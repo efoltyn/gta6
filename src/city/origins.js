@@ -2545,7 +2545,8 @@
 
   // ---- the ONE compact next-step line (city/hud.js renders it) -----------
   function obLine() {
-    if (!ob || g.mode !== "city") return null;
+    if (g.mode !== "city") return null;
+    if (!ob) return nmLine();
     if (ob.flash) return { title: ob.flash, flash: true };
     const st = OB_STEPS[ob.rec.step | 0];
     if (!st) return ob.finale > 0 ? { title: "You're in business", hint: "Finish the job. New work comes to your phone." } : null;
@@ -2576,7 +2577,127 @@
     const sig = L ? (L.title + "|" + (L.hint || "") + "|" + (L.progress != null ? Math.round(L.progress * 100) : "")) : "";
     if (sig !== obSig) { obSig = sig; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
   }
+  /* ======================================================================
+     AFTER THE CHAIN: THE NEXT MOVE.
+
+     The chain ends at "Take a job", and then the city went silent again: the
+     heists, the hitman wall, the street races and the gang ladders are all
+     real and deep, but every one of them is a door you had to already know
+     about ([H] inside a shop, [K] on a racer). A player with nothing on for a
+     while was a player wandering. So when you have been idle for ~40 s (no
+     job, no heat, not mid-heist, not in a menu), the objective slot offers
+     ONE real opportunity near you, pins it if you have no pin of your own,
+     and gets out of the way the moment you are busy. It rotates so it never
+     nags with the same thing twice, and it only ever points at something the
+     live world actually has (a real shop lot, the real wall, a real HQ).
+     ====================================================================== */
+  const NM_IDLE = 40, NM_SHOW = 30, NM_REST = 50;
+  const NM_STORE = { food: 1, gas: 1, barber: 1, gym: 1, hardware: 1 };
+  const NM_SMASH = { bar: 1, pawn: 1, drugs: 1, clothing: 1, electronics: 1 };
+  const nm = { idle: 0, pick: null, showT: 0, last: "", wp: null, evalT: 0 };
+  function nmBusy(P) {
+    if (P.dead || g.busted || (g.wanted | 0) > 0) return true;
+    if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return true;
+    const M = CBZ.mission;
+    if ((M && M.busy && M.busy()) || g.cityJob) return true;
+    let h = null; try { h = CBZ.cityHeistState ? CBZ.cityHeistState() : null; } catch (e) { h = null; }
+    if (h && h.phase && h.phase !== "idle") return true;
+    let sr = null; try { sr = CBZ.cityStreetRacing ? CBZ.cityStreetRacing.state() : null; } catch (e) { sr = null; }
+    return !!(sr && sr.active);
+  }
+  function nmNearestShop(P, kinds) {
+    const A = arena(); const ls = A && A.shopLots;
+    if (!ls) return null;
+    let best = null, bd = 260;
+    for (let i = 0; i < ls.length; i++) {
+      const l = ls[i];
+      if (!l || l.demolished || !kinds[l.kind]) continue;
+      const d = Math.hypot(l.cx - P.pos.x, l.cz - P.pos.z);
+      if (d < bd) { bd = d; best = l; }
+    }
+    return best;
+  }
+  function nmCandidates(P) {
+    const out = [];
+    const armed = (CBZ.weaponInventory || []).length > 0;
+    const cash = g.cash || 0;
+    if (!armed) {
+      const A = arena();
+      const lot = (A && A.gunShopLot) || (CBZ.cityGunstoreLot && CBZ.cityGunstoreLot()) || null;
+      const t = obDoorPoint(lot);
+      if (t && cash >= 350) out.push({ id: "gun", title: "You're walking around unarmed", hint: "The gun store sells a pistol for $350", x: t.x, z: t.z, label: "GUN STORE" });
+    }
+    if (armed) {
+      const s = nmNearestShop(P, NM_STORE);
+      if (s) out.push({ id: "store", title: "Stick up a store", hint: "Walk into the " + s.kind + " shop and press H to case it, then grab the till and run", x: s.cx, z: s.cz, label: "SCORE" });
+      const s2 = nmNearestShop(P, NM_SMASH);
+      if (s2) out.push({ id: "smash", title: "Smash and grab", hint: "The " + s2.kind + " place pays better than a corner store. Press H inside to case it", x: s2.cx, z: s2.cz, label: "SCORE" });
+    }
+    let room = null; try { room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null; } catch (e) { room = null; }
+    if (room && room.board) out.push({ id: "wall", title: "There's work on the wall", hint: "Read the wall in " + String(room.name || "the motel room").toLowerCase() + " for a paid contract", x: room.board.x, z: room.board.z, label: "THE WALL" });
+    const inCrew = !!(g.cityMembership || (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()));
+    const prospect = CBZ.cityProspectGangId && CBZ.cityProspectGangId() != null;
+    if (!inCrew && !prospect) {
+      const gid = obNearestGangId(P);
+      if (gid != null) {
+        const gr = (CBZ.cityGangs || []).find(function (r) { return r && r.id === gid; });
+        out.push({ id: "gang", title: "Get put on", hint: "Talk to " + ((gr && gr.name) ? "the " + gr.name : "a gang") + " on their turf and ask for work", gang: gid });
+      }
+    }
+    if (P.driving) out.push({ id: "race", title: "Race for money", hint: "Pull up next to a street racer and press K. Winner takes the pot" });
+    return out;
+  }
+  function nmClearWp() {
+    const cur = obCurWp();
+    if (nm.wp && cur === nm.wp && CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
+    nm.wp = null;
+  }
+  function nmDrop() {
+    if (!nm.pick) return;
+    nm.pick = null; nmClearWp();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  function nmTick(dt) {
+    if (ob) { nm.idle = 0; return; }                 // the chain still owns the slot
+    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+    if (!w || !w.onboard || (w.onboard.step | 0) < OB_STEPS.length) return;   // skipped stories keep their own openings
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
+    const P = CBZ.player; if (!P || !P.pos) return;
+    nm.evalT -= dt;
+    if (nm.evalT > 0) return;
+    const step = 0.5 - nm.evalT; nm.evalT = 0.5;
+    if (nmBusy(P)) { nm.idle = Math.min(nm.idle, 0); nmDrop(); return; }
+    if (nm.pick) {
+      nm.showT -= step;
+      const d = nm.pick.x != null ? Math.hypot(nm.pick.x - P.pos.x, nm.pick.z - P.pos.z) : 1e9;
+      // arrived: the pin has done its job, the instruction stays a while
+      if (d < 8 && nm.wp) { nmClearWp(); nm.showT = Math.max(nm.showT, 14); }
+      if (nm.showT <= 0) { nmDrop(); nm.idle = -NM_REST; }
+      return;
+    }
+    nm.idle += step;
+    if (nm.idle < NM_IDLE) return;
+    const c = nmCandidates(P).filter(function (o) { return o.id !== nm.last; });
+    if (!c.length) { nm.idle = -NM_REST; return; }
+    const pick = c[(Math.random() * c.length) | 0];
+    nm.pick = pick; nm.last = pick.id; nm.showT = NM_SHOW; nm.idle = 0;
+    if (!obCurWp() && CBZ.fullMap) {
+      let wp = null;
+      try {
+        if (pick.gang != null && CBZ.fullMap.setGangWaypoint) wp = CBZ.fullMap.setGangWaypoint(pick.gang);
+        else if (pick.x != null && CBZ.fullMap.setWaypoint) wp = CBZ.fullMap.setWaypoint(pick.x, pick.z, pick.label);
+      } catch (e) { wp = null; }
+      nm.wp = wp || null;
+    }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  function nmLine() {
+    if (!nm.pick) return null;
+    return { title: nm.pick.title, hint: nm.pick.hint };
+  }
+
   CBZ.cityOnboardLine = obLine;
+  CBZ.cityNextMove = function () { return nm.pick ? { id: nm.pick.id, title: nm.pick.title } : null; };
   // probe/harness read: where the chain is (null when finished or not running)
   CBZ.cityOnboardState = function () {
     return ob ? { step: ob.rec.step | 0, id: (OB_STEPS[ob.rec.step | 0] || {}).id || "done", earned: ob.rec.earned | 0, quiet: ob.quiet } : null;
@@ -2594,6 +2715,7 @@
       if (pendingTP) { pendingTP = false; if (CBZ.disarmFPSAfterIntro) { try { CBZ.disarmFPSAfterIntro(); } catch (e) {} } }
       tickHeat(dt); tickAirborne(dt); tickRace(dt);
       obTick(dt);
+      nmTick(dt);
     }
     if (!scene) return;
     if (g.mode !== "city") { clearScene(); return; }
