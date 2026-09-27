@@ -5,35 +5,45 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Bomb Survivor</title>
 <!-- ============================================================
-  BOMB SURVIVOR — the one version.
+  BOMB SURVIVOR
 
-  There used to be two of these, and both were the same mistake wearing
-  different loaders: a purpose-built desert of box towers standing in for a
-  city this repo already ships. This page deletes the fake world and stands
-  the game on GANG CITY'S OWN MAP:
+  THE IDEA: one city, two halves. You bomb it, then you live in it while the
+  other side bombs it. Same streets both times, so what you learned from the
+  cockpit is what keeps you alive on the pavement.
 
-    • the REAL military island at its authored place (-620,-700) — fence,
-      airstrip, parked fighters, the heavy bomber — raised by the same
-      builder the full game runs, via CBZ.studio.raise("militaryisland");
-    • a REAL downtown across the strait at the mainland's own coordinates
-      (0,-700) — CBZ.studio.town() calls city/towngen.js + the one shell
-      mint (cityMakeBuilding), so every tower is the enterable, instanced-
-      glass, stairs-inside building the mainland is made of, and a runner
-      ducks through a REAL door for cover;
-    • Halloran Field, the REAL civil airport island, north across the water
-      (?airport=0 to skip it);
-    • civilians who WALK, on the shipped gait, sliding along the real
-      colliders — because forty statues never read as a city.
+  WHAT WAS DUMB, AND WHAT REPLACED IT (2026-09-27):
+    • The running half had nothing to DO. The optimal play was to stand in a
+      doorway for three minutes, and the first stick that found you ended
+      your half: runners never came back, so you spectated.
+      → FLAK. Five anti-aircraft emplacements stand in the open streets.
+        Runners score by MANNING them and by SHOOTING BOMBERS DOWN; a manned
+        gun is loud, lit and exposed, so every gun is a bet on how long you
+        dare to stay on it while a stick walks toward you. Runners respawn.
+    • The bombing half had no threat, so the altitude stick "trade" in the
+      old header (low is accurate, high is safe) was fiction: nothing could
+      touch an aeroplane. → Flak bursts at the bombers' altitude, accuracy
+      falls with slant range, so low passes are deadly and high passes are
+      vague. Bombers now have a job: silence the guns, then hunt the crews.
+    • The match clock ran at DOUBLE speed: teammatch self-steps on
+      micro.onFrame by default AND the page stepped it again every frame.
+    • D turned the bomber LEFT, and strafing on foot was mirrored.
+    • Runners never animated (animChar's arguments were swapped), and every
+      bomb anywhere in town billed a "TOWER DOWN" for whichever lot was
+      nearest, while the building stood there untouched.
+    • AI bombers flew straight at a man's CURRENT position and dropped
+      whenever the pipper was within 70 m. Now they lead the target by the
+      store's own time of fall, line the stick up along track, spread their
+      targets across the squad, climb when the flak is heavy and avoid
+      crowds of civilians.
+    • AI runners slid straight across blocks toward "lower danger". Now they
+      route along the street grid, crew guns, read the incoming rings with a
+      per-man nerve, break for cover and come back when the sky clears.
+    • Civilians strolled into bomb rings. Now they panic and flee.
 
-  What is left in this file is the game: who bombs, who runs, what a tower
-  is worth, what a civilian costs, and what the clock decides. The world is
-  an afterthought. That is the whole point.
-
-  THE HEADING CONVENTION, restated because getting it wrong cost a session:
-  systems/airframe.js publishes heading() as atan2(-fx,-fz) — the nose is
-  -Z, so for heading h the aeroplane's forward is (-sin h, -cos h).
+  THE HEADING CONVENTION (systems/airframe.js): heading() = atan2(-fx,-fz),
+  so for heading h the aeroplane's forward is (-sin h, -cos h), and an
+  INCREASING heading turns LEFT.
     fly toward p from q:   h = atan2(q.x - p.x, q.z - p.z)
-    d metres ahead:        (pos.x - sin h * d, pos.z - cos h * d)
 ============================================================ -->
 <style>
   :root{color-scheme:dark}
@@ -43,35 +53,73 @@
     -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
   canvas{display:block}
   #gate{position:fixed;inset:0;display:grid;place-items:center;padding:26px;z-index:60;
-    background:radial-gradient(120% 90% at 50% 0%,#1b2330,#0b0d10 70%)}
-  #gate .in{text-align:center;max-width:480px;width:100%}
-  #gate h1{margin:0 0 8px;font-size:clamp(32px,10vw,58px);letter-spacing:-.02em;line-height:.92}
+    background:radial-gradient(120% 90% at 50% 0%,#2a2320,#0b0d10 70%)}
+  #gate .in{text-align:center;max-width:520px;width:100%}
+  #gate h1{margin:0 0 10px;font-size:clamp(32px,10vw,58px);letter-spacing:-.02em;line-height:.92}
   #gate h1 em{font-style:normal;color:#ff7a45}
-  #gate p{margin:0 0 30px;opacity:.6;letter-spacing:.16em;font-size:11px}
+  #gate p{margin:0 0 22px;opacity:.62;letter-spacing:.16em;font-size:11px}
+  #gate ol{list-style:none;margin:0 0 26px;padding:0;text-align:left;font-weight:500;font-size:14px;line-height:1.45;opacity:.86}
+  #gate ol li{margin:0 0 10px;padding-left:34px;position:relative}
+  #gate ol li b{position:absolute;left:0;top:0;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;
+    background:rgba(255,122,69,.18);color:#ff9a6a;font-size:12px}
   #gate button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;width:100%;
     padding:22px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 21px/1 inherit;
     letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
   #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
-  #gate .st{margin-top:22px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
+  #gate .st{margin-top:18px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
   #role{position:fixed;left:50%;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%);
-    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.7;pointer-events:none;white-space:nowrap}
-  #streak{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
-    z-index:41;font-size:12px;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none}
-  #streak.on{opacity:.95}
+    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.8;pointer-events:none;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+  #goal{position:fixed;left:50%;top:calc(80px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    z-index:41;font-size:13px;letter-spacing:.08em;color:#ffe2b8;pointer-events:none;white-space:nowrap;
+    text-shadow:0 1px 4px rgba(0,0,0,.9);opacity:.95}
+  #streak{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:41;font-size:15px;font-weight:800;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none;
+    text-shadow:0 2px 6px rgba(0,0,0,.8)}
+  #streak.on{opacity:1}
   #swap{position:fixed;inset:0;display:grid;place-items:center;z-index:58;pointer-events:none;
     background:rgba(9,11,14,.82);opacity:0;transition:opacity .45s;font-size:clamp(26px,8vw,52px);
-    letter-spacing:.06em;text-align:center;line-height:1.15}
+    letter-spacing:.06em;text-align:center;line-height:1.15;padding:20px}
   #swap.on{opacity:1}
   #swap small{display:block;font-size:12px;letter-spacing:.3em;opacity:.55;margin-top:14px}
+  #swap .how{display:block;font-size:14px;letter-spacing:.04em;opacity:.85;margin-top:18px;font-weight:500;max-width:520px;line-height:1.45}
   #radar{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));
     bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
     opacity:.82;pointer-events:none;display:none}
   #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55;transition:opacity .5s}
-  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.92);padding:26px}
-  #over .in{text-align:center}
-  #over h2{margin:0 0 16px;font-size:clamp(26px,7vw,42px)}
-  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums}
-  #over td{padding:7px 18px;opacity:.85}
+  #hit{position:fixed;inset:0;pointer-events:none;z-index:44;opacity:0;
+    background:radial-gradient(ellipse at center,rgba(0,0,0,0) 45%,rgba(160,20,10,.55) 100%)}
+  #threat{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:42;pointer-events:none;
+    display:none;text-align:center;color:#ff5a45;font-weight:800;letter-spacing:.18em;font-size:14px;text-shadow:0 2px 6px rgba(0,0,0,.9)}
+  #threat i{display:block;width:0;height:0;margin:0 auto 6px;border-left:16px solid transparent;border-right:16px solid transparent;
+    border-bottom:28px solid #ff5a45;filter:drop-shadow(0 2px 4px rgba(0,0,0,.8))}
+  #nav{position:fixed;left:50%;top:calc(104px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:41;pointer-events:none;
+    display:none;text-align:center;font-size:11px;letter-spacing:.2em;color:#ffd9a0;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  #nav i{display:block;width:0;height:0;margin:0 auto 4px;border-left:9px solid transparent;border-right:9px solid transparent;
+    border-bottom:15px solid #ffc46a;filter:drop-shadow(0 1px 3px rgba(0,0,0,.8))}
+  #gunhud{position:fixed;left:50%;bottom:calc(104px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:42;pointer-events:none;display:none;text-align:center;font-size:12px;letter-spacing:.2em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  #gunhud .bar{width:220px;height:8px;border-radius:4px;background:rgba(255,255,255,.18);margin:6px auto 0;overflow:hidden}
+  #gunhud .bar s{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd27a,#ff5a2a);text-decoration:none}
+  #gunhud.hot .bar s{background:#ff2a2a}
+  #reticle{position:fixed;z-index:42;pointer-events:none;display:none;width:44px;height:44px;margin:-22px 0 0 -22px;
+    border:2px solid rgba(255,210,122,.95);border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,.7)}
+  #reticle.far{border-color:rgba(255,255,255,.45);border-style:dashed}
+  #respawn{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);z-index:46;pointer-events:none;display:none;
+    text-align:center;font-size:clamp(22px,6vw,38px);font-weight:800;letter-spacing:.08em;text-shadow:0 2px 8px rgba(0,0,0,.9)}
+  #respawn small{display:block;font-size:12px;letter-spacing:.3em;opacity:.7;margin-top:8px;font-weight:600}
+  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.93);padding:26px;overflow:auto}
+  #over .in{text-align:center;max-width:640px;width:100%}
+  #over h2{margin:0 0 6px;font-size:clamp(26px,7vw,42px)}
+  #over .sub{margin:0 0 18px;opacity:.6;font-size:12px;letter-spacing:.2em}
+  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%}
+  #over th{padding:6px 10px;font-size:11px;letter-spacing:.2em;opacity:.6;font-weight:700}
+  #over td{padding:7px 10px;opacity:.9;border-top:1px solid rgba(255,255,255,.08)}
+  #over td:first-child{text-align:left;opacity:.7}
+  #over tr.tot td{font-weight:800;font-size:17px;opacity:1}
+  .menu{display:inline-block;margin-top:16px;color:inherit;opacity:.6;font-size:12px;letter-spacing:.24em;text-decoration:none;padding:10px 16px}
+  .menu:hover{opacity:1}
+  #pauseMenu{position:fixed;left:50%;top:calc(50% + 48px);transform:translateX(-50%);z-index:70;display:none;
+    border:1px solid rgba(255,255,255,.3);border-radius:999px;background:rgba(10,12,15,.7);opacity:.95;margin:0}
   #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
     background:transparent;color:inherit;padding:15px 32px;border-radius:999px;font:700 15px/1 inherit;
     letter-spacing:.16em;cursor:pointer}
@@ -81,25 +129,43 @@
 
 <div id="gate"><div class="in">
   <h1>BOMB <em>SURVIVOR</em></h1>
-  <p>THREE MINUTES BOMBING. THREE MINUTES BOMBED. THE REAL CITY.</p>
+  <p>BOMB THE CITY. THEN SURVIVE IT.</p>
+  <ol>
+    <li><b>1</b>First half you fly a bomber. Flak guns in the streets shoot back. Knock them out, then hunt their crews. Fly low to hit, high to live.</li>
+    <li><b>2</b>Second half you are on foot in the same city. Run to a flak gun, man it and shoot the bombers down.</li>
+    <li><b>3</b>A red ring on the ground is where a bomb will land. Get out of it, or get under a roof.</li>
+  </ol>
   <button id="go">PLAY</button>
   <div class="st" id="st"></div>
+  <a class="menu" href="../index.html">MAIN MENU</a>
 </div></div>
+<a class="menu" id="pauseMenu" href="../index.html">MAIN MENU</a>
 
 <div id="role"></div>
+<div id="goal"></div>
 <div id="swap"></div>
 <div id="streak"></div>
+<div id="hit"></div>
+<div id="threat"><i></i><span></span></div>
+<div id="nav"><i></i><span></span></div>
+<div id="gunhud"><div id="gunline"></div><div class="bar"><s></s></div></div>
+<div id="reticle"></div>
+<div id="respawn"></div>
 <canvas id="radar" width="264" height="264"></canvas>
 <div id="flash"></div>
 
 <div id="over"><div class="in">
   <h2 id="overTitle">RESULT</h2>
+  <div class="sub" id="overSub"></div>
   <table id="overTable"></table>
-  <button id="again">AGAIN</button>
+  <button id="again">AGAIN</button><br>
+  <a class="menu" href="../index.html">MAIN MENU</a>
 </div></div>
 
-<!-- ONE TAG. Everything this game draws, Gang City already draws. -->
+<!-- ONE TAG for the engine. Everything this game draws, Gang City already draws. -->
 <script src="../src/core/studio.js?v=nodash1"></script>
+<!-- the sea, the quays, the light and the smoke: this game's own scene layer -->
+<script src="bomb-survivor-scene.js?v=1"></script>
 <script>
 (function () {
 "use strict";
@@ -108,20 +174,8 @@ const WANT_AIRPORT = Q.get("airport") !== "0";
 const WORLD_SEED = Q.get("seed") || "talloran";
 
 const NEEDS = [
-  "caps",           // be reachable: modeHas, worldActors, blast damage
-  "batch",          // the two passes that make the real fabric affordable
-  "green",          // instanced trees
-  "people",         // the shipped 1.82 m rig, gait, poses
-  "military",       // the real fleet models: jets, the B-2, tanks, trucks
-  "militaryisland", // the REAL base from the map, raisable
-  "citycore",       // the REAL city fabric: cityMakeBuilding + buildTown
-  "airbase",        // model seating (wheels on concrete), used by fly()
-  "air",            // flight with derived coefficients
-  "ordnance",       // bombs and the one shared ballistic integrator
-  "damage",         // fireball, wall ruin, building collapse
-  "nukefx",         // the researched mushroom
-  "radar",          // PPI scope
-  "match",          // two sides, a clock, the half-time swap
+  "caps", "batch", "green", "people", "military", "militaryisland", "citycore",
+  "airbase", "air", "ordnance", "damage", "nukefx", "radar", "match",
 ];
 if (WANT_AIRPORT) NEEDS.push("airport");
 
@@ -131,91 +185,85 @@ const el = function (id) { return document.getElementById(id); };
 const st = function (t) { const n = el("st"); if (n) n.textContent = t; };
 
 // ============================================================ THE RULES
-const SQUAD        = 6;        // per side
-const HALVES       = 2;
-const HALF_SECONDS = 180;      // three minutes each way; ten was a siege
-const PTS_KILL     = 250;
-const PTS_TOWER    = 150;      // a building brought down — the city is the scoreboard
-const PTS_ALIVE    = 0.5;      // per second, per living runner
-const CIV_PENALTY  = 250;      // a civilian is not a target; the ledger says so
+const SQUAD         = 4;        // per side: you and three
+const HALVES        = 2;
+const HALF_SECONDS  = 150;
+const INTERMISSION  = 7;
+// the ledger. Every line of it is a thing you can see happen.
+const PTS = {
+  runnerKill: 100,   // bombers: a man on the ground
+  gunKill:    175,   // bombers: a flak emplacement silenced
+  building:    40,   // bombers: a building burned out
+  civilian:   -60,   // whoever dropped it
+  bomberDown: 250,   // runners: an aeroplane out of the sky
+  manned:       3,   // runners: per second, per crewed gun (being exposed pays)
+};
 const BOMB_ALT     = 320;
-const ALT_MIN      = 170, ALT_MAX = 640;
-const RELEASE_MIN  = 120;      // press the attack below this and the stick is yours
-const RUN_SPEED    = 6.4;
-const STICK        = 7;        // stores per press
-const NUKE_ARM     = 5;        // kills that earn the one round
-const RESPAWN_AIR  = 8;
-const CIVILIANS    = 20;
+const ALT_MIN      = 160, ALT_MAX = 700;
+const RUN_SPEED    = 6.2, SPRINT = 1.6;
+const STICK        = 6;        // stores per press
+const HUMAN_RELOAD = 2.6, AI_RELOAD = 6.5;
+const NUKE_ARM     = 5;        // your kills that earn the one round
+const RESPAWN_AIR  = 8, RESPAWN_RUN = 5;
+const CIVILIANS    = 22;
+// flak
+const FLAK_RANGE   = 1350;     // slant metres
+const SHELL_SPEED  = 820;
+const BURST_R      = 26;       // lethal radius of one shell
+const BURST_DMG    = 22;
+const GUN_HP       = 100;
+const GUN_REPAIR   = 22;       // seconds a silenced gun stays silent
 
-// ONE-LINE REVERT for the takeoff repair, so tools/before-after.mjs can
-// photograph this checkout against its own broken self rather than against a
-// deployed build that differs by forty other commits. ?cfg_BOMB_TAKEOFF_V1=0
-// restores BOTH halves of the old behaviour: the spawn that passed 64 into
-// place()'s PITCH argument, and the roll that only ever ended if the player
-// pulled the stick. Pair it with ?cfg_PLANE_SEATING_V1=0&cfg_AIRFRAME_ROTATE_V1=0
-// for the complete before.
 const TAKEOFF_V1 = CBZ.CONFIG.BOMB_TAKEOFF_V1 !== false;
 
 function headingToward(fromX, fromZ, toX, toZ) { return Math.atan2(fromX - toX, fromZ - toZ); }
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function wrapPi(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+const rnd = CBZ.seedStream ? CBZ.seedStream("bs-play") : Math.random;
+function gauss() { let u = 0, v = 0; while (u === 0) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.2831853 * v); }
 
 const TEAMS = [
-  { id: "talon", name: "TALON", color: 0xff6a3d },
-  { id: "ghost", name: "GHOST", color: 0x49c6ff },
+  { id: "talon", name: "TALON", color: 0xff6a3d, css: "#ff7a45" },
+  { id: "ghost", name: "GHOST", color: 0x49c6ff, css: "#58c8ff" },
 ];
 
-let town = null, base = null, port = null;
+let town = null, base = null, port = null, scene3 = null, fx = null;
 let hud, match, cam, chase, sight, scope, eng;
 let ctlFly, ctlWalk, ctl;
-let units = [], civs = [], me = null, started = false;
+let units = [], civs = [], guns = [], me = null, started = false;
 const nuke = { kills: 0, armed: false, spent: false };
-const _v = new THREE.Vector3();
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3();
+const stats = {};
+function statsFor(team) { return stats[team] || (stats[team] = { runnerKill: 0, gunKill: 0, building: 0, civilian: 0, bomberDown: 0, manned: 0 }); }
 
 // ============================================================ BOOT
 st("RAISING THE STRAIT");
 CBZ.micro.boot({
-  fov: 74, far: 15000, exposure: 0.92,
-  sky: { top: 0x6ea7d8, bottom: 0xdfe6ea, fogNear: 1500, fogFar: 8500, radius: 11000 },
-  lights: { sun: 0.95, hemi: 0.5, shadowSpan: 900, groundColor: 0x7a828a },
+  fov: 70, far: 15000, exposure: 0.92,
+  sky: { top: 0x5f8fbf, bottom: 0xe2d2bd, fogNear: 1400, fogFar: 7800, radius: 11000 },
+  lights: { sun: 1.0, hemi: 0.46, shadowSpan: 900, groundColor: 0x6b6358 },
 });
 cam = CBZ.camera;
 
 // ============================================================ THE WORLD
-// Gang City's own geography. The military island and Halloran Field build at
-// their AUTHORED map coordinates; downtown stands at the mainland's slot.
-// Everything else is the strait. groundAt answers from the rects the builders
-// themselves own — no heightfield, no fake terrain, just the map.
 const SEA_Y = -0.4;
-const BASE_RECT = { minX: -860, maxX: -380, minZ: -950, maxZ: -450 };          // island_military.js's own extents
-const BASE_CW   = { minX: -380, maxX: -133, minZ: -712, maxZ: -688 };          // its causeway toward the mainland
-const PORT_RECT = { minX: -900, maxX: 290, minZ: -280, maxZ: 40 };             // island_airport.js A_MINX..A_MAXZ
+const BASE_RECT = { minX: -860, maxX: -380, minZ: -950, maxZ: -450 };
+const BASE_CW   = { minX: -380, maxX: -133, minZ: -712, maxZ: -688 };
+const PORT_RECT = { minX: -900, maxX: 290, minZ: -280, maxZ: 40 };
 const PORT_CW   = { minX: -12,  maxX: 12,  minZ: -566, maxZ: -280 };
-const TOWN_AT   = { x: 0, z: -700 };                                           // the mainland core's slot
-let   TOWN_RECT = { minX: -180, maxX: 180, minZ: -880, maxZ: -520 };           // replaced by town.rect after build
+const TOWN_AT   = { x: 0, z: -700 };
+let   TOWN_RECT = { minX: -180, maxX: 180, minZ: -880, maxZ: -520 };
 
 function inRect(r, x, z) { return x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ; }
 function groundAt(x, z) {
   if (inRect(TOWN_RECT, x, z)) return 0.03;
   if (inRect(BASE_RECT, x, z) || inRect(BASE_CW, x, z)) return 0.05;
   if (WANT_AIRPORT && (inRect(PORT_RECT, x, z) || inRect(PORT_CW, x, z))) return 0.05;
-  return -2.2;                                        // the sea floor
+  return -2.2;
 }
 function waterAt(x, z) { return groundAt(x, z) < SEA_Y; }
 CBZ.studio.setWorld({ groundAt: groundAt, waterAt: waterAt, seaLevel: SEA_Y });
 
-// the sea: one deep plate under everything, fog does the rest
-(function sea() {
-  const g = new THREE.PlaneGeometry(24000, 24000);
-  g.rotateX(-Math.PI / 2); g.translate(0, SEA_Y, -400);
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
-  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
-  m.userData.terrain = true;
-  CBZ.scene.add(m);
-})();
-
-// BE REACHABLE. One call and every shared verb can find these people. The
-// blastActors cap is 0 ON PURPOSE: systems/ordnance.js already sweeps this
-// roster through addTarget WITH the cover rules (wall trace + overhead lid);
-// a second sweep would kill the same man twice and skip the roof test.
 CBZ.studio.join({
   id: "bombsurvivor", label: "Bomb Survivor",
   caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0, breach: 1 },
@@ -229,60 +277,141 @@ CBZ.studio.join({
   route: "bomb survivor units + hurt()",
 });
 
-// THE BASE — the real island, its own builder, its authored place.
 st("THE MILITARY ISLAND");
 base = CBZ.studio.raise("militaryisland");
 
-// DOWNTOWN — the real fabric at the mainland's coordinates. Marked streets,
-// sidewalks, shops with signs, and a cluster of real glass towers. The base's
-// own causeway (built above) already points at this rect's west edge.
-st("DOWNTOWN, THE REAL FABRIC");
+st("DOWNTOWN");
 town = CBZ.studio.town({
   at: TOWN_AT, seed: WORLD_SEED, name: "Talloran",
-  cols: 6, rows: 6, blockW: 42, blockD: 42, roadW: 14,
+  cols: 6, rows: 6, blockW: 42, blockD: 42, roadW: 14, density: 0.95,
+  // a harbour downtown, not a village: most blocks carry something with
+  // floors in it, and the core is a real cluster of towers
+  skyline: { minStoreys: 5, maxStoreys: 13, landmarkStoreys: 26, towerFrac: 0.5, megaChance: true, townMax: 8 },
+  // asphalt is dark, concrete is grey, and nothing in a city is paper white
+  palette: { ground: 0x686a6b, sidewalk: 0x93918c, road: 0x2e3033, plaza: 0x827c72, wood: 0x5a6470, accent: 0x8a94a0 },
 });
 if (town && town.rect) {
   TOWN_RECT = { minX: town.rect.minX - 26, maxX: town.rect.maxX + 26,
                 minZ: town.rect.minZ - 26, maxZ: town.rect.maxZ + 26 };
 }
-// a shore apron so the town reads as an island, not a raft
 (function apron() {
-  const g = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX + 40, TOWN_RECT.maxZ - TOWN_RECT.minZ + 40);
+  const g = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX, TOWN_RECT.maxZ - TOWN_RECT.minZ);
   g.rotateX(-Math.PI / 2);
   g.translate((TOWN_RECT.minX + TOWN_RECT.maxX) / 2, 0.005, (TOWN_RECT.minZ + TOWN_RECT.maxZ) / 2);
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x8d9198 }));
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x66645f }));
   m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
   m.userData.terrain = true;
   CBZ.scene.add(m);
 })();
 
-// HALLORAN FIELD — the real airport, north across the water. Optional, and
-// try/caught inside raise(): a bad builder costs the island, never the game.
-if (WANT_AIRPORT) {
-  st("HALLORAN FIELD");
-  port = CBZ.studio.raise("airport");
-}
+if (WANT_AIRPORT) { st("HALLORAN FIELD"); port = CBZ.studio.raise("airport"); }
 
-// THE MAP IS FINISHED — settle it before a single body goes in. The real
-// fabric is authored one wall-box at a time because the mainland's colliders
-// and LOS rays need those identities; city/mode.js then merges the render
-// copies and freezes their matrices, and a slice page never ran that. Same
-// two passes, same order, and everything added after this line keeps its own
-// live matrix, which is why it goes here and not at the end.
 st("SETTLING THE MAP");
 CBZ.studio.settle(CBZ.scene);
 
 CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 
+// THE SCENE LAYER: the sea, the quays, the grade and the smoke. Optional by
+// construction: a missing or throwing scene file costs the looks, never the game.
+const NOFX = { puff: function () {}, plume: function () { return { stop: function () {} }; }, dust: function () {},
+  tracer: function () {}, smokeTrail: function () { return { stop: function () {} }; } };
+fx = NOFX;
+try {
+  if (window.BombScene && window.BombScene.install) {
+    const lands = [Object.assign({ kind: "town" }, TOWN_RECT), Object.assign({ kind: "base" }, BASE_RECT),
+                   Object.assign({ kind: "causeway" }, BASE_CW)];
+    if (WANT_AIRPORT) { lands.push(Object.assign({ kind: "port" }, PORT_RECT)); lands.push(Object.assign({ kind: "causeway" }, PORT_CW)); }
+    scene3 = window.BombScene.install({ THREE: THREE, CBZ: CBZ, scene: CBZ.scene, camera: cam, renderer: CBZ.renderer,
+      seaY: SEA_Y, lands: lands, replaceSea: true });
+    if (scene3 && scene3.fx) fx = scene3.fx;
+  }
+} catch (e) { console.error("[bomb scene]", e); scene3 = null; fx = NOFX; }
+if (!scene3) {
+  const g = new THREE.PlaneGeometry(24000, 24000);
+  g.rotateX(-Math.PI / 2); g.translate(0, SEA_Y, -400);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
+  m.matrixAutoUpdate = false; m.updateMatrix(); m.userData.terrain = true;
+  CBZ.scene.add(m);
+}
+
+// ============================================================ THE STREETS
+// The town is a grid of full-length streets. Anything that walks routes along
+// them — the old runners slid straight at their goal and spent the half
+// grinding on a building corner.
+const NAV = { xs: [], zs: [] };
+(function buildNav() {
+  const roads = (town && town.roads) || [];
+  for (let i = 0; i < roads.length; i++) {
+    const r = roads[i];
+    if (r.vertical) NAV.xs.push(r.x); else NAV.zs.push(r.z);
+  }
+  NAV.xs.sort(function (a, b) { return a - b; });
+  NAV.zs.sort(function (a, b) { return a - b; });
+  if (!NAV.xs.length) NAV.xs.push(TOWN_AT.x);
+  if (!NAV.zs.length) NAV.zs.push(TOWN_AT.z);
+})();
+function nearestOf(arr, v) { let b = arr[0], bd = Infinity; for (let i = 0; i < arr.length; i++) { const d = Math.abs(arr[i] - v); if (d < bd) { bd = d; b = arr[i]; } } return b; }
+// a road-point for any goal: where on the street grid you step off to reach it
+function roadPointFor(g) {
+  const xl = nearestOf(NAV.xs, g.x), zl = nearestOf(NAV.zs, g.z);
+  if (Math.abs(g.x - xl) <= Math.abs(g.z - zl)) return { x: xl, z: g.z, v: true };
+  return { x: g.x, z: zl, v: false };
+}
+function routeTo(from, goal) {
+  const a = roadPointFor(from), b = roadPointFor(goal);
+  const pts = [];
+  if (Math.hypot(a.x - from.x, a.z - from.z) > 1.5) pts.push({ x: a.x, z: a.z });
+  if (a.v && b.v) {
+    if (Math.abs(a.x - b.x) > 1) { const zc = nearestOf(NAV.zs, (a.z + b.z) / 2); pts.push({ x: a.x, z: zc }); pts.push({ x: b.x, z: zc }); }
+  } else if (a.v && !b.v) { pts.push({ x: a.x, z: b.z }); }
+  else if (!a.v && b.v) { pts.push({ x: b.x, z: a.z }); }
+  else if (Math.abs(a.z - b.z) > 1) { const xc = nearestOf(NAV.xs, (a.x + b.x) / 2); pts.push({ x: xc, z: a.z }); pts.push({ x: xc, z: b.z }); }
+  pts.push({ x: b.x, z: b.z });
+  pts.push({ x: goal.x, z: goal.z });
+  return pts;
+}
+
+// buildings as the game sees them: shelter while they stand, a score when they burn
+// towngen publishes the door on the BUILDING, 1.6 m out from the facade
+const LOTS = ((town && town.lots) || []).filter(function (L) { return L && L.building && L.building.door; });
+for (let i = 0; i < LOTS.length; i++) {
+  const L = LOTS[i];
+  const storeys = L.skylineStoreys || (L.building && L.building.storeys) || 3;
+  L._hp = 1 + Math.floor(storeys / 4);         // direct hits it takes to burn out
+  L._down = false; L._plume = null;
+  L.door = L.building.door;
+}
+function lotAt(x, z, pad) {
+  pad = pad || 0;
+  for (let i = 0; i < LOTS.length; i++) {
+    const L = LOTS[i];
+    if (Math.abs(x - L.cx) <= L.w / 2 + pad && Math.abs(z - L.cz) <= L.d / 2 + pad) return L;
+  }
+  return null;
+}
+function doorPoint(L, inside) {
+  const k = inside ? -4.8 : 0.4;
+  return { x: L.door.x + L.door.nx * k, z: L.door.z + L.door.nz * k };
+}
+function nearestShelter(x, z, reach, avoid) {
+  let best = null, bd = reach * reach;
+  for (let i = 0; i < LOTS.length; i++) {
+    const L = LOTS[i];
+    if (L._down) continue;
+    const d = (L.door.x - x) * (L.door.x - x) + (L.door.z - z) * (L.door.z - z);
+    if (d >= bd) continue;
+    if (avoid && CBZ.ordnance.dangerAt(L.door.x, L.door.z, 12) > 0.05) continue;
+    bd = d; best = L;
+  }
+  return best;
+}
+
 // ============================================================ INSTRUMENTS
-// Score and feed are ON. The old page shipped them off in the name of a bare
-// HUD and the result was a game where nothing you did was ever said back to
-// you — bombing with no feedback is weather, not play.
 hud   = CBZ.studio.hud({ health: true, clock: true, score: true, feed: true, note: false });
 chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
 sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
 ctlFly  = CBZ.studio.controls("fly",  { buttons: { fire: "DROP", nuke: "NUKE" } });
-ctlWalk = CBZ.studio.controls("walk", { buttons: { sprint: "RUN" } });
+ctlWalk = CBZ.studio.controls("walk", { buttons: { sprint: "RUN", use: "MAN", fire: "FIRE" } });
 ctl = ctlFly;
 eng = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
 scope = CBZ.radar.create({
@@ -299,22 +428,279 @@ scope = CBZ.radar.create({
       if (!u.alive || u === me) continue;
       out.push({ id: u.id, x: u.pos.x, z: u.pos.z, y: u.pos.y, hostile: u.team !== me.team });
     }
+    for (let i = 0; i < guns.length; i++) {
+      const g = guns[i];
+      if (g.down > 0) continue;
+      out.push({ id: g.id, x: g.x, z: g.z, y: 0, hostile: g.team !== me.team });
+    }
     return out;
   },
 });
 
+// ============================================================ FLAK
+// Five emplacements in the open: a sandbag ring, a twin-barrel mount on a
+// pedestal, ammunition, and a light column over it so both halves can find
+// it — the bomber to kill it, the runner to crew it.
+const FLAK_MAT = {
+  bag:   new THREE.MeshLambertMaterial({ color: 0x6d6250 }),
+  steel: new THREE.MeshLambertMaterial({ color: 0x48503f }),
+  dark:  new THREE.MeshLambertMaterial({ color: 0x23261f }),
+  crate: new THREE.MeshLambertMaterial({ color: 0x5d5a3a }),
+  char:  new THREE.MeshLambertMaterial({ color: 0x1b1a18 }),
+};
+const BAG_GEO = (function () { const g = new THREE.SphereGeometry(0.5, 10, 6); g.scale(1.25, 0.46, 0.62); return g; })();
+const BEAM_GEO = (function () {
+  const g = new THREE.CylinderGeometry(2.4, 3.6, 260, 16, 1, true);
+  g.translate(0, 130, 0);
+  const pos = g.attributes.position, cols = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) { const f = 1 - clamp(pos.getY(i) / 260, 0, 1); cols[i * 3] = cols[i * 3 + 1] = cols[i * 3 + 2] = f * f; }
+  g.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+  return g;
+})();
+function buildGunModel(x, z) {
+  const root = new THREE.Group();
+  root.position.set(x, groundAt(x, z), z);
+  // sandbags: two courses round a 3.4 m ring, a gap left for the crew to get in
+  const n = 18;
+  const bags = new THREE.InstancedMesh(BAG_GEO, FLAK_MAT.bag, n * 2);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+  let k = 0;
+  for (let c = 0; c < 2; c++) {
+    for (let i = 0; i < n; i++) {
+      const a = (i + (c ? 0.5 : 0)) / n * Math.PI * 2;
+      if (Math.abs(wrapPi(a - Math.PI * 0.5)) < 0.36) continue;          // the entry
+      p.set(Math.cos(a) * 3.4, 0.22 + c * 0.42, Math.sin(a) * 3.4);
+      q.setFromAxisAngle(_v.set(0, 1, 0), -a + Math.PI / 2 + (rnd() - 0.5) * 0.2);
+      s.set(1 + (rnd() - 0.5) * 0.18, 1, 1);
+      m4.compose(p, q, s); bags.setMatrixAt(k++, m4);
+    }
+  }
+  bags.count = k; bags.castShadow = true; bags.receiveShadow = true;
+  root.add(bags);
+  // pedestal and turntable
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.8, 1.0, 12), FLAK_MAT.steel);
+  ped.position.y = 0.5; ped.castShadow = true; root.add(ped);
+  const yaw = new THREE.Group(); yaw.position.y = 1.05; root.add(yaw);
+  const table = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 0.18, 16), FLAK_MAT.steel);
+  table.castShadow = true; yaw.add(table);
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 0.08), FLAK_MAT.steel);
+  shield.position.set(0, 0.7, 0.55); shield.rotation.x = -0.12; shield.castShadow = true; yaw.add(shield);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.1, 0.45), FLAK_MAT.dark);
+  seat.position.set(0.55, 0.55, -0.5); yaw.add(seat);
+  const pitch = new THREE.Group(); pitch.position.set(0, 0.75, 0.1); yaw.add(pitch);
+  const cradle = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 1.1), FLAK_MAT.steel);
+  cradle.castShadow = true; pitch.add(cradle);
+  const barrelGeo = new THREE.CylinderGeometry(0.075, 0.1, 3.4, 8); barrelGeo.rotateX(Math.PI / 2); barrelGeo.translate(0, 0, 1.9);
+  for (let sgn = -1; sgn <= 1; sgn += 2) {
+    const b = new THREE.Mesh(barrelGeo, FLAK_MAT.dark); b.position.x = sgn * 0.2; b.castShadow = true; pitch.add(b);
+    const fl = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.35, 8), FLAK_MAT.dark);
+    fl.rotation.x = Math.PI / 2; fl.position.set(sgn * 0.2, 0, 3.55); pitch.add(fl);
+  }
+  // ammunition by the entry
+  for (let i = 0; i < 3; i++) {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), FLAK_MAT.crate);
+    c.position.set(-1.4 + i * 0.25, 0.21 + (i === 2 ? 0.42 : 0), 2.1 - (i === 2 ? 0.1 : 0) + (i === 1 ? -0.6 : 0));
+    c.rotation.y = 0.2 * i; c.castShadow = true; root.add(c);
+  }
+  // the light column: additive, fog-free, fading upward
+  const beamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.32,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
+  const beam = new THREE.Mesh(BEAM_GEO, beamMat); beam.renderOrder = 5; root.add(beam);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(4.3, 5.0, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
+  ring.position.y = 0.09; root.add(ring);
+  CBZ.scene.add(root);
+  return { root: root, yaw: yaw, pitch: pitch, beam: beam, ring: ring, parts: [ped, table, shield, cradle] };
+}
+function placeGuns() {
+  const xs = NAV.xs, zs = NAV.zs;
+  const spots = [];
+  const sq = town && town.square;
+  if (sq && sq.x != null) spots.push({ x: sq.x + (sq.w || 40) * 0.24, z: sq.z + (sq.d || 40) * 0.24 });   // clear of the fountain
+  // the square plus the four inner corners of the grid: every street has a
+  // gun within two blocks, and no single stick can reach two of them
+  const want = [[0.17, 0.17], [0.83, 0.17], [0.17, 0.83], [0.83, 0.83], [0.5, 0.17], [0.5, 0.83]];
+  for (let i = 0; i < want.length && spots.length < 5; i++) {
+    const x = xs[Math.round(want[i][0] * (xs.length - 1))], z = zs[Math.round(want[i][1] * (zs.length - 1))];
+    let clash = false;
+    for (let j = 0; j < spots.length; j++) if (Math.hypot(spots[j].x - x, spots[j].z - z) < 90) clash = true;
+    if (!clash) spots.push({ x: x, z: z });
+  }
+  for (let i = 0; i < spots.length; i++) {
+    const s = spots[i];
+    const g = { id: "gun" + i, x: s.x, z: s.z, team: null, crew: null, hp: GUN_HP, down: 0, cd: 0, heat: 0, locked: 0,
+      burst: 0, rest: 0, yawA: 0, pitchA: 0.5, target: null, model: buildGunModel(s.x, s.z), plume: null, claim: null };
+    g.pos = new THREE.Vector3(s.x, 1.2, s.z);
+    g.tgt = CBZ.ordnance.addTarget({ pos: g.pos, team: "flak", unit: g, onDamage: function (dmg, info) { hurtGun(g, dmg, info); } });
+    guns.push(g);
+  }
+}
+placeGuns();
+function gunColor(g) {
+  if (g.down > 0) return null;
+  if (!g.crew) return 0xffc46a;
+  return teamOf(g.crew.team).color;
+}
+function refreshGunLook(g) {
+  const c = gunColor(g), M = g.model;
+  // the column is for finding a gun, not for sitting inside: the human's own
+  // gun drops its beam while he is on it
+  M.beam.visible = c != null && !(g.crew && g.crew.human); M.ring.visible = c != null;
+  if (c != null) {
+    M.beam.material.color.setHex(c); M.ring.material.color.setHex(c);
+    M.beam.material.opacity = g.crew ? 0.55 : 0.3;
+  }
+}
+function hurtGun(g, dmg, info) {
+  if (g.down > 0 || !(dmg > 0)) return;
+  g.hp -= dmg;
+  if (g.hp > 0) return;
+  g.down = GUN_REPAIR; g.hp = 0;
+  const by = info && info.by ? unitById(info.by) : null;
+  if (by) {
+    award(by.team, PTS.gunKill, "gunKill");
+    hud.feed("FLAK SILENCED  +" + PTS.gunKill);
+    if (by === me) streak("GUN DOWN");
+  }
+  if (g.crew) { const c = g.crew; leaveGun(c); hurt(c, 999, { by: info && info.by, cause: "gun" }); }
+  g.model.pitch.rotation.x = 0.6; g.model.yaw.rotation.z = 0.35;
+  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = FLAK_MAT.char;
+  g.plume = fx.plume(g.x, 1, g.z, { size: 0.8, life: GUN_REPAIR, fire: true });
+  refreshGunLook(g);
+}
+function repairGun(g) {
+  g.down = 0; g.hp = GUN_HP; g.heat = 0; g.locked = 0;
+  g.model.pitch.rotation.x = -0.5; g.model.yaw.rotation.z = 0;
+  const ms = [FLAK_MAT.steel, FLAK_MAT.steel, FLAK_MAT.steel, FLAK_MAT.steel];
+  for (let i = 0; i < g.model.parts.length; i++) g.model.parts[i].material = ms[i];
+  refreshGunLook(g);
+}
+function manGun(u, g) {
+  if (!g || g.crew || g.down > 0 || !u.alive) return false;
+  g.crew = u; g.team = u.team; u.gun = g; g.claim = null;
+  g.heat = Math.min(g.heat, 0.5);
+  refreshGunLook(g);
+  if (u === me) { streak("ON THE GUN"); setGoal(); }
+  return true;
+}
+function leaveGun(u) {
+  const g = u && u.gun;
+  if (!g) return;
+  g.crew = null; u.gun = null;
+  refreshGunLook(g);
+  if (u === me) setGoal();
+}
+// the bomber a gun would shoot right now: the nearest enemy aeroplane in reach
+function gunTarget(g) {
+  let best = null, bd = FLAK_RANGE;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u.alive || u.role !== "bomber" || !u.af || u.rolling || u.team === g.team) continue;
+    const d = Math.hypot(u.af.pos.x - g.x, u.af.pos.y - 2, u.af.pos.z - g.z);
+    if (d < bd && u.af.pos.y > 30) { bd = d; best = u; }
+  }
+  return best;
+}
+const shells = [];
+function fireShell(g, t, human) {
+  const muz = _v.set(g.x, 2.2, g.z);
+  const d0 = Math.hypot(t.af.pos.x - muz.x, t.af.pos.y - muz.y, t.af.pos.z - muz.z);
+  let tf = d0 / SHELL_SPEED;
+  // lead twice: where will it be when the shell gets there
+  let ax = t.af.pos.x + t.af.vel.x * tf, ay = t.af.pos.y + t.af.vel.y * tf, az = t.af.pos.z + t.af.vel.z * tf;
+  tf = Math.hypot(ax - muz.x, ay - muz.y, az - muz.z) / SHELL_SPEED;
+  ax = t.af.pos.x + t.af.vel.x * tf; ay = t.af.pos.y + t.af.vel.y * tf; az = t.af.pos.z + t.af.vel.z * tf;
+  // the whole flak game is this line: error grows with slant range
+  const sig = (human ? 6 : 12) + d0 * (human ? 0.024 : 0.034);
+  ax += gauss() * sig; ay += gauss() * sig * 0.7; az += gauss() * sig;
+  shells.push({ x: ax, y: ay, z: az, t: tf, gun: g, by: g.crew ? g.crew.id : null, team: g.team });
+  fx.tracer(muz.x, muz.y, muz.z, ax, ay, az, { color: 0xffd27a, speed: SHELL_SPEED });
+  g.yawA = Math.atan2(ax - g.x, az - g.z);
+  g.pitchA = Math.atan2(ay - 2, Math.hypot(ax - g.x, az - g.z));
+  if (CBZ.micro.sfx && cam) {
+    const gain = CBZ.micro.sfx.gainAt(cam.position.distanceTo(muz), 120);
+    if (gain > 0.03) CBZ.micro.sfx.boom({ gain: gain * 0.22, dur: 0.22, sub: 140, bright: true });
+  }
+}
+function stepShells(dt) {
+  for (let i = shells.length - 1; i >= 0; i--) {
+    const s = shells[i];
+    s.t -= dt;
+    if (s.t > 0) continue;
+    shells.splice(i, 1);
+    fx.puff(s.x, s.y, s.z, { size: 17 + rnd() * 7, flash: true });
+    for (let j = 0; j < units.length; j++) {
+      const u = units[j];
+      if (!u.alive || u.role !== "bomber" || !u.af || u.team === s.team) continue;
+      const d = Math.hypot(u.af.pos.x - s.x, u.af.pos.y - s.y, u.af.pos.z - s.z);
+      if (d < BURST_R) {
+        const dmg = BURST_DMG * Math.pow(1 - d / BURST_R, 1.2);
+        u.hitT = 2.5;
+        hurt(u, dmg, { by: s.by, cause: "flak" });
+      } else if (u === me && d < 140) {
+        if (CBZ.micro.shake) CBZ.micro.shake(0.25 * (1 - d / 140));
+      }
+    }
+    if (CBZ.micro.sfx && cam) {
+      const dist = cam.position.distanceTo(_v.set(s.x, s.y, s.z));
+      const gain = CBZ.micro.sfx.gainAt(dist, 260);
+      if (gain > 0.03) setTimeout(function () { CBZ.micro.sfx.boom({ gain: gain * 0.4, dur: 0.6, sub: 70 }); }, Math.min(1500, dist / 340 * 1000));
+    }
+  }
+}
+function stepGuns(dt) {
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0) {
+      g.down -= dt;
+      if (g.down <= 0) { repairGun(g); if (me && me.role === "runner") hud.feed("A FLAK GUN IS BACK UP"); }
+      continue;
+    }
+    g.cd -= dt; g.rest -= dt;
+    if (g.locked > 0) { g.locked -= dt; if (g.locked <= 0) g.heat = 0.3; }
+    else g.heat = Math.max(0, g.heat - dt * 0.2);
+    const c = g.crew;
+    if (c && (!c.alive || c.gun !== g)) { g.crew = null; refreshGunLook(g); }
+    if (!g.crew) { g.target = null; continue; }
+    award(g.team, PTS.manned * dt, "manned");
+    g.target = gunTarget(g);
+    const human = g.crew === me;
+    let wants = false;
+    if (human) wants = ctl.held("fire");
+    else {
+      // an AI crew fires in bursts, not a hose
+      if (g.target && g.rest <= 0) { wants = true; }
+      if (g.burst >= 5) { g.burst = 0; g.rest = 1.2 + rnd() * 1.2; wants = false; }
+    }
+    if (wants && g.target && g.cd <= 0 && g.locked <= 0) {
+      fireShell(g, g.target, human);
+      g.cd = human ? 0.3 : 0.42;
+      g.burst++;
+      g.heat += human ? 0.07 : 0.06;
+      if (g.heat >= 1) { g.heat = 1; g.locked = 3.2; if (human) streak("OVERHEAT"); }
+    }
+    // slew the mount toward what it is shooting at
+    if (g.target && !(wants && g.cd > 0.2)) {
+      const t = g.target.af.pos;
+      g.yawA = Math.atan2(t.x - g.x, t.z - g.z);
+      g.pitchA = Math.atan2(t.y - 2, Math.hypot(t.x - g.x, t.z - g.z));
+    }
+    const M = g.model;
+    M.yaw.rotation.y += wrapPi(g.yawA - M.yaw.rotation.y) * Math.min(1, dt * 5);
+    M.pitch.rotation.x += (-g.pitchA - M.pitch.rotation.x) * Math.min(1, dt * 5);
+  }
+}
+
 // ============================================================ CIVILIANS
-// They walk the streets on the shipped gait, they slide along the real
-// colliders, and they are worth NEGATIVE points. A city you are afraid to
-// hit carelessly is a city that matters.
-const civRoll = CBZ.seedStream ? CBZ.seedStream("bs-civ") : function () { return 0.5; };
+// They stroll the pavements, and when the sky starts screaming they RUN —
+// away from the rings, into doorways. They are still worth negative points.
 (function castCivilians() {
   const roads = (town && town.roads) || [];
   const bodies = CBZ.studio.crowd(CIVILIANS, "civilian", {
     at: function (i) {
       if (roads.length) {
         const seg = roads[(i * 7) % roads.length];
-        const t = (civRoll() - 0.5) * seg.len * 0.8;
+        const t = (rnd() - 0.5) * seg.len * 0.8;
         const side = (i % 2 ? 1 : -1) * (seg.w / 2 + 2.2);
         const x = seg.vertical ? seg.x + side : seg.x + t;
         const z = seg.vertical ? seg.z + t : seg.z + side;
@@ -323,102 +709,168 @@ const civRoll = CBZ.seedStream ? CBZ.seedStream("bs-civ") : function () { return
       const a = (i / CIVILIANS) * Math.PI * 2;
       return { x: TOWN_AT.x + Math.cos(a) * 60, z: TOWN_AT.z + Math.sin(a) * 60, y: 0.03 };
     },
-    wander: { range: 52, speed: 1.25, pause: 2.2, groundAt: groundAt },
   });
   for (let i = 0; i < bodies.length; i++) {
     const g = bodies[i];
     const c = {
-      civ: true, id: "civ" + i, group: g, pos: g.position, dead: false, hp: 60,
-      team: null, alive: true,
+      civ: true, id: "civ" + i, group: g, pos: g.position, dead: false, hp: 60, team: null, alive: true,
+      home: { x: g.position.x, z: g.position.z }, tx: g.position.x, tz: g.position.z, wait: rnd() * 3,
+      fear: 0, hide: null, yaw: rnd() * 6.28, speed: 0,
     };
-    c.tgt = CBZ.ordnance.addTarget({
-      pos: c.pos, team: "civilian", unit: c,
-      onDamage: function (dmg, info) { hurtCiv(c, dmg, info); },
-    });
+    c.tgt = CBZ.ordnance.addTarget({ pos: c.pos, team: "civilian", unit: c, onDamage: function (dmg, info) { hurtCiv(c, dmg, info); } });
     civs.push(c);
   }
 })();
-
+// any blast frightens everyone who heard it
+(function hookBlasts() {
+  const prev = CBZ.ordnance.onBlast;
+  CBZ.ordnance.onBlast = function (x, y, z, radius, info, hits) {
+    if (prev) { try { prev(x, y, z, radius, info, hits); } catch (e) {} }
+    for (let i = 0; i < civs.length; i++) {
+      const c = civs[i];
+      if (c.dead) continue;
+      const d = Math.hypot(c.pos.x - x, c.pos.z - z);
+      if (d < 220) { c.fear = Math.max(c.fear, 12 - d / 30); c.fx = x; c.fz = z; }
+    }
+    onStoreLands({ impact: { x: x, y: y, z: z }, radius: radius, power: 1, owner: info && info.owner, kind: info && info.kind });
+  };
+})();
+function stepCivilians(dt) {
+  for (let i = 0; i < civs.length; i++) {
+    const c = civs[i];
+    if (c.dead) continue;
+    const here = CBZ.ordnance.dangerAt(c.pos.x, c.pos.z, 9);
+    if (here > 0.02) { c.fear = Math.max(c.fear, 8); }
+    c.fear = Math.max(0, c.fear - dt);
+    let tx = c.tx, tz = c.tz, speed = 1.25;
+    if (c.fear > 0) {
+      speed = 4.6;
+      if (!c.hide) {
+        const L = nearestShelter(c.pos.x, c.pos.z, 45, true);
+        if (L) { c.hide = doorPoint(L, true); c.hideOut = doorPoint(L, false); c.hideStage = 0; }
+      }
+      if (c.hide) {
+        const p = c.hideStage === 0 ? c.hideOut : c.hide;
+        tx = p.x; tz = p.z;
+        if (c.hideStage === 0 && Math.hypot(tx - c.pos.x, tz - c.pos.z) < 1.2) c.hideStage = 1;
+        if (c.hideStage === 1 && Math.hypot(tx - c.pos.x, tz - c.pos.z) < 0.8) speed = 0;
+      } else if (c.fx != null) {
+        const ax = c.pos.x - c.fx, az = c.pos.z - c.fz, n = Math.hypot(ax, az) || 1;
+        tx = c.pos.x + ax / n * 10; tz = c.pos.z + az / n * 10;
+      }
+    } else {
+      if (c.hide) { c.hide = null; c.tx = c.pos.x; c.tz = c.pos.z; }
+      if (c.wait > 0) { c.wait -= dt; speed = 0; }
+      else if (Math.hypot(c.tx - c.pos.x, c.tz - c.pos.z) < 0.6) {
+        const a = rnd() * 6.283, r = 6 + rnd() * 40;
+        c.tx = c.home.x + Math.cos(a) * r; c.tz = c.home.z + Math.sin(a) * r;
+        c.wait = 1 + rnd() * 3; speed = 0;
+      }
+      tx = c.tx; tz = c.tz;
+    }
+    const dx = tx - c.pos.x, dz = tz - c.pos.z, d = Math.hypot(dx, dz);
+    let moving = false;
+    if (speed > 0 && d > 0.3) {
+      const step = Math.min(d, speed * dt);
+      c.pos.x += dx / d * step; c.pos.z += dz / d * step;
+      if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(c.pos, 0.42, c.pos.y, 1.8);
+      c.yaw += wrapPi(Math.atan2(dx, dz) - c.yaw) * Math.min(1, dt * 8);
+      c.group.rotation.y = c.yaw;
+      moving = true;
+    }
+    c.pos.y = groundAt(c.pos.x, c.pos.z);
+    if (CBZ.animChar && c.group.userData.charRig) { try { CBZ.animChar(c.group.userData.charRig, moving ? speed : 0, dt); } catch (e) {} }
+  }
+}
 function hurtCiv(c, dmg, info) {
   if (!c || c.dead || !(dmg > 0)) return;
   c.hp -= dmg;
   if (c.hp > 0) return;
   c.dead = true; c.alive = false;
-  c.group.userData.dead = true;                     // the wander tick lets go
-  c.group.rotation.z = Math.PI / 2;                 // down, not despawned
-  c.group.position.y = groundAt(c.pos.x, c.pos.z) + 0.45;
+  c.group.userData.dead = true;
+  c.group.rotation.z = Math.PI / 2;
+  c.group.position.y = groundAt(c.pos.x, c.pos.z) + 0.3;
   if (c.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(c.tgt);
   const killer = info && info.by ? unitById(info.by) : null;
   if (killer) {
-    match.addScore(killer.team, -CIV_PENALTY, "civilian");
-    hud.feed("CIVILIAN KILLED · " + teamOf(killer.team).name + " −" + CIV_PENALTY);
-    if (killer === me && CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 });
+    award(killer.team, PTS.civilian, "civilian");
+    if (killer === me) { hud.feed("CIVILIAN KILLED  " + PTS.civilian); if (CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 }); }
   }
 }
 
 // ============================================================ THE CAST
-// Nobody here is drawn by this file. A runner is the shipped body. A bomber
-// is the shipped B-2 with the derived-coefficient airframe. The human's one
-// starts ON the island's own airstrip with speed already on the clock,
-// because a 25-second unpiloted crawl was the old game's first impression.
-const RW_Z = BASE_RECT.maxZ - 70;                    // the island's strip: z = -520, along X
-const RW_X0 = BASE_RECT.minX + 40;                   // threshold
-const RW_HDG = -Math.PI / 2;                         // forward = (+1, 0): east, toward downtown
+const RW_Z = BASE_RECT.maxZ - 70;
+const RW_X0 = BASE_RECT.minX + 40;
+const RW_HDG = -Math.PI / 2;
 
 function spawnUnit(rec, role, i) {
   const team = teamOf(rec.team);
   const u = {
-    rec: rec, id: rec.id, team: rec.team, role: role, human: !!rec.human,
-    alive: true, hp: 100, pos: new THREE.Vector3(), yaw: 0, hdg: 0,
+    rec: rec, id: rec.id, team: rec.team, role: role, human: !!rec.human, slot: i,
+    alive: true, hp: 100, pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, hdg: 0,
     group: null, af: null, tgt: null, cool: 0, respawnIn: 0, rolling: false,
+    // a per-man character, so four AIs are not one AI four times
+    nerve: 1.6 + rnd() * 2.6, aimErr: 0.6 + rnd() * 0.8,
   };
   if (role === "bomber") {
     const flown = CBZ.studio.fly("bomber", { groundAt: groundAt });
     if (flown) { u.group = flown.group; u.af = flown.af; }
     if (u.human && u.af) {
-      // launch(), NOT place(). place()'s fifth argument is PITCH IN RADIANS
-      // and this line used to pass 64 there, meaning "64 m/s". The result was
-      // the whole first impression of this game: a B-2 standing on its tail at
-      // 64 rad ≡ 67° nose-up, velocity zeroed by place() so the 64 never
-      // happened, thrust pointing 92% at the sky — 6.9 m/s² of it against
-      // 9.81 of gravity, so it could never leave the ground — creeping down
-      // the runway at walking pace forever. It read as a plane FLOATING.
-      // launch() is the verb that takes a heading AND an airspeed, and it
-      // seats the attitude level (-0.03 rad) instead of guessing.
       const ry = groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4);
       if (TAKEOFF_V1) u.af.launch(RW_X0, ry, RW_Z, RW_HDG, 64);
-      else u.af.place(RW_X0, ry, RW_Z, RW_HDG, 64);   // the bug: 64 rad of PITCH
-      u.af.throttle = 1;            // after launch(), which sets its own 0.85
+      else u.af.place(RW_X0, ry, RW_Z, RW_HDG, 64);
+      u.af.throttle = 1;
       u.rolling = true;
       u.hdg = RW_HDG;
     } else if (u.af) {
-      const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0);
-      const r = 900 + (i % 4) * 220;
-      const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
-      u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
-      u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
+      // far out: the runners get a quarter-minute to reach the guns
+      airStart(u, (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0), 2700 + (i % 3) * 200);
     }
     if (u.af) u.pos.copy(u.af.pos);
-    u.trail = CBZ.studio.trail({ length: 70, color: team.color, opacity: 0.4, minStep: 22 });
+    u.trail = CBZ.studio.trail({ length: 70, color: team.color, opacity: 0.35, minStep: 22 });
   } else {
     u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
     if (u.group) CBZ.scene.add(u.group);
-    // dust so a man is findable from altitude; it fades when he holds still,
-    // so standing quiet under a real roof is a choice, not a lost cause
     u.trail = CBZ.studio.trail({ length: 26, color: 0xc9cdd3, opacity: 0.5, minStep: 3.5 });
-    const sq = (town && town.square && town.square.bx != null) ? { x: town.square.bx, z: town.square.bz } : TOWN_AT;
-    const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? 0.4 : 0);
-    const r = 40 + (i % 4) * 34;
-    u.pos.set(sq.x + Math.cos(a) * r, 0, sq.z + Math.sin(a) * r);
-    u.pos.y = groundAt(u.pos.x, u.pos.z);
-    if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+    placeRunner(u, i);
   }
   u.tgt = CBZ.ordnance.addTarget({
     pos: u.pos, team: u.team, unit: u,
-    onDamage: function (dmg, info) { hurt(u, role === "bomber" ? dmg * 0.55 : dmg, info); },
+    onDamage: function (dmg, info) { if (role === "bomber") return; hurt(u, dmg, info); },
   });
   units.push(u);
   return u;
+}
+function airStart(u, a, r) {
+  const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
+  u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
+  u.alt = BOMB_ALT + (u.slot % 3) * 40;
+  u.af.launch(x, u.alt, z, u.hdg, 168);
+  u.pos.copy(u.af.pos);
+}
+// a runner comes in on foot from a doorway: never into a live ring
+function placeRunner(u, i) {
+  let p = null;
+  const tries = LOTS.length ? 12 : 0;
+  for (let k = 0; k < tries && !p; k++) {
+    const L = LOTS[(rnd() * LOTS.length) | 0];
+    if (!L || L._down) continue;
+    const q = doorPoint(L, false);
+    if (CBZ.ordnance.dangerAt(q.x, q.z, 12) > 0) continue;
+    // a man coming back should not pop up on the gun he died on
+    let ok = true;
+    for (let j = 0; j < guns.length; j++) if (Math.hypot(guns[j].x - q.x, guns[j].z - q.z) < 40) ok = false;
+    if (ok) p = q;
+  }
+  if (!p) {
+    const a = (i / SQUAD) * Math.PI * 2;
+    p = { x: TOWN_AT.x + Math.cos(a) * 70, z: TOWN_AT.z + Math.sin(a) * 70 };
+  }
+  u.pos.set(p.x, groundAt(p.x, p.z), p.z);
+  if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+  u.state = "toGun"; u.route = null; u.gun = null; u.think = 0; u.stuck = 0;
+  if (u.group) { u.group.visible = true; u.group.position.copy(u.pos); u.group.rotation.set(0, 0, 0); }
+  if (u.trail) u.trail.cut();
 }
 
 function teamOf(id) { for (let i = 0; i < TEAMS.length; i++) if (TEAMS[i].id === id) return TEAMS[i]; return TEAMS[0]; }
@@ -426,9 +878,9 @@ function unitById(id) { for (let i = 0; i < units.length; i++) if (units[i].id =
 function clearUnits() {
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
+    if (u.gun) leaveGun(u);
     if (u.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(u.tgt);
-    // drop(), not remove(): a bare remove leaves geometry resident on the GPU,
-    // measured at +11.7 MB per aircraft in a game that respawns on a timer
+    if (u.smoke) u.smoke.stop();
     if (u.group) CBZ.studio.drop(u.group);
     if (u.af && u.af.dispose) u.af.dispose();
     if (u.trail) u.trail.dispose();
@@ -436,97 +888,118 @@ function clearUnits() {
   units = [];
   me = null;
 }
+function award(team, pts, reason) {
+  if (!team || !match) return;
+  match.addScore(team, pts, reason);
+  const s = statsFor(team);
+  if (reason === "manned") s.manned += pts;
+  else s[reason] = (s[reason] || 0) + 1;
+}
 
 // ============================================================ DAMAGE
 function hurt(u, dmg, info) {
   if (!u || !u.alive || !(dmg > 0)) return;
   u.hp -= dmg;
-  if (u === me && CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 80));
+  if (u === me) {
+    if (CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 60));
+    const h = el("hit"); h.style.transition = "none"; h.style.opacity = String(Math.min(1, 0.35 + dmg / 40));
+    setTimeout(function () { h.style.transition = "opacity .7s"; h.style.opacity = "0"; }, 60);
+  }
   if (u.hp > 0) return;
   u.alive = false; u.hp = 0;
   const killer = info && info.by ? unitById(info.by) : null;
-  match.kill(u.rec, killer ? killer.rec : null, (info && info.crash) ? "CRASH" : "ORDNANCE");
+  match.kill(u.rec, killer ? killer.rec : null, (info && info.cause) ? String(info.cause).toUpperCase() : "ORDNANCE");
+  const enemy = match.enemyOf(u.team);
   if (u.role === "runner") {
-    const enemy = match.enemyOf(u.team);
-    if (enemy) {
-      match.addScore(enemy.id, PTS_KILL, "kill");
-      hud.feed(u.rec.name + " DOWN · +" + PTS_KILL);
-    }
+    if (u.gun) leaveGun(u);
+    if (enemy) award(enemy.id, PTS.runnerKill, "runnerKill");
+    hud.feed(u.rec.name + " KILLED  +" + PTS.runnerKill + " " + (enemy ? enemy.name : ""));
     if (killer === me) earnKill();
-    CBZ.studio.boom(u.pos, { radius: 5, power: 0.45, structural: false });
     if (u.trail) u.trail.cut();
-    if (u.group) CBZ.studio.drop(u.group);
-    if (u === me) hud.health(0);
+    // down, not despawned: a body in the street is what a kill looks like
+    if (u.group) { u.group.rotation.z = Math.PI / 2; u.group.position.y = groundAt(u.pos.x, u.pos.z) + 0.3; }
+    u.respawnIn = RESPAWN_RUN;
+    if (u === me) { hud.health(0); el("respawn").style.display = "block"; }
   } else {
-    if (u.af) CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.5, structural: false });
-    if (u.group) u.group.visible = false;
-    if (u.trail) u.trail.cut();
-    u.respawnIn = RESPAWN_AIR;        // pressure that stops when you die is not pressure
+    // SHOT DOWN: the aeroplane does not blink out, it goes in burning
+    if (enemy) award(enemy.id, PTS.bomberDown, "bomberDown");
+    hud.feed(u.rec.name + " SHOT DOWN  +" + PTS.bomberDown + " " + (enemy ? enemy.name : ""));
+    if (killer === me) streak("BOMBER DOWN");
+    u.downing = 9; u.crashRoll = (rnd() < 0.5 ? -1 : 1);
+    if (u.af) { const af = u.af; u.smoke = fx.smokeTrail(function () { return u.downing > 0 ? af.pos : null; }, { life: 8 }); }
+    u.respawnIn = RESPAWN_AIR + 9;
+    if (u === me) el("respawn").style.display = "block";
   }
+}
+function crashBomber(u) {
+  u.downing = 0;
+  if (u.smoke) { u.smoke.stop(); u.smoke = null; }
+  if (!u.af) return;
+  const p = u.af.pos;
+  const gy = groundAt(p.x, p.z);
+  CBZ.studio.boom(_v.set(p.x, Math.max(gy, SEA_Y), p.z), { radius: 26, power: 1.4, structural: false });
+  if (gy > SEA_Y) {
+    CBZ.ordnance.blast(p.x, gy + 1, p.z, 34, 160, { team: null, owner: null, kind: "iron" });
+    fx.plume(p.x, gy, p.z, { size: 1.1, life: 40, fire: true });
+  } else {
+    fx.dust(p.x, SEA_Y, p.z, { size: 14 });
+  }
+  if (u.group) u.group.visible = false;
+  if (u.trail) u.trail.cut();
 }
 
-// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN — the REAL
-// building. The town's lots carry real extents, so the collapse verb gets the
-// true footprint and roofline instead of guessing, the team is PAID for the
-// tower, and anyone standing inside learns why the shelter rules matter.
-function lotNear(x, z, reach) {
-  const lots = (town && town.lots) || [];
-  let best = null, bd = 1e18;
-  for (let i = 0; i < lots.length; i++) {
-    const L = lots[i];
-    if (!L.building) continue;
-    const dx = Math.max(L.cx - L.w / 2 - x, 0, x - (L.cx + L.w / 2));
-    const dz = Math.max(L.cz - L.d / 2 - z, 0, z - (L.cz + L.d / 2));
-    const d = dx * dx + dz * dz;
-    if (d < bd) { bd = d; best = L; }
+// A store that lands ON a building (roof strike, or inside its footprint)
+// damages that building. Enough of them and it burns out: points, a plume,
+// and one fewer roof to hide under. A store in the street is a store in the
+// street — the old code billed a tower for every bomb in town.
+function onStoreLands(b) {
+  if (!b || !b.impact || b.kind === "nuke") return;
+  const ix = b.impact.x, iz = b.impact.z;
+  fx.dust(ix, groundAt(ix, iz), iz, { size: 5 });
+  const L = lotAt(ix, iz, 3);
+  if (!L || L._down) return;
+  L._hp -= 1;
+  if (CBZ.cityAirstrikeCollapse) { try { CBZ.cityAirstrikeCollapse(L, { at: b.impact, power: 1.6, radius: 14 }); } catch (e) {} }
+  if (L._hp > 0) {
+    if (!L._plume) L._plume = fx.plume(L.cx, (b.impact.y || 0), L.cz, { size: 0.6, fire: false });
+    return;
   }
-  return best && bd <= reach * reach ? best : null;
+  burnOut(L, b.owner);
 }
-function crushInside(L, byId) {
-  // the building came down; the people in and against it come down with it
-  const pad = 6;
-  const hitRect = { minX: L.cx - L.w / 2 - pad, maxX: L.cx + L.w / 2 + pad,
-                    minZ: L.cz - L.d / 2 - pad, maxZ: L.cz + L.d / 2 + pad };
+function burnOut(L, ownerId) {
+  if (L._down) return;
+  L._down = true;
+  if (L._plume) L._plume.stop();
+  L._plume = fx.plume(L.cx, 2, L.cz, { size: 1.3, fire: true });
+  const owner = ownerId ? unitById(ownerId) : null;
+  if (owner) {
+    award(owner.team, PTS.building, "building");
+    if (owner === me) hud.feed(((L.building && L.building.name) || "BUILDING").toUpperCase() + " BURNING  +" + PTS.building);
+  }
+  // a burning building is no shelter: whoever was inside is hurt and runs
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
-    if (u.alive && u.role === "runner" && inRect(hitRect, u.pos.x, u.pos.z)) hurt(u, 95, { by: byId, cause: "collapse" });
-  }
-  for (let i = 0; i < civs.length; i++) {
-    const c = civs[i];
-    if (!c.dead && inRect(hitRect, c.pos.x, c.pos.z)) hurtCiv(c, 95, { by: byId });
-  }
-}
-function onStoreLands(b) {
-  if (!b || !b.impact) return;
-  const L = lotNear(b.impact.x, b.impact.z, Math.max(16, (b.radius || 12) * 1.2));
-  if (L && CBZ.cityAirstrikeCollapse) {
-    try { CBZ.cityAirstrikeCollapse(L, { at: b.impact, power: b.power || 1, radius: b.radius || 14 }); } catch (e) {}
-    if (!L._down) {
-      L._down = true;
-      const owner = b.owner ? unitById(b.owner) : null;
-      if (owner) {
-        match.addScore(owner.team, PTS_TOWER, "tower");
-        hud.feed((L.building.name || "TOWER").toUpperCase() + " DOWN · +" + PTS_TOWER);
-        if (owner === me) streak("TOWER DOWN");
-      }
-      crushInside(L, b.owner);
-    }
-  } else {
-    CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+    if (u.alive && u.role === "runner" && lotAt(u.pos.x, u.pos.z, 0) === L) hurt(u, 45, { by: ownerId, cause: "fire" });
   }
 }
 
 // ============================================================ THE MATCH
 match = CBZ.teammatch.create({
   teams: TEAMS, roles: ["bomber", "runner"], halves: HALVES, halfSeconds: HALF_SECONDS,
+  intermissionSeconds: INTERMISSION,
+  autoStep: false,                       // THE PAGE steps it; both did, and the clock ran double
   onHalfStart: function (half, m) {
     clearUnits();
+    CBZ.ordnance.clear();
+    shells.length = 0;
     nuke.kills = 0; nuke.armed = false; nuke.spent = false;
     ctlFly.button("nuke", false);
     ctlFly.button("fire", true);
+    for (let i = 0; i < guns.length; i++) { const g = guns[i]; g.crew = null; if (g.down > 0) { g.down = 0; if (g.plume) g.plume.stop(); repairGun(g); } refreshGunLook(g); }
     const players = m.players;
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
+      if (!p.alive) m.revive(p);
       const u = spawnUnit(p, m.roleOf(p.team), i % SQUAD);
       if (p.human) me = u;
     }
@@ -536,7 +1009,8 @@ match = CBZ.teammatch.create({
     ctlFly.show(flying);
     ctlWalk.show(!flying);
     el("radar").style.display = flying ? "block" : "none";
-    setRole();
+    if (me && !flying) { me.camYaw = Math.atan2(TOWN_AT.x - me.pos.x, TOWN_AT.z - me.pos.z); }
+    setRole(); setGoal();
     if (me) showSwap(half);
   },
   onEnd: function (result, m) { finish(result, m); },
@@ -544,10 +1018,7 @@ match = CBZ.teammatch.create({
 
 for (let t = 0; t < TEAMS.length; t++) {
   for (let i = 0; i < SQUAD; i++) {
-    match.addPlayer({
-      id: TEAMS[t].id + i, name: TEAMS[t].name + " " + (i + 1),
-      team: TEAMS[t].id, human: t === 0 && i === 0,
-    });
+    match.addPlayer({ id: TEAMS[t].id + i, name: TEAMS[t].name + " " + (i + 1), team: TEAMS[t].id, human: t === 0 && i === 0 });
   }
 }
 
@@ -556,35 +1027,49 @@ function showSwap(half) {
   const n = el("swap");
   const rows = match.standings();
   let line = "";
-  for (let i = 0; i < rows.length; i++) line += (i ? "   " : "") + rows[i].name + " " + Math.round(rows[i].total);
+  for (let i = 0; i < rows.length; i++) line += (i ? "    " : "") + rows[i].name + " " + Math.round(rows[i].total);
+  const how = me.role === "bomber"
+    ? "Silence the flak guns, then hunt their crews. Low is accurate, high is safe. Leave the civilians alone."
+    : "Get to a flak gun and man it. Shoot the bombers down. When a red ring closes on you, run or get under a roof.";
   n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
-    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "   ·   " + line : "") + "</small>";
+    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "    " + line : "") + "</small>" +
+    "<span class=\"how\">" + how + "</span>";
   n.classList.add("on");
-  swapT = 2.4;
+  swapT = 4.2;
 }
-
 function setRole() {
   if (!me) { el("role").textContent = ""; return; }
-  el("role").textContent = me.role === "bomber"
-    ? (me.rolling ? "FULL POWER · ROTATE" : "YOU BOMB")
-    : "YOU RUN";
+  if (me.role !== "bomber") { el("role").textContent = me.gun ? "ON THE GUN" : "YOU RUN"; return; }
+  if (me.rolling) { el("role").textContent = "FULL POWER  ROTATE"; return; }
+  const alt = me.af ? Math.round(me.af.pos.y) : 0;
+  el("role").textContent = "ALT " + alt + " M    " + (me.cool > 0 ? "RELOADING" : "STICK READY");
+}
+let goalT = 0;
+function setGoal() {
+  const g = el("goal");
+  if (!me || !me.alive || !started) { g.textContent = ""; return; }
+  if (me.role === "bomber") {
+    let manned = 0, up = 0;
+    for (let i = 0; i < guns.length; i++) { if (guns[i].down <= 0) { up++; if (guns[i].crew) manned++; } }
+    g.textContent = up ? (manned + " OF " + up + " FLAK GUNS FIRING") : "ALL FLAK SILENCED. HUNT THE CREWS";
+    return;
+  }
+  if (me.gun) { g.textContent = me.gun.target ? "HOLD FIRE ON THE BOMBER" : "WAITING FOR A BOMBER IN RANGE"; return; }
+  const gg = nearestGunFor(me);
+  if (!gg) { g.textContent = "EVERY GUN IS DOWN. STAY ALIVE, THEY COME BACK"; return; }
+  const d = Math.round(Math.hypot(gg.x - me.pos.x, gg.z - me.pos.z));
+  g.textContent = gg.crew ? "GET TO A GUN. A TEAMMATE WILL GIVE YOU THE SEAT" : "GET TO A FREE FLAK GUN AND MAN IT";
 }
 
-// ============================================================ A BOMBING RUN
+// ============================================================ BOMBING
 function dropStick(u) {
   if (!u.af || u.cool > 0) return;
-  const agl = u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z);
-  if (agl < RELEASE_MIN && u.human) {
-    if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.18, { type: "square", gain: 0.16 });
-  }
-  u.cool = 2.4;
+  u.cool = u.human ? HUMAN_RELOAD : AI_RELOAD;
   CBZ.ordnance.stick({
     count: STICK, interval: 0.13, kind: "iron", team: u.team, owner: u.id, by: u.id,
     getState: function () { return u.alive && u.af ? { pos: u.af.pos, vel: u.af.vel } : null; },
-    onDetonate: onStoreLands,
   });
 }
-
 function fireNuke(u) {
   if (!u || !u.af || !nuke.armed || nuke.spent) return;
   nuke.spent = true; nuke.armed = false;
@@ -595,133 +1080,89 @@ function fireNuke(u) {
       const f = el("flash");
       f.style.transition = "none"; f.style.opacity = "1";
       setTimeout(function () { f.style.transition = "opacity 2.4s"; f.style.opacity = "0"; }, 90);
-      if (CBZ.cityNukeFX) { try { CBZ.cityNukeFX(b.impact.x, b.impact.y, b.impact.z, {}); } catch (e) {} }
-      // the mushroom is nukefx's, the kill sweep is ordnance's; what is owed
-      // here is the CITY coming down, and it comes down by the same scored
-      // path a single store uses — a nuke is not exempt from the ledger
-      for (let r = 0; r < 9; r++) {
-        const a = (r / 9) * Math.PI * 2, d = (b.radius || 120) * 0.55;
-        onStoreLands({ impact: { x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
-          radius: d * 0.5, power: 3, owner: u.id });
+      for (let i = 0; i < LOTS.length; i++) {
+        const L = LOTS[i];
+        if (Math.hypot(L.cx - b.impact.x, L.cz - b.impact.z) < 260) burnOut(L, u.id);
+      }
+      for (let i = 0; i < guns.length; i++) {
+        if (Math.hypot(guns[i].x - b.impact.x, guns[i].z - b.impact.z) < 420) hurtGun(guns[i], 999, { by: u.id });
       }
     },
   });
   streak("ROUND AWAY");
 }
-
 function earnKill() {
   if (nuke.spent) return;
   nuke.kills++;
-  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctlFly.button("nuke", true, true); }
-  else streak(nuke.kills + " OF " + NUKE_ARM);
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED  PRESS N"); ctlFly.button("nuke", true, true); }
+  else streak(nuke.kills + " OF " + NUKE_ARM + " TO THE BIG ONE");
 }
 let streakT = 0;
 function streak(t) { el("streak").textContent = t; el("streak").classList.add("on"); streakT = 2.6; }
 
-// ============================================================ THE FRAME
-CBZ.micro.onFrame(function (rawDt) {
-  if (!started) return;
-  const dt = Math.min(rawDt || 0, 0.05);            // a slow phone frame must not slingshot the sim
-  match.step(dt);
-  if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
-  if (swapT > 0 && (swapT -= dt) <= 0) el("swap").classList.remove("on");
-  if (match.phase === "over") return;
-
-  ctl.step(dt);
-
+// ---- THE BOMBER'S BRAIN
+// Pick what is worth a pass (a crewed gun over an idle one over a man in the
+// open over a man in a doorway), avoid what three wingmen already picked and
+// what has a crowd of civilians round it, fly the carry, lead the mark by the
+// store's own time of fall, and let go only when the stick will walk across it.
+function candidateTargets(u) {
+  const out = [];
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0) continue;
+    out.push({ kind: "gun", ref: g, x: g.x, z: g.z, vx: 0, vz: 0, value: g.crew ? 1.5 : 0.55 });
+  }
   for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    if (!u.alive) {
-      if (u.role === "bomber" && (u.respawnIn -= dt) <= 0) reflight(u);
-      continue;
-    }
-    if (u.role === "bomber") stepBomber(u, dt, u === me);
-    else {
-      stepRunner(u, dt, u === me);
-      match.addScore(u.team, PTS_ALIVE * dt, "alive");
-    }
+    const r = units[i];
+    if (!r.alive || r.role !== "runner" || r.team === u.team || r.gun) continue;
+    const L = lotAt(r.pos.x, r.pos.z, 0);
+    out.push({ kind: "man", ref: r, x: r.pos.x, z: r.pos.z, vx: r.vel.x, vz: r.vel.z, value: L && !L._down ? 0.4 : 1.0 });
   }
-
-  CBZ.ordnance.step(dt);
-
-  if (me && !me.alive) hud.danger(0);
-  if (me && me.alive && eng) {
-    if (me.role === "bomber" && me.af) { eng.set(me.af.throttle, me.af.speed, 0); hud.danger(0); }
-    else {
-      eng.set(0, 0, 400);
-      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 10) : 0;
-      CBZ.studio.alarm(risk);
-      hud.danger(risk);
-    }
-  }
-
-  aimAndFollow(dt);
-  hud.clock(match.clock());
-  if (me) hud.health(Math.max(0, me.hp) / 100);
-  const rows = match.standings();
-  const sc = {};
-  for (let i = 0; i < rows.length; i++) sc[rows[i].name] = Math.round(rows[i].total);
-  hud.score(sc);
-  if (scope && me && me.role === "bomber") scope.draw(dt);
-});
-
-const _reroll = CBZ.seedStream ? CBZ.seedStream("bs-reflight") : function () { return 0.5; };
-function reflight(u) {
-  u.alive = true; u.hp = 100; u.respawnIn = 0;
-  if (u.group) u.group.visible = true;
-  const a = _reroll() * Math.PI * 2;
-  const r = 1100;
-  const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
-  u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
-  if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
-  if (u === me) setRole();
+  return out;
 }
-
-function nearestEnemyRunner(u) {
-  let best = null, bd = Infinity;
-  for (let i = 0; i < units.length; i++) {
-    const t = units[i];
-    if (!t.alive || t.role !== "runner" || t.team === u.team) continue;
-    const d = (t.pos.x - u.af.pos.x) * (t.pos.x - u.af.pos.x) + (t.pos.z - u.af.pos.z) * (t.pos.z - u.af.pos.z);
-    if (d < bd) { bd = d; best = t; }
+function civsNear(x, z, r) { let n = 0; for (let i = 0; i < civs.length; i++) { const c = civs[i]; if (!c.dead && Math.abs(c.pos.x - x) < r && Math.abs(c.pos.z - z) < r) n++; } return n; }
+function pickTarget(u) {
+  const cands = candidateTargets(u);
+  let best = null, bs = -Infinity;
+  for (let i = 0; i < cands.length; i++) {
+    const c = cands[i];
+    const d = Math.hypot(c.x - u.af.pos.x, c.z - u.af.pos.z);
+    let s = c.value / (1 + d / 1800);
+    for (let j = 0; j < units.length; j++) {
+      const w = units[j];
+      if (w !== u && w.alive && w.team === u.team && w.mark && w.mark.ref === c.ref) s -= 0.45;
+    }
+    s -= civsNear(c.x, c.z, 30) * 0.12;
+    s += (rnd() - 0.5) * 0.15;
+    if (s > bs) { bs = s; best = c; }
   }
   return best;
 }
+function refreshMark(m) {
+  if (m.kind === "gun") { m.x = m.ref.x; m.z = m.ref.z; return m.ref.down <= 0; }
+  if (!m.ref.alive || m.ref.gun) return false;
+  m.x = m.ref.pos.x; m.z = m.ref.pos.z; m.vx = m.ref.vel.x; m.vz = m.ref.vel.z;
+  return true;
+}
+function flakNear(x, z, r) { let n = 0; for (let i = 0; i < guns.length; i++) { const g = guns[i]; if (g.crew && g.down <= 0 && Math.hypot(g.x - x, g.z - z) < r) n++; } return n; }
 
 function stepBomber(u, dt, mine) {
   if (!u.af) return;
   u.cool = Math.max(0, u.cool - dt);
+  u.hitT = Math.max(0, (u.hitT || 0) - dt);
 
   if (u.rolling) {
-    /* THE ROLL IS SHORT AND IT ENDS WHETHER OR NOT ANYBODY PULLS.
-
-       EVERY VERB IN THIS GAME LIVES BELOW THE `return` AT THE BOTTOM OF THIS
-       BRANCH — the DROP read, the NUKE read, the run altitude, the bombsight.
-       So `rolling` is not a cosmetic state: while it is true the player has no
-       game at all. It used to clear on ONE condition, a stick pulled past 0.4
-       above 85 m/s, and nothing on screen says to do that beyond the word
-       ROTATE. A player who did not pull rolled to the end of the island and
-       then skimmed the sea at gear height forever, still rolling, still unable
-       to drop anything. That is what "there's no bombs" was.
-
-       So Vr flies the aeroplane off. The centreline hold pins the nose to the
-       deck until rotation speed and then aims at a climb-out instead, which is
-       the airframe's own autopilot doing it with the shipped coefficients —
-       no hand-poked vertical velocity. Pulling early still rotates early,
-       because that part was a good idea. */
-    const VR = 86;                     // rotate speed, m/s — bomber stalls at 55
+    // THE ROLL ENDS WHETHER OR NOT ANYBODY PULLS: Vr flies it off.
+    const VR = 86;
     u.af.throttle = 1;
-    if (mine) u.hdg += ctl.move.x * 0.22 * dt;
+    if (mine) u.hdg -= ctl.move.x * 0.22 * dt;
     const rotate = TAKEOFF_V1
       ? (u.af.speed > VR || (mine && ctl.move.y > 0.4 && u.af.speed > 78))
-      : (mine && ctl.move.y > 0.4 && u.af.speed > 85);   // the bug: pull, or never
+      : (mine && ctl.move.y > 0.4 && u.af.speed > 85);
     const gy = groundAt(u.af.pos.x, u.af.pos.z);
-    // hold the deck, or climb out at ~10° — a near aim point so steerTo
-    // commands a firm pitch rather than a suggestion
     const lever = rotate ? 1000 : 3000;
     const aimY = rotate ? gy + 180 : gy + 4;
-    const aim = u.af.steerTo(_v.set(
-      u.af.pos.x - Math.sin(u.hdg) * lever, aimY, u.af.pos.z - Math.cos(u.hdg) * lever), { gain: 3.2 });
+    const aim = u.af.steerTo(_v.set(u.af.pos.x - Math.sin(u.hdg) * lever, aimY, u.af.pos.z - Math.cos(u.hdg) * lever), { gain: 3.2 });
     u.af.step(dt, aim);
     u.pos.copy(u.af.pos);
     if (u.group) u.af.applyTo(u.group);
@@ -730,27 +1171,65 @@ function stepBomber(u, dt, mine) {
   }
 
   if (mine) {
-    u.hdg += ctl.move.x * 0.95 * dt;
+    // D turns RIGHT. (The heading grows to the LEFT; the old sign flew you
+    // the wrong way on every keypress.)
+    u.hdg -= ctl.move.x * 0.95 * dt;
     u.af.throttle = Math.max(0.3, ctl.throttle);
-    // the stick's Y walks the RUN ALTITUDE — lower is accurate and lethal and
-    // inside your own fragmentation, higher is safe and vague
-    u.alt = Math.max(ALT_MIN, Math.min(ALT_MAX, (u.alt || BOMB_ALT) - ctl.move.y * 130 * dt));
+    // stick forward is nose down, as in every aeroplane
+    u.alt = clamp((u.alt || BOMB_ALT) - ctl.move.y * 130 * dt, ALT_MIN, ALT_MAX);
     if (ctl.tapped("fire")) dropStick(u);
     if (ctl.tapped("nuke")) fireNuke(u);
   } else {
-    // hunt a MAN, not the middle of the map; commit to a run, re-pick slowly
+    u.af.throttle = 0.88;
     u.pick = (u.pick || 0) - dt;
-    if (u.pick <= 0 || !u.mark || !u.mark.alive) { u.mark = nearestEnemyRunner(u); u.pick = 7; }
+    if (!u.mark || !refreshMark(u.mark) || u.pick <= 0) {
+      // do not abandon a mark mid-run
+      if (!u.mark || !refreshMark(u.mark) || u.runPhase !== "commit") {
+        u.mark = pickTarget(u); u.pick = 9 + rnd() * 4;
+        u.errX = gauss() * 6 * u.aimErr; u.errZ = gauss() * 6 * u.aimErr;
+      }
+    }
     const mk = u.mark;
-    u.af.throttle = 0.85;
+    // altitude: heavy flak round the mark means a higher, vaguer run
+    const threat = mk ? flakNear(mk.x, mk.z, 900) : 0;
+    u.alt = 230 + Math.min(2, threat) * 105 + (u.slot % 3) * 22 + (u.hitT > 0 ? 90 : 0);
     if (mk) {
-      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, mk.pos.x, mk.pos.z);
-      // release when the SHARED integrator says the fall lands on him
       const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
-      if (p && Math.hypot(p.x - mk.pos.x, p.z - mk.pos.z) < 70) dropStick(u);
+      const tf = p ? p.t : 8;
+      const carryX = p ? p.x - u.af.pos.x : 0, carryZ = p ? p.z - u.af.pos.z : 0;
+      // where the mark will be when the store gets there
+      const hx = mk.x + mk.vx * tf + u.errX * (u.alt / 260);
+      const hz = mk.z + mk.vz * tf + u.errZ * (u.alt / 260);
+      // the release point is the mark minus the carry
+      const rx = hx - carryX, rz = hz - carryZ;
+      const dr = Math.hypot(rx - u.af.pos.x, rz - u.af.pos.z);
+      const fx0 = -Math.sin(u.af.heading()), fz0 = -Math.cos(u.af.heading());
+      const ahead = ((rx - u.af.pos.x) * fx0 + (rz - u.af.pos.z) * fz0) / (dr || 1);
+      if (dr > 900 || ahead > 0.3) {
+        u.runPhase = dr < 1400 ? "commit" : "approach";
+        u.hdg = headingToward(u.af.pos.x, u.af.pos.z, rx, rz);
+      } else {
+        // overshot the release point: extend straight out, then come round
+        u.runPhase = "extend";
+        if (dr > 1500) u.hdg = headingToward(u.af.pos.x, u.af.pos.z, rx, rz);
+      }
+      if (p && u.cool <= 0) {
+        // error of the predicted impact against the mark, in the aircraft's frame
+        const ex = hx - p.x, ez = hz - p.z;
+        const along = ex * fx0 + ez * fz0, cross = ex * -fz0 + ez * fx0;
+        const civ = civsNear(p.x, p.z, 30);
+        const civOk = civ === 0 || (mk.kind === "gun" && mk.ref.crew && civ < 2);
+        // the stick is ~120 m long: release a little short so it walks over him
+        if (Math.abs(cross) < 16 + u.alt * 0.02 && along > -10 && along < 70 && civOk) {
+          dropStick(u);
+          u.pick = Math.min(u.pick, 3);
+        }
+      }
     } else {
       u.hdg = headingToward(u.af.pos.x, u.af.pos.z, TOWN_AT.x, TOWN_AT.z);
     }
+    // jink while the flak is finding you
+    if (u.hitT > 0) u.hdg += Math.sin(match.elapsed * 1.7 + u.slot) * 0.35 * dt;
   }
 
   const alt = u.alt || BOMB_ALT;
@@ -760,118 +1239,447 @@ function stepBomber(u, dt, mine) {
   u.af.step(dt, aim);
   u.pos.copy(u.af.pos);
   if (u.group) u.af.applyTo(u.group);
-  if (u.trail && !u.rolling) u.trail.push(u.af.pos);
+  if (u.trail) u.trail.push(u.af.pos);
+}
+function stepDowning(u, dt) {
+  // stricken: power off, nose down, rolling off one wing, into the ground
+  u.downing -= dt;
+  const af = u.af;
+  if (!af) { u.downing = 0; return; }
+  af.throttle = 0;
+  const h = af.heading() + u.crashRoll * 0.6;
+  const aim = af.steerTo(_v.set(af.pos.x - Math.sin(h) * 500, groundAt(af.pos.x, af.pos.z) - 300, af.pos.z - Math.cos(h) * 500), { gain: 2.4 });
+  af.step(dt, aim);
+  u.pos.copy(af.pos);
+  if (u.group) af.applyTo(u.group);
+  if (af.pos.y - Math.max(SEA_Y, groundAt(af.pos.x, af.pos.z)) < 6 || u.downing <= 0) crashBomber(u);
 }
 
-// the runner half happens BETWEEN REAL BUILDINGS: cover is a wall the blast
-// trace already respects, and shelter is a real doorway in a real facade
-function nearestDoor(x, z, reach) {
-  const lots = (town && town.lots) || [];
-  let best = null, bd = reach * reach;
-  for (let i = 0; i < lots.length; i++) {
-    const L = lots[i];
-    const b = L.building;
-    if (!b || !b.door || L._down) continue;         // a collapsed shell shelters nobody
-    const d = (b.door.x - x) * (b.door.x - x) + (b.door.z - z) * (b.door.z - z);
-    if (d < bd) { bd = d; best = L; }
+// for the human: any standing gun he could sit at, free ones preferred
+function nearestGunFor(u) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0 || (g.crew && (g.crew.human || g.crew.team !== u.team))) continue;
+    const d = Math.hypot(g.x - u.pos.x, g.z - u.pos.z) + (g.crew ? 60 : 0);
+    if (d < bd) { bd = d; best = g; }
   }
   return best;
 }
-
+// ---- THE RUNNER'S BRAIN
+function nearestFreeGun(x, z, who) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0 || (g.crew && g.crew !== who)) continue;
+    if (g.claim && g.claim !== who && g.claim.alive && g.claim.team === (who && who.team)) continue;
+    const d = Math.hypot(g.x - x, g.z - z) + CBZ.ordnance.dangerAt(g.x, g.z, 12) * 400;
+    if (d < bd) { bd = d; best = g; }
+  }
+  return best;
+}
+// the escape: the step that gets out of every ring soonest, weighted by how
+// soon each ring lands; a doorway beats open ground when one is close enough
+function escapeFrom(u) {
+  const th = CBZ.ordnance.activeThreats();
+  let ex = 0, ez = 0, worst = Infinity;
+  for (let i = 0; i < th.length; i++) {
+    const t = th[i];
+    const dx = u.pos.x - t.x, dz = u.pos.z - t.z, d = Math.hypot(dx, dz) || 0.01;
+    if (d > t.radius * 1.3 + 25) continue;
+    const w = 1 / Math.max(0.5, t.t);
+    ex += dx / d * w; ez += dz / d * w;
+    worst = Math.min(worst, t.t);
+  }
+  return { x: ex, z: ez, t: worst };
+}
+function stepRunnerAI(u, dt) {
+  const here = CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 12);
+  u.think -= dt;
+  if (here > 0.02) {
+    const esc = escapeFrom(u);
+    // nerve: the braver a gunner, the later he leaves the gun
+    if (u.gun && esc.t > u.nerve && here < 0.5) return { stay: true };
+    if (u.gun) leaveGun(u);
+    if (u.state !== "evade" && u.state !== "shelter") { u.state = "evade"; u.route = null; }
+    if (u.state === "evade") {
+      // a roof within reach before it lands?
+      const L = nearestShelter(u.pos.x, u.pos.z, Math.max(8, (esc.t - 0.5) * RUN_SPEED * SPRINT), true);
+      if (L) { u.state = "shelter"; u.inside = false; u.route = [doorPoint(L, false), doorPoint(L, true)]; u.shelterL = L; }
+      else {
+        // pick the walkable direction nearest the escape vector
+        let bx = esc.x, bz = esc.z, best = -Infinity;
+        const n0 = Math.hypot(bx, bz) || 1;
+        for (let k = 0; k < 12; k++) {
+          const a = k / 12 * Math.PI * 2, cx = Math.cos(a), cz = Math.sin(a);
+          const sx = u.pos.x + cx * 14, sz = u.pos.z + cz * 14;
+          if (CBZ.micro.segmentBlocked && CBZ.micro.segmentBlocked(u.pos.x, 1, u.pos.z, sx, 1, sz)) continue;
+          const s = (cx * esc.x + cz * esc.z) / n0 - CBZ.ordnance.dangerAt(sx, sz, 12) * 2;
+          if (s > best) { best = s; bx = cx; bz = cz; }
+        }
+        return { mx: bx, mz: bz, sprint: true };
+      }
+    }
+  } else if (u.state === "evade" || (u.state === "shelter" && u.think <= 0)) {
+    // the sky is quiet: back to work
+    u.state = "toGun"; u.route = null;
+  }
+  if (u.gun) return { stay: true };
+  if (u.state === "toGun" && (!u.route || u.think <= 0)) {
+    u.think = 2.5 + rnd();
+    const g = nearestFreeGun(u.pos.x, u.pos.z, u);
+    if (g !== u.goalGun) u.route = null;
+    u.goalGun = g;
+    if (g) { g.claim = u; if (!u.route) u.route = routeTo(u.pos, { x: g.x, z: g.z }); }
+    else if (!u.route) {
+      // nothing to crew: stay near a gun that will come back, close to a door
+      const L = nearestShelter(u.pos.x, u.pos.z, 120, true);
+      if (L) u.route = routeTo(u.pos, doorPoint(L, false));
+    }
+  }
+  if (u.state === "toGun" && u.goalGun && Math.hypot(u.goalGun.x - u.pos.x, u.goalGun.z - u.pos.z) < 3.2) {
+    if (manGun(u, u.goalGun)) return { stay: true };
+    u.route = null; u.think = 0;
+  }
+  if (u.state === "shelter" && u.route && u.route.length === 0) {
+    if (!u.inside) { u.inside = true; u.think = 1.5 + rnd(); }
+    return { stay: true };
+  }
+  // follow the route
+  if (u.route && u.route.length) {
+    const w = u.route[0];
+    const dx = w.x - u.pos.x, dz = w.z - u.pos.z, d = Math.hypot(dx, dz);
+    if (d < 1.6) { u.route.shift(); return { mx: 0, mz: 0 }; }
+    return { mx: dx / d, mz: dz / d, sprint: u.state !== "toGun" || d > 30 };
+  }
+  return { mx: 0, mz: 0 };
+}
 function stepRunner(u, dt, mine) {
-  let mx = 0, mz = 0;
+  let mx = 0, mz = 0, sprint = false;
+  if (!u.alive) {
+    u.respawnIn -= dt;
+    if (u === me) el("respawn").innerHTML = "YOU WERE KILLED<small>BACK IN " + Math.max(1, Math.ceil(u.respawnIn)) + "</small>";
+    if (u.respawnIn <= 0) {
+      u.alive = true; u.hp = 100;
+      if (!u.rec.alive) match.revive(u.rec);
+      placeRunner(u, u.slot);
+      if (u === me) { el("respawn").style.display = "none"; setGoal(); }
+    }
+    return;
+  }
   if (mine) {
-    mx = ctl.move.x; mz = ctl.move.y;
-    const s = Math.hypot(mx, mz);
-    if (s > 0.01) {
-      // move relative to where the camera looks — the only third-person
-      // scheme anybody finds natural
-      const c = Math.cos(u.camYaw || 0), sn = Math.sin(u.camYaw || 0);
-      const wx = mx * c + mz * sn, wz = -mx * sn + mz * c;
-      mx = wx; mz = wz;
+    // look: mouse / right-hand drag is radians already
+    u.camYaw = (u.camYaw || 0) + ctl.look.x * 1.3;
+    if (u.gun) {
+      if (ctl.tapped("use") || Math.hypot(ctl.move.x, ctl.move.y) > 0.5) leaveGun(u);
+    } else {
+      const s = Math.hypot(ctl.move.x, ctl.move.y);
+      if (s > 0.01) {
+        // camera-relative: forward is (sin y, cos y), right is (-cos y, sin y)
+        const c = Math.cos(u.camYaw), sn = Math.sin(u.camYaw);
+        mx = ctl.move.y * sn - ctl.move.x * c;
+        mz = ctl.move.y * c + ctl.move.x * sn;
+      }
+      sprint = ctl.held("sprint");
+      const g = nearGun(u);
+      if (g && ctl.tapped("use")) takeGun(u, g);
     }
-    // look.x is already a per-frame delta — do NOT scale by dt
-    u.camYaw = (u.camYaw || 0) + ctl.look.x * 58;
   } else {
-    // ordnance publishes a danger field; a runner walks down the gradient,
-    // and under fire he makes for a REAL door — the town is the shelter
-    let best = 1e9, bx = Math.cos(u.yaw), bz = Math.sin(u.yaw);
-    const here = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 10) : 0;
-    let lid = null;
-    if (here > 0.05) {
-      const L = nearestDoor(u.pos.x, u.pos.z, 80);
-      if (L) {
-        const b = L.building;
-        // the point just INSIDE the doorway — through the real gap in the
-        // real collider, which resolveCircle politely allows
-        lid = { x: b.door.x - b.door.nx * 3.2, z: b.door.z - b.door.nz * 3.2 };
-      }
-    }
-    for (let a = 0; a < 8; a++) {
-      const th = (a / 8) * Math.PI * 2;
-      const cx = Math.cos(th), cz = Math.sin(th);
-      const sx = u.pos.x + cx * 16, sz = u.pos.z + cz * 16;
-      let cost = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 10) : 0;
-      cost += Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
-      if (lid) {
-        const dx = lid.x - u.pos.x, dz = lid.z - u.pos.z, n2 = Math.hypot(dx, dz) || 1;
-        cost -= (cx * dx / n2 + cz * dz / n2) * 0.55;
-      }
-      if (cost < best) { best = cost; bx = cx; bz = cz; }
-    }
-    mx = bx; mz = bz;
-    // near the door and the sky is quiet again: drift back out
-    if (lid && Math.hypot(lid.x - u.pos.x, lid.z - u.pos.z) < 1.4 && here < 0.04) { mx = -bx; mz = -bz; }
+    const r = stepRunnerAI(u, dt);
+    if (r.stay) { mx = 0; mz = 0; } else { mx = r.mx || 0; mz = r.mz || 0; sprint = !!r.sprint; }
+  }
+  if (u.gun) {
+    // crewing: on the seat, facing the mount
+    const g = u.gun;
+    u.pos.set(g.x + Math.sin(g.model.yaw.rotation.y) * -0.9, groundAt(g.x, g.z), g.z + Math.cos(g.model.yaw.rotation.y) * -0.9);
+    u.yaw = g.model.yaw.rotation.y;
+    mx = mz = 0;
   }
   const n = Math.hypot(mx, mz);
-  const spd = RUN_SPEED * ((mine && ctl.held("sprint")) ? 1.7 : 1);
+  const spd = RUN_SPEED * (sprint ? SPRINT : 1);
+  const ox = u.pos.x, oz = u.pos.z;
   if (n > 0.01) {
     u.pos.x += (mx / n) * spd * dt;
     u.pos.z += (mz / n) * spd * dt;
-    u.yaw = Math.atan2(mx, mz);
-    // the engine's own slide resolver: the city is cover, not scenery
+    u.yaw += wrapPi(Math.atan2(mx, mz) - u.yaw) * Math.min(1, dt * 10);
     if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+    // stuck on a corner: drop the route and think again
+    if (!mine && Math.hypot(u.pos.x - ox, u.pos.z - oz) < spd * dt * 0.25) {
+      u.stuck += dt;
+      if (u.stuck > 1.2) { u.stuck = 0; u.route = null; u.think = 0; u.pos.x += (rnd() - 0.5) * 1.5; u.pos.z += (rnd() - 0.5) * 1.5; }
+    } else u.stuck = 0;
   }
+  if (dt > 0) u.vel.set((u.pos.x - ox) / dt, 0, (u.pos.z - oz) / dt);
   u.pos.y = groundAt(u.pos.x, u.pos.z);
   if (u.trail && n > 0.01) u.trail.push(u.pos);
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
+    // animChar(rig, SPEED, DT): the old call passed (rig, dt, {speed}) and
+    // every runner in the game slid across the city in a standing pose
     if (CBZ.animChar && u.group.userData.charRig) {
-      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? spd : 0 }); } catch (e) {}
+      try { CBZ.animChar(u.group.userData.charRig, n > 0.01 ? spd : 0, dt); } catch (e) {}
     }
   }
 }
+// a gun you can get on: free, or crewed by an AI on your own side (he gives
+// you the seat and goes to find another)
+function nearGun(u) {
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0 || Math.hypot(g.x - u.pos.x, g.z - u.pos.z) >= 4.5) continue;
+    if (!g.crew || (g.crew !== u && !g.crew.human && g.crew.team === u.team)) return g;
+  }
+  return null;
+}
+function takeGun(u, g) {
+  if (g.crew && g.crew !== u) { const ai = g.crew; leaveGun(ai); ai.route = null; ai.think = 0; ai.goalGun = null; ai.pos.x += 2; }
+  return manGun(u, g);
+}
 
+// ============================================================ THE FRAME
+let hudT = 0;
+CBZ.micro.onFrame(function (rawDt) {
+  const dt = Math.min(rawDt || 0, 0.05);
+  if (scene3 && scene3.update) { try { scene3.update(dt); } catch (e) {} }
+  if (!started) return;
+  match.step(dt);
+  if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
+  if (swapT > 0 && (swapT -= dt) <= 0) el("swap").classList.remove("on");
+  if (match.phase === "over") return;
+
+  ctl.step(dt);
+
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u.role === "bomber") {
+      if (u.downing > 0) { stepDowning(u, dt); continue; }
+      if (!u.alive) {
+        if (u === me) el("respawn").innerHTML = "SHOT DOWN<small>BACK IN THE AIR IN " + Math.max(1, Math.ceil(u.respawnIn)) + "</small>";
+        if ((u.respawnIn -= dt) <= 0) reflight(u);
+        continue;
+      }
+      stepBomber(u, dt, u === me);
+    } else {
+      stepRunner(u, dt, u === me);
+    }
+  }
+  stepGuns(dt);
+  stepShells(dt);
+  stepCivilians(dt);
+  CBZ.ordnance.step(dt);
+
+  // the human on the ground: danger, the gun prompt, the escape arrow
+  if (me && me.alive && me.role === "runner") {
+    const risk = CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 12);
+    CBZ.studio.alarm(risk);
+    hud.danger(risk);
+    const ng = me.gun ? null : nearGun(me);
+    setPrompt(me.gun ? "LEAVE THE GUN" : ng ? "MAN THE GUN" : null);
+    setButton("use", !!(me.gun || ng), !me.gun, me.gun ? "OFF" : "MAN");
+    setButton("fire", !!me.gun, !!(me.gun && me.gun.target), "FIRE");
+    setButton("sprint", !me.gun, false, "RUN");
+    drawThreat();
+  } else {
+    setPrompt(null);
+    el("threat").style.display = "none";
+    hud.danger(0);
+  }
+  if (me && me.alive && eng) {
+    if (me.role === "bomber" && me.af) eng.set(me.af.throttle, me.af.speed, 0);
+    else eng.set(0, 0, 400);
+  }
+
+  aimAndFollow(dt);
+  drawGunHud();
+  drawNav();
+  if ((hudT -= dt) <= 0) {
+    hudT = 0.25;
+    hud.clock(match.clock());
+    const rows = match.standings();
+    const sc = {};
+    for (let i = 0; i < rows.length; i++) sc[rows[i].name] = Math.round(rows[i].total);
+    hud.score(sc);
+    setRole(); setGoal();
+  }
+  if (me) hud.health(Math.max(0, me.hp) / 100);
+  if (scope && me && me.role === "bomber") scope.draw(dt);
+});
+
+function reflight(u) {
+  u.alive = true; u.hp = 100; u.respawnIn = 0; u.downing = 0;
+  if (!u.rec.alive) match.revive(u.rec);
+  if (u.group) u.group.visible = true;
+  airStart(u, rnd() * Math.PI * 2, 1700);
+  u.mark = null; u.rolling = false;
+  if (u.trail) u.trail.cut();
+  if (u === me) { el("respawn").style.display = "none"; setRole(); }
+}
+
+// DOM writes only on change: a prompt rebuilt sixty times a second eats taps
+let _promptNow;
+function setPrompt(label) {
+  if (label === _promptNow) return;
+  _promptNow = label;
+  if (!label) { hud.prompt(null); return; }
+  hud.prompt(label, function () {
+    if (!me || !me.alive) return;
+    if (me.gun) leaveGun(me); else { const g = nearGun(me); if (g) takeGun(me, g); }
+  }, "E");
+}
+const _btnNow = {};
+function setButton(n, vis, lit, label) {
+  const k = vis + "|" + lit + "|" + label;
+  if (_btnNow[n] === k) return;
+  _btnNow[n] = k;
+  ctlWalk.button(n, vis, lit, label);
+}
+// ---- the bomber's arrow: the most useful thing to go and bomb, and which way
+function drawNav() {
+  const box = el("nav");
+  if (me && me.alive && me.role === "runner" && !me.gun) {
+    // on foot: the arrow points at the gun you should be running to
+    const g = nearestGunFor(me);
+    if (!g) { box.style.display = "none"; return; }
+    const rel = wrapPi(Math.atan2(g.x - me.pos.x, g.z - me.pos.z) - (me.camYaw || 0));   // + is LEFT
+    box.style.display = "block";
+    box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
+    box.querySelector("span").textContent = (g.crew ? "GUN" : "FREE GUN") + "  " + Math.round(Math.hypot(g.x - me.pos.x, g.z - me.pos.z)) + " M";
+    return;
+  }
+  if (!me || !me.alive || me.role !== "bomber" || !me.af || me.rolling) { box.style.display = "none"; return; }
+  let best = null, bs = Infinity, label = "";
+  for (let i = 0; i < guns.length; i++) {
+    const g = guns[i];
+    if (g.down > 0) continue;
+    const d = Math.hypot(g.x - me.af.pos.x, g.z - me.af.pos.z) * (g.crew ? 0.6 : 1);
+    if (d < bs) { bs = d; best = g; label = g.crew ? "FLAK FIRING" : "FLAK GUN"; }
+  }
+  if (!best) {
+    for (let i = 0; i < units.length; i++) {
+      const r = units[i];
+      if (!r.alive || r.role !== "runner" || r.team === me.team) continue;
+      const d = Math.hypot(r.pos.x - me.af.pos.x, r.pos.z - me.af.pos.z);
+      if (d < bs) { bs = d; best = r.pos; label = "RUNNER"; }
+    }
+  }
+  if (!best) { box.style.display = "none"; return; }
+  const bx = best.x, bz = best.z;
+  const h = me.af.heading();
+  const rel = wrapPi(headingToward(me.af.pos.x, me.af.pos.z, bx, bz) - h);   // + is LEFT
+  box.style.display = "block";
+  box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
+  const d = Math.hypot(bx - me.af.pos.x, bz - me.af.pos.z);
+  box.querySelector("span").textContent = label + "  " + (d > 950 ? (d / 1000).toFixed(1) + " KM" : Math.round(d) + " M");
+}
+// ---- the escape arrow: which way OUT of the nearest ring, and how long
+const _proj = new THREE.Vector3();
+function drawThreat() {
+  const box = el("threat");
+  const th = CBZ.ordnance.activeThreats();
+  let best = null, bt = Infinity;
+  for (let i = 0; i < th.length; i++) {
+    const t = th[i];
+    const d = Math.hypot(me.pos.x - t.x, me.pos.z - t.z);
+    if (d > t.radius * 1.2 + 20 || t.t > Math.max(12, t.warn)) continue;
+    if (t.t < bt) { bt = t.t; best = t; }
+  }
+  if (!best) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  // direction away from the impact, relative to the camera's facing
+  const away = Math.atan2(me.pos.x - best.x, me.pos.z - best.z);
+  const rel = wrapPi(away - (me.camYaw || 0));
+  box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
+  const inside = Math.hypot(me.pos.x - best.x, me.pos.z - best.z) < best.radius * 0.8;
+  box.querySelector("span").textContent = (inside ? "RUN  " : "INCOMING  ") + Math.max(0, best.t).toFixed(1) + " S";
+}
+// the gun view's instruments: heat, range and a ring on the target
+function drawGunHud() {
+  const gh = el("gunhud"), ret = el("reticle");
+  const g = me && me.alive && me.gun;
+  if (!g) { gh.style.display = "none"; ret.style.display = "none"; return; }
+  gh.style.display = "block";
+  gh.classList.toggle("hot", g.locked > 0);
+  gh.querySelector("s").style.width = (g.heat * 100).toFixed(0) + "%";
+  const t = g.target;
+  el("gunline").textContent = g.locked > 0 ? "BARRELS OVERHEATED" : t
+    ? "BOMBER  " + Math.round(Math.hypot(t.af.pos.x - g.x, t.af.pos.y, t.af.pos.z - g.z)) + " M    HOLD FIRE"
+    : "NO BOMBER IN RANGE";
+  if (t) {
+    _proj.copy(t.af.pos).project(cam);
+    if (_proj.z < 1) {
+      ret.style.display = "block";
+      ret.style.left = ((_proj.x + 1) / 2 * innerWidth).toFixed(0) + "px";
+      ret.style.top = ((1 - _proj.y) / 2 * innerHeight).toFixed(0) + "px";
+      ret.classList.toggle("far", Math.hypot(t.af.pos.x - g.x, t.af.pos.y, t.af.pos.z - g.z) > FLAK_RANGE * 0.7);
+    } else ret.style.display = "none";
+  } else ret.style.display = "none";
+}
+
+const _gc = new THREE.Vector3(), _gl = new THREE.Vector3();
 function aimAndFollow(dt) {
-  // spectate the nearest living friend rather than a black screen
   let look = me;
-  if (!look || !look.alive) {
+  if (!look || (!look.alive && !(look.downing > 0) && !(look.role === "runner"))) {
     for (let i = 0; i < units.length; i++) if (units[i].alive && (!me || units[i].team === me.team)) { look = units[i]; break; }
   }
   if (!look) return;
-  const air = look.role === "bomber";
-  if (air && look.af) {
+  if (look.role === "bomber" && look.af) {
     chase.followAir(look.af, dt, { back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
-    if (look === me && !look.rolling) sight.aim(look.af.pos, look.af.vel); else sight.hide();
-  } else {
-    chase.follow(look.pos, look.camYaw || look.yaw, dt, { air: false });
-    sight.hide();
+    if (look === me && !look.rolling && look.alive) sight.aim(look.af.pos, look.af.vel); else sight.hide();
+    return;
   }
+  sight.hide();
+  if (look === me && me.alive && me.gun) {
+    // THE GUN VIEW: over the layer's shoulder, looking where the barrels look
+    const g = me.gun, t = g.target;
+    const yaw = g.model.yaw.rotation.y;
+    _gc.set(g.x - Math.sin(yaw) * 7, 4.2, g.z - Math.cos(yaw) * 7);
+    if (t) _gl.copy(t.af.pos); else _gl.set(g.x + Math.sin(yaw) * 100, 60, g.z + Math.cos(yaw) * 100);
+    const k = 1 - Math.pow(0.02, dt);
+    cam.position.lerp(_gc, k);
+    cam.lookAt(_gl);
+    me.camYaw = yaw;
+    chase.reset();
+    return;
+  }
+  if (look === me && !me.alive) {
+    // dead on the pavement: the camera lifts off the body
+    chase.follow(look.pos, look.camYaw || look.yaw, dt, { back: 14, up: 10 });
+    return;
+  }
+  chase.follow(look.pos, look.camYaw != null ? look.camYaw : look.yaw, dt, { air: false });
 }
 
 // ============================================================ START / END
 function finish(result, m) {
   el("over").style.display = "grid";
-  el("overTitle").textContent = (result && result.winner) ? (result.winner.name + " TAKE IT") : "DRAW";
-  const rows = m.standings();
-  let h = "";
-  for (let i = 0; i < rows.length; i++) h += "<tr><td>" + rows[i].name + "</td><td>" + Math.round(rows[i].total) + "</td></tr>";
+  const humanTeam = TEAMS[0];
+  const won = result && result.winner && result.winner.name === humanTeam.name;
+  el("overTitle").textContent = (result && result.winner) ? (result.winner.name + (won ? " WIN. THAT WAS YOU" : " WIN")) : "DRAW";
+  el("overSub").textContent = "YOU FLEW FOR TALON, THEN RAN FOR TALON";
+  const rowsDef = [
+    ["Runners killed", "runnerKill"], ["Flak guns silenced", "gunKill"], ["Bombers shot down", "bomberDown"],
+    ["Buildings burned out", "building"], ["Civilians killed", "civilian"], ["Points from crewing guns", "manned"],
+  ];
+  let h = "<tr><th></th>" + TEAMS.map(function (t) { return "<th style=\"color:" + t.css + "\">" + t.name + "</th>"; }).join("") + "</tr>";
+  for (let i = 0; i < rowsDef.length; i++) {
+    h += "<tr><td>" + rowsDef[i][0] + "</td>" + TEAMS.map(function (t) { const v = statsFor(t.id)[rowsDef[i][1]] || 0; return "<td>" + Math.round(v) + "</td>"; }).join("") + "</tr>";
+  }
+  h += "<tr class=\"tot\"><td>Score</td>" + TEAMS.map(function (t) { return "<td>" + Math.round(m.total(t.id)) + "</td>"; }).join("") + "</tr>";
   el("overTable").innerHTML = h;
   if (scope) el("radar").style.display = "none";
+  el("threat").style.display = "none"; el("nav").style.display = "none"; el("gunhud").style.display = "none"; el("reticle").style.display = "none";
+  el("respawn").style.display = "none"; el("goal").textContent = "";
 }
 el("again").addEventListener("click", function () { location.reload(); });
+// paused, the way back to the hub is one tap
+setInterval(function () {
+  const on = started && !!(CBZ.micro && CBZ.micro.paused) && match.phase !== "over";
+  el("pauseMenu").style.display = on ? "block" : "none";
+  if (on && document.exitPointerLock && document.pointerLockElement) document.exitPointerLock();
+}, 250);
 
+for (let i = 0; i < guns.length; i++) refreshGunLook(guns[i]);
 st("READY");
 el("go").addEventListener("click", function () {
   el("gate").style.display = "none";
@@ -880,24 +1688,19 @@ el("go").addEventListener("click", function () {
   ctl.lock();
 });
 
-// a probe surface, so the reuse claim can be checked rather than asserted
 window.__bomb = {
+  match: function () { return match; },
+  units: function () { return units; },
+  guns: function () { return guns; },
+  me: function () { return me; },
   audit: function () {
-    const towers = ((town && town.lots) || []).filter(function (L) { return L.skylineStoreys; }).length;
     return {
-      tags: document.querySelectorAll("script[src]").length,
-      studio: CBZ.studio.audit(),
-      caps: CBZ.modeHas ? {
-        traverse: CBZ.modeHas("traverse"), blast: CBZ.modeHas("blast"),
-        blastActors: CBZ.modeHas("blastActors"), breach: CBZ.modeHas("breach"),
-      } : null,
-      route: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().routes[CBZ.game.mode] : null,
-      colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
-      world: { town: !!town, lots: ((town && town.lots) || []).length, towers: towers,
-               base: !!(base && base.regions && base.regions.length), baseRoads: (base && base.roads.length) || 0,
-               airport: !!(port && port.regions && port.regions.length) },
+      world: { town: !!town, lots: LOTS.length, burned: LOTS.filter(function (L) { return L._down; }).length,
+               nav: { xs: NAV.xs.length, zs: NAV.zs.length }, scene: !!scene3 },
+      guns: guns.map(function (g) { return { crew: g.crew ? g.crew.id : null, down: g.down > 0, hp: Math.round(g.hp), heat: +g.heat.toFixed(2) }; }),
       civs: { cast: civs.length, alive: civs.filter(function (c) { return !c.dead; }).length },
-      units: units.length, alive: units.filter(function (u) { return u.alive; }).length,
+      units: units.map(function (u) { return { id: u.id, role: u.role, alive: u.alive, hp: Math.round(u.hp), state: u.state || u.runPhase || null }; }),
+      stats: stats, half: match.half, phase: match.phase, clock: match.clock(),
       nuke: { kills: nuke.kills, armed: nuke.armed, spent: nuke.spent },
     };
   },

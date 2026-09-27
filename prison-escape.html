@@ -12,17 +12,31 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=frontdoor1">
+<link rel="stylesheet" href="css/shark_title.css?v=launch1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
+<link rel="stylesheet" href="css/title_hub.css?v=hub1">
 <meta name="description" content="Inmate or cop in a working prison: cells, yard, corridors, contraband, guards with tasers. Escape, or keep them in.">
 <script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:"escape"});</script>
 </head>
 <body class="campaign-build">
+<script>
+/* SHARK SIM FIRST PIXEL. The static title markup below is Cell Block Z's card,
+   and it painted for the whole script parse (15-20 s on a loaded machine)
+   before state.js could apply mode-sharksim: CrazyGames rejected the build for
+   "a quick shot of another game at the start". A shark page marks <html>
+   here, before any of that markup paints; css/shark_title.css hides the card
+   and puts up the ocean boot screen, and modes/shark_title.js takes it down
+   once the live sea is on screen. */
+(function(){try{var m=(window.CBZ&&CBZ.START_MODE)||new URLSearchParams(location.search).get("mode");
+if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
+var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
+document.body.appendChild(b);}}catch(e){}})();
+</script>
 <div id="game"></div>
 
 
@@ -107,10 +121,12 @@
 
 <div id="title" class="screen">
   <div class="card-box">
+    <div class="hub-hero">
     
     <div class="mode-escape-only">
+      <div class="hub-kicker">Prison Escape</div>
       <div class="logo">CELL BLOCK <span class="z">Z</span></div>
-      <div class="sub">Prison Escape</div>
+      <div class="sub">Lay low, make friends, get out.</div>
       <div id="roleSelect" class="role-select" aria-label="Choose role">
         <button class="role-btn active" type="button" data-role="inmate">
           <span>Inmate</span><small>Escape the block</small>
@@ -123,12 +139,12 @@
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys keys-touch">
-          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move · rim to sprint · press to sneak</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch · fire</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump · vault</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move, rim to sprint, press to sneak</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch or fire</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump, vault</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Eye</span></span><span class="lab">First-person</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact · the pill names the action</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact, the pill names the action</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
         </div>
@@ -138,7 +154,7 @@
           <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>
           <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire · reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire, reload</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
@@ -148,14 +164,15 @@
 
     
     <div class="mode-survival-only">
+      <div class="hub-kicker">100 players, one island</div>
       <div class="logo">DISASTER <span class="z">SURVIVAL</span></div>
-      <div class="sub">Natural Disaster Survival</div>
+      <div class="sub">Tsunamis, volcanoes, quakes. Last one alive wins.</div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · throw</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, throw</span></div>
           <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab / set down</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">Climb high</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
@@ -165,45 +182,47 @@
 
     
     <div class="mode-sharksim-only">
+      <div class="hub-kicker">You are the shark</div>
       <div class="logo">SHARK <span class="z">SIM</span></div>
-      <div class="sub">You Are The Shark</div>
+      <div class="sub">Eat. Grow. Become the megalodon.</div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Swim</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Lunge</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise · dive</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic — point it at food</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise, dive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic. Point it at food</span></div>
         </div>
       </details>
     </div>
 
     
     <div class="mode-gungame-only">
+      <div class="hub-kicker">Weapon-ladder deathmatch</div>
       <div class="logo">GUN <span class="z">GAME</span></div>
-      <div class="sub">Weapon-Ladder Deathmatch</div>
-      <div class="gg-map-label">CHOOSE YOUR MAP</div>
+      <div class="sub">Every kill climbs the ladder. The last rung is bare fists.</div>
+      <div class="gg-map-label">Choose your map</div>
       <div id="gungameMapSelect" class="gg-map-select" aria-label="Choose map"></div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire · punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire, punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
         </div>
       </details>
-      <div class="smallnote" id="gungameMapNote">Every kill climbs the ladder. The final rung is bare fists.</div>
     </div>
 
     
     <div class="mode-city-only">
+      <div class="hub-kicker">Open-world crime</div>
       <div class="logo">GANG <span class="z">LIFE</span></div>
-      <div class="sub">Open-world turf war</div>
+      <div class="sub">Make money any way you can. Cops escalate to five stars.</div>
       
-      <div class="origin-label">CHOOSE YOUR STORY</div>
+      <div class="origin-label">Choose your story</div>
       <div id="originSelect" class="origin-select" aria-label="Choose your story">
         <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Hitman</b></button>
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b></button>
@@ -220,23 +239,22 @@
       </div>
       
       <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
-        <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
+        <div class="origin-label origin-sublabel">Choose your aircraft</div>
         <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
       </div>
-      
       <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
-        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div class="origin-label origin-sublabel">Choose your boat</div>
         <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
       </div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
-          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · fire</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">YES · take the offer</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">NO · refuse</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">PUNCH · start a fight</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map · waypoint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move, drive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, fire</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Yes, take the offer</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">No, refuse</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">Punch, start a fight</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map, waypoint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
           <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
@@ -245,30 +263,29 @@
       </details>
     </div>
 
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
+    <div class="smallnote mode-escape-only" id="bestStat"></div>
+    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+    </div>
+
     
     <div class="title-actions">
     <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
       <div class="quality-preset-label">Graphics</div>
       <div class="quality-select">
-        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>HD · short horizon</small></button>
-        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced world</small></button>
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>Short horizon</small></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced</small></button>
         <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span><small>Full distance</small></button>
       </div>
     </div>
-
     <button class="btn" id="playBtn">Play</button>
     <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
       <span>New Life</span><small>Clear every saved city character</small>
     </button>
     </div>
+
     
     <div id="modeSelect" class="mode-select" hidden><button class="mode-btn active" type="button" data-mode="escape">Prison Escape</button></div>
-
-    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
-    <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars. Get cuffed and it's the jail game.</div>
-    <div class="smallnote mode-escape-only" id="bestStat"></div>
-    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
-    <div class="smallnote mode-sharksim-only">Point your mouth at food — the bite is automatic. Dodge the pod until you are the MEGALODON.</div>
   </div>
 </div>
 
@@ -278,6 +295,8 @@
     <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
     
     <button class="btn" id="resumeBtn">Resume</button>
+    
+    <button class="btn btn-quiet" id="pauseMenuBtn" type="button">Main Menu</button>
     <div class="smallnote">Esc resumes</div>
   </div>
 </div>
@@ -294,6 +313,7 @@
       <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
     </div>
     <button class="btn" id="againBtn">Escape Again</button>
+    <button class="btn btn-quiet" id="winMenuBtn" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -433,7 +453,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 
-  <script src="src/entities/character.js?v=races1"></script>
+  <script src="src/entities/character.js?v=sharkscene1"></script>
   
   <script src="src/systems/bodymass.js?v=mass1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
@@ -514,6 +534,7 @@
 
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=duty1"></script>
+<script src="src/world/prisonlook.js?v=look1"></script>
 
 <script src="src/systems/prisonrest.js?v=rest1"></script>
 
@@ -526,7 +547,7 @@
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=sharkmode1"></script>
+<script src="src/systems/camera.js?v=sharkscene1"></script>
 <script src="src/systems/physics.js?v=sharkmode1"></script>
 
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
@@ -563,6 +584,7 @@
 
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
+<script src="src/systems/escapeplan.js?v=plan1"></script>
 
 <script src="src/city/itemassets.js?v=allmain1"></script>
 
@@ -591,11 +613,12 @@
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/disaster_arena.js?v=sharkmode1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkmode1"></script>
+<script src="src/entities/survivorbot.js?v=sharkscene1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=sharkmode1"></script>
+<script src="src/modes/shark_sim.js?v=sharkscene1"></script>
 
-<script src="src/modes/shark_title.js?v=frontdoor1"></script>
+<script src="src/modes/shark_title.js?v=launch1"></script>
+<script src="src/systems/title_hub.js?v=hub1"></script>
 
 <script src="src/modes/gungame.js?v=nodash1"></script>
 
@@ -738,7 +761,7 @@
 
 <script src="src/world/wildnature.js?v=allmain1"></script>
 
-<script src="src/city/wildlife_rig.js?v=beasts1"></script>
+<script src="src/city/wildlife_rig.js?v=sharkscene1"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
@@ -750,11 +773,11 @@
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
+<script src="src/city/wildlife/aquatic.js?v=gillcrease1"></script>
 
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=indiv1"></script>
-<script src="src/city/wildlife_tame.js?v=sharkmode1"></script>
+<script src="src/city/wildlife.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_tame.js?v=sharkscene1"></script>
 <script src="src/city/dogs.js?v=nodash1"></script>
 
 
@@ -951,7 +974,7 @@
 
 <script src="src/city/fishing.js?v=allmain1"></script>
 
-<script src="src/city/yachts.js?v=yacht1"></script>
+<script src="src/city/yachts.js?v=sharkscene1"></script>
 <script src="src/city/seacrew.js?v=yacht1"></script>
 <script src="src/city/armor.js?v=nodash1"></script>
 
@@ -1005,13 +1028,13 @@
 
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 
-<script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<script src="src/city/wildlife_shark.js?v=sharkscene1"></script>
 
 <script src="src/city/wildlife_orca.js?v=orca1"></script>
 
 <script src="src/city/marine_predation.js?v=marinepred1"></script>
 
-<script src="src/city/marine_frenzy.js?v=marinefrenzy1"></script>
+<script src="src/city/marine_frenzy.js?v=sharkscene1"></script>
 
 <script src="src/systems/childsafe.js?v=nodash1"></script>
 
@@ -1157,11 +1180,11 @@
 
 
 <script src="src/world/hull_loft.js?v=loft1"></script>
-<script src="src/world/water_hulls.js?v=seawave1"></script>
+<script src="src/world/water_hulls.js?v=sharkscene1"></script>
 <script src="src/world/water_helm.js?v=boats1"></script>
 
 
-<script src="src/world/water_underwater.js?v=uwlook2"></script>
+<script src="src/world/water_underwater.js?v=snow1"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 
 <script src="src/world/water_stability.js?v=capsize1"></script>
@@ -1169,7 +1192,8 @@
 
 <script src="src/world/water_float.js?v=waterv2"></script>
 
-<script src="src/world/sea_craft.js?v=seacraft1"></script>
+<script src="src/world/sea_craft.js?v=sharkscene1"></script>
+<script src="src/world/sea_scene.js?v=sharkscene1"></script>
 <script src="src/world/water_impact.js?v=waterv2"></script>
 
 <script src="src/world/water_survival.js?v=sharkmode1"></script>
