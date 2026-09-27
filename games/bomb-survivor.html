@@ -67,11 +67,6 @@
     letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
   #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
   #gate .st{margin-top:18px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
-  #role{position:fixed;left:50%;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%);
-    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.8;pointer-events:none;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.8)}
-  #goal{position:fixed;left:50%;top:calc(80px + env(safe-area-inset-top,0px));transform:translateX(-50%);
-    z-index:41;font-size:13px;letter-spacing:.08em;color:#ffe2b8;pointer-events:none;white-space:nowrap;
-    text-shadow:0 1px 4px rgba(0,0,0,.9);opacity:.95}
   #streak{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
     z-index:41;font-size:15px;font-weight:800;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none;
     text-shadow:0 2px 6px rgba(0,0,0,.8)}
@@ -92,20 +87,20 @@
     display:none;text-align:center;color:#ff5a45;font-weight:800;letter-spacing:.18em;font-size:14px;text-shadow:0 2px 6px rgba(0,0,0,.9)}
   #threat i{display:block;width:0;height:0;margin:0 auto 6px;border-left:16px solid transparent;border-right:16px solid transparent;
     border-bottom:28px solid #ff5a45;filter:drop-shadow(0 2px 4px rgba(0,0,0,.8))}
-  #nav{position:fixed;left:50%;top:calc(104px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:41;pointer-events:none;
+  #nav{position:fixed;left:50%;top:calc(40px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:41;pointer-events:none;
     display:none;text-align:center;font-size:11px;letter-spacing:.2em;color:#ffd9a0;text-shadow:0 1px 3px rgba(0,0,0,.9)}
   #nav i{display:block;width:0;height:0;margin:0 auto 4px;border-left:9px solid transparent;border-right:9px solid transparent;
     border-bottom:15px solid #ffc46a;filter:drop-shadow(0 1px 3px rgba(0,0,0,.8))}
   #gunhud{position:fixed;left:50%;bottom:calc(104px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
     z-index:42;pointer-events:none;display:none;text-align:center;font-size:12px;letter-spacing:.2em;text-shadow:0 1px 3px rgba(0,0,0,.9)}
-  #gunhud .bar{width:220px;height:8px;border-radius:4px;background:rgba(255,255,255,.18);margin:6px auto 0;overflow:hidden}
+  #gunhud .bar{width:160px;height:5px;border-radius:4px;background:rgba(255,255,255,.18);margin:6px auto 0;overflow:hidden}
   #gunhud .bar s{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd27a,#ff5a2a);text-decoration:none}
   #gunhud.hot .bar s{background:#ff2a2a}
   #reticle{position:fixed;z-index:42;pointer-events:none;display:none;width:44px;height:44px;margin:-22px 0 0 -22px;
     border:2px solid rgba(255,210,122,.95);border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,.7)}
   #reticle.far{border-color:rgba(255,255,255,.45);border-style:dashed}
   #respawn{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);z-index:46;pointer-events:none;display:none;
-    text-align:center;font-size:clamp(22px,6vw,38px);font-weight:800;letter-spacing:.08em;text-shadow:0 2px 8px rgba(0,0,0,.9)}
+    text-align:center;font-size:clamp(28px,7vw,44px);font-weight:300;letter-spacing:.08em;opacity:.8;text-shadow:0 2px 8px rgba(0,0,0,.9)}
   #respawn small{display:block;font-size:12px;letter-spacing:.3em;opacity:.7;margin-top:8px;font-weight:600}
   #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.93);padding:26px;overflow:auto}
   #over .in{text-align:center;max-width:640px;width:100%}
@@ -141,14 +136,12 @@
 </div></div>
 <a class="menu" id="pauseMenu" href="../index.html">MAIN MENU</a>
 
-<div id="role"></div>
-<div id="goal"></div>
 <div id="swap"></div>
 <div id="streak"></div>
 <div id="hit"></div>
-<div id="threat"><i></i><span></span></div>
-<div id="nav"><i></i><span></span></div>
-<div id="gunhud"><div id="gunline"></div><div class="bar"><s></s></div></div>
+<div id="threat"><i></i></div>
+<div id="nav"><i></i></div>
+<div id="gunhud"><div class="bar"><s></s></div></div>
 <div id="reticle"></div>
 <div id="respawn"></div>
 <canvas id="radar" width="264" height="264"></canvas>
@@ -407,7 +400,9 @@ function nearestShelter(x, z, reach, avoid) {
 }
 
 // ============================================================ INSTRUMENTS
-hud   = CBZ.studio.hud({ health: true, clock: true, score: true, feed: true, note: false });
+// HUD PURGE: no clock, no score table, no kill feed. The half ends with the
+// swap card, the score is the end card, and a kill is a plane on fire.
+hud   = CBZ.studio.hud({ health: true, clock: false, score: false, feed: false, note: false });
 chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
 sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
 ctlFly  = CBZ.studio.controls("fly",  { buttons: { fire: "DROP", nuke: "NUKE" } });
@@ -559,7 +554,6 @@ function hurtGun(g, dmg, info) {
   const by = info && info.by ? unitById(info.by) : null;
   if (by) {
     award(by.team, PTS.gunKill, "gunKill");
-    hud.feed("FLAK SILENCED  +" + PTS.gunKill);
     if (by === me) streak("GUN DOWN");
   }
   if (g.crew) { const c = g.crew; leaveGun(c); hurt(c, 999, { by: info && info.by, cause: "gun" }); }
@@ -653,7 +647,7 @@ function stepGuns(dt) {
     const g = guns[i];
     if (g.down > 0) {
       g.down -= dt;
-      if (g.down <= 0) { repairGun(g); if (me && me.role === "runner") hud.feed("A FLAK GUN IS BACK UP"); }
+      if (g.down <= 0) repairGun(g);
       continue;
     }
     g.cd -= dt; g.rest -= dt;
@@ -794,7 +788,7 @@ function hurtCiv(c, dmg, info) {
   const killer = info && info.by ? unitById(info.by) : null;
   if (killer) {
     award(killer.team, PTS.civilian, "civilian");
-    if (killer === me) { hud.feed("CIVILIAN KILLED  " + PTS.civilian); if (CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 }); }
+    if (killer === me) { if (CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 }); }
   }
 }
 
@@ -913,7 +907,6 @@ function hurt(u, dmg, info) {
   if (u.role === "runner") {
     if (u.gun) leaveGun(u);
     if (enemy) award(enemy.id, PTS.runnerKill, "runnerKill");
-    hud.feed(u.rec.name + " KILLED  +" + PTS.runnerKill + " " + (enemy ? enemy.name : ""));
     if (killer === me) earnKill();
     if (u.trail) u.trail.cut();
     // down, not despawned: a body in the street is what a kill looks like
@@ -923,7 +916,6 @@ function hurt(u, dmg, info) {
   } else {
     // SHOT DOWN: the aeroplane does not blink out, it goes in burning
     if (enemy) award(enemy.id, PTS.bomberDown, "bomberDown");
-    hud.feed(u.rec.name + " SHOT DOWN  +" + PTS.bomberDown + " " + (enemy ? enemy.name : ""));
     if (killer === me) streak("BOMBER DOWN");
     u.downing = 9; u.crashRoll = (rnd() < 0.5 ? -1 : 1);
     if (u.af) { const af = u.af; u.smoke = fx.smokeTrail(function () { return u.downing > 0 ? af.pos : null; }, { life: 8 }); }
@@ -974,7 +966,6 @@ function burnOut(L, ownerId) {
   const owner = ownerId ? unitById(ownerId) : null;
   if (owner) {
     award(owner.team, PTS.building, "building");
-    if (owner === me) hud.feed(((L.building && L.building.name) || "BUILDING").toUpperCase() + " BURNING  +" + PTS.building);
   }
   // a burning building is no shelter: whoever was inside is hurt and runs
   for (let i = 0; i < units.length; i++) {
@@ -1024,42 +1015,19 @@ for (let t = 0; t < TEAMS.length; t++) {
 
 let swapT = 0;
 function showSwap(half) {
+  // two words and one line: the gate already explained the game
   const n = el("swap");
-  const rows = match.standings();
-  let line = "";
-  for (let i = 0; i < rows.length; i++) line += (i ? "    " : "") + rows[i].name + " " + Math.round(rows[i].total);
-  const how = me.role === "bomber"
-    ? "Silence the flak guns, then hunt their crews. Low is accurate, high is safe. Leave the civilians alone."
-    : "Get to a flak gun and man it. Shoot the bombers down. When a red ring closes on you, run or get under a roof.";
   n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
-    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "    " + line : "") + "</small>" +
-    "<span class=\"how\">" + how + "</span>";
+    "<span class=\"how\">" + (me.role === "bomber" ? "Silence the guns." : "Man a gun. Shoot them down.") + "</span>";
   n.classList.add("on");
-  swapT = 4.2;
+  swapT = 2.8;
 }
+// No ALT / STICK READY / objective line. Reload state lives on the DROP
+// button (lit when a stick is ready); the goal is what the flak is doing.
 function setRole() {
-  if (!me) { el("role").textContent = ""; return; }
-  if (me.role !== "bomber") { el("role").textContent = me.gun ? "ON THE GUN" : "YOU RUN"; return; }
-  if (me.rolling) { el("role").textContent = "FULL POWER  ROTATE"; return; }
-  const alt = me.af ? Math.round(me.af.pos.y) : 0;
-  el("role").textContent = "ALT " + alt + " M    " + (me.cool > 0 ? "RELOADING" : "STICK READY");
+  if (me && me.role === "bomber" && ctlFly) ctlFly.button("fire", true, !(me.cool > 0));
 }
-let goalT = 0;
-function setGoal() {
-  const g = el("goal");
-  if (!me || !me.alive || !started) { g.textContent = ""; return; }
-  if (me.role === "bomber") {
-    let manned = 0, up = 0;
-    for (let i = 0; i < guns.length; i++) { if (guns[i].down <= 0) { up++; if (guns[i].crew) manned++; } }
-    g.textContent = up ? (manned + " OF " + up + " FLAK GUNS FIRING") : "ALL FLAK SILENCED. HUNT THE CREWS";
-    return;
-  }
-  if (me.gun) { g.textContent = me.gun.target ? "HOLD FIRE ON THE BOMBER" : "WAITING FOR A BOMBER IN RANGE"; return; }
-  const gg = nearestGunFor(me);
-  if (!gg) { g.textContent = "EVERY GUN IS DOWN. STAY ALIVE, THEY COME BACK"; return; }
-  const d = Math.round(Math.hypot(gg.x - me.pos.x, gg.z - me.pos.z));
-  g.textContent = gg.crew ? "GET TO A GUN. A TEAMMATE WILL GIVE YOU THE SEAT" : "GET TO A FREE FLAK GUN AND MAN IT";
-}
+function setGoal() {}
 
 // ============================================================ BOMBING
 function dropStick(u) {
@@ -1089,13 +1057,11 @@ function fireNuke(u) {
       }
     },
   });
-  streak("ROUND AWAY");
 }
 function earnKill() {
   if (nuke.spent) return;
   nuke.kills++;
-  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED  PRESS N"); ctlFly.button("nuke", true, true); }
-  else streak(nuke.kills + " OF " + NUKE_ARM + " TO THE BIG ONE");
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak(CBZ.studio.touchDevice ? "NUKE" : "N  NUKE"); ctlFly.button("nuke", true, true); }
 }
 let streakT = 0;
 function streak(t) { el("streak").textContent = t; el("streak").classList.add("on"); streakT = 2.6; }
@@ -1358,7 +1324,7 @@ function stepRunner(u, dt, mine) {
   let mx = 0, mz = 0, sprint = false;
   if (!u.alive) {
     u.respawnIn -= dt;
-    if (u === me) el("respawn").innerHTML = "YOU WERE KILLED<small>BACK IN " + Math.max(1, Math.ceil(u.respawnIn)) + "</small>";
+    if (u === me) el("respawn").textContent = String(Math.max(1, Math.ceil(u.respawnIn)));
     if (u.respawnIn <= 0) {
       u.alive = true; u.hp = 100;
       if (!u.rec.alive) match.revive(u.rec);
@@ -1455,7 +1421,7 @@ CBZ.micro.onFrame(function (rawDt) {
     if (u.role === "bomber") {
       if (u.downing > 0) { stepDowning(u, dt); continue; }
       if (!u.alive) {
-        if (u === me) el("respawn").innerHTML = "SHOT DOWN<small>BACK IN THE AIR IN " + Math.max(1, Math.ceil(u.respawnIn)) + "</small>";
+        if (u === me) el("respawn").textContent = String(Math.max(1, Math.ceil(u.respawnIn)));
         if ((u.respawnIn -= dt) <= 0) reflight(u);
         continue;
       }
@@ -1493,15 +1459,7 @@ CBZ.micro.onFrame(function (rawDt) {
   aimAndFollow(dt);
   drawGunHud();
   drawNav();
-  if ((hudT -= dt) <= 0) {
-    hudT = 0.25;
-    hud.clock(match.clock());
-    const rows = match.standings();
-    const sc = {};
-    for (let i = 0; i < rows.length; i++) sc[rows[i].name] = Math.round(rows[i].total);
-    hud.score(sc);
-    setRole(); setGoal();
-  }
+  if ((hudT -= dt) <= 0) { hudT = 0.25; setRole(); }
   if (me) hud.health(Math.max(0, me.hp) / 100);
   if (scope && me && me.role === "bomber") scope.draw(dt);
 });
@@ -1534,43 +1492,16 @@ function setButton(n, vis, lit, label) {
   _btnNow[n] = k;
   ctlWalk.button(n, vis, lit, label);
 }
-// ---- the bomber's arrow: the most useful thing to go and bomb, and which way
+// ---- the runner's arrow: which way the gun you should run to is. Wordless,
+// and gone once the gun is close enough to see. The bomber has the radar.
 function drawNav() {
   const box = el("nav");
-  if (me && me.alive && me.role === "runner" && !me.gun) {
-    // on foot: the arrow points at the gun you should be running to
-    const g = nearestGunFor(me);
-    if (!g) { box.style.display = "none"; return; }
-    const rel = wrapPi(Math.atan2(g.x - me.pos.x, g.z - me.pos.z) - (me.camYaw || 0));   // + is LEFT
-    box.style.display = "block";
-    box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
-    box.querySelector("span").textContent = (g.crew ? "GUN" : "FREE GUN") + "  " + Math.round(Math.hypot(g.x - me.pos.x, g.z - me.pos.z)) + " M";
-    return;
-  }
-  if (!me || !me.alive || me.role !== "bomber" || !me.af || me.rolling) { box.style.display = "none"; return; }
-  let best = null, bs = Infinity, label = "";
-  for (let i = 0; i < guns.length; i++) {
-    const g = guns[i];
-    if (g.down > 0) continue;
-    const d = Math.hypot(g.x - me.af.pos.x, g.z - me.af.pos.z) * (g.crew ? 0.6 : 1);
-    if (d < bs) { bs = d; best = g; label = g.crew ? "FLAK FIRING" : "FLAK GUN"; }
-  }
-  if (!best) {
-    for (let i = 0; i < units.length; i++) {
-      const r = units[i];
-      if (!r.alive || r.role !== "runner" || r.team === me.team) continue;
-      const d = Math.hypot(r.pos.x - me.af.pos.x, r.pos.z - me.af.pos.z);
-      if (d < bs) { bs = d; best = r.pos; label = "RUNNER"; }
-    }
-  }
-  if (!best) { box.style.display = "none"; return; }
-  const bx = best.x, bz = best.z;
-  const h = me.af.heading();
-  const rel = wrapPi(headingToward(me.af.pos.x, me.af.pos.z, bx, bz) - h);   // + is LEFT
+  if (!(me && me.alive && me.role === "runner" && !me.gun)) { box.style.display = "none"; return; }
+  const g = nearestGunFor(me);
+  if (!g || Math.hypot(g.x - me.pos.x, g.z - me.pos.z) < 30) { box.style.display = "none"; return; }
+  const rel = wrapPi(Math.atan2(g.x - me.pos.x, g.z - me.pos.z) - (me.camYaw || 0));   // + is LEFT
   box.style.display = "block";
   box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
-  const d = Math.hypot(bx - me.af.pos.x, bz - me.af.pos.z);
-  box.querySelector("span").textContent = label + "  " + (d > 950 ? (d / 1000).toFixed(1) + " KM" : Math.round(d) + " M");
 }
 // ---- the escape arrow: which way OUT of the nearest ring, and how long
 const _proj = new THREE.Vector3();
@@ -1590,8 +1521,6 @@ function drawThreat() {
   const away = Math.atan2(me.pos.x - best.x, me.pos.z - best.z);
   const rel = wrapPi(away - (me.camYaw || 0));
   box.querySelector("i").style.transform = "rotate(" + (-rel * 180 / Math.PI).toFixed(0) + "deg)";
-  const inside = Math.hypot(me.pos.x - best.x, me.pos.z - best.z) < best.radius * 0.8;
-  box.querySelector("span").textContent = (inside ? "RUN  " : "INCOMING  ") + Math.max(0, best.t).toFixed(1) + " S";
 }
 // the gun view's instruments: heat, range and a ring on the target
 function drawGunHud() {
@@ -1602,9 +1531,6 @@ function drawGunHud() {
   gh.classList.toggle("hot", g.locked > 0);
   gh.querySelector("s").style.width = (g.heat * 100).toFixed(0) + "%";
   const t = g.target;
-  el("gunline").textContent = g.locked > 0 ? "BARRELS OVERHEATED" : t
-    ? "BOMBER  " + Math.round(Math.hypot(t.af.pos.x - g.x, t.af.pos.y, t.af.pos.z - g.z)) + " M    HOLD FIRE"
-    : "NO BOMBER IN RANGE";
   if (t) {
     _proj.copy(t.af.pos).project(cam);
     if (_proj.z < 1) {
@@ -1669,7 +1595,7 @@ function finish(result, m) {
   el("overTable").innerHTML = h;
   if (scope) el("radar").style.display = "none";
   el("threat").style.display = "none"; el("nav").style.display = "none"; el("gunhud").style.display = "none"; el("reticle").style.display = "none";
-  el("respawn").style.display = "none"; el("goal").textContent = "";
+  el("respawn").style.display = "none";
 }
 el("again").addEventListener("click", function () { location.reload(); });
 // paused, the way back to the hub is one tap
