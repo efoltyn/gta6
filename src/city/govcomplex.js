@@ -461,7 +461,10 @@
   // sin(a)*L/2, shifts by toward*cos(a)*L/2 and rotates rotation.x =
   // -toward*a. The X case is its mirror: rotation.z = +toward*a (rotation.z
   // maps local +X to (cos, sin), so the `toward` end is the one that climbs).
-  function gatehouse(root, x, z, laneAlongZ, hex) {
+  // `o.noArms`: a site that builds its OWN working barrier (the Executive
+  // Mansion's checkpoint, §2b) keeps the booth and drops the two parked arms
+  // and their pivots, so there is one barrier at the gate and it moves.
+  function gatehouse(root, x, z, laneAlongZ, hex, o) {
     const bx = laneAlongZ ? x - 8 : x, bz = laneAlongZ ? z : z - 8;
     box(root, bx, 1.5, bz, 3.4, 3.0, 3.2, hex);
     box(root, bx, 3.12, bz, 3.9, 0.28, 3.7, M.concreteD);
@@ -472,6 +475,7 @@
     win.position.set(bx + (laneAlongZ ? 1.75 : 0), 1.8, bz + (laneAlongZ ? 0 : 1.65));
     win.castShadow = false; root.add(win);
     col(bx, bz, 3.4, 3.2, 0, 3.0);
+    if (o && o.noArms) return;
     const L = 9.0, A = 1.15;                       // arm length / parked angle
     const lift = Math.sin(A) * L / 2, reach = Math.cos(A) * L / 2;
     for (const s of [-1, 1]) {
@@ -883,6 +887,248 @@
      CBZ.powerKit. That is the whole reason this file has no guard code.
      ==================================================================== */
 
+  /* ====================================================================
+     §2b  THE EXECUTIVE MANSION'S SECURITY GROUND.
+
+     What a real head-of-state residence has at its front gate and on its
+     roof, built as geometry and handed to city/protection.js, which owns
+     every body and every decision (who gets screened, when the arm lifts,
+     who the counter-snipers shoot). Nothing here thinks.
+
+     THE CHECKPOINT (the 24 m gate gap, looking in from the road):
+       west  a stone planter from the wall to the vehicle lane, so nobody
+             walks round anything
+       mid   the VEHICLE LANE (12 m): a red-and-white drop arm across it
+             just inside the gate line, and behind that a row of steel
+             anti-ram bollards that sink into the road for the motorcade.
+             Both carry real colliders while they are up.
+       east  the PEDESTRIAN LANE behind a steel rail: an X-ray belt table,
+             then a walk-through magnetometer arch with a status lamp on
+             its header, rope stanchions sealing either side of it, and a
+             sentry kiosk just inside. The only way in on foot is through
+             the arch.
+     The gatehouse booth on the west side is the guard booth.
+
+     THE ROOF: two counter-sniper stands on opposite parapet corners of the
+     Mansion (front-west and rear-east, so between them they see all four
+     sides), each a small walkable platform at roof height with a steel
+     shield plate and a spotting scope on a tripod.
+
+     THE WALL WALK: a loop 5 m inside the perimeter wall for the agents who
+     walk it.
+
+     Every static piece goes through box/col/cyl so the batcher merges it.
+     The three MOVING pieces (the arm, the bollards, the lamp) carry
+     userData so the batcher leaves them alone, and `gate.step(dt)` animates
+     them toward whatever protection.js last asked for.
+     ==================================================================== */
+  function mansionSecurity(root, R, cx, cz, main, wing) {
+    const gz = R.maxZ;                       // the gate line; inside is -Z
+    const out = { gate: null, roof: null, walk: [], doors: {}, safe: null, footprints: [], gatePosts: [] };
+
+    // ---- the vehicle lane's west edge: a planter from the wall to the lane
+    const planterZ = gz - 2.0;
+    box(root, cx - 9.05, 0.45, planterZ, 6.5, 0.9, 0.8, M.stoneD);
+    box(root, cx - 9.05, 0.93, planterZ, 6.3, 0.08, 0.6, M.hedge, { cast: false });
+    col(cx - 9.05, planterZ, 6.5, 0.8, 0, 0.95);
+    // the return to the wall, so the planter's end is not a doorway
+    box(root, cx - 12.3, 0.45, gz - 1.2, 0.8, 0.9, 1.6, M.stoneD);
+    col(cx - 12.3, gz - 1.2, 0.8, 1.6, 0, 0.95);
+
+    // ---- the lane divider: a steel rail between cars and people
+    const divX = cx + 6.3;
+    box(root, divX, 0.95, gz - 3.4, 0.08, 0.08, 5.2, M.steel, { cast: false });
+    box(root, divX, 0.5, gz - 3.4, 0.05, 0.05, 5.2, M.steel, { cast: false });
+    for (const dz of [-0.8, -3.4, -6.0]) cyl(root, divX, 0.5, gz + dz, 0.05, 0.05, 1.0, M.steelD, 6);
+    col(divX, gz - 3.4, 0.16, 5.2, 0, 1.0);
+
+    // ---- the walk-through magnetometer
+    const ax = cx + 8.4, az = gz - 2.6;
+    for (const s of [-1, 1]) {
+      box(root, ax + s * 0.66, 1.1, az, 0.22, 2.2, 0.56, M.blank);
+      box(root, ax + s * 0.66, 1.1, az, 0.06, 1.9, 0.6, M.blankD, { cast: false });   // the detector panels
+      col(ax + s * 0.66, az, 0.22, 0.56, 0, 2.2);
+    }
+    box(root, ax, 2.35, az, 1.56, 0.3, 0.6, M.blank);
+    box(root, ax, 0.02, az, 1.2, 0.04, 0.9, M.dark, { cast: false });               // the mat you stand on
+    // THE LAMP. One fresh emissive material shared by the lamp on each face,
+    // so recolouring it is one write.
+    const lampMat = new THREE.MeshLambertMaterial({ color: 0x1f8f3a, emissive: 0x1f8f3a, emissiveIntensity: 0.55 });
+    for (const s of [-1, 1]) {
+      const lm = new THREE.Mesh(bg(0.34, 0.12, 0.06), lampMat);
+      lm.position.set(ax, 2.35, az + s * 0.33);
+      lm.castShadow = false; lm.userData.dynamic = true;
+      root.add(lm);
+    }
+    // rope stanchions either side of the arch, back to the rail and the wall
+    function stanchions(x0, x1, z) {
+      const n = Math.max(1, Math.round(Math.abs(x1 - x0) / 1.4));
+      for (let i = 0; i <= n; i++) cyl(root, x0 + (x1 - x0) * i / n, 0.5, z, 0.04, 0.12, 1.0, M.steelD, 8);
+      box(root, (x0 + x1) / 2, 0.86, z, Math.abs(x1 - x0), 0.05, 0.05, M.flagRed, { cast: false });
+      col((x0 + x1) / 2, z, Math.abs(x1 - x0), 0.2, 0, 1.0);
+    }
+    stanchions(divX + 0.1, ax - 0.78, az);
+    stanchions(ax + 0.78, cx + 12.4, az);
+    box(root, cx + 12.4, 0.5, gz - 1.45, 0.2, 1.0, 2.3, M.steelD);
+    col(cx + 12.4, gz - 1.45, 0.2, 2.3, 0, 1.0);
+
+    // ---- the X-ray belt, outside the arch, where you put your bag down
+    const tx = cx + 10.6, tz = gz - 0.7;
+    box(root, tx, 0.4, tz, 0.7, 0.8, 2.8, M.steelD);
+    box(root, tx, 0.82, tz, 0.62, 0.04, 2.8, M.dark, { cast: false });              // the belt
+    box(root, tx, 1.15, tz, 0.84, 0.66, 1.1, M.blank);                              // the tunnel
+    box(root, tx, 1.15, tz, 0.86, 0.5, 0.9, M.dark, { cast: false });               // its mouth
+    box(root, tx + 0.55, 1.2, tz - 1.1, 0.08, 0.4, 0.5, M.dark);                    // the operator's screen
+    col(tx, tz, 0.84, 2.8, 0, 1.5);
+
+    // ---- the sentry kiosk just inside the pedestrian lane
+    const kx = cx + 11.0, kz = gz - 5.6;
+    box(root, kx, 1.2, kz, 1.5, 2.4, 1.5, M.stone);
+    box(root, kx, 2.47, kz, 1.8, 0.14, 1.8, M.concreteD);
+    box(root, kx - 0.76, 1.55, kz, 0.04, 0.8, 1.1, M.glassSteel, { cast: false });
+    col(kx, kz, 1.5, 1.5, 0, 2.4);
+
+    // ---- THE DROP ARM (moves). A group at the pivot; up = rotation.z < 0.
+    const armZ = gz - 1.6, armY = 1.0, armL = 11.9;
+    box(root, divX, 0.55, armZ, 0.5, 1.1, 0.5, M.warn);                             // the pivot housing
+    col(divX, armZ, 0.5, 0.5, 0, 1.1);
+    const arm = new THREE.Group();
+    arm.position.set(divX, armY, armZ);
+    arm.userData.dynamic = true;
+    const white = cm(0xeeeeea), red = cm(M.red);
+    const shaft = new THREE.Mesh(bg(armL, 0.12, 0.12), white);
+    shaft.position.set(-armL / 2 - 0.2, 0, 0); shaft.userData.dynamic = true; arm.add(shaft);
+    for (let i = 0; i < 6; i++) {
+      const st = new THREE.Mesh(bg(0.9, 0.13, 0.13), red);
+      st.position.set(-1.0 - i * 2.0, 0, 0); st.userData.dynamic = true; arm.add(st);
+    }
+    root.add(arm);
+    const armCol = { minX: cx - 5.8, maxX: divX - 0.3, minZ: armZ - 0.15, maxZ: armZ + 0.15, y0: 0.0, y1: 1.2, ref: null };
+
+    // ---- THE BOLLARDS (move): one InstancedMesh, raised by rewriting Y.
+    const bolZ = gz - 4.2, BR = 0.17, BH = 1.0;
+    const bolPts = [];
+    for (let i = 0; i < 8; i++) bolPts.push(cx - 5.1 + i * 1.5);
+    const bolMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(BR, BR + 0.02, BH, 10), cm(M.steelD), bolPts.length);
+    bolMesh.castShadow = true; bolMesh.receiveShadow = true; bolMesh.userData.dynamic = true;
+    bolMesh.frustumCulled = false;
+    root.add(bolMesh);
+    const bolCols = bolPts.map(function (x) { return { minX: x - BR, maxX: x + BR, minZ: bolZ - BR, maxZ: bolZ + BR, y0: 0, y1: BH, ref: null }; });
+    for (let i = 0; i < bolPts.length; i++) box(root, bolPts[i], 0.015, bolZ, 0.6, 0.03, 0.6, M.steel, { cast: false });   // the sleeves in the road
+    const _o = new THREE.Object3D();
+    function placeBollards(t) {
+      const y = -BH / 2 + t * BH;            // t 1 = fully up, 0 = flush with the road
+      for (let i = 0; i < bolPts.length; i++) {
+        _o.position.set(bolPts[i], y, bolZ); _o.rotation.set(0, 0, 0); _o.updateMatrix();
+        bolMesh.setMatrixAt(i, _o.matrix);
+      }
+      bolMesh.instanceMatrix.needsUpdate = true;
+      bolMesh.visible = t > 0.02;
+    }
+    function colOn(c, on) {
+      const L = (CBZ.colliders = CBZ.colliders || []);
+      const i = L.indexOf(c);
+      if (on && i < 0) L.push(c); else if (!on && i >= 0) L.splice(i, 1); else return false;
+      return true;
+    }
+
+    const LAMP = { idle: [0x1f8f3a, 0.55], pass: [0x2bd65a, 1.3], alarm: [0xff2a1a, 1.8], off: [0x2a2a2a, 0.0] };
+    const G = {
+      x: cx, z: gz, outX: 0, outZ: 1,
+      arch: { x: ax, y: 0, z: az, halfW: 0.55 },
+      lane: { minX: divX + 0.1, maxX: cx + 12.4 },          // the pedestrian lane
+      vehicle: { minX: cx - 5.8, maxX: divX, z: armZ },     // the vehicle lane
+      barrier: { x: cx, z: armZ },
+      bollards: { x: cx, z: bolZ },
+      lineZ: az,                                            // the screening line
+      arm: arm, armT: 0, armWant: 0, bolT: 1, bolWant: 1, lamp: "idle",
+      setArm: function (up) { G.armWant = up ? 1 : 0; },
+      setBollards: function (up) { G.bolWant = up ? 1 : 0; },
+      setLamp: function (k) {
+        if (G.lamp === k || !LAMP[k]) return;
+        G.lamp = k;
+        lampMat.color.setHex(LAMP[k][0]); lampMat.emissive.setHex(LAMP[k][0]); lampMat.emissiveIntensity = LAMP[k][1];
+      },
+      open: function () { return G.armT > 0.9 && G.bolT < 0.1; },
+      // animate toward the wanted state; colliders follow the physical state
+      step: function (dt) {
+        let dirty = false;
+        if (G.armT !== G.armWant) {
+          G.armT += Math.sign(G.armWant - G.armT) * Math.min(Math.abs(G.armWant - G.armT), dt / 2.2);
+          arm.rotation.z = -G.armT * 1.45;
+          dirty = colOn(armCol, G.armT < 0.35) || dirty;
+        }
+        if (G.bolT !== G.bolWant) {
+          G.bolT += Math.sign(G.bolWant - G.bolT) * Math.min(Math.abs(G.bolWant - G.bolT), dt / 3.0);
+          placeBollards(G.bolT);
+          const up = G.bolT > 0.4;
+          for (let i = 0; i < bolCols.length; i++) dirty = colOn(bolCols[i], up) || dirty;
+        }
+        if (dirty && CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
+      },
+    };
+    // closed at build: arm down, bollards up
+    placeBollards(1);
+    colOn(armCol, true);
+    for (let i = 0; i < bolCols.length; i++) colOn(bolCols[i], true);
+    out.gate = G;
+
+    // the posts at the gate (x, z, facing out to the road); `lockdown` posts
+    // are manned only while the capital is locked down
+    out.gatePosts = [
+      { id: "arch", x: ax - 1.1, z: az - 1.4, face: 0, role: "gate" },
+      { id: "lane", x: cx + 4.6, z: gz - 6.4, face: 0, role: "gate" },
+      { id: "booth", x: cx - 5.4, z: gz - 6.0, face: 0, role: "gate" },
+      { id: "lock0", x: cx - 2.2, z: gz - 5.8, face: 0, role: "gate", lockdown: true },
+      { id: "lock1", x: cx + 2.0, z: gz - 5.8, face: 0, role: "gate", lockdown: true },
+    ];
+
+    // ---- THE ROOF STANDS
+    const mb = main && main.b;
+    const roofY = (mb && Array.isArray(mb.floorTops) && mb.floorTops.length) ? mb.floorTops[mb.floorTops.length - 1]
+      : (mb && mb.h) || 6.4;
+    const mx = cx, mz = cz - 34, hw = 28, hd = 17;
+    const stands = [
+      { team: "A", x: mx - hw + 2.4, z: mz + hd - 2.4, ox: -1, oz: 1 },    // front-west
+      { team: "B", x: mx + hw - 2.4, z: mz - hd + 2.4, ox: 1, oz: -1 },    // rear-east
+    ];
+    const roofPosts = [];
+    for (let i = 0; i < stands.length; i++) {
+      const s = stands[i];
+      plat(s.x, s.z, 4.2, 4.2, roofY);
+      const face = Math.atan2(s.ox, s.oz);
+      // the shield plate stands at the outer corner of the stand
+      const px = s.x + s.ox * 1.3, pz = s.z + s.oz * 1.3;
+      box(root, px, roofY + 0.55, pz, 1.7, 1.1, 0.1, M.steelD, { rotY: face });
+      col(px, pz, 1.3, 1.3, roofY, roofY + 1.1);
+      // a spotting scope on a tripod
+      const sx = s.x + s.ox * 0.4 + s.oz * 0.9, sz = s.z + s.oz * 0.4 - s.ox * 0.9;
+      cyl(root, sx, roofY + 0.62, sz, 0.02, 0.09, 1.24, M.dark, 6);
+      box(root, sx, roofY + 1.3, sz, 0.1, 0.1, 0.5, M.dark, { rotY: face });
+      roofPosts.push({ team: s.team, role: "sniper", x: s.x - s.oz * 0.6, y: roofY, z: s.z + s.ox * 0.6, face: face });
+      roofPosts.push({ team: s.team, role: "spotter", x: s.x + s.oz * 0.8, y: roofY, z: s.z - s.ox * 0.8, face: face });
+    }
+    out.roof = { y: roofY, posts: roofPosts };
+
+    // ---- THE WALL WALK (a loop 5 m inside the wall, 10 m behind the gate)
+    out.walk = [
+      { x: R.minX + 5, z: R.maxZ - 10 }, { x: R.minX + 5, z: R.minZ + 5 },
+      { x: R.maxX - 5, z: R.minZ + 5 }, { x: R.maxX - 5, z: R.maxZ - 10 },
+    ];
+
+    // ---- doors, the safe point, the footprints the detail treats as indoors
+    if (main && main.door) {
+      out.doors.mansion = { x: main.door.x, z: main.door.z, nx: main.door.nx, nz: main.door.nz };
+      out.safe = { x: main.door.x + main.door.nx * 6, z: main.door.z + main.door.nz * 6 };
+    }
+    if (wing && wing.door) out.doors.wing = { x: wing.door.x, z: wing.door.z, nx: wing.door.nx, nz: wing.door.nz };
+    out.footprints = [
+      { name: "mansion", minX: mx - hw, maxX: mx + hw, minZ: mz - hd, maxZ: mz + hd },
+      { name: "wing", minX: cx - 58 - 17, maxX: cx - 58 + 17, minZ: cz - 30 - 11, maxZ: cz - 30 + 11 },
+    ];
+    return out;
+  }
+
   // ---- officeholder resolvers. Each returns a sid or null, read LIVE, so a
   // succession or an election moves the occupant with no bookkeeping here.
   function polList(kind) {
@@ -1006,7 +1252,7 @@
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.lawn, "execmansion");
         perimeter(root, R, { style: "wall", h: 3.4, thick: 0.7, hex: M.stoneD, gate: 1, gateW: 24 });
-        gatehouse(root, cx, R.maxZ - 6, true, M.stone);
+        gatehouse(root, cx, R.maxZ - 6, true, M.stone, { noArms: true });
         const mansionSpec = {
           kind: "mansion", crown: "dome", order: "doric", motto: "EXECUTIVE MANSION", stone: true,
           monumental: true,       // landmark opt-in; ordinary masonry stays disabled
@@ -1021,7 +1267,7 @@
         perron(root, cx, cz - 17, 56, 9, M.stone, 1);              // facade z -17, out to -8
         // the WEST WING: the office half of "residence and workplace"
         const wingSpec = { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true, monumental: true };
-        civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3, wingSpec, "West Wing");
+        const wing = civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3, wingSpec, "West Wing");
         // the motor court — a ring of paving round a fountain, which is what
         // the front of a state residence actually is
         disc(root, cx, cz + 18, 34, M.paving, YS, 28);
@@ -1053,6 +1299,13 @@
         const lamps = [];
         for (let i = 0; i < 5; i++) { lamps.push({ x: cx - 16, z: cz + 58 + i * 11 }); lamps.push({ x: cx + 16, z: cz + 58 + i * 11 }); }
         lampRow(root, lamps);
+        // THE SECRET SERVICE'S GROUND (§2b): the checkpoint at the gate, the
+        // counter-sniper stands on the roof, the wall walk. Geometry here;
+        // every body and every decision is protection.js's.
+        if (c.site) {
+          try { c.site.security = mansionSecurity(root, R, cx, cz, main, wing); }
+          catch (e) { console.error("[govcomplex] mansion security", e); }
+        }
         return { gate: { x: cx, z: R.maxZ }, seat: main };
       },
     },
@@ -3364,6 +3617,23 @@
         const s = SITES[i];
         if (!s.rect) continue;
         if (!s.def.principal) continue;      // an unstaffed row (the Freeport)
+        // THE PLAYER HAS NO STAND-IN. When the player holds this seat the
+        // row's body used to stay posted at the door with _sid "player": a
+        // second President standing on the perron, and shooting HIM ran the
+        // player's own succession through officials.js's kill wrap. The
+        // officeholder is the player; the NPC body goes home, and its ring
+        // with it. It is re-staffed the moment the seat changes hands.
+        {
+          const hh = holderOf(s);
+          if (hh && hh.sid === ((CBZ.officials && CBZ.officials.PLAYER_SID) || "player")) {
+            if (s.actor && !s.actor.dead) {
+              if (CBZ.powerDissolve) { try { CBZ.powerDissolve(s.actor); } catch (e) {} }
+              if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(s.actor); } catch (e) {} }
+            }
+            s.actor = null; s.power = null; s.seated = false;
+            continue;
+          }
+        }
         // (a) the body left the world (clearCityPeds on a mode change, or he
         //     was killed). A dead officeholder is REAL — officials.js's
         //     succession machinery owns that outcome — so we only rebuild a

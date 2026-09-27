@@ -2,6 +2,26 @@
    city/presidency.js — THE PRESIDENT MODE: one spine over organs that
    already exist.
 
+   2026-09-27 REWORK (owner: "much more realistic, much less gimmicky
+   button-pressing"). Read this before the older prose below, which still
+   describes the organs correctly but not how the player reaches them:
+     • The Situation Room has NO buttons now. Its seventeen labelled keys and
+       the STANDING ORDERS console are deleted. The General, the Bureau
+       Director and the Police Commissioner stand at the table (§3b) and
+       propose orders off live state; you answer yes or no. BUTTONS below is
+       still the one implementation of every order, called by people: these
+       officers, the callers on the desk phone and the folders on the desk
+       (president_office.js), the balcony speech (president_public.js).
+     • No banners, no phone texts from rooms. big() routes to the TV in the
+       President's Office; a refused order is returned to the person who
+       asked, who says why in his own words.
+     • The swearing-in announces nothing and hangs no waypoint.
+     • §3a cabinet(): real, persistent people (the VP is the ledger deputy).
+     • §10 THE SEAM for Hitman: current(), schedule(), onAssassinated(),
+       lockdown(); an assassination (player or NPC, any cause) runs the
+       succession officials.js already owns, then a national emergency, a
+       capital lockdown, and a junta when nobody legal is left to sit.
+
    OWNER (verbatim): "make a new mode president where you are president and
    the sand city has terrorist orgs and you can build a wall etc make the
    president game cool it can turn into king or dictator or person in jail
@@ -225,7 +245,14 @@
   function money(n) { return "$" + Math.round(n || 0).toLocaleString(); }
   function day() { return CBZ.worldDay ? CBZ.worldDay() : 0; }
   function feed(t, c) { if (CBZ.cityFeed) { try { CBZ.cityFeed(t, c || "#8fc1ff"); } catch (e) {} } }
-  function big(t) { if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(t); } catch (e) {} } }
+  // NO BANNERS. The screen-wide headline (CBZ.city.big) was this file's way
+  // of saying that something big happened, and it is exactly the fourth-wall
+  // popup the owner banned. A big moment in a country is on the TELEVISION:
+  // president_office.js runs the broadcast on the wall of your office.
+  function big(t) {
+    const O = CBZ.presidentOffice;
+    if (O && typeof O.news === "function") { try { O.news(String(t || ""), { kind: "breaking" }); } catch (e) {} }
+  }
   function news(text) {
     if (CBZ.phoneNotify) { try { CBZ.phoneNotify({ app: "news", from: "City Desk", text: text, priority: 1 }); return; } catch (e) {} }
     feed(text, "#ffd76a");
@@ -315,6 +342,10 @@
     ballotPending = false; _einfo = null; _einfoKey = "";
     RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
     ATT.armed = null; OCC.done = {}; OCC.arena = null; _safehouses = null;
+    for (const k in OFF.peds) OFF.peds[k] = null;   // the arena that held them is gone
+    CONV = null;
+    SEAM.fired = {}; SEAM.lastSid = null; SEAM.lastPed = null;
+    SEAM.lock.active = false; SEAM.lock.reason = null;
   }
 
   // ============================================================
@@ -369,31 +400,12 @@
     bindDetail({ id: rec.id, rec: rec });
     try { seedRoster(); } catch (e) {}          // the threat board is not empty on the first morning
     emitEvent("sworn", { seat: rec.id, country: rec.name || null, govType: rec.govType || null, day: day() });
-    big("SWORN IN · PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
-    orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall, your seal opens it. Nobody else's does.", 2);
-    // THE CLOCK IS PART OF THE JOB. swearIn() already stamped office.termDay
-    // (officials.termDaysFor gives the PLAYER's country seat 7 days, ~17 real
-    // minutes); elections.js calls the race two days before it and counts the
-    // ballot on it. Say so out loud, on day one, or the term is invisible.
-    const E0 = electionInfo();
-    if (E0.voteDay != null) {
-      orders("Chief of Staff", "The country votes on day " + E0.voteDay + ". Approval is the ballot.", 1);
-    }
-    // the first WHY is a locked door: walk to it. mission.js owns the HUD
-    // line, waypoint and beacon — build none of those.
-    const site = mansionSite();
-    if (site && CBZ.mission && CBZ.mission.start) {
-      try {
-        CBZ.mission.start({
-          id: "pres_sitroom", title: "Enter the Situation Room", goal: "reach",
-          // Resolve live: the room is built lazily after the Mansion shell.
-          // This points at the actual steel threshold instead of dropping the
-          // generic objective column through the landmark's dome.
-          at: function () { return ROOM.doorPt || (site.seatPoint ? site.seatPoint : { x: site.cx, z: site.cz }); },
-          radius: 3.4, marker: "ground", reward: 0,
-        });
-      } catch (e) {}
-    }
+    // NOTHING IS ANNOUNCED. The old swearing-in shouted a banner across the
+    // screen, pushed two phone texts explaining the Situation Room and the
+    // ballot, and hung a waypoint on the steel door. The owner's law is that
+    // the fourth wall stays up: president_office.js puts you behind your own
+    // desk, the Chief of Staff walks in and tells you the day in his own
+    // words, and the TV already has your face on it.
     return { ok: true, seat: rec.id };
   }
   CBZ.presidencyBegin = presidencyBegin;
@@ -637,70 +649,24 @@
       addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
     }
 
-    // THE ORDERS — every power the state actually ships, on three rails.
-    // Seventeen pads do not fit on one edge of a 6.4 m table without either
-    // stacking them (nothing in this room may be climbed to be reached) or
-    // running the labels into each other, so they sit on TWO RANKS of the
-    // table plus one standing console against the east wall — the room's one
-    // solid wall, the only one with no door, no screen and no station on it.
-    // Groups never interleave across a rail: SECURITY is the whole south
-    // rank; THE PEOPLE then THE REGIME share the north; THE CELL and THE
-    // PURSE stand at the wall. Each pad's own material carries its light, so
-    // paintBoard can recolour one order without touching a shared bucket.
-    const SOUTH = ["emergency", "crackdown", "curfew", "surge", "martial", "guard"];
-    const NORTH = ["address", "amnesty", "pardon", "fascism", "communism", "crown"];
-    const EAST = ["bureau", "wall", "police", "taxup", "taxdown"];
-    // furniture.js's F.table puts its worktop face at exactly (piece y + 0.74),
-    // and this room places the piece at 0.18 - so TTOP is 0.92 and every key,
-    // cap and plate is drawn ON it rather than a centimetre above it.
-    const STEP = 1.05, TTOP = 0.92;          // pad pitch: a 0.46 m plate, a 0.59 m gap
-    function tableRank(keys, pz, yaw, labelDz) {
-      for (let i = 0; i < keys.length; i++) {
-        const px = tx + (i - (keys.length - 1) / 2) * STEP;
-        addBox(grp, px, TTOP + 0.035, pz, 0.58, 0.07, 0.32, PADC);
-        const cap = addBox(grp, px, TTOP + 0.10, pz, 0.19, 0.06, 0.15, 0xb5443a);
-        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-        ROOM.pads.push({ key: keys[i], x: px, z: pz, cap: cap });
-        padLabel(grp, keys[i], px, TTOP + 0.028, pz + labelDz, yaw);
-      }
-    }
-    // BOTH RANKS LIVE INSIDE THE TABLE. The plate is tilted only 20.8 degrees
-    // off flat, so 93.5% of its 0.161 m height lies along Z: a rank at 0.52
-    // with its plate 0.26 further out put the plate's far edge 3 cm past the
-    // 0.825 m table edge, hanging over the carpet. Keys at 0.46, plates
-    // centred at 0.715 -> plate spans 0.64..0.79, clear of both.
-    tableRank(SOUTH, tz - 0.46, Math.PI, -0.255);
-    tableRank(NORTH, tz + 0.46, 0, 0.255);
-    // a hairline divider where THE PEOPLE ends and THE REGIME begins
-    addBox(grp, tx, TTOP + 0.01, tz + 0.46, 0.03, 0.02, 0.40, BRASS);
-
-    // THE STANDING CONSOLE. Waist height, against the solid east wall, with
-    // 2.4 m of clear floor between it and the table: you walk the room to
-    // give an order instead of leaning across the map.
-    const ex = x1 - T - 0.33, ez = zc, ETOP = 0.95, ESTEP = 1.00;
-    addBox(grp, ex, 0.46, ez, 0.60, 0.92, 5.20, STEEL);
-    addBox(grp, ex, 0.935, ez, 0.66, 0.03, 5.36, TRIM);
-    addBox(grp, ex - 0.31, 0.84, ez, 0.05, 0.05, 5.20, BRASS);       // grab rail
-    addBox(grp, ex - 0.295, 0.34, ez, 0.03, 0.56, 5.00, NAVY);       // inset front panel
-    addCol(ex, ez, 0.60, 5.20, 0, ETOP + 0.05);
-    for (let i = 0; i < EAST.length; i++) {
-      const pz = ez + (i - (EAST.length - 1) / 2) * ESTEP;
-      addBox(grp, ex + 0.06, ETOP + 0.035, pz, 0.34, 0.07, 0.56, PADC);
-      const cap = addBox(grp, ex + 0.06, ETOP + 0.10, pz, 0.16, 0.06, 0.20, 0xb5443a);
-      cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
-      ROOM.pads.push({ key: EAST[i], x: ex + 0.06, z: pz, cap: cap });
-      padLabel(grp, EAST[i], ex - 0.19, ETOP + 0.030, pz, -Math.PI / 2);
-    }
-    // the console's header, on the wall it stands against
-    addBox(grp, x1 - T - 0.03, 1.62, ez, 0.06, 0.62, 1.90, STEEL);
-    const ehdr = canvasTexLive(256, 64);
-    ehdr.cc.fillStyle = "#11151c"; ehdr.cc.fillRect(0, 0, 256, 64);
-    ehdr.cc.strokeStyle = "#b99347"; ehdr.cc.strokeRect(3, 3, 250, 58);
-    ehdr.cc.fillStyle = "#d8e2f2"; ehdr.cc.font = "bold 22px monospace"; ehdr.cc.textAlign = "center";
-    ehdr.cc.fillText("STANDING ORDERS", 128, 41); ehdr.paint();
-    const ehm = new THREE.Mesh(new THREE.PlaneGeometry(1.60, 0.40), new THREE.MeshBasicMaterial({ map: ehdr.tex }));
-    ehm.position.set(x1 - T - 0.07, 1.62, ez); ehm.rotation.y = -Math.PI / 2;
-    grp.add(ehm);
+    // NO BUTTONS. This table used to carry seventeen red keys with printed
+    // plates (SECURITY / CURFEW, THE REGIME / THE CROWN ...) and a STANDING
+    // ORDERS console: a vending machine for policy, which is exactly the
+    // "press a button to enact" gimmick the owner asked to be rid of. The
+    // orders themselves still live in BUTTONS below, but in this room they
+    // come out of PEOPLE: the General, the Bureau Director and the Police
+    // Commissioner stand at the table (see §3b), read the same live state the
+    // wall screen draws, and propose what they want to do. You say yes or no.
+    // Where they stand is published here so §3b posts them on real floor.
+    ROOM.stations = [
+      { role: "general", x: tx + 3.95, z: tz + 0.2, face: -Math.PI / 2 },
+      { role: "bureau", x: tx + 1.1, z: tz + 1.55, face: Math.PI },
+      { role: "police", x: tx - 1.1, z: tz - 1.55, face: 0 },
+    ];
+    // a folded map and a pair of grease pencils where the officers work
+    addBox(grp, tx + 1.2, 0.95, tz + 0.1, 1.4, 0.012, 0.9, 0xcfc6a8);
+    addBox(grp, tx + 1.2, 0.957, tz + 0.1, 0.02, 0.004, 0.86, 0x8f3434);
+    addBox(grp, tx + 0.7, 0.962, tz - 0.12, 0.13, 0.012, 0.012, 0x8f3434);
 
     // Paired standards and an inset seal terminate the room. They are wall-
     // attached state symbols, never another row of loose floor props.
@@ -717,56 +683,17 @@
     for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, 2.83, tz, 1.75, 0.05, 0.18, 0xffe6b0);
     ROOM.builtFor = CBZ.govComplexes;
     wireZones();
-    wireOfficeZones();
     paintBoard();
     return true;
   }
-  // THE CONSOLE, GROUPED. Seventeen orders is a lot of brass to read at a
-  // glance, so every pad carries its GROUP on its own plate: five decisions
-  // (who you police, who you hunt, what you spend, who you talk to, what the
-  // country IS), not seventeen unrelated switches.
-  const PAD_NAMES = {
-    emergency: ["SECURITY", "EMERGENCY"],
-    crackdown: ["SECURITY", "CRACKDOWN"],
-    curfew:    ["SECURITY", "CURFEW"],
-    surge:     ["SECURITY", "SURGE"],
-    martial:   ["SECURITY", "MARTIAL LAW"],
-    guard:     ["SECURITY", "GUARD DETAIL"],
-    bureau:    ["THE CELL", "BUREAU"],
-    wall:      ["THE CELL", "THE WALL"],
-    police:    ["THE PURSE", "FUND POLICE"],
-    taxup:     ["THE PURSE", "TAX UP"],
-    taxdown:   ["THE PURSE", "TAX DOWN"],
-    address:   ["THE PEOPLE", "ADDRESS"],
-    amnesty:   ["THE PEOPLE", "AMNESTY"],
-    pardon:    ["THE PEOPLE", "PARDON"],
-    fascism:   ["THE REGIME", "ONE STATE"],
-    communism: ["THE REGIME", "THE MARKET"],
-    crown:     ["THE REGIME", "THE CROWN"],
+  // plain names for an order, used only when statecraft cannot name its own
+  const ORDER_NAMES = {
+    emergency: "State of emergency", crackdown: "Crackdown", curfew: "Curfew", surge: "Police surge",
+    martial: "Soldiers on the street", guard: "A bigger detail", bureau: "The Bureau raid", wall: "The wall",
+    police: "Police funding", taxup: "A tax rise", taxdown: "A tax cut", address: "An address to the nation",
+    amnesty: "An amnesty", pardon: "A pardon", fascism: "One state", communism: "The state takes the market", crown: "The crown",
   };
-  function padGroup(key) { const e = PAD_NAMES[key]; return e ? e[0] : ""; }
-  function padName(key) { const e = PAD_NAMES[key]; return e ? e[1] : String(key).toUpperCase(); }
-  function padLabel(grp, key, x, y, z, yaw) {
-    const t = canvasTexLive(160, 56);
-    t.cc.fillStyle = "#0d1117"; t.cc.fillRect(0, 0, 160, 56);
-    t.cc.strokeStyle = "#2b3444"; t.cc.lineWidth = 2; t.cc.strokeRect(1, 1, 158, 54);
-    t.cc.textAlign = "center";
-    t.cc.fillStyle = "#b99347"; t.cc.font = "bold 12px monospace";
-    t.cc.fillText(padGroup(key), 80, 19);
-    t.cc.fillStyle = "#c8d4e4"; t.cc.font = "bold 16px monospace";
-    t.cc.fillText(padName(key), 80, 42);
-    t.paint();
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.161), new THREE.MeshBasicMaterial({ map: t.tex }));
-    m.position.set(x, y, z);
-    // YXZ ON PURPOSE: tilt the plate back off the surface FIRST, then turn the
-    // whole plate to face the chair that reads it. Under the default XYZ order
-    // the yaw was applied inside the tilt, so a yaw of PI tipped the plate's
-    // printed face into the table — the five front-rail labels were pointing
-    // at the floor and rendered as nothing (MeshBasicMaterial is FrontSide).
-    m.rotation.order = "YXZ";
-    m.rotation.set(-Math.PI / 2.6, yaw || 0, 0);
-    grp.add(m);
-  }
+  function padName(key) { return ORDER_NAMES[key] || String(key); }
   function inRoom(x, z) {
     const r = ROOM.rect;
     return !!(r && x > r.minX && x < r.maxX && z > r.minZ && z < r.maxZ);
@@ -903,7 +830,7 @@
         if (kind === "guard") {
           if (!CBZ.protection || !CBZ.protection.create) return { ok: false, why: "No protection system loaded." };
           const d = guardDetail(h), cap = (CBZ.protection.HIRE_CAP || 8);
-          if (d && (d.memberCount | 0) >= cap) return { ok: false, why: "Your detail is at full strength \u00b7 " + d.memberCount + " bodies." };
+          if (d && (d.memberCount | 0) >= cap) return { ok: false, why: "Your detail is at full strength, " + d.memberCount + " bodies." };
           return { ok: true };
         }
         const out = deploymentOf(kind);
@@ -997,14 +924,14 @@
       gate: function () {
         if (!CBZ.stateWall || !CBZ.stateWall.order) return { ok: false, why: "No construction machinery loaded." };
         const s = CBZ.stateWall.status();
-        if (s.done) return { ok: false, why: "The wall stands · " + s.built + " sections along the Saltlands line." };
+        if (s.done) return { ok: false, why: "The wall stands, " + s.built + " sections along the Saltlands line." };
         if (s.ordered) return { ok: false, why: "Under construction: " + s.built + "/" + s.total + " sections. Crews draw pay daily." };
         return { ok: true };
       },
       run: function (h) {
         const r = CBZ.stateWall.order(h.rec);
         if (!r.ok) return r;
-        big("THE WALL · CONSTRUCTION BEGINS");
+        big("THE WALL, CONSTRUCTION BEGINS");
         news(h.title + " orders a border wall along the Saltlands frontier. " + r.total + " sections, paid daily out of the treasury.");
         return { ok: true, why: "" };
       },
@@ -1129,14 +1056,16 @@
     const h = seat();
     if (!h) return { ok: false, why: "You do not hold the country." };
     const gt = B.gate(h);
+    // A REFUSAL IS RETURNED, NEVER ANNOUNCED. Every caller now is a person
+    // (an officer at the table, a minister on the phone, an aide at the desk)
+    // and that person says why in his own words. No phone text from a room.
     if (!gt.ok) {
-      orders("Situation Room", gt.why, 1); paintBoard();
+      paintBoard();
       emitEvent("order", { key: key, ok: false, why: gt.why || "" });
       return gt;
     }
     let r;
     try { r = B.run(h); } catch (e) { r = { ok: false, why: "The order did not go through." }; }
-    if (r && !r.ok && r.why) orders("Situation Room", r.why, 1);
     paintBoard();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     const out = r || { ok: true, why: "" };
@@ -1144,132 +1073,288 @@
     return out;
   }
 
-  // The Cabinet folio and the two desk objects are published by the shared
-  // room-program owner. These zones only bind those physical objects to the
-  // SAME orders as the Situation Room; no office-only state is introduced.
-  const OFFICE_PROP_KEYS = ["cabinet-bureau", "oval-address", "oval-pardon"];
-  let officeZonesWired = false;
-  let officeZoneCount = 0;
-  function officeProp(key) {
-    if (!CBZ.presidentInteriorProps) return null;
-    let list = [];
-    try { list = CBZ.presidentInteriorProps() || []; } catch (e) { list = []; }
-    for (let i = 0; i < list.length; i++) if (list[i] && list[i].key === key) return list[i];
-    return null;
-  }
-  function wireOfficeZones() {
-    if (officeZonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
-    officeZonesWired = true;
-    OFFICE_PROP_KEYS.forEach(function (key) {
-      CBZ.interactions.registerZone({
-        id: "pres-office-" + key, kind: "presprop", radius: 1.75, prio: 14,
-        find: function (px, pz) {
-          if (!on()) return null;
-          const mine = officeProp(key);
-          if (!mine) return null;
-          const P = CBZ.player;
-          if (P && P.pos && isFinite(P.pos.y) && isFinite(mine.y) && Math.abs(P.pos.y - mine.y) > 2.2) return null;
-          let nearest = null, bestAll = Infinity;
-          for (let i = 0; i < OFFICE_PROP_KEYS.length; i++) {
-            const p = officeProp(OFFICE_PROP_KEYS[i]);
-            if (!p) continue;
-            const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
-            if (d < bestAll) { bestAll = d; nearest = p.key; }
-          }
-          const d = (mine.x - px) * (mine.x - px) + (mine.z - pz) * (mine.z - pz);
-          return d < 1.75 * 1.75 && nearest === key
-            ? { x: mine.x, y: mine.y, z: mine.z, kind: "presprop", propKey: key }
-            : null;
-        },
-        options: [{
-          id: "pres-office-use-" + key, slot: "e",
-          label: function () {
-            const p = officeProp(key);
-            const B = p && BUTTONS[p.order];
-            const h = seat();
-            if (!p || !B) return "Presidential order unavailable";
-            if (!h) return p.label + " (not yours)";
-            const gt = B.gate(h);
-            return p.label + (gt.ok ? "" : " — " + gt.why);
-          },
-          onSelect: function () {
-            const p = officeProp(key);
-            if (p && BUTTONS[p.order]) pressButton(p.order);
-          },
-        }],
-      });
-      officeZoneCount++;
-    });
-    if (CBZ.interactions.describe) {
-      try { CBZ.interactions.describe("presprop", function () { return { label: "Presidential desk", note: "a physical state order" }; }); } catch (e) {}
-    }
-  }
-
-  // ---- the interaction zones: the door + one per pad ---------------------
+  // ---- the one zone the room still needs: its door -----------------------
+  // The sitting head of state never sees a prompt here: the leaf slides as he
+  // walks up (the tick below). Anybody else gets a handle that does not turn.
   function wireZones() {
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     ROOM.zonesWired = true;
-    // the sealed door — VISIBLE to anyone; openable by one person in the
-    // country. That asymmetry is the whole gradient.
     CBZ.interactions.registerZone({
       id: "pres-door", kind: "presdoor", radius: 2.6, prio: 12,
       find: function (px, pz) {
-        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.doorPt) return null;
+        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.doorPt || doorOpensFor()) return null;
+        const P = CBZ.player;
+        if (P && P.pos && P.pos.y > 2.4) return null;
         const dx = ROOM.doorPt.x - px, dz = ROOM.doorPt.z - pz;
         return (dx * dx + dz * dz) < 2.6 * 2.6 ? { x: ROOM.doorPt.x, z: ROOM.doorPt.z, kind: "presdoor" } : null;
       },
       options: [{
         id: "pres-door-try", slot: "e",
-        label: function () { return doorOpensFor() ? "Situation Room" : "Situation Room, sealed"; },
+        label: "Try the door",
         onSelect: function () {
-          if (doorOpensFor()) return; // the door is already sliding; walk in
-          orders("Mansion Detail", "The steel door does not move. Two men in suits look through you. This room opens for one person in the country.", 0);
+          if (CBZ.sfx) { try { CBZ.sfx("click", { vol: 0.5 }); } catch (e) {} }
+          if (ROOM.door) { ROOM.door.position.x += 0.02; setTimeout(function () { if (ROOM.door) ROOM.door.position.x -= 0.02; }, 90); }
         },
       }],
     });
-    // one zone per pad: find() only answers when this pad is the NEAREST.
-    const keys = [];
-    for (const k in BUTTONS) keys.push(k);
-    keys.forEach(function (key) {
-      CBZ.interactions.registerZone({
-        id: "pres-pad-" + key, kind: "prespad", radius: 1.6, prio: 13,
-        find: function (px, pz) {
-          if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.pads.length) return null;
-          if (!inRoom(px, pz)) return null;
-          // the crown pad exists only in a dictatorship — a button that
-          // appears the day the category flips (the door grammar again).
-          if (key === "crown") {
-            const r = seatRec();
-            if (!r || (r.govType !== "dictatorship" && r.govType !== "monarchy")) return null;
-          }
-          let mine = null, best = 1.6 * 1.6, bestAll = Infinity, nearestKey = null;
-          for (let i = 0; i < ROOM.pads.length; i++) {
-            const p = ROOM.pads[i];
-            const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
-            if (d < bestAll) { bestAll = d; nearestKey = p.key; }
-            if (p.key === key && d < best) { best = d; mine = p; }
-          }
-          if (!mine || nearestKey !== key) return null;
-          return { x: mine.x, z: mine.z, kind: "prespad" };
-        },
-        options: [{
-          id: "pres-press-" + key, slot: "e",
-          label: function () {
-            const B = BUTTONS[key];
-            const h = seat();
-            if (!h) return bname(B) + " (not yours)";
-            const gt = B.gate(h);
-            return bname(B) + (gt.ok ? "" : " — " + gt.why);
-          },
-          onSelect: function () { pressButton(key); },
-        }],
+  }
+
+  // ============================================================
+  //  §3a  THE CABINET — the people the orders come out of. Real ledger
+  //  identities (cityPedStash, the same shape the cell roster uses), minted
+  //  once per world off a named seed stream and persisted with the rest of
+  //  this file's state. The Vice President is NOT minted: he is whoever the
+  //  polity ledger says is the country's deputy, so the man who is sworn in
+  //  when you die is the man the office called the Vice President.
+  //  president_office.js reads cabinet() so the General on the desk phone is
+  //  the same General standing in the Situation Room.
+  // ============================================================
+  const CABINET_ROLES = [
+    { key: "chief", title: "Chief of Staff", prefix: "", job: "chief of staff", archetype: "professional" },
+    { key: "general", title: "General", prefix: "General", job: "military general", archetype: "military" },
+    { key: "bureau", title: "Bureau Director", prefix: "Director", job: "federal agent", archetype: "professional" },
+    { key: "police", title: "Police Commissioner", prefix: "Commissioner", job: "police commissioner", archetype: "professional" },
+    { key: "treasury", title: "Treasury Secretary", prefix: "Secretary", job: "treasury secretary", archetype: "professional" },
+  ];
+  function surname(n) { const p = String(n || "").trim().split(/\s+/); return p[p.length - 1] || n; }
+  function cabinet() {
+    const S = st();
+    if (!S.cabinet) {
+      S.cabinet = {};
+      const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cabinet") : rng;
+      for (let i = 0; i < CABINET_ROLES.length; i++) {
+        const R = CABINET_ROLES[i];
+        const gender = stream() < 0.68 ? "m" : "f";
+        const name = CBZ.cityMintName ? CBZ.cityMintName(stream, gender) : (R.title + " " + (i + 1));
+        const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: R.archetype, name: name, gender: gender, job: R.job, wealth: 0.7, aggr: 0.2, cash: 300 };
+        if (CBZ.cityPedStash) { try { CBZ.cityPedStash(obj); } catch (e) {} }
+        S.cabinet[R.key] = { name: name, sid: obj._sid || ("cab_" + R.key), role: R.title, gender: gender, dead: false, refused: 0 };
+      }
+    }
+    const out = {};
+    for (let i = 0; i < CABINET_ROLES.length; i++) {
+      const R = CABINET_ROLES[i], c = S.cabinet[R.key];
+      if (!c) continue;
+      out[R.key] = { name: c.name, sid: c.sid, role: c.role, gender: c.gender, dead: !!c.dead,
+        display: R.prefix ? (R.prefix + " " + surname(c.name)) : c.name };
+    }
+    const rec = seatRec() || countryRecAny();
+    const vpSid = rec && rec.office ? rec.office.deputy : null;
+    let vpName = null;
+    if (vpSid && CBZ.officials && CBZ.officials.identityOf) { try { const id = CBZ.officials.identityOf(vpSid); vpName = id && id.name; } catch (e) {} }
+    out.vp = vpSid ? { name: vpName || "the Vice President", sid: vpSid, role: "Vice President", dead: false,
+      display: vpName ? "Vice President " + surname(vpName) : "The Vice President" } : null;
+    return out;
+  }
+
+  // ============================================================
+  //  §3b  THE SITUATION ROOM IS PEOPLE. Three officers stand at the table
+  //  while you hold the seat. Walk up to one and he tells you what he wants
+  //  to do, read off the same live state the wall screen draws; you give him
+  //  one of two answers. Every yes is a real order through BUTTONS (the same
+  //  gate, price and refusal statecraft always had). A dead officer stays
+  //  dead and his desk goes quiet: shoot the General and there is nobody to
+  //  put soldiers on the street.
+  // ============================================================
+  const OFF = { peds: {}, t: 0 };
+  let CONV = null;
+  function gateOk(key) {
+    const h = seat(), B = BUTTONS[key];
+    if (!h || !B) return false;
+    try { return !!B.gate(h).ok; } catch (e) { return false; }
+  }
+  function lastAttackNear() { const S = st(); return day() - (S.lastAttackDay | 0) <= 1 && S.attacksDone > 0; }
+  function militiaName() {
+    try { const l = CBZ.militia && CBZ.militia.list ? CBZ.militia.list() : []; return l.length ? (l[0].name || "the hills") : null; } catch (e) { return null; }
+  }
+  // Every proposal is { line, key?, yes?, no?, ok?, nope? }. No key = a report.
+  function proposal(role) {
+    const T = status();
+    const cold = T.approval < 30;             // a weak president gets less deference
+    const sir = cold ? "" : ", sir";
+    if (role === "general") {
+      const rec = seatRec();
+      if (cabinetDead("general")) return { line: "" };
+      if (rec && rec.govType === "dictatorship" && gateOk("crown")) return {
+        line: "The officers would kneel" + sir + ". A crown settles the question of who comes after you, for good.",
+        key: "crown", yes: "Then crown me", no: "No crowns", ok: "It will be done in the morning.", nope: "As you wish.",
+      };
+      if ((ATT.armed || lastAttackNear()) && gateOk("martial")) return {
+        line: (ATT.armed ? "They are coming again, " + (ATT.armed.at && ATT.armed.at.gate ? "for this gate" : "for the market") : "They hit us yesterday") +
+          ". Give me soldiers on the streets and I'll have checkpoints up before dark.",
+        key: "martial", yes: "Put the soldiers out", no: "Not on our own streets", ok: "Trucks are rolling.", nope: "Then we wait for the next one.",
+      };
+      const mil = militiaName();
+      if (mil && gateOk("crackdown")) return {
+        line: "There's a private army out of " + mil + " answering to nobody. I can break it up this week.",
+        key: "crackdown", yes: "Break it up", no: "Leave them", ok: "My men move tonight.", nope: "They'll only grow.",
+      };
+      if (T.threat.members > 0 && T.emergency < 50 && gateOk("emergency")) return {
+        line: "Every order I get goes through three committees. Declare an emergency and I stop asking permission.",
+        key: "emergency", yes: "Declare it", no: "The law stands", ok: "Understood. The papers will scream.", nope: "Then the committees can fight the cell.",
+      };
+      if (T.emergency >= 50 && gateOk("fascism")) return {
+        line: "The emergency has held. The men want one flag and no parties. Say it and it's done.",
+        key: "fascism", yes: "One state", no: "Not that", ok: "One state.", nope: "They'll be disappointed.",
+      };
+      return { line: T.wall && T.wall.ordered && !T.wall.done ? "The engineers are on the wall, " + T.wall.built + " of " + T.wall.total + " sections done. The garrison is at readiness." : "The garrison is at readiness. Nothing on the board I'd move men for today." };
+    }
+    if (role === "bureau") {
+      if (RAID.phase) return { line: "My people are already moving. Pray it's clean." };
+      if (gateOk("bureau")) return {
+        line: "We have a thread on the Sons of the Dune. " + T.threat.members + " of them, a safehouse in Dry Gulch. Give me the word and my people go in.",
+        key: "bureau", yes: "Go in", no: "Keep watching", ok: "Cars are leaving the gate now.", nope: "We keep watching. They keep planning.",
+      };
+      if (gateOk("wall") && T.threat.supply > 0) return {
+        line: "Their supply walks across the Saltlands at night. A wall along that line starves them.",
+        key: "wall", yes: "Build the wall", no: "No wall", ok: "I'll tell the engineers.", nope: "Then the runners keep running.",
+      };
+      if (!T.threat.intel && T.threat.members > 0) return { line: "Nothing actionable. The cell hasn't surfaced yet. When they move, we'll see them." };
+      return { line: T.threat.members > 0 ? "We're watching " + T.threat.members + " of them. Nothing moves yet." : "The board is clear. For now." };
+    }
+    if (role === "police") {
+      const murders = (CBZ.approvalState && CBZ.approvalState.murders7d && seat()) ? CBZ.approvalState.murders7d(seat().id) : 0;
+      const pub = CBZ.presidentPublic;
+      let protests = 0;
+      if (pub && pub.protests) { try { protests = (pub.protests() || []).length; } catch (e) {} }
+      if ((protests > 0 || murders >= 5) && gateOk("curfew")) return {
+        line: protests > 0 ? "There are people at your gate and more coming. A curfew clears the streets after dark." : murders + " killings this week. A curfew empties the streets after dark.",
+        key: "curfew", yes: "Impose the curfew", no: "No curfew", ok: "Sirens at sundown.", nope: "Then we take our chances at night.",
+      };
+      if ((ATT.armed || lastAttackNear() || T.approval < 35) && gateOk("surge")) return {
+        line: "I can put a lot more cars where the trouble is. Today, if you want it.",
+        key: "surge", yes: "Put them out", no: "Keep it normal", ok: "You'll see them within the hour.", nope: "Normal it is.",
+      };
+      if (gateOk("police")) return {
+        line: "I'm short on every shift. Fund six more officers and you'll see them on the corners.",
+        key: "police", yes: "Fund them", no: "Not this year", ok: "Thank you" + sir + ".", nope: "The corners stay empty, then.",
+      };
+      if (gateOk("amnesty") && T.approval < 45) return {
+        line: "The cells are full of small cases. An amnesty clears them and buys some goodwill on the street.",
+        key: "amnesty", yes: "Grant it", no: "They stay in", ok: "The doors open at noon.", nope: "Understood.",
+      };
+      return { line: "The force is where it should be. Quiet day, as quiet as they get." };
+    }
+    return { line: "" };
+  }
+  function cabinetDead(role) { const S = st(); return !!(S.cabinet && S.cabinet[role] && S.cabinet[role].dead); }
+  function officerAt(role) {
+    const st_ = ROOM.stations || [];
+    for (let i = 0; i < st_.length; i++) if (st_[i].role === role) return st_[i];
+    return null;
+  }
+  function releaseOfficer(role) {
+    const p = OFF.peds[role];
+    OFF.peds[role] = null;
+    if (!p || p.dead) return;
+    if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); return; } catch (e) {} }
+    try {
+      if (p.group && p.group.parent) p.group.parent.remove(p.group);
+      const arr = CBZ.cityPeds; if (arr) { const i = arr.indexOf(p); if (i >= 0) arr.splice(i, 1); }
+    } catch (e) {}
+  }
+  function postOfficer(role) {
+    const at = officerAt(role);
+    const c = cabinet()[role];
+    if (!at || !c || c.dead || !CBZ.cityPostNpc) return null;
+    const R = CABINET_ROLES.filter(function (r) { return r.key === role; })[0];
+    let p = null;
+    try {
+      p = CBZ.cityPostNpc(at.x, at.z, {
+        job: R.job, archetype: R.archetype, gender: c.gender, pin: true, face: at.face,
+        armed: role === "general", aggr: 0.05, wealth: 0.7, src: "presidency:officer",
       });
-    });
-    if (CBZ.interactions.describe) {
+    } catch (e) { p = null; }
+    if (!p) return null;
+    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role;
+    OFF.peds[role] = p;
+    if (CBZ.interactions && CBZ.interactions.registerFor) {
       try {
-        CBZ.interactions.describe("prespad", function () { return { label: "Situation Room console", note: "orders that move the country" }; });
-        CBZ.interactions.describe("presdoor", function () { return { label: "Steel door", note: "the Situation Room" }; });
+        CBZ.interactions.registerFor(p, {
+          id: "pres-officer-" + role, slot: "e", prio: 40, campaignSafe: true,
+          label: function () { return "Talk to " + c.display; },
+          canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
+          onSelect: function () { talkTo(role); },
+        });
       } catch (e) {}
+    }
+    return p;
+  }
+  function sayPed(ped, line) { if (ped && line && CBZ.citySay) { try { CBZ.citySay(ped, line, "#dfe7ff", Math.min(6, 2 + line.length * 0.04)); } catch (e) {} } }
+  function talkTo(role) {
+    if (CONV) return;
+    const c = cabinet()[role];
+    const ped = OFF.peds[role];
+    if (!c || !ped || ped.dead) return;
+    const pr = proposal(role);
+    if (!pr.line) return;
+    const ui = CBZ.campaignUI;
+    CONV = { role: role, ped: ped, t: 0 };
+    if (!ui || !ui.say) { sayPed(ped, pr.line); CONV = null; return; }
+    if (!pr.key) {
+      ui.say(c.display, pr.line);
+      CONV.clearAt = 3.2 + pr.line.length * 0.035;
+      return;
+    }
+    let pending = null;
+    try {
+      pending = ui.say(c.display, pr.line, [{ id: "yes", label: pr.yes }, { id: "no", label: pr.no }]);
+    } catch (e) { pending = null; }
+    if (!pending || !pending.then) { CONV = null; return; }
+    pending.then(function (choice) {
+      const live = CONV && CONV.role === role;
+      CONV = null;
+      if (!live || (choice !== "yes" && choice !== "no")) return;
+      let r = { ok: false, why: "" };
+      if (choice === "yes") {
+        r = pressButton(pr.key, { quiet: true }) || r;
+        // a refusal is the officer's own sentence, never a system line
+        sayPed(ped, r.ok ? (pr.ok || "Yes, sir.") : String(r.why || "It can't be done today."));
+      } else {
+        const S = st();
+        if (S.cabinet && S.cabinet[role]) S.cabinet[role].refused = (S.cabinet[role].refused | 0) + 1;
+        sayPed(ped, pr.nope || "Understood.");
+      }
+      emitEvent("decision", { source: "officer", who: c.display, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, ok: choice === "yes" ? !!r.ok : true });
+    });
+  }
+  function tickOfficers(dt) {
+    OFF.t -= dt;
+    if (CONV) {
+      // he looks at you while he talks; walking off ends the conversation
+      const P = CBZ.player, p = CONV.ped;
+      CONV.t += dt;
+      if (p && p.group && P && P.pos) {
+        const dx = P.pos.x - p.pos.x, dz = P.pos.z - p.pos.z;
+        p.group.rotation.y = Math.atan2(dx, dz);
+        if (dx * dx + dz * dz > 7.5 * 7.5 || p.dead) { if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) CBZ.campaignUI.clearDialogue(); CONV = null; }
+      }
+      if (CONV && CONV.clearAt && CONV.t > CONV.clearAt) { if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) CBZ.campaignUI.clearDialogue(); CONV = null; }
+    }
+    if (OFF.t > 0) return;
+    OFF.t = 1.0;
+    const S = st();
+    const P = CBZ.player;
+    const r = ROOM.rect;
+    let near = false;
+    if (P && P.pos && r && seat()) {
+      const cx = (r.minX + r.maxX) / 2, cz = (r.minZ + r.maxZ) / 2;
+      near = Math.hypot(P.pos.x - cx, P.pos.z - cz) < 42 && P.pos.y < 2.6;
+    }
+    const st_ = ROOM.stations || [];
+    for (let i = 0; i < st_.length; i++) {
+      const role = st_[i].role, p = OFF.peds[role];
+      if (p && p.dead) {
+        // A DEAD OFFICER STAYS DEAD. His place at the table is empty from now on.
+        if (S.cabinet && S.cabinet[role] && !S.cabinet[role].dead) {
+          S.cabinet[role].dead = true;
+          emitEvent("cabinet-death", { role: role, name: p.name });
+        }
+        OFF.peds[role] = null;
+        continue;
+      }
+      if (near && !p) postOfficer(role);
+      else if (!near && p) releaseOfficer(role);
     }
   }
 
@@ -1493,17 +1578,6 @@
     const h = seat();
     const rec = h ? h.rec : countryRecAny();
     const T = status();
-    // Each cap owns its material so this event-driven status pass can show a
-    // live order in green, an available one in brass and a refused one in
-    // muted red without recolouring any shared material elsewhere.
-    for (let i = 0; i < ROOM.pads.length; i++) {
-      const pad = ROOM.pads[i], B = BUTTONS[pad.key];
-      if (!pad.cap || !pad.cap.material || !pad.cap.material.color || !B) continue;
-      let active = false, ready = false;
-      try { active = !!B.live(); } catch (e) {}
-      if (h) { try { ready = !!B.gate(h).ok; } catch (e) {} }
-      pad.cap.material.color.setHex(active ? 0x4fc487 : (ready ? BRASS : 0x873d3d));
-    }
     const cc = b.cc;
     const COLW = 1440;   // the text column. The map is height-limited and
                          // square, so extra panel width would only be margin.
@@ -1517,28 +1591,28 @@
     cc.strokeStyle = "#2c3a4e"; cc.lineWidth = 3; cc.strokeRect(6, 6, b.w - 12, b.h - 12);
     cc.textAlign = "left";
     cc.fillStyle = "#8fc1ff"; cc.font = "bold 34px monospace";
-    cc.fillText(fit(T.country ? String(T.country).toUpperCase() + " \u2014 " + String(T.govType || "").toUpperCase()
-      : (rec ? String(rec.name).toUpperCase() + " \u2014 " + String(rec.govType || "").toUpperCase() : "NO COUNTRY"), COLW - 56), 28, 52);
+    cc.fillText(fit(T.country ? String(T.country).toUpperCase() + "   " + String(T.govType || "").toUpperCase()
+      : (rec ? String(rec.name).toUpperCase() + "   " + String(rec.govType || "").toUpperCase() : "NO COUNTRY"), COLW - 56), 28, 52);
     cc.font = "22px monospace"; cc.fillStyle = "#d8e2f2";
     const S = st();
     const W = CBZ.stateWall && CBZ.stateWall.status ? CBZ.stateWall.status() : null;
     const threat = CFG.PRESIDENCY_TERROR
-      ? (T.threat.members + " known members \u00b7 supply " + T.threat.supply + (T.threat.intel ? " \u00b7 safehouse marked" : " \u00b7 no intel")
-         + (T.threat.armed ? " \u00b7 ATTACK ARMED ON " + String(T.threat.target || "an unknown target").toUpperCase() : ""))
+      ? (T.threat.members + " known members, supply " + T.threat.supply + (T.threat.intel ? ", safehouse marked" : ", no intel")
+         + (T.threat.armed ? ", ATTACK ARMED ON " + String(T.threat.target || "an unknown target").toUpperCase() : ""))
       : "quiet";
     const lines = [
       "TREASURY   " + money(T.treasury),
-      "APPROVAL   " + Math.round(T.approval) + "%    TYRANNY " + Math.round(T.tyranny) + "    SCANDAL " + Math.round(T.scandal),
-      "EMERGENCY  " + Math.round(T.emergency) + "%  (100 = the republic ends)",
+      "APPROVAL   " + Math.round(T.approval) + "% in the latest poll",
+      "EMERGENCY  " + (T.emergency > 0 ? Math.round(T.emergency) + "% of emergency powers in force" : "none declared"),
       "THREAT     " + threat,
-      "THE WALL   " + (T.wall ? (T.wall.ordered ? T.wall.built + "/" + T.wall.total + " sections \u00b7 " + (T.wall.manned ? "gaps manned" : "gaps open") + (W && W.breaches ? " \u00b7 " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
+      "THE WALL   " + (T.wall ? (T.wall.ordered ? T.wall.built + "/" + T.wall.total + " sections, " + (T.wall.manned ? "gaps manned" : "gaps open") + (W && W.breaches ? ", " + W.breaches + " breached" : "") : "not ordered") : "no machinery"),
       "BUREAU     " + (T.raid ? ("raid " + T.raid) : (S.raidsOrdered ? S.raidsWon + " won / " + S.raidsLost + " lost" : "standing by")),
     ];
     for (let i = 0; i < lines.length; i++) cc.fillText(fit(lines[i], COLW - 56), 28, 104 + i * 40);
     cc.fillStyle = "#5f708a"; cc.font = "20px monospace";
     cc.fillText(fit("DAY " + T.day + (T.seat
-      ? "  \u00b7  TERM ENDS " + (T.termDay != null ? "DAY " + T.termDay : "\u2014") + (T.impeachDay != null ? "  \u00b7  IMPEACHMENT VOTE DAY " + T.impeachDay : "")
-      : "  \u00b7  YOU DO NOT HOLD THE SEAT"), COLW - 56), 28, b.h - 28);
+      ? " ,  TERM ENDS " + (T.termDay != null ? "DAY " + T.termDay : "none") + (T.impeachDay != null ? " ,  IMPEACHMENT VOTE DAY " + T.impeachDay : "")
+      : " ,  YOU DO NOT HOLD THE SEAT"), COLW - 56), 28, b.h - 28);
     try { paintMap(cc, COLW + 12, 20, b.w - COLW - 32, b.h - 40, T); } catch (e) {}
     b.paint();
   }
@@ -2050,7 +2124,7 @@
     } else {
       S.raidsLost++;
       if (recId) shock(recId, RAID_LOSS_APPROVAL);
-      news("Bureau raid repelled at the Saltlands safehouse · " + raidCasualties() + " agent(s) down. The cell is emboldened.");
+      news("Bureau raid repelled at the Saltlands safehouse, " + raidCasualties() + " agent(s) down. The cell is emboldened.");
       if (CBZ.cityEvent) { try { CBZ.cityEvent("terror-threat", { panic: 3 }); } catch (e) {} }
     }
     // walk survivors home (their post is done); the dead stay where they fell
@@ -2246,7 +2320,7 @@
     S.terms = (S.terms | 0) + 1;
     const termDay = h.rec.office && h.rec.office.termDay != null ? h.rec.office.termDay : null;
     emitEvent("reelected", { day: d, seat: h.id, terms: S.terms, termDay: termDay });
-    big("RE-ELECTED · FOUR MORE YEARS");
+    big("RE-ELECTED FOR ANOTHER TERM");
     news("The count is in: " + (h.title || "the President") + " holds " + (h.rec.name || "the country") + " for a second term.");
     const m = recruitBomber();
     orders("Chief of Staff",
@@ -2384,7 +2458,7 @@
         rec.office.holder = rec.office.deputy || null;
         rec.office.deputy = null;
         rec.vacuum = d;
-        big("CONVICTED · REMOVED FROM OFFICE");
+        big("CONVICTED, REMOVED FROM OFFICE");
         news("The Senate convicts. The presidency is stripped; the marshals have a warrant.");
         S.arrestArmed = true; S.arrestT = 0; S.arrestWhy = "Corruption in office";
         orders("Marshals Service", "You have " + ARREST_GRACE_SEC + " seconds to surrender at the Mansion. Cross the border and you are a fugitive instead.", 2);
@@ -2434,7 +2508,8 @@
     // interactions.js parses after this file in some entry paths. Retry the
     // two idempotent registrations even when the room itself is already built.
     wireZones();
-    wireOfficeZones();
+    tickOfficers(dt);
+    tickSeam(dt);
     declareCell();
     // the door — slides for the sitting head of state, seals behind anyone
     // else. The collider IS the lock; there is no invisible wall.
@@ -2480,6 +2555,214 @@
   });
 
   // ============================================================
+  //  §10  THE SEAM — who is President, where he will be today, and what the
+  //  country does the moment somebody kills him. Hitman mode (agency.js)
+  //  plans its finale against exactly these four reads, so their shapes are
+  //  a contract:
+  //    current()          { kind:"player"|"npc"|"vacant", ped, sid, name, title, seatId }
+  //    schedule()         today's public appearances (president_public.js owns
+  //                       the diary; this is the stable name other modes call)
+  //    onAssassinated(cb) cb({ victim:{kind,name,sid}, cause, at:{x,z},
+  //                       successor:{kind,name,sid,how}, day }) for ANY death
+  //                       of the sitting head of state, player or NPC
+  //    lockdown()         { active, since, until, reason }
+  //  The succession itself is officials.js's (deputy sworn in, else vacuum).
+  //  This file adds what a country does on top: a national emergency, a
+  //  lockdown of the capital, and a junta when nobody legal is left to sit.
+  // ============================================================
+  const PLAYER_SID_ = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
+  const LOCKDOWN_DAYS = 1.4;          // ~3.5 real minutes of roadblocks and closed gates
+  const SEAM = { subs: [], fired: {}, lock: { active: false, since: 0, until: 0, reason: null }, pollT: 0, lastSid: null, lastPed: null, wrapped: false };
+  function dayTime() { return CBZ.dayTime ? CBZ.dayTime() : day(); }
+  function presRec() {
+    const h = seat(); if (h) return h.rec;
+    const S = st();
+    if (S.lastSeatId && CBZ.polity && CBZ.polity.get) { try { const r = CBZ.polity.get(S.lastSeatId); if (r) return r; } catch (e) {} }
+    return countryRecAny();
+  }
+  function nameOfSid(sid) {
+    if (!sid) return null;
+    if (CBZ.officials && CBZ.officials.identityOf) { try { const id = CBZ.officials.identityOf(sid); if (id && id.name) return id.name; } catch (e) {} }
+    if (CBZ.cityLedgerEntry) { try { const e = CBZ.cityLedgerEntry(sid); if (e && e.name) return e.name; } catch (e) {} }
+    return null;
+  }
+  function titleOfRec(rec) {
+    if (CBZ.officials && CBZ.officials.titleFor) { try { return CBZ.officials.titleFor(rec); } catch (e) {} }
+    return "President";
+  }
+  function current() {
+    const h = seat();
+    if (h) {
+      const P = CBZ.player;
+      let nm = null;
+      if (CBZ.cityPlayerName) { try { nm = CBZ.cityPlayerName(); } catch (e) {} }
+      return { kind: "player", ped: P || null, sid: PLAYER_SID_, name: nm || (P && P.name) || "The President", title: h.title || "President", seatId: h.id };
+    }
+    const rec = presRec();
+    const sid = rec && rec.office ? rec.office.holder : null;
+    if (!sid) return { kind: "vacant", ped: null, sid: null, name: null, title: null, seatId: rec ? rec.id : null };
+    const site = mansionSite();
+    const ped = site && site.actor && !site.actor.dead && site.actor._sid === sid ? site.actor : null;
+    return { kind: "npc", ped: ped, sid: sid, name: nameOfSid(sid) || (ped && ped.name) || "The President", title: titleOfRec(rec), seatId: rec.id };
+  }
+  function schedule(d) {
+    const pub = CBZ.presidentPublic;
+    if (pub && typeof pub.schedule === "function") { try { return pub.schedule(d) || []; } catch (e) {} }
+    return [];
+  }
+  function onAssassinated(cb) {
+    if (typeof cb !== "function") return function () {};
+    SEAM.subs.push(cb);
+    return function off() { const i = SEAM.subs.indexOf(cb); if (i >= 0) SEAM.subs.splice(i, 1); };
+  }
+  function lockdownRead() {
+    const L = SEAM.lock;
+    return { active: !!L.active, since: L.since, until: L.until, reason: L.reason };
+  }
+  function setLockdown(active, reason) {
+    const L = SEAM.lock;
+    if (active) {
+      L.active = true; L.since = dayTime(); L.until = L.since + LOCKDOWN_DAYS; L.reason = reason || "assassination";
+    } else {
+      if (!L.active) return;
+      L.active = false; L.reason = null;
+    }
+    emitEvent("lockdown", { active: !!active, reason: reason || null, until: L.until });
+  }
+  // THE CAUSE. officials.js's wrap swallows cityKillPed's third argument, so
+  // this file keeps its own thin wrap that only WRITES the cause onto the body
+  // before the chain runs (the officials subscriber then reads it back).
+  function wrapKillCause() {
+    if (SEAM.wrapped) return;
+    const orig = CBZ.cityKillPed;
+    if (typeof orig !== "function") return;
+    SEAM.wrapped = true;
+    if (orig._presCauseWrap) return;
+    const w = function (ped, imp, cause) {
+      if (ped && !ped.dead) {
+        let c = cause;
+        if (!c && imp) c = imp.cause || imp.kind || imp.type || (imp.explosive ? "explosion" : null) || (imp.weapon ? "shot" : null);
+        ped._presCause = c || "killed";
+        const P = CBZ.player;
+        ped._presByPlayer = !!(imp && (imp.byPlayer || imp.src === "player" || imp.attacker === P || imp.from === P));
+      }
+      return orig.apply(this, arguments);
+    };
+    for (const k in orig) { if (/Wrap(ped)?$/.test(k)) w[k] = orig[k]; }
+    w._presCauseWrap = true;
+    CBZ.cityKillPed = w;
+  }
+  function news(headline, opts) {
+    const O = CBZ.presidentOffice;
+    if (O && typeof O.news === "function") { try { O.news(headline, opts || { kind: "breaking" }); return; } catch (e) {} }
+  }
+  // WHO SITS NOW. officials.js has already moved the ledger by the time the
+  // death subscriber runs: the deputy holds the seat, or nobody does. A seat
+  // with nobody in it during a national emergency does not stay empty. The
+  // General takes it, the regime becomes a dictatorship, and the dressing on
+  // the Mansion (president_regime.js) turns into a junta's. The same happens
+  // if the country was already under emergency rule past 70: the army does
+  // not hand power to a civilian in the middle of a crisis it was given.
+  function resolveSuccession(rec) {
+    const sid = rec && rec.office ? rec.office.holder : null;
+    const p = politics();
+    const emergency = (p && p.emergencyPowers) || 0;
+    const cab = cabinet();
+    const gen = cab.general && !cab.general.dead ? cab.general : null;
+    if (gen && rec && rec.office && (!sid || (emergency >= 70 && h01(day(), emergency | 0, 7717) < 0.6))) {
+      rec.office.holder = gen.sid;
+      rec.office.deputy = null;
+      if (CBZ.regimes && CBZ.regimes.transition) { try { CBZ.regimes.transition(rec, "dictatorship", day(), -4); } catch (e) {} }
+      return { kind: "npc", name: gen.name, sid: gen.sid, how: "junta" };
+    }
+    if (sid) return { kind: sid === PLAYER_SID_ ? "player" : "npc", name: nameOfSid(sid) || "the Vice President", sid: sid, how: "deputy" };
+    return { kind: "vacant", name: null, sid: null, how: "vacuum" };
+  }
+  function fireAssassinated(rec, sid, ped) {
+    if (!sid || SEAM.fired[sid]) return;
+    SEAM.fired[sid] = true;
+    const wasPlayer = sid === PLAYER_SID_;
+    const P = CBZ.player;
+    const body = wasPlayer ? P : ped;
+    const at = body && body.pos ? { x: body.pos.x, z: body.pos.z } : null;
+    const cause = wasPlayer ? ((P && P._deathCause) || "killed") : ((ped && ped._presCause) || "killed");
+    let pname = null;
+    if (wasPlayer && CBZ.cityPlayerName) { try { pname = CBZ.cityPlayerName(); } catch (e) {} }
+    const victim = { kind: wasPlayer ? "player" : "npc", name: wasPlayer ? (pname || (P && P.name) || "The President") : (nameOfSid(sid) || (ped && ped.name) || "The President"), sid: sid };
+    const successor = resolveSuccession(rec);
+    // A NATIONAL EMERGENCY, in the fields that already mean one:
+    // emergencyPowers (regimes.js's ladder reads it), and a rally round the
+    // new holder, who inherits a grieving country rather than an angry one.
+    const pol = politics();
+    if (pol) pol.emergencyPowers = clamp((pol.emergencyPowers || 0) + 25, 0, 100);
+    if (rec && successor.sid) shock(rec.id, 6);
+    setLockdown(true, "assassination");
+    SEAM.lastSid = successor.sid;
+    SEAM.lastPed = null;
+    const payload = { victim: victim, cause: cause, at: at, successor: successor, day: day(), byPlayer: !!(ped && ped._presByPlayer) };
+    emitEvent("assassinated", payload);
+    emitEvent("succession", { successor: successor, day: day() });
+    emitEvent("emergency", { level: (pol && pol.emergencyPowers) || 0, reason: "assassination" });
+    for (let i = 0; i < SEAM.subs.length; i++) { try { SEAM.subs[i](payload); } catch (e) {} }
+    const who = victim.name;
+    news(who + " is dead", { kind: "breaking" });
+    if (successor.how === "junta") news("The army has taken the capital. " + successor.name + " speaks for the nation.", { kind: "breaking" });
+    else if (successor.sid) news(successor.name + " sworn in", { kind: "breaking" });
+    // THE PLAYER'S OWN DEATH IN OFFICE is the end of the story he was in. It
+    // gets the one full-screen beat the phone keeps for endings, dressed as
+    // what it is in the world: tomorrow's front page. The world goes on
+    // without him (officials.js already swore the next one in).
+    if (wasPlayer && CBZ.campaignUI && CBZ.campaignUI.takeover) {
+      setTimeout(function () {
+        try {
+          CBZ.campaignUI.takeover({
+            eyebrow: "LATE EDITION",
+            title: "THE PRESIDENT IS DEAD",
+            sub: successor.how === "junta" ? "The army holds the capital" : (successor.name ? successor.name + " takes the oath" : "The capital in lockdown"),
+            body: "Shot in the " + (st().terms > 1 ? "second" : "first") + " term. The Mansion gates are closed and soldiers stand at every road in.",
+          });
+        } catch (e) {}
+      }, 3200);
+    }
+  }
+  if (CBZ.onOfficialDeath) CBZ.onOfficialDeath(function (rec, sid) {
+    if (!rec || rec.kind !== "country" || !sid) return;
+    // Only the man who SAT. officials.js also calls its subscribers when a
+    // deputy dies; the last polled holder is the difference.
+    if (sid !== SEAM.lastSid) return;
+    const pr = presRec();
+    if (pr && rec.id !== pr.id && rec.id !== st().lastSeatId) return;
+    fireAssassinated(rec, sid, arguments[2] || null);
+  });
+  function tickSeam(dt) {
+    wrapKillCause();
+    SEAM.pollT -= dt;
+    if (SEAM.pollT > 0) return;
+    SEAM.pollT = 0.5;
+    const cur = current();
+    // FALLBACK for a body that died without passing cityKillPed (a sweep that
+    // stamps .dead directly): the head of state we polled is dead and nobody
+    // fired. Succession did not run through officials.js either, so this is
+    // the one place that has to ask for it.
+    if (SEAM.lastPed && SEAM.lastPed.dead && SEAM.lastSid && !SEAM.fired[SEAM.lastSid]) {
+      const rec = presRec();
+      if (rec && rec.office && rec.office.holder === SEAM.lastSid) {
+        rec.office.holder = rec.office.deputy || null;
+        rec.office.deputy = null;
+      }
+      fireAssassinated(rec, SEAM.lastSid, SEAM.lastPed);
+      return;
+    }
+    if (cur.sid && cur.sid !== SEAM.lastSid) {
+      SEAM.lastSid = cur.sid;
+      if (cur.sid === PLAYER_SID_) delete SEAM.fired[PLAYER_SID_];   // a new term is a new life
+    }
+    if (cur.ped && cur.kind === "npc") SEAM.lastPed = cur.ped;
+    else if (cur.kind === "player") SEAM.lastPed = null;
+    if (SEAM.lock.active && dayTime() > SEAM.lock.until) setLockdown(false);
+  }
+
+  // ============================================================
   //  §8  PERSISTENCE — the P-wave dual-rider pattern with the one-shot
   //  install guard (module-local boolean, checked BEFORE ever wrapping).
   // ============================================================
@@ -2497,6 +2780,8 @@
       wasPresident: !!S.wasPresident, lastSeatId: S.lastSeatId || null,
       terms: S.terms | 0, voteDay: S.voteDay, campaignFor: S.campaignFor,
       attacksSeen: S.attacksSeen | 0,
+      cabinet: S.cabinet ? JSON.parse(JSON.stringify(S.cabinet)) : null,
+      lock: SEAM.lock.active ? { since: SEAM.lock.since, until: SEAM.lock.until, reason: SEAM.lock.reason } : null,
     };
   }
   function apply(obj) {
@@ -2521,6 +2806,8 @@
     // whatever has already happened, so an old blob does not price every past
     // attack into today's scandal.
     S.attacksSeen = obj.attacksSeen != null ? (obj.attacksSeen | 0) : (S.attacksDone | 0);
+    S.cabinet = obj.cabinet && typeof obj.cabinet === "object" ? obj.cabinet : null;
+    if (obj.lock && isFinite(obj.lock.until)) { SEAM.lock.active = true; SEAM.lock.since = obj.lock.since; SEAM.lock.until = obj.lock.until; SEAM.lock.reason = obj.lock.reason || "assassination"; }
   }
   function stamp() { const led = g.cityWorld; if (led && typeof led === "object") led.pres = serialize(); }
   let _wrapsDone = false;
@@ -2606,7 +2893,7 @@
       ladderCopies: 3,
       ladderCopyFiles: ["officials.js (owner)", "contracts.js", "elections.js"],
       // reachable producers for the once-produce-less govTypes
-      govTypeProducers: (CBZ.regimeDeclareDoctrine ? 1 : 0) + (ROOM.pads.length ? 1 : 0),
+      govTypeProducers: (CBZ.regimeDeclareDoctrine ? 1 : 0) + ((ROOM.stations && ROOM.stations.length) ? 1 : 0),
       transitions: {
         dictator: !!(CBZ.gov && CBZ.gov.decree && CBZ.regimes),          // emergency decree -> regimes ladder
         king: !!(CBZ.crown && CBZ.crown.selfCrown),                       // dictatorship -> monarchy
@@ -2621,11 +2908,12 @@
         stateSymbols: (IA.stateSymbols | 0) + (ROOM.stateSymbols | 0) + architecture.length,
         emptyDecor: IA.emptyDecor | 0,
         roomNames: (IA.roomNames || []).concat(ROOM.group ? ["Situation Room"] : []),
-        orderProps: (IA.orderProps || []).concat(ROOM.pads.map(function (p) { return p.key; })),
+        orderProps: (IA.orderProps || []).concat((ROOM.stations || []).map(function (p) { return "officer:" + p.role; })),
         architecture: architecture,
       },
       officeOrderProps: IA.orderProps ? IA.orderProps.length : 0,
-      officeOrderZones: officeZoneCount,
+      officeOrderZones: 0,
+      officersPosted: Object.keys(OFF.peds).filter(function (k) { return !!OFF.peds[k]; }).length,
     };
   }
   CBZ.presidencyAudit = audit;
@@ -2644,6 +2932,15 @@
       return out;
     },
     seat: seat,
+    // THE SEAM (§10) — stable names other modes (Hitman) code against.
+    current: current,
+    schedule: schedule,
+    onAssassinated: onAssassinated,
+    lockdown: lockdownRead,
+    cabinet: cabinet,
+    // officers at the Situation Room table (probe surface)
+    officers: function () { const o = {}; for (const k in OFF.peds) if (OFF.peds[k]) o[k] = OFF.peds[k]; return o; },
+    proposal: proposal,
     // THE PUBLIC READ + THE PUBLIC BUS. Other systems (the HUD strip, the
     // Chief of Staff's missions, the motorcade) consume exactly these two and
     // nothing else out of this file's internals.
