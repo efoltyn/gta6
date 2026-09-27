@@ -685,7 +685,7 @@
       "<div class='cpStars'></div>" +
       "<div class='cpRow bounty'><span>Bounty</span><b>$0</b></div>" +
       "<div class='cpRow worth'><span>Net worth</span><b>$0</b></div>" +
-      "<div class='cpHint'><b>[I]</b> Inventory &nbsp; <b>[O]</b> Hide</div>" +
+      "<div class='cpHint'><b>[I]</b> Inventory &nbsp; <b>[Shift+O]</b> Hide</div>" +
       "</div></div>";
     document.body.appendChild(panel);
     pCanvas = panel.querySelector("canvas");
@@ -1029,7 +1029,7 @@
       // (owner's rule: I must always open the inventory — only death, a menu,
       // or a live "i" world-interaction may claim the key).
       const isI = (k === "i" || e.code === "KeyI") && !CBZ.player.dead;
-      if (k !== "o" && !isI) return;
+      if (!(k === "o" && e.shiftKey) && !isI) return;
     }
     if (k === "i" || e.code === "KeyI") {
       // CONTEXT PRIORITY: if a world interaction is currently offered on the
@@ -1044,9 +1044,10 @@
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       e.stopPropagation();
       openInv();
-    } else if (k === "o") {
-      // [O] HIDE-HUD — H was already owned by heists/realestate/interact
-      // (our 4th handler made H "open a relic"); O is verified-unbound.
+    } else if (k === "o" && e.shiftKey) {
+      // [Shift+O] HIDE-HUD. Plain [O] used to be swallowed here in the
+      // capture phase, so playergang.js's crew/orders menu (also [O]) could
+      // never open. Plain O now falls through to the crew menu.
       e.preventDefault();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       e.stopPropagation();
