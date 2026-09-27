@@ -2713,37 +2713,25 @@
     }
 
     if (CBZ.bootStep) CBZ.bootStep("island:streets");
-    // ---- STREETS: dark asphalt running in flat, contiguous runs along grid
-    // lines, with a dashed centre line. Hills/mountain break the runs so roads
-    // never float. roadSegs feeds the car scatter below. ----
-    // SURV_ROAD_LAYERS (round 2 of the flicker fix): the polygonOffset pass
-    // did NOT hold on real hardware (iPad) — mobile TBDR GPUs map offset
-    // factor/units to depth precision differently than SwiftShader, and the
-    // arena laid BOTH road directions at the same y (0.05) with the SAME
-    // material, so every avenue/cross-street intersection was two coplanar
-    // opaque planes z-fighting. The city never flickers because it separates
-    // by GEOMETRY, copying its exact proven constants here:
-    //   ground 0 → avenues +0.04 → cross-streets +0.045 → paint +0.057.
-    // Roads carry NO polygonOffset (pure y-separation, like city asphalt);
-    // only the paint dashes keep the city's decal recipe (offset -2/-2 +
-    // renderOrder 1 + userData.roadPaint so a batch pass can never strip the
-    // offset — the exact guard city/world.js documents). No two planes that
-    // can overlap ever share a y. false = the old 0.05/0.07 offset stack.
-    const LAYERS = !CBZ.CONFIG || CBZ.CONFIG.SURV_ROAD_LAYERS !== false;
-    const ROAD_Y_AVE = LAYERS ? 0.04 : 0.05;     // avenues (run along z)
-    const ROAD_Y_CROSS = LAYERS ? 0.045 : 0.05;  // cross-streets (run along x)
-    const ROAD_Y_PAD = LAYERS ? 0.05 : 0.05;     // forecourt/apron pads — ABOVE both road
-                                                 // levels (owner: gas-station ground flickered
-                                                 // where the pad overlapped an avenue at the
-                                                 // same 0.04), below the 0.057 dashes
-    const PAINT_Y = LAYERS ? 0.057 : 0.07;       // centre-line dashes
-    const roadMat = LAYERS ? skinMat("asphalt")
-      : skinMat("asphalt", { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    roadMat.name = "survival-asphalt";
-    const lineMat = LAYERS
-      ? new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
-      : new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-    const roadSegs = [];
+    // ---- STREETS: a real town's streets (world/island_roads.js) ----------
+    /* The roads used to be fixed-height ribbons of a generic tiling asphalt,
+       avenues and cross-streets overlapping at every crossing (split 5 mm
+       apart so iPad TBDR would not z-fight them), with a yellow dash every
+       6 m and nothing else. Now: layRoadLine only SCANS where a street can
+       run (flat ground, off the shore); after the scan the island road kit
+       turns the runs into pieces and junctions that never overlap (the
+       loop's finalize block), and finishRoads() lays everything once the
+       stations have reported their driveways: road-aligned asphalt, junction
+       squares, 0.15 m sidewalks with curbs, ramps and corner returns, paint,
+       signs and street lights, in 7 draw calls. Every surface follows the
+       terrain, so nothing floats at a hill skirt. surfaceHeightAt is the
+       walkable floor (terrain + sidewalks + station pads); the arena
+       descriptor hands THAT to physics as groundHeightAt. Build code keeps
+       calling the terrain-only groundHeightAt. */
+    const LAYERS = true;          // legacy name; roads no longer stack by height
+    const ROAD_Y_PAD = 0.05;      // legacy constants (no road code reads them)
+    const PAINT_Y = 0.057;
+    const roadSegs = [];          // one per road piece, junction squares excluded (the car scatter reads it)
     const ROADW = 7;
     /* THE STREET GRID, declared HERE rather than beside the code that draws
        it, because the buildings have to be placed with it in mind and they go
@@ -2752,6 +2740,11 @@
        the asphalt was then painted straight through them. */
     const GRID = 40;                 // avenue / cross-street pitch
     const KERB = ROADW / 2 + 1.4;    // corridor half-width plus a verge
+    // Driveways and raised slabs other builders report before finishRoads():
+    //   roadCuts  {x0,x1,z0,z1} world AABB over a sidewalk: the curb there
+    //             becomes a ramped apron (road level up to the 0.15 m top)
+    //   raisePads {x0,x1,z0,z1,top} absolute walkable top (station forecourt)
+    const roadCuts = [], raisePads = [];
 
     // The nearest grid line to a coordinate, and how far off it we are.
     function nearestLine(v, origin) {
@@ -2782,34 +2775,10 @@
       const nx = snapX ? seat : x, nz = snapX ? z : seat;
       return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
     }
-    /* THE ASPHALT. It was one flat 0x33363d plane per run plus ONE MESH PER
-       CENTRE-LINE DASH (a draw call for every 6 m of road). Now every run is
-       baked into ONE world-space mesh wearing the normalised asphalt map —
-       aggregate, patching, hairline cracks — with vertex-colour wear: a
-       dusty, sun-bleached kerb edge, darker tyre tracks down each lane, and
-       slow patchwork along the length. All the dashes are ONE mesh too. */
-    const roadParts = [], dashParts = [];
-    function roadGeo(x, z, w, len, vertical, y) {
-      const ax = vertical ? w : len, az = vertical ? len : w;         // world extents
-      const nL = Math.max(1, Math.round(len / 3)), nW = 6;
-      const g = new THREE.PlaneGeometry(ax, az, vertical ? nW : nL, vertical ? nL : nW);
-      g.rotateX(-Math.PI / 2);
-      g.translate(x, y, z);
-      const p = g.attributes.position, col = new Float32Array(p.count * 3), uv = new Float32Array(p.count * 2);
-      for (let i = 0; i < p.count; i++) {
-        const wx = p.getX(i), wz = p.getZ(i);
-        const across = (vertical ? wx - x : wz - z) / (w / 2);          // -1..1 across the road
-        const edge = Math.pow(Math.abs(across), 6);                    // kerb dust
-        const track = Math.exp(-Math.pow((Math.abs(across) - 0.5) / 0.14, 2));   // lane tyre lines
-        const patch = fbm2(wx, wz, 11, 0x7a01);
-        let v = 0.060 * (0.86 + 0.3 * patch) * (1 - 0.16 * track) + 0.05 * edge;
-        col[i * 3] = v * 1.02; col[i * 3 + 1] = v; col[i * 3 + 2] = v * 0.97 + 0.004;
-        uv[i * 2] = wx / 3; uv[i * 2 + 1] = wz / 3;
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-      return g;
-    }
+    // where a street can run on each grid line: flat ground, clear of the
+    // shore. Runs are [a, b] metres along the line from cx / cz.
+    const roadRuns = { ave: [[], [], [], [], []], cross: [[], [], [], [], []] };
+    let roadPlan = null, roadNet = null;
     function layRoadLine(fixed, vertical) {
       const step = 4, segs = [];
       let runStart = null;
@@ -2824,22 +2793,32 @@
           runStart = null;
         }
       }
-      segs.forEach(([a, bb]) => {
-        const midT = (a + bb) / 2, len = bb - a;
-        const x = vertical ? fixed : cx + midT, z = vertical ? cz + midT : fixed;
-        // avenues and cross-streets on SPLIT y levels (city constants) so the
-        // planes overlapping at every intersection can never z-fight
-        roadParts.push(roadGeo(x, z, ROADW, len, vertical, vertical ? ROAD_Y_AVE : ROAD_Y_CROSS));
-        const dashes = Math.max(1, Math.floor(len / 6));
-        for (let i = 0; i < dashes; i++) {
-          const tt = a + (i + 0.5) * (len / dashes);
-          const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
-          const dg = new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3);
-          dg.rotateX(-Math.PI / 2); dg.translate(lx, PAINT_Y, lz);
-          dashParts.push(dg);
-        }
-        roadSegs.push({ x, z, len, vertical });
+      const m = Math.round((fixed - (vertical ? cx : cz)) / GRID) + 2;
+      if (m >= 0 && m <= 4) roadRuns[vertical ? "ave" : "cross"][m] = segs;
+    }
+    // the walkable floor: terrain, plus the sidewalk top on a sidewalk, plus
+    // any raised pad; exactly groundHeightAt everywhere else
+    function surfaceHeightAt(x, z) {
+      if (roadNet) return roadNet.surfaceHeightAt(x, z);
+      let y = groundHeightAt(x, z);
+      for (let i = 0; i < raisePads.length; i++) {
+        const p = raisePads[i];
+        if (x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && p.top > y) y = p.top;
+      }
+      return y;
+    }
+    // lay the streets (after the stations have pushed roadCuts / raisePads)
+    function finishRoads() {
+      const kit = CBZ.islandRoadKit;
+      if (roadNet || !kit || !roadPlan) return;
+      roadNet = kit.build({
+        THREE: THREE, root: root, cx: cx, cz: cz, R: R, plan: roadPlan,
+        ground: groundHeightAt, cuts: roadCuts, pads: raisePads,
+        quality: CBZ.qualityLevel, renderer: CBZ.renderer, colliders: CBZ.colliders,
+        onUpdate: CBZ.onUpdate,
+        modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); },
       });
+      CBZ.survRoadStats = roadNet.stats;
     }
 
     /* ---- CARS: a real car silhouette in ONE draw ---------------------------
@@ -2938,44 +2917,63 @@
       return g;
     }
 
-    // ---- GAS STATION (GTA-style): a drive-under canopy on pillars, a row of
-    // fuel pumps, a price totem, and a small glass-fronted shop. The canopy
-    // roof is a height-gated collider so you drive/walk under it freely. ----
-    function makeGasStation(ox, oz) {
-      const gy = groundHeightAt(ox, oz);
-      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), LAYERS
-        ? new THREE.MeshLambertMaterial({ color: 0x41464d })
-        : new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-      // the forecourt apron rides its OWN level above both road planes — it
-      // can overlap an avenue, and coplanar overlap is exactly the TBDR
-      // z-fight the owner saw (SURV_ROAD_LAYERS)
-      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + (LAYERS ? ROAD_Y_PAD : 0.05), oz); pad.receiveShadow = true; root.add(pad);
-      if (LAYERS) pad.renderOrder = 1;
-      const CH = 5.2;
-      [[-6, -3.4], [6, -3.4], [-6, 3.4], [6, 3.4]].forEach(([px, pz]) => box(ox + px, gy + CH / 2, oz + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
-      box(ox, gy + CH + 0.45, oz, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: gy + CH, y1: gy + CH + 0.9 });
-      box(ox, gy + CH + 0.1, oz - 4.9, 14.6, 0.7, 0.25, 0xe53b3b);   // brand stripe
-      box(ox, gy + CH + 0.1, oz + 4.9, 14.6, 0.7, 0.25, 0xe53b3b);
-      for (let i = -1; i <= 1; i++) {
-        const px = ox + i * 4.0;
-        [oz - 1.4, oz + 1.4].forEach((pz) => {
-          box(px, gy + 0.75, pz, 0.7, 1.5, 0.5, 0x2a2d33, { solid: true });
-          box(px, gy + 1.6, pz, 0.85, 0.55, 0.62, 0xff7a1a);          // pump topper
-        });
+    /* ---- GAS STATIONS: world/fuel_station.js builds them (the same builder
+       the city annex uses). They used to be a grey pad, four posts under a
+       white slab, orange boxes for pumps and a yellow card on a stick.
+       placeStations() runs BEFORE the town is scattered: a station needs a
+       whole block frontage (24 m along the street, 26 m deep), and once the
+       houses are down there is never one free. It picks mid-block frontages
+       by a position hash (no rng(): the town's random stream is untouched),
+       on flat ground, on a street that is actually laid there, and seats the
+       lot's front edge on the back of the sidewalk. The station reports its
+       driveways (roadCuts: the sidewalk becomes a ramped apron there) and its
+       raised slabs (raisePads: the walkable floor follows the forecourt). */
+    function makeGasStation(site) {
+      if (!CBZ.buildFuelStation) return null;
+      return CBZ.buildFuelStation({
+        parent: root, x: site.x, z: site.z, y: site.y, rotY: site.rotY,
+        deck: 0.15, walkRise: 0.15, apron: 0,
+        onGlass: function (mesh, wx, wy, wz, span) { allGlass.push({ mesh: mesh, x: wx, y: wy, z: wz, span: span, shattered: false }); },
+        onCut: function (a) { roadCuts.push(a); },
+        onPad: function (a, top) { raisePads.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: a.z1, top: top }); },
+      });
+    }
+    function placeStations(want) {
+      const SZ = CBZ.FUEL_STATION_SIZE || { frontage: 24, depth: 26 };
+      const halfF = SZ.frontage / 2, halfD = SZ.depth / 2, SET = ROADW / 2 + 2 + halfD;
+      const cands = [];
+      for (let k = -2; k <= 2; k++) for (let j = -3; j <= 2; j++) for (const s of [-1, 1]) {
+        cands.push({ vertical: true, line: cx + k * GRID, along: cz + (j + 0.5) * GRID, s: s });
+        cands.push({ vertical: false, line: cz + k * GRID, along: cx + (j + 0.5) * GRID, s: s });
       }
-      box(ox - 9.6, gy + 2.4, oz - 5.6, 0.4, 4.8, 0.4, 0x6a7079, { solid: true });  // price totem
-      box(ox - 9.6, gy + 4.6, oz - 5.6, 2.2, 1.6, 0.3, 0xffd451);
-      // glass-fronted shop
-      const sw = 6, sd = 4.6, sh = 3.4, sxc = ox + 9.6, szc = oz;
-      box(sxc, gy + sh / 2, szc + sd / 2, sw, sh, 0.3, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc - sw / 2 + 0.15, gy + sh / 2, szc, 0.3, sh, sd, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc + sw / 2 - 0.15, gy + sh / 2, szc, 0.3, sh, sd, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc, gy + sh + 0.15, szc, sw, 0.3, sd, 0x9aa0a8, { solid: true, y0: gy + sh, y1: gy + sh + 0.3 });
-      addGlass(root, sxc - 1.95, gy + sh * 0.55, szc - sd / 2, 1.9, sh * 0.78, 0.06, 0, 0, 0, null);
-      addGlass(root, sxc + 1.95, gy + sh * 0.55, szc - sd / 2, 1.9, sh * 0.78, 0.06, 0, 0, 0, null);
-      addGlass(root, sxc - sw / 2 + 0.2, gy + sh * 0.55, szc, 0.06, sh * 0.7, sd * 0.7, 0, 0, 0, null);
-      addGlass(root, sxc + sw / 2 - 0.2, gy + sh * 0.55, szc, 0.06, sh * 0.7, sd * 0.7, 0, 0, 0, null);
-      box(sxc, gy + sh + 0.55, szc - sd / 2 + 0.12, 3, 0.7, 0.2, 0x39c06a);   // STORE sign
+      cands.forEach(function (c) { c.h = h01g(c.line * 1.7 + c.s, c.along * 0.9 + (c.vertical ? 3 : 7), 0x6a5); });
+      cands.sort(function (a, b) { return a.h - b.h; });
+      const sites = [];
+      for (const c of cands) {
+        if (sites.length >= want) break;
+        const x = c.vertical ? c.line + c.s * SET : c.along, z = c.vertical ? c.along : c.line + c.s * SET;
+        const w = c.vertical ? SZ.depth : SZ.frontage, d = c.vertical ? SZ.frontage : SZ.depth;
+        let ok = true, mx = -1e9, mn = 1e9;
+        for (let i = -2; i <= 2 && ok; i++) for (let jj = -2; jj <= 2; jj++) {
+          const px = x + i * w / 4, pz = z + jj * d / 4;
+          if (Math.hypot(px - cx, pz - cz) > R - 16) { ok = false; break; }
+          const h = groundHeightAt(px, pz); if (h > mx) mx = h; if (h < mn) mn = h;
+        }
+        if (!ok || mx - mn > 0.2 || mx > 0.9) continue;
+        // the street in front must really be laid along the whole frontage
+        for (let t = -halfF - 4; t <= halfF + 4; t += 4) {
+          const rx = c.vertical ? c.line : c.along + t, rz = c.vertical ? c.along + t : c.line;
+          if (Math.hypot(rx - cx, rz - cz) >= R - 5 || groundHeightAt(rx, rz) >= 0.5) { ok = false; break; }
+        }
+        if (!ok) continue;
+        if (sites.some(function (p) { return Math.hypot(p.x - x, p.z - z) < 70; })) continue;
+        if (placed.some(function (p) { return Math.abs(p.x - x) < (p.w + w) / 2 + 3 && Math.abs(p.z - z) < (p.d + d) / 2 + 3; })) continue;
+        const rotY = c.vertical ? c.s * Math.PI / 2 : (c.s > 0 ? 0 : Math.PI);
+        sites.push({ x: x, z: z, y: mx, rotY: rotY });
+        placed.push({ x: x, z: z, w: w, d: d });
+      }
+      sites.forEach(makeGasStation);
+      return sites;
     }
 
     // ---- CAR SHOWROOM (GTA dealership): no normal doors — the whole front is
@@ -3043,6 +3041,7 @@
     // place the town in a loose ring, ONLY on flat ground (off the mountain
     // and hill skirts so terrain never pokes through a floor), no overlaps
     const placed = [];
+    const stationSites = placeStations(2);   // gas stations claim their block frontages first
     let attempts = 0, want = Math.max(18, lowIds.length);
     while (placed.length < want && attempts < 1400) {
       attempts++;
@@ -3076,15 +3075,13 @@
       layRoadLine(cx + k * GRID, true);    // avenues (run along z)
       layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
     }
-    {
-      const BGU = THREE.BufferGeometryUtils;
-      const roads = new THREE.Mesh(BGU.mergeBufferGeometries(roadParts, false), roadMat);
-      roads.name = "survival-roads"; roads.receiveShadow = true; root.add(roads);
-      const paint = new THREE.Mesh(BGU.mergeBufferGeometries(dashParts, false), lineMat);
-      paint.name = "survival-road-paint";
-      if (LAYERS) { paint.renderOrder = 1; paint.userData.roadPaint = true; }
-      root.add(paint);
-      roadParts.forEach((g) => g.dispose()); dashParts.forEach((g) => g.dispose());
+    // the scanned runs become pieces + junctions (drawn by finishRoads)
+    if (CBZ.islandRoadKit) {
+      roadPlan = CBZ.islandRoadKit.plan({ cx: cx, cz: cz, GRID: GRID, runs: roadRuns });
+      for (const p of roadPlan.pieces) {
+        const mid = (p.a + p.b) / 2;
+        roadSegs.push({ x: p.vertical ? p.fixed : cx + mid, z: p.vertical ? cz + mid : p.fixed, len: p.b - p.a, vertical: p.vertical });
+      }
     }
 
     // a downtown cluster of tall towers, plus a few outliers, on flat ground
@@ -3142,9 +3139,8 @@
       }
       return null;
     }
-    const gs1 = placeFlat(11, 9); if (gs1) makeGasStation(gs1.x, gs1.z);
-    const gs2 = placeFlat(11, 9); if (gs2) makeGasStation(gs2.x, gs2.z);
     const dl1 = placeFlat(10, 8); if (dl1) makeShowroom(dl1.x, dl1.z);
+    finishRoads();
 
     // park cars along the streets (offset to one lane), skipping building spots
     roadSegs.forEach((seg) => {
@@ -3372,6 +3368,7 @@
       const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const gy = groundHeightAt(x, z);
       if (gy > 0.8) continue;                 // skip hillsides — no floating cubes on the mountain
+      if (onRoad(x, z, 3, 3) || surfaceHeightAt(x, z) > gy + 0.02) continue;   // not in a street corridor or on a forecourt
       const s = 1 + rng() * 2.2;
       const m = box(x, gy + s * 0.4, z, s, s, s, 0x6e675e, { solid: true });
       m.geometry.dispose();
@@ -3394,7 +3391,7 @@
       // published for tools and spawners; physics reads them via the height
       // field, never this list
       islets,
-      hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
+      hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt: surfaceHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;
         const d = (minD || 0) + rng() * ((maxD || R * 0.82) - (minD || 0));
