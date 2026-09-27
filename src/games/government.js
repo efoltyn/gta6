@@ -610,11 +610,10 @@
       return;
     }
     if (!list.length) {
-      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course, come back when a seat's up, or when one comes up the hard way.”</div>";
+      body += "<div style='opacity:.75;line-height:1.5'>No seat is open.</div>";
       C.hud.panel(body + btn("close", "Leave", "#26343c"), Object.assign({ close: function () { C.hud.closePanel(); } }, doctH));
       return;
     }
-    body += "<div style='opacity:.85;margin-bottom:6px'>“Fee's the fee. Signatures are yours to get. Ballot closes when it closes.”</div>";
     const h = Object.assign({ close: function () { C.hud.closePanel(); } }, doctH);
     for (let i = 0; i < list.length && i < 6; i++) {
       (function (o, i) {

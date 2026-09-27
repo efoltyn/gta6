@@ -697,7 +697,7 @@
     if (left === 0)
       return "<span style='color:#7f8794'>Cleaned out, the insurance re-stock is coming.</span>";
     if (S.pry && S.pry.cs === cs)
-      return "<span style='color:#9fe0ff'>Prying… " + Math.round(100 * S.pry.t / PRY_TIME) + "%</span> <span style='color:#7f8794'>· don't move</span>";
+      return "<span style='color:#7f8794'>Don't move</span>";
     // OPEN-STORE BUY: clerk posted + intact case + a buyable piece in your aim →
     // pay the counter and it goes ON YOU (then pawn it later). The WHY hint says
     // it: a wearable asset. (If you'd rather take it, the glass is right there.)
@@ -806,6 +806,9 @@
       else if ((cs.pane && cs.pane.shattered) || piecesLeft(cs) === 0) cancelPry();
       else {
         pr.t += dt;
+        // the slow pry IS the price of silence, so it keeps its time; the
+        // readout is a hairline on the case lid, not a "Prying... N%" line
+        if (CBZ.workLine) CBZ.workLine("jewel-pry", { x: cs.x, y: P.pos.y + 1.25, z: cs.z }, pr.t / PRY_TIME);
         if (pr.t >= PRY_TIME) finishPry(cs);
       }
       if (S.pry) { S.cur = cs; showPrompt(promptText(cs)); return; }

@@ -518,9 +518,9 @@
             welcomeHome(fam, m, P);                       // see the HOMECOMING block above
             if (reactCD <= 0 && (playerHurt || playerHot)) {
               reactCD = 12;
-              if (CBZ.cityFlavor) CBZ.cityFlavor(playerHurt
-                ? "" + (m.name || "Family") + ": “You're bleeding, get inside.”"
-                : "" + (m.name || "Family") + ": “The whole block's watching you. Be careful.”", "#9fd0ff");
+              if (CBZ.citySay) CBZ.citySay(m, playerHurt
+                ? "You're bleeding, get inside."
+                : "The whole block's watching you. Be careful.", "#9fd0ff", 2.6);
             }
             continue;
           }

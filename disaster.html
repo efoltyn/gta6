@@ -457,14 +457,11 @@ document.body.appendChild(b);}}catch(e){}})();
      of being refused by a mode enum. Loads before every consumer; flag
      MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
 <script src="src/systems/modecaps.js?v=caps1"></script>
-<!-- ONE LINE, ONE SURFACE. Four DOM layers render speech into the same
-     bottom-centre band (#campaignDialogue / #pinteractSay / #citySpeech /
-     #hint), and hud.css's ladder OFFSETS a collision rather than suppressing
-     it — which on touch, where #hint wears the subtitle skin and every floor
-     collapses to the same 120px, is the "two layers of text slightly offset"
-     bug. This is the claim desk that decides which surface owns a sentence.
-     Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
-<script src="src/systems/subtitlebus.js?v=bare1"></script>
+<!-- SPEECH OVER THE SPEAKER'S HEAD: the one mouth of every game (CBZ.speech).
+     A spoken line is a few words pinned above the speaker in world space; there
+     is no subtitle band. Loads before every caller (social.js, interact.js,
+     campaign_ui.js, the Hitman/President rooms). -->
+<script src="src/systems/speech.js?v=overhead1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in

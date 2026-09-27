@@ -155,11 +155,25 @@
      subtitle skin (#hint.hint-sub). `_hintT` is declared before showHint
      because hideHint zeroes it during boot. */
   let _hintT = 0;
+  /* SPEECH NEVER REACHES THE HUD (owner, 2026-09-27: "you don't need to see
+     the dialogue in the HUD"). A person's words go over his head through
+     CBZ.speech.say; a quoted line arriving here has lost its speaker, so it is
+     not shown at all. Shapes: `Name: "words"`, `"words"`, `Name says "words"`. */
+  const SPOKEN_RE = /^\s*(?:[^:"“]{1,40}:\s*)?[“"‘][^"”]{2,}["”’]?[.!?]?\s*$|“[^”]*\s[^”]*”|^\s*[A-Z][\w .'#-]{0,30}\s(?:says|said|asks|yells|shouts|mutters|whispers|calls)[,:]?\s*[“"]/;
+  let spokenDropped = 0;
+  function spoken(t) {
+    if (!SPOKEN_RE.test(String(t == null ? "" : t))) return false;
+    spokenDropped++;
+    return true;
+  }
+  CBZ.hudIsSpoken = function (t) { return SPOKEN_RE.test(String(t == null ? "" : t)); };
+  CBZ.hudSpokenDropped = function () { return spokenDropped; };
   function paintHint(t) {
     el.hint.classList.toggle("hint-sub", !!(CBZ.touchMode || prison()));
     el.hint.textContent = t; el.hint.classList.add("show");
   }
   function showHint(t, secs) {
+    if (spoken(t)) return;
     if (routeCityText(t, "messages", "City Desk")) { hideHint(); return; }
     if (prison()) {
       // no line in the prison is permanent: a persistent showHint is a
@@ -170,15 +184,11 @@
       _hintT = Math.min(2.6, Math.max(1.4, secs || 2));
       return;
     }
-    // THE HINT IS THE LOWEST-RANKED MOUTH (systems/subtitlebus.js): if a
-    // subtitle surface is already saying this sentence, the hint stays shut.
-    if (CBZ.subtitles && !CBZ.subtitles.claim("hint", "hint", t, secs || 1.6, "", hideHint)) return;
     paintHint(t);
   }
   function hideHint() {
     el.hint.classList.remove("show");
     _hintT = 0;
-    if (CBZ.subtitles) CBZ.subtitles.release("hint");
   }
   function flashHint(t, secs) {
     if (prison()) { showHint(t, secs); return; }
@@ -322,6 +332,7 @@
   const TOAST_ALARM_RE = /\b(?:LOCKDOWN|STRIKE|CUFFED|BACK TO|BUSTED|ALARM|MANHUNT|INCOMING|BRACE|SWEPT|NUKE|POWER OUT|REINFORCEMENTS)\b/i;
 
   function flashToast(t) {
+    if (spoken(t)) return;
     const it = itemShout(t);
     if (it) {
       pickupNote(it.name, { rare: it.rarity === "rare" || it.rarity === "epic", note: it.rarity === "common" ? "" : it.rarity });

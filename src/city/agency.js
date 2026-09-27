@@ -100,19 +100,17 @@
   function news(body) {
     if (CBZ.phoneNotify) { try { CBZ.phoneNotify({ app: "news", from: "City Desk", text: clean(body), priority: 1 }); } catch (e) {} }
   }
-  function say(speaker, line, secs) {
-    if (CBZ.hmSay) { try { CBZ.hmSay(speaker, line, secs); return; } catch (e) {} }
-    if (CBZ.campaignUI && CBZ.campaignUI.say) { try { CBZ.campaignUI.say(speaker, line); } catch (e) {} }
+  // who says it: the ped standing there, or "phone" for a voice on the burner.
+  // (hitman_hands owns the delivery: CBZ.speech, never a subtitle box.)
+  function say(by, line) {
+    if (CBZ.hmSay) { try { CBZ.hmSay(by, line); } catch (e) {} }
   }
   function clearSay() {
     if (CBZ.hmSayClear) { try { CBZ.hmSayClear(); } catch (e) {} }
-    if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) { try { CBZ.campaignUI.clearDialogue(); } catch (e) {} }
   }
   function call(lines, onEnd) {
     if (CBZ.hmCall) { try { return CBZ.hmCall(lines, onEnd); } catch (e) {} }
-    let t = 0;
-    lines.forEach(function (L) { setTimeout(function () { say(L.who, L.line); }, t); t += 2600; });
-    setTimeout(function () { clearSay(); if (onEnd) onEnd(); }, t + 200);
+    if (onEnd) setTimeout(onEnd, 200);
     return null;
   }
   function bark(ped, line, secs) { if (ped && CBZ.citySay) { try { CBZ.citySay(ped, line, "#e8e2d4", secs || 2.6); } catch (e) {} } }
@@ -1109,10 +1107,10 @@
      §10  THE STREET NAME (the Hitman card's opening)
      ================================================================ */
   const NICO_CALL = [
-    { who: BROKER, line: "It's Nico. You up?" },
-    { who: BROKER, line: "I got one for you. Nothing fancy. A guy who owes the wrong people." },
-    { who: BROKER, line: "Envelope's coming under your door. Photo, where he works, where he sleeps." },
-    { who: BROKER, line: "Same as always. Quiet is better. I'll text you where the money is." },
+    { by: "phone", line: "It's Nico. You up?" },
+    { by: "phone", line: "I got one for you. Nothing fancy. A guy who owes the wrong people." },
+    { by: "phone", line: "Envelope's coming under your door. Photo, where he works, where he sleeps." },
+    { by: "phone", line: "Same as always. Quiet is better. I'll text you where the money is." },
   ];
   function bindStreet() {
     if (!CBZ.hitmanBind) return null;
@@ -1661,7 +1659,7 @@
       const shotAt = (mt.voss.hp != null && mt.voss.maxHp != null && mt.voss.hp < mt.voss.maxHp - 1) || mt.men.some(function (q) { return q && (q.dead || (q.hp != null && q.maxHp != null && q.hp < q.maxHp - 1)); });
       if (shotAt && !mt.hot) {
         mt.hot = true; mt.handOut = false;
-        say(HANDLER, "So you read the back page.", 2.4);
+        say(mt.voss, "So you read the back page.");
         hostile(mt.voss); for (let i = 0; i < mt.men.length; i++) hostile(mt.men[i]);
       }
       if (mt.handOut && !mt.hot && mt.voss.group && pl.pos) mt.voss.group.rotation.y = Math.atan2(pl.pos.x - mt.voss.pos.x, pl.pos.z - mt.voss.pos.z);
@@ -1705,11 +1703,15 @@
     ];
     const Dz = D(); if (Dz && Dz.letterbox) Dz.letterbox(true);
     const steps = [];
+    const cut = CBZ.hmPieces || function (l) { return [l]; };
     for (let i = 0; i < lines.length; i++) {
-      const ln = lines[i];
       const shot = i === 0 ? shots[0] : shots[1 + (i % 2)];
-      const dur = Math.min(4.2, 1.9 + ln.length * 0.035);
-      steps.push({ cut: i === 0 || (i % 2 === 1), dur: dur, cam: shot, enter: function () { say(HANDLER, ln, dur + 0.3); } });
+      const bits = cut(lines[i]);
+      for (let j = 0; j < bits.length; j++) {
+        const ln = bits[j];
+        const dur = Math.min(4, 1.6 + ln.length * 0.045);
+        steps.push({ cut: j === 0 && (i === 0 || (i % 2 === 1)), dur: dur, cam: shot, enter: function () { say(v, ln); } });
+      }
     }
     const done = function () {
       if (Dz && Dz.letterbox) Dz.letterbox(false);
@@ -1718,9 +1720,7 @@
     };
     const ok = CBZ.cinePlay ? CBZ.cinePlay(steps, {}, done) : false;
     if (!ok) {
-      let t = 0;
-      lines.forEach(function (ln) { setTimeout(function () { say(HANDLER, ln); }, t); t += 2600; });
-      setTimeout(done, t + 300);
+      call(lines.map(function (ln) { return { by: v, line: ln }; }), done);
     }
   }
   function afterMeet1(mt) {
@@ -1740,7 +1740,7 @@
   function afterMeet2Lines(mt) {
     if (mt.done) return;
     mt.handOut = true;
-    say(HANDLER, "Well?", 2);
+    say(mt.voss, "Well?");
   }
   function handBook() {
     const mt = RT.meet; const a = arc();
@@ -1748,9 +1748,9 @@
     mt.done = true; mt.handOut = false;
     a.choice = "job"; commit();
     call([
-      { who: HANDLER, line: "Good." },
-      { who: HANDLER, line: "He speaks from the Mansion steps in the afternoon. Then the motorcade, out the gate and back." },
-      { who: HANDLER, line: "Find the gap. My car takes you to the Mansion road when you are ready. The ride out is on me." },
+      { by: mt.voss, line: "Good." },
+      { by: mt.voss, line: "He speaks from the Mansion steps in the afternoon. Then the motorcade, out the gate and back." },
+      { by: mt.voss, line: "Find the gap. My car takes you to the Mansion road when you are ready. The ride out is on me." },
     ], null);
     setStep("finale");
     boardDirty();
@@ -1789,10 +1789,10 @@
     setStep("done");
     const F = FO();
     call([
-      { who: "Unknown", line: "You don't know me. I work for the President." },
-      { who: "Unknown", line: "We read the Bureau's cable. The one with your number on it." },
-      { who: "Unknown", line: "The man in the parking lot was going to bury you. Now nobody will. The President would like to keep you." },
-      { who: "Unknown", line: "Your first payment is waiting. Check your phone." },
+      { by: "phone", line: "You don't know me. I work for the President." },
+      { by: "phone", line: "We read the Bureau's cable. The one with your number on it." },
+      { by: "phone", line: "The man in the parking lot was going to bury you. Now nobody will. The President would like to keep you." },
+      { by: "phone", line: "Your first payment is waiting. Check your phone." },
     ], function () {
       if (F && F.drop) F.drop({ pay: 100000, from: "Unknown number", line: function (where) { return "A bag by the bins outside " + where + ". With the President's thanks."; } });
       else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(100000);
@@ -2287,7 +2287,7 @@
       if (q) mt.men.push(q);
     }
     RT.meet = mt;
-    say(HANDLER, "Nothing personal. A man who kills a President cannot exist afterwards.", 3.4);
+    say(mt.voss, "Nothing personal. A man who kills a President cannot exist afterwards.");
     setTimeout(function () {
       if (mt.voss) hostile(mt.voss);
       for (let i = 0; i < mt.men.length; i++) hostile(mt.men[i]);
@@ -2300,10 +2300,10 @@
     commit();
     setTimeout(function () {
       call([
-        { who: BROKER, line: "It's Nico. I saw the news." },
-        { who: BROKER, line: "Whatever you did, don't tell me. I don't want to know." },
-        { who: BROKER, line: "Nobody's asking about you. Nobody at all. Somebody made sure of that." },
-        { who: BROKER, line: "Lie low. I'll call you when there's work." },
+        { by: "phone", line: "It's Nico. I saw the news." },
+        { by: "phone", line: "Whatever you did, don't tell me. I don't want to know." },
+        { by: "phone", line: "Nobody's asking about you. Nobody at all. Somebody made sure of that." },
+        { by: "phone", line: "Lie low. I'll call you when there's work." },
       ], function () {
         const Dz = D();
         if (Dz && Dz.ending) Dz.ending({

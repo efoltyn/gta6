@@ -580,7 +580,8 @@
     // swelling engine roar from the moment it crosses the city edge. The only
     // words are the read-back below — YOUR pilot confirming YOUR tasking, a
     // notification from a person, on the quiet feed.)
-    note("Pilot: \"Copy, running in on " + (tgt.label || "the mark") + ". Keep your head down.\"", 3);
+    // the pilot is on the radio, not in the world: his voice comes by your hand
+    if (CBZ.speech && CBZ.speech.phone) CBZ.speech.phone("Copy, running in on " + (tgt.label || "the mark") + ". Keep your head down.", { secs: 3 });
     return true;
   };
 

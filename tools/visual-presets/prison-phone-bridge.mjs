@@ -37,8 +37,8 @@
     which exist in the prison.)
   - a._verbs is stamped by interact.js's render(); CBZ.doInteract(idx) is the
     same entry point a keypress and a touch button use.
-  - the spoken answer lands in .pi-subtitle-line and is held by tickSay(dt),
-    which runs off the frame loop — frozen rAF means the line stays up.
+  - the spoken answer floats over the officer's head (#speech .say,
+    systems/speech.js); read back through CBZ.speech.audit().lines.
 */
 
 export default {
@@ -184,8 +184,8 @@ export default {
       return { pressed: true, verbs: verbs.slice() };
     };
     const spokenLine = () => {
-      const el = document.querySelector(".pi-subtitle-line");
-      return el ? (el.textContent || "").trim() : "";
+      const L = CBZ.speech ? CBZ.speech.audit().lines : [];
+      return L.length ? String(L[L.length - 1].text || "").trim() : "";
     };
 
     const bent = (CBZ.guards || []).filter((x) => x && x.corrupt && !x.dead && !(x.ko > 0));

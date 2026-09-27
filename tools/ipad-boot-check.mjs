@@ -14,8 +14,9 @@
         WKWebView in desktop content mode — both answer "fine" to. So this
         emulates the HARD case: touch points present, primary pointer FINE.
         body.touch must still appear.
-     3. NO SECOND MOUTH. systems/subtitlebus.js must be live and must actually
-        refuse a duplicate line, which is the iPad "two layers of text" bug.
+     3. ONE MOUTH. systems/speech.js (speech over the speaker's head) is live,
+        and a quoted line handed to the HUD hint is refused: speech never
+        reaches the HUD.
 
    It does NOT wait for the world build (a 25 km world does not finish inside a
    CDP window on a contended box — see boot-health.mjs's header for that whole
@@ -137,7 +138,7 @@ check("script chain loads with no exception", chain.length ? chain.slice(0, 3) :
 // ---- 2. the subsystems this pass added or fixed -----------------------------
 check("CBZ.isTouchDevice exists", (await evaluate("typeof CBZ.isTouchDevice")).value, "function");
 check("...and says yes on a 5-touch-point iPad", (await evaluate("CBZ.isTouchDevice()")).value, true);
-check("subtitle desk is live", (await evaluate("typeof CBZ.subtitles && typeof CBZ.subtitles.claim")).value, "function");
+check("over-head speech is live", (await evaluate("typeof CBZ.speech && typeof CBZ.speech.say")).value, "function");
 check("prison friendship system is live", (await evaluate("typeof CBZ.prisonFriendOffered")).value, "function");
 
 // ---- 3. the touch layer actually turned itself on ---------------------------
@@ -147,12 +148,9 @@ check("the joystick/button root was built", (await evaluate("!!document.getEleme
 // ---- 4. no second mouth -----------------------------------------------------
 {
   const r = await evaluate(`(function(){
-    CBZ.subtitles.reset();
-    var a = CBZ.subtitles.claim("citySpeech","speech","Yard is open now",3,"Marcus",function(){});
-    var b = CBZ.subtitles.claim("hint","hint",'Marcus: "Yard is open now."',3,"",function(){});
-    return [a,b];
+    return [CBZ.hudIsSpoken('Marcus: "Yard is open now."'), CBZ.hudIsSpoken("Yard is open now.")];
   })()`);
-  check("a duplicate line is refused the second surface", r.value, [true, false]);
+  check("a quoted line is speech and never reaches the HUD", r.value, [true, false]);
 }
 
 // ---- 5. the font is local, not a CDN ---------------------------------------

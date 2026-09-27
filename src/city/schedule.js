@@ -402,10 +402,6 @@
     ped._household = best.hh != null ? best.hh : null; // W8: null-guarded — older saves carry no `hh` field
     ped._sid = best.sid; ped._sidFresh = t;
     liveBy[best.sid] = ped; best.seen = t;
-    // a regular reads as a regular — one street line, only for someone you KNOW
-    if (best.known && CBZ.citySay && rng() < 0.3) {
-      CBZ.citySay(ped, best.k === "dealer" ? "“Same corner, same me.”" : "“Back at it, you know how it is.”", "#cfe6ff", 2.2);
-    }
   };
 
   // aigoals' recycle hygiene calls this the tick a parked body re-enters play:
@@ -475,8 +471,6 @@
           if (e0.known) v.nameKnown = true;
           if (e0.rel) v.relPlayer = { respect: e0.rel.r, fear: e0.rel.f, loyalty: e0.rel.l, affection: e0.rel.a, grudge: e0.rel.g, seen: e0.rel.s || 1, t: 0, ambushT: 0 };
           liveBy[v._sid] = v; e0.seen = t;
-          // one greeting for a face the stall knows — diegetic, near-gated by citySay
-          if (e0.known && CBZ.citySay && CBZ.player && !CBZ.player.dead && rng() < 0.5) CBZ.citySay(v, "“Morning. The usual face.”", "#cfe6ff", 2.2);
           continue;
         }
       }

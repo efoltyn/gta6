@@ -189,6 +189,10 @@
     // toast or left-side feed.
     note(msg, sec, opts) {
       if (!msg) return;
+      // A person's quoted words never become a phone push or a HUD line: they
+      // belong over the speaker's head (CBZ.citySay). Shape test shared with
+      // systems/hud.js.
+      if (CBZ.hudIsSpoken && CBZ.hudIsSpoken(msg)) return;
       const force = !!(opts && opts.urgent);
       if (!phoneWorthy(msg, opts, false)) return;
       if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
@@ -238,6 +242,7 @@
       routeLegacyCityPhone(msg, opts, urgent);
     },
     big(msg) {
+      if (CBZ.hudIsSpoken && CBZ.hudIsSpoken(msg)) return;
       if (!phoneWorthy(msg, null, true)) return;
       const s = String(msg);
       const bankish = /[+\-]?\$\s?[\d,]|\bPAID\b|\bDEPOSIT|\bPAYOUT|\bLOAN\b|\bMORTGAGE\b/i.test(s);

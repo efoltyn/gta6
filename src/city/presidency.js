@@ -1292,16 +1292,24 @@
     CONV = { role: role, ped: ped, t: 0 };
     if (!ui || !ui.say) { sayPed(ped, pr.line); CONV = null; return; }
     if (!pr.key) {
-      ui.say(c.display, pr.line);
-      CONV.clearAt = 3.2 + pr.line.length * 0.035;
+      // nothing to decide: he just says it, over his own head
+      if (CBZ.sayLines) CBZ.sayLines([{ by: ped, line: pr.line }], null); else sayPed(ped, pr.line);
+      CONV.clearAt = 3.2 + pr.line.length * 0.05;
       return;
     }
-    let pending = null;
-    try {
-      pending = ui.say(c.display, pr.line, [{ id: "yes", label: pr.yes }, { id: "no", label: pr.no }]);
-    } catch (e) { pending = null; }
-    if (!pending || !pending.then) { CONV = null; return; }
-    pending.then(function (choice) {
+    const conv = CONV;
+    const ask = function (last) {
+      if (CONV !== conv) return;               // you walked off mid-sentence
+      let pending = null;
+      try {
+        pending = ui.say(c.display, last, [{ id: "yes", label: pr.yes }, { id: "no", label: pr.no }], { actor: ped });
+      } catch (e) { pending = null; }
+      if (!pending || !pending.then) { CONV = null; return; }
+      pending.then(answered);
+    };
+    // he makes the case in breaths; the ask lands on the reply buttons
+    if (CBZ.sayThen) CBZ.sayThen(ped, pr.line, ask); else ask(pr.line);
+    function answered(choice) {
       const live = CONV && CONV.role === role;
       CONV = null;
       if (!live || (choice !== "yes" && choice !== "no")) return;
@@ -1316,7 +1324,7 @@
         sayPed(ped, pr.nope || "Understood.");
       }
       emitEvent("decision", { source: "officer", who: c.display, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, ok: choice === "yes" ? !!r.ok : true });
-    });
+    }
   }
   function tickOfficers(dt) {
     OFF.t -= dt;

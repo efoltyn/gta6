@@ -594,65 +594,8 @@ body.full-map-open #interact{display:none !important;}
 @media (max-width:900px),(max-height:560px){
   :root{ --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 186px); }
 }
-.world-subtitle{
-  --subtitle-shadow:
-    -2px -2px 0 #090909, 2px -2px 0 #090909,
-    -2px 2px 0 #090909, 2px 2px 0 #090909,
-    0 3px 1px rgba(0,0,0,.9);
-  position:fixed;
-  left:50%;
-  bottom:calc(var(--subtitle-floor) + var(--subtitle-rank,0px));
-  width:min(940px,calc(100vw - 34px));
-  box-sizing:border-box;
-  font-family:Fredoka,"Arial Rounded MT Bold","Trebuchet MS",system-ui,sans-serif;
-  text-align:center;
-}
-
-/* TWO SUBTITLE LAYERS NEVER SHARE PIXELS. #citySpeech (social.js) and
-   #campaignDialogue (campaign_ui.js) adopt the same class; while an authored
-   campaign line is up (body.campaign-dialogue-active) ambient speech and the
-   touch hint ride one rung higher. The prison's speech is over the speaker's
-   head (systems/interact.js), so it is no longer a rung in this ladder. */
-body.campaign-dialogue-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
+/* while reply buttons are up the touch hint rides above them */
 body.campaign-dialogue-active #hint.hint-sub{ --hint-rank:calc(var(--subtitle-slot) * 2); }
-.world-subtitle .world-subtitle-speaker{
-  position:absolute!important;
-  width:1px!important;
-  height:1px!important;
-  padding:0!important;
-  margin:-1px!important;
-  overflow:hidden!important;
-  clip:rect(0,0,0,0)!important;
-  white-space:nowrap!important;
-  border:0!important;
-}
-.world-subtitle .world-subtitle-line{
-  margin:0;
-  color:#fff;
-  font-size:var(--subtitle-line);
-  font-weight:700;
-  line-height:1.1;
-  letter-spacing:.005em;
-  text-align:center;
-  text-wrap:balance;
-  -webkit-text-stroke:var(--ink-stroke,1.6px) var(--ink,#090909);
-  paint-order:stroke fill;
-  text-shadow:var(--ink-shadow,var(--subtitle-shadow));
-}
-
-#citySpeech{
-  z-index:47;
-  transform:translate(-50%,10px); opacity:0; pointer-events:none;
-  transition:opacity .14s ease,transform .14s ease;
-}
-#citySpeech.show{opacity:1;transform:translate(-50%,0);}
-/* `body.city-menu-open` was a second selector here and could never match:
-   CBZ.cityMenuOpen is a plain JS boolean (playergang.js, realestate.js,
-   zillow.js) that is never mirrored onto document.body.classList, unlike
-   full-map-open which fullmap.js add/removes. Dead clause dropped. To
-   actually hide speech behind city menus, mirror the flag onto the body the
-   way systems/fullmap.js does — then re-add the selector. */
-body.full-map-open #citySpeech{opacity:0!important;}
 
 /* ============================================================
    SURVIVAL (natural-disaster) mode HUD — shown only when the body
@@ -765,7 +708,7 @@ body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-colo
      - the verb pinned over the thing (#prisonPrompts, interactions.js)
      - the people card's VERBS (desktop key rows / touch rail); no name plate,
        no read line, only a stall's item + price above them
-     - speech over the speaker's head (#prisonSpeech, interact.js)
+     - speech over the speaker's head (#speech, systems/speech.js)
      - the hotbar (it is how you pick an item), the crosshair, #ammo while armed
      - the hurt/heat vignette, the lockdown edge
      - one short note line (#hint) through the renderer policy in hud.js
@@ -800,3 +743,31 @@ body.prison-bare #interact{
   background:rgba(8,11,17,.38); box-shadow:none;
 }
 body.prison-bare #interactNote{ margin:0 0 4px; max-height:15px; }
+
+/* ============================================================
+   SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)
+   The only place a spoken line appears, in every game. One short line per
+   speaker, pinned above his head by projecting the world point through the
+   live camera each frame; scale and --a (distance/occlusion fade) are set
+   there. No box, no name, no stroke, no offset shadow: the zero-offset ink
+   halo, so the words can never render as two layers.
+============================================================ */
+#speech{ position:fixed; inset:0; pointer-events:none; z-index:27; overflow:hidden; }
+#speech .say{
+  position:absolute; left:0; top:0;
+  transform-origin:50% 100%;
+  max-width:min(46vw, 300px); width:max-content;
+  font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size:clamp(14px, 1.9vh, 19px);
+  font-weight:600; line-height:1.12; letter-spacing:.005em;
+  color:#fff; text-align:center; text-wrap:balance; white-space:normal;
+  text-shadow:var(--ink-shadow, 0 0 2px #000, 0 0 5px rgba(0,0,0,.7));
+  opacity:var(--a, 1);
+  transition:opacity .3s ease;
+  will-change:transform;
+}
+#speech .say.out{ opacity:0; }
+#speech .say.edge{ font-size:clamp(13px, 1.7vh, 17px); }
+/* a voice on the phone: smaller, cooler, by the hand */
+#speech .say.phone{ color:#dff3ff; font-weight:500; font-style:italic; max-width:min(40vw, 260px); }
+body.full-map-open #speech, body.sim-view #speech{ display:none !important; }

@@ -148,8 +148,8 @@
     return Math.round(GREASE_BASE * mul * dep * (1 + 0.35 * stars()));
   }
   function say(p, line, col, secs) {
-    if (CBZ.citySay) { try { CBZ.citySay(p, line, col || "#cfe6ff", secs || 2.4); return; } catch (e) {} }
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(line, secs || 2);
+    // over the official's head; never a note in the HUD
+    if (CBZ.citySay) { try { CBZ.citySay(p, line, col || "#cfe6ff", secs || 2.4); } catch (e) {} }
   }
   function toPhone(from, text) {
     if (CBZ.phoneNotify) { try { CBZ.phoneNotify({ app: "news", from: from, text: text, priority: 0 }); return; } catch (e) {} }

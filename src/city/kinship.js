@@ -613,8 +613,6 @@
     friend:  ["“Ayy! Long time!”", "“Where you been?”", "“Yo!”", "“Look who it is.”"],
     work:    ["“You on tonight?”", "“Rough shift?”", "“They got you working doubles too?”"],
   };
-  const REPLY = ["“Always.”", "“Same as ever.”", "“Don't even ask.”", "“Good to see you.”",
-    "“Tell me about it.”", "“Yeah, yeah.”", "“I know, I know.”"];
   const WARM = ["“I love you.”", "“You good?”", "“Come here.”", "“Almost home.”"];
   const WIDOW = ["“It's still quiet at the house.”", "“Some days are alright.”", "“I keep setting two plates.”"];
   // THE PAIR NOTICES YOU. social.js has spent this whole game writing
@@ -674,12 +672,11 @@
     if (kind === "warm") openers = WARM;
     if (kind === "notice") openers = ((a.opinion || 0) + (b.opinion || 0)) < 0 ? NOTICE_DOWN : NOTICE_UP;
     else if (a._widowed && Math.random() < 0.6) openers = WIDOW;
+    // Two strangers-to-you catching up is BODY LANGUAGE, not words over their
+    // heads (owner 2026-09-27: no AI small talk on screen). A line is spoken
+    // only when it is aimed at the player, or is ABOUT the player (notice).
     const col = (kind === "warm") ? "#ff9fd0" : (kind === "notice" ? "#ffd9a8" : "#cfe6ff");
-    say(a, pick(openers), col, Math.min(2.6, t));
-    if (!withPlayer && Math.random() < 0.75) {
-      // the reply lands a beat later — chatter, not a chorus
-      b._kinReplyIn = 0.7 + Math.random() * 0.7;
-    }
+    if (withPlayer || kind === "notice") say(a, pick(openers), col, Math.min(2.6, t));
     if (kind === "greet") _greetings++;
     // a real hello is a real (small) social event, so social.js's own `mood`
     // moves with it: the number the sim keeps and the thing you can see are
@@ -742,13 +739,6 @@
     if (waving) setPose(p, "kinWave");
     else if (bt.role === "reply" && bt.t > 1.0) setPose(p, "kinListen");
     else setPose(p, "kinTalk");
-    if (p._kinReplyIn != null) {
-      p._kinReplyIn -= dt;
-      if (p._kinReplyIn <= 0) {
-        p._kinReplyIn = null;
-        say(p, pick(REPLY), "#cfe6ff", Math.min(2.2, bt.t + 0.4));
-      }
-    }
   }
 
   // ============================================================

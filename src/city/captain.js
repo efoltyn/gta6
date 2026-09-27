@@ -1200,7 +1200,7 @@
             const o = offersHM && offersHM.cargo;
             return "Ticketed masters only, top manifest pays " + money(o ? o.pay : 2400);
           },
-          onSelect: function () { note("The harbourmaster doesn't look up: \"Master's ticket, or off my quay.\"", 2.6); } },
+          onSelect: function () {} },   // no harbourmaster stands here: the locked label says it
         { id: "hm-cargo", slot: "e",
           canShow: function () { return playerIsCaptain() && !voyage; },
           label: function () {

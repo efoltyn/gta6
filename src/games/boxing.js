@@ -424,7 +424,7 @@
         case "knockdown": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = true; ch.koT = 0.7; ch.koDur = 0.7; ch.fightStance = false; }
           if (near) feed("DOWN · " + nm(byDir(d.s) === A ? bout.a : bout.b) + " hits the canvas!", "#ff9a9a"); break; }
         case "getup": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = false; ch.koT = 0; } if (near) feed(nm(byDir(d.s) === A ? bout.a : bout.b) + " beats the count!", "#ffd166"); break; }
-        case "count": if (near && d.n >= 4) feed("...the ref counts " + d.n + "..."); break;
+        case "count": if (near && V && V.ref && V.ref.say) V.ref.say(d.n + "!", 1.6); break;   // the ref counts over his own head
         case "bell": if (near) feed("*DING*. Round " + d.n, "#e8b64c"); break;
         case "bellEnd": if (near) feed("*DING*, end of round " + d.n); break;
         case "cards": if (near) feed("Judges turn in Round " + d.round + " cards."); break;

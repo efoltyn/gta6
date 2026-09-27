@@ -288,6 +288,33 @@
   #whoHp.low s{background:#ff5a3d}
   #whoMagT s{background:#e8dcc0}
   #whoMagT.rl s{background:#ff9a3d}
+/* ============================================================
+   SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)
+   The only place a spoken line appears, in every game. One short line per
+   speaker, pinned above his head by projecting the world point through the
+   live camera each frame; scale and --a (distance/occlusion fade) are set
+   there. No box, no name, no stroke, no offset shadow: the zero-offset ink
+   halo, so the words can never render as two layers.
+============================================================ */
+#speech{ position:fixed; inset:0; pointer-events:none; z-index:27; overflow:hidden; }
+#speech .say{
+  position:absolute; left:0; top:0;
+  transform-origin:50% 100%;
+  max-width:min(46vw, 300px); width:max-content;
+  font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size:clamp(14px, 1.9vh, 19px);
+  font-weight:600; line-height:1.12; letter-spacing:.005em;
+  color:#fff; text-align:center; text-wrap:balance; white-space:normal;
+  text-shadow:var(--ink-shadow, 0 0 2px #000, 0 0 5px rgba(0,0,0,.7));
+  opacity:var(--a, 1);
+  transition:opacity .3s ease;
+  will-change:transform;
+}
+#speech .say.out{ opacity:0; }
+#speech .say.edge{ font-size:clamp(13px, 1.7vh, 17px); }
+/* a voice on the phone: smaller, cooler, by the hand */
+#speech .say.phone{ color:#dff3ff; font-weight:500; font-style:italic; max-width:min(40vw, 260px); }
+body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 </style>
 </head>
 <body>
@@ -641,7 +668,7 @@ const SWIM_PUNCH = Math.max(0, Math.min(1, parseFloat(Q.get("swimpunch") || "0.2
    city/ragdoll.js is the original of the method the animals' solver copied —
    13 points, sticks, joint limits, a ground clamp — writing back onto the same
    rig meshes, so the wounds and the dropped rifle ride along for free. */
-const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+const NEED = ["caps", "speech", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
 // ?marine=0 refuses the marine pack even on OPEN WATER (the revert). Its
 // absence is what shipped: models with no hunt, no fin, no blood, no prey.
 const MARINE_Q = Q.get("marine");

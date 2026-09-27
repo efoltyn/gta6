@@ -104,7 +104,7 @@
   function chipsHUD() { return "chips <b>" + bag().chips.toLocaleString() + "</b> · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (bag().debt ? " · <span style='color:#ff9aa2'>marker " + fmt(bag().debt) + "</span>" : ""); }
   function winStreak(profit) {
     const s = bag();
-    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) { C.hud.feed("Barman sends one over, on the house. Heater confirmed.", "#ffd166"); pitBossBark("hot"); } }
+    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) pitBossBark("hot"); }
     else if (profit < 0) s.streak = 0;
     save();
   }
@@ -372,11 +372,13 @@
     save(); renderCage();
   }
   function renderShark() {
-    sharkBark();                     // the ped mutters flavor; the loan PANEL below stays the primary [E]
+    // HIS words go over HIS head; the panel keeps only the terms + buttons
     const s = bag();
+    sharkSay(s.debt > 0 ? "You already carry my marker. Pay the cage. Then we talk."
+      : "I'll front you " + LIMITS.LOAN_GIVE + " in chips. You owe me " + fmt(LIMITS.LOAN_OWE) + ".");
     const body = s.debt > 0
-      ? "<div style='margin:6px 0'>“You already carry my marker, <b>" + fmt(s.debt) + "</b>. Pay the cage. Then we talk.”</div>" + btn("hub", "Walk away", "#26343c")
-      : "<div style='margin:6px 0'>“I'll front you <b>" + fmt(LIMITS.LOAN_GIVE) + "</b> in chips. You'll owe <b>" + fmt(LIMITS.LOAN_OWE) + "</b>. The house always pays me first.”</div>" +
+      ? "<div style='margin:6px 0'>Marker outstanding: <b>" + fmt(s.debt) + "</b></div>" + btn("hub", "Walk away", "#26343c")
+      : "<div style='margin:6px 0'>+<b>" + LIMITS.LOAN_GIVE.toLocaleString() + "</b> chips now, <b>" + fmt(LIMITS.LOAN_OWE) + "</b> owed.</div>" +
         btn("takeloan", "Take the marker (+" + LIMITS.LOAN_GIVE + " chips)", "#7c1626") + btn("hub", "Walk away", "#26343c");
     C.hud.panel(head("THE SHARK", "vig is vig"), body, {
       hub: openHub,
@@ -483,14 +485,9 @@
     "Cold runs happen. To you, tonight, apparently.",
     "Down to felt lint? There's a booth in the back for exactly that.",
   ];
-  const SHARK_LINES = [
-    "Vig is vig. Nothing personal, all arithmetic.",
-    "Everybody pays. The house first, me second, you whenever you can.",
-    "Short again? The marker's right here. So am I.",
-  ];
   function pickLine(pool, salt) { const s = bag().stats; return pool[(s.hands + s.spins + s.pulls + (salt || 0)) % pool.length]; }
   function pitBossBark(mood) { const h = V && V.pitBoss; if (h && h.say) h.say(pickLine(mood === "hot" ? PITBOSS_HOT : PITBOSS_COLD, mood === "hot" ? 0 : 1)); }
-  function sharkBark() { const h = V && V.shark; if (h && h.say) h.say(pickLine(SHARK_LINES, bag().debt ? 2 : 0)); }
+  function sharkSay(line) { const h = V && V.shark; if (h && h.say) h.say(line, 3.2); }
 
   /* ======================= FLAGSHIP VENUE (3D) ============================ */
   /* Card/chip/wheel/reel glue — every fn no-ops without the flagship venue. */
@@ -757,8 +754,8 @@
       ctx.cyl(g, cx, 1.2, cz - 0.15, 0.1, 0.14, 0.24, ctx.emat(0xffab66, 0.9), 8);
       ctx.solid(cx - 1.6, cz - 0.9, cx + 1.6, cz + 0.9);
       // No `dialogue` on purpose: his [E] is the LOAN PANEL (the ctx.zone below);
-      // flavor is delivered via sharkBark() when that panel opens, so the panel
-      // always wins the interaction. role "shark" → the facade's high-roller look,
+      // his line goes over his head via sharkSay() when that panel opens, so the
+      // panel always wins the interaction. role "shark" → the facade's high-roller look,
       // seated in the booth.
       queueCast({
         role: "shark", name: "The Shark", post: "pinned", pose: "sit",

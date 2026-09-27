@@ -491,33 +491,35 @@ async function moveTo(expr, ticks) {
   else check("world: the gang HUD strip is gone", r.flag === false && r.shown === false, JSON.stringify(r));
 }
 {
-  // THE MOUTH. Before this wave every prison citySay threw (prison actors keep
-  // position on .group, not .pos), so this asserts BOTH that prisonSay works
-  // and that it is not the old broken path.
+  // THE MOUTH. A prison line floats over the speaker's head (systems/speech.js,
+  // #speech .say); read it back through CBZ.speech.audit(), which lists the
+  // live lines and who is saying each one.
   const r = await evl(`
     var n = null;
     for (var i = 0; i < CBZ.npcs.length; i++) { var c = CBZ.npcs[i]; if (c && !c.dead && c.group) { n = c; break; } }
     if (!n) return { no: true };
     CBZ.player.pos.set(n.group.position.x + 1.5, 0, n.group.position.z);
     var far = null, near = null, threwCity = null;
-    try { CBZ.citySay(n, "x", "#fff", 1); } catch (e) { threwCity = String(e).split("\\n")[0]; }
-    near = CBZ.prisonSay(n, "TEST LINE NEAR", { secs: 4 });
-    var el = document.getElementById("pinteractSay");
-    var shown = el ? { cls: el.className, line: (el.querySelector(".pi-subtitle-line") || {}).textContent,
-                       who: (el.querySelector(".pi-subtitle-speaker") || {}).textContent } : null;
+    if (CBZ.speech) CBZ.speech.clear();
+    near = CBZ.prisonSay(n, "Test line near", { secs: 4 });
+    var live = CBZ.speech ? CBZ.speech.audit().lines : [];
+    var hit = live.filter(function (l) { return /Test line near/.test(l.text); })[0] || null;
+    var shown = hit ? { line: hit.text, who: hit.who } : null;
+    // citySay in the prison now lands on the same mouth instead of throwing
+    try { CBZ.citySay(n, "Test city route", "#fff", 1); } catch (e) { threwCity = String(e).slice(0, 120); }
+    var cityRouted = !threwCity && !!CBZ.speech && CBZ.speech.audit().lines.some(function (l) { return /Test city route/.test(l.text); });
     // …and out of range it must refuse rather than broadcast
     CBZ.player.pos.set(n.group.position.x + 60, 0, n.group.position.z + 60);
     far = CBZ.prisonSay(n, "TEST LINE FAR", { secs: 4 });
-    return { near: near, far: far, shown: shown, threwCity: threwCity, audit: CBZ.prisonSayAudit() };
+    if (CBZ.speech) CBZ.speech.clear();
+    return { near: near, far: far, shown: shown, threwCity: threwCity, cityRouted: cityRouted, audit: CBZ.prisonSayAudit() };
   `);
   if (bad(r) || r.no) check("world: the prison has a mouth", false, why(r));
   else {
-    check("world: an inmate beside you can speak", r.near === true && !!r.shown && /TEST LINE NEAR/.test(r.shown.line || ""), JSON.stringify(r.shown));
-    check("world: the speaker is named", !!r.shown && !!r.shown.who, JSON.stringify(r.shown && r.shown.who));
+    check("world: an inmate beside you can speak", r.near === true && !!r.shown && /Test line near/.test(r.shown.line || ""), JSON.stringify(r.shown));
+    check("world: the line hangs over a speaker", !!r.shown && !!r.shown.who && r.shown.who !== "?", JSON.stringify(r.shown && r.shown.who));
     check("world: a line is overheard, not broadcast", r.far === false, JSON.stringify({ far: r.far, audit: r.audit }));
-    // the old path is still broken — that is WHY prisonSay exists, and if it
-    // ever starts working this assertion is the thing that tells us.
-    check("world: (context) citySay still cannot read a prison actor", !!r.threwCity, String(r.threwCity));
+    check("world: citySay in the prison reaches the same mouth", !!r.cityRouted, String(r.threwCity || r.cityRouted));
   }
 }
 {
@@ -532,9 +534,9 @@ async function moveTo(expr, ticks) {
     n.aiState = "approachPlayer";
     n.approach = { kind: "debtCollect", t: 0.05, cost: 6, gang: n.gang };
     for (var k = 0; k < 40; k++) CBZ.stepSim(1/60);
-    var el = document.getElementById("pinteractSay");
-    return { before: before, after: CBZ.aiNarrationAudit(),
-             line: el ? (el.querySelector(".pi-subtitle-line") || {}).textContent : null };
+    var live = CBZ.speech ? CBZ.speech.audit().lines : [];
+    var mine = live.filter(function (l) { return l.who && n.data && l.who === n.data.name; })[0] || live[0] || null;
+    return { before: before, after: CBZ.aiNarrationAudit(), line: mine ? mine.text : null };
   `);
   if (bad(r) || r.no) check("world: a narration finds a mouth", false, why(r));
   else {

@@ -154,14 +154,15 @@
   };
   let lineSeq = 0;
   function pick(list) { lineSeq++; return list[(lineSeq * 7 + ((S.now * 10) | 0)) % list.length]; }
-  const SAY_ACT = function () { return CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1; };
   function say(actor, line, secs) {
     if (!line || !CBZ.prisonSay || !actor) return false;
-    try { return !!CBZ.prisonSay(actor, line, { rank: SAY_ACT(), secs: secs || 2.4 }); } catch (e) { return false; }
+    try { return !!CBZ.prisonSay(actor, line, { force: true, secs: secs || 2.4 }); } catch (e) { return false; }
   }
   // THE PA. The horn sounds from the nearest real speaker (prisonschedule.js)
-  // and the line rides the same subtitle surface every voice uses, spoken by
-  // "Warden": he is on the speaker, not in the room.
+  // and the words come out of that same horn, over it, like every voice in
+  // the prison (systems/speech.js): he is on the speaker, not in the room.
+  // (It used to anchor on the PLAYER's own position, so the Warden's PA
+  // announcement floated over your head as if you had said it.)
   const PA_VOICE = { kind: "pa", data: { name: "Warden" }, pos: null };
   function paSay(list) {
     const P = CBZ.player && CBZ.player.pos;
@@ -777,8 +778,14 @@
     if (S.paQueue) {
       S.paQueue.t -= dt;
       if (S.paQueue.t <= 0) {
-        PA_VOICE.pos = P();
-        say(PA_VOICE, S.paQueue.line, 2.8);
+        const H = CBZ.prisonSchedule && CBZ.prisonSchedule.horns, me = P();
+        let h = null, bd = Infinity;
+        if (H && me) for (let i = 0; i < H.length; i++) {
+          const dd = (H[i].x - me.x) * (H[i].x - me.x) + (H[i].z - me.z) * (H[i].z - me.z);
+          if (dd < bd) { bd = dd; h = H[i]; }
+        }
+        // the speech anchor adds a head height; the horn IS the mouth
+        if (h) { PA_VOICE.pos = { x: h.x, y: (h.y || 3.5) - 1.85, z: h.z }; say(PA_VOICE, S.paQueue.line, 2.8); }
         S.paQueue = null;
       }
     }

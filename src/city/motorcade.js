@@ -1724,7 +1724,7 @@
     const tok = ++DLG.token;
     DLG.open = true; DLG.asked = true;
     let pr = null;
-    try { pr = UI.say(name, line, ch.map(function (c, i) { return { id: "mc" + i, label: c.label }; })); } catch (e) { pr = null; }
+    try { pr = UI.say(name, line, ch.map(function (c, i) { return { id: "mc" + i, label: c.label }; }), a ? { actor: a } : null); } catch (e) { pr = null; }
     if (a && a.group && CBZ.player && CBZ.player.pos) a.group.rotation.y = Math.atan2(CBZ.player.pos.x - a.pos.x, CBZ.player.pos.z - a.pos.z);
     if (pr && typeof pr.then === "function") {
       pr.then(function (id) {

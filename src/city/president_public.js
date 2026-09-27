@@ -1308,7 +1308,10 @@
     }
     let pr = null;
     sp.awaiting = true;
-    try { pr = ui.say(name, b.line, [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }]); } catch (e) { pr = null; }
+    // HE SAYS IT TO THE CROWD: over his own head at the podium (a speech is
+    // spoken aloud, not inner monologue), then the two stances as replies.
+    if (CBZ.speech && CBZ.player) CBZ.speech.lines([{ by: CBZ.player, line: b.line, aloud: true }]);
+    try { pr = ui.say(name, "", [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }]); } catch (e) { pr = null; }
     if (!pr || !pr.then) { sp.awaiting = false; applyStance(L, b.a); return; }
     const myI = sp.i;
     pr.then(function (choice) {
@@ -1330,7 +1333,7 @@
     if (sp.delta + d < -6) d = -6 - sp.delta;
     sp.delta += d;
     shock(d);
-    if (CBZ.campaignUI && CBZ.campaignUI.say) { try { CBZ.campaignUI.say(c.name || "The President", st.say); } catch (e) {} }
+    if (CBZ.speech && CBZ.player) CBZ.speech.lines([{ by: CBZ.player, line: st.say, aloud: true }]);
     react(d >= 0 ? "cheer" : "boo", !!st.pro);
     sp.phase = "react"; sp.t = 3.0;
   }

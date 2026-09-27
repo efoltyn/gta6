@@ -224,12 +224,8 @@
     if (ped.group) ped.group.rotation.y = Math.atan2(x - ped.pos.x, z - ped.pos.z);
   }
 
-  // ---- speech: social.js owns the attributed subtitle surface. There is no
-  //      world-space fallback; if that UI is unavailable, actors simply speak
-  //      without manufacturing a label over their heads.
-  function bark(ped, text, color, secs) {
-    if (CBZ.citySay) { CBZ.citySay(ped, text, color, secs); return; }
-  }
+  // ---- speech: over the speaker's head (citySay -> CBZ.speech).
+  function bark(ped, text, color, secs) { if (CBZ.citySay) CBZ.citySay(ped, text, color, secs); }
 
   // ---- THE JOB TABLE: every job string the casters deal, mapped onto the city
   //      that actually exists. One record per job — `lots` is where it clocks in
@@ -468,10 +464,9 @@
     return null;
   }
   // people talk like people — no meta, no commands, just street small-talk
-  const CHAT_OPEN = ["“Been a minute! How you living?”", "“You look tired, you good?”", "“Rent went up AGAIN, I swear.”", "“You hear what happened on 3rd?”", "“We still on for Friday?”", "“This city, man…”"];
-  const CHAT_BACK = ["“Same as always.”", "“Hanging in there.”", "“Tell me about it.”", "“Crazy out here lately.”", "“For real.”", "“Don't even start.”"];
-  const PHONE_LINES = ["“…yeah. Yeah, I'm on my way.”", "“Tell him I said no. NO.”", "“…uh huh. Uh huh.”", "“I can't talk long.”"];
-  function pickLine(arr) { return arr[(rng() * arr.length) | 0]; }
+  // NO AMBIENT SMALL TALK IN TEXT (owner 2026-09-27: "dumb AI stuff"). Two
+  // strangers chatting, a ped on his phone, a worker narrating his shift are
+  // BODY LANGUAGE (face each other, pace, hold the phone), never captions.
 
   // both stop, square up face-to-face and talk for 4-8s through the brain's own
   // chat state (peds.js move() ticks chatT and releases them) — then each
@@ -481,8 +476,6 @@
     a.state = "chat"; a.chatT = t; a.speed = 0;
     b.state = "chat"; b.chatT = t * (0.85 + rng() * 0.25); b.speed = 0;
     face(a, b.pos.x, b.pos.z); face(b, a.pos.x, a.pos.z);
-    bark(a, pickLine(CHAT_OPEN), "#cfe6ff", 2.4);
-    bark(b, pickLine(CHAT_BACK), "#cfe6ff", 2.4);
     satisfy(needs(a), "social", 0.3 + rng() * 0.15);
     satisfy(needs(b), "social", 0.3 + rng() * 0.15);
     a._chatCD = b._chatCD = now() + (40 + rng() * 50) * 1000;
@@ -961,7 +954,6 @@
     ped._paceN = 2 + ((rng() * 3) | 0);
     routeTo(ped, A, { x: ped._paceA.x, z: ped._paceA.z });
     ped._goalKind = "phone";
-    if (rng() < 0.5) bark(ped, pickLine(PHONE_LINES) + "", "#dfe7ff", 2.4);
     _moments.push({ t: 12 }); ped._momCD = now() + (50 + rng() * 50) * 1000;
     return true;
   }
@@ -995,7 +987,6 @@
       }
     } else if (act === "corner") {
       ok = goDeal(ped, A, N);
-      if (ok && rng() < 0.2) bark(ped, "“On it till sunrise.”", "#cfe6ff", 2.2);
     } else if (act === "layup") {
       const trap = shopByKind(A, "drugs");
       if (trap && trap.building && trap.building.door) {
@@ -1341,7 +1332,6 @@
           ped._gigPhase = "driving";
           ped._goalKind = "gig";
           ped._goalCD = Math.max(ped._goalCD || 0, 3);   // hold the goal while we drive
-          if (rng() < 0.3) bark(ped, ped.job === "cab driver" ? "“Where to? Hop in.”" : "“Got a drop to make.”", "#cfe6ff", 2.2);
         } else {
           ped._goalCD = Math.max(ped._goalCD || 0, 2);    // still walking to the curb
         }
@@ -1374,7 +1364,6 @@
         } else if (ped.cash != null) {
           ped.cash = (ped.cash | 0) + (8 + ((rng() * 14) | 0));   // real cash earned (no-ledger fallback)
         }
-        if (rng() < 0.4) bark(ped, ped.job === "cab driver" ? "“Here you go. Cash or card?”" : "“Delivery! Sign here.”", "#cfe6ff", 2.2);
         if (car && CBZ.cityGigReturnCar) CBZ.cityGigReturnCar(car, true);
         if (CBZ.cityGigReleasePickup) CBZ.cityGigReleasePickup(ped);
         ped._gigCar = null; ped._gigDrop = null; ped._gigAt = null; ped._gigPhase = null;
@@ -1589,7 +1578,6 @@
           const swap = ped._paceB; ped._paceB = ped._paceA; ped._paceA = swap;
           ped.target.set(ped._paceA.x, 0, ped._paceA.z); ped.path = null;
           ped.pause = Math.max(ped.pause, 0.5 + rng() * 0.8);
-          if (rng() < 0.25) bark(ped, pickLine(PHONE_LINES) + "", "#dfe7ff", 2.2);
         } else {
           satisfy(N, "social", 0.15);
           ped._paceA = ped._paceB = null; ped._goalKind = null; ped._goalCD = 2 + rng() * 3;
@@ -1939,7 +1927,8 @@
     _rampTipT = t;
     const E = CBZ.cityEcon;
     const where = (E && E.districtAt && E.districtName) ? E.districtName(E.districtAt(ped.pos.x, ped.pos.z)) : "the city";
-    if (CBZ.cityFlavor) CBZ.cityFlavor("" + who + ": somebody's spraying up " + where + " · stay clear.", "#9fb0c6");
+    // a text from one of your people, not a "Name: words" line on the HUD
+    if (CBZ.cityFeed) CBZ.cityFeed("Somebody's spraying up " + where + ". Stay clear.", "#9fb0c6", { app: "messages", from: who });
   }
 
   // expose a manual trigger (debug / scripted events can force a spree on a ped)

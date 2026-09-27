@@ -461,7 +461,14 @@
         return {
           ped: null, rig: Rg,
           pose(verb) { applyRigPose(verb); return this; },
-          say(line) { if (line) ctx.hud.feed((spec.name ? spec.name + ": " : "") + line); return this; },
+          // over the dummy's own head, like a real ped's line (never the feed)
+          say(line, secs) {
+            if (line && CBZ.speech && Rg.g && typeof THREE !== "undefined") {
+              const p = new THREE.Vector3(); Rg.g.getWorldPosition(p);
+              CBZ.speech.say(p, line, { secs: secs, headY: 1.85 });
+            }
+            return this;
+          },
           at(x, z, f) { Rg.at(x, z, f); return this; },
           remove() { if (Rg.g && Rg.g.parent) Rg.g.parent.remove(Rg.g); },
         };

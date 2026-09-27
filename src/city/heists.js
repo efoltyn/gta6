@@ -380,22 +380,19 @@
           bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
           "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>One bag at a time. <span style='color:#ffd479'>[H]</span> call it and RUN</div>";
       } else if (tier && tier.bank) {
-        // bank shows the live stage: DRILL bar until breached, then BAG bar.
+        // the live stage in words; how far through the drill / the bag you
+        // are hangs on the vault itself (CBZ.workLine in the tick), not here.
         const drilling = h.drilled < 1;
-        const pct = Math.round((drilling ? h.drilled : h.grabbed) * 100);
         html =
           "<div style='font-size:16px;color:#ff9e6b'>" + tier.icon + (drilling ? " DRILLING THE VAULT" : " EMPTYING THE VAULT") + "</div>" +
-          bar(drilling ? "DRILL" : "BAG", pct, drilling ? "#ffd166" : "#7ed957") +
           (drilling
             ? "<div style='margin-top:4px;font-weight:500;color:#aeb8c6'>Vault holds ~" + fmt$(h.vaultTotal) + " · breach it to start bagging.</div>"
             : "<div style='margin-top:4px;font-weight:500'>" + fmt$(h.bag) + " of " + fmt$(h.bagMax) + " bagged</div>") +
           bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
           "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Stay on the vault. <span style='color:#ffd479'>[H]</span> grab &amp; GO with what you've got</div>";
       } else {
-        const pct = Math.round(h.grabbed * 100);
         html =
           "<div style='font-size:16px;color:#ff9e6b'>" + (tier ? tier.icon + " GRABBING · " + tier.name : "GRABBING") + "</div>" +
-          bar("BAG", pct, "#7ed957") +
           "<div style='margin-top:4px;font-weight:500'>" + fmt$(h.bag) + " in the bag</div>" +
           bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
           "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Stay on it. <span style='color:#ffd479'>[H]</span> grab &amp; GO with what you've got</div>";
@@ -1143,6 +1140,9 @@
           h.bag += (h.grabbed - prev) * h.bagMax;
           if (Math.random() < dt * 1.2) sfx("coin");
         }
+        // the drill, then the bag: the time on the vault IS the heist (heat
+        // climbs all the while), so it keeps a readout, but on the vault
+        if (CBZ.workLine && tgt) CBZ.workLine("heist-work", { x: tgt.x, y: (tgt.y || 0) + 2.2, z: tgt.z }, h.drilled < 1 ? h.drilled : h.grabbed);
         // heat climbs the WHOLE time you're exposed (drill + grab)
         h.heat = clamp(h.heat + (tier.heatRate / 100) * dt * 0.5, 0, 1);
         // escalate toward the engine's forced 4★ ceiling as the heat builds
@@ -1176,6 +1176,7 @@
         const prev = h.grabbed;
         h.grabbed = clamp(h.grabbed + dGrab, 0, 1);
         h.bag += (h.grabbed - prev) * h.bagMax;
+        if (CBZ.workLine && tgt) CBZ.workLine("heist-work", { x: tgt.x, y: (tgt.y || 0) + 2.2, z: tgt.z }, h.grabbed);
         // heat climbs while you grab → drives cops + escalates stars
         h.heat = clamp(h.heat + (tier.heatRate / 100) * dt * 0.5, 0, 1);
         // ramp the wanted level toward the tier's ceiling as heat builds

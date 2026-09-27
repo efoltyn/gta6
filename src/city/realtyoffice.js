@@ -281,13 +281,23 @@
   function actOn(p) {
     if (!p) return;
     if (p.type === "wall") { openPanel(); return; }
-    if (p.type === "desk") { talkToAgent(); return; }
+    if (p.type === "desk") { talkToAgent(p.desk); return; }
   }
 
   // ---- AGENT: a quick pre-approval read (consumes the bank loan engine via
   //      Zillow's financing quote on the priciest home you could finance). ----
-  function talkToAgent() {
-    if (!CBZ.cityRealtyListings) { note("The agent's between clients, try the wall.", 1.8); return; }
+  // the agent's words come from the agent: the lot's clerk if he is standing,
+  // otherwise the desk you are leaning on (a seated agent's head height)
+  function agentSay(desk, words) {
+    if (!CBZ.speech || !words) return;
+    const v = S.b && S.b.vendor;
+    if (v && !v.dead) { if (CBZ.citySay) CBZ.citySay(v, words, null, { secs: 3.4, force: true }); return; }
+    if (!desk) return;
+    const P = CBZ.player;
+    CBZ.speech.say({ x: desk.x, y: (P && P.pos && P.pos.y) || 0, z: desk.z }, words, { secs: 3.4, force: true, headY: 1.35 });
+  }
+  function talkToAgent(desk) {
+    if (!CBZ.cityRealtyListings) return;
     const cash = (g.cash || 0) + (g.cityBank || 0);
     let inv = [];
     try { inv = CBZ.cityRealtyListings({}) || []; } catch (e) { inv = []; }
@@ -305,15 +315,13 @@
     if (q) {
       const bankTail = (q.viaBank && q.payment > 0) ? ", about " + fmt$(Math.round(q.payment)) + "/cycle" : "";
       const ratePct = (Math.round((q.rate || 0.06) * 1000) / 10) + "%";
-      msg = "Agent: pre-approved. " + ratePct + " on a mortgage · "
-        + "as little as " + fmt$(q.down) + " down" + bankTail + " on " + shortName(qName) + ". "
-        + (topCash ? "You could pay cash for the " + shortName(topCash.name) + " today." : "Read the wall and pick a place.");
+      msg = "You're pre-approved. " + ratePct + ", " + fmt$(q.down) + " down" + bankTail + ".";
     } else if (topCash) {
-      msg = "Agent: \"" + fmt$(cash) + " on hand, you could buy the " + shortName(topCash.name) + " outright. Have a look at the wall.\"";
+      msg = "With " + fmt$(cash) + " you could buy the " + shortName(topCash.name) + " outright.";
     } else {
-      msg = "Agent: \"Save a deposit and we'll talk financing. 20% down opens most doors. The listings are on the wall.\"";
+      msg = "Save a deposit and we'll talk financing. 20% down.";
     }
-    note(msg, 3.4);
+    agentSay(desk, msg);
   }
 
   // ==========================================================================

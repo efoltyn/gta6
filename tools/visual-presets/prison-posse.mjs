@@ -203,23 +203,13 @@ async function stagePrisonPosse(input) {
   try { if (CBZ.fpsSetAim) CBZ.fpsSetAim(false); } catch (_) {}
   if (CBZ.invOpen && CBZ.toggleInventory) CBZ.toggleInventory();
   if (CBZ.prisonFriendsReset) CBZ.prisonFriendsReset();
-  /* CLEAR THE BAND. The subtitle is one shared element with a seconds timer
-     that only runs while the simulation does, so a line from the PREVIOUS
-     subject was still sitting over the next plate — the flanked pair was
-     captioned with the fourth man's refusal from the plate before it. Every
-     beat starts silent and only prints what it makes somebody say. */
-  const bandEl = document.getElementById("pinteractSay");
-  const bandLine = bandEl && bandEl.querySelector(".pi-subtitle-line");
-  const bandWas = bandLine ? (bandLine.textContent || "") : "";
-  if (bandEl) bandEl.classList.remove("show");
-  // ...and BLANK it, not merely hide it. The band is arbitrated by
-  // systems/subtitlebus.js, which holds a claim on the surface with its own
-  // wall-clock timer while interact.js's own countdown runs on SIMULATED
-  // seconds — two clocks that a frozen-rAF storyboard drives at wildly
-  // different rates. Releasing the claim and emptying the text means whatever
-  // survives that mismatch has nothing to print.
-  if (bandLine) bandLine.textContent = "";
-  try { if (CBZ.subtitles && CBZ.subtitles.release) CBZ.subtitles.release("pinteractSay"); } catch (_) {}
+  /* CLEAR THE LINES. Speech (systems/speech.js, over each speaker's head)
+     keeps a line for a few simulated seconds, so a line from the PREVIOUS
+     subject could still be hanging over the next plate. Every beat starts
+     silent and only prints what it makes somebody say. */
+  const liveLines = () => { try { return CBZ.speech ? CBZ.speech.audit().lines : []; } catch (_) { return []; } };
+  const bandWas = liveLines().map((l) => l.text).join(" | ");
+  try { if (CBZ.speech) CBZ.speech.clear(); } catch (_) {}
   const saidAtStart = (CBZ.prisonSayAudit && CBZ.prisonSayAudit().said) || 0;
   CBZ.game.cigs = sub.cigs;
   // ...and tell the HUD. Writing game.cigs straight leaves the corner chip
@@ -443,7 +433,7 @@ async function stagePrisonPosse(input) {
     let spoke = false;
     for (let i = 0; i < 24 && !spoke; i++) {
       step(6, said4);
-      spoke = !!(bandEl && bandEl.classList.contains("show") && bandLine && bandLine.textContent);
+      spoke = liveLines().length > 0;
     }
   } else if (sub.starve) {
     /* THREE SITTINGS, ON THE WORLD'S OWN CLOCK. dayPhase is the sun every
@@ -463,11 +453,7 @@ async function stagePrisonPosse(input) {
          a while, and the wing talks the whole time — the before plate came
          back captioned with a piece of yard gossip ("Been waiting on somebody
          to get to Blue Ace") that had nothing to do with anybody's dinner. */
-      if (w === walk.length - 1 && bandEl) {
-        bandEl.classList.remove("show");
-        if (bandLine) bandLine.textContent = "";
-        try { if (CBZ.subtitles && CBZ.subtitles.release) CBZ.subtitles.release("pinteractSay"); } catch (_) {}
-      }
+      if (w === walk.length - 1) { try { if (CBZ.speech) CBZ.speech.clear(); } catch (_) {} }
       CBZ.dayPhase(ph);
       // 90 frames, not 40: systems/dayplan.js CACHES the live block (`cur`) and
       // only re-reads it in poll(), and prisonfriends' own chow edge only gets
@@ -527,8 +513,7 @@ async function stagePrisonPosse(input) {
   };
   const cardRows = Array.from(document.querySelectorAll("#interact .iopt, #pinteract .pi-action, #pinteract [data-pi]"))
     .filter(vis).map((r) => (r.innerText || "").replace(/\s+/g, " ").trim());
-  const sayEl = document.getElementById("pinteractSay");
-  const said = sayEl && vis(sayEl) ? ((sayEl.querySelector(".pi-subtitle-line") || {}).textContent || "").trim() : "";
+  const said = liveLines().map((l) => l.text).join(" ").trim();
   let missed = 0;
   for (const m of marks) missed += m.pfMissed || 0;
   if (missedPeak > missed) missed = missedPeak;
@@ -571,16 +556,6 @@ async function stagePrisonPosse(input) {
   camera.updateMatrixWorld(true);
   CBZ.renderer.render(CBZ.scene, camera);
   await wait(420);                 // the subtitle band fades in on a .14s transition
-  /* AND ONLY THEN ASK WHAT IS ON SCREEN. The band fades in over 0.14 s of WALL
-     time, so a line spoken on the last simulated frame before the shutter is
-     still at opacity 0 when the metrics are taken — three runs reported "no
-     line" over a plate with the line plainly printed across it. The picture
-     was right and the row under it was wrong, which is worse than either. */
-  const bandNow = document.getElementById("pinteractSay");
-  if (bandNow && vis(bandNow)) {
-    const t = ((bandNow.querySelector(".pi-subtitle-line") || {}).textContent || "").trim();
-    if (t) quitLine = t;
-  }
 
   return {
     ok: true,

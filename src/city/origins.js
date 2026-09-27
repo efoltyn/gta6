@@ -1042,7 +1042,7 @@
       ph.vx = s.nx * T.tossSpeedXZ; ph.vz = s.nz * T.tossSpeedXZ;
       ph.vy = T.tossSpeedY; ph.spin = T.tossSpin;
       if (CBZ.shake) CBZ.shake(T.shakeAmt);
-      if (CBZ.city) { CBZ.city.big("“AND STAY OUT!”"); CBZ.city.note("Tossed out on your ass. $45 and a bar tab you'll never pay off.", 3); }
+      if (s.bouncer && CBZ.speech) CBZ.speech.say(s.bouncer, "AND STAY OUT!", { secs: 2.6, force: true });
       if (s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
       return;
     }

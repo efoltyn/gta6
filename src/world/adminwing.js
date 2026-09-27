@@ -724,7 +724,7 @@
      room, or close enough to hear you through the quarters doorway. */
   function sayWarden(w, group) {
     const line = CBZ.warden && CBZ.warden.line ? CBZ.warden.line(group) : "";
-    if (line && CBZ.prisonSay) CBZ.prisonSay(w, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    if (line && CBZ.prisonSay) CBZ.prisonSay(w, line, { force: true });
   }
   function wardenTerritory(w, dt, P) {
     if (CBZ.game.role === "cop") return;

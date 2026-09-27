@@ -82,7 +82,6 @@
   const cmat = CBZ.cmat || CBZ.mat;
 
   const REACH = 2.2;          // [E] rifle reach
-  const RIFLE_T = 0.7;        // the crouch-and-rifle beat
   const RESPAWN = 280;        // s — the beach crowd "comes back" with new valuables
 
   // deterministic LCG — same sand, same towels, every run
@@ -1091,7 +1090,7 @@
   // =====================================================================
   //  THE LOOT LOOP — [E] rifles a full cooler/bag for cash. Petty theft if
   //  witnessed (the existing chokepoint decides), restocks after minutes.
-  //  Same chip + document-keydown pattern as roofloot.js.
+  //  One interaction-card verb (zone-beachbag below); the take is instant.
   // =====================================================================
   function setLook(L, full) {
     L.body.material = full ? (L.bag ? BAG_FULL() : LOOT_FULL()) : (L.bag ? BAG_EMPTY() : LOOT_EMPTY());
@@ -1109,25 +1108,6 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
-  let chip = null, _chipLast;
-  function chipText(t) {
-    if (t === _chipLast) return;
-    if (!chip && typeof document !== "undefined" && document.body) {
-      try {
-        chip = document.createElement("div");
-        chip.id = "beachLootChip";
-        chip.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:278px;z-index:24;display:none;" +
-          "padding:6px 12px;border-radius:9px;background:rgba(8,14,22,.78);border:1px solid rgba(255,209,102,.30);" +
-          "color:#ffe9bd;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
-        document.body.appendChild(chip);
-      } catch (e) { chip = null; }
-    }
-    if (!chip) return;
-    _chipLast = t;
-    if (!t) { chip.style.display = "none"; return; }
-    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
-    chip.style.display = "block"; chip.innerHTML = t;
-  }
 
   function lootNear() {
     const P = CBZ.player; if (!P || P.pos.y > 1.6) return null;
@@ -1179,30 +1159,17 @@
     }
   }
 
-  let rifling = null;          // { L, t }
+  /* Going through a bag is a grab, not a 0.7 s "Going through it..." chip
+     (owner: a pickup with a loading beat is stupid). Pick it and it is done;
+     the theft is still charged only if somebody saw it. */
   CBZ.onUpdate(36.9, function (dt) {
-    if (g.mode !== "city" || !built) { rifling = null; chipText(null); return; }
+    if (g.mode !== "city" || !built) return;
     populate();
     for (const L of loot) {
       if (!L.looted) continue;
       L.t -= dt;
       if (L.t <= 0) { L.looted = false; setLook(L, true); }
     }
-    const P = CBZ.player;
-    if (rifling) {
-      const L = rifling.L;
-      if (!P || P.dead || L.looted || Math.hypot(P.pos.x - L.x, P.pos.z - L.z) > REACH + 1) { rifling = null; chipText(null); return; }
-      rifling.t += dt;
-      chipText("Going through it…");
-      if (rifling.t >= RIFLE_T) { rifle(L); rifling = null; chipText(null); }
-      return;
-    }
-    // not rifling: the chip has nothing to say. The walk-up prompt is the
-    // interaction card's job (zone-beachbag below) — the raw [E] keydown and
-    // the chip pill that used to double it are deleted; the registry is the
-    // one surface. The chip keeps the rifling-progress prose above, which the
-    // card has no channel for.
-    chipText(null);
   });
 
   let zoned = false;
@@ -1212,13 +1179,13 @@
     CBZ.interactions.describe("beachbag", function () { return { label: "Somebody's things", note: "" }; });
     CBZ.interactions.registerZone({
       id: "zone-beachbag", kind: "beachbag", prio: 11,
-      find: function () { return (built && !rifling && g.mode === "city") ? lootNear() : null; },
+      find: function () { return (built && g.mode === "city") ? lootNear() : null; },
       options: [{
         id: "beachbag-rifle", slot: "e", bad: true,
         // the button names what you are actually rifling (the deleted pill
         // distinguished bag from cooler; the one surviving surface keeps that)
         label: function (L) { return L && L.bag ? "Go through the bag" : "Go through the cooler"; },
-        onSelect: function (L) { if (L) rifling = { L: L, t: 0 }; },
+        onSelect: function (L) { if (L && !L.looted) rifle(L); },
       }],
     });
   });
@@ -1335,7 +1302,6 @@
     return { loungers: lie, deckchairs: sit, occupied: taken };
   };
   CBZ.cityBeachLootReset = function () {
-    rifling = null;
     for (const L of loot) { L.looted = false; L.t = 0; setLook(L, true); }
   };
 

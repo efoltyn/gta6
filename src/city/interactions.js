@@ -200,8 +200,7 @@
   // A VERB-CARD PROVIDER generalises dualRideRows (the airliner BOARD/HIJACK
   // card) to other systems: fn(pick, rows, ctx) may return a REPLACEMENT rows
   // array built from the same gated pool (rows._pass) — labelled decision rows
-  // instead of the single YES. Rows may carry `rows.note`, a spoken line the
-  // card shows in place of the proposal (dialogue's "what they just said").
+  // instead of the single YES. The card never prints a spoken line.
   // First provider to return rows wins; returning null passes through.
   function registerVerbCard(fn) { if (typeof fn === "function") verbCards.push(fn); return verbCards.length; }
 
@@ -565,7 +564,6 @@
     if (standing && !standing.canInfluence && !forceYes) {
       rememberChoice(t, verb, true);
       if (CBZ.cityRelShift) CBZ.cityRelShift(t, "snubbed", 0.35);
-      if (CBZ.city && CBZ.city.note) CBZ.city.note((t.name || "They") + " ignores you · Lv." + standing.playerLevel + " vs Lv." + standing.targetLevel, 2.0);
       dismissedTarget = t; dismissT = 2.2;
       hidePanel(); dirty = true;
       return;
@@ -734,23 +732,14 @@
     let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
     for (const r of rows) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
-    if (rows.note != null) fp += "N:" + rows.note + ";";   // a new spoken line is a new card
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
     if (noteEl) {
-      // NO QUESTION LINE, ANYWHERE (owner, 2026-08-04). It only ever existed to
-      // give the keyboard's YES row something to say yes TO; now that the row
-      // wears the verb itself on every surface, printing the proposal here as
-      // well is the "Zip tie them?" over a ZIP TIE pill all over again — say it
-      // ONCE, and say it on the button.
-      // A verb-card provider may still pin a SPOKEN LINE to the card
-      // (rows.note — dialogue's "what they just said to you"). That line IS
-      // content rather than a restated control, so it keeps the slot.
-      // describe()'s own note is NOT promoted into this slot: the answer to
-      // "too many words" is fewer words, not the same words moved up a line.
-      // What a door wants arrives when you PRESS it, in the note channel.
-      noteEl.textContent = rows.note != null ? rows.note : "";
-      noteEl.style.display = noteEl.textContent ? "" : "none";
+      // NO LINE ON THE CARD (owner, 2026-08-04 + 2026-09-27). No restated
+      // question, and no spoken line either: what a person says floats over his
+      // head (CBZ.speech via citySay). The card is buttons only.
+      noteEl.textContent = "";
+      noteEl.style.display = "none";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;

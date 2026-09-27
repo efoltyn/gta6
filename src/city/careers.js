@@ -1175,8 +1175,10 @@
         if (j.gangId === "player" && CBZ.cityPlayerGangClaimTurf) CBZ.cityPlayerGangClaimTurf(j.x, j.z);
         CBZ.city.note("Block taken, it flies the colours now.", 2.0);
         finishGangContract(j, 0);
-      } else if (CBZ.now - (j._noteT || 0) > 2200) {
-        j._noteT = CBZ.now; CBZ.city.note("Hold the corner… " + Math.ceil((j.held ? 2 : 3) - j.plant) + "s", 1.0);
+      } else if (CBZ.workLine) {
+        // holding the corner IS the job, so it keeps its time; the readout is
+        // a hairline over the corner itself, not a "Hold the corner... Ns" note
+        CBZ.workLine("gc-take", { x: j.x, y: 2.4, z: j.z }, j.plant / (j.held ? 2 : 3));
       }
     } else if (j.type === "gcDefend") {
       const onBlock = Math.hypot(P.x - j.x, P.z - j.z) < 18;
@@ -1205,7 +1207,8 @@
 
   // per-frame progress for a DEAD-DROP run. The chain the fence buys: get to
   // the FOOT of the way up (lift lobby / fire-escape flight), make the roof
-  // point, work the drop for a beat — and on a retrieve, walk the package back
+  // point, make the drop (instant: no "Working the drop... Ns" wait for
+  // tucking a package behind a vent) — and on a retrieve, walk the package back
   // down to the fence. Carrying for a fence demands a LOW PROFILE: spike to
   // 4 stars and the deal is off (same heat rule the smuggle run lives by).
   function deadDropTick(j, P, dt) {
@@ -1219,19 +1222,15 @@
       }
     } else if (j.stage === "roof") {
       const onSpot = Math.abs(CBZ.player.pos.y - r.drop.y) < 2.5 && Math.hypot(P.x - r.drop.x, P.z - r.drop.z) < 2.6;
-      if (!onSpot) { j.work = 0; return; }
-      j.work = (j.work || 0) + dt;
-      if (j.work >= 1.2) {
+      if (onSpot) {
         if (j.place) {
           CBZ.city.note("Package tucked in behind the vents. Nobody on the street saw a thing.", 2.2);
           finishJob((g.wanted | 0) === 0 ? 60 : 0);   // a clean, unseen drop earns the quiet bonus
         } else {
-          j.stage = "fence"; j.work = 0;
+          j.stage = "fence";
           makeBeacon(j.fence.x, j.fence.z, 0x7ed957);
           CBZ.city.note("Got the package, get back down and walk it to the fence.", 2.4);
         }
-      } else if (CBZ.now - (j._noteT || 0) > 900) {
-        j._noteT = CBZ.now; CBZ.city.note("Working the drop… " + Math.ceil(1.2 - j.work) + "s", 0.9);
       }
     } else { // fence: hand the lifted package over
       if (Math.hypot(P.x - j.fence.x, P.z - j.fence.z) < 4) {

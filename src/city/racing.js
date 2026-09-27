@@ -928,10 +928,10 @@
         const PA = CBZ.player;
         if (PA && PA.driving && CBZ.cityStartSpeedwayRace) {
           // they're at the wheel and the track flow is live → drop the green flag.
-          note("" + r.name + " takes the challenge, to the line!", 2.4);
+          if (CBZ.citySay) CBZ.citySay(p, "You're on. To the line!", null, { secs: 2.4, force: true });
           try { CBZ.cityStartSpeedwayRace(); } catch (e) { /* */ }
         } else {
-          note("\"" + r.name + ": Meet me at the speedway and we'll settle it.\"", 3.0);
+          if (CBZ.citySay) CBZ.citySay(p, "Meet me at the speedway and we'll settle it.", null, { secs: 3, force: true });
         }
       },
     });
@@ -1391,7 +1391,7 @@
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         if (!CBZ.player || !CBZ.player.driving) {
-          note("" + r.name + ": “Come back IN something. We race what we drive.”", 2.6);
+          if (CBZ.citySay) CBZ.citySay(p, "Come back IN something. We race what we drive.", null, { secs: 2.6, force: true });
           return;
         }
         // he calls two more names onto the grid — real cars form up behind you

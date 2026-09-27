@@ -238,24 +238,23 @@ const PASS_B = `(() => {
     if (!r.acted) out.fails.push(name + ": tapping the card row did nothing");
   };
 
-  probe("roof-stash", "roofstash", "roofStashChip", () => {
+  // roof stash + beach bag: the take is INSTANT now (no pry/rifle beat, no
+  // status chip), so the row firing must have looted it within a few frames.
+  probe("roof-stash", "roofstash", null, () => {
     const st = (CBZ.cityRoofStashes && CBZ.cityRoofStashes() || []).filter((x) => !x.looted)[0];
     if (!st) return false;
     window.__st = st; P.pos.set(st.x, st.y + 0.1, st.z); return true;
-  }, (c) => {
-    step(10);
-    const prose = c && c.textContent;                 // "Prying it open…" — the chip's status job
-    step(120);                                        // CRACK_T=0.9s and change
-    window.__stProse = prose;
+  }, () => {
+    step(3);
     return !!window.__st.looted;
   });
 
-  probe("beach-loot", "beachbag", "beachLootChip", () => {
+  probe("beach-loot", "beachbag", null, () => {
     const L = (CBZ.cityBeachLoot && CBZ.cityBeachLoot() || []).filter((x) => !x.looted)[0];
     if (!L) return false;
     window.__L = L; P.pos.set(L.x, 0.1, L.z); return true;
   }, () => {
-    step(120);                                        // RIFLE_T=0.7s and change
+    step(3);
     return !!window.__L.looted;
   });
 

@@ -138,8 +138,7 @@
   // ============================================================
   //  DEAL — a corner dealer + ambient buyers + a robbable cash stack
   // ============================================================
-  const DEAL_BARK = ["What you need?", "I got that, fam.", "Twenties, fifties, say it.", "Step up, don't loiter."];
-  const BUYER_BARK = ["You holding?", "Let me get a twenty.", "Hook me up, man.", "Same as last time."];
+  // (the hand-to-hand is body language: no dealer/buyer captions)
 
   // the grabbable cash stack that appears on the desk/ground during an exchange.
   // ONE at a time city-wide (cheap), placed at the live dealer's feet, grabbed on
@@ -285,7 +284,6 @@
     buyer.state = "idle";
     if (buyer.group) buyer.group.rotation.y = Math.atan2(dealer.pos.x - buyer.pos.x, dealer.pos.z - buyer.pos.z);
     if (dealer.group) dealer.group.rotation.y = Math.atan2(buyer.pos.x - dealer.pos.x, buyer.pos.z - dealer.pos.z);
-    if (!op.greeted) { op.greeted = true; opBark(gang, buyer, BUYER_BARK); }
     if (buyer._buyT >= 1.4 && !op.done) {
       op.done = true;
       if (op.onSettle) { try { op.onSettle(dealer, buyer); } catch (e) {} }
@@ -337,7 +335,6 @@
       gang.treasury = Math.min(8000, (gang.treasury || 0) + crewTake);
       if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(dealer); s.contrib = (s.contrib || 0) + crewTake * 0.5; s.loyalty = Math.min(1, (s.loyalty || 0.5) + 0.01); }
     }
-    opBark(gang, dealer, DEAL_BARK);
     // the cash carrot: a grabbable stack the player can rob (one city-wide)
     if (nearPlayer(dealer.pos.x, dealer.pos.z, 55)) {
       placeCash(dealer.pos.x, dealer.pos.y || 0, dealer.pos.z, take + 20 + ((rng() * 60) | 0), gang);

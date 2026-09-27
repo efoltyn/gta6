@@ -702,7 +702,9 @@
       const clear = near && losClear(P.pos.x, P.pos.y + 1.4, P.pos.z, V.proto.wx, V.proto.y, V.proto.wz);
       if (clear) {
         RT.photoT += dt;
-        hint("Framing the prototype… " + Math.min(100, Math.round(RT.photoT / PHOTO_HOLD * 100)) + "%");
+        // the hold is the play (stay in the open, in line of sight); its
+        // readout hangs on the prototype, never a HUD percentage
+        if (CBZ.workLine) CBZ.workLine("mil-photo", { x: V.proto.wx, y: (V.proto.y || 0) + 2.2, z: V.proto.wz }, RT.photoT / PHOTO_HOLD);
         if (RT.photoT >= PHOTO_HOLD) { RT.photoT = 0; completeJob("photo"); }
       } else { if (near && !clear) hint("No clean shot, get past the revetment wall"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
     }
@@ -713,7 +715,7 @@
         if (RT.seen) { hint("Spotted, can't work the mast now"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
         else {
           RT.tapT += dt;
-          hint("Installing tap… " + Math.min(100, Math.round(RT.tapT / TAP_HOLD * 100)) + "%");
+          if (CBZ.workLine) CBZ.workLine("mil-tap", { x: V.comms.wx, y: (V.comms.y || 0) + 1.6, z: V.comms.wz }, RT.tapT / TAP_HOLD);
           if (RT.tapT >= TAP_HOLD) { RT.tapT = 0; completeJob("tap"); }
         }
       } else RT.tapT = Math.max(0, RT.tapT - dt);
@@ -761,7 +763,7 @@
     // slam the cell door (a real collider) until the lock is picked
     if (!V.brigDoor) V.brigDoor = C.solid(cell.lx - 2.4, cell.lz + 2.2, cell.lx + 2.4, cell.lz + 2.8, 0, 3.6);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (C) { C.hud.toast("CAUGHT · THE BRIG"); C.hud.feed(reason || "Hands where I can see them.", "#ff5a4a"); }
+    if (C) { C.hud.toast("CAUGHT · THE BRIG"); if (reason) C.hud.feed(reason, "#ff5a4a"); }
     if (CBZ.shake) CBZ.shake(0.7);
     startLockpick();
   }

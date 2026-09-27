@@ -1216,7 +1216,7 @@
         // the officer tells you where this ride ends, on screen, over him
         const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
           : "You're under arrest. You're going to County.";
-        if (!(cop && CBZ.citySay && CBZ.citySay(cop, line, "#9fc3ff", 3.0)) && CBZ.city && CBZ.city.note) CBZ.city.note(line, 3.0);
+        if (cop && CBZ.citySay) CBZ.citySay(cop, line, "#9fc3ff", { secs: 3.0, force: true });
       }
       if (cop && !cop.dead && P) {
         cop.speed = 0;

@@ -450,7 +450,7 @@
     R.board = R.board.filter((k) => k !== j);
     const d = DESTS.find((k) => k.id === j.destId);
     note("RUN ACCEPTED · " + j.name + " → " + d.name + ". Walkaround, then fly.", 3.0);
-    if (j.hot) feed("No manifest on this one. You didn't get it from us.", "#ffd08a");
+    if (j.hot && DISPATCH) DISPATCH.say("No manifest on this one. You didn't get it from us.", 3.0);
     C.hud.closePanel();
   }
   function abortRun() {
@@ -465,8 +465,8 @@
     if (CUSTOMS && CUSTOMS.say) CUSTOMS.say(moodLine(ins.mood), 3.2);
     const cost = bribeCostFor(j.payout), odds = bribeOdds(ins.mood);
     C.hud.panel(head("CUSTOMS · INSPECTOR VANN", "ramp check"),
-      "<div style='margin:2px 0 8px;font-size:13px'>" + esc(moodLine(ins.mood)) +
-      "<br>In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg · " +
+      "<div style='margin:2px 0 8px;font-size:13px'>" +
+      "In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg · " +
       "<span style='color:#ff8a8a'>this will not survive a manifest check.</span></div>" +
       btn("bribe", "SLIP HIM " + fmt$(cost) + " (" + Math.round(odds * 100) + "% he pockets it)", "#8a6a1c") +
       btn("submit", "HAND OVER THE MANIFEST", "#7c1626"),
@@ -474,7 +474,7 @@
         bribe: () => {
           const r = resolveBribe(ins.mood, j.payout);
           C.hud.closePanel();
-          if (r.accepted) { note("He pockets it. “Wind must've blown that pallet in. Night.”", 3.0); finishPayout(0, false); }
+          if (r.accepted) { if (CUSTOMS) CUSTOMS.say("Wind must've blown that pallet in. Night.", 3.0); finishPayout(0, false); }
           else { note("BUSTED, cargo seized, fined " + fmt$(r.fine) + ".", 3.4); if (CUSTOMS) CUSTOMS.say("Hands where I can see 'em.", 2.4); finishPayout(0, true); }
         },
         submit: () => {
@@ -487,10 +487,11 @@
         },
       });
   }
+  // what Vann SAYS as he walks up; his mood is in the words, not narrated
   function moodLine(m) {
-    if (m < 0.34) return "Vann's arms are crossed. He hasn't blinked. “Manifest. Now.”";
-    if (m < 0.67) return "Vann flips his clipboard, even keel. “Evening. Papers, please.”";
-    return "Vann strolls over, hands behind his back. “Slow night. Whatcha hauling?”";
+    if (m < 0.34) return "Manifest. Now.";
+    if (m < 0.67) return "Evening. Papers, please.";
+    return "Slow night. Whatcha hauling?";
   }
 
   function openEndingPanel(kind, why) {
@@ -666,7 +667,7 @@
        dest beacons  → what you aim the run at
        walkaround    → 4 [E] stations around the parked charter jet
   ============================================================ */
-  let CUSTOMS = null, DISPATCH = null;    // NPC handles (for say())
+  let CUSTOMS = null, DISPATCH = null, FUEL = null;    // NPC handles (for say())
   function build(ctx, venue) {
     C = ctx; VENUE = venue;
     const g = venue.group, o = venue.origin;
@@ -743,7 +744,7 @@
     // ---- ZONES (interactions) ----
     ctx.zone({ id: "desk", label: () => (R.job && R.delivered ? "Collect at the charter desk" : "REDEYE charter desk"), pos: [0, 1.6], r: 2.4, onUse: openBoard });
     ctx.zone({ id: "fuel", label: "Fueler", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
-    ctx.zone({ id: "customs", label: "Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => note("Inspector Vann only cares when you come home heavy.", 2.4) });
+    ctx.zone({ id: "customs", label: "Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => { if (CUSTOMS) CUSTOMS.say("I only care when you come home heavy.", 2.6); } });
 
     // walkaround stations around the parked charter jet — only when a run is
     // accepted, on foot, pre-delivery. Positions key off the nearest charter
@@ -759,20 +760,14 @@
     });
   }
 
-  // the fueler's pre-flight brief: tonight's wind + the customs heat on a hot run
+  // the fueler's pre-flight brief: Bo SAYS tonight's customs heat over his
+  // own head (it used to be a panel of his words with one "Thanks, Bo" button)
   function openFuelBrief() {
-    const s = bag();
     const j = R.job;
-    let heat = "No run loaded, take one at the desk.";
-    if (j) {
-      heat = "Wind " + windStr() + ". " + (j.hot
-        ? "This one's HOT. Customs pull odds ~" + Math.round(inspectionChance(true) * 100) + "% on the ramp home. Bring the bribe money."
-        : "Clean cargo, customs won't blink.");
-    }
-    C.hud.panel(head("FUELER · BO", "pre-flight brief"),
-      "<div style='margin:4px 0;font-size:13px'>" + esc(heat) + "</div>" +
-      "<div style='font-size:11px;opacity:.7'>She's fuelled and ready. Watch the sock on final, the crosswind will walk you off the centreline.</div>" +
-      btn("close", "Thanks, Bo", "#26343c"), { close: () => C.hud.closePanel() });
+    const line = !j ? "No run loaded. Take one at the desk."
+      : j.hot ? "Hot one. Customs pulls about " + Math.round(inspectionChance(true) * 100) + "% on the ramp home."
+        : "Clean cargo. Customs won't blink.";
+    if (FUEL && FUEL.say) FUEL.say(line, 3.2);
   }
 
   // the parked charter jet's world position (nearest private jet), for the
@@ -846,7 +841,7 @@
     venue._npcs = [];
     for (const spec of (venue._cast || [])) {
       const h = ctx.npc(spec);
-      if (h) { venue._npcs.push(h); if (spec.key === "CUSTOMS") CUSTOMS = h; if (spec.key === "DISPATCH") DISPATCH = h; }
+      if (h) { venue._npcs.push(h); if (spec.key === "CUSTOMS") CUSTOMS = h; if (spec.key === "DISPATCH") DISPATCH = h; if (spec.key === "FUEL") FUEL = h; }
     }
   }
 

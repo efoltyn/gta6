@@ -114,9 +114,9 @@
      THE `Name: "` BUG WAS THIS FILE'S FAULT, NOT THE RENDERER'S
 
      Every line below used to be assembled as `${actor.data.name}: "${text}"`
-     and handed to systems/interact.js's .pi-subtitle — a SPEECH surface whose
-     speaker element (.pi-subtitle-speaker) is deliberately screen-reader-only
-     because you can see who is standing in front of you. So the name was
+     and handed to the old .pi-subtitle band (since deleted: every line now
+     floats over the speaker's head, systems/speech.js), whose speaker element
+     was screen-reader-only because you can see who is in front of you. So the name was
      printed twice (once invisibly, once with a colon stapled to the sentence)
      and interact.js:517's `String(msg).replace(/^[“"]|[”"]$/g, "")` then ate
      the CLOSING quote — its leading alternative can never match a string that

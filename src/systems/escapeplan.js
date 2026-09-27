@@ -14,7 +14,8 @@
 
      GATE      1 Keycard     lifted off a senior screw (economy.js steal),
                              taken off the block desk while its officer is
-                             away (a few unseen seconds, here), or bought
+                             away (one grab, here; do it seen and it is a
+                             witnessed theft), or bought
                              from the Old Timer (quests.js asks fixerTalk)
                2 Gate Key    the board in the gate booth (a Keycard door)
                              or the gate officer's belt
@@ -49,7 +50,7 @@
   const DESK_ATTEND_R = 6.0;          // a screw this close to the desk is AT it
   const DESK_REACH2 = 1.9 * 1.9;
   const GRATE_REACH2 = 1.6;           // the vents' own reach (interactions.js)
-  const WORK_NEED = { desk: 1.4, grate: 3.6 };
+  const WORK_NEED = { grate: 3.6 };  // the cut is the only timed beat; the card is a grab
   const SAW_HEARD = 7.0;              // a hacksaw on steel carries this far
   const PORT_SEEN_HOLD = 4.0;         // seconds a sighting at a port blocks the win
   // what a shakedown takes: keys, tools, blades. Personal effects stay.
@@ -134,10 +135,18 @@
   }
 
   /* ============================================================
-     WORK BEATS - a few seconds with your hands busy. A key press or a
-     pill tap starts one; it runs while you stay at the thing (a touch
+     WORK BEATS - the grate cut is a few seconds with your hands busy (the
+     time IS the risk: loud, and anyone near hears it). A key press or a
+     pill tap starts it; it runs while you stay at the grate (a touch
      screen cannot hold a pill, so staying put IS the hold) and stops the
-     moment you walk off or somebody sees you.
+     moment you walk off or somebody sees or hears you. Its progress is a
+     hairline on the Cut pill over the grate, never a number.
+
+     The desk card used to be one of these: 1.4 s of "Take 0%..99%" to lift
+     a card off a desk. OWNER: "when I pick up a key card, if there's a
+     loading 0 to 100% bar, that's really stupid." Picking a thing up is a
+     grab. The risk that the timer stood for is kept where it belongs: take
+     it while a screw has you in sight and he saw you steal it.
      ============================================================ */
   function startWork(kind) {
     if (S.work && S.work.kind === kind) return;
@@ -158,7 +167,15 @@
     const d = deskState();
     if (!d || d.d2 > DESK_REACH2) return;
     if (d.officer) return;               // he is standing at it; you can see him
-    startWork("desk");
+    const who = seenBy();
+    S.deskTaken = true;
+    deskCardShown(false);
+    grantKeycard();                      // the "Keycard" beat fires from the bag watcher
+    sfx("pickup", { volume: 0.6 });
+    if (who) {                           // lifted in plain sight: he comes for you
+      if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "steal" }); } catch (e) {} }
+      if (CBZ.addHeat) CBZ.addHeat(30);
+    }
   }
   function grateCut() {
     const v = CBZ.culvertGrate;
@@ -177,44 +194,28 @@
   function workTick(dt) {
     const w = S.work;
     if (!w) return;
-    let at = null, reach = 0;
-    if (w.kind === "desk") {
-      const d = deskState();
-      if (!d) { stopWork(); return; }
-      if (d.officer) { stopWork(); return; }
-      at = d.at; reach = DESK_REACH2;
-    } else {
-      const v = CBZ.culvertGrate;
-      if (!v || S.grateCut || !has("Hacksaw Blade")) { stopWork(); return; }
-      at = v; reach = GRATE_REACH2;
-    }
-    if (d2(player.pos.x, player.pos.z, at.x, at.z) > reach) { stopWork(); return; }
-    // SEEN (or, for the saw, HEARD) = caught with your hands on it
-    let who = seenBy();
-    if (!who && w.kind === "grate") who = nearestUpright(player.pos.x, player.pos.z, SAW_HEARD);
+    const at = CBZ.culvertGrate;
+    if (!at || S.grateCut || !has("Hacksaw Blade")) { stopWork(); return; }
+    if (d2(player.pos.x, player.pos.z, at.x, at.z) > GRATE_REACH2) { stopWork(); return; }
+    // SEEN or HEARD = caught with your hands on it
+    const who = seenBy() || nearestUpright(player.pos.x, player.pos.z, SAW_HEARD);
     if (who) {
       stopWork();
-      if (CBZ.reportCrime) { try { CBZ.reportCrime(w.kind === "desk" ? 45 : 35, { type: "steal" }); } catch (e) {} }
-      if (CBZ.addHeat) CBZ.addHeat(w.kind === "desk" ? 30 : 22);
+      if (CBZ.reportCrime) { try { CBZ.reportCrime(35, { type: "steal" }); } catch (e) {} }
+      if (CBZ.addHeat) CBZ.addHeat(22);
       return;                            // he comes for you; that is the message
     }
     w.t += dt;
-    if (w.kind === "grate" && CBZ.shake && (w.t % 0.5) < dt) { try { CBZ.shake(0.03); } catch (e) {} }
-    if (w.kind === "grate" && (w.t % 0.9) < dt && CBZ.worldSfx) {
+    if (CBZ.shake && (w.t % 0.5) < dt) { try { CBZ.shake(0.03); } catch (e) {} }
+    if ((w.t % 0.9) < dt && CBZ.worldSfx) {
       try { CBZ.worldSfx("shell", at.x, at.z, { y: 0.3, ref: 5, volume: 0.5, gap: 0.3 }); } catch (e) {}
     }
     dirty = true;
     if (w.t < w.need) return;
     S.work = null;
-    if (w.kind === "desk") {
-      S.deskTaken = true;
-      deskCardShown(false);
-      grantKeycard();           // the "Keycard" beat fires from the bag watcher
-    } else {
-      S.grateCut = true;
-      if (CBZ.culvertGrate.grate) CBZ.culvertGrate.grate.set(true);
-      beat("rack");
-    }
+    S.grateCut = true;
+    if (at.grate) at.grate.set(true);
+    beat("rack");
   }
 
   // the prompts on the desk and on the grate
@@ -222,8 +223,7 @@
     if (!CBZ.prisonPrompt) return;
     const d = deskState();
     if (d && d.d2 < DESK_REACH2 && !d.officer) {
-      const busy = S.work && S.work.kind === "desk";
-      CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2, sub: busy ? pct(S.work) : "" });
+      CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2 });
       if (CBZ.keys && CBZ.keys.e) deskTake();
     }
     const v = CBZ.culvertGrate;
@@ -232,7 +232,8 @@
       if (dd < GRATE_REACH2) {
         CBZ.prisonPrompt("plan-grate", "@escapePlanCut", "Cut",
           { at: { x: v.x, y: 0.7, z: v.z }, d2: dd,
-            sub: !has("Hacksaw Blade") ? "needs a blade" : (S.work && S.work.kind === "grate" ? pct(S.work) : "") });
+            sub: !has("Hacksaw Blade") ? "needs a blade" : "",
+            prog: S.work && S.work.kind === "grate" ? S.work.t / S.work.need : 0 });
         if (CBZ.keys && CBZ.keys.e) grateCut();
       }
     }
@@ -450,7 +451,6 @@
     return { now: pad(c.h) + ":" + pad(c.m) + "  " + (BLOCK_WORDS[id] || String(id)),
       until: Math.floor(u / 60) + ":" + pad(u % 60) + " left" };
   }
-  function pct(w) { return Math.min(99, Math.floor((w.t / w.need) * 100)) + "%"; }
 
   function gateRoute() {
     const card = g.hasKey || has("Gate Key");

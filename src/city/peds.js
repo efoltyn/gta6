@@ -4220,13 +4220,9 @@
   //  gates how often this runs at all — never per frame).
   // ============================================================
   function citySayBark(ped, txt, secs) {
-    // a brief player-facing line; cheap, throttled by the caller via reactCD.
-    // Route through the ATTRIBUTED speech subtitle (#citySpeech) so the line
-    // carries a visible speaker name — you can always see WHO is talking to you.
-    // citySay handles the missing-name case (SWAT Officer / Police Officer /
-    // job / Stranger) and the near-camera gate. Falls back to the note channel.
-    if (CBZ.citySay && ped && ped.group) { CBZ.citySay(ped, txt, null, secs || 2.4); return; }
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + ((ped && ped.name) || "Stranger") + ": " + txt, secs || 1.6);
+    // a brief player-facing line over the ped's own head (CBZ.speech via
+    // citySay); throttled by the caller via reactCD. No HUD fallback.
+    if (CBZ.citySay && ped && ped.group) CBZ.citySay(ped, txt, null, secs || 2.4);
   }
   // a ped that reached the player lifts some cash (the NPC-initiated mirror of the
   // player's own pickpocket verb in interact.js). Light touch; turns you hot-ish.
@@ -4423,7 +4419,7 @@
       const side = rng() < 0.5 ? 1 : -1;                   // pick a kerb to cross to
       ped.target.set(ped.pos.x + ax * 6 - az * side * 9, 0, ped.pos.z + az * 6 + ax * side * 9);
       ped.state = "walk";
-      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again, ”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
+      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again.”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
       if (CBZ.cityStreetParts) CBZ.cityStreetParts(ped);   // warn the people around them
       return true;
     }
@@ -4441,7 +4437,7 @@
       // street name still rides on it — that part was already right.
       const gl = CBZ.cityLine && CBZ.cityLine(ped, "greet");
       const line = gl ? "“" + gl.replace(/\.$/, "") + ", " + title + ".”"
-                      : pick(["“Yo, " + title + "!”", "“Ayy · " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
+                      : pick(["“Yo, " + title + "!”", "“Ayy, " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
       if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
       if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       return true;
