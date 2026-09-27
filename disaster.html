@@ -515,7 +515,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=deslop1"></script>
+<script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js"></script>
@@ -530,7 +530,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=furnish2"></script>
+<script src="src/city/furniture.js?v=deslop1"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -1262,10 +1262,10 @@ document.body.appendChild(b);}}catch(e){}})();
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<!-- THE SHELVES SELL THE GOODS (city/storegoods.js): every generic store stands
-     its own real stock on its own shelves as the real item models, and the
-     painted blocks furnishShop used to put there are stripped before the batch
-     merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
+<!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
+     gondola aisles, a cooler bank and its packaged goods for the few stores
+     near you, plus its real catalog stock as the real item models, buyable
+     where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
 <script src="src/city/storegoods.js?v=deslop1"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
