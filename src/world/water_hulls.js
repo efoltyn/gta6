@@ -42,6 +42,10 @@
      boat     Speedboat (EXISTING) 6.2m  2.1m  0.5m draft   1.6t   45kn
      cruiser  Bellamar Corsa 46   14.0m  4.2m  1.1m draft  16.0t   32kn
      yacht    Nordholm Aurelia 112 34.0m 7.6m  2.2m draft 260.0t   16kn  <-- SLOW
+     sup      Paddleboard          3.35m 0.81m 0.05m draft  12kg    4kn  (2026-09-27)
+     diveboat Reefline 40 Dive    12.0m 4.0m  0.85m draft  11.0t   24kn  (2026-09-27)
+     freighter Coastal Freighter 140.0m 22.0m 8.0m draft 14000t   16kn  SCENERY: not
+                                                     sold, not berthed (list() skips it)
 
    ART RULES OBSERVED
    - Every surface routes through playercars.js's OWN material helpers
@@ -468,7 +472,12 @@
     const swampT = a.swampT != null ? a.swampT : (t ? t.swampT : Math.max(2, Math.min(999, 2 + 3.2 * loa)));
     const crew = Math.max(1, Math.round(a.crew != null ? a.crew : (t ? t.crew : 1 + 0.38 * loa)));
     const seats = (Array.isArray(a.seats) && a.seats.length) ? a.seats.map(function (s) {
-      return { x: +s.x || 0, y: +s.y || 0, z: +s.z || 0, yaw: +s.yaw || 0 };
+      const o = { x: +s.x || 0, y: +s.y || 0, z: +s.z || 0, yaw: +s.yaw || 0 };
+      // `floor` is the sole under a berth that is NOT on the main deck (a
+      // wheelhouse up a step, a ship's bridge). sea_craft.js reads it; without
+      // it the feet go to deckY and a skipper stands in the wheelhouse floor.
+      if (isFinite(s.floor)) o.floor = +s.floor;
+      return o;
     }) : deriveSeats(h, spec, crew);
     return { gm: gm, phiV: phiV, freeboard: freeboardFor(h), swampT: swampT, crew: crew, seats: seats };
   }
@@ -702,7 +711,12 @@
     styleFor: styleFor,
     specFor: specFor,
     keys: function () { return Array.from(REG.keys()); },
-    list: function () { return Array.from(REG.values()); },
+    // list() is what the boatyard, the marina berth ladder and the origin
+    // picker walk: things you can own and moor. A SCENERY hull (the horizon
+    // freighter) is registered so seaCraft can spawn and wreck it by key, but
+    // nobody sells you a 140 m container ship or sizes a berth for it.
+    list: function () { return Array.from(REG.values()).filter(function (r) { return !r.scenery; }); },
+    listAll: function () { return Array.from(REG.values()); },
   };
 
   // ============================================================
@@ -758,26 +772,170 @@
     ribHull: () => sharedMat("mh-rib", 0xeef2f6, { emissive: 0x363c42, ei: 0.20, double: true }),
     sbHull: () => sharedMat("mh-speedboat", 0xeceff2, { emissive: 0x343a40, ei: 0.20, double: true }),
     ccHull: () => sharedMat("mh-console", 0xf3f6f8, { emissive: 0x383e44, ei: 0.20, double: true }),
+    // running gear: nibral bronze screws, and rudders/struts in the same
+    // tired antifouling the bottom wears
+    bronze: () => sharedMat("mh-bronze", 0xb08a4a, { emissive: 0x2a1c08, ei: 0.25 }),
+    foil: () => sharedMat("mh-foil", 0x4a2622, { emissive: 0x120806, ei: 0.15 }),
+    board: () => sharedMat("mh-sup", 0x2fb5c4, { emissive: 0x0a2c30, ei: 0.22 }),
+    boardPad: () => sharedMat("mh-suppad", 0x2c3238, { emissive: 0x0b0d0f, ei: 0.15 }),
+    alloy: () => sharedMat("mh-divehull", 0xd9dfe4, { emissive: 0x30363b, ei: 0.20, double: true }),
+    ship: () => sharedMat("mh-ship", 0x243447, { emissive: 0x070b10, ei: 0.18 }),
+    shipRed: () => sharedMat("mh-shipred", 0x8e2b22, { emissive: 0x1c0806, ei: 0.16 }),
+    flag: () => sharedMat("mh-flag", 0xc8231d, { emissive: 0x3a0806, ei: 0.35, double: true }),
   };
 
-  // A three-blade screw group named "boat_prop" so
-  // CBZ.cityUpdatePlayerCarVisual() spins it with zero new code.
-  function propGroup(scale, offsets) {
-    const g = new THREE.Group();
-    g.name = "boat_prop";
-    const chrome = M.chrome();
+  // THE SCREW. Was three BARS through the hub per prop, each its own mesh —
+  // six blade tips on a "three-blade" screw, and three draw calls per prop on
+  // a part nobody could see was wrong until the camera went under the boat.
+  // Now: a hub with a tail cone and three pitched blades, and EVERY prop of
+  // the group baked into ONE mesh named "boat_prop" (one draw call, and
+  // cityUpdatePlayerCarVisual() still finds it by name and spins it).
+  const _propGeo = new Map();
+  function propGeometry(scale, offsets) {
+    const key = scale + "|" + offsets.map(function (o) { return o.join(","); }).join(";");
+    let g = _propGeo.get(key);
+    if (g) return g;
+    const parts = [];
+    const R = 0.24 * scale, hubR = 0.055 * scale;
+    const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    const put = function (geo, x, y, z, rx, ry, rz, sx, sy, sz) {
+      const c = geo.index ? geo.toNonIndexed() : geo.clone();
+      e.set(rx || 0, ry || 0, rz || 0, "ZXY");
+      q.setFromEuler(e);
+      mtx.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx || 1, sy || 1, sz || 1));
+      c.applyMatrix4(mtx);
+      parts.push(c);
+    };
     for (const o of offsets) {
-      const sub = new THREE.Group();
-      sub.position.set(o[0], o[1], o[2]);
+      // hub along the shaft (z), with a tail cone astern of it
+      put(new THREE.CylinderGeometry(hubR, hubR * 0.9, 0.17 * scale, 10), o[0], o[1], o[2], Math.PI / 2, 0, 0);
+      put(new THREE.ConeGeometry(hubR * 0.9, 0.12 * scale, 10), o[0], o[1], o[2] - 0.145 * scale, -Math.PI / 2, 0, 0);
       for (let i = 0; i < 3; i++) {
-        const b = new THREE.Mesh(boxGeo(0.05 * scale, 0.44 * scale, 0.14 * scale), chrome);
-        b.rotation.z = (i / 3) * Math.PI * 2;
-        sub.add(b);
+        const a = (i / 3) * Math.PI * 2;
+        const r = hubR + (R - hubR) * 0.5;
+        // a blade is wide and thin, set at ~35 degrees of pitch about its own
+        // radial axis, and rounded at the tip by being a squashed cylinder
+        const blade = new THREE.CylinderGeometry(0.5, 0.5, 1, 10, 1);
+        blade.scale(0.16 * scale, R - hubR, 0.020 * scale);
+        const c = blade.toNonIndexed();
+        // (r128 BufferGeometry has no applyQuaternion — rotate by matrix)
+        e.set(0, 0.62, 0, "XYZ"); c.applyMatrix4(mtx.makeRotationFromEuler(e));   // pitch
+        c.translate(0, r, 0);
+        e.set(0, 0, a, "XYZ"); c.applyMatrix4(mtx.makeRotationFromEuler(e));      // clock round the hub
+        c.translate(o[0], o[1], o[2]);
+        parts.push(c);
       }
-      g.add(sub);
     }
-    g.userData.noMerge = true;
+    g = concatGeos(parts);
+    parts.forEach(function (p) { p.dispose(); });
+    g._shared = true;
+    _propGeo.set(key, g);
     return g;
+  }
+  function propGroup(scale, offsets) {
+    const m = new THREE.Mesh(propGeometry(scale, offsets), M.bronze());
+    m.name = "boat_prop";
+    m.castShadow = false;
+    m.userData.noMerge = true;
+    return m;
+  }
+
+  // ---- UNDER THE BOAT: shafts, P-brackets, spade rudders, trim tabs --------
+  // Every inboard hull in the fleet had a pair of screws hanging in the water
+  // under the transom with nothing holding them: no shaft, no strut, no
+  // rudder. From the beach that was invisible. From a shark it was a propeller
+  // levitating under a boat. These are the running gear, read off the lofted
+  // skin so every part lands on the plating it is bolted to.
+  //
+  // bottomYAt(stations, x, z): the height of the hull SKIN at half-breadth |x|
+  // — the lowest y whose section is at least that wide.
+  function bottomYAt(stations, x, z) {
+    // on the centreline the keel point itself is the skin; a hair off it the
+    // bisection lands just above the keel instead of returning "below keel"
+    const ax = Math.max(0.03, Math.abs(x));
+    let lo = -40, hi = 40;
+    // bracket: keel .. sheer at this station
+    let st = stations[0];
+    for (let i = 0; i < stations.length; i++) { if (stations[i].z <= z) st = stations[i]; }
+    lo = st.pts[0][0] - 0.5; hi = st.pts[st.pts.length - 1][0];
+    if (hullSectionX(stations, z, lo) >= ax) return lo;
+    for (let k = 0; k < 28; k++) {
+      const mid = (lo + hi) * 0.5;
+      if (hullSectionX(stations, z, mid) >= ax) hi = mid; else lo = mid;
+    }
+    return hi;
+  }
+  // gear: { props: [[x, z]], r: prop radius (m), shaft: m of shaft forward
+  //         of the hub, rudder: true|false, drop: extra hub depth }
+  // Returns the prop hub points, already handed to ONE propGroup.
+  function inboardGear(root, stations, gear) {
+    const g = gear || {};
+    const R0 = g.r || 0.3;
+    const steel = M.chrome(), cast = M.bronze(), foil = M.foil();
+    // THE DRAFT IS THE LOWEST POINT. A spec sheet's draft includes the
+    // running gear, and water_float / the shallows read that number, so the
+    // screws and rudders are fitted INSIDE it: the prop shrinks (to no less
+    // than 60% of the asked size) before it is allowed to hang below the keel.
+    let floor = Infinity;
+    for (const st of stations) floor = Math.min(floor, st.pts[0][0]);
+    const hubs = [];
+    let r = R0;
+    for (const p of g.props || []) {
+      const room = bottomYAt(stations, p[0], p[1]) - floor;
+      r = Math.min(r, clampN(room / 1.7, R0 * 0.8, R0));
+    }
+    const scale = r / 0.24;
+    for (const p of g.props || []) {
+      const x = p[0], zP = p[1];
+      const hullAtProp = bottomYAt(stations, x, zP);
+      const yP = hullAtProp - r * 1.12 - (g.drop || 0);
+      const zS = zP + (g.shaft || r * 6);
+      const yS = bottomYAt(stations, x, zS) + 0.03;
+      // the shaft: from where it leaves the hull, down its rake to the hub
+      addTubeBetween(root, [x, yS, zS], [x, yP, zP + 0.10 * scale], Math.max(0.025, r * 0.13), steel, 8);
+      // the shaft log: a fairing where the shaft leaves the plating
+      const log = addCyl(root, Math.max(0.05, r * 0.26), r * 1.4, x, yS - 0.02, zS - r * 0.5, cast, 8);
+      log.rotation.x = Math.PI / 2 - Math.atan2(yS - yP, zS - zP);
+      // THE P-BRACKET: a boss on the shaft just ahead of the screw, and two
+      // struts splayed up to the bottom — the V you see under every twin.
+      const zB = zP + r * 0.95;
+      const f = (zB - zP) / Math.max(0.01, zS - zP);
+      const yB = yP + (yS - yP) * f;
+      const boss = addCyl(root, r * 0.20, r * 0.62, x, yB, zB, cast, 8);
+      boss.rotation.x = Math.PI / 2;
+      [1, -1].forEach(function (side) {
+        const xt = x + side * r * 0.55;
+        addTubeBetween(root, [x + side * r * 0.08, yB, zB], [xt, bottomYAt(stations, xt, zB) + 0.02, zB + r * 0.25], Math.max(0.02, r * 0.07), cast, 6);
+      });
+      // THE SPADE RUDDER astern of the screw: a stock out of the bottom and a
+      // tapered blade that hangs a little deeper than the prop tip.
+      if (g.rudder !== false) {
+        const zR = zP - r * 1.55;
+        const yTop = bottomYAt(stations, x, zR);
+        const yBot = Math.max(yP - r * 1.05, floor - 0.05);
+        const chord = r * 1.25;
+        addPrism(root, Math.max(0.035, r * 0.12),
+          [[zR - chord * 0.55, yBot - yTop + 0.00], [zR - chord * 0.65, -0.04], [zR + chord * 0.45, -0.04], [zR + chord * 0.30, yBot - yTop]].map(function (q2) { return [q2[0], q2[1]]; }),
+          yTop, foil).position.x = x;
+        addCyl(root, Math.max(0.02, r * 0.08), 0.24, x, yTop + 0.05, zR, steel, 6);
+      }
+      hubs.push([x, yP, zP]);
+    }
+    if (hubs.length) root.add(propGroup(scale, hubs));
+    return hubs;
+  }
+  // Two stainless plates on the transom bottom, hinged at the hull and
+  // cocked down a few degrees, each with its ram. Every planing hull has them.
+  function trimTabs(root, stations, halfSpread, w, chord) {
+    const z0 = stations[0].z;
+    const steel = M.chrome(), ram = M.grey();
+    [1, -1].forEach(function (side) {
+      const x = side * halfSpread;
+      const y = bottomYAt(stations, x, z0 + 0.05);
+      const tab = addBox(root, w, 0.02, chord, x, y - 0.02, z0 - chord * 0.5, steel);
+      tab.rotation.x = 0.10;
+      addTubeBetween(root, [x, y + 0.34, z0 - 0.03], [x, y - 0.01, z0 - chord * 0.8], 0.028, ram, 6);
+    });
   }
 
   // Port red / starboard green at the bow, white astern, white masthead.
@@ -800,10 +958,123 @@
   // The hull SHELL: one lofted mesh, its own material, its own draw call.
   // Named so tools/visual-presets/boat-fleet.mjs can find the surface it is
   // auditing rather than guessing which merged bucket is the hull.
+  // ---- HULL PAINT: antifouling, boot top, and a boat that has been in the sea
+  // Every shell used to be ONE colour from the sheer to the keel: a white
+  // bathtub, which is exactly what a hull bottom never is. From a shark's eye
+  // the bottom is the whole boat, so the shell now carries its real paint
+  // scheme as a function of HULL-LOCAL HEIGHT (the waterline is y = 0 across
+  // the fleet): antifouling below the boot top, a boot stripe on the
+  // waterline, gelcoat above — plus fouling. Slime in the top band under the
+  // waterline, blotchy ablative wear, barnacle speckle, and a grime line on
+  // the gelcoat just above the boot.
+  //
+  // WHY A SHADER AND NOT A SECOND MESH OR VERTEX COLOURS. A second mesh is a
+  // second draw call per boat. Vertex colours break every consumer that
+  // builds geometry of its own with the hull's material: sea_craft.js's bite
+  // dices a chunk off the hull with cityShedSolid(box, hull.material), and a
+  // box with no colour attribute under a vertexColors material renders BLACK
+  // in r128. Painting off object-space position needs no attribute at all.
+  // It paints FRONT faces only: an open boat's shell is double-sided and its
+  // inside (below the sole of a skiff, say) is the liner, not the bottom.
+  const _paintCache = new Map();
+  const PAINT_VERT_HEAD = "varying vec3 vMhP;\n";
+  const PAINT_FRAG_HEAD = [
+    "varying vec3 vMhP;",
+    "uniform vec3 uMhBottom; uniform vec3 uMhBoot; uniform vec4 uMhBand; uniform vec2 uMhDirt;",
+    "float mhH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+    "float mhN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+    "  return mix(mix(mhH(i), mhH(i + vec2(1.0, 0.0)), f.x), mix(mhH(i + vec2(0.0, 1.0)), mhH(i + vec2(1.0, 1.0)), f.x), f.y); }",
+    "",
+  ].join("\n");
+  // uMhBand = (boot bottom = top of the antifouling, boot top, slime depth, boot on)
+  // uMhDirt = (fouling 0..1, feature scale: 1 for a runabout, larger for a ship)
+  const PAINT_FRAG_BODY = [
+    "if (gl_FrontFacing) {",
+    "  vec3 P = vMhP / uMhDirt.y;",
+    "  float wl = uMhBand.x / uMhDirt.y, bt = uMhBand.y / uMhDirt.y, sd = uMhBand.z / uMhDirt.y;",
+    "  float e = 0.012;",
+    "  float n1 = mhN(P.xz * vec2(1.7, 0.55) + P.y * 2.0);",
+    "  float n2 = mhN(vec2(P.z * 0.35, P.y * 9.0 + P.x * 0.7));",
+    "  float below = 1.0 - smoothstep(wl - e, wl + e, P.y);",
+    "  vec3 bot = uMhBottom * (0.80 + 0.32 * n1);",
+    "  float slime = (1.0 - smoothstep(0.0, sd, wl - P.y)) * uMhDirt.x;",
+    "  bot = mix(bot, vec3(0.19, 0.22, 0.11), slime * (0.40 + 0.45 * n2));",
+    // barnacles: sparse ROUND dots jittered in 11 cm cells, not a grid of squares
+    "  vec2 cc = P.xz * 9.0 + vec2(P.y * 5.0, 0.0); vec2 ci = floor(cc);",
+    "  vec2 cf = fract(cc) - 0.5 - (vec2(mhH(ci), mhH(ci + 7.1)) - 0.5) * 0.6;",
+    "  float spk = step(0.82, mhH(ci + 3.3)) * (1.0 - smoothstep(0.10, 0.17, length(cf))) * uMhDirt.x * 0.32;",
+    "  bot = mix(bot, vec3(0.58, 0.57, 0.50), spk);",
+    "  float boot = smoothstep(wl - e, wl + e, P.y) * (1.0 - smoothstep(bt - e, bt + e, P.y)) * uMhBand.w;",
+    "  vec3 c = diffuseColor.rgb;",
+    "  float grime = (1.0 - smoothstep(0.0, 0.16, P.y - bt)) * step(bt, P.y) * uMhDirt.x * 0.24 * n2;",
+    "  c *= 1.0 - grime;",
+    "  c = mix(c, uMhBoot, boot);",
+    "  diffuseColor.rgb = mix(c, bot, below);",
+    "}",
+  ].join("\n");
+  // The program cache key carries a hash of the shader text, so an edited
+  // paint shader can never be served from a program compiled off the old one.
+  const PAINT_KEY = (function () {
+    let h = 2166136261;
+    const t = PAINT_FRAG_HEAD + PAINT_FRAG_BODY;
+    for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return "mh-hullpaint-" + (h >>> 0).toString(36);
+  })();
+  // paint: { bottom: hex, boot: hex|null, bootH: m, bootY: m (top of the
+  //          antifouling, default 0), slime: m, dirt: 0..1, scale: m }
+  // Omitted -> a fouled, darkened version of the gelcoat and no boot stripe:
+  // any shell anybody lofts has been in the water, even one nobody painted.
+  function paintedHullMat(src, paint) {
+    if (!src || paint === false) return src;
+    const p = paint || {};
+    const base = src.color ? src.color.clone() : new THREE.Color(0xdddddd);
+    const bottom = p.bottom != null ? new THREE.Color(p.bottom)
+      : new THREE.Color(base.r * 0.52, base.g * 0.55, base.b * 0.48);
+    const bootOn = p.boot != null;
+    const boot = new THREE.Color(bootOn ? p.boot : 0x000000);
+    const scale = p.scale != null ? p.scale : 1;
+    const y0 = p.bootY != null ? p.bootY : 0;
+    const band = new THREE.Vector4(y0, y0 + (bootOn ? (p.bootH != null ? p.bootH : 0.07 * scale) : 0),
+      p.slime != null ? p.slime : 0.28 * scale, bootOn ? 1 : 0);
+    const dirt = new THREE.Vector2(p.dirt != null ? p.dirt : 0.8, scale);
+    const key = src.uuid + "|" + bottom.getHex() + "|" + boot.getHex() + "|" + band.toArray().join(",") + "|" + dirt.toArray().join(",");
+    let m = _paintCache.get(key);
+    if (m) return m;
+    m = src.clone();
+    m._shared = true;
+    m.userData = Object.assign({}, src.userData, { hullPaint: true, baseMat: src });
+    const prev = src.onBeforeCompile;
+    const prevKey = src.customProgramCacheKey ? src.customProgramCacheKey() : "";
+    m.onBeforeCompile = function (shader, renderer) {
+      if (typeof prev === "function") prev.call(this, shader, renderer);
+      shader.uniforms.uMhBottom = { value: bottom };
+      shader.uniforms.uMhBoot = { value: boot };
+      shader.uniforms.uMhBand = { value: band };
+      shader.uniforms.uMhDirt = { value: dirt };
+      shader.vertexShader = PAINT_VERT_HEAD + shader.vertexShader.replace(
+        "#include <begin_vertex>", "#include <begin_vertex>\n  vMhP = position;");
+      shader.fragmentShader = PAINT_FRAG_HEAD + shader.fragmentShader.replace(
+        "#include <color_fragment>", "#include <color_fragment>\n" + PAINT_FRAG_BODY);
+    };
+    // One program for every painted shell of a material type: the scheme is
+    // uniforms, not code, so twenty hulls do not compile twenty shaders.
+    m.customProgramCacheKey = function () { return PAINT_KEY + "|" + prevKey; };
+    _paintCache.set(key, m);
+    return m;
+  }
+
+  // The fleet's paint schemes, named so a builder's STRAKES and appendages
+  // can wear exactly the shell's paint (a spray rail below the waterline is
+  // antifouled like the plating it is moulded into, not bare white gelcoat).
+  const SB_PAINT = { bottom: 0x1f3552, boot: 0x1574d6, bootH: 0.06, dirt: 0.55, slime: 0.16, scale: 0.8 };
+  const CC_PAINT = { bottom: 0x6f2a22, boot: 0x16191d, bootH: 0.07, dirt: 0.8, slime: 0.20, scale: 0.9 };
+  const CR_PAINT = { bottom: 0x25282c, boot: 0x1d2b3a, bootH: 0.13, dirt: 0.75, slime: 0.30, scale: 1.2 };
+  const DV_PAINT = { bottom: 0x243f63, boot: 0x14181d, bootH: 0.10, dirt: 0.85, slime: 0.28, scale: 1.1 };
+  const YT_PAINT = { bottom: 0x5d2320, boot: 0x1d2b3a, bootH: 0.24, bootY: 0.02, dirt: 0.55, slime: 0.45, scale: 2.0 };
   function loftHull(root, stations, material, o) {
     const L = LOFT();
     if (!L) return null;
-    const m = L.mesh(stations, material, o);
+    const m = L.mesh(stations, paintedHullMat(material, o && o.paint), o);
     if (!m) return null;
     m.name = "hull_surface";
     m.castShadow = false;
@@ -1148,6 +1419,9 @@
     hullPanel: hullPanel, hullDisc: hullDisc,
     sheet: sheet, ribbon: ribbon, bulwark: bulwark, sheerRail: sheerRail,
     rakeStem: rakeStem, warpBilge: warpBilge,
+    // UNDER THE BOAT (2026-09-27): the paint and the running gear a shark sees.
+    paintedHullMat: paintedHullMat, bottomYAt: bottomYAt,
+    inboardGear: inboardGear, trimTabs: trimTabs,
   };
   CBZ.marineHulls.kit = KIT;
   // The named parts a hull author reuses verbatim. Same surface as KIT, split
@@ -1206,7 +1480,8 @@
     let out = null;
     if (HL) {
       const st = HL.stationsFromLines(lines);
-      loftHull(b, st, hull, { rings: 11, transom: "none", deck: true, deckCamber: 0.045, deckCols: 9, cockpit: CK });
+      loftHull(b, st, hull, { rings: 11, transom: "none", deck: true, deckCamber: 0.045, deckCols: 9, cockpit: CK,
+        paint: { bottom: 0xb9520f, dirt: 0.18, slime: 0.05, scale: 0.5 } });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
@@ -1329,7 +1604,8 @@
     let out = null;
     if (HL) {
       const st = HL.stationsFromLines(lines);
-      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat", deck: true, deckCamber: CAMBER, deckCols: 9 });
+      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat", deck: true, deckCamber: CAMBER, deckCols: 9,
+        paint: { bottom: 0x1a3f8c, boot: 0xd8352c, bootH: 0.035, dirt: 0.2, slime: 0.06, scale: 0.5 } });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
@@ -1632,7 +1908,9 @@
     let out = null;
     if (HL) {
       const st = HL.stationsFromLines(lines);
-      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat" });
+      // a RIB's pan is grey moulding, scuffed on the beach, never antifouled
+      loftHull(b, st, hull, { rings: 9, chine: "auto", transom: "flat",
+        paint: { bottom: 0x4a5058, dirt: 0.35, slime: 0.10, scale: 0.6 } });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
@@ -1749,6 +2027,7 @@
       loftHull(b, ST, hull, {
         rings: 9, chine: "auto", transom: "flat",
         deck: true, deckCamber: 0.05, deckCols: 9, cockpit: CK,
+        paint: SB_PAINT,
       });
       out = HL.outline(ST);
     }
@@ -1768,7 +2047,7 @@
         [0.26, 0.44].forEach(function (up, k) {
           const yOf = (z) => keelAt(z) + (sheerAt(z) - keelAt(z)) * up;
           const rail = HL.strip(skinRun(ST, side, -L * 0.44, L * 0.44, yOf, 0.012, 0.34),
-            0.026 - k * 0.006, hull, { segments: 46, radial: 5 });
+            0.026 - k * 0.006, paintedHullMat(hull, SB_PAINT), { segments: 46, radial: 5 });
           if (rail) { rail.castShadow = false; b.add(rail); }
         });
         const line = HL.strip(skinRun(ST, side, -L * 0.42, L * 0.44, (z) => sheerAt(z) - 0.13, 0.012, 0.34),
@@ -1888,6 +2167,7 @@
       loftHull(b, ST, hull, {
         rings: 9, chine: "auto", transom: "flat",
         deck: true, deckCamber: 0.06, deckCols: 9, cockpit: CK,
+        paint: CC_PAINT,
       });
       out = HL.outline(ST);
     }
@@ -1902,10 +2182,10 @@
         [0.24, 0.42].forEach(function (up, k) {
           const yOf = (z) => keelAt(z) + (sheerAt(z) - keelAt(z)) * up;
           const rail = HL.strip(skinRun(ST, side, -L * 0.45, L * 0.45, yOf, 0.014, 0.36),
-            0.030 - k * 0.007, hull, { segments: 48, radial: 5 });
+            0.030 - k * 0.007, paintedHullMat(hull, CC_PAINT), { segments: 48, radial: 5 });
           if (rail) { rail.castShadow = false; b.add(rail); }
         });
-        const ch = HL.strip(chineRun(ST, side, 0.016, 0.0), 0.024, hull, { segments: 46, radial: 5 });
+        const ch = HL.strip(chineRun(ST, side, 0.016, 0.0), 0.024, paintedHullMat(hull, CC_PAINT), { segments: 46, radial: 5 });
         if (ch) { ch.castShadow = false; b.add(ch); }
         const r = HL.strip(skinRun(ST, side, -L * 0.46, L * 0.45, (z) => sheerAt(z) - 0.05, 0.016, 0.36),
           0.038, dark, { segments: 48, radial: 5 });
@@ -2070,6 +2350,7 @@
       loftHull(b, st, hull, {
         rings: 11, chine: "auto", transom: "flat",
         deck: true, deckCamber: 0.10, deckCols: 9,
+        paint: CR_PAINT,
       });
       out = HL.outline(st);
     }
@@ -2078,18 +2359,22 @@
     const keelAt = (z) => (out ? out.keelYAt(z) : KEEL);
     if (HL && st) {
       [1, -1].forEach(function (side) {
-        // BOOT STRIPE at the waterline and a dark topside band under the
-        // sheer, both laid ON the skin — a straight box could only be right
-        // amidships, which is why the old one hung off the bow.
-        const bs = HL.strip(skinRun(st, side, -6.7, 6.2, 0.04, 0.012, 0.55), 0.075, boot, { segments: 56, radial: 5 });
-        if (bs) { bs.castShadow = false; b.add(bs); }
+        // The BOOT STRIPE is the shell's own paint now (paintedHullMat); the
+        // dark topside band under the sheer is still a strip laid ON the skin.
         const band = HL.strip(skinRun(st, side, -6.7, 6.0, (z) => sheerAt(z) - 0.34, 0.010, 0.55), 0.14, topside, { segments: 56, radial: 5 });
         if (band) { band.castShadow = false; b.add(band); }
         // SPRAY RAIL on the chine itself — the corner the loft reports, not a
         // height somebody guessed. This is the strake that throws the sheet of
         // water down and outboard and keeps the topsides dry.
-        const rail = HL.strip(chineRun(st, side, 0.035, 0.01).filter((p) => p[2] > -6.6), 0.055, hull, { segments: 48, radial: 4 });
+        const rail = HL.strip(chineRun(st, side, 0.035, 0.01).filter((p) => p[2] > -6.6), 0.055, paintedHullMat(hull, CR_PAINT), { segments: 48, radial: 4 });
         if (rail) { rail.castShadow = false; b.add(rail); }
+        // LIFTING STRAKES: two per side on the bottom panel, running aft from
+        // the entry. They are the lines a shark sees on every planing hull.
+        [0.30, 0.62].forEach(function (up, k) {
+          const yOf = (z) => keelAt(z) + (Math.min(0.2, sheerAt(z)) - keelAt(z)) * up * 0.8;
+          const sk = HL.strip(skinRun(st, side, -6.8, 4.6 - k * 1.2, yOf, 0.018, 0.5), 0.034, paintedHullMat(hull, CR_PAINT), { segments: 40, radial: 4 });
+          if (sk) { sk.castShadow = false; b.add(sk); }
+        });
         // HULL WINDOWS: dark panels INSET into the topsides, each one turned to
         // the surface normal at its own station, so they lie on the hull the
         // way glass in a moulding does instead of hovering beside it.
@@ -2196,7 +2481,15 @@
     // twin sterndrives under the transom
     // sterndrives hung off the transom at the KEEL the loft drew, not at a
     // depth typed in beside a prism that no longer exists
-    b.add(propGroup(1.5, [[0.85, keelAt(-6.9) + 0.10, -7.15], [-0.85, keelAt(-6.9) + 0.10, -7.15]]));
+    // Twin shafts under the bottom, each on a P-bracket with a spade rudder
+    // astern of the screw, and trim tabs on the transom (they used to be two
+    // screws hanging in the water under the platform with nothing holding them).
+    if (st) {
+      inboardGear(b, st, { props: [[0.88, -6.05], [-0.88, -6.05]], r: 0.30, shaft: 2.4 });
+      trimTabs(b, st, 1.25, 0.62, 0.30);
+    } else {
+      b.add(propGroup(1.5, [[0.85, keelAt(-6.9) + 0.10, -7.15], [-0.85, keelAt(-6.9) + 0.10, -7.15]]));
+    }
     // nav lights on the DECK EDGE where they belong: the hull is 1.0 m wide at
     // z 5.6, so the old hw (2.1) put both lamps in mid-air off the bow.
     navLights(b, hbAt(5.6), sheerAt(5.6) + 0.10, 5.6, -6.9, 5.42);
@@ -2267,7 +2560,8 @@
         },
       });
       warpBilge(st, 5.0, 1.9, 0.26, 0.60);
-      loftHull(b, st, hull, { rings: 13, transom: "flat" });
+      loftHull(b, st, hull, { rings: 13, transom: "flat",
+        paint: YT_PAINT });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
@@ -2277,11 +2571,9 @@
       [1, -1].forEach(function (side) {
         // Boot stripe, topside band and the AFT CHINE STRAKE, all read off the
         // skin so they stay on it as the hull narrows.
-        const bs = HL.strip(skinRun(st, side, -16.6, 15.4, 0.10, 0.02, 1.1), 0.14, boot, { segments: 70, radial: 5 });
-        if (bs) { bs.castShadow = false; b.add(bs); }
         const band = HL.strip(skinRun(st, side, -16.6, 14.6, (z) => sheerAt(z) - 0.62, 0.02, 1.1), 0.22, topside, { segments: 70, radial: 5 });
         if (band) { band.castShadow = false; b.add(band); }
-        const chine = HL.strip(chineRun(st, side, 0.05, 0).filter((p) => p[2] < 3.0), 0.10, hull, { segments: 40, radial: 4 });
+        const chine = HL.strip(chineRun(st, side, 0.05, 0).filter((p) => p[2] < 3.0), 0.10, paintedHullMat(hull, YT_PAINT), { segments: 40, radial: 4 });
         if (chine) { chine.castShadow = false; b.add(chine); }
         // BOW THRUSTER TUNNEL — a real ship has one and you can see it: a dark
         // disc a third of the way down the stem, one each side of the same
@@ -2478,7 +2770,12 @@
     b.userData.marineFixtureCount += 9;                               // exterior social/helm fittings
 
     // twin shafts + screws well under the counter
-    b.add(propGroup(2.6, [[1.55, Y.KEEL * 0.72, -15.6], [-1.55, Y.KEEL * 0.72, -15.6]]));
+    // On shafts with P-brackets and rudders now, not hanging in the sea.
+    if (st) {
+      inboardGear(b, st, { props: [[1.55, -13.2], [-1.55, -13.2]], r: 0.62, shaft: 5.0 });
+    } else {
+      b.add(propGroup(2.6, [[1.55, Y.KEEL * 0.72, -15.6], [-1.55, Y.KEEL * 0.72, -15.6]]));
+    }
     // lamps on the DECK EDGE at z 13.8, where the hull is 1.5 m wide — not at
     // the maximum half-beam, which floated them 2.3 m off the bow.
     navLights(b, hbAt(13.8), sheerAt(13.8) + 0.20, 13.8, -16.6, Y.SUN + 3.30);
@@ -2571,6 +2868,287 @@
       // in a swell that is the difference between a deck and a floor.
       tilt: true, onLeave: "upward", id: "yacht-decks",
     };
+  }
+
+  // ============================================================
+  //  3c. THE SHARK SEA'S MISSING CRAFT (2026-09-27)
+  // ============================================================
+  // The beach fleet ran kayak -> cruiser. A real warm-water beach has three
+  // more things on it that a shark game in particular needs: the paddleboard
+  // (the classic silhouette-from-below, and the smallest meal on the surface),
+  // the dive boat (a working boat that PUTS PEOPLE IN THE WATER), and a ship
+  // on the horizon so the sea has a far edge with scale in it.
+
+  // ---- PADDLEBOARD — 11' all-round SUP (3.35 m x 0.81 m) -------------------
+  // A foam plank: a rockered nose, a squared tail, rails rolled in, a deck pad
+  // and ONE fin. From below it is the silhouette every shark documentary
+  // opens on, so the bottom is white and the fin is the whole underside.
+  function buildSup() {
+    const b = new THREE.Group();
+    const L = 3.35, W = 0.81;
+    const board = M.board(), pad = M.boardPad(), dark = M.dark(), grey = M.grey();
+    declareRoom(b, "sup-deck", "Deck pad");
+    const HL = LOFT();
+    let out = null, st = null;
+    if (HL) {
+      st = HL.stationsFromLines({
+        loa: L, beam: W, draft: 0.05, freeboard: 0.075,
+        sheerBow: 0.10, sheerStern: 0.02,
+        roundBilge: true, bilgeN: 3.4, maxBeamHeight: 0.55, tumblehome: 40, flareBow: 0,
+        transomRake: 0, midBody0: 0.30, midBody1: 0.56, transomBeamFrac: 0.50,
+        entryPow: 1.15, rockerAft: 0.55, tKeel: 0.45, n: 17,
+        // A board's outline is ONE smooth curve (wide point just aft of the
+        // middle, a round nose, a squared tail) — the midbody/entry plan put
+        // shoulders on it.
+        planHalfBeam: function (t) {
+          if (t < 0.46) return 0.50 + 0.50 * Math.pow(Math.sin((t / 0.46) * Math.PI * 0.5), 0.8);
+          return Math.pow(Math.max(0, Math.cos(((t - 0.46) / 0.54) * Math.PI * 0.5)), 0.75);
+        },
+        // NOSE ROCKER is the BOTTOM rising, not the deck: the keel climbs to
+        // within 4 cm of the deck at the nose (a depth fraction below zero is
+        // a height above the waterline), and kicks up a little at the tail.
+        keelProfile: function (t) {
+          if (t < 0.2) return 1 - 0.3 * (0.2 - t) / 0.2;
+          if (t < 0.62) return 1;
+          return 1 - 3.8 * Math.pow((t - 0.62) / 0.38, 2);
+        },
+      });
+      loftHull(b, st, board, {
+        rings: 9, transom: "flat", deck: true, deckCamber: 0.012, deckCols: 7,
+        paint: { bottom: 0xe9edf0, dirt: 0.10, slime: 0.03, scale: 0.4 },
+      });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : 0.075);
+    // traction pad over the standing area, a kick-pad at the tail
+    // (the deck is crowned 1.2 cm over the rails: the pad sits on the crown)
+    addBox(b, 0.62, 0.012, 1.25, 0, sheerAt(-0.15) + 0.019, -0.15, pad);
+    addBox(b, 0.46, 0.035, 0.24, 0, sheerAt(-1.30) + 0.030, -1.30, pad);
+    markFixture(b, addBox(b, 0.14, 0.012, 0.06, 0, sheerAt(0.2) + 0.026, 0.2, dark), "carry-handle");
+    markFixture(b, addCyl(b, 0.018, 0.02, 0, sheerAt(-1.60) + 0.01, -1.60, grey, 8), "leash-plug");
+    // THE FIN: a raked US-box fin under the tail
+    const fin = addPrism(b, 0.012, [[-1.60, -0.23], [-1.53, 0.0], [-1.30, 0.0], [-1.48, -0.23]], -0.045, dark);
+    markFixture(b, fin, "fin");
+    // the paddle, laid along the deck beside the pad
+    const paddle = new THREE.Group();
+    paddle.position.set(0.25, sheerAt(0.3) + 0.045, 0.3);
+    const shaft = addCyl(paddle, 0.015, 1.90, 0, 0, 0, dark, 7);
+    shaft.rotation.x = Math.PI / 2;
+    addBox(paddle, 0.20, 0.014, 0.44, 0, 0, -1.12, M.pwcAccent());
+    addBox(paddle, 0.13, 0.03, 0.04, 0, 0.01, 0.96, dark);
+    markFixture(b, paddle, "paddle");
+    b.add(paddle);
+    return finish(b, { width: W, length: L, height: 0.22, wheelbase: L * 0.6 });
+  }
+
+  // ---- DIVE BOAT — 12 m day dive boat ---------------------------------------
+  // Wheelhouse forward, a big open dive deck aft under a hardtop, tank racks
+  // down both sides with the divers sat in front of them, a wide dive platform
+  // and two ladders into the water, the diver-down flag up. Twin inboards on
+  // shafts with rudders. This is the boat that puts bodies into a shark's sea.
+  function buildDiveboat() {
+    const b = new THREE.Group();
+    const L = 12, W = 4.0, hw = W * 0.5, FB = 1.10, KEEL = -0.85;
+    const hull = M.alloy(), topside = M.hullDark(), dark = M.dark(), grey = M.grey();
+    const chrome = M.chrome(), glass = M.glass(), pad = M.pad(), liner = M.liner();
+    const teak = M.teakDk(), screen = M.screen();
+    const deckPaint = sharedMat("mh-divedeck", 0x8d969d, { emissive: 0x15191c, ei: 0.16 });
+    const tankY = sharedMat("mh-tank", 0xe2b21c, { emissive: 0x3a2a04, ei: 0.22 });
+    const tankS = sharedMat("mh-tank2", 0xb8c0c6, { emissive: 0x23282c, ei: 0.2 });
+    declareRoom(b, "dive-deck", "Dive deck");
+    declareRoom(b, "dive-wheelhouse", "Wheelhouse");
+    const HL = LOFT();
+    const CK = { z0: -5.75, z1: 1.05, halfW: 1.62 };
+    let st = null, out = null;
+    if (HL) {
+      st = HL.stationsFromLines({
+        loa: L, beam: W, draft: -KEEL, freeboard: FB,
+        sheerBow: 0.55, sheerStern: 0.04,
+        deadrise: 14, deadriseBow: 46, flareBow: 18, tumblehome: 0,
+        transomRake: 5, midBody0: 0.14, midBody1: 0.70, transomBeamFrac: 0.95,
+        entryPow: 1.15, rockerAft: 0.95, tKeel: 0.40, n: 17,
+        chineY: function (t) { return 0.26 - 1.30 * Math.pow(Math.max(0, t - 0.36), 1.35); },
+      });
+      loftHull(b, st, hull, {
+        rings: 9, chine: "auto", transom: "flat",
+        deck: true, deckCamber: 0.06, deckCols: 9, cockpit: CK,
+        paint: DV_PAINT,
+      });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const hbAt = (z) => (out ? out.halfBeamAt(z) : hw);
+    const keelAt = (z) => (out ? out.keelYAt(z) : KEEL);
+    if (HL && st) {
+      [1, -1].forEach(function (side) {
+        const band = HL.strip(skinRun(st, side, -5.9, 5.2, (z) => sheerAt(z) - 0.26, 0.012, 0.5), 0.11, topside, { segments: 46, radial: 5 });
+        if (band) { band.castShadow = false; b.add(band); }
+        const rub = HL.strip(skinRun(st, side, -5.95, 5.4, (z) => sheerAt(z) - 0.04, 0.02, 0.5), 0.045, dark, { segments: 46, radial: 5 });
+        if (rub) { rub.castShadow = false; b.add(rub); }
+        const rail = HL.strip(chineRun(st, side, 0.03, 0.01).filter((p) => p[2] > -5.9), 0.045, paintedHullMat(hull, DV_PAINT), { segments: 40, radial: 4 });
+        if (rail) { rail.castShadow = false; b.add(rail); }
+        [0.34, 0.66].forEach(function (up, k) {
+          const yOf = (z) => keelAt(z) + (Math.min(0.15, sheerAt(z)) - keelAt(z)) * up * 0.8;
+          const sk = HL.strip(skinRun(st, side, -5.85, 3.6 - k * 1.1, yOf, 0.016, 0.5), 0.03, paintedHullMat(hull, DV_PAINT), { segments: 36, radial: 4 });
+          if (sk) { sk.castShadow = false; b.add(sk); }
+        });
+      });
+    }
+    // THE DIVE DECK: a non-skid sole the whole cockpit, benches outboard with
+    // the tanks racked behind them, a rinse tank on the centreline.
+    const SOLE = 0.55;
+    addBox(b, CK.halfW * 2 - 0.06, 0.07, CK.z1 - CK.z0 - 0.08, 0, SOLE, (CK.z0 + CK.z1) * 0.5, deckPaint);
+    [1, -1].forEach(function (side) {
+      const x = side * 1.26;
+      addFixtureBox(b, "dive-bench", 0.46, 0.08, 5.2, x, SOLE + 0.45, -2.45, pad);
+      addBox(b, 0.40, 0.42, 5.2, x, SOLE + 0.22, -2.45, liner);
+      addBox(b, 0.08, 0.42, 5.2, side * 1.52, SOLE + 0.72, -2.45, liner);           // the rack backboard
+      for (let i = 0; i < 8; i++) {
+        const z = -4.75 + i * 0.66;
+        markFixture(b, addCyl(b, 0.090, 0.66, side * 1.46, SOLE + 0.86, z, i % 3 ? tankY : tankS, 8), "tank");
+        addCyl(b, 0.035, 0.08, side * 1.46, SOLE + 1.22, z, chrome, 6);               // the valve
+      }
+    });
+    addFixtureBox(b, "rinse-tank", 0.60, 0.62, 0.90, 0, SOLE + 0.31, -3.2, M.pwcTrim());
+    // THE DIVE PLATFORM and two ladders into the water
+    addBox(b, 3.5, 0.12, 0.95, 0, 0.22, -L * 0.5 - 0.46, teak);
+    addBox(b, 3.3, 0.36, 0.22, 0, 0.36, -L * 0.5 - 0.02, hull);
+    [1, -1].forEach(function (side) {
+      const x = side * 1.05;
+      addTubeBetween(b, [x - 0.20, 0.28, -L * 0.5 - 0.88], [x - 0.20, -1.05, -L * 0.5 - 1.02], 0.022, chrome, 6);
+      addTubeBetween(b, [x + 0.20, 0.28, -L * 0.5 - 0.88], [x + 0.20, -1.05, -L * 0.5 - 1.02], 0.022, chrome, 6);
+      for (let k = 0; k < 4; k++) {
+        const y = 0.05 - k * 0.30;
+        addBox(b, 0.40, 0.04, 0.08, x, y, -L * 0.5 - 0.90 - k * 0.03, chrome);
+      }
+      markFixture(b, null, "dive-ladder");
+      // transom gate to the platform
+      addFixtureBox(b, "transom-gate", 0.62, 0.62, 0.05, side * 0.62, SOLE + 0.32, CK.z0 + 0.04, liner);
+    });
+    // THE WHEELHOUSE forward, enterable from the dive deck
+    const WH0 = 1.10, WH1 = 4.10, WY0 = sheerAt(2.4) - 0.05, WY1 = WY0 + 2.05;
+    addCabinShell(b, { width: 2.80, z0: WH0, z1: WH1, y0: WY0, y1: WY1, doorW: 0.95, body: hull, liner: liner, glass: glass });
+    addBox(b, 2.62, 0.06, WH1 - WH0 - 0.1, 0, WY0 + 0.04, (WH0 + WH1) * 0.5, teak);
+    addFixtureBox(b, "helm-console", 2.4, 0.78, 0.50, 0, WY0 + 0.43, WH1 - 0.38, dark);
+    addScreen(b, -0.55, WY0 + 1.0, WH1 - 0.64, 0.46, 0.26, 0, screen);
+    addSeat(b, -0.62, WY0 + 0.06, 3.1, 0, pad, chrome);
+    // THE HARDTOP over the dive deck, joined to the wheelhouse roof, on posts
+    const TOP = WY1 + 0.02;
+    addBox(b, 3.30, 0.10, 5.9, 0, TOP, -1.95, liner);
+    markFixture(b, null, "hardtop");
+    [1, -1].forEach(function (side) {
+      [-4.7, -2.4].forEach(function (z) {
+        addTubeBetween(b, [side * 1.55, SOLE + 0.04, z], [side * 1.55, TOP - 0.05, z], 0.045, chrome, 7);
+      });
+    });
+    // radar arch mast, dome and the DIVER-DOWN FLAG (red, white diagonal)
+    addTubeBetween(b, [0, TOP + 0.05, 1.6], [0, TOP + 1.9, 1.6], 0.035, grey, 6);
+    addCyl(b, 0.34, 0.14, 0, TOP + 0.14, 2.6, M.pwcHull(), 12);
+    const flag = addBox(b, 0.02, 0.44, 0.62, 0, TOP + 1.62, 1.28, M.flag());
+    markFixture(b, flag, "dive-flag");
+    const bar = addBox(b, 0.026, 0.09, 0.74, 0, TOP + 1.62, 1.28, M.pwcHull());
+    bar.rotation.x = -Math.atan2(0.44, 0.62);
+    // bow rail, cleats, the anchor
+    if (out) {
+      [1, -1].forEach(function (side) {
+        sheerRail(b, out, side, 1.4, 5.2, 0.02, chrome, { height: 0.72, inset: 0.12, spacing: 1.25 });
+        markFixture(b, addBox(b, 0.18, 0.05, 0.07, side * (hbAt(-5.4) - 0.16), sheerAt(-5.4) + 0.04, -5.4, chrome), "cleat");
+        markFixture(b, addBox(b, 0.18, 0.05, 0.07, side * (hbAt(4.2) - 0.16), sheerAt(4.2) + 0.04, 4.2, chrome), "cleat");
+      });
+    }
+    addBox(b, 0.22, 0.30, 0.40, 0, sheerAt(5.6) + 0.06, 5.6, chrome);
+    // FENDERS hung over the side, two a side: a boat that ties up to divers
+    [1, -1].forEach(function (side) {
+      [-3.4, -0.4].forEach(function (z) {
+        const x = side * (hbAt(z) + 0.14);
+        markFixture(b, addCyl(b, 0.12, 0.62, x, sheerAt(z) - 0.52, z, M.pwcTrim(), 8), "fender");
+      });
+    });
+    // RUNNING GEAR
+    if (st) {
+      inboardGear(b, st, { props: [[0.80, -4.95], [-0.80, -4.95]], r: 0.27, shaft: 2.1 });
+      trimTabs(b, st, 1.15, 0.55, 0.28);
+    }
+    navLights(b, hbAt(4.4), sheerAt(4.4) + 0.08, 4.4, -5.9, TOP + 1.95);
+    b.userData.marineFixtureCount += 3;
+    return finish(b, { width: W, length: L, height: TOP + 2.0, wheelbase: L * 0.6 });
+  }
+
+  // ---- COASTAL FREIGHTER — 140 m container feeder (horizon silhouette) -----
+  // Built to be seen from 1-3 km: the hull is a coarse loft (11 stations,
+  // 7 rings), the cargo is a dozen boxes, the house is three. It still has a
+  // real waterline — dark topsides, red bottom — because a shark that swims
+  // out that far should find a red hull and a screw the size of a house.
+  function buildFreighter() {
+    const b = new THREE.Group();
+    const L = 140, W = 22, FB = 10, T = 8;
+    const hull = M.ship(), red = M.shipRed(), white = M.pwcHull(), dark = M.dark(), grey = M.grey();
+    const boxA = sharedMat("mh-ctrA", 0x9a3b25, { emissive: 0x1e0b06, ei: 0.16 });
+    const boxB = sharedMat("mh-ctrB", 0x2a5b8c, { emissive: 0x081420, ei: 0.16 });
+    const boxC = sharedMat("mh-ctrC", 0x6f7a3a, { emissive: 0x14180a, ei: 0.16 });
+    const HL = LOFT();
+    let st = null, out = null;
+    if (HL) {
+      st = HL.stationsFromLines({
+        loa: L, beam: W, draft: T, freeboard: FB,
+        sheerBow: 2.6, sheerStern: 0.6,
+        roundBilge: true, bilgeN: 6, maxBeamHeight: 0.55,
+        flareBow: 16, tumblehome: 0, transomRake: 12,
+        tKeel: 0.45, rockerAft: 0.97, n: 11,
+        planHalfBeam: function (t) {
+          if (t < 0.14) return 0.66 + 0.34 * Math.pow(t / 0.14, 0.6);
+          if (t <= 0.70) return 1;
+          const u = clampN((t - 0.70) / 0.30, 0, 1);
+          return Math.max(0, 1 - Math.pow(u, 1.6));
+        },
+      });
+      loftHull(b, st, hull, {
+        rings: 7, transom: "flat", deck: true, deckCamber: 0.25, deckCols: 5,
+        paint: { bottom: 0x8e2b22, dirt: 0.35, slime: 1.2, scale: 8 },
+      });
+      out = HL.outline(st);
+    }
+    const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
+    const keelAt = (z) => (out ? out.keelYAt(z) : -T);
+    // bulbous bow under the forefoot
+    const bz = L * 0.47;
+    const bulb = addCyl(b, 2.2, 7.5, 0, -T * 0.55, bz - 1.0, red, 10);
+    bulb.rotation.x = Math.PI / 2;
+    // THE CARGO: bays of containers, three colours in blocks across the beam,
+    // a metre of dark gap between bays so it reads as stacks, not a slab
+    const mats = [boxA, boxB, boxC];
+    let bay = 0;
+    for (let z = -40; z < 50; z += 13.2) {
+      const tiers = 2 + ((bay * 7) % 3);
+      const h = tiers * 2.6;
+      for (let k = 0; k < 3; k++) {
+        const w = W * 0.84 / 3;
+        const x = -W * 0.42 + w * (k + 0.5);
+        addBox(b, w - 0.2, h, 12.2, x, sheerAt(z) + h * 0.5, z, mats[(bay + k * 2) % 3]);
+      }
+      bay++;
+    }
+    // hatch coamings under the stacks
+    addBox(b, W * 0.86, 1.0, 92, 0, sheerAt(3) + 0.3, 3, grey);
+    // THE HOUSE aft: accommodation block, bridge deck with wings, funnel
+    const HZ = -52;
+    // the bridge must see over the stacks, so the house stands 16 m
+    addBox(b, 15, 16, 10, 0, FB + 8.0, HZ, white);
+    addBox(b, W + 1.2, 1.1, 4.0, 0, FB + 16.3, HZ + 3.0, white);          // bridge wings
+    addBox(b, 14.6, 1.6, 0.3, 0, FB + 14.6, HZ + 5.05, dark);             // bridge windows
+    addBox(b, 3.8, 9.0, 5.5, 0, FB + 16.5, HZ - 7.5, grey);               // funnel
+    addBox(b, 3.9, 1.5, 5.6, 0, FB + 20.1, HZ - 7.5, red);                // funnel band
+    addTubeBetween(b, [0, FB + 16.8, HZ + 1.0], [0, FB + 24.0, HZ + 1.0], 0.35, grey, 6);   // radar mast
+    addTubeBetween(b, [0, sheerAt(60), 60], [0, sheerAt(60) + 11, 60], 0.3, grey, 6);       // foremast
+    addBox(b, 12, 1.4, 5, 0, sheerAt(64) + 0.7, 64, grey);                // forecastle break
+    // one big slow screw, a rudder behind it
+    if (st) inboardGear(b, st, { props: [[0, -62.5]], r: 2.2, shaft: 7 });
+    // sidelights on the bridge wings (where a ship carries them), masthead
+    // lights on the foremast and the radar mast
+    navLights(b, W * 0.5 + 0.6, FB + 16.3, HZ + 3.0, -L * 0.49, null);
+    addBox(b, 0.6, 0.6, 0.6, 0, sheerAt(60) + 11.2, 60, M.navWhite());
+    addBox(b, 0.6, 0.6, 0.6, 0, FB + 24.2, HZ + 1.0, M.navWhite());
+    return finish(b, { width: W, length: L, height: FB + 25, wheelbase: L * 0.6 });
   }
 
   // ============================================================
@@ -2818,6 +3396,101 @@
     feel: { accel: 0.22, top: 0.40, turn: 0.16, drift: 0.7, roll: 0.35 },
   });
 
+  // ---- 2026-09-27: the shark sea's missing craft ---------------------------
+  // sup — 11' paddleboard. PADDLED and STOOD ON: the rider is one standing
+  // berth 0.9 m over the deck. It cannot swamp (it is foam), it can only be
+  // knocked out from under you, so phiV is tiny and swampT is never.
+  register("sup", {
+    label: "Paddleboard", marque: "Sandbar", model: "Sandbar 11 SUP",
+    price: 1100, build: buildSup,
+    hull: {
+      loa: 3.35, beam: 0.81, draft: 0.05, massT: 0.012, freeboard: 0.09,
+      topKts: 4, cruiseKts: 2.6, planeKts: 0, canPlane: false,
+      engine: false,
+      accel0: 0.45, humpFrac: 0.30,
+      steerKind: "rudder", steerLock: 0.80, steerRate: 6.0,
+      yawRate: 1.60, yawAccel: 5.5, yawDamp: 3.4, pivotAft: 0.30,
+      swayL: 3.6, swayQ: 0.60,
+      trimRestDeg: 0.3, trimHumpDeg: 0.8, trimPlaneDeg: 0.3,
+      heelSign: 1, heelGain: 0.10, maxHeel: 0.45,
+      rideAbove: 0.01, waveGain: 1.30, slamV: 1.4,
+      deckY: 0.09, boardY: 0.09, sternOffset: 1.68,
+      helm: { x: 0, y: 1.72, z: -0.05 },               // a standing paddler's eye
+      wakeScale: 0.12, audio: "none",
+      stab: {
+        gm: 0.04, phiV: 0.55, freeboard: 0.09, swampT: 999, crew: 1,
+        seats: [{ x: 0, y: 0.99, z: -0.10, yaw: 0, floor: 0.09 }],
+      },
+    },
+    feel: { accel: 0.25, top: 0.10, turn: 1.7, drift: 1.9, roll: 1.5 },
+  });
+
+  // diveboat — 12 m day dive boat. Eight aboard: the skipper in the
+  // wheelhouse, six divers on the tank benches, one dive master standing at
+  // the gate. Too long for a megalodon to swallow (0.62 x 18 m = 11.2 m), not
+  // too heavy for one to roll.
+  register("diveboat", {
+    label: "Dive Boat", marque: "Reefline", model: "Reefline 40 Dive",
+    price: 520000, build: buildDiveboat,
+    hull: {
+      loa: 12, beam: 4.0, draft: 0.85, massT: 11,
+      topKts: 24, cruiseKts: 18, planeKts: 14, canPlane: true,
+      accel0: 1.8, humpFrac: 0.55,
+      steerKind: "rudder", steerLock: 0.45, steerRate: 3.4,
+      yawRate: 0.70, yawAccel: 1.0, yawDamp: 1.3, pivotAft: 3.1,
+      thrusterYaw: 0.25,
+      swayL: 1.3, swayQ: 0.22,
+      trimRestDeg: 2.2, trimHumpDeg: 6.2, trimPlaneDeg: 2.8,
+      heelSign: -1, heelGain: 0.020, maxHeel: 0.16,
+      rideAbove: 0.05, waveGain: 0.65, slamV: 4.0,
+      deckY: 0.59, boardY: 0.28, sternOffset: 6.0,
+      helm: { x: -0.62, y: 2.62, z: 3.1 },              // seated in the wheelhouse chair
+      wakeScale: 1.8, audio: "truck",
+      stab: {
+        gm: 1.10, phiV: 1.35, freeboard: 1.10, swampT: 45, crew: 8,
+        seats: [
+          { x: -0.62, y: 1.52, z: 3.1, yaw: 0, floor: 1.10 },   // skipper
+          { x: 1.20, y: 1.04, z: -4.2, yaw: -Math.PI / 2, floor: 0.59 },
+          { x: -1.20, y: 1.04, z: -4.2, yaw: Math.PI / 2, floor: 0.59 },
+          { x: 1.20, y: 1.04, z: -2.9, yaw: -Math.PI / 2, floor: 0.59 },
+          { x: -1.20, y: 1.04, z: -2.9, yaw: Math.PI / 2, floor: 0.59 },
+          { x: 1.20, y: 1.04, z: -1.6, yaw: -Math.PI / 2, floor: 0.59 },
+          { x: -1.20, y: 1.04, z: -1.6, yaw: Math.PI / 2, floor: 0.59 },
+          { x: 0, y: 1.49, z: -5.2, yaw: Math.PI, floor: 0.59 }, // dive master at the gate
+        ],
+      },
+    },
+    feel: { accel: 0.62, top: 0.62, turn: 0.55, drift: 1.15, roll: 0.55 },
+  });
+
+  // freighter — 140 m container feeder. SCENERY: registered so the sea can
+  // spawn it by key and a megalodon can ram it, never sold or berthed. It is
+  // an iron wall to anything in this sea: 14,000 t and a metacentric height
+  // of 1.8 m means no animal alive rolls her.
+  register("freighter", {
+    label: "Coastal Freighter", scenery: true, build: buildFreighter,
+    hull: {
+      loa: 140, beam: 22, draft: 8, massT: 14000, freeboard: 10,
+      topKts: 16, cruiseKts: 13, planeKts: 0, canPlane: false,
+      accel0: 0.10, humpFrac: 0.75,
+      steerKind: "rudder", steerLock: 0.35, steerRate: 1.0,
+      yawRate: 0.030, yawAccel: 0.004, yawDamp: 0.40, pivotAft: 36,
+      thrusterYaw: 0.01,
+      swayL: 0.30, swayQ: 0.05,
+      trimRestDeg: 0.2, trimHumpDeg: 0.5, trimPlaneDeg: 0.2,
+      heelSign: 1, heelGain: 0.004, maxHeel: 0.03,
+      rideAbove: 0.05, waveGain: 0.05, slamV: 9.0,
+      deckY: 10, boardY: 10, sternOffset: 70,
+      helm: { x: 0, y: 27.6, z: -47.5 },
+      wakeScale: 10, audio: "truck",
+      stab: {
+        gm: 1.8, phiV: 1.2, freeboard: 10, swampT: 999, crew: 1,
+        seats: [{ x: 0, y: 26.8, z: -48.0, yaw: 0, floor: 26.4 }],
+      },
+    },
+    feel: { accel: 0.05, top: 0.35, turn: 0.05, drift: 0.4, roll: 0.1 },
+  });
+
   // Every hull queued by an earlier-parsing file joins the fleet HERE — after
   // the authored four, before the economy push, so a queued hull is indexed,
   // priced, buyable and berth-sizable exactly like an authored one.
@@ -2839,7 +3512,7 @@
     if (!list || !Array.isArray(list)) return 0;
     let n = 0;
     REG.forEach(function (rec, key) {
-      if (!rec.model || key === "boat") return;            // "Speedboat" is already in the catalog
+      if (!rec.model || key === "boat" || rec.scenery) return;   // "Speedboat" is already in the catalog
       if (list.some(function (c) { return c.name === rec.model; })) return;
       list.push({
         name: rec.model,

@@ -329,6 +329,9 @@
     // and light are all still there behind it, and the door still swings; what
     // it opens onto is the recess rather than a rectangular void.
     const HL = (K.loft && K.loft()) || CBZ.hullLoft || null;
+    const YPAINT = { bottom: 0x5a2420, boot: 0x171b20, bootH: Math.max(0.16, S.draft * 0.08), bootY: S.draft * 0.02,
+      dirt: 0.5, slime: Math.max(0.3, S.draft * 0.14), scale: clamp(L / 18, 1.5, 6) };
+    const creamP = K.paintedHullMat ? K.paintedHullMat(cream, YPAINT) : cream;
     let st = null, out = null;
     if (HL) {
       st = HL.stationsFromLines({
@@ -346,7 +349,10 @@
         sheerProfile: function (t) { return FB + sheerRise(S, 2 * t - 1); },
       });
       if (K.warpBilge) K.warpBilge(st, 4.6, 1.9, 0.24, 0.58);
-      if (K.loftHull) K.loftHull(b, st, cream, { rings: 13, transom: "flat" });
+      // THE BOTTOM IS PAINTED: red antifouling under a black boot top, fouled
+      // along the waterline (water_hulls paintedHullMat). A superyacht seen
+      // from underneath is a dark red hull, not a cream bathtub.
+      if (K.loftHull) K.loftHull(b, st, cream, { rings: 13, transom: "flat", paint: YPAINT });
       out = HL.outline(st);
     }
     const sheerAt = function (z) { return out ? out.sheerYAt(z) : FB; };
@@ -356,12 +362,9 @@
     // 0.86 L box at the maximum half-beam, so both ends stood off the hull)
     if (HL && st && K.skinRun) {
       [1, -1].forEach(function (side) {
-        const bs = HL.strip(K.skinRun(st, side, -L * 0.485, L * 0.44, S.draft * 0.06, 0.02, L * 0.03),
-          Math.max(0.09, S.draft * 0.07), boot, { segments: 72, radial: 5 });
-        if (bs) { bs.castShadow = false; b.add(bs); }
         // the aft chine strake — the hard corner the warped bilge makes
         const ch = HL.strip(K.chineRun(st, side, S.beam * 0.006, 0).filter(function (p) { return p[2] < L * 0.10; }),
-          Math.max(0.07, S.beam * 0.012), cream, { segments: 44, radial: 4 });
+          Math.max(0.07, S.beam * 0.012), creamP, { segments: 44, radial: 4 });
         if (ch) { ch.castShadow = false; b.add(ch); }
         // BOW THRUSTER TUNNEL and the anchor pocket, both on the skin
         if (K.hullDisc) K.hullDisc(b, st, side, L * 0.385, keelAt(L * 0.385) * 0.55, Math.max(0.35, L * 0.012), dark, { thick: 0.12, seg: 16 });
@@ -373,9 +376,18 @@
     // BULBOUS BOW, seated on the forefoot the loft actually drew rather than
     // at a fixed fraction of the moulded depth.
     const bulbZ = L * 0.455;
-    const bulb = K.addCyl(b, S.beam * 0.055, L * 0.055, 0, keelAt(bulbZ) - S.draft * 0.10, bulbZ, cream, 10);
+    // It is below the boot top, so it wears the bottom's antifouling.
+    const foil = M.foil ? M.foil() : cream;
+    const bulb = K.addCyl(b, S.beam * 0.055, L * 0.055, 0, keelAt(bulbZ) - S.draft * 0.10, bulbZ, foil, 10);
     bulb.rotation.x = Math.PI / 2;
-    K.addCyl(b, S.beam * 0.040, S.beam * 0.040, 0, keelAt(bulbZ) - S.draft * 0.10, bulbZ + L * 0.030, cream, 10).rotation.x = Math.PI / 2;
+    K.addCyl(b, S.beam * 0.040, S.beam * 0.040, 0, keelAt(bulbZ) - S.draft * 0.10, bulbZ + L * 0.030, foil, 10).rotation.x = Math.PI / 2;
+    // RUNNING GEAR. The superyachts had NO screws at all: a 156 m ship with
+    // nothing under her counter. Twin shafts on P-brackets and spade rudders,
+    // sized off the length, laid on the skin the loft drew.
+    if (st && K.inboardGear) {
+      const pr = clamp(L * 0.017, 0.55, 2.4);
+      K.inboardGear(b, st, { props: [[HB * 0.36, S.sternZ + L * 0.085], [-HB * 0.36, S.sternZ + L * 0.085]], r: pr, shaft: L * 0.13 });
+    }
 
     // ---- 2) THE BEACH PLATFORM at the waterline: the ONE boarding point from
     // the sea, and the reference's whole stern read.
@@ -989,7 +1001,10 @@
         transomBeamFrac: 0.96, entryPow: 1.25,
         rockerAft: 1.0, tKeel: 0.34, n: 15,
       });
-      if (K.loftHull) K.loftHull(b, st, alu, { rings: 9, chine: "auto", transom: "flat" });
+      // Bare aluminium, never antifouled: dull, oxidised and weedy where she
+      // sits on her mooring (front faces only, so the inside stays bright).
+      if (K.loftHull) K.loftHull(b, st, alu, { rings: 9, chine: "auto", transom: "flat",
+        paint: { bottom: 0x6a7378, dirt: 0.75, slime: 0.14, scale: 0.7 } });
       out = HL.outline(st);
     }
     const sheerAt = (z) => (out ? out.sheerYAt(z) : FB);
@@ -1127,7 +1142,10 @@
       // working boat its reserve buoyancy in a head sea, and the reason a
       // trawler's bow does not read as the end of a barge.
       if (K.rakeStem) K.rakeStem(st, -16 * Math.PI / 180, 0.24);
-      if (K.loftHull) K.loftHull(b, st, hull, { rings: 13, transom: "flat" });
+      // A working boat's bottom: red copper antifouling under a black boot
+      // top, heavily fouled — she is out every day and slipped once a year.
+      if (K.loftHull) K.loftHull(b, st, hull, { rings: 13, transom: "flat",
+        paint: { bottom: 0x8a2b20, boot: 0x14181d, bootH: 0.20, bootY: 0.04, dirt: 1.0, slime: 0.45, scale: 1.6 } });
       out = HL.outline(st);
     }
     const sheerAt = function (z) { return out ? out.sheerYAt(z) : SHEER; };
@@ -1136,18 +1154,18 @@
     if (HL && st) {
       // THE BAR KEEL: a rectangular bar down the centreline, following the
       // rocker. A trawler sits on this in a drying harbour.
+      // It stops short of the stern: the screw turns in the APERTURE between
+      // the end of the keel and the rudder (inboardGear below).
       const bar = [];
       for (let i = 0; i <= 20; i++) {
-        const z = -8.6 + (16.4 * i) / 20;
+        const z = -6.9 + (14.7 * i) / 20;
         bar.push([0, keelAt(z) - 0.16, z]);
       }
-      const kbar = HL.strip(bar, 0.17, hull, { segments: 56, radial: 4 });
+      const kbar = HL.strip(bar, 0.17, M.foil ? M.foil() : hull, { segments: 56, radial: 4 });
       if (kbar) { kbar.castShadow = false; b.add(kbar); }
       [1, -1].forEach(function (side) {
         // boot stripe, the working sheer stripe, and TWO rubbing strakes —
         // the timber a trawler wears where she lies against a quay wall.
-        const bs = HL.strip(K.skinRun(st, side, -8.7, 8.2, 0.14, 0.02, 0.7), 0.13, boot, { segments: 60, radial: 5 });
-        if (bs) { bs.castShadow = false; b.add(bs); }
         const stripe = HL.strip(K.skinRun(st, side, -8.6, 8.0, function (z) { return sheerAt(z) - 0.36; }, 0.02, 0.7), 0.07, house, { segments: 60, radial: 5 });
         if (stripe) { stripe.castShadow = false; b.add(stripe); }
         [0.85, 1.55].forEach(function (dy) {
@@ -1268,7 +1286,10 @@
       K.addFixtureBox(b, "net-bin", 1.10, 0.74, 1.30, x, SHEER + 0.44, -5.1, dark);
     });
     K.addFixtureCyl(b, "warp-coil", 0.46, 0.26, -1.85, SHEER + 0.25, -8.05, dark, 10);
-    b.add(K.propGroup(2.0, [[0, KEEL * 0.72, -8.8]]));
+    // ONE big slow screw in the aperture between the bar keel and a hung
+    // rudder, on a shaft out of the deadwood (it floated in the sea before).
+    if (st && K.inboardGear) K.inboardGear(b, st, { props: [[0, -7.9]], r: 0.62, shaft: 3.2 });
+    else b.add(K.propGroup(2.0, [[0, KEEL * 0.72, -8.8]]));
     K.navLights(b, hbAt(7.2), sheerAt(7.2) + 1.15, 7.2, -8.8, SHEER + 5.9);
     return K.finish(b, { width: W, length: L, height: 8.4, wheelbase: L * 0.6 });
   }
@@ -1299,6 +1320,9 @@
     const b = new THREE.Group(), M = K.M;
     const L = 12.5, W = 4.3, hw = W * 0.5, KEEL = -1.15, SHEER = 1.42;
     const hull = K.roleMat("sf-hull", "paint", 0xf2f5f7), navy = K.roleMat("sf-navy", "paint", 0x14314f);
+    // the shell's paint, shared by the strakes moulded into it
+    const SF_PAINT = { bottom: 0x1f3a5c, boot: 0x14181d, bootH: 0.11, dirt: 0.6, slime: 0.26, scale: 1.2 };
+    const hullP = K.paintedHullMat ? K.paintedHullMat(hull, SF_PAINT) : hull;
     const teak = M.teak(), dark = M.dark(), chrome = M.chrome(), glass = M.glass(), pad = M.pad(), grey = M.grey();
     const liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
     K.declareRoom(b, "sportfish-cockpit", "Fishing cockpit");
@@ -1332,6 +1356,7 @@
         K.loftHull(b, st, hull, {
           rings: 11, chine: "auto", transom: "flat",
           deck: true, deckCamber: 0.09, deckCols: 9,
+          paint: SF_PAINT,
         });
       }
       out = HL.outline(st);
@@ -1347,9 +1372,9 @@
         // SPRAY RAILS: the chine strake itself plus a second rail half way up
         // the bottom. Both are what keep a boat this fast dry, and both are
         // read off the loft's own corner rather than guessed.
-        const cr = HL.strip(K.chineRun(st, side, 0.04, 0.01), 0.055, hull, { segments: 46, radial: 4 });
+        const cr = HL.strip(K.chineRun(st, side, 0.04, 0.01), 0.055, hullP, { segments: 46, radial: 4 });
         if (cr) { cr.castShadow = false; b.add(cr); }
-        const lower = HL.strip(K.skinRun(st, side, -6.1, 4.6, function (z) { return keelAt(z) * 0.42; }, 0.03, 0.5), 0.040, hull, { segments: 46, radial: 4 });
+        const lower = HL.strip(K.skinRun(st, side, -6.1, 4.6, function (z) { return keelAt(z) * 0.42; }, 0.03, 0.5), 0.040, hullP, { segments: 46, radial: 4 });
         if (lower) { lower.castShadow = false; b.add(lower); }
       });
     }
@@ -1416,7 +1441,12 @@
     K.addScreen(b, 0, SHEER + 5.18, 1.17, 0.50, 0.24, 0, screen);
     K.addSeat(b, 0, SHEER + 4.86, 0.20, 0, pad, chrome);
     b.userData.marineFixtureCount += 7;                                                  // cockpit + flybridge work fittings
-    b.add(K.propGroup(1.4, [[0.75, -0.95, -6.3], [-0.75, -0.95, -6.3]]));
+    // twin shafts on P-brackets, rudders and trim tabs — a convertible's
+    // bottom is exactly this seen from a marlin's point of view
+    if (st && K.inboardGear) {
+      K.inboardGear(b, st, { props: [[0.78, -5.35], [-0.78, -5.35]], r: 0.29, shaft: 2.2 });
+      if (K.trimTabs) K.trimTabs(b, st, 1.20, 0.60, 0.30);
+    } else b.add(K.propGroup(1.4, [[0.75, -0.95, -6.3], [-0.75, -0.95, -6.3]]));
     K.navLights(b, hbAt(5.1), sheerAt(5.1) + 0.10, 5.1, -6.1, SHEER + 5.4);
     return K.finish(b, { width: W, length: L, height: 6.9, wheelbase: L * 0.6 });
   }
@@ -1568,6 +1598,8 @@
         K.loftHull(b, ST, hull, {
           rings: 11, transom: "flat",           // NO o.chine: a keelboat has none
           deck: true, deckCamber: 0.09, deckCols: 9, cockpit: CK,
+          // navy ablative bottom under a red boot top
+          paint: { bottom: 0x1e2c47, boot: 0x9e2a22, bootH: 0.06, bootY: 0.03, dirt: 0.55, slime: 0.22, scale: 1.0 },
         });
       }
       out = HL.outline(ST);
@@ -1584,9 +1616,6 @@
     // showed.
     if (HL && ST) {
       [1, -1].forEach(function (side) {
-        const bt = HL.strip(K.skinRun(ST, side, -L * 0.46, L * 0.45, 0.02, 0.010, 0.55),
-          0.035, M.boot(), { segments: 52, radial: 5 });
-        if (bt) { bt.castShadow = false; b.add(bt); }
         const sp = HL.strip(K.skinRun(ST, side, -L * 0.46, L * 0.46, (z) => sheerAt(z) - 0.20, 0.014, 0.55),
           0.045, stripe, { segments: 52, radial: 5 });
         if (sp) { sp.castShadow = false; b.add(sp); }
@@ -1598,17 +1627,19 @@
     // body only draws 0.72. Each is drawn with its real PLANFORM (a swept
     // leading edge and a shorter tip chord), which is what a foil looks like
     // from the side — the old build used constant-section boxes.
-    K.addPrism(b, 0.30, [[-0.72, -2.06], [-1.12, -0.58], [1.32, -0.58], [0.56, -2.06]], 0, dark);
-    const bulb = K.addCyl(b, 0.17, 2.30, 0, -2.18, 0.05, dark, 10);
+    // The appendages wear the bottom's navy antifouling, not black plastic.
+    const keelPaint = K.sharedMat("sl-foil", 0x1a2640, { emissive: 0x05080f, ei: 0.15 });
+    K.addPrism(b, 0.30, [[-0.72, -2.06], [-1.12, -0.58], [1.32, -0.58], [0.56, -2.06]], 0, keelPaint);
+    const bulb = K.addCyl(b, 0.17, 2.30, 0, -2.18, 0.05, keelPaint, 10);
     bulb.rotation.x = Math.PI / 2;
     [1, -1].forEach(function (side) {
-      const nose = new THREE.Mesh(K.cylGeo(0.02, 0.17, 0.42, 10), dark);
+      const nose = new THREE.Mesh(K.cylGeo(0.02, 0.17, 0.42, 10), keelPaint);
       nose.position.set(0, -2.18, 0.05 + side * 1.36);
       nose.rotation.x = side > 0 ? -Math.PI / 2 : Math.PI / 2;
       nose.castShadow = false;
       b.add(nose);
     });
-    K.addPrism(b, 0.13, [[-4.88, -1.92], [-4.78, -0.34], [-3.98, -0.34], [-4.20, -1.92]], 0, dark);
+    K.addPrism(b, 0.13, [[-4.88, -1.92], [-4.78, -0.34], [-3.98, -0.34], [-4.20, -1.92]], 0, keelPaint);
     K.addCyl(b, 0.045, 1.70, 0, -1.10, -4.52, chrome, 8);                    // rudder stock
 
     // ---- COACHROOF, COCKPIT, COAMINGS ---------------------------------------
