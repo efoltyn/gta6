@@ -80,6 +80,42 @@
     return obj;
   }
 
+  /* SAME TRUCK, FEWER DRAWS. The 3MF arrives as ~40 meshes (205k tris), one
+     draw call each. Every triangle is kept (the owner's rule: no vehicle may
+     look worse to save cost); meshes that share a material are baked into
+     one, so the truck costs one draw per MATERIAL. Meshes with material
+     arrays or attribute sets that don't match their bucket stay as they are. */
+  function mergeByMaterial(model) {
+    const U = THREE.BufferGeometryUtils;
+    if (!U || !U.mergeBufferGeometries) return;
+    model.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    const buckets = new Map();
+    model.traverse(function (o) {
+      if (!o.isMesh || Array.isArray(o.material) || !o.geometry || !o.geometry.attributes.position) return;
+      const g = o.geometry;
+      const sig = o.material.uuid + "|" + Object.keys(g.attributes).sort().join(",") + "|" + (g.index ? 1 : 0);
+      (buckets.get(sig) || buckets.set(sig, []).get(sig)).push(o);
+    });
+    buckets.forEach(function (meshes) {
+      if (meshes.length < 2) return;
+      const geos = meshes.map(function (m) {
+        const g = m.geometry.clone();
+        g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+        return g;
+      });
+      let merged = null;
+      try { merged = U.mergeBufferGeometries(geos, false); } catch (e) { merged = null; }
+      geos.forEach(function (g) { g.dispose(); });
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, meshes[0].material);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.userData.vehiclePart = true;
+      meshes.forEach(function (m) { if (m.parent) m.parent.remove(m); });
+      model.add(mesh);
+    });
+  }
+
   CBZ.spawnOfficialFarmTruck = function (root, x, z, heading) {
     if (!root || root.getObjectByName("official-threejs-farm-truck")) return null;
     const holder = new THREE.Group();
@@ -96,6 +132,7 @@
         o.castShadow = true; o.receiveShadow = true;
         o.userData.vehiclePart = true;
       });
+      mergeByMaterial(model);
       holder.add(model);
       if (CBZ.cityRegisterVehicle) {
         const car = CBZ.cityRegisterVehicle(holder, {

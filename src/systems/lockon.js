@@ -185,7 +185,7 @@
   // EnumTargets contract below).
   function carSeek(c) {
     return function () {
-      if (!c || c.dead || !c.pos || !c.group || c.group.visible === false) return null;
+      if (!c || c.dead || !c.pos || !c.group || (c.group.visible === false && !c._proxy)) return null;   // proxied = drawn instanced
       const dm = c.dims || {};
       return { x: c.pos.x, y: (c.pos.y || 0) + (dm.height || 1.8) * 0.55, z: c.pos.z };
     };
@@ -413,7 +413,7 @@
     if (cars) {
       for (let i = 0; i < cars.length && slotCount < MAX_CANDS; i++) {
         const c = cars[i];
-        if (!c || c.dead || c === ownCar || (c.player && P && P.driving) || !c.pos || !c.group || c.group.visible === false) continue;
+        if (!c || c.dead || c === ownCar || (c.player && P && P.driving) || !c.pos || !c.group || (c.group.visible === false && !c._proxy)) continue;
         const dm = c.dims || {};
         const cy = (c.pos.y || 0) + (dm.height || 1.8) * 0.55;
         const dx = c.pos.x - _aimO.x, dy = cy - _aimO.y, dz = c.pos.z - _aimO.z;

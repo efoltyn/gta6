@@ -367,6 +367,8 @@
       // — crazed safety glass reads nearly OPAQUE, so push the clone's opacity
       // back up (once; the clone is cached/shared for the whole city).
       if (fm !== gl.mat && fm.transparent && fm.opacity < 0.8) { fm.opacity = 0.85; fm.depthWrite = true; }
+      // car glass (carfx 'autoGlass') is see-through by TRANSMISSION, not opacity
+      if (fm !== gl.mat && fm.transmission) { fm.transmission = 0.12; fm.opacity = 0.9; }
       gl.mesh.material = fm;
     }
   }
@@ -416,6 +418,7 @@
   }
 
   CBZ.cityCarFrost = function (car) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || !car.group) return;
     const e = entryFor(car, true);
     if (!e) return;
@@ -425,6 +428,7 @@
   };
 
   CBZ.cityCarBurnOut = function (car, opts) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || !car.group) return false;
     if (!ensureScratch()) return false;
     opts = opts || {};
@@ -669,6 +673,7 @@
   // down the panel, a square head-on (velocity mostly PARALLEL to dir) stays
   // a contained, deep crater — same budget, different shape.
   CBZ.cityCarImpact = function (car, point, dir, energy, opts) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || car.dead || !car.group || !point || !dir) return;
     const grp = car.group;
     const style = grp.userData && grp.userData.carStyle;
@@ -1112,6 +1117,7 @@
 
   // restore ONE car to pristine (police cruiser pool reuse, [C] body swap)
   CBZ.cityCarImpactReset = function (car) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (!car) return;
     const e = entryFor(car, false);
     if (e) release(e, false);

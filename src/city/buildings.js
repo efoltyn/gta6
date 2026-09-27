@@ -2949,6 +2949,10 @@
         const pd = CBZ.cityPeds[k]; if (!pd || pd.dead || !pd.pos || pd.enterT > 0) continue;
         const dx = pd.pos.x - dr.wx, dz = pd.pos.z - dr.wz;
         if (dx * dx + dz * dz > 22) continue;
+        // YOUR DOOR IS LOCKED TO OTHERS (city/plots.js stamps _ownerLock on
+        // every door of a building the player owns): it only swings for you
+        // and your people.
+        if (dr._ownerLock && !(CBZ.cityPlotFriendly && CBZ.cityPlotFriendly(pd, dr))) continue;
         if (doorNearActor(dr, pd.pos.x, pd.pos.z, 1.25)) return true;
       }
     }

@@ -2357,8 +2357,11 @@
     if (MAP_V2() && (map.view.z >= 2.6 || (map._cursor && !ICONS_V2()))) { drawClimbMarks(p, A); drawBoardTicks(p); }
     if (detail && !ICONS_V2()) drawCityLabels(p, A);
     if (detail) drawRentedBoards(p);
-    // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
-    if (detail && CBZ.cityOwnsLot) {
+    // ---- YOUR LAND: every lot you own is painted in your colour, with what
+    //      you built on it drawn to scale (walls, towers, the gate), so the map
+    //      reads as a deed map, not a ring of icons (city/plots.js). ----
+    if (CBZ.cityPlots && CBZ.cityPlots.list) drawOwnedPlots(p, detail);
+    else if (detail && CBZ.cityOwnsLot) {
       ctx.strokeStyle = "#ffd451"; ctx.lineWidth = 2;
       const ring = (lots) => { for (const lot of lots || []) { if (lot.building && CBZ.cityOwnsLot(lot)) { ctx.beginPath(); ctx.arc(p.x(lot.cx), p.z(lot.cz), 9, 0, Math.PI * 2); ctx.stroke(); } } };
       ring(A.lots); if (A.annex) ring(A.annex.lots);
@@ -2409,6 +2412,41 @@
         mapLabel(jn, jx, jy - 14, { size: 11, fill: "#bfffd9", force: true });
         pickAdd(jx, jy, 11, "mission", jn, job.reward ? "Pays $" + Math.round(job.reward).toLocaleString() : "Active objective", job.dest.x, job.dest.z);
       } else drawPoi(job.dest.x, job.dest.z, p, "#7ed957", "JOB", true, "mission");
+    }
+  }
+
+  function drawOwnedPlots(p, detail) {
+    let list = [];
+    try { list = CBZ.cityPlots.list() || []; } catch (e) { list = []; }
+    if (!list.length) return;
+    const pg = CBZ.game.playerGang;
+    const col = (pg && pg.founded && pg.color != null) ? pg.color : 0x7ed957;
+    const hx = hex6(col), r = (col >> 16) & 255, gg = (col >> 8) & 255, b = col & 255;
+    for (const plot of list) {
+      const R = plot.rect; if (!R) continue;
+      const x0 = p.x(R.minX), y0 = p.z(R.minZ), w = (R.maxX - R.minX) * p.sc, h = (R.maxZ - R.minZ) * p.sc;
+      ctx.fillStyle = "rgba(" + r + "," + gg + "," + b + ",0.30)";
+      ctx.fillRect(x0, y0, w, h);
+      ctx.strokeStyle = hx; ctx.lineWidth = Math.max(1.5, Math.min(3, p.sc * 0.4));
+      ctx.strokeRect(x0, y0, w, h);
+      // what stands on it: pieces drawn at their true footprint once zoomed in
+      if (detail && p.sc > 1.2 && CBZ.compoundKit && CBZ.compoundKit.piecesOn) {
+        let pcs = [];
+        try { pcs = CBZ.compoundKit.piecesOn(plot) || []; } catch (e) { pcs = []; }
+        ctx.fillStyle = "rgba(24,26,30,.85)";
+        for (const pc of pcs) {
+          if (!pc || !pc.alive || !pc.colliders || !pc.colliders.length) continue;
+          for (const c of pc.colliders) {
+            if (c.minX == null) continue;
+            ctx.fillRect(p.x(c.minX), p.z(c.minZ), Math.max(1, (c.maxX - c.minX) * p.sc), Math.max(1, (c.maxZ - c.minZ) * p.sc));
+          }
+        }
+      }
+      const cx = p.x(plot.center.x), cy = p.z(plot.center.z);
+      if (ICONS_V2()) {
+        pickAdd(cx, cy, Math.max(10, Math.min(w, h) * 0.5), "home", plot.name || "Your property", plot.cleared ? "Your land, cleared" : "Your property", plot.center.x, plot.center.z);
+      }
+      if (detail && p.sc > 0.6) mapLabel(plot.name || "Yours", cx, y0 - 7, { size: 11, fill: hx, force: true });
     }
   }
 

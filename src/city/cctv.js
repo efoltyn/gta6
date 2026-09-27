@@ -524,6 +524,9 @@
         if (aroot) auHidden = scopeApply(aroot);
       }
       renderer.setRenderTarget(rt);
+      // proxied parked cars are culled against the PLAYER's camera
+      // (city/carinstances.js); the monitor may look the other way
+      if (CBZ.carInstanceFullDraw) CBZ.carInstanceFullDraw();
       renderer.render(CBZ.scene, feedCam);
     } catch (e) {
       /* headless/context loss — fail soft */
