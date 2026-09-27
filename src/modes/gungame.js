@@ -1,72 +1,53 @@
 /* ============================================================
-   modes/gungame.js — GUN GAME: weapon-ladder deathmatch on a map you CHOOSE.
+   modes/gungame.js — GUN GAME: weapon-ladder deathmatch on a map you choose.
 
-   THE WHY (owner: "choose the map between jail natural disaster and others
-   and play gun game"): the ladder itself is the gradient. Everyone — you and
-   every bot — starts on the same first gun; every kill advances the killer
-   ONE rung down a fixed weapon ladder; whoever lands the FINAL rung's kill
-   wins the match. The gradient is READ OFF THE GUN IN YOUR HANDS, not off a
-   panel — gungamehud.js's row is OFF by default (owner: "you know what gun
-   you're on because you're holding it in your hand") — and the final rung is
-   CATEGORICAL: bare fists, the humiliation rung; losing your lead to a punch
-   is the drama.
+   THE GAME. You and nine bots start on the same pistol. Every kill climbs the
+   killer one rung (pistol, SMG, shotgun, rifle, AK, LMG, sniper, Desert
+   Eagle, bare fists). The first to land a kill on the fists rung wins. A
+   MELEE kill (F while armed, or any punch) HUMILIATES the victim: they drop a
+   rung. That rule is what makes the ladder a race instead of a queue, because
+   nobody is ever safely ahead.
 
-   THIS MODE BUILDS NO WORLD. It borrows maps whole:
-     • JAIL   — the prison world (CBZ.prisonRoot) that boots with the game.
-                Flat slab at y=0, colliders already live. The prison CAST is
-                hidden for the match (this is an arena, not a prison sim) and
-                restored on exit; their standing positions are harvested as
-                the spawn pool, because a spot a prison NPC stands on is a
-                spot the prison certifies as walkable.
-     • ISLAND — the disaster island. Built through survival's OWN
-                CBZ.modes.survival.build() so surv.built/surv.arena stay the
-                one truth and both modes share one build (never two islands).
-   IT BORROWS THE GEOMETRY, NEVER THE GAME (2026-08-19, owner: "in gun game
-   I'm seeing dialogue pop ups — why should there be dialogue?"). Borrowing
-   CBZ.prisonRoot borrowed the whole ESCAPE SIMULATION with it, because the
-   prison's own systems were gated by exception lists ("not survival") or by
-   nothing at all. Measured mid-match, before the fix: seventeen crimes
-   reported to a block that is not playing, heat at 31/100 in 45 s, 1608 guard
-   sight ticks, and the popups the owner actually saw — the breakout's own
-   prompts, offered in the middle of a deathmatch:
-       "Crouch [C] to enter vent / hatch"      (a vent teleports you off-map)
-       "Press [E] to Sabotage Power"
-       objective rewritten to "Cross the yard or scout tunnels for another way out."
-   Fixed at the two owners, not here: systems/detection.js (the wanted machine
-   and CBZ.reportCrime — the one choke point every shot, punch and lift goes
-   through) and systems/interactions.js (the breakout props). Both now ask for
-   the SCENARIO, `mode === "escape"`, which is the right question for a world's
-   own game — capabilities are for shared engine verbs (systems/modecaps.js).
-   The ratchet is CBZ.gungameAudit().prisonLeak: heat that arrived during a
-   match, resolved from the live ledger. Pin at 0.
+   THE ARENA. The mode borrows a world whole (the prison, or the disaster
+   island through survival's own build()) and fences a PLAY ZONE inside it: the
+   prison's inner compound (yard + south courtyard), or the island's downtown
+   ring. The old match spread ten people over the whole 6 ha prison; you
+   walked for a minute to find anyone. Spawns, bot movement and the player are
+   all held inside the zone.
 
-   MORE MAPS — the seam: add an entry to MAPS below with {label, small,
-   ensure(), root(), floorAt(x,z), point()}. A city-slice map (e.g. the
-   speedway infield) is deliberately NOT shipped: CBZ.city builds the whole
-   city lazily and paying that on the title screen for one arena slice is the
-   wrong trade. When the city is already built, a future map entry can borrow
-   it for free through the same five hooks.
+   THE BOTS (2026-09-27 rewrite). The old brain chased the nearest body
+   through walls it could not path around, knew where everyone was, and hit on
+   a flat dice roll. Now:
+     NAV    a 1 m walk grid rasterised from CBZ.colliders over the zone (plus
+            sea and slope on the island), the main connected region only, A*
+            with string-pulling, budgeted per frame.
+     SIGHT  a view cone + range + line of sight against the same colliders
+            (and CBZ.losBlockers before a shot). Bots HEAR gunfire and go to it.
+            A bot that is shot turns on its shooter.
+     AIM    a reaction delay on a new target, aim that settles the longer a bot
+            tracks, worse against a moving/crouching target, falloff by the
+            weapon's real effective range, and misses that visibly crack past
+            you. Each bot has its own skill.
+     PLAY   each rung is played to its gun: shotguns and SMGs push in, rifles
+            hold mid range and strafe, the sniper holds still, fists sprint and
+            weave. Low on health, a bot breaks line of sight. Everyone hunts
+            the leader a little harder, which keeps the race close.
 
-   REUSE MAP (what this file drives, never re-implements):
-     • Player guns/fists: systems/fpsmode.js untouched. Its non-city target
-       scan reads CBZ.guards + CBZ.npcs, so match bots REGISTER into CBZ.npcs
-       (and CBZ.bots, whose list grapple.js's shared body physics steps in
-       every non-escape mode). Prison actors are group-hidden for the match
-       and findActorHit skips invisible groups — bullets only ever find bots.
-     • Bot deaths: fpsmode/combat.js kill through CBZ.aiKill. The wrap below
-       intercepts ONLY records stamped _ggBot and routes them to this mode's
-       death handler (ragdoll via CBZ.body.hit, gore via CBZ.gore, ONE feed
-       line via CBZ.cityKillFeed) — prison side effects (case files, gang
-       standing, prison drops) never run for an arena bot.
-     • Bot guns: systems/actorweapons.js (syncActorWeapon/actorMuzzle/
-       actorAimAt) — the visible weapon IS the bot's rung. Fire is
-       tracer + gunVoice + a range-honest hit roll, LOS-gated through
-       CBZ.clearLineOfFire like city/peds.js's npcAttack.
-     • Ladder weapons: ids straight out of CBZ.FPS_WEAPONS (the ONE gun
-       system); the player swap is resetWeaponInventory → unlockWeapon →
-       fpsResetWeapons. No new guns are invented.
-   Flags: GUNGAME_V1 (master, null-check), GUNGAME_BOTS, GUNGAME_LADDER,
-   GUNGAME_KILLS_PER_RUNG, GUNGAME_RESPAWN_SEC. Audit: CBZ.gungameAudit().
+   IT BORROWS THE GEOMETRY, NEVER THE GAME. The prison's own simulation
+   (detection, breakout props, killstreak cards) is gated to mode "escape" at
+   its owners (systems/detection.js, systems/interactions.js,
+   systems/killstreaks.js); CBZ.gungameAudit().prisonLeak pins it at 0. The
+   prison cast is hidden for the match and restored on exit.
+
+   HUD. systems/gungamehud.js draws the ladder track, damage direction,
+   promotion pulse, death card and result standings, all off gg.on(type, fn)
+   events emitted here: matchstart, matchend, promote, demote, kill, hurt,
+   death, respawn, leader, final.
+
+   REUSE: player guns are systems/fpsmode.js (bots register into CBZ.npcs so
+   its target scan finds them); bot guns are systems/actorweapons.js; deaths
+   are ragdoll via CBZ.body.hit + CBZ.gore + one CBZ.cityKillFeed line; the
+   ladder ids are CBZ.FPS_WEAPONS ids. Audit: CBZ.gungameAudit().
 ============================================================ */
 (function () {
   "use strict";
@@ -76,19 +57,13 @@
   const g = CBZ.game;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.GUNGAME_V1 == null) CBZ.CONFIG.GUNGAME_V1 = true;
   if (CBZ.CONFIG.GUNGAME_BOTS == null) CBZ.CONFIG.GUNGAME_BOTS = 9;
   if (CBZ.CONFIG.GUNGAME_KILLS_PER_RUNG == null) CBZ.CONFIG.GUNGAME_KILLS_PER_RUNG = 1;
   if (CBZ.CONFIG.GUNGAME_RESPAWN_SEC == null) CBZ.CONFIG.GUNGAME_RESPAWN_SEC = 3;
-  if (CBZ.CONFIG.GUNGAME_V1 === false) return;   // one-line revert: title button falls back to escape (state.js normalizes)
 
   // ---- THE LADDER -----------------------------------------------------------
-  // ids are CBZ.FPS_WEAPONS ids (weapons/weapon-data.js); `name` is the
-  // actorweapons/audio-facing name (same strings city/combat.js's GUN_MAP
-  // uses), so one row arms the player, the bot's hands AND the gun's voice.
-  // Light → heavy → the categorical final rung: BARE FISTS (melee:true —
-  // no weapon id at all; fpsmode's unarmed punch / combat.js melee is the gun).
-  // Override: CBZ.CONFIG.GUNGAME_LADDER = [{id,name,melee?},…].
+  // ids are CBZ.FPS_WEAPONS ids; `name` is the actorweapons/audio name, so one
+  // row arms the player, the bot's hands and the gun's voice.
   const DEFAULT_LADDER = [
     { id: "sidearm", name: "Pistol" },
     { id: "smg", name: "SMG" },
@@ -109,145 +84,402 @@
     const w = CBZ.weaponById && CBZ.weaponById(r.id);
     return (w && w.label) || r.name || r.id;
   }
-  // kills needed on a rung: the final rung is always ONE kill (the drama rung);
-  // earlier rungs take GUNGAME_KILLS_PER_RUNG (classic gun game = 1).
   function rungNeed(i) {
     return i >= ladder().length - 1 ? 1 : Math.max(1, CBZ.CONFIG.GUNGAME_KILLS_PER_RUNG | 0);
   }
 
-  // ---- MAPS (borrowed worlds — see header; never authored here) -------------
+  // How each gun is PLAYED by a bot. band = the distance window it tries to
+  // hold; eff = the range at which its hit chance has halved; still = plants
+  // its feet to shoot (the sniper). Anything unlisted plays like a rifle.
+  const PLAY = {
+    sidearm: { band: [7, 16], eff: 22 },
+    smg: { band: [4, 12], eff: 18 },
+    shotgun: { band: [2.5, 7], eff: 9 },
+    carbine: { band: [12, 28], eff: 46 },
+    ak47: { band: [11, 26], eff: 40 },
+    lmg: { band: [12, 30], eff: 40 },
+    sniper: { band: [24, 70], eff: 120, still: true },
+    deagle: { band: [6, 16], eff: 26 },
+    fists: { band: [0.9, 1.4], eff: 2 },
+  };
+  function playOf(r) { return PLAY[r && r.id] || PLAY.carbine; }
+
+  // ---- MAPS -----------------------------------------------------------------
+  // Borrowed worlds. `zone` is the play area inside the borrowed world; `phase`
+  // pins the time of day for the whole match (a deathmatch is one light, not a
+  // 150-second day that turns to night halfway through a duel).
   const MAPS = {
     jail: {
-      id: "jail", label: "The Jail", small: "cell block · yard · corridors",
-      ensure() { return !!CBZ.prisonRoot; },          // built at boot with the game
+      id: "jail", label: "The Jail", small: "yard, courtyard, cell blocks",
+      phase: 0.34,
+      // the inner compound: the yard (walls x = +-30, z -8..52) and the south
+      // courtyard (walls x = +-44, z 52..128). Measured off CBZ.colliders.
+      zone: { kind: "rect", minX: -43.4, maxX: 43.4, minZ: -13.4, maxZ: 127.4 },
+      ensure() { return !!CBZ.prisonRoot; },
       root() { return CBZ.prisonRoot || null; },
-      floorAt() { return 0; },                        // the prison is a flat slab at y=0
-      point() { return null; },                       // jail spawns come from the harvested pool
+      floorAt() { return 0; },
+      sea() { return -Infinity; },
     },
     island: {
-      id: "island", label: "Disaster Island", small: "open ground · towers · shore",
+      id: "island", label: "Disaster Island", small: "downtown, towers, wrecks",
+      phase: 0.40,
+      zone: null,      // filled from the built arena (a circle over downtown)
       ensure() {
-        // ONE island for two modes: go through survival's own build() so its
-        // surv.built guard is the single truth — if survival built it we reuse
-        // it, if we build it survival adopts it (its build() will early-return
-        // forever after). Never call buildDisasterArena() directly from here:
-        // survival's build also installs its floorAt override, and skipping it
-        // would leave survival standing on y=0 the day gungame built first.
+        // ONE island for two modes: survival's own build() keeps surv.built the
+        // single truth and installs its floor; never build the arena directly.
         const m = CBZ.modes && CBZ.modes.survival;
         if (m && m.build) { try { m.build(); } catch (e) { console.error("[gungame island]", e); } }
-        return !!(CBZ.surv && CBZ.surv.arena);
+        const A = CBZ.surv && CBZ.surv.arena;
+        if (A) this.zone = { kind: "circle", cx: A.center.x, cz: A.center.z, r: A.radius * 0.56 };
+        return !!A;
       },
       root() { return (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.root) || null; },
       floorAt(x, z) {
         const A = CBZ.surv && CBZ.surv.arena;
         return A ? A.groundHeightAt(x, z) : 0;
       },
-      point() {
-        const A = CBZ.surv && CBZ.surv.arena;
-        return A ? A.randomPoint(12, A.radius * 0.78) : null;
-      },
+      sea(x, z) { return CBZ.survSeaHeightAt ? CBZ.survSeaHeightAt(x, z) : 0; },
     },
   };
   function curMap() { return MAPS[g.gungameMap] || MAPS.jail; }
   if (!g.gungameMap) g.gungameMap = "jail";
-
-  // state.js reads this to decide which borrowed root stays visible in-mode.
   CBZ.gungameWorlds = function () {
     return { jail: curMap().id === "jail", island: curMap().id === "island" };
   };
 
-  // ---- match state ----------------------------------------------------------
+  // ---- zone -----------------------------------------------------------------
+  function zoneBox(Z) {
+    if (!Z) return null;
+    if (Z.kind === "rect") return { minX: Z.minX, maxX: Z.maxX, minZ: Z.minZ, maxZ: Z.maxZ };
+    return { minX: Z.cx - Z.r, maxX: Z.cx + Z.r, minZ: Z.cz - Z.r, maxZ: Z.cz + Z.r };
+  }
+  function inZone(x, z, m) {
+    const Z = curMap().zone; m = m || 0;
+    if (!Z) return true;
+    if (Z.kind === "rect") return x > Z.minX + m && x < Z.maxX - m && z > Z.minZ + m && z < Z.maxZ - m;
+    return Math.hypot(x - Z.cx, z - Z.cz) < Z.r - m;
+  }
+  function clampZone(p, m) {
+    const Z = curMap().zone; m = m || 0;
+    if (!Z) return;
+    if (Z.kind === "rect") {
+      p.x = Math.max(Z.minX + m, Math.min(Z.maxX - m, p.x));
+      p.z = Math.max(Z.minZ + m, Math.min(Z.maxZ - m, p.z));
+    } else {
+      const dx = p.x - Z.cx, dz = p.z - Z.cz, d = Math.hypot(dx, dz), lim = Z.r - m;
+      if (d > lim && d > 0) { p.x = Z.cx + dx / d * lim; p.z = Z.cz + dz / d * lim; }
+    }
+  }
+
+  // ---- match state + events ---------------------------------------------------
   const gg = {
-    bots: [],            // our records; each also lives in CBZ.bots + CBZ.npcs while a match runs
-    match: null,         // {t, over}
+    bots: [],
+    match: null,          // {t, over}
     playerRung: 0, playerRungKills: 0, playerKills: 0, playerDeaths: 0,
-    respawnT: 0,         // player respawn countdown (>0 while dead mid-match)
-    spawnPool: [],       // jail: harvested walkable points
-    hiddenCast: [],      // prison actors we group-hid for a jail match (restored on exit)
+    respawnT: 0,
+    spawnProtectT: 0,     // player spawn shield (ends early when you fire)
+    hiddenCast: [],
     matchesPlayed: 0,
-    winner: null,        // "You" | bot name, once decided
-    heatAtStart: 0,      // the prison-leak ratchet's baseline (see the header)
+    winner: null,
+    killer: null,         // {name, weapon, x, z} of whoever last killed you
+    leader: null,         // name of the current leader
+    heatAtStart: 0,
+    spawnPool: [],        // kept for the audit + tools: the walkable spawn cells
+    nav: null,
   };
   CBZ.gungame = gg;
+  const listeners = {};
+  gg.on = function (type, fn) { (listeners[type] = listeners[type] || []).push(fn); return fn; };
+  gg.off = function (type, fn) { const L = listeners[type]; if (L) { const i = L.indexOf(fn); if (i >= 0) L.splice(i, 1); } };
+  function emit(type, data) {
+    const L = listeners[type]; if (!L) return;
+    for (let i = 0; i < L.length; i++) { try { L[i](data || {}); } catch (e) { console.error("[gungame " + type + "]", e); } }
+  }
 
   const rand = Math.random;   // runtime match randomness (FX-class; no world is built here)
 
-  // ---- bot cosmetics (survivorbot.js's lobby palette + naming grammar) ------
-  const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xf2cbb0];
-  const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0x222222, 0xdedede];
-  const OUTFIT = [0xff5b5b, 0x4f9dff, 0x44d07a, 0xffd166, 0xc792ea, 0xff9e6b, 0x66d9c0,
-    0xf06b9b, 0x5b8bff, 0xff7a1a, 0x39d0c0, 0xe85d8a, 0x7ed957, 0xb07aff];
+  // ---- NAV: a walk grid over the zone -------------------------------------------
+  // 1 m cells. A cell is BLOCKED if any collider (grown by a body radius)
+  // covers it at body height, if it is outside the zone, or on the island if it
+  // is sea or a cliff. Only the largest connected region is walkable, so a
+  // spawn can never land in a sealed room. `clear` is the distance in cells to
+  // the nearest blocked cell (spawns want room; paths prefer it).
+  const CS = 1.0, BODY_R = 0.42;
+  function buildNav() {
+    const map = curMap(), Z = map.zone, bb = zoneBox(Z);
+    if (!bb) return null;
+    const x0 = bb.minX, z0 = bb.minZ;
+    const w = Math.ceil((bb.maxX - bb.minX) / CS), h = Math.ceil((bb.maxZ - bb.minZ) / CS);
+    const N = w * h;
+    const blocked = new Uint8Array(N), floor = new Float32Array(N);
+    const island = map.id === "island";
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const k = j * w + i, x = x0 + (i + 0.5) * CS, z = z0 + (j + 0.5) * CS;
+      if (!inZone(x, z, 0.6)) { blocked[k] = 1; continue; }
+      const f = map.floorAt(x, z);
+      floor[k] = isFinite(f) ? f : 0;
+      if (island && floor[k] < map.sea(x, z) + 0.25) blocked[k] = 1;
+    }
+    if (island) {
+      // cliffs: a step of more than ~0.8 m between neighbouring cells
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+        const k = j * w + i; if (blocked[k] === 1) continue;
+        if ((i + 1 < w && Math.abs(floor[k] - floor[k + 1]) > 0.8) || (j + 1 < h && Math.abs(floor[k] - floor[k + w]) > 0.8)) blocked[k] = 2;
+      }
+    }
+    const cityOn = g.mode === "city";
+    const cols = [];
+    for (const c of CBZ.colliders || []) {
+      if (!c || (c._city && !cityOn)) continue;
+      if (c.maxX < bb.minX - 2 || c.minX > bb.maxX + 2 || c.maxZ < bb.minZ - 2 || c.minZ > bb.maxZ + 2) continue;
+      cols.push(c);
+      const i0 = Math.max(0, Math.floor((c.minX - BODY_R - x0) / CS)), i1 = Math.min(w - 1, Math.floor((c.maxX + BODY_R - x0) / CS));
+      const j0 = Math.max(0, Math.floor((c.minZ - BODY_R - z0) / CS)), j1 = Math.min(h - 1, Math.floor((c.maxZ + BODY_R - z0) / CS));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const k = j * w + i;
+        if (c.y0 != null && c.y1 != null) {
+          const fl = floor[k];
+          if (c.y1 <= fl + 0.4 || c.y0 >= fl + 1.9) continue;   // a kerb you step over / a beam you walk under
+        }
+        blocked[k] = 1;
+      }
+    }
+    // largest connected region (4-neighbour flood)
+    const comp = new Int32Array(N).fill(-1);
+    const q = new Int32Array(N);
+    let best = -1, bestN = 0, id = 0;
+    for (let s = 0; s < N; s++) {
+      if (blocked[s] || comp[s] >= 0) continue;
+      let qh = 0, qt = 0; q[qt++] = s; comp[s] = id; let n = 0;
+      while (qh < qt) {
+        const k = q[qh++]; n++;
+        const i = k % w, j = (k / w) | 0;
+        if (i > 0 && !blocked[k - 1] && comp[k - 1] < 0) { comp[k - 1] = id; q[qt++] = k - 1; }
+        if (i < w - 1 && !blocked[k + 1] && comp[k + 1] < 0) { comp[k + 1] = id; q[qt++] = k + 1; }
+        if (j > 0 && !blocked[k - w] && comp[k - w] < 0) { comp[k - w] = id; q[qt++] = k - w; }
+        if (j < h - 1 && !blocked[k + w] && comp[k + w] < 0) { comp[k + w] = id; q[qt++] = k + w; }
+      }
+      if (n > bestN) { bestN = n; best = id; }
+      id++;
+    }
+    const walk = new Uint8Array(N);
+    for (let k = 0; k < N; k++) walk[k] = comp[k] === best ? 1 : 0;
+    // clearance: multi-source BFS from every non-walkable cell, capped at 6
+    const clear = new Uint8Array(N).fill(6);
+    let qh = 0, qt = 0;
+    for (let k = 0; k < N; k++) if (!walk[k]) { clear[k] = 0; q[qt++] = k; }
+    while (qh < qt) {
+      const k = q[qh++], c1 = clear[k] + 1; if (c1 >= 6) continue;
+      const i = k % w, j = (k / w) | 0;
+      if (i > 0 && clear[k - 1] > c1) { clear[k - 1] = c1; q[qt++] = k - 1; }
+      if (i < w - 1 && clear[k + 1] > c1) { clear[k + 1] = c1; q[qt++] = k + 1; }
+      if (j > 0 && clear[k - w] > c1) { clear[k - w] = c1; q[qt++] = k - w; }
+      if (j < h - 1 && clear[k + w] > c1) { clear[k + w] = c1; q[qt++] = k + w; }
+    }
+    const open = [];
+    for (let k = 0; k < N; k++) if (walk[k] && clear[k] >= 2) open.push(k);
+    return {
+      x0, z0, w, h, walk, clear, floor, cols, open, cells: bestN,
+      g: new Float32Array(N), from: new Int32Array(N), stamp: new Uint32Array(N), closed: new Uint32Array(N), gen: 0,
+      heap: new Int32Array(N), hf: new Float32Array(N),
+    };
+  }
+  function cellOf(N, x, z) {
+    const i = Math.floor((x - N.x0) / CS), j = Math.floor((z - N.z0) / CS);
+    if (i < 0 || j < 0 || i >= N.w || j >= N.h) return -1;
+    return j * N.w + i;
+  }
+  function cellX(N, k) { return N.x0 + ((k % N.w) + 0.5) * CS; }
+  function cellZ(N, k) { return N.z0 + (((k / N.w) | 0) + 0.5) * CS; }
+  // nearest walkable cell to a point (spiral out to r cells)
+  function snapCell(N, x, z, r) {
+    const k0 = cellOf(N, x, z);
+    if (k0 >= 0 && N.walk[k0]) return k0;
+    const ci = Math.floor((x - N.x0) / CS), cj = Math.floor((z - N.z0) / CS);
+    for (let d = 1; d <= (r || 6); d++) {
+      for (let dj = -d; dj <= d; dj++) for (let di = -d; di <= d; di++) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== d) continue;
+        const i = ci + di, j = cj + dj;
+        if (i < 0 || j < 0 || i >= N.w || j >= N.h) continue;
+        const k = j * N.w + i;
+        if (N.walk[k]) return k;
+      }
+    }
+    return -1;
+  }
+  // is the straight walk a->b open? (grid DDA through walkable cells)
+  function navLine(N, ax, az, bx, bz) {
+    const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+    const steps = Math.max(1, Math.ceil(L / (CS * 0.5)));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps, k = cellOf(N, ax + dx * t, az + dz * t);
+      if (k < 0 || !N.walk[k]) return false;
+    }
+    return true;
+  }
+  // A* (8-neighbour, no corner cutting, octile heuristic, soft wall cost) +
+  // string pulling. Returns [{x,z}...] excluding the start, or null.
+  function findPath(N, sx, sz, tx, tz) {
+    const s = snapCell(N, sx, sz, 4), t = snapCell(N, tx, tz, 8);
+    if (s < 0 || t < 0) return null;
+    if (s === t) return [{ x: tx, z: tz }];
+    const gen = ++N.gen;
+    const W = N.w, heap = N.heap, hf = N.hf;
+    let hn = 0;
+    const tx0 = t % W, tz0 = (t / W) | 0;
+    const H = (k) => { const di = Math.abs((k % W) - tx0), dj = Math.abs(((k / W) | 0) - tz0); return (di + dj) + (1.4142 - 2) * Math.min(di, dj); };
+    const push = (k, f) => {
+      let i = hn++; heap[i] = k; hf[i] = f;
+      while (i > 0) { const p = (i - 1) >> 1; if (hf[p] <= hf[i]) break; const tk = heap[p], tf = hf[p]; heap[p] = heap[i]; hf[p] = hf[i]; heap[i] = tk; hf[i] = tf; i = p; }
+    };
+    const pop = () => {
+      const top = heap[0]; hn--;
+      if (hn > 0) {
+        heap[0] = heap[hn]; hf[0] = hf[hn];
+        let i = 0;
+        for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < hn && hf[l] < hf[m]) m = l; if (r < hn && hf[r] < hf[m]) m = r; if (m === i) break; const tk = heap[m], tf = hf[m]; heap[m] = heap[i]; hf[m] = hf[i]; heap[i] = tk; hf[i] = tf; i = m; }
+      }
+      return top;
+    };
+    N.stamp[s] = gen; N.g[s] = 0; N.from[s] = -1;
+    push(s, H(s));
+    let found = false, exp = 0;
+    const DI = [1, -1, 0, 0, 1, 1, -1, -1], DJ = [0, 0, 1, -1, 1, -1, 1, -1];
+    while (hn > 0 && exp < 9000) {
+      const k = pop();
+      if (N.closed[k] === gen) continue;
+      N.closed[k] = gen; exp++;
+      if (k === t) { found = true; break; }
+      const i = k % W, j = (k / W) | 0, gk = N.g[k];
+      for (let d = 0; d < 8; d++) {
+        const ni = i + DI[d], nj = j + DJ[d];
+        if (ni < 0 || nj < 0 || ni >= W || nj >= N.h) continue;
+        const nk = nj * W + ni;
+        if (!N.walk[nk] || N.closed[nk] === gen) continue;
+        if (d >= 4 && (!N.walk[j * W + ni] || !N.walk[nj * W + i])) continue;   // no corner cutting
+        const cl = N.clear[nk];
+        const step = (d >= 4 ? 1.4142 : 1) + (cl <= 1 ? 1.2 : cl === 2 ? 0.35 : 0);
+        const ng = gk + step;
+        if (N.stamp[nk] !== gen || ng < N.g[nk]) {
+          N.stamp[nk] = gen; N.g[nk] = ng; N.from[nk] = k;
+          push(nk, ng + H(nk));
+        }
+      }
+    }
+    if (!found) return null;
+    const cells = [];
+    for (let k = t; k >= 0; k = N.from[k]) { cells.push(k); if (k === s) break; }
+    cells.reverse();
+    // string-pull: from each anchor, jump to the farthest cell still in a straight open line
+    const out = [];
+    let ax = sx, az = sz, i = 0;
+    while (i < cells.length - 1) {
+      let j = cells.length - 1;
+      while (j > i + 1 && !navLine(N, ax, az, cellX(N, cells[j]), cellZ(N, cells[j]))) j--;
+      const px = j === cells.length - 1 ? tx : cellX(N, cells[j]);
+      const pz = j === cells.length - 1 ? tz : cellZ(N, cells[j]);
+      out.push({ x: px, z: pz });
+      ax = px; az = pz; i = j;
+    }
+    if (!out.length) out.push({ x: tx, z: tz });
+    // the goal itself may sit in a blocked cell (a target hugging a wall): end on the snapped cell
+    const last = out[out.length - 1], lk = cellOf(N, last.x, last.z);
+    if (lk < 0 || !N.walk[lk]) { last.x = cellX(N, t); last.z = cellZ(N, t); }
+    return out;
+  }
+
+  // ---- LINE OF SIGHT against the colliders (+ the mesh blockers to fire) ------
+  // CBZ.clearLineOfFire only knows CBZ.losBlockers, which the island never
+  // registers, so on the island everybody used to see (and shoot) through
+  // towers and wrecks. The walk grid's collider list IS the solid world.
+  function segBlocked(cols, ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dz = bz - az;
+    for (let n = 0; n < cols.length; n++) {
+      const c = cols[n];
+      let t0 = 0, t1 = 1;
+      if (Math.abs(dx) < 1e-9) { if (ax < c.minX || ax > c.maxX) continue; }
+      else { let ta = (c.minX - ax) / dx, tb = (c.maxX - ax) / dx; if (ta > tb) { const q = ta; ta = tb; tb = q; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+      if (Math.abs(dz) < 1e-9) { if (az < c.minZ || az > c.maxZ) continue; }
+      else { let ta = (c.minZ - az) / dz, tb = (c.maxZ - az) / dz; if (ta > tb) { const q = ta; ta = tb; tb = q; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+      if (c.y0 != null && c.y1 != null) {
+        // the ray's height across the box: blocked only if some of it is inside the slab
+        const ya = ay + (by - ay) * t0, yb = ay + (by - ay) * t1;
+        if (Math.max(ya, yb) < c.y0 || Math.min(ya, yb) > c.y1) continue;
+      }
+      return true;
+    }
+    return false;
+  }
+  function eyeY(a) { return (a.pos.y || 0) + (a.isPlayer ? ((CBZ.player && CBZ.player.crouch) ? 1.05 : 1.55) : 1.5); }
+  function chestY(a) { return (a.pos.y || 0) + (a.isPlayer && CBZ.player && CBZ.player.crouch ? 0.85 : 1.25); }
+  function sees(a, b) {
+    const N = gg.nav; if (!N) return true;
+    return !segBlocked(N.cols, a.pos.x, eyeY(a), a.pos.z, b.pos.x, chestY(b), b.pos.z);
+  }
+  function canFire(a, b) {
+    if (!sees(a, b)) return false;
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(a.pos.x, eyeY(a) - 0.1, a.pos.z, b.pos.x, chestY(b), b.pos.z)) return false;
+    return true;
+  }
+
+  // ---- bot cosmetics ------------------------------------------------------------
+  // Real people dressed for a fight: work jackets, fatigues, hoodies, denim and
+  // cargo in muted colours, some in a plate carrier and a helmet. (The old
+  // roster wore fourteen candy colours and read as a toy box.)
+  const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xf2cbb0, 0x9c6b47];
+  const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0x6d655c, 0x7a4a2e, 0x1c1c1c, 0x3b2a1d];
+  const TOPS = [0x4b5320, 0x6b5b3e, 0x2f3236, 0x1f2a3a, 0x7d6f52, 0x55595e, 0x5a2a2a, 0x2b3b36, 0x3d3a34, 0x6e7069, 0x28303f, 0x4a4436];
+  const LEGS = [0x2e3b52, 0x1e1f22, 0x5f5543, 0x3f4a2a, 0x46494e, 0x33302b, 0x243049];
   const FIRST = ["Liam", "Mia", "Noah", "Ava", "Kai", "Zoe", "Leo", "Ivy", "Max", "Ada",
     "Finn", "Cleo", "Ravi", "Yuki", "Omar", "Nina", "Jude", "Wren", "Theo", "Iris",
     "Hugo", "Vera", "Eli", "Luna", "Remy", "Sol", "Reed", "Beau", "Esme", "Nico",
     "Dane", "Arlo", "Cole", "Mara", "Kofi", "Tess", "Anya", "Dex", "Lena", "Quinn"];
   const LAST_I = "ABCDEFGHJKLMNPRSTVW";
   function pick(a) { return a[(rand() * a.length) | 0]; }
-  function pickName() { return pick(FIRST) + " " + LAST_I[(rand() * LAST_I.length) | 0] + "."; }
+  function pickName(taken) {
+    for (let i = 0; i < 20; i++) { const n = pick(FIRST) + " " + LAST_I[(rand() * LAST_I.length) | 0] + "."; if (!taken[n]) { taken[n] = 1; return n; } }
+    return pick(FIRST) + " " + ((rand() * 90) | 0);
+  }
 
-  // ---- spawns ---------------------------------------------------------------
-  // JAIL: a prison NPC's standing spot is a certified-walkable point — harvest
-  // the whole cast's positions (plus the two authored spawns) BEFORE hiding
-  // them. ISLAND: arena.randomPoint. Both filter through npcTransitionSafe so
-  // nobody ever materializes on the player's padded screen.
-  function harvestJailSpawns() {
-    const pts = [];
-    const push = (x, z) => { if (isFinite(x) && isFinite(z)) pts.push({ x: x, z: z }); };
-    if (CBZ.SPAWN) push(CBZ.SPAWN.x, CBZ.SPAWN.z);
-    if (CBZ.COP_SPAWN) push(CBZ.COP_SPAWN.x, CBZ.COP_SPAWN.z);
-    for (const n of CBZ.npcs || []) if (n && !n._ggBot && !n.escaped && n.group) push(n.group.position.x, n.group.position.z);
-    for (const gd of CBZ.guards || []) if (gd && gd.group) push(gd.group.position.x, gd.group.position.z);
-    return pts;
-  }
-  function minEnemyDist(x, z, self) {
-    let d = Infinity;
-    if (!CBZ.player.dead && self !== "player") d = Math.min(d, Math.hypot(x - CBZ.player.pos.x, z - CBZ.player.pos.z));
-    for (const b of gg.bots) {
-      if (b.dead || b === self) continue;
-      d = Math.min(d, Math.hypot(x - b.pos.x, z - b.pos.z));
-    }
-    return d;
-  }
-  // best available point: farthest from every living enemy, never on the
-  // player's padded screen (npcTransitionSafe). `self` = who is spawning.
+  // ---- spawns -------------------------------------------------------------------
+  // A spawn is a roomy walkable cell (clearance >= 2) as far as possible from
+  // every living enemy AND out of their sight: a spawn in an enemy's view is a
+  // spawn kill. The player also never gets a bot materialising on screen.
+  const _probe = { pos: { x: 0, y: 0, z: 0 }, isPlayer: false };
   function spawnPoint(self) {
-    const map = curMap();
-    let best = null, bestD = -1;
-    const consider = (p) => {
-      if (!p) return;
-      if (self !== "player" && CBZ.npcTransitionSafe &&
-          !CBZ.npcTransitionSafe(p.x, p.z, { minDistance: 14, maxDistance: 1e6 })) return;
-      const d = minEnemyDist(p.x, p.z, self);
-      if (d > bestD) { bestD = d; best = p; }
-    };
-    if (map.id === "jail") {
-      for (let i = 0; i < gg.spawnPool.length; i++) consider(gg.spawnPool[i]);
-      if (!best && gg.spawnPool.length) best = gg.spawnPool[(rand() * gg.spawnPool.length) | 0];
-      if (!best) best = { x: CBZ.SPAWN ? CBZ.SPAWN.x : 0, z: CBZ.SPAWN ? CBZ.SPAWN.z : 0 };
-    } else {
-      for (let i = 0; i < 10; i++) consider(map.point());
-      if (!best) best = map.point() || { x: 0, z: 0 };
+    const N = gg.nav;
+    if (!N || !N.open.length) {
+      const Z = curMap().zone;
+      return Z && Z.kind === "circle" ? { x: Z.cx, z: Z.cz } : { x: 0, z: 40 };
     }
+    let best = null, bestS = -Infinity;
+    for (let n = 0; n < 28; n++) {
+      const k = N.open[(rand() * N.open.length) | 0];
+      const x = cellX(N, k), z = cellZ(N, k);
+      if (self !== "player" && CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(x, z, { minDistance: 12, maxDistance: 1e6 })) continue;
+      _probe.pos.x = x; _probe.pos.z = z; _probe.pos.y = N.floor[k];
+      let dmin = 1e9, seen = 0;
+      const test = (a) => {
+        const d = Math.hypot(a.pos.x - x, a.pos.z - z);
+        if (d < dmin) dmin = d;
+        if (d < 55 && sees(a, _probe)) seen++;
+      };
+      if (self !== "player" && !CBZ.player.dead) test(PLAYER_TGT);
+      for (const b of gg.bots) if (!b.dead && b !== self) test(b);
+      const score = Math.min(dmin, 60) - seen * 22 + N.clear[k] * 0.5 + rand() * 3;
+      if (score > bestS) { bestS = score; best = { x, z }; }
+    }
+    if (!best) { const k = N.open[(rand() * N.open.length) | 0]; best = { x: cellX(N, k), z: cellZ(N, k) }; }
     return best;
   }
 
-  // ---- floor handoff --------------------------------------------------------
-  // The city's chain pattern (city/mode.js): our wrapper answers ONLY in
-  // gungame mode and delegates everything else to whatever floor was installed
-  // before us. Re-installed each match because survival's build() stomps
-  // CBZ.floorAt unconditionally (same reason city re-installs on reset).
+  // ---- floor handoff ---------------------------------------------------------------
   function mapFloor(x, z) { return curMap().floorAt(x, z); }
   function installFloor() {
-    // systems/solidground.js owns CBZ.floorAt; declare the map field and stop
     CBZ.registerGroundBase("gungame", function (x, z) { return mapFloor(x, z); });
   }
 
-  // ---- prison cast parking --------------------------------------------------
-  // A jail match plays on the prison MAP, not against the prison CAST: hide
-  // every inmate/guard body (visibility flip only — their records, brains and
-  // resets are untouched; the escape-gated AI wasn't running anyway) and
-  // restore exactly the ones we hid on exit. findActorHit skips invisible
-  // groups, so a hidden inmate can never eat a match bullet.
+  // ---- prison cast parking ---------------------------------------------------------
   function hidePrisonCast() {
     restorePrisonCast();
     const park = (a) => {
@@ -259,38 +491,63 @@
     for (const gd of CBZ.guards || []) park(gd);
   }
   function restorePrisonCast() {
-    for (const a of gg.hiddenCast) {
-      if (a && a.group && !a.escaped) a.group.visible = true;
-    }
+    for (const a of gg.hiddenCast) if (a && a.group && !a.escaped) a.group.visible = true;
     gg.hiddenCast.length = 0;
   }
 
-  // ---- bots -----------------------------------------------------------------
-  const BOT_RADIUS = 0.5;
-  const ANIM_DIST2 = 62 * 62;
-  function makeBot(x, z) {
-    const outfit = pick(OUTFIT), skin = pick(SKIN);
+  // ---- bots ---------------------------------------------------------------------------
+  const ANIM_DIST2 = 70 * 70;
+  const PLAYER_TGT = {
+    isPlayer: true, name: "You",
+    get pos() { return CBZ.player.pos; },
+    get dead() { return CBZ.player.dead; },
+    get group() { return CBZ.playerChar && CBZ.playerChar.group; },
+    get rung() { return gg.playerRung; },
+  };
+  gg.playerTarget = PLAYER_TGT;
+
+  function makeBot(x, z, taken, idx) {
+    const top = pick(TOPS), skin = pick(SKIN);
     const ch = CBZ.makeCharacter({
-      legs: pick(OUTFIT), torso: outfit, collar: outfit, arms: outfit,
-      skin: skin, hair: pick(HAIR), shoes: 0x2b2b2b,
+      legs: pick(LEGS), torso: top, collar: top, arms: top,
+      skin: skin, hair: pick(HAIR), shoes: rand() < 0.5 ? 0x1f1d1b : 0x3a3129,
+      beard: rand() < 0.3 ? pick(["stubble", "full", "goatee"]) : undefined,
     });
     ch.group.position.set(x, mapFloor(x, z), z);
     ch.group.rotation.y = rand() * 6.28;
-    const name = pickName();
-    return {
+    const name = pickName(taken);
+    const b = {
       kind: "gungame", _ggBot: true, isPlayer: false,
       char: ch, group: ch.group, pos: ch.group.position,
-      name: name, data: { name: name },       // fpsmode/killstreaks/combat read a.data.name
+      name: name, data: { name: name },
       hp: 100, maxHp: 100, dead: false, ko: 0, escaped: false,
-      armed: true, weapon: rungAt(0).name,    // actorweapons name — the visible gun IS the rung
+      armed: true, weapon: rungAt(0).name,
       rung: 0, rungKills: 0, kills: 0, deaths: 0,
-      outfit: outfit, skin: skin,             // gore colours
-      baseSpeed: 2.5 + rand() * 0.9, speed: 0,
-      target: new THREE.Vector3(x, 0, z), foe: null,
-      pause: 0, slice: (rand() * 6) | 0, thinkT: 0,
-      fireCD: 0.8 + rand() * 1.2, burst: 0, strafe: rand() < 0.5 ? 1 : -1,
-      respawnT: 0,
+      outfit: top, skin: skin,
+      // skill: 0.45 (sloppy) .. 0.9 (sharp). Spread across the roster so a
+      // match has a couple of genuinely dangerous players and some fodder.
+      skill: 0.45 + ((idx * 0.37 + rand() * 0.3) % 1) * 0.45,
+      speed: 0, target: new THREE.Vector3(x, 0, z),
+      foe: null, foeSeen: false, lostT: 99, react: 0, track: 0,
+      mem: null, heard: null, hurtBy: null, hurtT: 99,
+      path: null, pathI: 0, pathGoal: null, repathT: 0,
+      stuckT: 0, lastX: x, lastZ: z,
+      strafe: rand() < 0.5 ? 1 : -1, strafeT: 0,
+      fireCD: 0.8 + rand() * 1.0, burst: 0, meleeCD: 0,
+      thinkT: rand() * 0.2, spawnT: 1.2, respawnT: 0, _hpSeen: 100,
+      mode: "hunt",
     };
+    // a third of the roster wears plates + helmet, a third a soft vest: pure
+    // costume (nothing in this mode reads the armour pool), pooled meshes
+    const kitRoll = rand();
+    if (CBZ.cityArmorDressPed) {
+      try {
+        if (kitRoll < 0.33) CBZ.cityArmorDressPed(b, ["plateCarrier", "helmet"]);
+        else if (kitRoll < 0.6) CBZ.cityArmorDressPed(b, ["softVest"]);
+      } catch (e) {}
+      b._armor = 0;
+    }
+    return b;
   }
   function armBot(b) {
     const r = rungAt(b.rung);
@@ -300,21 +557,23 @@
   }
   function spawnBots(n) {
     const root = curMap().root() || CBZ.scene;
+    const taken = {};
     for (let i = 0; i < n; i++) {
       const p = spawnPoint(null);
-      const b = makeBot(p.x, p.z);
+      const b = makeBot(p.x, p.z, taken, i);
       root.add(b.group);
       gg.bots.push(b);
       CBZ.bots.push(b);   // grapple.js's shared body physics steps CBZ.bots in every non-escape mode
-      CBZ.npcs.push(b);   // fpsmode's non-city bullet/punch scan reads CBZ.npcs — this is what makes bots shootable
+      CBZ.npcs.push(b);   // fpsmode's non-city bullet/punch scan reads CBZ.npcs
       armBot(b);
     }
   }
   function despawnBots() {
     for (const b of gg.bots) {
       if (!b.group) continue;
+      // pooled armour goes back to its pool BEFORE the rig is disposed
+      if (b._armorMeshes && CBZ.cityArmorDressPed) { try { CBZ.cityArmorDressPed(b, []); } catch (e) {} }
       if (b.group.parent) b.group.parent.remove(b.group);
-      // survivorbot.js's dispose discipline: never touch anything _shared
       b.group.traverse(function (o) {
         if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
         if (o.material) {
@@ -328,22 +587,31 @@
     }
     gg.bots.length = 0;
   }
+  function resetBrain(b) {
+    b.foe = null; b.foeSeen = false; b.lostT = 99; b.react = 0; b.track = 0;
+    b.mem = null; b.heard = null; b.hurtBy = null; b.hurtT = 99;
+    b.path = null; b.pathI = 0; b.pathGoal = null; b.repathT = 0; b.stuckT = 0;
+    b.mode = "hunt"; b.meleeCD = 0; b.burst = 0;
+  }
   function respawnBot(b) {
     const p = spawnPoint(b);
-    b.dead = false; b.hp = 100; b.ko = 0; b.respawnT = 0; b.foe = null;
+    b.dead = false; b.hp = 100; b._hpSeen = 100; b.ko = 0; b.respawnT = 0;
     b.pos.set(p.x, mapFloor(p.x, p.z), p.z);
+    b.lastX = p.x; b.lastZ = p.z;
     b.group.rotation.set(0, rand() * 6.28, 0);
     if (b._phys) { b._phys.down = 0; b._phys.air = false; b._phys.kx = 0; b._phys.kz = 0; b._phys.heldBy = null; }
     b._lvy = 0;
-    b.fireCD = 0.9 + rand() * 0.9;
+    b.fireCD = 0.6 + rand() * 0.6;
+    b.spawnT = 1.2;
+    resetBrain(b);
     if (b.group && !b.group.parent) (curMap().root() || CBZ.scene).add(b.group);
     armBot(b);
   }
 
-  // ---- who killed whom ------------------------------------------------------
+  // ---- who killed whom --------------------------------------------------------------
   function resolveKiller(k) {
     if (!k) return null;
-    if (k === "player" || k === CBZ.player) return "player";
+    if (k === "player" || k === CBZ.player || k === PLAYER_TGT) return "player";
     if (k.group && CBZ.playerChar && k.group === CBZ.playerChar.group) return "player";
     if (k._ggBot) return k;
     return null;
@@ -352,18 +620,22 @@
     const r = kRec === "player" ? rungAt(gg.playerRung) : rungAt(kRec.rung);
     return r.melee ? "fists" : (r.name || r.id).toLowerCase();
   }
+  function nameOf(kRec) { return kRec === "player" ? "You" : (kRec ? kRec.name : ""); }
 
-  // ---- deaths (bots) --------------------------------------------------------
-  // ONE handler whichever gun fired: the player's bullets arrive here through
-  // the CBZ.aiKill wrap below (fpsmode/combat.js call aiKill on a lethal hit);
-  // bot-vs-bot fire arrives from hurt(). Ragdoll + gore are surv.killBot's
-  // exact grammar; the feed line is the one sanctioned popup.
-  function botDeath(b, killer, cause) {
+  // ---- deaths (bots) ------------------------------------------------------------------
+  // cause "melee" = a humiliation: the victim drops a rung (gun game's knife rule).
+  function botDeath(b, killer, cause, headshot) {
     if (!b || b.dead) return;
     b.dead = true; b.hp = 0; b.ko = 0; b.deaths++;
     b.respawnT = Math.max(1, +CBZ.CONFIG.GUNGAME_RESPAWN_SEC || 3);
     const kRec = resolveKiller(killer);
-    const label = cause || (kRec ? killerWeaponName(kRec) : "crossfire");
+    const melee = cause === "melee" || cause === "fists";
+    const humiliate = melee;
+    let label = cause || (kRec ? killerWeaponName(kRec) : "crossfire");
+    if (melee && kRec) {
+      const kr = kRec === "player" ? rungAt(gg.playerRung) : rungAt(kRec.rung);
+      label = kr.melee ? "fists" : "gun butt";
+    }
     if (CBZ.body) {
       const kp = kRec === "player" ? CBZ.player.pos : (kRec ? kRec.pos : null);
       if (kp) CBZ.body.hit(b, { fromX: kp.x, fromZ: kp.z, force: 6 + rand() * 3, fling: 4 + rand() * 3 });
@@ -372,38 +644,45 @@
         CBZ.body.hit(b, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 2.5 + rand() * 3, fling: 4 + rand() * 3 });
       }
     }
-    if (CBZ.gore) {
-      CBZ.gore(b.pos.x, b.pos.y + 1.0, b.pos.z, { amount: 0.95, cloth: b.outfit, skin: b.skin });
-    }
-    if (CBZ.cityKillFeed) {
-      CBZ.cityKillFeed(kRec === "player" ? "You" : (kRec ? kRec.name : ""), b.name, label);
-    }
-    if (kRec === "player") advancePlayer();
-    else if (kRec) advanceBot(kRec);
+    if (CBZ.gore) CBZ.gore(b.pos.x, b.pos.y + 1.0, b.pos.z, { amount: melee ? 0.4 : 0.95, cloth: b.outfit, skin: b.skin });
+    if (CBZ.cityKillFeed) CBZ.cityKillFeed(nameOf(kRec), b.name, label);
+    // humiliation: the victim loses a rung
+    if (humiliate && b.rung > 0 && kRec) { b.rung--; b.rungKills = 0; }
+    if (kRec === "player") {
+      emit("kill", { victim: b.name, weapon: label, melee: melee, headshot: !!headshot });
+      advancePlayer();
+    } else if (kRec) advanceBot(kRec);
   }
 
-  // ---- deaths (player) ------------------------------------------------------
-  // NO WASTED flow, no permadeath, no spectate: an arena death is a 3 s
-  // respawn. The ragdoll is survival's _death fling (physics.js integrates it
-  // in every non-escape mode); the feed line is the story.
+  // ---- deaths (player) -------------------------------------------------------------
+  // No WASTED flow and no permadeath: an arena death is a 3 s respawn with the
+  // camera turned on whoever did it.
   function playerDeath(byBot, cause) {
     if (CBZ.player.dead) return;
     CBZ.player.dead = true;
     CBZ.player.hp = 0;
     gg.playerDeaths++;
     gg.respawnT = Math.max(1, +CBZ.CONFIG.GUNGAME_RESPAWN_SEC || 3);
-    const a = rand() * 6.28;
+    const melee = cause === "melee" || cause === "fists";
+    const weapon = melee ? (byBot && rungAt(byBot.rung).melee ? "fists" : "gun butt") : (cause || "gunfire");
+    gg.killer = byBot ? { name: byBot.name, weapon: weapon, bot: byBot } : null;
+    const a = byBot ? Math.atan2(CBZ.player.pos.z - byBot.pos.z, CBZ.player.pos.x - byBot.pos.x) : rand() * 6.28;
     CBZ.player._death = {
-      vx: Math.cos(a) * (3 + rand() * 3), vz: Math.sin(a) * (3 + rand() * 3),
-      vy: 6 + rand() * 3, spin: (rand() * 2 - 1) * 7, spin2: (rand() * 2 - 1) * 5,
+      vx: Math.cos(a) * (2.5 + rand() * 2), vz: Math.sin(a) * (2.5 + rand() * 2),
+      vy: 4 + rand() * 2, spin: (rand() * 2 - 1) * 5, spin2: (rand() * 2 - 1) * 4,
       t: 0, landed: false, seed: rand() * 6.28,
     };
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
-    if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);     // third-person death cam for the 3 s
+    if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);
     if (CBZ.shake) CBZ.shake(1.0);
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.4);
-    if (CBZ.cityKillFeed) CBZ.cityKillFeed(byBot ? byBot.name : "", "You", cause || "gunfire", { you: true });
+    if (CBZ.cityKillFeed) CBZ.cityKillFeed(byBot ? byBot.name : "", "You", weapon, { you: true });
+    emit("death", { by: byBot ? byBot.name : "", weapon: weapon });
+    if (melee && byBot && gg.playerRung > 0) {
+      gg.playerRung--; gg.playerRungKills = 0;
+      emit("demote", { rung: gg.playerRung, by: byBot.name });
+    }
     if (byBot && byBot._ggBot) advanceBot(byBot);
   }
   function respawnPlayer() {
@@ -416,31 +695,29 @@
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     CBZ.player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
     CBZ.playerChar.group.position.copy(CBZ.player.pos);
-    CBZ.playerChar.group.rotation.set(0, rand() * 6.28, 0);
+    // face the middle of the zone, not a wall
+    const Z = curMap().zone, bb = zoneBox(Z);
+    const mx = bb ? (bb.minX + bb.maxX) / 2 : 0, mz = bb ? (bb.minZ + bb.maxZ) / 2 : 0;
+    const face = Math.atan2(mx - p.x, mz - p.z);
+    CBZ.playerChar.group.rotation.set(0, face, 0);
     CBZ.playerChar.group.scale.y = 1;
-    if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = 0.34; }
-    grantPlayerRung();   // fresh mags on the same rung (re-granting auto-drops back into FPS)
+    if (CBZ.cam) { CBZ.cam.yaw = face + Math.PI; CBZ.cam.pitch = 0.1; }
+    if (CBZ.fps) CBZ.fps.fp = 0;
+    gg.spawnProtectT = 2.0;
+    gg.killer = null;
+    grantPlayerRung();
+    emit("respawn", {});
   }
 
-  // ---- rung advancement -----------------------------------------------------
-  // A rung advance is a FULL HEAL (stated design: the reward for a kill is the
-  // next gun AND a clean slate — it keeps a hot streak hot and makes the
-  // leader killable only by actually outshooting them, not by chip damage).
+  // ---- rung advancement -------------------------------------------------------------
+  // A rung advance is a FULL HEAL and a fresh gun: it keeps a hot streak hot.
   function grantPlayerRung() {
     const r = rungAt(gg.playerRung);
-    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();   // one gun at a time — the rung IS the loadout
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (!r.melee && CBZ.unlockWeapon) CBZ.unlockWeapon(r.id, { select: true });
-    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();             // full mags for the new gun
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+    if (r.melee && CBZ.fpsSetActive && !CBZ.player.dead) CBZ.fpsSetActive(true);
   }
-  // A PROMOTION IS A GUN, NOT A SENTENCE. This used to flash
-  // "RUNG 2/9 — COMPACT SMG · NEXT: 12G PUMP" through CBZ.jailTell on every
-  // kill — the same sentence the owner has now deleted twice (the terse pass,
-  // then GUNGAME_HUD_PANEL=false: "you know what gun you're on because you're
-  // holding it in your hand"). Worse, it could not even have printed: jailTell
-  // SUPPRESSES under JAIL_SHOW_DONT_TELL, which is on by default, so the line
-  // was dead code claiming to be feedback. What a rung change actually is: the
-  // weapon in your hands becomes a different category on the same frame, with
-  // a full heal and a full magazine behind it. That is louder than a caption.
   function advancePlayer() {
     if (!gg.match || gg.match.over) return;
     gg.playerKills++;
@@ -452,6 +729,9 @@
     CBZ.player.hp = 100;
     grantPlayerRung();
     if (CBZ.sfx) CBZ.sfx("key");
+    const r = rungAt(gg.playerRung);
+    emit("promote", { rung: gg.playerRung, weaponId: r.id, label: rungLabel(r) });
+    if (r.melee) emit("final", { name: "You", you: true });
   }
   function advanceBot(b) {
     if (!gg.match || gg.match.over || !b || !b._ggBot) return;
@@ -463,18 +743,22 @@
     b.rungKills = 0;
     b.hp = 100;
     armBot(b);
+    if (rungAt(b.rung).melee) {
+      emit("final", { name: b.name, you: false });
+      if (CBZ.sfx) CBZ.sfx("alarm");
+    }
   }
 
-  // ---- match end ------------------------------------------------------------
+  // ---- match end ------------------------------------------------------------------
   function matchWon(who) {
     if (!gg.match || gg.match.over) return;
     gg.match.over = true;
     gg.winner = who === "player" ? "You" : who.name;
+    emit("matchend", { win: who === "player", winner: gg.winner });
     if (who === "player") { if (CBZ.winGame) CBZ.winGame("gungame"); }
     else if (CBZ.loseGame) CBZ.loseGame("outgunned");
   }
 
-  // standings, best first: rung then kills. Used by the result cards + HUD.
   function standings() {
     const rows = [{ name: "You", you: true, rung: gg.playerRung, kills: gg.playerKills }];
     for (const b of gg.bots) rows.push({ name: b.name, rung: b.rung, kills: b.kills });
@@ -484,19 +768,18 @@
   CBZ.gungameStandings = standings;
 
   // Fills the SHARED survival result cards (state.js shows #survwin/#survlose
-  // for this mode too — reuse, not a new screen). state.js's fillSurvResult
-  // restores every label we touch the next time survival ends a round.
+  // for this mode too); state.js's fillSurvResult restores what we relabel.
   function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
   function setLabelAfter(id, v) { const e = document.getElementById(id); if (e && e.nextElementSibling) e.nextElementSibling.textContent = v; }
   CBZ.gungameFillResult = function (win) {
     const rows = standings();
     const L = ladder().length;
-    const time = CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--";
+    const time = CBZ.fmtTime ? CBZ.fmtTime(gg.match ? gg.match.t : g.elapsed) : "--";
     if (win) {
       const box = document.getElementById("survwin");
       if (box) {
         const logo = box.querySelector(".logo"); if (logo) logo.textContent = "LADDER COMPLETE";
-        const sub = box.querySelector(".sub"); if (sub) sub.textContent = "The fists finished it, every rung climbed";
+        const sub = box.querySelector(".sub"); if (sub) sub.textContent = "Every rung climbed, finished with bare fists";
       }
       setText("swPlace", "#1"); setText("swTotal", "of " + rows.length);
       setText("swTime", time); setLabelAfter("swTime", "Match time");
@@ -508,217 +791,492 @@
       if (box) {
         const logo = box.querySelector(".logo"); if (logo) logo.textContent = "OUTGUNNED";
         const sub = box.querySelector(".sub");
-        if (sub) sub.textContent = (gg.winner || "Somebody") + " finished the ladder, you reached rung " +
-          (gg.playerRung + 1) + "/" + L + " (" + rungLabel(rungAt(gg.playerRung)) + ")";
+        if (sub) sub.textContent = (gg.winner || "Somebody") + " finished the ladder. You reached rung " +
+          (gg.playerRung + 1) + " of " + L + ", " + rungLabel(rungAt(gg.playerRung));
       }
       setText("slPlace", "#" + place); setText("slTotal", "of " + rows.length);
       setText("slTime", time); setLabelAfter("slTime", "Match time");
       setText("slDis", gg.playerKills); setLabelAfter("slDis", "Kills");
     }
+    if (CBZ.gungameResultCard) { try { CBZ.gungameResultCard(win); } catch (e) { console.error("[gungame result]", e); } }
   };
 
-  // ---- damage funnel --------------------------------------------------------
-  // Bot-fired damage lands here (the player's own guns damage bots through
-  // fpsmode's existing gunHit → CBZ.aiKill path — never a parallel one).
-  // Mirrors CBZ.surv.hurt's shape: player branch honors invuln and runs this
-  // mode's respawn death; bot branch converges on botDeath.
+  // ---- damage funnel ---------------------------------------------------------------
+  // Bot-fired damage lands here; the player's own guns reach bots through
+  // fpsmode's gunHit -> CBZ.aiKill (wrapped below).
   function hurt(actor, dmg, imp) {
     if (!actor || dmg <= 0 || g.mode !== "gungame" || !gg.match || gg.match.over) return;
+    imp = imp || {};
     if (actor === PLAYER_TGT || actor === CBZ.player || actor.isPlayer) {
-      if (CBZ.player.dead || g.invuln > 0) return;
+      if (CBZ.player.dead || g.invuln > 0 || gg.spawnProtectT > 0) return;
       CBZ.player.hp -= dmg;
-      if (CBZ.shake) CBZ.shake(0.12);
-      if (CBZ.player.hp <= 0) playerDeath(imp && imp.by, imp && imp.cause);
+      if (CBZ.shake) CBZ.shake(Math.min(0.5, 0.08 + dmg * 0.006));
+      const by = imp.by;
+      emit("hurt", { dmg: dmg, fromX: by ? by.pos.x : (imp.fromX || CBZ.player.pos.x), fromZ: by ? by.pos.z : (imp.fromZ || CBZ.player.pos.z), by: by ? by.name : "" });
+      if (CBZ.player.hp <= 0) playerDeath(by, imp.cause);
     } else {
       if (actor.dead) return;
       actor.hp -= dmg;
-      if (actor.hp <= 0) botDeath(actor, imp && imp.by, imp && imp.cause);
+      actor._hpSeen = actor.hp;
+      if (imp.by) { actor.hurtBy = imp.by; actor.hurtT = 0; }
+      if (actor.hp <= 0) botDeath(actor, imp.by, imp.cause, imp.head);
     }
   }
   gg.hurt = hurt;
 
-  // ---- CBZ.aiKill wrap ------------------------------------------------------
-  // fpsmode's gunHit and combat.js's melee execute both finish a non-city kill
-  // with CBZ.aiKill(victim, {group: playerChar.group}, …). For a match bot
-  // that call must become a GUNGAME death (feed + rung + respawn), never the
-  // prison's (case heat, gang standing, prison drops, frisk). Everything that
-  // is NOT a match bot passes through byte-identically.
+  // ---- CBZ.aiKill wrap ---------------------------------------------------------------
+  // fpsmode's gunHit and combat.js's melee finish a non-city kill through
+  // CBZ.aiKill. For a match bot that becomes a GUNGAME death; everything else
+  // passes through untouched.
   const prevAiKill = CBZ.aiKill;
   CBZ.aiKill = function (victim, killer, opts) {
     if (victim && victim._ggBot) {
-      if (g.mode === "gungame") botDeath(victim, killer, opts && opts.cause);
-      else if (!victim.dead) { victim.dead = true; victim.hp = 0; victim.ko = 0; }   // stale record outside the mode: just drop it
+      if (g.mode === "gungame") {
+        // a single round from the gun in hand could not have taken what the
+        // bot had left unless it found the head
+        const w = CBZ.weaponById && CBZ.weaponById(rungAt(gg.playerRung).id);
+        const head = !!(w && victim._hpSeen > (w.damage || 30) * 1.05);
+        botDeath(victim, killer, opts && opts.melee ? "melee" : (opts && opts.cause), head);
+      } else if (!victim.dead) { victim.dead = true; victim.hp = 0; victim.ko = 0; }
       return;
     }
     return prevAiKill ? prevAiKill(victim, killer, opts) : undefined;
   };
 
-  // ---- bot driver -----------------------------------------------------------
-  // The SIMPLEST brain composed from existing pieces: pick nearest living
-  // target, hold the weapon's standoff, strafe, fire through the shared seams
-  // (actorAimAt → actorMuzzle → clearLineOfFire → tracer → gunVoice), damage
-  // through hurt(). Locomotion is survivorbot.js's move grammar (collide +
-  // floorAt + animChar). No prison brain, no city brain.
-  const PLAYER_TGT = {
-    isPlayer: true,
-    get pos() { return CBZ.player.pos; },
-    get dead() { return CBZ.player.dead; },
-    get group() { return CBZ.playerChar && CBZ.playerChar.group; },
-  };
-  const _mz = new THREE.Vector3();
-  let frame = 0;
-
-  function botWeapon(b) { const r = rungAt(b.rung); return r.melee ? null : (CBZ.weaponById && CBZ.weaponById(r.id)); }
-
-  function pickTarget(b) {
-    let best = null, bd = Infinity;
-    if (!CBZ.player.dead) {
-      const d = Math.hypot(b.pos.x - CBZ.player.pos.x, b.pos.z - CBZ.player.pos.z);
-      if (d < bd) { bd = d; best = PLAYER_TGT; }
+  // ---- PLAYER MELEE --------------------------------------------------------------------
+  // F (or the fists rung's left click) swings at the bot in front of you. Two
+  // clean hits drop a man; a melee kill humiliates him down a rung. The fists
+  // rung punches through this path too, so the final rung is a weapon, not a
+  // prison scuffle (combat.js's jail punch took six swings to put a bot down).
+  let meleeCD = 0, meleeCombo = 0, meleePending = null;
+  // starts the swing (body + viewmodel); the blow LANDS ~0.14 s later, on the
+  // animation's drive frame, against whoever is in front of you THEN
+  function playerMelee(fromClick) {
+    if (g.mode !== "gungame" || g.state !== "playing" || !gg.match || gg.match.over) return false;
+    if (CBZ.player.dead || meleeCD > 0) return false;
+    const fists = rungAt(gg.playerRung).melee;
+    meleeCD = fists ? 0.42 : 0.6;
+    gg.spawnProtectT = 0;
+    meleeCombo++;
+    const ch = CBZ.playerChar;
+    if (ch) {
+      ch.punchArm = fists ? (meleeCombo % 2 ? "r" : "l") : "l";
+      ch.punchKind = fists ? (meleeCombo % 3 === 0 ? "hook" : meleeCombo % 2 ? "jab" : "cross") : "hook";
+      ch.punchDur = fists ? 0.34 : 0.4;
+      ch.punchT = ch.punchDur;
     }
-    for (const o of gg.bots) {
-      if (o === b || o.dead) continue;
-      const d = Math.hypot(b.pos.x - o.pos.x, b.pos.z - o.pos.z);
-      if (d < bd) { bd = d; best = o; }
+    // the fists viewmodel swings itself when fpsmode's click path gets ok:true;
+    // F / touch have to ask for it
+    if (fists && !fromClick && CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+    meleePending = { t: 0.14, fists: fists };
+    return true;
+  }
+  function landMelee(fists) {
+    const P = CBZ.player.pos, yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    let best = null, bd = 2.5;
+    for (const b of gg.bots) {
+      if (b.dead) continue;
+      const dx = b.pos.x - P.x, dz = b.pos.z - P.z, d = Math.hypot(dx, dz);
+      if (d > bd || d < 0.01) continue;
+      if ((dx * fx + dz * fz) / d < 0.5) continue;
+      if (Math.abs((b.pos.y || 0) - (P.y || 0)) > 1.4) continue;
+      best = b; bd = d;
+    }
+    if (!best) { if (CBZ.sfx) CBZ.sfx("step"); return; }
+    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(fists ? "hook" : "bash", true);
+    if (CBZ.sfx) CBZ.sfx("punch");
+    if (CBZ.body) CBZ.body.hit(best, { fromX: P.x, fromZ: P.z, force: 5.5 });
+    if (CBZ.doHitstop) CBZ.doHitstop(0.06);
+    if (CBZ.shake) CBZ.shake(0.12);
+    best.hurtBy = PLAYER_TGT; best.hurtT = 0;
+    // two clean hits drop a man; a melee kill humiliates him down a rung
+    best.hp -= fists ? 52 : 58; best._hpSeen = best.hp;
+    if (best.hp <= 0) botDeath(best, "player", "melee");
+  }
+  function meleeTick(dt) {
+    meleeCD = Math.max(0, meleeCD - dt);
+    if (!meleePending) return;
+    meleePending.t -= dt;
+    if (meleePending.t > 0) return;
+    const f = meleePending.fists;
+    meleePending = null;
+    if (!CBZ.player.dead) landMelee(f);
+  }
+  // combat.js's jail punch took six swings to put a bot down and knew nothing
+  // of the ladder: in a match every punch (fists rung click, third-person
+  // unarmed, the grapple verb) is this mode's melee
+  const prevPunch = CBZ.punch;
+  if (prevPunch) {
+    CBZ.punch = function () {
+      if (g.mode === "gungame" && gg.match) return { ok: playerMelee(true), msg: "" };
+      return prevPunch.apply(this, arguments);
+    };
+  }
+  if (CBZ.grapple && CBZ.grapple.punch) {
+    const prevGP = CBZ.grapple.punch;
+    CBZ.grapple.punch = function () {
+      if (g.mode === "gungame" && gg.match) { playerMelee(false); return; }
+      return prevGP.apply(this, arguments);
+    };
+  }
+  window.addEventListener("keydown", function (e) {
+    if (e.code !== "KeyF" || e.repeat || g.mode !== "gungame" || g.state !== "playing") return;
+    const t = e.target; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+    playerMelee(false);
+  });
+  gg.melee = playerMelee;
+  // TOUCH: a gun-game loadout is one gun, so the SWAP button has nothing to
+  // swap. In this mode it becomes the melee button (fist icon); a document
+  // capture listener gets there before touch.js's own handler.
+  let swapSaved = null;
+  const FIST_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M6.2 9.4V7.3c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v-.6c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v.2c0-1 .8-1.7 1.8-1.7s1.7.8 1.7 1.7v.9c.2-.8.9-1.3 1.7-1.3 1 0 1.7.8 1.7 1.7v5.2c0 3.6-2.9 6.6-6.6 6.6h-1.2c-2.8 0-5.2-1.8-6.1-4.4l-.9-2.5c-.3-.9.1-1.9 1-2.3.8-.3 1.6-.1 2.1.5z"/></svg>';
+  function swapButtonIsMelee(on) {
+    const b = document.getElementById("tswap");
+    if (!b) return;
+    if (on && !swapSaved) { swapSaved = { html: b.innerHTML, label: b.getAttribute("aria-label") }; b.innerHTML = FIST_SVG; b.setAttribute("aria-label", "Melee"); }
+    else if (!on && swapSaved) { b.innerHTML = swapSaved.html; if (swapSaved.label != null) b.setAttribute("aria-label", swapSaved.label); swapSaved = null; }
+  }
+  function swapCapture(e) {
+    if (g.mode !== "gungame" || !gg.match) return;
+    const t = e.target, b = document.getElementById("tswap");
+    if (!b || !t || !(t === b || b.contains(t))) return;
+    e.stopPropagation(); e.preventDefault();
+    b.classList.add("on"); setTimeout(() => b.classList.remove("on"), 110);
+    playerMelee(false);
+  }
+  document.addEventListener("touchstart", swapCapture, { capture: true, passive: false });
+  document.addEventListener("mousedown", swapCapture, true);
+
+  // ---- REGENERATION -------------------------------------------------------------
+  // Five seconds out of the fight and you heal, the shooter's standard. It is
+  // what makes breaking line of sight a real move, for you and for the bots.
+  let playerQuietT = 0;
+  gg.on("hurt", function () { playerQuietT = 0; });
+  function regen(dt) {
+    playerQuietT += dt;
+    if (!CBZ.player.dead && playerQuietT > 5 && CBZ.player.hp < 100) CBZ.player.hp = Math.min(100, CBZ.player.hp + 14 * dt);
+    for (const b of gg.bots) {
+      if (!b.dead && b.hurtT > 5 && b.hp < 100) { b.hp = Math.min(100, b.hp + 14 * dt); b._hpSeen = b.hp; }
+    }
+  }
+
+  // ---- NOISE: gunfire is heard ------------------------------------------------------
+  function noise(src, x, z, radius) {
+    for (const b of gg.bots) {
+      if (b.dead || b === src) continue;
+      const d = Math.hypot(b.pos.x - x, b.pos.z - z);
+      if (d > radius) continue;
+      if (b.foe && b.foeSeen) continue;              // busy with a fight it can see
+      if (!b.heard || d < b.heard.d) b.heard = { x: x, z: z, t: 0, d: d, who: src };
+    }
+  }
+  let lastRounds = -1;
+  function playerShotWatch() {
+    const f = CBZ.fps; if (!f || !f.rounds) return;
+    const n = f.rounds[f.weapon] | 0;
+    if (lastRounds >= 0 && n < lastRounds && !CBZ.player.dead) {
+      gg.spawnProtectT = 0;                          // firing ends your spawn shield
+      noise(PLAYER_TGT, CBZ.player.pos.x, CBZ.player.pos.z, 48);
+    }
+    lastRounds = n;
+  }
+
+  // ---- BOT BRAIN ----------------------------------------------------------------------
+  function enemiesOf(b, out) {
+    out.length = 0;
+    if (!CBZ.player.dead) out.push(PLAYER_TGT);
+    for (const o of gg.bots) if (o !== b && !o.dead) out.push(o);
+    return out;
+  }
+  const _cands = [];
+  function leaderRung() {
+    let r = gg.playerRung;
+    for (const o of gg.bots) if (o.rung > r) r = o.rung;
+    return r;
+  }
+  // who is this bot fighting? Visible enemies only, scored by distance, by who
+  // is shooting at it, by rung (the leader is hunted) and by stickiness.
+  function perceive(b) {
+    const fx = Math.sin(b.group.rotation.y), fz = Math.cos(b.group.rotation.y);
+    const top = leaderRung();
+    let best = null, bestS = Infinity;
+    enemiesOf(b, _cands);
+    for (let i = 0; i < _cands.length; i++) {
+      const e = _cands[i];
+      if (!e.isPlayer && e.spawnT > 0) continue;
+      if (e.isPlayer && gg.spawnProtectT > 0) continue;
+      const dx = e.pos.x - b.pos.x, dz = e.pos.z - b.pos.z, d = Math.hypot(dx, dz);
+      if (d > 70) continue;
+      const cos = d > 0.01 ? (dx * fx + dz * fz) / d : 1;
+      const aware = d < 5 || cos > -0.2 || e === b.hurtBy || e === b.foe;   // ~200 degree cone, plus touch
+      if (!aware) continue;
+      if (!sees(b, e)) continue;
+      let s = d;
+      if (e === b.foe) s -= 10;
+      if (e.isPlayer) s -= 5;                          // the human is the one everybody noticed
+      if (e === b.hurtBy && b.hurtT < 4) s -= 18;
+      const er = e.isPlayer ? gg.playerRung : e.rung;
+      if (er >= top && top > 0) s -= 12 + er * 1.5;    // everybody hunts the leader
+      if (e.isPlayer && top - gg.playerRung >= 3) s += 12;   // a trailing player gets breathing room
+      if (s < bestS) { bestS = s; best = e; }
+    }
+    if (best) {
+      if (best !== b.foe || !b.foeSeen) {
+        // reaction time: shorter if we were already looking for them
+        const primed = (best === b.foe && b.lostT < 1.5) || (best === b.hurtBy && b.hurtT < 1.5);
+        b.react = primed ? 0.12 + rand() * 0.1 : (0.55 - b.skill * 0.35) + rand() * 0.25;
+        if (best !== b.foe) b.track = 0;
+      }
+      b.foe = best; b.foeSeen = true; b.lostT = 0;
+      b.mem = { x: best.pos.x, z: best.pos.z, t: 0 };
+    } else if (b.foe) {
+      b.foeSeen = false;
+    }
+  }
+
+  // where should this bot be going right now? Sets b.goal (world x/z) + b.mode
+  function decide(b) {
+    const r = rungAt(b.rung), P = playOf(r);
+    const foe = b.foe && !b.foe.dead ? b.foe : null;
+    if (foe && b.foeSeen) {
+      const dx = foe.pos.x - b.pos.x, dz = foe.pos.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
+      const ux = dx / d, uz = dz / d;
+      // hurt and holding a gun: break line of sight
+      if (b.hp < 38 && !r.melee && b.mode !== "retreat" && rand() < 0.7) {
+        const hide = findCover(b, foe);
+        if (hide) { b.mode = "retreat"; b.goal = hide; b.path = null; return; }
+      }
+      if (b.mode === "retreat" && b.goal && Math.hypot(b.goal.x - b.pos.x, b.goal.z - b.pos.z) > 1.2 && b.hp < 60) return;
+      b.mode = "engage";
+      const lo = P.band[0], hi = P.band[1];
+      if (d > hi) { b.goal = { x: foe.pos.x - ux * (hi * 0.8), z: foe.pos.z - uz * (hi * 0.8) }; b.moveKind = "close"; }
+      else if (d < lo && !r.melee) { b.goal = { x: b.pos.x - ux * (lo - d + 2), z: b.pos.z - uz * (lo - d + 2) }; b.moveKind = "back"; }
+      else if (P.still && b.track > 0.4) { b.goal = null; b.moveKind = "hold"; }
+      else if (r.melee) { b.goal = { x: foe.pos.x, z: foe.pos.z }; b.moveKind = "close"; }
+      else {
+        // strafe across the line, swapping sides on a human rhythm
+        b.goal = { x: b.pos.x - uz * b.strafe * 3.5, z: b.pos.z + ux * b.strafe * 3.5 };
+        b.moveKind = "strafe";
+      }
+      if (b.goal && gg.nav && !navLine(gg.nav, b.pos.x, b.pos.z, b.goal.x, b.goal.z)) {
+        if (b.moveKind === "strafe") { b.strafe = -b.strafe; b.goal = { x: b.pos.x - uz * b.strafe * 3.5, z: b.pos.z + ux * b.strafe * 3.5 }; }
+      }
+      return;
+    }
+    // no one in sight: go where the fight was, then where the noise is, then
+    // hunt the nearest enemy (bots know roughly where people are, like a
+    // radar ping every few seconds, otherwise a big map goes quiet)
+    b.mode = "hunt"; b.moveKind = "run";
+    if (b.mem && b.mem.t < 6) { b.goal = { x: b.mem.x, z: b.mem.z }; return; }
+    if (b.heard && b.heard.t < 8) { b.goal = { x: b.heard.x, z: b.heard.z }; return; }
+    if (!b.huntGoal || b.huntT <= 0) {
+      let best = null, bd = Infinity;
+      enemiesOf(b, _cands);
+      for (const e of _cands) {
+        let d = Math.hypot(e.pos.x - b.pos.x, e.pos.z - b.pos.z);
+        const er = e.isPlayer ? gg.playerRung : e.rung;
+        d -= er * 4;                                   // drawn to the leaders
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (best) {
+        const jit = 10;
+        b.huntGoal = { x: best.pos.x + (rand() - 0.5) * jit, z: best.pos.z + (rand() - 0.5) * jit };
+      } else if (gg.nav && gg.nav.open.length) {
+        const k = gg.nav.open[(rand() * gg.nav.open.length) | 0];
+        b.huntGoal = { x: cellX(gg.nav, k), z: cellZ(gg.nav, k) };
+      }
+      b.huntT = 5 + rand() * 4;
+    }
+    b.goal = b.huntGoal;
+  }
+
+  // a nearby walkable spot the foe cannot see from where it stands
+  function findCover(b, foe) {
+    const N = gg.nav; if (!N) return null;
+    let best = null, bd = Infinity;
+    for (let n = 0; n < 14; n++) {
+      const a = (n / 14) * Math.PI * 2 + rand() * 0.3, rr = 4 + rand() * 7;
+      const x = b.pos.x + Math.cos(a) * rr, z = b.pos.z + Math.sin(a) * rr;
+      const k = cellOf(N, x, z);
+      if (k < 0 || !N.walk[k]) continue;
+      _probe.pos.x = x; _probe.pos.z = z; _probe.pos.y = N.floor[k];
+      if (!segBlocked(N.cols, foe.pos.x, eyeY(foe), foe.pos.z, x, _probe.pos.y + 1.2, z)) continue;
+      const d = Math.hypot(x - b.pos.x, z - b.pos.z) - Math.hypot(x - foe.pos.x, z - foe.pos.z) * 0.3;
+      if (d < bd) { bd = d; best = { x, z }; }
     }
     return best;
   }
 
-  function think(b) {
-    b.foe = pickTarget(b);
-    const w = botWeapon(b);
-    if (!b.foe) { b.pause = 0.5; return; }
-    const t = b.foe.pos;
-    const dx = t.x - b.pos.x, dz = t.z - b.pos.z;
-    const dist = Math.hypot(dx, dz) || 1;
-    // standoff: melee closes to arm's reach; a gun holds inside its sweet
-    // spot (dropStart-derived), backs off when hurt, strafes on station.
-    const stand = !w ? 1.5 : Math.max(7, Math.min(24, (w.dropStart || 30) * 0.55));
-    const hurtback = b.hp < 30 && w ? 6 : 0;
-    if (rand() < 0.12) b.strafe = -b.strafe;
-    if (dist > stand + 2) {
-      // close in (slight lead angle so approaches curve, not beeline)
-      const k = (dist - stand) / dist;
-      b.target.set(b.pos.x + dx * k + (rand() - 0.5) * 3, 0, b.pos.z + dz * k + (rand() - 0.5) * 3);
-    } else if (dist < stand - 3 || hurtback) {
-      // give ground, still facing the fight
-      const k = (stand + hurtback - dist) / dist;
-      b.target.set(b.pos.x - dx * k, 0, b.pos.z - dz * k);
-    } else {
-      // on station: strafe the circle
-      const px = -dz / dist, pz = dx / dist;
-      b.target.set(b.pos.x + px * b.strafe * 4, 0, b.pos.z + pz * b.strafe * 4);
+  // steer toward b.goal: straight when the grid says the line is open,
+  // otherwise along an A* path (re-planned when the goal moves or we stall)
+  let pathBudget = 0;
+  const _steer = { x: 0, z: 0 };
+  function steer(b, dt) {
+    const N = gg.nav, goal = b.goal;
+    if (!goal) return null;
+    const gdx = goal.x - b.pos.x, gdz = goal.z - b.pos.z, gd = Math.hypot(gdx, gdz);
+    if (gd < 0.6) { b.path = null; return null; }
+    if (!N || navLine(N, b.pos.x, b.pos.z, goal.x, goal.z)) {
+      b.path = null; _steer.x = goal.x; _steer.z = goal.z; return _steer;
     }
-    // ISLAND: never chase into the sea — clamp the waypoint inside the shore
-    // ring (a bot on the seabed is a bot the match forgot).
-    if (curMap().id === "island" && CBZ.surv && CBZ.surv.arena) {
-      const A = CBZ.surv.arena;
-      const ox = b.target.x - A.center.x, oz = b.target.z - A.center.z;
-      const od = Math.hypot(ox, oz), lim = A.radius * 0.9;
-      if (od > lim) { b.target.x = A.center.x + (ox / od) * lim; b.target.z = A.center.z + (oz / od) * lim; }
+    b.repathT -= dt;
+    const moved = b.pathGoal ? Math.hypot(b.pathGoal.x - goal.x, b.pathGoal.z - goal.z) : 1e9;
+    if ((!b.path || moved > 4 || b.repathT <= 0) && pathBudget > 0) {
+      pathBudget--;
+      b.path = findPath(N, b.pos.x, b.pos.z, goal.x, goal.z);
+      b.pathI = 0; b.pathGoal = { x: goal.x, z: goal.z };
+      b.repathT = 1.6 + rand() * 0.8;
+      if (!b.path) { b.huntT = 0; b.mem = null; b.heard = null; }
     }
+    if (!b.path) return null;
+    // advance through reached waypoints; skip ahead when a later one is directly walkable
+    while (b.pathI < b.path.length - 1) {
+      const wp = b.path[b.pathI];
+      if (Math.hypot(wp.x - b.pos.x, wp.z - b.pos.z) < 0.9) { b.pathI++; continue; }
+      const nx = b.path[b.pathI + 1];
+      if (navLine(N, b.pos.x, b.pos.z, nx.x, nx.z)) { b.pathI++; continue; }
+      break;
+    }
+    const wp = b.path[Math.min(b.pathI, b.path.length - 1)];
+    _steer.x = wp.x; _steer.z = wp.z;
+    return _steer;
   }
 
+  // ---- bot weapons ------------------------------------------------------------------
+  function botWeapon(b) { const r = rungAt(b.rung); return r.melee ? null : (CBZ.weaponById && CBZ.weaponById(r.id)); }
+  let playerSpeed = 0, _ppx = 0, _ppz = 0;
+  const _mz = new THREE.Vector3();
   function botFire(b, dt) {
     const foe = b.foe;
-    if (!foe || foe.dead) return;
-    b.fireCD -= dt;
-    if (b.fireCD > 0) return;
-    const w = botWeapon(b);
+    b.meleeCD = Math.max(0, b.meleeCD - dt);
+    if (!foe || foe.dead || !b.foeSeen) { b.track = Math.max(0, b.track - dt * 2); return; }
+    if (foe.isPlayer && gg.spawnProtectT > 0) return;
+    b.track += dt;
+    if (b.react > 0) { b.react -= dt; return; }
     const dx = foe.pos.x - b.pos.x, dz = foe.pos.z - b.pos.z;
     const dh = Math.hypot(dx, dz);
-
-    if (!w) {
-      // FISTS (final rung): a real swing at arm's reach through the shared
-      // body layer — the humiliation kill everyone can see coming.
-      if (dh > 2.2 || Math.abs((foe.pos.y || 0) - (b.pos.y || 0)) > 2.0) { b.fireCD = 0.15; return; }
-      b.fireCD = 0.8 + rand() * 0.5;
-      b.group.rotation.y = Math.atan2(dx, dz);   // square up (no gun-ready pose on the fists rung)
+    const r = rungAt(b.rung);
+    // MELEE: fists always; a gun-holder bashes when someone is in its face
+    if ((r.melee || (dh < 1.7 && rand() < 0.5)) && dh < 2.0 && Math.abs((foe.pos.y || 0) - (b.pos.y || 0)) < 1.5) {
+      if (b.meleeCD > 0) return;
+      b.meleeCD = r.melee ? 0.62 + rand() * 0.25 : 0.9;
+      b.group.rotation.y = Math.atan2(dx, dz);
+      if (b.char) { b.char.punchT = 0.4; b.char.punchKind = rand() < 0.5 ? "jab" : "hook"; }
       if (CBZ.body && !foe.isPlayer) CBZ.body.hit(foe, { fromX: b.pos.x, fromZ: b.pos.z, force: 5 });
       if (CBZ.sfx) CBZ.sfx("punch");
-      hurt(foe, 16 + rand() * 8, { by: b, cause: "fists" });
+      const hitP = 0.55 + b.skill * 0.35;
+      if (rand() < hitP) hurt(foe, (r.melee ? 34 + rand() * 10 : 45) * (foe.isPlayer ? 1 : 0.7), { by: b, cause: "melee" });
       return;
     }
-
-    const reach = Math.min(w.range || 80, 95);
-    if (dh > reach) { b.fireCD = 0.25; return; }
+    if (r.melee) return;
+    const w = botWeapon(b);
+    if (!w) return;
+    b.fireCD -= dt;
+    if (b.fireCD > 0) return;
+    const P = playOf(r);
+    if (dh > Math.min((w.range || 80) * 1.1, 110)) { b.fireCD = 0.3; return; }
+    if (!canFire(b, foe)) { b.fireCD = 0.2 + rand() * 0.2; return; }
     if (CBZ.actorAimAt) CBZ.actorAimAt(b, foe);
-    const ty = (foe.pos.y || 0) + (foe.isPlayer ? 1.5 : 1.3);
-    // LOS from the CHEST (the peds.js lesson: a muzzle can start inside a
-    // wall; the chest can't) — no clear line, hold fire and re-check.
-    if (CBZ.clearLineOfFire &&
-        !CBZ.clearLineOfFire(b.pos.x, (b.pos.y || 0) + 1.4, b.pos.z, foe.pos.x, ty, foe.pos.z)) {
-      b.fireCD = 0.25 + rand() * 0.3;
-      return;
-    }
-    // cadence: autos rip short bursts then breathe; everything else runs its
-    // own action's interval with a human beat on top.
+    // cadence: autos rip short bursts and breathe; the rest run their action
     if (w.auto) {
       b.burst = (b.burst || 0) + 1;
-      if (b.burst >= 3 + (rand() * 3 | 0)) { b.burst = 0; b.fireCD = 0.7 + rand() * 0.7; }
-      else b.fireCD = Math.max(0.09, (w.interval || 0.1) * 1.35);
+      if (b.burst >= 3 + (rand() * 4 | 0)) { b.burst = 0; b.fireCD = 0.45 + rand() * 0.5; }
+      else b.fireCD = Math.max(0.07, (w.interval || 0.1) * 1.15);
     } else {
-      b.fireCD = (w.interval || 0.5) * 1.2 + 0.15 + rand() * 0.4;
+      b.fireCD = (w.interval || 0.5) * 1.1 + 0.12 + rand() * 0.3 + (1 - b.skill) * 0.25;
     }
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(b, _mz) : { x: b.pos.x, y: (b.pos.y || 0) + 1.4, z: b.pos.z };
-    const to = { x: foe.pos.x, y: ty, z: foe.pos.z };
+    const ty = chestY(foe) + 0.1;
+    const d3 = Math.hypot(dh, ty - from.y);
+    // THE HIT MODEL
+    let p = 0.25 + b.skill * 0.6;                                  // 0.52 .. 0.79 at point blank, settled
+    p *= 1 / (1 + Math.pow(d3 / P.eff, 2));                        // the gun's effective range
+    p *= 0.45 + 0.55 * Math.min(1, b.track / (1.4 - b.skill * 0.6)); // aim settles while tracking
+    if (b.speed > 0.5) p *= P.still ? 0.4 : 0.8;                   // shooting on the move
+    if (foe.isPlayer) {
+      p *= 1 / (1 + playerSpeed * 0.07);                           // a moving target is harder
+      if (CBZ.player.crouch) p *= 0.82;
+      if (gg.match.t < 20) p *= 0.7;                               // the opening is a warm-up
+      if (CBZ.player.hp < 30) p *= 0.8;                            // one more chance
+      if (leaderRung() - gg.playerRung >= 3) p *= 0.85;           // trailing: a little mercy
+    } else {
+      // bots fighting bots is the backdrop, not the race: they trade slower
+      // than they fight you, so the ladder is decided by the one human in it
+      p *= 0.33 / (1 + (foe.speed || 0) * 0.06);
+    }
+    if (w.pellets > 1 || r.id === "shotgun") p = Math.min(0.95, p * 1.25);
+    const hit = rand() < p;
+    let to;
+    if (hit) to = { x: foe.pos.x + (rand() - 0.5) * 0.3, y: ty, z: foe.pos.z + (rand() - 0.5) * 0.3 };
+    else {
+      // a miss cracks PAST the target, not through it
+      const side = (rand() < 0.5 ? -1 : 1) * (0.5 + rand() * 1.2);
+      const nx = -dz / (dh || 1), nz = dx / (dh || 1);
+      to = { x: foe.pos.x + nx * side + dx / (dh || 1) * 3, y: ty + (rand() - 0.3) * 0.8, z: foe.pos.z + nz * side + dz / (dh || 1) * 3 };
+    }
     if (CBZ.tracer) CBZ.tracer(from, to, { shooter: b, targetActor: foe.isPlayer ? CBZ.player : foe });
     else if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
     if (CBZ.gunVoice) CBZ.gunVoice(b.weapon, Math.hypot(from.x - CBZ.player.pos.x, from.z - CBZ.player.pos.z));
     else if (CBZ.sfx) CBZ.sfx("report");
-    const d3 = Math.hypot(dh, ty - from.y);
-    // honest-with-range hit roll; a touch kinder to the player so duels are
-    // winnable against five bots at once (they also shoot each other).
-    let chance = Math.max(0.12, 0.82 - d3 * 0.022);
-    if (foe.isPlayer) chance *= 0.8;
-    if (rand() < chance) {
+    noise(b, b.pos.x, b.pos.z, 42);
+    if (hit) {
       const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, d3) : 1;
-      const dmg = Math.max(8, (w.damage || 20) * 0.5) * fall;
-      hurt(foe, dmg, { by: b, cause: (rungAt(b.rung).name || "gunfire").toLowerCase() });
+      const head = rand() < 0.06 + b.skill * 0.08;
+      const base = (w.damage || 20) * (foe.isPlayer ? 0.55 : 0.45);
+      let dmg = Math.max(7, base * fall * (head ? 1.9 : 1));
+      if (!foe.isPlayer) dmg = Math.min(dmg, 55);                  // no one-shot trades between bots
+      hurt(foe, dmg, { by: b, cause: (r.name || "gunfire").toLowerCase(), head: head });
     }
   }
 
-  // ---- VAULT (systems/physics.js characterTraversal) ------------------------
-  // Another borrowed capability, not a new one. The probe was refused outside
-  // city mode until systems/modecaps.js turned the mode enum into a capability;
-  // the maps this mode borrows are FULL of the waist-high geometry it wants —
-  // the prison's mess benches and stools (world/cafeteria.js registers them
-  // with the exact y0/y1 + ref band the probe reads) and the disaster island's
-  // abandoned cars. A bot running a duel line now gets over them the same way
-  // the player does, off the same code, with no bot-side animation authored.
-  // `b.speed` here IS the live per-frame speed (b.baseSpeed holds the base), so
-  // the default speedField:true is correct — the traversal drives the animator.
-  function ggTraverse(b, dt) {
+  // ---- VAULT (systems/physics.js characterTraversal) ---------------------------------
+  function ggTraverse(b, dt, tx, tz, spd) {
     const T = CBZ.characterTraversal;
     if (!T || !b.char || !(CBZ.modeHas && CBZ.modeHas("traverse"))) return false;
     if (b._traversal) {
       if (b.dead || b.ko > 0) { T.cancel(b, b.char, false, "interrupted"); return false; }
       const owned = T.step(b, b.char, dt, true);
-      if (!b._traversal) b._ggTravT = 0.36;      // a beat before the next probe
+      if (!b._traversal) b._ggTravT = 0.36;
       return owned;
     }
     b._ggTravT = (b._ggTravT || 0) - dt;
-    if (b._ggTravT > 0 || !b.target) return false;
-    const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z;
-    const dist = Math.hypot(tx, tz);
-    if (dist < 0.9) return false;
-    const spd = b.baseSpeed * (b.foe ? 1.35 : 1.0);
-    b._ggTravT = 0.12;
-    const started = T.start(b, b.char, tx, tz, {
-      speed: spd, radius: BOT_RADIUS,
+    if (b._ggTravT > 0) return false;
+    const vx = tx - b.pos.x, vz = tz - b.pos.z;
+    if (Math.hypot(vx, vz) < 0.9) return false;
+    b._ggTravT = 0.15;
+    const started = T.start(b, b.char, vx, vz, {
+      speed: spd, radius: 0.5,
       height: (b.char.metric && b.char.metric.height) || 1.7,
-      allowTop: false, cars: false, npc: true, running: true,
-      sprinting: !!b.foe,
+      allowTop: false, cars: false, npc: true, running: true, sprinting: spd > 4,
     });
     return !!(started && T.step(b, b.char, dt, true));
   }
 
+  // ---- THE FRAME -----------------------------------------------------------------------
+  let lastLeader = null;
   CBZ.onUpdate(23.2, function (dt) {
     if (g.mode !== "gungame" || g.state !== "playing" || !gg.match) return;
-    frame++;
     if (!gg.match.over) gg.match.t += dt;
+    pathBudget = 3;
+    meleeTick(dt);
+    if (gg.spawnProtectT > 0) gg.spawnProtectT = Math.max(0, gg.spawnProtectT - dt);
+    if (!gg.match.over) regen(dt);
 
-    // player respawn clock (paused screens pause it — onUpdate only runs mid-play)
+    // the player: speed (for the bots' aim), shots (noise), the zone fence
+    const P = CBZ.player.pos;
+    if (dt > 0) playerSpeed = playerSpeed * 0.8 + (Math.hypot(P.x - _ppx, P.z - _ppz) / dt) * 0.2;
+    _ppx = P.x; _ppz = P.z;
+    playerShotWatch();
+    if (!CBZ.player.dead && !CBZ.player._death) clampZone(P, 0.5);
+
+    // death cam: third person, turned on whoever did it
+    if (CBZ.player.dead && gg.killer && gg.killer.bot && CBZ.cam) {
+      const k = gg.killer.bot;
+      const want = Math.atan2(-(k.pos.x - P.x), -(k.pos.z - P.z));
+      CBZ.cam.yaw = CBZ.lerpAngle ? CBZ.lerpAngle(CBZ.cam.yaw, want, 1 - Math.pow(0.02, dt)) : want;
+      CBZ.cam.pitch = CBZ.cam.pitch + (0.18 - CBZ.cam.pitch) * Math.min(1, dt * 3);
+    }
     if (CBZ.player.dead && gg.respawnT > 0 && !gg.match.over) {
       gg.respawnT -= dt;
       if (gg.respawnT <= 0) respawnPlayer();
@@ -728,41 +1286,63 @@
     for (let i = 0; i < gg.bots.length; i++) {
       const b = gg.bots[i];
       if (b.dead) {
-        if (!gg.match.over) {
-          b.respawnT -= dt;
-          if (b.respawnT <= 0) respawnBot(b);
-        }
+        if (!gg.match.over) { b.respawnT -= dt; if (b.respawnT <= 0) respawnBot(b); }
         continue;
       }
-      // a KO in this mode IS a finish (combat.js's melee can KO instead of
-      // kill; an arena has no infirmary — the crowd counts it).
-      if (b.ko > 0) { botDeath(b, "player", "beaten cold"); continue; }
+      // a KO in this mode is a finish (combat.js's melee can KO instead of kill)
+      if (b.ko > 0) { botDeath(b, "player", "melee"); continue; }
+      // shot by the player through fpsmode (hp moved without passing hurt())
+      if (b.hp < b._hpSeen - 0.5) { b.hurtBy = PLAYER_TGT; b.hurtT = 0; b.react = Math.min(b.react, 0.15); }
+      b._hpSeen = b.hp;
+      b.hurtT += dt; b.lostT += dt; b.spawnT = Math.max(0, b.spawnT - dt);
+      if (b.mem) b.mem.t += dt;
+      if (b.heard) b.heard.t += dt;
+      b.huntT = (b.huntT || 0) - dt;
+      b.strafeT -= dt;
+      if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = 0.6 + rand() * 1.3; }
       if (gg.match.over) { b.speed = 0; continue; }
-      if (CBZ.body && CBZ.body.busy(b)) continue;      // flung / knocked down → body owns it
-      if (ggTraverse(b, dt)) continue;                 // a vault owns the whole frame
+      if (CBZ.body && CBZ.body.busy(b)) continue;
+
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
       const near = dx * dx + dz * dz < ANIM_DIST2;
-      if ((frame + b.slice) % (near ? 3 : 7) === 0) think(b);
-      // locomotion (survivorbot grammar)
-      const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z;
-      const dist = Math.hypot(tx, tz);
-      const spd = b.baseSpeed * (b.foe ? 1.35 : 1.0);
-      if (dist > 0.5) {
-        b.pos.x += (tx / dist) * spd * dt;
-        b.pos.z += (tz / dist) * spd * dt;
-        if (!b.foe && CBZ.lerpAngle) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(tx, tz), 1 - Math.pow(0.0008, dt));
-        b.speed = spd;
-      } else b.speed = 0;
-      if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
+      b.thinkT -= dt;
+      if (b.thinkT <= 0) {
+        b.thinkT = near ? 0.12 + rand() * 0.06 : 0.3 + rand() * 0.1;
+        perceive(b);
+        decide(b);
+      }
+
+      // locomotion
+      const r = rungAt(b.rung);
+      const st = steer(b, dt);
+      let spd = 0;
+      if (st) {
+        const mk = b.moveKind;
+        spd = mk === "strafe" ? 2.3 : mk === "back" ? 2.6 : b.mode === "retreat" ? 4.6
+          : (r.melee && b.foeSeen) ? 5.4 : b.foeSeen ? 3.6 : 4.2;
+        if (ggTraverse(b, dt, st.x, st.z, spd)) continue;
+        const tx = st.x - b.pos.x, tz = st.z - b.pos.z, dist = Math.hypot(tx, tz);
+        if (dist > 0.05) {
+          const step = Math.min(dist, spd * dt);
+          b.pos.x += tx / dist * step; b.pos.z += tz / dist * step;
+        }
+        if (!(b.foe && b.foeSeen) && CBZ.lerpAngle) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(tx, tz), 1 - Math.pow(0.002, dt));
+      }
+      b.speed = spd;
+      if (CBZ.collide) CBZ.collide(b.pos, 0.5, b.pos.y, b.pos.y + 1.7);
+      clampZone(b.pos, 0.6);
       b.pos.y = mapFloor(b.pos.x, b.pos.z);
+      // stall detection: wanted to move, didn't -> replan / sidestep
+      if (spd > 0) {
+        const moved = Math.hypot(b.pos.x - b.lastX, b.pos.z - b.lastZ);
+        if (moved < spd * dt * 0.25) b.stuckT += dt; else b.stuckT = Math.max(0, b.stuckT - dt * 2);
+        if (b.stuckT > 0.8) { b.stuckT = 0; b.path = null; b.repathT = 0; b.strafe = -b.strafe; b.huntT = 0; }
+      }
+      b.lastX = b.pos.x; b.lastZ = b.pos.z;
       if (near && CBZ.animChar) CBZ.animChar(b.char, b.speed, dt);
-      // hold the gun-ready pose EVERY animated frame while engaged — the
-      // actorweapons order-36 pose pass is city-only, and animChar just wrote
-      // walk-swing over the arms; actorAimAt (after it) turns to the foe and
-      // re-applies the ready pose, so the carried gun never droops mid-duel.
-      // A FISTS-rung bot only turns (no ready pose — its hands are the gun).
-      if (near && b.foe && !b.foe.dead) {
-        if (b.armed && CBZ.actorAimAt) CBZ.actorAimAt(b, b.foe, dt);
+      // hold the gun on the foe every animated frame (animChar just wrote walk-swing over the arms)
+      if (b.foe && b.foeSeen && !b.foe.dead) {
+        if (b.armed && CBZ.actorAimAt) { if (near) CBZ.actorAimAt(b, b.foe, dt); else b.group.rotation.y = Math.atan2(b.foe.pos.x - b.pos.x, b.foe.pos.z - b.pos.z); }
         else if (CBZ.lerpAngle) {
           const fx = b.foe.pos.x - b.pos.x, fz = b.foe.pos.z - b.pos.z;
           if (fx * fx + fz * fz > 0.01) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(fx, fz), 1 - Math.pow(0.0005, dt));
@@ -770,9 +1350,17 @@
       }
       botFire(b, dt);
     }
+
+    // the race: announce leader changes
+    let lead = { name: "You", rung: gg.playerRung, kills: gg.playerKills, you: true };
+    for (const b of gg.bots) if (b.rung > lead.rung || (b.rung === lead.rung && b.kills > lead.kills)) lead = { name: b.name, rung: b.rung, kills: b.kills, you: false };
+    if (lead.name !== lastLeader && lead.rung > 0) {
+      lastLeader = lead.name; gg.leader = lead.name;
+      emit("leader", { name: lead.name, rung: lead.rung, you: lead.you });
+    }
   });
 
-  // separation — the shared contact solver, exactly survivorbot's wiring
+  // separation — the shared contact solver
   const sepList = [];
   const playerEntry = { pos: null, _p: true, isPlayer: true, r: 0.55 };
   CBZ.onUpdate(26.2, function (dt) {
@@ -786,18 +1374,23 @@
     CBZ.humanContact.resolve(sepList, dt, {
       mode: "gungame",
       clamp(a) {
-        if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y, a.pos.y + 1.7);
+        if (CBZ.collide) CBZ.collide(a.pos, a.r || 0.5, a.pos.y, a.pos.y + 1.7);
         if (!a._p) a.pos.y = mapFloor(a.pos.x, a.pos.z);
       },
     });
   });
 
-  // ---- island lighting ------------------------------------------------------
-  // survival's onAlways(93) only serves ITS mode: in any other mode it parks
-  // the sun back on the prison, which would leave a gungame island match lit
-  // from 600 u away with a 70 u shadow box. Run right after it (93.6) and
-  // re-aim with survival's exact island numbers; restore the escape shadow
-  // box ONCE on the way out (survival's own mode latch can't see our writes).
+  // ---- the light ------------------------------------------------------------------------
+  // One time of day per map, held for the whole match (daynight.js advances
+  // the clock at order 2; re-pinning just before it keeps it still).
+  CBZ.onAlways(1.9, function () {
+    if (g.mode !== "gungame" || !gg.match || !CBZ.dayPhase) return;
+    const ph = curMap().phase;
+    if (ph != null) CBZ.dayPhase(ph);
+  });
+  // island: survival's onAlways(93) only lights ITS mode; re-aim the sun and
+  // widen the shadow box over the island for a gungame match, and restore the
+  // escape shadow box once on the way out.
   let islandLit = false;
   CBZ.onAlways(93.6, function () {
     const onIsland = g.mode === "gungame" && curMap().id === "island" && CBZ.surv && CBZ.surv.arena;
@@ -826,22 +1419,16 @@
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(A.center.x, 6, A.center.z);
   });
 
-  // ---- title-card map picker ------------------------------------------------
-  // Buttons are built here (dynamic — the registry is the truth), into the
-  // .mode-gungame-only block index.html ships. The note line is the objective
-  // line of the title card: it always names the chosen map.
+  // ---- title-card map picker -----------------------------------------------------------
   function refreshNote() {
     const note = document.getElementById("gungameMapNote");
     if (!note) return;
-    note.textContent = "Map: " + curMap().label + "  ·  " + ladder().length +
-      " rungs, every kill climbs one  ·  final rung: bare fists";
+    note.textContent = curMap().label + ". " + ladder().length + " rungs, every kill climbs one. A melee kill drops the victim a rung. Win on bare fists.";
   }
   function setMap(id) {
     g.gungameMap = MAPS[id] ? id : "jail";
     const holder = document.getElementById("gungameMapSelect");
-    if (holder) {
-      Array.from(holder.children).forEach((c) => c.classList.toggle("active", c.dataset.map === g.gungameMap));
-    }
+    if (holder) Array.from(holder.children).forEach((c) => c.classList.toggle("active", c.dataset.map === g.gungameMap));
     refreshNote();
   }
   CBZ.setGungameMap = setMap;
@@ -864,51 +1451,43 @@
   }
   buildMapButtons();
 
-  // ---- the mode descriptor --------------------------------------------------
+  // ---- the mode descriptor ----------------------------------------------------------------
   function startMatch() {
     const map = curMap();
-    if (!map.ensure()) { console.error("[gungame] map failed to build:", map.id); }
+    if (!map.ensure()) console.error("[gungame] map failed to build:", map.id);
     installFloor();
-    // borrowed roots: exactly one visible (state.js's setMode lines agree via CBZ.gungameWorlds)
     if (CBZ.prisonRoot) CBZ.prisonRoot.visible = map.id === "jail";
     const A = CBZ.surv && CBZ.surv.arena;
     if (A) {
       A.root.visible = map.id === "island";
-      // a fresh arena every match: the island's OWN restore puts back any
-      // towers/trees/cars a prior survival round wrecked (idempotent; holes
-      // were already emptied by the survival director on mode exit).
       if (map.id === "island" && A.reset) { try { A.reset(); } catch (e) { console.error("[gungame arena reset]", e); } }
     }
-    // spawn pool BEFORE the cast disappears (their spots outlive their bodies)
-    gg.spawnPool = map.id === "jail" ? harvestJailSpawns() : [];
-    if (map.id === "jail") hidePrisonCast();
-    else restorePrisonCast();       // island match: prisonRoot is hidden anyway; leave the cast clean for escape
+    if (map.id === "jail") hidePrisonCast(); else restorePrisonCast();
     if (CBZ.fx) CBZ.fx.clear();
     if (CBZ.clearGore) CBZ.clearGore();
     if (CBZ.killFeedReset) CBZ.killFeedReset();
-    if (CBZ.clearSpectate) CBZ.clearSpectate();          // never inherit survival's death overlay
-    // shared prison combat paths index these; an arena match must not crash them
+    if (CBZ.clearSpectate) CBZ.clearSpectate();
     g.koLog = g.koLog || {};
     g.kos = g.kos || 0;
-    // NO SENTENCE FOLLOWS YOU INTO THE ARENA. Heat, a pending radio call and a
-    // sealed cell door are escape-run state; a match started straight off an
-    // escape run used to inherit them. detection.js's ledger now refuses to
-    // grow outside that scenario, so this is the other half: start at zero.
+    // no sentence follows you into the arena
     g.detection = 0; g.strikeHeatFloor = 0; g.witnessReportT = 0; g.lastKnown = null;
     if (CBZ.releasePlayerCell) { try { CBZ.releasePlayerCell(); } catch (e) {} }
     gg.heatAtStart = g.detection;
+    if (map.phase != null && CBZ.dayPhase) CBZ.dayPhase(map.phase);
 
     despawnBots();
+    gg.nav = buildNav();
+    gg.spawnPool = gg.nav ? gg.nav.open.map((k) => ({ x: cellX(gg.nav, k), z: cellZ(gg.nav, k) })) : [];
     gg.playerRung = 0; gg.playerRungKills = 0; gg.playerKills = 0; gg.playerDeaths = 0;
-    gg.respawnT = 0; gg.winner = null;
+    gg.respawnT = 0; gg.winner = null; gg.killer = null; gg.leader = null; lastLeader = null;
     gg.match = { t: 0, over: false };
     gg.matchesPlayed++;
     spawnBots(Math.max(1, CBZ.CONFIG.GUNGAME_BOTS | 0));
 
-    // the player: far spawn, clean body, rung 0
     const p = spawnPoint("player");
     const gy = mapFloor(p.x, p.z);
     CBZ.player.pos.set(p.x, gy, p.z);
+    _ppx = p.x; _ppz = p.z; playerSpeed = 0; lastRounds = -1;
     CBZ.player.vy = 0; CBZ.player.grounded = true;
     CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
     CBZ.player._death = null;
@@ -919,24 +1498,28 @@
     if (CBZ.playerChar.cuffed) CBZ.playerChar.cuffed = false;
     if (CBZ.player._bandMesh) CBZ.player._bandMesh.visible = false;
     CBZ.playerChar.group.position.copy(CBZ.player.pos);
-    CBZ.playerChar.group.rotation.set(0, rand() * 6.28, 0);
+    const bb = zoneBox(map.zone);
+    const face = bb ? Math.atan2((bb.minX + bb.maxX) / 2 - p.x, (bb.minZ + bb.maxZ) / 2 - p.z) : rand() * 6.28;
+    CBZ.playerChar.group.rotation.set(0, face, 0);
     CBZ.playerChar.group.scale.y = 1;
-    if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = 0.34; }
+    if (CBZ.cam) { CBZ.cam.yaw = face + Math.PI; CBZ.cam.pitch = 0.1; }
     if (CBZ.resetZoom) CBZ.resetZoom();
+    gg.spawnProtectT = 2.0;
     grantPlayerRung();
-    if (CBZ.setObjective) {
-      CBZ.setObjective("GUN GAME on " + map.label + ". Every kill advances the ladder; the final rung is bare fists. First through wins.");
-    }
+    if (CBZ.setObjective) CBZ.setObjective("Gun Game on " + map.label + ". Every kill climbs the ladder. Win on bare fists.");
+    swapButtonIsMelee(true);
+    playerQuietT = 0;
+    emit("matchstart", { map: map.id, label: map.label });
   }
 
-  // clean EXIT (state.js calls this whenever setMode leaves gungame): nothing
-  // may leak into the next mode — no bots in the shared lists, no rung gun in
-  // the inventory, no hidden prison cast, no mid-death ragdoll.
+  // clean EXIT (state.js calls this whenever setMode leaves gungame)
   CBZ.gungameExit = function () {
+    swapButtonIsMelee(false);
     despawnBots();
     restorePrisonCast();
     gg.match = null;
     gg.respawnT = 0;
+    gg.nav = null;
     CBZ.player._death = null;
     if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
@@ -945,71 +1528,66 @@
   CBZ.registerMode("gungame", {
     id: "gungame",
     label: "Gun Game",
-    objective: "Pick a map. Everyone starts on the same pistol; every kill advances the killer one rung down the weapon ladder. The final rung is bare fists, land that kill and the match is yours.",
-    // build() is deliberately light: the jail exists at boot and the island is
-    // only ensured at match start (reset), so clicking the mode button never
-    // pays for a world the chosen map might not need.
+    objective: "Pick a map. Everyone starts on the same pistol and every kill climbs one rung of the weapon ladder. A melee kill knocks the victim down a rung. The last rung is bare fists: land that kill and the match is yours.",
     build() { buildMapButtons(); },
     reset() { startMatch(); },
     winStats() {
       return [
         { label: "Rungs", value: ladder().length + "/" + ladder().length },
         { label: "Kills", value: gg.playerKills },
-        { label: "Match time", value: CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--" },
+        { label: "Match time", value: CBZ.fmtTime ? CBZ.fmtTime(gg.match ? gg.match.t : g.elapsed) : "--" },
       ];
     },
   });
 
-  // ---- THE URL DOOR, ANSWERED LATE ------------------------------------------
-  // config.js turns ?mode=gungame (or CBZ.START_MODE) into g.mode, and
-  // state.js answers it with setMode(g.mode) AT PARSE TIME — which is before
-  // this file has registered the mode, so setMode's registry check normalised
-  // "gungame" to "escape" and the door opened onto the prison every time
-  // (measured 2026-09-14: index.html?mode=gungame booted to mode "escape").
-  // sharksim dodged this by being string-matched in setMode; this mode is
-  // registry-checked on purpose (GUNGAME_V1 off must fall back), so it
-  // re-answers the door itself, once, now that the registry has it.
+  // ---- THE URL DOOR, ANSWERED LATE ----------------------------------------------------------
+  // state.js answers ?mode=gungame at parse time, before this file registered
+  // the mode, and normalised it to escape. Re-answer it once, now.
   try {
     const want = (typeof location !== "undefined" && location.search &&
       new URLSearchParams(location.search).get("mode")) || CBZ.START_MODE;
     if (want === "gungame" && g.mode !== "gungame" && g.state !== "playing" && CBZ.setMode) CBZ.setMode("gungame");
   } catch (e) {}
 
-  // ---- audit (the orchestrator runs this) -----------------------------------
+  // ---- audit -----------------------------------------------------------------------------------
   CBZ.gungameAudit = function () {
     const L = ladder();
-    let alive = 0, listed = 0, leadBot = null;
+    let alive = 0, listed = 0, leadBot = null, seeing = 0, pathing = 0, stuck = 0;
     for (const b of gg.bots) {
       if (!b.dead) alive++;
+      if (b.foeSeen) seeing++;
+      if (b.path) pathing++;
+      if (b.stuckT > 0.4) stuck++;
       if (!leadBot || b.rung > leadBot.rung || (b.rung === leadBot.rung && b.kills > leadBot.kills)) leadBot = b;
     }
     for (const n of CBZ.npcs || []) if (n && n._ggBot) listed++;
-    const leaderRung = Math.max(gg.playerRung, leadBot ? leadBot.rung : 0);
+    const leaderR = Math.max(gg.playerRung, leadBot ? leadBot.rung : 0);
+    const N = gg.nav;
     return {
-      on: CBZ.CONFIG.GUNGAME_V1 !== false,
       maps: Object.keys(MAPS),
       map: g.gungameMap || "jail",
       rungs: L.length,
       killsPerRung: Math.max(1, CBZ.CONFIG.GUNGAME_KILLS_PER_RUNG | 0),
       bots: gg.bots.length,
       aliveBots: alive,
-      npcListed: listed,           // must equal bots mid-match and 0 outside the mode
+      npcListed: listed,
       playerRung: gg.playerRung,
-      leaderRung: leaderRung,
+      playerKills: gg.playerKills, playerDeaths: gg.playerDeaths,
+      leaderRung: leaderR,
       leaderName: leadBot && leadBot.rung > gg.playerRung ? leadBot.name : "You",
+      botKills: gg.bots.reduce((s, b) => s + b.kills, 0),
+      seeing: seeing, pathing: pathing, stuck: stuck,
+      nav: N ? { w: N.w, h: N.h, cells: N.cells, open: N.open.length, cols: N.cols.length } : null,
+      matchT: gg.match ? +gg.match.t.toFixed(1) : 0,
       matchesPlayed: gg.matchesPlayed,
       matchOver: !!(gg.match && gg.match.over),
       spawnPool: gg.spawnPool.length,
       hiddenCast: gg.hiddenCast.length,
-      /* THE RATCHET (pin at 0). Not "is detection.js gated?" — a table that
-         describes itself measures nothing. This resolves the live ledger: any
-         heat that arrived after the match started means the prison's wanted
-         machine reached a deathmatch again, whatever the source. A file
-         dropping out of index.html, a new caller bypassing reportCrime, or the
-         gate being reverted all push it up. */
+      // THE RATCHET (pin at 0): heat that arrived during a match means the
+      // prison's wanted machine reached a deathmatch again, whatever the source.
       prisonLeak: (gg.match && g.mode === "gungame")
         ? Math.max(0, Math.round(((g.detection || 0) - gg.heatAtStart) * 100) / 100)
-        : 0,   // nothing to measure when no match is running (the audit is read from any mode)
+        : 0,
       borrowedWorlds: { jail: !!CBZ.prisonRoot, island: !!(CBZ.surv && CBZ.surv.built) },
     };
   };
