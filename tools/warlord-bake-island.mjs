@@ -303,6 +303,8 @@ const data = {
   ruralPerKm2: { plains: 1.5, forest: 60, hills: 0.5, mountains: 0.1, desert: 0.2, marsh: 2 },
   startDate: null,
   win: { share: 0.7 },
+  // a warband war on 75 m tiles: towns arm a bigger share, columns cross in days
+  knobs: { GARRISON_SHARE: 0.07, GARRISON_GROW: 0.0005, MAX_TILES_DAY: 8, CATCH_KM: 4, FORAGE_KM: 1.2 },
 };
 
 const header = `/* ============================================================

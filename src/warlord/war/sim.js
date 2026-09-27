@@ -67,8 +67,15 @@
     CATCH_KM: 170,            // land farther than this (march cost) from every town is wilderness
     AI_EVERY: 3,
     MARCH_KM: 20,             // km a day on plains
+    MAX_TILES_DAY: 3,
   };
   SIM.K = K;
+  /* A MAP MAY RETUNE THE KNOBS (data.knobs). The Mediterranean is antiquity at
+     11 km a tile; the island is a warband war at 75 m a tile, where a town of
+     four thousand puts a far bigger share under arms and a column crosses the
+     island in days, not seasons. Reset to the defaults on every create. */
+  const K0 = Object.assign({}, K);
+  function applyKnobs(M) { Object.assign(K, K0, (M.data && M.data.knobs) || {}); }
 
   function rng(seed) {
     let a = (seed >>> 0) || 1;
@@ -88,6 +95,7 @@
     opts = opts || {};
     const N = M.w * M.h;
     const nf = M.factions.length;
+    applyKnobs(M);
     const ROGUE = nf + 1;
     const G = {
       M: M, day: 0, seed: (opts.seed | 0) || 1, player: opts.player | 0, ROGUE: ROGUE,
@@ -105,7 +113,7 @@
       sallied: new Int32Array(M.towns.length),          // id of the army that marched out, or 0
       catchOf: null, catchTiles: null,
       over: null, nextId: 1, landTiles: 0,
-      speed: Math.max(0.5, Math.min(3, K.MARCH_KM / Math.max(0.01, M.tileKm || 10))),
+      speed: Math.max(0.5, Math.min(K.MAX_TILES_DAY || 3, K.MARCH_KM / Math.max(0.01, M.tileKm || 10))),
       sallyR: Math.max(2, Math.round(K.SALLY_KM / Math.max(0.01, M.tileKm || 10))),
       _rand: rng(opts.seed || 1),
       _at: new Map(), _battleById: new Map(),
