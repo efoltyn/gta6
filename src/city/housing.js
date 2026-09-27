@@ -330,7 +330,7 @@
     const d = doorForUnit(unit);
     if (!d) return null;
     if (K.pedHas && K.pedHas(ped, d.id)) return d;
-    try { K.givePed(ped, d.id, "Key · " + d.label); } catch (e) { return null; }
+    try { K.givePed(ped, d.id, "Key to " + d.label); } catch (e) { return null; }
     return d;
   }
   CBZ.cityUnitDoorForLease = doorForUnit;

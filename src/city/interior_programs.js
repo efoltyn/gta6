@@ -635,6 +635,7 @@
   }
   function unitMayOpen(d) {
     if (!d) return false;
+    if (d.forced) return true;                    // a kicked-in door shuts but no longer locks
     const lot = unitLot(d);
     if (lot && CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)) return true;
     return !!(CBZ.cityKeys && typeof CBZ.cityKeys.has === "function" && CBZ.cityKeys.has(d.id));
@@ -703,14 +704,54 @@
           // Ownership already opened the door; the key is so the player can SEE
           // that this address is theirs without standing in front of it.
           if (CBZ.cityKeys && CBZ.cityKeys.grant && !CBZ.cityKeys.has(d.id))
-            { try { CBZ.cityKeys.grant(d.id, "Key · " + d.label); } catch (e) {} }
+            { try { CBZ.cityKeys.grant(d.id, "Key to " + d.label); } catch (e) {} }
           unitSetOpen(d, true);
           note("Unlocked " + d.label + ".", 1.8);
+        },
+      }, {
+        // BREAKING IN. The flat you do not have a key to is still a door, and a
+        // door gives: a pick is quiet, a crowbar splinters the frame, a boot
+        // takes a few goes and the whole corridor hears every one. A forced
+        // door stays forced (it shuts, it no longer locks).
+        id: "unit-door-force", slot: "i",
+        canShow: function (d) { return !!d && !d.open && !unitMayOpen(d); },
+        label: function () {
+          const E = CBZ.cityEcon;
+          if (E && E.count && E.count("Lockpick") > 0) return "Pick the lock";
+          if (E && E.count && E.count("Crowbar") > 0) return "Pry the door";
+          return "Kick the door in";
+        },
+        onSelect: function (d) {
+          const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
+          const E = CBZ.cityEcon;
+          const loud = function (sev, r) {
+            if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(d.x, d.z, r); } catch (e) {} }
+            if (CBZ.cityCrime) { try { CBZ.cityCrime(sev, { x: d.x, z: d.z, type: "burglary" }); } catch (e) {} }
+          };
+          if (E && E.count && E.count("Lockpick") > 0) {
+            if (Math.random() < 0.25 && E.take) { E.take("Lockpick", 1); note("The pick snaps in the lock.", 1.8); return; }
+            d.forced = true; unitSetOpen(d, true);
+            note("The lock gives. " + d.label + ".", 1.8);
+            return;
+          }
+          if (E && E.count && E.count("Crowbar") > 0) {
+            d.forced = true; unitSetOpen(d, true);
+            if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
+            loud(60, 0.7);
+            note("The frame splinters. " + d.label + " is open.", 2.0);
+            return;
+          }
+          d.kicks = (d.kicks | 0) + 1;
+          if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
+          if (d.kicks < 3) { loud(d.kicks === 1 ? 30 : 45, 0.9); note(d.kicks === 1 ? "The door shudders in its frame." : "The frame cracks.", 1.4); return; }
+          d.forced = true; unitSetOpen(d, true);
+          loud(70, 1.2);
+          note("The door bangs open against the wall.", 1.8);
         },
       }],
     });
     I.describe("unitdoor", function (d) {
-      return { label: d.label, note: d.open ? "Open" : (unitMayOpen(d) ? "Your key fits" : "Locked — somebody lives here") };
+      return { label: d.label, note: d.open ? "Open" : (unitMayOpen(d) ? "Your key fits" : "Locked. Somebody lives here.") };
     });
     doorVerbWired = true;
     return true;
@@ -1610,41 +1651,43 @@
     // BUILDING, so every storey of a tower plans the identical flat: the flats
     // are identical because they were BUILT identical, which is the monotony
     // doctrine rather than an economy.
-    const plans = { "-1": planFor(-1), "1": twoSided ? planFor(1) : null };
-    // replay ONE unit's plan, shifted along the run, THROUGH THE ONE EXECUTOR
-    // (roombuild.js's CBZ.roomExecute) — never a second copy of the ox/oz
-    // forwarding, the lamp signature and the seat re-file. Every piece is
-    // re-gated on the host's own aisle/stair/chase predicate at its REAL
-    // position: the plan is a layout, not a permit.
-    function replay(plan, dRun) {
-      if (!plan || !CBZ.roomExecute) return 0;
-      const ex = CBZ.roomExecute(plan, { y: y }, {
-        box: h.b.lbox, ox: h.ox, oz: h.oz, tone: (opts && opts.tone) || null,
-        dx: alongX ? dRun : 0, dz: alongX ? 0 : dRun, max: pieceCap,
-        accept: function (px, pz) { return inRect(r, px, pz, 0.25) && h.clear(px, pz, 0.45); },
-      });
-      for (let q = 0; q < ex.beds.length; q++) beds.push(ex.beds[q]);
-      return ex.executed;
-    }
-    // ---- the floor: corridor walls with a door per flat, party walls between,
-    //      a kitchen run inside each, and one strip light down the hall --------
+    // THE FIT-OUT OWNS THE FLAT NOW (city/fitout_plans.js). One pure planner
+    // (CBZ.fitoutUnitPlan) lays out each unit the way a flat is drawn: a
+    // bathroom by the entry, the kitchen run on the other party wall, living
+    // in the middle, the bedroom behind a partition at the window. This eager
+    // pass draws only what must exist while you are across town: the BED (a
+    // resident sleeps in it at night) and the containers' registry rows.
+    // Everything else is built when you walk in and freed when you leave. The
+    // roomPlan replay below is the fallback when that file is gone.
+    const unitPlanner = CFG.INTERIOR_COHERENCE_V1 !== false && typeof CBZ.fitoutUnitPlan === "function";
+    const plans = unitPlanner ? { "-1": null, "1": null }
+      : { "-1": planFor(-1), "1": twoSided ? planFor(1) : null };
+    // the shell's inner faces: a unit runs to the real wall at the facade and
+    // at the ends of the rank, never stopping 0.4 m short of it.
+    const SH = CBZ.interiorShellRect(h.b) || { x0: r.x0 - 0.4, x1: r.x1 + 0.4, z0: r.z0 - 0.4, z1: r.z1 + 0.4 };
+    const shLo = alongX ? SH.x0 : SH.z0, shHi = alongX ? SH.x1 : SH.z1;
+    const shCLo = alongX ? SH.z0 : SH.x0, shCHi = alongX ? SH.z1 : SH.x1;
+    const runFaceLo = Math.max(shLo, runLo - 0.42), runFaceHi = Math.min(shHi, runHi + 0.42);
+    const faceLo = Math.max(shCLo, crossLo - 0.42), faceHi = Math.min(shCHi, crossHi + 0.42);
+    const fitUnits = [];
+    // ---- the floor: corridor walls with a door per flat, party walls between.
     // A flat is only built where its OWN FRONT DOOR is walkable. The ground
     // storey's entrance aisle, the stair strip and the lift chase therefore
-    // punch a clean hole in the rank (the roomKit idiom) instead of a corridor
-    // wall standing across the way in — which is the same discipline every
-    // other program in this kit uses, applied to a whole dwelling.
+    // punch a clean hole in the rank instead of a corridor wall standing across
+    // the way in.
     const kept = { "-1": [], "1": [] };
     let live = 0;
     for (let u = 0; u < units; u++) {
       const a = runLo + u * UW, b2 = a + UW;
       const mid = (a + b2) / 2;
+      const ra = u === 0 ? runFaceLo : a, rb = u === units - 1 ? runFaceHi : b2;
       for (let s = 0; s < sides.length; s++) {
         const side = sides[s], key = side < 0 ? "-1" : "1";
         const crossAt = side < 0 ? cLo : cHi;
         const dp = P(mid, crossAt);
         if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8)) { kept[key][u] = false; continue; }
         kept[key][u] = true; live++;
-        wallRun(crossAt, a, b2, mid, 1.0);                    // the corridor wall...
+        wallRun(crossAt, unitPlanner ? ra : a, unitPlanner ? rb : b2, mid, 1.0);   // the corridor wall...
         // ...and the flat's own LOCKED front door filling the gap in it. This
         // is the one interior wall the owner asked for by name: "locked
         // apartment you have key to that allows interior walls in an apartment
@@ -1653,15 +1696,44 @@
         const label = "Unit " + (floorK + 1) + String.fromCharCode(65 + (n % 26));
         unitDoor(h, y, alongX ? "x" : "z", crossAt, mid, 1.0, wallH,
           addr + ":" + n, label);
-        if (u > 0 && kept[key][u - 1]) {                      // party wall between flats
-          if (side < 0) wallCross(a, crossLo, cLo);
-          else wallCross(a, cHi, crossHi);
+        // PARTY WALL at this flat's low end. Drawn whether or not the flat
+        // before it was built: a flat beside the entrance aisle used to stand
+        // OPEN to it, so its locked door was a door in a wall you could walk
+        // round. (The high end of the last flat before a gap is closed below.)
+        if (u > 0) {
+          if (side < 0) wallCross(a, unitPlanner ? faceLo : crossLo, cLo);
+          else wallCross(a, cHi, unitPlanner ? faceHi : crossHi);
         }
-        // KITCHEN RUN against the corridor wall, beside the door — cabinets and
-        // a worktop, two boxes, the one thing roombuild has no verb for. Its
-        // length is what actually FITS between the doorway and the party wall
-        // (door half 0.5 + a 0.12 shin gap on one side, 0.13 off the wall on the
-        // other), so it can neither block the way in nor cross into next door.
+        if (unitPlanner) {
+          // the unit as a room: building-local rect to the wall faces, the door
+          // on its corridor wall, the inward normal from that door.
+          const cIn = side < 0 ? -1 : 1;                    // cross direction into the flat
+          const c0 = side < 0 ? faceLo : cHi + PWT / 2, c1 = side < 0 ? cLo - PWT / 2 : faceHi;
+          const r0 = (u === 0 ? runFaceLo : a + PWT / 2), r1 = (u === units - 1 ? runFaceHi : b2 - PWT / 2);
+          const lo = P(r0, c0), hi = P(r1, c1);
+          const U = {
+            id: addr + ":" + n, label: label, n: n, floor: floorK, y: y,
+            x0: Math.min(lo.x, hi.x), x1: Math.max(lo.x, hi.x), z0: Math.min(lo.z, hi.z), z1: Math.max(lo.z, hi.z),
+            door: P(mid, crossAt + cIn * PWT / 2),
+            inX: alongX ? 0 : cIn, inZ: alongX ? cIn : 0,
+            alongX: alongX, partyLo: u > 0, partyHi: u < units - 1,
+          };
+          const plan = CBZ.fitoutUnitPlan(U, seed ^ (n * 131));
+          U.plan = plan;
+          if (plan && plan.bed && CBZ.furnish && CBZ.furnish.bed) {
+            let rb2 = null;
+            try {
+              rb2 = CBZ.furnish.bed(plan.bed.x, y, plan.bed.z, plan.bed.yaw,
+                { box: h.b.lbox, ox: h.ox, oz: h.oz, len: plan.bed.len, wide: plan.bed.wide, tone: plan.bed.tone || null });
+            } catch (e) { rb2 = null; }
+            if (rb2 && rb2.beds) for (let q = 0; q < rb2.beds.length; q++) beds.push(rb2.beds[q]);
+            if (rb2 && rb2.beds && rb2.beds[0]) U.bedRec = rb2.beds[0];   // the fit-out puts the tenant in it at night
+          }
+          if (plan && plan.kitchen) lootReg(h.ox + plan.kitchen.x, y, h.oz + plan.kitchen.z, "kitchen");
+          fitUnits.push(U);
+          continue;
+        }
+        // KITCHEN RUN against the corridor wall, beside the door (fallback path).
         const kLen = Math.min(UW / 2 - 0.75, 1.6);
         const kOff = 0.62 + kLen / 2;
         const kIn = side < 0 ? -0.42 : 0.42;
@@ -1669,12 +1741,19 @@
         if (kLen >= 0.7 && inRect(r, kp.x, kp.z, 0.3) && h.clear(kp.x, kp.z, 0.5)) {
           h.b.lbox(kp.x, y + 0.45, kp.z, alongX ? kLen : 0.62, 0.9, alongX ? 0.62 : kLen, P_KIT.body, { cast: false });
           h.b.lbox(kp.x, y + 0.93, kp.z, alongX ? kLen + 0.06 : 0.68, 0.06, alongX ? 0.68 : kLen + 0.06, P_KIT.top, { cast: false });
-          // INTERIOR_LOOT_V1: somebody's kitchen drawer. The lowest rung of the
-          // ladder on purpose — a corridor of flats is a burglary run of small
-          // takes, not a vault, and the flats are where a player actually is.
           lootReg(h.ox + kp.x, y, h.oz + kp.z, "kitchen");
         }
         replay(plans[key], (u * UW));
+      }
+    }
+    // close the high end of every flat that has no built neighbour past it
+    for (let s = 0; s < sides.length; s++) {
+      const side = sides[s], key = side < 0 ? "-1" : "1";
+      for (let u = 0; u < units - 1; u++) {
+        if (!kept[key][u] || kept[key][u + 1]) continue;
+        const b2 = runLo + (u + 1) * UW;
+        if (side < 0) wallCross(b2, unitPlanner ? faceLo : crossLo, cLo);
+        else wallCross(b2, cHi, unitPlanner ? faceHi : crossHi);
       }
     }
     if (!live) return { anchors: anchors, beds: beds, units: 0 };
@@ -1685,7 +1764,8 @@
       alongX ? 0.3 : Math.min(runLen - 1.0, 14), P.light,
       { emissive: P.light, ei: 0.26, cast: false }));
     RES_TALLY.floors++; RES_TALLY.units += live; RES_TALLY.beds += beds.length;
-    return { anchors: anchors, beds: beds, units: live };
+    return { anchors: anchors, beds: beds, units: live,
+             fit: { units: fitUnits, corridor: { alongX: alongX, runLo: runFaceLo, runHi: runFaceHi, cLo: cLo, cHi: cHi } } };
   }
   const P_KIT = { body: 0x55606e, top: 0xc9ccd2 };   // existing kitchen buckets
   const RES_TALLY = { floors: 0, units: 0, beds: 0 };
@@ -1855,6 +1935,15 @@
     weapons:    { rate: 1.00, tier: 2, dud: 0.24, item: 0.44, cash: [20, 120],  gun: 0.10, label: "Force the weapons locker", empty: "Empty racks. Whatever was in here walked out already." },
     cabinet:    { rate: 1.00, tier: 3, dud: 0.16, item: 0.46, cash: [140, 620], label: "Open the drinks cabinet", empty: "Good bottles, all of them empty. He drinks alone." },
     safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack the floor safe",      empty: "Deeds, a passport in another name — and no cash. He moved it." },
+    // THE FIT-OUT'S CONTAINERS (city/fitout*.js). Registered lazily when the
+    // building is fitted out; the coordinate dedupe makes a rebuild a no-op.
+    mattress:   { rate: 0.30, tier: 1, dud: 0.35, item: 0.25, cash: [40, 260],  label: "Lift the mattress",         empty: "Lint, a sock, a dead phone charger." },
+    closet:     { rate: 0.40, tier: 1, dud: 0.40, item: 0.40, cash: [10, 90],   label: "Go through the closet",     empty: "Coats that smell of somebody else." },
+    medicine:   { rate: 0.55, tier: 0, dud: 0.45, item: 0.45, cash: [0, 12],    label: "Open the mirror cabinet",   empty: "Floss and an empty pill bottle." },
+    register:   { rate: 1.00, tier: 2, dud: 0.05, item: 0.05, cash: [60, 340],  label: "Empty the register",        empty: "The drawer's already been cleared." },
+    stockroom:  { rate: 0.60, tier: 1, dud: 0.30, item: 0.55, cash: [5, 40],    label: "Go through the stock",      empty: "Flattened boxes and a price gun." },
+    countroom:  { rate: 1.00, tier: 3, dud: 0.00, item: 0.18, cash: [900, 3400], label: "Take the count",           empty: "Rubber bands. They already moved it." },
+    lab:        { rate: 1.00, tier: 2, dud: 0.10, item: 0.80, cash: [0, 60],    label: "Bag the product",           empty: "Residue and a cracked flask." },
   };
   // WHAT COMES OUT, by container. Every name is checked against the live econ
   // catalog before it is offered, so a catalog edit can only ever shrink these.
@@ -1868,6 +1957,13 @@
     weapons:    ["Ammo Box", "Body Armor", "Knife"],
     cabinet:    ["Rolex", "Diamond Ring", "Cash Stack", "Gold Bar"],
     safe:       ["Gold Bar", "Cash Stack", "Iced Watch", "Briefcase of Cash"],
+    mattress:   ["Cash Stack", "Pistol", "Wallet", "Rolex"],
+    closet:     ["Body Armor", "Knife", "Wallet", "Sunglasses"],
+    medicine:   ["Painkillers", "Medkit", "Bandage"],
+    register:   ["Cash Stack"],
+    stockroom:  ["Soda", "Hotdog", "Crowbar", "Phone"],
+    countroom:  ["Cash Stack", "Briefcase of Cash"],
+    lab:        ["Meth", "Coke", "Weed"],
   };
   const LOOT_GUNS = ["Pistol", "Shotgun", "SMG"];
   // the heat a container costs you WHEN SOMEBODY SEES IT (the safe pays it
@@ -1938,6 +2034,14 @@
     if (kind === "safe") LOOT_TALLY.safes++;
     return rec;
   }
+  // THE ONE REGISTRY, exported: the fit-out (city/fitout*.js) files its
+  // containers here so a flat's mattress and a boss's safe are one ladder.
+  // opts.lot ties a container to a lot (a gang count room provokes its gang).
+  CBZ.interiorLootRegister = function (x, y, z, kind, opts) {
+    const rec = lootReg(x, y, z, kind, opts);
+    if (rec && opts && opts.lot) { rec.lot = opts.lot; rec._lotR = true; }
+    return rec;
+  };
   // the approach-frame form every door-relative program wants: same arguments
   // as anchorAt's placement pair, so a program never converts coordinates.
   function lootAtA(A, inD, lat, kind, opts) {
@@ -2090,6 +2194,25 @@
     const K = LOOT_KIND[rec.kind];
     rec.taken = 1;
     LOOT_TALLY.looted++;
+    // A GANG'S MONEY IS THE GANG'S. The count table in a hideout IS the stash
+    // gangs.js keeps on the lot: taking it empties that stash (so the crew
+    // raid and the turf repaint agree), pays what the stash held, and the
+    // gang finds out the way gangs.js's own stash robbery tells it.
+    if (rec.kind === "countroom" || rec.kind === "lab") {
+      const lot = lootLotOf(rec);
+      const st = lot && lot.building && lot.building.stash;
+      if (st && st.gang && CBZ.cityGangProvoke) { try { CBZ.cityGangProvoke(st.gang, 1); } catch (e) {} }
+      if (st && !st.looted && rec.kind === "countroom") {
+        st.looted = true;
+        const add = (st.cash | 0) + K.cash[0] + ((Math.random() * (K.cash[1] - K.cash[0])) | 0);
+        lootCash(add);
+        if (st.drugs > 0 && CBZ.cityEcon && CBZ.cityEcon.add && lootHasItem("Meth")) CBZ.cityEcon.add("Meth", st.drugs | 0);
+        if (st.weapon && CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add(st.weapon, 1);
+        if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(6);
+        lootNote("$" + add + " off the count table, rubber bands and all.", 2.4);
+        return true;
+      }
+    }
     if (rec.kind === "safe") {
       if (rec.klass === "item") {
         const n = lootPickItem("safe");
@@ -3129,6 +3252,15 @@
       return fn(r, h, (ctx && ctx.opts) || null);
     }, "program:" + name);
     if (out) PROG_TALLY[name] = (PROG_TALLY[name] | 0) + 1;
+    // TELL THE FIT-OUT what this storey is. This dispatcher is the one place
+    // every programmed floor passes through, so it is the one declaration.
+    // `out.fit` carries whatever the lazy pass needs (the flats' unit list).
+    if (out && CBZ.fitoutDeclare) {
+      try {
+        CBZ.fitoutDeclare(h.b, r.y, name, { x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 },
+          Object.assign({ opts: (ctx && ctx.opts) || null }, out.fit || {}));
+      } catch (e) {}
+    }
     return out;
   };
   CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint",
@@ -3734,6 +3866,8 @@
     // the doors described a city that no longer exists (their meshes and
     // colliders died with it) — drop them in lockstep with the geometry.
     unitDoorsReset();
+    // the fit-out's floor log describes shells that just died with the arena
+    if (CBZ.fitoutReset) { try { CBZ.fitoutReset(); } catch (e) {} }
     // the interior job rows go with the arena they described — re-opening the
     // venue on the next declaration CLEARS citystaff's own list for us, so a
     // rebuilt city can never inherit a job from a demolished building.

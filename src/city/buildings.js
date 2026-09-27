@@ -6461,6 +6461,8 @@
     // tinted hardwood FLOOR slab over the solid plate (-x stair strip stays open).
     b.lbox((k.xLo + k.xHi) / 2, Y + 0.02, 0, Math.max(1, k.xHi - k.xLo), 0.04, k.zHi - k.zLo, 0x33373f, { cast: false });
     // VACANT building: the shell above (light + finished floor) IS the design.
+    if (CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, Y, "flat", CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, Math.round(Y / (b.FH || FH))) : null,
+      { vacant: !!vacant, idx: idx, door: b.localDoor });
     if (vacant) return;
 
     // ---- PROGRAMMED FLAT (only when the plate is big enough to zone) ----------
@@ -6499,6 +6501,10 @@
       setKitchen(k, dinR);
       if (!planSet(b, Y, bedR, "bedroom", { x: midX, z: (bedR.z0 + bedR.z1) / 2 }, ftone)) setBedroom(k, bedR, linen);
       if (bathR.z1 - bathR.z0 >= 2.2) setBath(k, bathR);
+      if (CBZ.fitoutSiteOf) {
+        const fs = CBZ.fitoutSiteOf(b), fk = fs && fs.floors[Math.round(Y / (b.FH || FH))];
+        if (fk && fk.info) fk.info.zones = { liv: livR, din: dinR, bed: bedR, bath: bathR, midX: midX, midZ: midZ };
+      }
       return;
     }
 
@@ -7864,6 +7870,9 @@
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot, 0x4caf6e);
+        // a crew's building, every floor of it: the fit-out (city/fitout_gang.js)
+        // stands the count room, the lounge, the cook kitchen and the mattresses.
+        if (CBZ.fitoutDeclareBuilding) CBZ.fitoutDeclareBuilding(b, "hideout", { door: b.localDoor });
         abandonedLots.push(lot);
         placed.push(lot);
         continue;
@@ -7954,6 +7963,11 @@
           realtor: !!shop.realtor, chop: !!shop.chop,
         };
         furnishShop(b, lot, door);
+        // THE FIT-OUT (city/fitout.js) learns what this ground floor is: the
+        // trade, the counter it stands behind, the door you came in by.
+        if (CBZ.fitoutDeclare) CBZ.fitoutDeclare(b, 0, "shop", CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, 0) : null,
+          { kind: shop.kind, name: shop.name, counter: { x: ccx, z: ccz, w: cw, d: cd }, door: b.localDoor,
+            flags: { gas: !!shop.gas, hospital: !!shop.hospital, carlot: !!shop.carlot, chop: !!shop.chop, realtor: !!shop.realtor, retail: !!shop.retail } });
         // the district field stacks HOMES over the storefront — stairs (and
         // anyone ducking upstairs mid-robbery) walk through them, so every
         // upper floor is a dressed flat, not a bare slab. EXCEPT dealerships:
