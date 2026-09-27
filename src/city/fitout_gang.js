@@ -755,10 +755,21 @@
       const c = (w.a0 + w.a1) / 2, W2 = w.a1 - w.a0, yb = w.y - w.hh, yt = Math.min(B.ceil - 0.04, w.y + w.hh);
       const board = function (a0, a1, y0, y1) {
         if (a1 - a0 < 0.05 || y1 - y0 < 0.05) return;
-        // weathered boards, vertical, nailed to two horizontal 2x4 battens
-        bx((a0 + a1) / 2, (y0 + y1) / 2, 0.035, a1 - a0, y1 - y0, 0.02, 0xa39683, { mat: "wood", uv: 1.4 });
-        const bh = y1 - y0;
-        for (let q = 0; q < 2; q++) bx((a0 + a1) / 2, y0 + bh * (q ? 0.78 : 0.22), 0.068, a1 - a0 + 0.08, 0.09, 0.045, 0x6f604c, { mat: "wood", uv: 1.2 });
+        // PLYWOOD, the way a window is actually boarded: 1.22 m sheets screwed
+        // over the opening, a dark 4 mm gap at every joint, weathered tone
+        // varying sheet to sheet, a line of screw heads round each edge. (It
+        // was the oak FLOOR texture stood on end: 20 cm "planks" across the
+        // whole wall, reading as panelling.)
+        const L = a1 - a0, n = Math.max(1, Math.ceil(L / 1.22)), sw = L / n, H = y1 - y0;
+        bx((a0 + a1) / 2, (y0 + y1) / 2, 0.022, L, H, 0.006, 0x2a2622);                    // shadow behind the joints
+        for (let q = 0; q < n; q++) {
+          const s0 = a0 + q * sw, sc = s0 + sw / 2;
+          const tone = mulHex(0xb89c74, 0.84 + 0.18 * B.h(sc, y0, 0x91 + q));
+          bx(sc, (y0 + y1) / 2, 0.036, sw - 0.004, H - 0.004, 0.018, tone, { mat: "plaster", uv: 0.9 });
+          const nS = Math.max(2, Math.round(H / 0.35));
+          for (let r = 0; r <= nS; r++) for (const e of [-1, 1]) bx(sc + e * (sw / 2 - 0.03), y0 + 0.03 + r * (H - 0.06) / nS, 0.046, 0.012, 0.012, 0.004, 0x3a3632);
+          for (const yy of [y0 + 0.03, y1 - 0.03]) for (let r = 1; r < 3; r++) bx(s0 + r * sw / 3, yy, 0.046, 0.012, 0.012, 0.004, 0x3a3632);
+        }
       };
       if (kind === "curtain") {
         const ytop = Math.min(B.ceil - 0.05, yt + 0.14), ybot = Math.max(B.fy + 0.02, yb - 0.12);
@@ -777,6 +788,14 @@
         }
       } else if (kind === "board") {
         board(w.a0 - 0.06, w.a1 + 0.06, yb - 0.06, yt + 0.06);
+      } else if (kind === "brick") {
+        // BRICKED UP: the opening filled with the wall's own brick, a touch
+        // cleaner than the old wall around it, a concrete lintel and sill
+        // marking where the window was. A count room has no windows.
+        const t = B.brickTint || 0xc9bdb2;
+        bx(c, (yb + yt) / 2, 0.012, W2 + 0.02, yt - yb + 0.02, 0.012, mulHex(t, 1.05), { mat: "brick" });
+        bx(c, yt + 0.05, 0.02, W2 + 0.2, 0.1, 0.02, 0xa8a49c, { mat: "concrete" });
+        bx(c, yb - 0.03, 0.03, W2 + 0.2, 0.06, 0.04, 0xa8a49c, { mat: "concrete" });
       } else if (kind === "foil") {
         bx(c, (yb + yt) / 2, 0.02, W2 + 0.06, yt - yb + 0.06, 0.004, 0xc9ced2);
         bx(c, yt + 0.02, 0.024, W2 + 0.1, 0.045, 0.004, 0xb49a62);                     // tape
@@ -953,22 +972,34 @@
     // THE BILL COUNTER (~28 x 26 x 22 cm): notes go in the sloped hopper at
     // the back, drop counted into the stacker pocket at the front, the count
     // shows on the LCD facing him.
-    const mA = -0.48, mk = 0x34383d, mkD = 0x1d1f22;
-    p(mA, 0, 0.06, 0.28, 0.12, 0.24, mk);                          // body
-    p(mA, 0.12, 0.08, 0.28, 0.04, 0.2, mk);                        // top shell, front
-    p(mA, 0.12, -0.06, 0.24, 0.02, 0.08, mkD);                     // hopper floor, low step
-    p(mA, 0.14, -0.08, 0.24, 0.02, 0.05, mkD);                     //   ...high step: the slope
-    for (let s = -1; s <= 1; s += 2) p(mA + s * 0.125, 0.12, -0.045, 0.012, 0.1, 0.11, 0x2a2d31);   // hopper guides
-    p(mA, 0.12, -0.1, 0.25, 0.12, 0.012, 0x2a2d31);                // hopper back plate
-    p(mA, 0.0, 0.215, 0.2, 0.025, 0.07, mkD);                      // stacker pocket floor
-    for (let s = -1; s <= 1; s += 2) p(mA + s * 0.096, 0.025, 0.215, 0.01, 0.06, 0.07, 0x2a2d31);   // pocket cheeks
-    p(mA - 0.05, 0.09, 0.181, 0.075, 0.03, 0.003, 0x9fe8a0, { glow: true });   // LCD
-    for (let q = 0; q < 3; q++) p(mA + 0.04 + q * 0.028, 0.095, 0.181, 0.02, 0.016, 0.004, q ? 0x8a8e92 : 0xb8453a);   // keys
+    // Two-tone like the real machines: a light grey body, a dark top deck.
+    // The hopper is an open V of bright guide wings rising at the BACK with a
+    // fan of notes leaning in it; the stacker pocket is a dark mouth at the
+    // FRONT with the counted stack in it; the display and keys sit on the top
+    // deck, angled to the man counting. (It read as a grey box with a slot.)
+    const mA = -0.48, mk = 0xc4c7c9, mkD = 0x1d1f22, TOPC = 0x2e3236, WING = 0xb9bec4;
+    p(mA, 0, 0.06, 0.28, 0.13, 0.26, mk);                          // body
+    p(mA, 0, 0.06, 0.29, 0.012, 0.27, 0x2a2d31);                   // rubber feet line
+    p(mA, 0.13, 0.1, 0.28, 0.025, 0.18, TOPC);                     // top deck
+    p(mA - 0.05, 0.155, 0.13, 0.12, 0.006, 0.07, 0x1a1c1e);        // display bezel
+    p(mA - 0.05, 0.161, 0.13, 0.1, 0.002, 0.05, 0x9fe8a0, { glow: true });   // display
+    for (let q = 0; q < 4; q++) p(mA + 0.04 + q * 0.024, 0.157, 0.14, 0.018, 0.008, 0.018, q ? 0x8a8e92 : 0xb8453a);   // keys
+    p(mA, 0.13, -0.04, 0.24, 0.012, 0.1, mkD);                     // hopper bed
+    for (let s = -1; s <= 1; s += 2) {
+      p(mA + s * 0.118, 0.13, -0.03, 0.01, 0.1, 0.12, WING);        // hopper guide wings
+      p(mA + s * 0.118, 0.23, -0.075, 0.01, 0.05, 0.05, WING);      //   ...their raised backs
+    }
+    p(mA, 0.13, -0.095, 0.25, 0.16, 0.012, 0x2a2d31);              // hopper back plate
+    p(mA, 0.0, 0.2, 0.2, 0.012, 0.08, mkD);                        // stacker pocket floor
+    p(mA, 0.012, 0.2, 0.2, 0.07, 0.004, mkD);                      // pocket mouth (dark)
+    for (let s = -1; s <= 1; s += 2) p(mA + s * 0.1, 0.0, 0.2, 0.012, 0.08, 0.08, 0x3a3e42);   // pocket cheeks
     if (full) {
-      p(mA, 0.145, -0.045, 0.156, 0.022, 0.066, COL.billEdge);    // notes loaded in the hopper
-      p(mA, 0.167, -0.045, 0.153, 0.0016, 0.063, COL.billFace);
-      p(mA, 0.025, 0.215, 0.156, 0.02, 0.066, COL.billEdge);      // counted notes in the pocket
-      p(mA, 0.045, 0.215, 0.153, 0.0016, 0.063, COL.billFace);
+      // a fan of notes leaning back in the hopper: offset slabs, each a note
+      for (let q = 0; q < 6; q++) {
+        p(mA, 0.145 + q * 0.012, -0.04 - q * 0.006, 0.156, 0.004, 0.066, q & 1 ? COL.billEdge : COL.billFace);
+      }
+      p(mA, 0.012, 0.2, 0.156, 0.03, 0.066, COL.billEdge);         // counted notes in the pocket
+      p(mA, 0.042, 0.2, 0.153, 0.0016, 0.063, COL.billFace);
       // strapped bricks along the far side, the day's count
       brick(p, -0.12, 0, -0.27, 2, 3, 3 + Math.floor(h(1, 1) * 3), STRAPS[0]);
       brick(p, 0.2, 0, -0.27, 2, 3, 3 + Math.floor(h(2, 1) * 2), STRAPS[1]);
@@ -1229,7 +1260,7 @@
       const wz = w.axis === "x" ? w.side * (B.b.d / 2) : (w.a0 + w.a1) / 2;
       const inBand = w.axis === "x" ? (cs > 0 ? wz >= g.zp - 0.05 : wz <= g.zp + 0.05)
                                     : (cs > 0 ? w.a1 > g.zp : w.a0 < g.zp);
-      return inBand ? "board" : "curtain";
+      return inBand ? "brick" : "curtain";
     }, g.wall ? { axis: "z", at: g.zp } : null);
     // THE PARTITION: solid, plaster over studs, one doorway at the far end
     // with its steel door standing open against the jamb

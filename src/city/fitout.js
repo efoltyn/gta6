@@ -133,20 +133,20 @@
      REAL SIZES. TEX_SCALE is the metres one texture tile covers, and every
      painter below draws a whole number of its units into that tile, so the
      unit comes out at its real size on any box (UVs are world-scaled):
-       wood      8 boards across 1.12 m  = 14 cm oak strip, 0.4-1.1 m boards
+       wood      16 boards across 2.0 m  = 12.5 cm oak strip, staggered 0.3-2 m boards
        carpet    4 tiles across 2.0 m    = 50 cm carpet tile, quarter-turned
        tile      4 across 1.2 m          = 30 cm ceramic, 5 mm grout
        vinyl     4 across 1.2 m          = 30 cm (12") VCT
        subway    3 x 6 across 0.45 m     = 15 x 7.5 cm subway tile
        brick     3 x 8 across 0.61 m     = 20 x 7.6 cm modular brick + joint
-       concrete  one 3 m tile            = control joints on a 3 m grid
+       concrete  one 4.5 m tile          = control joints on a 4.5 m grid
        ceiling   4 across 2.4 m          = 600 x 600 lay-in grid
      Every painter is SEAMLESS (what crosses an edge is drawn again on the
      other side), so no tile boundary shows as a line across the floor.
      ======================================================================== */
-  const TEX_SCALE = { wood: 1.12, carpet: 2.0, tile: 1.2, vinyl: 1.2, checker: 1.2, concrete: 3.0,
+  const TEX_SCALE = { wood: 2.0, carpet: 2.0, tile: 1.2, vinyl: 1.2, checker: 1.2, concrete: 4.5,
                       plaster: 2.5, subway: 0.45, brick: 0.61, terrazzo: 2.0, ceiling: 2.4 };
-  const TEX_SIZE = { wood: 512, brick: 512, concrete: 512, carpet: 512, terrazzo: 512 };
+  const TEX_SIZE = { wood: 1024, brick: 512, concrete: 512, carpet: 512, terrazzo: 512 };
   const MATS = {};
   function rnd(seed) { let s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
   function canvas(n) { const c = document.createElement("canvas"); c.width = c.height = n; return c; }
@@ -183,13 +183,16 @@
     }
   }
   const PAINT = {
-    wood: function (x, n) {                          // oak strip: 8 boards, each column 1-2 boards long
-      const r = rnd(11), cols = 8, pw = n / cols;
+    wood: function (x, n) {                          // oak strip: 16 boards, each column 1-3 boards long
+      const r = rnd(11), cols = 16, pw = n / cols;
       x.fillStyle = "#7c5a3c"; x.fillRect(0, 0, n, n);
       for (let i = 0; i < cols; i++) {
-        const two = r() < 0.55;
-        const a = n * (0.38 + r() * 0.26);
-        const lens = two ? [a, n - a] : [n];
+        // 1-3 boards of random length per column, started at a random offset:
+        // real staggered end joints, never a line across the floor
+        const nb = 1 + ((r() * 3) | 0), lens = [];
+        let rem = n;
+        for (let k = 0; k < nb - 1; k++) { const L = rem * (0.3 + r() * 0.4) / (nb - 1 - k); lens.push(L); rem -= L; }
+        lens.push(rem);
         let y0 = r() * n;
         for (let k = 0; k < lens.length; k++) {
           const L = lens[k], t = 0.9 + r() * 0.18, warm = (r() - 0.5) * 12;
@@ -197,7 +200,7 @@
           wrapFill(x, n, i * pw, y0, pw, L);
           // grain: long streaks down the board, a few dark, a few pale
           for (let g = 0; g < 11; g++) {
-            const gx = i * pw + 2 + r() * (pw - 4), al = 0.035 + r() * 0.08;
+            const gx = i * pw + 1.5 + r() * (pw - 3), al = 0.035 + r() * 0.08;
             x.fillStyle = r() < 0.62 ? "rgba(66,38,18," + al.toFixed(3) + ")" : "rgba(255,232,196," + (al * 0.6).toFixed(3) + ")";
             wrapFill(x, n, gx, y0, 0.8 + r() * 1.6, L);
           }
@@ -270,16 +273,12 @@
     concrete: function (x, n) {                      // sealed slab: cloud, aggregate, trowel, joints
       x.fillStyle = "#8f8d87"; x.fillRect(0, 0, n, n);
       const r = rnd(61);
-      for (let i = 0; i < 46; i++) {
+      for (let i = 0; i < 60; i++) {
         const dark = r() < 0.6;
-        blot(x, n, r() * n, r() * n, 30 + r() * 130, dark ? "44,40,34" : "236,232,222", 0.03 + r() * 0.06);
+        blot(x, n, r() * n, r() * n, 60 + r() * 180, dark ? "44,40,34" : "236,232,222", 0.015 + r() * 0.03);
       }
-      // power-trowel swirls: faint burnished arcs
-      for (let i = 0; i < 26; i++) {
-        x.strokeStyle = "rgba(255,255,255," + (0.02 + r() * 0.03).toFixed(3) + ")";
-        x.lineWidth = 5 + r() * 10;
-        x.beginPath(); x.arc(r() * n, r() * n, 30 + r() * 110, r() * 6.3, r() * 6.3 + 0.8 + r()); x.stroke();
-      }
+      // (no stroked trowel arcs: at floor distance any drawn arc reads as a
+      // hard RING, tiled — the burnish is the soft blots plus the shader mottle)
       noise(x, n, 0, 0.16, 16000, 1.3, 62);            // fine aggregate
       noise(x, n, 0, 0.28, 900, 1.8, 63);              // pits and stones
       // control joints on the 3 m grid (the tile edge), with their lit lip
@@ -331,10 +330,10 @@
     },
     ceiling: function (x, n) {                       // 600 grid, fissured mineral tile, white T-bar
       x.fillStyle = "#e8e8e4"; x.fillRect(0, 0, n, n);
-      noise(x, n, 0, 0.08, 5000, 1.2, 101);
+      noise(x, n, 0, 0.035, 2500, 2.0, 101);
       const r = rnd(102);
-      x.fillStyle = "rgba(90,90,86,0.22)";
-      for (let i = 0; i < 1400; i++) x.fillRect(r() * n, r() * n, 1 + r() * 2.5, 1);   // fissures
+      x.fillStyle = "rgba(90,90,86,0.08)";
+      for (let i = 0; i < 700; i++) x.fillRect(r() * n, r() * n, 2 + r() * 3, 2);     // fissures, soft
       const q = n / 4;
       for (let i = 0; i <= 4; i++) {
         x.fillStyle = "rgba(120,120,116,0.5)"; x.fillRect(i * q - 2.5, 0, 5, n); x.fillRect(0, i * q - 2.5, n, 5);   // reveal shadow
@@ -348,11 +347,11 @@
   // has the slight unevenness paint and cloth have. World-space, so it needs
   // no UVs and lands on the flat-colour bucket too. One program for all.
   const FIT_NOISE =
-    "float fitH(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n" +
+    "float fitH(vec3 p){ p = mod(p, 512.0); p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }\n" +
     "float fitN(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n" +
     "  return mix(mix(mix(fitH(i), fitH(i + vec3(1.0,0.0,0.0)), f.x), mix(fitH(i + vec3(0.0,1.0,0.0)), fitH(i + vec3(1.0,1.0,0.0)), f.x), f.y),\n" +
     "             mix(mix(fitH(i + vec3(0.0,0.0,1.0)), fitH(i + vec3(1.0,0.0,1.0)), f.x), mix(fitH(i + vec3(0.0,1.0,1.0)), fitH(i + vec3(1.0,1.0,1.0)), f.x), f.y), f.z); }\n" +
-    "float fitMottle(vec3 p){ return 0.955 + 0.06 * fitN(p * 1.3) + 0.03 * fitN(p * 5.1 + 17.0); }\n";
+    "float fitMottle(vec3 p){ p = mod(p, 1024.0); return 0.955 + 0.06 * fitN(p * 0.9) + 0.03 * fitN(p * 3.1 + 17.0); }\n";
   const FIT_LIT = { value: 0.12 };
   function fitShader(sh) {
     sh.uniforms.uFitLit = FIT_LIT;
@@ -377,7 +376,10 @@
       const t = new THREE.CanvasTexture(c);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.encoding = THREE.sRGBEncoding;
-      try { const R = CBZ.renderer; if (R && R.capabilities) t.anisotropy = Math.min(4, R.capabilities.getMaxAnisotropy()); } catch (e) {}
+      t.generateMipmaps = true;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      try { const R = CBZ.renderer; if (R && R.capabilities) t.anisotropy = Math.min(8, R.capabilities.getMaxAnisotropy()); } catch (e) {}
       m = new THREE.MeshLambertMaterial({ map: t, vertexColors: true });
     }
     // THE LIGHTS ARE ON AT NIGHT. The baked pools live in the vertex colour,
