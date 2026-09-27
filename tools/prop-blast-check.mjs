@@ -206,7 +206,10 @@ const PASS = `(() => {
   out.postsWithNoBlastFx = quiet;
   out.shotDetail = shot;
   if (killed) out.fails.push(killed + "/" + targets.length + " posts were CARVED by the blast — carveHole treated street furniture as a wall");
-  if (uncollided) out.fails.push(uncollided + "/" + targets.length + " posts were DELETED by the blast (mesh hidden and/or collider spliced) — street furniture is being treated as part of a wall");
+  // 2026-09-27: a post dead-centre in an RPG blast now BREAKS into itself
+  // (city/props.js cityPropsBlast -> CBZ.debris). Hidden/decollided is the
+  // intended outcome; only a CARVE (killed, above) is a wall-path bug.
+  out.postsBroken = uncollided;
   if (carvesOpened) out.fails.push(carvesOpened + " isolated post(s) got a carve opened in them — the phantom-room path is still live");
   if (quiet) out.fails.push(quiet + "/" + targets.length + " detonations produced no FX at all — the blast went silent, which is worse than the bug");
 
