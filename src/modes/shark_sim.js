@@ -88,13 +88,21 @@
      own hit points (massOf), so a mackerel is a snack and a human is a
      meal. The megalodon is the end of the ladder and the start of the win
      condition, not another rung. ---- */
+  /* PACED FOR A RUN, NOT A MINUTE (2026-09-27). The old rungs (14/34/75) were
+     measured with an autopilot that only steers at the nearest thing in the
+     water: it reached the GREAT WHITE in 90 seconds and would have been a
+     megalodon inside three minutes, after which the game had nothing left to
+     give. At ~35 mass a minute (a mixed diet of swimmers and shoals) these
+     rungs land at about 1 min / 3 min / 7-8 min, which is the arc a shark
+     game needs: learn to eat, get hunted, turn the tables. */
   const LADDER = [
     { id: "bull_shark",        name: "BULL SHARK",       need: 0 },
-    { id: "hammerhead_shark",  name: "GREAT HAMMERHEAD", need: 14 },
-    { id: "great_white_shark", name: "GREAT WHITE",      need: 34 },
-    { id: "megalodon",         name: "MEGALODON",        need: 75 },
+    { id: "hammerhead_shark",  name: "GREAT HAMMERHEAD", need: 40 },
+    { id: "great_white_shark", name: "GREAT WHITE",      need: 110 },
+    { id: "megalodon",         name: "MEGALODON",        need: 260 },
   ];
 
+  CBZ.sharkSimLadder = LADDER;   // tools read the rungs from here, never a private copy
   const sim = {
     on: false,          // a match is live and the player has a shark
     needsTeardown: false, // mount/rider/ring state is out; teardown() owes a restore
@@ -105,6 +113,11 @@
     orcas: 0,           // orcas eaten: the run's only trophy, read back on the death card
     biteT: 0, hudT: 0, podT: 0, stockT: 0, strandT: 0, hintT: 0,
     waterline: 0,       // mean radius where the sea meets this island's sand
+    clock: 0,           // seconds of THIS match (sim time, not wall time)
+    score: 0,           // the run's number: meals x their size x the frenzy
+    combo: 0, comboT: 0,// the frenzy: meals chained inside COMBO_WINDOW
+    best: null,         // the device's record, read once per match
+    starved: false,     // the hunger clock killed this shark, not a predator
   };
   CBZ.sharkSim = sim;
   CBZ.sharkSimShoreRing = null;   // read by entities/survivorbot.js's wander
@@ -552,7 +565,10 @@
     a.pos.x = x; a.pos.z = z;
     a.pos.y = seaYAt(x, z) - (a.swimDepth || 1.2);
     a.home = { x: x, z: z };
-    a.heading = ang + Math.PI / 2; a.faceH = a.heading;
+    /* Nose angled IN toward the beach (the tangent turned ~32 degrees
+       shoreward), so the first frame of the match has the crowd in it: the
+       thing the game is about is in front of you before you touch a key. */
+    a.heading = ang + Math.PI / 2 - 0.55; a.faceH = a.heading;
     if (a._waterMove) { a._waterMove.x = x; a._waterMove.z = z; a._waterMove.heading = a.heading; a._waterMove.blocked = false; }
   }
   function mountShark() {
@@ -627,7 +643,7 @@
     return a;
   }
   function podShow(dt) {
-    if (!SDT() || sim.tier >= 3) { if (podLocked.length) podRestore(); return; }
+    if (!SDT() || sim.tier >= 3 || sim.clock < POD_GRACE) { if (podLocked.length) podRestore(); return; }
     const P = CBZ.player;
     sim.podScanT = (sim.podScanT || 0) - dt;
     sim.podWakeT = (sim.podWakeT || 0) - dt;
@@ -686,15 +702,21 @@
     if (sim.podT > 0) return;
     sim.podT = 8;
     const A = arena(), P = CBZ.player;
+    const calm = sim.clock < POD_GRACE;
     let alive = orcas(function (a) {
       const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
+      if (calm) { if (d < 200) a.hunger = Math.min(a.hunger || 0, 0.3); return; }
       if (d < 160 && sim.tier < 3) a.hunger = Math.max(a.hunger || 0, 0.9);
     });
     /* A FULL POD, ALWAYS. This used to fall to ONE orca at megalodon, because
        one orca was all the old win condition needed to exist. There is no win
        any more: the pod is what the endgame IS — the only prey left worth
        chasing once the ladder is done — so the sea keeps three of them. */
-    const wantPod = 3;
+    /* ..but it GROWS INTO the full pod. One orca while you are a bull shark
+       that has not been in the water three minutes, a pair for a hammerhead,
+       the full three from the great white on — the threat curve rises with
+       you instead of sitting at its maximum from the first second. */
+    const wantPod = sim.tier >= 2 ? 3 : Math.min(3, 1 + sim.tier + (sim.clock > 180 ? 1 : 0));
     if (alive < wantPod && CBZ.cityWildlifeSpawnAt) {
       const ang = Math.random() * 6.283;
       for (let i = alive; i < wantPod; i++) {
@@ -742,7 +764,13 @@
       try { CBZ.wildlifeCreditMeal(eater, target, kind, { player: true }); } catch (e) {}
     }
     const S = sim.shark;
-    if (S && S.maxHp) S.hp = Math.min(S.maxHp, S.hp + S.maxHp * (0.05 + Math.min(0.25, gain * 0.012)));
+    /* A MEAL IS LIFE. The hunger clock (hungerTick) is always taking; this is
+       the only thing that gives back, sized so a mackerel buys ~8 s and a
+       swimmer ~20 s at bull-shark rates. The old +5% made a meal a rounding
+       error on a bar that never moved on its own, so nothing ever made you
+       go and find food. */
+    if (S && S.maxHp) S.hp = Math.min(S.maxHp, S.hp + S.maxHp * Math.min(0.5, 0.06 + gain * 0.035));
+    mealBeat(gain, kind, target);
     if (kind === "animal" && target.species && target.species.id === "orca") orcaBeat(target);
     const next = LADDER[sim.tier + 1];
     if (next && sim.mass >= next.need) evolve();
@@ -974,6 +1002,7 @@
      without this file re-deriving the pod's own bookkeeping — and a shark that
      somehow died to something else does not get told a lie about it. */
   function killerLabel() {
+    if (sim.starved) return "hunger";
     const S = sim.shark;
     const by = S && ((S._mpRoll && S._mpRoll.by) || S._mpHuntedBy);
     const sp = by && !by.isPlayer && by.species;
@@ -988,6 +1017,7 @@
     hideHud();                           // the death and its card own the screen
     const S = sim.shark, P = CBZ.player;
     sim.killer = killerLabel();
+    writeBest();
     // THE HEALTH BAR IS THE SHARK (see step()), and the shark is dead — so it
     // empties. step() floors the mirror at 1 while you are alive so nothing
     // mistakes it for a death; this is the death, and a full green bar under a
@@ -1076,18 +1106,20 @@
     const box = document.getElementById("survlose");
     const logo = box && box.querySelector(".logo");
     const sub = box && box.querySelector(".sub");
-    if (logo) logo.textContent = "EATEN";
+    if (logo) logo.textContent = sim.starved ? "STARVED" : "EATEN";
     if (sub) {
       const n = sim.orcas || 0;
-      sub.textContent = "The " + speciesName().toLowerCase() + " "
-        + (n ? "ate " + n + (n > 1 ? " orcas" : " orca") + " and was killed by " : "was killed by ")
-        + (sim.killer || "the pod");
+      const who = "The " + speciesName().toLowerCase() + " ";
+      const how = sim.starved ? "starved" : "was killed by " + (sim.killer || "the pod");
+      const best = sim.newBest && sim.score > 0 ? "  NEW BEST"
+        : (sim.prevBest ? "  Best " + fmtScore(sim.prevBest.score) : "");
+      sub.textContent = who + (n ? "ate " + n + (n > 1 ? " orcas" : " orca") + " and " : "") + how + "." + best;
       delete sub.dataset.jailText;       // a jail loss must not think its copy is still up
     }
-    // "#14 of 100" would read as a PLACEMENT, which is the exact thing this
-    // card exists to stop saying — it is a rung, so it reads as one.
-    setStat("slPlace", (sim.tier + 1) + "/" + LADDER.length, "Form");
-    setStat("slTime", CBZ.fmtTime ? CBZ.fmtTime(g.elapsed) : "--", "Hunted");
+    // The run's number first, then the two facts that explain it. The form
+    // reads as a rung ("3/4"), never as a placement against the crowd.
+    setStat("slPlace", fmtScore(sim.score), sim.newBest && sim.score > 0 ? "New best" : "Score");
+    setStat("slTime", (sim.tier + 1) + "/" + LADDER.length, "Form");
     setStat("slDis", String(sim.eaten || 0), "Eaten");
     const b = document.getElementById("loseAgainBtn"); if (b) b.textContent = "Try Again";
   };
@@ -1144,6 +1176,146 @@
     const slide = Math.min(2.6, 0.7 + (sim.strandT - BEACH_PATIENCE) * 1.6);
     P.pos.x += (dx / rr) * slide * dt;
     P.pos.z += (dz / rr) * slide * dt;
+  }
+
+  /* ================= THE LOOP: HUNGER, FRENZY, THE RECORD ==================
+     2026-09-27, the "it isn't fun yet" pass. The ladder and the pod were the
+     whole game, and neither one asked anything of you minute to minute: the
+     health bar only moved when an orca found you, so a player could idle in
+     the shallows forever, and a meal was worth the same whether it was the
+     first in a minute or the fifth in five seconds. Three rules fix that, and
+     they are the three every shark game that works is built on:
+
+       1. HUNGER. The body burns itself. HP drains at a rate that rises with
+          the form (a megalodon is a furnace), and a meal is the only thing
+          that refills it. The first HUNGER_GRACE seconds are free, so the
+          opening teaches eating before it punishes not eating. Starving is a
+          real death, with its own card line.
+       2. THE FRENZY. Meals chained inside COMBO_WINDOW multiply the score, up
+          to x8. That is what makes a beach raid (a crowd of 5-mass swimmers,
+          all panicking at once) the best thing you can do, and a bait ball
+          the second best: the game's two set pieces are now its two jackpots.
+       3. THE RECORD. The run ends in a number, and the device remembers the
+          best one. The title shows it; the death card says when you beat it.
+          That is the restart loop: one more go to beat it.
+
+     The only mid-play readout is two numbers in the top-right rail where the
+     island's survivor count used to sit (a count of FOOD, printed as if it
+     were rivals) — score, and the frenzy multiplier while it is live. No
+     sentences over the water; the owner's rule stands. */
+  const HUNGER = [1 / 95, 1 / 88, 1 / 80, 1 / 70];   // fraction of max HP burned per second, per form
+  const HUNGER_GRACE = 20;                            // seconds of free swimming at the start of a match
+  const COMBO_WINDOW = 3.5, COMBO_MAX = 8;
+  const POD_GRACE = 45;                               // the pod ignores you while you learn to eat
+  const BEST_KEY = "CBZ_SHARK_BEST_V1";
+
+  function readBest() {
+    try {
+      const b = JSON.parse(localStorage.getItem(BEST_KEY) || "null");
+      if (b && b.score > 0) return b;
+    } catch (e) {}
+    return null;
+  }
+  CBZ.sharkSimBest = readBest;          // the title reads it (modes/shark_title.js)
+  function writeBest() {
+    const prev = readBest();
+    const run = { score: Math.round(sim.score), tier: sim.tier, eaten: sim.eaten, orcas: sim.orcas || 0, t: Math.round(sim.clock) };
+    sim.newBest = !prev || run.score > prev.score;
+    sim.prevBest = prev;
+    if (sim.newBest && run.score > 0) { try { localStorage.setItem(BEST_KEY, JSON.stringify(run)); } catch (e) {} }
+  }
+
+  function hungerTick(dt) {
+    const S = sim.shark;
+    if (!S || S.dead || !S.maxHp || sim.grow) return;
+    if (sim.clock < HUNGER_GRACE) return;
+    const burn = S.maxHp * (HUNGER[sim.tier] || HUNGER[0]) * dt;
+    if (S.hp - burn > 0.5) { S.hp -= burn; return; }
+    // the last of it goes through the one animal bus, so the carcass, the
+    // tumble and the sink are exactly the ones a pod kill gets
+    sim.starved = true;
+    if (CBZ.cityWildlifeHit) { try { CBZ.cityWildlifeHit(S, {}, { damage: Math.max(2, S.hp + 2), cause: "starved" }); } catch (e) {} }
+    if (!S.dead) { S.hp = 0; S.dead = true; }
+  }
+
+  /* THE BEAT A MEAL MAKES. The bite already has blood and a crunch (the mount's
+     own attack); this is the part that says it COUNTED: the score ticks, the
+     number kicks, the frenzy climbs, and a person or anything bigger than a
+     fish lands with a short jolt. Chained meals get a rising chime. */
+  function mealBeat(gain, kind, target) {
+    const chained = sim.comboT > 0;
+    sim.combo = chained ? Math.min(COMBO_MAX, sim.combo + 1) : 1;
+    sim.comboT = COMBO_WINDOW;
+    const pts = Math.round(gain * 10 * sim.combo * (1 + sim.tier * 0.25));
+    sim.score += pts;
+    scorePop(pts);
+    const big = kind !== "animal" || gain >= 3;
+    if (big && CBZ.shake) CBZ.shake(Math.min(0.22, 0.08 + gain * 0.02));
+    if (CBZ.sfx && sim.combo >= 2) {
+      try { CBZ.sfx("coin", { volume: Math.min(0.7, 0.22 + sim.combo * 0.06) }); } catch (e) {}
+    }
+  }
+  function comboTick(dt) {
+    if (sim.comboT > 0) { sim.comboT -= dt; if (sim.comboT <= 0) { sim.combo = 0; scoreDraw(); } }
+  }
+
+  // ---- the score rail + the starving edge ---------------------------------
+  let scoreEl = null, scoreNum = null, comboEl = null, starveEl = null, shownScore = -1, shownCombo = -1;
+  function buildScore() {
+    if (!scoreEl) {
+      const rail = document.getElementById("topright");
+      scoreEl = document.createElement("div");
+      scoreEl.id = "sharkScore";
+      scoreEl.className = "pill panel";
+      scoreNum = document.createElement("b");
+      scoreNum.id = "sharkScoreNum";
+      comboEl = document.createElement("span");
+      comboEl.id = "sharkCombo";
+      scoreEl.appendChild(scoreNum); scoreEl.appendChild(comboEl);
+      if (rail) rail.insertBefore(scoreEl, rail.firstChild); else document.body.appendChild(scoreEl);
+    }
+    if (!starveEl) {
+      starveEl = document.createElement("div");
+      starveEl.id = "sharkStarve";
+      document.body.appendChild(starveEl);
+    }
+    scoreEl.style.display = "";
+    shownScore = -1; shownCombo = -1;
+    scoreDraw();
+  }
+  function fmtScore(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  function scoreDraw() {
+    if (!scoreNum) return;
+    if (shownScore !== sim.score) { scoreNum.textContent = fmtScore(sim.score); shownScore = sim.score; }
+    const c = sim.comboT > 0 && sim.combo >= 2 ? sim.combo : 0;
+    if (c !== shownCombo) {
+      comboEl.textContent = c ? "x" + c : "";
+      comboEl.style.display = c ? "" : "none";
+      shownCombo = c;
+    }
+  }
+  function scorePop(pts) {
+    scoreDraw();
+    if (!scoreEl) return;
+    scoreEl.classList.remove("pop");
+    void scoreEl.offsetWidth;            // restart the keyframe
+    scoreEl.classList.add("pop");
+  }
+  function starveTick() {
+    if (!starveEl) return;
+    const S = sim.shark;
+    const f = S && S.maxHp ? S.hp / S.maxHp : 1;
+    const burning = sim.clock >= HUNGER_GRACE && !sim.ended;
+    // under a third of the tank the edge of the screen starts to beat, faster
+    // and redder as it empties: the body telling you to go and eat
+    const k = burning ? Math.max(0, Math.min(1, (0.34 - f) / 0.34)) : 0;
+    if (k <= 0) { if (starveEl.style.opacity !== "0") starveEl.style.opacity = "0"; return; }
+    const beat = 0.5 + 0.5 * Math.sin(sim.clock * (4 + k * 6));
+    starveEl.style.opacity = (0.25 + 0.55 * k * (0.55 + 0.45 * beat)).toFixed(3);
+  }
+  function hideScore() {
+    if (scoreEl) scoreEl.style.display = "none";
+    if (starveEl) starveEl.style.opacity = "0";
   }
 
   // ---- HUD ---------------------------------------------------------------
@@ -1386,6 +1558,7 @@
     if (sim.hintT > 0) hudLine2.textContent = "point your mouth at food — the bite is automatic";
   }
   function hideHud() {
+    hideScore();
     if (hud) hud.style.display = "none";
     if (flashEl) flashEl.style.opacity = "0";
     viewCardClose();      // every hideHud caller means "another card owns the screen now"
@@ -1476,7 +1649,7 @@
     document.body.appendChild(viewCard);
   }
   function openingFlash() {
-    flash("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
+    flash("YOU ARE THE SHARK", "eat to live, chain meals for a frenzy, become the MEGALODON");
   }
 
   // ---- match lifecycle ---------------------------------------------------
@@ -1486,6 +1659,8 @@
     despawn(sim.shark);                     // last match's body never lingers
     sim.shark = null;
     sim.tier = 0; sim.mass = 0; sim.eaten = 0; sim.orcas = 0;
+    sim.clock = 0; sim.score = 0; sim.combo = 0; sim.comboT = 0;
+    sim.starved = false; sim.newBest = false; sim.prevBest = null;
     sim.ended = false;
     sim.death = null; sim.killer = null;
     // stockT 0.4, not 3: the sea top-up rides this same clock now and a match
@@ -1514,10 +1689,16 @@
     claim(S);
     sim.shark = S;
     mountShark();
+    // ..and the lens starts BEHIND that nose, looking where it looks. The ride
+    // keeps its own heading copy and the chase camera keeps the castaway's
+    // yaw, so without this the match opened side-on to its own shark.
+    if (CBZ.cityMountedHeading) { try { CBZ.cityMountedHeading(S.heading); } catch (e) {} }
+    if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(-Math.cos(S.heading), -Math.sin(S.heading)); CBZ.cam.pitch = 0.06; }
     hideRider();          // the frame you BECOME the shark, not the one after:
                           // step() used to own this and the oracle caught the
                           // one-frame window where a man sits on the shark
     buildHud();
+    buildScore();
     hudNow();
     sim.on = true;
     sim.needsTeardown = true;
@@ -1577,6 +1758,13 @@
     }
     if (S.dead) { onSharkDead(); return; }
     if (sim.hintT > 0) sim.hintT -= dt;
+    sim.clock += dt;
+    // the pod may only hunt you once you have had the grace period to learn to eat
+    S.huntable = sim.clock >= POD_GRACE;
+    hungerTick(dt);
+    if (S.dead) { onSharkDead(); return; }
+    comboTick(dt);
+    starveTick();
     // the HUD health bar IS the shark — the rider has no separate body here.
     // Floor at 1 so nothing else mistakes the mirror for a death; the only
     // way to die is the shark dying, and that path is explicit above.

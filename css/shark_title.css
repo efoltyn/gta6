@@ -90,3 +90,21 @@ body.touch #sharkTitle .st-keys .st-touch{display:inline-flex;}
   #sharkTitle .st-ladder{margin-top:8px;}
   #sharkTitle .st-mark{font-size:clamp(44px,11vh,120px);}
 }
+
+/* the record under PLAY: the one number the next run is for */
+#sharkTitle .st-best{font-weight:700; font-size:clamp(13px,1.6vw,18px); letter-spacing:.2em; text-indent:.2em; text-transform:uppercase; color:#ffd9a8; text-shadow:0 2px 8px rgba(2,24,40,.9);}
+
+/* ---- in play: the score rail (modes/shark_sim.js) ------------------------
+   The island's survivor count is a count of FOOD here; the score takes its
+   seat in the top-right rail, beside the clock. */
+body.mode-sharksim #survTop{display:none !important;}
+#topright #sharkScore{display:none; align-items:center; gap:8px; font-weight:700; min-width:92px; justify-content:center;}
+body.mode-sharksim.state-playing #topright #sharkScore{display:flex;}
+#sharkScore b{color:#fff; font-size:1.05em; letter-spacing:.02em; font-variant-numeric:tabular-nums;}
+#sharkScore #sharkCombo{color:#ff9a3c; font-weight:800; letter-spacing:.04em;}
+#sharkScore.pop{animation:sharkScorePop .32s ease-out;}
+@keyframes sharkScorePop{0%{transform:scale(1)} 30%{transform:scale(1.22)} 100%{transform:scale(1)}}
+/* the starving edge: a red pulse that beats harder as the tank empties */
+#sharkStarve{position:fixed; inset:0; pointer-events:none; z-index:44; opacity:0;
+  box-shadow:inset 0 0 90px 30px rgba(190,10,20,.85), inset 0 0 220px 40px rgba(120,0,10,.45);}
+body:not(.mode-sharksim) #sharkStarve, body:not(.state-playing) #sharkStarve{display:none;}
