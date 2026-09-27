@@ -149,7 +149,7 @@
 <body>
 <div id="game"></div>
 <div id="hud">
-  <div id="phaseCard" class="panel"><div class="tag" id="phaseTag">APEX NIGHT</div><div class="body" id="phaseBody">—</div></div>
+  <div id="phaseCard" class="panel"><div class="tag" id="phaseTag">APEX NIGHT</div><div class="body" id="phaseBody"></div></div>
   <div id="topRight">
     <div class="pill panel" id="cashPill">$0</div>
     <div class="pill panel" id="racePill">RACE 1/3</div>
@@ -173,10 +173,10 @@
   <div class="logo">APEX NIGHT</div>
   <div class="logoSub">DIAMOND ISLAND SPEEDWAY</div>
   <div class="blurb">One night. Three races. Seven named rivals under the floodlights.
-    Qualify, bet on yourself at the booth, nurse your tires, use the tow —
+    Qualify, bet on yourself at the booth, nurse your tires, use the tow,
     take the championship purse or go home broke.</div>
-  <div class="keys">W / &uarr; throttle &nbsp;&middot;&nbsp; S / &darr; brake &nbsp;&middot;&nbsp; A D / &larr; &rarr; steer<br/>
-    R recover to track &nbsp;&middot;&nbsp; M mute &nbsp;&middot;&nbsp; ENTER confirm menus<br/>
+  <div class="keys">W / &uarr; throttle, S / &darr; brake, A D / &larr; &rarr; steer<br/>
+    R recover to track, M mute, ENTER confirm menus<br/>
     Pit: turn into the lit pit lane on the main straight, stop in YOUR box.</div>
   <button class="btn" id="playBtn">START RACE NIGHT</button>
 </div></div>
@@ -184,7 +184,7 @@
 <!-- GARAGE -->
 <div id="ovGarage" class="overlay"><div class="sheet panel">
   <h2 class="ovTitle">PICK YOUR CAR</h2>
-  <div class="sub" id="garageSub">Entry fee $250 — Race 1 of 3</div>
+  <div class="sub" id="garageSub">Entry fee $250, Race 1 of 3</div>
   <div class="cards" id="classCards"></div>
   <button class="btn" id="garageGo">PAY ENTRY &amp; QUALIFY</button>
   <div><button class="btn small red" id="garageLeave" style="display:none">CASH OUT &amp; LEAVE</button></div>
@@ -193,9 +193,8 @@
 <!-- BET -->
 <div id="ovBet" class="overlay"><div class="sheet panel">
   <h2 class="ovTitle">THE BOOKMAKER'S BOOTH</h2>
-  <div class="sub" id="betSub">—</div>
+  <div class="sub" id="betSub"></div>
   <div id="betBtns"></div>
-  <div class="sub" style="margin-top:12px">A win pays stake &times; odds. Anything else loses the stake.</div>
 </div></div>
 
 <!-- RESULTS -->
@@ -217,7 +216,7 @@
 
 <!-- ENDING -->
 <div id="ovEnd" class="overlay"><div class="sheet panel">
-  <div class="verdict" id="endVerdict">—</div>
+  <div class="verdict" id="endVerdict"></div>
   <div class="sub" id="endSub" style="margin-top:6px"></div>
   <div class="statGrid" id="endStats"></div>
   <button class="btn" id="endRestart">RACE ANOTHER NIGHT</button>
