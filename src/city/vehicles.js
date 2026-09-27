@@ -1699,12 +1699,15 @@
      own arms are hidden there: its shoulders are at the lens). Materials are
      the rig's own skin and sleeve, so the hands wear what he wears. */
   const live = { car: null, needles: null, spin: null, hands: null };
+  const _armInv = new THREE.Matrix4(), _armS = [new THREE.Vector3(), new THREE.Vector3()];
   function dropLive() {
     if (live.needles) {
       if (live.needles.parent) live.needles.parent.remove(live.needles);
       live.needles.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
     }
     if (live.hands && live.hands.parent) live.hands.parent.remove(live.hands);
+    const arms = live.hands && live.hands.userData.arms;
+    if (arms && arms.parent) arms.parent.remove(arms);
     if (live.spin) live.spin.rotation.z = 0;
     live.car = null; live.needles = null; live.spin = null; live.hands = null;
   }
@@ -1726,13 +1729,34 @@
       if (live.spin && CBZ.carCabinHands && sk) {
         const skin = firstMat(sk.hands) || firstMat(sk.head);
         if (skin) {
-          live.hands = CBZ.carCabinHands(skin, firstMat(sk.armsLower) || skin, ci.wheel && ci.wheel.r);
+          live.hands = CBZ.carCabinHands(skin, firstMat(sk.armsLower) || skin, ci.wheel && ci.wheel.r, firstMat(sk.arms));
           live.spin.add(live.hands);
+          // the ARMS hang off the steer group: the rim turns, the shoulders do not
+          if (live.hands.userData.arms && live.spin.parent) live.spin.parent.add(live.hands.userData.arms);
         }
       }
     }
     if (live.spin) live.spin.rotation.z = -steerLeft * 1.55;       // ~90° of wheel at full lock
-    if (live.hands) live.hands.visible = !!(fp && seat && seat.isDriver);
+    if (live.hands) {
+      const on = !!(fp && seat && seat.isDriver);
+      live.hands.visible = on;
+      const arms = live.hands.userData.arms;
+      if (arms) arms.visible = on;
+      if (on && arms && live.hands.userData.tick && live.spin.parent) {
+        // the driver's shoulders, carried into the steer group's frame: off
+        // the seat's eye (right = -X, back = -Z in the car body)
+        const steer = live.spin.parent;
+        steer.updateMatrix();
+        _armInv.copy(steer.matrix).invert();
+        const eye = (seat && seat.eye) || ci.eye;
+        for (let i = 0; i < 2; i++) {
+          const x = i === 0 ? -1 : 1;
+          if (eye) _armS[i].set(eye.x + x * 0.19, eye.y - 0.25, eye.z - 0.07).applyMatrix4(_armInv);
+          else _armS[i].set(x * 0.20, 0.04, -0.50);
+        }
+        live.hands.userData.tick(live.spin, _armS);
+      }
+    }
     if (live.needles) {
       const spd = Number.isFinite(car.v) ? Math.abs(car.v) : Math.hypot(car.vx || 0, car.vz || 0);
       const mph = spd * 2.4;                                         // carcluster.js's own scale

@@ -51,7 +51,7 @@
     box(g, 0.082, 0.21, 0.095, mat.wood, 0, -0.135, 0.045, -0.34);
     box(g, 0.086, 0.06, 0.105, mat.wood, 0, -0.225, 0.085, -0.34);
     // hand wrapping the grip
-    box(g, 0.15, 0.11, 0.13, mat.skin, 0, -0.15, 0.07, -0.24);
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.036, 0.010], rake: 0.34, gripW: 0.082, gripD: 0.095, size: 1.0, trigger: [-0.05, -0.06] });
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -0.64);
     // WHERE THE HANDS GO — see systems/gunhands.js. A wheelgun is fed
     // through the cylinder, which swings out to the gun's LEFT.

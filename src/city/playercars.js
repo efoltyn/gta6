@@ -1379,9 +1379,11 @@
   /* LIVE PARTS for the car the player sits in (city/vehicles.js hangs these
      on the cabin while he is in it and takes them off when he leaves):
        needles  two thin lit bars, pivoting on the cluster dials
-       hands    two forearms + gloved hands on the rim, parented to the wheel's
-                spin group so they turn with it — the arms of the rig are at
-                the lens in first person and have to be hidden (see seatDriver)
+       hands    systems/fphands.js's hands closed on the rim, parented to the
+                wheel's spin group so they turn with it; the ARMS are not —
+                they hang off the steer group and are solved every tick from
+                the driver's shoulders (the arms of the rig are at the lens in
+                first person and have to be hidden, see seatDriver)
      Materials are the rig's OWN (skin, sleeve) passed in, never cloned. */
   // the builder itself, for a body built outside this file and for node checks
   CBZ.carDressCabin = function (root, o, style) {
@@ -1408,28 +1410,60 @@
     });
     return g;
   };
-  CBZ.carCabinHands = function (skin, sleeve, rimR) {
+  /* THE DRIVER'S HANDS. They used to be a rounded box on the rim with a
+     forearm box parented to the SPINNING wheel group, so the whole arm turned
+     with the rim like a clock hand — at full lock the right elbow stood up in
+     the windscreen. Now: fphands' real hands closed round the rim (they DO
+     turn with it), and two arms that do NOT — each is solved every tick from
+     the driver's shoulder to the wrist with the elbow down and out on its own
+     side, so the forearms follow the hands round the wheel and never cross.
+     Returns the hands group (goes on the spin group); `userData.arms` goes on
+     the steer group; `userData.tick(spin, shoulders)` poses the arms. */
+  const WHEEL_POSE = { wrap: 0.021, thumb: [[-0.34, -0.66, -0.67], [-0.12, -0.96, -0.24], [0.18, -0.62, -0.76]], cup: 0.005, name: "rim" };
+  CBZ.carCabinHands = function (skin, sleeve, rimR, upper) {
+    const FPH = CBZ.fpHands;
     const g = new THREE.Group();
     g.name = "cabin_hands";
-    const R = rimR || 0.18;
-    [1, -1].forEach(function (s) {
-      // the hand grips the rim at 9 / 3 o'clock, a touch above centre
-      const hx = s * R * 0.97, hy = R * 0.18;
-      const hand = new THREE.Mesh(rboxGeo(0.07, 0.1, 0.06, 0.022), skin);
-      hand.position.set(hx, hy, -0.018);
-      hand.rotation.z = s * 0.25;
+    const arms = new THREE.Group();
+    arms.name = "cabin_arms";
+    g.userData.arms = arms;
+    if (!FPH) return g;
+    const R = rimR || 0.18, K = 1.08, TH = 0.22;
+    const fore = sleeve || skin, up = upper || fore;
+    const rig = [];
+    [-1, 1].forEach(function (x) {
+      // x = car-local side; the driver's RIGHT is -X, so the right hand is on -X
+      const side = x < 0 ? 1 : -1;
+      const c = Math.cos(TH), s = Math.sin(TH);
+      const radial = new THREE.Vector3(x * c, s, 0);
+      const tangentUp = new THREE.Vector3(-x * s, c, 0);
+      // back of the hand OUTWARD and a touch forward: the fingers then run forward
+      // over the rim from the outside and the wrist sits behind it, toward the driver
+      const dorsal = radial.clone().add(new THREE.Vector3(0, 0.05, 0.2));
+      const hand = FPH.attachGrip(g, {
+        side: side, pose: WHEEL_POSE, scale: K,
+        center: new THREE.Vector3(x * R * c, R * s, 0), axis: tangentUp, dorsal: dorsal,
+      }, skin);
       hand.castShadow = false;
-      g.add(hand);
-      // the forearm runs back toward the elbow, down and out
-      const a = new THREE.Vector3(hx + s * 0.01, hy - 0.03, -0.05);
-      const b = new THREE.Vector3(hx + s * 0.09, hy - 0.2, -0.30);
-      const len = a.distanceTo(b);
-      const arm = new THREE.Mesh(rboxGeo(0.075, 0.075, len, 0.03), sleeve || skin);
-      arm.position.copy(a).add(b).multiplyScalar(0.5);
-      arm.quaternion.setFromUnitVectors(_zAxis, b.clone().sub(a).normalize());
-      arm.castShadow = false;
-      g.add(arm);
+      const arm = FPH.makeArm({ fore: fore, upper: up });
+      arms.add(arm);
+      rig.push({ x: x, side: side, hand: hand, arm: arm });
     });
+    const sleeved = !!(fore && skin && fore.color && skin.color && !fore.color.equals(skin.color));
+    const W = new THREE.Vector3(), E = new THREE.Vector3(), Q = new THREE.Quaternion();
+    const Sa = [0, 0, 0], Wa = [0, 0, 0], pole = [0, -1, -0.3];
+    g.userData.tick = function (spin, shoulders) {
+      for (let i = 0; i < rig.length; i++) {
+        const r = rig[i], S = shoulders[r.x < 0 ? 0 : 1];
+        W.copy(r.hand.position).applyQuaternion(spin.quaternion);
+        Q.copy(spin.quaternion).multiply(r.hand.quaternion);
+        Sa[0] = S.x; Sa[1] = S.y; Sa[2] = S.z; Wa[0] = W.x; Wa[1] = W.y; Wa[2] = W.z;
+        pole[0] = r.x * 0.8;
+        const e = FPH.math.solveElbow(Sa, Wa, pole, 0.29, 0.27);
+        E.set(e[0], e[1], e[2]);
+        FPH.poseArm(r.arm, W, E, S, Q, K, sleeved);
+      }
+    };
     return g;
   };
 

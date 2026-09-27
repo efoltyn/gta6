@@ -43,7 +43,7 @@
     box(g, 0.016, 0.022, 0.20, mat.steel, 0.082, -0.01, 0.09);
     box(g, 0.180, 0.060, 0.035, mat.dark, 0, -0.01, 0.20);
     // hand wrapping the center grip
-    box(g, 0.160, 0.105, 0.135, mat.skin, 0, -0.155, -0.13, -0.06);
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.055, -0.166], rake: 0.08, gripW: 0.095, gripD: 0.115, size: 1.0, trigger: [-0.055, -0.25] });
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -0.52);
     // WHERE THE HANDS GO — see systems/gunhands.js. Mag-in-grip, so the off
     // hand has no handguard: it cups the barrel nut ahead of the receiver.

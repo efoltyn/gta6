@@ -45,7 +45,7 @@
     box(g, 0.022, 0.08, 0.024, mat.black, -0.03, 0.17, -0.30);
     box(g, 0.05, 0.04, 0.012, mat.steel, -0.03, 0.22, -0.30);
     // hand on the fire grip
-    box(g, 0.14, 0.10, 0.12, mat.skin, 0, -0.09, 0.09, -0.1);
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.008, 0.046], rake: 0.15, gripW: 0.07, gripD: 0.09, size: 0.9, trigger: [-0.03, -0.005] });
     // projectile + flash originate at the bore tip
     g.userData.muzzle = new THREE.Vector3(0, 0.05, -0.78);
     // WHERE THE HANDS GO — see systems/gunhands.js. Six chambers in a drum:

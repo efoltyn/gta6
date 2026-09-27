@@ -305,14 +305,19 @@
   const FP_SLEEVE_FALLBACK = 0x2d79ad;   // the pre-2026-08-16 literals, kept as
   const FP_SKIN_FALLBACK = 0xe7ae83;     // the no-body floor: the rig always builds
 
+  // where a closed fist holds the brake toggle (fphands "grip" pose, hand size 1.7)
+  const TOGGLE_AT = THREE ? new THREE.Vector3(0, -0.056, -0.146) : null;
   function makeFirstPersonRig() {
     if (!THREE) return null;
     const rig = new THREE.Group();
     rig.name = "bailout-first-person-rig";
     rig.userData.bailoutFirstPerson = true;
     rig.position.z = -0.42; // keep the hands readable without filling the lens
-    const skin = new THREE.MeshBasicMaterial({ color: FP_SKIN_FALLBACK, depthTest: false, depthWrite: false });
-    const sleeve = new THREE.MeshBasicMaterial({ color: FP_SLEEVE_FALLBACK, depthTest: false, depthWrite: false });
+    // LIT and depth-tested (a jointed hand drawn with depthTest off paints its
+    // own fingers over each other); a depth-clear sentinel below keeps the
+    // world from cutting into them, the same trick fpsmode's viewmodel uses.
+    const skin = new THREE.MeshLambertMaterial({ color: FP_SKIN_FALLBACK, transparent: true });
+    const sleeve = new THREE.MeshLambertMaterial({ color: FP_SLEEVE_FALLBACK, transparent: true });
     const web = new THREE.MeshBasicMaterial({ color: 0x1e2731, depthTest: false, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: 0xe9edf1, transparent: true, opacity: 0.86, depthTest: false, depthWrite: false });
     const brakeLine = new THREE.LineBasicMaterial({ color: 0xe84b3d, transparent: true, opacity: 0.94, depthTest: false, depthWrite: false });
@@ -321,20 +326,33 @@
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
       mesh.position.set(x, y, z); parent.add(mesh); return mesh;
     }
-    function hand() {
+    // systems/fphands.js's ONE hand + forearm (was two unlit boxes)
+    const FPH = CBZ.fpHands;
+    const HK = 1.7;
+    function hand(side) {
       const h = new THREE.Group();
-      box(h, 0.15, 0.13, 0.38, sleeve, 0, 0, 0.16);       // forearm recedes toward lens
-      // Match character.js: hands are one simple cap, never articulated digits.
-      box(h, 0.20, 0.10, 0.22, skin, 0, 0, -0.15);
+      if (FPH) {
+        const m = FPH.makeHand(side, "open", skin);
+        m.scale.setScalar(HK);
+        h.add(m);
+        h.userData.handMesh = m;
+        const arm = FPH.makeArm({ fore: sleeve, upper: sleeve });
+        FPH.poseArm(arm, new THREE.Vector3(0, 0, 0), new THREE.Vector3(side * 0.02, -0.03, 0.48), null, m.quaternion, HK, false);
+        h.add(arm);
+      } else {
+        box(h, 0.15, 0.13, 0.38, sleeve, 0, 0, 0.16);
+        box(h, 0.20, 0.10, 0.22, skin, 0, 0, -0.15);
+      }
       const toggle = new THREE.Mesh(new THREE.TorusGeometry(0.057, 0.014, 5, 12), toggleMat);
-      toggle.position.set(0, 0.03, -0.22);
+      toggle.position.copy(TOGGLE_AT);
+      toggle.rotation.y = Math.PI / 2;
       toggle.visible = false;
       h.add(toggle);
       h.userData.toggle = toggle;
       rig.add(h);
       return h;
     }
-    const left = hand(), right = hand();
+    const left = hand(-1), right = hand(1);
     const risers = new THREE.Group();
     const linePts = [];
     for (const side of [-1, 1]) {
@@ -367,6 +385,15 @@
       sleeve: FP_SLEEVE_FALLBACK, skin: FP_SKIN_FALLBACK,
     };
     rig.traverse(function (o) { o.renderOrder = 1200; o.frustumCulled = false; });
+    (function () {
+      const dcGeo = new THREE.BufferGeometry();
+      dcGeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(9), 3));
+      const dc = new THREE.Mesh(dcGeo, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false, transparent: true }));
+      dc.frustumCulled = false;
+      dc.renderOrder = 1199;
+      dc.onBeforeRender = function (renderer) { renderer.clearDepth(); };
+      rig.add(dc);
+    })();
     rig.visible = false;
     dressFirstPersonRig(rig);   // born dressed, even for a tool that builds it bare
     return rig;
@@ -406,7 +433,9 @@
       p.risers.visible = false;
       p.brakeLines.visible = false;
       p.left.userData.toggle.visible = p.right.userData.toggle.visible = false;
+      if (CBZ.fpHands) [p.left, p.right].forEach(function (h) { if (h.userData.handMesh) CBZ.fpHands.setPose(h.userData.handMesh, "open"); });
     } else {
+      if (CBZ.fpHands) [p.left, p.right].forEach(function (h) { if (h.userData.handMesh) CBZ.fpHands.setPose(h.userData.handMesh, "grip"); });
       const down = flare * 0.34;
       p.left.position.set(-0.46, -0.04 - down + w, -0.86);
       p.right.position.set(0.46, -0.04 - down - w, -0.86);
@@ -416,7 +445,7 @@
       p.brakeLines.visible = true;
       p.left.userData.toggle.visible = p.right.userData.toggle.visible = true;
       const brakePositions = p.brakeLines.geometry.attributes.position;
-      const togglePoint = new THREE.Vector3(0, 0.03, -0.22);
+      const togglePoint = TOGGLE_AT;
       const leftToggle = togglePoint.clone().applyEuler(p.left.rotation).add(p.left.position);
       const rightToggle = togglePoint.clone().applyEuler(p.right.rotation).add(p.right.position);
       brakePositions.setXYZ(0, leftToggle.x, leftToggle.y, leftToggle.z);

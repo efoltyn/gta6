@@ -105,9 +105,8 @@
     box(visual, 0.025, 0.074, 0.018, mat.black, 0, -0.020, -0.180, -0.28);
     box(visual, 0.052, 0.018, 0.048, mat.black, 0, 0.116, -0.050);
 
-    // One quiet palm shows the held relationship without wrapping the grip in
-    // extra finger bands that compete with the device silhouette.
-    box(visual, 0.138, 0.100, 0.105, mat.skin, 0, -0.225, 0.040, -0.30);
+    // The firing hand closed on the swept grip (systems/fphands.js's one hand).
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(visual, { at: [-0.10, 0.04], rake: -0.15, gripW: 0.148, gripD: 0.20, size: 1.2, trigger: [-0.03, -0.17] });
 
     visual.updateMatrix();
     g.userData.muzzle = new THREE.Vector3(0, 0.028, -0.553).applyMatrix4(visual.matrix);
