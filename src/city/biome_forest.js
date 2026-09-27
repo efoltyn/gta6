@@ -153,7 +153,11 @@
       floorGeo.attributes.position.needsUpdate = true;
       floorGeo.computeVertexNormals();
     }
-    const floor = new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    // the shared ground skin (world/textures_surface.js): duff, moss and the
+    // lake bank get soil / grass / stone detail per pixel instead of paint
+    const floor = new THREE.Mesh(floorGeo, CBZ.groundSkin
+      ? CBZ.groundSkin({ name: "redhollow-forest-ground", far: 360, sandY: [-0.9, -0.3] })
+      : new THREE.MeshLambertMaterial({ vertexColors: true }));
     floor.position.set(CX, 0.02, CZ);
     floor.receiveShadow = true;
     floor.userData.terrain = true;
