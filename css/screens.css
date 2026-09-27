@@ -208,12 +208,9 @@ body.mode-gungame{
   --gg-top:calc(14px + env(safe-area-inset-top,0px));
 }
 
-/* the clock matches the glass (it is the only other permanent readout) */
-body.mode-gungame #topright .pill{
-  background:var(--gg-glass); border:1px solid var(--gg-edge); border-radius:10px;
-  box-shadow:none; font-family:var(--gg-num); font-weight:600; font-size:16px;
-  letter-spacing:.06em; font-variant-numeric:tabular-nums; padding:7px 12px;
-}
+/* no match clock: a gun game has no time limit, so the clock counted
+   nothing a player plays against (HUD purge 2026-09-27) */
+body.mode-gungame #topright #timer{ display:none !important; }
 
 /* ======================================================================
    #ggHud root (gungamehud.js builds it; hidden outside a live match)
@@ -228,7 +225,10 @@ body.mode-gungame.state-playing #ggHud{ display:block; }
   width:min(288px,52vw); height:26px; padding:0 5px 0 9px; box-sizing:border-box;
   background:var(--gg-glass); border:1px solid var(--gg-edge); border-radius:999px;
   -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+  transition:opacity .5s ease;
 }
+/* between rung changes the track is gone (gungamehud.js sets .gg-quiet) */
+#ggHud .gg-track.gg-quiet{ opacity:0; }
 #ggHud .gg-seg{
   position:relative; flex:1 1 0; height:6px; border-radius:3px;
   background:rgba(255,255,255,.13);
@@ -337,32 +337,27 @@ body.mode-gungame.state-playing #ggHud{ display:block; }
 @keyframes ggArc{ 0%{ opacity:var(--k,1); } 55%{ opacity:calc(var(--k,1) * .8); } 100%{ opacity:0; } }
 
 /* ---- 4. HEALTH PLATE (the shared #survBars, restyled for this mode) --
-   Bottom-left on desktop (the bottom centre is the gun chip), top-left on
-   touch (the bottom-left is the joystick). The HP number is the one digit
-   that changes; the captions are gone. */
-.gg-hpnum, .gg-hpghost{ display:none; }
+   One slim bar, bottom-left on desktop (the bottom centre is the gun chip),
+   top-left on touch (the bottom-left is the joystick). Invisible at full
+   health; gungamehud.js adds .gg-show for a few seconds after a hit and
+   while you are hurt. No digit, no captions, no stamina hairline. */
+.gg-hpghost{ display:none; }
 body.mode-gungame #survBars{
-  display:grid; grid-template-columns:auto 1fr; column-gap:10px; align-items:center;
+  display:block; opacity:0;
   left:calc(18px + env(safe-area-inset-left,0px)); bottom:calc(18px + env(safe-area-inset-bottom,0px));
-  transform:none; width:min(236px,46vw); box-sizing:border-box; padding:7px 12px 8px 10px;
+  transform:none; width:min(200px,40vw); box-sizing:border-box; padding:6px 8px;
   background:var(--gg-glass); border:1px solid var(--gg-edge); border-radius:10px;
   -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
-  transition:border-color .3s;
+  transition:opacity .45s ease, border-color .3s;
 }
-body.mode-gungame #survBars .gg-hpnum{
-  display:block; grid-row:1 / span 2; min-width:3ch; text-align:right;
-  font-family:var(--gg-num); font-weight:700; font-size:21px; line-height:1;
-  font-variant-numeric:tabular-nums; letter-spacing:.02em; color:var(--gg-ink);
-  text-shadow:0 1px 2px rgba(0,0,0,.5); transition:color .25s;
-}
+body.mode-gungame #survBars.gg-show{ opacity:1; }
 body.mode-gungame #survBars .slab{ display:none; }
-body.mode-gungame #survBars .sbar{ grid-column:2; display:block; margin:0; }
+body.mode-gungame #survBars .sbar{ display:block; margin:0; }
+body.mode-gungame #survBars .sbar:last-child{ display:none; }
 body.mode-gungame #survBars .sbarbg{
   position:relative; height:8px; border-radius:4px;
   background:rgba(255,255,255,.08); box-shadow:inset 0 1px 2px rgba(0,0,0,.45);
 }
-body.mode-gungame #survBars .sbar:last-child{ margin-top:4px; }
-body.mode-gungame #survBars .sbar:last-child .sbarbg{ height:2px; border-radius:1px; box-shadow:none; }
 body.mode-gungame #survBars .gg-hpghost{
   display:block; position:absolute; left:0; top:0; bottom:0; width:100%;
   border-radius:4px; background:rgba(255,110,80,.55);
@@ -374,12 +369,7 @@ body.mode-gungame #hpBar{
 }
 body.mode-gungame #survBars.gg-amber #hpBar{ background:linear-gradient(180deg,#ffc15a,#e9942c) !important; }
 body.mode-gungame #survBars.gg-red #hpBar{ background:linear-gradient(180deg,#ff6a55,#d8352a) !important; }
-body.mode-gungame #survBars.gg-amber .gg-hpnum{ color:#ffc15a; }
-body.mode-gungame #survBars.gg-red .gg-hpnum{ color:#ff6a55; }
 body.mode-gungame #survBars.gg-red{ border-color:rgba(255,90,70,.35); }
-body.mode-gungame #stamBar{
-  border-radius:1px; background:rgba(125,215,255,.85) !important; transition:width .15s linear;
-}
 body.touch.mode-gungame #survBars{
   top:var(--gg-top); bottom:auto; left:calc(14px + env(safe-area-inset-left,0px));
 }
@@ -401,11 +391,6 @@ body.touch.mode-gungame #survBars{
 #ggHud .gg-ring circle{ fill:none; stroke-width:3; }
 #ggHud .gg-ring circle.bg{ stroke:rgba(255,255,255,.12); }
 #ggHud .gg-ring circle.fg{ stroke:var(--gg-ink); stroke-linecap:round; transition:stroke-dashoffset .12s linear; }
-#ggHud .gg-ring-n{
-  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  font-family:var(--gg-num); font-weight:700; font-size:20px; color:var(--gg-ink);
-  font-variant-numeric:tabular-nums;
-}
 #ggHud .gg-death-info{ display:grid; grid-template-columns:auto auto; align-items:center; column-gap:6px; row-gap:4px; }
 #ggHud .gg-death-skull{ width:15px; height:15px; fill:var(--gg-red); }
 #ggHud .gg-death-name{
@@ -419,11 +404,6 @@ body.touch.mode-gungame #survBars{
 #ggHud .gg-death-wep.img img{ display:block; }
 #ggHud .gg-death-fist{ display:none; width:22px; height:22px; fill:var(--gg-gold); }
 #ggHud .gg-death-wep.melee .gg-death-fist{ display:block; }
-#ggHud .gg-death-lbl{
-  font-family:var(--gg-num); font-size:11px; font-weight:600; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--gg-dim);
-}
-#ggHud .gg-death-lbl:empty{ display:none; }
 
 /* ---- 6. KILL CONFIRM (under the reticle) ----------------------------- */
 #ggHud .gg-kc{
@@ -455,7 +435,7 @@ body.touch.mode-gungame #survBars{
    a centred track, so the track drops one row, under the clock. */
 @media (max-width:560px){
   #ggHud .gg-track{ top:calc(62px + env(safe-area-inset-top,0px)); width:min(260px,70vw); }
-  body.mode-gungame #survBars{ width:min(200px,50vw); }
+  body.mode-gungame #survBars{ width:min(170px,50vw); }
   #ggHud .gg-death{ top:64%; }
 }
 

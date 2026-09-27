@@ -23,15 +23,15 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=survrail1">
+<link rel="stylesheet" href="css/hud.css?v=bare1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=launch1">
+<link rel="stylesheet" href="css/shark_title.css?v=uicut1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
-<link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
+<link rel="stylesheet" href="css/interact_touch.css?v=bare1">
 <link rel="stylesheet" href="css/title_hub.css?v=hub1">
 </head>
 <body class="campaign-build">
@@ -79,7 +79,6 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="detectBarBg"><div id="detectBar"></div></div>
   </div>
 
-  <div id="gangHud" class="panel"></div>
   <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
 
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
@@ -312,14 +311,14 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
       <div class="quality-preset-label">Graphics</div>
       <div class="quality-select">
-        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>Short horizon</small></button>
-        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced</small></button>
-        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span><small>Full distance</small></button>
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span></button>
+        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span></button>
       </div>
     </div>
     <button class="btn" id="playBtn">Play</button>
     <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
-      <span>New Life</span><small>Clear every saved city character</small>
+      <span>New Life</span>
     </button>
     </div><!-- /.title-actions -->
 
@@ -451,7 +450,7 @@ document.body.appendChild(b);}}catch(e){}})();
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=sharkmode1"></script>
+<script src="src/config.js?v=inworld1"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -465,7 +464,7 @@ document.body.appendChild(b);}}catch(e){}})();
      collapses to the same 120px, is the "two layers of text slightly offset"
      bug. This is the claim desk that decides which surface owns a sentence.
      Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
-<script src="src/systems/subtitlebus.js?v=onemouth1"></script>
+<script src="src/systems/subtitlebus.js?v=bare1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -520,6 +519,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=surf1"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js"></script>
 <script src="src/world/corridorkit.js"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
@@ -560,7 +560,7 @@ document.body.appendChild(b);}}catch(e){}})();
      before any entity that registers a prop type, e.g. coins.js below -->
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=sharkscene1"></script>
+  <script src="src/entities/character.js?v=sharkfix2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -578,8 +578,8 @@ document.body.appendChild(b);}}catch(e){}})();
      systems/gore.js + wounds.js own blood from explicit damage events. -->
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=nukefield1"></script>
-<script src="src/systems/hud.js?v=allmain3"></script>
+<script src="src/systems/audio.js?v=m0927p"></script>
+<script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
@@ -694,7 +694,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4b. remaining systems -->
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
-<script src="src/systems/camera.js?v=sharkscene1"></script>
+<script src="src/systems/camera.js?v=cars1"></script>
 <script src="src/systems/physics.js?v=sharkmode1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -728,9 +728,11 @@ document.body.appendChild(b);}}catch(e){}})();
      what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
+<script src="src/systems/prisonlaw.js?v=law1"></script>
+<!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
+<script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
-<script src="src/systems/minimap.js?v=route1"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
      called TALK now, which is what it does). This owns the real thing: an NPC
@@ -741,7 +743,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
-<script src="src/systems/escapeplan.js?v=plan1"></script>
+<script src="src/systems/escapeplan.js?v=m0927p"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
@@ -787,6 +789,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
+<script src="src/systems/debris.js?v=debris1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -796,13 +799,14 @@ document.body.appendChild(b);}}catch(e){}})();
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=sharkmode1"></script>
+<script src="src/world/island_roads.js?v=roads1"></script>
+<script src="src/world/disaster_arena.js?v=merge0927a"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkscene1"></script>
+<script src="src/entities/survivorbot.js?v=sharkfix2"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
-<script src="src/modes/shark_title.js?v=launch1"></script>
+<script src="src/modes/shark_title.js?v=uicut1"></script>
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
@@ -855,7 +859,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=plume2"></script>
+<script src="src/systems/disasters.js?v=tsureal1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=sharkmode1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -878,7 +882,11 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=shallow1"></script>
+<script src="src/world/water_spec.js?v=tsureal2"></script>
+<!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
+<script src="src/world/tsunami_debris.js?v=tsureal1"></script>
+<script src="src/world/tsunami_flow.js?v=tsureal1"></script>
+<script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -979,6 +987,11 @@ document.body.appendChild(b);}}catch(e){}})();
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
+<!-- THE CITY BUILD KIT (city/compoundkit.js): concrete/brick walls, steel gates,
+     guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
+     into systems/building.js's CATALOG. City-only; everything city-side is looked
+     up lazily. -->
+<script src="src/city/compoundkit.js?v=cpd1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->
@@ -1014,14 +1027,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_rig.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
-<script src="src/city/wildlife/aquatic.js?v=gillcrease1"></script>
+<script src="src/city/wildlife/aquatic.js?v=sharkfix3"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=sharkscene1"></script>
+<script src="src/city/wildlife.js?v=sharkfix3"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1058,6 +1071,14 @@ document.body.appendChild(b);}}catch(e){}})();
      After blobshadows.js (same pool shape) and before vehicles.js: it only
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=lamps1"></script>
+<script src="src/city/carbody.js?v=cars2"></script>
+<script src="src/city/carwheels.js?v=cars2"></script>
+<!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
+     per-car occupancy map). Before playercars.js (dressCabin upholsters its
+     seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
+<script src="src/city/carseats.js?v=cars1"></script>
+<script src="src/city/cardyn.js?v=cars1"></script>
+<script src="src/city/carinstances.js?v=cars1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1122,7 +1143,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ?cfg_PAX_CHAUFFEUR=0 (riding while a companion drives). PAX_AIRCRAFT is
      declared and OFF: a passenger deck in a machine the player is flying is
      playeraircraft.js/bailout.js's wave, and the button says so. -->
-<script src="src/city/passengerseat.js?v=pax1"></script>
+<script src="src/city/passengerseat.js?v=cars1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1143,8 +1164,8 @@ document.body.appendChild(b);}}catch(e){}})();
      are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1"></script>
-<script src="src/city/structural.js?v=collapse1"></script>
+<script src="src/city/collapse.js?v=cpd1"></script>
+<script src="src/city/structural.js?v=cpd1"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -1239,6 +1260,16 @@ document.body.appendChild(b);}}catch(e){}})();
      merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
 <script src="src/city/storegoods.js?v=realgoods1"></script>
+<!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
+     in or at the door of is fitted out for real (finished floors, bathrooms,
+     kitchens, bedrooms, stockrooms, a gang's count room, baked light from
+     real fixtures) and freed when you leave. After storegoods (same lazy
+     dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
+     (which declares every floor to it). -->
+<script src="src/city/fitout.js?v=fit1"></script>
+<script src="src/city/fitout_plans.js?v=fit1"></script>
+<script src="src/city/fitout_work.js?v=fit1"></script>
+<script src="src/city/fitout_gang.js?v=fit1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
@@ -1338,6 +1369,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
+<!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
+     hold it, the motel room that is his menu, the consequences of a kill. -->
+<script src="src/city/hitman_paper.js?v=inworld1"></script>
+<script src="src/city/hitman_hands.js?v=inworld1"></script>
+<script src="src/city/hitman_room.js?v=inworld1"></script>
+<script src="src/city/dossier.js?v=inworld1"></script>
+<script src="src/city/hitman_fallout.js?v=inworld1"></script>
+<script src="src/city/agency.js?v=inworld1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
@@ -1351,11 +1390,11 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=sharkmode1"></script>
+<script src="src/systems/fullmap.js?v=cpd1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=sharkmode1"></script>
+<script src="src/systems/gore.js?v=sharkfix3"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1389,7 +1428,7 @@ document.body.appendChild(b);}}catch(e){}})();
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sharkscene1"></script>
+<script src="src/city/wildlife_shark.js?v=sharkfix3"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1404,7 +1443,7 @@ document.body.appendChild(b);}}catch(e){}})();
      takedown is CONSUMED from marine_predation, not re-implemented.
      Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
      ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
-<script src="src/city/wildlife_orca.js?v=orca1"></script>
+<script src="src/city/wildlife_orca.js?v=sharkfix3"></script>
 <!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
      MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
      taking a small boat, and the chum producers that had never existed — a
@@ -1688,21 +1727,26 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
-     Executive Mansion (a locked door + a console of real orders), the
+     Executive Mansion (a locked door + the General, the Bureau Director and
+     the Police Commissioner, who propose real orders you answer), the
      Saltlands terror cell (factions/occupy/aigoals), Bureau raids (real
      agents at real cell members), the border wall order (construction.js's
      CBZ.stateWall) and the falls (regimes' dictatorship, crown's coronation,
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<!-- THE PRESIDENT WAVE — four organs on presidency.js's status() API, in
-     load order: the HUD strip (reads status), the Chief of Staff's agenda
-     (mission.js + presidency.press), the motorcade (chauffeur + helipad), and
-     the regime dressing that changes the Mansion when the republic falls. -->
-<script src="src/city/president_hud.js?v=pres2"></script>
-<script src="src/city/president_agenda.js?v=pres2"></script>
-<script src="src/city/motorcade.js?v=pres2"></script>
-<script src="src/city/president_regime.js?v=pres2"></script>
+<!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
+     list, no button console. In load order: the office (desk phone that rings
+     with real calls, briefing folders you read on the desk, the TV news, aides
+     who walk in), the motorcade (a real convoy you ride in), the public life
+     (the day's schedule, the balcony speech and its crowd, protests, curfew
+     and lockdown bodies in the street), and the regime dressing that changes
+     the Mansion when the republic falls. Security (the detail, the gate
+     checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
+<script src="src/city/president_office.js?v=pres3"></script>
+<script src="src/city/motorcade.js?v=pres3"></script>
+<script src="src/city/president_public.js?v=pres3"></script>
+<script src="src/city/president_regime.js?v=pres3"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
@@ -1719,6 +1763,12 @@ document.body.appendChild(b);}}catch(e){}})();
      Loads after storage.js (ownership), bank.js (the room) and cashstore.js
      (the bag verbs it hooks). -->
 <script src="src/city/propertyvault.js?v=pvault1"></script>
+<!-- LAND YOU OWN, AS A PLACE (city/plots.js): sale signs at the curb, the
+     property panel at your address post, the contractor's demolition, locked
+     doors, the deed map. Then the crew that lives there and the rival raids
+     on it (city/compoundcrew.js). -->
+<script src="src/city/plots.js?v=plots1"></script>
+<script src="src/city/compoundcrew.js?v=cpd2"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1786,7 +1836,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and any other mode that has water but no road fleet, plus the shark-vs-boat
      rules (engulf / bite / tip). After water_hulls + water_float, both of which
      it spends. -->
-<script src="src/world/sea_craft.js?v=sharkscene1"></script>
+<script src="src/world/sea_craft.js?v=sharkfix2"></script>
 <script src="src/world/sea_scene.js?v=sharkscene1"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's

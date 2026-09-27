@@ -1204,7 +1204,9 @@
     installCompatibilityWrappers();
     if (!livePlay() && state.open) close();
     if (peek) peek.classList.toggle("available", livePlay() && !state.open);
-    if (!active && state.dialogue) clearDialogue();
+    // Speech outlives the campaign: any origin (the President's office, the
+    // Bureau) talks through this card, so only LEAVING play clears it.
+    if (!playableMode() && state.dialogue) clearDialogue();
     hideWorldNameTags();
     if (clockEl && state.open) clockEl.textContent = nowLabel();
   }

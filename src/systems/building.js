@@ -34,6 +34,10 @@
        roof reuses the exact same slab shape as floor (kind differs only
        for label/color + a trivial cosmetic lip).
 
+   GRIDS: every placement belongs to one grid {id, ox, oz, oy} (see the
+   GRIDS block below). Survival uses the global grid (0,0,0), for which all
+   of the following is byte-identical; a city plot supplies its own origin.
+
    OCCUPANCY: one Map "gx,gy,gz,slot" -> pieceId. slot = "fill" for
    foundation/floor/roof/stairs (they compete for the same cell), or
    "e0".."e3" for wall/doorframe (they compete for the same edge). This
@@ -276,31 +280,105 @@
   };
 
   /* ============================================================
-     OCCUPANCY — "gx,gy,gz,slot" -> pieceId, + the reverse map remove()
-     needs to clean it back up (pieceId -> occKey). ONLY pieces spawned
-     through CBZ.building.place() ever get an entry here — a piece
-     despawned via a direct CBZ.despawnPiece() call bypassing
-     CBZ.building.remove() will leave its occupancy slot stuck occupied
-     (documented limitation, per the task's "keep minimal" steer; no
-     onDespawn hook was added to pieces.js for this — every OTHER
-     caller of despawnPiece today is world/proptypes-owned debris that
-     never touches building occupancy in the first place).
+     GRIDS (PROPERTY + COMPOUNDS wave). Every placement belongs to ONE grid
+     {id, ox, oz, oy}: cell (gx,gz) centre is (ox + gx*CELL, oz + gz*CELL),
+     storey gy stands on oy + gy*WALL_H. Survival (and anything that passes
+     no grid) uses GLOBAL_GRID {id:"g", 0,0,0}: every key string, position
+     and support probe on it is byte-identical to the pre-grid file. A city
+     plot supplies its own grid (city lots are 30 m and their edges do NOT
+     sit on the global 3 m lattice), so a plot's walls land ON the lot edge.
+
+     Occupancy keys on a plot grid are namespaced "<gridId>|gx,gy,gz,slot",
+     and EDGE keys are CANONICAL there: the edge shared by two cells has one
+     key (a cell's south edge is its southern neighbour's north edge), so a
+     plot can never carry two walls on one line. The global grid keeps the
+     legacy per-cell "e"+rot keys untouched.
+     ============================================================ */
+  const GLOBAL_GRID = Object.freeze({ id: "g", ox: 0, oz: 0, oy: 0 });
+  function normGrid(gr) {
+    if (!gr || gr.id == null || gr.id === "g") return GLOBAL_GRID;
+    return { id: String(gr.id), ox: +gr.ox || 0, oz: +gr.oz || 0, oy: +gr.oy || 0 };
+  }
+  function isGlobal(gr) { return !gr || gr === GLOBAL_GRID || gr.id === "g"; }
+
+  /* ============================================================
+     OCCUPANCY — key -> pieceId, + the reverse map remove() needs to clean it
+     back up (pieceId -> [keys]; a multi-cell prefab owns one key per covered
+     cell). ONLY pieces spawned through CBZ.building.place() ever get an entry
+     here — a piece despawned via a direct CBZ.despawnPiece() call bypassing
+     CBZ.building.remove() leaves its keys stuck occupied (documented limit).
      ============================================================ */
   const occupancy = new Map();
   const pieceIdToOccKey = new Map();
 
-  function occKey(gx, gy, gz, slot) { return gx + "," + gy + "," + gz + "," + slot; }
-  // B6: 3 new slot kinds, added here (not just in the CATALOG) because a
-  // piece's occupancy bookkeeping key is exactly what lets it COEXIST with
-  // (rather than compete for) whatever else already sits on that cell:
-  //   cupboard/container -> "tc"/"box", a cell-level slot distinct from
-  //     "fill" so a tool cupboard or storage box can sit ON TOP of a
-  //     foundation/floor without the two ever fighting over one slot.
-  //   door -> "dr"+rot, an edge-level slot distinct from doorframe's own
-  //     "e"+rot so the door PANEL (which fills a doorframe's gap) can rest
-  //     at the very same cell+edge as the doorframe it depends on (see
-  //     checkSupport's door branch below) without double-claiming that
-  //     doorframe's slot.
+  function occKey(gx, gy, gz, slot, gr) {
+    const k = gx + "," + gy + "," + gz + "," + slot;
+    return isGlobal(gr) ? k : gr.id + "|" + k;
+  }
+  function edgeKey(prefix, gx, gy, gz, rot, gr) {
+    if (isGlobal(gr)) return occKey(gx, gy, gz, prefix + rot);
+    if (rot === 2) return occKey(gx, gy, gz + 1, prefix + "0", gr);
+    if (rot === 1) return occKey(gx + 1, gy, gz, prefix + "3", gr);
+    return occKey(gx, gy, gz, prefix + rot, gr);
+  }
+  // Slot model. Legacy names keep their B1/B6 slots:
+  //   wall/doorframe -> edge "e", door -> edge "dr", cupboard -> "tc",
+  //   container -> "box", foundation/floor/roof/stairs -> "fill".
+  // Kit defs declare def.slot: "edge" (perimeter walls, fences, gates; may
+  // span def.span.w edges), "fill" (towers, garages, helipads; may span
+  // def.span {w,d} cells), "dep" (deployables that ride a cell without
+  // taking its fill: floodlights, stash, bunks) or "cam" (a mount slot on an
+  // edge, sat on top of whatever wall holds that edge).
+  const LEGACY_EDGE = { wall: "e", doorframe: "e", door: "dr" };
+  const LEGACY_CELL = { cupboard: "tc", container: "box" };
+  function slotTypeOf(kind, def) {
+    if (LEGACY_EDGE[kind]) return "edge";
+    if (LEGACY_CELL[kind]) return "cell";
+    return (def && def.slot) || "fill";
+  }
+  function edgeSpanN(def) { return (def && def.span && def.span.w) || 1; }
+  function spanOf(def, rot) {
+    const s = def && def.span;
+    if (!s) return { W: 1, D: 1 };
+    const w = s.w || 1, d = s.d || 1;
+    return (rot === 1 || rot === 3) ? { W: d, D: w } : { W: w, D: d };
+  }
+  function edgeDir(rot) {
+    return rot === 0 ? { x: 0, z: -1 } : rot === 1 ? { x: 1, z: 0 } : rot === 2 ? { x: 0, z: 1 } : { x: -1, z: 0 };
+  }
+  // the cells a placement covers (anchor = min corner in world cells)
+  function cellsFor(kind, def, gx, gz, rot) {
+    const st = slotTypeOf(kind, def);
+    const out = [];
+    if (st === "edge" || st === "cam") {
+      const n = edgeSpanN(def), alongX = (rot === 0 || rot === 2);
+      for (let k = 0; k < n; k++) out.push(alongX ? [gx + k, gz] : [gx, gz + k]);
+      return out;
+    }
+    if (st === "fill") {
+      const sp = spanOf(def, rot);
+      for (let i = 0; i < sp.W; i++) for (let j = 0; j < sp.D; j++) out.push([gx + i, gz + j]);
+      return out;
+    }
+    out.push([gx, gz]);
+    return out;
+  }
+  function keysFor(kind, def, gx, gy, gz, rot, gr) {
+    if (LEGACY_EDGE[kind]) return [edgeKey(LEGACY_EDGE[kind], gx, gy, gz, rot, gr)];
+    if (LEGACY_CELL[kind]) return [occKey(gx, gy, gz, LEGACY_CELL[kind], gr)];
+    const st = slotTypeOf(kind, def);
+    const cells = cellsFor(kind, def, gx, gz, rot);
+    const out = [];
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (st === "edge") out.push(edgeKey("e", c[0], gy, c[1], rot, gr));
+      else if (st === "cam") out.push(edgeKey("cam", c[0], gy, c[1], rot, gr));
+      else if (st === "dep") out.push(occKey(c[0], gy, c[1], "dep", gr));
+      else out.push(occKey(c[0], gy, c[1], "fill", gr));
+    }
+    return out;
+  }
+  // legacy single-slot name, kept for anything that still asks
   function slotFor(kind, rot) {
     if (kind === "wall" || kind === "doorframe") return "e" + rot;
     if (kind === "door") return "dr" + rot;
@@ -308,66 +386,86 @@
     if (kind === "container") return "box";
     return "fill";
   }
+  function posFor(kind, def, gx, gy, gz, rot, gr) {
+    const baseY = gr.oy + gy * WALL_H;
+    const st = slotTypeOf(kind, def);
+    if (st === "edge" || st === "cam") {
+      const n = LEGACY_EDGE[kind] ? 1 : edgeSpanN(def);
+      const alongX = (rot === 0 || rot === 2);
+      const half = (n - 1) * CELL / 2;
+      const cx = gr.ox + gx * CELL + (alongX ? half : 0);
+      const cz = gr.oz + gz * CELL + (alongX ? 0 : half);
+      const d = edgeDir(rot);
+      return { x: cx + d.x * CELL / 2, y: baseY, z: cz + d.z * CELL / 2 };
+    }
+    if (st === "dep") {
+      let x = gr.ox + gx * CELL, z = gr.oz + gz * CELL;
+      if (def && def.edgeInset != null) {
+        const d = edgeDir(rot);
+        x += d.x * (CELL / 2 - def.edgeInset); z += d.z * (CELL / 2 - def.edgeInset);
+      }
+      return { x: x, y: baseY, z: z };
+    }
+    const sp = (st === "fill") ? spanOf(def, rot) : { W: 1, D: 1 };
+    return { x: gr.ox + (gx + (sp.W - 1) / 2) * CELL, y: baseY, z: gr.oz + (gz + (sp.D - 1) / 2) * CELL };
+  }
+  // the union of the covered cells' squares: the LAND a placement uses (the
+  // ownership test reads this, not the collider, so an edge wall whose
+  // thickness straddles the lot line still counts as on your land)
+  function cellsRect(kind, def, gx, gz, rot, gr) {
+    const cells = cellsFor(kind, def, gx, gz, rot);
+    let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+    for (let i = 0; i < cells.length; i++) {
+      const x = gr.ox + cells[i][0] * CELL, z = gr.oz + cells[i][1] * CELL;
+      if (x - CELL / 2 < a) a = x - CELL / 2; if (x + CELL / 2 > b) b = x + CELL / 2;
+      if (z - CELL / 2 < c) c = z - CELL / 2; if (z + CELL / 2 > d) d = z + CELL / 2;
+    }
+    return { minX: a, maxX: b, minZ: c, maxZ: d };
+  }
+  function defFor(kind, gr) {
+    const d = CATALOG[kind];
+    if (!d) return null;
+    return (!isGlobal(gr) && d.city) ? d.city : d;
+  }
 
   // ---- support rules (documented per-kind; see file header for the model) --
-  // Every branch now ALSO returns `stability` (B4): 0 for a ground/root
-  // rest, else min(live supporter stability) + 1. floor/roof additionally
-  // return `pieceIds` (ALL supporting walls on the cell below, not just
-  // the first) alongside `pieceId` (kept = pieceIds[0] for backward
-  // compatibility with any caller still reading the single-id field).
+  // Every branch returns `stability` (B4): 0 for a ground/root rest, else
+  // min(live supporter stability) + 1. floor/roof additionally return
+  // `pieceIds` (ALL supporting walls on the cell below).
   function stabilityOf(pieceId) {
     const p = pieceId != null && CBZ.pieces ? CBZ.pieces.get(pieceId) : null;
     return (p && p.stability != null) ? p.stability : 0;
   }
-  function checkSupport(kind, gx, gy, gz, cx, cz, rot) {
+  function groundSupport(x, z, gr) {
+    return CBZ.findSupport ? CBZ.findSupport(x, z, gr.oy - 0.5, gr.oy + 0.5) : null;
+  }
+  function checkSupport(kind, def, gx, gy, gz, cx, cz, rot, gr, pos) {
     if (kind === "foundation") {
-      // ground-only, ground floor only: findSupport must land within
-      // 0.5m of y=0 at the cell centre (terrain-flatness assumption —
-      // deliberately simple, per the task).
+      // ground-only, ground floor only: findSupport must land within 0.5m of
+      // the grid's ground level at the cell centre.
       if (gy !== 0) return { ok: false };
-      const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
+      const s = groundSupport(cx, cz, gr);
       if (!s) return { ok: false };
       return { ok: true, pieceId: s.pieceId || null, stability: 0 };
     }
     if (kind === "wall" || kind === "doorframe") {
-      // simplest correct rule (task's own resolution of the ambiguity):
-      // a wall/doorframe needs a FILL piece (foundation/floor/roof) at
-      // its own cell + level, full stop. Single supporter — stability
-      // rides straight off that one fill piece.
-      const fillId = occupancy.get(occKey(gx, gy, gz, "fill"));
+      // a wall/doorframe needs a FILL piece at its own cell + level.
+      const fillId = occupancy.get(occKey(gx, gy, gz, "fill", gr));
       if (!fillId) return { ok: false };
       return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
     if (kind === "floor" || kind === "roof") {
-      // ground floor (gy===0): same ground rule as foundation (a floor
-      // CAN be laid straight on the ground instead of a foundation).
-      // Ground-supported fill pieces are ALSO roots (stability 0) — same
-      // simplification as foundation, regardless of which candidate
-      // findSupport actually picked (ground vs. a piece's platform at
-      // the same level).
       if (gy === 0) {
-        const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
+        const s = groundSupport(cx, cz, gr);
         if (!s) return { ok: false };
         return { ok: true, pieceId: s.pieceId || null, stability: 0 };
       }
-      // gy>0: Rust-LENIENT rule — ONE wall on ANY edge of the cell below
-      // is enough (not all 4, "for rigor" — explicitly not required).
-      // B4 MULTI-SUPPORT: collect EVERY wall on the cell's 4 edges (not
-      // just the first) into pieceIds, so losing one still leaves the
-      // others wired into supportedBy — pieces.js's recompute then finds
-      // the survivor(s) instead of the floor going straight through the
-      // old "supportedBy emptied" cascade. stability = min of all of
-      // them + 1 (the SHORTEST path to a root wins, same BFS-hop meaning
-      // as a single supporter). NOTE: every edge of one cell shares the
-      // SAME underlying fill piece, so in THIS wave's grid all sibling
-      // supporters of one floor are always stability-EQUAL by
-      // construction (min() is still the generally-correct operation —
-      // it just never actually has to pick a smaller of two DIFFERENT
-      // values until a future wave adds cross-cell/diagonal bracing).
+      // Rust-LENIENT: ONE wall on ANY edge of the cell below is enough; every
+      // such wall is wired in (B4 multi-support), stability = min + 1.
       const pieceIds = [];
       let minStability = Infinity;
       for (let r = 0; r < 4; r++) {
-        const wid = occupancy.get(occKey(gx, gy - 1, gz, "e" + r));
+        const wid = occupancy.get(edgeKey("e", gx, gy - 1, gz, r, gr));
         if (!wid) continue;
         pieceIds.push(wid);
         const ws = stabilityOf(wid);
@@ -377,218 +475,250 @@
       return { ok: true, pieceId: pieceIds[0], pieceIds: pieceIds, stability: minStability + 1 };
     }
     if (kind === "stairs") {
-      // INTERPRETATION NOTE: stairs occupy the "fill" slot at their OWN
-      // (gx,gy,gz) — they can't also require a fill piece to already be
-      // sitting there (that's the very slot they're about to claim), so
-      // "stairs need fill at gy" is read here as "stairs need something
-      // to rest their base on", mirroring floor/roof's rule one level
-      // down: a fill piece at gy-1, or bare ground if gy===0.
+      // stairs occupy their own cell's fill slot, so they rest on a fill piece
+      // one level down, or bare ground at gy 0.
       if (gy === 0) {
-        const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
+        const s = groundSupport(cx, cz, gr);
         if (!s) return { ok: false };
         return { ok: true, pieceId: s.pieceId || null, stability: 0 };
       }
-      const fillId = occupancy.get(occKey(gx, gy - 1, gz, "fill"));
+      const fillId = occupancy.get(occKey(gx, gy - 1, gz, "fill", gr));
       if (!fillId) return { ok: false };
       return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
-    // B6: cupboard/container — deployables that ride a fill cell (occupy
-    // their OWN "tc"/"box" slot, see slotFor above, so they don't compete
-    // with the fill piece itself for the "fill" slot). Same support feel
-    // as a wall: needs a foundation/floor/roof/stairs already at this
-    // exact cell+level.
+    // B6: cupboard/container ride a fill cell (own "tc"/"box" slot).
     if (kind === "cupboard" || kind === "container") {
-      const fillId = occupancy.get(occKey(gx, gy, gz, "fill"));
+      const fillId = occupancy.get(occKey(gx, gy, gz, "fill", gr));
       if (!fillId) return { ok: false };
       return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
-    // B6: door — a panel that fills a doorframe's walk-through gap. Needs
-    // the doorframe ALREADY standing at this exact cell's e+rot edge slot
-    // (the door rides that same edge, in its own "dr"+rot slot).
+    // B6: door fills a doorframe's gap on the same cell+edge.
     if (kind === "door") {
-      const dfId = occupancy.get(occKey(gx, gy, gz, "e" + rot));
+      const dfId = occupancy.get(edgeKey("e", gx, gy, gz, rot, gr));
       const dfPiece = dfId != null && CBZ.pieces ? CBZ.pieces.get(dfId) : null;
       if (!dfPiece || dfPiece.kind !== "doorframe") return { ok: false };
       return { ok: true, pieceId: dfId, stability: stabilityOf(dfId) + 1 };
     }
+    // ---- KIT kinds (def.support) -------------------------------------------
+    const sup = def && def.support;
+    const st = slotTypeOf(kind, def);
+    if (sup === "mount") {
+      // a camera sits on top of whatever holds that edge (wall, fence, gate),
+      // or on a tower filling the cell (towers carry def.mountY).
+      const eid = occupancy.get(edgeKey("e", gx, gy, gz, rot, gr));
+      const ep = eid != null ? CBZ.pieces.get(eid) : null;
+      if (ep && ep.alive) {
+        const ed = ep.defRef || CATALOG[ep.kind] || {};
+        const my = ed.mountY != null ? ed.mountY : (ed.y1 != null ? ed.y1 : WALL_H);
+        return { ok: true, pieceId: eid, stability: stabilityOf(eid) + 1, mountY: (ep.pos.y - pos.y) + my };
+      }
+      const fid = occupancy.get(occKey(gx, gy, gz, "fill", gr));
+      const fp = fid != null ? CBZ.pieces.get(fid) : null;
+      const fd = fp && (fp.defRef || CATALOG[fp.kind]);
+      if (fp && fp.alive && fd && fd.mountY != null) {
+        return { ok: true, pieceId: fid, stability: stabilityOf(fid) + 1, mountY: (fp.pos.y - pos.y) + fd.mountY };
+      }
+      return { ok: false, why: "mount it on a wall or a tower" };
+    }
+    if (sup === "ground") {
+      if (st === "fill") {
+        // towers, garages, helipads: bare ground only (the pad), never on a slab
+        if (gy !== 0) return { ok: false, why: "needs bare ground" };
+        const s = groundSupport(pos.x, pos.z, gr);
+        if (!s) return { ok: false, why: "needs bare ground" };
+        return { ok: true, pieceId: s.pieceId || null, stability: 0 };
+      }
+      // edge + dep kinds: a slab at this cell+level if there is one, else ground
+      const fillId = occupancy.get(occKey(gx, gy, gz, "fill", gr));
+      if (fillId) return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
+      if (gy !== 0) return { ok: false, why: "needs a floor under it" };
+      const s = groundSupport(pos.x, pos.z, gr);
+      if (!s) return { ok: false, why: "needs level ground" };
+      return { ok: true, pieceId: s.pieceId || null, stability: 0 };
+    }
     return { ok: false };
   }
 
+  /* ---- LIVE world-collision test (plot grids / city mode) -------------------
+     The static CBZ.placement hash still holds a demolished building's
+     reservation, so a cleared lot would read as blocked forever. Plot grids
+     ask the LIVE collider set instead: anything solid in the piece's box that
+     is not itself a building piece (piece vs piece is the grid's job). */
+  const _liveScratch = [];
+  function liveBlocker(rect) {
+    if (!CBZ.queryCollidersNear) return null;
+    const cx = (rect.minX + rect.maxX) / 2, cz = (rect.minZ + rect.maxZ) / 2;
+    const r = Math.max(rect.maxX - rect.minX, rect.maxZ - rect.minZ) / 2 + 0.5;
+    const near = CBZ.queryCollidersNear(cx, cz, r, _liveScratch);
+    const E = 0.08;
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
+      if (c.pieceId != null) continue;
+      if (c.maxX <= rect.minX + E || c.minX >= rect.maxX - E || c.maxZ <= rect.minZ + E || c.minZ >= rect.maxZ - E) continue;
+      const y0 = c.y0 != null ? c.y0 : -Infinity, y1 = c.y1 != null ? c.y1 : Infinity;
+      if (y1 <= rect.minY + 0.15 || y0 >= rect.maxY - 0.05) continue;
+      return c;
+    }
+    return null;
+  }
+
   /* ============================================================
-     computeValidity(kind, gx, gy, gz, rot) — B2 MINIMAL REFACTOR: the
-     exact validity block place() always ran, factored out so B2's ghost
-     preview can ask "would this placement succeed, and why not" WITHOUT
-     actually spawning anything. Byte-identical math to the old inline
-     block (this function is a pure extraction, not a rewrite) — it
-     always computes the geometry (slot/pos/footprint/rect) even for the
-     hard-fail paths (stairs rot 1/3, duplicate slot) so B2 can still
-     render a red ghost at the right transform for those cases.
-
-     Returns { ok, reason, slot, key, pos, fp, rect, sup } — sup is only
-     present once support was actually checked (i.e. past the hard-fail
-     gates). `reason` is null when ok, else a short human string; two
-     EXACT reason strings ("slot already occupied" and a "stairs: ..."
-     prefix) are HARD fails place() enforces even under opts.skipValidity
-     (replay trusts the save for support/world-collision only, never a
-     double claim on one logical slot or a structurally-impossible ramp)
-     — see place() below.
-
-     ownerId (B6, optional 6th param): the PLACER's pid — defaults to
-     CBZ.netPid() (always available once net/netpersist.js has loaded;
-     "solo" if somehow it hasn't) when omitted, since every call site this
-     wave is "whoever is standing here right now placing this". Used ONLY
-     for the new base-ownership gate (d) below; every other kind's
-     validity math is completely unaware of who's placing it.
+     computeValidity(kind, gx, gy, gz, rot, ownerId, grid) — the read-only
+     "would this placement succeed, and why not" pass place() runs itself and
+     buildmode's ghost asks. Always computes the geometry (keys/pos/footprint/
+     rect) even on the hard-fail paths so a red ghost still lands in the right
+     place. `reason` is null when ok, else a short plain string.
+     "slot already occupied" is the one HARD fail place() enforces even under
+     opts.skipValidity (a replayed save can never double-claim a slot).
      ============================================================ */
-  function computeValidity(kind, gx, gy, gz, rot, ownerId) {
-    const def = CATALOG[kind];
+  function computeValidity(kind, gx, gy, gz, rot, ownerId, grid) {
+    const gr = normGrid(grid);
+    const def = defFor(kind, gr);
     if (!def) return { ok: false, reason: "unknown kind: " + kind };
     gx |= 0; gy |= 0; gz |= 0;
     rot = ((rot | 0) % 4 + 4) % 4;
 
+    const keys = keysFor(kind, def, gx, gy, gz, rot, gr);
+    const key = keys[0];
     const slot = slotFor(kind, rot);
-    const key = occKey(gx, gy, gz, slot);
-    const cx = gx * CELL, cz = gz * CELL, baseY = gy * WALL_H;
-    // B6: positioning is now keyed off KIND, not off "is this slot != fill"
-    // — cupboard/container occupy non-"fill" slots ("tc"/"box") but still
-    // sit at the CELL CENTER like any other fill piece (see slotFor above);
-    // only wall/doorframe/door actually live on an edge offset.
-    const isEdge = (kind === "wall" || kind === "doorframe" || kind === "door");
-    let pos;
-    if (isEdge) {
-      switch (rot) {
-        case 0: pos = { x: cx, y: baseY, z: cz - CELL / 2 }; break;           // north edge
-        case 1: pos = { x: cx + CELL / 2, y: baseY, z: cz }; break;           // east edge
-        case 2: pos = { x: cx, y: baseY, z: cz + CELL / 2 }; break;           // south edge
-        default: pos = { x: cx - CELL / 2, y: baseY, z: cz }; break;          // west edge (rot 3)
-      }
-    } else {
-      pos = { x: cx, y: baseY, z: cz };
-    }
-
+    const cx = gr.ox + gx * CELL, cz = gr.oz + gz * CELL;
+    const pos = posFor(kind, def, gx, gy, gz, rot, gr);
     const fp = rotateFP(def.footprint, rot);
-    // stackable:true — piece-vs-piece contact is GOVERNED BY THE GRID
-    // (occupancy slots + support rules above), not by AABB overlap: a
-    // floor slab genuinely touches the tops of the walls that hold it
-    // up, and a wall's base band touches the floor it stands on. The
-    // placement hash's stackable escape hatch (placement.js, F5) skips
-    // conflicts only when BOTH rects are stackable — so pieces ignore
-    // each other here while still hard-colliding with every non-
-    // stackable WORLD rect (city lots, prison geometry, scatter).
+    // stackable:true — piece-vs-piece contact is governed by the GRID, not by
+    // AABB overlap (see the placement hash's stackable escape hatch).
     const rect = {
       minX: pos.x - fp.hx, maxX: pos.x + fp.hx,
       minZ: pos.z - fp.hz, maxZ: pos.z + fp.hz,
       minY: pos.y + def.y0, maxY: pos.y + def.y1,
       stackable: true,
     };
+    const base = { slot: slot, key: key, keys: keys, pos: pos, fp: fp, rect: rect, def: def, grid: gr };
+    function fail(reason, sup) { const o = Object.assign({ ok: false, reason: reason }, base); if (sup) o.sup = sup; return o; }
 
-    if (occupancy.has(key)) return { ok: false, reason: "slot already occupied", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
+    if (def.cityOnly && isGlobal(gr)) return fail("city only");
+    for (let i = 0; i < keys.length; i++) if (occupancy.has(keys[i])) return fail("slot already occupied");
 
-    // (d) B6 BASE OWNERSHIP GATE — Rust-style "building privilege": once a
-    // tool cupboard's BaseRecord claims this ground (CBZ.baseAt, systems/
-    // baseclaim.js), only pids on its authorized list may place anything
-    // inside the radius. Guarded — baseclaim.js loads after this file, and
-    // single-player-with-no-bases-yet must behave exactly as before B6.
-    // Not a HARD fail: opts.skipValidity (replay) bypasses it like every
-    // other soft gate below, so a saved world always restores intact.
+    const cityRules = !isGlobal(gr) || (CBZ.game && CBZ.game.mode === "city");
+    // (c) LAND: in the city you only build on a plot you own.
+    if (CBZ.game && CBZ.game.mode === "city") {
+      const CP = CBZ.cityPlots;
+      const land = CP && CP.canBuild ? CP.canBuild(cellsRect(kind, def, gx, gz, rot, gr)) : null;
+      if (!land || !land.ok) return fail("not your land");
+    }
+
+    // (d) B6 BASE OWNERSHIP GATE — a tool cupboard's claim: only its
+    // authorized pids may build inside the radius (soft; replay skips it).
     if (CBZ.baseAt) {
       const placerId = ownerId != null ? ownerId : (CBZ.netPid ? CBZ.netPid() : "solo");
       const rec = CBZ.baseAt(cx, cz);
-      if (rec && rec.authorized.indexOf(placerId) < 0) {
-        return { ok: false, reason: "building blocked (foreign base)", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
-      }
+      if (rec && rec.authorized.indexOf(placerId) < 0) return fail("building blocked (foreign base)");
     }
 
-    const sup = checkSupport(kind, gx, gy, gz, cx, cz, rot);
-    if (!sup.ok) return { ok: false, reason: "no support at this position", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
-    // B4: structural integrity — reject a placement whose candidate
-    // stability (hops from the nearest root) exceeds this kind's
-    // MAX_SPAN, so cantilevers/towers can't stack forever off one
-    // foundation. Checked AFTER support (a candidate needs a stability
-    // number to compare) but BEFORE the world-collision gate (cheaper,
-    // and gives B2's ghost the more specific reason first).
-    if (sup.stability > maxSpanFor(kind)) return { ok: false, reason: "too far from foundation", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
-    if (!CBZ.placement || !CBZ.placement.isFree(rect)) return { ok: false, reason: "blocked by existing geometry", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
-
-    return { ok: true, reason: null, slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
+    const sup = checkSupport(kind, def, gx, gy, gz, cx, cz, rot, gr, pos);
+    if (!sup.ok) return fail(sup.why || "no support at this position", sup);
+    if (sup.mountY != null) { pos.y += sup.mountY; rect.minY += sup.mountY; rect.maxY += sup.mountY; }
+    // B4: structural integrity — too many hops from the nearest root.
+    if (sup.stability > maxSpanFor(kind)) return fail("too far from foundation", sup);
+    if (cityRules) {
+      if (def.slot !== "cam" && liveBlocker(rect)) return fail("something is in the way", sup);
+    } else if (!CBZ.placement || !CBZ.placement.isFree(rect)) {
+      return fail("blocked by existing geometry", sup);
+    }
+    const ok = Object.assign({ ok: true, reason: null }, base);
+    ok.sup = sup;
+    return ok;
   }
 
   /* ============================================================
      CBZ.building.place(kind, gx, gy, gz, rot, opts) -> Piece | null
-       opts: { skipValidity=false, ownerId=null, hp } — skipValidity is
-       ONLY for serialize()/apply() replay (trust the save); ownerId/hp
-       let a replayed piece carry its saved owner + damage state.
+       opts: { skipValidity=false, ownerId=null, hp, grid, y } — skipValidity
+       is ONLY for serialize()/apply() replay (trust the save); ownerId/hp/y
+       let a replayed piece carry its saved owner, damage and height; grid is
+       the plot grid {id, ox, oz, oy} (omitted = the global survival grid).
      ============================================================ */
   const B = (CBZ.building = {});
   B.CELL = CELL; B.WALL_H = WALL_H; B.FLOOR_T = FLOOR_T; B.WALL_T = WALL_T;
   B.DOOR_GAP_W = DOOR_GAP_W; B.DOOR_GAP_H = DOOR_GAP_H; // B6: baseclaim.js's door piece sizes itself off the doorframe's own gap
   B.CATALOG = CATALOG;
-  B.MAX_SPAN = MAX_SPAN; // exposed read-only for tooling/harness/B5 (per-tier scaling)
+  B.MAX_SPAN = MAX_SPAN; // exposed read-only for tooling/harness
+  B.GLOBAL_GRID = GLOBAL_GRID;
+  B.defFor = function (kind, grid) { return defFor(kind, normGrid(grid)); };
+  B.spanOf = spanOf;
+  B.edgeDir = edgeDir;
+  B.slotTypeOf = function (kind) { return slotTypeOf(kind, CATALOG[kind]); };
+  // The yaw a piece's mesh is drawn at. Legacy pieces turn +rot quarter
+  // turns (their shapes are symmetric, so the mirrored edge convention never
+  // showed). Kit pieces (def.kit) have a FRONT: their local -z must point out
+  // of the edge rot names (0 north, 1 east, 2 south, 3 west), which is a
+  // -rot turn. Buildmode's ghost reads this too.
+  B.meshYaw = function (kind, rot, grid) {
+    const d = defFor(kind, normGrid(grid));
+    return (d && d.kit ? -rot : rot) * (Math.PI / 2);
+  };
 
-  // Convenience for B2's ghost preview: grid coords -> world origin
-  // (the SAME formula as the file-header contract; exposed so callers
-  // never hand-roll it).
-  B.gridToWorld = function (gx, gy, gz) { return { x: gx * CELL, y: gy * WALL_H, z: gz * CELL }; };
+  // grid coords -> world origin (edge offsets excluded; that is validate().pos)
+  B.gridToWorld = function (gx, gy, gz, grid) {
+    const gr = normGrid(grid);
+    return { x: gr.ox + gx * CELL, y: gr.oy + gy * WALL_H, z: gr.oz + gz * CELL };
+  };
+  B.worldToCell = function (x, z, grid) {
+    const gr = normGrid(grid);
+    return { gx: Math.round((x - gr.ox) / CELL), gz: Math.round((z - gr.oz) / CELL) };
+  };
 
-  // B2: CBZ.building.validate(kind, gx, gy, gz, rot) -> {ok, reason} —
-  // the read-only preview building.place() itself now runs internally.
-  // Also carries `pos` (world transform, edge-offset included) so B2's
-  // ghost mesh never has to re-derive the wall/doorframe edge offset by
-  // hand; that's additive beyond the documented {ok,reason} contract, not
-  // a replacement for it.
-  // B6: optional 6th arg `ownerId` — the placer's pid, forwarded to the
-  // computeValidity gate (d) so a ghost preview reads "blocked" for a
-  // foreign base exactly like a real place() attempt would. Omitted calls
-  // (every pre-B6 call site) default to CBZ.netPid() inside computeValidity.
-  B.validate = function (kind, gx, gy, gz, rot, ownerId) {
-    const v = computeValidity(kind, gx, gy, gz, rot, ownerId);
-    return { ok: v.ok, reason: v.reason, pos: v.pos || null, fp: v.fp || null };
+  // CBZ.building.validate(kind, gx, gy, gz, rot, ownerId, grid) -> {ok, reason, pos, fp}
+  B.validate = function (kind, gx, gy, gz, rot, ownerId, grid) {
+    const v = computeValidity(kind, gx, gy, gz, rot, ownerId, grid);
+    return { ok: v.ok, reason: v.reason, pos: v.pos || null, fp: v.fp || null, def: v.def || null };
   };
 
   B.place = function (kind, gx, gy, gz, rot, opts) {
     opts = opts || {};
-    const def = CATALOG[kind];
-    if (!def) { console.warn("[building] place: unknown kind", kind); return null; }
+    if (!CATALOG[kind]) { console.warn("[building] place: unknown kind", kind); return null; }
     gx |= 0; gy |= 0; gz |= 0;
     rot = ((rot | 0) % 4 + 4) % 4;
 
-    const v = computeValidity(kind, gx, gy, gz, rot, opts.ownerId);
-
-    // HARD fail — enforced even under opts.skipValidity (a replayed save
-    // still can't double-claim a slot); support/world-collision are the
-    // only trust-the-save skip. (B3: the old "stairs rot 1/3 unsupported"
-    // hard fail is gone now that the x-axis ramp exists — see below.)
-    if (v.reason === "slot already occupied") return null;
+    const v = computeValidity(kind, gx, gy, gz, rot, opts.ownerId, opts.grid);
+    if (v.reason === "slot already occupied" || !v.def) return null;
     if (!opts.skipValidity && !v.ok) return null;
 
-    const pos = v.pos, fp = v.fp, rect = v.rect, sup = v.sup, key = v.key;
+    const def = v.def, gr = v.grid, fp = v.fp, rect = v.rect, keys = v.keys;
+    const sup = v.sup || { ok: false };
+    const pos = v.pos;
+    if (opts.y != null && isFinite(opts.y)) {
+      const dy = opts.y - pos.y;
+      pos.y = opts.y; rect.minY += dy; rect.maxY += dy;
+    }
 
     const piece = CBZ.spawnPiece(def, {
       pos: pos, rot: rot, kind: kind,
       hp: opts.hp != null ? opts.hp : def.hp,
       maxHp: def.hp,
+      tier: def.tier != null ? def.tier : null,
       ownerId: opts.ownerId != null ? opts.ownerId : null,
       solid: def.solid !== false,
       walkTop: !!def.walkTop,
       blockLOS: !!def.blockLOS,
       gridPos: { gx: gx, gy: gy, gz: gz },
-      // B4: stability/maxSpan live ON the piece (pieces.js stays generic —
-      // it only ever compares these two numbers, never re-derives them).
       stability: sup.stability != null ? sup.stability : 0,
       maxSpan: maxSpanFor(kind),
     });
     if (!piece) return null;
+    piece.defRef = def;
+    if (!isGlobal(gr)) piece.grid = { id: gr.id, ox: gr.ox, oz: gr.oz, oy: gr.oy };
+    if (def.kit && piece.meshRef) {
+      piece.meshRef.rotation.y = -rot * (Math.PI / 2);
+      piece.meshRef.updateMatrix();
+    }
 
-    // reserve() ALWAYS runs (even under skipValidity/replay) — a loaded
-    // world's footprints must still block future real-time placements.
-    if (CBZ.placement && CBZ.placement.reserve) CBZ.placement.reserve(rect);
-    occupancy.set(key, piece.id);
-    pieceIdToOccKey.set(piece.id, key);
+    // The static placement hash is the SURVIVAL world gate. Plot grids never
+    // read it (they test live colliders), so they never write to it either:
+    // a reservation there outlives the piece and would haunt the lot.
+    if (isGlobal(gr) && CBZ.placement && CBZ.placement.reserve) CBZ.placement.reserve(rect);
+    for (let i = 0; i < keys.length; i++) occupancy.set(keys[i], piece.id);
+    pieceIdToOccKey.set(piece.id, keys);
 
-    // B4 MULTI-SUPPORT: wire EVERY supporter into supportedBy/supports —
-    // sup.pieceIds (floor/roof, may hold >1 wall) when present, else the
-    // single sup.pieceId (wall/doorframe/stairs/foundation, or null on
-    // bare ground — nothing to wire).
+    // B4 MULTI-SUPPORT: wire EVERY supporter into supportedBy/supports.
     if (sup.ok) {
       const supporterIds = (sup.pieceIds && sup.pieceIds.length) ? sup.pieceIds : (sup.pieceId ? [sup.pieceId] : []);
       for (let i = 0; i < supporterIds.length; i++) {
@@ -600,12 +730,8 @@
     }
 
     if (kind === "stairs") {
-      // Custom RAMP platform (systems/physics.js's groundAt ramp handling,
-      // core/interfaces.js #4) — NOT the generic walkTop flat-top path.
-      // rot0/rot2 climb along z (unchanged); rot1/rot3 climb along x (B3 —
-      // physics.js's ramp parsing grew an optional axis:"x" sibling for
-      // exactly this). dir is "which way is uphill" along the climb axis:
-      // rot0 → +z, rot2 → -z, rot1 → +x, rot3 → -x.
+      // Custom RAMP platform (physics.js groundAt ramp handling). rot0/rot2
+      // climb along z, rot1/rot3 along x; dir = which way is uphill.
       const onXAxis = (rot === 1 || rot === 3);
       const dir = (rot === 0 || rot === 1) ? 1 : -1;
       const rampShape = onXAxis
@@ -619,31 +745,20 @@
         pieceId: piece.id,
       };
       CBZ.platforms.push(ramp);
-      piece.platforms.push(ramp); // keep the piece's own bookkeeping array in sync (reapDrain filters CBZ.platforms globally by pieceId, so cleanup works either way — this just keeps piece.platforms truthful)
+      piece.platforms.push(ramp);
     }
 
-    // B6 EXTENSION POINT: fires after EVERY successful placement, fresh OR
-    // replayed through B.apply() below — a single optional hook so
-    // systems/baseclaim.js can react (mint/extend a BaseRecord for a
-    // cupboard, seed open/locked/contents state for a door/container,
-    // register its interaction verbs) without this file knowing what any
-    // of those kinds MEAN. Not an array/bus — this wave has exactly one
-    // consumer; widen to a list if a second one ever needs it.
+    // Extension points: the global B6 hook (baseclaim.js), then the def's own
+    // (the compound kit keeps its per-kind behaviour on its defs).
     if (CBZ.onPiecePlace) CBZ.onPiecePlace(piece, opts);
+    if (def.onPlace) { try { def.onPlace(piece, opts); } catch (e) { console.error("[building] onPlace", kind, e); } }
 
     return piece;
   };
 
-  // ---- collectCascade: READ-ONLY mirror of pieces.js's despawnPiece
-  // cascade BFS (systems/pieces.js:274-299), duplicated here so
-  // CBZ.building.remove() can clean occupancy for every piece a cascade
-  // is ABOUT to kill BEFORE calling despawnPiece (which only marks
-  // !alive + queues the actual array/mesh teardown for the next reap
-  // drain — occupancy cleanup can't wait for that deferred pass without
-  // a lookup miss on this same collectCascade). Kept in exact lockstep
-  // with pieces.js's algorithm on purpose; if that BFS ever changes,
-  // this one must change with it (no shared helper was factored out,
-  // per the task's "keep minimal" steer).
+  // ---- collectCascade: READ-ONLY mirror of pieces.js's despawnPiece cascade
+  // BFS, so remove() can clean occupancy for every piece the cascade is ABOUT
+  // to kill before despawnPiece defers the real teardown. Kept in lockstep.
   function collectCascade(rootId) {
     const toKill = new Set([rootId]);
     const queue = [rootId];
@@ -671,41 +786,50 @@
   }
 
   // CBZ.building.remove(pieceId) -> bool — despawnPiece(cascade:true) +
-  // occupancy cleanup for every piece the cascade kills.
+  // occupancy cleanup + the remove hooks for every piece the cascade kills.
   B.remove = function (pieceId) {
     const p = CBZ.pieces.get(pieceId);
     if (!p || !p.alive) return false;
     const toKill = collectCascade(pieceId);
     toKill.forEach(function (id) {
-      const key = pieceIdToOccKey.get(id);
-      if (key != null) { occupancy.delete(key); pieceIdToOccKey.delete(id); }
-      // B6 EXTENSION POINT: mirror of onPiecePlace above — fires for EVERY
-      // piece this cascade is about to kill (not just the explicit target),
-      // so a cupboard caught in a collapse dissolves its BaseRecord exactly
-      // like a direct demolish/raid-kill would (Rust semantics: the TC
-      // falling drops building privilege for the whole radius).
-      if (CBZ.onPieceRemove) { const kp = CBZ.pieces.get(id); if (kp) CBZ.onPieceRemove(kp); }
+      const keys = pieceIdToOccKey.get(id);
+      if (keys != null) {
+        for (let i = 0; i < keys.length; i++) if (occupancy.get(keys[i]) === id) occupancy.delete(keys[i]);
+        pieceIdToOccKey.delete(id);
+      }
+      const kp = CBZ.pieces.get(id);
+      if (!kp) return;
+      if (CBZ.onPieceRemove) CBZ.onPieceRemove(kp);
+      if (kp.defRef && kp.defRef.onRemove) { try { kp.defRef.onRemove(kp); } catch (e) { console.error("[building] onRemove", kp.kind, e); } }
     });
     return CBZ.despawnPiece(pieceId, { cascade: true });
   };
 
+  // who holds this exact placement's first slot (null = free) — blueprints
+  // and the kit's own support lookups ask this instead of guessing keys.
+  B.occupantAt = function (kind, gx, gy, gz, rot, grid) {
+    const gr = normGrid(grid);
+    const def = defFor(kind, gr);
+    if (!def) return null;
+    const keys = keysFor(kind, def, gx | 0, gy | 0, gz | 0, ((rot | 0) % 4 + 4) % 4, gr);
+    for (let i = 0; i < keys.length; i++) { const id = occupancy.get(keys[i]); if (id != null) return id; }
+    return null;
+  };
+  B.isBuilt = function (pieceId) { return pieceIdToOccKey.has(pieceId); };
+
   /* ============================================================
-     serialize()/apply() — the world-blob rider (netpersist.js's
-     blob.bld, wired beside blob.fam's established pattern). apply()
-     replays through place() with validity SKIPPED entirely (trust the
-     save) but STILL reserves real geometry footprints (see place()'s
-     comment on `opts.skipValidity`).
+     serialize()/apply() — the world-blob rider (netpersist.js blob.bld and
+     basesave.js's single-player ledger). apply() replays through place()
+     with validity SKIPPED (trust the save). Plot-grid pieces carry their
+     grid {id,ox,oz,oy} and their exact height, so they restore exactly.
      ============================================================ */
   B.serialize = function () {
     const pieces = [];
     CBZ.pieces.forEach(function (p) {
       if (!p.alive || !p.gridPos || pieceIdToOccKey.get(p.id) == null) return; // only building-placed pieces
       const rec = { kind: p.kind, gx: p.gridPos.gx, gy: p.gridPos.gy, gz: p.gridPos.gz, rot: p.rot, hp: p.hp, ownerId: p.ownerId };
-      // B6: generic optional passthrough — this file has no idea what a
-      // door's `open`/`locked` or a container's `contents` MEAN, it just
-      // carries whatever systems/baseclaim.js stamped onto the piece
-      // (undefined fields are skipped so every pre-B6 piece serializes
-      // byte-identical to before).
+      if (p.grid) { rec.grid = { id: p.grid.id, ox: p.grid.ox, oz: p.grid.oz, oy: p.grid.oy }; rec.y = p.pos.y; }
+      // generic optional passthrough (baseclaim doors/containers, kit gates/stash)
       if (p.open !== undefined) rec.open = p.open;
       if (p.locked !== undefined) rec.locked = p.locked;
       if (p.contents !== undefined) rec.contents = p.contents;
@@ -715,20 +839,17 @@
   };
 
   B.apply = function (blob) {
-    if (!blob || blob.v !== 1 || !Array.isArray(blob.pieces)) { if (blob) console.warn("[building] apply: blob v" + (blob && blob.v) + " · skipped"); return; }
+    if (!blob || blob.v !== 1 || !Array.isArray(blob.pieces)) { if (blob) console.warn("[building] apply: blob v" + (blob && blob.v) + " skipped"); return; }
     for (let i = 0; i < blob.pieces.length; i++) {
       const rec = blob.pieces[i];
-      const piece = B.place(rec.kind, rec.gx, rec.gy, rec.gz, rec.rot, { skipValidity: true, ownerId: rec.ownerId, hp: rec.hp });
+      if (!rec || !CATALOG[rec.kind]) continue;
+      const piece = B.place(rec.kind, rec.gx, rec.gy, rec.gz, rec.rot, { skipValidity: true, ownerId: rec.ownerId, hp: rec.hp, grid: rec.grid || null, y: rec.grid ? rec.y : null, replay: true });
       if (!piece) continue;
-      // B6: restore the generic extras (CBZ.onPiecePlace already fired
-      // inside B.place, against the pre-extras defaults — a second,
-      // explicitly-named hook lets baseclaim.js re-sync anything DERIVED
-      // from these fields, e.g. an open door's collider must stay OUT of
-      // CBZ.colliders on replay, not get re-added by the default-closed path).
       if (rec.open !== undefined) piece.open = rec.open;
       if (rec.locked !== undefined) piece.locked = rec.locked;
       if (rec.contents !== undefined) piece.contents = rec.contents;
       if (CBZ.onPieceReplay) CBZ.onPieceReplay(piece, rec);
+      if (piece.defRef && piece.defRef.onReplay) { try { piece.defRef.onReplay(piece, rec); } catch (e) { console.error("[building] onReplay", rec.kind, e); } }
     }
   };
 

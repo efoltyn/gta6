@@ -57,9 +57,6 @@
       if (b) b.click();
     });
     mid.appendChild(play);
-    // the device's record: the number the next run is for (modes/shark_sim.js owns it)
-    const best = el("div", "st-best"); best.id = "sharkBest";
-    mid.appendChild(best);
     const q = el("div", "st-quality");
     q.appendChild(el("span", null, "Graphics"));
     const seg = el("div", "st-seg");
@@ -196,21 +193,12 @@
     }
     cast.length = 0;
   }
-  function showBest() {
-    const n = document.getElementById("sharkBest");
-    if (!n) return;
-    const b = CBZ.sharkSimBest && CBZ.sharkSimBest();
-    if (!b) { n.textContent = ""; n.style.display = "none"; return; }
-    n.textContent = "Best " + String(b.score).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    n.style.display = "";
-  }
   function attract(dt) {
     const g = CBZ.game;
     if (!g || g.state !== "title" || g.mode !== "sharksim") { if (seeded) castOut(); seeded = false; return; }
     const A = CBZ.surv && CBZ.surv.arena, cam = CBZ.camera, T = window.THREE;
     if (!A || !A.center) { ensureWorld(); return; }
     if (!cam || !T) return;
-    if (!seeded) { showBest(); }
     if (!seeded) { seeded = true; t = 0; ang0 = (CBZ.hash01 ? CBZ.hash01(7, 3, 0x5aac01) : Math.random()) * Math.PI * 2; }
     const step = Math.min(0.1, dt || 0.016);
     t += step;

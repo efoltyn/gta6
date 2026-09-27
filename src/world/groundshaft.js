@@ -121,7 +121,7 @@
      is the signal to dispose the meshes those records owned. */
   const pub = CBZ.survHoles = CBZ.groundShafts = (CBZ.survHoles || []);
   const live = [];
-  const chunks = [];          // falling rim/entrained debris (our own integrator)
+  const chunks = [];          // crush trackers riding the falling rim slabs (the slabs are CBZ.debris)
   const seqs = [];            // running collapse sequences
   const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0 };
 
@@ -763,6 +763,23 @@
         const F = [0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 0, 3, 7, 0, 7, 4];
         for (let i = 0; i < F.length; i++) I.push(base + F[i]);
       },
+      // an irregular broken chunk (debris.js's shared cut solid, ~1 m across)
+      // scaled to (sx, sy, sz); a plain box only when debris.js is absent
+      chunk(cx, cy, cz, sx, sy, sz, yaw, hex, k, variant) {
+        const g = CBZ.debris && CBZ.debris.chunkGeo ? CBZ.debris.chunkGeo(variant) : null;
+        if (!g) { this.add(cx, cy, cz, sx, sy, sz, yaw, hex, k); return; }
+        const pa = g.attributes.position;
+        const co = Math.cos(yaw || 0), si = Math.sin(yaw || 0);
+        const base = P.length / 3;
+        const r = (((hex >> 16) & 255) / 255) * k, gg = (((hex >> 8) & 255) / 255) * k, b = ((hex & 255) / 255) * k;
+        for (let i = 0; i < pa.count; i++) {
+          const x = pa.getX(i) * sx, y = pa.getY(i) * sy, z = pa.getZ(i) * sz;
+          P.push(cx + x * co - z * si, cy + y, cz + x * si + z * co);
+          const kk = y > 0 ? 1 : 0.82;
+          C.push(r * kk, gg * kk, b * kk);
+          I.push(base + i);
+        }
+      },
       mesh(mat) {
         if (!P.length) return null;
         const geo = new THREE.BufferGeometry();
@@ -788,14 +805,23 @@
        no burial and no wall to shelter against, so slabs the size of a car
        leaning in a 5 m dish were just furniture in the wrong room. */
     const wedges = h.bowl ? 0 : 3;
-    // talus cone, as stacked broken plates (a cone primitive reads too clean)
+    /* the talus cone IS the street that went down first: broken slabs of the
+       surface (asphalt / turf-topped soil) and clods of the earth under it,
+       each an irregular fractured chunk (CBZ.debris.chunkGeo, the same cut
+       solids the debris system breaks things into) stretched to slab or clod
+       proportions, stacked into a mound highest in the middle. It was 26
+       boxes. Seeded per hole (hs), so a re-cut keeps the same heap, and
+       merged into this shaft's own mesh, so it goes when the hole does. */
     const cone = h.coneR;
-    for (let i = 0; i < 26; i++) {
+    const nT = h.bowl ? 14 : 34;
+    for (let i = 0; i < nT; i++) {
       const a = hs(h, i, 1) * TAU, d = Math.sqrt(hs(h, i, 2)) * cone;
       const y = h.bottom + h.coneH * Math.max(0, 1 - d / cone) * (0.35 + hs(h, i, 3) * 0.6);
-      const s = 1.1 + hs(h, i, 4) * 2.3;
-      B.add(h.x + Math.cos(a) * d, y, h.z + Math.sin(a) * d, s, 0.35 + hs(h, i, 5) * 0.7, s * (0.6 + hs(h, i, 6) * 0.8),
-        hs(h, i, 7) * TAU, i % 3 === 0 ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1);
+      const slab = i % 3 === 0;
+      const s = slab ? 0.9 + hs(h, i, 4) * 1.6 : 0.5 + hs(h, i, 4) * 0.9;
+      B.chunk(h.x + Math.cos(a) * d, y, h.z + Math.sin(a) * d,
+        s, slab ? 0.22 + hs(h, i, 5) * 0.2 : s * (0.5 + hs(h, i, 5) * 0.4), s * (0.6 + hs(h, i, 6) * 0.6),
+        hs(h, i, 7) * TAU, slab ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1, i);
     }
     // wedged slabs → the void spaces
     const nV = wedges;
@@ -1089,63 +1115,65 @@
   }
 
   /* ============================================================
-     FALLING DEBRIS — our own integrator, because systems/fx.js's is
-     gated to survival mode and a city sinkhole must still crush people
+     FALLING DEBRIS — the street itself going in. Each rim chunk is a SLAB
+     OF THE GROUND that sheared off: a block of the surface's own material
+     (asphalt on a road, soil on the island) fractured by CBZ.debris into
+     real irregular pieces that tumble into the shaft, pile on each other
+     and settle as rubble at the bottom. The CRUSH is gameplay and stays
+     here: an invisible tracker rides the same arc (our own integrator,
+     because systems/fx.js's updater is gated to survival mode and a city
+     sinkhole must still crush people) and hurts whoever it lands on.
      ============================================================ */
+  const slabMats = new Map();
+  function slabMat(hex) {
+    let m = slabMats.get(hex);
+    if (!m) { m = new THREE.MeshLambertMaterial({ color: hex }); m._shared = true; slabMats.set(hex, m); }
+    return m;
+  }
+  function slabKind(hex) { return hex === 0x2f2e2c ? "asphalt" : "dirt"; }
+  const _chunkV = new THREE.Vector3(), _chunkW = new THREE.Vector3();
   function dropChunk(o) {
-    mats();
     const s = o.size || 1.2;
-    const B = BoxBuf();
-    B.add(0, 0, 0, s, s * (0.35 + rnd() * 0.5), s * (0.7 + rnd() * 0.6), rnd() * TAU, o.color != null ? o.color : 0x51473b, 0.5);
-    const m = B.mesh(rockMat);
-    if (!m) return;
-    m.position.set(o.x, o.y, o.z);
-    root().add(m);
+    const hh = s * (0.35 + rnd() * 0.5), dd = s * (0.7 + rnd() * 0.6);
+    const col = o.color != null ? o.color : 0x51473b;
+    if (CBZ.debris) {
+      _chunkV.set(o.vx || 0, o.vy || 0, o.vz || 0);
+      _chunkW.set((rnd() - 0.5) * 5, (rnd() - 0.5) * 2, (rnd() - 0.5) * 5);
+      CBZ.debris.shatterBox({ minX: o.x - s / 2, maxX: o.x + s / 2, minY: o.y - hh / 2, maxY: o.y + hh / 2, minZ: o.z - dd / 2, maxZ: o.z + dd / 2 },
+        slabMat(col), { kind: slabKind(col), launch: false, velocity: _chunkV, angular: _chunkW,
+          maxPieces: s > 1.4 ? 4 : 3, size: Math.max(0.25, s * 0.5), owner: "groundshaft", dust: 0.6, grit: 0.5 });
+    }
     chunks.push({
-      m: m, x: o.x, z: o.z, y: o.y, vy: o.vy || 0, vx: o.vx || 0, vz: o.vz || 0,
-      sx: (rnd() - 0.5) * 5, sz: (rnd() - 0.5) * 5, r: s * 0.7,
-      dmg: o.dmg != null ? o.dmg : 0, landed: false, keep: !!o.keep, t: 0,
+      x: o.x, z: o.z, y: o.y, vy: o.vy || 0, vx: o.vx || 0, vz: o.vz || 0, r: s * 0.7,
+      dmg: o.dmg != null ? o.dmg : 0, landed: false,
     });
   }
   function clearChunks() {
-    for (let i = 0; i < chunks.length; i++) {
-      const c = chunks[i];
-      if (c.m.geometry) c.m.geometry.dispose();
-      if (c.m.parent) c.m.parent.remove(c.m);
-    }
     chunks.length = 0;
+    if (CBZ.debris) CBZ.debris.clear("groundshaft");
   }
   function tickChunks(dt) {
-    const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
+    // the tracker falls under debris.js's gravity, the one the pieces obey
+    const G = 9.81;
     for (let i = chunks.length - 1; i >= 0; i--) {
       const c = chunks[i];
-      c.t += dt;
-      if (!c.landed) {
-        c.vy -= G * dt;
-        c.x += c.vx * dt; c.z += c.vz * dt; c.y += c.vy * dt;
-        c.m.position.set(c.x, c.y, c.z);
-        c.m.rotation.x += c.sx * dt; c.m.rotation.z += c.sz * dt;
-        const fl = CBZ.groundShaftFloor(c.x, c.z, rawFloor(c.x, c.z));
-        if (c.y <= fl + c.r * 0.5) {
-          c.y = fl + c.r * 0.5; c.landed = true;
-          c.m.position.y = c.y;
-          // CRUSHING — a slab of the street arriving on somebody at the bottom
-          if (c.dmg > 0) {
-            eachActor(function (a) {
-              if (!a || !a.pos) return;
-              if (Math.hypot(a.pos.x - c.x, a.pos.z - c.z) > c.r + 1.5) return;
-              if (a.pos.y > c.y + 2.6) return;
-              stats.crushed++;
-              hurt(a, c.dmg, "crushed under the collapsing street", { fromX: c.x, fromZ: c.z, force: 6, fling: 1 });
-            });
-          }
-          if (CBZ.shake && CBZ.camera && Math.hypot(CBZ.camera.position.x - c.x, CBZ.camera.position.z - c.z) < 45) CBZ.shake(0.12);
-        }
-      } else if (!c.keep && c.t > 14) {
-        if (c.m.geometry) c.m.geometry.dispose();
-        if (c.m.parent) c.m.parent.remove(c.m);
-        chunks.splice(i, 1);
+      c.vy -= G * dt;
+      c.x += c.vx * dt; c.z += c.vz * dt; c.y += c.vy * dt;
+      const fl = CBZ.groundShaftFloor(c.x, c.z, rawFloor(c.x, c.z));
+      if (c.y > fl + c.r * 0.5) continue;
+      // CRUSHING — a slab of the street arriving on somebody at the bottom
+      c.y = fl + c.r * 0.5;
+      if (c.dmg > 0) {
+        eachActor(function (a) {
+          if (!a || !a.pos) return;
+          if (Math.hypot(a.pos.x - c.x, a.pos.z - c.z) > c.r + 1.5) return;
+          if (a.pos.y > c.y + 2.6) return;
+          stats.crushed++;
+          hurt(a, c.dmg, "crushed under the collapsing street", { fromX: c.x, fromZ: c.z, force: 6, fling: 1 });
+        });
       }
+      if (CBZ.shake && CBZ.camera && Math.hypot(CBZ.camera.position.x - c.x, CBZ.camera.position.z - c.z) < 45) CBZ.shake(0.12);
+      chunks.splice(i, 1);
     }
   }
 
@@ -1319,7 +1347,7 @@
         x: seq.x + Math.cos(a) * d, z: seq.z + Math.sin(a) * d, y: seq.gy + 0.6,
         vy: 0.6 + rnd() * 1.4, vx: -Math.cos(a) * (0.8 + rnd() * 1.8), vz: -Math.sin(a) * (0.8 + rnd() * 1.8),
         size: s, color: i % 3 === 0 ? h.surfaceColor : 0x584d40,
-        dmg: 55 + s * 22, keep: i % 2 === 0,
+        dmg: 55 + s * 22,
       });
     }
   }

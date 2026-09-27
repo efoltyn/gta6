@@ -15,9 +15,9 @@
                   fire is what converts a survivable hit into a fatal one,
                   exactly as in the real sequence (NIST: fireproofing stripped
                   by the impact, steel softens, floors sag)
-     4 CRITICAL   load path failing. Bare columns where a bay of cladding used
-                  to be, rebar out of the broken slabs, an apron of masonry on
-                  the pavement. The last beat where it is still standing.
+     4 CRITICAL   load path failing. The bays around the wound are carved
+                  open too and their own wall lies on the pavement in pieces.
+                  The last beat where it is still standing.
      5 COLLAPSING the catastrophe, choreographed by city/collapse.js in
                   whatever grammar this building's material calls for
      6 RUBBLE     handed to city/demolition.js, which already owns the
@@ -935,13 +935,13 @@
        explosion in front of an untouched wall, which is exactly the fault the
        owner filmed — the blast looks real and its EFFECT does not.
 
-       collapse.js's damage skin is real geometry hung on the facade at the
-       wound: blown-out openings with the floor slab edges showing through
-       them, a panel left hanging off its top fixing, bare columns and rebar
-       at CRITICAL, and an apron of masonry on the pavement that grows with
-       the stage. It is rebuilt (never accumulated) on each transition, so it
-       cannot grow without bound, and it is keyed on the lot so a building
-       that is repaired by demolition.js's rebuild calendar loses it.
+       collapse.js's damage is the building's own wall, opened: at each
+       transition the wall at the wound is carved (the same carve a rocket
+       makes), its material leaves as pieces of itself and lands on the
+       pavement, the floor plates show through the gap, and at CRITICAL the
+       neighbouring bays and the floor above go too. Nothing is invented
+       (the old skin hung boxes on the facade and a box apron on the kerb).
+       It is keyed on the lot and each stage carves once.
 
        Nothing is painted ON the wall: the owner purged facade decals for a
        real reason (soot does not adhere to a vertical pane), and this obeys
@@ -954,6 +954,7 @@
           ox: b.ox, oz: b.oz, gy: 0, w: b.w, d: b.d,
           h: b.h || (b.storeys * (b.FH || 3.2)), storeys: b.storeys, FH: b.FH || 3.2,
           wall: b.wallColor, masonry: b.masonry, style: styleOf(b), key: rec.key,
+          at: { x: w.x, y: w.y, z: w.z },
         }, stage, { nx: w.nx, nz: w.nz, floor: w.floor });
       } catch (e) {}
     }
@@ -1118,8 +1119,8 @@
     //
     // NOT a synchronous finishCollapse(): the nuke's blast wave sweeps a ring
     // every 50ms and a single ring can cross dozens of lots at once. Each
-    // teardown runs demolition.js's buildRubble — 16-24 `new THREE.BoxGeometry`
-    // plus meshes plus a tween — so doing them inline meant hundreds of
+    // teardown runs demolition.js's buildRubble — a fractured rubble mound
+    // plus a tween — so doing them inline meant hundreds of
     // geometry allocations inside one wave tick, 20x a second, for three
     // seconds. That is the exact frame cliff the brief forbids, and it is the
     // budget the old hand-rolled nuke used to enforce with its own "2 lots per
@@ -1154,10 +1155,12 @@
        grammar and picks a GRAMMAR to match: a frame pancakes, a slender
        masonry stack hinges at its base and falls across the street, a
        wounded mid-rise shears along the hit, timber folds, adobe crumbles.
-       The shell it raises is built from this building's real wall colour,
-       real storey height and real window rhythm, so the swap behind the dust
-       is a frame nobody can see — which was the actual reason the old
-       collapse read as fake however well it was timed.
+       The shell it raises IS this building — its own walls, floor plates,
+       facade and glass (b.group / b.losMeshes / b.windows, handed over
+       below), cut into storey bands — so the swap behind the dust is a frame
+       nobody can see, and every band that fails breaks into pieces of
+       itself. That was the actual reason the old collapse read as fake
+       however well it was timed.
 
        REVERT: ?cfg_COLLAPSE_V2=0 sends every condemnation down the same
        queue an over-the-cap one already takes — demolition.js's instant
@@ -1180,9 +1183,14 @@
       ox: b.ox, oz: b.oz, gy: 0,
       w: b.w, d: b.d, h: h, storeys: b.storeys, FH: b.FH || 3.2,
       wall: b.wallColor, masonry: b.masonry, style: styleOf(b), key: rec.key,
+      // THE BUILDING ITSELF, so the shell that falls is what was standing and
+      // the pieces are cut out of its own walls, plates and glass
+      group: b.group, solids: b.losMeshes, panes: b.windows,
+      tight: !!rec.controlled,        // a contractor's drop stays in its footprint
     }, {
       wound: { nx: w.nx, nz: w.nz, floor: initFloor || 0 },
       preShudder: PRESHUDDER,
+      mode: rec.controlled ? "pancake" : undefined,
       onSwap: function () { hideReal(rec); },
       onGround: function () { finishCollapse(rec, false); },
       onDone: function () {
@@ -1201,7 +1209,7 @@
     try {
       if (rec.wound && CBZ.cityChunk) {
         CBZ.cityChunk(rec.wound.x, rec.wound.y, rec.wound.z,
-          { count: 8, force: 7, dirx: rec.wound.nx, dirz: rec.wound.nz });
+          { count: 8, force: 7, dirx: rec.wound.nx, dirz: rec.wound.nz, material: wallMatOf(b) });
       }
     } catch (e) {}
   }
@@ -1213,6 +1221,15 @@
      city-wide position hash. Ask the kit rather than re-deriving it here, so
      the building that COLLAPSES is made of what the building that was BUILT
      is made of. */
+  // The wall this building is actually made of (collapse.js reads it off the
+  // building's own solids), so chips and dust take its colour.
+  function wallMatOf(b) {
+    try {
+      const r = CBZ.collapse && CBZ.collapse.materialsOf ? CBZ.collapse.materialsOf(b) : null;
+      if (r && r.wall) return r.wall;
+    } catch (e) {}
+    return CBZ.cmat && b && b.wallColor != null ? CBZ.cmat(b.wallColor) : null;
+  }
   function styleOf(b) {
     if (!b) return null;
     if (b.dress && b.dress.style) return b.dress.style;
@@ -1227,30 +1244,22 @@
     if (rec.stage >= STAGE.COLLAPSING) return false;
     if (opts && opts.by) rec.by = opts.by;
     if (opts && opts.byPlayer) rec.byPlayer = true;   // credit vs blame — see hit()
+    /* A CONTROLLED DEMOLITION (city/plots.js: the owner's contractor). Charges
+       at the base, so the frame pancakes straight down into its own footprint
+       instead of hinging across the street, and the debris field stays inside
+       the lot the owner paid to clear: nobody on the sidewalk is buried by a
+       job that was cordoned and legal. */
+    if (opts && opts.controlled) rec.controlled = true;
     if (!collapsible(lot)) return false;
     beginCollapse(rec, 0);
     return true;
   };
 
-  /* ---- the proxy shell ---------------------------------------------------
-     A stack of storey BANDS approximating the building's silhouette, built
-     the moment the real one is hidden. <=10 boxes on cached materials, so a
-     collapse costs about as much as one small prop. Never batched (it lives
-     for four seconds), never disposed twice.
-     WHY A PROXY AT ALL: the real building's geometry is MERGED into shared
-     static buffers by core/batch.js. Moving b.group would not move a single
-     merged vertex, and disposing those buffers is explicitly forbidden. So
-     the only honest way to animate a collapse in this engine is the industry-
-     standard one anyway: hide the real thing behind dust and animate a cheap
-     stand-in (Frostbite/Control both ship exactly this).
-  ------------------------------------------------------------------------ */
-  /* THE PROXY SHELL MOVED to city/collapse.js. It was <=10 flat boxes in one
-     grey; it is now built out of this building's own wall colour, storey
-     height, window rhythm, plinth and cornice, and it decomposes into face
-     panels and floor slabs so a grammar can peel one face off and expose the
-     slabs behind it. See that file's section 3 for why the proxy exists at
-     all (merged static buffers cannot be moved, so the industry-standard
-     hide-behind-dust swap is the only honest option in this engine). */
+  /* THE SHELL is city/collapse.js's (section 3). The real building's
+     geometry is MERGED into shared static buffers by core/batch.js, so moving
+     b.group would not move a single merged vertex: the collapse hides the
+     real thing behind dust and animates a stand-in. That stand-in is now the
+     building's own solids, read at the swap, not a stack of grey boxes. */
 
   /* ---- hide the real building (and kill what is inside) ----------------- */
   /* Remove every member of `set` from `arr`, IN PLACE, in one pass.
@@ -1365,17 +1374,20 @@
         if (CBZ.shake) CBZ.shake(4.0);
         if (CBZ.sfx) { CBZ.sfx("collapse"); CBZ.sfx("rumble", { delay: 0.35 }); }
         if (CBZ.cityScorch) CBZ.cityScorch(b.ox, b.oz, Math.max(b.w, b.d) * 0.6);
+        const wm = wallMatOf(b);
         if (CBZ.cityDustKick) {
           // the pall rolls out along the streets — dust volume many times the
-          // building's own footprint is the signature of a real collapse
+          // building's own footprint is the signature of a real collapse, and
+          // it is the colour of what came down
+          const dc = wm && wm.color ? wm.color.clone().lerp(new THREE.Color(0xb3ada2), 0.5).getHex() : undefined;
           const n = Math.round(CBZ.qScale ? CBZ.qScale(4, 10) : 8);
           for (let i = 0; i < n; i++) {
             const a = (i / n) * 6.2832;
-            CBZ.cityDustKick(b.ox + Math.cos(a) * b.w * 0.7, 0.5, b.oz + Math.sin(a) * b.d * 0.7, 2.6);
+            CBZ.cityDustKick(b.ox + Math.cos(a) * b.w * 0.7, 0.5, b.oz + Math.sin(a) * b.d * 0.7, 2.6, dc);
           }
         }
         if (CBZ.cityChunk) {
-          CBZ.cityChunk(b.ox, 1.4, b.oz, { count: 20, force: 10 });
+          CBZ.cityChunk(b.ox, 1.4, b.oz, { count: 20, force: 10, material: wm });
         }
         if (CBZ.cityShatter) CBZ.cityShatter(b.ox, b.oz, Math.max(b.w, b.d) + 14);   // the block's windows go
       } catch (e) {}
@@ -1392,7 +1404,7 @@
          not. Every death goes through the shared kill bus (CLAUDE.md) — this
          file never toasts a death itself. */
       try {
-        const reach = Math.max(b.w, b.d) * 0.6 + (b.h || 12) * 0.35;
+        const reach = rec.controlled ? Math.max(b.w, b.d) * 0.55 + 1 : Math.max(b.w, b.d) * 0.6 + (b.h || 12) * 0.35;
         const cause = "buried in the collapse";
         if (CBZ.cityCrowdCircleKill) {
           CBZ.cityCrowdCircleKill(b.ox, b.oz, reach, { quiet: true, fromX: b.ox, fromZ: b.oz, noCrime: !rec.byPlayer });

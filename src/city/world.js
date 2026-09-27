@@ -1036,7 +1036,7 @@
         // land BEHIND the sea. Rejecting sea fragments over dry land outright
         // means water and ground never fight for depth ownership, so there is
         // no green flicker and no apparent ocean growing around trees.
-        "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut) discard;",
+        "  if (uSeaHasLandMask > 0.5 && field.r > cbzShoreCutAt(vSeaWorld.xz)) discard;",
         "  float inland = max(vSeaInland, field.a);",
         // WATER_SURFACE_LOOK: the ripple field, the streak lanes and the shore
         // calm band all live in world/water_spec.js so the planar mirror gets

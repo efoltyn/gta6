@@ -390,7 +390,7 @@
     { name: "Metro Cab",       brand: "bison",   value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  detailStyle: "tesla-3", livery: "taxi", designStyle: "cab" },
     { name: "Bison Vista",     brand: "bison", maker: "VLT",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  detailStyle: "tesla-3", designStyle: "vista" },
     { name: "Bison Hauler",    brand: "bison", maker: "VLT",   value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "hauler" },
-    { name: "Bison Rampart",   brand: "bison", maker: "VLT",   value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", detailStyle: "suv", designStyle: "rampart" },
+    { name: "Bison Rampart",   brand: "bison", maker: "VLT",   value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", detailStyle: "pickup", designStyle: "rampart" },
     { name: "Kotori Kaze",     brand: "kotori", maker: "KAI",  value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "kaze" },
     { name: "Bison Frontier",  brand: "bison", maker: "VLT",   value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "frontier" },
     { name: "Bison Stampede",  brand: "bison", maker: "VLT",   value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "stampede" },

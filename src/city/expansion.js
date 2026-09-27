@@ -449,33 +449,20 @@
     tower(cx + 48, cz + 40, 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
     tower(cx + 40, cz - 48, 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");
 
-    // ---- service station and showroom, copied from the disaster-town mix ----
-    function gasStation(x, z) {
-      addPlaced(x, z, 20, 15);
-      lots.push({ cx: x, cz: z, w: 20, d: 15, kind: "gas", district: "island", building: { name: "Island Gas" } });
-      plane(x, z, 20, 15, 0x41464d, 0.045);
-      const CH = 5.2;
-      [[-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5]].forEach(([px, pz]) => box(x + px, CH / 2, z + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
-      box(x, CH + 0.45, z, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: CH, y1: CH + 0.9 });
-      for (let i = -1; i <= 1; i++) box(x + i * 4, 0.8, z, 0.8, 1.6, 0.7, 0xff7a1a, { solid: true });
-      box(x - 9.5, 2.4, z - 5.5, 0.5, 4.8, 0.5, 0x6a7079, { solid: true });
-      box(x - 9.5, 4.6, z - 5.5, 2.2, 1.6, 0.3, 0xffd451);
-      // THE KIOSK along the back of the pad: a grab-and-go counter, two
-      // stocked snack racks and a lit drinks cooler — the stop is a real
-      // business you walk through, not just pumps under a roof.
-      box(x - 6.2, 0.55, z + 5.4, 2.6, 1.1, 0.9, 0x55606e, { solid: true });           // counter
-      box(x - 6.2, 1.14, z + 5.4, 2.7, 0.08, 1.0, 0xe6e8ee, { cast: false });          // worktop
-      for (const off of [-2.4, 0.4]) {
-        // SOLID: the kiosk has NO WALLS — counter, racks and cooler stand on
-        // the open forecourt slab, so nothing else covers their footprint. The
-        // counter beside them was already solid; these two 1.4 m racks and the
-        // 2.0 m cooler below were not, on the same floor, in the same room.
-        box(x + off, 0.7, z + 5.6, 1.7, 1.4, 0.6, 0x44505c, { cast: false, solid: true }); // rack body
-        for (let i = 0; i < 4; i++)
-          box(x + off - 0.55 + i * 0.38, 1.55, z + 5.6, 0.28, 0.3, 0.28,
-            [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff][i], { cast: false });             // snack stock
+    // ---- service station: world/fuel_station.js, the SAME builder the
+    //      disaster island uses (canopy, dispensers, lit store you can walk
+    //      into, price pylon). It used to straddle the (cx-80, cz+80) junction
+    //      and cut both streets; it now holds a proper mid-block frontage on
+    //      the cz+80 cross-street, facing it, with aprons out to the shoulder.
+    function gasStation(x, z, rotY) {
+      const SZ = CBZ.FUEL_STATION_SIZE || { frontage: 24, depth: 26 };
+      const odd = Math.abs(Math.round(Math.sin(rotY))) === 1;
+      const w = odd ? SZ.depth : SZ.frontage, d = odd ? SZ.frontage : SZ.depth;
+      addPlaced(x, z, w, d);
+      lots.push({ cx: x, cz: z, w, d, kind: "gas", district: "island", building: { name: "Island Gas" } });
+      if (CBZ.buildFuelStation) {
+        CBZ.buildFuelStation({ parent: root, x, z, y: 0, rotY, deck: 0.06, walkRise: 0, apron: 1.2 });
       }
-      box(x + 3.4, 1.0, z + 5.6, 1.2, 2.0, 0.8, 0x9fe0ff, { emissive: 0x9fe0ff, ei: 0.45, cast: false, solid: true });  // drinks cooler (2 m fridge)
     }
 
     // ISLAND CARS ARE REAL CARS (user-filmed: the old two-box props read as a
@@ -549,7 +536,7 @@
       });
     }
 
-    gasStation(cx - 78, cz + 74);
+    gasStation(cx - 60, cz + 80 - ROADW / 2 - 1.2 - 13, Math.PI);   // front edge on the shoulder
     showroom(cx + 72, cz - 76);
 
     // ---- enterable low-rise town around the former terrain peaks ----

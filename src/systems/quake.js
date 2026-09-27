@@ -922,40 +922,77 @@
       const b = frag[i];
       if (!b || b.fallen || !b.group) continue;
       const gy = b.gy != null ? b.gy : (A2.groundHeightAt ? A2.groundHeightAt(b.x, b.z) : 0);
-      // ---- DAY-ROOM TABLES on the ground floor -------------------------
-      // A heavy table with a solid apron is the only piece of furniture the
-      // advice names, so that is the only piece drawn. One or two per floor
-      // plate, inset from the walls, away from the stairwell strip.
-      if (CBZ.furnish && CBZ.furnish.table && b.w > 5 && b.d > 5) {
+      /* WHERE A TABLE ACTUALLY FITS.
+         OWNER: "the table and chair were stupidly placed inside buildings that
+         aren't big enough for them." They were: a 2.1 x 1.25 table with four
+         chairs was dropped at a hashed spot anywhere in the middle (w - 4.4)
+         of the footprint, and nothing knew the room had a 3.6 m switchback
+         stair down its -x side, a door on -z, or, in a tower, a lift shaft in
+         the middle. So tables stood on the stairs, across the doorway and on
+         the lift car, and chairs went through walls.
+
+         Now the arena publishes each building's ground-floor plan (b.interior:
+         the room inside the walls and the strips that must stay walkable) and
+         a table goes only where its WHOLE footprint, chairs pulled out and a
+         walkway round it, lies in the room and clear of every one of those
+         strips. The biggest piece that fits wins: a four-seat dining table,
+         else a two-seat one, else a small sturdy table (still something to
+         get under), else nothing. Among the spots that fit it takes the one
+         nearest the middle of the free floor, which is where people put a
+         table. A second table only goes in if it fits clear of the first. */
+      const plan = b.interior;
+      if (CBZ.furnish && CBZ.furnish.table && plan) {
         const buckets = new Map();
-        const n = 1 + (h01(b.x, b.z, 0x9a11) > 0.55 ? 1 : 0);
-        /* TWO TABLES MUST NOT BE THE SAME TABLE. Both positions were drawn
-           independently from the hash inside a room whose usable span is only
-           about 5 m, and nothing compared them — so a fair share of the
-           two-table buildings got both slabs in the same place: one L-shaped
-           top with a seam through it, eight chairs round it and a couple of
-           them clipping through the tabletop. A table is 2.1 x 1.25 with its
-           chair ring 0.42 out, so centres closer than ~3.2 m interpenetrate.
-           The second one is mirrored to the far quadrant when that happens,
-           which is deterministic and puts it where a second table would
-           actually be; if the room is too small to hold two apart, it simply
-           does not get a second. */
-        const spots = [];
-        const MINSEP = 3.2;
-        for (let k = 0; k < n; k++) {
-          let lx = (h01(b.x + k * 3.1, b.z, 0x9a12) - 0.5) * (b.w - 4.4);
-          let lz = (h01(b.x, b.z + k * 3.1, 0x9a13) - 0.5) * (b.d - 4.4);
-          let clash = function () {
-            for (let j = 0; j < spots.length; j++) {
-              if (Math.hypot(spots[j].lx - lx, spots[j].lz - lz) < MINSEP) return true;
+        const TIERS = [
+          { len: 2.1, deep: 1.25, seats: 4 },
+          { len: 1.6, deep: 0.95, seats: 2 },
+          { len: 1.1, deep: 0.75, seats: 0 },
+        ];
+        const CLEAR = 0.4, WALL = 0.2, STEP = 0.2;
+        const placedRects = [];
+        const fits = function (r) {
+          if (r.x0 < plan.x0 + WALL || r.x1 > plan.x1 - WALL || r.z0 < plan.z0 + WALL || r.z1 > plan.z1 - WALL) return false;
+          const all = plan.keepOut.concat(placedRects);
+          for (let i = 0; i < all.length; i++) {
+            const k = all[i];
+            if (r.x1 > k.x0 && r.x0 < k.x1 && r.z1 > k.z0 && r.z0 < k.z1) return false;
+          }
+          return true;
+        };
+        // every centre + yaw where this tier fits, nearest the middle of the
+        // free floor first
+        const spotsFor = function (T) {
+          const out = [];
+          for (let yi = 0; yi < 2; yi++) {
+            const hx0 = T.len / 2 + 0.05, hz0 = T.deep / 2 + (T.seats ? 0.42 + 0.3 : 0.05);
+            const hx = (yi ? hz0 : hx0) + CLEAR, hz = (yi ? hx0 : hz0) + CLEAR;
+            for (let x = plan.x0 + hx; x <= plan.x1 - hx + 1e-6; x += STEP) {
+              for (let z = plan.z0 + hz; z <= plan.z1 - hz + 1e-6; z += STEP) {
+                const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
+                if (fits(r)) out.push({ lx: x, lz: z, yaw: yi ? Math.PI / 2 : 0, rect: r });
+              }
             }
-            return false;
-          };
-          if (clash()) { lx = -lx; lz = -lz; }
-          if (clash()) continue;              // this room only has room for one
-          spots.push({ lx: lx, lz: lz });
-          const wx = b.x + lx, wz = b.z + lz;
-          const yaw = h01(wx, wz, 0x9a14) > 0.5 ? 0 : Math.PI / 2;
+          }
+          if (!out.length) return out;
+          let mx = 0, mz = 0;
+          for (const o of out) { mx += o.lx; mz += o.lz; }
+          mx /= out.length; mz /= out.length;
+          for (const o of out) o.score = Math.hypot(o.lx - mx, o.lz - mz) + (o.yaw ? 0.01 : 0);
+          out.sort(function (a, c) { return a.score - c.score; });
+          return out;
+        };
+        const want = 1 + (h01(b.x, b.z, 0x9a11) > 0.55 ? 1 : 0);
+        for (let k = 0; k < want; k++) {
+          let pick = null, tier = null;
+          for (const T of TIERS) {
+            const spots = spotsFor(T);
+            if (spots.length) { pick = spots[0]; tier = T; break; }
+          }
+          if (!pick) break;                       // this room has no floor left for a table
+          if (k > 0 && tier !== TIERS[0] && tier !== TIERS[1]) break;   // a second table must be a real one
+          placedRects.push(pick.rect);
+          const wx = b.x + pick.lx, wz = b.z + pick.lz;
+          const fy = b.floorTop != null ? b.floorTop : gy;      // the floor you stand on, not the lot
           // host draw: the table belongs to the BUILDING's group, so it goes
           // down with it when the building pancakes. Boxes are BUFFERED per
           // colour and merged once per building below: one mesh per table
@@ -977,10 +1014,8 @@
             return true;
           };
           try {
-            // a HEAVY table — the advice is specific about that, and a 1.6 m
-            // café table is not what somebody survives a ceiling under
-            CBZ.furnish.table(wx, gy, wz, yaw, { box: host, ox: 0, oz: 0, solid: true, seats: 4, len: 2.1, deep: 1.25, tone: "warm" });
-            coverAdd(wx, gy, wz, 1.0, "table", b);
+            CBZ.furnish.table(wx, fy, wz, pick.yaw, { box: host, ox: 0, oz: 0, solid: true, seats: tier.seats, len: tier.len, deep: tier.deep, tone: "warm" });
+            coverAdd(wx, fy, wz, tier.seats ? 1.0 : 0.75, "table", b);
             A.kitTables++;
           } catch (e) { /* the kit refused; the island simply has no table here */ }
         }

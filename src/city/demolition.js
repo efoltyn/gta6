@@ -16,9 +16,12 @@
      building's slices inside the shared merged buffers, the live group
      hides, colliders/platforms/LOS/doors/glass all unregister through
      the per-building mirrors makeBuilding now returns. Fully reversible.
-   - Rubble is DETERMINISTIC — seeded by the lot's coordinates
-     (CBZ.hashN), so every client and every reload grows the same pile
-     from a record that is just {x, z, atDay}.
+   - Rubble is the building's own material (CBZ.debris.pile of its wall,
+     floor plates and glass). The RECORD is still just {x, z, atDay}, and
+     everything that matters to play (phase, calendar, the mound collider)
+     is a pure function of it; the exact seating of the pieces is cosmetic
+     and may differ between clients. Barriers/scaffold stay seeded by the
+     lot's coordinates (CBZ.hashN).
    - Ledger records are coordinate-keyed (never array indices), serialize
      into the world save next to cityFracture's holes (net/netpersist.js
      already carries blob.demo), and expose onEvent/applyOne for the
@@ -53,6 +56,13 @@
   const T_CLEARED = 2.2;    // rubble sits smoking this long
   const T_SCAFFOLD = 4.2;   // then a cleared, barriered lot
   const T_REBUILT = 7.0;    // then scaffolding, then the building returns
+  /* AN OWNER'S TEARDOWN IS NOT A WOUND. When the player's contractor knocks a
+     building down on a lot he owns (city/plots.js), the city does not heal it:
+     the rubble is carted off in a fraction of a day and the lot is left as a
+     bare poured pad, HELD, for as long as he owns it. Selling the lot releases
+     the hold and the ordinary calendar (cleared -> scaffold -> rebuilt) takes
+     the parcel back. 0.12 day = 18 s real, enough to see the pile. */
+  const T_HELD_CLEAR = 0.12;
   // Storey ceiling above which a building is immune to collapse. This used to
   // be a hardcoded 11, which made the city's TALLEST buildings — the ones you
   // actually want to fly a plane into — the only ones that could never fall.
@@ -110,10 +120,6 @@
      saves carry the ledger at all — see the SP PERSISTENCE block at the foot
      of this file. false = the old per-row path, verbatim, and no SP section.  */
   if (CBZ.CONFIG.DEMO_LOAD_V1 == null) CBZ.CONFIG.DEMO_LOAD_V1 = true;
-  /* DEMO_RUBBLE_DET — rubble draw-stream equalisation + a less pathetic light
-     tier. See buildRubble() for the full reasoning and the mesh arithmetic.
-     false = the pre-existing two-branch builder, verbatim. */
-  if (CBZ.CONFIG.DEMO_RUBBLE_DET == null) CBZ.CONFIG.DEMO_RUBBLE_DET = true;
   // ~3 rockets for a small shop, ~5-6 for a fat 4-storey block (RPG power 1.9)
   function hpMax(b) { return 2 + b.storeys * 1.2 + (b.w * b.d) / 300; }
 
@@ -199,24 +205,11 @@
   }
   const mat = (col) => (CBZ.cmat ? CBZ.cmat(col) : new THREE.MeshLambertMaterial({ color: col }));
   // Detailed rubble is deliberately scarce. A nuclear collapse can put every
-  // lot in the city on this ledger; 16-24 unique meshes for every one of them
-  // turns a gameplay consequence into thousands of permanent draw calls.
-  // The first entries (structural.js drains nearest-first) keep the full pile;
-  // the rest retain a grounded, collidable three-piece silhouette.
+  // lot in the city on this ledger. The first RUBBLE_DETAIL_CAP piles
+  // (structural.js drains nearest-first) are full mounds; the rest are a low
+  // scatter of the same stuff. Either way the pieces are CBZ.debris rubble:
+  // frozen into one merged draw per material per 16 m cell, not a mesh each.
   const RUBBLE_DETAIL_CAP = 32;
-  /* LIGHT TIER = 5 slabs + 1 shard, not 2 + 1 (DEMO_RUBBLE_DET).
-     After a whole-city nuke the measured split was 32 detailed / 296 light, and
-     a 2-slab-plus-1-shard stub does not read as "a building was here" — it
-     reads as "the building was ERASED", which is precisely the owner's
-     "buildings blow up wrong". The arithmetic for the fix: +3 meshes x ~296
-     light lots = ~+900 extra boxes worst case, taking the light tier from
-     296*3 = 888 to 296*6 = 1,776 and the whole city-nuke pile budget from
-     ~1,480 to ~2,368 meshes. They are static, shadowless, unmerged
-     BoxGeometry boxes on the SHARED cmat cache (one material, no new
-     material per box), i.e. the cheapest thing this renderer draws — the same
-     class of object the scaffold phase already puts 40-60 of on a SINGLE lot.
-     The 32-lot full-mound cap is unchanged; only the floor is raised. */
-  const RUBBLE_LIGHT_SLABS = 5, RUBBLE_LIGHT_SHARDS = 1;
   function box(g, x, y, z, w, h, d, col, ry) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(col));
     m.position.set(x, y, z);
@@ -226,93 +219,45 @@
     return m;
   }
 
+  /* THE PILE IS THE BUILDING. This used to be 14-21 `new THREE.BoxGeometry`
+     slabs in four concrete greys and two leaning grey "wall shards" — a
+     quarry of cubes that had never looked at the building it replaced.
+     Now it is CBZ.debris.pile of the building's OWN materials (its wall, its
+     floor plates, its glass, read off its solids by collapse.materialsOf):
+     blocks of that stuff fractured exactly the way a shatter cuts, seated
+     biggest-first on the ground and on the pieces the collapse already
+     threw, and frozen solid (you climb it). Owned by the lot key, which is
+     also the key the collapse's own pieces carry: leaving the rubble phase
+     carts both off together (see disposeGroup / clearPhaseProps). */
+  function rubbleMats(b) {
+    let r = null;
+    try { r = CBZ.collapse && CBZ.collapse.materialsOf ? CBZ.collapse.materialsOf(b) : null; } catch (e) {}
+    const wall = (r && r.wall) || mat(b.wallColor != null ? b.wallColor : 0x8b8f94);
+    const list = [{ material: wall, weight: 3 }];
+    if (r && r.slab && r.slab !== wall) list.push({ material: r.slab, kind: "concrete", weight: 2 });
+    if (r && r.glass) list.push({ material: r.glass, kind: "glass", weight: 0.6 });
+    return list;
+  }
   function buildRubble(rec) {
     const lot = rec.lot, b = lot.building, g = new THREE.Group();
-    const rng = lotRng(lot, 0xdead);
-    const W = b.w - 1.2, Dp = b.d - 1.2;
+    const W = Math.max(2, b.w - 1.2), Dp = Math.max(2, b.d - 1.2);
     const peak = Math.min(3.6, 1.0 + b.storeys * 0.35);
     // The tier LATCHES here, at build time, and is deliberately never
-    // retrofitted: a pile that healed out of the ledger frees a detailed slot
-    // for the NEXT lot to be built (ledger.size is read live, and destroy()
-    // registers the record before calling setPhase, so the new pile counts
-    // itself), but an existing stub is left exactly as it is. Rebuilding
-    // standing geometry underneath the player to chase a budget is a worse bug
-    // than an under-detailed pile. DEMO_RUBBLE_DET changes only what the latch
-    // MEANS (how many of the pile's slabs get meshes), never when it happens.
+    // retrofitted: rebuilding a pile under the player to chase a budget is a
+    // worse bug than an under-detailed one.
     const detailed = ledger.size <= RUBBLE_DETAIL_CAP;
     rec.rubbleDetailed = detailed;
-    // concrete greys + a memory of the building's own wall colour
-    const cols = [0x565a5e, 0x4a4e52, 0x63676b, 0x585349];
-    if (CBZ.CONFIG.DEMO_RUBBLE_DET) {
-      /* ---- EQUALISED DRAW STREAM ----------------------------------------
-         The file header (:19-21) promises: "Rubble is DETERMINISTIC — seeded
-         by the lot's coordinates (CBZ.hashN), so every client and every reload
-         grows the same pile from a record that is just {x, z, atDay}."
-         The two-branch builder below BROKE that promise, and not subtly. The
-         detailed branch drew `14 + ((rng()*8)|0)` (one draw) then 7 draws per
-         slab then 5 per shard; the light branch skipped the count draw
-         entirely and drew 2 slabs and 1 shard. So the SAME lot, from the SAME
-         seed, produced a DIFFERENT pile depending on how full the ledger
-         happened to be at the moment it collapsed — and the light pile was not
-         even a prefix of the detailed one, because the missing count draw
-         shifted the whole stream by one. Two clients that nuked the same
-         district in a different order disagreed about the geometry; so did one
-         client reloading its own save.
-         The fix: draw EVERY parameter for the FULL pile, unconditionally, in
-         the original order. The tier then decides only how many of those
-         already-decided slabs get a mesh. A lot's pile is a pure function of
-         its coordinates again — the header's promise, restored — and a light
-         pile is now a true visual PREFIX of its own detailed self, so a lot
-         that heals and falls again in a quieter frame grows the same mound it
-         would have grown the first time.
-         The detailed branch is byte-identical to what it always drew (same
-         count formula, same order, nothing skipped); only light piles change. */
-      const n = 14 + ((rng() * 8) | 0);
-      const slabCap = detailed ? n : RUBBLE_LIGHT_SLABS;
-      for (let i = 0; i < n; i++) {
-        // mound profile: big tilted slabs near the centre, crumbs at the rim
-        const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
-        const x = Math.cos(ang) * rr * W * 0.42, z = Math.sin(ang) * rr * Dp * 0.42;
-        const k = 1 - rr;                                        // 1 centre → 0 rim
-        const w = 1.2 + rng() * 3.4 * (0.4 + k), d = 1.2 + rng() * 3.4 * (0.4 + k);
-        const h = 0.3 + k * peak * (0.5 + rng() * 0.6);
-        const ci = (rng() * cols.length) | 0;                    // drawn even when unmeshed —
-        const ry = rng() * Math.PI;                              // the stream must not shift
-        if (i >= slabCap) continue;                              // tier caps MESHES, not PARAMETERS
-        box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[ci], ry);
-      }
-      // a couple of leaning wall shards — reads as "was a building", not a quarry
-      const shardCap = detailed ? 2 : RUBBLE_LIGHT_SHARDS;
-      for (let i = 0; i < 2; i++) {
-        const sx = rng() < 0.5 ? -1 : 1;
-        const sz = (rng() - 0.5) * Dp * 0.5;
-        const sd = 2.2 + rng() * 2.5;
-        const sry = rng() * 0.4;
-        const lean = sx * (0.35 + rng() * 0.25);                 // leaning, not standing
-        if (i >= shardCap) continue;
-        const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + sz, 0.35, peak * 1.5, sd, 0x585349, sry);
-        m.rotation.z = lean;
-      }
-    } else {
-      // ---- LEGACY (DEMO_RUBBLE_DET off): the two-branch builder, verbatim ---
-      const n = detailed ? 14 + ((rng() * 8) | 0) : 2;
-      for (let i = 0; i < n; i++) {
-        // mound profile: big tilted slabs near the centre, crumbs at the rim
-        const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
-        const x = Math.cos(ang) * rr * W * 0.42, z = Math.sin(ang) * rr * Dp * 0.42;
-        const k = 1 - rr;                                        // 1 centre → 0 rim
-        const w = 1.2 + rng() * 3.4 * (0.4 + k), d = 1.2 + rng() * 3.4 * (0.4 + k);
-        const h = 0.3 + k * peak * (0.5 + rng() * 0.6);
-        box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[(rng() * cols.length) | 0], rng() * Math.PI);
-      }
-      // a couple of leaning wall shards — reads as "was a building", not a quarry
-      for (let i = 0; i < (detailed ? 2 : 1); i++) {
-        const sx = rng() < 0.5 ? -1 : 1;
-        const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + (rng() - 0.5) * Dp * 0.5,
-          0.35, peak * 1.5, 2.2 + rng() * 2.5, 0x585349, rng() * 0.4);
-        m.rotation.z = sx * (0.35 + rng() * 0.25);               // leaning, not standing
-      }
+    if (CBZ.debris) {
+      try {
+        CBZ.debris.pile({
+          x: b.ox, z: b.oz, w: W, d: Dp, h: detailed ? peak : Math.min(1.4, peak * 0.45),
+          materials: rubbleMats(b), owner: rec.k, solid: true,
+          count: detailed ? Math.round(Math.min(110, 20 + W * Dp * 0.2)) : 12,
+        });
+      } catch (e) {}
     }
+    g.userData.debrisOwner = rec.k;
+    g.userData.debrisLot = { x: b.ox, z: b.oz, r: Math.max(b.w, b.d) * 0.6 };
     // one central mound collider: you clamber AROUND a fresh collapse
     const c = { minX: b.ox - W * 0.3, maxX: b.ox + W * 0.3, minZ: b.oz - Dp * 0.3, maxZ: b.oz + Dp * 0.3, y0: 0, y1: Math.max(0.9, peak * 0.55) };
     return { group: g, cols: [c] };
@@ -336,6 +281,62 @@
         box(g, x, 0.55, z, horiz ? bw : 0.14, 0.7, horiz ? 0.14 : bw, i % 2 ? 0xd2691e : 0xe8e4da, 0);
       }
     }
+    return { group: g, cols: [] };
+  }
+
+  /* PHASE 4, THE HELD PAD: the rubble is gone and what is left is the lot an
+     owner builds on. Poured concrete over the whole footprint, saw-cut control
+     joints on a 3 m module (the same module the build grid snaps to, so a
+     foundation or a wall reads as SET on the slab), a darker cure stain at the
+     edges. No colliders: it is ground, and the build gate reads live
+     colliders, so nothing here may block a piece. */
+  let _padMat = null;
+  function padMaterial() {
+    if (_padMat) return _padMat;
+    const c = document.createElement("canvas"); c.width = c.height = 256;
+    const g2 = c.getContext("2d");
+    g2.fillStyle = "#9a9d9f"; g2.fillRect(0, 0, 256, 256);
+    // aggregate speckle + trowel mottling (deterministic arithmetic, no rng)
+    for (let i = 0; i < 2600; i++) {
+      const x = (i * 97) % 256, y = (i * 61 + ((i * 13) % 17)) % 256;
+      const v = 128 + ((i * 53) % 60) - 30;
+      g2.fillStyle = "rgba(" + v + "," + v + "," + (v + 2) + ",0.22)";
+      g2.fillRect(x, y, 1 + (i % 3 === 0 ? 1 : 0), 1);
+    }
+    for (let i = 0; i < 26; i++) {
+      const x = (i * 71) % 256, y = (i * 113) % 256, r = 18 + (i * 7) % 30;
+      const gr = g2.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, i % 2 ? "rgba(70,72,74,0.10)" : "rgba(200,200,196,0.08)");
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      g2.fillStyle = gr; g2.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // one saw-cut joint at the tile edge: the tile repeats every 3 m
+    g2.fillStyle = "rgba(58,60,62,0.75)"; g2.fillRect(0, 0, 256, 2); g2.fillRect(0, 0, 2, 256);
+    g2.fillStyle = "rgba(210,210,206,0.35)"; g2.fillRect(0, 2, 256, 1); g2.fillRect(2, 0, 1, 256);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    _padMat = new THREE.MeshLambertMaterial({ map: t });
+    _padMat._shared = true;
+    return _padMat;
+  }
+  function buildPad(rec) {
+    const lot = rec.lot, b = lot.building, g = new THREE.Group();
+    const W = Math.max(2, b.w + 0.6), Dd = Math.max(2, b.d + 0.6);
+    const geo = new THREE.BoxGeometry(W, 0.1, Dd);
+    // UVs in metres / 3 so one joint tile == one 3 m build cell on the top face
+    const uv = geo.attributes.uv, pos = geo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + b.ox) / 3, (pos.getZ(i) + b.oz) / 3);
+    uv.needsUpdate = true;
+    const m = new THREE.Mesh(geo, padMaterial());
+    m.position.set(b.ox, 0.075, b.oz);
+    m.receiveShadow = true; m.castShadow = false;
+    g.add(m);
+    // a thin darker curb band where the slab meets the yard, so the pad reads as poured, not painted
+    const edge = mat(0x6f7274);
+    box(g, b.ox, 0.06, b.oz - Dd / 2, W + 0.2, 0.12, 0.18, edge);
+    box(g, b.ox, 0.06, b.oz + Dd / 2, W + 0.2, 0.12, 0.18, edge);
+    box(g, b.ox - W / 2, 0.06, b.oz, 0.18, 0.12, Dd, edge);
+    box(g, b.ox + W / 2, 0.06, b.oz, 0.18, 0.12, Dd, edge);
     return { group: g, cols: [] };
   }
 
@@ -384,8 +385,21 @@
   }
 
   // ---- phase transitions ---------------------------------------------------
+  // The rubble phase's pieces live in CBZ.debris under the lot key; the
+  // group that stood for them carries that key, so whenever that group goes
+  // (snap, exit tween, rebuild, reset) the pile goes with it.
+  function cartOff(g) {
+    const k = g && g.userData && g.userData.debrisOwner;
+    if (k == null || !CBZ.debris) return;
+    try { CBZ.debris.clear(k); } catch (e) {}
+    // the footprint too (clearNear also lowers the rubble height-field, so the
+    // next pile on this lot starts from the ground, not from phantom rubble)
+    const L = g.userData.debrisLot;
+    if (L && CBZ.debris.clearNear) { try { CBZ.debris.clearNear(L.x, L.z, L.r); } catch (e) {} }
+  }
   function clearPhaseProps(rec) {
     if (rec.propGroup) {
+      cartOff(rec.propGroup);
       const A = arena();
       if (A && A.root) A.root.remove(rec.propGroup);
       rec.propGroup.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
@@ -448,6 +462,7 @@
   function ease(t) { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
   function disposeGroup(g) {
     if (!g) return;
+    cartOff(g);
     if (g.parent) g.parent.remove(g);
     g.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
   }
@@ -537,7 +552,11 @@
     rec.phase = phase;
     const A = arena();
     if (!A || !A.root) { if (anim && oldGroup) disposeGroup(oldGroup); return; }
-    const built = phase === 1 ? buildRubble(rec) : phase === 2 ? buildCleared(rec) : phase === 3 ? buildScaffold(rec) : null;
+    if (phase === 4 && CBZ.collapse && CBZ.collapse.clearNear) {
+      const bb = rec.lot.building;
+      try { CBZ.collapse.clearNear(bb.ox, bb.oz, Math.max(bb.w, bb.d) * 0.72); } catch (e) {}
+    }
+    const built = phase === 1 ? buildRubble(rec) : phase === 2 ? buildCleared(rec) : phase === 3 ? buildScaffold(rec) : phase === 4 ? buildPad(rec) : null;
     if (built) {
       A.root.add(built.group);
       rec.propGroup = built.group;
@@ -675,7 +694,9 @@
     const rec = {
       k: keyOf(lot), lot, at: opts.at != null ? opts.at : (CBZ.dayTime ? CBZ.dayTime() : 0),
       phase: 0, propGroup: null, propCols: [], rubbleDetailed: false,
+      held: !!(opts.held || lot._plotHold),
     };
+    if (rec.held) lot._plotHold = true;
     ledger.set(rec.k, rec);
     setPhase(rec, phaseFor(rec));
 
@@ -684,9 +705,11 @@
       try {
         if (CBZ.cityScorch) CBZ.cityScorch(b.ox, b.oz, Math.max(b.w, b.d) * 0.55);
         if (CBZ.cityChunk) {
-          CBZ.cityChunk(b.ox, 1.2, b.oz, { count: 26, force: 9 });
-          CBZ.cityChunk(b.ox - b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7 });
-          CBZ.cityChunk(b.ox + b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7 });
+          // chips of THIS building's wall, in its colour
+          const wm = rubbleMats(b)[0].material;
+          CBZ.cityChunk(b.ox, 1.2, b.oz, { count: 26, force: 9, material: wm });
+          CBZ.cityChunk(b.ox - b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7, material: wm });
+          CBZ.cityChunk(b.ox + b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7, material: wm });
         }
         // "boom" is NOT in systems/audio.js's BANK — it silently no-ops with a
         // console warning. The bank has the exact cue this beat wants.
@@ -710,6 +733,8 @@
     else clearPhaseProps(rec);
     ledger.delete(rec.k);
     hp.delete(lot);
+    // any piece of the old building still lying on the lot goes before it stands again
+    if (CBZ.debris) { try { CBZ.debris.clear(rec.k); } catch (e) {} }
     lot.demolished = false;
     restoreAir(b);              // the rebuild calendar gives the pad/hangar back
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);
@@ -752,6 +777,7 @@
   function phaseFor(rec) {
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
     const el = now - rec.at;
+    if (rec.held) return el >= T_HELD_CLEAR ? 4 : 1;
     return el >= T_SCAFFOLD ? 3 : el >= T_CLEARED ? 2 : 1;
   }
 
@@ -918,11 +944,11 @@
     // it. A frame of pure phase ticking must not pay an O(colliders) Set build,
     // and this ticker runs every frame for as long as any rubble exists.
     let healed = 0;
-    for (const rec of recs) if (now - rec.at >= T_REBUILT) healed++;
+    for (const rec of recs) if (!rec.held && now - rec.at >= T_REBUILT) healed++;
     const owned = (healed > 1 && fastPurge()) ? reSetsBegin() : false;
     try {
       for (const rec of recs) {
-        if (now - rec.at >= T_REBUILT) rebuild(rec);
+        if (!rec.held && now - rec.at >= T_REBUILT) rebuild(rec);
         else setPhase(rec, phaseFor(rec));
       }
     } finally { reSetsEnd(owned); }
@@ -946,22 +972,51 @@
   D.propGroup = function (lot) { const rec = ledger.get(keyOf(lot)); return rec ? rec.propGroup : null; };
   // save / late-join snapshot (netpersist worldBlob.demo — see fracture's twin)
   D.serialize = function () {
-    return { v: 1, list: Array.from(ledger.values()).map((r) => ({ x: Math.round(r.lot.cx), z: Math.round(r.lot.cz), at: +r.at.toFixed(3) })) };
+    return { v: 1, list: Array.from(ledger.values()).map((r) => {
+      const row = { x: Math.round(r.lot.cx), z: Math.round(r.lot.cz), at: +r.at.toFixed(3) };
+      if (r.held) row.h = 1;                 // an owner's pad: never healed by the calendar
+      return row;
+    }) };
   };
   D.applyOne = function (row) {
     if (!row) return false;
     const A = arena();
     if (!A || !A.lots) return false;
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
-    if (row.at != null && now - row.at >= T_REBUILT) return false;   // already healed
+    if (!row.h && row.at != null && now - row.at >= T_REBUILT) return false;   // already healed
     let best = null, bd = 1e9;
     for (const lot of A.lots) {
       const d = Math.hypot(lot.cx - row.x, lot.cz - row.z);
       if (d < bd) { bd = d; best = lot; }
     }
     if (!best || bd > 3) return false;                                // address didn't resolve
-    return destroy(best, { quiet: true, silent: true, at: row.at });
+    return destroy(best, { quiet: true, silent: true, at: row.at, held: !!row.h });
   };
+  /* THE HOLD (city/plots.js). hold(lot, true) marks a lot's teardown as the
+     owner's: a record that already exists stops its calendar and settles to
+     the pad; a lot that is still standing is stamped so the NEXT destroy()
+     (the contractor's collapse) opens held. hold(lot, false) hands the parcel
+     back to the city: the pad becomes the barriered cleared lot and the normal
+     rebuild arc resumes from there. */
+  D.hold = function (lot, on) {
+    if (!lot) return false;
+    const rec = ledger.get(keyOf(lot));
+    if (on) {
+      lot._plotHold = true;
+      if (rec && !rec.held) { rec.held = true; setPhase(rec, phaseFor(rec)); }
+      return true;
+    }
+    lot._plotHold = false;
+    if (rec && rec.held) {
+      rec.held = false;
+      const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+      rec.at = now - T_CLEARED;
+      setPhase(rec, phaseFor(rec));
+    }
+    return true;
+  };
+  D.held = function (lot) { const rec = lot && ledger.get(keyOf(lot)); return !!(rec && rec.held); };
+  D.phaseOf = function (lot) { const rec = lot && ledger.get(keyOf(lot)); return rec ? rec.phase : 0; };
   /* THE LOAD PATH (DEMO_LOAD_V1). This ran a full destroy() per row,
      synchronously, inside net/netpersist.js's applyWorld: measured 2,063 ms
      for a 328-row blob, because every row paid its own indexOf storm against
@@ -1117,7 +1172,7 @@
     // a section written by an older build of this file — fall through to the
     // raw rows rather than inventing an age.
     const rows = base == null ? blob.list : blob.list.map(function (r) {
-      return { x: r.x, z: r.z, at: now - Math.max(0, base - r.at) };
+      return { x: r.x, z: r.z, at: now - Math.max(0, base - r.at), h: r.h };
     });
     try { D.apply({ v: 1, list: rows }); } catch (e) {}
   }

@@ -599,30 +599,140 @@
   const GP_SH0 = PEAKS_V2() ? 0.072 : 0.30;     // shoulder share, innermost
   const GP_SHJ = PEAKS_V2() ? 0.021 : 0.055;    // …per ring outward
   const GP_SHV = PEAKS_V2() ? 0.033 : 0.09;     // …hash jitter (max share 0.168)
+  /* ---- RIDGES, NOT DOMES (2026-09-27) -----------------------------------
+     A hillshade of this field (no browser: sample the oracle, shade it)
+     showed exactly what the coast sees: ten ISOLATED round domes on a
+     plateau, each wearing a star of radial pleats, the "row of cones" every
+     earlier wave tuned the skin of. A range is a network of CRESTS: long
+     summit ridges along the strike, spur ridges falling off them, saddles
+     tying neighbours together, and V-shaped gullies down every flank
+     between the spurs. So each mass is now a CAPSULE (a crest SEGMENT with
+     a Gaussian cross-profile) instead of a point:
+       - summits: a crest along the range strike (+-20 deg per summit),
+         falling off toward its ends (a multi-top summit ridge, not a pin);
+       - the forty shoulders become SPURS: the same masses, now segments
+         aimed out from their parent, descending as they go;
+       - SADDLES: every summit is tied to its nearest neighbour by a low
+         crest (<= 0.42 of the lower one), so the range reads connected;
+       - the star pleats are gone; the island volcano's barranco law takes
+         their place, generalised to a crest: asymmetric corrugation (deep
+         narrow valleys, broad rounded interfluves) indexed by distance ALONG
+         the crest, so gullies run straight down the fall line of each flank
+         and fan radially round the crest's ends, nil at the crest and the
+         foot, deepest a third of the way down.
+     Hierarchy is unchanged: same summit amplitudes, same shoulder shares. */
+  const GREAT_STRIKE0 = CBZ.mtnStrikeOf ? CBZ.mtnStrikeOf(GREAT_MAJOR) : 0;
+  // A crest is LONG and NARROW: the cross-section is `narrow` of the old
+  // round lobe's sigma and the crest segment carries the rest of the mass.
+  function capsule(l, ang, halfLen, kind, narrow) {
+    l.ax = Math.cos(ang); l.az = Math.sin(ang);
+    l.L = halfLen; l.sig = (l.sx + l.sz) * 0.5 * (narrow || 1); l.kind = kind;
+    l.gsp = Math.max(38, l.sig * 0.42);          // gully spacing along the crest
+    const reach = l.L + 4 * l.sig;
+    l.bx = reach; l.bz = reach;                  // reject box half-extent
+    return l;
+  }
   for (let gi = 0; gi < GREAT_MAJOR.length; gi++) {
     const m = GREAT_MAJOR[gi];
     const scaled = Math.pow(m.s, GP_EXP);
     const mainAmp = GP_AMP * scaled;
-    GREAT_LOBES.push({
+    const main = {
       x: m.x, z: m.z,
       sx: 48 + 67 * scaled, sz: 44 + 61 * scaled,
       a: mainAmp, major: true,
-    });
-    // Four offset shoulders per summit = 10 mains + 40 shoulders = 50
+    };
+    capsule(main, GREAT_STRIKE0 + (greaterHash(gi, 41) - 0.5) * 1.3, (46 + 64 * scaled) * 1.3, "summit", 0.64);
+    GREAT_LOBES.push(main);
+    // Four offset shoulders per summit = 10 mains + 40 spurs = 50
     // independently sized masses. They are deterministic and allocate once.
     for (let j = 0; j < 4; j++) {
       const u = greaterHash(gi, j), v = greaterHash(gi + 17, j + 9);
       const angle = (j / 4) * Math.PI * 2 + (u - 0.5) * 0.9;
       const ring = (70 + j * 23) * Math.pow(m.s, 0.38) * (0.82 + v * 0.36);
       const ss = scaled * (0.33 + j * 0.075 + u * 0.10);
-      GREAT_LOBES.push({
+      const sp = {
         x: m.x + Math.cos(angle) * ring,
         z: m.z + Math.sin(angle) * ring,
         sx: 30 + 58 * ss,
         sz: 28 + 52 * ss,
         a: mainAmp * (GP_SH0 + j * GP_SHJ + v * GP_SHV), major: false,
-      });
+      };
+      // the spur's crest runs out from the summit, from half-way in
+      capsule(sp, angle, ring * 0.75, "spur", 0.72);
+      GREAT_LOBES.push(sp);
     }
+  }
+  // saddles: each summit to its nearest neighbour (unique pairs, < 1.3 km)
+  (function saddles() {
+    const seen = {};
+    for (let i = 0; i < GREAT_MAJOR.length; i++) {
+      let best = -1, bd = 1300;
+      for (let j = 0; j < GREAT_MAJOR.length; j++) {
+        if (j === i) continue;
+        const d = Math.hypot(GREAT_MAJOR[j].x - GREAT_MAJOR[i].x, GREAT_MAJOR[j].z - GREAT_MAJOR[i].z);
+        if (d < bd) { bd = d; best = j; }
+      }
+      if (best < 0) continue;
+      const key = Math.min(i, best) + ":" + Math.max(i, best);
+      if (seen[key]) continue;
+      seen[key] = 1;
+      const A = GREAT_LOBES[i * 5], B = GREAT_LOBES[best * 5];
+      const sig = Math.min(A.sig, B.sig) * 0.62;
+      const sd = {
+        x: (A.x + B.x) / 2, z: (A.z + B.z) / 2, sx: sig, sz: sig,
+        a: 0.42 * Math.min(A.a, B.a), major: false, saddle: true,
+      };
+      capsule(sd, Math.atan2(B.z - A.z, B.x - A.x), bd * 0.5, "saddle");
+      GREAT_LOBES.push(sd);
+    }
+  })();
+  // one lobe's height at (x,z): capsule cross-profile x crest law x gullies
+  function greatLobeH(l, i, x, z) {
+    const px = x - l.x, pz = z - l.z;
+    if (px < -l.bx || px > l.bx || pz < -l.bz || pz > l.bz) return 0;
+    const u = px * l.ax + pz * l.az, v = -px * l.az + pz * l.ax;
+    const uc = u < -l.L ? -l.L : (u > l.L ? l.L : u);
+    const du = u - uc;
+    const r = Math.sqrt(du * du + v * v) / l.sig;
+    if (r > 4) return 0;
+    const base = Math.exp(-0.5 * r * r);
+    let profile = l.major
+      ? base * (0.22 + 0.78 * Math.pow(base, 1.35))
+      : base * (0.76 + 0.24 * base);
+    profile += (l.major ? 0.42 : 0.18) * base * (1 - base);      // the broad concave apron
+    const t = uc / (l.L || 1);                                     // -1..1 along the crest
+    const crest = l.kind === "summit" ? 1 - 0.30 * t * t
+      : l.kind === "spur" ? 1 - 0.38 * (t + 1) * 0.5              // falls away from its parent
+      : 0.78 + 0.22 * t * t;                                       // a saddle dips mid-way
+    // arc length ALONG the crest; round the ends it keeps counting round
+    // the cap at one sigma, so gullies fan radially there
+    let along = uc;
+    if (du !== 0) {
+      const phi = Math.atan2(Math.abs(v), Math.abs(du));         // 0 at the tip .. pi/2 at the side
+      // arc length at the point's own distance: constant gully spacing
+      // round the end, no star converging on the crest tip
+      along = (du > 0 ? 1 : -1) * (l.L + (1.5707963 - phi) * Math.sqrt(du * du + v * v));
+    }
+    // gully envelope: nil on the crest and the foot, deepest ~1 sigma down
+    const rn = r / 2.7;
+    const env = rn >= 1 ? 0 : Math.sin(3.14159265 * Math.pow(rn, 0.62));
+    let c = 0;
+    if (env > 0) {
+      // TRIBUTARIES MERGE DOWNHILL: the pattern's spacing grows with the
+      // distance from the crest, so near the top there are many small
+      // gullies and lower down fewer, bigger valleys; a slow warp of the
+      // along-coordinate by depth lets each one meander instead of ruling
+      // a straight stripe down the flank
+      const dist = r * l.sig;
+      const warp = (CBZ.mtnNoise(along * 0.5, dist, l.gsp * 3, S_GRIDGE + 53 + i) - 0.5) * l.gsp * 1.4;
+      const aw = (along + warp) / (0.55 + 0.9 * rn);
+      c = 2 * CBZ.mtnNoise(aw, dist * 0.12, l.gsp, S_GRIDGE + 31 + i) - 1;
+      c = c * 1.7 + 0.55 * (2 * CBZ.mtnNoise(aw, 0, l.gsp * 0.43, S_GRIDGE + 97 + i) - 1) * (1 - rn);
+      c = c < 0 ? -Math.pow(Math.min(1, -c), 1.6) : 0.45 * Math.pow(Math.min(1, c), 0.75);
+    }
+    // tiny masses stay smooth; a big flank is cut a quarter deep
+    const depth = (l.major ? 0.30 : (l.saddle ? 0.16 : 0.22)) * smooth01((l.a - 18) / 60);
+    return l.a * profile * crest * (1 + depth * env * c);
   }
 
   // AUTHORED-frame field (lobes/erosion constants are stage-1 coordinates);
@@ -645,7 +755,13 @@
   const GREAT_ANISO = 1.85;
   function greaterMercyMacroA(x, z) {
     let sum2 = 0;
-    for (let i = 0; i < GREAT_LOBES.length; i++) {
+    if (PEAKS_V2()) {
+      // crests, spurs and saddles (see RIDGES, NOT DOMES above), soft-maxed
+      for (let i = 0; i < GREAT_LOBES.length; i++) {
+        const h = greatLobeH(GREAT_LOBES[i], i, x, z);
+        sum2 += h * h;
+      }
+    } else for (let i = 0; i < GREAT_LOBES.length; i++) {
       const l = GREAT_LOBES[i];
       const dx = (x - l.x) / l.sx, dz = (z - l.z) / l.sz;
       // exp() is the only costly part. A four-sigma reject makes floor queries
@@ -1294,6 +1410,9 @@
       g.name = "mount-mercy-earth-terrain";
       g.frustumCulled = false;
       root.add(g);
+      // far LOD: every 2nd grid line past 1.5 km (the grid is ~2 m on the
+      // summits, 4 m at 1.5 km is well under a pixel); same vertex buffers
+      if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(g, { stride: 2, near: 1500 });
       if (CBZ.registerCityGroundHeight) {
         CBZ.registerCityGroundHeight(mountainHeightAt, { name: "Mount Mercy terrain", biome: "snow" });
       }
@@ -1428,8 +1547,11 @@
           // running down the concavities past bare rock, which is the look.
           const gHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
-            line: 96, band: 140, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
-            concave: gconc, gully: 74, spine: 0.58, patch: 0.85, patchCell: 190,
+            // gully 38 (was 74), shed1 0.74 (was 0.54), line 88: the ridged range (see
+            // RIDGES, NOT DOMES) has deeper gullies and steeper crests; the old
+            // numbers filled every low valley white and stripped the summits
+            line: 88, band: 140, aspect: 70, wob: 40, shed0: 0.18, shed1: 0.74, salt: S_GSNOW,
+            concave: gconc, gully: 38, spine: 0.58, patch: 0.85, patchCell: 190,
             slopeHold: gHold,
             // one scale up: 34 u beds, so the ledge lines are the ones a
             // kilometre-distant eye actually resolves on this range.
@@ -1531,6 +1653,10 @@
       mesh.userData.mountainFamilies = GREAT_MAJOR.length;
       mesh.userData.gaussianLobes = GREAT_LOBES.length;
       root.add(mesh);
+      // far LOD: every 2nd grid line once the camera is 2.2 km from the
+      // range's box (8 m -> 16 m spacing is ~0.4 deg there, under aerial
+      // haze); the strip rule above is re-applied to the coarse cells
+      if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(mesh, { stride: 2, near: 2200, keepY: 0.8 });
       if (CBZ.registerCityGroundHeight) {
         CBZ.registerCityGroundHeight(greaterMercyHeightAt, {
           name: "Greater Mercy Range terrain", biome: "snow",
@@ -2063,7 +2189,11 @@
             {
               if (keep < 1 && CBZ.hash01(i, j, o.salt + 6) > keep) continue;
               if (!openNature(x, z, 1.4)) continue;
-              const sc = o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1;
+              // a treeline STUNTS before it stops: the last trees up a real
+              // slope are half-height krummholz, not full spruce cut off at a
+              // contour. Full size below treeline-fade, ~half at the line.
+              const stunt = 1 - 0.5 * smooth01((gy - (o.treeline - o.fade)) / (o.fade * 1.6));
+              const sc = (o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1) * stunt;
               q.setFromAxisAngle(up, CBZ.hash01(i, j, o.salt + 4) * Math.PI * 2);
               const trunkTop = gy + 1.6 * sc;
               const seatY = gy - 0.35 * sc;                    // seated into the slope

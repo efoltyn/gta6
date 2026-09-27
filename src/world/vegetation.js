@@ -780,7 +780,132 @@
     return mesh;
   }
 
+  /* THE PALM (moved here from world/disaster_arena.js, 2026-09-27, so the
+     island and any Gang Life coast plant ONE palm, not two forks). Both
+     return cached geometries with a white-ish vertex colour ramp (the kit
+     materials run vertexColors); the trunk's geometry.userData.top is its
+     bent tip at unit height, where the crown hub sits. Wear them with
+     material("wood") for the trunk and a DoubleSide vertex-colour Lambert
+     for the fronds (a frond is a comb of leaflet triangles, not a card). */
+  const palmCache = Object.create(null);
+  function palmOnce(key, fn) { return palmCache[key] || (palmCache[key] = fn()); }
+  function h01(a, b, s) { return CBZ.hash01 ? CBZ.hash01(a, b, s) : 0.5; }
+  function palmRamp(g, low) {
+    g.computeBoundingBox();
+    const p = g.attributes.position, y0 = g.boundingBox.min.y, dy = Math.max(0.001, g.boundingBox.max.y - y0);
+    const c = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const t = Math.max(0, Math.min(1, (p.getY(i) - y0) / dy));
+      const val = low + (1 - low) * Math.sqrt(t);
+      c[i * 3] = val; c[i * 3 + 1] = val; c[i * 3 + 2] = val;
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    return g;
+  }
+  /* A COCONUT PALM, in two meshes. The trunk is a leaning curve (slender,
+     swelling at the foot, banded by the dark leaf-scar collars a palm trunk
+     is read by — vertex colour, not extra meshes); the crown is 11 pinnate
+     fronds — a spine that leaves the hub near level and hangs over its
+     length, with a leaflet pair at every step — merged into ONE geometry.
+     Geometry, not a texture: a frond's read is its comb of leaflets
+     against the sky. */
+  function palmTrunk(v) {
+    return palmOnce("pt" + v, function () {
+      const SEG = 7, parts = [];
+      const bend = [0.10, 0.16, 0.06][v];
+      const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
+      const up = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < SEG; i++) {
+        const a = at(i / SEG), b = at((i + 1) / SEG);
+        const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
+        const len = a.distanceTo(b);
+        const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
+        const uv = c.attributes.uv;
+        for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
+        const dir = b.clone().sub(a).normalize();
+        c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
+        c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+        parts.push(c);
+      }
+      const BGU = THREE.BufferGeometryUtils;
+      const g = (BGU && BGU.mergeBufferGeometries && BGU.mergeBufferGeometries(parts, false)) || parts[0];
+      palmRamp(g, 0.62);
+      const p = g.attributes.position, col = g.attributes.color;
+      for (let i = 0; i < p.count; i++) {
+        const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
+        const k = 1 - 0.3 * Math.pow(band, 6);
+        col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
+      }
+      g.userData.top = at(1);
+      g.computeBoundingSphere();
+      return g;
+    });
+  }
+  function palmCrown(v) {
+    return palmOnce("pc" + v, function () {
+      const pos = [], col = [];
+      const N = 11, SEG = 17;
+      function tri(a, b, c, ca, cb, cc) {
+        pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+        col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
+      }
+      for (let f = 0; f < N; f++) {
+        const yaw = (f / N) * Math.PI * 2 + (h01(f, v, 0x9a1) - 0.5) * 0.35;
+        const len = 2.6 + h01(f, v, 0x9a2) * 0.9;
+        const lift = -0.2 + h01(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
+        const hang = 1.2 + h01(f, v, 0x9a4) * 0.7;               // how hard it droops
+        const dx = Math.cos(yaw), dz = Math.sin(yaw);
+        const sx = -dz, sz = dx;                                   // leaflet side direction
+        // the spine: integrate the pitch so it is a real arc, not a chord
+        const pts = [new THREE.Vector3(0, 0, 0)];
+        const STEPS = 18;
+        for (let s = 1; s <= STEPS; s++) {
+          const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
+          const q = pts[s - 1];
+          pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
+        }
+        const spine = function (u) {
+          const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
+          return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
+        };
+        for (let i = 0; i < SEG; i++) {
+          const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
+          // a leaflet is a narrow blade: its base spans only the first half
+          // of the step, so the comb has gaps between blades
+          const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
+          const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
+          const shade = 0.6 + 0.4 * u0;
+          for (let sgn = -1; sgn <= 1; sgn += 2) {
+            const tip = new THREE.Vector3(
+              (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
+              (a.y + b.y) / 2 - w * 0.6,
+              (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
+            tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+      // lighting normals point OUT of the crown, up-biased, so both faces
+      // of a leaflet shade as part of the canopy mass, not as a flipped card
+      const nrm = new Float32Array(pos.length);
+      for (let i = 0; i < pos.length; i += 3) {
+        const x = pos[i], y = pos[i + 1] + 0.8, z = pos[i + 2];
+        const l = Math.hypot(x, y, z) || 1;
+        let nx = x / l * 0.55, ny = y / l * 0.55 + 0.45, nz = z / l * 0.55;
+        const m = Math.hypot(nx, ny, nz) || 1;
+        nrm[i] = nx / m; nrm[i + 1] = ny / m; nrm[i + 2] = nz / m;
+      }
+      g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+      g.computeBoundingSphere();
+      return g;
+    });
+  }
+
   CBZ.vegetationKit = {
+    palmTrunk: palmTrunk,
+    palmCrown: palmCrown,
     geometry: geometry,
     customCrown: customCrown,
     material: material,

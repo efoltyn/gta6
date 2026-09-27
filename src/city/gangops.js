@@ -201,7 +201,18 @@
   // then peeling off. Returns true if a buyer was dispatched.
   function dispatchBuyer(gang, dealer) {
     if (gang._buyer && !gang._buyer.dead && gang._buyer._op && gang._buyer._op.role === "buy") return false; // one at a time
-    const peds = CBZ.cityPeds; if (!peds) return false;
+    const best = findBuyer(dealer);
+    if (!best) return false;
+    best._op = { role: "buy", until: 12, dealerGang: gang.id, _ret: { x: best.target ? best.target.x : best.pos.x, z: best.target ? best.target.z : best.pos.z } };
+    best._buyT = 0;
+    best.state = "walk"; best.pause = 0; best.path = null;
+    if (best.target && best.target.set) best.target.set(dealer.pos.x, 0, dealer.pos.z);
+    gang._buyer = best;
+    return true;
+  }
+  // the nearest ordinary passer-by who could plausibly walk up and buy.
+  function findBuyer(dealer) {
+    const peds = CBZ.cityPeds; if (!peds) return null;
     let best = null, bd = 26 * 26;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
@@ -216,21 +227,42 @@
       if (d2 < 4 * 4) continue;                          // already on top of him
       if (d2 < bd) { bd = d2; best = p; }
     }
-    if (!best) return false;
-    best._op = { role: "buy", until: 12, dealerGang: gang.id, _ret: { x: best.target ? best.target.x : best.pos.x, z: best.target ? best.target.z : best.pos.z } };
+    return best;
+  }
+
+  /* THE SAME STAGING FOR ANY DEALER. A dealer who is not a CBZ.cityGangs
+     record (city/compoundcrew.js's workers: YOUR people selling on your block)
+     used to have no way in: the walk-up, the hand-to-hand and the peel-off all
+     keyed off a gang record. `dealer` is any live ped; `onSettle(dealer, buyer)`
+     decides where the money goes (the caller's own ledger, never a gang
+     treasury). One buyer per dealer; returns the buyer or null. */
+  const EXT_BUYERS = [];
+  CBZ.cityDealStageBuyer = function (dealer, opts) {
+    if (!dealer || dealer.dead || !dealer.pos) return null;
+    for (let i = 0; i < EXT_BUYERS.length; i++) if (EXT_BUYERS[i]._op && EXT_BUYERS[i]._op.dealer === dealer) return null;
+    const best = findBuyer(dealer);
+    if (!best) return null;
+    best._op = { role: "buy", until: 12, dealer: dealer, onSettle: opts && opts.onSettle, _ret: { x: best.target ? best.target.x : best.pos.x, z: best.target ? best.target.z : best.pos.z } };
     best._buyT = 0;
     best.state = "walk"; best.pause = 0; best.path = null;
     if (best.target && best.target.set) best.target.set(dealer.pos.x, 0, dealer.pos.z);
-    gang._buyer = best;
-    return true;
+    EXT_BUYERS.push(best);
+    return best;
+  };
+  function tickExtBuyers(dt) {
+    for (let i = EXT_BUYERS.length - 1; i >= 0; i--) {
+      const b = EXT_BUYERS[i];
+      if (b && !b.dead && b._op && b._op.role === "buy" && b._op.dealer) tickBuyer(b, dt);
+      if (!b || b.dead || !b._op || b._op.role !== "buy" || !b._op.dealer) EXT_BUYERS.splice(i, 1);
+    }
   }
 
   // advance a buyer: walk in, do the hand-to-hand, peel off. Settling the deal
   // banks the crew + draws a little heat + drops the robbable cash stack.
   function tickBuyer(buyer, dt) {
     const op = buyer._op; if (!op || op.role !== "buy") return;
-    const gang = CBZ.cityGangById ? CBZ.cityGangById(op.dealerGang) : null;
-    const dealer = gang ? liveDealer(gang) : null;
+    const gang = op.dealer ? null : (CBZ.cityGangById ? CBZ.cityGangById(op.dealerGang) : null);
+    const dealer = op.dealer ? ((op.dealer.dead || op.dealer.ko > 0) ? null : op.dealer) : (gang ? liveDealer(gang) : null);
     op.until -= dt;
     // dealer gone / busy / buyer scared off → abort, send the buyer on their way
     if (!dealer || op.until <= 0 || buyer.rage || (buyer.fear || 0) > 3 || buyer.state === "flee") {
@@ -256,7 +288,8 @@
     if (!op.greeted) { op.greeted = true; opBark(gang, buyer, BUYER_BARK); }
     if (buyer._buyT >= 1.4 && !op.done) {
       op.done = true;
-      settleDeal(gang, dealer, buyer);
+      if (op.onSettle) { try { op.onSettle(dealer, buyer); } catch (e) {} }
+      else settleDeal(gang, dealer, buyer);
       // peel off and go about their day
       buyer._op = null;
       if (op._ret && buyer.target && buyer.target.set) { buyer.state = "walk"; buyer.pause = 0; buyer.target.set(op._ret.x, 0, op._ret.z); }
@@ -614,6 +647,8 @@
   // ---- reset: drop all op state so a fresh run / mode swap starts clean ----
   function resetOps() {
     dropCash();
+    for (let i = 0; i < EXT_BUYERS.length; i++) if (EXT_BUYERS[i]) EXT_BUYERS[i]._op = null;
+    EXT_BUYERS.length = 0;
     _supplier = undefined;                     // re-resolve the supplier on the fresh roster
     const gangs = CBZ.cityGangs || [];
     for (const gang of gangs) {
@@ -635,6 +670,7 @@
   CBZ.onUpdate(34.7, function (dt) {
     if (!inCity()) return;
     if (noSim()) return;                       // host simulates; guests puppet
+    if (EXT_BUYERS.length) tickExtBuyers(dt);  // non-gang dealers (compoundcrew.js)
     if (!CBZ.cityGangs || !CBZ.cityGangs.length) return;
     // per-frame: advance in-flight buyers + the cash-grab test (both cheap/bounded)
     tickBuyers(dt);

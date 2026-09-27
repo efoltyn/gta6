@@ -375,6 +375,20 @@
   // stopped loading or stopped accepting the island's descriptor, and the
   // island has quietly gone back to having a second, worse collapse of its own.
   let engineFalls = 0, legacyFalls = 0;
+  // the building's OWN wall material (the shell mesh wearing its wall colour,
+  // else its biggest opaque mesh): what its debris and rubble are made of
+  function wallMatOf(b) {
+    if (b._wallMat !== undefined) return b._wallMat;
+    let best = null, bestN = -1;
+    if (b.group) b.group.traverse(function (o) {
+      if (!o.isMesh || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
+      const pa = o.geometry && o.geometry.attributes && o.geometry.attributes.position;
+      const n = (pa ? pa.count : 0) + (b.color != null && o.material.color.getHex() === b.color ? 1e7 : 0);
+      if (n > bestN) { bestN = n; best = o.material; }
+    });
+    b._wallMat = best || (CBZ.cmat ? CBZ.cmat(b.color != null ? b.color : 0x8b9097) : null);
+    return b._wallMat;
+  }
   function structureHit(b, amount, ctx, opts) {
     if (!b || b.fallen) return 0;
     opts = opts || {};
@@ -430,11 +444,22 @@
                   floor: Math.max(0, Math.round((b.storeys || 2) * 0.4)) });
         } catch (e) {}
       }
-      for (let i = 0; i < 7; i++) CBZ.fx.dropDebris({
-        x: b.x + (rnd() - 0.5) * b.w, z: b.z + (rnd() - 0.5) * b.d,
-        fromY: b.h * (0.4 + rnd() * 0.6), vy: -1 - rnd() * 2,
-        size: 0.5 + rnd() * 1.1, color: 0x8b9097, dmg: scale(14, ctx || { intensity: 0.4 }), keep: true,
-      });
+      // THE FACADE SHEDS ITS OWN SKIN: slabs of this building's wall, in its
+      // own material, come off the face (not grey cubes out of its middle)
+      // and break up as they fall onto the pavement below that face.
+      const wm = wallMatOf(b);
+      for (let i = 0; i < 7; i++) {
+        const side = (rnd() * 4) | 0, t = rnd() - 0.5;
+        const fxw = side < 2 ? t * b.w : (side === 2 ? -1 : 1) * (b.w / 2 + 0.3);
+        const fzw = side < 2 ? (side === 0 ? -1 : 1) * (b.d / 2 + 0.3) : t * b.d;
+        const sz = 0.5 + rnd() * 1.1;
+        CBZ.fx.dropDebris({
+          x: b.x + fxw, z: b.z + fzw,
+          fromY: (b.gy || 0) + b.h * (0.4 + rnd() * 0.6), vy: -1 - rnd() * 2,
+          size: sz, dims: side < 2 ? { w: sz * 1.3, h: sz, d: 0.28 } : { w: 0.28, h: sz, d: sz * 1.3 },
+          material: wm, dmg: scale(14, ctx || { intensity: 0.4 }), keep: true,
+        });
+      }
       if (CBZ.shake && near({ x: b.x, z: b.z }, 45)) CBZ.shake(0.22);
     }
     if (now >= 1) collapse(b, ctx, opts);
@@ -1607,7 +1632,7 @@
             CBZ.fx.dropDebris({
               x: p.x + (rnd() - 0.5) * 5, z: p.z + (rnd() - 0.5) * 5,
               fromY: p.y + 3 + rnd() * 4, vy: -2 - rnd() * 3,
-              size: 0.4 + rnd() * 0.9, color: 0x4a4038, dmg: 0, linger: 5,
+              size: 0.4 + rnd() * 0.9, shape: "rock", color: 0x4a4038, dmg: 0, linger: 5,
             });
           }
         }
@@ -2074,6 +2099,24 @@
      starts running uphill. That is the signal that has actually saved lives.  */
   const TSU_DRAW = -6.7;          // metres of surge at the bottom of the drawdown
 
+  /* TWO WATER LEVELS, NOT ONE (2026-09-27). The event used to be a single
+     sea level walked up and down, so the moment the wave "crossed" the
+     island every street on it was rising at once, including the ones the
+     wall had not reached; the far side was a lake before the bore got
+     there. A tsunami has an EDGE. `behind` is the surge of the water the
+     front has already brought in (the flood); `ahead` is the surge of the
+     water it has not reached yet (the drawn-back sea, the dry town, the calm
+     far side). The ocean mesh rides `behind` and the sheet is pulled down
+     by the difference ahead of the front (water_spec.js uDwAhead), and every
+     survival water query subtracts the same difference
+     (CBZ.waterFrontDropAt), so the swimmer, the bots and the debris are wet
+     exactly where the flood is drawn. */
+  function tsuLevels(st, behind, ahead) {
+    surgeSet(behind);
+    st.behindSurge = behind; st.aheadSurge = ahead;
+    st.aheadDrop = Math.max(0, behind - ahead);
+  }
+
   // signed sweep coordinate of a point along the travel direction
   function tsuS(ctx, x, z) { const st = ctx.st; return (x - ctx.cx) * st.dx + (z - ctx.cz) * st.dz; }
 
@@ -2294,11 +2337,12 @@
       W.flowDir = seaward ? [-st.dx, -st.dz] : [st.dx, st.dz];
       W.flowSpeed = 0.6 + Math.abs(Number.isFinite(flow) ? flow : 0) * 0.9;
       W.stand = st.phase === "sweep" ? 0 : (st.phase === "flooded" ? 1 : 0.8);
+      W.aheadDrop = st.aheadDrop || 0;
     }
     if (CBZ.waterEventSet) CBZ.waterEventSet({
       owner: "survival-tsunami", kind: "tsunami", phase: st.phase,
       cx: ctx.cx, cz: ctx.cz, dx: st.dx, dz: st.dz,
-      frontS: st.frontS, frontWet: -2, frontWidth: 20,
+      frontS: st.frontS, frontWet: -2, frontWidth: 20, aheadDrop: st.aheadDrop || 0,
       level: CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.level,
       waveAmp: st.waveAmp, chopAmp: st.chopAmp,
       sediment: st.sediment || 0,
@@ -2494,6 +2538,30 @@
     });
   }
 
+  /* WADING IS NOT SAFE. Swimming players already ride the current
+     (city/swim.js reads waterEventSample), but a player still on their feet
+     in knee-to-waist deep flood walked through it as if it were a puddle.
+     Moving water at that depth takes your legs: you are shoved along the
+     flow, harder the deeper and the closer to the bore, and you cannot hold
+     a line against it. Pushed, not teleported: the body's own collision
+     still resolves against walls next step. */
+  const _wadeS = {};
+  function tsuWade(dt, ctx) {
+    const P = CBZ.player, st = ctx.st;
+    if (!P || P.dead || !CBZ.waterEventSample) return;
+    const sw = CBZ.citySwimState && CBZ.citySwimState();
+    if (sw && sw.swimming) return;
+    const s = CBZ.waterEventSample(P.pos.x, P.pos.z, null, _wadeS);
+    if (!s || !s.wet) return;
+    const depth = s.mean - (P.pos.y != null ? Math.max(P.pos.y, floor(P.pos.x, P.pos.z)) : floor(P.pos.x, P.pos.z));
+    if (depth < 0.25) return;
+    const k = Math.min(1, depth / 1.2);
+    const v = Math.min(3.2, Math.hypot(s.currentX || 0, s.currentZ || 0) * 0.32 * k) * dt;
+    const dl = Math.hypot(s.currentX || 0, s.currentZ || 0) || 1;
+    P.pos.x += (s.currentX || 0) / dl * v;
+    P.pos.z += (s.currentZ || 0) / dl * v;
+  }
+
   /* THE WRECKAGE IS THE BUILDING'S OWN WALLS. A swept house sheds no invented
      brown boxes any more: the biggest solid pieces of its actual group — the
      walls and slabs the arena built it from, wearing the building's own
@@ -2608,7 +2676,7 @@
     st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
-    surgeSet(st.floodSurge);
+    tsuLevels(st, st.floodSurge, st.floodSurge);
     tsuPublish(ctx, 1.6);
     narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
   }
@@ -2653,6 +2721,7 @@
       st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
       st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
+      st.aheadDrop = 0; st.behindSurge = 0; st.aheadSurge = 0;
       tsuPublish(ctx, 0);
       narrate("hint", "TSUNAMI, the sea is PULLING BACK. GET HIGH!", 3.6);
       soundAt("siren", ctx.cx, ctx.cz);
@@ -2674,6 +2743,31 @@
       st.waveAmp = 0.86 + k * 0.38;
       st.chopAmp = 0.72 + k * 0.62;
       st.foamGain = 0.34 + k * 0.18;
+      /* THE WHITE LINE ON THE HORIZON. Every piece of footage has it: while
+         the reef is still draining, a thin bright line appears far out and
+         grows. The bore is built here, 330 m out, and runs in at open-sea
+         speed to the 52 m mark where the sweep takes over, standing up as it
+         comes: long, low and mostly foam at first, a wall by the end. */
+      if (k > 0.3 && CBZ.CONFIG.TSU_FACE_V2 !== false && CBZ.tsuFaceBuild) {
+        if (!st.face) {
+          if (st.H == null) st.H = Math.max(10, Math.min(44, 34 * (st.mag != null ? st.mag : 1)));
+          tsuBuildWave(ctx);
+        }
+        const u = Math.min(1, (k - 0.3) / 0.7);
+        st.frontS = -(ctx.R + 330) + (330 - 52) * u;
+        const oy = (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + (st.draw != null ? st.draw : TSU_DRAW) * (k * k * (3 - 2 * k));
+        st.faceH = st.H * (0.10 + 0.26 * u * u);
+        if (st.face) CBZ.tsuFaceUpdate(st.face, {
+          t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
+          height: st.faceH, turbid: 0.12 * u, curl: 0.12 + 0.25 * u, foam: 0.9,
+          x: ctx.cx + st.dx * st.frontS, y: oy - 1.0, z: ctx.cz + st.dz * st.frontS, seaY: oy,
+          dirX: st.dx, dirZ: st.dz,
+        });
+        // the roar arrives before the water does
+        st.roarCd = (st.roarCd || 0) - dt;
+        if (st.roarCd <= 0) { st.roarCd = 1.1 - 0.6 * u; sound("rumble"); }
+        if (CBZ.shake) CBZ.shake(0.04 + 0.16 * u * u);
+      }
       tsuPublish(ctx, -0.5 * k);
       if (CBZ.shake) CBZ.shake(0.05);
       st.sirenCd = (st.sirenCd || 0) - dt;
@@ -2725,7 +2819,7 @@
       st.waveAmp = 1.55; st.chopAmp = 2.15; st.foamGain = 0.82;
       st.waveId = "tsu" + CBZ.now + rnd();
       st.landfall = false;
-      tsuBuildWave(ctx);
+      if (!st.wave) tsuBuildWave(ctx);
       // NO INUNDATION MESH. The sea itself comes over the island (surgeSet),
       // which is why the swimmer, the buoyancy, the drifting corpses and the
       // submergence test all agree without any of them being told.
@@ -2790,31 +2884,30 @@
           st.frontV = st.speed;
           st.frontS += st.speed * dt;
         }
-        /* THE ARC IS MEASURED AGAINST THE ISLAND, NOT AGAINST THE WHOLE RUN.
-           The first version of this walked one curve across the entire travel
-           (-R-52 → +R+52) with a lag exponent, and the arithmetic of that was
-           simply wrong: at the moment the wall reached the island CENTRE the
-           surge was still -1.15 m — BELOW resting sea level. The bore arrived
-           on dry ground and the water only turned up after the front had left,
-           which is the opposite of a tsunami.
-
-           Two beats, each with its own span, because they are two different
-           physical events:
-
-           APPROACH (frontS -R-52 → -R): the drawdown COMING BACK. The sea
-           returns from TSU_DRAW to rest over the 52 m of open water in front
-           of the beach, so it crosses mean level exactly as the wall makes
-           landfall — the water and the wall arrive together.
-
-           CROSSING (frontS -R → +R): the run-up piles in, on land^0.75. That
-           exponent is what keeps the crest AHEAD of full inundation (the wall
-           still reads as an edge, not the top of a rising pool) without ever
-           letting the ground behind it be dry. */
+        /* 2026-09-27, THE EDGE (tsuLevels above). The single-level arc this
+           replaced walked the WHOLE island's water up with `land^0.75`, so
+           the street 200 m ahead of the wall was already under 7 m of sea.
+           Now: AHEAD of the front the reef stays drained until the wall is
+           on it (the stranded boats and the bare seabed are in frame right
+           up to the impact), and the far side's sea eases back to rest as
+           the front crosses. BEHIND it the flood is deep at once (a bore
+           brings its water with it) and deepens to the full inundation by
+           the far shore; past the far beach the two levels meet, so the
+           flood phase inherits one sea with no pop. */
         const approach = Math.min(1, (st.frontS + ctx.R + 52) / 52);
         const land = Math.max(0, Math.min(1, (st.frontS + ctx.R) / (2 * ctx.R)));
-        surgeSet(land <= 0 ? (st.draw != null ? st.draw : TSU_DRAW) * (1 - ease(approach))
-                           : st.floodSurge * Math.pow(land, 0.75));
+        const drawM = st.draw != null ? st.draw : TSU_DRAW;
+        const out = Math.max(0, Math.min(1, (st.frontS - ctx.R) / 52));   // past the far beach
+        let behind, ahead;
+        if (land <= 0) { behind = drawM + (1.2 - drawM) * ease(approach); ahead = drawM; }
+        else {
+          behind = 1.2 + (st.floodSurge - 1.2) * Math.sqrt(land);
+          ahead = drawM * (1 - land) * (1 - land);
+          ahead += (behind - ahead) * ease(out);
+        }
+        tsuLevels(st, behind, ahead);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0.8;
+        const aheadY = (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + ahead;
         const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
         /* ---- THE FACE IS SCALED BY THE WATER UNDER IT ---------------------
            A tsunami in open water is long, low and barely visible; it stands
@@ -2876,14 +2969,21 @@
           const crashDip = st.broke ? (1 - 0.26 * Math.exp(-Math.max(0, st.crashT) * 1.15)) : 1;
           const crashCurl = st.broke ? Math.max(0.3, 1 - Math.max(0, st.crashT) * 1.1) : 1;
           const hs = (0.40 + 0.74 * Math.pow(shoal, 1.7)) * spent * crashDip;
-          st.faceH = st.H * hs;
+          /* THE FACE STANDS ON THE WATER IN FRONT OF IT, not on the flood
+             behind it: its foot is the drained reef / the dry street, and it
+             is as tall as the step it is carrying plus the breaking crest
+             above that. The crest's height over the flood is the old faceH,
+             unchanged; only the base moved down to where the water is. */
+          const step = Math.max(0, st.level - aheadY);
+          st.faceH = Math.max(2, st.H * hs + step - 1.2);
+          st.faceY = aheadY - 1.2;
           CBZ.tsuFaceUpdate(st.face, {
             t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
             height: st.faceH, turbid: turbid,
             // a spent surge does not overhang: the curl goes with the height
             curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent) * crashCurl,
             foam: st.foamGain,
-            x: fx0, y: st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0,
+            x: fx0, y: st.faceY + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0, seaY: aheadY,
             dirX: st.dx, dirZ: st.dz,
           });
           grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
@@ -2904,8 +3004,8 @@
         // the mist follows the curl as before
         st.spray.setActive(st.broke && st.crashT < 0.9 ? 1.5
           : (0.6 + 0.4 * shoal) * Math.max(0.18, spent));
-        st.spray.update(dt, fx0, st.level + (st.faceH || st.H) * 0.9, fz0);
-        tsuPublish(ctx, 2.2);
+        st.spray.update(dt, fx0, (st.faceY != null ? st.faceY : st.level) + (st.faceH || st.H) * 0.9, fz0);
+        tsuPublish(ctx, 4.2);
         // LEGACY LANDFALL (TSU_SHOAL_V2 off): the single blast + "BRACE!".
         // With the flag on, tsuCrash() already fired at the end of the stand
         // and set st.landfall, so this never runs twice.
@@ -2915,13 +3015,26 @@
           narrate("toast", "BRACE!");
           sound("collapse"); sound("water");
         }
-        const pd = Math.abs(tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z) - st.frontS);
-        if (pd < 40 && CBZ.shake) CBZ.shake(0.45 * (1 - pd / 40));   // the roar closes in
+        /* THE ROAR CLOSES IN. Shake and rumble scale with how close the
+           front is to YOU (ahead of it or already behind it), from 150 m
+           out, and with how big this one is; a tower roof 30 m up feels
+           the building shudder but not the water's fist. */
+        const pS = tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z);
+        const pd = Math.abs(pS - st.frontS);
+        const near = Math.max(0, 1 - pd / 150);
+        if (near > 0) {
+          const hk = Math.max(0.35, 1 - Math.max(0, CBZ.player.pos.y - st.level) / 30);
+          const mk = 0.6 + 0.4 * Math.min(1.3, st.mag != null ? st.mag : 1);
+          if (CBZ.shake) CBZ.shake((0.08 + 0.62 * near * near * near) * hk * mk);
+          st.roarCd = (st.roarCd || 0) - dt;
+          if (st.roarCd <= 0) { st.roarCd = 0.55 + 1.1 * (1 - near); soundAt("rumble", fx0, fz0); if (near > 0.6) sound("water"); }
+        }
         if (rnd() < dt * 8) sound("water");
         tsuCatch(dt, ctx);
+        tsuWade(dt, ctx);
         tsuSmash(ctx);
         tsuCarHandoff(ctx);
-        floodActors(dt, ctx, 2.2, "drowned in the flood", st.dx, st.dz);
+        floodActors(dt, ctx, 4.2, "drowned in the flood", st.dx, st.dz);
         // the debris rides the BORE's speed, not a constant: near-still while
         // the wave stands, then surging inland with the released front
         tsuFlotsam(dt, ctx, CBZ.CONFIG.TSU_SHOAL_V2 !== false && st.frontV != null
@@ -2929,7 +3042,7 @@
         if (st.frontS > ctx.R + 52) tsuEnterFlood(ctx);
       } else if (st.phase === "flooded") {
         st.floodT += dt;
-        surgeSet(st.floodSurge);
+        tsuLevels(st, st.floodSurge, st.floodSurge);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.floodSurge;
         st.sediment = 0.95;
         tsuPublish(ctx, 1.6);
@@ -2946,7 +3059,7 @@
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * (TSU_FAST() ? 0.17 : 0.2)));
-        surgeSet(next);
+        tsuLevels(st, next, next);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
         const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
         st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is back
@@ -2970,6 +3083,7 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, undertow);
         tsuUndertowDrown(dt, ctx, drainK);
+        tsuWade(dt, ctx);
       }
       // heavier fog with your face at the surface — city/swim.js owns the
       // swimmer now, so this reads its published state instead of a local flag
@@ -2981,11 +3095,12 @@
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
       surgeSet(0);
+      st.aheadDrop = 0; st.behindSurge = 0; st.aheadSurge = 0; st.faceY = null;
       // an event cancelled mid-stand must not leave the world muted
       if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
       // the sediment goes with it — one match's soup must never tint the next
-      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; }
+      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; W.aheadDrop = 0; }
       const o = ctx.arena && ctx.arena.ocean;
       if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1, sediment: 0 });
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
@@ -4519,17 +4634,28 @@
     // out after half a minute; this is the rubble that is still there at the
     // end of the match, and it lands when the building does, not when it
     // starts falling.
+    //   It is a MOUND OF THE BUILDING: its own wall material broken into real
+    //   pieces plus its pale floor slabs, seated on each other by
+    //   CBZ.debris.pile and frozen solid (you climb it). Taller towers leave a
+    //   higher, wider heap. The last few storeys still come down on whoever
+    //   is standing at the edge of the footprint.
     const layRubble = function () {
-      const RUBBLE = [0x70757e, 0x8b9097, 0x5c6168, 0xb9bec6, 0x9aa0a8];
-      const n = 22 + (rnd() * 14 | 0) + (b.h > 24 ? 16 : 0);   // taller towers leave more
-      for (let i = 0; i < n; i++) {
-        CBZ.fx.dropDebris({
-          x: b.x + (rnd() - 0.5) * b.w * 1.4, z: b.z + (rnd() - 0.5) * b.d * 1.4,
-          fromY: 1.2 + rnd() * 2.5, vy: -1 - rnd() * 2,
-          size: 0.7 + rnd() * 2.2, color: RUBBLE[(rnd() * RUBBLE.length) | 0],
-          dmg: i < 6 && ctx ? scale(30, ctx) : 0, keep: true,
-        });
+      if (ctx && surv()) {
+        for (let i = 0; i < 6; i++) {
+          surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.4, b.z + (rnd() - 0.5) * b.d * 1.4, 1.6, scale(30, ctx));
+        }
       }
+      if (!CBZ.debris) return;
+      const tall = b.h > 24;
+      CBZ.debris.pile({
+        x: b.x, z: b.z, y: b.gy || undefined,
+        w: b.w * 1.25, d: b.d * 1.25, h: Math.min(tall ? 4.5 : 3, 0.9 + b.h * 0.1),
+        materials: [
+          { material: wallMatOf(b), weight: 3 },
+          { material: CBZ.cmat ? CBZ.cmat(0xb4b9c1) : wallMatOf(b), kind: "concrete", weight: 1 },
+        ],
+        owner: "fx", solid: true,
+      });
     };
 
     const job = (CBZ.collapse && CBZ.CONFIG.COLLAPSE_V2) ? CBZ.collapse.play({
@@ -4578,7 +4704,19 @@
       vx: dirx * force + (rnd() - 0.5) * 2, vy: up + rnd() * 3, vz: dirz * force + (rnd() - 0.5) * 2,
       sx: (rnd() - 0.5) * 6, sz: (rnd() - 0.5) * 6, settled: false,
     });
-    CBZ.fx.dropDebris({ x: car.group.position.x, z: car.group.position.z, fromY: 2, vy: 4, size: 0.6, color: 0xbfe0ff, linger: 0.4 });
+    // the windows go as it is ripped off the street: THIS car's own glass
+    // shatters (a single-material glass mesh on its body), else a burst of
+    // glass grit where the windows were
+    if (CBZ.debris) {
+      const gp = car.group.position;
+      let pane = null;
+      car.group.traverse(function (o) {
+        if (!pane && o.isMesh && o.visible && o.material && !Array.isArray(o.material) && CBZ.debris.kindOf(o.material, o) === "glass") pane = o;
+      });
+      const at = { x: gp.x, y: gp.y + 1.2, z: gp.z };
+      if (pane) { car._pane = pane; CBZ.debris.shatter(pane, { kind: "glass", at, dir: { x: dirx, y: 0.4, z: dirz }, power: 1.2, maxPieces: 12, owner: "fx" }); }
+      else CBZ.debris.chips(at.x, at.y, at.z, { kind: "glass", count: 18, power: 1.2, dir: { x: dirx, y: 0.5, z: dirz }, spread: 1.4 });
+    }
   }
 
   // ---- WILDFIRE: real flames + glow + smoke + scorch on each burning tree ----
@@ -4627,7 +4765,9 @@
     removeTreeFire(t);
     if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0x1a1410); if (t.foliage.material.emissive) t.foliage.material.emissive.setHex(0x000000); }
     if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
-    if (CBZ.fx) CBZ.fx.dropDebris({ x: t.x, z: t.z, fromY: floor(t.x, t.z) + 3, vy: 2, size: 0.5, color: 0x2a2622, linger: 0.6 });
+    // the crown burns out: charred twig and bark flecks rain off it in a
+    // puff of ash (the tree's own char, not a black cube)
+    if (CBZ.debris) CBZ.debris.chips(t.x, floor(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
   }
 
   /* ============================================================
@@ -4896,12 +5036,32 @@
       // A TREE THAT IS STRUCK EXPLODES. The sap inside the trunk flashes to
       // steam and blows the bark off in strips — the one piece of genuine
       // blunt-trauma debris a strike produces, and nothing like an ejecta cone.
-      if (at.kind === "tree" && CBZ.fx && CBZ.fx.dropDebris) {
+      // The strips are cut from THIS trunk: a bark-thick slab of its own
+      // surface on the struck side, in its own bark material, split along the
+      // grain by CBZ.debris (wood fractures into long splinters).
+      if (at.kind === "tree") {
         const t = at.ref, base = floor(at.x, at.z);
-        for (let i = 0; i < 4; i++) {
-          CBZ.fx.dropDebris({ x: at.x + (rnd() - 0.5) * 2.4, z: at.z + (rnd() - 0.5) * 2.4,
-            fromY: base + 2 + rnd() * 2.5, vy: 3 + rnd() * 3, size: 0.28 + rnd() * 0.3,
-            color: 0x4a3520, linger: 5 });
+        if (CBZ.debris && t && t.trunk && t.trunk.geometry && t.trunk.material) {
+          const tr = t.trunk;
+          tr.updateWorldMatrix(true, false);
+          if (!tr.geometry.boundingBox) tr.geometry.computeBoundingBox();
+          const bb = tr.geometry.boundingBox.clone().applyMatrix4(tr.matrixWorld);
+          const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+          const rad = Math.max(0.08, Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2);
+          const y0 = Math.max(bb.min.y, base) + 0.6, y1 = Math.min(bb.max.y, y0 + 2.6);
+          // (a trunk mesh wider than a tree is a merged forest: no strips off that)
+          const strips = (bb.max.x - bb.min.x < 3 && bb.max.z - bb.min.z < 3) ? 2 + ((rnd() * 2) | 0) : 0;
+          for (let i = 0; i < strips && y1 > y0 + 0.4; i++) {
+            const a = rnd() * 6.283, ux = Math.cos(a), uz = Math.sin(a);
+            const sx = cx + ux * rad * 0.9, sz = cz + uz * rad * 0.9;
+            const hw = Math.max(0.05, rad * 0.45), th = Math.min(0.06, rad * 0.35) / 2;
+            CBZ.debris.shatterBox({
+              minX: sx - Math.abs(uz) * hw - Math.abs(ux) * th, maxX: sx + Math.abs(uz) * hw + Math.abs(ux) * th,
+              minY: y0, maxY: y1,
+              minZ: sz - Math.abs(ux) * hw - Math.abs(uz) * th, maxZ: sz + Math.abs(ux) * hw + Math.abs(uz) * th,
+            }, tr.material, { kind: "wood", at: { x: sx, y: (y0 + y1) / 2, z: sz }, dir: { x: ux, y: 0.35, z: uz },
+              power: 1.4, maxPieces: 4, owner: "fx", snap: false });
+          }
         }
         if (t && t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x2a1c10);
       }
@@ -5307,7 +5467,7 @@
           const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
           if (p.t <= 0) {
             p.m.dispose();
-            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
+            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, shape: "rock", color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
               // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
               // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
               // a 6 t stone at 200 m/s — so passing this rock's mass and speed

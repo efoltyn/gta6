@@ -224,10 +224,8 @@ body.touch #title .mode-escape-only .controls .keys-touch{display:grid;}
 }
 #title .quality-btn:first-child{border-left:0;}
 #title .quality-btn span{display:block; font:600 13px/1.1 var(--hub-display); letter-spacing:.12em; text-transform:uppercase;}
-#title .quality-btn small{display:block; margin-top:3px; font-size:10.5px; color:var(--hub-faint); white-space:nowrap;}
 #title .quality-btn:hover{color:var(--hub-ink);}
 #title .quality-btn.active{background:rgba(255,255,255,.14); color:#fff;}
-#title .quality-btn.active small{color:var(--hub-mute);}
 
 #title #playBtn{
   margin:0; width:100%; display:flex; align-items:center; justify-content:center; gap:14px;
@@ -254,7 +252,6 @@ body.mode-city #title .new-life-btn{
   font-family:var(--hub-text); transition:background .14s, border-color .14s;
 }
 #title .new-life-btn span{font:600 12px/1.1 var(--hub-display); letter-spacing:.18em; text-transform:uppercase;}
-#title .new-life-btn small{font-size:11px; color:rgba(255,178,166,.72); font-weight:500;}
 #title .new-life-btn:hover{background:rgba(255,90,70,.12); border-color:rgba(255,120,104,.6);}
 #title .new-life-btn:disabled{cursor:wait; opacity:.6;}
 
@@ -284,14 +281,10 @@ body.mode-city #title .new-life-btn{
   content:""; position:absolute; inset:0; pointer-events:none;
   background:linear-gradient(0deg, rgba(4,6,9,.92) 0%, rgba(4,6,9,.5) 34%, rgba(4,6,9,0) 64%);
 }
-#title .mode-btn span, #title .mode-btn small{position:absolute; left:10px; right:10px; z-index:1;}
+#title .mode-btn span{position:absolute; left:10px; right:10px; z-index:1;}
 #title .mode-btn span{
-  bottom:clamp(22px,2.2vw,28px); font:600 clamp(13px,1.15vw,17px)/1.05 var(--hub-display);
+  bottom:clamp(9px,1vw,13px); font:600 clamp(13px,1.15vw,17px)/1.05 var(--hub-display);
   letter-spacing:.05em; text-transform:uppercase; text-shadow:0 1px 8px rgba(0,0,0,.8);
-}
-#title .mode-btn small{
-  bottom:clamp(7px,.8vw,10px); font-size:clamp(10.5px,.8vw,12px); font-weight:500; color:var(--hub-mute);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 #title .mode-btn:hover{transform:translateY(-3px); box-shadow:0 0 0 1px rgba(255,255,255,.28), 0 16px 30px -14px rgba(0,0,0,.9);}
 #title .mode-btn:hover .mode-art{filter:saturate(1) brightness(.95); transform:scale(1.04);}
@@ -305,8 +298,6 @@ body.mode-city #title .new-life-btn{
   background:rgba(6,8,12,.62) center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 2h6v6M10 2 2.5 9.5'/%3E%3C/svg%3E");
 }
 /* the last game you played (systems/title_hub.js) */
-#title .mode-btn.is-last > small{color:var(--accent);}
-#title .mode-btn.is-last > small::before{content:"Last played. ";}
 
 /* ============================================================
    RESPONSIVE
@@ -356,7 +347,6 @@ body.mode-city #title .new-life-btn{
   #title .origin-btn{min-height:40px; padding:6px 12px;}
   #title .controls{margin-top:6px;}
   #title .title-actions{gap:8px;}
-  #title .quality-btn small{display:none;}
   #title .quality-btn{min-height:40px;}
 }
 @media (max-width:420px){
@@ -380,7 +370,6 @@ body.mode-city #title .new-life-btn{
   #title .origin-label, #title .gg-map-label{margin:10px 0 6px;}
   #title .origin-btn{min-height:40px; padding:6px 10px;}
   #title #playBtn{padding-block:12px; font-size:22px;}
-  #title .quality-btn small{display:none;}
   #title .mode-select{grid-template-columns:repeat(8,minmax(128px,1fr)); overflow-x:auto; scrollbar-width:none; min-height:84px;}
   #title .mode-btn{height:80px; aspect-ratio:auto;}
 }

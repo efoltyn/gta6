@@ -60,10 +60,8 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["Plotting something, are we? I'm always watching.",
-             "This is MY block. Step out of line and you'll regret it.",
-             "The gun room stays locked. My key, my rules."]
-          : ["Keep moving, inmate.", "Nothing to see here.", "Back to your block."],
+          ? ["What do you want.", "Keep walking.", "Not now."]
+          : ["Keep moving.", "Move along.", "Back to your block."],
       },
     };
     // a post named by the roster outranks the one systems/economy.js derives
@@ -143,9 +141,7 @@
     g.data.pool = "goods";
     g.data.offer = CBZ.econ.pickOffer("goods");
     g.data.name += " (bent)";
-    g.data.talk = ["You didn't see me, I didn't see you.",
-                   "You need it brought in, I'm the one who brings it.",
-                   "My shelf's open when my shift's quiet."];
+    g.data.talk = ["You didn't see me.", "Need something brought in?", "Later. When it's quiet."];
   });
 
   function nameOf(g) {
@@ -320,8 +316,8 @@
       g.approachCD = 3 + CBZ.econ.rng() * 3;
       if (near && CBZ.prisonSay && g.standingOffer.walks === 1) {
         CBZ.prisonSay(g, a.kind === "snitchIntel"
-          ? "The name keeps. You know my post."
-          : "The paperwork can wait on you. Not forever.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+          ? "You know where I am."
+          : "Offer stands. For now.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       }
       return;
     }
@@ -346,13 +342,20 @@
     const seen = g._saidClosers || (g._saidClosers = {});
     if (near && CBZ.prisonSay && !seen[a.kind]) {
       seen[a.kind] = 1;
-      CBZ.prisonSay(g, a.kind === "racketOffer" ? "The tab doesn't close because you walked." : "We're done talking.",
+      CBZ.prisonSay(g, a.kind === "racketOffer" ? "You still owe the tab." : "We're done.",
         { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
     }
   }
 
+  function wardenNear() {
+    const W = CBZ.warden;
+    if (!W || typeof W.presence !== "function") return false;
+    try { return (+W.presence() || 0) > 0.5; } catch (e) { return false; }
+  }
+  CBZ.guardsWardenNear = wardenNear;
   function considerPayoffApproach(g, dt) {
     if (!g.corrupt || g.approach || g.bribed > 0 || g.ko > 0 || g.dead || g.hunt > 0) return;
+    if (wardenNear()) return;                 // nobody takes money with the boss on the floor
     // his standing offer only ages while he is NOT pitching it
     if (g.standingOffer) {
       g.standingOffer.t -= dt;
@@ -456,9 +459,9 @@
        rather than a description of the mechanic. Out of earshot you get the
        sweep with no explanation, which is correct: you were not there. */
   const RADIO = [
-    "Post four, got a sighting for you. Sending it now.",
-    "Yeah, he's yours. Same spot I called in.",
-    "Control, I've got eyes. Passing it up the line.",
+    "Post four. Got him for you.",
+    "He's yours. Same spot.",
+    "Control, eyes on. Passing it up.",
   ];
   function racketBark(g) {
     const game = CBZ.game || {};
@@ -561,7 +564,7 @@
 
   function resolveGuardApproach(g, action) {
     const a = g && g.approach;
-    if (!a) return { ok: false, msg: "Nothing doing. Not right now." };
+    if (!a) return { ok: false, msg: "Not now." };
     if (action === "listen") {
       // NO NAME, NO COLON. These four were the last of the `Name: line` shape
       // in the prison: .pi-subtitle (systems/interact.js) carries the speaker
@@ -575,12 +578,15 @@
       const terms = deepKind(a) && CBZ.econ.phoneTerms ? CBZ.econ.phoneTerms() : "";
       const tail = terms ? " " + terms : "";
       return { ok: true, msg: a.kind === "witnessBlackmail"
-        ? `${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.${tail}`
+        ? `${a.source || "Somebody"} saw you. Pay and it goes away.${tail}`
         : a.kind === "racketOffer"
-        ? `Pay the cut and your contraband stays invisible.${tail}`
+        ? `Pay the cut. Nobody finds your stuff.${tail}`
         : a.kind === "snitchIntel"
-        ? `Pay, and I point you at the mouth feeding the log. What you do about it is yours.${tail}`
-        : `${a.cost}, and the paperwork gets lost.` };
+        ? `Pay and I tell you who's talking.${tail}`
+        : `${a.cost} and it goes away.` };
+    }
+    if (action === "pay" && wardenNear()) {
+      return { ok: false, msg: "Not now." };
     }
     if (action === "pay") {
       /* NOBODY SELLS A CAREER FOR TOBACCO (PRISON_PHONE_BRIDGE).
@@ -601,7 +607,7 @@
         // A REFUSAL NAMES THE THING AND THE NUMBER, and never opens on a bare
         // numeral — these three said "12. Come back with it or don't come
         // back", which is a price tag with a full stop after it.
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `That name costs ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         const snitch = (a.snitch && !a.snitch.dead && !a.snitch.escaped) ? a.snitch : findSnitchLead();
@@ -636,10 +642,10 @@
         addRacketStanding(1);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "Trail's cold. I'll keep the fee for the trouble." };
+        return { ok: true, msg: paidPrefix() + "Trail's cold. I keep the fee." };
       }
       if (a.kind === "witnessBlackmail") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Burying a statement costs ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 22);
@@ -661,10 +667,10 @@
         addRacketStanding(3);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "That statement never got typed up. Nobody remembers taking it." };
+        return { ok: true, msg: paidPrefix() + "That statement's gone." };
       }
       if (a.kind === "racketOffer") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `The cut is ${a.cost}. Come back with it or don't come back.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
         CBZ.econ.addCigs(-a.cost);
         CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
         g.bribed = Math.max(g.bribed || 0, 24);
@@ -685,7 +691,7 @@
         addRacketStanding(6);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "You're under my wing for a while. Don't make me regret the arithmetic." };
+        return { ok: true, msg: paidPrefix() + "You're covered. For a while." };
       }
       // the price on the card, not a second one computed at the till — see the
       // note on econ.payoff()'s opts.cost. HAGGLE writes a.cost; this is what
@@ -703,13 +709,13 @@
         a.cost = Math.max(3, a.cost - 2 - Math.floor(CBZ.econ.rng() * 3));
         a.t = Math.max(a.t || 0, 7);
         addRacketStanding(-1);
-        return { ok: true, msg: `Fine. ${a.cost}, and we never had this conversation.` };
+        return { ok: true, msg: `Fine. ${a.cost}.` };
       }
       a.cost += 2;
       if (a.kind === "racketOffer") CBZ.econ.addRacketDebt(1);
       addRacketStanding(-2);
       if (CBZ.addHeat) CBZ.addHeat(4);
-      return { ok: false, msg: `Now it's ${a.cost}. Haggle again and see what happens.` };
+      return { ok: false, msg: `Now it's ${a.cost}.` };
     }
     if (action === "threaten") {
       const armed = (CBZ.playerArmed && CBZ.playerArmed()) || (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv"));
@@ -741,11 +747,11 @@
       }
       if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
       nudgeCleanGuard(g);
-      return { ok: false, msg: "Wrong answer. Control, this is post one." };
+      return { ok: false, msg: "Wrong answer." };
     }
     if (action === "refuse") {
       expireGuardApproach(g, "refuse");
-      return { ok: false, msg: "Suit yourself. I've got a long memory and a short shift." };
+      return { ok: false, msg: "Suit yourself." };
     }
     return { ok: false, msg: "" };
   }
@@ -995,7 +1001,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss, I saw him going the other way. Towards the south gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way. South gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -1048,7 +1054,7 @@
       n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss. Boss! He's right there.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss! He's right there.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -1095,15 +1101,19 @@
      Noise (CBZ.guardHear) pulls the nearest one or two to a spot; a hunting
      guard's radio (systems/detection.js) sends backup to his LAST KNOWN spot.
   ============================================================ */
+  // Short, the way a screw actually talks. Most state changes say nothing.
   const BARKS = {
-    hunt: ["STOP RIGHT THERE!", "We got a runner!", "Don't make me chase you!", "You're mine, inmate!"],
-    huntWarden: ["You dare run from ME?", "MY block. MY rules. Take him down!"],
-    suspicious: ["Hey. Who's that?", "Something moved over there.", "Hold on. Who's there?"],
-    search: ["Where'd he go?", "Lost him. Check the corners.", "He was right here."],
-    investigate: ["I heard something over there.", "Hold up. Checking that out.", "What was that?"],
-    giveup: ["Nothing. Back to my round.", "Must have been nothing."],
-    // hands over his head, your gun on him: he talks like a man buying time
-    heldup: ["Easy. Easy now.", "Alright. Take it easy.", "Don't do anything stupid, son."],
+    hunt: ["Hey!", "Stop!", "Runner!"],
+    huntWarden: ["Stop him."],
+    suspicious: ["Hey. You.", "Who's that?"],
+    search: ["Where'd he go?", "Lost him."],
+    investigate: ["Hold up.", "What was that?"],
+    heldup: ["Easy.", "Easy now."],
+    // systems/capture.js + prisonlaw.js speak these through CBZ.guardLine
+    order: ["On the ground! Now!", "Stop right there!", "Hands where I can see them!", "Down! Get down!"],
+    warned: ["Move along.", "Don't let me see it again.", "Walk away."],
+    cuff: ["Hands behind your back.", "Don't move."],
+    breakup: ["Break it up!", "Hey! Break it up!", "Back off! Now!"],
   };
   let barkCD = 0;   // global spacing so barks never spam the speech line
 
@@ -1112,21 +1122,30 @@
     if (barkCD > 0 || !CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing") return;
     if (g.dead || g.ko > 0 || g.bribed > 0) return;
     let pool = null;
-    if (s === "hunt") pool = g.kind === "warden" ? BARKS.huntWarden : BARKS.hunt;
-    else if (s === "suspicious") pool = BARKS.suspicious;
+    if (s === "hunt" && prev !== "capture" && prev !== "search") pool = g.kind === "warden" ? BARKS.huntWarden : BARKS.hunt;
+    else if (s === "suspicious" && Math.random() < 0.5) pool = BARKS.suspicious;
     else if (s === "search" && prev === "hunt") pool = BARKS.search;
-    else if (s === "investigate" && Math.random() < 0.7) pool = BARKS.investigate;
-    else if (s === "return" && Math.random() < 0.6) pool = BARKS.giveup;
+    else if (s === "investigate" && Math.random() < 0.35) pool = BARKS.investigate;
+    else if (s === "heldup") pool = BARKS.heldup;
     if (!pool) return;
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
     barkCD = 3.5;
-    // A bark is speech: prisonSay puts the name in its speaker slot and the
-    // words in the world, never `Name: "line"` stamped on the HUD.
     const line = pool[(Math.random() * pool.length) | 0];
     if (CBZ.prisonSay) CBZ.prisonSay(g, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
-    else if (CBZ.flashHint) CBZ.flashHint(line, 1.7);
   }
+  // A line the LAW needs said now (the order, the warning, the cuffs, break it
+  // up): over this screw's head, outranking chatter, ignoring the bark spacing
+  // when forced. One short line, never a speech.
+  CBZ.guardLine = function (g, kind, opts) {
+    opts = opts || {};
+    const pool = BARKS[kind];
+    if (!g || !pool || !CBZ.prisonSay) return false;
+    if (!opts.force && barkCD > 0) return false;
+    barkCD = 3.0;
+    const line = pool[((g.id || 0) + ((Math.random() * 2) | 0)) % pool.length];
+    try { return CBZ.prisonSay(g, line, { secs: opts.secs || 1.8, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.answer : 2 }); } catch (e) { return false; }
+  };
 
   function noteState(g, s) {
     if (g.state === s) return;
@@ -1153,11 +1172,14 @@
   const SUS_CHECK = 0.5;       // a meter still this high with nothing to see: go and look
   const CLOSE_SPOT = 2.6;      // m: inside this, sight is instant
   const CAPTURE_R = 1.4;       // m: capture.js's reach (unchanged)
+  const ORDER_R = 4.2;         // m: where he gives the order (capture.js ARREST.ORDER_R)
   const RADIO_FIX_EVERY = 3;   // s between a blind pursuer adopting the block's newest fix
   const GIVE_UP_STALL = 3.5;   // s without closing on a search point: skip it
 
   // ---- the per-frame read of the player, shared by every guard ---------------
+  let wardenSharp = 1;          // 1..1.15, the warden's presence on the cone
   const ctx = {
+    warden: 0,
     heat: 0, reason: 0, zone: null, lock: false, invuln: false,
     moveMul: 1, lightMul: 1, diffMul: 1, viewMul: 1, tier: 1, searchLen: 12,
     pvx: 0, pvz: 0, pv: 0,
@@ -1197,7 +1219,14 @@
     // DIFFICULTY: the tier is what the prison IS, heat is how hard it is
     // looking for you right now. Both nudge; neither turns a screw into a hawk.
     ctx.diffMul = (1 + 0.12 * ctx.tier) * (1 + Math.min(0.4, ctx.heat / 250));
-    ctx.viewMul = 1 + Math.min(0.15, ctx.heat / 600);
+    // THE WARDEN ON THE FLOOR (systems/prisonwarden.js): his screws look
+    // harder while he is near the action (+15% reach and cone at presence 1)
+    let wp = 0;
+    const W = CBZ.warden;
+    if (W && typeof W.presence === "function") { try { wp = +W.presence() || 0; } catch (e) { wp = 0; } }
+    ctx.warden = clamp(wp, 0, 1);
+    wardenSharp = 1 + 0.15 * ctx.warden;
+    ctx.viewMul = (1 + Math.min(0.15, ctx.heat / 600)) * wardenSharp;
     ctx.searchLen = 10 + 1.2 * ctx.tier + Math.min(4, ctx.heat / 25);
     ctx.invuln = (G.invuln || 0) > 0 || !!player.dead ||
       !!(player.captureState && player.captureState !== "normal");
@@ -1539,14 +1568,20 @@
         S.fixAt = clock();
         const dist = Math.hypot(pdx, pdz);
         lookAtPoint(g, player.pos.x, player.pos.z);
-        if (dist > CAPTURE_R) {
+        // THE ORDER (systems/capture.js): inside ORDER_R he tells you, then
+        // stands off at the distance the arrest asks for while you decide.
+        let hold = CAPTURE_R;
+        if (dist <= ORDER_R && CBZ.tryCapture) {
+          const h = CBZ.tryCapture(g, dt);
+          if (typeof h === "number" && h > 0) hold = h;
+        }
+        if (dist > hold) {
           noteState(g, "hunt");
-          walkTo(g, player.pos.x, player.pos.z, g.speed * 1.7, dt);
+          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt);
         } else {
           noteState(g, "capture");
           faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
           animChar(g.char, 0, dt);
-          if (CBZ.tryCapture) CBZ.tryCapture(g, dt);
         }
       } else {
         // blind: run to where he last had you, then sweep round it. The hunt
@@ -1787,7 +1822,7 @@
     if (dist > vd || dist < 0.05) return false;
     const yaw = g.group.rotation.y;
     const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
-    if (dot < Math.cos(g.half)) return false; // outside the cone angle
+    if (dot < Math.cos(Math.min(1.45, g.half * wardenSharp))) return false; // outside the cone angle
     // ...AND SO DOES THE DARK (systems/prisonnight.js publishes sightScale off
     // the prison's own light state; undefined everywhere else). After the
     // range and angle tests: it can only shrink the cone.

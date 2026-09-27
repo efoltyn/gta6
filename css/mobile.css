@@ -12,11 +12,11 @@
    pills (.tpill, and the #interact card's .tverb rows).
 
    SCREEN ZONES (landscape iPad, the anti-overlap contract):
-     top-left      #cpPanel chip, #cRadar minimap under it
+     top-left      #cRadar minimap
      top-center    objective / job lines
-     top-right     #cTopRight money+wanted column (jail: #minimap)
+     top-right     #cTopRight cash, only when it changes (jail: #minimap)
      mid-bottom    walk-up prompt band (bottom:158) → #interact card (224)
-     bottom-center #cWpn hotbar + MC vitals
+     bottom-center #cWpn hotbar + ammo (gun out only)
      bottom-left   FIXED joystick (faint till touched; rim = sprint,
                    quick press = crouch — TOUCH_FIXED_STICK)
      bottom-right  #tbtns on foot ⇄ #tveh dial+buttons in a vehicle
@@ -452,11 +452,11 @@ body.touch .haspill {
 body.touch #compass { display: none; }
 /* jail minimap: top-right chip, tappable (tap opens the full map) */
 body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; pointer-events: auto; cursor: pointer; }
-/* city radar: moves out of the left-thumb arc to the TOP-LEFT (under the
-   character chip), shrinks, and becomes the tap-to-open-map surface. */
+/* city radar: moves out of the left-thumb arc to the TOP-LEFT corner and
+   becomes the tap-to-open-map surface. */
 body.touch #cRadar {
   left: calc(10px + env(safe-area-inset-left, 0px)) !important;
-  top: 64px !important; bottom: auto !important;
+  top: calc(10px + env(safe-area-inset-top, 0px)) !important; bottom: auto !important;
   width: 128px !important; height: 128px !important;
   pointer-events: auto !important; cursor: pointer;
 }
@@ -575,21 +575,6 @@ body.tveh-car #tveh #tvDial {
 body.tveh-on #tbtns { display: none !important; }
 body.tveh-on #cSpeed { display: none !important; }
 body.tveh-on #cityFlightHud { display: none !important; }
-
-/* ============================================================
-   TOUCH_HUD_TIDY (body.touch-tidy): the character card collapses to a
-   compact tappable chip; tap = expand (class cpOpen, charpanel.js).
-============================================================ */
-body.touch-tidy #cpPanel { pointer-events: auto; width: auto; max-width: 168px; }
-body.touch-tidy #cpPanel .cpCard { width: auto; min-width: 96px; }
-body.touch-tidy #cpPanel:not(.cpOpen) canvas,
-body.touch-tidy #cpPanel:not(.cpOpen) .cpStars,
-body.touch-tidy #cpPanel:not(.cpOpen) .cpRow,
-body.touch-tidy #cpPanel:not(.cpOpen) .cpHide,
-body.touch-tidy #cpPanel:not(.cpOpen) .cpHint { display: none; }
-body.touch-tidy #cpPanel:not(.cpOpen) .cpMeta { border-top: none; padding: 11px 14px; }
-body.touch-tidy #cpPanel.cpOpen { width: 148px; }
-body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
 
 /* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
 /* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on

@@ -214,108 +214,80 @@
   #bench:hover{opacity:.9}
   #maxline{font-size:11px;letter-spacing:.16em;opacity:.45;text-align:center;min-height:14px}
 
-  /* ---- battle chrome ---- */
-  #top{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);
-    z-index:41;display:none;align-items:center;gap:12px;padding:8px 14px;border-radius:999px;
-    background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
-    font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
-  #top .r{color:#ff8a70;font-weight:800}
-  #top .b{color:#7cc4ff;font-weight:800}
-  #top .bar{width:min(17vw,110px);height:7px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden}
-  #top .bar s{display:block;height:100%}
-  #top .bar.rr s{background:#ff5a3d}
-  #top .bar.bb s{background:#3fa8ff;margin-left:auto}
-  #top .mid{font-size:12px;opacity:.85;letter-spacing:.08em;text-align:center;min-width:86px}
-  #top .mid small{display:block;font-size:10px;opacity:.6;letter-spacing:.2em}
+  /* ---- battle chrome ----
+     The armies ARE the scoreboard: no counts, no clock, no ticker, no key
+     legend. What is left is the four things a watcher actually reaches for
+     (leave, pause, speed, camera), wordless, and they fade out of the picture
+     when the mouse is still. */
   #ctl{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
-    z-index:42;display:none;gap:7px;align-items:center}
-  #ctl button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(12,14,17,.6);
-    backdrop-filter:blur(6px);border-radius:12px;min-width:46px;height:44px;padding:0 12px;cursor:pointer;
-    font:700 13px/1 inherit;letter-spacing:.06em}
-  #ctl button.on{background:rgba(255,122,69,.28);border-color:#ff7a45}
-  body.coarse #ctl button{min-width:52px;height:52px}
+    z-index:42;display:none;gap:6px;align-items:center;transition:opacity .6s}
+  #ctl.idle{opacity:0;pointer-events:none}
+  body.coarse #ctl.idle{opacity:.38;pointer-events:auto}
+  #ctl button{appearance:none;display:grid;place-items:center;border:1px solid rgba(255,255,255,.18);
+    background:rgba(12,14,17,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    border-radius:50%;width:44px;height:44px;padding:0;cursor:pointer;
+    font:700 13px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em}
+  #ctl button svg{width:18px;height:18px;fill:currentColor}
+  #ctl button.on{border-color:var(--cc,#ff7a45);box-shadow:inset 0 0 0 1px var(--cc,#ff7a45)}
+  #ctl #cBack{margin-right:10px;opacity:.7}
+  body.coarse #ctl button{width:52px;height:52px}
+  /* the bench is the one mode whose answer is a sentence */
   #banner{position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:44;pointer-events:none;
     font:400 clamp(34px,7.4vw,68px)/1 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
     letter-spacing:.06em;text-align:center;opacity:0;transition:opacity .45s,transform .6s cubic-bezier(.2,.8,.2,1);
     text-shadow:0 3px 18px rgba(0,0,0,.75),0 0 2px rgba(0,0,0,.6);white-space:nowrap}
   #banner.on{opacity:.97;transform:translateX(-50%) scale(1.02)}
   #banner small{display:block;font:800 12px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.34em;opacity:.75;margin-top:10px}
-  /* ---- THE RESULT: a verdict, not a spreadsheet ---- */
+  #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
+
+  /* ---- THE RESULT: the winner's name over the field, then the way back in.
+     The field stays visible behind it; the buttons arrive a beat later so the
+     verdict lands on its own first. ---- */
   #end{position:fixed;inset:0;display:none;place-items:center;z-index:62;overflow:auto;
-    background:radial-gradient(120% 90% at 50% 20%,rgba(20,16,12,.72),rgba(6,7,9,.94) 70%);
+    background:radial-gradient(90% 70% at 50% 45%,rgba(8,9,12,.25),rgba(6,7,9,.7));
     padding:calc(22px + env(safe-area-inset-top,0px)) 16px calc(22px + env(safe-area-inset-bottom,0px));
-    backdrop-filter:blur(3px);animation:endIn .5s ease-out}
+    animation:endIn .6s ease-out}
   @keyframes endIn{from{opacity:0}to{opacity:1}}
-  #end .in{text-align:center;max-width:520px;width:100%}
-  #endKick{font-size:11px;letter-spacing:.34em;opacity:.55}
-  #end h2{margin:6px 0 6px;font-size:clamp(34px,9vw,60px);letter-spacing:.02em;line-height:1;
-    font-family:"Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;font-weight:400;text-shadow:0 4px 24px rgba(0,0,0,.6)}
+  #end .in{text-align:center;max-width:420px;width:100%}
+  #end h2{margin:0 0 8px;font:400 clamp(52px,14vw,104px)/.9 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
+    letter-spacing:.03em;text-shadow:0 4px 30px rgba(0,0,0,.7)}
   #end h2.red{color:#ff7a5c} #end h2.blue{color:#7cc4ff}
-  #endCall{min-height:22px;font-size:14px;letter-spacing:.2em;font-weight:800;margin-bottom:14px}
+  #endCall{min-height:18px;font-size:13px;letter-spacing:.22em;font-weight:800;margin-bottom:18px}
   #endCall.right{color:#8fe3a0} #endCall.wrong{color:#ff9a7a}
-  #endCall small{display:block;font-size:10px;letter-spacing:.26em;opacity:.6;font-weight:700;margin-top:4px;color:#f2efe8}
-  #endScore{display:flex;align-items:center;justify-content:center;gap:18px;margin:6px 0 12px;font-variant-numeric:tabular-nums}
-  #endScore .side{display:flex;flex-direction:column;align-items:center;min-width:110px}
-  #endScore b{font-size:44px;line-height:1;font-weight:800}
-  #endScore .red b{color:#ff7a5c} #endScore .blue b{color:#7cc4ff}
-  #endScore span{font-size:10px;letter-spacing:.24em;opacity:.55;margin-top:4px}
-  #endScore .vs{opacity:.35;font-weight:800}
-  #endMvp{font-size:12px;letter-spacing:.16em;margin:0 0 12px;min-height:16px}
-  #endMvp b{color:#ffd08a}
-  #end table{margin:0 auto 16px;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px;
-    background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
-  #end td{padding:6px 14px;opacity:.85;text-align:left;border-top:1px solid rgba(255,255,255,.05)}
-  #end tr:first-child td{border-top:0}
-  #end td+td{text-align:right}
-  #end .next{margin:4px 0 12px}
+  #end .acts{opacity:0;animation:endIn .5s ease-out 1.4s forwards}
   #end .nl{font-size:10px;letter-spacing:.28em;opacity:.55;margin-bottom:8px}
-  #end .calls{display:flex;gap:10px;justify-content:center}
-  #end .calls button{flex:0 1 140px;padding:12px 10px;border-radius:12px}
+  #end .calls{display:flex;gap:10px;justify-content:center;margin-bottom:12px}
+  #end .calls button{flex:0 1 120px;padding:11px 10px;border-radius:12px}
   #end .calls button.cr.on{background:rgba(255,90,61,.3);border-color:#ff5a3d}
   #end .calls button.cb.on{background:rgba(63,168,255,.3);border-color:#3fa8ff}
   #end .row{display:flex;gap:10px;margin-top:10px}
-  #end .row.small button{padding:11px 8px;font-size:12px;opacity:.8}
-  /* BACK TO THE HUB: index.html remembers the last game, so this lands on NPC War's tile */
-  #end a.hub{flex:1;display:flex;align-items:center;justify-content:center;padding:11px 8px;border-radius:999px;
-    border:1px solid rgba(255,255,255,.25);color:inherit;text-decoration:none;font:700 12px/1 inherit;letter-spacing:.14em;opacity:.8}
+  #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(8,9,12,.4);color:inherit;
+    flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;cursor:pointer}
+  #end button.big{background:#4fbf6a;border:0;color:#07130b}
+  #end button.big2{background:rgba(255,208,138,.14);border-color:rgba(255,208,138,.6);color:#ffd08a}
+  #end .row.small button{flex:0 1 auto;padding:11px 22px;font-size:12px;opacity:.75;margin:0 auto}
+  #end button.x{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));top:calc(14px + env(safe-area-inset-top,0px));
+    flex:none;width:44px;height:44px;padding:0;display:grid;place-items:center;font:300 26px/1 ui-sans-serif,system-ui,sans-serif}
   .hubLink{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));
     z-index:3;display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:999px;
     background:rgba(8,10,12,.45);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);
     color:#f2efe8;text-decoration:none;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em}
   .hubLink:hover{background:rgba(255,255,255,.1)}
-  #end button.big2{background:rgba(255,208,138,.14);border-color:rgba(255,208,138,.6);color:#ffd08a}
-  /* the call, riding the battle so it is never forgotten */
-  #warcall{position:fixed;left:50%;transform:translateX(-50%);top:calc(60px + env(safe-area-inset-top,0px));
-    z-index:41;display:none;pointer-events:none;font-size:11px;letter-spacing:.2em;font-weight:800;padding:7px 11px;
-    border-radius:10px;background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px)}
-  #warcall.red{color:#ff8a70} #warcall.blue{color:#7cc4ff}
-  #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit;
-    flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 inherit;letter-spacing:.14em;cursor:pointer}
-  #end button.big{background:#4fbf6a;border:0;color:#07130b}
-  #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
-  #hint{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
-    z-index:41;font-size:10px;letter-spacing:.14em;opacity:.45;pointer-events:none;display:none;max-width:26vw;line-height:1.6}
 
-  /* ---- THE MAN ON THE LENS: who the camera is on, and how his fight is
-     going. Ammo is the reason this exists — a magazine emptying and a man
-     reloading is the beat the war is made of, and it was invisible. ---- */
-  #who{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));top:calc(64px + env(safe-area-inset-top,0px));
-    z-index:41;display:none;pointer-events:none;padding:9px 12px 10px;border-radius:12px;min-width:172px;
-    background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
-    font-variant-numeric:tabular-nums}
-  #who.down{opacity:.55}
-  #whoN{font-size:13px;letter-spacing:.16em;font-weight:800}
-  #whoN i{font-style:normal;opacity:.5;font-weight:600;letter-spacing:.1em}
-  #whoHp{height:3px;border-radius:2px;background:rgba(255,255,255,.14);margin:6px 0 8px;overflow:hidden}
-  #whoHp s{display:block;height:100%;background:#4fbf6a;transition:width .12s linear}
-  #whoG{font-size:11px;letter-spacing:.14em;opacity:.75;display:flex;justify-content:space-between;gap:10px}
-  #whoG b{font-weight:800;opacity:.95}
-  #whoMagT{height:5px;border-radius:3px;background:rgba(255,255,255,.14);margin:5px 0 7px;overflow:hidden}
-  #whoMagT s{display:block;height:100%;background:#e8dcc0;transition:width .1s linear}
+  /* ---- THE MAN ON THE LENS: two thin bars under the picture, in his
+     colour. Blood only once he is hit; the magazine only if he carries one,
+     draining with every shot and refilling orange through a reload. No
+     name, no gun label, no tally. Gone the moment the lens leaves him. ---- */
+  #who{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + env(safe-area-inset-bottom,0px));
+    z-index:41;pointer-events:none;width:132px;opacity:0;transition:opacity .4s}
+  #who.on{opacity:1}
+  #who i{display:block;height:4px;border-radius:2px;background:rgba(0,0,0,.45);margin-top:4px;overflow:hidden;
+    box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+  #who i s{display:block;height:100%;transition:width .1s linear}
+  #whoHp s{background:var(--tc,#4fbf6a)}
+  #whoHp.low s{background:#ff5a3d}
+  #whoMagT s{background:#e8dcc0}
   #whoMagT.rl s{background:#ff9a3d}
-  #whoK{font-size:11px;letter-spacing:.14em;opacity:.7}
-  #whoK b{color:#ffd08a;font-weight:800}
-  body.coarse #who{min-width:150px;padding:7px 10px 8px}
 </style>
 </head>
 <body>
@@ -398,57 +370,30 @@
   </div>
 </div></div>
 
-<div id="top">
-  <span class="r" id="redC">0</span>
-  <span class="bar rr"><s id="redB" style="width:100%"></s></span>
-  <span class="mid"><span id="clk">0:00</span><small id="spd">SPEED 1</small></span>
-  <span class="bar bb"><s id="blueB" style="width:100%"></s></span>
-  <span class="b" id="blueC">0</span>
-</div>
 <div id="ctl">
-  <button id="cPause">PAUSE</button>
-  <button data-s="0.25">&frac14;</button>
-  <button data-s="1" class="on">1</button>
-  <button data-s="2">2</button>
-  <button data-s="4">4</button>
-  <button data-s="8">8</button>
-  <button id="cCam">AUTO CAM</button>
-  <button id="cSetup">SETUP</button>
+  <button id="cBack" aria-label="setup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5.4 14 4l-8 8 8 8 1.4-1.4L8.8 12z"/></svg></button>
+  <button id="cPause" aria-label="pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
+  <button id="cSpeed" aria-label="speed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg></button>
+  <button id="cCam" aria-label="camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg></button>
 </div>
 <div id="banner"></div>
 <div id="nflash"></div>
-<div id="hint"></div>
-<div id="who">
-  <div id="whoN"></div>
-  <div id="whoHp"><s></s></div>
-  <div id="whoG"><span id="whoGun"></span><b id="whoAmmo"></b></div>
-  <div id="whoMagT"><s></s></div>
-  <div id="whoK"></div>
-</div>
+<div id="who"><i id="whoHp"><s></s></i><i id="whoMagT"><s></s></i></div>
 
 <div id="end"><div class="in">
-  <div id="endKick">THE RESULT</div>
-  <h2 id="endT">RESULT</h2>
+  <button id="endWatch" class="x" aria-label="keep watching">&times;</button>
+  <h2 id="endT"></h2>
   <div id="endCall"></div>
-  <div id="endScore"><div class="side red"><b id="endRedN">0</b><span>RED STANDING</span></div>
-    <div class="vs">V</div><div class="side blue"><b id="endBlueN">0</b><span>BLUE STANDING</span></div></div>
-  <div id="endMvp"></div>
-  <table id="endTable"></table>
-  <div class="next">
-    <div class="nl">NEXT ROUND, WHO WINS?</div>
+  <div class="acts">
+    <div class="nl">WHO WINS?</div>
     <div class="calls"><button data-call="red" class="cr">RED</button><button data-call="blue" class="cb">BLUE</button></div>
-  </div>
-  <div class="row">
-    <button id="endAgain" class="big">REMATCH</button>
-    <button id="endLoser" class="big2">LOSER +50%</button>
-  </div>
-  <div class="row small">
-    <button id="endWatch">KEEP WATCHING</button>
-    <button id="endMenu">SETUP</button>
-    <a class="hub" href="../index.html">MAIN MENU</a>
+    <div class="row">
+      <button id="endAgain" class="big">REMATCH</button>
+      <button id="endLoser" class="big2"></button>
+    </div>
+    <div class="row small"><button id="endMenu">SETUP</button></div>
   </div>
 </div></div>
-<div id="warcall"></div>
 
 <!-- ============ ONE TAG FOR THE STUDIO ============================
   The packs below are the studio's front door. The combat stack under
@@ -2843,9 +2788,6 @@ CBZ.studio.need(NEED).then(function () {
     corpses.push(m);
     if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
     const aliveMine = aliveCount(m.team);
-    if (camDist2(m.pos) < 120 * 120 || aliveMine + aliveCount(m.team === "red" ? "blue" : "red") < 40) {
-      hud.feed(manName(m) + " DOWN");
-    }
     moraleOnDeath(m, aliveMine);
   }
   // a fled man has been spliced out of `men` by updateMorale, so this is
@@ -3066,7 +3008,6 @@ CBZ.studio.need(NEED).then(function () {
       m.routed = true; m.routT = 0; m.routBest = fd; m.routStall = 0;
       m.tgt = null; m.sees = false; m.hull = null; m.stepAsideT = 0;
       setStance(m, "stand");
-      if (hud && ARMY[m.team].alive < 80 && camDist2(m.pos) < 120 * 120) hud.feed(manName(m) + " BREAKS");
     } else {
       m.routT += dt;
       if (fd > m.routBest + 0.6) { m.routBest = fd; m.routStall = 0; }
@@ -3082,7 +3023,6 @@ CBZ.studio.need(NEED).then(function () {
       }
       if (cornered) {
         m.routed = false; m.rallyT = 12; m.routStall = 0;
-        if (hud && ARMY[m.team].alive < 80 && camDist2(m.pos) < 120 * 120) hud.feed(manName(m) + " TURNS TO FIGHT");
         return false;
       }
       // RALLY with hysteresis, once the rattle has worn off
@@ -4313,7 +4253,6 @@ CBZ.studio.need(NEED).then(function () {
         });
       }
     });
-    if (planes.length) hud.feed("AIR IS UP");
   }
   function dropStick(p) {
     // five bombs a pass on a long cooldown: air PUNCTUATES an infantry fight.
@@ -4354,7 +4293,6 @@ CBZ.studio.need(NEED).then(function () {
         }
       },
     });
-    banner("NUKE AWAY", TEAMS[p.team].name + " AIR");
   }
   /* A bomber at 165 m/s turns on a KILOMETRES-wide circle — measured here:
      bank-limited, ~1.6 km radius, which is why "orbit the target" never put
@@ -5594,63 +5532,49 @@ CBZ.studio.need(NEED).then(function () {
     camApply(dt);
   }
   /* ============================================================ THE CARD
-     What the man on the lens is doing, in the only four numbers that matter
-     while you are watching him: how hurt he is, what he is holding, how many
-     rounds are left in it, and how many men he has killed. The magazine is
-     the point — a rifle emptying and a man reloading behind a wall is the
-     rhythm of the whole fight and it was happening invisibly.
+     The man on the lens, as two bars and nothing else: blood (only once he
+     has been hit) and the magazine (only if he carries one), in his army's
+     colour. A rifle emptying and refilling orange behind a wall is the rhythm
+     of the fight; his name, his gun's label and his tally were words about it.
 
-     Every write is guarded by a cached string: this runs at 10 Hz on a page
-     that is already drawing a thousand bodies, so it must not touch the DOM
-     when nothing has changed. */
-  const whoC = { n: "", g: "", a: "", k: "", hp: -1, mag: -1, rl: null, on: null, down: null };
+     Every write is guarded by a cached value: this runs at 10 Hz on a page
+     that is already drawing a thousand bodies. */
+  const whoC = { on: null, team: "", hp: -1, low: null, mag: -1, rl: null, hasMag: null, hurt: null };
   function stepWho() {
     const m = (cam.mode === "follow" || cam.shot === "point" ||
       cam.shot === "push" || cam.shot === "study" || cam.shot === "kill")
       ? cam.followM : null;
-    const on = !!m;
-    if (on !== whoC.on) { whoC.on = on; el("who").style.display = on ? "block" : "none"; }
-    if (!m) return;
-    const down = !!m.dead;
-    if (down !== whoC.down) { whoC.down = down; el("who").classList.toggle("down", down); }
-    const name = m.beast ? String(m.species.name).toUpperCase()
-      : TEAMS[m.team].name + " " + (m.i + 1);
-    const n = name + (down ? " <i>DOWN</i>" : "");
-    if (n !== whoC.n) { whoC.n = n; el("whoN").innerHTML = n;
-      el("whoN").style.color = "#" + TEAMS[m.team].color.toString(16).padStart(6, "0"); }
+    const on = !!m && !m.dead;
+    if (on !== whoC.on) { whoC.on = on; el("who").classList.toggle("on", on); }
+    if (!on) return;
+    if (m.team !== whoC.team) {
+      whoC.team = m.team;
+      el("who").style.setProperty("--tc", "#" + TEAMS[m.team].color.toString(16).padStart(6, "0"));
+    }
     const hp = m.maxHp > 1e8 ? 1 : Math.max(0, Math.min(1, m.hp / m.maxHp));
+    const hurt = hp < 0.995;
+    if (hurt !== whoC.hurt) { whoC.hurt = hurt; el("whoHp").style.display = hurt ? "block" : "none"; }
     if (Math.abs(hp - whoC.hp) > 0.01) {
       whoC.hp = hp;
-      const s = el("whoHp").firstElementChild;
-      s.style.width = (hp * 100) + "%";
-      s.style.background = hp > 0.6 ? "#4fbf6a" : hp > 0.3 ? "#e2c14a" : "#ff5a3d";
+      el("whoHp").firstElementChild.style.width = (hp * 100) + "%";
+      const low = hp < 0.34;
+      if (low !== whoC.low) { whoC.low = low; el("whoHp").classList.toggle("low", low); }
     }
-    const gun = m.beast ? "CLAWS AND TEETH" : m.fists ? "FISTS"
-      : ((CBZ.weaponById(m.wid) || {}).label || m.weapon || "").toUpperCase();
-    if (gun !== whoC.g) { whoC.g = gun; el("whoGun").textContent = gun; }
-    // ammo: rounds left, or the reload counting itself down
+    const hasMag = m.magSize > 0;
+    if (hasMag !== whoC.hasMag) { whoC.hasMag = hasMag; el("whoMagT").style.display = hasMag ? "block" : "none"; }
+    if (!hasMag) return;
     const reloading = m.reloadT > 0;
-    const ammo = m.magSize > 0
-      ? (reloading ? "RELOADING" : m.mag + "/" + m.magSize) : "";
-    if (ammo !== whoC.a) { whoC.a = ammo; el("whoAmmo").textContent = ammo; }
-    const w = m.magSize > 0 ? (CBZ.weaponById(m.wid) || {}) : null;
-    const full = w ? ((w.reloadTime || w.reload) || 1.6) : 1;
-    const frac = m.magSize > 0
-      ? (reloading ? Math.max(0, Math.min(1, 1 - m.reloadT / full)) : m.mag / m.magSize) : 0;
+    const w = CBZ.weaponById(m.wid) || {};
+    const full = (w.reloadTime || w.reload) || 1.6;
+    const frac = reloading ? Math.max(0, Math.min(1, 1 - m.reloadT / full)) : m.mag / m.magSize;
     if (Math.abs(frac - whoC.mag) > 0.01 || reloading !== whoC.rl) {
       whoC.mag = frac; whoC.rl = reloading;
       const t = el("whoMagT");
-      t.style.display = m.magSize > 0 ? "block" : "none";
       t.classList.toggle("rl", reloading);
       t.firstElementChild.style.width = (frac * 100) + "%";
     }
-    const k = "<b>" + (m.kills || 0) + "</b> KILLS" +
-      (m.magSize > 0 ? "   " + (m.reloads || 0) + " RELOADS" : "") +
-      (m.shotsF ? "   " + Math.round((m.hitsF / m.shotsF) * 100) + "% HIT" : "");
-    if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
   }
 
-  const CAM_LABEL = { auto: "AUTO CAM", study: "STUDY", under: "UNDER", surface: "WAVE", free: "FREE CAM" };
   function setCamMode(mode, team) {
     // a kill-cam beat in flight must not be left holding the old speed
     if (cam.mode === "kill" && mode !== "kill" && KILL.t > 0) {
@@ -5658,9 +5582,12 @@ CBZ.studio.need(NEED).then(function () {
     }
     cam.mode = mode;
     if (team) cam.followTeam = team;
-    el("cCam").textContent = mode === "follow"
-      ? "FOLLOW " + TEAMS[cam.followTeam].name : (CAM_LABEL[mode] || "FREE CAM");
-    el("cCam").classList.toggle("on", mode !== "free");
+    // the camera button lights while a director owns the lens, in the
+    // followed army's colour when it is riding one of them
+    const cb = el("cCam");
+    cb.classList.toggle("on", mode !== "free");
+    cb.style.setProperty("--cc", mode === "follow"
+      ? "#" + TEAMS[cam.followTeam].color.toString(16).padStart(6, "0") : "#ff7a45");
     if (mode === "follow") {
       updatePoint();
       cam.followM = subjectFor(cam.followTeam) || hottestMan();
@@ -5756,25 +5683,43 @@ CBZ.studio.need(NEED).then(function () {
   }
 
   /* ============================================================ CLOCK */
-  let effSpeed = 1;
+  const ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>';
+  const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+  const ICON_FAST = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg>';
+  const SPEED_RING = [1, 2, 4, 8, 0.25];
   function setSpeed(s) {
     if (s > 0) lastSpeed = s;
     speed = s;
-    el("spd").textContent = s === 0 ? "PAUSED" : "SPEED " + (s < 1 ? s.toFixed(2).replace("0.", ".") : s);
-    el("cPause").textContent = s === 0 ? "PLAY" : "PAUSE";
-    el("ctl").querySelectorAll("button[data-s]").forEach(function (b) {
-      b.classList.toggle("on", parseFloat(b.dataset.s) === s);
-    });
+    const pb = el("cPause");
+    pb.innerHTML = s === 0 ? ICON_PLAY : ICON_PAUSE;
+    pb.classList.toggle("on", s === 0);
+    // the speed button is the fast-forward mark at real time and the dial's
+    // number once it is anything else
+    const sb = el("cSpeed"), shown = s === 0 ? lastSpeed : s;
+    sb.innerHTML = shown === 1 ? ICON_FAST : (shown < 1 ? "&frac14;" : shown) + "&times;";
+    sb.classList.toggle("on", shown !== 1);
   }
   el("cPause").addEventListener("click", function () { setSpeed(speed === 0 ? lastSpeed : 0); });
-  el("ctl").querySelectorAll("button[data-s]").forEach(function (b) {
-    b.addEventListener("click", function () { setSpeed(parseFloat(b.dataset.s)); });
+  el("cSpeed").addEventListener("click", function () {
+    const i = SPEED_RING.indexOf(speed === 0 ? lastSpeed : speed);
+    setSpeed(SPEED_RING[(i + 1) % SPEED_RING.length]);
   });
   el("cCam").addEventListener("click", function () {
     cycleCam();
   });
+  /* THE CONTROLS LEAVE THE PICTURE. Still mouse for three seconds and the row
+     fades out; any movement, touch or key brings it back. On a touch screen it
+     only dims, since there is no hover to summon it with. */
+  let ctlIdleAt = 0;
+  function wakeCtl() {
+    ctlIdleAt = performance.now() + 3000;
+    el("ctl").classList.remove("idle");
+  }
+  ["pointermove", "pointerdown", "keydown", "wheel"].forEach(function (ev) {
+    window.addEventListener(ev, wakeCtl, { passive: true });
+  });
   // out of the war: back to the war room (which carries MAIN MENU to the hub)
-  el("cSetup").addEventListener("click", function () { location.href = location.pathname; });
+  el("cBack").addEventListener("click", function () { location.href = location.pathname; });
 
   /* ============================================================ BENCH
      The honest answer to "how many". Everybody is unkillable so the census
@@ -5867,24 +5812,16 @@ CBZ.studio.need(NEED).then(function () {
     }
   }
 
-  /* ============================================================ BANNER / END */
+  /* ============================================================ BANNER / END
+     The banner is the bench's alone now: "MAX 480 MEN" is a measurement
+     whose whole point is the sentence. A war says what happened with the
+     camera (the director goes wide over a rout, lands on the last man) and
+     the sound (a falling horn when a line gives way), not with captions. */
   let bannerT = 0;
   function banner(big, small) {
     el("banner").innerHTML = big + (small ? "<small>" + small + "</small>" : "");
     el("banner").classList.add("on");
     bannerT = 3.4;
-  }
-  // the man with the most kills, alive or dead — the ledger's whole point
-  function topKiller() {
-    let best = null;
-    for (let i = 0; i < men.length; i++) {
-      if ((men[i].kills || 0) > (best ? best.kills : 0)) best = men[i];
-    }
-    return best;
-  }
-  function gunLabel(wid) {
-    if (wid === "fists") return "FISTS";
-    return ((CBZ.weaponById(wid) || {}).label || wid || "").toUpperCase();
   }
   /* ============================================================ THE CALL
      A WAR YOU WATCH NEEDS SOMETHING RIDING ON IT. The question machine was
@@ -5915,23 +5852,15 @@ CBZ.studio.need(NEED).then(function () {
     p.set("auto", "1");
     return location.pathname + "?" + p.toString();
   }
-  /* MOMENTUM, SAID OUT LOUD. The man layer calls this when the war turns: an
-     army breaks and runs, a broken army rallies, a man goes on a streak, an
-     army is down to its last man. Each is a banner a watcher can read from
-     across the room, and the last man gets the lens. */
-  let lastEventBanner = -9;
+  /* MOMENTUM, SHOWN. The man layer calls this when the war turns: an army
+     breaks and runs, or is down to its last man. The director answers with
+     the lens and the horn; nothing is captioned. Rallies and kill streaks
+     are visible in the fight itself and need no hook here. */
   function warEvent(kind, d) {
     d = d || {};
     const team = d.team;
     if (!team || !TEAMS[team]) return;
-    const name = sideName(team);
-    const who = function () {
-      for (let i = 0; i < men.length; i++) if (men[i].id === d.id) return men[i];
-      return null;
-    };
     if (kind === "rout") {
-      banner(name + " BREAK", "THE LINE IS RUNNING");
-      lastEventBanner = simT;
       // the director goes wide over the run: the broken line and the pursuit
       // behind it is the picture of the moment the war was decided
       const c = teamCOM[team];
@@ -5944,55 +5873,32 @@ CBZ.studio.need(NEED).then(function () {
       }
       // a falling horn: the sound of a line giving way
       if (CBZ.micro.sfx && CBZ.micro.sfx.tone) { try { CBZ.micro.sfx.tone(196, 0.9, { type: "sawtooth", slideTo: 110, gain: 0.08 }); } catch (e) {} }
-    } else if (kind === "rally") {
-      banner(name + " RALLY", "THEY TURN AND FIGHT");
-      lastEventBanner = simT;
     } else if (kind === "lastman") {
-      const m = who();
-      banner("LAST MAN STANDING", name + (m && !m.beast ? " " + (m.i + 1) : ""));
-      lastEventBanner = simT;
+      let m = null;
+      for (let i = 0; i < men.length; i++) if (men[i].id === d.id) { m = men[i]; break; }
       // the lens goes to him: this is the shot the whole war was building to
       if (m && !m.dead && cam.mode === "auto") {
         cam.shot = "point"; cam.followM = m; cam.holdT = 0; cam.cutAt = simT + 12;
       }
-    } else if (kind === "streak") {
-      const m = who();
-      const label = (m && m.beast ? String(m.species.name).toUpperCase() : name + " " + (m ? m.i + 1 : "")) +
-        "  " + (d.kills || 0) + " KILLS";
-      if (hud) hud.feed(label);
-      // the big ones get the banner, if nothing bigger just had it
-      if ((d.kills || 0) >= 5 && simT - lastEventBanner > 4) { banner(label, d.kills >= 8 ? "UNSTOPPABLE" : "ON A RUN"); lastEventBanner = simT; }
     }
   }
   function endWar(won) {
     over = true;
     winner = won;
-    const tk = topKiller();
-    // the verdict
     const h = el("endT");
     h.textContent = won ? sideName(won) + " WIN" : "NOBODY LEFT";
     h.className = won || "";
-    el("endKick").textContent = "AFTER " + clockText();
-    el("endRedN").textContent = aliveCount("red");
-    el("endBlueN").textContent = aliveCount("blue");
-    el("endMvp").innerHTML = tk && tk.kills
-      ? "TOP KILLER  <b>" + (tk.beast ? String(tk.species.name).toUpperCase() : TEAMS[tk.team].name + " " + (tk.i + 1)) +
-        "</b>  " + tk.kills + " KILLS" + (tk.beast || tk.fists ? "" : "  " + gunLabel(tk.wid)) + (tk.dead ? "  FELL" : "  LIVED")
-      : "";
-    // the call, scored once
+    // the call, scored once; the streak is only worth saying once it is one
     const ec = el("endCall");
-    const st = readStreak();
+    ec.className = ""; ec.textContent = "";
     if (SET.call && won && !callScored) {
       callScored = true;
+      const st = readStreak();
       const right = SET.call === won;
       st.calls++; if (right) { st.right++; st.streak++; st.best = Math.max(st.best, st.streak); } else st.streak = 0;
       try { localStorage.setItem(STREAK_KEY, JSON.stringify(st)); } catch (e) {}
       ec.className = right ? "right" : "wrong";
-      ec.innerHTML = (right ? "YOU CALLED IT" : "WRONG CALL") +
-        "<small>STREAK " + st.streak + "   BEST " + st.best + "   " + st.right + " OF " + st.calls + " RIGHT</small>";
-    } else if (!SET.call) {
-      ec.className = "";
-      ec.innerHTML = "<small>CALL A SIDE BELOW AND RUN IT BACK</small>";
+      ec.textContent = right ? (st.streak >= 2 ? st.streak + " IN A ROW" : "YOU CALLED IT") : "WRONG CALL";
     }
     nextCall = SET.call || null;
     el("end").querySelectorAll(".calls button").forEach(function (b) { b.classList.toggle("on", b.dataset.call === nextCall); });
@@ -6002,31 +5908,9 @@ CBZ.studio.need(NEED).then(function () {
       const n = loserTeam === "red" ? SET.redN : SET.blueN;
       el("endLoser").textContent = sideName(loserTeam) + " " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
     }
-    const rows = [
-      ["KILLS", stats.red.kills + "  v  " + stats.blue.kills],
-      ["ACCURACY", pct(stats.red.hits, stats.red.shots) + "  v  " + pct(stats.blue.hits, stats.blue.shots)],
-    ];
-    // and the guns, ranked by what they actually did — the row MIXED and
-    // EVERYTHING were always secretly asking for. A launcher lands NO hits by
-    // construction (its damage is blast, through studio.boom), so printing it
-    // a hit rate reads as a broken weapon rather than an honest column.
-    const wids = Object.keys(GUNS).sort(function (a, b) { return GUNS[b].kills - GUNS[a].kills; });
-    const gunRow = function (wid) {
-      const g = GUNS[wid];
-      let s = g.kills + " KILLS";
-      if (g.hits > 0) s += "   " + pct(g.hits, g.shots) + " HIT";
-      if (g.reloads > 0) s += "   " + g.reloads + " RELOADS";
-      return [gunLabel(wid), s];
-    };
-    if (wids.length > 1) wids.slice(0, 3).forEach(function (wid) { rows.push(gunRow(wid)); });
-    else if (wids.length === 1) rows.push(gunRow(wids[0]));
-    el("endTable").innerHTML = rows.map(function (r) {
-      return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
-    }).join("");
     el("end").style.display = "grid";
-    el("warcall").style.display = "none";
+    el("ctl").classList.add("idle");
   }
-  function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "0%"; }
   el("end").querySelectorAll(".calls button").forEach(function (b) {
     b.addEventListener("click", function () {
       nextCall = nextCall === b.dataset.call ? null : b.dataset.call;
@@ -6139,7 +6023,9 @@ CBZ.studio.need(NEED).then(function () {
     const R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer);
     if (R && R.shadowMap && (total > 170 || asBench)) R.shadowMap.enabled = false;
 
-    hud = CBZ.studio.hud({ health: false, clock: false, score: false, feed: true, note: true, prompt: false, danger: false, pause: false });
+    // the studio HUD carries one line, and only for the bench: its running
+    // census IS the measurement. A war you watch gets no ticker.
+    hud = CBZ.studio.hud({ health: false, clock: false, score: false, feed: false, note: !!asBench, prompt: false, danger: false, pause: false });
 
     spawnQueue.length = 0;
     // interleave the queues so uneven armies still stream in fairly
@@ -6161,29 +6047,13 @@ CBZ.studio.need(NEED).then(function () {
     cam.pitch = 0.62; cam.wPitch = MAP.water ? 0.3 : 0.2;
     cam.cutAt = 5;
 
-    el("top").style.display = "flex";
     el("ctl").style.display = "flex";
-    if (!COARSE) {
-      el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT   WHEEL ZOOM   WASD PAN<br>" +
-        "SPACE PAUSE   1-5 SPEED   . STEP   F FRONT CAM   V STUDY   [ ] PICK" +
-        (MAP.water ? "<br>U UNDERWATER   B AT WAVE HEIGHT" : "");
-    }
+    wakeCtl();
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
     if (asBench) { cam.wPitch = 0.9; cam.wDist = 170; }
     initRes(spawnTotal);
     started = true;
-    const armyName = function (team) {
-      const u = team === "red" ? SET.redU : SET.blueU;
-      return u === "men" ? TEAMS[team].name : kindLabel(u);
-    };
-    banner(MAPS[SET.map].label, armyName("red") + " " + SET.redN + "   V   " + armyName("blue") + " " + SET.blueN);
-    if (SET.call === "red" || SET.call === "blue") {
-      const wc = el("warcall");
-      wc.textContent = "YOUR CALL  " + armyName(SET.call);
-      wc.className = SET.call; wc.style.display = "block";
-    }
     if (AIR.on) spawnPlanes();
     CBZ.micro.onFrame(frame);
   }
@@ -6249,13 +6119,8 @@ CBZ.studio.need(NEED).then(function () {
     }
   }
 
-  function clockText() {
-    const s = Math.floor(simT);
-    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-  }
-
   /* ============================================================ FRAME */
-  let uiT = 0, winCheckT = 0, lastWall = 0, whoT = 0;
+  let winCheckT = 0, lastWall = 0, whoT = 0;
   /* THE PROBE'S CLOCK. The sim below reads performance.now() on purpose — the
      speed dial is a promise about REAL seconds and a render-time clock cannot
      keep it. That also means a headless tool cannot advance this battle by a
@@ -6319,7 +6184,7 @@ CBZ.studio.need(NEED).then(function () {
 
     // ---- SIM at the dialled speed, sub-stepped so 8x stays solid. The
     // sub-step cap means a machine that cannot COMPUTE eight seconds per
-    // second degrades to what it can; effSpeed below is the HUD admitting it.
+    // second degrades to what it can.
     let simDt = realDt * speed;
     if (stepPulse > 0) { simDt = stepPulse; stepPulse = 0; }   // one frame, by hand
     const simBefore = simT;
@@ -6475,32 +6340,16 @@ CBZ.studio.need(NEED).then(function () {
     stepCamera(dt);
     if (SEA.on) seaUnderwater();          // after the camera moved, before the draw
     stepRes(dt);
-    effSpeed += ((realDt > 0 ? (simT - simBefore) / realDt : speed) - effSpeed) * Math.min(1, dt * 2);
 
     if (bench && !bench.done) stepBench(dt);
     if (bannerT > 0 && (bannerT -= dt) <= 0) el("banner").classList.remove("on");
 
-    // ---- chrome on a slow tick ----
-    // the card runs faster than the rest of the chrome: a magazine draining
-    // and a reload filling are the two things on it that MOVE
+    // ---- chrome ----
+    // the lens card at 10 Hz: a magazine draining and a reload filling are
+    // the two things on it that MOVE
     whoT -= dt;
     if (whoT <= 0) { whoT = 0.1; if (started) stepWho(); }
-    uiT -= dt;
-    if (uiT <= 0) {
-      uiT = 0.25;
-      const ar = aliveCount("red"), ab = aliveCount("blue");
-      el("redC").textContent = ar;
-      el("blueC").textContent = ab;
-      el("redB").style.width = (spawnCount.red ? ar / spawnCount.red * 100 : 0) + "%";
-      el("blueB").style.width = (spawnCount.blue ? ab / spawnCount.blue * 100 : 0) + "%";
-      el("clk").textContent = clockText() + (Q.get("fps") === "1" || SET.bench ? "  " + (CBZ.micro.fps || 0) + "FPS" : "");
-      // a dial the machine cannot honour says so instead of lying
-      if (speed > 0 && effSpeed < speed * 0.8) {
-        el("spd").textContent = "SPEED " + speed + "  REAL " + (Math.round(effSpeed * 10) / 10);
-      } else if (speed > 0) {
-        el("spd").textContent = "SPEED " + (speed < 1 ? speed.toFixed(2).replace("0.", ".") : speed);
-      }
-    }
+    if (ctlIdleAt && performance.now() > ctlIdleAt) { ctlIdleAt = 0; el("ctl").classList.add("idle"); }
     winCheckT -= dt;
     if (winCheckT <= 0 && !over && !bench && spawnQueue.length === 0) {
       winCheckT = 0.5;

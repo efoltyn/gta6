@@ -39,6 +39,18 @@
 
 const beats = [
   {
+    /* 2026-09-27: THE SHORE-LEVEL DRAWDOWN. The wide drawdown frame is taken
+       from 250 m out at sea, where a 15-25 m band of bared reef is a pencil
+       line. This is the eyewitness frame instead: standing on the beach,
+       looking out over the drained seabed at the white line on the horizon
+       that is about to become the wall. */
+    id: "shoreline",
+    label: "From the beach: the sea has gone out",
+    focus: "Late drawdown, eye level on the beach. The water has pulled off the shelf: bare wet seabed, weed, rock and stranded fish and boats where the sea was, and far out a white line growing on the horizon. That line is the wave.",
+    wait: { state: "warn", phase: "warn", untilWarnFrac: 0.8 },
+    shot: { mode: "front", back: -6, side: 34, alt: 6, aimAhead: -170, aimY: 0 },
+  },
+  {
     id: "drawdown",
     label: "The drawdown — the only warning",
     focus: "Warn phase. The sea empties off the shelf and hundreds of metres of wet seabed appear; the crowd should already be running uphill. No siren text, no banner: this IS the warning.",
@@ -324,7 +336,10 @@ async function stageTsunami(input) {
   const dx = ev && Number.isFinite(ev.dx) ? ev.dx : 1;
   const dz = ev && Number.isFinite(ev.dz) ? ev.dz : 0;
   const px = -dz, pz = dx;                     // the front's own lateral axis
-  const fs = a2.frontS != null && a2.frontS > -1e8 ? a2.frontS : -A.radius;
+  // during the drawdown the bore is already running in from 330 m out (the
+  // white line on the horizon), but the warn beats are framed on the BEACH,
+  // exactly as they were before the line existed, so both builds match
+  const fs = a2.phase !== "warn" && a2.frontS != null && a2.frontS > -1e8 ? a2.frontS : -A.radius;
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.fov = 55;
