@@ -1468,7 +1468,7 @@
     if (mine.length) {
       W.earn(income);
       W.log("the island paid $" + income + " from " + mine.length + " holding" +
-            (mine.length === 1 ? "" : "s") + (lev.raised ? " — " + lev.raised + " levies raised, " +
+            (mine.length === 1 ? "" : "s") + (lev.raised ? ", " + lev.raised + " levies raised, " +
             men + " men under arms on your ground" : "") + ".", "good");
     }
     let flips = [];
@@ -1684,31 +1684,31 @@
     if (!r) return false;
     const o = T.owner(r.id);
     const opts = [];
-    let sub = ownerLabel(o) + " · +$" + T.regionIncome(r) + "/DAY";
+    let sub = ownerLabel(o) + ", +$" + T.regionIncome(r) + "/DAY";
 
     if (o === "you") {
       const n = garrisonMen(r.id);
       opts.push({ label: "RAISE THE LEVY", kind: "hot", note: n ? n + " MEN" : "none",
         disabled: !n,
         on: function () { const got = raiseLevy(r); if (got) W.toast(got + " MEN FALL IN", "good"); } });
-      sub = "YOURS · " + n + " IN GARRISON · +$" + T.regionIncome(r) + "/DAY";
+      sub = "YOURS, " + n + " IN GARRISON, +$" + T.regionIncome(r) + "/DAY";
     } else if (o) {
       const held = columnOn(r, o);
       if (held) {
-        sub = ownerLabel(o) + " · " + W.bandSize(held) + " MEN ON IT";
+        sub = ownerLabel(o) + ", " + W.bandSize(held) + " MEN ON IT";
       } else {
         const d = defenceOf(r);
         const odds = W.odds(W.yourPower(), d);
         opts.push({ label: "STORM", kind: odds > 0.55 ? "hot" : odds > 0.3 ? "" : "bad",
           note: Math.round(odds * 100) + "%",
           on: function () { storm(r); } });
-        sub = ownerLabel(o) + " · " + T.garrisonSize(r.id) + " IN GARRISON";
+        sub = ownerLabel(o) + ", " + T.garrisonSize(r.id) + " IN GARRISON";
       }
     } else {
       const s = T.standing();
       sub = W.armySize() < claimMen()
-        ? "UNCLAIMED · " + claimMen() + " MEN TO TAKE IT"
-        : "UNCLAIMED · YOURS IN " + Math.max(1, Math.ceil((s ? s.left : CLAIM_HOURS) * 60)) + " MIN";
+        ? "UNCLAIMED, " + claimMen() + " MEN TO TAKE IT"
+        : "UNCLAIMED, YOURS IN " + Math.max(1, Math.ceil((s ? s.left : CLAIM_HOURS) * 60)) + " MIN";
     }
     opts.push({ label: "THE ISLAND", on: function () { T.focus(r.id); } });
     opts.push({ label: "RIDE ON", on: function () {} });
