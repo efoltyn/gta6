@@ -204,34 +204,37 @@ async function stageHitmanArc(input) {
     const site = (CBZ.govComplexes || []).find((s) => s && s.rect && (s.id === "execmansion" || (s.def && s.def.id === "execmansion")));
     if (!site) return fin({ ok: false, error: "no mansion" });
     const gx = site.gate ? site.gate.x : site.cx, gz = site.gate ? site.gate.z : site.rect.maxZ;
-    const standZ = gz + 48;   // on the approach, the gate framing the steps
-    put(gx - 0.8, standZ); tick(30);
-    try { if (CBZ.cityHour) CBZ.cityHour(14); } catch (_) {}
-    if (hasArc) {
-      CBZ.agency.jump("finale"); reset();
-      tickUntil(() => CBZ.agency._rt.fin && CBZ.agency._rt.fin.staged, 900);
+    if (hasArc) { CBZ.agency.jump("finale"); reset(); tickUntil(() => CBZ.agency._rt.fin && CBZ.agency._rt.fin.staged, 900); }
+    // the published speech: president mode's own appearance (balcony + crowd + detail)
+    let aim = { x: site.cx, y: 3, z: site.cz - 10 };
+    const PB = CBZ.presidentPublic;
+    if (hasArc && PB && PB._startNow) {
+      try { PB._startNow("speech"); } catch (e) { notes.push("speech: " + e.message); }
+      tick(360);
+      try { const bl = PB.balcony(); if (bl) aim = { x: bl.x, y: bl.y + 1.4, z: bl.z }; } catch (_) {}
+    } else if (hasArc) {
       const F = CBZ.agency._rt.fin;
-      if (F && !F.seam) {
-        const p = F.ped;
-        p.staffPost = null; p.controlled = true;
+      if (F && !F.seam && F.podium) {
+        const p = F.ped; p.staffPost = null; p.controlled = true;
         p.pos.set(F.podium.x, p.pos.y, F.podium.z); if (p.group) p.group.position.copy(p.pos);
-        F.phase = "address"; F.t = 5;
+        F.phase = "address"; F.t = 5; aim = { x: F.podium.x, y: (p.pos.y || 0) + 1.5, z: F.podium.z };
       }
       tick(120);
     }
-    faceTo(site.cx, site.cz - 10);
-    if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = 0.03;
+    // stand back on the approach, in line with the gate
+    const sx = gx - 0.8, sz = gz + 55;
+    put(sx, sz); tick(20);
+    const eyeY = (CBZ.floorAt ? (CBZ.floorAt(sx, sz) || 0) : 0) + 1.65;
+    const dist = Math.hypot(aim.x - sx, aim.z - sz);
+    const pitch = -Math.atan2(aim.y - eyeY, dist);        // positive pitch looks down
+    const setAim = () => { faceTo(aim.x, aim.z); if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = pitch; if (CBZ.fps && CBZ.fps.pitch != null) CBZ.fps.pitch = pitch; };
+    setAim();
     try { if (CBZ.hmBinoculars) CBZ.hmBinoculars.toggle(true); } catch (_) {}
-    tick(60);
-    faceTo(site.cx, site.cz - 10);
-    if (CBZ.cam && CBZ.cam.pitch != null) CBZ.cam.pitch = 0.03;
-    if (CBZ.fps && CBZ.fps.pitch != null) CBZ.fps.pitch = 0.03;
-    tick(20);
+    for (let i = 0; i < 6; i++) { setAim(); tick(10); }
     if (typeof CBZ.skySync === "function") { try { CBZ.skySync(); } catch (_) {} }
-    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = false;
     await wait(300);
     frame(KEEP);
-    return fin();
+    return fin({ aim: aim, dist: Math.round(dist) });
   }
 
   if (sub.id === "aftermath") {

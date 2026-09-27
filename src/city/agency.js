@@ -301,15 +301,17 @@
     role: "President. Cancelled the election. Rules by decree.",
     security: "The Presidential detail. Rifles. Counter-snipers on the roof. Police front and back on the road.",
     approaches: [
-      { id: "long", label: "From a distance", detail: "The Mansion gate is twenty meters wide and lines up with the steps. He speaks there." },
-      { id: "charge", label: "His car", detail: "The state car waits in the motor court between drives. It goes when his door closes." },
-      { id: "disguise", label: "His detail's uniform", detail: "The detail trusts the uniform. Get one." },
-      { id: "loud", label: "Loud", detail: "You will not walk out." },
+      { id: "long", label: "From a distance", detail: "Past two hundred and fifty meters, or from real cover. Closer than that the roof team sees you first." },
+      { id: "roof", label: "The roof team", detail: "Two rifles over the Mansion. Take them off the roof, or find the one who takes money." },
+      { id: "disguise", label: "One of his agents", detail: "Every man on the detail has a price or a uniform. Either one walks you closer." },
+      { id: "charge", label: "His car", detail: "The state car drives the route the paper prints. A charge goes when it pulls away." },
+      { id: "speech", label: "The balcony", detail: "He speaks to the crowd at the times the paper prints. A crowd hides a man." },
+      { id: "loud", label: "Through the gate", detail: "It can be done. You will not walk out." },
     ],
     legs: [
       { at: "residence", label: "The residence", detail: "Inside the Mansion with his detail. Nobody sees him." },
       { at: "address", label: "The address", detail: "Speaks from the top of the Mansion steps, 13:00 to 17:00. A crowd on the lawn." },
-      { at: "motorcade", label: "The motorcade", detail: "Leaves at 17:00. Police car, three black cars, police car. Out the gate, down the road and back." },
+      { at: "motorcade", label: "The motorcade", detail: "Out the gate on the published route, police front and back. He rides in the state car." },
     ],
     win: { address: [13, 17], motorcade: [17, 19] },
   };
@@ -990,7 +992,7 @@
         a.kit.charge = Math.max(0, (a.kit.charge | 0) - 1);
         c._agencyCharged = true;
         if (RT.op && c === RT.op.car) { RT.op.charge = true; knowAppr(RT.op, "charge"); addNote(RT.op.id, "Charge under the driver's seat. It goes when his door closes."); }
-        if (RT.fin && c === RT.fin.stateCar) { RT.fin.charge = true; finNote("Charge under the state car. It goes when his door closes."); }
+        if (RT.fin && RT.fin.seam && c === realStateCar()) { RT.fin.charge = true; RT.fin.chargeCar = c; RT.fin.chargeAt = { x: c.pos.x, z: c.pos.z }; finNote("Charge under the state car. It goes when it pulls away."); }
         commit();
       },
     });
@@ -1031,12 +1033,37 @@
       verb: "Hand him the book",
       onUse: function () { handBook(); },
     });
+    // a man on the President's detail can be paid (protection.suborn: the
+    // price and whether he takes it are president mode's rules, not ours)
+    const bribeTok = { x: 0, z: 0, ped: null };
+    V.add({
+      id: "agency-bribe", prio: 14, range: 2.2,
+      find: function (px, pz) {
+        const F = RT.fin;
+        if (!F || !F.seam || F.dead || F.alarm > 0 || !playing() || !CBZ.protection || !CBZ.protection.suborn || !F.seamDetail) return null;
+        const G = F.seamDetail.peds;
+        for (let i = 0; i < G.length; i++) {
+          const q = G[i];
+          if (!q || q.dead || q.rage || q._subornT > 0 || q._hmAsked) continue;
+          if (d2(px, pz, q.pos.x, q.pos.z) < 2.2) { bribeTok.x = q.pos.x; bribeTok.z = q.pos.z; bribeTok.ped = q; return bribeTok; }
+        }
+        return null;
+      },
+      verb: "Offer him money",
+      onUse: function (tok) {
+        const q = tok && tok.ped; if (!q) return;
+        let r = null; try { r = CBZ.protection.suborn(q); } catch (e) { r = null; }
+        if (r && r.ok) { bark(q, "I was looking the other way.", 2.6); finNote("One of his men took the money. " + (q.name ? q.name + "." : "")); boardDirty(); }
+        else if (r && r.reason === "can't afford") bark(q, "Not for that kind of money.", 2.4);
+        else { q._hmAsked = true; bark(q, "Walk away. Now.", 2.2); }
+      },
+    });
   }
   function chargeCar() {
     const op = RT.op;
     if (op && op.car && !op.car.dead && !op.charge && !op.dead) return op.car;
     const F = RT.fin;
-    if (F && F.stateCar && !F.stateCar.dead && !F.charge && !F.dead && F.phase !== "convoy") return F.stateCar;
+    if (F && F.seam && !F.charge && !F.dead) { const sc = realStateCar(); if (sc && !(sc.v > 1.5)) return sc; }
     return null;
   }
   function chargeWatcher(car) {
@@ -1810,7 +1837,12 @@
   }
   function presCurrent() {
     if (!seams().current) return null;
-    try { const c = CBZ.presidency.current(); return c ? { raw: c, ped: resolvePed(c) } : null; } catch (e) { return null; }
+    try {
+      const c = CBZ.presidency.current();
+      // {kind:'player'|'npc'|'vacant', ped, sid, name}: the player in the chair or an empty chair is no mark
+      if (!c || c.kind === "player" || c.kind === "vacant") return null;
+      return { raw: c, ped: resolvePed(c) };
+    } catch (e) { return null; }
   }
   function presName() {
     const F = RT.fin;
@@ -1838,7 +1870,12 @@
     if (!seams().schedule) return null;
     let L = null; try { L = CBZ.presidency.schedule(); } catch (e) { L = null; }
     if (!Array.isArray(L) || !L.length) return null;
-    return L.map(function (e) { return { kind: e.kind || "visit", place: normPlace(e.place), t0: normHour(e.t0), t1: normHour(e.t1), route: e.route || null }; }).filter(function (e) { return e.t0 != null; });
+    return L.filter(function (e) { return e && !e.cancelled; }).map(function (e) {
+      // hour0 is the start as an hour of the day; t0/t1 are CBZ.dayTime() days
+      const h0 = e.hour0 != null ? e.hour0 : normHour(e.t0);
+      const h1 = (e.hour0 != null && e.t1 != null && e.t0 != null) ? (e.hour0 + (e.t1 - e.t0) * 24) % 24 : normHour(e.t1);
+      return { kind: e.kind || "visit", place: normPlace(e.place), t0: h0, t1: h1, route: e.route || null, day: e.t0 > 24 ? Math.floor(e.t0) : null };
+    }).filter(function (e) { return e.t0 != null; });
   }
   function scheduleRows() {
     const S = presSchedule();
@@ -1851,22 +1888,25 @@
     }
     return [
       { k: "Address to the nation", v: "From the Mansion steps, daily, 13:00 to 17:00. The public lawn opens at noon." },
-      { k: "Motorcade", v: "Leaves the Mansion at 17:00 with a police escort. Out the main gate along the approach road and back by 19:00." },
       { k: "Residence", v: "The President receives no visitors." },
     ];
   }
   function presDetail(F) {
     if (!seams().detail) return null;
     const id = presId(F.cur || presCurrent());
-    let d = null; try { d = CBZ.protection.detail(id); } catch (e) { d = null; }
+    let d = null;
+    try { d = CBZ.protection.detail("president"); } catch (e) { d = null; }
+    if (!d && id != null) { try { d = CBZ.protection.detail(id); } catch (e) { d = null; } }
     if (!d) return null;
     const units = Array.isArray(d) ? d : (d.units || d.members || []);
     const peds = [], posts = [];
     units.forEach(function (u) {
       const p = u && u.pos ? u : (u && u.ped ? u.ped : null);
       if (p) peds.push(p);
-      const po = u && u.post ? u.post : null;
-      if (po && po.x != null) posts.push({ x: po.x, z: po.z, y: po.y || 0, kind: po.kind || u.role || "post", ped: p });
+      if (u && u.alive === false) return;
+      const po = u && u.post ? u.post : (u && u.role === "counter-sniper" && p ? { x: p.pos.x, z: p.pos.z, y: p.pos.y } : null);
+      const ROLE = { "counter-sniper": "roof", agent: "agent", "shift-leader": "agent", ring: "agent", gate: "gate", patrol: "post" };
+      if (po && po.x != null) posts.push({ x: po.x, z: po.z, y: po.y || 0, kind: ROLE[u.role] || po.kind || "post", ped: p });
     });
     (d.posts || []).forEach(function (po) { if (po && po.x != null) posts.push({ x: po.x, z: po.z, y: po.y || 0, kind: po.kind || "post" }); });
     return { peds: peds, posts: posts };
@@ -1938,36 +1978,15 @@
     F.gateS = F.pathLen[3];
     return F;
   }
-  function pathAt(F, s) {
-    s = Math.max(0, Math.min(F.total, s));
-    let i = 1;
-    while (i < F.pathLen.length - 1 && F.pathLen[i] < s) i++;
-    const a = F.path[i - 1], b = F.path[i];
-    const L = F.pathLen[i] - F.pathLen[i - 1] || 1;
-    const k = (s - F.pathLen[i - 1]) / L;
-    return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, h: Math.atan2(b.x - a.x, b.z - a.z) };
-  }
-  const CAR_GAP = 11, CONVOY_N = 5, STATE_I = 2;
   function stageFinale(F) {
     if (F.staged) return;
     F.staged = true;
     photograph("finale", F.ped);
-    F.ped._agencyMark = true; F.ped._agencyOp = "finale";
-    if (F.seam) return;
-    // the motorcade in the motor court: police, lead, the state car, tail, police
-    if (CBZ.cityAddParkedCar) {
-      const Fo = FO();
-      for (let i = 0; i < CONVOY_N; i++) {
-        const q = pathAt(F, CAR_GAP * (CONVOY_N - 1) - i * CAR_GAP + 4);
-        let c = null;
-        const police = i === 0 || i === CONVOY_N - 1;
-        try { c = police && Fo && Fo.policeCar ? Fo.policeCar(q.x, q.z, q.h) : CBZ.cityAddParkedCar(q.x, q.z, q.h, { color: i === STATE_I ? 0x07080a : 0x15171a }); } catch (e) { c = null; }
-        if (c) { c._agencyConvoy = true; c._hmKeepMesh = true; }
-        F.cars.push(c);
-      }
-      F.stateCar = F.cars[STATE_I] || null;
-    }
-    F.homeS = CAR_GAP * (CONVOY_N - 1) + 4;
+    F.ped._agencyMark = true;
+    // THE SEAM PATH never claims him: president mode's real motorcade refuses a
+    // principal marked _agencyOp === "finale", and it is THE motorcade now.
+    if (F.seam) { F.ped._agencyFinale = true; return; }
+    F.ped._agencyOp = "finale";
     postSnipers(F);
   }
   // THE HUGE SECURITY (fallback): two counter-snipers on the Mansion's roof
@@ -2041,119 +2060,6 @@
     for (let i = 0; i < F.crowd.length; i++) if (F.crowd[i] && !F.crowd[i].dead) despawn(F.crowd[i]);
     F.crowd.length = 0;
   }
-  function detailGuards(F) {
-    if (!F.ped || !CBZ.powerGuardsOf) return [];
-    try { return CBZ.powerGuardsOf(F.ped) || []; } catch (e) { return []; }
-  }
-  function ride(F, on) {
-    const p = F.ped; if (!p) return;
-    const G = detailGuards(F);
-    const escort = [F.cars[1], F.cars[3]];
-    if (on) {
-      p.controlled = true; p.staffPost = null;
-      if (p.group) p.group.visible = false;
-      p._agencyRiding = true;
-      for (let i = 0; i < G.length; i++) { const q = G[i]; if (!q || q.dead) continue; q._agencyRiding = true; if (q.group) q.group.visible = false; }
-    } else {
-      p._agencyRiding = false;
-      if (p.group) p.group.visible = true;
-      const c = F.stateCar;
-      const ex = c ? c.pos.x + Math.cos(c.heading) * 1.8 : p.pos.x, ez = c ? c.pos.z - Math.sin(c.heading) * 1.8 : p.pos.z;
-      place(p, ex, ez);
-      for (let i = 0; i < G.length; i++) {
-        const q = G[i]; if (!q || q.dead) continue;
-        q._agencyRiding = false; if (q.group) q.group.visible = true;
-        const cc = escort[i % 2] || c;
-        if (cc) place(q, cc.pos.x + (i % 3 - 1) * 1.6, cc.pos.z + ((i / 3) | 0) * 1.4);
-      }
-    }
-  }
-  function pinRiders(F) {
-    const p = F.ped, c = F.stateCar;
-    if (p && p._agencyRiding && c) { p.pos.set(c.pos.x, floorY(c.pos.x, c.pos.z), c.pos.z); if (p.group) p.group.position.copy(p.pos); if (p.target) p.target.set(c.pos.x, 0, c.pos.z); p.state = "idle"; }
-    const G = detailGuards(F), escort = [F.cars[1], F.cars[3]];
-    for (let i = 0; i < G.length; i++) {
-      const q = G[i]; if (!q || q.dead || !q._agencyRiding) continue;
-      const cc = escort[i % 2] || c; if (!cc) continue;
-      q.pos.set(cc.pos.x, floorY(cc.pos.x, cc.pos.z), cc.pos.z); if (q.group) q.group.position.copy(q.pos);
-      if (q.target) q.target.set(cc.pos.x, 0, cc.pos.z);
-      q.state = "idle"; q.rage = null;
-    }
-  }
-  function carsHome(F) {
-    F.s = F.homeS || 48;
-    for (let i = 0; i < F.cars.length; i++) {
-      const c = F.cars[i]; if (!c || c.dead || c.player) continue;
-      const q = pathAt(F, F.s - i * CAR_GAP); c.pos.x = q.x; c.pos.z = q.z; c.heading = q.h; c.v = 0;
-    }
-  }
-  // per frame: the convoy along the loop. LEAD NOTE (cars overhaul on main):
-  // these are cityAddParkedCar records moved by writing pos/heading every
-  // frame (parkSeat seats them on the terrain). If main instances settled
-  // parked cars inside 150 m, these must stay real meshes: _hmKeepMesh /
-  // _agencyConvoy are set on every convoy car for that merge.
-  function tickConvoy(F, dt) {
-    if (F.phase !== "convoy") return;
-    const c0 = F.cars[0];
-    let blocked = false;
-    if (c0 && CBZ.cityCars) {
-      const fx = Math.sin(c0.heading), fz = Math.cos(c0.heading);
-      for (let i = 0; i < CBZ.cityCars.length; i++) {
-        const o = CBZ.cityCars[i];
-        if (!o || o._agencyConvoy || o.dead) continue;
-        const dx = o.pos.x - c0.pos.x, dz = o.pos.z - c0.pos.z;
-        const ahead = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
-        if (ahead > 0 && ahead < 7 && lat < 2.4) { blocked = true; break; }
-      }
-    }
-    const pl = P();
-    if (!blocked && pl && pl.pos && c0) {
-      const dx = pl.pos.x - c0.pos.x, dz = pl.pos.z - c0.pos.z;
-      const ahead = dx * Math.sin(c0.heading) + dz * Math.cos(c0.heading), lat = Math.abs(dx * Math.cos(c0.heading) - dz * Math.sin(c0.heading));
-      if (ahead > 0 && ahead < 5 && lat < 1.8) blocked = true;
-    }
-    if (blocked) F.stopT += dt; else F.stopT = 0;
-    const v = blocked ? 0 : (F.alarm > 0 ? 13 : 8.5);
-    F.s += v * dt;
-    for (let i = 0; i < F.cars.length; i++) {
-      const c = F.cars[i];
-      if (!c || c.dead || c.player) continue;
-      const q = pathAt(F, F.s - i * CAR_GAP);
-      c.pos.x = q.x; c.pos.z = q.z; c.heading = q.h; c.v = v;
-      if (c._hmBar) { const on = ((now() / 260) | 0) % 2 === 0; c._hmBar.red.visible = on; c._hmBar.blue.visible = !on; }
-    }
-    pinRiders(F);
-    if (F.charge && F.s > F.homeS + 12 && !F.dead && F.stateCar && !F.stateCar._agencyBoom) {
-      F.accident = "charge";
-      RT.killWatch = { t: now() + 1200, blast: true };
-      F.ped._agencyRiding = false; if (F.ped.group) F.ped.group.visible = true;
-      carBomb(null, F.stateCar, F.ped);
-      ride(F, false);
-      F.phase = "done";
-      return;
-    }
-    if (F.stateCar && (F.stateCar.dead || F.stateCar.player) && F.ped._agencyRiding) {
-      F.ped._agencyRiding = false; if (F.ped.group) F.ped.group.visible = true;
-      if (F.stateCar.dead) { try { CBZ.cityKillPed(F.ped, { byPlayer: true }, "explosion"); } catch (e) {} }
-      ride(F, false);
-      F.phase = F.ped.dead ? "done" : "bail";
-      return;
-    }
-    if (F.stopT > 3.5 || (F.alarm > 0 && blocked)) {
-      ride(F, false);
-      F.phase = "bail"; F.t = 0;
-      finNote("The motorcade stopped. He ran for the house.");
-      walkTo(F.ped, F.residence.x, F.residence.z, true);
-      return;
-    }
-    if (F.s >= F.total) {
-      ride(F, false);
-      F.phase = "walkhome"; F.t = 0;
-      walkTo(F.ped, F.residence.x, F.residence.z);
-      carsHome(F);
-    }
-  }
-
   function goHot(F) {
     if (F.alarm <= 0) {
       F.everAlarm = true;
@@ -2174,8 +2080,6 @@
     if (F.seam) { tickSeamFinale(F, dt); finIntel(F, dt); return; }
     const h = hour();
     const inAddr = inWin(h, FINALE.win.address[0], FINALE.win.address[1]);
-    const inMot = inWin(h, FINALE.win.motorcade[0], FINALE.win.motorcade[1]);
-    if (!inMot) F.convoyDone = false;
     if (dPl < 320 && F.phase === "address" && !F.crowd.length && F.alarm <= 0) spawnCrowd(F);
     if (dPl > 380 && F.crowd.length) dropCrowd(F);
     if ((F.phase === "address" || F.phase === "toaddress") && dPl < 420) postAgents(F);
@@ -2199,7 +2103,6 @@
         if (p.staffPost == null) p.staffPost = { x: F.residence.x, z: F.residence.z, face: F.residence.face };
         if (F.alarm <= 0 && F.t > 2) {
           if (inAddr) { F.phase = "toaddress"; F.t = 0; walkTo(p, F.podium.x, F.podium.z); }
-          else if (inMot && !F.convoyDone && F.stateCar && !F.stateCar.dead) toCar(F);
         }
         break;
       case "toaddress":
@@ -2216,21 +2119,9 @@
         if (F.t > 16 && F.t - dt <= 16) bark(p, "Order first. Then freedom.", 3);
         if (!inAddr) {
           dropCrowd(F);
-          if (inMot && F.stateCar && !F.stateCar.dead) toCar(F);
-          else { F.phase = "walkhome"; F.t = 0; walkTo(p, F.residence.x, F.residence.z); }
+          F.phase = "walkhome"; F.t = 0; walkTo(p, F.residence.x, F.residence.z);
         }
         break;
-      case "walkcar": {
-        F.t += dt;
-        const c = F.stateCar;
-        if (!c || c.dead) { F.phase = "walkhome"; F.t = 0; walkTo(p, F.residence.x, F.residence.z); break; }
-        if (d2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < 2.6 || F.t > 25) {
-          F.phase = "convoy"; F.s = F.homeS; F.stopT = 0; F.convoyDone = true; ride(F, true);
-          if (distP(c.pos.x, c.pos.z) < 200) finNote("He got into the middle car.");
-        }
-        break;
-      }
-      case "convoy": break;
       case "walkhome":
       case "bail":
         F.t += dt;
@@ -2239,18 +2130,35 @@
           holdAt(p, F.residence.face);
           const wasBail = F.phase === "bail";
           F.phase = "residence"; F.t = wasBail ? -30 : 0;
-          carsHome(F);
         }
         break;
     }
     finIntel(F, dt);
   }
-  function toCar(F) {
-    const c = F.stateCar; if (!c) return;
-    F.phase = "walkcar"; F.t = 0;
-    walkTo(F.ped, c.pos.x + Math.cos(c.heading) * 1.8, c.pos.z - Math.sin(c.heading) * 1.8);
+  // THE REAL MOTORCADE (president mode, city/motorcade.js). We never move it;
+  // we only read its state car so a charge can go under it.
+  function realStateCar() {
+    try {
+      const m = CBZ.motorcade && CBZ.motorcade.active ? CBZ.motorcade.active() : null;
+      const c = m && m.stateCar;
+      return c && !c.dead ? c : null;
+    } catch (e) { return null; }
+  }
+  function tickSeamCharge(F) {
+    const c = F.chargeCar;
+    if (!F.charge || !c || F.dead || c._agencyBoom) return;
+    if (c.dead) { F.charge = false; return; }
+    // it goes when the car pulls away with him in it
+    if (d2(c.pos.x, c.pos.z, F.chargeAt.x, F.chargeAt.z) < 8) return;
+    const p = F.ped;
+    const inside = p && !p.dead && (d2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < 4.5 || (p.group && !p.group.visible));
+    F.accident = "charge";
+    carBomb(null, c, null);
+    if (inside) { try { CBZ.cityKillPed(p, { byPlayer: true }, "explosion"); } catch (e) {} }
+    finNote(inside ? "The state car went up on the route." : "The state car went up. He was not in it.");
   }
   function tickSeamFinale(F, dt) {
+    tickSeamCharge(F);
     // their man may have been re-posted as a new body; follow it
     const c = presCurrent();
     if (c && c.ped && c.ped !== F.ped && !c.ped.dead && !F.dead) { F.ped = c.ped; F.cur = c; photograph("finale", c.ped); }
@@ -2278,15 +2186,17 @@
       if (k && !S.legs[k]) { S.legs[k] = "eyes"; finNote(FINALE.legs[+k].label + ". " + FINALE.legs[+k].detail); }
       if (!S.appr.long && (F.seam || F.phase === "address") && distP(p.pos.x, p.pos.z) > 60) { S.appr.long = true; finNote("A clear line to him from here. " + Math.round(distP(p.pos.x, p.pos.z)) + " m."); }
     }
-    if (F.phase === "convoy" && F.stateCar && !S.legs["2"] && sees(F.stateCar.pos.x, 1, F.stateCar.pos.z, 160, 0.8)) { S.legs["2"] = "eyes"; S.appr.charge = true; finNote("The motorcade: police front and back, he rides in the middle car."); }
-    if (F.stateCar && distP(F.stateCar.pos.x, F.stateCar.pos.z) < 12) S.appr.charge = true;
+    const sc = realStateCar();
+    if (sc && !S.legs["2"] && sees(sc.pos.x, 1, sc.pos.z, 160, 0.8)) { S.legs["2"] = "eyes"; S.appr.charge = true; finNote("The motorcade. He rides in the state car."); }
+    if (sc && distP(sc.pos.x, sc.pos.z) < 12) S.appr.charge = true;
     // counting the rifles: a post you have looked at is a post you know
     for (let i = 0; i < F.posts.length; i++) {
       const po = F.posts[i]; const key = (po.kind || "post") + ":" + Math.round(po.x) + ":" + Math.round(po.z);
       if (S.posts[key]) continue;
       if (seesPoint(po.x, (po.y || 0) + 1.5, po.z)) {
         S.posts[key] = po.kind || "post";
-        finNote(po.kind === "roof" ? ("A rifle on the roof, " + (po.side === "left" ? "left" : "right") + " of the dome.") : (po.kind === "podium" ? "An agent by the podium." : "A man posted, watching the lawn."));
+        finNote(po.kind === "roof" ? (po.side != null && typeof po.side === "string" ? ("A rifle on the roof, " + po.side + " of the dome.") : "A rifle on a roof, watching the approach.")
+          : po.kind === "podium" ? "An agent by the podium." : po.kind === "agent" ? "One of his agents, close in." : po.kind === "gate" ? "Men on the gate, checking everyone." : "A man posted, watching the crowd.");
         boardDirty();
       }
     }
@@ -2589,7 +2499,6 @@
   }
   function teardownFinale(F) {
     if (!F) return;
-    for (let i = 0; i < F.cars.length; i++) if (F.cars[i] && !F.cars[i].player && CBZ.cityScrapCar) { try { CBZ.cityScrapCar(F.cars[i]); } catch (e) {} }
     dropCrowd(F); dropAgents(F);
     for (let i = 0; i < F.snipers.length; i++) if (F.snipers[i] && !F.snipers[i].dead) despawn(F.snipers[i]);
     F.snipers.length = 0;
@@ -2609,8 +2518,6 @@
       if (!playing()) return;
       const F = RT.fin;
       if (!F) return;
-      if (F.phase === "convoy" && !F.dead) tickConvoy(F, dt || 0);
-      else if (F.ped && F.ped._agencyRiding) pinRiders(F);
       if (F.snipers && F.snipers.length) pinSnipers(F);
     });
   }
@@ -2694,7 +2601,7 @@
         scene: fa ? fa.scenes : null,
         president: {
           seams: sm, mode: RT.fin ? (RT.fin.seam ? "seam" : "fallback") : null,
-          finale: RT.fin ? { phase: RT.fin.phase, cars: RT.fin.cars.filter(Boolean).length, snipers: RT.fin.snipers.length, agents: RT.fin.agents.length, posts: RT.fin.posts.length, crowd: RT.fin.crowd.length, identified: RT.fin.identified, dead: RT.fin.dead, hour: Math.round(hour() * 10) / 10 } : null,
+          finale: RT.fin ? { phase: RT.fin.phase, motorcade: !!(CBZ.motorcade && CBZ.motorcade.active && CBZ.motorcade.active()), charge: !!RT.fin.charge, snipers: RT.fin.snipers.length, agents: RT.fin.agents.length, posts: RT.fin.posts.length, crowd: RT.fin.crowd.length, identified: RT.fin.identified, dead: RT.fin.dead, hour: Math.round(hour() * 10) / 10 } : null,
         },
         meet: RT.meet ? { kind: RT.meet.kind, voss: !!RT.meet.voss, started: RT.meet.started, handOut: !!RT.meet.handOut, done: RT.meet.done } : null,
         pin: PIN.key, dossier: !!D(), why: RT.why || null, lots: lotsOfKinds(null).length, arena: !!A(),
