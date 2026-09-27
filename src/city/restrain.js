@@ -463,7 +463,15 @@
       // dragging in a clean citizen: the desk doesn't pay — it CHARGES you.
       ped.controlled = false;
       ped.fear = 10; ped.alarmed = 8; ped.state = "flee";
-      CBZ.city && CBZ.city.note("“This one's clean. Cuffing citizens off the street, that's a snatch job.”", 2.6);
+      // the desk officer says it: the nearest cop at the station, over his head
+      const P0 = CBZ.player.pos;
+      let desk = null, bd = 25 * 25;
+      for (const c of (CBZ.cityCops || [])) {
+        if (!c || c.dead || !c.pos) continue;
+        const d2 = (c.pos.x - P0.x) * (c.pos.x - P0.x) + (c.pos.z - P0.z) * (c.pos.z - P0.z);
+        if (d2 < bd) { bd = d2; desk = c; }
+      }
+      if (desk && CBZ.citySay) CBZ.citySay(desk, "This one's clean. Cuffing citizens off the street, that's a snatch job.", null, { secs: 2.8, force: true });
       CBZ.cityCrime && CBZ.cityCrime(120, { instant: true, x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "kidnapping" });
     }
     I.refresh();

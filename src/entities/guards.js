@@ -317,7 +317,7 @@
       if (near && CBZ.prisonSay && g.standingOffer.walks === 1) {
         CBZ.prisonSay(g, a.kind === "snitchIntel"
           ? "You know where I am."
-          : "Offer stands. For now.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+          : "Offer stands. For now.", { force: true });
       }
       return;
     }
@@ -343,7 +343,7 @@
     if (near && CBZ.prisonSay && !seen[a.kind]) {
       seen[a.kind] = 1;
       CBZ.prisonSay(g, a.kind === "racketOffer" ? "You still owe the tab." : "We're done.",
-        { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+        { force: true });
     }
   }
 
@@ -567,9 +567,9 @@
     if (!a) return { ok: false, msg: "Not now." };
     if (action === "listen") {
       // NO NAME, NO COLON. These four were the last of the `Name: line` shape
-      // in the prison: .pi-subtitle (systems/interact.js) carries the speaker
-      // in its own element and shows only the words, so a name stapled to the
-      // front is the same man introduced twice.
+      // in the prison: the line floats over the speaker's own head
+      // (systems/speech.js), so a name stapled to the front is the same man
+      // introduced twice.
       /* AND HE STATES THE INSTRUMENT. Asking a bent officer what the deal is
          is the one moment the outside-money fiction belongs in a mouth: he
          says where the money actually goes, and asks the only question that
@@ -1001,7 +1001,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way. South gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way. South gate.", { force: true });
       return;
     }
 
@@ -1054,7 +1054,7 @@
       n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss! He's right there.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss! He's right there.", { force: true });
       return;
     }
 
@@ -1132,7 +1132,7 @@
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
     barkCD = 3.5;
     const line = pool[(Math.random() * pool.length) | 0];
-    if (CBZ.prisonSay) CBZ.prisonSay(g, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    if (CBZ.prisonSay) CBZ.prisonSay(g, line, { force: true });
   }
   // A line the LAW needs said now (the order, the warning, the cuffs, break it
   // up): over this screw's head, outranking chatter, ignoring the bark spacing
@@ -1144,7 +1144,7 @@
     if (!opts.force && barkCD > 0) return false;
     barkCD = 3.0;
     const line = pool[((g.id || 0) + ((Math.random() * 2) | 0)) % pool.length];
-    try { return CBZ.prisonSay(g, line, { secs: opts.secs || 1.8, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.answer : 2 }); } catch (e) { return false; }
+    try { return CBZ.prisonSay(g, line, { secs: opts.secs || 1.8, force: true }); } catch (e) { return false; }
   };
 
   function noteState(g, s) {
@@ -1532,8 +1532,7 @@
           a.greeted = true;
           // He has walked over to you and the head icon is up (markers.js):
           // the invitation is already on screen, no instruction bolted on.
-          if (CBZ.prisonSay) CBZ.prisonSay(g, a.msg, { secs: 2.6, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
-          else if (CBZ.flashHint) CBZ.flashHint(a.msg, 2.1);
+          if (CBZ.prisonSay) CBZ.prisonSay(g, a.msg, { secs: 2.6, force: true });
         }
       }
       updateFlashlight(g, dt);

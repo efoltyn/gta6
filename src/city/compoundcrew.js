@@ -57,7 +57,6 @@
   const BARK_CONTACT = ["Contact at the gate!", "Movement on the wall!", "We got company!", "Eyes up, hostiles out front!"];
   const BARK_C4 = ["Charge on the gate!", "They're blowing the gate!", "Get back from the gate!"];
   const BARK_RAID = ["Hit the stash!", "Blow it open!", "Go go go, take the money!"];
-  const BARK_SELL = ["What you need?", "Step up.", "Got you, same as always."];
   const BARK_QUIT = ["No pay, no work. I'm out.", "Find somebody else, boss.", "I don't work for free."];
 
   // ---- tiny helpers -----------------------------------------------------
@@ -661,7 +660,7 @@
       dealer.cash = (dealer.cash || 0) + pay;
       dealer._ccTake = (dealer._ccTake || 0) + pay;
       ws.sales++;
-      if (nearPlayer(dealer.pos.x, dealer.pos.z, 40)) { say(dealer, BARK_SELL, 1.8); sfx("coin"); }
+      if (nearPlayer(dealer.pos.x, dealer.pos.z, 40)) sfx("coin");
       if (Math.random() < 0.2 && CBZ.cityCrime) { try { CBZ.cityCrime(10, { x: dealer.pos.x, z: dealer.pos.z, type: "dealing" }); } catch (e) {} }
     };
   }
@@ -839,7 +838,7 @@
             ped._ccWalk = null;
             if (e.role === "worker" && ped._ccWork && ped._ccWork.st === "out") { ped._ccSlot = slot; standAt(ped, plot, slot, "guard"); }
             else settleOnSlot(ped, plot, slot);
-            if (e.origin === "hire" && !e.arrived) { e.arrived = true; markDirty(); if (nearPlayer(ped.pos.x, ped.pos.z, 50)) say(ped, "Reporting in, boss."); }
+            if (e.origin === "hire" && !e.arrived) { e.arrived = true; markDirty(); }
           } else if (ped._post) {
             const n = w.pts[w.i];
             ped._post.x = n.x; ped._post.z = n.z;

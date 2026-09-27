@@ -1104,9 +1104,8 @@
         const lines = T.list.map((t, i) => {
           const mark = (i === T.idx) ? "▶" : (t.done ? "✓" : "·");
           const col = t.done ? "#7ed957" : (i === T.idx ? "#ffd166" : "#8a93a3");
-          let extra = "";
-          if (i === T.idx && t.id === "trust" && rec) extra = " (" + Math.round(trustProgress(rec) * 100) + "%)";
-          return "<div style='color:" + col + ";font-size:12px'>" + mark + " " + labels[t.id] + extra + "</div>";
+          // (no "(NN%)" on trust: they warm to you, you do not watch a meter fill)
+          return "<div style='color:" + col + ";font-size:12px'>" + mark + " " + labels[t.id] + "</div>";
         }).join("");
         html += "<div style='margin:-2px 0 8px'>" + lines + "</div>";
       }

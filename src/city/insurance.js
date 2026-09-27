@@ -781,14 +781,14 @@
             label: "Insure " + addrOf(lot) + " " + money(q.price),
             run: function () {
               const r = CBZ.cityInsure(lot);
-              if (!r.ok) { note(r.why, 3); say(p, "“" + r.why + "”"); return; }
+              if (!r.ok) { say(p, "“" + r.why + "”"); return; }
               if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
               say(p, "“Covered to " + money(r.value) + ". Try not to need it.”");
               note("Cover written on " + addrOf(lot) + " — " + money(r.value) + " for " + money(r.price) + ".", 3.4);
             },
           };
         }
-        return { label: "Ask about cover on " + addrOf(lot), run: function () { say(p, "“" + q.why + "”"); note(q.why, 3); } };
+        return { label: "Ask about cover on " + addrOf(lot), run: function () { say(p, "“" + q.why + "”"); } };
       }
     }
     // 3. the floor. A working person always has something honest to say, and

@@ -597,7 +597,7 @@
   function labelLawyer() { const r = S; if (!r || !r.inv.card || r.lawyered) return ""; return r.deckerLoc === "interrogation" ? "[E] Slide the lawyer card through the tray" : ""; }
   function labelSteak() { const r = S; if (!r || !r.inv.steak) return ""; return "[E] Toss the steak to REX"; }
   function labelExtract() { const r = S; if (!r) return "[E] The crew's beater"; return "[E] Slip away in the beater"; }
-  function labelBoy() { const r = S; if (!r) return "[E] Talk to Decker"; if (r.released) return r.following ? "" : "[E] \"Let's go.\" (he follows)";
+  function labelBoy() { const r = S; if (!r) return "[E] Talk to Decker"; if (r.released) return r.following ? "" : "[E] Bring Decker";
     return (r.deckerLoc === "holding") ? "[E] Talk to Decker (holding)" : ""; }
 
   /* ==========================================================
@@ -619,20 +619,23 @@
     sergeantSay(pick(["Visiting hours. Bench is there.", "You lost? Bail window's the glass."]));
     if (!S.password) feed("The sergeant's on the take, but you'd need the WORD. Ask Lou next door.", "#e8b23a");
   }
-  function sergeantSay(l) { const h = V && V.staff.KOWALCZYK; if (h && h.say) h.say(l); else feed("Kowalczyk: " + l, "#dfe7ff"); }
+  function sergeantSay(l) { staffSay("KOWALCZYK", l); }
+  // a staffer's words go over HIS head. No body in the room, no line.
+  function staffSay(name, l) { const h = V && V.staff[name]; if (h && h.say) h.say(l); }
 
   function openBondsman() {
     armStart();
+    if (!S.password) staffSay("LOU", "The sarge is on the take. I sell the word.");
     const owe = S.loanOwed ? "  ·  you owe Lou $" + S.loanOwed : "";
     C.hud.panel(
       hHead("LOU'S BONDS", "both money paths start here" + owe) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b>. The sergeant's on the take. I sell the WORD that opens him. Or take a loan; the vig keeps me sentimental.</div>" +
+      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
       hBtn("word", S.password ? "WORD BOUGHT" : "Buy the word on the sarge. $" + BOND.PASSWORD, S.password ? "#26343c" : "#8a1f1f", S.password) +
       hBtn("loan", S.loanGot ? "LOAN TAKEN" : "Loan. $" + BOND.LOAN_NOW + " now, $" + BOND.LOAN_OWED + " owed", S.loanGot ? "#26343c" : "#1f4e8a", !!S.loanGot) +
       "<div style='margin-top:8px'>" + hBtn("close", "Leave", "#26343c") + "</div>",
       {
-        word: () => { if (S.password) return; if (!C.wallet.spend(BOND.PASSWORD, "The word on Kowalczyk")) { feed("Short. Loans are the other thing I do."); return; }
-          S.paid += BOND.PASSWORD; S.password = true; toast("WORD BOUGHT"); feed("Tell Kowalczyk: \"Half-caf, extra vig.\"", "#e8b23a"); openBondsman(); },
+        word: () => { if (S.password) return; if (!C.wallet.spend(BOND.PASSWORD, "The word on Kowalczyk")) { staffSay("LOU", "Short. Loans are the other thing I do."); return; }
+          S.paid += BOND.PASSWORD; S.password = true; toast("WORD BOUGHT"); staffSay("LOU", "The word is half-caf, extra vig. Tell the sarge."); openBondsman(); },
         loan: () => { if (S.loanGot) return; C.wallet.give(BOND.LOAN_NOW, "Lou's loan"); S.loanGot = BOND.LOAN_NOW; S.loanOwed = BOND.LOAN_OWED; toast("LOAN"); openBondsman(); },
         close: () => C.hud.closePanel(),
       });
@@ -641,31 +644,33 @@
   function openBail() {
     armStart();
     if (S.chargesKicked || S.released || S.releaseAt != null) { feed("Bail's settled. Decker's release is in motion."); return; }
-    if (!rosterAt(S.t, S.lawyered).bail) { feed("da Silva: Window shade is down. BACK IN 5.", "#e88a7a"); return; }
+    if (!rosterAt(S.t, S.lawyered).bail) { feed("Window shade is down: BACK IN 5.", "#e88a7a"); return; }
     const q = bailQuote(S.charges);
-    if (q == null) { feed("da Silva: It's above my pay grade now. The DA has the file.", "#e88a7a"); return; }
+    if (q == null) { staffSay("DASILVA", "It's above my pay grade now. The DA has the file."); return; }
     C.hud.panel(
       hHead("BAIL WINDOW", "charges: " + chargeTier(S.charges)) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail is <b>400 + 8 × charges</b> = <b>$" + q + "</b>, and it CLIMBS while he talks in the box (freeze it with the lawyer card). Cash <b>" + fmtCash(C.wallet.cash()) + "</b>.<br><span style='opacity:.8'>Cheaper but dirty: the sergeant kicks the whole sheet for the word + $" + BOND.BRIBE + ".</span></div>" +
       hBtn("pay", "Post bail. $" + q, "#1c6b40") + hBtn("close", "Leave", "#26343c"),
       {
         pay: () => { const qq = bailQuote(S.charges); if (qq == null) { feed("Too late. RICO referral. The window's shut."); return; }
-          if (!C.wallet.spend(qq, "Bail posted")) { feed("da Silva: Bail is $" + qq + ". You're short."); return; }
+          if (!C.wallet.spend(qq, "Bail posted")) { staffSay("DASILVA", "Bail is $" + qq + ". You're short."); return; }
           S.paid += qq; S.bailPaid = true; startRelease(); toast("BAIL POSTED");
-          feed("da Silva: Receipt. Processing takes a minute, wait by the desk.", "#9fd0ff"); C.hud.closePanel(); },
+          staffSay("DASILVA", "Receipt. Processing takes a minute."); C.hud.closePanel(); },
         close: () => C.hud.closePanel(),
       });
   }
 
   function liftBadge() {
     armStart(); if (S.inv.badge) return;
-    if (observed()) { S.heat += 25; toast("HEY!"); feed("\"Hands off the podium.\"", "#e88a7a"); return; }
+    const w = observed();
+    if (w) { S.heat += 25; toast("HEY!"); w.say("Hands off the podium."); return; }
     S.inv.badge = true; toast("BADGE LIFTED"); feed("A visitor-escort badge. Fools a rookie. Not a veteran.", "#e8b23a");
   }
   function stealCase() {
     armStart(); if (S.inv.caseNo) return;
-    if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES") { feed("Reyes: That desk bites. Walk on.", "#e88a7a"); S.heat += 8; return; }
-    if (observed()) { S.heat += 25; toast("HEY!"); feed("\"Step away from the detective's desk.\"", "#e88a7a"); return; }
+    if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES") { staffSay("REYES", "That desk bites. Walk on."); S.heat += 8; return; }
+    const w = observed();
+    if (w) { S.heat += 25; toast("HEY!"); w.say("Step away from the detective's desk."); return; }
     S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO); feed("Case number " + CASE_NO + " · the duffel's sign-out key.", "#e8b23a");
   }
 
@@ -678,7 +683,7 @@
       hHead("EVIDENCE CAGE", clerk ? ("clerk: " + clerk + (flickerPhaseAt(S.t) === "dark" ? " · tube DARK" : "")) : "post empty, tube: " + flickerPhaseAt(S.t)) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Two ways past the gate:<br>• <b>SIGN IT OUT</b>, needs case# <b>" + (S.inv.caseNo || "—") + "</b> + a badge that satisfies the clerk (rookie takes the escort badge; the veteran does not. READ THE PLATE).<br>• <b>PICK THE LOCK</b>, only while the clerk can't see you (post empty OR the tube is dark). No signature, no chain.</div>" +
       hBtn("sign", "Sign the duffel out", "#1f4e8a", !clerk || S.stashLoc !== "cage") +
-      hBtn("pick", S.cageOpen ? "GATE OPEN" : "Work the cage lock (" + Math.floor(S.pickProgress / 3 * 100) + "%)", "#8a1f1f", S.cageOpen || !S.inv.picks) +
+      hBtn("pick", S.cageOpen ? "GATE OPEN" : "Pick the cage lock", "#8a1f1f", S.cageOpen || !S.inv.picks) +
       "<div style='margin-top:8px'>" + hBtn("close", "Back off", "#26343c") + "</div>" +
       (blind ? "<div style='font-size:11px;color:#7fe8a8;margin-top:4px'>The clerk can't see the gate right now.</div>" : ""),
       {
@@ -705,7 +710,7 @@
     toast("SIGNED OUT"); clerkSay(clerk, "Transfer to the DA run, right? Sign here.");
     C.hud.closePanel();
   }
-  function clerkSay(name, l) { const h = V && V.staff[name]; if (h && h.say) h.say(l); else feed(name + ": " + l, "#dfe7ff"); }
+  function clerkSay(name, l) { staffSay(name, l); }
   function pickTick(dt) {
     if (S.cageOpen) return;
     const clerk = rosterAt(S.t, S.lawyered).cage;
@@ -935,11 +940,12 @@
   function observed() {
     // a simple observation gate: an on-post officer within ~7u of the player.
     // (uses staff ped positions; enough to make lifting risky without a full LOS.)
-    if (!V || !CBZ.player) return false;
+    // Returns the WATCHER's handle (truthy) so he is the one who shouts.
+    if (!V || !CBZ.player) return null;
     const P = CBZ.player;
     for (const name in V.staff) { const h = V.staff[name]; if (!h || !h.ped) continue;
-      if (Math.hypot(h.ped.pos.x - P.pos.x, h.ped.pos.z - P.pos.z) < 7 && !awayAt(name, S.t)) return true; }
-    return false;
+      if (Math.hypot(h.ped.pos.x - P.pos.x, h.ped.pos.z - P.pos.z) < 7 && !awayAt(name, S.t)) return h; }
+    return null;
   }
 
   /* ==========================================================

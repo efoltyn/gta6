@@ -930,8 +930,8 @@
           : { open: have, line: "The armory door needs a Keycard." };
         if (L.open) {
           armory.setOpen(true);
-          // the cage swinging open in front of you is the line.
-          tellHint("The armory rack's open, take what you need.", 2.6);
+          // the cage swinging open in front of you is the line (the
+          // narration that used to caption it is deleted).
         } else {
           // KEPT, and it is the one hint in this file that earns its place: a
           // locked door's REASON is not visible from outside it, and this is
@@ -962,7 +962,6 @@
             if (L.open && !latched) {
               inner.setOpen(true);
               // the lock turning and the door opening say both halves of this.
-              tellHint("The Warden's key turns. There's a rifle in there.", 2.6);
             } else if (!L.open) {
               // ROUTE TWO — graft. A hacksaw blade is the only item in the
               // prison's tool list that had never had a verb; it has one now,
@@ -974,18 +973,14 @@
               // Degrade-safe: with no touch layer this is a no-op and the
               // polled key above is still the whole interaction.
               // "Saw", held, over the padlocked leaf. The cage is the noun.
-              if (saw && CBZ.prisonPrompt) CBZ.prisonPrompt("gunroom-cage", "e", "Saw", { at: { x: 23.40, y: 1.55, z: -1.55 }, hold: true });
+              // The saw's progress is the hairline on this pill, over the
+              // padlock: the time is the play here (six loud seconds in the
+              // armoury), so it gets a readout, on the lock, not the HUD.
+              if (saw && CBZ.prisonPrompt) CBZ.prisonPrompt("gunroom-cage", "e", "Saw", { at: { x: 23.40, y: 1.55, z: -1.55 }, hold: true, prog: inner.saw / 6 });
               else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
               if (saw && pressing) {
                 inner.saw += dt;
                 if (CBZ.shake && inner.saw % 0.5 < dt) CBZ.shake(0.03);
-                if (inner.sawMsg <= 0) {
-                  inner.sawMsg = 0.9;
-                  // KEPT: a hold-to-saw with no readout is a hold with no
-                  // feedback, and there is no diegetic surface for "how far
-                  // through the shackle am I". Declared on the audit.
-                  CBZ.flashHint("Sawing the padlock… " + Math.round((inner.saw / 6) * 100) + "%", 1.0);
-                }
                 if (inner.saw >= 6) {
                   if (econ && econ.takeItem) econ.takeItem("Hacksaw Blade");   // the blade snaps
                   // THE BLADE IS GONE BUT THE PADLOCK IS TOO. Remembered
@@ -995,7 +990,6 @@
                   inner.sawed = true;
                   inner.setOpen(true);
                   // the shackle falling off the hasp is the event.
-                  tellHint("The padlock drops. The blade's finished, worth it.", 2.6);
                 }
               } else {
                 inner.saw = Math.max(0, inner.saw - dt * 2);
@@ -1125,11 +1119,10 @@
   }
 
   CBZ.armory = armory;
-  /* THE TWO LINES THIS FILE KEEPS, DECLARED. CBZ.jailShowAudit().hints reads
-     this list, so the ratchet reports 2 rather than pretending the prison has
-     no hint text left. Both are state a player cannot see from where he is
-     standing: WHY a locked door is locked, and how far through a padlock a
-     hacksaw has cut. Either one becoming diegetic drops the number. */
+  /* THE ONE LINE THIS FILE KEEPS, DECLARED. CBZ.jailShowAudit().hints reads
+     this list. It is state a player cannot see from where he is standing:
+     WHY a locked door is locked. (The saw's "Sawing the padlock... N%" hint
+     is gone: its progress is a hairline on the Saw pill over the padlock.) */
   (CBZ._jailShowRaw = CBZ._jailShowRaw || { toasts: [], hints: [], narrations: [] })
-    .hints.push("gunroom:locked-reason", "gunroom:saw-progress");
+    .hints.push("gunroom:locked-reason");
 })();

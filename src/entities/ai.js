@@ -5423,10 +5423,10 @@
                glyph without this fix would have left the approach mute.
 
                A man who has walked over to talk to you TALKS. prisonSay is the
-               prison's one mouth, and it is ranked, so his opener yields to a
-               louder line rather than stomping it. The instruction half is
+               prison's one mouth (systems/speech.js, over his head), and he
+               walked up to YOU, so the line is forced. The instruction half is
                gone; the offer itself is the whole message. */
-            if (CBZ.prisonSay) CBZ.prisonSay(n, a.msg, { secs: 2.6, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+            if (CBZ.prisonSay) CBZ.prisonSay(n, a.msg, { secs: 2.6, force: true });
             // the shove IS the question: a hand in your chest, not a sentence
             if (a.shove) {
               const kx = px - n.group.position.x, kz = pz - n.group.position.z, kd = Math.hypot(kx, kz) || 1;

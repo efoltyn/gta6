@@ -449,35 +449,21 @@
   let dispatchHoldT = 0, responseDeployT = 0, lastStars = 0, lastWant = 0;   // radio-beat + real precinct deployment cadence
   let convictHailed = false;   // one-shot "escaped convict" all-points bulletin per run
 
-  // beat small-talk — strictly diegetic procedure/street flavor, only worth
-  // SAYING when the player is close enough to overhear it.
-  const BEAT_LINES = [
-    "Quiet block tonight. Stay on it.",
-    "Dispatch wants us visible on this strip.",
-    "Watch that corner, it's been hot all week.",
-    "We loop the block, then check the storefronts.",
-    "Payday weekend. Keep your eyes open.",
-  ];
+  // No patrol small-talk: cops narrating their own beat was filler. A cop
+  // speaks when he is doing something to someone (move-along, stop, arrest).
   function copBark(c, lines) {
     if (barkCD > 0 || !lines || !lines.length) return;
     const P = CBZ.player; if (!P || P.dead) return;
     if (Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) > 13) return;   // overheard, not broadcast
     barkCD = 26 + rng() * 20;
-    copSay(c, lines[(rng() * lines.length) | 0], 1.8, true);   // overheard or not at all
+    copSay(c, lines[(rng() * lines.length) | 0], 1.8);   // overheard or not at all
   }
 
-  // A COP'S WORDS GO ON SCREEN, OVER THE COP. city.note() is a phone channel
-  // (mode.js routes it to the Scanner/News app or drops it), so every "FREEZE"
-  // and every gun-stop warning this file used to print through it never reached
-  // the player's eyes: the law escalated in silence. citySay is the one
-  // on-screen speech surface (social.js, subtitle-bus arbitrated, near-camera
-  // gated); the note is only the fallback for a build without it.
-  function copSay(c, text, secs, noPhone) {
-    if (c && !c.dead && CBZ.citySay) {
-      try { if (CBZ.citySay(c, text, "#9fc3ff", secs || 2.2)) return true; } catch (e) {}
-    }
-    if (!noPhone && CBZ.city && CBZ.city.note) CBZ.city.note(text, secs || 2.2);
-    return false;
+  // A COP'S WORDS GO OVER THE COP (citySay -> CBZ.speech). Never the phone,
+  // never a HUD line: out of earshot means not heard.
+  function copSay(c, text, secs) {
+    if (!c || c.dead || !CBZ.citySay) return false;
+    try { return !!CBZ.citySay(c, text, "#9fc3ff", secs || 2.2); } catch (e) { return false; }
   }
 
   // ---- POLICE GRACE: a fresh life, a hospital discharge or a release from the
@@ -3861,11 +3847,11 @@
       }
 
       // LEAD (or solo): stroll the beat with an occasional stop-and-look pause —
-      // which is where the (rare, overheard-only) small talk happens.
+      // a cop looking around his block.
       if (c._pauseT > 0) { c._pauseT -= dt; standIdle(c, c.group.rotation.y, dt, near); continue; }
       if (c.ambient) {
         c._beatT = (c._beatT == null ? 8 + rng() * 14 : c._beatT - dt);
-        if (c._beatT <= 0) { c._beatT = 16 + rng() * 20; c._pauseT = 2.2 + rng() * 2.4; if (M && !mateBusy) copBark(c, BEAT_LINES); continue; }
+        if (c._beatT <= 0) { c._beatT = 16 + rng() * 20; c._pauseT = 2.2 + rng() * 2.4; continue; }
       }
       // DISTRICT-WEIGHTED BEAT (police-district-weight): an idle patrol cop picks
       // its next goal via copBeatPoint — a road point bordering a cops-WEIGHTED

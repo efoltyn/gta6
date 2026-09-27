@@ -106,6 +106,17 @@
   function note(msg, sec, opts) {
     if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec == null ? 2.2 : sec, opts || { from: DESK, app: "messages" });
   }
+  // A CLERK'S WORDS go over the clerk's head (systems/speech.js via citySay),
+  // never onto the phone. The clerk is the vendor ped of the desk you are at.
+  let DESK_KIND = null;
+  function clerk(kind) {
+    const lot = (CBZ.cityShopLot && CBZ.cityShopLot()) || civicLots()[kind || DESK_KIND];
+    return (lot && lot.building && lot.building.vendor) || null;
+  }
+  function say(words, secs, kind) {
+    const c = clerk(kind);
+    if (c && !c.dead && CBZ.citySay) CBZ.citySay(c, words, null, { secs: secs || 2.4, force: true });
+  }
   function feed(msg, opts) { if (CBZ.cityFeed) CBZ.cityFeed(msg, "#cfd8e6", opts); }
   function coin() { if (CBZ.sfx) CBZ.sfx("coin"); }
   function day() { return CBZ.worldDay ? CBZ.worldDay() : 0; }
@@ -242,13 +253,13 @@
   }
   function payFine() {
     const s = stars();
-    if (s <= 0) { note("“Nothing outstanding against you. Have a good day.”", 2); return; }
+    if (s <= 0) { say("Nothing outstanding against you. Have a good day.", 2); return; }
     if (s >= 4) {
-      note("“That's a warrant, not a fine. I can't take your money for that, turn yourself in or run.”", 3);
+      say("That's a warrant, not a fine. I can't take your money for that, turn yourself in or run.", 3);
       return;
     }
     if (copsClose() && s >= 1) {
-      note("“There are officers in this building looking for you. Step away from my window.”", 3);
+      say("There are officers in this building looking for you. Step away from my window.", 3);
       return;
     }
     const cost = fineCost();
@@ -276,7 +287,7 @@
   }
   function pullRecord() {
     const rec = recordTarget();
-    if (!rec) { note("“No jurisdiction on file for this address.”", 2.2); return; }
+    if (!rec) { say("No jurisdiction on file for this address.", 2.2); return; }
     if (!CBZ.city.spend(RECORD_FEE)) { note("Copies run " + fmt$(RECORD_FEE) + ".", 2); return; }
     coin();
     st().recIdx = (st().recIdx + 1) % Math.max(1, chain().length);
@@ -349,8 +360,8 @@
   }
   function qGate() {
     const t = q();
-    if (!t || t.done) { note("“Take a number first.” She does not look up.", 2.2); return false; }
-    if (!t.called) { note("“Number " + t.serving + ". That's not you.”", 2.2); return false; }
+    if (!t || t.done) { say("Take a number first.", 2.2); return false; }
+    if (!t.called) { say("Number " + t.serving + ". That's not you.", 2.2); return false; }
     return true;
   }
 
@@ -380,13 +391,13 @@
   function registerCar() {
     if (!qGate()) return;
     const car = targetCar();
-    if (!car) { note("“Bring the vehicle to the window, or park it out front.”", 2.4); return; }
+    if (!car) { say("Bring the vehicle to the window, or park it out front.", 2.4); return; }
     const nm = (car.model && car.model.name) || "Vehicle";
-    if (car.owned) { note("“That one's already titled to you.”", 2); return; }
-    if (car.dead || car._exploded) { note("“I can't title a wreck.”", 2); return; }
+    if (car.owned) { say("That one's already titled to you.", 2); return; }
+    if (car.dead || car._exploded) { say("I can't title a wreck.", 2); return; }
     // hot with cops ON it: the clerk runs the plate and it comes back flagged.
     if (stars() >= 1 || (car.npcWanted || 0) > 0 || (car.pullover || 0) > 0) {
-      note("“The plate comes back flagged and there are units on it. Not today.”", 3);
+      say("The plate comes back flagged and there are units on it. Not today.", 3);
       return;
     }
     const fee = titleFee(car);
@@ -461,7 +472,7 @@
   }
   function archiveLabel() {
     const r = st().read;
-    if (r) return "Reading the file…" + dim(Math.max(1, Math.ceil(r.need - r.t)) + "s, stay at the table");
+    if (r) return "Reading the file" + dim("stay at the table");
     const rec = readTarget();
     if (!rec) return "Search the archives" + dim("no officeholder on file for this ground");
     const id = holderId(rec);
@@ -470,7 +481,7 @@
   function startRead() {
     if (st().read) { note("You're already reading. Sit still.", 1.8); return; }
     const rec = readTarget();
-    if (!rec) { note("“Nothing filed for this jurisdiction, I'm afraid.”", 2.2); return; }
+    if (!rec) { say("Nothing filed for this jurisdiction, I'm afraid.", 2.2); return; }
     const lot = civicLots().library;
     st().read = { id: rec.id, sid: rec.office.holder, t: 0, need: READ_SECS, lot: lot };
     note("Boxes on the table. This takes a while, and you have to stay with it.", 2.6,
@@ -511,7 +522,7 @@
   function readRolls() {
     const rec = hereRec();
     const b = blocsHere();
-    if (!b || !b.length) { note("“The rolls for this jurisdiction aren't held at this branch.”", 2.4); return; }
+    if (!b || !b.length) { say("The rolls for this jurisdiction aren't held at this branch.", 2.4); return; }
     let tot = 0; for (let i = 0; i < b.length; i++) tot += b[i].pop || 0;
     note((rec ? rec.name : "This city") + " — " + b.length + " blocs, " + tot + " on the rolls.", 3,
       { from: "Public Library", app: "messages" });
@@ -556,9 +567,9 @@
     return "Take a delivery run " + fmt$(RUN_PAY) + dim("to " + ((l.building && l.building.name) || "an address"));
   }
   function takeRun() {
-    if (!CBZ.mission || !CBZ.mission.start) { note("“Route book's not out.”", 2); return; }
+    if (!CBZ.mission || !CBZ.mission.start) { say("Route book's not out.", 2); return; }
     const l = deliveryLot();
-    if (!l) { note("“Nothing on the board for you right now.”", 2.2); return; }
+    if (!l) { say("Nothing on the board for you right now.", 2.2); return; }
     const where = (l.building && l.building.name) || "the address";
     CBZ.mission.start({
       id: "civic:post:run",
@@ -618,7 +629,7 @@
   }
   function collectMail() {
     const it = mailItems();
-    if (!it.length) { note("“Box is empty.”", 1.8); return; }
+    if (!it.length) { say("Box is empty.", 1.8); return; }
     for (let i = 0; i < it.length; i++) {
       if (it[i] === "summons") {
         note("SUMMONS, an open case in your name. The Clerk of the Court will take " + fmt$(fineCost()) + " to close it.",
@@ -656,8 +667,8 @@
   function tripDetector(lot) {
     lot._civicBarred = (CBZ.now || 0) + BARRED_MS;
     const at = lotAt(lot);
-    note("METAL DETECTOR, the marshal waves you back. “Stow it outside or don't come in.”", 3,
-      { from: (lot.building && lot.building.name) || "Federal Building", app: "messages" });
+    const marshal = lot.building && lot.building.vendor;
+    if (marshal && !marshal.dead && CBZ.citySay) CBZ.citySay(marshal, "Stow it outside or don't come in.", null, { secs: 3, force: true });
     // a weapon through a screening lane is a real offence; `trespass` is
     // wanted.js's live key that fits, and it is witness-gated (not `instant`)
     // because the marshal has to actually get on the radio.
@@ -668,7 +679,7 @@
     const lot = civicLots()[kind];
     if (!lot) return true;
     if (barred(lot)) {
-      note("“You were carrying. Desk is closed to you, come back later.”", 2.6);
+      say("You were carrying. Desk is closed to you, come back later.", 2.6);
       return false;
     }
     if (armed()) { tripDetector(lot); return false; }
@@ -705,7 +716,7 @@
   }
   function informNext() {
     const l = gangList();
-    if (!l.length) { note("“No open files.”", 2); return; }
+    if (!l.length) { say("No open files.", 2); return; }
     st().gangIdx = (st().gangIdx + 1) % l.length;
     note("File pulled: " + l[st().gangIdx % l.length].name + ".", 1.8);
     repaint();
@@ -713,8 +724,8 @@
   function inform() {
     if (!screened("federal")) return;
     const gang = namedGang();
-    if (!gang) { note("“No open files.”", 2); return; }
-    if ((st().informed[gang.id] || -1) >= day()) { note("“You've already been in today.”", 2); return; }
+    if (!gang) { say("No open files.", 2); return; }
+    if ((st().informed[gang.id] || -1) >= day()) { say("You've already been in today.", 2); return; }
     st().informed[gang.id] = day();
     const pay = bounty(gang);
     CBZ.city.addCash(pay);
@@ -787,9 +798,9 @@
   function fileForOffice() {
     if (!screened("cityannex")) return;
     const R = run();
-    if (!R || !R.file) { note("“The filing window is not open.”", 2.4); return; }
+    if (!R || !R.file) { say("The filing window is not open.", 2.4); return; }
     const x = pickedOffice();
-    if (!x) { note("“Nothing is up for election right now.”", 2.4); return; }
+    if (!x) { say("Nothing is up for election right now.", 2.4); return; }
     let r = null;
     try { r = R.file(x.id); } catch (e) { r = null; }
     if (!r || !r.ok) { note(r && r.why ? r.why : "The filing is refused.", 3); return; }
@@ -807,7 +818,7 @@
   }
   function nextOffice() {
     const o = offices();
-    if (!o || !o.length) { note("“Nothing is up for election right now.”", 2.2); return; }
+    if (!o || !o.length) { say("Nothing is up for election right now.", 2.2); return; }
     st().officeIdx = (st().officeIdx + 1) % o.length;
     repaint();
   }
@@ -914,9 +925,9 @@
     return "Sign on for a call " + fmt$(650) + dim(f.kind === "building" ? "structure fire, " + f.floors + " floor(s) alight" : "vehicle fire");
   }
   function signOn() {
-    if (!CBZ.mission || !CBZ.mission.start) { note("“No board at this house.”", 2); return; }
+    if (!CBZ.mission || !CBZ.mission.start) { say("No board at this house.", 2); return; }
     const f = liveFire();
-    if (!f) { note("“No calls. Sit down, have a coffee.”", 2.4); return; }
+    if (!f) { say("No calls. Sit down, have a coffee.", 2.4); return; }
     const fx = f.x, fz = f.z, car = f.car || null;
     const isB = f.kind === "building";
     CBZ.mission.start({
@@ -1117,6 +1128,7 @@
     services: function (kind) {
       if (!on() || !KINDSET[kind]) return [];
       DESK = DESK_NAME[kind] || "Front Desk";
+      DESK_KIND = kind;
       return serviceRows(kind);
     },
     hours: function (kind) { return (on() && HOURS[kind]) || null; },

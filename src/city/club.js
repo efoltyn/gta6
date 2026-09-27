@@ -108,8 +108,12 @@
     return d;
   }
 
+  // the bouncer's words go over the bouncer's head; no bouncer, no words
+  function bouncerSay(words, secs, force) {
+    const b = S.bouncer;
+    if (b && !b.dead && CBZ.citySay) CBZ.citySay(b, words, null, { secs: secs || 2.2, force: !!force });
+  }
   function note(msg, sec) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec); }
-  function big(msg) { if (CBZ.city && CBZ.city.big) CBZ.city.big(msg); }
 
   // ---------- the LINE: spawn / hold / dismiss --------------------------
   // hold a line-goer at its assigned slot, facing the door. We mark them
@@ -245,11 +249,10 @@
       p.state = "walk"; p.path = null; p.pause = 0;
       if (p.target) p.target.set(S.club.insideSpot.x, 0, S.club.insideSpot.z);
       p._clubGoingIn = 3.0;
-      note("The bouncer waves a sharp-dressed guest past the rope.", 1.4);
     } else {
       // TURNED AWAY — the whole point. Dejected walk-off.
       release(p, true);
-      note('Bouncer: "Not tonight.", turned away at the rope.', 1.3);
+      bouncerSay("Not tonight.", 1.4);
     }
     S.line.shift();
   }
@@ -316,14 +319,11 @@
   function admitPlayer(drip) {
     setAdmitted(true);
     const vip = drip >= vipDrip();
-    big(vip ? "WELCOME TO THE VELVET · VIP" : "WELCOME TO THE VELVET");
-    if (vip) note("The bouncer unhooks the rope and nods you toward the elite lounge.", 2.2);
-    else note('Bouncer: "Welcome to the Velvet, VIP.", the rope opens.', 2.0);
+    bouncerSay(vip ? "Lounge is upstairs. Enjoy your night." : "Welcome to the Velvet.", 2.2, true);
     // one-time entry bonus: drip is a STATUS signal → respect. VIP pays more.
     if (!S.everIn) {
       S.everIn = true;
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(vip ? 12 : 6);
-      note("You're somebody now.", 1.8);
     }
     S.admitted_vip = vip;
     S.bottleCD = 6;
@@ -331,8 +331,7 @@
 
   function rejectPlayer(drip, need) {
     S.rejectCD = 3.2;
-    big("NOT TONIGHT");
-    note('"Not in those rags." Come back sharper.', 3.2);
+    bouncerSay("Not tonight. Not in those rags.", 2.6, true);
   }
 
   function setAdmitted(v) {
@@ -474,6 +473,8 @@
     S.bouncerDownT = 0; S.bouncerHires = 0; S.unmannedNoted = false;
   }
 
+  // the door's live bouncer (for other files that want him to speak)
+  CBZ.cityClubBouncer = function () { return (S.bouncer && !S.bouncer.dead) ? S.bouncer : null; };
   CBZ.cityClubReset = function () {
     softReset();
     S.lot = null; S.club = null;

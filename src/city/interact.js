@@ -77,7 +77,8 @@
   }
 
   const TALK = ["You lost?", "Nice day, huh.", "Got a light?", "Move along.", "I know you?", "Crazy out here lately.", "Spare some change?"];
-  function talk() { CBZ.city.note("“" + TALK[(Math.random() * TALK.length) | 0] + "”", 1.6); }
+  // the ped's own reply, over his head
+  function talk(p) { if (p && CBZ.citySay) CBZ.citySay(p, "“" + TALK[(Math.random() * TALK.length) | 0] + "”", "#dfe7ff", 2); }
 
   // ---- valuables / pawn helpers ------------------------------------------
   // Everything reads from the shared econ catalog so the player can judge a
@@ -560,17 +561,17 @@
   }
   function copAlibi(c) {
     const stars = g.wanted | 0;
-    if (stars < 1) { talk(); return; }
+    if (stars < 1) { talk(c); return; }
     // believability falls as the heat climbs; selling it buys you down a level
     const chance = stars === 1 ? 0.6 : 0.32;
     if (Math.random() < chance) {
       CBZ.cityReduceWanted && CBZ.cityReduceWanted(2);
       if (c) { c.curTarget = null; c.sees = false; c.retarget = 2.5; c.arrestT = 0; }
       // (no big — the cop's own line carries it)
-      CBZ.city && CBZ.city.note("“…fine. Move along.” " + c.name + " buys it.", 2);
+      if (CBZ.citySay) CBZ.citySay(c, "“…fine. Move along.”", "#9fc3ff", 2.2);
       CBZ.city && CBZ.city.addRespect(1);
     } else {
-      CBZ.city && CBZ.city.note("“Save it.” " + c.name + " isn't buying it.", 2);
+      if (CBZ.citySay) CBZ.citySay(c, "“Save it.”", "#9fc3ff", 2);
       CBZ.cityCrime && CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "lying-to-police" });
       if (c) c.retarget = 0;        // lock straight onto you
     }
@@ -628,11 +629,7 @@
   // sensible aliases. If club.js isn't loaded yet, describe the gate instead.
   function clubTryEnter() {
     const fn = CBZ.cityClubTryEnter || CBZ.cityClubApproach || CBZ.cityClubEnter || CBZ.cityClubGate;
-    if (typeof fn === "function") { fn(); return; }
-    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
-    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
-    if (drip >= need) CBZ.city.note("The bouncer sizes up your fit and unhooks the rope…", 2.2);
-    else CBZ.city.note("“Not in those rags.” The bouncer waves you off, come back sharper.", 2.6);
+    if (typeof fn === "function") fn();
   }
   function clubNote() {
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
@@ -1328,7 +1325,7 @@
   I.register("ped:civ", {
     id: "ped-promote", slot: "i", prio: 60, canShow: (p) => inMyGang(p),
     label: (p) => (p.rank === "lt" ? "Lieutenant" : "Promote → Lt."),
-    onSelect: (p) => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)),
+    onSelect: (p) => (p.rank === "lt" ? talk(p) : CBZ.cityPlayerGangPromote(p)),
   });
   I.register("ped:civ", { id: "ped-swing-crew", slot: "i", prio: 50, bad: true, canShow: (p) => crewmate(p), label: "Swing on", onSelect: (p) => attack(p) });
   I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: "Mug", onSelect: (p) => mug(p) });
@@ -1349,12 +1346,12 @@
   I.register("ped:civ", {
     id: "ped-crew-favor", slot: "k", prio: 50, canShow: (p) => crewmate(p),
     label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do a favor" : "Talk",
-    onSelect: (p) => { if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) CBZ.cityDoFavor(p); else { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } },
+    onSelect: (p) => { if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) CBZ.cityDoFavor(p); else { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(p); } },
   });
   I.register("ped:civ", {
     id: "ped-propose", slot: "k", prio: 45, canShow: (p) => p === g.cityPartner,
     label: (p) => (g.citySpouse ? "Sweet-talk" : "Propose"),
-    onSelect: (p) => (g.citySpouse ? talk() : CBZ.cityPropose(p)),
+    onSelect: (p) => (g.citySpouse ? talk(p) : CBZ.cityPropose(p)),
   });
   // a rival whose BOSS you dropped: claim the whole crew (their colors are
   // already in the card title — "(Vipers)" — so the label stays generic)
@@ -1405,10 +1402,10 @@
     label: "Hire", onSelect: (p) => CBZ.cityRecruit(p),
   });
   I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up", onSelect: (p) => CBZ.cityFlirt(p) });
-  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(p); } });
 
   // ---- LIVING PED, slot L ----
-  I.register("ped:civ", { id: "ped-talk-gang", slot: "l", prio: 60, canShow: (p) => inMyGang(p), label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+  I.register("ped:civ", { id: "ped-talk-gang", slot: "l", prio: 60, canShow: (p) => inMyGang(p), label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(p); } });
   I.register("ped:civ", { id: "ped-leave-crew", slot: "l", prio: 50, bad: true, canShow: (p) => crewmate(p), label: "Leave the crew", onSelect: () => CBZ.cityLeaveGang && CBZ.cityLeaveGang() });
   I.register("ped:civ", { id: "ped-pickpocket", slot: "l", prio: 10, bad: true, label: "Pick pocket", onSelect: (p) => pickpocket(p) });
 
@@ -1417,7 +1414,7 @@
   // arrest-first stamps c._challenged) — the FREEZE hint points here.
   I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1 || !!(c && c._challenged && !c.dead), label: "Surrender", onSelect: (c) => copSurrender(c) });
   I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Give alibi", onSelect: (c) => copAlibi(c) });
-  I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: "Ask directions", onSelect: () => talk() });
+  I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: "Ask directions", onSelect: (c) => talk(c) });
   // the design rule: there's ALWAYS a malicious option — here, assault
   I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: "Sucker-punch", onSelect: (c) => copAssault(c) });
 
@@ -1497,7 +1494,7 @@
     onSelect: (v) => CBZ.cityOpenShop(v.vendor),
   });
   I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Rob the register", onSelect: (v) => robRegister(v) });
-  I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Talk to the clerk", onSelect: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) });
+  I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Talk to the clerk", onSelect: (v) => { if (CBZ.citySay) CBZ.citySay(v, "“Welcome in. Take a look around.”", "#cfe6ff", 2.2); } });
 
   // ---- CORPSE: take the fit (loot is automatic — see the walk-over loop) ----
   I.register("corpse", {

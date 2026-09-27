@@ -157,6 +157,7 @@
   CBZ.cityFeed = function (msg, color, opts) {
     if (!msg) return;
     if (opts && opts.collapseOnly) return;
+    if (CBZ.hudIsSpoken && CBZ.hudIsSpoken(msg)) return;   // words go over the speaker's head
     if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(msg, opts, false)) return;
     const payload = {
       app: (opts && opts.app) || "news",

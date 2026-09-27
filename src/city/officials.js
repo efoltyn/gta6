@@ -714,7 +714,6 @@
     if (det && CBZ.protection.spawnMembers) CBZ.protection.spawnMembers(det, A, sp.x, sp.z, rng);
 
     pr.state = "live"; pr.principal = p; pr.mode = phase; pr.mournT = 0;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + titleFor(rec) + " " + (id.name || "") + " is out, flanked by security.", 2.4);
   }
 
   function tickOffice(rec, kind, door, A, phase, dt) {

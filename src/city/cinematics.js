@@ -164,9 +164,9 @@
     root().add(grp); S.props.push(grp);
     return grp;
   }
-  function say(speaker, text) {
-    if (CBZ.campaignUI && CBZ.campaignUI.say) { try { CBZ.campaignUI.say(speaker, text); return; } catch (e) {} }
-    if (CBZ.flashHint) CBZ.flashHint(speaker + ": " + text, 3);
+  // a line is said by the actor standing in the scene, over his head
+  function say(actor, text) {
+    if (actor && CBZ.speech) { try { CBZ.speech.say(actor, text, { force: true, important: true }); } catch (e) {} }
   }
   function notify(from, body) {
     if (CBZ.campaignUI && CBZ.campaignUI.notify) { try { CBZ.campaignUI.notify("personal", from, body); return; } catch (e) {} }
@@ -364,30 +364,30 @@
       { // wide establishing: over the player's shoulder toward the desk
         dur: 2.6,
         cam: { pos: W(4.6, 3.4, 6.4), look: bossHead },
-        enter() { say("SAL VETTI", "There he is. The one the phones won't shut up about."); },
+        enter() { say(ctx.boss, "There he is. The one the phones won't shut up about."); },
       },
       { // slow push-in on the boss (dolly handled by the damped camera)
         dur: 3.2,
         cam: { pos: W(0, 1.9, 2.6), look: bossHead },
-        enter() { say("SAL VETTI", "You've been taking work in my city. Contracts move, money moves… and none of it kisses the ring."); },
+        enter() { say(ctx.boss, "You work my city and none of it kisses the ring."); },
       },
       { // ---- THE CUT: first person, on the desk slam ----
         dur: 2.2, cut: true, hideRig: true,
         cam() { const e = playerEyes(); return { pos: e, look: bossHead }; },
         enter() {
           if (CBZ.shake) CBZ.shake(0.55);
-          say("SAL VETTI", "LOOK AT ME WHEN I'M TALKING.");
+          say(ctx.boss, "LOOK AT ME WHEN I'M TALKING.");
         },
       },
       { // hold in first person while he settles back
         dur: 3.4, hideRig: true, track: true,
         cam() { const e = playerEyes(); return { pos: e, look: bossHead }; },
-        enter() { say("SAL VETTI", "Relax. If I wanted you in the harbor you'd be in the harbor. I want you EMPLOYED."); },
+        enter() { say(ctx.boss, "Relax. I want you EMPLOYED, not in the harbor."); },
       },
       { // pull back out to third person; the offer lands
         dur: 3.6, cut: true, hideRig: false,
         cam: { pos: W(-4.2, 2.6, 4.6), look: W(0, 1.4, 0) },
-        enter() { say("SAL VETTI", "There's a car outside. My driver takes you to the meet. Front seat, my guys like the company."); },
+        enter() { say(ctx.boss, "Car's outside. Front seat, my guys like company."); },
       },
       {
         dur: 1.6,
@@ -467,16 +467,17 @@
   }
 
   function rideFrontSteps(car) {
+    const driver = rideCtx && rideCtx.driver;
     return [
       { // exterior: the car sits under the streetlight, engine off
         dur: 2.4,
         cam: () => carCamera(car, 5.4, 2.2, 3.6, 0, 1.0, 0),
-        enter() { say("THE DRIVER", "Good. Boss says you follow instructions."); },
+        enter() { say(driver, "Good. Boss says you follow instructions."); },
       },
       { // CUT inside — first person, front passenger, watching the windshield
         dur: 2.6, cut: true, hideRig: true,
         cam: () => carCamera(car, -0.42, 1.18, 0.42, -0.42, 1.1, 6),
-        enter() { say("THE DRIVER", "Sit tight. We're waiting on one more."); },
+        enter() { say(driver, "Sit tight. We're waiting on one more."); },
       },
       { // the rear door. behind you.
         dur: 2.2, hideRig: true,
@@ -491,7 +492,7 @@
       { // the lens whips to the back bench. one beat of understanding.
         dur: 1.15, hideRig: true,
         cam: () => carCamera(car, -0.42, 1.18, 0.42, -0.42, 1.15, -0.78),
-        enter() { say("THE DRIVER", "Nothing personal. The front seat is always for the guest."); },
+        enter() { say(driver, "Nothing personal. Front seat's for the guest."); },
       },
       { // bang.
         dur: 0.9, hideRig: true,
@@ -509,11 +510,12 @@
   }
 
   function rideBackSteps(car) {
+    const driver = rideCtx && rideCtx.driver;
     return [
       { // exterior; the driver checks the mirror, says nothing
         dur: 2.4,
         cam: () => carCamera(car, 5.4, 2.2, -2.4, 0, 1.0, 0),
-        enter() { say("THE DRIVER", "…That's not the seat you were told."); },
+        enter() { say(driver, "That's not the seat you were told."); },
       },
       { // CUT: first person from the BACK bench — watching the front seat
         dur: 2.6, cut: true, hideRig: true,
@@ -524,9 +526,9 @@
         cam: () => carCamera(car, -0.42, 1.2, -0.78, -0.42, 1.05, 0.42),
         enter(ctx) {
           const w = seatWorld(car, seatLocal.frontP);
-          ctx.shadow = spawnActor("—", w.x, w.z, { archetype: "professional", armed: true });
+          ctx.shadow = spawnActor("a stranger", w.x, w.z, { archetype: "professional", armed: true });
           if (ctx.shadow) seatRig(ctx.shadow, car, seatLocal.frontP);
-          say("THE DRIVER", "Smart. The front seat is for people who don't think about who sits behind them.");
+          say(driver, "Smart. Front seat's for men who don't look behind.");
         },
       },
       { // the shooter turns; the muzzle rests on the seat-back. a long beat.
@@ -534,13 +536,13 @@
         cam: () => carCamera(car, -0.42, 1.2, -0.78, -0.42, 1.15, 0.42),
         enter(ctx) {
           if (ctx.shadow && ctx.shadow.group) ctx.shadow.group.rotation.y = car.heading + Math.PI;
-          say("THE SHOOTER", "Boss said if you picked the back, you're hired. If you picked the front… well.");
+          say(ctx.shadow, "Back seat, you're hired. Front seat, well.");
         },
       },
       { // pull out; you live
         dur: 2.4, cut: true, hideRig: false,
         cam: () => carCamera(car, 6.0, 2.6, -4.2, 0, 1.0, 0),
-        enter() { say("THE DRIVER", "Vetti pays for instincts. Get out, the money's already moving."); },
+        enter() { say(driver, "Vetti pays for instincts. Get out."); },
       },
     ];
   }

@@ -564,10 +564,9 @@
   /* ==========================================================================
      WHAT COMES BACK IS A THING A PERSON SAID
 
-     `.pi-subtitle` (systems/interact.js) is a SPEECH surface — hud.css's
-     world-subtitle grammar, the speaker's name in an aria-only slot because
-     you can see who is in front of you. Every verb below returned its `msg`
-     into it, and most of those messages were the game talking about itself:
+     A verb's `msg` is spoken over the man's head (CBZ.prisonSay ->
+     systems/speech.js; the old .pi-subtitle band is gone). Every verb below
+     used to return its `msg` into a speech surface, and most of those messages were the game talking about itself:
      "Lifted a Cell Key + 7 clean." · "Bought Shiv for 12  (heat tax)" ·
      "Bribe costs 10 ." · "blushes (34/100)". A number in a speech bubble is
      the fourth wall with a mouth drawn on it.
@@ -1165,7 +1164,7 @@
     if (rng() < 0.35) {
       if (CBZ.provokeGang) CBZ.provokeGang(mark, 11, { crew: 1, why: "snitch" });
       noteRead("snitch", 14, nm(mark), 22);
-      if (CBZ.prisonSay) CBZ.prisonSay(mark, "You went to the man. That's done now.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (CBZ.prisonSay) CBZ.prisonSay(mark, "You went to the man. That's done now.", { force: true });
     }
     CBZ.sfx("coin");
     return { ok: true, msg: pick(VOICE.wardenPaidName) };

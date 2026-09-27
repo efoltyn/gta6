@@ -736,9 +736,11 @@
         // A WITNESS IS A PERSON REACTING, NOT A LINE OF TEXT. He already
         // startles, turns and walks off to report; the line said so a second
         // time on the HUD. It goes over HIS head now, where a thing a person
-        // notices belongs.
-        if (!tellHint(`${n.data.name.replace(/^the |^a |^an /, "")} ${witness.heardOnly ? "heard that" : "saw that"}.`, 1.6) && CBZ.citySay) {
-          try { CBZ.citySay(n, witness.heardOnly ? "“…the hell was that?”" : "“Hey! HEY!”", "#ffd27b", 1.6); } catch (e) {}
+        // notices belongs. (The narration "X saw that." is gone; it used to
+        // gate this line INVERTED, so with the jail's show-don't-tell on the
+        // witness said nothing at all.)
+        if (CBZ.citySay) {
+          try { CBZ.citySay(n, witness.heardOnly ? "The hell was that?" : "Hey! HEY!", "#ffd27b", 1.6); } catch (e) {}
         }
         return true;
       }

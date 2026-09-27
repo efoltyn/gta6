@@ -328,9 +328,9 @@
     const line = m.declines > 0
       ? "“Still open: " + r.title + ". " + pay + ". Door won't stay open forever.”"
       : gv.org === "gang"
-        ? pick(["“Set's got work. " + r.title + " — " + pay + ". You in or out?”",
+        ? pick(["“Set's got work. " + r.title + ", " + pay + ". You in or out?”",
                 "“Been waiting on somebody solid. " + r.title + ". " + pay + " when it's done.”"])
-        : pick(["“Ops flagged you. " + r.title + " — " + pay + ". Taking it?”",
+        : pick(["“Ops flagged you. " + r.title + ", " + pay + ". Taking it?”",
                 "“Garrison needs a body for " + r.title.toLowerCase() + ". " + pay + ". You want it?”"]);
     return {
       id: "job", line: line,
@@ -457,7 +457,7 @@
   function intentIntro(p, m, t) {
     return {
       id: "intro",
-      line: "“You move like you're looking for somebody. I know a guy · " + t.what + ".”",
+      line: "“You move like you're looking for somebody. I know a guy, " + t.what + ".”",
       a: {
         label: "Who?",
         closer: "“Ask for " + t.name + ". You didn't hear it from me.”",
@@ -469,7 +469,7 @@
               goal: "reach", radius: 7,
               at: t.live ? function () { return (t.live && !t.live.dead) ? t.live : (t.at || null); } : t.at,
               reward: { respect: 2 },
-              brief: "“" + t.name + " " + t.what + ". Worth knowing.”",
+              brief: t.name + " " + t.what + ".",
               doneText: "You found " + t.name + ".",
               onComplete: function () { if (t.live) { meet(t.live); relShift(t.live, "greeted", 0.5); } },
             });
@@ -586,7 +586,6 @@
     relShift(p, "gift", 1);
     contactAdd(p, "friend");
     sayP(p, "“You're alright. I mean it. You need me, you know where I am.”", "#cdeccd", 3);
-    note(nm(p) + " counts you a friend now.", 2.4, nm(p).toUpperCase());
     return true;
   }
 
@@ -711,7 +710,8 @@
       { key: "i", hold: false, label: lb, bad: !!dlg.b.bad, opt: dlg.wrapB, decision: "yes", proposal: lb, standing: null },
     ];
     out.dualRide = true;          // verb-card render + the E-router yield
-    out.note = dlg.line;          // the spoken line IS the card's text
+    // The spoken line lives over the speaker's head (citySay at openDialogue);
+    // the card carries only the two answers.
     dlg.lastRows = out;
     return out;
   }
@@ -875,7 +875,7 @@
       lastPingReal = nowSec(); pingsToday++; pinged++;
       const call = CBZ.hash01(rec.x, rec.z, 0xCA12 + dNow) < 0.3;
       const text = pend.kind === "job"
-        ? (call ? "Tried to call you. " : "") + "Got another one if you want it · " + pend.title.toLowerCase() + ", pays " + money(pend.pay) + ". Check your contacts."
+        ? (call ? "Tried to call you. " : "") + "Got another one if you want it: " + pend.title.toLowerCase() + ", pays " + money(pend.pay) + ". Check your contacts."
         : (call ? "Rang you twice. " : "") + "Been a minute. Meet me at " + pend.place + "? First round's mine.";
       phonePush(rec.name.toUpperCase(), text);
       return;                                 // one ping per pass, ever
@@ -899,7 +899,7 @@
       if (CBZ.mission && CBZ.mission.busy && CBZ.mission.busy()) { note("Finish what you're carrying first.", 2.2, rec.name.toUpperCase()); return false; }
       if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
       const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(pend.id) : null;
-      if (!started || started.inert) { note("It fell through · " + rec.name + " will call again.", 2.2, rec.name.toUpperCase()); return false; }
+      if (!started || started.inert) { note("It fell through. I'll call you again.", 2.2, rec.name.toUpperCase()); return false; }
       routed++;
       return true;
     }
@@ -908,7 +908,7 @@
         id: "dlg:meet:" + rec.id, title: "Meet " + rec.name, giver: rec.name,
         goal: "reach", at: [pend.x, pend.z], radius: 8,
         reward: { respect: 2 },
-        brief: "“Meet me at " + pend.place + ".”",
+        brief: "Meet " + rec.name + " at " + pend.place + ".",
         doneText: rec.name + " buys the round. Friends are worth keeping.",
         onComplete: function () { const p = contactPed(rec); if (p) relShift(p, "gift", 0.8); },
       });

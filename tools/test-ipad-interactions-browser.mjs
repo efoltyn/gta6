@@ -2,7 +2,7 @@
 // Real-Chrome iPad contract for:
 //   1. Prison/city interaction choices docked vertically beside Reload.
 //   2. AIM -> short swipe-up FIRE, including the taught target geometry.
-//   3. Authored campaign speech using one subtitle renderer, not two.
+//   3. Authored campaign speech: over the speaker's head or nowhere, never a HUD box.
 
 import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -249,40 +249,36 @@ try {
   check(aim.geometry.scopeAboveGhost && aim.geometry.ghostScopeGap >= 8,
     "Scope overlaps the closer swipe-up Fire target", JSON.stringify(aim.geometry));
 
+  // The campaign's words go over the speaker's head (CBZ.speech) or nowhere:
+  // the #campaignDialogue line text and #citySpeech band are gone. So the act
+  // must still resolve, the words must never sit in a HUD box, and at most
+  // ONE over-head copy of the line may exist (no second owner echoing it).
   const subtitle = await json(`(() => {
-    const oldCitySay = CBZ.citySay;
-    let citySayCalls = 0;
-    CBZ.citySay = function () {
-      citySayCalls++;
-      return oldCitySay && oldCitySay.apply(this, arguments);
-    };
     CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
     CBZ.cityCampaignRestore({
       version: 1, chapter: 1, phase: "prison_arrival", branch: null,
       contractNo: 0, flags: {}, history: [],
     });
+    if (CBZ.speech) CBZ.speech.clear();
     const result = CBZ.cityCampaignPrisonAct("campaign-escape", { kind: "warden" });
-    const campaign = document.getElementById("campaignDialogue");
-    const city = document.getElementById("citySpeech");
-    const campaignText = campaign?.querySelector(".campaign-dialogue-text")?.textContent || "";
-    const cityText = city?.querySelector(".citySpeechLine")?.textContent || "";
-    const campaignShown = !!(campaign && campaign.classList.contains("show"));
-    const cityShown = !!(city && city.classList.contains("show"));
-    CBZ.citySay = oldCitySay;
+    const box = document.querySelector("#campaignDialogue .campaign-dialogue-text");
+    const boxText = box ? (box.textContent || "").trim() : "";
+    const lines = CBZ.speech ? CBZ.speech.audit().lines : [];
+    const copies = lines.filter((l) => /camera/i.test(l.text)).length;
     if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) CBZ.campaignUI.clearDialogue();
+    if (CBZ.speech) CBZ.speech.clear();
     return {
       handled: !!(result && result.handled),
-      citySayCalls,
-      campaignShown,
-      campaignText,
-      cityText,
-      duplicateVisible: cityShown && cityText === campaignText,
+      boxText,
+      oldBands: !!(document.getElementById("citySpeech") || document.getElementById("prisonSpeech") || document.getElementById("pinteractSay")),
+      copies,
+      lines,
     };
   })()`);
-  check(subtitle.handled && subtitle.campaignText.includes("Every camera outside"),
-    "authored Prison Escape dialogue did not reach the campaign subtitle", JSON.stringify(subtitle));
-  check(subtitle.citySayCalls === 0 && !subtitle.duplicateVisible,
-    "authored dialogue still rendered through both subtitle owners", JSON.stringify(subtitle));
+  check(subtitle.handled, "authored Prison Escape act did not resolve", JSON.stringify(subtitle));
+  check(!subtitle.boxText && !subtitle.oldBands,
+    "a spoken line still lands in a HUD dialogue box", JSON.stringify(subtitle));
+  check(subtitle.copies <= 1, "the same line is shown by two owners", JSON.stringify(subtitle));
 
   const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   await writeFile(shotPath, Buffer.from(shot.data, "base64"));

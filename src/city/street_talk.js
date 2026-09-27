@@ -7,28 +7,25 @@
 
    This file only owns WHAT the proposal is for a stranger: one offer derived
    from live variables (your level, their level, max cash they can spare,
-   job, wealth). Funny equal-opportunity look jokes + custom.env tokens ride
-   on the lines. No extra keys, no second panel.
+   job, wealth). No extra keys, no second panel.
 
-   Feature flag: CBZ.CONFIG.STREET_TALK_V2 (default ON).
+   WORDS: only the stranger speaks, over his own head (CBZ.citySay). The old
+   HUD narration ("They peel off $40. Eyes on the ground.", the player's
+   look-roast one-liners, the orphaned NO branch) is deleted, not relocated.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.interactions) return;
   const g = CBZ.game;
-  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
-  if (CFG.STREET_TALK_V2 == null) CFG.STREET_TALK_V2 = true;
   const I = CBZ.interactions;
 
-  function on() { return CFG.STREET_TALK_V2 !== false; }
+  function on() { return true; }
   function bw(s) { return (CBZ.bw ? CBZ.bw(s) : String(s || "")).replace(/\{\{[^}]+\}\}/g, "****"); }
-  function note(msg, secs) { if (CBZ.city && CBZ.city.note) CBZ.city.note(bw(msg), secs == null ? 2.4 : secs); }
   function say(p, text, color, secs) { if (CBZ.citySay) CBZ.citySay(p, bw(text), color || "#dfe7ff", secs == null ? 2.2 : secs); }
   function sfx(n) { if (CBZ.sfx) CBZ.sfx(n); }
   function meet(p) { if (CBZ.cityMeet) CBZ.cityMeet(p); }
   function relShift(p, kind, amt) { if (CBZ.cityRelShift) try { return CBZ.cityRelShift(p, kind, amt); } catch (e) {} return 0; }
-  function nm(p) { return (p && p.name) || "them"; }
   function money(n) { n = Math.round(n || 0); return n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
   function myCash() { return (g && (g.cash | 0)) || 0; }
   function spend(n) {
@@ -47,87 +44,6 @@
     catch (e) { return Date.now() / 1000; }
   }
 
-  // ---- look buckets (equal roast table — cosmetic only) -------------------
-  const SKIN_BUCKET = [
-    { hex: 0xfae0c8, tag: "pale" }, { hex: 0xf0c39a, tag: "light" },
-    { hex: 0xe8b58c, tag: "light" }, { hex: 0xd8a177, tag: "mid" },
-    { hex: 0xc08a5a, tag: "mid" }, { hex: 0x8a5a3a, tag: "brown" },
-    { hex: 0x6b4a32, tag: "dark" }, { hex: 0x5a3c28, tag: "dark" },
-  ];
-  function skinOf(a) {
-    if (!a) return 0xf0c39a;
-    if (a.skin != null) return a.skin | 0;
-    if (a.char && a.char.skinTone != null) return a.char.skinTone | 0;
-    if (a === CBZ.player || (a && a.isPlayer)) {
-      const ch = CBZ.playerChar;
-      if (ch && ch.skinTone != null) return ch.skinTone | 0;
-      if (g && g.cityPlayerSkin != null) return g.cityPlayerSkin | 0;
-    }
-    return 0xf0c39a;
-  }
-  function lookTag(a) {
-    const sk = skinOf(a);
-    let best = SKIN_BUCKET[0], bd = 1e9;
-    for (let i = 0; i < SKIN_BUCKET.length; i++) {
-      const d = Math.abs((SKIN_BUCKET[i].hex | 0) - sk);
-      if (d < bd) { bd = d; best = SKIN_BUCKET[i]; }
-    }
-    return best.tag;
-  }
-  function playerLook() {
-    if (g && g.cityPlayerRace) return String(g.cityPlayerRace);
-    return lookTag(CBZ.player);
-  }
-
-  // Equal-opportunity roast lines — every look bucket gets it, including you.
-  // Tokens resolve live from custom.env (uncensored by default).
-  const RACE_LINES = {
-    pale: [
-      "You {{F_WORD}}ing {{SLUR_WHITE}} glow like a flashlight in a dark alley.",
-      "Pale {{A_WORD}} energy. The sun is your final boss.",
-      "Bro your SPF is a personality trait, you pasty {{S_WORD}}.",
-    ],
-    light: [
-      "Light-skinned and already arguing with the sun, you {{B_WORD}}.",
-      "You look like you burn at the idea of summer, {{A_WORD}}.",
-      "Soft-serve complexion. Respectfully, {{S_WORD}}head.",
-    ],
-    mid: [
-      "Perfect beige. The human default skin pack, you boring {{A_WORD}}.",
-      "Mid-tone menace. Neither pasty nor mysterious, just {{S_WORD}}.",
-      "You look like every driver's license photo ever, {{B_WORD}}.",
-    ],
-    brown: [
-      "Brown and unbothered, you seasoned {{A_WORD}}.",
-      "Warm tone, cold stare. Dangerous combo, {{S_WORD}}head.",
-      "You look like you season food correctly. Don't make me {{F_WORD}} it up.",
-    ],
-    dark: [
-      "Dark and cinematic, you {{SLUR_BLACK}} lighting-department dream.",
-      "You absorb sunlight like a solar panel of swagger, {{A_WORD}}.",
-      "Night-mode skin. Phone cameras can't handle that {{S_WORD}}.",
-    ],
-  };
-  const SELF_LINES = {
-    pale: ["I'm out here looking like a raw {{SLUR_WHITE}} chicken and still asking for trouble."],
-    light: ["I'm light-skinned, broke, and already mid-{{S_WORD}}show. Classic."],
-    mid: ["I'm mid-tone mid-life mid-wallet. Peak {{S_WORD}} comedy."],
-    brown: ["I'm brown, broke, and somehow still the main {{A_WORD}}."],
-    dark: ["I'm a dark-skinned {{SLUR_BLACK}} with lighter pockets. The duality of man."],
-  };
-  const YES_YES = [
-    "Bet. Let's run it.", "Say less.", "I'm down. Don't make me regret it.",
-    "Alright, you {{F_WORD}}, deal.", "Yes. But if this is a setup I will {{F_WORD}} you up.",
-  ];
-  const NO_NO = [
-    "Hard pass.", "Nah. Walk.", "Not today, chief.",
-    "I said no, {{A_WORD}}.", "Keep that energy somewhere else.",
-  ];
-  const PUNCH_LINES = [
-    "Conversation over.", "Talk with your hands then.",
-    "Alright. Square up.", "You wanted physical? Here.",
-  ];
-
   // ---- offer engine -------------------------------------------------------
   function maxOfferCash(p) {
     const w = Math.max(0, Math.min(1, p.wealth || 0.2));
@@ -144,62 +60,39 @@
     const broke = myCash() < 40;
     const richMe = myCash() >= 5000 || myLvl() >= 40;
     const pedBroke = (p.wealth || 0) < 0.28;
-    let kind, amount = 0, label, yesLine, noLine;
+    let kind, amount = 0, label;
 
     if (gap >= 12 && max >= 15) {
       kind = "tribute";
       amount = Math.max(5, Math.floor(max * (0.35 + Math.min(0.45, gap * 0.02))));
       label = "Take " + money(amount);
-      yesLine = "They peel off " + money(amount) + ". Eyes on the ground.";
-      noLine = "You wave them off. They look grateful and confused.";
     } else if (gap <= -12) {
       kind = "tax";
       amount = Math.max(10, Math.min(myCash() || 10, 20 + Math.floor((-gap) * 3)));
       label = "Pay " + money(amount);
-      yesLine = "You hand over " + money(amount) + ". They smirk.";
-      noLine = "You refuse the tax. They clock the disrespect.";
     } else if (pedBroke && !broke && myCash() >= 25) {
       kind = "charity";
       amount = Math.min(40, Math.max(10, Math.floor(myCash() * 0.05)));
       label = "Slip " + money(amount);
-      yesLine = "You help them out. They won't forget it.";
-      noLine = "You keep your wallet shut. They clock it.";
     } else if (broke && max >= 20) {
       kind = "handout";
       amount = Math.max(8, Math.floor(max * 0.4));
       label = "Take " + money(amount);
-      yesLine = "Charity from a stranger. You pocket it.";
-      noLine = "Pride over rent money. You walk.";
     } else if (p.job && /dealer|trap|runner/i.test(p.job)) {
       kind = "deal";
       amount = Math.min(80, Math.max(20, Math.floor(max * 0.5)));
       label = "Deal " + money(amount);
-      yesLine = "A little product changes hands. Quiet.";
-      noLine = "You pass on the bag. Not tonight.";
     } else if (richMe && (p.wealth || 0) > 0.55) {
       kind = "flex";
       amount = 0;
       label = "Flex";
-      yesLine = "You talk money. They clock the suit that used to mean something.";
-      noLine = "You ghost the networking. Cold.";
     } else {
       kind = "chat";
       amount = 0;
       label = "Talk";
-      yesLine = "You trade a few lines. City noise fills the gaps.";
-      noLine = "You shut it down. They shrug.";
     }
 
-    const pl = playerLook();
-    const them = lookTag(p);
-    const jokePool = SELF_LINES[pl] || [];
-    const roastPool = RACE_LINES[them] || [];
-    return {
-      kind, amount, max, gap, label, yesLine, noLine,
-      joke: jokePool.length ? jokePool[(Math.random() * jokePool.length) | 0] : null,
-      roast: roastPool.length ? roastPool[(Math.random() * roastPool.length) | 0] : null,
-      pl, them,
-    };
+    return { kind, amount, max, gap, label };
   }
 
   function offerOf(p) {
@@ -227,9 +120,6 @@
     if (!p) return;
     meet(p);
     const o = offerOf(p) || buildOffer(p);
-    if (o.joke && Math.random() < 0.45) note(o.joke, 2.0);
-    else if (o.roast && Math.random() < 0.35) note(o.roast, 2.0);
-    else note(YES_YES[(Math.random() * YES_YES.length) | 0], 1.6);
 
     if (o.kind === "tribute" || o.kind === "handout") {
       const got = Math.min(o.amount, maxOfferCash(p));
@@ -247,7 +137,6 @@
         say(p, "“Smart. Stay breathing.”", "#ffd1c4", 2.2);
         sfx("coin");
       } else {
-        note("You're too broke to pay. They laugh.", 2);
         relShift(p, "snubbed", 0.6);
         say(p, "“Pathetic.”", "#ff8a7a", 2);
       }
@@ -276,63 +165,8 @@
       relShift(p, "greeted", 0.5);
       say(p, ["“Crazy city, huh.”", "“Stay dangerous.”", "“You look familiar.”"][(Math.random() * 3) | 0], "#dfe7ff", 2);
     }
-    note(o.yesLine, 2.4);
     p._streetOffer = null;
     p._streetDone = nowSec() + 2.5;
-  }
-
-  // ORPHANED (owner "NO is not an option"): street-offer's decline row is gone,
-  // so nothing wires onDecline anymore — doNo no longer runs. Kept to avoid a
-  // literal-heavy delete mid emoji-sweep; safe to remove once that merge lands.
-  function doNo(p) {
-    if (!p) return;
-    meet(p);
-    const o = offerOf(p) || buildOffer(p);
-    note(NO_NO[(Math.random() * NO_NO.length) | 0], 1.6);
-    note(o.noLine, 2.2);
-    if (o.kind === "tax") {
-      relShift(p, "snubbed", 1);
-      say(p, "“Remember that.”", "#ff8a7a", 2);
-      if (Math.random() < 0.28) doPunch(p, true);
-    } else if (o.kind === "tribute") {
-      relShift(p, "greeted", 0.3);
-      say(p, "“…thanks?”", "#cfd6e6", 1.8);
-    } else {
-      relShift(p, "snubbed", 0.35);
-      say(p, "“Whatever.”", "#cfd6e6", 1.6);
-    }
-    p._streetOffer = null;
-    p._streetDone = nowSec() + 1.8;
-  }
-
-  function doPunch(p, fromRefuse) {
-    if (!p) return;
-    meet(p);
-    note(PUNCH_LINES[(Math.random() * PUNCH_LINES.length) | 0], 1.6);
-    relShift(p, "threatened", 1);
-    p.rage = CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : CBZ.player;
-    p.state = "fight";
-    p.fear = 0;
-    p.alarmed = Math.max(p.alarmed || 0, 6);
-    try {
-      const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-      if (CBZ.player) CBZ.player._fighting = 1.5;
-      if (p.kind === "cop") {
-        if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 35, { fromX: fx, fromZ: fz });
-      } else {
-        p.hp = (p.hp == null ? 100 : p.hp) - 35;
-        if (p.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: fx, fromZ: fz }, "beaten");
-        else if (CBZ.cityKOPed) CBZ.cityKOPed(p, fx, fz);
-      }
-    } catch (e) {}
-    say(p, fromRefuse
-      ? "“You refuse AND swing? {{F_WORD}} you!”"
-      : ["“OH it's like that?!”", "“Let's GO!”", "“{{F_WORD}} you!”"][(Math.random() * 3) | 0],
-      "#ff8a7a", 2.2);
-    sfx("punch");
-    if (CBZ.shake) CBZ.shake(0.25);
-    p._streetOffer = null;
-    p._streetDone = nowSec() + 6;
   }
 
   // ---- register ONE proposal option (the grammar owns YES/NO keys) --------

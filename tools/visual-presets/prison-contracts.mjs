@@ -27,8 +27,9 @@
     roster members in entities/npc.js, which is why the pitch can name them.
   - a tab needs ~95 s of yard time to ripen; CBZ.prisonContract.seed() books
     one already aged, so what is photographed is the real row, not a mock.
-  - the card is #interact (.iopt rows, #interactName, #interactNote); speech is
-    #pinteractSay (.pi-subtitle-line), interact.js's one mouth.
+  - the card is #interact (.iopt rows, #interactName, #interactNote); speech floats
+    over the speaker's head (#speech .say, systems/speech.js), read back via
+    CBZ.speech.audit().lines.
   - rigs face local -Z, so the camera yaw is atan2(-vx, -vz) toward the actor.
 */
 
@@ -102,7 +103,7 @@ export default {
   },
   metricsNote:
     "contractRow counts COLLECT/SETTLE/WORK and the accept-row of a contract or debtorDodge approach. " +
-    "spokenChars reads #pinteractSay's live line — the prison's one speech surface — so a beat that " +
+    "spokenChars reads the live over-head lines (CBZ.speech.audit()), so a beat that " +
     "nobody speaks scores zero by construction, which is the point.",
 
   stage: async function stagePrisonContracts(input) {
@@ -430,8 +431,7 @@ export default {
     const rows = touchRows.length ? touchRows : desktopRows;
     const rowsText = rows.map((r) => (r.innerText || "").trim());
 
-    const sayEl = document.getElementById("pinteractSay");
-    const sayLine = sayEl && vis(sayEl) ? (sayEl.querySelector(".pi-subtitle-line") || {}).innerText || "" : "";
+    const sayLine = CBZ.speech ? CBZ.speech.audit().lines.map((l) => l.text).join(" ") : "";
     const noteEl = document.getElementById("interactNote");
     const noteText = noteEl ? (noteEl.innerText || "") : "";
     const nameEl = document.getElementById("interactName");

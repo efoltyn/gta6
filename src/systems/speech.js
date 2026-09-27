@@ -83,8 +83,11 @@
   }
   function playerDist(p) {
     const P = CBZ.player;
-    if (!P || !P.pos || !p) return 0;
-    return Math.hypot(P.pos.x - p.x, P.pos.z - p.z);
+    if (!p) return 0;
+    // no player (a spectator page like NPC War): the ear is the camera
+    const from = (P && P.pos) ? P.pos : (CBZ.camera ? CBZ.camera.position : null);
+    if (!from) return 0;
+    return Math.hypot(from.x - p.x, from.z - p.z);
   }
   function engaged(s) {
     if (!s) return false;
@@ -166,7 +169,9 @@
   function say(spk, text, opts) {
     opts = opts || {};
     if (!spk || !text || !playing() || !V) { refused++; return false; }
-    if (isPlayer(spk) && !opts.phone) { narration++; return false; }   // no inner monologue
+    // no inner monologue; the player speaks only when he says it ALOUD to
+    // someone (a speech at a podium)
+    if (isPlayer(spk) && !opts.phone && !opts.aloud) { narration++; return false; }
     if (downed(spk)) { refused++; return false; }
     if (!headOf(spk, opts, HEAD)) { refused++; return false; }
     if (typeof CBZ.speechGate === "function" && CBZ.speechGate(spk, opts) === false) { refused++; return false; }
@@ -174,7 +179,7 @@
     const ear = opts.ear || ((opts.force || engaged(spk)) ? EAR_ENGAGED : EAR);
     if (d > ear) { refused++; return false; }
     const raw = words(text, spk);
-    if (!raw || (!opts.phone && isNarration(spk, raw))) { narration++; return false; }
+    if (!raw || (!opts.phone && !opts.aloud && isNarration(spk, raw))) { narration++; return false; }
     const line = few(raw);
     if (!line) { refused++; return false; }
     const life = Math.min(4, Math.max(1.6, (+opts.secs || (1.2 + line.length * 0.045))));
@@ -299,7 +304,81 @@
     }
   }
 
+  /* LONG AUTHORED LINES, SAID IN BREATHS. say() keeps a line to what fits in
+     two short lines and drops the tail. A story beat (Voss's briefing, a
+     cabinet pitch, a phone call) is cut into breath-sized pieces and played
+     back to back by the same mouth:
+       pieces(text)                          -> ["piece", ...]
+       lines([{ by, line, aloud? }], onEnd)  -> handle {stop()}; by = speaker or "phone"
+       then(by, text, fn)                    -> says all but the last piece,
+                                                then fn(lastPiece) (a question
+                                                that lands on its reply buttons) */
+  function pieces(line) {
+    const s = String(words(line) || "").replace(/\s*[—–·•]\s*/g, ". ").replace(/\s+/g, " ").trim();
+    if (!s) return [];
+    if (s.length <= CHARS) return [s];
+    const out = [];
+    let cur = "";
+    const push = function (bit) {
+      bit = bit.trim(); if (!bit) return;
+      if (cur && (cur + " " + bit).length <= CHARS) { cur += " " + bit; return; }
+      if (cur) out.push(cur);
+      cur = bit;
+    };
+    (s.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) || [s]).forEach(function (sn) {
+      sn = sn.trim();
+      if (sn.length <= CHARS) { push(sn); return; }
+      sn.replace(/([,;:])\s+/g, "$1\n").split("\n").forEach(function (cl) {
+        if (cl.length <= CHARS) { push(cl); return; }
+        let w = "";
+        cl.split(" ").forEach(function (word) {
+          if (w && (w + " " + word).length > CHARS) { push(w); w = word; } else w = w ? w + " " + word : word;
+        });
+        push(w);
+      });
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  const running = [];
+  function secsOf(t) { return Math.min(4, 1.6 + String(t).length * 0.045); }
+  function voice(L, t, secs) {
+    if (L.by === "phone") return phone(t, { secs: secs });
+    return say(L.by, t, { secs: secs, force: true, important: true, aloud: !!L.aloud });
+  }
+  function lines(list, onEnd) {
+    const q = [];
+    (list || []).forEach(function (L) { if (L && L.by) pieces(L.line).forEach(function (t) { q.push({ L: L, t: t }); }); });
+    const mouth = q.length ? q[0].L.by : null;
+    for (let k = running.length - 1; k >= 0; k--) if (mouth && running[k].by === mouth) running[k].stop();
+    let i = 0, timer = 0, stopped = false;
+    const h = {
+      by: mouth,
+      stop: function () { stopped = true; clearTimeout(timer); const k = running.indexOf(h); if (k >= 0) running.splice(k, 1); },
+    };
+    running.push(h);
+    const next = function () {
+      if (stopped) return;
+      if (i >= q.length) { h.stop(); if (onEnd) { try { onEnd(); } catch (e) {} } return; }
+      const it = q[i++], secs = secsOf(it.t);
+      try { voice(it.L, it.t, secs + 0.2); } catch (e) {}
+      timer = setTimeout(next, secs * 1000);
+    };
+    next();
+    return h;
+  }
+  function then(by, text, fn) {
+    const bits = pieces(text);
+    const last = bits.length ? bits.pop() : "";
+    return lines(bits.map(function (t) { return { by: by, line: t }; }), function () { fn(last); });
+  }
+  function stopAll() { while (running.length) running.pop().stop(); }
+
   CBZ.speech = {
+    pieces: pieces,
+    lines: lines,
+    then: then,
+    stopAll: stopAll,
     say: say,
     phone: phone,
     clear: clear,

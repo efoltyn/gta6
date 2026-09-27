@@ -1161,9 +1161,9 @@
     const c = disguise(); if (!c) return false;
     const fresh = !(g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT);
     g.cityOutfitBlownT = CBZ.now + 60000;
-    if (fresh && CBZ.city) {
-      const who = (by && by.name) || "Someone";
-      CBZ.city.note("“" + (why || ("Wait, you're no " + String(c.role).toLowerCase() + "!")) + "” " + who + " clocks you.", 2.6);
+    // the observer who clocked you says it, over his own head
+    if (fresh && by && by.pos && CBZ.citySay) {
+      CBZ.citySay(by, why || ("Wait, you're no " + String(c.role).toLowerCase() + "!"), null, { secs: 2.6, force: true });
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;

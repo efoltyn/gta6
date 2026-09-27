@@ -12,7 +12,8 @@
                       "E  Answer". No title, no card. A tappable pill on touch.
      CBZ.hmInspect    lean in and look at a thing (the corkboard, the open gun
                       case, the TV): the camera eases in through CBZ.cineCam.
-     CBZ.hmSay/hmCall film subtitles, one line at a time.
+     CBZ.hmSay/hmCall a line said by someone: over his head, or by your hand
+                      on the phone (CBZ.speech). Never a subtitle box.
      CBZ.hmBinoculars hold Option/Alt: binoculars. First person, a long lens, a
                       two-circle mask. Scouting is looking.
 
@@ -45,11 +46,6 @@
     ".hm-verb.hm-touch{pointer-events:auto;cursor:pointer;background:rgba(10,10,12,.55);border-radius:22px;padding:10px 20px;min-height:44px;box-sizing:border-box;",
     "-webkit-tap-highlight-color:transparent;touch-action:manipulation;}",
     ".hm-verb.hm-touch .hm-key{display:none;}",
-    ".hm-sub{position:fixed;left:50%;bottom:calc(9vh + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:47;width:min(86vw,820px);",
-    "text-align:center;color:#fff;font:500 21px/1.4 Georgia,'Times New Roman',serif;text-shadow:0 2px 4px #000,0 0 14px rgba(0,0,0,.8);",
-    "pointer-events:none;opacity:0;transition:opacity .25s ease;}",
-    ".hm-sub.hm-on{opacity:1;}",
-    ".hm-sub b{display:block;font:700 12px/1.6 'Helvetica Neue',Helvetica,Arial,sans-serif;letter-spacing:.24em;color:rgba(255,236,200,.85);}",
     ".hm-bino{position:fixed;inset:0;z-index:46;pointer-events:none;display:none;}",
     ".hm-bino.hm-on{display:block;}",
     ".hm-bino i{position:absolute;inset:0;background:#030303;",
@@ -79,8 +75,6 @@
     dom.verb.addEventListener("touchend", tapVerb, { passive: false });
     dom.verb.addEventListener("click", tapVerb);
     document.body.appendChild(dom.verb);
-    dom.sub = document.createElement("div"); dom.sub.className = "hm-sub";
-    document.body.appendChild(dom.sub);
     dom.bino = document.createElement("div"); dom.bino.className = "hm-bino";
     dom.bino.appendChild(document.createElement("i"));
     dom.range = document.createElement("u"); dom.bino.appendChild(dom.range);
@@ -330,33 +324,21 @@
   };
 
   /* ================================================================
-     SUBTITLES + CALLS
+     SPOKEN LINES + CALLS
+     No subtitle box. A line is said by someone: over his head when he is
+     standing there (`by` = the ped), by your hand when he is on the phone
+     (`by` = "phone"). Nobody to say it, nothing shown. Long authored lines
+     are cut into breath-sized pieces (CBZ.speech keeps a line short and
+     would otherwise drop the tail) and played one after another.
      ================================================================ */
-  let subT = 0, callSerial = 0;
-  function say(speaker, line, secs) {
-    const D = ensureDom(); if (!D) return;
-    while (D.sub.firstChild) D.sub.removeChild(D.sub.firstChild);
-    if (speaker) { const b = document.createElement("b"); b.textContent = clean(speaker).toUpperCase(); D.sub.appendChild(b); }
-    D.sub.appendChild(document.createTextNode(clean(line)));
-    D.sub.classList.add("hm-on");
-    subT = secs != null ? secs : Math.min(6.5, 2.2 + String(line || "").length * 0.055);
-  }
-  function sayClear() { subT = 0; if (dom) dom.sub.classList.remove("hm-on"); }
-  function call(lines, onEnd) {
-    const id = ++callSerial;
-    let i = 0, timer = 0, stopped = false;
-    const next = function () {
-      if (stopped || id !== callSerial) return;
-      if (i >= lines.length) { sayClear(); if (onEnd) { try { onEnd(); } catch (e) {} } return; }
-      const L = lines[i++] || {};
-      const secs = L.secs != null ? L.secs : Math.min(6.5, 2.4 + String(L.line || "").length * 0.055);
-      say(L.who || "", L.line || "", secs + 0.2);
-      timer = setTimeout(next, secs * 1000);
-    };
-    next();
-    return { stop: function () { stopped = true; clearTimeout(timer); sayClear(); }, id: id };
-  }
+  // the implementation lives in systems/speech.js (CBZ.speech.lines/pieces/then)
+  function say(by, line) { return CBZ.speech ? CBZ.speech.lines([{ by: by, line: line }], null) : null; }
+  function sayClear() { if (CBZ.speech) CBZ.speech.stopAll(); }
+  function call(lines, onEnd) { return CBZ.speech ? CBZ.speech.lines(lines, onEnd) : (onEnd && onEnd(), null); }
   CBZ.hmSay = say; CBZ.hmSayClear = sayClear; CBZ.hmCall = call;
+  CBZ.hmPieces = function (t) { return CBZ.speech ? CBZ.speech.pieces(t) : [String(t || "")]; };
+  CBZ.sayLines = call; CBZ.speechPieces = CBZ.hmPieces;
+  CBZ.sayThen = function (by, text, fn) { return CBZ.speech ? CBZ.speech.then(by, text, fn) : fn(text); };
 
   // a fade to black and back (sleep, a ride, a cut); cb runs while black
   CBZ.hmFade = function (cb, holdMs) {
@@ -499,7 +481,6 @@
     tickHold(dt);
     tickInspect(dt);
     tickBino(dt);
-    if (subT > 0) { subT -= dt; if (subT <= 0) sayClear(); }
     V.evalT -= dt;
     if (V.evalT <= 0) {
       V.evalT = 0.1;

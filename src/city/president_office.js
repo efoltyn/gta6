@@ -819,12 +819,22 @@
     let line = clean(m.line), choices;
     if (gate.ok) choices = [{ id: "yes", label: clean(m.yes.label) }, { id: "no", label: clean(m.no.label) }];
     else { line += " " + cantLine(m, gate.why); choices = [{ id: "no", label: clean(m.no.label) }]; }
+    // who is talking, in the world: the voice on the line, or the aide at the desk
+    const by = phone ? "phone" : (AIDE.ped && !AIDE.ped.dead ? AIDE.ped : null);
+    const meta = by === "phone" ? { phone: true } : { actor: by };
     const UI = CBZ.campaignUI;
-    if (!UI || !UI.say) { ignore(m, source); if (onDone) onDone(null); return; }
-    let pr = null;
-    try { pr = UI.say(who, line, choices); } catch (e) { pr = null; }
-    if (!pr || !pr.then) { ignore(m, source); if (onDone) onDone(null); return; }
-    pr.then(function (pick) {
+    if (!UI || !UI.say || !by) { ignore(m, source); if (onDone) onDone(null); return; }
+    const tok0 = SAY_TOKEN;
+    const ask = function (last) {
+      if (tok0 !== SAY_TOKEN) return;          // another conversation took over
+      let pr = null;
+      try { pr = UI.say(who, last, choices, meta); } catch (e) { pr = null; }
+      if (!pr || !pr.then) { ignore(m, source); if (onDone) onDone(null); return; }
+      pr.then(answered);
+    };
+    // he says it in breaths; the last one lands on the reply buttons
+    if (CBZ.sayThen) CBZ.sayThen(by, line, ask); else ask(line);
+    function answered(pick) {
       let reply = null;
       if (pick === "yes") {
         const r = decide(m, "yes", source);
@@ -836,12 +846,12 @@
         ignore(m, source);
       }
       if (reply) {
-        try { UI.say(who, clean(reply)); } catch (e) {}
+        try { UI.say(who, clean(reply), meta); } catch (e) {}
         const tok = ++SAY_TOKEN;
         M.later.push({ at: CLOCK + 3.4, fn: function () { if (tok === SAY_TOKEN) clearSay(); } });
       }
       if (onDone) onDone(pick);
-    });
+    }
   }
   let SAY_TOKEN = 0;
   function clearSay() { const UI = CBZ.campaignUI; if (UI && UI.clearDialogue) { try { UI.clearDialogue(); } catch (e) {} } }
@@ -1175,7 +1185,6 @@
       if (near && !M.onCall && !READ.f) {
         AIDE.phase = "talk"; AIDE.talking = true;
         const m = AIDE.m;
-        if (CBZ.citySay) { try { CBZ.citySay(p, m.greet || (m.who.role === "chief" ? "Mr. President." : "Sir."), "#e8e2cf", 2.4); } catch (e) {} }
         converse(m, "aide", function () {
           AIDE.talking = false;
           M.later.push({ at: CLOCK + 2.6, fn: function () {
@@ -1745,7 +1754,6 @@
     const T = th();
     return offer({
       id: "a:armed:" + day(), via: "aide", urgent: true, topic: "surge", who: whoOf("aide"), expires: 45,
-      greet: "Sir, a moment.",
       line: "Sir, the detail wants you away from the windows. We have word the cell is moving" + (T.target ? " on " + T.target : "") + ". Police at the gate would help.",
       yes: { label: "Put police on the gate.", order: "surge", reply: "Right away. Please stay inside, sir." },
       no: { label: "I'm staying at my desk.", reply: "Then we'll stand in the doorway." },

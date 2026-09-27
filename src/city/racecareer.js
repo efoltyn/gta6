@@ -234,6 +234,15 @@
     DOORS.push(d);
     return d;
   }
+  // A door with a staffed body (the paddock steward) says its refusal over
+  // that body's head; with nobody there it says nothing. Signage doors
+  // (no speaker) fall through to the caller's note. Returns true if handled.
+  function doorSpeak(d, secs) {
+    if (!d.speaker) return false;
+    const ped = d.speaker.ped;
+    if (ped && !ped.dead && CBZ.citySay) CBZ.citySay(ped, d.why(), null, { secs: secs || 3, force: true });
+    return true;
+  }
   function doorByVerb(v) { for (let i = 0; i < DOORS.length; i++) if (DOORS[i].verb === v) return DOORS[i]; return null; }
 
   // ============================================================
@@ -259,9 +268,9 @@
     box(grp, gold, G.x + half * 0.5, 1.28, G.z - 1.6, 0.3, 0.26, 0.12);
     const d = declareDoor("paddock-gate", "paddock", G.x, G.z, function () {
       const s = stats();
-      return "Gate steward: “License holders only. " +
-        (s.starts >= 1 ? "Your rank's coming through, hold on.”" :
-          "Run one race. Diamond or the streets, and this gate learns your name.”");
+      return "License holders only. " +
+        (s.starts >= 1 ? "Your rank's coming through, hold on." :
+          "Run one race. Diamond or the streets, and this gate learns your name.");
     });
     // two sliding leaves (chain-mesh look: frame + crossbars)
     for (const sgn of [-1, 1]) {
@@ -280,7 +289,8 @@
     // the steward — a real staffed body at the reader
     if (CBZ.cityStaffVenue && CBZ.cityStaffPost) {
       CBZ.cityStaffVenue("raceladder", { stations: 1, note: "paddock gate steward" });
-      CBZ.cityStaffPost({
+      // the steward SPEAKS the gate's refusal (over his head, doorSpeak)
+      d.speaker = CBZ.cityStaffPost({
         venue: "raceladder", id: "raceladder:gate", job: "gate steward",
         archetype: "security", x: G.x + half * 0.5 + 1.2, z: G.z - 2.0,
         face: Math.PI, pose: "foldarms", opts: { wealth: 0.3, aggr: 0.1 },
@@ -575,7 +585,7 @@
         const dx = P.pos.x - d.x, dz = P.pos.z - d.z;
         if (dx * dx + dz * dz < 100) {
           d.noteT -= dt || 0;
-          if (d.noteT <= 0) { d.noteT = 10; note(d.why(), 4.2); }
+          if (d.noteT <= 0) { d.noteT = 10; if (!doorSpeak(d, 4.2)) note(d.why(), 4.2); }
         } else if (d.noteT > 0.5) d.noteT = 0.5;
       }
     }
@@ -655,6 +665,13 @@
     }
     return out;
   }
+  // the crew chief's words go over the chief's head
+  function chiefSay(words, secs) {
+    const b = crewBodies();
+    for (let i = 0; i < b.length; i++) {
+      if (b[i]._raceCrew === "chief") { if (CBZ.citySay) CBZ.citySay(b[i], words, null, { secs: secs || 2.4, force: true }); return; }
+    }
+  }
   function carOnMarks() {
     if (!MARKS) return null;
     const P = CBZ.player;
@@ -677,7 +694,7 @@
   function startOrder(kind, cost, apply, sayLine) {
     if (CREW.order) { note("The crew is mid-job, let them finish.", 1.8); return; }
     const car = carOnMarks();
-    if (!car) { note("Crew chief: “Roll it onto the marks first.”", 2.2); return; }
+    if (!car) { chiefSay("Roll it onto the marks first.", 2.2); return; }
     if (cost > 0 && !(CBZ.city && CBZ.city.spend && CBZ.city.spend(cost))) {
       note("That work runs " + fmt$(cost) + " · you're short.", 2.0); return;
     }
@@ -725,7 +742,7 @@
         startOrder("service", 260, function (car) {
           car.engineHp = 100; car._smoking = false;
           if (car.hp != null && car.maxHp != null) car.hp = car.maxHp;
-          note("Crew chief: “She'll run like the day she was built.”", 2.6);
+          chiefSay("She'll run like the day she was built.", 2.6);
         }, "“Full service. Fuel, rubber, the lot.”");
       },
     });
@@ -742,7 +759,7 @@
         return "Order: race tune Stage " + t + " (" + fmt$(TUNE_PRICE[t] || 0) + ")";
       },
       onSelect: function () {
-        const car = carOnMarks(); if (!car) { note("Crew chief: “Roll it onto the marks first.”", 2.2); return; }
+        const car = carOnMarks(); if (!car) { chiefSay("Roll it onto the marks first.", 2.2); return; }
         const t = nextTuneTier(car);
         startOrder("tune", TUNE_PRICE[t] || 0, function (c2) {
           // the modshop pipeline IS the tune — feel + gear torque + visuals.
@@ -750,7 +767,7 @@
             const mods = Object.assign({}, c2.mods || {}, { perf: t });
             CBZ.cityRestoreCarMods(c2, { mods: mods });
           }
-          note("Crew chief: “Stage " + t + ". Mind the throttle now.”", 2.6);
+          chiefSay("Stage " + t + ". Mind the throttle now.", 2.6);
         }, "“Stage " + t + " build. Cams, map, the works.”");
       },
     });
@@ -798,7 +815,7 @@
     }
     return "machine";
   }
-  function psStart(racer) {
+  function psStart(racer, ped) {
     if (PS.active) return;
     if (!CFG.RACE_PINKSLIP || !can("pinkslip")) return;
     const P = CBZ.player;
@@ -808,7 +825,10 @@
     if (CBZ.cityStreetRacing && CBZ.cityStreetRacing.state && CBZ.cityStreetRacing.state().active) { note("Finish the street race first.", 2.2); return; }
     const car = P && P.driving ? P._vehicle : null;
     if (!car || car.dead) { note("Pink slips means YOUR car on the line. Drive one you own to him.", 2.6); return; }
-    if (!car.owned || car._loaner) { note("He laughs: “That's not yours to stake.” Bring a car you OWN.", 2.8); return; }
+    if (!car.owned || car._loaner) {
+      if (ped && CBZ.citySay) CBZ.citySay(ped, "That's not yours to stake. Bring a car you OWN.", null, { secs: 2.8, force: true });
+      return;
+    }
     // grid the two of you
     const rSlot = C.gridSlot(0), pSlot = C.gridSlot(1);
     const m = CBZ.raceDrivers.spawn({
@@ -886,7 +906,7 @@
         PS.transfers++;
       }
       big("HE TOOK YOUR CAR");
-      note(racer.name + ": “" + (why === "bailed" ? "Walk home. I'll drive." : "Sweet ride. MY sweet ride.") + "”, his number is going on your doors.", 5.0);
+      if (m && CBZ.citySay) CBZ.citySay(m, why === "bailed" ? "Walk home. I'll drive." : "Sweet ride. MY sweet ride.", null, { secs: 3.5, force: true });
     }
     if (CBZ.cityEvent) CBZ.cityEvent("race-finish", {
       race: "pinkslip", place: win ? 1 : 2, win: win, dnf: why === "bailed" || why === "wrecked",
@@ -960,7 +980,7 @@
         const r = p._racer;
         return "PINK SLIPS, your car vs his " + psCarName(r);
       },
-      onSelect: function (p) { if (p._racer) psStart(p._racer); },
+      onSelect: function (p) { if (p._racer) psStart(p._racer, p); },
     });
   }
 
@@ -1016,6 +1036,7 @@
               return -1;
             })() : -1;
             const price = needIdx > 0 && NEED[needIdx] ? NEED[needIdx].text : "rank";
+            if (doorSpeak(d, 4.2)) return;
             note(d.why() + "  [Price: " + price + " · you: " + s.starts + " starts, " + s.podiums +
               " podiums, " + s.wins + " wins, " + s.titles + " titles · rank " + (tier < 0 ? "unlicensed" : tier) + "]", 5.4);
           } else note("It's yours. Walk in.", 1.8);

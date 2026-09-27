@@ -159,7 +159,7 @@
      the dialogue in the HUD"). A person's words go over his head through
      CBZ.speech.say; a quoted line arriving here has lost its speaker, so it is
      not shown at all. Shapes: `Name: "words"`, `"words"`, `Name says "words"`. */
-  const SPOKEN_RE = /^\s*(?:[^:"“]{1,40}:\s*)?[“"‘][^"”]{2,}["”’]?[.!?]?\s*$|^\s*[A-Z][\w .'#-]{0,30}\s(?:says|said|asks|yells|shouts|mutters|whispers|calls)[,:]?\s*[“"]/;
+  const SPOKEN_RE = /^\s*(?:[^:"“]{1,40}:\s*)?[“"‘][^"”]{2,}["”’]?[.!?]?\s*$|“[^”]*\s[^”]*”|^\s*[A-Z][\w .'#-]{0,30}\s(?:says|said|asks|yells|shouts|mutters|whispers|calls)[,:]?\s*[“"]/;
   let spokenDropped = 0;
   function spoken(t) {
     if (!SPOKEN_RE.test(String(t == null ? "" : t))) return false;

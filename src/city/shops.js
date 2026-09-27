@@ -1845,7 +1845,7 @@
     // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
     // stays shut to YOU until the heat of it fades.
     const _v = lot && lot.building && lot.building.vendor;
-    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { CBZ.city.note("“We're closed. To YOU. Get out.”", 2.2); return; }
+    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { if (CBZ.citySay) CBZ.citySay(_v, "“We're closed. To YOU. Get out.”", null, { secs: 2.2, force: true }); return; }
     openLot = lot; CBZ.cityMenuOpen = true;
     qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
     el().style.display = "block";
@@ -2149,7 +2149,6 @@
       label: (v) => "Locked up for the night, knock anyway",
       onSelect: (v) => {
         if (CBZ.citySay) CBZ.citySay(v, "“We're closed. Sunup.”", "#cfe6ff", 2.2);
-        else CBZ.city.note("“We're closed. Sunup.”", 1.6);
       },
     });
 

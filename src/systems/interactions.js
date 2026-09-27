@@ -39,6 +39,9 @@
                       it. Absent = no thing (the nuke) → the bottom band.
                 key   letter the desktop chip shows for an @fn act (dflt "E")
                 hold  a hold-to-work beat (pick / saw) — the chip says HOLD
+                prog  0..1 through a timed beat whose time IS the play (saw,
+                      cut). A thin line under the verb, on the thing itself.
+                      Never a percentage: nobody reads a number off a saw.
                 sub   a small second line ("to Cell Block Aisle")
                 d2    squared metres to the thing, for ONE PILL below
 
@@ -125,6 +128,7 @@
       ensureLayer().appendChild(p.wrap);
     }
     p.at = opts.at || null;
+    setProg(p, opts.prog);
     p.city = !!opts.city;          // a CITY verb on a thing (boarding.js car doors) survives the city gate below
     p.frame = frameNo;
     // Unranked callers sit at 2 m — the range nearly every prison prompt arms
@@ -133,6 +137,27 @@
     p.seq = ++pillSeq;
     promptLayer.classList.add("on");
     return true;
+  }
+
+  // the work line: a hairline under the pill, anchored with it over the
+  // thing. Updated in place (not part of the pill's signature), so a saw
+  // stroke never rebuilds the button under the player's finger.
+  function setProg(p, v) {
+    const on = v != null && isFinite(v) && v > 0;
+    if (!on) { if (p.bar) p.bar.style.display = "none"; return; }
+    if (!p.bar) {
+      const bar = document.createElement("div");
+      bar.style.cssText = "position:absolute;left:10%;right:10%;bottom:11px;height:3px;border-radius:2px;z-index:1;" +
+        "background:rgba(10,16,24,.55);overflow:hidden;pointer-events:none";
+      const fill = document.createElement("div");
+      fill.style.cssText = "height:100%;width:0;background:#ffd27a;border-radius:2px";
+      bar.appendChild(fill);
+      p.wrap.appendChild(bar);
+      p.bar = bar; p.barFill = fill;
+    }
+    p.bar.style.display = "";
+    const w = (Math.min(1, v) * 100).toFixed(1) + "%";
+    if (p.barFill.style.width !== w) p.barFill.style.width = w;
   }
 
   function prisonPromptClear(id) {
@@ -211,6 +236,67 @@
 
   CBZ.prisonPrompt = prisonPrompt;
   CBZ.prisonPromptClear = prisonPromptClear;
+
+  /* ---- CBZ.workLine(id, at, frac) — THE ONE WORK READOUT, ON THE THING ------
+     OWNER: "when I pick up a key card, if there's a loading 0 to 100% bar,
+     that's really stupid." Pickups are instant now. What is left timed is
+     only work whose time IS the play (a drill on a vault door, a tap being
+     wired, a lock being pried under a guard's nose), and its readout is a
+     short hairline hung on the thing being worked, projected from its world
+     point every frame. Never a number, never a HUD bar. Any game may use it
+     (not gated to the prison like the pills above). The caller re-arms it
+     every frame it is working; two frames without a re-arm and it is gone. */
+  let workLayer = null;
+  const workLines = new Map();       // id -> {el, fill, at, frac, frame}
+  function workLine(id, at, frac) {
+    if (!id || !at) return false;
+    if (!workLayer) {
+      workLayer = document.createElement("div");
+      workLayer.id = "workLines";
+      workLayer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:24";
+      document.body.appendChild(workLayer);
+    }
+    let w = workLines.get(id);
+    if (!w) {
+      const el = document.createElement("div");
+      el.style.cssText = "position:absolute;left:0;top:0;width:54px;height:4px;margin:-2px 0 0 -27px;" +
+        "border-radius:2px;background:rgba(10,16,24,.6);box-shadow:0 0 0 1px rgba(255,255,255,.18);overflow:hidden;visibility:hidden";
+      const fill = document.createElement("div");
+      fill.style.cssText = "height:100%;width:0;background:#ffd27a";
+      el.appendChild(fill);
+      workLayer.appendChild(el);
+      w = { el: el, fill: fill, at: null, frac: 0, frame: 0 };
+      workLines.set(id, w);
+    }
+    w.at = at; w.frac = Math.max(0, Math.min(1, +frac || 0)); w.frame = frameNo;
+    return true;
+  }
+  function workLineClear(id) {
+    const w = workLines.get(id);
+    if (!w) return;
+    if (w.el.parentNode) w.el.parentNode.removeChild(w.el);
+    workLines.delete(id);
+  }
+  CBZ.onAlways(96.5, function () {
+    if (!workLines.size) return;
+    const cam = CBZ.camera;
+    const ids = [];
+    workLines.forEach(function (w, id) { if (frameNo - w.frame > 2) ids.push(id); });
+    for (let i = 0; i < ids.length; i++) workLineClear(ids[i]);
+    if (!cam || !workLines.size) return;
+    cam.updateMatrixWorld();
+    const W = window.innerWidth || 800, H = window.innerHeight || 600;
+    workLines.forEach(function (w) {
+      _pv.set(w.at.x, w.at.y || 0, w.at.z).project(cam);
+      if (_pv.z > 1 || Math.abs(_pv.x) > 1 || Math.abs(_pv.y) > 1) { w.el.style.visibility = "hidden"; return; }
+      w.el.style.left = Math.round((_pv.x * 0.5 + 0.5) * W) + "px";
+      w.el.style.top = Math.round((-_pv.y * 0.5 + 0.5) * H) + "px";
+      w.fill.style.width = (w.frac * 100).toFixed(1) + "%";
+      w.el.style.visibility = "";
+    });
+  });
+  CBZ.workLine = workLine;
+  CBZ.workLineClear = workLineClear;
   CBZ.prisonPromptShown = function () {
     let out = null;
     pills.forEach(function (p, id) {

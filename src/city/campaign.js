@@ -215,18 +215,13 @@
     if (ui && ui.clearDialogue) ui.clearDialogue();
     R.dialogueT = 0;
   }
-  function say(speaker, body, secs, actor) {
+  // `by` is who says it: the ped standing there, or "phone" for a voice on
+  // the line (the pilot's radio, the handler). Over his head or by your hand.
+  function say(speaker, body, secs, by) {
     const ui = UI();
-    const campaignOwnsLine = !!(ui && ui.say);
-    if (campaignOwnsLine) ui.say(speaker, body, { actor: actor || null });
+    if (!ui || !ui.say || !by) return;
+    ui.say(speaker, body, by === "phone" ? { phone: true } : { actor: by });
     R.dialogueT = secs || 3.2;
-    // #campaignDialogue is the canonical authored-speech surface. citySay is
-    // only a degradation fallback: sending the same body to both created two
-    // verbatim subtitle layers, which iPad's touch sizing exposed as offset,
-    // mixed-font duplicate text.
-    if (!campaignOwnsLine && actor && CBZ.citySay) {
-      try { CBZ.citySay(actor, body, "#dfe7ff", secs || 3.2); } catch (e) {}
-    }
   }
 
   function floorY(x, z) {
@@ -773,7 +768,7 @@
       objectives: [{ id: "land", text: "Exit the helicopter", done: false }],
     });
     notify("personal", "PILOT", "Thirty seconds out. Your fee is on the roof. No luggage. No questions.");
-    say("PILOT", "Hold tight. Setting down on the Spire now.", 3.0);
+    say("PILOT", "Hold tight. Setting down on the Spire now.", 3.0, "phone");
   }
 
   function spawnRooftopSwat() {
@@ -843,7 +838,7 @@
     // chase camera. Every activation now releases the body exactly once.
     if (!R.transportReleased) {
       R.transportReleased = true;
-      say("PILOT", "Roof is clear. Move.", 2.2);
+      say("PILOT", "Roof is clear. Move.", 2.2, "phone");
       if (!state().flags.dropped) {
         state().flags.dropped = true;
         commit();
@@ -938,7 +933,7 @@
     if (openingPrisonPhase(c.phase) && w && !c.flags.wardenSpoke && w.group && distTo(w.group.position.x, w.group.position.z) < 5.2) {
       c.flags.wardenSpoke = true;
       commit();
-      say("WARDEN", "You can climb my walls, or work for me. Refuse, and the people you call family become leverage.", 5.2, w);
+      say("WARDEN", "Climb my walls, or work for me. Refuse, and your family pays.", 5.2, w);
     }
     if (c.phase === PHASE.PRISON_SPY_EXIT) {
       R.transitionT -= dt;
@@ -1050,7 +1045,7 @@
       status: "active",
       objectives: [{ id: "intel", text: "Recover the manifest from the relay", done: false }],
     });
-    say("WARDEN", "That case maps the studios financing the ambush. Bring me the names; then you get a target.", 5.0);
+    say("WARDEN", "That case maps the studios. Bring me the names.", 5.0, "phone");
   }
 
   function tickSpyIntel(dt) {
@@ -1293,22 +1288,16 @@
       status: "active",
       objectives: [{ id: "choose", text: "Answer the handler", done: false }],
     });
+    // the order IS the prompt, on the phone; the replies are the only buttons
     const order = c.flags.familySaved
-      ? "You saved them once. Refuse me and we build another set around everyone you love. No names. Everyone in the concourse is the assignment."
-      : "You know what refusal costs now. No names. No extraction list. Everyone in the concourse is the assignment.";
-    say(cHandler(), order, 8.0);
+      ? "You saved them once. Everyone in the concourse. All of them."
+      : "No names this time. Everyone in the concourse. All of them.";
     const ui = UI();
-    if (ui && ui.choice) {
-      ui.choice({
-        id: "airport-order",
-        speaker: cHandler(),
-        prompt: "Carry out the massacre, or turn on the people who ordered it.",
-        options: [
-          { id: "comply", label: "Carry out the order" },
-          { id: "refuse", label: "Refuse, hunt the handler" },
-        ],
-        onChoose: function (id) { CBZ.cityCampaignChoose(id); },
-      });
+    if (ui && ui.say) {
+      ui.say(cHandler(), order, [
+        { id: "comply", label: "Carry out the order", onSelect: function () { CBZ.cityCampaignChoose("comply"); } },
+        { id: "refuse", label: "Refuse, hunt the handler", onSelect: function () { CBZ.cityCampaignChoose("refuse"); } },
+      ], { phone: true });
     }
   }
 
@@ -1900,7 +1889,7 @@
     } else if (CBZ.flashToast && CBZ.flashToast._campaignOriginal) {
       try { CBZ.flashToast._campaignOriginal("CITY BOSS: YOU OWN THE CITY"); } catch (e) {}
     }
-    say(cHandler(), "The whole map answers to you now. That does not cancel the list.", 4.6);
+    say(cHandler(), "The city answers to you now. The list still stands.", 4.6, "phone");
   }
 
   CBZ.cityCampaignTakeover = function (how) {

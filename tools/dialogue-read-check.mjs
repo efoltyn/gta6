@@ -12,7 +12,8 @@
  *   4. ...and a DIFFERENT standing gets a different line, so #3 is stability,
  *      not a constant;
  *   5. a real body-to-body contact through CBZ.humanContact.react() actually
- *      reaches the subtitle — the bump has a voice;
+ *      puts a line over the man's head (CBZ.speech, #speech .say) — the bump
+ *      has a voice;
  *   6. what they PITCH changes with what the player is (the owner's hitman
  *      case), asserted by flipping the player's role and re-reading;
  *   7. THE LIMP POPUP IS GONE and the limp itself still works — a wound must
@@ -177,11 +178,9 @@ const PASS = await evl(`(() => {
     if (a1) F("REVERT: cityLine still spoke with CITY_READ_V1=0");
   }
 
-  // ---------- 5. the bump reaches the subtitle ----------
-  const el0 = document.getElementById("citySpeech");
-  const before = el0 ? el0.textContent : "";
+  // ---------- 5. the bump puts a line over his head ----------
   // clear any live line, then drive a REAL contact through the shared contract
-  if (CBZ.citySocialReset) {} // no-op guard
+  if (CBZ.speech && CBZ.speech.clear) CBZ.speech.clear();
   // citySay only shows a speaker within earshot (9.5 u ambient), so a contact
   // test on a random body across the map proves nothing. Put the mark at arm's
   // length — which is where a body-to-body contact happens anyway.
@@ -194,16 +193,16 @@ const PASS = await evl(`(() => {
     ? (CBZ.humanContact.react(target, { source: CBZ.city && CBZ.city.playerActor, kind: "shoved", severity: 0.6, mode: "city" }), true)
     : false;
   if (!spoke) F("CBZ.humanContact.react is not reachable");
-  const el = document.getElementById("citySpeech");
-  const shown = el ? (el.textContent || "") : "";
-  const visible = !!(el && el.classList.contains("show"));
+  const sp = CBZ.speech && CBZ.speech.audit ? CBZ.speech.audit() : { lines: [] };
+  const shown = sp.lines.map(l => l.text).join(" | ");
+  const visible = sp.lines.length > 0;
   out.notes.subtitle = shown.slice(0, 80);
   out.notes.subtitleShown = visible;
   const audit = CBZ.cityReadAudit();
   out.notes.audit = audit;
   if (!REVERT) {
     if (!audit.contacts) F("contact produced no line (audit.contacts = 0)");
-    if (!visible) F("subtitle element is not showing after a contact");
+    if (!visible) F("no over-head line (CBZ.speech) after a contact");
   } else {
     if (audit.contacts) F("REVERT: contact still spoke with CITY_READ_V1=0");
   }

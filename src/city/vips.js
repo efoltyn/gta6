@@ -732,9 +732,10 @@
           slot.phase = "clubin"; slot.goT = 0;
           p.path = null; p.state = "walk";
           p.target.set(wp.clubRef.insideSpot.x, 0, wp.clubRef.insideSpot.z);
-          if (!slot.clubNoted && camD2(p.pos.x, p.pos.z) < 45 * 45 && CBZ.city && CBZ.city.note) {
+          if (!slot.clubNoted && camD2(p.pos.x, p.pos.z) < 45 * 45) {
             slot.clubNoted = true;
-            CBZ.city.note("Bouncer: \"Evening.\", the rope unclips; the party walks straight past the line.", 2.2);
+            const bz = CBZ.cityClubBouncer && CBZ.cityClubBouncer();
+            if (bz && CBZ.citySay) CBZ.citySay(bz, "Evening.", null, 2.2);
           }
         } else if (wp.enter) {
           p.enterT = wp.t || 9;                       // through the door — detail posts outside

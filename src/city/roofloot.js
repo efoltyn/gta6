@@ -35,8 +35,7 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  const REACH = 2.4;          // [E] crack reach (and the chip prompt range)
-  const CRACK_T = 0.9;        // the pry-beat: kneel on it before it gives
+  const REACH = 2.4;          // [E] crack reach
   const RESPAWN = 300;        // s — long minutes before a roof restocks
 
   // deterministic LCG (reseeded at build) — placement never shuffles between runs
@@ -256,31 +255,6 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
-  // ---- the tiny prompt chip (one DOM node, hidden when idle; headless-safe) --
-  let chip = null;
-  function dom() {
-    if (chip || typeof document === "undefined" || !document.body) return;
-    try {
-      chip = document.createElement("div");
-      chip.id = "roofStashChip";
-      chip.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:278px;z-index:24;display:none;" +
-        "padding:6px 12px;border-radius:9px;background:rgba(8,14,22,.78);border:1px solid rgba(255,209,102,.30);" +
-        "color:#ffe9bd;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
-      document.body.appendChild(chip);
-    } catch (e) { chip = null; }
-  }
-  // PERF: callers run at frame rate — skip the DOM writes (display + textContent
-  // dirty layout even with identical values) unless the text actually changed.
-  let _chipLast;
-  function chipText(t) {
-    if (t === _chipLast) return;
-    dom(); if (!chip) return;
-    _chipLast = t;
-    if (!t) { chip.style.display = "none"; return; }
-    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
-    chip.style.display = "block"; chip.innerHTML = t;
-  }
-
   // the un-cracked stash you're standing over (you must actually be ON the roof)
   function stashNear() {
     const P = CBZ.player; if (!P) return null;
@@ -292,11 +266,10 @@
     return null;
   }
 
-  let cracking = null;   // { st, t }
   CBZ.onUpdate(36.7, function (dt) {            // after elevators (36.6) so the lift/escape tags exist
-    if (g.mode !== "city") { cracking = null; chipText(null); return; }
+    if (g.mode !== "city") return;
     const A = CBZ.city && CBZ.city.arena;
-    if (built && A !== builtA) { built = false; stashes.length = 0; access.length = 0; cracking = null; }   // arena rebuilt → re-seed
+    if (built && A !== builtA) { built = false; stashes.length = 0; access.length = 0; }   // arena rebuilt → re-seed
     if (!built) {
       if (A && A.lots &&
         ((A.elevatorLots || []).some((l) => l.building && l.building.lift) ||
@@ -311,24 +284,8 @@
       if (st.t <= 0) { st.looted = false; setLook(st, true); }
     }
 
-    const P = CBZ.player;
-    if (cracking) {
-      const st = cracking.st;
-      if (!P || P.dead || st.looted || Math.abs(P.pos.y - st.y) > 2.2 ||
-        Math.hypot(P.pos.x - st.x, P.pos.z - st.z) > REACH + 1) { cracking = null; chipText(null); return; }
-      cracking.t += dt;
-      chipText("Prying it open…");
-      if (CBZ.shake && cracking.t > 0.4 && cracking._j !== 1) { cracking._j = 1; CBZ.shake(0.06); }   // the latch fights back
-      if (cracking.t >= CRACK_T) { crackOpen(st); cracking = null; chipText(null); }
-      return;
-    }
-    // not cracking: the chip has nothing to say. The walk-up PRY prompt is the
-    // interaction card's job (zone-roofstash below) — this file once ran a raw
-    // [E] keydown + a chip pill AND the zone, three surfaces for one verb (two
-    // sessions each fixed the same tablet outage a day apart); the registry is
-    // the keystone, so it is the only one left. The chip keeps the pry-beat
-    // prose above, which the card has no channel for.
-    chipText(null);
+    // Prying the box is ONE shove of the bar, not a 0.9 s "Prying it
+    // open..." chip: a pickup never shows a loading beat (owner).
   });
 
   let zoned = false;
@@ -338,13 +295,13 @@
     CBZ.interactions.describe("roofstash", function () { return { label: "Roof stash", note: "" }; });
     CBZ.interactions.registerZone({
       id: "zone-roofstash", kind: "roofstash", prio: 11,
-      find: function () { return (built && !cracking && g.mode === "city") ? stashNear() : null; },
+      find: function () { return (built && g.mode === "city") ? stashNear() : null; },
       options: [{
         id: "roofstash-pry", slot: "e", bad: true,
         // a SET'S stash provokes the set that holds the block — the button
         // says whose box you are about to open (the deleted pill's wording)
         label: function (st) { return st && st.rich ? "Crack the set's stash" : "Pry it open"; },
-        onSelect: function (st) { if (st) cracking = { st: st, t: 0 }; },
+        onSelect: function (st) { if (st && !st.looted) { if (CBZ.shake) CBZ.shake(0.06); crackOpen(st); } },
       }],
     });
   });
@@ -356,7 +313,6 @@
   CBZ.cityRoofAccess = function () { return access; };
   // fresh run: everything restocked (mirrors cityGangsReset's stash un-loot)
   CBZ.cityRoofLootReset = function () {
-    cracking = null;
     for (const st of stashes) { st.looted = false; st.t = 0; setLook(st, true); }
   };
 })();

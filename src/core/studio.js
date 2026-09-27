@@ -280,6 +280,23 @@
       publishes: ["modeHas", "worldActors", "hurtWorldActor", "blastWorldActors"],
     },
 
+    // ---- a mouth ------------------------------------------------------------
+    /* SPEECH IS OVER THE SPEAKER'S HEAD, on a one-shot page too. The same
+       file index.html loads; it needs THREE at load (it keeps a scratch
+       Vector3) and CBZ.onAlways (microboot's bridge) to tick, which is why it
+       is a pack after `boot` and not a static tag above studio.js: a tag there
+       runs before three exists and the system is dead on arrival. The page
+       owns the CSS (`#speech .say`, copied verbatim from css/hud.css). With no
+       CBZ.player on the page every line counts as in earshot. */
+    speech: {
+      gives: "CBZ.speech.say(actor, words): a few words pinned over the " +
+             "speaker's head, projected through CBZ.camera every frame. The " +
+             "only way a person's spoken line reaches the screen",
+      needs: ["boot"],
+      files: ["systems/speech.js"],
+      publishes: ["speech"],
+    },
+
     // ---- the four services the prison wave proved every game needs ---------
     // Each is standalone: no world, no city file, no mode. `day` and `light`
     // are the pair that make a night mean something; `rest` and `push` are the

@@ -682,7 +682,7 @@
         guard.rage = PA; guard.state = "fight";
         p._milliThreat = PA; p._milliThreatT = 12;
       } else {
-        note("\"You think my security lets that happen?\", the bodyguard goes for his gun.", 2.4);
+        if (CBZ.citySay) CBZ.citySay(p, "You think my security lets that happen?", null, { secs: 2.4, force: true });
         if (guard) { guard.rage = PA; guard.state = "fight"; }
         p._milliThreat = PA; p._milliThreatT = 12;
         p.fear = 4; p.state = "flee"; if (CBZ.cityFleeFrom && PA) CBZ.cityFleeFrom(p, PA.pos.x, PA.pos.z);
