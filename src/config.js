@@ -881,7 +881,9 @@
   // touches sandbox origins or standalone Prison Escape. false is the one-line
   // kill switch for the whole authored story. The old flag-true-hijacks-the-
   // title embed behavior moved behind CAMPAIGN_CANONICAL_TITLE (campaign_ui.js).
-  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
+  // 2026-09-27: OFF. The Hitman card wakes in his motel room and plays the
+  // Bureau arc (city/agency.js); ?cfg_CITY_HITMAN_CAMPAIGN=1 brings this back.
+  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
   // GTA convention: dying closes the manhunt. On player death the wanted
   // stars, the heat AND the escaped-convict floor (g.escapedConvict) all
   // clear — a corpse is as caught as it gets. city/wanted.js reads this at
