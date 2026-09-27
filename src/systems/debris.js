@@ -69,6 +69,9 @@
      kindOf(material)             the kind this file would infer
      tag(object, kind)            declare an object's material kind
      clear(owner?)                remove live + frozen debris (all, or one owner)
+     clearNear(x, z, r)           haul off every piece within r (a crew clearing a lot)
+     pile(o) / adopt(obj, o)      settled rubble mound / hand a whole part to the sim
+     chunkGeo(i)                  shared irregular chunk geometry for authored scenery rubble
      stats()                      live/static/grit counts for audits
    Everything is headless-safe and never throws into a caller.
 ============================================================ */
@@ -1428,6 +1431,54 @@
       if (dustSys) { dustSys.motes.fill(null); dustSys.pos.fill(-9999); dustSys.alpha.fill(0); }
     }
   }
+  /* Haul off every piece within r of (x,z) — live bodies, frozen rubble,
+     grit, colliders and the height-field under them. A crew clearing a lot. */
+  function clearNear(x, z, r) {
+    const r2 = r * r, inR = (px, pz) => (px - x) * (px - x) + (pz - z) * (pz - z) <= r2;
+    let n = 0;
+    for (let i = live.length - 1; i >= 0; i--) {
+      const b = live[i], p = b.mesh.position;
+      if (!inR(p.x, p.z)) continue;
+      live.splice(i, 1); retire(b); n++;
+    }
+    for (let i = frozenPending.length - 1; i >= 0; i--) {
+      const b = frozenPending[i], p = b.mesh.position;
+      if (!inR(p.x, p.z)) continue;
+      frozenPending.splice(i, 1); retire(b);
+    }
+    const gone = new Set();
+    for (const bk of buckets.values()) {
+      const before = bk.parts.length;
+      bk.parts = bk.parts.filter((q) => { if (inR(q.x, q.z)) { gone.add(q.id); return false; } return true; });
+      if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
+    }
+    staticCount = Math.max(0, staticCount - gone.size);
+    n += gone.size;
+    // the height-field is hashed, so walk the covered cells directly
+    for (let gx = Math.floor((x - r) / HF); gx <= Math.floor((x + r) / HF); gx++)
+      for (let gz = Math.floor((z - r) / HF); gz <= Math.floor((z + r) / HF); gz++)
+        hf.delete(gx * 73856093 ^ gz * 19349663);
+    if (grit) {
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (const v of grit.variants) {
+        let dirty = false;
+        for (let k = 0; k < v.slots.length; k++) {
+          const q = v.slots[k];
+          if (q && inR(q.x, q.z)) { q.dead = true; v.slots[k] = null; v.im.setMatrixAt(k, zero); dirty = true; }
+        }
+        if (dirty) v.im.instanceMatrix.needsUpdate = true;
+      }
+    }
+    if (CBZ.colliders) {
+      let changed = false;
+      for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
+        const c = CBZ.colliders[i];
+        if (c && c.debris && gone.has(c.debrisId)) { CBZ.colliders.splice(i, 1); changed = true; }
+      }
+      if (changed && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    return n;
+  }
   // a fresh scene (mode switch) drops the old pools: they belong to its scene
   function hardReset() {
     clear();
@@ -1457,7 +1508,7 @@
     dust: (x, y, z, o) => dust(x, y, z, o),
     kindOf,
     tag(obj, kind) { if (obj) { if (obj.userData) obj.userData.debrisKind = kind; else if (obj.material) obj.material.userData.debrisKind = kind; } return obj; },
-    clear, reset: hardReset,
+    clear, clearNear, reset: hardReset,
     update,
     KINDS,
     stats() {
