@@ -93,7 +93,7 @@
         // declutter (css/campaign.css) hides #cHud's children wholesale, and a
         // wound or a manhunt is not narration.
         "#cHurt,#cHeat{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .5s ease}" +
-        "#cHurt{background:radial-gradient(ellipse at center,rgba(150,0,0,0) 52%,rgba(150,0,0,.55) 100%)}" +
+        "#cHurt{background:radial-gradient(ellipse at center,rgba(150,0,0,0) 60%,rgba(150,0,0,.6) 100%)}" +
         "#cHurt.low{animation:cHurtBeat 1.1s ease-in-out infinite}" +
         "@keyframes cHurtBeat{0%,100%{filter:brightness(1)}45%{filter:brightness(1.6)}}" +
         "#cHeat{box-shadow:inset 0 0 90px 10px rgba(255,40,40,.5)}" +
@@ -913,8 +913,8 @@
   function syncEdges(P) {
     const maxHp = P.maxHp || 100;
     const f = Math.max(0, Math.min(1, (P.hp || 0) / maxHp));
-    // nothing above 70%; deepens to full at 15%
-    let o = P.dead ? 0 : Math.max(0, Math.min(1, (0.7 - f) / 0.55));
+    // nothing above half; deepens to full at 10% (a scratch is not a wound)
+    let o = P.dead ? 0 : Math.max(0, Math.min(1, (0.5 - f) / 0.4));
     o = Math.round(o * 20) / 20;
     if (o !== hurtOp) { hurtOp = o; hurtEl.style.opacity = String(o); }
     const low = !P.dead && f < 0.3;
