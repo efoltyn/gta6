@@ -197,7 +197,18 @@ async function stageProduct(input) {
   };
 
   let note = {};
-  if (sub.act === "yard") {
+  if (sub.act === "view") {
+    /* A PLAIN LOOK (prison-real.mjs): the hour pinned, the population left
+       where the schedule put it, the player parked out of frame unless the
+       subject places him, a lens at sub.cam aimed at sub.aim. */
+    pin(sub.hour);
+    if (sub.player) { placePlayer(sub.player.x, sub.player.z, sub.player.y || 0); facePlayer(sub.player.fx, sub.player.fz); }
+    else placePlayer(-11, -39.9);
+    step(sub.settle || 90, sub.hour);
+    if (PC && PC.group) PC.group.visible = !!sub.showPlayer;
+    shoot(sub.cam, sub.aim, sub.fov || 70);
+    note = { phase: CBZ.dayPhase && CBZ.dayPhase(), look: CBZ.prisonLook ? CBZ.prisonLook.audit() : null };
+  } else if (sub.act === "yard") {
     /* THE YARD FROM THE TOWER. The population is walked into the yard by
        hand (the schedule would take a sim-hour to do it), given three
        seconds to settle into their own idles. The lens stands on the south
@@ -369,6 +380,10 @@ async function stageProduct(input) {
   if (CBZ.renderer.info && CBZ.renderer.info.reset) CBZ.renderer.info.reset();
   CBZ.renderer.render(CBZ.scene, camera);
 
+  if (sub.bare) {
+    for (const id of ["prisonProductBand", "prisonProductTitle"]) { const el = document.getElementById(id); if (el) el.style.display = "none"; }
+    return { ok: true, subject: sub.id, width: W, height: H, ...note, scripted: true };
+  }
   // ---- the title: the one thing the portal allows on a cover --------------
   let band = document.getElementById("prisonProductBand");
   if (!band) { band = document.createElement("div"); band.id = "prisonProductBand"; document.body.appendChild(band); }
@@ -387,7 +402,7 @@ async function stageProduct(input) {
   title.appendChild(w1);
   if (portrait || square) { title.appendChild(document.createElement("br")); } else { title.appendChild(document.createTextNode(" ")); }
   title.appendChild(w2);
-  title.style.display = "";
+  title.style.display = ""; band.style.display = "";
 
   return { ok: true, subject: sub.id, width: W, height: H, ...note, scripted: true };
 }
