@@ -74,10 +74,10 @@ const subjects = [
     id: "keyart-town", label: "The wall over the town",
     focus: "Key art: from a street 70 m inland at head height, the standing wall over the town's roofline with sky above the lip, spray veil tearing off the crest, the crowd running up the street toward the lens.",
     sun: 0.22,
-    act: { force: "flood", crowdAtShoal: 0.66, crowd: { n: 100, from: 30, to: 90, side: 0, spread: 18 },
+    act: { force: "flood", crowdAtShoal: 0.66, crowd: { n: 100, from: 22, to: 66, side: 0, spread: 18 },
       untilStalled: true, extraSecs: 0.3, clearRoofs: true, tsuMagPin: 1.2 },
-    shot: { mode: "front", back: 100, side: 0, alt: 2.0, aimAhead: 0, aimSide: 0, aimY: 12, fov: 60,
-      narrow: { back: 100, alt: 1.9, aimY: 14, fov: 72 } },
+    shot: { mode: "front", back: 76, side: 0, alt: 1.6, aimAhead: 0, aimSide: 0, aimY: 18, fov: 64, clearRay: 30,
+      narrow: { back: 80, alt: 1.6, aimY: 21, fov: 72 } },
   },
   {
     id: "cover-run", label: "RUN",
@@ -244,13 +244,34 @@ async function stageDisasterProduct(input) {
       if (cost < bestCost) {
         const eye = new T.Vector3(cam.x, CBZ.surv.floorAt(cam.x, cam.z) + (sh.alt || 5), cam.z);
         const to = new T.Vector3(aim.x, sh.aimY || 5, aim.z).sub(eye);
-        const ray = new T.Raycaster(eye, to.normalize(), 0, 8);
+        const ray = new T.Raycaster(eye, to.normalize(), 0, sh.clearRay || 8);
         ray.camera = CBZ.camera;     // r128: a scene with Sprites throws without it
         let blocked = false;
         try {
           const hits = ray.intersectObject(A.root, true);
           for (const h of hits) { if (h.object && h.object.visible && !(h.object.userData && h.object.userData.waterSurface)) { blocked = true; break; } }
         } catch (_) {}
+        // and nothing OVER the lens either (a canopy or an awning frames the
+        // shot from above and the ray toward the aim never sees it)
+        if (!blocked && sh.clearRay) {
+          try {
+            // a FAN across the frame: overhead, then five bearings at two
+            // pitches out to clearRay. Anything big and near the lens in
+            // any of them (a canopy, a pole, a sign) fails the stretch.
+            const dirs = [new T.Vector3(0, 1, 0)];
+            const f = to.clone().setY(0).normalize();
+            for (const yaw of [-0.45, -0.22, 0, 0.22, 0.45]) {
+              const d = f.clone().applyAxisAngle(new T.Vector3(0, 1, 0), yaw);
+              dirs.push(d.clone().setY(0.12).normalize(), d.clone().setY(0.5).normalize());
+            }
+            for (const d of dirs) {
+              const rc = new T.Raycaster(eye, d, 0, d.y > 0.9 ? 14 : sh.clearRay);
+              rc.camera = CBZ.camera;
+              for (const h of rc.intersectObject(A.root, true)) { if (h.object && h.object.visible && !(h.object.userData && h.object.userData.waterSurface)) { blocked = true; break; } }
+              if (blocked) break;
+            }
+          } catch (_) {}
+        }
         if (!blocked) { bestCost = cost; best = L; }
       }
     }
