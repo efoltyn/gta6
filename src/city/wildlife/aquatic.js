@@ -451,7 +451,49 @@
      fin exactly the way the reference photographs do. A small deterministic
      jitter per column breaks the line into a ragged edge instead of a
      machine-straight seam.
+
+     THE LINE CUTS THE FACES, IT DOES NOT PICK THEM. The boundary used to be
+     decided per QUAD: a whole face was white or grey. On a bull shark whose
+     rings sit 0.6 m apart that turned the white kick-up behind the pectoral
+     into a pale RECTANGLE with a dead-straight top edge, and the gill slits
+     stood on it like a barcode on a label. The cut is now a signed value per
+     VERTEX (the ring's sine against the ring's cut, plus a gentler hash
+     wobble) and quadSplit divides each face along its zero crossing, so the
+     countershade line is one continuous curve down the flank.
+
+     AND THE GREY IS NOT ONE FLAT GREY. hullShell bakes a `color` attribute: a
+     dorsal-to-lateral ramp (darker along the spine, lighter toward the
+     countershade line) with an optional per-species tint (bronze-grey for a
+     bull shark, slate for a great white). hullMesh hands slot 0 a vertex-
+     coloured twin of the species' back material; the belly and the mouth
+     interior never read the attribute. Build-time only: zero per-frame cost.
      ====================================================================== */
+  const SKIN_SPINE = 0.80, SKIN_FLANK = 1.14, SKIN_LO = -0.32;
+  /* rgb multiplier for the back material at ring-sine `sn` (-1 belly .. +1
+     spine) and station x. sp.tint colours the whole back; sp.fade0/fade1
+     (x) fade the ramp to neutral toward a head whose shell is painted flat,
+     so the weld to the snout shell has no tone step. */
+  function skinShade(sn, x, sp) {
+    const t = Math.pow(clamp((sn - SKIN_LO) / (1 - SKIN_LO), 0, 1), 0.85);
+    const k = lerp(SKIN_FLANK, SKIN_SPINE, t);
+    const tint = (sp && sp.tint) || null;
+    let r = k * (tint ? tint[0] : 1), gg = k * (tint ? tint[1] : 1), b = k * (tint ? tint[2] : 1);
+    if (sp && sp.fade1 != null && sp.fade0 != null && sp.fade1 > sp.fade0) {
+      const w = clamp((sp.fade1 - x) / (sp.fade1 - sp.fade0), 0, 1);
+      r = lerp(1, r, w); gg = lerp(1, gg, w); b = lerp(1, b, w);
+    }
+    return [r, gg, b];
+  }
+  const SKIN_SHADE_MATS = new Map();   // source material -> its vertex-coloured twin
+  function shadedTwin(mat) {
+    if (!mat || !mat.isMaterial || mat.vertexColors) return mat;
+    let t = SKIN_SHADE_MATS.get(mat);
+    if (!t) {
+      t = mat.clone(); t.vertexColors = true; t._shared = true;
+      SKIN_SHADE_MATS.set(mat, t);
+    }
+    return t;
+  }
   function hullShell(o) {
     const rings = o.rings, n = rings.length, sides = Math.max(8, o.sides || 12);
     const rag = o.ragged == null ? 0.06 : o.ragged;
@@ -479,9 +521,9 @@
     const moLift = mo ? (mo.lift || 0) : 0;
     const moFrom = mo ? mo.hingeX + mo.length * 0.05 - moX : 0;
     const notched = mo ? [] : null;
-    const sh = new Shell(), id = [];
+    const sh = new Shell(), id = [], pos = [];
     for (let i = 0; i < n; i++) {
-      const r = rings[i], row = [], cutRow = [];
+      const r = rings[i], row = [], cutRow = [], prow = [];
       let roof = -1e9;
       if (mo && r.x > moFrom) roof = mouthSeamY(mo, r.x + moX) + moLift - moY;
       for (let j = 0; j < sides; j++) {
@@ -495,8 +537,9 @@
         }
         cutRow.push(cut);
         row.push(sh.v(r.x, y, z));
+        prow.push([r.x, y, z]);
       }
-      id.push(row);
+      id.push(row); pos.push(prow);
       if (notched) notched.push(cutRow);
     }
     function bucket(i, j) {
@@ -525,10 +568,49 @@
       }
       return belly ? 1 : 0;
     }
+    // the countershade line as a signed value per VERTEX (negative = belly):
+    // the ring's own sine against its cut, with a wobble about half the old
+    // per-quad jitter (a cut line needs far less: the steps WERE the rag)
+    function lineF(i, j) {
+      const a = (j / sides) * Math.PI * 2;
+      const jit = (h01(j * 7 + 1, 0, seed) - 0.5) * rag
+        + (h01(j * 7 + 1, i * 13 + 3, seed + 1) - 0.5) * rag * 0.35;
+      return Math.sin(a) - (cutAt(i, n > 1 ? i / (n - 1) : 0) + jit);
+    }
+    function isNotch(i, j) {
+      if (!notched) return false;
+      const nj = (j + 1) % sides, r0 = notched[i], r1 = notched[i + 1];
+      const in0 = r0 && (r0[j] || r0[nj]), in1 = r1 && (r1[j] || r1[nj]);
+      return !!(r0 && r1 ? (in0 && in1) : (in0 || in1));
+    }
+    function painted(i, j) {
+      if (!paint) return false;
+      const a0 = (j / sides) * Math.PI * 2, a1 = ((j + 1) / sides) * Math.PI * 2;
+      const s2 = (Math.sin(a0) + Math.sin(a1)) * 0.5;
+      const u = n > 1 ? i / (n - 1) : 0;
+      return paint(i, u, j, s2, s2 < cutAt(i, u)) >= 0;
+    }
     for (let i = 0; i < n - 1; i++) {
       for (let j = 0; j < sides; j++) {
-        const nj = (j + 1) % sides, g = bucket(i, j);
-        sh.quad(g, id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
+        const nj = (j + 1) % sides;
+        // an authored marking (paint) or the mouth notch owns the whole face
+        if (isNotch(i, j) || painted(i, j)) {
+          sh.quad(bucket(i, j), id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
+          continue;
+        }
+        const P = [pos[i][j], pos[i + 1][j], pos[i + 1][nj], pos[i][nj]];
+        // wound exactly like the old quad (Newell of the same corner order),
+        // so no face flips when it is split
+        let nx = 0, ny = 0, nz = 0;
+        for (let q = 0; q < 4; q++) {
+          const A = P[q], B = P[(q + 1) % 4];
+          nx += (A[1] - B[1]) * (A[2] + B[2]); ny += (A[2] - B[2]) * (A[0] + B[0]); nz += (A[0] - B[0]) * (A[1] + B[1]);
+        }
+        if (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) < 1e-12) {
+          sh.quad(bucket(i, j), id[i][j], id[i + 1][j], id[i + 1][nj], id[i][nj]);
+          continue;
+        }
+        sh.quadSplit(1, 0, [nx, ny, nz], P, [lineF(i, j), lineF(i + 1, j), lineF(i + 1, nj), lineF(i, nj)]);
       }
     }
     // flat caps keep a deliberately blunt nose/tail instead of quietly turning
@@ -540,21 +622,35 @@
       sh.tri(bucket(0, j), rear, id[0][j], id[0][nj]);
       sh.tri(bucket(n - 1, j), front, id[n - 1][nj], id[n - 1][j]);
     }
-    return sh.geom();
+    const out = sh.geom();
+    if (o.shade !== false) {
+      const P = out.attributes.position, col = new Float32Array(P.count * 3);
+      for (let v = 0; v < P.count; v++) {
+        const x = P.getX(v), r = ringAt(rings, x);
+        const sn = clamp((P.getY(v) - r.y) / Math.max(1e-3, r.ry), -1, 1);
+        const c = skinShade(sn, x, o.shade);
+        col[v * 3] = c[0]; col[v * 3 + 1] = c[1]; col[v * 3 + 2] = c[2];
+      }
+      out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+    }
+    return out;
   }
   function hullMesh(mats, rings, o) {
     o = o || {};
+    const shade = o.shade === false ? false : (o.shade || {});
     const shape = {
       rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
-      mouth: o.mouth || 0,
+      mouth: o.mouth || 0, shade: shade,
     };
-    const key = "hull|" + JSON.stringify(shape) + "|" + (o.paintKey || "");
+    const key = "hull2|" + JSON.stringify(shape) + "|" + (o.paintKey || "");
     const geo = cachedGeom(key, function () {
       return hullShell({
         rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged,
-        seed: o.seed, paint: o.paint, mouth: o.mouth,
+        seed: o.seed, paint: o.paint, mouth: o.mouth, shade: shade,
       });
     });
+    // slot 0 (the back) reads the baked ramp; belly/markings/interior do not
+    if (shade !== false && mats && mats.length) mats = [shadedTwin(mats[0])].concat(mats.slice(1));
     return meshOf(geo, mats);
   }
   // interpolate a cross-section, so details can be laid ON the skin instead of
@@ -775,6 +871,7 @@
     const ped = hullMesh(mats, weldedSleeve(hullRings, o), {
       sides: o.sides || 12, bellyCut: o.bellyCut,
       ragged: o.ragged == null ? 0.05 : o.ragged, seed: o.seed,
+      shade: { tint: o.tint || null },
     });
     ped.name = "tailSleeve";
     ped.position.set(o.at[0], o.at[1], 0);
@@ -896,12 +993,23 @@
         rings = kept;
       }
     }
+    /* the back's tone ramp (see hullShell). Where a snout shell takes the
+       head over, the ramp fades to neutral before the shell's root shows,
+       because the shell's grey is painted flat and a darker spine running
+       into it would be a tone step at the weld. */
+    const shade = { tint: o.tint || null };
+    if (mo && mo.snoutShell) {
+      shade.fade1 = mo.hingeX - mo.length * 0.20;
+      shade.fade0 = shade.fade1 - Math.max(0.45, mo.length * 0.9);
+    }
     const hull = hullMesh([o.top, o.belly || o.top, o.interior || o.top], rings, {
       sides: o.sides, bellyCut: cutFor, ragged: o.ragged, seed: o.seed,
-      mouth: mo,
+      mouth: mo, shade: shade,
     });
     hull.name = "sharkHull";
     g.add(hull);
+    // what the face details need to lay gill creases in the skin's OWN colour
+    g._aquaticPaint = { rings: rings, cut: cutFor, top: o.top, belly: o.belly || o.top, shade: shade };
     const maxWidth = rings.reduce(function (v, r) { return Math.max(v, r.rz * 2); }, 0);
     const maxHeight = rings.reduce(function (v, r) { return Math.max(v, r.ry * 2); }, 0);
     const fr = rings[rings.length - 1];
@@ -1027,46 +1135,94 @@
       snoutOf(nn);
     });
 
-    // GILLS — five slots per side, each one built ON the interpolated hull
-    // cross-section so it hugs the flank. Merged into ONE mesh per side: the
-    // old version was ten free-floating boxes that read as detached plates.
-    const gills = o.gills || 5, pale = m(o.gillColor || 0xbcc6c8);
+    /* GILLS — five slits per side, each built ON the interpolated hull
+       cross-section so it hugs the flank, merged into ONE mesh per side.
+
+       THEY ARE CREASES IN THE SKIN, NOT A BARCODE. The last version was a
+       pale 0xc3cccd slot beside a near-black 0x1d2429 shadow bar, each as
+       wide as a finger, on a pale quad-stepped panel: five black-and-white
+       stripes that read as a label stuck to the flank. A real gill slit is
+       a thin curved fold of the same skin, 35-50% darker at its deepest,
+       lighter at the lip, tapering out at both ends, each a little shorter
+       than the one in front. So every vertex is coloured from the skin it
+       sits on — the back material through the same tone ramp the hull bakes
+       above the countershade line, the belly material below it — times a
+       crease profile across the slit: lip 0.90, core 0.52, flap edge 0.76,
+       all easing back to 1.0 at the ends. One vertex-coloured material, one
+       draw call per side. */
+    const gills = o.gills || 5;
     if (rings && gills > 0) {
       const gx = o.gillX, gstep = o.gillStep || 0.09;
       const gh = o.gillHeight || 0.34, gAng = o.gillAngle == null ? 0.0 : o.gillAngle;
-      const gw = o.gillWidth || 0.032;
+      const gw = o.gillWidth || 0.022;
+      const gc = o.gillCenter == null ? 0.06 : o.gillCenter;
+      const paintOf = g._aquaticPaint || null;
+      const rgbOf = function (mat, fb) {
+        return mat && mat.color ? [mat.color.r, mat.color.g, mat.color.b] : fb;
+      };
+      const topC = rgbOf(paintOf && paintOf.top, [0.27, 0.30, 0.32]);
+      const belC = rgbOf(paintOf && paintOf.belly, [0.92, 0.94, 0.94]);
+      const pRings = paintOf ? paintOf.rings : rings;
+      const pCut = paintOf ? paintOf.cut : -0.16;
+      const skinAt = function (p) {
+        const r = ringAt(pRings, p[0]);
+        const sn = clamp((p[1] - r.y) / Math.max(1e-3, r.ry), -1, 1);
+        const cut = typeof pCut === "function" ? -0.16 : bellyAt(pRings, pCut, p[0]);
+        if (sn < cut) return belC;
+        const k = skinShade(sn, p[0], paintOf ? paintOf.shade : null);
+        return [topC[0] * k[0], topC[1] * k[1], topC[2] * k[2]];
+      };
+      const PROF = [0.90, 0.52, 0.56, 0.76];            // lip, core, core, flap edge
+      const OFF = [1.0, 0.18, -0.30, -1.0];             // across the slit, x hw
       [-1, 1].forEach(function (side) {
-        const key = "gill|" + [gills, gx, gstep, gh, gw, gAng, side, o.gillCenter].join(",")
-          + "|" + JSON.stringify(rings);
+        const key = "gill3|" + [gills, gx, gstep, gh, gw, gAng, side, gc].join(",")
+          + "|" + JSON.stringify(rings) + "|" + topC.join(",") + "|" + belC.join(",")
+          + "|" + JSON.stringify(paintOf ? [paintOf.cut, paintOf.shade] : 0);
         const geo = cachedGeom(key, function () {
-          const sh = new Shell();
+          const sh = new Shell(), cols = [];
+          const colOf = function (idx, c) { cols[idx] = c; return idx; };
+          const steps = 6;
           for (let i = 0; i < gills; i++) {
             const x = gx - i * gstep;
-            const hgt = gh * (1 - i * 0.05);
-            const steps = 4;
+            const hgt = gh * (1 - i * 0.07);
+            const bow = hgt * 0.07;                 // the slit bows gently tailward at mid-height
+            const ry0 = Math.max(0.05, ringAt(rings, x).ry);
             const prev = [];
             for (let k = 0; k <= steps; k++) {
-              // walk the slot up the flank along the real ring angle
               const t = k / steps - 0.5;
-              const ang = (o.gillCenter == null ? 0 : o.gillCenter) + side * 0 + t * (hgt / Math.max(0.05, ringAt(rings, x).ry));
+              const end = Math.sin(Math.PI * (k / steps));        // 0 at the ends, 1 mid
+              const ang = gc + t * (hgt / ry0);
               const a = side > 0 ? ang : Math.PI - ang;
-              const sk = onSkin(rings, x - t * hgt * Math.sin(gAng), a, 0.005);
-              const c = sk.p, hw = gw * 0.5;
-              const P = function (dx) { return [c[0] + dx, c[1], c[2]]; };
-              const q = [P(hw), P(-hw), P(-hw - gw * 0.10), P(-hw - gw * 0.62)];
-              prev.push({ n: sk.n, p: q, v: q.map(function (r) { return sh.v(r[0], r[1], r[2]); }) });
+              const sk = onSkin(rings, x - t * hgt * Math.sin(gAng) - bow * Math.cos(Math.PI * t), a, 0.004);
+              const c = sk.p, hw = gw * 0.5 * (0.30 + 0.70 * Math.pow(end, 0.6));
+              const base = skinAt(c);
+              const q = [], v = [];
+              for (let e = 0; e < 4; e++) {
+                const pp = [c[0] + OFF[e] * hw, c[1], c[2]];
+                const f = lerp(1, PROF[e], 0.35 + 0.65 * end);
+                q.push(pp);
+                v.push(colOf(sh.v(pp[0], pp[1], pp[2]), [base[0] * f, base[1] * f, base[2] * f]));
+              }
+              prev.push({ n: sk.n, p: q, v: v });
               if (k > 0) {
                 const a0 = prev[k - 1], a1 = prev[k];
-                sh.quadN(0, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
-                  [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);        // the pale slot
-                sh.quadN(1, a1.n, [a0.p[2], a1.p[2], a1.p[3], a0.p[3]],
-                  [a0.v[2], a1.v[2], a1.v[3], a0.v[3]]);        // its shadow line
+                for (let e = 0; e < 3; e++) {
+                  sh.quadN(0, a1.n, [a0.p[e], a1.p[e], a1.p[e + 1], a0.p[e + 1]],
+                    [a0.v[e], a1.v[e], a1.v[e + 1], a0.v[e + 1]]);
+                }
               }
             }
           }
-          return sh.geom();
+          const out = sh.geom();
+          const col = new Float32Array(out.attributes.position.count * 3);
+          for (let i = 0; i < cols.length; i++) {
+            const c2 = cols[i] || belC;
+            col[i * 3] = c2[0]; col[i * 3 + 1] = c2[1]; col[i * 3 + 2] = c2[2];
+          }
+          out.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+          return out;
         });
-        const gm = meshOf(geo, [pale, m(o.gillDark || 0x1d2429)]);
+        const gm = new T.Mesh(geo, shadedTwin(m(0xffffff)));
         gm.name = "sharkGill";
         g.add(gm);
       });
@@ -2823,7 +2979,7 @@
         // and at 16 the silhouette of the head reads as a drawn polygon.
         top: grey, belly: white, sides: 20, rings: GW_RINGS,
         bellyCut: GW_BELLY, ragged: 0.075, seed: 21, profile: "torpedo-wedge",
-        mouth: MOUTH, interior: m(0x3a1518),
+        mouth: MOUTH, interior: m(0x3a1518), tint: [0.97, 1.0, 1.045],   // slate
       });
       // the mouth goes in BEFORE the rostrum so the snout's matrix is solved
       // after the upper jaw has told it how far to lift this frame
@@ -2847,9 +3003,8 @@
         rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT, mouth: MOUTH,
         eyeX: 2.10, eyeY: 1.065, eyeZ: 0.335, eyeSize: 0.055, dark: 0x07090a,
         noseX: 2.36, noseY: 0.782, noseZ: 0.115, nostrilLen: 0.15, nostrilWidth: 0.026,
-        gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.11,
-        gillHeight: 0.33, gillStep: 0.115, gillWidth: 0.060, gillAngle: 0.24,
-        gillColor: 0xc3cccd,
+        gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: 0.08,
+        gillHeight: 0.33, gillStep: 0.115, gillWidth: 0.026, gillAngle: 0.24,
         pores: 52, poreSize: 0.019, poreX0: 1.98, poreX1: 2.58, poreSpread: 0.95,
         poreSeed: 31, poreColor: 0x252b2f,
       });
@@ -2908,7 +3063,7 @@
       // a body section to carry the wave instead of a rectangular block.
       tailSleeve(g, [grey, white], GW_RINGS, {
         at: [-1.88, 0.860], x0: -0.502, x1: 0.46, tipRy: 0.060, tipRz: 0.038,
-        sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23,
+        tint: [0.97, 1.0, 1.045], sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23,
       });
 
       // CAUDAL FIN — tall crescent, UPPER LOBE CLEARLY LONGER (§4).
@@ -2969,9 +3124,11 @@
       const MOUTH = { hingeX: 2.30, hingeY: 0.800, length: 1.32, width: 1.10, gap: 0.56, cornerRise: 0.25, snoutShell: true };
       addSharkHull(g, {
         top: dark, belly: white, sides: 16, rings: MEG_RINGS,
-        bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26],
+        // the rostrum's own table forward of the kick, so the two lines meet
+        // at the weld; the kick itself lowered so the gills sit on grey
+        bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.06, -0.17, -0.30, -0.34],
         ragged: 0.08, seed: 51, profile: "battering-ram",
-        mouth: MOUTH, interior: m(0x33131a),
+        mouth: MOUTH, interior: m(0x33131a), tint: [0.95, 0.99, 1.05],   // dark slate
       });
       addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
         rings: MEG_RINGS,
@@ -2987,9 +3144,8 @@
         rings: MEG_RINGS, snout: snout, snoutRings: MEG_SNOUT, mouth: MOUTH,
         eyeX: 3.34, eyeY: 1.315, eyeZ: 0.505, eyeSize: 0.085, dark: 0x07090a,
         noseX: 3.72, noseY: 0.942, noseZ: 0.19, nostrilLen: 0.24, nostrilWidth: 0.042,
-        gillX: 2.62, gillY: 1.0, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.60, gillStep: 0.20, gillWidth: 0.105, gillAngle: 0.22,
-        gillColor: 0xb4bec1,
+        gillX: 2.62, gillY: 1.0, gillZ: 0, gills: 5, gillCenter: 0.08,
+        gillHeight: 0.60, gillStep: 0.20, gillWidth: 0.044, gillAngle: 0.22,
         pores: 60, poreSize: 0.030, poreX0: 3.05, poreX1: 3.94, poreSpread: 0.95,
         poreSeed: 33, poreColor: 0x2f363a,
       });
@@ -3035,7 +3191,7 @@
       });
       tailSleeve(g, [dark, white], MEG_RINGS, {
         at: [-2.46, 0.98], x0: -0.744, x1: 0.66, tipRy: 0.090, tipRz: 0.056,
-        sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53,
+        tint: [0.95, 0.99, 1.05], sides: 16, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53,
       });
       fin([dark, white], [-2.82, 1.02, 0], {
         span: 2.25, chordRoot: 0.92, chordTip: 0.10, sweep: 0.30, concavity: 0.24,
@@ -3076,9 +3232,9 @@
       const MOUTH = { hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24, cornerRise: 0.115 };
       addSharkHull(g, {
         top: grey, belly: pale, sides: 14, rings: HH_RINGS,
-        bellyCut: [-0.36, -0.30, -0.12, 0.12, -0.06, -0.26],
+        bellyCut: [-0.36, -0.30, -0.12, 0.10, -0.22, -0.26],
         ragged: 0.07, seed: 61, profile: "cephalofoil",
-        mouth: MOUTH, interior: m(0x371519),
+        mouth: MOUTH, interior: m(0x371519), tint: [1.07, 1.02, 0.90],   // bronze-grey
       });
       addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
         rings: HH_RINGS,
@@ -3110,9 +3266,9 @@
         rings: HH_RINGS, eyeSize: 0, eyeX: 0, eyeY: 0, eyeZ: 0, dark: 0x0d1114,
         noseX: 2.02, noseY: 0.898, noseZ: 0.90, nostrilLen: 0.20, nostrilWidth: 0.028,
         nostrilYaw: 0.05,
-        gillX: 1.30, gillY: 0.92, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.26, gillStep: 0.10, gillWidth: 0.052, gillAngle: 0.22,
-        gillColor: 0xc6cfcf, pores: 0,
+        gillX: 1.30, gillY: 0.92, gillZ: 0, gills: 5, gillCenter: 0.10,
+        gillHeight: 0.26, gillStep: 0.10, gillWidth: 0.021, gillAngle: 0.22,
+        pores: 0,
       });
       addSharkSkin(g, m, {
         rings: HH_RINGS, scars: 8, scarLen: 0.34, scarWidth: 0.02, scarColor: 0xa9b2b4,
@@ -3156,7 +3312,7 @@
       });
       tailSleeve(g, [grey, pale], HH_RINGS, {
         at: [-1.76, 0.90], x0: -0.464, x1: 0.42, tipRy: 0.050, tipRz: 0.031,
-        sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64,
+        tint: [1.07, 1.02, 0.90], sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64,
       });
       fin([grey, pale], [-1.98, 0.94, 0], {
         span: 1.42, chordRoot: 0.46, chordTip: 0.05, sweep: 0.32, concavity: 0.26,
@@ -3205,9 +3361,12 @@
       const MOUTH = { hingeX: 1.36, hingeY: 0.716, length: 0.64, width: 0.56, gap: 0.28, cornerRise: 0.12, snoutShell: true };
       addSharkHull(g, {
         top: grey, belly: white, sides: 14, rings: BULL_RINGS,
-        bellyCut: [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30],
+        // BULL_BELLY's own values forward of the pectoral, so the hull's
+        // line meets the rostrum's at the weld (-0.02 here left a step), and
+        // the white stays UNDER the gills instead of climbing into them
+        bellyCut: [-0.36, -0.30, -0.14, 0.10, -0.25, -0.35, -0.36],
         ragged: 0.075, seed: 71, profile: "stocky-blunt",
-        mouth: MOUTH, interior: m(0x3a1518),
+        mouth: MOUTH, interior: m(0x3a1518), tint: [1.06, 1.0, 0.92],   // grey-brown
       });
       addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
         rings: BULL_RINGS,
@@ -3223,9 +3382,8 @@
         rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT, mouth: MOUTH,
         eyeX: 1.80, eyeY: 1.150, eyeZ: 0.260, eyeSize: 0.048, dark: 0x07090a,
         noseX: 1.98, noseY: 0.806, noseZ: 0.105, nostrilLen: 0.13, nostrilWidth: 0.024,
-        gillX: 1.28, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.29, gillStep: 0.10, gillWidth: 0.055, gillAngle: 0.22,
-        gillColor: 0xc3cccd,
+        gillX: 1.28, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: 0.12,
+        gillHeight: 0.29, gillStep: 0.10, gillWidth: 0.023, gillAngle: 0.22,
         pores: 40, poreSize: 0.017, poreX0: 1.70, poreX1: 2.12, poreSpread: 0.95,
         poreSeed: 34, poreColor: 0x424a4e,
       });
@@ -3271,7 +3429,7 @@
       });
       tailSleeve(g, [grey, white], BULL_RINGS, {
         at: [-1.58, 0.88], x0: -0.432, x1: 0.40, tipRy: 0.058, tipRz: 0.036,
-        sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
+        tint: [1.06, 1.0, 0.92], sides: 14, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74,
       });
       fin([grey, white], [-1.78, 0.92, 0], {
         span: 1.06, chordRoot: 0.46, chordTip: 0.05, sweep: 0.30, concavity: 0.24,
