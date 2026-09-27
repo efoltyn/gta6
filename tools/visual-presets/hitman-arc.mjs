@@ -222,7 +222,7 @@ async function stageHitmanArc(input) {
       tick(120);
     }
     // stand back on the approach, in line with the gate
-    const sx = gx - 0.8, sz = gz + 55;
+    const sx = aim.x + 1.2, sz = aim.z + 85;   // on the lawn with the crowd, clear of the trees on the drive
     put(sx, sz); tick(20);
     const eyeY = (CBZ.floorAt ? (CBZ.floorAt(sx, sz) || 0) : 0) + 1.65;
     const dist = Math.hypot(aim.x - sx, aim.z - sz);
