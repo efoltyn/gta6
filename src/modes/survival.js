@@ -543,7 +543,7 @@
       surv.stats = { total: n + 1, placement: 0, disastersSurvived: 0 };
 
       // drop the player at a random spawn on the island
-      const p = A.randomPoint(12, A.radius * 0.78);
+      const p = A.randomPoint(A.hills && A.hills[0] ? A.hills[0].r + 4 : 12, A.radius * 0.78);   // spawn in town, never halfway up the volcano
       const gy = A.groundHeightAt(p.x, p.z);
       CBZ.player.pos.set(p.x, gy, p.z);
       CBZ.player.vy = 0; CBZ.player.grounded = true;

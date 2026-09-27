@@ -3882,7 +3882,6 @@
   "src/vendor/WaterReflect.js",
   "src/vendor/DRACOLoader.js",
   "src/vendor/GLTFLoader.js",
-  "src/vendor/BufferGeometryUtils.js",
   "src/vendor/fflate.min.js",
   "src/vendor/3MFLoader.js",
   "src/vendor/RGBELoader.js",
@@ -3895,8 +3894,6 @@
   "src/core/seed.js",
   "src/systems/breach.js",
   "src/systems/airports.js",
-  "src/world/treeaudit.js",
-  "src/world/vegetation.js",
   "src/world/forestlook.js",
   "src/core/lightpin.js",
   "src/core/groundmask.js",
@@ -3904,7 +3901,6 @@
   "src/systems/bunkerspace.js",
   "src/systems/tunnels.js",
   "src/systems/digsite.js",
-  "src/world/textures_surface.js",
   "src/world/textures_masonry.js",
   "src/core/mission.js",
   "src/city/furniture.js",
@@ -4406,7 +4402,7 @@
  ],
  "keptBytes": 3616724,
  "droppedBytes": 22655210,
- "updatedAt": "2026-08-21T07:23:22.167Z",
+ "updatedAt": "2026-09-27T06:03:40.544Z",
  "pin": [
   "src/core/seed.js",
   "src/core/prio.js",
@@ -4441,6 +4437,10 @@
   "src/city/facades/adobe.js",
   "src/city/facades/mosque.js",
   "src/city/facades/pagoda.js",
-  "src/systems/modecaps.js"
+  "src/systems/modecaps.js",
+  "src/world/vegetation.js",
+  "src/world/textures_surface.js",
+  "src/world/treeaudit.js",
+  "src/vendor/BufferGeometryUtils.js"
  ]
 }

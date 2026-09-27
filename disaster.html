@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 471
+     Natural Disaster Survival, standing alone: index.html minus the 468
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
+<link rel="stylesheet" href="css/shark_title.css?v=frontdoor1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
@@ -328,6 +329,7 @@
     <!-- Performance/quality controls live in ONE place: the Settings panel
          (systems/settings.js injects its button below; [Esc] from here opens it). -->
     <button class="btn" id="resumeBtn">Resume</button>
+    <div class="smallnote">Esc resumes</div>
   </div>
 </div>
 
@@ -386,6 +388,7 @@
 <script src="src/vendor/three.r128.min.js"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
      wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
+<script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- Official Three.js sample loaders used by the farm truck / BIM campus.
      fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
@@ -405,6 +408,9 @@
      rockscliffs.js's fractured boulders on the mountains you can actually walk on.
      MUST load AFTER terrain_overhaul.js (reads CBZ.terrainFogScale) and BEFORE
      city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
+<!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
+     Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
+<script src="src/world/alpine_skin.js?v=skin1"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -452,8 +458,10 @@
      precede every field builder and the airline that flies between them. -->
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
+<script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
+<script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
@@ -491,7 +499,10 @@
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
+<script src="src/world/textures_surface.js?v=surf1"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/prisonkit.js"></script>
+<script src="src/world/corridorkit.js"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -530,7 +541,7 @@
      before any entity that registers a prop type, e.g. coins.js below -->
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=holster1"></script>
+  <script src="src/entities/character.js?v=races1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -574,6 +585,10 @@
 <script src="src/entities/vision.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
+<!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
+     jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
+     city/clothes.js and the head atlas below. -->
+<script src="src/entities/heritage.js?v=races1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -595,6 +610,8 @@
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
+<script src="src/world/prisongrounds.js"></script>
+<script src="src/world/corridors.js"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -762,6 +779,9 @@
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=sharkmode1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
+<!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
+     PLAY over the live sea, proxies every original control by id. -->
+<script src="src/modes/shark_title.js?v=frontdoor1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
@@ -837,6 +857,11 @@
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=shallow1"></script>
+<!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
+     inventory item; an NPC's keys live on the NPC and every existing way to
+     take something off a person moves them. MUST load before city/buildings.js
+     and city/interact.js, both of which ask CBZ.cityKeys at parse-adjacent time. -->
+<script src="src/city/keys.js?v=keys1"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
@@ -984,6 +1009,11 @@
      (cityRel/cityBond/citySay); every consumer resolves it lazily at call
      time, so nothing below needs reordering. Consumers: humancontact.js (the
      bump), peds.js (trade + greet), interactions_rich.js (insult scaling). -->
+<!-- headlight pools + tail glow on the road at night (instanced ground decals,
+     no dynamic lights); pushes the shared lamp emissives up after dark.
+     After blobshadows.js (same pool shape) and before vehicles.js: it only
+     READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
+<script src="src/city/carlamps.js?v=lamps1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1159,6 +1189,12 @@
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
+<!-- THE SHELVES SELL THE GOODS (city/storegoods.js): every generic store stands
+     its own real stock on its own shelves as the real item models, and the
+     painted blocks furnishShop used to put there are stripped before the batch
+     merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
+     models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
+<script src="src/city/storegoods.js?v=realgoods1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
@@ -1615,6 +1651,14 @@
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
+<!-- THE PRESIDENT WAVE — four organs on presidency.js's status() API, in
+     load order: the HUD strip (reads status), the Chief of Staff's agenda
+     (mission.js + presidency.press), the motorcade (chauffeur + helipad), and
+     the regime dressing that changes the Mansion when the republic falls. -->
+<script src="src/city/president_hud.js?v=pres2"></script>
+<script src="src/city/president_agenda.js?v=pres2"></script>
+<script src="src/city/motorcade.js?v=pres2"></script>
+<script src="src/city/president_regime.js?v=pres2"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
@@ -1625,6 +1669,12 @@
      (it reads that file's published site record), storage.js (the property
      ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
      ?cfg_CASH_STORE_V1=0. -->
+<!-- A VAULT YOU BOUGHT, ON LAND YOU BOUGHT (city/propertyvault.js). The SAME
+     CBZ.cityVaultRoom the bank uses, built into a property you own, paid for at
+     the [G] desk, keyed through city/keys.js and banked through CBZ.cityTill.
+     Loads after storage.js (ownership), bank.js (the room) and cashstore.js
+     (the bag verbs it hooks). -->
+<script src="src/city/propertyvault.js?v=pvault1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1666,16 +1716,33 @@
      with a yaw-ACCELERATION cap, which is what makes the yacht take seconds
      to answer the helm rather than merely being slow. Both before core/loop.js
      — it sorts CBZ.updaters once at parse time. -->
+<!-- A HULL IS A LOFTED SURFACE, not a stack of boxes. CBZ.hullLoft turns a
+     sheer/chine/keel line set into one welded smooth-shaded BufferGeometry
+     with hard edges only where a real hull has them. Pure geometry, no CBZ
+     reads but THREE — but it MUST parse before water_hulls.js, whose builders
+     call it at build() time. -->
 
 <!-- WATER V2 runtime: submerged-camera state, boat buoyancy off the live wave
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
+     over, and a hull that goes over stays over — inverted, keel up, its people
+     in the water — then floods and sinks or drifts. Registers at order 38.4,
+     one tick BEFORE the buoyancy pass above, which composes its phi into the
+     ride. Parse order among these does not matter (every cross-read is
+     feature-detected at call time). -->
+<script src="src/world/water_stability.js?v=capsize1"></script>
 <!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars
      sink and wallow, corpses float face-down) and the impact bus
      (CBZ.waterHit — one call made ~58 existing bullet/explosion sites
      water-aware by wrapping, with zero edits to their files). -->
+<!-- SMALL CRAFT WITHOUT vehicles.js (CBZ.seaCraft): boats in the shark sim
+     and any other mode that has water but no road fleet, plus the shark-vs-boat
+     rules (engulf / bite / tip). After water_hulls + water_float, both of which
+     it spends. -->
+<script src="src/world/sea_craft.js?v=seacraft1"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
      numbers in survival mode, and publishes CBZ.waterModeOn() — the predicate
@@ -1697,6 +1764,8 @@
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
 <script src="src/core/farcull.js?v=fc2z"></script>
+<!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
+<script src="src/core/viewscope.js?v=vs1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
 <script src="src/core/batch.js"></script>

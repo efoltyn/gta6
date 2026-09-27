@@ -258,7 +258,7 @@
     let s = 7 + n;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let i = 0; i < n; i++) {
-      const p = arena.randomPoint(10, arena.radius * 0.8);
+      const p = arena.randomPoint(arena.hills && arena.hills[0] ? arena.hills[0].r + 2 : 10, arena.radius * 0.8);   // in the town, not on the cone
       const b = makeBot(p.x, p.z, rr);
       arena.root.add(b.group);
       CBZ.bots.push(b);
@@ -1110,7 +1110,11 @@
           }
           b.target.set(ring.cx + Math.cos(th) * d, 0, ring.cz + Math.sin(th) * d);
         } else {
-          const d = brnd() * arena.radius * 0.6;
+          // the town ring, not the volcano: a uniform draw inside 0.6 R put
+          // a third of the island strolling up bare scoria on a live cone.
+          // Same single draw (the count is match state), reshaped.
+          const cone = arena.hills && arena.hills[0] ? arena.hills[0].r * 0.85 : 0;
+          const d = cone + brnd() * Math.max(4, arena.radius * 0.84 - cone);
           b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
         }
         b.pause = 0.6 + brnd() * 2.2;
