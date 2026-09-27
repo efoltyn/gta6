@@ -2935,7 +2935,9 @@
     id: "great_white_shark", name: "Great White Shark", biome: "water",
     rarity: "rare", hp: 140, fur: "Shark Fin", furValue: 260,
     meat: "Shark Meat", meatValue: 30, packs: 3, spd: 2.6, danger: 0.6,
-    bite: 30, aquatic: true, scale: 1.2, color: 0x363c40,
+    // REAL SIZE: adults 4.5-6 m, the biggest shark in the water short of the
+    // megalodon. Hull 5.16 units -> 5.6 m mean, ~4.7-6.4 m across individuals.
+    bite: 30, aquatic: true, scale: 1.08, sizeVary: 0.10, color: 0x363c40,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x363c40), white = m(0xf1f4f4);
@@ -3224,7 +3226,8 @@
     id: "hammerhead_shark", name: "Great Hammerhead", biome: "water",
     rarity: "rare", hp: 150, fur: "Shark Fin", furValue: 300,
     meat: "Shark Meat", meatValue: 30, spd: 2.5, danger: 0.5,
-    bite: 26, aquatic: true, scale: 1.25, color: 0x434c50,
+    // REAL SIZE: great hammerhead adults 3.5-5 m. Hull 4.58 units -> 4.35 m mean.
+    bite: 26, aquatic: true, scale: 0.95, sizeVary: 0.10, color: 0x434c50,
     clearance: 40, swimDepth: 2.5,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
@@ -3352,7 +3355,11 @@
     id: "bull_shark", name: "Bull Shark", biome: "water",
     rarity: "uncommon", hp: 110, fur: "Shark Fin", furValue: 190,
     meat: "Shark Meat", meatValue: 24, spd: 2.7, danger: 0.55,
-    bite: 24, aquatic: true, scale: 0.95, color: 0x464e52,
+    // REAL SIZE (2026-09-27): adults 2.4-3.5 m. The hull is 4.33 model units,
+    // so 0.76 is a 3.3 m mean; sizeVary 0.10 keeps an individual inside
+    // ~2.8-3.8 m instead of the generic uncommon spread (+-34%), which rolled
+    // 5 m bull sharks bigger than great whites.
+    bite: 24, aquatic: true, scale: 0.76, sizeVary: 0.10, color: 0x464e52,
     clearance: 12, swimDepth: 1.5,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();

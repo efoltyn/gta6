@@ -259,7 +259,9 @@
      Everything else derives from facts the bestiary already carries, so a new
      species still costs no row. */
   const GROW_CAP = {
-    bull_shark: 1.40, hammerhead_shark: 1.36, great_white_shark: 1.34,
+    // shark ceilings RISE with the species (a fed bull must never outgrow a
+    // lean great white: 3.8 m x 1.18 = 4.5 m < 4.7 m, the smallest white)
+    bull_shark: 1.18, hammerhead_shark: 1.22, great_white_shark: 1.28,
     megalodon: 1.30, orca: 1.26, tiger_shark: 1.38, mako_shark: 1.38,
     barracuda: 1.30, marlin: 1.22, tuna: 1.20, dolphin: 1.16,
     humpback_whale: 1.10, blue_whale: 1.08, fish: 1.10, sardine: 1.08,
