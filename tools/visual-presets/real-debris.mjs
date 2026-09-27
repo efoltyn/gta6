@@ -188,7 +188,7 @@ async function stage(input) {
     }
     props.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
     // a lamp on a real street: clear of walls by 7 m but with buildings within 30 m
-    for (const p of props) if (!lamp && p.h > 4.2 && p.span < 1.2 && lonely(p.x, p.z, 7) && !lonely(p.x, p.z, 30)) lamp = p;
+    for (const p of props) if (!lamp && p.h > 4.2 && p.h < 12 && p.span < 1.2 && p.c.ref.visible !== false && p.mat && p.mat.color && !p.mat.transparent && lonely(p.x, p.z, 7) && !lonely(p.x, p.z, 30)) lamp = p;
     for (const p of props) if (!wood && p.h > 0.4 && p.h < 2.5 && woodish(p.mat) && lonely(p.x, p.z, 6) && !lonely(p.x, p.z, 40) && (!lamp || Math.hypot(p.x - lamp.x, p.z - lamp.z) > 30)) wood = p;
 
     const hud = document.createElement("div");
@@ -220,7 +220,7 @@ async function stage(input) {
       lamp: lampT && tripod(lampT, [[8, 1.8, 3, 58], [10, 2.2, -4, 56], [7, 1.6, 5, 60]]),
       wood: woodT && tripod(woodT, [[6, 1.7, 2.5, 58], [7.5, 2.1, -3, 56], [5, 1.5, 3.5, 60]]),
       // high and back: over the street, looking down on the footprint
-      collapse: collT && tripod({ ...collT, lookY: 2 }, [[collapse.b.h * 1.4 + 18, collapse.b.h * 0.9 + 8, 8, 54], [collapse.b.h * 1.8 + 24, collapse.b.h + 12, -12, 52], [collapse.b.h * 1.2 + 14, collapse.b.h * 0.7 + 6, 16, 56]]),
+      collapse: collT && tripod({ ...collT, x: collapse.b.ox, z: collapse.b.oz, y: 2, lookY: 2 }, [[collapse.b.h * 1.3 + 22, collapse.b.h * 1.3 + 16, 10, 52], [collapse.b.h * 1.6 + 28, collapse.b.h * 1.5 + 20, -14, 50], [collapse.b.h * 1.1 + 18, collapse.b.h * 1.1 + 12, 18, 54]]),
     };
     S = window.__rdSeq = { hud, cams, brickT, glassT, lampT, woodT, collapse, t: {}, done: {},
       found: { brick: !!brick, glass: !!glass, lamp: !!lamp, wood: !!wood, collapse: !!collapse } };

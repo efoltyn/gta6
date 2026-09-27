@@ -2100,7 +2100,16 @@
         const v = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
         const share = vol > 0 ? v / vol : 0;
         const budget = Math.max(2, Math.round(TOTAL * share));
-        CBZ.debris.shatterBox(b, b.mat, {
+        // the face the player SEES: a shell under a facade-kit skin is
+        // painted by the skin, so pieces wear the building's visible wall
+        // material (collapse.js's materialsOf), not the hidden core course
+        let skinMat = null;
+        if (!b.glass && shedBld && CBZ.collapse && CBZ.collapse.materialsOf) {
+          try { const mo = CBZ.collapse.materialsOf(shedBld); skinMat = mo && mo.wall; } catch (e) { skinMat = null; }
+          if (Array.isArray(skinMat)) skinMat = skinMat[0];
+          if (skinMat && (skinMat.transparent || !skinMat.color)) skinMat = null;
+        }
+        CBZ.debris.shatterBox(b, skinMat || b.mat, {
           at: { x, y, z }, dir: outN, power: P,
           // what the wall is MADE of: a brick building sheds brick; civic /
           // fortified shells are stone and concrete; glass is glass

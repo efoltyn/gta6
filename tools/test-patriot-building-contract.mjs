@@ -125,7 +125,7 @@ assert.match(crashfx, /CBZ\.debris\.shatterBox\(box, mat, \{/,
   "the shed primitive is a shim onto the one fracture path, with the source material");
 assert.match(crashfx, /CBZ\.cityDebrisAudit = function/);
 const shed = section(bld, "if (CBZ.debris && rec.shed.length)", "if (CBZ.cityInteriorGlowClearBox)");
-assert.match(shed, /CBZ\.debris\.shatterBox\(b, b\.mat, \{/,
+assert.match(shed, /CBZ\.debris\.shatterBox\(b, skinMat \|\| b\.mat, \{/,
   "the carve must hand over each removed solid with its own material");
 assert.match(shed, /keepEdge:/, "the rim of surviving wall stays welded (a broken edge, not a saw cut)");
 assert.match(bld, /shedBox\(Math\.max\(minU, u0\), Math\.min\(maxU, u1\)/,
