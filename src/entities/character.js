@@ -3159,7 +3159,12 @@
     // else, weighted differently. That is why all ~15 makeCharacter call sites
     // get the new motion without a line of change.
     const GA = ch.gait || GAIT_NEUTRAL;
-    ch.phase += gaitPhaseDelta(speed, dt, walkRef, GA.step);
+    // FOOT-PLANT-MATCHED STRIDE (entities/moves.js): one footfall covers the
+    // ground the planted foot sweeps under THIS rig's hip, so walkers stop
+    // skating. Runs keep the authored stride (flight phase).
+    ch.phase += (CBZ.moves && CBZ.moves.phaseDelta)
+      ? CBZ.moves.phaseDelta(ch, speed, dt, walkRef, GA)
+      : gaitPhaseDelta(speed, dt, walkRef, GA.step);
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so

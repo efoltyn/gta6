@@ -594,6 +594,11 @@ document.body.appendChild(b);}}catch(e){}})();
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
   <script src="src/systems/bodymass.js?v=mass1"></script>
+<!-- CBZ.moves: THE ONE locomotion layer (velocity, arrival, turn rate,
+     avoidance, stuck recovery, foot-matched stride, formations). Pure math;
+     every AI mover in every game steps through it. Before poses.js so the
+     rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
+<script src="src/entities/moves.js?v=moves1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <script src="src/entities/coins.js"></script>
