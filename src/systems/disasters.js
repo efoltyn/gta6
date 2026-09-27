@@ -276,7 +276,10 @@
       const a = bots[i];
       if (a.dead || (CBZ.body && CBZ.body.busy(a))) continue;
       const surface = seaY(a.pos.x, a.pos.z);
-      const depth = surface - floor(a.pos.x, a.pos.z);
+      // measured from where the body STANDS: a survivor on a first floor
+      // (survivorbot.js publishes `_lift`, metres above the terrain) is only
+      // in the water once it is over that floor, not over the street under it
+      const depth = surface - floor(a.pos.x, a.pos.z) - (a._survSwim ? 0 : (a._lift || 0));
       if (depth <= 1.35) { a._survSwim = 0; continue; }
       if (!a._survSwim) { a._survSwim = 1; a._survPh = rnd() * 6.28; a._survLX = a.pos.x; a._survLZ = a.pos.z; }
       // paddle: halve the brain's step, ride the current
@@ -659,7 +662,13 @@
           let tx, tz; const acts = surv().actors();
           const near = [];
           for (let i = 0; i < acts.length; i++) { const a2 = acts[i]; if (!a2.dead && Math.hypot(a2.pos.x - ctx.st.cellX, a2.pos.z - ctx.st.cellZ) < cr) near.push(a2); }
-          if (near.length && rnd() < 0.3 + 0.45 * mag) { const a2 = near[(rnd() * near.length) | 0]; tx = a2.pos.x + (rnd() - 0.5) * 12; tz = a2.pos.z + (rnd() - 0.5) * 12; }
+          /* THE SKY HUNTS THE CARELESS: a player out in the open under the
+             cell draws a share of the aimed strikes (a near miss 5-11 m off,
+             never a guaranteed hit), so standing in a field during a storm is
+             a decision you feel; under a roof you only hear it. */
+          const P = CBZ.player, pExposed = !P.dead && !underRoof(P.pos.x, P.pos.z, P.pos.y) && near.some((q) => q.isPlayer);
+          if (pExposed && rnd() < 0.22 + 0.2 * mag) { const a3 = rnd() * 6.28, d3 = 5 + rnd() * 6; tx = P.pos.x + Math.cos(a3) * d3; tz = P.pos.z + Math.sin(a3) * d3; }
+          else if (near.length && rnd() < 0.3 + 0.45 * mag) { const a2 = near[(rnd() * near.length) | 0]; tx = a2.pos.x + (rnd() - 0.5) * 12; tz = a2.pos.z + (rnd() - 0.5) * 12; }
           else {
             const ang = rnd() * 6.2832, rr = cr * Math.sqrt(rnd());
             tx = ctx.st.cellX + Math.cos(ang) * rr; tz = ctx.st.cellZ + Math.sin(ang) * rr;
@@ -1147,7 +1156,7 @@
           } else {
             a.pos.x += w.x * drag * dt; a.pos.z += w.z * drag * dt;
             if (CBZ.collide) CBZ.collide(a.pos, 0.5);
-            a.pos.y = floor(a.pos.x, a.pos.z);
+            if (!a._lift) a.pos.y = floor(a.pos.x, a.pos.z);   // a body on a floor keeps it (the mover re-stands it)
           }
           // FLYING DEBRIS IS THE WOUND: at eyewall speeds loose material is
           // airborne and a strike is a real hit, not ambient chip damage
@@ -4204,7 +4213,12 @@
       // after warn() has rolled the occurrence; the lazy roll covers any
       // path that reads it first. Real quake duration scales hard with M —
       // an M4 is over in seconds, an M8 owns the round for a minute-plus.
-      get activeSecs() { return qkEnsureRoll(dir.intensity).activeSecs; },
+      /* A ROUND, NOT A SEISMOGRAM: quake.js's physical duration (strong
+         motion + coda + an aftershock window) runs to 110 s for a big one,
+         and a match measured 70 s and 100 s of aftershock rattle in which
+         nothing happened. The mainshock and the first aftershocks are the
+         event; the round ends at 40 s. */
+      get activeSecs() { return Math.min(40, qkEnsureRoll(dir.intensity).activeSecs); },
       cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
       // THE FORESHOCK IS THE WARNING. A real quake announces itself by rattling
       // everything loose in the room, so the telegraph is a rising tremor with
@@ -5165,8 +5179,13 @@
             surv().forEachActor((a) => {
               const dx = a.pos.x - x, dz = a.pos.z - z, d = Math.hypot(dx, dz);
               if (d < r0 || d >= r1) return;
-              if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: 5 + 13 * k, fling: k > 0.45 ? 2.5 + 4 * k : 0 });
-              if (k > 0.18) surv().hurt(a, 6 + 30 * k, { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
+              /* A ROOF IS THE ANSWER THE CARD GIVES, so it has to be the
+                 answer the physics gives: indoors the front rattles you and
+                 the glass nicks you (a quarter of the wound, no throw); in the
+                 open it knocks you flat and flings you. */
+              const roofed = sheltered(a);
+              if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: (5 + 13 * k) * (roofed ? 0.3 : 1), fling: !roofed && k > 0.45 ? 2.5 + 4 * k : 0 });
+              if (k > 0.18) surv().hurt(a, (6 + 30 * k) * (roofed ? 0.25 : 1), { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
             });
             if (k > 0.25) structureSweepRing(c, x, z, r0, r1, 0.06 * k);
           },
@@ -5212,7 +5231,12 @@
         const ground = !ctx.st.first || rnd() < 0.4;
         ctx.st.first = true;
         let p = ctx.arena.randomPoint(0, ctx.R * 0.9);
-        if (ground && CBZ.groundShaftCanOpen) {
+        // an exposed player draws one ground strike in four (8-16 m off, the
+        // marker gives ~1.7 s to move), so the roof is the answer you FEEL
+        const PL = CBZ.player;
+        const hunt = ground && !PL.dead && !underRoof(PL.pos.x, PL.pos.z, PL.pos.y) && rnd() < 0.25;
+        if (hunt) { const a4 = rnd() * 6.28, d4 = 8 + rnd() * 8; p = { x: PL.pos.x + Math.cos(a4) * d4, z: PL.pos.z + Math.sin(a4) * d4 }; }
+        else if (ground && CBZ.groundShaftCanOpen) {
           // prefer ground a crater can actually be dug in (flat, dry, clear)
           for (let k2 = 0; k2 < 5; k2++) {
             const q = ctx.arena.randomPoint(0, ctx.R * 0.8);
@@ -5404,8 +5428,73 @@
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }
 
-  const dir = { state: "idle", t: 6, cur: null, curId: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0, overT: 0, overName: null };
+  const dir = { state: "idle", t: 6, cur: null, curId: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0, overT: 0, overName: null,
+    nextId: null, shuffledAt: -1, aliveAt: 0, killed: 0, cap: 0, last: null };
   let curCtx = null;
+
+  /* ============================================================
+     THE ROUND IS A DECISION, NOT A DICE ROLL (2026-09-27).
+
+     Measured on seed 90210 before this: the director gave 4-7 s of warning
+     with no word on screen, so a new player never knew what was coming or
+     what the right move was, and the crowd (whose only brain was "run down
+     the local threat gradient") could not know either. The lobby's fate was
+     the shuffle: one hurricane killed 65 of 100, one volcano 55 of 92, while
+     the gentle openers killed 0-4. Nothing the player did mattered and the
+     first ninety seconds were empty.
+
+     Three things fix it and they live here because the director owns the
+     round:
+
+       BRIEF. Every disaster is ANNOUNCED `BRIEF` seconds before its def's
+       own warn starts, with its name and the one kind of place that saves
+       you (`advice()`). The physical telegraph still plays in the warn; the
+       brief is the beat where the island decides where to run. The HUD and
+       the crowd both read advice(), so the smart survivors are visibly
+       running to the answer while the card is still up.
+
+       THE CURVE. Each disaster may take at most a share of the living
+       lobby, and the share climbs with the round number (10% on the first,
+       nearly half by the ninth, 60% after that). A disaster that would
+       kill past its share leaves the remaining bots on their feet, hurt.
+       The PLAYER is never governed: you die honestly, the crowd thins on a
+       schedule, and a match runs ten-plus disasters instead of three.
+
+       INTENSITY. The escalation floor is higher, so the opener is a real
+       event instead of a storm cell passing on the horizon.
+     ============================================================ */
+  const BRIEF = 7;          // s of announcement before the def's warn
+  const MIN_GAP = BRIEF + 4; // a quiet beat after the all-clear, then the next card
+  const ADVICE = {
+    flood:      { kind: "high",        tip: "Get to high ground. Hills or the top floors of a tall building." },
+    flashflood: { kind: "high",        tip: "Get off the low ground. Climb." },
+    storm:      { kind: "indoors",     tip: "Get inside a building. Stay away from trees and open ground." },
+    hurricane:  { kind: "indoors",     tip: "Get inside a building and go upstairs. The sea comes in behind the wind." },
+    blizzard:   { kind: "indoors",     tip: "Get inside a building or you will freeze." },
+    meteor:     { kind: "indoors",     tip: "Get under a solid roof." },
+    volcano:    { kind: "indoors_far", tip: "Get away from the mountain and get inside." },
+    quake:      { kind: "open",        tip: "Get out of the buildings. Open ground." },
+    wildfire:   { kind: "clear",       tip: "Get away from the trees." },
+    tornado:    { kind: "away",        tip: "Watch the funnel. Run across its path, not ahead of it." },
+    sinkhole:   { kind: "away",        tip: "Watch the ground. When it cracks, run." },
+    nuke:       { kind: "indoors_far", tip: "Get inside, as far from the blast as you can." },
+  };
+  function deathShare(occ, alive) {
+    return Math.min(0.6, 0.1 + 0.045 * Math.max(0, occ - 1));
+  }
+  /* THE ENDGAME. Measured with the curve alone: the last eight bots sat
+     through four disasters that took nobody, then one tornado took all of
+     them at once and the match ended on a frame. So the final few are a
+     countdown instead: at most ONE bot per disaster once the lobby is down
+     to the last handful, and the sky gets meaner and quicker as it thins. */
+  const ENDGAME = 4;
+  function liveBotCount() { return CBZ.surv && CBZ.surv.liveBots ? CBZ.surv.liveBots() : 0; }
+  // the next id in this run's arc, reshuffling at the cycle boundary exactly
+  // once (beginWarn and the brief both ask; whoever asks first shuffles)
+  function peekNext() {
+    if (dir.idx > 0 && dir.idx % order.length === 0 && dir.shuffledAt !== dir.idx) { order = buildOrder(); dir.shuffledAt = dir.idx; }
+    return order[dir.idx % order.length];
+  }
 
   function makeCtx(dt) {
     const A = CBZ.surv.arena;
@@ -5443,10 +5532,14 @@
   function beginWarn() {
     // survived a whole arc? reshuffle the next cycle from the same run stream
     // (nuke-last + gentle-first keeps the wraparound pacing legal by itself)
-    if (dir.idx > 0 && dir.idx % order.length === 0) order = buildOrder();
-    const id = order[dir.idx % order.length];
+    const id = peekNext();
     dir.idx++; dir.occ++;
-    dir.intensity = Math.min(1.7, 0.2 + dir.occ * 0.16);
+    dir.nextId = null;
+    // the curve: this disaster's share of the living lobby
+    dir.aliveAt = liveBotCount(); dir.killed = 0;
+    dir.cap = dir.aliveAt <= ENDGAME ? 1 : Math.max(1, Math.ceil(dir.aliveAt * deathShare(dir.occ, dir.aliveAt)));
+    const late = dir.aliveAt <= 15 ? (15 - dir.aliveAt) / 15 : 0;
+    dir.intensity = Math.min(1.7, 0.42 + dir.occ * 0.12 + 0.5 * late);   // 1.7: the ceiling every def was tuned under
     dir.cur = DEFS[id]; dir.curId = id; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
     dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
@@ -5474,7 +5567,10 @@
     // audit read — nothing draws it.
     dir.overName = dir.cur.name;
     dir.overT = Math.min(4, dir.cur.gap || 4);
-    dir.state = "idle"; dir.t = dir.cur.gap; dir.cur = null; dir.curId = null;
+    // what the round cost, for the SURVIVED card (systems/survivalhud.js)
+    dir.last = { id: dir.curId, name: dir.cur.name, n: dir.occ, killed: Math.max(0, dir.aliveAt - liveBotCount()), alive: CBZ.surv.aliveCount(), you: !CBZ.player.dead, t: CBZ.now };
+    // the last handful get less time to breathe between them
+    dir.state = "idle"; dir.t = Math.max(dir.cur.gap || 0, liveBotCount() <= ENDGAME ? BRIEF + 1.5 : MIN_GAP); dir.cur = null; dir.curId = null;
   }
 
   // one answer to "how dangerous is (x,z) right now", warn phase included
@@ -5507,7 +5603,86 @@
       orderRng = CBZ.seedStream ? CBZ.seedStream("surv-sequence-" + runNo) : null;
       reseedHazards(runNo);      // the hazards themselves, same seed, same run
       order = buildOrder();
-      dir.state = "idle"; dir.t = 7; dir.cur = null; dir.curId = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; dir.overT = 0; dir.overName = null; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
+      // 10 s: three seconds to look around the island, then the first card
+      dir.state = "idle"; dir.t = 10; dir.cur = null; dir.curId = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; dir.overT = 0; dir.overName = null; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
+      dir.nextId = null; dir.shuffledAt = 0; dir.aliveAt = 0; dir.killed = 0; dir.cap = 0; dir.last = null;
+    },
+    /* WHAT IS COMING AND WHAT SAVES YOU. null when the sky is quiet. phase
+       "brief" = announced, the def's warn has not started; tLeft = seconds
+       until the disaster goes ACTIVE. `from` is the hazard's origin where it
+       has one (the volcano, the funnel). Read by the HUD card and the crowd. */
+    advice() {
+      const id = dir.curId || dir.nextId;
+      if (!id) return null;
+      const def = DEFS[id]; if (!def) return null;
+      const a = ADVICE[id] || { kind: "away", tip: "Get clear of it." };
+      const phase = dir.curId ? dir.state : "brief";
+      let tLeft = 0;
+      if (phase === "brief") tLeft = dir.t + (def.warnSecs || 0);
+      else if (phase === "warn") tLeft = dir.t;
+      else tLeft = -Math.max(0, dir.t);        // active: negative = seconds of it left
+      let from = null;
+      const A = CBZ.surv && CBZ.surv.arena;
+      if ((id === "volcano" || id === "nuke") && A && A.hills && A.hills[0]) from = { x: A.hills[0].x, z: A.hills[0].z };
+      if (id === "nuke" && dir.st && dir.st.gx != null) from = { x: dir.st.gx, z: dir.st.gz };
+      if (id === "tornado" && dir.curId === "tornado" && dir.st && dir.st.x != null) from = { x: dir.st.x, z: dir.st.z };
+      return { id, name: def.name, phase, kind: a.kind, tip: a.tip, from, tLeft,
+        warnSecs: def.warnSecs || 0, activeSecs: def.activeSecs || 0, brief: BRIEF, n: dir.curId ? dir.occ : dir.occ + 1 };
+    },
+    /* IS THIS SPOT THE RIGHT KIND OF PLACE for what is coming? One oracle
+       for the HUD's SAFE / EXPOSED chip and anyone else who asks, graded off
+       the same physical tests the disasters use (underRoof is the blizzard's,
+       hurricane's and ash's own shelter test). `y` is feet height.
+       Returns { safe, kind } or null when nothing is coming. */
+    safeAt(x, z, y) {
+      const adv = CBZ.disasters.advice(); if (!adv) return null;
+      const A = CBZ.surv && CBZ.surv.arena; if (!A) return null;
+      let safe = false;
+      const roof = underRoof(x, z, y);
+      if (adv.kind === "indoors") {
+        safe = roof;
+        // the hurricane's surge floods every ground floor on this flat island
+        if (safe && adv.id === "hurricane") safe = y - (CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0) >= 3;
+      }
+      else if (adv.kind === "indoors_far") {
+        const f = adv.from || A.center;
+        safe = roof && Math.hypot(x - f.x, z - f.z) > (adv.id === "volcano" ? 65 : 70);
+      } else if (adv.kind === "high") {
+        const sea = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
+        safe = y - sea >= (adv.id === "flood" ? 11 : 4.5);
+      } else if (adv.kind === "open") {
+        safe = !roof;
+        for (let i = 0; safe && i < A.fragile.length; i++) {
+          const b = A.fragile[i]; if (b.fallen) continue;
+          const ex = Math.max(0, Math.abs(x - b.ox) - b.w / 2), ez = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
+          if (Math.hypot(ex, ez) < Math.max(6, Math.min(24, (b.h || 10) * 0.6))) safe = false;
+        }
+      } else if (adv.kind === "clear") {
+        safe = true;
+        const T = A.flammable || [];
+        for (let i = 0; safe && i < T.length; i++) {
+          const t = T[i]; if (t.burnt) continue;
+          if (Math.hypot(x - t.x, z - t.z) < (t.burning ? 14 : 9)) safe = false;
+        }
+      } else {
+        safe = liveThreat(x, z) < 0.15;
+        if (adv.from && Math.hypot(x - adv.from.x, z - adv.from.z) < 30) safe = false;
+      }
+      return { safe, kind: adv.kind };
+    },
+    // the round just finished (name, number, what it cost), for the HUD
+    lastResult() { return dir.last; },
+    round() { return dir.occ; },
+    /* THE CURVE'S GATE (see BRIEF above). modes/survival.js killBot asks this
+       before a disaster may take a bot: true = spare it (the share for this
+       disaster is spent). Counts every bot death from the warn until the
+       next warn, so the after-effects of a disaster bill to it. */
+    spareBot(b, cause) {
+      if (CBZ.game.mode !== "survival" || !dir.occ) return false;
+      if (cause && /beaten|punch|thrown|shoved|fists/.test(cause)) return false;   // your hands are not the weather
+      if (dir.killed >= dir.cap) return true;
+      dir.killed++;
+      return false;
     },
     threatAt(x, z) { return (dir.cur && curCtx) ? liveThreat(x, z) : 0; },
     /* THE CROWD IS THE WARNING. This is what turns 99 bots from set dressing
@@ -5983,7 +6158,7 @@
 
     // reset the lighting baseline; the active disaster re-tints below
     const e = CBZ.survEnv;
-    e.fog = 0xbfe0ff; e.fogNear = 80; e.fogFar = 380; e.sunInt = 1.08; e.sunColor = 0xfff4e0; e.hemiInt = 0.98; e.hemiColor = 0xeaf4ff;
+    Object.assign(e, CBZ.SURV_CLEAR_SKY || { fog: 0xbfe0ff, fogNear: 80, fogFar: 380, sunInt: 1.08, sunColor: 0xfff4e0, hemiInt: 0.98, hemiColor: 0xeaf4ff });
 
     // crumble animation for collapsed buildings (runs across states): the
     // whole group (walls + every floor + roof) sinks into the ground and
@@ -6019,6 +6194,13 @@
       dir.t -= dt;
       // let the "IT'S OVER" all-clear breathe for a few seconds, then go quiet
       if (dir.overT > 0) { dir.overT -= dt; if (dir.overT <= 0) dir.overName = null; }
+      // THE BRIEF: name the next one while there is still time to act on it
+      if (!dir.nextId && dir.t <= BRIEF) {
+        dir.nextId = peekNext();
+        if (CBZ.shake) CBZ.shake(0.08);
+        // disaster_siren.m4a: the island's warning horn
+        if (CBZ.sfx) { try { CBZ.sfx("siren"); } catch (e) {} }
+      }
       if (dir.t <= 0) beginWarn();
     }
     else if (dir.state === "warn") { dir.t -= dt; warnAmbience(); if (dir.cur.warnTick) try { dir.cur.warnTick(dt, ctx); } catch (e2) {} if (dir.t <= 0) beginActive(ctx); }

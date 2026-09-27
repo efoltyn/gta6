@@ -594,7 +594,20 @@
            zero-crossings of a smooth signed field are guaranteed-CONNECTED
            wandering curves, which is the whole reason the lace anastomoses
            instead of speckling. */
-        const q = (clamp(1 - Math.abs(f) * 1.6, 0, 1) * 255) | 0;
+        /* THE CORE. 2026-09-27, OWNER: "when a volcano looks dumb" — the
+           eruption shot showed an orange vein net skinned over the whole
+           cone, because the lace was the ONLY thing the melt drew: every
+           square metre was equally likely to be a filament. A fed channel
+           is not a net. Its middle, where the flow is fastest, stays OPEN
+           and incandescent; the crust plates only weld over the slower
+           margins. So a bright core rides the channel's own centreline
+           (uv.x 0.5 carries the meander, so the core meanders with it),
+           ~1-1.6 m wide, necking where a raft of crust drifts across it,
+           and the lace is dimmed to the margins around it. */
+        const cw = 1.05 + 0.4 * Math.sin(a * 2 + 0.7) + 0.2 * Math.sin(a * 5 + b * 0.3 + 2.2);
+        const bridge = 0.72 + 0.28 * Math.sin(a * 4 + 1.3) * Math.sin(a * 7 + 0.4);
+        const core = Math.exp(-(vm * vm) / (cw * cw)) * bridge;
+        const q = (clamp(Math.max((1 - Math.abs(f) * 1.6) * 0.78, core), 0, 1) * 255) | 0;
         const o = (py * S + pxi) * 4, q3 = q * 3;
         D[o] = LUT[q3]; D[o + 1] = LUT[q3 + 1]; D[o + 2] = LUT[q3 + 2]; D[o + 3] = 255;
       }
@@ -642,10 +655,25 @@
        other half of the anti-zig-zag fix: lava has momentum and a metre of
        lateral wobble per four metres travelled is not momentum, it is noise.
        smoothPath then files off what survives. */
+    /* LAVA LEAVES A RIM THROUGH ITS LOWEST NOTCH. The caller hands a
+       bearing off the rim; the flow looks a few metres down a +-0.5 rad fan
+       and takes the lowest heading, which on the stratovolcano is the head
+       of the nearest barranco — so the flow is IN a valley from its first
+       station instead of draping a ridge and having to slide off it. */
+    let bearing0 = o.bearing;
+    if (bearing0 != null) {
+      let bestH = 1e9, best = bearing0;
+      for (let k = -5; k <= 5; k++) {
+        const a = bearing0 + k * 0.1;
+        const hh = groundAt(o.x + Math.cos(a) * 7, o.z + Math.sin(a) * 7) + Math.abs(k) * 0.02;
+        if (hh < bestH) { bestH = hh; best = a; }
+      }
+      bearing0 = best;
+    }
     const path = smoothPath(fallLine({
-      x: o.x, z: o.z, groundAt: groundAt, bearing: o.bearing,
+      x: o.x, z: o.z, groundAt: groundAt, bearing: bearing0,
       step: seg, count: Math.ceil(len / seg) + 1, salt: salt,
-      turn: 0.3, wander: 0.06,
+      turn: 0.42, wander: 0.05,
     }), 2, groundAt);
     const N = path.pts.length;
 
@@ -703,7 +731,21 @@
          one and a half, which is the bible photograph's belly-and-neck. */
       const sm = i * seg;
       const lobe = 1 + 0.34 * Math.sin(sm * 0.26 + wPh1) + 0.17 * Math.sin(sm * 0.62 + wPh2);
-      wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * lobe * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
+      /* CONFINED ON THE CONE, SPREADING ON THE PLAIN. The width used to grow
+         with distance alone, so a flood-width stem (6-14 m from the caller)
+         was already ~9 m wide a third of the way down a 30 m cone: six of
+         them skinned the whole mountain. What sets a lava flow's width is the
+         GROUND: on a steep flank it is confined to its channel (a few metres,
+         sitting in the barranco it found), and only where the slope eases
+         does it spread into a broad lobe. So the local grade squeezes it —
+         to ~0.3 of the caller's width on the upper cone — and the necking
+         wave is damped there too (a channel between levees does not belly). */
+      const pa = path.pts[Math.max(0, i - 1)], pb = path.pts[Math.min(N - 1, i + 1)];
+      const grade = Math.max(0, pa.y - pb.y) / Math.max(0.5, Math.hypot(pb.x - pa.x, pb.z - pa.z));
+      const steep = clamp((grade - 0.12) / 0.55, 0, 1);
+      const sq = 1 - 0.7 * steep * steep * (3 - 2 * steep);
+      const lobeK = 1 + (lobe - 1) * (1 - 0.6 * steep);
+      wProf[i] = (0.62 + 0.6 * Math.pow(u, 0.7)) * sq * lobeK * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
       // temperature falls downstream — this is the whole colour story.
       // Gentled from 0.72: the toe of an ACTIVE flow is still ~1000 C rock
       // arriving from the vent, dull orange rather than near-black.
@@ -1351,6 +1393,233 @@
     return _sunXZ;
   }
 
+  /* ============================================================
+     THE PUFF BATCH — every billboard in a cloud, ONE draw call.
+
+     r128 draws every THREE.Sprite as its own call, whatever the material:
+     the column was 80-156 calls and the fountain another 56-132, i.e. the
+     eruption alone cost more draws than the whole town on an iPad. This is
+     the same billboard as a Sprite (a camera-facing quad, rotated in the
+     view plane, unlit) drawn as instances of one quad, with the per-puff
+     state that used to live on 156 SpriteMaterials — position, size,
+     rotation, colour, opacity, mask — in instanced attributes rewritten
+     each frame (a few KB), and the instances SORTED back to front on the
+     CPU so normal-blended smoke still layers correctly.
+
+     Two things a Sprite could not do, and the reason the column reads as a
+     volume now:
+       UNDERLIGHT  each puff carries how much of the vent's light reaches it,
+                   and the shader paints that onto the puff's LOWER half
+                   only, fading up through the mask — the lit underside of a
+                   convective column over a glowing crater;
+       ATLAS       the three lit puff masks share one texture, so every puff
+                   still picks its own lobe pattern inside one call.
+     Colours arrive LINEAR (screenHex-authored) and go through the same tone
+     map + output encoding as the Sprites did, so nothing about the palette
+     moved.
+     ============================================================ */
+  let _puffAtlas = null;
+  function puffAtlas() {
+    if (_puffAtlas) return _puffAtlas;
+    const S = 128, cv = document.createElement("canvas");
+    cv.width = S * 3; cv.height = S;
+    const g = cv.getContext("2d");
+    for (let k = 0; k < 3; k++) g.drawImage(puffTex(k).image, k * S, 0);
+    _puffAtlas = new THREE.CanvasTexture(cv);
+    return _puffAtlas;
+  }
+  const PUFF_VS = [
+    "attribute vec3 iPos;",
+    "attribute vec4 iSR;",      // size x, size y, rotation, atlas tile
+    "attribute vec4 iCol;",     // rgb, opacity
+    "attribute float iUnder;",  // vent underlight 0..1
+    "varying vec2 vUv;",
+    "varying vec4 vCol;",
+    "varying float vUnder;",
+    "#include <fog_pars_vertex>",
+    "void main() {",
+    "  vec4 mvPosition = viewMatrix * vec4(iPos, 1.0);",
+    "  float c = cos(iSR.z), s = sin(iSR.z);",
+    "  vec2 p = position.xy * iSR.xy;",
+    "  mvPosition.xy += vec2(c * p.x - s * p.y, s * p.x + c * p.y);",
+    "  gl_Position = projectionMatrix * mvPosition;",
+    "  vUv = vec2((uv.x + iSR.w) * uTiles, uv.y);",
+    "  vCol = iCol;",
+    "  vUnder = iUnder;",
+    "  #include <fog_vertex>",
+    "}",
+  ].join("\n");
+  const PUFF_FS = [
+    "uniform sampler2D map;",
+    "uniform vec3 uUnderCol;",
+    "varying vec2 vUv;",
+    "varying vec4 vCol;",
+    "varying float vUnder;",
+    "#include <fog_pars_fragment>",
+    "void main() {",
+    "  vec4 t = texture2D(map, vUv);",
+    "  vec3 col = t.rgb * vCol.rgb;",
+    // the underside: strongest at the quad's foot, gone by two thirds up
+    "  float u = vUnder * (1.0 - smoothstep(0.0, 0.68, vUv.y));",
+    "  col = mix(col, uUnderCol * (0.55 + 0.45 * t.r), clamp(u, 0.0, 1.0));",
+    "  gl_FragColor = vec4(col, t.a * vCol.a);",
+    "  if (gl_FragColor.a < 0.004) discard;",
+    "  #include <tonemapping_fragment>",
+    "  #include <encodings_fragment>",
+    "  #include <fog_fragment>",
+    "}",
+  ].join("\n");
+  /* puffBatch(n, {map, tiles, additive, fog, underCol, renderOrder, parent})
+     -> { mesh, set(i, x,y,z, sx,sy, rot, tile, r,g,b,a, under), hide(i),
+          commit(), dispose() } */
+  function puffBatch(n, o) {
+    o = o || {};
+    const tiles = o.tiles || 1;
+    const quad = new THREE.PlaneGeometry(1, 1);
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.setIndex(quad.index);
+    geo.setAttribute("position", quad.attributes.position);
+    geo.setAttribute("uv", quad.attributes.uv);
+    const aPos = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+    const aSR = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+    const aCol = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+    const aUn = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    [aPos, aSR, aCol, aUn].forEach(function (a) { a.setUsage(THREE.DynamicDrawUsage); });
+    geo.setAttribute("iPos", aPos); geo.setAttribute("iSR", aSR);
+    geo.setAttribute("iCol", aCol); geo.setAttribute("iUnder", aUn);
+    geo.instanceCount = 0;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+        map: { value: null }, uUnderCol: { value: new THREE.Color(o.underCol != null ? o.underCol : 0x000000) },
+      }]),
+      vertexShader: "#define uTiles " + (1 / tiles).toFixed(6) + "\n" + PUFF_VS,
+      fragmentShader: PUFF_FS,
+      transparent: true, depthWrite: false, depthTest: true,
+      fog: o.fog !== false,
+      blending: o.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    });
+    mat.uniforms.map.value = o.map;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = o.renderOrder != null ? o.renderOrder : 7;
+    (o.parent || CBZ.scene).add(mesh);
+    // staging, in caller order; commit() sorts the live ones into the attributes
+    const sx = new Float32Array(n * 13), live = new Uint8Array(n);
+    const order = [], depth = new Float32Array(n);
+    const _cp = new THREE.Vector3(), _cd = new THREE.Vector3();
+    const B = {
+      mesh: mesh, material: mat, count: n,
+      set(i, x, y, z, w, h, rot, tile, r, g, b, a, under) {
+        const k = i * 13;
+        sx[k] = x; sx[k + 1] = y; sx[k + 2] = z; sx[k + 3] = w; sx[k + 4] = h;
+        sx[k + 5] = rot; sx[k + 6] = tile; sx[k + 7] = r; sx[k + 8] = g; sx[k + 9] = b;
+        sx[k + 10] = a; sx[k + 11] = under || 0;
+        live[i] = a > 0.003 && w > 0.01 ? 1 : 0;
+      },
+      hide(i) { live[i] = 0; },
+      commit() {
+        const cam = CBZ.camera;
+        order.length = 0;
+        if (cam) { cam.getWorldPosition(_cp); cam.getWorldDirection(_cd); }
+        for (let i = 0; i < n; i++) {
+          if (!live[i]) continue;
+          const k = i * 13;
+          depth[i] = cam ? (sx[k] - _cp.x) * _cd.x + (sx[k + 1] - _cp.y) * _cd.y + (sx[k + 2] - _cp.z) * _cd.z : 0;
+          order.push(i);
+        }
+        // far first; additive light does not care, but it costs nothing
+        if (!o.additive) order.sort(function (p, q) { return depth[q] - depth[p]; });
+        const P = aPos.array, S = aSR.array, C = aCol.array, U = aUn.array;
+        for (let j = 0; j < order.length; j++) {
+          const k = order[j] * 13;
+          P[j * 3] = sx[k]; P[j * 3 + 1] = sx[k + 1]; P[j * 3 + 2] = sx[k + 2];
+          S[j * 4] = sx[k + 3]; S[j * 4 + 1] = sx[k + 4]; S[j * 4 + 2] = sx[k + 5]; S[j * 4 + 3] = sx[k + 6];
+          C[j * 4] = sx[k + 7]; C[j * 4 + 1] = sx[k + 8]; C[j * 4 + 2] = sx[k + 9]; C[j * 4 + 3] = sx[k + 10];
+          U[j] = sx[k + 11];
+        }
+        geo.instanceCount = order.length;
+        mesh.visible = order.length > 0;
+        aPos.needsUpdate = aSR.needsUpdate = aCol.needsUpdate = aUn.needsUpdate = true;
+        return order.length;
+      },
+      dispose() {
+        if (mesh.parent) mesh.parent.remove(mesh);
+        geo.dispose(); quad.dispose(); mat.dispose();
+      },
+    };
+    return B;
+  }
+  V.puffBatch = puffBatch;
+
+  /* ============================================================
+     FUMAROLES — the mountain breathing at rest.
+
+     For the first minute of every match the volcano is the island's
+     landmark and nothing else, and a dormant stratovolcano is never quite
+     still: a thin white wisp leans off a vent on the crater wall and tears
+     apart downwind. That one moving thing on the summit is what says
+     "this is alive" before anything erupts. Steam, not ash: pale, very
+     thin, climbing a dozen metres and gone. One instanced draw for every
+     vent. It hands the sky over to the column while one stands (fades out)
+     and comes back when the eruption is over.
+     ============================================================ */
+  V.fumarole = function (o) {
+    o = o || {};
+    const vents = (o.vents && o.vents.length) ? o.vents : [{ x: +o.x || 0, y: +o.y || 0, z: +o.z || 0 }];
+    const PER = qi(7, 11);
+    const N = PER * vents.length;
+    const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: true, parent: o.parent, renderOrder: 6 });
+    const C_DAY = new THREE.Color(screenHex(214, 212, 206));
+    const C_NIGHT = new THREE.Color(screenHex(62, 64, 70));
+    const col = new THREE.Color();
+    let seed = ((o.salt | 0) ^ 0x3c6ef372) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const LIFE = 7.5;
+    const P = [];
+    for (let i = 0; i < N; i++) {
+      P.push({ v: vents[i % vents.length], life: (i / N) * LIFE, jx: 0, jz: 0, sz: 0.8 + 0.4 * rnd(), rot: (rnd() - 0.5) * 0.5, tile: i % 3, big: (i % vents.length) === 0 ? 1 : 0.7 });
+    }
+    let fade = 1, dead = false;
+    const handle = {
+      kind: "fumarole", mesh: B.mesh,
+      update(dt) {
+        if (dead || !(dt > 0)) return handle;
+        if (dt > 0.2) dt = 0.2;
+        // the eruption column owns the summit while it stands
+        const want = LIVE.column.length ? 0 : 1;
+        fade += (want - fade) * Math.min(1, dt * 0.8);
+        let wx = 0.8, wz = 0.35;
+        try {
+          const w = CBZ.weatherWind ? CBZ.weatherWind() : null;
+          if (w && w.speed > 0.2) { const L = Math.hypot(w.x, w.z) || 1; wx = w.x / L; wz = w.z / L; }
+        } catch (e) { /* no weather: a light sea breeze */ }
+        const night = clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
+        col.copy(C_DAY).lerp(C_NIGHT, night);
+        for (let i = 0; i < N; i++) {
+          const p = P[i];
+          p.life += dt;
+          if (p.life >= LIFE) {
+            p.life -= LIFE;
+            p.jx = (rnd() - 0.5) * 0.8; p.jz = (rnd() - 0.5) * 0.8;
+            p.sz = 0.8 + 0.4 * rnd(); p.rot = (rnd() - 0.5) * 0.5;
+          }
+          const u = p.life / LIFE;
+          // rises fast off the vent, then the breeze takes it over
+          const rise = 11 * p.big * (1 - Math.pow(1 - u, 1.8));
+          const lean = 9 * u * u * p.big;
+          const s = (1.1 + 5.5 * u) * p.sz * p.big;
+          const a = fade * 0.26 * Math.min(1, u / 0.12) * Math.pow(1 - u, 1.5);
+          B.set(i, p.v.x + p.jx + wx * lean, p.v.y + 0.6 + rise, p.v.z + p.jz + wz * lean,
+            s * 1.15, s, p.rot + u * 0.3, p.tile, col.r, col.g, col.b, a, 0);
+        }
+        B.commit();
+        return handle;
+      },
+      dispose() { if (dead) return; dead = true; B.dispose(); },
+    };
+    return handle;
+  };
+
   V.ashColumn = function (o) {
     o = o || {};
     const parent = o.parent || CBZ.scene;
@@ -1358,7 +1627,6 @@
     const baseY = o.y != null ? +o.y : 0;
     const height = o.height > 0 ? +o.height : 55;
     const r0 = o.r > 0 ? +o.r : 7;
-    const mats = [];
     /* `fogless`: the column is the eruption's LANDMARK, and a 180 m pillar
        whose head sits 250+ m from any camera on a 240 m island was being
        dissolved by the eruption's own 380 m fog wall — the most dramatic
@@ -1366,53 +1634,39 @@
        to matter. Soot against sky owes the air nothing (city/nukefx.js's
        lobes made the same call), so the caller may exempt it. */
     const useFog = o.fogless ? false : true;
-    /* The volcano's OWN mask, always — puffTex is lit from above (see it),
-       which the RPG's shared smoke mask is not; borrowing that mask was
-       what made the column's crown read as pale coins. */
-    // Screen-authored soot. Base is a dirty brown (fresh ash in its own
-    // shadow), the body neutral, the crown a shade lighter where it is out
-    // in the open; NIGHT is a silhouette and SUN is the lit face of the
-    // head; VENT is the crater's own light thrown up onto the column's foot.
-    const CH_BASE = screenHex(30, 25, 21);
-    const CH_BODY = screenHex(48, 45, 43);
-    const CH_CROWN = screenHex(68, 65, 61);
+    // Screen-authored soot. Base is near-black (fresh ash in its own shadow,
+    // the jet still full of rock), the body a dark neutral, the crown a shade
+    // lighter where it is out in the open; NIGHT is a silhouette and SUN is
+    // the lit face of the head; VENT is the crater's light thrown up onto the
+    // column's foot (applied to each puff's UNDERSIDE, in the shader).
+    const CH_BASE = screenHex(22, 19, 17);
+    const CH_BODY = screenHex(46, 43, 41);
+    const CH_CROWN = screenHex(74, 70, 66);
     const C_NIGHT = new THREE.Color(screenHex(12, 12, 15));
-    const C_SUN = new THREE.Color(screenHex(172, 164, 149));
-    const C_VENT = new THREE.Color(screenHex(214, 96, 38));
+    const C_SUN = new THREE.Color(screenHex(176, 166, 150));
+    const C_VENT = screenHex(236, 112, 40);
     // how far up the crater's own glow reaches — the Fuego photograph's
     // burning foot is roughly two vent diameters of lit column
-    const VENT_REACH = 18 + 0.95 * r0;
-    const N = qi(80, 156);
-    const grp = new THREE.Group();
-    grp.frustumCulled = false;
-    parent.add(grp);
+    const VENT_REACH = 20 + 1.1 * r0;
+    /* One instanced draw now (see puffBatch), so the population is set by
+       fill rate, not by draw calls: more, smaller-relative puffs give the
+       head its cauliflower lobes instead of a few big discs. */
+    const N = qi(110, 200);
+    const B = puffBatch(N, {
+      map: puffAtlas(), tiles: 3, fog: useFog, parent: parent, renderOrder: 7, underCol: C_VENT,
+    });
     /* u = life/RISE: 0 birth at the vent, 1 arrival at the head, then a
        bounded cauliflower hold before recycle. Births fill the whole cycle
        at a constant cadence: the plume grows honestly from an empty vent,
        then reaches a steady state where every lifecycle age is represented
        and no recycle can open a missing-age hole through the middle. */
-    const RISE = 5, END = 1.4;
+    const RISE = 5.5, END = 1.45;
     // A local seeded stream makes the silhouette stable without stealing
     // random calls from bomb, lava and hazard gameplay downstream.
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x61a5c3d7) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const puffs = [];
     for (let i = 0; i < N; i++) {
-      /* Per-puff material state. Shared materials made every billboard
-         rotate and fade in lockstep, which is what let the eye resolve a
-         repeated card pattern; here rotation, opacity and the baked light
-         are all owned, so nothing advances together. */
-      const mat = new THREE.SpriteMaterial({
-        map: puffTex(i % 3), color: CH_BODY,
-        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
-        // near upright: the mask carries its own light, and it has to stay on top
-        fog: useFog, blending: THREE.NormalBlending, rotation: (rnd() - 0.5) * 0.5,
-      });
-      mats.push(mat);
-      const m = new THREE.Sprite(mat);
-      m.renderOrder = 7;
-      m.visible = false;
-      grp.add(m);
       const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2);   // core / body / edge
       // sqrt keeps the population area-uniform across the disc instead of
       // piling every puff onto the axis; the edge tier is allowed past 1 so
@@ -1420,21 +1674,24 @@
       const rr = role === 0 ? 0.44 * Math.sqrt(rnd())
         : (role === 1 ? 0.26 + 0.56 * Math.sqrt(rnd()) : 0.66 + 0.46 * rnd());
       puffs.push({
-        m: m, role: role,
+        role: role,
         life: -(i / N) * RISE * END,
         ang: rnd() * 6.2832,
         rr: rr,
         ph: rnd() * 6.2832,
         sz: (role === 0 ? 1.06 : (role === 1 ? 0.98 : 0.82)) * (0.78 + 0.44 * rnd()),
         aspect: 0.74 + rnd() * 0.54,
+        rot: (rnd() - 0.5) * 0.5,
         spin: (rnd() - 0.5) * 0.05,   // a slow rock, never a turn (the lit mask)
         wind: 0.76 + rnd() * 0.38,
-        maxOp: role === 0 ? 0.56 : (role === 1 ? 0.46 : 0.28),
+        tile: i % 3,
+        maxOp: role === 0 ? 0.62 : (role === 1 ? 0.5 : 0.3),
       });
     }
+    const col = new THREE.Color();
     let t = 0, dead = false;
     const handle = {
-      kind: "column", group: grp, puffCount: N,
+      kind: "column", group: B.mesh, puffCount: N,
       /* opts.night (0 day .. 1 night) is the caller's day clock — tickEruption
          already computes it and it is the difference between a black
          silhouette and a grey smudge. Absent, the sky's own sun height
@@ -1450,7 +1707,7 @@
         for (let i = 0; i < puffs.length; i++) {
           const P = puffs[i];
           P.life += dt;
-          if (P.life < 0) { P.m.visible = false; continue; }
+          if (P.life < 0) { B.hide(i); continue; }
           let u = P.life / RISE;
           if (u >= END) {
             P.life = 0; u = 0;
@@ -1459,37 +1716,35 @@
             P.wind = 0.76 + rnd() * 0.38;
           }
           const climb = Math.min(1, u);
-          // Buoyant ash leaves the throat fast and crowds at neutral
-          // buoyancy. That crowd — not one giant disc — is the head.
-          const hh = 1 - Math.pow(1 - climb, 1.3);
+          // Buoyant ash leaves the throat fast (the gas-thrust jet) and slows
+          // as it reaches neutral buoyancy. That crowd — not one giant disc —
+          // is the head.
+          const hh = 1 - Math.pow(1 - climb, 1.45);
           const head = clamp((u - 1) / (END - 1), 0, 1);
-          /* ENTRAINMENT IS THE SHAPE: a mouth the size of the vent, growing
-             ~0.2 m of radius per metre climbed, then a broad turbulent cap. */
-          const axisR = (r0 + 0.2 * hh * height) * (1 + 0.85 * head);
+          /* ENTRAINMENT IS THE SHAPE: a jet the width of the vent for the
+             first tenth (the gas-thrust region is narrow and dense), then
+             ~0.2 m of radius per metre climbed, then a broad turbulent cap
+             that spreads sideways at neutral buoyancy — an anvil, not a ball. */
+          const jet = hh < 0.1 ? 0.75 + 2.5 * hh : 1;
+          const axisR = (r0 * jet + 0.2 * hh * height) * (1 + 1.05 * head);
           const lean = height * 0.27 * hh * hh * P.wind;
           // A slow helical roll belongs to convection; nothing is added to
           // world position as a sinusoid, so no puff bounces on a fixed seat.
           const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
           const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.34 : 0.12));
-          const capLift = head * height * (0.03 + 0.05 * Math.sin(P.ph));
+          const capLift = head * height * (0.02 + 0.04 * Math.sin(P.ph));
           const py = baseY + hh * height + capLift;
-          P.m.position.set(
-            x + Math.cos(drift) * radial + bx * lean,
-            py,
-            z + Math.sin(drift) * radial + bz * lean
-          );
           // sized off the LOCAL radius: overlap depth is scale-free, so the
-          // burp and the big one are both masses rather than strings
-          const sc = axisR * (0.52 + 0.44 * P.sz) * (1 + 0.16 * head);
-          P.m.scale.set(sc * P.aspect, sc * (1.12 - (P.aspect - 0.74) * 0.3), 1);
+          // burp and the big one are both masses rather than strings; puffs
+          // keep swelling as they age (the billow)
+          const sc = axisR * (0.5 + 0.42 * P.sz) * (1 + 0.22 * head) * (0.85 + 0.15 * climb);
           // BORN AT THE CRATER — full inside ~2 % of the rise (about 2 m),
           // behind the vent apron and the fountain
           const born = clamp(u / 0.016, 0, 1);
           const dying = u < 1.2 ? 1 : clamp((END - u) / (END - 1.2), 0, 1);
-          P.m.material.opacity = P.maxOp * born * dying;
-          P.m.material.rotation += P.spin * dt;
+          const op = P.maxOp * born * dying * (1 + 0.25 * (1 - hh));   // the dense foot
+          P.rot += P.spin * dt;
           // ---- the light on the soot, baked per puff ----
-          const col = P.m.material.color;
           ramp3(hh, CH_BASE, CH_BODY, CH_CROWN, col);
           if (night > 0) col.lerp(C_NIGHT, night * 0.88);
           /* THE SUN SIDE. A convecting head is a solid, and the half of it
@@ -1499,24 +1754,27 @@
             const sunSide = (Math.cos(drift) * sd.x + Math.sin(drift) * sd.z) * P.rr;
             if (sunSide > 0) col.lerp(C_SUN, sunSide * day * (0.10 + 0.46 * hh));
           }
-          /* AND THE VENT LIGHTS THE FOOT. Fuego by night: the pillar is
-             black except for the stretch standing on the crater, which is
-             rose-orange from below. */
+          /* AND THE VENT LIGHTS THE FOOT FROM BELOW. Fuego by night: the
+             pillar is black except for the stretch standing on the crater,
+             whose undersides are rose-orange. */
           const dy = py - baseY;
+          let under = 0;
           if (dy < VENT_REACH) {
             const gk = 1 - dy / VENT_REACH;
-            col.lerp(C_VENT, gk * gk * (0.2 + 0.68 * night));
+            under = gk * gk * (0.28 + 0.62 * night);
           }
-          P.m.visible = P.m.material.opacity > 0.012 && sc > 0.05;
+          B.set(i,
+            x + Math.cos(drift) * radial + bx * lean, py, z + Math.sin(drift) * radial + bz * lean,
+            sc * P.aspect, sc * (1.12 - (P.aspect - 0.74) * 0.3), P.rot, P.tile,
+            col.r, col.g, col.b, Math.min(0.85, op), under);
         }
+        B.commit();
         return handle;
       },
       dispose() {
         if (dead) return;
         dead = true;
-        for (let i = 0; i < puffs.length; i++) grp.remove(puffs[i].m);
-        parent.remove(grp);
-        for (let i = 0; i < mats.length; i++) mats[i].dispose();
+        B.dispose();
         const k = LIVE.column.indexOf(handle); if (k >= 0) LIVE.column.splice(k, 1);
       },
     };
@@ -1566,12 +1824,12 @@
     const F_HOT = new THREE.Color(screenHex(255, 246, 214));
     const F_MID = new THREE.Color(screenHex(255, 140, 38));
     const F_OLD = new THREE.Color(screenHex(152, 30, 8));
-    const grp = new THREE.Group();
-    grp.frustumCulled = false;
-    parent.add(grp);
+    // one additive instanced draw for every clot (was one Sprite call each)
+    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 8 });
+    const _fc = new THREE.Color();
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x1d3f77b1) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const mats = [], clots = [];
+    const clots = [];
     function launch(P) {
       const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * mouth;
       P.x = x + Math.cos(a) * rr; P.y = baseY; P.z = z + Math.sin(a) * rr;
@@ -1591,23 +1849,13 @@
       P.tf = Math.max(0.35, 2 * P.vy / G);
     }
     for (let i = 0; i < N; i++) {
-      const mat = new THREE.SpriteMaterial({
-        map: glowTex(), color: 0xffffff, transparent: true, opacity: 0,
-        depthWrite: false, depthTest: true, fog: false,
-        blending: THREE.AdditiveBlending,
-      });
-      mats.push(mat);
-      const m = new THREE.Sprite(mat);
-      m.renderOrder = 8;
-      m.visible = false;
-      grp.add(m);
-      const P = { m: m, mat: mat, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, wait: (i / N) * 1.2 };
+      const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, wait: (i / N) * 1.2 };
       launch(P);
       clots.push(P);
     }
     let dead = false, active = 1;
     const handle = {
-      kind: "fountain", group: grp, clotCount: N,
+      kind: "fountain", group: B.mesh, clotCount: N,
       setActive(k) { active = clamp(k == null ? 1 : +k, 0, 1); return handle; },
       update(dt) {
         if (dead) return handle;
@@ -1616,8 +1864,8 @@
         const live = Math.max(1, Math.round(N * (0.25 + 0.75 * active)));
         for (let i = 0; i < clots.length; i++) {
           const P = clots[i];
-          if (i >= live) { P.m.visible = false; continue; }
-          if (P.wait > 0) { P.wait -= dt; P.m.visible = false; continue; }
+          if (i >= live) { B.hide(i); continue; }
+          if (P.wait > 0) { P.wait -= dt; B.hide(i); continue; }
           P.age += dt;
           P.vy -= G * dt;
           P.x += P.vx * dt; P.y += P.vy * dt; P.z += P.vz * dt;
@@ -1627,32 +1875,29 @@
              clot passes the vent lip and kept until it lands. */
           if (P.vy < 0 && P.y < baseY) {
             if (P.gy == null) { try { P.gy = +groundAt(P.x, P.z) || 0; } catch (e) { P.gy = baseY - 30; } }
-            if (P.y <= P.gy) { launch(P); P.m.visible = false; continue; }
+            if (P.y <= P.gy) { launch(P); B.hide(i); continue; }
           }
           const k = clamp(P.age / P.tf, 0, 1);
           // white-yellow -> orange -> dull red, and dimming the whole way
-          const col = P.mat.color;
+          const col = _fc;
           if (k < 0.42) col.copy(F_HOT).lerp(F_MID, k / 0.42);
           else col.copy(F_MID).lerp(F_OLD, (k - 0.42) / 0.58);
-          P.mat.opacity = 0.82 * (1 - 0.6 * k) * clamp(P.age / 0.06, 0, 1);
+          const op = 0.82 * (1 - 0.6 * k) * clamp(P.age / 0.06, 0, 1);
           /* A CLOT IS MOVING. Stretching the card along the flight — most of
              which is vertical — is the whole difference between a bead and a
              tracer, and it costs one scale component. It relaxes to a round
              lump at the apex, where the clot really has stopped. */
           const s = P.sz * (1 + 0.3 * k);
           const stretch = 1 + 0.55 * clamp(Math.abs(P.vy) / V0, 0, 1);
-          P.m.position.set(P.x, P.y, P.z);
-          P.m.scale.set(s / Math.sqrt(stretch), s * stretch, 1);
-          P.m.visible = true;
+          B.set(i, P.x, P.y, P.z, s / Math.sqrt(stretch), s * stretch, 0, 0, col.r, col.g, col.b, op, 0);
         }
+        B.commit();
         return handle;
       },
       dispose() {
         if (dead) return;
         dead = true;
-        for (let i = 0; i < clots.length; i++) grp.remove(clots[i].m);
-        parent.remove(grp);
-        for (let i = 0; i < mats.length; i++) mats[i].dispose();
+        B.dispose();
         const k = LIVE.fountain.indexOf(handle); if (k >= 0) LIVE.fountain.splice(k, 1);
       },
     };
@@ -2156,7 +2401,7 @@
       side: THREE.DoubleSide,
       // same neutral floor the ash deposit uses, and for the same reason: an
       // eruption's sun is 0xff6a3a and mud is not peach
-      emissive: 0x14161a, emissiveIntensity: 1,
+      emissive: 0x040506, emissiveIntensity: 1,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     });
     const mesh = new THREE.Mesh(geo, mat);
@@ -2212,7 +2457,12 @@
              paler and dustier still, which is what makes the scar legible
              after the event. */
           const grain = 0.85 + 0.3 * h01(x, z, salt + 17);
-          ramp3(clamp(0.25 + 0.5 * (1 - au) + setK * 0.8, 0, 1), 0x453d35, 0x655c4f, 0x968d81, _c3);
+          /* ...but those hexes were authored as SWATCHES, and this pipeline
+             reads a vertex colour as LINEAR (the linear-hex trap, top of the
+             file): 0x968d81 is a 0.3 linear albedo and photographed as a
+             near-white paper sheet lying on the cone. These are the linear
+             albedos of wet and drying volcanic mud (0.04-0.13). */
+          ramp3(clamp(0.25 + 0.5 * (1 - au) + setK * 0.8, 0, 1), 0x0b0a08, 0x16130f, 0x241f1a, _c3);
           col[off] = _c3.r * grain;
           col[off + 1] = _c3.g * grain;
           col[off + 2] = _c3.b * grain;

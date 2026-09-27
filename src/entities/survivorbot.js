@@ -80,6 +80,25 @@
 
   function seaAt(x, z) { return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) : -1e9; }
   function bedAt(x, z) { return CBZ.surv ? CBZ.surv.floorAt(x, z) : 0; }
+  /* WHERE THE FEET GO. Survival bodies stand on the same walkable surfaces the
+     player does (physics.js groundAt: floors, landings, the stair ramps, with
+     its step-up rule), so a survivor can take the stairs to the first floor
+     when the storm surge is coming. Everywhere else (Shark Sim) the feet stay
+     on the terrain exactly as before. `_lift` is how far above the terrain the
+     body stands, which the water test subtracts: a dry first floor is dry. */
+  function standY(b) {
+    const bed = bedAt(b.pos.x, b.pos.z);
+    if (!CBZ.groundAt || !CBZ.game || CBZ.game.mode !== "survival") { b._lift = 0; return bed; }
+    // groundAt only knows the terrain the mode registered, not the sinkholes
+    // surv.floorAt cuts into it: take its answer only when it is a PLATFORM
+    // (above the bare terrain), otherwise the hole-aware bed stands
+    const g = CBZ.groundAt(b.pos.x, b.pos.z, b.pos.y);
+    const A = CBZ.surv.arena;
+    const terr = A && A.groundHeightAt ? A.groundHeightAt(b.pos.x, b.pos.z) : bed;
+    const y = g > terr + 0.02 && g > bed ? g : bed;
+    b._lift = y - bed;
+    return y;
+  }
   // Metres of water over the bed here, measured against MEAN sea level.
   function waterDepth(x, z) {
     if (CBZ.survFloodDepthMeanAt) return Math.max(0, CBZ.survFloodDepthMeanAt(x, z));
@@ -234,10 +253,12 @@
        moved between runs. Zeroed with the crowd it schedules. */
     frame = 0;
     if (CBZ.fixedStep) CBZ.fixedStep.tick = 0;
+    // the brain's clock and memory are match state too
+    simT = 0; adv = null; advKey = ""; advEp = 0; shelterArena = null; shelters = null; occ = null; shelterThr = null; minThreat = 0;
     let s = 7 + n;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let i = 0; i < n; i++) {
-      const p = arena.randomPoint(10, arena.radius * 0.8);
+      const p = arena.randomPoint(arena.hills && arena.hills[0] ? arena.hills[0].r + 2 : 10, arena.radius * 0.8);   // in the town, not on the cone
       const b = makeBot(p.x, p.z, rr);
       arena.root.add(b.group);
       CBZ.bots.push(b);
@@ -362,6 +383,576 @@
     return dx * dx + dz * dz >= 1;                   // still on its way
   }
 
+  /* ============================================================
+     THE SURVIVOR BRAIN (survival mode only).
+
+     The crowd's only answer to a disaster used to be fleeVector(): walk down
+     the local threat gradient, and only once the threat at your own feet was
+     over 0.15. Nobody ever went to the RIGHT KIND of place, so every "mega"
+     disaster took most of the lobby at random. Measured on seed 90210 with the
+     death-share governor stubbed off, one disaster forced on a fresh 99:
+     hurricane 76 dead, meteor 52, volcano 35, tsunami 28, storm 19, quake 22,
+     blizzard 2 (full matches: hurricanes took 91/99, 47/48, 46/47).
+
+     Now every disaster has an answer (CBZ.disasters.advice().kind) and each
+     survivor goes for it with its own skill:
+
+       high         a hill that stays dry for THIS water: the mountain for a
+                    tsunami (its flood tops the small hills), any hill for a
+                    flash flood; never the volcano in an eruption
+       indoors      inside an intact building, under a slab; in a hurricane
+                    UPSTAIRS first, because the surge floods every ground floor
+                    on this island (it is flat, 0-1 m)
+       indoors_far  a building on the far side of `from` (the volcano), past
+                    the director's own safeAt() line
+       open         out of the buildings, clear of them by safeAt()'s rule
+       clear        clear of the trees by safeAt()'s rule (9 m, 14 m burning)
+       away         the old fleeVector gradient (tornado, sinkholes)
+
+     SKILL is one number per body, hashed from two spawn draws the body
+     already has (reactivity, baseSpeed), so it costs the match stream no draw
+     at all. It sets how long you stand and stare at the thing before moving
+     (0.3 to 4 s after the card), whether you pick the best shelter, a sloppy
+     one (the nearest, the second best, ignoring the far-side rule), or just
+     run down the gradient, and whether you follow someone: a low-skill body
+     with no plan latches onto a smarter neighbour within 16 m and copies where
+     they are going, which is what makes the smart ones worth watching.
+
+     Buildings are boxes with the ground-floor door on the -z face. A plan is a
+     short list of waypoints: round the corner if you are behind it, the step
+     in front of the door, the step inside it, then your own spot (or up the
+     stair ramp to one on the first floor: survival bodies now stand on the
+     same walkable platforms the player does, see standY). Spots are sampled
+     once per building (under a slab, clear of every wall) and are the
+     capacity: when a building is full the next body picks another, and a
+     good head also avoids buildings the live threat has reached. A steep
+     local hazard (a strike marker, lava at the door) beats the plan for as
+     long as it is there. After the all-clear everybody inside walks back
+     down and out of the door and goes back to wandering.
+
+     Cost: the advice is read ONCE per frame; a plan is built once per body per
+     disaster (31 buildings, a dozen samples); following it is a distance test.
+     ============================================================ */
+  const KIND_OF = {
+    flood: "high", flashflood: "high", storm: "indoors", hurricane: "indoors",
+    blizzard: "indoors", meteor: "indoors", volcano: "indoors_far", nuke: "indoors_far",
+    quake: "open", wildfire: "clear", tornado: "away", sinkhole: "away",
+  };
+  let adv = null, advEp = 0, advKey = "";
+  let simT = 0;                                  // match sim clock (deterministic)
+  let shelters = null, shelterArena = null;      // per-building door + spots, lazily
+  let occ = null;                                // occupants per building this episode
+  let shelterThr = null, minThreat = 0;          // live threat at each building, refreshed ~3x/s
+  function threatOf(s) { return shelterThr ? shelterThr[s.i] : 0; }
+  function refreshShelterThreat() {
+    if (!shelters || !CBZ.disasters.threatAt) return;
+    if (!shelterThr || shelterThr.length !== shelters.length) shelterThr = new Float32Array(shelters.length);
+    let m = 1e9;
+    for (let i = 0; i < shelters.length; i++) {
+      const b = shelters[i].b;
+      const t = b.fallen ? 1 : Math.max(CBZ.disasters.threatAt(b.ox, b.oz), CBZ.disasters.threatAt(b.ox, b.oz - b.d / 2 - 1.7));
+      shelterThr[i] = t;
+      if (!b.fallen && t < m) m = t;
+    }
+    minThreat = m === 1e9 ? 0 : m;
+  }
+
+  function survOn() { return CBZ.game && CBZ.game.mode === "survival"; }
+
+  // one read per frame; a new disaster (or a new occurrence of one) is a new episode
+  function readAdvice() {
+    const D = CBZ.disasters;
+    let a = null;
+    if (D && survOn()) {
+      if (D.advice) a = D.advice();
+      else if (D.currentId) {
+        // fallback until the director publishes advice(): the same table, no brief
+        const id = D.currentId(), st = D.state();
+        if (id && st !== "idle") {
+          const A = CBZ.surv && CBZ.surv.arena;
+          a = { id: id, phase: st, kind: KIND_OF[id] || "away", tLeft: st === "warn" ? D.timeLeft() : -D.timeLeft(),
+            from: (id === "volcano" || id === "nuke") && A && A.hills[0] ? { x: A.hills[0].x, z: A.hills[0].z } : null };
+        }
+      }
+    }
+    const key = a ? a.id + ":" + (a.n != null ? a.n : "") : "";
+    if (key !== advKey) {
+      advKey = key;
+      if (a) { advEp++; if (occ) occ.fill(0); if (shelterThr) shelterThr.fill(0); minThreat = 0; }
+    }
+    adv = a;
+    if (a && a.phase !== "brief" && frame % 20 === 0 && shelterReady()) refreshShelterThreat();
+  }
+
+  // integer hash -> [0,1). Pure arithmetic, identical on every client.
+  function hmix(a, b) {
+    let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul((b | 0) + 0x632be5ab, 0xc2b2ae35);
+    h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15;
+    return (h >>> 0) / 4294967296;
+  }
+  function hidOf(b) {
+    if (b._hid == null) b._hid = (((+b.reactivity || 0) * 1e9) | 0) ^ ((((+b.baseSpeed || 2) * 1e6) | 0) << 3);
+    return b._hid;
+  }
+  // 0 = panics, 1 = cool head. Skewed a little low: most people are not experts.
+  function skillOf(b) {
+    if (b._skill == null) b._skill = Math.pow(hmix(hidOf(b), 1), 1.15);
+    return b._skill;
+  }
+
+  // ---- the buildings as shelters ------------------------------------------
+  function inside(s, x, z, pad) {
+    return Math.abs(x - s.b.ox) < s.b.w / 2 - (pad || 0) && Math.abs(z - s.b.oz) < s.b.d / 2 - (pad || 0);
+  }
+  function buildShelters(arena) {
+    shelters = []; shelterArena = arena;
+    const list = arena.fragile || [];
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      const zf = b.oz - b.d / 2;
+      shelters.push({
+        b: b, i: i, spots: null, cap: 0,
+        out: { x: b.ox, z: zf - 1.7 },          // the step in front of the door
+        door: { x: b.ox, z: zf + 1.3 },         // the step inside it
+      });
+    }
+    occ = new Int16Array(shelters.length);
+  }
+  /* SPOTS: where a body stands inside. The ground floor under the first slab,
+     and (when the building has a flight of stairs) the FIRST FLOOR under the
+     second one, reached up the stair ramp: foot of the flight, top of it, the
+     landing, then the floor. Everything is read off the building's own
+     platform and collider records, so a building grammar that changes shape
+     changes its spots with it. Sampled once per building per arena. */
+  function sampleFloor(b, top, x0, x1, z0, z1, out) {
+    const plats = b.platforms || [], cols = b.colliders || [];
+    for (let z = z1; z >= z0; z -= 1.25) {
+      for (let x = x0; x <= x1; x += 1.25) {
+        const y = top == null ? bedAt(x, z) : top, head = y + 2.1;
+        let roof = false, ramp = false;
+        for (let k = 0; k < plats.length; k++) {
+          const p = plats[k];
+          if (x < p.minX - 0.3 || x > p.maxX + 0.3 || z < p.minZ - 0.3 || z > p.maxZ + 0.3) continue;
+          if (p.ramp) { if (p.ramp.y1 > y + 0.2 && p.ramp.y0 < head) ramp = true; continue; }
+          if (x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ && p.top > head) roof = true;
+        }
+        if (!roof || ramp) continue;
+        if (top != null) {                                    // upstairs: there must be floor under you
+          let floor = false;
+          for (let k = 0; k < plats.length && !floor; k++) {
+            const p = plats[k];
+            if (!p.ramp && Math.abs(p.top - top) < 0.05 && x > p.minX + 0.45 && x < p.maxX - 0.45 && z > p.minZ + 0.45 && z < p.maxZ - 0.45) floor = true;
+          }
+          if (!floor) continue;
+        }
+        let hit = false;
+        for (let k = 0; k < cols.length && !hit; k++) {
+          const c = cols[k];
+          if (c.y1 != null && (c.y1 < y + 0.3 || c.y0 > y + 1.7)) continue;
+          if (x > c.minX - 0.6 && x < c.maxX + 0.6 && z > c.minZ - 0.6 && z < c.maxZ + 0.6) hit = true;
+        }
+        if (!hit) out.push({ x: x, z: z, y: y });
+      }
+    }
+    return out;
+  }
+  function spotsOf(s) {
+    if (s.spots) return s.spots;
+    const b = s.b;
+    const x0 = b.ox - b.w / 2 + 0.9, x1 = b.ox + b.w / 2 - 0.9;
+    const z0 = b.oz - b.d / 2 + 1.6, z1 = b.oz + b.d / 2 - 0.9;
+    s.spots = sampleFloor(b, null, x0, x1, z0, z1, []);
+    s.cap = Math.min(s.spots.length, Math.max(2, Math.floor((b.w * b.d) / 5)));
+    // the first flight: the ramp that starts on the ground floor
+    s.up = null; s.upCap = 0;
+    const plats = b.platforms || [];
+    let r0 = null;
+    for (let k = 0; k < plats.length; k++) {
+      const p = plats[k];
+      if (p.ramp && Math.abs(p.ramp.y0 - b.gy) < 0.35 && p.ramp.axis !== "x") { r0 = p; break; }
+    }
+    if (r0 && (b.storeys || 1) >= 2) {
+      const R = r0.ramp, top = R.y1, dz = R.z1 > R.z0 ? 1 : -1;
+      const lx = (r0.minX + r0.maxX) / 2;
+      let landing = null, slab = null, la = 0;
+      for (let k = 0; k < plats.length; k++) {
+        const p = plats[k];
+        if (p.ramp || Math.abs(p.top - top) > 0.05) continue;
+        const area = (p.maxX - p.minX) * (p.maxZ - p.minZ);
+        if (area > la) { la = area; slab = p; }
+        if (R.z1 + dz * 0.5 >= p.minZ && R.z1 + dz * 0.5 <= p.maxZ && lx >= p.minX - 0.2 && lx <= p.maxX + 0.2) landing = p;
+      }
+      if (slab && landing && slab !== landing) {
+        const spots = sampleFloor(b, top, slab.minX + 0.6, slab.maxX - 0.6, slab.minZ + 0.6, slab.maxZ - 0.6, []);
+        if (spots.length) {
+          /* Tight arrival radii (r) on the stair: the flight is a lane with a
+             drop on one side, and a body that turns for the next waypoint
+             while still on the ramp steps off it and lands on the ground
+             floor. The TOP waypoint is already on the landing for the same
+             reason, and the floor is entered along the landing's own line
+             (the next flight up starts beside it; cutting the corner walks
+             into the stairwell). */
+          const lcx = (landing.minX + landing.maxX) / 2, lcz = (landing.minZ + landing.maxZ) / 2;
+          const cl = function (v, a, c) { return v < a ? a : (v > c ? c : v); };
+          s.up = {
+            wps: [
+              { x: lx, z: R.z0 + dz * 0.4, r: 0.65 },                          // foot of the flight
+              { x: lx, z: R.z1 + dz * 0.55, r: 0.65 },                        // top of it, on the landing
+              { x: lcx, z: lcz, r: 0.7 },                                     // the landing
+              { x: cl(lcx, slab.minX + 0.8, slab.maxX - 0.8), z: cl(lcz, slab.minZ + 0.8, slab.maxZ - 0.8), r: 0.7 },
+            ],
+            spots: spots, y: top,
+          };
+          s.upCap = Math.min(spots.length, Math.max(2, Math.floor(((slab.maxX - slab.minX) * (slab.maxZ - slab.minZ)) / 5)));
+        }
+      }
+    }
+    s.capAll = s.cap + s.upCap;
+    return s.spots;
+  }
+  function shelterReady(arena) {
+    const A = arena || (CBZ.surv && CBZ.surv.arena);
+    if (!A) return false;
+    if (shelterArena !== A) buildShelters(A);
+    return shelters.length > 0;
+  }
+  function shelterAt(x, z) {
+    if (!shelters) return null;
+    for (let i = 0; i < shelters.length; i++) if (!shelters[i].b.fallen && inside(shelters[i], x, z, 0)) return shelters[i];
+    return null;
+  }
+
+  // waypoints from (x,z) to a building's door: round the near corner(s) first
+  // if the body is not already in front of the -z face
+  function pushDoorPath(wps, s, x, z) {
+    const b = s.b, zf = b.oz - b.d / 2, zb = b.oz + b.d / 2;
+    const side = x >= b.ox ? 1 : -1, cx = b.ox + side * (b.w / 2 + 1.7);
+    const beside = Math.abs(x - b.ox) > b.w / 2 + 0.8;
+    if (z > zf - 0.8) {
+      if (z > zb - 0.5 && !beside) wps.push({ x: cx, z: zb + 1.7 });
+      wps.push({ x: cx, z: zf - 1.7 });
+    }
+    wps.push(s.out, s.door);
+  }
+  // the way out of whatever building the body is standing in
+  function pushExit(wps, x, z, y) {
+    const s = shelterAt(x, z);
+    if (!s) return null;
+    spotsOf(s);
+    if (s.up && y != null && y > s.b.gy + 1.2) {              // upstairs: back down the flight first
+      const u = s.up.wps;
+      for (let k = u.length - 1; k >= 0; k--) wps.push(u[k]);
+    }
+    wps.push(s.door, { x: s.out.x, z: s.out.z - 1.5 });
+    return s;
+  }
+
+  // ---- choosing -------------------------------------------------------------
+  // how far from `from` counts as the far side: the director's safeAt() line
+  // plus a couple of metres, so a body that gets there is safe by the HUD's rule
+  function farEnough() { return adv && adv.id === "nuke" ? 72 : 57; }
+  function pickShelter(b, far, sloppy) {
+    if (!shelterReady()) return null;
+    const from = adv && adv.from;
+    let best = null, bs = 1e9, second = null, ss = 1e9;
+    for (let i = 0; i < shelters.length; i++) {
+      const s = shelters[i];
+      if (s.b.fallen) continue;
+      spotsOf(s);
+      if (!s.capAll || occ[i] >= s.capAll) continue;
+      const dx = s.out.x - b.pos.x, dz = s.out.z - b.pos.z;
+      let score = Math.hypot(dx, dz);
+      if (!sloppy) {
+        score += (occ[i] / s.capAll) * 14;                    // spread the crowd
+        score += Math.max(0, threatOf(s) - minThreat) * 70;   // not where the hazard is going
+        if (adv && adv.id === "hurricane" && !s.up) score += 25; // the surge floods every ground floor
+        if (b.pos.z > s.b.oz - s.b.d / 2) score += s.b.w * 0.8; // the walk round to the door
+      }
+      if (far && from) {
+        const fd = Math.hypot(s.b.ox - from.x, s.b.oz - from.z);
+        if (!sloppy) { if (fd < farEnough()) continue; score -= fd * 0.9; }
+      }
+      if (score < bs) { second = best; ss = bs; best = s; bs = score; }
+      else if (score < ss) { second = s; ss = score; }
+    }
+    // a middling head sometimes settles for the second-best door
+    if (second && sloppy === 1 && hmix(hidOf(b), advEp * 13 + 5) < 0.5) return second;
+    return best;
+  }
+  function pickHigh(b, sloppy) {
+    const A = CBZ.surv.arena;
+    const hills = A.hills || [];
+    const noVol = adv && (adv.id === "volcano" || adv.id === "nuke");
+    // a tsunami's flood reaches 4.6-14.3 m above the sea: only the mountain is
+    // certain. A flash flood is under two metres: any hill will do.
+    const need = adv && adv.id === "flood" ? 16 : 6;
+    let best = null, bs = 1e9;
+    for (let i = 0; i < hills.length; i++) {
+      if (i === 0 && noVol) continue;
+      const h = hills[i];
+      if (bedAt(h.x, h.z) < 2) continue;                      // a shoal is not a refuge
+      const d = Math.hypot(h.x - b.pos.x, h.z - b.pos.z);
+      const score = sloppy ? d : d + (h.peak < need ? 400 : 0) - h.peak * 2;
+      if (score < bs) { bs = score; best = h; }
+    }
+    if (!best) return null;
+    // the highest ground on the near side of it, not a hand-typed summit
+    // (hills[0] is a caldera: its rim, not its centre, is the top)
+    const own = Math.atan2(b.pos.z - best.z, b.pos.x - best.x);
+    const jit = (hmix(hidOf(b), 7) - 0.5) * 1.4;
+    let gx = best.x, gz = best.z, gy = -1e9;
+    for (let k = 0; k < 5; k++) {
+      const r = best.r * (0.08 + k * 0.1);
+      for (let j = -1; j <= 1; j++) {
+        const a = own + jit + j * 0.5;
+        const x = best.x + Math.cos(a) * r, z = best.z + Math.sin(a) * r;
+        const y = bedAt(x, z) - r * 0.01;
+        if (y > gy) { gy = y; gx = x; gz = z; }
+      }
+    }
+    return { x: gx, z: gz };
+  }
+  // open ground: dry, and farther from every building than it is tall (quake),
+  // or clear of the trees (wildfire: 9 m from a live one, 14 m from a burning one)
+  function pickOpen(b, trees) {
+    const A = CBZ.surv.arena;
+    const list = trees ? (A.flammable || []) : (A.fragile || []);
+    const base = hmix(hidOf(b), advEp * 3 + 11) * 6.283;
+    let best = null, bs = -1e9;
+    for (let k = 0; k < 10; k++) {
+      const a = base + k * 0.628, r = k < 5 ? 14 : 26;
+      const x = b.pos.x + Math.cos(a) * r, z = b.pos.z + Math.sin(a) * r;
+      const y = bedAt(x, z);
+      if (waterDepth(x, z) > 0.05) continue;                  // dry land, not the sea
+      let clear = 1e9;
+      for (let i = 0; i < list.length; i++) {
+        const o = list[i];
+        // the clearances are the director's own safeAt() rules, so a body that
+        // gets there is standing where the HUD would call the player safe
+        let d;
+        if (trees) {
+          if (o.burnt) continue;
+          d = Math.hypot(o.x - x, o.z - z) - (o.burning ? 14 : 9);
+        } else {
+          if (o.fallen) continue;
+          const ex = Math.max(0, Math.abs(x - o.ox) - o.w / 2), ez = Math.max(0, Math.abs(z - o.oz) - o.d / 2);
+          d = Math.hypot(ex, ez) - Math.max(6, Math.min(24, (o.h || 10) * 0.6));
+        }
+        if (d < clear) clear = d;
+      }
+      const score = Math.min(clear, 30) - r * 0.08 - Math.max(0, y - 6) * 0.5;
+      if (score > bs) { bs = score; best = { x: x, z: z }; }
+    }
+    return best;
+  }
+
+  // ---- the plan ---------------------------------------------------------
+  // b.plan = { ep, kind, s (shelter) | null, wps: [...], wi, spot, t (built),
+  //            best (closest so far to the current waypoint), bestT, detours }
+  function roomIn(s) { spotsOf(s); return occ[s.i] < s.capAll; }
+  // which spot the n-th occupant gets: the storm surge sends them upstairs first
+  function assignSpot(s, wps) {
+    const n = occ[s.i]++;
+    const upFirst = !!(adv && adv.id === "hurricane");
+    const upN = upFirst ? n : n - s.cap;
+    if (s.up && upN >= 0 && upN < s.upCap) {
+      for (let k = 0; k < s.up.wps.length; k++) wps.push(s.up.wps[k]);
+      wps.push(s.up.spots[upN % s.up.spots.length]);
+      return;
+    }
+    const L = s.spots.length;
+    const gN = upFirst ? n - s.upCap : n;
+    wps.push(s.spots[((gN % L) + L) % L]);
+  }
+  function makePlan(b, kind, sloppy, forceShelter) {
+    const wps = [];
+    const from = pushExit(wps, b.pos.x, b.pos.z, b.pos.y);
+    const p = { ep: advEp, kind: kind, s: null, wps: wps, wi: 0, t: simT, best: 1e9, bestT: simT, detours: 0 };
+    if (kind === "indoors" || kind === "indoors_far") {
+      const far = kind === "indoors_far";
+      let s = forceShelter && !forceShelter.b.fallen && roomIn(forceShelter) ? forceShelter : null;
+      // already indoors somewhere that will do: stay there
+      if (!s && from && !from.b.fallen && roomIn(from) && threatOf(from) < minThreat + 0.3 &&
+        (!far || !adv.from || Math.hypot(from.b.ox - adv.from.x, from.b.oz - adv.from.z) > farEnough())) s = from;
+      if (!s) s = pickShelter(b, far, sloppy);
+      if (!s || (!s.spots.length && !s.up)) return null;
+      if (from === s) wps.length = 0;                         // already in it
+      else pushDoorPath(wps, s, from ? from.out.x : b.pos.x, from ? from.out.z - 1.5 : b.pos.z);
+      assignSpot(s, wps);
+      p.s = s;
+    } else if (kind === "high") {
+      const g = pickHigh(b, sloppy);
+      if (!g) return null;
+      wps.push(g);
+    } else if (kind === "open" || kind === "clear") {
+      const g = pickOpen(b, kind === "clear");
+      if (!g) return null;
+      wps.push(g);
+    } else return null;
+    return p;
+  }
+  function dropPlan(b) {
+    const p = b.plan;
+    if (p && p.s && p.ep === advEp && occ && occ[p.s.i] > 0) occ[p.s.i]--;
+    b.plan = null;
+  }
+
+  // walk the plan: returns true while it owns the body this think
+  function followPlan(b, urg) {
+    const p = b.plan;
+    if (p.s && p.s.b.fallen) { dropPlan(b); return false; }
+    let w = p.wps[p.wi];
+    if (!w) { dropPlan(b); return false; }
+    const last = p.wi === p.wps.length - 1;
+    let d = Math.hypot(w.x - b.pos.x, w.z - b.pos.z);
+    // (never under 0.55: move() stops 0.5 m short of any target)
+    if (!last && d < Math.max(0.55, w.r || 1.1)) {
+      p.wi++; w = p.wps[p.wi]; p.best = 1e9; p.bestT = simT;
+      d = Math.hypot(w.x - b.pos.x, w.z - b.pos.z);
+    }
+    // stuck: no progress for a while -> step sideways, then give up
+    if (d < p.best - 0.3) { p.best = d; p.bestT = simT; }
+    else if (d > 0.9 && simT - p.bestT > 2.6) {
+      if (++p.detours > 4) { dropPlan(b); return false; }
+      const side = (p.detours & 1) ? 1 : -1;
+      const nx = -(w.z - b.pos.z) / (d || 1), nz = (w.x - b.pos.x) / (d || 1);
+      p.wps.splice(p.wi, 0, { x: b.pos.x + nx * side * 3.5 - (w.x - b.pos.x) / (d || 1) * 1.2, z: b.pos.z + nz * side * 3.5 - (w.z - b.pos.z) / (d || 1) * 1.2 });
+      w = p.wps[p.wi]; p.best = 1e9; p.bestT = simT;
+    }
+    b.target.set(w.x, 0, w.z);
+    b.pause = 0;
+    if (last && d < 1.2) {                                     // there: stay put
+      b.state = p.exit ? "wander" : "hide"; b.urg = 0;
+      if (p.exit) { b.plan = null; b.pause = 0.5; }
+      return true;
+    }
+    b.urg = urg;
+    b.state = urg > 0.35 ? "flee" : "move";
+    return true;
+  }
+
+  // a panicking body looks round for somebody who seems to know where they
+  // are going, and goes there too
+  function herd(b, sk) {
+    if (sk > 0.55 || simT < (b._herdT || 0)) return false;
+    b._herdT = simT + 1.2;
+    const bots = CBZ.bots;
+    let lead = null, bd = 16 * 16;
+    for (let i = 0; i < bots.length; i++) {
+      const o = bots[i];
+      if (o === b || o.dead || !o.plan || o.plan.exit || o.plan.ep !== advEp) continue;
+      if (skillOf(o) < sk + 0.2) continue;
+      const dx = o.pos.x - b.pos.x, dz = o.pos.z - b.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; lead = o; }
+    }
+    if (!lead) return false;
+    const lp = lead.plan;
+    const p = makePlan(b, lp.kind, 0, lp.s);
+    if (!p) return false;
+    if (!lp.s) {                                              // same hill / clearing, own patch of it
+      const g = lp.wps[lp.wps.length - 1];
+      const j = hmix(hidOf(b), 17) * 6.283;
+      p.wps[p.wps.length - 1] = { x: g.x + Math.cos(j) * 2.5, z: g.z + Math.sin(j) * 2.5 };
+    }
+    p.herd = true;
+    b.plan = p;
+    return true;
+  }
+
+  /* One think of the survivor brain. true = it owns the body this tick. */
+  function survivorThink(b) {
+    // the all-clear: whoever is still holding a plan walks back out of the door
+    if (!adv) {
+      if (b.plan && !b.plan.exit) {
+        b.plan = null;
+        const wps = [];
+        if (pushExit(wps, b.pos.x, b.pos.z, b.pos.y)) b.plan = { ep: advEp, exit: true, kind: "exit", s: null, wps: wps, wi: 0, t: simT, best: 1e9, bestT: simT, detours: 0 };
+      }
+      b._seenEp = 0;
+      if (b.plan && b.plan.exit) return followPlan(b, 0);
+      return false;
+    }
+    if (b.plan && b.plan.ep !== advEp) dropPlan(b);
+    const sk = skillOf(b);
+    if (b._seenEp !== advEp) {                                // first sight of this card
+      b._seenEp = advEp;
+      b._reactT = simT + 0.3 + 3.7 * Math.pow(1 - sk, 1.6);
+      const roll = hmix(hidOf(b), advEp * 7 + 3);
+      // 0 = best answer, 1 = second-best / nearest, 2 = ignores the advice and
+      // runs down the gradient. At skill 0: 45% run, 45% sloppy, 10% right.
+      // At skill 0.5: 16% / 22% / 62%. Past 0.9 almost always right.
+      const u = 1 - sk, pRun = 0.45 * Math.pow(u, 1.5), pSloppy = 0.45 * u;
+      b._mode = roll < pRun ? 2 : (roll < pRun + pSloppy ? 1 : 0);
+      b._planned = false;
+    }
+    const kind = adv.kind;
+    const tLeft = adv.tLeft > 0 ? adv.tLeft : 0;
+    const urg = adv.phase === "active" ? 1 : Math.max(0.2, Math.min(1, 1.15 - tLeft / 14));
+
+    // THE STARE. Before the reaction lands the body stops and looks at it.
+    if (simT < b._reactT) {
+      const fv = CBZ.disasters.fleeVector(b.pos.x, b.pos.z);
+      if (fv && fv.w > 0.5) { b._reactT = simT; }             // it is already on you: go
+      else {
+        const f = adv.from;
+        if (f) { b._lookX = f.x; b._lookZ = f.z; }
+        else if (fv && (fv.x || fv.z)) { b._lookX = b.pos.x - fv.x * 10; b._lookZ = b.pos.z - fv.z * 10; }
+        else b._lookX = null;
+        b.state = "look"; b.urg = 0; b.pause = 0;
+        b.target.set(b.pos.x, 0, b.pos.z);
+        return true;
+      }
+    }
+    b._lookX = null;
+
+    if (!b.plan && !b._planned && kind !== "away") {
+      b._planned = true;
+      if (b._mode < 2) b.plan = makePlan(b, kind, b._mode);
+    }
+    if (!b.plan && kind !== "away" && herd(b, sk)) { /* following someone */ }
+    // clearing is a moving target: the fire spreads, look again now and then
+    if (b.plan && kind === "clear" && simT - b.plan.t > 4 && b.plan.wi === b.plan.wps.length - 1) {
+      dropPlan(b); b.plan = makePlan(b, kind, b._mode ? 1 : 0);
+    }
+    if (!b.plan) return false;                                // the old gradient
+
+    /* A LOCAL HAZARD BEATS THE PLAN: a strike marker on your roof, lava at the
+       door. Only a steep one — the threat here is much worse than a dozen
+       metres downhill of it — so a storm that is bad everywhere never pulls
+       anybody back out of the shelter it is the answer to. A good head also
+       gives up a shelter the hazard has reached and picks another. */
+    if (adv.phase !== "brief") {
+      const fv = CBZ.disasters.fleeVector(b.pos.x, b.pos.z);
+      if (fv && fv.w > 0.55 && (fv.x || fv.z)) {
+        const t2 = CBZ.disasters.threatAt ? CBZ.disasters.threatAt(b.pos.x + fv.x * 12, b.pos.z + fv.z * 12) : 0;
+        if (fv.w - t2 > 0.3) {
+          if (b.plan.s && b._mode === 0 && threatOf(b.plan.s) > minThreat + 0.35 && simT - b.plan.t > 2) {
+            dropPlan(b); b.plan = makePlan(b, kind, 0);
+          }
+          return false;                                        // the gradient has this one
+        }
+      }
+    }
+    return followPlan(b, urg);
+  }
+
+  /* THE BRAIN AS NUMBERS: what the crowd is doing about the current card.
+     `shelters` lists [spots, cap, occupants] per building; `under` is how many
+     living bodies are standing under a slab right now. */
+  CBZ.survBrainAudit = function () {
+    const out = { advice: adv ? adv.id + "/" + adv.phase + "/" + adv.kind : null, ep: advEp, plans: 0, herd: 0, look: 0, exit: 0, modes: [0, 0, 0], shelters: [] };
+    const bots = CBZ.bots || [];
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (b.dead) continue;
+      if (b.plan) { out.plans++; if (b.plan.herd) out.herd++; if (b.plan.exit) out.exit++; }
+      if (b.state === "look") out.look++;
+      if (b._seenEp === advEp && b._mode != null) out.modes[b._mode]++;
+    }
+    if (shelterReady()) for (let i = 0; i < shelters.length; i++) { const s = shelters[i]; spotsOf(s); out.shelters.push([s.spots.length, s.cap, s.up ? s.up.spots.length : 0, s.upCap, occ[i], +threatOf(s).toFixed(2)]); }
+    return out;
+  };
+
   // ---- the lean brain: decide target + state ----
   function think(b) {
     if (b.dead) return;
@@ -404,6 +995,10 @@
         return;
       }
     } else if (b.panicT > 0) { b.panicT = 0; b.foe = null; }
+
+    // the survivor brain goes to the right KIND of place (see above); when it
+    // has no plan (a panicker, a tornado, a sinkhole) the gradient below runs
+    if (survOn() && CBZ.disasters && survivorThink(b)) return;
 
     // run from the active disaster (there are no zones — the hazard itself
     // is the only pressure a survivor reacts to)
@@ -515,7 +1110,11 @@
           }
           b.target.set(ring.cx + Math.cos(th) * d, 0, ring.cz + Math.sin(th) * d);
         } else {
-          const d = brnd() * arena.radius * 0.6;
+          // the town ring, not the volcano: a uniform draw inside 0.6 R put
+          // a third of the island strolling up bare scoria on a live cone.
+          // Same single draw (the count is match state), reshaped.
+          const cone = arena.hills && arena.hills[0] ? arena.hills[0].r * 0.85 : 0;
+          const d = cone + brnd() * Math.max(4, arena.radius * 0.84 - cone);
           b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
         }
         b.pause = 0.6 + brnd() * 2.2;
@@ -580,7 +1179,7 @@
        hysteresis reads it: on the wavy surface a swell rolling past flips a
        body between wading and swimming several times a second, and each flip
        is an entry splash. city/swim.js learned this the same way. */
-    const depth = waterDepth(b.pos.x, b.pos.z);
+    const depth = Math.max(0, waterDepth(b.pos.x, b.pos.z) - (b._lift || 0));
     b.wet = depth > 0.25;
     const wasSwim = !!b.swim;
     if (depth >= SWIM_ENTER) b.swim = true;
@@ -624,6 +1223,10 @@
       // The dwell is per-body and costs no new draw: `reactivity` is already
       // one, so a twitchy survivor moves on in half a second and a placid one
       // stands in the surf for four.
+      // the stare: a body waiting to react turns to face the thing coming
+      if (b.state === "look" && b._lookX != null) {
+        b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(b._lookX - b.pos.x, b._lookZ - b.pos.z), 1 - Math.pow(0.02, dt));
+      }
       if (b.state === "wander" && !b._arrived) {
         b._arrived = true;
         b.pause = Math.max(b.pause, 0.5 + (+b.reactivity || 0) * 3.5);
@@ -632,7 +1235,7 @@
     // bots walk the terrain only (they don't climb); pass their body span so the
     // height-gated upper-floor walls of buildings don't block them at ground level
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
-    b.pos.y = CBZ.surv ? CBZ.surv.floorAt(b.pos.x, b.pos.z) : 0;
+    b.pos.y = CBZ.surv ? standY(b) : 0;
     if (animate) animChar(b.char, b.speed, dt);
   }
 
@@ -740,6 +1343,8 @@
   CBZ.onUpdate(23, function (dt) {
     if (!CBZ.islandModeOn(CBZ.game.mode)) return;
     frame++;
+    simT += dt;
+    readAdvice();                                    // once per frame for the whole crowd
     // ONE scan of the bestiary for the whole crowd, on its own slow clock. See
     // refreshThreats: a hundred bots each scanning it would be a hundred scans
     // of a list that changes twice a second.
@@ -858,7 +1463,7 @@
            swim looked like it did nothing at all. */
         clamp(a) {
           if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y, a.pos.y + 1.7);
-          if (!a._p && !a.swim) a.pos.y = CBZ.surv ? CBZ.surv.floorAt(a.pos.x, a.pos.z) : 0;
+          if (!a._p && !a.swim) a.pos.y = CBZ.surv ? standY(a) : 0;
         },
       });
       return;
