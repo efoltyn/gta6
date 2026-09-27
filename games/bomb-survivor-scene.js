@@ -270,14 +270,17 @@
     "  #elif BS_KIND == 3",
     "  float e = bsEdge();",
     "  vec2 b = e < 1.4 ? bsBond( uv, vec2( 1.0, 0.7 ), 0.5 ) : bsBond( uv, vec2( 0.21, 0.11 ), 0.5 );",
-    "  shade *= 1.0 + ( b.y - 0.5 ) * ( e < 1.4 ? 0.12 : 0.3 );",
-    "  diffuseColor.rgb *= mix( vec3( 1.04, 0.97, 0.9 ), vec3( 0.93, 0.97, 1.03 ), bsH( vec2( b.y, 9.1 ) ) );",
-    "  shade *= mix( 0.86, mix( 0.42, 1.0, h ), bsFar );",
+    // a 21 cm sett is under a pixel past ~40 m: fade its joints and per-stone
+    // tint there, or the running bond beats against the pixel grid (moire)
+    "  float sF = e < 1.4 ? bsFar : 1.0 - smoothstep( 8.0, 38.0, bsD );",
+    "  shade *= 1.0 + ( b.y - 0.5 ) * ( e < 1.4 ? 0.12 : 0.3 ) * sF;",
+    "  diffuseColor.rgb *= mix( vec3( 1.0 ), mix( vec3( 1.04, 0.97, 0.9 ), vec3( 0.93, 0.97, 1.03 ), bsH( vec2( b.y, 9.1 ) ) ), sF );",
+    "  shade *= mix( 0.86, mix( 0.42, 1.0, h ), sF );",
     "  shade *= 1.0 - 0.3 * smoothstep( 0.58, 0.86, bsF( bsW.xz * 0.07 ) );",        // oil and soot
     "  shade *= 1.0 - 0.12 * ( 1.0 - smoothstep( 0.0, 3.0, e ) );",                  // spray darkens the edge
     "  shade *= mix( 1.0, 0.9 + 0.2 * bsH( floor( uv * 90.0 ) ), bsFine );",
     "  wet = smoothstep( 0.69, 0.73, bsF( bsW.xz * 0.045 + 11.0 ) );",              // standing water
-    "  relief = 0.02 * ( 1.0 - wet );",
+    "  relief = 0.02 * ( 1.0 - wet ) * sF;",
     // ------------------------------------------------ ROCK
     "  #elif BS_KIND == 4",
     "  shade *= 0.8 + 0.4 * bsF( uv * 1.7 );",
@@ -830,7 +833,7 @@
     if (!SURF_U.bsRect.value) SURF_U.bsRect.value = new THREE.Vector4();
     SURF_U.bsRect.value.set((outer.minX + outer.maxX) / 2, (outer.minZ + outer.maxZ) / 2,
       (outer.maxX - outer.minX) / 2, (outer.maxZ - outer.minZ) / 2);
-    const m = new THREE.Mesh(mergeGeos(THREE, parts), surfaceMat(THREE, K.SETTS, { color: 0x77736c, roughness: 0.88 }));
+    const m = new THREE.Mesh(mergeGeos(THREE, parts), surfaceMat(THREE, K.SETTS, { color: 0x56534d, roughness: 0.9 }));
     m.name = "bombApron";
     m.receiveShadow = true;
     m.matrixAutoUpdate = false; m.updateMatrix();
