@@ -60,8 +60,11 @@
      knowing an island exists. Never build a second water height model.       */
   CBZ.survSeaMeanY = function () { return arena_meanY(); };
   CBZ.survSeaWave = function () { return arenaWave; };
+  // metres the water at (x,z) still sits below the flood because a tsunami
+  // front has not reached it (water_spec.js uDwAhead / waterFrontDropAt)
+  function frontDrop(x, z) { return CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(x, z) : 0; }
   CBZ.survSeaHeightAt = function (x, z) {
-    const mean = arena_meanY();
+    const mean = arena_meanY() - frontDrop(x, z);
     return CBZ.waterDisasterSurfaceY
       ? CBZ.waterDisasterSurfaceY(x, z, mean, arenaWave.amp, arenaWave.chop)
       : mean;
@@ -111,7 +114,7 @@
      and the BED question goes flat. One water, two honest readings of it. */
   CBZ.survFloodDepthMeanAt = function (x, z) {
     if (!arena) return 0;
-    return arena_meanY() - arena.groundHeightAt(x, z);
+    return arena_meanY() - frontDrop(x, z) - arena.groundHeightAt(x, z);
   };
   // "is this point in the water" — the survival twin of CBZ.cityWaterAt. Reads
   // the MEAN column for the same reason: a swell crest lapping over a kerb does
@@ -150,7 +153,7 @@
     for (let i = 0; i < S.n; i++) {
       // ±0.3 m of breathing swash, phased along the shore (θ·43 ≈ 21 m waves)
       const swash = 0.19 * Math.sin(t * 0.9 + S.th[i] * 43.0) + 0.11 * Math.sin(t * 0.53 - S.th[i] * 23.0);
-      const lip = S.h[i] - (sea + swash);          // m above the breathing waterline
+      const lip = S.h[i] - (sea - (S.x ? frontDrop(S.x[i], S.z[i]) : 0) + swash);   // m above the breathing waterline
       const target = lip <= 0 ? 1 : (lip >= 0.5 ? 0 : 1 - (lip / 0.5) * (lip / 0.5) * (3 - 2 * (lip / 0.5)));
       let w = S.wet[i];
       if (target > w) w = target;                  // soaks instantly
@@ -1850,6 +1853,7 @@
       const base = new Float32Array(vn * 3);   // authored colour, never mutated
       const vh = new Float32Array(vn);         // vertex height (the profile)
       const vth = new Float32Array(vn);        // vertex theta (alongshore phase)
+      const vwx = new Float32Array(vn), vwz = new Float32Array(vn);
       // DRY is the sand's real linear albedo (the normalised sand map adds
       // ripples and grain on top); BED stays the seabed mesh's own tone so
       // the shared outer rim is seamless in colour.
@@ -1861,6 +1865,7 @@
         const h = dist <= R ? -0.03 : coastHeightAt(dist);
         sa[i * 3 + 2] = h;
         vh[i] = h; vth[i] = Math.atan2(ly, lx);
+        vwx[i] = cx + lx; vwz[i] = cz - ly;     // world XZ (ring authored in XY, rotated -PI/2 about X)
         // dry sand, mottled: per-vertex grain (position hash — no rng draw,
         // the island build stream stays byte-identical) over a broad warm/cool
         // drift, blending into the seabed's own tone at the outer rim so the
@@ -1888,7 +1893,7 @@
       shore.userData.coat = true;                 // it is the ground; blizzards coat it
       shore.userData.dynamic = true;              // never batch-merge a mesh we repaint
       root.add(shore);
-      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, wet: new Float32Array(vn), n: vn };
+      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, x: vwx, z: vwz, wet: new Float32Array(vn), n: vn };
       // start honest: everything the sea covers right now is wet
       for (let i = 0; i < vn; i++) {
         const w = vh[i] < OCEAN_Y + 0.12 ? 1 : 0;

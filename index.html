@@ -911,7 +911,7 @@ document.body.appendChild(b);}}catch(e){}})();
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=sharkmode1"></script>
+<script src="src/world/disaster_arena.js?v=tsureal1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=sharkscene1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
@@ -972,7 +972,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=plume2"></script>
+<script src="src/systems/disasters.js?v=tsureal1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=sharkmode1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -996,7 +996,11 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=shallow1"></script>
+<script src="src/world/water_spec.js?v=tsureal1"></script>
+<!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
+<script src="src/world/tsunami_debris.js?v=tsureal1"></script>
+<script src="src/world/tsunami_flow.js?v=tsureal1"></script>
+<script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <script src="src/city/world.js?v=nodash1"></script>
 <script src="src/city/interior_programs.js?v=nodash1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
@@ -1531,7 +1535,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mask, crowd.js's flee and the predator dread bus do all of it. Fires only
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
-<script src="src/city/tsunami.js?v=wave1"></script>
+<script src="src/city/tsunami.js?v=tsureal1"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
 <script src="src/city/construction.js?v=nodash1"></script>
 <script src="src/city/companies.js?v=nodash1"></script>
