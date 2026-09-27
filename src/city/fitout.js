@@ -129,13 +129,29 @@
 
   /* ========================================================================
      2. MATERIALS — a handful of canvas textures, built once, never freed.
+
+     REAL SIZES. TEX_SCALE is the metres one texture tile covers, and every
+     painter below draws a whole number of its units into that tile, so the
+     unit comes out at its real size on any box (UVs are world-scaled):
+       wood      16 boards across 2.0 m  = 12.5 cm oak strip, staggered 0.3-2 m boards
+       carpet    4 tiles across 2.0 m    = 50 cm carpet tile, quarter-turned
+       tile      4 across 1.2 m          = 30 cm ceramic, 5 mm grout
+       vinyl     4 across 1.2 m          = 30 cm (12") VCT
+       subway    3 x 6 across 0.45 m     = 15 x 7.5 cm subway tile
+       brick     3 x 8 across 0.61 m     = 20 x 7.6 cm modular brick + joint
+       concrete  one 4.5 m tile          = control joints on a 4.5 m grid
+       ceiling   4 across 2.4 m          = 600 x 600 lay-in grid
+     Every painter is SEAMLESS (what crosses an edge is drawn again on the
+     other side), so no tile boundary shows as a line across the floor.
      ======================================================================== */
-  const TEX_SCALE = { wood: 1.6, carpet: 2.0, tile: 1.2, vinyl: 2.4, checker: 1.2, concrete: 3.0,
-                      plaster: 2.5, subway: 0.9, brick: 1.6, terrazzo: 2.0, ceiling: 2.4 };
+  const TEX_SCALE = { wood: 2.0, carpet: 2.0, tile: 1.2, vinyl: 1.2, checker: 1.2, concrete: 4.5,
+                      plaster: 2.5, subway: 0.45, brick: 0.61, terrazzo: 2.0, ceiling: 2.4 };
+  const TEX_SIZE = { wood: 1024, brick: 512, concrete: 512, carpet: 512, terrazzo: 512 };
   const MATS = {};
   function rnd(seed) { let s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
   function canvas(n) { const c = document.createElement("canvas"); c.width = c.height = n; return c; }
-  function noise(x, n, rgb, amp, count, size, seed) {
+  function rgb(r, g, b) { return "rgb(" + Math.max(0, Math.min(255, r | 0)) + "," + Math.max(0, Math.min(255, g | 0)) + "," + Math.max(0, Math.min(255, b | 0)) + ")"; }
+  function noise(x, n, rgbUnused, amp, count, size, seed) {
     const r = rnd(seed);
     for (let i = 0; i < count; i++) {
       const v = (r() - 0.5) * amp;
@@ -144,116 +160,207 @@
       x.fillRect(r() * n, r() * n, s, s);
     }
   }
+  // a rect that wraps across the tile edges (seamless)
+  function wrapFill(x, n, px, py, w, h) {
+    for (let ox = -n; ox <= n; ox += n) for (let oy = -n; oy <= n; oy += n) {
+      const a = px + ox, b = py + oy;
+      if (a + w < 0 || a > n || b + h < 0 || b > n) continue;
+      x.fillRect(a, b, w, h);
+    }
+  }
+  // a soft CONCENTRIC blot, wrapped. (One centre for both circles: a radial
+  // gradient whose two circles have different centres draws a cone, and that
+  // cone is where the dark TRIANGLES on the old concrete came from.)
+  function blot(x, n, cx, cy, rad, rgbS, a) {
+    for (let ox = -n; ox <= n; ox += n) for (let oy = -n; oy <= n; oy += n) {
+      const X = cx + ox, Y = cy + oy;
+      if (X + rad < 0 || X - rad > n || Y + rad < 0 || Y - rad > n) continue;
+      const g = x.createRadialGradient(X, Y, 0, X, Y, rad);
+      g.addColorStop(0, "rgba(" + rgbS + "," + a.toFixed(3) + ")");
+      g.addColorStop(1, "rgba(" + rgbS + ",0)");
+      x.fillStyle = g;
+      x.fillRect(X - rad, Y - rad, rad * 2, rad * 2);
+    }
+  }
   const PAINT = {
-    wood: function (x, n) {                         // oak strip flooring, 8 planks across 1.6 m
-      const r = rnd(11); const pw = n / 8;
-      for (let i = 0; i < 8; i++) {
-        let y0 = -r() * n;
-        while (y0 < n) {
-          const len = n * (0.35 + r() * 0.5);
-          const t = 0.8 + r() * 0.35;
-          x.fillStyle = "rgb(" + ((122 * t) | 0) + "," + ((92 * t) | 0) + "," + ((66 * t) | 0) + ")";
-          x.fillRect(i * pw, y0, pw, len);
-          for (let g = 0; g < 7; g++) {             // grain
-            x.strokeStyle = "rgba(60,36,18," + (0.05 + r() * 0.1).toFixed(3) + ")";
-            x.beginPath(); const gx = i * pw + r() * pw; x.moveTo(gx, y0); x.lineTo(gx + (r() - 0.5) * 4, y0 + len); x.stroke();
+    wood: function (x, n) {                          // oak strip: 16 boards, each column 1-3 boards long
+      const r = rnd(11), cols = 16, pw = n / cols;
+      x.fillStyle = "#7c5a3c"; x.fillRect(0, 0, n, n);
+      for (let i = 0; i < cols; i++) {
+        // 1-3 boards of random length per column, started at a random offset:
+        // real staggered end joints, never a line across the floor
+        const nb = 1 + ((r() * 3) | 0), lens = [];
+        let rem = n;
+        for (let k = 0; k < nb - 1; k++) { const L = rem * (0.3 + r() * 0.4) / (nb - 1 - k); lens.push(L); rem -= L; }
+        lens.push(rem);
+        let y0 = r() * n;
+        for (let k = 0; k < lens.length; k++) {
+          const L = lens[k], t = 0.9 + r() * 0.18, warm = (r() - 0.5) * 12;
+          x.fillStyle = rgb(134 * t + warm, 97 * t + warm * 0.3, 62 * t - warm * 0.4);
+          wrapFill(x, n, i * pw, y0, pw, L);
+          // grain: long streaks down the board, a few dark, a few pale
+          for (let g = 0; g < 11; g++) {
+            const gx = i * pw + 1.5 + r() * (pw - 3), al = 0.035 + r() * 0.08;
+            x.fillStyle = r() < 0.62 ? "rgba(66,38,18," + al.toFixed(3) + ")" : "rgba(255,232,196," + (al * 0.6).toFixed(3) + ")";
+            wrapFill(x, n, gx, y0, 0.8 + r() * 1.6, L);
           }
-          x.fillStyle = "rgba(40,24,12,0.55)"; x.fillRect(i * pw, y0, pw, 1.5);   // butt joint
-          y0 += len;
+          // a knot now and then
+          if (r() < 0.22) {
+            const kx = i * pw + pw * (0.3 + r() * 0.4), ky = ((y0 + L * (0.2 + r() * 0.6)) % n + n) % n;
+            x.fillStyle = "rgba(62,36,16,0.38)";
+            x.beginPath(); x.ellipse(kx, ky, 2.4 + r() * 1.5, 6 + r() * 5, 0, 0, Math.PI * 2); x.fill();
+          }
+          x.fillStyle = "rgba(36,20,9,0.62)"; wrapFill(x, n, i * pw, y0 - 1, pw, 2);     // butt joint
+          y0 += L;
         }
-        x.fillStyle = "rgba(40,24,12,0.5)"; x.fillRect(i * pw, 0, 1.5, n);       // plank seam
+        x.fillStyle = "rgba(36,20,9,0.55)"; x.fillRect(i * pw, 0, 1.5, n);                // the groove
+        x.fillStyle = "rgba(255,238,210,0.10)"; x.fillRect(i * pw + 1.5, 0, 1, n);         // its lit lip
       }
+      noise(x, n, 0, 0.05, 5000, 1.2, 12);
     },
-    carpet: function (x, n) {                        // commercial carpet tile, 4×4 per 2 m
-      x.fillStyle = "#5a606b"; x.fillRect(0, 0, n, n);
-      noise(x, n, 0, 0.22, 9000, 1.6, 21);
-      const q = n / 4;
+    carpet: function (x, n) {                        // loop-pile carpet tile, 50 cm, quarter-turned
+      x.fillStyle = "#63686f"; x.fillRect(0, 0, n, n);
+      const q = n / 4, r = rnd(21);
       for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-        x.fillStyle = ((i + j) & 1) ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.03)";
+        const t = (r() - 0.5) * 0.06;
+        x.fillStyle = t > 0 ? "rgba(255,255,255," + t.toFixed(3) + ")" : "rgba(0,0,0," + (-t).toFixed(3) + ")";
         x.fillRect(i * q, j * q, q, q);
+        // the pile rows run one way on this tile and across on the next —
+        // which is exactly how a quarter-turned install reads from standing height
+        const turn = (i + j) & 1;
+        for (let s = 1; s < q; s += 3) {
+          x.fillStyle = "rgba(0,0,0," + (0.05 + r() * 0.05).toFixed(3) + ")";
+          if (turn) x.fillRect(i * q, j * q + s, q, 1); else x.fillRect(i * q + s, j * q, 1, q);
+        }
       }
-      x.fillStyle = "rgba(0,0,0,0.18)";
-      for (let i = 0; i <= 4; i++) { x.fillRect(i * q - 0.5, 0, 1, n); x.fillRect(0, i * q - 0.5, n, 1); }
+      noise(x, n, 0, 0.3, 30000, 1.1, 22);          // heather fleck of the loops
+      x.fillStyle = "rgba(0,0,0,0.12)";
+      for (let k = 0; k < 4; k++) { x.fillRect(k * q, 0, 1, n); x.fillRect(0, k * q, n, 1); }
     },
-    tile: function (x, n) {                          // 30 cm ceramic, pale grout
-      x.fillStyle = "#cfd0cc"; x.fillRect(0, 0, n, n);
+    tile: function (x, n) {                          // 30 cm glazed ceramic, 5 mm grout
+      x.fillStyle = "#b4b2ab"; x.fillRect(0, 0, n, n);
       const c = 4, q = n / c, r = rnd(31);
       for (let i = 0; i < c; i++) for (let j = 0; j < c; j++) {
-        const t = 228 + ((r() * 18) | 0);
-        x.fillStyle = "rgb(" + t + "," + t + "," + (t - 4) + ")";
-        x.fillRect(i * q + 2, j * q + 2, q - 4, q - 4);
+        const t = 226 + ((r() * 16) | 0);
+        x.fillStyle = rgb(t, t, t - 5);
+        x.fillRect(i * q + 1, j * q + 1, q - 2, q - 2);
+        const g = x.createLinearGradient(i * q, j * q, i * q + q, j * q + q);
+        g.addColorStop(0, "rgba(255,255,255,0.07)"); g.addColorStop(1, "rgba(0,0,0,0.04)");
+        x.fillStyle = g; x.fillRect(i * q + 1, j * q + 1, q - 2, q - 2);
       }
-      noise(x, n, 0, 0.06, 1500, 2, 32);
+      noise(x, n, 0, 0.05, 1600, 1.5, 32);
     },
-    vinyl: function (x, n) {                         // speckled commercial VCT
-      x.fillStyle = "#d9d6cf"; x.fillRect(0, 0, n, n);
-      noise(x, n, 0, 0.25, 6000, 1.5, 41);
-      const q = n / 4;
-      x.fillStyle = "rgba(0,0,0,0.12)";
-      for (let i = 0; i <= 4; i++) { x.fillRect(i * q - 0.5, 0, 1, n); x.fillRect(0, i * q - 0.5, n, 1); }
+    vinyl: function (x, n) {                         // speckled commercial VCT, 30 cm
+      x.fillStyle = "#d8d5ce"; x.fillRect(0, 0, n, n);
+      const q = n / 4, r = rnd(41);
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        const t = (r() - 0.5) * 0.07;
+        x.fillStyle = t > 0 ? "rgba(255,255,255," + t.toFixed(3) + ")" : "rgba(0,0,0," + (-t).toFixed(3) + ")";
+        x.fillRect(i * q, j * q, q, q);
+      }
+      noise(x, n, 0, 0.26, 7000, 1.3, 42);
+      x.fillStyle = "rgba(0,0,0,0.13)";
+      for (let i = 0; i < 4; i++) { x.fillRect(i * q, 0, 1, n); x.fillRect(0, i * q, n, 1); }
     },
     checker: function (x, n) {                       // black-and-white diner tile
       const c = 4, q = n / c;
+      x.fillStyle = "#8a8884"; x.fillRect(0, 0, n, n);
       for (let i = 0; i < c; i++) for (let j = 0; j < c; j++) {
-        x.fillStyle = ((i + j) & 1) ? "#1f2023" : "#e8e6e0"; x.fillRect(i * q, j * q, q, q);
+        x.fillStyle = ((i + j) & 1) ? "#1f2023" : "#e8e6e0"; x.fillRect(i * q + 1, j * q + 1, q - 2, q - 2);
       }
       noise(x, n, 0, 0.08, 2000, 2, 51);
     },
-    concrete: function (x, n) {                      // stained sealed slab
-      x.fillStyle = "#8b8a85"; x.fillRect(0, 0, n, n);
+    concrete: function (x, n) {                      // sealed slab: cloud, aggregate, trowel, joints
+      x.fillStyle = "#8f8d87"; x.fillRect(0, 0, n, n);
       const r = rnd(61);
-      for (let i = 0; i < 26; i++) {
-        const g = x.createRadialGradient(r() * n, r() * n, 0, r() * n, r() * n, 20 + r() * 90);
-        g.addColorStop(0, "rgba(40,36,30," + (0.08 + r() * 0.12).toFixed(3) + ")"); g.addColorStop(1, "rgba(40,36,30,0)");
-        x.fillStyle = g; x.fillRect(0, 0, n, n);
+      for (let i = 0; i < 60; i++) {
+        const dark = r() < 0.6;
+        blot(x, n, r() * n, r() * n, 60 + r() * 180, dark ? "44,40,34" : "236,232,222", 0.015 + r() * 0.03);
       }
-      noise(x, n, 0, 0.14, 7000, 1.4, 62);
-      x.fillStyle = "rgba(0,0,0,0.2)"; x.fillRect(n / 2, 0, 1, n);   // saw cut
+      // (no stroked trowel arcs: at floor distance any drawn arc reads as a
+      // hard RING, tiled — the burnish is the soft blots plus the shader mottle)
+      noise(x, n, 0, 0.16, 16000, 1.3, 62);            // fine aggregate
+      noise(x, n, 0, 0.28, 900, 1.8, 63);              // pits and stones
+      // control joints on the 3 m grid (the tile edge), with their lit lip
+      x.fillStyle = "rgba(24,22,20,0.42)"; x.fillRect(0, 0, 2, n); x.fillRect(0, 0, n, 2);
+      x.fillStyle = "rgba(255,255,255,0.08)"; x.fillRect(2, 0, 1, n); x.fillRect(0, 2, n, 1);
     },
     plaster: function (x, n) {                       // painted plaster: near-white, the tint is the paint
       x.fillStyle = "#f4f4f2"; x.fillRect(0, 0, n, n);
-      noise(x, n, 0, 0.05, 5000, 3, 71);
+      const r = rnd(70);
+      for (let i = 0; i < 14; i++) blot(x, n, r() * n, r() * n, 20 + r() * 60, r() < 0.5 ? "0,0,0" : "255,255,255", 0.012 + r() * 0.014);
+      noise(x, n, 0, 0.05, 7000, 2.2, 71);            // roller stipple
     },
-    subway: function (x, n) {                        // 7.5×15 subway tile
-      x.fillStyle = "#b9bcbc"; x.fillRect(0, 0, n, n);
-      const rows = 6, cols = 3, th = n / rows, tw = n / cols;
+    subway: function (x, n) {                        // 15 x 7.5 cm gloss subway tile, 3 mm grout
+      x.fillStyle = "#b3b6b5"; x.fillRect(0, 0, n, n);
+      const rows = 6, cols = 3, th = n / rows, tw = n / cols, r = rnd(76);
       for (let j = 0; j < rows; j++) for (let i = -1; i < cols; i++) {
-        const off = (j & 1) ? tw / 2 : 0;
-        x.fillStyle = "#f2f3f1"; x.fillRect(i * tw + off + 1.5, j * th + 1.5, tw - 3, th - 3);
+        const off = (j & 1) ? tw / 2 : 0, t = 238 + ((r() * 12) | 0);
+        x.fillStyle = rgb(t, t + 1, t);
+        x.fillRect(i * tw + off + 1, j * th + 1, tw - 2, th - 2);
+        x.fillStyle = "rgba(255,255,255,0.35)"; x.fillRect(i * tw + off + 2, j * th + 2, tw - 4, 2);   // glaze catch
+        x.fillStyle = "rgba(0,0,0,0.06)"; x.fillRect(i * tw + off + 2, j * th + th - 4, tw - 4, 2);
       }
     },
-    brick: function (x, n) {                         // exposed interior brick (hideouts)
-      x.fillStyle = "#6e6660"; x.fillRect(0, 0, n, n);
-      const rows = 8, cols = 4, th = n / rows, tw = n / cols, r = rnd(81);
-      for (let j = 0; j < rows; j++) for (let i = -1; i < cols; i++) {
-        const off = (j & 1) ? tw / 2 : 0, t = 0.75 + r() * 0.35;
-        x.fillStyle = "rgb(" + ((150 * t) | 0) + "," + ((78 * t) | 0) + "," + ((60 * t) | 0) + ")";
-        x.fillRect(i * tw + off + 2, j * th + 2, tw - 4, th - 4);
+    brick: function (x, n) {                         // modular brick, 10 mm raked joint
+      x.fillStyle = "#9b9388"; x.fillRect(0, 0, n, n);
+      noise(x, n, 0, 0.18, 5000, 1.6, 80);            // sandy mortar
+      const rows = 8, cols = 3, th = n / rows, tw = n / cols, r = rnd(81), m = 4;
+      for (let j = 0; j < rows; j++) for (let i = -1; i <= cols; i++) {
+        const off = (j & 1) ? tw / 2 : 0, t = 0.72 + r() * 0.34, burnt = r() < 0.12;
+        const bx = i * tw + off + m, by = j * th + m, bw = tw - m * 2, bh = th - m * 2;
+        x.fillStyle = burnt ? rgb(96 * t, 50 * t, 40 * t) : rgb(158 * t, 82 * t + r() * 10, 62 * t);
+        x.fillRect(bx, by, bw, bh);
+        x.fillStyle = "rgba(255,220,190,0.14)"; x.fillRect(bx, by, bw, 2);           // top arris catches light
+        x.fillStyle = "rgba(0,0,0,0.22)"; x.fillRect(bx, by + bh - 2, bw, 2);         // underside in shadow
+        x.fillStyle = "rgba(0,0,0,0.10)"; x.fillRect(bx + bw - 2, by, 2, bh);
+        if (r() < 0.3) { x.fillStyle = "rgba(0,0,0,0.12)"; x.fillRect(bx + r() * bw * 0.6, by + r() * bh * 0.5, 6 + r() * 20, 3 + r() * 6); }
       }
-      noise(x, n, 0, 0.18, 4000, 2, 82);
+      noise(x, n, 0, 0.2, 14000, 1.4, 82);            // the clay's grit
     },
-    terrazzo: function (x, n) {                      // lobby / bank floor
+    terrazzo: function (x, n) {                      // lobby / bank floor, zinc divider strips
       x.fillStyle = "#d8d3c8"; x.fillRect(0, 0, n, n);
       const r = rnd(91);
-      for (let i = 0; i < 2600; i++) {
+      for (let i = 0; i < 9000; i++) {
         const s = 1 + r() * 4, v = r();
         x.fillStyle = v < 0.4 ? "#8f877a" : v < 0.7 ? "#f3efe6" : v < 0.85 ? "#6f6a62" : "#b39a74";
         x.fillRect(r() * n, r() * n, s, s);
       }
-      x.fillStyle = "rgba(0,0,0,0.15)"; x.fillRect(0, 0, n, 2); x.fillRect(0, 0, 2, n);
+      x.fillStyle = "rgba(120,114,100,0.55)"; x.fillRect(0, 0, n, 1.5); x.fillRect(0, 0, 1.5, n);
     },
-    ceiling: function (x, n) {                       // 600 grid acoustic tile
-      x.fillStyle = "#e9e9e6"; x.fillRect(0, 0, n, n);
-      noise(x, n, 0, 0.1, 5000, 1.2, 101);
-      const q = n / 4; x.fillStyle = "rgba(170,170,166,0.8)";
-      for (let i = 0; i <= 4; i++) { x.fillRect(i * q - 1.5, 0, 3, n); x.fillRect(0, i * q - 1.5, n, 3); }
+    ceiling: function (x, n) {                       // 600 grid, fissured mineral tile, white T-bar
+      x.fillStyle = "#e8e8e4"; x.fillRect(0, 0, n, n);
+      noise(x, n, 0, 0.035, 2500, 2.0, 101);
+      const r = rnd(102);
+      x.fillStyle = "rgba(90,90,86,0.08)";
+      for (let i = 0; i < 700; i++) x.fillRect(r() * n, r() * n, 2 + r() * 3, 2);     // fissures, soft
+      const q = n / 4;
+      for (let i = 0; i <= 4; i++) {
+        x.fillStyle = "rgba(120,120,116,0.5)"; x.fillRect(i * q - 2.5, 0, 5, n); x.fillRect(0, i * q - 2.5, n, 5);   // reveal shadow
+        x.fillStyle = "#f4f4f1"; x.fillRect(i * q - 1.5, 0, 3, n); x.fillRect(0, i * q - 1.5, n, 3);               // the T-bar face
+      }
     },
   };
+  // THE SURFACE, in the shader (the prisonlook idea): nothing real is one
+  // flat colour. A world-space two-octave mottle (about +-5%) over every
+  // fit-out surface, so a painted wall, a laminate carcass or a linen sheet
+  // has the slight unevenness paint and cloth have. World-space, so it needs
+  // no UVs and lands on the flat-colour bucket too. One program for all.
+  const FIT_NOISE =
+    "float fitH(vec3 p){ p = mod(p, 512.0); p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }\n" +
+    "float fitN(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n" +
+    "  return mix(mix(mix(fitH(i), fitH(i + vec3(1.0,0.0,0.0)), f.x), mix(fitH(i + vec3(0.0,1.0,0.0)), fitH(i + vec3(1.0,1.0,0.0)), f.x), f.y),\n" +
+    "             mix(mix(fitH(i + vec3(0.0,0.0,1.0)), fitH(i + vec3(1.0,0.0,1.0)), f.x), mix(fitH(i + vec3(0.0,1.0,1.0)), fitH(i + vec3(1.0,1.0,1.0)), f.x), f.y), f.z); }\n" +
+    "float fitMottle(vec3 p){ p = mod(p, 1024.0); return 0.955 + 0.06 * fitN(p * 0.9) + 0.03 * fitN(p * 3.1 + 17.0); }\n";
   const FIT_LIT = { value: 0.12 };
   function fitShader(sh) {
     sh.uniforms.uFitLit = FIT_LIT;
+    sh.vertexShader = sh.vertexShader
+      .replace("void main() {", "varying vec3 vFitW;\nvoid main() {")
+      .replace("#include <project_vertex>", "#include <project_vertex>\n\tvFitW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
     sh.fragmentShader = sh.fragmentShader
-      .replace("void main() {", "uniform float uFitLit;\nvoid main() {")
+      .replace("void main() {", FIT_NOISE + "uniform float uFitLit;\nvarying vec3 vFitW;\nvoid main() {")
+      .replace("#include <color_fragment>", "#include <color_fragment>\n\tdiffuseColor.rgb *= fitMottle(vFitW);")
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * uFitLit;");
   }
   function texMat(key) {
@@ -263,13 +370,16 @@
     else if (key === "glow") m = new THREE.MeshBasicMaterial({ vertexColors: true });
     else if (key === "glass") m = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.28, depthWrite: false });
     else {
-      const c = canvas(key === "wood" || key === "brick" ? 512 : 256);
+      const c = canvas(TEX_SIZE[key] || 256);
       const x = c.getContext("2d");
       (PAINT[key] || PAINT.plaster)(x, c.width);
       const t = new THREE.CanvasTexture(c);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.encoding = THREE.sRGBEncoding;
-      try { const R = CBZ.renderer; if (R && R.capabilities) t.anisotropy = Math.min(4, R.capabilities.getMaxAnisotropy()); } catch (e) {}
+      t.generateMipmaps = true;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      try { const R = CBZ.renderer; if (R && R.capabilities) t.anisotropy = Math.min(8, R.capabilities.getMaxAnisotropy()); } catch (e) {}
       m = new THREE.MeshLambertMaterial({ map: t, vertexColors: true });
     }
     // THE LIGHTS ARE ON AT NIGHT. The baked pools live in the vertex colour,
@@ -450,6 +560,24 @@
             box(at, y0 + ch + 0.03, (g0 + g1) / 2, t + 0.04, 0.06, g1 - g0 + 0.12, cc);
           }
         }
+        // THE DOOR ITSELF, standing open against the room (g.leaf = {hinge:
+        // -1|+1 which jamb, side: -1|+1 which room it swings into}). A doorway
+        // in a home has a door in it; a hole with a casing and no leaf reads
+        // as a building site. Not solid: it is open flat to a wall.
+        if (g.leaf && g1 - g0 > 0.5) {
+          const ch = (g.h || 2.1) - 0.02, lw = g1 - g0 - 0.05, hs = g.leaf.hinge < 0 ? g0 + 0.035 : g1 - 0.035;
+          const sd = g.leaf.side < 0 ? -1 : 1, pc = at + sd * (t / 2 + lw / 2 + 0.01);
+          const lc = g.leaf.color == null ? 0xf1eee7 : g.leaf.color, kc = 0xb9b4aa;
+          if (axis === "x") {
+            box(hs, y0 + 0.01 + ch / 2, pc, 0.04, ch, lw, lc);
+            for (const e of [-1, 1]) box(hs + e * 0.022, y0 + 0.01 + ch * 0.36, pc, 0.004, ch * 0.5, lw - 0.16, 0xe4e0d7);   // lower panel
+            for (const e of [-1, 1]) box(hs + e * 0.03, y0 + 1.0, at + sd * (t / 2 + lw - 0.07), 0.02, 0.03, 0.12, kc);  // lever
+          } else {
+            box(pc, y0 + 0.01 + ch / 2, hs, lw, ch, 0.04, lc);
+            for (const e of [-1, 1]) box(pc, y0 + 0.01 + ch * 0.36, hs + e * 0.022, lw - 0.16, ch * 0.5, 0.004, 0xe4e0d7);
+            for (const e of [-1, 1]) box(at + sd * (t / 2 + lw - 0.07), y0 + 1.0, hs + e * 0.03, 0.12, 0.03, 0.02, kc);
+          }
+        }
         cur = g1;
       }
       seg(cur, hi, y0, y0 + wh);
@@ -504,6 +632,45 @@
         }
       }
     }
+    // THE FITTINGS, as the things they are. Each one is a mounting that is
+    // NOT lit (a ring, a canopy, a housing) around the part that IS (the
+    // diffuser, the underside of a shade, the bulb), because a lamp you can
+    // read is a dark or pale object with a bright face, not a glowing cube.
+    function fixture(x, z, kind, o, col) {
+      o = o || {};
+      if (kind === "panel") {                          // 600x600 LED lay-in panel in the T-bar grid
+        box(x, ceil - 0.01, z, 0.62, 0.02, 0.62, 0xd2d4d2);
+        box(x, ceil - 0.024, z, 0.56, 0.008, 0.56, 0xf8f8f3, { glow: true, faces: 8 });
+      } else if (kind === "strip") {                   // surface batten: housing + opal diffuser
+        const L = o.len || 1.2, ax = o.axis === "z";
+        box(x, ceil - 0.035, z, ax ? 0.12 : L, 0.07, ax ? L : 0.12, 0xdadcdb);
+        box(x, ceil - 0.075, z, ax ? 0.07 : L - 0.06, 0.016, ax ? L - 0.06 : 0.07, 0xfdfcf6, { glow: true });
+        box(x, ceil - 0.009, z, ax ? 0.14 : L + 0.02, 0.018, ax ? L + 0.02 : 0.14, 0xc9cbca);
+      } else if (kind === "pendant") {                 // canopy, cord, a drum shade lit from inside
+        const dy = o.drop || 0.7, sh = o.shade == null ? 0x2b2e33 : o.shade;
+        box(x, ceil - 0.015, z, 0.12, 0.03, 0.12, 0xe6e4de);                         // canopy
+        box(x, ceil - dy / 2, z, 0.012, dy, 0.012, 0x1e1e1e);                         // cord
+        box(x, ceil - dy - 0.03, z, 0.05, 0.06, 0.05, 0x3a3a3a);                      // lamp holder
+        box(x, ceil - dy - 0.06, z, 0.22, 0.04, 0.22, sh);                            // shade crown
+        box(x, ceil - dy - 0.14, z, 0.34, 0.12, 0.34, sh);                            // shade drum
+        box(x, ceil - dy - 0.2, z, 0.3, 0.004, 0.3, col, { glow: true, faces: 8 });  // the lit mouth
+        box(x, ceil - dy - 0.13, z, 0.07, 0.08, 0.07, 0xfff4dc, { glow: true, faces: 8 });   // bulb in the shade
+      } else if (kind === "bulb") {                    // bare lamp on a flex: holder + pear bulb
+        const dy = o.drop || 0.45;
+        box(x, ceil - dy / 2, z, 0.01, dy, 0.01, 0x151515);
+        box(x, ceil - dy - 0.025, z, 0.035, 0.05, 0.035, 0x2a2a2a);
+        box(x, ceil - dy - 0.075, z, 0.06, 0.06, 0.06, 0xfff0c0, { glow: true });
+        box(x, ceil - dy - 0.115, z, 0.04, 0.02, 0.04, 0xfff0c0, { glow: true });
+      } else if (kind === "can") {                     // recessed downlight: a trim ring and its lens
+        box(x, ceil - 0.008, z, 0.2, 0.016, 0.2, 0xe6e6e2);
+        box(x, ceil - 0.0175, z, 0.13, 0.002, 0.13, 0xfffaf0, { glow: true, faces: 8 });
+      } else if (kind === "dome") {                    // flush ceiling dome: ring, stepped opal bowl
+        box(x, ceil - 0.01, z, 0.36, 0.02, 0.36, 0xe4e2dc);
+        box(x, ceil - 0.04, z, 0.3, 0.04, 0.3, 0xf6f2e8, { glow: true });
+        box(x, ceil - 0.07, z, 0.2, 0.025, 0.2, 0xfbf8f0, { glow: true });
+        box(x, ceil - 0.086, z, 0.03, 0.008, 0.03, 0xb9b6ae);                         // finial
+      }
+    }
     // A LIGHT: a fixture you can see + a baked light source. kind:
     //   "panel" 600×600 office troffer · "strip" batten · "pendant" drop shade
     //   "bulb" bare bulb on a cord (hideouts) · "dome" flush ceiling dome
@@ -512,25 +679,7 @@
       o = o || {};
       const kind = o.kind || "dome", col = o.color == null ? 0xfff1d6 : o.color;
       const ly = o.y != null ? o.y : ceil - 0.05;
-      if (kind === "panel") {
-        box(x, ceil - 0.015, z, 0.6, 0.03, 0.6, 0xf7f7f2, { glow: true });
-        box(x, ceil - 0.01, z, 0.66, 0.02, 0.66, 0xb8bab8);
-      } else if (kind === "strip") {
-        const L = o.len || 1.2, ax = o.axis === "z";
-        box(x, ceil - 0.05, z, ax ? 0.14 : L, 0.06, ax ? L : 0.14, 0xd9dcdc);
-        box(x, ceil - 0.085, z, ax ? 0.08 : L - 0.04, 0.02, ax ? L - 0.04 : 0.08, 0xfdfcf6, { glow: true });
-      } else if (kind === "pendant") {
-        const dy = o.drop || 0.7;
-        box(x, ceil - dy / 2, z, 0.015, dy, 0.015, 0x222222);
-        box(x, ceil - dy - 0.09, z, 0.36, 0.16, 0.36, o.shade == null ? 0x2b2e33 : o.shade);
-        box(x, ceil - dy - 0.175, z, 0.26, 0.012, 0.26, col, { glow: true, faces: 8 });
-      } else if (kind === "bulb") {
-        const dy = o.drop || 0.45;
-        box(x, ceil - dy / 2, z, 0.012, dy, 0.012, 0x151515);
-        box(x, ceil - dy - 0.05, z, 0.07, 0.1, 0.07, 0xfff0c0, { glow: true });
-      } else if (kind === "dome") {
-        box(x, ceil - 0.04, z, 0.34, 0.07, 0.34, 0xf3f0e6, { glow: true });
-      }
+      fixture(x, z, kind, o, col);
       const src = { x: x, y: kind === "pendant" ? ceil - (o.drop || 0.7) - 0.2 : ly - 0.1, z: z,
                     r: o.r || 5.5, i: o.i == null ? 0.75 : o.i, rect: o.rect || null,
                     c: hexRGB(col) };
@@ -545,8 +694,12 @@
       return src;
     }
     // THE KIT BRIDGE — CBZ.furnish through this builder's buckets.
+    // An emissive kit part is self-lit here only when it is a LIGHT or a
+    // SCREEN (ei >= 0.34: glass, a lamp's open mouth). A lampshade's fabric
+    // (ei ~0.3) is lit by the lamp's baked source like any other surface, so
+    // it reads as cloth with light behind it and not as a glowing block.
     function kitBox(lx, ly, lz, w, h, d, color, o) {
-      box(lx, ly, lz, w, h, d, color, o && o.emissive != null ? { glow: true } : null);
+      box(lx, ly, lz, w, h, d, color, o && o.emissive != null && (o.ei == null || o.ei >= 0.34) ? { glow: true } : null);
       return true;
     }
     function furn(name, x, z, yaw, o) {
@@ -555,7 +708,8 @@
       const oo = { box: kitBox, ox: ox, oz: oz, lot: site.lot || null };
       if (o) for (const k in o) if (oo[k] === undefined) oo[k] = o[k];
       let r = null;
-      try { r = name === "lamp" ? F.lamp(x, fy, z, oo) : F[name](x, fy, z, yaw || 0, oo); } catch (e) { r = null; }
+      const yy = o && o.atY != null ? o.atY : fy;           // a piece on a sill or a worktop
+      try { r = name === "lamp" ? F.lamp(x, yy, z, oo) : F[name](x, yy, z, yaw || 0, oo); } catch (e) { r = null; }
       if (r) pieces.push({ tag: name, x: x, z: z, w: r.w, d: r.d, yaw: yaw || 0 });
       return r;
     }
@@ -564,6 +718,7 @@
       site: site, b: b, floor: floor, lot: site.lot, k: floor.k, y0: y0, fy: fy, ceil: ceil, FH: FH,
       ox: ox, oz: oz, rect: floor.rect, info: floor.info || {},
       box: box, plane: plane, wall: wall, skin: skin, light: light, lamp: lamp, furn: furn, solid: solid,
+      fixture: function (x, z, o) { o = o || {}; fixture(x, z, o.kind || "panel", o, o.color == null ? 0xfff1d6 : o.color); },
       pieces: pieces,
       // SOMEBODY IN THE ROOM. spec {x, z (local), face, job, seat|bed (a propuse
       // record, e.g. B.furn("sofa").seats[0].rec), when: "day"|"night"|null,
@@ -719,6 +874,7 @@
   function basePlan(B) {
     const r = B.rect; if (!r) return;
     B.plane(r.x0, r.z0, r.x1, r.z1, B.fy, "vinyl", 0xffffff);
+    B.plane(r.x0, r.z0, r.x1, r.z1, B.ceil - 0.012, "ceiling", 0xffffff, { down: true, cell: 1.2 });
     const nx = Math.max(1, Math.round((r.x1 - r.x0) / 4.5)), nz = Math.max(1, Math.round((r.z1 - r.z0) / 4.5));
     for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++)
       B.light(r.x0 + (i + 0.5) * (r.x1 - r.x0) / nx, r.z0 + (j + 0.5) * (r.z1 - r.z0) / nz, { kind: "panel", r: 5.5, i: 0.55 });
@@ -764,6 +920,15 @@
     }
     const parent = s.b.group || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     s.live[k] = B.finish(parent);
+    // THE REAL ROOM IS BEHIND THE GLASS NOW: city/interiorlight.js stops
+    // hanging its painted room-gradient in this storey's windows (it restores
+    // them when the floor is freed), so from the street you see into THIS.
+    if (CBZ.cityInteriorGlowHideBox && s.wx != null) {
+      const hb = { x0: s.wx - s.b.w / 2 - 1, x1: s.wx + s.b.w / 2 + 1, z0: s.wz - s.b.d / 2 - 1, z1: s.wz + s.b.d / 2 + 1,
+                   y0: (s.wy || 0) + floorTopOf(s.b, k) + 0.05, y1: (s.wy || 0) + floorTopOf(s.b, k + 1) - 0.05 };
+      s.live[k].glowBox = hb;
+      try { CBZ.cityInteriorGlowHideBox(hb.x0, hb.x1, hb.y0, hb.y1, hb.z0, hb.z1, true); } catch (e) {}
+    }
     STATS.built++;
     const ms = performance.now() - t0;
     STATS.lastMs = ms; STATS.maxMs = Math.max(STATS.maxMs, ms);
@@ -807,6 +972,10 @@
     delete s.live[k];
     if (L.empty) return;
     L.live = false;
+    if (L.glowBox && CBZ.cityInteriorGlowHideBox) {
+      const hb = L.glowBox;
+      try { CBZ.cityInteriorGlowHideBox(hb.x0, hb.x1, hb.y0, hb.y1, hb.z0, hb.z1, false); } catch (e) {}
+    }
     if (L.posted) PEOPLE.live = Math.max(0, PEOPLE.live - L.posted);
     if (L.group && L.group.parent) L.group.parent.remove(L.group);
     for (let i = 0; i < L.meshes.length; i++) { try { L.meshes[i].geometry.dispose(); } catch (e) {} }

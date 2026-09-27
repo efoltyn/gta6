@@ -666,6 +666,44 @@
       for (const gm of geoms) { const mesh = new THREE.Mesh(gm, material); mesh.castShadow = !!cast; mesh.receiveShadow = true; p.add(mesh); }
       return null;
     }
+    /* ---- THE REAL-MATERIAL KIT (de-slop 2026-09-27). The marina was built
+       from flat-colour boxes: the quay a grey block, the pontoons pale-grey
+       slabs, cleats and bollards little cubes, the buildings a box with a
+       darker box for windows. K is airport_kit.js's shared parts library
+       (concrete / plaster / timber decking / corrugated steel with metre
+       UVs, merged per material); without it everything falls back to the
+       old boxes, so nothing here can fail to draw. */
+    const K = CBZ.airfieldParts || null;
+    // a pontoon float: timber decking with the boards running ACROSS its long axis
+    function pgeo(x, y, z, w, h, d) {
+      if (!K) return boxGeoAt(x, y, z, w, h, d);
+      return K.put(K.boxM(w, h, d, 1, d > w), x, y, z);
+    }
+    // a horn cleat bolted to a deck at (x, top, z); `alongX` = its bar runs along x
+    function cleatAt(x, top, z, alongX) {
+      if (!K) return [boxGeoAt(x, top + 0.09, z, alongX ? 0.3 : 0.12, 0.18, alongX ? 0.12 : 0.3)];
+      const out = [];
+      const ry = alongX ? 0 : Math.PI / 2;
+      for (const s2 of [-1, 1]) {
+        const leg = K.put(new THREE.BoxGeometry(0.05, 0.07, 0.06), s2 * 0.06, 0.035, 0);
+        leg.rotateY(ry); leg.translate(x, top, z); out.push(leg);
+        const horn = new THREE.CylinderGeometry(0.014, 0.028, 0.16, 6);
+        horn.rotateZ(s2 * Math.PI / 2); horn.translate(s2 * 0.08, 0.085, 0);
+        horn.rotateY(ry); horn.translate(x, top, z); out.push(horn);
+      }
+      return out;
+    }
+    // a cast-iron mushroom bollard standing on a deck at (x, top, z)
+    function bollardAt(x, top, z, big) {
+      const k = big ? 1.2 : 1;
+      if (!K) return [boxGeoAt(x, top + 0.28 * k, z, 0.34 * k, 0.56 * k, 0.34 * k)];
+      return [
+        K.put(new THREE.CylinderGeometry(0.26 * k, 0.28 * k, 0.05, 12), x, top + 0.025, z),
+        K.put(new THREE.CylinderGeometry(0.15 * k, 0.17 * k, 0.46 * k, 12), x, top + 0.05 + 0.23 * k, z),
+        K.put(new THREE.CylinderGeometry(0.23 * k, 0.17 * k, 0.1 * k, 12), x, top + 0.05 + 0.5 * k, z),
+      ];
+    }
+    const concMat = K ? K.concreteMat(0xb0aca3) : null, concDkMat = K ? K.concreteMat(0x96928a) : null;
     function solid(x, z, w, d, ref, y0, y1) {
       const c = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: ref, noCam: true };
       if (y1 != null) { c.y0 = y0 || 0; c.y1 = y1; }
@@ -690,28 +728,55 @@
     // can fall in. A decorative notch you cannot fall into would be a lie.
     const WELL_Z = BZ + L.wellZ, WELL_HZ = 3.4, WELL_X0 = QX - 12;
     {
+      // THE QUAY WALL: poured concrete at real texture scale, a lighter
+      // precast coping along the water edge, and the dark wet/weed band the
+      // tide leaves on its face (it was one flat grey block).
+      const slabs = [], coping = [], weed = [];
       function slabBox(x0, x1, z0, z1) {
-        const s = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, QUAY_TOP + 1.4, z1 - z0), m(CONCRETE));
-        s.position.set((x0 + x1) / 2, QUAY_TOP - (QUAY_TOP + 1.4) / 2, (z0 + z1) / 2);
-        s.receiveShadow = true; root.add(s);
+        const H = QUAY_TOP + 1.4;
+        if (K) slabs.push(K.put(K.boxM(x1 - x0, H, z1 - z0, 1), (x0 + x1) / 2, QUAY_TOP - H / 2, (z0 + z1) / 2));
+        else {
+          const s = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, H, z1 - z0), m(CONCRETE));
+          s.position.set((x0 + x1) / 2, QUAY_TOP - H / 2, (z0 + z1) / 2);
+          s.receiveShadow = true; root.add(s);
+        }
         plat(x0, x1, z0, z1, QUAY_TOP);
       }
       slabBox(QW0, QW1, QZ0, WELL_Z - WELL_HZ);              // south of the well
       slabBox(QW0, QW1, WELL_Z + WELL_HZ, QZ1);              // north of the well
       slabBox(QW0, WELL_X0, WELL_Z - WELL_HZ, WELL_Z + WELL_HZ);  // landward side of it
+      if (K) {
+        // coping + wet band on the seaward face, either side of the lift well,
+        // and round the well's own three faces
+        const runs = [[QZ0, WELL_Z - WELL_HZ], [WELL_Z + WELL_HZ, QZ1]];
+        for (const r of runs) {
+          const L = r[1] - r[0], cz = (r[0] + r[1]) / 2;
+          coping.push(K.put(K.boxM(0.6, 0.04, L, 1), QW1 - 0.3, QUAY_TOP + 0.015, cz));
+          weed.push(K.put(new THREE.BoxGeometry(0.03, 0.75, L), QW1 + 0.016, SEA_Y + 0.1, cz));
+        }
+        weed.push(K.put(new THREE.BoxGeometry(QW1 - WELL_X0, 0.75, 0.03), (QW1 + WELL_X0) / 2, SEA_Y + 0.1, WELL_Z - WELL_HZ + 0.016));
+        weed.push(K.put(new THREE.BoxGeometry(QW1 - WELL_X0, 0.75, 0.03), (QW1 + WELL_X0) / 2, SEA_Y + 0.1, WELL_Z + WELL_HZ - 0.016));
+        weed.push(K.put(new THREE.BoxGeometry(0.03, 0.75, WELL_HZ * 2), WELL_X0 + 0.016, SEA_Y + 0.1, WELL_Z));
+        K.addMerged(root, slabs, concMat, {});
+        K.addMerged(root, coping, K.concreteMat(0xc9c5bc), {});
+        K.addMerged(root, weed, cmat(0x39402f), {});
+      }
 
-      // fenders on the quay face — old tyres and black cylinders, every 5m
+      // fenders on the quay face: hanging cylindrical rubber fenders every
+      // 5 m, the load a quay face actually carries (they were 24 cm boxes)
       const fend = [];
       for (let z = QZ0 + 4; z < QZ1 - 4; z += 5) {
-        fend.push(boxGeoAt(QW1 + 0.12, SEA_Y + 0.30, z, 0.24, 0.62, 0.5));
+        if (Math.abs(z - WELL_Z) < WELL_HZ + 0.5) continue;
+        if (K) fend.push(K.put(new THREE.CylinderGeometry(0.17, 0.17, 0.95, 12), QW1 + 0.19, SEA_Y + 0.42, z));
+        else fend.push(boxGeoAt(QW1 + 0.12, SEA_Y + 0.30, z, 0.24, 0.62, 0.5));
       }
-      mergeAdd(fend, m(0x24272b));
+      mergeAdd(fend, m(0x1d1f22));
 
       // bollards along the quay edge (every 6m — §G says 3-6m)
       const boll = [];
       for (let z = QZ0 + 3; z < QZ1 - 3; z += 6) {
-        boll.push(boxGeoAt(QW1 - 0.9, QUAY_TOP + 0.28, z, 0.34, 0.56, 0.34));
-        boll.push(boxGeoAt(QW1 - 0.9, QUAY_TOP + 0.58, z, 0.46, 0.10, 0.46));   // the mushroom cap
+        if (Math.abs(z - WELL_Z) < WELL_HZ + 0.4) continue;
+        boll.push.apply(boll, bollardAt(QW1 - 0.9, QUAY_TOP, z, false));
       }
       mergeAdd(boll, m(CLEAT));
     }
@@ -799,16 +864,16 @@
         const h = pick(idx);
         const w = berthWidth(h), fl = fingerLen(h);
         // the finger on the LOW-x edge of this berth
-        pontGeo.push(boxGeoAt(cursor, PONTOON_TOP - 0.16, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, 0.32, fl));
+        pontGeo.push(pgeo(cursor, PONTOON_TOP - 0.16, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, 0.32, fl));
         deck(cursor, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, fl);
-        cleatGeo.push(boxGeoAt(cursor, PONTOON_TOP + 0.09, dz + side * (MAIN_W / 2 + fl - 0.4), 0.24, 0.16, 0.10));
+        cleatGeo.push.apply(cleatGeo, cleatAt(cursor, PONTOON_TOP, dz + side * (MAIN_W / 2 + fl - 0.4), false));
         row.push({ x: cursor + w / 2, h: h, fl: fl });
         cursor += w; idx++;
       }
       // the closing finger — a trot's last berth needs a finger on BOTH sides
       {
         const fl = fingerLen(pick(idx));
-        pontGeo.push(boxGeoAt(cursor, PONTOON_TOP - 0.16, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, 0.32, fl));
+        pontGeo.push(pgeo(cursor, PONTOON_TOP - 0.16, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, 0.32, fl));
         deck(cursor, dz + side * (MAIN_W / 2 + fl / 2), FINGER_W, fl);
       }
       row.forEach(function (b, i) {
@@ -826,12 +891,12 @@
     const DOCK_LETTER = "ABCDEF";
     L.dockZ.forEach(function (dz, di) {
       // spine
-      pontGeo.push(boxGeoAt((MAIN_X0 + MAIN_X1) / 2, PONTOON_TOP - 0.18, dz, MAIN_LEN, 0.36, MAIN_W));
+      pontGeo.push(pgeo((MAIN_X0 + MAIN_X1) / 2, PONTOON_TOP - 0.18, dz, MAIN_LEN, 0.36, MAIN_W));
       deck((MAIN_X0 + MAIN_X1) / 2, dz, MAIN_LEN, MAIN_W);
       // cleats every 4m down both edges of the walkway
       for (let x = MAIN_X0 + 2; x < MAIN_X1; x += 4) {
-        cleatGeo.push(boxGeoAt(x, PONTOON_TOP + 0.09, dz - MAIN_W / 2 + 0.16, 0.30, 0.18, 0.12));
-        cleatGeo.push(boxGeoAt(x, PONTOON_TOP + 0.09, dz + MAIN_W / 2 - 0.16, 0.30, 0.18, 0.12));
+        cleatGeo.push.apply(cleatGeo, cleatAt(x, PONTOON_TOP, dz - MAIN_W / 2 + 0.16, true));
+        cleatGeo.push.apply(cleatGeo, cleatAt(x, PONTOON_TOP, dz + MAIN_W / 2 - 0.16, true));
       }
       // WHICH BOATS BERTH WHERE. The inner docks are the small-craft end of
       // the basin and the outer (north, seaward of the fairway) dock carries
@@ -859,10 +924,10 @@
        does not reach it, so the ramp off the quay can never end over water. */
     if (L.head) {
       const hz0 = Math.min(L.dockZ[0], 0) - 1.4, hz1 = Math.max(L.dockZ[L.dockZ.length - 1], 0) + 1.4;
-      pontGeo.push(boxGeoAt(MAIN_X0, PONTOON_TOP - 0.18, (hz0 + hz1) / 2, MAIN_W, 0.36, hz1 - hz0));
+      pontGeo.push(pgeo(MAIN_X0, PONTOON_TOP - 0.18, (hz0 + hz1) / 2, MAIN_W, 0.36, hz1 - hz0));
       deck(MAIN_X0, (hz0 + hz1) / 2, MAIN_W, hz1 - hz0);
       for (let z = hz0 + 3; z < hz1 - 2; z += 6) {
-        cleatGeo.push(boxGeoAt(MAIN_X0 + MAIN_W / 2 - 0.16, PONTOON_TOP + 0.09, z, 0.12, 0.18, 0.30));
+        cleatGeo.push.apply(cleatGeo, cleatAt(MAIN_X0 + MAIN_W / 2 - 0.16, PONTOON_TOP, z, false));
       }
     }
 
@@ -871,10 +936,10 @@
     const FUEL_X = MAIN_X1 - 4, FUEL_Z = L.fuelZ;
     const FUEL_W = L.head ? 18 : 12;
     const FUEL_LINK = L.dockZ[L.dockZ.length - 1] + MAIN_W / 2;   // the dock it hangs off
-    pontGeo.push(boxGeoAt(FUEL_X, PONTOON_TOP - 0.18, FUEL_Z, FUEL_W, 0.36, 2.6));
+    pontGeo.push(pgeo(FUEL_X, PONTOON_TOP - 0.18, FUEL_Z, FUEL_W, 0.36, 2.6));
     deck(FUEL_X, FUEL_Z, FUEL_W, 2.6);
     // link the fuel dock to the outermost walkway with a catwalk
-    pontGeo.push(boxGeoAt(FUEL_X, PONTOON_TOP - 0.16, (FUEL_LINK + FUEL_Z) / 2, 1.0, 0.32, FUEL_Z - FUEL_LINK));
+    pontGeo.push(pgeo(FUEL_X, PONTOON_TOP - 0.16, (FUEL_LINK + FUEL_Z) / 2, 1.0, 0.32, FUEL_Z - FUEL_LINK));
     deck(FUEL_X, (FUEL_LINK + FUEL_Z) / 2, 1.0, FUEL_Z - FUEL_LINK);
 
     // DEALER DOCK — the brokerage's own water frontage at the landward end,
@@ -882,13 +947,44 @@
     const DEAL_X = MAIN_X0 + 2, DEAL_Z = L.dealZ;
     const DEAL_W = L.dealW;
     const DEAL_LINK = L.dockZ[0] - MAIN_W / 2;
-    pontGeo.push(boxGeoAt(DEAL_X + DEAL_W / 2 - 3, PONTOON_TOP - 0.18, DEAL_Z, DEAL_W, 0.36, 2.6));
+    pontGeo.push(pgeo(DEAL_X + DEAL_W / 2 - 3, PONTOON_TOP - 0.18, DEAL_Z, DEAL_W, 0.36, 2.6));
     deck(DEAL_X + DEAL_W / 2 - 3, DEAL_Z, DEAL_W, 2.6);
-    pontGeo.push(boxGeoAt(DEAL_X, PONTOON_TOP - 0.16, (DEAL_Z + DEAL_LINK) / 2, 1.0, 0.32, DEAL_LINK - DEAL_Z));
+    pontGeo.push(pgeo(DEAL_X, PONTOON_TOP - 0.16, (DEAL_Z + DEAL_LINK) / 2, 1.0, 0.32, DEAL_LINK - DEAL_Z));
     deck(DEAL_X, (DEAL_Z + DEAL_LINK) / 2, 1.0, DEAL_LINK - DEAL_Z);
 
-    mergeAdd(pontGeo, m(PONTOON_C), pontoonGrp, false);
+    // THE FUEL DOCK HAS A PUMP. It was a bare pontoon with an attendant
+    // standing on it: a dispenser cabinet with its nozzle holster and a
+    // hose reel, at the head of the fuel pontoon (it floats with it).
+    const fuelKit = [], fuelDark = [];
+    if (K) {
+      const fx = FUEL_X - FUEL_W / 2 + 2.2, fz = FUEL_Z + 0.6;
+      fuelKit.push(K.put(new THREE.BoxGeometry(0.7, 1.45, 0.5), fx, PONTOON_TOP + 0.725, fz));
+      fuelDark.push(K.put(new THREE.BoxGeometry(0.72, 0.14, 0.52), fx, PONTOON_TOP + 1.52, fz));
+      fuelDark.push(K.put(new THREE.BoxGeometry(0.4, 0.3, 0.02), fx, PONTOON_TOP + 1.1, fz - 0.26));
+      fuelDark.push(K.put(new THREE.BoxGeometry(0.1, 0.22, 0.08), fx + 0.3, PONTOON_TOP + 0.9, fz - 0.28));
+      fuelDark.push(K.put(new THREE.CylinderGeometry(0.28, 0.28, 0.16, 14), fx + 1.1, PONTOON_TOP + 0.45, fz, 0, 0, Math.PI / 2));
+      fuelKit.push(K.put(new THREE.BoxGeometry(0.1, 0.5, 0.5), fx + 1.1, PONTOON_TOP + 0.25, fz));
+      solid(QX + fx, BZ + fz, 0.8, 0.6, null, PONTOON_TOP - 0.4, PONTOON_TOP + 1.6);
+    }
+    // rubbing strips down both long edges of every float (a timber pontoon's
+    // edge is a dark hardwood rub rail, not the side of the decking)
+    const rub = [];
+    if (K) {
+      for (const dp of decks) {
+        const alongX = dp.w >= dp.d;
+        for (const sg of [-1, 1]) {
+          if (alongX) rub.push(K.put(new THREE.BoxGeometry(dp.w, 0.16, 0.08), dp.x, PONTOON_TOP - 0.12, dp.z + sg * (dp.d / 2 + 0.03)));
+          else rub.push(K.put(new THREE.BoxGeometry(0.08, 0.16, dp.d), dp.x + sg * (dp.w / 2 + 0.03), PONTOON_TOP - 0.12, dp.z));
+        }
+      }
+    }
+    mergeAdd(pontGeo, K ? K.deckMat() : m(PONTOON_C), pontoonGrp, false);
     mergeAdd(cleatGeo, m(CLEAT), pontoonGrp, false);
+    mergeAdd(rub, m(0x3a2c20), pontoonGrp, false);
+    if (fuelKit.length) {
+      mergeAdd(fuelKit, m(0xd9dde1), pontoonGrp, true);
+      mergeAdd(fuelDark, m(0x2a2d31), pontoonGrp, true);
+    }
 
     // the GANGWAY / BROW: a hinged ramp from the fixed quay down to the
     // floating dock. Registered STATIC at the mean waterline — a real brow
@@ -899,6 +995,26 @@
       brow.position.set(QX + 2.0, (QUAY_TOP + PONTOON_TOP) / 2, BZ);
       brow.rotation.z = Math.atan2(PONTOON_TOP - QUAY_TOP, 2.8);
       brow.receiveShadow = true; root.add(brow);
+      // an aluminium gangway has handrails and anti-slip cleats across its
+      // walking surface; it was a bare tilted plate
+      if (K) {
+        const al = [];
+        const x0 = QX + 0.6, x1 = QX + 3.4, y0 = QUAY_TOP + 0.06, y1 = PONTOON_TOP + 0.06;
+        for (const sg of [-1, 1]) {
+          const zz = BZ + sg * 1.05;
+          al.push(K.member(x0, y0 + 0.95, zz, x1, y1 + 0.95, zz, 0.05));
+          al.push(K.member(x0, y0 + 0.5, zz, x1, y1 + 0.5, zz, 0.03));
+          for (const t of [0.05, 0.5, 0.95]) {
+            const px = x0 + (x1 - x0) * t, py = y0 + (y1 - y0) * t;
+            al.push(K.member(px, py, zz, px, py + 0.95, zz, 0.045));
+          }
+        }
+        for (let t = 0.08; t < 0.95; t += 0.1) {
+          const px = x0 + (x1 - x0) * t, py = y0 + (y1 - y0) * t;
+          al.push(K.put(new THREE.BoxGeometry(0.03, 0.025, 2.0), px, py + 0.012, BZ));
+        }
+        K.addMerged(root, al, K.steelMat(0xc3c7cb), { cast: true });
+      }
     }
 
     // ---- the two docks that are not trots (world-space registration; the
@@ -940,7 +1056,7 @@
     const MEDZ = BZ + L.medZ;                   // the quay face the sterns touch
     {
       const FACE_W = L.medFaceW, FACE_CX = QX + L.medFaceCx;
-      const face = new THREE.Mesh(new THREE.BoxGeometry(FACE_W, QUAY_TOP + 1.8, 5), m(CONCRETE_DK));
+      const face = new THREE.Mesh(K ? K.boxM(FACE_W, QUAY_TOP + 1.8, 5, 1) : new THREE.BoxGeometry(FACE_W, QUAY_TOP + 1.8, 5), K ? concDkMat : m(CONCRETE_DK));
       face.position.set(FACE_CX, QUAY_TOP - (QUAY_TOP + 1.8) / 2, MEDZ + 2.5);
       face.receiveShadow = true; root.add(face);
       plat(FACE_CX - FACE_W / 2, FACE_CX + FACE_W / 2, MEDZ, MEDZ + 5, QUAY_TOP);
@@ -973,8 +1089,8 @@
           label: "Superyacht Quay " + (i + 1),
         });
         // the pair of stern bollards + a passerelle stub for each berth
-        boll.push(boxGeoAt(bx - bigH.beam / 2, QUAY_TOP + 0.3, MEDZ + 0.9, 0.4, 0.6, 0.4));
-        boll.push(boxGeoAt(bx + bigH.beam / 2, QUAY_TOP + 0.3, MEDZ + 0.9, 0.4, 0.6, 0.4));
+        boll.push.apply(boll, bollardAt(bx - bigH.beam / 2, QUAY_TOP, MEDZ + 0.9, true));
+        boll.push.apply(boll, bollardAt(bx + bigH.beam / 2, QUAY_TOP, MEDZ + 0.9, true));
         // stern lines running down to the water (thin angled boxes — the read)
         for (const sgn of [-1, 1]) {
           lines.push(boxGeoAt(bx + sgn * bigH.beam / 2, (QUAY_TOP + SEA_Y) / 2 + 0.1, MEDZ - 0.6, 0.06, 1.8, 0.06, 0, sgn * 0.5));
@@ -999,37 +1115,184 @@
     function quayAt(t) { return QZ0 + (QZ1 - QZ0) * t; }
     // -- harbourmaster office: two storeys, a window band, a signal mast --
     const HARBOUR_MASTER = { x: QX - 11, z: quayAt(0.6346) };
+    /* A TWO-STOREY OFFICE, BUILT LIKE ONE (it was a white box wrapped in a
+       blue box for "windows", a slab for a roof, a square stick for a mast
+       and a box for a flag). Rendered walls, a plinth, real windows (frame,
+       sill, dark pane) on every face, a glazed door to the quay, a parapet
+       with its coping, a round signal mast with a yard and a cloth ensign. */
     {
-      const hx = HARBOUR_MASTER.x, hz = HARBOUR_MASTER.z;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(8, 6.2, 6), m(0xe6e8ea));
-      body.position.set(hx, QUAY_TOP + 3.1, hz); body.castShadow = true; body.receiveShadow = true; root.add(body);
-      solid(hx, hz, 8, 6, body, 0, QUAY_TOP + 6.2);
-      const band = new THREE.Mesh(new THREE.BoxGeometry(8.2, 1.3, 6.2), m(0x2f4a63));
-      band.position.set(hx, QUAY_TOP + 4.6, hz); root.add(band);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.24, 6.8), m(0x8c9298));
-      roof.position.set(hx, QUAY_TOP + 6.3, hz); root.add(roof);
-      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.16, 5.0, 0.16), m(0xd8dade));
-      mast.position.set(hx + 3.4, QUAY_TOP + 8.9, hz - 2.4); root.add(mast);
-      const pennant = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 1.2), m(0xd94a3a));
-      pennant.position.set(hx + 3.4, QUAY_TOP + 10.8, hz - 1.7); root.add(pennant);
+      const hx = HARBOUR_MASTER.x, hz = HARBOUR_MASTER.z, Y = QUAY_TOP;
+      if (!K) {
+        const body = new THREE.Mesh(new THREE.BoxGeometry(8, 6.2, 6), m(0xe6e8ea));
+        body.position.set(hx, Y + 3.1, hz); body.castShadow = true; body.receiveShadow = true; root.add(body);
+        solid(hx, hz, 8, 6, body, 0, Y + 6.2);
+      } else {
+        const wall = [], trim = [], pane = [], dark = [], metal = [];
+        wall.push(K.put(K.boxM(8, 6.2, 6, 1), hx, Y + 3.1, hz));
+        trim.push(K.put(K.boxM(8.1, 0.35, 6.1, 1), hx, Y + 0.175, hz));                // plinth
+        trim.push(K.put(K.boxM(8.1, 0.12, 6.1, 1), hx, Y + 3.1, hz));                  // floor band
+        // parapet + coping
+        for (const sg of [-1, 1]) {
+          wall.push(K.put(K.boxM(8, 0.6, 0.2, 1), hx, Y + 6.5, hz + sg * 2.9));
+          wall.push(K.put(K.boxM(0.2, 0.6, 5.6, 1), hx + sg * 3.9, Y + 6.5, hz));
+          trim.push(K.put(K.boxM(8.2, 0.08, 0.3, 1), hx, Y + 6.84, hz + sg * 2.9));
+          trim.push(K.put(K.boxM(0.3, 0.08, 5.8, 1), hx + sg * 3.9, Y + 6.84, hz));
+        }
+        dark.push(K.put(new THREE.BoxGeometry(7.6, 0.05, 5.6), hx, Y + 6.22, hz));        // roof membrane
+        // windows: face normal n, centred along the face at offsets, two floors
+        function win(cx, cy, cz, nx, nz, w, h) {
+          const along = nx !== 0 ? "z" : "x";
+          const ox = nx * 0.06, oz = nz * 0.06;
+          const W = along === "x" ? w : 0.05, D = along === "x" ? 0.05 : w;
+          pane.push(K.put(new THREE.BoxGeometry(W, h, D), cx + ox, cy, cz + oz));
+          const fw = along === "x" ? w + 0.16 : 0.08, fd = along === "x" ? 0.08 : w + 0.16;
+          trim.push(K.put(new THREE.BoxGeometry(fw, 0.08, fd), cx + ox, cy + h / 2 + 0.04, cz + oz));   // head
+          trim.push(K.put(new THREE.BoxGeometry(along === "x" ? w + 0.24 : 0.16, 0.06, along === "x" ? 0.16 : w + 0.24), cx + nx * 0.1, cy - h / 2 - 0.03, cz + nz * 0.1));  // sill
+          for (const sg of [-1, 1]) {
+            const jx = along === "x" ? sg * (w / 2 + 0.04) : 0, jz = along === "x" ? 0 : sg * (w / 2 + 0.04);
+            trim.push(K.put(new THREE.BoxGeometry(along === "x" ? 0.08 : 0.08, h, along === "x" ? 0.08 : 0.08), cx + ox + jx, cy, cz + oz + jz));
+          }
+          // a glazing bar across the middle
+          trim.push(K.put(new THREE.BoxGeometry(along === "x" ? w : 0.06, 0.05, along === "x" ? 0.06 : w), cx + ox * 1.1, cy + h * 0.15, cz + oz * 1.1));
+        }
+        for (const fy of [Y + 1.7, Y + 4.7]) {
+          for (const sg of [-1, 1]) {
+            for (const ax of [-2.4, 0, 2.4]) win(hx + ax, fy, hz + sg * 3, 0, sg, 1.3, 1.4);
+            for (const az of [-1.4, 1.4]) win(hx + sg * 4, fy, hz + az, sg, 0, 1.2, 1.4);
+          }
+        }
+        // the glazed door to the quay (+x face), with a canopy
+        pane.push(K.put(new THREE.BoxGeometry(0.05, 2.2, 1.1), hx + 4.06, Y + 1.1 + 0.35, hz));
+        trim.push(K.put(new THREE.BoxGeometry(0.1, 2.35, 1.3), hx + 4.03, Y + 1.2 + 0.35, hz));
+        metal.push(K.put(new THREE.BoxGeometry(1.1, 0.08, 1.8), hx + 4.55, Y + 3.0, hz));
+        // signal mast: tapered round spar, a yard, halyards, the ensign
+        const mx = hx + 3.4, mz = hz - 2.4, m0 = Y + 6.2;
+        metal.push(K.put(new THREE.CylinderGeometry(0.05, 0.08, 5.0, 8), mx, m0 + 2.5, mz));
+        metal.push(K.put(new THREE.CylinderGeometry(0.025, 0.035, 1.8, 6), mx, m0 + 3.9, mz, 0, 0, Math.PI / 2));
+        metal.push(K.put(new THREE.SphereGeometry(0.08, 8, 6), mx, m0 + 5.05, mz));
+        dark.push(K.member(mx + 0.85, m0 + 3.88, mz, mx + 0.85, m0 + 0.6, mz, 0.01));
+        dark.push(K.member(mx - 0.85, m0 + 3.88, mz, mx - 0.85, m0 + 0.6, mz, 0.01));
+        K.addMerged(root, wall, K.plasterMat(0xece9e2), { cast: true });
+        K.addMerged(root, trim, cmat(0xd9dadb), { cast: true });
+        K.addMerged(root, pane, cmat(0x27323b), {});
+        K.addMerged(root, dark, cmat(0x2a2d31), {});
+        K.addMerged(root, metal, K.steelMat(0xdfe2e5), { cast: true });
+        const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7, 4, 1), new THREE.MeshLambertMaterial({ color: 0xd94a3a, side: THREE.DoubleSide }));
+        { const fp = flag.geometry.attributes.position; for (let i = 0; i < fp.count; i++) fp.setZ(i, Math.sin((fp.getX(i) + 0.55) * 4.2) * 0.07); flag.geometry.computeVertexNormals(); }
+        flag.position.set(mx + 0.62, m0 + 4.7, mz); root.add(flag);
+        solid(hx, hz, 8, 6, null, 0, Y + 6.9);
+      }
     }
     // -- chandlery: a low shed with a roller door + a rack of fenders --
     {
       const sx = QX - 12, sz = quayAt(0.4615);
-      const shed = new THREE.Mesh(new THREE.BoxGeometry(10, 4.2, 7), m(0xb7c0c6));
-      shed.position.set(sx, QUAY_TOP + 2.1, sz); shed.castShadow = true; shed.receiveShadow = true; root.add(shed);
-      solid(sx, sz, 10, 7, shed, 0, QUAY_TOP + 4.2);
-      const door = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.0, 3.4), m(0x50575c));
-      door.position.set(sx + 5.05, QUAY_TOP + 1.5, sz); root.add(door);
-      const eave = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.2, 7.6), m(0x7d848a));
-      eave.position.set(sx, QUAY_TOP + 4.3, sz); root.add(eave);
+      if (!K) {
+        const shed = new THREE.Mesh(new THREE.BoxGeometry(10, 4.2, 7), m(0xb7c0c6));
+        shed.position.set(sx, QUAY_TOP + 2.1, sz); shed.castShadow = true; shed.receiveShadow = true; root.add(shed);
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.0, 3.4), m(0x50575c));
+        door.position.set(sx + 5.05, QUAY_TOP + 1.5, sz); root.add(door);
+      } else {
+        /* A STEEL-CLAD SHED: trapezoidal sheet walls on a concrete upstand, a
+           pitched roof with its ridge and barge boards, a roller door with its
+           box and guides, a personnel door, gutters and downpipes (it was a
+           grey box, a dark box for a door and a slab for an eave). */
+        const Y = QUAY_TOP, W = 10, D = 7, EH = 4.0, RH = 1.3;
+        const clad = [], roofG = [], trim = [], dark = [], upst = [];
+        upst.push(K.put(K.boxM(W, 0.3, D, 1), sx, Y + 0.15, sz));
+        // long walls (ribs vertical), gable walls up to the ridge
+        clad.push(K.put(K.boxM(W, EH - 0.3, D - 0.02, 1), sx, Y + 0.3 + (EH - 0.3) / 2, sz));
+        for (const sg of [-1, 1]) {
+          const gg = new THREE.BufferGeometry();
+          const gx = sx + sg * W / 2, y0 = Y + EH;
+          const v = new Float32Array([gx, y0, sz - D / 2, gx, y0, sz + D / 2, gx, y0 + RH, sz]);
+          gg.setAttribute("position", new THREE.BufferAttribute(v, 3));
+          gg.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, D, 0, D / 2, RH]), 2));
+          if (sg < 0) gg.setIndex([0, 1, 2]); else gg.setIndex([1, 0, 2]);
+          gg.computeVertexNormals();
+          clad.push(gg);
+        }
+        // roof: two slopes with a 0.4 m overhang
+        const slope = Math.atan2(RH, D / 2), sl = Math.hypot(RH, D / 2) + 0.4;
+        for (const sg of [-1, 1]) {
+          const r = K.boxM(W + 0.6, 0.08, sl, 1, true);
+          r.rotateX(sg * slope);
+          r.translate(sx, Y + EH + RH / 2 - 0.05, sz + sg * (D / 4 + 0.1));
+          roofG.push(r);
+          trim.push(K.put(new THREE.BoxGeometry(W + 0.6, 0.12, 0.14), sx, Y + EH - 0.12, sz + sg * (D / 2 + 0.3)));   // gutter
+          trim.push(K.put(new THREE.CylinderGeometry(0.05, 0.05, EH - 0.2, 6), sx + sg * (W / 2 - 0.3), Y + (EH - 0.2) / 2, sz + sg * (D / 2 + 0.3)));
+        }
+        trim.push(K.put(new THREE.BoxGeometry(W + 0.7, 0.14, 0.3), sx, Y + EH + RH + 0.02, sz));                     // ridge
+        // roller door on the quay face (+x): curtain, box, guides
+        const ddz = sz - 0.8;
+        roofG.push(K.put(K.boxM(0.06, 3.0, 3.4, 1, true), sx + W / 2 + 0.03, Y + 0.3 + 1.5, ddz));
+        trim.push(K.put(new THREE.BoxGeometry(0.45, 0.45, 3.7), sx + W / 2 + 0.2, Y + 3.55, ddz));
+        for (const sg of [-1, 1]) trim.push(K.put(new THREE.BoxGeometry(0.1, 3.0, 0.1), sx + W / 2 + 0.06, Y + 1.8, ddz + sg * 1.75));
+        dark.push(K.put(new THREE.BoxGeometry(0.06, 2.1, 0.95), sx + W / 2 + 0.03, Y + 0.3 + 1.05, sz + 2.1));
+        K.addMerged(root, upst, concMat, {});
+        K.addMerged(root, clad, K.corrugatedMat(0x8fa3ad), { cast: true });
+        K.addMerged(root, roofG, K.corrugatedMat(0xb9bec2), { cast: true });
+        K.addMerged(root, trim, cmat(0x4d555c), { cast: true });
+        K.addMerged(root, dark, cmat(0x2c3338), {});
+      }
+      solid(sx, sz, 10, 7, null, 0, QUAY_TOP + 5.3);
     }
     // -- yacht club terrace: a raised, usable deck left deliberately open --
     {
       const tx = QX - 8, tz = quayAt(0.7692), TW = 12, TD = 9, TT = QUAY_TOP + 0.4;
-      const planks = [];
-      for (let x = tx - TW / 2 + 0.6; x < tx + TW / 2; x += 1.1) planks.push(boxGeoAt(x, TT - 0.06, tz, 1.0, 0.12, TD));
-      mergeAdd(planks, m(WOOD_A));
+      if (!K) {
+        const planks = [];
+        for (let x = tx - TW / 2 + 0.6; x < tx + TW / 2; x += 1.1) planks.push(boxGeoAt(x, TT - 0.06, tz, 1.0, 0.12, TD));
+        mergeAdd(planks, m(WOOD_A));
+      } else {
+        /* A CLUB TERRACE: a timber deck (140 mm boards, not 1 m slabs) on a
+           skirted frame, a glass-panel balustrade on the three open sides
+           (the quay side is where you step up), and tables under parasols. */
+        const deckG = [K.put(K.boxM(TW, 0.12, TD, 1, true), tx, TT - 0.06, tz)];
+        const skirt = [], rail = [], glassG = [], furn = [], canvas = [];
+        for (const sg of [-1, 1]) {
+          skirt.push(K.put(K.boxM(TW, TT - QUAY_TOP - 0.1, 0.06, 1), tx, (TT + QUAY_TOP) / 2 - 0.05, tz + sg * TD / 2));
+          skirt.push(K.put(K.boxM(0.06, TT - QUAY_TOP - 0.1, TD, 1), tx + sg * TW / 2, (TT + QUAY_TOP) / 2 - 0.05, tz));
+        }
+        // balustrade: landward (-x) side and the two short ends
+        const runs = [[tx - TW / 2, tz - TD / 2, tx - TW / 2, tz + TD / 2], [tx - TW / 2, tz - TD / 2, tx + TW / 2 - 1.6, tz - TD / 2], [tx - TW / 2, tz + TD / 2, tx + TW / 2 - 1.6, tz + TD / 2]];
+        for (const r of runs) {
+          rail.push(K.member(r[0], TT + 1.0, r[1], r[2], TT + 1.0, r[3], 0.06));
+          const L = Math.hypot(r[2] - r[0], r[3] - r[1]), n = Math.max(1, Math.round(L / 1.5));
+          for (let i = 0; i <= n; i++) {
+            const px = r[0] + (r[2] - r[0]) * i / n, pz = r[1] + (r[3] - r[1]) * i / n;
+            rail.push(K.member(px, TT, pz, px, TT + 1.0, pz, 0.05));
+          }
+          glassG.push(K.member(r[0], TT + 0.5, r[1], r[2], TT + 0.5, r[3], 0.02, 0.85));
+          solid((r[0] + r[2]) / 2, (r[1] + r[3]) / 2, Math.max(0.1, Math.abs(r[2] - r[0])), Math.max(0.1, Math.abs(r[3] - r[1])), null, TT, TT + 1.05);
+        }
+        // three tables with four chairs and a parasol each
+        for (let i = 0; i < 3; i++) {
+          const fx = tx - TW / 2 + 2.5 + i * 3.4, fz = tz + (i % 2 ? 1.6 : -1.4);
+          furn.push(K.put(new THREE.CylinderGeometry(0.45, 0.45, 0.04, 14), fx, TT + 0.74, fz));
+          furn.push(K.put(new THREE.CylinderGeometry(0.03, 0.03, 0.72, 6), fx, TT + 0.36, fz));
+          furn.push(K.put(new THREE.CylinderGeometry(0.22, 0.25, 0.03, 10), fx, TT + 0.015, fz));
+          furn.push(K.put(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 6), fx, TT + 1.15, fz));
+          canvas.push(K.put(new THREE.ConeGeometry(1.35, 0.45, 8, 1, true), fx, TT + 2.2, fz));
+          for (let c = 0; c < 4; c++) {
+            const a = c * Math.PI / 2 + 0.3, cx2 = fx + Math.cos(a) * 0.72, cz2 = fz + Math.sin(a) * 0.72;
+            furn.push(K.put(new THREE.BoxGeometry(0.42, 0.04, 0.42), cx2, TT + 0.45, cz2, -a));
+            furn.push(K.put(new THREE.BoxGeometry(0.04, 0.45, 0.42), cx2 + Math.cos(a) * 0.2, TT + 0.68, cz2 + Math.sin(a) * 0.2, -a));
+            for (const lx of [-0.17, 0.17]) for (const lz of [-0.17, 0.17]) {
+              const g2 = new THREE.CylinderGeometry(0.012, 0.012, 0.45, 4);
+              g2.translate(lx, 0.225, lz); g2.rotateY(-a); g2.translate(cx2, TT, cz2);
+              furn.push(g2);
+            }
+          }
+          solid(fx, fz, 1.0, 1.0, null, TT, TT + 0.78);
+        }
+        K.addMerged(root, deckG, K.deckMat(), {});
+        K.addMerged(root, skirt, K.deckMat(0xb09a82), {});
+        K.addMerged(root, rail, K.steelMat(0xc8ccd0), { cast: true });
+        K.addMerged(root, glassG, K.glassMat(0.3), {});
+        K.addMerged(root, furn, cmat(0x2f3338), { cast: true });
+        const pm = new THREE.MeshLambertMaterial({ color: 0xece6d6, side: THREE.DoubleSide });
+        K.addMerged(root, canvas, pm, { cast: true });
+      }
       plat(tx - TW / 2, tx + TW / 2, tz - TD / 2, tz + TD / 2, TT);
     }
     // -- travel-lift gantry straddling the lift well (the well itself is the
@@ -1047,11 +1310,27 @@
       }
       for (const lz of [WELL_Z - 4.2, WELL_Z + 4.2]) beams.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 8.7, lz, wx1 - wx0 - 1.4, 0.7, 0.8));
       beams.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 9.2, WELL_Z, 1.4, 0.6, 9.2));
+      // the machine a travel lift actually is: cross-braced side frames, a
+      // wheel bogie with two tyres at the foot of every leg, hoist blocks on
+      // the main beams and flat lifting straps, not 14 cm square rods
+      const tyres = [], straps = [];
+      for (const lx of [wx0 + 1.5, wx1 - 1.5]) for (const lz of [WELL_Z - 4.2, WELL_Z + 4.2]) {
+        legs.push(boxGeoAt(lx, QUAY_TOP + 0.55, lz, 0.9, 0.35, 1.9));
+        for (const tz2 of [-0.55, 0.55]) tyres.push(K ? K.put(new THREE.CylinderGeometry(0.42, 0.42, 0.32, 14), lx, QUAY_TOP + 0.42, lz + tz2, 0, 0, Math.PI / 2) : boxGeoAt(lx, QUAY_TOP + 0.42, lz + tz2, 0.32, 0.84, 0.84));
+      }
+      if (K) for (const lz of [WELL_Z - 4.2, WELL_Z + 4.2]) {
+        legs.push(K.member(wx0 + 1.5, QUAY_TOP + 1.2, lz, wx1 - 1.5, QUAY_TOP + 7.8, lz, 0.18));
+        for (const sz of [WELL_Z - 2.0, WELL_Z + 2.0]) legs.push(K.put(new THREE.BoxGeometry(0.6, 0.5, 0.4), (wx0 + wx1) / 2, QUAY_TOP + 8.1, sz));
+      }
       mergeAdd(legs, m(0x2f6d8f), root, true);
       mergeAdd(beams, m(0x2f6d8f), root, true);
+      mergeAdd(tyres, m(0x16181b), root, true);
       const slings = [];
-      for (const sz of [WELL_Z - 2.0, WELL_Z + 2.0]) slings.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 6.6, sz, 0.14, 4.6, 0.14));
-      mergeAdd(slings, m(0x3a3f44));
+      for (const sz of [WELL_Z - 2.0, WELL_Z + 2.0]) {
+        slings.push(boxGeoAt((wx0 + wx1) / 2 - 1.1, QUAY_TOP + 5.9, sz, 0.02, 4.4, 0.22));
+        slings.push(boxGeoAt((wx0 + wx1) / 2 + 1.1, QUAY_TOP + 5.9, sz, 0.02, 4.4, 0.22));
+      }
+      mergeAdd(slings, m(0x2f55a0));
       // A GANTRY DOES NOT LIFT A BOAT BY ITSELF. The lift operator stands at
       // the head of the well where the controls are, watching the slings.
       crewSpots.push({ x: (wx0 + wx1) / 2 - 2.0, z: WELL_Z - 5.6, face: 0, job: "boat mechanic",
@@ -1060,20 +1339,76 @@
     // -- the brokerage building: the dealer's showroom, glass to the water.
     //    boatyard.js registers its sales desk at deskX/deskZ (exposed below).
     const DESK = { x: QX - 6.5, z: BZ + DEAL_Z + 4 };
+    /* THE SHOWROOM YOU CAN WALK INTO. It was a solid white box with its
+       sales desk ENTOMBED inside the box's collider (the desk marker sat
+       2.5 m inside a 13 x 11 m solid), a glass slab stuck on one face and a
+       blank blue box for a sign. Now: rendered walls on three sides, full
+       height glazing with mullions to the water and a door in it, a
+       cantilevered roof with a lit soffit, a polished floor, the broker's
+       desk (top, modesty panel, monitor, chair) facing the door, and the
+       name on the fascia. Colliders are the walls, the glazing either side
+       of the door, and the desk. */
     {
-      const bx = QX - 9, bz = BZ + DEAL_Z + 4;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(13, 5.4, 11), m(0xf0f2f4));
-      body.position.set(bx, QUAY_TOP + 2.7, bz); body.castShadow = true; body.receiveShadow = true; root.add(body);
-      solid(bx, bz, 13, 11, body, 0, QUAY_TOP + 5.4);
-      const glass = new THREE.Mesh(new THREE.BoxGeometry(0.14, 3.6, 10.4), m(0x8fc4e0));
-      glass.position.set(bx + 6.6, QUAY_TOP + 2.5, bz); root.add(glass);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(13.8, 0.26, 11.8), m(0xb9bfc4));
-      roof.position.set(bx, QUAY_TOP + 5.5, bz); root.add(roof);
-      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.1, 8.4), m(0x123a5a));
-      sign.position.set(bx + 6.9, QUAY_TOP + 6.3, bz); root.add(sign);
-      // the desk marker the interaction zone sits on
-      const desk = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 0.9), m(WOOD_DK));
-      desk.position.set(DESK.x, QUAY_TOP + 0.5, DESK.z); desk.castShadow = true; root.add(desk);
+      const bx = QX - 9, bz = BZ + DEAL_Z + 4, Y = QUAY_TOP;
+      const BW = 13, BD = 11, BH = 5.4;
+      const DOOR_Z = bz + 2.6, DOOR_W = 2.4;
+      if (!K) {
+        const body = new THREE.Mesh(new THREE.BoxGeometry(13, 5.4, 11), m(0xf0f2f4));
+        body.position.set(bx, Y + 2.7, bz); body.castShadow = true; body.receiveShadow = true; root.add(body);
+        solid(bx, bz, 13, 11, body, 0, Y + 5.4);
+        const desk = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 0.9), m(WOOD_DK));
+        desk.position.set(DESK.x, Y + 0.5, DESK.z); desk.castShadow = true; root.add(desk);
+      } else {
+        const wall = [], frame = [], glassG = [], floor = [], lit = [], desk = [], deskTop = [];
+        const T = 0.25, xb = bx - BW / 2, xf = bx + BW / 2;
+        wall.push(K.put(K.boxM(T, BH, BD, 1), xb + T / 2, Y + BH / 2, bz));
+        for (const sg of [-1, 1]) wall.push(K.put(K.boxM(BW, BH, T, 1), bx, Y + BH / 2, bz + sg * (BD / 2 - T / 2)));
+        solid(xb + T / 2, bz, T, BD, null, 0, Y + BH);
+        for (const sg of [-1, 1]) solid(bx, bz + sg * (BD / 2 - T / 2), BW, T, null, 0, Y + BH);
+        // the water face: glazing either side of the door, mullions every 1.5 m
+        const segs = [[bz - BD / 2 + T, DOOR_Z - DOOR_W / 2], [DOOR_Z + DOOR_W / 2, bz + BD / 2 - T]];
+        for (const sgm of segs) {
+          const L = sgm[1] - sgm[0], cz = (sgm[0] + sgm[1]) / 2;
+          glassG.push(K.put(new THREE.BoxGeometry(0.05, BH - 0.6, L), xf - 0.1, Y + (BH - 0.6) / 2 + 0.05, cz));
+          solid(xf - 0.1, cz, 0.2, L, null, 0, Y + BH);
+          for (let z = sgm[0]; z <= sgm[1] + 0.01; z += Math.max(0.5, L / Math.max(1, Math.round(L / 1.5)))) frame.push(K.put(new THREE.BoxGeometry(0.12, BH - 0.5, 0.08), xf - 0.1, Y + (BH - 0.5) / 2, z));
+        }
+        frame.push(K.put(new THREE.BoxGeometry(0.14, 0.12, BD), xf - 0.1, Y + 0.06, bz));
+        frame.push(K.put(new THREE.BoxGeometry(0.14, 0.14, DOOR_W + 0.2), xf - 0.1, Y + 2.4, DOOR_Z));
+        glassG.push(K.put(new THREE.BoxGeometry(0.05, BH - 2.95, DOOR_W), xf - 0.1, Y + 2.47 + (BH - 2.95) / 2, DOOR_Z));   // transom
+        // roof: slab over the whole plan, cantilevered 1.8 m over the quay
+        wall.push(K.put(K.boxM(BW + 1.8, 0.35, BD + 0.4, 1), bx + 0.9, Y + BH + 0.17, bz));
+        frame.push(K.put(new THREE.BoxGeometry(0.2, 0.7, BD + 0.5), xf + 1.8, Y + BH + 0.1, bz));      // fascia
+        for (let z = bz - BD / 2 + 1.5; z < bz + BD / 2 - 1; z += 2.4) {
+          for (const x of [bx - 3.5, bx, bx + 3.5]) lit.push(K.put(new THREE.BoxGeometry(1.2, 0.03, 0.6), x, Y + BH - 0.02, z));
+          lit.push(K.put(new THREE.BoxGeometry(0.4, 0.03, 0.4), xf + 0.9, Y + BH - 0.02, z));
+        }
+        // polished floor inside, just above the quay deck (the quay is the floor)
+        floor.push(K.put(new THREE.BoxGeometry(BW - T - 0.2, 0.02, BD - 2 * T), bx + 0.1, Y + 0.012, bz));
+        // the sales desk, facing the door
+        const dx = DESK.x, dz = DESK.z;
+        deskTop.push(K.put(new THREE.BoxGeometry(0.8, 0.05, 2.2), dx, Y + 0.76, dz));
+        desk.push(K.put(new THREE.BoxGeometry(0.04, 0.6, 2.1), dx + 0.36, Y + 0.44, dz));
+        for (const sg of [-1, 1]) desk.push(K.put(new THREE.BoxGeometry(0.72, 0.74, 0.05), dx, Y + 0.37, dz + sg * 1.05));
+        desk.push(K.put(new THREE.BoxGeometry(0.05, 0.36, 0.56), dx - 0.2, Y + 1.0, dz - 0.4));
+        desk.push(K.put(new THREE.BoxGeometry(0.2, 0.02, 0.2), dx - 0.2, Y + 0.795, dz - 0.4));
+        lit.push(K.put(new THREE.BoxGeometry(0.01, 0.31, 0.5), dx - 0.23, Y + 1.0, dz - 0.4));
+        desk.push(K.put(new THREE.BoxGeometry(0.46, 0.06, 0.46), dx - 0.75, Y + 0.48, dz));             // chair seat
+        desk.push(K.put(new THREE.BoxGeometry(0.06, 0.5, 0.44), dx - 0.96, Y + 0.78, dz));              // back
+        desk.push(K.put(new THREE.CylinderGeometry(0.03, 0.03, 0.42, 6), dx - 0.75, Y + 0.24, dz));
+        solid(dx, dz, 0.8, 2.2, null, 0, Y + 0.8);
+        K.addMerged(root, wall, K.plasterMat(0xf2f0eb), { cast: true });
+        K.addMerged(root, frame, cmat(0x30353b), { cast: true });
+        K.addMerged(root, glassG, K.glassMat(0.35), {});
+        K.addMerged(root, floor, cmat(0xd9d6cf), {});
+        K.addMerged(root, deskTop, cmat(0x2c2a28), {});
+        K.addMerged(root, desk, cmat(0x5a4a3a), {});
+        K.addMerged(root, lit, K.glow(CBZ.mat(0xfff4dc, { emissive: 0xffecc8, ei: 0.45 }), 0.45, 1.0, root), {});
+        if (CBZ.makeLabelSprite) {
+          const s2 = CBZ.makeLabelSprite("YACHT SALES", { color: "#f4f6f8", board: "#123a5a" });
+          if (s2) { s2.position.set(xf + 1.92, Y + BH + 0.1, bz); s2.rotation.y = Math.PI / 2; s2.scale.set(5.2, 0.62, 1); root.add(s2); }
+        }
+      }
     }
 
     // =====================================================================
@@ -1088,6 +1423,7 @@
     // the docks by one elbow before hooking in — solved off the dock spine, so
     // a longer basin never leaves its own pontoons outside its breakwater.
     const ARM_X0 = QX + 8, ARM_X1 = QX + MAIN_X0 + MAIN_LEN + 9;
+    const armour = [];
     function breakwater(z, hookZ) {
       const x0 = ARM_X0, x1 = ARM_X1;
       const hz0 = Math.min(z, hookZ), hz1 = Math.max(z, hookZ);
@@ -1098,7 +1434,18 @@
       const body = [];
       body.push(boxGeoAt((x0 + x1) / 2, bodyBottom + bodyH / 2, z, x1 - x0, bodyH, 2.2));
       body.push(boxGeoAt(x1, bodyBottom + bodyH / 2, (hz0 + hz1) / 2, 2.2, bodyH, hz1 - hz0));
-      const bodyMesh = mergeAdd(body, m(CONCRETE_DK));
+      const bodyMesh = mergeAdd(K ? body.map(function (b) { return b; }) : body, K ? concDkMat : m(CONCRETE_DK));
+      // ARMOUR STONE along both faces at the waterline (irregular quarried
+      // rock, instanced; the cube rip-rap that used to hide the gap was
+      // deleted for being cubes, not for being rock)
+      if (K) {
+        armour.push([x0, z, x1, z], [x1, hz0, x1, hz1]);
+        // the stone is solid to a hull: a band each side of each run
+        for (const sg of [-1, 1]) {
+          solid((x0 + x1) / 2, z + sg * 2.2, x1 - x0, 1.6, null, bodyBottom, SEA_Y + 0.8);
+          solid(x1 + sg * 2.2, (hz0 + hz1) / 2, 1.6, hz1 - hz0, null, bodyBottom, SEA_Y + 0.8);
+        }
+      }
       solid((x0 + x1) / 2, z, x1 - x0, 2.2, bodyMesh, bodyBottom, CAP_TOP);
       solid(x1, (hz0 + hz1) / 2, 2.2, hz1 - hz0, bodyMesh, bodyBottom, CAP_TOP);
       plat(x0, x1, z - 1.1, z + 1.1, CAP_TOP);
@@ -1116,22 +1463,80 @@
         stepSpots.push({ x: sx, top: top });
         plat(sx - 0.6, sx + 0.6, z - 1.0, z + 1.0, top);
       }
-      const stepMesh = mergeAdd(steps, m(CONCRETE_DK));
+      const stepMesh = mergeAdd(steps, K ? concDkMat : m(CONCRETE_DK));
       for (const s of stepSpots) solid(s.x, z, 1.2, 2.0, stepMesh, bodyBottom, s.top);
       return { x1: x1, hookZ: hookZ };
     }
     const southArm = L.arms ? breakwater(BZ + L.armS, BZ + L.hookS) : null;
     const northArm = L.arms ? breakwater(BZ + L.armN, BZ + L.hookN) : null;
+    if (K && armour.length && CBZ.surfaceMaps) {
+      const pts = [];
+      for (const r of armour) {
+        const Lr = Math.hypot(r[2] - r[0], r[3] - r[1]), ux = (r[2] - r[0]) / Lr, uz = (r[3] - r[1]) / Lr;
+        for (let t = 0.6; t < Lr; t += 1.25) for (const sg of [-1, 1]) {
+          const h = CBZ.hash01(r[0] + t, r[1] + sg, 991);
+          const x = r[0] + ux * t + (-uz) * sg * (1.55 + h * 0.4), z2 = r[1] + uz * t + ux * sg * (1.55 + h * 0.4);
+          if (!waterAt(x, z2)) continue;
+          pts.push([x, SEA_Y + 0.05 + h * 0.35, z2, h]);
+        }
+      }
+      if (pts.length) {
+        const rg = new THREE.DodecahedronGeometry(0.85, 0);
+        const pa = rg.attributes.position;
+        for (let i = 0; i < pa.count; i++) {
+          const k = 0.78 + CBZ.hash01(Math.round(pa.getX(i) * 50), Math.round(pa.getZ(i) * 50) + Math.round(pa.getY(i) * 50) * 7, 992) * 0.4;
+          pa.setXYZ(i, pa.getX(i) * k, pa.getY(i) * k * 0.8, pa.getZ(i) * k);
+        }
+        rg.computeVertexNormals();
+        const rm = new THREE.MeshStandardMaterial({ color: 0x8d8a83, roughness: 0.95, metalness: 0, envMap: CBZ.ENV || null });
+        if (CBZ.surfaceApply) CBZ.surfaceApply(rm, "rock", { repeat: 1.2, roughness: 0.95, metalness: 0 });
+        const im = new THREE.InstancedMesh(rg, rm, pts.length);
+        const d0 = new THREE.Object3D();
+        for (let i = 0; i < pts.length; i++) {
+          const q = pts[i];
+          d0.position.set(q[0], q[1], q[2]);
+          d0.rotation.set(q[3] * 2.1, q[3] * 5.3, q[3] * 1.7);
+          const sc = 0.8 + q[3] * 0.55; d0.scale.set(sc, sc * (0.8 + q[3] * 0.3), sc * 1.1);
+          d0.updateMatrix(); im.setMatrixAt(i, d0.matrix);
+        }
+        im.instanceMatrix.needsUpdate = true;
+        im.castShadow = true; im.receiveShadow = true;
+        root.add(im);
+      }
+    }
 
     // head lights + channel buoys (IALA Region B)
+    /* A HARBOUR LIGHT: a tapered tower painted in its IALA colour with a
+       white band, a gallery with a rail, and a small lantern (glass, cap,
+       vent) whose lamp shows its colour at night. It was a white cylinder
+       with a glowing ball sat on top at full strength all day. */
     function navHead(x, z, color, top) {
       const y = top == null ? CAP_TOP : top;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 3.4, 8), m(0xe8ebee));
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 3.4, 12), m(color));
       col.position.set(x, y + 1.7, z); col.castShadow = true; root.add(col);
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 6),
-        new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.9 }));
-      lamp.position.set(x, y + 3.7, z); root.add(lamp);
       solid(x, z, 1.4, 1.4, col, 0, y + 3.4);
+      if (!K) {
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 6),
+          new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.9 }));
+        lamp.position.set(x, y + 3.7, z); root.add(lamp);
+        return;
+      }
+      const wht = [], drk = [];
+      wht.push(K.put(new THREE.CylinderGeometry(0.575, 0.6, 0.6, 12, 1, true), x, y + 1.9, z));
+      wht.push(K.put(new THREE.CylinderGeometry(0.85, 0.85, 0.08, 14), x, y + 3.44, z));          // gallery
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * Math.PI * 2;
+        drk.push(K.put(new THREE.CylinderGeometry(0.015, 0.015, 0.6, 4), x + Math.cos(a) * 0.8, y + 3.78, z + Math.sin(a) * 0.8));
+      }
+      drk.push(K.put(new THREE.TorusGeometry(0.8, 0.02, 4, 20), x, y + 4.08, z, 0, Math.PI / 2));
+      drk.push(K.put(new THREE.CylinderGeometry(0.26, 0.28, 0.1, 10), x, y + 3.53, z));
+      drk.push(K.put(new THREE.ConeGeometry(0.34, 0.3, 10), x, y + 4.33, z));                    // lantern cap
+      drk.push(K.put(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 6), x, y + 4.6, z));
+      K.addMerged(root, wht, cmat(0xeef0f2), { cast: true });
+      K.addMerged(root, drk, cmat(0x2c3035), { cast: true });
+      const lm = K.glow(CBZ.mat(color, { emissive: color, ei: 0.15 }), 0.15, 1.3, root);
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.55, 10), lm);
+      lamp.position.set(x, y + 3.86, z); root.add(lamp);
     }
     // RED to STARBOARD entering from seaward => the SOUTH head is red.
     // With no arms there are no arm HEADS either, and a harbour with no lights
@@ -1179,8 +1584,13 @@
           : new THREE.ConeGeometry(0.68, 1.7, 8),                   // NUN (conical) = green
           m(b.c));
         hull.position.y = 0.75; buoy.add(hull);
-        const top = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 0.12), m(b.c));
-        top.position.y = 1.9; buoy.add(top);
+        // a staff with the topmark: a can on a red buoy, a cone on a green one
+        const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.8, 6), m(0x2c3035));
+        staff.position.y = (b.can ? 1.5 : 1.7) + 0.4; buoy.add(staff);
+        const top = new THREE.Mesh(b.can ? new THREE.CylinderGeometry(0.16, 0.16, 0.3, 8) : new THREE.ConeGeometry(0.2, 0.34, 8), m(b.c));
+        top.position.y = (b.can ? 1.5 : 1.7) + 0.9; buoy.add(top);
+        const band = new THREE.Mesh(b.can ? new THREE.CylinderGeometry(0.63, 0.63, 0.14, 8, 1, true) : new THREE.CylinderGeometry(0.36, 0.44, 0.14, 8, 1, true), m(0xeef0f2));
+        band.position.y = b.can ? 1.2 : 0.95; buoy.add(band);
         root.add(buoy);
         // buoys ride the swell like anything else afloat
         if (CBZ.waterFloat) {
@@ -1198,13 +1608,16 @@
         const px = QX + 12 + i * 8;
         const pz = BZ + (i % 2 ? L.pileZN : L.pileZS);
         if (!waterAt(px, pz)) continue;
-        piles.push(boxGeoAt(px, SEA_Y + 1.4, pz, 0.42, 5.2, 0.42, CBZ.hash01(px, pz, 831) * 0.3));
+        // a driven timber pile is ROUND, with a pale weathered cap
+        if (K) {
+          piles.push(K.put(K.uvScale(new THREE.CylinderGeometry(0.19, 0.22, 5.2, 10), 1.3, 5.2), px, SEA_Y + 1.4, pz, CBZ.hash01(px, pz, 831) * 0.3));
+        } else piles.push(boxGeoAt(px, SEA_Y + 1.4, pz, 0.42, 5.2, 0.42, CBZ.hash01(px, pz, 831) * 0.3));
         // a mooring pile is a driven timber, and a boat that motors THROUGH the
         // piles marking its own channel mouth is the whole reason they read as
         // paint. Full-height (they stand from the seabed up), 0.42 square.
         solid(px, pz, 0.42, 0.42, null);
       }
-      mergeAdd(piles, m(WOOD_DK), root, true);
+      mergeAdd(piles, K ? K.woodMat(0x7a6446) : m(WOOD_DK), root, true);
     }
 
     site = {

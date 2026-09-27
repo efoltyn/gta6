@@ -416,7 +416,7 @@
     const offer = bl.offer("auto", principal, { kind: "auto", value: price, down: down, vessel: entry.key, loa: entry.loa });
     if (!offer || !offer.approved) {
       const why = (offer && offer.reason) ? offer.reason : "the bank declined the marine loan";
-      flash("Declined · " + why + ".", "bad"); note("Marine finance declined: " + why + ".", 2.4); sfx("empty");
+      flash("Declined, " + why + ".", "bad"); note("Marine finance declined: " + why + ".", 2.4); sfx("empty");
       if (open_) render(); return false;
     }
     if (!charge(down)) return false;
@@ -433,7 +433,7 @@
     const rec = record(entry, modelName, down);
     rec.loanId = loanId;
     finish(rec, entry, "Financed the " + entry.label);
-    note(money(down) + " down · " + money(offer.principal != null ? offer.principal : principal) + " on the note.", 3);
+    note(money(down) + " down, " + money(offer.principal != null ? offer.principal : principal) + " on the note.", 3);
     return true;
   }
 
@@ -451,7 +451,7 @@
     const b = B(); if (b && rec.berthId) b.release(rec.berthId);
     const gi = garage().indexOf(rec); if (gi >= 0) garage().splice(gi, 1);
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(back);
-    big("Sold the " + rec.label + " — " + money(back));
+    big("Sold the " + rec.label + ": " + money(back));
     if (rec.loanId != null) note("The note on her is still yours. The bank doesn't care who owns the hull.", 3);
     sfx("coin"); commit();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -504,7 +504,7 @@
     if (owe <= 0) { note("You're square with the harbourmaster.", 1.8); return false; }
     if (!charge(owe)) { flash("Need " + money(owe) + " to clear the dues.", "bad"); sfx("empty"); return false; }
     for (const r of fleet()) r.arrears = 0;
-    flash("Back dues cleared · " + money(owe) + ".", "ok"); sfx("coin"); commit();
+    flash("Back dues cleared, " + money(owe) + ".", "ok"); sfx("coin"); commit();
     if (open_) render();
     return true;
   }
@@ -557,13 +557,38 @@
     // COLREGs: at anchor you show ONE all-round white light and no running
     // lights. We only add the anchor light (touching the hull's existing
     // navigation lights is WP-2's mesh, not ours).
+    // It stands at the hull's HIGHEST point (the masthead / wheelhouse roof),
+    // measured from the hull's own geometry, as a short staff with an
+    // all-round lens and cap. It was a bare white ball at a fixed 2.6 m,
+    // which floated in mid-air over every runabout and sat inside the
+    // wheelhouse of every yacht, glowing at full strength at noon.
     if (window.THREE && car.group && !car._anchorLight) {
-      const L = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 5),
-        new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1 }));
-      L.position.set(0, 2.6, 0.2);
+      let top = 2.2, lx = 0, lz = 0.2;
+      try {
+        car.group.updateMatrixWorld(true);
+        const inv = new THREE.Matrix4().copy(car.group.matrixWorld).invert();
+        const bb = new THREE.Box3(), tmp = new THREE.Box3();
+        car.group.traverse(function (o) {
+          if (!o.isMesh || !o.geometry || o === car.group) return;
+          if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+          tmp.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld).applyMatrix4(inv);
+          bb.union(tmp);
+        });
+        if (!bb.isEmpty()) { top = bb.max.y; lx = (bb.min.x + bb.max.x) / 2; lz = bb.min.z + (bb.max.z - bb.min.z) * 0.45; }
+      } catch (e) {}
+      const L = new THREE.Group();
+      const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.45, 6), new THREE.MeshLambertMaterial({ color: 0x2c3035 }));
+      staff.position.y = 0.225; L.add(staff);
+      const lensM = new THREE.MeshLambertMaterial({ color: 0xf4f2ea, emissive: 0xfff6dc, emissiveIntensity: 0.15 });
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 10), lensM);
+      lens.position.y = 0.5; L.add(lens);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 10), new THREE.MeshLambertMaterial({ color: 0x2c3035 }));
+      cap.position.y = 0.565; L.add(cap);
+      L.position.set(lx, top, lz);
+      L.userData.lensMat = lensM;
       car.group.add(L); car._anchorLight = L;
     }
-    note("Anchor down · " + Math.round(depth) + "m, " + scope + ":1 scope, " + Math.round(car._anchor.radius) + "m swing.", 3);
+    note("Anchor down, " + Math.round(depth) + "m, " + scope + ":1 scope, " + Math.round(car._anchor.radius) + "m swing.", 3);
     return true;
   }
 
@@ -573,6 +598,10 @@
     const t = CBZ.waterClock ? CBZ.waterClock() : (CBZ.now || 0);
     for (const car of CBZ.cityCars) {
       const a = car && car._anchor; if (!a) continue;
+      // the anchor light is a lamp: dim by day, lit at night
+      if (car._anchorLight && car._anchorLight.userData.lensMat) {
+        car._anchorLight.userData.lensMat.emissiveIntensity = 0.15 + 1.05 * Math.max(0, Math.min(1, CBZ.nightAmount || 0));
+      }
       if (car.dead) { car._anchor = null; continue; }
       // the set: current (+ a slow synthetic wind that shares the same field)
       let cx = 0, cz = 0;
@@ -773,16 +802,16 @@
     document.body.appendChild(panel);
     return panel;
   }
-  function kts(n) { return n ? Math.round(n) + " kn" : "—"; }
+  function kts(n) { return n ? Math.round(n) + " kn" : "n/a"; }
   function ft(m) { return Math.round(m / M_PER_FT) + "'"; }
   function render() {
     actions = [];
     const cash = (g.cash || 0), bank = (g.cityBank || 0);
     let html = "<div style='font-size:19px;font-weight:700'>CASSALINE MARINE</div>";
-    html += "<div style='font-size:11px;color:#7fa8c4;margin-bottom:6px'>Brokerage &amp; yard · " + (CBZ.cityMarina && CBZ.cityMarina.exists() ? "Marina berths available" : "Roadstead moorings only") + "</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(cash) + " · Bank " + money(bank) + (fleet().length ? " · Upkeep " + money(fleetDaily()) + "/day" : "") + "</div>";
+    html += "<div style='font-size:11px;color:#7fa8c4;margin-bottom:6px'>Brokerage &amp; yard, " + (CBZ.cityMarina && CBZ.cityMarina.exists() ? "Marina berths available" : "Roadstead moorings only") + "</div>";
+    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(cash) + ", Bank " + money(bank) + (fleet().length ? ", Upkeep " + money(fleetDaily()) + "/day" : "") + "</div>";
     if (flash_) html += "<div style='font-size:12px;margin-bottom:7px'>" + flash_ + "</div>";
-    html += "<div style='font-size:11px;color:#6b7480;margin-bottom:7px'>[B] brokerage · [F] your fleet</div>";
+    html += "<div style='font-size:11px;color:#6b7480;margin-bottom:7px'>[B] brokerage, [F] your fleet</div>";
 
     if (tab === "buy") {
       for (const e of catalog()) {
@@ -790,13 +819,13 @@
         const p = priceOf(e);
         html += "<div style='padding:6px 0;border-top:1px solid rgba(255,255,255,.07)'>";
         html += "<b style='color:#cfe0f5'>" + e.label + "</b> <span style='color:#8a93a3;font-size:11px'>" +
-          ft(e.loa) + " LOA · " + e.beam.toFixed(1) + "m beam · " + kts(e.topKts) + "</span>";
+          ft(e.loa) + " LOA, " + e.beam.toFixed(1) + "m beam, " + kts(e.topKts) + "</span>";
         html += "<div style='font-size:12px;color:#ffd166'>" + money(p) + "</div>";
         html += "</div>";
-        if (have) actions.push({ label: e.label + " · OWNED (locate her)", fn: function () { locate(have); } });
+        if (have) actions.push({ label: e.label + ", OWNED (locate her)", fn: function () { locate(have); } });
         else {
-          actions.push({ label: "Buy " + e.label + " — " + money(p), fn: function () { buy(e.key); } });
-          if (bankLoan()) actions.push({ label: "Finance " + e.label + " — " + money(Math.round(p * DOWN_FRAC / 500) * 500) + " down", fn: function () { financeBuy(e.key); } });
+          actions.push({ label: "Buy " + e.label + ": " + money(p), fn: function () { buy(e.key); } });
+          if (bankLoan()) actions.push({ label: "Finance " + e.label + ": " + money(Math.round(p * DOWN_FRAC / 500) * 500) + " down", fn: function () { financeBuy(e.key); } });
         }
       }
       if (catalog().length === 1 && catalog()[0].soloFallback) {
@@ -808,13 +837,13 @@
       for (const r of f) {
         const live = liveHull(r);
         html += "<div style='padding:6px 0;border-top:1px solid rgba(255,255,255,.07)'>";
-        html += "<b style='color:#cfe0f5'>" + (r.label || r.name) + "</b> <span style='color:#8a93a3;font-size:11px'>" + ft(r.loa || 6.2) + " · berth " + (r.berthId || "—") + "</span>";
+        html += "<b style='color:#cfe0f5'>" + (r.label || r.name) + "</b> <span style='color:#8a93a3;font-size:11px'>" + ft(r.loa || 6.2) + ", berth " + (r.berthId || "n/a") + "</span>";
         html += "<div style='font-size:11px;color:" + (r.arrears ? "#ff8b7a" : "#8a93a3") + "'>" +
-          money(dailyCost(r)) + "/day" + (r.arrears ? " · " + money(r.arrears) + " OVERDUE" : "") +
-          (r.loanId != null ? " · financed" : "") + (live ? " · afloat" : " · laid up") + "</div>";
+          money(dailyCost(r)) + "/day" + (r.arrears ? ", " + money(r.arrears) + " OVERDUE" : "") +
+          (r.loanId != null ? ", financed" : "") + (live ? ", afloat" : ", laid up") + "</div>";
         html += "</div>";
         actions.push({ label: (live ? "Locate " : "Bring out ") + (r.label || r.name), fn: function () { locate(r); } });
-        actions.push({ label: "Sell " + (r.label || r.name) + " — " + money(Math.round(r.price * SELL_FRAC)), fn: function () { sell(r.key); } });
+        actions.push({ label: "Sell " + (r.label || r.name) + ": " + money(Math.round(r.price * SELL_FRAC)), fn: function () { sell(r.key); } });
       }
       if (totalArrears() > 0) actions.push({ label: "Pay dues " + money(totalArrears()), fn: payArrears });
     }
@@ -824,7 +853,7 @@
       html += "<button type='button' class='tpill tpill-sm' data-bclose='1' style='margin-top:9px'>CLOSE</button>";
     } else {
       actions.forEach(function (a, i) { if (i < 9) html += "<div style='padding:3px 0;font-size:13px'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-      html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1–" + Math.min(9, actions.length) + "] select · [Esc] close</div>";
+      html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1-" + Math.min(9, actions.length) + "] select, [Esc] close</div>";
     }
     el().innerHTML = html;
   }

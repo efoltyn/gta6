@@ -157,12 +157,18 @@
     cloth:   0x8a5a2b,   // upholstery                      (buildings.js setLiving sofa)
     linen:   0x6b7da0,   // mattress sheet                  (buildings.js setBedroom linen)
     blanket: 0x55606e,   // folded blanket over the foot    (buildings.js headboard bucket)
+    duvet:   0x55606e,   // the duvet cover (tone key; same bucket as blanket)
     pillow:  0xe8e8ee,   // pillow                          (buildings.js setBedroom)
     head:    0x55606e,   // headboard                       (buildings.js setBedroom)
     shelf:   0x8a939c,   // shelf board / handle            (interior_programs P.shelf)
     metal:   0x49505b,   // cabinet / locker / rack body    (buildings.js setKitchen)
     metalD:  0x2e2620,   // locker door face                (buildings.js wardrobe)
     lamp:    0xffe6b0,   // warm lamp glow                  (buildings.js setBedroom lamp)
+    // THE GREENS + CLAY. The only new buckets in this file, and they replace
+    // three different hand-rolled plant palettes (fitout_plans, fitout_work,
+    // the exec floor) that each minted their own.
+    leaf:    0x3f7a45, leaf2: 0x2f6338, leaf3: 0x5a8f4a, trunk: 0x5a4632,
+    pot:     0x3a3a3c, soil: 0x3b2c20, clay: 0x9a5a3c,
   };
   // tone variants — each value is itself an existing bucket, never a new hex.
   const TONES = {
@@ -392,7 +398,11 @@
   // seat casts its own line, and (c) a back that is NOT vertical.
   F.chair = function (x, y, z, yaw, opts) {
     const p = pen("chair", x, y, z, yaw, opts);
-    const leg = P.chair, pad = p.col("cloth"), body = P.chair;
+    // opts.frameCol: the wood/metal of the frame. A dining set is ONE timber:
+    // F.table hands its own wood to the chairs round it, and a caller with no
+    // opinion keeps the charcoal frame every office and cell chair has.
+    const fc = opts && opts.frameCol != null ? opts.frameCol : P.chair;
+    const leg = fc, pad = p.col("cloth"), body = fc;
     const D = det();
     const legT = D ? 0.045 : 0.06;                                   // thinner legs read as legs
     // Front legs stop under the seat; the REAR pair keep going as the back's
@@ -411,17 +421,48 @@
       ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, colH: 0.06 })            // cushion → 0.45
       : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, colH: 0.08 });           // cushion → 0.45
     if (D) {
-      // THREE staggered panels between the rear uprights = a raked back. Each
-      // step is 3.5cm further aft over 0.18 of rise, i.e. about an 11-degree
-      // lean — the real angle of a dining chair, drawn without rotating a box.
-      p.put(0, 0.50, -0.195, 0.46, 0.16, 0.05, body);                // lumbar panel
-      p.put(0, 0.68, -0.230, 0.46, 0.16, 0.05, body);                // mid panel, stepped aft
-      p.put(0, 0.86, -0.265, 0.50, 0.09, 0.07, body);                // top rail, capped
+      // AN OPEN BACK, the way a chair is joined: a top rail and a lower rail
+      // tenoned between the two rear uprights, two slats between them, and AIR
+      // round the slats. The old back was three solid panels stacked into a
+      // wall; the gaps are what make it read as a chair from across a room.
+      p.put(0, 0.79, -0.205, 0.41, 0.10, 0.035, body);               // top rail
+      p.put(0, 0.53, -0.205, 0.41, 0.045, 0.03, body);               // lower rail
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * 0.075, 0.575, -0.205, 0.04, 0.215, 0.022, body);    // slats
     } else {
       p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body);                 // backrest (legacy slab)
     }
     p.seat(0, 0, yaw, "chair", 0.45, top);
     return p.done(0.52, D ? 0.55 : 0.50, 0.95, top);
+  };
+
+  // TASK CHAIR — the office chair every desk has: a five-spoke base drawn as
+  // a cross of spokes with a caster under each end, a gas lift, a seat pan and
+  // a pad whose top is 0.45 (the SAME cushion and kind "chair" as F.chair, so
+  // the rig and every anchor reader see nothing new), a curved-looking back on
+  // its stem, and two armrests. yaw = the way the sitter looks.
+  F.taskChair = function (x, y, z, yaw, opts) {
+    const p = pen("taskChair", x, y, z, yaw, opts);
+    const pad = p.col("cloth"), frame = P.bezel;
+    const D = det();
+    p.put(0, 0.03, 0, 0.62, 0.03, 0.06, frame);                               // spokes
+    p.put(0, 0.03, 0, 0.06, 0.03, 0.62, frame);
+    if (D) for (let a = -1; a <= 1; a += 2) {
+      p.put(a * 0.29, 0, 0, 0.05, 0.03, 0.05, frame);                          // casters
+      p.put(0, 0, a * 0.29, 0.05, 0.03, 0.05, frame);
+    }
+    p.put(0, 0.06, 0, 0.05, 0.28, 0.05, P.shelf);                              // gas lift
+    p.put(0, 0.34, 0, 0.42, 0.04, 0.42, frame);                                // seat pan
+    const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, colH: 0.07 });   // cushion → 0.45
+    p.put(0, 0.36, -0.25, 0.06, 0.2, 0.03, frame);                             // back stem
+    p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad);                              // back 0.54..0.96
+    if (D) p.put(0, 0.58, -0.295, 0.4, 0.34, 0.012, frame);                    // its shell
+    if (D) for (let a = -1; a <= 1; a += 2) {
+      p.put(a * 0.27, 0.40, -0.02, 0.03, 0.2, 0.03, frame);                    // arm post
+      p.put(a * 0.27, 0.60, 0.0, 0.06, 0.03, 0.26, frame);                     // arm pad → 0.63
+    }
+    p.seat(0, 0, yaw, "chair", 0.45, top);
+    return p.done(0.62, 0.62, 0.96, top);
   };
 
   // ARMCHAIR — a ONE-SEAT sofa, and the documented gap in this kit: world/
@@ -436,7 +477,9 @@
     const p = pen("armchair", x, y, z, yaw, opts);
     const cloth = p.col("cloth");
     const D = det();
-    p.put(0, 0, 0, W - 0.10, 0.10, 0.82, P.chair);                            // plinth
+    // short legs under the body, not a plinth: you see floor under a chair
+    for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
+      p.put(a * (W / 2 - 0.1), 0, b * 0.32, 0.05, 0.10, 0.05, P.darkwood);
     p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, colH: 0.74 });     // body
     const top = p.put(0, 0.34, 0.04, W - 0.30, 0.08, 0.72, cloth);            // cushion → 0.42
     p.put(0, 0.42, -0.34, W - 0.26, 0.40, 0.14, cloth);                       // back cushion → 0.82
@@ -507,7 +550,12 @@
     const p = pen("sofa", x, y, z, yaw, opts);
     const cloth = p.col("cloth");
     const D = det();
-    p.put(0, 0, 0, L - 0.10, 0.12, 0.78, P.chair);                          // plinth
+    // short legs at the corners (and mid-span on a long sofa): the floor
+    // shows under it, which is the difference between a sofa and a block of
+    // upholstery sitting on the carpet
+    for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
+      p.put(a * (L / 2 - 0.1), 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
+    if (L > 1.9) for (let b = -1; b <= 1; b += 2) p.put(0, 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
     p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, colH: 0.73 });   // body
     // THE SEAM IS THE WHOLE READ. A sofa is three cushions, and one 2.24-long
     // slab is a bench with upholstery on it. Draw the cushion ONCE PER SEAT
@@ -568,9 +616,13 @@
     }
     const top = p.put(0, 0.32, 0, W - (D ? 0.14 : 0.08), 0.23, L - (D ? 0.16 : 0.10), linen);   // mattress → 0.55
     if (D) {
-      // duvet from the foot up to just short of the pillows, then the fold.
-      p.put(0, 0.55, -L * 0.13, W - 0.16, 0.06, L * 0.60, P.blanket);             // duvet → 0.61
-      p.put(0, 0.55, L * 0.17, W - 0.16, 0.10, 0.16, linen);                      // TURNED-DOWN fold → 0.65
+      // THE DUVET DRAPES. A cover lies OVER the mattress and falls down its
+      // sides and foot to just above the rails, so from the room you see cloth
+      // hanging, not a thin slab laid on a second slab. Its top is still 0.61
+      // (the lying solve reads the mattress, 0.55, which is untouched).
+      const duv = p.col("duvet"), dFoot = -L / 2 + 0.06, dHead = L * 0.09;
+      p.put(0, 0.38, (dFoot + dHead) / 2, W - 0.08, 0.23, dHead - dFoot, duv);      // duvet → 0.61
+      p.put(0, 0.56, L * 0.17, W - 0.07, 0.10, 0.16, linen);                         // TURNED-DOWN fold → 0.66
     } else {
       p.put(0, 0.55, -L * 0.16, W - 0.04, 0.05, L * 0.55, P.blanket);             // folded blanket
     }
@@ -652,6 +704,22 @@
   //  WORK SURFACES
   // ======================================================================
 
+  // A FLAT-PANEL MONITOR on a worktop at `top`, its glass facing -forward (the
+  // worker). A slim panel with a thin bezel and a deeper chin, a rear housing,
+  // a neck and a foot that sits ON the desk: the old one was a 5 cm slab on a
+  // cube with its glass hovering 2.5 cm in front of it (to dodge z-fighting),
+  // which from the side read as two floating plates. The glass now sits 3 mm
+  // proud of the bezel: separated, so it cannot fight, and flush to the eye.
+  function monitor(p, lat, fwd, top, wide) {
+    const hgt = wide * 0.6;
+    p.put(lat, top, fwd + 0.03, 0.24, 0.012, 0.18, P.bezel);                      // foot
+    p.put(lat, top + 0.012, fwd + 0.055, 0.05, 0.16, 0.03, P.bezel);               // neck
+    p.put(lat, top + 0.10, fwd + 0.03, wide * 0.55, hgt * 0.62, 0.035, P.bezel);   // rear housing
+    p.put(lat, top + 0.08, fwd, wide, hgt, 0.022, P.bezel);                       // the panel
+    p.put(lat, top + 0.08 + 0.028, fwd - 0.011 - 0.003 - 0.002, wide - 0.03, hgt - 0.045, 0.004, P.screen,
+      { emissive: P.screen, ei: 0.35 });                                         // glass, chin below it
+  }
+
   // DESK — worktop 0.74, drawer pedestal, modesty panel, monitor facing the
   // worker, and a CHAIR BEHIND IT facing the desk (yaw = the worker's look
   // direction, so the desk's public face is the +forward side).
@@ -679,13 +747,10 @@
     if (DT) p.put(0, 0.62, D / 2 - 0.05, L - 0.08, 0.06, 0.06, P.chair);
     const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop);                  // worktop → 0.74
     if (DT) p.put(0, 0.74, -0.02, 0.44, 0.02, 0.15, P.bezel);              // keyboard, worker side
-    p.put(0, 0.74, D / 2 - 0.22, 0.12, 0.06, 0.14, P.bezel);               // monitor stand
-    p.put(0, 0.78, D / 2 - 0.22, 0.62, 0.42, 0.05, P.bezel);               // monitor
-    p.put(0, 0.80, D / 2 - (0.245 + SCREEN_GAP + 0.01), 0.52, 0.32, 0.02, P.screen,
-      { emissive: P.screen, ei: 0.35 });                                  // glass proud of bezel
-    // the chair behind the desk, facing it (= facing along yaw, over the top)
+    monitor(p, 0, D / 2 - 0.22, 0.74, 0.60);
+    // the TASK chair behind the desk, facing it (= facing along yaw, over the top)
     const so = sub(opts, p);
-    const cr = F.chair(p.wx(0, -(D / 2 + 0.42)), y, p.wz(0, -(D / 2 + 0.42)), yaw, so);
+    const cr = F.taskChair(p.wx(0, -(D / 2 + 0.42)), y, p.wz(0, -(D / 2 + 0.42)), yaw, so);
     for (let i = 0; i < cr.seats.length; i++) p.seats.push(cr.seats[i]);
     return p.done(L, D + 0.94, 1.20, top);
   };
@@ -700,21 +765,26 @@
     const p = pen("table", x, y, z, yaw, opts);
     const wood = p.col("wood");
     const DT = det();
+    // Legs run up to the underside of the top with the apron framed between
+    // them (a table is a frame and a board), and the board is 35 mm thick:
+    // the old 8 cm top on 8 cm posts over a slab apron was a butcher's block,
+    // which is exactly the "chunky blocks" read.
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (L / 2 - 0.12), 0, b * (D / 2 - 0.10), DT ? 0.07 : 0.08, 0.56, DT ? 0.07 : 0.08, wood);
-    // STRETCHERS between the legs down the long sides — the brace a real table
-    // has, and the thing that stops four posts reading as four separate sticks.
-    if (DT) for (let b = -1; b <= 1; b += 2)
-      p.put(0, 0.14, b * (D / 2 - 0.10), L - 0.24, 0.05, 0.05, wood);
-    // APRON, recessed 12cm on every side under a top that oversails it. Drawn in
-    // the dark-wood bucket so the recess reads as shadow rather than as a second
-    // slab of the same colour — no new hex, it is interior_programs' P.table.
-    p.put(0, 0.56, 0, L - (DT ? 0.28 : 0.16), 0.10, D - (DT ? 0.28 : 0.16),
-      DT ? P.darkwood : wood, { solid: true, colH: 0.18 });                           // apron
-    const top = p.put(0, 0.66, 0, L, 0.08, D, wood);                                  // top → 0.74
+      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), DT ? 0.055 : 0.08, DT ? 0.705 : 0.56, DT ? 0.055 : 0.08, wood);
+    if (DT) {
+      for (let b = -1; b <= 1; b += 2)
+        p.put(0, 0.61, b * (D / 2 - 0.08), L - 0.24, 0.09, 0.025, P.darkwood);       // long aprons
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.2, P.darkwood);        // end aprons
+      p.put(0, 0.665, 0, L - 0.2, 0.03, D - 0.2, P.darkwood, { solid: true, colH: 0.08 });   // under-frame (collider)
+    } else {
+      p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, colH: 0.18 });       // apron
+    }
+    const top = DT ? p.put(0, 0.705, 0, L, 0.035, D, wood) : p.put(0, 0.66, 0, L, 0.08, D, wood);   // top → 0.74
     // ring: half the chairs down each long side, the remainder at the +x end
     const perSide = Math.floor(n / 2), ends = n - perSide * 2;
     const so = sub(opts, p);
+    so.frameCol = opts.frameCol != null ? opts.frameCol : wood;          // the chairs are the table's set
     const place = function (lat, fwd, face) {
       const cr = F.chair(p.wx(lat, fwd), y, p.wz(lat, fwd), face, so);
       for (let i = 0; i < cr.seats.length; i++) p.seats.push(cr.seats[i]);
@@ -827,17 +897,131 @@
     return p.done(W, D, H, y + H);
   };
 
+  // WARDROBE — a home's hanging cupboard, the domestic twin of F.locker (which
+  // is steel, and in a bedroom reads as a locker room). Recessed plinth, a
+  // timber carcass, opts.n doors (default from the width) with a shadow gap
+  // between each, a bar pull per door and a cornice. opts.len (1.2) ·
+  // opts.h (2.0) · opts.deep (0.6). One full-height collider.
+  F.wardrobe = function (x, y, z, yaw, opts) {
+    opts = opts || {};
+    const L = Math.max(0.6, opts.len != null ? +opts.len : 1.2);
+    const H = Math.max(1.4, opts.h != null ? +opts.h : 2.0);
+    const D = Math.max(0.45, opts.deep != null ? +opts.deep : 0.6);
+    const n = Math.max(1, opts.n != null ? (opts.n | 0) : Math.round(L / 0.5));
+    const p = pen("wardrobe", x, y, z, yaw, opts);
+    const wood = p.col("wood");
+    p.put(0, 0, -0.02, L - 0.06, 0.08, D - 0.08, P.darkwood);                   // plinth, set back
+    p.put(0, 0.08, 0, L, H - 0.12, D, wood, { solid: true, colH: H - 0.08 });   // carcass
+    p.put(0, H - 0.04, 0.01, L + 0.04, 0.04, D + 0.03, wood);                   // cornice
+    const dw = L / n;
+    for (let i = 0; i < n; i++) {
+      const lat = -L / 2 + dw * (i + 0.5);
+      p.put(lat, 0.10, D / 2 + 0.006, dw - 0.008, H - 0.16, 0.012, wood);       // door face
+      const side = (i % 2 === 0) ? 1 : -1;                                     // pulls meet at the pair's joint
+      p.put(lat + side * (dw / 2 - 0.05), H * 0.42, D / 2 + 0.025, 0.018, 0.28, 0.02, P.shelf);
+    }
+    if (det()) for (let i = 1; i < n; i++)
+      p.put(-L / 2 + dw * i, 0.10, D / 2 + 0.004, 0.006, H - 0.16, 0.006, P.darkwood);   // the shadow gap
+    return p.done(L, D + 0.04, H, y + H);
+  };
+
+  // CREDENZA — the low storage piece under a boardroom screen or behind an
+  // executive desk: set-back plinth, a timber carcass, opts.n doors with shadow
+  // gaps and slim pulls, and a top that oversails by 2 cm. opts.len (1.8) ·
+  // opts.h (0.72) · opts.deep (0.48). No seats; a waist-high collider.
+  F.credenza = function (x, y, z, yaw, opts) {
+    opts = opts || {};
+    const L = Math.max(0.8, opts.len != null ? +opts.len : 1.8);
+    const H = Math.max(0.5, opts.h != null ? +opts.h : 0.72);
+    const D = Math.max(0.35, opts.deep != null ? +opts.deep : 0.48);
+    const n = Math.max(2, opts.n != null ? (opts.n | 0) : Math.round(L / 0.45));
+    const p = pen("credenza", x, y, z, yaw, opts);
+    const wood = p.col("wood");
+    p.put(0, 0, -0.03, L - 0.08, 0.07, D - 0.08, P.darkwood);                          // plinth
+    p.put(0, 0.07, 0, L - 0.02, H - 0.105, D - 0.02, wood, { solid: true, colH: H - 0.07 });   // carcass
+    const top = p.put(0, H - 0.035, 0, L + 0.02, 0.035, D + 0.01, wood);               // top → H
+    const dw = (L - 0.02) / n;
+    for (let i = 0; i < n; i++) {
+      const lat = -(L - 0.02) / 2 + dw * (i + 0.5);
+      p.put(lat, 0.08, (D - 0.02) / 2 + 0.004, dw - 0.008, H - 0.13, 0.01, wood);      // door
+      p.put(lat + ((i % 2) ? -1 : 1) * (dw / 2 - 0.04), H * 0.5, (D - 0.02) / 2 + 0.018, 0.012, 0.16, 0.014, P.shelf);
+    }
+    if (det()) for (let i = 1; i < n; i++)
+      p.put(-(L - 0.02) / 2 + dw * i, 0.08, (D - 0.02) / 2 + 0.002, 0.006, H - 0.13, 0.006, P.darkwood);
+    return p.done(L + 0.02, D + 0.01, H, top);
+  };
+
+  // PLANTER — a potted plant, drawn as a plant and not as green cubes stacked
+  // on a brown cube. opts.kind:
+  //   "snake"  sansevieria: stiff upright blades, which is the one plant whose
+  //            real shape IS axis-aligned plates (the default, desks and sills)
+  //   "tree"   a ficus / fiddle-leaf in a big pot: trunk, and ~30 small leaf
+  //            plates set round it in a phyllotaxis spiral, bushiest mid-height
+  // opts.s scale (1 = a 0.95 m snake plant / a 1.7 m tree) · opts.pot colour.
+  // Deterministic: the leaf jitter is CBZ.hash01 of the position.
+  F.planter = function (x, y, z, yaw, opts) {
+    opts = opts || {};
+    const s = Math.max(0.3, opts.s != null ? +opts.s : 1);
+    const tree = opts.kind === "tree";
+    const p = pen("planter", x, y, z, yaw, opts);
+    const potC = opts.pot != null ? opts.pot : P.pot;
+    const h = function (i, k) { return CBZ.hash01 ? CBZ.hash01(x * 3.1 + i * 1.7, z * 2.3 - i * 0.9, 0x91A + k) : ((i * 0.618 + k * 0.31) % 1); };
+    const pw = (tree ? 0.42 : 0.26) * Math.min(1.2, s), ph = (tree ? 0.44 : 0.28) * Math.min(1.2, s);
+    // a tapered pot: a narrower foot, the body, a rolled rim; soil inside it
+    p.put(0, 0, 0, pw * 0.8, ph * 0.18, pw * 0.8, potC);
+    p.put(0, ph * 0.18, 0, pw, ph * 0.74, pw, potC, { solid: true, colH: ph * 0.74 });
+    p.put(0, ph * 0.92, 0, pw + 0.03, ph * 0.08, pw + 0.03, potC);
+    p.put(0, ph - 0.015, 0, pw - 0.02, 0.01, pw - 0.02, P.soil);
+    const y0 = ph - 0.01;
+    const greens = [P.leaf, P.leaf2, P.leaf3];
+    if (!tree) {
+      const n = 9;
+      for (let i = 0; i < n; i++) {
+        const a = i * 2.39996, r = (0.02 + (i % 3) * 0.035) * s;
+        const bh = (0.38 + 0.45 * h(i, 1)) * s, bw = (0.05 + 0.025 * h(i, 2)) * s;
+        const lat = Math.cos(a) * r, fwd = Math.sin(a) * r;
+        const across = (i & 1) ? bw : 0.012, deep = (i & 1) ? 0.012 : bw;
+        p.put(lat, y0, fwd, across, bh, deep, greens[i % 3]);
+        // the blade narrows toward its tip
+        p.put(lat, y0 + bh, fwd, across * ((i & 1) ? 0.55 : 1), bh * 0.18, deep * ((i & 1) ? 1 : 0.55), greens[i % 3]);
+      }
+      return p.done(pw + 0.03, pw + 0.03, y0 + 0.95 * s, y + ph);
+    }
+    const TH = 1.7 * s;
+    p.put(0, y0, 0, 0.035, TH * 0.78, 0.035, P.trunk);                               // trunk
+    p.put(0.03, y0 + TH * 0.35, 0, 0.14, 0.025, 0.025, P.trunk);                      // a limb
+    p.put(-0.02, y0 + TH * 0.52, 0.02, 0.025, 0.025, 0.12, P.trunk);
+    const n = 30;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const a = i * 2.39996 + h(i, 3) * 0.6;
+      const r = (0.08 + 0.2 * Math.sin(Math.PI * Math.min(1, t * 1.15)) + 0.05 * h(i, 4)) * s;
+      const ly = y0 + TH * (0.32 + 0.66 * t) + (h(i, 5) - 0.5) * 0.06;
+      const lat = Math.cos(a) * r, fwd = Math.sin(a) * r;
+      const L = (0.15 + 0.07 * h(i, 6)) * s, W = L * 0.68;
+      const flat = h(i, 7) < 0.55;
+      if (flat) p.put(lat, ly, fwd, (i & 1) ? L : W, 0.012, (i & 1) ? W : L, greens[i % 3]);
+      else p.put(lat, ly - L * 0.3, fwd, (i & 1) ? L * 0.8 : 0.012, L * 0.7, (i & 1) ? 0.012 : L * 0.8, greens[(i + 1) % 3]);
+    }
+    return p.done(0.6 * s, 0.6 * s, y0 + TH, y + ph);
+  };
+
   // LAMP — base, pole, emissive shade. PURPOSE = light (no yaw: a lamp has no
   // front). opts.h (default 1.55) · opts.ei (glow strength).
   F.lamp = function (x, y, z, opts) {
     opts = opts || {};
     const H = Math.max(0.4, opts.h != null ? +opts.h : 1.55);
     const p = pen("lamp", x, y, z, 0, opts);
-    p.put(0, 0, 0, 0.28, 0.05, 0.28, P.chair);                               // base
-    p.put(0, 0.05, 0, 0.06, H - 0.30, 0.06, P.chair);                        // pole
-    const top = p.put(0, H - 0.26, 0, 0.34, 0.24, 0.34, P.lamp,
-      { emissive: P.lamp, ei: opts.ei != null ? +opts.ei : 0.6 });           // shade
-    return p.done(0.34, 0.34, H, top);
+    const ei = opts.ei != null ? +opts.ei : 0.6;
+    // a weighted disc, a thin stem, and a tapered DRUM shade: fabric that is
+    // lit through (a soft glow), open at the bottom where the bulb's light
+    // falls out (bright). The old one was a lit 34 cm cube on a post.
+    p.put(0, 0, 0, 0.30, 0.025, 0.30, P.chair);                              // base
+    p.put(0, 0.025, 0, 0.026, H - 0.30, 0.026, P.chair);                     // stem
+    p.put(0, H - 0.306, 0, 0.36, 0.006, 0.36, P.lamp, { emissive: P.lamp, ei: Math.min(1, ei * 1.5) });   // open mouth
+    p.put(0, H - 0.30, 0, 0.40, 0.16, 0.40, P.lamp, { emissive: P.lamp, ei: ei * 0.55 });                // drum
+    const top = p.put(0, H - 0.14, 0, 0.31, 0.14, 0.31, P.lamp, { emissive: P.lamp, ei: ei * 0.45 });    // taper
+    return p.done(0.40, 0.40, H, top);
   };
 
   // ======================================================================
@@ -858,10 +1042,7 @@
     p.put(0, 0.06, D / 2 - 0.06, L - 0.20, 0.60, 0.10, P.darkwood, { solid: true, colH: 0.68 });
     const top = p.put(0, 0.66, 0, L, 0.08, D, surf);                         // worktop → 0.74
     p.put(0, 0.74, D / 2 - 0.10, 0.46, 0.05, 0.08, P.worktop);               // nameplate
-    p.put(0.55, 0.74, D / 2 - 0.34, 0.12, 0.06, 0.14, P.bezel);              // monitor stand
-    p.put(0.55, 0.78, D / 2 - 0.34, 0.66, 0.44, 0.05, P.bezel);              // monitor
-    p.put(0.55, 0.80, D / 2 - (0.365 + SCREEN_GAP + 0.01), 0.56, 0.34, 0.02, P.screen,
-      { emissive: P.screen, ei: 0.35 });                                  // glass proud of bezel
+    monitor(p, 0.55, D / 2 - 0.34, 0.74, 0.66);
 
     // THE THRONE — high-back, on a pedestal column, behind the desk.
     const tf = -(D / 2 + 0.52);

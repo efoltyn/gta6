@@ -502,6 +502,14 @@
 
     function consider(m) {
       if (!m.isMesh || m.isInstancedMesh) return;
+      // A MESH THAT DOES NOT DRAW MUST NOT BE BAKED INTO ONE THAT DOES. Every
+      // collider in the game that wants a body without a picture hangs an
+      // invisible proxy box (visible=false) as its c.ref; the wall pass below
+      // takes collider refs, and merging ignores .visible, so each proxy came
+      // back as a solid opaque box in the merged shell. That was the flat tan
+      // slab swallowing the walnut desk on the executive floor and the
+      // z-fighting stripes on its sill cabinets. Hidden stays hidden, live.
+      if (m.visible === false) return;
       const referenced = losSet.has(m) || refSet.has(m);
       if (referenced) {
         // INERT path can't touch referenced meshes. The WALL path may — but only

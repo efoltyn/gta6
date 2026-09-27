@@ -26,9 +26,11 @@
   // for mail (that verb lives in interact.js). One-line revert. Defaulted here
   // AND in interact.js — idempotent, whichever script loads first wins.
   CBZ.CONFIG = CBZ.CONFIG || {};
-  // Primitive street scatter is opt-in. Traffic signals, junction markings
-  // and working street lights below remain; random furniture, billboards,
-  // roof dressing and camps stay absent unless explicitly requested.
+  // Kerb furniture (hydrants, bins, news boxes, meters, mailboxes, street
+  // trees, bus stops, shop-front dressing) is always built, by the KERB
+  // FURNITURE pass (real objects, instanced, placed on the kerbs the street
+  // kit drew). This switch now only gates the loud extras: roadside
+  // billboards, roof rails/boards and the homeless camps.
   if (CBZ.CONFIG.CITY_STREET_CLUTTER == null) CBZ.CONFIG.CITY_STREET_CLUTTER = false;
   if (CBZ.CONFIG.PROPS_WIRED_V1 == null) CBZ.CONFIG.PROPS_WIRED_V1 = true;
   // JUNCTION_DETAIL (owner: "roads meet at intersections right now feeling very
@@ -646,6 +648,351 @@
     return m;
   }
 
+  /* ======================================================================
+     THE KERB KIT — street furniture drawn as the REAL objects.
+     ======================================================================
+     OWNER (de-slop wave): "there's just some unrealistic random slop." The
+     old kerb props were 2-4 primitives each (a hydrant was a cylinder, a
+     half-sphere and two stubs; a mailbox was HALF a drum with a plane nailed
+     to its front and nothing under it; a news box was a coloured cube with a
+     white card; a parking meter carried a glowing green face at noon), one
+     scene-graph group per prop, and every bin/meter/news box's group was a
+     collider REF, so core/batch.js had to leave its meshes live: three draw
+     calls per bin, city-wide. That cost is why the whole layer was switched
+     off and the pavements stood empty.
+
+     NOW: each kind is ONE vertex-coloured prototype baked from the parts a
+     real one has (a hydrant's base flange and bolts, barrel, breakaway ring,
+     bonnet, pentagon operating nut, hose and pumper nozzles with caps and
+     chains; a collection box's body, hood, legs and pull-down chute; a news
+     box's door, window, the paper behind it and the coin mech ...), with a
+     splash-grime band baked into the bottom 25 cm, drawn through
+     street_hardware.js's chunked InstancedMesh (one per 200 m cell per kind,
+     frustum-culled, shared vertex-colour Lambert). Each kind also keeps its
+     ROLE geometries (snap / main / glass) so the moment a prop is knocked,
+     tipped, swept or smashed it MATERIALISES: its instance collapses and a
+     live group of those meshes takes its place, which is exactly the object
+     tipProp / smashProp / the tsunami already animate. Nothing about how a
+     prop reacts changed; only what stands there before it does.
+  ====================================================================== */
+  const _kb = { m: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(), p: new THREE.Vector3(), s: new THREE.Vector3() };
+  function Bake() { this.P = []; this.N = []; this.C = []; }
+  // one primitive, transformed (Euler XYZ, three's default) and painted. The
+  // bottom 25 cm of anything standing on a pavement takes splash-back grime.
+  Bake.prototype.put = function (g, hex, x, y, z, rx, ry, rz, sx, sy, sz, o) {
+    const src = g.index ? g.toNonIndexed() : g;
+    _kb.e.set(rx || 0, ry || 0, rz || 0);
+    _kb.q.setFromEuler(_kb.e);
+    _kb.p.set(x || 0, y || 0, z || 0);
+    _kb.s.set(sx || 1, sy || 1, sz || 1);
+    _kb.m.compose(_kb.p, _kb.q, _kb.s);
+    src.applyMatrix4(_kb.m);
+    const pa = src.attributes.position.array, na = src.attributes.normal.array;
+    const r = ((hex >> 16) & 255) / 255, gg = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
+    const grime = !(o && o.clean);
+    for (let i = 0; i < pa.length; i += 3) {
+      this.P.push(pa[i], pa[i + 1], pa[i + 2]);
+      this.N.push(na[i], na[i + 1], na[i + 2]);
+      const k = grime ? 1 - 0.16 * Math.max(0, 1 - pa[i + 1] / 0.25) : 1;
+      this.C.push(r * k, gg * k, b * k);
+    }
+    if (src !== g) src.dispose();
+    g.dispose();
+    return this;
+  };
+  Bake.prototype.box = function (w, h, d, hex, x, y, z, rx, ry, rz, o) {
+    return this.put(new THREE.BoxGeometry(w, h, d), hex, x, y, z, rx, ry, rz, 1, 1, 1, o);
+  };
+  Bake.prototype.cyl = function (rt, rb, h, seg, hex, x, y, z, rx, ry, rz, o) {
+    return this.put(new THREE.CylinderGeometry(rt, rb, h, seg, 1, !!(o && o.open), (o && o.t0) || 0, (o && o.tl) || Math.PI * 2),
+      hex, x, y, z, rx, ry, rz, 1, 1, 1, o);
+  };
+  Bake.prototype.sph = function (r, ws, hs, hex, x, y, z, sx, sy, sz, o) {
+    return this.put(new THREE.SphereGeometry(r, ws, hs, 0, Math.PI * 2, 0, (o && o.tl) || Math.PI), hex, x, y, z, 0, 0, 0, sx, sy, sz, o);
+  };
+  Bake.prototype.tor = function (R, t, rs, ts, arc, hex, x, y, z, rx, ry, rz, o) {
+    return this.put(new THREE.TorusGeometry(R, t, rs, ts, arc), hex, x, y, z, rx, ry, rz, 1, 1, 1, o);
+  };
+  Bake.prototype.geo = function () {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.P, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(this.N, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(this.C, 3));
+    g.computeBoundingSphere();
+    return g;
+  };
+  // a kind = its role parts (for the live copy) + the whole (for the instances)
+  function kindOf(roles) {
+    const W = new Bake();
+    const parts = [];
+    for (const r of roles) {
+      W.P = W.P.concat(r.b.P); W.N = W.N.concat(r.b.N); W.C = W.C.concat(r.b.C);
+      parts.push({ geo: r.b.geo(), role: r.role || "main", kind: r.kind || null });
+    }
+    return { whole: W.geo(), parts: parts };
+  }
+
+  // Local frame for every kind: origin on the footway surface, +z faces the
+  // WALK (the building side; where a person stands to use it), -z the road.
+  let _kerbKit = null;
+  function kerbKit() {
+    if (_kerbKit) return _kerbKit;
+    const K = {};
+    const PI = Math.PI, HP = Math.PI / 2;
+
+    // ---- FIRE HYDRANT (dry-barrel, 0.83 m): flange + bolts, barrel, the
+    // breakaway ring, bonnet with a pentagon operating nut, two hose nozzles
+    // and the big pumper nozzle toward the road, caps on chains.
+    (function () {
+      const RED = 0x9c2b22, RED_D = 0x7a2019, CAP = 0xc9c3b3, NUT = 0x47423e, CHAIN = 0x57524c;
+      const b = new Bake();
+      b.cyl(0.165, 0.178, 0.05, 14, RED_D, 0, 0.025, 0);
+      for (let k = 0; k < 6; k++) { const a = k * PI / 3 + 0.3; b.cyl(0.014, 0.014, 0.024, 6, NUT, Math.cos(a) * 0.148, 0.062, Math.sin(a) * 0.148); }
+      b.cyl(0.118, 0.126, 0.30, 14, RED, 0, 0.20, 0);
+      b.cyl(0.146, 0.146, 0.045, 14, RED_D, 0, 0.372, 0);
+      for (let k = 0; k < 6; k++) { const a = k * PI / 3; b.cyl(0.011, 0.011, 0.055, 6, NUT, Math.cos(a) * 0.136, 0.372, Math.sin(a) * 0.136); }
+      b.cyl(0.122, 0.118, 0.27, 14, RED, 0, 0.52, 0);
+      b.cyl(0.15, 0.15, 0.04, 14, RED_D, 0, 0.675, 0);
+      b.sph(0.13, 14, 6, RED, 0, 0.692, 0, 1, 0.75, 1, { tl: HP });
+      b.cyl(0.036, 0.04, 0.05, 5, NUT, 0, 0.815, 0);
+      for (let s = -1; s <= 1; s += 2) {
+        b.cyl(0.044, 0.048, 0.10, 10, RED, s * 0.16, 0.53, 0, 0, 0, HP);
+        b.cyl(0.055, 0.055, 0.036, 10, CAP, s * 0.226, 0.53, 0, 0, 0, HP);
+        b.cyl(0.021, 0.021, 0.022, 5, CAP, s * 0.254, 0.53, 0, 0, 0, HP);
+        b.tor(0.046, 0.005, 3, 8, PI, CHAIN, s * 0.19, 0.50, 0, 0, 0, PI);
+      }
+      b.cyl(0.07, 0.076, 0.09, 12, RED, 0, 0.47, -0.16, HP, 0, 0);
+      b.cyl(0.087, 0.087, 0.04, 12, CAP, 0, 0.47, -0.225, HP, 0, 0);
+      b.cyl(0.027, 0.027, 0.025, 5, CAP, 0, 0.47, -0.257, HP, 0, 0);
+      K.hydrant = kindOf([{ b: b, role: "main", kind: "metal" }]);
+    })();
+
+    // ---- USPS-STYLE COLLECTION BOX: a real body under the hood (the old one
+    // was half a drum with nothing below it), four legs on foot plates, the
+    // pull-down chute and its handle on the walk side, a panel line at the
+    // back pickup door and the pickup-times label on the flank.
+    (function () {
+      const BLUE = 0x21427d, BLUE_D = 0x1a3566, LEG = 0x1b2230, STEEL = 0x9aa0a6, SLOT = 0x0d0f14;
+      const b = new Bake();
+      for (const sx of [-0.2, 0.2]) for (const sz of [-0.22, 0.22]) {
+        b.box(0.045, 0.34, 0.045, LEG, sx, 0.17, sz);
+        b.box(0.09, 0.012, 0.09, LEG, sx, 0.006, sz);
+      }
+      b.box(0.47, 0.035, 0.53, BLUE_D, 0, 0.357, 0);
+      b.box(0.46, 0.62, 0.52, BLUE, 0, 0.66, 0);
+      b.cyl(0.23, 0.23, 0.52, 16, BLUE, 0, 0.97, 0, -HP, 0, 0, { t0: -HP, tl: PI });
+      b.box(0.47, 0.02, 0.53, BLUE_D, 0, 0.972, 0);                  // hood seam
+      b.box(0.31, 0.10, 0.07, BLUE, 0, 0.93, 0.285, -0.18, 0, 0);    // pull-down chute
+      b.box(0.26, 0.014, 0.012, SLOT, 0, 0.975, 0.31, -0.18, 0, 0);
+      b.cyl(0.012, 0.012, 0.22, 6, STEEL, 0, 0.875, 0.322, 0, 0, HP);
+      b.box(0.36, 0.44, 0.006, BLUE_D, 0, 0.64, -0.262);             // rear pickup door
+      b.box(0.02, 0.05, 0.012, STEEL, 0.12, 0.64, -0.268);           // its lock
+      b.box(0.006, 0.15, 0.21, 0xe3e0d6, 0.232, 0.78, 0.02);         // pickup-times label
+      b.box(0.006, 0.12, 0.3, 0xe3e0d6, -0.232, 0.55, 0.0);          // flank stripe panel
+      K.mailbox = kindOf([{ b: b, role: "main", kind: "metal" }]);
+    })();
+
+    // ---- LITTER BASKET: fourteen steel slats on three bands, a black liner
+    // bag inside it, its lip rolled over the top rim (what a real city bin
+    // looks like from a pavement), a darker base ring.
+    (function () {
+      const GRN = 0x2b4636, GRN_D = 0x22382b, BAG = 0x151618;
+      const b = new Bake();
+      b.cyl(0.272, 0.282, 0.05, 16, GRN_D, 0, 0.025, 0);
+      for (let k = 0; k < 14; k++) {
+        const a = k * PI * 2 / 14;
+        b.box(0.078, 0.66, 0.018, GRN, Math.sin(a) * 0.266, 0.38, Math.cos(a) * 0.266, 0, a, 0);
+      }
+      b.cyl(0.286, 0.286, 0.07, 18, GRN_D, 0, 0.74, 0, 0, 0, 0, { open: true });
+      b.cyl(0.276, 0.276, 0.04, 18, GRN_D, 0, 0.40, 0, 0, 0, 0, { open: true });
+      b.cyl(0.276, 0.276, 0.035, 18, GRN_D, 0, 0.09, 0, 0, 0, 0, { open: true });
+      const L = new Bake();
+      L.cyl(0.25, 0.235, 0.66, 14, BAG, 0, 0.40, 0, 0, 0, 0, { open: true });
+      L.sph(0.25, 14, 4, 0x1c1d20, 0, 0.66, 0, 1, 0.28, 1, { tl: HP });   // the bag's contents
+      L.tor(0.27, 0.02, 4, 18, PI * 2, BAG, 0, 0.775, 0, HP, 0, 0);     // liner rolled over the rim
+      K.bin = kindOf([{ b: b, role: "main", kind: "metal" }, { b: L, role: "main", kind: "plastic" }]);
+    })();
+
+    // ---- SINGLE-SPACE PARKING METER: pipe post on a flange, cast housing,
+    // chrome dome with a dark window front and back, coin slot, knob, lock,
+    // and the little red violation flag. No emissive face: an LCD does not
+    // glow at noon.
+    (function () {
+      const POST = 0x6a7076, HOUSE = 0x3c4448, DOME = 0x80878d, CHROME = 0xaeb3b6, DARK = 0x16191b;
+      const p = new Bake();
+      p.cyl(0.07, 0.075, 0.025, 10, POST, 0, 0.0125, 0);
+      p.cyl(0.036, 0.04, 1.02, 10, POST, 0, 0.52, 0);
+      const h = new Bake();
+      h.box(0.20, 0.035, 0.16, HOUSE, 0, 1.045, 0);
+      h.box(0.19, 0.20, 0.15, HOUSE, 0, 1.16, 0);
+      h.cyl(0.096, 0.096, 0.15, 16, DOME, 0, 1.28, 0, HP, 0, 0);
+      h.box(0.06, 0.018, 0.012, DARK, 0, 1.19, 0.078);                 // coin slot
+      h.cyl(0.026, 0.026, 0.03, 10, CHROME, 0, 1.105, 0.085, HP, 0, 0); // knob
+      h.cyl(0.014, 0.014, 0.02, 8, CHROME, 0.06, 1.1, -0.08, HP, 0, 0); // lock
+      const w = new Bake();
+      for (const s of [1, -1]) {
+        w.cyl(0.07, 0.07, 0.008, 16, 0x2b3632, 0, 1.285, s * 0.077, HP, 0, 0, { clean: true });
+        w.box(0.032, 0.012, 0.004, 0xa22d25, -0.02, 1.26, s * 0.082, 0, 0, 0.35, { clean: true });   // expired flag
+      }
+      K.meter = kindOf([{ b: p, role: "snap", kind: "metal" }, { b: h, role: "main", kind: "metal" }, { b: w, role: "main", kind: "glass" }]);
+    })();
+
+    // ---- COIN-OP NEWS BOX (three liveries): body on a pedestal skid, a
+    // sloped lid, the door frame and window with TODAY'S PAPER behind it
+    // (masthead, headline, a photo block, columns), the coin mechanism on top
+    // of the door, and the pull handle.
+    const NEWS_LIVERY = [0x9d2e28, 0x2c5793, 0xc99a24];
+    NEWS_LIVERY.forEach(function (col, vi) {
+      const dcol = ((((col >> 16) & 255) * 0.78) << 16) | ((((col >> 8) & 255) * 0.78) << 8) | ((col & 255) * 0.78);
+      const STEEL = 0x2a2d31, MECH = 0x8e959a;
+      const b = new Bake();
+      b.box(0.5, 0.03, 0.4, STEEL, 0, 0.015, 0);
+      for (const sx of [-0.17, 0.17]) b.cyl(0.022, 0.022, 0.32, 8, STEEL, sx, 0.19, -0.02);
+      b.box(0.5, 0.66, 0.44, col, 0, 0.67, 0);
+      b.box(0.54, 0.05, 0.49, dcol, 0, 1.03, 0.01, -0.07, 0, 0);
+      b.box(0.44, 0.52, 0.02, dcol, 0, 0.71, 0.228);
+      b.box(0.13, 0.15, 0.07, MECH, 0.14, 0.93, 0.26);
+      b.box(0.012, 0.05, 0.006, 0x14161a, 0.14, 0.95, 0.296);
+      b.box(0.17, 0.028, 0.03, MECH, 0, 0.52, 0.255);
+      const w = new Bake();
+      const PAPER = 0xd8d4c8, INK = 0x24262a, GREY = 0x6b6d70;
+      w.box(0.34, 0.28, 0.005, PAPER, -0.02, 0.76, 0.24, 0, 0, 0, { clean: true });
+      w.box(0.30, 0.045, 0.004, INK, -0.02, 0.87, 0.244, 0, 0, 0, { clean: true });
+      w.box(0.28, 0.02, 0.004, 0x3a3c40, -0.02, 0.83, 0.244, 0, 0, 0, { clean: true });
+      w.box(0.12, 0.095, 0.004, 0x7c8186, -0.10, 0.76, 0.244, 0, 0, 0, { clean: true });
+      for (let k = 0; k < 5; k++) w.box(0.12, 0.006, 0.004, GREY, 0.07, 0.785 - k * 0.018, 0.244, 0, 0, 0, { clean: true });
+      for (let k = 0; k < 3; k++) w.box(0.26, 0.006, 0.004, GREY, -0.02, 0.695 - k * 0.018, 0.244, 0, 0, 0, { clean: true });
+      K["newsbox" + vi] = kindOf([{ b: b, role: "main", kind: "metal" }, { b: w, role: "main", kind: "glass" }]);
+    });
+    K.newsVariants = NEWS_LIVERY.length;
+
+    // ---- PARK / BUS-STOP BENCH (1.8 m): cast-iron end frames (raked rear
+    // leg, seat bearer, arm on its post), four seat slats, three raked back
+    // slats. Cushion (the slat tops) 0.46 m. Front = +z.
+    (function () {
+      const IRON = 0x2a2d30, WOOD = 0x7b5634, WOOD2 = 0x6e4c2e;
+      const b = new Bake(), L = 1.8;
+      for (let s = -1; s <= 1; s += 2) {
+        const x = s * (L / 2 - 0.1);
+        b.box(0.05, 0.43, 0.05, IRON, x, 0.215, 0.19);
+        b.box(0.05, 0.86, 0.05, IRON, x, 0.43, -0.2, -0.14, 0, 0);
+        b.box(0.05, 0.045, 0.47, IRON, x, 0.415, 0);
+        b.box(0.05, 0.04, 0.38, IRON, x, 0.64, 0.02);
+        b.box(0.04, 0.2, 0.04, IRON, x, 0.53, 0.2);
+        b.box(0.09, 0.015, 0.1, IRON, x, 0.0075, 0.19);
+        b.box(0.09, 0.015, 0.1, IRON, x, 0.0075, -0.26);
+      }
+      const sz = [0.17, 0.06, -0.05, -0.16];
+      for (let k = 0; k < 4; k++) b.box(L, 0.032, 0.092, k % 2 ? WOOD2 : WOOD, 0, 0.444, sz[k], 0, 0, 0, { clean: true });
+      for (let k = 0; k < 3; k++) b.box(L, 0.09, 0.03, k % 2 ? WOOD2 : WOOD, 0, 0.57 + k * 0.12, -0.215 - k * 0.017, -0.14, 0, 0, { clean: true });
+      K.bench = kindOf([{ b: b, role: "main", kind: "wood" }]);
+    })();
+
+    // ---- TREE GRATE (1.2 m cast iron) over a mulch pit: the street tree
+    // stands IN the pavement, not in a concrete box on top of it.
+    (function () {
+      const IRON = 0x2d2b29, RUST = 0x4a3526, MULCH = 0x2e241b;
+      const b = new Bake();
+      b.box(1.18, 0.006, 1.18, MULCH, 0, 0.004, 0, 0, 0, 0, { clean: true });
+      for (let s = -1; s <= 1; s += 2) {
+        b.box(1.24, 0.022, 0.06, IRON, 0, 0.011, s * 0.59, 0, 0, 0, { clean: true });
+        b.box(0.06, 0.022, 1.24, IRON, s * 0.59, 0.011, 0, 0, 0, 0, { clean: true });
+        b.box(0.62, 0.02, 0.04, RUST, 0, 0.012, s * 0.3, 0, 0, 0, { clean: true });
+        b.box(0.04, 0.02, 0.62, RUST, s * 0.3, 0.012, 0, 0, 0, 0, { clean: true });
+      }
+      for (let k = 0; k < 12; k++) {
+        const a = k * PI / 6;
+        b.box(0.03, 0.018, 0.3, IRON, Math.sin(a) * 0.45, 0.011, Math.cos(a) * 0.45, 0, a, 0, { clean: true });
+      }
+      K.grate = kindOf([{ b: b, role: "keep", kind: "metal" }]);
+    })();
+
+    // ---- BUS STOP SIGN POLE: galvanised post, the plate rides on the sign
+    // atlas (street_furniture.js), a timetable case at eye height.
+    (function () {
+      const GALV = 0xa3a9ac;
+      const b = new Bake();
+      b.cyl(0.035, 0.038, 2.9, 8, GALV, 0, 1.45, 0);
+      b.cyl(0.07, 0.07, 0.03, 8, 0x80868a, 0, 0.015, 0);
+      b.box(0.26, 0.36, 0.05, 0x2a2f35, 0, 1.45, 0.05);               // timetable case
+      b.box(0.22, 0.30, 0.004, 0xdcd8cc, 0, 1.45, 0.077, 0, 0, 0, { clean: true });
+      K.busPole = kindOf([{ b: b, role: "main", kind: "metal" }]);
+    })();
+
+
+    // ---- BIKE RACK: three galvanised inverted-U staples on foot plates -----
+    (function () {
+      const GALV = 0x9da3a6;
+      const b = new Bake();
+      for (const x of [-0.8, 0, 0.8]) {
+        b.tor(0.28, 0.024, 6, 14, PI, GALV, x, 0.52, 0);
+        for (const s of [-1, 1]) {
+          b.cyl(0.024, 0.024, 0.52, 8, GALV, x + s * 0.28, 0.26, 0);
+          b.box(0.1, 0.012, 0.1, 0x80868a, x + s * 0.28, 0.006, 0);
+        }
+      }
+      K.bikerack = kindOf([{ b: b, role: "main", kind: "metal" }]);
+    })();
+
+    // ---- PROPANE EXCHANGE CAGE: a steel cabinet with wire-mesh doors and
+    // two rows of swap tanks behind them (collar, valve, foot ring).
+    (function () {
+      const STEEL = 0x5a6167, MESH = 0x7b8288, TANK = 0xd9dad6, TANK2 = 0x3d6aa0, BRASS = 0xa98a4a;
+      const c = new Bake();
+      c.box(1.3, 0.1, 0.72, STEEL, 0, 0.05, 0);
+      c.box(1.3, 0.05, 0.72, STEEL, 0, 1.2, 0);
+      for (const sx of [-0.63, 0.63]) for (const sz of [-0.34, 0.34]) c.box(0.045, 1.15, 0.045, STEEL, sx, 0.62, sz);
+      c.box(1.3, 0.035, 0.035, STEEL, 0, 0.62, 0.34);
+      c.box(0.03, 1.1, 0.03, STEEL, 0, 0.62, 0.35);                      // door meeting stile
+      for (let k = 0; k < 13; k++) c.box(0.012, 1.08, 0.012, MESH, -0.6 + k * 0.1, 0.63, 0.345, 0, 0, 0, { clean: true });
+      for (let k = 0; k < 6; k++) c.box(1.24, 0.012, 0.012, MESH, 0, 0.16 + k * 0.19, 0.345, 0, 0, 0, { clean: true });
+      for (const sx of [-0.635, 0.635]) {
+        for (let k = 0; k < 7; k++) c.box(0.012, 1.08, 0.012, MESH, sx, 0.63, -0.3 + k * 0.1, 0, 0, 0, { clean: true });
+        for (let k = 0; k < 6; k++) c.box(0.012, 0.012, 0.66, MESH, sx, 0.16 + k * 0.19, 0, 0, 0, 0, { clean: true });
+      }
+      c.box(0.04, 0.12, 0.03, 0xc9a23c, 0.1, 0.62, 0.37);               // padlock hasp
+      const t = new Bake();
+      for (let row = 0; row < 2; row++) for (let k = 0; k < 3; k++) {
+        const x = -0.4 + k * 0.4, z = row ? -0.16 : 0.16, y0 = 0.1 + row * 0.0;
+        const col = (row + k) % 3 === 0 ? TANK2 : TANK;
+        t.cyl(0.15, 0.15, 0.4, 12, col, x, y0 + 0.28, z);
+        t.sph(0.15, 12, 4, col, x, y0 + 0.48, z, 1, 0.45, 1, { tl: HP });
+        t.cyl(0.13, 0.13, 0.06, 12, 0x8a8e91, x, y0 + 0.05, z, 0, 0, 0, { open: true });
+        t.cyl(0.09, 0.09, 0.1, 10, 0x8a8e91, x, y0 + 0.6, z, 0, 0, 0, { open: true });
+        t.cyl(0.025, 0.025, 0.06, 6, BRASS, x, y0 + 0.585, z);
+      }
+      K.propane = kindOf([{ b: c, role: "main", kind: "metal" }, { b: t, role: "main", kind: "metal" }]);
+    })();
+
+    // ---- BISTRO TABLE: round top on a pedestal, cast base. And the chair:
+    // round seat, splayed legs, a bent back hoop.
+    (function () {
+      const ALU = 0x9aa1a6, DARK = 0x2e3236;
+      const b = new Bake();
+      b.cyl(0.36, 0.36, 0.025, 20, ALU, 0, 0.735, 0);
+      b.cyl(0.35, 0.34, 0.02, 20, DARK, 0, 0.715, 0);
+      b.cyl(0.028, 0.034, 0.7, 8, DARK, 0, 0.37, 0);
+      b.cyl(0.22, 0.24, 0.025, 14, DARK, 0, 0.0125, 0);
+      K.bistroTable = kindOf([{ b: b, role: "main", kind: "metal" }]);
+      const c = new Bake();
+      c.cyl(0.2, 0.2, 0.03, 16, ALU, 0, 0.45, 0);
+      for (let k = 0; k < 4; k++) {
+        const a = PI / 4 + k * HP, sx = Math.cos(a), sz = Math.sin(a);
+        c.cyl(0.012, 0.012, 0.46, 6, DARK, sx * 0.17, 0.225, sz * 0.17, -sz * 0.12, 0, sx * 0.12);
+      }
+      c.tor(0.17, 0.012, 5, 12, PI, DARK, 0, 0.78, -0.17, -0.12, 0, 0);
+      for (const s of [-1, 1]) c.cyl(0.012, 0.012, 0.33, 6, DARK, s * 0.17, 0.62, -0.18, -0.12, 0, 0);
+      K.bistroChair = kindOf([{ b: c, role: "main", kind: "metal" }]);
+    })();
+
+    _kerbKit = K;
+    return K;
+  }
+  // shared with city/buildings.js's parks (the same bench, the same baker for
+  // the park railing) so there is one outdoor-furniture vocabulary, not two
+  CBZ.kerbKit = kerbKit;
+  CBZ.kerbBake = function () { return new Bake(); };
+
   // ============================================================
   //  FAKE-GLOW FRESNEL SHELL (Stemkoski Shader-Glow / ektogamat fake-glow-
   //  material technique, hand-ported to a plain ShaderMaterial string — no
@@ -822,6 +1169,7 @@
   // with the prop's own yaw via quaternion (q0) — touches transform only.
   function tipProp(s, dirX, dirZ, hop, slide) {
     if (s.over || !s.group) return;
+    if (s._mz) s._mz(s);                  // kerb-kit instance -> live group
     s.over = true;
     const dl = Math.hypot(dirX, dirZ) || 1; dirX /= dl; dirZ /= dl;
     // headless-safe: a minimal Quaternion stub (tools/harness.js — it never
@@ -1676,7 +2024,6 @@
     // and in the four world-dressing passes is placed after this point — so one
     // index here covers all six scatter passes. Draws no rng.
     alleyIndex(city);
-    const PURGED = CBZ.CONFIG.PROPS_PURGE_V1 !== false;
     const STREET_CLUTTER = CBZ.CONFIG.CITY_STREET_CLUTTER === true;
     // fresh world: drop every shootable record/animation from the old one
     shootables = [];
@@ -2742,401 +3089,48 @@
       }
     }
 
+
     // =====================================================================
-    //  GTA-style street furniture. Real props that BELONG on a sidewalk and
-    //  serve a function. Big ones (hydrants, mailboxes, bus shelters, billboards)
-    //  get colliders; small decor (cones, meters, papers) does not so it never
-    //  blocks pedestrians. Everything shares geometry + material.
+    //  SHOP-FRONT + BUS-STOP PIECES (placed by the KERB FURNITURE pass below).
+    //  These are the few-per-city pieces with their own verbs and ads, so
+    //  they stay scene-graph groups; their geometry comes from the kerb kit
+    //  (vertex-coloured, shared) so a patio is a real bistro set and a rack
+    //  is three real staples. y = the footway height they stand on.
     // =====================================================================
-
-    // small helper: where a sidewalk edge sits, with a yaw facing the building
-    // (so signs/meters face the street). edge 0..3 = N,S,W,E of a lot.
-    // ROAD-SURFACE REJECTION (owner: "some roads have props just in the road"):
-    // two placement bugs put street furniture out in the carriageway —
-    //   (1) the N/S band offset used lot.w/2 where the lot's z half-extent is
-    //       lot.d/2, so any lot wider than deep threw its N/S props clean past
-    //       the sidewalk into the street;
-    //   (2) the tangent offset `t` was never clamped to the edge length, so a
-    //       long meter/tree row overshot the corner into the cross-street.
-    // Fix the math AND, as the systematic guard, pull any point that still
-    // lands on a road carriageway back to the kerb (deterministic — pure
-    // geometry against city.roads, no rng draws touched).
-    function clearOfRoadSurface(p) {
-      for (const r of city.roads) {
-        // per-road half-width: a prop near a 24m highway was only ejected the
-        // city-grid 9m before and could still sit on the deck. Use the road's
-        // own stamped width when present.
-        const half = (r.w != null ? r.w : city.ROAD) / 2 + 0.35;   // carriageway + a kerb margin
-        if (r.vertical) {
-          if (Math.abs(p.z - r.z) > r.len / 2 + 1 || Math.abs(p.x - r.x) >= half) continue;
-          p.x = r.x + (p.x >= r.x ? half : -half);   // eject to the near kerb
-        } else {
-          if (Math.abs(p.x - r.x) > r.len / 2 + 1 || Math.abs(p.z - r.z) >= half) continue;
-          p.z = r.z + (p.z >= r.z ? half : -half);
-        }
+    const VCM = HW ? HW.hardwareMaterial(false) : smat(0x8a9099);
+    function kitMesh(g, kind, x, y, z, ry) {
+      const K = kerbKit()[kind];
+      const out = [];
+      for (const p of K.parts) {
+        const m = new THREE.Mesh(p.geo, VCM);
+        m.position.set(x || 0, y || 0, z || 0); m.rotation.y = ry || 0;
+        m.castShadow = true; m.receiveShadow = true;
+        g.add(m); out.push(m);
       }
-      return p;
+      return out;
     }
-    // IS THIS EDGE A FRONTAGE? A lot has four edges and only some of them face
-    // a street; the rest face the back of the next block. Kerb furniture that
-    // has no verb (a planter, a shrub box) earns its place by LINING a kerb, so
-    // it may only stand where there is a carriageway to line. Same arithmetic
-    // clearOfRoadSurface already runs, asking the opposite question.
-    // the purge's thinning gate: a SEEDED position hash, so it costs the
-    // shared city.rng stream nothing. Degrade-safe — with seed.js absent every
-    // gate reads 0.5, which keeps the prop rather than dropping it.
-    function ph(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
-    function roadNear(x, z, m) {
-      const margin = m == null ? 4.0 : m;
-      for (const r of city.roads) {
-        const half = (r.w != null ? r.w : city.ROAD) / 2 + margin;
-        if (r.vertical) {
-          if (Math.abs(z - r.z) > r.len / 2 + 1) continue;
-          if (Math.abs(x - r.x) < half) return true;
-        } else {
-          if (Math.abs(x - r.x) > r.len / 2 + 1) continue;
-          if (Math.abs(z - r.z) < half) return true;
-        }
+
+    // ----- A-FRAME SIDEWALK BOARD: two framed ad panels, hinged at the top ---
+    const aFrameWoodM = smat(0x3b2f24);
+    function aFrameSign(x, z, yaw, ad, y) {
+      const g = new THREE.Group(); g.position.set(x, y || 0, z); g.rotation.y = yaw;
+      const panelG = geo("aframePanel2", () => new THREE.PlaneGeometry(0.56, 0.78));
+      const railG = geo("aframeRail", () => new THREE.BoxGeometry(0.035, 0.98, 0.03));
+      const barG = geo("aframeBar", () => new THREE.BoxGeometry(0.62, 0.035, 0.03));
+      for (const s of [1, -1]) {
+        const lean = -0.2 * s;
+        const leaf = new THREE.Group(); leaf.position.set(0, 0.93, 0); leaf.rotation.x = lean; g.add(leaf);
+        for (const lx of [-0.3, 0.3]) { const r = new THREE.Mesh(railG, aFrameWoodM); r.position.set(lx, -0.47, s * 0.0); leaf.add(r); }
+        for (const ly of [-0.05, -0.9]) { const bb = new THREE.Mesh(barG, aFrameWoodM); bb.position.set(0, ly, 0); leaf.add(bb); }
+        const face = new THREE.Mesh(panelG, adMatFor(ad));
+        face.position.set(0, -0.47, s * 0.018); face.rotation.y = s > 0 ? 0 : Math.PI; leaf.add(face);
       }
-      return false;
-    }
-    function edgePoint(lot, edge, t, outBand) {
-      const band = outBand == null ? 1.4 : outBand;
-      const w2 = lot.w / 2, d2 = (lot.d != null ? lot.d : lot.w) / 2;
-      // clamp the along-edge offset to this edge's actual half-length
-      const tx = Math.max(-(w2 - 0.6), Math.min(w2 - 0.6, t));
-      const tz = Math.max(-(d2 - 0.6), Math.min(d2 - 0.6, t));
-      let p;
-      if (edge === 0) p = { x: lot.cx + tx, z: lot.cz - (d2 + band), yaw: 0 };
-      else if (edge === 1) p = { x: lot.cx + tx, z: lot.cz + (d2 + band), yaw: Math.PI };
-      else if (edge === 2) p = { x: lot.cx - (w2 + band), z: lot.cz + tz, yaw: Math.PI / 2 };
-      else p = { x: lot.cx + (w2 + band), z: lot.cz + tz, yaw: -Math.PI / 2 };
-      return clearOfRoadSurface(p);
-    }
-
-    // ----- FIRE HYDRANT: squat body, dome cap, two side outlets ------------
-    const hydM = smat(0xd23b30), hydCapM = smat(0xf2c83a);
-    function fireHydrant(x, z) {
-      const g = new THREE.Group(); g.position.set(x, 0, z);
-      const body = new THREE.Mesh(geo("hydBody", () => new THREE.CylinderGeometry(0.17, 0.2, 0.62, 8)), hydM);
-      body.position.y = 0.31; body.castShadow = true; g.add(body);
-      const cap = new THREE.Mesh(geo("hydCap", () => new THREE.SphereGeometry(0.18, 8, 5, 0, 6.3, 0, 1.3)), hydCapM);
-      cap.position.y = 0.62; g.add(cap);
-      const noz = geo("hydNoz", () => new THREE.CylinderGeometry(0.07, 0.07, 0.2, 6));
-      const n1 = new THREE.Mesh(noz, hydCapM); n1.rotation.z = Math.PI / 2; n1.position.set(0.2, 0.4, 0); g.add(n1);
-      const n2 = new THREE.Mesh(noz, hydCapM); n2.rotation.x = Math.PI / 2; n2.position.set(0, 0.4, 0.2); g.add(n2);
-      root.add(g);
-      const hc = solidCollider(x, z, 0.26, body);
-      city.streetProps.push({ x, z, type: "hydrant" });
-      const hrec = { type: "hydrant", x, z, y: 0.5, r: 0.5, group: g, gy: null };
-      shootables.push(hrec);
-      breakable(g, "hydrant", x, z, { cols: [hc], rec: hrec });
-    }
-
-    // ----- MAILBOX: USPS-style blue drum letterbox on a foot ---------------
-    const mailM = smat(0x2f6bd6), mailLegM = smat(0x21304a);
-    function mailbox(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const drum = new THREE.Mesh(geo("mailDrum", () => {
-        const gg = new THREE.CylinderGeometry(0.34, 0.34, 0.62, 10, 1, false, 0, Math.PI);
-        gg.rotateZ(Math.PI / 2); return gg;
-      }), mailM);
-      drum.position.y = 1.05; drum.castShadow = true; g.add(drum);
-      const front = new THREE.Mesh(geo("mailFront", () => new THREE.BoxGeometry(0.62, 0.7, 0.04)), mailM);
-      front.position.set(0, 0.95, 0.34); g.add(front);
-      const leg = geo("mailLeg", () => new THREE.BoxGeometry(0.08, 0.78, 0.08));
-      for (const sx of [-0.22, 0.22]) { const l = new THREE.Mesh(leg, mailLegM); l.position.set(sx, 0.4, 0); g.add(l); }
-      root.add(g);
-      const mc = solidCollider(x, z, 0.36, drum);
-      city.streetProps.push({ x, z, type: "mailbox" });
-      const mrec = { type: "mailbox", x, z, y: 0.95, r: 0.5 };
-      shootables.push(mrec);
-      breakable(g, "mailbox", x, z, { cols: [mc], rec: mrec });
-    }
-
-    // ----- PUBLIC TRASH CAN: green mesh barrel + dome lid ------------------
-    const canM = smat(0x356b3e), lidM = smat(0x223f28);
-    function trashCan(x, z) {
-      const g = new THREE.Group(); g.position.set(x, 0, z);
-      const barrel = new THREE.Mesh(geo("canBarrel", () => new THREE.CylinderGeometry(0.27, 0.23, 0.78, 8)), canM);
-      barrel.position.y = 0.39; barrel.castShadow = true; g.add(barrel);
-      const lid = new THREE.Mesh(geo("canLid", () => new THREE.CylinderGeometry(0.3, 0.27, 0.12, 8)), lidM);
-      lid.position.y = 0.82; g.add(lid);
-      root.add(g);
-      city.streetProps.push({ x, z, type: "bin" });
-      // small, light — a real hit (bullet OR bumper) knocks it flat, it never
-      // stops a car. solidCollider's radius is trivial (barrel footprint) so
-      // pedestrians route around it but a car barely notices the nudge.
-      const bc = solidCollider(x, z, 0.24, g);
-      const rec = { type: "bin", x, z, y: 0.5, r: 0.48, group: g, over: false };
-      shootables.push(rec);
-      carKnockables.push(rec);
-      breakable(g, "bin", x, z, { cols: [bc], rec });
-    }
-
-    // ----- PARKING METER: post + head + tiny display -----------------------
-    const meterPostM = smat(0x6a6f78), meterHeadM = smat(0x2a2d33), meterFaceM = smat(0x101216, { emissive: 0x39ff88, ei: 0.5 });
-    function parkingMeter(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const post = new THREE.Mesh(geo("meterPost", () => new THREE.CylinderGeometry(0.05, 0.06, 1.2, 6)), meterPostM);
-      post.position.y = 0.6; g.add(post);
-      const head = new THREE.Mesh(geo("meterHead", () => new THREE.BoxGeometry(0.22, 0.34, 0.16)), meterHeadM);
-      head.position.y = 1.32; g.add(head);
-      const face = new THREE.Mesh(geo("meterFace", () => new THREE.PlaneGeometry(0.14, 0.1)), meterFaceM);
-      face.position.set(0, 1.36, 0.085); g.add(face);
-      root.add(g);
-      city.streetProps.push({ x, z, type: "meter" });
-      // thin bolted post — a bullet just rings it (hitProp treats meter/
-      // mailbox as "bolted steel"), but a CAR is a different order of force:
-      // it bends the post right over. Tiny collider + it joins carKnockables
-      // below so a bumper clip actually topples it, unlike a gunshot.
-      const mtc = solidCollider(x, z, 0.16, g);
-      const rec = { type: "meter", x, z, y: 1.25, r: 0.28, group: g, over: false };
-      shootables.push(rec);
-      carKnockables.push(rec);
-      breakable(g, "meter", x, z, { snap: [post], cols: [mtc], rec, kinds: [[face, "glass"]] });
-    }
-
-    // ----- NEWSPAPER / NEWS BOX: little coin-op vending box ----------------
-    const NEWS_COLORS = [0xc23a3a, 0x2f78d6, 0xe0a020, 0x3a3f47, 0x2f9d5a];
-    function newsBox(x, z, yaw, ci) {
-      const m = smat(NEWS_COLORS[ci % NEWS_COLORS.length]);
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const body = new THREE.Mesh(geo("newsBody", () => new THREE.BoxGeometry(0.42, 0.78, 0.4)), m);
-      body.position.y = 0.55; body.castShadow = true; g.add(body);
-      const legG = geo("newsLeg", () => new THREE.BoxGeometry(0.05, 0.32, 0.05));
-      for (const sx of [-0.16, 0.16]) for (const sz of [-0.13, 0.13]) { const l = new THREE.Mesh(legG, smat(0x202327)); l.position.set(sx, 0.16, sz); g.add(l); }
-      const win = new THREE.Mesh(geo("newsWin", () => new THREE.PlaneGeometry(0.3, 0.4)), smat(0xdfe6ee));
-      win.position.set(0, 0.62, 0.205); g.add(win);
-      root.add(g);
-      city.streetProps.push({ x, z, type: "newsbox" });
-      // light sheet-metal box on skinny legs — a small collider so a bumper
-      // clip registers as a real hit, not a ghost.
-      const nc = solidCollider(x, z, 0.22, g);
-      const rec = { type: "newsbox", x, z, y: 0.55, r: 0.45, group: g, over: false };
-      shootables.push(rec);
-      carKnockables.push(rec);
-      breakable(g, "newsbox", x, z, { cols: [nc], rec, kinds: [[win, "glass"]] });
-    }
-
-    // ----- TRAFFIC CONE: orange cone + reflective collar -------------------
-    const coneM = smat(0xff6a1a), coneBandM = smat(0xf0f0f0), coneBaseM = smat(0x2a1608);
-    function trafficCone(x, z) {
-      const g = new THREE.Group(); g.position.set(x, 0, z);
-      const cone = new THREE.Mesh(geo("coneBody", () => new THREE.ConeGeometry(0.16, 0.5, 7)), coneM);
-      cone.position.y = 0.27; cone.castShadow = true; g.add(cone);
-      const band = new THREE.Mesh(geo("coneBand", () => new THREE.CylinderGeometry(0.13, 0.15, 0.07, 7)), coneBandM);
-      band.position.y = 0.2; g.add(band);
-      const base = new THREE.Mesh(geo("coneBase", () => new THREE.BoxGeometry(0.32, 0.04, 0.32)), coneBaseM);
-      base.position.y = 0.02; g.add(base);
-      root.add(g);
-      // trivially light — smallest collider of the four (it's a hollow plastic
-      // cone), so it's the easiest thing on the street to send flying.
-      const cc = solidCollider(x, z, 0.14, g);
-      const rec = { type: "cone", x, z, y: 0.27, r: 0.32, group: g, over: false };
-      shootables.push(rec);
-      carKnockables.push(rec);
-      breakable(g, "cone", x, z, { cols: [cc], rec });
-    }
-
-    // ----- PLANTER + low-poly TREE -----------------------------------------
-    const planterM = smat(0x8a7a64), soilM = smat(0x3a2a1c);
-    // THE REAL TREE (world/vegetation.js): barked bole, leaf-card crown.
-    // The kit's materials carry the maps; the tint per tree stays this list.
-    const VKIT = CBZ.vegetationKit;
-    const trunkM = VKIT ? VKIT.material("wood", 0x8c6a48) : smat(0x6e4a2c);
-    const FOLIAGE = VKIT
-      ? [VKIT.material("foliage", 0x5f9a4c), VKIT.material("foliage", 0x76b45a), VKIT.material("foliage", 0x4f8a48), VKIT.material("foliage", 0x86c262)]
-      : [smat(0x3f7d3a), smat(0x4f9942), smat(0x356e34), smat(0x5aa84c)];
-    function planterTree(x, z, withTree) {
-      const g = new THREE.Group(); g.position.set(x, 0, z);
-      const box = new THREE.Mesh(geo("planterBox", () => new THREE.BoxGeometry(1.0, 0.42, 1.0)), planterM);
-      box.position.y = 0.21; box.castShadow = true; g.add(box);
-      const soil = new THREE.Mesh(geo("planterSoil", () => new THREE.BoxGeometry(0.86, 0.06, 0.86)), soilM);
-      soil.position.y = 0.42; g.add(soil);
-      // ONE TREE GRAMMAR (world/treeaudit.js §2). The street tree was two
-      // stacked IcosahedronGeometry blobs on a 0.1 m stick — the same "weird
-      // geometric" tree the wilderness was full of, standing on every
-      // pavement in the city. It becomes ONE cone-stack crown (two meshes to
-      // one, a small object-count win) over a bole with a real root flare
-      // spreading into the planter soil, which is the one place in the game a
-      // player is close enough to READ a root. Every number below keeps the
-      // old silhouette's envelope: crown y[1.30,3.10] at radius 0.82, trunk
-      // top at 1.90.
-      const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
-      if (withTree) {
-        // A planter tree is drawn at scale 1, so the flare is authored in
-        // METRES here rather than as a fraction of the geo height (see the
-        // non-uniform-scale note in treeaudit.js §2).
-        const trunk = new THREE.Mesh(GRAM && CBZ.treeTrunkGeo
-          ? geo("treeTrunkRoot", () => CBZ.treeTrunkGeo({ rTop: 0.10, rBase: 0.16, h: 1.5, seg: 6,
-              roots: 4, rise: 0.20, dip: 0.05, spread: 2.0, flare: 1.45, site: "street" }))
-          : geo("treeTrunk", () => new THREE.CylinderGeometry(0.1, 0.14, 1.5, 6)), trunkM);
-        trunk.position.y = GRAM ? 0.40 : 1.15;      // base-at-0 geo sits ON the soil; legacy geo is centred
-        trunk.castShadow = true; g.add(trunk);
-        const fm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
-        if (GRAM) {
-          const c = new THREE.Mesh(geo("treeCrownStack",
-            () => CBZ.treeCrownGeo({ tiers: 2, r: 0.82, h: 1.8, seg: 7, taper: 0.66, site: "street", leaf: !!VKIT, cards: 9 })), fm);
-          c.position.y = 1.30; c.castShadow = true; g.add(c);
-          if (VKIT && c.geometry.userData.leafCards) c.customDepthMaterial = VKIT.depthMaterial("foliage");
-        } else {
-          // two stacked low-poly blobs for a stylised canopy
-          const c1 = new THREE.Mesh(geo("treeCanopy1", () => new THREE.IcosahedronGeometry(0.82, 0)), fm);
-          c1.position.y = 2.0; c1.castShadow = true; c1.scale.set(1, 0.85, 1); g.add(c1);
-          const c2 = new THREE.Mesh(geo("treeCanopy2", () => new THREE.IcosahedronGeometry(0.55, 0)), fm);
-          c2.position.set(0.25, 2.55, 0.1); g.add(c2);
-          if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("street");
-        }
-        const tc = solidCollider(x, z, 0.5, trunk);
-        city.streetProps.push({ x, z, type: "tree" });
-        // the bole snaps, the crown comes apart as clumps + leaves, the
-        // planter stays standing (and keeps the collider)
-        const crowns = g.children.filter((m) => m !== box && m !== soil && m !== trunk);
-        breakable(g, "tree", x, z, { snap: [trunk], keep: [box, soil], cols: [tc],
-          kinds: crowns.map((m) => [m, "foliage"]) });
-      } else {
-        // shrub planter: a couple of small bushes (leafy clumps in the same
-        // grammar — a shrub is just a very squat crown)
-        const sm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
-        if (GRAM) {
-          const sg = geo("shrubStack", () => CBZ.treeCrownGeo({ tiers: 2, r: 0.34, h: 0.44, seg: 5, taper: 0.70, site: "street", leaf: !!VKIT, cards: 5 }));
-          const b1 = new THREE.Mesh(sg, sm);
-          b1.position.set(-0.18, 0.45, 0.1); b1.scale.set(1, 1.05, 1); g.add(b1);
-          const b2 = new THREE.Mesh(sg, sm);
-          b2.position.set(0.2, 0.45, -0.12); b2.scale.set(0.88, 0.9, 0.88); b2.rotation.y = 0.9; g.add(b2);
-        } else {
-          const b1 = new THREE.Mesh(geo("shrub1", () => new THREE.IcosahedronGeometry(0.34, 0)), sm);
-          b1.position.set(-0.18, 0.62, 0.1); b1.scale.y = 0.8; g.add(b1);
-          const b2 = new THREE.Mesh(geo("shrub2", () => new THREE.IcosahedronGeometry(0.3, 0)), sm);
-          b2.position.set(0.2, 0.6, -0.12); g.add(b2);
-        }
-        const sc = solidCollider(x, z, 0.55, box);
-        city.streetProps.push({ x, z, type: "planter" });
-        breakable(g, "shrub", x, z, { keep: [box, soil], cols: [sc] });
-      }
-    }
-
-    // ----- A-FRAME SANDWICH BOARD (sparse generic only) --------------------
-    // NOTE: per-shop sidewalk signs were REMOVED — the store's name now lives ON
-    // the building facade (buildings agent), not on a board out on the kerb. We
-    // keep a *sparse* sandwich board as generic street decor carrying a city
-    // brand/radio ad, never a "this is shop X" sign in front of a door.
-    function aFrameSign(x, z, yaw, ad) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const panelG = geo("aframePanel", () => new THREE.PlaneGeometry(0.7, 0.9));
-      const front = new THREE.Mesh(panelG, adMatFor(ad));
-      front.position.set(0, 0.55, 0.12); front.rotation.x = 0.18; g.add(front);
-      const back = new THREE.Mesh(panelG, adMatFor(ad));
-      back.position.set(0, 0.55, -0.12); back.rotation.x = -0.18; back.rotation.y = Math.PI; g.add(back);
-      const footG = geo("aframeFoot", () => new THREE.BoxGeometry(0.74, 0.04, 0.5));
-      const foot = new THREE.Mesh(footG, smat(0x2a2a2a)); foot.position.y = 0.02; g.add(foot);
       root.add(g);
       city.streetProps.push({ x, z, type: "sign" });  // light, no collider
-      breakable(g, "aframe", x, z, { kinds: [[foot, "metal"]] });
+      breakable(g, "aframe", x, z, {});
+      return g;
     }
-
-    // =====================================================================
-    //  PER-SHOP SIDEWALK DRESSING — props that match the storefront's KIND.
-    //  All share the geo()/smat() caches; small enough to skip colliders so
-    //  they never trap a ped, and always placed off the door (caller guards
-    //  with nearDoor). Branch picks one of these by lot.building.shop.kind.
-    // =====================================================================
-
-    // ----- PATIO SET: a round table, a tilted parasol + a couple of chairs --
-    // (food / bar lots — a little outdoor seating spilling onto the kerb).
-    const patioTopM = smat(0xb9c0c8), patioLegM = smat(0x55606b), chairM = smat(0x6a7280);
-    const UMBRELLA = [smat(0xe05d5d), smat(0x4f9942), smat(0x2f78d6), smat(0xe0a020)];
-    function patioSet(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const top = new THREE.Mesh(geo("patioTop", () => new THREE.CylinderGeometry(0.55, 0.55, 0.06, 12)), patioTopM);
-      top.position.y = 0.74; top.castShadow = true; g.add(top);
-      const stem = new THREE.Mesh(geo("patioStem", () => new THREE.CylinderGeometry(0.05, 0.05, 0.74, 6)), patioLegM);
-      stem.position.y = 0.37; g.add(stem);
-      // parasol pole + canopy (a shallow cone)
-      const pole = new THREE.Mesh(geo("umbPole", () => new THREE.CylinderGeometry(0.035, 0.035, 2.0, 5)), patioLegM);
-      pole.position.y = 1.0; g.add(pole);
-      const canopy = new THREE.Mesh(geo("umbTop", () => new THREE.ConeGeometry(1.05, 0.5, 8)), UMBRELLA[(rng() * UMBRELLA.length) | 0]);
-      canopy.position.y = 2.05; canopy.castShadow = true; g.add(canopy);
-      const chairSeatG = geo("chairSeat", () => new THREE.BoxGeometry(0.4, 0.06, 0.4));
-      const chairBackG = geo("chairBack", () => new THREE.BoxGeometry(0.4, 0.4, 0.05));
-      for (const a of [0.6, 3.74]) {
-        const cx = Math.cos(a) * 0.95, cz = Math.sin(a) * 0.95;
-        const seat = new THREE.Mesh(chairSeatG, chairM); seat.position.set(cx, 0.42, cz); g.add(seat);
-        const back = new THREE.Mesh(chairBackG, chairM); back.position.set(cx - Math.cos(a) * 0.2, 0.62, cz - Math.sin(a) * 0.2); back.rotation.y = a; g.add(back);
-        // PROPS_PURPOSE: the chair is a SEAT (local→world via the group's yaw:
-        // wx = x + lx·cos + lz·sin, wz = z − lx·sin + lz·cos). The back panel
-        // sits between seat and table, so the sitter faces OUTWARD (local
-        // (cos a, sin a)) — register that yaw so the pose matches the build.
-        if (CBZ.propRegisterSeat) {
-          const cy = Math.cos(yaw), sy = Math.sin(yaw);
-          const fdx = Math.cos(a) * cy + Math.sin(a) * sy, fdz = -Math.cos(a) * sy + Math.sin(a) * cy;
-          CBZ.propRegisterSeat(x + cx * cy + cz * sy, 0, z - cx * sy + cz * cy, Math.atan2(fdx, fdz), "patio", null);
-        }
-      }
-      root.add(g);
-      city.streetProps.push({ x, z, type: "patio" });   // soft furniture, no collider
-      breakable(g, "patio", x, z, { kinds: [[top, "metal"], [stem, "metal"], [pole, "metal"]] });
-    }
-
-    // ----- BIKE RACK: a low U-loop rail (gym — somewhere to chain a bike) ----
-    const bikeM = smat(0x8a9099);
-    function bikeRack(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const railG = geo("bikeRail", () => new THREE.BoxGeometry(2.2, 0.07, 0.07));
-      const legG = geo("bikeLeg", () => new THREE.CylinderGeometry(0.05, 0.05, 0.7, 5));
-      const rail = new THREE.Mesh(railG, bikeM); rail.position.y = 0.62; g.add(rail);
-      for (const lx of [-1.0, -0.33, 0.33, 1.0]) { const l = new THREE.Mesh(legG, bikeM); l.position.set(lx, 0.31, 0); g.add(l); }
-      // a couple of upright loops so it reads as a real rack
-      const loopG = geo("bikeLoop", () => new THREE.TorusGeometry(0.28, 0.04, 5, 9, Math.PI));
-      for (const lx of [-0.66, 0.66]) { const lp = new THREE.Mesh(loopG, bikeM); lp.position.set(lx, 0.62, 0); g.add(lp); }
-      root.add(g);
-      const brc = solidCollider(x, z, 0.4, rail);
-      city.streetProps.push({ x, z, type: "bikerack" });
-      breakable(g, "bikerack", x, z, { cols: [brc] });
-    }
-
-    // ----- PROPANE CAGE: a steel cage of swap-out tanks (hardware lot) ------
-    const cageM = smat(0x9a6a2a), tankPropM = smat(0xc23a3a), cageBarM = smat(0x4a4f57);
-    function propaneCage(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const base = new THREE.Mesh(geo("cageBase", () => new THREE.BoxGeometry(1.4, 0.12, 0.8)), cageM);
-      base.position.y = 0.06; base.castShadow = true; g.add(base);
-      // a couple of propane bottles inside
-      const tankG = geo("propaneTank", () => new THREE.CylinderGeometry(0.16, 0.16, 0.6, 8));
-      for (const px of [-0.45, 0, 0.45]) { const tk = new THREE.Mesh(tankG, tankPropM); tk.position.set(px, 0.42, rng() < 0.5 ? -0.15 : 0.15); g.add(tk); }
-      // cage bars (a top frame + corner posts) — reads as a locked rack
-      const postG = geo("cagePost", () => new THREE.BoxGeometry(0.05, 0.95, 0.05));
-      for (const px of [-0.68, 0.68]) for (const pz of [-0.36, 0.36]) { const p = new THREE.Mesh(postG, cageBarM); p.position.set(px, 0.5, pz); g.add(p); }
-      const topG = geo("cageTop", () => new THREE.BoxGeometry(1.4, 0.05, 0.8));
-      const topf = new THREE.Mesh(topG, cageBarM); topf.position.y = 0.96; g.add(topf);
-      root.add(g);
-      // WIRED: point the collider at the GROUP (like every other knockable —
-      // cans/cones/meters), which core/batch.js spares from the city-wide inert
-      // merge (liveGroups). That keeps ALL of the cage's meshes live under one
-      // group so the explosion below can hide the WHOLE cage with g.visible=false
-      // and leave nothing floating. Flag OFF keeps the original base ref (merged
-      // decor) byte-for-byte — the one-line revert.
-      const pc = solidCollider(x, z, 0.55, CBZ.CONFIG.PROPS_WIRED_V1 ? g : base);
-      city.streetProps.push({ x, z, type: "propane" });
-      // PROPS_WIRED_V1: a shot cage COOKS OFF. Register it as a shootable so
-      // gunfire (CBZ.cityShootProp → hitProp) whittles its hp and, on the last
-      // hit, routes into the SAME player blast chain the grenade/C4 fire. Flag
-      // off → never registered, the cage stays inert decor (one-line revert).
-      if (CBZ.CONFIG.PROPS_WIRED_V1) {
-        const prec = { type: "propane", x, z, y: 0.5, r: 0.7, group: g, hp: 3 };
-        shootables.push(prec);
-        // a blast that reaches it cooks it off (cityPropsBlast queues it);
-        // the cook-off itself breaks the cage into its own steel
-        breakable(g, "propane", x, z, { cols: [pc], rec: prec });
-      }
-    }
-
-    // ----- PER-SHOP SANDWICH BOARD: an A-frame whose panel reflects the shop --
-    // Unlike the sparse generic board, this one is keyed to the storefront's
-    // kind so a diner shows a diner promo, a gym a gym promo, etc. It reuses the
-    // cached adTextureFor() pipeline by composing a small per-kind ad record
-    // (cached by content) — no per-frame work, no new canvas churn after first build.
+    // Per-shop board: the panel carries the shop's own promo (cached ad pipeline)
     const SHOP_BOARD_AD = {
       food:     ["TODAY'S SPECIAL", "2-for-1 wings til 6", 0x7a3a0d, 0xffce7a, { tag: "EAT" }],
       bar:      ["HAPPY HOUR", "half off, all night", 0x2a0d1a, 0xe85d8a, { tag: "OPEN" }],
@@ -3149,64 +3143,126 @@
       guns:     ["RANGE OPEN", "rights. ammo. respect.", 0x1c2414, 0xff5a2c, { tag: "GUNS" }],
       pawn:     ["WE BUY GOLD", "we buy hot junk", 0x2a1c0d, 0xc89a5a, { tag: "CASH" }],
     };
-    function shopBoard(x, z, yaw, kind) {
+    function shopBoard(x, z, yaw, kind, y) {
       const ad = SHOP_BOARD_AD[kind];
       if (!ad) return false;
-      aFrameSign(x, z, yaw, ad);    // reuses the cached adMatFor()/adTextureFor()
+      aFrameSign(x, z, yaw, ad, y);
       return true;
     }
 
-    // ----- BUS-STOP SHELTER: posts, flat roof, bench, glass ad panel -------
-    const shelterPostM = smat(0x3a3f47), shelterRoofM = smat(0x202327), glassM = new THREE.MeshLambertMaterial({ color: 0x9fc6e0, transparent: true, opacity: 0.28 });
-    function busShelter(x, z, yaw) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
-      const postG = geo("shelterPost", () => new THREE.BoxGeometry(0.1, 2.3, 0.1));
-      for (const px of [-1.7, 1.7]) for (const pz of [-0.6, 0.6]) { const p = new THREE.Mesh(postG, shelterPostM); p.position.set(px, 1.15, pz); g.add(p); }
-      const roof = new THREE.Mesh(geo("shelterRoof", () => new THREE.BoxGeometry(3.8, 0.12, 1.5)), shelterRoofM);
-      roof.position.y = 2.35; roof.castShadow = true; g.add(roof);
-      // back glass wall
-      const back = new THREE.Mesh(geo("shelterGlass", () => new THREE.PlaneGeometry(3.4, 1.9)), glassM);
-      back.position.set(0, 1.2, -0.6); g.add(back);
-      // bench
-      const bench = new THREE.Mesh(geo("shelterBench", () => new THREE.BoxGeometry(2.6, 0.1, 0.5)), smat(0x55606b));
-      bench.position.set(0, 0.55, -0.35); bench.castShadow = true; g.add(bench);
-      const legG = geo("shelterBenchLeg", () => new THREE.BoxGeometry(0.1, 0.5, 0.4));
-      for (const lx of [-1.1, 1.1]) { const l = new THREE.Mesh(legG, shelterPostM); l.position.set(lx, 0.25, -0.35); g.add(l); }
-      // PROPS_PURPOSE: 3 SEAT anchors along the bench, facing out of the
-      // shelter (local +z → world (sin yaw, cos yaw), i.e. face = yaw).
-      // GEOMETRY: this bench's slab is a TALL one — box centre 0.55 + half of
-      // its 0.1 thickness = a 0.60 cushion top, 16cm above the generic "bench"
-      // default. Declare it so the rig's feet-on-the-floor solve
-      // (entities/character.js via CBZ.propSeatRef) lands the body ON the slab
-      // instead of 16cm inside it.
-      if (CBZ.propRegisterSeat) {
-        const cy = Math.cos(yaw), sy = Math.sin(yaw);
-        const SHELTER_BENCH = { cushion: 0.60, floorBelow: 0 };
-        for (const lx of [-0.8, 0, 0.8]) {
-          CBZ.propRegisterSeat(x + lx * cy + (-0.35) * sy, 0, z - lx * sy + (-0.35) * cy, yaw, "bench", null, SHELTER_BENCH);
+    // ----- PATIO SET: bistro table, two chairs, a parasol --------------------
+    const UMBRELLA = [0xb8423c, 0x3f7a4a, 0x2d5f8f, 0xc28f2c].map(function (c) {
+      const m = new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide }); m._shared = true; return m;
+    });
+    function patioSet(x, z, yaw, y) {
+      y = y || 0;
+      const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = yaw;
+      const table = kitMesh(g, "bistroTable", 0, 0, 0, 0);
+      const chairs = [];
+      for (const a of [0.6, 3.74]) {
+        const cx = Math.cos(a) * 0.72, cz = Math.sin(a) * 0.72;
+        // the chair's back is at its local -z; face the table: its +z points
+        // from the chair toward the table centre
+        const face = Math.atan2(-cx, -cz);
+        chairs.push.apply(chairs, kitMesh(g, "bistroChair", cx, 0, cz, face));
+        if (CBZ.propRegisterSeat) {
+          const cy = Math.cos(yaw), sy = Math.sin(yaw);
+          CBZ.propRegisterSeat(x + cx * cy + cz * sy, y, z - cx * sy + cz * cy, yaw + face, "patio", null, { cushion: 0.465, floorBelow: 0 });
         }
       }
-      // lit advertising panel on one end (glows at night). Bus shelters carry
-      // our brand/shop/radio + gang ads (no wanted posters at street level).
+      // parasol: pole through the table, eight-panel canopy (seen from below
+      // too, so double-sided), a finial
+      const pole = new THREE.Mesh(geo("umbPole2", () => new THREE.CylinderGeometry(0.02, 0.02, 2.3, 6)), smat(0xb9bdc0));
+      pole.position.y = 1.15; g.add(pole);
+      const canopy = new THREE.Mesh(geo("umbTop2", () => new THREE.ConeGeometry(1.15, 0.38, 8, 1, true)),
+        UMBRELLA[((CBZ.hash01 ? CBZ.hash01(x, z, 0x77) : 0.5) * UMBRELLA.length) | 0]);
+      canopy.position.y = 2.12; canopy.castShadow = true; g.add(canopy);
+      const fin = new THREE.Mesh(geo("umbFinial", () => new THREE.SphereGeometry(0.035, 6, 4)), smat(0xb9bdc0));
+      fin.position.y = 2.33; g.add(fin);
+      root.add(g);
+      city.streetProps.push({ x, z, type: "patio" });   // soft furniture, no collider
+      breakable(g, "patio", x, z, { kinds: [[canopy, "plastic"], [pole, "metal"]] });
+      return g;
+    }
+
+    // ----- BIKE RACK: three inverted-U staples at the kerb -------------------
+    function bikeRack(x, z, yaw, y) {
+      const g = new THREE.Group(); g.position.set(x, y || 0, z); g.rotation.y = yaw;
+      kitMesh(g, "bikerack", 0, 0, 0, 0);
+      root.add(g);
+      const brc = solidCollider(x, z, 0.35, null);
+      city.streetProps.push({ x, z, type: "bikerack" });
+      breakable(g, "bikerack", x, z, { cols: [brc] });
+      return g;
+    }
+
+    // ----- PROPANE EXCHANGE CAGE (hardware store) -----------------------------
+    function propaneCage(x, z, yaw, y) {
+      const g = new THREE.Group(); g.position.set(x, y || 0, z); g.rotation.y = yaw;
+      kitMesh(g, "propane", 0, 0, 0, 0);
+      root.add(g);
+      // WIRED: the collider points at the GROUP so core/batch.js keeps the
+      // cage live and the cook-off can hide the whole thing in one go.
+      const pc = solidCollider(x, z, 0.55, CBZ.CONFIG.PROPS_WIRED_V1 ? g : null);
+      city.streetProps.push({ x, z, type: "propane" });
+      if (CBZ.CONFIG.PROPS_WIRED_V1) {
+        const prec = { type: "propane", x, z, y: (y || 0) + 0.5, r: 0.7, group: g, hp: 3 };
+        shootables.push(prec);
+        breakable(g, "propane", x, z, { cols: [pc], rec: prec });
+      }
+      return g;
+    }
+
+    // ----- BUS SHELTER: brushed-aluminium frame, tinted roof with fascia,
+    // glass back and one glass end, an ad lightbox on the other end, a real
+    // bench inside, the stop's flag sign on a pole at the kerb end ---------
+    const shelterAluM = smat(0x8e959b), shelterRoofM = smat(0x3a4046);
+    const glassM = new THREE.MeshLambertMaterial({ color: 0xa9c7d6, transparent: true, opacity: 0.22, depthWrite: false });
+    glassM._shared = true;
+    function busShelter(x, z, yaw, y) {
+      y = y || 0;
+      const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = yaw;
+      const postG = geo("shelterPost2", () => new THREE.BoxGeometry(0.08, 2.3, 0.08));
+      for (const px of [-1.75, 1.75]) for (const pz of [-0.62, 0.55]) { const p = new THREE.Mesh(postG, shelterAluM); p.position.set(px, 1.15, pz); g.add(p); }
+      const roof = new THREE.Mesh(geo("shelterRoof2", () => new THREE.BoxGeometry(3.9, 0.05, 1.6)), shelterRoofM);
+      roof.position.set(0, 2.36, -0.03); roof.castShadow = true; g.add(roof);
+      const fasciaG = geo("shelterFascia", () => new THREE.BoxGeometry(3.94, 0.16, 0.05));
+      for (const fz of [-0.84, 0.78]) { const f = new THREE.Mesh(fasciaG, shelterAluM); f.position.set(0, 2.32, fz); g.add(f); }
+      const railG = geo("shelterRail", () => new THREE.BoxGeometry(3.5, 0.05, 0.05));
+      for (const ry of [0.18, 2.2]) { const r = new THREE.Mesh(railG, shelterAluM); r.position.set(0, ry, -0.62); g.add(r); }
+      const back = new THREE.Mesh(geo("shelterGlass2", () => new THREE.PlaneGeometry(3.42, 1.98)), glassM);
+      back.position.set(0, 1.19, -0.62); g.add(back);
+      const endGlass = new THREE.Mesh(geo("shelterEndGlass", () => new THREE.PlaneGeometry(1.1, 1.98)), glassM);
+      endGlass.position.set(-1.75, 1.19, -0.04); endGlass.rotation.y = Math.PI / 2; g.add(endGlass);
+      // the bench (kerb kit), against the back glass, facing the road (+z)
+      const benchMs = kitMesh(g, "bench", 0, 0, -0.33, 0);
+      if (CBZ.propRegisterSeat) {
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        for (const lx of [-0.6, 0, 0.6]) {
+          CBZ.propRegisterSeat(x + lx * cy + (-0.31) * sy, y, z - lx * sy + (-0.31) * cy, yaw, "bench", null, { cushion: 0.46, floorBelow: 0 });
+        }
+      }
+      // ad lightbox on the +x end: aluminium case, a poster on each face
+      const box = new THREE.Mesh(geo("shelterAdBox", () => new THREE.BoxGeometry(0.12, 1.85, 1.2)), shelterAluM);
+      box.position.set(1.8, 1.2, -0.04); g.add(box);
       const pick = pickAd(x, z, { allowWanted: false });
       const adM = adMatFor(pick.ad);
-      const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adM);
-      ad.position.set(1.74, 1.2, 0); ad.rotation.y = -Math.PI / 2; g.add(ad);
+      const adG = geo("shelterAd2", () => new THREE.PlaneGeometry(1.06, 1.7));
+      const ad = new THREE.Mesh(adG, adM); ad.position.set(1.738, 1.2, -0.04); ad.rotation.y = -Math.PI / 2; g.add(ad);
+      const ad2 = new THREE.Mesh(adG, adM); ad2.position.set(1.862, 1.2, -0.04); ad2.rotation.y = Math.PI / 2; g.add(ad2);
       nightAds.push(adM);
-      regDynAd(ad, pick, x + Math.cos(yaw) * 1.74, 1.2, z - Math.sin(yaw) * 1.74);   // wanted poster or E3 market ticker -> live-refresh driver
-      // rentable: walk-up point is the PANEL end of the shelter (world coords)
-      adBoards.push({ mesh: ad, x: x + Math.cos(yaw) * 1.74, z: z - Math.sin(yaw) * 1.74, y: 0, kind: "shelter", mat0: adM });
-      // bus-stop sign pole at the end
-      const sp = new THREE.Mesh(geo("shelterSignPole", () => new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6)), shelterPostM);
-      sp.position.set(2.1, 1.3, 0); g.add(sp);
-      const sign = new THREE.Mesh(geo("shelterSign", () => new THREE.BoxGeometry(0.5, 0.5, 0.06)), smat(0x2f6bd6, { emissive: 0x2f6bd6, ei: 0.15 }));
-      sign.position.set(2.1, 2.5, 0); g.add(sign);
+      regDynAd(ad, pick, x + Math.cos(yaw) * 1.74, y + 1.2, z - Math.sin(yaw) * 1.74);
+      adBoards.push({ mesh: ad, mesh2: ad2, x: x + Math.cos(yaw) * 1.8, z: z - Math.sin(yaw) * 1.8, y: 0, kind: "shelter", mat0: adM, mat0b: adM });
+      // the stop pole at the -x kerb corner with the flag sign
+      const tx = Math.cos(yaw), tz = -Math.sin(yaw), fx = Math.sin(yaw), fz = Math.cos(yaw);
+      const px = x - tx * 2.25 + fx * 0.45, pz = z - tz * 2.25 + fz * 0.45;
       root.add(g);
-      // colliders on the posts only (you can walk in, sit, take cover; cars crash the frame)
-      const shc1 = solidCollider(x - Math.cos(yaw) * 1.7, z + Math.sin(yaw) * 1.7, 0.5, roof, false);
-      const shc2 = solidCollider(x + Math.cos(yaw) * 1.7, z - Math.sin(yaw) * 1.7, 0.5, roof, false);
+      solidCollider(x - tx * 1.75, z - tz * 1.75, 0.35, null);
+      solidCollider(x + tx * 1.75, z + tz * 1.75, 0.35, null);
       city.streetProps.push({ x, z, type: "busstop" });
-      breakable(g, "shelter", x, z, { cols: [shc1, shc2], kinds: [[back, "glass"], [ad, "plastic"], [sign, "plastic"]] });
+      breakable(g, "shelter", x, z, { kinds: [[back, "glass"], [endGlass, "glass"], [ad, "plastic"], [ad2, "plastic"]]
+        .concat(benchMs.map(function (m) { return [m, "wood"]; })) });
+      return { poleX: px, poleZ: pz };
     }
 
     // ----- BILLBOARD: tall steel legs + a big lit ad board -----------------
@@ -3283,190 +3339,443 @@
     }
 
     // =====================================================================
-    //  PLACEMENT — march props around every block's sidewalk; bias the corners
-    //  for hydrants/meters and put the bigger landmark props (shelters, big
-    //  billboards) only where there's room (corner lots / wide frontage).
-    //
-    //  PROPS_PURGE_V1 CENSUS — what this pass stopped doing, and why. The rule
-    //  applied is the owner's: a prop stays if it has a VERB (something you can
-    //  DO to it) or a reaction; otherwise it gets out of the way or it is gone.
-    //
-    //    KEPT, now alley-gated — meter (jimmy the coin box, roleverbs.js) ·
-    //      hydrant (crack the cap) · bin + newsbox (rummage, interact.js) ·
-    //      mailbox (check the mail) · bus shelter (route board) · patio (a
-    //      registered propuse SEAT) · propane cage (cooks off when shot) ·
-    //      per-shop board (it names the shop it stands in front of) · bike rack.
-    //      All of these keep their collider; the alley law is what stops them
-    //      standing in the one gap you need to run down.
-    //    THINNED — planters/street trees 0.75 -> ~0.42 effective per lot and
-    //      STREET-FACING ONLY. A planter has no verb; it earns its place by
-    //      lining a kerb, and a shrub box wedged in a service gap is the
-    //      definition of the dumb prop. Bins/newsboxes 0.70 -> ~0.50 for the
-    //      same reason: the owner's complaint is DENSITY, and one bin per two
-    //      lots still reads as a city.
-    //    CUT — the generic sandwich board (a radio ad on a board nobody put
-    //      there, at a random lot edge: no verb, no owner, pure noise; the
-    //      PER-SHOP board at a storefront stays) and the three-cone "roadwork
-    //      feel" cluster (a work zone with no work, three colliders deep, and
-    //      the single most common thing to trip over on a pavement).
-    //
-    //  EVERY rng() DRAW BELOW IS PRESERVED, ON BOTH SIDES OF THE FLAG — the
-    //  same discipline the rooftop purge further down already used ("// former
-    //  x"). city.rng is a shared stream and props.js is its LAST consumer
-    //  before this file's own camps and rooftops, so dropping one draw would
-    //  reshuffle those too and the flag would revert to a THIRD world rather
-    //  than to the one the owner is looking at. That is why every THINNING is
-    //  a CBZ.hash01 position gate and never a lowered rng() threshold, and why
-    //  a skipped builder replays the draws it would have taken itself.
+    //  KERB FURNITURE — sparse, purposeful, standing on the real footway.
     // =====================================================================
-    const lots = STREET_CLUTTER ? city.lots : [];
-    let lotIdx = 0;
-    for (const lot of lots) {
-      lotIdx++;
-      // 1) parking meters in a short row along ONE street-facing edge
-      if (rng() < 0.6) {
-        const edge = (rng() * 4) | 0;
-        const meters = 2 + ((rng() * 3) | 0);
-        const start = -(meters - 1) * 1.1;
-        for (let m = 0; m < meters; m++) {
-          const p = edgePoint(lot, edge, start + m * 2.2, 1.0);
-          if (nearDoor(p.x, p.z, 1.8)) continue;
-          if (PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.16 })) continue;
-          parkingMeter(p.x, p.z, p.yaw);
+    //  The old layer rolled nine props per LOT EDGE off city.rng and scattered
+    //  them wherever the edge happened to be (a lot edge is not a kerb: half
+    //  of them faced the back of the next block), which is why it read as
+    //  junk and was switched off, leaving the pavements bare. This pass walks
+    //  the KERBS the street kit actually drew (city.street.solve: the block
+    //  grid, its corner radii and its 2 m footway) and puts each thing where
+    //  a city puts it:
+    //    - a fire hydrant roughly every 60-80 m of kerb, near mid-block;
+    //    - a litter bin at a corner (busier districts: most corners) and
+    //      beside shop doors;
+    //    - news boxes at the far corner of busy blocks, in ones and twos;
+    //    - a collection mailbox on some faces;
+    //    - single-space meters at stall spacing on commercial kerbs only;
+    //    - street trees in iron grates, between the lamps;
+    //    - bus stops on the avenues (a shelter where the pad behind it leaves
+    //      a walkway, otherwise a stop pole and a bench).
+    //  Every spot must be FULL-HEIGHT footway (not a ramp, a driveway apron,
+    //  a lot pad or the road), clear of door approaches, lamps, signal poles
+    //  and each other. Variation is CBZ.hash01 of the position, so this pass
+    //  draws NOTHING from city.rng and the rest of the world is unchanged.
+    //  Everything a kind draws is ONE InstancedMesh per 200 m cell (the kerb
+    //  kit above); props only become live meshes once something hits them.
+    const KERB_STATS = city._kerbFurniture = { hydrant: 0, bin: 0, newsbox: 0, meter: 0, mailbox: 0, tree: 0,
+      bench: 0, shelter: 0, busStop: 0, patio: 0, bikerack: 0, propane: 0, aframe: 0, drawSets: 0 };
+    const KERB_SETS = {};                    // kind -> chunk set (for materialise)
+    // a failure here must never cost the camps/billboards/drivers below it
+    try {
+    (function kerbFurniture() {
+      const st = city.street, G = st && st.solve;
+      if (!G || !HW || !THREE.InstancedMesh || typeof st.regionAt !== "function" || typeof st.heightAt !== "function") return;
+      let KIT = null;
+      try { KIT = kerbKit(); } catch (e) { console.warn("[kerb kit]", e); return; }
+      const VC = HW.hardwareMaterial(false);
+      const X = G.X, Z = G.Z, N = G.N, h = G.h, S = G.S;
+      const YW = st.profile ? st.profile.yWalk : 0.18;
+      function hsh(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
+      function dkind(x, z) { const d = city.districtAt ? city.districtAt(x, z) : null; return (d && d.kind) || "residential"; }
+
+      // ---- occupancy: what already stands on the kerb + what we add ------
+      const OCC = [];
+      for (const p of city.streetProps) OCC.push({ x: p.x, z: p.z, r: 0.45 });
+      for (const c of allPoles) OCC.push({ x: c.x, z: c.z, r: 0.5 });
+      function clearAt(x, z, r) {
+        for (let i = 0; i < OCC.length; i++) {
+          const o = OCC[i], d = r + o.r;
+          const dx = o.x - x, dz = o.z - z;
+          if (dx > d || dx < -d || dz > d || dz < -d) continue;
+          if (dx * dx + dz * dz < d * d) return false;
         }
+        return true;
       }
-      // 2) a hydrant near one corner
-      if (rng() < 0.5) {
-        const edge = (rng() * 4) | 0;
-        const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.8, 1.2);
-        if (!nearDoor(p.x, p.z, 2.0)
-          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.26 }))) fireHydrant(p.x, p.z);
+      function claim(x, z, r) { OCC.push({ x: x, z: z, r: r }); }
+      // full-height footway, not a ramp / driveway / pad / road, no door approach
+      function onWalk(x, z) {
+        if (st.regionAt(x, z) !== 1) return false;
+        const y = st.heightAt(x, z);
+        return Number.isFinite(y) && y >= YW - 0.012;
       }
-      // 3) trash + news boxes near a corner
-      if (rng() < 0.7) {
-        const edge = (rng() * 4) | 0;
-        const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.7, 1.1);
-        // THINNED 0.70 -> ~0.50 effective. THE THINNING GATE IS A POSITION
-        // HASH, NEVER A LOWERED rng() THRESHOLD. Lowering the roll above would
-        // have skipped the three draws inside this branch on every lot it
-        // newly rejected, and props.js is the last consumer of city.rng before
-        // its OWN camps and rooftops — so the flag would have reshuffled half
-        // the world behind it instead of reverting to it. hash01 folds
-        // WORLD_SEED, so it is per-seed, order-independent and stream-free.
-        const thin = PURGED && ph(p.x, p.z, 0x9101) >= 0.71;
-        if (!nearDoor(p.x, p.z, 1.6)) {
-          // one draw either way, exactly as before — the branch decides how
-          // many MORE it takes, and that is preserved inside each arm.
-          if (rng() < 0.5) {
-            if (!thin && (!PURGED || CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.24 }))) trashCan(p.x, p.z);
-          } else {
-            const ci = (rng() * NEWS_COLORS.length) | 0;
-            if (!thin && (!PURGED || CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.22 }))) newsBox(p.x, p.z, p.yaw, ci);
-          }
+      function spotOK(x, z, r, doorR) {
+        if (!onWalk(x, z)) return false;
+        if (nearDoor(x, z, doorR == null ? 2.2 : doorR)) return false;
+        if (CBZ.roadPropClear && !CBZ.roadPropClear(x, z, null)) return false;
+        return clearAt(x, z, r);
+      }
+
+      // ---- instanced kinds + the materialise-on-contact record ------------
+      const ITEMS = {};
+      function inst(kind, x, y, z, ry) {
+        const a = ITEMS[kind] || (ITEMS[kind] = []);
+        a.push({ x: x, y: y, z: z, ry: ry });
+        return { kind: kind, i: a.length - 1, done: false };
+      }
+      function materialize(rec) {
+        const I = rec.inst;
+        if (!I || I.done) return;
+        I.done = true;
+        const Kd = KIT[I.kind];
+        if (!Kd) return;
+        const g = rec.group;
+        for (const p of Kd.parts) {
+          const m = new THREE.Mesh(p.geo, VC);
+          m.castShadow = true; m.receiveShadow = true;
+          g.add(m);
+          if (rec.brk) rec.brk.parts.push({ m: m, role: p.role === "keep" ? "keep" : p.role, kind: p.kind });
         }
+        g.userData.dynamic = true;
+        if (!g.parent) root.add(g);
+        g.updateMatrixWorld(true);
+        const set = KERB_SETS[I.kind];
+        if (set) set.setMatrixAt(I.i, _zeroM4);
       }
-      // 4) a mailbox
-      if (rng() < 0.35) {
-        const edge = (rng() * 4) | 0;
-        const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.6, 1.3);
-        if (!nearDoor(p.x, p.z, 2.2)
-          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.36 }))) mailbox(p.x, p.z, p.yaw + Math.PI);
+      // `over` is the flag every knock path (bullet, bumper, runner, blast,
+      // tsunami) flips first; flipping it is what brings the live copy in.
+      function liveRec(type, kind, x, y, z, ry, hy, r) {
+        const g = new THREE.Group();
+        g.position.set(x, y, z); g.rotation.y = ry;
+        const rec = { type: type, x: x, z: z, y: y + hy, r: r, group: g, inst: inst(kind, x, y, z, ry), _ov: false, _mz: materialize };
+        Object.defineProperty(rec, "over", {
+          enumerable: true, configurable: true,
+          get: function () { return this._ov; },
+          set: function (v) { if (v) materialize(this); this._ov = !!v; },
+        });
+        return rec;
       }
-      // 5) planters / street trees spaced along an edge — STREET-FACING only.
-      //    edgePoint's own band puts the row 1.6m outside the lot line, so
-      //    "is there a carriageway behind me" is the honest test for whether
-      //    this edge is a frontage or the back of the block.
-      if (rng() < 0.75) {
-        const edge = (rng() * 4) | 0;
-        const trees = 1 + ((rng() * 3) | 0);
-        const start = -(trees - 1) * 2.2;
-        for (let m = 0; m < trees; m++) {
-          const p = edgePoint(lot, edge, start + m * 4.4 + (rng() - 0.5), 1.6);
-          if (nearDoor(p.x, p.z, 2.4)) continue;         // no draw here, exactly as before
-          const withTree = rng() < 0.65;                 // was planterTree's third argument
-          // THINNED 0.75 -> ~0.42 effective, by position hash (see #3) — plus
-          // the two structural gates: a planter must LINE A KERB, and it may
-          // never be the thing standing in an alley.
-          const skip = PURGED && (ph(p.x, p.z, 0x9102) >= 0.56
-            || !roadNear(p.x, p.z, 4.0)
-            || !CBZ.alleyOk(p.x, p.z, { solid: true, r: withTree ? 0.5 : 0.55 }));
-          if (skip) {
-            rng();                                       // purged: the FOLIAGE draw planterTree would have taken
-            continue;
-          }
-          planterTree(p.x, p.z, withTree);
+      // local +z toward the walk: forward (sin ry, cos ry) = (bx, bz)
+      function yawTo(bx, bz) { return Math.atan2(bx, bz); }
+
+      function hydrant(x, z, bx, bz) {
+        const y = st.heightAt(x, z), ry = yawTo(bx, bz);
+        const rec = liveRec("hydrant", "hydrant", x, y, z, ry, 0.5, 0.5);
+        rec.gy = null;
+        const c = solidCollider(x, z, 0.2, rec.group);
+        shootables.push(rec);
+        breakable(rec.group, "hydrant", x, z, { cols: [c], rec: rec });
+        city.streetProps.push({ x: x, z: z, type: "hydrant" });
+        claim(x, z, 0.45); KERB_STATS.hydrant++;
+      }
+      function mailbox(x, z, bx, bz) {
+        const y = st.heightAt(x, z), ry = yawTo(bx, bz);
+        const rec = liveRec("mailbox", "mailbox", x, y, z, ry, 0.95, 0.5);
+        const c = solidCollider(x, z, 0.3, rec.group);
+        shootables.push(rec);
+        breakable(rec.group, "mailbox", x, z, { cols: [c], rec: rec });
+        city.streetProps.push({ x: x, z: z, type: "mailbox" });
+        claim(x, z, 0.5); KERB_STATS.mailbox++;
+      }
+      function bin(x, z, bx, bz) {
+        const y = st.heightAt(x, z), ry = yawTo(bx, bz) + hsh(x, z, 0x51a) * 1.2;
+        const rec = liveRec("bin", "bin", x, y, z, ry, 0.5, 0.48);
+        const c = solidCollider(x, z, 0.27, rec.group);
+        shootables.push(rec); carKnockables.push(rec);
+        breakable(rec.group, "bin", x, z, { cols: [c], rec: rec });
+        city.streetProps.push({ x: x, z: z, type: "bin" });
+        claim(x, z, 0.45); KERB_STATS.bin++;
+      }
+      function newsbox(x, z, bx, bz, vi) {
+        const y = st.heightAt(x, z), ry = yawTo(bx, bz);
+        const rec = liveRec("newsbox", "newsbox" + vi, x, y, z, ry, 0.6, 0.45);
+        const c = solidCollider(x, z, 0.25, rec.group);
+        shootables.push(rec); carKnockables.push(rec);
+        breakable(rec.group, "newsbox", x, z, { cols: [c], rec: rec });
+        city.streetProps.push({ x: x, z: z, type: "newsbox" });
+        claim(x, z, 0.32); KERB_STATS.newsbox++;
+      }
+      function meter(x, z, bx, bz) {
+        const y = st.heightAt(x, z), ry = yawTo(bx, bz);
+        const rec = liveRec("meter", "meter", x, y, z, ry, 1.25, 0.28);
+        const c = solidCollider(x, z, 0.1, rec.group);
+        shootables.push(rec); carKnockables.push(rec);
+        breakable(rec.group, "meter", x, z, { cols: [c], rec: rec });
+        city.streetProps.push({ x: x, z: z, type: "meter" });
+        claim(x, z, 0.3); KERB_STATS.meter++;
+      }
+      // a bench: instanced, solid along its length, three seats facing `ry`
+      function bench(x, z, fx, fz) {
+        const y = st.heightAt(x, z), ry = yawTo(fx, fz);
+        inst("bench", x, y, z, ry);
+        const along = Math.abs(fx) > 0.5 ? "z" : "x";
+        if (CBZ.colliders) CBZ.colliders.push(along === "x"
+          ? { minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.25, maxZ: z + 0.25, ref: null, noCam: true, noBreach: true, y0: y, y1: y + 0.46 }
+          : { minX: x - 0.25, maxX: x + 0.25, minZ: z - 0.9, maxZ: z + 0.9, ref: null, noCam: true, noBreach: true, y0: y, y1: y + 0.46 });
+        if (CBZ.propRegisterSeat) {
+          const tx = -fz, tz = fx;       // along the bench
+          for (const l of [-0.6, 0, 0.6]) CBZ.propRegisterSeat(x + tx * l + fx * 0.02, y, z + tz * l + fz * 0.02, ry, "bench", null, { cushion: 0.46, floorBelow: 0 });
         }
+        city.streetProps.push({ x: x, z: z, type: "bench" });
+        claim(x, z, 1.0); KERB_STATS.bench++;
       }
-      // 6) purged: the generic sandwich board. Draws preserved.
-      if (rng() < 0.06) {
-        const edge = (rng() * 4) | 0;
-        const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.5, 1.2);
-        if (!nearDoor(p.x, p.z, 2.6)) {
-          const mix = rng() < 0.5 ? BRAND_ADS : RADIO_ADS;
-          const ad = mix[(rng() * mix.length) | 0];
-          if (!PURGED) aFrameSign(p.x, p.z, p.yaw, ad);
-        }
-      }
-      // 7) a bus shelter occasionally, on a long clear edge
-      if (rng() < 0.12) {
-        const edge = (rng() * 4) | 0;
-        const p = edgePoint(lot, edge, 0, 2.2);
-        if (!nearDoor(p.x, p.z, 3.0) && Math.abs(p.x) < 9990
-          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 1.7 }))) {
-          const yaw = edge < 2 ? 0 : Math.PI / 2;
-          busShelter(p.x, p.z, yaw + (edge === 0 || edge === 2 ? 0 : Math.PI));
-        }
-      }
-      // 8) purged: the three-cone "roadwork" cluster. Draws preserved.
-      if (rng() < 0.18) {
-        const edge = (rng() * 4) | 0;
-        const p0 = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.6, 0.7);
-        for (let c = 0; c < 3; c++) {
-          const jx = (rng() - 0.5) * 1.2, jz = (rng() - 0.5) * 1.2;
-          if (!PURGED) trafficCone(p0.x + jx, p0.z + jz);
-        }
-      }
-      // 9) PER-SHOP sidewalk dressing keyed to the storefront kind. Placed on the
-      //    door-facing edge but OFFSET to the side of the door (so it dresses the
-      //    frontage without ever blocking entry); nearDoor() is the final guard.
-      const shop = lot.building && lot.building.shop;
-      if (shop) {
-        const kind = shop.kind;
-        // the storefront edge (door side); offset the prop along it, away from centre.
-        const sEdge = lot.building.side != null ? lot.building.side : (rng() * 4) | 0;
-        const t = (rng() < 0.5 ? -1 : 1) * (lot.w * 0.26 + 1.0);   // off to one side of the door
-        // `o.draws` is how many rng() draws the BUILDER itself consumes
-        // (patioSet 1 for its parasol colour, propaneCage 3 for bottle jitter).
-        // A placement the alley law refuses replays them, so the shared stream
-        // is identical whether or not the prop went down. Anything else here
-        // draws nothing of its own.
-        const place = (band, fn, prob, o) => {
-          if (rng() >= prob) return;
-          const p = edgePoint(lot, sEdge, t, band);
-          if (Math.abs(p.x) > 9990 || nearDoor(p.x, p.z, 2.6)) return;
-          const oo = o || {};
-          if (PURGED && !CBZ.alleyOk(p.x, p.z, { solid: !!oo.solid, r: oo.r == null ? 0.4 : oo.r })) {
-            for (let d = 0; d < (oo.draws | 0); d++) rng();
-            return;
-          }
-          fn(p.x, p.z, p.yaw);
+
+      // ---- street trees: grate (kerb kit) + the vegetation kit's bole and
+      // crown, all instanced; on a break the pieces materialise as meshes.
+      const VKIT = CBZ.vegetationKit;
+      const GRAM = !!(CBZ.treeCrownGeo && CBZ.treeTrunkGeo);
+      const trunkM = VKIT ? VKIT.material("wood", 0x8c6a48) : smat(0x6e4a2c);
+      const crownMs = VKIT ? [VKIT.material("foliage", 0x5f9a4c), VKIT.material("foliage", 0x76a856)] : [smat(0x3f7d3a), smat(0x4f9942)];
+      const trunkGeo = GRAM ? geo("streetTreeTrunk", () => CBZ.treeTrunkGeo({ rTop: 0.09, rBase: 0.15, h: 2.9, seg: 7,
+        roots: 4, rise: 0.18, dip: 0.04, spread: 1.6, flare: 1.4, uvRepeat: 3, site: "street" })) : null;
+      const crownGeo = GRAM ? geo("streetTreeCrown", () => CBZ.treeCrownGeo({ tiers: 2, r: 1.25, h: 2.7, seg: 7, taper: 0.66,
+        site: "street", leaf: !!VKIT, cards: 12 })) : null;
+      const CROWN_Y = 2.3;
+      const trunkItems = [], crownItems = [[], []];
+      function tree(x, z) {
+        if (!GRAM) return;
+        const y = st.heightAt(x, z), ry = hsh(x, z, 0x7e1) * 6.283;
+        const ci = hsh(x, z, 0x7e2) < 0.5 ? 0 : 1;
+        const sc = 0.9 + hsh(x, z, 0x7e3) * 0.25;
+        inst("grate", x, y, z, 0);
+        const ti = trunkItems.length; trunkItems.push({ x: x, y: y, z: z, ry: ry, sx: sc, sy: sc, sz: sc });
+        const cj = crownItems[ci].length; crownItems[ci].push({ x: x, y: y + CROWN_Y * sc, z: z, ry: ry, sx: sc, sy: sc, sz: sc });
+        const col = solidCollider(x, z, 0.2, null);
+        const g = new THREE.Group(); g.position.set(x, y, z);
+        const b = breakable(g, "tree", x, z, { cols: [col] });
+        b.onSmash = function (bb) {
+          const TS = KERB_SETS._trunk, CS = KERB_SETS["_crown" + ci];
+          if (TS) TS.setMatrixAt(ti, _zeroM4);
+          if (CS) CS.setMatrixAt(cj, _zeroM4);
+          const t = new THREE.Mesh(trunkGeo, trunkM); t.rotation.y = ry; t.scale.setScalar(sc); t.updateMatrix(); bb.g.add(t);
+          bb.parts.push({ m: t, role: "snap", kind: "wood" });
+          const c = new THREE.Mesh(crownGeo, crownMs[ci]); c.position.y = CROWN_Y * sc; c.rotation.y = ry; c.scale.setScalar(sc); c.updateMatrix(); bb.g.add(c);
+          bb.parts.push({ m: c, role: "main", kind: "foliage" });
         };
-        if (kind === "food" || kind === "bar") {
-          // a patio table out front + a matching sandwich board
-          place(2.0, (x, z, yaw) => patioSet(x, z, yaw), 0.7, { r: 1.1, draws: 1 });
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.45, { r: 0.4 });
-        } else if (kind === "gym") {
-          place(1.4, (x, z, yaw) => bikeRack(x, z, yaw), 0.7, { solid: true, r: 0.4 });
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4, { r: 0.4 });
-        } else if (kind === "hardware") {
-          place(1.4, (x, z, yaw) => propaneCage(x, z, yaw), 0.7, { solid: true, r: 0.55, draws: 3 });
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4, { r: 0.4 });
-        } else {
-          // every other storefront just gets the occasional per-shop board
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.35, { r: 0.4 });
+        city.streetProps.push({ x: x, z: z, type: "tree" });
+        claim(x, z, 0.75); KERB_STATS.tree++;
+      }
+
+      // ---- the atlas BUS STOP plate (street_furniture.js's sign atlas) ------
+      const DKs = CBZ.detailKit;
+      let busPlateM = null, busPlateUV = null;
+      if (DKs && DKs.signAtlas && DKs.signFaceUV && DKs.signAtlasCells && DKs.signAtlasCells.BUS != null) {
+        try {
+          busPlateM = geo("__busPlateMat", () => { const m = new THREE.MeshLambertMaterial({ map: DKs.signAtlas() }); m._shared = true; return m; });
+          busPlateUV = DKs.signFaceUV(DKs.signAtlasCells.BUS);
+        } catch (e) { busPlateM = null; }
+      }
+      function busPlateGeo() {
+        return geo("busPlate", () => {
+          const g = new THREE.PlaneGeometry(0.46, 0.69);
+          const uv = g.attributes.uv, U = busPlateUV;
+          for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) < 0.5 ? U.u0 : U.u1, uv.getY(i) < 0.5 ? U.v0 : U.v1);
+          return g;
+        });
+      }
+      function busPole(x, z, fx, fz) {
+        const y = st.heightAt(x, z), ry = yawTo(-fx, -fz);   // timetable case faces the walk
+        inst("busPole", x, y, z, ry);
+        if (busPlateM) {
+          // a FLAG sign: the plate sticks out from the pole toward the road
+          // and faces up and down the street, so arriving traffic (and the
+          // people waiting) read it; both faces carry the legend
+          const tx = -fz, tz = fx;
+          for (const s of [1, -1]) {
+            const m = new THREE.Mesh(busPlateGeo(), busPlateM);
+            m.rotation.y = Math.atan2(tx * s, tz * s);
+            m.position.set(x + fx * 0.27 + tx * s * 0.004, y + 2.45, z + fz * 0.27 + tz * s * 0.004);
+            root.add(m);
+          }
+        }
+        solidCollider(x, z, 0.08, null);
+        city.streetProps.push({ x: x, z: z, type: "busstop" });
+        claim(x, z, 0.4); KERB_STATS.busStop++;
+      }
+
+      // ---- where a pad behind the kerb leaves room (shelters, patios) -------
+      function insideBuilding(x, z) { const gp = CBZ.alleyGapAt ? CBZ.alleyGapAt(x, z) : null; return !!(gp && gp.inside); }
+
+      // ---- THE WALK: every straight kerb face of the grid ---------------------
+      const shopDoors = [];
+      for (const lot of doorLots()) {
+        const b = lot.building, d = b && b.door;
+        if (!d || !b.shop || !Number.isFinite(d.x)) continue;
+        shopDoors.push({ lot: lot, x: d.x, z: d.z, ex: -d.nx, ez: -d.nz, kind: b.shop.kind });
+      }
+      const faces = [];
+      for (let i = 0; i <= N; i++) for (let j = 0; j < N; j++) for (const s of [-1, 1]) {
+        if (s < 0 ? i === 0 : i === N) continue;
+        faces.push({ vertical: true, line: i, c: X[i], a: Z[j] + S + 0.9, b: Z[j + 1] - S - 0.9, s: s, ave: !!(G.isAve && G.isAve(i)) });
+      }
+      for (let j = 0; j <= N; j++) for (let i = 0; i < N; i++) for (const s of [-1, 1]) {
+        if (s < 0 ? j === 0 : j === N) continue;
+        faces.push({ vertical: false, line: j, c: Z[j], a: X[i] + S + 0.9, b: X[i + 1] - S - 0.9, s: s, ave: false });
+      }
+      for (const F of faces) {
+        const L = F.b - F.a;
+        if (L < 6) continue;
+        // world point at distance u along the face, `off` metres from the kerb face
+        const P = function (u, off) {
+          const lat = F.c + F.s * (h + off), al = F.a + u;
+          return F.vertical ? { x: lat, z: al } : { x: al, z: lat };
+        };
+        const bx = F.vertical ? F.s : 0, bz = F.vertical ? 0 : F.s;      // toward the buildings
+        const mid = P(L / 2, 1), dk = dkind(mid.x, mid.z);
+        const busy = dk === "core" || dk === "commercial";
+        const H1 = function (salt) { return hsh(mid.x, mid.z, salt); };
+        // try a spot at u, sliding up to `slide` metres either way
+        const tryAt = function (u, off, r, slide, doorR) {
+          for (let k = 0; k <= (slide || 0) * 2; k++) {
+            const du = (k & 1 ? 1 : -1) * Math.ceil(k / 2) * 0.5;
+            const uu = u + du;
+            if (uu < 0 || uu > L) continue;
+            const p = P(uu, off);
+            if (spotOK(p.x, p.z, r, doorR)) return p;
+          }
+          return null;
+        };
+        let hasStop = false;
+        // 1) BUS STOPS on the avenues (and the odd busy street)
+        if ((F.ave && H1(0x61) < 0.45) || (!F.ave && busy && H1(0x62) < 0.1)) {
+          // a shelter needs the lot pad behind the footway to carry the walk
+          const p = tryAt(L * 0.5, 0.95, 1.6, 4, 3.4);
+          if (p) {
+            const back = { x: p.x + bx * 2.6, z: p.z + bz * 2.6 };
+            const padFree = !insideBuilding(back.x, back.z) && !insideBuilding(back.x + bx * 0.8, back.z + bz * 0.8)
+              && !nearDoor(p.x, p.z, 4.0);
+            if (padFree) {
+              // shelter front (+z) toward the road
+              const sh = busShelter(p.x, p.z, yawTo(-bx, -bz), st.heightAt(p.x, p.z));
+              if (sh && spotOK(sh.poleX, sh.poleZ, 0.2, 2.2)) busPole(sh.poleX, sh.poleZ, -bx, -bz);
+              claim(p.x, p.z, 2.1); KERB_STATS.shelter++;
+              hasStop = true;
+            } else {
+              const pp = tryAt(L * 0.5, 0.62, 0.95, 3, 2.8);
+              if (pp) {
+                bench(pp.x, pp.z, -bx, -bz);
+                const tx = F.vertical ? 0 : 1, tz = F.vertical ? 1 : 0;
+                const sx = pp.x + tx * 1.5, sz = pp.z + tz * 1.5;
+                const sx2 = pp.x - tx * 1.5, sz2 = pp.z - tz * 1.5;
+                if (spotOK(sx, sz, 0.2, 2.2)) busPole(sx, sz, -bx, -bz);
+                else if (spotOK(sx2, sz2, 0.2, 2.2)) busPole(sx2, sz2, -bx, -bz);
+                hasStop = true;
+              }
+            }
+          }
+        }
+        // 2) HYDRANT near mid-block, ~1 face in 2.6 (a hydrant per 60-80 m)
+        if (H1(0x63) < 0.38) {
+          const p = tryAt(L * (0.3 + H1(0x64) * 0.4), 0.55, 0.4, 5, 2.6);
+          if (p) hydrant(p.x, p.z, bx, bz);
+        }
+        // 3) LITTER BIN at the near corner
+        if (H1(0x65) < (busy ? 0.72 : dk === "industrial" ? 0.2 : 0.42)) {
+          const p = tryAt(1.0, 0.6, 0.4, 3, 2.2);
+          if (p) bin(p.x, p.z, bx, bz);
+        }
+        // 4) NEWS BOXES at the far corner of busy blocks, in ones and twos
+        if (H1(0x66) < (busy ? 0.5 : dk === "residential" ? 0.12 : 0.04)) {
+          const two = busy && H1(0x67) < 0.55;
+          const vi0 = (H1(0x68) * KIT.newsVariants) | 0;
+          const p = tryAt(L - 1.1, 0.58, 0.32, 3, 2.2);
+          if (p) {
+            newsbox(p.x, p.z, bx, bz, vi0);
+            if (two) {
+              const tx = F.vertical ? 0 : 1, tz = F.vertical ? 1 : 0;
+              const q = { x: p.x - tx * 0.6, z: p.z - tz * 0.6 };
+              if (spotOK(q.x, q.z, 0.28, 2.2)) newsbox(q.x, q.z, bx, bz, (vi0 + 1) % KIT.newsVariants);
+            }
+          }
+        }
+        // 5) COLLECTION MAILBOX on some faces
+        if (H1(0x69) < (busy ? 0.24 : dk === "residential" ? 0.18 : 0.06)) {
+          const p = tryAt(L * 0.64, 0.62, 0.45, 4, 2.6);
+          if (p) mailbox(p.x, p.z, bx, bz);
+        }
+        // 6) STREET TREES in grates between the lamps
+        const treeP = dk === "residential" ? 0.85 : busy ? 0.6 : dk === "projects" ? 0.3 : 0.0;
+        if (GRAM && H1(0x6a) < treeP) {
+          const n = Math.max(1, Math.floor(L / 8.5));
+          for (let k = 0; k < n; k++) {
+            const p = tryAt((k + 0.5) * (L / n), 0.85, 0.75, 2, 2.4);
+            if (p) tree(p.x, p.z);
+          }
+        }
+        // 7) METERS at stall spacing on commercial kerbs (never a bus stop)
+        if (busy && !hasStop && H1(0x6b) < 0.7) {
+          for (let u = 2.6; u < L - 2.0; u += 6.1) {
+            const p = P(u, 0.5);
+            if (spotOK(p.x, p.z, 0.22, 1.8)) meter(p.x, p.z, bx, bz);
+          }
         }
       }
-    }
+
+      // ---- SHOP FRONTS: a bin by the kerb, and the dressing the trade puts
+      // out (only where the frontage actually has the room) ----------------
+      function kerbDistFrom(x, z, ex, ez) {
+        for (let k = 0; k <= 48; k++) {
+          const d = k * 0.25;
+          if (st.regionAt(x + ex * d, z + ez * d) === 0) return d;
+        }
+        return -1;
+      }
+      for (const D of shopDoors) {
+        const kd = kerbDistFrom(D.x, D.z, D.ex, D.ez);
+        if (kd < 1.5 || kd > 9) continue;
+        const tx = -D.ez, tz = D.ex;               // along the frontage
+        const side = hsh(D.x, D.z, 0x71) < 0.5 ? -1 : 1;
+        // kerbside bin a few metres off the door line
+        if (hsh(D.x, D.z, 0x72) < 0.65) {
+          const kx = D.x + D.ex * (kd - 0.6), kz = D.z + D.ez * (kd - 0.6);
+          for (const off of [2.6, 3.4, -2.6]) {
+            const x = kx + tx * off * side, z = kz + tz * off * side;
+            if (spotOK(x, z, 0.4, 1.4)) { bin(x, z, -D.ex, -D.ez); break; }
+          }
+        }
+        // the trade's own dressing, against the storefront beside the door.
+        // face = the door plane; room = face-to-kerb distance
+        const face = 0.35;                          // door point sits just inside
+        const room = kd - face;
+        const at = function (outM, alongM) {
+          return { x: D.x + D.ex * (face + outM) + tx * alongM * side, z: D.z + D.ez * (face + outM) + tz * alongM * side };
+        };
+        const padOK = function (p, r) {
+          const reg = st.regionAt(p.x, p.z);
+          return (reg === 1 || reg === 2) && !insideBuilding(p.x, p.z) && !nearDoor(p.x, p.z, 1.6) && clearAt(p.x, p.z, r);
+        };
+        const k = D.kind;
+        if ((k === "food" || k === "bar") && room >= 3.4) {
+          const p = at(1.25, 2.9);
+          if (padOK(p, 1.0) && patioSet(p.x, p.z, yawTo(D.ex, D.ez), st.heightAt(p.x, p.z))) { claim(p.x, p.z, 1.1); KERB_STATS.patio++; }
+        } else if (k === "hardware" && room >= 2.8) {
+          const p = at(0.45, 2.4);
+          if (padOK(p, 0.75)) { propaneCage(p.x, p.z, yawTo(D.ex, D.ez), st.heightAt(p.x, p.z)); claim(p.x, p.z, 0.8); KERB_STATS.propane++; }
+        } else if (k === "gym") {
+          const kx = D.x + D.ex * (kd - 0.7) + tx * 3.2 * side, kz = D.z + D.ez * (kd - 0.7) + tz * 3.2 * side;
+          if (spotOK(kx, kz, 1.2, 1.6)) { bikeRack(kx, kz, yawTo(tx, tz), st.heightAt(kx, kz)); claim(kx, kz, 1.3); KERB_STATS.bikerack++; }
+        }
+        // an A-frame board on the OTHER side of the door, against the glass
+        if (SHOP_BOARD_AD[k] && room >= 2.0 && hsh(D.x, D.z, 0x73) < 0.55) {
+          const p = at(0.4, -1.5);
+          if (padOK(p, 0.4)) { shopBoard(p.x, p.z, yawTo(D.ex, D.ez), k, st.heightAt(p.x, p.z)); claim(p.x, p.z, 0.45); KERB_STATS.aframe++; }
+        }
+      }
+
+      // ---- build the instanced sets (one InstancedMesh per 200 m cell) -----
+      for (const kind in ITEMS) {
+        const Kd = KIT[kind];
+        if (!Kd || !ITEMS[kind].length) continue;
+        KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: 320 }).addTo(root);
+        KERB_STATS.drawSets += KERB_SETS[kind].meshes.length;
+      }
+      if (GRAM && trunkItems.length) {
+        KERB_SETS._trunk = HW.chunked("kerb-tree-trunk", trunkGeo, trunkM, trunkItems, { cast: true, maxDist: 420 }).addTo(root);
+        KERB_STATS.drawSets += KERB_SETS._trunk.meshes.length;
+        for (let c = 0; c < 2; c++) {
+          if (!crownItems[c].length) continue;
+          const dm = VKIT && VKIT.depthMaterial && crownGeo.userData && crownGeo.userData.leafCards ? VKIT.depthMaterial("foliage") : null;
+          KERB_SETS["_crown" + c] = HW.chunked("kerb-tree-crown" + c, crownGeo, crownMs[c], crownItems[c], { cast: true, maxDist: 420,
+            perMesh: function (im) { if (dm) im.customDepthMaterial = dm; } }).addTo(root);
+          KERB_STATS.drawSets += KERB_SETS["_crown" + c].meshes.length;
+        }
+      }
+    })();
+    } catch (e) { console.error("[kerb furniture]", e); }
+
+    // Lot-edge scatter is gone (see KERB FURNITURE above); `lots` feeds only
+    // the opt-in layers below (rooftop rails / roof boards / camps).
+    const lots = STREET_CLUTTER ? city.lots : [];
 
     // ----- BILLBOARDS on the perimeter wall + a few rooftops ---------------
     // Big roadside billboards face inward along the outer walls (you see them as
@@ -3561,7 +3870,6 @@
     // Generic AC/vent/tank/dish/mast clutter was pure silhouette noise and has
     // been removed. Keep only fall-prevention rails and the rare rentable ad:
     // both have a direct gameplay reason to exist.
-    const railM = smat(0x42474f);
     for (const lot of lots) {
       const b = lot.building; if (!b || b.park) continue;   // parks carry a stub building (owner only) but have NO structure — no roof gear floats over them
       // roof height + extent + the gear-clear roof centre (away from the stairwell)
@@ -3590,27 +3898,12 @@
       // + roof headhouse) are built by city/elevators.js on storeys>=3 towers and
       // are untouched.
       if (halfW > 3 && halfD > 3) { rng(); }
-      // PARAPET-RAILING SLATS — a top rail + vertical slats around the roof rim,
-      // built as ONE merged-look run per edge using shared slat geometry. Modest
-      // slat spacing keeps the count sane; only on roomy roofs.
-      if (halfW > 2.5 && halfD > 2.5 && rng() < 0.6) {
-        const railTopG = geo("railTopX", () => new THREE.BoxGeometry(1, 0.06, 0.06));
-        const railTopZG = geo("railTopZ", () => new THREE.BoxGeometry(0.06, 0.06, 1));
-        const slatG = geo("railSlat", () => new THREE.CylinderGeometry(0.02, 0.02, 0.5, 4));
-        const railY = h + 0.55;
-        // top rails (scaled to each side's span)
-        const rN = new THREE.Mesh(railTopG, railM); rN.scale.x = halfW * 2; rN.position.set(rcx, railY, rcz - halfD); root.add(rN);
-        const rS = new THREE.Mesh(railTopG, railM); rS.scale.x = halfW * 2; rS.position.set(rcx, railY, rcz + halfD); root.add(rS);
-        const rW = new THREE.Mesh(railTopZG, railM); rW.scale.z = halfD * 2; rW.position.set(rcx - halfW, railY, rcz); root.add(rW);
-        const rE = new THREE.Mesh(railTopZG, railM); rE.scale.z = halfD * 2; rE.position.set(rcx + halfW, railY, rcz); root.add(rE);
-        // vertical slats along N & S edges (spaced ~1.4u, capped at a handful)
-        const nSlat = Math.min(10, Math.max(2, Math.floor(halfW * 2 / 1.4)));
-        for (let s = 0; s <= nSlat; s++) {
-          const sx = rcx - halfW + (s / nSlat) * halfW * 2;
-          const a = new THREE.Mesh(slatG, railM); a.position.set(sx, h + 0.3, rcz - halfD); root.add(a);
-          const c = new THREE.Mesh(slatG, railM); c.position.set(sx, h + 0.3, rcz + halfD); root.add(c);
-        }
-      }
+      // PARAPET-RAILING SLATS deleted 2026-09-27 (de-slop): a thin rail at
+      // knee height floating 1.5 m INSIDE the parapet on the N/S sides only,
+      // with slats that stood on nothing, on 60% of roofs. The parapet is the
+      // fall guard (city/elevators.js gives reachable roofs rim colliders).
+      // The rng draw is kept so the seeded stream downstream is unchanged.
+      if (halfW > 2.5 && halfD > 2.5) rng();
       // a RARE rooftop BILLBOARD on tall buildings — a small framed lit ad board
       // standing on the roof, angled to face the street. Big landmark, low odds.
       if (h > 18 && halfW > 3.5 && halfD > 3.5 && rng() < 0.12) {

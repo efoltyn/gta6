@@ -347,12 +347,15 @@
   let _meshes = [], _meshRoot = null, _dirty = true;
   function bagMesh(rec) {
     let m = null;
-    if (CBZ.itemAsset) {
+    // baked (city/itemassets.js): one draw call a duffel, so a full rack is
+    // a dozen draws, not seven hundred
+    const mk = CBZ.itemAssetBaked || (CBZ.itemAsset && function (k, n, r, o) { return CBZ.itemAsset(n, r, o); });
+    if (mk) {
       try {
-        m = CBZ.itemAsset(null, null, {
+        m = mk(null, null, null, {
           kind: "moneybag",
           canvas: rec.dyed ? 0x7a2a26 : 0x2f3a2c,
-          note: rec.dyed ? 0x8c4a44 : 0x6fae5a,
+          dyed: !!rec.dyed,
           flash: 0xc9a227,
         });
       } catch (e) { m = null; }
@@ -423,12 +426,16 @@
     // otherwise you walk up to the blank back of your own safe.
     grp.rotation.y = Math.atan2(-a.fx, -a.fz);
     grp.userData.transient = true;
-    const steel = CBZ.cmat ? CBZ.cmat(0x3c4046) : new THREE.MeshLambertMaterial({ color: 0x3c4046 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.82, 0.62), steel);
-    body.position.y = 0.41; grp.add(body);
-    const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.06, 10),
-      CBZ.cmat ? CBZ.cmat(0xd0c088) : new THREE.MeshLambertMaterial({ color: 0xd0c088 }));
-    dial.rotation.x = Math.PI / 2; dial.position.set(0, 0.46, 0.33); grp.add(dial);
+    // a real safe (city/itemassets.js's `safe`: feet, door in its gap line,
+    // hinges, dial and three-spoke handle), not a steel cube with a disc on it
+    let safe = null;
+    if (CBZ.itemAssetBaked) { try { safe = CBZ.itemAssetBaked(null, null, null, { kind: "safe" }); } catch (e) { safe = null; } }
+    if (!safe) {
+      const steel = CBZ.cmat ? CBZ.cmat(0x3c4046) : new THREE.MeshLambertMaterial({ color: 0x3c4046 });
+      safe = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(0.62, 0.8, 0.56) : new THREE.BoxGeometry(0.62, 0.8, 0.56), steel);
+      safe.position.y = 0.4;
+    }
+    grp.add(safe);
     const list = S().homes[h.id] || [];
     for (let i = 0; i < list.length && i < HOME_CAP; i++) {
       const m = bagMesh(list[i]);
@@ -759,6 +766,38 @@
      because it is the piece that has to CHANGE when you buy the place.
      ============================================================ */
   let _board = null, _boardOwned = null;
+  // THE SIGN IS PRINTED. It was a red box glowing at 28% emissive with two
+  // white slabs standing in for words: a placeholder that lit up at night like
+  // a vending machine. A real agent's board is printed vinyl on a panel, lit by
+  // whatever lights the yard. One shared material per face (FOR SALE / SOLD).
+  const BOARD_MAT = {};
+  function boardMat(own) {
+    const k = own ? "sold" : "sale";
+    if (BOARD_MAT[k]) return BOARD_MAT[k];
+    const bg = own ? "#2f5b8c" : "#b43a32";
+    let m = null;
+    try {
+      if (typeof document === "undefined" || !document.createElement) throw 0;
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 232;
+      const x = c.getContext("2d");
+      if (!x) throw 0;
+      x.fillStyle = bg; x.fillRect(0, 0, 512, 232);
+      x.strokeStyle = "#f1f1ec"; x.lineWidth = 8; x.strokeRect(16, 16, 480, 200);
+      x.fillStyle = "#f1f1ec"; x.textAlign = "center"; x.textBaseline = "middle";
+      x.font = "bold 104px Arial, Helvetica, sans-serif";
+      x.fillText(own ? "SOLD" : "FOR SALE", 256, 118);
+      const t = new THREE.CanvasTexture(c);
+      const R = CBZ.renderer;
+      if (R && R.outputEncoding === THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+      t.anisotropy = 4;
+      m = new THREE.MeshLambertMaterial({ map: t });
+      m._shared = true;
+    } catch (e) { m = null; }
+    if (!m) m = CBZ.cmat ? CBZ.cmat(own ? 0x2f5b8c : 0xb43a32) : new THREE.MeshLambertMaterial({ color: own ? 0x2f5b8c : 0xb43a32 });
+    BOARD_MAT[k] = m;
+    return m;
+  }
   function ensureBoard() {
     const root = arenaRoot(), W = wh();
     if (!root || !W || !THREE) return;
@@ -771,21 +810,21 @@
     grp.position.set(W.board.x, y, W.board.z);
     grp.userData.transient = true;
     const post = CBZ.cmat ? CBZ.cmat(0x3c4046) : new THREE.MeshLambertMaterial({ color: 0x3c4046 });
-    for (const s of [-1, 1]) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(0.16, 3.0, 0.16), post);
-      p.position.set(s * 1.7, 1.5, 0); grp.add(p);
+    const edge = CBZ.cmat ? CBZ.cmat(0xe6e6e0) : new THREE.MeshLambertMaterial({ color: 0xe6e6e0 });
+    const bgeo = function (w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); };
+    for (const sx of [-1, 1]) {
+      const p = new THREE.Mesh(bgeo(0.10, 3.0, 0.10), post);       // square steel posts
+      p.position.set(sx * 1.7, 1.5, 0); grp.add(p);
+      const cap = new THREE.Mesh(bgeo(0.13, 0.04, 0.13), post);
+      cap.position.set(sx * 1.7, 3.02, 0); grp.add(cap);
     }
-    const faceHex = own ? 0x2f5b8c : 0xb43a32;
-    const face = new THREE.Mesh(new THREE.BoxGeometry(4.0, 1.8, 0.14),
-      CBZ.cmat ? CBZ.cmat(faceHex, { emissive: faceHex, ei: 0.28 }) : new THREE.MeshLambertMaterial({ color: faceHex }));
-    face.position.set(0, 2.3, 0); grp.add(face);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.22, 0.06),
-      CBZ.cmat ? CBZ.cmat(0xecf0f1) : new THREE.MeshLambertMaterial({ color: 0xecf0f1 }));
-    bar.position.set(0, own ? 2.3 : 2.62, 0.11); grp.add(bar);
-    if (!own) {
-      const bar2 = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.16, 0.06),
-        CBZ.cmat ? CBZ.cmat(0xecf0f1) : new THREE.MeshLambertMaterial({ color: 0xecf0f1 }));
-      bar2.position.set(-0.5, 2.16, 0.11); grp.add(bar2);
+    // the panel: printed faces front and back, white aluminium edges
+    const face = boardMat(own);
+    const panel = new THREE.Mesh(bgeo(3.2, 1.45, 0.04), [edge, edge, edge, edge, face, face]);
+    panel.position.set(0, 2.2, 0.07); grp.add(panel);
+    for (const sy of [2.2 - 0.62, 2.2 + 0.62]) {                    // the two rails it is bolted to
+      const rail = new THREE.Mesh(bgeo(3.5, 0.06, 0.05), post);
+      rail.position.set(0, sy, 0.02); grp.add(rail);
     }
     root.add(grp);
     _board = grp; _boardOwned = own;

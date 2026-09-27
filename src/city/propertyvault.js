@@ -387,12 +387,14 @@
   const SHELF_Y = [0.44, 1.06, 1.68, 2.30];
   function bagMesh(rec) {
     let m = null;
-    if (CBZ.itemAsset) {
+    // baked: one draw call a duffel (city/itemassets.js CBZ.itemAssetBaked)
+    const mk = CBZ.itemAssetBaked || (CBZ.itemAsset && function (k, n, r, o) { return CBZ.itemAsset(n, r, o); });
+    if (mk) {
       try {
-        m = CBZ.itemAsset(null, null, {
+        m = mk(null, null, null, {
           kind: "moneybag",
           canvas: rec.dyed ? 0x7a2a26 : 0x2f3a2c,
-          note: rec.dyed ? 0x8c4a44 : 0x6fae5a,
+          dyed: !!rec.dyed,
           flash: 0xc9a227,
         });
       } catch (e) { m = null; }

@@ -1,668 +1,626 @@
 /* ============================================================
-   world/building_dress.js — VERTICAL CLUTTER ON THE EXISTING CITY
-   (layer 5 of 5).
+   world/building_dress.js — WHAT A CITY ROOF IS MADE OF, AND WHAT
+   STANDS ON IT.
 
-   city/buildings.js owns the buildings; this pass never rebuilds one.
-   It reads the finished lot records (CBZ.city.arena.lots → lot.building
-   = the makeBuilding return: group/w/d/h/storeys/door/floorTops) and
-   glues onto them the layer every real building accumulates and no
-   procedural one has:
+   2026-09-27 DE-SLOP rewrite. Seen from any window above the third floor
+   (the exec office spawn looks straight down on a block of them) every
+   low and mid-rise roof in the city was one flat bright slab: a single
+   grey colour at full albedo, a grey band of parapet, and nothing on it
+   except a thin rail floating 1.5 m in from the edge. The previous
+   version of this file was a scatter pass (hashed lattices of HVAC,
+   dishes, aerials, window AC) that the owner rightly killed as junk, and
+   it sat dead behind DETAIL_WORLD_V1. It is gone. What replaces it:
 
-     ROOF  — packaged HVAC units, condenser banks, mushroom vents, duct
-             runs, a timber-legged water tank, satellite dishes and
-             aerials. A skyline of bare boxes is the single loudest
-             "generated" signal in the game; roof plant fixes it from
-             every window and every helicopter.
-     WALL  — downpipes from gutter to ground with a cast shoe, window AC
-             units dripping onto the storey below, shop awnings, rolled
-             security shutters, wall-mounted lamps beside doorways, fire
-             escapes zig-zagging down the blind elevations, and enamel
-             house-number plates by the front door.
-     GRIME — the staining that makes a facade look weathered: streaks
-             below every window sill, runs under the roof edge, and dark
-             trails down the wall beside each downpipe.
+   1. THE ROOF DECK (CBZ.roofDeckMaterial). A granulated modified-bitumen
+      cap sheet: 1 m rolls with torched side laps and staggered end laps and
+      mineral granule speckle (world/textures_surface.js "roofing", baked
+      once), projected in WORLD METRES so every roof carries the sheet at
+      real scale. On top of that, in-shader: repair patches, dirt
+      banked against the parapet, ponding stains with tide marks where
+      water sits after rain, and a per-building membrane family (grey cap
+      sheet, sun-faded light grey, tan granules, a newer dark re-roof). It
+      is the roof slab's OWN material (city/buildings.js passes it to the
+      slab lbox), so it costs no extra geometry, and it is a Standard
+      material so the low sun rakes across the laps like it does on the
+      promoted walls around it.
 
-   DRAW-CALL BUDGET
-     hvac 1 · condenser 1 · vent 1 · duct 1 · water tank 1 · dish 1 ·
-     aerial 1 · downpipe 1 · pipe shoe 1 · window AC 1 · awning 1 ·
-     shutter 1 · wall lamp 1 · fire escape 1 · house numbers 1 (shares
-     the street-furniture sign atlas) · wall grime 1  =  16 draws.
+   2. ROOF PLANT, PLACED LIKE A BUILDING SERVICES ENGINEER WOULD. Not a
+      lattice. One pass per roof, AFTER elevators.js / roofloot.js /
+      the helipad have claimed their ground, so nothing lands on a lift
+      headhouse, a stash, a fire-escape bridge, a helipad, a roof billboard
+      or the spawn point at the slab centre. Every roof gets what that
+      building actually needs:
+        · roof drains (cast-iron dome strainers in a lead sump) - every roof
+        · plumbing vent stacks through flashing boots, clustered over the
+          wet stack - every roof
+        · packaged rooftop units (curb, louvred condenser coil, top fan
+          with guard, service panels, rain hood, disconnect, a yellow gas
+          line on a pipe stand) - sized by roof area, 0 to 3
+        · an upblast exhaust fan on a curb (kitchens, toilets) - most
+        · domed skylights in a row down the long axis - some low-rises
+        · a roof hatch where there is no stair to the roof
+        · a timber water tank on a braced steel stand - rare, 3-6 storeys
+      All of it is instanced per prototype (the big pieces in 400 m cells,
+      frustum- and fog-culled per cell; the small ones one pool each), the big
+      pieces carry y-gated colliders pushed into b.colliders (so demolition
+      splices them with the building), and a building that collapses takes
+      its plant with it (the batchHideGroup / batchShowGroup wrap below,
+      the same seam city/localinst.js uses).
 
-   Everything is an InstancedMesh or a merged sheet, so those 16 draws
-   cover thousands of individual fittings. Nothing here registers a
-   collider: none of it is reachable, and a collider on a rooftop vent
-   would only trip up the helicopter landing logic.
-
-   Flag: CBZ.CONFIG.DETAIL_BUILDING_DRESS.
+   3. The PRISON FACADE PASS (unchanged, bottom of file).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || !window.THREE || !CBZ.detailKit) return;
+  if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
-  const DK = CBZ.detailKit;
-
-  const METAL = 0x9aa1a5, METAL_D = 0x767c80, RUST = 0x8a6a4e, PAINT = 0xb6bcbd;
+  const DK = CBZ.detailKit || null;          // DK.proto: many parts -> one vertex-coloured geometry
 
   // =====================================================================
-  //  WALL-GRIME TEXTURE — one soft streak, reused everywhere
+  //  1. THE ROOF DECK MATERIAL
   // =====================================================================
-  // Deterministic by arithmetic (the world/materials.js concreteTex idiom),
-  // never Math.random: the same seed must produce the same world on every
-  // client, and that includes anything baked at build time.
-  let _grimeTex = null;
-  function grimeTex() {
-    if (_grimeTex) return _grimeTex;
-    const W = 64, H = 256;
-    const cv = document.createElement("canvas");
-    cv.width = W; cv.height = H;
-    const g = cv.getContext("2d");
-    g.clearRect(0, 0, W, H);
-    const img = g.createImageData(W, H);
-    for (let y = 0; y < H; y++) {
-      const v = y / (H - 1);                       // 0 at top (source), 1 at bottom
-      // runs are strongest just under the source and fade as they spread
-      const fall = Math.max(0, 1 - Math.pow(v, 0.72));
-      for (let x = 0; x < W; x++) {
-        const u = x / (W - 1);
-        // three fixed harmonics give the vertical streaking; the *53/*97
-        // integer walk adds grain without a PRNG
-        const streak =
-          0.55 + 0.26 * Math.sin(u * 17.3 + 1.1) + 0.15 * Math.sin(u * 41.7 - 0.4)
-          + 0.10 * Math.sin(u * 7.1 + v * 3.0);
-        const grain = (((x * 53 + y * 97) % 128) / 128) * 0.16;
-        const edge = Math.min(1, Math.min(u, 1 - u) * 5.5);   // fade the sides out
-        let a = fall * Math.max(0, streak - 0.34) * edge * (0.82 + grain);
-        a = Math.max(0, Math.min(1, a));
-        const q = (y * W + x) * 4;
-        const dark = 52 + 26 * (1 - a);
-        img.data[q] = dark; img.data[q + 1] = dark * 0.98; img.data[q + 2] = dark * 0.9;
-        img.data[q + 3] = (a * 168) | 0;
-      }
+  const DECK_TILE = 6.0;                      // metres per "roofing" tile (textures_surface.js)
+  let _deck = null;
+  CBZ.roofDeckMaterial = function () {
+    if (_deck) return _deck;
+    const q = CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel;
+    let maps = null;
+    try { maps = CBZ.surfaceMaps ? CBZ.surfaceMaps("roofing", { repeat: 1, res: q <= 1 ? 256 : 512 }) : null; } catch (e) { maps = null; }
+    const m = new THREE.MeshStandardMaterial({
+      // with the baked sheet the colour lives in the map; without it (tier 0,
+      // textures off) a mid grey membrane, never the old near-white slab
+      color: maps ? 0xffffff : 0x6f6c66,
+      vertexColors: true,                     // the slab's fake-AO shading (buildings.js shadeGeo)
+      roughness: 0.93, metalness: 0.0,
+      envMapIntensity: 0.5,
+    });
+    if (maps) {
+      m.map = maps.map;
+      m.normalMap = maps.normalMap;
+      m.normalScale.set(0.9, 0.9);
+      m.roughnessMap = maps.roughnessMap;
     }
-    g.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(cv);
-    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    _grimeTex = t;
-    return t;
-  }
+    m._shared = true;
+    m.onBeforeCompile = function (sh) {
+      const v = sh.vertexShader, f = sh.fragmentShader;
+      if (v.indexOf("#include <project_vertex>") < 0 || f.indexOf("#include <map_fragment>") < 0
+        || f.indexOf("#include <roughnessmap_fragment>") < 0) return;
+      sh.vertexShader = v
+        .replace("#include <common>",
+          "#include <common>\nvarying vec4 rdLH;\nvarying vec4 rdTK;\nvarying float rdUpV;")
+        .replace("#include <project_vertex>",
+          "#include <project_vertex>\n" +
+          "  {\n" +
+          "    vec3 rdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n" +
+          "    vec3 rdN = normalize( mat3( modelMatrix ) * normal );\n" +
+          "    rdUpV = step( 0.5, rdN.y );\n" +
+          // the slab is a scaled unit box: local position x scale = metres
+          // from the slab centre, and half the scale is the half-extent
+          "    vec2 rdS = vec2( length( modelMatrix[0].xyz ), length( modelMatrix[2].xyz ) );\n" +
+          "    rdLH = vec4( position.xz * rdS, 0.5 * rdS );\n" +
+          // ONE value per roof (its centre), so the membrane family is a
+          // property of the building, not a noise field across it
+          "    float rdK = fract( sin( dot( floor( modelMatrix[3].xz * 0.5 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );\n" +
+          "    vec3 rdTint = rdK < 0.46 ? vec3( 1.0 )\n" +
+          "           : ( rdK < 0.70 ? vec3( 1.20, 1.19, 1.16 )\n" +          // sun-faded light grey cap sheet
+          "           : ( rdK < 0.86 ? vec3( 1.13, 1.03, 0.86 )\n" +          // tan granules
+          "           :                vec3( 0.74, 0.74, 0.76 ) ) );\n" +     // a newer dark re-roof
+          "    rdTK = vec4( rdTint, rdK );\n" +
+          "  #ifdef USE_UV\n" +
+          "    vec3 rdA = abs( rdN );\n" +
+          "    vUv = ( rdA.y > 0.5 ? rdW.xz : ( rdA.x > rdA.z ? rdW.zy : rdW.xy ) ) * " + (1 / DECK_TILE).toFixed(6) + ";\n" +
+          "  #endif\n" +
+          "  }");
+      sh.fragmentShader = f
+        .replace("#include <common>",
+          "#include <common>\nvarying vec4 rdLH;\nvarying vec4 rdTK;\nvarying float rdUpV;\n" +
+          "float rdHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453123 ); }\n" +
+          "float rdNoise( vec2 p ) {\n" +
+          "  vec2 i = floor( p ), u = fract( p ); u = u * u * ( 3.0 - 2.0 * u );\n" +
+          "  return mix( mix( rdHash( i ), rdHash( i + vec2( 1.0, 0.0 ) ), u.x ),\n" +
+          "              mix( rdHash( i + vec2( 0.0, 1.0 ) ), rdHash( i + vec2( 1.0, 1.0 ) ), u.x ), u.y );\n" +
+          "}\n" +
+          "float rdPond = 0.0;")
+        .replace("#include <map_fragment>",
+          "#include <map_fragment>\n" +
+          "  {\n" +
+          "    float rdUp = step( 0.5, rdUpV );\n" +
+          "    vec2 rdL = rdLH.xy, rdH = rdLH.zw;\n" +
+          "    vec3 rdTint = rdTK.rgb; float rdK = rdTK.w;\n" +
+          // local coords + a per-roof offset keep the noise inputs small
+          // (a sin-hash on raw world metres bands on mediump GPUs)
+          "    vec2 rdP = rdL + vec2( rdK * 71.0, rdK * 37.0 );\n" +
+          // DIRT BANKED AGAINST THE PARAPET: wind drops grit where the air
+          // stalls, water drains to the edges, so the last 0.8 m is darker
+          "    vec2 rdE = rdH - abs( rdL );\n" +
+          "    float rdEd = min( rdE.x, rdE.y );\n" +
+          "    float rdEdge = mix( 0.66, 1.0, smoothstep( 0.02, 0.85, rdEd ) );\n" +
+          "    rdEdge *= mix( 0.82, 1.0, smoothstep( 0.4, 1.9, max( rdE.x, rdE.y ) ) );\n" +   // corners hold the most
+          // PONDING: flat roofs are never flat; the low spots hold water,
+          // leave a darker silt stain and a crisp tide mark at its rim
+          "    float rdN1 = rdNoise( rdP * 0.21 ) * 0.62 + rdNoise( rdP * 0.57 + 11.0 ) * 0.38;\n" +
+          "    rdPond = smoothstep( 0.60, 0.74, rdN1 );\n" +
+          "    float rdRing = smoothstep( 0.57, 0.60, rdN1 ) - smoothstep( 0.60, 0.635, rdN1 );\n" +
+          "    float rdDirt = rdNoise( rdP * 1.7 ) * 0.10 + rdNoise( rdP * 0.09 ) * 0.10;\n" +
+          // REPAIR PATCHES: a torched-on square of newer, darker cap sheet
+          // with a black bitumen bead, in about one 4.5 m cell in five
+          "    vec2 rdC = floor( rdP / 4.5 );\n" +
+          "    float rdPatch = 1.0;\n" +
+          "    if ( rdHash( rdC + 3.7 ) < 0.22 ) {\n" +
+          "      vec2 rdSz = vec2( 0.35 + rdHash( rdC + 2.2 ) * 0.5, 0.25 + rdHash( rdC + 5.9 ) * 0.4 );\n" +
+          "      vec2 rdQ = abs( rdP - ( rdC * 4.5 + 0.9 + vec2( rdHash( rdC + 1.3 ), rdHash( rdC + 8.1 ) ) * 2.7 ) );\n" +
+          "      float rdM = min( rdSz.x - rdQ.x, rdSz.y - rdQ.y );\n" +
+          "      rdPatch = rdM < 0.0 ? 1.0 : ( rdM < 0.016 ? 0.42 : 0.80 );\n" +
+          "    }\n" +
+          "    vec3 rdMul = rdTint * rdEdge * rdPatch * mix( 1.0, 0.80, rdPond ) * ( 1.0 - rdRing * 0.12 ) * ( 0.92 + rdDirt );\n" +
+          "    diffuseColor.rgb *= mix( rdTint, rdMul, rdUp );\n" +
+          "    rdPond *= rdUp;\n" +
+          "  }")
+        .replace("#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\n  roughnessFactor *= mix( 1.0, 0.72, rdPond );");
+    };
+    m.customProgramCacheKey = function () { return "cbzRoofDeck1" + (maps ? "m" : "p"); };
+    if (CBZ.gfxRegisterPbr) { try { CBZ.gfxRegisterPbr(m); } catch (e) { /* env optional */ } }
+    _deck = m;
+    return m;
+  };
 
   // =====================================================================
-  //  PROTOTYPES — roof
+  //  2. ROOF PLANT PROTOTYPES (local frame: y = 0 on the membrane, +x long)
   // =====================================================================
-  function hvacProto() {
+  const CAB = 0xc6c3b8, CAB_D = 0xaeaba1, COIL = 0x4f5254, LOUV = 0x9b988f, GRILLE = 0x26292c;
+  const GALV = 0x8f9498, FLASH = 0x4a4843, GAS = 0xcfa52a, CONDUIT = 0x7b7f83;
+  const ALU = 0xb3b7b9, ALU_D = 0x8e9294, IRON = 0x232426, STEEL = 0x4d5054, STEEL_D = 0x3b3d40;
+
+  function torus(p, r, tube, color, x, y, z, seg) {
+    p.add(new THREE.TorusGeometry(r, tube, 3, seg || 16), color, x, y, z, Math.PI / 2, 0, 0);
+  }
+
+  // a 5-ton packaged rooftop unit: 2.3 x 1.2 cabinet on a 0.34 m curb
+  function rtuProto() {
     const p = DK.proto();
-    p.box(2.3, 1.05, 1.7, PAINT, 0, 0.53, 0);
-    p.box(2.36, 0.09, 1.76, METAL_D, 0, 1.08, 0);            // lid
-    p.cyl(0.52, 0.52, 0.17, 7, METAL_D, -0.55, 1.2, 0);      // fan cowl
-    p.cyl(0.46, 0.46, 0.05, 7, 0x4d5257, -0.55, 1.3, 0);     // fan grille
-    for (let i = 0; i < 3; i++) p.box(0.06, 0.62, 0.05, 0x3d4145, 0.35 + i * 0.27, 0.55, 0.86);  // condenser fins
-    p.box(0.9, 0.7, 0.03, 0x5b6165, 0.62, 0.55, 0.862);
-    p.box(2.5, 0.14, 1.34, 0x6c6f6b, 0, 0.07, 0);            // sleeper raft
-    p.box(0.16, 0.8, 0.16, METAL, 1.0, 1.2, 0.5);            // refrigerant riser
+    p.box(2.24, 0.1, 1.16, FLASH, 0, 0.05, 0);                    // membrane turned up the curb
+    p.box(2.14, 0.34, 1.06, GALV, 0, 0.17, 0);                    // roof curb
+    p.box(2.3, 1.05, 1.2, CAB, 0, 0.865, 0);                      // cabinet
+    p.box(2.34, 0.04, 1.24, CAB_D, 0, 1.41, 0);                   // top panel lip
+    // CONDENSER SECTION (x 0.2..1.15): coil behind louvres on three sides
+    for (const s of [-1, 1]) p.box(0.9, 0.78, 0.012, COIL, 0.67, 0.86, s * 0.606);
+    p.box(0.012, 0.78, 1.0, COIL, 1.156, 0.86, 0);
+    for (let i = 0; i < 5; i++) {
+      const y = 0.54 + i * 0.15;
+      for (const s of [-1, 1]) p.box(0.9, 0.022, 0.035, LOUV, 0.67, y, s * 0.62, s * 0.5, 0, 0);
+      p.box(0.035, 0.022, 1.0, LOUV, 1.17, y, 0, 0, 0, -0.5);
+    }
+    // condenser fan in the top panel: shroud, dark grille, hub, finger guard
+    p.cyl(0.40, 0.40, 0.1, 14, CAB_D, 0.67, 1.46, 0);
+    p.cyl(0.37, 0.37, 0.012, 14, GRILLE, 0.67, 1.514, 0);
+    p.cyl(0.07, 0.07, 0.03, 10, 0x3a3d40, 0.67, 1.53, 0);
+    for (const a of [Math.PI / 4, -Math.PI / 4]) p.box(0.74, 0.014, 0.022, 0x6d7074, 0.67, 1.53, 0, 0, a, 0);
+    torus(p, 0.25, 0.009, 0x6d7074, 0.67, 1.53, 0, 14);
+    // SUPPLY/RETURN SECTION (x -1.15..0.2): screwed service panels + handles
+    for (const s of [-1, 1]) {
+      for (const x of [-0.5, 0.2]) p.box(0.016, 0.92, 0.008, CAB_D, x, 0.86, s * 0.604);
+      p.box(0.12, 0.03, 0.02, 0x55585b, -0.85, 0.9, s * 0.61);
+    }
+    // outside-air intake under a sloped rain hood on the -x end
+    p.box(0.012, 0.36, 0.86, COIL, -1.156, 0.98, 0);
+    p.box(0.34, 0.03, 0.96, CAB_D, -1.29, 1.2, 0, 0, 0, 0.62);
+    for (const s of [-1, 1]) p.box(0.3, 0.3, 0.02, CAB_D, -1.27, 1.03, s * 0.47);
+    // fused disconnect on the +z face with its conduit down to the deck
+    p.box(0.26, 0.34, 0.12, 0x8a8e91, -0.95, 0.72, 0.66);
+    p.cyl(0.022, 0.022, 0.56, 6, CONDUIT, -0.95, 0.3, 0.68);            // down to the deck
+    // yellow GAS LINE: out of the -z face, down, along a pipe stand, into a boot
+    p.cyl(0.024, 0.024, 0.36, 6, GAS, -0.5, 0.7, -0.78, Math.PI / 2, 0, 0);
+    p.cyl(0.024, 0.024, 0.52, 6, GAS, -0.5, 0.45, -0.96);
+    p.cyl(0.024, 0.024, 1.12, 6, GAS, -1.06, 0.2, -0.96, 0, 0, Math.PI / 2);
+    p.box(0.1, 0.176, 0.2, 0x2b2b2b, -1.2, 0.088, -0.96);           // rubber pipe block
+    p.cyl(0.024, 0.024, 0.2, 6, GAS, -1.62, 0.1, -0.96);
+    p.cyl(0.05, 0.08, 0.1, 8, FLASH, -1.62, 0.05, -0.96);          // penetration boot
     return p.done();
   }
-  function condenserProto() {
+  // upblast exhaust fan (kitchen / toilet extract) on its own curb
+  function fanProto() {
     const p = DK.proto();
-    p.box(1.05, 0.9, 1.05, 0xa9afb1, 0, 0.45, 0);
-    p.cyl(0.4, 0.4, 0.08, 7, 0x4d5257, 0, 0.92, 0);
-    p.box(1.1, 0.05, 0.05, 0x71767a, 0, 0.9, 0.5);
-    p.box(1.15, 0.1, 0.16, 0x6c6f6b, 0, 0.05, 0);
+    p.box(0.72, 0.08, 0.72, FLASH, 0, 0.04, 0);
+    p.box(0.62, 0.3, 0.62, GALV, 0, 0.15, 0);
+    p.box(0.7, 0.03, 0.7, ALU_D, 0, 0.315, 0);                      // curb cap
+    p.cyl(0.27, 0.31, 0.14, 16, ALU, 0, 0.4, 0);                   // windband
+    p.cyl(0.2, 0.2, 0.2, 16, ALU, 0, 0.57, 0);                     // motor housing
+    p.cyl(0.46, 0.46, 0.03, 18, ALU_D, 0, 0.66, 0);                // hood rim
+    p.cyl(0.12, 0.46, 0.2, 18, ALU, 0, 0.77, 0);                   // spun hood
+    p.cyl(0.09, 0.12, 0.05, 12, ALU_D, 0, 0.895, 0);               // cap
     return p.done();
   }
+  // one plumbing vent stack through a flashing boot (instanced in clusters)
   function ventProto() {
     const p = DK.proto();
-    p.cyl(0.16, 0.19, 0.5, 6, METAL, 0, 0.25, 0);
-    p.cyl(0.3, 0.24, 0.16, 6, METAL_D, 0, 0.56, 0);          // mushroom cap
+    p.cyl(0.075, 0.14, 0.12, 10, FLASH, 0, 0.06, 0);
+    p.cyl(0.055, 0.055, 0.5, 10, IRON, 0, 0.3, 0);
+    p.cyl(0.062, 0.062, 0.03, 10, 0x3a3b3d, 0, 0.54, 0);          // hub at the cut end
     return p.done();
   }
-  function ductProto() {
+  // cast-iron roof drain: lead sump sheet + domed strainer
+  function drainProto() {
     const p = DK.proto();
-    p.box(0.62, 0.5, 3.2, 0xb4b9ba, 0, 0.62, 0);
-    for (let i = -1; i <= 1; i++) p.box(0.68, 0.56, 0.06, 0x92989a, 0, 0.62, i * 1.1);  // flanges
-    p.box(0.12, 0.44, 0.12, 0x7c8083, -0.2, 0.19, -1.2);     // stand legs
-    p.box(0.12, 0.44, 0.12, 0x7c8083, -0.2, 0.19, 1.2);
-    p.box(0.12, 0.44, 0.12, 0x7c8083, 0.2, 0.19, -1.2);
-    p.box(0.12, 0.44, 0.12, 0x7c8083, 0.2, 0.19, 1.2);
+    p.box(0.72, 0.018, 0.72, 0x3b3a37, 0, 0.009, 0);
+    p.cyl(0.24, 0.26, 0.02, 14, 0x2a2a29, 0, 0.022, 0);            // clamping ring
+    p.cyl(0.05, 0.17, 0.1, 12, 0x1d1e1f, 0, 0.08, 0);              // dome strainer
+    for (let i = 0; i < 4; i++) p.box(0.3, 0.012, 0.018, 0x333436, 0, 0.1, 0, 0, i * Math.PI / 4, 0);
     return p.done();
   }
+  // curb-mounted domed skylight
+  function skylightProto() {
+    const p = DK.proto();
+    p.box(1.2, 0.08, 1.2, FLASH, 0, 0.04, 0);
+    p.box(1.1, 0.3, 1.1, GALV, 0, 0.15, 0);
+    p.box(1.18, 0.05, 1.18, 0xd3d6d6, 0, 0.325, 0);                // extruded frame
+    const dome = new THREE.SphereGeometry(0.54, 16, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+    dome.scale(1, 0.4, 1);
+    p.add(dome, 0x9aaeb6, 0, 0.35, 0);
+    return p.done();
+  }
+  // roof access hatch (buildings with no stair to the roof)
+  function hatchProto() {
+    const p = DK.proto();
+    p.box(1.0, 0.08, 1.1, FLASH, 0, 0.04, 0);
+    p.box(0.9, 0.36, 1.0, GALV, 0, 0.18, 0);
+    p.box(1.0, 0.07, 1.1, 0x7e8387, 0, 0.395, 0);                  // lid
+    for (const s of [-1, 1]) p.box(0.12, 0.06, 0.05, STEEL_D, s * 0.3, 0.35, -0.57);   // hinges
+    p.box(0.18, 0.04, 0.04, STEEL_D, 0, 0.44, 0.5);                // pull handle
+    return p.done();
+  }
+  // the timber water tank on a braced steel stand
   function tankProto() {
-    // The classic timber-slat water tank: instantly legible, and it breaks the
-    // flat roofline better than anything else this cheap.
     const p = DK.proto();
-    for (let i = 0; i < 4; i++) {
-      const a = i * Math.PI / 2 + Math.PI / 4;
-      p.box(0.16, 2.6, 0.16, 0x6a563c, Math.cos(a) * 0.9, 1.3, Math.sin(a) * 0.9);
+    for (const s of [-1, 1]) p.box(3.0, 0.24, 0.22, STEEL, 0, 0.12, s * 0.9);   // dunnage beams on pads
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) p.box(0.16, 2.0, 0.16, STEEL, sx * 0.9, 1.24, sz * 0.9);
+    // X-bracing on all four faces
+    const L = Math.hypot(1.8, 1.8), ang = Math.atan2(1.8, 1.8);
+    for (const s of [-1, 1]) {
+      for (const a of [ang, -ang]) {
+        p.box(L, 0.035, 0.035, STEEL_D, 0, 1.24, s * 0.9, 0, 0, a);
+        p.box(0.035, 0.035, L, STEEL_D, s * 0.9, 1.24, 0, a, 0, 0);
+      }
     }
-    p.box(2.3, 0.14, 2.3, 0x5b492f, 0, 2.6, 0);              // deck
-    p.cyl(1.05, 1.0, 2.5, 10, 0x8a6f49, 0, 3.9, 0);          // staves
-    for (let i = 0; i < 2; i++) p.cyl(1.07, 1.07, 0.07, 10, 0x4a3d2b, 0, 3.3 + i * 1.1, 0);  // hoops
-    p.cone(1.1, 0.7, 10, 0x6f5a3b, 0, 5.5, 0);               // conical lid
-    p.box(0.1, 2.4, 0.1, METAL_D, 1.0, 1.3, 0.34);           // downpipe from the tank
-    for (let i = 0; i < 4; i++) p.box(0.5, 0.05, 0.05, METAL_D, 1.02, 0.6 + i * 0.7, 0);     // ladder rungs
-    return p.done();
-  }
-  function dishProto() {
-    const p = DK.proto();
-    p.cyl(0.62, 0.1, 0.14, 10, 0xd6d8d2, 0, 0.5, 0.16, -1.05, 0, 0);   // the bowl, tipped up
-    p.box(0.06, 0.5, 0.06, METAL_D, 0, 0.5, -0.1, -1.05, 0, 0);        // feed arm
-    p.box(0.11, 0.11, 0.11, 0x3b3f42, 0, 0.72, -0.34);                  // LNB
-    p.cyl(0.06, 0.07, 0.62, 5, METAL_D, 0, 0.31, 0);                    // mast
-    p.box(0.34, 0.06, 0.34, 0x6c6f6b, 0, 0.03, 0);                      // base plate
-    return p.done();
-  }
-  function aerialProto() {
-    const p = DK.proto();
-    p.box(0.05, 3.0, 0.05, METAL_D, 0, 1.5, 0);
-    for (let i = 0; i < 4; i++) p.box(1.1 - i * 0.2, 0.028, 0.028, METAL, 0, 1.5 + i * 0.36, 0);
-    p.box(0.05, 0.5, 0.05, METAL_D, 0, 0.25, 0.2, 0.5, 0, 0);           // guy strut
-    p.box(0.3, 0.05, 0.3, 0x6c6f6b, 0, 0.03, 0);
+    p.box(2.5, 0.12, 2.5, STEEL_D, 0, 2.3, 0);                     // deck
+    // staves: twenty real boards, three tones of weathered cedar
+    const R = 1.2, N = 20, SW = 2 * Math.PI * R / N + 0.01;
+    const WOOD = [0x7b6650, 0x6e5a46, 0x846d56];
+    for (let i = 0; i < N; i++) {
+      const a = (i + 0.5) / N * Math.PI * 2;
+      p.box(SW, 2.62, 0.07, WOOD[i % 3], Math.cos(a) * R, 3.67, Math.sin(a) * R, 0, -a + Math.PI / 2, 0);
+    }
+    for (const y of [2.62, 3.2, 3.85, 4.55]) torus(p, R + 0.05, 0.028, 0x3e3a36, 0, y, 0, 24);   // steel hoops, tighter low down
+    p.cone(1.34, 0.82, 20, 0x4b4038, 0, 5.39, 0);                  // conical roof
+    p.cyl(0.05, 0.08, 0.22, 6, STEEL_D, 0, 5.89, 0);               // vent finial
+    // ladder up the leg, then up the barrel to the roof hatch
+    for (const s of [-1, 1]) {
+      p.box(0.04, 2.12, 0.04, STEEL, 1.08, 1.3, s * 0.2);
+      p.box(0.04, 2.72, 0.04, STEEL, 1.3, 3.7, s * 0.2);
+    }
+    for (let y = 0.5; y < 2.3; y += 0.3) p.box(0.03, 0.03, 0.4, STEEL, 1.08, y, 0);
+    for (let y = 2.6; y < 5.0; y += 0.3) p.box(0.03, 0.03, 0.4, STEEL, 1.3, y, 0);
+    p.cyl(0.08, 0.08, 2.1, 8, STEEL_D, 0.35, 1.2, -0.35);          // outlet down to the roof
+    p.cyl(0.12, 0.16, 0.1, 8, FLASH, 0.35, 0.05, -0.35);
     return p.done();
   }
 
   // =====================================================================
-  //  PROTOTYPES — wall
+  //  INSTANCE POOLS. The engine is draw-call bound, so: the big pieces (RTU,
+  //  fan, skylight, tank) pool per 400 m cell, so r128 frustum-culls cells and
+  //  core/farcull's fog-reach pass drops cells past the fog; the small cheap
+  //  ones (vents, drains, hatches: a few hundred verts each) are ONE pool each
+  //  for the whole city. About 3 + 4 x (cells in view) draws in total.
   // =====================================================================
-  function pipeProto() {
-    // a 1m unit scaled to the building's height; brackets are deliberately
-    // NOT modelled here so the scale never stretches them out of shape
-    const p = DK.proto();
-    p.cyl(0.075, 0.075, 1.0, 7, 0x8b8f8c, 0, 0.5, 0);
-    return p.done();
-  }
-  function pipeShoeProto() {
-    const p = DK.proto();
-    p.cyl(0.085, 0.1, 0.42, 6, 0x7c817e, 0, 0.21, 0);
-    p.cyl(0.085, 0.11, 0.3, 6, 0x7c817e, 0, 0.5, 0.16, 0.85, 0, 0);     // the elbow out to the gutter
-    p.box(0.24, 0.06, 0.06, 0x63676a, 0, 1.35, -0.06);                   // a bracket at head height
-    return p.done();
-  }
-  function windowAcProto() {
-    const p = DK.proto();
-    p.box(0.72, 0.42, 0.5, 0xc3c7c2, 0, 0, 0.2);
-    p.box(0.66, 0.34, 0.03, 0x585d60, 0, 0, 0.46);                       // grille
-    for (let i = 0; i < 3; i++) p.box(0.6, 0.02, 0.035, 0x8b9094, 0, -0.1 + i * 0.1, 0.47);
-    p.box(0.78, 0.05, 0.1, 0x9aa0a2, 0, -0.24, 0.06);                    // sill bracket
-    return p.done();
-  }
-  function awningProto() {
-    // canvas awning projecting along +z; the pass yaws it to the door face
-    const p = DK.proto();
-    p.box(3.2, 0.06, 1.55, 0x9c3b34, 0, 0.3, 0.78, -0.32, 0, 0);         // sloped canvas
-    p.box(3.2, 0.34, 0.05, 0x8a322c, 0, 0.06, 1.5);                      // valance
-    for (let s = -1; s <= 1; s += 2) {
-      p.box(0.05, 0.05, 1.6, 0x5d6062, s * 1.5, 0.34, 0.78, -0.32, 0, 0);   // frame rails
-      p.box(0.04, 0.9, 0.04, 0x5d6062, s * 1.5, 0.28, 0.34, 0.8, 0, 0);     // tie rods
+  const SECT = 400;
+  const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  const _v = new THREE.Vector3(), _s = new THREE.Vector3(), _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  function Pools(name, geo, cast, citywide) { this.name = name; this.geo = geo; this.cast = cast; this.citywide = !!citywide; this.items = []; }
+  Pools.prototype.add = function (x, y, z, ry, sy, grp) {
+    this.items.push({ x: x, y: y, z: z, ry: ry || 0, sy: sy || 1, grp: grp });
+  };
+  Pools.prototype.build = function (root, out, byGroup) {
+    if (!this.items.length || !this.geo) return;
+    const secs = new Map();
+    for (const it of this.items) {
+      const k = this.citywide ? "all" : Math.floor(it.x / SECT) + "," + Math.floor(it.z / SECT);
+      let a = secs.get(k); if (!a) { a = []; secs.set(k, a); } a.push(it);
     }
-    p.box(3.3, 0.09, 0.09, 0x4f5254, 0, 0.62, 0.06);                     // wall channel
-    return p.done();
-  }
-  function shutterProto() {
-    const p = DK.proto();
-    p.cyl(0.24, 0.24, 3.0, 7, 0x8d9294, 0, 0, 0.16, 0, 0, Math.PI / 2);  // rolled curtain
-    p.box(3.2, 0.1, 0.34, 0x6f7477, 0, 0.28, 0.14);                      // hood
-    for (let s = -1; s <= 1; s += 2) p.box(0.11, 2.6, 0.11, 0x7c8184, s * 1.6, -1.35, 0.1);   // guide rails
-    return p.done();
-  }
-  function wallLampProto() {
-    const p = DK.proto();
-    p.box(0.09, 0.09, 0.34, 0x4a4e50, 0, 0, 0.17);
-    p.cone(0.19, 0.24, 6, 0xc9ccc6, 0, -0.06, 0.36, Math.PI, 0, 0);      // downlit shade
-    p.box(0.15, 0.12, 0.15, 0xfff0c8, 0, -0.17, 0.36);                   // the lamp itself
-    return p.done();
-  }
-  function fireEscapeProto() {
-    // One storey of a New-York-style escape: grated platform, railings and
-    // the diagonal ladder down to the level below. This is the single most
-    // expensive prototype in the pass (it is instanced PER STOREY), so the
-    // grating and rungs are held to the minimum that still reads as steel.
-    const p = DK.proto();
-    const G = 0x4e4a44, R = 0x585149;
-    p.box(2.6, 0.06, 1.25, G, 0, 0, 0.62);                               // platform
-    for (let i = 0; i < 4; i++) p.box(2.6, 0.03, 0.04, 0x3d3a35, 0, 0.04, 0.2 + i * 0.3);   // grating
-    p.box(2.6, 0.05, 0.05, R, 0, 1.0, 1.22);                             // outer rail
-    p.box(2.6, 0.05, 0.05, R, 0, 0.55, 1.22);
-    for (let s = -1; s <= 1; s += 2) {
-      p.box(0.05, 1.0, 0.05, R, s * 1.28, 0.5, 1.22);                     // stanchions
-      p.box(0.05, 0.05, 1.2, R, s * 1.28, 1.0, 0.64);                     // side rails
-    }
-    // the ladder run
-    p.box(0.06, 2.6, 0.06, R, -0.9, -1.2, 1.0, -0.62, 0, 0);
-    p.box(0.06, 2.6, 0.06, R, -0.35, -1.2, 1.0, -0.62, 0, 0);
-    for (let i = 0; i < 5; i++) p.box(0.6, 0.04, 0.04, R, -0.62, -0.35 - i * 0.58, 0.3 + i * 0.3);
-    // brackets back into the wall
-    p.box(0.07, 0.07, 0.5, R, -1.1, -0.1, 0.25, 0.6, 0, 0);
-    p.box(0.07, 0.07, 0.5, R, 1.1, -0.1, 0.25, 0.6, 0, 0);
-    return p.done();
-  }
-
-  // =====================================================================
-  //  THE PASS
-  // =====================================================================
-  DK.register(40, "building-dress", function (city, DK) {
-    if (CBZ.CONFIG.DETAIL_BUILDING_DRESS === false) return;
-    const root = city.root;
-    /* ==================================================================
-       PROPS_PURGE_V1 — WHAT CAME OFF THE BUILDINGS, AND WHY.
-       ==================================================================
-       OWNER: "DUMB AC BOXES OUTSIDE WINDOWS ... AND DUMB THINGS ON ROOFS
-       OF BUILDINGS, GET RID OF THE DUMB PROPS."
-
-       THE HISTORY IS THE ARGUMENT. city/props.js used to scatter exactly
-       this kit and DELETED it — its own surviving comment reads "Generic
-       AC/vent/tank/dish/mast clutter was pure silhouette noise and has
-       been removed. Keep only fall-prevention rails and the rare rentable
-       ad: both have a direct gameplay reason to exist." It even preserved
-       the rng draws so the removal was reversible. Then THIS pass, four
-       files later, put the whole thing back and made it denser. That is
-       the exact failure mode CLAUDE.md's block law exists to stop, and it
-       is why the census below is written down rather than just done.
-
-       CUT OUTRIGHT
-         • WINDOW AC UNITS — up to 260 of them, six per elevation, hung on
-           a hash off a wall with no window behind them (this pass does not
-           read the facade; buildings.js owns the glazing, and nothing here
-           asks it where a window is). A box bolted to blank concrete is
-           the owner's screenshot. The DRIP STAIN that went with each one
-           goes too — a stain under nothing is worse than the unit.
-         • DECORATIVE FIRE-ESCAPE PLATFORMS — the 2.6m black boxes filmed
-           down the sides of Threads & Drip and other glass buildings. This
-           pass called an elevation "blind" from a position hash; it never
-           inspected the actual windows, then repeated the platform once per
-           floor. Worse, they were fake: no collider and no climbable surface.
-           elevators.js owns the deliberately selected, full-height, climbable
-           fire escapes, so deleting this duplicate prop loses no roof access.
-         • SATELLITE DISHES + AERIAL MASTS — laid on the same lattice at a
-           hashed yaw, so a dish pointed at a different sky on every roof
-           and an aerial stood in the middle of nowhere guyed to nothing.
-           A dish has an azimuth or it is a prop.
-         • DUCT RUNS — a 3.2m duct on legs with no plant at either end.
-
-       KEPT, AND MADE INTENTIONAL
-         • ROOF PLANT is now a DECK, not a scatter: one contiguous
-           mechanical run inset from ONE parapet — chiller, its condensers
-           beside it, its vents at the end — on buildings big enough to
-           need plant (>=9m either way, >=2 storeys) instead of on every
-           shed with a 6m footprint. A lattice of eleven unrelated boxes
-           reads generated; four related ones on one deck reads built.
-         • THE WATER TANK keeps its rule unchanged (low/mid-rise, one
-           corner) — it was already the most legible thing on the skyline.
-         • Downpipes, awnings, shutters, wall lamps, house numbers and the
-           roofline/sill weathering all stay: every one of them is anchored
-           to something the building actually has.
-       ================================================================== */
-    const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
-    let cutN = 0, cutEsc = 0;
-
-    const hvac = DK.batch("roof-hvac", hvacProto(), { cls: "decor", cast: true });
-    const cond = DK.batch("roof-condenser", condenserProto(), { cls: "decor", cast: true });
-    const vents = DK.batch("roof-vent", ventProto(), { cls: "fine", cast: false });
-    const ducts = DK.batch("roof-duct", ductProto(), { cls: "decor", cast: true });
-    const tanks = DK.batch("water-tank", tankProto(), { cls: "decor", cast: true });
-    const dishes = DK.batch("sat-dish", dishProto(), { cls: "fine", cast: false });
-    const aerials = DK.batch("aerial", aerialProto(), { cls: "fine", cast: false });
-    const pipes = DK.batch("downpipe", pipeProto(), { cls: "decor", cast: false });
-    const shoes = DK.batch("downpipe-shoe", pipeShoeProto(), { cls: "decor", cast: false });
-    const acs = DK.batch("window-ac", windowAcProto(), { cls: "decor", cast: false });
-    const awnings = DK.batch("awning", awningProto(), { cls: "decor", cast: true });
-    const shutters = DK.batch("shutter", shutterProto(), { cls: "fine", cast: false });
-    const escapes = DK.batch("fire-escape", fireEscapeProto(), { cls: "decor", cast: false });
-    // vertexColors on, same reason as world/utility_lines.js's mast lamp: the
-    // prototype carries its part colours in the geometry, not the material.
-    const lampM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, emissive: 0xffe0b0, emissiveIntensity: 0 });
-    lampM._shared = true;
-    const wlamps = DK.batch("wall-lamp", wallLampProto(), { cls: "decor", cast: false, material: lampM });
-    const grime = DK.sheet("wall-grime", { cls: "fine", unlit: true, map: grimeTex() });
-    const atlas = DK.signAtlas ? DK.signAtlas() : null;
-    const nums = atlas ? DK.sheet("house-number", { cls: "fine", map: atlas, alphaTest: 0.45, unlit: true }) : null;
-    const AC = DK.signAtlasCells || { NUM_0: 24, NUM_N: 24 };
-    const AGRID = DK.signAtlasGrid || 8;
-
-    // running caps so one enormous settlement can't eat the whole budget
-    let nHvac = 0, nCond = 0, nVent = 0, nDuct = 0, nTank = 0, nDish = 0, nAerial = 0,
-      nPipe = 0, nAc = 0, nAwn = 0, nShut = 0, nEsc = 0, nLamp = 0, nGrime = 0, nNum = 0;
-    // VERTEX BUDGET. These caps are the real cost control: an InstancedMesh
-    // submits count × prototype-verts every frame, and the roof/facade layer
-    // touches every building in the world, so it is the heaviest of the five
-    // passes by far. Caps are consumed in DK.eachBuilding's HASH-SHUFFLED
-    // order, so a cap that binds thins the layer evenly across the map
-    // instead of dressing the first N buildings and abandoning the rest.
-    const MAX = {
-      hvac: DK.count(170), cond: DK.count(180), vent: DK.count(300), duct: DK.count(95),
-      tank: DK.count(55), dish: DK.count(150), aerial: DK.count(120), pipe: DK.count(240),
-      ac: DK.count(260), awn: DK.count(140), shut: DK.count(100), esc: DK.count(100),
-      lamp: DK.count(260), grime: DK.count(950), num: DK.count(240),
-    };
-
-    // Elevator/stair shafts punch through the roof (buildings.js publishes
-    // b.shaftRects); dropping a two-tonne chiller on the hatch would look
-    // broken and could block the roof-access gameplay that already exists.
-    function onShaft(b, lx, lz) {
-      const sr = b.shaftRects;
-      if (!sr || !sr.length) return false;
-      for (let i = 0; i < sr.length; i++) {
-        const r = sr[i];
-        if (!r) continue;
-        const x0 = r.minX != null ? r.minX : (r.x - (r.w || 0) / 2);
-        const x1 = r.maxX != null ? r.maxX : (r.x + (r.w || 0) / 2);
-        const z0 = r.minZ != null ? r.minZ : (r.z - (r.d || 0) / 2);
-        const z1 = r.maxZ != null ? r.maxZ : (r.z + (r.d || 0) / 2);
-        if (!Number.isFinite(x0)) continue;
-        if (lx > x0 - 1.2 && lx < x1 + 1.2 && lz > z0 - 1.2 && lz < z1 + 1.2) return true;
+    if (!this.geo.boundingSphere) this.geo.computeBoundingSphere();
+    const pr = this.geo.boundingSphere ? this.geo.boundingSphere.radius : 4;
+    const mat = DK.litMaterial();
+    const self = this;
+    secs.forEach(function (recs) {
+      const g = self.geo.clone();
+      let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9, nz = 1e9, xz = -1e9;
+      for (const r of recs) {
+        if (r.x < nx) nx = r.x; if (r.x > xx) xx = r.x;
+        if (r.y < ny) ny = r.y; if (r.y > xy) xy = r.y;
+        if (r.z < nz) nz = r.z; if (r.z > xz) xz = r.z;
       }
-      return false;
-    }
-
-    DK.eachBuilding(city, function (bi) {
-      const b = bi.b;
-      const rx = bi.w / 2, rz = bi.d / 2;
-      const roofY = bi.roofY + 0.04;
-      const bh = DK.h01(bi.x, bi.z, 0x8101);
-      // PER-BUILDING quotas on top of the global caps. Without these a single
-      // 40m×40m tower could eat the entire rooftop budget on its own lattice
-      // and every other roof in the city would come out bare.
-      let roofHere = 0, acHere = 0, grimeHere = 0, escHere = 0;
-      const ROOF_PER = 11, AC_PER = 6, GRIME_PER = 7, ESC_PER = 5;
-
-      // =================================================================
-      //  ROOF PLANT
-      // =================================================================
-      // Laid on a coarse lattice inset from the parapet, skipping the middle
-      // (where hatches, helipads and city/roofloot.js's own content live) and
-      // any published shaft rect. Everything is position-hashed, so a given
-      // roof always gets the same kit.
-      if (PURGED) {
-        // ---- THE PLANT DECK ------------------------------------------
-        // A real roof's mechanical plant sits together, on one side, set
-        // back from the parapet, with a walkway around it — because a
-        // fitter has to reach it and a crane had to land it. So: pick a
-        // side from the position hash, run the chiller down it with its
-        // condensers beside it and its vents at the end, and leave the
-        // rest of the roof EMPTY. Everything is still position-hashed, so
-        // a given roof always gets the same deck.
-        if (bi.w >= 9 && bi.d >= 9 && bi.storeys >= 2 && nHvac < MAX.hvac) {
-          const INSET = 2.6;
-          let side = (DK.h01(bi.x, bi.z, 0x8118) * 4) | 0;
-          // (ex,ez) = the OUTWARD normal of the chosen parapet; the deck
-          // sits INSET inside it and runs along the tangent.
-          let ex = 0, ez = 0, half = 0, run = 0;
-          for (let attempt = 0; attempt < 4; attempt++) {
-            const s = (side + attempt) & 3;
-            ex = s === 2 ? -1 : (s === 3 ? 1 : 0);
-            ez = s === 0 ? -1 : (s === 1 ? 1 : 0);
-            half = ex ? rx : rz;                    // depth toward that parapet
-            run = ex ? bi.d : bi.w;                 // length along it
-            const dx = ex * (half - INSET), dz = ez * (half - INSET);
-            if (!onShaft(b, dx, dz)) { side = s; break; }
-            if (attempt === 3) { half = 0; }        // every side blocked — no deck
-          }
-          // AVAIL is the usable half-length along that parapet, and it is what
-          // decides how much deck this roof gets — NOT a per-building fudge.
-          // A 9m roof fits the chiller alone; a 16m one fits the whole run.
-          // Every item is admitted only if its own half-width still lands
-          // inside AVAIL, so nothing can ever hang off a parapet edge (the
-          // failure the lattice above could not have, and which is exactly
-          // what a "floating roof prop" screenshot looks like).
-          const avail = run / 2 - INSET;
-          if (half > 0 && avail > 1.3) {
-            const tx = -ez, tz = ex;                // along the parapet
-            const cx0 = ex * (half - INSET), cz0 = ez * (half - INSET);
-            // a deterministic slide so not every deck is dead-centre
-            const slide = DK.h11(bi.z, bi.x, 0x8119) * Math.max(0, avail - 3.9);
-            const fits = function (t, hw) { return Math.abs(slide + t) + hw <= avail; };
-            // local +z points at the parapet, so the chiller's long axis
-            // (its 2.3m x) runs ALONG the deck by construction
-            const yaw = Math.atan2(ex, ez);
-            const put = function (t, off) {
-              return {
-                x: bi.x + cx0 + tx * (slide + t) - ex * (off || 0),
-                z: bi.z + cz0 + tz * (slide + t) - ez * (off || 0),
-              };
-            };
-            if (fits(0, 1.25)) {
-              const P0 = put(0, 0);
-              hvac.add(P0.x, roofY, P0.z, { ry: yaw, tint: 0.9 + DK.h01(bi.x, bi.z, 0x8111) * 0.6 });
-              nHvac++; roofHere++;
-              // 2.3 x 1.7 x 1.05 of chiller on a walkable deck. Same y-gate as
-              // the tank below: solid between the deck and its own top, nothing
-              // at street level. Extents are the yawed box's, not the raw one.
-              {
-                const ec = Math.abs(Math.cos(yaw)), es = Math.abs(Math.sin(yaw));
-                DK.solid(P0.x, P0.z, 1.15 * ec + 0.85 * es, 1.15 * es + 0.85 * ec,
-                  null, roofY, roofY + 1.35);
-              }
-              // condensers in a row beside the chiller — the same machine
-              const conds = 1 + (DK.h01(bi.x, bi.z, 0x811a) < 0.55 ? 1 : 0);
-              for (let k = 0; k < conds && nCond < MAX.cond; k++) {
-                const t = 2.05 + k * 1.25;
-                if (!fits(t, 0.58)) break;
-                const P = put(t, 0);
-                cond.add(P.x, roofY, P.z, { ry: yaw }); nCond++; roofHere++;
-              }
-              // and its flues at the other end of the deck
-              const vN = 1 + (DK.h01(bi.z, bi.x, 0x811b) < 0.5 ? 1 : 0);
-              for (let k = 0; k < vN && nVent < MAX.vent; k++) {
-                const t = -1.9 - k * 0.85;
-                if (!fits(t, 0.32)) break;
-                const P = put(t, k * 0.6);
-                vents.add(P.x, roofY, P.z, { ry: yaw, sy: k ? 0.8 : 1 }); nVent++; roofHere++;
-              }
-            }
-          }
-        }
-      } else if (bi.w > 6 && bi.d > 6) {
-        const inset = 2.1;
-        const gx = Math.max(1, Math.floor((bi.w - inset * 2) / 3.4));
-        const gz = Math.max(1, Math.floor((bi.d - inset * 2) / 3.4));
-        for (let a = 0; a < gx && roofHere < ROOF_PER; a++) {
-          for (let c = 0; c < gz && roofHere < ROOF_PER; c++) {
-            const lx = -rx + inset + (a + 0.5) * ((bi.w - inset * 2) / gx);
-            const lz = -rz + inset + (c + 0.5) * ((bi.d - inset * 2) / gz);
-            // keep the middle of the roof clear
-            if (Math.abs(lx) < rx * 0.22 && Math.abs(lz) < rz * 0.22) continue;
-            if (onShaft(b, lx, lz)) continue;
-            const wx = bi.x + lx, wz = bi.z + lz;
-            const h = DK.h01(wx, wz, 0x8111);
-            const yaw = (((DK.h01(wz, wx, 0x8112) * 4) | 0) * Math.PI) / 2;
-            if (h < 0.17 && nHvac < MAX.hvac) {
-              hvac.add(wx, roofY, wz, { ry: yaw, tint: 0.9 + h * 0.6 }); nHvac++; roofHere++;
-            } else if (h < 0.34 && nCond < MAX.cond) {
-              cond.add(wx, roofY, wz, { ry: yaw }); nCond++; roofHere++;
-              if (h < 0.24 && nCond < MAX.cond) { cond.add(wx + 1.25, roofY, wz, { ry: yaw }); nCond++; }
-            } else if (h < 0.42 && nDuct < MAX.duct) {
-              ducts.add(wx, roofY, wz, { ry: yaw, sz: 0.8 + h }); nDuct++; roofHere++;
-            } else if (h < 0.62 && nVent < MAX.vent) {
-              vents.add(wx, roofY, wz, { ry: yaw }); nVent++; roofHere++;
-              if (nVent < MAX.vent) { vents.add(wx + 0.7, roofY, wz + 0.5, { ry: yaw, sy: 0.8 }); nVent++; }
-            } else if (h < 0.70 && nDish < MAX.dish) {
-              dishes.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8113) * 6.28, sx: 0.8 + h * 0.5, sy: 0.8 + h * 0.5, sz: 0.8 + h * 0.5 });
-              nDish++; roofHere++;
-            } else if (h < 0.745 && nAerial < MAX.aerial) {
-              aerials.add(wx, roofY, wz, { ry: DK.h01(wz, wx, 0x8114) * 6.28 }); nAerial++; roofHere++;
-            }
-          }
+      g.boundingSphere = new THREE.Sphere(new THREE.Vector3((nx + xx) / 2, (ny + xy) / 2, (nz + xz) / 2),
+        Math.hypot(xx - nx, xy - ny, xz - nz) / 2 + pr + 1);
+      const im = new THREE.InstancedMesh(g, mat, recs.length);
+      im.name = "roofplant-" + self.name;
+      im.castShadow = !!self.cast; im.receiveShadow = true;
+      im.frustumCulled = true;
+      im.userData.worldSpacePool = true;      // non-empty userData: batch/localinst leave it alone
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        _e.set(0, r.ry, 0); _q.setFromEuler(_e);
+        _v.set(r.x, r.y, r.z); _s.set(1, r.sy, 1);
+        _m4.compose(_v, _q, _s);
+        im.setMatrixAt(i, _m4);
+        if (r.grp) {
+          let a = byGroup.get(r.grp); if (!a) { a = []; byGroup.set(r.grp, a); }
+          a.push({ im: im, i: i, m: _m4.clone() });
         }
       }
-      // A TIMBER WATER TANK on the low/mid-rise stock, in one corner. Hoisted
-      // OUT of the lattice branch so it survives the purge unchanged: it was
-      // never the problem — it is the one rooftop object in this pass that a
-      // player can name from the street, and it is one per roof by rule, in a
-      // corner, on exactly the building stock that really carries them.
-      if (bi.w > 6 && bi.d > 6 && bi.storeys >= 3 && bi.storeys <= 14 && bh < 0.30 && nTank < MAX.tank) {
-        const sxg = DK.h01(bi.x, bi.z, 0x8115) < 0.5 ? -1 : 1;
-        const szg = DK.h01(bi.z, bi.x, 0x8116) < 0.5 ? -1 : 1;
-        const wx = bi.x + sxg * (rx - 2.6), wz = bi.z + szg * (rz - 2.6);
-        if (!onShaft(b, wx - bi.x, wz - bi.z)) {
-          tanks.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8117) * 1.57 }); nTank++;
-          // SOLID, AND HEIGHT-GATED — this is the whole trick for roof plant.
-          // Roofs in this game are real walkable platforms (elevators land on
-          // them, roofloot sends you up), so a 5.5 m timber tank with no
-          // collider is a thing you walk clean through while standing on the
-          // building it sits on. But a FULL-HEIGHT AABB here would be a 2.2 m
-          // invisible column running all the way down to the PAVEMENT, which
-          // is a far worse bug than the one it fixes. y0/y1 (physics.js:133)
-          // makes the collider exist only between the deck and the tank's own
-          // top, so the street below is untouched.
-          DK.solid(wx, wz, 1.15, 1.15, null, roofY, roofY + 5.5);
-        }
-      }
-
-      // =================================================================
-      //  FACADE
-      // =================================================================
-      const faces = DK.buildingFaces(bi);
-      for (let f = 0; f < faces.length; f++) {
-        const fc = faces[f];
-        const isDoor = DK.isDoorFace(bi, fc);
-        const tx = -fc.nz, tz = fc.nx;                     // tangent along the wall
-        const yaw = Math.atan2(fc.nx, fc.nz);              // local +z → outward
-        const wallX = fc.cx + fc.nx * 0.06, wallZ = fc.cz + fc.nz * 0.06;
-        const fh = DK.h01(fc.cx, fc.cz, 0x8121);
-
-        // ---- downpipes at both ends of every elevation -----------------
-        if (nPipe < MAX.pipe && fc.span > 4 && (f === 0 || f === 2)) {
-          for (let s = -1; s <= 1; s += 2) {
-            if (nPipe >= MAX.pipe) break;
-            const px = wallX + tx * s * (fc.span / 2 - 0.55);
-            const pz = wallZ + tz * s * (fc.span / 2 - 0.55);
-            const len = Math.max(2.5, bi.h - 0.35);
-            pipes.add(px, bi.y0 + 0.3, pz, { sy: len });
-            shoes.add(px, bi.y0, pz, { ry: yaw });
-            nPipe++;
-            // and the stain the pipe has been making for thirty years
-            if (nGrime < MAX.grime && grimeHere < GRIME_PER) {
-              grimeHere++;
-              grime.quadWall(px + fc.nx * 0.02, bi.y0 + Math.min(6, bi.h) * 0.5, pz + fc.nz * 0.02,
-                0.9, Math.min(6.5, bi.h * 0.75), fc.nx, fc.nz, 0xffffff, DK.atlasCell(0, 1));
-              nGrime++;
-            }
-          }
-        }
-
-        // ---- fake facade platforms: purged; real escapes live elsewhere -
-        // Keep evaluating the old deterministic placement rule for the audit
-        // and flag-off rollback, but never emit a decorative platform under
-        // the purge. This hash does NOT know whether the elevation is blind.
-        if (!isDoor && nEsc + cutEsc < MAX.esc && bi.storeys >= 3 && bi.storeys <= 12
-          && fc.span > 6 && fh < 0.34) {
-          const ex = wallX + tx * (fc.span * 0.18), ez = wallZ + tz * (fc.span * 0.18);
-          const top = Math.min(bi.storeys, 8);
-          for (let s = 1; s < top && nEsc + cutEsc < MAX.esc && escHere < ESC_PER; s++) {
-            if (PURGED) { cutEsc++; escHere++; continue; }
-            escapes.add(ex, bi.y0 + s * 3.2 + 0.15, ez, { ry: yaw });
-            nEsc++; escHere++;
-          }
-        }
-
-        // ---- window AC units, floor by floor ---------------------------
-        // PURGED. The loop still RUNS under the flag so the census can report
-        // how many boxes came off the city's walls, but it places nothing and
-        // its drip stains go with it — a drip stain under no unit is a smear
-        // on a blank wall, which is worse than the unit was.
-        if (nAc < MAX.ac && acHere < AC_PER && bi.storeys >= 2) {
-          const cols = Math.max(1, Math.floor(fc.span / 2.6));
-          const rows = Math.min(bi.storeys - 1, 8);
-          for (let r2 = 1; r2 <= rows && nAc < MAX.ac && acHere < AC_PER; r2++) {
-            for (let c2 = 0; c2 < cols && nAc < MAX.ac && acHere < AC_PER; c2++) {
-              const t = -fc.span / 2 + (c2 + 0.5) * (fc.span / cols);
-              const ax = wallX + tx * t, az = wallZ + tz * t;
-              const ay = bi.y0 + r2 * 3.2 + 1.15;
-              if (DK.h01(ax + r2 * 7.3, az - r2 * 3.1, 0x8131) > 0.16) continue;
-              if (PURGED) { cutN++; acHere++; continue; }
-              acs.add(ax, ay, az, { ry: yaw });
-              nAc++; acHere++;
-              if (nGrime < MAX.grime && grimeHere < GRIME_PER) {
-                // the drip stain the unit leaves down the wall beneath it
-                grime.quadWall(ax + fc.nx * 0.02, ay - 1.25, az + fc.nz * 0.02,
-                  0.6, 2.0, fc.nx, fc.nz, 0xffffff, DK.atlasCell(0, 1));
-                nGrime++; grimeHere++;
-              }
-            }
-          }
-        }
-
-        // ---- sill staining: a run under every storey band ---------------
-        if (nGrime < MAX.grime && grimeHere < GRIME_PER && bi.storeys >= 2) {
-          const bands = Math.min(bi.storeys, 6);
-          const cols2 = Math.max(1, Math.floor(fc.span / 4.2));
-          for (let r2 = 1; r2 <= bands && nGrime < MAX.grime && grimeHere < GRIME_PER; r2++) {
-            for (let c2 = 0; c2 < cols2 && nGrime < MAX.grime && grimeHere < GRIME_PER; c2++) {
-              const t = -fc.span / 2 + (c2 + 0.5) * (fc.span / cols2);
-              const sx = fc.cx + fc.nx * 0.05 + tx * t, sz = fc.cz + fc.nz * 0.05 + tz * t;
-              if (DK.h01(sx + r2 * 11.7, sz + r2 * 5.3, 0x8141) > 0.36) continue;
-              grime.quadWall(sx, bi.y0 + r2 * 3.2 - 0.55, sz, 2.5, 1.9, fc.nx, fc.nz, 0xffffff, DK.atlasCell(0, 1));
-              nGrime++; grimeHere++;
-            }
-          }
-        }
-        // ---- one long run under the roof edge --------------------------
-        // A single wide quad per elevation buys the most weathering per
-        // vertex of anything in the pass — the roofline is where every
-        // building in the world is dirtiest.
-        if (nGrime < MAX.grime && fh < 0.62) {
-          grime.quadWall(fc.cx + fc.nx * 0.05, bi.roofY - Math.min(4.5, bi.h * 0.28), fc.cz + fc.nz * 0.05,
-            Math.min(fc.span - 0.6, 12), Math.min(5.0, bi.h * 0.4), fc.nx, fc.nz, 0xffffff, DK.atlasCell(0, 1));
-          nGrime++;
-        }
-
-        // ---- the shopfront kit, on the door elevation only -------------
-        if (isDoor && bi.door) {
-          const dx = bi.door.x, dz = bi.door.z;
-          // sit the fittings on the wall plane directly above the doorway
-          const ox = fc.cx + fc.nx * 0.08 + tx * ((dx - fc.cx) * tx + (dz - fc.cz) * tz);
-          const oz = fc.cz + fc.nz * 0.08 + tz * ((dx - fc.cx) * tx + (dz - fc.cz) * tz);
-          if (bi.shop && nAwn < MAX.awn && DK.h01(ox, oz, 0x8151) < 0.62) {
-            awnings.add(ox, bi.y0 + 3.05, oz, { ry: yaw, sx: 0.85 + DK.h01(oz, ox, 0x8152) * 0.4 });
-            nAwn++;
-          } else if (bi.shop && nShut < MAX.shut) {
-            shutters.add(ox, bi.y0 + 3.3, oz, { ry: yaw });
-            nShut++;
-          }
-          if (nLamp < MAX.lamp) {
-            for (let s = -1; s <= 1; s += 2) {
-              if (nLamp >= MAX.lamp) break;
-              wlamps.add(ox + tx * s * 1.5, bi.y0 + 2.85, oz + tz * s * 1.5, { ry: yaw });
-              nLamp++;
-            }
-          }
-          // ---- enamel house number beside the door ---------------------
-          if (nums && nNum < MAX.num) {
-            const cell = AC.NUM_0 + (((DK.h01(ox, oz, 0x8161) * AC.NUM_N) | 0) % AC.NUM_N);
-            nums.quadWall(ox + tx * 1.15 + fc.nx * 0.02, bi.y0 + 2.35, oz + tz * 1.15 + fc.nz * 0.02,
-              0.34, 0.34, fc.nx, fc.nz, 0xffffff, DK.atlasCell(cell, AGRID));
-            nNum++;
-          }
-        }
-      }
+      im.instanceMatrix.needsUpdate = true;
+      root.add(im);
+      out.push(im);
     });
+  };
 
-    hvac.build(root); cond.build(root); vents.build(root); ducts.build(root);
-    tanks.build(root); dishes.build(root); aerials.build(root);
-    pipes.build(root); shoes.build(root); acs.build(root);
-    awnings.build(root); shutters.build(root); escapes.build(root);
-    const lampMesh = wlamps.build(root);
-    grime.build(root);
-    if (nums) nums.build(root);
+  // =====================================================================
+  //  3. THE ROOF PASS
+  // =====================================================================
+  let protos = null;
+  function getProtos() {
+    if (protos) return protos;
+    protos = {
+      rtu: rtuProto(), fan: fanProto(), vent: ventProto(), drain: drainProto(),
+      sky: skylightProto(), hatch: hatchProto(), tank: tankProto(),
+    };
+    return protos;
+  }
+  const H = function (x, z, salt) {
+    if (CBZ.hash01) return CBZ.hash01(x, z, salt);
+    const n = Math.sin(x * 127.1 + z * 311.7 + salt * 0.017) * 43758.5453;
+    return n - Math.floor(n);
+  };
 
-    // Same trick utility_lines.js uses: join city/props.js's existing dusk
-    // driver (city._nightLamps, walked every frame at props.js:2115) instead
-    // of standing up a second lighting loop.
-    if (lampMesh && city._nightLamps) { try { city._nightLamps.push(lampMesh); } catch (e) { /* driver absent */ } }
+  let builtFor = null, livePools = [], liveGroups = new Map(), audit = null;
 
-    // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit).
-    // acBoxes and facadePlatforms are STRUCTURALLY 0 under the flag;
-    // roofItems is printed beside them so the separate roof discussion has
-    // an exact live count instead of being conflated with this facade purge.
-    if (CBZ.propPurgeCensus) {
-      CBZ.propPurgeCensus({
-        acBoxes: nAc,
-        facadePlatforms: nEsc,
-        roofItems: nHvac + nCond + nVent + nDuct + nTank + nDish + nAerial,
-        acRemoved: cutN,
-        facadePlatformsRemoved: cutEsc,
-      });
+  function dispose() {
+    for (const im of livePools) { if (im.parent) im.parent.remove(im); if (im.geometry) im.geometry.dispose(); }
+    livePools = []; liveGroups = new Map();
+  }
+
+  // what already stands on this roof, as circles + rects in WORLD xz
+  function blockers(b, lot, S) {
+    const circ = [], rect = [];
+    const rcx = b.roofCx != null ? b.roofCx : (S.x0 + S.x1) / 2;
+    const rcz = b.roofCz != null ? b.roofCz : (S.z0 + S.z1) / 2;
+    circ.push({ x: rcx, z: rcz, r: 2.8 });                              // spawn point / slab centre
+    if (b.helipad) circ.push({ x: b.helipad.x, z: b.helipad.z, r: (b.helipad.r || 6) + 1.6 });
+    if (b.lift && b.lift.roof) circ.push({ x: b.lift.roof.x, z: b.lift.roof.z, r: 3.4 });
+    const sr = b.shaftRects || [];
+    for (const r of sr) {
+      if (!r || !Number.isFinite(r.x0)) continue;
+      rect.push({ x0: b.ox + r.x0 - 1.6, x1: b.ox + r.x1 + 1.6, z0: b.oz + r.z0 - 1.6, z1: b.oz + r.z1 + 1.6 });
     }
+    if (b.fireEscape) circ.push({ x: b.ox + (b.fireEscape.side || 1) * (b.w / 2 - 1.3), z: b.fireEscape.z, r: 3.2 });
+    if (b.roofCrown) {
+      const c = b.roofCrown;
+      rect.push({ x0: b.ox + c.x0 - 1.0, x1: b.ox + c.x1 + 1.0, z0: b.oz + c.z0 - 1.0, z1: b.oz + c.z1 + 1.0 });
+    }
+    const st = CBZ.cityRoofStashes ? CBZ.cityRoofStashes() : null;
+    if (st) for (const s of st) if (s && s.b === b) circ.push({ x: s.x, z: s.z, r: 1.7 });
+    const ads = CBZ.cityAdBoards || [];
+    for (const a of ads) {
+      if (!a || a.kind !== "roof") continue;
+      if (a.x > S.x0 - 2 && a.x < S.x1 + 2 && a.z > S.z0 - 2 && a.z < S.z1 + 2) circ.push({ x: a.x, z: a.z, r: 4.0 });
+    }
+    return { circ: circ, rect: rect };
+  }
+
+  function buildRoofPlant(A) {
+    dispose();
+    if (!DK || !DK.proto || !DK.litMaterial) return;
+    const P = getProtos();
+    const pools = {
+      rtu: new Pools("rtu", P.rtu, true), fan: new Pools("fan", P.fan, true),
+      vent: new Pools("vent", P.vent, false, true), drain: new Pools("drain", P.drain, false, true),
+      sky: new Pools("skylight", P.sky, false), hatch: new Pools("hatch", P.hatch, false, true),
+      tank: new Pools("tank", P.tank, true),
+    };
+    const count = { roofs: 0, rtu: 0, fan: 0, vent: 0, drain: 0, sky: 0, hatch: 0, tank: 0, colliders: 0 };
+    const MAX = { rtu: 220, fan: 160, tank: 24, sky: 150, vent: 720, drain: 600, hatch: 200 };
+    const sets = [A.lots || []];
+    if (A.annex && A.annex.lots) sets.push(A.annex.lots);
+    const seen = new Set();
+    let collidersAdded = 0;
+
+    for (const set of sets) for (const lot of set) {
+      const b = lot && lot.building;
+      if (!b || b.park || !b.group || seen.has(b)) continue;
+      if (!(b.w > 5 && b.d > 5 && b.h > 2)) continue;
+      if (b.roofCrowned) continue;                    // dome / mansard / civic crown owns the roof
+      seen.add(b);
+      const wt = b.wt != null ? b.wt : 0.4;
+      const slabMinX = b.hasStairs ? (-b.w / 2 + wt + (b.stairW || 0)) : (-b.w / 2 + wt);
+      const gy = b.group.position ? b.group.position.y : 0;
+      const S = {
+        x0: b.ox + slabMinX, x1: b.ox + b.w / 2 - wt,
+        z0: b.oz - b.d / 2 + wt, z1: b.oz + b.d / 2 - wt,
+      };
+      const sw = S.x1 - S.x0, sd = S.z1 - S.z0;
+      if (sw < 3.5 || sd < 3.5) continue;
+      const Y = gy + b.h;                              // the membrane surface (slab top = storeys*FH)
+      const bl = blockers(b, lot, S);
+      const placed = [];
+      const ox = b.ox, oz = b.oz;
+      const longX = sw >= sd;
+      const derelict = !!(b.boarded || b.abandoned);
+      count.roofs++;
+
+      // is a footprint (world centre, half-extents incl. walkway) legal here?
+      const EDGE = 1.0;                                 // a fitter walks between plant and parapet
+      function fits(x, z, hx, hz, edge) {
+        const e = edge == null ? EDGE : edge;
+        if (x - hx < S.x0 + e || x + hx > S.x1 - e || z - hz < S.z0 + e || z + hz > S.z1 - e) return false;
+        for (const c of bl.circ) {
+          const dx = Math.max(Math.abs(x - c.x) - hx, 0), dz = Math.max(Math.abs(z - c.z) - hz, 0);
+          if (dx * dx + dz * dz < c.r * c.r) return false;
+        }
+        for (const r of bl.rect) if (x + hx > r.x0 && x - hx < r.x1 && z + hz > r.z0 && z - hz < r.z1) return false;
+        for (const q of placed) if (x + hx > q.x0 && x - hx < q.x1 && z + hz > q.z0 && z - hz < q.z1) return false;
+        return true;
+      }
+      function claim(x, z, hx, hz) { placed.push({ x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz }); }
+      // deterministic candidate walk over the slab (never rng: an order-free
+      // position hash, so a roof is dressed the same on every client)
+      function spot(salt, hx, hz, edge, tries) {
+        const n = tries || 28;
+        for (let k = 0; k < n; k++) {
+          const u = H(ox + k * 3.1, oz - k * 1.7, salt), v = H(oz + k * 2.3, ox + k * 0.9, salt + 7);
+          const x = S.x0 + hx + 1 + u * Math.max(0, sw - 2 * hx - 2);
+          const z = S.z0 + hz + 1 + v * Math.max(0, sd - 2 * hz - 2);
+          if (fits(x, z, hx, hz, edge)) return { x: x, z: z };
+        }
+        return null;
+      }
+      function solid(x, z, hx, hz, y1) {
+        if (!CBZ.colliders) return;
+        const c = { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz, y0: Y, y1: Y + y1, ref: null, noCam: true, noBreach: true };
+        CBZ.colliders.push(c);
+        if (Array.isArray(b.colliders)) b.colliders.push(c);
+        collidersAdded++;
+      }
+      const G = b.group;
+
+      // ---- DRAINS: one per ~140 m2, in the field, never under plant ------
+      const nDrain = Math.max(1, Math.min(4, Math.round(sw * sd / 140)));
+      for (let k = 0; k < nDrain && count.drain < MAX.drain; k++) {
+        const d = spot(0x5d10 + k * 13, 0.45, 0.45, 1.6, 20);
+        if (!d) continue;
+        pools.drain.add(d.x, Y, d.z, 0, 1, G); claim(d.x, d.z, 0.5, 0.5); count.drain++;
+      }
+
+      // ---- VENT STACKS: one cluster of 2-3 over the wet stack -------------
+      {
+        const c = spot(0x5d20, 0.7, 0.45, 0.8, 20);
+        if (c && count.vent < MAX.vent) {
+          const n = 2 + (H(ox, oz, 0x5d21) < 0.5 ? 1 : 0);
+          for (let i = 0; i < n; i++) {
+            const t = (i - (n - 1) / 2) * 0.55;
+            const vx = longX ? c.x + t : c.x + (i % 2 ? 0.18 : -0.1);
+            const vz = longX ? c.z + (i % 2 ? 0.18 : -0.1) : c.z + t;
+            pools.vent.add(vx, Y, vz, 0, 0.8 + H(vx, vz, 0x5d22) * 0.6, G); count.vent++;
+          }
+          claim(c.x, c.z, 0.9, 0.6);
+        }
+      }
+      if (derelict) continue;                          // a dead building keeps its drains and stacks, nothing live
+
+      // ---- ROOF HATCH where no stair reaches the roof ----------------------
+      if (!b.hasStairs && sw * sd > 30 && count.hatch < MAX.hatch) {
+        const hs = spot(0x5d30, 0.55, 0.6, 1.2, 20);
+        if (hs) { pools.hatch.add(hs.x, Y, hs.z, longX ? 0 : Math.PI / 2, 1, G); claim(hs.x, hs.z, 0.9, 1.2); count.hatch++; }
+      }
+
+      // ---- PACKAGED ROOFTOP UNITS, sized to the floor area they serve ------
+      const area = sw * sd;
+      const nRtu = area < 60 ? 0 : area < 170 ? 1 : area < 380 ? 2 : 3;
+      const ry = longX ? 0 : Math.PI / 2;
+      const hx = longX ? 1.75 : 1.1, hz = longX ? 1.1 : 1.75;       // unit + gas line + a service aisle
+      for (let k = 0; k < nRtu && count.rtu < MAX.rtu; k++) {
+        const r = spot(0x5d40 + k * 17, hx + 0.6, hz + 0.6, 1.0, 36);
+        if (!r) break;
+        const flip = H(r.x, r.z, 0x5d41) < 0.5 ? Math.PI : 0;        // which way the condenser end faces
+        pools.rtu.add(r.x, Y, r.z, ry + flip, 1, G);
+        claim(r.x, r.z, hx + 0.6, hz + 0.6);
+        solid(r.x, r.z, longX ? 1.18 : 0.64, longX ? 0.64 : 1.18, 1.6);
+        count.rtu++;
+      }
+
+      // ---- EXHAUST FAN ------------------------------------------------------
+      if (area > 45 && count.fan < MAX.fan && H(ox, oz, 0x5d50) < 0.75) {
+        const f = spot(0x5d51, 0.9, 0.9, 1.0, 24);
+        if (f) { pools.fan.add(f.x, Y, f.z, 0, 1, G); claim(f.x, f.z, 0.9, 0.9); solid(f.x, f.z, 0.36, 0.36, 0.95); count.fan++; }
+      }
+
+      // ---- SKYLIGHTS: a row down the long axis of a low-rise ----------------
+      if (b.storeys <= 4 && area > 110 && count.sky < MAX.sky && H(ox, oz, 0x5d60) < 0.4) {
+        const n = area > 260 ? 3 : 2, step = 2.4;
+        const run = (n - 1) * step;
+        const s0 = spot(0x5d61, (longX ? run / 2 : 0) + 1.2, (longX ? 0 : run / 2) + 1.2, 1.2, 24);
+        if (s0) {
+          for (let i = 0; i < n; i++) {
+            const t = -run / 2 + i * step;
+            const sx = longX ? s0.x + t : s0.x, sz = longX ? s0.z : s0.z + t;
+            pools.sky.add(sx, Y, sz, 0, 1, G); solid(sx, sz, 0.58, 0.58, 0.62); count.sky++;
+          }
+          claim(s0.x, s0.z, (longX ? run / 2 : 0) + 1.2, (longX ? 0 : run / 2) + 1.2);
+        }
+      }
+
+      // ---- WATER TANK: rare, the 3-6 storey stock that really carries them --
+      if (b.storeys >= 3 && b.storeys <= 6 && area >= 120 && count.tank < MAX.tank && H(ox, oz, 0x5d70) < 0.16) {
+        const t = spot(0x5d71, 1.9, 1.9, 1.0, 30);
+        if (t) {
+          pools.tank.add(t.x, Y, t.z, H(t.x, t.z, 0x5d72) * Math.PI * 0.5, 1, G);
+          claim(t.x, t.z, 1.9, 1.9); solid(t.x, t.z, 1.3, 1.3, 5.9); count.tank++;
+        }
+      }
+    }
+
+    const root = A.root || CBZ.scene;
+    const byGroup = new Map();
+    for (const k in pools) pools[k].build(root, livePools, byGroup);
+    liveGroups = byGroup;
+    count.colliders = collidersAdded;
+    if (collidersAdded && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    count.pools = livePools.length;
+    audit = count;
+    if (CBZ.propPurgeCensus) {
+      try { CBZ.propPurgeCensus({ roofItems: count.rtu + count.fan + count.tank + count.sky + count.hatch }); } catch (e) { /* census optional */ }
+    }
+  }
+
+  // a building that collapses (demolition.js / structural.js hide its group
+  // through batchHideGroup) takes its roof plant with it, and gets it back on
+  // a rebuild. Wrapped once, markers copied forward, chain-safe.
+  function wrapHide() {
+    const hide = CBZ.batchHideGroup, show = CBZ.batchShowGroup;
+    if (typeof hide === "function" && !hide._roofPlantWrapped) {
+      const w = function (top) {
+        const r = hide.apply(this, arguments);
+        const a = liveGroups.get(top);
+        if (a) { for (const e of a) { e.im.setMatrixAt(e.i, _zero); e.im.instanceMatrix.needsUpdate = true; } }
+        return r;
+      };
+      for (const k in hide) if (/Wrapped$/.test(k)) w[k] = hide[k];
+      w._roofPlantWrapped = true;
+      CBZ.batchHideGroup = w;
+    }
+    if (typeof show === "function" && !show._roofPlantWrapped) {
+      const w2 = function (top) {
+        const r = show.apply(this, arguments);
+        const a = liveGroups.get(top);
+        if (a) { for (const e of a) { e.im.setMatrixAt(e.i, e.m); e.im.instanceMatrix.needsUpdate = true; } }
+        return r;
+      };
+      for (const k in show) if (/Wrapped$/.test(k)) w2[k] = show[k];
+      w2._roofPlantWrapped = true;
+      CBZ.batchShowGroup = w2;
+    }
+  }
+
+  // AFTER elevators.js (36.6) and roofloot.js (36.7) have claimed their roof
+  // ground in the same first city frame; re-dressed when the arena is rebuilt.
+  if (CBZ.onUpdate) CBZ.onUpdate(36.8, function () {
+    const g = CBZ.game;
+    if (!g || g.mode !== "city") return;
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.lots || A === builtFor) return;
+    builtFor = A;
+    wrapHide();
+    try { buildRoofPlant(A); } catch (e) { console.error("[roof plant]", e); }
   });
+  // what stands on the city's roofs, for the console and the gates
+  CBZ.roofPlantAudit = function () { return audit ? Object.assign({}, audit) : null; };
 
   // =====================================================================
   //  THE PRISON FACADE PASS  (PRISON_DRESS_V2)

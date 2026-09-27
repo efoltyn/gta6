@@ -17,8 +17,9 @@
        situations in the network, so there are no ONE WAY / YIELD signs.
      • Bollards guarding plaza corners and shopfronts.
      • Kerb-inlet storm drains where gutter water would actually go.
-     • Alley life at the BACK of buildings: dumpsters, bagged trash,
-       stacked pallets, crates, and site barriers.
+     • The BACK of a building: its dumpster and the bagged trash beside it
+       (the pallet / crate-stack / site-barrier scatter was deleted in the
+       2026-09-27 de-slop: props with no reason to be there).
      • Chained bikes leaning on poles and railings.
      • The fine grain: kerbside litter and weeds in the joints. This is
        the first thing to go on a weak GPU and the first thing you miss
@@ -26,8 +27,8 @@
 
    DRAW-CALL BUDGET
      sign posts 1 · sign faces 1 (atlas) · bollards 1 · storm drains 1 ·
-     dumpsters 1 · trash bags 1 · pallets 1 · crates 1 · barriers 1 ·
-     bikes 1 · litter 1 · weeds 1  =  12 draws (+3 shadow casters).
+     dumpsters 1 · trash bags 1 · bikes 1 · litter 1 · weeds 1
+     =  9 draws (+2 shadow casters).
 
    Determinism: positions and every variant choice come from
    CBZ.hash01 — no rng draws, so no sibling module's stream is shifted.
@@ -203,7 +204,9 @@
   // consuming sheet rather than one per sign.
   DK.signAtlas = signAtlas;
   DK.signAtlasGrid = GRID;
-  DK.signAtlasCells = { NUM_0: NUM_0, NUM_N: NUM_N, RECT_BACK: C_RECT_BACK, NAME_0: NAME_0, NAME_N: NAME_N };
+  DK.signAtlasCells = { NUM_0: NUM_0, NUM_N: NUM_N, RECT_BACK: C_RECT_BACK, NAME_0: NAME_0, NAME_N: NAME_N, BUS: C_BUS, HYDRANT: C_HYDRANT };
+  // exact-plate UVs of a cell (city/props.js hangs the BUS STOP flag sign with it)
+  DK.signFaceUV = function (i, rect) { return faceUV(i, rect); };
 
   // =====================================================================
   //  PROTOTYPES
@@ -240,16 +243,30 @@
     return p.done();
   }
   function dumpsterProto() {
+    // A 3-yard front-load container: the body flares out toward the top with
+    // the sloped front a truck's forks lift from, steel fork POCKETS down both
+    // flanks, a top rail, two black plastic lids (one propped on the other),
+    // a drain plug, four swivel castors and a weathered hauler panel.
     const p = DK.proto();
-    p.box(1.98, 1.12, 1.12, 0x2f6a4b, 0, 0.66, 0);
-    p.box(2.04, 0.1, 1.18, 0x24523a, 0, 1.24, 0);           // rim
-    p.box(0.96, 0.07, 1.14, 0x3b7a58, -0.5, 1.32, 0.02, -0.16, 0, 0);   // left lid (ajar)
-    p.box(0.96, 0.07, 1.14, 0x3b7a58, 0.5, 1.29, -0.02, 0.09, 0, 0);    // right lid
-    p.box(2.02, 0.16, 0.06, 0x22462f, 0, 0.9, 0.57);        // side rib
-    for (let s = -1; s <= 1; s += 2) for (let t = -1; t <= 1; t += 2) {
-      p.box(0.2, 0.2, 0.08, 0x1c1e21, s * 0.82, 0.11, t * 0.45);   // castors
+    const BODY = 0x2f5e46, DARK = 0x234634, LID = 0x1b1c1e, STEEL = 0x3a3d40;
+    p.box(1.9, 0.9, 1.0, BODY, 0, 0.64, -0.06);                         // lower body
+    p.box(1.9, 0.42, 0.6, BODY, 0, 1.04, 0.2, -0.42, 0, 0);            // sloped front
+    p.box(1.96, 0.36, 1.16, BODY, 0, 1.06, -0.02);                      // upper body
+    p.box(2.0, 0.06, 1.22, DARK, 0, 1.26, -0.02);                       // top rail
+    for (let s = -1; s <= 1; s += 2) {
+      p.box(0.14, 0.14, 1.26, STEEL, s * 1.03, 0.9, -0.02);            // fork pocket
+      p.box(0.08, 0.1, 0.9, DARK, s * 0.99, 0.42, -0.06);               // side rib
     }
-    p.box(0.5, 0.34, 0.02, 0xd9d2b4, 0.55, 0.68, 0.565);    // grubby stencil panel
+    p.box(0.97, 0.05, 1.2, LID, -0.49, 1.31, -0.02);                    // lid, shut
+    p.box(0.97, 0.05, 1.2, LID, 0.49, 1.36, -0.08, -0.12, 0, 0);       // lid, propped
+    for (let k = -2; k <= 2; k++) p.box(0.9, 0.012, 0.04, 0x26282b, 0.49, 1.39, -0.08 + k * 0.22, -0.12, 0, 0);  // lid ribs
+    for (let s = -1; s <= 1; s += 2) for (let t = -1; t <= 1; t += 2) {
+      p.box(0.12, 0.06, 0.12, STEEL, s * 0.8, 0.2, t * 0.38 - 0.06);   // castor plate
+      p.cyl(0.08, 0.08, 0.06, 8, 0x151618, s * 0.8, 0.09, t * 0.38 - 0.06, 0, 0, Math.PI / 2);   // wheel
+    }
+    p.cyl(0.035, 0.035, 0.05, 6, STEEL, 0.7, 0.3, -0.58, Math.PI / 2, 0, 0);   // drain plug
+    p.box(0.62, 0.3, 0.012, 0xcfc6a6, 0.5, 0.74, 0.456);                // hauler panel
+    p.box(0.52, 0.05, 0.004, 0x5a2a22, 0.5, 0.8, 0.464);                // its lettering band
     return p.done();
   }
   function bagProto() {
@@ -261,36 +278,6 @@
     p.sphere(0.25, 5, 3, 0x1e2024, 0.36, 0.2, 0.14);
     p.sphere(0.22, 5, 3, 0x2a2c31, -0.28, 0.18, -0.16);
     p.cone(0.09, 0.2, 4, 0x24262a, 0, 0.5, 0);              // knotted top
-    return p.done();
-  }
-  function palletProto() {
-    const p = DK.proto();
-    for (let i = 0; i < 3; i++) p.box(1.16, 0.07, 0.14, 0xa8895e, 0, 0.035, (i - 1) * 0.34);
-    for (let i = 0; i < 3; i++) p.box(0.12, 0.09, 0.9, 0x8d7049, (i - 1) * 0.48, 0.12, 0);
-    for (let i = 0; i < 4; i++) p.box(1.16, 0.06, 0.11, 0xb59268, 0, 0.2, (i - 1.5) * 0.28);
-    return p.done();
-  }
-  function crateProto() {
-    const p = DK.proto();
-    p.box(0.86, 0.7, 0.72, 0x9c7f56, 0, 0.35, 0);
-    p.box(0.9, 0.06, 0.06, 0x7a6142, 0, 0.66, 0.36);
-    p.box(0.9, 0.06, 0.06, 0x7a6142, 0, 0.06, 0.36);
-    p.box(0.06, 0.7, 0.06, 0x7a6142, 0.42, 0.35, 0.36);
-    p.box(0.06, 0.7, 0.06, 0x7a6142, -0.42, 0.35, 0.36);
-    p.box(0.34, 0.22, 0.01, 0xd8cba8, 0, 0.4, 0.365);       // shipping label
-    return p.done();
-  }
-  function barrierProto() {
-    // The orange/white A-frame every roadworks in the world uses.
-    const p = DK.proto();
-    p.box(1.5, 0.2, 0.05, 0xdd6a1e, 0, 0.86, 0);
-    p.box(1.5, 0.2, 0.05, 0xdd6a1e, 0, 0.5, 0);
-    for (let i = -1; i <= 1; i++) p.box(0.15, 0.2, 0.055, 0xeeeae2, i * 0.46, 0.86, 0.002);
-    for (let i = -1; i <= 1; i++) p.box(0.15, 0.2, 0.055, 0xeeeae2, i * 0.46 + 0.23, 0.5, 0.002);
-    p.box(0.07, 1.0, 0.07, 0x9aa0a2, -0.66, 0.5, 0.14, 0.2, 0, 0);
-    p.box(0.07, 1.0, 0.07, 0x9aa0a2, 0.66, 0.5, 0.14, 0.2, 0, 0);
-    p.box(0.07, 1.0, 0.07, 0x9aa0a2, -0.66, 0.5, -0.14, -0.2, 0, 0);
-    p.box(0.07, 1.0, 0.07, 0x9aa0a2, 0.66, 0.5, -0.14, -0.2, 0, 0);
     return p.done();
   }
   function bikeProto() {
@@ -337,23 +324,13 @@
   DK.register(20, "street-furniture", function (city, DK) {
     if (CBZ.CONFIG.DETAIL_STREET_FURNITURE === false) return;
     const root = city.root;
-    // PROPS_PURGE_V1 (city/props.js owns the flag and the ALLEY LAW). What this
-    // pass stopped doing:
-    //   CUT — the site BARRIER. An orange A-frame is a work zone, and there is
-    //     no work: no dig, no cone taper, no plate, nothing it is guarding. It
-    //     was a 1.5m SOLID standing at the back of a building — i.e. the single
-    //     worst thing in this file for the owner's complaint, and the only one
-    //     with neither a verb nor a reason.
-    //   THINNED — pallet stacks 1-3 -> 1. A 3-high stack is 0.78m of geometry
-    //     with NO collider, which is the decoy world/clutter.js's own header
-    //     bans by name; one pallet is 0.26m, under physics.js's 0.45 STEP_UP,
-    //     so walking over it is honest.
-    //   GATED — dumpster, crate and bollard now declare their collider and
-    //     half-width to CBZ.alleyOk through DK.free, so at most ONE of them can
-    //     stand in any 14m of alley and only where it leaves a 2.4m run. The
-    //     flat grain (litter, weeds, drains) opts OUT: a stain is not a prop
-    //     and must not spend an alley's budget.
-    const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
+    // What this pass no longer does: the site BARRIER (a work zone with no
+    // work), the pallet stacks and the crate-on-a-crate at back walls are all
+    // gone (2026-09-27 de-slop). Dumpster and bollard declare their collider
+    // and half-width to CBZ.alleyOk through DK.free, so at most ONE solid can
+    // stand in any 14 m of alley and only where it leaves a 2.4 m run. The
+    // flat grain (litter, weeds, drains) opts OUT: a stain is not a prop and
+    // must not spend an alley's budget.
     // Seat everything on the DRAWN street surface: the landmass floor
     // (DK.groundY) is 0 across the city, but the footway is a raised slab
     // (city.street.heightAt: road, gutter, kerb, footway). Posts, bollards
@@ -378,9 +355,6 @@
     const drains = DK.batch("storm-drain", drainProto(), { cls: "fine", cast: false });
     const dumps = DK.batch("dumpster", dumpsterProto(), { cls: "solid", cast: true });
     const bags = DK.batch("trash-bags", bagProto(), { cls: "fine", cast: false });
-    const pallets = DK.batch("pallets", palletProto(), { cls: "decor", cast: false });
-    const crates = DK.batch("crate", crateProto(), { cls: "decor", cast: true });
-    const barriers = DK.batch("barrier", barrierProto(), { cls: "solid", cast: false });
     const bikes = DK.batch("bike", bikeProto(), { cls: "decor", cast: false });
     const litter = DK.batch("litter", litterProto(), { cls: "fine", cast: false });
     const weeds = DK.batch("weeds", weedProto(), { cls: "fine", cast: false });
@@ -619,9 +593,8 @@
     // Fronts are for shops; backs are for bins. Dressing the rear faces is
     // what makes a block feel inhabited rather than extruded, and it costs
     // nothing where the player rarely looks straight on.
-    let dumpN = 0, bagN = 0, palN = 0, crateN = 0, barN = 0;
-    const DUMP_MAX = DK.count(55), BAG_MAX = DK.count(110), PAL_MAX = DK.count(70),
-      CRATE_MAX = DK.count(95), BAR_MAX = PURGED ? 0 : DK.count(32);
+    let dumpN = 0, bagN = 0;
+    const DUMP_MAX = DK.count(55), BAG_MAX = DK.count(110);
     DK.eachBuilding(city, function (bi) {
       const facesOf = DK.buildingFaces(bi);
       // rank faces: never the door face, prefer the one facing away from any road
@@ -666,39 +639,11 @@
           }
         }
       }
-      // pallets / crates / a site barrier further along the same wall
-      const h2 = DK.h01(bi.z, bi.x, 0x4447);
-      const ox2 = baseX - tx * (face.span * 0.26), oz2 = baseZ - tz * (face.span * 0.26);
-      // 0.6 = the crate's own half-extent, which is the largest thing this
-      // branch can produce; a pallet and a barrier are both smaller.
-      if (DK.free(ox2, oz2, { doorR: 3.0, ring: 1, alley: { solid: h2 >= 0.30, r: 0.6 } })) {
-        const yaw = Math.atan2(face.nx, face.nz) + DK.h11(ox2, oz2, 0x4448) * 0.35;
-        if (h2 < 0.30 && palN < PAL_MAX) {
-          // ONE pallet, flat. See the purge note at the top of the pass: a
-          // 3-high stack is 0.78m of walk-through geometry.
-          const stack = PURGED ? 1 : 1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0);
-          if (PURGED) cutN += (1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0)) - 1;
-          for (let k = 0; k < stack; k++) pallets.add(ox2, gY(ox2, oz2) + k * 0.26, oz2, { ry: yaw + k * 0.06 });
-          DK.claim(ox2, oz2); palN++;
-        } else if (h2 < 0.62 && crateN < CRATE_MAX) {
-          crates.add(ox2, gY(ox2, oz2), oz2, { ry: yaw, tint: 0.9 + DK.h01(ox2, oz2, 0x444a) * 0.2 });
-          if (DK.h01(oz2, ox2, 0x444b) < 0.45 && crateN + 1 < CRATE_MAX) {
-            crates.add(ox2 + tx * 0.15, gY(ox2, oz2) + 0.7, oz2 + tz * 0.15, { ry: yaw + 0.4, sx: 0.82, sy: 0.82, sz: 0.82 });
-            crateN++;
-          }
-          DK.solid(ox2, oz2, 0.48, 0.48, null);
-          DK.claim(ox2, oz2); crateN++;
-        } else if (h2 < 0.72) {
-          // PURGED: the site barrier. A work zone with no work — see the note
-          // at the top of the pass. BAR_MAX is 0 under the flag, so the whole
-          // slice draws nothing and the alley simply has a gap in it.
-          if (barN < BAR_MAX) {
-            barriers.add(ox2, gY(ox2, oz2), oz2, { ry: yaw + Math.PI / 2 });
-            DK.solid(ox2, oz2, 0.28, 0.75, null);
-            DK.claim(ox2, oz2); barN++;
-          } else if (PURGED) cutN++;
-        }
-      }
+      // DE-SLOP (2026-09-27): no pallets, crate stacks or site barriers at the
+      // back wall any more. A lone pallet, a crate with a second crate balanced
+      // on it, a roadworks A-frame guarding nothing: props with no reason to be
+      // there, which is exactly what the owner called slop. The dumpster and
+      // its bags (a building's real waste point) are what an alley keeps.
     });
 
     // =====================================================================
@@ -766,13 +711,10 @@
     drains.build(root);
     dumps.build(root);
     bags.build(root);
-    pallets.build(root);
-    crates.build(root);
-    barriers.build(root);
     bikes.build(root);
     litter.build(root);
     weeds.build(root);
     // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit)
-    if (CBZ.propPurgeCensus) CBZ.propPurgeCensus({ alleyRemoved: cutN, alleySolids: dumpN + crateN + barN + bollN });
+    if (CBZ.propPurgeCensus) CBZ.propPurgeCensus({ alleyRemoved: cutN, alleySolids: dumpN + bollN });
   });
 })();

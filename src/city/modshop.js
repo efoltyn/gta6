@@ -1233,7 +1233,7 @@
     }
     m.ammo = TUNE.launcherAmmoMax;
     if (CBZ.sfx) CBZ.sfx("reload");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded · " + m.ammo + " ready.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded, " + m.ammo + " ready.", 1.6);
   }
   function doRespray(car) {
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.respray))) {
@@ -1251,7 +1251,7 @@
     // a visual swap orphaned our attachments — re-dress.
     if (car.mods) applyMods(car);
     if (CBZ.sfx) CBZ.sfx("switch");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " · looks clean.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + ", looks clean.", 1.8);
     renderPanelSafe();
   }
   function recolor(car, col) {
@@ -1320,5 +1320,281 @@
     if (g.mode !== "city") return;
     registerZone();
   });
+
+  /* ==========================================================================
+     THE GARAGE ITSELF (2026-09-27 de-slop). The chop shop / mod garage used to
+     be a car DEALERSHIP inside (turntable pads, price placards) with a wall of
+     painted "tyre" blocks. It is a working shop floor now, drawn lazily for
+     the one garage you are at, merged through CBZ.storeFixtureKit:
+       • sealed grey concrete over the slab, painted bay lines, a trench drain,
+         oil stains where cars have stood;
+       • the MOD BAY (at the modZone the menu opens from): a two-post
+         clear-floor lift (base plates, 3 m columns, overhead beam and
+         hydraulic line, four swing arms with pads, the power unit);
+       • the CHOP BAY (at the chopZone): bare floor, a trolley jack and axle
+         stands;
+       • rolling tool chests, a steel workbench with a vise under a pegboard of
+         tools, a two-tier tyre rack of real tyres, an air compressor with its
+         tank, belt guard and a hose reel, oil drums;
+       • the service desk dressed on the room's counter (till, parts binder);
+       • LED battens hung from the ceiling (the fit-out puts none in a chop
+         shop): the tubes are the only thing that glows.
+     ========================================================================== */
+  const GAR = { built: null, group: null, bounds: null, stats: null };
+  function tyre(k, x, y, z, ry) {
+    k.torus(x, y, z, 0.26, 0.085, 0x141414, "solid", 0, ry, 0, null, 16);
+    k.cyl(x, y, z, 0.2, 0.2, 0.16, 0x1c1c1c, "solid", 0, ry - Math.PI / 2, Math.PI / 2, 12);     // sidewall/bead face
+  }
+  function buildGarage(lot) {
+    const KIT = CBZ.storeFixtureKit;
+    const b = lot.building;
+    const dr = b.localDoor || b.door;
+    if (!KIT || !dr || dr.nx == null || !b.w || !b.d) return false;
+    const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+    const wt = b.wt != null ? b.wt : 0.4;
+    const inx = dr.nx, inz = dr.nz, tx = -inz, tz = inx;
+    const along = Math.abs(inx) > 0.5;
+    const halfIn = (along ? b.w : b.d) / 2, halfTan = (along ? b.d : b.w) / 2;
+    const FF = (Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;   // no fit-out floor here: the slab IS the floor
+    const CEIL = ((Array.isArray(b.floorTops) && b.floorTops[1] != null) ? b.floorTops[1] : FF + (b.FH || 4.6)) - 0.212;
+    const W = function (lat, dep) { return { x: ox + tx * lat + inx * (dep - halfIn), z: oz + tz * lat + inz * (dep - halfIn) }; };
+    const LD = function (x, z) { const dx = x - ox, dz = z - oz; return { lat: dx * tx + dz * tz, dep: dx * inx + dz * inz + halfIn }; };
+    const yawF = function (dLat, dDep) { return Math.atan2(tx * dLat + inx * dDep, tz * dLat + inz * dDep); };
+    const k = KIT.create();
+    const at = function (lat, dep, dLat, dDep) { const p = W(lat, dep); k.frame(p.x, FF, p.z, yawF(dLat, dDep)); };
+    const Tf = halfTan - wt, back = 2 * halfIn - wt;
+    const cols = [];
+    const collide = function (l0, l1, d0, d1, y1) {
+      const a = W(l0, d0), q = W(l1, d1);
+      const r = { minX: Math.min(a.x, q.x), maxX: Math.max(a.x, q.x), minZ: Math.min(a.z, q.z), maxZ: Math.max(a.z, q.z), y0: 0, y1: FF + y1 };
+      if (CBZ.colliders) { CBZ.colliders.push(r); cols.push(r); }
+    };
+    const occ = [];
+    const take = function (l0, l1, d0, d1) { occ.push([Math.min(l0, l1), Math.max(l0, l1), Math.min(d0, d1), Math.max(d0, d1)]); };
+    const free = function (l0, l1, d0, d1) {
+      const a0 = Math.min(l0, l1), a1 = Math.max(l0, l1), c0 = Math.min(d0, d1), c1 = Math.max(d0, d1);
+      if (a0 < -Tf - 0.01 || a1 > Tf + 0.01 || c0 < wt - 0.01 || c1 > back + 0.01) return false;
+      for (let i = 0; i < occ.length; i++) { const o = occ[i]; if (a1 > o[0] && a0 < o[1] && c1 > o[2] && c0 < o[3]) return false; }
+      if (typeof b.clearFloorPoint === "function") {
+        const pts = [[(a0 + a1) / 2, (c0 + c1) / 2], [a0, c0], [a1, c0], [a0, c1], [a1, c1]];
+        for (let i = 0; i < pts.length; i++) { const p = W(pts[i][0], pts[i][1]); if (!b.clearFloorPoint(p.x - ox, p.z - oz, 0.05)) return false; }
+      }
+      return true;
+    };
+
+    // ---- the floor: sealed concrete, trench drain, stains ----
+    at(0, halfIn, 0, -1);
+    k.box(0, 0.004, 0, 2 * Tf, 0.008, 2 * halfIn - 2 * wt, 0x8e8c86, "gloss");
+    k.box(0, 0.0085, halfIn - wt - 1.2, 2 * Tf - 0.4, 0.002, 0.12, 0x2a2a2a, "metal");   // trench drain grate near the door
+    const rr = KIT.rng(Math.round(ox * 11 + oz * 3));
+    for (let i = 0; i < 7; i++) k.cyl((rr() - 0.5) * (2 * Tf - 2), 0.0092, (rr() - 0.5) * (2 * halfIn - 4), 0.3 + rr() * 0.5, 0.3 + rr() * 0.5, 0.001, 0x6a6862, "gloss", 0, 0, 0, 14);
+
+    // ---- the service desk (the room's counter) + its queue/staff side ----
+    const C = KIT.counterOf(lot);
+    if (C) {
+      const cc = LD(C.x, C.z), hl = (along ? C.d : C.w) / 2, hd = (along ? C.w : C.d) / 2;
+      take(cc.lat - hl - 0.4, cc.lat + hl + 0.4, cc.dep - hd - 1.2, back);
+      const Lc = Math.max(C.w, C.d), D = Math.min(C.w, C.d);
+      k.frame(C.x, 0, C.z, KIT.yawOf(C.tx, C.tz));
+      const top = KIT.dressCounter(k, Lc, D, C.top, FF, { clad: 0x3a3e44, trim: 0x9aa0a6, work: 0x2a2c30, kick: 0x121214, workKind: "metal" });
+      KIT.till(k, -Lc / 2 + 0.55, top, D);
+      k.box(Lc / 2 - 0.45, top + 0.03, 0.05, 0.32, 0.06, 0.26, 0x1c3a6a);           // parts binder
+      k.box(Lc / 2 - 0.45, top + 0.061, 0.05, 0.3, 0.002, 0.24, 0xf2f0e8);
+    }
+    take(-1.5, 1.5, 0, 3.0);                                                        // the doorway lane
+
+    // ---- THE MOD BAY: a two-post lift at the modZone ----
+    const mz = b.modZone ? LD(b.modZone.x, b.modZone.z) : { lat: Tf - 3, dep: 6.6 };
+    const bayLat = Math.max(-(Tf - 2.4), Math.min(Tf - 2.4, mz.lat));
+    const bayDep = Math.max(3.4, Math.min(back - 3.2, mz.dep));
+    let lift = false;
+    if (Tf >= 3.0 && back > 7 && free(bayLat - 2.1, bayLat + 2.1, bayDep - 2.8, bayDep + 2.8)) {
+      lift = true;
+      take(bayLat - 2.1, bayLat + 2.1, bayDep - 2.8, bayDep + 2.8);
+      at(bayLat, bayDep, 0, -1);                                                    // local X across the bay, Z toward the door
+      const H = Math.min(3.9, CEIL - FF - 0.1), steel = 0x2a4a8a, dark = 0x1c1e22;
+      for (const e of [-1, 1]) {
+        const x = e * 1.62;
+        k.box(x, 0.012, 0, 0.62, 0.024, 0.62, 0x5a5c60, "metal");                   // base plate
+        k.box(x, H / 2, 0, 0.3, H, 0.34, steel, "gloss");                           // column
+        k.box(x - e * 0.155, H / 2, 0, 0.012, H - 0.1, 0.2, dark);                  // carriage slot
+        k.box(x - e * 0.2, 0.18, 0, 0.14, 0.2, 0.3, 0x6a6c70, "metal");             // carriage
+        for (const zz of [-1, 1]) {                                                 // swing arms + pads, parked open
+          const a = zz * 0.5 * e;
+          k.box(x - e * 0.6, 0.14, zz * 0.32, 1.0, 0.07, 0.1, 0x6a6c70, "metal", 0, a, 0);
+          k.cyl(x - e * 1.05, 0.2, zz * 0.62, 0.07, 0.07, 0.06, 0x121212, "solid", 0, 0, 0, 12);
+        }
+        k.box(x, 0.004, 0, 0.2, 0.008, 5.0, 0xe0b41a);                              // bay line along the post
+      }
+      k.box(0, H - 0.08, 0, 3.6, 0.16, 0.2, steel, "gloss");                        // overhead beam
+      k.cyl(0, H - 0.2, 0.12, 0.012, 0.012, 3.3, 0x121212, "solid", 0, 0, Math.PI / 2, 6);   // hydraulic line
+      k.box(1.62 + 0.3, 1.1, 0.1, 0.24, 0.5, 0.3, 0x1c1e22, "gloss");               // power unit: motor + tank
+      k.cyl(1.62 + 0.3, 1.45, 0.1, 0.08, 0.08, 0.2, 0x3a3c40, "metal", 0, 0, 0, 12);
+      k.box(1.62 + 0.28, 1.2, 0.26, 0.05, 0.08, 0.02, 0xd8d6cc);                    // up/down button
+      k.box(0, 0.004, 2.5, 3.6, 0.008, 0.12, 0xe0b41a);                              // stop line at the bay mouth
+      collide(bayLat - 1.8, bayLat - 1.45, bayDep - 0.2, bayDep + 0.2, H);
+      collide(bayLat + 1.45, bayLat + 1.8, bayDep - 0.2, bayDep + 0.2, H);
+    }
+
+    // ---- THE CHOP BAY: bare floor, a trolley jack, axle stands ----
+    const cz0 = b.chopZone ? LD(b.chopZone.x, b.chopZone.z) : { lat: 0, dep: 5 };
+    const cbLat = Math.max(-(Tf - 2.0), Math.min(Tf - 2.0, cz0.lat)), cbDep = Math.max(3.2, Math.min(back - 3.0, cz0.dep));
+    if (free(cbLat - 1.6, cbLat + 1.6, cbDep - 2.5, cbDep + 2.5)) {
+      take(cbLat - 1.6, cbLat + 1.6, cbDep - 2.5, cbDep + 2.5);
+      at(cbLat, cbDep, 0, -1);
+      for (const e of [-1, 1]) k.box(e * 1.5, 0.004, 0, 0.1, 0.008, 4.8, 0xe0b41a);
+      // trolley jack parked at the bay side
+      at(cbLat + 1.25, cbDep - 1.6, 0, -1);
+      k.box(0, 0.09, 0, 0.3, 0.1, 0.62, 0xb81c1c, "gloss");
+      for (const e of [-1, 1]) for (const zz of [-0.24, 0.24]) k.cyl(e * 0.14, 0.045, zz, 0.045, 0.045, 0.03, 0x121212, "solid", 0, 0, Math.PI / 2, 10);
+      k.cyl(0, 0.16, 0.34, 0.06, 0.06, 0.04, 0x3a3a3a, "metal", 0, 0, 0, 12);   // saddle
+      k.cyl(0, 0.5, -0.55, 0.015, 0.015, 0.9, 0x9aa0a6, "metal", 0.9, 0, 0, 6);    // handle
+      for (let i = 0; i < 2; i++) {                                                 // axle stands
+        at(cbLat - 1.25, cbDep - 1.3 + i * 0.45, 0, -1);
+        for (let j = 0; j < 4; j++) k.box(Math.cos(j * Math.PI / 2) * 0.1, 0.18, Math.sin(j * Math.PI / 2) * 0.1, 0.03, 0.38, 0.03, 0xb81c1c, "gloss", Math.sin(j * Math.PI / 2) * 0.25, 0, -Math.cos(j * Math.PI / 2) * 0.25);
+        k.cyl(0, 0.42, 0, 0.025, 0.025, 0.2, 0x9aa0a6, "metal", 0, 0, 0, 8);
+        k.box(0, 0.53, 0, 0.1, 0.03, 0.05, 0x3a3a3a, "metal");
+      }
+    }
+
+    // ---- WALL KIT along both side walls: chests, bench, compressor, drums; tyres on the back wall
+    const wallRun = function (side, dFrom, dTo, pieces) {
+      let d = dFrom;
+      for (let i = 0; i < pieces.length; i++) {
+        const P2 = pieces[i];
+        while (d + P2.len <= dTo && !free(side * (Tf - P2.deep), side * Tf, d, d + P2.len)) d += 0.25;
+        if (d + P2.len > dTo) break;
+        take(side * (Tf - P2.deep - 0.3), side * Tf, d, d + P2.len);
+        at(side * Tf, d + P2.len / 2, -side, 0);                                    // local +Z = the room, X along the wall
+        P2.draw();
+        collide(side * (Tf - P2.deep), side * Tf, d, d + P2.len, P2.h);
+        d += P2.len + 0.35;
+      }
+    };
+    const chest = { len: 1.4, deep: 0.62, h: 1.5, draw: function () {
+      const red = 0xb01c1c;
+      k.box(0, 0.08, 0.31, 1.36, 0.1, 0.5, 0x1c1c1c);                                // casters base
+      for (const e of [-0.6, 0.6]) for (const zz of [0.12, 0.5]) k.cyl(e, 0.05, zz, 0.045, 0.045, 0.04, 0x121212, "solid", 0, 0, Math.PI / 2, 10);
+      k.box(0, 0.55, 0.31, 1.36, 0.84, 0.56, red, "gloss");                          // roll cab
+      for (let i = 0; i < 6; i++) {
+        const y = 0.2 + i * 0.13 + 0.06;
+        k.box(0, y, 0.595, 1.3, 0.11, 0.01, 0xa01818, "gloss");
+        k.box(0, y + 0.035, 0.605, 1.1, 0.014, 0.012, 0xc9ced4, "metal");            // drawer pull
+      }
+      k.box(0, 0.99, 0.31, 1.4, 0.03, 0.6, 0x2a2c30, "metal");                       // worktop
+      k.box(0, 1.24, 0.24, 1.32, 0.46, 0.44, red, "gloss");                          // top chest
+      for (let i = 0; i < 3; i++) k.box(0, 1.08 + i * 0.12, 0.465, 1.26, 0.1, 0.01, 0xa01818, "gloss");
+      k.box(0, 1.475, 0.24, 1.34, 0.03, 0.46, 0xa01818, "gloss", -0.05);              // lid
+      k.box(0.3, 1.02, 0.35, 0.25, 0.02, 0.06, 0x9aa0a6, "metal", 0, 0.4, 0);        // wrench left out
+    } };
+    const bench = { len: 2.2, deep: 0.8, h: 1.0, draw: function () {
+      const L2 = 2.2;
+      k.box(0, 0.93, 0.4, L2, 0.05, 0.75, 0x6a4a2a, "gloss");                       // butcher-block top
+      for (const e of [-1, 1]) for (const zz of [0.08, 0.72]) k.box(e * (L2 / 2 - 0.06), 0.45, zz, 0.05, 0.9, 0.05, 0x3a4a5a, "metal");
+      k.box(0, 0.2, 0.4, L2 - 0.1, 0.03, 0.7, 0x3a4a5a, "metal");                   // lower shelf
+      // bench vise
+      k.box(0.7, 1.0, 0.72, 0.16, 0.1, 0.22, 0x2a4a8a, "gloss");
+      k.box(0.7, 1.08, 0.82, 0.16, 0.08, 0.04, 0x2a4a8a, "gloss");
+      k.cyl(0.7, 1.02, 0.95, 0.012, 0.012, 0.22, 0x9aa0a6, "metal", Math.PI / 2, 0, 0, 6);
+      // pegboard with tools
+      k.box(0, 1.6, 0.012, L2, 1.0, 0.018, 0xb89a6a);
+      for (let i = 0; i < 9; i++) k.box(-0.9 + i * 0.07, 1.62, 0.03, 0.022, 0.18 + i * 0.015, 0.006, 0x9aa0a6, "metal");   // spanners, by size
+      for (let i = 0; i < 5; i++) {                                                  // screwdrivers
+        k.cyl(-0.1 + i * 0.07, 1.78, 0.03, 0.012, 0.014, 0.1, [0xc01c1c, 0xe0b41a, 0x1c5aa0, 0xc01c1c, 0x1c1c1c][i], "solid", 0, 0, 0, 6);
+        k.cyl(-0.1 + i * 0.07, 1.66, 0.03, 0.003, 0.003, 0.14, 0x9aa0a6, "metal", 0, 0, 0, 4);
+      }
+      k.box(0.55, 1.62, 0.035, 0.05, 0.3, 0.02, 0x6a4a2a);                           // hammer
+      k.box(0.55, 1.78, 0.035, 0.14, 0.04, 0.03, 0x3a3c40, "metal");
+      k.box(0.8, 1.55, 0.05, 0.3, 0.3, 0.06, 0x2a2c30, "metal");                    // socket rail case
+      k.box(0, 2.05, 0.2, L2 - 0.2, 0.04, 0.1, 0x2a2c30, "metal");                  // bench light
+      k.box(0, 2.028, 0.2, L2 - 0.3, 0.006, 0.06, 0xf4f8ff, "glow");
+    } };
+    const compressor = { len: 1.5, deep: 0.62, h: 1.2, draw: function () {
+      k.cyl(0, 0.42, 0.3, 0.26, 0.26, 1.3, 0xb01c1c, "gloss", 0, 0, Math.PI / 2, 16); // tank
+      for (const e of [-1, 1]) k.sphere(e * 0.65, 0.42, 0.3, 0.26, 0xb01c1c, "gloss", 0.3, 1, 1);
+      for (const e of [-0.45, 0.45]) k.box(e, 0.1, 0.3, 0.08, 0.2, 0.4, 0x1c1c1c);     // feet
+      k.box(-0.2, 0.78, 0.3, 0.36, 0.26, 0.3, 0x1c1c1c, "gloss");                     // motor
+      k.box(0.25, 0.78, 0.3, 0.3, 0.3, 0.26, 0x3a3c40, "metal");                      // pump head
+      k.box(0.03, 0.8, 0.47, 0.5, 0.26, 0.03, 0xe0b41a, "gloss");                     // belt guard
+      k.cyl(0.5, 0.75, 0.3, 0.04, 0.04, 0.08, 0x9aa0a6, "metal", 0, 0, 0, 8);          // gauge
+      k.cyl(0, 1.4, 0.06, 0.2, 0.2, 0.12, 0x1c1c1c, "gloss", Math.PI / 2, 0, 0, 16);  // hose reel on the wall
+      k.torus(0, 1.4, 0.13, 0.15, 0.02, 0xe0b41a, "solid", 0, 0, 0, null, 16);
+    } };
+    const drums = { len: 1.3, deep: 0.62, h: 0.9, draw: function () {
+      for (const e of [-0.32, 0.32]) {
+        k.cyl(e, 0.44, 0.31, 0.29, 0.29, 0.88, e < 0 ? 0x1c4a8a : 0x2a2c30, "gloss", 0, 0, 0, 16);
+        for (const y of [0.3, 0.6]) k.torus(e, y, 0.31, 0.29, 0.012, 0x1c1c1c, "solid", Math.PI / 2, 0, 0, null, 16);
+        k.cyl(e + 0.12, 0.885, 0.31, 0.03, 0.03, 0.01, 0x9aa0a6, "metal", 0, 0, 0, 8);
+      }
+    } };
+    const s = (CBZ.hash01 ? CBZ.hash01(lot.cx, lot.cz, "garside") : 0.3) < 0.5 ? -1 : 1;
+    wallRun(s, 1.2, back - 0.2, [chest, bench, chest]);
+    wallRun(-s, 1.2, back - 0.2, [compressor, drums, chest]);
+    // the tyre rack against the back wall, beside the desk
+    const rackL = 2.4;
+    for (const side of [-1, 1]) {
+      const lat = side * (Tf - rackL / 2 - 0.1);
+      if (!free(lat - rackL / 2, lat + rackL / 2, back - 0.6, back)) continue;
+      take(lat - rackL / 2, lat + rackL / 2, back - 0.9, back);
+      at(lat, back, 0, -1);
+      for (const e of [-1, 1]) for (const zz of [0.06, 0.5]) k.box(e * (rackL / 2 - 0.03), 1.0, zz, 0.05, 2.0, 0.05, 0xd06a1a, "gloss");
+      for (const y of [0.12, 1.1]) for (const zz of [0.06, 0.5]) k.box(0, y, zz, rackL, 0.06, 0.04, 0xd06a1a, "gloss");
+      for (const y of [0.12, 1.1]) {
+        const n = Math.floor((rackL - 0.2) / 0.22);
+        for (let i = 0; i < n; i++) tyre(k, -rackL / 2 + 0.2 + i * 0.22, y + 0.37, 0.28, Math.PI / 2);
+      }
+      collide(lat - rackL / 2, lat + rackL / 2, back - 0.56, back, 2.0);
+      break;
+    }
+
+    // ---- LED battens off the ceiling, over the bays and the benches ----
+    const lampH = Math.min(CEIL - FF - 0.35, 3.6);
+    const hang = function (lat, dep, len) {
+      at(lat, dep, 0, -1);
+      const drop = CEIL - FF - lampH;
+      for (const e of [-1, 1]) k.cyl(0, lampH + drop / 2, e * (len / 2 - 0.1), 0.003, 0.003, drop, 0x6a6e74, "metal", 0, 0, 0, 4);
+      k.box(0, lampH + 0.03, 0, 0.14, 0.05, len, 0xd8dade, "metal");
+      k.box(0, lampH, 0, 0.1, 0.012, len - 0.06, 0xf4f8ff, "glow");
+    };
+    if (lampH > 2.4) {
+      for (let lat = -(Tf - 1.2); lat <= Tf - 1.2 + 1e-6; lat += Math.max(2.6, (2 * Tf - 2.4) / 3)) {
+        for (let dep = 2.5; dep <= back - 1.5; dep += 3.2) hang(lat, dep, 1.5);
+      }
+    }
+
+    const group = new THREE.Group();
+    k.build(group);
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (!root) return false;
+    root.add(group);
+    GAR.group = group;
+    GAR.bounds = { minX: ox - b.w / 2 - 3, maxX: ox + b.w / 2 + 3, minZ: oz - b.d / 2 - 3, maxZ: oz + b.d / 2 + 3 };
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.interiorTrackFixture) { try { CBZ.interiorTrackFixture("mod-garage", b, group); } catch (e) {} }
+    let meshes = 0, verts = 0;
+    group.traverse(function (o) { if (o.isMesh) { meshes++; verts += o.geometry.attributes.position.count; } });
+    GAR.stats = { meshes: meshes, verts: verts, lift: lift, colliders: cols.length };
+    return true;
+  }
+  CBZ.onUpdate(99.8, function () {
+    if (g.mode !== "city") { if (GAR.group) GAR.group.visible = false; return; }
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A) return;
+    if (GAR.built && GAR.built !== A) { GAR.built = null; GAR.group = null; GAR.bounds = null; }
+    const lot = A.chopShop, P = CBZ.player;
+    if (!lot || !lot.building || !P || !P.pos) return;
+    if (!GAR.built) {
+      const dx = P.pos.x - lot.cx, dz = P.pos.z - lot.cz;
+      if (dx * dx + dz * dz > 50 * 50) return;
+      GAR.built = A;
+      try { buildGarage(lot); } catch (e) { /* the bay zone still works without the dressing */ }
+    }
+    if (GAR.group && GAR.bounds) {
+      const B = GAR.bounds, x = P.pos.x, z = P.pos.z;
+      const vis = x >= B.minX && x <= B.maxX && z >= B.minZ && z <= B.maxZ;
+      if (GAR.group.visible !== vis) GAR.group.visible = vis;
+    }
+  });
+  CBZ.cityModGarageAudit = function () { return GAR.stats ? Object.assign({ built: !!GAR.group }, GAR.stats) : null; };
 
 })();

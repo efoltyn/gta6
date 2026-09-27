@@ -15,12 +15,23 @@
    Stashes restock after long minutes, so a route over the skyline
    becomes a repeatable earner you can show off.
 
-   Draw-call discipline: ONE shared unit box geometry scaled per
-   mesh, all materials through the cached CBZ.cmat pool, 2 meshes
-   per stash, parented to the building group. No colliders (knee-
-   high bags). Looted = a cached-material SWAP, never a mutation.
-   Seeding is DETERMINISTIC (fixed LCG) — same roofs, same stashes,
-   every run. All DOM/keys headless-guarded.
+   WHAT IS UP THERE (2026-09-27 de-slop). A stash is a real thing
+   somebody hid: a zipped duffel (olive canvas for a forgotten bag,
+   black nylon for a set's) or a black hard case, tucked against the
+   parapet with its long side to the wall. They used to be two plain
+   boxes each — a "duffel" that was a green-glowing brick with a
+   strap box on top, a "crate" that was a glowing olive cube with a lid
+   box — lit up like arcade pickups so you could spot them across the
+   roof. Nothing glows now: a bag against a wall is found by looking.
+   Cracked = the SAME object gone through: the duffel slumped open and
+   empty, the case with its lid thrown back over plucked foam.
+
+   Draw-call discipline: every variant is BAKED once by city/
+   itemassets.js (CBZ.itemAssetBaked — one merged vertex-coloured
+   geometry, one shared material), so a stash is ONE draw call full and
+   ONE empty (the other is hidden), parented to the building group. No
+   colliders (knee-high bags). Seeding is DETERMINISTIC (fixed LCG) —
+   same roofs, same stashes, every run. All DOM/keys headless-guarded.
 
    Publishes:
      CBZ.cityRoofStashes() — live stash records (map markers)
@@ -42,24 +53,26 @@
   let _s = 70921;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
-  // ---- shared building blocks (mesh-count bound: ONE geometry, cached mats) --
-  const UNIT = new THREE.BoxGeometry(1, 1, 1);
-  const cmat = CBZ.cmat || CBZ.mat;
-  // material SWAPS between cached shared mats (the elevators.js button pattern):
-  // a full bag glints (worth the climb), a rich bag glints hotter, a cracked
-  // one goes dead dark — readable across a roof at a glance.
-  const BAG_FULL  = () => cmat(0x2a2f26, { emissive: 0x4caf6e, ei: 0.25 });
-  const BAG_RICH  = () => cmat(0x33272a, { emissive: 0xffb347, ei: 0.35 });
-  const BAG_EMPTY = () => cmat(0x202020, { emissive: 0x000000, ei: 0 });
-  const CRATE_FULL  = () => cmat(0x4a5232, { emissive: 0x4caf6e, ei: 0.18 });
-  const CRATE_EMPTY = () => cmat(0x2c3022, { emissive: 0x000000, ei: 0 });
-  const STRAP = 0x14171c, LID = 0x3a4128;
-
-  function box(parent, x, y, z, w, h, d, material) {
-    const m = new THREE.Mesh(UNIT, material);
-    m.scale.set(w, h, d); m.position.set(x, y, z);
-    m.castShadow = false; m.receiveShadow = true;
-    parent.add(m);
+  // ---- the objects. Four baked variants per look, built once, shared. --------
+  const LOOK = {
+    duffel:     { kind: "moneybag", state: "closed", canvas: 0x4a5a3f, flash: false },
+    duffelRich: { kind: "moneybag", state: "closed", canvas: 0x1c1e22, flash: false },
+    case:       { kind: "stashcase" },
+  };
+  function bakedOf(look, empty) {
+    const o = Object.assign({}, look);
+    if (empty) { if (o.kind === "moneybag") o.state = "empty"; else o.open = true; }
+    let m = null;
+    if (CBZ.itemAssetBaked) { try { m = CBZ.itemAssetBaked(null, null, null, o); } catch (e) { m = null; } }
+    if (!m && CBZ.itemAsset) { try { m = CBZ.itemAsset(null, null, o); } catch (e) { m = null; } }
+    if (!m) {                                    // no registry at all: a plain dark bag shape, never a glow
+      m = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(0.34, empty ? 0.14 : 0.30, 0.70) : new THREE.BoxGeometry(0.34, 0.30, 0.70),
+        (CBZ.cmat || CBZ.mat)(0x2c3026));
+      m.position.y = empty ? 0.07 : 0.15;
+      const w = new THREE.Group(); w.add(m); m = w;
+    }
+    m.castShadow = false;
+    m.traverse(function (c) { if (c.isMesh) { c.castShadow = false; c.receiveShadow = true; } });
     return m;
   }
 
@@ -93,31 +106,49 @@
   function avoidList(lot) {
     const b = lot.building, ox = b.ox, oz = b.oz, S = slabInfo(b);
     const a = [];
+    // the slab centre is where city/mode.js wakes you up on this roof: keep
+    // it clear so the first thing you see is the skyline, not somebody's bag
+    if (b.roofCx != null) a.push({ x: b.roofCx, z: b.roofCz, r: 2.8 });
     const hp = b.helipad; if (hp) a.push({ x: hp.x, z: hp.z, r: (hp.r || 6) + 1.4 });
     if (b.lift) {
       a.push({ x: b.lift.roof.x, z: b.lift.roof.z, r: 4.0 });                       // arrival pad ([E] zones must not overlap)
       a.push({ x: ox + S.ixMax - 1.7, z: oz + S.izMin + 1.7, r: 2.8 });             // headhouse
     }
     if (b.fireEscape) a.push({ x: ox + b.w / 2 - 1.3, z: b.fireEscape.z, r: 3.0 }); // bridge landing
+    // rectangles: the stair/lift shaft heads and the roof crown (a bag is
+    // tucked beside those, never inside one)
+    const rects = [];
+    for (const r of (b.shaftRects || [])) {
+      if (r && isFinite(r.x0)) rects.push({ x0: ox + r.x0, x1: ox + r.x1, z0: oz + r.z0, z1: oz + r.z1 });
+    }
+    if (b.roofCrown) { const c = b.roofCrown; rects.push({ x0: ox + c.x0, x1: ox + c.x1, z0: oz + c.z0, z1: oz + c.z1 }); }
+    a.rects = rects;
     return a;
   }
   function clear(avoid, x, z, r) {
     for (const a of avoid) if (Math.hypot(x - a.x, z - a.z) < a.r + (r || 0)) return false;
+    const R = (r || 0) + 0.2;
+    if (avoid.rects) for (const q of avoid.rects) {
+      if (x > q.x0 - R && x < q.x1 + R && z > q.z0 - R && z < q.z1 + R) return false;
+    }
     return true;
   }
 
   // candidate corners/edges of the solid slab, walked from a seeded offset so
   // different roofs hide their bags in different spots (but always the same
   // spot on the same roof).
+  // A thing you hide on a roof goes AGAINST THE PARAPET, long side to the
+  // wall (`ry` turns the object's back, local -X, to that wall), not out in
+  // the open 1.2 m from it.
   function spotCandidates(b) {
-    const S = slabInfo(b), ox = b.ox, oz = b.oz;
+    const S = slabInfo(b), ox = b.ox, oz = b.oz, IN = 0.42;
     return [
-      { x: ox + S.slabMinX + 1.15, z: oz + (S.izMin + S.izMax) / 2 },
-      { x: ox + S.ixMax - 1.15, z: oz + S.izMax - 1.4 },
-      { x: ox + (S.slabMinX + S.ixMax) / 2, z: oz + S.izMin + 1.3 },
-      { x: ox + S.slabMinX + 1.15, z: oz + S.izMax - 1.4 },
-      { x: ox + S.ixMax - 1.15, z: oz + (S.izMin + S.izMax) / 2 },
-      { x: ox + (S.slabMinX + S.ixMax) / 2, z: oz + S.izMax - 1.3 },
+      { x: ox + S.slabMinX + IN, z: oz + (S.izMin + S.izMax) / 2, ry: 0 },
+      { x: ox + S.ixMax - IN, z: oz + S.izMax - 1.4, ry: Math.PI },
+      { x: ox + (S.slabMinX + S.ixMax) / 2, z: oz + S.izMin + IN, ry: -Math.PI / 2 },
+      { x: ox + S.slabMinX + IN, z: oz + S.izMax - 1.4, ry: 0 },
+      { x: ox + S.ixMax - IN, z: oz + (S.izMin + S.izMax) / 2, ry: Math.PI },
+      { x: ox + (S.slabMinX + S.ixMax) / 2, z: oz + S.izMax - IN, ry: Math.PI / 2 },
     ];
   }
 
@@ -129,17 +160,18 @@
     return dn + ((b.storeys || 1) >= 5 ? " high-rise" : " walk-up");
   }
 
-  function buildStash(lot, wx, wz, rich, kind) {
+  function buildStash(lot, wx, wz, rich, kind, ry) {
     const b = lot.building, lx = wx - b.ox, lz = wz - b.oz, h = b.h;
-    let body;
-    if (kind === "crate") {
-      body = box(b.group, lx, h + 0.26, lz, 0.9, 0.52, 0.65, CRATE_FULL());
-      box(b.group, lx, h + 0.55, lz, 0.96, 0.08, 0.71, cmat(LID));               // lid rim
-    } else {
-      body = box(b.group, lx, h + 0.24, lz, 1.05, 0.48, 0.52, rich ? BAG_RICH() : BAG_FULL());
-      box(b.group, lx, h + 0.49, lz, 0.18, 0.06, 0.56, cmat(STRAP));             // carry strap
-    }
-    stashes.push({ lot, b, kind, rich, x: wx, z: wz, y: h, body, looted: false, t: 0 });
+    const look = kind === "case" ? LOOK.case : (rich ? LOOK.duffelRich : LOOK.duffel);
+    const body = new THREE.Group();
+    body.position.set(lx, h, lz);
+    // a hair off square to the wall, so a row of roofs is not a row of clones
+    body.rotation.y = (ry || 0) + (rng() - 0.5) * 0.3;
+    const full = bakedOf(look, false), empty = bakedOf(look, true);
+    empty.visible = false;
+    body.add(full); body.add(empty);
+    b.group.add(body);
+    stashes.push({ lot, b, kind, rich, x: wx, z: wz, y: h, body, full, empty, looted: false, t: 0 });
   }
 
   function build(A) {
@@ -161,7 +193,7 @@
           const c = cands[(start + i) % cands.length];
           if (!clear(avoid, c.x, c.z, 0.8)) continue;
           if (placed < want) {
-            buildStash(lot, c.x, c.z, rich, rich && placed === 1 ? "crate" : (rng() < 0.3 ? "crate" : "duffel"));
+            buildStash(lot, c.x, c.z, rich, rich && placed === 1 ? "case" : (rng() < 0.3 ? "case" : "duffel"), c.ry);
             avoid.push({ x: c.x, z: c.z, r: 2.0 });
             placed++;
           } else if (!dropSpot) { dropSpot = c; break; }              // first clear spot AFTER the bags = the dead-drop point
@@ -184,8 +216,8 @@
 
   // ---- CRACKING ONE OPEN -----------------------------------------------------
   function setLook(st, full) {
-    if (st.kind === "crate") st.body.material = full ? CRATE_FULL() : CRATE_EMPTY();
-    else st.body.material = full ? (st.rich ? BAG_RICH() : BAG_FULL()) : BAG_EMPTY();
+    if (st.full) st.full.visible = !!full;
+    if (st.empty) st.empty.visible = !full;
   }
 
   function crackOpen(st) {
@@ -225,7 +257,7 @@
     }
     if (cash > 0) CBZ.city.addCash(cash);
     else {
-      CBZ.city.note("Cracked it open, the set's tapped out. Nothing in the bag.", 2.4);
+      CBZ.city.note("The set's tapped out. Nothing in it.", 2.4);
       if (CBZ.cityGangProvoke && gid) CBZ.cityGangProvoke(gid, 0.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
@@ -243,14 +275,13 @@
     }
     CBZ.city.addRespect(st.rich ? 6 : 2);        // a score nobody saw still carries
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (st.rich && CBZ.city.big) CBZ.city.big("ROOF STASH + $" + cash);
     // taking THEIR stash provokes the set that holds the block NOW — but no
     // cops: a roof job has no street witnesses. That's the whole appeal.
     if (st.rich && gid && CBZ.cityGangProvoke) {
       CBZ.cityGangProvoke(gid, 0.8);
-      CBZ.city.note("Cracked the set's roof stash. $" + cash + extra + ". They'll know it was light.", 2.8);
+      CBZ.city.note("The set's money. $" + cash + extra + ". They'll know it was light.", 2.8);
     } else {
-      CBZ.city.note("Cracked the stash. $" + cash + extra + ".", 2.2);
+      CBZ.city.note("Somebody's stash. $" + cash + extra + ".", 2.2);
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -292,7 +323,10 @@
   CBZ.onUpdate(99.63, function () {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zoned = true;
-    CBZ.interactions.describe("roofstash", function () { return { label: "Roof stash", note: "" }; });
+    // the card names the OBJECT in front of you, never the system behind it
+    CBZ.interactions.describe("roofstash", function (st) {
+      return { label: st && st.kind === "case" ? "A hard case" : "A duffel bag", note: "" };
+    });
     CBZ.interactions.registerZone({
       id: "zone-roofstash", kind: "roofstash", prio: 11,
       find: function () { return (built && g.mode === "city") ? stashNear() : null; },
@@ -300,7 +334,10 @@
         id: "roofstash-pry", slot: "e", bad: true,
         // a SET'S stash provokes the set that holds the block — the button
         // says whose box you are about to open (the deleted pill's wording)
-        label: function (st) { return st && st.rich ? "Crack the set's stash" : "Pry it open"; },
+        label: function (st) {
+          if (st && st.kind === "case") return st.rich ? "Pop the set's case" : "Pop the latches";
+          return st && st.rich ? "Unzip the set's bag" : "Unzip it";
+        },
         onSelect: function (st) { if (st && !st.looted) { if (CBZ.shake) CBZ.shake(0.06); crackOpen(st); } },
       }],
     });

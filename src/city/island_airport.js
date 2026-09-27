@@ -2028,85 +2028,162 @@
     const KERB_Z = 38.5 + ADZ;                     // the drop-off lane (the road record's own z)
     const PERIM_X = A_MAXX - 22;                   //  268 + ADX — the east perimeter spur
 
+    // ---- shared layout, read by the paint AND by the hardware below --------
+    // The gate line: the larger the airliner, the further SOUTH it parks, so
+    // the up-scaled tail stays clear of the terminal frontage (z=11) while the
+    // nose noses out toward the taxiway. AL_SC=1 keeps the original gate line.
+    const GATE_Z = APRON_Z - 14 - 11 * (AL_SC - 1);
+    const GATE_XS = [0, 1, 2, 3].map(function (i) { return -120 + ADX + i * 55; });
+    const REMOTE_XS = [150 + ADX, 205 + ADX];
+    // jet bridges at the two EMPTY slots between parked airliners
+    const BRIDGE_XS = [-92.5 + ADX, -37.5 + ADX];
+    const BR_WALL = TERM_Z - TERM_D / 2;           // the terminal's airside face (z 11)
+    const BR_HEAD = -4.1 + ADZ, BR_COL = 1.0 + ADZ;  // cab face, drive column
+    // the apron: concrete from the taxiway edge to the terminal face, plus the
+    // east ramp the business jets and the two remote stands stand on (they
+    // used to park on the grass beyond the painted apron's east edge)
+    const APRON_X0 = APRON_X - 132, APRON_X1 = APRON_X + 132;
+    const APRON_Z0 = TAX_Z + 7, APRON_Z1 = BR_WALL + 1;
+    const EAST_X1 = 238 + ADX, EAST_Z1 = 9 + ADZ;
+    // landside forecourt (see 10b): published here so the paint and the
+    // hardware read one set of numbers
+    const PLZ_X0 = TERM_X1 + 6, PLZ_X1 = TERM_X1 + 96;
+    const PLZ_Z0 = 14 + ADZ, PLZ_Z1 = FRONT_Z;
+    const GATE_PZ = KERB_Z - 5.5;                  // entry pylon centre, south of the lane
+    const PED_Z = GATE_PZ - 4.5;                   // the pedestrian entrance
+    const TURN_X = TERM_X1 - 4;
+    const RANK_Z = KERB_Z - 15, RANK_N = 6, RANK_GAP = 6.4;
+    const PARTS = CBZ.airfieldParts || null;
+
     // =====================================================================
-    //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway and apron are baked
-    //     into one texture on one plane.  The old five nearly-coplanar slabs
-    //     were the airport flicker: at flight distance their 0.1m separation
-    //     collapsed to the same depth value and green won through asphalt.
+    //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway, apron, landside and
+    //     every marking are baked into one canvas on one plane. The old five
+    //     nearly-coplanar slabs were the airport flicker: at flight distance
+    //     their 0.1 m separation collapsed to the same depth value and green
+    //     won through asphalt. The forecourt deck, footway and rank bay that
+    //     were later laid ON TOP of this plane (at 0.05 / 0.07 / 0.08 against
+    //     its 0.08) were the same bug again, so they are paint in it now.
+    //
+    //     DE-SLOP (2026-09-27): the canvas was 2048 px across 1190 m (1.7
+    //     px/m, so a 0.5 m line was a smear) of flat colour. It is 4096 px
+    //     now, and airport_kit.js's surface shader lays real material over the
+    //     layout at world scale: 5 m concrete apron slabs with sealed joints,
+    //     per-slab tone and fuel drips; asphalt aggregate and repair patches;
+    //     rubber in both touchdown zones; worn paint; patchy mown grass. The
+    //     apron is CONCRETE now, as a real ramp is; the taxiway and runway stay
+    //     asphalt. Markings follow ICAO proportions at this runway's width.
     // =====================================================================
     (function ground() {
       const gw = A_MAXX - A_MINX, gd = A_MAXZ - A_MINZ;
-      const canvas = document.createElement("canvas");
-      canvas.width = 2048; canvas.height = 1024;
-      const ctx = canvas.getContext("2d");
-      function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
-      function rect(x, z, w, d, color) {
-        ctx.fillStyle = css(color);
-        ctx.fillRect((x - w / 2 - A_MINX) / gw * canvas.width,
-          (z - d / 2 - A_MINZ) / gd * canvas.height,
-          w / gw * canvas.width, d / gd * canvas.height);
-      }
-      function runwayText(text, x, z, worldSize, rotation) {
-        ctx.save();
-        ctx.translate((x - A_MINX) / gw * canvas.width, (z - A_MINZ) / gd * canvas.height);
-        ctx.rotate(rotation || 0);
-        ctx.fillStyle = css(C_PAINT);
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.font = "900 " + Math.max(14, worldSize / gd * canvas.height) + "px Arial Black, sans-serif";
-        ctx.fillText(text, 0, 0);
-        ctx.restore();
-      }
-      ctx.fillStyle = css(C_GRASS); ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // restrained mowing bands add scale without another geometry layer
-      ctx.globalAlpha = 0.08; ctx.fillStyle = "#8aa96b";
-      for (let z = A_MINZ; z < A_MAXZ; z += 28) rect((A_MINX + A_MAXX) / 2, z + 7, gw, 14, 0x8aa96b);
-      ctx.globalAlpha = 1;
-      rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
-      rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
-      rect(APRON_X, APRON_Z + 6, 260, 80, C_TARMAC);
-      // CONNECTOR TAXIWAYS — apron <-> taxiway. The depth used to be written
-      // `TAX_Z - APRON_Z + 30`, and TAX_Z is NORTH of APRON_Z (RWY_Z+50 = -40
-      // against 0), so that expression is -40 + 30 = **-10**: a NEGATIVE depth.
-      // The two connectors were therefore 10 m stubs sitting at z in [-35,-25]
-      // instead of the ~50 m ribbons that actually join the ramp to the
-      // taxiway — the airfield has been missing its connectors for their whole
-      // life, and it is why nothing could taxi off the apron. Absolute span,
-      // plus 10 m of overrun at each end so the joins are not hairline.
-      const CONN_D = Math.abs(TAX_Z - APRON_Z) + 20;
-      const CONN_CZ = (TAX_Z + APRON_Z) / 2;
-      for (const cx of CONN_XS) rect(cx, CONN_CZ, 16, CONN_D, C_TARMAC);
+      const W = 0xeef1f4, Y = C_YELLOW, RED = 0xb8322a;
+      const CONCRETE = 0x8f8d87, SHOULDER = 0x3a3d40, WALK = 0xa9a7a0, PLAZA = 0x4a4d52;
+      let mat0 = null, tex = null, P0 = null;
+      if (PARTS) {
+        P0 = PARTS.painter(gw, gd, 4096, 1024);
+        P0.frame(-A_MINX, -A_MINZ, 0);                 // paint in WORLD metres
+        P0.fill(C_GRASS);
+        for (let z = A_MINZ; z < A_MAXZ; z += 28) P0.rect((A_MINX + A_MAXX) / 2, z + 7, gw, 14, 0x8aa96b, 0.08);
+        // runway strip, shoulders + blast pads, the runway itself
+        P0.rect(RWY_CX, RWY_Z, RWY_LEN + 80, RWY_W + 44, 0x62824b, 0.6);
+        P0.rect(RWY_CX, RWY_Z, RWY_LEN + 60, RWY_W + 10, SHOULDER);
+        P0.rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
+        P0.rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
+        // CONNECTOR TAXIWAYS — apron <-> taxiway <-> runway. (The depth used
+        // to be written `TAX_Z - APRON_Z + 30`, a NEGATIVE number, so the
+        // connectors were 10 m stubs for their whole life. Absolute span.)
+        const CONN_D = Math.abs(TAX_Z - APRON_Z) + 20;
+        const CONN_CZ = (TAX_Z + APRON_Z) / 2;
+        for (const cx of CONN_XS) {
+          P0.rect(cx, CONN_CZ, 16, CONN_D, C_TARMAC);
+          P0.rect(cx, (RWY_Z + TAX_Z) / 2, 16, TAX_Z - RWY_Z, C_TARMAC);
+          for (const zz of [RWY_Z + RWY_W / 2 + 3, TAX_Z - 9 - 3]) P0.rect(cx, zz, 28, 6, C_TARMAC);   // fillets
+        }
+        // the apron (concrete) + the east ramp
+        P0.rect((APRON_X0 + APRON_X1) / 2, (APRON_Z0 + APRON_Z1) / 2, APRON_X1 - APRON_X0, APRON_Z1 - APRON_Z0, CONCRETE);
+        P0.rect((APRON_X1 + EAST_X1) / 2, (APRON_Z0 + EAST_Z1) / 2, EAST_X1 - APRON_X1, EAST_Z1 - APRON_Z0, CONCRETE);
+        P0.rect(APRON_X, TERM_Z, TERM_W + 2, TERM_D, CONCRETE);                 // under the hall
+        // the tower's pad and its footpath to the terminal's west end
+        P0.rect(-180 + ADX, 30 + ADZ, 14, 14, CONCRETE);
+        P0.rect((-173 + ADX + TERM_X0) / 2, 34.5 + ADZ, TERM_X0 - (-173 + ADX), 2.0, WALK);
+        // ---- landside: the kerb lane, the forecourt, footways, the rank
+        P0.rect((TERM_X0 - 12 + PERIM_X + 7) / 2, (TERM_FRONT + FRONT_Z) / 2, PERIM_X + 7 - (TERM_X0 - 12), FRONT_Z - TERM_FRONT, PLAZA);
+        P0.rect((PLZ_X0 + PLZ_X1) / 2, (PLZ_Z0 + PLZ_Z1) / 2, PLZ_X1 - PLZ_X0, PLZ_Z1 - PLZ_Z0, PLAZA);
+        P0.rect((TURN_X + PLZ_X1 + 6) / 2, PED_Z, (PLZ_X1 + 6) - TURN_X, 1.8, WALK);          // gate -> the turn
+        P0.rect(TURN_X, (PED_Z + TERM_FRONT + 0.42) / 2, 1.8, (TERM_FRONT + 0.42) - PED_Z, WALK);
+        P0.rect((TERM_X0 + TURN_X) / 2, TERM_FRONT + 0.42, TURN_X - TERM_X0, 0.84, WALK);     // along the wall
+        // zebra crossing at the doors: bars parallel to the traffic
+        for (let k = 0; k < 3; k++) P0.rect(APRON_X, TERM_FRONT + 0.85 + k * 0.9, 4.0, 0.45, W);
+        // the taxi rank bay: a yellow box with its word painted at the head
+        {
+          const rx0 = PLZ_X0 + 8 - 3.2, rx1 = PLZ_X0 + 8 + (RANK_N - 1) * RANK_GAP + 3.2;
+          P0.line([[rx0, RANK_Z - 1.6], [rx1, RANK_Z - 1.6], [rx1, RANK_Z + 1.6], [rx0, RANK_Z + 1.6], [rx0, RANK_Z - 1.6]], 0.2, Y);
+          P0.text("TAXI", rx0 - 2.4, RANK_Z, 1.6, Math.PI / 2, Y, 3.0);
+        }
+        // forecourt parking-lane edge line
+        P0.line([[PLZ_X0, KERB_Z - 1.8], [PLZ_X1, KERB_Z - 1.8]], 0.15, W);
 
-      // runway white paint
-      rect(RWY_CX, RWY_Z - RWY_W / 2 + 0.6, RWY_LEN - 8, 0.6, C_PAINT);
-      rect(RWY_CX, RWY_Z + RWY_W / 2 - 0.6, RWY_LEN - 8, 0.6, C_PAINT);
-      const dashL = 6, step = 12;
-      for (let x = RWY_X0 + 24; x < RWY_X1 - 24; x += step) rect(x + dashL / 2, RWY_Z, dashL, 0.5, C_PAINT);
-      for (const endSgn of [-1, 1]) {
-        const baseX = endSgn < 0 ? RWY_X0 + 5 : RWY_X1 - 19;
-        for (let k = 0; k < 8; k++) rect(baseX + 7, RWY_Z - RWY_W / 2 + 2.2 + k * 3.4, 14, 1.4, C_PAINT);
+        // ---- RUNWAY 09/27 markings
+        P0.line([[RWY_X0 + 60, RWY_Z], [RWY_X1 - 60, RWY_Z]], 0.9, W, [30, 20]);
+        for (const s of [-1, 1]) P0.line([[RWY_X0 + 1, RWY_Z + s * (RWY_W / 2 - 0.9)], [RWY_X1 - 1, RWY_Z + s * (RWY_W / 2 - 0.9)]], 0.9, W);
+        for (const e of [{ x: RWY_X0, sg: 1, name: "09", rot: Math.PI / 2 }, { x: RWY_X1, sg: -1, name: "27", rot: -Math.PI / 2 }]) {
+          for (let k = 0; k < 4; k++) for (const s of [-1, 1]) P0.rect(e.x + e.sg * 21, RWY_Z + s * (2.2 + k * 3.4), 30, 1.8, W);
+          P0.text(e.name, e.x + e.sg * 52, RWY_Z, 9, e.rot, W, 7.5);
+          for (const s of [-1, 1]) {
+            P0.rect(e.x + e.sg * 180, RWY_Z + s * 7.5, 40, 4, W);                             // aiming point
+            for (const k of [0, 1]) P0.rect(e.x + e.sg * 330, RWY_Z + s * (6 + k * 2.4), 22, 1.5, W);   // touchdown zone
+          }
+          P0.rect(e.x + e.sg * 0.6, RWY_Z, 1.2, RWY_W, W);                                     // threshold bar
+          for (let k = 0; k < 3; k++) {                                                        // blast pad chevrons
+            const x0 = e.x - e.sg * (6 + k * 8);
+            for (const s of [-1, 1]) P0.line([[x0 - e.sg * 6, RWY_Z + s * (RWY_W / 2 - 2)], [x0, RWY_Z]], 1.0, Y);
+          }
+        }
+        // ---- taxiway + connectors: centrelines, runway-holding positions
+        P0.line([[RWY_X0 + 12, TAX_Z], [RWY_X1 - 12, TAX_Z]], 0.45, Y);
+        for (const cx of CONN_XS) {
+          P0.line([[cx, APRON_Z0 + 2], [cx, RWY_Z + RWY_W / 2 + 1]], 0.45, Y);
+          const hz = RWY_Z + RWY_W / 2 + 18;
+          P0.line([[cx - 8, hz + 1.8], [cx + 8, hz + 1.8]], 0.4, Y);
+          P0.line([[cx - 8, hz + 0.9], [cx + 8, hz + 0.9]], 0.4, Y);
+          P0.line([[cx - 8, hz], [cx + 8, hz]], 0.4, Y, [2, 1.5]);
+          P0.line([[cx - 8, hz - 0.9], [cx + 8, hz - 0.9]], 0.4, Y, [2, 1.5]);
+        }
+        // ---- stands: centreline off the taxiway, nose-wheel stop bar, stand
+        //      number read from the taxiway, red wingtip clearance lines
+        const standXs = GATE_XS.concat(REMOTE_XS);
+        for (let i = 0; i < standXs.length; i++) {
+          const sx = standXs[i];
+          P0.line([[sx, TAX_Z], [sx, GATE_Z + 8]], 0.4, Y);
+          const stopZ = GATE_Z - 10 * AL_SC;                                                   // nose gear
+          P0.rect(sx, stopZ, 6, 0.5, Y);
+          P0.text(i < GATE_XS.length ? String(i + 1) : "R" + (i - GATE_XS.length + 1), sx + 5.5, stopZ - 8, 3.2, Math.PI, Y);
+        }
+        for (let i = 0; i < GATE_XS.length - 1; i++) {
+          const mx = (GATE_XS[i] + GATE_XS[i + 1]) / 2;
+          P0.line([[mx, APRON_Z0 + 3], [mx, BR_HEAD - 2]], 0.3, RED, [3, 3]);
+        }
+        // jet-bridge wheel parking boxes (red, hatched) under each drive column
+        for (const bx of BRIDGE_XS) {
+          P0.line([[bx - 2.2, BR_COL - 1.4], [bx + 2.2, BR_COL - 1.4], [bx + 2.2, BR_COL + 1.4], [bx - 2.2, BR_COL + 1.4], [bx - 2.2, BR_COL - 1.4]], 0.2, RED);
+          for (let k = -1; k <= 1; k++) P0.line([[bx + k * 1.4 - 0.8, BR_COL - 1.3], [bx + k * 1.4 + 0.8, BR_COL + 1.3]], 0.15, RED);
+        }
+        tex = P0.texture();
+        mat0 = PARTS.surfaceMaterial(tex, gw, gd, {
+          frame: { ox: 0, oz: 0, yaw: 0 },
+          rwy: [RWY_X0 - A_MINX, RWY_X1 - A_MINX, RWY_Z - A_MINZ, RWY_W / 2], panel: 5,
+        });
+        /* THE ONE PAINT API. airside.js paints its service road, its kerb lane
+           and its hold-short hatching INTO this canvas instead of laying more
+           ribbons on top of the plane (the same coplanar trap). World metres. */
+        city.airportPaint = function (fn) {
+          try { fn(P0); } catch (e) { try { console.error("[airport] paint", e); } catch (e2) {} }
+          tex.needsUpdate = true;
+        };
+      } else {
+        city.airportPaint = null;
+        mat0 = new THREE.MeshLambertMaterial({ color: C_GRASS });
       }
-      for (const ax of [RWY_X0 + 60, RWY_X1 - 60]) {
-        rect(ax, RWY_Z - 4.5, 18, 2.2, C_PAINT);
-        rect(ax, RWY_Z + 4.5, 18, 2.2, C_PAINT);
-      }
-      // Designators are PAINT in the same authoritative surface texture, not
-      // floating sprites hovering above the runway.
-      runwayText("09", RWY_X0 + 29, RWY_Z, 9, Math.PI / 2);
-      runwayText("27", RWY_X1 - 29, RWY_Z, 9, -Math.PI / 2);
-      // taxiway yellow centrelines and hold bars
-      rect(RWY_CX, TAX_Z, RWY_LEN - 24, 0.5, C_YELLOW);
-      for (const cx of CONN_XS) {
-        // same negative-depth bug as the tarmac above — the centreline was
-        // -16 deep, so the connectors had no visible guidance line either.
-        rect(cx, CONN_CZ, 0.5, Math.abs(TAX_Z - APRON_Z) + 14, C_YELLOW);
-        for (let i = 0; i < 4; i++) rect(cx, TAX_Z - 14 - i * 0.9, 14, 0.4, C_YELLOW);
-      }
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.magFilter = THREE.LinearFilter;
-      tex.minFilter = THREE.LinearMipmapLinearFilter;
-      tex.generateMipmaps = true;
-      tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
-      const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
+      const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), mat0);
       grass.rotation.x = -Math.PI / 2;
       // Keep one deliberate depth layer above the continent underlay. 8cm is
       // visually flush but remains separable in the far camera's depth buffer.
@@ -2120,37 +2197,34 @@
     })();
 
     // =====================================================================
-    //  2) RUNWAY 09/27 — E-W, 1,090 long × 30 wide, centred north of mid.
-    //     Real markings: solid edge lines, dashed centreline, threshold
-    //     "piano keys", runway designator numbers, aiming-point bars.
-    // =====================================================================
-    // Runway numbers are already painted into the unified surface above.
-
-    // =====================================================================
-    //  3) EDGE LIGHTS — ONE InstancedMesh down both runway edges + the
-    //     taxiway/apron edge. Emissive amber so they glow at night. This is
-    //     the single biggest "repeat" on the field, so it MUST be instanced.
+    //  2) EDGE LIGHTS — real elevated fixtures (stem, base plate, lens) in
+    //     their real colours, instanced: white runway edge every 30 m, green
+    //     threshold / red end bars at both ends, blue taxiway edge. They were
+    //     0.5 m amber cubes glowing at full strength at noon. Lenses are dark
+    //     by day and light up with core/daynight.js's night.
     // =====================================================================
     (function edgeLights() {
-      const positions = [];
-      // runway edge lights every 18m, both sides
-      for (let x = RWY_X0; x <= RWY_X1; x += 18) {
-        positions.push([x, RWY_Z - RWY_W / 2 - 0.8]);
-        positions.push([x, RWY_Z + RWY_W / 2 + 0.8]);
+      if (!PARTS) return;
+      const pts = [];
+      for (let x = RWY_X0; x <= RWY_X1 + 0.1; x += 30) {
+        pts.push([x, RWY_Z - RWY_W / 2 - 1.2, "w"], [x, RWY_Z + RWY_W / 2 + 1.2, "w"]);
       }
-      // taxiway centreline studs (green-ish but reuse amber pool to stay 1 mesh)
-      for (let x = RWY_X0 + 10; x <= RWY_X1 - 10; x += 24) positions.push([x, RWY_Z + RWY_W / 2 + 26]);
-      const geo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-      const m = mat(0xffb648, { emissive: 0xffb648, ei: 0.9 });
-      const inst = new THREE.InstancedMesh(geo, m, positions.length);
-      inst.castShadow = false; inst.receiveShadow = false;
-      const dummy = new THREE.Object3D();
-      for (let i = 0; i < positions.length; i++) {
-        dummy.position.set(positions[i][0], 0.25, positions[i][1]);
-        dummy.updateMatrix(); inst.setMatrixAt(i, dummy.matrix);
+      for (const e of [{ x: RWY_X0, sg: -1 }, { x: RWY_X1, sg: 1 }]) {
+        for (let k = -3; k <= 3; k++) {
+          pts.push([e.x + e.sg * 1.5, RWY_Z + k * (RWY_W / 7), "g"]);
+          pts.push([e.x - e.sg * 0.8, RWY_Z + k * (RWY_W / 7) + RWY_W / 14, "r"]);
+        }
       }
-      inst.instanceMatrix.needsUpdate = true;
-      root.add(inst);
+      // taxiway edge (the runway side) + both edges of each connector
+      for (let x = RWY_X0 + 10; x <= RWY_X1 - 10; x += 24) {
+        let clear = true;
+        for (const cx of CONN_XS) if (Math.abs(x - cx) < 18) clear = false;
+        if (clear) pts.push([x, TAX_Z - 9 - 1.0, "b"]);
+      }
+      for (const cx of CONN_XS) for (const s of [-1, 1]) {
+        for (let z = RWY_Z + RWY_W / 2 + 7; z < TAX_Z - 12; z += 9) pts.push([cx + s * 9, z, "b"]);
+      }
+      PARTS.edgeLights(root, pts, root);
     })();
 
     // =====================================================================
@@ -2192,12 +2266,50 @@
         const ix0 = tx - tw / 2 + 4, ix1 = tx + tw / 2 - 4;
         const fz = tz;    // concourse centre z
 
-        // check-in desks along the landside wall (4 desks)
+        /* CHECK-IN ISLANDS along the landside wall (4). Each was a grey 8 m
+           block with a dark lid. A check-in island is: a laminate counter
+           front with a recessed kick plate, a stone worktop, a bag-drop scale
+           and belt at every position, monitors on stalks facing the agent,
+           and the lit airline board on the back fascia. The audit box and
+           the collider keep the old 8 x 2.4 x 1.2 envelope exactly (the gate
+           agents are posted at dz, tz + td/2 - 1.4, behind it). */
+        const ckBody = [], ckTop = [], ckDark = [], ckLit = [];
         for (let k = 0; k < 4; k++) {
-          const dx = tx - tw / 2 + 20 + k * 30;
-          terminalBox(dx, 0.55, tz + td / 2 - 3, 8, 1.1, 2.2, 0xc9cfd6, { cast: true });
-          terminalBox(dx, 1.15, tz + td / 2 - 3, 8, 0.1, 2.4, 0x2b2f34);   // counter top
-          solid(dx, tz + td / 2 - 3, 8, 2.4, 0, 1.2);
+          const dx = tx - tw / 2 + 20 + k * 30, dz = tz + td / 2 - 3;
+          terminalAuditBoxes.push({
+            name: "terminal-check-in", minX: dx - 4, maxX: dx + 4, minY: 0, maxY: 1.2, minZ: dz - 1.2, maxZ: dz + 1.2,
+          });
+          solid(dx, dz, 8, 2.4, 0, 1.2);
+          if (!PARTS) { terminalBox(dx, 0.55, dz, 8, 1.1, 2.2, 0xc9cfd6, { cast: true }); continue; }
+          // passenger-side counter front (faces -z, the queue) + kick plate
+          ckBody.push(PARTS.put(PARTS.boxM(8, 1.02, 0.5, 1), dx, 0.56, dz - 0.7));
+          ckDark.push(PARTS.put(new THREE.BoxGeometry(7.9, 0.12, 0.46), dx, 0.06, dz - 0.66));
+          // agent-side desk behind it, lower (0.75 m work height)
+          ckBody.push(PARTS.put(PARTS.boxM(8, 0.72, 0.7, 1), dx, 0.41, dz + 0.35));
+          ckTop.push(PARTS.put(new THREE.BoxGeometry(8.1, 0.05, 0.62), dx, 1.09, dz - 0.68));
+          ckTop.push(PARTS.put(new THREE.BoxGeometry(8.0, 0.04, 0.72), dx, 0.79, dz + 0.35));
+          for (let p = 0; p < 2; p++) {
+            const px = dx - 2 + p * 4;
+            // bag drop: scale plate + short belt, set into the counter line
+            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.8, 0.34, 0.4), px - 1.2, 0.2, dz - 1.0));
+            ckTop.push(PARTS.put(new THREE.BoxGeometry(0.74, 0.02, 0.36), px - 1.2, 0.38, dz - 1.0));
+            // monitor on a stalk, back to the queue
+            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.05, 0.3, 0.05), px + 0.6, 0.95, dz + 0.1));
+            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.5, 0.33, 0.05), px + 0.6, 1.2, dz + 0.1));
+            ckLit.push(PARTS.put(new THREE.BoxGeometry(0.44, 0.27, 0.01), px + 0.6, 1.2, dz + 0.13));
+          }
+          // the back fascia with its lit airline board (no invented name on it)
+          // (behind the agents' standing line at dz + 1.6, so it has its own collider)
+          ckBody.push(PARTS.put(PARTS.boxM(8, 2.3, 0.2, 1), dx, 1.15, dz + 1.95));
+          ckLit.push(PARTS.put(new THREE.BoxGeometry(6.4, 0.7, 0.04), dx, 1.85, dz + 1.83));
+          solid(dx, dz + 1.95, 8, 0.2, 0, 2.3);
+        }
+        if (PARTS) {
+          PARTS.addMerged(grp, ckBody, PARTS.steelMat(0xd9dde1), { cast: true });
+          PARTS.addMerged(grp, ckTop, cmat(0x2a2d31), {});
+          PARTS.addMerged(grp, ckDark, cmat(0x33383e), { cast: true });
+          PARTS.addMerged(grp, ckLit, PARTS.glow(mat(0x2a6aa0, { emissive: 0x2a6aa0, ei: 0.45 }), 0.45, 0.8, root), {});
+          grp.traverse(function (o) { if (o.isMesh) o.userData.interiorAuditIgnore = true; });
         }
 
         // =============================================================
@@ -2262,13 +2374,101 @@
         if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture(
           "airport-terminal", terminal, grp, { boxes: terminalAuditBoxes });
 
+        // The building's name on the clerestory glazing over the doors (it was
+        // a board hovering above a 3.2 m roofline), and the gate sign inside
+        // naming the four gates the apron actually has (it promised eight,
+        // with an en dash).
         if (CBZ.makeLabelSprite) {
           const s = CBZ.makeLabelSprite("INTERNATIONAL TERMINAL", { color: "#dfeaff" });
-          if (s) { s.position.set(tx, 5.2, tz + td / 2 + 0.4); s.scale.set(20, 2.4, 1); root.add(s); }
-          const g1 = CBZ.makeLabelSprite("GATES A1–A8 →", { color: "#ffd451" });
-          if (g1) { g1.position.set(tx + 40, 3.0, fz - td / 2 + 1.5); g1.scale.set(12, 1.6, 1); root.add(g1); }
+          if (s) { s.position.set(tx, 5.0, tz + td / 2 + 0.3); s.scale.set(18, 1.8, 1); root.add(s); }
+          const g1 = CBZ.makeLabelSprite("GATES 1-4 →", { color: "#ffd451" });
+          if (g1) { g1.position.set(tx + 40, 2.7, fz - td / 2 + 1.5); g1.scale.set(7, 0.9, 1); root.add(g1); }
         }
       }
+    })();
+
+    // =====================================================================
+    //  5b) THE TERMINAL ROOF. cityMakeBuilding builds one storey: a 150 m x
+    //      26 m hall 3.2 m tall, which from the apron read as a long grey
+    //      shoebox (an international terminal is the tallest, widest-roofed
+    //      thing on a field). This does NOT touch the building: it stands a
+    //      glazed clerestory on its roof and floats a barrel-vaulted roof
+    //      over the lot, cantilevered 4 m over the airside service road
+    //      (clear of every vehicle: its edge is 7 m up) and 3 m over the
+    //      landside kerb, where it is the drop-off canopy (the old 62 m slab
+    //      on leaning struts is gone with it). Merged per material, no light
+    //      objects: the soffit downlights are emissive and follow the night.
+    // =====================================================================
+    (function terminalRoof() {
+      if (!PARTS || !terminal) return;
+      const H0 = (terminal.h || 3.2) + 0.05;          // clerestory sill: the hall's roof
+      const zS = BR_WALL - 4, zE = FRONT_Z;             // roof edges (airside, landside)
+      const xS = TERM_X0 - 3, xE = TERM_X1 + 3;
+      const Y0 = 7.0, RISE = 2.4, T = 0.6;
+      const yTop = function (z) { return Y0 + RISE * Math.sin(Math.PI * Math.max(0, Math.min(1, (z - zS) / (zE - zS)))); };
+      const ySof = function (z) { return yTop(z) - T; };
+      const cx = (xS + xE) / 2, cz = (zS + zE) / 2, RW = xE - xS, RD = zE - zS;
+      function vault(faceUp) {
+        const g = new THREE.PlaneGeometry(RW, RD, 1, 28);
+        g.rotateX(faceUp ? -Math.PI / 2 : Math.PI / 2);
+        g.translate(cx, 0, cz);
+        const p = g.attributes.position;
+        for (let i = 0; i < p.count; i++) p.setY(i, faceUp ? yTop(p.getZ(i)) : ySof(p.getZ(i)));
+        PARTS.uvScale(g, RW / 1.0, RD / 1.0);
+        g.computeVertexNormals();
+        return g;
+      }
+      const top = [vault(true)], sof = [vault(false)], dark = [], glassG = [], inner = [], lamps = [];
+      // fascia: straight along the two long edges, curved along the gables
+      for (const z of [zS, zE]) dark.push(PARTS.put(new THREE.BoxGeometry(RW + 0.3, T + 0.3, 0.3), cx, Y0 - T / 2 + 0.05, z));
+      for (const sg of [-1, 1]) {
+        const g = new THREE.PlaneGeometry(RD, 1, 28, 1);
+        g.rotateY(sg * Math.PI / 2);
+        g.translate(sg > 0 ? xE + 0.02 : xS - 0.02, 0, cz);
+        const p = g.attributes.position;
+        for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) > 0 ? yTop(p.getZ(i)) + 0.08 : ySof(p.getZ(i)) - 0.22);
+        g.computeVertexNormals();
+        dark.push(g);
+      }
+      // clerestory: glass on the two long faces and the two gables, a mullion
+      // every 3 m, and a warm interior volume behind it so it reads as a
+      // lit hall rather than a glass fence round an empty roof
+      const z0 = BR_WALL, z1 = TERM_FRONT;
+      for (const z of [z0, z1]) {
+        const hy = ySof(z) - H0;
+        glassG.push(PARTS.put(new THREE.BoxGeometry(TERM_W, hy, 0.05), APRON_X, H0 + hy / 2, z));
+        for (let x = TERM_X0; x <= TERM_X1 + 0.01; x += 3) dark.push(PARTS.put(new THREE.BoxGeometry(0.1, hy, 0.16), x, H0 + hy / 2, z));
+        dark.push(PARTS.put(new THREE.BoxGeometry(TERM_W, 0.14, 0.2), APRON_X, H0 + 0.07, z));
+        solid(APRON_X, z, TERM_W, 0.3, H0, ySof(z));
+      }
+      for (const x of [TERM_X0, TERM_X1]) {
+        const g = new THREE.PlaneGeometry(TERM_D, 1, 16, 1);
+        g.rotateY(Math.PI / 2);
+        g.translate(x, 0, TERM_Z);
+        const p = g.attributes.position;
+        for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) > 0 ? ySof(p.getZ(i)) : H0);
+        g.computeVertexNormals();
+        glassG.push(g);
+        for (let z = z0 + 3; z < z1; z += 3) { const hy = ySof(z) - H0; dark.push(PARTS.put(new THREE.BoxGeometry(0.16, hy, 0.1), x, H0 + hy / 2, z)); }
+        solid(x, TERM_Z, 0.3, TERM_D, H0, ySof(TERM_Z));
+      }
+      {
+        const ih = ySof(z0 + 2) - H0 - 0.3;
+        inner.push(PARTS.put(new THREE.BoxGeometry(TERM_W - 3, ih, TERM_D - 3.6), APRON_X, H0 + ih / 2, TERM_Z));
+      }
+      // soffit downlights over both overhangs, on a 5 m grid
+      for (let x = xS + 2.5; x < xE - 1; x += 5) {
+        for (const z of [zS + 1.6, zS + 3.2, zE - 1.4]) lamps.push(PARTS.put(new THREE.BoxGeometry(0.5, 0.04, 0.5), x, ySof(z) - 0.03, z));
+      }
+      const g = new THREE.Group();
+      g.name = "terminal-roof";
+      PARTS.addMerged(g, top, PARTS.steelMat(0xc4c9cd), { cast: true });
+      PARTS.addMerged(g, sof, cmat(0xdfe2e4), {});
+      PARTS.addMerged(g, dark, cmat(0x2f353c), { cast: true });
+      PARTS.addMerged(g, inner, cmat(0x7a7670), {});
+      PARTS.addMerged(g, glassG, PARTS.glassMat(0.55), { cast: false, receive: false });
+      PARTS.addMerged(g, lamps, PARTS.glow(mat(0xfff3da, { emissive: 0xffecc8, ei: 0.2 }), 0.2, 1.2, root), {});
+      root.add(g);
     })();
 
     // =====================================================================
@@ -2295,8 +2495,20 @@
     (function controlTower() {
       const cxp = -180 + ADX, czp = 30 + ADZ, base = 4.5, H = 34;
       const V2 = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false;
-      // shaft
-      box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
+      /* THE BUILDING (de-slop 2026-09-27): it was a grey box shaft, a
+         see-through box for a cab, a slab for a roof and a glowing red stick
+         for a beacon, with "TWR" on a board hung in the air in front of the
+         glass. It is now airport_kit.js's tower: an octagonal concrete shaft
+         with its pour-lift reveals, a sill, raked glazing with mullions, a
+         deep roof with plant, radome, antenna mast and a red obstruction
+         light that is lit at night. Its shaft apothem (2.2) sits inside the
+         4.5 m collider and inside the stair's 2.4 m inner edge; its cab is
+         the same 8.5 m square the cab-floor platform already is. */
+      if (PARTS) {
+        PARTS.tower(root, cxp, czp, { H: H, apothem: 2.2, cabHalf: (base + 4) / 2, cabH: 3.2, plinth: false }, root);
+      } else {
+        box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
+      }
       if (!V2) {
         solid(cxp, czp, base, base, 0, H + 6);
       } else {
@@ -2315,20 +2527,22 @@
         const leaf = box(cxp + DW / 2 + 0.12, DH / 2, czp + base / 2 + 0.22, 0.09, DH, DW * 0.92,
           0x3e4a56, { cast: true });
         leaf.rotation.y = 0.5;
-        box(cxp, DH + 0.35, czp + base / 2 + 0.06, DW + 0.7, 0.5, 0.35, 0x2f3a46,
-          { cast: true, emissive: 0x1d3550, ei: 0.3 });   // door head / sign band
+        // the door frame and a small steel canopy over it (the old head was
+        // a glowing box standing in for a sign nobody wrote)
+        box(cxp, DH + 0.06, czp + base / 2 - 0.05, DW + 0.24, 0.12, 0.2, 0x2f3a46, { cast: true });
+        for (const sg of [-1, 1]) box(cxp + sg * (DW / 2 + 0.06), DH / 2, czp + base / 2 - 0.05, 0.12, DH, 0.2, 0x2f3a46, { cast: false });
+        box(cxp, DH + 0.45, czp + base / 2 + 0.55, DW + 1.0, 0.08, 1.1, 0x5b636b, { cast: true });
+        // the opening itself: the dark of the stair core behind the door
+        box(cxp, DH / 2, czp + 2.21, DW, DH, 0.04, 0x0e1012, { cast: false });
       }
       // cab (wider glass box) + roof + dish — OWNER RULE (bda61ab): no gray
       // panes; the cab is the same clear tinted glass as every city facade.
       // mat() is fresh-per-call so mutating is safe; transparent keeps it out
       // of batch.js's opaque merge. cast:false — clear glass throws no shadow.
-      const cab = box(cxp, H + 1.6, czp, base + 4, 3.2, base + 4, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 });
-      cab.material.transparent = true; cab.material.opacity = 0.6;
-      box(cxp, H + 3.6, czp, base + 4.6, 0.6, base + 4.6, 0x3a4046, { cast: true }); // cab roof
-      box(cxp, H + 4.6, czp - 1, 0.3, 1.4, 0.3, 0xd24a3a, { emissive: 0xff5a4a, ei: 0.9 }); // beacon
-      if (CBZ.makeLabelSprite) {
-        const s = CBZ.makeLabelSprite("TWR", { color: "#cfe3ff" });
-        if (s) { s.position.set(cxp, H + 1.6, czp + base + 2.2); s.scale.set(5, 2.6, 1); root.add(s); }
+      if (!PARTS) {
+        const cab = box(cxp, H + 1.6, czp, base + 4, 3.2, base + 4, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 });
+        cab.material.transparent = true; cab.material.opacity = 0.6;
+        box(cxp, H + 3.6, czp, base + 4.6, 0.6, base + 4.6, 0x3a4046, { cast: true }); // cab roof
       }
       if (!V2) return;
 
@@ -2369,16 +2583,38 @@
           CBZ.platforms.push(pr); towerPlats.push(pr);
         }
       }
-      if (stairs.length && BGU && BGU.mergeBufferGeometries) {
-        const gs = [];
+      /* THE STAIR AS STEEL. It was 81 loose 1.4 m plates floating round
+         the shaft. A real external tower stair is grating treads carried on
+         an outer stringer, a handrail on posts, and brackets back to the
+         wall. Each tread is drawn at its real going (0.72 m, the step
+         spacing) over the unchanged 1.4 m platform records. */
+      if (stairs.length && PARTS) {
+        const treads = [], steel = [];
+        const legOf = function (s) { return (s / PER_LEG | 0) % 4; };
+        // outward unit vector for each leg (away from the shaft)
+        const OUT = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+        const ALONG = [[1, 0], [0, 1], [-1, 0], [0, -1]];
         for (let i = 0; i < stairs.length; i++) {
-          const g = new THREE.BoxGeometry(1.4, 0.10, 1.4);
-          g.translate(stairs[i][0], stairs[i][1] - 0.05, stairs[i][2]);
-          gs.push(g);
+          const L = legOf(i), a = ALONG[L], o = OUT[L];
+          const w = a[0] ? 0.72 : 1.3, d = a[0] ? 1.3 : 0.72;
+          treads.push(PARTS.put(new THREE.BoxGeometry(w, 0.05, d), stairs[i][0], stairs[i][1] - 0.03, stairs[i][2]));
+          // wall bracket under the inner edge
+          steel.push(PARTS.put(new THREE.BoxGeometry(a[0] ? 0.06 : 0.5, 0.25, a[0] ? 0.5 : 0.06),
+            stairs[i][0] - o[0] * 0.4, stairs[i][1] - 0.2, stairs[i][2] - o[1] * 0.4));
+          // handrail post every other tread, outer edge
+          if (i % 2 === 0) {
+            steel.push(PARTS.put(new THREE.BoxGeometry(0.05, 1.0, 0.05), stairs[i][0] + o[0] * 0.66, stairs[i][1] + 0.5, stairs[i][2] + o[1] * 0.66));
+          }
         }
-        const sm = new THREE.Mesh(BGU.mergeBufferGeometries(gs), mat(0x767d85));
-        sm.castShadow = false; sm.receiveShadow = true;
-        sm.matrixAutoUpdate = false; root.add(sm);
+        // stringer + handrail per run of consecutive treads on the same leg
+        for (let i = 0; i < stairs.length - 1; i++) {
+          if (legOf(i) !== legOf(i + 1)) continue;
+          const o = OUT[legOf(i)], A = stairs[i], B = stairs[i + 1];
+          steel.push(PARTS.member(A[0] + o[0] * 0.68, A[1] - 0.12, A[2] + o[1] * 0.68, B[0] + o[0] * 0.68, B[1] - 0.12, B[2] + o[1] * 0.68, 0.06, 0.28));
+          steel.push(PARTS.member(A[0] + o[0] * 0.66, A[1] + 1.0, A[2] + o[1] * 0.66, B[0] + o[0] * 0.66, B[1] + 1.0, B[2] + o[1] * 0.66, 0.05));
+        }
+        PARTS.addMerged(root, treads, cmat(0x4d535a), { cast: true });
+        PARTS.addMerged(root, steel, cmat(0x9aa1a8), { cast: true });
       }
       // the cab FLOOR — the top landing, and the deck the controller's chair
       // and console stand on.
@@ -2390,18 +2626,36 @@
         };
         CBZ.platforms.push(cf); towerPlats.push(cf);
       }
-      box(cxp, CAB_Y - 0.06, czp, base + 4, 0.12, base + 4, 0x4a5158, { cast: false });
+      if (!PARTS) box(cxp, CAB_Y - 0.06, czp, base + 4, 0.12, base + 4, 0x4a5158, { cast: false });
 
       // ---- THE CONSOLE. A desk arc facing the runway (-z, down the field),
       //      with a lit screen bank — what an air traffic controller sits at.
       const DESK_Z = czp - 1.9;
-      box(cxp, CAB_Y + 0.42, DESK_Z, 4.6, 0.10, 0.9, 0x2b3138, { cast: false });   // worktop
-      box(cxp, CAB_Y + 0.20, DESK_Z, 4.4, 0.44, 0.7, 0x3c444c, { cast: false });   // pedestal
-      box(cxp, CAB_Y + 0.86, DESK_Z - 0.28, 3.6, 0.78, 0.08,
-        0x1d5f74, { emissive: 0x3fc6e6, ei: 0.75, cast: false });                  // screen bank
-      // cab floodlight bar — one emissive strip under the roof, no light object.
-      box(cxp, H + 3.15, czp, base + 3.4, 0.10, 0.22,
-        0xfff0cf, { emissive: 0xffe6b0, ei: 0.8, cast: false });
+      // A console at CONSOLE height: a 0.76 m worktop on a 0.74 m pedestal,
+      // and a row of low tilted monitors under the sightline (a controller
+      // looks OUT). It was a 0.42 m knee-high slab with a 3.6 m glowing
+      // panel standing across the window in front of him.
+      if (PARTS) {
+        const cDark = [], cTop = [], cLit = [];
+        cDark.push(PARTS.put(new THREE.BoxGeometry(4.4, 0.72, 0.7), cxp, CAB_Y + 0.36, DESK_Z));
+        cTop.push(PARTS.put(new THREE.BoxGeometry(4.6, 0.05, 0.9), cxp, CAB_Y + 0.765, DESK_Z + 0.05));
+        for (let i = 0; i < 4; i++) {
+          const mx = cxp - 1.65 + i * 1.1;
+          cDark.push(PARTS.put(new THREE.BoxGeometry(0.06, 0.14, 0.06), mx, CAB_Y + 0.86, DESK_Z - 0.2));
+          const scr = new THREE.BoxGeometry(0.62, 0.38, 0.04); scr.rotateX(-0.25); scr.translate(mx, CAB_Y + 1.1, DESK_Z - 0.22);
+          cDark.push(scr);
+          const px = new THREE.BoxGeometry(0.56, 0.32, 0.01); px.rotateX(-0.25); px.translate(mx, CAB_Y + 1.1, DESK_Z - 0.195);
+          cLit.push(px);
+        }
+        PARTS.addMerged(root, cDark, cmat(0x2f353c), {});
+        PARTS.addMerged(root, cTop, cmat(0x1f2327), {});
+        PARTS.addMerged(root, cLit, mat(0x1d5f74, { emissive: 0x3fc6e6, ei: 0.6 }), {});
+      }
+      // cab ceiling light — one emissive strip under the roof, no light
+      // object, lit at night and dim by day.
+      const fl = box(cxp, H + 3.1, czp, base + 3.0, 0.06, 0.3,
+        0xfff0cf, { emissive: 0xffe6b0, ei: 0.2, cast: false });
+      if (PARTS) PARTS.glow(fl.material, 0.2, 0.9, root);
 
       /* ---- THE CONTROLLER. cityStaffPost, so the body exists only when
          somebody could see the cab and is reaped when they leave. The trade
@@ -3261,7 +3515,7 @@
     // the larger the airliner, the further SOUTH it parks, so the up-scaled tail
     // stays clear of the terminal frontage (z=11) while the nose noses out toward
     // the taxiway. AL_SC=1 keeps the original gate line (one-number revert).
-    const gateZ = APRON_Z - 14 - 11 * (AL_SC - 1);
+    const gateZ = GATE_Z;
     for (let i = 0; i < 4; i++) {
       const gx = -120 + ADX + i * 55;
       const hd = Math.PI / 2 + (rng() - 0.5) * 0.05;
@@ -3293,9 +3547,15 @@
       // no dumb props): a proper little machine (cab, wheels, hitch) registered
       // in CBZ.cityCars via cityRegisterVehicle, so you can hop in and drive it
       // around the apron. The pushback animation yields the moment it's taken.
-      const tug = new THREE.Group();
+      // THE TUG BODY IS airside.js's (CBZ.airsideBodies.tug): the airside
+      // fleet already builds a proper low-slung pushback tug, and this file
+      // used to hand-roll a second, cruder one out of six boxes. One body,
+      // one look; the six-box version survives only as the no-airside
+      // fallback.
+      const AB = CBZ.airsideBodies && CBZ.airsideBodies.tug ? CBZ.airsideBodies.tug(0xe8c020) : null;
+      const tug = AB ? AB.grp : new THREE.Group();
       tug.position.set(-160 + ADX + 16, 0, TAX_Z - 6);
-      (function buildTug() {
+      if (!AB) (function buildTug() {
         function tb(w, h, d, x, y, z, color, emissive) {
           const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
             emissive ? mat(color, { emissive: emissive, ei: 0.6 }) : mat(color));
@@ -3328,7 +3588,7 @@
           tugRec = CBZ.cityRegisterVehicle(tug, {
             body: "van", style: "van", persist: true, color: 0xe8c020,
             model: { name: "Baggage Tug", value: 9000, rarity: 0.1, body: "van" },
-            dims: { width: 2.0, length: 3.4, height: 2.0, wheelbase: 1.7 },
+            dims: AB && AB.dims ? AB.dims : { width: 2.0, length: 3.4, height: 2.0, wheelbase: 1.7 },
           });
         } catch (e) { tugRec = null; }
       }
@@ -3386,11 +3646,35 @@
     // Elevated corridors off the terminal face: constants only, NO colliders
     // (underside 2.1u+, everything walks under), clear of every plane
     // collider (x ±15 around gates) and of the stolen-plane roll-out path.
+    /* DE-SLOP (2026-09-27): each bridge was two flat blue boxes. It is now
+       a real apron-drive bridge (airport_kit.js): a rotunda hung on the
+       terminal face, a glazed two-section telescoping tunnel, a drive column
+       on a two-wheel bogie parked in its painted box, and a cab with its
+       bellows canopy. The tunnel's underside stays at 2.33 m, over the
+       head-of-stand service road (vehicles here are <= 2.1 m), and the ONE
+       thing that stands on the ground, the drive column, stands south of
+       that road (z 0.5..1.5 against its 2.4 edge) and is solid. */
     function jetBridge(bx) {
-      box(bx, 3.4, 4.5, 3.0, 2.2, 13, 0x9fb4c4, { cast: true });     // corridor from the terminal
-      box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });   // gate-end head block
+      if (!PARTS) {
+        box(bx, 3.4, 4.5, 3.0, 2.2, 13, 0x9fb4c4, { cast: true });
+        box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });
+        return;
+      }
+      const jb = PARTS.jetBridge(root, bx, BR_WALL, BR_HEAD, { floor: 2.55, zCol: BR_COL });
+      const c = jb.col;
+      solid(c.x, c.z, c.w, c.d, 0, c.h);
     }
-    jetBridge(-92.5 + ADX); jetBridge(-37.5 + ADX);
+    for (const bx of BRIDGE_XS) jetBridge(bx);
+    // the stands are coned: a cone off each wingtip and one at the nose of
+    // every parked airliner (hazard cones are what a turned stand has on it)
+    if (PARTS) {
+      const hs = AIRCRAFT_DIMS.airliner.span * AL_SC / 2 + 1.2;
+      const cones = [];
+      for (const gx of GATE_XS) cones.push([gx - hs, GATE_Z + 6], [gx + hs, GATE_Z + 6], [gx + 2.2, GATE_Z - AIRCRAFT_DIMS.airliner.length * AL_SC / 2 - 1.5]);
+      PARTS.cones(root, cones);
+      // the wind: a windsock on the infield, abeam the 27 touchdown zone
+      PARTS.windsock(root, RWY_X1 - 330, RWY_Z + RWY_W / 2 + 13, 0.6);
+    }
 
     // =====================================================================
     //  10) PERIMETER FENCE — the WHY you can't drive into the sea except via
@@ -3459,80 +3743,77 @@
       // airport" report; gameplay boundaries must come from visible geometry,
       // terrain and water, never a hundreds-of-metres AABB.
 
-      // decorative sand/ramp APRONS (no collider) at each seaward gap so it
-      // reads as a slipway/beach down to the water.
-      function apron(x, z, w, d) {
-        const a = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(0xcdb88a));
-        a.rotation.x = -Math.PI / 2; a.position.set(x, 0.03, z);
-        a.receiveShadow = true; a.matrixAutoUpdate = false; a.updateMatrix(); root.add(a);
-      }
-      apron(midX, A_MAXZ + 4, PG * 2 + 2, 10);       // north slipway
-      apron(A_MINX - 4, midZ, 10, PG * 2 + 2);       // west slipway
-      apron(A_MAXX + 4, midZ, 10, PG * 2 + 2);       // east slipway
-
-      // posts — one instanced mesh, skipping ALL gate/gap spans
-      const postGeo = new THREE.BoxGeometry(0.18, H, 0.18);
-      const pts = [];
-      const stepP = 8;
-      const inGapZ = (z) => (z > midZ - PG && z < midZ + PG);
-      const inGapX = (x) => (x > midX - PG && x < midX + PG);
-      for (let x = A_MINX; x <= A_MAXX; x += stepP) {
-        if (!inGapX(x) && !frontOpen(x)) pts.push([x, A_MAXZ]);  // north (skip centre gap + the frontage)
-        if (x < gapX0 || x > gapX1) pts.push([x, A_MINZ]); // south (skip causeway gate)
-      }
-      for (let z = A_MINZ; z <= A_MAXZ; z += stepP) {
-        if (!inGapZ(z)) { pts.push([A_MINX, z]); pts.push([A_MAXX, z]); } // W/E skip centre gaps
-      }
-      const inst = new THREE.InstancedMesh(postGeo, mat(C_FENCE), pts.length);
-      inst.castShadow = false; const dm = new THREE.Object3D();
-      for (let i = 0; i < pts.length; i++) { dm.position.set(pts[i][0], H / 2, pts[i][1]); dm.updateMatrix(); inst.setMatrixAt(i, dm.matrix); }
-      inst.instanceMatrix.needsUpdate = true; root.add(inst);
-      // thin mesh "mesh-fabric" panels (merged) so it isn't just posts
-      if (BGU && BGU.mergeBufferGeometries) {
-        const panels = [];
-        function panelRun(x0, z0, x1, z1) {
-          const len = Math.hypot(x1 - x0, z1 - z0);
-          if (len < 0.5) return;
-          const g = new THREE.BoxGeometry(len, H * 0.85, 0.05);
-          g.rotateY(Math.atan2(z1 - z0, x1 - x0));
-          g.translate((x0 + x1) / 2, H * 0.5, (z0 + z1) / 2);
-          panels.push(g);
+      // A SLIPWAY at each seaward gap: a concrete ramp from the island's edge
+      // down under the water, with a kerb each side. (It was a flat beige
+      // sheet floating 3 cm over the sea, 10 m out from the shore.)
+      function slipway(x, z, dx, dz) {
+        if (!PARTS) return;
+        const LEN = 11, W = PG * 2 + 2, DROP = 1.6;
+        const ang = Math.atan2(DROP, LEN), L = Math.hypot(LEN, DROP);
+        const yaw = Math.atan2(dx, dz);                 // local +z -> seaward
+        const ramp = [], kerb = [];
+        const g = PARTS.boxM(W, 0.3, L, 1);
+        g.rotateX(ang); g.translate(0, 0.06 - DROP / 2 - 0.15, LEN / 2);
+        ramp.push(g);
+        for (const sg of [-1, 1]) {
+          const k = PARTS.boxM(0.35, 0.45, L, 1);
+          k.rotateX(ang); k.translate(sg * (W / 2 + 0.17), 0.06 - DROP / 2 + 0.1, LEN / 2);
+          kerb.push(k);
         }
-        // north split around the centre gap AND the frontage opening
-        panelRun(A_MINX, A_MAXZ, midX - PG, A_MAXZ);
-        if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) panelRun(midX + PG, A_MAXZ, OPEN_X0, A_MAXZ);
-        else panelRun(midX + PG, A_MAXZ, A_MAXX, A_MAXZ);
-        // west split around centre gap
-        panelRun(A_MINX, A_MINZ, A_MINX, midZ - PG);
-        panelRun(A_MINX, midZ + PG, A_MINX, A_MAXZ);
-        // east split around centre gap
-        panelRun(A_MAXX, A_MINZ, A_MAXX, midZ - PG);
-        panelRun(A_MAXX, midZ + PG, A_MAXX, A_MAXZ);
-        // south split around causeway gate
-        panelRun(A_MINX, A_MINZ, gapX0, A_MINZ);
-        panelRun(gapX1, A_MINZ, A_MAXX, A_MINZ);
-        // This is collision-bearing security fencing, so it must remain plainly
-        // visible against bright sea/sky.  At 0.18 opacity the collider read as
-        // an invisible wall anywhere between the widely spaced posts.  A darker,
-        // depth-writing mesh keeps the chain-link feel while making every solid
-        // span agree with what the player can actually see.
-        const fm = CBZ.glass
-          // the SAME glass as the towers, seen from both sides. The old flat
-          // grey 0x66717d had no emissive lift, which is exactly why an
-          // airliner window read as a dead grey slot instead of a pane.
-          ? CBZ.glass({ opacity: 0.5, side: THREE.DoubleSide })
-          : new THREE.MeshLambertMaterial({ color: 0x66717d, transparent: true, opacity: 0.52, depthWrite: true, side: THREE.DoubleSide });
-        const fmesh = new THREE.Mesh(BGU.mergeBufferGeometries(panels), fm);
-        fmesh.matrixAutoUpdate = false; root.add(fmesh);
+        const grp = new THREE.Group();
+        grp.position.set(x, 0, z); grp.rotation.y = yaw;
+        PARTS.addMerged(grp, ramp, PARTS.concreteMat(0xa9a59b), {});
+        PARTS.addMerged(grp, kerb, PARTS.concreteMat(0x8f8b83), { cast: true });
+        root.add(grp);
+      }
+      slipway(midX, A_MAXZ, 0, 1);                    // north slipway
+      slipway(A_MINX, midZ, -1, 0);                   // west slipway
+      slipway(A_MAXX, midZ, 1, 0);                    // east slipway
+
+      // THE FENCE (de-slop 2026-09-27): galvanised round posts every 3 m
+      // with 45 degree barbed-wire outriggers leaning out to sea, a top rail,
+      // three barbed strands and a real see-through chain-link fabric
+      // (airport_kit.js). It was square posts every 8 m and panels of the
+      // towers' window GLASS. Same runs, same gaps, still no collider.
+      const runs = [];
+      runs.push([A_MINX, A_MAXZ, midX - PG, A_MAXZ]);
+      if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) runs.push([midX + PG, A_MAXZ, OPEN_X0, A_MAXZ]);
+      else runs.push([midX + PG, A_MAXZ, A_MAXX, A_MAXZ]);
+      runs.push([A_MINX, A_MINZ, A_MINX, midZ - PG], [A_MINX, midZ + PG, A_MINX, A_MAXZ]);
+      runs.push([A_MAXX, A_MINZ, A_MAXX, midZ - PG], [A_MAXX, midZ + PG, A_MAXX, A_MAXZ]);
+      runs.push([A_MINX, A_MINZ, gapX0, A_MINZ], [gapX1, A_MINZ, A_MAXX, A_MINZ]);
+      if (PARTS) {
+        PARTS.fence(root, runs, { height: H, center: { x: midX, z: midZ } });
+      } else {
+        const postGeo = new THREE.BoxGeometry(0.18, H, 0.18);
+        const pts = [];
+        for (const r of runs) {
+          const L = Math.hypot(r[2] - r[0], r[3] - r[1]), n = Math.max(1, Math.round(L / 8));
+          for (let i = 0; i <= n; i++) pts.push([r[0] + (r[2] - r[0]) * i / n, r[1] + (r[3] - r[1]) * i / n]);
+        }
+        const inst = new THREE.InstancedMesh(postGeo, mat(C_FENCE), pts.length);
+        const dm = new THREE.Object3D();
+        for (let i = 0; i < pts.length; i++) { dm.position.set(pts[i][0], H / 2, pts[i][1]); dm.updateMatrix(); inst.setMatrixAt(i, dm.matrix); }
+        inst.instanceMatrix.needsUpdate = true; root.add(inst);
       }
       // …and the SEA WALL that takes over the opened span's real job. One
       // merged run, y-gated 0..0.55 so it stops a car and a walking body
       // without ever reading as a barrier in front of a door.
       if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) {
         const BH = 0.55, seg = 30;
+        const wallG = [], copeG = [];
         for (let x = OPEN_X0; x < OPEN_X1; x += seg) {
           const w = Math.min(seg, OPEN_X1 - x);
-          box(x + w / 2, BH / 2, A_MAXZ, w, BH, 0.30, C_CONC, { cast: false });
+          if (PARTS) {
+            // precast units with a 10 mm joint every 2.5 m, under a coping
+            for (let u = 0; u < w - 0.01; u += 2.5) {
+              const uw = Math.min(2.5, w - u) - 0.01;
+              wallG.push(PARTS.put(PARTS.boxM(uw, BH - 0.08, 0.28, 1), x + u + uw / 2 + 0.005, (BH - 0.08) / 2, A_MAXZ));
+            }
+            copeG.push(PARTS.put(PARTS.boxM(w, 0.09, 0.4, 1), x + w / 2, BH - 0.045, A_MAXZ));
+          } else {
+            box(x + w / 2, BH / 2, A_MAXZ, w, BH, 0.30, C_CONC, { cast: false });
+          }
           // `roadBarrier` is roadrules.js's own word (colliderExempt) and it is
           // the literally correct one: this run lies ALONGSIDE the kerb lane at
           // the water's edge, which is what a barrier is for. Without the stamp
@@ -3540,6 +3821,10 @@
           // carriageway and the gap law would try to cut the one thing out here
           // that must never be cut.
           solid(x + w / 2, A_MAXZ, w, 0.30, 0, BH).roadBarrier = true;
+        }
+        if (PARTS) {
+          PARTS.addMerged(root, wallG, PARTS.concreteMat(0xb3afa6), {});
+          PARTS.addMerged(root, copeG, PARTS.concreteMat(0xc9c5bc), { cast: true });
         }
       }
     })();
@@ -3561,97 +3846,83 @@
     // =====================================================================
     (function forecourt() {
       if (CBZ.CONFIG.AIRPORT_ENTRY_V2 === false) return;
-      const PLZ_X0 = TERM_X1 + 6, PLZ_X1 = TERM_X1 + 96;   // 41 → 131 + ADX
-      const PLZ_Z0 = 14 + ADZ, PLZ_Z1 = FRONT_Z;           // 26 m of real depth
-      // ---- the plaza deck, painted so the ground says where to drive.
-      mergePaint([quadGeo((PLZ_X0 + PLZ_X1) / 2, (PLZ_Z0 + PLZ_Z1) / 2,
-        PLZ_X1 - PLZ_X0, PLZ_Z1 - PLZ_Z0, 0.05)], 0x53585e, 0.05);
+      // The plaza deck, the footway (gate -> turn -> frontage -> doors), the
+      // zebra at the doors and the rank bay are PAINT in the airfield surface
+      // now (section 1). They used to be separate quads laid at 0.05-0.08 on
+      // top of a plane that itself sits at 0.08: coplanar, and they flickered.
+      // The drop-off canopy is the terminal roof's landside overhang (5b).
 
       /* ---- THE ENTRY GATE at the plaza's east mouth. You drive under it and
-         you have arrived — which is the whole difference between an entrance
-         and a hole in a fence.
-
-         IT IS A SINGLE PYLON, not a pair, and that is measured rather than
-         stylistic: the lane centre is KERB_Z (38.5) and the island's edge is
-         FRONT_Z (40), so a car's own half-width already reaches 39.5 and there
-         is no room on the north side for a post that a car would not clip. The
-         north side of the gate is therefore the SEA WALL the fence opening left
-         behind — 0.55 m of parapet that is already there — and the gantry
-         cantilevers to it. Clear width 5.85 m against a 2 m car.
-         Colliders on the pylon only; the gantry is 6.6 m up. */
-      const GATE_Z = KERB_Z - 5.5;                     // pylon centre, south side
-      box(PLZ_X1, 3.4, GATE_Z, 1.1, 6.8, 1.1, C_CONC, { cast: true });
+         you have arrived. IT IS A SINGLE COLUMN, not a pair, and that is
+         measured: the lane centre is KERB_Z (38.5) and the island's edge is
+         FRONT_Z (40), so there is no room north of the lane for a post a car
+         would not clip. The column stands south of the lane and a sign
+         gantry cantilevers over it to the sea wall. It was a 6.8 m concrete
+         block with a glowing box on top and a sign facing ALONG the lane
+         (edge-on to every driver) that carried a middle dot. */
+      const G = PARTS ? [] : null, GS = PARTS ? [] : null;
+      const armZ0 = GATE_PZ, armZ1 = FRONT_Z - 0.2, ARM_Y = 6.9;
+      if (PARTS) {
+        GS.push(PARTS.put(new THREE.CylinderGeometry(0.32, 0.36, 7.4, 12), PLZ_X1, 3.7, GATE_PZ));
+        GS.push(PARTS.put(new THREE.CylinderGeometry(0.6, 0.6, 0.3, 12), PLZ_X1, 0.15, GATE_PZ));
+        // the cantilever: a two-chord truss with diagonals
+        for (const dy of [0, 0.7]) G.push(PARTS.member(PLZ_X1, ARM_Y + dy, armZ0, PLZ_X1, ARM_Y + dy, armZ1, 0.14));
+        for (let z = armZ0, k = 0; z < armZ1 - 0.5; z += 0.9, k++) {
+          G.push(PARTS.member(PLZ_X1, ARM_Y + (k % 2 ? 0.7 : 0), z, PLZ_X1, ARM_Y + (k % 2 ? 0 : 0.7), Math.min(armZ1, z + 0.9), 0.06));
+        }
+        // the sign panel hung under the arm, square to the arriving traffic
+        GS.push(PARTS.put(new THREE.BoxGeometry(0.16, 1.3, 5.2), PLZ_X1, ARM_Y - 0.75, KERB_Z));
+        for (const dz of [-2, 2]) G.push(PARTS.member(PLZ_X1, ARM_Y, KERB_Z + dz, PLZ_X1, ARM_Y - 0.1, KERB_Z + dz, 0.05));
+        PARTS.addMerged(root, GS, PARTS.steelMat(0x7d858d), { cast: true });
+        PARTS.addMerged(root, G, cmat(0x5b636b), { cast: true });
+      }
       // `gate` — roadrules.js's colliderExempt word for hardware that stands
-      // beside a carriageway ON PURPOSE. A gatepost is the one collider at a
-      // road's edge that is not an accident.
-      solid(PLZ_X1, GATE_Z, 1.1, 1.1, 0, 6.8).gate = true;
-      box(PLZ_X1, 6.6, (GATE_Z + FRONT_Z) / 2, 1.2, 0.9, FRONT_Z - GATE_Z,
-        0x2f3a46, { cast: true, emissive: 0x1d3550, ei: 0.35 });
+      // beside a carriageway ON PURPOSE.
+      solid(PLZ_X1, GATE_PZ, 0.8, 0.8, 0, 7.4).gate = true;
       if (CBZ.makeLabelSprite) {
-        const s = CBZ.makeLabelSprite("→ DEPARTURES · ARRIVALS", { color: "#ffd451" });
-        if (s) { s.position.set(PLZ_X1, 6.6, (GATE_Z + FRONT_Z) / 2 + 0.7); s.scale.set(13, 1.7, 1); root.add(s); }
+        // both faces of the panel: arriving traffic reads the east face
+        for (const sg of [1, -1]) {
+          const s = CBZ.makeLabelSprite("DEPARTURES DROP-OFF", { color: "#f4f6f8", board: "#1f4f8a" });
+          if (s) {
+            s.position.set(PLZ_X1 + sg * 0.1, ARM_Y - 0.75, KERB_Z);
+            s.rotation.y = sg * Math.PI / 2;
+            s.scale.set(5.0, 1.2, 1);
+            root.add(s);
+          }
+        }
       }
-      // the PEDESTRIAN gate — its own opening well south of the carriageway,
-      // two posts with 2.4 m between them, and the footway threads it.
-      const PED_Z = GATE_Z - 4.5;                      // 28.5 — clear of the lane
+      // the PEDESTRIAN entrance — its own opening well south of the
+      // carriageway, marked by two steel bollards 2.4 m apart that the
+      // footway threads (two 3.2 m concrete posts holding up nothing).
+      const bol = [];
       [PED_Z - 1.2, PED_Z + 1.2].forEach(function (pz) {
-        box(PLZ_X1, 1.6, pz, 0.5, 3.2, 0.5, C_CONC, { cast: true });
-        solid(PLZ_X1, pz, 0.5, 0.5, 0, 3.2).gate = true;
+        if (PARTS) {
+          bol.push(PARTS.put(new THREE.CylinderGeometry(0.1, 0.11, 1.0, 10), PLZ_X1, 0.5, pz));
+          bol.push(PARTS.put(new THREE.CylinderGeometry(0.115, 0.115, 0.08, 10), PLZ_X1, 0.82, pz));
+        }
+        solid(PLZ_X1, pz, 0.3, 0.3, 0, 1.0).gate = true;
       });
-
-      /* FOOTWAY — the pedestrian leg of the arrival, walked end to end:
-         through the pedestrian gate, west across the plaza, north to the
-         frontage, then along the terminal wall to the doors. Three straight
-         runs, all south of the carriageway, so a walker never shares ground
-         with the drop-off lane. Paint only — nothing here has a collider. */
-      const foot = [];
-      const TURN_X = TERM_X1 - 4;
-      foot.push(quadGeo((TURN_X + PLZ_X1 + 6) / 2, PED_Z,
-        (PLZ_X1 + 6) - TURN_X, 1.4, 0.07));            // gate → the turn
-      foot.push(quadGeo(TURN_X, (PED_Z + TERM_FRONT + 0.42) / 2,
-        1.4, (TERM_FRONT + 0.42) - PED_Z, 0.07));      // north to the frontage
-      // …and the frontage leg narrows to 0.8 m, because that is all the strip
-      // has: wall at TERM_FRONT (37), lane edge at 37.8. A wider path here
-      // would only be paint drawn under the cars.
-      foot.push(quadGeo((TERM_X0 + TURN_X) / 2, TERM_FRONT + 0.42,
-        TURN_X - TERM_X0, 0.8, 0.07));                 // along the wall to the doors
-      foot.push(quadGeo(APRON_X, KERB_Z, 9, 0.5, 0.07));  // and a crossing at the doors
-      mergePaint(foot, 0xd8dde3, 0.07);
-
-      // ---- THE CANOPY over the doors. CANTILEVERED off the terminal's north
-      //      wall on angled struts — a columned porte-cochère cannot fit in a
-      //      3 m strip without standing in the lane, and a canopy you have to
-      //      swerve round is a worse entrance than none.
-      const CAN_W = 62, CAN_OUT = 2.6, CAN_Y = 5.4;
-      box(APRON_X, CAN_Y, TERM_FRONT + CAN_OUT / 2, CAN_W, 0.35, CAN_OUT,
-        0x8d97a1, { cast: true });
-      for (let k = -2; k <= 2; k++) {
-        const sx = APRON_X + k * (CAN_W / 5);
-        const st = box(sx, CAN_Y - 0.95, TERM_FRONT + 0.75, 0.22, 2.3, 0.22, 0x6b737b, { cast: false });
-        st.rotation.x = -0.62;                    // leans back to the wall
-      }
-      // …and it is LIT, because an entrance canopy that goes dark at dusk is
-      // where the whole read falls over. One emissive strip, no light object.
-      box(APRON_X, CAN_Y - 0.24, TERM_FRONT + CAN_OUT - 0.25, CAN_W - 3, 0.12, 0.30,
-        0xfff0cf, { emissive: 0xffe6b0, ei: 0.85, cast: false });
+      if (PARTS) PARTS.addMerged(root, bol, cmat(0x3b4148), { cast: true });
 
       // ---- LAMPS along the arrival, through the SHARED solve (CLAUDE.md:
       //      "A LUMINAIRE IS A POLE, AN ARM AND A HEAD ON THE ARM'S TIP").
       //      Degrade-safe: no lampMast, no lamps — never a hand-rolled mast.
+      //      The lens is a lamp: dark by day, lit at night (one material).
       const LM = CBZ.lampMast ? CBZ.lampMast({ poleH: 6.2, reach: 1.7, rise: 0.32, poleR: 0.12 }) : null;
       if (LM) {
+        const poleM = cmat(0x6f767d), headM = cmat(0x4c535a);
+        const bulbM = PARTS ? PARTS.glow(mat(0xfff2d0, { emissive: 0xffe9b8, ei: 0.1 }), 0.1, 1.0, root) : mat(0xfff2d0, { emissive: 0xffe9b8, ei: 0.9 });
         for (let x = PLZ_X0 + 10; x <= PLZ_X1 - 6; x += 26) {
           const g = new THREE.Group();
           g.position.set(x, 0, PLZ_Z0 + 1.6);
           g.rotation.y = 0;                        // local +Z faces the lane (north)
-          const pole = new THREE.Mesh(new THREE.CylinderGeometry(LM.poleR, LM.poleR * 1.3, LM.poleH, 6), mat(0x6f767d));
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(LM.poleR, LM.poleR * 1.3, LM.poleH, 8), poleM);
           pole.position.y = LM.poleCY; g.add(pole);
-          const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, LM.armLen, 5), mat(0x6f767d));
+          const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, LM.armLen, 6), poleM);
           arm.rotation.x = LM.armRotX; arm.position.set(0, LM.armCY, LM.armCZ); g.add(arm);
-          const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.62), mat(0x4c535a));
+          const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.62), headM);
           head.position.set(0, LM.headY, LM.headZ); g.add(head);
-          const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.5),
-            mat(0xfff2d0, { emissive: 0xffe9b8, ei: 0.9 }));
+          const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.5), bulbM);
           bulb.position.set(0, LM.bulbY, LM.bulbZ); g.add(bulb);
           root.add(g);
           solid(x, PLZ_Z0 + 1.6, 0.4, 0.4, 0, LM.poleH);
@@ -3674,15 +3945,16 @@
          THE RANK IS ITS OWN LANE, per real airport grammar and per the owner's
          constraint: it sits at RANK_Z, 15 m south of the drop-off lane, so a
          stationary queue can never block the kerb it serves. Placement is a
-         position hash, never Math.random. */
-      const RANK_Z = KERB_Z - 15, RANK_N = 6, RANK_GAP = 6.4;
-      const rankPaint = [];
-      rankPaint.push(quadGeo(PLZ_X0 + 8 + (RANK_N - 1) * RANK_GAP / 2, RANK_Z,
-        RANK_N * RANK_GAP + 2, 3.2, 0.08));
-      mergePaint(rankPaint, 0xd8b53a, 0.08);
+         position hash, never Math.random. The bay is painted (section 1);
+         the TAXI board stands on its own post at the head of the rank (it
+         used to hang 2.6 m up on nothing). */
       if (CBZ.makeLabelSprite) {
-        const s = CBZ.makeLabelSprite("TAXI", { color: "#ffd451" });
-        if (s) { s.position.set(PLZ_X0 + 4, 2.6, RANK_Z); s.scale.set(4.6, 2.0, 1); root.add(s); }
+        const s = CBZ.makeLabelSprite("TAXI", { color: "#1b1d20", board: "#ffd451" });
+        if (s) { s.position.set(PLZ_X0 + 4.2, 2.5, RANK_Z); s.scale.set(1.6, 0.8, 1); root.add(s); }
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 2.1, 8), cmat(0x6f767d));
+        post.position.set(PLZ_X0 + 4.2, 1.05, RANK_Z - 0.08); post.castShadow = true;
+        root.add(post);
+        solid(PLZ_X0 + 4.2, RANK_Z - 0.08, 0.15, 0.15, 0, 2.1);
       }
       // deferred: cityAddParkedCar needs a live arena, and cityStaffPost needs
       // the ped roster — neither exists while a landmass builder is running.

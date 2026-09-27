@@ -591,39 +591,190 @@
     }
     return town || any;
   }
+  // THE TENANT'S BUILDING. This used to take the TALLEST home tower, which is
+  // always the Spire, the flagship with a penthouse on top; its units[0] is
+  // storey 0, which on the Spire is the drive-in HANGAR deck. So "one room,
+  // one mattress" woke up among the parked supercars of the richest building
+  // in the city. A man with $12 lives in an ordinary tower: never the
+  // flagship, the cheapest address tier first, the tallest of those.
   function findTenantTower() {
     const A = arena(); if (!A) return null;
     const pool = A.homeLots || A.lots;
     if (!pool) return null;
-    let best = null, bestS = -1;
+    let best = null, bestK = -1e9;
     for (const lot of pool) {
       if (!lot || lot.kind !== "tower" || !lot.building || !lot.building.home) continue;
+      const h = lot.building.home;
+      if (h.flagship) continue;
       const st = lot.building.storeys || 0;
-      if (st > bestS) { bestS = st; best = lot; }
+      if (st < 3) continue;
+      const k = -((h.tier | 0) * 1000) + st;              // poorest tier first, then tallest
+      if (k > bestK) { bestK = k; best = lot; }
     }
-    return best;
+    if (best) return best;
+    for (const lot of pool) if (lot && lot.kind === "tower" && lot.building && lot.building.home) return lot;
+    return null;
+  }
+  // WHICH FLOOR: an ordinary flat a couple of storeys up (never the ground
+  // plate, which in a tower is the lobby or a garage), cheapest units first.
+  function tenantFloorY(lot) {
+    const units = (CBZ.cityFloorUnits && lot) ? (CBZ.cityFloorUnits(lot) || []) : [];
+    const b = lot && lot.building;
+    const ground = (b && b.floorTops && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
+    const ups = units.filter(function (u) { return u && u.floorY != null && u.floorY > ground + 2.0; });
+    ups.sort(function (a, c) { return ((a.tier | 0) - (c.tier | 0)) || (a.floorY - c.floorY); });
+    if (ups.length) return ups[Math.min(1, ups.length - 1)].floorY;
+    return units.length ? units[0].floorY : ground;
   }
 
-  // a low, slightly puffy twin air mattress + rumpled sheet + pillow — simple
-  // additive scene geometry (props.js pattern: cheap cached MeshLambert boxes,
-  // never disposed, matches the rest of the city's static-decor style).
-  function buildAirMattress(root, x, y, z, rotY) {
+  // THE WALL THE MATTRESS GOES AGAINST. Nobody sleeps on a mattress floating
+  // in the middle of a room: it is pushed along a wall. Nearest solid that is
+  // a WALL (spans waist height, runs 2.2 m or more), with the side it faces.
+  function wallBeside(b, floorY, x, z, maxD) {
+    const cols = (b && b.colliders) || [];
+    let best = null;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y1 == null || c.y1 < floorY + 1.2 || c.y0 > floorY + 0.4) continue;
+      const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ;
+      if (Math.max(sx, sz) < 2.2 || Math.min(sx, sz) > 0.8) continue;
+      const qx = Math.max(c.minX, Math.min(c.maxX, x)), qz = Math.max(c.minZ, Math.min(c.maxZ, z));
+      const d = Math.hypot(x - qx, z - qz);
+      if (d <= 0.05 || d > maxD) continue;
+      if (!best || d < best.d) best = { d: d, c: c };
+    }
+    if (!best) return null;
+    const c = best.c, alongX = (c.maxX - c.minX) >= (c.maxZ - c.minZ);
+    if (alongX) {
+      const s = z > (c.minZ + c.maxZ) / 2 ? 1 : -1;
+      return { nx: 0, nz: s, face: s > 0 ? c.maxZ : c.minZ, lo: c.minX, hi: c.maxX, alongX: true, c: c };
+    }
+    const s = x > (c.minX + c.maxX) / 2 ? 1 : -1;
+    return { nx: s, nz: 0, face: s > 0 ? c.maxX : c.minX, lo: c.minZ, hi: c.maxZ, alongX: false, c: c };
+  }
+
+  // does the squat's whole footprint (frame: long axis local x, wall at -z)
+  // land on open floor? Sampled on a grid over the mattress + crate + duffel
+  // + the blanket spill, against the building's gate and its real solids.
+  function squatFits(b, floorY, cx, cz, yaw) {
+    const cols = (b && b.colliders) || [];
+    const bx = (b && b.ox != null) ? b.ox : 0, bz = (b && b.oz != null) ? b.oz : 0;
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    for (let lx = -1.4; lx <= 1.75; lx += 0.35) for (let lz = -0.42; lz <= 1.05; lz += 0.35) {
+      // local (lx, lz) -> world: +z maps to (sin yaw, cos yaw), +x to (cos yaw, -sin yaw)
+      const x = cx + lx * cs + lz * sn, z = cz - lx * sn + lz * cs;
+      if (b && typeof b.clearFloorPoint === "function" && !b.clearFloorPoint(x - bx, z - bz, 0.05)) return false;
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        if (c.y1 != null && (c.y1 < floorY + 0.05 || c.y0 > floorY + 1.0)) continue;
+        if (x > c.minX - 0.04 && x < c.maxX + 0.04 && z > c.minZ - 0.04 && z < c.maxZ + 0.04) return false;
+      }
+    }
+    return true;
+  }
+
+  // THE SQUAT: a real twin air mattress (vinyl body, flocked top, a valve),
+  // a pillow, a fleece blanket kicked half onto the floor, an upturned milk
+  // crate for a nightstand with the phone charging off the wall, a clothes
+  // pile, a duffel with everything he owns, last night's pizza box and cans.
+  // Built with the exec suite's mesh kit (CBZ.cityMeshKit): real shapes,
+  // one merged mesh per material. Frame: long axis local x (head at -x), the
+  // wall at local -z, the open floor at +z. Re-staging removes the old one.
+  let squat = null;
+  function clearSquat() {
+    if (!squat) return;
+    if (squat.parent) squat.parent.remove(squat);
+    squat.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+    squat = null;
+  }
+  function blanketGeo(THREE, hs) {
+    const BW = 1.45, BD = 1.75, nx = 26, nz = 30;
+    const g = new THREE.PlaneGeometry(BW, BD, nx, nz);
+    g.rotateX(-Math.PI / 2);
+    const p = g.attributes.position;
+    const TOP = 0.236, HX = 0.9, HZ = 0.46;
+    for (let i = 0; i < p.count; i++) {
+      const wx = p.getX(i) + 0.32, wz = p.getZ(i) + 0.3;
+      let wr = 0.022 * Math.sin(wx * 9.0 + wz * 3.1) + 0.016 * Math.sin(wz * 13.0 - wx * 5.3) + 0.01 * Math.sin(wx * 23 + wz * 17);
+      const lump = 0.07 * Math.exp(-((wx - 0.35) * (wx - 0.35) * 6 + (wz + 0.05) * (wz + 0.05) * 9));
+      const over = Math.max(0, Math.abs(wx) - HX, Math.abs(wz) - HZ);
+      let y;
+      if (over <= 0) y = TOP + Math.max(-0.01, wr) + lump;
+      else {
+        y = TOP + wr * 0.5 - over * 2.8;
+        if (y < 0.012) y = 0.012 + Math.max(0, wr * 0.6) + 0.03 * hs(i, 3) * Math.max(0, 1 - over * 2);
+      }
+      p.setXYZ(i, wx, y, wz);
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+  function buildSquat(root, x, y, z, rotY) {
     const THREE = window.THREE;
-    if (!THREE || !root) return;
-    const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
+    clearSquat();
+    if (!THREE || !root || !CBZ.cityMeshKit) return null;
+    const K = CBZ.cityMeshKit(y), M = K.M, hs = CBZ.cityMeshKit.hash;
+    K.at(x, z, rotY || 0);
+    // the mattress: grey-blue vinyl body, navy flocked top in long I-beam
+    // channels, the valve on the foot end
+    K.rbox(M.satin, 0, 0.1, 0, 1.88, 0.2, 0.97, 0.085, 0x56647a);
+    K.rbox(M.paint, 0, 0.2, 0, 1.76, 0.02, 0.86, 0.009, 0x26314a);
+    for (let i = 0; i < 7; i++) {
+      K.cyl(M.paint, 0, 0.19, -0.37 + i * 0.1233, 0.036, 0.036, 1.66, 12, 0x2b3752, 0, 0, Math.PI / 2);
+    }
+    K.cyl(M.satin, 0.94, 0.14, 0.3, 0.022, 0.022, 0.03, 12, 0x2a2e33, 0, 0, Math.PI / 2);
+    // pillow at the head, a little crooked, a lived-in off-white
+    K.rbox(M.paint, -0.63, 0.285, -0.08, 0.54, 0.12, 0.38, 0.055, 0xd8d0c0, 0.04, 0.12, 0.05);
+    // the fleece blanket, kicked off the open side onto the floor
+    K.geo(M.leaf, blanketGeo(THREE, hs), 0, 0, 0, 0x6b5a4b);
+    // an upturned milk crate at the head end, against the wall
+    K.at(x, z, rotY || 0);
+    const cx = -1.25, cz = -0.26, CW = 0.33, CH = 0.28, CB = 0x2b4f8c;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(M.satin, cx + sx * (CW / 2 - 0.012), CH / 2, cz + sz * (CW / 2 - 0.012), 0.024, CH, 0.024, CB);
+    for (const yy of [0.012, 0.1, 0.18, CH - 0.012]) {
+      K.box(M.satin, cx, yy, cz + CW / 2 - 0.01, CW, 0.018, 0.02, CB);
+      K.box(M.satin, cx, yy, cz - CW / 2 + 0.01, CW, 0.018, 0.02, CB);
+      K.box(M.satin, cx + CW / 2 - 0.01, yy, cz, 0.02, 0.018, CW, CB);
+      K.box(M.satin, cx - CW / 2 + 0.01, yy, cz, 0.02, 0.018, CW, CB);
+    }
+    for (let i = -2; i <= 2; i++) {
+      K.box(M.satin, cx + i * 0.06, CH - 0.01, cz, 0.012, 0.02, CW - 0.02, CB);
+      K.box(M.satin, cx, CH - 0.01, cz + i * 0.06, CW - 0.02, 0.02, 0.012, CB);
+    }
+    // on it: the phone charging, a water bottle, a lighter
+    K.rbox(M.satin, cx + 0.05, CH + 0.006, cz + 0.06, 0.075, 0.009, 0.155, 0.006, 0x111214, 0, 0.5, 0);
+    K.box(M.emit, cx + 0.05, CH + 0.0112, cz + 0.06, 0.062, 0.001, 0.13, 0x10161c, 0, 0.5, 0);
+    K.tube(M.paint, [cx + 0.02, CH + 0.005, cz - 0.01], [cx - 0.08, CH + 0.004, cz - 0.12], 0.003, 0xe8e8e8, 5);
+    K.tube(M.paint, [cx - 0.08, CH + 0.004, cz - 0.12], [cx - 0.1, 0.3, -0.505], 0.003, 0xe8e8e8, 5);
+    K.box(M.paint, cx - 0.1, 0.3, -0.508, 0.072, 0.115, 0.008, 0xefeee8);
+    K.box(M.paint, cx - 0.1, 0.285, -0.49, 0.03, 0.04, 0.03, 0xf4f4f2);
+    K.cyl(M.satin, cx - 0.08, CH + 0.11, cz + 0.08, 0.033, 0.033, 0.22, 14, 0x9fc3d6);
+    K.cyl(M.paint, cx - 0.08, CH + 0.23, cz + 0.08, 0.016, 0.016, 0.02, 10, 0xf2f2f2);
+    K.box(M.satin, cx + 0.1, CH + 0.009, cz - 0.08, 0.025, 0.012, 0.075, 0xc0392b, 0, 0.9, 0);
+    // a duffel at the foot, against the wall: everything he owns
+    K.cyl(M.satin, 1.28, 0.15, -0.3, 0.15, 0.15, 0.42, 16, 0x1c1e22, 0, 0, Math.PI / 2);
+    K.sphere(M.satin, 1.07, 0.15, -0.3, 0.15, 0x1c1e22, 0.35, 1, 1);
+    K.sphere(M.satin, 1.49, 0.15, -0.3, 0.15, 0x1c1e22, 0.35, 1, 1);
+    K.box(M.satin, 1.28, 0.297, -0.3, 0.44, 0.006, 0.02, 0x0c0d0f);
+    K.tube(M.satin, [1.12, 0.26, -0.36], [1.28, 0.36, -0.36], 0.01, 0x2a2d31, 6);
+    K.tube(M.satin, [1.28, 0.36, -0.36], [1.44, 0.26, -0.36], 0.01, 0x2a2d31, 6);
+    // yesterday's clothes on the floor by the foot, open side
+    K.sphere(M.paint, 1.45, 0.05, 0.62, 0.2, 0x55585e, 1.3, 0.35, 1.0);
+    K.sphere(M.paint, 1.6, 0.035, 0.38, 0.18, 0x2c3a52, 1.6, 0.25, 0.7);
+    K.sphere(M.paint, 1.3, 0.03, 0.85, 0.14, 0xd8d8d2, 1.2, 0.25, 1.0);
+    // last night: a pizza box and the cans
+    K.at(x, z, rotY || 0);
+    K.rbox(M.paint, -0.75, 0.021, 0.88, 0.38, 0.042, 0.38, 0.004, 0xb99a6c, 0, 0.35, 0);
+    K.box(M.paint, -0.75, 0.0425, 0.88, 0.2, 0.001, 0.14, 0x8a2f24, 0, 0.35, 0);
+    K.cyl(M.chrome, -1.1, 0.033, 0.5, 0.033, 0.033, 0.122, 14, 0xb9bec4, 0, 0.6, Math.PI / 2);
+    K.cyl(M.satin, -1.1, 0.033, 0.5, 0.0335, 0.0335, 0.05, 14, 0x9b1f25, 0, 0.6, Math.PI / 2);
+    K.cyl(M.chrome, -1.3, 0.061, 0.62, 0.033, 0.033, 0.122, 14, 0xb9bec4);
+    K.cyl(M.satin, -1.3, 0.07, 0.62, 0.0335, 0.0335, 0.05, 14, 0x9b1f25);
     const grp = new THREE.Group();
-    grp.position.set(x, y, z);
-    grp.rotation.y = rotY || 0;
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.25, 0.95), cmat(0xd9cfb6));
-    base.position.y = 0.125; base.castShadow = false; base.receiveShadow = true;
-    grp.add(base);
-    const sheet = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.08, 0.84), cmat(0x8fa6bd));
-    sheet.position.set(0.02, 0.25 + 0.04, 0.02);
-    grp.add(sheet);
-    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.36), cmat(0xefe8d6));
-    pillow.position.set(-1.9 / 2 + 0.34, 0.25 + 0.08 + 0.06, 0);
-    grp.add(pillow);
+    grp.name = "tenant-squat";
+    K.flush(grp, "tenant-squat");
     root.add(grp);
+    squat = grp;
     return grp;
   }
 
@@ -951,15 +1102,80 @@
     game.cash = T.startCash; game.cityDebt = T.startDebt;   // cityOriginApply commits right after
     if (CBZ.cityDrink) { try { CBZ.cityDrink(T.drunkLevel); } catch (e) {} }
   }
+  // THE BAR'S FRONT DOOR, dressed like one: a pair of wall lanterns on the
+  // door casing lit amber, a rubber door mat, a steel ash urn with the night's
+  // butts round its foot, and a neon beer mug on a black backer in the window
+  // (no invented words: the building's own sign already names the place).
+  // props.js already stands a patio set / A-frame on bar frontages, so this
+  // stays inside the door's own 2 m and never on the kerb. (fx, fz) is the
+  // threshold on the facade, (ox, oz) points OUT. Built once per bar lot with
+  // the mesh kit; a rebuilt city is a new lot, so it is rebuilt with it.
+  function dressBarFront(A, lot, fx, fz, ox, oz) {
+    const THREE = window.THREE;
+    if (!THREE || !A || !A.root || !CBZ.cityMeshKit || !lot || !lot.building) return;
+    if (lot.building._barFront && lot.building._barFront.parent) return;
+    const gy = CBZ.floorAt ? CBZ.floorAt(fx + ox * 0.6, fz + oz * 0.6) : 0;
+    const K = CBZ.cityMeshKit(gy), M = K.M;
+    const yaw = Math.atan2(ox, oz);           // frame: +z = out to the street, +x along the facade
+    K.at(fx, fz, yaw);
+    // door mat: black rubber with raised ribs
+    K.rbox(M.satin, 0, 0.008, 0.55, 1.05, 0.016, 0.62, 0.006, 0x151617);
+    for (let i = -6; i <= 6; i++) K.box(M.satin, i * 0.075, 0.017, 0.55, 0.02, 0.004, 0.54, 0x0b0c0d);
+    // two lanterns on the casing: backplate, arm, a boxy black frame with
+    // amber glass on all four sides, a cap
+    for (const s of [-1, 1]) {
+      const lx = s * 0.87, ly = 2.0;
+      K.rbox(M.satin, lx, ly, 0.1, 0.1, 0.2, 0.02, 0.006, 0x16171a);
+      K.box(M.satin, lx, ly + 0.02, 0.17, 0.03, 0.03, 0.14, 0x16171a);
+      for (const cx of [-1, 1]) for (const cz of [-1, 1]) K.box(M.satin, lx + cx * 0.07, ly - 0.02, 0.26 + cz * 0.07, 0.016, 0.26, 0.016, 0x16171a);
+      K.box(M.emit, lx, ly - 0.02, 0.26, 0.13, 0.22, 0.13, 0xffb24a);
+      K.cyl(M.satin, lx, ly + 0.14, 0.26, 0.02, 0.11, 0.06, 4, 0x16171a, 0, Math.PI / 4);
+      K.box(M.satin, lx, ly - 0.155, 0.26, 0.17, 0.03, 0.17, 0x16171a);
+    }
+    // the ash urn by the door, and the butts nobody swept
+    K.at(fx, fz, yaw);
+    K.cyl(M.steel, -1.2, 0.31, 0.4, 0.15, 0.16, 0.62, 20, 0xd2d4d6);
+    K.sphere(M.steel, -1.2, 0.62, 0.4, 0.15, 0xd2d4d6, 1, 0.35, 1);
+    K.cyl(M.paint, -1.2, 0.66, 0.4, 0.09, 0.09, 0.01, 16, 0xcfc5b0);
+    const hs = CBZ.cityMeshKit.hash;
+    for (let i = 0; i < 7; i++) {
+      const a = hs(i, 9) * 6.28, r = 0.22 + hs(i, 10) * 0.35;
+      K.cyl(M.paint, -1.2 + Math.cos(a) * r, 0.006, 0.4 + Math.sin(a) * r, 0.0045, 0.0045, 0.03, 6, i & 1 ? 0xefe9dc : 0xc98f4d, 0, a, Math.PI / 2);
+    }
+    // the neon: a beer mug on a black backer, hung on the window beside the door
+    const nx0 = 1.95, ny0 = 1.62, nz0 = 0.06;
+    K.rbox(M.satin, nx0, ny0, nz0, 0.66, 0.56, 0.02, 0.01, 0x0d0e10);
+    const T = function (a, b, c) { K.tube(M.emit, [nx0 + a[0], ny0 + a[1], nz0 + 0.025], [nx0 + b[0], ny0 + b[1], nz0 + 0.025], 0.009, c || 0xffb03a, 6); };
+    T([-0.14, -0.2], [0.1, -0.2]); T([-0.14, -0.2], [-0.16, 0.14]); T([0.1, -0.2], [0.12, 0.14]);
+    T([0.12, 0.02], [0.2, 0.02]); T([0.2, 0.02], [0.2, 0.1]); T([0.2, 0.1], [0.12, 0.1]);
+    const foam = [[-0.18, 0.14], [-0.12, 0.2], [-0.06, 0.16], [0.0, 0.21], [0.06, 0.16], [0.12, 0.2], [0.15, 0.14]];
+    for (let i = 0; i < foam.length - 1; i++) T(foam[i], foam[i + 1], 0xfff3d6);
+    T([-0.08, -0.14], [-0.08, 0.06], 0xffd27a); T([0.04, -0.14], [0.04, 0.06], 0xffd27a);
+    const grp = new THREE.Group();
+    grp.name = "bar-front";
+    K.flush(grp, "bar-front");
+    A.root.add(grp);
+    lot.building._barFront = grp;
+  }
   // SCENE (may fail — no bar lot AND no arena spawn to fall back to, which
   // only happens if the arena itself never built): the door + bouncer toss.
   function sceneBarfly(game) {
     const A = arena();
     const lot = findBarLot();
+    // THROWN OUT MEANS OUT. building.door is buildings.js's doorPt: 1.6 m
+    // INSIDE the facade, carrying doorInfo's INWARD normal (the club block in
+    // buildings.js says so and negates it). This scene read it as an outward
+    // door on the street, so the player spawned ~3 m inside the bar and the
+    // bouncer "threw him out" deeper into the room. Now: (doorX, doorZ) is the
+    // threshold on the facade, (nx, nz) points OUT to the sidewalk, the
+    // bouncer fills the doorway and the player lands on the pavement.
     let doorX, doorZ, nx = 0, nz = 1;
     if (lot && lot.building && lot.building.door) {
       const door = lot.building.door;
-      doorX = door.x; doorZ = door.z; nx = door.nx; nz = door.nz;
+      nx = -(door.nx || 0); nz = -(door.nz || 0);
+      if (!nx && !nz) nz = 1;
+      doorX = door.x + nx * 1.6; doorZ = door.z + nz * 1.6;     // back out to the facade line
+      dressBarFront(A, lot, doorX, doorZ, nx, nz);
     } else if (A && A.spawn) {
       doorX = A.spawn.x; doorZ = A.spawn.z - 2; nx = 0; nz = 1;
     } else return null;
@@ -974,7 +1190,7 @@
 
     let bouncer = null;
     if (CBZ.cityMakePed && CBZ.cityPeds && A && A.root) {
-      bouncer = CBZ.cityMakePed(doorX, doorZ, Math.random, {
+      bouncer = CBZ.cityMakePed(doorX + nx * 0.35, doorZ + nz * 0.35, Math.random, {
         name: "Bouncer", kind: "civilian", wealth: 0.6, archetype: "merchant",
         job: "doorman", aggr: 0.7, hp: 220, armed: false,
       });
@@ -1073,14 +1289,10 @@
   function sceneTenant(game) {
     const A = arena();
     const lot = findTenantTower();
-    let px, pz, mx, mz, floorY;
+    let px, pz, mx, mz, myaw = null, floorY;
     if (lot && lot.building) {
       const b = lot.building;
-      const units = CBZ.cityFloorUnits ? CBZ.cityFloorUnits(lot) : [];
-      let unit = null;
-      for (const u of units) { if (u && u.tier === 0) { unit = u; break; } }
-      if (!unit && units.length) unit = units[0];
-      floorY = unit ? unit.floorY : 0.14;
+      floorY = tenantFloorY(lot);
       const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
       // both the standing spot and the mattress get validated OPEN floor
       // (clearSpot: walls / stair run / shaft / the floor's real furniture
@@ -1088,9 +1300,30 @@
       // spawning the player inside a partition wall reads as a broken game.
       const sp = clearSpot(b, floorY, bx + 1.2, bz + 0.8);
       px = sp.x; pz = sp.z;
-      const ms = clearSpot(b, floorY, px - 1.7, pz - 0.4);
-      mx = ms.x; mz = ms.z;
-      if (Math.hypot(mx - px, mz - pz) < 0.9) { mx = px - 1.7; mz = pz - 0.4; }   // never on top of the player
+      // the squat goes AGAINST the nearest wall, its whole footprint (the
+      // mattress, the crate, the duffel, the blanket spill) on open floor
+      const wl = wallBeside(b, floorY, px, pz, 5.0);
+      if (wl) {
+        const HALF = 0.485 + 0.03;                      // mattress half-width + a finger of air
+        const t0 = wl.alongX ? px : pz;
+        const yaw = Math.atan2(wl.nx, wl.nz);           // local +z = the open floor
+        const cands = [t0, t0 + 1.2, t0 - 1.2, t0 + 2.4, t0 - 2.4];
+        for (const tc of cands) {
+          const t = Math.max(wl.lo + 1.6, Math.min(wl.hi - 1.8, tc));
+          const cx = wl.alongX ? t : wl.face + wl.nx * HALF;
+          const cz = wl.alongX ? wl.face + wl.nz * HALF : t;
+          if (squatFits(b, floorY, cx, cz, yaw)) { mx = cx; mz = cz; myaw = yaw; break; }
+        }
+      }
+      if (myaw == null) {
+        const ms = clearSpot(b, floorY, px - 1.7, pz - 0.4);
+        mx = ms.x; mz = ms.z;
+        if (Math.hypot(mx - px, mz - pz) < 0.9) { mx = px - 1.7; mz = pz - 0.4; }   // never on top of the player
+      } else {
+        // he is on his feet on the open side, a step off the mattress's middle
+        const s = clearSpot(b, floorY, mx + Math.sin(myaw) * 1.45 + Math.cos(myaw) * 0.35, mz + Math.cos(myaw) * 1.45 - Math.sin(myaw) * 0.35, 2.0);
+        px = s.x; pz = s.z;
+      }
     } else if (A && A.spawn) {
       px = A.spawn.x; pz = A.spawn.z; floorY = 0.14;
       mx = px - 1.6; mz = pz - 0.3;
@@ -1102,7 +1335,7 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.34; }
 
-    if (A && A.root) buildAirMattress(A.root, mx, floorY, mz, facing + Math.PI);
+    if (A && A.root) buildSquat(A.root, mx, floorY, mz, myaw != null ? myaw : facing + Math.PI);
 
     scene = null;   // static dressing only — no ongoing scripted beat
     return { compact: true };
@@ -1770,10 +2003,7 @@
       // Inside a building we must land on a REAL floor: tower_top rides the
       // executive floor if the flagship built one, otherwise the ground plate.
       if (comp.where === "tower_top" && b.execOffice && b.execOffice.floorY != null) floorY = b.execOffice.floorY;
-      else if (comp.where === "unit" && CBZ.cityFloorUnits) {
-        const units = CBZ.cityFloorUnits(lot) || [];
-        if (units.length) floorY = units[0].floorY;
-      }
+      else if (comp.where === "unit" && CBZ.cityFloorUnits) floorY = tenantFloorY(lot);
       const sp = clearSpot(b, floorY, bx + 1.2, bz + 0.8);
       px = sp.x; pz = sp.z;
     } else if (A && A.spawn) {

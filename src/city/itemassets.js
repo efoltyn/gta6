@@ -87,6 +87,25 @@
   function gTor(r, t, seg) { seg = seg || 16; return G("t" + r + "," + t + "," + seg, function () { return new THREE.TorusGeometry(r, t, 6, seg); }); }
   function gOct(r) { return G("o" + r, function () { return new THREE.OctahedronGeometry(r); }); }
   function gDod(r) { return G("d" + r, function () { return new THREE.DodecahedronGeometry(r); }); }
+  // A ROUNDED-CORNER SLAB lying flat on XZ, base at y=0: the one shape a card
+  // needs (a CR80 card is a rectangle with 3 mm corner radii, and a square
+  // corner is the thing that made the old "keycard" read as a tile).
+  function gRRect(w, d, r, h) {
+    return G("r" + w + "," + d + "," + r + "," + h, function () {
+      const s = new THREE.Shape(), x0 = -w / 2, z0 = -d / 2;
+      s.moveTo(x0 + r, z0);
+      s.lineTo(x0 + w - r, z0); s.absarc(x0 + w - r, z0 + r, r, -Math.PI / 2, 0, false);
+      s.lineTo(x0 + w, z0 + d - r); s.absarc(x0 + w - r, z0 + d - r, r, 0, Math.PI / 2, false);
+      s.lineTo(x0 + r, z0 + d); s.absarc(x0 + r, z0 + d - r, r, Math.PI / 2, Math.PI, false);
+      s.lineTo(x0, z0 + r); s.absarc(x0 + r, z0 + r, r, Math.PI, Math.PI * 1.5, false);
+      const geo = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: 4 });
+      // the shape is drawn in XY and extruded along +Z; lay it down so the
+      // shape's Y becomes world Z and the extrusion becomes the thickness (+Y)
+      geo.rotateX(Math.PI / 2);
+      geo.translate(0, h, 0);
+      return geo;
+    });
+  }
 
   // one material path, and it is the repo's pooled one (CLAUDE.md's raw-material
   // ratchet counts every construction that bypasses cmat — do not add to it).
@@ -135,6 +154,65 @@
   const STEEL = 0x8e98a4, IRON = 0x5b636e, DARK = 0x1d222a, BONE = 0xe4ddc8,
         LEATH = 0x4a3423, BRASS = 0xc9a44a, GLASSY = 0x8ecbe8, PAPER = 0xd8d0ad,
         LEAF = 0x5f9b46, RED = 0xc03a30, OFFWHITE = 0xe8ebef, CARD = 0xb08a55;
+
+  // ---- PAPER MONEY, at real size. One note is 156 x 66 mm; a hundred of
+  // them is 11 mm thick. A note is pale grey-green paper with DARKER green
+  // print (border, corner numerals, the portrait oval) — the contrast between
+  // the pale paper edge and the printed face is the whole read at 5 m.
+  const BILL_W = 0.066, BILL_L = 0.156;
+  const BILL = { edge: 0xd3d7c4, face: 0xa3b193, print: 0x55684b, portrait: 0x6e7c62,
+                 strapA: 0xc9a23a, strapB: 0x7b5a9e };           // $10k mustard, $2k violet straps
+  // a dye pack went off in the bag: the same notes, soaked red
+  const BILL_DYED = { edge: 0xc79a92, face: 0xa56a62, print: 0x6a2c28, portrait: 0x80403a,
+                      strapA: 0x9a5a3a, strapB: 0x6a3a5a };
+  function billPrint(p, y, len, pal) {                // the printed face of a note whose paper top is at y
+    pal = pal || BILL;
+    const pr = M(pal.print), yy = y + 0.00015, L = len || BILL_L;
+    bx(p, pr, 0.0030, 0.0003, L - 0.014, 0.0265, yy, 0);
+    bx(p, pr, 0.0030, 0.0003, L - 0.014, -0.0265, yy, 0);
+    bx(p, pr, BILL_W - 0.014, 0.0003, 0.0030, 0, yy, L / 2 - 0.0065);
+    bx(p, pr, BILL_W - 0.014, 0.0003, 0.0030, 0, yy, -(L / 2 - 0.0065));
+    if (L > 0.1) {
+      const o = put(p, gCyl(0.0145, 0.0145, 0.0003, 14), M(pal.portrait), 0, yy, 0.012);
+      o.scale.set(1.25, 1, 1);
+      bx(p, pr, 0.010, 0.0003, 0.012, 0.018, yy, -0.056);
+      bx(p, pr, 0.010, 0.0003, 0.012, -0.018, yy, 0.058);
+    }
+  }
+  // a strapped stack; returns its height
+  function billStack(g, x, y, z, ry, bills, strapKind, pal) {
+    pal = pal || BILL;
+    const s = new THREE.Group();
+    s.position.set(x, y, z); s.rotation.y = ry || 0; g.add(s);
+    const t = Math.max(0.003, bills * 0.00011);
+    bx(s, M(pal.edge), BILL_W, t, BILL_L, 0, t / 2, 0);
+    bx(s, M(pal.face), BILL_W - 0.002, 0.0004, BILL_L - 0.002, 0, t + 0.0002, 0);
+    billPrint(s, t + 0.0004, 0, pal);
+    bx(s, M(strapKind ? pal.strapB : pal.strapA), BILL_W + 0.0016, t + 0.0016, 0.038, 0, (t + 0.0016) / 2, 0);
+    return t + 0.0016;
+  }
+  // one loose note, one end curling up off whatever it lies on
+  function looseBill(g, x, y, z, ry) {
+    const s = new THREE.Group();
+    s.position.set(x, y + 0.003, z); s.rotation.y = ry || 0; g.add(s);
+    const c = new THREE.Group(); c.rotation.x = -0.035; s.add(c);
+    bx(c, M(BILL.face), BILL_W, 0.0004, BILL_L, 0, 0.0002, 0);
+    billPrint(c, 0.0004);
+  }
+  // a folded wad: a few notes doubled over, the fold edge rounded, the top
+  // leaf springing open a few millimetres the way folded paper does
+  function billFold(g, x, y, z, ry) {
+    const s = new THREE.Group();
+    s.position.set(x, y, z); s.rotation.y = ry || 0; g.add(s);
+    const H = BILL_L / 2;
+    bx(s, M(BILL.edge), BILL_W, 0.005, H, 0, 0.0025, 0);
+    put(s, gCyl(0.0028, 0.0028, BILL_W, 8), M(BILL.face), 0, 0.0028, -H / 2, 0, 0, Math.PI / 2);
+    const leaf = new THREE.Group();
+    leaf.position.set(0, 0.0052, -H / 2); leaf.rotation.x = -0.06; s.add(leaf);
+    bx(leaf, M(BILL.face), BILL_W, 0.0005, H, 0, 0.00025, H / 2);
+    const lp = new THREE.Group(); lp.position.z = H / 2; leaf.add(lp);
+    billPrint(lp, 0.0005, H);
+  }
 
   // ============================================================
   //  2. THE TONE KIT — itemicons.js already solved "what colour is this
@@ -286,12 +364,52 @@
     },
 
     // ---- product ---------------------------------------------------------
-    drug: function (g, C) {                                   // a taped brick
-      bx(g, C.mA, 0.150, 0.056, 0.100, 0, 0.028, 0);
-      bx(g, C.mS, 0.152, 0.012, 0.102, 0, 0.010, 0);          // wrap seam
-      bx(g, C.mD, 0.154, 0.060, 0.020, 0, 0.028, 0);          // tape cross
-      bx(g, C.mD, 0.022, 0.060, 0.104, 0, 0.028, 0);
-      bx(g, C.mDL, 0.050, 0.003, 0.036, -0.040, 0.057, 0.026);
+    // Product is packaged the way product is actually packaged, and the NAME
+    // picks the package: weed is a zip baggie of buds, crystal is a baggie
+    // of shards, everything else (coke, heroin, "brick") is a kilo brick in
+    // layered brown packing tape with a crew's stamp. The old one-size white
+    // slab with a tape cross read as a bar of soap.
+    drug: function (g, C, name) {
+      const n = String(name || "").toLowerCase();
+      if (/weed|kush|bud|marijuana|cannabis|ganja|joint|haze/.test(n)) {
+        // a quarter-ounce zip bag lying flat, buds pushing the plastic up
+        const bag = M(0xdfe5e2), seal = M(0x3b62a8);
+        const b1 = M(0x5e7a2e), b2 = M(0x72903a), b3 = M(0x4c6426), hair = M(0xb4763a);
+        bx(g, bag, 0.100, 0.006, 0.140, 0, 0.003, 0);
+        bx(g, seal, 0.101, 0.004, 0.006, 0, 0.004, 0.058);           // the zip track
+        bx(g, bag, 0.101, 0.002, 0.016, 0, 0.002, 0.066);            // lip above the zip
+        const at = [[-0.022, 0.018, -0.030, 1.0, b1], [0.020, 0.016, -0.004, 0.9, b2],
+                    [-0.010, 0.015, 0.026, 0.85, b3], [0.026, 0.014, -0.040, 0.75, b1],
+                    [-0.028, 0.013, 0.004, 0.7, b2]];
+        for (let i = 0; i < at.length; i++) {
+          const d = put(g, gDod(0.024), at[i][4], at[i][0], at[i][1] * 0.8 + 0.008, at[i][2]);
+          d.scale.set(at[i][3], at[i][3] * 0.62, at[i][3] * 1.25); d.rotation.set(0.4 * i, 0.9 * i, 0.2);
+        }
+        sh(g, hair, 0.004, -0.018, 0.024, -0.024); sh(g, hair, 0.004, 0.022, 0.021, 0.0);
+        return;
+      }
+      if (/meth|crystal|\bice\b|shard|crank/.test(n)) {
+        const bag = M(0xdfe5e2), seal = M(0xb03a32), xtal = M(0xe8f2f7), xtal2 = M(0xc8dde8);
+        bx(g, bag, 0.070, 0.005, 0.095, 0, 0.0025, 0);
+        bx(g, seal, 0.071, 0.004, 0.005, 0, 0.0035, 0.038);
+        const at = [[-0.012, -0.012, 0.012], [0.010, -0.018, 0.010], [0.000, 0.004, 0.013],
+                    [-0.016, 0.014, 0.009], [0.014, 0.012, 0.011], [0.004, -0.030, 0.008]];
+        for (let i = 0; i < at.length; i++) {
+          const o = put(g, gOct(at[i][2]), i % 2 ? xtal : xtal2, at[i][0], 0.006 + at[i][2] * 0.35, at[i][1]);
+          o.scale.set(0.8, 0.5, 1.3); o.rotation.set(0.3 * i, 1.1 * i, 0);
+        }
+        return;
+      }
+      // THE KILO BRICK. ~12 x 4.5 x 19 cm, wrapped in overlapping bands of tan
+      // packing tape laid at angles (the uneven layering is what says "taped
+      // by hand" and not "a box"), a pressed crew stamp on the face.
+      const tape = M(0xb99a62), tapeD = M(0xa4854f), tapeL = M(0xcdb483), stamp = M(0x7c2420);
+      bx(g, tape, 0.120, 0.045, 0.190, 0, 0.0225, 0);
+      bx(g, tapeD, 0.122, 0.047, 0.050, 0, 0.0225, -0.058, 0, 0.06, 0);   // tape bands wrapped round
+      bx(g, tapeL, 0.122, 0.047, 0.046, 0, 0.0225, 0.022, 0, -0.10, 0);
+      bx(g, tapeD, 0.122, 0.047, 0.040, 0, 0.0225, 0.074, 0, 0.12, 0);
+      bx(g, tapeL, 0.050, 0.047, 0.192, 0.028, 0.0225, 0, 0, 0.04, 0);     // one run lengthwise
+      bx(g, stamp, 0.040, 0.0015, 0.040, -0.024, 0.0475, -0.012, 0, 0.3, 0); // the stamp
     },
     pill: function (g, C) {                                   // the bottle
       cy(g, C.mA, 0.026, 0.026, 0.072, 0, 0.036, 0);
@@ -435,20 +553,92 @@
         bx(g, s, 0.0035, 0.0022, 0.014, i * 0.020, 0.014, 0.088, 0, i * 0.5, 0);
       }
     },
+    // A KEY IS A BUNCH OF KEYS ON A RING, lying flat: a steel split ring, two
+    // cut keys fanned off it (a brass one and a nickel one, bow + blade +
+    // bitting notches), and a leather fob. The old one was a rod through a
+    // doughnut hovering 3 mm under its own origin.
     key: function (g, C) {
-      cy(g, C.mA, 0.0048, 0.0048, 0.080, 0, 0.005, 0.018, LZ);
-      to(g, C.mA, 0.019, 0.0055, 0, 0.005, -0.032, LZ, 0, 0);
-      bx(g, C.mA, 0.0048, 0.011, 0.008, 0, -0.001, 0.044);
-      bx(g, C.mA, 0.0048, 0.014, 0.008, 0, -0.003, 0.058);
-      bx(g, C.mD, 0.006, 0.003, 0.010, 0, 0.010, -0.032);     // brass tag
+      const ringM = M(0x9aa2aa), nickel = M(0xb9bec4), leather = M(0x4a2f1e);
+      to(g, ringM, 0.014, 0.0014, 0, 0.0016, 0, LZ, 0, 0);            // the split ring, flat
+      const keyAt = [[C.mA, 0.35], [nickel, -0.55]];
+      for (let k = 0; k < keyAt.length; k++) {
+        const kg = new THREE.Group();
+        kg.rotation.y = keyAt[k][1];
+        g.add(kg);
+        const m = keyAt[k][0];
+        cy(kg, m, 0.012, 0.012, 0.0022, 0, 0.0011, 0.024);              // the bow
+        cy(kg, M(DARK), 0.0032, 0.0032, 0.0024, 0, 0.0012, 0.017);       // the hole the ring runs through
+        bx(kg, m, 0.0085, 0.0020, 0.046, 0, 0.0010, 0.058);             // the blade
+        bx(kg, m, 0.0100, 0.0022, 0.004, 0, 0.0011, 0.036);             // the shoulder
+        for (let i = 0; i < 4; i++) {
+          bx(kg, m, 0.0030, 0.0020, 0.0045, 0.0055, 0.0010, 0.044 + i * 0.009 + (i % 2) * 0.002);  // bitting teeth
+        }
+      }
+      // the leather fob hanging off the other side of the ring
+      bx(g, leather, 0.020, 0.0035, 0.050, 0, 0.00175, -0.042, 0, 0.12, 0);
+      cy(g, M(BRASS), 0.0045, 0.0045, 0.004, 0.0015, 0.002, -0.020);    // its rivet/snap
+    },
+    // A KEYCARD: a CR80 card (85.6 x 54 mm, rounded corners) face-up, the
+    // issuer's colour stripe across the top, a head-and-shoulders PHOTO, two
+    // printed lines, the gold contact chip — clipped to a badge reel and a
+    // lanyard lying in a loose loop. Every one of those is a thing a real
+    // access card has; together they are what make it read as "somebody's
+    // pass" and not "a white tile".
+    keycard: function (g, C) {
+      const white = M(0xf1f1ec), stripe = C.mD, stripeD = C.mF;
+      const skin = M(0xc49a74), hair = M(0x2e241e), shirt = M(0x3d4a5c), photoBg = M(0xb9c4cf);
+      const ink = M(0x5a6068), chip = M(0xc9a44a), chipD = M(0x8a6c22);
+      const T = 0.0012;                                                   // card thickness (a real one is 0.76 mm)
+      put(g, gRRect(0.054, 0.0856, 0.003, T), white, 0, 0, 0);
+      bx(g, stripe, 0.0536, 0.0004, 0.017, 0, T + 0.0002, 0.0336);        // issuer stripe across the top
+      bx(g, photoBg, 0.019, 0.0004, 0.024, -0.0135, T + 0.0002, 0.0060);  // photo
+      bx(g, shirt, 0.017, 0.0003, 0.007, -0.0135, T + 0.0005, -0.0020);
+      bx(g, skin, 0.008, 0.0003, 0.010, -0.0135, T + 0.0005, 0.0065);
+      bx(g, hair, 0.009, 0.0003, 0.004, -0.0135, T + 0.0006, 0.0128);
+      bx(g, ink, 0.020, 0.0003, 0.0025, 0.012, T + 0.0002, 0.0100);        // name line
+      bx(g, ink, 0.014, 0.0003, 0.0020, 0.009, T + 0.0002, 0.0050);        // title line
+      bx(g, stripeD, 0.040, 0.0003, 0.0030, 0, T + 0.0002, -0.0330);       // number band at the foot
+      bx(g, chip, 0.0110, 0.0005, 0.0090, 0.0125, T + 0.0002, -0.0110);    // the contact chip
+      bx(g, chipD, 0.0110, 0.0002, 0.0008, 0.0125, T + 0.0005, -0.0110);
+      bx(g, chipD, 0.0008, 0.0002, 0.0090, 0.0125, T + 0.0005, -0.0110);
+      bx(g, M(0x6b7078), 0.010, 0.0004, 0.0025, 0, T + 0.0002, 0.0395);   // the slot punched for the clip
+      // badge-reel strap + clip, then the lanyard in a loose loop on the ground
+      bx(g, M(0x8e969e), 0.007, 0.0012, 0.018, 0, 0.0006, 0.0500);
+      bx(g, M(STEEL), 0.012, 0.0030, 0.014, 0, 0.0015, 0.0620);
+      const loop = to(g, stripeD, 0.034, 0.0022, 0, 0.0022, 0.100, LZ, 0, 0);
+      loop.scale.set(1, 1.35, 1);                                          // an oval, the way a dropped lanyard lies
     },
     // MOVED here out of city/inventory.js's buildChestMesh — SAME dimensions
     // and SAME palette, so a placed chest is byte-identical to the one that
     // has been standing in saved worlds, and the bag now shows that exact box.
-    chest: function (g, C) {
-      put(g, gBox(1.0, 0.6, 0.8), M(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }), 0, 0.3, 0);
-      put(g, gBox(1.04, 0.2, 0.84), M(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }), 0, 0.7, 0);
-      put(g, gBox(0.14, 0.18, 0.06), M(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }), 0, 0.58, 0.44);
+    // A WOODEN STORAGE TRUNK, same 1.0 x 0.8 x 0.8 footprint the saved chests
+    // were placed with: planked sides (the plank seams are what say wood), a
+    // slightly proud lid, steel corner bands, rope side handles and a hasp
+    // with a padlock. It was three boxes with an emissive lift and a GLOWING
+    // gold latch — a treasure chest out of a platformer.
+    chest: function (g) {
+      const wood = M(0x5e3f24), woodL = M(0x6d4a2b), seam = M(0x3a2614), steel = M(0x3a3e44),
+            steelL = M(0x6b7178), rope = M(0x9a8660), brass = M(0xa88a3e);
+      bx(g, wood, 1.0, 0.6, 0.8, 0, 0.30, 0);
+      for (const y of [0.15, 0.30, 0.45]) {                          // plank seams, all four faces
+        bx(g, seam, 1.004, 0.008, 0.804, 0, y, 0);
+      }
+      bx(g, woodL, 1.04, 0.19, 0.84, 0, 0.705, 0);                    // the lid
+      bx(g, seam, 1.044, 0.008, 0.844, 0, 0.705, 0);                  // lid plank seam
+      bx(g, steel, 1.05, 0.03, 0.85, 0, 0.615, 0);                    // lid rim band
+      bx(g, steel, 1.01, 0.04, 0.81, 0, 0.03, 0);                     // base band
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {          // steel corner bands
+        bx(g, steel, 0.06, 0.62, 0.012, sx * 0.475, 0.31, sz * 0.404);
+        bx(g, steel, 0.012, 0.62, 0.06, sx * 0.504, 0.31, sz * 0.375);
+      }
+      for (const sx of [-1, 1]) {                                    // rope handles in cleats
+        bx(g, steelL, 0.02, 0.05, 0.05, sx * 0.51, 0.46, -0.10);
+        bx(g, steelL, 0.02, 0.05, 0.05, sx * 0.51, 0.46, 0.10);
+        cy(g, rope, 0.012, 0.012, 0.22, sx * 0.525, 0.43, 0, LZ);
+      }
+      bx(g, steel, 0.10, 0.16, 0.012, 0, 0.60, 0.426);               // the hasp
+      to(g, steelL, 0.022, 0.006, 0, 0.50, 0.440, 0, 0, 0);           // padlock shackle
+      bx(g, brass, 0.05, 0.045, 0.022, 0, 0.47, 0.442);               // padlock body
     },
 
     // ---- materials -------------------------------------------------------
@@ -475,13 +665,51 @@
     },
 
     // ---- money & shine ---------------------------------------------------
-    cash: function (g, C) {
-      bx(g, C.mA, 0.155, 0.030, 0.070, 0, 0.015, 0);
-      bx(g, C.mS, 0.155, 0.006, 0.070, 0, 0.020, 0);
-      bx(g, C.mA, 0.155, 0.005, 0.070, 0, 0.033, 0, 0, 0.13, 0);   // slipped top bills
-      bx(g, C.mA, 0.155, 0.005, 0.070, 0, 0.039, 0, 0, -0.07, 0);
-      bx(g, C.mD, 0.030, 0.040, 0.074, 0, 0.020, 0);               // paper band
-      bx(g, C.mF, 0.026, 0.004, 0.026, 0, 0.043, 0);               // seal
+    // A VAULT BRICK: nine strapped stacks deep, three across — how a cash
+    // centre shelves money — drawn as ONE paper block with the layer lines,
+    // each column's strap stripe and the printed top face, so a strongroom
+    // holding a hundred of them stays cheap. (19.8 x 11.3 x 15.6 cm.)
+    cashbrick: function (g) {
+      const cols = 3, layers = 9, t = 0.0126, W = BILL_W * cols, H = t * layers, L = BILL_L;
+      bx(g, M(BILL.edge), W, H, L, 0, H / 2, 0);
+      bx(g, M(BILL.face), W - 0.002, 0.0004, L - 0.002, 0, H + 0.0002, 0);
+      const line = M(dk(BILL.edge, 0.78));
+      for (let i = 1; i < layers; i++) bx(g, line, W + 0.001, 0.0008, L + 0.001, 0, i * t, 0);
+      for (let c = 0; c < cols; c++) {
+        const cx = (c - (cols - 1) / 2) * BILL_W;
+        const top = new THREE.Group(); top.position.x = cx; g.add(top);
+        billPrint(top, H + 0.0004);
+        bx(g, M(c === 1 ? BILL.strapB : BILL.strapA), BILL_W - 0.003, H + 0.0016, 0.038, cx, (H + 0.0016) / 2, 0);
+      }
+    },
+    // ONE STRAPPED STACK: a hundred notes, 156 x 66 mm and 11 mm thick, the
+    // paper strap across the middle, and one loose note slipped off the top.
+    // (The old one was a 3 cm green brick — a stack of cash is THIN; the
+    // thinness and the pale paper edges are what say money.)
+    cash: function (g) {
+      billStack(g, 0, 0, 0, 0, 100, 0);
+      looseBill(g, 0.010, 0.0126, 0.012, 0.22);
+    },
+    // CASH ON THE GROUND, sized by what it is worth (opts.amount). A pocket's
+    // worth is a folded wad of loose notes; a real take is banded stacks
+    // spilled in a heap. Never a briefcase that appears from nowhere.
+    cashpile: function (g, C, name, row, opts) {
+      const amt = Math.max(1, (opts && opts.amount) || 100);
+      if (amt < 400) {
+        billFold(g, 0, 0, 0, 0.3);
+        looseBill(g, 0.070, 0, -0.020, 1.1);
+        if (amt >= 120) looseBill(g, -0.060, 0, 0.050, -0.6);
+        return;
+      }
+      const n = Math.max(1, Math.min(10, Math.round(amt / 2000)));
+      const LOW = [[0, 0, 0.10], [0.074, 0.020, -0.18], [-0.072, 0.028, 0.24], [0.018, 0.168, 1.46], [-0.030, -0.166, 1.62]];
+      const TOP = [[0.034, 0.012, 0.52], [-0.036, 0.018, -0.36], [0.004, 0.092, 1.20], [0.010, -0.082, 1.78], [0.000, 0.000, 0.92]];
+      const t = 0.011;
+      for (let i = 0; i < n; i++) {
+        const top = i >= 5, p = top ? TOP[i - 5] : LOW[i];
+        billStack(g, p[0], top ? t + 0.0016 : 0, p[1], p[2], 100, i % 3 === 1 ? 1 : 0);
+      }
+      if (n <= 3) { looseBill(g, 0.110, 0, 0.060, 0.8); looseBill(g, -0.100, 0, -0.080, -0.4); }
     },
     // MOVED here out of city/inventory.js's makeBriefcase (opts.small keeps the
     // corpse-container's two sizes).
@@ -515,44 +743,72 @@
       const dark = M(dk(base, 0.58));
       const strap = M(dk(base, 0.34));
       const brass = M(0xb59a4a);
-      const note = M(o.note != null ? o.note : 0x6fae5a);         // banded notes
-      const band = M(0xd8d2c0);
       /* THE SILHOUETTE IS A BARREL, NOT A BOX. The first draft led with a
          0.34x0.26x0.60 slab and read as a toolbox; the fix is to let the
          SPHERES carry the volume and use one shallow box only to give the
          thing a flat bottom to sit on. Three overlapping ellipsoids down Z is
          also how a loaded holdall actually slumps — fat in the middle,
-         tapering to the zip ends. */
-      sh(g, canvas, 0.175, 0, 0.180, 0, 1.00, 0.98, 1.35);        // the belly
-      sh(g, canvas, 0.150, 0, 0.170, -0.200, 1.00, 0.95, 1.05);   // and the two ends
-      sh(g, canvas, 0.150, 0, 0.170, 0.200, 1.00, 0.95, 1.05);
-      bx(g, dark, 0.180, 0.044, 0.380, 0, 0.014, 0);              // flat load-bearing base
-      /* THE MOUTH IS A RECESS, NOT A TRAY. The first draft floated the dark
-         plate and the bricks ABOVE the canvas line, so the notes read as
-         cargo strapped to the roof of a bag. Dropping both below the belly's
-         crown (0.30 against the ellipsoid's ~0.35) is what turns them into
-         something you are looking DOWN INTO. */
-      bx(g, dark, 0.155, 0.040, 0.440, 0, 0.286, 0);
-      for (let i = -1; i <= 1; i++) {
-        bx(g, note, 0.122, 0.048, 0.090, i * 0.006, 0.296, i * 0.140, 0, i * 0.20, 0);
-        bx(g, band, 0.032, 0.051, 0.093, i * 0.006, 0.296, i * 0.140, 0, i * 0.20, 0);
+         tapering to the zip ends.
+
+         THREE STATES (opts.state): "open" (default — unzipped, banded
+         stacks showing: a vault haul), "closed" (zipped shut, a zip track
+         and pull along the crown: a bag somebody stashed), "empty" (the
+         canvas slumped to half height, unzipped, handles lying flat: a bag
+         somebody already went through). */
+      const state = o.state || "open";
+      const body = new THREE.Group();
+      g.add(body);
+      if (state === "empty") body.scale.set(1.08, 0.46, 1.0);
+      sh(body, canvas, 0.175, 0, 0.180, 0, 1.00, 0.98, 1.35);        // the belly
+      sh(body, canvas, 0.150, 0, 0.170, -0.200, 1.00, 0.95, 1.05);   // and the two ends
+      sh(body, canvas, 0.150, 0, 0.170, 0.200, 1.00, 0.95, 1.05);
+      bx(g, dark, 0.180, 0.030, 0.380, 0, 0.015, 0);                 // flat load-bearing base
+      if (state === "closed") {
+        // the zip runs the crown: a dark track, the sliders and a pull tab
+        bx(g, dark, 0.016, 0.008, 0.270, 0, 0.349, 0);
+        bx(g, dark, 0.016, 0.008, 0.090, 0, 0.334, 0.170, -0.26, 0, 0);
+        bx(g, dark, 0.016, 0.008, 0.090, 0, 0.334, -0.170, 0.26, 0, 0);
+        bx(g, brass, 0.020, 0.010, 0.024, 0, 0.354, 0.080);
+        bx(g, strap, 0.010, 0.004, 0.034, 0.012, 0.357, 0.100, 0, 0.35, 0);
+      } else {
+        /* THE MOUTH IS A RECESS, NOT A TRAY. Dropping the dark plate below
+           the belly's crown is what turns the opening into something you are
+           looking DOWN INTO. */
+        const my = state === "empty" ? 0.150 : 0.286;
+        bx(g, dark, 0.155, 0.040, 0.440, 0, my, 0);
+        if (state === "open") {
+          // real banded stacks, jumbled in the mouth (the old ones were 5 cm
+          // green bricks — five times the thickness of any stack that exists)
+          const pal = o.dyed ? BILL_DYED : null;
+          const at = [[-0.030, 0.300, -0.130, 0.25], [0.028, 0.300, -0.010, -0.18], [-0.020, 0.300, 0.120, 0.10],
+                      [0.024, 0.3126, 0.080, 0.42], [-0.012, 0.3126, -0.070, -0.30]];
+          for (let i = 0; i < at.length; i++) billStack(g, at[i][0], at[i][1], at[i][2], at[i][3], 100, i % 2, pal);
+        }
+        // the lit lip of the open mouth, so the recess reads as an opening
+        bx(g, light, 0.190, 0.022, 0.470, 0, my - 0.010, 0);
+        bx(g, brass, 0.026, 0.026, 0.020, 0, my, 0.232);               // the zip pulls, run to the ends
+        bx(g, brass, 0.026, 0.026, 0.020, 0, my, -0.232);
       }
-      // TWO webbing handles arching off the top — the whole reason the
-      // silhouette reads as a bag and not a crate. Deliberately SLIM (0.022):
-      // at 0.035 they read as a suitcase grip instead of nylon tape.
-      for (const sx of [-0.090, 0.090]) {
-        bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, -0.078, 0.12, 0, 0);
-        bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, 0.078, -0.12, 0, 0);
-        bx(g, strap, 0.022, 0.022, 0.180, sx, 0.420, 0);
+      if (state === "empty") {
+        // handles lying flat across the slumped canvas, not standing up
+        for (const sx of [-0.120, 0.120]) bx(g, strap, 0.024, 0.008, 0.260, sx, 0.150, 0, 0, sx * 0.8, 0);
+        bx(g, strap, 0.020, 0.010, 0.44, 0.176, 0.005, 0.02, 0, 0.06, 0);   // shoulder strap fallen to the floor
+      } else {
+        // TWO webbing handles arching off the top — the whole reason the
+        // silhouette reads as a bag and not a crate. Deliberately SLIM (0.022):
+        // at 0.035 they read as a suitcase grip instead of nylon tape.
+        for (const sx of [-0.090, 0.090]) {
+          bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, -0.078, 0.12, 0, 0);
+          bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, 0.078, -0.12, 0, 0);
+          bx(g, strap, 0.022, 0.022, 0.180, sx, 0.420, 0);
+        }
+        bx(g, strap, 0.020, 0.048, 0.44, 0.166, 0.230, 0, 0, 0, 0.10);   // shoulder strap running the flank
       }
-      // shoulder strap running the flank, and the end-cap zip pulls
-      bx(g, strap, 0.020, 0.048, 0.44, 0.166, 0.230, 0, 0, 0, 0.10);
-      bx(g, brass, 0.026, 0.026, 0.020, 0, 0.286, 0.232);
-      bx(g, brass, 0.026, 0.026, 0.020, 0, 0.286, -0.232);
-      // the lit lip of the open mouth, so the recess reads as an opening
-      bx(g, light, 0.190, 0.022, 0.470, 0, 0.276, 0);
       // stencilled bank/house flash on the flank (a colour block, never text)
-      bx(g, M(o.flash != null ? o.flash : 0xc9a227), 0.012, 0.070, 0.210, -0.168, 0.190, 0.04);
+      if (o.flash !== false) {
+        bx(g, M(o.flash != null ? o.flash : 0xc9a227), 0.012, state === "empty" ? 0.034 : 0.070, 0.210,
+          -0.168, state === "empty" ? 0.090 : 0.190, 0.04);
+      }
     },
     // MOVED here out of city/inventory.js's makeBackpack — the container a
     // corpse's belongings still spill into.
@@ -563,6 +819,61 @@
       bx(g, cloth2, 0.38, 0.22, 0.09, 0, 0.22, -0.19);
       bx(g, leather, 0.07, 0.54, 0.05, -0.20, 0.37, 0.17, 0, 0, -0.10);
       bx(g, leather, 0.07, 0.54, 0.05, 0.20, 0.37, 0.17, 0, 0, 0.10);
+    },
+    // A HOME SAFE, door on +Z: a charcoal body standing on four feet, the
+    // door proud of the body inside a dark gap line, two barrel hinges on the
+    // left, the combination dial with its ring, and a three-spoke handle.
+    // Replaces a bare steel cube with a disc stuck on it.
+    safe: function (g) {
+      const body = M(0x2b2f35), door = M(0x363b42), gap = M(0x15171a), hinge = M(0x1e2125);
+      const steel = M(0x9aa1a8), dial = M(0xc9c2a4), ring = M(0x121417);
+      for (const fx of [-0.25, 0.25]) for (const fz of [-0.21, 0.21]) bx(g, gap, 0.07, 0.035, 0.07, fx, 0.0175, fz);
+      bx(g, body, 0.62, 0.76, 0.56, 0, 0.035 + 0.38, 0);
+      bx(g, gap, 0.54, 0.66, 0.006, 0, 0.415, 0.281);                    // the door gap
+      bx(g, door, 0.52, 0.64, 0.030, 0, 0.415, 0.295);                   // the door itself
+      bx(g, body, 0.46, 0.58, 0.006, 0, 0.415, 0.312);                   // its raised panel
+      for (const hy of [0.22, 0.61]) cy(g, hinge, 0.017, 0.017, 0.10, -0.268, hy, 0.300);
+      cy(g, ring, 0.056, 0.056, 0.012, 0.06, 0.52, 0.318, LZ, 0, 0, 20);  // dial ring
+      cy(g, dial, 0.044, 0.044, 0.022, 0.06, 0.52, 0.326, LZ, 0, 0, 20);  // the dial
+      cy(g, ring, 0.010, 0.010, 0.026, 0.06, 0.52, 0.330, LZ, 0, 0, 8);   // knob
+      bx(g, M(0xb03a32), 0.004, 0.012, 0.004, 0.06, 0.588, 0.322);        // index mark
+      cy(g, steel, 0.020, 0.020, 0.030, 0.06, 0.34, 0.325, LZ);           // handle hub
+      for (let i = 0; i < 3; i++) {
+        const a = i * (TAU / 3) + 0.3;
+        cy(g, steel, 0.0065, 0.0065, 0.090, 0.06 + Math.cos(a) * 0.045, 0.34 + Math.sin(a) * 0.045, 0.335,
+          0, 0, a - Math.PI / 2);
+        sh(g, steel, 0.012, 0.06 + Math.cos(a) * 0.092, 0.34 + Math.sin(a) * 0.092, 0.335);
+      }
+    },
+    // A HARD CASE (the black waterproof kind people keep guns and money in),
+    // long axis along Z, latches and carry handle on the +X face. opts.open
+    // swings the lid back on its rear hinge and shows the empty foam: that
+    // is what a stash looks like after somebody got to it first.
+    stashcase: function (g, C, name, row, opts) {
+      const o = opts || {};
+      const shellHex = o.shell != null ? o.shell : 0x1d1f22;
+      const shell = M(shellHex), seam = M(dk(shellHex, 0.6)), rib = M(lt(shellHex, 0.08));
+      const latch = M(0x4b5057), foam = M(0x34363a), cut = M(0x121315);
+      const W = 0.36, L = 0.56, HB = 0.150, HL = 0.070, F = 0.012;
+      for (const fx of [-0.14, 0.14]) for (const fz of [-0.22, 0.22]) bx(g, seam, 0.05, F, 0.05, fx, F / 2, fz);
+      bx(g, shell, W, HB, L, 0, F + HB / 2, 0);
+      bx(g, seam, W + 0.008, 0.012, L + 0.008, 0, F + HB - 0.006, 0);   // the parting-line flange
+      for (const lz of [-0.15, 0.15]) bx(g, latch, 0.016, 0.060, 0.070, W / 2 + 0.008, F + HB - 0.008, lz);
+      bx(g, latch, 0.022, 0.020, 0.150, W / 2 + 0.020, F + HB - 0.040, 0);   // carry handle
+      bx(g, latch, 0.020, 0.030, 0.014, W / 2 + 0.010, F + HB - 0.040, 0.068);
+      bx(g, latch, 0.020, 0.030, 0.014, W / 2 + 0.010, F + HB - 0.040, -0.068);
+      const lid = new THREE.Group();
+      lid.position.set(-W / 2, F + HB, 0);                              // hinged along the rear (-X) edge
+      g.add(lid);
+      bx(lid, shell, W, HL, L, W / 2, HL / 2, 0);
+      for (const rz of [-0.14, 0.14]) bx(lid, rib, W - 0.06, 0.012, 0.040, W / 2, HL + 0.006, rz);
+      if (o.open) {
+        lid.rotation.z = 1.95;                                          // swung back past vertical
+        bx(lid, foam, W - 0.03, 0.006, L - 0.03, W / 2, -0.003, 0);      // lid-side egg-crate foam
+        bx(g, foam, W - 0.03, 0.006, L - 0.03, 0, F + HB - 0.004, 0);    // pick-and-pluck foam, plucked empty
+        bx(g, cut, 0.14, 0.004, 0.22, -0.06, F + HB - 0.001, -0.10);
+        bx(g, cut, 0.10, 0.004, 0.16, 0.08, F + HB - 0.001, 0.12);
+      }
     },
     // THE INGOT. A 4-segment cylinder is a square prism and a tapered one is the
     // trapezoid every gold bar has. The square is squared by thetaStart (pi/4),
@@ -725,28 +1036,119 @@
   };
   CBZ.itemAssetKind = function (name, row, opts) { return kindOf(name, rowOf(name, row), opts); };
 
-  // A DROPPED item must be FINDABLE, and the models are honest about size — an
-  // apple is 8 cm because an apple is 8 cm, and 8 cm of apple on a pavement is
-  // invisible. So the PICKUP scales, and the model never lies about itself.
+  // ============================================================
+  //  4b. THE BAKE — one Mesh per object instead of 10-40.
+  //  An authored asset is a Group of small primitives, which is the right way
+  //  to WRITE it and the wrong way to DRAW forty of them on the city's roofs.
+  //  `bakeGroup` flattens every visible mesh under a group into ONE
+  //  non-indexed BufferGeometry in the group's own frame, carrying each
+  //  part's material colour as a vertex colour, drawn with ONE shared
+  //  vertex-coloured Lambert. Same look (every material here is a flat pooled
+  //  Lambert colour), one draw call. Geometry is cached per variant key and
+  //  flagged `_shared`, so the repo's dispose paths never free it out from
+  //  under a sibling.
+  // ============================================================
+  let VC_MAT = null;
+  function vcMat() {
+    if (!VC_MAT) { VC_MAT = new THREE.MeshLambertMaterial({ vertexColors: true }); VC_MAT._shared = true; }
+    return VC_MAT;
+  }
+  const _bm = new THREE.Matrix4(), _bi = new THREE.Matrix4(), _bn = new THREE.Matrix3(),
+        _bv = new THREE.Vector3(), _bw = new THREE.Vector3();
+  function bakeGroup(root) {
+    root.updateMatrixWorld(true);
+    _bi.copy(root.matrixWorld).invert();
+    const pos = [], nrm = [], col = [];
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+      for (let p = o; p && p !== root; p = p.parent) if (!p.visible) return;
+      const src = o.geometry, geo = src.index ? src.toNonIndexed() : src;
+      if (!geo.attributes.normal) geo.computeVertexNormals();
+      const P = geo.attributes.position, N = geo.attributes.normal;
+      _bm.multiplyMatrices(_bi, o.matrixWorld);
+      _bn.getNormalMatrix(_bm);
+      const mirrored = _bm.determinant() < 0;
+      const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+      const c = (mat && mat.color) || { r: 1, g: 1, b: 1 };
+      const n = P.count;
+      for (let t = 0; t < n; t += 3) {
+        // a mirrored transform flips winding; swap two corners to keep faces out
+        const order = mirrored ? [t, t + 2, t + 1] : [t, t + 1, t + 2];
+        for (let k = 0; k < 3; k++) {
+          const i = order[k];
+          _bv.fromBufferAttribute(P, i).applyMatrix4(_bm);
+          pos.push(_bv.x, _bv.y, _bv.z);
+          _bw.fromBufferAttribute(N, i).applyMatrix3(_bn).normalize();
+          nrm.push(_bw.x, _bw.y, _bw.z);
+          col.push(c.r, c.g, c.b);
+        }
+      }
+      if (geo !== src) geo.dispose();
+    });
+    if (!pos.length) return null;
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+    out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    out.computeBoundingBox(); out.computeBoundingSphere();
+    out._shared = true;
+    return out;
+  }
+  const BAKED = new Map();
+  function bakeKey(name, opts) {
+    let k = String(name == null ? "" : name) + "|";
+    if (opts) { try { k += JSON.stringify(opts); } catch (e) { k += "?"; } }
+    return k;
+  }
+  // CBZ.itemAssetBaked(key|null, name, row, opts) -> a fresh Mesh over a cached
+  // baked geometry (key defaults to name+opts). Same frame and origin as
+  // CBZ.itemAsset's Group, so it is a drop-in replacement wherever a static
+  // object is placed.
+  CBZ.itemAssetBaked = function (key, name, row, opts) {
+    const k = key || bakeKey(name, opts);
+    let e = BAKED.get(k);
+    if (!e) {
+      const grp = CBZ.itemAsset(name, row, opts);
+      if (!grp) return null;
+      const geo = bakeGroup(grp);
+      if (!geo) return null;
+      e = { geo: geo, kind: grp.userData.itemAsset, name: grp.userData.itemName };
+      BAKED.set(k, e);
+    }
+    const m = new THREE.Mesh(e.geo, vcMat());
+    m.castShadow = true; m.receiveShadow = true;
+    m.userData.itemAsset = e.kind;
+    m.userData.itemName = e.name;
+    return m;
+  };
+  // for callers that author their own group (systems/resources.js's scrap pile)
+  CBZ.itemAssetBakeGroup = bakeGroup;
+  CBZ.itemAssetVCMat = vcMat;
+
+  // A DROPPED ITEM IS ITS REAL SIZE (2026-09-27 de-slop). This used to be a
+  // findability RAMP, `k = (0.34/m)^0.62`, that lifted every small thing
+  // toward 34 cm: a 15.6 cm stack of notes became a 25 cm green brick, a
+  // wallet became a 21 cm clutch bag, a key ring a doorstop. It was the one
+  // place the file lied about size, and it is what made pickups read as
+  // arcade tokens instead of objects somebody dropped. What makes a thing
+  // findable is that it reads as itself — pale paper, a white card on a
+  // coloured lanyard, brass on asphalt — so the ramp is gone.
   //
-  // The scale is a RAMP, not a clamp, and that distinction is the whole reason
-  // it does not look stupid: clamping every small thing to one floor makes a
-  // ring and a medkit the same size on the kerb. `k = (REF/m)^0.62` lifts the
-  // tiniest things most while PRESERVING ORDER — ring 15 cm < apple 21 < medkit
-  // 25 < loaf 31 < knife 32 — so the pavement still tells you which is which.
-  // Anything already big is left exactly alone up to a hard 1.05 m ceiling.
-  //
-  // NO_SCALE kinds opt out entirely: a gun's size comes from the model every
-  // armed NPC in the game carries, and a chest/case/pack is world furniture
-  // already. Normalising those would make a dropped pistol 68% longer than the
-  // one on the corpse beside it.
-  const PICK_REF = 0.34, PICK_MAX = 1.05, PICK_POW = 0.62;
-  // `moneybag` joins them for the same reason a briefcase does: it is world
-  // furniture at honest scale, and normalising it would make a duffel on a
-  // vault shelf a different size from the one on the pavement beside it.
-  const NO_SCALE = { gun: 1, chest: 1, briefcase: 1, backpack: 1, moneybag: 1 };
+  // Two honest limits remain. Anything under 6 cm (a ring, a loose gem) is
+  // lifted to 6 cm at most 1.6x, because below that it is a single pixel at
+  // third-person distance. Anything over 1.05 m is brought down to 1.05 m,
+  // except the NO_SCALE world furniture (a gun is the model every armed NPC
+  // carries; a chest/case/duffel/safe is the same object on a shelf).
+  const PICK_MIN = 0.06, PICK_MIN_K = 1.6, PICK_MAX = 1.05;
+  const NO_SCALE = { gun: 1, chest: 1, briefcase: 1, backpack: 1, moneybag: 1, safe: 1, stashcase: 1 };
   CBZ.itemAssetPickup = function (name, row, opts) {
-    const o = CBZ.itemAsset(name, row, opts);
+    // everything but a gun is BAKED: one draw call, one shared geometry per
+    // variant, however many of them are lying around. (A gun stays a live
+    // weapon model: the physics body and the NPC-drop replacement inspect it.)
+    let o = null;
+    const kind = kindOf(name, rowOf(name, row), opts);
+    if (kind !== "gun" && CBZ.itemAssetBaked) o = CBZ.itemAssetBaked(null, name, row, opts);
+    if (!o) o = CBZ.itemAsset(name, row, opts);
     if (!o) return null;
     o.updateMatrixWorld(true);
     let b = new THREE.Box3().setFromObject(o);
@@ -754,7 +1156,7 @@
       const m = Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
       let k = 1;
       if (m > 1e-4 && !NO_SCALE[o.userData.itemAsset]) {
-        if (m < PICK_REF) k = Math.min(PICK_REF / m, Math.pow(PICK_REF / m, PICK_POW));
+        if (m < PICK_MIN) k = Math.min(PICK_MIN_K, PICK_MIN / m);
         else if (m > PICK_MAX) k = PICK_MAX / m;
       }
       if (k !== 1) { o.scale.multiplyScalar(k); o.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(o); }

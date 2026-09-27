@@ -200,6 +200,17 @@
     ];
     return _tintMats;
   }
+  // VIEW glass: the pane you stand behind to look at the city. The default
+  // pane is a 0.6-opacity sheet with its own blue underlight, which from the
+  // inside of a 160 m high office reads as a grey fog wall, not a window.
+  // Real low-iron curtain glass barely tints what is behind it: a faint cool
+  // tint, near-zero self-light. Shared by the pooled VIEW panes and any
+  // interior partition that wants the same glass (CBZ.cityViewGlassMat).
+  let _viewGlassMat = null;
+  function viewGlassMat() {
+    return _viewGlassMat || (_viewGlassMat = new THREE.MeshLambertMaterial({ color: 0xd4e4ea, emissive: 0x0c1418, emissiveIntensity: 1, transparent: true, opacity: 0.13 }));
+  }
+  CBZ.cityViewGlassMat = viewGlassMat;
   function litWinMat() { return _litWinMat || (_litWinMat = new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 })); }
   // REFLECTIVE glass (offices/apartments by default): a mirror-ish, near-opaque
   // tint you can NOT see through — until it shatters into a real see-through
@@ -299,15 +310,17 @@
     // partition by (tint, kind, sector) — see the sectored-pools note above.
     const buckets = new Map(), litBuckets = new Map();
     for (const r of batch) {
-      const k = (r.tint * 2 + (r.kind === "reflective" ? 1 : 0)) + "|" + sectorKey(r);
+      // kind index: 0 clear, 1 reflective, 2 VIEW (a floor that exists to be
+      // looked OUT of: exec_office.js retags its storey's panes to this).
+      const k = (r.tint * 3 + (r.kind === "reflective" ? 1 : r.kind === "view" ? 2 : 0)) + "|" + sectorKey(r);
       let a = buckets.get(k); if (!a) { a = []; buckets.set(k, a); } a.push(r);
       if (r.lit) { const lk = sectorKey(r); let la = litBuckets.get(lk); if (!la) { la = []; litBuckets.set(lk, la); } la.push(r); }
       r._grp = null;
     }
     buckets.forEach(function (recs, k) {
-      const bidx = parseInt(k, 10);                 // tint*2+kind prefix of the key
-      const t = (bidx / 2) | 0, kn = bidx % 2;
-      const im = pooledIM(recs, kn ? rmats[t] : mats[t]);
+      const bidx = parseInt(k, 10);                 // tint*3+kind prefix of the key
+      const t = (bidx / 3) | 0, kn = bidx % 3;
+      const im = pooledIM(recs, kn === 2 ? viewGlassMat() : kn ? rmats[t] : mats[t]);
       for (let i = 0; i < recs.length; i++) {
         const r = recs[i]; r.pool = im; r.inst = i;
         im.setMatrixAt(i, r.shattered ? _zeroM : paneMatrix(r));
@@ -3373,7 +3386,7 @@
       if (o.emissive) {
         mm = mat(col, { emissive: o.emissive, ei: o.ei || 0.5 });
         if (o.los) mm.vertexColors = true;
-      } else mm = o.los ? vcMat(col) : CBZ.cmat(col);
+      } else mm = o.mat || (o.los ? vcMat(col) : CBZ.cmat(col));
       const m = new THREE.Mesh(unitBoxGeo(!!o.los, ly - bh / 2 <= 0.2), mm);
       m.position.set(lx, ly, lz);
       m.scale.set(bw, bh, bd);
@@ -4155,23 +4168,63 @@
     // shaft column. The ROOF slab (top) is never carved (the headhouse sits on
     // it) and the ground plane is terrain, so only L=1..storeys-1 are tracked.
     const floorSlabs = [];
+    // THE ROOF is a granulated bitumen membrane (world/building_dress.js
+    // roofDeckMaterial: real-scale rolls, laps, patches, ponding, parapet
+    // dirt), not the old flat 0x9fa6ad slab that read near-white from above.
+    const roofMat = CBZ.roofDeckMaterial ? CBZ.roofDeckMaterial() : null;
     for (let L = 1; L <= storeys; L++) {
       const isRoof = L === storeys;
-      const sm = lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof });
+      const sm = lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x6f6c66 : 0xb9bec6,
+        { plat: true, los: true, cast: isRoof, mat: isRoof ? roofMat : null });
       if (!isRoof) floorSlabs.push({ mesh: sm, y: L * FH - 0.1, plat: plats[plats.length - 1], col: 0xb9bec6 });
     }
     const rTop = storeys * FH;
     // FACADE MASSING: parapet height varies per building (0.55..1.05, was a
     // flat 0.7) and a coping lip caps it — rooflines stop reading identical.
     const pp = 0.55 + vhash * 0.5;
-    lbox(slabCx, rTop + pp / 2, d / 2 - WT / 2, slabW, pp, WT, 0x8b9097, { los: true });
-    lbox(w / 2 - WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, 0x8b9097, { los: true });
-    lbox(slabCx, rTop + pp / 2, -d / 2 + WT / 2, slabW, pp, WT, 0x8b9097, { los: true });
-    lbox(-w / 2 + WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, 0x8b9097, { los: true });
-    dbox(slabCx, rTop + pp + 0.05, d / 2 - WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);
-    dbox(w / 2 - WT / 2, rTop + pp + 0.05, slabCz, WT + 0.16, 0.1, slabD + 0.1, TRIM);
-    dbox(slabCx, rTop + pp + 0.05, -d / 2 + WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);
-    dbox(-w / 2 + WT / 2, rTop + pp + 0.05, slabCz, WT + 0.16, 0.1, slabD + 0.1, TRIM);
+    // PARAPET = the facade wall carried up past the roof, in the facade's own
+    // colour (it was one fixed grey band on every building in the city), with
+    // a metal coping that oversails both faces, and on the roof side the
+    // membrane turned up the wall as base flashing with its termination bar.
+    // A boarded (opts.boarded) shell's roofline has really given way at one +z
+    // corner: the parapet stops short there instead of standing intact.
+    const PARC = shadeHex(color, 0.94), FLASHC = 0x4d4a45, TBAR = 0x7c8084;
+    const brk = opts.boarded ? ((Math.abs(Math.sin(ox * 17.23 + oz * 91.7) * 43758.5453) % 1) < 0.5 ? 1 : -1) : 0;
+    const GAPX = 1.9, GAPZ = 1.3;               // how much of the corner came down
+    const pzW = brk ? slabW - GAPX : slabW, pzC = brk ? slabCx - brk * GAPX / 2 : slabCx;
+    const pxD = slabD - GAPZ, pxC = slabCz - GAPZ / 2;
+    // The +-z runs are FULL building width: they used to span only the slab,
+    // which left a WT x WT notch out of the parapet at all four corners.
+    const pfW = brk ? w - GAPX : w, pfC = brk ? -brk * GAPX / 2 : 0;
+    lbox(pfC, rTop + pp / 2, d / 2 - WT / 2, pfW, pp, WT, PARC, { los: true });
+    if (brk === 1) lbox(w / 2 - WT / 2, rTop + pp / 2, pxC, WT, pp, pxD, PARC, { los: true });
+    else lbox(w / 2 - WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, PARC, { los: true });
+    lbox(0, rTop + pp / 2, -d / 2 + WT / 2, w, pp, WT, PARC, { los: true });
+    if (brk === -1) lbox(-w / 2 + WT / 2, rTop + pp / 2, pxC, WT, pp, pxD, PARC, { los: true });
+    else lbox(-w / 2 + WT / 2, rTop + pp / 2, slabCz, WT, pp, slabD, PARC, { los: true });
+    dbox(pfC, rTop + pp + 0.05, d / 2 - WT / 2, pfW + 0.16, 0.1, WT + 0.16, TRIM);
+    dbox(w / 2 - WT / 2, rTop + pp + 0.05, brk === 1 ? pxC : slabCz, WT + 0.16, 0.1, (brk === 1 ? pxD : slabD) + 0.1, TRIM);
+    dbox(0, rTop + pp + 0.05, -d / 2 + WT / 2, w + 0.16, 0.1, WT + 0.16, TRIM);
+    dbox(-w / 2 + WT / 2, rTop + pp + 0.05, brk === -1 ? pxC : slabCz, WT + 0.16, 0.1, (brk === -1 ? pxD : slabD) + 0.1, TRIM);
+    // base flashing + termination bar on the three (or four) inner faces that
+    // actually meet the membrane; the -x face of a stair building meets the
+    // open stairwell, not the roof, so it gets none
+    {
+      const FH_UP = 0.3, T = 0.025;
+      const iz = d / 2 - WT - T / 2, ix = w / 2 - WT - T / 2;
+      dbox(pzC, rTop + FH_UP / 2, iz, pzW, FH_UP, T, FLASHC);
+      dbox(slabCx, rTop + FH_UP / 2, -iz, slabW, FH_UP, T, FLASHC);
+      dbox(pzC, rTop + FH_UP + 0.02, iz - 0.012, pzW, 0.04, 0.02, TBAR);
+      dbox(slabCx, rTop + FH_UP + 0.02, -iz + 0.012, slabW, 0.04, 0.02, TBAR);
+      const sxD = brk === 1 ? pxD : slabD, sxC = brk === 1 ? pxC : slabCz;
+      dbox(ix, rTop + FH_UP / 2, sxC, T, FH_UP, sxD, FLASHC);
+      dbox(ix - 0.012, rTop + FH_UP + 0.02, sxC, 0.02, 0.04, sxD, TBAR);
+      if (!hasStairs) {
+        const nxD = brk === -1 ? pxD : slabD, nxC = brk === -1 ? pxC : slabCz;
+        dbox(-ix, rTop + FH_UP / 2, nxC, T, FH_UP, nxD, FLASHC);
+        dbox(-ix + 0.012, rTop + FH_UP + 0.02, nxC, 0.02, 0.04, nxD, TBAR);
+      }
+    }
 
     // ============================================================
     //  SWITCHBACK STAIRS — CONTINUOUS RAMP COLLISION + DECO TREADS
@@ -4265,7 +4318,10 @@
       const lz0 = Math.max(izMin, Math.min(rampEndZ, endZ) - 0.6);
       const lz1 = Math.min(izMax, Math.max(rampEndZ, endZ) + 0.6);
       const lzc = (lz0 + lz1) / 2, landD = lz1 - lz0;
-      lbox(ixMin + stairW / 2, (k + 1) * FH - 0.08, lzc, stairW + 2 * OUT_OVL, 0.2, landD, 0xb4b9c1, { plat: true, los: true, cast: false });
+      // (the TOP landing is open sky at roof level, so it is roof membrane,
+      // not a light-grey interior floor seen from every window above it)
+      lbox(ixMin + stairW / 2, (k + 1) * FH - 0.08, lzc, stairW + 2 * OUT_OVL, 0.2, landD, 0xb4b9c1,
+        { plat: true, los: true, cast: false, mat: (k === storeys - 1) ? roofMat : null });
       // ---- PREMIUM RAILINGS (deco, merged): a sloped handrail per flight on the
       // OPEN (centre) edge, balusters every ~2 treads, and newel posts at each
       // flight end. Single shared material → folds into the deco batch. ----
@@ -4361,6 +4417,7 @@
     // doors / interiors / stairs / the elevator shaft / roofloot / helipad are all
     // untouched. Deterministic per lot via CBZ.hash01(ox,oz,salt) — never rng(),
     // never a shared-stream draw. Skips the bespoke flagship (garageGround).
+    let crownRect = null;   // building-local footprint of the setback crown (roof plant keeps off it)
     if ((CBZ.CONFIG ? CBZ.CONFIG.BUILDING_MASSING_V2 !== false : true) && !opts.garageGround) {
       const h01 = (salt) => CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.4;
       // a projecting horizontal belt wrapping a centred rectangle at world height y.
@@ -4390,16 +4447,11 @@
         belt(rTop - 0.06, 0.14, 0.22, TRIM);
         belt(rTop + 0.12, 0.22, 0.14, shadeHex(color, 0.80));
       }
-      // ---- CORNER PINNACLES: chunky parapet-corner caps (finials; storeys >= 3)
-      // Skipped when a facade owns the roofline: gothic pinnacles, a mosque's
-      // merlons or a mansard's cresting all land on these same four corners.
-      if (storeys >= 3 && !facadeTakesRoof) {
-        const finH = 0.5 + h01(0x11e) * 0.5;
-        for (const sxp of [-1, 1]) for (const szp of [-1, 1]) {
-          dbox(sxp * (w / 2 - 0.06), rTop + pp + finH / 2, szp * (d / 2 - 0.06), 0.36, finH, 0.36, TRIM);
-          dbox(sxp * (w / 2 - 0.06), rTop + pp + finH + 0.08, szp * (d / 2 - 0.06), 0.30, 0.16, 0.30, shadeHex(color, 0.9));
-        }
-      }
+      // (CORNER PINNACLES deleted 2026-09-27: four stubby trim cubes stood on
+      // the parapet corners of every 3+ storey office and apartment block. No
+      // real curtain-wall or walk-up roofline carries finials; they read as
+      // placeholder blocks from every window above them. A facade that really
+      // has pinnacles, merlons or cresting draws its own via the facade kit.)
       // ===== SETBACK CROWN (storeys >= 6): an inset capping volume with 45°
       // chamfered corners + a stepped spire — the tripartite silhouette. DECO
       // ONLY (cast shadow, no collider), seated ON the roof slab and inset from
@@ -4440,14 +4492,32 @@
           const ctop = cy0 + crownH;
           beltAt(cx0, cz0, cw, cdp, ctop + 0.10, 0.20, 0.16, TRIM);  // crown cornice
           beltAt(cx0, cz0, cw, cdp, ctop + 0.36, 0.05, 0.5, cCol);   // crown parapet
-          // stepped spire finial at the crown centre (ziggurat + mast)
-          let sy = ctop + 0.4; const steps = 3, spH = (crownH * 0.7 + 1.4) / steps;
-          for (let s = 0; s < steps; s++) {
-            const ss = 0.95 * (1 - s * 0.26);
-            dbox(cx0, sy + spH / 2, cz0, ss, spH, ss, TRIM);
-            sy += spH;
+          // THIS IS THE MECHANICAL PENTHOUSE, so it breathes like one: a band
+          // of louvred intake/exhaust grilles across each long wall (dark
+          // plenum behind, blades proud of it) instead of the old stepped
+          // ziggurat of trim cubes on its lid. The lid carries one guyed
+          // antenna mast on a base plate, off-centre like a real rooftop mast.
+          {
+            const LV = 0x3a3f45, BL = shadeHex(cCol, 0.82);
+            const lh = Math.min(1.6, crownH * 0.45), ly = cy0 + crownH * 0.55;
+            const lw = Math.min(cw, cdp) * 0.5;
+            const nb = Math.max(4, Math.round(lh / 0.16));
+            for (const s of [-1, 1]) {
+              dbox(cx0, ly, cz0 + s * (chd + WT / 2 + 0.01), lw, lh, 0.02, LV);
+              dbox(cx0 + s * (chw + WT / 2 + 0.01), ly, cz0, 0.02, lh, lw, LV);
+              for (let k = 0; k < nb; k++) {
+                const by = ly - lh / 2 + (k + 0.5) * (lh / nb);
+                dbox(cx0, by, cz0 + s * (chd + WT / 2 + 0.05), lw, 0.035, 0.07, BL);
+                dbox(cx0 + s * (chw + WT / 2 + 0.05), by, cz0, 0.07, 0.035, lw, BL);
+              }
+            }
+            const mx = cx0 + cw * 0.22, mz = cz0 - cdp * 0.18, mH = 3.2 + h01(0x9a3) * 2.4;
+            dbox(mx, ctop + 0.03, mz, 0.6, 0.06, 0.6, MULL);          // base plate
+            dbox(mx, ctop + mH / 2, mz, 0.09, mH, 0.09, MULL);        // mast
+            dbox(mx, ctop + mH * 0.7, mz, 0.9, 0.03, 0.03, MULL);     // dipole arms
+            dbox(mx, ctop + mH * 0.85, mz, 0.6, 0.03, 0.03, MULL);
           }
-          dbox(cx0, sy + 0.7, cz0, 0.16, 1.4, 0.16, MULL);          // mast
+          crownRect = { x0: cx0 - chw, x1: cx0 + chw, z0: cz0 - chd, z1: cz0 + chd };
         }
       }
     }
@@ -4459,6 +4529,7 @@
     // merge). The helper module owns the vocabulary; this block owns the
     // plumbing — a small ctx of closures + the building's real dimensions, so
     // buildings_civic.js never touches the scene graph, colliders or rng.
+    let roofCrowned = false;
     {
       const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
       const addMesh = (geo, col, lx, ly, lz, emissive) => {
@@ -4479,6 +4550,10 @@
         // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
         // every existing caller, so the kit is inert until someone asks for it.
         dress: opts.dress === false ? false : (opts.dress || null),   // false = explicit opt-out
+        // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
+        // open: dressFacade re-emits any grammar box through one as the pieces
+        // around it. The mega-tower hands in its executive storey here.
+        keepClear: Array.isArray(opts.keepClear) && opts.keepClear.length ? opts.keepClear : null,
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -4593,8 +4668,11 @@
       // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
       // roof centre, and a water tank next to a courthouse dome is comedy.
       // Skipped for the same reason when a facade crowned its own roof.
-      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)
-          && !(dressed && dressed.crownsRoof)) CBZ.bldRoofClutter(ctxC);
+      // A roof somebody else crowned (a dome, a clock tower, a mansard, a
+      // mosque) is not a plant deck: world/building_dress.js reads this flag
+      // and leaves it alone. Everything else gets its roof plant there, after
+      // the lifts, stashes and helipad have claimed their ground.
+      roofCrowned = !!((civicF && civicSpec) || (dressed && dressed.crownsRoof) || opts.garageGround);
     }
     flushDeco();
 
@@ -4609,7 +4687,7 @@
 
     const built = { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
       wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
-      boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
+      boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
@@ -5149,10 +5227,18 @@
       if (b.clearFloorPoint && !b.clearFloorPoint(lx, lz, pad == null ? 0.7 : pad)) return null;
       return { x: lx, z: lz };
     }
+    // THE FLOOR IS AT GF, NOT AT 0. Every height in this dresser was authored
+    // as if the ground floor were y = 0, but the foundation slab's top is 0.14
+    // and the fit-out lays the finished floor 6 cm over it (0.20), so every
+    // table, bench, bed, stool and booth in every shop stood 20 cm INTO the
+    // floor (a booth "cushion at 0.44" sat 24 cm off the tiles). box() and the
+    // kit bridge now stand everything on GF; the few direct b.lbox calls below
+    // that are floor-relative add it themselves.
+    const GF = ((Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14) + 0.06;
     // a box whose footprint we orient with the tangent (w = across-aisle span)
     function box(p, y, across, h, deep, col, o) {
       const bw = along ? deep : across, bd = along ? across : deep;
-      return b.lbox(p.x, y, p.z, bw, h, bd, col, o);
+      return b.lbox(p.x, y + GF, p.z, bw, h, bd, col, o);
     }
     function decor(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { cast: false }); }
     function solidBox(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { solid: true, cast: false }); }
@@ -5168,10 +5254,10 @@
     // rebuilt to the real height in the same edit.
     function seatP(p, face, kind, cushion) {
       if (p && CBZ.propRegisterSeat)
-        CBZ.propRegisterSeat(abx + p.x, 0, abz + p.z, face, kind, null,
+        CBZ.propRegisterSeat(abx + p.x, GF, abz + p.z, face, kind, null,
           cushion != null ? { cushion: cushion, floorBelow: 0 } : null);
     }
-    function bedP(p, hx, hz, len, topY) { if (p && CBZ.propRegisterBed) CBZ.propRegisterBed(abx + p.x, 0, abz + p.z, hx, hz, len, topY, "bed", null); }
+    function bedP(p, hx, hz, len, topY) { if (p && CBZ.propRegisterBed) CBZ.propRegisterBed(abx + p.x, GF, abz + p.z, hx, hz, len, topY + GF, "bed", null); }
     // THE KIT BRIDGE for this dresser: hand a piece to city/furniture.js and it
     // draws through the SAME b.lbox every box here uses (so it batch-folds and
     // rides the interior clamp) and files its own anchor WITH geometry. `p` is
@@ -5182,142 +5268,84 @@
       if (!p || !F || typeof F[name] !== "function" || typeof b.lbox !== "function") return null;
       const oo = { box: b.lbox, ox: abx, oz: abz };
       if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
-      try { return (name === "lamp") ? F.lamp(p.x, 0, p.z, oo) : F[name](p.x, 0, p.z, yaw, oo); }
+      try { return (name === "lamp") ? F.lamp(p.x, GF, p.z, oo) : F[name](p.x, GF, p.z, yaw, oo); }
       catch (e) { return null; }
     }
     // a point offset from `p` by `d` metres along the TANGENT (+ = the +t side)
     // and `e` metres along IN — the two axes this whole dresser is written in.
     function off(p, d, e) { return { x: p.x + tx * d + inx * (e || 0), z: p.z + tz * d + inz * (e || 0) }; }
 
-    // ---- always-on dressing: floor mat + lit ceiling fixture ----
-    const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
-    if (matP) b.lbox(matP.x, 0.005, matP.z, along ? 0.05 + 1.8 : 2.0, 0.05, along ? 2.0 : 0.05 + 1.8, 0x33373f, { cast: false });
-    // a thin interior FLOOR-COVERING plane tinted per trade (just one cheap slab
-    // covering the room centre at y~0.02) for material variety underfoot.
-    const FLOOR_TINT = { bar: 0x2a1f2a, casino: 0x2a2418, drugs: 0x2e2c24, bank: 0x3a4250,
-      cityhall: 0x3a4250, hospital: 0x3f4a52, gym: 0x24282e, guns: 0x303529, jewelry: 0x342c1c,
-      pawn: 0x342c1c, electronics: 0x232a2c, security: 0x282e34, food: 0x3a322a, clothing: 0x352e38,
-      barber: 0x2c3036, hardware: 0x342e26, gas: 0x2c3138,
-      // civic trades: polished stone / terrazzo lobbies, a green library floor,
-      // and a bare painted apparatus-bay slab for the fire house.
-      courthouse: 0x3d4249, federal: 0x394049, cityannex: 0x3a4250, postoffice: 0x35404c,
-      dmv: 0x323a34, library: 0x33403a, firestation: 0x2e3238 };
-    const ftint = FLOOR_TINT[kind] || 0x2e3238;
-    b.lbox(0, 0.02, 0, W - 1.2, 0.04, D - 1.2, ftint, { cast: false });
-    // mood-tinted ceiling fixture per trade — bars/casinos run a moody saturated
-    // glow, clinical trades (bank/hospital) cold-white, the rest warm shop light.
-    const MOOD = { bar: [0xe85d8a, 0.6], casino: [0xc9a227, 0.62], drugs: [0x4caf6e, 0.4], bank: [0xdfe8ff, 0.5],
-      cityhall: [0xdfe8ff, 0.5], hospital: [0xf2faff, 0.55], gym: [0x66d9c0, 0.45], guns: [0xbfd0a8, 0.4],
-      jewelry: [0xffe08a, 0.55], pawn: [0xffe08a, 0.5], electronics: [0x39d0c0, 0.45], security: [0x49a0c0, 0.45],
-      courthouse: [0xe8ecf5, 0.5], federal: [0xdfe8ff, 0.5], cityannex: [0xdfe8ff, 0.5],
-      postoffice: [0xe6eef8, 0.48], dmv: [0xeef3e8, 0.5], library: [0xffe6b8, 0.5], firestation: [0xffd0b0, 0.5] };
-    const mood = MOOD[kind] || [0xffcf66, 0.42];
-    b.lbox(0, FHl - 0.32, 0, along ? 0.5 : 3.2, 0.08, along ? 3.2 : 0.5, mood[0], { emissive: mood[0], ei: mood[1], cast: false });
-    // a second, dimmer back-of-room fixture so deep rooms aren't black
-    const bf = pt(2 * halfIn - 3.2, 0, 1.2);
-    if (bf) b.lbox(bf.x, FHl - 0.32, bf.z, along ? 0.5 : 2.6, 0.07, along ? 2.6 : 0.5, mood[0], { emissive: mood[0], ei: mood[1] * 0.6, cast: false });
+    // ---- CEILING FIXTURES, AS THE STREET SEES THEM ----------------------------
+    // The walk-in fit-out (fitout_work.js) hangs the real troffer grid and bakes
+    // its light the moment you are near; these are what the storefront glass
+    // shows before that. They used to be trade-COLOURED glowing slabs hanging
+    // 7 cm under the ceiling line (green in the gun store, teal in the phone
+    // shop, cyan over the security desk) plus a third emissive strip across the
+    // room: lights nobody installs. Now: flush 600 x 1200 panels in neutral shop
+    // white on a real module, 2 mm above the fit-out's ceiling plane so the real
+    // grid covers them once it builds. Only the bar and the casino keep a
+    // coloured wash, because that is what a bar's lighting is.
+    // (Also deleted from here: a per-trade floor-tint slab drawn at y 0..0.04,
+    // INSIDE the 0.14-topped foundation slab and so never once visible, and a
+    // door mat whose own aisle gate always refused it. fitout_work.js lays the
+    // real floor and the real entrance mat.)
+    {
+      const NIGHT = { bar: [0xe85d8a, 0.6], casino: [0xc9a227, 0.62] };
+      const fx = NIGHT[kind] || [0xf4f1e6, 0.55];
+      const fyc = FHl - 0.205;
+      for (const dIn of [halfIn * 0.55, halfIn, halfIn * 1.45]) {
+        for (const lat of [-halfTan * 0.35, halfTan * 0.35]) {
+          const p = pt(dIn, lat, 0.3); if (!p) continue;
+          b.lbox(p.x, fyc, p.z, along ? 1.2 : 0.6, 0.01, along ? 0.6 : 1.2, fx[0], { emissive: fx[0], ei: fx[1], cast: false });
+        }
+      }
+    }
 
-    // ---- the register on the back counter the caller already placed ----
-    // (counter centre ≈ inDepth = 2*halfIn-2.8 in this frame; nudge a register
-    //  block + a small glowing screen onto its top so it reads as a sales desk.)
+    // ---- THE TILL on the counter the caller placed ------------------------------
+    // A POS terminal built like one: a cash drawer, a stem, a screen turned to the
+    // clerk, a receipt printer with its paper curl. It was a 0.7 x 0.28 slab with
+    // a glowing strip in the trade's accent colour. It stands on the fit-out's
+    // worktop (1.24) or, where a flagship file owns the counter, on the bare
+    // counter top (1.20).
+    const FLAG_COUNTER = { guns: 1, jewelry: 1, pawn: 1, bank: 1, casino: 1, realtor: 1, carlot: 1, chop: 1, clothing: 1, raceway: 1 };
     const regP = pt(2 * halfIn - 2.8, -0.7, 0.4) || pt(2 * halfIn - 2.8, 0, 0.4);
-    if (regP) { decor(regP, 1.32, 0.7, 0.28, 0.5, 0x2a2f37); glow({ x: regP.x, z: regP.z }, 1.46, 0.4, 0.12, 0.06, kindAccent(kind), 0.7); }
-
-    // ---- wall SHELVES / cases along BOTH side walls (off the aisle) ----
-    // returns the list of placed shelf tops so the stocker can fill them.
-    const shelfTops = [];
-    // ---- SHOPLIFT anchors (SHOPS_ROBBABLE_V1) — each stocked shelf/gondola is
-    // recorded in WORLD coords so the shoplift runtime (near the bottom of this
-    // file) can offer a grab off it. The per-shelf item count is seeded via
-    // CBZ.hash01 (deterministic, never rng). Trades whose "stock" isn't sensibly
-    // pocketable (raceway betting slips) are skipped. Recording is pure data — no
-    // geometry, no colliders — so it never perturbs the deterministic build.
-    const shopStock = [];
-    function recordStock(p, topY, across, deep) {
-      if (!p || kind === "raceway") return;
-      const wx = abx + p.x, wz = abz + p.z;
-      const n0 = 3 + ((CBZ.hash01 ? CBZ.hash01(wx, wz, 0x5107) : 0.5) * 3 | 0);   // 3..5 units on the shelf
-      shopStock.push({ x: wx, z: wz, y: topY, across: across || 1.2, deep: deep || 0.7, kind: kind, n0: n0, taken: 0 });
-    }
-    function wallShelves(opt) {
-      opt = opt || {};
-      const lat = halfTan - (opt.deep || 0.7) - 0.05;   // hug the wall
-      const colBody = opt.body || 0x6a7078, colTop = opt.top || 0x8a939c;
-      const sh = opt.h || 1.4, deep = opt.deep || 0.7, span = opt.span || 2.0;
-      for (const side of [-1, 1]) for (let i = 0; i < (opt.count || 3); i++) {
-        const inDepth = (opt.start || 5.6) + i * (opt.step || 2.6);
-        if (inDepth > 2 * halfIn - 1.4) break;          // don't punch the back wall
-        const p = pt(inDepth, side * lat, 0.8);
-        if (!p) continue;
-        decor(p, sh / 2, span, sh, deep, colBody);
-        decor(p, sh + 0.05, span, 0.1, deep, colTop);
-        if (opt.glassFront) decor(p, sh * 0.62, span, sh * 0.7, 0.05, GLASS);
-        shelfTops.push({ p, top: sh + 0.1, side, across: span, deep });
-        recordStock(p, sh + 0.1, span, deep);
-      }
-    }
-    // a free-standing floor RACK/island (e.g. clothing rounders, produce tables)
-    function island(inDepth, lat, w2, h2, d2, col, o) {
-      const p = pt(inDepth, lat, 0.8); if (!p) return null;
-      box(p, h2 / 2, w2, h2, d2, col, o || { cast: false }); return p;
-    }
-    // stock props sitting on a shelf top: a tidy row of little coloured blocks
-    function stockRow(st, col, n, size, h) {
-      n = n || 4; size = size || 0.22; h = h || 0.3;
-      const gap = (st.across - 0.3) / n;
-      for (let i = 0; i < n; i++) {
-        const lat = -st.across / 2 + 0.25 + i * gap;
-        const lx = st.p.x + tx * lat, lz = st.p.z + tz * lat;
-        const c = Array.isArray(col) ? col[i % col.length] : col;
-        b.lbox(lx, st.top + h / 2, lz, size, h, size, c, { cast: false });
-      }
+    if (regP) {
+      const TOP = (FLAG_COUNTER[kind] ? 1.2 : 1.24) - GF;                          // decor() adds GF back
+      decor(regP, TOP + 0.05, 0.42, 0.1, 0.4, 0x2a2d31);                          // cash drawer
+      decor(regP, TOP + 0.103, 0.36, 0.006, 0.3, 0x3a3e44);                      // drawer lid seam
+      decor(off(regP, 0, 0.13), TOP + 0.19, 0.05, 0.18, 0.05, 0x3a3e44);         // stem
+      decor(off(regP, 0, 0.13), TOP + 0.38, 0.36, 0.25, 0.035, 0x1d1f22);        // screen housing
+      glow(off(regP, 0, 0.15), TOP + 0.38, 0.31, 0.2, 0.006, 0x9ec3d4, 0.32);    // the screen, facing the clerk
+      decor(off(regP, 0.34, 0.06), TOP + 0.065, 0.15, 0.13, 0.2, 0x34383e);      // receipt printer
+      decor(off(regP, 0.34, -0.02), TOP + 0.132, 0.08, 0.004, 0.06, 0xf4f2ea);   // paper curl
     }
 
-    // ---- shared BASE DRESSING every shop gets (a waste bin, a potted plant,
-    // an emissive ceiling-tile strip). SPACE DOCTRINE: the entrance zone stays
-    // OPEN — the old pair of customer stools that crowded every doorway is CUT
-    // (trades that genuinely seat people — bar/food/barber — place their own
-    // seating), and the plant/bin gate with a 1.2u pad so nothing squeezes the
-    // door aisle. Every piece is gated by pt()'s clearFloorPoint.
-    function baseClutter() {
-      // an emissive ceiling-tile STRIP running the room (extra light line)
-      const cs = pt(halfIn, 0, 1.4);
-      if (cs) b.lbox(cs.x, FHl - 0.18, cs.z, along ? 0.22 : halfTan * 1.2, 0.05, along ? halfTan * 1.2 : 0.22, 0xf2f4f8, { emissive: 0xf2f4f8, ei: 0.3, cast: false });
-      // a potted PLANT in a front corner (planter box + green foliage cube)
-      const pl = pt(4.4, halfTan - 1.1, 1.2);
-      if (pl) { decor(pl, 0.25, 0.5, 0.5, 0.5, 0x6b4a2a); decor(pl, 0.85, 0.6, 0.7, 0.6, 0x3f9a4f); }
-      // a WASTE BIN by the far front corner
-      const wb = pt(4.0, -(halfTan - 0.9), 1.2);
-      if (wb) decor(wb, 0.32, 0.42, 0.64, 0.42, 0x3a4048);
-      // (a purely-decorative wall clock used to hang here — CUT: no time read,
-      //  no purpose. Same fate for the two entrance stools: the doorway is a
-      //  walking lane, not a waiting room. The space stays open.)
-    }
-    baseClutter();
+    // (DELETED: wallShelves / stockRow / recordStock / baseClutter. The wall
+    //  shelves asked for 0.8 m of clearance from the very wall they hugged, so
+    //  their gate never once passed and none of the painted 22 cm "goods" cubes
+    //  meant to stand on them was ever drawn; the potted plant and the waste bin
+    //  had the same gate problem; the one piece of it that did land was a third
+    //  glowing ceiling strip. A shop's shelving, goods, cooler and coffee station
+    //  are city/storegoods.js; its plant, bin, floor and troffers are
+    //  fitout_work.js.)
 
-    // ---- UNIVERSAL BACK-OF-HOUSE WALL (every non-showroom trade) --------------
-    // WHY: a shop is a SALES FLOOR (front) backed by a STOCKROOM the customer
-    // never sees. A full-height wall runs across the room behind the counter (at
-    // backDepth from the door wall), with a ≥1.6u doorway gap so the clerk can
-    // reach the back. The back band holds a small back OFFICE (setBackroom).
+    // ---- BACK-OF-HOUSE WALL: the bank and the civic halls only ----------------
+    // A public counter hall is backed by offices the public never sees; a full-
+    // height SOLID wall runs across the room at backDepth with a doorway, and the
+    // back band holds a small office (setBackroom).
     //
-    // THIS ONE IS INTENTIONAL, SO IT IS SOLID. It used to be a collider-less
-    // decal you strolled through to reach the safe, which is the owner's whole
-    // complaint; the answer to "a room the customer never sees" is a wall, not
-    // a picture of one. Every other sub-room this file used to fake on a shop
-    // floor (fitting booths, an enclosed kitchen, exam bays, a locker room, two
-    // back-office cells) is deleted — see the strongroom block below.
-    //
-    // Showroom trades (carlot/chop/realtor) keep their open display floor —
-    // they return early below.
-    // (firestation joins the showroom exclusions: its ground floor IS the
-    //  apparatus bay — an engine has to be able to roll straight out of it.)
-    const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor" && kind !== "firestation"
-      && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
+    // IT USED TO RUN ACROSS EVERY SHOP, and in a shop it stood IN FRONT of the
+    // counter: backDepth is 5.5 m off the back wall, the counter 2.8 m off it,
+    // so the till, the clerk, the gun store's rack wall and the jeweller's vault
+    // case were all shut in a 5.5 m strip you reached through a 1.7 m hole in a
+    // grey partition. A shop's stockroom is a room BESIDE the counter, which is
+    // what fitout_work.js's buildStockroom stands whenever this wall is absent.
+    const BACK_OF_HOUSE = { bank: 1, cityhall: 1, courthouse: 1, federal: 1, cityannex: 1, postoffice: 1, dmv: 1, library: 1 };
+    const backWalled = !!BACK_OF_HOUSE[kind] && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
     if (backWalled) {
       const WALLH = FHl - 0.05;
       const backDepth = 2 * halfIn - 5.5;            // wall sits ~5.5u in front of the back wall
-      // doorway centred (lat 0) — keep one gap so the stockroom is reachable.
+      // doorway centred (lat 0) — keep one gap so the back offices are reachable.
       const gapW = 1.7, segHalf = halfTan;
       const spans = [[-segHalf, -gapW / 2], [gapW / 2, segHalf]];
       for (let s = 0; s < spans.length; s++) {
@@ -5339,23 +5367,21 @@
       const cB = [inx * (-halfIn + (2 * halfIn - 0.8)) + tx * (halfTan - 0.5), inz * (-halfIn + (2 * halfIn - 0.8)) + tz * (halfTan - 0.5)];
       setBackroom(k, { x0: Math.min(cA[0], cB[0]), x1: Math.max(cA[0], cB[0]), z0: Math.min(cA[1], cB[1]), z1: Math.max(cA[1], cB[1]) });
     }
+    // a screen or panel HUNG ON THE BACK WALL behind the clerk (the TV wall,
+    // the CCTV bank): no floor gate, 3 cm proud of the inner back face.
+    const Bwall = 2 * halfIn - (b.wt != null ? b.wt : WT);
+    function backWallBox(lat, yC, wAcross, h, depth, col, o) {
+      const dIn = Bwall - 0.03 - depth / 2;
+      const lx = inx * (-halfIn + dIn) + tx * lat, lz = inz * (-halfIn + dIn) + tz * lat;
+      return b.lbox(lx, yC, lz, along ? depth : wAcross, h, along ? wAcross : depth, col, o || { cast: false });
+    }
 
     // dispatch to the trade-specific dresser
     switch (kind) {
       case "guns": {
-        // gun racks: tall pegboard cabinets with stylised rifles hung in rows
-        wallShelves({ body: 0x32363d, top: 0x44505c, h: 2.2, count: 2, glassFront: true });   // 2/side (space doctrine)
-        for (const st of shelfTops) {
-          for (let r = 0; r < 2; r++) {
-            const y = 0.85 + r * 0.7, n = 3, gap = (st.across - 0.4) / n;
-            for (let i = 0; i < n; i++) {
-              const lat = -st.across / 2 + 0.3 + i * gap;
-              const lx = st.p.x + tx * lat, lz = st.p.z + tz * lat;
-              b.lbox(lx, y, lz - 0, along ? 0.06 : 0.9, 0.1, along ? 0.9 : 0.06, 0x2b2f33, { cast: false });   // rifle body
-              b.lbox(lx, y - 0.12, lz, 0.1, 0.18, 0.1, 0x6b4a2a, { cast: false });                              // grip
-            }
-          }
-        }
+        // (Stylised two-box "rifles" on wall cabinets used to be dealt here, onto
+        //  shelves whose clearance gate never let one stand: dead code, deleted.
+        //  The gun wall is city/gunstore.js, hung with the real weapon models.)
         // (The two freestanding deco pistol-case islands + the deco ammo crates
         //  are CUT — space doctrine: gunstore.js stands the REAL counter case,
         //  rack wall, ammo crates and armor row on this lot, and the deco twins
@@ -5364,115 +5390,41 @@
       }
       case "jewelry":
       case "pawn": {
-        // lit GLASS display cases along the walls, sparkling stock on top
-        wallShelves({ body: 0x3a2f1c, top: 0xcaa64a, h: 1.1, count: 2, glassFront: true, span: 2.2 });   // 2/side (space doctrine)
-        for (const st of shelfTops) { glow(st.p, st.top + 0.05, st.across, 0.06, st.deep, 0xffe08a, 0.6); stockRow(st, [0xfff2b0, 0x9fe0ff, 0xff9ad0, 0xb9ffb0], 5, 0.16, 0.18); }
-        if (kind === "pawn") island(2 * halfIn - 5.4, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.3, along ? 2.4 : 1.0, 0x55606e, { cast: false }); // pawned junk pile
+        // (DELETED: wall cases of painted "gem" cubes that never placed, and the
+        //  pawn shop's "junk pile", a plain 2.4 m grey box. jewelry.js stands
+        //  the real vitrines; pawnshop.js stands the real pawned goods.)
         break;
       }
       case "bar":
       case "casino": {
-        // back bar with a lit BOTTLE WALL; bar stools; neon accent strip
-        wallShelves({ body: 0x2a1f16, top: 0x3a2a1c, h: 1.8, count: 3, span: 2.4 });
-        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.95 + r * 0.55, across: st.across }, [0x6fbf73, 0xbf6f6f, 0xc7b06f, 0x6f9fbf, 0xbf6fb0], 6, 0.14, 0.42);
-        // NEON back-bar strip glowing behind the bottles (the trade accent colour)
-        const neon = kind === "casino" ? 0xc9a227 : 0xe85d8a;
-        const np = pt(2 * halfIn - 2.0, 0, 0.6);
-        if (np) glow(np, 2.3, along ? 0.06 : halfTan * 1.4, 0.14, along ? halfTan * 1.4 : 0.06, neon, 0.95);
-        // a row of bar stools facing the back counter
-        // BAR STOOLS. They used to be 1.0-tall posts capped at 1.08 — a "stool"
-        // whose seat was ABOVE the bar — filed with no geometry. F.stool is a
-        // pedestal, a foot ring and a cushion at the real 0.68 that goes with a
-        // 0.92 counter, and it declares that number itself.
-        for (let i = -1; i <= 1; i++) {
-          const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (!p) continue;
-          if (kitP("stool", p, Math.atan2(inx, inz))) continue;
-          decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); seatP(p, Math.atan2(inx, inz), "stool");
-        }
-        if (kind === "bar") {
-          // ===== THE VELVET CLUB — a real VIP nightclub interior =====
-          // a glowing multi-colour DANCE FLOOR mid-room, VIP velvet BOOTHS down
-          // the walls, a DJ booth lit with neon, a mirror-ball ceiling glow and a
-          // little interior velvet cordon so inside reads as the status apex. (The
-          // exclusive ENTRANCE / rope / bouncer line is set up by clubRope + run
-          // by city/club.js; this is the payoff you get once you're past it.)
-          const FLOORCOLS = [0xe85d8a, 0x8a4fff, 0x39d0ff, 0xffd400];
-          const dfP = pt(halfIn + 0.4, 0, 1.2) || pt(halfIn, 0, 1.2);
-          if (dfP) {
-            // a 3×3 checker of softly glowing floor panels = the dance floor
-            for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
-              const lat = gx * 0.95, dep = gz * 0.95;
-              const lx = dfP.x + tx * lat + inx * dep, lz = dfP.z + tz * lat + inz * dep;
-              const c = FLOORCOLS[(gx + gz + 2) % FLOORCOLS.length];
-              b.lbox(lx, 0.04, lz, 0.9, 0.06, 0.9, c, { emissive: c, ei: 0.85, cast: false });
-            }
-            // a glinting MIRROR-BALL: a bright cube high over the floor + a wash glow
-            b.lbox(dfP.x, FHl - 0.55, dfP.z, 0.4, 0.4, 0.4, 0xcfd6e0, { emissive: 0xbcd0ff, ei: 0.7, cast: false });
-            b.lbox(dfP.x, FHl - 0.3, dfP.z, along ? 0.5 : 3.0, 0.05, along ? 3.0 : 0.5, 0x8a4fff, { emissive: 0x8a4fff, ei: 0.55, cast: false });
-          }
-          // VIP BOOTHS hugging the side walls: a velvet bench + a low cocktail
-          // table glowing with bottle-service light. Two per side, off the aisle.
-          for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
-            const bp = pt(5.4 + i * 3.2, side * (halfTan - 1.1), 0.8);
-            if (!bp) continue;
-            // A REAL BOOTH, not a 0.95-tall velvet block. Plinth → cushion at
-            // the 0.44 propuse holds for kind "booth" → a buttoned back against
-            // the wall behind the sitter, so the thing you sit ON and the thing
-            // you lean AGAINST are different boxes.
-            //
-            // THE BANQUETTE ALSO TURNED 90 DEGREES. The old block was 2.0 wide
-            // ACROSS the room and 0.7 along the wall — i.e. its long axis ran
-            // straight at the sitter's own face and 1.0 m of it stuck into the
-            // aisle. It is now 2.0 along the WALL and 0.72 deep, which is what
-            // a banquette is; that only ever frees aisle in front of the entry
-            // point, so no anchor can become unreachable (`blocked` may only go
-            // DOWN).
-            decor(bp, 0.19, 0.72, 0.38, 2.00, 0x6a1622);                      // booth plinth
-            decor(bp, 0.41, 0.76, 0.06, 2.00, 0x8a1f2b);                      // seat cushion → 0.44
-            decor(off(bp, side * 0.30), 0.74, 0.14, 0.62, 2.00, 0x6a1622);    // padded back → 1.05
-            decor(off(bp, side * 0.30), 1.09, 0.18, 0.08, 2.10, 0x8a1f2b);    // capping trim
-            seatP(bp, Math.atan2(-side * tx, -side * tz), "booth", 0.44);     // face the cocktail table
-            const tp = pt(5.4 + i * 3.2, side * (halfTan - 2.3), 0.6);
-            if (tp) { decor(tp, 0.55, 0.7, 0.1, 0.7, 0x1c1f24); glow({ x: tp.x, z: tp.z }, 0.62, 0.5, 0.05, 0.5, 0xffd166, 0.6); }   // lit cocktail table
-          }
-          // the DJ BOOTH at the back beside the bar: a raised console, two glowing
-          // decks, and a tall neon backdrop strip (the club's signature pink).
-          const djP = pt(2 * halfIn - 3.6, -(halfTan - 1.6), 0.8);
-          if (djP) {
-            decor(djP, 0.6, along ? 1.0 : 2.0, 1.2, along ? 2.0 : 1.0, 0x20242b);   // console body
-            for (const e of [-0.45, 0.45]) { const lx = djP.x + tx * e, lz = djP.z + tz * e; b.lbox(lx, 1.24, lz, 0.36, 0.06, 0.36, 0x39d0ff, { emissive: 0x39d0ff, ei: 0.8, cast: false }); }  // decks
-            b.lbox(djP.x + inx * 0.4, 1.8, djP.z + inz * 0.4, along ? 0.06 : 1.8, 1.4, along ? 1.8 : 0.06, 0xe85d8a, { emissive: 0xe85d8a, ei: 0.8, cast: false });   // neon backdrop
-          }
-          // an interior VELVET CORDON marking the elite back lounge (just a couple
-          // of brass posts + a red span) so the VIP area reads as roped-off too.
-          for (const side of [-1, 1]) { const cp = pt(2 * halfIn - 5.6, side * 1.3, 0.6); if (cp) decor(cp, 0.5, 0.14, 1.0, 0.14, 0xcaa64a); }
-          { const cp = pt(2 * halfIn - 5.6, 0, 0.6); if (cp) glow(cp, 0.82, along ? 0.05 : 2.4, 0.06, along ? 2.4 : 0.05, 0x8a1f2b, 0.5); }
-        } else {
-          // CASINO: a couple of glowing felt TABLES + a row of SLOT MACHINES
-          for (const lat of [-(halfTan - 2.4), halfTan - 2.4]) {
-            const p = island(halfIn, lat, along ? 1.6 : 2.6, 0.95, along ? 2.6 : 1.6, 0x1f4d33, { cast: false });
-            if (p) glow(p, 0.99, along ? 1.4 : 2.4, 0.04, along ? 2.4 : 1.4, 0x39d07a, 0.55);   // felt glow
-          }
-          // slot machine bank along one side wall, screens glowing gold/red
-          const slotLat = halfTan - 0.85, scols = [0xffd400, 0xff3b3b, 0x39d0ff, 0xffd400];
-          for (let i = 0; i < 4; i++) {
-            const p = pt(5.0 + i * 1.6, slotLat, 0.6);
-            if (!p) continue;
-            decor(p, 0.7, along ? 0.5 : 1.0, 1.4, along ? 1.0 : 0.5, 0x2a2f37);                 // cabinet
-            b.lbox(p.x, 1.15, p.z, along ? 0.06 : 0.6, 0.5, along ? 0.6 : 0.06, scols[i % scols.length], { emissive: scols[i % scols.length], ei: 0.7, cast: false });  // lit screen
-          }
-        }
+        // CASINO: casino.js builds the whole gaming floor (felt tables with
+        // seats, the slot bank, the bar corner, the cashier cage). The glowing
+        // felt boxes and the four slot "cabinets" this dresser used to add were
+        // a second, fake casino on the same floor: deleted.
+        if (kind === "casino") break;
+        // THE VELVET CLUB's whole interior (bar and back bar, stools, booths,
+        // DJ booth, dance floor, lighting rig) is city/club.js. The eager copy
+        // that used to stand here (glowing floor tiles under the slab, a
+        // glowing mirror-ball cube, gate-refused booths, a DJ box with two cyan
+        // squares) was a second club on the same floor: deleted.
         break;
       }
       case "food": {
         // diner: produce/serving tables down the room + a back kitchen line
-        wallShelves({ body: 0x6b7078, top: 0xe8e8ee, h: 1.0, count: 2, span: 2.2 });   // 2/side (space doctrine)
-        for (const st of shelfTops) stockRow(st, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0xff9a5a], 5, 0.2, 0.22);   // produce
+        // (the dining floor; the grocery bays, the drinks cooler and the hot food
+        //  warmer behind it are city/storegoods.js)
         for (let i = 0; i < 2; i++) {                                          // two booth tables w/ bench seats
           for (const side of [-1, 1]) {
             const p = pt(5.0 + i * 3.2, side * (halfTan - 1.7), 0.8);
             if (p) {
-              decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee);  // top
+              // A DINER TABLE: chrome pedestal foot, column, a laminate top at
+              // 0.74 with its chrome edge band, its long side along the bench.
+              // (It was a slab at 0.45, a plank "leg" and a second slab at 0.55,
+              // long side sticking out across the aisle.)
+              decor(p, 0.015, 0.5, 0.03, 0.5, 0xb9bec4);                    // foot
+              decor(p, 0.37, 0.08, 0.68, 0.08, 0x9aa0a6);                   // column
+              decor(p, 0.705, 0.72, 0.03, 1.22, 0xb9bec4);                  // edge band
+              decor(p, 0.72, 0.7, 0.04, 1.2, 0xe8e4da);                     // top -> 0.74
               // a red vinyl bench on the wall side of each booth
               const bp = pt(5.0 + i * 3.2, side * (halfTan - 0.7), 0.8);
               // the red vinyl bench, rebuilt to REAL heights: the old seat
@@ -5491,10 +5443,20 @@
           }
         }
         // a glowing back-lit MENU BOARD above the counter (diner classic)
-        const mb = pt(2 * halfIn - 1.8, 0, 0.6);
-        if (mb) {
-          glow(mb, 2.5, along ? 0.08 : halfTan * 1.3, 0.9, along ? halfTan * 1.3 : 0.08, 0xffae5a, 0.55);
-          for (let i = -1; i <= 1; i++) { const lat = i * (halfTan * 0.4); const lx = mb.x + tx * lat, lz = mb.z + tz * lat; b.lbox(lx, 2.5, lz + (along ? 0 : 0), along ? 0.05 : 0.5, 0.18, along ? 0.5 : 0.05, 0x2a2018, { cast: false }); }  // menu lines
+        // THREE LIGHTBOX PANELS HUNG ON THE BACK WALL behind the counter, each
+        // a dark frame, a warm backlit face, a photo of the food and the price
+        // lines as dark bars (no invented words). It was one 0.9 m slab of
+        // orange glow standing free 1.4 m in front of the back wall, over the
+        // clerk's head, its width flipping with the door side.
+        {
+          const FOOD = [0xb5572a, 0xd9a441, 0x8e3b24];
+          for (let i = -1; i <= 1; i++) {
+            const la = i * 1.3;
+            backWallBox(la, 2.35, 1.2, 0.78, 0.05, 0x1c1e22);                                               // frame
+            backWallBox(la, 2.35, 1.12, 0.7, 0.056, 0xfff0d6, { emissive: 0xfff0d6, ei: 0.55, cast: false });  // lit face
+            backWallBox(la - 0.28, 2.43, 0.44, 0.34, 0.06, FOOD[i + 1], { emissive: FOOD[i + 1], ei: 0.35, cast: false });   // the photo
+            for (let r = 0; r < 4; r++) backWallBox(la + 0.26, 2.58 - r * 0.13, 0.44, 0.035, 0.06, 0x2a2018);             // price lines
+          }
         }
         break;
       }
@@ -5546,7 +5508,7 @@
           }
           for (const sg of [-1, 1]) {
             const ct = pt(2 * halfIn - 5.6, sg * 2.1, 0.7);
-            if (ct) { decor(ct, 0.72, 2.0, 0.10, 0.9, 0x5a4433); for (const e of [-1, 1]) { const lx = ct.x + tx * e * 0.85, lz = ct.z + tz * e * 0.85; b.lbox(lx, 0.35, lz, 0.1, 0.7, 0.1, 0x3a2f24, { cast: false }); } }
+            if (ct) { decor(ct, 0.72, 2.0, 0.10, 0.9, 0x5a4433); for (const e of [-1, 1]) { const lx = ct.x + tx * e * 0.85, lz = ct.z + tz * e * 0.85; b.lbox(lx, 0.35 + GF, lz, 0.1, 0.7, 0.1, 0x3a2f24, { cast: false }); } }
           }
           for (let r = 0; r < 2; r++) {
             const pw = pt(6.2 + r * 1.6, 0, 0.8);
@@ -5569,7 +5531,7 @@
             decor(wall, 1.15, 3.4, 2.30, 0.35, 0x3a3630);
             for (let c2 = 0; c2 < 7; c2++) for (let r2 = 0; r2 < 6; r2++) {
               const lat = -1.5 + c2 * 0.5;
-              b.lbox(wall.x + tx * lat, 0.35 + r2 * 0.36, wall.z + tz * lat,
+              b.lbox(wall.x + tx * lat, 0.35 + r2 * 0.36 + GF, wall.z + tz * lat,
                 along ? 0.06 : 0.42, 0.30, along ? 0.42 : 0.06, (c2 + r2) % 2 ? 0xc0a057 : 0xa88a44, { cast: false });
             }
           }
@@ -5628,7 +5590,7 @@
             for (let i = 0; i < 6; i++) {
               const lat = -0.75 + i * 0.3;
               const hcol = [0x8a3b3b, 0x3b5a8a, 0x3b7a4f, 0xc0a057, 0x6a4a7a][(i + s2 + r) % 5];
-              b.lbox(p.x + tx * lat, y + 0.18, p.z + tz * lat, along ? 0.5 : 0.24, 0.30, along ? 0.24 : 0.5, hcol, { cast: false });
+              b.lbox(p.x + tx * lat, y + 0.18 + GF, p.z + tz * lat, along ? 0.5 : 0.24, 0.30, along ? 0.24 : 0.5, hcol, { cast: false });
             }
           }
         }
@@ -5681,40 +5643,65 @@
         break;
       }
       case "gym": {
-        // weight benches + a rack of dumbbells + a couple of machines
+        // WEIGHT BENCHES, built like them: two A-frame legs, a padded top at
+        // 0.43, an upright rack at the head with a loaded barbell on its hooks.
+        // They were a floating 16 cm pad with two 34 cm grey cubes beside it.
+        const IRON = 0x2a2d31, CHROME = 0xb9bec4;
         for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
           const p = pt(5.4 + i * 3.0, side * (halfTan - 1.8), 0.9);
           if (!p) continue;
-          decor(p, 0.45, 0.5, 0.16, 1.7, 0x2a2f37);                 // bench pad
-          for (const e of [-1, 1]) { const lx = p.x + tx * 0, lz = p.z + tz * 0; b.lbox(lx + (along ? e * 0.85 : 0), 0.7, lz + (along ? 0 : e * 0.85), 0.34, 0.34, 0.34, 0x44505c, { cast: false }); } // plates
+          for (const e of [-0.48, 0.48]) {
+            decor(off(p, 0, e), 0.02, 0.4, 0.04, 0.05, IRON);                // foot bar
+            decor(off(p, 0, e), 0.2, 0.05, 0.36, 0.05, IRON);                // leg
+          }
+          decor(p, 0.395, 0.1, 0.03, 1.0, IRON);                             // spine
+          decor(p, 0.45, 0.3, 0.08, 1.15, 0x1f2124);                         // pad -> 0.49
+          for (const t of [-0.5, 0.5]) {
+            decor(off(p, t, 0.62), 0.55, 0.05, 1.1, 0.05, IRON);             // rack post
+            decor(off(p, t, 0.58), 1.02, 0.05, 0.03, 0.08, IRON);            // J-hook
+          }
+          decor(off(p, 0, 0.6), 1.05, 1.9, 0.03, 0.03, CHROME);              // the bar
+          for (const t of [-1, 1]) {
+            decor(off(p, t * 0.78, 0.6), 1.05, 0.04, 0.45, 0.45, 0x16181b);  // 20 kg plate
+            decor(off(p, t * 0.72, 0.6), 1.05, 0.03, 0.3, 0.3, 0x16181b);    // 10 kg plate
+            decor(off(p, t * 0.83, 0.6), 1.05, 0.03, 0.07, 0.07, CHROME);    // collar
+          }
         }
-        // a back dumbbell rack
+        // THE DUMBBELL RACK against the side wall: a two-tier steel frame with
+        // pairs of hex dumbbells (handle + two heads) in size order. It was a
+        // 1 m block with five grey bricks on it, its long side flipping with
+        // the door side.
         const dr = pt(2 * halfIn - 3.4, halfTan - 1.6, 0.7);
-        if (dr) { decor(dr, 0.5, along ? 0.6 : 2.4, 1.0, along ? 2.4 : 0.6, 0x32363d); for (let i = -2; i <= 2; i++) { const lx = dr.x + tx * i * 0.45, lz = dr.z + tz * i * 0.45; b.lbox(lx, 0.85, lz, 0.18, 0.18, 0.5, 0x6a7078, { cast: false }); } }
-        // a full wall MIRROR strip (gyms are wall-to-wall mirrors)
-        const mp = pt(8.0, -(halfTan - 0.55), 0.9); if (mp) decor(mp, 1.5, along ? 0.04 : 3.6, 2.6, along ? 3.6 : 0.04, 0xc6ecf7);
-        // rubber FLOOR MATS down the centre of the gym floor
-        for (let i = 0; i < 3; i++) {
-          const fp = pt(5.5 + i * 2.6, 0, 0.9);
-          if (fp) b.lbox(fp.x, 0.02, fp.z, along ? 1.6 : 1.8, 0.04, along ? 1.8 : 1.6, [0x222931, 0x2a323a][i % 2], { cast: false });
+        if (dr) {
+          for (const e of [-1.15, 1.15]) {
+            decor(off(dr, 0, e), 0.4, 0.5, 0.8, 0.05, IRON);                 // end frame
+          }
+          for (let tier = 0; tier < 2; tier++) {
+            const y = 0.42 + tier * 0.36, tl = tier ? 0.08 : -0.08;
+            decor(off(dr, tl, 0), y, 0.3, 0.025, 2.3, IRON);                 // tray
+            for (let k = 0; k < 5; k++) {
+              const hd = 0.07 + (tier * 5 + k) * 0.006;                      // heads grow down the rack
+              const e = -0.9 + k * 0.45;
+              for (const pr of [-0.09, 0.09]) {
+                const q = off(dr, tl, e + pr);
+                decor(q, y + 0.0125 + hd / 2, 0.16, 0.025, 0.025, CHROME);   // handle
+                for (const hh of [-1, 1]) decor(off(q, hh * 0.1, 0), y + 0.0125 + hd / 2, 0.05, hd, hd, 0x1c1d20);
+              }
+            }
+          }
         }
+        // (DELETED: a mirror slab and three rubber mats that never showed: the
+        //  mirror's wall gate never passed and the mats were drawn under the
+        //  slab. fitout_work.js hangs the real mirror and lays the real mats.)
         break;
       }
       case "clothing":
       case "barber": {
         if (kind === "clothing") {
-          // round clothing racks (rounders): ONE per side (space doctrine — the
-          // old two-per-side quartet crowded the floor), stocked with garments
-          for (let i = 0; i < 1; i++) for (const side of [-1, 1]) {
-            const p = pt(5.2 + i * 3.0, side * (halfTan - 1.9), 0.9);
-            if (!p) continue;
-            decor(p, 0.75, 0.1, 1.5, 0.1, 0x8a939c);                    // post
-            decor(p, 1.5, 1.4, 0.08, 1.4, 0x6a7078);                    // ring bar
-            const cols = [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e, 0xe85d8a];
-            for (let g = 0; g < 6; g++) { const a = g / 6 * Math.PI * 2, lx = p.x + Math.cos(a) * 0.6, lz = p.z + Math.sin(a) * 0.6; b.lbox(lx, 1.0, lz, 0.22, 0.9, 0.1, cols[g % cols.length], { cast: false }); }
-          }
-          wallShelves({ body: 0x55606e, top: 0x8a939c, h: 1.6, count: 2, span: 2.0 });   // 2/side (space doctrine)
-          for (const st of shelfTops) stockRow(st, [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e], 4, 0.3, 0.16);  // folded stacks
+          // (DELETED: two "rounders" whose garments were six coloured slabs
+          //  standing on the floor round a post, and wall shelves of painted
+          //  "folded stacks" that never placed. clothingstore.js hangs the real
+          //  garments on real rails.)
           // (The deco entrance mannequins are CUT — space doctrine: the walk-in
           //  store (clothingstore.js) stands REAL buyable mannequins across the
           //  entrance, and the deco pair just crowded the same floor.)
@@ -5737,7 +5724,8 @@
             decor(off(p, -side * 0.34), 0.86, 0.12, 0.74, 0.58, 0x6b1f1f);         // high back → 1.23
             for (const a2 of [-1, 1]) decor(off(p, 0, a2 * 0.29), 0.60, 0.56, 0.10, 0.06, 0x8a8f97);  // chrome arms
             seatP(p, bface, "chair", 0.49);                                        // face the mirror
-            const mp = pt(6.0, side * (halfTan - 0.5), 0.9); if (mp) decor(mp, 1.4, along ? 0.04 : 1.4, 1.8, along ? 1.4 : 0.04, 0xb9e6f7);
+            // (the mirror itself is fitout_work.js's shopBarberMirrors; the one
+            //  that used to be typed here never passed its own wall gate)
           }
         }
         break;
@@ -5761,41 +5749,48 @@
             for (const e of [-0.6, 0.6]) seatP({ x: cp.x + inx * e, z: cp.z + inz * e }, cface, "couch");
           }
         }
+        // THE TABLE IN FRONT OF THE COUCH, built like one. It was a 0.1 m slab
+        // floating 0.35 m up with four painted 14 cm cubes on it ("baggies").
+        // Now: a low coffee table on four legs standing on the finished floor
+        // (0.20), a digital pocket scale with its lit readout, and clear baggies
+        // with the product visible inside, the size baggies are.
         const tp = pt(2 * halfIn - 6.0, halfTan - 2.4, 0.9);
-        if (tp) { decor(tp, 0.4, 1.2, 0.1, 0.8, 0x2a2f37); stockRow({ p: tp, top: 0.45, across: 1.0 }, [0x4caf6e, 0xffffff, 0x4caf6e], 4, 0.14, 0.1); }
-        wallShelves({ body: 0x3a352e, top: 0x4a423a, h: 1.6, count: 2 });
-        for (const st of shelfTops) stockRow(st, [0x4caf6e, 0xe0e0e0, 0x6b4a2a], 4, 0.2, 0.2);
+        if (tp) {
+          const FL = 0, TT = FL + 0.44;                                                            // decor() stands it on GF
+          decor(tp, TT - 0.02, 1.1, 0.04, 0.6, 0x3a2e24);                                         // top
+          for (const e1 of [-1, 1]) for (const e2 of [-1, 1]) decor(off(tp, e1 * 0.5, e2 * 0.25), FL + 0.21, 0.045, 0.42, 0.045, 0x2a221b);
+          decor(off(tp, -0.3, 0), TT + 0.012, 0.14, 0.024, 0.1, 0x2a2d31);                         // scale body
+          decor(off(tp, -0.3, 0.012), TT + 0.026, 0.1, 0.004, 0.07, 0xb9bec4);                       // platter
+          glow(off(tp, -0.3, -0.04), TT + 0.025, 0.06, 0.004, 0.016, 0x9fd8a0, 0.35);               // readout
+          for (let i = 0; i < 5; i++) {
+            const q = off(tp, 0.02 + (i % 3) * 0.11, -0.1 + ((i / 3) | 0) * 0.14);
+            decor(q, TT + 0.004, 0.07, 0.008, 0.09, 0xdfe7e1);                                      // the bag
+            decor(q, TT + 0.01, 0.035, 0.01, 0.04, 0x5c7a38);                                       // what is in it
+          }
+        }
+        // (the "stash shelves" that used to follow never placed: deleted)
         break;
       }
       case "electronics": {
-        wallShelves({ body: 0x2b2f33, top: 0x44505c, h: 1.7, count: 2, glassFront: true });   // 2/side (space doctrine)
-        for (const st of shelfTops) for (let r = 0; r < 2; r++) {           // glowing screens on two levels
-          const lat0 = -st.across / 2 + 0.3, gap = (st.across - 0.6) / 3;
-          for (let i = 0; i < 3; i++) { const lat = lat0 + i * gap, lx = st.p.x + tx * lat, lz = st.p.z + tz * lat, y = 0.8 + r * 0.55; b.lbox(lx, y, lz, along ? 0.05 : 0.34, 0.26, along ? 0.34 : 0.05, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.6, cast: false }); }
+        // THE TV WALL behind the counter: three 55-inch sets hung on the back
+        // wall, each a bezel with its picture a few mm proud. It used to be a
+        // 3 m free-standing slab of teal glow at 2hi-1.8, i.e. between the
+        // counter and where the clerk stands; plus a plain box "gadget island"
+        // in the door-to-till aisle. (The wall shelving and its teal "screens"
+        // never placed. The shelves are city/storegoods.js now.)
+        const PIC = [0x6f9fc0, 0x8fb57a, 0xc9a06a];
+        for (let i = -1; i <= 1; i++) {
+          backWallBox(i * 1.45, 1.95, 1.24, 0.72, 0.05, 0x121417);
+          backWallBox(i * 1.45, 1.95, 1.16, 0.64, 0.056, PIC[i + 1], { emissive: PIC[i + 1], ei: 0.5, cast: false });
         }
-        // a big BIG-SCREEN TV demo wall + a glass gadget island in the middle
-        const bs = pt(2 * halfIn - 1.8, 0, 0.6);
-        if (bs) {
-          decor(bs, 1.6, along ? 0.08 : 3.0, 1.8, along ? 3.0 : 0.08, 0x14171c);
-          // Back wall is in the +IN direction; glass faces the shop aisle.
-          const sg = { x: bs.x - inx * (0.04 + SCREEN_GAP + 0.025),
-            z: bs.z - inz * (0.04 + SCREEN_GAP + 0.025) };
-          glow(sg, 1.6, along ? 0.05 : 2.7, 1.5, along ? 2.7 : 0.05, 0x39d0c0, 0.7);
-        }
-        const gi = pt(halfIn, 0, 1.0);
-        if (gi) { decor(gi, 0.5, along ? 1.0 : 2.0, 1.0, along ? 2.0 : 1.0, 0x2a2f37); decor(gi, 1.04, along ? 0.95 : 1.9, 0.06, along ? 1.9 : 0.95, GLASS); }
         break;
       }
       case "hardware": {
-        // tall industrial racks with crates/cans
-        wallShelves({ body: 0x4a4034, top: 0x6b5a3a, h: 2.0, count: 2, span: 2.4 });   // 2/side (space doctrine)
-        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.65, across: st.across }, [0xffd166, 0x8a5a2b, 0xb9bec6, 0x66d9c0], 5, 0.26, 0.34);
-        island(2 * halfIn - 5.0, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.1, along ? 2.4 : 1.0, 0x6b5a3a, { cast: false });
-        // a leaning STACK OF LUMBER + a hung tool pegboard on a side wall
-        const lb = pt(6.6, halfTan - 1.2, 0.7);
-        if (lb) for (let i = 0; i < 4; i++) decor({ x: lb.x, z: lb.z }, 0.18 + i * 0.16, along ? 0.34 : 2.6, 0.14, along ? 2.6 : 0.34, [0x8a5a2b, 0xa9743a][i % 2]);
-        const pb = pt(halfIn, -(halfTan - 0.2), 0.6);
-        if (pb) { decor(pb, 1.5, along ? 0.03 : 2.4, 1.4, along ? 2.4 : 0.03, 0x55452e); glow(pb, 1.5, along ? 0.02 : 2.5, 1.5, along ? 2.5 : 0.02, 0xffd166, 0.2); }
+        // (DELETED: a plain box "island", four planks stacked in mid-aisle as
+        //  "lumber" in front of the wall bays, a pegboard that glowed yellow and
+        //  never passed its gate, and wall racks of painted cubes that never
+        //  placed. The racks and their stock are city/storegoods.js; the tool
+        //  pegboard is fitout_work.js's shopPegboard.)
         break;
       }
       case "hospital": {
@@ -5815,23 +5810,17 @@
             decor(p, 0.75, 1.0, 0.25, 0.5, 0xbfd8e6);          // pillow end
             bedP(p, inx, inz, 2.0, 0.53);                      // SLEEP anchor (lie axis = IN)
           }
-          const cp = pt(5.6 + i * 3.2, -(halfTan - 0.6), 0.9); if (cp) decor(cp, 1.4, along ? 0.05 : 2.2, 2.0, along ? 2.2 : 0.05, 0xbfe6d8);  // curtain
         }
-        wallShelves({ body: 0xd8dde2, top: 0xffffff, h: 1.6, count: 2 });
-        for (const st of shelfTops) stockRow(st, [0xff5a5a, 0x5aff8a, 0xffffff, 0x5a8aff], 4, 0.2, 0.2);
+        // (a "curtain" slab and a supply shelf of painted cubes used to follow;
+        //  neither ever passed its wall gate. The pharmacy bays are storegoods.js.)
         break;
       }
       case "gas": {
-        // convenience aisles inside + a cooler wall (showroom front handled outside)
-        wallShelves({ body: 0x44505c, top: 0x6a7078, h: 1.5, count: 2, span: 2.2 });   // 2/side (space doctrine)
-        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.55, across: st.across }, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff], 5, 0.18, 0.34);
-        // a glowing cooler against the back wall
-        const cp = pt(2 * halfIn - 2.6, 0, 0.6);
-        if (cp) glow(cp, 1.1, along ? 0.4 : 3.0, 2.0, along ? 3.0 : 0.4, 0x9fe0ff, 0.4);
-        // a SNACK ENDCAP island + a coffee/slushie machine on a side counter
-        island(halfIn, 0, along ? 1.0 : 2.0, 1.2, along ? 2.0 : 1.0, 0x44505c, { cast: false });
-        const cm = pt(2 * halfIn - 4.4, halfTan - 1.2, 0.7);
-        if (cm) { decor(cm, 0.55, 0.6, 1.1, 0.6, 0x2a2f37); glow(cm, 1.05, 0.5, 0.18, 0.5, 0xff7a3b, 0.4); }
+        // (DELETED: a 3 m block of pale-blue glow standing at the counter line as
+        //  the "cooler", a plain box "snack endcap" in the middle of the
+        //  door-to-till aisle, a box with an orange glowing top as the "coffee
+        //  machine", and wall shelves that never placed. The gondolas, the
+        //  reach-in cooler bank and the coffee station are city/storegoods.js.)
         break;
       }
       case "carlot":
@@ -5850,7 +5839,7 @@
           const mt = pt(halfIn, 0, 1.0);
           if (mt) {
             decor(mt, 0.42, along ? 1.2 : 2.2, 0.1, along ? 2.2 : 1.2, 0x6b4a2a);    // table
-            for (let g = -1; g <= 1; g++) { const lx = mt.x + tx * g * 0.6, lz = mt.z + tz * g * 0.6; b.lbox(lx, 0.72, lz, 0.4, 0.5, 0.4, [0xc8cdd4, 0xa9b0b8][(g + 1) % 2], { cast: false }); }
+            for (let g = -1; g <= 1; g++) { const lx = mt.x + tx * g * 0.6, lz = mt.z + tz * g * 0.6; b.lbox(lx, 0.72 + GF, lz, 0.4, 0.5, 0.4, [0xc8cdd4, 0xa9b0b8][(g + 1) % 2], { cast: false }); }
           }
           const ss = pt(4.6, halfTan - 1.0, 0.7);
           if (ss) { decor(ss, 0.85, 0.08, 1.7, 0.08, 0x8a939c); glow(ss, 1.5, along ? 0.05 : 1.0, 0.5, along ? 1.0 : 0.05, 0x4fd0a0, 0.5); }
@@ -5861,18 +5850,23 @@
           // instead of one lonely box. Spread across EVERY storey of the building
           // (showroomFloor is also called per-upper-floor by the city builder) so
           // every floor is full of cars. A parts/tyre wall keeps the trade read.
-          wallShelves({ body: 0x3a352e, top: 0x55606e, h: 1.4, count: 2, span: 2.0 });
-          for (const st of shelfTops) stockRow(st, [0x2a2f37, 0x44505c], 4, 0.3, 0.3);   // tyre/part stacks
-          showroomFloor(b, kind, door, 0, 0);   // ground floor = catalog start
+          // the chop shop is a working garage (city/modshop.js dresses it), not
+          // a dealership: no turntables, no price placards
+          if (kind === "carlot") showroomFloor(b, kind, door, 0, 0);   // ground floor = catalog start
         }
         break;
       }
       case "security": {
-        // a wall of glowing CCTV monitors + an equipment shelf
-        const mp = pt(2 * halfIn - 2.6, 0, 0.6);
-        if (mp) for (let r = 0; r < 2; r++) for (let i = -1; i <= 1; i++) { const lat = i * 0.9; const lx = mp.x + tx * lat, lz = mp.z + tz * lat, y = 1.3 + r * 0.7; b.lbox(lx, y, lz, along ? 0.05 : 0.7, 0.5, along ? 0.7 : 0.05, 0x49a0c0, { emissive: 0x49a0c0, ei: 0.55, cast: false }); }
-        wallShelves({ body: 0x32363d, top: 0x49566b, h: 1.6, count: 2 });
-        for (const st of shelfTops) stockRow(st, [0x49566b, 0x2a2f37, 0x6a7078], 4, 0.22, 0.24);
+        // THE CCTV BANK on the back wall behind the counter: six monitors in two
+        // rows on a wall rail, grey camera feeds (a feed is not neon cyan). It
+        // used to stand at 2hi-2.6, which is the counter's own line, so the
+        // "monitors" ran through the counter top. (Its shelving never placed.)
+        backWallBox(0, 1.72, 3.1, 0.06, 0.04, 0x2a2d31);                                  // wall rail
+        for (let r = 0; r < 2; r++) for (let i = -1; i <= 1; i++) {
+          const y = 1.5 + r * 0.44;
+          backWallBox(i * 0.92, y, 0.84, 0.4, 0.07, 0x16181b);
+          backWallBox(i * 0.92, y, 0.76, 0.34, 0.076, 0x7f949e, { emissive: 0x7f949e, ei: 0.38, cast: false });
+        }
         break;
       }
       case "raceway": {
@@ -5903,7 +5897,7 @@
         const ob = pt(winD + 0.6, 0, 0.5) || pt(winD, 0, 0.5);
         if (ob) {
           glow(ob, 2.6, along ? 0.08 : halfTan * 1.3, 1.1, along ? halfTan * 1.3 : 0.08, RWB, 0.5);
-          for (let i = -1; i <= 1; i++) { const lat = i * (halfTan * 0.4); const lx = ob.x + tx * lat, lz = ob.z + tz * lat; b.lbox(lx, 2.6, lz, along ? 0.05 : 0.62, 0.16, along ? 0.62 : 0.05, 0x141a24, { cast: false }); }
+          for (let i = -1; i <= 1; i++) { const lat = i * (halfTan * 0.4); const lx = ob.x + tx * lat, lz = ob.z + tz * lat; b.lbox(lx, 2.6 + GF, lz, along ? 0.05 : 0.62, 0.16, along ? 0.62 : 0.05, 0x141a24, { cast: false }); }
         }
         // --- THE TRACK MAP: a wall panel with a glowing tri-oval ring, the
         //     start/finish tick in red — Diamond Speedway, drawn to covet ---
@@ -5915,19 +5909,19 @@
             const a = (s2 / SEG) * Math.PI * 2;
             const dIn = Math.cos(a) * 1.35, dy = Math.sin(a) * 0.72;
             const sf = s2 === Math.floor(SEG * 0.25);    // top of the oval = S/F
-            b.lbox(tm.x + inx * dIn, 1.7 + dy, tm.z + inz * dIn,
+            b.lbox(tm.x + inx * dIn, 1.7 + dy + GF, tm.z + inz * dIn,
               along ? 0.14 : 0.1, 0.1, along ? 0.1 : 0.14,
               sf ? 0xc23a36 : 0xeef2f6, { emissive: sf ? 0xc23a36 : 0x7da8d8, ei: sf ? 0.7 : 0.45, cast: false });
           }
           // infield tag: a little gold pylon block inside the ring
-          b.lbox(tm.x, 1.7, tm.z, along ? 0.1 : 0.08, 0.34, along ? 0.08 : 0.1, 0xffd451, { emissive: 0xffd451, ei: 0.5, cast: false });
+          b.lbox(tm.x, 1.7 + GF, tm.z, along ? 0.1 : 0.08, 0.34, along ? 0.08 : 0.1, 0xffd451, { emissive: 0xffd451, ei: 0.5, cast: false });
         }
         // --- CHAMPIONS' TROPHY CASE: lit glass island, a gold cup inside ---
         const tc = pt(halfIn - 1.6, -(halfTan - 2.0), 0.8);
         if (tc) {
           decor(tc, 0.55, 1.1, 1.1, 0.8, 0x2a2f37);      // plinth
           decor(tc, 1.45, 1.0, 0.7, 0.7, GLASS);         // glass bonnet
-          b.lbox(tc.x, 1.32, tc.z, 0.3, 0.42, 0.3, 0xe0b53a, { emissive: 0xe0b53a, ei: 0.4, cast: false });   // the cup
+          b.lbox(tc.x, 1.32 + GF, tc.z, 0.3, 0.42, 0.3, 0xe0b53a, { emissive: 0xe0b53a, ei: 0.4, cast: false });   // the cup
           glow({ x: tc.x, z: tc.z }, 1.12, 0.9, 0.04, 0.6, 0xffe08a, 0.5);   // case light
         }
         // --- TEAM POSTER WALL: driver posters in championship team colours ---
@@ -5936,33 +5930,14 @@
           if (!pp) continue;
           decor(pp, 1.6, 0.05, 1.5, 1.0, 0x10141c);      // poster frame
           glow(pp, 1.6, 0.04, 1.3, 0.8, TEAM[i % TEAM.length], 0.35);   // the team wash
-          b.lbox(pp.x, 2.05, pp.z, along ? 0.03 : 0.5, 0.14, along ? 0.5 : 0.03, 0xeef2f6, { emissive: 0xeef2f6, ei: 0.3, cast: false });  // name strip
+          b.lbox(pp.x, 2.05 + GF, pp.z, along ? 0.03 : 0.5, 0.14, along ? 0.5 : 0.03, 0xeef2f6, { emissive: 0xeef2f6, ei: 0.3, cast: false });  // name strip
         }
-        // --- ticket counters: stacks of team-colour betting slips ---
-        wallShelves({ body: 0x232a36, top: 0x3a4354, h: 1.1, count: 2, span: 2.0, start: 4.2 });
-        for (const st of shelfTops) { glow(st.p, st.top + 0.02, st.across, 0.04, st.deep, RWB, 0.3); stockRow(st, TEAM, 5, 0.16, 0.14); }
         break;
       }
       default: {
-        // generic store: stocked wall shelving + a central GONDOLA aisle of
-        // product the customer walks BETWEEN to the counter — a real shop floor,
-        // not bare walls. The gondola is gated so it never crosses the door aisle.
-        wallShelves({ count: 2 });   // 2/side (space doctrine)
-        for (const st of shelfTops) stockRow(st, [0xff9e6b, 0x6bb6ff, 0x4caf6e, 0xc792ea], 4, 0.24, 0.24);
-        // ONE GONDOLA ROW, shifted OFF the door→counter line (space doctrine:
-        // the old three centre-line rows made every generic store a slalom —
-        // now the approach lane to the counter stays ≥1.2u clear and the one
-        // stocked island reads placed, not crammed). Still shopliftable.
-        const gd = halfIn + 0.6;
-        if (gd <= 2 * halfIn - 6.0) {                  // only when it clears the back-of-house wall
-          const g = pt(gd, 1.9, 1.2);
-          if (g) {
-            decor(g, 0.55, along ? 1.2 : 2.4, 1.1, along ? 2.4 : 1.2, 0x55606e);
-            const gtop = { p: g, top: 1.16, across: along ? 1.0 : 2.2, deep: along ? 2.2 : 1.0 };
-            stockRow(gtop, [0x4caf6e, 0xff9e6b, 0x6bb6ff], 4, 0.22, 0.3);
-            recordStock(g, 1.16, along ? 1.0 : 2.2, along ? 2.2 : 1.0);
-          }
-        }
+        // generic store: the whole sales floor (wall bays, gondola aisles, the
+        // cooler bank) is city/storegoods.js. What stood here was one solid
+        // 2.4 x 1.1 m grey box with four painted cubes on it as the "gondola".
       }
     }
 
@@ -5994,20 +5969,32 @@
     }
     if ((2 * halfTan) >= 8 && (2 * halfIn) >= 13) {
       if (kind === "clothing") {
-        // a row of FITTING BOOTHS against one side wall (3 small stalls w/ curtains)
-        const lat = halfTan - 1.3;
-        for (let i = 0; i < 3; i++) {
-          const d = 5.0 + i * 2.2;
-          if (d > 2 * halfIn - 6.0) break;
-          const p = pt(d, lat, 0.8);
-          if (p) decor(p, 1.1, along ? 1.6 : 0.1, 2.2, along ? 0.1 : 1.6, 0x4a4250);  // curtain front
+        // (DELETED: three 2.2 m curtain SLABS standing free on the shop floor as
+        //  "fitting booths", no walls, no rail, nothing to stand in. The fitting
+        //  room is clothingstore.js's, in a back corner, with its mirror.)
+      } else if (kind === "food") {
+        // THE PREP TABLE of the open kitchen behind the counter, built like one:
+        // a stainless top at 0.9 m on four legs with an undershelf and a
+        // splashback, standing against the side wall with its long side on the
+        // wall, a cutting board and a hotel pan on it. It was a 1 m grey block
+        // whose orientation flipped with the side the door was on.
+        const FL = 0.2, Lg = 2.0, Dp = 0.72;
+        const kd = 2 * halfIn - 3.0, kl = halfTan - (b.wt != null ? b.wt : WT) - Dp / 2 - 0.03;
+        const kp = { x: inx * (-halfIn + kd) + tx * kl, z: inz * (-halfIn + kd) + tz * kl };
+        if (!b.clearFloorPoint || b.clearFloorPoint(kp.x, kp.z, Dp / 2 - 0.05)) {
+          const STEEL = 0xb9bfc4;
+          const kb = function (dl, de, y, sl, h, si, col) {        // (lat off, in off, centre y, lat size, h, in size)
+            const q = off(kp, dl, de);
+            b.lbox(q.x, y, q.z, along ? si : sl, h, along ? sl : si, col, { cast: false });
+          };
+          kb(0, 0, FL + 0.885, Dp, 0.03, Lg, STEEL);                                              // top
+          kb(Dp / 2 - 0.01, 0, FL + 1.0, 0.02, 0.2, Lg, STEEL);                                  // splashback (wall side)
+          kb(0, 0, FL + 0.19, Dp - 0.08, 0.02, Lg - 0.08, 0x9aa0a6);                             // undershelf
+          for (const e1 of [-1, 1]) for (const e2 of [-1, 1]) kb(e1 * (Dp / 2 - 0.04), e2 * (Lg / 2 - 0.04), FL + 0.435, 0.04, 0.87, 0.04, 0x9aa0a6);
+          kb(-0.05, -0.45, FL + 0.91, 0.3, 0.02, 0.45, 0xd8c3a0);                                // cutting board
+          kb(-0.02, 0.35, FL + 0.935, 0.32, 0.065, 0.52, 0xc9cfd4);                              // hotel pan
+          kb(-0.02, 0.35, FL + 0.966, 0.29, 0.004, 0.49, 0x8e3b24);                              // what is in it
         }
-      } else if (kind === "food" || kind === "bar") {
-        // an OPEN KITCHEN behind the counter. The two walls that used to cell it
-        // in were walk-through, and the counter is already the barrier that
-        // says "staff only" — you can see the cook now, which is better.
-        const kp = pt(2 * halfIn - 3.0, halfTan - 1.6, 0.8);
-        if (kp) decor(kp, 0.55, along ? 0.9 : 2.0, 1.0, along ? 2.0 : 0.9, 0x6a7078);  // a steel prep counter inside
       } else if (kind === "bank") {
         // the walled STRONGROOM in the back corner — the one shop sub-room that
         // survives the open-plan pass, and the one the owner named out loud.
@@ -6047,29 +6034,41 @@
         // ward, which is what a curtain is for. The corridor wall and the three
         // bay dividers that used to enclose them were full-height and
         // walk-through: three fake rooms on every hospital lot in the world.
+        // Each is the kit's clinic bed (frame, mattress, pillow, a declared
+        // sleep anchor), not the 0.5 m white slab it used to be.
         const lat = halfTan - 1.8;
         for (let i = 0; i < 3; i++) {
           const d = 6.0 + i * 3.2; if (d > 2 * halfIn - 5.0) break;
           const bp = pt(d - 1.4, lat, 0.8);
-          if (bp) decor(bp, 0.45, along ? 0.7 : 1.8, 0.5, along ? 1.8 : 0.7, 0xe6e8ee);  // exam bed
+          if (bp) kitP("bed", bp, Math.atan2(inx, inz), { len: 1.9, wide: 0.8, tone: "clinic" });
         }
       } else if (kind === "gym") {
         // a bank of LOCKERS against the back wall. The two partitions that used
         // to wall the corner off were walk-through; the lockers themselves are
         // the read, and now the whole floor is one room you can cross.
-        for (let i = 0; i < 4; i++) {
-          const lat = -(halfTan - 1.4) + i * 1.0;
-          const lp2 = pt(2 * halfIn - 2.5, lat, 0.8);
-          if (lp2) decor(lp2, 1.1, along ? 0.5 : 0.9, 2.2, along ? 0.9 : 0.5, 0x49566b);  // lockers
+        // It was four 2.2 m blocks standing 1.85 m OFF the back wall in a row.
+        // Now: the kit's steel lockers (door faces, handles, one collider) with
+        // their backs on the back wall, in the + corner (the fit-out's
+        // stockroom prefers the - corner for a gym).
+        const wIn = b.wt != null ? b.wt : WT;
+        for (let i = 0; i < 2; i++) {
+          const lat = (halfTan - wIn) - 0.4 - 1.26 / 2 - i * 1.3;
+          const dIn = 2 * halfIn - wIn - 0.26;
+          const lp2 = { x: inx * (-halfIn + dIn) + tx * lat, z: inz * (-halfIn + dIn) + tz * lat };
+          if (b.clearFloorPoint && !b.clearFloorPoint(lp2.x, lp2.z, 0.2)) continue;
+          kitP("locker", lp2, Math.atan2(-inx, -inz), { n: 3 });
         }
       } else if (kind === "realtor") {
         // realtor keeps its open display floor, and now that is ALL it is — the
         // two-wall "back office cell" was a pair of paintings of walls.
         const op = pt(2 * halfIn - 2.8, -(halfTan - 1.8), 0.8);
-        if (op) decor(op, 0.5, along ? 0.9 : 1.6, 1.0, along ? 1.6 : 0.9, 0x6b4a2a);  // manager desk
+        // the kit's desk (pedestal, drawers, modesty panel, monitor, chair),
+        // the worker facing the room; it was a 1 m brown block
+        if (op && !kitP("desk", op, Math.atan2(-inx, -inz), { len: 1.6, deep: 0.8 }))
+          decor(op, 0.5, along ? 0.9 : 1.6, 1.0, along ? 1.6 : 0.9, 0x6b4a2a);
       }
     }
-    return shopStock;   // SHOPLIFT anchors for the caller to stamp on lot.building
+    return null;        // (no flavour-word shoplift shelves any more: storegoods.js sells the real stock)
   }
 
   // a small accent colour per trade (register screen / glow tint)
@@ -6384,8 +6383,11 @@
     const linen = LINEN[idx & 3], sofa = SOFA[(idx + 1) & 3];
 
     const k = roomKit(b, baseY);
-    // emissive CEILING fixture so the flat reads lit (one rare emissive piece).
-    b.lbox((k.xLo + k.xHi) / 2, Y + (b.FH || FH) - 0.28, 0, 1.8, 0.1, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.4, cast: false });
+    // emissive CEILING fixture so the flat reads lit (one rare emissive piece),
+    // FLUSH with the slab underside: walked into, the fit-out's plaster
+    // ceiling covers it and its own fittings light the rooms (it used to hang
+    // 13 cm under that ceiling as a glowing plank).
+    b.lbox((k.xLo + k.xHi) / 2, Y + (b.FH || FH) - 0.205, 0, 1.8, 0.01, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.4, cast: false });
     // tinted hardwood FLOOR slab over the solid plate (-x stair strip stays open).
     b.lbox((k.xLo + k.xHi) / 2, Y + 0.02, 0, Math.max(1, k.xHi - k.xLo), 0.04, k.zHi - k.zLo, 0x33373f, { cast: false });
     // VACANT building: the shell above (light + finished floor) IS the design.
@@ -7146,8 +7148,25 @@
     // suite is SEEING the city 160m below; the reflective mirror kit is
     // near-opaque from inside. Flag off → the exact old layout + mirror skin.
     const EXECF = !!(CBZ.CONFIG && CBZ.CONFIG.EXEC_TOP_OFFICE);
+    const execY = (STOREYS - 2) * FH;
+    // THE SUITE HAS TO SEE OUT. The flagship wears a skyline facade grammar
+    // (the city's position-hash pick; megabrace.js's "Braced Tube" on the
+    // current map), and those grammars skin the tower in a CONTINUOUS dark
+    // window field standing 0.04-0.2 m proud of the glass, with X-brace and
+    // megacolumn blocks up to ~1.7 m thick whose inner faces reach a metre
+    // INTO the rooms. From storey 50 that read as opaque brown panels in
+    // every bay and as floating planks / boxes over the floor by the sills.
+    // Two keep-clear volumes for the facade kit's carve: nothing a grammar
+    // lays may stand inside the executive storey's footprint, and nothing
+    // within 0.35 m of the wall may cross its window band. The spandrel
+    // lines at the slab edges and the outer faces of any brace or column
+    // stay, so from the street the structure still reads continuous.
+    const execClear = EXECF ? [
+      { x0: -w / 2, x1: w / 2, z0: -d / 2, z1: d / 2, y0: execY + 0.01, y1: execY + FH - 0.01 },
+      { x0: -w / 2 - 0.35, x1: w / 2 + 0.35, z0: -d / 2 - 0.35, z1: d / 2 + 0.35, y0: execY + 0.5, y1: execY + FH - 0.4 },
+    ] : null;
     const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
-      EXECF ? { garageGround: true, district: "core", glassKind: "clear" }
+      EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear }
             : { garageGround: true, district: "core" });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
@@ -7159,7 +7178,6 @@
     // the storey just below the penthouse is the EXECUTIVE FLOOR (flag on) or
     // the mansion NATATORIUM (flag off; the pool then rides one lower);
     // every other floor is a dressed flat (merged tris; no extra draw calls).
-    const execY = (STOREYS - 2) * FH;
     for (let k = 1; k < STOREYS - 1; k++) {
       if (EXECF && k === STOREYS - 2) continue;           // the executive suite — dressed below
       if (k === STOREYS - (EXECF ? 3 : 2)) furnishPoolFloor(b, k * FH);
@@ -7238,163 +7256,17 @@
     return rec;
   }
 
-  function abandonDecor(b, rng, gangColor) {
-    // graffiti on a couple of interior + exterior walls
-    const gtex = graffitiTex(gangColor || 0xb079ea);
-    for (let i = 0; i < 3; i++) {
-      const gp = new THREE.Mesh(new THREE.PlaneGeometry(2.6 + rng() * 1.5, 1.4 + rng()),
-        new THREE.MeshBasicMaterial({ map: gtex, transparent: true, depthWrite: false }));
-      const face = (rng() * 4) | 0;
-      const inset = 0.25;
-      if (face === 0) { gp.position.set((rng() - 0.5) * (b.w - 3), 1.6, -b.d / 2 + inset); }
-      else if (face === 1) { gp.position.set((rng() - 0.5) * (b.w - 3), 1.6, b.d / 2 - inset); gp.rotation.y = Math.PI; }
-      else if (face === 2) { gp.position.set(-b.w / 2 + inset, 1.6, (rng() - 0.5) * (b.d - 3)); gp.rotation.y = Math.PI / 2; }
-      else { gp.position.set(b.w / 2 - inset, 1.6, (rng() - 0.5) * (b.d - 3)); gp.rotation.y = -Math.PI / 2; }
-      b.group.add(gp);
-    }
-    // trash / debris on the floor
-    for (let i = 0; i < 6; i++) {
-      let x = 0, z = 0, tries = 0;
-      do { x = (rng() - 0.5) * (b.w - 3); z = (rng() - 0.5) * (b.d - 3); tries++; }
-      while (tries < 8 && b.clearFloorPoint && !b.clearFloorPoint(x, z, 0.7));
-      if (b.clearFloorPoint && !b.clearFloorPoint(x, z, 0.7)) continue;
-      const s = 0.3 + rng() * 0.6;
-      b.lbox(x, s / 2, z, s, s * (0.4 + rng()), s, [0x2f2c28, 0x3a352e, 0x444038][(rng() * 3) | 0], { cast: false });
-    }
-    // a busted-out couch — still a SEAT (a squat's furniture works, barely)
-    if (!b.clearFloorPoint || b.clearFloorPoint(-b.w / 2 + 2.2, b.d / 2 - 2.4, 1.2)) {
-      b.lbox(-b.w / 2 + 2.2, 0.4, b.d / 2 - 2.4, 2.0, 0.5, 0.9, 0x4a423a, { cast: false });
-      if (CBZ.propRegisterSeat) {
-        const scx = (b.ox || 0) + (-b.w / 2 + 2.2), scz = (b.oz || 0) + (b.d / 2 - 2.4);
-        for (const sx of [-0.55, 0.55]) CBZ.propRegisterSeat(scx + sx, 0, scz, Math.atan2(b.w / 2 - 2.2, -(b.d / 2 - 2.4)), "couch", null);  // face the room centre
-      }
-    }
-    const clear = (x, z, pad) => (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad == null ? 1.0 : pad));
-    // a filthy MATTRESS PILE in a corner (a squatter's bed) — PROPS_PURPOSE:
-    // sized up so a character actually fits (1.9→2.0 × 1.1→1.2) + sleepable.
-    {
-      const mx = b.w / 2 - 2.2, mz = -b.d / 2 + 2.4;
-      if (clear(mx, mz, 1.1)) {
-        b.lbox(mx, 0.18, mz, 2.0, 0.3, 1.2, 0x6a5f50, { cast: false });           // mattress
-        b.lbox(mx + 0.3, 0.42, mz - 0.2, 1.2, 0.2, 0.8, 0x5a5246, { cast: false }); // crumpled blanket
-        if (CBZ.propRegisterBed) CBZ.propRegisterBed((b.ox || 0) + mx, 0, (b.oz || 0) + mz, 1, 0, 2.0, 0.33, "bedroll", null);  // head at the +x wall end
-      }
-    }
-    // an OIL-DRUM FIRE: a rusty drum with an emissive ember glow + flame cube
-    {
-      const dx = (rng() - 0.5) * (b.w - 5), dz = (rng() - 0.5) * (b.d - 5);
-      if (clear(dx, dz, 1.0)) {
-        b.lbox(dx, 0.5, dz, 0.7, 1.0, 0.7, 0x3a2f24, { cast: false });            // drum
-        b.lbox(dx, 1.12, dz, 0.5, 0.45, 0.5, 0xff7a1f, { emissive: 0xff5a14, ei: 0.95, cast: false }); // flame
-        b.lbox(dx, 1.05, dz, 0.62, 0.12, 0.62, 0xffc24a, { emissive: 0xffb030, ei: 0.7, cast: false }); // ember rim
-      }
-    }
-    // BROKEN FURNITURE: a toppled chair + a smashed table on its side
-    {
-      const cx2 = -b.w / 2 + 2.6, cz2 = 0.4;
-      if (clear(cx2, cz2, 0.9)) { b.lbox(cx2, 0.25, cz2, 0.5, 0.5, 0.5, 0x4a4036, { cast: false }); b.lbox(cx2, 0.6, cz2 + 0.3, 0.5, 0.7, 0.08, 0x4a4036, { cast: false }); }
-      const tx2 = b.w / 2 - 3.0, tz2 = b.d / 2 - 3.2;
-      if (clear(tx2, tz2, 1.0)) { b.lbox(tx2, 0.35, tz2, 1.3, 0.08, 0.9, 0x55452e, { cast: false }); b.lbox(tx2 - 0.5, 0.18, tz2, 0.08, 0.36, 0.08, 0x55452e, { cast: false }); }
-    }
-    // extra GANG-TAG cluster (3 small tags) on one interior wall, tinted by the
-    // gang colour so a faction's turf reads its own colour up close.
-    {
-      const gtex2 = graffitiTex(gangColor || 0xb079ea);
-      const face = (rng() * 4) | 0, inset = 0.26;
-      for (let i = 0; i < 3; i++) {
-        const tg = new THREE.Mesh(new THREE.PlaneGeometry(1.2 + rng() * 0.6, 0.7 + rng() * 0.4),
-          new THREE.MeshBasicMaterial({ map: gtex2, transparent: true, depthWrite: false }));
-        const off = (i - 1) * 1.6;
-        if (face === 0) { tg.position.set(off, 2.4, -b.d / 2 + inset); }
-        else if (face === 1) { tg.position.set(off, 2.4, b.d / 2 - inset); tg.rotation.y = Math.PI; }
-        else if (face === 2) { tg.position.set(-b.w / 2 + inset, 2.4, off); tg.rotation.y = Math.PI / 2; }
-        else { tg.position.set(b.w / 2 - inset, 2.4, off); tg.rotation.y = -Math.PI / 2; }
-        b.group.add(tg);
-      }
-    }
-  }
-
-  // ---- DERELICTS AT DISTANCE ----------------------------------------------
-  // WHY: gang turf should read from a block away, not only once you're close
-  // enough to see the boards. Two cheap silhouette tells on every abandoned
-  // shell:
-  //  • SOOT-STREAK decals bleeding down from the boarded upper windows (ONE
-  //    cached canvas texture + ONE shared material; ≤4 planes per derelict —
-  //    the same budget as the existing graffiti pass);
-  //  • a BROKEN PARAPET: crumbled chunk boxes tipped on the roof corner and
-  //    teetering on the lip, plus one fallen at the base (opaque, no
-  //    colliders → batch-merged), so the ruined roofline reads in silhouette.
-  // Deterministic per lot (position hash) — zero draws on the worldgen rng.
-  let _sootMat = null;
-  function sootStreakMat() {
-    if (_sootMat) return _sootMat;
-    const c = document.createElement("canvas"); c.width = 96; c.height = 64;
-    const x = c.getContext("2d");
-    for (let i = 0; i < 8; i++) {
-      const sx = 3 + i * 11.5 + (i % 3) * 2, sw = 4 + (i % 3) * 3;
-      const grd = x.createLinearGradient(0, 0, 0, 64);
-      grd.addColorStop(0, "rgba(14,12,10,0.9)");
-      grd.addColorStop(0.55, "rgba(14,12,10,0.38)");
-      grd.addColorStop(1, "rgba(14,12,10,0)");
-      x.fillStyle = grd; x.fillRect(sx, 0, sw, 64);
-    }
-    const tex = new THREE.CanvasTexture(c);
-    _sootMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
-    return _sootMat;
-  }
-  function derelictExterior(b) {
-    const vh = Math.abs(Math.sin(b.ox * 17.23 + b.oz * 91.7) * 43758.5453) % 1;
-    // soot bleeding down from the boarded upper window bands (band bottom sits
-    // ~k*FH + FH/2 - 0.31, so the streak hangs just under it — tracked off FH,
-    // not a frozen offset, so it stays glued to the boards), patchy per face/floor.
-    const sm = sootStreakMat();
-    let made = 0;
-    for (let k = 1; k < b.storeys && made < 4; k++) {
-      for (let f = 0; f < 4 && made < 4; f++) {
-        if ((((vh * 977) | 0) + k * 13 + f * 29) % 3 === 0) continue;   // skip ~1/3, varies per lot
-        const span = Math.min((f < 2 ? b.w : b.d) * 0.55, 4.6);
-        const p = new THREE.Mesh(new THREE.PlaneGeometry(span, 1.6), sm);
-        const y = k * FH + FH / 2 - 0.95;
-        if (f === 0) { p.position.set(0, y, -b.d / 2 - 0.03); p.rotation.y = Math.PI; }
-        else if (f === 1) { p.position.set(0, y, b.d / 2 + 0.03); }
-        else if (f === 2) { p.position.set(-b.w / 2 - 0.03, y, 0); p.rotation.y = -Math.PI / 2; }
-        else { p.position.set(b.w / 2 + 0.03, y, 0); p.rotation.y = Math.PI / 2; }
-        p.castShadow = false; b.group.add(p);
-        made++;
-      }
-    }
-    // the broken parapet: one corner of the roofline crumbled
-    const sgn = vh < 0.5 ? 1 : -1;            // which corner gave way
-    const ccol = 0x7a7f86, dcol = 0x63686f;
-    function chunk(x, y, z, s, ry, rz, col) {
-      // a broken lump of the parapet, not a box (debris.js's shared chunk)
-      const g = CBZ.debris ? CBZ.debris.chunkGeo(((x * 7 + z * 13) | 0)) : new THREE.BoxGeometry(1, 1, 1);
-      const m = new THREE.Mesh(g, mat(col));
-      m.scale.set(s, s * 0.6, s * 1.15);
-      m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz;
-      m.castShadow = false; m.receiveShadow = true; b.group.add(m);
-    }
-    const rx = sgn * (b.w / 2 - 1.1), rz = b.d / 2 - 0.9;
-    chunk(rx, b.h + 0.32, rz - 0.4, 0.95, 0.7 * sgn, 0.3, ccol);                          // big slab tipped on the roof
-    chunk(rx - sgn * 0.9, b.h + 0.18, rz - 1.2, 0.6, 1.9, -0.25, dcol);                   // smaller spall beside it
-    chunk(sgn * (b.w / 2 - 0.2), b.h + 0.65, rz + 0.45, 0.55, 0.25, 0.55 * sgn, ccol);    // teetering on the lip
-    chunk(rx, 0.28, b.d / 2 + 0.75, 0.8, 0.9, 0.1, dcol);                                 // fallen at the base
-  }
-
-  function makeStash(b, lot, gangColor) {
-    // a duffel + crate near the back wall — the gang's cash/drugs/gun cache
-    const sx = lot.cx, sz = lot.cz;
-    const duffel = b.lbox(0, 0.35, b.d / 2 - 2.6, 1.0, 0.5, 0.5, 0x2a2f26, { emissive: gangColor || 0x4caf6e, ei: 0.18, cast: false });
-    duffel.userData.transient = false;
+  // THE GANG'S STASH: a record, not a mesh. It sits at the back-centre of the
+  // plate; the walk-in fit-out (city/fitout_gang.js) stands the count table
+  // and the real duffel there and moves stash.x/z onto the table. (This used
+  // to be a 1 m eager box glowing in the gang's colour: the "pink box".)
+  function makeStash(b, lot) {
     lot.building.stash = {
-      x: sx, z: sz + (b.d / 2 - 2.6) * 0, looted: false,
+      x: lot.cx, z: lot.cz + (b.d / 2 - 2.6), looted: false,
       // wealth set when the gang takes the building (city/gangs.js may bump it)
       cash: 300 + ((b.storeys || 1) * 150), drugs: 1 + ((b.storeys || 1)), weapon: null,
-      mesh: duffel,
+      mesh: null,
     };
-    // place the stash world point near the back-centre of the building
-    lot.building.stash.x = lot.cx;
-    lot.building.stash.z = lot.cz + (b.d / 2 - 2.6);
   }
 
   // ---- OWNERSHIP -----------------------------------------------------------
@@ -7800,7 +7672,7 @@
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: hideBrick ? "brick" : "office", district: districtKind(lot) });
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
-        makeStash(b, lot, 0x4caf6e);
+        makeStash(b, lot);
         // a crew's building, every floor of it: the fit-out (city/fitout_gang.js)
         // stands the count room, the lounge, the cook kitchen and the mattresses.
         if (CBZ.fitoutDeclareBuilding) CBZ.fitoutDeclareBuilding(b, "hideout", { door: b.localDoor });
@@ -8369,12 +8241,37 @@
     x.lineWidth = 6; x.strokeRect(6, 6, 500, 116);
     // the NAME, auto-shrunk to fit, with a hard drop shadow for legibility
     let fs = 62; x.textAlign = "center"; x.textBaseline = "middle";
-    do { x.font = "900 " + fs + "px Fredoka, Arial Black, sans-serif"; fs -= 4; } while (x.measureText(name).width > 470 && fs > 22);
+    // a sign-maker's face (a heavy grotesque), not the game's rounded UI font
+    do { x.font = "800 " + fs + "px 'Helvetica Neue', Helvetica, Arial, sans-serif"; fs -= 4; } while (x.measureText(name).width > 470 && fs > 22);
     x.fillStyle = "rgba(0,0,0,0.55)"; x.fillText(name, 258, 68);     // shadow
     x.fillStyle = readableText(signHex); x.fillText(name, 256, 64);  // face text
     t = new THREE.CanvasTexture(c); signTexCache.set(key, t); return t;
   }
 
+  // striped awning canvas, cached per colour and run direction: the stripes run
+  // down the slope (across the storefront), whichever axis the storefront is on
+  const awnMatCache = new Map();
+  function awningMat(hex, along) {
+    const key = hex + (along ? "a" : "b");
+    let m = awnMatCache.get(key); if (m) return m;
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d");
+    const base = "#" + ("000000" + shadeHex(hex, 0.85).toString(16)).slice(-6);
+    for (let i = 0; i < 8; i++) {
+      x.fillStyle = (i & 1) ? "#ece6d8" : base;
+      if (along) x.fillRect(0, i * 16, 128, 16); else x.fillRect(i * 16, 0, 16, 128);
+    }
+    x.fillStyle = "rgba(0,0,0,0.06)";                         // canvas weave
+    for (let i = 0; i < 128; i += 2) { x.fillRect(i, 0, 1, 128); x.fillRect(0, i, 128, 1); }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.encoding = THREE.sRGBEncoding;
+    // 8 stripes per texture across a 4 m awning -> two repeats = 25 cm stripes
+    t.repeat.set(along ? 1 : 2, along ? 2 : 1);
+    m = new THREE.MeshLambertMaterial({ map: t });
+    awnMatCache.set(key, m);
+    return m;
+  }
   // a real STOREFRONT: a BIG illuminated sign board carrying the shop NAME baked
   // right onto the facade (no freestanding sidewalk sign), plus a canopy awning.
   // `along` = the facade runs perpendicular to the door normal.
@@ -8398,19 +8295,32 @@
     // rotates about the FACADE-TANGENT axis (x for a ±z door, z for a ±x door —
     // the old axes were swapped, rolling the band sideways instead of pitching
     // its street edge down).
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(awnCol, { emissive: awnCol, ei: 0.4 }));
-    awn.position.set(di.x + onx * 0.75, DOORH, di.z + onz * 0.75);   // hugs the DOOR opening, not the floor line
-    awn.rotation[along ? "z" : "x"] = along ? 0.22 * di.nx : -0.22 * di.nz;   // street edge dips
+    // THE AWNING IS CANVAS. It was a 32 cm-thick slab glowing in the trade
+    // colour with a neon strip under its lip: a lit brick over every door in
+    // the city. Now: a striped canvas sheet pitched down to the street from a
+    // header rail on the facade, with a solid valance hanging off its front
+    // edge. Nothing on it glows; the street lights and the shop window light it.
+    const AW = DOORW + 2.4, AD = 1.25, PITCH = 0.35;
+    const cOff = Math.cos(PITCH) * AD / 2, cY = DOORH + 0.2;
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.025, AD)), awningMat(awnCol, along));
+    awn.position.set(di.x + onx * cOff, cY, di.z + onz * cOff);
+    awn.rotation[along ? "z" : "x"] = along ? PITCH * di.nx : -PITCH * di.nz;   // street edge dips
     b.group.add(awn);
-    // EMISSIVE NEON TRIM strip under the awning lip (cheap glowing accent line)
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.06, 0.1)), mat(accent, { emissive: accent, ei: 0.95 }));
-    trim.position.set(di.x + onx * 1.3, DOORH - 0.18, di.z + onz * 1.3); trim.castShadow = false;
-    b.group.add(trim);
+    const vOff = Math.cos(PITCH) * AD, vY = cY - Math.sin(PITCH) * AD / 2 - 0.12;
+    const val = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.24, 0.018)), mat(shadeHex(awnCol, 0.78)));
+    val.position.set(di.x + onx * vOff, vY, di.z + onz * vOff);
+    b.group.add(val);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW + 0.1, 0.07, 0.08)), mat(0x2b2e33));
+    rail.position.set(di.x + onx * 0.04, cY + Math.sin(PITCH) * AD / 2 + 0.02, di.z + onz * 0.04);
+    b.group.add(rail);
+    void accent;
     // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
     // (the trade colour) with the NAME painted on its street face. Board back
     // face rides 0.03 PROUD of the facade (real separation, no depth aliasing).
     const signH = 1.2, signY = FH + 0.45;
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, signH, 0.22)), mat(color, { emissive: color, ei: 0.9 }));
+    // the LIGHTBOX: a dark aluminium casing (the name panel below is the lit
+    // face). The whole 0.22 m box used to glow on every side like a lamp.
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, signH, 0.22)), mat(0x2b2e33));
     sign.position.set(di.x + onx * 0.14, signY, di.z + onz * 0.14);
     b.group.add(sign);
     // the painted name plate just proud of the board's street face. ONE plate:
@@ -8735,117 +8645,225 @@
   };
 
   // ---- PARKS WORTH CROSSING -------------------------------------------------
-  // WHY: a park was four cube trees on an empty rectangle — nothing answered
-  // why you'd cut through one. Now the park is the block's meeting spot: a
-  // stone FOUNTAIN at the heart (a landmark you can see down the street),
-  // BENCHES facing it from the four path mouths, crossing GRAVEL PATH decals
-  // (flat quads, the road-detail dm() pattern), a low HEDGE ring framing the
-  // lawn (broken at the path mouths so the cut-through stays obvious), and TWO
-  // tree silhouettes so the canopy reads varied. Everything is opaque
-  // shared-material geometry the batcher collapses; only the water keeps its
-  // one shared translucent material. Colliders: fountain basin + tree trunks
-  // ONLY — benches/hedges/paths stay brushable so chases never snag.
+  // A park is the block's meeting spot: a stone FOUNTAIN at the heart,
+  // BENCHES facing it from the four path mouths, crossing PATHS, a clipped
+  // HEDGE ring framing the lawn (broken at the path mouths so the cut-through
+  // stays obvious), a low steel RAILING at the lot edge, and four real trees.
+  //
+  // DE-SLOP (2026-09-27): it was all flat-colour primitives: a box bench (an
+  // iron slab under a plank), box hedges, a cube-stack "broadleaf", a lawn
+  // that was whatever lot pad the district happened to lay (downtown parks
+  // were grass-free concrete), gravel paths as flat beige quads with no
+  // texture, and a fountain whose water GLOWED (emissive 0.4, lit at noon)
+  // under a 16 cm BoxGeometry "jet". Now: a textured lawn with a stone edging
+  // kerb, gravel paths with steel edging strips, a paved plaza, a coped stone
+  // basin with dark (unlit-by-itself) water, a two-tier bowl with a water
+  // column and a falling curtain, the kerb kit's cast-iron slatted bench
+  // (city/props.js, the one outdoor-furniture vocabulary), clipped hedges
+  // with a rounded top in a leafy texture, and trees from the tree grammar +
+  // vegetation kit (bark bole with root flare, leaf-card crown).
+  // Colliders: fountain basin + tree trunks + the railing ONLY — benches,
+  // hedges and paths stay brushable so chases never snag.
   // rng budget: exactly the 12 draws the old pass made (worldgen stream safe).
-  let _parkWaterM = null;
-  function parkWaterMat() { return _parkWaterM || (_parkWaterM = new THREE.MeshLambertMaterial({ color: 0x7fd4ee, emissive: 0x2f7f9e, emissiveIntensity: 0.4, transparent: true, opacity: 0.78 })); }
+  let _parkWaterM = null, _parkFallM = null;
+  function parkWaterMat() {
+    return _parkWaterM || (_parkWaterM = new THREE.MeshLambertMaterial({ color: 0x2f5560, transparent: true, opacity: 0.86, depthWrite: false }));
+  }
+  function parkFallMat() {
+    return _parkFallM || (_parkFallM = new THREE.MeshLambertMaterial({ color: 0xcfe3ea, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
+  }
   const _parkMats = new Map();
-  function parkMat(c) { let m = _parkMats.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); _parkMats.set(c, m); } return m; }
+  // a Lambert keyed by colour + optional surface-library map (repeat 1: the
+  // geometry's own UVs are scaled to metres, so nothing stretches)
+  function parkMat(c, surf, o) {
+    const key = c + "|" + (surf || "") + "|" + ((o && o.off) || 0);
+    let m = _parkMats.get(key);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color: c });
+      const maps = surf && CBZ.surfaceMaps ? CBZ.surfaceMaps(surf, { repeat: 1 }) : null;
+      if (maps && maps.map) m.map = maps.map;
+      // tint colours are authored to multiply the map; with the library off
+      // (tier 0) stand in for the map's own luminance instead of glowing pale
+      else if (surf) m.color.multiplyScalar(surf === "grass" ? 0.42 : 0.6);
+      if (o && o.off) { m.polygonOffset = true; m.polygonOffsetFactor = -o.off; m.polygonOffsetUnits = -o.off * 2; }
+      _parkMats.set(key, m);
+    }
+    return m;
+  }
+  // scale a geometry's UVs so one texture repeat covers `metres`
+  function uvMetres(g, su, sv) {
+    const uv = g.attributes.uv; if (!uv) return g;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+    return g;
+  }
   function makePark(root, lot, rng) {
     const cx = lot.cx, cz = lot.cz, w = lot.w, d = lot.d;
-    function add(geo, c, x, y, z) {
-      const m = new THREE.Mesh(geo, parkMat(c));
+    const Y = 0.125;                                     // the lot pad the park stands on
+    function add(g, mat, x, y, z, o) {
+      const m = new THREE.Mesh(g, mat);
       m.position.set(x, y, z);
-      m.castShadow = false; m.receiveShadow = true; root.add(m);
+      if (o && o.rx != null) m.rotation.x = o.rx;
+      if (o && o.ry != null) m.rotation.y = o.ry;
+      m.castShadow = !!(o && o.cast); m.receiveShadow = true; root.add(m);
       return m;
     }
-    // GRAVEL PATHS: a cross of flat decals over the lawn (the lot grass plane
-    // sits at y≈0.10) meeting on a plaza disc under the fountain.
-    const GRAVEL = 0xb3a98a;
-    const pa = add(new THREE.PlaneGeometry(w - 2.5, 1.8), GRAVEL, cx, 0.125, cz); pa.rotation.x = -Math.PI / 2;
-    const pb = add(new THREE.PlaneGeometry(1.8, d - 2.5), GRAVEL, cx, 0.125, cz); pb.rotation.x = -Math.PI / 2;
-    const plaza = add(new THREE.CircleGeometry(Math.min(w, d) * 0.17, 20), 0xa9a082, cx, 0.13, cz); plaza.rotation.x = -Math.PI / 2;
-    // the FOUNTAIN: stone basin + a translucent water disc + a two-tier spout
-    const STONE = 0x9aa0a8;
-    const basin = add(new THREE.CylinderGeometry(1.7, 1.9, 0.6, 12), STONE, cx, 0.4, cz);
-    const water = new THREE.Mesh(new THREE.CircleGeometry(1.45, 16), parkWaterMat());
-    water.rotation.x = -Math.PI / 2; water.position.set(cx, 0.62, cz);
-    water.renderOrder = 1; root.add(water);
-    add(new THREE.CylinderGeometry(0.22, 0.3, 0.9, 8), STONE, cx, 1.0, cz);
-    add(new THREE.CylinderGeometry(0.55, 0.62, 0.16, 10), STONE, cx, 1.5, cz);
-    const jet = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.16), parkWaterMat());
-    jet.position.set(cx, 1.8, cz); jet.castShadow = false; root.add(jet);
-    CBZ.colliders.push({ minX: cx - 1.9, maxX: cx + 1.9, minZ: cz - 1.9, maxZ: cz + 1.9, ref: basin, noCam: true });
-    // BENCHES facing the fountain, set just OFF each path arm (frame + seat +
-    // back; decor only — no colliders, so nobody snags on park furniture)
-    const WOOD = 0x6b4a2a, IRON = 0x2a2f37;
-    const bo = Math.min(w, d) * 0.21;
-    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const bx = cx + sx * bo + (sx === 0 ? 1.7 : 0);
-      const bz = cz + sz * bo + (sz === 0 ? 1.7 : 0);
-      const lwX = sx !== 0 ? 0.55 : 1.8, ldZ = sx !== 0 ? 1.8 : 0.55;
-      add(new THREE.BoxGeometry(lwX * 0.9, 0.42, ldZ * 0.9), IRON, bx, 0.22, bz);
-      add(new THREE.BoxGeometry(lwX, 0.12, ldZ), WOOD, bx, 0.5, bz);
-      add(new THREE.BoxGeometry(sx !== 0 ? 0.12 : 1.8, 0.55, sx !== 0 ? 1.8 : 0.12), WOOD,
-        bx + sx * 0.3, 0.82, bz + sz * 0.3);
+    const flat = (W, D, tile) => { const g = new THREE.PlaneGeometry(W, D); uvMetres(g, W / tile, D / tile); return g; };
+    const STONE = 0xb9b2a3, EDGE = 0x8f8a80;
+    // LAWN inside a stone edging kerb (whatever the district's lot pad is)
+    const lw = w - 1.6, ld = d - 1.6;
+    add(flat(lw, ld, 3.2), parkMat(0x9fc07e, "grass", { off: 1 }), cx, Y + 0.012, cz, { rx: -Math.PI / 2 });
+    for (const s of [-1, 1]) {
+      add(new THREE.BoxGeometry(lw + 0.3, 0.1, 0.15), parkMat(EDGE), cx, Y + 0.05, cz + s * (ld / 2 + 0.075));
+      add(new THREE.BoxGeometry(0.15, 0.1, ld), parkMat(EDGE), cx + s * (lw / 2 + 0.075), Y + 0.05, cz);
     }
-    // LOW HEDGE RING framing the lawn, broken at the four path mouths
-    const HEDGE = 0x2f7a3f, hw = w / 2 - 1.2, hd = d / 2 - 1.2, gap = 2.4;
+    // PATHS: gravel with steel edging strips, meeting on a paved plaza
+    const PW = 2.2, GRAVEL = 0xdac7a0;          // tan decomposed granite
+    add(flat(lw, PW, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
+    add(flat(PW, ld, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
+    const edgeM = parkMat(0x3a3834);
+    for (const s of [-1, 1]) {
+      add(new THREE.BoxGeometry(lw, 0.03, 0.035), edgeM, cx, Y + 0.02, cz + s * PW / 2);
+      add(new THREE.BoxGeometry(0.035, 0.03, ld), edgeM, cx + s * PW / 2, Y + 0.02, cz);
+    }
+    const plazaR = Math.min(w, d) * 0.17;
+    const plazaG = new THREE.CircleGeometry(plazaR, 28);
+    uvMetres(plazaG, plazaR * 2 / 1.2, plazaR * 2 / 1.2);
+    add(plazaG, parkMat(0xcfc8b8, "concrete", { off: 3 }), cx, Y + 0.022, cz, { rx: -Math.PI / 2 });
+    const ringG = new THREE.RingGeometry(plazaR - 0.02, plazaR + 0.18, 28);
+    add(ringG, parkMat(EDGE, null, { off: 4 }), cx, Y + 0.024, cz, { rx: -Math.PI / 2 });
+
+    // the FOUNTAIN: coped stone basin, dark water, two-tier bowl, a column of
+    // water from the top and a thin curtain falling off the bowl's lip
+    const stoneM = parkMat(STONE, "concrete");
+    const BR = 1.9, BH = 0.5;
+    const outer = new THREE.CylinderGeometry(BR, BR + 0.05, BH, 32, 1, true); uvMetres(outer, 2 * Math.PI * BR / 1.5, BH / 1.5);
+    add(outer, stoneM, cx, Y + BH / 2, cz, { cast: true });
+    const inner = new THREE.CylinderGeometry(BR - 0.26, BR - 0.26, BH, 32, 1, true); uvMetres(inner, 2 * Math.PI * BR / 1.5, BH / 1.5);
+    add(inner, parkMat(0x9d978a, "concrete"), cx, Y + BH / 2, cz).material.side = THREE.BackSide;
+    const cope = new THREE.RingGeometry(BR - 0.3, BR + 0.08, 32); uvMetres(cope, 2, 2);
+    add(cope, stoneM, cx, Y + BH + 0.005, cz, { rx: -Math.PI / 2 });
+    add(new THREE.CircleGeometry(BR - 0.26, 28), parkMat(0x3b4644), cx, Y + 0.08, cz, { rx: -Math.PI / 2 });   // basin floor
+    const water = add(new THREE.CircleGeometry(BR - 0.26, 28), parkWaterMat(), cx, Y + BH - 0.09, cz, { rx: -Math.PI / 2 });
+    water.renderOrder = 1;
+    add(new THREE.CylinderGeometry(0.2, 0.28, 0.95, 12), stoneM, cx, Y + 0.475, cz, { cast: true });
+    const bowlY = Y + 0.95;
+    add(new THREE.CylinderGeometry(0.78, 0.26, 0.24, 20), stoneM, cx, bowlY + 0.12, cz, { cast: true });
+    add(new THREE.CylinderGeometry(0.12, 0.16, 0.45, 10), stoneM, cx, bowlY + 0.46, cz);
+    add(new THREE.CylinderGeometry(0.34, 0.12, 0.12, 14), stoneM, cx, bowlY + 0.72, cz);
+    const bowlWater = add(new THREE.CircleGeometry(0.72, 20), parkWaterMat(), cx, bowlY + 0.225, cz, { rx: -Math.PI / 2 });
+    bowlWater.renderOrder = 1;
+    const col = add(new THREE.CylinderGeometry(0.035, 0.05, 0.42, 8, 1, true), parkFallMat(), cx, bowlY + 0.98, cz);
+    col.renderOrder = 2;
+    const curtainH = bowlY + 0.2 - (Y + BH - 0.09);
+    const curtain = add(new THREE.CylinderGeometry(0.8, 0.86, curtainH, 24, 1, true), parkFallMat(), cx, (Y + BH - 0.09) + curtainH / 2, cz);
+    curtain.renderOrder = 2;
+    CBZ.colliders.push({ minX: cx - BR, maxX: cx + BR, minZ: cz - BR, maxZ: cz + BR, ref: null, noCam: true, noBreach: true, y0: Y, y1: Y + BH + 0.05 });
+
+    // BENCHES facing the fountain, set just off each path arm (kerb kit bench)
+    const KK = CBZ.kerbKit ? (function () { try { return CBZ.kerbKit(); } catch (e) { return null; } })() : null;
+    const VCM = CBZ.streetHW && CBZ.streetHW.hardwareMaterial ? CBZ.streetHW.hardwareMaterial(false) : null;
+    const bo = Math.min(w, d) * 0.23;
+    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      // beside the path (1.9 m off its centre line), on the lawn, facing the fountain
+      const bx = cx + sx * bo + (sx === 0 ? 2.0 : 0);
+      const bz = cz + sz * bo + (sz === 0 ? 2.0 : 0);
+      const face = Math.atan2(-sx, -sz);                 // +z of the bench toward the fountain
+      if (KK && KK.bench && VCM) {
+        for (const p of KK.bench.parts) add(p.geo, VCM, bx, Y + 0.012, bz, { ry: face, cast: true });
+        const seatReg = CBZ.propRegisterSeat || CBZ.roomSeatAnchor;
+        if (seatReg) {
+          const tx = Math.cos(face), tz = -Math.sin(face);
+          for (const l of [-0.6, 0, 0.6]) seatReg(bx + tx * l, Y + 0.012, bz + tz * l, face, "bench", lot, { cushion: 0.46, floorBelow: 0 });
+        }
+      }
+    }
+    // HEDGES: clipped box with a rounded top, leafy texture, broken at the mouths
+    const hedgeM = parkMat(0x6f9a5a, "grass");
+    const hw = lw / 2 - 0.9, hd = ld / 2 - 0.9, gap = 2.6;
+    function hedge(len, x, z, alongX) {
+      const body = new THREE.BoxGeometry(alongX ? len : 0.6, 0.55, alongX ? 0.6 : len);
+      uvMetres(body, 1.5, 1.5);
+      add(body, hedgeM, x, Y + 0.275, z, { cast: true });
+      const top = new THREE.CylinderGeometry(0.3, 0.3, len, 10, 1, false, -Math.PI / 2, Math.PI);
+      uvMetres(top, 1.5, len / 1.2);
+      // the half-cylinder is the +z half about +y; lay it down so its axis
+      // runs along the hedge and the round side faces up
+      top.rotateX(-Math.PI / 2);                 // axis -> z, round side -> +y
+      if (alongX) top.rotateY(Math.PI / 2);      // axis -> x
+      add(top, hedgeM, x, Y + 0.55, z, { cast: true });
+    }
     for (const s of [-1, 1]) {
       const L = hw - gap / 2, Ld = hd - gap / 2;
       for (const e of [-1, 1]) {
-        add(new THREE.BoxGeometry(L, 0.6, 0.5), HEDGE, cx + e * (gap / 2 + L / 2), 0.42, cz + s * hd);
-        add(new THREE.BoxGeometry(0.5, 0.6, Ld), HEDGE, cx + s * hw, 0.42, cz + e * (gap / 2 + Ld / 2));
+        hedge(L, cx + e * (gap / 2 + L / 2), cz + s * hd, true);
+        hedge(Ld, cx + s * hw, cz + e * (gap / 2 + Ld / 2), false);
       }
     }
-    // TWO TREE VARIANTS in the lawn quadrants (clear of paths/fountain):
-    // a conifer (cone canopy) and a broadleaf (double-cube canopy), alternating.
-    // TREES_V2 (config.js): the conifer's single cone becomes a 2-tier stack
-    // with a deeper trunk embed (0.45 instead of 0.2), canopy widths take a
-    // per-tree hash01 jitter (the 12-draw rng budget above is untouched), the
-    // trunk base sinks 0.15 under the lawn plane (y≈0.10), and every park
-    // tree registers with world/treeaudit.js. The extra tier is one more
-    // shared-material mesh the batcher collapses — zero draw-call change.
-    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
-    if (TREES2 && makePark._regRoot !== root && CBZ.treeAuditResetSite) {
+    // RAILING at the lot edge: 0.75 m steel pickets on two rails, gaps at the
+    // path mouths, one merged vertex-coloured mesh per park
+    if (CBZ.kerbBake && VCM) {
+      try {
+        const B = CBZ.kerbBake(), IRON = 0x24272a;
+        const fx = w / 2 - 0.35, fz = d / 2 - 0.35, open = 2.6, H = 0.8;
+        const runs = [];
+        for (const s of [-1, 1]) {
+          runs.push([-fx, s * fz, -open / 2, s * fz], [open / 2, s * fz, fx, s * fz]);
+          runs.push([s * fx, -fz, s * fx, -open / 2], [s * fx, open / 2, s * fx, fz]);
+        }
+        for (const r of runs) {
+          const x0 = r[0], z0 = r[1], x1 = r[2], z1 = r[3];
+          const len = Math.hypot(x1 - x0, z1 - z0), ax = (x1 - x0) / len, az = (z1 - z0) / len;
+          const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, ry = Math.atan2(ax, az);
+          B.box(0.035, 0.035, len, IRON, mx, 0.16, mz, 0, ry, 0);
+          B.box(0.045, 0.035, len, IRON, mx, H - 0.04, mz, 0, ry, 0);
+          const n = Math.floor(len / 0.14);
+          for (let k = 0; k <= n; k++) {
+            const t = k / n, px = x0 + (x1 - x0) * t, pz = z0 + (z1 - z0) * t;
+            B.box(0.016, H - 0.02, 0.016, IRON, px, (H - 0.02) / 2, pz);
+          }
+          for (const t of [0, 1]) B.box(0.06, H + 0.08, 0.06, IRON, x0 + (x1 - x0) * t, (H + 0.08) / 2, z0 + (z1 - z0) * t);
+          const cxr = cx + mx, czr = cz + mz, hx = Math.abs(ax) * len / 2 + 0.05, hz = Math.abs(az) * len / 2 + 0.05;
+          CBZ.colliders.push({ minX: cxr - hx, maxX: cxr + hx, minZ: czr - hz, maxZ: czr + hz, ref: null, noCam: true, noBreach: true, y0: Y, y1: Y + H });
+        }
+        const rail = new THREE.Mesh(B.geo(), VCM);
+        rail.position.set(cx, Y, cz); rail.castShadow = true; rail.receiveShadow = true; root.add(rail);
+      } catch (e) { /* a railing is never worth a failed park */ }
+    }
+
+    // TREES in the lawn quadrants (clear of paths/fountain), from the tree
+    // grammar + vegetation kit. 3 rng draws per tree, as before.
+    const VK = CBZ.vegetationKit;
+    const GRAM = !!(CBZ.treeCrownGeo && CBZ.treeTrunkGeo);
+    const REG = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    if (REG && makePark._regRoot !== root && CBZ.treeAuditResetSite) {
       CBZ.treeAuditResetSite("park"); makePark._regRoot = root;   // reset once per world build
     }
+    const trunkM = VK ? VK.material("wood", 0x86674a) : parkMat(0x6b4a2a);
+    const leafMs = VK ? [VK.material("foliage", 0x5f9a4c), VK.material("foliage", 0x6fa452)] : [parkMat(0x3f7d3a), parkMat(0x4f9942)];
     let vi = 0;
     for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       const x = cx + qx * w * 0.28 + (rng() - 0.5) * 2.0;
       const z = cz + qz * d * 0.28 + (rng() - 0.5) * 2.0;
-      const th = 2.2 + rng() * 1.0;
-      const hv = TREES2 && CBZ.hash01 ? CBZ.hash01(x, z, 9103) : 0.5;   // per-tree variety, zero rng draws
-      // trunk: V2 grows it 0.15 downward (base −0.05, under the lawn top at
-      // 0.10) while the top stays at th + 0.1 so the canopy anchors hold.
-      const trunkH = TREES2 ? th + 0.15 : th;
-      const trunk = add(new THREE.BoxGeometry(0.45, trunkH, 0.45), 0x6b4a2a, x, TREES2 ? th / 2 + 0.025 : th / 2 + 0.1, z);
-      trunk.castShadow = true;
-      // noBreach: a plaza tree is a 0.6 m square box with a tall trunk mesh on
-      // it and no y-band — the exact profile carveHole's derived-band path
-      // mistakes for a wall panel (see the eligibility loop's POST_ASPECT note,
-      // and city/props.js:solidCollider for the filmed lamp-post case).
-      CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true, noBreach: true });
-      const parts = TREES2 ? [x - 0.225, -0.05, z - 0.225, x + 0.225, th + 0.1, z + 0.225] : null;
-      if (vi++ % 2 === 0) {
-        if (TREES2) {
-          const r1 = 1.5 + hv * 0.5, r2 = 0.95 + hv * 0.3;
-          add(new THREE.ConeGeometry(r1, 2.6, 7), 0x35854a, x, th + 0.95, z).castShadow = true;
-          add(new THREE.ConeGeometry(r2, 1.9, 7), 0x2f7a44, x, th + 2.6, z).castShadow = true;
-          parts.push(x - r1, th - 0.35, z - r1, x + r1, th + 2.25, z + r1);
-          parts.push(x - r2, th + 1.65, z - r2, x + r2, th + 3.55, z + r2);
-        } else {
-          add(new THREE.ConeGeometry(1.6, 3.4, 7), 0x35854a, x, th + 1.6, z).castShadow = true;
-        }
+      const th = 2.2 + rng() * 1.0;                     // trunk height to the crown
+      const hv = CBZ.hash01 ? CBZ.hash01(x, z, 9103) : 0.5;
+      const conifer = (vi++ % 2 === 0);
+      const trunkH = th + 1.0;
+      const r0 = conifer ? 1.7 + hv * 0.4 : 2.1 + hv * 0.6, h0 = conifer ? 4.4 : 3.6 + hv * 0.8;
+      if (GRAM) {
+        const tg = CBZ.treeTrunkGeo({ rTop: 0.12, rBase: 0.22, h: trunkH, seg: 7, roots: 5, rise: 0.25, dip: 0.05, spread: 1.8,
+          flare: 1.45, uvRepeat: 3, site: "park" });
+        const t = add(tg, trunkM, x, Y, z, { cast: true, ry: hv * 6.28 });
+        const cg = CBZ.treeCrownGeo({ tiers: conifer ? 3 : 2, r: r0, h: h0, seg: 7, taper: 0.66, site: "park", leaf: !!VK, cards: conifer ? 16 : 18, seed: (hv * 1000) | 0 });
+        const c = add(cg, leafMs[vi % 2], x, Y + th - 0.3, z, { cast: true, ry: hv * 6.28 });
+        if (VK && cg.userData && cg.userData.leafCards && VK.depthMaterial) c.customDepthMaterial = VK.depthMaterial("foliage");
+        CBZ.colliders.push({ minX: x - 0.28, maxX: x + 0.28, minZ: z - 0.28, maxZ: z + 0.28, ref: t, noCam: true, noBreach: true });
       } else {
-        const b1 = TREES2 ? 2.3 + hv * 0.7 : 2.6, b2 = TREES2 ? 1.5 + hv * 0.5 : 1.7;
-        add(new THREE.BoxGeometry(b1, 2.2, b1), 0x3f9a4f, x, th + 0.9, z).castShadow = true;
-        add(new THREE.BoxGeometry(b2, 1.4, b2), 0x4cab5c, x, th + 2.3, z).castShadow = true;
-        if (parts) {
-          parts.push(x - b1 / 2, th - 0.2, z - b1 / 2, x + b1 / 2, th + 2.0, z + b1 / 2);
-          parts.push(x - b2 / 2, th + 1.6, z - b2 / 2, x + b2 / 2, th + 3.0, z + b2 / 2);
-        }
+        const t = add(new THREE.CylinderGeometry(0.16, 0.24, trunkH, 7), trunkM, x, Y + trunkH / 2, z, { cast: true });
+        add(new THREE.ConeGeometry(r0, h0, 8), leafMs[vi % 2], x, Y + th + h0 / 2 - 0.3, z, { cast: true });
+        CBZ.colliders.push({ minX: x - 0.28, maxX: x + 0.28, minZ: z - 0.28, maxZ: z + 0.28, ref: t, noCam: true, noBreach: true });
       }
-      if (parts) CBZ.treeRegisterTree("park", 0.1, parts);
+      if (REG) CBZ.treeRegisterTree("park", Y, [x - 0.22, Y - 0.05, z - 0.22, x + 0.22, Y + trunkH, z + 0.22,
+        x - r0, Y + th - 0.3, z - r0, x + r0, Y + th - 0.3 + h0, z + r0]);
     }
   }
 

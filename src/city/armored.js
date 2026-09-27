@@ -371,15 +371,23 @@
       const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
       const fy = (CBZ.floorAt ? CBZ.floorAt(px, pz) : 0) || 0;
       const grp = new THREE.Group();
-      const bag = new THREE.Mesh(DUFFEL_GEO, DUFFEL_MAT);
-      bag.position.y = 0.18; grp.add(bag);
-      // a couple of note bricks spilling out
-      for (let k = 0; k < 3; k++) {
-        const note = new THREE.Mesh(CASH_GEO, CASH_MAT);
-        note.position.set((rng() - 0.5) * 0.5, 0.1 + k * 0.05, (rng() - 0.5) * 0.5);
-        note.rotation.y = rng() * 6.28; grp.add(note);
+      // an open crew duffel with banded stacks spilled beside it (the real
+      // assets from city/itemassets.js); the boxes are only the degrade
+      const realBag = CBZ.itemAssetBaked ? CBZ.itemAssetBaked(null, null, null, { kind: "moneybag", canvas: 0x2b2f36, flash: 0xd9a520 }) : null;
+      const realCash = CBZ.itemAssetBaked ? CBZ.itemAssetBaked(null, null, null, { kind: "cashpile", amount: 6000 }) : null;
+      if (realBag && realCash) {
+        grp.add(realBag);
+        realCash.position.set(0.34, 0, 0.1); realCash.rotation.y = rng() * 6.28; grp.add(realCash);
+      } else {
+        const bag = new THREE.Mesh(DUFFEL_GEO, DUFFEL_MAT);
+        bag.position.y = 0.18; grp.add(bag);
+        for (let k = 0; k < 3; k++) {
+          const note = new THREE.Mesh(CASH_GEO, CASH_MAT);
+          note.position.set((rng() - 0.5) * 0.5, 0.1 + k * 0.05, (rng() - 0.5) * 0.5);
+          note.rotation.y = rng() * 6.28; grp.add(note);
+        }
       }
-      grp.position.set(px, fy + 0.04, pz);
+      grp.position.set(px, fy + (realBag ? 0 : 0.04), pz);
       grp.rotation.y = rng() * 6.28;
       if (root) root.add(grp);
       const amt = (i === piles - 1) ? left : per;

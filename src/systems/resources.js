@@ -138,16 +138,86 @@
       },
     });
   }
+  // the scrap pile, authored in metres, footprint inside the def's 0.6 x 0.5
+  // half-extents, base on y = 0. Built and baked once.
+  let _scrapGeo;
+  function scrapPileGeo() {
+    if (_scrapGeo !== undefined) return _scrapGeo;
+    _scrapGeo = null;
+    if (!CBZ.itemAssetBakeGroup || !CBZ.itemAssetVCMat) return null;
+    try {
+      const grp = new THREE.Group();
+      const part = function (geo, hex, x, y, z, rx, ry, rz, sx, sy, sz) {
+        const m = new THREE.Mesh(geo, cmat(hex));
+        m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0);
+        if (sx) m.scale.set(sx, sy || sx, sz || sx);
+        grp.add(m); return m;
+      };
+      const B = function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
+      const Cy = function (r, h, seg) { return new THREE.CylinderGeometry(r, r, h, seg || 10); };
+      // a steel drum lying on its side, dented (squashed), faded paint + rims
+      part(Cy(0.21, 0.56, 14), 0x3f5c74, 0.18, 0.19, -0.14, 0, 0.35, Math.PI / 2, 1, 1, 0.86);
+      part(Cy(0.215, 0.03, 14), 0x2c3a44, 0.18 - Math.cos(0.35) * 0.20, 0.19, -0.14 + Math.sin(0.35) * 0.20, 0, 0.35, Math.PI / 2, 1, 1, 0.86);
+      part(Cy(0.215, 0.03, 14), 0x2c3a44, 0.18 + Math.cos(0.35) * 0.20, 0.19, -0.14 - Math.sin(0.35) * 0.20, 0, 0.35, Math.PI / 2, 1, 1, 0.86);
+      // a rusted corrugated sheet slumped over it, ridges along its length
+      const sheet = new THREE.Group();
+      sheet.position.set(0.02, 0.24, 0.02); sheet.rotation.set(0.10, -0.12, 0.30); grp.add(sheet);
+      const sm = function (geo, hex, x, y, z) { const m = new THREE.Mesh(geo, cmat(hex)); m.position.set(x, y, z); sheet.add(m); };
+      sm(B(0.96, 0.012, 0.62), 0x7b4a2c, 0, 0, 0);
+      for (let i = 0; i < 6; i++) sm(B(0.96, 0.022, 0.04), i % 2 ? 0x6a3f26 : 0x8a5634, 0, 0.012, -0.26 + i * 0.104);
+      // an old tyre lying flat, and its rim well
+      part(new THREE.TorusGeometry(0.25, 0.085, 8, 18), 0x1d1e20, -0.30, 0.085, 0.20, Math.PI / 2, 0, 0);
+      part(Cy(0.17, 0.02, 14), 0x2a2b2e, -0.30, 0.02, 0.20);
+      // pipe and angle iron
+      part(Cy(0.028, 1.02, 8), 0x6d7174, -0.05, 0.03, 0.34, 0, 0.18, Math.PI / 2);
+      part(Cy(0.022, 0.84, 8), 0x7e5a3e, 0.10, 0.07, 0.30, 0.1, -0.30, Math.PI / 2 - 0.08);
+      part(B(0.9, 0.04, 0.004), 0x5f5850, 0.05, 0.02, -0.38, 0, 0.08, 0);
+      part(B(0.9, 0.004, 0.04), 0x5f5850, 0.05, 0.002, -0.36, 0, 0.08, 0);
+      // a broken pallet leaning into the back of the pile
+      const pal = new THREE.Group();
+      pal.position.set(-0.36, 0.22, -0.20); pal.rotation.set(0, 0.4, 0.95); grp.add(pal);
+      const pm = function (geo, hex, x, y, z) { const m = new THREE.Mesh(geo, cmat(hex)); m.position.set(x, y, z); pal.add(m); };
+      for (let i = 0; i < 4; i++) if (i !== 2) pm(B(0.09, 0.018, 0.62), i % 2 ? 0x8b7556 : 0x9a8462, -0.15 + i * 0.1, 0, 0);
+      pm(B(0.40, 0.06, 0.06), 0x7a6548, 0, -0.04, -0.24);
+      pm(B(0.40, 0.06, 0.06), 0x7a6548, 0, -0.04, 0.24);
+      _scrapGeo = CBZ.itemAssetBakeGroup(grp);
+      // the loose parts were only scaffolding for the bake
+      grp.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+      if (_scrapGeo) {
+        _scrapGeo.computeBoundingBox();
+        const lo = _scrapGeo.boundingBox.min.y;
+        _scrapGeo.translate(0, -lo - 0.01, 0);                   // sit on the ground, a hair bedded in
+        _scrapGeo.computeBoundingBox(); _scrapGeo.computeBoundingSphere();
+      }
+    } catch (e) { _scrapGeo = null; }
+    return _scrapGeo;
+  }
   if (A && !A.has("harvest-scrap")) {
     A.define("harvest-scrap", {
       footprint: { hx: 0.6, hz: 0.5 }, clearance: 0.3, y1: 0.7, zone: "nature",
       instanceable: true,
-      geom: function () { const bg = new THREE.BoxGeometry(1.1, 0.55, 0.8); bg.translate(0, 0.275, 0); return bg; },
-      material: function () { return cmat(0x6b5a4a); },
+      // A SCRAP PILE IS SCRAP. It was one 1.1 x 0.55 x 0.8 brown box — thirty
+      // identical cardboard-coloured cubes along the city's sidewalks with a
+      // "hit it for Scrap" verb on them. Now it is the thing a scrapper picks
+      // through: a rusted corrugated sheet slumped over a lying drum, an old
+      // tyre, lengths of pipe and angle iron, a broken pallet. Still ONE
+      // instanced draw call: the parts are baked into a single vertex-coloured
+      // geometry by city/itemassets.js's bake (the box stays as the degrade).
+      geom: function () {
+        const baked = scrapPileGeo();
+        if (baked) return baked;
+        const bg = new THREE.BoxGeometry(1.1, 0.55, 0.8); bg.translate(0, 0.275, 0); return bg;
+      },
+      material: function () {
+        return (scrapPileGeo() && CBZ.itemAssetVCMat) ? CBZ.itemAssetVCMat() : cmat(0x6b5a4a);
+      },
       build: function (ctx) {
         const s = ctx.scale || 1;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(1.1 * s, 0.55 * s, 0.8 * s), cmat(0x6b5a4a));
-        m.position.y = 0.275 * s; ctx.group.add(m);
+        const geo = scrapPileGeo();
+        const m = geo ? new THREE.Mesh(geo, CBZ.itemAssetVCMat()) : new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 0.8), cmat(0x6b5a4a));
+        if (!geo) m.position.y = 0.275;
+        m.scale.setScalar(s); if (!geo) m.position.y *= s;
+        ctx.group.add(m);
       },
     });
   }

@@ -1,25 +1,47 @@
 /* ============================================================
    city/gunstore.js — the WALK-IN gun store: the wall IS the menu.
 
-   WHY: the AK shipped with a price in a text menu — but a status gun
-   deserves a counter, a wall, and a clerk. Walking into Ammu-Nation,
-   SEEING the actual AK hanging behind the register, and walking out
-   holding it IS the purchase fantasy; menus are for groceries. So the
-   guns lot's existing shell (buildings.js stamps lot.building.gunstore)
-   gets the city's real purchasable stock hung as the REAL appearance
-   models (CBZ.buildActorWeapon → the same wood-and-steel AK every NPC
-   carries), each with a price tag. Walk up, look at the piece, [E] —
-   cash leaves, the gun's in your hands with starter rounds, and the
-   rack shows a SOLD gap until the restock truck refills it. Pistols
-   live under counter glass; ammo crates sell over the counter. The
-   clerk is the SAME vendor ped peds.js already posts (so "Rob the
-   register" and the counter menu keep working untouched).
+   WHY: a status gun deserves a counter, a wall, and a clerk. Walking into
+   the store, SEEING the actual AK standing in the rack behind the register,
+   and walking out holding it IS the purchase fantasy; menus are for
+   groceries. The guns lot's shell (buildings.js stamps lot.building.gunstore)
+   gets the city's real purchasable stock as the REAL appearance models
+   (CBZ.buildActorWeapon, the same wood-and-steel AK every NPC carries).
+   Walk up, look at the piece, [E]: cash leaves, the gun's in your hands with
+   starter rounds, and the rack shows an empty yoke until the restock truck
+   refills it. The clerk is the SAME vendor ped peds.js already posts.
 
-   Prices/stock come from cityEcon (buyPrice/stockFor) — ONE source of
-   truth, zero duplicated price tables. Perf: built once per city on a
-   single group, shared fixture materials, and the whole display is
-   visibility-gated by distance so the ~dozen gun models cost nothing
-   until you're actually shopping. Mode-gated + headless-guarded.
+   WHAT THE ROOM IS (de-slop pass, 2026-09-27). Everything here is built
+   from parts at real dimensions and merged per material (one draw call per
+   finish, see the STORE FIXTURE KIT below):
+     • the back wall: a drawer base cabinet with a felt butt tray, a slatwall
+       panel above it in trim, and a long-gun rack where every rifle stands
+       muzzle-up, leaning 3 degrees into its own padded barrel yoke, with a
+       card price tag tied to the yoke. An LED bar light over the rack.
+     • the counter: clad in charcoal laminate with a kick plinth, a
+       customer-face trim line and a stone worktop; a countertop showcase
+       (aluminium frame, glass on five faces, sliding back doors, felt deck,
+       LED strip under the lid) with the handguns lying on their sides;
+       a POS terminal, receipt printer and card reader at the register end;
+       an open hard case of C4 charges at the far end.
+     • the ammo gondola at the counter's end: shelving with price-channel
+       lips, printed boxes of rounds two deep, steel ammo cans below.
+     • an open wooden grenade crate with a divider tray of real frags.
+     • the armoury: character rigs in studio cream on round display bases,
+       wearing armor.js's real kit.
+     • the gunsmith bench: butcher-block top on a steel frame, pegboard with
+       tools, a bench vise, a cleaning mat and an articulated lamp.
+   Deleted as slop: the flat 12 cm-proud pegboard box, the glowing green
+   "trade accent" strip, the glowing glass box and green under-glow slab,
+   two olive boxes posing as ammo, the olive boxes under the frags and the
+   C4, a four-box bench with a GLOWING vise, and every floating label sprite.
+   Rifles, carbines, SMGs and the LMG used to be sorted into the COUNTER
+   CASE (only weaponSlot "long" went on the wall), so an AK and an M249 lay
+   in a 36 cm glass box: only pistol/utility pieces go under glass now.
+
+   Prices/stock come from cityEcon (buyPrice/stockFor). Perf: built once per
+   city on a single group; fixtures merge to a handful of meshes; the whole
+   display is visibility-gated by distance.
 ============================================================ */
 (function () {
   "use strict";
@@ -28,12 +50,308 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
+  /* ==========================================================================
+     THE STORE FIXTURE KIT — shared by gunstore.js, jewelry.js, pawnshop.js
+     (gunstore.js loads first; the other two build lazily at runtime, so the
+     kit is always there by the time they ask for it).
+
+     A Kit collects primitives (box / cyl / torus / sphere, or a whole model
+     "absorbed" from CBZ.itemAsset) in a local FRAME (origin + yaw), bakes each
+     one's transform and a flat vertex colour into its geometry, and build()
+     merges everything per FINISH into one mesh:
+        solid  Lambert, vertex colour     (wood, laminate, card, felt, paint)
+        metal  Phong, vertex colour       (steel, chrome, aluminium, brass)
+        gloss  Phong, low specular        (stone worktops, lacquer)
+        glass  Phong, clear, no depth write
+        glow   Basic, vertex colour       (ONLY lamps, LED strips, screens)
+     So a whole store's fixtures cost ~5 draw calls. Frame convention used by
+     every caller: local +X runs along the wall/counter TANGENT, local +Z
+     points toward the CUSTOMER (into the room), y is absolute world height.
+     ========================================================================== */
+  if (!CBZ.storeFixtureKit) (function () {
+    const MAT = {};
+    function kitMat(kind) {
+      let m = MAT[kind];
+      if (m) return m;
+      if (kind === "metal") m = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x8a9098, shininess: 60 });
+      else if (kind === "gloss") m = new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0x404040, shininess: 38 });
+      else if (kind === "glass") m = new THREE.MeshPhongMaterial({ color: 0xdcecf2, specular: 0xffffff, shininess: 140, transparent: true, opacity: 0.14, depthWrite: false });
+      else if (kind === "glow") m = new THREE.MeshBasicMaterial({ vertexColors: true });
+      else m = new THREE.MeshLambertMaterial({ vertexColors: true });
+      m._shared = true;
+      MAT[kind] = m;
+      return m;
+    }
+    const _m = new THREE.Matrix4(), _w = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+    const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
+    const KEEP = { position: 1, normal: 1, uv: 1 };
+
+    function Kit() { this.F = new THREE.Matrix4(); this.parts = {}; this.yaw = 0; this.ox = 0; this.oz = 0; }
+    // local frame: origin (x, y, z) and a yaw about +Y
+    Kit.prototype.frame = function (x, y, z, yaw) {
+      this.F.makeRotationY(yaw || 0);
+      this.F.setPosition(x || 0, y || 0, z || 0);
+      this.yaw = yaw || 0; this.ox = x || 0; this.oz = z || 0;
+      return this;
+    };
+    // frame-local (x, z) → world {x, z}
+    Kit.prototype.world = function (x, z) {
+      const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+      return { x: this.ox + x * c + z * s, z: this.oz - x * s + z * c };
+    };
+    Kit.prototype.put = function (geo, matrix, color, kind, own) {
+      const gg = geo.index ? geo.toNonIndexed() : geo.clone();   // non-indexed: ANY primitive merges with any other
+      if (own) geo.dispose();
+      gg.applyMatrix4(matrix);
+      const names = Object.keys(gg.attributes);
+      for (let i = 0; i < names.length; i++) if (!KEEP[names[i]]) gg.deleteAttribute(names[i]);
+      const n = gg.attributes.position.count;
+      if (!gg.attributes.normal) gg.computeVertexNormals();
+      if (!gg.attributes.uv) gg.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+      _c.setHex(color == null ? 0xffffff : color);
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = _c.r; col[i * 3 + 1] = _c.g; col[i * 3 + 2] = _c.b; }
+      gg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      gg.morphAttributes = {};
+      const k = kind || "solid";
+      (this.parts[k] || (this.parts[k] = [])).push(gg);
+      return this;
+    };
+    Kit.prototype.push = function (geo, color, kind, x, y, z, rx, ry, rz, sx, sy, sz) {
+      _e.set(rx || 0, ry || 0, rz || 0); _q.setFromEuler(_e);
+      _p.set(x || 0, y || 0, z || 0); _s.set(sx || 1, sy || 1, sz || 1);
+      _m.compose(_p, _q, _s); _m.premultiply(this.F);
+      return this.put(geo, _m, color, kind, true);
+    };
+    Kit.prototype.box = function (x, y, z, w, h, d, color, kind, rx, ry, rz) {
+      return this.push(new THREE.BoxGeometry(w, h, d), color, kind, x, y, z, rx, ry, rz);
+    };
+    Kit.prototype.cyl = function (x, y, z, rt, rb, h, color, kind, rx, ry, rz, seg) {
+      return this.push(new THREE.CylinderGeometry(rt, rb, h, seg || 12), color, kind, x, y, z, rx, ry, rz);
+    };
+    Kit.prototype.torus = function (x, y, z, r, tube, color, kind, rx, ry, rz, arc, seg) {
+      return this.push(new THREE.TorusGeometry(r, tube, 6, seg || 18, arc == null ? Math.PI * 2 : arc), color, kind, x, y, z, rx, ry, rz);
+    };
+    Kit.prototype.sphere = function (x, y, z, r, color, kind, sx, sy, sz) {
+      return this.push(new THREE.SphereGeometry(r, 12, 9), color, kind, x, y, z, 0, 0, 0, sx, sy, sz);
+    };
+    // Bake a whole model (CBZ.itemAsset / buildActorWeapon) into the kit:
+    // for static decor that is never bought off its spot one at a time.
+    Kit.prototype.absorb = function (obj, x, y, z, rx, ry, rz, sc) {
+      if (!obj) return this;
+      obj.updateMatrixWorld(true);
+      _e.set(rx || 0, ry || 0, rz || 0); _q.setFromEuler(_e);
+      _p.set(x || 0, y || 0, z || 0); _s.set(sc || 1, sc || 1, sc || 1);
+      _w.compose(_p, _q, _s); _w.premultiply(this.F);
+      const self = this;
+      obj.traverse(function (o) {
+        if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+        const mt = Array.isArray(o.material) ? o.material[0] : o.material;
+        const col = mt && mt.color ? mt.color.getHex() : 0x888888;
+        const kind = mt && mt.transparent ? "glass" : (mt && mt.isMeshPhongMaterial ? "metal" : "solid");
+        _m.multiplyMatrices(_w, o.matrixWorld);
+        self.put(o.geometry, _m, col, kind, false);
+      });
+      return this;
+    };
+    Kit.prototype.build = function (parent) {
+      const BGU = THREE.BufferGeometryUtils, out = [];
+      for (const k in this.parts) {
+        const list = this.parts[k];
+        if (!list || !list.length) continue;
+        let geos = list;
+        if (BGU && BGU.mergeBufferGeometries && list.length > 1) {
+          let merged = null;
+          try { merged = BGU.mergeBufferGeometries(list, false); } catch (e) { merged = null; }
+          if (merged) { for (let i = 0; i < list.length; i++) list[i].dispose(); geos = [merged]; }
+        }
+        for (let i = 0; i < geos.length; i++) {
+          const gg = geos[i];
+          gg.computeBoundingSphere(); gg.computeBoundingBox();
+          const mesh = new THREE.Mesh(gg, kitMat(k));
+          mesh.castShadow = false;
+          mesh.receiveShadow = k !== "glass" && k !== "glow";
+          if (k === "glass") mesh.renderOrder = 1;
+          mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+          parent.add(mesh);
+          out.push(mesh);
+        }
+      }
+      this.parts = {};
+      return out;
+    };
+
+    // the yaw whose local +X is the tangent (tx, tz); local +Z is then
+    // (-tz, tx), which for every store in this city is the side facing the door.
+    function yawOf(tx, tz) { return Math.atan2(-tz, tx); }
+
+    // A model re-seated on its own bounds: returns a holder Group whose origin
+    // is the model's bottom centre (alignZ "min": its back face instead of
+    // its z centre), after `orient(turn, model)` has rotated it. Size in
+    // holder.userData.size (x = along the frame, y = height, z = depth).
+    function seat(model, orient, alignZ) {
+      const turn = new THREE.Group();
+      turn.add(model);
+      if (orient) orient(turn, model);
+      turn.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(turn);
+      const holder = new THREE.Group();
+      holder.add(turn);
+      if (isFinite(bb.min.x) && isFinite(bb.max.x)) {
+        turn.position.set(-(bb.min.x + bb.max.x) / 2, -bb.min.y,
+          alignZ === "min" ? -bb.min.z : -(bb.min.z + bb.max.z) / 2);
+        holder.userData.size = { x: bb.max.x - bb.min.x, y: bb.max.y - bb.min.y, z: bb.max.z - bb.min.z };
+      } else holder.userData.size = { x: 0.2, y: 0.1, z: 0.1 };
+      holder.userData.turn = turn;
+      return holder;
+    }
+
+    // WHERE A STORE'S COUNTER IS, in world terms: the fit-out record the
+    // shop build declared (city/fitout.js), else the posted clerk's spot
+    // (who stands 1.2 m behind the counter centre). `top` is the counter
+    // box's top (buildings.js stands a 1.2-tall box from y 0).
+    function counterOf(lot) {
+      const b = lot && lot.building;
+      if (!b) return null;
+      const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+      const dr = b.localDoor || b.door;
+      if (!dr || dr.nx == null) return null;
+      const inx = dr.nx, inz = dr.nz, tx = -inz, tz = inx;
+      let K = null;
+      const site = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
+      const f0 = site && site.floors && site.floors[0];
+      if (f0) {
+        const recs = [f0].concat(f0.extra || []);
+        for (let i = 0; i < recs.length && !K; i++) if (recs[i] && recs[i].info && recs[i].info.counter) K = recs[i].info.counter;
+      }
+      if (K) return { x: ox + K.x, z: oz + K.z, w: K.w, d: K.d, top: 1.2, tx, tz, inx, inz };
+      const v = b.vendorSpot;
+      if (!v) return null;
+      const along = Math.abs(inx) > 0.5;
+      return { x: v.x - inx * 1.2, z: v.z - inz * 1.2,
+               w: along ? 0.8 : Math.min((b.w || 10) - 2, 4.5), d: along ? Math.min((b.d || 10) - 2, 4.5) : 0.8,
+               top: 1.2, tx, tz, inx, inz };
+    }
+
+    // DRESS A COUNTER. buildings.js stands a bare 1.2 m box and fitout.js
+    // leaves the flagship trades' counters to their own files: this wraps it
+    // in cladding over a kick plinth, runs a trim line and panel reveals on
+    // the customer face, and lays an overhanging worktop. The kit's frame
+    // must already be the counter frame (origin = counter centre, y = 0).
+    // Returns the worktop's top height.
+    function dressCounter(kit, L, D, top, FY, o) {
+      o = o || {};
+      const clad = o.clad || 0x2a2d32, trim = o.trim || 0xa3a7ac, work = o.work || 0x1d1e21, kick = o.kick || 0x111214;
+      const workKind = o.workKind || "gloss";
+      const h = top - FY;
+      kit.box(0, FY + h / 2, 0, L + 0.04, h, D + 0.04, clad, o.cladKind || "solid");
+      kit.box(0, FY + 0.05, 0, L + 0.05, 0.1, D + 0.05, kick);
+      const zf = D / 2 + 0.022;
+      kit.box(0, FY + 0.101, zf + 0.002, L + 0.045, 0.012, 0.004, trim, "metal");     // plinth cap
+      kit.box(0, top - 0.09, zf + 0.002, L + 0.045, 0.022, 0.004, trim, "metal");     // top trim line
+      const panels = Math.max(1, Math.round(L / 0.9));
+      for (let i = 1; i < panels; i++) {                                             // panel reveals
+        const x = -L / 2 + (L * i) / panels;
+        kit.box(x, FY + 0.1 + (h - 0.2) / 2, zf + 0.001, 0.008, h - 0.2, 0.003, 0x151618);
+      }
+      kit.box(0, top + 0.02, 0.02, L + 0.08, 0.04, D + 0.12, work, workKind);         // worktop, customer overhang
+      return top + 0.04;
+    }
+
+    // A POS till on the clerk side of a counter top (screen on a pole facing
+    // the clerk, receipt printer), a cash drawer under the worktop on the
+    // clerk face, and a card reader on the customer edge. Counter frame.
+    function till(kit, x, top, D) {
+      const zc = -D / 2 + 0.24;
+      kit.box(x, top + 0.01, zc, 0.2, 0.02, 0.18, 0x1c1e22, "metal");
+      kit.cyl(x, top + 0.11, zc + 0.02, 0.014, 0.014, 0.18, 0x2a2d31, "metal");
+      const a = 0.3, sy = top + 0.3, sz = zc + 0.03;
+      kit.box(x, sy, sz, 0.34, 0.24, 0.035, 0x1a1b1e, "gloss", a);
+      kit.box(x, sy + 0.019 * Math.sin(a), sz - 0.019 * Math.cos(a), 0.3, 0.2, 0.004, 0x2e4a66, "glow", a);
+      kit.box(x + 0.27, top + 0.055, zc, 0.14, 0.11, 0.18, 0xd6d6d2);                  // receipt printer
+      kit.box(x + 0.27, top + 0.111, zc + 0.03, 0.1, 0.003, 0.012, 0x222222);           // paper slot
+      kit.box(x + 0.27, top + 0.114, zc + 0.03, 0.08, 0.002, 0.03, 0xf4f2ea, "solid", -0.6);
+      kit.box(x + 0.1, top - 0.1, -D / 2 - 0.033, 0.44, 0.11, 0.02, 0x2a2c30);           // cash drawer
+      kit.box(x + 0.1, top - 0.1, -D / 2 - 0.045, 0.12, 0.012, 0.012, 0xb4b8bd, "metal");
+      const cx = x - 0.34, cz = D / 2 - 0.1;                                            // card reader
+      kit.box(cx, top + 0.01, cz, 0.09, 0.02, 0.1, 0x1c1e22);
+      kit.box(cx, top + 0.045, cz + 0.01, 0.075, 0.03, 0.15, 0x24262a, "gloss", -0.35);
+      kit.box(cx, top + 0.063, cz - 0.02, 0.055, 0.003, 0.04, 0x3f7fa6, "glow", -0.35);
+      kit.box(cx, top + 0.071, cz + 0.035, 0.055, 0.003, 0.05, 0x8b9096, "solid", -0.35);
+    }
+
+    // A countertop showcase in a counter frame, centred at local (xc, 0):
+    // black base, felt deck, aluminium corner posts and rails, glass lid,
+    // customer front and ends, two sliding glass doors on the clerk side
+    // with a lock, an LED strip under the lid's front rail (inside only).
+    // Returns the deck's top height.
+    function showcase(k, xc, top, len, wid, o) {
+      o = o || {};
+      const H = o.h || 0.3, BASE = 0.045, AL = o.frame || 0xb2b6bb, AK = o.frameKind || "metal";
+      k.box(xc, top + BASE / 2, 0, len, BASE, wid, o.base || 0x16181b);
+      k.box(xc, top + BASE + 0.004, 0, len - 0.03, 0.008, wid - 0.03, o.felt || 0x1f3327);
+      const y0 = top + BASE, yTop = y0 + H;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(xc + sx * (len / 2 - 0.01), y0 + H / 2, sz * (wid / 2 - 0.01), 0.02, H, 0.02, AL, AK);
+      for (const sz of [-1, 1]) {
+        k.box(xc, yTop - 0.01, sz * (wid / 2 - 0.01), len, 0.02, 0.02, AL, AK);
+        k.box(xc, y0 + 0.01, sz * (wid / 2 - 0.01), len, 0.02, 0.02, AL, AK);
+      }
+      for (const sx of [-1, 1]) k.box(xc + sx * (len / 2 - 0.01), yTop - 0.01, 0, 0.02, 0.02, wid, AL, AK);
+      k.box(xc, yTop - 0.003, 0, len - 0.03, 0.006, wid - 0.03, 0, "glass");
+      k.box(xc, y0 + H / 2, wid / 2 - 0.01, len - 0.03, H - 0.03, 0.006, 0, "glass");
+      for (const sx of [-1, 1]) k.box(xc + sx * (len / 2 - 0.01), y0 + H / 2, 0, 0.006, H - 0.03, wid - 0.03, 0, "glass");
+      for (const sx of [-1, 1]) k.box(xc + sx * len / 4, y0 + H / 2, -(wid / 2 - 0.01) + (sx > 0 ? 0.012 : 0), len / 2 + 0.02, H - 0.03, 0.006, 0, "glass");
+      k.cyl(xc, y0 + H - 0.05, -(wid / 2 - 0.004), 0.008, 0.008, 0.012, 0xd8dade, "metal", Math.PI / 2);
+      k.box(xc, yTop - 0.023, wid / 2 - 0.01, len - 0.1, 0.006, 0.014, 0xfff6e6, "glow");
+      return y0 + 0.008;
+    }
+
+    // a small white card price tag on a string, as its own tiny group (it
+    // leaves with the piece it prices). Shared geometry + material.
+    let TAG = null;
+    function tagCard(len) {
+      if (!TAG) {
+        TAG = { card: new THREE.BoxGeometry(0.04, 0.062, 0.002), str: new THREE.BoxGeometry(0.0016, 1, 0.0016),
+                stripe: new THREE.BoxGeometry(0.03, 0.004, 0.0024),
+                white: new THREE.MeshLambertMaterial({ color: 0xf3f0e6 }), line: new THREE.MeshLambertMaterial({ color: 0x9a2a22 }),
+                twine: new THREE.MeshLambertMaterial({ color: 0xcbb68a }) };
+        for (const k in TAG) TAG[k]._shared = true;
+      }
+      len = len || 0.05;
+      const grp = new THREE.Group();
+      const s = new THREE.Mesh(TAG.str, TAG.twine); s.scale.y = len; s.position.y = -len / 2; grp.add(s);
+      const c = new THREE.Mesh(TAG.card, TAG.white); c.position.y = -len - 0.031; grp.add(c);
+      const l = new THREE.Mesh(TAG.stripe, TAG.line); l.position.set(0, -len - 0.012, 0); grp.add(l);
+      grp.traverse(function (o) { o.castShadow = false; o.receiveShadow = false; });
+      return grp;
+    }
+    // a folded tent card standing on a surface (origin = its foot), facing +Z.
+    function tentCard() {
+      tagCard();
+      const grp = new THREE.Group();
+      for (const sgn of [-1, 1]) {
+        const c = new THREE.Mesh(TAG.card, TAG.white);
+        c.rotation.x = sgn * 0.32; c.position.set(0, 0.03, -sgn * 0.0095);
+        c.castShadow = false; grp.add(c);
+      }
+      const l = new THREE.Mesh(TAG.stripe, TAG.line); l.rotation.x = -0.32; l.position.set(0, 0.04, 0.0063); grp.add(l);
+      return grp;
+    }
+
+    // a deterministic stream (layout variety without Math.random churn)
+    function rng(seed) { let s = (seed >>> 0) || 1; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+    CBZ.storeFixtureKit = { create: function () { return new Kit(); }, yawOf, seat, counterOf, dressCounter, till, showcase, tagCard, tentCard, rng };
+  })();
+  const KIT = CBZ.storeFixtureKit;
+
   const RESTOCK = 150;       // seconds a SOLD slot stays a gap (the truck's coming)
   const VIS_R = 55;          // display group draws only when you're near the shop
   const RACK_REACH = 6.0;    // long guns are bought ACROSS the counter (real gun-store style)
-  const CASE_REACH = 3.0;    // counter glass / ammo crate: walk right up
+  const CASE_REACH = 3.0;    // counter glass / ammo shelf: walk right up
   const RACK_DOT = 0.60;     // look-cone for the wall (farther away, more central)
   const CASE_DOT = 0.82;     // tighter cone up close so the clerk's E ("Shop here") isn't stolen
+  const LEAN = 0.06;         // radians a racked long gun leans back into its yoke
 
   const S = { lot: null, gs: null, group: null, slots: [], built: false,
               cur: null, prompt: null, lastTxt: "", cx: 0, cz: 0,
@@ -42,24 +360,7 @@
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
-  // ---- shared fixture materials (one each, flagged _shared) ----------------
-  let M = null;
-  function mats() {
-    if (M) return M;
-    M = {
-      board: new THREE.MeshLambertMaterial({ color: 0x23262c }),                                 // rack pegboard
-      glass: new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.35, transparent: true, opacity: 0.32 }),
-      glow: new THREE.MeshLambertMaterial({ color: 0x7ed957, emissive: 0x7ed957, emissiveIntensity: 0.55 }),  // the trade's green accent
-      crate: new THREE.MeshLambertMaterial({ color: 0x4a5232 }),                                 // olive ammo crates
-    };
-    Object.keys(M).forEach((k) => { M[k]._shared = true; });
-    return M;
-  }
-
   // the REAL gun model — the exact appearance factory NPCs carry (actorweapons).
-  // ITEMS[name].gun is the engine id ("ak47"/"bazooka"/…); buildActorWeapon
-  // normalizes the rest (Pistol→sidearm, Rifle→carbine) so the wall never
-  // shows a placeholder for a buyable piece.
   function buildModel(name) {
     if (!CBZ.buildActorWeapon) return null;
     const e = econ(), it = e && e.ITEMS[name];
@@ -67,33 +368,45 @@
     if (!m) return null;
     m.rotation.set(0, 0, 0);
     m.position.set(0, 0, 0);
+    const sc = (CBZ.weaponWorldScale && CBZ.weaponWorldScale(m.userData.weaponId || name)) || 0.95;
+    m.scale.setScalar(sc);
     return m;
   }
+  // handguns go under the glass; everything with a stock goes in the rack
+  function isHandgun(model) {
+    const sl = model && model.userData && model.userData.weaponSlot;
+    return sl === "pistol" || sl === "utility";
+  }
 
-  function tagSprite(text, color, sx, sy) {
-    // PROPS_PURPOSE (owner order): NO floating words over shop items — the
-    // displays speak for themselves and the walk-up prompt carries the price.
-    // Every call site already null-guards (the makeLabelSprite-absent path),
-    // so returning null degrades cleanly. Revert: CBZ.CONFIG.PROPS_PURPOSE=false.
-    if (!CBZ.CONFIG || CBZ.CONFIG.PROPS_PURPOSE !== false) return null;
-    if (!CBZ.makeLabelSprite) return null;
-    const s = CBZ.makeLabelSprite(text, { color: color || "#ffd166" });
-    s.scale.set(sx || 2.3, sy || 0.55, 1);
-    return s;
+  // the floor a customer stands on (buildings.js: ground slab top 0.14)
+  // the FINISHED floor: fitout_work.js lays the shop floor 6 cm over the slab top
+  function floorY(b) { return ((b && Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14) + 0.06; }
+
+  // how far along +-tangent from (x, z) the room's walkable bounds reach
+  function latRoom(B, x, z, tx, tz, sgn) {
+    let best = 1e9;
+    const dx = tx * sgn, dz = tz * sgn;
+    if (dx > 1e-6) best = Math.min(best, (B.maxX - x) / dx);
+    if (dx < -1e-6) best = Math.min(best, (B.minX - x) / dx);
+    if (dz > 1e-6) best = Math.min(best, (B.maxZ - z) / dz);
+    if (dz < -1e-6) best = Math.min(best, (B.minZ - z) / dz);
+    return best;
   }
 
   // ---- build the displays once per city ------------------------------------
   function buildDisplays() {
-    const e = econ(), gs = S.gs, m = mats();
+    const e = econ(), gs = S.gs;
     const group = new THREE.Group();
     S.group = group;
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     root.add(group);
     S.cx = (gs.bounds.minX + gs.bounds.maxX) / 2;
     S.cz = (gs.bounds.minZ + gs.bounds.maxZ) / 2;
+    const FY = floorY(S.lot.building);
+    const R0 = CBZ.storeFixtureKit.rng(Math.round(S.cx * 13) ^ Math.round(S.cz * 7));
 
-    // partition the shop's REAL stock: long guns → the back wall, pistols →
-    // the counter glass. (Melee/armor/grenades stay the clerk's counter menu.)
+    // partition the shop's REAL stock: stocked guns → the back-wall rack,
+    // handguns → the counter showcase.
     const stock = e.stockFor("guns");
     const longs = [], pistols = [];
     for (const n of stock) {
@@ -101,177 +414,302 @@
       if (!it || !it.gun) continue;
       const model = buildModel(n);
       if (!model) continue;
-      const slot = { name: n, model, sold: false, restockT: 0, tag: null, soldTag: null, x: 0, y: 0, z: 0, reach: 3, dot: CASE_DOT };
-      if (model.userData && model.userData.weaponSlot === "long") longs.push(slot); else pistols.push(slot);
+      const slot = { name: n, model: null, raw: model, sold: false, restockT: 0, card: null, x: 0, y: 0, z: 0, reach: 3, dot: CASE_DOT };
+      (isHandgun(model) ? pistols : longs).push(slot);
     }
 
-    // ---- THE BACK-WALL RACK (behind the clerk; buy across the counter) ----
-    const R = gs.rack;
-    const perRow = Math.max(2, Math.min(5, Math.floor(R.span / 2.0)));
-    const rows = Math.max(1, Math.ceil(longs.length / perRow));
-    const boardH = 0.55 + rows * 0.95;
-    const bw = Math.abs(R.tx) * (R.span + 0.6) + Math.abs(R.nx) * 0.12;
-    const bd = Math.abs(R.tz) * (R.span + 0.6) + Math.abs(R.nz) * 0.12;
-    const yTop = 2.55;
-    const board = new THREE.Mesh(new THREE.BoxGeometry(bw, boardH, bd), m.board);
-    board.position.set(R.x, yTop + 0.5 - boardH / 2, R.z);   // board top just over the top row
-    board.castShadow = false; board.receiveShadow = true;
-    group.add(board);
-    // the green ARMORY strip over the rack (the trade accent — reads from the door)
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(bw * 0.98 + Math.abs(R.nx) * 0.02, 0.08, bd * 0.98 + Math.abs(R.nz) * 0.02), m.glow);
-    strip.position.set(R.x + R.nx * 0.02, yTop + 0.62, R.z + R.nz * 0.02);
-    strip.castShadow = false;
-    group.add(strip);
-
-    longs.forEach((s, i) => {
-      const row = (i / perRow) | 0;
-      const inRow = Math.min(perRow, longs.length - row * perRow);
-      const col = i - row * perRow;
-      const lat = (col - (inRow - 1) / 2) * (R.span / Math.max(inRow, 1));
-      const y = yTop - row * 0.95;
-      const x = R.x + R.nx * 0.22 + R.tx * lat;
-      const z = R.z + R.nz * 0.22 + R.tz * lat;
-      // barrel lies ALONG the wall; origin is the grip, so re-centre the silhouette
-      s.model.rotation.y = Math.atan2(-R.tx, -R.tz);
-      // REAL-DIMENSION SIZING (weapons/weapon-scale.js): wall display hangs in
-      // world space — the gun on the wall is the length the researched real
-      // gun would be (× class READ), identical to the one sold into the hand.
-      s.model.scale.setScalar(
-        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(s.model.userData.weaponId || s.name)) || 0.95
-      );
-      s.model.position.set(x - R.tx * 0.38, y, z - R.tz * 0.38);
-      group.add(s.model);
-      s.x = x; s.y = y; s.z = z; s.reach = RACK_REACH; s.dot = RACK_DOT;
-      s.tag = tagSprite(s.name + " · " + fmt$(e.buyPrice(s.name)), "#ffd166");
-      if (s.tag) { s.tag.position.set(x + R.nx * 0.12, y - 0.44, z + R.nz * 0.12); group.add(s.tag); }
-      S.slots.push(s);
-    });
-
-    // ---- THE COUNTER GLASS CASE (pistols, shifted off the register half so
-    //      [E] at the case never collides with the clerk's "Shop here") ----
+    buildRack(group, longs, FY);
     const C = gs.counter;
-    const longLen = Math.max(C.w, C.d);
-    const caseLen = Math.max(1.4, Math.min(2.6, longLen * 0.45));
-    const caseW = Math.min(0.72, Math.min(C.w, C.d));
-    const caseOff = Math.max(0, longLen / 2 - caseLen / 2 - 0.25);   // toward the + tangent end
-    const ccx = C.x + C.tx * caseOff, ccz = C.z + C.tz * caseOff;
-    const gw = Math.abs(C.tx) * caseLen + Math.abs(C.tz) * caseW;
-    const gd = Math.abs(C.tz) * caseLen + Math.abs(C.tx) * caseW;
-    const caseMesh = new THREE.Mesh(new THREE.BoxGeometry(gw, 0.36, gd), m.glass);
-    caseMesh.position.set(ccx, C.top + 0.18, ccz);
-    caseMesh.castShadow = false;
-    group.add(caseMesh);
-    const underGlow = new THREE.Mesh(new THREE.BoxGeometry(gw * 0.94, 0.04, gd * 0.94), m.glow);
-    underGlow.position.set(ccx, C.top + 0.03, ccz);
-    underGlow.castShadow = false;
-    group.add(underGlow);
+    const L = Math.max(C.w, C.d), D = Math.min(C.w, C.d);
+    const ck = KIT.create().frame(C.x, 0, C.z, KIT.yawOf(C.tx, C.tz));
+    const top = KIT.dressCounter(ck, L, D, C.top, FY);
+    KIT.till(ck, -L / 2 + 0.55, top, D);
+    // the counter's + end holds the C4 hard case when there's room for it
+    const c4Zone = L >= 3.0 ? 0.48 : 0;
+    const z0 = Math.max(-L / 2 + 1.15, 0.05), z1 = L / 2 - c4Zone - 0.06;
+    buildShowcase(group, ck, pistols, C, top, (z0 + z1) / 2, Math.max(0.8, Math.min(2.2, z1 - z0)), Math.min(0.62, D + 0.02));
+    // the + end of the floor: the ammo gondola, then the grenade crate
+    const ends = buildEnd(group, C, L, D, FY, R0);
+    if (e.ITEMS["C4 Charge"]) {
+      if (c4Zone) buildC4(group, ck, L / 2 - 0.25, top, 0.02, C);
+      else buildC4(group, ends.kit, ends.ammoX, FY + 1.535, 0, C);   // tiny counter: the case sits on the gondola
+    }
+    ck.build(group);
+    ends.kit.build(group);
 
-    pistols.forEach((s, i) => {
-      const lat = (i - (pistols.length - 1) / 2) * (caseLen / Math.max(pistols.length, 1));
-      const x = ccx + C.tx * lat, z = ccz + C.tz * lat;
-      const y = C.top + 0.15;
-      s.model.rotation.y = Math.atan2(-C.tx, -C.tz);
-      // case pistols lie in world space too: same real-dimension law as the
-      // wall rack (they used to keep the hand-socket scale — a different size
-      // than the same pistol two metres away on the wall).
-      s.model.scale.setScalar(
-        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(s.model.userData.weaponId || s.name)) || 0.92
-      );
-      s.model.position.set(x - C.tx * 0.1, y, z - C.tz * 0.1);
-      group.add(s.model);
-      s.x = x; s.y = y; s.z = z; s.reach = CASE_REACH; s.dot = CASE_DOT;
-      s.tag = tagSprite(s.name + " · " + fmt$(e.buyPrice(s.name)), "#ffd166", 1.7, 0.42);
-      if (s.tag) { s.tag.position.set(x, C.top + 0.66, z); group.add(s.tag); }
+    // ---- THE ARMOURY (the counter's - end) ----
+    buildArmorRack(group, C, L, FY);
+
+    // ---- THE GUNSMITH BENCH ----
+    if (CBZ.gunModsOpenBench) buildBench(group, C, L, D, FY);
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("gun-store", S.lot.building, group);
+  }
+
+  /* ---- THE BACK-WALL RACK ----------------------------------------------
+     gs.rack is a point 0.18 m off the back wall's inner face, with the
+     normal (nx, nz) pointing back into the room. Everything is laid out in
+     a frame whose origin is ON the wall face at floor level. */
+  function buildRack(group, longs, FY) {
+    const R = S.gs.rack;
+    const wx = R.x - R.nx * 0.18, wz = R.z - R.nz * 0.18;
+    const yaw = KIT.yawOf(R.tx, R.tz);
+    const k = KIT.create().frame(wx, 0, wz, yaw);
+    const TRAY = FY + 0.92;                     // butt tray top (drawer cabinet height)
+    const SLAT = 0.026;                         // slatwall face off the wall
+
+    // stand every gun muzzle-up, side to the room, and measure it
+    const racked = longs.map(function (s) {
+      const holder = KIT.seat(s.raw, function (turn, m) { m.rotation.set(Math.PI / 2, -Math.PI / 2, 0, "YXZ"); }, "min");
+      const sz = holder.userData.size;
+      // the bore line: the muzzle point, in the holder frame
+      let mu = null;
+      if (s.raw.userData && s.raw.userData.muzzle && s.raw.userData.muzzle.isVector3) {
+        holder.updateMatrixWorld(true);
+        mu = s.raw.localToWorld(s.raw.userData.muzzle.clone());
+      }
+      return { s, holder, w: sz.x, h: sz.y, th: sz.z, mu: mu || new THREE.Vector3(0, sz.y, sz.z / 2) };
+    });
+    // tallest in the middle, falling away to both ends: a rack reads as a display
+    racked.sort(function (a, b) { return b.h - a.h; });
+    const order = [];
+    racked.forEach(function (r, i) { if (i % 2) order.push(r); else order.unshift(r); });
+    const gap0 = 0.14;
+    let used = 0; for (const r of order) used += r.w;
+    const maxLen = Math.max(2.4, R.span);
+    const gap = order.length > 1 ? Math.max(0.03, Math.min(gap0, (maxLen - 0.5 - used) / (order.length - 1))) : 0;
+    const len = Math.min(maxLen, Math.max(2.4, used + gap * Math.max(0, order.length - 1) + 0.5));
+
+    // ---- the drawer base cabinet + felt butt tray ----
+    k.box(0, FY + 0.05, 0.22, len - 0.02, 0.1, 0.44, 0x111214);                       // recessed kick
+    k.box(0, FY + 0.495, 0.25, len, 0.79, 0.5, 0x2d3035);                        // carcass
+    const drawers = Math.max(2, Math.round(len / 0.62));
+    const dw = len / drawers;
+    for (let i = 0; i < drawers; i++) {
+      const x = -len / 2 + dw * (i + 0.5);
+      for (let r = 0; r < 2; r++) {
+        const y = FY + 0.12 + 0.19 + r * 0.38;
+        k.box(x, y, 0.51, dw - 0.012, 0.36, 0.02, 0x3a3e44);
+        k.box(x, y + 0.13, 0.528, 0.16, 0.018, 0.018, 0xb4b8bd, "metal");
+      }
+    }
+    k.box(0, TRAY - 0.015, 0.27, len + 0.02, 0.03, 0.54, 0x5c4129);                   // walnut tray top
+    k.box(0, TRAY + 0.004, 0.2, len - 0.04, 0.008, 0.3, 0x3b4238);                    // felt butt pad
+
+    // ---- the slatwall ----
+    const S0 = TRAY + 0.01, S1 = FY + 2.46, SH = S1 - S0;
+    k.box(0, S0 + SH / 2, 0.006, len, SH, 0.012, 0x57534c);                           // groove backer
+    const pitch = 0.0762, slats = Math.floor(SH / pitch);
+    for (let i = 0; i < slats; i++) k.box(0, S0 + pitch * (i + 0.5), 0.019, len, pitch - 0.016, 0.014, 0xbab4a8);
+    for (const sx of [-1, 1]) k.box(sx * (len / 2 + 0.012), S0 + SH / 2, 0.016, 0.024, SH + 0.02, 0.032, 0xa7abb0, "metal");
+    k.box(0, S1 + 0.012, 0.018, len + 0.05, 0.024, 0.036, 0xa7abb0, "metal");
+    // an LED bar light over the rack: housing on two arms, lens underneath
+    for (const sx of [-1, 1]) k.box(sx * (len / 2 - 0.3), S1 + 0.07, 0.11, 0.02, 0.02, 0.2, 0x2a2d31, "metal");
+    k.box(0, S1 + 0.07, 0.22, len - 0.2, 0.045, 0.09, 0x2a2d31, "metal");
+    k.box(0, S1 + 0.046, 0.22, len - 0.26, 0.006, 0.06, 0xfff4e0, "glow");
+
+    // ---- the guns, each in its yoke ----
+    const sinL = Math.sin(LEAN), cosL = Math.cos(LEAN);
+    let x = -len / 2 + 0.25;
+    let frontMax = 0;
+    order.forEach(function (r) {
+      const s = r.s;
+      const cxg = x + r.w / 2; x += r.w + gap;
+      const zb = (SLAT + 0.02 + r.h * sinL) / cosL;         // the leaning top still clears the slats
+      const pivot = new THREE.Group();
+      const wp = k.world(cxg, 0);
+      pivot.position.set(wp.x, TRAY + 0.008, wp.z);
+      pivot.rotation.y = yaw;
+      const tilt = new THREE.Group();
+      tilt.rotation.x = -LEAN;
+      tilt.position.y = -zb * sinL;
+      r.holder.position.set(0, 0, zb);
+      tilt.add(r.holder); pivot.add(tilt);
+      group.add(pivot);
+      s.model = pivot;
+      frontMax = Math.max(frontMax, zb * cosL + r.th);
+      // the barrel yoke: two arms off the slats either side of the bore at
+      // 72% height, joined by a padded bar in front of it
+      const yk = r.mu.y * 0.72, bz = r.mu.z + zb;
+      const py = TRAY + 0.008 - zb * sinL + yk * cosL + bz * sinL;
+      const pz = -yk * sinL + bz * cosL;
+      const bx = cxg + r.mu.x;
+      const armLen = pz + 0.032 - SLAT;
+      for (const sx of [-1, 1]) k.box(bx + sx * 0.03, py, SLAT + armLen / 2, 0.01, 0.014, armLen, 0xb9bdc2, "metal");
+      k.box(bx, py, pz + 0.032, 0.074, 0.018, 0.016, 0x1a1a1c);
+      k.box(bx, py, SLAT + 0.006, 0.09, 0.05, 0.012, 0xb9bdc2, "metal");               // slat clip plate
+      // its price tag, tied to the end of the yoke bar
+      const card = KIT.tagCard(0.045);
+      const cp = k.world(bx + 0.034, pz + 0.034);
+      card.position.set(cp.x, py - 0.008, cp.z);
+      card.rotation.y = yaw + (R0h(s.name) - 0.5) * 0.5;
+      group.add(card);
+      s.card = card;
+      const gp = k.world(cxg, zb + r.th / 2);
+      s.x = gp.x; s.y = TRAY + r.h * 0.5; s.z = gp.z; s.reach = RACK_REACH; s.dot = RACK_DOT;
       S.slots.push(s);
     });
+    // a chrome stop rail along the front of the tray keeps the butts on it
+    if (order.length) {
+      const zr = Math.min(0.46, frontMax + 0.05);
+      k.box(0, TRAY + 0.045, zr, len - 0.1, 0.012, 0.012, 0xb9bdc2, "metal");
+      const posts = Math.max(2, Math.round(len / 0.9));
+      for (let i = 0; i <= posts; i++) k.box(-len / 2 + 0.05 + (len - 0.1) * i / posts, TRAY + 0.022, zr, 0.012, 0.045, 0.012, 0xb9bdc2, "metal");
+    }
+    k.build(group);
+  }
+  function R0h(name) { let h = 7; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; return (h % 1000) / 1000; }
 
-    // ---- AMMO CRATES at the case end of the counter (always stocked) ----
-    const ax = C.x + C.tx * (longLen / 2 + 0.55), az = C.z + C.tz * (longLen / 2 + 0.55);
-    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.42, 0.62), m.crate);
-    c1.position.set(ax, 0.21, az); c1.castShadow = false;
-    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.5), m.crate);
-    c2.position.set(ax, 0.59, az); c2.castShadow = false;
-    group.add(c1); group.add(c2);
-    const ammoMeta = e.ITEMS["Ammo Box"] || {};
-    const ammo = { name: "Ammo Box", ammo: true, sold: false, x: ax, y: 0.7, z: az, reach: CASE_REACH, dot: CASE_DOT };
-    ammo.tag = tagSprite("Ammo Box · " + fmt$(e.buyPrice("Ammo Box")), "#9fe0ff", 1.7, 0.42);
-    if (ammo.tag) { ammo.tag.position.set(ax, 1.15, az); group.add(ammo.tag); }
+  /* ---- THE COUNTER SHOWCASE (handguns under glass) ----------------------
+     A countertop case on the worktop: black base, felt deck, aluminium
+     posts and rails, glass on the top/front/ends, two sliding glass doors on
+     the clerk side, an LED strip under the lid's front rail. Handguns lie on
+     their right side, muzzle toward the + end, grip toward the customer,
+     each with a tent card in front of it. */
+  function buildShowcase(group, ck, pistols, C, top, xc, len, wid) {
+    const yd = KIT.showcase(ck, xc, top, len, wid, { felt: 0x1f3327 });
+
+    // the handguns, lying on the felt
+    const n = pistols.length;
+    const rows = n > 4 ? 2 : 1, per = Math.ceil(n / rows);
+    pistols.forEach(function (s, i) {
+      const row = (i / per) | 0, col = i - row * per;
+      const inRow = Math.min(per, n - row * per);
+      const lx = xc + (col - (inRow - 1) / 2) * (len - 0.1) / Math.max(inRow, 1);
+      const lz = rows === 1 ? -0.07 : (row === 0 ? 0.06 : -0.16);
+      const holder = KIT.seat(s.raw, function (turn, m) { m.rotation.set(0, 0, Math.PI / 2); turn.rotation.y = -Math.PI / 2 + 0.35; });
+      const wp = ck.world(lx, lz);
+      holder.position.set(wp.x, yd + 0.001, wp.z);
+      holder.rotation.y = ck.yaw;
+      group.add(holder);
+      s.model = holder;
+      const card = KIT.tentCard();
+      const cp = ck.world(lx + (row ? 0.11 : 0), wid / 2 - 0.055);   // at the front edge, clear of the gun
+      card.position.set(cp.x, yd, cp.z);
+      card.rotation.y = ck.yaw;
+      group.add(card);
+      s.card = card;
+      s.x = wp.x; s.y = yd + 0.05; s.z = wp.z; s.reach = CASE_REACH; s.dot = CASE_DOT;
+      S.slots.push(s);
+    });
+  }
+
+  /* ---- THE + END: ammo gondola + grenade crate --------------------------
+     Built in the counter's frame, stepping out past its + end. The gondola
+     is a real shelving unit (uprights, pegboard back, four boards with a
+     price-channel lip, a top cap) stocked two deep with printed boxes of
+     rounds, steel ammo cans on the bottom board. */
+  function buildEnd(group, C, L, D, FY, R0) {
+    const e = econ();
+    const yaw = KIT.yawOf(C.tx, C.tz);
+    const k = KIT.create().frame(C.x, 0, C.z, yaw);
+    const room = latRoom(S.gs.bounds, C.x, C.z, C.tx, C.tz, 1) - 0.12;
+    const UW = 0.9, UD = 0.4;
+    const ax = Math.min(L / 2 + 0.14 + UW / 2, room - UW / 2);
+    const SH = [0.12, 0.47, 0.82, 1.17], TOPY = FY + 1.5;
+    const GREY = 0x8c9197;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(ax + sx * (UW / 2 - 0.015), FY + 0.75, sz * (UD / 2 - 0.015), 0.03, 1.5, 0.03, GREY, "metal");
+    k.box(ax, FY + 0.77, -UD / 2 + 0.006, UW - 0.03, 1.42, 0.012, 0xd4cfc3);                  // pegboard back
+    for (let i = 0; i < 12; i++) for (let j = 0; j < 4; j++)
+      k.box(ax - UW / 2 + 0.09 + i * 0.066, FY + 1.3 + j * 0.05, -UD / 2 + 0.0125, 0.008, 0.008, 0.002, 0x6f6a60);
+    k.box(ax, TOPY + 0.015, 0, UW + 0.02, 0.03, UD + 0.02, 0x2c2f34, "metal");
+    k.box(ax, FY + 0.04, 0, UW - 0.03, 0.08, UD - 0.03, 0x1c1e21);                          // kick
+    for (const y of SH) {
+      k.box(ax, FY + y, 0, UW - 0.03, 0.02, UD - 0.03, 0xd6d8da, "metal");
+      k.box(ax, FY + y + 0.004, UD / 2 - 0.008, UW - 0.03, 0.036, 0.008, 0xefefe9);          // price channel
+      k.box(ax, FY + y - 0.004, UD / 2 - 0.0035, UW - 0.03, 0.004, 0.002, 0x3a3d42);
+    }
+    // printed boxes of rounds (body, wrap band, end label), two deep
+    const WAYS = [[0xb8322a, 0xf0ece0], [0x2f5d3a, 0xe8c547], [0x1f3f73, 0xdadde2], [0xd9d4c4, 0x9a2a22], [0x3a3a3a, 0xd4a43a], [0x7a2f5a, 0xeee6d8]];
+    function ammoBox(x, y, z, w, h, d, way) {
+      k.box(x, y + h / 2, z, w, h, d, way[0]);
+      k.box(x, y + h * 0.55, z, w + 0.002, h * 0.34, d + 0.002, way[1]);
+      k.box(x, y + h * 0.55, z + d / 2 + 0.0012, w * 0.55, h * 0.2, 0.0015, 0xf6f4ee);
+    }
+    [[SH[1], 0.1, 0.07, 0.065, 2], [SH[2], 0.1, 0.07, 0.065, 1], [SH[3], 0.105, 0.036, 0.065, 3]].forEach(function (sh, si) {
+      const y0 = FY + sh[0] + 0.01, bw = sh[1], bh = sh[2], bd = sh[3], stack = sh[4];
+      const facings = Math.floor((UW - 0.06) / (bw + 0.012));
+      for (let f = 0; f < facings; f++) {
+        const way = WAYS[(f + si * 2) % WAYS.length];
+        const x = ax - (facings - 1) * (bw + 0.012) / 2 + f * (bw + 0.012);
+        const hgt = 1 + ((R0() * stack) | 0);
+        for (const z of [UD / 2 - 0.05, UD / 2 - 0.05 - bd - 0.012]) for (let st = 0; st < hgt; st++) ammoBox(x, y0 + st * (bh + 0.001), z, bw, bh, bd, way);
+      }
+    });
+    // steel ammo cans on the bottom board: lid, folded handle, latch, stencil
+    for (const sx of [-1, 1]) {
+      const cx = ax + sx * 0.21, y0 = FY + SH[0] + 0.01;
+      k.box(cx, y0 + 0.085, 0.02, 0.28, 0.17, 0.15, 0x4b5234, "metal");
+      k.box(cx, y0 + 0.182, 0.02, 0.29, 0.028, 0.16, 0x444b2f, "metal");
+      k.box(cx, y0 + 0.2, 0.02, 0.13, 0.01, 0.018, 0x2c3020, "metal");
+      for (const hx of [-1, 1]) k.box(cx + hx * 0.06, y0 + 0.199, 0.02, 0.012, 0.012, 0.03, 0x2c3020, "metal");
+      k.box(cx + 0.146, y0 + 0.14, 0.02, 0.012, 0.09, 0.05, 0x3a4028, "metal");
+      k.box(cx, y0 + 0.1, 0.0955, 0.12, 0.018, 0.001, 0xd9b23a);
+    }
+    const ammo = { name: "Ammo Box", ammo: true, sold: false, x: 0, y: FY + 0.9, z: 0, reach: CASE_REACH, dot: CASE_DOT };
+    const ap = k.world(ax, 0.1); ammo.x = ap.x; ammo.z = ap.z;
     S.slots.push(ammo);
 
-    // ---- THE ARMOR RACK (a mannequin row at the OTHER end of the counter) ----
-    // WHY: a gun store IS where you walk in unarmored and walk out plated — the
-    // non-violent path to body armor (the violent path: peel a SWAT vest off a
-    // corpse). Kits come from armor.js (CBZ.ARMOR_KITS); equipping routes through
-    // CBZ.cityEquipArmor. swatVest is OMITTED on purpose — police issue, LOOT-ONLY.
-    buildArmorRack(group, m, C, longLen);
-
-    // ---- THE DEMOLITION END (past the ammo crates): a frag crate + a C4
-    //      satchel. Consumables sold by COUNT exactly like the Ammo Box —
-    //      the throw lives in city/combat.js ([G]) and the plant/detonate in
-    //      city/explosives.js ([B]); the store just moves the product. ----
+    // ---- the grenade crate: an open OD-painted plank crate, rope handles,
+    //      a kraft divider tray with the frags standing in it ----
     if (e.ITEMS["Grenade"]) {
-      const fx = C.x + C.tx * (longLen / 2 + 1.35), fz = C.z + C.tz * (longLen / 2 + 1.35);
-      const fc = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.38, 0.56), m.crate);
-      fc.position.set(fx, 0.19, fz); fc.castShadow = false;
-      group.add(fc);
-      if (CBZ.grenadeMesh) for (let i = 0; i < 3; i++) {   // a few frags nested in the straw
-        const gm = CBZ.grenadeMesh(THREE);
-        if (!gm) break;
-        gm.position.set(fx + (i - 1) * 0.15, 0.42, fz + (Math.random() - 0.5) * 0.12);
-        group.add(gm);
+      const CW = 0.56, CD = 0.4, CH = 0.32;
+      let fx = ax + UW / 2 + 0.14 + CW / 2, fy = FY, onTop = false;
+      if (fx + CW / 2 > room) { fx = ax; fy = TOPY + 0.03; onTop = true; }
+      {
+        const OD = 0x4d5634, ODD = 0x3f472b;
+        k.box(fx, fy + 0.01, 0, CW, 0.02, CD, ODD);
+        for (const sz of [-1, 1]) for (let p = 0; p < 2; p++) k.box(fx, fy + 0.02 + 0.075 + p * 0.152, sz * (CD / 2 - 0.01), CW, 0.146, 0.02, OD);
+        for (const sx of [-1, 1]) for (let p = 0; p < 2; p++) k.box(fx + sx * (CW / 2 - 0.01), fy + 0.02 + 0.075 + p * 0.152, 0, 0.02, 0.146, CD - 0.04, OD);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(fx + sx * (CW / 2 - 0.035), fy + CH / 2 + 0.01, sz * (CD / 2 + 0.008), 0.05, CH - 0.02, 0.016, ODD);
+        k.box(fx, fy + 0.2, CD / 2 + 0.0015, 0.26, 0.03, 0.002, 0xd9b23a);
+        for (const sx of [-1, 1]) k.torus(fx + sx * (CW / 2 + 0.004), fy + 0.2, 0, 0.045, 0.007, 0xb89a62, "solid", 0, Math.PI / 2, Math.PI, Math.PI);
+        const trayY = fy + CH - 0.1;
+        k.box(fx, trayY, 0, CW - 0.05, 0.01, CD - 0.05, 0xb08a55);
+        for (let i = 1; i < 4; i++) k.box(fx - (CW - 0.05) / 2 + (CW - 0.05) * i / 4, trayY + 0.03, 0, 0.003, 0.05, CD - 0.05, 0xa47e4a);
+        k.box(fx, trayY + 0.03, 0, CW - 0.05, 0.05, 0.003, 0xa47e4a);
+        if (CBZ.itemAsset) for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
+          const gm = CBZ.itemAsset("Grenade", null, { kind: "grenade" });
+          if (gm) k.absorb(gm, fx - (CW - 0.05) * 3 / 8 + i * (CW - 0.05) / 4, trayY + 0.005, (j ? 1 : -1) * (CD - 0.05) / 4, 0, R0() * 6.28, 0);
+        }
       }
-      const gren = { name: "Grenade", boom: true, sold: false, x: fx, y: 0.5, z: fz, reach: CASE_REACH, dot: CASE_DOT };
-      gren.tag = tagSprite("Frag Crate · " + fmt$(e.buyPrice("Grenade")), "#ff9e6a", 1.7, 0.42);
-      if (gren.tag) { gren.tag.position.set(fx, 0.95, fz); group.add(gren.tag); }
+      const gp = k.world(fx, 0.05);
+      const gren = { name: "Grenade", boom: true, sold: false, x: gp.x, y: fy + CH, z: gp.z, reach: CASE_REACH, dot: CASE_DOT };
       S.slots.push(gren);
     }
-    if (e.ITEMS["C4 Charge"]) {   // registered by explosives.js — guard for safety
-      const bx = C.x + C.tx * (longLen / 2 + 2.1), bz = C.z + C.tz * (longLen / 2 + 2.1);
-      const bc = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.5), m.crate);
-      bc.position.set(bx, 0.15, bz); bc.castShadow = false;
-      group.add(bc);
-      if (CBZ.cityC4Mesh) {   // the real charge model on the lid (shared geo/mats)
-        const cm = CBZ.cityC4Mesh();
-        if (cm) { cm.position.set(bx, 0.36, bz); cm.rotation.y = Math.random() * 6.28; group.add(cm); }
-      }
-      const c4 = { name: "C4 Charge", boom: true, sold: false, x: bx, y: 0.42, z: bz, reach: CASE_REACH, dot: CASE_DOT };
-      c4.tag = tagSprite("C4 Charge · " + fmt$(e.buyPrice("C4 Charge")), "#ff6a6a", 1.7, 0.42);
-      if (c4.tag) { c4.tag.position.set(bx, 0.92, bz); group.add(c4.tag); }
-      S.slots.push(c4);
-    }
+    return { kit: k, ammoX: ax };
+  }
 
-    // ---- THE GUNSMITH BENCH: walk up, [E], and fit the gun in your hands with
-    //      scopes / bigger mags / a suppressor / grips (city/gunmods.js owns the
-    //      catalog + the menu; this is just the in-world workbench you approach).
-    //      Placed toward the store interior (customer side) so it's always
-    //      reachable inside the browse apron. ----
-    if (CBZ.gunModsOpenBench) {
-      let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
-      const wx = C.x + C.tx * (longLen * 0.28) + inx * 1.6;
-      const wz = C.z + C.tz * (longLen * 0.28) + inz * 1.6;
-      const top = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.12, 0.7), m.board);
-      top.position.set(wx, 0.92, wz); top.castShadow = false; group.add(top);
-      const legGeo = new THREE.BoxGeometry(0.08, 0.86, 0.08);
-      [[-0.42, -0.28], [0.42, -0.28], [-0.42, 0.28], [0.42, 0.28]].forEach((o) => {
-        const lg = new THREE.Mesh(legGeo, m.board); lg.position.set(wx + o[0], 0.43, wz + o[1]); lg.castShadow = false; group.add(lg);
-      });
-      const vise = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), m.glow);
-      vise.position.set(wx, 1.06, wz); vise.castShadow = false; group.add(vise);
-      const bench = { name: "Gunsmith Bench", mod: true, sold: false, x: wx, y: 1.06, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 };
-      bench.tag = tagSprite("Gunsmith Bench · scopes · mags · silencer", "#7ed957", 3.2, 0.52);
-      if (bench.tag) { bench.tag.position.set(wx, 1.55, wz); group.add(bench.tag); }
-      S.slots.push(bench);
+  /* ---- the C4: an open black hard case, egg-crate foam in the lid, two
+     charges bedded in the base foam. `k` is a kit whose frame has +Z toward
+     the customer; (x, y) is where the case's foot sits. */
+  function buildC4(group, k, x, y, z, C) {
+    const W = 0.36, D = 0.27, BH = 0.075;
+    k.box(x, y + BH / 2, z, W, BH, D, 0x1b1c1e, "gloss");
+    for (let i = -1; i <= 1; i += 2) k.box(x + i * 0.12, y + BH / 2, z + D / 2 + 0.004, 0.05, BH - 0.02, 0.008, 0x151618, "gloss");
+    for (const sx of [-1, 1]) k.box(x + sx * 0.1, y + BH - 0.012, z + D / 2 + 0.008, 0.035, 0.02, 0.01, 0x9aa0a6, "metal");
+    k.box(x, y + BH - 0.005, z, W - 0.02, 0.01, D - 0.02, 0x2a2b2e);
+    const a = -0.28, hz = z - D / 2, hy = y + BH;
+    const LH = D;
+    k.box(x, hy + (LH / 2) * Math.cos(a), hz + (LH / 2) * Math.sin(a) - 0.02, W, LH, 0.045, 0x1b1c1e, "gloss", a);
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 4; j++) {
+      const ly = 0.035 + j * 0.055, lx = -W / 2 + 0.045 + i * 0.068;
+      k.box(x + lx, hy + ly * Math.cos(a) + 0.004, hz + ly * Math.sin(a) + 0.006, 0.05, 0.04, 0.012, 0x2a2b2e, "solid", a);
     }
-    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("gun-store", S.lot.building, group);
+    if (CBZ.itemAsset) for (let i = 0; i < 2; i++) {
+      const cm = CBZ.itemAsset("C4 Charge", null, { kind: "bomb" });
+      if (cm) k.absorb(cm, x - 0.075 + i * 0.15, y + BH - 0.012, z + 0.02, 0, Math.PI / 2, 0);
+    }
+    const wp = k.world(x, z);
+    S.slots.push({ name: "C4 Charge", boom: true, sold: false, x: wp.x, y: y + 0.1, z: wp.z, reach: CASE_REACH, dot: CASE_DOT });
   }
 
   // which kits the store SELLS, in display order. swatVest is intentionally NOT
   // here — it's police issue, taken off a dead SWAT (the loot-only why). Prices
   // come from cityEcon if the kit name is registered there; else a sane default.
   const ARMOR_FOR_SALE = [
-    { kit: "softVest",     label: "Kevlar Vest",    price: 450,  color: "#9fe0ff" },
-    { kit: "plateCarrier", label: "Plate Carrier",  price: 2400, color: "#ffd166" },
-    { kit: "helmet",       label: "Combat Helmet",  price: 600,  color: "#9fe0ff" },
+    { kit: "softVest",     label: "Kevlar Vest",    price: 450 },
+    { kit: "plateCarrier", label: "Plate Carrier",  price: 2400 },
+    { kit: "helmet",       label: "Combat Helmet",  price: 600 },
   ];
   function armorKit(id) { return (CBZ.ARMOR_KITS && CBZ.ARMOR_KITS[id]) || null; }
   function armorPrice(spec) {
@@ -282,28 +720,14 @@
     return spec.price;
   }
 
-  /* ---- THE ARMOURY IS REAL ----------------------------------------------
-     OWNER: "armoury having real armour on mannequins ... i dont want a store
-     with a bunch of fake shit."
-
-     WHAT WAS HERE. A 0.55x0.78x0.32 BOX on a stick, tinted 0x2c3340, and for
-     the helmet a hemisphere on a post. Not the vest. Not even a body. Every
-     cop and every SWAT in this city wears a REAL vest — armor.js mounts a
-     fitted shell, a raised plate band, shoulder pads, cummerbund side plates
-     and a groin flap over a measured torso, and a real tactical lid with a
-     brim, rails, a visor and a rear counterweight — and the shop that SELLS
-     that armour displayed a rectangle.
-
-     WHAT IS HERE NOW. A real character rig (CBZ.makeCharacter — the body every
-     person in the game is built from), coloured matte studio-cream so the FORM
-     never competes with the goods, standing on a plinth; and armor.js's own
-     CBZ.cityArmorDressPed puts the ACTUAL kit on it. The vest on the mannequin
-     is the vest you walk out wearing, mounted by the one function that mounts
-     it, fitted by the same armorFit measurement — so it cannot drift from what
-     the player gets, ever. Missing armor.js or missing rig builder → the row is
-     skipped entirely rather than faked. */
+  /* ---- THE ARMOURY -------------------------------------------------------
+     A real character rig (CBZ.makeCharacter) in matte studio cream, standing
+     on a round display base, wearing the ACTUAL kit armor.js mounts on every
+     SWAT officer (CBZ.cityArmorDressPed), so the vest on the form cannot
+     drift from the vest you walk out wearing. Missing armor.js or rig builder
+     → the row is skipped rather than faked. */
   const FORM_SKIN = 0xd8d2c6, FORM_DARK = 0x2c2f36;
-  function armorMannequin(group, x, z, faceY, kitId) {
+  function armorMannequin(group, x, z, faceY, kitId, y) {
     if (!CBZ.makeCharacter || !CBZ.cityArmorDressPed) return null;
     let rig = null;
     try {
@@ -313,7 +737,7 @@
       });
     } catch (e) { rig = null; }
     if (!rig || !rig.group) return null;
-    rig.group.position.set(x, 0, z);
+    rig.group.position.set(x, y, z);
     rig.group.rotation.y = faceY;
     // a display form is a RIG under the city root: tag it so the static passes
     // (batch merge / matrix freeze) never fold a body into the shell.
@@ -323,37 +747,37 @@
     return rig;
   }
 
-  // the armoury row past the ammo crates (counter's - tangent end). One
-  // mannequin per kit that actually EXISTS in CBZ.ARMOR_KITS, wearing it.
-  function buildArmorRack(group, m, C, longLen) {
-    const kits = CBZ.ARMOR_KITS;
-    if (!kits) return;                                       // armor.js absent — no rack, no crash
+  // the armoury row past the counter's - end, facing the customer side. The
+  // pitch tightens to fit the room; forms that still don't fit step into a
+  // second row in front.
+  function buildArmorRack(group, C, L, FY) {
+    if (!CBZ.ARMOR_KITS) return;
     const sells = ARMOR_FOR_SALE.filter((sp) => armorKit(sp.kit));
     if (!sells.length) return;
-    // mannequins sit at the - tangent end (ammo/explosives took the + end),
-    // facing the customer side of the counter.
-    const baseOff = -(longLen / 2 + 0.95);
     let inx = S.cx - C.x, inz = S.cz - C.z;
     const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
     const faceY = Math.atan2(inx, inz);
-    const plinth = m.plinth || (m.plinth = (function () {
-      const mm = new THREE.MeshLambertMaterial({ color: 0x1c1f24 }); mm._shared = true; return mm;
-    })());
+    const room = latRoom(S.gs.bounds, C.x, C.z, C.tx, C.tz, -1) - 0.4;
+    const first = L / 2 + 0.72;
+    const avail = Math.max(0, room - first);
+    const pitch = sells.length > 1 ? Math.max(0.72, Math.min(0.95, avail / (sells.length - 1))) : 0;
+    const perRow = Math.max(1, Math.floor(avail / Math.max(pitch, 0.72)) + 1);
+    const k = KIT.create().frame(0, 0, 0, 0);
     sells.forEach((sp, i) => {
-      const off = baseOff - i * 1.15;
-      const x = C.x + C.tx * off + inx * 0.35, z = C.z + C.tz * off + inz * 0.35;
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.10, 0.62), plinth);
-      base.position.set(x, 0.05, z); base.castShadow = false; group.add(base);
-      const rig = armorMannequin(group, x, z, faceY, sp.kit);
-      if (rig && rig.group) rig.group.position.y = 0.10;      // stand ON the plinth
+      const row = (i / perRow) | 0, col = i - row * perRow;
+      const off = -(first + col * pitch);
+      const fwd = 0.35 + row * 0.85;
+      const x = C.x + C.tx * off + inx * fwd, z = C.z + C.tz * off + inz * fwd;
+      // round display base: a dark disc, a brushed ring, a rubber foot
+      k.cyl(x, FY + 0.012, z, 0.3, 0.31, 0.024, 0x111214);
+      k.cyl(x, FY + 0.04, z, 0.28, 0.28, 0.032, 0x23262b, "gloss", 0, 0, 0, 32);
+      k.torus(x, FY + 0.056, z, 0.28, 0.006, 0xa7abb0, "metal", Math.PI / 2, 0, 0, null, 32);
+      const rig = armorMannequin(group, x, z, faceY, sp.kit, FY + 0.056);
       const isHelmet = (armorKit(sp.kit) || {}).slot === "head" || sp.kit === "helmet";
-      const slot = { name: sp.label, armor: true, kit: sp.kit, price: sp.price, rig: rig,
-                     sold: false, x: x, y: isHelmet ? 1.75 : 1.40, z: z, reach: CASE_REACH, dot: CASE_DOT };
-      const price = armorPrice(sp);
-      slot.tag = tagSprite(sp.label + " · " + fmt$(price), sp.color, 1.9, 0.44);
-      if (slot.tag) { slot.tag.position.set(x, (isHelmet ? 2.15 : 2.05), z); group.add(slot.tag); }
-      S.slots.push(slot);
+      S.slots.push({ name: sp.label, armor: true, kit: sp.kit, price: sp.price, rig: rig,
+                     sold: false, x: x, y: FY + (isHelmet ? 1.75 : 1.40), z: z, reach: CASE_REACH, dot: CASE_DOT });
     });
+    k.build(group);
   }
   // headless / harness handle: what the armoury row is actually WEARING.
   CBZ.cityGunstoreArmoury = function () {
@@ -368,18 +792,80 @@
     return out;
   };
 
+  /* ---- THE GUNSMITH BENCH ------------------------------------------------
+     Walk up, [E], and fit the gun in your hands (city/gunmods.js owns the
+     catalog + menu). A freestanding bench on the customer side: butcher-block
+     top on a steel frame with a lower shelf, a pegboard riser with wrenches
+     hung on it, a bench vise, a cleaning mat with a rod, a screwdriver and
+     an oil bottle, an articulated lamp. Kept off the room's centre line,
+     which is the customer's walk from the door to the counter. */
+  function buildBench(group, C, L, D, FY) {
+    let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
+    let lat = L * 0.28;
+    let wx = C.x + C.tx * lat + inx * 1.6, wz = C.z + C.tz * lat + inz * 1.6;
+    const latC = (wx - S.cx) * C.tx + (wz - S.cz) * C.tz;
+    if (Math.abs(latC) < 1.62) { const shift = (latC >= 0 ? 1 : -1) * 1.62 - latC; wx += C.tx * shift; wz += C.tz * shift; }
+    const B = S.gs.bounds;
+    wx = Math.max(B.minX + 0.75, Math.min(B.maxX - 0.75, wx));
+    wz = Math.max(B.minZ + 0.75, Math.min(B.maxZ - 0.75, wz));
+    const k = KIT.create().frame(wx, 0, wz, KIT.yawOf(C.tx, C.tz));
+    const T = FY + 0.9, STEEL = 0x3c4148;
+    k.box(0, T + 0.025, 0, 1.2, 0.05, 0.62, 0x9c7447);                                  // butcher block
+    for (let i = 1; i < 12; i++) k.box(-0.6 + i * 0.1, T + 0.0505, 0, 0.003, 0.001, 0.62, 0x7d5a35);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(sx * 0.55, FY + 0.45, sz * 0.26, 0.045, 0.9, 0.045, STEEL, "metal");
+    for (const sz of [-1, 1]) k.box(0, T - 0.04, sz * 0.26, 1.06, 0.06, 0.03, STEEL, "metal");
+    k.box(0, FY + 0.2, 0, 1.1, 0.02, 0.5, 0x6d5234);                                    // lower shelf
+    for (const sz of [-1, 1]) k.box(0, FY + 0.19, sz * 0.26, 1.06, 0.03, 0.03, STEEL, "metal");
+    k.box(0.1, FY + 0.27, 0.02, 0.5, 0.12, 0.3, 0xb3322b, "metal");                     // a red tool chest on the shelf
+    k.box(0.1, FY + 0.336, 0.02, 0.51, 0.012, 0.31, 0x8a2621, "metal");
+    k.box(0.1, FY + 0.35, 0.02, 0.18, 0.015, 0.02, 0xb4b8bd, "metal");
+    // pegboard riser at the back, and what hangs on it
+    const PB = T + 0.05;
+    for (const sx of [-1, 1]) k.box(sx * 0.58, PB + 0.3, -0.29, 0.03, 0.6, 0.03, STEEL, "metal");
+    k.box(0, PB + 0.3, -0.29, 1.12, 0.56, 0.012, 0xc9b48a);
+    for (let i = 0; i < 16; i++) for (let j = 0; j < 7; j++) k.box(-0.525 + i * 0.07, PB + 0.06 + j * 0.07, -0.2835, 0.007, 0.007, 0.002, 0x6f604a);
+    if (CBZ.itemAsset) {
+      for (let i = 0; i < 3; i++) {
+        const wr = CBZ.itemAsset("Wrench", null, { kind: "tool" });
+        if (wr) k.absorb(wr, -0.4 + i * 0.09, PB + 0.3, -0.276, -Math.PI / 2, 0, 0, 0.9 + i * 0.12);
+      }
+      const cb = CBZ.itemAsset("Crowbar");
+      if (cb) k.absorb(cb, 0.35, PB + 0.3, -0.27, -Math.PI / 2, 0, 0.12);
+    }
+    // bench vise at the + front corner
+    const vx = 0.42, vz = 0.2, VB = 0x3f5a7a;
+    k.box(vx, T + 0.065, vz, 0.14, 0.03, 0.14, VB, "metal");
+    k.box(vx, T + 0.12, vz, 0.16, 0.08, 0.1, VB, "metal");
+    k.box(vx, T + 0.19, vz - 0.03, 0.15, 0.06, 0.035, VB, "metal");
+    k.box(vx, T + 0.19, vz + 0.05, 0.15, 0.06, 0.035, VB, "metal");
+    for (const zz of [vz - 0.012, vz + 0.032]) k.box(vx, T + 0.215, zz, 0.15, 0.012, 0.004, 0x9aa0a6, "metal");
+    k.cyl(vx, T + 0.13, vz + 0.14, 0.012, 0.012, 0.16, 0xb4b8bd, "metal", Math.PI / 2);
+    k.cyl(vx, T + 0.13, vz + 0.215, 0.008, 0.008, 0.2, 0xb4b8bd, "metal", 0, 0, Math.PI / 2);
+    // cleaning mat and what's on it
+    k.box(-0.12, T + 0.052, 0.05, 0.72, 0.004, 0.36, 0x2c4a3a);
+    k.cyl(-0.12, T + 0.06, 0.12, 0.004, 0.004, 0.6, 0x8e959c, "metal", 0, 0, Math.PI / 2);
+    k.cyl(-0.3, T + 0.066, -0.03, 0.012, 0.012, 0.1, 0xd4a43a, "solid", 0, 0, Math.PI / 2);   // screwdriver handle
+    k.cyl(-0.215, T + 0.066, -0.03, 0.003, 0.003, 0.08, 0x9aa0a6, "metal", 0, 0, Math.PI / 2);
+    k.cyl(0.12, T + 0.105, -0.05, 0.024, 0.024, 0.1, 0x2a3f6a);                            // oil bottle
+    k.cyl(0.12, T + 0.17, -0.05, 0.004, 0.012, 0.03, 0xe8e2d0);
+    // articulated lamp at the - back corner
+    const lx = -0.5, lz = -0.2;
+    k.cyl(lx, T + 0.06, lz, 0.065, 0.07, 0.02, 0x22252a, "metal");
+    k.cyl(lx + 0.06, T + 0.22, lz, 0.008, 0.008, 0.34, 0x22252a, "metal", 0, 0, -0.38);
+    k.cyl(lx + 0.2, T + 0.4, lz + 0.05, 0.008, 0.008, 0.3, 0x22252a, "metal", 0.3, 0, -1.1);
+    k.cyl(lx + 0.32, T + 0.42, lz + 0.1, 0.03, 0.065, 0.08, 0x22252a, "metal", 0.35, 0, -0.5);
+    k.cyl(lx + 0.34, T + 0.385, lz + 0.115, 0.055, 0.055, 0.004, 0xfff1d8, "glow", 0.35, 0, -0.5);
+    k.build(group);
+    S.slots.push({ name: "Gunsmith Bench", mod: true, sold: false, x: wx, y: T + 0.1, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 });
+  }
+
   // ---- SOLD gap / restock ----------------------------------------------------
+  // the gun and its tag leave together; the empty yoke (or bare felt) stays
   function setSold(s, on) {
     s.sold = !!on;
     if (s.model) s.model.visible = !on;
-    if (s.tag) s.tag.visible = false;
-    if (on) {
-      if (!s.soldTag) {
-        s.soldTag = tagSprite("SOLD, restock soon", "#ff7a7a", 2.0, 0.5);
-        if (s.soldTag) { s.soldTag.position.set(s.tag ? s.tag.position.x : s.x, s.tag ? s.tag.position.y : s.y, s.tag ? s.tag.position.z : s.z); S.group.add(s.soldTag); }
-      } else s.soldTag.visible = true;
-      s.restockT = RESTOCK * (0.8 + Math.random() * 0.5);
-    } else if (s.soldTag) s.soldTag.visible = false;
+    if (s.card) s.card.visible = !on;
+    if (on) s.restockT = RESTOCK * (0.8 + Math.random() * 0.5);
   }
 
   // ---- buying ----------------------------------------------------------------
@@ -401,10 +887,10 @@
     if (s.armor) {
       if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); return; }
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2); return; }
       CBZ.cityEquipArmor(s.kit);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + " · you're plated up.", 2.2);
+      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + ", you're plated up.", 2.2);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
@@ -412,7 +898,7 @@
     // off-screen). Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
     if (s.boom) {
       const price = e.buyPrice(s.name);
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2); return; }
       e.add(s.name, 1);
       const n = e.count ? e.count(s.name) : 0;
       if (s.name === "Grenade") g.cityGrenades = n;
@@ -429,7 +915,7 @@
     if (!meta) return;
     const price = e.buyPrice(s.name);   // the SAME price the counter menu reads
     if (!CBZ.city.spend(price)) {
-      CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2);
+      CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2);
       return;
     }
     e.add(s.name, 1);
@@ -442,7 +928,7 @@
     setSold(s, true);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 3000 ? 3 : 1);   // walking out heavy IS the flex
-    if (price >= 3000 && CBZ.city.big) CBZ.city.big("" + s.name + " · straight off the wall!");
+    if (price >= 3000 && CBZ.city.big) CBZ.city.big(s.name + ", straight off the wall!");
     CBZ.city.note("Bought the " + s.name + " for " + fmt$(price) + " (+" + rounds + " starter rounds).", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -468,26 +954,26 @@
 
   function promptText(s) {
     const e = econ();
-    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench, <span style='color:#7ed957'>fit scopes · bigger mags · silencer · grips</span>";
+    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench, <span style='color:#7ed957'>fit scopes, bigger mags, silencer, grips</span>";
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {};
-      return "<b style='color:#ffd166'>[E]</b> Ammo Box, <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>· +" + (meta.rounds || 60) + " rounds</span>";
+      return "<b style='color:#ffd166'>[E]</b> Ammo Box, <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>+" + (meta.rounds || 60) + " rounds</span>";
     }
     if (s.boom) {
-      const use = s.name === "C4 Charge" ? "remote det · [B] plant, hold [B] boom" : "frag · [G] throws it";
-      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " · <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>· " + use + "</span>";
+      const use = s.name === "C4 Charge" ? "remote det, [B] plant, hold [B] boom" : "frag, [G] throws it";
+      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + ", <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>" + use + "</span>";
     }
     if (s.armor) {
       const kit = armorKit(s.kit) || {};
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      const stats = ((kit.pts | 0) > 0 ? "+" + kit.pts + " armor" : "body armor") + (kit.slot === "helmet" ? " · head" : "");
-      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + " · <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
+      const stats = ((kit.pts | 0) > 0 ? "+" + kit.pts + " armor" : "body armor") + (kit.slot === "helmet" ? ", head" : "");
+      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + ", <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>" + stats + "</span>";
     }
-    if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + " · SOLD</span> <span style='color:#7f8794'>· restock truck's rolling</span>";
+    if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + ", SOLD</span> <span style='color:#7f8794'>restock truck's rolling</span>";
     const meta = e.ITEMS[s.name] || {};
     const price = e.buyPrice(s.name);
-    const stats = ((meta.dmg | 0) > 1 ? meta.dmg + " dmg" : "explosive") + (meta.ammo ? " · " + meta.ammo + "-rd mag" : "");
-    return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " · <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
+    const stats = ((meta.dmg | 0) > 1 ? meta.dmg + " dmg" : "explosive") + (meta.ammo ? ", " + meta.ammo + "-rd mag" : "");
+    return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + ", <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>" + stats + "</span>";
   }
 
   function promptEl() {

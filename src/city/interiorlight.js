@@ -119,7 +119,33 @@
   //                 soft warm pool, then a thin dark skirting line at the base.
   // A faint vertical seam down the centre hints at a back corner so two side
   // walls are implied — enough parallax-free depth cue to never read as flat.
-  var _roomTex = null;
+  var _roomTex = null, _roomTexLit = null;
+  // THE LIT ROOM has its lights on: the same room with a ceiling fitting in
+  // the top band, the pool it throws on the ceiling round it and a wash down
+  // the back wall. A lit room's ceiling is the BRIGHT part of the view from the
+  // street, not the dark one, and that single cue is what reads as "someone
+  // switched the lights on" instead of "a beige panel got brighter".
+  function makeLitRoomTexture() {
+    if (_roomTexLit) return _roomTexLit;
+    var base = makeRoomTexture();
+    var cv = document.createElement("canvas");
+    cv.width = 64; cv.height = 128;
+    var g = cv.getContext("2d");
+    g.drawImage(base.image, 0, 0);
+    var cg = g.createRadialGradient(32, 5, 1, 32, 5, 30);
+    cg.addColorStop(0, "rgba(255,255,255,0.55)"); cg.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = cg; g.fillRect(0, 0, 64, 24);
+    var wg = g.createRadialGradient(32, 30, 2, 32, 30, 34);
+    wg.addColorStop(0, "rgba(255,255,255,0.16)"); wg.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = wg; g.fillRect(0, 10, 64, 60);
+    g.fillStyle = "#ffffff"; g.fillRect(21, 3, 22, 3);          // the fitting itself
+    _roomTexLit = new THREE.CanvasTexture(cv);
+    _roomTexLit.wrapS = _roomTexLit.wrapT = THREE.ClampToEdgeWrapping;
+    if (THREE.sRGBEncoding != null) _roomTexLit.encoding = THREE.sRGBEncoding;
+    _roomTexLit.minFilter = THREE.LinearFilter;
+    _roomTexLit.generateMipmaps = false;
+    return _roomTexLit;
+  }
   function makeRoomTexture() {
     if (_roomTex) return _roomTex;
     var cv = document.createElement("canvas");
@@ -163,17 +189,23 @@
     // ONE plane, faces +Z by default; we orient per-instance via the matrix.
     geo = new THREE.PlaneGeometry(1, 1);
     var roomTex = makeRoomTexture();
-    // unlit, double-sided so it reads from a slight angle through the opening,
+    // unlit and FRONT-SIDED: the plane's +Z faces OUT through the opening, so
+    // it reads from every street angle and is culled from INSIDE the room.
+    // It used to be DoubleSide, which meant anyone standing in a real, fully
+    // furnished tower floor looked at a 96%-opaque grey painting of a room
+    // hung 0.18 m inside every window: the exec suite 160 m up "showed only
+    // flat grey haze" because every curtain-wall bay had this panel in it.
     // depthWrite OFF so it never z-fights the pane and stays behind the glass.
     // The shared ROOM-DEPTH texture supplies floor/wall/ceiling contrast; the
     // material color tints it day→night.
-    function mk() {
+    var litTex = makeLitRoomTexture();
+    function mk(lit) {
       return new THREE.MeshBasicMaterial({
-        color: 0x808080, map: roomTex, transparent: true, opacity: 0.96,
-        depthWrite: false, side: THREE.DoubleSide, fog: true
+        color: 0x808080, map: lit ? litTex : roomTex, transparent: true, opacity: 0.96,
+        depthWrite: false, side: THREE.FrontSide, fog: true
       });
     }
-    mats = { coolLit: mk(), warmLit: mk(), coolDark: mk(), warmDark: mk() };
+    mats = { coolLit: mk(true), warmLit: mk(true), coolDark: mk(false), warmDark: mk(false) };
     layers = {};
     counts = {};
     Object.keys(mats).forEach(function (k) {
@@ -333,6 +365,13 @@
     if (!built || !ensureThree()) return 0;
     if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
     var cleared = 0;
+    // a panel a fit-out has HIDDEN is zeroed already; blasting its bay must also
+    // forget the saved matrix, or walking away would restore it into the breach
+    for (var id in HIDDEN) {
+      var sv = HIDDEN[id];
+      if (sv[12] < minX || sv[12] > maxX || sv[14] < minZ || sv[14] > maxZ || sv[13] < y0 || sv[13] > y1) continue;
+      delete HIDDEN[id]; cleared++;
+    }
     Object.keys(layers).forEach(function (k) {
       var im = layers[k], n = counts[k];
       for (var i = 0; i < n; i++) {
@@ -352,6 +391,47 @@
   };
   var __clearM = null, __clearP = null;
 
+  /* PUBLIC: A REAL ROOM IS BEHIND THIS GLASS NOW — hide the painting of one.
+
+     city/fitout.js builds the actual interior of the storey you walk up to
+     (floor, walls, ceiling, lamps, furniture). With the panel still hung 0.18 m
+     inside every window, that finished room could never be seen from the
+     street: you looked at a 96%-opaque gradient of a room in front of the
+     room. hide=true zero-scales every panel whose centre is in the box and
+     SAVES its matrix; hide=false puts back exactly what it saved (and only
+     that) when the fit-out frees the floor. Returns the count touched. */
+  var HIDDEN = {};                      // "layer:index" -> saved matrix elements
+  CBZ.cityInteriorGlowHideBox = function (minX, maxX, y0, y1, minZ, maxZ, hide) {
+    if (!built || !ensureThree()) return 0;
+    if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
+    var n2 = 0;
+    Object.keys(layers).forEach(function (k) {
+      var im = layers[k], n = counts[k], touched = false;
+      for (var i = 0; i < n; i++) {
+        var id = k + ":" + i, sv = HIDDEN[id];
+        if (hide) {
+          if (sv) continue;
+          im.getMatrixAt(i, __clearM);
+          var e = __clearM.elements;
+          if (e[0] === 0 && e[5] === 0) continue;                 // blasted / cleared
+          if (e[12] < minX || e[12] > maxX || e[14] < minZ || e[14] > maxZ || e[13] < y0 || e[13] > y1) continue;
+          HIDDEN[id] = e.slice();
+          __clearM.makeScale(0, 0, 0);
+          im.setMatrixAt(i, __clearM);
+        } else {
+          if (!sv) continue;
+          if (sv[12] < minX || sv[12] > maxX || sv[14] < minZ || sv[14] > maxZ || sv[13] < y0 || sv[13] > y1) continue;
+          __clearM.fromArray(sv);
+          im.setMatrixAt(i, __clearM);
+          delete HIDDEN[id];
+        }
+        touched = true; n2++;
+      }
+      if (touched) im.instanceMatrix.needsUpdate = true;
+    });
+    return n2;
+  };
+
   /* PUBLIC: wipe everything (new run / island regen). */
   CBZ.cityInteriorGlowReset = function () {
     if (!built) return;
@@ -362,6 +442,7 @@
       if (im.parent) im.parent.remove(im);   // re-added on next register
     });
     total = 0;
+    HIDDEN = {};
     nightApplied = -1;
   };
 

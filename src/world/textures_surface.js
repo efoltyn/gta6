@@ -142,6 +142,52 @@
         out.q = 0.97 - grain * 0.13 - blotch * 0.06;
       },
     },
+    // ---- roofing: a granulated modified-bitumen cap sheet ----------------
+    // ONE tile = 6 m x 6 m of flat roof (city/building_dress.js projects it in
+    // world metres, so a 9 m motel roof and a 40 m tower roof carry the same
+    // real-scale sheet). Six 1 m rolls run along u; every roll is lapped by the
+    // next along a thin torched bitumen bead (the line that catches low sun),
+    // each roll has one staggered end lap, the rolls differ a touch in tone
+    // (two production batches).
+    // Mineral granules are per-pixel speckle, not smooth noise: that grain is
+    // what makes a roof read as a roof instead of a grey slab.
+    roofing: {
+      def: { roughness: 0.93, metalness: 0.0, normalScale: 0.9, repeat: 1 },
+      author: function (u, v, out) {
+        const ROWS = 6, TILE = 6;
+        const vv = v * ROWS, row = Math.floor(vv) % ROWS, fr = vv - Math.floor(vv);
+        // granules: per-texel white noise, 512 lattice (tiles at any bake res)
+        const g = lat(Math.floor(u * 512), Math.floor(v * 512), 512, 0x0f72);
+        const g2 = lat(Math.floor(u * 512) + 7, Math.floor(v * 512) + 3, 512, 0x0f7a);
+        let l = 0.44 + (g - 0.5) * 0.07;
+        if (g2 > 0.94) l += 0.11; else if (g2 < 0.05) l -= 0.12;
+        const mott = fbm(u, v, 3, 3, 0x0f74) - 0.5, fine = fbm(u, v, 18, 2, 0x0f75) - 0.5;
+        l += mott * 0.09 + fine * 0.05;
+        // the next roll lies ON this one's selvage from fr = 0.905, so the lap
+        // strip belongs to (and is toned like) the roll above it
+        const onTop = fr > 0.905 ? (row + 1) % ROWS : row;
+        l += (lat(onTop, 1, ROWS, 0x0f73) - 0.5) * 0.05;        // roll-to-roll batch tone
+        let h = 0.45 + (g - 0.5) * 0.18, q = 0.95 - (g2 > 0.94 ? 0.06 : 0);
+        // SIDE LAP: a crisp edge where the upper roll stops (fr = 0.905), and a
+        // soft drape where it comes back down onto the deck past the row line
+        if (fr > 0.905) h += 0.22;
+        else if (fr < 0.06) h += 0.22 * (1 - fr / 0.06);
+        const bead = Math.abs(fr - 0.905) * TILE / ROWS;          // metres from the lap edge
+        if (bead < 0.012) { l = 0.16 + (g - 0.5) * 0.04; q = 0.58; h += 0.10; }
+        else if (bead < 0.03 && fr < 0.905) l -= 0.05;            // bead shadow on the lower roll
+        // END LAP: one per roll, staggered along u
+        let du = u - lat(row, 0, ROWS, 0x0f71); du -= Math.round(du);
+        const duM = du * TILE;                                    // signed metres
+        if (duM > -0.075 && duM < 0.075) h += 0.18;
+        const eb = Math.abs(duM - 0.075);
+        if (eb < 0.012) { l = 0.16 + (g - 0.5) * 0.04; q = 0.58; h += 0.08; }
+        // (repair patches are laid in world space by the deck shader in
+        // world/building_dress.js, so they never repeat on a 6 m grid)
+        out.r = l * 1.03; out.g = l * 1.0; out.b = l * 0.95;
+        out.h = Math.min(1, h);
+        out.q = q;
+      },
+    },
     // ---- concrete: poured, pitted, water-stained -------------------------
     concrete: {
       def: { roughness: 0.90, metalness: 0.02, normalScale: 0.55, repeat: 4 },

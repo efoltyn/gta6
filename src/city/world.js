@@ -298,23 +298,66 @@
     }
     // the raised concrete MEDIAN on the two avenues, stopping short of the
     // stop bars so the crosswalk and the junction stay open (one merged mesh)
+    // It was a flat-grey BoxGeometry (unit UVs, no texture): a placeholder slab
+    // down the middle of the avenue. It is cut from the SAME granite kerb stone
+    // the footway kerbs use (streetkit's kerb atlas: top band v 0.53-0.98, sawn
+    // face v < 0.5, 1 m stones along u), so the island reads as kerbed concrete
+    // with road grime up its faces, and its noses are rounded like a real one.
     if (street) {
-      const medMat = mat(0x7a7f86);
-      const medGeoms = [];
+      const kTex = street.kerbTexture || null;
+      const medMat = kTex ? new THREE.MeshLambertMaterial({ map: kTex }) : mat(0x6f737a);
+      if (kTex && CBZ.terrainFogScale) CBZ.terrainFogScale(medMat, 0.10);
+      const P = [], Nn = [], U = [];
+      const yB = SP.yRoad - 0.02, yT = SP.yRoad + 0.17, H = yT - yB;
+      const vFace0 = Math.max(0, 0.5 - (H / 0.32) * 0.5);
+      // one triangle, wound so its face normal agrees with n (never trust the
+      // hand-ordered ring to be CCW in three's left-handed top view)
+      function tri(a, b, c, n, ua, ub, uc) {
+        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        const d = (uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2];
+        const L = d < 0 ? [[a, ua], [c, uc], [b, ub]] : [[a, ua], [b, ub], [c, uc]];
+        for (const [p, uv] of L) { P.push(p[0], p[1], p[2]); Nn.push(n[0], n[1], n[2]); U.push(uv[0], uv[1]); }
+      }
+      function quad(a, b, c, d, n, ua, ub, uc, ud) { tri(a, b, c, n, ua, ub, uc); tri(a, c, d, n, ua, uc, ud); }
+      function medianRun(x, z0, z1) {
+        const hw = AVE_MEDIAN / 2, R = hw, SEG = 6;
+        // outline: straight sides + a semicircular nose at each end (CCW from above)
+        const ring = [];
+        for (let k = 0; k <= SEG; k++) { const a = Math.PI + (k / SEG) * Math.PI; ring.push([x + Math.cos(a) * R, z0 + R + Math.sin(a) * R]); }
+        for (let k = 0; k <= SEG; k++) { const a = (k / SEG) * Math.PI; ring.push([x + Math.cos(a) * R, z1 - R + Math.sin(a) * R]); }
+        // top: fan from the centre line (granite top band)
+        const cz = (z0 + z1) / 2;
+        let s = 0;
+        const along = [0];
+        for (let k = 1; k <= ring.length; k++) { const a = ring[k - 1], b = ring[k % ring.length]; s += Math.hypot(b[0] - a[0], b[1] - a[1]); along.push(s); }
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k], b = ring[(k + 1) % ring.length];
+          const vA = 0.53 + 0.45 * (a[0] - (x - hw)) / (2 * hw), vB = 0.53 + 0.45 * (b[0] - (x - hw)) / (2 * hw);
+          // top triangle (centre, b, a) faces +y
+          tri([x, yT, cz], [b[0], yT, b[1]], [a[0], yT, a[1]], [0, 1, 0], [cz / 4, 0.755], [b[1] / 4, vB], [a[1] / 4, vA]);
+          // side face, outward normal
+          const mx = (a[0] + b[0]) / 2 - x, mz = (a[1] + b[1]) / 2 - Math.min(Math.max((a[1] + b[1]) / 2, z0 + R), z1 - R);
+          const nl = Math.hypot(mx, mz) || 1, n = [mx / nl, 0, mz / nl];
+          const u0 = along[k] / 4, u1 = along[k + 1] / 4;
+          quad([a[0], yB, a[1]], [a[0], yT, a[1]], [b[0], yT, b[1]], [b[0], yB, b[1]], n, [u0, vFace0], [u0, 0.5], [u1, 0.5], [u1, vFace0]);
+        }
+      }
       const noseOff = street.solve.stop1 + 0.8;
       AVENUE_LINES.forEach((i) => {
         const x = xLines[i];
         for (let j = 0; j < N; j++) {
           const z0 = zLines[j] + noseOff, z1 = zLines[j + 1] - noseOff;
-          if (z1 - z0 < 1) continue;
-          const g = new THREE.BoxGeometry(AVE_MEDIAN, 0.2, z1 - z0);
-          g.translate(x, SP.yRoad + 0.08, (z0 + z1) / 2);
-          medGeoms.push(g);
+          if (z1 - z0 < 1.5) continue;
+          medianRun(x, z0, z1);
         }
       });
-      const BGU = THREE.BufferGeometryUtils;
-      if (medGeoms.length && BGU && BGU.mergeBufferGeometries) {
-        const med = new THREE.Mesh(BGU.mergeBufferGeometries(medGeoms), medMat);
+      if (P.length) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+        g.setAttribute("normal", new THREE.Float32BufferAttribute(Nn, 3));
+        g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
+        g.computeBoundingSphere();
+        const med = new THREE.Mesh(g, medMat);
         med.name = "avenue-medians";
         med.castShadow = false; med.receiveShadow = true; med.matrixAutoUpdate = false; med.updateMatrix(); root.add(med);
       }

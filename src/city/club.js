@@ -383,7 +383,7 @@
     if (best) {
       best._clubConnect = true;     // interact.js / your crew code can read this as "rich lead"
       best.tightWithYou = true;     // warmer to recruiting (guarded read elsewhere)
-      note("A high-roller in the VIP lounge · " + (best.name || "a big earner") + " · is worth knowing.", 2.4);
+      note("A high-roller in the VIP lounge, " + (best.name || "a big earner") + ", is worth knowing.", 2.4);
     } else {
       note("The VIP lounge is full of money, work the room.", 2.0);
     }
@@ -511,4 +511,330 @@
     workTheLine(dt);
     gatePlayer(dt);
   });
+
+  /* ==========================================================================
+     THE ROOM PAST THE ROPE (2026-09-27 de-slop). The club used to be glowing
+     floor tiles, a lit cube for a mirror ball, blocks for booths and a DJ
+     console with two cyan squares for decks, all drawn by buildings.js. The
+     whole interior is built here now, lazily, only for the club you are at:
+       • the back bar behind the (fit-out clad) counter: fridges with lit
+         glass doors, a mirror, three shelves of real bottles, LED under-shelf
+         strips; bar stools with a foot ring along the customer face;
+       • a raised dance floor of dark glass tiles with dim LED panels in a
+         pattern and an aluminium nosing;
+       • a box truss over it on drop rods with moving heads and a faceted
+         mirror ball;
+       • a DJ riser against a side wall: fascia with an LED strip, two decks,
+         a mixer, a laptop on a stand, monitor speakers, PA stacks either side;
+       • VIP banquettes along the other wall (tufted back, cushion at 0.44,
+         round pedestal tables with an ice bucket), high-top tables up front.
+     Only screens, lamp lenses, LED strips and fridge interiors glow.
+     Everything merges through CBZ.storeFixtureKit into a few meshes.
+     ========================================================================== */
+  const THREE = window.THREE;
+
+  // ---- SHARED VENUE FIXTURES (casino.js reuses these) -----------------------
+  // Both draw in the kit's CURRENT frame: local +X runs along the wall/counter,
+  // local +Z faces the room, y is height above the finished floor (the caller
+  // frames the kit at floor height).
+  const BOTTLES = [0x5a3212, 0x7a4a18, 0x1f4a2a, 0xc9ccc4, 0x3a1a28, 0x8a6a2a, 0x24361e, 0xa8b0b4, 0x4a2410];
+  function backBar(k, L, o) {
+    o = o || {};
+    const H = o.h || 2.4, wood = o.wood || 0x2a1d14, top = o.top || 0x141416, led = o.led || 0xffcf8a;
+    const rr = (CBZ.storeFixtureKit && CBZ.storeFixtureKit.rng) ? CBZ.storeFixtureKit.rng(o.seed || 7) : Math.random;
+    // under-counter fridges: steel carcass, glass doors lit from inside
+    k.box(0, 0.45, 0.24, L, 0.9, 0.48, wood);
+    k.box(0, 0.05, 0.49, L, 0.1, 0.02, 0x0e0e10);                                   // kick
+    const doors = Math.max(1, Math.floor(L / 0.7));
+    for (let i = 0; i < doors; i++) {
+      const x = -L / 2 + (i + 0.5) * (L / doors);
+      k.box(x, 0.5, 0.485, L / doors - 0.06, 0.66, 0.012, 0x9aa0a6, "metal");      // door frame
+      k.box(x, 0.5, 0.49, L / doors - 0.12, 0.58, 0.004, 0xd8ecf2, "glow");          // lit fridge interior
+      for (let r = 0; r < 2; r++) for (let j = 0; j < 4; j++)                        // cans/bottles in the fridge
+        k.cyl(x - (L / doors) * 0.3 + j * (L / doors) * 0.2, 0.3 + r * 0.28, 0.45, 0.028, 0.028, 0.16, BOTTLES[(i + j + r) % BOTTLES.length], "gloss", 0, 0, 0, 8);
+      k.box(x + (L / doors) * 0.38, 0.72, 0.5, 0.015, 0.2, 0.02, 0xc9ced4, "metal"); // handle
+    }
+    k.box(0, 0.92, 0.25, L + 0.04, 0.04, 0.52, top, "gloss");                        // worktop
+    // the mirror and the shelving above it
+    k.box(0, (0.95 + H) / 2 + 0.02, 0.012, L, H - 0.95, 0.012, 0x9fb0b8, "metal");
+    for (const e of [-1, 1]) k.box(e * (L / 2 + 0.03), (0.95 + H) / 2, 0.14, 0.06, H - 0.9, 0.28, wood);
+    k.box(0, H + 0.04, 0.14, L + 0.12, 0.08, 0.3, wood);                            // cornice
+    for (let s = 0; s < 3; s++) {
+      const y = 1.25 + s * 0.38;
+      k.box(0, y, 0.13, L, 0.025, 0.24, 0xcfe4ec, "glass");                        // glass shelf
+      k.box(0, y - 0.018, 0.23, L, 0.008, 0.012, led, "glow");                      // LED strip under the front lip
+      const n = Math.floor((L - 0.1) / 0.1);
+      for (let i = 0; i < n; i++) {
+        if (rr() < 0.12) continue;                                                  // the gaps a working bar has
+        const x = -L / 2 + 0.08 + i * 0.1 + (rr() - 0.5) * 0.02, tall = 0.18 + rr() * 0.1;
+        const c = BOTTLES[Math.floor(rr() * BOTTLES.length)], z = 0.1 + rr() * 0.05;
+        k.cyl(x, y + 0.012 + tall / 2, z, 0.032, 0.035, tall, c, "gloss", 0, 0, 0, 7);
+        k.cyl(x, y + 0.012 + tall + 0.035, z, 0.011, 0.02, 0.07, c, "gloss", 0, 0, 0, 5);
+        k.cyl(x, y + 0.012 + tall + 0.075, z, 0.012, 0.012, 0.014, rr() < 0.5 ? 0xc9a24a : 0x1c1c1e, "metal", 0, 0, 0, 5);
+      }
+    }
+    // glassware stack and a till on the worktop
+    for (let i = 0; i < 8; i++) k.cyl(-L / 2 + 0.25 + (i % 4) * 0.09, 0.99 + Math.floor(i / 4) * 0.13, 0.33, 0.035, 0.028, 0.12, 0xdcecf2, "glass", 0, 0, 0, 8);
+    k.box(L / 2 - 0.35, 1.02, 0.3, 0.32, 0.16, 0.26, 0x1c1e22, "gloss");
+    k.box(L / 2 - 0.35, 1.18, 0.33, 0.28, 0.18, 0.02, 0x2e4a66, "glow", -0.3);
+  }
+  // a bar stool: five-star base, gas column, foot ring, round cushion. seatY
+  // is the cushion TOP (propuse's declared number).
+  function barStool(k, x, z, seatY, o) {
+    o = o || {};
+    const metal = o.metal || 0x2a2c30, pad = o.pad || 0x3a1e1a;
+    k.cyl(x, 0.015, z, 0.2, 0.22, 0.03, metal, "metal", 0, 0, 0, 10);
+    k.cyl(x, (seatY - 0.08) / 2, z, 0.025, 0.03, seatY - 0.08, 0xc9ced4, "metal");
+    k.torus(x, seatY * 0.4, z, 0.17, 0.011, 0xc9ced4, "metal", Math.PI / 2, 0, 0, null, 12);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2;
+      k.box(x + Math.cos(a) * 0.085, seatY * 0.4, z + Math.sin(a) * 0.085, 0.17, 0.012, 0.012, 0xc9ced4, "metal", 0, -a, 0);
+    }
+    k.cyl(x, seatY - 0.06, z, 0.12, 0.1, 0.04, metal, "metal", 0, 0, 0, 10);
+    k.cyl(x, seatY - 0.03, z, 0.19, 0.19, 0.06, pad, "solid", 0, 0, 0, 12);
+  }
+  CBZ.cityVenueFixtures = { backBar: backBar, barStool: barStool, BOTTLES: BOTTLES };
+
+  const ROOM = { built: null, group: null, cols: [], seats: 0, stats: null };
+  function roomBounds(b, ox, oz) {
+    const wt = b.wt != null ? b.wt : 0.4;
+    return { minX: ox - b.w / 2 + wt - 1.2, maxX: ox + b.w / 2 - wt + 1.2, minZ: oz - b.d / 2 + wt - 1.2, maxZ: oz + b.d / 2 - wt + 1.2 };
+  }
+  function buildRoom(lot) {
+    const KIT = CBZ.storeFixtureKit;
+    const b = lot.building, c = b.club;
+    if (!KIT || !THREE || !c || !c.door || !b.w || !b.d) return false;
+    const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+    const wt = b.wt != null ? b.wt : 0.4;
+    const inx = c.door.nx, inz = c.door.nz, tx = -inz, tz = inx;         // INTO the club + the wall tangent
+    const along = Math.abs(inx) > 0.5;
+    const halfIn = (along ? b.w : b.d) / 2, halfTan = (along ? b.d : b.w) / 2;
+    const slab = (Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
+    const FF = slab + 0.06;
+    const CEIL = ((Array.isArray(b.floorTops) && b.floorTops[1] != null) ? b.floorTops[1] : slab + (b.FH || 4.6)) - 0.212;
+    const HROOM = CEIL - FF;
+    // (lat, depth-from-door-wall) → world
+    const W = function (lat, dep) { return { x: ox + tx * lat + inx * (dep - halfIn), z: oz + tz * lat + inz * (dep - halfIn) }; };
+    const yawFace = function (dLat, dDep) { return Math.atan2(tx * dLat + inx * dDep, tz * dLat + inz * dDep); };
+    const k = KIT.create();
+    const at = function (lat, dep, dLat, dDep) { const p = W(lat, dep); k.frame(p.x, FF, p.z, yawFace(dLat, dDep)); return p; };
+    const Tf = halfTan - wt, back = 2 * halfIn - wt;
+    const occ = [];
+    const take = function (l0, l1, d0, d1) { occ.push([Math.min(l0, l1), Math.max(l0, l1), Math.min(d0, d1), Math.max(d0, d1)]); };
+    const free = function (l0, l1, d0, d1) {
+      const a0 = Math.min(l0, l1), a1 = Math.max(l0, l1), b0 = Math.min(d0, d1), b1 = Math.max(d0, d1);
+      if (a0 < -Tf || a1 > Tf || b0 < wt || b1 > back) return false;
+      for (let i = 0; i < occ.length; i++) { const o = occ[i]; if (a1 > o[0] && a0 < o[1] && b1 > o[2] && b0 < o[3]) return false; }
+      if (typeof b.clearFloorPoint === "function") {
+        const pts = [[(a0 + a1) / 2, (b0 + b1) / 2], [a0, b0], [a1, b0], [a0, b1], [a1, b1]];
+        for (let i = 0; i < pts.length; i++) { const p = W(pts[i][0], pts[i][1]); if (!b.clearFloorPoint(p.x - ox, p.z - oz, 0.1)) return false; }
+      }
+      return true;
+    };
+    const collide = function (l0, l1, d0, d1, y1) {
+      const a = W(l0, d0), q = W(l1, d1);
+      const r = { minX: Math.min(a.x, q.x), maxX: Math.max(a.x, q.x), minZ: Math.min(a.z, q.z), maxZ: Math.max(a.z, q.z), y0: 0, y1: FF + y1 };
+      if (CBZ.colliders) { CBZ.colliders.push(r); ROOM.cols.push(r); }
+    };
+    const seat = function (lat, dep, dLat, dDep, kind, h) {
+      if (!CBZ.propRegisterSeat) return;
+      const p = W(lat, dep);
+      if (CBZ.propRegisterSeat(p.x, FF, p.z, yawFace(dLat, dDep), kind, lot, { cushion: h, floorBelow: 0 })) ROOM.seats++;
+    };
+    // entry lane + fit-out plant/bin inside the door stay clear
+    take(-1.3, 1.3, 0, 2.2);
+
+    // ---- THE BAR: the fit-out clads the counter; the back bar and stools are ours
+    const C = KIT.counterOf(lot);
+    let cFront = back - 3.2;
+    if (C) {
+      const cLat = (C.x - ox) * tx + (C.z - oz) * tz, cDep = (C.x - ox) * inx + (C.z - oz) * inz + halfIn;
+      const hL = (along ? C.d : C.w) / 2, hD = (along ? C.w : C.d) / 2;
+      cFront = cDep - hD;
+      take(cLat - hL - 0.3, cLat + hL + 0.3, cFront - 0.2, back);           // counter + staff side
+      const bbL = Math.min(2 * Tf - 0.4, 2 * hL + 1.0);
+      at(cLat, back, 0, -1);
+      backBar(k, bbL, { seed: Math.round(ox * 3 + oz), h: Math.min(2.5, HROOM - 0.3), led: 0xffc48a });
+      collide(cLat - bbL / 2, cLat + bbL / 2, back - 0.5, back, 2.4);
+      const n = Math.max(2, Math.floor((2 * hL - 0.3) / 0.62));
+      for (let i = 0; i < n; i++) {
+        const la = cLat - hL + 0.3 + (i + 0.5) * ((2 * hL - 0.6) / n);
+        const p = W(la, cFront - 0.42);
+        k.frame(p.x, FF, p.z, 0);
+        barStool(k, 0, 0, 0.78, { pad: 0x5a1422 });
+        seat(la, cFront - 0.42, 0, 1, "stool", 0.78);
+      }
+      take(cLat - hL, cLat + hL, cFront - 0.9, cFront);
+    }
+
+    // ---- THE DANCE FLOOR ------------------------------------------------------
+    const s = (CBZ.hash01 ? CBZ.hash01(lot.cx, lot.cz, "clubdj") : 0.3) < 0.5 ? -1 : 1;
+    const dfH = Math.min(2.4, Tf - 2.3, (cFront - 1.2 - 2.6) / 2);
+    let dfD = 0;
+    if (dfH >= 1.2) {
+      dfD = Math.max(2.6 + dfH, Math.min(halfIn, cFront - 1.4 - dfH));
+      const dfL = -s * 0.4;                                                  // shifted off the DJ wall
+      if (free(dfL - dfH, dfL + dfH, dfD - dfH, dfD + dfH)) {
+        take(dfL - dfH, dfL + dfH, dfD - dfH, dfD + dfH);
+        at(dfL, dfD, 0, -1);
+        const S2 = dfH * 2, n = Math.max(3, Math.round(S2 / 0.6)), t = S2 / n;
+        k.box(0, 0.04, 0, S2, 0.08, S2, 0x121216, "gloss");                 // riser
+        const PAL = [0x3a1650, 0x14304a, 0x4a1030, 0x1a3a2a];
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+          const x = -dfH + (i + 0.5) * t, z = -dfH + (j + 0.5) * t;
+          const lit = ((i + j) % 3) === 0;
+          k.box(x, 0.082, z, t - 0.03, 0.006, t - 0.03, lit ? PAL[(i * 3 + j) % PAL.length] : 0x0c0c10, lit ? "glow" : "gloss");
+        }
+        for (const e of [-1, 1]) {                                          // aluminium nosing
+          k.box(e * dfH, 0.045, 0, 0.03, 0.09, S2 + 0.03, 0xb4b8bd, "metal");
+          k.box(0, 0.045, e * dfH, S2 + 0.03, 0.09, 0.03, 0xb4b8bd, "metal");
+        }
+        // THE TRUSS: a square box truss on four drop rods, moving heads on it,
+        // a faceted mirror ball on a chain in the middle
+        const tY = Math.min(HROOM - 0.45, 3.4), tH = dfH + 0.2, tw = 0.29;
+        if (tY > 2.6) {
+          for (const e of [-1, 1]) for (const side of [0, 1]) {
+            for (const cy of [-tw / 2, tw / 2]) for (const cz of [-tw / 2, tw / 2]) {
+              if (side === 0) k.cyl(e * tH + cz, tY + cy, 0, 0.018, 0.018, 2 * tH + tw, 0xc9ced4, "metal", Math.PI / 2, 0, 0, 6);
+              else k.cyl(0, tY + cy, e * tH + cz, 0.018, 0.018, 2 * tH + tw, 0xc9ced4, "metal", 0, 0, Math.PI / 2, 6);
+            }
+            const segs = Math.round((2 * tH) / tw);
+            for (let q = 0; q < segs; q++) {                                 // zig-zag lacing on the two sides
+              const u = -tH + (q + 0.5) * (2 * tH / segs), a = (q % 2 ? 1 : -1) * 0.78;
+              for (const cz of [-tw / 2, tw / 2]) {
+                if (side === 0) k.cyl(e * tH + cz, tY, u, 0.007, 0.007, tw * 1.41, 0xc9ced4, "metal", a, 0, 0, 4);
+                else k.cyl(u, tY, e * tH + cz, 0.007, 0.007, tw * 1.41, 0xc9ced4, "metal", 0, 0, a, 4);
+              }
+            }
+          }
+          for (const ex of [-1, 1]) for (const ez of [-1, 1]) k.cyl(ex * tH, (tY + HROOM) / 2, ez * tH, 0.012, 0.012, HROOM - tY, 0x6a6e74, "metal", 0, 0, 0, 6);
+          const heads = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+          const lens = [0xff4fa8, 0x4fb8ff, 0xb07cff, 0xffd46a];
+          heads.forEach(function (h, i) {
+            const hx = h[0] * tH, hz = h[1] * tH, yb = tY - tw / 2;
+            k.box(hx, yb - 0.04, hz, 0.24, 0.06, 0.2, 0x1a1b1e, "gloss");                 // base
+            for (const e of [-1, 1]) k.box(hx + e * 0.11, yb - 0.17, hz, 0.03, 0.22, 0.08, 0x1a1b1e, "gloss");   // yoke
+            const tilt = 0.6;
+            k.cyl(hx, yb - 0.24, hz, 0.085, 0.1, 0.26, 0x1a1b1e, "gloss", -h[1] * tilt, 0, h[0] * tilt, 12);
+            k.cyl(hx - h[0] * 0.08, yb - 0.35, hz - h[1] * 0.08, 0.07, 0.07, 0.01, lens[i], "glow", -h[1] * tilt, 0, h[0] * tilt, 12);
+          });
+          k.cyl(0, (tY - 0.25 + HROOM) / 2, 0, 0.004, 0.004, HROOM - tY + 0.25, 0x9aa0a6, "metal", 0, 0, 0, 4);   // ball chain
+          const ball = new THREE.IcosahedronGeometry(0.2, 2);
+          ball.computeVertexNormals();                                                 // flat facets, not a smooth blob
+          k.push(ball, 0xd8dde4, "metal", 0, tY - 0.45, 0);
+        }
+      }
+    }
+
+    // ---- THE DJ RISER + PA -----------------------------------------------------
+    const djLat = s * (Tf - 0.75), djDep = dfD || Math.max(3.5, cFront - 2.5);
+    if (free(djLat - 0.75, djLat + 0.75, djDep - 1.6, djDep + 1.6)) {
+      take(djLat - 0.75, djLat + 0.75, djDep - 1.6, djDep + 1.6);
+      at(djLat, djDep, -s, 0);                                               // faces the floor
+      k.box(0, 0.15, 0, 2.0, 0.3, 1.4, 0x141416, "gloss");                    // riser
+      k.box(0, 0.62, 0.36, 1.9, 0.64, 0.08, 0x1c1c20, "gloss");              // fascia
+      k.box(0, 0.36, 0.405, 1.86, 0.012, 0.008, 0x8a4fff, "glow");            // LED strip in the fascia reveal
+      k.box(0, 0.96, 0.2, 1.9, 0.04, 0.46, 0x222226, "gloss");               // desk
+      for (const e of [-0.52, 0.52]) {                                        // two decks
+        k.box(e, 1.0, 0.18, 0.34, 0.05, 0.4, 0x151517, "gloss");
+        k.cyl(e, 1.03, 0.22, 0.11, 0.11, 0.012, 0x3a3c40, "metal", 0, 0, 0, 20);
+        k.torus(e, 1.037, 0.22, 0.11, 0.004, 0x39d0ff, "glow", Math.PI / 2, 0, 0, null, 20);
+        k.box(e, 1.03, 0.04, 0.12, 0.004, 0.07, 0x2e4a66, "glow");           // deck screen
+      }
+      k.box(0, 1.01, 0.18, 0.3, 0.07, 0.38, 0x151517, "gloss");              // mixer
+      for (let i = 0; i < 4; i++) k.box(-0.1 + i * 0.066, 1.05, 0.26, 0.01, 0.012, 0.07, 0xc9ced4, "metal");   // faders
+      k.box(0, 1.1, -0.02, 0.26, 0.2, 0.03, 0x2a2c30, "metal", -0.3);        // laptop stand + lid
+      k.box(0, 1.1, -0.005, 0.24, 0.16, 0.004, 0x3a5a7a, "glow", -0.3);
+      for (const e of [-0.85, 0.85]) {                                        // monitor speakers on the desk ends
+        k.box(e, 1.16, 0.1, 0.18, 0.28, 0.2, 0x151517, "gloss");
+        k.cyl(e, 1.12, 0.205, 0.06, 0.06, 0.01, 0x2a2c30, "metal", Math.PI / 2, 0, 0, 12);
+      }
+      collide(djLat - 0.75, djLat + 0.75, djDep - 1.0, djDep + 1.0, 1.1);
+      for (const e of [-1.35, 1.35]) {                                       // PA stacks either side of the riser
+        const sub = W(djLat, djDep + e);
+        k.frame(sub.x, FF, sub.z, yawFace(-s, 0));
+        k.box(0, 0.3, 0, 0.6, 0.6, 0.6, 0x141416, "gloss");
+        k.cyl(0, 0.3, 0.301, 0.22, 0.22, 0.01, 0x2a2c30, "metal", Math.PI / 2, 0, 0, 18);
+        k.box(0, 1.05, 0, 0.44, 0.9, 0.44, 0x141416, "gloss");
+        for (const y of [0.8, 1.2]) k.cyl(0, y, 0.221, 0.13, 0.13, 0.01, 0x2a2c30, "metal", Math.PI / 2, 0, 0, 16);
+        k.box(0, 1.42, 0.221, 0.2, 0.08, 0.01, 0x2a2c30, "metal");
+        collide(djLat - 0.3, djLat + 0.3, djDep + e - 0.3, djDep + e + 0.3, 1.5);
+      }
+    }
+
+    // ---- VIP BANQUETTES along the other wall ------------------------------------
+    const vs = -s, bLat = vs * (Tf - 0.36);
+    for (let d = 2.8; d + 1.0 < cFront - 0.4; d += 2.5) {
+      if (!free(vs * (Tf - 0.02), vs * (Tf - 1.9), d - 1.0, d + 1.0)) continue;
+      take(vs * (Tf - 0.02), vs * (Tf - 1.9), d - 1.0, d + 1.0);
+      at(bLat, d, -vs, 0);                                                  // faces the room
+      k.box(0, 0.19, 0, 1.9, 0.38, 0.62, 0x1c1418);                          // plinth
+      k.box(0, 0.41, 0.03, 1.86, 0.06, 0.58, 0x6a1622);                      // seat cushion (top 0.44)
+      k.box(0, 0.72, -0.26, 1.9, 0.62, 0.14, 0x5a121c);                       // tall back
+      for (let i = 0; i < 6; i++) for (let r = 0; r < 2; r++)                // buttoned tufting
+        k.box(-0.8 + i * 0.32, 0.6 + r * 0.22, -0.188, 0.022, 0.022, 0.006, 0x3a0a12, "solid", 0, 0, 0.785);
+      k.box(0, 1.05, -0.26, 1.96, 0.04, 0.18, 0xb08a4a, "metal");            // brass capping
+      for (const e of [-1, 1]) k.box(e * 0.97, 0.34, 0, 0.06, 0.68, 0.62, 0x1c1418);   // end arms
+      for (const e of [-0.45, 0.45]) seat(bLat - vs * 0.03, d + e, -vs, 0, "booth", 0.44);
+      // the round table in front: pedestal, disc top, ice bucket + a bottle
+      k.cyl(0, 0.02, 0.75, 0.22, 0.24, 0.04, 0x1a1a1c, "metal", 0, 0, 0, 16);
+      k.cyl(0, 0.3, 0.75, 0.035, 0.035, 0.56, 0xb08a4a, "metal", 0, 0, 0, 10);
+      k.cyl(0, 0.6, 0.75, 0.36, 0.36, 0.03, 0x121214, "gloss", 0, 0, 0, 22);
+      k.cyl(0.08, 0.7, 0.72, 0.09, 0.07, 0.17, 0xc9ced4, "metal", 0, 0, 0, 14);
+      k.cyl(0.08, 0.78, 0.72, 0.03, 0.035, 0.26, 0x1f4a2a, "gloss", 0.18, 0, 0, 8);
+      for (const e of [-0.14, -0.22]) k.cyl(e, 0.66, 0.84, 0.03, 0.022, 0.1, 0xdcecf2, "glass", 0, 0, 0, 8);
+      collide(bLat - vs * 0.5, bLat - vs * 1.0, d - 0.25, d + 0.25, 0.62);
+    }
+
+    // ---- HIGH-TOP TABLES by the front ------------------------------------------
+    for (const e of [-1, 1]) {
+      const hl = e * Math.min(Tf - 1.2, 2.6), hd = 3.0;
+      if (!free(hl - 0.45, hl + 0.45, hd - 0.45, hd + 0.45)) continue;
+      take(hl - 0.45, hl + 0.45, hd - 0.45, hd + 0.45);
+      at(hl, hd, 0, -1);
+      k.cyl(0, 0.015, 0, 0.24, 0.26, 0.03, 0x1a1a1c, "metal", 0, 0, 0, 16);
+      k.cyl(0, 0.53, 0, 0.03, 0.03, 1.0, 0xc9ced4, "metal", 0, 0, 0, 10);
+      k.cyl(0, 1.05, 0, 0.32, 0.32, 0.03, 0x121214, "gloss", 0, 0, 0, 20);
+      k.cyl(0.08, 1.12, 0.05, 0.03, 0.022, 0.11, 0xdcecf2, "glass", 0, 0, 0, 8);
+      collide(hl - 0.25, hl + 0.25, hd - 0.25, hd + 0.25, 1.07);
+    }
+
+    const group = new THREE.Group();
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (!root) return false;
+    k.build(group);
+    root.add(group);
+    ROOM.group = group;
+    ROOM.bounds = roomBounds(b, ox, oz);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("velvet-club", b, group);
+    let meshes = 0, verts = 0;
+    group.traverse(function (o) { if (o.isMesh) { meshes++; verts += o.geometry.attributes.position.count; } });
+    ROOM.stats = { meshes: meshes, verts: verts, seats: ROOM.seats, danceFloor: dfD > 0 };
+    return true;
+  }
+  CBZ.onUpdate(36.1, function () {
+    if (!g || g.mode !== "city") { if (ROOM.group) ROOM.group.visible = false; return; }
+    const arena = CBZ.city && CBZ.city.arena;
+    if (!arena) return;
+    if (ROOM.built && ROOM.built !== arena) { ROOM.built = null; ROOM.group = null; ROOM.cols = []; ROOM.seats = 0; }
+    const P = CBZ.player; if (!P || !P.pos) return;
+    const lot = arena.clubLot;
+    if (!lot || !lot.building || !lot.building.club) return;
+    if (!ROOM.built) {
+      const dx = P.pos.x - lot.cx, dz = P.pos.z - lot.cz;
+      if (dx * dx + dz * dz > 45 * 45) return;
+      ROOM.built = arena;
+      try { buildRoom(lot); } catch (e) { /* the rope still works without the room */ }
+    }
+    // only drawn with you in (or at the door of) the shell: r128 does not cull
+    // a lit truss behind an opaque facade
+    if (ROOM.group && ROOM.bounds) {
+      const B = ROOM.bounds, x = P.pos.x, z = P.pos.z;
+      const vis = x >= B.minX && x <= B.maxX && z >= B.minZ && z <= B.maxZ;
+      if (ROOM.group.visible !== vis) ROOM.group.visible = vis;
+    }
+  });
+  // EXPORT ONLY (probe/preset): what the room stands
+  CBZ.cityClubRoomAudit = function () { return ROOM.stats ? Object.assign({ built: !!ROOM.group }, ROOM.stats) : null; };
 })();

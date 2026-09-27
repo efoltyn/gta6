@@ -1336,6 +1336,26 @@
        read as levitating; real shelving stands on a post at every bay end, so
        the posts are drawn per BAY and the boards land on them. */
     const SHELF_Y = [0.44, 1.06, 1.68, 2.30];
+    // THE MONEY ON THE BOARDS IS MONEY: city/itemassets.js's `cashbrick`
+    // (strapped stacks, layer lines, printed top) seated ON the board, long
+    // side into the shelf. It was a 22 x 12 x 26 cm solid green box with a
+    // beige slab through it, sunk 7 mm into the board. The lbox call is kept
+    // as the placement (it knows this room's frame and parent) and swapped for
+    // the baked brick; with no registry the old green box stays as the degrade.
+    const BRICK_H = 0.1134, SHELF_TOP = 0.0225;
+    const cashBrick = function (x, yBase, z, ry, w, d) {
+      const m = b.lbox(x, yBase + BRICK_H / 2, z, w, BRICK_H, d, 0x5f9c52, { cast: false });
+      let real = null;
+      if (m && m.parent && CBZ.itemAssetBaked) {
+        try { real = CBZ.itemAssetBaked(null, null, null, { kind: "cashbrick" }); } catch (e) { real = null; }
+      }
+      if (!real) return;
+      real.position.set(m.position.x, m.position.y - BRICK_H / 2, m.position.z);
+      real.rotation.y = ry + (hsh(Math.round(x * 97 + z * 131), "vbrick") - 0.5) * 0.12;
+      real.castShadow = false;
+      m.parent.add(real); m.parent.remove(m);
+    };
+    const RY_BACK = Math.atan2(nx, nz), RY_FLANK = Math.atan2(tx, tz);
     const backD = v.rd - 0.55;
     const BAY = 1.15;                                 // one shelving bay
     let bricks = 0;
@@ -1374,8 +1394,7 @@
         const qs = sizeAcross(0.22, 0.26);
         const stack = hsh(si * 31 + i, "vstack") < 0.42 ? 2 : 1;
         for (let k = 0; k < stack; k++) {
-          b.lbox(q.x, floorY + sy + 0.075 + k * 0.13, q.z, qs.w, 0.12, qs.d, 0x5f9c52, { cast: false });
-          b.lbox(q.x, floorY + sy + 0.075 + k * 0.13, q.z, qs.w * 0.26, 0.125, qs.d * 1.03, 0xd8d2c0, { cast: false });
+          cashBrick(q.x, floorY + sy + SHELF_TOP + k * BRICK_H, q.z, RY_BACK, qs.w, qs.d);
           bricks++;
         }
       }
@@ -1390,18 +1409,34 @@
           const dd = v.rd / 2 + 0.1 + (i / Math.max(1, fper - 1) - 0.5) * (v.rd - 1.5);
           const q = P(dd, s * (half - 0.32));
           const qs = sizeAcross(0.26, 0.22);
-          b.lbox(q.x, floorY + sy + 0.075, q.z, qs.w, 0.12, qs.d, 0x5f9c52, { cast: false });
-          b.lbox(q.x, floorY + sy + 0.075, q.z, qs.w * 1.03, 0.125, qs.d * 0.26, 0xd8d2c0, { cast: false });
+          cashBrick(q.x, floorY + sy + SHELF_TOP, q.z, RY_FLANK, qs.w, qs.d);
           bricks++;
         }
       }
     }
     v.bricks = bricks;
     // a caged trolley parked mid-floor (the thing the notes actually move on)
-    const tp = P(v.rd * 0.45, (hsh(3, "vtroll") - 0.5) * Math.max(0, v.rw - 2.4));
+    const tLat = (hsh(3, "vtroll") - 0.5) * Math.max(0, v.rw - 2.4), tDeep = v.rd * 0.45;
+    const tp = P(tDeep, tLat);
     const ts = sizeAcross(0.86, 0.60);
     b.lbox(tp.x, floorY + 0.36, tp.z, ts.w, 0.06, ts.d, 0x6d7681, { cast: false });
-    b.lbox(tp.x, floorY + 0.70, tp.z, ts.w * 0.9, 0.62, ts.d * 0.9, 0x5f9c52, { cast: false });
+    // loaded with bricks, three layers, instead of one 62 cm green block; a
+    // mesh cage round it (corner posts + top rails) so it reads as a trolley
+    for (let ly = 0; ly < 3; ly++) for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+      if (ly === 2 && (i + j) % 3 === 0) continue;                 // a part-loaded top layer
+      const q = P(tDeep + (j - 1) * 0.16, tLat + (i - 1.5) * 0.20);
+      cashBrick(q.x, floorY + 0.39 + ly * BRICK_H, q.z, RY_BACK, 0.19, 0.15);
+    }
+    for (const cs of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const q = P(tDeep + cs[1] * 0.28, tLat + cs[0] * 0.41);
+      b.lbox(q.x, floorY + 0.39 + 0.36, q.z, 0.025, 0.72, 0.025, 0x828c99, { cast: false });
+    }
+    for (const sd of [-1, 1]) {
+      const q1 = P(tDeep + sd * 0.28, tLat), q2 = P(tDeep, tLat + sd * 0.41);
+      const r1 = sizeAcross(0.84, 0.02), r2 = sizeAcross(0.02, 0.58);
+      b.lbox(q1.x, floorY + 1.10, q1.z, r1.w, 0.025, r1.d, 0x828c99, { cast: false });
+      b.lbox(q2.x, floorY + 1.10, q2.z, r2.w, 0.025, r2.d, 0x828c99, { cast: false });
+    }
     // four castors under it — drawn in the WORLD axes the trolley's own top
     // was drawn in, so they cannot walk off it when the room faces ±X.
     for (let i = 0; i < 4; i++) {
