@@ -1,18 +1,18 @@
 /* ============================================================
-   weapons/appearances/shotgun.js — the 12G PUMP block model.
+   weapons/appearances/shotgun.js — the 12-gauge pump (Remington 870).
 
-   WHY: the room-clearer must read "pump shotgun" before you hear it.
-   The landmarks that survive being boxes: TWO parallel tubes up front
-   (barrel OVER the magazine tube — no rifle has that), the sliding
-   wood FORE-END with grasping grooves, a brass BEAD sight (not a
-   post) at the muzzle, a receiver with a visible ejection port, a
-   side SADDLE of red shells on the receiver (ammo you can SEE — this
-   gun's whole rhythm is feeding it), and a full wood stock with a
-   recoil pad.
+   Reads as a pump gun because of: TWO tubes up front (the barrel over the
+   magazine tube, tied by the barrel lug at the mag cap), the grooved walnut
+   fore-end riding the mag tube with its action bars running back into the
+   receiver, a long flat-sided receiver with the ejection port on the right,
+   a brass bead at the muzzle instead of a post, a straight walnut stock
+   with a wrist (no pistol grip) and a rubber recoil pad, and a side saddle
+   of red shells on the receiver's left flank.
 
    Contract: fpsmode.js slides userData.pump along +z by pumpBaseZ +
-   sin(t)*0.22 for the pump cycle — the grooves are CHILDREN of the
-   pump mesh so they rack with it.
+   sin(t)*0.22 to rack it, so the fore-end and its action bars are one
+   group, parked far enough forward that the rack stops at the receiver.
+   Built on CBZ.gunKit (sidearm.js).
 ============================================================ */
 (function () {
   "use strict";
@@ -21,54 +21,67 @@
 
   CBZ.weaponAppearance.shotgun = function (ctx) {
     const { THREE, box, cyl, mat } = ctx;
-    if (!mat.wood) {
-      mat.wood = new THREE.MeshLambertMaterial({ color: 0x6e4424 });
-      mat.wood._shared = true;
-    }
+    const K = CBZ.gunKit(ctx);
+    const steel = K.fin("blued"), parker = K.fin("parker"), wood = K.fin("walnut");
     const g = new THREE.Group();
-    // steel receiver + EJECTION PORT cut into the right flank
-    box(g, 0.150, 0.150, 0.36, mat.dark, 0, 0.015, -0.17);
-    box(g, 0.016, 0.065, 0.13, mat.black, 0.072, 0.035, -0.20);
-    // BARREL over MAGAZINE TUBE — the twin-tube shotgun silhouette —
-    // with a clamp ring tying them together near the muzzle
-    cyl(g, 0.032, 0.80, mat.black, 0, 0.095, -0.70, Math.PI / 2);
-    cyl(g, 0.026, 0.68, mat.steel, 0, 0.020, -0.62, Math.PI / 2);
-    box(g, 0.075, 0.115, 0.035, mat.steel, 0, 0.058, -0.93);
-    // brass BEAD sight at the muzzle (shotguns point, they don't aim)
-    cyl(g, 0.012, 0.020, mat.brass, 0, 0.135, -1.07);
-    // sliding wood PUMP riding the mag tube; grooves are children so
-    // they rack back with it (fpsmode slides this mesh on z)
-    const pump = box(g, 0.105, 0.095, 0.30, mat.wood, 0, 0.005, -0.52);
-    box(pump, 0.110, 0.099, 0.020, mat.dark, 0, 0, -0.09);
-    box(pump, 0.110, 0.099, 0.020, mat.dark, 0, 0, 0);
-    box(pump, 0.110, 0.099, 0.020, mat.dark, 0, 0, 0.09);
-    // pump ARM connecting the fore-end back into the receiver — also a
-    // child of the pump so the whole assembly racks together
-    box(pump, 0.020, 0.030, 0.26, mat.steel, 0.058, -0.025, 0.16);
-    // side SADDLE: three red spare shells with brass heads, right side
-    cyl(g, 0.020, 0.085, mat.redShell, 0.085, 0.045, -0.085, Math.PI / 2);
-    cyl(g, 0.020, 0.085, mat.redShell, 0.085, -0.005, -0.085, Math.PI / 2);
-    cyl(g, 0.020, 0.085, mat.redShell, 0.085, 0.095, -0.085, Math.PI / 2);
-    box(g, 0.012, 0.16, 0.10, mat.dark, 0.095, 0.045, -0.085);
-    // trigger guard + trigger
-    box(g, 0.048, 0.020, 0.13, mat.black, 0, -0.085, -0.10);
-    box(g, 0.014, 0.045, 0.012, mat.steel, 0, -0.05, -0.085, -0.2);
-    // full WOOD stock: dropped comb wrist into the butt + recoil pad
-    box(g, 0.105, 0.13, 0.24, mat.wood, 0, -0.025, 0.115, -0.18);
-    box(g, 0.110, 0.155, 0.26, mat.wood, 0, -0.075, 0.305, 0.08);
-    box(g, 0.115, 0.165, 0.035, mat.black, 0, -0.085, 0.44, 0.08);
-    // hand on the wrist
-    box(g, 0.160, 0.115, 0.15, mat.skin, 0, -0.09, 0.07, -0.12);
-    g.userData.muzzle = new THREE.Vector3(0, 0.095, -1.10);
+    const BORE = 0.090, TUBE = 0.030;
+
+    // RECEIVER: flat sides, the top sweeping down into the stock tang
+    K.prof(g, "870.recv", [[-0.050, -0.030], [0.345, -0.030], [0.345, 0.118], [0.320, 0.124], [0.040, 0.124], [-0.020, 0.108], [-0.050, 0.080]],
+      0.066, steel, { bevel: 0.005 });
+    box(g, 0.004, 0.050, 0.150, mat.black, 0.032, 0.070, -0.180);         // ejection port
+    // trigger plate + guard with its hole, trigger blade
+    K.prof(g, "870.guard", [[-0.030, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [-0.010, -0.048]],
+      0.040, parker, { bevel: 0.003, holes: [[[0.126, -0.040], [0.120, -0.088], [0.034, -0.088], [0.018, -0.046]]] });
+    box(g, 0.010, 0.044, 0.010, mat.black, 0, -0.058, -0.080, -0.25);
+
+    // BARREL over the MAGAZINE TUBE; cap + barrel lug tie them together
+    K.tube(g, 0.021, 0.022, 0.760, 14, steel, 0, BORE, -0.725);
+    K.tube(g, 0.022, 0.022, 0.560, 14, steel, 0, TUBE, -0.625);
+    K.tube(g, 0.024, 0.026, 0.040, 14, parker, 0, TUBE, -0.925);          // mag cap
+    box(g, 0.022, 0.050, 0.030, parker, 0, 0.062, -0.890);                // barrel lug
+    cyl(g, 0.008, 0.012, mat.brass, 0, BORE + 0.026, -1.080);             // brass bead
+    const bore = cyl(g, 0.017, 0.006, mat.bore || mat.black, 0, BORE, -1.104, Math.PI / 2);
+    bore.userData.weaponBore = true;
+
+    // the PUMP: grooved walnut fore-end + action bars, racked as one group
+    const pump = new THREE.Group();
+    pump.position.set(0, 0, -0.660);
+    g.add(pump);
+    K.prof(pump, "870.pump", [[-0.135, 0.064], [0.135, 0.064], [0.142, 0.040], [0.142, 0.000], [0.128, -0.014],
+      [-0.128, -0.014], [-0.142, 0.000], [-0.142, 0.040]], 0.066, wood, { bevel: 0.009 });
+    box(pump, 0.078, 0.006, 0.250, mat.black, 0, 0.018, 0);              // grip grooves
+    box(pump, 0.078, 0.006, 0.250, mat.black, 0, 0.040, 0);
+    box(pump, 0.054, 0.010, 0.230, parker, 0, TUBE, 0.235);              // action bars
+
+    // SIDE SADDLE on the left of the receiver (where the real ones go, and
+    // the flank the first-person camera sees): four shells, brass down
+    box(g, 0.006, 0.090, 0.150, parker, -0.036, 0.050, -0.120);
+    const shell = mat.redShell;
+    for (let i = 0; i < 4; i++) cyl(g, 0.016, 0.086, shell, -0.052, 0.060, -0.068 - i * 0.035);
+    box(g, 0.034, 0.018, 0.140, mat.brass, -0.052, 0.012, -0.120);
+
+    // straight WALNUT stock with a wrist, rubber recoil pad
+    K.prof(g, "870.stock", [
+      [-0.046, 0.112], [-0.100, 0.100], [-0.442, 0.070], [-0.442, -0.150], [-0.392, -0.150],
+      [-0.190, -0.074], [-0.110, -0.056], [-0.066, -0.040], [-0.046, -0.030],
+    ], 0.062, wood, { bevel: 0.012 });
+    K.prof(g, "870.pad", [[-0.440, 0.074], [-0.470, 0.074], [-0.470, -0.156], [-0.440, -0.154]], 0.070, K.fin("rubber"), { bevel: 0.004 });
+
+    // the firing hand around the wrist
+    const R = 52 * Math.PI / 180;
+    K.hand(g, { at: [0.016, 0.060], rake: R, gripW: 0.062, gripD: 0.085, size: 0.78, trigger: [-0.056, -0.084] });
+
+    g.userData.muzzle = new THREE.Vector3(0, BORE, -1.106);
     g.userData.pump = pump;
     g.userData.pumpBaseZ = pump.position.z;
     // WHERE THE HANDS GO — see systems/gunhands.js. The support hand rides
     // the PUMP (it is what racks the gun), and shells go in one at a time
     // through the loading port under the receiver.
     g.userData.grips = {
-      support: new THREE.Vector3(0, -0.060, -0.520),
-      mag: new THREE.Vector3(0, -0.090, -0.190),
-      charge: new THREE.Vector3(0, -0.060, -0.520),    // racking IS the pump
+      support: new THREE.Vector3(0, -0.040, -0.660),
+      mag: new THREE.Vector3(0, -0.050, -0.170),
+      charge: new THREE.Vector3(0, -0.040, -0.660),    // racking IS the pump
       style: "shell",
     };
     return g;

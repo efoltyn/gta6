@@ -143,7 +143,8 @@
     const id = normalizeWeaponId(name);
     const meta = weaponMeta(id);
     const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[meta.appearanceFactory || meta.key || id];
-    const model = builder ? builder({ THREE, box, cyl, mat }) : fallbackWeapon();
+    // noHand: the first-person grip hand is a viewmodel prop; a body already has hands
+    const model = builder ? builder({ THREE, box, cyl, mat, noHand: true }) : fallbackWeapon();
     model.userData.weaponId = id;
     model.userData.weaponSlot = meta.slot || "pistol";
     // Does this prop have a BARREL? Every consumer that reasons about aim —

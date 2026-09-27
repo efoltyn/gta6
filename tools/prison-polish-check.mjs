@@ -595,7 +595,7 @@ async function moveTo(expr, ticks) {
     const r = await evl(`
       var s = document.getElementById("weaponStrip"), h = document.getElementById("hotbar");
       var gg = document.getElementById("gungameHud");
-      function txt(c){ var e = gg && gg.querySelector(c); return e ? e.textContent : null; }
+      var hudRoot = document.getElementById("ggHud");
       var cells = 0, hidden = 0;
       h.querySelectorAll(".islot").forEach(function(c){ cells++; if (getComputedStyle(c).display === "none") hidden++; });
       return {
@@ -605,8 +605,7 @@ async function moveTo(expr, ticks) {
         bagHidden: (function(){ var b = document.getElementById("invBagBtn");
           return !b || getComputedStyle(b).display === "none"; })(),   // gone-for-good counts as hidden
         panel: !!gg,
-        panelFlag: !!(window.CBZ.CONFIG && window.CBZ.CONFIG.GUNGAME_HUD_PANEL),
-        now: txt(".gg-now"), next: txt(".gg-next"), lead: txt(".gg-lead"),
+        track: !!(hudRoot && hudRoot.querySelectorAll(".gg-track .gg-seg").length === 9),
         hp: (document.getElementById("hpBar") || {}).style ? document.getElementById("hpBar").style.width : null,
       };
     `);
@@ -619,7 +618,10 @@ async function moveTo(expr, ticks) {
       // The node must not exist at all, and the shared arena bars must survive
       // it: gungamehud.js writes #survBars from the same tick the row used to
       // live in, so "row removed" and "bars still written" is ONE assertion.
-      check("gungame: no ladder row above the hotbar", r.panel === false && r.panelFlag === false, JSON.stringify({ panel: r.panel, flag: r.panelFlag, now: r.now, next: r.next, lead: r.lead }));
+      // 2026-09-27: the ladder is back as a WORDLESS nine-segment track at the
+      // top (systems/gungamehud.js); the text row above the hotbar stays gone.
+      check("gungame: no ladder row above the hotbar", r.panel === false, JSON.stringify({ panel: r.panel }));
+      check("gungame: wordless ladder track present", r.track === true, JSON.stringify({ track: r.track }));
       check("gungame: HP/stamina still write with the row gone", !!r.hp && r.hp !== "", JSON.stringify({ hp: r.hp }));
     }
   }
