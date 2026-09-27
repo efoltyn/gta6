@@ -3494,10 +3494,577 @@
                  CBZ.cityExplosion && CBZ.cityExplosion._wildlifeWrapped);
   }
 
+  // ============================================================
+  //  SEA MOTION — how a wild sea animal SWIMS when no brain owns it.
+  //
+  //  OWNER (2026-09-27): "I wanted other fish and other animals in the game
+  //  to MOVE more realistically."
+  //
+  //  What this replaced, all of it in the aquatic branch of tick():
+  //    • a heading SNAP of up to ±0.4 rad every 3-7 s — a one-frame pivot —
+  //      plus another +0.28 rad EVERY FRAME the shore feeler was blocked;
+  //    • ONE constant speed for everything, sp.spd × 6: a mackerel "idling"
+  //      at 12 m/s (faster than the player's bull shark cruises), a dolphin
+  //      at 18, a turtle at 6.6, and an orca matriarch at 20 m/s while her
+  //      pod's station-keeping topped out at 16 — so the pod strung out behind
+  //      her and sprinted forever. A wild shark wandered at 16 m/s and dropped
+  //      to the hunt's 6.5 on the frame the hunt began;
+  //    • NOTHING reacted to ANYTHING. A school swam into the player's mouth, a
+  //      turtle ignored a great white, a dolphin ignored a boat.
+  //
+  //  Now every wild swimmer has a PROFILE (MM below: cruise, burst, agility,
+  //  gait), a scratch `a._mm` built once, and one steering function that
+  //  blends momentum, a smooth wander (a school's is shared on the herd so it
+  //  turns as one body), the boids terms for a group, the animal's own habit,
+  //  and its answer to whatever it can SENSE: the player's shark (its size and
+  //  how fast it is closing), a wild predator bigger than it, a boat's engine.
+  //  The turn is rate-limited by agility (no pivots, ever), speed eases under
+  //  an acceleration limit, and the gait is real: a fish swims burst-and-glide
+  //  (the body actually slows in the coast, and the rig reads the same flag so
+  //  the tail goes quiet on the same frames), a turtle surges on each flipper
+  //  stroke, a manta on each wingbeat.
+  //
+  //  THE HABITS, per kind:
+  //    school   mackerel/sardine. Moves as one body; a predator closing on it
+  //             SPLITS it (each fish breaks sideways off the attacker's line —
+  //             the fountain — and the school re-forms behind it); a predator
+  //             that hangs around BALLS it (tight, milling, driven up).
+  //    pelagic  tuna/marlin. Fast, steady, wide turns; bolts and zig-zags.
+  //    ambush   barracuda. Hangs almost still, then lunges at a passing school.
+  //    turtle   paddles slowly, comes up to BREATHE every half-minute or so,
+  //             dives and paddles off hard from a shark.
+  //    ray      manta. Slow wide glides low in the water; flushes with big
+  //             wingbeats when something big comes at it.
+  //    dolphin  pods; bow-ride a boat under way; MOB a shark small enough to
+  //             bully, flee one that is not.
+  //    shark    cruises wide constant-radius loops (a hammerhead sweeps its
+  //             head and patrols deep); yields to a shark 1.3x its size —
+  //             the player's included. Blood and the hunt stay predator.js's.
+  //    orca     the matriarch's pace is now the pod's pace, and a fed pod rests.
+  //
+  //  THREAT BALANCE: the orca pod and the rival sharks' HUNT are untouched
+  //  (their brains still own them the moment they hunt). What changed is the
+  //  food: fish no longer drift at 12-14 m/s, they cruise at ~4 and burst to
+  //  ~11 for a second and a half before they tire — under the player's sprint,
+  //  so a chase is winnable and reads like one.
+  //
+  //  Allocation-free per frame: the threat list is a fixed pool refilled once
+  //  a frame, senses are sampled at 4 Hz per herd (or per loner), and the only
+  //  neighbour query is the herd's own member list — the herd IS the
+  //  neighbourhood, so no second spatial structure exists to drift from it.
+  // ============================================================
+  const MM = {
+    //        cruise = sp.spd x this (m/s)   burst = x cruise   turn/fturn rad/s
+    school:  { cruise: 1.8,  burst: 2.9, turn: 2.4,  fturn: 7.0, acc: 14,  dec: 2.2, tire: 1.6, senseR: 15, gait: 1 },
+    pelagic: { cruise: 2.4,  burst: 1.8, turn: 1.0,  fturn: 2.6, acc: 8,   dec: 1.6, tire: 4.0, senseR: 36, gait: 0 },
+    ambush:  { cruise: 0.65, burst: 5.2, turn: 1.3,  fturn: 4.5, acc: 24,  dec: 3.0, tire: 1.2, senseR: 28, gait: 0 },
+    turtle:  { cruise: 1.5,  burst: 1.9, turn: 0.7,  fturn: 1.5, acc: 2.4, dec: 1.2, tire: 3.0, senseR: 30, gait: 2, period: 2.4 },
+    ray:     { cruise: 1.6,  burst: 3.0, turn: 0.55, fturn: 2.0, acc: 5,   dec: 0.9, tire: 2.6, senseR: 28, gait: 2, period: 3.4 },
+    dolphin: { cruise: 2.8,  burst: 1.8, turn: 1.5,  fturn: 3.0, acc: 7,   dec: 1.8, tire: 7.0, senseR: 55, gait: 0 },
+    whale:   { cruise: 1.6,  burst: 1.3, turn: 0.2,  fturn: 0.35, acc: 0.7, dec: 0.4, tire: 5.0, senseR: 0, gait: 0 },
+    shark:   { cruise: 2.4,  burst: 1.5, turn: 0.55, fturn: 1.3, acc: 3,   dec: 1.0, tire: 3.0, senseR: 45, gait: 0 },
+    orca:    { cruise: 1.75, burst: 1.3, turn: 0.45, fturn: 0.8, acc: 2,   dec: 0.8, tire: 5.0, senseR: 0, gait: 0 },
+  };
+  const MM_SCAN = 0.25;          // s between threat samples, per herd or loner
+  function mmKind(sp) {
+    if (sp.motion && MM[sp.motion]) return sp.motion;       // a row may declare it
+    const id = String(sp.id || "");
+    if (id === "orca") return "orca";
+    if (/whale/.test(id)) return "whale";
+    if (/dolphin|porpoise/.test(id)) return "dolphin";
+    if (/turtle/.test(id)) return "turtle";
+    if (/manta|_ray$|stingray/.test(id)) return "ray";
+    if (id === "barracuda") return "ambush";
+    if ((sp.danger || 0) >= 0.5 || /shark|megalodon/.test(id)) return "shark";
+    if (sp.herd && sp.herd[1] >= 10) return "school";
+    return "pelagic";
+  }
+  // Body length in metres, as drawn (the rig measured the model once).
+  function mmLen(a) {
+    const r = a.swim, s = (a.group && a.group.scale && a.group.scale.x) || 1;
+    return r && r.len ? r.len * s : SZ(a) * 2;
+  }
+  function mmOf(a) {
+    let m = a._mm;
+    if (m) return m;
+    const kind = mmKind(a.species);
+    const h = CBZ.hash01 ? CBZ.hash01(a.home.x, a.home.z, 0x5EA1) : 0.5;
+    m = a._mm = {
+      kind: kind, pr: MM[kind], v: -1, wH: a.heading, wT: h * 5, curve: 0, cT: 2 + h * 8,
+      scanT: h * MM_SCAN, ref: null, boat: null, mode: 0, R: 0, lvl: 0, u: 0,
+      zig: h < 0.5 ? 1 : -1, zigT: 0, fat: 0, gph: h * 6.283, glide: 0, beatT: 1 + h * 2,
+      breathT: 18 + h * 26, breath: 0, depthK: 1, blockT: 0, lunge: 0, lungeT: 4 + h * 6,
+      cool: 0, rideT: 0, seed: h, ex: 0, ez: 0,
+    };
+    return m;
+  }
+  function herdMM(hr) {
+    let H = hr._mm;
+    if (H) return H;
+    H = hr._mm = {
+      H: hr.heading, HT: 0, scanT: 0, scanF: -1, ref: null, boat: null, mode: 0, R: 0, lvl: 0,
+      linger: 0, spin: (CBZ.hash01 ? CBZ.hash01(hr.cx, hr.cz, 0x5EA2) : 0.5) < 0.5 ? 1 : -1,
+      cool: 0, rideT: 0,
+    };
+    return H;
+  }
+
+  // ---- THE THINGS A SEA ANIMAL CAN SENSE, refilled once per frame ---------
+  const TH = [];
+  let thN = 0, mmFrame = 0, thFrame = -1;
+  function thSlot() {
+    let r = TH[thN];
+    if (!r) r = TH[thN] = { a: null, boat: null, x: 0, z: 0, vx: 0, vz: 0, spd: 0, len: 0, apex: false, eater: false };
+    thN++;
+    return r;
+  }
+  function gatherThreats(dt) {
+    if (thFrame === mmFrame) return;
+    thFrame = mmFrame;
+    thN = 0;
+    const idt = dt > 0 ? 1 / dt : 0;
+    for (let i = 0; i < animals.length; i++) {
+      const o = animals[i], sp = o.species;
+      if (!sp || !sp.aquatic || o.dead || o.external) continue;
+      const k = mmKind(sp);
+      const apex = (sp.danger || 0) >= 0.5;
+      const eater = apex || (sp.danger || 0) >= 0.15 || k === "dolphin" || k === "pelagic" || k === "whale";
+      if (!eater) continue;
+      const p = o.group.position;
+      const vx = o._mmPx == null ? 0 : (p.x - o._mmPx) * idt;
+      const vz = o._mmPz == null ? 0 : (p.z - o._mmPz) * idt;
+      o._mmPx = p.x; o._mmPz = p.z;
+      const t = thSlot();
+      t.a = o; t.boat = null; t.x = p.x; t.z = p.z;
+      // a teleport (spawn, evolve, recovery) is not a speed
+      if (vx * vx + vz * vz > 900) { t.vx = 0; t.vz = 0; } else { t.vx = vx; t.vz = vz; }
+      t.spd = Math.sqrt(t.vx * t.vx + t.vz * t.vz);
+      t.len = mmLen(o); t.apex = apex; t.eater = eater;
+    }
+    const sc = CBZ.seaCraft;
+    const list = sc && sc.list ? sc.list() : null;
+    if (list) {
+      for (let i = 0; i < list.length; i++) {
+        const b = list[i];
+        if (!b || b.dead || b._sinking || !b.pos) continue;
+        const sp2 = Math.abs(b.v || 0);
+        if (sp2 < 0.8) continue;                        // an idle hull is not a noise
+        const t = thSlot();
+        t.a = null; t.boat = b; t.x = b.pos.x; t.z = b.pos.z;
+        // measured, not read: a hull's heading convention is sin/cos and its
+        // vx/vz are only the drift, so the honest velocity is the one it moved
+        const bvx = b._mmPx == null ? 0 : (b.pos.x - b._mmPx) * idt;
+        const bvz = b._mmPz == null ? 0 : (b.pos.z - b._mmPz) * idt;
+        b._mmPx = b.pos.x; b._mmPz = b.pos.z;
+        if (bvx * bvx + bvz * bvz > 2500) { t.vx = 0; t.vz = 0; } else { t.vx = bvx; t.vz = bvz; }
+        if (b._mmLoa == null) {
+          let loa = 8;
+          try { const spc = sc.spec && sc.spec(b); if (spc && spc.loa > 0) loa = +spc.loa; } catch (e) {}
+          b._mmLoa = loa;
+        }
+        t.spd = sp2; t.len = b._mmLoa; t.apex = false; t.eater = false;
+      }
+    }
+  }
+  // What the animal (or its herd, sampled at the centre) makes of the sea
+  // around it. Writes ref/boat/mode/R/lvl onto `S` (a._mm or the herd's).
+  //   mode 1 flee · 2 bow-ride · 3 mob · 4 yield (a shark to a bigger one)
+  function senseScan(a, m, S, hr, len) {
+    const kind = m.kind;
+    const cx = hr ? hr.cx : a.group.position.x, cz = hr ? hr.cz : a.group.position.z;
+    const spread = hr ? Math.min(14, 4 + hr.n * 0.18) : 0;
+    let best = 0, bA = null, bB = null, bMode = 0, bR = 0;
+    for (let i = 0; i < thN; i++) {
+      const t = TH[i];
+      if (t.a === a || (t.a && hr && t.a.herd === hr)) continue;
+      if (t.a && !t.a.ridden && t.a.species === a.species) continue;   // peers do not flinch
+      const dx = cx - t.x, dz = cz - t.z;
+      const dc = Math.sqrt(dx * dx + dz * dz);
+      const d = Math.max(0, dc - spread);
+      let mode = 0, R = 0;
+      if (t.boat) {
+        if (kind === "dolphin") { if (t.spd > 2.5 && S.cool <= 0) { mode = 2; R = 110; } }
+        else if (kind === "school" || kind === "turtle" || kind === "ray" || kind === "ambush" || kind === "pelagic") {
+          mode = 1; R = 6 + t.spd * 3.2;                // an engine is loud in proportion to its revs
+        }
+      } else {
+        const ratio = t.len / Math.max(0.2, len);
+        if (kind === "school") { if (ratio >= 1.5) mode = 1; }
+        else if (kind === "pelagic" || kind === "ambush") { if (t.apex && ratio >= 1.3) mode = 1; }
+        else if (kind === "turtle" || kind === "ray") { if (t.apex && ratio >= 1.2) mode = 1; }
+        else if (kind === "dolphin") {
+          // a pod bullies a shark it outnumbers and roughly matches (and,
+          // bored of that, ignores it); anything bigger it runs from
+          if (t.apex) mode = (ratio <= 1.7 && hr && hr.n >= 3) ? (S.cool <= 0 ? 3 : 0) : 1;
+        }
+        else if (kind === "shark") { if (t.apex && ratio >= 1.3) mode = 4; }
+        if (mode) {
+          // how hard it is coming at me: a fast approach is heard from further
+          const close = dc > 0.01 ? -(t.vx * dx + t.vz * dz) / dc : 0;
+          R = m.pr.senseR * (0.7 + 0.3 * Math.min(2, ratio)) + Math.max(0, close) * 0.6;
+          // a predator hanging still is TOLERATED at a much shorter range
+          // than one that is moving — reef fish school round a resting shark
+          R *= 0.5 + 0.5 * Math.min(1, t.spd / 5);
+          if (mode === 3) R *= 1.35;
+          if (mode === 4) R = 22 + t.len * 3;
+        }
+      }
+      if (!mode || d > R) continue;
+      const lvl = 1 - d / R + (mode === 1 ? 0.001 : 0);   // flight outranks curiosity on a tie
+      if (lvl > best) { best = lvl; bA = t.a; bB = t.boat; bMode = mode; bR = R; }
+    }
+    if (bMode !== S.mode) S.rideT = 0;
+    S.ref = bA; S.boat = bB; S.mode = bMode; S.R = bR; S.lvl = best;
+  }
+  function thPos(S) { return S.ref ? S.ref.group.position : (S.boat ? S.boat.pos : null); }
+  function thVel(S, out) {
+    out.x = 0; out.z = 0;
+    // gatherThreats measured it this frame; the velocity lives on the slot
+    for (let i = 0; i < thN; i++) {
+      const t = TH[i];
+      if ((S.ref && t.a === S.ref) || (S.boat && t.boat === S.boat)) { out.x = t.vx; out.z = t.vz; break; }
+    }
+    return out;
+  }
+  const _tv = { x: 0, z: 0 };
+  function wrapA(h) { while (h > Math.PI) h -= 6.283185307; while (h < -Math.PI) h += 6.283185307; return h; }
+
+  /* THE STEER. Sets a.heading (rate-limited) and returns this frame's speed in
+     m/s. Also owns a.swimDepth's per-kind lean (a turtle's breath, a ray low,
+     a bait ball driven up) — applied to the value the hunger line rewrote
+     from the spawn-time base this frame, so it can never compound. Cetacean
+     depth is not touched here. */
+  function aquaticSteer(a, dt, hdA) {
+    gatherThreats(dt);
+    if (a.alarm > 0) a.alarm = Math.max(0, a.alarm - dt);
+    const m = mmOf(a), pr = m.pr, kind = m.kind, sp = a.species, grp = a.group;
+    const x = grp.position.x, z = grp.position.z;
+    const len = mmLen(a);
+    const big = Math.max(0.6, Math.pow(Math.max(0.3, len) / 2.5, 0.35));    // big bodies turn wide
+    const hunger = HUNGER(a);
+    let cruise = (a._spd0 || sp.spd || 1.5) * pr.cruise * (hdA ? hdA.spd : 1);
+    // A FED PREDATOR RESTS: an orca pod or a shark that has eaten logs along
+    // at half pace instead of patrolling.
+    if ((kind === "orca" || kind === "shark") && hunger < 0.22) cruise *= 0.55;
+    if (m.v < 0) m.v = cruise;
+
+    const hr = (a.herd && a.herd.n > 1) ? a.herd : null;
+    const H = hr ? herdMM(hr) : null;
+    const S = H || m;                                   // who holds the threat read
+
+    // ---- SENSE (4 Hz, once per herd) -------------------------------------
+    if (m.cool > 0) m.cool -= dt;
+    if (H) {
+      if (H.scanF !== mmFrame) {
+        H.scanF = mmFrame;
+        H.scanT -= dt;
+        if (H.cool > 0) H.cool -= dt;
+        if (H.scanT <= 0) { H.scanT = MM_SCAN; senseScan(a, m, H, hr, len); }
+        // A BAIT BALL: a predator that HANGS around a school (circling, not
+        // charging) knots it; a charge through it blows it apart instead.
+        // Once per herd per frame, read from the school's centre.
+        if (kind === "school") {
+          const q = H.mode === 1 ? thPos(H) : null;
+          let hang = false;
+          if (q && H.ref) {
+            thVel(H, _tv);
+            const qx = hr.cx - q.x, qz = hr.cz - q.z, qd = Math.sqrt(qx * qx + qz * qz) || 0.01;
+            const closing = -(_tv.x * qx + _tv.z * qz) / qd;
+            hang = qd < (H.R || 30) * 0.9 && closing < cruise * 1.6;
+            // ..and a charge THROUGH a ball flashes it open at once
+            if (!hang && closing > cruise * 2 && qd < (H.R || 30) * 0.6 && hr.bunch > 0) {
+              hr.bunch = Math.max(0, hr.bunch - dt * 1.5);
+              H.linger = Math.min(H.linger, 2);
+            }
+          }
+          H.linger = hang ? Math.min(8, H.linger + dt) : Math.max(0, H.linger - dt * 0.7);
+          const b = Math.max(0, Math.min(1, (H.linger - 2) / 3));
+          if (b > (hr.bunch || 0)) hr.bunch = b;
+        }
+        // the herd's shared wander: a slow drift the whole group follows
+        H.HT -= dt;
+        if (H.HT <= 0) {
+          H.HT = 6 + Math.random() * 9;
+          H.H = hr.heading + (Math.random() - 0.5) * 1.3;
+        }
+      }
+    } else {
+      m.scanT -= dt;
+      if (m.scanT <= 0) { m.scanT = MM_SCAN; senseScan(a, m, m, null, len); }
+    }
+    // a bow ride or a mob is a game, not a job: they tire of it
+    if ((S.mode === 2 || S.mode === 3) && (!H || H.scanF === mmFrame && H.rideF !== mmFrame)) {
+      if (H) H.rideF = mmFrame;
+      S.rideT += dt;
+      if (S.rideT > 30 + m.seed * 25) { S.rideT = 0; S.cool = 40; S.mode = 0; S.boat = null; S.ref = null; }
+    }
+    const tp = S.mode ? thPos(S) : null;
+    if (S.mode && (!tp || (S.ref && S.ref.dead))) { S.mode = 0; S.ref = null; S.boat = null; }
+
+    // ---- DESIRED DIRECTION --------------------------------------------------
+    const ch = Math.cos(a.heading), shh = Math.sin(a.heading);
+    let dx = ch, dz = shh;                              // momentum: never a reversal on a tie
+    let wantV = cruise, fleeing = false, u = 0;
+
+    // wander: sharks, orcas and whales hold a constant CURVE (wide loops);
+    // everything else drifts a heading target that moves smoothly.
+    if (kind === "shark" || kind === "orca" || kind === "whale") {
+      m.cT -= dt;
+      if (m.cT <= 0) {
+        m.cT = 9 + Math.random() * 16;
+        const r = Math.random();
+        const mag = kind === "shark" ? 0.05 + Math.random() * 0.1 : 0.02 + Math.random() * 0.05;
+        m.curve = r < 0.3 ? 0 : (r < 0.65 ? mag : -mag);
+      }
+      m.wH = a.heading;                                 // the curve is applied as a rate, below
+    } else if (!H) {
+      m.wT -= dt;
+      if (m.wT <= 0) { m.wT = 4 + Math.random() * 7; m.wH = a.heading + (Math.random() - 0.5) * 1.6; }
+    }
+    const wH = H ? H.H : m.wH;
+    const wW = H ? (kind === "school" ? 0.45 : 0.9) : 1.3;
+    dx += Math.cos(wH) * wW; dz += Math.sin(wH) * wW;
+    // a hammerhead SWEEPS: its path sways as the head scans side to side
+    if (/hammerhead/.test(sp.id)) {
+      const sw = Math.sin(m.gph * 2.1 + m.seed * 20) * 0.5;
+      dx += -shh * sw; dz += ch * sw;
+    }
+    // home range: nothing wanders off its patch for good
+    const hx = a.home.x - x, hz = a.home.z - z;
+    const hd2 = hx * hx + hz * hz;
+    const leash = kind === "school" ? 200 : kind === "shark" || kind === "orca" || kind === "whale" ? 320 : 160;
+    if (hd2 > leash * leash) {
+      const hd = Math.sqrt(hd2), k = Math.min(2, (hd - leash) / 60);
+      dx += hx / hd * k; dz += hz / hd * k;
+    }
+
+    // ---- THE GROUP (boids) -------------------------------------------------
+    let bunch = 0;
+    if (hr && !a.tamed) {
+      bunch = hr.bunch || 0;
+      const panic = S.mode === 1 ? S.lvl : 0;
+      const al = (kind === "school" ? 0.8 : 0.5) + panic * 1.2;
+      dx += Math.cos(hr.heading) * al; dz += Math.sin(hr.heading) * al;
+      const toCx = hr.cx - x, toCz = hr.cz - z;
+      const cd = Math.sqrt(toCx * toCx + toCz * toCz) || 1;
+      const coh = Math.min(1.1 + bunch * 0.9, Math.max(0, cd - 5 * (1 - bunch * 0.8)) / (14 - bunch * 7));
+      dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
+      // separation — the one neighbour query, over the herd's own members
+      const sepR = (kind === "school" ? 1.2 + len * 1.4 : 2.2 + len * 0.9) * (1 - bunch * 0.4);
+      const sepR2 = sepR * sepR;
+      let sx = 0, sz = 0;
+      const mem = hr.members;
+      for (let k = 0; k < mem.length; k++) {
+        const o2 = mem[k]; if (o2 === a || o2.dead) continue;
+        const ox = x - o2.pos.x, oz = z - o2.pos.z;
+        const od2 = ox * ox + oz * oz;
+        if (od2 < sepR2 && od2 > 1e-6) {
+          const od = Math.sqrt(od2), w = (sepR - od) / sepR;
+          sx += (ox / od) * w; sz += (oz / od) * w;
+        }
+      }
+      dx += sx * 1.6; dz += sz * 1.6;
+      // A BAIT BALL MILLS: a knotted school circles its own centre.
+      if (kind === "school" && bunch > 0.25) {
+        const tk = (bunch - 0.25) * 1.6 * H.spin;
+        dx += (-toCz / cd) * tk; dz += (toCx / cd) * tk;
+        wantV = cruise * (0.85 + 0.35 * bunch);
+      }
+    }
+
+    // ---- WHAT IT SENSED ----------------------------------------------------
+    if (tp && S.mode) {
+      const rx = x - tp.x, rz = z - tp.z;
+      const d = Math.sqrt(rx * rx + rz * rz) || 0.01;
+      const ax = rx / d, az = rz / d;
+      thVel(S, _tv);
+      const tv = Math.sqrt(_tv.x * _tv.x + _tv.z * _tv.z);
+      const R = S.R || 30;
+      if (S.mode === 1 || S.mode === 4) {
+        // each animal reads its OWN distance, so a school's far side only
+        // follows the panic wave (alignment) while the near side breaks
+        u = Math.max(0, Math.min(1, 1 - d / R));
+        if (S.mode === 4) u *= 0.7;
+        if (u > 0) {
+          fleeing = true;
+          let fx = ax, fz = az;
+          if (tv > 1) {
+            // THE FOUNTAIN: in the attacker's path, break SIDEWAYS off its
+            // line (whichever side I am already on) rather than straight
+            // ahead of it, where it would simply run me down.
+            const hx2 = _tv.x / tv, hz2 = _tv.z / tv;
+            const ahead = -(ax * hx2 + az * hz2);         // 1 = dead ahead of it
+            if (ahead > -0.2) {
+              const px = -hz2, pz = hx2;
+              const side = (rx * px + rz * pz) >= 0 ? 1 : -1;
+              const lat = 0.6 + 0.6 * Math.max(0, ahead);
+              fx = ax * 0.55 + px * side * lat; fz = az * 0.55 + pz * side * lat;
+            }
+          }
+          // ZIG-ZAG: a loner chased close jinks; a school's split is its jink
+          if (kind !== "school" && u > 0.45 && tv > 2) {
+            m.zigT -= dt;
+            if (m.zigT <= 0) { m.zigT = 0.55 + Math.random() * 0.45; m.zig = -m.zig; }
+            fx += -az * m.zig * 0.8; fz += ax * m.zig * 0.8;
+          }
+          // a BALLED school holds together instead of scattering: its defence
+          // is the ball (and the flash when something finally charges it)
+          const w = (1.2 + 4 * u) * (1 - 0.75 * bunch);
+          dx += fx * w; dz += fz * w;
+          wantV = Math.max(wantV, cruise * (1 + (pr.burst - 1) * Math.min(1, u * 1.6)));
+          a.alarm = Math.max(a.alarm || 0, u * 3);
+        }
+      } else if (S.mode === 2 && S.boat) {
+        // BOW-RIDING: a station just off the bow, matching the boat's speed
+        const b = S.boat, bh = Math.atan2(_tv.z, _tv.x);
+        const side = m.seed < 0.5 ? 1 : -1;
+        const loa = b._mmLoa || 8;                        // ride the pressure wave, clear of the stem
+        const fwd = loa * 0.5 + 2.5 + m.seed * 4, lat = side * (loa * 0.1 + 1.2 + m.seed * 2);
+        const sx2 = b.pos.x + Math.cos(bh) * fwd - Math.sin(bh) * lat;
+        const sz2 = b.pos.z + Math.sin(bh) * fwd + Math.cos(bh) * lat;
+        const ex = sx2 - x, ez2 = sz2 - z;
+        const ed = Math.sqrt(ex * ex + ez2 * ez2) || 0.01;
+        dx += (ex / ed) * 3 + Math.cos(bh) * 1.2; dz += (ez2 / ed) * 3 + Math.sin(bh) * 1.2;
+        wantV = Math.min(cruise * pr.burst, Math.max(cruise * 0.7, tv + (ed - 2) * 0.5));
+      } else if (S.mode === 3) {
+        // THE MOB: close passes at a shark small enough to push around, each
+        // dolphin from its own side, so the pod harries rather than stacks
+        const side = m.seed < 0.5 ? 1 : -1;
+        const px = tp.x - az * side * 5, pz = tp.z + ax * side * 5;
+        const ex = px - x, ez2 = pz - z;
+        const ed = Math.sqrt(ex * ex + ez2 * ez2) || 0.01;
+        // the pass point swings from side to side, so they RAKE past it
+        const sw = Math.sin(m.gph * 0.9 + m.seed * 9) * 4;
+        dx += (ex / ed) * 2.4 - az * sw * 0.15; dz += (ez2 / ed) * 2.4 + ax * sw * 0.15;
+        wantV = cruise * (d < 8 ? 1.7 : 1.35);
+      }
+    }
+
+    // ---- HABITS ------------------------------------------------------------
+    let depthWant = 1;
+    if (kind === "ambush") {
+      // HANG, THEN LUNGE: near-still in the water column until a school passes
+      // close, then one explosive dash through it.
+      if (m.lunge > 0) {
+        m.lunge -= dt; wantV = cruise * pr.burst; m.fat += dt;
+      } else if (!fleeing) {
+        wantV = cruise * (0.35 + 0.2 * Math.sin(m.gph * 0.3));
+        m.lungeT -= dt;
+        if (m.lungeT <= 0) {
+          m.lungeT = 1.2;
+          let bd2 = 18 * 18, bx = 0, bz = 0, got = false;
+          for (let i = 0; i < herds.length; i++) {
+            const h2 = herds[i];
+            if (h2.n < 6 || !h2.sp || mmKind(h2.sp) !== "school") continue;
+            const qx = h2.cx - x, qz = h2.cz - z, q2 = qx * qx + qz * qz;
+            if (q2 < bd2) { bd2 = q2; bx = qx; bz = qz; got = true; }
+          }
+          if (got && hunger > 0.3 && m.fat <= 0) {
+            m.lunge = 0.9; m.lungeT = 7 + Math.random() * 6;
+            m.wH = Math.atan2(bz, bx);                   // fturn carries it round, no pivot
+          }
+        }
+      }
+    } else if (kind === "turtle") {
+      // IT HAS TO BREATHE: every half-minute or so it rises, lies at the
+      // surface with its head out for a few seconds, and dives again.
+      if (fleeing) { m.breath = 0; m.breathT = Math.max(m.breathT, 8); depthWant = 1.8; }
+      else {
+        m.breathT -= dt;
+        if (m.breath > 0) {
+          m.breath -= dt; depthWant = 0.22; wantV = cruise * 0.4;
+          if (m.breath <= 0) m.breathT = 24 + Math.random() * 26;
+        } else {
+          if (m.breathT <= 0) m.breath = 3.5 + Math.random() * 2.5;
+          depthWant = m.breathT < 6 ? 0.5 : 1.35;      // on its way up
+        }
+      }
+    } else if (kind === "ray") {
+      depthWant = fleeing ? 1.3 : 2.2;                   // low in the water; flushes up and away
+    } else if (/hammerhead/.test(sp.id)) {
+      depthWant = 1.55;                                  // the bottom patrol
+    } else if (kind === "school" && bunch > 0.35) {
+      depthWant = 1 - 0.45 * bunch;                      // a ball is driven up at the surface
+    }
+    if (kind !== "orca" && kind !== "whale" && kind !== "dolphin" && a._swimDepth0 > 0) {
+      m.depthK += (depthWant - m.depthK) * Math.min(1, dt * (depthWant < m.depthK ? 0.5 : 0.8));
+      a.swimDepth *= m.depthK;
+    }
+
+    // ---- GAIT: burst-and-glide / stroke --------------------------------------
+    m.glide = 0;
+    if (pr.gait === 1) {
+      // a fish beats for a second or two, then coasts; urgency never coasts
+      m.beatT -= dt;
+      if (m.beatT <= 0) {
+        m.gph = m.gph > 0 ? -1 : 1;
+        m.beatT = m.gph > 0 ? 1.0 + Math.random() * 1.6 : 0.6 + Math.random() * 0.9;
+      }
+      if (!fleeing && m.gph < 0) { wantV *= 0.7; m.glide = 1; }
+      else if (!fleeing) wantV *= 1.18;
+    } else if (pr.gait === 2) {
+      // one surge per flipper stroke / wingbeat, the phase the rig draws
+      const rate = 6.283 / pr.period * Math.max(0.6, Math.min(2.4, m.v / Math.max(0.1, cruise)));
+      m.gph += dt * rate;
+      if (m.gph > 6.283e3) m.gph -= 6.283e3;
+      wantV *= 0.82 + 0.5 * Math.max(0, Math.sin(m.gph));
+    } else {
+      m.gph += dt;                                     // a plain clock (sway, hover)
+      if (m.gph > 1e4) m.gph -= 1e4;
+    }
+    // FATIGUE: a burst is short. Past its budget a fleeing animal can only
+    // hold ~1.35x cruise, which is what makes a chase winnable.
+    if (wantV > cruise * 1.5) { m.fat += dt; if (m.fat > pr.tire) wantV = Math.min(wantV, cruise * 1.35); }
+    else if (m.fat > 0) m.fat = Math.max(0, m.fat - dt * 0.6);
+
+    // ---- BLOCKED LAST FRAME: turn away along the shore, smoothly ------------
+    if (m.blockT > 0) {
+      m.blockT -= dt;
+      dx += -shh * m.zig * 2.5 - ch * 0.8; dz += ch * m.zig * 2.5 - shh * 0.8;
+      wantV = Math.min(wantV, cruise * 0.7);
+    }
+
+    // ---- TURN (rate-limited) + SPEED (accel-limited) --------------------------
+    const want = Math.atan2(dz, dx);
+    const rate = (fleeing || S.mode === 3 || m.lunge > 0 ? pr.fturn : pr.turn) / big;
+    const dh = wrapA(want - a.heading);
+    const lim = rate * dt;
+    a.heading += dh > lim ? lim : (dh < -lim ? -lim : dh);
+    // the constant-radius loop of a patrolling shark / travelling whale: a
+    // steady yaw rate, not a chased target (which only ever turns at max)
+    if (m.curve && !fleeing) a.heading += m.curve * dt;
+    a.heading = wrapA(a.heading);
+    // a hard turn bleeds speed — a real body carves, it does not pivot at pace
+    const turnLoss = Math.min(0.35, Math.abs(dh) * 0.12);
+    wantV *= 1 - turnLoss;
+    const dv = wantV - m.v;
+    const accel = dv > 0 ? pr.acc : pr.dec * (m.glide ? 0.8 : 1.6);
+    m.v += Math.max(-accel * dt, Math.min(accel * dt, dv));
+    m.u = u;
+    // the rig's coast flag (wildlife_rig.js reads a._mmGlide): only a fish's
+    // burst-and-glide is ours; a steady swimmer keeps the rig's own coasts
+    a._mmGlide = pr.gait === 1 ? m.glide : null;
+    return m.v;
+  }
+  // wildlife_rig.js draws the flipper stroke / wingbeat on this phase
+  CBZ.wildlifeSwimPhase = function (a) { return a && a._mm ? a._mm.gph : null; };
+  // the probe: what one animal is doing, in words, for plain-node checks
+  CBZ.wildlifeMotionRead = function (a) {
+    const m = a && a._mm; if (!m) return null;
+    const S = (a.herd && a.herd._mm) || m;
+    return {
+      kind: m.kind, v: +m.v.toFixed(2), heading: +a.heading.toFixed(3),
+      mode: ["cruise", "flee", "bow-ride", "mob", "yield"][S.mode] || "cruise",
+      u: +m.u.toFixed(2), glide: m.glide, breath: m.breath > 0, depthK: +m.depthK.toFixed(2),
+      bunch: a.herd ? +(a.herd.bunch || 0).toFixed(2) : 0, lunge: m.lunge > 0, tired: m.fat > m.pr.tire,
+    };
+  };
+
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
     const waterTime = ((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001) % 3600;
+    mmFrame++;                     // sea motion: one threat gather per frame
     venomTick(dt);                 // poison keeps draining after a venomous bite
     updateHerds(dt);               // live centroid + mean heading + herd alarm
     if (!wrapsOk) installWraps();  // retry until the combat hooks exist (idempotent)
@@ -3659,6 +4226,8 @@
             TRAITS.hungerKit(a._shark.opts, a);
           }
           if (CBZ.sharkBrain(a, dt, P)) {
+            a._mmGlide = null;                        // the hunt's speed, the rig's coasts
+            if (a._mm) a._mm.v = -1;                  // re-seed the pace when it hands back
             faceAnimalHeading(grp, a.heading);
             if (LIVE()) animateSwim(a, dt);
             continue;                                 // the hunt owns the transform
@@ -3676,52 +4245,12 @@
         const hdA = DRIVE(a);
         if (a._baseClear > 0) a.waterClearance = a._baseClear * (1.5 - hdA.bold * 0.5);
         a.bob += dt * (1.2 + a.spd * 0.2);
-        a.turnT -= dt;
-        if (a.turnT <= 0) {
-          a.heading += (Math.random() - 0.5) * 0.8 * hdA.restless;
-          a.turnT = (3 + Math.random() * 4) / hdA.restless;
-        }
-        /* ---- A SCHOOL IS A SCHOOL. -------------------------------------
-           This block existed twice in this file — once in landWalk and once
-           in the legacy land branch — and NOT ONCE in the water, which is the
-           one place the concept has a name. A sardine row declares a herd of
-           26 to 60; seeding built the herd, updateHerds kept its centre and
-           its shared heading up to date every frame, and then the aquatic
-           mover ignored all of it and gave each fish an independent random
-           walk. At a mackerel's cruise that is a shoal for about two seconds
-           and a scatter of loners for the rest of the match — which is why
-           the sea reads empty even when it is full: forty fish spread evenly
-           over a ring is one fish every forty metres, and underwater sight
-           lines here are shorter than that.
-
-           Same three boids terms and the same constants as the land block,
-           the same `bunch` scalar (a bait ball IS a school that has knotted
-           because something hungry is under it), applied to the heading
-           BEFORE the water navigator so shoreline clearance still owns the
-           final step. Behind the LOD gate, so an off-screen school costs
-           nothing. */
-        const hrA = a.herd;
-        if (hrA && hrA.n > 1 && !a.tamed) {
-          let dx = Math.cos(a.heading), dz = Math.sin(a.heading);
-          dx += Math.cos(hrA.heading) * 0.5; dz += Math.sin(hrA.heading) * 0.5;
-          const toCx = hrA.cx - grp.position.x, toCz = hrA.cz - grp.position.z;
-          const cd = Math.hypot(toCx, toCz) || 1;
-          const bn = hrA.bunch || 0;
-          const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7));
-          dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
-          const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
-          let sx = 0, sz = 0;
-          for (let m = 0; m < hrA.members.length; m++) {
-            const o2 = hrA.members[m]; if (o2 === a || o2.dead) continue;
-            const ox = grp.position.x - o2.pos.x, oz = grp.position.z - o2.pos.z;
-            const od = Math.hypot(ox, oz);
-            if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od); }
-          }
-          dx += sx * 0.9; dz += sz * 0.9;
-          let dh = Math.atan2(dz, dx) - a.heading;
-          while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
-          a.heading += dh * Math.min(1, dt * 2.2);
-        }
+        /* HOW IT SWIMS: the whole of it lives in aquaticSteer (SEA MOTION,
+           above tick) — wander, the school, the gait, and what it senses.
+           It replaced a ±0.4 rad heading snap every few seconds and one
+           constant sp.spd x 6 for every animal in the sea. Tamed sea life
+           keeps its follow-the-player drive below at its old pace. */
+        const seaV = a.tamed ? a.spd * hdA.spd * 6 : aquaticSteer(a, dt, hdA);
         // TAMED sea life (ANIMALS_ALL_CONTROLLABLE): your dolphin swims WITH
         // you — heading steers toward wherever you are (the water nav below
         // still owns shoreline clearance, so it holds just offshore when you
@@ -3747,12 +4276,18 @@
             if (wet) { grp.position.x = wet.x; grp.position.z = wet.z; a.home.x = wet.x; a.home.z = wet.z; }
           }
           const nav = wf.moveInWater(
-            grp.position.x, grp.position.z, a.heading, a.spd * hdA.spd * dt * 6,
+            grp.position.x, grp.position.z, a.heading, seaV * dt,
             a.waterClearance || 12, waterTime, a._waterMove
           );
           a.heading = nav.heading;
           grp.position.x = nav.x; grp.position.z = nav.z;
-          if (nav.blocked) { a.heading += 0.28; a.turnT = Math.min(a.turnT, 0.45); }
+          // blocked: aquaticSteer carves away along the shore over the next
+          // frames (it used to add 0.28 rad per blocked FRAME — a spin)
+          if (nav.blocked && a._mm && a._mm.blockT <= 0) {
+            const m0 = a._mm; m0.blockT = 0.7;
+            if (a.herd && a.herd._mm) a.herd._mm.H = a.heading + 2.2 * m0.zig;
+            else m0.wH = a.heading + 2.2 * m0.zig;
+          }
           // The bob rides INSIDE the solved water column (it is a change of
           // draft, not a change of Y after the fact), so nothing can bob its
           // way out of the sea, and the shared law keeps a body out of the bed
@@ -3762,8 +4297,8 @@
             aquaticBedLift(a), waterTime);
         } else {
           // Legacy radial-band fallback when this module is unit-loaded alone.
-          const nx = grp.position.x + Math.cos(a.heading) * a.spd * hdA.spd * dt * 6;
-          const nz = grp.position.z + Math.sin(a.heading) * a.spd * hdA.spd * dt * 6;
+          const nx = grp.position.x + Math.cos(a.heading) * seaV * dt;
+          const nz = grp.position.z + Math.sin(a.heading) * seaV * dt;
           const rr = Math.hypot(nx - FIELD.cx, nz - FIELD.cz);
           if (rr < FIELD.r0 || rr > FIELD.r1) a.heading += Math.PI * 0.6;
           else { grp.position.x = nx; grp.position.z = nz; }

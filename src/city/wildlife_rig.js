@@ -590,6 +590,9 @@
       gliding: false, nG: 0, turn: 0, vyS: 0,
       gT: 1 + (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 74) : 0.5) * 3.5,   // staggered first coast
       curl: 0, yawSwing: 0,
+      // "flap" (a ray: the wings ARE the stroke) / "flipper" (a turtle rows)
+      style: (sp.swimStyle === "flap" || sp.swimStyle === "flipper") && pecs.length === 2 ? sp.swimStyle : null,
+      sph: 0,
       seed: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 72) : 0.5) * 997,
     };
     // hinge height for the gape = the mean y of the jaw parts
@@ -686,6 +689,40 @@
     }
   }
 
+  /* THE WING AND THE FLIPPER. A manta does not swim with its tail and a
+     turtle does not either; both FLY through the water on their pectorals.
+     Before this they got the fish treatment — a tail wag and a pectoral
+     trim — so a manta slid along with its wings held flat like a paper
+     plane and a turtle wagged its stub tail. The phase comes from
+     wildlife.js's sea motion (CBZ.wildlifeSwimPhase) whenever it is steering
+     the animal, so each power stroke lands on the same frames as the surge
+     of speed it produces; a ridden or otherwise-driven body falls back to
+     the rig's own distance-driven beat.
+       flap     both wings down together (0.5-1.0 rad at the root, deeper
+                the harder it swims), a slow deep beat, the power stroke
+                a touch deeper than the recovery.
+       flipper  a turtle's flight stroke: down-and-back on the power stroke
+                with the blade square to the water, then up feathered. */
+  function strokePecs(a, rig, dt) {
+    const ph0 = CBZ.wildlifeSwimPhase ? CBZ.wildlifeSwimPhase(a) : null;
+    let ph;
+    if (ph0 != null && !a.ridden) ph = ph0;
+    else { rig.sph += dt * (1.6 + 3.2 * rig.spd01) * (1 - 0.7 * rig.glide); ph = rig.sph; }
+    const s = Math.sin(ph), c = Math.cos(ph);
+    const turn = Math.max(-0.3, Math.min(0.3, rig.turn * 0.25));
+    if (rig.style === "flap") {
+      const amp = 0.5 + 0.3 * rig.spd01 + 0.2 * rig.burst;
+      // + drop = tips down; the upstroke is a touch shallower than the power stroke
+      const drop = s > 0 ? amp * s : amp * 0.8 * s;
+      posePecs(rig, 0.12 * c, drop, turn, 0.06 * rig.spd01);
+    } else {
+      const drop = 0.5 * s;                     // down on the power stroke
+      const sweep = 0.32 * (0.5 - 0.5 * c);     // ..and swept back through it
+      const feather = -0.35 * c;                // blade edge-on on the recovery
+      posePecs(rig, feather, drop, turn, sweep);
+    }
+  }
+
   function animateSwim(a, dt) {
     const rig = a.swim; if (!rig) return;
     const grp = a.group;
@@ -720,7 +757,12 @@
     // coasts. The schedule is hashed per animal (no Math.random, no shared
     // stream), and anything urgent (accelerating, rushing, ridden) beats.
     let glideWant = rig.brake;
-    if (!a.ridden && moved > 0) {
+    if (a._mmGlide != null && !a.ridden) {
+      // wildlife.js's sea motion owns the coast now (the body really slows in
+      // it), so the tail goes quiet on exactly the frames the speed drops
+      rig.gliding = false;
+      if (a._mmGlide > 0) glideWant = Math.max(glideWant, 0.9);
+    } else if (!a.ridden && moved > 0) {
       rig.gT -= dt;
       const calm = rig.spd01 < 0.5 && rig.burst < 0.25 && !(a._atkAnim >= 0);
       if (rig.gliding) {
@@ -742,7 +784,7 @@
     const swing = moved > 0.002 ? 1 : 0.4;
     rig.k += (swing - rig.k) * ez(4, dt);
     const ampMul = (AMP_SLOW + (AMP_FAST - AMP_SLOW) * rig.spd01) * (1 + 0.45 * rig.burst) * (1 - 0.85 * rig.glide);
-    const amp = rig.amp * ampMul * rig.k;
+    const amp = rig.amp * ampMul * rig.k * (rig.style ? 0.3 : 1);
     // CURL: a poser's static bend (breach arc, death), eased.
     const curlWant = a._swimCurl ? Math.max(-1, Math.min(1, a._swimCurl)) : 0;
     rig.curl += (curlWant - rig.curl) * ez(6, dt);
@@ -762,7 +804,8 @@
     // ---- PECTORALS ---------------------------------------------------------
     // trim: leading edge up to climb, down to dive; flare on braking; swept
     // back at a rush; differential in a turn; a slow scull at rest.
-    if (rig.pecs && rig.pecs.length) {
+    if (rig.pecs && rig.pecs.length && rig.style) strokePecs(a, rig, dt);
+    else if (rig.pecs && rig.pecs.length) {
       const trim = Math.max(-0.32, Math.min(0.32, rig.vyS * 0.55));
       const idle = (1 - rig.spd01) * Math.sin(rig.ph * 0.5) * 0.05;
       const aoa = trim + 0.55 * rig.brake + idle;

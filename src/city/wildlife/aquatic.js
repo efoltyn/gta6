@@ -4088,6 +4088,7 @@
     rarity: "uncommon", hp: 90, fur: "Manta Hide", furValue: 210,
     meat: "Fish Fillet", meatValue: 18, herd: [1, 3], spd: 1.9, danger: 0,
     aquatic: true, scale: 1.1, color: 0x262c33, clearance: 70, swimDepth: 2.2,
+    swimStyle: "flap",         // wildlife_rig.js: the wings are the stroke
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const dark = m(0x262c33), pale = m(0xeaeeef), slit = m(0x141a1e), eye = m(0x0a0c0f);
@@ -4167,6 +4168,7 @@
     meat: "Fish Fillet", meatValue: 12, herd: [1, 3], spd: 1.1, danger: 0,
     aquatic: true, scale: 0.7, color: 0x4f6535,
     clearance: 20, swimDepth: 1.1,
+    swimStyle: "flipper",      // wildlife_rig.js: it rows with the front flippers
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const shell = m(0x4f6535), scute = m(0x384a26), cream = m(0xd6cfa8);
