@@ -1923,14 +1923,26 @@
       findSpawn: function () { const f = (AXES.where[HITCOMP.where] || {}).find; return f ? f() : null; },
       grants: function (game) { applyGrants(HITCOMP, game); armHeat(game); },
       scene: function (game) {
-        // Campaign on: the director stages the real opening (the room, the
-        // name, the handoff) from its reset wrap — a cheap safe spawn is all
-        // this scene should do, and no origin cinematic plays over it.
+        // Campaign on (only if someone re-enables CITY_HITMAN_CAMPAIGN): the
+        // director stages its own opening from its reset wrap.
         if (CBZ.cityCampaignEnabled && CBZ.cityCampaignEnabled()) { genericSafeSpawn(); return { compact: true }; }
-        // Campaign off (the one-line kill switch): the classic preset opening.
+        // THE ROOM (2026-09-27, the in-world wave): the Hitman wakes in his
+        // motel room (city/hitman_room.js). The Bureau arc (city/agency.js)
+        // rings the burner on the bed; nothing is started from here.
+        let room = null;
+        try { room = CBZ.hmRoom && CBZ.hmRoom.ensure ? CBZ.hmRoom.ensure() : (CBZ.hitmanRoom ? CBZ.hitmanRoom() : null); } catch (e) { room = null; }
+        const P = CBZ.player;
+        if (room && room.spawn && P && P.pos) {
+          const sx = room.spawn.x, sz = room.spawn.z;
+          const gy = room.floorY != null ? room.floorY : (CBZ.floorAt ? CBZ.floorAt(sx, sz) : 0);
+          P.pos.set(sx, gy, sz); P.vy = 0; P.grounded = true; P.speed = 0; P.driving = false;
+          if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, (room.spawn.heading || 0) + Math.PI, 0); }
+          if (CBZ.cam) { CBZ.cam.yaw = room.spawn.heading || 0; CBZ.cam.pitch = 0.12; }
+          scene = null;
+          return { compact: true };
+        }
         let o = null;
         try { o = placeComposition(HITCOMP, game); } catch (e) { o = null; }
-        if (o) { try { startVerb(HITCOMP); } catch (e) {} }
         return o;
       },
     };
@@ -2312,7 +2324,7 @@
   ];
   // Stories whose opening IS a career of their own (the grid, the Oval
   // Office, the wheelhouse) do not get told to mug a stranger.
-  const OB_SKIP = { president: 1, captain: 1, racer: 1 };
+  const OB_SKIP = { president: 1, captain: 1, racer: 1, contract: 1, hitman: 1 };   // the Hitman's opening is the burner on the bed
   let ob = null;            // live chain state, or null (done / skipped / campaign)
   let obSig = "";
   let pendingTP = false;    // one-shot: disarm fpsmode's FP-after-intro on the first frame
@@ -2478,7 +2490,7 @@
       try { room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null; } catch (e) { room = null; }
       if (room && room.board) {
         ob.jobVia = "wall"; ob.jobPlace = String(room.name || "the motel room").toLowerCase();
-        obSetWp(room.board.x, room.board.z, "THE WALL");
+        obSetWp(room.board.x, room.board.z, "MOTEL");
         return;
       }
       const gid = obNearestGangId(P);
@@ -2633,8 +2645,6 @@
       const s2 = nmNearestShop(P, NM_SMASH);
       if (s2) out.push({ id: "smash", title: "Smash and grab", hint: "The " + s2.kind + " place pays better than a corner store. Press H inside to case it", x: s2.cx, z: s2.cz, label: "SCORE" });
     }
-    let room = null; try { room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null; } catch (e) { room = null; }
-    if (room && room.board) out.push({ id: "wall", title: "There's work on the wall", hint: "Read the wall in " + String(room.name || "the motel room").toLowerCase() + " for a paid contract", x: room.board.x, z: room.board.z, label: "THE WALL" });
     const inCrew = !!(g.cityMembership || (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()));
     const prospect = CBZ.cityProspectGangId && CBZ.cityProspectGangId() != null;
     if (!inCrew && !prospect) {

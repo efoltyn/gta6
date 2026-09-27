@@ -37,7 +37,12 @@
   // The flag is a MASTER ENABLE, not an activation: with it on (the default),
   // the campaign runs only when the player picks "The Contract" on the title
   // screen. false is the one-line kill switch for the whole story.
-  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = true;
+  // 2026-09-27 (the in-world hitman wave): OFF by default. The Hitman card now
+  // wakes in his motel room and plays the Bureau arc (city/agency.js,
+  // hitman_room.js). Two hitman stories on one card was the drift CLAUDE.md
+  // warns about; the Bureau one is the owner's current direction. This
+  // Director story is kept intact: ?cfg_CITY_HITMAN_CAMPAIGN=1 brings it back.
+  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = false;
   // Endless-line archetypes (sniper/disguise/vehicle/high-value contracts).
   if (CFG.CAMPAIGN_CONTRACT_VARIETY == null) CFG.CAMPAIGN_CONTRACT_VARIETY = true;
   // Ambient scenedirector set-pieces during ENDLESS free time (scripted phases
