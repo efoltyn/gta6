@@ -72,6 +72,38 @@
     { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 1000, cull: 500 },  // 3
     { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 1400, cull: 700 },  // 4 — full world
   ];
+  // ---- DEVICE TIERING (2026-09-27, owner: "very hard to run on my iPad") ----
+  // config.js classifies the machine before anything renders. The pr column
+  // above is a multiplier on CSS pixels, and a desktop's CSS pixel is already
+  // the cheap one; an iPad's viewport is 1180x820 CSS at DPR 2, so "pr 1.0"
+  // there is a quarter of the panel's real pixels and still looks sharp at
+  // arm's length. Tablets and phones get their own resolution column; every
+  // other budget (shadows, crowd, peds, fog, cull, gfx) keeps the shared rows.
+  const DEVICE = CBZ.deviceClass || "desktop";
+  const MOBILE = DEVICE !== "desktop";
+  const MOBILE_PR = DEVICE === "phone"
+    ? [0.9, 1.0, 1.15, 1.3, 1.5]   // phone CSS viewports are tiny (390x844): 1.0 alone reads soft
+    : [0.75, 0.9, 1.0, 1.15, 1.3]; // tablet
+  if (MOBILE) for (let i = 0; i < QUALITY.length; i++) QUALITY[i].pr = Math.min(devicePixelRatio || 1, MOBILE_PR[i]);
+  // A desktop whose GPU is an integrated/mobile part (Intel iGPU, Mali, Adreno)
+  // starts where an iPad does and lets the auto governor climb. SwiftShader is
+  // NOT on this list: every headless tool renders through it and must keep
+  // seeing the desktop defaults it was calibrated on.
+  let GPU = "";
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    GPU = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || "");
+  } catch (e) {}
+  const LOW_GPU = !MOBILE && /Intel|Mali|Adreno|PowerVR|Microsoft Basic|llvmpipe/i.test(GPU) && !/SwiftShader/i.test(GPU);
+  CBZ.gpuName = GPU;
+  CBZ.lowPowerGPU = LOW_GPU;
+  // Auto-quality ceilings. The player can still pick Best by hand; the
+  // governor just never climbs a tablet past Balanced or a phone past Fast.
+  const AUTO_TOP = DEVICE === "phone" ? 1 : (DEVICE === "tablet" ? 2 : (LOW_GPU ? 3 : 4));
+  const AUTO_START = DEVICE === "phone" ? 0 : ((DEVICE === "tablet" || LOW_GPU) ? 1 : 2);
+  const DEVICE_AUTO = MOBILE || LOW_GPU;
+
   // Published live so any renderer-side system can read the current budget
   // without importing the table. Set before the first applyQuality() below.
   CBZ.gfxTier = GFX[2];
@@ -92,7 +124,20 @@
   // survives a reload.
   CBZ.qualityAuto = false;
   CBZ.qualityLocked = true;
-  try {
+  // A weak device boots AUTO at its own starting tier. A choice saved before
+  // device tiering existed (the old one-size Medium pin, or a Best tapped on
+  // the iPad once) is not honoured there: only a pick stamped with THIS device
+  // class (cbz_qualityDevice, written by the title buttons) pins the tier.
+  let deviceAuto = DEVICE_AUTO;
+  try { if (DEVICE_AUTO && localStorage.getItem("cbz_qualityDevice") === DEVICE) deviceAuto = false; } catch (e) {}
+  if (deviceAuto) {
+    qLevel = AUTO_START;
+    titlePreset = "auto";
+    CBZ.qualityAuto = true;
+    CBZ.qualityLocked = false;
+  }
+  CBZ.qualityDeviceAuto = deviceAuto;
+  if (!deviceAuto) try {
     const savedPreset = localStorage.getItem("cbz_qualityPreset");
     const saved = localStorage.getItem("cbz_qualityLevel");
     if (savedPreset && TITLE_PRESETS[savedPreset] != null) {
@@ -107,13 +152,25 @@
     }
   } catch (e) {}
 
+  // The title card says what the machine is running, even when nobody chose:
+  // under auto the nearest preset lights up and the label names the device,
+  // so an iPad shows "Graphics: auto for this iPad" over a lit Fast button
+  // instead of a Medium it never really ran.
+  const DEVICE_WORD = DEVICE === "phone" ? "phone"
+    : (DEVICE === "tablet" ? (/iPad|Macintosh/.test(navigator.userAgent || "") ? "iPad" : "tablet") : "machine");
   function syncTitlePresetUI() {
     const nearest = qLevel <= 1 ? "fast" : (qLevel >= 4 ? "best" : "medium");
+    const auto = CBZ.qualityLocked === false && !!CBZ.qualityAuto;
     const buttons = document.querySelectorAll("[data-quality-preset]");
     for (let i = 0; i < buttons.length; i++) {
-      const active = CBZ.qualityLocked !== false && buttons[i].getAttribute("data-quality-preset") === nearest;
+      const active = buttons[i].getAttribute("data-quality-preset") === nearest;
       buttons[i].classList.toggle("active", active);
-      buttons[i].setAttribute("aria-pressed", active ? "true" : "false");
+      buttons[i].classList.toggle("auto", active && auto);
+      buttons[i].setAttribute("aria-pressed", active && !auto ? "true" : "false");
+    }
+    const labels = document.querySelectorAll("#qualityPreset .quality-preset-label");
+    for (let i = 0; i < labels.length; i++) {
+      labels[i].textContent = auto ? (DEVICE_AUTO ? "Graphics: auto for this " + DEVICE_WORD : "Graphics: auto") : "Graphics";
     }
   }
 
@@ -131,7 +188,10 @@
       // A fine-grained Settings choice (tiers 1 or 3 included) must not be
       // overwritten by an older three-button preset on the next reload.
       if (!applyingTitlePreset) localStorage.removeItem("cbz_qualityPreset");
+      localStorage.setItem("cbz_qualityDevice", DEVICE);
     } catch (e) {}
+    CBZ.qualityDeviceAuto = false;
+    dynRes = 1;
     applyQuality();
     return qLevel;
   }
@@ -146,7 +206,8 @@
     applyingTitlePreset = true;
     try { level = setQualityLevel(TITLE_PRESETS[id]); }
     finally { applyingTitlePreset = false; }
-    try { localStorage.setItem("cbz_qualityPreset", id); } catch (e) {}
+    try { localStorage.setItem("cbz_qualityPreset", id); localStorage.setItem("cbz_qualityDevice", DEVICE); } catch (e) {}
+    CBZ.qualityDeviceAuto = false;
     try {
       window.dispatchEvent(new CustomEvent("cbzqualitypreset", { detail: { id: id, level: level } }));
     } catch (e) {}
@@ -214,7 +275,9 @@
   function topTier() {
     // Hosting is measured by the same frame sampler as everything else. A good
     // GPU must not be denied Best quality merely because this client is host.
-    return QUALITY.length - 1;
+    // The player's own pick may be Best on any device; AUTO stops at the device
+    // ceiling (a tablet never auto-climbs past Balanced, a phone past Fast).
+    return (CBZ.qualityLocked === false && CBZ.qualityAuto) ? AUTO_TOP : QUALITY.length - 1;
   }
   CBZ.qualityTopTier = topTier; // exposed so the settings panel can grey out / cap its slider
 
@@ -252,6 +315,21 @@
   const qListeners = [];
   CBZ.onQualityChange = function (fn) { qListeners.push(fn); try { fn(qLevel); } catch (e) {} };
 
+  // ---- DYNAMIC RESOLUTION ---------------------------------------------------
+  // dynRes multiplies the tier's pixel ratio. The governor in sampleFPS moves
+  // it in small steps (fill-rate relief with no shader recompile, no rebuilt
+  // shadow map, no change to what is in the world) BEFORE it may drop a whole
+  // tier. Only ever <= 1: it sheds pixels under load and returns them when
+  // there is headroom; it never supersamples past the tier.
+  let dynRes = 1;
+  const DYN_MIN = MOBILE ? 0.6 : 0.7;
+  function setRenderScale() {
+    const q = QUALITY[qLevel];
+    const pr = Math.max(0.45, Math.round(q.pr * dynRes * 100) / 100);
+    CBZ.dynResScale = dynRes;
+    if (renderer.getPixelRatio() !== pr) renderer.setPixelRatio(pr);
+  }
+
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;
@@ -264,7 +342,7 @@
     if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
     CBZ.pedLOD = q.ped;
     if (CBZ.refreshPedLOD) CBZ.refreshPedLOD();
-    renderer.setPixelRatio(q.pr);
+    setRenderScale();
     // Three r128 setPixelRatio() already reapplies the cached logical size.
     // A second setSize() repeated the drawing-buffer reset/allocation work.
     // Shadow policy: the quality tier sets the baseline (tier 0 kills the sun
@@ -351,6 +429,15 @@
     // qualityAuto=false (pause-screen slider) and qualityLocked=true (settings
     // panel); either one wins over the auto-tuner.
     if (!CBZ.qualityAuto || CBZ.qualityLocked) return;
+    // Only frames of actual PLAY say anything about the world's cost. The
+    // title card and pause menus draw a fraction of it: sampled there, an
+    // iPad would climb to Balanced before the city is even built, and the
+    // build reads tier-scaled budgets (population, traffic, grass) then.
+    if (CBZ.game && CBZ.game.state !== "playing") {
+      resetVWindow(true);
+      _vBadRun = 0; _vEmergencyRun = 0; _vSpikeRun = 0; _vLongRun = 0; _good = 0;
+      return;
+    }
     // Visibility is a correctness guard for both V2 and the opt-in legacy
     // sampler. Some browsers deliver sparse background callbacks; accumulating
     // those as render frames would manufacture a low-FPS window.
@@ -433,17 +520,51 @@
     // 1) if we're above the host-aware ceiling, drop toward it immediately.
     if (qLevel > top) { qLevel--; applyQuality(); _good = 0; _vCool = 4; return; }
 
-    if (fps < V_FPS_DOWN) _vBadRun++; else _vBadRun = 0;
+    // A display (or iOS Low Power Mode) that caps rAF at 30Hz delivers a
+    // metronome-steady ~33ms. That is the ceiling, not load: shedding pixels
+    // or tiers there would blur and strip the world for zero frames gained.
+    const capped30 = fps > 27.5 && fps < 31.5 && p95 > 0 && p95 < 37;
+    const downFps = MOBILE ? 40 : V_FPS_DOWN;
+    if (fps < downFps && !capped30) _vBadRun++; else _vBadRun = 0;
     if (fps < 22) _vEmergencyRun++; else _vEmergencyRun = 0;
+
+    // 1b) DYNAMIC RESOLUTION FIRST. Below ~45fps (52 on desktop) shed 10% of
+    // the resolution per window, down to DYN_MIN, before any tier is touched:
+    // the cheapest relief there is, and invisible at a glance on a retina
+    // panel. Given back 10% at a time after three smooth windows.
+    if (!capped30 && fps < (MOBILE ? 45 : 52) && dynRes > DYN_MIN + 1e-3) {
+      dynRes = Math.max(DYN_MIN, Math.round((dynRes - 0.1) * 100) / 100);
+      setRenderScale();
+      qualitySettlingUntil = now + 400;
+      _good = 0; _vCool = Math.max(_vCool, 2);
+      return;
+    }
+    if (fps >= (MOBILE ? 54 : V_FPS_UP) && !spiky && _vCool === 0 && dynRes < 1) {
+      if (++_good >= 4) {
+        dynRes = Math.min(1, Math.round((dynRes + 0.1) * 100) / 100);
+        setRenderScale();
+        qualitySettlingUntil = now + 400;
+        _good = 0;
+      }
+      return;
+    }
 
     // 2) sustained mean load. Auto quality normally stops at Balanced: a
     // 30/40Hz display or CPU-bound draw stream should not destroy presentation
     // chasing an impossible 60. Fast is allowed below 28fps; the shadow-off
-    // emergency tier requires four genuinely dire windows below 22fps.
+    // emergency tier requires four genuinely dire windows below 22fps. On a
+    // phone/tablet the governor holds 40fps rather than 50 and may reach the
+    // shadowless tier below 30 (only once resolution is already at its floor).
     let autoFloor = fps < 28 ? 1 : 2;
+    if (MOBILE) autoFloor = fps < 30 ? 0 : 1;
     if (fps < 22 && _vEmergencyRun >= 4) autoFloor = 0;
-    if (_vBadRun >= 2 && qLevel > autoFloor) {
-      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 4; _vBadRun = 0; return;
+    const resSpent = dynRes <= DYN_MIN + 1e-3 || fps < 20;
+    if (_vBadRun >= 2 && qLevel > autoFloor && resSpent) {
+      // The lighter tier frees headroom, so hand back part of the shed
+      // resolution with it; the governor re-trims from there.
+      dynRes = Math.min(1, dynRes + 0.2);
+      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 4; _vBadRun = 0;
+      return;
     }
 
     // 3) steady-beats-spiky: sustained p95 spikes → shed a tier even if mean ok.
