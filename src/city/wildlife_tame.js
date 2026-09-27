@@ -1141,7 +1141,7 @@
   const ride = {
     mount: null, head: 0, phase: 0, lx: 0, lz: 0, visual: null, water: null,
     attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
-    target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
+    target: null, targetKind: null, attackPitch: 0, attackRoll: 0, attackYaw: 0,
     // Short-lived surface anchor from first tooth contact through compression.
     // This is separate from the above-weight death-roll clamp below.
     gripTarget: null, gripKind: null, gripLocal: new THREE.Vector3(), gripFrames: 0,
@@ -2094,7 +2094,7 @@
     ride.attackDur = CBZ.aquaticBiteDuration
       ? CBZ.aquaticBiteDuration(a, pick.kind, pick.kind === "animal" ? pick.target : null)
       : (R.shipBite ? 0.72 : 0.56);
-    ride.attackHit = false; ride.attackHitP = -1;
+    ride.attackHit = false; ride.attackHitP = -1; ride.attackHitT = null;
     AQUATIC_AUDIT.lastContactGap = 0;
     AQUATIC_AUDIT.lastBitePenetration = 0;
     AQUATIC_AUDIT.lastCollider = "";
@@ -2256,7 +2256,7 @@
       if (tickClamp(a, dt)) return;
     }
     if (ride.attackCd > 0) ride.attackCd = Math.max(0, ride.attackCd - dt);
-    ride.attackPitch = 0; ride.attackRoll = 0;
+    ride.attackPitch = 0; ride.attackRoll = 0; ride.attackYaw = 0;
     if (!(ride.attackT > 0)) return;
     const pPrev = Math.min(1, ride.attackT / ride.attackDur);
     ride.attackT += dt;
@@ -2293,7 +2293,19 @@
     // wind-up to recovery and a sampled-only test never lands a single bite.
     if (!ride.attackHit && p >= 0.38 && pPrev <= 0.72) {
       ride.attackHit = damageBiteTarget(a, ride.target, ride.targetKind);
-      if (ride.attackHit) ride.attackHitP = p;
+      if (ride.attackHit) { ride.attackHitP = p; ride.attackHitT = ride.attackT; }
+    }
+    /* THE HEAD-SHAKE. Teeth that have gone in SAW: a shark that lands a bite
+       throws its head side to side (a real great white's lateral shake, about
+       four a second) and rolls with it, and the shake dies as the jaw closes.
+       Yaw and roll only, on the drawn body: the camera root is solved from the
+       swim pose, so the lens holds still while the head works. */
+    if (ride.attackHit && ride.attackHitT != null) {
+      const ts = Math.max(0, ride.attackT - ride.attackHitT);
+      const env = Math.exp(-ts * 3.2) * Math.min(1, ts * 12);
+      const w = Math.sin(ts * 26.4);                    // ~4.2 Hz
+      ride.attackYaw = w * 0.22 * env;
+      ride.attackRoll += w * 0.14 * env;
     }
     // The same normalized production curve now drives mounted and wild jaws.
     // Contact is still geometry-owned above, but no longer collapses the next
@@ -2316,8 +2328,8 @@
       if (!ride.attackHit) ride.attackCd = Math.min(ride.attackCd, 0.18);
       endBiteGrip(a); releaseEngulf();
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
-      ride.attackHitP = -1;
-      ride.attackPitch = 0; ride.attackRoll = 0; a._atkAnim = -1;
+      ride.attackHitP = -1; ride.attackHitT = null;
+      ride.attackPitch = 0; ride.attackRoll = 0; ride.attackYaw = 0; a._atkAnim = -1;
       if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
     }
   }
@@ -3556,6 +3568,8 @@
       }
       W.roll = Math.max(-0.5, Math.min(0.5,
         Math.sin((W.groundT || 0) * 6.4) * 0.34 * Math.min(1, 0.25 + W.v)));
+      // a stranded body flexes whole, head to tail, against the sand
+      a._swimCurl = Math.sin((W.groundT || 0) * 6.4 + 1.2) * 0.6;
       W.lastHead = ride.head;
     } else if (W.airborne) {
       /* HANDS OFF THE ROLL IN THE AIR. The turn-roll below is a bank into a
@@ -3563,10 +3577,25 @@
          own roll every frame — which is why a breach used to come out of the
          water perfectly upright no matter what. In the air the arc owns it. */
       W.thrashT = 0; W.lastHead = ride.head;
+      /* THE BREACH CURL. A leaping shark is not a plank on a parabola: it
+         comes out bent, whips straight at the top and bends the other way
+         into the entry, the tail still working. The rig takes a static bend
+         (a._swimCurl) on top of the beat; on a body rolled onto its flank
+         that lateral C reads as the arch you see in the footage. */
+      const u = W.airTotal > 0 ? Math.max(0, Math.min(1, (W.airT || 0) / W.airTotal)) : 0.5;
+      a._swimCurl = (W.roll >= 0 ? 1 : -1) * 0.75 * Math.cos(u * Math.PI);
     } else {
+      a._swimCurl = 0;
       W.thrashT = 0;
-      W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
-      W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
+      /* BANK INTO THE TURN. This was `* -0.065`, which rolled the body OUT of
+         every turn (the top of the animal leaned to the outside, like a car on
+         soft springs) — the wild rig in wildlife_rig.js has always banked the
+         other way. A +X-forward body under rotation.x > 0 tips its back toward
+         local +z, which is the inside of a turn with a rising heading. A shark
+         carving at full rate (~1.6 rad/s) now leans ~15 degrees into it. */
+      const turnRate = shortestAngle(ride.head - W.lastHead) / fdt;
+      W.roll += (turnRate * 0.17 - W.roll) * (1 - Math.exp(-fdt * 4));
+      W.roll = Math.max(-0.45, Math.min(0.45, W.roll)); W.lastHead = ride.head;
     }
     /* THE SEA ANSWERS THE BODY, EVERY FRAME. Last thing in the update, so the
        position and the pose it reads are the ones that will be DRAWN this
@@ -3608,21 +3637,10 @@
      missing underwater system to build for the shark. There was an eye in the
      wrong place. This pass moves the eye; the existing system does the rest.
 
-     HOW IT COMPOSES INSTEAD OF COMPETING. Order 50.4 is deliberate and sits in
-     a two-sided gap: AFTER systems/camera.js's one and only writer (onAlways 50)
-     so nothing can clobber us mid-frame, and BEFORE water_underwater.js's
-     observer (onAlways 50.5) so the depth it grades is the depth we just moved
-     to. camera.js is not edited, is not flagged off, and keeps owning yaw,
-     pitch, collision, shake and FOV.
-
-     THE MOVE ITSELF is one lerp and NO rotation write, which is the whole
-     trick. The target is `body − viewDirection × distance`: the point from
-     which the camera's CURRENT aim already looks straight down the barrel at
-     the animal. So at k=0 nothing happens at all, at k=1 the body is dead
-     centre, and in between it eases toward centre while the player's own yaw
-     and pitch keep orbiting — because the target is defined FROM the live view
-     direction, steering still steers. Rotation is never touched, so there is
-     no fight with camera.lookAt and nothing to unwind when we stand down.
+     That was the first fix (a lerp toward the body along the live view ray).
+     It has since been replaced wholesale by THE SHARK CAMERA below, one
+     spring rig that owns position, rotation and FOV while you ride a sea
+     animal in third person; the sighting and boom-fit law here still feeds it.
   ============================================================ */
   /* ---- HOW BIG IS THE THING THE LENS IS FRAMING -------------------------
      OWNER (2026-08-30): "for megalodon in shark sim the camera is way way
@@ -3870,159 +3888,257 @@
     };
   };
 
-  /* ---- THE STAND-OFF IS NOT PART OF THE DIVE TREATMENT --------------------
-     Outside its dead band the dive pass used to hand the frame straight back
-     to systems/camera.js's 4.35 m walking boom — which is fine on a bull shark
-     and is INSIDE a megalodon. Two poses live outside that band and neither is
-     rare: a shallow cruise with the dorsal out, which is most of the shore
-     hunting in this game, and a breach, which is the one moment the whole
-     ladder is built to pay off. The apex form spent both of them with the lens
-     somewhere in its own back.
+  /* ============================================================
+     THE SHARK CAMERA — one rig that owns the lens while you ride a sea animal
+     in third person. (2026-09-27, replaces the dive lerp + stand-off push.)
 
-     So the fit distance is enforced as a FLOOR at every depth, in the air
-     included: if camera.js has parked the lens closer to the body than the
-     animal's own length allows, push it straight back out along the view
-     direction. It only ever pushes AWAY and it never touches rotation, so
-     there is nothing for camera.js to fight and nothing to unwind — the same
-     reason the dive lerp composes instead of competing. */
-  function aquaticStandOff(a, P, W, cam, dir) {
-    const minD = boomFor(a) * 0.86;
-    const bx = P.pos.x - cam.position.x, by = W.y - cam.position.y, bz = P.pos.z - cam.position.z;
-    const have = Math.sqrt(bx * bx + by * by + bz * bz);
-    if (!(have < minD)) return;
-    const wasAbove = cam.position.y > seaY(cam.position.x, cam.position.z);
-    const push = minD - have;
-    cam.position.x -= dir.x * push;
-    cam.position.y -= dir.y * push;
-    cam.position.z -= dir.z * push;
-    // The push runs AFTER camera.js's own collision sweep, so it owns not
-    // walking the lens into the ground it just skipped past. Seabed AND dry
-    // floor: a shallow stand-off near a beach is exactly where the two oracles
-    // disagree.
-    let flr = -1e9;
-    if (CBZ.citySeaBedYAt) {
-      const bed = +CBZ.citySeaBedYAt(cam.position.x, cam.position.z);
-      if (Number.isFinite(bed)) flr = Math.max(flr, bed);
-    }
-    if (CBZ.floorAt) {
-      const gy = +CBZ.floorAt(cam.position.x, cam.position.z);
-      if (Number.isFinite(gy)) flr = Math.max(flr, gy);
-    }
-    if (flr > -1e8 && cam.position.y < flr + 0.4) cam.position.y = flr + 0.4;
-    /* ...AND IT OWNS NOT DROWNING THE LENS EITHER. The push runs along the
-       view direction, so a player looking UP at their own shark is pushed
-       DOWN, and on a 21 m boom a few degrees of up-look is several metres of
-       water. The seabed guard above already says the push may not bury the
-       eye in the ground; this is the same rule at the other surface. It only
-       binds when the push is what crossed the line — an eye that was already
-       under stays under, so a dive is untouched. */
-    const camSurf = seaY(cam.position.x, cam.position.z);
-    if (wasAbove && cam.position.y < camSurf + 0.25) cam.position.y = camSurf + 0.25;
+     WHAT IT REPLACED, AND WHY. The chase view used to be three writers
+     stacked on one camera: systems/camera.js flew its 4.35 m WALKING boom
+     around the rider's pivot (smooth-damped on feel-dt, random-noise shake on
+     top), then aquaticStandOff() shoved the lens back out along the view ray
+     to a boom sized for the animal, then aquaticDiveCamera() lerped it toward
+     a third target by a depth-ramped k, then a breach floor dragged it out of
+     the water. Every frame the camera was first put in the wrong place and
+     then corrected, and each correction had its own clamp against a wavy
+     surface — which is where the waterline chatter came from: the stand-off
+     clamp, the breach floor and camera.js's own water floor all disagreed
+     about which side of the sea the eye belonged on, frame to frame.
+
+     Now there is ONE solve, in orbit coordinates, on springs:
+       pivot   the body, followed by a critically damped spring whose lag
+               GROWS with speed, so a burst pulls the animal away from the lens
+               and the boom visibly stretches, then recovers;
+       yaw     the player's cam.yaw (it is also the steering input, so this
+               spring is short — the body swinging to catch the view is the
+               lag you see; camera.js's aquaticFollowYaw swings the view round
+               behind a body steered with A/D or the stick);
+       pitch   the player's pitch, lowered to a documentary eye line, plus a
+               share of the body's own dive/climb pitch, lagged;
+       boom    boomFor() — the hull-length fit law and the water-sight cap —
+               stretched with speed and in the air;
+       fov     widens with speed and in the air; still honours cityRideFov
+               (the lens the murk hands back when it shortened the boom).
+     The eye is then composed EXACTLY from those, so a fast mouse swing is an
+     arc around the animal, never a chord through it.
+
+     THE WATERLINE is a side, not a clamp. The eye is either ABOVE or BELOW
+     the sea, chosen from the depth of the animal's BACK with hysteresis
+     (dive past 1.5 m to go under, come up past 0.55 m to come out; airborne
+     is always above). Each side is a soft floor/ceiling a clear margin off
+     the surface under the EYE, and a side change blends between the two
+     solutions on a smoothstep — so the lens crosses the water once, fast,
+     and never sits in the band where the underwater grade flickers.
+
+     IMPACT. The owner's rule from shark_sim.js stands: a beat, not a slam,
+     and your own mouth gets no shake. A bite is a lens LEAN — the boom tucks
+     in a few percent and the FOV narrows two degrees, eased; no noise. A hull
+     hit (bite or ram on a boat) is ONE directional jolt — an under-damped
+     spring kicked along the body's heading, so the lens lurches into the
+     impact and settles in about half a second — plus a fifth of a second of
+     slow-mo, refractory so a boat fight cannot become a strobe. CBZ.shake
+     (camera.js's envelope: hurt, beaching, sea_craft's ram) is spent as a
+     smooth low-frequency sway instead of per-frame white noise.
+
+     THE BREACH gets its own shot: the boom lengthens, the eye drops (looking
+     UP at the animal against the sky), the pivot's vertical follow goes slow
+     so the body climbs through the frame, the lens opens, and time drops for
+     a third of a second at launch.
+
+     All springs run on WALL time (CBZ.wallDt), not feel-dt, so slow-mo and
+     hitstop never make the lens lurch on release — the measured ~0.95 m
+     catch-up this file warns about under "NO HITSTOP PER MOUTHFUL". Order 50.4:
+     after camera.js's writer at 50, before water_underwater.js's observer at
+     50.5, which grades the depth we just placed the eye at.
+  ============================================================ */
+  const SC = {
+    on: false, t: 0,
+    px: 0, py: 0, pz: 0, pxV: 0, pyV: 0, pzV: 0,
+    yaw: 0, yawV: 0, pitch: 0.3, pitchV: 0, boom: 8, boomV: 0,
+    fov: 62, fovV: 0, roll: 0, rollV: 0, bodyP: 0, bodyPV: 0,
+    side: 1, sideK: 1, surf: 0, surfV: 0,
+    kx: 0, ky: 0, kz: 0, kvx: 0, kvy: 0, kvz: 0,
+    punch: 0, hits: 0, ship: 0, shipCd: 0, slowCd: 0, wasAir: false, breachCd: 0,
+    look: new THREE.Vector3(),
+  };
+  CBZ.sharkCam = SC;                          // tooling seam (read-only by convention)
+  function scDamp(cur, tgt, key, T, dt) {
+    const w = 2 / Math.max(1e-4, T), x = w * dt;
+    const ex = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const ch = cur - tgt, tmp = (SC[key] + w * ch) * dt;
+    SC[key] = (SC[key] - w * tmp) * ex;
+    return tgt + (ch + tmp) * ex;
   }
-
-  const _diveWant = new THREE.Vector3(), _diveDir = new THREE.Vector3();
-  function aquaticDiveCamera(dt) {
-    if (!DIVE_ON()) return;
-    const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera;
-    if (!cam || !a || !W || !P || a.dead || P.dead || !aquaticMounted(a)) return;
-    if (!CBZ.game || CBZ.game.state !== "playing") return;
-    // Never wrestle an owner with a stronger claim on the lens.
-    if (CBZ.cineCam && CBZ.cineCam.active) return;
-    if (CBZ.simView && CBZ.simView.active) return;
-    if (CBZ.cityCam && CBZ.cityCam.death) return;
-    if (CBZ.fps && CBZ.fps.active) return;      // first person already rides the body
-    const surf = seaY(P.pos.x, P.pos.z);
-    /* ---- HOW DEEP IS THIS ANIMAL — ASK ITS BACK, NOT ITS ORIGIN ----------
-       OWNER (2026-08-31): "with the other sharks I can rise to the surface and
-       just swim on the surface and see the world from the surface. But with
-       megalodon it's zoomed out and I'm stuck under it, looking up at it."
-
-       This used to be `surf - W.y`: the submergence of the model ORIGIN, in
-       metres. Every shark in this game cruises the same way, with its back at
-       the waterline; the only thing that differs between them is how many
-       metres of animal hang below that back. So a ramp meant to ask "how deep
-       are you" was actually asking "how BIG are you", and the dead band it
-       fed — full authority by 2.65 m down — is a depth no megalodon can ever
-       be shallower than. wildlife.js gives it swimDepth 7.8, the ride's own
-       surface clamp is 0.432 of that, and MEASURED on the live page the body
-       tops out at 3.52 m with k pinned at 1.00 and 150% of margin to spare.
-
-       Pinned there, the dive rig never stood down, and its target is
-       `W.y - dir.y*boom` — the origin, pushed back along a lens aimed at a
-       pivot several metres higher. That is a feedback loop: the eye sinks
-       below the body, so the aim tilts up, so the boom drives the eye further
-       down. It settles with the lens 19.4 m UNDER the water (measured) while
-       the animal's back is in the air. Not a lid, not a clamp — a runaway,
-       and one only the biggest body in the game is heavy enough to start.
-
-       ride.visual.y is the saddle socket: the top of the longest torso mesh,
-       in world units, already measured off this body and already rebuilt when
-       it grows (wildlifeRideResize). Add the pitch term the seat uses and it
-       IS the animal's back. Asking THAT how deep it is reads 0 when the
-       dorsal breaks the surface, on a bull shark and a megalodon alike, so
-       the same 0.45/2.2 dead band finally means the same thing on both and
-       the surfaced apex form is handed back to the walking camera — which is
-       above the waterline, which is the whole ask. */
+  function softMax(a, b, k) { const d = a - b; return (a + b + Math.sqrt(d * d + k * k)) * 0.5; }
+  function softMin(a, b, k) { const d = a - b; return (a + b - Math.sqrt(d * d + k * k)) * 0.5; }
+  function scFloorAt(x, z) {
+    let f = -1e9;
+    if (CBZ.citySeaBedYAt) { const b = +CBZ.citySeaBedYAt(x, z); if (Number.isFinite(b)) f = Math.max(f, b); }
+    if (CBZ.floorAt) { const g2 = +CBZ.floorAt(x, z); if (Number.isFinite(g2)) f = Math.max(f, g2); }
+    return f;
+  }
+  function sharkCamActive(a, W, P) {
+    if (!a || !W || !P || a.dead || P.dead || !aquaticMounted(a)) return false;
+    if (!CBZ.game || CBZ.game.state !== "playing") return false;
+    if (CBZ.cineCam && CBZ.cineCam.active) return false;
+    if (CBZ.simView && CBZ.simView.active) return false;
+    if (CBZ.cityCam && CBZ.cityCam.death) return false;
+    if (CBZ.surv && (CBZ.surv.deathCam || CBZ.surv.spectating)) return false;
+    if (CBZ.fps && CBZ.fps.active) return false;   // first person already rides the body
+    if (CBZ.camIntroActive && CBZ.camIntroActive()) return false;  // the arrival shot is camera.js's
+    return true;
+  }
+  function sharkCamera(dtIn) {
+    const a = ride.mount, W = ride.water, P = CBZ.player, cam = CBZ.camera, cin = CBZ.cam;
+    if (!cam || !cin || !sharkCamActive(a, W, P)) { SC.on = false; return; }
+    const dt = Math.max(0.001, Math.min(0.05, CBZ.wallDt != null ? CBZ.wallDt : (dtIn || 0.016)));
+    SC.t += dt;
+    const R = rideDef(a.species) || {};
     const V = ride.visual;
+    const hd = ride.head || 0, fx = Math.cos(hd), fz = Math.sin(hd);
     const back = V && V.aquatic
-      ? Math.max(0, (V.x || 0) * Math.sin(W.pitch || 0) + (V.y || 0) * Math.cos(W.pitch || 0))
-      : 0;
-    const sub = surf - (W.y + back);            // the animal's BACK, not its origin
-    /* ---- THE LENS CROSSES THE SURFACE WITH THE BODY -----------------------
-       Everything world/water_underwater.js draws — the fog ramp, the caustic
-       ceiling, the god rays, the waterline band, the 820 Hz muffle — is decided
-       from the CAMERA's own depth (its eyeDepth() asks citySeaHeightAt where
-       the EYE is, not where the animal is). A breach is the one move in this
-       game that takes the body from under the water to five metres over it in
-       half a second, and NOTHING owned that crossing: the lerp below stands
-       down the instant the body leaves the water (sub goes negative, so k <= 0
-       and it returns), and camera.js's boom smooth-damps toward the rider on a
-       time constant tuned for walking. So the world stayed green through the
-       best part of the jump, which is exactly the frame this whole pass is for.
+      ? Math.max(0, (V.x || 0) * Math.sin(W.pitch || 0) + (V.y || 0) * Math.cos(W.pitch || 0)) : 0;
+    const surfB = seaY(P.pos.x, P.pos.z);
+    const sub = surfB - (W.y + back);
+    const air = !!W.airborne;
+    const hull = Math.max(1, hullLength(a));
+    const top = Math.max(1, R.sprint || (R.cruise || 6) * 1.6);
+    const spd = Math.max(0, Math.min(1.25, (W.v || 0) / top));
+    const pvx = P.pos.x, pvy = W.y + back * 0.45, pvz = P.pos.z;
 
-       This is a FLOOR under the eye, never a target: while the body is out of
-       the water the lens is dragged out with it, at least as fast as the body
-       is leaving, and the moment camera.js has the lens above the line this
-       does nothing at all. It cannot fight the boom because it can only ever
-       push the same way gravity is not. */
-    // The boom holds its stand-off before anything else decides anything —
-    // a breach is exactly where the walking boom is worst and where the old
-    // pass handed it the frame outright.
-    cam.getWorldDirection(_diveDir);
-    aquaticStandOff(a, P, W, cam, _diveDir);
-    if (W.airborne) {
-      const camSurf = seaY(cam.position.x, cam.position.z);
-      const out = Math.max(0, W.y - surf);
-      const wantY = camSurf + Math.min(1.9, 0.30 + out * 0.55);
-      if (cam.position.y < wantY) {
-        const step = Math.max(7, Math.abs(W.vy) + 5) *
-          Math.max(0.001, Math.min(0.08, dt || 0.016));
-        cam.position.y = Math.min(wantY, cam.position.y + step);
+    if (!SC.on) {
+      // HAND-OVER WITHOUT A POP: start every spring where the lens already is.
+      SC.on = true;
+      SC.px = pvx; SC.py = pvy; SC.pz = pvz; SC.pxV = SC.pyV = SC.pzV = 0;
+      const dx = cam.position.x - pvx, dy = cam.position.y - pvy, dz = cam.position.z - pvz;
+      const d = Math.max(1, Math.hypot(dx, dy, dz));
+      SC.boom = d; SC.boomV = 0;
+      SC.yaw = cin.yaw || 0; SC.yawV = 0;
+      SC.pitch = Math.asin(Math.max(-1, Math.min(1, dy / d))); SC.pitchV = 0;
+      SC.fov = cam.fov || 62; SC.fovV = 0;
+      SC.roll = 0; SC.rollV = 0; SC.bodyP = W.pitch || 0; SC.bodyPV = 0;
+      SC.side = cam.position.y >= seaY(cam.position.x, cam.position.z) ? 1 : -1;
+      SC.sideK = SC.side > 0 ? 1 : 0;
+      SC.surf = surfB; SC.surfV = 0;
+      SC.kx = SC.ky = SC.kz = SC.kvx = SC.kvy = SC.kvz = 0;
+      SC.punch = 0; SC.hits = AQUATIC_AUDIT.hits; SC.ship = AQUATIC_AUDIT.shipBites;
+      SC.wasAir = air;
+    }
+
+    // ---- impacts, read off the ride's own ledger (no hooks in the bite code)
+    SC.shipCd = Math.max(0, SC.shipCd - dt);
+    SC.slowCd = Math.max(0, SC.slowCd - dt);
+    SC.breachCd = Math.max(0, SC.breachCd - dt);
+    const shipHit = AQUATIC_AUDIT.shipBites !== SC.ship;
+    if (AQUATIC_AUDIT.hits !== SC.hits && !shipHit) SC.punch = 1;   // a mouthful: lean, no shake
+    SC.hits = AQUATIC_AUDIT.hits;
+    if (shipHit) {
+      SC.ship = AQUATIC_AUDIT.shipBites;
+      if (SC.shipCd <= 0) {
+        SC.shipCd = 0.6;
+        const kmag = 2.6 + Math.sqrt(hull) * 0.9;           // m/s into the spring
+        SC.kvx += fx * kmag; SC.kvz += fz * kmag; SC.kvy -= kmag * 0.35;
+        SC.punch = 1;
+        if (SC.slowCd <= 0 && CBZ.doSlowmo) { SC.slowCd = 2.5; CBZ.doSlowmo(0.2); }
       }
-      return;
     }
-    // Dead band at the surface so a swell can never make the frame breathe, and
-    // full authority by ~2.6 m down — the depth at which the old rig had the
-    // lens still in the air and the whole treatment still switched off.
-    const k = Math.min(1, (sub - 0.45) / 2.2);
-    if (!(k > 0)) return;
-    // A CONSTANT distance, not the measured one: measuring our own previous
-    // frame's result and feeding it back in is how a camera starts creeping.
-    // Sized to the HULL (see boomFor) so a megalodon is framed like one.
-    const dist = boomFor(a);
-    _diveWant.set(
-      P.pos.x - _diveDir.x * dist,
-      W.y - _diveDir.y * dist,
-      P.pos.z - _diveDir.z * dist);
-    // ...but never inside the bottom. Same 0.4 m stand-off camera.js's own
-    // water floor uses, off the same bathymetry oracle.
-    if (CBZ.citySeaBedYAt) {
-      const bed = +CBZ.citySeaBedYAt(_diveWant.x, _diveWant.z);
-      if (Number.isFinite(bed) && _diveWant.y < bed + 0.4) _diveWant.y = bed + 0.4;
+    SC.punch *= Math.exp(-dt / 0.28);
+    if (air && !SC.wasAir && (W.vy || 0) > 2 && SC.breachCd <= 0) {
+      SC.breachCd = 4;
+      if (CBZ.doSlowmo) CBZ.doSlowmo(0.32);
     }
-    cam.position.lerp(_diveWant, k);
+    SC.wasAir = air;
+    // the kick: one under-damped jolt (~4.5 Hz, zeta 0.55) that settles by itself
+    {
+      const w = 6.2832 * 4.5, c = 2 * 0.55 * w, k = w * w;
+      SC.kvx += (-k * SC.kx - c * SC.kvx) * dt; SC.kx += SC.kvx * dt;
+      SC.kvy += (-k * SC.ky - c * SC.kvy) * dt; SC.ky += SC.kvy * dt;
+      SC.kvz += (-k * SC.kz - c * SC.kvz) * dt; SC.kz += SC.kvz * dt;
+    }
+
+    // ---- pivot: lag grows with speed (the burst pull-back); slow in the air
+    const Txz = 0.07 + 0.08 * Math.min(1, spd);
+    SC.px = scDamp(SC.px, pvx, "pxV", Txz, dt);
+    SC.pz = scDamp(SC.pz, pvz, "pzV", Txz, dt);
+    SC.py = scDamp(SC.py, pvy, "pyV", air ? 0.34 : 0.16, dt);
+    // never let the lag outgrow a third of the boom (a teleport or respawn)
+    {
+      const ex = pvx - SC.px, ey = pvy - SC.py, ez = pvz - SC.pz, e = Math.hypot(ex, ey, ez);
+      const lim = Math.max(1.5, SC.boom * 0.33);
+      if (e > lim) { const s = 1 - lim / e; SC.px += ex * s; SC.py += ey * s; SC.pz += ez * s; }
+    }
+
+    // ---- yaw: the player's, on a short spring (it is also the steering input)
+    let dyaw = (cin.yaw || 0) - SC.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    SC.yaw = scDamp(SC.yaw, SC.yaw + dyaw, "yawV", 0.085, dt);
+
+    // ---- pitch: a documentary eye line + a lagged share of the body's dive
+    SC.bodyP = scDamp(SC.bodyP, air ? 0 : (W.pitch || 0), "bodyPV", 0.45, dt);
+    let pT = (cin.pitch != null ? cin.pitch : 0.46) * 0.85 - 0.12 - SC.bodyP * 0.35;
+    if (air) pT -= 0.16;
+    pT = Math.max(-0.75, Math.min(1.05, pT));
+    SC.pitch = scDamp(SC.pitch, pT, "pitchV", 0.16, dt);
+
+    // ---- boom: sized to the animal, stretched by speed and in the air
+    const shipNear = ride.attackT > 0 && (ride.targetKind === "ship" || ride.targetKind === "ram");
+    const boomT = boomFor(a) * (1 + 0.10 * Math.min(1, spd)) * (air ? 1.14 : 1) *
+      (shipNear ? 1.08 : 1) * (1 - 0.06 * SC.punch);
+    SC.boom = scDamp(SC.boom, boomT, "boomV", air ? 0.45 : 0.32, dt);
+
+    // ---- fov
+    const rideF = (CBZ.cityRideFov && CBZ.cityRideFov(61)) || 0;
+    const fovT = Math.max(61, rideF) + 6 * Math.min(1, spd) + (air ? 5 : 0) - 2.2 * SC.punch;
+    SC.fov = scDamp(SC.fov, Math.min(84, fovT), "fovV", 0.28, dt);
+
+    // ---- compose the eye exactly on the orbit
+    const cp = Math.cos(SC.pitch), sp = Math.sin(SC.pitch);
+    let ex = SC.px + Math.sin(SC.yaw) * cp * SC.boom;
+    let ey = SC.py + sp * SC.boom;
+    let ez = SC.pz + Math.cos(SC.yaw) * cp * SC.boom;
+    // camera.js's shake envelope, spent as a smooth sway (hurt, beaching, rams)
+    const shk = CBZ.camShakeLevel ? +CBZ.camShakeLevel() || 0 : 0;
+    const rx = Math.cos(SC.yaw), rz = -Math.sin(SC.yaw);
+    if (shk > 0.001) {
+      const s = Math.min(1.2, shk) * 0.4, t = SC.t;
+      const nx = Math.sin(t * 17.3) * 0.6 + Math.sin(t * 27.1 + 1.3) * 0.4;
+      const ny = Math.sin(t * 19.7 + 0.7) * 0.6 + Math.sin(t * 31.9 + 2.1) * 0.4;
+      ex += rx * nx * s; ez += rz * nx * s; ey += ny * s * 0.8;
+    }
+    ex += SC.kx; ey += SC.ky; ez += SC.kz;
+
+    // ---- the waterline: a side with hysteresis, blended, never straddled
+    const surfE = seaY(ex, ez);
+    SC.surf = scDamp(SC.surf, surfE, "surfV", 0.2, dt);
+    const flr = scFloorAt(ex, ez);
+    const clr = 0.4 + SC.boom * 0.02;
+    const shallow = flr > -1e8 && (surfE - flr) < clr * 2 + 0.6;
+    if (air || shallow) SC.side = 1;
+    else if (SC.side > 0 && sub > 1.5) SC.side = -1;
+    else if (SC.side < 0 && sub < 0.55) SC.side = 1;
+    const sideT = SC.side > 0 ? 1 : 0;
+    const step = dt / 0.3;
+    SC.sideK = SC.sideK < sideT ? Math.min(sideT, SC.sideK + step) : Math.max(sideT, SC.sideK - step);
+    const sk = SC.sideK * SC.sideK * (3 - 2 * SC.sideK);
+    const yA = softMax(ey, Math.max(surfE, SC.surf) + clr, 0.5);
+    const yB = softMin(ey, Math.min(surfE, SC.surf) - clr, 0.5);
+    ey = yB + (yA - yB) * sk;
+    if (flr > -1e8 && ey < flr + 0.5) ey = flr + 0.5;
+    cam.position.set(ex, ey, ez);
+
+    // ---- look: ahead of the animal with its speed, the body a touch low
+    const lead = hull * (0.12 + 0.3 * Math.min(1, spd));
+    SC.look.set(SC.px + fx * lead + SC.kx * 0.4,
+      SC.py + SC.boom * 0.07 + SC.ky * 0.4,
+      SC.pz + fz * lead + SC.kz * 0.4);
+    cam.lookAt(SC.look);
+    // bank a little with the body's turn roll (never the breach barrel roll)
+    const rollT = air ? 0 : Math.max(-0.42, Math.min(0.42, W.roll || 0)) * -0.22;
+    SC.roll = scDamp(SC.roll, rollT, "rollV", 0.3, dt);
+    if (Math.abs(SC.roll) > 1e-4) cam.rotateZ(SC.roll);
+    if (Math.abs(cam.fov - SC.fov) > 0.01) { cam.fov = SC.fov; cam.updateProjectionMatrix(); }
   }
-  if (CBZ.onAlways) CBZ.onAlways(50.4, aquaticDiveCamera);
+  if (CBZ.onAlways) CBZ.onAlways(50.4, sharkCamera);
   /* THE SHORE LAW, PUBLISHED. modes/shark_sim.js owns the anti-softlock slide
      off a beach and needs to know when the body is genuinely aground and when
      it can swim again. Those are the ride's numbers, so it asks the ride —
@@ -4209,7 +4325,7 @@
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     ride.attackPitch = ride.attackRoll = 0;
     ride.lensT = 0; ride.hurtT = 0; ride.hurtAmp = 0; ride.hurtAcc = 0;
-    a._atkAnim = -1;
+    a._atkAnim = -1; a._swimCurl = 0;
     if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
     P._mountedAnimal = null;
     P._aquaticMount = null;
@@ -4378,6 +4494,15 @@
       if (playing) tickAquaticAttack(a, dt);
       a.group.rotation.x = W.roll + ride.attackRoll;
       a.group.rotation.z = W.pitch + ride.attackPitch;
+      /* The head's counter-yaw against the tail beat (wildlife_rig.js
+         rig.yawSwing) and the bite's head-shake land on the yaw faceAnimal
+         just rewrote. Only when no rider is drawn on the saddle (Shark Sim
+         hides him): a wobbling seat under a visible man is worse than a stiff
+         trunk. */
+      const chV = CBZ.playerChar && CBZ.playerChar.group;
+      if (!chV || chV.visible === false) {
+        a.group.rotation.y += (a.swim ? a.swim.yawSwing || 0 : 0) + (ride.attackYaw || 0);
+      }
       // Last transform word after wildlife/survivor movement and after the
       // current jaw/body pose: contacted flesh stays in the lower mouth during
       // compression instead of being rewritten onto the rostrum by another AI.

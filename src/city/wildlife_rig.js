@@ -343,17 +343,55 @@
   //
   //  ?cfg_MARINE_TAIL_V2=0 restores the v1 slide verbatim for A/B captures.
   // ============================================================
-  if (!CBZ.CONFIG) CBZ.CONFIG = {};
-  if (CBZ.CONFIG.MARINE_TAIL_V2 == null) CBZ.CONFIG.MARINE_TAIL_V2 = true;
-  function TAILV2() { return CBZ.CONFIG.MARINE_TAIL_V2 !== false; }
+  //  (The v1 slide and its MARINE_TAIL_V2 switch are deleted: git is the undo.)
+  //
+  //  ============================================================
+  //  NATURE-FOOTAGE PASS (2026-09-27) — what drives each motion, in one place:
+  //
+  //    TAIL BEAT   phase rides DISTANCE travelled (freq rad/unit) + a small
+  //                idle flick + an ACCELERATION kick, so a body that is
+  //                speeding up beats hard even before it has covered ground
+  //                (a real kick-off from rest), and a steady cruise beats slow.
+  //    AMPLITUDE   rides body-lengths/s (AMP_SLOW..AMP_FAST): lazy sweeps at
+  //                cruise, deep whipping ones at a rush, +45 % while
+  //                accelerating.
+  //    GLIDE       burst-and-glide. Any deceleration glides (the tail goes
+  //                quiet and straightens instead of beating at a braking
+  //                body), and an unhurried wild animal alternates a few
+  //                seconds of beats with a coast, on a hashed schedule.
+  //    TRUNK       rigid hull (thunniform: a great white IS stiff), so the
+  //                body wave is the tail chord chain below plus a head
+  //                counter-yaw (BODY_SWING) against the beat. Published as
+  //                rig.yawSwing so the ridden shark (whose yaw the mount
+  //                rewrites late) can apply it when nobody sits on it.
+  //    PECTORALS   discovered off the authored fins (finShape.under, span
+  //                sideways, forward of the origin) or by name. They trim
+  //                with vertical speed (leading edge up to rise), FLARE on
+  //                braking (tips down, high angle of attack), sweep back at a
+  //                rush, and work differentially in a turn.
+  //    BANK        roll into the turn, pitch with vertical speed.
+  //    CURL        a static bend a poser can ask for (a._swimCurl, -1..1):
+  //                the breach arc and the death throes use it.
+  //    DEATH       CBZ.aquaticDeathBegin/Step: a few dying beats that fade,
+  //                a slow roll belly-up, the nose dropping, and a shark
+  //                SINKING to the bed (no swim bladder) while bony fish and
+  //                cetaceans drift up and float. Replaces the land tumble
+  //                (a corpse thrown upward at 20 m/s^2 gravity) for anything
+  //                aquatic.
+  //
+  //  Everything is frame-rate independent (exponential easing on dt) and
+  //  allocation-free per frame.
+  //  ============================================================
 
   const TAIL_LAG = 1.45;      // rad of phase between the trunk weld and the tip
   const TAIL_ENV = 1.55;      // amplitude envelope exponent along the tail
-  const AMP_SLOW = 0.55;      // × rig.amp when it is drifting
-  const AMP_FAST = 1.45;      // × rig.amp at a full rush
+  const AMP_SLOW = 0.45;      // x rig.amp when it is drifting
+  const AMP_FAST = 1.60;      // x rig.amp at a full rush
   const SPD_LO = 0.30;        // body-lengths/s that counts as "drifting"
   const SPD_HI = 2.60;        // ..and as a full rush
-  const BODY_SWING = 0.055;   // rad the TRUNK counter-swings at a full rush
+  const BODY_SWING = 0.075;   // rad the TRUNK counter-swings at a full rush
+  const CURL_AMP = 0.20;      // tip bend, in body lengths, at curl = 1
+  function ez(k, dt) { return 1 - Math.exp(-k * dt); }
 
   const _bb3 = (window.THREE && window.THREE.Box3) ? new window.THREE.Box3() : null;
   // a child mesh's bounding box expressed in its PARENT's (the actor group's)
@@ -496,6 +534,21 @@
       }
     }
     const len = Math.max(0.5, maxX - minX);
+    // PECTORALS: the paired, sideways, forward fins. Authored fins remember
+    // their recipe (aquatic.js finMesh -> userData.finShape/finAt); the orca
+    // build names its own. The geometry is baked about the fin's ROOT, so a
+    // rotation of the mesh pivots the fin where it joins the body.
+    const pecs = [];
+    for (let i = 0; i < kids.length && pecs.length < 2; i++) {
+      const m = kids[i]; if (!m || !m.isMesh) continue;
+      const fs = m.userData && m.userData.finShape;
+      const byShape = fs && fs.under && fs.spanDir && Math.abs(fs.spanDir[2]) > 0.5 &&
+        m.position.x > 0 && Math.abs(m.position.z) > 0.05 && (fs.span || 0) >= 0.3;
+      const byName = /pectoral/i.test(m.name || "") && Math.abs(m.position.z) > 0.05;
+      if (!byShape && !byName) continue;
+      if (parts.some(function (p) { return p.m === m; })) continue;
+      pecs.push({ m: m, s: m.position.z >= 0 ? 1 : -1, rx: m.rotation.x, ry: m.rotation.y, rz: m.rotation.z });
+    }
     a.swim = {
       parts: parts, vert: tipHorizontal(tip),
       amp: len * 0.065,                            // sweep at the tip, in local u
@@ -532,6 +585,12 @@
       jawK: -1,
       px: null, pz: null, py: null, ph0: a.heading,
       roll: 0, pitch: 0,
+      // nature-footage pass state (see the block above the constants)
+      pecs: pecs, vS: -1, acc: 0, burst: 0, brake: 0, glide: 0,
+      gliding: false, nG: 0, turn: 0, vyS: 0,
+      gT: 1 + (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 74) : 0.5) * 3.5,   // staggered first coast
+      curl: 0, yawSwing: 0,
+      seed: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 72) : 0.5) * 997,
     };
     // hinge height for the gape = the mean y of the jaw parts
     if (jaw.length && !jawBase) {
@@ -582,118 +641,154 @@
     }
   }
 
+  // THE TAIL CHAIN. Chord-fit every rigid tail part onto ONE wave that is
+  // exactly zero at the trunk weld (see MARINE_TAIL_V2 above), plus a static
+  // bend `curl` (local units at the tip). Shared by the living beat and the
+  // death throes so there is one tail law, not two.
+  function poseTail(rig, amp, ph, curl) {
+    const parts = rig.parts;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      // where the ROOT sits: on its host part's own chord if it is sleeved
+      // onto one, otherwise on the wave (which is exactly 0 at the trunk).
+      const h = p.host >= 0 ? parts[p.host] : null;
+      const w0 = h ? (h.w0 + (h.w1 - h.w0) * p.hf)
+                   : (p.e0 > 0 ? amp * p.e0 * Math.sin(ph - p.l0) + curl * p.u0 * p.u0 : 0);
+      const w1 = (p.e1 > 0 ? amp * p.e1 * Math.sin(ph - p.l1) : 0) + curl * p.u1 * p.u1;
+      p.w0 = w0; p.w1 = w1;
+      const th = Math.atan2(w1 - w0, p.d);       // the chord that joins them
+      if (rig.vert) {                            // cetacean: the fluke plane is horizontal
+        const c = Math.cos(-th), s = Math.sin(-th);
+        p.m.position.x = p.hx + p.dx * c - p.dy * s;
+        p.m.position.y = rig.spineY + p.dx * s + p.dy * c + w0;
+        p.m.rotation.z = p.rz - th;
+      } else {                                   // fish/shark: the caudal plane is vertical
+        const c = Math.cos(th), s = Math.sin(th);
+        p.m.position.x = p.hx + p.dx * c + p.dz * s;
+        p.m.position.z = rig.spineZ - p.dx * s + p.dz * c + w0;
+        p.m.rotation.y = p.ry + th;
+      }
+    }
+  }
+
+  // THE PECTORALS. aoa: angle of attack (+ = leading edge up), drop: both tips
+  // down (+) / up (-), diff: one up one down (the turn), sweep: tips swept back.
+  function posePecs(rig, aoa, drop, diff, sweep) {
+    const pecs = rig.pecs;
+    if (!pecs || !pecs.length) return;
+    for (let i = 0; i < pecs.length; i++) {
+      const q = pecs[i], s = q.s;
+      // rotation.x lowers a +z fin's tip when positive and raises a -z fin's,
+      // so `drop` is signed per side and `diff` is not.
+      q.m.rotation.x = q.rx + drop * s + diff;
+      q.m.rotation.y = q.ry - sweep * s;
+      q.m.rotation.z = q.rz + aoa;
+    }
+  }
+
   function animateSwim(a, dt) {
     const rig = a.swim; if (!rig) return;
     const grp = a.group;
     if (grp.visible === false) return;            // out of the LOD radius: no mesh work
+    if (!(dt > 0)) return;
     const mx = grp.position.x, mz = grp.position.z, my = grp.position.y;
     const mdx = rig.px == null ? 0 : mx - rig.px;
     const mdz = rig.pz == null ? 0 : mz - rig.pz;
-    const moved = Math.sqrt(mdx * mdx + mdz * mdz);
-    const vy = (rig.py == null || dt <= 0) ? 0 : (my - rig.py) / dt;
+    let moved = Math.sqrt(mdx * mdx + mdz * mdz);
+    const first = rig.px == null;
+    const vy = (rig.py == null) ? 0 : (my - rig.py) / dt;
     rig.px = mx; rig.pz = mz; rig.py = my;
-    // beat rides distance moved (same law as the gait) + a small idle flick, so
-    // a hovering fish still lives and a sprinting shark thrashes. Capped so a
-    // teleport/recovery jump can never spin the tail into a blur.
-    rig.ph += Math.min(Math.min(moved, 1.5) * rig.freq, dt * 24) + dt * 0.9;
+    // a teleport / recovery jump is not swimming
+    const wlen = Math.max(0.5, rig.len * (grp.scale && grp.scale.x ? grp.scale.x : 1));
+    if (moved > wlen * 3) moved = 0;
+
+    // ---- SPEED, ACCELERATION, BRAKING (all in body lengths, all eased) ----
+    const blps = moved / dt / wlen;
+    let accRaw = 0;                                // BL/s^2
+    if (first) rig.vS = -1;                        // no speed until two samples exist
+    else if (rig.vS < 0) rig.vS = blps;
+    else { const vPrev = rig.vS; rig.vS += (blps - rig.vS) * ez(5, dt); accRaw = (rig.vS - vPrev) / dt; }
+    rig.acc += (accRaw - rig.acc) * ez(6, dt);
+    rig.burst += (Math.max(0, Math.min(1, rig.acc / 1.1)) - rig.burst) * ez(8, dt);
+    rig.brake += (Math.max(0, Math.min(1, -rig.acc / 0.9)) - rig.brake) * ez(6, dt);
+    const wantS = Math.max(0, Math.min(1, (Math.max(0, rig.vS) - SPD_LO) / (SPD_HI - SPD_LO)));
+    rig.spd01 += (wantS - rig.spd01) * ez(4, dt);
+    rig.vyS += (vy / wlen - rig.vyS) * ez(4, dt);
+
+    // ---- BURST AND GLIDE -------------------------------------------------
+    // A braking body glides; an unhurried wild one alternates beats and
+    // coasts. The schedule is hashed per animal (no Math.random, no shared
+    // stream), and anything urgent (accelerating, rushing, ridden) beats.
+    let glideWant = rig.brake;
+    if (!a.ridden && moved > 0) {
+      rig.gT -= dt;
+      const calm = rig.spd01 < 0.5 && rig.burst < 0.25 && !(a._atkAnim >= 0);
+      if (rig.gliding) {
+        if (rig.gT <= 0 || !calm) { rig.gliding = false; rig.gT = 2.2 + hashG(a, rig) * 3.2; }
+      } else if (rig.gT <= 0 && calm) {
+        rig.gliding = true; rig.gT = 0.9 + hashG(a, rig) * 1.5;
+      } else if (rig.gT <= 0) rig.gT = 0.5;
+      if (rig.gliding) glideWant = Math.max(glideWant, 0.9);
+    } else rig.gliding = false;
+    rig.glide += (Math.min(1, glideWant) - rig.glide) * ez(rig.glide < glideWant ? 3.5 : 5, dt);
+
+    // ---- THE BEAT ----------------------------------------------------------
+    // Frequency rides distance (so it scales with speed), plus the kick of
+    // acceleration, minus the glide. Capped so nothing ever blurs.
+    const adv = Math.min(Math.min(moved, 1.5) * rig.freq, dt * 24)
+              + dt * (0.9 + 9 * rig.burst);
+    rig.ph += adv * (1 - 0.8 * rig.glide);
     if (rig.ph > 1e6) rig.ph -= 1e6;
     const swing = moved > 0.002 ? 1 : 0.4;
-    rig.k += (swing - rig.k) * Math.min(1, dt * 4);
-    const parts = rig.parts;
-    let bodySwing = 0;
-    if (TAILV2() && rig.tspan > 0) {
-      // ---- V2: chord-fit every rigid part onto ONE wave that is zero at the
-      //      trunk weld. See the MARINE_TAIL_V2 block above for why.
-      const wlen = Math.max(0.5, rig.len * (grp.scale && grp.scale.x ? grp.scale.x : 1));
-      const blps = dt > 0 ? (moved / dt) / wlen : 0;    // body lengths per second
-      const wantS = Math.max(0, Math.min(1, (blps - SPD_LO) / (SPD_HI - SPD_LO)));
-      rig.spd01 += (wantS - rig.spd01) * Math.min(1, dt * 4);
-      const amp = rig.amp * (AMP_SLOW + (AMP_FAST - AMP_SLOW) * rig.spd01) * rig.k;
-      const ph = rig.ph;
-      for (let i = 0; i < parts.length; i++) {
-        const p = parts[i];
-        // where the ROOT sits: on its host part's own chord if it is sleeved
-        // onto one, otherwise on the wave (which is exactly 0 at the trunk).
-        const h = p.host >= 0 ? parts[p.host] : null;
-        const w0 = h ? (h.w0 + (h.w1 - h.w0) * p.hf)
-                     : (p.e0 > 0 ? amp * p.e0 * Math.sin(ph - p.l0) : 0);
-        const w1 = p.e1 > 0 ? amp * p.e1 * Math.sin(ph - p.l1) : 0;   // ..and the REAR END
-        p.w0 = w0; p.w1 = w1;
-        const th = Math.atan2(w1 - w0, p.d);       // the chord that joins them
-        if (rig.vert) {                            // cetacean: the fluke plane is horizontal
-          const c = Math.cos(-th), s = Math.sin(-th);
-          p.m.position.x = p.hx + p.dx * c - p.dy * s;
-          p.m.position.y = rig.spineY + p.dx * s + p.dy * c + w0;
-          p.m.rotation.z = p.rz - th;
-        } else {                                   // fish/shark: the caudal plane is vertical
-          const c = Math.cos(th), s = Math.sin(th);
-          p.m.position.x = p.hx + p.dx * c + p.dz * s;
-          p.m.position.z = rig.spineZ - p.dx * s + p.dz * c + w0;
-          p.m.rotation.y = p.ry + th;
-        }
-      }
-      // THE TRUNK IS NOT A PLANK. A swimming body yaws (or pitches) against its
-      // own tail beat; without this the fin whips off a dead hull and the eye
-      // reads two objects. Deliberately small, speed-scaled, and skipped on a
-      // RIDDEN animal because wildlife_tame.js transforms the rider's saddle
-      // socket by this exact euler and a wobbling seat is worse than a stiff
-      // trunk.
-      if (!a.ridden) bodySwing = -BODY_SWING * rig.spd01 * rig.k * Math.sin(rig.ph);
-    } else {
-      const amp = rig.amp * rig.k, yaw = rig.yaw * rig.k;
-      for (let i = 0; i < parts.length; i++) {
-        const p = parts[i];
-        const ang = rig.ph - p.t * 1.55;            // lag down the body = a travelling wave
-        const sw = Math.sin(ang) * p.t, lead = Math.cos(ang) * p.t;
-        if (rig.vert) {                             // cetacean: up/down flukes
-          p.m.position.y = p.by + sw * amp;
-          p.m.rotation.z = p.rz + lead * yaw;
-        } else {                                    // fish/shark: side to side
-          p.m.position.z = p.bz + sw * amp;
-          p.m.rotation.y = p.ry + lead * yaw;
-        }
-      }
+    rig.k += (swing - rig.k) * ez(4, dt);
+    const ampMul = (AMP_SLOW + (AMP_FAST - AMP_SLOW) * rig.spd01) * (1 + 0.45 * rig.burst) * (1 - 0.85 * rig.glide);
+    const amp = rig.amp * ampMul * rig.k;
+    // CURL: a poser's static bend (breach arc, death), eased.
+    const curlWant = a._swimCurl ? Math.max(-1, Math.min(1, a._swimCurl)) : 0;
+    rig.curl += (curlWant - rig.curl) * ez(6, dt);
+    if (rig.tspan > 0) poseTail(rig, amp, rig.ph, rig.curl * CURL_AMP * rig.len);
+    // THE TRUNK IS NOT A PLANK: the head yaws against the tail beat, harder
+    // the harder it swims (lateral swimmers; a cetacean nods instead).
+    const bodySwing = -BODY_SWING * (0.35 + 0.65 * rig.spd01) * (1 + 0.5 * rig.burst) *
+      (1 - 0.85 * rig.glide) * rig.k * Math.sin(rig.ph);
+    rig.yawSwing = rig.vert ? 0 : bodySwing;
+
+    // ---- TURN RATE (for the bank and the pectorals) ------------------------
+    let dh = a.heading - rig.ph0;
+    while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
+    rig.turn += (dh / dt - rig.turn) * ez(6, dt);
+    rig.ph0 = a.heading;
+
+    // ---- PECTORALS ---------------------------------------------------------
+    // trim: leading edge up to climb, down to dive; flare on braking; swept
+    // back at a rush; differential in a turn; a slow scull at rest.
+    if (rig.pecs && rig.pecs.length) {
+      const trim = Math.max(-0.32, Math.min(0.32, rig.vyS * 0.55));
+      const idle = (1 - rig.spd01) * Math.sin(rig.ph * 0.5) * 0.05;
+      const aoa = trim + 0.55 * rig.brake + idle;
+      const drop = 0.45 * rig.brake - 0.10 * rig.spd01 + idle * 0.6;
+      const diff = Math.max(-0.3, Math.min(0.3, rig.turn * 0.18));
+      const sweep = 0.22 * rig.spd01 - 0.15 * rig.brake;
+      posePecs(rig, aoa, drop, diff, sweep);
     }
+
     /* ---- WHOEVER POSED THIS BODY LAST FRAME KEEPS IT ----------------------
-       THE ORDER THIS FILE ASSUMES IS NOT THE ORDER THAT RUNS. Three marine
-       files (wildlife_orca.js at 47.2, wildlife_shark.js at 47.22,
-       marine_frenzy.js at 47.2) each say in a comment that they run AFTER
-       wildlife.js's tick at 47.1, so the pose they write survives this
-       function. They do not. `CBZ.onUpdate` (config.js) only PUSHES onto
-       CBZ.updaters and core/loop.js sorts that list exactly ONCE, at load —
-       so any hook registered later never takes its priority position, and
-       wildlife.js registers its 47.1 lazily, inside the `wired` guard at
-       world-build time. It therefore runs LAST, after every marine pass.
-
-       Caught with a write trap on one orca's Euler, one frame, seed 90210:
-
-         applyPose  (wildlife_orca.js:2119)  rotation.z <- 0.700
-         animateSwim(wildlife_rig.js:670)    rotation.z <- 0.032   ... and won
-
-       So a spy-hop computed a correct 40-degree nose-up attitude and this
-       line flattened it to two degrees, every frame, and the same thing was
-       quietly clipping the shark's breach arc from 0.95 rad to this function's
-       own ±0.5 clamp.
-
-       Re-sorting the updater list would fix it at the root, and it should be
-       done — but that reorders every late-registered system in the game at
-       once, with nothing measuring the rest of them, so it is not a change to
-       make from inside a wildlife pose function. The baton below is order-
-       INDEPENDENT instead: a poser stamps the actor when it writes an
-       attitude, and this function yields for exactly that one frame and clears
-       the stamp. Run before the poser, this writes and is then overwritten
-       (the documented intent). Run after it, this yields. Either way the pose
-       wins, and an animal nobody is posing keeps its swim pitch. */
+       THE ORDER THIS FILE ASSUMES IS NOT THE ORDER THAT RUNS. `CBZ.onUpdate`
+       (config.js) only PUSHES onto CBZ.updaters and core/loop.js sorts that
+       list exactly ONCE, at load, and wildlife.js registers its 47.1 lazily at
+       world-build time — so it runs LAST, after the orca pose (47.2), the
+       shark breach (47.22) and marine_frenzy. A write trap on one orca caught
+       this function flattening a 40-degree spy-hop to two degrees every frame.
+       The baton is order-INDEPENDENT: a poser stamps a._poseOwn when it writes
+       an attitude, and this function yields for exactly that one frame and
+       clears the stamp. */
     // BODY: bank into the turn (rotation.x rolls a +X-forward body) and pitch
     // with vertical speed (rotation.z) — a diving shark noses down. Yielded
     // whenever a flinch or a creature_combat strike owns the transform.
     if ((a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
-      let dh = a.heading - rig.ph0;
-      while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
-      const turn = dt > 0 ? dh / dt : 0;
-      const wantRoll = Math.max(-0.45, Math.min(0.45, turn * 0.25));
+      const wantRoll = Math.max(-0.5, Math.min(0.5, rig.turn * 0.25 * (0.5 + 0.5 * rig.k)));
       const wantPitch = Math.max(-0.5, Math.min(0.5, vy * 0.11));
-      const e = Math.min(1, dt * 3.2);
+      const e = ez(3.2, dt);
       /* The rig keeps EASING even while it is yielding, so the frame a pose
          ends the swim attitude is already where the body actually is and there
          is no snap back to a stale angle. Only the two writes are yielded. */
@@ -703,20 +798,115 @@
       a._poseOwn = false;
       if (!posed) {
         grp.rotation.x = rig.roll;
-        grp.rotation.z = rig.pitch + (rig.vert ? bodySwing : 0);
+        grp.rotation.z = rig.pitch + (rig.vert ? bodySwing * 0.6 : 0);
       }
       // The lateral swimmers' trunk swing lands on the YAW, which the mover
       // rewrites from `heading` every frame — so remember exactly what we left
       // behind: unchanged means nobody else wrote and our old offset has to
       // come off first; changed means that new value is the authoritative base.
-      if (!rig.vert) {
+      // A RIDDEN body's yaw is rewritten late by wildlife_tame.js, which adds
+      // rig.yawSwing itself when no rider is drawn on it.
+      if (!rig.vert && !a.ridden) {
         if (rig.swingLeft != null && grp.rotation.y === rig.swingLeft) grp.rotation.y -= rig.swingAdd;
         grp.rotation.y += bodySwing;
         rig.swingAdd = bodySwing; rig.swingLeft = grp.rotation.y;
       }
     }
-    rig.ph0 = a.heading;
   }
+
+  function hashG(a, rig) {
+    rig.nG++;
+    return CBZ.hash01 ? CBZ.hash01(rig.nG * 7.13, rig.seed || 0, 73)
+                      : ((rig.nG * 0.618034) % 1);
+  }
+
+  // ============================================================
+  //  AQUATIC DEATH — goes limp, rolls, sinks (or floats).
+  //
+  //  Before this, every sea animal died through the LAND tumble: thrown
+  //  upward at 1.6+ m/s against 20.5 m/s^2 of gravity, spun on three axes and
+  //  "bounced" off an invisible floor at its swim depth, then settled on its
+  //  side in mid-water and hung there. In water nothing bounces. A dying
+  //  shark beats a few times, each weaker and slower, the tail goes slack,
+  //  the body coasts to a stop, rolls belly-up and — no swim bladder — sinks
+  //  nose-first to the bottom. Bony fish and cetaceans do the same beats and
+  //  roll, then drift UP and lie belly-up under the surface.
+  //
+  //  One state object per corpse (a._aqDeath), no allocation per frame.
+  //  Called from wildlife.js's death entry (wildlifeDeathTumble) for any
+  //  aquatic body; everything else keeps the land tumble.
+  // ============================================================
+  function aquaticDeathBegin(a, dir) {
+    const grp = a && a.group; if (!grp) return null;
+    const sp = a.species || {};
+    if (grp.rotation.order !== "YXZ") grp.rotation.order = "YXZ";
+    const rig = a.swim;
+    const sc = (grp.scale && grp.scale.x) || 1;
+    const len = Math.max(0.5, (rig ? rig.len : 3) * sc);
+    const v0 = rig && rig.vS > 0 ? Math.min(6, rig.vS * len) : 1.2;
+    let side = grp.rotation.x >= 0 ? 1 : -1;
+    if (Math.abs(grp.rotation.x) < 0.05 && dir) side = ((+dir.x || 0) + (+dir.z || 0)) >= 0 ? 1 : -1;
+    const h = CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 91) : 0.5;
+    const shark = !!(grp.userData && grp.userData.sharkShape) || /shark|megalodon|hammerhead|mako|tiger/.test(sp.id || "");
+    a._aqDeath = {
+      t: 0, v0: v0, head: a.heading || 0,
+      // belly-up, a little off true so no two corpses lie identically
+      rollTo: side * (2.55 + h * 0.5),
+      pitchTo: shark ? -(0.28 + h * 0.2) : (0.05 + h * 0.1),
+      sink: shark, vy: 0, len: len,
+      ph: rig ? rig.ph : 0, amp0: rig ? rig.amp * 1.35 : 0, curl: (h - 0.5) * 0.7,
+      done: false,
+    };
+    return a._aqDeath;
+  }
+
+  function aquaticDeathStep(a, dt) {
+    const D = a && a._aqDeath, grp = a && a.group;
+    if (!D || !grp || !(dt > 0)) return false;
+    if (D.done) return false;
+    const step = Math.min(0.05, dt);
+    D.t += step;
+    const t = D.t;
+    // COAST: the corpse keeps the way it had and loses it to drag
+    const v = D.v0 * Math.exp(-t * 1.1);
+    grp.position.x += Math.cos(D.head) * v * step;
+    grp.position.z += Math.sin(D.head) * v * step;
+    // ROLL + NOSE: slow, heavy, eased — the roll starts once the beats fade
+    const rollK = t < 0.6 ? 0.35 : 0.9;
+    grp.rotation.x += (D.rollTo - grp.rotation.x) * ez(rollK, step);
+    grp.rotation.z += (D.pitchTo - grp.rotation.z) * ez(0.8, step);
+    // SINK / FLOAT against the live column
+    const x = grp.position.x, z = grp.position.z;
+    const surf = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) : 0;
+    const depth = CBZ.cityWaterDepthAt ? Math.max(0, CBZ.cityWaterDepthAt(x, z)) : 30;
+    const bed = surf - depth + Math.max(0.25, D.len * 0.09);
+    if (D.sink) {
+      const vt = -Math.min(1.1, 0.35 + D.len * 0.05);        // terminal sink rate
+      D.vy += (vt - D.vy) * ez(0.6, step);
+      grp.position.y += D.vy * step;
+      if (grp.position.y < bed) { grp.position.y = bed; D.vy = 0; }
+    } else {
+      const top = surf - Math.max(0.12, D.len * 0.06);
+      D.vy += ((top - grp.position.y) * 0.5 - D.vy) * ez(1.2, step);
+      grp.position.y += D.vy * step;
+      if (grp.position.y > top) grp.position.y = top;
+    }
+    // THE LAST BEATS: fast and strong at first, each weaker and slower, then
+    // slack with a lazy bend. Only when the body is drawn.
+    const rig = a.swim;
+    if (rig && grp.visible !== false) {
+      const env = Math.exp(-t * 1.5);
+      D.ph += step * (3 + 11 * Math.exp(-t * 0.9));
+      if (rig.tspan > 0) poseTail(rig, D.amp0 * env, D.ph, D.curl * Math.min(1, t * 0.5) * CURL_AMP * rig.len);
+      posePecs(rig, 0.1 * env, 0.35 * Math.min(1, t), 0, 0);
+      if (t < 1.2 && swimJaw) swimJaw(a, 0.25 * Math.min(1, t * 2));
+    }
+    // settled: sunk to the bed, or floating, and fully still
+    if (t > 14) { D.done = true; return false; }
+    return true;
+  }
+  CBZ.aquaticDeathBegin = aquaticDeathBegin;
+  CBZ.aquaticDeathStep = aquaticDeathStep;
 
   CBZ.buildSwimRig = buildSwimRig;
   CBZ.animateSwim = animateSwim;

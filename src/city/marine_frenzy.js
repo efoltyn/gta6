@@ -459,7 +459,11 @@
       // a fish on an orbit faces along it; +X is forward on every body this
       // repo builds, and the repo's own convention is rotation.y = -heading.
       const head = th + 1.5707963;
-      _e.set(Math.sin(t * f.wob) * 0.5, -head, 0);
+      // THE SCHOOL SWIMS: every fish yaws with its own tail beat (phase-offset
+      // per fish, faster when the ball is blown apart) instead of only
+      // rocking on its long axis; the smaller roll is the silver flash.
+      const beat = Math.sin(t * (11 + f.wob * 3) * spinK + f.th * 7.3) * 0.26;
+      _e.set(Math.sin(t * f.wob) * 0.28, -head + beat, 0);
       _q.setFromEuler(_e);
       const sc = f.sc;
       _s.set(sc, sc, sc);

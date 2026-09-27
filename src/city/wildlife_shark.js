@@ -1518,6 +1518,7 @@
   // water rather than leave it hanging over it.
   function endBreach(a, s) {
     if (!s.air) return;
+    a._swimCurl = 0;
     s.air = 0; s.airOut = 0; s.airPitch = 0; s.airRoll = 0; s.airY = 0; s.airVy = 0;
     const g = a.group;
     if (g) {
@@ -1533,6 +1534,7 @@
     const g = a.group;
     const fall = Math.abs(s.airVy);
     s.air = 0; s.airOut = 0.3;
+    a._swimCurl = 0;
     BAUDIT.landings++;
     BAUDIT.lastWhy = s.airWhy;
     BAUDIT.lastApex = +(s.airApex || 0).toFixed(2);
@@ -1650,6 +1652,10 @@
     s.airPitch = Math.max(-1.25, Math.min(1.32, Math.atan2(s.airVy, Math.max(0.8, s.hv))));
     const u = s.air === 2 ? Math.max(0, Math.min(1, s.airT / Math.max(0.25, s.airTotal))) : 0;
     s.airRoll = s.airSpin * rollAmt() * Math.sin(u * 2.67);
+    // THE ARCH (wildlife_rig.js a._swimCurl): bent coming out, straight at the
+    // top, bent the other way into the entry — on a body that is rolling onto
+    // its flank, which is what turns a lateral bend into the arch you see.
+    a._swimCurl = s.air === 2 ? s.airSpin * 0.75 * Math.cos(u * Math.PI) : s.airSpin * 0.4;
     if (s.airPitch > (s.pitchUp || 0)) s.pitchUp = s.airPitch;
     if (s.airPitch < (s.pitchDown || 0)) s.pitchDown = s.airPitch;
     if (Math.abs(s.airRoll) > (s.rollPeak || 0)) s.rollPeak = Math.abs(s.airRoll);
