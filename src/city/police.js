@@ -2836,7 +2836,7 @@
     carPool: [], copPool: [], // detached, reusable records — never rebuilt per staging
     flashT: 0, leaveT: 0, age: 0,
   };
-  const CRUISER_MODEL = { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu" };
+  const CRUISER_MODEL = { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu", livery: "police" };
   let rbM = null;             // shared light-bar/livery mats + ONE unit cube (built once, never disposed)
   function rbMats() {
     if (rbM) return rbM;
@@ -2846,48 +2846,34 @@
     rbM.geo._shared = true;
     return rbM;
   }
-  // turn a plain black sedan into a black-and-white pursuit unit: white door
-  // panels against matte hood/trunk contrast panels, a chunky 3-segment
-  // red|white|blue roof bar (the red/blue halves keep the EXACT visibility-flip
-  // flash contract — rbUpdate flips .red/.blue, patrol parks them dark; the
-  // white centre is a steady lamp), a nose push-bar and an A-pillar spotlight.
-  // All cheap shared-material boxes; CRUISER_MODEL is always a sedan, so the
-  // hull-top ≈ y 1.10 the panels ride is a constant of this one body type.
+  /* THE BLACK-AND-WHITE IS BUILT, NOT GLUED. CRUISER_MODEL carries
+     livery:"police", so the car builder (carparts.js applyPolice) paints
+     the doors and roof white over the black body, fits a shaped roof bar,
+     a push bar and a spotlight — all ON the body's own surfaces. The old
+     version here bolted flat white slabs to the flanks and matte boxes on
+     the hood, which on a curved body float off the paint. What stays here
+     is what the POLICE LOGIC needs: the red/blue halves of the bar, found
+     by name, as the visibility-flip handles rbUpdate / patrol / checkpoints
+     drive (c._rbBar). A car that was not built as a cruiser (cityMarkCruiser
+     on any other car) gets a bar of the same shape and nothing else. */
   function rbDecorate(c) {
     if (c._rbBar) return;
-    const M = rbMats();
-    const h = (c.dims && c.dims.height) || 1.55, w = (c.dims && c.dims.width) || 1.9;
-    const l = (c.dims && c.dims.length) || 4.2;
-    const bar = new THREE.Group();
-    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.34, 0.1, 0.4); bar.add(base);
-    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.46, 0.17, 0.34); red.position.set(-0.42, 0.1, 0); bar.add(red);
-    const mid = new THREE.Mesh(M.geo, M.lamp); mid.scale.set(0.28, 0.15, 0.3); mid.position.set(0, 0.09, 0); bar.add(mid);
-    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.46, 0.17, 0.34); blue.position.set(0.42, 0.1, 0); bar.add(blue);
-    bar.position.set(0, h + 0.05, 0.12);
-    c.group.add(bar);
-    // the black-and-white: white DOOR panels…
-    [1, -1].forEach((s) => {
-      const door = new THREE.Mesh(M.geo, M.white);
-      door.scale.set(0.05, 0.64, 1.36);
-      door.position.set(s * (w / 2 + 0.015), 0.97, 0.25);
-      c.group.add(door);
-    });
-    // …between matte-black HOOD + TRUNK contrast panels riding the hull top
-    const hood = new THREE.Mesh(M.geo, M.dark); hood.scale.set(w * 0.56, 0.07, l * 0.2);
-    hood.position.set(0, 1.09, l * 0.28); c.group.add(hood);
-    const trunk = new THREE.Mesh(M.geo, M.dark); trunk.scale.set(w * 0.56, 0.07, l * 0.15);
-    trunk.position.set(0, 1.09, -l * 0.31); c.group.add(trunk);
-    // nose PUSH-BAR (blade + two uprights)
-    const pb = new THREE.Mesh(M.geo, M.dark); pb.scale.set(w * 0.58, 0.3, 0.09);
-    pb.position.set(0, 0.66, l / 2 + 0.1); c.group.add(pb);
-    [0.22, -0.22].forEach((ux) => {
-      const up = new THREE.Mesh(M.geo, M.dark); up.scale.set(0.07, 0.5, 0.09);
-      up.position.set(ux * w, 0.56, l / 2 + 0.1); c.group.add(up);
-    });
-    // A-pillar SPOTLIGHT block (driver side)
-    const spot = new THREE.Mesh(M.geo, M.lamp); spot.scale.set(0.1, 0.12, 0.22);
-    spot.position.set(-(w / 2 + 0.05), 1.28, l * 0.16); c.group.add(spot);
-    c._rbBar = { red, blue, mid, phase: (rng() * 2) | 0 };
+    let bar = null;
+    c.group.traverse(function (o) { if (!bar && o.name === "police_lightbar") bar = o; });
+    if (!bar) {
+      const M = rbMats();
+      const h = (c.dims && c.dims.height) || 1.55;
+      bar = new THREE.Group();
+      bar.name = "police_lightbar";
+      const base = new THREE.Mesh(M.geo, M.dark); base.name = "lb_base"; base.scale.set(1.12, 0.05, 0.28); base.position.y = 0.025; bar.add(base);
+      const red = new THREE.Mesh(M.geo, M.red); red.name = "lb_red"; red.scale.set(0.44, 0.08, 0.22); red.position.set(0.3, 0.09, 0); bar.add(red);
+      const blue = new THREE.Mesh(M.geo, M.blue); blue.name = "lb_blue"; blue.scale.set(0.44, 0.08, 0.22); blue.position.set(-0.3, 0.09, 0); bar.add(blue);
+      const mid = new THREE.Mesh(M.geo, M.lamp); mid.name = "lb_mid"; mid.scale.set(0.14, 0.07, 0.2); mid.position.set(0, 0.085, 0); bar.add(mid);
+      bar.position.set(0, h + 0.005, 0);
+      c.group.add(bar);
+    }
+    const find = (n) => { let r = null; bar.traverse(function (o) { if (!r && o.name === n) r = o; }); return r; };
+    c._rbBar = { red: find("lb_red"), blue: find("lb_blue"), mid: find("lb_mid"), phase: (rng() * 2) | 0 };
   }
   function rbDispose(grp) {   // same dispose discipline as clearCityCops/clearCars
     if (!grp) return;

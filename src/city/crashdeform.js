@@ -367,6 +367,8 @@
       // — crazed safety glass reads nearly OPAQUE, so push the clone's opacity
       // back up (once; the clone is cached/shared for the whole city).
       if (fm !== gl.mat && fm.transparent && fm.opacity < 0.8) { fm.opacity = 0.85; fm.depthWrite = true; }
+      // car glass (carfx 'autoGlass') is see-through by TRANSMISSION, not opacity
+      if (fm !== gl.mat && fm.transmission) { fm.transmission = 0.12; fm.opacity = 0.9; }
       gl.mesh.material = fm;
     }
   }

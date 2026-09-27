@@ -108,6 +108,10 @@
     // 14 m artic in place. A truck is a vehicle you go and find, not a paint
     // job you toggle.
     semi: "Bison Longhauler",
+    // same rule as `semi`: a real, buildable body (the Rampart crew-cab
+    // pickup) with a name, but NOT a stop on the [C] ring — inserting it into
+    // STYLE_ORDER would renumber every saved index after it.
+    pickup: "Bison Rampart",
   };
 
   // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
@@ -141,6 +145,7 @@
     // motor sounds like a diesel with no audio file and no new voice. The
     // handling multipliers are what make it drive like sixteen metres: it will
     // not stop, it will not turn, and the tail rolls.
+    pickup:     { class: "suv",    accel: 0.98, top: 0.94, turn: 0.82, grip: 0.86, brake: 0.90, drift: 1.1, roll: 1.2 },
     semi:       { class: "van",    accel: 0.58, top: 0.74, turn: 0.52, grip: 0.70, brake: 0.62, drift: 1.25, roll: 1.5 },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
@@ -216,50 +221,12 @@
     return geo;
   }
 
-  // Generates the HULL SIDE PROFILE fed to addPrism/prismGeo, now with a per-
-  // point WIDTH SCALE (see prismGeo) so the body doesn't stay a constant-width
-  // slab: it bulges out over each wheel (a fender arch flare) and tucks back in
-  // at the waist between the axles, with pinched bumper corners at the nose and
-  // tail. This is the single change that turns every road car's flanks from a
-  // flat plank into a real character-lined body — applied once here, every
-  // style benefits, tuned per style via the small `o` knob table (STYLE_FLARE).
-  function hullRing(len, baseH, deckRear, deckFront, archZ, o) {
-    o = o || {};
-    const shoulderF = o.shoulderF != null ? o.shoulderF : 0.78;
-    const shoulderR = o.shoulderR != null ? o.shoulderR : 0.80;
-    const bulge = o.bulge != null ? o.bulge : 1.04;
-    const tuck = o.tuck != null ? o.tuck : 0.97;
-    const noseTuck = o.noseTuck != null ? o.noseTuck : 0.90;
-    const tailTuck = o.tailTuck != null ? o.tailTuck : 0.95;
-    const nose = len * 0.5, tail = -len * 0.5;
-    // The fender work is WIDTH-ONLY: every bottom-edge point stays at y=0 so
-    // the rocker line runs straight and the flank stays a closed wall. (The
-    // first pass raised the arch points to ~0.38*baseH — that SCOOPED the
-    // whole lower mid-body out of the side profile, and from any street angle
-    // you saw clean through the car to the far wheels. Orbit-sheet diagnosed.)
-    return [
-      [tail, 0, tailTuck],
-      [tail, baseH * shoulderR, 1.0],
-      [deckRear, baseH, 1.0],
-      [deckFront, baseH, 1.0],
-      [nose, baseH * shoulderF, 1.0],
-      [nose, 0, noseTuck],
-      // NOT exactly y=0: r128's ShapeUtils ear-clipper emits flipped ears for
-      // collinear vertices (the whole mid-flank rendered inside-out and the
-      // body read see-through from the street). 2cm of rocker rise breaks the
-      // collinearity and is invisible behind the sill trim.
-      [archZ, 0.02, bulge],            // front fender flare (width only)
-      [0, 0.03, tuck],                 // waist tuck between the axles
-      [-archZ, 0.02, bulge],           // rear fender flare (width only)
-    ];
-  }
-
   const mats = new Map();
   const boxes = new Map();
   const prisms = new Map();
-  const wheels = new Map();
   const spheres = new Map();
   const procTemplates = new Map();
+  const tplCtx = new WeakMap();        // template -> its full brand-face context
   let ferrariTemplate = null;
   let ferrariLoading = false;
   let active = null;
@@ -306,6 +273,10 @@
     let m = mats.get(key);
     if (m) return m;
     m = vmat("paint", color, opts);
+    // SMOOTH, not faceted: the body is a lofted shell whose authored normals
+    // ARE the curvature (carfx's paint role defaults to flatShading, which
+    // would facet every panel back into the low-poly box it replaced).
+    if (m.flatShading) { m.flatShading = false; m.needsUpdate = true; }
     m._bodyPaint = true; m._shared = true;
     mats.set(key, m);
     return m;
@@ -320,11 +291,15 @@
     mats.set(key, m);
     return m;
   }
-  const glassMat = () => roleMat("glass", "glass", 0x16242e, { emissive: 0x070f15, ei: 0.25, double: true });
+  // car glass = carfx 'autoGlass' (reflective Physical transmission pane; the
+  // tint stays inside crashdeform's frost window). Aircraft keep THE ONE GLASS.
+  const glassMat = () => roleMat("glass", "autoGlass", 0x1c3346);
   const chromeMat = () => roleMat("chrome", "chrome", 0xc4ccd4, { emissive: 0x262b31, ei: 0.3 });
   const lightFrontMat = () => roleMat("lightFront", "lightFront", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.9 });
   const lightTailMat = () => roleMat("lightTail", "lightTail", 0xff3344, { emissive: 0xff2233, ei: 0.95 });
-  const plateMat = () => roleMat("plate", "metal", 0xe8edf2, { emissive: 0x202428, ei: 0.3 });
+  // a real plate (carfx atlas: light field, dark registration). Each call
+  // takes the next of eight variants, so styles do not all share one number.
+  const plateMat = () => (CBZ.carPlateMat ? CBZ.carPlateMat() : roleMat("plate", "plastic", 0xe8edf2));
 
   function boxGeo(w, h, d) {
     const key = w + "|" + h + "|" + d;
@@ -544,73 +519,6 @@
     return geo;
   }
 
-  // A PANEL CUT FROM A FLANK: the (z,y) polygon with optional holes, its outer
-  // face lying ON the surface xAt(z,y) of flank `side` (±1), its inner face
-  // `thick` inboard, and a rim all the way round the outline and every hole.
-  // A door skin, a window frame, a pane and a door card are all this shape.
-  // Built in the car's own frame; the caller translates it onto its hinge.
-  function patchGeo(side, contour, holes, xAt, thick) {
-    const pos = [];
-    const F = flankTris(contour, holes);
-    const tris = F.tris, verts = F.verts;
-    function tri(a, b, c) { pos.push(...a, ...b, ...c); }
-    for (let t = 0; t < tris.length; t++) {
-      const v = [verts[tris[t][0]], verts[tris[t][1]], verts[tris[t][2]]];
-      const o = v.map((p) => [side * xAt(p.x, p.y), p.y, p.x]);
-      const n = v.map((p) => [side * (xAt(p.x, p.y) - thick), p.y, p.x]);
-      if (side < 0) { tri(o[0], o[2], o[1]); tri(n[0], n[1], n[2]); }
-      else { tri(o[0], o[1], o[2]); tri(n[0], n[2], n[1]); }
-    }
-    const rings = [contour].concat(holes || []);
-    for (let r = 0; r < rings.length; r++) {
-      const poly = rings[r];
-      let cz = 0, cy = 0;
-      for (let i = 0; i < poly.length; i++) { cz += poly[i][0]; cy += poly[i][1]; }
-      cz /= poly.length; cy /= poly.length;
-      for (let i = 0; i < poly.length; i++) {
-        const j = (i + 1) % poly.length;
-        const zi = poly[i][0], yi = poly[i][1], zj = poly[j][0], yj = poly[j][1];
-        const oi = xAt(zi, yi), oj = xAt(zj, yj);
-        const a = [side * oi, yi, zi], b = [side * oj, yj, zj];
-        const c = [side * (oj - thick), yj, zj], d = [side * (oi - thick), yi, zi];
-        const mz = (zi + zj) * 0.5, my = (yi + yj) * 0.5;
-        // the outline's rim faces away from the panel; a hole's rim faces into the hole
-        const toward = r === 0
-          ? [side * (oi - thick * 0.5), my + (my - cy), mz + (mz - cz)]
-          : [side * (oi - thick * 0.5), cy, cz];
-        quadToward(pos, a, b, c, d, toward);
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.computeVertexNormals();
-    return geo;
-  }
-  // grow a convex (z,y) polygon by `d` on every edge
-  function offsetPoly(poly, d) {
-    let cz = 0, cy = 0;
-    for (let i = 0; i < poly.length; i++) { cz += poly[i][0]; cy += poly[i][1]; }
-    cz /= poly.length; cy /= poly.length;
-    const lines = [];
-    for (let i = 0; i < poly.length; i++) {
-      const j = (i + 1) % poly.length;
-      const dz = poly[j][0] - poly[i][0], dy = poly[j][1] - poly[i][1];
-      const L = Math.hypot(dz, dy) || 1;
-      let nz = -dy / L, ny = dz / L;
-      const mz = (poly[i][0] + poly[j][0]) * 0.5, my = (poly[i][1] + poly[j][1]) * 0.5;
-      if (nz * (mz - cz) + ny * (my - cy) < 0) { nz = -nz; ny = -ny; }
-      lines.push({ pz: poly[i][0] + nz * d, py: poly[i][1] + ny * d, dz: dz, dy: dy });
-    }
-    const out = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = lines[(i + poly.length - 1) % poly.length], q = lines[i];
-      const det = p.dz * q.dy - p.dy * q.dz;
-      if (Math.abs(det) < 1e-9) { out.push([q.pz, q.py]); continue; }
-      const t = ((q.pz - p.pz) * q.dy - (q.py - p.py) * q.dz) / det;
-      out.push([p.pz + p.dz * t, p.py + p.dy * t]);
-    }
-    return out;
-  }
   // several non-indexed geometries → one (positions + normals), for the
   // three-mesh door below
   function concatGeos(list) {
@@ -633,92 +541,6 @@
     return geo;
   }
 
-  /* ============================================================
-     DOORS THAT ARE DOORS — a car is HOLLOW where its doors are.
-
-     OWNER: "when door opens and shit car really isn't hollow, it's not
-     geometrically realistic, and it just doesn't look real enough."
-
-     WHAT WAS ACTUALLY WRONG. The car had no door. It had a door SEAM (two
-     thin boxes and a chrome handle glued to a solid hull) and, when somebody
-     boarded, city/boarding.js conjured a 5 cm slab with a glass pane on it
-     and swung that out — over a flank that was still there. So an open door
-     showed you the same painted wall the shut one did, the slab had no edge,
-     no card, no frame and no hinge, the handle stayed behind on the body, and
-     the side window stayed put in the glass tub while its "door" swung away
-     without it. Every one of those is the same fault: the door was drawn as
-     a decal, and a decal cannot open.
-
-     WHAT THIS DOES. The doors are laid out FIRST, and the hull and the glass
-     tub are then cut AROUND them (prismGeo holes, with jamb walls), so the
-     body is genuinely open where a door is. Each door is a three-mesh group
-     hinged on its leading edge:
-       paint   the skin (cut from the same flank surface, so it sits flush in
-               its own aperture with a 4 mm shut line) + the window frame
-       dark    the door card, an armrest, a pull, two hinges, the handle
-       glass   the pane, in the frame — the window LEAVES with the door
-     The group's userData.carDoor is a plain JSON spec (id/side/row/z-span/
-     hinge) so a clone carries it. city/vehicles.js bakes the shut doors into
-     three merged meshes per car and only swaps the live groups in while one
-     is open (CBZ.carDoorPose), so traffic pays +3 draw calls, not +12.
-     boarding.js, passengerseat.js and crashdeform.js all pose THIS door.
-
-     What is deliberately not here: the van, cybertruck and semi. Their sides
-     are slabs and sculpts, not the hullRing prism, and the van's back is
-     already a real door (vehicle_hold). They keep the cabin's built-in door
-     cards and boarding's fallback leaf.
-  ============================================================ */
-  const DOOR_SHUT_LINE = 0.004;
-  // where the doors go, from the cabin's own corners: front door from just
-  // behind the B-pillar to the A-pillar base, rear door from the C-pillar base
-  // to just ahead of the B-pillar; a coupe gets one long door per side. The
-  // 0.232·len clamp keeps every leading/trailing edge clear of the wheel arches.
-  function layoutDoors(len, cab, coupe) {
-    const rB = cab[0], rT = cab[1], fT = cab[2], fB = cab[3];
-    const bpZ = (fT[0] + rT[0]) * 0.5;
-    const lead = Math.min(fB[0] - 0.02, len * 0.232);
-    const trail = Math.max(rB[0] + 0.05, -len * 0.232);
-    const out = [];
-    if (coupe) out.push({ row: 0, z0: Math.max(trail, bpZ - (fB[0] - rB[0]) * 0.24), z1: lead });
-    else {
-      out.push({ row: 0, z0: bpZ + 0.045, z1: lead });
-      out.push({ row: 1, z0: trail, z1: bpZ - 0.045 });
-    }
-    return out.filter((d) => d.z1 - d.z0 > 0.45);
-  }
-  /* buildCarDoors(root, D) → { hullHoles, tubHoles, spans }
-       D.half/hullProfile/baseH/bodyY   the hull prism the doors are cut from
-       D.sillTop                        hull-local y of the aperture's bottom
-       D.cab/cabW/peakY/cabBaseY        the glass tub the windows are cut from
-       D.plan                           layoutDoors()
-       D.paint/D.dark/D.glass           materials
-     Adds one hinged group per door to `root`; the caller feeds the holes to
-     the two addPrism calls and the spans to dressCabin. */
-  function buildCarDoors(root, D) {
-    const hwHull = hullWidthFn(D.hullProfile, D.half);
-    const xTub = hullWidthFn(D.cab, D.cabW * 0.5);     // the very law the tub is built by
-    const cab = D.cab, peakY = D.peakY;
-    const rB = cab[0], rT = cab[1], fT = cab[2], fB = cab[3];
-    const bpZ = (fT[0] + rT[0]) * 0.5;
-    const y0 = D.sillTop, y1 = D.baseH - 0.04;
-    const yb = 0.035, yt = Math.max(yb + 0.08, peakY - 0.045);
-    const out = { hullHoles: [], tubHoles: [], spans: [] };
-    for (let k = 0; k < D.plan.length; k++) {
-      const d = D.plan[k];
-      // the window: inset from the pillar it follows (A-rake or C-rake) and
-      // stopping 3 cm short of the B-pillar bar, never ahead of its own hinge
-      const aLead = (y) => Math.min(fB[0] + (fT[0] - fB[0]) * (y / peakY) - 0.06, d.z1 - 0.012);
-      const cTrail = (y) => Math.max(rB[0] + (rT[0] - rB[0]) * (y / peakY) + 0.06, d.z0 + 0.012);
-      const win = d.row === 0
-        ? [[aLead(yb), yb], [aLead(yt), yt], [bpZ + 0.03, yt], [bpZ + 0.03, yb]]
-        : [[bpZ - 0.03, yb], [bpZ - 0.03, yt], [cTrail(yt), yt], [cTrail(yb), yb]];
-      out.hullHoles.push([[d.z0, y0], [d.z0, y1], [d.z1, y1], [d.z1, y0]]);
-      out.tubHoles.push(win);
-      out.spans.push([d.z0, d.z1]);
-      [1, -1].forEach(function (side) { buildDoor(root, D, d, side, win, hwHull, xTub, y0, y1); });
-    }
-    return out;
-  }
   // the door card's own shade (see shadeCabin): dark at the sill, brightest
   // at the belt, an armrest's underside in its own shadow
   function shadeDoorCard(geo, yLow, yHigh) {
@@ -734,176 +556,12 @@
     }
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   }
-  function buildDoor(root, D, d, side, win, hwHull, xTub, y0, y1) {
-    const s = DOOR_SHUT_LINE, bodyY = D.bodyY, cabBaseY = D.cabBaseY;
-    const z0 = d.z0, z1 = d.z1, len = z1 - z0, zc = (z0 + z1) * 0.5, ym = (y0 + y1) * 0.5;
-    const id = (d.row ? "R" : "F") + (side > 0 ? "L" : "R");
-    const hx = side * hwHull(z1, ym);                  // the hinge line, on the skin's leading edge
-    const paintGeos = [], darkGeos = [];
-    const skin = patchGeo(side, [[z0 + s, y0 + s], [z0 + s, y1 - s], [z1 - s, y1 - s], [z1 - s, y0 + s]], null, hwHull, 0.06);
-    skin.translate(0, bodyY, 0); paintGeos.push(skin);
-    const frame = patchGeo(side, offsetPoly(win, 0.04), [win], (z, y) => xTub(z, y) + 0.008, 0.032);
-    frame.translate(0, cabBaseY, 0); paintGeos.push(frame);
-    const pane = patchGeo(side, win, null, (z, y) => xTub(z, y) - 0.004, 0.006);
-    pane.translate(0, cabBaseY, 0);
-    const card = patchGeo(side, [[z0 + 0.03, y0 + 0.03], [z0 + 0.03, y1 - 0.03], [z1 - 0.03, y1 - 0.03], [z1 - 0.03, y0 + 0.03]],
-      null, (z, y) => hwHull(z, y) - 0.06, 0.06);
-    card.translate(0, bodyY, 0); darkGeos.push(card);
-    const inner = hwHull(zc, ym) - 0.12;               // the card's inner face
-    const box = (w, h, dd, x, y, z) => { const g = new THREE.BoxGeometry(w, h, dd); g.translate(x, y, z); return g; };
-    darkGeos.push(box(0.05, 0.07, len * 0.42, side * (inner - 0.025), bodyY + y1 - 0.13, zc - 0.04));   // armrest
-    darkGeos.push(box(0.11, 0.025, len - 0.08, side * (inner + 0.035), bodyY + y1 - 0.012, zc));        // belt trim ledge over the card
-    darkGeos.push(box(0.04, 0.16, len * 0.30, side * (inner - 0.02), bodyY + y0 + 0.16, zc + 0.02));     // door pocket
-    darkGeos.push(box(0.03, 0.03, 0.09, side * (inner - 0.035), bodyY + y1 - 0.105, zc - 0.10));         // window switch pod
-    darkGeos.push(box(0.04, 0.03, 0.14, side * (inner - 0.02), bodyY + y1 - 0.24, zc + 0.14));           // pull
-    darkGeos.push(box(0.05, 0.08, 0.04, side * (hwHull(z1, ym) - 0.05), bodyY + y0 + 0.14, z1 - 0.02)); // hinges
-    darkGeos.push(box(0.05, 0.08, 0.04, side * (hwHull(z1, ym) - 0.05), bodyY + y1 - 0.14, z1 - 0.02));
-    darkGeos.push(box(0.026, 0.032, 0.12, side * (hwHull(z0 + 0.16, y1 - 0.09) + 0.013), bodyY + y1 - 0.09, z0 + 0.16)); // handle
-    const g = new THREE.Group();
-    g.name = "door_" + id;
-    g.position.set(hx, 0, z1);
-    const mk = (geos, mat, shade) => {
-      const geo = concatGeos(geos);
-      if (shade) shadeDoorCard(geo, bodyY + y0, bodyY + y1);
-      geo.translate(-hx, 0, -z1);
-      geo._shared = true;
-      const m = new THREE.Mesh(geo, mat);
-      m.castShadow = false;
-      m.userData.noSeal = true;
-      g.add(m);
-      return m;
-    };
-    mk(paintGeos, D.paint);
-    mk(darkGeos, D.dark, true);
-    mk([pane], D.glass);
-    g.userData.carDoor = {
-      id: id, side: side, row: d.row, z0: z0, z1: z1, len: len,
-      hx: hx, hz: z1, y0: bodyY + y0, belt: bodyY + y1, y1: cabBaseY + D.peakY,
-    };
-    root.add(g);
-    return g;
-  }
 
-  function wheelGeo(radius, width) {
-    const key = radius + "|" + width;
-    let geo = wheels.get(key);
-    if (!geo) {
-      // 28-seg sidewall (was 16): tires read as round cylinders instead of a
-      // faceted drum at the close orbit-shot distances the studio tool uses.
-      geo = new THREE.CylinderGeometry(radius, radius, width, 28);
-      geo._shared = true;
-      wheels.set(key, geo);
-    }
-    return geo;
-  }
-
-  // ---- one TIRE mesh per size: rounder 28-seg sidewall (the dark rubber). The
-  // bright RIM (spokes + lip + hub) is a SEPARATE merged mesh added as a child
-  // so it can carry the shiny vmat('rim') material while the tire stays
-  // vmat('tire'). Rims are now OPENWORK (no solid face disc except the EV aero
-  // wheel) built AT THE TIRE CAP PLANE, with a dark BRAKE DISC visible in the
-  // gaps between spokes — the old design centred the rim assembly INSIDE the
-  // closed tire cylinder, so all that ever showed was a ~2cm proud sliver:
-  // the "flat coin rim" critique. Local y=0 in rimGeo = the tire cap plane.
-  // Spoke style is a per-brand signature (carparts.js rimStyleFor). ----
-  const RIM_PARAMS = {
-    sport5:  { n: 5,  sw: 0.16, hub: 0.18 },                 // classic alloy
-    twin10:  { n: 10, sw: 0.10, hub: 0.15 },                 // Falcone twin-five
-    turbine: { n: 7,  sw: 0.13, hub: 0.17 },                 // Adler/Vitesse turbine
-    aero:    { n: 0,  sw: 0,    hub: 0.15, disc: 0.80 },     // Voltra flush aero cover
-    steel:   { n: 4,  sw: 0.20, hub: 0.22 },                 // Kotori steelie
-    sixlug:  { n: 6,  sw: 0.17, hub: 0.24 },                 // Bison truck six-spoke
-    wire:    { n: 12, sw: 0.07, hub: 0.13, dish: true },     // Eldorado wire wheel
-  };
-  const rimGeos = new Map();
-  // rimFrac = rim-face radius / tire radius — THE sidewall knob. Real cars:
-  // supercar low-profile ≈ 0.70-0.75 rim (thin rubber band of sidewall),
-  // sedans ≈ 0.62-0.68, muscle/SUV ≈ 0.58-0.62, work van/truck ≈ 0.50-0.58
-  // (fat sidewall). The old fixed 0.86-0.92 put rubber-band tires on
-  // EVERYTHING — one reason the fleet's wheels read wrong.
-  function rimGeo(radius, width, style, rimFrac) {
-    const p = RIM_PARAMS[style] || RIM_PARAMS.sport5;
-    const rf = rimFrac || 0.7;
-    const rr = radius * rf;                   // rim face radius
-    const key = radius + "|" + width + "|" + (style || "sport5") + "|" + rf;
-    let geo = rimGeos.get(key);
-    if (geo) return geo;
-    const parts = [];
-    const lipY = p.dish ? width * 0.10 : 0;   // wire wheels: lip proud, face sunk = deep dish
-    // outer rim LIP: an open barrel straddling the cap plane, AT the rim
-    // radius — the tire cylinder beyond it reads as sidewall.
-    const lip = new THREE.CylinderGeometry(rr * 1.02, rr * 0.94, width * 0.22, 24, 1, true);
-    lip.translate(0, lipY, 0);
-    parts.push(lip);
-    // spokes: hub → lip, mostly PROUD of the cap so they read as real metalwork.
-    const spokeLen = rr * 0.97, spokeW = Math.max(0.028, rr * p.sw * 1.15), spokeT = width * 0.30;
-    for (let i = 0; i < p.n; i++) {
-      const a = (i / p.n) * Math.PI * 2;
-      const s = new THREE.BoxGeometry(spokeLen, spokeT, spokeW);
-      s.translate(spokeLen * 0.5, spokeT * 0.2 - (p.dish ? width * 0.06 : 0), 0);
-      // spoke runs +X with its THICKNESS along the wheel axis (Y)
-      s.applyMatrix4(new THREE.Matrix4().makeRotationY(a));
-      parts.push(s);
-    }
-    // EV aero cover: one flush disc instead of spokes.
-    if (p.disc) parts.push(new THREE.CylinderGeometry(rr * p.disc / 0.88, rr * p.disc / 0.88, width * 0.10, 24).translate(0, width * 0.03, 0));
-    // hub cap, proud of everything.
-    parts.push(new THREE.CylinderGeometry(rr * p.hub / 0.88, rr * p.hub / 0.88, width * 0.18, 12).translate(0, width * 0.07 - (p.dish ? width * 0.06 : 0), 0));
-    geo = mergeGeo(parts);
-    geo._shared = true;
-    rimGeos.set(key, geo);
-    return geo;
-  }
-  // brake disc: a thin dark-steel rotor sitting just proud of the tire cap,
-  // filling the openwork behind the spokes (child of the tire → spins with it,
-  // which is physically right for a rotor).
-  const discGeos = new Map();
-  function discGeo(radius) {
-    const key = radius.toFixed(4);
-    let geo = discGeos.get(key);
-    if (!geo) {
-      geo = new THREE.CylinderGeometry(radius * 0.62, radius * 0.62, 0.03, 20);
-      geo._shared = true;
-      discGeos.set(key, geo);
-    }
-    return geo;
-  }
-  // dark-steel rotor: Lambert (carfx's 'metal' role returns the CHROME
-  // singleton regardless of colour — a mirror rotor would kill the openwork
-  // depth contrast the new rims exist for).
-  function discMat() { return sharedMat("brake-disc", 0x3f444b, { emissive: 0x101317, ei: 0.3 }); }
-
-  // minimal BufferGeometry merge (position+normal) — local to playercars so we
-  // don't depend on BufferGeometryUtils. Inputs are disposed by caller if needed.
-  // NOTE: primitives like CylinderGeometry/BoxGeometry are INDEXED in r128, so
-  // toNonIndexed() EXPANDS the vertex count (one vert per triangle-corner,
-  // no sharing). The size budget must be computed from the POST-conversion
-  // (non-indexed) geometry, not the indexed source, or the Float32Array fill
-  // below overruns its buffer (this used to throw "offset is out of bounds"
-  // and take down every wheel build — rimGeo/makeWheel/addWheels — so ALL
-  // road cars silently fell back to the legacy box rig via vehicles.js's
-  // try/catch around cityBuildPlayerCarVisual).
-  function mergeGeo(geos) {
-    const parts = geos.map(function (g) {
-      g.computeVertexNormals();
-      return g.index ? g.toNonIndexed() : g;
-    });
-    let n = 0;
-    for (const gp of parts) n += gp.attributes.position.count;
-    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
-    let pi = 0;
-    for (let i = 0; i < parts.length; i++) {
-      const gp = parts[i], g = geos[i];
-      const pa = gp.attributes.position.array, na = gp.attributes.normal.array;
-      pos.set(pa, pi); nrm.set(na, pi); pi += pa.length;
-      if (gp !== g && gp.dispose) gp.dispose();
-    }
-    const out = new THREE.BufferGeometry();
-    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    out.computeBoundingSphere();
-    return out;
-  }
+  // ---- WHEELS live in city/carwheels.js: one lathed tyre + dished rim +
+  // spokes + rotor per wheel as ONE mesh (vertex colours + carfx's 'wheel'
+  // ramp material), built once per (radius, width, style, rimFrac) and
+  // shared by every car. The old CylinderGeometry tyre, box-spoke rim and
+  // flat brake disc (three meshes a wheel) are gone. ----
 
   // Build ONE wheel (tire + bright rim child) at the origin, axle along the
   // mesh's own Y (caller rotates z=PI/2 to lay it on its side like the old rig).
@@ -933,29 +591,17 @@
     return mesh;
   }
 
-  // tire + rim materials are FLEET-shared singletons (one black rubber, one
-  // bright alloy) cached here so every wheel in the city reuses them and so
-  // clearCars (which disposes only un-_shared mats) can never dispose them.
-  let _tireMat = null, _rimMat = null;
-  function tireMat() { if (!_tireMat) { _tireMat = vmat("tire", 0x14161a); _tireMat._shared = true; } return _tireMat; }
-  function rimMat() { if (!_rimMat) { _rimMat = vmat("rim", 0xc2c9d1, { emissive: 0x20242a, ei: 0.3 }); _rimMat._shared = true; } return _rimMat; }
+  // ONE wheel at the origin, axle along the mesh's own Y (+Y = rim face,
+  // outboard); the caller lays it on its side with rotation.z = -+PI/2.
+  // Tagged playerWheel: spared by the static merge, spun by the drive loops.
+  // rotation.order YXZ = Ry(steer) * Rx(spin) * Rz(lay-down): see carwheels.js.
   function makeWheel(radius, width, rimStyle, rimFrac) {
-    const tire = new THREE.Mesh(wheelGeo(radius, width), tireMat());
-    tire.castShadow = false;
-    tire.userData.playerWheel = true;
-    // brake rotor first (visually behind the spokes), flush on the cap plane —
-    // sized to sit INSIDE the rim face, whatever the sidewall fraction.
-    const disc = new THREE.Mesh(discGeo(radius * (rimFrac || 0.7) * 0.86 / 0.62), discMat());
-    disc.position.y = width * 0.5 + 0.004;
-    disc.castShadow = false;
-    tire.add(disc);
-    // openwork rim AT the cap plane (rimGeo local y=0 = cap); +Y is outboard
-    // before the caller's z-rotation lays the wheel on its side.
-    const rim = new THREE.Mesh(rimGeo(radius, width, rimStyle, rimFrac), rimMat());
-    rim.position.y = width * 0.5 + 0.01;
-    rim.castShadow = false;
-    tire.add(rim);
-    return tire;
+    const W = CBZ.carWheels;
+    const wheel = new THREE.Mesh(W.wheelGeo(radius, width, rimStyle || "sport5", rimFrac || 0.66), W.wheelMat());
+    wheel.castShadow = false;
+    wheel.rotation.order = "YXZ";
+    wheel.userData.playerWheel = true;
+    return wheel;
   }
 
   function sphereGeo(radius) {
@@ -974,17 +620,6 @@
     mesh.castShadow = false;
     root.add(mesh);
     return mesh;
-  }
-
-  // four strips around a cabin footprint: the beltline shadow band
-  function dloFrame(root, wOuter, len, cz, y, material) {
-    const t = 0.03;
-    [1, -1].forEach(function (s) {
-      const m = addBox(root, t, 0.05, len, s * (wOuter * 0.5 - t * 0.5), y, cz, material);
-      m.userData.noSeal = true;
-      const e = addBox(root, wOuter - t * 2, 0.05, t, 0, y, cz + s * (len * 0.5 - t * 0.5), material);
-      e.userData.noSeal = true;
-    });
   }
 
   function addPrism(root, width, profile, y, material, opts) {
@@ -1045,15 +680,16 @@
       wheel.position.set(p[0], radius, p[1]);
       root.add(wheel);
       if (archMat) addWheelArch(root, p[0] + Math.sign(p[0]) * 0.03, radius, p[1], radius, archMat);
-      // brake CALIPER: a static block hugging the rotor at the trailing edge —
-      // a root child (calipers don't spin), sitting just outboard of the cap
-      // where the openwork spokes sweep past it. Merged with the statics.
-      if (caliperMat) {
-        const cal = new THREE.Mesh(boxGeo(0.05, radius * 0.34, radius * 0.30), caliperMat);
-        cal.position.set(p[0] + Math.sign(p[0]) * (wheelWidth * 0.5 + 0.02), radius + radius * 0.12, p[1] - radius * 0.42);
-        cal.castShadow = false;
-        root.add(cal);
-      }
+      // brake CALIPER: an arc block straddling the rotor edge INSIDE the
+      // barrel, behind the spokes, near the top of the wheel. A root child, so
+      // it never spins (the rotor does, it is part of the wheel mesh) and the
+      // static merge bakes all four into one draw. Default: dark grey.
+      const cal = new THREE.Mesh(CBZ.carWheels.caliperGeo(radius, wheelWidth, rimFrac || 0.66, Math.sign(p[0]) || 1, rimStyle || "sport5"),
+        caliperMat || sharedMat("caliper-dk", 0x3a3f45));
+      cal.position.set(p[0], radius, p[1]);
+      cal.castShadow = false;
+      cal.userData.noSeal = true;
+      root.add(cal);
     });
   }
 
@@ -1063,64 +699,8 @@
       if ((o.userData && o.userData.playerWheel) || (o.name && /^wheel_(fl|fr|rl|rr)$/.test(o.name))) out.push(o);
     });
     root.userData.playerWheels = out;
+    if (CBZ.carWheels) CBZ.carWheels.tagSteer(out);   // front axle yaws (userData.steers)
   }
-
-  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, bodyYIn, cabBaseYIn) {
-    const bodyY = bodyYIn == null ? wheelR * 0.42 : bodyYIn, bodyTop = bodyY + baseH;
-    const peakY = cabin[1][1];
-    const plate = plateMat();
-    const chrome = chromeMat();             // shiny chromed trim
-
-    // Hood/trunk breaks, mirrors, door cuts and wheel-arch brows give every
-    // silhouette readable vehicle anatomy. The FACE (grille, lamps, badge,
-    // bumpers, exhaust) is a BRAND design language now — applied per instance
-    // via carparts.js (see makeProcedural), NOT here, so two marques sharing
-    // one silhouette still read as different manufacturers.
-    addBox(root, w * 0.78, 0.035, len * 0.27, 0, bodyTop + 0.02, len * 0.31, paint);
-    addBox(root, w * 0.74, 0.035, len * 0.18, 0, bodyTop + 0.02, -len * 0.39, paint);
-    [1, -1].forEach(function (side) {
-      // mirror on the greenhouse beltline (cabin base ~bodyTop), just below the glass
-      addBox(root, 0.18, 0.12, 0.28, side * (w * 0.53), bodyTop + peakY * 0.28, len * 0.15, trim);
-      // (the door seams and handles that used to be painted here are REAL
-      // now — the shut line and the handle ride the door, see buildCarDoors)
-      // wheel-arch brows over each axle (top of arch ~ mid-hull). 0.16·len,
-      // down from 0.20, so they stop clear of the door apertures at 0.232·len.
-      [len * 0.32, -len * 0.32].forEach(function (z) {
-        addBox(root, 0.06, 0.09, len * 0.16, side * (w * 0.505), bodyY + baseH * 0.42, z, trim);
-      });
-    });
-    addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.32, -len * 0.5 - 0.075, plate);
-    addBox(root, w * 0.96, 0.12, 0.16, 0, bodyY + 0.04, len * 0.5 - 0.03, trim);
-    addBox(root, w * 0.96, 0.13, 0.14, 0, bodyY + 0.05, -len * 0.5 + 0.02, trim);
-    // thin chrome window-surround on the greenhouse beltline (catches light, reads
-    // as a real DLO trim strip wrapping the glass). Cheap pair of low boxes.
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.03, 0.035, (cabin[2][0] - cabin[1][0]) * 0.9, side * (w * 0.44 * 0.94), bodyTop + peakY * 0.08, (cabin[1][0] + cabin[2][0]) * 0.5, chrome);
-    });
-    // total height = hull top + greenhouse peak (greenhouse base sunk into deck).
-    const cabBaseY = cabBaseYIn == null ? bodyTop - peakY * 0.08 : cabBaseYIn;
-    root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.64 };
-  }
-
-  // per-style fender-flare / tumblehome knobs fed to hullRing() + the cabin
-  // profile's roof-width taper. Supercars get the most pronounced bulge +
-  // tightest tumblehome (wedge-y, aggressive); sedans/EVs/hatch stay subtle so
-  // they still read as clean, low-drama shapes; muscle/lowrider get wide,
-  // low arches (long hood, flat fenders) instead of a wedge taper.
-  const STYLE_FLARE = {
-    ferrari:    { bulge: 1.045, tuck: 0.95, noseTuck: 0.88, tailTuck: 0.94, archY: 0.40, roofTuck: 0.84 },
-    enzo:       { bulge: 1.03, tuck: 0.95, noseTuck: 0.87, tailTuck: 0.94, archY: 0.40, roofTuck: 0.84 },
-    aventador:  { bulge: 1.03, tuck: 0.94, noseTuck: 0.86, tailTuck: 0.93, archY: 0.40, roofTuck: 0.82 },
-    veyron:     { bulge: 1.045, tuck: 0.95, noseTuck: 0.89, tailTuck: 0.95, archY: 0.40, roofTuck: 0.85 },
-    porsche:    { bulge: 1.04, tuck: 0.96, noseTuck: 0.90, tailTuck: 0.95, archY: 0.38, roofTuck: 0.86 },
-    muscle:     { bulge: 1.045, tuck: 0.96, noseTuck: 0.92, tailTuck: 0.96, archY: 0.36, roofTuck: 0.90 },
-    lowrider:   { bulge: 1.04, tuck: 0.97, noseTuck: 0.92, tailTuck: 0.96, archY: 0.34, roofTuck: 0.92 },
-    "tesla-s":  { bulge: 1.03, tuck: 0.97, noseTuck: 0.91, tailTuck: 0.96, archY: 0.38, roofTuck: 0.88 },
-    "tesla-3":  { bulge: 1.03, tuck: 0.97, noseTuck: 0.91, tailTuck: 0.96, archY: 0.38, roofTuck: 0.88 },
-    "tesla-x":  { bulge: 1.03, tuck: 0.97, noseTuck: 0.92, tailTuck: 0.96, archY: 0.38, roofTuck: 0.90 },
-    "tesla-y":  { bulge: 1.03, tuck: 0.97, noseTuck: 0.92, tailTuck: 0.96, archY: 0.38, roofTuck: 0.90 },
-    hatch:      { bulge: 1.03, tuck: 0.97, noseTuck: 0.92, tailTuck: 0.96, archY: 0.40, roofTuck: 0.90 },
-  };
 
   // per-style CLEARCOAT tuning fed straight to vmat('paint', color, opts):
   // supercars run higher metalness + lower roughness + a hotter envMapIntensity
@@ -1142,182 +722,314 @@
     hatch:      { metalness: 0.48, roughness: 0.38, envMapIntensity: 1.0 },
   };
 
-  /* ============================================================
-     THE CABIN — one builder, every body style (CAR_CABIN_V2)
-
-     OWNER: "really make interior of car exist like how interior of building
-     with glass exists and you can see npcs from outside" — and, separately,
-     that his own car looks EMPTY coming toward the camera.
-
-     Two different faults were producing one symptom:
-
-     (1) THE ROOM WAS NOT A ROOM. The road cars had five loose slabs floating
-         inside a transparent tub — a seat deck, two seat backs, a bench, a
-         dash. Nothing enclosed anything, so a low camera looking through the
-         side glass saw the INSIDE of the far flank, which is a backface, which
-         is culled, which is daylight. The SUV had a single grey block; the van
-         and the cybertruck had nothing at all behind their windows.
-         A building interior does not read because it has furniture. It reads
-         because it is a SEALED BOX with a glass wall — city/buildings.js's
-         see-inside discipline. So this builds the box first (floor pan, two
-         door cards, a firewall, a rear bulkhead, a headliner) and only then
-         puts furniture in it. That is also what makes first person possible:
-         you cannot sit inside a room that has no floor and no walls.
-
-     (2) NOTHING WAS ANCHORED. `cabinInfo` carried four numbers, enough to
-         park a merged blob roughly in the middle of the greenhouse and no
-         more. This publishes the frame the rest of the wave needs — the two
-         front SEATS (cushion height and all), the WHEEL, the FLOOR, and the
-         EYE — so city/vehicles.js can seat the player's real dressed rig at
-         the wheel and city/view.js can put a camera in his head, both reading
-         the same authored numbers instead of each inventing their own.
-
-     PROPORTIONS ARE REAL, NOT EYEBALLED. The cabin is derived off the same
-     total-height law the silhouettes already obey: floor pan ~0.29·H, cushion
-     a hand's width above it, driver's eye ~0.81·H (a Model 3's eye ellipse
-     sits ~1.20 m up a 1.44 m car), headrest crown just under the eye — which
-     is why the reference photo shows a head ABOVE the headrests, not behind
-     them. Every number below falls out of the cabin box it is handed, so an
-     SUV gets an SUV's high hip point and a supercar gets a supercar's low one
-     with no per-style table to keep in sync.
-
-     COST. Everything uses the ONE shared interior material, so the whole cabin
-     merges into the interior bucket city/vehicles.js already makes — the car
-     gains geometry, not draw calls. The single exception is the instrument
-     face, which is emissive (a lit cluster is the whole reason a cabin reads
-     at dusk) and therefore one extra bucket; that is the price and it is
-     behind CAR_CABIN_V2 with everything else.
-  ============================================================ */
-  // Screens are authored 0.07 proud of their bezel, not the 0.025 SCREEN LAW
-  // minimum, because vehicles.js's sealSeams() inflates every box thinner than
-  // 0.09 on its thin axis by 0.04 — which eats 0.04 of any gap between two
-  // thin boxes. 0.07 authored is ~0.03 shipped, i.e. still legal after the
-  // seam pass. (Meshes that must NOT be inflated carry userData.noSeal.)
-  const SCREEN_GAP = 0.07;
+  /* THE CABIN'S LIGHT, in one paragraph (the long history lives in git).
+     This is a Lambert world with no bounce: the sun cannot reach a roofed
+     room, so every cabin surface renders at the ambient floor and then passes
+     through a 0.35-opacity pane. The fix is an emissive LIFT standing in for
+     the bounce light a real cabin gets off its own glass, carried mostly by
+     the emissive and little by the diffuse (a pale diffuse clips to white
+     where the windscreen lets sun onto the dash). crashdeform.js frosts any
+     material whose hue reads as glass, so the cabin material stays warm-grey
+     and vertex-coloured (which crashdeform skips). */
   const rings = new Map();
   function ringGeo(r, tube) {
     const key = r.toFixed(3) + "|" + tube.toFixed(3);
     let geo = rings.get(key);
     if (!geo) {
       // a steering-wheel-sized ring at half a metre is the most looked-at
-      // object in a first-person cabin; 5x14 read as a pentagon tube. Small
-      // rings (dial bezels, knobs) keep the cheap tessellation.
+      // object in a first-person cabin; small rings keep the cheap tessellation
       geo = r >= 0.12 ? new THREE.TorusGeometry(r, tube, 9, 30) : new THREE.TorusGeometry(r, tube, 5, 14);
       geo._shared = true;
       rings.set(key, geo);
     }
     return geo;
   }
-  function addRing(root, r, tube, x, y, z, material) {
-    const mesh = new THREE.Mesh(ringGeo(r, tube), material);
-    mesh.position.set(x || 0, y || 0, z || 0);
-    mesh.castShadow = false;
-    root.add(mesh);
-    return mesh;
-  }
-  /* WHY A CABIN NEEDS ITS OWN LIGHT.
-     The first plates of this work were geometrically correct and read as a
-     black void behind tinted glass — worse than the empty tub they replaced,
-     because at least the old floating slab caught the sun. The reason is the
-     same one world/carfx.js writes up at length about the glass itself: this
-     is a LAMBERT world with no bounce and no ambient occlusion budget, and a
-     cabin is a ROOFED ROOM. The sun physically cannot reach any surface in it,
-     so every one of them renders at the ambient floor, i.e. near black, and
-     then gets multiplied by a 0.35-opacity pane on the way out.
-     carfx's fix for the pane was an emissive LIFT, and the same fix works one
-     layer in: a small self-glow standing in for the bounce light a real cabin
-     gets off its own glass. Three tones, because a real interior is not one
-     colour and the read from outside depends entirely on contrast:
-       interior       dark structure — floor, door cards, bulkheads, console
-       interior-lite  upholstery and headliner: the big pale surfaces that ARE
-                      what you see through a window from above
-       interior-screen the one lit panel. It deliberately says NOTHING — no
-                      needle, no number — because the game does not simulate a
-                      value for it and a gauge that lies is worse than no gauge
-                      (city/carcluster.js's own rule). It is a backlit panel,
-                      and that is a true thing to be.
-     Cost: two shared materials for the whole fleet, i.e. two extra merged
-     buckets on an enclosed car, and only with CAR_CABIN_V2 on.
+  /* ============================================================
+     THE CABIN, BUILT AS ONE ROOM (car wave 2026-09-27).
 
-     The lift is carried mostly by the EMISSIVE and only a little by the base
-     colour, on purpose. A pale base is the obvious way to make an interior
-     show and it is the wrong one: the windscreen lets direct sun onto the dash
-     roll, a pale Lambert under that sun clips to white, and the plate came
-     back with a glowing bar across every car in traffic. A mid base plus a
-     standing self-glow reads at the SAME level in sun and in shadow, which is
-     what "a room with its own light" actually means.
+     OWNER: "especially the interior and what it looks like for the driver
+     and being a passenger or car ride ... with two seats and six seats".
 
-     THE KEY IS "interior-v2", NOT "interior", AND THAT IS LOAD-BEARING.
-     sharedMat is a first-caller-wins cache keyed on a string, and the pre-V2
-     fallbacks below still ask for `sharedMat("interior", 0x2a2f36)` — one of
-     them on the line ABOVE the dressCabin call that was supposed to replace
-     it. So the flag-off material won the cache before the flag-on material
-     ever asked for it, and every cabin in the fleet was silently drawn in the
-     unlit dark tone while this file's own audit reported the lit one. It cost
-     an entire measured iteration to find, because nothing is wrong with the
-     geometry, the flag, the merge or the light — only with the NAME. A tone
-     that belongs to V2 gets a key that belongs to V2. */
-  // KEYS ARE "-v5": these carry vertexColors (see shadeEmissive) and every
-  // mesh that uses them is baked; the old keys stay free for any stray caller.
-  // COLOUR CONTRACT: city/crashdeform.js frosts any material whose hue reads
-  // as glass (b-r > 0.045 with r < 0.25). The V2 structure tone 0x333a44 MET
-  // that rule — a crashed car's dash, floor and console were swapped for
-  // crazed-glass white. These stay warm-grey, and a vertex-shaded material is
-  // never a pane (crashdeform checks that too now).
-  // DIFFUSE LOW, LIFT HIGH. The sun reaches every up-facing surface in this
-  // cabin (nothing on a car casts a shadow on its own interior), so a normal
-  // diffuse tone sun-bleaches the floor, the dash top and the door cards to
-  // one flat grey (measured, second driver's-seat plate). The base colour is
-  // kept near-black so direct sun adds little, and the baked shade drives the
-  // emissive lift that actually draws the room.
+     What the previous cabin was, measured by reading it: ~150 loose BOXES in
+     ELEVEN materials (structure, lite, seat, leather, belt, mirror, trim,
+     screen, cyan, red, amber) — i.e. up to eleven merged draw calls per car
+     for the interior alone — seats that were two slabs and a brick, a
+     steering wheel welded into the static merge so it could never turn, a
+     cluster made of 40 tick-mark boxes, and exactly two front seats and one
+     bench for every body from a Ferrari to a van.
+
+     What it is now:
+       • THE SEATS COME FROM city/carseats.js — the ONE seat model the rig,
+         the NPC occupancy, boarding and the passenger code all read. A
+         coupe gets two buckets, a sedan 2+3, a 2+2 gets its jump seats, the
+         six-seat SUV three rows of captain's chairs, a pickup a 3-across
+         bench, a van a 3-across cab bench. dressCabin only upholsters what
+         that model says is there.
+       • ONE GEOMETRY, ONE MATERIAL. Every static piece is baked into a single
+         buffer with a per-vertex colour = the room's light (shadeCabin) x the
+         piece's own TONE (headliner pale, seats in the class's upholstery,
+         trim satin, carpet dark). The material's emissive lift is multiplied
+         by that colour (sharedMat vcol), so value AND hue live in the vertex
+         and the whole room is one draw call.
+       • THE LIT GLASS IS ONE MESH on one shared canvas atlas: a hooded
+         cluster (speedo + tach faces, drawn once for the whole fleet) and a
+         centre screen. No needle is painted — a gauge that lies is worse than
+         none (carcluster.js's rule); the needles are live meshes only in the
+         car the player sits in (vehicles.js seatDriver).
+       • THE WHEEL IS ITS OWN GROUP ("cabin_steer" > "cabin_steer_spin"), so
+         the driven car turns it with the steering input and the driver's
+         hands (vehicles.js) hold its rim.
+     Net draw cost for a dressed car: 3 (room, glass, wheel), down from ~11.
+  ============================================================ */
   const cabinMat = () => sharedMat("interior-v5", 0x0f1114, { emissive: 0x141719, ei: 1.0, vcol: true });
-  const cabinLiteMat = () => sharedMat("interior-lite-v5", 0x1e2126, { emissive: 0x272c33, ei: 1.0, vcol: true });
-  const cabinLeatherMat = () => sharedMat("interior-leather", 0x0f1113, { emissive: 0x141719, ei: 1.0, vcol: true });
-  const cabinBeltMat = () => sharedMat("interior-belt", 0x101214, { emissive: 0x121417, ei: 1.0, vcol: true });
-  const cabinMirrorMat = () => sharedMat("interior-mirror", 0x06090c, { emissive: 0x1c2630, ei: 0.9 })   // dark glass: a low sun through the windscreen lit the old tone to white;
-  // a screen is a black pane with its own light: near-zero diffuse so the sun
-  // through the windscreen cannot wash it to pale cyan (measured on the
-  // tilted centre screen), the lift unchanged
-  const clusterMat = () => sharedMat("interior-screen-v5", 0x04060a, { emissive: 0x0c1e2c, ei: 0.9 });
-  /* CAR_CABIN_V3 — the cabin reads as a ROOM, not a filled block.
-     MEASURED (before/after, backseat + cutaway plates): with every soft
-     surface in the one pale "interior-lite" tone, the parcel shelf, bench,
-     seats and headliner fused into a single flat mass pressed against the
-     glass — through the backlight the car read as a body-coloured SOLID, and
-     an occupant blob (its lift sits at the same value) merged straight into
-     it. A real interior is read by VALUE STEPS: near-black shelf and
-     structure, dark seats, pale headliner, and a body that is BRIGHTER than
-     the seat behind it. So seats get their own upholstery tone — one extra
-     shared material, i.e. one extra merged bucket per enclosed car — and the
-     shelf joins the dark structure. The headliner stays pale: it is the one
-     surface a high camera reads, and darkening it is the "black void" fault
-     this file already documented. */
+  // the body builders still read these two (roof tumble, pillar trims)
   if (CFG.CAR_CABIN_V3 == null) CFG.CAR_CABIN_V3 = true;
   const cabinV3 = () => CFG.CAR_CABIN_V3 !== false;
-  const cabinSeatMat = () => cabinV3()
-    ? sharedMat("interior-seat-v5", 0x15181b, { emissive: 0x1a1d21, ei: 1.0, vcol: true })
-    : cabinLiteMat();
+  // which style dressCabin is dressing right now (makeProcedural sets it), so
+  // a body that does not pass `seatLayout` still gets its class's seats
+  let _cabinStyle = null;
 
-  /* CAR_CABIN_V4 — high-fidelity interior detailing:
-     (1) Dashboard metallic accent trim dividing upper and lower dash tiers.
-     (2) Climate control air vents (HVAC slatted vents on left, center, right).
-     (3) Active illuminated digital cluster: speedo and tachometer arcs, speed readout.
-     (4) Center infotainment display: active navigation route guidance, hazard flasher.
-     (5) Driver footwell pedal box (brake and accelerator with arms) + dead pedal footrest.
-     (6) Center console gear selector shifter, twin cup holders, and upholstered armrest pad.
-     (7) Engineered twin chrome headrest posts connecting seat backs to headrests.
-     (8) Seatbelt buckle receptacles with red release accents.
-     (9) Outboard seat base adjustment controls and cushion contour inserts.
-     (10) Steering wheel center emblem ring, spoke control button pods, column stalks.
-     (11) Overhead dome console with reading lights, mirror windshield mount and face.
-     (12) Door sill scuff plates on door apertures.
-     Flip false (?cfg_CAR_CABIN_V4=0) for a byte-for-byte V3 revert. */
-  if (CFG.CAR_CABIN_V4 == null) CFG.CAR_CABIN_V4 = true;
-  const cabinV4 = () => CFG.CAR_CABIN_V4 !== false;
-  const cabinTrimMat = () => sharedMat("interior-trim-v5", 0x2a2e33, { emissive: 0x2d3238, ei: 1.0, vcol: true });
-  const clusterCyanMat = () => sharedMat("interior-screen-cyan", 0x0a2436, { emissive: 0x3cd8f8, ei: 1.0 });
-  const clusterRedMat = () => sharedMat("interior-screen-red", 0x330c0c, { emissive: 0xfd3f3f, ei: 0.95 });
-  const clusterAmberMat = () => sharedMat("interior-screen-amber", 0x382208, { emissive: 0xffaa24, ei: 0.95 });
+  /* TONES — multipliers on the one dark material (base 0x0f1114, lift
+     0x141719). sRGB + ACES: a vertex colour of ~2 is the old pale headliner,
+     ~1.3 the old seat, 1 the old structure. Nothing here may push a big
+     surface past ~2.2 or the sun through the windscreen bleaches it. */
+  const TONE = {
+    struct: [1, 1, 1], carpet: [0.74, 0.72, 0.7], head: [1.95, 1.9, 1.82],
+    trim: [2.15, 2.15, 2.22], chrome: [2.9, 2.9, 3.0], leather: [0.9, 0.88, 0.86],
+    belt: [0.84, 0.85, 0.9], mirror: [0.5, 0.58, 0.68], pedal: [1.6, 1.6, 1.62],
+    grille: [0.55, 0.55, 0.56], lamp: [2.4, 2.3, 2.1],
+  };
+  // upholstery per seat model: the body, and the centre insert panels
+  const THEMES = {
+    coupe2: { seat: [1.02, 1.0, 0.99], insert: [1.75, 0.5, 0.42] },     // black hide, red inserts
+    coupe4: { seat: [1.62, 1.14, 0.78], insert: [1.42, 0.98, 0.66] },   // tan leather
+    sedan5: { seat: [1.24, 1.25, 1.28], insert: [1.04, 1.05, 1.09] },   // grey cloth
+    suv6:   { seat: [1.5, 1.1, 0.8], insert: [1.3, 0.94, 0.68] },       // saddle brown
+    suv7:   { seat: [1.3, 1.3, 1.32], insert: [1.12, 1.12, 1.16] },
+    pickup6: { seat: [1.06, 1.12, 1.22], insert: [0.94, 0.99, 1.08] },  // work vinyl
+    van3:   { seat: [1.06, 1.12, 1.22], insert: [0.94, 0.99, 1.08] },
+    van6:   { seat: [1.06, 1.12, 1.22], insert: [0.94, 0.99, 1.08] },
+    cab2:   { seat: [1.1, 1.1, 1.12], insert: [0.98, 0.98, 1.0] },
+  };
+
+  /* A ROUNDED BOX. BoxGeometry with two segments a side, every vertex pulled
+     onto a radius-r round of its inner box, normals from the same solve —
+     the cheapest shape that reads as upholstery instead of lumber. `crown`
+     domes the top face (a cushion, a headrest). Cached; never mutated. */
+  const rboxes = new Map();
+  function rboxGeo(w, h, d, r, crown) {
+    const key = [w, h, d, r, crown || 0].map((v) => (+v).toFixed(3)).join("|");
+    let geo = rboxes.get(key);
+    if (geo) return geo;
+    r = Math.max(0.002, Math.min(r, w * 0.45, h * 0.45, d * 0.45));
+    geo = new THREE.BoxGeometry(w, h, d, 2, 2, 2).toNonIndexed();
+    const pos = geo.attributes.position, nor = geo.attributes.normal;
+    const hx = w / 2 - r, hy = h / 2 - r, hz = d / 2 - r;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const cx = Math.max(-hx, Math.min(hx, x)), cy = Math.max(-hy, Math.min(hy, y)), cz = Math.max(-hz, Math.min(hz, z));
+      let nx = x - cx, ny = y - cy, nz = z - cz;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nx /= l; ny /= l; nz /= l;
+      let px = cx + nx * r, py = cy + ny * r, pz = cz + nz * r;
+      if (crown && ny > 0.5) py += crown * (1 - (x / (w / 2)) * (x / (w / 2))) * (1 - (z / (d / 2)) * (z / (d / 2)));
+      pos.setXYZ(i, px, py, pz);
+      nor.setXYZ(i, nx, ny, nz);
+    }
+    geo._shared = true;
+    rboxes.set(key, geo);
+    return geo;
+  }
+  const _cm = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _ce = new THREE.Euler(), _cs = new THREE.Vector3(1, 1, 1), _cp = new THREE.Vector3();
+  function mtx(x, y, z, rx, ry, rz) {
+    _ce.set(rx || 0, ry || 0, rz || 0, "XYZ");
+    _cq.setFromEuler(_ce);
+    _cp.set(x || 0, y || 0, z || 0);
+    return new THREE.Matrix4().compose(_cp, _cq, _cs);
+  }
+  // an accumulator of transformed, toned pieces → one buffer
+  function cabinAcc() {
+    const list = [];
+    const A = {
+      list: list,
+      put: function (geo, tone, m) {
+        const g = geo.index ? geo.toNonIndexed() : geo.clone();
+        if (!g.attributes.normal) g.computeVertexNormals();
+        if (m) g.applyMatrix4(m);
+        list.push({ geo: g, tone: tone || TONE.struct });
+        return g;
+      },
+      box: function (w, h, d, x, y, z, tone, rx, ry, rz) {
+        return A.put(boxGeo(w, h, d), tone, mtx(x, y, z, rx, ry, rz));
+      },
+      rbox: function (w, h, d, r, x, y, z, tone, rx, ry, rz, crown) {
+        return A.put(rboxGeo(w, h, d, r, crown), tone, mtx(x, y, z, rx, ry, rz));
+      },
+      // a box from point a to point b (a strap, a pillar trim, a stalk)
+      bar: function (a, b, w, h, tone) {
+        const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+        const len = Math.max(0.005, Math.hypot(dx, dy, dz));
+        _dir.set(dx, dy, dz).normalize();
+        _cq.setFromUnitVectors(_zAxis, _dir);
+        _cp.set((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5);
+        return A.put(boxGeo(w, h, len), tone, new THREE.Matrix4().compose(_cp, _cq, _cs));
+      },
+      ring: function (r, tube, m, tone) { return A.put(ringGeo(r, tube), tone, m); },
+    };
+    return A;
+  }
+  // non-indexed pieces (position/normal/color) → one geometry
+  function bakeAcc(A, f) {
+    shadeCabin(A.list, f);
+    let n = 0;
+    for (let i = 0; i < A.list.length; i++) n += A.list[i].geo.attributes.position.count;
+    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    let k = 0;
+    for (let i = 0; i < A.list.length; i++) {
+      const g = A.list[i].geo;
+      pos.set(g.attributes.position.array, k);
+      nrm.set(g.attributes.normal.array, k);
+      col.set(g.attributes.color.array, k);
+      k += g.attributes.position.array.length;
+      g.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.computeBoundingSphere();
+    geo._shared = true;
+    return geo;
+  }
+
+  /* ---- THE GLASS ATLAS: one canvas for the whole fleet ------------------
+     512 x 512. Rows 0..163: the instrument cluster (speedometer left, tach
+     right, faces only). Rows 176..486: the centre screen (a map with a
+     route). No brand, no clock, no number the game does not know. */
+  const ATLAS = { W: 512, H: 512, cl: [0, 0, 512, 163], sc: [0, 176, 512, 310],
+    dials: [{ cx: 128, cy: 84, r: 70, kind: "speed", max: 160 }, { cx: 384, cy: 84, r: 70, kind: "tach", max: 8 }],
+    a0: Math.PI * 1.25, a1: -Math.PI * 0.25 };
+  let _atlasMat = null;
+  function drawAtlas(ctx) {
+    const W = ATLAS.W;
+    ctx.fillStyle = "#020304"; ctx.fillRect(0, 0, W, ATLAS.H);
+    // cluster backing: a soft pool of light behind each dial
+    ATLAS.dials.forEach(function (d) {
+      const gr = ctx.createRadialGradient(d.cx, d.cy, 4, d.cx, d.cy, d.r + 10);
+      gr.addColorStop(0, "#0b1a24"); gr.addColorStop(1, "#020304");
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(d.cx, d.cy, d.r + 10, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#5c6a74"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(d.cx, d.cy, d.r, 0, Math.PI * 2); ctx.stroke();
+      const steps = d.kind === "speed" ? 16 : 16, major = d.kind === "speed" ? 2 : 2;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps, a = ATLAS.a0 + (ATLAS.a1 - ATLAS.a0) * t;
+        const big = i % major === 0;
+        const red = d.kind === "tach" && t * d.max >= 6.5;
+        ctx.strokeStyle = red ? "#ff4a3a" : big ? "#e8eef2" : "#9aa6ae";
+        ctx.lineWidth = big ? 3 : 1.5;
+        const r0 = d.r - (big ? 14 : 8), r1 = d.r - 3;
+        ctx.beginPath();
+        ctx.moveTo(d.cx + Math.cos(a) * r0, d.cy - Math.sin(a) * r0);
+        ctx.lineTo(d.cx + Math.cos(a) * r1, d.cy - Math.sin(a) * r1);
+        ctx.stroke();
+        if (big) {
+          const v = d.kind === "speed" ? Math.round(t * d.max) : Math.round(t * d.max);
+          ctx.fillStyle = red ? "#ff6a5a" : "#cfd8de";
+          ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          const rt = d.r - 26;
+          ctx.fillText(String(v), d.cx + Math.cos(a) * rt, d.cy - Math.sin(a) * rt);
+        }
+      }
+      if (d.kind === "tach") {
+        ctx.strokeStyle = "#ff3a2a"; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(d.cx, d.cy, d.r - 2, -(ATLAS.a0 + (ATLAS.a1 - ATLAS.a0) * (6.5 / 8)), -ATLAS.a1);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#3cd8f8"; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(d.kind === "speed" ? "MPH" : "RPM x1000", d.cx, d.cy + d.r * 0.52);
+      ctx.fillStyle = "#11181d"; ctx.beginPath(); ctx.arc(d.cx, d.cy, 9, 0, Math.PI * 2); ctx.fill();
+    });
+    // the strip between the dials: gear letters, a fuel bar outline
+    ctx.fillStyle = "#cfd8de"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("D", 256, 70);
+    ctx.fillStyle = "#6c7880"; ctx.font = "bold 11px sans-serif";
+    ctx.fillText("P R N", 256, 96);
+    ctx.strokeStyle = "#5c6a74"; ctx.lineWidth = 1.5; ctx.strokeRect(222, 124, 68, 9);
+    ctx.fillStyle = "#3cd8f8"; ctx.fillRect(224, 126, 44, 5);
+    // ---- the centre screen: a street map with a route ------------------
+    const S = ATLAS.sc, x0 = S[0], y0 = S[1], w = S[2], h = S[3];
+    ctx.fillStyle = "#0a1015"; ctx.fillRect(x0, y0, w, h);
+    ctx.strokeStyle = "#1f2a33"; ctx.lineWidth = 6;
+    for (let i = 0; i < 7; i++) {
+      ctx.beginPath(); ctx.moveTo(x0 + i * 82 + 20, y0); ctx.lineTo(x0 + i * 82 - 30, y0 + h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x0, y0 + i * 52 + 14); ctx.lineTo(x0 + w, y0 + i * 52 + 34); ctx.stroke();
+    }
+    ctx.fillStyle = "#12301f"; ctx.fillRect(x0 + 300, y0 + 40, 120, 70);        // a park block
+    ctx.fillStyle = "#0e2230"; ctx.fillRect(x0 + 40, y0 + 200, 150, 60);         // water
+    ctx.strokeStyle = "#3cd8f8"; ctx.lineWidth = 7; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x0 + 250, y0 + h - 40); ctx.lineTo(x0 + 262, y0 + 190); ctx.lineTo(x0 + 350, y0 + 176);
+    ctx.lineTo(x0 + 372, y0 + 70); ctx.stroke();
+    ctx.fillStyle = "#ffaa24";
+    ctx.beginPath(); ctx.moveTo(x0 + 250, y0 + h - 62); ctx.lineTo(x0 + 238, y0 + h - 30); ctx.lineTo(x0 + 262, y0 + h - 30); ctx.fill();
+    // bottom bar: fan + seat-heat marks (icons, no values)
+    ctx.fillStyle = "#050809"; ctx.fillRect(x0, y0 + h - 22, w, 22);
+    ctx.fillStyle = "#9aa6ae";
+    for (let i = 0; i < 4; i++) ctx.fillRect(x0 + 200 + i * 10, y0 + h - 8 - i * 3, 6, 4 + i * 3);
+    ctx.fillRect(x0 + 30, y0 + h - 14, 22, 5); ctx.fillRect(x0 + w - 52, y0 + h - 14, 22, 5);
+  }
+  function screenMat() {
+    if (_atlasMat) return _atlasMat;
+    let tex = null;
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const cv = document.createElement("canvas");
+        cv.width = ATLAS.W; cv.height = ATLAS.H;
+        const ctx = cv.getContext && cv.getContext("2d");
+        if (ctx) { drawAtlas(ctx); tex = new THREE.CanvasTexture(cv); }
+      }
+    } catch (e) { tex = null; }
+    if (!tex) { _atlasMat = sharedMat("interior-screen-v5", 0x04060a, { emissive: 0x0c1e2c, ei: 0.9 }); return _atlasMat; }
+    if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = 4;
+    _atlasMat = new THREE.MeshLambertMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.92 });
+    _atlasMat._shared = true;
+    mats.set("interior-atlas", _atlasMat);
+    return _atlasMat;
+  }
+  // a quad facing -Z (the occupants), UVs cut from an atlas rect
+  function atlasQuad(w, h, rect, m) {
+    const g = new THREE.PlaneGeometry(w, h);
+    g.rotateY(Math.PI);                       // face the seats: u runs to the driver's right
+    const uv = g.attributes.uv;
+    const u0 = rect[0] / ATLAS.W, u1 = (rect[0] + rect[2]) / ATLAS.W;
+    const v1 = 1 - rect[1] / ATLAS.H, v0 = 1 - (rect[1] + rect[3]) / ATLAS.H;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) < 0.5 ? u0 : u1, uv.getY(i) < 0.5 ? v0 : v1);
+    g.applyMatrix4(m);
+    return g.toNonIndexed();
+  }
+
+  // atlas quads → one geometry that KEEPS its uvs (mergeGeo drops them)
+  function quadsGeo(list) {
+    let n = 0;
+    for (let i = 0; i < list.length; i++) n += list[i].attributes.position.count;
+    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), uvs = new Float32Array(n * 2);
+    let k = 0, u = 0;
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      pos.set(g.attributes.position.array, k); nrm.set(g.attributes.normal.array, k);
+      uvs.set(g.attributes.uv.array, u);
+      k += g.attributes.position.array.length; u += g.attributes.uv.array.length;
+      g.dispose();
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    out.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    out.computeBoundingSphere();
+    return out;
+  }
 
   /* dressCabin(root, o) -> cabinInfo (also written to root.userData.cabinInfo)
        o.cabW    cabin base width (the glass tub's base width)
@@ -1327,105 +1039,44 @@
        o.beltY   beltline: where the glass starts
        o.roofY   headliner height
        o.floorY  cabin floor pan top
-       o.rows    1 or 2 seat rows (optional; derived from cabin length)
+       o.rows    1 / 2 / 3 seat rows (optional; a HINT for an unnamed layout)
+       o.seatLayout  (optional) a city/carseats.js kind: coupe2 coupe4 sedan5
+                 suv6 suv7 pickup6 van3 van6 cab2. Absent: the style's kind
+                 (carseats KIND_BY_STYLE), else read off the cabin box.
        o.doorSpans [[z0,z1],...] the real doors (buildCarDoors) — no card there */
   function dressCabin(root, o) {
-    if (CFG.CAR_CABIN_V2 === false) return null;
-    const M = cabinMat(), L = cabinLiteMat(), SCRN = clusterMat();
-    const TRIM = cabinTrimMat(), CYAN = clusterCyanMat(), RED = clusterRedMat(), AMBER = clusterAmberMat();
-    const LEATHER = cabinLeatherMat(), MIRROR = cabinMirrorMat(), BELT = cabinBeltMat();
-    const v4 = cabinV4();
-    const cabW = o.cabW, halfW = cabW * 0.5;
-    const zR = Math.min(o.zR, o.zF), zF = Math.max(o.zR, o.zF);
-    const cl = Math.max(0.60, zF - zR), cz = (zR + zF) * 0.5;
-    const beltY = o.beltY, roofY = o.roofY;
-    const gh = Math.max(0.16, roofY - beltY);
-    const roofW = o.roofW != null ? o.roofW : cabW * 0.86;
-    const zTR = o.zTR != null ? o.zTR : zR + cl * 0.20;
-    const zTF = o.zTF != null ? o.zTF : zF - cl * 0.20;
-    const floorY = Math.min(o.floorY, beltY - 0.26);
-    const wallH = Math.max(0.14, beltY - floorY);
-
-    /* EVERY PIECE OF THE ROOM IS COLLECTED, because the last thing this
-       function does is bake a per-vertex shade into all of them (see
-       shadeCabin below). A cabin piece is authored exact and never seam-
-       sealed: the bake turns the shared BoxGeometry into a per-car buffer
-       with no `parameters`, which is what sealSeams keys on, so `noSeal` is
-       the truth for all of them and is stamped here rather than 40 times. */
-    const parts = [];
-    const box = function (w, h, d, x, y, z, mat) {
-      const m = addBox(root, w, h, d, x, y, z, mat);
-      m.userData.noSeal = true;
-      parts.push(m);
-      return m;
-    };
-    const ring = function (r, tube, x, y, z, mat) {
-      const m = addRing(root, r, tube, x, y, z, mat);
-      m.userData.noSeal = true;
-      parts.push(m);
-      return m;
-    };
-    // a box laid from point A to point B (a strap, a pillar trim, a stalk)
-    const bar = function (a, b, w, h, mat) {
-      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
-      const len = Math.hypot(dx, dy, dz);
-      const m = box(w, h, len, (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5, mat);
-      _dir.set(dx, dy, dz).normalize();
-      m.quaternion.setFromUnitVectors(_zAxis, _dir);
-      return m;
-    };
-
-    // ---- THE DRIVING POSITION, derived once and shared by everything -------
-    // THE COWL SITS AT THE SILL (see the V2 note in this file's history: a dash
-    // that stands proud of the window line is a wall across the bottom of the
-    // windscreen from outside). dashTopY is the top of the dash roll.
-    const dashTopY = beltY + gh * 0.05;
-    /* THE DASH IS DEEP AND IT MEETS THE GLASS. The V2 dash was a 0.34 m slab
-       whose face ended up 0.40 m from the driver's eye, with the centre screen
-       0.32 m from his nose — a real dash face is ~0.65 m from the eye and the
-       screen ~0.55 m. Measured from the first driver's-seat plate: the screen
-       was a wall across the right half of the frame. The slab now runs from
-       its face all the way to the base of the windscreen (no painted body
-       deck or hood clamshell can show between them), and the seat, wheel and
-       eye are laid out back from that face at real reach distances. */
-    const dashD = 0.32;
-    const dashZ = zF - 0.14;                       // slab centre: zF-0.30 .. zF+0.02
-    const dashFaceZ = dashZ - dashD * 0.5;         // the face the driver looks at
-    const fz = dashFaceZ;                          // short name for dash-face furniture
-    const wheelZ = dashFaceZ - 0.13;               // rim plane ~13 cm off the dash face
-    const seatX = Math.min(0.42, cabW * 0.24);     // +X is the car's LEFT: LHD
-    // THE REACH. Rim to seat-back ~0.58 m; the eye then sits a hand ahead of
-    // the seat frame (the torso is hidden in first person, so the eye no
-    // longer has to clear a chest) — rim ~0.50 m from the eye, dash face
-    // ~0.65, windscreen base ~0.95, header ~0.5 ahead. Real POV numbers.
-    const seatZ = Math.max(zR + 0.34, wheelZ - 0.58);
-    // THE HIP POINT (SAE H30): cushion ~0.10-0.15 m over the floor pan.
-    const cushionY = floorY + Math.max(0.10, wallH * 0.17);
-    /* THE EYE. A driver's eye sits well above the beltline — real eye
-       ellipses run 0.15-0.30 m over the sill — and the V2 value (0.12, i.e.
-       0.30·gh capped) put the eye 7 cm over a dash whose top roll then
-       filled the bottom half of the frame. 0.45·gh, clamped 0.14..0.30 and
-       always 0.17 under the headliner, so a van's driver is not sitting twice
-       as high as a coupe's. */
-    const eyeY = Math.max(beltY + 0.06,
-      Math.min(beltY + Math.max(0.14, Math.min(gh * 0.45, 0.30)), roofY - 0.17));
-    // A seat back reaches the SILL — the shoulder line of a car interior.
-    const backH = Math.max(0.30, Math.min(0.72, beltY + gh * 0.06 - cushionY));
-    const wheelR = Math.min(0.185, cabW * 0.108);
-    const wheelY = Math.max(cushionY + 0.28, dashTopY - 0.11);
-    const rearZ = Math.max(zR + 0.30, seatZ - 0.80);
-    const rows = o.rows || ((rearZ < seatZ - 0.55) ? 2 : 1);
-    const bpZ = (zTR + zTF) * 0.5;                 // the B-pillar line
+    const SEATS = CBZ.carSeats;
+    if (!SEATS) return null;
+    const kind = o.seatLayout || (SEATS.KIND_BY_STYLE[_cabinStyle] || null);
+    const Lay = SEATS.layout({
+      cabW: o.cabW, zR: o.zR, zF: o.zF, zTR: o.zTR, zTF: o.zTF, roofW: o.roofW,
+      beltY: o.beltY, roofY: o.roofY, floorY: o.floorY, rows: o.rows,
+    }, kind);
+    const D = Lay.drive;
+    const theme = THEMES[Lay.kind] || THEMES.sedan5;
+    const A = cabinAcc();
+    const cabW = D.cabW, halfW = D.halfW, zR = D.zR, zF = D.zF, cl = D.cl, cz = D.cz;
+    const beltY = D.beltY, roofY = D.roofY, gh = D.gh, zTR = D.zTR, zTF = D.zTF;
+    const roofW = D.roofW, floorY = D.floorY, wallH = D.wallH;
+    const dashTopY = D.dashTopY, dashZ = D.dashZ, dashD = D.dashD, fz = D.dashFaceZ;
+    const wheelX = D.wheelX, wheelY = D.wheelY, wheelZ = D.wheelZ, wheelR = D.wheelR;
+    const cushionY = D.cushionY;
+    const seats = Lay.seats, driver = seats[0];
+    const front = seats.filter((s) => s.row === 0);
+    const benchFront = front.length === 3;
+    const lastZ = seats[seats.length - 1].z;
+    const bpZ = (zTR + zTF) * 0.5;
+    const RAKE = 0.42;
 
     // ---- THE BOX. Sealed on five sides; the sixth is the glass. -----------
-    box(cabW * 0.96, 0.06, cl, 0, floorY - 0.03, cz, M);                          // floor pan
-    // footwell mats: a darker rectangle under each front seat's feet, and the
-    // kick panels that close the footwell against the door sill
-    [seatX, -seatX].forEach(function (x) {
-      box(0.42, 0.012, Math.min(0.62, (zF - 0.10) - (seatZ + 0.10)), x, floorY + 0.006, (zF - 0.10 + seatZ + 0.10) * 0.5, M);
+    // THE SKIN RULE: the loft glass leans inboard and the windscreen curves,
+    // so every piece stays inside |x| <= cabW/2 - 0.05 below the belt and
+    // roofW/2 - 0.04 at the roof, or it pokes out through the body.
+    A.box(cabW - 0.10, 0.06, cl, 0, floorY - 0.03, cz, TONE.carpet);                       // floor pan
+    seats.forEach(function (s) {                                                        // a mat in every footwell
+      const z1 = s.row === 0 ? zF - 0.10 : s.z + 0.62, z0 = s.z + 0.12;
+      if (z1 - z0 > 0.12) A.rbox(Math.min(0.46, s.w * 0.9), 0.014, z1 - z0, 0.006, s.x, floorY + 0.008, (z0 + z1) * 0.5, TONE.carpet.map((v) => v * 0.8));
     });
-    // DOOR CARDS. A body with real doors (o.doorSpans, buildCarDoors) carries
-    // its cards ON the doors, so the tub only walls the strips between them.
     const spans = o.doorSpans && o.doorSpans.length ? o.doorSpans.slice().sort((a, b) => a[0] - b[0]) : null;
     [1, -1].forEach(function (s) {
       const segs = [];
@@ -1439,840 +1090,752 @@
         if (zF - 0.02 - z > 0.04) segs.push([z, zF - 0.02]);
       }
       segs.forEach(function (sg) {
-        box(0.06, wallH, sg[1] - sg[0], s * (halfW - 0.05), floorY + wallH * 0.5, (sg[0] + sg[1]) * 0.5, M);
+        const len = sg[1] - sg[0], zc = (sg[0] + sg[1]) * 0.5, xw = s * (halfW - 0.08);
+        A.box(0.06, wallH, len, xw, floorY + wallH * 0.5, zc, TONE.struct);             // card
+        if (len < 0.35) return;
+        A.rbox(0.06, 0.06, len * 0.9, 0.02, xw - s * 0.05, beltY - 0.06, zc, TONE.trim);  // belt ledge
+        A.rbox(0.06, 0.07, Math.min(0.42, len * 0.5), 0.025, xw - s * 0.06, beltY - 0.22, zc, TONE.leather);  // armrest
+        A.rbox(0.04, 0.03, 0.12, 0.012, xw - s * 0.04, beltY - 0.13, zc + len * 0.22, TONE.chrome);        // handle
+        // the speaker: a grille disc low on the card
+        A.ring(0.07, 0.012, mtx(xw - s * 0.035, floorY + 0.16, zc - len * 0.18, 0, s * Math.PI / 2, 0), TONE.trim);
+        A.put(new THREE.CircleGeometry(0.066, 14), TONE.grille, mtx(xw - s * 0.034, floorY + 0.16, zc - len * 0.18, 0, -s * Math.PI / 2, 0));
       });
-      if (spans) return;                                                      // pull + armrest ride the door
-      box(0.05, 0.05, 0.20, s * (halfW - 0.11), beltY - 0.13, cz + cl * 0.14, M);   // door pull
-      box(0.05, 0.10, cl * 0.5, s * (halfW - 0.10), beltY - 0.05, cz, M);           // armrest / beltline pad
     });
     const fwH = Math.max(0.12, dashTopY - 0.05 - floorY);
-    box(cabW * 0.94, fwH, 0.07, 0, floorY + fwH * 0.5, zF - 0.05, M);               // firewall
-    box(cabW * 0.94, wallH, 0.07, 0, floorY + wallH * 0.5, zR + 0.05, M);           // rear bulkhead
-    // headliner: PALE. The single biggest surface a camera above the beltline
-    // sees through the glass, and a dark one turns the cabin into a hole.
-    box(roofW * 0.96, 0.035, Math.max(0.30, (zTF - zTR) * 0.98), 0, roofY - 0.028, (zTR + zTF) * 0.5, L);
+    A.box(cabW - 0.12, fwH, 0.07, 0, floorY + fwH * 0.5, zF - 0.05, TONE.struct);          // firewall
+    A.box(cabW - 0.12, wallH, 0.07, 0, floorY + wallH * 0.5, zR + 0.05, TONE.struct);      // rear bulkhead
+    // headliner: PALE — the biggest surface a camera above the belt sees, and a
+    // dark one turns the cabin into a hole
+    A.rbox(Math.max(0.4, roofW - 0.10), 0.035, Math.max(0.30, (zTF - zTR) * 0.98), 0.012, 0, roofY - 0.028, (zTR + zTF) * 0.5, TONE.head);
 
-    /* PILLAR TRIMS. From the driver's seat the A-pillars are the frame of
-       every windscreen shot there is; the V2 cabin had painted bars OUTSIDE
-       the glass and nothing inside it, so the glass met the headliner on a
-       hard edge. A pale trim runs up each rake edge inside the glass, and a
-       B-pillar trim stands between the doors at the shoulder. */
+    // ---- PILLARS, handles, the sill -------------------------------------
     [1, -1].forEach(function (s) {
-      const xIn = s * (halfW - 0.05), xTop = s * (roofW * 0.5 - 0.035);
-      bar([xIn, beltY + 0.01, zF - 0.02], [xTop, roofY - 0.035, zTF + 0.01], 0.075, 0.05, L);    // A-pillar
-      bar([xIn, beltY + 0.01, zR + 0.02], [xTop, roofY - 0.035, zTR - 0.01], 0.075, 0.05, L);    // C-pillar
-      const bpm = box(0.05, gh - 0.02, 0.10, s * (halfW - 0.04), beltY + gh * 0.5 - 0.01, bpZ, L); // B-pillar
-      bpm.rotation.z = s * Math.atan2((cabW - roofW) * 0.5, gh);
-      // grab handle on the header, the thing a passenger holds in a corner
-      if (s < 0 || rows > 1) box(0.03, 0.03, 0.16, s * (roofW * 0.5 - 0.08), roofY - 0.065, s < 0 ? zTF - 0.30 : zTR + 0.30, M);
+      const xIn = s * (halfW - 0.11), xTop = s * (roofW * 0.5 - 0.075);
+      A.bar([xIn, beltY - 0.02, zF - 0.05], [xTop, roofY - 0.065, zTF - 0.01], 0.06, 0.04, TONE.head);   // A-pillar
+      A.bar([xIn, beltY - 0.02, zR + 0.05], [xTop, roofY - 0.065, zTR + 0.01], 0.07, 0.04, TONE.head);   // C-pillar
+      A.box(0.045, gh - 0.06, 0.10, s * ((halfW - 0.09) + (roofW * 0.5 - 0.07)) * 0.5, beltY + gh * 0.5 - 0.03, bpZ, TONE.head, 0, 0, s * Math.atan2((halfW - 0.09) - (roofW * 0.5 - 0.07), gh));   // B-pillar
+      // grab handles over every passenger door
+      seats.forEach(function (st) {
+        if (st.side !== s || st.isDriver) return;
+        A.rbox(0.03, 0.028, 0.18, 0.01, s * (roofW * 0.5 - 0.08), roofY - 0.07, st.z + 0.05, TONE.struct);
+      });
+      A.box(0.065, 0.012, Math.min(1.3, cl * 0.7), s * (halfW - 0.09), floorY + 0.008, cz + 0.05, TONE.trim);   // sill scuff
     });
 
-    // ---- SEATS. Base, back, headrest, bolsters, and a seat belt. ---------
-    const S = cabinSeatMat();
-    function seat(x, z, bh, hr) {
-      box(0.46, 0.13, 0.48, x, cushionY - 0.065, z, S);
-      const back = box(0.46, bh, 0.12, x, cushionY + bh * 0.5, z - 0.24, S);
-      back.rotation.x = -0.12;                                                 // recline
-      [0.20, -0.20].forEach(function (bx) {
-        const bo = box(0.07, bh * 0.86, 0.16, x + bx, cushionY + bh * 0.5, z - 0.22, M);
-        bo.rotation.x = -0.12;
+    // ---- SEATS: the model's seats, upholstered --------------------------
+    const RECL = -0.2;
+    function backHeight(s) {
+      const want = Math.max(0.30, Math.min(0.72, beltY + gh * 0.06 - s.cushionY)) * (s.row === 0 ? 1 : 0.9);
+      // headrest crown must clear the roof over this row
+      const room = (s.roofY - 0.05) - s.cushionY - 0.23;
+      return Math.max(0.24, Math.min(want, room / Math.cos(RECL)));
+    }
+    function bucket(s) {
+      const w = s.w, x = s.x, z = s.z, cy = s.cushionY, bh = backHeight(s);
+      // rails + pedestal
+      const baseH = Math.max(0.04, cy - 0.10 - floorY);
+      A.box(w * 0.7, baseH, 0.40, x, floorY + baseH * 0.5, z, TONE.struct);
+      // cushion: a crowned insert between two raised bolsters, a front roll
+      A.rbox(w * 0.66, 0.1, 0.44, 0.03, x, cy - 0.05, z + 0.01, theme.insert, 0, 0, 0, 0.018);
+      [1, -1].forEach(function (b) {
+        A.rbox(w * 0.19, 0.14, 0.47, 0.045, x + b * w * 0.40, cy - 0.035, z, theme.seat);
       });
-      if (hr) {
-        box(0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, S);
-        if (v4) {
-          [-0.065, 0.065].forEach(function (px) {
-            const post = box(0.018, 0.09, 0.018, x + px, cushionY + bh + 0.04, z - 0.255, TRIM);
-            post.rotation.x = -0.12;
-          });
-        }
+      A.rbox(w * 0.9, 0.09, 0.09, 0.04, x, cy - 0.07, z + 0.215, theme.seat);
+      // backrest in its own reclined frame
+      const bf = mtx(x, cy, z - 0.22, RECL, 0, 0);
+      const at = (lx, ly, lz, rx, ry, rz) => bf.clone().multiply(mtx(lx, ly, lz, rx, ry, rz));
+      A.put(rboxGeo(w * 0.64, bh * 0.94, 0.1, 0.03, 0.012), theme.insert, at(0, bh * 0.49, 0));
+      [1, -1].forEach(function (b) {
+        A.put(rboxGeo(w * 0.2, bh * 0.92, 0.17, 0.05), theme.seat, at(b * w * 0.40, bh * 0.47, 0.035, 0, -b * 0.28, 0));
+      });
+      A.put(rboxGeo(w * 0.78, 0.08, 0.13, 0.035), theme.seat, at(0, bh - 0.02, -0.005));      // shoulder roll
+      A.put(rboxGeo(w * 0.52, 0.17, 0.11, 0.045, 0.01), theme.seat, at(0, bh + 0.14, -0.01)); // headrest
+      [-0.07, 0.07].forEach(function (px) { A.put(boxGeo(0.014, 0.08, 0.014), TONE.chrome, at(px, bh + 0.03, 0)); });
+      A.put(rboxGeo(w * 0.7, bh * 0.9, 0.03, 0.012), TONE.struct, at(0, bh * 0.47, -0.065));  // the seat's back shell
+    }
+    function bench(row) {
+      const rs = seats.filter((s) => s.row === row);
+      const s0 = rs[0], cy = s0.cushionY, z = s0.z, bh = Math.min.apply(null, rs.map(backHeight));
+      const x0 = Math.max.apply(null, rs.map((s) => s.x + s.w * 0.5)), x1 = Math.min.apply(null, rs.map((s) => s.x - s.w * 0.5));
+      const W = x0 - x1, xc = (x0 + x1) * 0.5;
+      const baseH = Math.max(0.04, cy - 0.10 - floorY);
+      A.box(W * 0.9, baseH, 0.40, xc, floorY + baseH * 0.5, z, TONE.struct);
+      A.rbox(W, 0.12, 0.48, 0.04, xc, cy - 0.06, z, theme.seat, 0, 0, 0, 0.012);
+      A.rbox(W * 0.98, 0.09, 0.09, 0.04, xc, cy - 0.075, z + 0.225, theme.seat);
+      const bf = mtx(xc, cy, z - 0.22, RECL * 0.8, 0, 0);
+      const at = (lx, ly, lz) => bf.clone().multiply(mtx(lx, ly, lz));
+      A.put(rboxGeo(W, bh, 0.12, 0.04, 0.01), theme.seat, at(0, bh * 0.5, 0));
+      rs.forEach(function (s) {
+        // each place: an insert panel, a headrest, the seam between places
+        A.rbox(s.w * 0.62, 0.012, 0.36, 0.005, s.x, cy + 0.003, z + 0.01, theme.insert);
+        A.put(rboxGeo(s.w * 0.6, bh * 0.8, 0.02, 0.008), theme.insert, at(s.x - xc, bh * 0.5, 0.062));
+        A.put(rboxGeo(Math.min(0.28, s.w * 0.5), 0.15, 0.1, 0.04, 0.008), theme.seat, at(s.x - xc, bh + 0.12, -0.01));
+        [-0.06, 0.06].forEach(function (px) { A.put(boxGeo(0.013, 0.07, 0.013), TONE.chrome, at(s.x - xc + px, bh + 0.025, 0)); });
+      });
+      // a fold-down centre armrest in the middle place's back
+      if (rs.length === 3) A.put(rboxGeo(0.2, 0.07, 0.3, 0.03), theme.seat, at(0, 0.24, 0.12));
+    }
+    const rowsDone = {};
+    seats.forEach(function (s) {
+      if (s.bench) { if (!rowsDone[s.row]) { rowsDone[s.row] = true; bench(s.row); } }
+      else bucket(s);
+      // THE BELT: pillar loop over the outboard shoulder, across the chest to
+      // the inboard buckle, and the lap strap. The one object that crosses a
+      // first-person frame at the shoulder.
+      if (s.side) {
+        const sg = s.side;
+        const inX = s.x - sg * s.w * 0.5;
+        const loopX = Math.min(Math.abs(s.x) + s.w * 0.42, (halfW + roofW * 0.5) * 0.5 - 0.10);
+        const loop = [sg * loopX, Math.min(s.roofY - 0.10, beltY + 0.26), s.z - 0.30];
+        A.bar(loop, [inX + sg * 0.02, s.cushionY + 0.115, s.z - 0.06], 0.048, 0.006, TONE.belt);
+        A.bar([s.x + sg * s.w * 0.46, s.cushionY + 0.07, s.z - 0.02], [inX, s.cushionY + 0.10, s.z - 0.08], 0.048, 0.006, TONE.belt);
+        A.box(0.03, 0.06, 0.03, loop[0], loop[1], loop[2], TONE.trim);
+        A.box(0.034, 0.05, 0.034, inX, s.cushionY + 0.07, s.z - 0.10, TONE.struct, 0, 0, -sg * 0.14);   // buckle
       }
-      if (v4) {
-        const sg = Math.sign(x) || 1;
-        const inX = x - sg * 0.25;
-        const bStalk = box(0.022, 0.09, 0.025, inX, cushionY + 0.03, z - 0.10, M);
-        bStalk.rotation.z = -sg * 0.14;
-        const bHead = box(0.034, 0.042, 0.034, inX, cushionY + 0.08, z - 0.10, M);
-        bHead.rotation.z = -sg * 0.14;
-        const bBtn = box(0.022, 0.012, 0.022, inX, cushionY + 0.103, z - 0.10, RED);
-        bBtn.rotation.z = -sg * 0.14;
-        const outX = x + sg * 0.24;
-        box(0.02, 0.04, 0.14, outX, cushionY - 0.04, z - 0.02, M);
-        box(0.026, 0.016, 0.06, outX + sg * 0.005, cushionY - 0.03, z - 0.02, TRIM);
-        box(0.32, 0.018, 0.38, x, cushionY + 0.005, z, M);
-        /* THE BELT. The one object that crosses a first-person frame at the
-           shoulder; without it a seated POV reads as a camera on a tripod.
-           Webbing from the pillar loop above the outboard shoulder down
-           across the chest to the inboard buckle, and a lap strap. */
-        const loop = [x + sg * 0.20, Math.min(roofY - 0.10, beltY + 0.26), z - 0.30];
-        bar(loop, [inX + sg * 0.02, cushionY + 0.115, z - 0.06], 0.048, 0.006, BELT);
-        bar([x + sg * 0.22, cushionY + 0.07, z - 0.02], [inX, cushionY + 0.10, z - 0.08], 0.048, 0.006, BELT);
-        // the loop itself, a small guide on the pillar/seat shoulder
-        box(0.03, 0.06, 0.03, loop[0], loop[1], loop[2], TRIM);
-      }
-    }
-    seat(seatX, seatZ, backH, true);
-    seat(-seatX, seatZ, backH, true);
-    if (rows > 1) {
-      const rbh = Math.max(0.24, backH * 0.80);
-      box(cabW * 0.80, 0.13, 0.44, 0, cushionY - 0.065, rearZ, S);
-      const rb = box(cabW * 0.80, rbh, 0.12, 0, cushionY + rbh * 0.5, rearZ - 0.22, S);
-      rb.rotation.x = -0.16;
-      [seatX, -seatX].forEach(function (x) {
-        box(0.22, 0.14, 0.11, x, cushionY + rbh + 0.07, rearZ - 0.25, S);
-      });
-      if (v4) {
-        [seatX, -seatX].forEach(function (rx) {
-          [-0.055, 0.055].forEach(function (px) {
-            const rpost = box(0.016, 0.07, 0.016, rx + px, cushionY + rbh + 0.035, rearZ - 0.235, TRIM);
-            rpost.rotation.x = -0.16;
-          });
-          box(0.03, 0.05, 0.03, rx * 0.45, cushionY + 0.02, rearZ - 0.11, M);
-          box(0.02, 0.01, 0.02, rx * 0.45, cushionY + 0.048, rearZ - 0.11, RED);
-        });
-        const rArm = box(0.24, rbh * 0.72, 0.016, 0, cushionY + rbh * 0.45, rearZ - 0.165, M);
-        rArm.rotation.x = -0.16;
-      }
-      // parcel shelf behind the bench. DARK: a real shelf is near-black.
-      box(cabW * 0.86, 0.05, Math.max(0.12, (rearZ - 0.30) - (zR + 0.09)), 0,
-        beltY - 0.05, (rearZ - 0.30 + zR + 0.09) * 0.5, cabinV3() ? M : L);
-    }
-    // centre console + transmission tunnel between the front seats
-    box(Math.max(0.16, cabW * 0.14), Math.max(0.14, cushionY + 0.10 - floorY),
-      cl * 0.40, 0, floorY + (cushionY + 0.10 - floorY) * 0.5, seatZ - 0.06, M);
-    if (v4) {
-      const armW = Math.max(0.14, cabW * 0.12);
-      box(armW, 0.035, cl * 0.18, 0, cushionY + 0.115, seatZ - cl * 0.08, S);       // armrest pad
-      box(0.10, 0.014, 0.14, 0, cushionY + 0.105, seatZ + 0.09, TRIM);              // shifter gate
-      box(0.02, 0.055, 0.02, 0, cushionY + 0.13, seatZ + 0.09, TRIM);
-      box(0.044, 0.034, 0.054, 0, cushionY + 0.16, seatZ + 0.09, LEATHER);          // knob
-      [-0.04, 0.035].forEach(function (czOff) {
-        box(0.072, 0.014, 0.072, 0, cushionY + 0.104, seatZ - 0.01 + czOff, TRIM);   // cup holders
-        box(0.058, 0.016, 0.058, 0, cushionY + 0.105, seatZ - 0.01 + czOff, M);
-      });
-    }
-
-    // ---- DASH. A deep slab to the glass, a MATTE top roll, a binnacle hood
-    //      over the cluster, two screens. The roll is the darkest thing in
-    //      the cabin (windscreen veiling glare — real dash tops are matte
-    //      black for the same reason).
-    box(cabW * 0.92, 0.15, dashD, 0, dashTopY - 0.075, dashZ, M);
-    box(cabW * 0.92, 0.04, dashD, 0, dashTopY - 0.005, dashZ, M);
-    // the lower dash / knee bolster, down to the footwell, so the dash face
-    // is a wall and not a floating shelf when you look down at your knees
-    box(cabW * 0.92, Math.max(0.10, dashTopY - 0.15 - (floorY + 0.28)), 0.12, 0,
-      (dashTopY - 0.15 + floorY + 0.28) * 0.5, fz + 0.06 + 0.06, M);
-    const cowl = box(0.44, 0.11, 0.24, seatX, dashTopY + 0.015, dashZ - 0.03, M);
-    // instrument cluster: bezel face 2 cm proud of the dash face, the lit
-    // panel SCREEN_GAP proud of the bezel (see the screen-law note above)
-    const bezelFrontZ = fz + 0.02;
-    box(0.36, 0.12, 0.05, seatX, dashTopY - 0.015, bezelFrontZ + 0.025, M);   // the bezel itself
-    const cl1 = box(0.34, 0.10, 0.03, seatX, dashTopY - 0.015, bezelFrontZ - SCREEN_GAP - 0.015, SCRN);
-    cl1.userData.carScreen = SCREEN_GAP;
-    // centre stack screen, standing proud of the dash face and tilted up
-    const cs = box(Math.min(0.34, cabW * 0.20), 0.19, 0.03, 0, dashTopY + 0.03, fz - SCREEN_GAP - 0.015, SCRN);
-    cs.rotation.x = 0.10;
-    cs.userData.carScreen = SCREEN_GAP;
-
-    if (v4) {
-      box(cabW * 0.93, 0.024, 0.02, 0, dashTopY - 0.08, fz - 0.006, TRIM);         // satin accent strip
-      // Air vents (HVAC): outer pair + centre pair, each a trim frame with a dark slat well
-      [[cabW * 0.40, 0.07, 0.05], [-cabW * 0.40, 0.07, 0.05], [0.14, 0.065, 0.042], [-0.14, 0.065, 0.042]].forEach(function (vv) {
-        box(vv[1], vv[2], 0.025, vv[0], dashTopY - 0.04, fz - 0.004, TRIM);
-        box(vv[1] - 0.014, vv[2] - 0.014, 0.03, vv[0], dashTopY - 0.04, fz - 0.006, M);
-        // two horizontal slats in the well
-        [-0.008, 0.008].forEach(function (sy) { box(vv[1] - 0.02, 0.003, 0.02, vv[0], dashTopY - 0.04 + sy, fz - 0.012, TRIM); });
-      });
-      box(0.38, 0.012, 0.015, -seatX, dashTopY - 0.12, fz - 0.004, M);            // glovebox seam
-      box(0.06, 0.018, 0.022, -seatX - 0.08, dashTopY - 0.11, fz - 0.012, TRIM);  // glovebox release
-
-      // Cluster graphics: two dials with tick rings, a speed bar, a needle
-      const scrnZ = bezelFrontZ - SCREEN_GAP - 0.032;
-      [seatX + 0.09, seatX - 0.09].forEach(function (dx) {
-        ring(0.032, 0.004, dx, dashTopY - 0.015, scrnZ, CYAN);
-        for (let k = 0; k <= 9; k++) {
-          const a = Math.PI * 1.25 - k * (Math.PI * 1.5 / 9);
-          box(0.003, 0.007, 0.004, dx + Math.cos(a) * 0.026, dashTopY - 0.015 + Math.sin(a) * 0.026, scrnZ - 0.002, TRIM).rotation.z = a - Math.PI / 2;
-        }
-      });
-      box(0.045, 0.016, 0.006, seatX, dashTopY - 0.015, scrnZ, CYAN);              // speed readout bar
-      const needle = box(0.022, 0.003, 0.005, seatX - 0.09 + 0.010, dashTopY - 0.015 + 0.006, scrnZ - 0.003, RED);
-      needle.rotation.z = 0.6;
-
-      // Infotainment screen UI graphics
-      const csZ = fz - SCREEN_GAP;
-      const navLine = box(0.18, 0.012, 0.006, 0, dashTopY + 0.07, csZ - 0.033, CYAN);
-      navLine.rotation.x = 0.10;
-      // a small amber position marker, not a yellow card the size of the screen
-      const mapCard = box(0.018, 0.018, 0.006, -0.05, dashTopY + 0.02, csZ - 0.031, AMBER);
-      mapCard.rotation.x = 0.10;
-      const climInd = box(0.09, 0.012, 0.006, 0.07, dashTopY - 0.03, csZ - 0.031, CYAN);
-      climInd.rotation.x = 0.10;
-      box(0.032, 0.025, 0.012, 0, dashTopY - 0.065, fz - 0.012, RED);              // hazard button
-      // climate knobs under the screen
-      [-0.09, 0.09].forEach(function (kx) { ring(0.018, 0.006, kx, dashTopY - 0.11, fz - 0.012, TRIM); });
-
-      // Footwell pedals (driver at +seatX)
-      const brkPedal = box(0.065, 0.075, 0.02, seatX - 0.04, floorY + 0.11, zF - 0.09, TRIM);
-      brkPedal.rotation.x = 0.22;
-      box(0.018, 0.10, 0.03, seatX - 0.04, floorY + 0.17, zF - 0.07, M).rotation.x = 0.22;
-      const gasPedal = box(0.042, 0.11, 0.018, seatX + 0.065, floorY + 0.095, zF - 0.09, TRIM);
-      gasPedal.rotation.x = 0.22;
-      box(0.016, 0.10, 0.03, seatX + 0.065, floorY + 0.16, zF - 0.07, M).rotation.x = 0.22;
-      box(0.055, 0.14, 0.02, seatX + 0.16, floorY + 0.09, zF - 0.11, M).rotation.x = 0.25;   // dead pedal
-    }
-
-    // ---- THE WHEEL. A leather rim, a hub and three spokes, raked back at
-    //      the top the way a column puts it. The rim is its own tone so it
-    //      reads against the dash behind it instead of fusing into it.
-    const col = box(0.07, 0.07, 0.30, seatX, wheelY - 0.05, wheelZ + 0.15, M);
-    col.rotation.x = 0.42;
-    const rim = ring(wheelR, 0.026, seatX, wheelY, wheelZ, LEATHER);
-    rim.rotation.x = 0.42;
-    box(0.10, 0.09, 0.05, seatX, wheelY, wheelZ, M);                            // hub
-    [0, 2.094, -2.094].forEach(function (a) {
-      const sp = box(0.035, wheelR * 0.92, 0.025,
-        seatX + Math.sin(a) * wheelR * 0.45,
-        wheelY + Math.cos(a) * wheelR * 0.45 * Math.cos(0.42),
-        wheelZ - Math.cos(a) * wheelR * 0.45 * Math.sin(0.42), M);
-      sp.rotation.set(0.42, 0, -a);
     });
-    if (v4) {
-      ring(0.025, 0.006, seatX, wheelY, wheelZ - 0.028, TRIM).rotation.x = 0.42;   // horn ring
-      box(0.05, 0.05, 0.015, seatX, wheelY, wheelZ - 0.026, M).rotation.x = 0.42;  // horn cap
-      [-0.08, 0.08].forEach(function (bx) {
-        box(0.032, 0.038, 0.018, seatX + bx, wheelY + 0.01, wheelZ - 0.015, M).rotation.x = 0.42;
-        box(0.020, 0.022, 0.006, seatX + bx, wheelY + 0.01, wheelZ - 0.025, TRIM).rotation.x = 0.42;
-      });
-      const stalkL = box(0.11, 0.016, 0.016, seatX + 0.10, wheelY - 0.02, wheelZ + 0.07, M);
-      stalkL.rotation.z = 0.20;
-      box(0.025, 0.022, 0.022, seatX + 0.155, wheelY - 0.01, wheelZ + 0.07, TRIM);
-      const stalkR = box(0.11, 0.016, 0.016, seatX - 0.10, wheelY - 0.02, wheelZ + 0.07, M);
-      stalkR.rotation.z = -0.20;
-      box(0.025, 0.022, 0.022, seatX - 0.155, wheelY - 0.01, wheelZ + 0.07, TRIM);
+    // behind the last row: a parcel shelf (a saloon) or a cargo floor + cover
+    const shelfD = (lastZ - 0.30) - (zR + 0.09);
+    if (shelfD > 0.12) {
+      A.box(cabW * 0.86, 0.05, shelfD, 0, beltY - 0.06, (lastZ - 0.30 + zR + 0.09) * 0.5, TONE.struct);
     }
 
-    // ---- header furniture: mirror + two visors + dome console ------------
-    box(0.26, 0.075, 0.045, 0, roofY - 0.10, zTF - 0.02, M);                    // mirror housing
-    box(0.24, 0.062, 0.008, 0, roofY - 0.10, zTF - 0.045, MIRROR);             // its glass, facing the driver
-    box(0.03, 0.06, 0.05, 0, roofY - 0.06, zTF + 0.01, M);                     // mount stem
-    /* VISORS ARE STOWED. V2 hung both at -0.5 rad — folded a third of the way
-       down — which from the seat was two pale slabs across the top of the
-       windscreen (the first driver's-seat plate). Stowed flat against the
-       header, where a visor lives 99% of the time. */
+    // ---- DASH: a deep slab to the glass, a sloped padded top, a rolled
+    //      leading edge, a knee wall, and a HOOD over the cluster ----------
+    const dW = cabW - 0.12;
+    A.box(dW, 0.15, dashD, 0, dashTopY - 0.075, dashZ, TONE.struct);
+    A.rbox(dW, 0.04, dashD * 0.96, 0.015, 0, dashTopY - 0.008, dashZ + 0.01, TONE.struct, 0.1);     // top pad, falling to the glass
+    A.put(new THREE.CylinderGeometry(0.05, 0.05, dW - 0.02, 10), TONE.struct, mtx(0, dashTopY - 0.035, fz + 0.03, 0, 0, Math.PI / 2));   // the roll
+    const kneeH = Math.max(0.10, dashTopY - 0.15 - (floorY + 0.28));
+    A.rbox(dW, kneeH, 0.12, 0.03, 0, (dashTopY - 0.15 + floorY + 0.28) * 0.5, fz + 0.12, TONE.struct);
+    A.box(dW, 0.022, 0.02, 0, dashTopY - 0.085, fz - 0.004, TONE.trim);                         // satin accent strip
+    // the cluster: a bezel, the atlas face, and a hood that shades it
+    const clW = Math.min(0.32, cabW * 0.19), clH = clW * 0.32;
+    const clY = dashTopY - clH * 0.1, clZ = fz - 0.04;
+    A.rbox(clW + 0.04, clH + 0.04, 0.06, 0.018, wheelX, clY, clZ + 0.02, TONE.struct);
+    const hood = new THREE.CylinderGeometry(1, 1, 0.17, 14, 1, true, Math.PI / 2, Math.PI);
+    hood.rotateX(Math.PI / 2);
+    hood.scale((clW + 0.06) * 0.5, clH * 0.75, 1);
+    A.put(hood, TONE.struct, mtx(wheelX, clY + 0.005, clZ - 0.03));
+    // outer round vents at the dash corners, two slot vents over the screen
     [1, -1].forEach(function (s) {
-      const vz = box(roofW * 0.34, 0.025, 0.17, s * roofW * 0.24, roofY - 0.062, zTF - 0.05, M);
-      vz.rotation.x = -0.10;
+      const vx = s * cabW * 0.40, m = mtx(vx, dashTopY - 0.055, fz - 0.004, 0, Math.PI, 0);
+      A.ring(0.042, 0.009, m, TONE.trim);
+      A.put(new THREE.CircleGeometry(0.036, 12), TONE.grille, mtx(vx, dashTopY - 0.055, fz - 0.002, 0, Math.PI, 0));
+      A.box(0.06, 0.004, 0.012, vx, dashTopY - 0.055, fz - 0.012, TONE.trim);
+      A.rbox(0.12, 0.034, 0.02, 0.008, s * 0.075, dashTopY - 0.035, fz - 0.006, TONE.trim);
+      A.box(0.1, 0.02, 0.022, s * 0.075, dashTopY - 0.035, fz - 0.008, TONE.grille);
+      // tweeter at the A-pillar foot
+      A.ring(0.022, 0.006, mtx(s * (halfW - 0.1), dashTopY + 0.004, zF - 0.10, -Math.PI / 2, 0, 0), TONE.trim);
     });
-    if (v4) {
-      box(0.18, 0.02, 0.13, 0, roofY - 0.038, zTF - 0.16, M);                  // dome console
-      [-0.05, 0.05].forEach(function (lx) { box(0.038, 0.006, 0.045, lx, roofY - 0.046, zTF - 0.16, L); });
-      [1, -1].forEach(function (s) {                                           // sill scuff plates
-        box(0.065, 0.012, Math.min(1.10, cl * 0.65), s * (halfW - 0.08), floorY + 0.008, cz + 0.05, TRIM);
+    // glovebox on the side away from the wheel
+    const gx = -Math.sign(wheelX || 1) * Math.min(0.42, cabW * 0.24);
+    A.box(0.38, 0.012, 0.015, gx, dashTopY - 0.12, fz - 0.004, TONE.grille);
+    A.box(0.06, 0.018, 0.022, gx - Math.sign(gx) * 0.12, dashTopY - 0.105, fz - 0.012, TONE.trim);
+    // ---- CENTRE STACK: screen housing, climate row, down to the console --
+    const scW = Math.min(0.28, cabW * 0.16), scH = scW * 0.6;
+    const scY = dashTopY - 0.075 - scH * 0.1, scZ = fz - 0.018;
+    // housing and glass share ONE frame, so the tilted glass can never dip into its bezel
+    const scF = mtx(0, scY, scZ, -0.12, -0.15 * Math.sign(wheelX || 1), 0);
+    A.put(rboxGeo(scW + 0.03, scH + 0.03, 0.035, 0.01), TONE.struct, scF.clone().multiply(mtx(0, 0, 0.012)));
+    const stackTop = dashTopY - 0.15, stackBot = benchFront ? floorY + 0.18 : cushionY + 0.02;
+    if (stackTop - stackBot > 0.08) {
+      A.rbox(0.30, stackTop - stackBot, 0.14, 0.03, 0, (stackTop + stackBot) * 0.5, fz + 0.03, TONE.struct);
+      [-0.08, 0, 0.08].forEach(function (kx, i) {
+        const ky = stackTop - 0.05;
+        if (i === 1) A.box(0.032, 0.025, 0.012, 0, ky, fz - 0.045, [1.8, 0.5, 0.45]);   // hazard
+        else A.ring(0.018, 0.007, mtx(kx, ky, fz - 0.045, 0, Math.PI, 0), TONE.trim);
       });
     }
+    if (!benchFront) {
+      // ---- CONSOLE between two buckets: tunnel, shifter, cups, armrest --
+      const cz0 = fz + 0.02, cz1 = driver.z - 0.28;
+      const conW = Math.max(0.16, Math.min(0.24, Math.abs(front[0].x - front[front.length - 1].x) - front[0].w - 0.02));
+      const conTop = cushionY + 0.07;
+      A.rbox(conW, conTop - floorY, cz0 - cz1, 0.02, 0, (conTop + floorY) * 0.5, (cz0 + cz1) * 0.5, TONE.struct);
+      const shZ = driver.z + 0.14;
+      A.rbox(conW * 0.8, 0.012, 0.16, 0.004, 0, conTop + 0.006, shZ, TONE.trim);                 // gate plate
+      A.rbox(0.07, 0.05, 0.08, 0.025, 0, conTop + 0.03, shZ, TONE.leather);                      // boot
+      A.box(0.018, 0.07, 0.018, 0, conTop + 0.08, shZ, TONE.chrome, -0.15);                       // lever
+      A.rbox(0.05, 0.05, 0.06, 0.02, 0, conTop + 0.12, shZ - 0.01, TONE.leather, 0, 0, 0, 0.01);  // knob
+      [-0.035, 0.035].forEach(function (dz) {
+        A.ring(0.034, 0.006, mtx(0, conTop + 0.004, driver.z + dz - 0.02, -Math.PI / 2, 0, 0), TONE.trim);
+        A.put(new THREE.CircleGeometry(0.03, 12), TONE.grille, mtx(0, conTop + 0.002, driver.z + dz - 0.02, -Math.PI / 2, 0, 0));
+      });
+      A.rbox(conW * 0.95, 0.05, 0.30, 0.022, 0, conTop + 0.03, driver.z - 0.16, theme.seat, 0, 0, 0, 0.01);   // armrest lid
+    } else {
+      // a bench cab shifts on the column
+      A.bar([wheelX - 0.05, wheelY - 0.03, wheelZ + 0.10], [wheelX - 0.20, wheelY - 0.07, wheelZ + 0.02], 0.016, 0.016, TONE.chrome);
+      A.rbox(0.03, 0.03, 0.03, 0.012, wheelX - 0.205, wheelY - 0.072, wheelZ + 0.018, TONE.leather);
+    }
 
-    // ---- THE SHADE BAKE ----------------------------------------------------
-    shadeCabin(parts, {
-      floorY: floorY, roofY: roofY, dashTopY: dashTopY, dashFaceZ: dashFaceZ,
-      cushionY: cushionY, zF: zF, halfW: halfW,
+    // ---- THE COLUMN and its stalks (static); the wheel itself is live ------
+    const colF = mtx(wheelX, wheelY, wheelZ, RAKE, 0, 0);
+    const col = (lx, ly, lz, rx, ry, rz) => colF.clone().multiply(mtx(lx, ly, lz, rx, ry, rz));
+    A.put(rboxGeo(0.08, 0.08, 0.30, 0.03), TONE.struct, col(0, 0, 0.19));
+    A.put(rboxGeo(0.13, 0.09, 0.08, 0.035), TONE.struct, col(0, -0.005, 0.07));          // shroud
+    [1, -1].forEach(function (s) {
+      A.put(boxGeo(0.11, 0.016, 0.016), TONE.struct, col(s * 0.10, -0.01, 0.07, 0, 0, s * 0.2));
+      A.put(rboxGeo(0.026, 0.022, 0.022, 0.008), TONE.trim, col(s * 0.155, 0.0, 0.07));
     });
 
+    // ---- PEDALS in the driver's well -----------------------------------
+    A.box(0.07, 0.08, 0.02, wheelX - 0.05, floorY + 0.11, zF - 0.09, TONE.pedal, 0.22);          // brake
+    A.box(0.018, 0.10, 0.03, wheelX - 0.05, floorY + 0.17, zF - 0.07, TONE.struct, 0.22);
+    A.box(0.045, 0.12, 0.018, wheelX + 0.07, floorY + 0.095, zF - 0.09, TONE.pedal, 0.22);       // throttle
+    A.box(0.016, 0.10, 0.03, wheelX + 0.07, floorY + 0.16, zF - 0.07, TONE.struct, 0.22);
+    A.box(0.06, 0.14, 0.02, wheelX + 0.17, floorY + 0.09, zF - 0.11, TONE.struct, 0.25);         // dead pedal
+
+    // ---- HEADER: mirror, visors, dome ------------------------------------
+    A.rbox(0.26, 0.075, 0.045, 0.02, 0, roofY - 0.10, zTF - 0.02, TONE.struct);                  // mirror housing
+    A.box(0.24, 0.062, 0.008, 0, roofY - 0.10, zTF - 0.045, TONE.mirror);                         // its glass
+    A.box(0.03, 0.06, 0.05, 0, roofY - 0.06, zTF + 0.01, TONE.struct);                            // mount stem
+    [1, -1].forEach(function (s) {
+      A.rbox(roofW * 0.34, 0.025, 0.17, 0.01, s * roofW * 0.24, roofY - 0.062, zTF - 0.05, TONE.head, -0.10);   // stowed visor
+      A.box(0.012, 0.02, 0.05, s * roofW * 0.07, roofY - 0.058, zTF - 0.05, TONE.trim);          // its clip
+    });
+    A.rbox(0.18, 0.022, 0.13, 0.008, 0, roofY - 0.038, zTF - 0.16, TONE.struct);                 // dome console
+    [-0.05, 0.05].forEach(function (lx) { A.box(0.038, 0.006, 0.045, lx, roofY - 0.05, zTF - 0.16, TONE.lamp); });
+    if (Lay.rows > 1) A.box(0.12, 0.006, 0.08, 0, roofY - 0.035, Lay.seats[Lay.seats.length - 1].z + 0.1, TONE.lamp);   // rear dome lamp
+
+    // ---- BAKE: the room is one mesh ----------------------------------------
+    const roomGeo = bakeAcc(A, { floorY: floorY, roofY: roofY, dashTopY: dashTopY, dashFaceZ: fz, cushionY: cushionY, zF: zF, halfW: halfW });
+    const room = new THREE.Mesh(roomGeo, cabinMat());
+    room.name = "cabin_room";
+    room.castShadow = false;
+    room.userData.noSeal = true;
+    root.add(room);
+
+    // ---- THE LIT GLASS: cluster face + centre screen, one mesh ---------------
+    const glassGeo = quadsGeo([
+      atlasQuad(clW, clH, ATLAS.cl, mtx(wheelX, clY, clZ - 0.012)),
+      atlasQuad(scW, scH, ATLAS.sc, scF.clone().multiply(mtx(0, 0, -0.008))),
+    ]);
+    glassGeo._shared = true;
+    const glassM = new THREE.Mesh(glassGeo, screenMat());
+    glassM.name = "cabin_screens";
+    glassM.castShadow = false;
+    glassM.userData.noSeal = true;
+    glassM.userData.carScreen = 0.03;
+    root.add(glassM);
+
+    // ---- THE WHEEL: a live group so it can turn ----------------------------
+    const W = cabinAcc();
+    W.ring(wheelR, 0.024, null, TONE.leather);                                                // the rim
+    W.rbox(0.12, 0.10, 0.06, 0.03, 0, 0, 0.012, TONE.struct);                                 // hub
+    W.rbox(0.09, 0.07, 0.02, 0.012, 0, 0, -0.025, TONE.leather);                              // horn pad
+    [1, -1].forEach(function (s) {
+      W.rbox(wheelR * 0.86, 0.034, 0.022, 0.01, s * wheelR * 0.5, -0.01, 0.004, TONE.struct); // 3 and 9 o'clock spokes
+      W.rbox(0.03, 0.03, 0.012, 0.008, s * wheelR * 0.42, -0.005, -0.012, TONE.trim);        // spoke buttons
+    });
+    W.rbox(0.035, wheelR * 0.8, 0.02, 0.01, 0, -wheelR * 0.52, 0.006, TONE.struct);          // 6 o'clock spoke
+    const wheelGeo2 = bakeAcc(W, { floorY: -0.6, roofY: 0.6, dashTopY: 10, dashFaceZ: 10, cushionY: -10, zF: 10, halfW: 10 });
+    const steer = new THREE.Group();
+    steer.name = "cabin_steer";
+    steer.position.set(wheelX, wheelY, wheelZ);
+    steer.rotation.x = RAKE;
+    const spin = new THREE.Group();
+    spin.name = "cabin_steer_spin";
+    steer.add(spin);
+    const wheelMesh = new THREE.Mesh(wheelGeo2, cabinMat());
+    wheelMesh.castShadow = false;
+    wheelMesh.userData.noSeal = true;
+    spin.add(wheelMesh);
+    root.add(steer);
+
+    // ---- WHAT THE REST OF THE GAME READS -----------------------------------
+    const dialsOut = ATLAS.dials.map(function (d) {
+      // atlas u runs to the driver's RIGHT (-X): the left dial sits at +X
+      return {
+        kind: d.kind, max: d.max, a0: ATLAS.a0, a1: ATLAS.a1,
+        x: wheelX + clW * 0.5 - (d.cx / ATLAS.W) * clW,
+        y: clY + clH * 0.5 - (d.cy / ATLAS.cl[3]) * clH,
+        z: clZ - 0.016, r: (d.r / ATLAS.W) * clW,
+      };
+    });
+    const rear = seats.find((s) => s.row === 1);
     const info = {
-      // legacy four (city/vehicles.js occSeatAnchor has read these for ages)
+      // legacy four (occupancy has read these for ages)
       baseY: beltY, peakY: gh, cx: cz, w: cabW,
-      // the V2 frame
       floorY: floorY, roofY: roofY, beltY: beltY,
-      zRear: zR, zFront: zF, rows: rows,
+      zRear: zR, zFront: zF, rows: Lay.rows, kind: Lay.kind,
       zRoofRear: zTR,
-      cushionY: cushionY, seatX: seatX, seatZ: seatZ, rearSeatZ: rows > 1 ? rearZ : null,
-      wheel: { x: seatX, y: wheelY, z: wheelZ, r: wheelR },
-      dashFaceZ: dashFaceZ, dashTopY: dashTopY,
-      // THE FIRST-PERSON EYE. The seated torso is hidden in first person
-      // (city/vehicles.js seatDriver), so the eye sits where a face is: a
-      // hand ahead of the seat frame, not a whole chest ahead of it.
-      eye: { x: seatX, y: eyeY, z: seatZ + 0.06 },
-      // where the door line is, for a head that leans out of the window
+      cushionY: cushionY, seatX: D.seatX, seatZ: D.seatZ, rearSeatZ: rear ? rear.z : null,
+      wheel: { x: wheelX, y: wheelY, z: wheelZ, r: wheelR, rake: RAKE },
+      steerName: "cabin_steer",
+      cluster: { dials: dialsOut },
+      dashFaceZ: fz, dashTopY: dashTopY,
+      eye: { x: driver.eye.x, y: driver.eye.y, z: driver.eye.z },
       doorX: halfW, windowTopY: roofY - 0.05,
+      // THE SEAT MODEL (city/carseats.js), plain JSON so a template clone carries it
+      seatLayout: { kind: Lay.kind, rows: Lay.rows, seats: seats, doors: Lay.doors },
       dressed: true,
     };
     root.userData.cabinInfo = info;
     return info;
   }
 
+  /* LIVE PARTS for the car the player sits in (city/vehicles.js hangs these
+     on the cabin while he is in it and takes them off when he leaves):
+       needles  two thin lit bars, pivoting on the cluster dials
+       hands    two forearms + gloved hands on the rim, parented to the wheel's
+                spin group so they turn with it — the arms of the rig are at
+                the lens in first person and have to be hidden (see seatDriver)
+     Materials are the rig's OWN (skin, sleeve) passed in, never cloned. */
+  // the builder itself, for a body built outside this file and for node checks
+  CBZ.carDressCabin = function (root, o, style) {
+    const was = _cabinStyle;
+    if (style) _cabinStyle = style;
+    try { return dressCabin(root, o); } finally { _cabinStyle = was; }
+  };
+  const needleMat = () => sharedMat("cabin-needle", 0x330c0c, { emissive: 0xff5a3a, ei: 1.0 });
+  CBZ.carCabinNeedles = function (ci) {
+    if (!ci || !ci.cluster || !ci.cluster.dials) return null;
+    const g = new THREE.Group();
+    g.name = "cabin_needles";
+    ci.cluster.dials.forEach(function (d) {
+      const piv = new THREE.Group();
+      piv.position.set(d.x, d.y, d.z);
+      const len = d.r * 0.86;
+      const geo = new THREE.BoxGeometry(len, Math.max(0.002, d.r * 0.07), 0.003);
+      geo.translate(len * 0.5, 0, 0);
+      const m = new THREE.Mesh(geo, needleMat());
+      m.castShadow = false;
+      piv.add(m);
+      piv.userData.dial = { kind: d.kind, max: d.max, a0: d.a0, a1: d.a1 };
+      g.add(piv);
+    });
+    return g;
+  };
+  CBZ.carCabinHands = function (skin, sleeve, rimR) {
+    const g = new THREE.Group();
+    g.name = "cabin_hands";
+    const R = rimR || 0.18;
+    [1, -1].forEach(function (s) {
+      // the hand grips the rim at 9 / 3 o'clock, a touch above centre
+      const hx = s * R * 0.97, hy = R * 0.18;
+      const hand = new THREE.Mesh(rboxGeo(0.07, 0.1, 0.06, 0.022), skin);
+      hand.position.set(hx, hy, -0.018);
+      hand.rotation.z = s * 0.25;
+      hand.castShadow = false;
+      g.add(hand);
+      // the forearm runs back toward the elbow, down and out
+      const a = new THREE.Vector3(hx + s * 0.01, hy - 0.03, -0.05);
+      const b = new THREE.Vector3(hx + s * 0.09, hy - 0.2, -0.30);
+      const len = a.distanceTo(b);
+      const arm = new THREE.Mesh(rboxGeo(0.075, 0.075, len, 0.03), sleeve || skin);
+      arm.position.copy(a).add(b).multiplyScalar(0.5);
+      arm.quaternion.setFromUnitVectors(_zAxis, b.clone().sub(a).normalize());
+      arm.castShadow = false;
+      g.add(arm);
+    });
+    return g;
+  };
+
   /* shadeCabin — the light a cabin has, baked into its vertices.
      This is a LAMBERT world with no bounce and no occlusion budget, and a
      cabin is a roofed room: the sun cannot reach any surface in it, so every
      one of them renders at the ambient floor plus the flat emissive lift the
-     V2 materials carry. Measured from the driver's seat that is a single
-     navy silhouette — dash, wheel, column and cowl fused into one shape with
-     no edge between them, which is exactly the "fake" the owner named.
-     A real interior is read by GRADIENTS: the headliner is bright, the
-     footwell is black, an upward face catches the sky through the glass, a
-     downward face is in its own shadow, and the well under the dash is a
-     cave. So each vertex gets a shade from its height, its normal and where
-     it sits, written to a colour attribute; the cabin materials multiply
-     BOTH their diffuse and their emissive lift by it (sharedMat's `vcol`).
-     One buffer per piece, merged into the same per-material buckets as
-     before — the car gains vertices, not draw calls. */
-  const _sv = new THREE.Vector3(), _sn = new THREE.Vector3(), _snm = new THREE.Matrix3();
-  function shadeCabin(parts, f) {
+     cabin material carries. A real interior is read by GRADIENTS: the
+     headliner is bright, the footwell is black, an upward face catches the
+     sky through the glass, a downward face is in its own shadow, and the well
+     under the dash is a cave. Each vertex gets that shade from its height,
+     its normal and where it sits, times its piece's TONE (value and hue). */
+  const _sv = new THREE.Vector3(), _sn = new THREE.Vector3();
+  function shadeCabin(pieces, f) {
     const span = Math.max(0.3, f.roofY - f.floorY);
-    for (let p = 0; p < parts.length; p++) {
-      const m = parts[p];
-      const src = m.geometry;
-      if (!src || !src.attributes || !src.attributes.position) continue;
-      const geo = src.index ? src.toNonIndexed() : src.clone();
-      if (!geo.attributes.normal) geo.computeVertexNormals();
+    for (let p = 0; p < pieces.length; p++) {
+      const geo = pieces[p].geo, tone = pieces[p].tone;
       const pos = geo.attributes.position, nor = geo.attributes.normal;
       const n = pos.count;
       const col = new Float32Array(n * 3);
-      m.updateMatrix();
-      _snm.getNormalMatrix(m.matrix);
       for (let i = 0; i < n; i++) {
-        _sv.fromBufferAttribute(pos, i).applyMatrix4(m.matrix);
-        _sn.fromBufferAttribute(nor, i).applyMatrix3(_snm).normalize();
+        _sv.fromBufferAttribute(pos, i);
+        _sn.fromBufferAttribute(nor, i);
         const t = Math.max(0, Math.min(1, (_sv.y - f.floorY) / span));
         let s = 0.42 + 0.80 * t;                                   // floor dark, headliner bright
         if (_sn.y > 0) s += 0.22 * _sn.y;                          // catches the sky
         else s -= 0.28 * -_sn.y;                                   // its own shadow underneath
         s += 0.10 * Math.abs(_sn.x);                               // side glass light
-        // the cave under the dash, and the well under a seat
-        if (_sv.z > f.dashFaceZ + 0.02 && _sv.y < f.dashTopY - 0.08) s *= 0.68;
-        if (_sv.y < f.cushionY - 0.03) s *= 0.72;
-        // the sill and the door line, a little occluded by the body
+        if (_sv.z > f.dashFaceZ + 0.02 && _sv.y < f.dashTopY - 0.08) s *= 0.68;   // the cave under the dash
+        if (_sv.y < f.cushionY - 0.03) s *= 0.72;                                  // the well under a seat
         if (Math.abs(_sv.x) > f.halfW - 0.12 && _sv.y < f.floorY + 0.10) s *= 0.75;
         s = Math.max(0.22, Math.min(1.35, s));
-        col[i * 3] = s; col[i * 3 + 1] = s; col[i * 3 + 2] = s;
+        col[i * 3] = s * tone[0]; col[i * 3 + 1] = s * tone[1]; col[i * 3 + 2] = s * tone[2];
       }
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      geo.computeBoundingSphere();
-      m.geometry = geo;
     }
   }
 
-  function makeRoadCar(style) {
-    const root = new THREE.Group();
-    const flare = STYLE_FLARE[style] || STYLE_FLARE["tesla-3"];
-    const paint = paintMat(style, ({
-      "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6,
-      "tesla-y": 0x1470e3, porsche: 0xf3cf39, aventador: 0xf28c28,
-      ferrari: 0xd1262f, enzo: 0xe02025, veyron: 0x202225,
-      muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6,
-    })[style] || 0xd1262f, PAINT_OPTS[style]);   // shiny clearcoat, _bodyPaint-tagged for per-car recolour
-    const dark = glassMat();   // reflective tinted glass
+  /* ============================================================
+     ROAD BODIES — one lofted-shell generator, one spec row per class.
 
-    // ===================================================================
-    // PROPORTION LAW (drives the whole silhouette off total height H):
-    //   wheelR     ~ 0.16*H        (tire diameter ~ 0.33*H)
-    //   bodyY      = wheelR*0.42   (hull bottom just below axle)
-    //   baseH      = hullFrac*H    (hull is the DOMINANT band, ~0.60-0.66*H)
-    //   greenhouse peak ~ ghFrac*baseH  (0.34-0.46, NEVER > baseH)
-    // Result: hull ~62% of H, greenhouse ~25% of H, wheel dia ~ half hull.
-    // ===================================================================
-    // Per-body table: [W, L, H, hullFrac, cabinLenFrac, cabinCenterX(frac of L), ghFrac]
-    // Per-body table now carries REAL wheel math (derived from published tire
-    // specs, e.g. 235/45R18 → 669mm on a 1443mm-tall Model 3):
-    //   tD   = tire DIAMETER as a fraction of H. Real cars: supercar 0.55-0.60
-    //          (the body is LOW, so the same ~700mm tire dominates), sedan/EV
-    //          0.45-0.49, hatch 0.45, muscle 0.50, SUV 0.43 of a taller H.
-    //          The old fixed 0.32 is why the whole fleet looked like it was
-    //          rolling on shopping-cart casters.
-    //   rf   = rim-face radius / tire radius (sidewall profile): supercar
-    //          ~0.72 rubber-band, sedan ~0.66, muscle 0.62, lowrider wire 0.55.
-    //   ride = hull-bottom clearance as a fraction of wheelR (rocker height):
-    //          supercar ~0.38 (sills hug the ground), sedan ~0.55, crossover 0.62.
-    const SPEC = {
-      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.50, rf: 0.68, ride: 0.36 },
-      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.48, rf: 0.67, ride: 0.40 },
-      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.52 },
-      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.48 },
-      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40, tD: 0.54, rf: 0.71, ride: 0.30 },
-      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.58, rf: 0.72, ride: 0.30 },
-      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.56, rf: 0.72, ride: 0.38 },
-      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.60, rf: 0.73, ride: 0.26 },
-      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36, tD: 0.58, rf: 0.72, ride: 0.26 },
-      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40, tD: 0.52, rf: 0.62, ride: 0.36 },
-      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36, tD: 0.43, rf: 0.57, ride: 0.22 },
-      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46, tD: 0.45, rf: 0.63, ride: 0.40 },
+     OWNER: "completely improving car ... it's going to look freaking car."
+     The old road car was a flat-sided extruded prism + a trapezoid glass
+     tub + ~30 slabs (hood clamshell, roof cap, pillar bars, rocker strips,
+     splitter, brows), flat-shaded, with the wheels parked beside the flanks.
+     It is gone. Every road body — sedan, hatch, crossover, SUV, pickup,
+     sports/super, muscle, lowrider and the van's cab — is ONE sectional
+     loft from city/carbody.js (curved hood, crowned roof, tumblehome, raked
+     glass that IS the shell, round arches the tyres sit in) and the numbers
+     below are the only thing that differs between classes.
+
+     Row fields (metres; car frame +z = nose):
+       L W        length, body width at the fenders
+       FO WB      front overhang (bumper to front axle), wheelbase
+       R WW gap   tyre radius, tyre width, arch clearance
+       yB         rocker bottom (ride), nL/tL overhang lift of the valance
+       cowl rf rr deck   windshield base / roof front / roof rear / deck
+                  line, as z measured from the FRONT AXLE (negative = aft)
+       yN yC yD yT      hood leading edge / cowl / deck line / tail edge heights
+       roof       roof centre height (= overall height)
+       tum        tumblehome (roof rail x / glass base x)
+       rcN rcT    bumper plan corner radius
+       bulge tuck fender flare / waist
+       doors      1 (coupe) or 2 per side;  bp  B-pillar z from the front axle
+       sgR        side-glass rear limit (z from front axle; paint behind)
+       dp         extra black pillar strips (D-pillars), z from front axle
+       rows       seat rows handed to the cabin (3 = six seats)
+  ============================================================ */
+  const BODY = {
+    // -- sedans (the taxi and the police cruiser are liveries on tesla-3) --
+    "tesla-3":   { L: 4.69, W: 1.86, FO: 0.86, WB: 2.88, R: 0.335, WW: 0.235, gap: 0.045, yB: 0.16, nL: 0.08, tL: 0.10,
+                   cowl: -0.52, rf: -1.42, rr: -2.30, deck: -3.02, yN: 0.66, yC: 0.97, yD: 1.02, yT: 0.95, roof: 1.44,
+                   tum: 0.80, rcN: 0.34, rcT: 0.28, bulge: 0.018, tuck: 0.012, doors: 2, bp: -1.55, sgR: -2.52, rows: 2,
+                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.05, eTT: 0.03 },
+    "tesla-s":   { L: 4.97, W: 1.96, FO: 0.95, WB: 2.96, R: 0.35, WW: 0.245, gap: 0.045, yB: 0.15, nL: 0.08, tL: 0.10,
+                   cowl: -0.58, rf: -1.50, rr: -2.35, deck: -3.40, yN: 0.65, yC: 0.97, yD: 1.02, yT: 0.96, roof: 1.44,
+                   tum: 0.79, rcN: 0.36, rcT: 0.30, bulge: 0.02, tuck: 0.012, doors: 2, bp: -1.60, sgR: -2.62, rows: 2,
+                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.9, eTN: 0.05, eTT: 0.03 },
+    // -- compact hatch --
+    hatch:       { L: 4.10, W: 1.79, FO: 0.80, WB: 2.58, R: 0.31, WW: 0.215, gap: 0.045, yB: 0.16, nL: 0.08, tL: 0.10,
+                   cowl: -0.46, rf: -1.30, rr: -2.66, deck: -3.18, yN: 0.70, yC: 0.98, yD: 1.02, yT: 1.00, roof: 1.48,
+                   tum: 0.84, rcN: 0.30, rcT: 0.22, bulge: 0.018, tuck: 0.01, doors: 2, bp: -1.30, sgR: -2.72, rows: 2,
+                   hoodC: 0.05, roofC: 0.045, winF: 0.25, winR: 0.2, eTN: 0.05, eTT: 0.02 },
+    // -- crossovers / SUVs --
+    "tesla-y":   { L: 4.75, W: 1.92, FO: 0.90, WB: 2.89, R: 0.36, WW: 0.255, gap: 0.05, yB: 0.23, nL: 0.08, tL: 0.10,
+                   cowl: -0.56, rf: -1.50, rr: -2.62, deck: -3.55, yN: 0.80, yC: 1.07, yD: 1.10, yT: 1.08, roof: 1.62,
+                   tum: 0.81, rcN: 0.34, rcT: 0.26, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.58, sgR: -2.95, rows: 2,
+                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.8, eTN: 0.05, eTT: 0.03, archTrim: true },
+    "tesla-x":   { L: 5.04, W: 2.00, FO: 0.98, WB: 2.97, R: 0.375, WW: 0.265, gap: 0.05, yB: 0.24, nL: 0.08, tL: 0.10,
+                   cowl: -0.60, rf: -1.60, rr: -2.95, deck: -3.78, yN: 0.81, yC: 1.09, yD: 1.14, yT: 1.10, roof: 1.68,
+                   tum: 0.82, rcN: 0.36, rcT: 0.26, bulge: 0.022, tuck: 0.01, doors: 2, bp: -1.62, sgR: -3.20, rows: 3,
+                   hoodC: 0.05, roofC: 0.05, winF: 0.25, winR: 0.7, eTN: 0.05, eTT: 0.03, archTrim: true },
+    suv:         { L: 5.02, W: 2.02, FO: 0.90, WB: 3.00, R: 0.40, WW: 0.275, gap: 0.07, yB: 0.30, nL: 0.06, tL: 0.08,
+                   cowl: -0.66, rf: -1.30, rr: -3.85, deck: -4.02, yN: 1.10, yC: 1.17, yD: 1.18, yT: 1.17, roof: 1.84,
+                   tum: 0.88, rcN: 0.22, rcT: 0.16, bulge: 0.03, tuck: 0.008, doors: 2, bp: -1.62, sgR: -3.92, dp: [-2.72], rows: 3,
+                   hoodC: 0.04, roofC: 0.035, winF: 0.15, winR: 0.1, eTN: 0.03, eTT: 0.01, archTrim: true, roll: 0.03, hoodBow: 0.01 },
+    // -- pickup: crew cab + open bed --
+    pickup:      { L: 5.70, W: 2.03, FO: 0.98, WB: 3.60, R: 0.42, WW: 0.28, gap: 0.08, yB: 0.36, nL: 0.06, tL: 0.04,
+                   cowl: -0.62, rf: -1.14, rr: -2.52, deck: -2.60, yN: 1.20, yC: 1.27, yD: 1.28, yT: 1.28, roof: 1.93,
+                   tum: 0.90, rcN: 0.20, rcT: 0.07, bulge: 0.03, tuck: 0.006, doors: 2, bp: -1.66, sgR: -2.56, rows: 2,
+                   hoodC: 0.04, roofC: 0.03, winF: 0.15, winR: 0.0, eTN: 0.03, eTT: 0.0, archTrim: true, seats: "pickup6", roll: 0.025, hoodBow: 0.01,
+                   bed: { z0: 0.07, z1: -2.66, floor: 0.92 } },
+    // -- sports / super: low, wide, cab-rearward fastbacks, one door a side --
+    porsche:     { L: 4.52, W: 1.90, FO: 1.00, WB: 2.45, R: 0.345, WW: 0.27, gap: 0.04, yB: 0.13, nL: 0.06, tL: 0.10,
+                   cowl: -0.62, rf: -1.40, rr: -2.02, deck: -3.12, yN: 0.62, yC: 0.83, yD: 0.91, yT: 0.89, roof: 1.30,
+                   tum: 0.78, rcN: 0.36, rcT: 0.34, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.20, rows: 2,
+                   hoodC: 0.055, roofC: 0.055, winF: 0.35, winR: 1.3, eTN: 0.06, eTT: 0.02 },
+    ferrari:     { L: 4.61, W: 1.98, FO: 1.02, WB: 2.65, R: 0.345, WW: 0.285, gap: 0.035, yB: 0.12, nL: 0.04, tL: 0.08,
+                   cowl: -0.42, rf: -1.36, rr: -1.95, deck: -3.12, yN: 0.55, yC: 0.77, yD: 0.87, yT: 0.85, roof: 1.21,
+                   tum: 0.74, rcN: 0.40, rcT: 0.30, bulge: 0.06, tuck: 0.025, doors: 1, sgR: -2.05, rows: 1,
+                   hoodC: 0.06, roofC: 0.05, winF: 0.4, winR: 1.4, eTN: 0.08, eTT: 0.02 },
+    enzo:        { L: 4.70, W: 2.03, FO: 1.05, WB: 2.65, R: 0.35, WW: 0.29, gap: 0.035, yB: 0.12, nL: 0.03, tL: 0.08,
+                   cowl: -0.36, rf: -1.32, rr: -1.92, deck: -3.20, yN: 0.52, yC: 0.75, yD: 0.87, yT: 0.87, roof: 1.15,
+                   tum: 0.72, rcN: 0.44, rcT: 0.28, bulge: 0.07, tuck: 0.03, doors: 1, sgR: -2.02, rows: 1,
+                   hoodC: 0.07, roofC: 0.05, winF: 0.45, winR: 1.4, eTN: 0.10, eTT: 0.02 },
+    aventador:   { L: 4.78, W: 2.03, FO: 1.10, WB: 2.70, R: 0.35, WW: 0.30, gap: 0.035, yB: 0.11, nL: 0.03, tL: 0.08,
+                   cowl: -0.30, rf: -1.40, rr: -1.95, deck: -3.25, yN: 0.50, yC: 0.73, yD: 0.85, yT: 0.85, roof: 1.14,
+                   tum: 0.70, rcN: 0.30, rcT: 0.18, bulge: 0.06, tuck: 0.03, doors: 1, sgR: -2.05, rows: 1,
+                   hoodC: 0.035, roofC: 0.04, winF: 0.1, winR: 0.3, eTN: 0.12, eTT: 0.03 },
+    veyron:      { L: 4.46, W: 1.99, FO: 0.98, WB: 2.71, R: 0.35, WW: 0.29, gap: 0.035, yB: 0.12, nL: 0.04, tL: 0.08,
+                   cowl: -0.40, rf: -1.30, rr: -1.92, deck: -3.10, yN: 0.60, yC: 0.79, yD: 0.89, yT: 0.88, roof: 1.20,
+                   tum: 0.76, rcN: 0.46, rcT: 0.34, bulge: 0.05, tuck: 0.02, doors: 1, sgR: -2.00, rows: 1,
+                   hoodC: 0.06, roofC: 0.055, winF: 0.45, winR: 1.3, eTN: 0.05, eTT: 0.03 },
+    // -- muscle: long hood, short deck, blunt nose --
+    muscle:      { L: 5.02, W: 1.96, FO: 0.95, WB: 2.95, R: 0.36, WW: 0.275, gap: 0.04, yB: 0.15, nL: 0.06, tL: 0.08,
+                   cowl: -0.86, rf: -1.66, rr: -2.52, deck: -3.18, yN: 0.88, yC: 0.99, yD: 1.02, yT: 1.00, roof: 1.40,
+                   tum: 0.80, rcN: 0.14, rcT: 0.14, bulge: 0.03, tuck: 0.012, doors: 1, sgR: -2.62, rows: 2,
+                   hoodC: 0.035, roofC: 0.04, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01 },
+    // -- lowrider: a long, low sixties hardtop --
+    lowrider:    { L: 5.40, W: 2.00, FO: 1.05, WB: 3.00, R: 0.33, WW: 0.23, gap: 0.05, yB: 0.13, nL: 0.04, tL: 0.06,
+                   cowl: -0.80, rf: -1.62, rr: -2.78, deck: -3.26, yN: 0.84, yC: 0.93, yD: 0.95, yT: 0.92, roof: 1.36,
+                   tum: 0.84, rcN: 0.12, rcT: 0.12, bulge: 0.01, tuck: 0.004, doors: 1, sgR: -2.86, rows: 2,
+                   hoodC: 0.03, roofC: 0.035, winF: 0.1, winR: 0.3, eTN: 0.02, eTT: 0.01 },
+    // -- the stainless wedge truck: faceted (flat), one straight rake from
+    //    the nose over the apex, a long metal sail down to the tail --
+    cybertruck:  { L: 5.68, W: 2.03, FO: 1.05, WB: 3.81, R: 0.44, WW: 0.30, gap: 0.09, yB: 0.40, nL: 0.02, tL: 0.02,
+                   cowl: -0.30, rf: -1.52, rr: -1.56, deck: -4.62, yN: 1.02, yC: 1.34, yD: 1.32, yT: 1.30, roof: 1.80,
+                   tum: 0.78, rcN: 0.05, rcT: 0.03, bulge: 0.0, tuck: 0.0, doors: 2, bp: -1.72, sgR: -2.35, rows: 2,
+                   hoodC: 0.12, roofC: 0.0, deckC: 0.06, winF: 0.0, winR: 0.0, eTN: 0.0, eTT: 0.0, archTrim: true,
+                   roll: 0, hoodBow: 0.0, flat: true, backGlassR: -2.05 },
+  };
+  const BODY_COLOR = {
+    "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6, "tesla-y": 0x1470e3,
+    porsche: 0xf3cf39, aventador: 0xf28c28, ferrari: 0xd1262f, enzo: 0xe02025, veyron: 0x202225,
+    muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6, suv: 0x2e3a4a, pickup: 0xe24b4b, cybertruck: 0xa8afb2,
+  };
+  const PAINT_OPTS_EXTRA = { cybertruck: { metalness: 0.86, roughness: 0.32, envMapIntensity: 1.2 }, suv: { metalness: 0.45, roughness: 0.42, envMapIntensity: 0.9 }, pickup: { metalness: 0.46, roughness: 0.40, envMapIntensity: 0.95 } };
+
+  // the full loft spec for a body row (absolute z), doors laid out on it
+  function loftSpec(b) {
+    const zF = b.L / 2 - b.FO, zR = zF - b.WB;
+    const Ra = b.R + b.gap;
+    const W2 = b.W / 2;
+    const S = {
+      L: b.L, W: b.W, axles: [zF, zR], wheelR: b.R, wheelW: b.WW, archGap: b.gap,
+      yB: b.yB, noseLift: b.nL, tailLift: b.tL,
+      zCowl: zF + b.cowl, zRoofF: zF + b.rf, zRoofR: zF + b.rr, zDeck: zF + b.deck,
+      yNose: b.yN, yCowl: b.yC, yDeck: b.yD, yTail: b.yT, yRoof: b.roof,
+      hoodCrown: b.hoodC, roofCrown: b.roofC, deckCrown: b.deckC != null ? b.deckC : 0.035,
+      tumble: b.tum, rcNose: b.rcN, rcTail: b.rcT, endTaperN: b.eTN, endTaperT: b.eTT,
+      bulge: b.bulge, tuck: b.tuck, winF: b.winF, winR: b.winR,
+      sideGlassR: b.sgR != null ? zF + b.sgR : null,
+      archTrim: !!b.archTrim, blackPillars: !!b.blackPillars, glassRoof: !!b.glassRoof,
+      floorY: b.yB + 0.13, flat: !!b.flat,
+      backGlassR: b.backGlassR != null ? zF + b.backGlassR : null,
     };
-    const s = SPEC[style] || SPEC["tesla-3"];
-    const w = s.W, len = s.L, H = s.H;
-    const wheelR = +((s.tD || 0.46) * H / 2).toFixed(3);
-    const bodyY = +(wheelR * (s.ride || 0.52)).toFixed(3);   // rocker clearance off the REAL wheel
-    // hull band height rebalanced so roofline stays ≈ H despite the taller
-    // ride: bodyY + baseH + gh*baseH ≈ H  →  baseH = (H − bodyY)/(1 + gh)
-    const baseH = +((H - bodyY) / (1 + s.gh)).toFixed(3);
-    const bodyTop = bodyY + baseH;
-    const peakY = +(s.gh * baseH).toFixed(3);         // slim greenhouse, < baseH
-    const cabLen = len * s.cab;
-    const cabCx = len * s.cx;                          // cabin center (rearward = -)
-    // cabin profile (z,y[,wScale]): [rear-bottom, rear-top, front-top, front-bottom].
-    // top is shorter footprint than base (windshield/backlight rake) AND, via the
-    // 3rd element (prismGeo's width-scale), NARROWER than the base — real
-    // tumblehome, the glasshouse leaning inward toward the roof instead of
-    // rising as a constant-width box. Base z half-extent = cabLen/2.
-    const cb = cabLen * 0.5, ct = cabLen * 0.30;       // base vs top half-length (rake)
-    const cabin = [
-      [cabCx - cb, 0, 1.0], [cabCx - ct, peakY, flare.roofTuck], [cabCx + ct, peakY, flare.roofTuck], [cabCx + cb, 0, 1.0],
-    ];
-
-    // ---- HULL: the dominant painted mass, with a beltline + raked nose/tail ----
-    // Deck top must enclose the cabin footprint so the greenhouse never overhangs
-    // the sloped hood/tail. Derive deck edges from the cabin z-extent.
-    const cabinRearZ = cabin[0][0], cabinFrontZ = cabin[cabin.length - 1][0];
-    const deckRear = Math.max(-len * 0.5, Math.min(-len * 0.30, cabinRearZ - 0.14));
-    const deckFront = Math.min(len * 0.5, Math.max(len * 0.28, cabinFrontZ + 0.14));
-    // beltline at baseH; nose & tail dip slightly so the hull reads sculpted;
-    // fender arches bulge over each axle with a tucked waist between them
-    // (hullRing, driven by this style's STYLE_FLARE knobs).
-    const archZ = len * 0.32;             // matches addWheels' wz = length*0.32
-    const bodyProfile = hullRing(len, baseH, deckRear, deckFront, archZ, flare);
-    const cabW = w * 0.94;                              // greenhouse nearly full-width:
-    // the old 0.86 left a wide bare shelf each side of the glass that read as
-    // detached floating decks from 3/4 views (probe-diagnosed); real cars
-    // start the tumblehome at the beltline edge, so the tub base hugs it
-    const cabBaseY = bodyTop - peakY * 0.08;
-    // THE DOORS COME FIRST, because the hull and the glass tub are cut around
-    // them (see buildCarDoors). Two-door bodies get one long door per side.
-    const coupe = /^(ferrari|enzo|aventador|veyron|porsche|muscle|lowrider)$/.test(style);
-    const doors = buildCarDoors(root, {
-      half: w * 0.5, hullProfile: bodyProfile, baseH: baseH, bodyY: bodyY,
-      // the aperture's sill sits just above the rocker trim (a 0.14 m band at
-      // wheelR + 0.08, below) and never below the floor pan
-      sillTop: Math.max(baseH * 0.18 + 0.04, wheelR + 0.155 - bodyY),
-      cab: cabin, cabW: cabW, peakY: peakY, cabBaseY: cabBaseY,
-      plan: layoutDoors(len, cabin, coupe),
-      paint: paint, glass: dark, dark: cabinMat(),
-    });
-    // the deck is cut away under the cabin (see prismGeo deckCut): the room
-    // the dresser builds is what you see through the glass, not a painted lid
-    addPrism(root, w, bodyProfile, bodyY, paint, {
-      holes: doors.hullHoles, jamb: 0.10, jambFloor: baseH * 0.18 - 0.02,
-      deckCut: { z0: cabin[0][0] + 0.02, z1: cabin[3][0] - 0.02, half: cabW * 0.5 - 0.03 },
-    });
-
-    // ---- GREENHOUSE: the cabin IS GLASS. A tinted trapezoidal prism (raked
-    // ends via the profile, tumblehome via roofTuck width-scale) with a painted
-    // ROOF CAP and painted B-PILLARS on top of it. This replaces the old
-    // painted-shell-plus-glass-decal sandwich whose rake panels tipped the
-    // wrong way (orbit-sheet diagnosed: windshields lay forward over the hood
-    // like open flaps). A glass tub needs zero rake math, always reads as a
-    // real glasshouse from any angle, and is fewer meshes.
-    // the glass tub — with the door windows cut out of its flanks: those
-    // panes are on the doors now, and leave with them
-    addPrism(root, cabW, cabin, cabBaseY, dark, {
-      holes: doors.tubHoles,
-      floorCut: { z0: cabin[0][0] + 0.03, z1: cabin[3][0] - 0.03, half: 0 },   // no glass floor at the sill
-    });
-    // CABIN INTERIOR (CAR_CABIN_V2): a sealed, dressed room behind the real
-    // glass — see dressCabin's header. The pre-V2 five loose slabs are the
-    // `else` arm below and remain the exact one-line revert.
-    if (!dressCabin(root, {
-      cabW: cabW, zR: cabin[0][0], zF: cabin[3][0],
-      zTR: cabin[1][0], zTF: cabin[2][0], roofW: cabW * flare.roofTuck,
-      beltY: cabBaseY, roofY: cabBaseY + peakY,
-      floorY: bodyY + baseH * 0.18, doorSpans: doors.spans,
-    })) {
-      // pre-V2 dressing. The material is minted HERE, inside the fallback,
-      // not above the dressCabin call — see the "interior-v2" note by the
-      // cabin materials: minting it early handed the flag-OFF tone to the
-      // flag-ON cabin through sharedMat's first-caller-wins cache.
-      const interior = sharedMat("interior", 0x2a2f36);
-      addBox(root, cabW * 0.88, Math.max(0.06, peakY * 0.22), Math.max(0.3, (cb + ct)), 0, cabBaseY + peakY * 0.12, cabCx, interior);   // seat deck / floor mass
+    // hood bows up between the leading edge and the cowl; the belt kicks
+    // up a touch toward the tail (a real car's wedge)
+    const zN = b.L / 2;
+    S.hoodKeys = [[lerpN(S.zCowl, zN, 0.55), lerpN(b.yC, b.yN, 0.55) + (b.hoodBow != null ? b.hoodBow : 0.035)]];
+    // the NOSE ROLL: the hood edge falls away over the last ~0.25 m, so the
+    // top of the fascia rakes back into the hood (where the lamps sit)
+    // instead of standing as a flat wall under a lip
+    const roll = b.roll != null ? b.roll : 0.08;
+    if (roll > 0) S.hoodKeys.push([zN - 0.24, b.yN + roll]);
+    S.beltKeys = [[lerpN(S.zDeck, S.zCowl, 0.5), lerpN(b.yD, b.yC, 0.5) + 0.005]];
+    // tyre outer face 2 cm inside the fender at the axle
+    const sh = CBZ.carBody.makeShape(Object.assign({}, S, { trackHalf: 1 }));
+    const hwAx = Math.min(sh.planHalf(zF), sh.planHalf(zR)) + (b.bulge || 0) * 1.0;
+    S.trackHalf = hwAx - 0.02 - b.WW / 2;
+    // doors: clear of the arches, the front one up to the cowl
+    const lead = Math.min(S.zCowl + 0.02, zF - Ra - 0.05);
+    const trail = zR + Ra + 0.06;
+    const plan = [];
+    if (b.doors === 1) plan.push({ row: 0, z0: Math.max(trail, lead - 1.32), z1: lead });
+    else {
+      const bp = zF + b.bp;
+      plan.push({ row: 0, z0: bp + 0.045, z1: lead });
+      plan.push({ row: 1, z0: Math.max(trail, S.zDeck + 0.1), z1: bp - 0.045 });
+      S.pillars = [bp];
+    }
+    if (b.dp) S.pillars = (S.pillars || []).concat(b.dp.map((z) => zF + z));
+    S.doors = [];
+    plan.filter((d) => d.z1 - d.z0 > 0.45).forEach(function (d) {
       [1, -1].forEach(function (side) {
-        addBox(root, cabW * 0.3, peakY * 0.62, 0.1, side * cabW * 0.22, cabBaseY + peakY * 0.5, cabCx - 0.12, interior);               // front seat backs
-      });
-      addBox(root, cabW * 0.7, peakY * 0.5, 0.1, 0, cabBaseY + peakY * 0.42, cabCx - cb * 0.62, interior);                             // rear bench back
-      addBox(root, cabW * 0.8, 0.12, 0.24, 0, cabBaseY + peakY * 0.34, cabCx + cb * 0.62, interior);                                   // dash
-      const swheel = addBox(root, 0.3, 0.26, 0.05, cabW * 0.22, cabBaseY + peakY * 0.4, cabCx + cb * 0.42, interior);                  // steering wheel
-      swheel.rotation.x = -0.5;
-      // occupant anchor: vehicles.js seats a visible low-poly driver/passenger
-      // off this frame (baseY = tub base, peakY = tub height, cx = cabin centre)
-      root.userData.cabinInfo = { baseY: cabBaseY, peakY: peakY, cx: cabCx, w: cabW };
-    }
-
-    // Decklid behind the cabin (not on fastbacks).
-    const fastback = /^(ferrari|enzo|aventador|veyron)$/.test(style);
-    if (!fastback) {
-      const lidFront = cabin[0][0] - 0.02;
-      const lidRear = deckRear - 0.04;
-      const lidLen = Math.max(0.12, lidFront - lidRear);
-      addBox(root, w * 0.72, 0.06, lidLen, 0, bodyTop + 0.02, (lidFront + lidRear) * 0.5, paint);
-    }
-
-    // ---- painted structure over the glass tub: roof cap + B-pillars ----
-    // cabin corners: [0]=rear bottom, [1]=rear top, [2]=front top, [3]=front bottom
-    const rB = cabin[0], rT = cabin[1], fT = cabin[2], fB = cabin[3];
-    const roofW = cabW * flare.roofTuck;
-    const roofLen = Math.max(0.2, fT[0] - rT[0]);
-    // roof cap: slightly proud of the glass top so the paint edge reads as the
-    // roof skin + header rails from every angle.
-    // noSeal, MEASURED: vehicles.js's sealSeams treats any wide flat panel
-    // as a deck slab and skirts it 0.45 m DOWN into the body. On a roof cap
-    // that is a body-coloured block hanging through the entire greenhouse,
-    // 5 cm inside the side glass — a ray through the window met paint at
-    // x=0.80 on a 0.90 half-width tub. The whole dressed cabin was behind it.
-    const cap = addBox(root, roofW + 0.02, 0.05, roofLen + 0.06, 0, cabBaseY + peakY + 0.012, (fT[0] + rT[0]) * 0.5, paint);
-    cap.userData.noSeal = true;
-    // pillars: painted bars along the glass edges so the roof visually
-    // connects to the body instead of hovering on a dark band. A/C pillars
-    // lie in the rake plane (one rotation.x each); B-pillars are vertical.
-    const bpZ = (fT[0] + rT[0]) * 0.5;
-    const pillarX = (cabW * 0.5 + roofW * 0.5) * 0.5 - 0.005;
-    /* PILLARS FOLLOW THE TUMBLEHOME (V3). The glass leans inboard toward the
-       roof (roofTuck), but the pillar bars used to stand in a vertical plane
-       at the AVERAGE x — touching the glass edge at exactly one height and
-       floating off it everywhere else, which is most of why the greenhouse
-       photographed as scaffolding around a tub instead of a glasshouse.
-       One z-lean per pillar lays the bar along the real edge line. */
-    const tumble = cabinV3() ? Math.atan2((cabW - roofW) * 0.5, Math.max(0.12, peakY)) : 0;
-    [1, -1].forEach(function (side) {
-      const bp = addBox(root, 0.035, peakY * 0.94, 0.05, side * pillarX, cabBaseY + peakY * 0.48, bpZ, paint);
-      bp.castShadow = false;
-      bp.rotation.z = side * tumble;
-      // A-pillar (front rake edge) and C-pillar (rear rake edge)
-      [[fB, fT, 1], [rB, rT, -1]].forEach(function (edge) {
-        const bot = edge[0], top = edge[1];
-        const dz = top[0] - bot[0], dy = top[1] - bot[1];
-        const el = Math.hypot(dz, dy);
-        const pm = addBox(root, 0.05, el * 1.02, 0.055, side * pillarX, cabBaseY + (bot[1] + top[1]) * 0.5, (bot[0] + top[0]) * 0.5, paint);
-        pm.rotation.x = Math.atan2(dz, dy);
-        pm.rotation.z = side * tumble;
-        pm.castShadow = false;
+        S.doors.push({ id: (d.row ? "R" : "F") + (side > 0 ? "L" : "R"), side: side, row: d.row, z0: +d.z0.toFixed(4), z1: +d.z1.toFixed(4) });
       });
     });
-    // DLO TRIM (V3): a slim near-black band where the glass meets the body —
-    // the shadow line every real car carries at its beltline. It is the
-    // single cheapest cue that the greenhouse is an OPENING cut into the
-    // body rather than a patch painted on it. Reuses the sill bucket.
-    if (cabinV3()) {
-      // A BAND, NOT A PLATE. This shipped as one solid slab the size of the
-      // cabin footprint, 5 cm thick, at the beltline — a black lid over the
-      // whole interior (measured from the driver's seat: 8 cm under the eye).
-      // Four strips around the perimeter are the shadow line it meant to be.
-      dloFrame(root, cabW + 0.022, cabLen * 0.985, cabCx, cabBaseY + 0.012, sharedMat("sill-" + style, 0x14171c));
-    }
-    // paint cowl at the windshield base so the glass meets bodywork, not air.
-    // ...and OUTSIDE the glass base, not 8 cm inside it: from the seat the
-    // old cowl was a bar of body paint standing above the dash.
-    addBox(root, cabW * 0.94, 0.10, 0.12, 0, cabBaseY + fB[1] + 0.05, fB[0] + 0.05, paint);
+    if (b.bed) S.bed = { z0: -b.L / 2 + b.bed.z0, z1: zF + b.bed.z1, floorY: b.bed.floor };
+    return S;
+  }
+  function lerpN(a, b, t) { return a + (b - a) * t; }
 
-    // SLEEK NOSE: a thin painted hood clamshell over the front deck, sculpted to
-    // SLOPE DOWN toward the nose (r128 vertex trick via slopeBox). Sports cars get
-    // a steep wedge drop + a pinched point; teslas/hatch a gentler fall. This is
-    // what turns a flat-top hull into a car that "leans forward".
-    const noseDrop = ({ ferrari: 0.16, enzo: 0.16, aventador: 0.17, veyron: 0.13, porsche: 0.13, muscle: 0.08, lowrider: 0.07, hatch: 0.07 })[style] || 0.09;
-    const hoodFront = Math.min(len * 0.5, deckFront);
-    const hoodRear = cabin[cabin.length - 1][0] + 0.03;   // from the cowl forward — never inside the cabin
-    const hoodLen = Math.max(0.4, hoodFront - hoodRear);
-    addSculpt(root, w * 0.9, baseH * 0.16, hoodLen, 0, bodyTop - baseH * 0.05, (hoodFront + hoodRear) * 0.5, paint,
-      { noseDrop: noseDrop, frontPinch: /ferrari|enzo|aventador|veyron|porsche/.test(style) ? 0.22 : 0.1 });
+  /* ---- the door leaf as a hinged group (the contract boarding.js,
+     vehicles.js bakeShutDoors / CBZ.carDoorPose, view.js lean and
+     crashdeform's door sag all pose) ---------------------------------- */
+  function loftDoor(root, D, paint, glass, dark) {
+    const d = D.spec, side = d.side;
+    const hx = D.hx, hz = d.z1;
+    const g = new THREE.Group();
+    g.name = "door_" + d.id;
+    g.position.set(hx, 0, hz);
+    const darkGeos = D.geos.dark ? [D.geos.dark] : [];
+    const len = d.z1 - d.z0, zc = (d.z0 + d.z1) * 0.5;
+    const inner = Math.abs(D.hx) - 0.075;          // the card's inner face
+    const box = (w, h, dd, x, y, z) => { const b = new THREE.BoxGeometry(w, h, dd).toNonIndexed(); b.translate(x, y, z); return b; };
+    darkGeos.push(box(0.05, 0.07, len * 0.42, side * (inner - 0.025), D.belt - 0.13, zc - 0.04));   // armrest
+    darkGeos.push(box(0.04, 0.16, len * 0.30, side * (inner - 0.02), D.y0 + 0.17, zc + 0.02));      // door pocket
+    darkGeos.push(box(0.03, 0.03, 0.09, side * (inner - 0.035), D.belt - 0.10, zc - 0.10));         // window switch pod
+    darkGeos.push(box(0.04, 0.03, 0.14, side * (inner - 0.02), D.belt - 0.24, zc + 0.14));          // pull
+    const H = D.handle;                                                                          // outside handle, on the skin
+    darkGeos.push(box(0.03, 0.032, 0.13, H.x + side * 0.012, H.y, H.z));
+    const mk = (geos, mat, shade) => {
+      const list = geos.filter(Boolean).map((x) => (x.index ? x.toNonIndexed() : x));
+      if (!list.length) return null;
+      const geo = concatGeos(list);
+      if (shade) shadeDoorCard(geo, D.y0, D.belt);
+      geo.translate(-hx, 0, -hz);
+      geo._shared = true;
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = false;
+      m.userData.noSeal = true;
+      g.add(m);
+      return m;
+    };
+    const pm = mk([D.geos.paint], paint);
+    if (pm) pm.userData.paintZone = "door";
+    mk(darkGeos, dark, true);
+    mk([D.geos.glass], glass);
+    g.userData.carDoor = {
+      id: d.id, side: side, row: d.row, z0: d.z0, z1: d.z1, len: len,
+      hx: hx, hz: hz, y0: D.y0, belt: D.belt, y1: D.y1,
+    };
+    root.add(g);
+    return g;
+  }
 
-    // sculpted lower body: contrasting rocker/sill + a slim front splitter so the
-    // nose reads as a real bumper, not a flat box face.
-    const sill = sharedMat("sill-" + style, 0x14171c);
-    // two rocker strips, not one slab through the cabin: the full-width box
-    // ran across the floor pan at seat height (a black plate under the seats)
-    [1, -1].forEach(function (sd) { addBox(root, 0.14, 0.14, len * 0.9, sd * (w * 0.5 - 0.05), wheelR + 0.08, 0, sill); });
-    addBox(root, w * 0.96, 0.1, 0.18, 0, wheelR + 0.06, len * 0.5 - 0.04, sill);   // front splitter
-    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, bodyY, cabBaseY);
+  // body mesh from a loft geometry; noSeal because it is authored exact
+  function addBody(root, geo, mat, zone) {
+    if (!geo) return null;
+    geo._shared = true;
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = false;
+    m.userData.noSeal = true;
+    if (zone) m.userData.paintZone = zone;
+    root.add(m);
+    return m;
+  }
+  // a small shaped part: a box with its top/ends sloped (cached per params)
+  function addShaped(root, w, h, d, x, y, z, mat, opts) {
+    const m = addSculpt(root, w, h, d, x, y, z, mat, opts);
+    m.userData.noSeal = true;
+    return m;
+  }
+  // wing mirror: arm + a pod that is wider at the glass than at the arm
+  function addMirrors(root, sec, zM, paint, trim) {
+    const s = sec(zM), P = CBZ.carBody.P;
+    const x0 = s.pts[P.G0][0], y0 = s.pts[P.G0][1];
+    [1, -1].forEach(function (side) {
+      addShaped(root, 0.11, 0.03, 0.06, side * (x0 + 0.05), y0 + 0.035, zM, trim);               // arm
+      const pod = addShaped(root, 0.17, 0.115, 0.10, side * (x0 + 0.15), y0 + 0.075, zM - 0.01, paint,
+        { topTaper: 0.12, frontPinch: 0.35 });
+      pod.rotation.y = side * 0.08;
+      addShaped(root, 0.15, 0.095, 0.012, side * (x0 + 0.15), y0 + 0.075, zM - 0.066, trim);   // the glass face (dark)
+    });
+  }
 
-    // ---- per-model accents (Y anchors re-based on the TALL hull) ----
-    const wingY = bodyTop + 0.14;   // wing/spoiler height above the tall hull
-    if (style === "ferrari") {
-      addBox(root, w * 0.22, 0.22, 0.08, -w * 0.29, bodyY + baseH * 0.34, len * 0.5 + 0.04, sill);
-      addBox(root, w * 0.22, 0.22, 0.08, w * 0.29, bodyY + baseH * 0.34, len * 0.5 + 0.04, sill);
-      addBox(root, w * 0.34, 0.18, 0.08, 0, bodyY + baseH * 0.30, len * 0.5 + 0.05, paint);
-    }
-    if (style === "aventador") addBox(root, w * 0.76, 0.12, 0.16, 0, wingY, -len * 0.42, paint);
-    if (style === "porsche") addBox(root, w * 0.72, 0.1, 0.14, 0, wingY - 0.04, -len * 0.44, paint);
-    if (style === "enzo") {
-      addBox(root, w * 0.92, 0.1, 0.12, 0, wingY - 0.06, -len * 0.44, paint);
-      addBox(root, w * 0.32, 0.1, 0.12, 0, wheelR + 0.34, len * 0.51, sharedMat("enzo-black", 0x101317));
-    }
-    if (style === "veyron") {
-      const orange = sharedMat("veyron-orange", 0xff6b20);
-      addBox(root, w + 0.02, 0.17, len * 0.94, 0, wheelR + 0.12, 0, orange);
-      addBox(root, w * 0.74, 0.12, 0.14, 0, wingY - 0.02, -len * 0.42, paint);
+  function makeRoadCar(style) {
+    const b = BODY[style] || BODY["tesla-3"];
+    const root = new THREE.Group();
+    const paint = paintMat(style, BODY_COLOR[style] || 0xd1262f, PAINT_OPTS[style] || PAINT_OPTS_EXTRA[style]);
+    const glass = glassMat();
+    const trim = roleMat("body-trim", "plastic", 0x14171c);
+    const under = trim;                        // underbody + wheel-well liner: same black, one bucket
+    const S = loftSpec(b);
+    const B = CBZ.carBody.loft(S);
+    const P = CBZ.carBody.P;
+    addBody(root, B.geos.paint, paint, "body");
+    addBody(root, B.geos.paintU, paint, "upper");
+    addBody(root, B.geos.glass, glass);
+    addBody(root, B.geos.trim, trim);
+    addBody(root, B.geos.under, under);
+    root.userData.loftBody = true;
+    // the doors, cut from the shell (see carbody.js pass 4)
+    const cabDark = cabinMat();
+    B.doors.forEach(function (D) { loftDoor(root, D, paint, glass, cabDark); });
+    // the cabin, read off the same shell
+    const zF = S.axles[0], zR = S.axles[1];
+    const midCab = B.section((S.zRoofF + S.zRoofR) / 2);
+    const xG0 = midCab.xG0, xRail = xG0 * S.tumble;
+    // the room runs to the backlight base: a saloon's parcel shelf, a hatch's
+    // or an SUV's cargo floor (the third row lives there on a six-seater)
+    const cabRear = S.zDeck + 0.05;
+    const spans = [];
+    B.doors.forEach(function (D) { if (D.spec.side > 0) spans.push([D.spec.z0, D.spec.z1]); });
+    dressCabin(root, {
+      cabW: xG0 * 2, zR: cabRear, zF: S.zCowl - 0.02,
+      zTR: S.zRoofR, zTF: S.zRoofF, roofW: (xRail - 0.05) * 2,
+      beltY: midCab.yEdge, roofY: S.yRoof - S.roofCrown - 0.02,
+      floorY: S.floorY, rows: b.rows, doorSpans: spans, seatLayout: b.seats || undefined,
+      doors: S.doors.map((d) => ({ id: d.id, side: d.side, row: d.row, z0: d.z0, z1: d.z1 })),
+    });
+    // mirrors at the A-pillar base, plates/lamps/grilles come with the brand face
+    addMirrors(root, B.section, S.zCowl - 0.16, paint, trim);
+    // per-model accents that ride the shell
+    const top = (z) => B.section(z).pts[P.RC][1];
+    const wingZ = -b.L / 2 + 0.22;
+    if (style === "aventador" || style === "porsche" || style === "enzo") {
+      const yT = top(wingZ);
+      const span = b.W * (style === "enzo" ? 0.9 : 0.78);
+      [1, -1].forEach(function (sd) { addShaped(root, 0.04, 0.10, 0.08, sd * span * 0.38, yT + 0.05, wingZ + 0.02, trim); });
+      addShaped(root, span, 0.035, 0.24, 0, yT + 0.115, wingZ, style === "porsche" ? paint : trim, { noseDrop: 0.02 });
     }
     if (style === "muscle") {
-      const black = sharedMat("muscle-black", 0x0c0e12);
-      // hood scoop + twin racing stripes up the long hood (on the tall hull deck)
-      addBox(root, w * 0.34, 0.14, 0.6, 0, bodyTop + 0.06, len * 0.28, black);
-      addBox(root, 0.18, 0.02, len * 0.9, -0.28, bodyTop + 0.005, 0, black);
-      addBox(root, 0.18, 0.02, len * 0.9, 0.28, bodyTop + 0.005, 0, black);
-      // chunky rear wing
-      addBox(root, w * 0.78, 0.08, 0.16, 0, wingY + 0.08, -len * 0.46, black);
-    }
-    if (style === "lowrider") {
-      const chrome = sharedMat("low-chrome", 0xc9ccd2, { emissive: 0x2a2d33, ei: 0.4 });
-      const roof = sharedMat("low-roof", 0xf2f3f6);
-      // chrome rocker trim down both sides + a painted hardtop roof cap
-      addBox(root, w + 0.06, 0.07, len * 0.92, 0, wheelR + 0.05, 0, chrome);
-      const hardtop = addBox(root, roofW + 0.04, 0.06, roofLen * 0.96, 0, cabBaseY + peakY + 0.035, (fT[0] + rT[0]) * 0.5, roof);
-      hardtop.userData.noSeal = true;                                          // same skirt trap as the roof cap
+      const zS = S.zCowl + 0.55;
+      addShaped(root, 0.62, 0.075, 0.70, 0, top(zS) + 0.02, zS, trim, { noseDrop: 0.06, topTaper: 0.12 });   // hood scoop
+      addShaped(root, b.W * 0.8, 0.03, 0.14, 0, top(-b.L / 2 + 0.1) + 0.03, -b.L / 2 + 0.1, paint, { tailDrop: -0.03 });  // ducktail lip
     }
     if (style === "hatch") {
-      const black = sharedMat("hatch-black", 0x14171c);
-      // roof-edge spoiler over the tailgate
-      addBox(root, w * 0.82, 0.06, 0.14, 0, cabBaseY + peakY + 0.02, cabin[0][0] - 0.04, black);
+      const zS = S.zRoofR - 0.02;
+      addShaped(root, (xRail - 0.02) * 2, 0.04, 0.18, 0, top(zS) + 0.012, zS - 0.04, paint, { tailDrop: 0.03 });   // roof spoiler
     }
-    // brand-signature rims + brake rotors; performance cars flash red calipers.
+    if (style === "suv" || style === "tesla-x") {
+      // roof rails on low feet
+      const rl = (S.zRoofF - S.zRoofR) * 0.84, rz = (S.zRoofF + S.zRoofR) / 2;
+      const rail = sharedMat("suv-rail", 0x596069, { emissive: 0x1a1d22, ei: 0.3 });
+      [1, -1].forEach(function (sd) {
+        addShaped(root, 0.05, 0.05, rl, sd * (xRail - 0.07), S.yRoof - S.roofCrown + 0.035, rz, rail, { noseDrop: 0.02, tailDrop: 0.02 });
+      });
+    }
+    if (b.bed) makeBedDetails(root, S, B, trim, paint);
+    if (style === "cybertruck") {
+      // the full-width light bar along the nose's top edge, and the single
+      // bright crease down each flank at the shoulder
+      const nz = b.L / 2 - 0.03, ns = B.section(nz);
+      addShaped(root, ns.xG0 * 2, 0.03, 0.05, 0, ns.yEdge + 0.01, nz, lightFrontMat());
+      const crease = sharedMat("cyber-crease", 0xd4d9dc, { emissive: 0x2e3236, ei: 0.35 });
+      const ms = B.section(0);
+      [1, -1].forEach(function (sd) { addShaped(root, 0.012, 0.02, b.WB * 0.8, sd * (ms.hwS + 0.004), ms.pts[P.S][1], (S.axles[0] + S.axles[1]) / 2, crease); });
+    }
+    // wheels: tucked into the arches (the tyre's outer face 2 cm inside the fender)
     const rimStyle = CBZ.carParts ? CBZ.carParts.rimStyleFor(style) : "sport5";
     const calMat = /ferrari|enzo|aventador|veyron|porsche|muscle/.test(style)
       ? sharedMat("caliper-red", 0xc23030, { emissive: 0x2a0808, ei: 0.4 })
       : sharedMat("caliper-dk", 0x3a3f45);
-    addWheels(root, w + 0.08, len, wheelR, Math.max(0.26, wheelR * 0.92), sill, rimStyle, calMat, s.rf || 0.66);
-    // anchor frame for the carparts.js brand face + per-model identity, applied
-    // per INSTANCE in makeProcedural (templates stay faceless so one silhouette
-    // can serve several marques). Read-only; cloned by reference with userData.
-    root.userData.partCtx = {
-      w: w, len: len, style: style,
-      frontZ: len * 0.5, rearZ: -len * 0.5,
-      baseY: wheelR + 0.10,
-      headY: bodyY + baseH * 0.58, tailY: bodyY + baseH * 0.55,
-      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
-      roofY: cabBaseY + peakY, roofZ: (fT[0] + rT[0]) * 0.5,
-      roofW: roofW, roofLen: roofLen,
-      paint: paint,
-    };
+    const rf = ({ ferrari: 0.72, enzo: 0.72, aventador: 0.73, veyron: 0.72, porsche: 0.71, muscle: 0.62, lowrider: 0.57,
+      hatch: 0.63, suv: 0.58, pickup: 0.56, "tesla-x": 0.64, "tesla-y": 0.64 })[style] || 0.67;
+    placeWheels(root, S, rimStyle, calMat, rf);
+    root.userData.vehicleDims = { width: b.W, length: b.L, height: S.yRoof, wheelbase: b.WB };
+    root.userData.partCtx = loftCtx(style, S, B, b, paint);
     return root;
   }
-
-  function makeCybertruck() {
-    const root = new THREE.Group();
-    // brushed-stainless body: a FRESH 'paint'-role standard material driven to
-    // high metalness (cold steel sheen), _bodyPaint so it recolours per car.
-    // (Was vmat('metal') — but that role returns the fleet-wide CHROME
-    // SINGLETON with colour/opts ignored, so tagging it _bodyPaint made
-    // recolorBody repaint every chrome trim piece on every car built after
-    // the first cybertruck template. 'paint' is fresh-per-call by contract.)
-    const silver = (function () {
-      let m = mats.get("cyber-silver"); if (m) return m;
-      m = vmat("paint", 0xa8afb2, { metalness: 0.86, roughness: 0.32, envMapIntensity: 1.2 }); m._bodyPaint = true; m._shared = true; mats.set("cyber-silver", m); return m;
-    })();
-    const creaseM = sharedMat("cyber-crease", 0xd4d9dc, { emissive: 0x2e3236, ei: 0.35 });
-    const trim = roleMat("cyber-trim", "plastic", 0x20262a);
-    const glass = glassMat();
-    // PROPORTION LAW: pickup, tall hull + cab forward of an open bed. H~1.80.
-    const w = 2.2, len = 5.35, H = 1.80;
-    const wheelR = +(0.245 * H).toFixed(3);           // tire dia 0.49H (Cybertruck 285/65R20 = 879mm / 1795mm — Edmunds)
-    const bodyY = +(wheelR * 0.62).toFixed(3);        // truck rocker rides high
-    const baseH = +(0.58 * H).toFixed(3);             // ~1.04 tall hull (pickup body)
-    const bodyTop = bodyY + baseH;
-    // body shell (tall hull). bed crease via a lower trim band.
-    addBox(root, w, baseH, len, 0, bodyY + baseH * 0.5, 0, silver);
-    addBox(root, w + 0.08, 0.2, len * 0.82, 0, bodyY + 0.12, -0.08, trim);
-    // CYBERTRUCK WEDGE identity: a body-COLORED angular cab prism forward, on the
-    // tall hull deck (base sunk in), with INSET dark glass (no doubled dark mass).
-    const peakY = +(0.40 * baseH).toFixed(3);         // slim cab band, < baseH
-    const cabBaseY = bodyTop - peakY * 0.08;
-    const cabCx = len * 0.05;                          // cab forward of an open bed
-    const cb = len * 0.40 * 0.5, ct = len * 0.40 * 0.30;
-    const cabProf = [[cabCx - cb, 0], [cabCx - ct, peakY], [cabCx + ct, peakY], [cabCx + cb, 0]];
-    addPrism(root, w * 0.93, cabProf, cabBaseY, silver);
-    // inset glass: windshield (front rake) + backlight (rear rake), ~0.7 of face.
-    const rT = cabProf[1], fT = cabProf[2], rB = cabProf[0], fB = cabProf[3];
-    function cyberGlass(zT, zB, sign) {
-      const dz = zT - zB, dy = peakY;
-      const fl = Math.hypot(dz, dy);
-      const nz = (dy / fl) * sign, ny = (-dz / fl) * sign;
-      const midZ = (zT + zB) * 0.5, midY = cabBaseY + peakY * 0.5;
-      const m = new THREE.Mesh(boxGeo(w * 0.78, fl * 0.82, 0.02), glass);
-      // proud, not inset: the cab prism is a thin shell, so glass pushed INWARD
-      // sits fully behind opaque paint and never renders (see rakeGlass above).
-      m.position.set(0, midY + ny * 0.016, midZ + nz * 0.016);
-      m.rotation.x = -Math.atan2(dz, dy);
-      m.material.polygonOffset = true; m.material.polygonOffsetFactor = -1;
-      root.add(m);
-    }
-    cyberGlass(fT[0], fB[0], 1);
-    cyberGlass(rT[0], rB[0], -1);
-    // side windows
-    [1, -1].forEach(function (side) {
-      const sw = addBox(root, 0.02, peakY * 0.72, (ct + cb), side * (w * 0.93 * 0.5 + 0.011), cabBaseY + peakY * 0.55, cabCx, glass);
-      sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
-    });
-    // CAR_CABIN_V2: the wedge had four panes and an empty stainless box behind
-    // them. Same cabin builder as every other body — the truck just gets a
-    // higher hip point out of its own taller floor.
-    dressCabin(root, {
-      cabW: w * 0.93, zR: rB[0], zF: fB[0], zTR: rT[0], zTF: fT[0], roofW: w * 0.80,
-      beltY: cabBaseY, roofY: cabBaseY + peakY,
-      floorY: bodyY + baseH * 0.18,
-    });
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), bodyY + baseH * 0.3, 0, trim);
-      addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
-      // the SINGLE stamped crease line, nose to tail at door-top height — the
-      // signature fold. Colour-true bright lambert so it reads as a caught
-      // highlight whatever the body recolours to.
-      addBox(root, 0.022, 0.05, len * 0.98, side * (w * 0.5 + 0.005), bodyY + baseH * 0.74, 0, creaseM);
-    });
-    // full-width LIGHT BAR capping the nose top edge (headlight-contract
-    // emissive; the Voltra face brow lands just below and the two stack into
-    // one tall bright band, the truck's face signature).
-    addBox(root, w * 0.92, 0.035, 0.06, 0, bodyTop - 0.02, len * 0.5 - 0.01, lightFrontMat());
-    // bed: ribbed roll-cover + bright rail caps + tailgate seam
-    addBox(root, w * 0.84, 0.08, len * 0.3, 0, bodyTop + 0.04, -len * 0.29, trim);   // dark tonneau cover over bed
-    [-0.18, -0.255, -0.33, -0.405].forEach(function (fz) {
-      addBox(root, w * 0.78, 0.022, 0.055, 0, bodyTop + 0.088, len * fz, trim);      // roll-cover ribs
-    });
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.06, 0.03, len * 0.34, side * (w * 0.5 - 0.03), bodyTop + 0.015, -len * 0.29, creaseM);   // bed rail caps
-    });
-    addBox(root, w * 0.68, 0.025, 0.02, 0, bodyTop - 0.34, -len * 0.5 - 0.005, trim);   // tailgate seam
-    // CHUNKY ANGULAR arch flares (the real truck's cue) instead of the round
-    // torus lips: solid trapezoid prisms proud of each flank, wheel below.
-    [len * 0.32, -len * 0.32].forEach(function (wz) {
-      [1, -1].forEach(function (side) {
-        const flare = addPrism(root, 0.18, [
-          [wz - wheelR * 1.62, 0.30], [wz - wheelR * 0.78, wheelR * 2.2],
-          [wz + wheelR * 0.78, wheelR * 2.2], [wz + wheelR * 1.62, 0.30],
-        ], 0, trim);
-        flare.position.x = side * (w * 0.5 + 0.03);
-      });
-    });
-    addWheels(root, w + 0.13, len, wheelR, 0.34, null, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.56);
-    root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.68 };
-    // Voltra face anchors (full-width LED brow + tail blade land on the wedge
-    // hull faces); the angular EV truck skips the bumper blocks.
-    root.userData.partCtx = {
-      w: w, len: len, style: "cybertruck",
-      frontZ: len * 0.5, rearZ: -len * 0.5,
-      baseY: wheelR + 0.12, headY: bodyTop - 0.09, tailY: bodyTop - 0.06,
-      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
-      roofY: cabBaseY + peakY, roofZ: cabCx, roofW: w * 0.8, roofLen: cb + ct,
-      paint: silver, noBumpers: true,
-    };
-    return root;
+  // wheels at the real axle positions (addWheels is symmetric about z=0, so
+  // the parts it adds are shifted onto the axle midpoint afterwards)
+  function placeWheels(root, S, rimStyle, calMat, rf) {
+    const zF = S.axles[0], zR = S.axles[1];
+    const n0 = root.children.length;
+    addWheels(root, S.trackHalf * 2, (zF - zR) / 0.64, S.wheelR, S.wheelW, null, rimStyle, calMat, rf);
+    const mid = (zF + zR) / 2;
+    for (let i = n0; i < root.children.length; i++) root.children[i].position.z += mid;
   }
-
-  // --- a tall boxy 3-box SUV: high greenhouse, roof rails, beefy fenders. ---
-  function makeSUV() {
-    const root = new THREE.Group();
-    const paint = paintMat("suv", 0x2e3a4a, { metalness: 0.45, roughness: 0.42, envMapIntensity: 0.9 });
-    const dark = glassMat();
-    const trim = roleMat("suv-trim", "plastic", 0x14171c);
-    // colour-true satin alu — vmat('metal') would hand back the bright chrome
-    // singleton (colour ignored), and rack hardware should read duller than
-    // the brightwork trim.
-    const rail = sharedMat("suv-rail", 0x596069, { emissive: 0x1a1d22, ei: 0.3 });
-    // PROPORTION LAW: tall 3-box SUV. H~1.74, tall hull + upright greenhouse.
-    const w = 2.16, len = 5.1, H = 1.74;
-    const wheelR = +(0.23 * H).toFixed(3);            // tire dia 0.46H (Grand Cherokee 245/70R17 → 0.44 + art bump)
-    const bodyY = +(wheelR * 0.60).toFixed(3);
-    const baseH = +(0.60 * H).toFixed(3);             // ~1.04 tall hull
-    const bodyTop = bodyY + baseH;
-    // hull as a hullRing prism (not a flat box): near-full height/width at the
-    // very ends (shoulderF/R close to 1 keeps the 3-box SUV silhouette boxy)
-    // but with real fender arches bulging over each wheel + a tucked waist,
-    // so it doesn't read as a slab with wheels bolted beside it.
-    const archZ = len * 0.32;
-    const suvProfile = hullRing(len, baseH, -len * 0.47, len * 0.40, archZ,
-      { shoulderF: 0.90, shoulderR: 0.92, archY: 0.36, bulge: 1.04, tuck: 0.97, noseTuck: 0.90, tailTuck: 0.95 });
-    // (the hull prism is added below, once the cabin corners exist to cut its
-    // door apertures from — see buildCarDoors)
-    addBox(root, w + 0.06, 0.22, len * 0.96, 0, bodyY + 0.12, 0, trim);   // wide fender flares
-    // upright BODY-COLORED greenhouse (paint), base sunk ~8% into the hull deck.
-    // Taller than the old 0.42*baseH: a 3-box SUV reads "boxy" mainly through a
-    // substantial upright greenhouse, not just a flat-topped hull.
-    const peakY = +(0.50 * baseH).toFixed(3);         // ~0.52 tall upright cabin
-    const cabBaseY = bodyTop - peakY * 0.08;
-    const cabCx = -len * 0.02;                         // slightly rearward (long hood)
-    const cb = len * 0.52 * 0.5, ct = len * 0.52 * 0.38;   // upright => gentle rake
-    // glass-tub cab (same pattern as makeRoadCar): tinted prism + painted
-    // roof + pillars + interior. The old paint-shell + proud-glass sandwich
-    // read as a small hut with fins on a limo body (orbit-diagnosed).
-    const cabWs = w * 0.94, roofTuck = 0.88;
-    const suvCab = [[cabCx - cb, 0, 1.0], [cabCx - ct, peakY, roofTuck], [cabCx + ct, peakY, roofTuck], [cabCx + cb, 0, 1.0]];
-    // four real doors, and the hull + tub cut around them (makeRoadCar's law)
-    const suvDoors = buildCarDoors(root, {
-      half: w * 0.5, hullProfile: suvProfile, baseH: baseH, bodyY: bodyY,
-      sillTop: Math.max(baseH * 0.18 + 0.04, 0.24),      // above the 0.22 m fender-flare band
-      cab: suvCab, cabW: cabWs, peakY: peakY, cabBaseY: cabBaseY,
-      plan: layoutDoors(len, suvCab, false),
-      paint: paint, glass: dark, dark: cabinMat(),
-    });
-    addPrism(root, w, suvProfile, bodyY, paint, {
-      holes: suvDoors.hullHoles, jamb: 0.10, jambFloor: baseH * 0.18 - 0.02,
-      deckCut: { z0: suvCab[0][0] + 0.02, z1: suvCab[3][0] - 0.02, half: cabWs * 0.5 - 0.03 },
-    });
-    addPrism(root, cabWs, suvCab, cabBaseY, dark, {
-      holes: suvDoors.tubHoles,
-      floorCut: { z0: suvCab[0][0] + 0.03, z1: suvCab[3][0] - 0.03, half: 0 },
-    });
-    const rB = suvCab[0], rT = suvCab[1], fT = suvCab[2], fB = suvCab[3];
-    const roofWs = cabWs * roofTuck;
-    const sideMidZ = (rT[0] + fT[0]) * 0.5;
-    const sideLen = (fT[0] - rT[0]) * 1.0;
-    // CAR_CABIN_V2: the SUV's whole interior used to be ONE grey block — the
-    // biggest greenhouse in the fleet with the least to look at inside it.
-    // Same builder as every road car; the block is the flag-off fallback.
-    if (!dressCabin(root, {
-      cabW: cabWs, zR: rB[0], zF: fB[0], zTR: rT[0], zTF: fT[0], roofW: roofWs,
-      beltY: cabBaseY, roofY: cabBaseY + peakY,
-      floorY: bodyY + baseH * 0.18, rows: 2, doorSpans: suvDoors.spans,
-    })) {
-      addBox(root, cabWs * 0.88, peakY * 0.45, cb + ct, 0, cabBaseY + peakY * 0.24, cabCx, sharedMat("interior", 0x2a2f36));
-    }
-    const roofSkin = addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
-    roofSkin.userData.noSeal = true;                                          // the sealSeams skirt trap — see makeRoadCar's roof cap
-    addBox(root, 0.07, 0.08, sideLen, w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);  // roof rails
-    addBox(root, 0.07, 0.08, sideLen, -w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);
-    [-0.28, 0.28].forEach(function (fz) {                                                  // rack crossbars between the rails
-      addBox(root, w * 0.72 + 0.14, 0.045, 0.07, 0, cabBaseY + peakY + 0.13, sideMidZ + sideLen * fz, rail);
-    });
-    const pillarXs = (cabWs * 0.5 + roofWs * 0.5) * 0.5 - 0.005;
-    // pillars lean with the tumblehome so they lie ON the glass edge instead
-    // of touching it at one height and floating everywhere else (V3 — same
-    // fix as makeRoadCar, and this greenhouse is the tallest in the fleet, so
-    // the float was worst here: A-pillars visibly ended in mid-air).
-    const tumbleS = cabinV3() ? Math.atan2((cabWs - roofWs) * 0.5, Math.max(0.12, peakY)) : 0;
-    [1, -1].forEach(function (side) {
-      const bp = addBox(root, 0.04, peakY * 0.94, 0.06, side * pillarXs, cabBaseY + peakY * 0.48, sideMidZ, paint);
-      bp.castShadow = false;
-      bp.rotation.z = side * tumbleS;
-      [[fB, fT], [rB, rT]].forEach(function (edge) {
-        const bot = edge[0], top = edge[1];
-        const dz = top[0] - bot[0], dy = top[1] - bot[1];
-        const el = Math.hypot(dz, dy);
-        const pm = addBox(root, 0.055, el * 1.02, 0.06, side * pillarXs, cabBaseY + (bot[1] + top[1]) * 0.5, (bot[0] + top[0]) * 0.5, paint);
-        pm.rotation.x = Math.atan2(dz, dy);
-        pm.rotation.z = side * tumbleS;
-        pm.castShadow = false;
-      });
-    });
-    // DLO trim at the glass base (V3) — see makeRoadCar.
-    if (cabinV3()) {
-      dloFrame(root, cabWs + 0.022, cb * 2 * 0.985, cabCx, cabBaseY + 0.012, trim);   // a band, not a lid
-    }
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
-      // (door seams + handles are on the real doors — buildCarDoors)
-    });
-    // tailgate ladder (overlander cue): two rails + three rungs, in the gap
-    // between the rear spare (|x| < ~0.49) and the Bison vertical tails (~0.76+)
-    [0.54, 0.72].forEach(function (fx) {
-      addBox(root, 0.035, baseH * 0.6, 0.04, fx, bodyY + baseH * 0.52, -len * 0.5 - 0.035, rail);
-    });
-    [0.30, 0.52, 0.74].forEach(function (fy) {
-      addBox(root, 0.24, 0.032, 0.045, 0.63, bodyY + baseH * fy, -len * 0.5 - 0.035, rail);
-    });
-    const suvRoofY = cabBaseY + peakY + 0.05;
-    addSphere(root, wheelR * 1.05, 0, bodyY + baseH * 0.56, -len * 0.51, trim, 1, 1, 0.3);   // rear spare, sized off the real wheel radius (was fixed at 0.46 — bigger than the road wheels on every SUV size)
-    addWheels(root, w + 0.14, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.58);
-    root.userData.vehicleDims = { width: w, length: len, height: suvRoofY + 0.05, wheelbase: len * 0.66 };
-    // Bison face anchors (tall slatted grille, quad lamps, vertical tails).
-    root.userData.partCtx = {
-      w: w, len: len, style: "suv",
-      frontZ: len * 0.5, rearZ: -len * 0.5,
-      baseY: wheelR + 0.16, headY: bodyY + baseH * 0.52, tailY: bodyY + baseH * 0.55,
-      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
-      roofY: suvRoofY, roofZ: sideMidZ, roofW: roofWs, roofLen: sideLen,
+  // anchors for the carparts brand face + accessories: the fascia grids let
+  // lamps/grilles sit ON the curved skin instead of on a flat plane
+  function loftCtx(style, S, B, b, paint) {
+    const P = CBZ.carBody.P;
+    const secN = B.section(b.L / 2 - 0.02), secT = B.section(-b.L / 2 + 0.02);
+    const noseTop = secN.pts[P.RC][1], tailTop = secT.pts[P.RC][1];
+    const faceBot = (s) => s.pts[P.R][1];
+    const midCab = B.section((S.zRoofF + S.zRoofR) / 2);
+    return {
+      w: b.W, len: b.L, style: style, loft: true, noBumpers: true,
+      frontZ: b.L / 2, rearZ: -b.L / 2,
+      baseY: faceBot(secN) + 0.02,
+      headY: lerpN(faceBot(secN), noseTop, 0.72), tailY: lerpN(faceBot(secT), tailTop, 0.68),
+      noseTopY: noseTop, tailTopY: tailTop, bodyY: S.yB, baseH: Math.max(noseTop, tailTop) - S.yB,
+      roofY: S.yRoof, roofZ: (S.zRoofF + S.zRoofR) / 2, roofW: midCab.xG0 * S.tumble * 2, roofLen: S.zRoofF - S.zRoofR,
+      zCowl: S.zCowl, zDeck: S.zDeck, beltY: midCab.yEdge,
+      fz: CBZ.carBody.faceGrid(B, 1, 9, 9), rz: CBZ.carBody.faceGrid(B, -1, 9, 9),
+      lines: CBZ.carBody.lines(B, 32),
+      doors: S.doors.map((d) => [d.z0, d.z1, d.side]),
       paint: paint,
     };
-    return root;
+  }
+  // pickup bed: rail caps, a ribbed floor, tie-down hooks, a tailgate seam
+  function makeBedDetails(root, S, B, trim, paint) {
+    const bed = S.bed, P = CBZ.carBody.P;
+    const mid = B.section((bed.z0 + bed.z1) / 2);
+    const xw = mid.pts[P.G0][0];
+    const blen = bed.z1 - bed.z0, bz = (bed.z0 + bed.z1) / 2;
+    const n = Math.max(4, Math.round(blen / 0.28));
+    for (let i = 0; i < n; i++) {
+      addShaped(root, xw * 2 - 0.04, 0.018, 0.05, 0, bed.floorY + 0.009, bed.z0 + blen * (i + 0.5) / n, trim);   // floor ribs
+    }
+    [1, -1].forEach(function (sd) {
+      addShaped(root, 0.075, 0.025, blen + 0.02, sd * (mid.pts[P.S][0] - 0.03), mid.yEdge + 0.012, bz, trim);    // rail caps
+    });
+    const tail = B.section(-S.L / 2 + 0.03);
+    addShaped(root, tail.xG0 * 1.2, 0.05, 0.03, 0, tail.yEdge - 0.08, -S.L / 2 - 0.004, trim);                  // tailgate handle
   }
 
   /* ============================================================
@@ -2631,174 +2194,158 @@
     });
   }
 
-  // --- a tall long cargo van: flat slab sides (sliding-door crease), short hood. ---
+  /* --- THE VAN: a lofted cab-forward body wrapped round a walk-in hold. ---
+     The shell is the same loft as every road car (short raked nose, steep
+     windscreen, a flat roof running to the tail, real arches) with its TAIL
+     LEFT OPEN: the VAN_HOLD_V1 room — floor, sides, roof and bulkhead as
+     thick noSeal panels just inside the skin — and the bottom-hinged
+     tailgate close it. The hold is carved around the rear wheel tubs (a real
+     van's load floor has them too), so the tyres sit in round arches instead
+     of inside a painted slab. Contract unchanged: holdSpec + the named
+     "van_tailgate" node (city/vehicle_hold.js), dressed cab, two real cab
+     doors (boarding.js poses them like a car's). */
+  const VAN = { L: 5.60, W: 2.10, FO: 0.92, WB: 3.40, R: 0.36, WW: 0.235, gap: 0.07, yB: 0.25 };
   function makeVan() {
     const root = new THREE.Group();
     const paint = paintMat("van", 0xe9ebee, { metalness: 0.4, roughness: 0.48, envMapIntensity: 0.8 });
-    const dark = glassMat();
+    const glass = glassMat();
     const trim = roleMat("van-trim", "plastic", 0x202428);
-    // PROPORTION LAW: tall cab-forward box van. H~1.95, greenhouse merges into box.
-    const w = 2.18, len = 5.6, H = 1.95;
-    const wheelR = +(0.185 * H).toFixed(3);           // tire dia 0.37H (Transit low-roof: small wheels under a tall box IS correct)
-    const bodyY = +(wheelR * 0.58).toFixed(3);
-    const boxH = +(0.82 * H).toFixed(3);              // ~1.60 very tall cargo box
-    const boxTop = bodyY + boxH;
-    /* ---- THE VAN GOT A CAB (CAR_CABIN_V2) -----------------------------
-       The old van had NO cab. Its cargo box ran forward to z = +0.27·len and
-       the hood was one long 55° rake from the nose straight up to the box
-       roof, so the entire volume where a driver sits was solid painted slab
-       with a 0.14·len porthole in each flank. There was nowhere to put an
-       interior, which is why it never had one.
-       The box now stops at +0.13·len (its REAR is untouched at −0.47·len, so
-       the doors, hinges and handle bar all still land) and the front body is
-       one prism carrying a flat cab roof back over the driver plus a 45°
-       Transit windscreen. Same silhouette read from 30 m — a tall white box
-       with a short nose — but there is a room in it now. Flag off: the two
-       ARE the same shape, minus the room. */
-    const vanBoxZ = -len * 0.17, vanBoxD = len * 0.60;     // rear stays at -0.47·len
-    const vanCabFrontZ = vanBoxZ + vanBoxD * 0.5;          // = +0.13·len, the box face
-    const vanRoofTopY = boxH * 0.965;                      // cab roof, local to the prism base
-    // A Transit's windscreen is ~26° off vertical over a SHORT bonnet, not a
-    // 45° sheet running the whole nose (which is what the first pass drew, and
-    // it read as a bus). Steep glass + a real bonnet in front of it is also
-    // what leaves a flat cab roof long enough to sit a driver under.
-    const vanWsBotY = boxH * 0.38, vanWsBotZ = len * 0.418, vanWsTopZ = len * 0.336;
-    const vanNoseY = boxH * 0.35;
-    /* ---- THE BOX IS A ROOM NOW (VAN_HOLD_V1) ---------------------------
-       OWNER: "you bring a van and open the back of it, and put the money in
-       it." That box was ONE SOLID SLAB — the single most-photographed cargo
-       volume in the game and there was nothing inside it, not even air.
-
-       The slab becomes five thin panels whose OUTER faces sit exactly where
-       the slab's faces sat: 0 mm of silhouette change at any distance, and a
-       2.08 × 1.39 × 3.14 m room behind the doors. It is not a room you can
-       stand up straight in — a Transit is 1.4 m inside and this one honours
-       that. It is a room you can crouch in, walk duffels into, and drive away
-       with, and its floor is a real moving platform, so the money is still
-       there at the other end.
-       Flag off → the original slab, byte for byte. */
+    const under = trim;                        // underbody + wheel-well liner: same black, one bucket
+    const v = VAN, zN = v.L / 2, zT = -v.L / 2;
+    const zF = zN - v.FO, zR = zF - v.WB, Ra = v.R + v.gap;
+    const zCowl = zF - 0.18, zRoofF = zCowl - 0.62;
+    const yRoof = 2.04, roofC = 0.03;
     const vanHold = CFG.VAN_HOLD_V1 !== false;
-    const vanWallT = 0.05;
-    const vanFloorTop = bodyY + vanWallT;
-    const vanRoofY = bodyY + boxH - vanWallT;
-    const vanHoldW = w - vanWallT * 2;
-    const vanBoxBackZ = vanBoxZ - vanBoxD / 2, vanBoxFrontZ = vanBoxZ + vanBoxD / 2;
+    const holdFront = zCowl - 1.36;                 // the bulkhead behind the seats
+    const S = {
+      L: v.L, W: v.W, axles: [zF, zR], wheelR: v.R, wheelW: v.WW, archGap: v.gap,
+      yB: v.yB, noseLift: 0.08, tailLift: 0.0,
+      zCowl: zCowl, zRoofF: zRoofF, zRoofR: zT - 0.5, zDeck: zT - 1.0,
+      yNose: 0.98, yCowl: 1.16, yDeck: 1.17, yTail: 1.17, yRoof: yRoof,
+      hoodKeys: [[zN - 0.22, 1.06], [(zCowl + zN) / 2, 1.12]],
+      roofKeys: [[zRoofF, yRoof - 0.03], [zRoofF - 0.5, yRoof], [zT, yRoof]],
+      hoodCrown: 0.03, roofCrown: roofC, deckCrown: 0.02,
+      tumble: 0.975, beltIn: 0.012, shoulderIn: 0.012, shoulderDrop: 0.02,
+      rcNose: 0.26, rcTail: 0.02, endTaperN: 0.04, endTaperT: 0,
+      bulge: 0.018, tuck: 0.004, winF: 0.1, winR: 0,
+      sideGlassR: holdFront + 0.1, archTrim: true, valance: 0.3,
+      openTail: vanHold, floorY: v.yB + 0.15,
+    };
+    const sh0 = CBZ.carBody.makeShape(Object.assign({}, S, { trackHalf: 1 }));
+    S.trackHalf = Math.min(sh0.planHalf(zF), sh0.planHalf(zR)) + S.bulge - 0.02 - v.WW / 2;
+    const lead = Math.min(zCowl + 0.02, zF - Ra - 0.05);
+    S.doors = [];
+    [1, -1].forEach(function (side) {
+      S.doors.push({ id: "F" + (side > 0 ? "L" : "R"), side: side, row: 0, z0: +(holdFront + 0.14).toFixed(4), z1: +lead.toFixed(4) });
+    });
+    const B = CBZ.carBody.loft(S);
+    const P = CBZ.carBody.P;
+    addBody(root, B.geos.paint, paint, "body");
+    addBody(root, B.geos.paintU, paint, "upper");
+    addBody(root, B.geos.glass, glass);
+    addBody(root, B.geos.trim, trim);
+    addBody(root, B.geos.under, under);
+    root.userData.loftBody = true;
+    B.doors.forEach(function (D) { loftDoor(root, D, paint, glass, cabinMat()); });
+    // ---- THE HOLD, just inside the skin ----
+    const tail = B.section(zT + 0.01);
+    const railX = tail.pts[P.G1][0];
+    const wallT = 0.05;
+    const holdHalf = Math.min(railX - 0.012, tail.pts[P.S][0] - 0.02);
+    const holdW = holdHalf * 2;
+    const floorTop = 0.52;
+    const roofY = tail.pts[P.G1][1] - 0.02 - wallT;       // the panel's top stays under the rail
+    const boxBack = zT, boxFront = holdFront;
+    const boxD = boxFront - boxBack, boxZ = (boxFront + boxBack) / 2;
+    const archTop = v.R + Ra + 0.02;
+    const xIn = S.trackHalf - v.WW / 2 - 0.05;
+    const a0 = zR - Ra - 0.02, a1 = zR + Ra + 0.02;       // the rear arch's z-span
+    const deck = roleMat("van-deck", "metal", 0x4e545c);
+    const mark = function (m) { m.userData.noSeal = true; m.userData.holdShell = true; return m; };
+    const pbox = (w, h, d, x, y, z, m) => mark(addBox(root, w, h, d, x, y, z, m));
     if (vanHold) {
-      addHoldShell(root, {
-        w: w, zFront: vanBoxFrontZ, zBack: vanBoxBackZ,
-        floorTop: vanFloorTop, roofY: vanRoofY, wall: vanWallT,
-        mat: paint, deckMat: roleMat("van-deck", "metal", 0x4e545c), bulkMat: paint,
+      const seg = (z0, z1) => [Math.max(boxBack, z0), Math.min(boxFront, z1)];
+      // floor: full width fore and aft of the arch, between the tubs over it
+      [[boxBack, a0, holdW], [a0, a1, xIn * 2], [a1, boxFront, holdW]].forEach(function (f) {
+        const s2 = seg(f[0], f[1]);
+        if (s2[1] - s2[0] > 0.02) pbox(f[2], wallT, s2[1] - s2[0], 0, floorTop - wallT / 2, (s2[0] + s2[1]) / 2, deck);
       });
-    } else {
-      addBox(root, w, boxH, vanBoxD, 0, bodyY + boxH * 0.5, vanBoxZ, paint);
+      [1, -1].forEach(function (sd) {
+        const x = sd * (holdHalf - wallT / 2);
+        [[boxBack, a0, floorTop], [a0, a1, archTop], [a1, boxFront, floorTop]].forEach(function (f) {
+          const s2 = seg(f[0], f[1]);
+          if (s2[1] - s2[0] > 0.02) pbox(wallT, roofY - f[2], s2[1] - s2[0], x, (f[2] + roofY) / 2, (s2[0] + s2[1]) / 2, paint);
+        });
+        // the wheel tub: an inverted U over the tyre (a lid at the arch top,
+        // an inner wall down to the floor), hollow so the tyre has its well
+        const tw = holdHalf - wallT - xIn;
+        pbox(tw + wallT, wallT, a1 - a0, sd * (xIn + tw / 2), archTop + wallT / 2, (a0 + a1) / 2, deck);
+        pbox(wallT, archTop - floorTop + wallT, a1 - a0, sd * (xIn + wallT / 2), (floorTop - wallT + archTop) / 2, (a0 + a1) / 2, deck);
+      });
+      pbox(holdW, wallT, boxD, 0, roofY + wallT / 2, boxZ, paint);                                 // roof lining
+      pbox(holdW, roofY - floorTop + wallT * 2, wallT, 0, (floorTop + roofY) / 2, boxFront - wallT / 2, paint);  // bulkhead
+      // the rear frame: posts, header and a bumper step close the ring
+      // between the skin and the opening
+      const hw = tail.hwLow + 0.005;
+      [1, -1].forEach(function (sd) {
+        pbox(hw - holdHalf + wallT, roofY - v.yB, 0.07, sd * (holdHalf - wallT + (hw - holdHalf + wallT) / 2), (roofY + v.yB) / 2, zT + 0.035, trim);
+      });
+      pbox(hw * 2, tail.pts[P.RC][1] - roofY + 0.01, 0.07, 0, (tail.pts[P.RC][1] + roofY) / 2, zT + 0.035, trim);
+      pbox(hw * 2, floorTop - wallT - v.yB, 0.12, 0, (floorTop - wallT + v.yB) / 2, zT + 0.02, trim);
     }
-    // sliding-door crease line + lower rocker trim down the slab
-    addBox(root, w + 0.02, 0.05, vanBoxD * 0.95, 0, bodyY + boxH * 0.6, vanBoxZ, trim);
-    addBox(root, w + 0.02, 0.18, vanBoxD * 0.97, 0, bodyY + 0.1, vanBoxZ, trim);
-    // CAB + SHORT BONNET as one prism: flat roof over the driver from the box
-    // face forward, the windscreen rake, then the bonnet out to the nose.
-    addPrism(root, w * 0.96, [
-      [vanCabFrontZ, 0], [vanCabFrontZ, vanRoofTopY],
-      [vanWsTopZ, vanRoofTopY], [vanWsBotZ, vanWsBotY],
-      [len * 0.5, vanNoseY], [len * 0.5, 0.2],
-    ], bodyY + 0.06, paint);
-    // raked windscreen: a dark panel LYING ON the rake plane (the old vertical
-    // slab poked through the slope and floated off the nose — orbit-diagnosed).
-    (function () {
-      const botZ = vanWsBotZ, botY = vanWsBotY, topZ = vanWsTopZ, topY = vanRoofTopY;
-      const dz = topZ - botZ, dy = topY - botY, fl = Math.hypot(dz, dy);
-      const nz = dy / fl, ny = -dz / fl;               // outward (up-forward) normal
-      const m = new THREE.Mesh(boxGeo(w * 0.86, fl * 0.86, 0.03), dark);
-      m.position.set(0, bodyY + 0.06 + (botY + topY) * 0.5 + ny * 0.02, (botZ + topZ) * 0.5 + nz * 0.02);
-      m.rotation.x = Math.atan2(dz, dy);
-      root.add(m);
-    })();
-    const vanBeltY = bodyY + boxH * 0.58, vanCabRoofY = bodyY + 0.06 + vanRoofTopY;
-    [1, -1].forEach(function (side) {
-      // a REAL cab side window, sill to header, from the box face to the
-      // A-pillar — the thing you see the driver through from the kerb.
-      addBox(root, 0.03, vanCabRoofY - vanBeltY - 0.09, vanWsTopZ - vanCabFrontZ - 0.04,
-        side * (w * 0.485), (vanBeltY + vanCabRoofY) * 0.5, (vanCabFrontZ + vanWsTopZ) * 0.5, dark);
-      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, vanBoxZ, trim);
-      addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), bodyY + boxH * 0.66, len * 0.4, trim);  // mirrors
-    });
+    // cab
+    const midCab = B.section(zCowl - 0.6);
     dressCabin(root, {
-      cabW: w * 0.92, zR: vanCabFrontZ + 0.07, zF: vanWsBotZ - 0.03,
-      zTR: vanCabFrontZ + 0.08, zTF: vanWsTopZ - 0.06, roofW: w * 0.86,
-      beltY: vanBeltY, roofY: vanCabRoofY - 0.03,
-      floorY: bodyY + boxH * 0.20, rows: 1,
+      cabW: midCab.xG0 * 2, zR: holdFront + 0.04, zF: zCowl - 0.02,
+      zTR: holdFront + 0.06, zTF: zRoofF, roofW: (midCab.xG0 * S.tumble - 0.05) * 2,
+      beltY: midCab.yEdge, roofY: yRoof - roofC - 0.03,
+      floorY: S.floorY, rows: 1, seatLayout: "van3",
+      doorSpans: S.doors.filter((d) => d.side > 0).map((d) => [d.z0, d.z1]),
+      doors: S.doors.map((d) => ({ id: d.id, side: d.side, row: d.row, z0: d.z0, z1: d.z1 })),
     });
-    // fleet livery band down both flanks — an accent lambert that is NOT
-    // _bodyPaint, so a recoloured van keeps its working-fleet stripe.
-    const livery = sharedMat("van-livery", 0x2f5f9e, { emissive: 0x0c1828, ei: 0.35 });
-    [1, -1].forEach(function (side) {
-      addBox(root, 0.02, 0.40, len * 0.42, side * (w * 0.5 + 0.006), bodyY + boxH * 0.38, -len * 0.08, livery);
-    });
-    // kerb-side sliding-door gear: seam, lower roller track, grab handle
-    addBox(root, 0.025, boxH * 0.52, 0.035, w * 0.505, bodyY + boxH * 0.40, len * 0.02, trim);
-    addBox(root, 0.02, 0.035, len * 0.28, w * 0.505, bodyY + boxH * 0.10, -len * 0.06, trim);
-    addBox(root, 0.03, 0.05, 0.15, w * 0.508, bodyY + boxH * 0.42, len * 0.09, trim);
-    /* THE REAR DOOR. It used to be three decals painted on a solid slab: a
-       split seam, four hinge blocks and a handle bar, all stuck to a face
-       nothing was behind. They now ride the door LEAF, so the same hardware you
-       always saw is the hardware that swings — and the hinges are on the hinge.
-       A bottom-hinged tailgate rather than the barn doors the decals implied,
-       because vehicle_hold's door IS the ramp (see addTailgate): one node, one
-       arc, and a surface the money goes up. */
-    const vanLeaf = 1.50;
+    addMirrors(root, B.section, zCowl - 0.12, trim, trim);
+    // kerb-side (-x) sliding-door shut lines + its roller track
+    const sd0 = holdFront - 0.02, sd1 = holdFront - 1.12;
+    const flank = B.section((sd0 + sd1) / 2);
+    const fx = -(flank.pts[P.M][0] + 0.004), yLo = flank.pts[P.R][1] + 0.02, yHi = flank.pts[P.G1][1] - 0.04;
+    [sd0, sd1].forEach(function (z) { addShaped(root, 0.01, yHi - yLo, 0.012, fx, (yLo + yHi) / 2, z, trim); });
+    addShaped(root, 0.012, 0.03, sd0 - sd1 + 0.4, fx - 0.004, flank.pts[P.S][1] - 0.05, (sd0 + sd1) / 2 - 0.2, trim);
+    // three amber clearance markers on the cab roof's leading edge
+    const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
+    [-0.3, 0, 0.3].forEach(function (f) { addShaped(root, 0.10, 0.04, 0.06, f * v.W, yRoof + 0.005, zRoofF - 0.12, marker); });
+    const vanLeaf = Math.min(1.5, roofY - floorTop + 0.06);
     if (vanHold) {
       addTailgate(root, "van_tailgate", {
-        w: vanHoldW, len: vanLeaf, sillZ: vanBoxBackZ, sillTop: vanFloorTop,
+        w: holdW - 0.01, len: vanLeaf, sillZ: boxBack, sillTop: floorTop,
         closedRx: 1.552, mat: paint, ribMat: trim, trimMat: trim, leafT: 0.06,
       });
-    } else {
-      addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
-      [1, -1].forEach(function (side) {                                                   // rear-door hinges + handle bar
-        [0.30, 0.72].forEach(function (fy) {
-          addBox(root, 0.035, 0.09, 0.05, side * (w * 0.5 - 0.05), bodyY + boxH * fy, -len * 0.47 - 0.02, trim);
-        });
-      });
-      addBox(root, 0.03, 0.26, 0.04, 0.11, bodyY + boxH * 0.45, -len * 0.47 - 0.025, trim);
     }
-    // trucker jewellery: three amber clearance markers along the front roof edge
-    // (kills the "rolling fridge" read — the roofline gets a working-vehicle cue).
-    const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
-    [-0.3, 0, 0.3].forEach(function (fx) {
-      // on the CAB roof's leading edge now that there is a cab — the old z was
-      // the cargo box's old front face, which the box no longer reaches.
-      addBox(root, 0.12, 0.06, 0.09, fx * w, vanCabRoofY + 0.02, vanWsTopZ - 0.06, marker);
-    });
-    addWheels(root, w + 0.1, len, wheelR, 0.32, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.52);
-    root.userData.vehicleDims = { width: w, length: len, height: Math.max(boxTop, vanCabRoofY), wheelbase: len * 0.68 };
-    // Bison face anchors: lamps low on the nose, VERTICAL tails riding the tall
-    // box rear corners (rearZ is the box face, not len/2 — the box is set back).
-    root.userData.partCtx = {
-      w: w, len: len, style: "van",
-      // headY well ABOVE the bumper band (baseY): the first render buried the
-      // grille + quad lamps behind the bumper block (both landed at y≈0.49).
-      frontZ: len * 0.5, rearZ: -len * 0.47,
-      baseY: wheelR + 0.12, headY: bodyY + 0.68, tailY: bodyY + boxH - 0.46,
-      noseTopY: bodyY + boxH * 0.55, bodyY: bodyY, baseH: boxH,
-      roofY: boxTop, roofZ: vanBoxZ, roofW: w * 0.9, roofLen: vanBoxD * 0.8,
-      paint: paint,
-    };
-    // THE VAN'S HOLD. Same declaration shape as the semi's and read by the same
-    // three lines in vehicles.js, which is the point: a second freight body
-    // cost a spec object, not a system. See makeSemi for the contract notes.
+    const rimStyle = CBZ.carParts ? CBZ.carParts.rimStyleFor("van") : "steel";
+    placeWheels(root, S, rimStyle, sharedMat("caliper-dk", 0x3a3f45), 0.56);
+    root.userData.vehicleDims = { width: v.W, length: v.L, height: yRoof, wheelbase: v.WB };
+    const ctx = loftCtx("van", S, B, Object.assign({ W: v.W, L: v.L }, v), paint);
+    // the tail lamps ride the rear posts, the plate the bumper step — never
+    // the tailgate, which swings away with anything glued to it
+    ctx.tailX = (tail.hwLow + holdHalf - wallT) / 2;
+    ctx.tailW = Math.max(0.06, tail.hwLow - holdHalf + wallT - 0.02);
+    ctx.tailY = floorTop + 0.35;
+    ctx.rearPlateY = (floorTop - wallT + v.yB) / 2;
+    ctx.rearFlat = true;
+    root.userData.partCtx = ctx;
     if (vanHold) {
       root.userData.holdSpec = {
         id: "van-box", label: "Cargo bay",
-        floor: { x: 0, z: vanBoxZ, w: vanHoldW, d: vanBoxD - vanWallT * 2, top: vanFloorTop },
-        roof: vanRoofY,
+        floor: { x: 0, z: boxZ, w: holdW - wallT * 2, d: boxD - wallT * 2, top: floorTop },
+        roof: roofY,
         walls: [
-          { x: -(w / 2 - vanWallT / 2), z: vanBoxZ, w: vanWallT, d: vanBoxD - vanWallT * 2, y0: vanFloorTop, y1: vanRoofY },
-          { x: (w / 2 - vanWallT / 2), z: vanBoxZ, w: vanWallT, d: vanBoxD - vanWallT * 2, y0: vanFloorTop, y1: vanRoofY },
-          { x: 0, z: vanBoxFrontZ - vanWallT / 2, w: w, d: vanWallT, y0: vanFloorTop, y1: vanRoofY },
+          { x: -(holdHalf - wallT / 2), z: boxZ, w: wallT, d: boxD - wallT * 2, y0: floorTop, y1: roofY },
+          { x: (holdHalf - wallT / 2), z: boxZ, w: wallT, d: boxD - wallT * 2, y0: floorTop, y1: roofY },
+          { x: 0, z: boxFront - wallT / 2, w: holdW, d: wallT, y0: floorTop, y1: roofY },
         ],
         ramp: {
-          nodeName: "van_tailgate", w: vanHoldW, len: vanLeaf,
-          sillZ: vanBoxBackZ, sillTop: vanFloorTop,
-          closedRx: 1.552, openRx: -Math.asin(Math.min(0.98, vanFloorTop / vanLeaf)),
+          nodeName: "van_tailgate", w: holdW - 0.01, len: vanLeaf,
+          sillZ: boxBack, sillTop: floorTop,
+          closedRx: 1.552, openRx: -Math.asin(Math.min(0.98, floorTop / vanLeaf)),
           dir: -1, seconds: 1.5,
         },
       };
@@ -3145,14 +2692,14 @@
       if (!m || Array.isArray(m) || !m._bodyPaint) return;
       if (m._playerCarOwned) {                 // ours already — repaint, don't mint
         if (m.color && m.color.copy) m.color.copy(c);
-        if (m.emissive && m.emissive.copy) m.emissive.copy(c).multiplyScalar(0.16);
+        if (m.emissive && m.emissive.copy) m.emissive.copy(c).multiplyScalar(0.03);
         return;
       }
       let nm = swapped.get(m.id);
       if (!nm) {
         nm = m.clone();
         nm.color = c.clone();
-        if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
+        if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.03);
         nm._shared = false; nm._playerCarOwned = true;
         // RE-APPLIED, NOT INHERITED: Material.clone() does not carry custom
         // props (see the block comment). Without this line the car becomes
@@ -3195,9 +2742,8 @@
   function makeProcedural(style, color, model) {
     let template = procTemplates.get(style);
     if (!template) {
-      if (style === "cybertruck") template = makeCybertruck();
-      else if (style === "suv") template = makeSUV();
-      else if (style === "van") template = makeVan();
+      _cabinStyle = style;                 // dressCabin: which seat model to upholster
+      if (style === "van") template = makeVan();
       // SEMI_TRUCK_V1 off → no builder answers, so the fleet placer below finds
       // nothing to place and no semi exists. Deliberately NOT a fallback to a
       // road car: a truck spawn that quietly becomes a hatchback is worse than
@@ -3214,6 +2760,18 @@
       else if (style === "boat") template = makeBoat();
       else template = makeRoadCar(style);
       markGlassOrder(template);
+      // THE FULL FACE CONTEXT STAYS WITH THE TEMPLATE. Object3D.clone deep-
+      // copies userData through JSON, so a partCtx carrying the paint material
+      // and the fascia grids was serialised again for EVERY car in the city.
+      // The instance keeps a slim, numbers-only copy (same keys, minus the
+      // heavy ones); the face builder reads the full one from here.
+      const full = template.userData.partCtx;
+      if (full) {
+        tplCtx.set(template, full);
+        const slim = {};
+        for (const k in full) if (k !== "paint" && k !== "fz" && k !== "rz" && k !== "lines") slim[k] = full[k];
+        template.userData.partCtx = slim;
+      }
       procTemplates.set(style, template);
     }
     const clone = template.clone(true);
@@ -3229,7 +2787,7 @@
     // silhouette (a Kanzler and a Surge are both "tesla-s"), so the face must
     // follow the catalog model, defaulting to the silhouette's home marque.
     // Applied BEFORE recolorBody so body-colour face panels get the car's paint.
-    const ctx = template.userData.partCtx;
+    const ctx = tplCtx.get(template) || template.userData.partCtx;
     if (ctx && CBZ.carParts) {
       const brand = (model && model.brand) || CBZ.carParts.brandForStyle(style);
       CBZ.carParts.applyBrandFace(clone, brand, ctx);
@@ -3393,7 +2951,8 @@
     if (/boat|speedboat|jetmax|yacht|dinghy/i.test(name)) return "boat";
     if (/van|transit|sprinter|cargo/i.test(name)) return "van";
     if (/cybertruck/i.test(name)) return "cybertruck";
-    if (/f-150|cherokee|escalade|suburban|tahoe|suv|range/i.test(name)) return "suv";
+    if (/f-150|f150|rampart|silverado|ram 1500|pickup|tacoma|tundra/i.test(name)) return "pickup";
+    if (/cherokee|escalade|suburban|tahoe|suv|range/i.test(name)) return "suv";
     if (/mercedes/i.test(name)) return "tesla-s";
     if (/prius|civic|golf|hatch/i.test(name)) return "hatch";
     if (/caravan/i.test(name)) return "tesla-y";
@@ -3402,7 +2961,7 @@
     if (body === "muscle") return "muscle";
     if (body === "suv") return "suv";
     if (body === "van") return "van";
-    if (body === "pickup") return "cybertruck";
+    if (body === "pickup") return "pickup";
     if (body === "coupe") return "porsche";
     if (body === "hatch") return "hatch";
     return "tesla-3";
@@ -3485,6 +3044,7 @@
     const ud = visual.userData;
     const list = ud.playerWheels || [];
     for (let i = 0; i < list.length; i++) list[i].rotation.x -= car.v * dt * 1.6;
+    if (CBZ.carWheelSteer) CBZ.carWheelSteer(car, list, dt, visual);
     // motorcycle leans into the turn — read steering from heading change.
     if (ud.leanRider) {
       const dh = car.heading - (car._lastHeading == null ? car.heading : car._lastHeading);

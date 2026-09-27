@@ -146,9 +146,10 @@
   // live leaves; boarding.js's sweep shuts any leaf nobody claims, so it is
   // claimed every frame exactly as passengerseat.js does)
   let leanDoor = null, leanPane = null;
-  function windowDown(car, sx) {
+  function windowDown(car, sx, seat) {
     if (!CBZ.carDoorPose || !car) return;
-    const id = "F" + (sx > 0 ? "L" : "R");
+    // YOUR seat's window: a back-seat rider leans out of the rear door
+    const id = (seat && seat.doorId) || ("F" + (sx > 0 ? "L" : "R"));
     if (!CBZ.carDoorPose(car, id, 0.003)) return;
     if (!leanDoor || leanDoor.userData.carDoor.id !== id || !leanDoor.parent) {
       leanDoor = null; leanPane = null;
@@ -251,7 +252,8 @@
     resetHead();
     if (fpOn) faceForward(car);
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note(fpOn ? (isHull(car) ? "At the wheel" : "Driver's seat") : "Chase view", 1.0);
+      const ps = CBZ.carPlayerSeat && !isHull(car) ? CBZ.carPlayerSeat(car) : null;
+      CBZ.city.note(fpOn ? (isHull(car) ? "At the wheel" : (!ps || ps.isDriver) ? "Driver's seat" : ps.row ? "Back seat" : "Passenger seat") : "Chase view", 1.0);
     }
     return true;
   }
@@ -289,15 +291,17 @@
     }
     if (fpCar !== car) { fpCar = car; resetHead(); faceForward(car); }
     const ci = marine ? null : (CBZ.carCabinInfo ? CBZ.carCabinInfo(car) : null);
-    const eye = marine ? helmEye(car) : (ci && ci.eye);
+    // THE EYE IS YOUR SEAT'S (city/carseats.js): the wheel, the shotgun seat,
+    // the middle of the back bench, an SUV's third row
+    const seat = (!marine && ci && CBZ.carPlayerSeat) ? CBZ.carPlayerSeat(car) : null;
+    const eye = marine ? helmEye(car) : (seat ? seat.eye : (ci && ci.eye));
     const grp = car.group;
     if (!eye || !grp || !grp.parent) { fpOn = false; return null; }
-    /* WHICH SEAT. ci.eye.x is the DRIVER's half-track (+X, the car's left);
-       riding shotgun (city/passengerseat.js) mirrors it — before this the
-       passenger's body sat on the right and his eye stayed in the driver's
-       head. One sign, same as vehicles.js's seatSideX. */
+    /* WHICH SEAT: the one the player holds (vehicles.js carPlayerSeat, off
+       city/carseats.js) — its eye, its side, its window. */
     const pax = !marine && !!(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car));
-    const sx = pax ? -1 : 1;
+    // which window is yours: a middle seat has none within reach (sx 0)
+    const sx = seat ? seat.side : (pax ? -1 : 1);
     leanSide = sx;
     // A hull's live attitude — heading, trim, heel, the wave seat water_
     // buoyancy composes — is all on the GROUP; carVisual carries the crash
@@ -332,7 +336,7 @@
     }
 
     // ---- the lean, eased ------------------------------------------------
-    const wantLean = CFG.CAR_FP_LEAN !== false && !marine && !!ci &&
+    const wantLean = CFG.CAR_FP_LEAN !== false && !marine && !!ci && sx !== 0 &&
       (leanWant || (firearmInHand() && !!(CBZ.fpsAimHeld && CBZ.fpsAimHeld())));
     if (wantLean && !leanHeld) {
       // taking the window: turn the head to it once, and hold the free-look
@@ -353,7 +357,7 @@
     lean += ((wantLean ? 1 : 0) - lean) * Math.min(1, dt * 7);
     if (lean < 0.002) lean = 0; else if (lean > 0.998) lean = 1;
     const lk = clamp01s(lean);
-    if (lean > 0.05) windowDown(car, sx); else if (leanDoor) windowUp(car);
+    if (lean > 0.05) windowDown(car, sx, seat); else if (leanDoor) windowUp(car);
 
     // ---- where the eye is, in the vehicle's own frame --------------------
     vis.updateWorldMatrix(true, false);
@@ -361,7 +365,7 @@
     // the door line, a touch higher and forward, the way a shoulder goes out
     // of a window first.
     const doorX = (ci && ci.doorX) || Math.abs(eye.x) + 0.42;
-    const ex = sx * (Math.abs(eye.x) + (doorX + 0.22 - Math.abs(eye.x)) * lk);
+    const ex = eye.x + (sx * (doorX + 0.22) - eye.x) * lk;
     const ey = eye.y + 0.03 * lk;
     const ez = eye.z + 0.06 * lk;
     _v.set(ex + head.x, ey + head.buzz, ez + head.z);

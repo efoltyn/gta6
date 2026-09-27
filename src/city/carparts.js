@@ -35,6 +35,17 @@
      • deterministic: nothing here draws randomness — parts derive purely
        from brand/model/style, so multiplayer clients build identical cars.
 
+   ON THE SKIN (the loft wave). The road bodies are curved shells now
+   (city/carbody.js), so every face part is PLACED by `put()` onto the
+   fascia grid the body publishes (ctx.fz / ctx.rz): a lamp sits on the
+   bumper corner it belongs to, turned to the surface, instead of floating
+   in front of a flat plane. Lamps are units (housing, chrome reflector, lit
+   element; tails: dark red lens, lit bar, reverse lamp), every car carries a
+   plain plate front and rear (no text, no marque), and the fleet liveries
+   are built here too: model.livery "police" (white doors + roof over the
+   black paint, a shaped roof bar whose red/blue halves city/police.js
+   flashes by name, push bar, spotlight) and "taxi" (the roof sign).
+
    Loads BEFORE playercars.js / vehicles.js (index.html order).
 ============================================================ */
 (function () {
@@ -157,18 +168,17 @@
     veyron: "vitesse", porsche: "adler",
     "tesla-s": "voltra", "tesla-3": "voltra", "tesla-x": "voltra", "tesla-y": "voltra",
     cybertruck: "voltra",
-    muscle: "bison", lowrider: "bison", suv: "bison", van: "bison",
+    muscle: "bison", lowrider: "bison", suv: "bison", van: "bison", pickup: "bison",
     hatch: "kotori",
   };
 
-  // ---- shared bumper masses: real protruding forms at nose + tail so the
-  //      body no longer falls straight to the ground at both ends. ----
+  // ---- legacy bumper masses: ONLY for a body that does not carry its own
+  //      bumpers (the loft bodies do: ctx.noBumpers). ----
   function addBumpers(root, ctx, chromeStrip) {
     const w = ctx.w, bY = ctx.baseY;
     [[ctx.frontZ + 0.07, 1], [ctx.rearZ - 0.07, -1]].forEach(function (end) {
       const z = end[0];
       add(root, w * 1.02, 0.2, 0.22, 0, bY, z, bumperM());
-      // wrap-around corner caps
       [1, -1].forEach(function (side) {
         add(root, 0.16, 0.2, 0.3, side * w * 0.46, bY, z - end[1] * 0.12, bumperM());
       });
@@ -176,164 +186,263 @@
     });
   }
 
+  /* ============================================================
+     ON THE SKIN. A loft body publishes its nose and tail as a grid of
+     surface z over (x, y) (carbody.js faceGrid). Every face part is placed
+     by `put`: it sits ON the curved fascia at that (x, y), turned to the
+     local surface normal, so a lamp at the bumper corner follows the corner
+     instead of floating in front of it. A body without a grid (the legacy
+     slabs) falls back to its flat frontZ/rearZ plane — the old behaviour.
+  ============================================================ */
+  function gridZ(G, x, y) {
+    const xs = G.xs, ys = G.ys, Z = G.z;
+    x = Math.abs(x);
+    const fx = Math.max(0, Math.min(xs.length - 1.0001, (x - xs[0]) / (xs[1] - xs[0])));
+    const fy = Math.max(0, Math.min(ys.length - 1.0001, (y - ys[0]) / (ys[1] - ys[0])));
+    const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j;
+    // a null cell = the point is outside the body there: use the nearest
+    // valid cell inward (smaller x, then lower y)
+    function at(ii, jj) {
+      for (let a = ii; a >= 0; a--) if (Z[jj][a] != null) return Z[jj][a];
+      for (let b = jj; b >= 0; b--) if (Z[b][ii] != null) return Z[b][ii];
+      return null;
+    }
+    const a = at(i, j), b = at(i + 1, j), c = at(i, j + 1), d = at(i + 1, j + 1);
+    const pick = (p, q) => (p == null ? q : q == null ? p : null);
+    const ab = (a != null && b != null) ? a + (b - a) * u : pick(a, b);
+    const cd = (c != null && d != null) ? c + (d - c) * u : pick(c, d);
+    if (ab == null && cd == null) return null;
+    if (ab == null) return cd;
+    if (cd == null) return ab;
+    return ab + (cd - ab) * v;
+  }
+  function surfZ(ctx, end, x, y) {
+    const G = end > 0 ? ctx.fz : ctx.rz;
+    const flat = end > 0 ? ctx.frontZ : ctx.rearZ;
+    if (!G) return flat;
+    const z = gridZ(G, x, y);
+    return z == null ? flat : z;
+  }
+  const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _n = new THREE.Vector3(), _zA = new THREE.Vector3(0, 0, 1);
+  // place `mesh` on the fascia at (x, y), `proud` metres out along the normal,
+  // turned so its local +z is the outward normal (roll = extra spin about it)
+  function put(mesh, ctx, end, x, y, proud, roll) {
+    const e = 0.035;
+    const z = surfZ(ctx, end, x, y);
+    const zx = (surfZ(ctx, end, x + e, y) - surfZ(ctx, end, x - e, y)) / (2 * e);
+    const zy = (surfZ(ctx, end, x, y + e) - surfZ(ctx, end, x, y - e)) / (2 * e);
+    _n.set(-zx, -zy * end, 1).normalize();                 // the normal in the part's frame (rear parts are turned 180 about y)
+    // limit the turn: a lamp on a corner wraps, it does not face sideways
+    if (_n.z < 0.45) { _n.z = 0.45; _n.normalize(); }
+    _q.setFromUnitVectors(_zA, _n);
+    if (end < 0) { _q2.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); _q.premultiply(_q2); }
+    if (roll) { _q2.setFromAxisAngle(_zA, roll); _q.multiply(_q2); }
+    const wn = _n.clone(); if (end < 0) { wn.x = -wn.x; wn.z = -wn.z; }
+    mesh.position.set(x + wn.x * proud, y + wn.y * proud, z + wn.z * proud);
+    mesh.quaternion.copy(_q);
+    return mesh;
+  }
+
+  // ---- shaped part geometry: rounded rectangles / discs, extruded -------
+  const shapeGeos = new Map();
+  // a rounded slab w x h, `d` deep, its FRONT face at z=0 (back at -d), a
+  // small bevel on the front edge so it catches a highlight like a lens
+  // a rounded slab w x h, `d` deep, its FRONT face at z=0: walls + a
+  // chamfered front, NO back cap (it is always buried in the body) — ~50
+  // triangles, a quarter of an ExtrudeGeometry's, because a face carries
+  // two dozen of these and traffic carries dozens of faces
+  function slabGeo(w, h, d, r, bevel) {
+    const k = [w, h, d, r, bevel || 0].map((v) => (+v).toFixed(3)).join("|");
+    let g = shapeGeos.get(k);
+    if (g) return g;
+    const b = Math.min(bevel || 0, d * 0.5, Math.min(w, h) * 0.2);
+    r = Math.max(0, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3));
+    const ring = (inset) => {
+      const out = [], rr = Math.max(0, r - inset), hw = w / 2 - inset, hh = h / 2 - inset;
+      const cs = [[hw - rr, hh - rr, 0], [-(hw - rr), hh - rr, Math.PI / 2], [-(hw - rr), -(hh - rr), Math.PI], [hw - rr, -(hh - rr), Math.PI * 1.5]];
+      cs.forEach(function (c) {
+        for (let i = 0; i <= 2; i++) { const a = c[2] + (Math.PI / 2) * i / 2; out.push([c[0] + Math.cos(a) * rr, c[1] + Math.sin(a) * rr]); }
+      });
+      return out;
+    };
+    const R0 = ring(0), R1 = ring(b), n = R0.length, pos = [];
+    const tri = (A, B, C) => pos.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const a0 = [R0[i][0], R0[i][1], -d], b0 = [R0[j][0], R0[j][1], -d], a1 = [R0[i][0], R0[i][1], -b], b1 = [R0[j][0], R0[j][1], -b];
+      tri(a0, b0, b1); tri(a0, b1, a1);                                     // wall (ring is CCW: outward)
+      if (b > 0) { const a2 = [R1[i][0], R1[i][1], 0], b2 = [R1[j][0], R1[j][1], 0]; tri(a1, b1, b2); tri(a1, b2, a2); }
+    }
+    const F = b > 0 ? R1 : R0;
+    for (let i = 1; i + 1 < n; i++) tri([F[0][0], F[0][1], 0], [F[i][0], F[i][1], 0], [F[i + 1][0], F[i + 1][1], 0]);
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    g._shared = true;
+    shapeGeos.set(k, g);
+    return g;
+  }
+  function slab(root, w, h, d, r, material, bevel) {
+    const m = new THREE.Mesh(slabGeo(w, h, d, r, bevel), material);
+    m.castShadow = false;
+    m.userData.noSeal = true;
+    root.add(m);
+    return m;
+  }
+
+  // lamp materials beyond the two contract singletons. DRAW CALLS: every
+  // distinct material is one more merged bucket per car, so the reflector
+  // bowl and the plate recess share the grille's black, and the reverse lamp
+  // shares the plate's white.
+  const housing = () => grille();                                                       // dark reflector bowl
+  const reflector = () => M("cp-chrome", "chrome", 0xc4ccd4, { emissive: 0x262b31, ei: 0.3 });
+  const tailLens = () => L("cp-taillens", 0x4a0a10, { emissive: 0x2a0306, ei: 0.5 });    // dark red outer lens (NOT a tail by the detector: r<0.78)
+  const plateM = () => L("cp-plate", 0xe8ebef, { emissive: 0x30343a, ei: 0.35 });
+  const reverseM = () => plateM();                                                      // unlit reverse lamp
+  const plateRim = () => grille();
+
+  /* A HEADLAMP UNIT: a dark reflector housing set into the fascia, a chrome
+     reflector ring and the lit element (the lightFront contract singleton —
+     carlamps.js pushes its emissive at night, crashdeform kills it). */
+  function headLamp(root, ctx, x, y, w, h, roll, kind) {
+    const r = kind === "round" ? Math.min(w, h) / 2 : kind === "brow" ? h / 2 : Math.min(w, h) * 0.32;
+    put(slab(root, w + 0.03, h + 0.03, 0.05, r + 0.015, housing()), ctx, 1, x, y, 0.004, roll);
+    if (kind !== "brow") put(slab(root, w, h, 0.02, r, reflector(), 0.004), ctx, 1, x, y, 0.012, roll);
+    const ew = kind === "brow" ? w : w * (kind === "quad" ? 0.62 : 0.78), eh = kind === "brow" ? h * 0.8 : h * 0.62;
+    put(slab(root, ew, eh, 0.02, Math.min(ew, eh) * 0.45, head(), 0.004), ctx, 1, x + (kind === "brow" ? 0 : Math.sign(x) * w * 0.06), y, 0.024, roll);
+  }
+  /* A TAIL LAMP: dark red lens, a bright bar inside it (the lightTail
+     singleton — vehicles.js swaps it for the braking twin), a reverse lamp. */
+  function tailLamp(root, ctx, x, y, w, h, roll, kind, rev) {
+    const r = kind === "round" ? Math.min(w, h) / 2 : Math.min(w, h) * 0.3;
+    put(slab(root, w + 0.02, h + 0.02, 0.045, r, tailLens(), 0.005), ctx, -1, x, y, 0.004, roll);
+    if (kind === "round") put(slab(root, w * 0.66, h * 0.66, 0.02, w * 0.33, tail()), ctx, -1, x, y, 0.016, roll);
+    else put(slab(root, w * 0.86, Math.max(0.03, h * 0.36), 0.02, 0.012, tail()), ctx, -1, x, y + h * 0.16, 0.016, roll);
+    if (rev) put(slab(root, Math.min(0.12, w * 0.3), Math.max(0.03, h * 0.26), 0.02, 0.01, reverseM()), ctx, -1, x - Math.sign(x) * w * 0.22, y - h * 0.24, 0.016, roll);
+  }
+  // a plain plate in a dark recess (no marque, no text)
+  function plate(root, ctx, end, y) {
+    put(slab(root, 0.56, 0.16, 0.03, 0.012, plateRim()), ctx, end, 0, y, 0.002);
+    put(slab(root, 0.52, 0.12, 0.02, 0.01, plateM()), ctx, end, 0, y, 0.012);
+  }
+  function grilleAt(root, ctx, w, h, y, r, frame) {
+    put(slab(root, w, h, 0.05, r, grille()), ctx, 1, 0, y, 0.003);
+    if (frame) put(slab(root, w + 0.04, 0.025, 0.03, 0.01, frame), ctx, 1, 0, y + h / 2 + 0.005, 0.012);
+  }
+  function pipe(root, ctx, x, y, r, material) {
+    const m = new THREE.Mesh(cylGeo(r, 0.16, 12), material || chrome());
+    m.castShadow = false;
+    const z = surfZ(ctx, -1, x, y);
+    m.position.set(x, y, z - 0.02);
+    m.rotation.x = Math.PI / 2;
+    root.add(m);
+    const inner = new THREE.Mesh(cylGeo(r * 0.72, 0.165, 10), grille());
+    inner.position.copy(m.position); inner.rotation.x = Math.PI / 2;
+    root.add(inner);
+  }
+
   // ============================================================
-  //  BRAND FACES — grille + lamps + badge + exhaust + rear treatment.
-  //  ctx anchors: { w, len, frontZ, rearZ, baseY, headY, tailY, noseTopY,
-  //                 baseH, paint (optional body-paint material), noBumpers }
+  //  BRAND FACES — the design language, placed ON the skin.
+  //  ctx (playercars loftCtx): w, frontZ/rearZ, baseY (valance), headY,
+  //  tailY, noseTopY, fz/rz grids, lines, paint, noBumpers
   // ============================================================
   const FACES = {
     falcone: function (root, ctx) {
-      const w = ctx.w;
-      // low wide mouth + splitter (the exotic gets aero, not a bumper block)
-      add(root, w * 0.66, 0.17, 0.06, 0, ctx.baseY + 0.07, ctx.frontZ + 0.03, grille());
-      add(root, w * 0.94, 0.08, 0.24, 0, ctx.baseY - 0.05, ctx.frontZ + 0.04, darkTrim());
-      // slanted slim headlamps + inner DRL chip
-      [1, -1].forEach(function (side) {
-        const bez = add(root, w * 0.28, 0.11, 0.04, side * w * 0.30, ctx.headY, ctx.frontZ + 0.015, darkTrim());
-        const lamp = add(root, w * 0.25, 0.075, 0.06, side * w * 0.30, ctx.headY, ctx.frontZ + 0.035, head());
-        bez.rotation.z = lamp.rotation.z = side * -0.20;
+      const w = ctx.w, hy = ctx.headY;
+      // a low wide mouth under a slim nose, twin side intakes
+      put(slab(root, w * 0.46, 0.11, 0.05, 0.05, grille()), ctx, 1, 0, ctx.baseY + 0.07, 0.003);
+      [1, -1].forEach(function (s) {
+        put(slab(root, w * 0.16, 0.12, 0.05, 0.04, grille()), ctx, 1, s * w * 0.34, ctx.baseY + 0.08, 0.003, s * 0.12);
+        headLamp(root, ctx, s * w * 0.33, hy, w * 0.22, 0.075, s * -0.16, "slant");
       });
-      add(root, 0.11, 0.15, 0.035, 0, ctx.headY + 0.03, ctx.frontZ + 0.045, badgeGold());   // shield badge
-      // twin ROUND tail lamps per side in a dark panel — the house signature,
-      // each lamp ringed by a chrome bezel (exotic-house jewellery)
-      add(root, w * 0.9, 0.24, 0.04, 0, ctx.tailY, ctx.rearZ - 0.005, darkTrim());
-      [1, -1].forEach(function (side) {
-        [0.34, 0.19].forEach(function (fx) {
-          addRound(root, 0.085, 0.06, side * w * fx, ctx.tailY, ctx.rearZ - 0.03, tail());
-          addRing(root, 0.092, 0.014, side * w * fx, ctx.tailY, ctx.rearZ - 0.062, chrome());
-        });
+      put(slab(root, 0.07, 0.09, 0.02, 0.02, badgeGold()), ctx, 1, 0, hy + 0.02, 0.01);
+      // twin round tails a side, quad pipes in a finned diffuser
+      [1, -1].forEach(function (s) {
+        [0.36, 0.23].forEach(function (fx) { tailLamp(root, ctx, s * w * fx, ctx.tailY, 0.13, 0.13, 0, "round", false); });
       });
-      add(root, 0.10, 0.13, 0.03, 0, ctx.tailY, ctx.rearZ - 0.035, badgeGold());
-      // centred quad exhaust + finned diffuser
-      [-0.22, -0.09, 0.09, 0.22].forEach(function (fx) {
-        addRound(root, 0.05, 0.12, fx * w, ctx.baseY + 0.02, ctx.rearZ - 0.05, chrome(), 10);
-      });
-      add(root, w * 0.72, 0.11, 0.12, 0, ctx.baseY - 0.04, ctx.rearZ - 0.04, grille());
-      [-0.18, 0, 0.18].forEach(function (fx) {
-        add(root, 0.035, 0.15, 0.14, fx * w, ctx.baseY - 0.04, ctx.rearZ - 0.05, darkTrim());
-      });
+      put(slab(root, w * 0.62, 0.12, 0.06, 0.03, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.003);
+      [-0.2, -0.08, 0.08, 0.2].forEach(function (fx) { pipe(root, ctx, fx * w, ctx.baseY + 0.03, 0.042); });
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 + 0.02);
     },
-
     adler: function (root, ctx) {
-      const w = ctx.w;
+      const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, true);
-      // twin horizontal chrome bars over a dark inner grille
-      add(root, w * 0.54, 0.17, 0.04, 0, ctx.headY - 0.06, ctx.frontZ + 0.02, grille());
-      [-0.045, 0.045].forEach(function (dy) {
-        add(root, w * 0.5, 0.035, 0.05, 0, ctx.headY - 0.06 + dy, ctx.frontZ + 0.035, chrome());
+      grilleAt(root, ctx, w * 0.42, 0.12, ctx.baseY + 0.12, 0.04, chrome());
+      put(slab(root, w * 0.5, 0.1, 0.05, 0.04, grille()), ctx, 1, 0, ctx.baseY + 0.02, 0.003);   // lower intake
+      [1, -1].forEach(function (s) {
+        headLamp(root, ctx, s * w * 0.32, hy, 0.24, 0.15, s * -0.08, "round");
+        put(slab(root, 0.05, 0.04, 0.02, 0.012, amber()), ctx, 1, s * w * 0.44, hy - 0.08, 0.008);
       });
-      // oval lamps (flattened rounds) + amber corner markers
-      [1, -1].forEach(function (side) {
-        const hb = addRound(root, 0.12, 0.05, side * w * 0.31, ctx.headY, ctx.frontZ + 0.02, darkTrim(), 14);
-        hb.scale.set(1.5, 1, 0.9);
-        const hl = addRound(root, 0.10, 0.06, side * w * 0.31, ctx.headY, ctx.frontZ + 0.035, head(), 14);
-        hl.scale.set(1.45, 1, 1);
-        add(root, 0.06, 0.055, 0.05, side * w * 0.465, ctx.headY, ctx.frontZ + 0.02, amber());
-      });
-      addRound(root, 0.07, 0.035, 0, ctx.headY + 0.11, ctx.frontZ + 0.04, chrome(), 14);   // roundel badge
-      addRound(root, 0.032, 0.02, 0, ctx.headY + 0.11, ctx.frontZ + 0.062, grille(), 10);  // dark quartered centre
-      // full-width slim tail bar with a chrome underline
-      add(root, w * 0.86, 0.05, 0.04, 0, ctx.tailY - 0.08, ctx.rearZ - 0.02, chrome());
-      add(root, w * 0.84, 0.10, 0.06, 0, ctx.tailY, ctx.rearZ - 0.012, tail());
-      // dual wide oval exhausts
-      [1, -1].forEach(function (side) {
-        add(root, 0.17, 0.09, 0.11, side * w * 0.30, ctx.baseY + 0.02, ctx.rearZ - 0.05, chrome());
-      });
+      put(slab(root, 0.08, 0.08, 0.015, 0.04, chrome()), ctx, 1, 0, hy + 0.02, 0.01);            // roundel
+      // full-width slim tail bar
+      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * w * 0.26, ctx.tailY, w * 0.42, 0.08, 0, "bar", true); });
+      [1, -1].forEach(function (s) { pipe(root, ctx, s * w * 0.3, ctx.baseY + 0.03, 0.045); });
+      plate(root, ctx, 1, ctx.baseY + 0.04);
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2);
     },
-
     bison: function (root, ctx) {
-      const w = ctx.w;
+      const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, true);
-      // tall slatted grille + thick chrome crossbar + red badge bar
-      const gH = Math.min(0.34, ctx.baseH * 0.34);
-      add(root, w * 0.56, gH, 0.06, 0, ctx.headY - 0.03, ctx.frontZ + 0.02, grille());
-      for (let i = -2; i <= 2; i++) {
-        add(root, 0.045, gH * 0.9, 0.045, i * w * 0.105, ctx.headY - 0.03, ctx.frontZ + 0.035, darkTrim());
-      }
-      add(root, w * 0.6, 0.065, 0.05, 0, ctx.headY - 0.03, ctx.frontZ + 0.045, chrome());
-      add(root, 0.17, 0.08, 0.035, 0, ctx.headY - 0.03, ctx.frontZ + 0.055, badgeRed());
-      // square QUAD headlamps in dark bezels
-      [1, -1].forEach(function (side) {
-        add(root, 0.27, 0.14, 0.04, side * w * 0.345, ctx.headY, ctx.frontZ + 0.015, darkTrim());
-        add(root, 0.11, 0.11, 0.06, side * (w * 0.345 - 0.065), ctx.headY, ctx.frontZ + 0.035, head());
-        add(root, 0.11, 0.11, 0.06, side * (w * 0.345 + 0.065), ctx.headY, ctx.frontZ + 0.035, head());
-      });
-      // VERTICAL stacked tail lamps at the rear corners
-      const tH = Math.max(0.22, Math.min(0.5, ctx.baseH * 0.3));
-      [1, -1].forEach(function (side) {
-        add(root, 0.13, tH + 0.06, 0.04, side * w * 0.38, ctx.tailY, ctx.rearZ - 0.005, darkTrim());
-        add(root, 0.10, tH, 0.065, side * w * 0.38, ctx.tailY, ctx.rearZ - 0.02, tail());
-      });
-      add(root, 0.17, 0.08, 0.03, 0, ctx.tailY, ctx.rearZ - 0.03, badgeRed());
-      // offset dual pipes
-      [1, -1].forEach(function (side) {
-        addRound(root, 0.055, 0.14, side * w * 0.33, ctx.baseY + 0.01, ctx.rearZ - 0.06, chrome(), 10);
-      });
+      // tall slatted grille with a chrome crossbar and a red badge bar
+      const gH = Math.max(0.16, Math.min(0.32, (hy - ctx.baseY) * 1.1));
+      const gy = (hy + ctx.baseY) / 2 + 0.03;
+      put(slab(root, w * 0.5, gH, 0.05, 0.03, grille()), ctx, 1, 0, gy, 0.003);
+      for (let i = -2; i <= 2; i++) put(slab(root, 0.028, gH * 0.9, 0.02, 0.006, darkTrim()), ctx, 1, i * w * 0.09, gy, 0.012);
+      put(slab(root, w * 0.54, 0.05, 0.03, 0.012, chrome()), ctx, 1, 0, gy, 0.02);
+      put(slab(root, 0.14, 0.06, 0.02, 0.012, badgeRed()), ctx, 1, 0, gy, 0.034);
+      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.37, hy, 0.24, 0.13, 0, "quad"); });
+      // vertical tails at the corners
+      const tH = Math.max(0.2, Math.min(0.42, (ctx.tailTopY || ctx.tailY + 0.2) - ctx.baseY - 0.12));
+      // (a body with a rear opening says where its lamps may go: the van's
+      // tail posts, its bumper step — never the door that swings away)
+      const tx = ctx.tailX != null ? ctx.tailX : w * 0.4;
+      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * tx, ctx.tailY, ctx.tailW || 0.11, tH, 0, "bar", true); });
+      [1, -1].forEach(function (s) { pipe(root, ctx, s * w * 0.32, ctx.baseY - 0.01, 0.05); });
+      plate(root, ctx, 1, ctx.baseY + 0.02);
+      plate(root, ctx, -1, ctx.rearPlateY != null ? ctx.rearPlateY : (ctx.baseY + ctx.tailY) / 2);
     },
-
     voltra: function (root, ctx) {
-      const w = ctx.w;
+      const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, false);
-      // closed body-colour nose panel + slim LED brow + low aero slot
-      if (ctx.paint) add(root, w * 0.6, 0.13, 0.05, 0, ctx.headY - 0.05, ctx.frontZ + 0.02, ctx.paint);
-      // The brow is a SLIM strip and stays one: sealSeams inflates any box
-      // axis ≤0.09 by +0.04, which swelled this 0.055 lamp 73% into the fat
-      // white tube filmed across every oncoming Voltra nose. Author the depth
-      // past the inflation threshold (buried into the panel, so the seam stays
-      // sealed) and pin the height with noSeal.
-      add(root, w * 0.72, 0.05, 0.10, 0, ctx.headY + 0.055, ctx.frontZ - 0.01, head()).userData.noSeal = true;
-      add(root, w * 0.5, 0.08, 0.05, 0, ctx.baseY + 0.05, ctx.frontZ + 0.03, grille());
-      // chevron badge (two chrome dashes forming a V)
-      [1, -1].forEach(function (side) {
-        const b = add(root, 0.10, 0.03, 0.035, side * 0.043, ctx.headY - 0.045, ctx.frontZ + 0.045, chrome());
-        b.rotation.z = side * -0.65;
+      // closed nose: a slim LED brow each side + a low aero slot, no grille
+      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.33, hy, w * 0.2, 0.05, s * -0.05, "brow"); });
+      put(slab(root, w * 0.44, 0.07, 0.05, 0.03, grille()), ctx, 1, 0, ctx.baseY + 0.05, 0.003);
+      [1, -1].forEach(function (s) {
+        const b = put(slab(root, 0.07, 0.02, 0.015, 0.008, chrome()), ctx, 1, s * 0.03, hy + 0.01, 0.01, s * -0.6);
+        b.userData.noSeal = true;
       });
-      // full-width red tail blade + dark valance (same slim-lamp rule as the brow)
-      add(root, w * 0.9, 0.05, 0.04, 0, ctx.tailY - 0.075, ctx.rearZ - 0.015, darkTrim());
-      add(root, w * 0.88, 0.075, 0.10, 0, ctx.tailY, ctx.rearZ + 0.02, tail()).userData.noSeal = true;
-      add(root, w * 0.6, 0.1, 0.1, 0, ctx.baseY - 0.02, ctx.rearZ - 0.03, grille());   // diffuser, no pipes
+      // full-width tail blade
+      tailLamp(root, ctx, 0, ctx.tailY, w * 0.84, 0.06, 0, "bar", false);
+      put(slab(root, w * 0.5, 0.08, 0.05, 0.03, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.003);
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2 - 0.02);
     },
-
     kotori: function (root, ctx) {
-      const w = ctx.w;
+      const w = ctx.w, hy = ctx.headY;
       if (!ctx.noBumpers) addBumpers(root, ctx, false);
-      // slim upper slot + big lower mouth = the friendly "smile"
-      add(root, w * 0.36, 0.055, 0.05, 0, ctx.headY, ctx.frontZ + 0.025, grille());
-      add(root, w * 0.56, 0.15, 0.05, 0, ctx.baseY + 0.09, ctx.frontZ + 0.03, grille());
-      add(root, w * 0.58, 0.035, 0.04, 0, ctx.baseY + 0.175, ctx.frontZ + 0.035, chrome());
-      // compact rectangular lamps + tiny amber corner
-      [1, -1].forEach(function (side) {
-        add(root, 0.24, 0.11, 0.04, side * w * 0.315, ctx.headY, ctx.frontZ + 0.015, darkTrim());
-        add(root, 0.20, 0.085, 0.06, side * w * 0.30, ctx.headY, ctx.frontZ + 0.035, head());
-        add(root, 0.055, 0.07, 0.05, side * w * 0.44, ctx.headY, ctx.frontZ + 0.025, amber());
+      // slim upper slot + a big lower "smile"
+      put(slab(root, w * 0.34, 0.05, 0.05, 0.02, grille()), ctx, 1, 0, hy, 0.003);
+      put(slab(root, w * 0.5, 0.14, 0.05, 0.05, grille()), ctx, 1, 0, ctx.baseY + 0.06, 0.003);
+      [1, -1].forEach(function (s) {
+        headLamp(root, ctx, s * w * 0.32, hy, 0.22, 0.1, s * -0.06, "rect");
+        put(slab(root, 0.05, 0.05, 0.02, 0.012, amber()), ctx, 1, s * w * 0.45, hy - 0.02, 0.008);
       });
-      addRound(root, 0.05, 0.035, 0, ctx.headY, ctx.frontZ + 0.045, badgeRed(), 12);   // red-dot badge
-      // twin compact square tails + a small silver reverse chip
-      [1, -1].forEach(function (side) {
-        add(root, 0.20, 0.15, 0.04, side * w * 0.33, ctx.tailY, ctx.rearZ - 0.005, darkTrim());
-        add(root, 0.16, 0.12, 0.065, side * w * 0.33, ctx.tailY, ctx.rearZ - 0.02, tail());
-        add(root, 0.06, 0.06, 0.05, side * w * 0.19, ctx.tailY, ctx.rearZ - 0.02, silverM());
-      });
-      addRound(root, 0.045, 0.1, -w * 0.28, ctx.baseY + 0.01, ctx.rearZ - 0.05, chrome(), 10);   // one shy pipe
+      put(slab(root, 0.06, 0.06, 0.015, 0.03, badgeRed()), ctx, 1, 0, hy, 0.02);
+      [1, -1].forEach(function (s) { tailLamp(root, ctx, s * w * 0.36, ctx.tailY, 0.18, 0.13, 0, "rect", true); });
+      pipe(root, ctx, -w * 0.28, ctx.baseY - 0.01, 0.038);
+      plate(root, ctx, 1, ctx.baseY + 0.06 - 0.1);
+      plate(root, ctx, -1, (ctx.baseY + ctx.tailY) / 2);
     },
-
     vitesse: function (root, ctx) {
-      const w = ctx.w;
-      // chrome horseshoe grille, front and centre
-      addRound(root, 0.11, 0.05, 0, ctx.headY - 0.05, ctx.frontZ + 0.03, grille(), 14);
-      addRing(root, 0.12, 0.028, 0, ctx.headY - 0.05, ctx.frontZ + 0.045, chrome());
-      add(root, w * 0.9, 0.08, 0.2, 0, ctx.baseY - 0.04, ctx.frontZ + 0.04, darkTrim());   // splitter lip
-      // slim rectangular lamps
-      [1, -1].forEach(function (side) {
-        add(root, 0.20, 0.09, 0.04, side * w * 0.30, ctx.headY, ctx.frontZ + 0.015, darkTrim());
-        add(root, 0.17, 0.07, 0.06, side * w * 0.30, ctx.headY, ctx.frontZ + 0.035, head());
-      });
-      add(root, 0.08, 0.10, 0.035, 0, ctx.headY + 0.1, ctx.frontZ + 0.04, badgeGold());
-      // framed full-width tail bar + one huge centre exhaust
-      add(root, w * 0.84, 0.15, 0.04, 0, ctx.tailY, ctx.rearZ - 0.005, chrome());
-      add(root, w * 0.8, 0.10, 0.06, 0, ctx.tailY, ctx.rearZ - 0.018, tail());
-      add(root, 0.2, 0.13, 0.12, 0, ctx.baseY + 0.02, ctx.rearZ - 0.05, chrome());
-      add(root, w * 0.66, 0.1, 0.1, 0, ctx.baseY - 0.04, ctx.rearZ - 0.03, grille());
+      const w = ctx.w, hy = ctx.headY;
+      // chrome horseshoe grille front and centre, slim lamps
+      put(slab(root, 0.2, 0.2, 0.05, 0.1, grille()), ctx, 1, 0, hy - 0.06, 0.003);
+      put(slab(root, 0.24, 0.024, 0.03, 0.01, chrome()), ctx, 1, 0, hy + 0.04, 0.012);
+      put(slab(root, w * 0.56, 0.08, 0.05, 0.03, grille()), ctx, 1, 0, ctx.baseY + 0.03, 0.003);
+      [1, -1].forEach(function (s) { headLamp(root, ctx, s * w * 0.31, hy, 0.2, 0.07, s * -0.04, "rect"); });
+      tailLamp(root, ctx, 0, ctx.tailY, w * 0.78, 0.09, 0, "bar", false);
+      put(slab(root, 0.2, 0.12, 0.05, 0.05, chrome()), ctx, -1, 0, ctx.baseY + 0.02, 0.004);
+      put(slab(root, 0.14, 0.08, 0.05, 0.04, grille()), ctx, -1, 0, ctx.baseY + 0.02, 0.02);
     },
   };
 
@@ -344,46 +453,155 @@
     face(root, ctx);
   }
 
+  // ---- a strip laid along the body's top line (stripes), skipping glass ---
+  function topStrip(root, ctx, xOff, halfW, material, lift) {
+    if (!ctx.lines || !ctx.lines.top) return;
+    const T = ctx.lines.top, pos = [];
+    for (let i = 0; i + 1 < T.length; i++) {
+      const a = T[i], b = T[i + 1];
+      const onGlass = (g) => g > 0.02 && g < 0.98;
+      if (onGlass(a[4]) || onGlass(b[4])) continue;
+      const ya = a[1] + lift, yb = b[1] + lift;
+      const x0 = xOff - halfW, x1 = xOff + halfW;
+      pos.push(x0, ya, a[0], x1, ya, a[0], x1, yb, b[0], x0, ya, a[0], x1, yb, b[0], x0, yb, b[0]);
+    }
+    if (!pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, material);
+    m.userData.noSeal = true;
+    root.add(m);
+  }
+  function topAt(ctx, z) {
+    const T = ctx.lines && ctx.lines.top;
+    if (!T) return ctx.noseTopY;
+    for (let i = 0; i + 1 < T.length; i++) if (z >= T[i][0] && z <= T[i + 1][0]) {
+      const u = (z - T[i][0]) / Math.max(1e-6, T[i + 1][0] - T[i][0]);
+      return T[i][1] + (T[i + 1][1] - T[i][1]) * u;
+    }
+    return T[z < T[0][0] ? 0 : T.length - 1][1];
+  }
+
   // ---- ROOF ACCESSORIES ----------------------------------------------------
+  const extr = new Map();
+  // a trapezoid prism across x: the taxi sign / lightbar body
+  function trapGeo(w, h, dBot, dTop) {
+    const k = [w, h, dBot, dTop].join("|");
+    let g = extr.get(k);
+    if (g) return g;
+    const s = new THREE.Shape();
+    s.moveTo(-dBot / 2, 0); s.lineTo(dBot / 2, 0); s.lineTo(dTop / 2, h); s.lineTo(-dTop / 2, h); s.lineTo(-dBot / 2, 0);
+    g = new THREE.ExtrudeGeometry(s, { depth: w, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.01, bevelSegments: 1 });
+    g.translate(0, 0, -w / 2);
+    g.rotateY(Math.PI / 2);        // extrude axis z -> x; the trapezoid now spans z (depth) and y
+    g.computeVertexNormals();
+    g._shared = true;
+    extr.set(k, g);
+    return g;
+  }
   function addTaxiSign(root, ctx) {
-    const signM = L("cp-taxisign", 0xf8e46b, { emissive: 0x5a4a14, ei: 0.5 });
-    add(root, 0.62, 0.2, 0.3, 0, ctx.roofY + 0.11, ctx.roofZ || 0, signM);
-    // checker band down both flanks at the beltline
-    add(root, ctx.w + 0.03, 0.1, ctx.len * 0.46, 0, ctx.bodyY + ctx.baseH * 0.5, -ctx.len * 0.03, darkTrim());
+    const signM = L("cp-taxisign", 0xf8e46b, { emissive: 0x8a7020, ei: 0.7 });
+    const z = ctx.roofZ || 0;
+    add(root, 0.5, 0.03, 0.18, 0, ctx.roofY + 0.012, z, darkTrim()).userData.noSeal = true;   // mount
+    const s = new THREE.Mesh(trapGeo(0.62, 0.17, 0.28, 0.12), signM);
+    s.position.set(0, ctx.roofY + 0.025, z);
+    s.userData.noSeal = true;
+    root.add(s);
+    if (!ctx.loft) add(root, ctx.w + 0.03, 0.1, ctx.len * 0.46, 0, ctx.bodyY + ctx.baseH * 0.5, -ctx.len * 0.03, darkTrim());
   }
   function addRoofRails(root, ctx) {
     const railM = L("cp-rail", 0x8f979f, { emissive: 0x1a1d22, ei: 0.3 });
     [1, -1].forEach(function (side) {
-      add(root, 0.06, 0.06, (ctx.roofLen || ctx.len * 0.36), side * (ctx.roofW || ctx.w * 0.8) * 0.42, ctx.roofY + 0.06, ctx.roofZ || 0, railM);
+      add(root, 0.05, 0.05, (ctx.roofLen || ctx.len * 0.36) * 0.86, side * (ctx.roofW || ctx.w * 0.8) * 0.44, ctx.roofY + 0.01, ctx.roofZ || 0, railM).userData.noSeal = true;
     });
   }
 
+  /* THE BLACK-AND-WHITE (model.livery "police"). Doors and the roof/pillars
+     (the loft's "upper" paint zone) go white over the car's black paint; a
+     shaped roof bar whose red and blue halves are the visibility-flip
+     meshes city/police.js flashes (it finds them by name — see rbDecorate),
+     a push bar and a driver's-side spotlight. The white is NOT _bodyPaint, so
+     a respray leaves the livery alone. */
+  let policeWhite = null;
+  function whitePaint() {
+    if (policeWhite) return policeWhite;
+    const m = vmat("paint", 0xeef1f4, { metalness: 0.3, roughness: 0.4 });
+    if (m.flatShading) { m.flatShading = false; m.needsUpdate = true; }
+    m._bodyPaint = false; m._shared = true;
+    policeWhite = m;
+    return m;
+  }
+  const lbMats = {};
+  function lbMat(k, c) {
+    if (!lbMats[k]) { lbMats[k] = new THREE.MeshBasicMaterial({ color: c }); lbMats[k]._shared = true; }
+    return lbMats[k];
+  }
+  function policeLightbar(ctx) {
+    const bar = new THREE.Group();
+    bar.name = "police_lightbar";
+    const base = new THREE.Mesh(trapGeo(1.12, 0.05, 0.3, 0.26), darkTrim());
+    base.name = "lb_base"; bar.add(base);
+    const red = new THREE.Mesh(trapGeo(0.44, 0.075, 0.26, 0.2), lbMat("red", 0xff2d3e));
+    red.name = "lb_red"; red.position.set(0.3, 0.05, 0); bar.add(red);
+    const blue = new THREE.Mesh(trapGeo(0.44, 0.075, 0.26, 0.2), lbMat("blue", 0x2d6bff));
+    blue.name = "lb_blue"; blue.position.set(-0.3, 0.05, 0); bar.add(blue);
+    const mid = new THREE.Mesh(trapGeo(0.14, 0.06, 0.24, 0.2), lbMat("mid", 0xdfe9f4));
+    mid.name = "lb_mid"; mid.position.set(0, 0.05, 0); bar.add(mid);
+    bar.position.set(0, ctx.roofY + 0.012, (ctx.roofZ || 0) + (ctx.roofLen || 1) * 0.12);
+    bar.traverse(function (o) { o.userData.noSeal = true; });
+    return bar;
+  }
+  function applyPolice(root, ctx) {
+    const white = whitePaint();
+    root.traverse(function (o) {
+      if (!o.material || !o.userData) return;
+      const z = o.userData.paintZone;
+      if (z === "upper" || z === "door") o.material = white;
+    });
+    root.add(policeLightbar(ctx));
+    // push bar: a blade + two uprights ahead of the nose
+    const pbY = ctx.baseY + 0.16, w = ctx.w;
+    const z = surfZ(ctx, 1, 0, pbY) + 0.1;
+    add(root, w * 0.5, 0.2, 0.06, 0, pbY, z, darkTrim()).userData.noSeal = true;
+    [1, -1].forEach(function (s) { add(root, 0.06, 0.34, 0.06, s * w * 0.2, pbY - 0.02, z - 0.02, darkTrim()).userData.noSeal = true; });
+    // A-pillar spotlight, driver's side (+x)
+    const sp = new THREE.Mesh(cylGeo(0.06, 0.12, 10), reverseM());
+    sp.rotation.x = Math.PI / 2;
+    sp.position.set(ctx.w * 0.47, (ctx.beltY || ctx.roofY - 0.4) + 0.12, (ctx.zCowl != null ? ctx.zCowl : 0.8) - 0.3);
+    sp.userData.noSeal = true;
+    root.add(sp);
+  }
+
   // ============================================================
-  //  PER-MODEL IDENTITY on the unified visual — the small bolt-ons that
-  //  split two same-silhouette siblings apart (and the taxi's roof gear,
-  //  which the old chain dropped on the unified path — the known bug).
+  //  PER-MODEL IDENTITY — the small bolt-ons that split two
+  //  same-silhouette siblings apart, plus the fleet liveries.
   // ============================================================
   function applyModelIdentity(root, model, ctx) {
     if (!model || !ctx) return;
     const ds = model.designStyle;
+    if (model.livery === "police") applyPolice(root, ctx);
     if (model.livery === "taxi" || ds === "cab") addTaxiSign(root, ctx);
     if (ds === "kanzler") {
-      // hood ornament + chrome rocker strip: old-money German luxury
-      add(root, 0.035, 0.09, 0.035, 0, ctx.noseTopY + 0.05, ctx.frontZ - 0.32, chrome());
-      add(root, ctx.w + 0.05, 0.045, ctx.len * 0.7, 0, ctx.baseY + 0.14, 0, chrome());
+      // hood ornament + a chrome rocker strip between the arches
+      add(root, 0.03, 0.07, 0.03, 0, topAt(ctx, ctx.frontZ - 0.34) + 0.03, ctx.frontZ - 0.34, chrome()).userData.noSeal = true;
+      const R = ctx.lines && ctx.lines.rock;
+      if (R) {
+        const mid = R[(R.length / 2) | 0];
+        [1, -1].forEach(function (s) { add(root, 0.02, 0.03, ctx.len * 0.36, s * (mid[1] + 0.012), mid[2] - 0.02, 0, chrome()).userData.noSeal = true; });
+      }
     } else if (ds === "surge" && ctx.paint) {
-      add(root, ctx.w * 0.62, 0.05, 0.13, 0, ctx.noseTopY + 0.03, ctx.rearZ + 0.32, ctx.paint);   // lip spoiler
+      const z = ctx.rearZ + 0.1;
+      add(root, ctx.w * 0.55, 0.03, 0.1, 0, topAt(ctx, z) + 0.02, z, ctx.paint).userData.noSeal = true;   // lip spoiler
     } else if (ds === "kaze") {
-      add(root, (ctx.roofW || ctx.w * 0.8) * 0.8, 0.05, 0.16, 0, ctx.roofY + 0.02, (ctx.roofZ || 0) - 0.45, darkTrim());
-    } else if (ds === "apex") {
-      // twin centre stripes down hood + deck
-      [-0.14, 0.14].forEach(function (fx) {
-        add(root, 0.16, 0.02, ctx.len * 0.88, fx, ctx.noseTopY + 0.09, 0, darkTrim());
-      });
-    } else if (ds === "halo" || ds === "frontier") {
+      add(root, (ctx.roofW || ctx.w * 0.8) * 0.8, 0.03, 0.14, 0, topAt(ctx, (ctx.roofZ || 0) - (ctx.roofLen || 1) * 0.5) + 0.02, (ctx.roofZ || 0) - (ctx.roofLen || 1) * 0.5, darkTrim()).userData.noSeal = true;
+    } else if (ds === "apex" || ds === "stampede") {
+      // twin centre stripes over the hood, roof and deck — never over the glass
+      [-0.12, 0.12].forEach(function (fx) { topStrip(root, ctx, fx, 0.07, darkTrim(), 0.004); });
+    } else if (ds === "halo") {
       addRoofRails(root, ctx);
     } else if (ds === "eldorado") {
-      add(root, ctx.w * 0.3, 0.05, 0.05, 0, ctx.noseTopY + 0.1, ctx.frontZ - 0.1, badgeGold());   // gold nose trim
+      add(root, ctx.w * 0.3, 0.03, 0.04, 0, topAt(ctx, ctx.frontZ - 0.12) + 0.01, ctx.frontZ - 0.12, badgeGold()).userData.noSeal = true;
     }
   }
 
@@ -477,6 +695,11 @@
     addRoofRails: addRoofRails,
     addBumpers: addBumpers,
     rimStyleFor: function (styleOrBrand) {
+      // a body that wears something other than its marque's signature wheel
+      // (carwheels.js styles): the lowrider on laced wire, a work van on
+      // steelies, the muscle car on a five-spoke, the German coupe on a mesh
+      const own = { lowrider: "wire", van: "steel", muscle: "sport5", porsche: "mesh" }[styleOrBrand];
+      if (own) return own;
       const b = BRANDS[styleOrBrand] || BRANDS[STYLE_BRAND[styleOrBrand]];
       return (b && b.rim) || "sport5";
     },

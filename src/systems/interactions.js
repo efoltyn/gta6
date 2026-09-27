@@ -124,6 +124,7 @@
       ensureLayer().appendChild(p.wrap);
     }
     p.at = opts.at || null;
+    p.city = !!opts.city;          // a CITY verb on a thing (boarding.js car doors) survives the city gate below
     p.frame = frameNo;
     // Unranked callers sit at 2 m — the range nearly every prison prompt arms
     // itself at — so a site that never learns about d2 still competes fairly.
@@ -196,10 +197,10 @@
     frameNo++;
     if (!pills.size) return;
     const gm = CBZ.game;
-    const dead = !gm || gm.mode === "city" || gm.state !== "playing";
+    const live = !!(gm && gm.state === "playing");
     const ids = [];
     pills.forEach(function (p, id) {
-      if (dead || frameNo - p.frame > 2) ids.push(id);
+      if (!live || (gm.mode === "city" && !p.city) || frameNo - p.frame > 2) ids.push(id);
     });
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
     if (!pills.size) return;

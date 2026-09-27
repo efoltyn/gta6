@@ -872,6 +872,8 @@
     return _pulseCurve;
   }
   let eng = null, engFed = 0, engFlavorKey = "";
+  const ENGINE_LP_OFF = 1400;   // Hz: overrun voice cutoff at idle — the muffled lift-off burble
+  const ENGINE_LP_ON = 7000;    // Hz added by full throttle — the bark opens right up
   function ignition(t) {
     const sb = S("car.start");
     if (sb) {
@@ -899,7 +901,12 @@
     if (eng || !ctx || !loopBus || !sfxBus) return;
     const e = { stops: [] };
     e.gain = ctx.createGain(); e.gain.gain.value = 0.0001; e.gain.connect(loopBus);
-    e.mix = ctx.createGain(); e.mix.gain.value = 1; e.mix.connect(e.gain);
+    e.mix = ctx.createGain(); e.mix.gain.value = 1;
+    // LOAD FILTER: an engine on the throttle is bright and barking; the same
+    // rpm on the overrun (foot off, the car driving the engine) is muffled and
+    // hollow. One lowpass on the whole voice, opened by the throttle.
+    e.lp = ctx.createBiquadFilter(); e.lp.type = "lowpass"; e.lp.frequency.value = 2400; e.lp.Q.value = 0.7;
+    e.mix.connect(e.lp); e.lp.connect(e.gain);
     const idleB = S("car.idle"), revB = S("car.rev");
     if (idleB && revB) {
       // ---- TWO-LOOP CROSSFADER: both loops always run; RPM rides the rates
@@ -997,23 +1004,29 @@
       if (e.kind === "synth") { e.f1.Q.value = F.q1; e.f2.Q.value = F.q2; }
     }
     rev = Math.max(0, Math.min(1.15, rev || 0));
+    // throttle may be a pedal position (0..1) or the old 0/1 flag
+    const load = Math.max(0, Math.min(1, +throttle || 0));
     if (e.kind === "sample") {
       // equal-power crossfade idle<->rev + both loops' rates riding the revs
       const x = Math.min(1, rev) * Math.PI * 0.5;
       e.gIdle.gain.setTargetAtTime(Math.cos(x), t, F.resp);
       e.gRev.gain.setTargetAtTime(Math.sin(x), t, F.resp);
-      e.srcIdle.playbackRate.setTargetAtTime(F.rate * (0.82 + rev * 0.38 + (throttle ? 0.03 : 0)), t, F.resp);
-      e.srcRev.playbackRate.setTargetAtTime(F.rate * (0.8 + rev * 0.4 + (throttle ? 0.05 : 0)), t, F.resp);
+      // the rev loop spans a wider band than the idle loop: the chassis now
+      // hands over a TRUE in-gear rpm (an upshift drops to ~half, not to idle),
+      // so the pitch sweep through each gear is what you hear change
+      e.srcIdle.playbackRate.setTargetAtTime(F.rate * (0.82 + rev * 0.38 + load * 0.03), t, F.resp);
+      e.srcRev.playbackRate.setTargetAtTime(F.rate * (0.76 + rev * 0.62 + load * 0.05), t, F.resp);
     } else {
       // cylinder firing rate: RPM/60 * cyl/2 (4-stroke). The gear-step rev
       // DROP must read as a snap, so the rate constant is clamped tight.
       const rpm = F.idleRPM + rev * (F.maxRPM - F.idleRPM);
       e.osc.frequency.setTargetAtTime((rpm / 60) * F.cyl * 0.5, t, Math.min(F.resp, 0.05));
       e.f1.frequency.setTargetAtTime(F.ex * (1 + rev * 0.45), t, 0.07);
-      e.f2.frequency.setTargetAtTime(F.body * (1 + rev * 0.55) + (throttle ? 120 : 0), t, 0.07);
+      e.f2.frequency.setTargetAtTime(F.body * (1 + rev * 0.55) + load * 120, t, 0.07);
     }
-    e.ng.gain.setTargetAtTime((throttle ? 1 : 0) * F.intake * (0.35 + rev * 0.65), t, 0.06);
-    const vol = F.vol * (0.4 + rev * 0.34 + (throttle ? 0.28 : 0));
+    e.ng.gain.setTargetAtTime(load * F.intake * (0.35 + rev * 0.65), t, 0.06);
+    e.lp.frequency.setTargetAtTime(ENGINE_LP_OFF + rev * 2600 + load * ENGINE_LP_ON, t, 0.06);
+    const vol = F.vol * (0.4 + rev * 0.34 + load * 0.28);
     if (shifted) {
       // the gear change: a momentary throttle-cut dip while the "clutch" is in
       e.gain.gain.cancelScheduledValues(t);

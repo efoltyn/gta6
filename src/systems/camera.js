@@ -516,6 +516,14 @@
   };
   // Vehicle free-look (suspends the behind-the-car auto-recenter) + look-back.
   let flHold = false, flT = 0, lookBackHeld = false, lookBackK = 0, bankK = 0;
+  // ---- ROAD-CAR CHASE: how speed reads (city driving branch below) ----
+  const CHASE_SPD_V0 = 8, CHASE_SPD_V1 = 42;   // m/s: calm below ~18 mph, full effect by ~95 mph
+  const CHASE_BACK_GAIN = 0.12;   // boom stretches 12% at speed — the car shrinks a touch into the road
+  const CHASE_DROP = 0.14;        // and drops 14% lower — a lower eye makes the tarmac rush
+  const CHASE_LEAD_GAIN = 7;      // m of extra look-ahead: you see the corner coming, not your bonnet
+  const CHASE_FOV_GAIN = 8;       // degrees wider at full speed (66 -> 74): peripheral streak without fisheye
+  const CHASE_BUZZ = 0.035;       // m of smooth high-speed mount buzz at full speed
+  let chaseBuzzT = 0;
   CBZ.camFreeLook = function (on) { flHold = !!on; if (on) flT = 0.8; };
   // A DELIBERATE GLANCE with no hold to release. camFreeLook LATCHES (flHold
   // stays true until somebody passes false), which is correct for a finger that
@@ -1398,12 +1406,24 @@
       // changes. `ahead` is a look-lead, not a boom, so it is deliberately not
       // scaled (trimming it would swing the aim point, not the camera).
       const tzk = CBZ.camTouchTrim();
+      /* SPEED SELLS ITSELF (road cars only — craft/hulls frame by their own
+         records). The faster you go the more the boom drops and stretches, the
+         lens widens a few degrees, the look point runs further down the road,
+         and past ~45 mph a small, smooth road buzz comes through the mount.
+         `spK` is 0 at a crawl and 1 at ~95 mph, eased so city speeds stay calm.
+         The boom's positional lag (SmoothDamp below) already trails the car
+         by ~smoothTime x speed, so hard acceleration pulls it back and a
+         stop lets it catch up without any extra code. */
+      const roadCar = !craft && !hull;
+      const spd = roadCar ? Math.abs(player.speed || 0) : 0;
+      const spT = Math.max(0, Math.min(1, (spd - CHASE_SPD_V0) / (CHASE_SPD_V1 - CHASE_SPD_V0)));
+      const spK = spT * spT * (3 - 2 * spT);
       const back = (craft && craft.cameraBack != null ? craft.cameraBack
-        : hull ? Math.max(9.5, hLoa * 1.05 + 2) : 9.5) * tzk;
+        : hull ? Math.max(9.5, hLoa * 1.05 + 2) : 9.5 * (1 + CHASE_BACK_GAIN * spK)) * tzk;
       const up = (craft && craft.cameraUp != null ? craft.cameraUp
-        : hull ? Math.max(10.0, hLoa * 0.40 + 3.5) : 10.0) * tzk;
+        : hull ? Math.max(10.0, hLoa * 0.40 + 3.5) : 10.0 * (1 - CHASE_DROP * spK)) * tzk;
       const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead
-        : hull ? Math.max(6.0, hLoa * 0.30) : 6.0;
+        : hull ? Math.max(6.0, hLoa * 0.30) : 6.0 + CHASE_LEAD_GAIN * spK;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
       // AIRCRAFT FOLLOW AT SPEED (FLIGHT_SPEED_V2): a fixed 0.12s boom lags
       // ~smoothTime·speed behind its target, so at the new jet top speeds the
@@ -1431,7 +1451,16 @@
       look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, lookSf, fdt);
       camera.lookAt(look);
       if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, sdt); if (shakeAmt < 0.01) shakeAmt = 0; }
-      fov = smoothDamp(fov, 66, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      // high-speed road buzz: smooth incommensurate sines (never white noise,
+      // which reads as a broken camera), applied AFTER lookAt so it rocks the
+      // lens a hair rather than dragging the framing around
+      if (roadCar && spK > 0.01) {
+        chaseBuzzT += sdt;
+        const a = CHASE_BUZZ * spK * spK;
+        camera.position.y += (Math.sin(chaseBuzzT * 23.1) * 0.6 + Math.sin(chaseBuzzT * 37.7) * 0.4) * a;
+        camera.rotateZ((Math.sin(chaseBuzzT * 17.3) * 0.5 + Math.sin(chaseBuzzT * 29.9) * 0.5) * a * 0.12);
+      }
+      fov = smoothDamp(fov, 66 + (roadCar ? CHASE_FOV_GAIN * spK : 0), fovV, 0.35, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
       // AIRCRAFT BANK (CAM_AIR_BANK): lean the chase camera into a fraction of
       // the craft's roll — you feel the bank without the horizon whipping.
       // Cars publish no roll → bankK eases back to level. rotateZ runs AFTER
