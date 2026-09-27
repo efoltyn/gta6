@@ -280,7 +280,9 @@
   function lotName(lot) {
     if (!lot) return "the place";
     const b = lot.building;
-    if (b && b.name) return String(b.name);
+    // a proper name reads as one ("Harbor Savings"); a one-word generic label
+    // ("Apartments") reads as a place: "the apartments"
+    if (b && b.name) { const n = String(b.name).trim(); return n.indexOf(" ") > 0 ? n : "the " + n.toLowerCase(); }
     const K = { bank: "the bank", office: "the office block", tower: "the tower", food: "the diner", club: "the club",
       casino: "the casino", guns: "the gun shop", security: "the security depot", carlot: "the car lot", shop: "the shop",
       cityhall: "City Hall" };
@@ -315,6 +317,12 @@
       const d = d2(l.cx, l.cz, cx, cz);
       return d >= minD * 0.5 && d <= maxD * 1.6 && (!avoid || avoid.indexOf(l) < 0);
     });
+    // last resort: whatever door is nearest past forty metres (a player who
+    // spawned at the city's edge still gets a job in the city)
+    if (!pool.length) pool = lotsOfKinds(null).filter(function (l) {
+      return isFinite(l.cx) && d2(l.cx, l.cz, cx, cz) >= 40 && (!avoid || avoid.indexOf(l) < 0);
+    });
+    if (!pool.length) pool = lotsOfKinds(null).filter(function (l) { return !avoid || avoid.indexOf(l) < 0; });
     if (!pool.length) return null;
     pool.sort(function (a, b) { return d2(a.cx, a.cz, cx, cz) - d2(b.cx, b.cz, cx, cz); });
     const r = h01(salt, (CBZ.WORLD_SEED | 0), 0xa9e);
@@ -349,7 +357,7 @@
         armed: !!opts.armed, weapon: opts.weapon || (opts.armed ? "Pistol" : null), aggr: opts.aggr != null ? opts.aggr : 0.2,
         wealth: opts.wealth != null ? opts.wealth : 0.7,
       });
-    } catch (e) { p = null; }
+    } catch (e) { p = null; RT.why = "makePed: " + (e && e.message); }
     if (!p) return null;
     p.pos.y = floorY(x, z);
     AR.root.add(p.group);
@@ -565,7 +573,7 @@
       const lot = base
         ? pickLot(v.kinds, base.cx, base.cz, 35, 150, def.fileNo * 97 + i, used)
         : pickLot(v.kinds, px, pz, 130, 460, def.fileNo * 131 + i, used);
-      if (!lot) return null;
+      if (!lot) { RT.why = "no lot for " + v.key + " near " + Math.round(px) + "," + Math.round(pz) + " lots=" + lotsOfKinds(null).length; return null; }
       out[v.key] = lot; used.push(lot); keys[v.key] = lotKey(lot);
     }
     a.venues[def.id] = keys;
@@ -1235,7 +1243,7 @@
     const p = P(); const AR = A(); if (!AR) return null;
     const px = p && p.pos ? p.pos.x : AR.center.x, pz = p && p.pos ? p.pos.z : AR.center.z;
     const lot = pickLot(["carlot", "gas", "security", "shop"], px, pz, 140, 420, 0x3e7, null);
-    if (!lot) return null;
+    if (!lot) { RT.why = "no meet lot, lots=" + lotsOfKinds(null).length; return null; }
     const s = spotAt(lot, 9, 4);
     a.meet = { lot: lotKey(lot), x: s.x, z: s.z, face: s.face };
     commit();
@@ -2235,7 +2243,7 @@
         op: RT.op ? { id: RT.op.id, staged: !!RT.op.staged, ped: !!RT.op.ped, leg: RT.op.leg, phase: RT.op.phase, identified: RT.op.identified, guards: guardsOf(RT.op).length, dead: RT.op.dead, rating: RT.op.rating } : null,
         finale: RT.fin ? { phase: RT.fin.phase, cars: RT.fin.cars.length, crowd: RT.fin.crowd.length, identified: RT.fin.identified, dead: RT.fin.dead, s: Math.round(RT.fin.s), total: Math.round(RT.fin.total || 0) } : null,
         meet: RT.meet ? { kind: RT.meet.kind, voss: !!RT.meet.voss, started: RT.meet.started } : null,
-        dossier: !!D(),
+        dossier: !!D(), why: RT.why || null, lots: lotsOfKinds(null).length, arena: !!A(), pl: P() && P().pos ? [Math.round(P().pos.x), Math.round(P().pos.z)] : null,
       };
     },
     _rt: RT,
