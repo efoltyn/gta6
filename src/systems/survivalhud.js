@@ -70,6 +70,35 @@
       }
     }
 
+    /* THE TOWN, and WHERE TO GO. The map drew the hills and nothing else, so
+       the one question every card asks (which building? which hill?) had no
+       answer on it. Every standing building is a footprint now, and while a
+       disaster is announced the places that answer it light up green (the
+       buildings for "get inside", the tall ones and the hills for "get
+       high"), the ones that kill you in it go red (buildings in a quake). */
+    const adv = CBZ.game.mode === "survival" && CBZ.disasters && CBZ.disasters.advice ? CBZ.disasters.advice() : null;
+    const kind = adv ? adv.kind : null;
+    if (A.fragile) {
+      for (let i = 0; i < A.fragile.length; i++) {
+        const b = A.fragile[i]; if (b.fallen) continue;
+        let fill = "rgba(205,210,220,.42)";
+        if (kind === "indoors") fill = "rgba(70,230,130,.85)";
+        else if (kind === "indoors_far") fill = adv.from && Math.hypot(b.ox - adv.from.x, b.oz - adv.from.z) > 65 ? "rgba(70,230,130,.85)" : "rgba(205,210,220,.3)";
+        else if (kind === "high") fill = (b.h || 0) >= 12 ? "rgba(70,230,130,.85)" : "rgba(205,210,220,.3)";
+        else if (kind === "open") fill = "rgba(255,90,70,.7)";
+        ctx.fillStyle = fill;
+        const w = Math.max(1.5, b.w * sc), d = Math.max(1.5, b.d * sc);
+        ctx.fillRect(mx(b.ox) - w / 2, mz(b.oz) - d / 2, w, d);
+      }
+    }
+    if (kind === "high" && A.hills) {
+      ctx.strokeStyle = "rgba(70,230,130,.9)"; ctx.lineWidth = 1.5;
+      for (let i = 0; i < A.hills.length; i++) {
+        const h = A.hills[i]; if (h.peak < 9 && i !== 0) continue;
+        ctx.beginPath(); ctx.arc(mx(h.x), mz(h.z), Math.max(2, h.r * 0.45 * sc), 0, 7); ctx.stroke();
+      }
+    }
+
     // THE HAZARD, where it actually is (SURV_MAP_HAZARDS): red circles for
     // point threats (funnel, strikes, sinkholes, vent, shockwave front), a
     // sweeping chord for a wave front. No rings, no zones — the map shows the
@@ -125,6 +154,128 @@
       ctx.restore();
     }
   }
+
+  /* ============================================================
+     THE ROUND CARD (2026-09-27). Show-don't-tell went one step too far:
+     with every word gone a new player spent each disaster not knowing what
+     it was or what the right move was, and the mode's whole idea (read the
+     sky, run to the RIGHT kind of shelter) was invisible. The world still
+     does the telling; this card says the two things the world cannot say
+     in time: WHAT is coming and WHICH kind of place saves you, plus the one
+     piece of feedback that makes the choice a game: are you somewhere safe
+     right now. It lives in three shapes:
+       brief / warn   the card: round number, name, the tip, a fuse that
+                      burns down to impact, and the SAFE / EXPOSED chip
+       active         a slim strip: name, the chip, the time it has left
+       all-clear      SURVIVED, what it cost the island, how many are left
+     Data comes from CBZ.disasters.advice() / safeAt() / lastResult().
+     ============================================================ */
+  let card = null, cEls = null, lastSeen = null, survT = 0, survMsg = null;
+  function buildCard() {
+    if (card) return;
+    const st = document.createElement("style");
+    st.textContent =
+      "#survRound{position:fixed;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);z-index:40;pointer-events:none;" +
+      "font-family:Fredoka,system-ui,sans-serif;color:#f4f7fb;text-align:center;min-width:min(88vw,420px);max-width:92vw;transition:opacity .35s ease}" +
+      "#survRound .box{background:linear-gradient(180deg,rgba(12,16,24,.78),rgba(12,16,24,.62));border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:10px 18px 12px;box-shadow:0 10px 30px rgba(0,0,0,.35);backdrop-filter:blur(3px)}" +
+      "#survRound .n{font-size:12px;letter-spacing:.22em;font-weight:600;color:#ffb46a;opacity:.95}" +
+      "#survRound .nm{font-size:clamp(26px,5.2vw,44px);font-weight:700;letter-spacing:.02em;line-height:1.02;margin:2px 0 4px;text-shadow:0 3px 0 rgba(0,0,0,.35)}" +
+      "#survRound .tip{font-size:clamp(14px,2.1vw,17px);font-weight:500;color:#dfe8f2}" +
+      "#survRound .row{display:flex;align-items:center;gap:10px;margin-top:9px}" +
+      "#survRound .fuse{flex:1;height:6px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden}" +
+      "#survRound .fuse i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ff5a36,#ffb03a);border-radius:4px;transform-origin:left center}" +
+      "#survRound .sec{font-size:15px;font-weight:700;min-width:30px;text-align:right;font-variant-numeric:tabular-nums}" +
+      "#survRound .chip{font-size:12px;font-weight:700;letter-spacing:.12em;padding:4px 9px;border-radius:999px;white-space:nowrap}" +
+      "#survRound .chip.safe{background:#1f9a55;color:#eafff2}#survRound .chip.bad{background:#c8322a;color:#fff1ee;animation:survPulse 1s ease-in-out infinite}" +
+      "@keyframes survPulse{50%{opacity:.62}}" +
+      "#survRound.slim .box{padding:6px 12px 8px}#survRound.slim .n,#survRound.slim .tip{display:none}#survRound.slim .nm{font-size:clamp(17px,2.8vw,22px);margin:0}#survRound.slim .row{margin-top:5px}" +
+      "#survRound.won .nm{color:#7dffb0}#survRound.won .fuse,#survRound.won .sec,#survRound.won .chip{display:none}";
+    document.head.appendChild(st);
+    card = document.createElement("div");
+    card.id = "survRound";
+    card.style.opacity = "0";
+    card.innerHTML = '<div class="box"><div class="n"></div><div class="nm"></div><div class="tip"></div>' +
+      '<div class="row"><span class="chip"></span><div class="fuse"><i></i></div><span class="sec"></span></div></div>';
+    document.body.appendChild(card);
+    cEls = { n: card.querySelector(".n"), nm: card.querySelector(".nm"), tip: card.querySelector(".tip"),
+      chip: card.querySelector(".chip"), fuse: card.querySelector(".fuse i"), sec: card.querySelector(".sec"), row: card.querySelector(".row") };
+  }
+  function setText(e, s) { if (e.textContent !== s) e.textContent = s; }
+  function drawRoundCard(dt) {
+    const D = CBZ.disasters;
+    const live = CBZ.game.mode === "survival" && CBZ.game.state === "playing" && D && D.advice;
+    if (!live) { if (card) card.style.opacity = "0"; return; }
+    buildCard();
+    const adv = D.advice();
+    const last = D.lastResult ? D.lastResult() : null;
+    if (last && last !== lastSeen) {
+      lastSeen = last;
+      if (last.you && !CBZ.player.dead) {
+        survT = 3.6;
+        survMsg = { n: "DISASTER " + last.n + " SURVIVED", nm: "YOU MADE IT",
+          tip: (last.killed > 0 ? last.killed + (last.killed === 1 ? " person" : " people") + " did not.  " : "Nobody died.  ") + last.alive + " left alive" };
+        if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+      }
+    }
+    if (survT > 0) survT -= dt;
+    if (adv && (adv.phase !== "brief" || survT <= 0)) {
+      survT = 0;
+      const slim = adv.phase === "active";
+      card.classList.toggle("slim", slim); card.classList.remove("won");
+      setText(cEls.n, "DISASTER " + adv.n);
+      setText(cEls.nm, adv.name);
+      setText(cEls.tip, adv.tip);
+      let frac, secs;
+      if (slim) { const total = Math.max(1, adv.activeSecs || 20); secs = Math.max(0, -adv.tLeft); frac = secs / total; }
+      else { const total = adv.brief + adv.warnSecs; secs = Math.max(0, adv.tLeft); frac = secs / total; }
+      cEls.fuse.style.transform = "scaleX(" + Math.max(0, Math.min(1, frac)).toFixed(3) + ")";
+      setText(cEls.sec, Math.ceil(secs) + "s");
+      const P = CBZ.player;
+      const s = !P.dead && D.safeAt ? D.safeAt(P.pos.x, P.pos.z, P.pos.y) : null;
+      cEls.chip.style.display = s ? "" : "none";
+      if (s) { cEls.chip.className = "chip " + (s.safe ? "safe" : "bad"); setText(cEls.chip, s.safe ? "SAFE HERE" : "NOT SAFE"); }
+      card.style.opacity = "1";
+    } else if (survT > 0 && survMsg) {
+      card.classList.remove("slim"); card.classList.add("won");
+      setText(cEls.n, survMsg.n); setText(cEls.nm, survMsg.nm); setText(cEls.tip, survMsg.tip);
+      card.style.opacity = survT < 0.5 ? String(Math.max(0, survT / 0.5)) : "1";
+    } else card.style.opacity = "0";
+  }
+  CBZ.survRoundCard = { el: () => card };
+
+  /* ---- YOU ARE BEING HURT. The health bar was the only sign: ash in your
+     lungs, a frostbite tick or a lightning side flash all just shortened a
+     bar in the corner. A red edge that flares with every loss (scaled by
+     it) and stays faintly on when you are low. ---- */
+  let hurtEl = null, hurtK = 0, lastHp = null;
+  function drawHurt(dt) {
+    const on = CBZ.game.mode === "survival" && CBZ.game.state === "playing" && !CBZ.player.dead;
+    if (!hurtEl) {
+      hurtEl = document.createElement("div");
+      hurtEl.id = "survHurt";
+      hurtEl.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:35;opacity:0;" +
+        "background:radial-gradient(ellipse at center,rgba(150,0,0,0) 52%,rgba(150,0,0,.55) 82%,rgba(90,0,0,.9) 100%)";
+      document.body.appendChild(hurtEl);
+    }
+    const hp = CBZ.player.hp;
+    if (!on) { hurtEl.style.opacity = "0"; lastHp = hp; hurtK = 0; return; }
+    if (lastHp != null && hp < lastHp) {
+      const d = lastHp - hp;
+      hurtK = Math.min(1, hurtK + d * 0.045);
+      if (d >= 12 && CBZ.shake) CBZ.shake(Math.min(0.5, d * 0.02));
+    }
+    lastHp = hp;
+    hurtK *= Math.pow(0.12, dt);
+    const low = hp < 35 ? (35 - hp) / 35 * (0.35 + 0.15 * Math.sin((CBZ.now || 0) * 0.008)) : 0;
+    const o = Math.max(hurtK, low);
+    hurtEl.style.opacity = o < 0.01 ? "0" : o.toFixed(3);
+  }
+
+  // onAlways, not onUpdate: the card must fade when the round ends or pauses
+  CBZ.onAlways(49.5, function (dt) {
+    const d = Math.min(0.1, dt || 1 / 60);
+    drawRoundCard(d); drawHurt(d);
+  });
 
   CBZ.onUpdate(49, function () {
     if (!CBZ.islandModeOn(CBZ.game.mode)) return;

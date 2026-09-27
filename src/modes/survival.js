@@ -253,6 +253,21 @@
   }
   CBZ.clearSpectate = clearSpectate;
 
+  /* ONE KEY TO GO AGAIN. A round is a few minutes and dying is the common
+     ending, so the restart has to be as fast as the death: Enter or R on
+     the result card starts the next match, and while you are spectating
+     Enter skips to the results. (The buttons still work; touch uses them.) */
+  document.addEventListener("keydown", function (e) {
+    if (g.mode !== "survival" || e.repeat) return;
+    const k = e.key;
+    if (g.state === "lost" || g.state === "won") {
+      if (k === "Enter" || k === "r" || k === "R") {
+        const btn = document.getElementById(g.state === "won" ? "survAgainBtn" : "loseAgainBtn");
+        if (btn) { e.preventDefault(); btn.click(); }
+      }
+    } else if (g.state === "playing" && surv.spectating && k === "Enter") { e.preventDefault(); finishRound(); }
+  });
+
   const surv = {
     arena: null,
     built: false,
@@ -324,6 +339,18 @@
 
     killBot(b, imp, cause) {
       if (b.dead) return;
+      /* THE CURVE (systems/disasters.js spareBot): once this disaster has
+         taken its share of the lobby the rest of the crowd is left standing,
+         hurt and knocked about, instead of one hurricane ending the match.
+         Never applies to the player. */
+      const why = cause != null ? cause : ((imp && imp.cause) || surv._cause);
+      if (CBZ.disasters && CBZ.disasters.spareBot && CBZ.disasters.spareBot(b, why)) {
+        b.hp = Math.max(b.hp || 0, 8 + deathRnd() * 14);
+        if (CBZ.body && imp && (imp.fromX != null || imp.dir) && !(CBZ.body.busy && CBZ.body.busy(b))) {
+          CBZ.body.hit(b, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: 3, fling: 0 });
+        }
+        return;
+      }
       b.dead = true; b.deadT = 0; b.hp = 0;
       if (CBZ.body) {
         if (imp && (imp.fling || imp.fromX != null || imp.dir)) {
@@ -373,6 +400,18 @@
   };
   CBZ.survStats = function () { return { wins: survSaved.wins || 0, runs: survSaved.runs || 0, bestPlacement: survSaved.bestPlacement || 0 }; };
   refreshSurvTitle();
+
+  /* THE CLEAR-DAY LIGHT, in one place (systems/disasters.js resets the
+     env to this every tick before the live disaster re-tints it). It was
+     sun 1.08 against a hemisphere fill of 0.98 under a 80-380 m fog: the
+     fill nearly matched the key so nothing had a shadow side, and the fog
+     ate the island from a boat 230 m out, which together is why every
+     screenshot read as a pale diorama. A stronger warm key, a cooler fill
+     at two thirds of it, and a fog that starts past the far shore. */
+  CBZ.SURV_CLEAR_SKY = {
+    fog: 0xc4d8ea, fogNear: 170, fogFar: 760,
+    sunInt: 1.28, sunColor: 0xfff0d6, hemiInt: 0.64, hemiColor: 0xd9e6f5,
+  };
 
   // ---- arena lighting override: re-aim the sun onto the far island and
   //      let CBZ.survEnv (written by disasters) recolour sky/fog/flash ----
@@ -527,11 +566,7 @@
       if (CBZ.resetZoom) CBZ.resetZoom();
 
       // neutral daytime baseline (disasters take over from here)
-      Object.assign(CBZ.survEnv, {
-        fog: 0xbfe0ff, fogNear: 80, fogFar: 380,
-        sunInt: 1.08, sunColor: 0xfff4e0, hemiInt: 0.98, hemiColor: 0xeaf4ff,
-        flash: 0, flashColor: 0xffffff,
-      });
+      Object.assign(CBZ.survEnv, CBZ.SURV_CLEAR_SKY, { flash: 0, flashColor: 0xffffff });
 
       // PHYSICAL SHELTER: the hazards themselves are the whole pressure, and
       // the right TYPE of place (altitude for water, indoors for ash/cold,
