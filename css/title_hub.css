@@ -1,0 +1,413 @@
+/* ============================================================
+   title_hub.css — THE FRONT DOOR (index.html #title).
+
+   What it replaced: a beige 1100px dialogue card on a flat blue gradient,
+   cartoon orange wordmark with a stacked 3D shadow, white chunky buttons,
+   and a "MORE GAMES" grid of text-only tiles with middle-dotted blurbs. It
+   read as a dev panel.
+
+   What it is now: the selected game's key art fills the screen (the
+   engine's own photograph, assets/keyart/, written by tools/hub-keyart.sh),
+   darkened where the type sits. The game's name, pitch and options on the
+   left; PLAY in the game's accent colour on the right; every game as a
+   photographed tile in the rail along the bottom. One tap on a tile picks
+   it (or opens it, for the three that live on their own page); one tap on
+   PLAY starts it.
+
+   Everything the title shows is styled HERE and nowhere else: the old
+   rules in screens.css (card, mode strip, quality, roles, controls),
+   city.css (story picker, New Life) and mobile.css (prison controls swap)
+   were deleted when this file landed, not overridden.
+
+   Hooks this file does not own and must not break: the per-mode show/hide
+   rules (.mode-*-only, in screens.css/city.css) and shark mode's own front
+   door (css/shark_title.css hides .card-box and makes #title transparent).
+============================================================ */
+
+/* ---- per-game art + accent. Escape is the no-class default (state.js sets
+   no body class for it). Order matters: sharksim bodies ALSO carry
+   mode-survival, so the survival rule is guarded. ---- */
+#title{
+  --hub-ink:#f3f5f8;
+  --hub-mute:rgba(226,232,242,.70);
+  --hub-faint:rgba(226,232,242,.46);
+  --hub-glass:rgba(12,16,23,.62);
+  --hub-glass-hi:rgba(22,28,38,.78);
+  --hub-line:rgba(255,255,255,.14);
+  --hub-display:"Oswald","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --hub-text:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --accent:#ff8a1f; --accent-ink:#1d1206; --accent-soft:rgba(255,138,31,.16); --accent-glow:rgba(255,138,31,.55);
+  --hero:url("../assets/keyart/escape.jpg");
+}
+body.mode-city #title{
+  --accent:#ffc62e; --accent-ink:#1c1604; --accent-soft:rgba(255,198,46,.15); --accent-glow:rgba(255,198,46,.5);
+  --hero:url("../assets/keyart/city.jpg");
+}
+body.mode-survival:not(.mode-sharksim) #title{
+  --accent:#ff5b3a; --accent-ink:#1e0904; --accent-soft:rgba(255,91,58,.16); --accent-glow:rgba(255,91,58,.55);
+  --hero:url("../assets/keyart/survival.jpg");
+}
+body.mode-gungame #title{
+  --accent:#c6f23a; --accent-ink:#141a04; --accent-soft:rgba(198,242,58,.14); --accent-glow:rgba(198,242,58,.45);
+  --hero:url("../assets/keyart/gungame.jpg");
+}
+body.mode-sharksim #title{
+  --accent:#3fc7ff; --accent-ink:#04161f; --accent-soft:rgba(63,199,255,.16); --accent-glow:rgba(63,199,255,.5);
+  --hero:url("../assets/keyart/sharksim.jpg");
+}
+
+/* ---- the screen: art, then the scrims that make type readable on it ---- */
+#title{
+  padding:0; align-items:stretch; justify-content:stretch; text-align:left;
+  background:#07090d; color:var(--hub-ink); font-family:var(--hub-text);
+  isolation:isolate; overflow:hidden;
+}
+#title::before{
+  content:""; position:absolute; inset:0; z-index:-2; pointer-events:none;
+  background:var(--hero) center 40% / cover no-repeat;
+}
+#title::after{
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(6,8,12,.94) 0%, rgba(6,8,12,.78) 30%, rgba(6,8,12,.22) 60%, rgba(6,8,12,.26) 100%),
+    linear-gradient(0deg, rgba(6,8,12,.97) 0%, rgba(6,8,12,.72) 22%, rgba(6,8,12,0) 48%),
+    linear-gradient(180deg, rgba(6,8,12,.55) 0%, rgba(6,8,12,0) 16%);
+}
+/* a new pick fades its art in instead of cutting (systems/title_hub.js) */
+#title.hub-swap::before{ animation:hubIn .5s ease-out; }
+@keyframes hubIn{ from{opacity:0; transform:scale(1.035);} to{opacity:1; transform:scale(1);} }
+@media (prefers-reduced-motion:reduce){ #title::before, #title.hub-swap::before{animation:none;} }
+/* shark mode draws its own front door over the live sea */
+body.mode-sharksim #title::before, body.mode-sharksim #title::after{display:none;}
+
+/* ---- layout: hero | actions, then the rail. The card IS the screen. ---- */
+#title .card-box{
+  width:100%; height:100%; max-height:none; margin:0;
+  overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
+  background:none; border:0; border-radius:0; box-shadow:none; color:var(--hub-ink);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(250px,330px);
+  grid-template-rows:minmax(0,1fr) auto auto;
+  grid-template-areas:"hero actions" "label label" "rail rail";
+  column-gap:clamp(24px,4.5vw,72px);
+  padding:
+    max(26px, env(safe-area-inset-top))
+    max(clamp(20px,4.4vw,64px), env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(clamp(20px,4.4vw,64px), env(safe-area-inset-left));
+}
+#title .hub-hero{grid-area:hero; align-self:center; min-width:0; max-width:880px; padding:8px 0 18px;}
+#title .title-actions{
+  grid-area:actions; align-self:end; min-width:0;
+  display:flex; flex-direction:column; align-items:stretch; gap:12px; padding-bottom:18px;
+}
+#title .mode-strip-label{grid-area:label;}
+#title .mode-select{grid-area:rail;}
+/* single-game pages (tools/build-web-release.mjs, build-disaster-page.mjs)
+   ship the rail as one hidden tile; the display rules below must not revive it */
+#title .mode-select[hidden]{display:none !important;}
+
+/* ---- hero type ---- */
+#title .hub-kicker{
+  font:600 clamp(12px,1.05vw,14px)/1 var(--hub-display); letter-spacing:.3em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:clamp(8px,1.2vh,14px);
+}
+#title .logo{
+  font:700 clamp(46px, min(7.4vw, 12vh), 118px)/.9 var(--hub-display);
+  letter-spacing:.01em; text-transform:uppercase; color:#fff;
+  text-shadow:0 2px 0 rgba(0,0,0,.25), 0 10px 40px rgba(0,0,0,.55);
+}
+#title .logo .z{color:var(--accent); text-shadow:0 10px 40px rgba(0,0,0,.5);}
+#title .sub{
+  margin-top:clamp(10px,1.6vh,16px); max-width:34em;
+  font:500 clamp(15px,1.3vw,18px)/1.4 var(--hub-text); letter-spacing:0; text-transform:none;
+  color:var(--hub-mute);
+}
+#title .smallnote{margin-top:10px; font-size:13px; color:var(--hub-faint); font-weight:500;}
+#title .smallnote:empty{display:none;}
+
+/* ---- section labels ---- */
+#title .origin-label, #title .gg-map-label, #title .quality-preset-label{
+  font:600 12px/1 var(--hub-display); letter-spacing:.24em; text-transform:uppercase;
+  color:var(--hub-faint); text-align:left; margin:clamp(16px,2.6vh,26px) 0 10px;
+}
+#title .origin-sublabel{margin-top:14px;}
+#title .quality-preset-label{margin:0 0 8px;}
+
+/* ---- option chips: role, story, map, aircraft/boat ---- */
+#title .role-select, #title .gg-map-select{
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;
+  width:min(460px,100%); margin:clamp(16px,2.6vh,26px) 0 0;
+}
+#title .gg-map-select{margin-top:0;}
+#title .origin-select{
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; width:100%; margin:0;
+}
+#title .origin-plane-select{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-start;}
+#title .origin-plane-wrap{width:100%; margin:0;}
+#title .role-btn, #title .origin-btn, #title .gg-map-btn, #title .origin-plane-btn{
+  pointer-events:auto; cursor:pointer; font-family:var(--hub-text); text-align:left;
+  background:var(--hub-glass); color:var(--hub-ink);
+  border:1px solid var(--hub-line); border-radius:10px;
+  padding:11px 14px; min-height:44px;
+  transition:background .14s, border-color .14s, box-shadow .14s, transform .08s;
+  -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+}
+#title .origin-btn{display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; padding:9px 12px;}
+#title .origin-plane-btn{min-height:36px; padding:7px 12px; font-size:13px; font-weight:600;}
+#title .role-btn span, #title .gg-map-btn span{
+  display:block; font:600 17px/1.1 var(--hub-display); letter-spacing:.06em; text-transform:uppercase;
+}
+#title .role-btn small, #title .gg-map-btn small{display:block; margin-top:4px; color:var(--hub-mute); font-size:12.5px; font-weight:500;}
+#title .origin-btn b{font-size:14px; font-weight:600; letter-spacing:0;}
+#title .origin-btn span{color:var(--hub-mute); font-size:11.5px; font-weight:500; line-height:1.25;}
+#title .origin-btn span:empty{display:none;}
+#title .origin-btn-roll{border-style:dashed;}
+#title .origin-btn-contract{color:#f3dca4; border-color:rgba(217,166,63,.45);}
+#title .role-btn:hover, #title .origin-btn:hover, #title .gg-map-btn:hover, #title .origin-plane-btn:hover{
+  background:var(--hub-glass-hi); border-color:rgba(255,255,255,.3);
+}
+#title .role-btn.active, #title .origin-btn.active, #title .gg-map-btn.active, #title .origin-plane-btn.active{
+  background:var(--accent-soft); border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent);
+}
+#title .origin-btn-contract.active{border-color:#e0ad45; box-shadow:inset 0 0 0 1px #e0ad45; background:rgba(224,173,69,.16); color:#ffe6a6;}
+#title .role-btn:active, #title .origin-btn:active, #title .gg-map-btn:active, #title .origin-plane-btn:active{transform:translateY(1px);}
+
+/* ---- Controls: a quiet disclosure, then a glass panel ---- */
+#title .controls{margin:clamp(14px,2.2vh,22px) 0 0; max-width:560px;}
+#title .controls summary{
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none;
+  font:600 12px/1 var(--hub-display); letter-spacing:.24em; text-transform:uppercase;
+  color:var(--hub-faint); padding:8px 0; min-height:32px;
+}
+#title .controls summary::-webkit-details-marker{display:none;}
+#title .controls summary::after{
+  content:""; width:7px; height:7px; margin-top:-3px;
+  border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg);
+  transition:transform .15s, margin .15s;
+}
+#title .controls[open] summary::after{transform:rotate(-135deg); margin-top:3px;}
+#title .controls summary:hover{color:var(--hub-ink);}
+#title .controls .keys{
+  display:grid; grid-template-columns:1fr 1fr; gap:8px 22px; margin:8px 0 0; max-width:none;
+  padding:14px 16px; border-radius:12px; background:var(--hub-glass-hi); border:1px solid var(--hub-line);
+  text-align:left;
+}
+#title .controls .keys .row{display:flex; align-items:center; gap:10px; font-size:13px; font-weight:500; color:var(--hub-mute);}
+#title .controls .keys .keycol{flex:0 0 72px; display:inline-flex; gap:3px; align-items:center; color:var(--hub-faint);}
+#title .controls .keys-touch .keycol{flex-basis:96px;}
+#title .kbd, #title .tcap{
+  display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:0 7px;
+  background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.24); border-bottom-width:2px;
+  border-radius:6px; font:600 11.5px/1 var(--hub-text);
+}
+#title .tcap{height:auto; min-height:24px; padding:3px 8px; border-bottom-width:1px; text-align:center;}
+#title .controls-note{margin-top:10px; font-size:12.5px; color:var(--hub-faint);}
+/* the prison's keyboard grid and its touch twin: exactly one shows, picked
+   by body.touch (systems/touch.js). tools/touch-keycap-check.mjs pins it. */
+#title .controls .keys-touch{display:none;}
+#title .controls .keys-touch .row:first-child{grid-column:1 / -1;}
+body.touch #title .mode-escape-only .controls .keys-kbd{display:none;}
+body.touch #title .mode-escape-only .controls .keys-touch{display:grid;}
+
+/* ---- the action column: graphics, PLAY, New Life ---- */
+#title .quality-preset{width:100%; margin:0;}
+#title .quality-select{
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0;
+  border:1px solid var(--hub-line); border-radius:10px; overflow:hidden; background:var(--hub-glass);
+}
+#title .quality-btn{
+  pointer-events:auto; cursor:pointer; background:transparent; color:var(--hub-mute);
+  border:0; border-left:1px solid var(--hub-line); border-radius:0; padding:9px 4px 8px; min-height:44px;
+  font-family:var(--hub-text); text-align:center; transition:background .14s, color .14s;
+  -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+}
+#title .quality-btn:first-child{border-left:0;}
+#title .quality-btn span{display:block; font:600 13px/1.1 var(--hub-display); letter-spacing:.12em; text-transform:uppercase;}
+#title .quality-btn small{display:block; margin-top:3px; font-size:10.5px; color:var(--hub-faint); white-space:nowrap;}
+#title .quality-btn:hover{color:var(--hub-ink);}
+#title .quality-btn.active{background:rgba(255,255,255,.14); color:#fff;}
+#title .quality-btn.active small{color:var(--hub-mute);}
+
+#title #playBtn{
+  margin:0; width:100%; display:flex; align-items:center; justify-content:center; gap:14px;
+  padding:clamp(15px,2.4vh,21px) 20px; border:0; border-radius:12px;
+  font:700 clamp(24px,2.3vw,32px)/1 var(--hub-display); letter-spacing:.2em; text-indent:.2em; text-transform:uppercase;
+  color:var(--accent-ink); background:var(--accent);
+  box-shadow:0 14px 36px -12px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.35), inset 0 -3px 0 rgba(0,0,0,.16);
+  transition:transform .08s, filter .12s, box-shadow .12s;
+  -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+}
+#title #playBtn::before{
+  content:""; width:0; height:0; margin-left:-.2em;
+  border-top:.36em solid transparent; border-bottom:.36em solid transparent; border-left:.58em solid currentColor;
+}
+#title #playBtn:hover{filter:brightness(1.07); transform:translateY(-1px); box-shadow:0 18px 40px -12px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.35), inset 0 -3px 0 rgba(0,0,0,.16);}
+#title #playBtn:active{transform:translateY(2px); filter:brightness(.96);}
+#title #playBtn:focus-visible{outline:3px solid #fff; outline-offset:3px;}
+
+#title .new-life-btn{display:none;}
+body.mode-city #title .new-life-btn{
+  display:flex; flex-direction:column; align-items:center; gap:2px; width:100%; margin:0;
+  pointer-events:auto; cursor:pointer; padding:8px 12px; border-radius:10px;
+  background:transparent; color:#ffb2a6; border:1px solid rgba(255,120,104,.32);
+  font-family:var(--hub-text); transition:background .14s, border-color .14s;
+}
+#title .new-life-btn span{font:600 12px/1.1 var(--hub-display); letter-spacing:.18em; text-transform:uppercase;}
+#title .new-life-btn small{font-size:11px; color:rgba(255,178,166,.72); font-weight:500;}
+#title .new-life-btn:hover{background:rgba(255,90,70,.12); border-color:rgba(255,120,104,.6);}
+#title .new-life-btn:disabled{cursor:wait; opacity:.6;}
+
+/* ---- the rail: every game, photographed ---- */
+#title .mode-strip-label{
+  margin:6px 0 10px; padding:0; border:0;
+  display:flex; align-items:center; gap:14px;
+}
+#title .mode-strip-label::after{content:""; flex:1; height:1px; background:var(--hub-line);}
+#title .mode-select{
+  display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:clamp(8px,.9vw,14px);
+  width:100%; margin:0;
+}
+#title .mode-btn{
+  position:relative; display:block; min-width:0; min-height:0; margin:0; padding:0;
+  aspect-ratio:16 / 10; overflow:hidden; cursor:pointer; text-align:left;
+  border:0; border-radius:10px; background:#141a22; color:#fff; font-family:var(--hub-text);
+  box-shadow:0 0 0 1px rgba(255,255,255,.10), 0 10px 24px -14px rgba(0,0,0,.9);
+  transition:transform .14s ease, box-shadow .14s ease;
+  -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+}
+#title .mode-btn .mode-art{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+  filter:saturate(.9) brightness(.78); transition:filter .18s ease, transform .4s ease;
+}
+#title .mode-btn::after{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(0deg, rgba(4,6,9,.92) 0%, rgba(4,6,9,.5) 34%, rgba(4,6,9,0) 64%);
+}
+#title .mode-btn span, #title .mode-btn small{position:absolute; left:10px; right:10px; z-index:1;}
+#title .mode-btn span{
+  bottom:clamp(22px,2.2vw,28px); font:600 clamp(13px,1.15vw,17px)/1.05 var(--hub-display);
+  letter-spacing:.05em; text-transform:uppercase; text-shadow:0 1px 8px rgba(0,0,0,.8);
+}
+#title .mode-btn small{
+  bottom:clamp(7px,.8vw,10px); font-size:clamp(10.5px,.8vw,12px); font-weight:500; color:var(--hub-mute);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#title .mode-btn:hover{transform:translateY(-3px); box-shadow:0 0 0 1px rgba(255,255,255,.28), 0 16px 30px -14px rgba(0,0,0,.9);}
+#title .mode-btn:hover .mode-art{filter:saturate(1) brightness(.95); transform:scale(1.04);}
+#title .mode-btn.active{box-shadow:0 0 0 2px var(--accent), 0 16px 34px -14px var(--accent-glow);}
+#title .mode-btn.active .mode-art{filter:saturate(1.05) brightness(1);}
+#title .mode-btn:active{transform:translateY(0) scale(.98);}
+#title .mode-btn:focus-visible{outline:2px solid #fff; outline-offset:3px;}
+/* a tile that opens its own page wears a small out-arrow */
+#title .mode-launch::before{
+  content:""; position:absolute; top:8px; right:8px; z-index:1; width:22px; height:22px; border-radius:6px;
+  background:rgba(6,8,12,.62) center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 2h6v6M10 2 2.5 9.5'/%3E%3C/svg%3E");
+}
+/* the last game you played (systems/title_hub.js) */
+#title .mode-btn.is-last > small{color:var(--accent);}
+#title .mode-btn.is-last > small::before{content:"Last played. ";}
+
+/* ============================================================
+   RESPONSIVE
+============================================================ */
+/* tablets in portrait, small laptops: the rail wraps to two rows of four */
+@media (max-width:1099px){
+  #title .mode-select{grid-template-columns:repeat(4,minmax(0,1fr));}
+  #title .origin-select{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+/* one column: phones in portrait and narrow tablets. The rail becomes a
+   swipeable strip of big tiles instead of eight postage stamps. */
+@media (max-width:759px){
+  #title .card-box{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto auto auto auto;
+    grid-template-areas:"hero" "actions" "label" "rail";
+    padding:max(20px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    align-content:start;
+  }
+  #title::after{
+    background:
+      linear-gradient(180deg, rgba(6,8,12,.55) 0%, rgba(6,8,12,.86) 38%, rgba(6,8,12,.96) 70%, rgba(6,8,12,.98) 100%);
+  }
+  #title .hub-hero{align-self:start; padding-top:4px;}
+  #title .logo{font-size:clamp(40px,12vw,64px);}
+  #title .title-actions{padding-bottom:8px;}
+  #title .mode-select{
+    display:flex; gap:10px; overflow-x:auto; scroll-snap-type:x mandatory;
+    margin:0 -16px; padding:2px 16px 6px; scrollbar-width:none;
+  }
+  #title .mode-select::-webkit-scrollbar{display:none;}
+  /* a scroller contributes 0 to its grid row, so the row collapses unless the
+     strip states its own height: tile width x 10/16 plus the padding */
+  #title .mode-select{min-height:calc(min(46vw,220px) * .625 + 8px);}
+  #title .mode-btn{flex:0 0 min(46vw,220px); height:calc(min(46vw,220px) * .625); scroll-snap-align:start;}
+  #title .mode-btn span{font-size:15px;}
+  #title .controls .keys{grid-template-columns:1fr;}
+}
+/* a 667pt phone carries the twelve stories six rows deep; tighten the rhythm
+   (not the 40px+ targets) so PLAY lands above the fold */
+@media (orientation:portrait) and (max-height:740px) and (max-width:759px){
+  #title .hub-kicker{margin-bottom:6px;}
+  #title .logo{font-size:clamp(36px,10.5vw,52px);}
+  #title .sub{font-size:14px; margin-top:6px;}
+  #title .origin-label, #title .gg-map-label{margin:12px 0 7px;}
+  #title .origin-select{gap:6px;}
+  #title .origin-btn{min-height:40px; padding:6px 12px;}
+  #title .controls{margin-top:6px;}
+  #title .title-actions{gap:8px;}
+  #title .quality-btn small{display:none;}
+  #title .quality-btn{min-height:40px;}
+}
+@media (max-width:420px){
+  #title .origin-select{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+/* phones on their side: two columns, everything smaller, the card scrolls to
+   the rail. PLAY rides at the top of its column, where the thumb is. */
+@media (orientation:landscape) and (max-height:560px){
+  #title .card-box{
+    grid-template-columns:minmax(0,1fr) minmax(210px,280px);
+    grid-template-rows:auto auto auto;
+    grid-template-areas:"hero actions" "label label" "rail rail";
+    padding:max(14px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 12px max(20px, env(safe-area-inset-left));
+    column-gap:24px;
+  }
+  #title .hub-hero{align-self:start; padding:0 0 8px;}
+  #title .title-actions{align-self:start; gap:8px; padding:4px 0 0;}
+  #title .logo{font-size:clamp(34px,10vh,52px);}
+  #title .sub{font-size:14px; margin-top:6px;}
+  #title .hub-kicker{margin-bottom:6px;}
+  #title .origin-label, #title .gg-map-label{margin:10px 0 6px;}
+  #title .origin-btn{min-height:40px; padding:6px 10px;}
+  #title #playBtn{padding-block:12px; font-size:22px;}
+  #title .quality-btn small{display:none;}
+  #title .mode-select{grid-template-columns:repeat(8,minmax(128px,1fr)); overflow-x:auto; scrollbar-width:none; min-height:84px;}
+  #title .mode-btn{height:80px; aspect-ratio:auto;}
+}
+
+/* ============================================================
+   THE WAY BACK: pause card + Main Menu (systems/title_hub.js)
+============================================================ */
+#pause{background:rgba(5,7,11,.58);}
+#pause .card-box{
+  width:min(400px,92vw); padding:30px 28px 22px; border-radius:18px;
+  background:rgba(14,18,26,.94); color:#f3f5f8; border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 30px 80px rgba(0,0,0,.55);
+  display:flex; flex-direction:column; align-items:stretch; gap:10px;
+}
+#pause .logo{
+  font:700 44px/1 "Oswald","Arial Narrow",Arial,sans-serif !important; letter-spacing:.12em; text-indent:.12em;
+  color:#fff; text-shadow:none; margin-bottom:10px;
+}
+#pause .btn{
+  margin:0; width:100%; border-radius:12px; padding:15px 20px; font:700 20px/1 "Oswald","Arial Narrow",Arial,sans-serif;
+  letter-spacing:.16em; background:#f3f5f8; color:#0b0f15; box-shadow:none;
+}
+#pause .btn:hover{transform:none; background:#fff; box-shadow:none;}
+#pause .btn:active{transform:translateY(1px); box-shadow:none;}
+#pause .btn ~ .btn{background:rgba(255,255,255,.08); color:#f3f5f8; border:1px solid rgba(255,255,255,.16);}
+#pause .btn ~ .btn:hover{background:rgba(255,255,255,.14);}
+#pause .smallnote{color:rgba(226,232,242,.5); margin-top:6px;}
+/* on the light result cards the way out is a quiet grey button */
+.btn.btn-quiet{background:#6b7686; box-shadow:0 6px 0 #4a5562, 0 10px 18px rgba(0,0,0,.25); margin-left:8px;}
+#pause .btn.btn-quiet{margin-left:0;}

@@ -615,12 +615,8 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
   /* keep the shared bottom panel clear of the home-indicator / rounded corner */
   #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
 }
-/* THE PRISON BRIEFING. Its Controls card is the mode's only how-to-play surface
-   and it listed nine keys; index.html carries a .keys-touch twin naming the
-   on-screen controls instead. One swap, both directions, so a hybrid iPad with
-   a keyboard attached still gets whichever grid its pointer says it is. */
-body.touch .mode-escape-only .controls .keys-kbd { display: none; }
-body.touch .mode-escape-only .controls .keys-touch { display: grid; }
+/* THE PRISON BRIEFING's keyboard/touch swap lives in css/title_hub.css, next
+   to the Controls block it switches. */
 
 /* The waypoint arrow's "[M] map" tail is the third key legend a tablet cannot
    act on (city mode has hidden it outright since the HUD declutter; prison and
