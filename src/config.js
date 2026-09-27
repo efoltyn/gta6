@@ -132,6 +132,11 @@
     const q = typeof location !== "undefined" && location.search
       && new URLSearchParams(location.search).get("mode");
     if (q) startMode = q;
+    // THE MENU REMEMBERS (systems/title_hub.js writes it at PLAY). Only the
+    // multi-game page listens: a page that declares START_MODE is one game,
+    // and an explicit ?mode= always wins. Unknown or other-page ids (npcwar,
+    // warlord...) fall through the MODES check below and change nothing.
+    if (!startMode && typeof localStorage !== "undefined") startMode = localStorage.getItem("cbz.hub.last");
   } catch (e) {}
   if (startMode && MODES[startMode]) CBZ.game.mode = startMode;
 

@@ -53,6 +53,16 @@
     return s;
   }
 
+  // ---- THE LINE BETWEEN A FINE AND A CELL, said once as you cross it. 1-2
+  // stars end in a fine and a release outside the precinct (bust → pettyRelease
+  // below); 3+ is County booking and then the prison van. That rule is only
+  // fair if you are told the moment it starts to apply to you.
+  function tierWarn(prev) {
+    if ((prev | 0) < 3 && (g.wanted | 0) >= 3 && CBZ.city && CBZ.city.note) {
+      CBZ.city.note("Three stars. Get caught now and it's County, not a fine.", 3.2, { urgent: true });
+    }
+  }
+
   // ---- ESCAPED CONVICT FLOOR: while g.escapedConvict is set (you broke OUT of
   // jail, mode.js stamped it on the city reset), the manhunt cannot end on its
   // own — heat/stars can't bleed below the 3★ band. Only CBZ.cityClearConvict()
@@ -88,6 +98,12 @@
     "assault":           { stars: 1, label: "Assault" },
     "mugging":           { stars: 1, label: "Mugging" },
     "lying-to-police":   { stars: 1, label: "Obstruction" },
+    // police.js gun-stop outcomes + the tackle break. These three ids were
+    // being FIRED and silently charging nothing (unknown id → "Disturbance"):
+    // walking off a stop three times and tearing loose from a tackle were free.
+    "brandishing":       { stars: 1, label: "Brandishing a Firearm" },
+    "armed-refusal":     { stars: 1, label: "Refusing a Lawful Order" },
+    "resisting":         { stars: 2, label: "Resisting Arrest" },
     "shots-fired":       { stars: 2, label: "Discharging a Firearm" },
     "gta":               { stars: 2, label: "Grand Theft Auto" },
     "vehicular-assault": { stars: 2, label: "Vehicular Assault" },
@@ -249,7 +265,7 @@
     // personal danger — the response just got heavier). A same-tier report no
     // longer prints "Reported: <crime>": you can't overhear a witness's call,
     // and the heat ring/star meter already carry the pressure.
-    if (g.wanted > prev) CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED · " + info.label);
+    if (g.wanted > prev) { CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED: " + info.label); tierWarn(prev); }
     if (CBZ.cityEvent) CBZ.cityEvent("crime-reported", { crime: info.label, severity: sev, panic: Math.min(8, want * 1.4), wantedPeak: g.wanted }, { silent: true, noWanted: true });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -269,7 +285,7 @@
     g.heat = Math.max(g.heat || 0, CBZ.CITY.starHeat[n] + 5);
     const prev = g.wanted | 0; g.wanted = starsFromHeat(g.heat);
     lastCrimeT = CBZ.now; g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
-    if (g.wanted > prev) { CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED"); }
+    if (g.wanted > prev) { CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED"); tierWarn(prev); }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityForceStars = forceStars;
@@ -291,7 +307,7 @@
     if (CBZ.player && CBZ.player.pos) g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
     if (reason) g.cityCrimeLabel = String(reason);
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
-    if (g.wanted > prev) CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED" + (reason ? " · " + reason : ""));
+    if (g.wanted > prev) { CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED" + (reason ? ": " + reason : "")); tierWarn(prev); }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return g.wanted;
   }
@@ -329,7 +345,7 @@
     if (CBZ.player && CBZ.player.pos) g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
     if (opts.reason) g.cityCrimeLabel = String(opts.reason);
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
-    CBZ.city && CBZ.city.big("★".repeat(Math.max(1, g.wanted)) + " WANTED" + (opts.reason ? " · " + opts.reason : ""));
+    CBZ.city && CBZ.city.big("★".repeat(Math.max(1, g.wanted)) + " WANTED" + (opts.reason ? ": " + opts.reason : ""));
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return g.wanted;
   };
@@ -612,7 +628,7 @@
   function completeContract() {
     const c = contract; if (!c) return;
     // peds.js already PAID the cash + announced "BOUNTY CLAIMED" — bookkeeping only here.
-    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract fulfilled: " + c.targetName + " · +" + bMoney(c.reward), "#7ed957"); } catch (e) {} }
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract fulfilled: " + c.targetName + ", +" + bMoney(c.reward), "#7ed957"); } catch (e) {} }
     if (CBZ.city) CBZ.city.addRespect(c.reward >= 1000000 ? 20 : 6);
     // CONSEQUENCE: a sanctioned hit on a KNOWN CRIMINAL earns a partial pardon
     // ("the law looks the other way"); murdering a respectable tycoon/exec
@@ -627,8 +643,8 @@
     const c = contract; if (!c) return;
     clearOurBounty(c);
     dropContractWaypoint();
-    bNotify("Contract failed · " + why + ".");
-    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract failed · " + why, "#ff8a8a"); } catch (e) {} }
+    bNotify("Contract failed: " + why + ".");
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract failed: " + why, "#ff8a8a"); } catch (e) {} }
     contract = null; bountyCooldown = 60;
   }
   function pingContract(manual) {
@@ -665,7 +681,7 @@
   CBZ.bountyFromPoster = function (poster) {
     if (!bountiesOn() || g.mode !== "city") return null;
     if (contract) {
-      bNotify("You've already got a live contract · " + contract.targetName + " (" + bMoney(contract.reward) + "). Finish it or let it expire.");
+      bNotify("You've already got a live contract: " + contract.targetName + " (" + bMoney(contract.reward) + "). Finish it or let it expire.");
       pingContract(true);
       return contract;
     }
@@ -723,7 +739,7 @@
     const inside = x > B.minX + inset && x < B.maxX - inset && z > B.minZ + inset && z < B.maxZ - inset;
     if (!inside) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
     if (!milLock) {
-      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA · TURN BACK");
+      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA. TURN BACK");
       milWarnT += dt;
       // a fresh crime reported INSIDE the wire (report() stamps _milHostileT)
       // = hostile incursion, no grace. 10s window: generous enough that a
@@ -778,9 +794,22 @@
     // explicit opt-out for anything written later.
     const scripted = opts.arc === false || !!opts.bigLabel || !!opts.note
       || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    // A PETTY COLLAR STAYS IN THE CITY. Every arrest used to end in the prison
+    // escape MODE (via County), so a first-minute mugging threw you out of the
+    // game you were playing. At 1-2 stars the ride goes to the precinct desk
+    // instead: a fine, the gun in your hand confiscated, released on the step.
+    // 3+ stars, an escaped convict, or a third petty collar inside ten minutes
+    // still goes to County (and from there, the prison van).
+    const stars0 = Math.max(1, g.wanted | 0);
+    const petty = !scripted && arcOn() && stars0 <= 2 && !g.escapedConvict && pettyBustsRecent() < 2;
     arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false,
       phase: (arcOn() && !scripted) ? "hands" : "legacy", total: 0, car: null, ourCar: false,
-      cine: false, legB: false, gate: null, lost: 0, charged: false, seat: null };
+      cine: false, legB: false, gate: null, lost: 0, charged: false, seat: null,
+      stars0: stars0, petty: petty,
+      // what was IN YOUR HAND when the collar landed (the hands phase holsters
+      // you, so this has to be read now, not at the desk)
+      gunId: (CBZ.cityHasGun && CBZ.cityHasGun()) ? CBZ.currentWeaponId : null,
+      gunName: (CBZ.cityHasGun && CBZ.cityHasGun() && CBZ.cityCurrentWeaponName) ? CBZ.cityCurrentWeaponName() : null };
     if (arrestScene.phase === "hands") TALLY.arcs++;   // tackles are counted where they happen (police.js)
   }
 
@@ -844,9 +873,7 @@
   }
   // where the jail takes you in. The gate is games/jail.js's compound door;
   // with no jail package mounted the precinct desk stands in.
-  function jailGate() {
-    const j = CBZ.cityJailGate && CBZ.cityJailGate();
-    if (j) return j;
+  function stationGate() {
     const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
     if (!st) return null;
     const d = st.lot && st.lot.building && st.lot.building.door;
@@ -854,6 +881,13 @@
     const nl = Math.hypot(nx, nz) || 1;
     return { x: st.x, z: st.z, nx: nx / nl, nz: nz / nl, desk: { x: st.x, z: st.z } };
   }
+  function jailGate() {
+    const j = CBZ.cityJailGate && CBZ.cityJailGate();
+    return j || stationGate();
+  }
+  // a petty collar rides to the PRECINCT desk (fine + release); anything
+  // heavier rides to County booking.
+  function gateFor(sc) { return (sc && sc.petty) ? (stationGate() || jailGate()) : jailGate(); }
 
   // THE RIDE NEEDS A CAR. Prefer the arresting officer's own cruiser (parked
   // ten metres away, which is where a beat cop's unit actually is); otherwise
@@ -1014,6 +1048,7 @@
   // transfer still concludes the arrest — an arrest may never evaporate.
   function bookIn(sc) {
     if (!sc || sc.finished) return;
+    if (sc.petty) { pettyRelease(sc); return; }
     const lost = forfeit(sc);
     let took = false;
     if (CBZ.cityBookIn) {
@@ -1042,6 +1077,60 @@
     if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: (sc.opts || {}).note });
     else toJail();
   }
+  // ============================================================
+  //  PETTY RELEASE — the 1-2 star ending. Charged once, at the desk (or on the
+  //  kerb when no unit could ride you in): a fine scaled by stars (cooperating
+  //  is cheaper; it can take you to $0, never below), the gun that was in your
+  //  hand goes to evidence for good, and you are walked out onto the precinct
+  //  step facing the street with a short police grace window. The run, the
+  //  crew, the rest of your gear: untouched.
+  // ============================================================
+  const PETTY_FINE = [0, 200, 600];
+  const PETTY_WINDOW = 10 * 60 * 1000;             // ms: three petty collars inside this = County
+  function pettyBustsRecent() {
+    const since = (CBZ.now || 0) - (g._pettyBustT || -1e15);
+    if (since < 0 || since > PETTY_WINDOW) return 0;          // < 0: a reloaded page's clock
+    return g._pettyBustN | 0;
+  }
+  function pettyRelease(sc) {
+    if (!sc || sc.finished) return;
+    sc.finished = true;
+    const opts = sc.opts || {};
+    const st = Math.max(1, Math.min(2, sc.stars0 | 0));
+    const fine = Math.min(Math.max(0, Math.round(g.cash || 0)), Math.round(PETTY_FINE[st] * (opts.peaceful ? 0.6 : 1)));
+    if (fine > 0) g.cash -= fine;
+    sc.lost = fine; sc.charged = true;
+    let took = null;
+    if (sc.gunId && CBZ.lockWeapon && CBZ.lockWeapon(sc.gunId)) took = sc.gunName || "Your gun";
+    const n = pettyBustsRecent() + 1;
+    g._pettyBustN = n; g._pettyBustT = CBZ.now || 0;
+    TALLY.releases++;
+    if (CBZ.cityEvent) CBZ.cityEvent("arrest", { lost: fine, peaceful: !!opts.peaceful, debt: 0 }, { noWanted: true });
+    if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }
+    const note = "Fined $" + fine + "." + (took ? " " + took + " confiscated." : "") +
+      (n >= 2 ? " Next arrest means County." : " Released at the precinct.");
+    const done = function () { releaseAtPrecinct(sc); };
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(fine, done, { title: "RELEASED", note: note });
+    else done();
+  }
+  function releaseAtPrecinct(sc) {
+    clearArc(sc);
+    arrestScene = null; busting = false;
+    if (CBZ.cityWantedReset) CBZ.cityWantedReset();          // heat, stars, g.busted
+    const P = CBZ.player, gate = stationGate();
+    if (P && P.pos && gate && g.mode === "city") {
+      const x = gate.x + gate.nx * 3.2, z = gate.z + gate.nz * 3.2;
+      P.pos.set(x, 0, z); P.vy = 0; P.grounded = true; P.speed = 0;
+      const yaw = Math.atan2(gate.nx, gate.nz);                // out the door, at the street
+      if (CBZ.playerChar && CBZ.playerChar.group) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, yaw, 0); }
+      if (CBZ.cam) { CBZ.cam.yaw = yaw + Math.PI; if (CBZ.CITY_TP) CBZ.cam.pitch = CBZ.CITY_TP.PITCH; }
+      if (typeof CBZ.cityFaceOpen === "function") { try { CBZ.cityFaceOpen(P); } catch (e) {} }   // mode.js: the open view
+    }
+    g.cityHolstered = true;                                    // you walk out with it put away
+    if (CBZ.cityPoliceGrace) CBZ.cityPoliceGrace(30);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+
   // games/jail.js calls this when processing is done and you can move again.
   CBZ.cityArrestUncuff = function () {
     if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
@@ -1124,7 +1213,10 @@
         if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(true); } catch (e) {} }
         if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click
         if (CBZ.city && CBZ.city.big) CBZ.city.big((sc.opts || {}).bigLabel || ((sc.opts || {}).peaceful ? "SURRENDERED" : "CUFFED"));
-        if (CBZ.city && CBZ.city.note) CBZ.city.note("“You're under arrest. Watch your head.”", 2.2);
+        // the officer tells you where this ride ends, on screen, over him
+        const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
+          : "You're under arrest. You're going to County.";
+        if (!(cop && CBZ.citySay && CBZ.citySay(cop, line, "#9fc3ff", 3.0)) && CBZ.city && CBZ.city.note) CBZ.city.note(line, 3.0);
       }
       if (cop && !cop.dead && P) {
         cop.speed = 0;
@@ -1133,7 +1225,8 @@
       }
       if (sc.t >= CUFF_T) {
         const found = P ? findCruiser(P, cop) : null;
-        if (!found) { sc.phase = "walkin"; sc.t = 0; sc.gate = jailGate(); if (!sc.gate) { bookIn(sc); return; } }
+        if (!found && sc.petty) { bookIn(sc); return; }       // no unit to ride in: processed on the kerb
+        if (!found) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) { bookIn(sc); return; } }
         else { sc.car = found.car; sc.ourCar = found.ours; sc.car.ai = false; sc.car._arrestRide = true; sc.car.v = 0; sc.phase = "walk"; sc.t = 0; }
       }
       return;
@@ -1142,7 +1235,7 @@
     // ---------- 3. THE PERP WALK: marched to the car, one pace ahead ----------
     if (sc.phase === "walk") {
       const car = sc.car;
-      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = jailGate(); if (!sc.gate) bookIn(sc); return; }
+      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) bookIn(sc); return; }
       // the kerb-side rear door, in the car's own frame
       const door = seatAt(car, { x: seatOf("rear").x - 1.35, z: seatOf("rear").z });
       const moved = marchTo(P, ch, cop, door.x, door.z, dt);
@@ -1162,7 +1255,7 @@
       if (cop && !cop.dead && car) sitRig(cop, car, seatOf("driver"));
       if (sc.t >= DOOR_T) {
         sc.phase = "ride"; sc.t = 0; sc.legB = false;
-        sc.gate = jailGate();
+        sc.gate = gateFor(sc);
         startRideCamera(sc);
       }
       return;
@@ -1198,7 +1291,7 @@
 
     // ---------- 7. THROUGH THE GATE TO THE DESK ----------
     if (sc.phase === "walkin") {
-      const gate = sc.gate || (sc.gate = jailGate());
+      const gate = sc.gate || (sc.gate = gateFor(sc));
       if (!gate) { bookIn(sc); return; }
       const target = (!sc._atGate && gate.gate) ? gate.gate : (gate.desk || gate);
       const moved = marchTo(P, ch, cop, target.x, target.z, dt);
@@ -1285,7 +1378,7 @@
 
   function ride(sc, P, ch, cop, dt) {
     const car = sc.car;
-    if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = sc.gate || jailGate(); if (!sc.gate) bookIn(sc); return; }
+    if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = sc.gate || gateFor(sc); if (!sc.gate) bookIn(sc); return; }
     car._arrestRide = true; car.ai = false;
 
     // ---- LEG A: pull away down the road you were arrested on, easing onto the
@@ -1304,7 +1397,7 @@
         // the bench: the vehicle (and everyone in it) is relocated onto the
         // jail's approach in ONE frame. Nothing visible teleports — this is
         // exactly how city/elevators.js hides a floor change.
-        const gate = sc.gate || (sc.gate = jailGate());
+        const gate = sc.gate || (sc.gate = gateFor(sc));
         if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
         const ax = gate.x + (gate.nx || 0) * 34, az = gate.z + (gate.nz || 1) * 34;
         car.pos.x = ax; car.pos.z = az;
@@ -1315,7 +1408,7 @@
       }
     } else {
       // ---- LEG B: roll up to the gate and stop. ----
-      const gate = sc.gate || (sc.gate = jailGate());
+      const gate = sc.gate || (sc.gate = gateFor(sc));
       if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
       const dx = gate.x - car.pos.x, dz = gate.z - car.pos.z, d = Math.hypot(dx, dz);
       const want = Math.atan2(dx, dz);
@@ -1372,25 +1465,63 @@
       phase: arrestScene ? arrestScene.phase : null };
   };
 
-  // ---- per-frame: decay heat when you lose the cops ----
+  // ---- per-frame: EVADING. Heat only bleeds once NO officer (or the chopper
+  // beam) has had eyes on you for a stars-scaled stretch. The old rule was
+  // "no cop sees you THIS FRAME and your last crime was 3 s ago", so the heat
+  // bled every frame a sightline flickered mid-chase and a two-star pursuit
+  // could be shaken by stepping behind a van. Now: break contact, stay broken
+  // for EVADE_HOLD[stars] seconds (twice as fast once you are well clear of
+  // the last place you were seen), and only then do the stars start to fall.
+  // Any sighting resets the clock. The HUD's existing star flash is the
+  // readout: FLASHING = they have eyes on you, STEADY = they are searching.
+  const EVADE_HOLD = [0, 6, 9, 13, 18, 24];          // s unseen before heat bleeds
+  const EVADE_RATE = [1, 2.2, 1.8, 1.3, 0.85, 0.7];  // bleed multiplier once it does
+  const SEARCH_R = [0, 45, 60, 80, 110, 150];        // m: "well clear" of the last sighting
+  let unseenT = 0, evadeState = 0;                   // 0 seen, 1 searching, 2 bleeding
+  CBZ.cityEvadeState = function () {
+    const st = g.wanted | 0;
+    return { stars: st, unseen: unseenT, hold: EVADE_HOLD[Math.min(5, st)], state: evadeState };
+  };
+  function playerSeen() {
+    const pa = CBZ.city && CBZ.city.playerActor;
+    const cops = CBZ.cityCops;
+    for (let i = 0; i < cops.length; i++) {
+      const c = cops[i];
+      // a cop who SEES an NPC offender is not a sighting of you
+      if (!c.dead && c.sees && (c.curTarget === pa || c._post)) return true;
+    }
+    return !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints());
+  }
   CBZ.onUpdate(33, function (dt) {
     if (g.mode !== "city") return;
     const sinceCrime = CBZ.now - lastCrimeT;
-    let seen = false;
-    const cops = CBZ.cityCops;
-    for (let i = 0; i < cops.length; i++) { if (!cops[i].dead && cops[i].sees) { seen = true; break; } }
-    if (!seen && sinceCrime > 3000 && (g.heat || 0) > 0) {   // 3s grace (CBZ.now is ms) before heat bleeds — not 3ms
-      // Decay scales with how much heat you're carrying (a flat base + a small
-      // fraction of current heat) so the HUGE high tiers bleed in reasonable
-      // absolute time instead of taking hours — a hard-won 5★ is STICKY-but-
-      // escapable: you must truly lose the heavy units for a sustained stretch
-      // (~1.5 min unseen to shed a star at 5★), but it never permanently traps
-      // you. A mild high-tier damping keeps the top stars feeling weighty.
-      const rate = (CBZ.CITY.heatDecay + (g.heat || 0) * 0.011) * (g.wanted >= 5 ? 0.7 : g.wanted >= 4 ? 0.85 : 1);
-      g.heat = Math.max(0, g.heat - rate * dt);
-      g.wanted = starsFromHeat(g.heat);
-      if (g.heat <= 0) { g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; }   // cleared → fresh slate
+    const stars = g.wanted | 0;
+    if (stars <= 0 || g.busted || (CBZ.player && CBZ.player.dead)) { unseenT = 0; evadeState = 0; }
+    else if (playerSeen() || sinceCrime < 1500) {
+      if (evadeState === 2 && CBZ.city && CBZ.city.note) CBZ.city.note("They've spotted you again.", 1.6);
+      unseenT = 0; evadeState = 0;
+    } else {
+      const lk = g.cityLastKnown, P = CBZ.player;
+      const clear = !lk || !P || Math.hypot(P.pos.x - lk.x, P.pos.z - lk.z) > SEARCH_R[Math.min(5, stars)];
+      unseenT += dt * (clear ? 2 : 1);
+      if (evadeState === 0) evadeState = 1;
+      if (unseenT >= EVADE_HOLD[Math.min(5, stars)] && (g.heat || 0) > 0) {
+        if (evadeState !== 2) { evadeState = 2; if (CBZ.city && CBZ.city.note) CBZ.city.note("You've lost them. Stay out of sight.", 2.2); }
+        // bleed scales with the heat carried (flat base + a small fraction), so
+        // the huge top tiers still clear in minutes, not hours
+        const rate = (CBZ.CITY.heatDecay + (g.heat || 0) * 0.011) * EVADE_RATE[Math.min(5, stars)];
+        g.heat = Math.max(0, g.heat - rate * dt);
+        g.wanted = starsFromHeat(g.heat);
+        if (g.heat <= 0) {
+          g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null;   // cleared, fresh slate
+          if (!g.escapedConvict && CBZ.city && CBZ.city.note) CBZ.city.note("The heat is off. The police have given up the search.", 2.6);
+        }
+      }
     }
+    // the HUD flashes the stars while (g.heat>0 && wanted >= g._wantedPeak);
+    // hud.js only ever RAISES the peak, so holding it one above the live stars
+    // while nobody can see you turns the flash into the "search" read.
+    if ((g.wanted | 0) > 0) g._wantedPeak = evadeState === 0 ? (g.wanted | 0) : (g.wanted | 0) + 1;
     // an active manhunt for an escaped convict never falls below 3★ on its own
     // (only CBZ.cityClearConvict lifts it). Re-assert AFTER any decay this frame.
     convictFloor();
@@ -1408,60 +1539,30 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene) clearArc(arrestScene); arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene) clearArc(arrestScene); arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; unseenT = 0; evadeState = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
 
-  // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
-  // back toward Lv.1 so the level/title visibly falls and the player re-climbs.
-  // We zero ONLY the infamy inputs that feed CBZ.cityPlayerLevel() (level.js):
-  // kills, respect, the wanted heat/stars, the bounty, the crew + borrowed-colors
-  // membership, and the holster flag. We NEVER touch owned assets (cash, house,
-  // cars, guns, jewelry) — net worth still contributes to the level (that's earned
-  // and stays). Safe to call repeatedly and only meaningful in city mode.
-  // death.js's respawn() already calls cityWantedReset() (heat/stars/bounty); this
-  // hook is additionally fired the instant you die (we wrap cityKillPlayer below),
-  // and may also be called by any death-flow code directly.
-  function infamyResetOnDeath() {
+  // ---- DEATH CONSEQUENCES (wanted side). Called by death.js's cityKillPlayer
+  // at the moment you go down. Death closes the manhunt (heat, stars, bounty,
+  // the escaped-convict floor, the military lock) and costs you a DENT of
+  // street respect. It used to also zero your kills, ALL your respect, your
+  // crew and your gang membership, and kill any open contract: one bad
+  // firefight erased an hour of progress. Progress now survives the hospital.
+  function deathPenalty() {
     if (g.mode !== "city") return;
     g.heat = 0; g.wanted = 0; g.cityCopTarget = 0;
-    // GTA convention (CITY_WANTED_CLEARS_ON_DEATH): death closes the manhunt —
-    // the escaped-convict floor dies with you too (a corpse is as caught as it
-    // gets; without this, convictFloor() re-asserted 3★ the frame after the
-    // heat wipe and the stars visibly SURVIVED the respawn). Arrest keeps its
-    // own funnel (games/jail.js); this is the DEATH path only.
     if (CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH !== false && g.escapedConvict) {
       if (CBZ.cityClearConvict) CBZ.cityClearConvict(); else g.escapedConvict = false;
     }
-    milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9;   // the sensor lock dies with you (respawn is outside the wire)
+    milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9;   // respawn is outside the wire
     g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null;
-    g.cityBounty = 0;                       // the price on your head dies with you
-    g.kills = 0;                            // body count infamy resets (assets untouched)
-    g.respect = 0;                          // street respect resets
-    g.cityCrew = 0;                         // your crew scatters when you go down
-    g.cityMembership = null;                // borrowed gang colors lapse (a founded g.playerGang is an asset → kept)
-    g.cityHolstered = false;               // back to default stance on respawn
-    // a hitman's contract dies with the hitman (the target keeps walking)
-    if (contract) { clearOurBounty(contract); dropContractWaypoint(); contract = null; bountyCooldown = 30; }
+    g.cityBounty = 0;                                  // the price on your head dies with you
+    const r = g.respect || 0;
+    if (r > 0) g.respect = Math.max(0, r - Math.max(2, Math.round(r * 0.1)));
+    g.cityHolstered = false;
+    unseenT = 0; evadeState = 0;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
-  CBZ.cityInfamyResetOnDeath = infamyResetOnDeath;
-
-  // self-wire the death moment: cityKillPlayer (death.js) is the single WASTED
-  // trigger. It loads AFTER us, so wrap it lazily (the heists.js/aircraft.js
-  // pattern). Firing the infamy reset AT death (not only at respawn) makes the
-  // Lv/Title drop visible immediately on the WASTED screen. Idempotent flag guard
-  // means a re-wrap (hot reload) can't double-chain.
-  // returns true ONLY when wrapping is DONE (or already done) — so the retry loop
-  // keeps polling until cityKillPlayer actually exists (it loads after us).
-  function wrapKill() {
-    if (typeof CBZ.cityKillPlayer !== "function") return false;   // not loaded yet → retry
-    if (CBZ.cityKillPlayer._infamyWrapped) return true;            // already wrapped → stop
-    const orig = CBZ.cityKillPlayer;
-    const wrapped = function () { try { infamyResetOnDeath(); } catch (e) {} return orig.apply(this, arguments); };
-    wrapped._infamyWrapped = true;
-    CBZ.cityKillPlayer = wrapped;
-    return true;
-  }
-  if (!wrapKill()) { const iv = setInterval(function () { if (wrapKill()) clearInterval(iv); }, 0); }
+  CBZ.cityDeathPenalty = deathPenalty;
   function augment() { if (CBZ.city) { CBZ.city.crime = crime; CBZ.city.report = report; CBZ.city.addHeat = addHeat; CBZ.city.clearWanted = clearWanted; CBZ.city.stars = function () { return g.wanted | 0; }; } }
   if (CBZ.city) augment(); else { const iv = setInterval(function () { if (CBZ.city) { augment(); clearInterval(iv); } }, 0); }
 })();

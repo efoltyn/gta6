@@ -3013,6 +3013,7 @@
     return tgt.isPlayer ? (g.wanted | 0) >= 1 : (tgt.npcWanted | 0) >= 1;
   }
 
+  const _hurtWP = { x: 0, y: 0, z: 0 }, _hurtWO = { fromX: 0, fromZ: 0 };
   function hurtActor(att, tgt, dmg, melee) {
     if (!tgt || tgt.dead) return;
     const fx = att.pos.x, fz = att.pos.z;
@@ -3043,8 +3044,11 @@
     }
     // ped vs ped
     tgt.hp -= dmg;
-    // the body CARRIES the hit (wounds.js): entry wound + blood soak on the clothing
-    if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.05 + rng() * 0.55, z: tgt.pos.z }, melee ? { melee: "blunt", fromX: fx, fromZ: fz } : { fromX: fx, fromZ: fz });
+    // the body CARRIES a ROUND (wounds.js): entry wound + blood soak. A punch
+    // leaves no decal: wounds.js draws "blunt" as the same pit as a bullet hole
+    // and the owner had it gutted from the player's fists (systems/combat.js);
+    // NPC-on-NPC punches were still stamping it on every street brawl.
+    if (!melee && CBZ.bodyWound) { _hurtWP.x = tgt.pos.x; _hurtWP.y = (tgt.pos.y || 0) + 1.05 + rng() * 0.55; _hurtWP.z = tgt.pos.z; _hurtWO.fromX = fx; _hurtWO.fromZ = fz; CBZ.bodyWound(tgt, _hurtWP, _hurtWO); }
     tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
     if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
     // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
@@ -4803,6 +4807,20 @@
       ped.pause = Math.max(ped.pause, ped.posePoint);
     }
 
+    // ---- ROUTED (gangs.js crewTakesLoss): this man's crew broke and he ran.
+    //      He keeps running and stays out of it until the timer lapses; the
+    //      threatened branch below would otherwise turn a crook straight back
+    //      round at the shooter on the very next think. Shoot him and he
+    //      turns (hurtActor/fpsmode give him a rage, and the rage branch takes over).
+    if (ped._routT > 0) {
+      ped._routT -= dt;
+      if (!ped.rage) {
+        if (ped.state !== "flee" || !(ped._reactHold > 0)) { ped.state = "flee"; fleeFrom(ped, px, pz); ped._reactHold = 2 + rng() * 1.5; }
+        else ped._reactHold -= dt;
+        return;
+      }
+    }
+
     // ---- if currently raging at someone, keep engaging until they're gone ----
     if (ped.rage) {
       if (ped.rage.dead || (ped.rage.isPlayer && P.dead)) { ped.rage = null; }
@@ -4876,7 +4894,11 @@
         // closer ⇒ more dread (0 at the 16m edge, ~1.6/tick on top of you), bounded.
         const close = 1 - Math.sqrt(gd2) / 16;
         ped.fear = Math.min(10, ped.fear + 0.6 + close * 1.0);
-        if (ped.fear >= 4) { ped.state = "flee"; fleeFrom(ped, gx, gz); return; }
+        if (ped.fear >= 4) {
+          // committed: one routed escape per ~2 s, not a re-plan every sweep
+          if (ped.state !== "flee" || !(ped._reactHold > 0)) { ped.state = "flee"; fleeFrom(ped, gx, gz); ped._reactHold = 1.8 + rng() * 1.2; }
+          return;
+        }
       } else if (ped.fear > 0 && ped.alarmed <= 0) {
         // no armed gangster in range and nothing else alarming → the turf-dread we
         // raised bleeds back off, so a civilian who passed a crew calms once clear
@@ -4954,21 +4976,58 @@
 
     // ---- being threatened (player aiming / hot / a witnessed crime nearby) ----
     const threatened = ped.alarmed > 0 || (playerThreat && dpl < 14);
+    if (ped._reactHold > 0) ped._reactHold -= dt;
+    if (ped._cowerT > 0) ped._cowerT -= dt;
+    if (ped._cowerCD > 0) ped._cowerCD -= dt;
     if (threatened) {
-      if (bnd === "meek" || bnd === "wary") {
-        // origin of the threat: a remembered offender if we have one, else the player
-        const thx = (ped.mem && ped.mem.pos) ? ped.mem.pos.x : px;
-        const thz = (ped.mem && ped.mem.pos) ? ped.mem.pos.z : pz;
-        const dThreat = Math.hypot(ped.pos.x - thx, ped.pos.z - thz);
-        // a wary bystander films from a safe-ish distance; high fear always bolts.
-        const wantFilm = bnd === "wary" && ped.fear < 7 && dThreat > 7 && rng() < 0.4;
-        if (wantFilm) {
-          ped.state = "film"; ped.speed = 0;
-          ped.group.rotation.y = Math.atan2(thx - ped.pos.x, thz - ped.pos.z);   // hold the phone up at it
-        } else {
-          // FLEE — and if a wall/cover is right beside the threat, duck behind it
-          ped.state = "flee";
-          fleeFrom(ped, thx, thz);
+      // origin of the threat: a remembered offender if we have one, else the player
+      const memT = (ped.mem && !ped.mem.dead && ped.mem.pos) ? ped.mem : null;
+      const thx = memT ? memT.pos.x : px;
+      const thz = memT ? memT.pos.z : pz;
+      const dThreat = Math.hypot(ped.pos.x - thx, ped.pos.z - thz);
+      // OUTGUNNED. A bold man with empty hands does not walk up to somebody who
+      // is holding a gun. This branch used to send every bold/crook civilian
+      // who heard a shot straight at the shooter ("confront": walk to him at
+      // 1.7x) and every crook into a fistfight with a rifle. Only the truly
+      // violent, or someone holding a gun themselves, squares up to a gun.
+      const foeIsPlayer = !memT || memT === CBZ.city.playerActor || memT.isPlayer;
+      const foeArmed = foeIsPlayer ? playerArmed : !!memT.armed;
+      const outgunned = foeArmed && !ped.armed && ped.kind !== "security" && ped.aggr < (B.violent || 0.88);
+      if (bnd === "meek" || bnd === "wary" || outgunned) {
+        // COMMIT to a reaction. This used to re-roll film-vs-flee and re-route
+        // the escape on EVERY think (15 Hz): a wary ped flickered between a
+        // frozen phone pose and a sprint, and every flee re-ran the exit
+        // scorer's LOS raycasts, so people ran in little circles instead of
+        // away. A chosen reaction now plays out for a beat; only a watcher the
+        // threat is walking INTO is allowed to change its mind early.
+        const holding = ped._reactHold > 0 && (ped.state === "flee" || ped.state === "film" || ped._cowerT > 0);
+        const closing = ped.state === "film" && dThreat < 7;
+        if (!holding || closing) {
+          ped._cowerT = 0;
+          // COWER: right on top of the danger with the fear maxed, the first
+          // instinct is to drop and cover, not to sprint past the gun. A beat of
+          // hunched arms-over-head (reactions.js reads poseCower), then they run.
+          if (ped.fear >= 8 && dThreat < 5.5 && (ped._cowerCD || 0) <= 0 && rng() < 0.5) {
+            const hold = 1.3 + rng() * 1.1;
+            ped.state = "idle"; ped.speed = 0; ped.path = null;
+            ped.target.set(ped.pos.x, 0, ped.pos.z);
+            ped.pause = Math.max(ped.pause, hold);
+            ped.poseCower = Math.max(ped.poseCower || 0, hold);
+            ped._cowerT = hold; ped._reactHold = hold; ped._cowerCD = 10;
+          } else if ((bnd === "wary" || outgunned) && ped.fear < 7 && dThreat > (outgunned ? 15 : 9) && rng() < 0.5) {
+            // GAWK from a safe distance: phone up at it, and stay put a while
+            ped.state = "film"; ped.speed = 0;
+            ped.group.rotation.y = Math.atan2(thx - ped.pos.x, thz - ped.pos.z);
+            ped._reactHold = 2.5 + rng() * 2.5;
+          } else {
+            // FLEE, and commit to the route for a couple of seconds
+            ped.state = "flee";
+            fleeFrom(ped, thx, thz);
+            ped._reactHold = 1.8 + rng() * 1.4;
+          }
+        } else if (ped.state === "film") {
+          ped.speed = 0;
+          ped.group.rotation.y = Math.atan2(thx - ped.pos.x, thz - ped.pos.z);   // keep the phone on it
         }
         // DECIDE whether to snitch — only if this ped actually WITNESSED a crime
         // (carries a witnessSev). They report once they've put some DISTANCE between
@@ -5008,7 +5067,8 @@
     if (active && ped.guard) {
       const intruder = ped.gang ? turfIntruder(ped, px, pz, playerArmed)
         : ped.kind === "security" && CBZ.citySecurityIntruder ? CBZ.citySecurityIntruder(ped) : null;
-      if (intruder) { ped.rage = intruder; ped.state = "fight"; return; }
+      if (intruder) { standDown(ped); ped.rage = intruder; ped.state = "fight"; return; }
+      if (ped.gang && turfStandoff(ped, px, pz, dpl, playerArmed)) return;
       // Hold the turf/post: loiter near the guard point.
       const dg = Math.hypot(ped.pos.x - ped.guard.x, ped.pos.z - ped.guard.z);
       if (dg > 9 || ped.pause <= 0) {
@@ -5501,6 +5561,70 @@
       }
     }
     return null;
+  }
+
+  // ---- TURF STANDOFF: notice, warn, warn again, then fight ----
+  // turfIntruder only ever fired once the set was ALREADY provoked (or you were
+  // wanted and armed), so a stranger could stroll through a corner crew with a
+  // rifle out and nobody looked up, and the first sign of life was a volley.
+  // Now the crew reads the gun: whoever sees you first squares up, gun levelled,
+  // and says so; the rest of the set on that post turns and holds. A second,
+  // harder warning follows if you stay; if you stay after THAT (or walk right
+  // up on them) the set is provoked and turfIntruder's rally takes it from
+  // there. Put the gun away or leave the block and the clock resets. The state
+  // is per GANG (one voice, one ladder), not per member, so a crew of six does
+  // not bark six warnings. Cost: a few compares per guard think, no scans.
+  const TW_WARN = [
+    ["Ay. Put that away. You're on our block.", "You lost? That piece stays in your pants round here.", "Wrong corner to be waving that."],
+    ["I'm not saying it again. Walk.", "Last time. Turn around.", "You got about two seconds."],
+    ["Light him up!", "He wants it. Get him!", "That's it. Run him off!"],
+  ];
+  const TW_EASE = ["Yeah. Keep walking.", "Smart.", "That's what I thought."];
+  function standDown(ped) { if (ped._twPose) { ped._twPose = false; ped.poseAimBack = false; } }
+  function turfStandoff(ped, px, pz, dpl, playerArmed) {
+    if (!ped.gang || CBZ.player.dead || ped.surrender || ped.restraint) { standDown(ped); return false; }
+    const gang = CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+    const host = gang ? gangHostility(ped) : 0;
+    if (!gang || gang.isPlayer || gang.playerFriendly || host < 0) { standDown(ped); return false; }
+    const G = ped.guard;
+    const now = (CBZ.now || 0) / 1000;
+    const W = gang._tw || (gang._tw = { stage: 0, t: 0, seen: -1e9, eased: false });
+    const gdx = px - G.x, gdz = pz - G.z;
+    const trespass = gdx * gdx + gdz * gdz < 16 * 16 && dpl < 15 && (playerArmed || host >= 1);
+    if (W.stage > 0 && W.stage < 3 && now - W.seen > 4) {
+      W.stage = 0;                       // nobody on the set has seen the gun for 4 s: the visit is over
+    }
+    if (W.stage >= 3 && (CBZ.cityGangProvoked ? CBZ.cityGangProvoked(ped.gang) : 0) < 0.2) W.stage = 0;   // the grudge cooled off
+    if (!trespass) {
+      // you put it away (or backed off) mid-warning: one of them says so, once
+      if (ped.state === "confront" && W.stage > 0 && W.stage < 3 && !W.eased && !playerArmed && dpl < 20) { W.eased = true; citySayBark(ped, pick(TW_EASE, rng()), 1.4); }
+      standDown(ped); return false;
+    }
+    W.seen = now;
+    // at open WAR there is nothing to warn about: you are the enemy on sight
+    if (host === 2 && W.stage < 2) { W.stage = 2; W.t = -1e9; }
+    if (W.stage >= 3) { standDown(ped); ped.rage = CBZ.city.playerActor; ped.state = "fight"; return true; }
+    // HOLD THE CORNER: square up where you stand, face him, gun levelled if you have one
+    ped.state = "confront"; ped.path = null; ped.speed = 0;
+    ped.target.set(ped.pos.x, 0, ped.pos.z);
+    ped.pause = Math.max(ped.pause, 0.6);
+    ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(px - ped.pos.x, pz - ped.pos.z), 0.6);
+    if (ped.armed && !ped._twPose) { ped._twPose = true; ped.poseAimBack = true; }
+    if (W.stage === 0) {
+      W.stage = 1; W.t = now; W.eased = false;
+      citySayBark(ped, pick(TW_WARN[0], rng()), 2.2);
+    } else if (W.stage === 1 && (now - W.t > 4.5 || dpl < 4)) {
+      W.stage = 2; W.t = now;
+      citySayBark(ped, pick(TW_WARN[1], rng()), 2.0);
+    } else if (W.stage === 2 && (now - W.t > 3.5 || dpl < 3)) {
+      W.stage = 3; W.t = now;
+      citySayBark(ped, pick(TW_WARN[2], rng()), 1.6);
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
+      standDown(ped);
+      ped.rage = CBZ.city.playerActor; ped.state = "fight";
+      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor); ped._rallyT = 6; }
+    }
+    return true;
   }
 
   function markGunpoint(ped, hold) {

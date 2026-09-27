@@ -16,15 +16,29 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=frontdoor1">
+<link rel="stylesheet" href="css/shark_title.css?v=launch1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
+<link rel="stylesheet" href="css/title_hub.css?v=hub1">
 </head>
 <body class="campaign-build">
+<script>
+/* SHARK SIM FIRST PIXEL. The static title markup below is Cell Block Z's card,
+   and it painted for the whole script parse (15-20 s on a loaded machine)
+   before state.js could apply mode-sharksim: CrazyGames rejected the build for
+   "a quick shot of another game at the start". A shark page marks <html>
+   here, before any of that markup paints; css/shark_title.css hides the card
+   and puts up the ocean boot screen, and modes/shark_title.js takes it down
+   once the live sea is on screen. */
+(function(){try{var m=(window.CBZ&&CBZ.START_MODE)||new URLSearchParams(location.search).get("mode");
+if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
+var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
+document.body.appendChild(b);}}catch(e){}})();
+</script>
 <div id="game"></div>
 
 <!-- HUD -->
@@ -112,13 +126,29 @@
   <span id="waypointArrow">▲</span><span id="waypointDist">--</span><span id="waypointLabel">Waypoint</span><span class="waypoint-mapkey">[M] map</span>
 </div>
 
-<!-- Title -->
+<!-- Title: THE FRONT DOOR. One screen for every game on the build. The
+     selected game's key art fills the screen (css/title_hub.css keys it off
+     the body.mode-* class state.js already sets), its name and options sit
+     on the left, PLAY on the right, and every game is a photographed tile in
+     the rail along the bottom. The art is the engine's own: assets/keyart/
+     is written by tools/hub-keyart.sh from the *-product presets.
+
+     LOAD-BEARING HOOKS (none of these throw when broken, they just stop):
+     #playBtn (+ class btn), #qualityPreset as its IMMEDIATE previous sibling,
+     #originSelect as the ancestor of the contract .origin-btn, empty
+     #gungameMapSelect, #originRollLine, #newLifeBtn, #bestStat, the
+     .smallnote.mode-survival-only text (survival.js reads it), 10 .kbd in
+     the prison's keys-kbd grid, and the rail's exact opening line and
+     closing `</button>` + `    </div>` pair, which tools/build-web-release.mjs
+     and tools/build-disaster-page.mjs splice out for single-game pages. -->
 <div id="title" class="screen">
   <div class="card-box">
+    <div class="hub-hero">
     <!-- ESCAPE mode -->
     <div class="mode-escape-only">
+      <div class="hub-kicker">Prison Escape</div>
       <div class="logo">CELL BLOCK <span class="z">Z</span></div>
-      <div class="sub">Prison Escape</div>
+      <div class="sub">Lay low, make friends, get out.</div>
       <div id="roleSelect" class="role-select" aria-label="Choose role">
         <button class="role-btn active" type="button" data-role="inmate">
           <span>Inmate</span><small>Escape the block</small>
@@ -127,22 +157,18 @@
           <span>Cop</span><small>Patrol with gear</small>
         </button>
       </div>
-      <!-- NO KEYBOARD ⇒ NO KEY LEGEND (owner, 2026-08-09, iPad). This card is
-           the prison's ONLY how-to-play surface — systems/controls.js's card,
-           the one that already knows how to render touchRows, never fires here
-           (its context() bails outside the city) — so on a tablet the entire
-           tutorial was nine key caps for keys that do not exist. The touch grid
-           names the on-screen control instead. css/mobile.css swaps the two off
-           body.touch; the other three mode cards still carry key caps only. -->
+      <!-- NO KEYBOARD, NO KEY LEGEND (owner, 2026-08-09, iPad). This is the
+           prison's only how-to-play surface, so a tablet gets the touch grid
+           naming the on-screen controls; css/mobile.css swaps the two. -->
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys keys-touch">
-          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move · rim to sprint · press to sneak</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch · fire</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump · vault</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move, rim to sprint, press to sneak</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch or fire</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump, vault</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Eye</span></span><span class="lab">First-person</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact · the pill names the action</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact, the pill names the action</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
         </div>
@@ -152,7 +178,7 @@
           <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>
           <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire · reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire, reload</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
@@ -162,14 +188,15 @@
 
     <!-- SURVIVAL mode -->
     <div class="mode-survival-only">
+      <div class="hub-kicker">100 players, one island</div>
       <div class="logo">DISASTER <span class="z">SURVIVAL</span></div>
-      <div class="sub">Natural Disaster Survival</div>
+      <div class="sub">Tsunamis, volcanoes, quakes. Last one alive wins.</div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · throw</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, throw</span></div>
           <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab / set down</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">Climb high</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
@@ -177,49 +204,52 @@
       </details>
     </div>
 
-    <!-- SHARK SIM mode -->
+    <!-- SHARK SIM mode (its own front door is #sharkTitle, over the live sea;
+         this block is only what the hidden card would have said) -->
     <div class="mode-sharksim-only">
+      <div class="hub-kicker">You are the shark</div>
       <div class="logo">SHARK <span class="z">SIM</span></div>
-      <div class="sub">You Are The Shark</div>
+      <div class="sub">Eat. Grow. Become the megalodon.</div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Swim</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Lunge</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise · dive</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic — point it at food</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise, dive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic. Point it at food</span></div>
         </div>
       </details>
     </div>
 
     <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
-         own MAPS registry — the registry is the truth, the markup is a slot) -->
+         own MAPS registry; the markup is a slot and must stay empty) -->
     <div class="mode-gungame-only">
+      <div class="hub-kicker">Weapon-ladder deathmatch</div>
       <div class="logo">GUN <span class="z">GAME</span></div>
-      <div class="sub">Weapon-Ladder Deathmatch</div>
-      <div class="gg-map-label">CHOOSE YOUR MAP</div>
+      <div class="sub">Every kill climbs the ladder. The last rung is bare fists.</div>
+      <div class="gg-map-label">Choose your map</div>
       <div id="gungameMapSelect" class="gg-map-select" aria-label="Choose map"></div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire · punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire, punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
           <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
         </div>
       </details>
-      <div class="smallnote" id="gungameMapNote">Every kill climbs the ladder. The final rung is bare fists.</div>
     </div>
 
     <!-- CITY mode -->
     <div class="mode-city-only">
+      <div class="hub-kicker">Open-world crime</div>
       <div class="logo">GANG <span class="z">LIFE</span></div>
-      <div class="sub">Open-world turf war</div>
+      <div class="sub">Make money any way you can. Cops escalate to five stars.</div>
       <!-- character-origin picker (systems/state.js wires it; city/origins.js
-           applies the pick at run-start — see that file's header). -->
-      <div class="origin-label">CHOOSE YOUR STORY</div>
+           applies the pick at run-start). -->
+      <div class="origin-label">Choose your story</div>
       <div id="originSelect" class="origin-select" aria-label="Choose your story">
         <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Hitman</b></button>
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b></button>
@@ -234,33 +264,26 @@
         <button class="origin-btn" type="button" data-origin="tenant"><b>The Tenant</b></button>
         <button class="origin-btn origin-btn-roll" type="button" data-origin="random"><b>Roll The Dice</b><span id="originRollLine"></span></button>
       </div>
-      <!-- PILOT sub-select. Hidden unless the PILOT story is chosen; systems/
-           state.js fills it from CBZ.cityOriginPlanes(), which reads the LIVE
-           aircraft registry — every airframe in the game shows up here with no
-           edit, and a new one appears the moment it registers. -->
+      <!-- PILOT / CAPTAIN sub-selects: hidden unless that story is chosen;
+           systems/state.js fills them from the live aircraft and hull
+           registries, so a new airframe or boat appears with no edit here. -->
       <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
-        <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
+        <div class="origin-label origin-sublabel">Choose your aircraft</div>
         <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
       </div>
-      <!-- CAPTAIN sub-select. The same strip, drawn by the same renderSub() in
-           systems/state.js, filled from CBZ.cityOriginBoats() — world/
-           water_hulls.js's live hull registry. That one is populated at PARSE
-           time, so unlike the aircraft list above this is the REAL fleet with
-           real lengths before a world exists, and a hull registered tomorrow
-           appears here with no edit. -->
       <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
-        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div class="origin-label origin-sublabel">Choose your boat</div>
         <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
       </div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
-          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · fire</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">YES · take the offer</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">NO · refuse</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">PUNCH · start a fight</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map · waypoint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move, drive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, fire</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Yes, take the offer</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">No, refuse</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">Punch, start a fight</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map, waypoint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
           <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
@@ -269,78 +292,43 @@
       </details>
     </div>
 
-    <!-- THE THINGS YOU PRESS, IN ONE BOX. Graphics, PLAY and New Life used to
-         be three loose children of the card, each picking its own width: the
-         roles above them ran the full 1100px, these shrank to a 460px strip
-         down the middle, and PLAY sat off-centre because New Life stood beside
-         it. Boxed together they become a rail — beside the roster on a wide
-         screen, under it on a phone — and PLAY is centred in it either way.
-         Nothing here is addressed by position: state.js, newlife.js, quality.js
-         and gamepad.js all reach these by id. -->
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
+    <div class="smallnote mode-escape-only" id="bestStat"></div>
+    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+    </div><!-- /.hub-hero -->
+
+    <!-- THE THINGS YOU PRESS, IN ONE BOX: graphics, PLAY, New Life. Reached
+         by id everywhere (state.js, newlife.js, quality.js, gamepad.js). -->
     <div class="title-actions">
     <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
       <div class="quality-preset-label">Graphics</div>
       <div class="quality-select">
-        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>HD · short horizon</small></button>
-        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced world</small></button>
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>Short horizon</small></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced</small></button>
         <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span><small>Full distance</small></button>
       </div>
     </div>
-
     <button class="btn" id="playBtn">Play</button>
     <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
       <span>New Life</span><small>Clear every saved city character</small>
     </button>
     </div><!-- /.title-actions -->
-    <!-- THE OTHER GAMES, BELOW THE GAME. This strip used to be the first
-         thing on the title card, which made the screen a menu of six
-         products instead of one game you are about to play. It keeps every
-         button and every behaviour — setMode for the four modes, data-href
-         for the two that leave the page — it just stopped going first.
-         (Kept as-is otherwise, by owner direction.) -->
-    <div class="origin-label mode-strip-label">MORE GAMES</div>
-    <div id="modeSelect" class="mode-select" aria-label="Choose game mode">
-      <button class="mode-btn active" type="button" data-mode="city"><span>Gang Life</span><small>Turf, gangs, cops</small></button>
-      <button class="mode-btn" type="button" data-mode="escape"><span>Prison Escape</span><small>Stealth &amp; survival</small></button>
-      <button class="mode-btn" type="button" data-mode="survival"><span>Disaster Survival</span><small>100 players · last alive</small></button>
-      <button class="mode-btn" type="button" data-mode="gungame"><span>Gun Game</span><small>Pick a map · climb the ladder</small></button>
-      <button class="mode-btn" type="button" data-mode="sharksim"><span>Shark Sim</span><small>you ARE the shark · eat the beach crowd · become the MEGALODON</small></button>
-      <!-- BOMB SURVIVOR is not a mode of this build — it is another game on the
-           release, standing on its own page (one studio tag boots the engine
-           without the city). So the tile NAVIGATES rather than calling setMode:
-           systems/state.js honours data-href on any .mode-btn. Full width,
-           because a tile that leaves the page should not look like a sibling of
-           four that do not. There used to be an A and a B here; the bet is
-           settled — the studio won, and the one game stands on the real map. -->
-      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivor"
-              data-href="games/bomb-survivor.html">
-        <span>Bomb Survivor</span><small>6 v 6 · the real island, the real downtown · 3 minutes each way</small>
-      </button>
-      <!-- NPC WAR stands on its own page like Bomb Survivor, and since this
-           wave it stands on the same GROUND: the real downtown, the real
-           military island, Halloran Field. You do not play a man in it — you
-           hold the camera and the clock over two armies of any size. -->
-      <button class="mode-btn mode-launch" type="button" data-mode="npcwar"
-              data-href="games/battle.html">
-        <span>NPC War</span><small>two armies · any size · the real city · bombers, nukes · you hold the clock</small>
-      </button>
-      <!-- DESERT WARLORD is what NPC War turned into once somebody had to LIVE
-           with the result of a battle. Same men, same guns, same combat brain —
-           but the armies are yours, you paid for them or frightened them into
-           joining, and the ones who die stay dead. Its own page for the same
-           reason Bomb Survivor has one: it is a whole world, not a mode of this
-           one, and it boots the studio without the city. -->
-      <button class="mode-btn mode-launch" type="button" data-mode="warlord"
-              data-href="games/warlord.html">
-        <span>Desert Warlord</span><small>start alone · 14 km of sand · hire them, rout them, or take their surrender</small>
-      </button>
-    </div>
 
-    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
-    <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars. Get cuffed and it's the jail game.</div>
-    <div class="smallnote mode-escape-only" id="bestStat"></div>
-    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
-    <div class="smallnote mode-sharksim-only">Point your mouth at food — the bite is automatic. Dodge the pod until you are the MEGALODON.</div>
+    <!-- THE GAMES. Every tile is the game's own key art. The five without
+         data-href are modes of this page (state.js setMode); the three with
+         data-href are whole games on their own pages, and state.js navigates
+         to them. src/systems/title_hub.js remembers the last one played. -->
+    <div class="origin-label mode-strip-label">Games</div>
+    <div id="modeSelect" class="mode-select" aria-label="Choose a game">
+      <button class="mode-btn active" type="button" data-mode="city"><img class="mode-art" src="assets/keyart/city.jpg" alt="" decoding="async"><span>Gang Life</span><small>Run the city</small></button>
+      <button class="mode-btn" type="button" data-mode="escape"><img class="mode-art" src="assets/keyart/escape.jpg" alt="" decoding="async"><span>Prison Escape</span><small>Cell Block Z</small></button>
+      <button class="mode-btn" type="button" data-mode="survival"><img class="mode-art" src="assets/keyart/survival.jpg" alt="" decoding="async"><span>Disaster Survival</span><small>Last one alive</small></button>
+      <button class="mode-btn" type="button" data-mode="gungame"><img class="mode-art" src="assets/keyart/gungame.jpg" alt="" decoding="async"><span>Gun Game</span><small>Climb the ladder</small></button>
+      <button class="mode-btn" type="button" data-mode="sharksim"><img class="mode-art" src="assets/keyart/sharksim.jpg" alt="" decoding="async"><span>Shark Sim</span><small>Become the megalodon</small></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="npcwar" data-href="games/battle.html"><img class="mode-art" src="assets/keyart/npcwar.jpg" alt="" decoding="async"><span>NPC War</span><small>Two armies, any size</small></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="warlord" data-href="games/warlord.html"><img class="mode-art" src="assets/keyart/warlord.jpg" alt="" decoding="async"><span>Desert Warlord</span><small>An army from nothing</small></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivor" data-href="games/bomb-survivor.html"><img class="mode-art" src="assets/keyart/bombsurvivor.jpg" alt="" decoding="async"><span>Bomb Survivor</span><small>6 v 6 on the real island</small></button>
+    </div>
   </div>
 </div>
 
@@ -351,6 +339,10 @@
     <!-- Performance/quality controls live in ONE place: the Settings panel
          (systems/settings.js injects its button below; [Esc] from here opens it). -->
     <button class="btn" id="resumeBtn">Resume</button>
+    <!-- THE WAY OUT. Without it the only road back to the other games was a
+         page reload. src/systems/title_hub.js wires it; settings.js inserts
+         its Settings button between Resume and this one. -->
+    <button class="btn btn-quiet" id="pauseMenuBtn" type="button">Main Menu</button>
     <div class="smallnote">Esc resumes</div>
   </div>
 </div>
@@ -367,6 +359,7 @@
       <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
     </div>
     <button class="btn" id="againBtn">Escape Again</button>
+    <button class="btn btn-quiet" id="winMenuBtn" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -750,6 +743,7 @@
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=duty1"></script>
+<script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
      so every useBed() call silently degraded — measured: 21 props, 0 beds),
@@ -853,6 +847,7 @@
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
+<script src="src/systems/escapeplan.js?v=plan1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
@@ -920,10 +915,11 @@
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=sharkmode1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=sharkmode1"></script>
+<script src="src/modes/shark_sim.js?v=loop1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
-<script src="src/modes/shark_title.js?v=frontdoor1"></script>
+<script src="src/modes/shark_title.js?v=launch1"></script>
+<script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=nodash1"></script>
@@ -1194,7 +1190,7 @@
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
+<script src="src/city/wildlife/aquatic.js?v=gillcrease1"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
@@ -2197,7 +2193,7 @@
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=uwlook2"></script>
+<script src="src/world/water_underwater.js?v=snow1"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people

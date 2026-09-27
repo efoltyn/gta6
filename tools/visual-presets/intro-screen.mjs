@@ -30,6 +30,7 @@ export default {
     "iphone-16:portrait",
     "iphone-16:landscape",
     "ipad-mini:landscape",
+    "ipad-pro-11:portrait",
     "laptop",
   ],
   // The title screen is DOM, but state.js wires the pickers after boot and
@@ -59,6 +60,12 @@ export default {
       mode: "escape",
       focus: "The other mode's card must survive the reshuffle untouched.",
     },
+    {
+      id: "gungame-title",
+      label: "Gun Game title",
+      mode: "gungame",
+      focus: "The map picker (built at runtime by gungame.js) inside the hero.",
+    },
   ],
   metrics: {
     fillPct: { label: "Screen width used by the card", unit: "%", better: "higher" },
@@ -69,6 +76,8 @@ export default {
     visibleKeycaps: { label: "Keyboard key caps shown on a touch device", unit: "caps", better: "lower" },
     raggedCells: { label: "Holes at the end of a wrapped row", unit: "cells", better: "lower" },
     playOffCentre: { label: "PLAY off the centre of its own box", unit: "px", better: "lower" },
+    gameTilesWithArt: { label: "Game tiles showing real key art", unit: "tiles", better: "higher" },
+    heroArt: { label: "Selected game's art behind the screen", unit: "1=yes", better: "higher" },
   },
   metricsNote:
     "Measured live in the page at each device frame. fillPct is the card's border box against the viewport width; " +
@@ -85,8 +94,13 @@ export default {
     const mode = input.subject.mode || "city";
     const modeButton = document.querySelector('.mode-btn[data-mode="' + mode + '"]');
     if (!modeButton) return { ok: false, error: 'no .mode-btn[data-mode="' + mode + '"]' };
-    modeButton.click();
-    await sleep(220);
+    // HARNESS TRAP: clicking the already-active CITY tile on a build without
+    // the hub's guard runs setMode("city") again, which builds the whole city
+    // behind the boot meter and photographs "89% BUILDING THE WORLD".
+    if (!modeButton.classList.contains("active")) modeButton.click();
+    // the hub fades the new game's key art in over 0.5 s (css/title_hub.css
+    // .hub-swap); photographing mid-fade would slander the art
+    await sleep(750);
 
     const card = document.querySelector("#title .card-box");
     if (!card) return { ok: false, error: "no #title .card-box" };
@@ -167,6 +181,14 @@ export default {
         return rect.width > 0 && rect.height > 0;
       }).length;
 
+    // THE FRONT DOOR'S PICTURES. A tile counts when its <img> actually
+    // decoded (naturalWidth > 0), not merely when the markup names a file.
+    const gameTilesWithArt = Array.from(document.querySelectorAll("#modeSelect .mode-btn img"))
+      .filter((img) => img.complete && img.naturalWidth > 0 && img.getBoundingClientRect().width > 0).length;
+    const titleEl = document.getElementById("title");
+    const heroBg = titleEl ? getComputedStyle(titleEl, "::before").backgroundImage : "none";
+    const heroArt = heroBg && heroBg.indexOf("url(") >= 0 ? 1 : 0;
+
     return {
       ok: true,
       mode,
@@ -181,6 +203,8 @@ export default {
         visibleKeycaps,
         raggedCells,
         playOffCentre,
+        gameTilesWithArt,
+        heroArt,
       },
     };
   },

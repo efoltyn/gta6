@@ -352,7 +352,7 @@
         if (result === "escaped") {
           // you broke his grip. That IS a crime, and the report is the one the
           // world already has for it — never a bespoke penalty.
-          if (CBZ.city && CBZ.city.note) CBZ.city.note("You tear loose. “SUSPECT IS RESISTING!”", 2.0);
+          copSay(c, "SUSPECT IS RESISTING!", 2.0);
           if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: c.pos.x, z: c.pos.z, type: "resisting" }); } catch (e) {} }
           c._challenged = false; c._patience = 0; c.arrestT = 0;
           c.curTarget = (CBZ.city && CBZ.city.playerActor) || null; c.sees = true; c.retarget = 0.6;
@@ -360,7 +360,7 @@
       },
     });
     if (!h) return false;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("“STOP RIGHT THERE!”", 1.4);
+    copSay(c, "STOP RIGHT THERE!", 1.4);
     if (CBZ.arrestCount) CBZ.arrestCount("tackles");
     c.arrestT = 0; c.speed = 0; c.curTarget = null; c.npcTarget = null;
     return true;
@@ -463,8 +463,31 @@
     const P = CBZ.player; if (!P || P.dead) return;
     if (Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) > 13) return;   // overheard, not broadcast
     barkCD = 26 + rng() * 20;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + (c.name || "Officer") + ": " + lines[(rng() * lines.length) | 0], 1.8);
+    copSay(c, lines[(rng() * lines.length) | 0], 1.8, true);   // overheard or not at all
   }
+
+  // A COP'S WORDS GO ON SCREEN, OVER THE COP. city.note() is a phone channel
+  // (mode.js routes it to the Scanner/News app or drops it), so every "FREEZE"
+  // and every gun-stop warning this file used to print through it never reached
+  // the player's eyes: the law escalated in silence. citySay is the one
+  // on-screen speech surface (social.js, subtitle-bus arbitrated, near-camera
+  // gated); the note is only the fallback for a build without it.
+  function copSay(c, text, secs, noPhone) {
+    if (c && !c.dead && CBZ.citySay) {
+      try { if (CBZ.citySay(c, text, "#9fc3ff", secs || 2.2)) return true; } catch (e) {}
+    }
+    if (!noPhone && CBZ.city && CBZ.city.note) CBZ.city.note(text, secs || 2.2);
+    return false;
+  }
+
+  // ---- POLICE GRACE: a fresh life, a hospital discharge or a release from the
+  // precinct gets a short window where no beat cop opens a gun-stop on you.
+  // Waking up at the ER with your piece in hand and being challenged before you
+  // can see the street is not a stop, it is an ambush. death.js / wanted.js /
+  // a fresh city reset call CBZ.cityPoliceGrace(sec).
+  let copGraceT = 0;
+  CBZ.cityPoliceGrace = function (sec) { copGraceT = Math.max(copGraceT, +sec || 0); };
+  CBZ.cityPoliceGraceLeft = function () { return copGraceT; };
 
   // ---- ARREST-FIRST CHALLENGE (city-arrest-first) ---------------------------
   // A cop who gets eyes on a wanted suspect inside barking range CHALLENGES
@@ -481,12 +504,17 @@
     c._patience = Math.max(0.8, copPatience(c) / c._chalN);   // escalating: each re-challenge is shorter
     if (challengeNoteCD > 0) return;
     challengeNoteCD = 4.5;
-    if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note(c.swat ? "\"POLICE! DOWN · HANDS BEHIND YOUR HEAD!\"" : "\"FREEZE! Hands where I can see them!\"", 2.0);
-      if (CBZ.now - surrenderHintT > 30000) {
-        surrenderHintT = CBZ.now;
-        CBZ.city.note("Stand still to be cuffed, or walk up and surrender. Fighting back gets you shot.", 3.2);
-      }
+    // THE STAKES ARE SAID OUT LOUD. What getting caught costs is decided by the
+    // stars (wanted.js: 1-2 stars is a fine and a release at the precinct, 3+
+    // is County), so the officer's first line tells you which one this is.
+    const st = g.wanted | 0;
+    const line = c.swat ? "POLICE! DOWN! HANDS BEHIND YOUR HEAD!"
+      : st >= 3 ? "FREEZE! You're going to County for this!"
+        : "FREEZE! Hands up. Make it easy, it's just a fine.";
+    copSay(c, line, 2.6);
+    if (CBZ.now - surrenderHintT > 30000) {
+      surrenderHintT = CBZ.now;
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Stand still to be cuffed, or walk up and surrender. Fighting back gets you shot.", 3.2);
     }
   }
 
@@ -622,13 +650,6 @@
 
   function stopActive() { return !!(STOP.cop && !STOP.cop.dead); }
 
-  // how believable an excuse is: a low-suspicion stop + your street respect help;
-  // every time you've been re-asked makes the officer less patient.
-  function stopTalkChance(base) {
-    const respect = Math.min(0.25, (g.respect || 0) * 0.01);
-    return Math.max(0.05, base - STOP.susp * 0.18 - STOP.asked * 0.12 + respect);
-  }
-
   /* ONE ROW, AND IT IS THE VERB (owner, 2026-08-04). This card used to offer
      YES / REFUSE. Both were wrong:
        • YES answered a question the note had to ask. The button now says the
@@ -648,9 +669,20 @@
   }
   // The note is the OFFICER, not a restated button: how close he is to calling
   // it in, and (once he is impatient) what walking off will now cost.
+  // THE CLOCK IS ON THE CARD. Ignoring a gun-stop used to end, silently, 16 s
+  // in, as a 2-star "Discharging a Firearm" charge nobody had fired. Now the
+  // officer's patience is a visible count, he says it three times out loud
+  // (STOP_WARN), and running out of it is the honest charge: brandishing, 1 star.
+  const STOP_LIMIT = 14;
+  const STOP_WARN = [
+    { t: 5, line: "Put it away. Now." },
+    { t: 9.5, line: "Last warning! Holster that weapon!" },
+  ];
+  function stopLeft() { return Math.max(0, Math.ceil(STOP_LIMIT - STOP.t)); }
   function stopNote() {
-    const s = STOP.susp;
-    if (s >= 2.2) return "FINAL WARNING · walk off now and he calls it in";
+    const s = STOP.susp, left = stopLeft();
+    if (s >= 2.2) return "FINAL WARNING: walk off now and he calls it in (" + left + ")";
+    if (STOP.t >= STOP_WARN[0].t) return "Holster it or he calls it in (" + left + ")";
     if (s >= 1.2) return "Officer is losing patience";
     return "Open carry, he wants it away";
   }
@@ -695,7 +727,7 @@
   }
 
   function beginStop(cop) {
-    STOP.cop = cop; STOP.t = 0; STOP.asked = 1; STOP.key = "";
+    STOP.cop = cop; STOP.t = 0; STOP.asked = 1; STOP.key = ""; STOP.warnI = 0;
     // THE OFFICER REMEMBERS. The REFUSE row's real weight was that it could be
     // pressed twice and the third one got you arrested. With refusal moved onto
     // walking away, that repetition lives ACROSS stops instead of inside one:
@@ -712,7 +744,7 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("\"Hey! Hold up, is that a firearm?\"", 1.8);
+    copSay(cop, "Hey! Hold up, is that a firearm? Put it away.", 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -727,33 +759,6 @@
     STOP.cop = null; STOP.t = 0; STOP.susp = 0; STOP.asked = 0;
     stopHide();
   }
-
-  // talk-out: success backs the cop off; failure ratchets suspicion (and a third
-  // strike turns the stop into a real stand-off — he draws and calls it in).
-  function stopAttempt(chance, sellLine) {
-    const c = STOP.cop; if (!c) return;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(sellLine, 1.6);
-    STOP.asked++;
-    if (rng() < chance) {
-      if (CBZ.city) { CBZ.city.note("“…alright. Keep it holstered. Move along.”", 2.2); CBZ.city.addRespect(1); }
-      if (c.armed && CBZ.syncActorWeapon) { c._gunLowered = true; }
-      endStop(true);
-    } else {
-      STOP.susp += 1;
-      if (STOP.susp >= 3) {
-        // brandishing call goes out → a 1-star stop becomes real; he squares up
-        if (CBZ.city) CBZ.city.note("“That's it, hands! HANDS!”", 1.8);
-        if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "shots-fired" });
-        c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
-        endStop(false);
-      } else {
-        if (CBZ.city) CBZ.city.note("“Don't lie to me. Put it AWAY.”", 1.8);
-        stopRefreshPanel();
-      }
-    }
-  }
-  function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed. I carry legal.”"); }
-  function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
 
   // REFUSING IS WALKING AWAY. The REFUSE row is gone, but the refusal it stood
   // for was never a cosmetic close button — the officer remembered it and a
@@ -771,13 +776,13 @@
     c._stopRefused = (c._stopRefused || 0) + 1;      // he will open harder next time
     STOP.susp += STOP.susp >= 1.2 ? 1.25 : 1.05;
     if (STOP.susp >= 3) {
-      if (CBZ.city) CBZ.city.note("“Refusing a lawful order. HANDS!”", 1.8);
+      copSay(c, "Refusing a lawful order. HANDS!", 1.8);
       if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "armed-refusal" });
       c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
       endStop(false);
       return;
     }
-    if (CBZ.city) CBZ.city.note("“Walking away from me with that thing out. Noted.”", 1.7);
+    copSay(c, "Walking away from me with that thing out. Noted.", 1.7);
     endStop(true);
   }
 
@@ -797,7 +802,7 @@
     const c = STOP.cop;
     if (c) c._stopRefused = 0;                       // you did what he asked — the ledger clears
     stowGuns();
-    if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · Q re-draw", 2.6);
+    copSay(c, "Good. Stay out of trouble.", 2.2);
     if (c) { c._gunLowered = true; }
     endStop(true);
   }
@@ -816,36 +821,6 @@
     // (no "Weapon out." note — the gun filling your hands says it)
     return true;
   };
-
-  // EXECUTE — draw on the cop. fpsmode still owns the actual shot if you fire, but
-  // pulling on the law during a stop is itself the crime: instant cop-kill heat if
-  // it drops him, else assault-on-an-officer.
-  function stopExecute() {
-    const c = STOP.cop; if (!c) { endStop(false); return; }
-    const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-    const from = CBZ.playerMuzzleWorld ? CBZ.playerMuzzleWorld() : { x: fx, y: 1.45, z: fz };
-    if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
-    if (CBZ.sfx) CBZ.sfx(CBZ.gunVoiceName ? CBZ.gunVoiceName((CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon() || {}).key) : "report");
-    if (CBZ.shake) CBZ.shake(0.4);
-    const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
-    const dmg = it && it.dmg ? it.dmg * 1.5 + 30 : 80;
-    STOP.cop = null; stopHide();    // the stop is over the instant you pull
-    // LOS GATE (audit): the stop only dies past 16u, not when a corner slides
-    // between you — without this, EXECUTE was the one police-stand-off shot that
-    // could land THROUGH a wall. A blocked shot still FIRED: the officer hears
-    // it and the assault-on-an-officer branch below still hunts you.
-    const clear = !CBZ.clearLineOfFire ||
-      CBZ.clearLineOfFire(from.x, from.y != null ? from.y : 1.45, from.z, c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z);
-    if (clear && CBZ.cityHurtCop) CBZ.cityHurtCop(c, dmg, { fromX: fx, fromZ: fz });
-    if (!c.dead) {
-      // didn't kill him — he's now hunting you for assaulting an officer
-      if (CBZ.cityCrime) CBZ.cityCrime(70, { instant: true, x: c.pos.x, z: c.pos.z, type: "assault-officer" });
-      c.gunstop = false; c._gunLowered = false; c.state = "patrol"; c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.2;
-    } else {
-      // cityHurtCop already routed a cop-kill → 5 stars; just clear his stop flags
-      c.gunstop = false; c._gunLowered = false;
-    }
-  }
 
   // RE-DRAW the stowed loadout with [Q] — the same key fpsmode uses to swap guns.
   // fpsmode's Q is gated on armed(), so while your guns are STOWED (inventory empty)
@@ -867,7 +842,7 @@
     }
     if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
       e.preventDefault();
-      if (CBZ.city) CBZ.city.note("Holstered. · Q draw", 1.6);
+      if (CBZ.city) CBZ.city.note("Holstered. Q to draw.", 1.6);
     }
   });
 
@@ -899,6 +874,7 @@
   // pick a cop to run the stop, drive the approach, and bail on the right cues.
   // Only ONE stop runs at a time; an ambient beat cop nearest you is chosen.
   function updateGunStop(dt) {
+    if (copGraceT > 0) copGraceT = Math.max(0, copGraceT - dt);
     // the stow is only "live" while the gun is actually away. If anything re-arms
     // you (buy/loot a gun → unlockWeapon refills weaponInventory), drop the stale stow snapshot so it reads
     // as open carry again — otherwise a fresh draw would never get stopped.
@@ -926,8 +902,17 @@
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
       const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
       if (wantKey !== STOP.key) stopRefreshPanel();
-      // ignore him too long and he forces it (draws + calls a brandishing stop)
-      if (STOP.t > 16) { if (CBZ.city) CBZ.city.note("“You've been warned!”", 1.6); if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "shots-fired" }); c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false); }
+      // he SAYS it, louder each time, on the screen over his head (the card's
+      // count is the second carrier; the @40 re-assert keeps it ticking).
+      const w = STOP_WARN[STOP.warnI | 0];
+      if (w && STOP.t >= w.t) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, w.line, 2.4); }
+      // ignore him to the end of the count and he calls it in: brandishing,
+      // ONE star. Nobody fired anything, so nobody is charged with firing.
+      if (STOP.t > STOP_LIMIT) {
+        copSay(c, "That's it. Suspect refusing to disarm!", 2.0);
+        if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
+        c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
+      }
       return;
     }
 
@@ -936,6 +921,7 @@
     const P = CBZ.player;
     if (!openCarry() || (g.wanted | 0) >= 1 || P.driving || P.dead || g.busted) return;
     if (g.cityMenuOpen) return;
+    if (copGraceT > 0 || (g.invuln || 0) > 0) return;   // fresh off a respawn / release
     gunStopScanT -= dt;
     if (gunStopScanT > 0) return;
     gunStopScanT = 0.5;
@@ -1146,8 +1132,8 @@
     c._watchLost = true;
     const key = c.copRank;
     vacancy[key] = (key === "chief") ? 150 : 60;       // seconds without a holder
-    if (key === "chief" && CBZ.city && CBZ.city.big) CBZ.city.big("THE CHIEF IS DOWN · NO STAND-DOWN ORDER");
-    else if (CBZ.cityFeed) CBZ.cityFeed("MPD command post vacant · " + (c.name || "an officer") + " is down.", "#ff9e6b");
+    if (key === "chief" && CBZ.city && CBZ.city.big) CBZ.city.big("THE CHIEF IS DOWN. NO STAND-DOWN ORDER");
+    else if (CBZ.cityFeed) CBZ.cityFeed("MPD command post vacant: " + (c.name || "an officer") + " is down.", "#ff9e6b");
   }
 
   // spawn a cop at a specific spot (used by the car-biz police RAID in empire.js)
@@ -2670,7 +2656,7 @@
     // (convictHailed reset in cityPoliceForceReset). chooseTarget() does the rest.
     if (g.escapedConvict && !convictHailed && g.state === "playing") {
       convictHailed = true;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS · ESCAPED CONVICT AT LARGE");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS: ESCAPED CONVICT AT LARGE");
     }
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
@@ -3211,7 +3197,30 @@
   function chooseTarget(cop) {
     let best = null, bestScore = -1, bestPed = null;
     const cp = cop.pos;
+    cop._blindToPlayer = false;
+    // NO OMNISCIENT COPS. This used to hand every officer on the map your LIVE
+    // position the moment you had a star, from any distance, through any
+    // number of buildings: a search ended, the next retarget re-locked the
+    // real you, and the chase could never actually be lost. An officer now
+    // only hunts YOU when he has you (eyes on, inside earshot, or the chopper
+    // beam on you). Otherwise he works the last place anyone SAW you
+    // (g.cityLastKnown, stamped by sightings and fresh reports) — the caller
+    // turns _blindToPlayer into a search of that spot. Ambient beat cops far
+    // from that spot at low heat keep their beat instead of the whole city
+    // converging on a jaywalker.
+    let playerKnown = false;
     if ((g.wanted | 0) >= 1 && !CBZ.player.dead) {
+      const d = Math.hypot(cp.x - CBZ.player.pos.x, cp.z - CBZ.player.pos.z);
+      playerKnown = d < 12 || (cop.sees && cop.curTarget === CBZ.city.playerActor) ||
+        (d < 48 && losClear(cp.x, cp.z, CBZ.player.pos.x, CBZ.player.pos.z)) ||
+        !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints());
+      if (!playerKnown) {
+        const lk = g.cityLastKnown, stars = g.wanted | 0;
+        const reach = cop.ambient && stars < 3 ? (stars <= 1 ? 110 : 170) : 1e9;
+        if (lk && Math.hypot(cp.x - lk.x, cp.z - lk.z) < reach) cop._blindToPlayer = true;
+      }
+    }
+    if (playerKnown) {
       const d = Math.hypot(cp.x - CBZ.player.pos.x, cp.z - CBZ.player.pos.z);
       // ESCAPED CONVICT: the manhunt is personal — a fleeing felon outranks a
       // random armed NPC offender, so cops lock onto YOU over an equal-stars ped.
@@ -3376,7 +3385,11 @@
       // (re)choose a target periodically — but DON'T re-lock onto the player while
       // we're mid-SEARCH (we lost sight; go investigate the last-known spot, not
       // beeline to their live position). We only re-acquire when we can see again.
-      if (c.retarget <= 0 && !(c.searchT > 0)) { c.retarget = 0.6; c.curTarget = chooseTarget(c); }
+      if (c.retarget <= 0 && !(c.searchT > 0)) {
+        c.retarget = 0.6; c.curTarget = chooseTarget(c);
+        // lost you and nobody else to chase → go work the last sighting
+        if (!c.curTarget && c._blindToPlayer && g.cityLastKnown) goSearch(c, g.cityLastKnown);
+      }
       let tgt = c.searchT > 0 ? null : c.curTarget;
       // a car suspect overrides if one is near + this cop is free
       if (!c.npcTarget && (!tgt || tgt === CBZ.city.playerActor && stars === 0)) {
@@ -3392,8 +3405,19 @@
         // de-escalation, NOT a casualty: an officer who stands down walks off
         // duty and returns to the reserve (the force is unchanged — only a KILL
         // depletes it). Guard with _returned so the same body can't bank twice.
-        if (frame % 240 === 0 && rng() < 0.5) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } cops.splice(i, 1); continue; }
-        const gx = A.minX - 18 - c.pos.x, gz = 0; stepTo(c, gx, gz, c.baseSpeed, dt, near); continue;
+        // He walks back toward the precinct and clocks off once he is out of
+        // the player's world (70 m from the lens) or has walked for 25 s. The
+        // old version marched every stood-down officer to the WEST EDGE OF THE
+        // MAP and deleted him on a coin flip every 240 frames, so a finished
+        // chase left a conga line of cops trudging across the whole city.
+        c._leaveT = (c._leaveT || 0) + dt;
+        const lcx = c.pos.x - camx, lcz = c.pos.z - camz;
+        if (c._leaveT > 25 || lcx * lcx + lcz * lcz > 70 * 70) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } cops.splice(i, 1); continue; }
+        const home = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
+        let gx, gz;
+        if (home && Math.hypot(home.x - c.pos.x, home.z - c.pos.z) > 6) { gx = home.x - c.pos.x; gz = home.z - c.pos.z; }
+        else { gx = c.pos.x - P.pos.x; gz = c.pos.z - P.pos.z; }       // no precinct: just away from you
+        stepTo(c, gx, gz, c.baseSpeed * 0.7, dt, near); continue;
       }
 
       // chase a fleeing car
@@ -3518,7 +3542,7 @@
               }
             }
             if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
-              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("\"Easy now, hold still.\"", 1.2); }
+              if (c.arrestT === 0 && challengeNoteCD <= 0) { challengeNoteCD = 2.5; copSay(c, "Easy now, hold still.", 1.4); }
               c.arrestT += dt;
               if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
               // close the last stretch slowly, cuffs out; square up on top
@@ -3530,7 +3554,7 @@
         } else if (wantArrest && c.sees && dist < 1.9) {
           if (isPlayer) {
             if (P.speed < 2.4 && !P._fighting) {
-              if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("\"FREEZE! Hands where I can see them!\"", 1.0);
+              if (c.arrestT === 0) copSay(c, "FREEZE! Hands where I can see them!", 1.4);
               c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
             } else c.arrestT = 0;
           } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
@@ -3762,7 +3786,7 @@
           if (pd < 30 && (painted || losClear(c.pos.x, c.pos.z, CBZ.player.pos.x, CBZ.player.pos.z))) {
             c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
             // a SHOUT, not radio-speak — he's within 30u, you'd genuinely hear it
-            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("\"There he is!\"", 0.9);
+            if (rng() < 0.5) copSay(c, "There he is!", 1.2);
             continue;
           }
         }

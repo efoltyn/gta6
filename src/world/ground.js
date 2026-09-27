@@ -37,7 +37,9 @@
     // The country outside the wall was one flat green sheet. Same mean colour
     // (0x4ea84e), now with slow relief in it. ~26 m tile over the 420x520
     // plane — nobody walks here until the gate opens, so the tile is large.
-    const field = CBZ.prisonGroundTex("field-grass");
+    // 2026-09-27: the city's #57b257 lawn read as mint under the yard fog; a
+    // prison's country is rough, dry pasture. Prison-only tones, passed in.
+    const field = CBZ.prisonGroundTex("field-grass", { a: "#6a7a44", b: "#5b6b3a" });
     field.repeat.set(16, 20);
     baseMat = new THREE.MeshLambertMaterial({ map: field });
   } else {
@@ -51,7 +53,7 @@
 
   // yard grass — worn exercise-yard turf (was: a 4 m checker)
   const grass = V2
-    ? CBZ.prisonGroundTex("yard-grass")
+    ? CBZ.prisonGroundTex("yard-grass", { a: "#6f7f45", b: "#5d6c3a", wear: 0.72 })
     : checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2);
   // 5 -> a 12 m tile across the 60 m yard. The old 15 put a 4 m draughts
   // square under your feet; a mottle needs a tile bigger than the eye's

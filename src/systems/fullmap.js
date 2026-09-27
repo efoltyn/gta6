@@ -2813,6 +2813,24 @@
       redraw += dt;
       if (redraw >= 1 / 12) { redraw %= 1 / 12; draw(); }
     }
+    // ARRIVAL CLEARS THE PIN. A waypoint used to stand forever once reached:
+    // the arrow and a "3m" chip kept pointing at your own feet until you
+    // found the clear key. Reaching it (6 m on foot, 14 m in a vehicle)
+    // clears it. A pin owned by a live core/mission.js job is left alone:
+    // the mission re-pins a moving mark and clears its own on completion, so
+    // clearing it here would only make it flicker back.
+    {
+      const wp0 = activeWaypoint(), P = CBZ.player;
+      if (wp0 && !map.active && CBZ.game.state === "playing" && P && P.pos && !P.dead &&
+          wp0.label !== "Patriot target" && !(CBZ.mission && CBZ.mission.focus && CBZ.mission.focus())) {
+        const r = P.driving ? 14 : 6;
+        // standing on a roof or an upper floor above a street pin is not arriving
+        const A = mode() === "city" && CBZ.city && CBZ.city.arena;
+        const gy = (A && A.groundHeightAt) ? A.groundHeightAt(wp0.x, wp0.z) : null;
+        const level = gy == null || P.pos.y < gy + 4;
+        if (level && Math.hypot(wp0.x - P.pos.x, wp0.z - P.pos.z) < r) clearWaypoint();
+      }
+    }
     reroute += dt;
     const wp = activeWaypoint(), route = activeRoute();
     if (wp && route && CBZ.navigation && reroute >= 1.5) {

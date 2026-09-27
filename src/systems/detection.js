@@ -71,6 +71,40 @@
     "Control, inmate where he should not be. All units.",
     "Control, post calling it in. Get bodies over here.",
   ];
+  SPOT_LINES["the admin wing"] = ["This wing is off limits! Stand still!", "Inmate in the admin wing! Hands where I can see them!"];
+
+  /* ---- THE WARNING (staff areas, seen from a distance) ---------------------
+     A screw who sees an inmate somewhere he should not be, from across the
+     room, tells him first. `warnT` holds the man where he stands, facing you,
+     for WARN_T seconds (entities/guards.js reads it as the "warn" state). Walk
+     out of the zone and it is over: no call, no chase. Stay, or come back
+     within WARN_MEMORY seconds, and it is the sighting above. The armory never
+     gets a warning, and neither does a man who walks up on a guard (inside
+     WARN_DIST * 0.6). */
+  const WARN_T = 3.5, WARN_DIST = 7, WARN_MEMORY = 30;
+  const WARN_LINES = {
+    "the staff lounge": ["Staff only. Turn around, inmate.", "Hey! You don't belong in here. Out."],
+    "the exit corridor": ["Back to your block! Now!", "Hey! You're a long way from your cell. Turn around."],
+    "the admin wing": ["This wing is off limits. Back the way you came.", "Inmate! Turn around and walk out. Now."],
+  };
+
+  /* ---- BACKUP (a hunting guard's radio) ------------------------------------
+     A clean screw who has eyes on a wanted man opens the same radio window
+     the zone call uses (silence him inside it and it never lands). When it
+     lands, the nearest one or two free officers are sent to HIS last-known
+     spot for you, the one he had when he keyed the mic, never your live
+     position. BACKUP_CD keeps one man from calling it in every few seconds. */
+  const BACKUP_CALL_T = 2.0, BACKUP_CD = 9, BACKUP_HEAT = 4;
+  const BACKUP_LINES = [
+    "Control, eyes on the runner. Need backup on me.",
+    "Runner on my post! Anybody close, move!",
+    "Control, I've got him. Send whoever's near.",
+  ];
+
+  /* ---- NOISE ---------------------------------------------------------------
+     What a crime SOUNDS like, and how far. entities/guards.js's guardHear
+     sends the nearest officers to the spot. A lift is silent. */
+  const NOISE_R = { gunfire: 40, taser: 16, melee: 13 };
 
   // the wanted meter only exists while it has a reading — see the long note at
   // the `wantedShown(...)` call at the foot of updateDetection. The class (not a
@@ -102,6 +136,8 @@
     if (p.z > 47) return "the exit corridor";
     return null;
   }
+  // entities/guards.js prices its suspicion meter off the same map
+  CBZ.restrictedZoneAt = zoneOf;
 
   /* ---- THE PRISON IS A SCENARIO, NOT A MAP --------------------------------
      modes/gungame.js plays a DEATHMATCH on the prison's geometry
@@ -534,6 +570,8 @@
       source: reporter && reporter.data ? reporter.data.name.replace(/^the |^a |^an /, "") : "witness",
       credibility: meta.credibility != null ? meta.credibility : (reporter && reporter.reportedPlayerCred != null ? reporter.reportedPlayerCred : null),
       corrupt: !!(reporter && reporter.corrupt),
+      // when the fix was taken: a blind pursuer adopts only a NEWER one
+      at: g.elapsed || 0,
     };
     return g.lastKnown;
   }
@@ -542,20 +580,24 @@
     const lk = storeLastKnown(amount, meta, reporter);
     const guards = [];
     for (const gd of CBZ.guards) {
-      if (!gd || gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0) continue;
+      // a man asleep, on escort, tied or staring down a muzzle cannot answer a
+      // radio: sending him burned one of the two slots on nobody
+      if (!gd || gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.asleep || gd._escort || gd.tied || gd.intimidMode === "scared") continue;
       const dx = lk.x - gd.group.position.x, dz = lk.z - gd.group.position.z;
       guards.push({ gd, d2: dx * dx + dz * dz });
     }
     guards.sort((a, b) => a.d2 - b.d2);
     const count = Math.min(guards.length, focusGuard ? 3 : 2);
+    // `looking`: they are out looking for YOU (guards.js: suspicion fills even
+    // with no other reason, and sighting you there is a chase)
     if (focusGuard && !focusGuard.dead && !(focusGuard.ko > 0) && !focusGuard.corrupt) {
-      focusGuard.investigate = { x: lk.x, z: lk.z, t: 7.5, scan: 0, type: lk.type };
+      focusGuard.investigate = { x: lk.x, z: lk.z, t: 7.5, scan: 0, type: lk.type, looking: !lk.heardOnly };
       focusGuard.alert = Math.max(focusGuard.alert || 0, 0.9);
     }
     for (let i = 0, sent = focusGuard ? 1 : 0; i < guards.length && sent < count; i++) {
       const gd = guards[i].gd;
       if (gd === focusGuard || gd.hunt > 0) continue;
-      gd.investigate = { x: lk.x, z: lk.z, t: 6.5 + sent * 1.2, scan: 0, type: lk.type };
+      gd.investigate = { x: lk.x, z: lk.z, t: 6.5 + sent * 1.2, scan: 0, type: lk.type, looking: !lk.heardOnly };
       gd.alert = Math.max(gd.alert || 0, 0.75);
       sent++;
     }
@@ -703,6 +745,10 @@
     if (!prisonSim()) return;
     meta = metaWithPlayerPos(meta || {});
     const copCrime = meta.actorRole === "cop" || g.role === "cop";
+    // THE SOUND OF IT, whether or not anybody saw it
+    if (!copCrime && CBZ.guardHear && NOISE_R[meta.type]) {
+      try { CBZ.guardHear(player.pos.x, player.pos.z, NOISE_R[meta.type], { type: meta.type, player: true }); } catch (e) {}
+    }
     if (copCrime) {
       if (!trySnitch(amount, true, meta)) CBZ.addComplaint(amount * 0.05);
       return;
@@ -712,7 +758,7 @@
       storeLastKnown(amount, meta, gd);
       CBZ.addCasePressure(amount, meta, gd, { guardSeen: true, credibility: 0.94 });
       CBZ.addHeat(amount);
-      gd.hunt = 3.5; gd.alert = 1.0;
+      gd.hunt = Math.max(gd.hunt || 0, 3.5); gd.alert = 1.0;
       return;
     }
     // unseen by guards: maybe a snitch inmate is watching
@@ -766,10 +812,26 @@
 
     for (const gd of CBZ.guards) {
       if (gd.dead) continue;
-      const sees = g.invuln <= 0 && guardSees(gd);
+      // CONFIRMED sight (entities/guards.js's suspicion meter ran full, or he
+      // is already on you), never a one-frame glimpse at the edge of a cone.
+      const sees = g.invuln <= 0 && (gd.spotted != null ? !!gd.spotted : guardSees(gd));
+      const d = Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z);
+      // a warning he gave: walked out = complied; stood there = it runs out
+      if (gd.warnT != null) {
+        if (!zone || gd.ko > 0 || gd.bribed > 0) {
+          gd.warnT = null;
+          gd.sus = Math.min(gd.sus || 0, 0.5);
+        } else {
+          gd.warnT -= dt;
+          if (gd.warnT <= 0 && !sees) {
+            // he lost you inside the zone: he goes and looks
+            gd.warnT = null;
+            if (gd.lkX != null) gd.investigate = { x: gd.lkX, z: gd.lkZ, t: 5, scan: 0, type: "trespass", looking: true };
+          }
+        }
+      }
       if (sees) {
         seenByAnyone = true;
-        const d = Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z);
         nearestSeer = Math.min(nearestSeer, d);
         if (zone) {
           if (!witnessReportOn()) {
@@ -778,10 +840,22 @@
             if (gd._radioed || g.detection > 18 || (g.witnessReportT || 0) > 0) {
               // the block already knows — he radios your position live
               CBZ.addHeat(18 * dt);
+            } else if (gd.radioT == null && zone !== "the armory" && d > WARN_DIST * 0.6 &&
+                (gd.warnT == null ? !(gd._warnedZone === zone && (g.elapsed || 0) - (gd._warnedAt || -1e9) < WARN_MEMORY) : gd.warnT > 0)) {
+              // THE WARNING: first time, at a distance. He stands and tells you.
+              if (gd.warnT == null) {
+                gd.warnT = WARN_T;
+                gd._warnedZone = zone; gd._warnedAt = g.elapsed || 0;
+                gd.alert = Math.max(gd.alert || 0, 0.5);
+                const wl = WARN_LINES[zone] || ["Back to your cell!"];
+                if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, wl[(gd.id || 0) % wl.length]); } catch (e) {} }
+              }
             } else if (gd.radioT == null) {
               // THE SIGHTING: he shouts, comes for you, reaches for the radio.
               // Nothing global yet — the window is yours to close.
+              gd.warnT = null;
               gd.radioT = RADIO_CALL_T;
+              gd.radioKind = "zone";
               gd.radioZone = zone;
               gd.alert = 1.0;
               gd.hunt = Math.max(gd.hunt || 0, 3.0);
@@ -797,7 +871,11 @@
         // already wanted + spotted → this guard joins the hunt
         if ((g.detection > 18 || (g.witnessReportT || 0) > 0) && !gd.corrupt) {
           storeLastKnown(10, { type: "visual" }, gd);
-          gd.hunt = 3.0; gd.alert = 1.0; gd.investigate = null;
+          gd.hunt = Math.max(gd.hunt || 0, 3.0); gd.alert = 1.0; gd.investigate = null; gd.warnT = null;
+          // ...and reaches for his radio (BACKUP above)
+          if (witnessReportOn() && gd.radioT == null && !((gd._backupCD || 0) > 0)) {
+            gd.radioT = BACKUP_CALL_T; gd.radioKind = "backup";
+          }
         }
       }
       if (CBZ.updateGuardFlashlight) CBZ.updateGuardFlashlight(gd, dt);
@@ -809,11 +887,23 @@
       let calm = g.detection <= 0.5 && (g.witnessReportT || 0) <= 0 && !(g.lastKnown && g.lastKnown.t > 0);
       for (const gd of CBZ.guards) {
         if (calm && gd._radioed && !(gd.hunt > 0)) gd._radioed = false;   // old calls go stale once the block cools
+        if ((gd._backupCD || 0) > 0) gd._backupCD -= dt;
         if (gd.radioT == null) continue;
-        if (gd.dead || gd.ko > 0 || gd.tied || gd.bribed > 0) { gd.radioT = null; continue; }   // silenced — the call never lands
+        if (gd.dead || gd.ko > 0 || gd.tied || gd.bribed > 0) { gd.radioT = null; gd.radioKind = null; continue; }   // silenced — the call never lands
         if (gd.intimidMode === "scared") continue;   // a muzzle HOLDS the call; it does not erase it
         gd.radioT -= dt;
         if (gd.radioT > 0) continue;
+        if (gd.radioKind === "backup") {
+          // BACKUP LANDS: the nearest free officers go to where HE last had you
+          gd.radioT = null; gd.radioKind = null; gd._backupCD = BACKUP_CD;
+          const bx = gd.lkX != null ? gd.lkX : player.pos.x, bz = gd.lkZ != null ? gd.lkZ : player.pos.z;
+          CBZ.addHeat(BACKUP_HEAT);
+          dispatchSearch(10, { type: "visual", lastKnown: { x: bx, z: bz, type: "visual" } }, { data: { name: "a sighting" } }, null);
+          if (CBZ.worldSfx) { try { CBZ.worldSfx("switch", gd.group.position.x, gd.group.position.z, { y: 1.6, ref: 6, volume: 0.5, gap: 0.4 }); } catch (e) {} }
+          if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, BACKUP_LINES[(gd.id || 0) % BACKUP_LINES.length]); } catch (e) {} }
+          continue;
+        }
+        gd.radioKind = null;
         // THE CALL LANDS. The search is named for the PLACE he called in
         // ("Searching: armory"), not for him — the guards he summons are
         // literally sent to it, and "Searching: Officer #1" read as a hunt
