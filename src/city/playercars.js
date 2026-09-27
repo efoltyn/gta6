@@ -1752,12 +1752,14 @@
   let mirrorGeo = null, mirrorGlassGeo = null;
   function mirrorGeos() {
     if (mirrorGeo) return;
-    const g = new THREE.SphereGeometry(1, 12, 8);
+    const g = new THREE.SphereGeometry(1, 20, 12);
     g.scale(0.11, 0.06, 0.055);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) if (p.getZ(i) < -0.012) p.setZ(i, -0.012);   // the flat back the glass sits in
     g.computeVertexNormals();
-    mirrorGeo = g.toNonIndexed(); mirrorGeo.computeVertexNormals(); mirrorGeo._shared = true;
+    // smooth normals come from the INDEXED sphere; recomputing them after
+    // toNonIndexed() gave every triangle its own face normal (a faceted blob)
+    mirrorGeo = g.toNonIndexed(); mirrorGeo._shared = true;
     mirrorGlassGeo = new THREE.BoxGeometry(0.19, 0.095, 0.006); mirrorGlassGeo._shared = true;
   }
   function addMirrors(root, sec, zM, paint, trim, k) {

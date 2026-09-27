@@ -138,8 +138,8 @@
           "  if ( cbzD < 3.5 ) {",
           "    vec3 cbzC = floor( vCbzObj * 330.0 );",
           "    vec3 cbzR = vec3( cbzHash( cbzC + 1.7 ), cbzHash( cbzC + 3.1 ), cbzHash( cbzC + 5.3 ) ) - 0.5;",
-          "    float cbzG = pow( saturate( dot( normalize( normal + cbzR * 0.9 ), cbzV ) ), 48.0 ) * step( 0.5, cbzHash( cbzC ) );",
-          "    outgoingLight += cbzG * cbzFlake * ( 1.0 - smoothstep( 1.4, 3.5, cbzD ) ) * 0.9 *",
+          "    float cbzG = pow( saturate( dot( normalize( normal + cbzR * 0.7 ), cbzV ) ), 90.0 ) * step( 0.8, cbzHash( cbzC ) );",
+          "    outgoingLight += cbzG * cbzFlake * ( 1.0 - smoothstep( 1.0, 3.0, cbzD ) ) * 0.35 *",
           "      ( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular );",
           "  }",
           "}",
@@ -183,8 +183,8 @@
     if (!m._flakeU) m._flakeU = { value: 0 };
     if (metal) {
       m.metalness = 0.42;
-      m.roughness = 0.4;
-      m.envMapIntensity = 0.74;
+      m.roughness = 0.34;
+      m.envMapIntensity = 0.55;
       m.clearcoatRoughness = 0.03;
       m._flakeU.value = 1;
     } else if (P) {

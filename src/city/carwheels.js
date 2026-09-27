@@ -55,7 +55,12 @@
   };
   const RAMP_W = CBZ.WHEEL_RAMP_W || 16;
 
-  function rgb(hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; }
+  /* THE HEXES BELOW ARE AUTHORED IN sRGB; the renderer takes a vertex colour
+     as LINEAR and encodes to sRGB on output, which lifts every dark value:
+     "near-black" 0x1c rubber photographed as mid-grey (#5x) in the studio.
+     Pulled into linear (gamma 2.0: most of the way, same idea as carfx's
+     paintColor) so the tyre reads as rubber and the machined face as metal. */
+  function rgb(hex) { const k = (v) => Math.pow(v / 255, 2.0); return [k((hex >> 16) & 255), k((hex >> 8) & 255), k(hex & 255)]; }
   // Rubber is NEAR-BLACK (the old 0x1b/0x23 greys read as grey plastic next
   // to the rim); the material's env diffuse fill keeps it from going to a
   // hole in shade. Sidewall a hair lighter than the tread, the shoulder a
