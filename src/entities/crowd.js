@@ -288,7 +288,11 @@
       }
       const frozen = !!a.intimidMode || a.ko > 0;     // held at gunpoint / knocked out -> crowd sim lets go
       if (!frozen) {
-        const moveSpeed = Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
+        const mm = motors[id];
+        // the rig's legs animate the ground the body covered (CBZ.moves' m.gs),
+        // and the inmates round him read his velocity off the same motor
+        a._mv = mm || null;
+        const moveSpeed = mm ? mm.gs : Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
         const moving = moveSpeed > 0.08;
         const bob = moving ? Math.abs(Math.sin(S.phase[id])) * 0.035 : 0;
         rig.group.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
@@ -307,7 +311,13 @@
           if (rig.parts.ra) rig.parts.ra.rotation.x = -0.45 - Math.max(0, sw) * 1.05;
         }
       } else {
-        if (a.intimidMode) { const w = Math.atan2(p.x - rig.group.position.x, p.z - rig.group.position.z); rig.group.rotation.y = CBZ.lerpAngle(rig.group.rotation.y, w, 1 - Math.pow(0.0006, dt)); }
+        if (a.intimidMode) {
+          // held at gunpoint: turn to the muzzle at a man's rate, and leave the
+          // crowd sim's heading where the body is so letting go is not a snap
+          const w = Math.atan2(p.x - rig.group.position.x, p.z - rig.group.position.z);
+          rig.group.rotation.y = CBZ.moves.face(motorOf(id), rig.group.rotation.y, w, dt);
+          S.heading[id] = rig.group.rotation.y;
+        }
         if (CBZ.animChar) CBZ.animChar(rig, 0, dt);
       }
     }
@@ -464,6 +474,12 @@
     return false;
   }
 
+  // one CBZ.moves motor per crowd row, made the first time the row moves
+  const motors = new Array(TOTAL);
+  function motorOf(id) { return motors[id] || (motors[id] = CBZ.moves.motor(null)); }
+  const _cp = { x: 0, z: 0 };
+  const CMV = { speed: 1.4, stop: 0.3, leg: false, face: null, strafe: false, vffX: 0, vffZ: 0, lod: 2, accel: 0 };
+
   function fixedStep(dt) {
     const player = CBZ.player, armed = CBZ.playerArmed && CBZ.playerArmed();
     _scuffleCD -= dt;
@@ -486,7 +502,8 @@
       S.prevX[id] = S.posX[id]; S.prevZ[id] = S.posZ[id];
       if (S.downT[id] > 0) {
         S.downT[id] = Math.max(0, S.downT[id] - dt);
-        S.velX[id] *= Math.pow(0.01, dt); S.velZ[id] *= Math.pow(0.01, dt);
+        S.velX[id] = S.velZ[id] = 0;
+        _cp.x = S.posX[id]; _cp.z = S.posZ[id]; CBZ.moves.reset(motorOf(id), _cp);
         continue;
       }
       let activity = S.activity[id] || ACT.WALK;
@@ -532,37 +549,50 @@
         activity = S.activity[id];
         dx = S.goalX[id] - S.posX[id]; dz = S.goalZ[id] - S.posZ[id];
       }
-      const d = Math.sqrt(dx * dx + dz * dz) || 1;
-      const held = (activity === ACT.STAND || activity === ACT.SOCIAL || activity === ACT.ACTION) && dx * dx + dz * dz < 0.9;
+      const held =(activity === ACT.STAND || activity === ACT.SOCIAL || activity === ACT.ACTION) && dx * dx + dz * dz < 0.9;
       const fightingClose = activity === ACT.FIGHT && dx * dx + dz * dz < 1.75 * 1.75;
-      let wantX = (held || fightingClose) ? 0 : dx / d * S.speed[id];
-      let wantZ = (held || fightingClose) ? 0 : dz / d * S.speed[id];
-      if (activity === ACT.FIGHT && !fightingClose) { wantX *= 1.25; wantZ *= 1.25; }
+      /* THE STEP (CBZ.moves, the cheap LOD path). This was a velocity
+         chasing its want at 1 - 0.001^dt and a heading lerped at the same
+         rate: at the 20 Hz fixed step that is 29% of the angle per tick, so a
+         man re-rolling his goal behind him spun round in two frames, walked
+         at full pace into his post and stopped dead on it. Now he gets the
+         layer every AI body gets: accel-limited velocity, a braking arrival
+         at a post, a bounded yaw. The crowd's own pushes (the player's
+         personal space, a zone flow, a scare from CBZ.alertCrowd) are
+         FEED-FORWARD velocity on top of where he is going. */
+      const M = CBZ.moves, m = motorOf(id), O = CMV;
+      m.vx = S.velX[id]; m.vz = S.velZ[id];         // honour impulses (systems/humancontact.js)
+      let ffX = S.avoidX[id], ffZ = S.avoidZ[id];
       if (flowTTL[zoneId] > 0) {
-        wantX += flowX[zoneId] * flowStrength[zoneId];
-        wantZ += flowZ[zoneId] * flowStrength[zoneId];
+        ffX += flowX[zoneId] * flowStrength[zoneId];
+        ffZ += flowZ[zoneId] * flowStrength[zoneId];
       }
       const px = S.posX[id] - player.pos.x, pz = S.posZ[id] - player.pos.z, pd2 = px * px + pz * pz;
       if (pd2 < 3.1 * 3.1 && pd2 > 0.0001) {
         const pd = Math.sqrt(pd2), give = (3.1 - pd) / pd * 3.6;
-        wantX += px * give; wantZ += pz * give;
+        ffX += px * give; ffZ += pz * give;
         if (armed && pd < 6) S.panic[id] = Math.max(S.panic[id], 0.72);
       }
       const panicMul = 1 + Math.min(1, S.panic[id]) * 1.18;
-      wantX = wantX * panicMul + S.avoidX[id]; wantZ = wantZ * panicMul + S.avoidZ[id];
-      const follow = 1 - Math.pow(0.001, dt);
-      S.velX[id] += (wantX - S.velX[id]) * follow; S.velZ[id] += (wantZ - S.velZ[id]) * follow;
-      S.posX[id] += S.velX[id] * dt; S.posZ[id] += S.velZ[id] * dt;
+      const posted = activity === ACT.STAND || activity === ACT.SOCIAL || activity === ACT.ACTION;
+      O.speed = fightingClose ? 0 : S.speed[id] * panicMul * (activity === ACT.FIGHT ? 1.25 : 1);
+      O.stop = posted ? 0.45 : activity === ACT.FIGHT ? 1.6 : 0.3;
+      O.leg = activity === ACT.WALK || activity === ACT.FLEE;   // a stroll re-rolls short of its spot: walk through it
+      O.face = held ? S.activityHeading[id] : fightingClose ? Math.atan2(dx, dz) : null;
+      O.strafe = O.face != null;                     // the last half metre into a post is a side-step
+      O.vffX = ffX; O.vffZ = ffZ;
+      O.lod = ri >= 0 ? 1 : 2;
+      _cp.x = S.posX[id]; _cp.z = S.posZ[id];
+      M.step(m, _cp, S.heading[id], S.goalX[id], S.goalZ[id], O, dt);
+      S.posX[id] = _cp.x; S.posZ[id] = _cp.z;
+      S.velX[id] = m.vx; S.velZ[id] = m.vz;
+      S.heading[id] = m.yaw;
       if (CBZ.humanContact) CBZ.humanContact.resolveAmbientPlayer(S, id, dt);
       if (S.downT[id] > 0 && ri >= 0) facePool[ri].actor.ko = Math.max(facePool[ri].actor.ko || 0, S.downT[id]);
       S.posX[id] = Math.max(zone.x0, Math.min(zone.x1, S.posX[id]));
       S.posZ[id] = Math.max(zone.z0, Math.min(zone.z1, S.posZ[id]));
       S.updateDensityCell(id);
-      const face = held ? S.activityHeading[id]
-        : fightingClose ? Math.atan2(dx, dz)
-          : Math.atan2(S.velX[id], S.velZ[id]);
-      S.heading[id] = CBZ.lerpAngle(S.heading[id], face, 1 - Math.pow(0.001, dt));
-      const moveSpeed = Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
+      const moveSpeed = m.gs;
       if (activity === ACT.FIGHT || activity === ACT.ACTION) S.phase[id] += dt * (activity === ACT.FIGHT ? 8.5 : 3.2);
       else if (moveSpeed > 0.08) S.phase[id] += CBZ.gaitPhaseDelta ? CBZ.gaitPhaseDelta(moveSpeed, dt) : dt * (2.2 + moveSpeed * 1.4);
       S.avoidX[id] *= Math.pow(0.025, dt); S.avoidZ[id] *= Math.pow(0.025, dt); S.panic[id] = Math.max(0, S.panic[id] - dt * 0.22);

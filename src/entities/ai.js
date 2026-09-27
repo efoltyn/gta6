@@ -5216,7 +5216,7 @@
       const r = 4.6 + ((n.slice || 0) % 3) * 0.6;
       const pos = clampWorld(px + Math.cos(ang) * r, pz + Math.sin(ang) * r);
       n.target.set(pos.x, 0, pos.z);
-      n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(-dx, -dz), 1 - Math.pow(0.0001, dt));
+      n._faceYaw = Math.atan2(-dx, -dz); n._faceTTL = 0.3;   // mover turns him (CBZ.moves)
       return d < r - 0.8 ? n.baseSpeed * 0.8 : n.baseSpeed * 1.05;
     }
     if (n.huntPlayer > 0) {
@@ -5407,7 +5407,7 @@
         n.target.set(px, 0, pz);
         if (d <= APPROACH_NEAR) {
           n.target.set(n.group.position.x, 0, n.group.position.z);
-          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(px - n.group.position.x, pz - n.group.position.z), 1 - Math.pow(0.0001, dt));
+          n._faceYaw = Math.atan2(px - n.group.position.x, pz - n.group.position.z); n._faceTTL = 0.3;
           if (!a.greeted) {
             a.greeted = true;
             /* HE ARRIVES AND HE SPEAKS. This used to be
@@ -5487,7 +5487,7 @@
         n.target.set(pos.x, 0, pos.z);
         const d = Math.hypot(px - n.group.position.x, pz - n.group.position.z);
         if (d < 4.0) {
-          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(px - n.group.position.x, pz - n.group.position.z), 1 - Math.pow(0.00008, dt));
+          n._faceYaw = Math.atan2(px - n.group.position.x, pz - n.group.position.z); n._faceTTL = 0.3;
           if (tactic === "watch" && n.blockRead && (n.blockRead.t || 0) > 0 && rng() < 0.010) {
             addBuzz(n.blockRead.kind, 1.2, actorName(n));
           }
@@ -5596,7 +5596,7 @@
         const desired = d < radius - 0.8 ? radius + 1.2 : radius;
         const pos = clampWorld(px + Math.cos(angle) * desired, pz + Math.sin(angle) * desired);
         n.target.set(pos.x, 0, pos.z);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(dxp, dzp), 1 - Math.pow(0.00008, dt));
+        n._faceYaw = Math.atan2(dxp, dzp); n._faceTTL = 0.3;
         if (rng() < (kind === "fear" ? 0.012 : 0.006)) emote(n, kind === "cover" ? "+" : (kind === "pocket" || kind === "debt" ? "$" : "?"));
         return n.baseSpeed * (kind === "cover" ? 1.18 : 0.95);
       }
@@ -5653,7 +5653,7 @@
           return n.baseSpeed * 0.85;
         }
         n.target.set(n.group.position.x, 0, n.group.position.z);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.00008, dt));
+        n._faceYaw = Math.atan2(dx, dz); n._faceTTL = 0.3;
         if (rng() < 0.018) emote(n, n.huddleKind === "wealth" || n.huddleKind === "debt" || n.huddleKind === "badge" ? "$" : "?");
         return 0;
       }
@@ -5734,7 +5734,7 @@
         if (d < 3.1) {
           const dx = n.group.position.x - gd.group.position.x;
           const dz = n.group.position.z - gd.group.position.z;
-          gd.group.rotation.y = CBZ.lerpAngle(gd.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0001, dt));
+          gd.group.rotation.y = CBZ.moves.face(CBZ.moves.motor(gd), gd.group.rotation.y, Math.atan2(dx, dz), dt);
           gd.alert = Math.max(gd.alert || 0, 0.7);
           gd.hunt = Math.max(0, (gd.hunt || 0) - dt * 2.2);
           if (rng() < 0.035) emote(n, "!");

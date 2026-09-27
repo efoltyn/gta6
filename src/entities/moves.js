@@ -194,7 +194,7 @@
       // whatever the closing speed — once matched, the gap must hold)
       if (ahead > 0 && Math.abs(rx * -hz + rz * hx) < R && d < 2.4) {
         const along = ovx * hx + ovz * hz;
-        if (along > -0.1 && along < want) _av.follow = Math.min(_av.follow, Math.max(0, along) + Math.max(0, d - R - 0.15) * 0.9);
+        if (along > 0.3 && along < want) _av.follow = Math.min(_av.follow, Math.max(0, along) + Math.max(0, d - R - 0.15) * 0.9);
       }
     }
     return _av;
