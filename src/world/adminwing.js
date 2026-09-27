@@ -182,20 +182,22 @@
   partition("z", PX_B, IZ0, CORR_Z, []);
   partition("x", QZ, PX_B, IX1, [D_QRT]);
 
-  // ---- floors: one slab per room, tinted by what the room is for --------
-  function floor(x0, x1, z0, z1, color) {
+  // ---- floors: a real finish per room, at real tile scale ----------------
+  // (2026-09-27: they were five flat-colour slabs; the "carpet" was brown paint)
+  function floor(x0, x1, z0, z1, color, kind) {
+    if (PD && PD.floor) return PD.floor(x0, x1, z0, z1, kind || "vct", color);
     addBox((x0 + x1) / 2, 0.02, (z0 + z1) / 2, x1 - x0, 0.08, z1 - z0, color, { solid: false, cast: false });
   }
-  floor(IX0, IX1, CORR_Z, IZ1, 0x9aa1a8);                     // corridor: polished
-  floor(IX0, PX_A, IZ0, CORR_Z, C_FLOOR);                     // records
-  floor(PX_A, PX_B, IZ0, CORR_Z, C_FLOOR);                    // staff room
-  floor(PX_B, IX1, QZ, CORR_Z, C_OFFICE_FLOOR);               // the office gets carpet
-  floor(PX_B, IX1, IZ0, QZ, 0x6a5340);                        // quarters
+  floor(IX0, IX1, CORR_Z, IZ1, 0xc9cac4, "vct");               // corridor: VCT
+  floor(IX0, PX_A, IZ0, CORR_Z, 0xc3bdae, "vct");              // records
+  floor(PX_A, PX_B, IZ0, CORR_Z, 0xbfc3bd, "vct");             // staff room
+  floor(PX_B, IX1, QZ, CORR_Z, 0x6e5d4c, "carpet");            // the office gets carpet tile
+  floor(PX_B, IX1, IZ0, QZ, 0x5f6670, "carpet");               // quarters
 
   // ---- ONE ROOF over the whole block (world/roofs.js's primitive) -------
   if (CBZ.prisonRoof) CBZ.prisonRoof({
     id: "adminwing", x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: AW.z1,
-    top: H, over: WT / 2, deck: 0x616a75,
+    top: H, over: WT / 2, deck: 0x616a75, soffit: false,   // the rooms have ceilings
   });
 
   /* ==========================================================
@@ -210,22 +212,37 @@
     { id: "warden-office", x0: PX_B, x1: IX1, z0: QZ, z1: CORR_Z, n: 3, axis: "x" },
     { id: "warden-quarters", x0: PX_B, x1: IX1, z0: IZ0, z1: QZ, n: 2, axis: "x" },
   ];
-  if (PD && typeof PD.strip === "function") {
+  /* CEILINGS AT 3.0 m (2026-09-27). An office block is not a 6 m shed: each
+     room gets a lay-in ceiling with 2 x 4 troffers on the schedule, and every
+     wall a vinyl base and a painted dado. `F` = the room's FACES (partitions
+     are 0.4 thick, so a face is 0.2 off its plane); the corridor's south side
+     is the cell house's north wall face. */
+  const PH = PT / 2, CEIL = 3.0, SOUTH = -44.45;
+  const FACES = {
+    "admin-corridor": { x0: IX0, x1: IX1, z0: CORR_Z + PH, z1: SOUTH,
+      doors: [{ side: "N", a0: D_REC.x0, a1: D_REC.x1 }, { side: "N", a0: D_STAFF.x0, a1: D_STAFF.x1 },
+        { side: "N", a0: D_OFF.x0, a1: D_OFF.x1 }, { side: "S", a0: SG.x0, a1: SG.x1 }], dado: 0x7d838c },
+    "admin-records": { x0: IX0, x1: PX_A - PH, z0: IZ0, z1: CORR_Z - PH,
+      doors: [{ side: "S", a0: D_REC.x0, a1: D_REC.x1 }], dado: 0x7d838c },
+    "admin-staff": { x0: PX_A + PH, x1: PX_B - PH, z0: IZ0, z1: CORR_Z - PH,
+      doors: [{ side: "S", a0: D_STAFF.x0, a1: D_STAFF.x1 }], dado: 0x6f7f8c },
+    "warden-office": { x0: PX_B + PH, x1: IX1, z0: QZ + PH, z1: CORR_Z - PH,
+      doors: [{ side: "S", a0: D_OFF.x0, a1: D_OFF.x1 }, { side: "N", a0: D_QRT.x0, a1: D_QRT.x1 }], dado: 0x6b5a48, rail: 0x4a3a2a },
+    "warden-quarters": { x0: PX_B + PH, x1: IX1, z0: IZ0, z1: QZ - PH,
+      doors: [{ side: "S", a0: D_QRT.x0, a1: D_QRT.x1 }], dado: 0x707a86 },
+  };
+  if (PD && PD.ceiling) {
     for (let i = 0; i < ROOMS.length; i++) {
-      const R = ROOMS[i], w = R.x1 - R.x0, d = R.z1 - R.z0;
-      const len = Math.max(1.6, Math.min(4.0, (R.axis === "x" ? w : d) * 0.34));
-      for (let k = 0; k < R.n; k++) {
-        const u = (k + 1) / (R.n + 1);
-        const x = R.axis === "x" ? R.x0 + u * w : (R.x0 + R.x1) / 2;
-        const z = R.axis === "x" ? (R.z0 + R.z1) / 2 : R.z0 + u * d;
-        PD.strip(x, H - 0.42, z, len, R.axis);
-      }
+      const R = ROOMS[i], F = FACES[R.id];
+      PD.trim(F, F.doors, { dado: F.dado, dadoH: 1.0, base: 0x2b2d30, rail: F.rail });
+      PD.ceiling(F, CEIL, { id: R.id, kind: "acoustic", lights: "troffer", along: R.axis,
+        nx: R.axis === "x" ? R.n : 1, nz: R.axis === "x" ? 1 : R.n });
     }
     // caged lamps either side of the two locked doors — a lock you cannot
     // see at 2 a.m. is a lock you cannot find.
-    PD.lamp(-3.2, 2.9, -45.6, "z+");
-    PD.lamp(11.4, 2.9, -48.7, "z-");
-    PD.lamp(11.4, 2.9, -50.1, "z+");
+    PD.lamp(-3.2, 2.62, -45.6, "z+");
+    PD.lamp(11.4, 2.62, -48.7, "z-");
+    PD.lamp(11.4, 2.62, -50.1, "z+");
   }
   // the wing is an INTERIOR as far as systems/prisonnight.js's sensors are
   // concerned: a body in here is lit by these fittings, not by the sky.
@@ -330,9 +347,9 @@
     // the wall clock. A prison runs on it; systems/prisonschedule.js drives
     // the hands below, which is the only place in this build where the time
     // of day is DRAWN rather than merely obeyed.
-    const face = addBox(-6.75, 3.3, -53.0, 0.09, 0.9, 0.9, 0xf0ece2, { cast: false });
-    const hh = addBox(-6.68, 3.3, -53.0, 0.03, 0.1, 0.34, 0x1a1d22, { cast: false });
-    const mh = addBox(-6.68, 3.3, -53.0, 0.03, 0.06, 0.52, 0x1a1d22, { cast: false });
+    const face = addBox(-6.75, 2.45, -53.0, 0.09, 0.62, 0.62, 0xf0ece2, { cast: false });
+    const hh = addBox(-6.68, 2.45, -53.0, 0.03, 0.1, 0.34, 0x1a1d22, { cast: false });
+    const mh = addBox(-6.68, 2.45, -53.0, 0.03, 0.06, 0.52, 0x1a1d22, { cast: false });
     hh.userData.mover = true; mh.userData.mover = true; face.userData.mover = true;
     CBZ.onUpdate(21.45, function () {
       const S = CBZ.prisonSchedule;
@@ -341,8 +358,8 @@
       const hAng = ((t.h % 12) + t.m / 60) / 12 * Math.PI * 2;
       const mAng = (t.m / 60) * Math.PI * 2;
       hh.rotation.x = -hAng; mh.rotation.x = -mAng;
-      hh.position.set(-6.68, 3.3 + Math.cos(hAng) * 0.17, -53.0 - Math.sin(hAng) * 0.17);
-      mh.position.set(-6.68, 3.3 + Math.cos(mAng) * 0.26, -53.0 - Math.sin(mAng) * 0.26);
+      hh.position.set(-6.68, 2.45 + Math.cos(hAng) * 0.17, -53.0 - Math.sin(hAng) * 0.17);
+      mh.position.set(-6.68, 2.45 + Math.cos(mAng) * 0.26, -53.0 - Math.sin(mAng) * 0.26);
     });
   })();
 
@@ -352,16 +369,18 @@
     // steel away. Fixed pane behind real bars; the wall behind it is solid,
     // so this is a view and never a route. (OWNER RULE: no grey panes — the
     // glass behind bars is the same clear tint the city and the wing use.)
-    const pane = addBox(12.9, 3.3, -63.62, 3.6, 1.9, 0.08, 0xbfe9f7,
+    const pane = addBox(12.9, 1.8, -63.62, 3.0, 1.3, 0.08, 0xbfe9f7,
       { cast: false, emissive: 0x3f8aa6, ei: 0.35 });
     pane.material.transparent = true; pane.material.opacity = 0.62;
-    for (let i = 0; i < 6; i++) addBox(11.2 + i * 0.68, 3.3, -63.45, 0.09, 1.9, 0.09, 0x2a2f38, { cast: false });
+    addBox(12.9, 1.8, -63.6, 3.16, 1.46, 0.05, 0x3a3f46, { cast: false });           // frame
+    addBox(12.9, 1.1, -63.5, 3.2, 0.05, 0.2, 0xd8d2c4, { cast: false });             // sill
+    for (let i = 0; i < 5; i++) addBox(11.7 + i * 0.6, 1.8, -63.45, 0.05, 1.3, 0.05, 0x2a2f38, { cast: false });
     // the state flag and the framed commission: the two things on the wall
     // of every warden's office ever photographed
-    addBox(19.3, 3.4, -52.6, 0.09, 1.5, 2.4, 0x2c3f6b, { cast: false });
-    addBox(19.22, 3.4, -52.6, 0.05, 0.5, 0.9, 0xd9b64c, { cast: false });
-    addBox(19.3, 3.3, -55.6, 0.08, 0.9, 0.7, 0x6b5636, { cast: false });
-    addBox(19.24, 3.3, -55.6, 0.04, 0.72, 0.54, 0xefe8d6, { cast: false });
+    addBox(19.66, 1.95, -52.6, 0.03, 1.0, 1.6, 0x2c3f6b, { cast: false });          // flag, framed flat
+    addBox(19.64, 1.95, -52.6, 0.012, 0.34, 0.6, 0xd9b64c, { cast: false });
+    addBox(19.66, 1.8, -55.6, 0.04, 0.62, 0.48, 0x6b5636, { cast: false });          // the commission
+    addBox(19.635, 1.8, -55.6, 0.012, 0.5, 0.36, 0xefe8d6, { cast: false });
     // a decanter set on the sideboard, because he is that kind of warden
     addBox(9.6, 1.02, -56.4, 0.22, 0.34, 0.22, 0x8a6a2c, { cast: false });
     addBox(9.95, 0.94, -56.4, 0.12, 0.18, 0.12, 0xc9d6dd, { cast: false });
