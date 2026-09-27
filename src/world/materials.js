@@ -560,9 +560,12 @@
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     if (opts.repeat && opts.repeat.length === 2) t.repeat.set(+opts.repeat[0], +opts.repeat[1]);
     t.anisotropy = groundAniso();
-    // Deliberately NOT tagged THREE.sRGBEncoding — see the WHY NOT note above.
-    // Everything else in this compound is authored untagged; a tagged map here
-    // would read visibly darker than the wall standing on it.
+    // Untagged by default (see the WHY NOT note above: indoor slabs are tuned
+    // against the untagged palette). OUTDOOR paving passes `srgb: true`
+    // (2026-09-27): read as linear under the sRGB output, the yard's concrete
+    // and bitumen came out near-white on a phone (the owner's screenshot), a
+    // pale sheet with no weight. Tagged, the authored tones are the tones.
+    if (opts.srgb) t.encoding = THREE.sRGBEncoding;
     t.needsUpdate = true;
     t._cbzGround = k;
     return t;

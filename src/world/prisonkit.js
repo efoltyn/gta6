@@ -737,10 +737,11 @@
   function ground(x, z, w, d, kind, o) {
     o = o || {};
     let tex = null;
-    const kinds = { asphalt: ["#4b515a", "#434950"], turf: ["#6f8a4a", "#5d7a3e"], concrete: ["#5b636c", "#535b64"], gravel: ["#6c6a63", "#5e5c56"], track: ["#8a4d3d", "#7a4335"] };
+    // outdoor paving tones are sRGB (tagged below); turf keeps the untagged path
+    const kinds = { asphalt: ["#4e5257", "#474b50"], turf: ["#6f8a4a", "#5d7a3e"], concrete: ["#8e908b", "#858782"], gravel: ["#8a857a", "#7d786e"], track: ["#8a4d3d", "#7a4335"] };
     const gk = kind === "turf" ? "yard-grass" : kind === "track" || kind === "gravel" ? "asphalt" : kind;
     const ab = kinds[kind] || kinds.concrete;
-    if (CBZ.prisonGroundTex) tex = CBZ.prisonGroundTex(gk, { a: o.a || ab[0], b: o.b || ab[1] });
+    if (CBZ.prisonGroundTex) tex = CBZ.prisonGroundTex(gk, { a: o.a || ab[0], b: o.b || ab[1], srgb: kind !== "turf" && !o.a });
     else if (CBZ.checkerTex) tex = CBZ.checkerTex(ab[0], ab[1], 2);
     if (!tex) return null;
     tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));

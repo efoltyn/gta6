@@ -85,7 +85,7 @@
   // positions, same `tex.repeat.set(rx, rz)` shape — only the canvas changed.
   const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
   function slab(x, z, w, d, a, b, rx, rz, kind) {
-    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b })
+    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : CBZ.checkerTex(a, b, 2);
     tex.repeat.set(rx, rz);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ map: tex }));
@@ -96,7 +96,7 @@
   // two panels per tile the joints land on 3.15 m centres, which is what a
   // real poured apron uses. A slab is the one tiling surface allowed to show
   // where it repeats.
-  slab(0, 90, 88, 76, "#586069", "#4f5760", 14, 12, "concrete");   // lower-yard apron
+  slab(0, 90, 88, 76, "#8e908b", "#858782", 14, 12, "concrete");   // lower-yard apron (sRGB weathered concrete)
   // path: 1x8 -> a ~9 m square tile. The old 2x16 repeated a 4.6 m cell
   // sixteen times down the corridor you walk the whole length of.
   // PRISON_ROAD_FIX (world/ground.js owns the flag and PUBLISHES the width).
@@ -104,7 +104,7 @@
   // to type "9" independently, which is exactly how a 132 m two-lane band ended
   // up running the length of the compound. One number, read, never retyped.
   const WALK = (CBZ.prisonWalkway && CBZ.prisonWalkway.w) || 9;
-  slab(0, 90, WALK, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? Math.max(1, Math.round(76 / WALK)) : 16, "asphalt"); // square tile: 1 x 8 on a 2.8 m path stretched it 3.4x along the walk // central path to the gate
+  slab(0, 90, WALK, 76, "#4e5257", "#474b50", GV2 ? 1 : 2, GV2 ? Math.max(1, Math.round(76 / WALK)) : 16, "asphalt"); // square tile: 1 x 8 on a 2.8 m path stretched it 3.4x along the walk // central path to the gate
   // (No kerb: world/ground.js dropped the pale 12 cm curb strips that ran
   // both edges; the bitumen against the concrete apron IS the path's edge.)
 

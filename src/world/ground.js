@@ -103,7 +103,7 @@
 
   // central asphalt walkway from the cell door toward the exit
   const asphalt = V2
-    ? CBZ.prisonGroundTex("asphalt")
+    ? CBZ.prisonGroundTex("asphalt", { a: "#4e5257", b: "#474b50", srgb: true })
     : checkerTex(CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, 2);
   // the tile stays SQUARE as the path narrows — the repeat is derived from the
   // width rather than retyped, so a future width change cannot stretch it.
@@ -174,7 +174,7 @@
     // Same asphalt CANVAS as the walkway (one cached bake, not a second one) —
     // the pad is told apart by a darker material tint, which is also what a
     // court that never gets resurfaced actually looks like next to a swept path.
-    const padTex = CBZ.prisonGroundTex("asphalt");
+    const padTex = CBZ.prisonGroundTex("asphalt", { a: "#55595e", b: "#4d5156", srgb: true });
     padTex.repeat.set(1.4, 1.5);
     const pad = new THREE.Mesh(
       new THREE.PlaneGeometry(12.4, 13.6),
