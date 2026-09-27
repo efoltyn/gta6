@@ -362,7 +362,7 @@
     const h = adopt(rec, 0.55, false);
     // ground out, not blown out: a quiet crumble of chunks, no boom
     const g = rec.gap, nx = g.horiz ? 0 : g.outS, nz = g.horiz ? g.outS : 0;
-    if (CBZ.cityChunk) CBZ.cityChunk(x + nx * 0.3, y, z + nz * 0.3, { count: 3, force: 2, dirx: nx, dirz: nz });
+    if (CBZ.cityChunk) CBZ.cityChunk(x + nx * 0.3, y, z + nz * 0.3, { count: 3, force: 2, dirx: nx, dirz: nz, material: rec.wall && rec.wall.material });
     // sustained gunfire still feeds the same facade wound score, just at a
     // much lighter weight than ordnance — many murder holes ground into one
     // wing CAN bring it down, it just takes a lot more of them than a rocket.

@@ -846,6 +846,7 @@
 
   /* ================= 5. GRIT (instanced chips) ============================ */
   let grit = null;
+  let chunkGeos = null;
   function chipGeo(glass) {
     // an irregular convex chip: a unit solid cut by a few random planes —
     // the same clipper the big pieces use, so a chip is a small piece
@@ -1441,6 +1442,17 @@
     // sim whole: its own geometry becomes the body, the original is hidden
     adopt: (obj, o) => shatter(obj, Object.assign({ whole: "one", launch: false, grit: false, dust: false }, o || {})),
     pile,
+    /* A shared irregular broken-chunk geometry (~1 m across, convex, cut by
+       the same clipper) for SCENERY rubble authored at build time — a
+       derelict parapet, a gabion's fill. Scale it per axis like a box.
+       Shared: never dispose it. i picks one of 6 variants. */
+    chunkGeo(i) {
+      if (!chunkGeos) {
+        chunkGeos = [];
+        for (let v = 0; v < 6; v++) { const g = chipGeo(false); g._shared = true; chunkGeos.push(g); }
+      }
+      return chunkGeos[Math.abs(i | 0) % chunkGeos.length];
+    },
     chips,
     dust: (x, y, z, o) => dust(x, y, z, o),
     kindOf,
