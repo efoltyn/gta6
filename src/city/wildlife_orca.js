@@ -2166,6 +2166,20 @@
     const x = end === "tail" ? TAIL_X * sc : end === "nose" ? NOSE_X * sc : 0;
     return x * Math.sin(pitch || 0) - (out || 0);
   }
+  /* THE CEILING FOR A SWIMMING ORCA, measured off the body instead of off
+     the draft. The hull rides at y = HY with its deepest ring 0.92 up and
+     down, so the top of the back is (HY + 0.92) model units over the origin.
+     The old ceiling was `0.92 x draft`, and draft only grows as size^0.9
+     while the body grows as size — so it put 0.66 m of back in the air on an
+     average cow and 0.9 m on a big bull. This is the
+     depth that leaves exactly BACK_OUT metres of back (and the whole dorsal)
+     over the swell at any size. Returns a DEPTH (positive = below). */
+  const BACK_Y = HY + 0.92, BACK_OUT = 0.4;
+  const PORP_ROLL = 2.4;                 // s — one breath-roll at speed
+  function surfCeil(a, draft) {
+    const d = BACK_Y * scaleOf(a) - BACK_OUT;
+    return d > 0.3 ? d : (draft || 2.6) * 0.92;
+  }
   function actTick(a, s, dt, dist) {
     if (!ACTS()) { if (s.act) endAct(s); s.airborne = false; return false; }
     s.cool -= dt;
@@ -2176,21 +2190,49 @@
     const dep = surf - g.position.y;
     const draft = a.swimDepth || 2.6;
 
-    // ---- PORPOISING. Not a decision — a consequence of travelling fast, so it
-    // is a modifier on top of everything else rather than an act that has to
-    // start and end. It only runs when no act owns the animal.
+    // ---- TRAVELLING FAST. Not a decision — a consequence of speed, so it is a
+    // modifier on top of everything else rather than an act that has to start
+    // and end. It only runs when no act owns the animal.
+    /* OWNER, 2026-09-27: "the orcas sometimes, when they're going fast, they
+       are entirely above the water while swimming, which is really dumb."
+       This branch WAS that. Above 5.2 m/s it ran a continuous sine, and on the
+       positive half of every 4.6 s cycle it asked for `lift = 0.75 x draft`
+       ABOVE the surface and set `s.airborne`, which switches depth()'s
+       submersion clamp off. 0.75 x 2.6 put the ORIGIN 1.95 m over the sea, and
+       the origin is the orca's BELLY line (the hull rides at y = HY, bottom at
+       0.13 model units) — so the whole animal, belly included, was in the air
+       for ~2 s of every 4.6 s on any fast transit. The negative half pinned it
+       at the ceiling, so a fast orca was never once down at swimming depth.
+
+       A real orca at speed runs a metre or three down and surfaces only to
+       breathe: a short roll where the blowhole, the back and the dorsal break
+       the surface and it goes straight back down. So that is what this is — a
+       DEPTH curve, never a height: from its travelling depth up to the one
+       depth depth() allows a swimming orca (surfCeil: back and fin out, belly
+       under), blow at the top, back down, then run submerged until the next
+       breath. `s.airborne` stays false the whole way, so the clamp is never
+       lifted; only a deliberate breach (§5, rare) clears the water. The pitch
+       still comes off the depth curve (ballistic), capped to a gentle roll. */
     if (!s.act && s.spd > 5.2 && dep < draft * 2.6) {
-      s.porpPh = (s.porpPh || 0) + dt * 1.35;
-      if (s.porpPh > 6.283185307) { s.porpPh -= 6.283185307; AUDIT.porpoises++; }
-      // MARINE_SIT_DEEPER: 1.5 drafts of air put the ORIGIN 4.3 m over the
-      // surface, i.e. the whole nine metres of animal clear of the water on an
-      // ordinary fast transit. A porpoise is a low arc that skims — the back
-      // and the flank break out, the body does not fly.
-      s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * (SITLOW() ? 0.75 : 1.5);
-      s.airborne = s.lift > draft * 0.5;
+      const period = 7.5 - clamp((s.spd - 5.2) / 6, 0, 1) * 2.5;   // 7.5 s fast, 5 s flat out
+      s.porpPh = (s.porpPh || 0) + dt;
+      if (s.porpPh >= period) { s.porpPh -= period; s.blown = false; AUDIT.porpoises++; }
+      const deep = draft * 1.35 * 1.15;                              // the pod's travelling depth
+      const top = surfCeil(a, draft);
+      let rise = 0;
+      if (s.porpPh < PORP_ROLL) {
+        const k = s.porpPh / PORP_ROLL;
+        rise = Math.sin(k * Math.PI);
+        if (!s.blown && k > 0.45) {
+          s.blown = true; fireSpout(a, s);
+          s.breathT = Math.max(s.breathT, 20);                       // that WAS the breath
+        }
+      }
+      s.diveWant = deep + (top - deep) * rise;
+      s.lift = -s.diveWant;
+      s.airborne = false;
       s.porp = true;
-      s.diveWant = -s.lift;
-      ballistic(s, dt, 0.38);            // nose follows the arc, not an author
+      ballistic(s, dt, 0.16);            // nose up into the roll, down out of it
       return true;
     }
     s.porp = false;
@@ -2245,7 +2287,7 @@
          the game.
          The honest shape is a rise to the SURFACE, not through it: aim the same
          eased curve at a shallow DEPTH instead of a height, and let depth()'s
-         own submersion clamp (0.92 × draft, which puts the back and the whole
+         own submersion clamp (surfCeil: the back and the whole
          dorsal in the air and nothing else) be what stops it. `s.airborne`
          stays false for a blow now, which is what re-arms that clamp — the act
          no longer asks for the exemption a breach legitimately needs. */
@@ -2258,8 +2300,7 @@
          4.07 m of dorsal in the air and aimed it at a shallow DEPTH instead;
          that number is settled and the owner signed it off. Only the sign of
          the ten-centimetre pitch was wrong, so only the sign is touched. */
-      if (SITLOW()) s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth
-      else s.lift = rise * (draft * 0.85);
+      s.lift = -draft * (1.25 - 1.05 * rise);   // ⇒ diveWant = a depth; depth()'s ceiling stops it
       if (!s.blown && k > 0.42) { s.blown = true; fireSpout(a, s); }
       if (s.actT <= 0) endAct(s);
     } else if (s.act === "spyhop") {
@@ -2567,7 +2608,11 @@
        body lagged its own pose and the flukes only ever grazed the surface
        instead of clearing it. A ballistic arc keeps the softer number; it is
        already a smooth curve and does not need chasing. */
-    const seatK = s.act && !s.airborne ? 9 : (s.airborne || s.act ? 4.5 : 1.1);
+    /* The breath-roll at speed (s.porp) is tracked like an attitude act: at
+       the resting 1.1 a 2.4 s roll lagged so far behind its own curve that the
+       back never broke the surface at all. */
+    const tracked = (s.act || s.porp) && !s.airborne;
+    const seatK = tracked ? 9 : (s.airborne || s.act ? 4.5 : 1.1);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * seatK);
     let y = surf - s.dive;
     const draft = a.swimDepth || 2.6;
@@ -2575,13 +2620,14 @@
     // leave the water is not a breach, and a spy-hop under the surface is a
     // hovering whale. The seabed clamp below is NOT lifted — the bed always
     // wins, which is wildlife_shark.js's order and its reasoning.
-    if (!s.airborne && y > surf - draft * 0.92) y = surf - draft * 0.92;
+    const ceil = surfCeil(a, draft);
+    if (!s.airborne && y > surf - ceil) y = surf - ceil;
     if (CBZ.cityAquaticBedRestY) {
       const lift = CBZ.cityAquaticBedLift ? CBZ.cityAquaticBedLift(a.species) : scaleOf(a) * 0.9;
       const lo = CBZ.cityAquaticBedRestY(g.position.x, g.position.z, draft, lift, t, surf);
       if (y < lo) y = lo;
     }
-    g.position.y += (y - g.position.y) * Math.min(1, dt * (s.act && !s.airborne ? 13 : (s.airborne || s.act ? 7 : 3.2)));
+    g.position.y += (y - g.position.y) * Math.min(1, dt * (tracked ? 13 : (s.airborne || s.act ? 7 : 3.2)));
   }
 
   // ============================================================
