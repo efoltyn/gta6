@@ -265,6 +265,10 @@ async function stage(input) {
     hold();
     if (C.fpsFire) { C.fpsFire(true); C.fpsFire(false); }
     const canvas = C.renderer && C.renderer.domElement;
+    // HARNESS TRAP: the boot meter overlays everything until something hides
+    // it; with rAF stubbed nothing does, so a play shot was a loading screen
+    if (C.bootMeter && C.bootMeter.hide) { try { C.bootMeter.hide(); } catch (_) {} }
+    for (const id of ['bootload']) { const e = document.getElementById(id); if (e) e.style.setProperty('display', 'none', 'important'); }
     window.__cbzVisualCompare.render();
     const hud = {};
     for (const id of ['survBars', 'crosshair', 'ammo', 'timer', 'hotbar', 'ggHud']) {
