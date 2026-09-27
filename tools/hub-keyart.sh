@@ -20,7 +20,7 @@ mkdir -p "$OUT" assets/keyart
 ROSTER="
 city|city|cover-chase
 escape|prison|cover-fight
-survival|disaster|cover-tsunami
+survival|disaster|keyart-town
 gungame|gungame|cover-firefight
 sharksim|shark|cover-white
 npcwar|npcwar|cover-nuke

@@ -65,6 +65,21 @@ const subjects = [
       narrow: { back: 12, side: 52, aimAhead: -14, aimSide: -16, aimY: 10, fov: 78 } },
   },
   {
+    /* THE KEY ART (the title screen's hero and the portal thumbnail). The
+       lens stands IN THE TOWN, low, well back from the beach, so the wall has
+       scale: it towers over the rooftops with sky above the lip, and the
+       crowd sprints up the street at the lens. Composed centre-heavy because
+       the hero is cover-cropped to the middle ~40% of the width on a
+       portrait iPad (css/title_hub.css: center 40% / cover). */
+    id: "keyart-town", label: "The wall over the town",
+    focus: "Key art: from a street 70 m inland at head height, the standing wall over the town's roofline with sky above the lip, spray veil tearing off the crest, the crowd running up the street toward the lens.",
+    sun: 0.22,
+    act: { force: "flood", crowdAtShoal: 0.66, crowd: { n: 100, from: 30, to: 90, side: 0, spread: 18 },
+      untilStalled: true, extraSecs: 0.3, clearRoofs: true, tsuMagPin: 1.2 },
+    shot: { mode: "front", back: 100, side: 0, alt: 2.0, aimAhead: 0, aimSide: 0, aimY: 12, fov: 60,
+      narrow: { back: 100, alt: 1.9, aimY: 14, fov: 72 } },
+  },
+  {
     id: "cover-run", label: "RUN",
     focus: "The same stand from the town side: a crowd sprints straight at a lens parked at knee height on the beach road, the standing wall filling the sky behind them. The tripod hangs on the SHORELINE, not the front.",
     sun: 0.40,
@@ -143,6 +158,7 @@ async function stageDisasterProduct(input) {
 
   // ---- the director: put it on this cover's disaster ----------------------
   if (act.magPin != null) window.__volcanoMagPin = act.magPin;
+  window.__tsunamiMagPin = act.tsuMagPin != null ? act.tsuMagPin : undefined;
   if (act.force) { CBZ.disasters.force(act.force); S.forced = act.force; step(0.1); }
 
   // ---- the axes: along the wave's travel, or a chosen bearing --------------
@@ -268,7 +284,12 @@ async function stageDisasterProduct(input) {
         if (!(wet > 0.12)) break;
         s += 5; x = A.center.x + X.dx * s + X.px * side; z = A.center.z + X.dz * s + X.pz * side;
       }
-      b.pos.x = x; b.pos.z = z; b.pos.y = CBZ.surv.floorAt(x, z);
+      // STREET LEVEL ONLY: floorAt answers the top of whatever is there, and
+      // an extra dropped on a canopy or a roof sprints across it in mid-air
+      const fl = CBZ.surv.floorAt(x, z);
+      const g0 = typeof A.groundHeightAt === "function" ? A.groundHeightAt(x, z) : fl;
+      if (Number.isFinite(g0) && fl - g0 > 1.2) continue;
+      b.pos.x = x; b.pos.z = z; b.pos.y = fl;
       b.swim = false; b.panicT = 0; b.pause = 0;
       b.state = "flee"; b.urg = 1;
       b.target.set(x + X.dx * 60 * runDir, 0, z + X.dz * 60 * runDir);
@@ -293,6 +314,16 @@ async function stageDisasterProduct(input) {
   if (act.crowdAfterSecs) step(act.crowdAfterSecs);
   lateral = pickLateral();
   placeCrowd();
+  /* act.clearRoofs: the survivors already up on a canopy or a roof are doing
+     the right thing, but a body on a 20 cm canopy slab photographs as a man
+     floating in the air. The key art walks them down to the street. */
+  if (act.clearRoofs && CBZ.bots) {
+    for (const b of CBZ.bots) {
+      if (!b || b.dead || !b.pos || typeof A.groundHeightAt !== "function") continue;
+      const g0 = A.groundHeightAt(b.pos.x, b.pos.z);
+      if (Number.isFinite(g0) && b.pos.y - g0 > 1.2 && b.pos.y - g0 < 30) { b.pos.y = g0; if (b.group) b.group.position.y = g0; }
+    }
+  }
   if (act.untilShoal != null) pollShoal(act.untilShoal);
   if (act.untilStalled) {
     // THE STAND: the wall at full height over the beach, creeping (0.45 s)
@@ -418,6 +449,15 @@ async function stageDisasterProduct(input) {
   title.innerHTML = portrait ? "DISASTER<br>SURVIVAL" : TITLE;
   title.style.display = "";
 
+  // (clearRoofs, last word) anyone still off the ground in frame is a body
+  // floating over a canopy slab: out of the picture
+  if (act.clearRoofs && CBZ.bots) {
+    for (const b of CBZ.bots) {
+      if (!b || !b.group || typeof A.groundHeightAt !== "function") continue;
+      const gp = b.group.position, g0 = A.groundHeightAt(gp.x, gp.z);
+      if (Number.isFinite(g0) && gp.y - g0 > 1.2) b.group.visible = false;
+    }
+  }
   CBZ.renderer.render(CBZ.scene, cam);
 
   // ---- THE TRAILER HOOK: hold the cover half a second, then let it play ----
