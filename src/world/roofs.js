@@ -11,7 +11,7 @@
 
    SKY IS A YARD THING. A roofed room is the whole difference between a
    building and a stage set, and it is the difference the towers, the
-   searchlights and entities/ambientlife.js's four crows (y 18-25) make
+   searchlights (and, until 2026-09-27, four box crows at y 18-25) make
    visible from inside every room in the prison.
 
    ---- WHY THE CAMERA IS NO LONGER AN ARGUMENT --------------------------

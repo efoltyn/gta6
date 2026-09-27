@@ -473,12 +473,14 @@
       const fBlot = rasterField(N, 3, 3, salt + 3);        // repair patches / sun bleach
       const fAgg = rasterField(N, o.grain, 2, salt + 13);  // aggregate speckle
       const fStain = rasterField(N, 5, 2, salt + 23);      // oil + tyre staining
-      const fCrack = rasterField(N, 3, 2, salt + 31);      // hairline cracks
+      // (no "hairline cracks": they were the 0.5 level set of a 3-cell smooth
+      // field, i.e. closed metre-wide loops and S-curves drawn in dark ink over
+      // every tile of the walkway. The owner's "squiggles". Real asphalt reads
+      // from aggregate, bleach and tyre/oil staining, all kept below.)
       for (let i = 0, n = N * N; i < n; i++) {
         let l = 1 + (fBlot[i] - 0.5) * 0.10 + (fAgg[i] - 0.5) * 0.15;
         const st = fStain[i];
         l -= st * st * st * 0.20;
-        l -= pow40(1 - Math.abs(fCrack[i] * 2 - 1)) * 0.50;
         const i4 = i * 4;
         // bitumen reads faintly cool, the way real asphalt does
         d[i4] = cl(mr * l * 0.99); d[i4 + 1] = cl(mg * l); d[i4 + 2] = cl(mb * l * 1.03); d[i4 + 3] = 255;
@@ -546,7 +548,8 @@
       patch: opts.patch != null ? (opts.patch | 0) : def.patch,
       grain: opts.grain != null ? (opts.grain | 0) : def.grain,
       joint: opts.joint != null ? (opts.joint | 0) : def.joint,
-      crack: opts.crack != null ? (opts.crack | 0) : 3,
+      // 0 by default: a contour crack is a loop, never a crack (see bakeGround)
+      crack: opts.crack != null ? (opts.crack | 0) : 0,
     };
     if (o.b == null) o.b = o.a;
     const key = k + "|" + o.a + "|" + o.b + "|" + o.size + "|" + o.wear + "|" + o.patch + "|" + o.grain + "|" + o.joint + "|" + o.crack;

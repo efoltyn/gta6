@@ -181,7 +181,9 @@
     addBox(11.6, 6.7, -36.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
     addBox(12.4, 6.65, -5.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
   }
-  pipe(12.0, 7.2, -20.5, 0.14, 30, "z", 0x717c86);
+  // z -35.5..-8.3: the run ends at the cell house's north wall (z -8) instead
+  // of poking 2.5 m out of it into the yard air.
+  pipe(12.0, 7.2, -21.9, 0.14, 27.2, "z", 0x717c86);
 
   // ---- route 4: cafeteria grease duct into the same ditch network ----
   const kitchenDuct = floorHatch(-27.1, 19.2, "Kitchen Grease Duct", 0x9a6a2d);
@@ -204,5 +206,7 @@
       addBox(29.45, 5.2, z + 2.5, 0.12, 0.12, 3.0, 0x66717c, { cast: false });
     }
   }
-  pipe(0, 9.8, 22, 0.10, 48, "z", 0x5b6470);
+  // (The 48 m, 10 cm "pipe" hung 9.8 m over the middle of the north yard is
+  // GONE. It touched no wall and no roof: from the ground it was a grey line
+  // drawn diagonally across the sky, and the owner saw exactly that.)
 })();

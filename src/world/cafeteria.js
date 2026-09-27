@@ -207,21 +207,57 @@
     };
 
     // ---- painted floor wayfinding (1 mesh) --------------------------------
-    // Hospitals and prisons route people with coloured lines on the DECK, not
-    // with signs — and a line on the floor is the one wayfinding a 3rd-person
-    // camera can actually read.
+    // PAINT IS FLUSH (2026-09-27, owner: "lines on ground are dumb"). These
+    // used to be 2 cm boxes centred at a hand-typed y 0.045: on the yard (floor
+    // 0) that stood a 5 cm coloured curb on the concrete, and inside a
+    // roomShell (slab top 0.06) it buried the line in the floor. A line is
+    // now laid ON whatever floor slab is under it (read at build time), 4 mm thick with its top 3 mm proud, and in a worn tone: paint
+    // on a floor people walk on is never the colour on the tin.
+    // Walks the root's direct children once per call (a few thousand, build
+    // time only) and reads each flat slab's LOCAL transform: matrixWorld is
+    // not trustworthy yet (core/matrixskip.js skips the hidden root at load).
+    const PAINTED = new WeakSet();
+    function floorTop(x, z) {
+      const root = CBZ.prisonRoot || CBZ.scene;
+      let top = 0;
+      for (const m of root.children) {
+        if (!m.isMesh || PAINTED.has(m) || !m.geometry) continue;
+        const p = m.geometry.parameters; if (!p) continue;
+        const r = m.rotation;
+        if (m.geometry.type === "BoxGeometry") {
+          if (Math.abs(r.x) > 0.01 || Math.abs(r.z) > 0.01 || Math.abs(r.y) > 0.01) continue;
+          const h = p.height * m.scale.y; if (h > 0.25) continue;
+          const t = m.position.y + h / 2; if (t > 0.3 || t <= top) continue;
+          if (Math.abs(x - m.position.x) > p.width * m.scale.x / 2 || Math.abs(z - m.position.z) > p.depth * m.scale.z / 2) continue;
+          top = t;
+        } else if (m.geometry.type === "PlaneGeometry") {
+          if (Math.abs(r.x + Math.PI / 2) > 0.01 || Math.abs(r.y) > 0.01 || Math.abs(r.z) > 0.01) continue;
+          const t = m.position.y; if (t > 0.3 || t <= top) continue;
+          if (Math.abs(x - m.position.x) > p.width * m.scale.x / 2 || Math.abs(z - m.position.z) > p.height * m.scale.y / 2) continue;
+          top = t;
+        }
+      }
+      return top;
+    }
+    const worn = (c) => { const col = new THREE.Color(c); const g = (col.r + col.g + col.b) / 3;
+      col.setRGB((col.r * 0.7 + g * 0.3) * 0.82, (col.g * 0.7 + g * 0.3) * 0.82, (col.b * 0.7 + g * 0.3) * 0.82); return col.getHex(); };
+    K.floorTop = floorTop;
     K.floorLine = function (x, z, len, axis, color, o) {
       o = o || {};
-      return addBox(x, o.y != null ? o.y : 0.045, z,
-        axis === "x" ? len : (o.w || 0.16), 0.02,
-        axis === "x" ? (o.w || 0.16) : len, color, { cast: false });
+      const w = o.w || 0.1, top = floorTop(x, z) + 0.003;
+      const m = addBox(x, top - 0.002, z, axis === "x" ? len : w, 0.004,
+        axis === "x" ? w : len, worn(color), { cast: false });
+      if (m) PAINTED.add(m);
+      return m;
     };
     // a direction chevron built from two short strokes (2 meshes)
     K.chevron = function (x, z, axis, sign, color, o) {
       o = o || {};
-      const s = o.size || 0.34, y = o.y != null ? o.y : 0.05;
+      const s = o.size || 0.34, top = floorTop(x, z) + 0.003;
       for (const g of [-1, 1]) {
-        const m = addBox(x, y, z, s, 0.02, 0.1, color, { cast: false });
+        const m = addBox(x, top - 0.002, z, s, 0.004, 0.08, worn(color), { cast: false });
+        if (!m) continue;
+        PAINTED.add(m);
         m.rotation.y = (axis === "x" ? 0 : HALF) + g * sign * 0.62;
       }
     };

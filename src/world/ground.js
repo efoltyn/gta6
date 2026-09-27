@@ -117,13 +117,10 @@
   path.position.set(0, 0.01, 24);
   path.receiveShadow = true;
   scene.add(path);
-  // THE KERB — what tells you this is a path and not a lane. 0.12 high, one
-  // 56 m box a side, cast:false and NOT solid.
-  if (ROADFIX) {
-    for (const sx of [-1, 1]) {
-      addBox(sx * (WALK_W / 2 + 0.09), 0.06, 24, 0.18, 0.12, 56, 0xa9a294, { cast: false });
-    }
-  }
+  // NO KERB (2026-09-27). The 0.18 x 0.12 pale boxes down both edges read,
+  // at a phone's eye height, as two raised white bars running the length of
+  // the yard (owner: "lines on ground are dumb"). Bitumen laid into a yard
+  // needs no curb; its edge against the turf is the edge.
 
   // cell-block concrete floor — the tier's own slab.
   // This was the compound's LAST legacy ground map (a 128 px speck canvas
@@ -157,12 +154,14 @@
   //  config.js's CBZ.WORLD.northYard, x[-30,30] z[-8,52]).
   // ============================================================
   if (V2) {
-    const PAINT = 0xe7e2d2;   // the same worn white southblock.js paints with
-    const YEL = 0xe2c049;     // and its yellow
+    const PAINT = 0xc9c5b8;   // worn white: sun-bleached, walked on
+    const YEL = 0xb9a052;     // worn safety yellow, not a fresh tin
     // y = 0.04 (a 0.02 slab, so 0.03..0.05): clear of the yard plane (0) and
     // of the walkway/court pad (0.01). The height southblock.js already paints
     // its own court lines at.
-    const paint = (x, z, w, d, c) => addBox(x, 0.04, z, w, 0.02, d, c, { cast: false });
+    // FLUSH: 4 mm thick, top at 0.014 (3-4 mm over the yard and the pad).
+    // It was a 2 cm box with its top at 5 cm: a curb, not paint.
+    const paint = (x, z, w, d, c) => addBox(x, 0.012, z, w, 0.004, d, c, { cast: false });
 
     // ---- the basketball pad ------------------------------------------------
     // props.js stands a 5 m hoop at (-28, 14) on bare grass, with the rim
@@ -216,8 +215,8 @@
     // recreation wall (hoop, gym, barrels) and gets the court instead; the
     // east run and the two north returns either side of the cell block are
     // bare, and get the line.
-    paint(28.3, 21.5, 0.16, 57, YEL);        // east wall,  z[-7, 50]
-    paint(-23, -6.8, 13, 0.16, YEL);         // north return, x[-29.5, -16.5]
-    paint(23, -6.8, 13, 0.16, YEL);          // north return, x[16.5, 29.5]
+    paint(28.3, 21.5, 0.1, 57, YEL);         // east wall,  z[-7, 50]
+    paint(-23, -6.8, 13, 0.1, YEL);          // north return, x[-29.5, -16.5]
+    paint(23, -6.8, 13, 0.1, YEL);           // north return, x[16.5, 29.5]
   }
 })();

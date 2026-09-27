@@ -753,9 +753,14 @@
     return m;
   }
   CBZ.prisonGround = ground;
-  // a painted line on the ground (a thin box; nothing casts, nothing collides)
+  // a painted line on the ground: FLUSH paint, 4 mm thick with its top 5 mm
+  // over a ground() patch (y 0.02). It was 12 mm thick with its top at 5 cm,
+  // which from eye height is a raised curb. Colours are worn, never tin-fresh.
   function paint(x, z, w, d, color, y) {
-    return addBox(x, y != null ? y : 0.045, z, w, 0.012, d, color != null ? color : 0xe9e9e4, { cast: false });
+    const c = new THREE.Color(color != null ? color : 0xe9e9e4);
+    const g = (c.r + c.g + c.b) / 3;
+    c.setRGB((c.r * 0.7 + g * 0.3) * 0.84, (c.g * 0.7 + g * 0.3) * 0.84, (c.b * 0.7 + g * 0.3) * 0.84);
+    return addBox(x, y != null ? y : 0.023, z, w, 0.004, d, c.getHex(), { cast: false });
   }
   CBZ.prisonPaint = paint;
   function program(id, x0, x1, z0, z1) { programs.push({ id, x0, x1, z0, z1, m2: (x1 - x0) * (z1 - z0) }); }

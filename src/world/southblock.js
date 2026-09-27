@@ -104,34 +104,25 @@
   // to type "9" independently, which is exactly how a 132 m two-lane band ended
   // up running the length of the compound. One number, read, never retyped.
   const WALK = (CBZ.prisonWalkway && CBZ.prisonWalkway.w) || 9;
-  slab(0, 90, WALK, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? 8 : 16, "asphalt"); // central path to the gate
-  // the kerb continues with it, so the path does not lose its edges at z=52
-  if (CBZ.prisonWalkway && CBZ.prisonWalkway.fixed) {
-    for (const sx of [-1, 1]) addBox(sx * (WALK / 2 + 0.09), 0.06, 90, 0.18, 0.12, 76, 0xa9a294, { cast: false });
-  }
+  slab(0, 90, WALK, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? Math.max(1, Math.round(76 / WALK)) : 16, "asphalt"); // square tile: 1 x 8 on a 2.8 m path stretched it 3.4x along the walk // central path to the gate
+  // (No kerb: world/ground.js dropped the pale 12 cm curb strips that ran
+  // both edges; the bitumen against the concrete apron IS the path's edge.)
 
   // a basketball half-court painted into the apron
   (function court() {
     const c = new THREE.Mesh(new THREE.PlaneGeometry(16, 22),
       new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
     c.rotation.x = -Math.PI / 2; c.position.set(-11, 0.02, 96); scene.add(c);
-    const line = (x, z, w, d) => addBox(x, 0.04, z, w, 0.02, d, 0xe7e2d2, { cast: false });
-    line(-11, 85.2, 16, 0.16); line(-11, 96, 5.0, 5.0); line(-3.2, 96, 0.16, 22);
+    // flush paint on the court plane (top 3 mm proud of it), worn white; the
+    // old middle "line" was a solid 5 x 5 m white square, not a key outline
+    const line = (x, z, w, d) => addBox(x, 0.021, z, w, 0.004, d, 0xc9c5b8, { cast: false });
+    line(-11, 85.2, 16, 0.08); line(-3.2, 96, 0.08, 22);
+    line(-11, 93.5, 5.0, 0.08); line(-11, 98.5, 5.0, 0.08); line(-8.5, 96, 0.08, 5.0); line(-13.5, 96, 0.08, 5.0);
   })();
 
-  // running-track oval outline around the infield (just painted lines).
-  // WHITE and small: the old 0.7 m yellow dabs read as road dashes from the
-  // air and chained with the walkway into a phantom carriageway (owner:
-  // "yellow dotted road going through the middle of it"). A track is lined
-  // in white; nothing painted in this compound is yellow-dashed.
-  (function track() {
-    const seg = 40, R = 30;
-    for (let i = 0; i < seg; i++) {
-      const a = (i / seg) * Math.PI * 2;
-      const x = Math.cos(a) * (R * 0.9), z = 94 + Math.sin(a) * (R * 0.62);
-      addBox(x, 0.03, z, 0.42, 0.02, 0.42, 0xcfd5d8, { cast: false });
-    }
-  })();
+  // (The "running track" was 40 white 0.42 m squares dotted in an oval over
+  // the concrete apron: no track surface, no lanes, a ring of floor tiles.
+  // Deleted 2026-09-27.)
 
   /* ---- floodlight poles: DELETED (PRISON_PROP_USE_V1) -------------------
      THE YARD ALREADY HAS FLOOD MASTS AND THEY ARE NOT THESE.
@@ -516,38 +507,14 @@
   if (DRESS && PD) (function institutional() {
     const WX = 43.5, SZ1 = 127.5;                 // perimeter inner faces
 
-    // ---- 1. WAYFINDING PAINT ---------------------------------------------
-    // Prisons and hospitals route people with COLOURED LINES ON THE DECK, and
-    // a line on the deck is the only wayfinding a third-person camera can read
-    // at this scale. Each trunk peels off at the z of the door it serves, so
-    // the paint is a map of the block rather than decoration.
-    const GATE = 0xe8c33c, MED = 0x4fbf7a, WORK = 0x3f7fd0, CHAP = 0x9a7ad0, LAUN = 0xd8d2c4;
-    PD.floorLine(-0.6, 89, 70, "z", GATE);          // trunk: the gate, z 54..124
-    PD.floorLine(-1.6, 75, 42, "z", MED);           // trunk: medical, z 54..96
-    PD.floorLine(11.9, 96, 27, "x", MED, { y: 0.047 });   // branch east to the infirmary door
-    PD.floorLine(-1.1, 61.5, 15, "z", WORK);        // trunk: workshop, z 54..69
-    PD.floorLine(-12.3, 69, 22.4, "x", WORK, { y: 0.047 }); // branch west to the workshop door
-    PD.floorLine(11.4, 69.6, 24.1, "x", CHAP, { y: 0.047 }); // branch east to the chapel door
-    // the laundry gets a DOOR LEG only: a full branch at this z would run
-    // under the bleachers (x -18.1..-15.9) and across the painted half-court,
-    // i.e. a line you cannot see for half its length.
-    PD.floorLine(-22.6, 96.6, 6.2, "x", LAUN, { y: 0.047 });
-    PD.chevron(-0.6, 112, "z", 1, GATE);
-    PD.chevron(-0.6, 84, "z", 1, GATE);
-    PD.chevron(18, 96, "x", 1, MED);
-    PD.chevron(-18, 69, "x", -1, WORK);
-    // The same colours carried onto the wall each line ends at, so a lane and
-    // a doorway are the same idea in two places. Each x is the wall's YARD
-    // face plus a hair — a roomShell wall is 0.5 thick and centred on the rect
-    // edge, so the yard face is edge -/+ 0.25 and getting the sign wrong hides
-    // the stripe inside the concrete.
-    // Each band sits BESIDE its doorway, never across it: a roomShell door gap
-    // is a full-height hole in the wall, so a stripe centred on the door
-    // centreline would hang in the opening with nothing behind it.
-    PD.band(-23.72, 1.55, 73.2, 3.6, "z", WORK);    // workshop east face (yard side x > -23.75)
-    PD.band(23.72, 1.55, 73.2, 3.6, "z", CHAP);     // chapel west face   (yard side x <  23.75)
-    PD.band(25.72, 1.55, 100.2, 3.4, "z", MED);     // infirmary west face
-    PD.band(-25.72, 1.55, 100.2, 3.4, "z", LAUN);   // laundry east face
+    // ---- 1. WAYFINDING PAINT: DELETED (2026-09-27) --------------------------
+    // Five coloured trunks (gate yellow, medical green, workshop blue, chapel
+    // violet, laundry white) ran down the OUTDOOR yard walkway with chevrons,
+    // plus a matching coloured band beside each door. Coloured routing lines
+    // are an indoor hospital-corridor device; on an open prison yard they read
+    // as a board-game track, and from a phone at eye level they were thick
+    // bright bars (owner: "lines on ground are dumb"). The yard is navigated by
+    // the doors, the signs over them and the walkway itself.
 
     // ---- 2. PERIMETER WEAR ------------------------------------------------
     // A 76 m concrete wall with one red trim line on top is a boundary; the
