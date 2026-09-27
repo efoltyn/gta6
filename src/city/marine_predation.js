@@ -868,8 +868,10 @@
     }
     // the bleed while it is being worked: this is a chum source, and the whole
     // point of §7 is that other sharks come to it.
-    if (tp && CBZ.goreBloom && Math.random() < dt * 5) {
-      try { CBZ.goreBloom(tp.x, (tp.y || 0) + 0.5, tp.z, { amount: 0.9, arterial: true }); } catch (e) {}
+    // (a bloom ~1.5x a second, not 5 — the chum ribbon is the steady part;
+    // five full blooms a second stacked into a red wall over the roll.)
+    if (tp && CBZ.goreBloom && Math.random() < dt * 1.5) {
+      try { CBZ.goreBloom(tp.x, (tp.y || 0) + 0.5, tp.z, { amount: 0.6, arterial: true }); } catch (e) {}
     }
     // damage delivered across the roll, so it dies AT the inversion.
     hurt(t, dpsAgainst(a, t) * 2.4 * dt, a, "drowned by a pod of " + label(a) + "s");
