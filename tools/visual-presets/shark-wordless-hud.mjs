@@ -161,7 +161,7 @@ async function stageWordlessHud(input) {
       /* Climb a rung by PLAYING: bait, let the automatic bite feed, repeat.
          The rung that matters is always reached by a real evolve(). */
       feedToTier(tier) {
-        const NEED = [0, 14, 34, 75], sim = CBZ.sharkSim;
+        const NEED = (CBZ.sharkSimLadder || []).map((r) => r.need), sim = CBZ.sharkSim;
         for (let round = 0; round < 12 && sim.tier < tier; round++) {
           D.peace(); D.shallow(4); D.step(12);
           sim.mass = Math.max(sim.mass, NEED[sim.tier + 1] - 1);
@@ -172,7 +172,7 @@ async function stageWordlessHud(input) {
       },
       /* eat until the rung climbs, from one meal short of the threshold */
       eatOneRung() {
-        const NEED = [0, 14, 34, 75], sim = CBZ.sharkSim, from = sim.tier;
+        const NEED = (CBZ.sharkSimLadder || []).map((r) => r.need), sim = CBZ.sharkSim, from = sim.tier;
         for (let round = 0; round < 12 && sim.tier === from; round++) {
           D.peace(); D.shallow(4); D.step(12);
           sim.mass = NEED[from + 1] - 1;

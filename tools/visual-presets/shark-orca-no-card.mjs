@@ -43,7 +43,7 @@ async function stageOrcaKill(input) {
   const CBZ = window.CBZ, T = window.THREE, sub = input.subject;
   if (!CBZ || !T || !CBZ.stepSim || !CBZ.surv) return { ok: false, missing: "engine" };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const NEED = [0, 14, 34, 75];                 // the ladder's mass thresholds
+  const NEED = (CBZ.sharkSimLadder || []).map((r) => r.need);                 // the ladder's mass thresholds
 
   let D = window.__orcaBA;
   if (!D) {
