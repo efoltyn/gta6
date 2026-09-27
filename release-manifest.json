@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "a80d2019a24216124bf4b20cba5a59848de946c3",
-  "createdAt": "2026-09-27T07:59:58.032Z",
+  "sourceCommit": "e4d0602a14e60089a8ae36b3b8ba7908de548bac",
+  "createdAt": "2026-09-27T08:01:51.667Z",
   "fileCount": 1124,
-  "totalBytes": 45724292,
+  "totalBytes": 45764091,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -123,8 +123,8 @@
     },
     {
       "file": "src/city/beach.js",
-      "bytes": 27274,
-      "sha256": "4d5482b53e251d45d3863c1c5e1fb8fee3fc58790d69a2ac2afd4238aca25ae2"
+      "bytes": 28798,
+      "sha256": "8e0a9abf8b5a9be5e4964170b350c140cff108ed93cb3ea469443a1ca3487846"
     },
     {
       "file": "src/city/biome_desert.js",
@@ -953,13 +953,13 @@
     },
     {
       "file": "src/city/marine_frenzy.js",
-      "bytes": 12400,
-      "sha256": "11ac7417212653e0540c4afb99682c215c75181b216733f337e70de7500ab553"
+      "bytes": 8225,
+      "sha256": "05a648f8198eaad9b8f2ae5eb7d9e8dffef04195d10fd06fe34b0893f0688dd6"
     },
     {
       "file": "src/city/marine_predation.js",
-      "bytes": 30211,
-      "sha256": "be06c3c1ad2a6d04ae3a9e8c1374802d2a2e7e20508b15bb63ee1823def1698b"
+      "bytes": 35034,
+      "sha256": "c952cf1d9eac5189570b96d0c4a5ecd019cbc7492245b262cb47dbf7e0987926"
     },
     {
       "file": "src/city/marriage.js",
@@ -1483,8 +1483,8 @@
     },
     {
       "file": "src/city/wildlife/aquatic.js",
-      "bytes": 86525,
-      "sha256": "38ce11bc46df6b986ae12b4828920f4c365c2fa985150855544b0089d7dc5d5f"
+      "bytes": 89116,
+      "sha256": "e5713a474b698a79501a1de90e28a034486c2e5bad354eed2a97e471be7da5a9"
     },
     {
       "file": "src/city/wildlife/bears.js",
@@ -1533,23 +1533,23 @@
     },
     {
       "file": "src/city/wildlife.js",
-      "bytes": 69822,
-      "sha256": "8ca7d8a561272f1aa821b1c16fc183bab21b8bd58b73dcf35d78bcdb3693f7cf"
+      "bytes": 83737,
+      "sha256": "46992119ec443559630c8e0c6a599abd3ec8e5a9700241f3c83a423e118b96ab"
     },
     {
       "file": "src/city/wildlife_orca.js",
-      "bytes": 61457,
-      "sha256": "a2e4c60d8647cf7477dd4315e22734839a2207d792835b1d57e28d6f37c3dccc"
+      "bytes": 62131,
+      "sha256": "c01b23125e045dbefa057083fc6579bbdbc1237ec4d6f414fbe9af7d8eaab8a5"
     },
     {
       "file": "src/city/wildlife_rig.js",
-      "bytes": 18086,
-      "sha256": "2f781ed294d219653849241f941f4c115b7bf5171df5fd4a2e718b89d046e992"
+      "bytes": 18907,
+      "sha256": "5b3cbeb1b98652f01a0ed66c4290b6fca9f4b0bed7d61a07d8055cb5298607cb"
     },
     {
       "file": "src/city/wildlife_shark.js",
-      "bytes": 36075,
-      "sha256": "79e75a59ba23892bed2c957c3cc52d2d0ce76f7c15250a96c1cc19ff1bb59136"
+      "bytes": 36230,
+      "sha256": "8786925f891aea9c73a29a7bb54e9020887a41bcf5849e128599939e2dad6ad0"
     },
     {
       "file": "src/city/wildlife_species.js",
@@ -1558,8 +1558,8 @@
     },
     {
       "file": "src/city/wildlife_tame.js",
-      "bytes": 94126,
-      "sha256": "f9a804a6caf1274e4df749b3825810b9070d0bf83996801124c82c0d1060d1ae"
+      "bytes": 95027,
+      "sha256": "c852d6dd33e73633060efe64e4572a7644dfa7be8f9d616f66148561d314b0a5"
     },
     {
       "file": "src/city/wildlife_traits.js",
@@ -1718,8 +1718,8 @@
     },
     {
       "file": "src/core/studio.js",
-      "bytes": 47758,
-      "sha256": "841a5ada3ed7602d3062e17903a8c51b825a018f90f6a2b6ca238df9924b453d"
+      "bytes": 47737,
+      "sha256": "27714463592c6eae5bcf0a9176f6f0ad6b3780096d0e2812d6583d7f6d4ba209"
     },
     {
       "file": "src/core/viewscope.js",
@@ -1743,8 +1743,8 @@
     },
     {
       "file": "src/entities/character.js",
-      "bytes": 95146,
-      "sha256": "8a82b5401e1c8b1deb5200c05d03ebe8bed5146f51911cf478e14da49fae55d2"
+      "bytes": 95933,
+      "sha256": "c8299a67ac5ff1e188b7d6ea0b0205a8062e7329c1cb28779fc5691c87107f90"
     },
     {
       "file": "src/entities/coins.js",
@@ -1808,8 +1808,8 @@
     },
     {
       "file": "src/entities/survivorbot.js",
-      "bytes": 26240,
-      "sha256": "2bd321f96a6ecab4256c7fd0a015df82a5caa6e4f82a9aa2a68313703672e7c6"
+      "bytes": 26328,
+      "sha256": "afa41628dee8615f2cd20217c07ebcc689c1165aabb7b2dcb06b6710b6b219a2"
     },
     {
       "file": "src/entities/vision.js",
@@ -2263,8 +2263,8 @@
     },
     {
       "file": "src/systems/gore.js",
-      "bytes": 57667,
-      "sha256": "61303420805e093b62c9f3fbe2365c96a5a89de59e849ec3f05da71710c3c038"
+      "bytes": 63994,
+      "sha256": "f9d65747f432d6a336d1680663de937da0394bc5eae6058720fd9df767f10c39"
     },
     {
       "file": "src/systems/grapple.js",
@@ -3238,8 +3238,8 @@
     },
     {
       "file": "src/world/sea_craft.js",
-      "bytes": 50498,
-      "sha256": "2f347562d86761a038d0b8dd845ff78e9843b5cdf96267967ce879c11276b1bd"
+      "bytes": 61967,
+      "sha256": "30f24c23c32bc45200f1ccd1cb053197794e6ae7fd5d4a2b641aac2b80f67caa"
     },
     {
       "file": "src/world/sea_scene.js",
@@ -5493,28 +5493,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 55335,
-      "sha256": "e9a7f947c9e6d838252fccd9ee2a61c28c3a152bdb71886169ab3d94f019f208"
+      "bytes": 55319,
+      "sha256": "dc661bd2dbdc20c2d41423f433877e711de0ee534b19c8abfa3e431e4444d173"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 55378,
-      "sha256": "562b35172fa26b556bd2d97707ce0686d95e844911b58faafd320ecd6d1b4603"
+      "bytes": 55362,
+      "sha256": "7f3cb92bfa3954641ba8554960ad3e7804c0d170185001861bcde637b7b4f173"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 55347,
-      "sha256": "65019effc8671772198e14dada3a23d694a134c7fbad7b428ac9984971bff2dd"
+      "bytes": 55331,
+      "sha256": "3b0686a7fce7fa89e98d4936350f7648b1b407f0bc45f2363cfb0d8838c3d5a7"
     },
     {
       "file": "gang-city.html",
-      "bytes": 55302,
-      "sha256": "0e6e5fde759d2e7d79c6dc2f9cdd1ff6d551819809961fa6427ae41b53770972"
+      "bytes": 55286,
+      "sha256": "9734cf65ba571c99c50cdca34b2b42d1248bbb871f2aa7bfc8be7a4ff10f4353"
     },
     {
       "file": "gun-game.html",
-      "bytes": 55324,
-      "sha256": "b0256401f5978c276d537d994181716817a445b879a63c33503f000dd47c6571"
+      "bytes": 55308,
+      "sha256": "612867272b5a5b2e849d05bd5df83d01570b93a8c766304a86fd4f2c80c1da6c"
     },
     {
       "file": "games/airport.html",
