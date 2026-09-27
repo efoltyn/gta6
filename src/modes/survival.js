@@ -423,6 +423,15 @@
     sun.shadow.camera.left = -sc; sun.shadow.camera.right = sc;
     sun.shadow.camera.top = sc; sun.shadow.camera.bottom = -sc;
     sun.shadow.camera.far = mode === "survival" ? 420 : 260;
+    /* SHADOW ACNE: the island frustum is 264 m across a 1024 map, so a
+       shadow texel is ~0.26 m, and core/lights.js's normalBias (0.022) was
+       sized for the prison's 140 m frustum. The shortfall striped the grass
+       and the beach in every high shot and crawled as the sun moved (part of
+       the "everything flickers"). Scaled with the texel, restored on exit. */
+    if ("normalBias" in sun.shadow) {
+      if (sun.userData._nbBase == null) sun.userData._nbBase = sun.shadow.normalBias;
+      sun.shadow.normalBias = mode === "survival" ? 0.2 : sun.userData._nbBase;
+    }
     if (sun.shadow.camera.updateProjectionMatrix) sun.shadow.camera.updateProjectionMatrix();
   }
 
