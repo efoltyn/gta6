@@ -118,7 +118,11 @@
     }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;
-      // keep them locked onto the player
+      // keep them in PURSUIT. This used to mean every guard in the prison
+      // homed on your live position through every wall for as long as the
+      // lockdown ran. entities/guards.js now reads a hunt honestly: chase
+      // what he sees, otherwise sweep outward from the last fix the block
+      // has (his own sighting, a radio call, a lens). Hiding works.
       if (!grace && !(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
       gd.alert = Math.max(gd.alert || 0, grace ? 0.6 : 1.0);
       // apply the boost once per guard; the ledger remembers its real base
@@ -373,6 +377,8 @@
     return true;
   };
   CBZ.cellMusterActive = function () { return musterOn; };
+  // entities/guards.js: out of your cell during a lockdown is a reason to look
+  CBZ.lockdownActive = function () { return active; };
   CBZ.cellMusterAudit = function () {
     return { active: musterOn, held: mustered.size, sealed: sealedCells.size,
       cells: wing() ? wing().cells.length : 0 };
