@@ -364,7 +364,8 @@
   function bag() { return S || (S = C.state(() => ({ belt: false, wins: 0, losses: 0, kos: 0, earned: 0 }))); }
   function save() { C && C.saveState(); }
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
-  function feed(m, col) { C && C.hud.feed(m, col); }
+  // people talk over their own heads; the ring shows the rest (no feed narration)
+  function sayBy(h, line, secs) { if (h && h.say && line) h.say(line, secs); }
   function rank() { const s = bag(); return s.belt ? "CHAMPION" : s.wins >= 2 ? "contender" : s.wins >= 1 ? "prospect" : "nobody"; }
   function nextBoutIdx() { return Math.min(BOUTS.length - 1, bag().wins); }
 
@@ -422,20 +423,17 @@
         case "slip": { const ch = chOf(foe(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = nextRand() < 0.5 ? -1 : 1; } break; }
         case "slipmove": { const ch = chOf(byDir(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = d.dir; } break; }
         case "knockdown": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = true; ch.koT = 0.7; ch.koDur = 0.7; ch.fightStance = false; }
-          if (near) feed("DOWN · " + nm(byDir(d.s) === A ? bout.a : bout.b) + " hits the canvas!", "#ff9a9a"); break; }
-        case "getup": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = false; ch.koT = 0; } if (near) feed(nm(byDir(d.s) === A ? bout.a : bout.b) + " beats the count!", "#ffd166"); break; }
+          break; }
+        case "getup": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = false; ch.koT = 0; } break; }
         case "count": if (near && V && V.ref && V.ref.say) V.ref.say(d.n + "!", 1.6); break;   // the ref counts over his own head
-        case "bell": if (near) feed("*DING*. Round " + d.n, "#e8b64c"); break;
-        case "bellEnd": if (near) feed("*DING*, end of round " + d.n); break;
-        case "cards": if (near) feed("Judges turn in Round " + d.round + " cards."); break;
-        case "ropes": if (near) feed(nm(byDir(d.s) === A ? bout.a : bout.b) + " is driven into the ropes."); break;
+        case "bell": if (near) sayBy(V.ref, "Round " + d.n + ". Fight!", 1.8); break;
+        case "bellEnd": if (near) sayBy(V.ref, "Break! Corners.", 1.6); break;
         case "over": endOfBout(bout); break;
         default: break;
       }
     }
     if (bout.events.length > 400) { bout.events.splice(0, bout.events.length - 120); bout.evI = bout.events.length; }
   }
-  function nm(side) { return side && side.def ? side.def.short || side.def.name : "?"; }
 
   /* ==========================================================
      7. BOUT LIFECYCLE
@@ -448,17 +446,16 @@
     LIVE = { bout: bout, role: "ai", aKey: card[0], bKey: card[1], boutIdx: -1, purse: 0, done: false,
       oddsA: oddsFromProb(p), oddsB: oddsFromProb(1 - p), bet: null };
     resetFighterRigs();
-    if (near) feed("Undercard: " + DEFS[card[0]].name + " (" + LIVE.oddsA.toFixed(2) + ") vs " +
-      DEFS[card[1]].name + " (" + LIVE.oddsB.toFixed(2) + "). [E] to bet.", "#9ad0ff");
+    if (near) sayBy(V.bookie, DEFS[card[0]].short + " at " + LIVE.oddsA.toFixed(2) + ", " + DEFS[card[1]].short + " at " + LIVE.oddsB.toFixed(2) + ". Money down!");
   }
   function startPlayerBout(idx) {
-    if (!V || !V.fA) { feed("The card is closed tonight."); return; }
+    if (!V || !V.fA) return;
     const B = BOUTS[idx];
     LIVE = { bout: mkBout("you", B.opp, true), role: "player", aKey: "you", bKey: B.opp,
       boutIdx: idx, purse: B.purse, done: false, oddsA: oddsFromProb(B.youWinProb), oddsB: oddsFromProb(1 - B.youWinProb), bet: null };
     resetFighterRigs();
     pendingAction = null;
-    feed((idx === 2 ? "TITLE FIGHT" : B.label) + " · you vs " + DEFS[B.opp].name + ". Purse " + fmt(B.purse) + ".", "#e8b64c");
+    sayBy(V.ref, "Touch gloves. Clean fight.", 2);
     openFighterHUD();
   }
   function resetFighterRigs() {
@@ -476,17 +473,15 @@
         s.wins++; if (kod) s.kos++; s.earned += LIVE.purse;
         C.wallet.give(LIVE.purse, "Fight purse");
         if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(LIVE.boutIdx === 2 ? 12 : 6); } catch (e) {} }
-        if (LIVE.boutIdx === 2 && !s.belt) { s.belt = true; openBelt(); feed("NEW SOUTHPAW PALACE CHAMPION!", "#ffd166"); }
-        else feed("Winner by " + method + " · purse " + fmt(LIVE.purse) + "!", "#ffd166");
+        if (LIVE.boutIdx === 2 && !s.belt) { s.belt = true; openBelt(); sayBy(V.ref, "And NEW champion!", 2.4); }
       } else {
         s.losses++;
-        feed(bout.winner === "B" ? ("Beaten by " + method + ". Journeyman's night, no purse.") : "Draw. No purse tonight.", "#ff9a9a");
       }
       save();
     } else if (LIVE.role === "ai" && LIVE.bet) {   // settle the bettor's stake
       const won = LIVE.bet.side === bout.winner;
-      if (won) { const pay = payout(LIVE.bet.stake, LIVE.bet.odds); C.wallet.give(pay, "Bet cashed"); feed("Bet cashed: +" + fmt(pay), "#ffd166"); }
-      else feed("Bet lost · " + fmt(LIVE.bet.stake) + " to the house.", "#ff9a9a");
+      if (won) { const pay = payout(LIVE.bet.stake, LIVE.bet.odds); C.wallet.give(pay, "Bet cashed"); sayBy(V.bookie, "Winner. Come collect."); }
+      else sayBy(V.bookie, "House thanks you, friend.");
       LIVE.bet = null;
     }
     if (LIVE.role === "player") { panelMode = "result"; openResult(bout); }
@@ -627,7 +622,7 @@
     ctx.zone({
       id: "belt", pos: [half + 2.4, half + 1.6], r: 1.8,
       label: () => bag().belt ? "[E] The Southpaw Palace belt, yours" : "[E] The belt case (win the title)",
-      onUse: () => { const s = bag(); C.hud.toast(s.belt ? "SOUTHPAW PALACE CHAMPION" : "Win the title fight to claim the strap."); },
+      onUse: () => { if (bag().belt) C.hud.toast("SOUTHPAW PALACE CHAMPION"); },
     });
   }
 
@@ -745,7 +740,7 @@
   }
   function head(title, sub) {
     return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + " · Esc closes</span></div>";
+      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + "</span></div>";
   }
   function barHTML(id, col, pct) {
     return "<div style='height:12px;border-radius:6px;background:rgba(0,0,0,.5);overflow:hidden;border:1px solid rgba(255,255,255,.18);margin:3px 0'>" +
@@ -755,17 +750,16 @@
   function openMain() {
     panelMode = "main"; const s = bag();
     const idx = nextBoutIdx(), B = BOUTS[idx];
-    const fh = "<div style='font-size:12px;opacity:.85;margin:4px 0 8px'>Record <b>" + s.wins + "-" + s.losses + "</b> · " + s.kos + " KO · " +
-      rank().toUpperCase() + " · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (s.belt ? " · <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>";
+    const fh = "<div style='font-size:12px;opacity:.85;margin:4px 0 8px'>Record <b>" + s.wins + "-" + s.losses + "</b>, " + s.kos + " KO, " +
+      rank().toUpperCase() + ", cash <b>" + fmt(C.wallet.cash()) + "</b>" + (s.belt ? ", <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>";
     const fightRow = s.belt
-      ? "<div style='opacity:.8;font-size:13px;margin:6px 0'>You hold the strap. Defend it (title purse):</div>" + btn("fight", "DEFEND vs " + DEFS.vega.name + " — " + fmt(BOUTS[2].purse), "#8a1f1f")
-      : "<div style='font-size:13px;margin:6px 0'>" + B.label + ": <b>you</b> vs " + DEFS[B.opp].name + " (" + DEFS[B.opp].blurb + ")<br>your odds <b>" + oddsFromProb(B.youWinProb).toFixed(2) + "</b> · purse <b>" + fmt(B.purse) + "</b></div>" + btn("fight", "SIGN · " + B.label, "#8a1f1f");
+      ? btn("fight", "DEFEND vs " + DEFS.vega.name + ", " + fmt(BOUTS[2].purse), "#8a1f1f")
+      : "<div style='font-size:13px;margin:6px 0'>" + B.label + ": <b>you</b> vs " + DEFS[B.opp].name + "<br>your odds <b>" + oddsFromProb(B.youWinProb).toFixed(2) + "</b>, purse <b>" + fmt(B.purse) + "</b></div>" + btn("fight", "SIGN: " + B.label, "#8a1f1f");
     C.hud.panel(
       head("SOUTHPAW PALACE", "Fight Night") + fh +
       "<div style='display:flex;gap:16px;flex-wrap:wrap'>" +
-        "<div style='flex:1;min-width:240px'><div style='color:#ff9a9a;font-weight:800;font-size:12px;letter-spacing:1px'>ROLE · FIGHTER</div>" + fightRow + "</div>" +
-        "<div style='flex:1;min-width:240px'><div style='color:#9ad0ff;font-weight:800;font-size:12px;letter-spacing:1px'>ROLE · BETTOR</div>" +
-          "<div style='font-size:13px;margin:6px 0'>Watch the undercard live in the ring and back a fighter at odds from their records.</div>" +
+        "<div style='flex:1;min-width:240px'><div style='color:#ff9a9a;font-weight:800;font-size:12px;letter-spacing:1px'>FIGHT</div>" + fightRow + "</div>" +
+        "<div style='flex:1;min-width:240px'><div style='color:#9ad0ff;font-weight:800;font-size:12px;letter-spacing:1px'>BET</div>" +
           btn("bet", "BETTING WINDOW", "#1f4e8a") + "</div>" +
       "</div>",
       { fight: () => { if (s.belt) startPlayerBout(2); else startPlayerBout(idx); },
@@ -814,8 +808,8 @@
     let tell = "";
     if (a.act === "down") tell = "DOWN! Mash a punch button to rise (" + a.riseHits + "/" + a.riseNeed + ")";
     else if (a.counterT > 0) tell = "COUNTER WINDOW, punch NOW for DOUBLE!";
-    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "" + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + " · SLIP or BLOCK!";
-    else if (a.swell >= 2) tell = "Your eye is closing, see the cutman between rounds.";
+    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "" + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + ". SLIP or BLOCK!";
+    else if (a.swell >= 2) tell = "EYE SWELLING";
     set("bx_tell", tell, "h");
   }
 
@@ -824,11 +818,12 @@
     const a = bout.a, s = a;
     const cutOpts = s.cutmanLeft > 0
       ? btn("ice", "Ice the swelling. $150", "#1f4e8a") + btn("air", "Oxygen (stamina). $120", "#1f4e8a") + btn("pep", "Adrenaline (HP). $200", "#1f4e8a")
-      : "<div style='opacity:.7;font-size:12px'>The cutman's done what he can this fight.</div>";
+      : "";
+    if (s.cutmanLeft <= 0) sayBy(V.cutman, "That's all I got. Keep your hands up.");
     C.hud.panel(
-      head("YOUR CORNER", "Round " + bout.round + " done · cutman work: " + s.cutmanLeft + " left") +
+      head("YOUR CORNER", "Round " + bout.round + " done, cutman: " + s.cutmanLeft + " left") +
       "<div style='font-size:12px;margin:4px 0'>" + cardTable(bout) + "</div>" +
-      "<div style='font-size:13px;margin:6px 0'>HP " + Math.max(0, Math.round(a.hp)) + " · STA " + Math.max(0, Math.round(a.st)) + " · swelling " + a.swell + " · cash " + fmt(C.wallet.cash()) + "</div>" +
+      "<div style='font-size:13px;margin:6px 0'>HP " + Math.max(0, Math.round(a.hp)) + ", STA " + Math.max(0, Math.round(a.st)) + ", swelling " + a.swell + ", cash " + fmt(C.wallet.cash()) + "</div>" +
       cutOpts + "<div style='margin-top:8px'>" + btn("bell", "ANSWER THE BELL ►", "#8a1f1f") + "</div>",
       { ice: () => cutman("ice"), air: () => cutman("air"), pep: () => cutman("pep"),
         bell: () => { answerBell(bout); openFighterHUD(); },
@@ -837,7 +832,7 @@
   function cutman(kind) {
     const a = LIVE && LIVE.bout && LIVE.bout.a; if (!a || a.cutmanLeft <= 0) return;
     const cost = kind === "ice" ? 150 : kind === "air" ? 120 : 200;
-    if (!C.wallet.spend(cost, "Cutman")) { feed("Not enough cash for the cutman."); return; }
+    if (!C.wallet.spend(cost, "Cutman")) { sayBy(V.cutman, "Cash first, champ."); return; }
     a.cutmanLeft--;
     if (kind === "ice") { a.swell = Math.max(0, a.swell - 2); a.hp = Math.min(a.hpMax, a.hp + 6); }
     else if (kind === "air") a.st = Math.min(100, a.st + 40);
@@ -860,16 +855,16 @@
 
   function openBet() {
     panelMode = "bet";
-    if (!LIVE || LIVE.role !== "ai") { if (LIVE && LIVE.role === "player") { feed("Finish your own bout first."); return; } startAIBout(); }
+    if (!LIVE || LIVE.role !== "ai") { if (LIVE && LIVE.role === "player") return; startAIBout(); }
     if (!LIVE || LIVE.bout.over) startAIBout();
     const bt = LIVE.bout, aD = DEFS[LIVE.aKey], bD = DEFS[LIVE.bKey];
-    const already = LIVE.bet ? "<div style='color:#ffd166;font-size:13px'>Bet down: " + fmt(LIVE.bet.stake) + " on " + (LIVE.bet.side === "A" ? aD.short : bD.short) + " @ " + LIVE.bet.odds.toFixed(2) + "</div>" : "";
+    const already = LIVE.bet ? "<div style='color:#ffd166;font-size:13px'>Your bet: " + fmt(LIVE.bet.stake) + " on " + (LIVE.bet.side === "A" ? aD.short : bD.short) + " @ " + LIVE.bet.odds.toFixed(2) + "</div>" : "";
     betStake = betStake || 50;
     C.hud.panel(
-      head("BETTING WINDOW", "Round " + bt.round + " · live undercard") +
+      head("BETTING WINDOW", "Round " + bt.round + ", live undercard") +
       "<div style='font-size:13px;margin:4px 0'><b style='color:#ff9a9a'>" + aD.name + "</b> @ " + LIVE.oddsA.toFixed(2) + "  vs  <b style='color:#9ad0ff'>" + bD.name + "</b> @ " + LIVE.oddsB.toFixed(2) + "</div>" +
       already +
-      "<div style='margin:8px 0'>Stake: <b id='bx_stake'>" + fmt(betStake) + "</b> · cash " + fmt(C.wallet.cash()) + "<br>" +
+      "<div style='margin:8px 0'>Stake: <b id='bx_stake'>" + fmt(betStake) + "</b>, cash " + fmt(C.wallet.cash()) + "<br>" +
         btn("m25", "-$25", "#26343c") + btn("p25", "+$25", "#26343c") + "</div>" +
       btn("backA", "BACK " + aD.short, "#8a1f1f") + btn("backB", "BACK " + bD.short, "#1f4e8a") +
       "<div style='margin-top:6px'>" + btn("watch", "Just watch", "#26343c") + "</div>",
@@ -880,11 +875,11 @@
   let betStake = 50;
   function pokeStake() { const e = document.getElementById("bx_stake"); if (e) e.textContent = fmt(betStake); }
   function placeBet(side) {
-    if (!LIVE || LIVE.role !== "ai" || LIVE.bout.over) { feed("Too late, bout's decided."); return; }
-    if (LIVE.bet) { feed("Your money's already down on this one."); return; }
+    if (!LIVE || LIVE.role !== "ai" || LIVE.bout.over) { sayBy(V.bookie, "Too late. Book's closed on that one."); return; }
+    if (LIVE.bet) { sayBy(V.bookie, "You're already down on this one."); return; }
     if (!C.wallet.spend(betStake, "Bet placed")) return;
     LIVE.bet = { side: side, stake: betStake, odds: side === "A" ? LIVE.oddsA : LIVE.oddsB };
-    feed("Bet down: " + fmt(betStake) + " on " + (side === "A" ? DEFS[LIVE.aKey].short : DEFS[LIVE.bKey].short) + " @ " + LIVE.bet.odds.toFixed(2), "#ffd166");
+    sayBy(V.bookie, "You're on. " + (side === "A" ? DEFS[LIVE.aKey].short : DEFS[LIVE.bKey].short) + " it is.");
     openBet();
   }
 
@@ -894,15 +889,15 @@
     const s = bag();
     const next = s.belt ? "" : (s.wins < 3 ? btn("again", "Next: " + BOUTS[nextBoutIdx()].label, "#8a1f1f") : "");
     C.hud.panel(
-      head("SOUTHPAW PALACE", title + " · " + (bout.method || "")) +
+      head("SOUTHPAW PALACE", title + (bout.method ? ", " + bout.method : "")) +
       "<div style='font-size:12px;margin:4px 0'>" + cardTable(bout) + "</div>" +
-      "<div style='font-size:13px;margin:6px 0'>Record " + s.wins + "-" + s.losses + " · " + s.kos + " KO · earned " + fmt(s.earned) + (s.belt ? " · <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>" +
+      "<div style='font-size:13px;margin:6px 0'>Record " + s.wins + "-" + s.losses + ", " + s.kos + " KO, earned " + fmt(s.earned) + (s.belt ? ", <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>" +
       next + btn("done", "Leave the ring", "#26343c"),
       { again: () => { LIVE = null; openMain(); }, done: () => { LIVE = null; panelMode = null; C.hud.closePanel(); },
         close: () => { LIVE = null; panelMode = null; C.hud.closePanel(); } });
   }
 
-  function openBelt() { C.hud.toast("SOUTHPAW PALACE CHAMPION, the case is yours."); }
+  function openBelt() { C.hud.toast("SOUTHPAW PALACE CHAMPION"); }
 
   // redraw the judges' held scorecards onto the ringside board (per round)
   function drawCards(bout) {
@@ -925,7 +920,7 @@
         cc.textAlign = "right"; cc.fillStyle = "#fff6e2"; cc.font = "bold 40px Arial";
         cc.fillText(bout.cards[j][r][0] + " - " + bout.cards[j][r][1], w - 34, y + 4);
       }
-    } else { cc.textAlign = "center"; cc.fillStyle = "#8a929c"; cc.font = "bold 40px Arial"; cc.fillText(" · fight night · ", w / 2, 168); }
+    } else { cc.textAlign = "center"; cc.fillStyle = "#8a929c"; cc.font = "bold 40px Arial"; cc.fillText("FIGHT NIGHT", w / 2, 168); }
     if (V.card) V.card.paint(); else if (V.boardTex) V.boardTex.needsUpdate = true;
   }
 

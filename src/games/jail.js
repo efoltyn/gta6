@@ -208,32 +208,9 @@
   function bag() { return S || (S = C.state(() => ({ stints: 0, served: 0, bribed: 0, escapes: 0, shifts: 0, catches: 0, breaksStopped: 0, wagesEarned: 0 }))); }
   function save() { if (C) C.saveState(); }
   function fmt(n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); }
-  // ============================================================
-  //  SHOW DON'T TELL (JAIL_SHOW_DONT_TELL — declared in entities/ai.js, gated
-  //  by systems/capture.js's CBZ.jailTell).
-  //
-  //  OWNER: "the HUD is cluttered with 4th-wall breakers — summaries of events
-  //  when the events should just HAPPEN." This file had two private popup
-  //  wrappers — `feed` (a coloured line in the package log) and `big` (the
-  //  city's full-screen banner) — and between them they narrated EVERY beat of
-  //  a booking that the player was standing inside: "BOOKING" while the booking
-  //  sheet opened in front of him, "TIME SERVED" while the cell door swung,
-  //  "OVER THE WALL — MANHUNT" while four stars lit up and the sirens started.
-  //
-  //  Both wrappers survive, and both now go through the shared gate. What is
-  //  KEPT is the booking sheet itself (a bounded modal with bare verbs — the
-  //  one sanctioned panel here) and anything a PERSON says, which goes over
-  //  that person's head through CBZ.citySay. Everything else is deleted and
-  //  the world does the talking.
-  // ============================================================
-  function telling() { return !(CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false); }
-  let toldFeeds = 0, toldBigs = 0;
-  function feed(m, col) { if (!telling()) { toldFeeds++; return true; } if (C) C.hud.feed(m, col); return false; }
-  function big(m) {
-    if (!telling()) { toldBigs++; return true; }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big(m); else feed(m, "#ffd166");
-    return false;
-  }
+  // No narration here: no feed lines, no banners. The booking sheet is the one
+  // panel (a document with bare verbs); anything a PERSON says goes over that
+  // person's head. The world does the rest of the talking.
   // a line somebody SAYS, over their head. This is what a narration turns into
   // when it carried something the player genuinely could not otherwise know.
   function say(h, text, col, secs) {
@@ -1005,7 +982,6 @@
     }
     const s = bag(); s.stints++; save();
     // the charge sheet coming up in front of you IS the booking.
-    big("BOOKING");
     openBooking();
     return true;
   }
@@ -1059,9 +1035,6 @@
     // the door racking shut behind you is the "holding cell" line. What a
     // player genuinely cannot see is WHEN THE VAN COMES — so a screw tells him,
     // out loud, once, standing there. Not a HUD card.
-    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s · " +
-      INM.prison + "s to serve inside.", "#ffd166");
-    feed("That plate's still loose. Last chance.", "#cfd6e6");
     say(anyGuard(), "\u201cVan's here in " + Math.ceil(INM.transportT) + ". Sit tight.\u201d", "#ffd27b", 3.0);
   }
 
@@ -1085,7 +1058,7 @@
       if (CBZ.cityArrestToPrison) CBZ.cityArrestToPrison();
       else { if (CBZ.setMode) CBZ.setMode("escape"); if (CBZ.setRole) CBZ.setRole("inmate"); if (CBZ.startRun) CBZ.startRun(); }
     };
-    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(0, go, { title: "TRANSFERRED", note: "Prison transport · " + sec + "s to serve" });
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(0, go, { title: "TRANSFERRED", note: sec + "s to serve" });
     else go();
   }
 
@@ -1101,13 +1074,12 @@
     const s = bag();
     setDoor(V.cells[1], false);                          // door swings open
     holdPlayer(false);
-    if (reason === "served") { s.served++; respect(2); big("TIME SERVED"); feed("You did your time. Back to the streets.", "#cfe8b0"); say(anyGuard(), "\u201cTime served. Out you go.\u201d", "#cfe8b0", 2.4); }
+    if (reason === "served") { s.served++; respect(2); say(anyGuard(), "\u201cTime served. Out you go.\u201d", "#cfe8b0", 2.4); }
     else if (reason === "bailed" || reason === "bribed") {
-      s.bribed++; big("RELEASED ON BAIL");
+      s.bribed++;
       say(V && V.sarge, "\u201cBond's posted. Door's that way.\u201d", "#ffd166", 2.4);
       // BAIL BUYS YOUR PROPERTY BACK TOO. Escaping does not — the locker keeps it.
-      const back = CBZ.cityEvidenceReturn ? CBZ.cityEvidenceReturn() : 0;
-      feed("Bond posted. You walk." + (back ? " Property returned (" + back + ")." : ""), "#ffd166");
+      if (CBZ.cityEvidenceReturn) CBZ.cityEvidenceReturn();
       if (CBZ.arrestCount) CBZ.arrestCount("releases");
       // out the front, not out of thin air
       const wg = W(V.out.x, V.out.z); teleportPlayer(wg.x, wg.z);
@@ -1121,15 +1093,8 @@
       g.escapedConvict = true;
       if (CBZ.cityAddStars) { try { CBZ.cityAddStars(4, "Jailbreak"); } catch (e) {} }
       else if (CBZ.cityForceStars) { try { CBZ.cityForceStars(4); } catch (e) {} }
-      // FOUR STARS AND EVERY SIREN IN THE CITY IS THE ANNOUNCEMENT. A banner
-      // reading "OVER THE WALL — MANHUNT" over the top of a live manhunt is
-      // exactly the caption the owner is describing.
-      big("OVER THE WALL · MANHUNT");
-      // YOUR GUNS ARE STILL IN THE PROPERTY ROOM. Breaking out does not open
-      // the locker; you are loose, broke of hardware, and hunted.
-      const held = CBZ.cityEvidenceHeld ? CBZ.cityEvidenceHeld() : null;
-      feed("You're out, and every cop in the city knows it. RUN." +
-        (held && held.guns ? " (Your hardware's still in evidence.)" : ""), "#ff9a9a");
+      // four stars and every siren in the city are the announcement; the
+      // guns stay in the property room (breaking out never opens the locker).
       if (CBZ.arrestCount) CBZ.arrestCount("escapes");
     }
     save();
@@ -1157,7 +1122,7 @@
     // AFTER the city reset (which restores the character ledger, and whose
     // ledger records an EMPTY loadout because the guns were in evidence when it
     // was committed): hand the property back and put you on the precinct step.
-    const back = CBZ.cityEvidenceReturn ? CBZ.cityEvidenceReturn() : 0;
+    if (CBZ.cityEvidenceReturn) CBZ.cityEvidenceReturn();
     const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
     const P = CBZ.player;
     if (st && P && P.pos) {
@@ -1170,8 +1135,6 @@
     }
     if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
     if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big(reason === "bailed" ? "RELEASED ON BAIL" : "TIME SERVED");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(back ? "Property returned at the desk." : "Nothing to collect at the desk.", 2.6);
     if (CBZ.arrestCount) CBZ.arrestCount("releases");
     return true;
   }
@@ -1191,9 +1154,6 @@
     INM.transportT = Math.min(INM.transportT, 16);
     INM.pry = 0; INM._pryMark = 0;      // they bolt a fresh plate on the door
     // being physically put back in the cell with the bars shut is "CAUGHT".
-    big("CAUGHT");
-    feed((byName ? byName + " drags you back. " : "Dragged back. ") + "+" +
-      Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside, and the van's early.", "#ff9a9a");
     if (CBZ.shake) { try { CBZ.shake(0.7); } catch (e) {} }
     // (the bars shutting behind you are voiced by setDoor above — the leaf,
     // not the beat that asked for it.)
@@ -1204,12 +1164,10 @@
     if (!INM || (INM.phase !== "held" && INM.phase !== "prying")) return;
     INM.phase = "prying";
     panelMode = null; menuLock(false); if (C) C.hud.closePanel();
-    feed("You work the door plate. Stop when the screws look over.", "#ffd27b");
   }
   function stopPry(quiet) {
     if (!INM || INM.phase !== "prying") return;
     INM.phase = "held";
-    if (!quiet) feed("You ease off the plate.", "#cfd6e6");
   }
   // spotted mid-pry: no teleport (you're already in the cell) — the plate gets
   // hammered half back and the sentence grows. The spotting guard sells it.
@@ -1217,16 +1175,11 @@
     if (!INM) return;
     INM.phase = "held"; INM.prison += RECAP_PENALTY * PRISON_SCALE; INM.pry *= 0.5; INM._pryMark = 0;
     if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "“Step AWAY from the door!”", "#ffd27b", 2.2); } catch (e) {} }
-    feed((spot ? spot.name : "A guard") + " catches you at the door, the plate's hammered back. +" +
-      Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside.", "#ff9a9a");
   }
   function popDoor(how) {
     if (!INM) return;
     INM.phase = "breakout";
     setDoor(V.cells[1], false);
-    feed(how === "keys"
-      ? "The keyring turns your lock. The gap's in the back corner. Mind their eyes."
-      : "The plate gives, the door swings loose. The gap's in the back corner. Mind their eyes.", "#cfe8b0");
   }
 
   /* ---- GUARD KEYS: the second physical means (owner doctrine — escape is
@@ -1274,10 +1227,10 @@
      ========================================================== */
   function startShift() {
     if (JOB && JOB.active) return;
-    if (INM) { feed("You're an inmate right now, you can't work the door."); return; }
+    if (INM) return;
     JOB = { active: true, caught: 0, wage: 0, escape: null, breakT: 14 + rng() * 10, t: 0 };
     const s = bag(); s.shifts++; save();
-    feed("On duty. Runners go for the back-corner gap, cuff them before they're over.", "#cfe8b0");
+    say(V && V.sarge, "\u201cThey run for the back corner. Cuff 'em before the wall.\u201d", "#cfe8b0", 3.0);
   }
 
   // a seeded inmate makes a break: un-pin one and march it to the gap.
@@ -1293,7 +1246,6 @@
     JOB.escape = { h: runner, t: 0 };
     // the man is RUNNING, in front of you, and he already shouted on his way
     // past (citySay, above). That is the alarm.
-    feed("Runner loose from the cells!", "#ff9a9a");
     return runner;
   }
   function driveRunner(dt) {
@@ -1346,7 +1298,6 @@
     const h = JOB.escape.h;
     homeInmate(h);                                   // gone over the wall — a replacement takes the cell
     JOB.escape = null;
-    feed("One got over the wall.", "#ff9a9a");
   }
 
   function endShift(reason) {
@@ -1354,8 +1305,6 @@
     const s = bag();
     s.wagesEarned += JOB.wage; save();
     if (JOB.escape) homeInmate(JOB.escape.h);        // any live runner goes back inside
-    if (reason === "arrested") feed("Badge pulled, you're going in the cells yourself.", "#ff9a9a");
-    else feed("Clocked off. Caught " + JOB.caught + " runner" + (JOB.caught === 1 ? "" : "s") + " · " + fmt(JOB.wage), "#cfe8b0");
     JOB = null; if (C) C.hud.closePanel(); panelMode = null; menuLock(false);
   }
 
@@ -1403,8 +1352,7 @@
           INM._tMark = mark;
           // the van is a THING that arrives; a deputy calls the count down the
           // corridor rather than the HUD ticking at you.
-          if (feed("Transport in " + mark + "s.", mark <= 5 ? "#ff9a9a" : "#ffd27b") && mark <= 10)
-            say(anyGuard(), "\u201c" + mark + " seconds!\u201d", "#ff9a9a", 1.6);
+          if (mark <= 10) say(anyGuard(), "\u201c" + mark + " seconds!\u201d", "#ff9a9a", 1.6);
         }
         if (INM.transportT <= 0) { toPrison(); return; }
       }
@@ -1416,8 +1364,8 @@
         if (spot) { caughtPrying(spot); return; }
         INM.pry += dt;
         // diegetic progress — the metal tells you, no meter
-        if (INM._pryMark === 0 && INM.pry >= PRY_TIME * 0.34) { INM._pryMark = 1; feed("The first bolt backs out.", "#ffd27b"); }
-        else if (INM._pryMark === 1 && INM.pry >= PRY_TIME * 0.67) { INM._pryMark = 2; feed("The plate's half off. Nearly there.", "#ffd27b"); }
+        if (INM._pryMark === 0 && INM.pry >= PRY_TIME * 0.34) { INM._pryMark = 1; }
+        else if (INM._pryMark === 1 && INM.pry >= PRY_TIME * 0.67) { INM._pryMark = 2; }
         if (INM.pry >= PRY_TIME) popDoor();
       } else if (INM.phase === "breakout") {
         // reach the gap = free; caught in a guard's cone = dragged back.
@@ -1516,7 +1464,7 @@
      ========================================================== */
   const BTN = "display:inline-block;margin:3px 5px 3px 0;padding:9px 15px;border-radius:11px;cursor:pointer;font-weight:800;font-size:14px;user-select:none;box-shadow:0 3px 0 rgba(0,0,0,.4);";
   function btn(act, label, bg, dis) { return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c6b40") + ";" + (dis ? "opacity:.35;pointer-events:none;" : "") + "'>" + label + "</span>"; }
-  function head(title, sub) { return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + " · Esc closes</span></div>"; }
+  function head(title, sub) { return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + "  Esc closes</span></div>"; }
 
   // THE BOOKING SCREEN. It is a bounded package panel (ctx.hud.panel), which is
   // the one sanctioned modal here — no floating card, no second HUD layer, and
@@ -1531,13 +1479,13 @@
     const canBail = C.wallet.cash() >= INM.bribe;
     const row = (k, v) => "<div style='display:flex;justify-content:space-between;font-size:12px;margin:2px 0'><span style='opacity:.7'>" + k + "</span><b>" + v + "</b></div>";
     const charges = INM.charges.map((c) =>
-      "<div style='font-size:12px;margin:1px 0 1px 6px;opacity:.9'>· " + c + "</div>").join("");
+      "<div style='font-size:12px;margin:1px 0 1px 6px;opacity:.9'>" + c + "</div>").join("");
     C.hud.panel(
       head("BOOKING", INM.wanted0 + "★ jacket") +
       "<div style='font-size:11px;letter-spacing:1px;opacity:.6;margin-top:4px'>CHARGES</div>" + charges +
       "<div style='height:6px'></div>" +
       row("Property seized", INM.guns ? INM.guns + " item" + (INM.guns === 1 ? "" : "s") + " → evidence" : "nothing") +
-      row("Forfeited", INM.lost > 0 ? fmt(INM.lost) : "—") +
+      row("Forfeited", INM.lost > 0 ? fmt(INM.lost) : "none") +
       row("Sentence", INM.prison + "s in state prison") +
       row("Bail set at", fmt(INM.bribe)) +
       row("On you", fmt(C.wallet.cash())) +
@@ -1552,7 +1500,7 @@
   }
   function doBail() {
     if (!INM) return;
-    if (!C.wallet.spend(INM.bribe, "Posted bail")) { feed("Not enough cash to post bond."); return; }
+    if (!C.wallet.spend(INM.bribe, "Posted bail")) { say(V && V.sarge, "\u201cBail's " + fmt(INM.bribe) + ". You're short.\u201d", "#ffd166", 2.4); return; }
     releaseInmate("bailed");
   }
   function doBribe() { doBail(); }

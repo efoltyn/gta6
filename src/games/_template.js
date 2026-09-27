@@ -31,6 +31,13 @@
      - Real money: ctx.wallet (city cash). Stakes make it a game.
      - Roles, not one-shots: if the sim supports an opposing role
        (jailor/inmate, shark/swimmer), ship both from day one.
+     - SPEECH LAW: a person's words go over THEIR head: the npc handle's
+       .say(line) (or CBZ.speech.say(actor, line); a phone/PA voice is
+       CBZ.speech.phone(line)). Never put an NPC's line, "X says...",
+       or reported speech in a panel, ctx.hud.feed or ctx.hud.toast.
+       Panels are bare buttons; toasts are short status chips ("WINNER").
+       No popups that explain the game: people talk, the world shows.
+       On-screen text: no em dashes, no middle dots.
 ============================================================ */
 (function () {
   "use strict";
@@ -44,7 +51,7 @@
   function scoreFor(thing) { return thing * 10; }
 
   /* ---- session state (persisted via ctx.state) ---- */
-  let C = null, S = null;
+  let C = null, S = null, HOST = null;
   function bag() { return S || (S = C.state(() => ({ best: 0, plays: 0 }))); }
 
   CBZ.games.register({
@@ -72,6 +79,7 @@
         dialogue: ["Step up. House rules are simple.", "Winners talk less."],
         name: "The Host",
       });
+      HOST = host;
       ctx.idle && host.ped && host.ped.char && 0; // (idle bob comes free on peds)
 
       // the entry point: one zone, one panel
@@ -107,16 +115,17 @@
 
   function openPanel() {
     const s = bag();
+    if (HOST && HOST.say) HOST.say("Twenty-five to play.");   // his line, over his head
     C.hud.panel(
       "<b style='letter-spacing:2px;color:#e8b64c'>MY GAME</b>" +
-      "<div style='margin:6px 0'>Best: " + s.best + " · Cash $" + C.wallet.cash().toLocaleString() + "</div>" +
+      "<div style='margin:6px 0'>Best: " + s.best + ", cash $" + C.wallet.cash().toLocaleString() + "</div>" +
       "<span data-act='go' style='display:inline-block;padding:9px 16px;border-radius:11px;background:#1c6b40;font-weight:800;cursor:pointer'>PLAY $25</span>" +
       "<span data-act='close' style='display:inline-block;padding:9px 16px;border-radius:11px;background:#26343c;font-weight:800;cursor:pointer;margin-left:6px'>Leave</span>",
       {
         go: () => {
           if (!C.wallet.spend(25, "MY GAME buy-in")) return;
           const won = Math.random() < 0.5; // runtime RNG is fine
-          if (won) { C.wallet.give(60, "MY GAME payout"); C.hud.toast("WINNER"); }
+          if (won) { C.wallet.give(60, "MY GAME payout"); C.hud.toast("WINNER"); if (HOST && HOST.say) HOST.say("Winner. Don't get used to it."); }
           const s2 = bag(); s2.plays++; if (won) s2.best++; C.saveState();
           openPanel();
         },

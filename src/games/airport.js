@@ -69,7 +69,9 @@
   const fmt$ = (n) => (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
   const esc = (s) => String(s == null ? "" : s).replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s || 2.2); }
-  function feed(m, c) { if (CBZ.cityFeed) CBZ.cityFeed(m, c || "#cfe0ff"); }
+  // people talk over their own heads; the dispatcher on the radio sits by the player's hand
+  function sayBy(h, line, secs) { if (h && h.say && line) h.say(line, secs || 2.8); }
+  function radio(line) { if (CBZ.speech && CBZ.speech.phone && line) CBZ.speech.phone(line); }
 
   /* ============================================================
      GAMEPLAY RNG FUNNEL — every job / wind / defect / inspection / bribe
@@ -167,7 +169,7 @@
   let S = null;      // persisted bag
   function bag() { return S || (S = C.state(() => ({
     debt: ECON.DEBT0, strikes: 0, ending: null,
-    runs: 0, onTime: 0, bestVs: null, bestRating: "—",
+    runs: 0, onTime: 0, bestVs: null, bestRating: "none",
     bribes: 0, bribesPaid: 0, earned: 0, spent: 0, titles: 0,
   }))); }
   function save() { if (C) C.saveState(); }
@@ -195,7 +197,7 @@
 
   /* -------- jobs -------- */
   const JOB_NAMES_LEGIT = ["MAIL SACKS", "MEDICAL COOLERS", "ENGINE PARTS", "DIVE GEAR", "GENERATOR COILS"];
-  const JOB_NAMES_HOT = ["UNMARKED CRATES", "'FISH' · NO MANIFEST", "SEALED DRUMS", "QUIET BOXES", "SPARE PARTS (DON'T ASK)"];
+  const JOB_NAMES_HOT = ["UNMARKED CRATES", "'FISH', NO MANIFEST", "SEALED DRUMS", "QUIET BOXES", "SPARE PARTS (DON'T ASK)"];
   const DEFECT_NAMES = ["OIL LEAK (nose)", "FUEL CAP OPEN (right wing)", "FLAP HINGE CRACK (left wing)", "ELEVATOR PLAY (tail)"];
   const STATION_NAMES = ["NOSE / ENGINE", "LEFT WING", "RIGHT WING", "TAIL"];
 
@@ -227,8 +229,7 @@
     const s = bag();
     if (s.ending) return s.strikes;
     s.strikes++;
-    note("STRIKE " + s.strikes + " / 3 · " + reason, 3.2);
-    feed("Customs violation logged: " + reason + " (" + s.strikes + "/3)", "#ff9a9a");
+    note("STRIKE " + s.strikes + " / 3, " + reason, 3.2);
     if (s.strikes >= 3) setEnding("LOSE", "License pulled: " + reason);
     save();
     return s.strikes;
@@ -246,10 +247,10 @@
   function payDebt(n) {
     const s = bag();
     if (n <= 0) return;
-    if (!C.wallet.spend(n, "Paid down N407RD")) { note("You're short, payout a run first.", 2.2); return; }
+    if (!C.wallet.spend(n, "Paid down N407RD")) { sayBy(DISPATCH, "You're short. Fly a run first."); return; }
     s.debt = Math.max(0, s.debt - n); s.spent += n; save();
-    note("Paid " + fmt$(n) + " on the note · " + fmt$(s.debt) + " to go.", 2.6);
-    if (s.debt <= 0) setEnding("WIN", "You paid the plane off. She's yours, free and clear.");
+    note("Paid " + fmt$(n) + ", " + fmt$(s.debt) + " to go", 2.6);
+    if (s.debt <= 0) setEnding("WIN", "N407RD is yours, free and clear.");
     else openBoard();
   }
 
@@ -286,7 +287,7 @@
       }
     } else if (!j.hot && !R.inspection && nextRand() < inspectionChance(false)) {
       // a legit run gets a cursory look — always clears, no stakes.
-      note("Customs waves you through. Papers are clean.", 2.2);
+      sayBy(CUSTOMS, "Papers are clean. Go on.");
     }
     finishPayout(0, false);
   }
@@ -304,7 +305,6 @@
     C.wallet.give(pay, "REDEYE run: " + j.name);
     s.earned += pay; save();
     note("PAID " + fmt$(pay) + (land ? " (butter bonus)" : ""), 3.2);
-    feed("Delivered " + j.name + " · collected " + fmt$(pay) + ". Debt " + fmt$(s.debt), "#8ef0a8");
     R.job = null; R.delivered = false; R.inspection = null; R.phase = "idle"; R.landingRating = null;
     rollBoard();
     openBoard();
@@ -330,7 +330,7 @@
     return best;
   }
   function boardCharter() {
-    if (!R.job) { note("Take a run at the charter desk first.", 2.2); return; }
+    if (!R.job) return;
     const P = CBZ.player;
     if (P && P._aircraft) return;                          // already flying
     const rec = nearestCharterRec();
@@ -338,12 +338,11 @@
       const craft = CBZ.citySpawnFlyableFromProp(rec);
       if (craft) {
         R.charterRec = rec;
-        note("Engine start. Cargo aboard, call it in and fly the run.", 2.6);
+        radio("Cargo's aboard. Call the tower and go.");
         return;
       }
     }
-    // fallback: no clean board — point the player at a real parked jet.
-    note("Board a parked jet to fly the run (walk up, press E).", 3.0);
+    // fallback: no clean board. The parked jet's own [E] prompt carries it.
   }
 
   /* ============================================================
@@ -356,18 +355,19 @@
     if (j.defect === i && !j.defectFixed) {
       j.defectFound = true;
       if (j.fixArmed) {
-        if (!C.wallet.spend(ECON.FIX_DEFECT, "Fixed " + DEFECT_NAMES[i])) { note("Can't cover the repair right now.", 2.2); return; }
+        if (!C.wallet.spend(ECON.FIX_DEFECT, "Fixed " + DEFECT_NAMES[i])) { sayBy(FUEL, "Parts cost " + fmt$(ECON.FIX_DEFECT) + ". You're short."); return; }
         j.defectFixed = true; j.stations[i] = true; j.fixArmed = false;
-        note("DEFECT FIXED · " + DEFECT_NAMES[i] + " squared away.", 2.4);
+        note("FIXED: " + DEFECT_NAMES[i], 2.4);
         return;
       }
       j.fixArmed = true;
-      note("FOUND: " + DEFECT_NAMES[i] + " · it WILL fail in the air. [E] again to fix for " + fmt$(ECON.FIX_DEFECT) + ".", 3.6);
+      note("FOUND: " + DEFECT_NAMES[i], 3.0);
+      sayBy(FUEL, "That'll let go in the air. " + fmt$(ECON.FIX_DEFECT) + " and it's fixed.", 3.2);
       return;
     }
     j.stations[i] = true;
     const done = j.stations.filter(Boolean).length;
-    note(STATION_NAMES[i] + ": clean (" + done + "/4 checked)", 1.6);
+    note(STATION_NAMES[i] + ": clean (" + done + "/4)", 1.6);
   }
 
   /* ============================================================
@@ -380,7 +380,7 @@
   }
   function head(title, sub) {
     return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + sub + " · Esc closes</span></div>";
+      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + sub + "</span></div>";
   }
   function windStr() {
     const d = Math.round(R.wind.dir / 10) * 10 || 360;
@@ -394,20 +394,19 @@
     // a returned run collects here first
     if (R.job && R.delivered) {
       const j = R.job;
-      C.hud.panel(head("REDEYE · CHARTER DESK", "collect"),
-        "<div style='margin:2px 0 8px;font-size:13px'>" + esc(j.name) + " is home. " +
-        (j.hot ? "<span style='color:#ff8a8a'>Hot cargo, customs may want a look.</span>" : "Paperwork's clean.") +
-        (R.landingRating ? " Landing graded <b style='color:#e8b64c'>" + R.landingRating.rating + "</b>." : "") + "</div>" +
+      C.hud.panel(head("REDEYE CHARTER DESK", ""),
+        "<div style='margin:2px 0 8px;font-size:13px'>" + esc(j.name) +
+        (R.landingRating ? ", landing <b style='color:#e8b64c'>" + R.landingRating.rating + "</b>" : "") + "</div>" +
         btn("collect", "COLLECT " + fmt$(j.payout), "#1c6b40") + btn("close", "Later", "#26343c"),
         { collect: collectRun, close: () => C.hud.closePanel() });
       return;
     }
     if (R.job) {
       const d = DESTS.find((k) => k.id === R.job.destId);
-      C.hud.panel(head("REDEYE · CHARTER DESK", "run in progress"),
-        "<div style='margin:2px 0 8px;font-size:13px'>Active: <b>" + esc(R.job.name) + "</b> → " + esc(d.name) +
-        " · " + R.job.cargoKg + "kg · " + fmt$(R.job.payout) + (R.job.hot ? " <span style='color:#ff8a8a'>HOT</span>" : "") +
-        "<br><span style='opacity:.75'>Walkaround the jet, then board and fly. Wind " + windStr() + ".</span></div>" +
+      C.hud.panel(head("REDEYE CHARTER DESK", ""),
+        "<div style='margin:2px 0 8px;font-size:13px'><b>" + esc(R.job.name) + "</b> → " + esc(d.name) +
+        ", " + R.job.cargoKg + "kg, " + fmt$(R.job.payout) + (R.job.hot ? " <span style='color:#ff8a8a'>HOT</span>" : "") +
+        "<br><span style='opacity:.75'>Wind " + windStr() + "</span></div>" +
         btn("board", "BOARD N407RD & FLY", "#c98f22") + btn("abort", "Abandon run", "#7c1626") + btn("close", "Close", "#26343c"),
         { board: () => { C.hud.closePanel(); boardCharter(); }, abort: abortRun, close: () => C.hud.closePanel() });
       return;
@@ -417,15 +416,14 @@
     R.board.forEach((j, i) => {
       const d = DESTS.find((k) => k.id === j.destId);
       rows += "<span>" + (j.hot ? "<span style='color:#ff8a8a;font-weight:800'>HOT </span>" : "") + esc(j.name) +
-        "<br><span style='opacity:.6'>→ " + esc(d.name) + " · " + j.cargoKg + "kg</span></span>" +
+        "<br><span style='opacity:.6'>→ " + esc(d.name) + ", " + j.cargoKg + "kg</span></span>" +
         "<span style='align-self:center;color:#8ef0a8;font-weight:800'>" + fmt$(j.payout) + "</span>" +
         "<span style='align-self:center'>" + btn("take", "TAKE", j.hot ? "#8a3324" : "#1c5a6b", false, { i: i }) + "</span>";
     });
     rows += "</div>";
-    C.hud.panel(head("REDEYE INTERNATIONAL", "night charter"),
-      "<div style='margin:2px 0 6px;font-size:13px'>Plane note <b style='color:#ff9a9a'>" + fmt$(s.debt) + "</b> · " +
-      "cash <b style='color:#e8b64c'>" + fmt$(C.wallet.cash()) + "</b> · license " + strikeDots(s.strikes) + "</div>" + rows +
-      "<div style='font-size:11px;opacity:.7;margin-bottom:6px'>Legit pays honest money. Hot pays big, and customs runs the ramp on the way home.</div>" +
+    C.hud.panel(head("REDEYE INTERNATIONAL", ""),
+      "<div style='margin:2px 0 6px;font-size:13px'>Plane note <b style='color:#ff9a9a'>" + fmt$(s.debt) + "</b>, " +
+      "cash <b style='color:#e8b64c'>" + fmt$(C.wallet.cash()) + "</b>, license " + strikeDots(s.strikes) + "</div>" + rows +
       btn("pay500", "PAY $500 ON THE NOTE", "#2a5c3a", C.wallet.cash() < 500) +
       btn("payall", "PAY " + fmt$(Math.min(s.debt, C.wallet.cash())), "#2a5c3a", C.wallet.cash() < 1) +
       btn("close", "Leave", "#26343c"),
@@ -449,8 +447,8 @@
     R.wind = rollWind();
     R.board = R.board.filter((k) => k !== j);
     const d = DESTS.find((k) => k.id === j.destId);
-    note("RUN ACCEPTED · " + j.name + " → " + d.name + ". Walkaround, then fly.", 3.0);
-    if (j.hot && DISPATCH) DISPATCH.say("No manifest on this one. You didn't get it from us.", 3.0);
+    note("RUN ACCEPTED", 2.4);
+    sayBy(DISPATCH, j.hot ? "No manifest on this one. You didn't get it from us." : "Walk the jet, then take it to " + d.name + ".", 3.0);
     C.hud.closePanel();
   }
   function abortRun() {
@@ -464,10 +462,9 @@
     const j = R.job, ins = R.inspection; if (!j || !ins) return;
     if (CUSTOMS && CUSTOMS.say) CUSTOMS.say(moodLine(ins.mood), 3.2);
     const cost = bribeCostFor(j.payout), odds = bribeOdds(ins.mood);
-    C.hud.panel(head("CUSTOMS · INSPECTOR VANN", "ramp check"),
+    C.hud.panel(head("CUSTOMS", ""),
       "<div style='margin:2px 0 8px;font-size:13px'>" +
-      "In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg · " +
-      "<span style='color:#ff8a8a'>this will not survive a manifest check.</span></div>" +
+      "In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg</div>" +
       btn("bribe", "SLIP HIM " + fmt$(cost) + " (" + Math.round(odds * 100) + "% he pockets it)", "#8a6a1c") +
       btn("submit", "HAND OVER THE MANIFEST", "#7c1626"),
       {
@@ -500,12 +497,12 @@
     const verdict = kind === "WIN" ? "PAID OFF" : "LICENSE PULLED";
     const vc = kind === "WIN" ? "#e8b64c" : "#ff7a7a";
     const otp = s.runs ? Math.round(100 * s.onTime / s.runs) : 0;
-    C.hud.panel(head("REDEYE INTERNATIONAL", "the night is over"),
+    C.hud.panel(head("REDEYE INTERNATIONAL", ""),
       "<div style='font-size:28px;font-weight:900;letter-spacing:3px;color:" + vc + ";margin:2px 0'>" + verdict + "</div>" +
       "<div style='font-size:13px;margin:4px 0'>" + esc(why || "") + "</div>" +
-      "<div style='font-size:12px;opacity:.85;margin:6px 0'>Runs " + s.runs + " · best landing " + s.bestRating +
-      (s.bestVs != null ? " (" + s.bestVs.toFixed(1) + " m/s)" : "") + " · bribes " + s.bribes + " (" + fmt$(s.bribesPaid) + ")" +
-      "<br>Career net " + fmt$(s.earned - s.spent) + " · plane notes paid off " + s.titles + "</div>" +
+      "<div style='font-size:12px;opacity:.85;margin:6px 0'>Runs " + s.runs + ", best landing " + s.bestRating +
+      (s.bestVs != null ? " (" + s.bestVs.toFixed(1) + " m/s)" : "") + ", bribes " + s.bribes + " (" + fmt$(s.bribesPaid) + ")" +
+      "<br>Career net " + fmt$(s.earned - s.spent) + ", plane notes paid off " + s.titles + "</div>" +
       (kind === "LOSE" ? btn("relicense", "APPLY FOR A NEW LICENSE", "#2a5c3a") : btn("newnote", "SIGN A NEW PLANE ($12k note)", "#2a5c3a")) +
       btn("close", "Done", "#26343c"),
       {
@@ -572,8 +569,7 @@
         if (j.defect >= 0 && !j.defectFixed && !R.defectFired && R.airborneT > 15) {
           R.defectFired = true;
           const kind = DEFECT_NAMES[j.defect];
-          feed("MAYDAY-ish: " + kind + " · the defect you skipped just let go.", "#ff9a9a");
-          note("AIRFRAME FAILURE · " + kind, 3.4);
+          note("AIRFRAME FAILURE: " + kind, 3.4);
           // honest consequence: damage the REAL airframe (control authority sags)
           if (CBZ.cityPlayerAircraftDamage) { try { CBZ.cityPlayerAircraftDamage(48, craft.pos.x, craft.pos.z); } catch (e) {} }
         }
@@ -582,8 +578,8 @@
         if (!R.delivered && nearDest(craft)) {
           R.delivered = true; R.phase = "returning";
           const d = DESTS.find((k) => k.id === j.destId);
-          note("CARGO DROPPED at " + d.name + ". Fly it home to REDEYE. RWY 27, PAPI on the left.", 3.6);
-          feed("Delivered to " + d.name + ". Now get home clean.", "#8ef0a8");
+          note("CARGO DROPPED", 2.6);
+          radio(d.name + " has it. Bring her home, runway two seven.");
         }
       } else {
         // ON GROUND: detect a fresh touchdown at home to grade the landing
@@ -618,10 +614,10 @@
     const s = bag();
     if (s.bestVs == null || sink < s.bestVs) { s.bestVs = sink; s.bestRating = r.rating; save(); }
     if (r.rating === "CRASH") {
-      note("CRASH LANDING · " + sink.toFixed(1) + " m/s. That's a strike.", 3.4);
+      note("CRASH LANDING, " + sink.toFixed(1) + " m/s", 3.4);
       strike("crashed the aircraft on landing");
     } else {
-      note((r.rating === "BUTTER" ? "BUTTER" : r.rating) + " — " + sink.toFixed(1) + " m/s" + (r.bonus ? " · +" + fmt$(r.bonus) + " handling bonus" : ""), 2.8);
+      note(r.rating + ", " + sink.toFixed(1) + " m/s" + (r.bonus ? ", +" + fmt$(r.bonus) : ""), 2.8);
     }
     // landed without calling it in → the standalone's no-clearance fine (home only)
     if (!R.noClrFined) {
@@ -792,7 +788,8 @@
   function registerStation(ctx, i) {
     ctx.zone({
       id: "walk" + i,
-      label: () => "Inspect " + STATION_NAMES[i] + (R.job && R.job.stations[i] ? " (checked)" : ""),
+      label: () => (R.job && R.job.fixArmed && R.job.defect === i && !R.job.defectFixed) ? "Fix " + STATION_NAMES[i] + " (" + fmt$(ECON.FIX_DEFECT) + ")"
+        : "Inspect " + STATION_NAMES[i] + (R.job && R.job.stations[i] ? " (checked)" : ""),
       // position is recomputed live via a getter-like find isn't available;
       // stations sit at build-time-resolved local offsets around the jet.
       pos: (function () { const w = stationWorld(i); return [w.x - (VENUE ? VENUE.origin.x : 0), w.z - (VENUE ? VENUE.origin.z : 0)]; })(),

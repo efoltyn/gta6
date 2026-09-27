@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DEAD WATER — Salvage the Deep</title>
+<title>DEAD WATER: Salvage the Deep</title>
 <link rel="icon" href="data:," />
 <style>
   :root{
@@ -134,26 +134,26 @@
 
 <div id="kiosk" class="panel">
   <h2>DOCK KIOSK</h2>
-  <div class="sub">Salvage &amp; Supply — Mona's</div>
+  <div class="sub">Mona's Salvage &amp; Supply</div>
   <div id="kioskRows"></div>
-  <div class="foot">Press a number to buy · ESC to close</div>
+  <div class="foot">Press a number to buy, ESC to close</div>
 </div>
 
 <div id="screenTitle" class="screen">
   <div class="card">
     <div class="logo">DEAD<br/><em>WATER</em></div>
     <div class="sub">A salvage diver's last season</div>
-    <div class="blurb">Five wrecks lie under the buoys. The pay gets better the deeper you go —
+    <div class="blurb">Five wrecks lie under the buoys. The pay gets better the deeper you go,
       and the deepest one sits over the trench, where the sonar draws something
       that should not exist. Watch the food chain: gulls mark the bait, the bait draws the
       white sharks, the dolphins drive them off, and the orcas kill them all.
       Raise the trench gold. Make the dock. Stay out of dead water.</div>
     <div class="keys">
-      <div class="row"><span class="kbd">W</span><span class="kbd">S</span> throttle · <span class="kbd">A</span><span class="kbd">D</span> steer</div>
+      <div class="row"><span class="kbd">W</span><span class="kbd">S</span> throttle&nbsp;&nbsp; <span class="kbd">A</span><span class="kbd">D</span> steer</div>
       <div class="row"><span class="kbd">F</span> drop / raise anchor</div>
       <div class="row"><span class="kbd">E</span> dive · board · grab · kiosk</div>
       <div class="row"><span class="kbd">SPACE</span><span class="kbd">SHIFT</span> swim up / down</div>
-      <div class="row"><span class="kbd">DRAG</span> look · <span class="kbd">CLICK</span> harpoon</div>
+      <div class="row"><span class="kbd">DRAG</span> look&nbsp;&nbsp; <span class="kbd">CLICK</span> harpoon</div>
       <div class="row"><span class="kbd">C</span> throw chum (draws sharks)</div>
     </div>
     <button id="playBtn" class="bigbtn">SET OUT</button>
@@ -162,8 +162,8 @@
 
 <div id="screenEnd" class="screen hidden">
   <div class="card">
-    <div id="endTitle">—</div>
-    <div id="endCause">—</div>
+    <div id="endTitle"></div>
+    <div id="endCause"></div>
     <div class="stats" id="endStats"></div>
     <button id="restartBtn" class="bigbtn">GO AGAIN</button>
   </div>
@@ -930,7 +930,7 @@ function killShark(s, by) {
     (nR() - 0.5) * 3, nR() * 2, (nR() - 0.5) * 3, 0.8, 0.08, 0.05, 1.6);
   if (by === "orca") {
     chain.events.orcaKills++;
-    if (playerDist(s.pos) < 220) { stats.orcaKillsSeen++; toast("AN ORCA JUST KILLED A GREAT WHITE"); }
+    if (playerDist(s.pos) < 220) { stats.orcaKillsSeen++; }
   }
 }
 function playerWaterPos() { return mode === "dive" ? diver.pos : null; }
@@ -1007,7 +1007,6 @@ function updateShark(s, dt) {
       tx = pl.x; tz = pl.z; ty = pl.y; spd = 9; turn = 2.6;
       if (d3(s.pos, pl) < 2.6) {
         chain.events.sharkBumps++; s.bumpCd = 6; s.state = "circle"; s.stateT = 99;
-        toast("Something just brushed you", true);
       }
       if (s.stateT <= 0) { s.state = "circle"; s.bumpCd = 4; }
       break;
@@ -1032,7 +1031,7 @@ function updateShark(s, dt) {
       if (d2(s.pos.x, s.pos.z, boat.pos.x, boat.pos.z) < 3.4) {
         boat.hull -= 5; boat.shudder = 0.5; s.stateT = 0;
         splashAt(boat.pos.x, boat.pos.z, 10, 2.4);
-        toast("SHARKS ARE HITTING THE HULL — MOVE", true);
+        toast("HULL HIT", true);
       }
       if (s.stateT <= 0) { s.state = "patrol"; s.bumpCd = 5; }
       if (Math.abs(boat.spd) > 4) s.state = "patrol";
@@ -1078,7 +1077,7 @@ function updatePod(pod, dt) {
   const ref = mode === "dive" ? diver.pos : boat.pos;
   const nearP = d2(pod.members[0].pos.x, pod.members[0].pos.z, ref.x, ref.z) < 85 && pod.leaveT <= 0;
   if (pod.leaveT > 0) pod.leaveT -= dt;
-  if (nearP && !pod.escorting) { pod.escorting = true; if (mode !== "title") toast("A dolphin pod is escorting you"); }
+  if (nearP && !pod.escorting) { pod.escorting = true; }
   if (!nearP) pod.escorting = false;
   let cx, cz;
   if (pod.escorting) { cx = ref.x; cz = ref.z; }
@@ -1110,7 +1109,6 @@ function updatePod(pod, dt) {
           s.aggr = 0; s.calmT = 7; s.state = "flee"; s.fleeFrom = { x: m.pos.x, z: m.pos.z }; s.stateT = 6;
           chain.events.dolphinRepels++; stats.repels++;
           splashAt(s.pos.x, s.pos.z, 8, 2);
-          if (playerDist(s.pos) < 160) toast("A dolphin drove the shark off!");
           m.charging = null; m.chargeCd = 3;
         }
         clampSwim(m, false); m.tailT += dt * 9;
@@ -1161,7 +1159,6 @@ function spawnOrcas(x, z) {
     chain.orcas.push(o); arr.push(o);
   }
   chain.orcaHere = true;
-  if (mode !== "title") toast("ORCA POD INBOUND");
   return arr;
 }
 function updateOrca(o, dt) {
@@ -1174,7 +1171,6 @@ function updateOrca(o, dt) {
       if (mode === "dive") { diver.hp -= 50; diver.lastHit = "orca"; }
       else { boat.hull -= 40; boat.shudder = 1; }
       splashAt(ref.x, ref.z, 16, 3.5);
-      toast("THE ORCA ANSWERED. Do not do that again.", true);
       o.punish = 0; o.immune = true;
     }
     o.punish -= dt;
@@ -1249,7 +1245,6 @@ function forceMeg() {
   scene.add(mesh);
   chain.meg = { kind: "meg", mesh, pos: { x: TRENCH.x + 85, y: floorY(TRENCH.x + 85, TRENCH.z) + 9, z: TRENCH.z },
     yaw: 0, pitch: 0, tailT: 0, phase: "lurk", lurkT: 0, runCd: 4, enraged: false, alive: true };
-  if (mode !== "title") toast("SOMETHING ENORMOUS IS MOVING BELOW", true);
   return chain.meg;
 }
 function updateMeg(m, dt) {
@@ -1263,13 +1258,11 @@ function updateMeg(m, dt) {
     steer(m, TRENCH.x + Math.sin(a) * r, floorY(TRENCH.x, TRENCH.z) + 11, TRENCH.z + Math.cos(a) * r, 6, 0.8, dt);
     if ((inTrench && (goldGrabbed || m.lurkT > 18)) || (boatInTrench && goldGrabbed)) {
       m.phase = "run"; m.runCd = 2.5;
-      toast("IT HAS FOUND YOU", true);
     }
   } else if (m.phase === "run") {
     m.runCd -= dt;
     if (!inTrench && !boatInTrench && d2(ref.x, ref.z, TRENCH.x, TRENCH.z) > TRENCH.r + 110) {
       m.phase = "lurk"; m.lurkT = 0;
-      toast("It broke off. It does not leave the trench.");
     } else if (m.runCd <= 0 && !m.running) {
       /* line up a pass: appear from the murk, run straight through the player */
       const a = nR() * Math.PI * 2;
@@ -1389,7 +1382,7 @@ function interact() {
   if (mode === "boat") {
     if (kioskOpen) { closeKiosk(); return; }
     if (atDock()) { openKiosk(); return; }
-    if (!boat.anchored) { hint("Drop anchor first — press F"); return; }
+    if (!boat.anchored) { hint("Drop anchor first (F)"); return; }
     startDive();
   } else if (mode === "dive") {
     /* crate first, boat second */
@@ -1412,7 +1405,7 @@ function startDive() {
   diver.mesh.visible = true;
   splashAt(diver.pos.x, diver.pos.z, 14, 2.5);
   playerStats.closestNow = 9999;
-  hint("E near a crate to grab · surface to breathe · E at the boat to board");
+  hint("E grab   E at the boat to board");
 }
 function boardBoat() {
   mode = "boat";
@@ -1430,18 +1423,17 @@ function grabCrate(c) {
   const st = statics.find((s) => s.mesh === c.mesh); if (st) statics.splice(statics.indexOf(st), 1);
   if (c.gold) {
     goldGrabbed = true;
-    toast("THE AURORA GOLD IS YOURS — NOW SURVIVE", true);
+    toast("THE AURORA GOLD", true);
   } else {
-    toast("+$" + v + " salvage" + (night ? " (night ×2)" : ""));
+    toast("+$" + v + (night ? " (night x2)" : ""));
   }
 }
 function throwChum() {
-  if (chum <= 0) { hint("No chum left — buy at the kiosk"); return; }
+  if (chum <= 0) { hint("No chum"); return; }
   chum--;
   const cx = boat.pos.x - Math.sin(boat.yaw) * 7, cz = boat.pos.z - Math.cos(boat.yaw) * 7;
   addBlood(cx, cz, 4, 75);
   splashAt(cx, cz, 10, 1.8);
-  toast("Chum in the water — sharks will come HERE");
 }
 const bolts3d = [];
 function fireHarpoon() {
@@ -1469,18 +1461,18 @@ function updateBolts(dt) {
       if (s.alive && d3(b.pos, s.pos) < 2.4) {
         s.hp--; s.state = "flee"; s.fleeFrom = { x: b.pos.x, z: b.pos.z }; s.stateT = 5;
         addBlood(s.pos.x, s.pos.z, 2, 35);
-        if (s.hp <= 0) { killShark(s, "bolt"); toast("Shark killed — blood is calling more", true); chain.sharkTimer = Math.min(chain.sharkTimer, 8); }
+        if (s.hp <= 0) { killShark(s, "bolt"); toast("SHARK KILLED", true); chain.sharkTimer = Math.min(chain.sharkTimer, 8); }
         hit = true; break;
       }
     }
     if (!hit) for (const o of chain.orcas) {
-      if (o.alive && !o.immune && d3(b.pos, o.pos) < 3.4) { o.punish = 12; toast("You harpooned an ORCA.", true); hit = true; break; }
+      if (o.alive && !o.immune && d3(b.pos, o.pos) < 3.4) { o.punish = 12; hit = true; break; }
     }
     if (!hit && chain.meg && d3(b.pos, chain.meg.pos) < 6) {
-      chain.meg.enraged = true; toast("The bolt did NOTHING. It noticed.", true); hit = true;
+      chain.meg.enraged = true; hit = true;
     }
     if (!hit) for (const p of chain.pods) for (const dm of p.members) {
-      if (d3(b.pos, dm.pos) < 1.8) { p.leaveT = 40; p.escorting = false; toast("You hit a dolphin. The pod leaves you.", true); hit = true; }
+      if (d3(b.pos, dm.pos) < 1.8) { p.leaveT = 40; p.escorting = false; hit = true; }
     }
     if (hit || b.life <= 0 || b.pos.y < floorY(b.pos.x, b.pos.z)) {
       scene.remove(b.mesh); bolts3d.splice(i, 1);
@@ -1494,7 +1486,7 @@ function updateBoat(dt) {
   const st = (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0);
   if (boat.anchored) {
     boat.spd = lerp(boat.spd, 0, Math.min(1, dt * 3));
-    if (thr > 0 && Math.abs(boat.spd) < 0.5) hint("Anchor is down — press F to raise");
+    if (thr > 0 && Math.abs(boat.spd) < 0.5) hint("Anchor down (F to raise)");
   } else {
     boat.spd += (thr * maxSpeed() - boat.spd) * Math.min(1, dt * 0.55);
     boat.spd *= 1 - 0.12 * dt;
@@ -1503,11 +1495,11 @@ function updateBoat(dt) {
   const nx = boat.pos.x + Math.sin(boat.yaw) * boat.spd * dt;
   const nz = boat.pos.z + Math.cos(boat.yaw) * boat.spd * dt;
   const fl = floorY(nx, nz);
-  if (fl > -1.0 && boat.spd > 0) { boat.spd *= 0.55; if (fl > -0.6) { boat.spd = 0; hint("Beached — reverse (S) into deeper water"); } }
+  if (fl > -1.0 && boat.spd > 0) { boat.spd *= 0.55; if (fl > -0.6) { boat.spd = 0; hint("Beached (S to reverse)"); } }
   if (fl < -0.6 || boat.spd < 0) { boat.pos.x = nx; boat.pos.z = nz; }
   if (!boat.anchored) { boat.pos.x += 0.22 * dt; }   // slow current: anchoring matters
   boat.pos.x = clamp(boat.pos.x, -900, 900); boat.pos.z = clamp(boat.pos.z, -900, 900);
-  if (d2(boat.pos.x, boat.pos.z, ISLET.x, ISLET.z) > 860) hint("Open ocean — nothing out there. Turn back.");
+  if (d2(boat.pos.x, boat.pos.z, ISLET.x, ISLET.z) > 860) hint("Turn back");
   /* ride the waves */
   const t = simT;
   boat.pos.y = waterY(boat.pos.x, boat.pos.z, t);
@@ -1538,7 +1530,7 @@ function sinkBoat() {
   if (d2(boat.pos.x, boat.pos.z, ISLET.x, ISLET.z) > 130) { gameOver("sunk"); return; }
   boat.hull = Math.round(hullMax() * 0.3);
   boat.pos.x = 3.6; boat.pos.z = 34; boat.yaw = Math.PI; boat.spd = 0; boat.anchored = true;
-  toast("You washed ashore. The boat needs work.", true);
+  toast("WASHED ASHORE", true);
 }
 /* diver physics + THE OXYGEN CLOCK */
 function updateDiver(dt) {
@@ -1608,14 +1600,14 @@ function kioskRowsData() {
     { k: 5, n: "Harpoon bolts ×4", p: BOLT_COST, can: cash >= BOLT_COST && bolts < 12, buy: "bolts" },
     { k: 6, n: "Chum bucket ×1", p: CHUM_COST, can: cash >= CHUM_COST && chum < 5, buy: "chum" },
     { k: 7, n: "Patch hull (full repair)", p: REPAIR_COST, can: cash >= REPAIR_COST && boat.hull < hullMax(), buy: "repair" },
-    { k: 8, n: "SAIL AWAY — end the season", p: 0, can: true, leave: true },
+    { k: 8, n: "SAIL AWAY, end the season", p: 0, can: true, leave: true },
   ];
 }
 function renderKiosk() {
   const rows = kioskRowsData();
   document.getElementById("kioskRows").innerHTML = rows.map((r) =>
     '<div class="row' + (r.can ? "" : " dim") + '"><span><span class="k">' + r.k + "</span>" + r.n +
-    "</span><b>" + (r.leave ? "—" : (r.sell ? "+$" : "$") + r.p) + "</b></div>").join("");
+    "</span><b>" + (r.leave ? "" : (r.sell ? "+$" : "$") + r.p) + "</b></div>").join("");
 }
 function kioskBuy(k) {
   const r = kioskRowsData().find((x) => x.k === k);
@@ -1688,7 +1680,6 @@ function updateDaylight(dt) {
   const wasNight = updateDaylight._n;
   const night = isNight();
   if (wasNight !== undefined && night !== wasNight && mode !== "title") {
-    toast(night ? "NIGHTFALL — salvage pays DOUBLE. So do mistakes." : "Dawn. The water eases.");
   }
   updateDaylight._n = night;
   drawSky(tod);
@@ -1781,8 +1772,8 @@ function hint(msg) {
 }
 function objective() {
   if (goldGrabbed && !over) return cargo.some((c) => c.gold) ? "SURVIVE. Get the gold back to the dock." : "Sell the gold at the kiosk.";
-  if (cargoValue() > 0) return "Salvage aboard — sell it at the dock kiosk (E at the dock).";
-  if (boat.tier.o2 >= 2) return "The Aurora waits over the trench. The sonar knows why you shouldn't.";
+  if (cargoValue() > 0) return "Sell the salvage at the dock kiosk.";
+  if (boat.tier.o2 >= 2) return "Raise the Aurora gold over the trench.";
   if (cash > 0 || stats.hauled > 0) return "Deeper wrecks pay more. Upgrade tank, engine, hull.";
   return "Follow an amber buoy. Anchor (F), then dive (E).";
 }
@@ -1921,7 +1912,6 @@ function startGame() {
   mode = "boat";
   document.getElementById("screenTitle").classList.add("hidden");
   camYaw = boat.yaw + Math.PI;
-  toast("Follow an amber buoy out. Watch the birds.");
 }
 document.getElementById("playBtn").addEventListener("click", startGame);
 

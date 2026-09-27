@@ -59,6 +59,8 @@
   function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
   function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;")); }
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s || 2.2); }
+  // a cast member's words go over HIS head (marshal / bookmaker); no body, no line
+  function castSay(role, line, secs) { const h = VENUE && VENUE["_" + role]; if (h && h.say && line) h.say(line, secs); }
 
   /* ============================================================
      THE TRACK IS A WORLD-MODEL OBJECT, NOT PACKAGE CODE.
@@ -266,7 +268,7 @@
   function startNight() {
     if (NIGHT.active) return;
     if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("A race is already running on the oval.", 2.2); return; }
-    if (!C.wallet.canAfford(ECON.entry)) { note("Entry is " + fmtCash(ECON.entry) + " · you're short.", 2.4); return; }
+    if (!C.wallet.canAfford(ECON.entry)) { note("Entry is " + fmtCash(ECON.entry) + ", you're short.", 2.4); return; }
     if (!ensureCar()) { note("Bring a car to the paddock to qualify.", 2.4); return; }
     if (!C.wallet.spend(ECON.entry, "APEX NIGHT entry")) return;
     NIGHT.active = true; NIGHT.raceIx = 0; NIGHT.playerPts = 0; NIGHT.aiPts = {}; NIGHT.night$ = -ECON.entry;
@@ -285,7 +287,7 @@
     NIGHT.qualLast = paramAt(car.pos.x, car.pos.z);
     if (CBZ.raceHud) CBZ.raceHud.hide();
     towerDraw(["QUALIFY", "flying lap"], "RACE " + (NIGHT.raceIx + 1) + "/" + ECON.RACES);
-    note("QUALIFYING, one flying lap. Cross the line and give it everything!", 3.2);
+    note("QUALIFYING: one flying lap", 3.2);
     C.hud.closePanel();
   }
   function finishQualify(car) {
@@ -298,7 +300,7 @@
     entries.forEach((e, i) => { e.slot = i; });        // 0-based grid slot
     NIGHT.grid = entries;
     NIGHT.playerGrid = (entries.find((e) => e.player).slot | 0) + 1;
-    note("Qualified P" + NIGHT.playerGrid + " · " + fmtT(NIGHT.qualTime), 3.0);
+    note("Qualified P" + NIGHT.playerGrid + ", " + fmtT(NIGHT.qualTime), 3.0);
     openBetPanel();
   }
 
@@ -355,7 +357,8 @@
     NIGHT.kit = CBZ.raceKit ? CBZ.raceKit.create({ course: "speedway", laps: ECON.LAPS, entrants: entrants }) : null;
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
     setGantry(0, false);
-    note("RACE " + (NIGHT.raceIx + 1) + " · lights are coming on. Hold the brake!", 3.0);
+    note("RACE " + (NIGHT.raceIx + 1), 3.0);
+    castSay("marshal", "Hold the brake. Lights coming on.", 3.0);
     C.hud.closePanel();
   }
 
@@ -415,7 +418,7 @@
 
     // podium toast + checkered flag wave
     waveFlag(2);
-    if (place === 1 && !pRow.dnf) { C.hud.toast("P1 · CHECKERED FLAG!"); if (CBZ.sfx) CBZ.sfx("coin"); }
+    if (place === 1 && !pRow.dnf) { C.hud.toast("P1, CHECKERED FLAG"); if (CBZ.sfx) CBZ.sfx("coin"); }
     else C.hud.toast(pRow.dnf ? "DNF, out of the race" : "Finished P" + place);
 
     // tear the field down
@@ -492,7 +495,8 @@
         setGantry(5, true); waveFlag(1);
         if (CBZ.raceHud) CBZ.raceHud.lights("go");
         if (NIGHT.useRD && CBZ.raceDrivers) CBZ.raceDrivers.setState("race", "apex");
-        note(NIGHT.jumped ? "GREEN, but you jumped it." : "GREEN GREEN GREEN!", 1.8);
+        note(NIGHT.jumped ? "GREEN, +" + ECON.JUMP_PENALTY + "s" : "GREEN", 1.8);
+        castSay("marshal", "GO GO GO!", 1.8);
         if (CBZ.sfx) CBZ.sfx("coin");
       }
       return;
@@ -653,7 +657,7 @@
         ],
       });
       if (CBZ.interactions.describe) CBZ.interactions.describe("apexpaddock", function () {
-        return { label: "APEX NIGHT", note: NIGHT.active ? "Race " + (NIGHT.raceIx + 1) + "/" + ECON.RACES : ECON.RACES + " races · entry " + fmtCash(ECON.entry) };
+        return { label: "APEX NIGHT", note: NIGHT.active ? "Race " + (NIGHT.raceIx + 1) + "/" + ECON.RACES : ECON.RACES + " races, entry " + fmtCash(ECON.entry) };
       });
     }
     // ---- BOOKMAKER zone (ctx service): the stand's [E] opens the book.
@@ -669,7 +673,7 @@
     if (ctx.npc && !arenaLive() && !(venue.group && venue.group.parent)) return;
     venue._pendingCast = false;
     venue._npcs = [];
-    for (const spec of (venue._cast || [])) { const h = ctx.npc(spec); if (h) venue._npcs.push(h); }
+    for (const spec of (venue._cast || [])) { const h = ctx.npc(spec); if (h) { venue._npcs.push(h); if (spec.role && !venue["_" + spec.role]) venue["_" + spec.role] = h; } }
   }
 
   /* ============================================================
@@ -722,7 +726,7 @@
   }
   function head(title, sub) {
     return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + sub + " · Esc closes</span></div>";
+      "<b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + sub + "</span></div>";
   }
   function standTable() {
     const field = rosterField();
@@ -732,7 +736,7 @@
     let h = "<div style='display:grid;grid-template-columns:24px 30px 1fr 46px;gap:4px;font-size:11px'>";
     rows.forEach((r, i) => {
       h += "<span style='color:" + (i === 0 ? "#ffd166" : "#8a93a3") + ";font-weight:700'>" + (i + 1) + "</span>" +
-        "<span style='font-weight:700;color:" + hex6(r.color) + "'>" + (r.number != null ? r.number : "—") + "</span>" +
+        "<span style='font-weight:700;color:" + hex6(r.color) + "'>" + (r.number != null ? r.number : "-") + "</span>" +
         "<span style='" + (r.you ? "color:#5ad1ff;font-weight:800" : "") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + esc(r.name) + (r.you ? " (YOU)" : "") + "</span>" +
         "<span style='text-align:right;color:#7ed957;font-weight:700'>" + r.pts + "</span>";
     });
@@ -744,13 +748,13 @@
     if (NIGHT.active && NIGHT.phase !== "idle") { note("You're on track, finish the session.", 1.8); return; }
     let body;
     if (!NIGHT.active) {
-      body = "<div style='margin:2px 0 8px;font-size:13px'>Cash <b style='color:#e8b64c'>" + fmtCash(C.wallet.cash()) + "</b> · " +
-        ECON.RACES + " races · " + ECON.LAPS + " laps · field of " + ECON.FIELD +
-        "<br><span style='opacity:.7;font-size:12px'>Best night net " + fmtCash(bag().bestNet) + " · titles " + bag().titles + "</span></div>" +
+      body = "<div style='margin:2px 0 8px;font-size:13px'>Cash <b style='color:#e8b64c'>" + fmtCash(C.wallet.cash()) + "</b>, " +
+        ECON.RACES + " races, " + ECON.LAPS + " laps, field of " + ECON.FIELD +
+        "<br><span style='opacity:.7;font-size:12px'>Best night net " + fmtCash(bag().bestNet) + ", titles " + bag().titles + "</span></div>" +
         btn("start", "PAY ENTRY " + fmtCash(ECON.entry) + " & QUALIFY", "#c98f22", !C.wallet.canAfford(ECON.entry)) +
         btn("close", "Leave", "#26343c");
     } else {
-      body = "<div style='margin:2px 0 8px;font-size:13px'>Race <b>" + (NIGHT.raceIx + 1) + "/" + ECON.RACES + "</b> up next · night net " +
+      body = "<div style='margin:2px 0 8px;font-size:13px'>Race <b>" + (NIGHT.raceIx + 1) + "/" + ECON.RACES + "</b> up next, night net " +
         "<b style='color:" + (NIGHT.night$ >= 0 ? "#7ed957" : "#ff9aa2") + "'>" + (NIGHT.night$ >= 0 ? "+" : "−") + fmtCash(Math.abs(NIGHT.night$)).slice(1) + "</b></div>" +
         standTable() +
         "<div style='margin-top:8px'>" + btn("qual", "GO TO QUALIFYING", "#1c6b40") + btn("cashout", "CASH OUT & LEAVE", "#7c1626") + "</div>";
@@ -764,21 +768,20 @@
     if (!C) return;
     // standalone = opened from the bookmaker stand outside qualifying flow
     if (standalone && (!NIGHT.active || NIGHT.phase !== "bet" && NIGHT.grid == null)) {
-      C.hud.panel(head("THE BOOKMAKER", "side bets") +
-        "<div style='margin:6px 0;font-size:13px'>Qualify first, your grid slot sets the odds. Back yourself to WIN; only P1 pays.</div>" + btn("close", "Close", "#26343c"),
-        { close: function () { C.hud.closePanel(); } });
+      castSay("bookmaker", "Qualify first. Your grid sets the odds.");
       return;
     }
     NIGHT.phase = "bet";
     const odds = oddsForGrid(NIGHT.playerGrid);
-    let body = "<div style='margin:2px 0 8px;font-size:13px'>Qualified <b style='color:#5ad1ff'>P" + NIGHT.playerGrid + "</b> · lap " + fmtT(NIGHT.qualTime) +
-      "<br>Back yourself to WIN at <b style='color:#e8b64c'>" + odds + "x</b>, only a win pays.</div>";
+    castSay("bookmaker", "Only a win pays. " + odds + " to one on you.");
+    let body = "<div style='margin:2px 0 8px;font-size:13px'>Qualified <b style='color:#5ad1ff'>P" + NIGHT.playerGrid + "</b>, lap " + fmtT(NIGHT.qualTime) +
+      "<br>WIN pays <b style='color:#e8b64c'>" + odds + "x</b></div>";
     body += ECON.stakes.map((s) => s === 0 ? btn("stake", "NO BET", "#26343c") : btn("stake", "$" + s + " → " + fmtCash(s * odds), "#16301f", C.wallet.cash() < s, { s: s })).join("");
     body += "<div style='margin-top:8px'>" + btn("grid", "GO TO THE GRID →", "#c98f22") + "</div>";
-    C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + " · " + odds + "x") + body, {
+    C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + ", " + odds + "x") + body, {
       stake: function (el) {
         const s = el && el.getAttribute ? (el.getAttribute("data-s") | 0) : 0;
-        if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; note("" + fmtCash(s) + " on YOU @ " + odds + "x.", 2.2); }
+        if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; castSay("bookmaker", "You're on. " + fmtCash(s) + " at " + odds + " to one."); }
         else NIGHT.bet = null;
         beginGrid();
       },
@@ -796,14 +799,14 @@
       else if (r.isPlayer && NIGHT.jumped) gap = "+" + ECON.JUMP_PENALTY + "s*";
       else gap = r.pos === 1 ? "leader" : "";
       tbl += "<span style='color:" + (r.pos === 1 ? "#ffd166" : "#cfd6dd") + "'>" + r.pos + "</span>" +
-        "<span style='font-weight:700;color:" + hex6(r.color != null ? r.color : 0x5ad1ff) + "'>" + (r.number != null ? r.number : "—") + "</span>" +
+        "<span style='font-weight:700;color:" + hex6(r.color != null ? r.color : 0x5ad1ff) + "'>" + (r.number != null ? r.number : "-") + "</span>" +
         "<span style='" + (r.isPlayer ? "color:#5ad1ff;font-weight:800" : "") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + esc(r.name) + "</span>" +
         "<span style='text-align:right;color:#9fb4dd'>" + gap + "</span>" +
         "<span style='text-align:right;color:#7ed957'>" + (r.dnf ? 0 : "+" + pointsFor(r.pos)) + "</span>";
     });
     tbl += "</div>";
-    let msg = dnf ? "DNF, no purse." : "Finished P" + place + " · purse " + fmtCash(purse);
-    if (betMsg) msg += " · " + betMsg;
+    let msg = dnf ? "DNF, no purse." : "Finished P" + place + ", purse " + fmtCash(purse);
+    if (betMsg) msg += ". " + betMsg;
     if (NIGHT.jumped) msg += " (jump-start +" + ECON.JUMP_PENALTY + "s applied)";
     const last = NIGHT.raceIx >= ECON.RACES - 1;
     const body = "<div style='margin:2px 0 6px;font-size:13px'>" + msg + "</div>" + tbl +
@@ -823,8 +826,8 @@
     const st = bag();
     const body = "<div style='font-size:30px;font-weight:900;letter-spacing:3px;color:" + vc + ";margin:4px 0'>" + verdict + "</div>" +
       "<div style='font-size:13px;margin:4px 0'>" + (isPlayer && !walked ? "You take APEX NIGHT, champion bonus " + fmtCash(bonus) + "." : "Champion: <b>" + esc(champ) + "</b>.") +
-      "<br>Night net <b style='color:" + (NIGHT.night$ >= 0 ? "#7ed957" : "#ff9aa2") + "'>" + (NIGHT.night$ >= 0 ? "+" : "−") + fmtCash(Math.abs(NIGHT.night$)).slice(1) + "</b> · " +
-      "career: " + st.wins + " wins · " + st.titles + " titles</div>" +
+      "<br>Night net <b style='color:" + (NIGHT.night$ >= 0 ? "#7ed957" : "#ff9aa2") + "'>" + (NIGHT.night$ >= 0 ? "+" : "−") + fmtCash(Math.abs(NIGHT.night$)).slice(1) + "</b>, " +
+      "career: " + st.wins + " wins, " + st.titles + " titles</div>" +
       btn("close", "DONE", "#1c6b40");
     C.hud.panel(head("APEX NIGHT", "the night is over") + body, { close: function () { C.hud.closePanel(); } });
   }
