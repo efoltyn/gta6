@@ -1184,6 +1184,11 @@
         add("sq-bags", "GRAB THE BAGS, carry the money", "#ffd166");
       }
     }
+    // THE COMPOUND (city/compoundcrew.js): post the people with you at the
+    // compound you're standing at, pull them back, hand the driver the wheel.
+    const cc = (CBZ.compoundCrew && CBZ.compoundCrew.menuEntries) ? CBZ.compoundCrew.menuEntries() : [];
+    if (cc.length) html += "<div style='color:#7fd0ff;font-weight:700;margin:8px 0 2px'>Compound</div>";
+    for (let i = 0; i < cc.length; i++) add(cc[i].act, cc[i].label, cc[i].color);
     html += CBZ.touchMode ? "<div class='oopt' data-act='close' style='margin-top:10px;padding:10px;border:1px solid #3a3140;border-radius:10px;text-align:center;font-weight:700;letter-spacing:.6px;cursor:pointer'>CLOSE</div>"
       : "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
     menuEl.innerHTML = html;
@@ -1221,6 +1226,7 @@
     else if (act === "leavegang") { CBZ.cityLeaveGang(); }
     // ---- squad orders (city/boarding.js owns the verbs; this is the surface) ----
     else if (act.indexOf("sq-") === 0) doSquad(act.slice(3));
+    else if (act.indexOf("cc-") === 0) { if (CBZ.compoundCrew && CBZ.compoundCrew.menuDo) CBZ.compoundCrew.menuDo(act); }
   }
   /* Every one of these is ONE call into CBZ.followerOrderAll, and every one of
      them REPORTS WHAT ACTUALLY HAPPENED rather than what was asked for — "two
