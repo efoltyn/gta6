@@ -58,9 +58,9 @@
    continent's country relief flattens under every corridor the same way
    it already does for the frontier loop, so decks never hover over hills.
 
-   DRAW BUDGET: 3 draw calls per route (merged deck + white paint + yellow
-   paint) = 21 total for the 7 routes. No instanced dressing yet — rails/
-   gantries can join later per-route without touching the table.
+   DRAW BUDGET: highways.js merges each route per ~400 m chunk (deck, paint,
+   furniture); far chunks drop paint/furniture. The R5/R1 interchange
+   (city/interchange.js) is planned here and built in the late pass.
 
    EXTEND IT: push another entry into routeTable() — a polyline + width —
    and the builder does the rest (fillets, records, regions, relief).
@@ -76,7 +76,17 @@
   if (!CBZ.CONFIG) CBZ.CONFIG = {};
   if (CBZ.CONFIG.HIGHWAY_NET_V2 == null) CBZ.CONFIG.HIGHWAY_NET_V2 = true;
 
-  const HALF = 12;                       // 24m deck half-width (3+3 + median)
+  // THE CROSS-SECTION (highways.js builds it; these are the numbers the table
+  // docks by). 3+3 lanes of 3.6 m either side of a 3.0 m median (a 0.6 m
+  // F-shape barrier between two 1.2 m inner shoulders), 3.0 m outer
+  // shoulders: travelled half 12.3, deck half 15.3. Traffic reads the lane
+  // centres off the records (medianW 3.0), so the paint and the cars agree.
+  const MEDIAN_W = 3.0, LANE_W = 3.6, LANES = 3, SHOULDER = 3.0;
+  const HALF = MEDIAN_W / 2 + LANES * LANE_W + SHOULDER;   // 15.3: a network deck's half-width
+  const WIDTH = HALF * 2;
+  // Island causeways keep their own 24 m records (1.2 m median); highways.js
+  // adds the same 3 m shoulder outside them, so their deck half is 14.4.
+  const CW_HALF = 1.2 / 2 + 3 * 3.6 + SHOULDER;
 
   // ---- corridors for the continent relief gate (published before the
   //      continent builds at order 97; empty until the builder runs) --------
@@ -204,9 +214,9 @@
     // connector doctrine, folded into the table.
     return [
       {
-        id: "R1", name: "Continental Loop", width: 24, lanesPerDir: 3, fillet: 140,
+        id: "R1", name: "Continental Loop", width: WIDTH, lanesPerDir: 3, fillet: 140,
         pts: [
-          { x: timberX, z: brandtZ - HALF },             // dock: Brandt causeway north edge
+          { x: timberX, z: brandtZ - CW_HALF },          // dock: Brandt causeway north edge
           { x: timberX, z: corridorZ },
           { x: westX, z: corridorZ },
           { x: westX, z: southZ },
@@ -219,9 +229,9 @@
         docks: [{ x: timberX, z: brandtZ, note: "Brandt causeway" }],
       },
       {
-        id: "R2", name: "Cape Spine", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R2", name: "Cape Spine", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
-          { x: capeX, z: diamondZ + HALF },              // dock: Diamond causeway south edge
+          { x: capeX, z: diamondZ + CW_HALF },           // dock: Diamond causeway south edge
           { x: capeX, z: capeMouthZ },                   // dock: Cape Harbor link mouth
         ],
         recA: diamondZ, recB: capeMouthZ + 20,
@@ -229,7 +239,7 @@
                 { x: capeX, z: capeMouthZ, note: "Cape Harbor link" }],
       },
       {
-        id: "R3", name: "Goldspire Run", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R3", name: "Goldspire Run", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
           { x: goldX, z: goldMouthZ },                   // dock: Goldspire link mouth
           { x: goldX, z: -200 },
@@ -239,7 +249,7 @@
         docks: [{ x: goldX, z: goldMouthZ, note: "Goldspire link" }],
       },
       {
-        id: "R4", name: "Foundry Row", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R4", name: "Foundry Row", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
           { x: foundryMouthX, z: foundryRowZ },          // dock: Foundry link mouth
           { x: goldX - HALF, z: foundryRowZ },           // T flush onto Route 3's deck
@@ -248,7 +258,7 @@
         docks: [{ x: foundryMouthX, z: foundryRowZ, note: "Foundry link" }],
       },
       {
-        id: "R5", name: "West Shore Highway", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R5", name: "West Shore Highway", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
           { x: westX + HALF, z: -700 },                  // T flush onto Route 1's west deck
           // -1500, not -1200: WORLD_LAYOUT_V2 widened Fort Brandt's span to
@@ -261,13 +271,13 @@
           // east at z -420 passes 120 m north of its apron. Both hold.
           { x: -1500, z: -700 },
           { x: -1500, z: -420 },
-          { x: halloranX - HALF, z: -420 },              // dock: Halloran causeway west edge
+          { x: halloranX - CW_HALF, z: -420 },           // dock: Halloran causeway west edge
         ],
         recA: westX, recB: halloranX,
         docks: [{ x: halloranX, z: -420, note: "Halloran causeway" }],
       },
       {
-        id: "R6", name: "Southgate Spur", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R6", name: "Southgate Spur", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
           // -280, not -240: originally chosen to clear the Goldspire Civic
           // Campus (minX -230 after the spread), which the old x cut through.
@@ -281,7 +291,7 @@
         docks: [],
       },
       {
-        id: "R7", name: "Mercy Connector", width: 24, lanesPerDir: 3, fillet: 60,
+        id: "R7", name: "Mercy Connector", width: WIDTH, lanesPerDir: 3, fillet: 60,
         // THE EIGHTH LITERAL, NOW DERIVED. This crossing was authored as
         // z = -1000, which is the value `brandtZ` happened to have when it was
         // written — i.e. it is the Brandt causeway's own centreline, the south
@@ -291,7 +301,7 @@
         // number in the stage-3 world, so this changes nothing there.
         pts: [
           { x: timberX + HALF, z: brandtZ },             // T flush onto Route 1's first leg
-          { x: mercyX - HALF, z: brandtZ },              // dock: Mercy causeway west edge
+          { x: mercyX - CW_HALF, z: brandtZ },           // dock: Mercy causeway west edge
         ],
         recA: timberX, recB: mercyX,
         docks: [{ x: mercyX, z: brandtZ, note: "Mercy causeway" }],
@@ -431,16 +441,18 @@
 
     _corridors = [];
     let bMinX = 1e9, bMaxX = -1e9, bMinZ = 1e9, bMaxZ = -1e9;
+    const recs = {};
 
     for (const route of routes) {
       // ---- geometry: fillet + mitre-strip deck/paint (highways.js) --------
-      CBZ.buildHighway(group, {
+      const hw = CBZ.buildHighway(group, {
         path: route.pts, smooth: true, filletRadius: route.fillet, filletStep: 9,
         width: route.width, lanesPerDir: route.lanesPerDir,
-        median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
+        median: true, medianW: MEDIAN_W, laneW: LANE_W, theme: "asphalt",
         registerRoads: false,            // records come from the LEG table below,
-        suspensionBridge: false,         // never from the arc-subdivided path
+        route: route.id,                 // never from the arc-subdivided path
       });
+      recs[route.id] = hw;
 
       // ---- relief corridors: the exact filleted centreline the deck used —
       //      same pure function, same inputs, zero drift ---------------------
@@ -474,8 +486,8 @@
           ? { x: a.x, z: (lo + hi) / 2, vertical: true, len: hi - lo }
           : { x: (lo + hi) / 2, z: a.z, vertical: false, len: hi - lo };
         seg.district = "highway";
-        seg.w = route.width; seg.lanesPerDir = route.lanesPerDir; seg.laneW = 3.6;
-        seg.median = true; seg.medianW = 1.2; seg.route = route.id;
+        seg.w = route.width; seg.lanesPerDir = route.lanesPerDir; seg.laneW = LANE_W;
+        seg.median = true; seg.medianW = MEDIAN_W; seg.route = route.id;
         // ENFORCE (roadrules.js): dock at a place's edge, never cross it. The
         // route's FINAL point is the destination, so the leg that arrives is
         // allowed in and a leg that merely passes a town is cut at the kerb.
@@ -491,6 +503,23 @@
           pad: 1,
         });
       }
+    }
+    // ---- THE INTERCHANGE (city/interchange.js): Route 5 T's onto Route 1's
+    //      west leg on flat open country — the flyover carries the crossing
+    //      movement, the at-grade T stays for traffic. Its footprint joins
+    //      the relief gate so the ground under the ramps is flat too. -------
+    if (CBZ.planInterchange) {
+      const byId = {};
+      for (const r of routes) byId[r.id] = r;
+      try {
+        const res = byId.R1 && byId.R5 ? CBZ.planInterchange({ through: byId.R1, stem: byId.R5, recs: recs, city: city }) : null;
+        if (res) for (const c of res.corridors) {
+          _corridors.push(c);
+          bMinX = Math.min(bMinX, c.minX - 60); bMaxX = Math.max(bMaxX, c.maxX + 60);
+          bMinZ = Math.min(bMinZ, c.minZ - 60); bMaxZ = Math.max(bMaxZ, c.maxZ + 60);
+        }
+        else console.warn("[highwaynet] R5/R1 interchange could not be planned; the T stays at grade");
+      } catch (e) { console.error("[highwaynet] interchange", e); }
     }
     _netBox = { minX: bMinX, maxX: bMaxX, minZ: bMinZ, maxZ: bMaxZ };
   }, 91);

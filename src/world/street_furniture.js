@@ -9,9 +9,12 @@
 
      • REGULATORY SIGNAGE on real posts, drawn from one shared canvas
        ATLAS so every sign face in the world is a single textured draw:
-       stop signs at unsignalised junctions, street-name blades at the
-       signalised ones, no-parking / tow-away / one-way plates down the
-       kerbs, and house numbers beside front doors.
+       octagonal STOP signs (real 8-sided geometry) at unsignalised
+       junctions, street-name blades hung from the signal mast arms
+       (city/props.js records where), SPEED LIMIT plates mid-block by
+       street class, parking plates down the kerbs, and house numbers
+       beside front doors. There are no one-way streets and no yield
+       situations in the network, so there are no ONE WAY / YIELD signs.
      • Bollards guarding plaza corners and shopfronts.
      • Kerb-inlet storm drains where gutter water would actually go.
      • Alley life at the BACK of buildings: dumpsters, bagged trash,
@@ -45,20 +48,27 @@
   // the draw budget. One atlas + one merged quad sheet sidesteps that: all
   // signage in the city is ONE textured draw, forever.
   const GRID = 8, CELL = 128, ATLAS_PX = GRID * CELL;
-  // cell map
-  const C_STOP = 0, C_STOP_BACK = 1, C_NOPARK = 2, C_RECT_BACK = 3, C_ONEWAY = 4,
-    C_DNE = 5, C_CIRC_BACK = 6, C_SPEED = 7, C_PARK = 48, C_TOW = 49, C_FIRELANE = 50,
-    C_YIELD = 51, C_TRI_BACK = 52, C_BUS = 53, C_HYDRANT = 54, C_BLADE_BACK = 55;
-  const NAME_0 = 8, NAME_N = 16;      // cells 8..23  — street-name blades
-  const NUM_0 = 24, NUM_N = 24;       // cells 24..47 — house-number plates
+  // cell map. Only standard MUTCD faces live here, and each one knows the
+  // exact pixel rectangle (or octagon) it occupies, so the geometry samples
+  // the face and nothing around it: no transparent margin, no cutout halo,
+  // no lettering spilling past the plate edge.
+  const C_STOP = 0, C_STOP_BACK = 1, C_NOPARK = 2, C_RECT_BACK = 3, C_SPEED = 7,
+    C_PARK = 48, C_TOW = 49, C_FIRELANE = 50, C_BUS = 53, C_HYDRANT = 54, C_BLADE_BACK = 55,
+    C_SPEED25 = 56, C_SPEED35 = 57, C_SPEED_BACK = 58;
+  const NAME_0 = 8, NAME_N = 16;      // cells 8..23  — street-name blades (8 avenues, then 8 streets)
+  const NUM_0 = 24, NUM_N = 24;       // cells 24..47 — house-number plates (building_dress.js)
 
-  // Deterministic by construction: a fixed authored table, indexed by a
-  // position hash. Nothing here is random at build time.
-  const ST_NAMES = [
-    "MERIDIAN AVE", "HOLLOW ST", "CANAL ST", "8TH AVE", "PORTSIDE RD", "KESTREL ST",
-    "LOW BANK RD", "ASHGROVE AVE", "3RD ST", "MARLOWE ST", "CINDER LN", "HARBOR AVE",
-    "VERDE ST", "OLD MILL RD", "TENTH AVE", "BRINE ST",
-  ];
+  // Deterministic by construction: fixed authored tables. The avenues (the
+  // N-S grid lines) take the AVE names in order, the cross streets the ST
+  // names, so a street carries ONE name at every one of its crossings.
+  const AVE_NAMES = ["MERIDIAN AVE", "ASHGROVE AVE", "8TH AVE", "HARBOR AVE", "TENTH AVE", "KESTREL AVE", "VERDE AVE", "MARLOWE AVE"];
+  const ST_NAMES = ["HOLLOW ST", "CANAL ST", "PORTSIDE ST", "LOW BANK ST", "3RD ST", "CINDER ST", "OLD MILL ST", "BRINE ST"];
+
+  // plate rectangles inside their 128 px cell: {x, y, w, h} in cell pixels
+  const PLATE = {};
+  function plateRect(i, w, h) { PLATE[i] = { x: (CELL - w) / 2, y: (CELL - h) / 2, w: w, h: h }; return PLATE[i]; }
+  const BLADE_RECT = { x: 2, y: 48, w: 124, h: 31 };   // 4:1, the blade's own aspect
+  const OCT_R = 62;                                     // STOP octagon circumradius, cell px
 
   let _atlas = null;
   function signAtlas() {
@@ -71,7 +81,7 @@
     g.textBaseline = "middle";
 
     function cell(i) { return { x: (i % GRID) * CELL, y: ((i / GRID) | 0) * CELL }; }
-    function poly(i, n, rot, r, fill, stroke, sw) {
+    function poly(i, n, rot, r, fill) {
       const c = cell(i), cx = c.x + CELL / 2, cy = c.y + CELL / 2;
       g.beginPath();
       for (let k = 0; k < n; k++) {
@@ -80,90 +90,82 @@
         if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
       }
       g.closePath();
-      if (fill) { g.fillStyle = fill; g.fill(); }
-      if (stroke) { g.strokeStyle = stroke; g.lineWidth = sw || 5; g.stroke(); }
+      g.fillStyle = fill; g.fill();
     }
-    function rect(i, pad, fill, stroke, sw, rw, rh) {
-      const c = cell(i);
-      const w = (rw || CELL) - pad * 2, h = (rh || CELL) - pad * 2;
-      const x = c.x + (CELL - w) / 2, y = c.y + (CELL - h) / 2;
-      if (fill) { g.fillStyle = fill; g.fillRect(x, y, w, h); }
-      if (stroke) { g.strokeStyle = stroke; g.lineWidth = sw || 4; g.strokeRect(x + 2, y + 2, w - 4, h - 4); }
-      return { x: x, y: y, w: w, h: h };
+    // a plate: fill the WHOLE rect (its edges are the geometry's edges), then
+    // an inset border like the real sheeting has
+    function plate(i, w, h, fill, border, bw, inset) {
+      const c = cell(i), r = plateRect(i, w, h);
+      g.fillStyle = fill; g.fillRect(c.x + r.x - 2, c.y + r.y - 2, r.w + 4, r.h + 4);   // 2 px bleed past the UV edge
+      if (border) {
+        g.strokeStyle = border; g.lineWidth = bw || 3;
+        const k = (inset || 4) + (bw || 3) / 2;
+        g.strokeRect(c.x + r.x + k, c.y + r.y + k, r.w - 2 * k, r.h - 2 * k);
+      }
     }
     function text(i, str, size, color, dy, maxW) {
       const c = cell(i);
       g.fillStyle = color;
       g.font = "bold " + size + "px Helvetica, Arial, sans-serif";
-      g.fillText(str, c.x + CELL / 2, c.y + CELL / 2 + (dy || 0), maxW || CELL - 12);
+      g.fillText(str, c.x + CELL / 2, c.y + CELL / 2 + (dy || 0), maxW || CELL - 16);
     }
 
-    // --- STOP (regulation octagon) ---------------------------------------
-    poly(C_STOP, 8, Math.PI / 8, 58, "#b4231e", "#f2f2ee", 6);
-    text(C_STOP, "STOP", 40, "#f6f6f2", 2);
-    poly(C_STOP_BACK, 8, Math.PI / 8, 58, "#9aa0a2", "#7d8385", 5);
-    // --- rectangular regulatory plates -----------------------------------
-    rect(C_NOPARK, 12, "#f4f4ef", "#22262b", 4, 84, 118);
+    // --- STOP (R1-1): white border band, white legend on red -----------------
+    poly(C_STOP, 8, Math.PI / 8, OCT_R + 2, "#f2f2ee");
+    poly(C_STOP, 8, Math.PI / 8, OCT_R - 6, "#b4231e");
+    text(C_STOP, "STOP", 38, "#f6f6f2", 2, 94);
+    poly(C_STOP_BACK, 8, Math.PI / 8, OCT_R + 2, "#9aa0a2");
+    // --- rectangular regulatory plates (2:3) ----------------------------------
+    plate(C_NOPARK, 76, 114, "#f4f4ef", "#22262b", 2, 3);
     (function () {
       const c = cell(C_NOPARK), cx = c.x + CELL / 2, cy = c.y + 46;
-      g.beginPath(); g.arc(cx, cy, 26, 0, Math.PI * 2);
-      g.strokeStyle = "#c02a24"; g.lineWidth = 8; g.stroke();
-      g.beginPath(); g.moveTo(cx - 19, cy + 19); g.lineTo(cx + 19, cy - 19); g.stroke();
+      g.beginPath(); g.arc(cx, cy, 24, 0, Math.PI * 2);
+      g.strokeStyle = "#c02a24"; g.lineWidth = 7; g.stroke();
       g.fillStyle = "#22262b"; g.font = "bold 30px Helvetica, Arial, sans-serif";
       g.fillText("P", cx, cy + 1);
-      g.font = "bold 15px Helvetica, Arial, sans-serif";
-      g.fillText("NO PARKING", cx, c.y + 92, 78);
-      g.fillText("ANY TIME", cx, c.y + 108, 78);
+      g.strokeStyle = "#c02a24"; g.lineWidth = 7;
+      g.beginPath(); g.moveTo(cx - 17, cy + 17); g.lineTo(cx + 17, cy - 17); g.stroke();
+      g.fillStyle = "#22262b"; g.font = "bold 13px Helvetica, Arial, sans-serif";
+      g.fillText("NO PARKING", cx, c.y + 88, 66);
+      g.fillText("ANY TIME", cx, c.y + 103, 66);
     })();
-    rect(C_RECT_BACK, 12, "#9aa0a2", "#7d8385", 4, 84, 118);
-    rect(C_ONEWAY, 16, "#1a1d21", null, 0, 110, 46);
-    (function () {
-      const c = cell(C_ONEWAY), cy = c.y + CELL / 2;
-      g.fillStyle = "#f4f4ef";
-      g.beginPath();
-      g.moveTo(c.x + 24, cy); g.lineTo(c.x + 44, cy - 12); g.lineTo(c.x + 44, cy - 4);
-      g.lineTo(c.x + 100, cy - 4); g.lineTo(c.x + 100, cy + 4); g.lineTo(c.x + 44, cy + 4);
-      g.lineTo(c.x + 44, cy + 12); g.closePath(); g.fill();
-      g.font = "bold 13px Helvetica, Arial, sans-serif";
-      g.fillText("ONE WAY", c.x + CELL / 2, cy + 20, 90);
-    })();
-    poly(C_DNE, 40, 0, 56, "#b4231e", "#f2f2ee", 5);
-    (function () { const c = cell(C_DNE); g.fillStyle = "#f4f4ef"; g.fillRect(c.x + 22, c.y + 56, 84, 17); })();
-    poly(C_CIRC_BACK, 40, 0, 56, "#9aa0a2", "#7d8385", 5);
-    rect(C_SPEED, 12, "#f4f4ef", "#22262b", 4, 84, 118);
-    text(C_SPEED, "SPEED", 16, "#22262b", -34, 70);
-    text(C_SPEED, "LIMIT", 16, "#22262b", -16, 70);
-    text(C_SPEED, "30", 46, "#22262b", 22, 70);
-    rect(C_PARK, 14, "#1b4f8f", "#f4f4ef", 4, 82, 100);
+    plate(C_RECT_BACK, 76, 114, "#9aa0a2");
+    plate(C_TOW, 76, 114, "#f4f4ef", "#c02a24", 3, 3);
+    text(C_TOW, "TOW", 21, "#c02a24", -26, 62);
+    text(C_TOW, "AWAY", 21, "#c02a24", -2, 62);
+    text(C_TOW, "ZONE", 21, "#c02a24", 22, 62);
+    plate(C_FIRELANE, 76, 114, "#c02a24", "#f4f4ef", 3, 3);
+    text(C_FIRELANE, "FIRE", 22, "#f4f4ef", -14, 62);
+    text(C_FIRELANE, "LANE", 22, "#f4f4ef", 12, 62);
+    plate(C_PARK, 76, 114, "#1b4f8f", "#f4f4ef", 3, 3);
     text(C_PARK, "P", 62, "#f4f4ef", 2);
-    rect(C_TOW, 12, "#f4f4ef", "#c02a24", 5, 88, 112);
-    text(C_TOW, "TOW", 22, "#c02a24", -26, 76);
-    text(C_TOW, "AWAY", 22, "#c02a24", -2, 76);
-    text(C_TOW, "ZONE", 22, "#c02a24", 22, 76);
-    rect(C_FIRELANE, 12, "#c02a24", "#f4f4ef", 4, 88, 96);
-    text(C_FIRELANE, "FIRE", 22, "#f4f4ef", -16, 76);
-    text(C_FIRELANE, "LANE", 22, "#f4f4ef", 10, 76);
-    poly(C_YIELD, 3, -Math.PI / 2, 62, "#f4f4ef", "#b4231e", 12);
-    text(C_YIELD, "YIELD", 20, "#b4231e", 18, 70);
-    poly(C_TRI_BACK, 3, -Math.PI / 2, 62, "#9aa0a2", "#7d8385", 6);
-    rect(C_BUS, 14, "#1b4f8f", "#f4f4ef", 4, 76, 100);
-    text(C_BUS, "BUS", 21, "#f4f4ef", -14, 66);
-    text(C_BUS, "STOP", 21, "#f4f4ef", 12, 66);
-    rect(C_HYDRANT, 16, "#f4f4ef", "#c02a24", 4, 60, 88);
-    text(C_HYDRANT, "NO", 17, "#c02a24", -16, 52);
-    text(C_HYDRANT, "STOP", 17, "#c02a24", 4, 52);
-    text(C_HYDRANT, "PING", 17, "#c02a24", 22, 52);
+    plate(C_BUS, 76, 114, "#1b4f8f", "#f4f4ef", 3, 3);
+    text(C_BUS, "BUS", 21, "#f4f4ef", -14, 62);
+    text(C_BUS, "STOP", 21, "#f4f4ef", 12, 62);
+    plate(C_HYDRANT, 76, 114, "#f4f4ef", "#c02a24", 3, 3);
+    text(C_HYDRANT, "NO", 18, "#c02a24", -22, 60);
+    text(C_HYDRANT, "STOPPING", 13, "#c02a24", -2, 62);
+    text(C_HYDRANT, "ANY TIME", 13, "#c02a24", 18, 62);
+    // --- SPEED LIMIT (R2-1, 4:5): black legend on white, by street class ------
+    [[C_SPEED25, "25"], [C_SPEED, "30"], [C_SPEED35, "35"]].forEach(function (sp) {
+      plate(sp[0], 92, 115, "#f4f4ef", "#22262b", 3, 4);
+      text(sp[0], "SPEED", 18, "#22262b", -35, 76);
+      text(sp[0], "LIMIT", 18, "#22262b", -15, 76);
+      text(sp[0], sp[1], 52, "#22262b", 22, 76);
+    });
+    plate(C_SPEED_BACK, 92, 115, "#9aa0a2");
 
-    // --- street-name blades (green, reflective white legend) --------------
+    // --- street-name blades (green, reflective white legend and border) -----
+    const NAMES = AVE_NAMES.concat(ST_NAMES);
     for (let i = 0; i < NAME_N; i++) {
-      const idx = NAME_0 + i, c = cell(idx);
-      g.fillStyle = "#1f5c3a"; g.fillRect(c.x + 2, c.y + 44, CELL - 4, 40);
-      g.strokeStyle = "#e8ece6"; g.lineWidth = 2; g.strokeRect(c.x + 5, c.y + 47, CELL - 10, 34);
+      const idx = NAME_0 + i, c = cell(idx), R = BLADE_RECT;
+      g.fillStyle = "#1f5c3a"; g.fillRect(c.x + R.x - 2, c.y + R.y - 2, R.w + 4, R.h + 4);
+      g.strokeStyle = "#e8ece6"; g.lineWidth = 2; g.strokeRect(c.x + R.x + 3, c.y + R.y + 3, R.w - 6, R.h - 6);
       g.fillStyle = "#f2f5ef";
-      g.font = "bold 17px Helvetica, Arial, sans-serif";
-      g.fillText(ST_NAMES[i % ST_NAMES.length], c.x + CELL / 2, c.y + 65, CELL - 16);
+      g.font = "bold 18px Helvetica, Arial, sans-serif";
+      g.fillText(NAMES[i % NAMES.length], c.x + CELL / 2, c.y + R.y + R.h / 2 + 1, R.w - 14);
     }
-    (function () { const c = cell(C_BLADE_BACK); g.fillStyle = "#8f9691"; g.fillRect(c.x + 2, c.y + 44, CELL - 4, 40); })();
+    (function () { const c = cell(C_BLADE_BACK), R = BLADE_RECT; g.fillStyle = "#8f9691"; g.fillRect(c.x + R.x - 2, c.y + R.y - 2, R.w + 4, R.h + 4); })();
 
     // --- house-number plates ---------------------------------------------
     for (let i = 0; i < NUM_N; i++) {
@@ -178,10 +180,23 @@
 
     const t = new THREE.CanvasTexture(cv);
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.anisotropy = 4;
-    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;   // r128 spelling
+    // sharp at the glancing angles a kerbside sign is always seen from:
+    // trilinear mips (the CanvasTexture default on a power-of-two canvas)
+    // plus as much anisotropy as the GPU offers, capped at 8
+    let aniso = 8;
+    try { const R = CBZ.renderer; if (R && R.capabilities && R.capabilities.getMaxAnisotropy) aniso = Math.min(8, R.capabilities.getMaxAnisotropy()); } catch (e) { /* keep 8 */ }
+    t.anisotropy = Math.max(1, aniso);
+    if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;   // r128 spelling: sRGB-authored canvas colours
     _atlas = t;
     return t;
+  }
+  // uv rect of a cell's exact face (plate / blade), inset half a texel
+  function faceUV(i, rect) {
+    const col = i % GRID, row = (i / GRID) | 0, r = rect || PLATE[i];
+    if (!r) return DK.atlasCell(i, GRID);
+    const x0 = col * CELL + r.x + 0.5, x1 = col * CELL + r.x + r.w - 0.5;
+    const y0 = row * CELL + r.y + 0.5, y1 = row * CELL + r.y + r.h - 0.5;
+    return { u0: x0 / ATLAS_PX, u1: x1 / ATLAS_PX, v0: 1 - y1 / ATLAS_PX, v1: 1 - y0 / ATLAS_PX };
   }
   // Shared with world/building_dress.js (house-number plates) so the whole
   // world still has exactly ONE signage texture, hence one signage draw per
@@ -193,12 +208,15 @@
   // =====================================================================
   //  PROTOTYPES
   // =====================================================================
-  const STEEL = 0x8f959a, DARK = 0x2f3338, GALV = 0xa7adb0;
+  const GALV = 0xa7adb0;
 
   function signPostProto() {
+    // 2-inch square galvanised perforated-tube post (the US standard), with
+    // the breakaway anchor sleeve it sits in at the footway
     const p = DK.proto();
-    p.cyl(0.042, 0.05, 3.0, 6, STEEL, 0, 1.5, 0);
-    p.cyl(0.09, 0.11, 0.14, 8, 0x6f7478, 0, 0.07, 0);      // base collar
+    p.box(0.05, 3.0, 0.05, GALV, 0, 1.5, 0);
+    p.box(0.065, 0.2, 0.065, 0x8a9093, 0, 0.1, 0);        // anchor sleeve
+    p.box(0.056, 0.012, 0.056, 0x7d8386, 0, 3.0, 0);       // top cap
     return p.done();
   }
   function bollardProto() {
@@ -338,8 +356,14 @@
     const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
     let cutN = 0;
 
-    const posts = DK.batch("sign-post", signPostProto(), { cls: "decor", cast: false });
-    const faces = DK.sheet("sign-face", { cls: "decor", map: signAtlas(), alphaTest: 0.45, unlit: false });
+    // Regulatory signs are never thinned by the quality tier: a STOP sign that
+    // vanishes on an iPad is a rule the player cannot see. (cls "solid" keeps
+    // every instance; each is still one draw.) The faces sample only their own
+    // plate pixels, so the alphaTest never actually cuts anything: it is there
+    // because DK.sheet makes a mapped sheet OPAQUE (depth-writing) only when
+    // one is given, and a sign must sort like the solid plate it is.
+    const posts = DK.batch("sign-post", signPostProto(), { cls: "solid", cast: false });
+    const faces = DK.sheet("sign-face", { cls: "solid", map: signAtlas(), alphaTest: 0.45, unlit: false });
     const bollards = DK.batch("bollard", bollardProto(), { cls: "solid", cast: true });
     const drains = DK.batch("storm-drain", drainProto(), { cls: "fine", cast: false });
     const dumps = DK.batch("dumpster", dumpsterProto(), { cls: "solid", cast: true });
@@ -351,33 +375,62 @@
     const litter = DK.batch("litter", litterProto(), { cls: "fine", cast: false });
     const weeds = DK.batch("weeds", weedProto(), { cls: "fine", cast: false });
 
-    // ---- sign helper ---------------------------------------------------
+    // ---- sign helpers ----------------------------------------------------
     // One post instance + a front face and a matching BACK face, so walking
     // behind a sign shows a blank grey plate instead of mirrored lettering.
-    function sign(x, z, nx, nz, cellFront, cellBack, w, h, mountY, postH) {
+    // Faces sample exactly their plate's pixels (faceUV), so the quad IS the
+    // plate: no cutout margin, no halo.
+    function post(x, z, nx, nz, postH) {
       const y = DK.groundY(x, z);
       posts.add(x, y, z, { sy: (postH || 3.0) / 3.0, ry: Math.atan2(-nx, -nz) });
-      const fx = x + nx * 0.045, fz = z + nz * 0.045;
-      faces.quadWall(fx, y + mountY, fz, w, h, nx, nz, 0xffffff, DK.atlasCell(cellFront, GRID));
-      const bx = x - nx * 0.045, bz = z - nz * 0.045;
-      faces.quadWall(bx, y + mountY, bz, w, h, -nx, -nz, 0xffffff, DK.atlasCell(cellBack, GRID));
-      // SOLID. This kit's own policy line (detail_kit.js:688) says "only
-      // genuinely solid things get one: poles, bollards, dumpsters, cabinets,
-      // barriers" — and then every sign POLE in the world was left out, so a
-      // 3 m galvanised post standing on a kerb was pass-through while the 1 m
-      // bollard beside it was not. Same radius as the bollard (0.16 vs its own
-      // 0.09 shaft, matching city/props.js's parking-meter treatment: a body
-      // meets the post, not the paint on it).
-      DK.solid(x, z, 0.14, 0.14, null);
+      // SOLID: a 3 m galvanised post on a kerb is not pass-through.
+      DK.solid(x, z, 0.12, 0.12, null);
       DK.claim(x, z);
+      return y;
+    }
+    function sign(x, z, nx, nz, cellFront, cellBack, w, h, mountY, postH) {
+      const y = post(x, z, nx, nz, postH);
+      faces.quadWall(x + nx * 0.04, y + mountY, z + nz * 0.04, w, h, nx, nz, 0xffffff, faceUV(cellFront));
+      faces.quadWall(x - nx * 0.04, y + mountY, z - nz * 0.04, w, h, -nx, -nz, 0xffffff, faceUV(cellBack));
+    }
+    // a regular polygon face (the STOP octagon is REAL eight-sided geometry,
+    // not a textured square), UV-mapped onto the same polygon in the atlas.
+    // Tangent/winding follow Sheet.quadWall: texture-left on the viewer's left,
+    // triangle normal = (nx, 0, nz).
+    function polyFace(cx, cy, cz, R, sides, rot, nx, nz, cellI, rPx) {
+      const tx = -nz, tz = nx;
+      const col = cellI % GRID, row = (cellI / GRID) | 0;
+      const uc = (col * CELL + CELL / 2) / ATLAS_PX, vc = 1 - (row * CELL + CELL / 2) / ATLAS_PX;
+      const ru = (rPx - 0.5) / ATLAS_PX;
+      const P = [], Nn = [], U = [];
+      for (let k = 0; k < sides; k++) {
+        const a0 = rot + k * Math.PI * 2 / sides, a1 = rot + (k + 1) * Math.PI * 2 / sides;
+        // (centre, v1, v0): with angles increasing counter-clockwise in the
+        // (tangent, up) plane this order faces (nx, 0, nz)
+        const vx = [0, Math.cos(a1), Math.cos(a0)], vy = [0, Math.sin(a1), Math.sin(a0)];
+        for (let q = 0; q < 3; q++) {
+          P.push(cx + tx * vx[q] * R, cy + vy[q] * R, cz + tz * vx[q] * R);
+          Nn.push(nx, 0, nz);
+          U.push(uc + vx[q] * ru, vc + vy[q] * ru);
+        }
+      }
+      faces.push(P, Nn, DK.colArray(0xffffff, P.length / 3), U, DK.h01(cx, cz, 0x77a3));
+    }
+    function stopSign(x, z, nx, nz) {
+      // R1-1 at 30 in across the flats; bottom edge 2.1 m over the footway
+      const R = 0.76 / (2 * Math.cos(Math.PI / 8));
+      const mountY = 2.1 + R;
+      const y = post(x, z, nx, nz, mountY + R * 0.6);
+      polyFace(x + nx * 0.04, y + mountY, z + nz * 0.04, R, 8, Math.PI / 8, nx, nz, C_STOP, OCT_R);
+      polyFace(x - nx * 0.04, y + mountY, z - nz * 0.04, R, 8, Math.PI / 8, -nx, -nz, C_STOP_BACK, OCT_R);
     }
 
     // =====================================================================
     //  1) STOP SIGNS at unsignalised junctions
     // =====================================================================
-    // Every mainland grid crossing already carries a real signal head
-    // (city/props.js's makeHead), and a junction never has both. So compute
-    // the geometric crossings of the ORDINARY street network and drop a stop
+    // Every mainland grid crossing carries a real signal installation
+    // (city/props.js), and a junction never has both. So compute the
+    // geometric crossings of the ORDINARY street network and drop a stop
     // sign only where no signal exists — which in practice means the town
     // lanes, the annex back streets and the biome settlements.
     const streets = DK.streetRoads(city);
@@ -402,46 +455,90 @@
         if (DK.h01(ix, iz, 0x4411) > 0.72) continue;      // not every junction is signed
         const halfV = (V.w != null ? V.w : (city.ROAD || 18)) / 2;
         const halfH = (H.w != null ? H.w : (city.ROAD || 18)) / 2;
-        // A two-way stop on the north–south road: one sign per opposing
-        // approach, each on that approach's NEAR-RIGHT corner with its face
-        // turned back at the oncoming driver. s = +1 is the corner east and
-        // south of the junction, governing traffic arriving from the south
-        // (travelling +z) — so its face points -z, i.e. normal (0, -s).
+        // A two-way stop on the north-south road: one sign per opposing
+        // approach, on that approach's near kerb (the side its lanes run on)
+        // with its face turned back at the oncoming driver. s = +1 governs
+        // traffic arriving from the south (travelling +z, lanes at +x), so
+        // it stands east and south of the junction facing -z.
         for (let s = -1; s <= 1; s += 2) {
           const sx = ix + s * (halfV + 1.3), sz = iz - s * (halfH + 1.3);
           if (!DK.free(sx, sz, { doorR: 3.0, ring: 1 })) continue;
-          sign(sx, sz, 0, -s, C_STOP, C_STOP_BACK, 0.78, 0.78, 2.15, 2.6);
+          stopSign(sx, sz, 0, -s);
+          (city._stopSigns = city._stopSigns || []).push({ x: sx, z: sz, nx: 0, nz: -s });   // for shots + audits
           stopN++;
         }
       }
     }
 
     // =====================================================================
-    //  2) STREET-NAME BLADES at the signalised crossings
+    //  2) STREET-NAME BLADES on the signal mast arms
     // =====================================================================
-    // A street you can name is a street you can navigate. One blade per
-    // crossing, on a corner the signal heads don't already occupy.
-    let bladeN = 0;
-    const BLADE_MAX = DK.count(60);
-    for (let i = 0; i < signalled.length && bladeN < BLADE_MAX; i++) {
-      const it = signalled[i];
-      const half = (city.ROAD || 18) / 2;
-      const sx = it.x - (half + 2.1), sz = it.z - (half + 2.1);
-      if (!DK.free(sx, sz, { doorR: 2.6, ring: 1 })) continue;
-      const y = DK.groundY(sx, sz);
-      posts.add(sx, y, sz, { sy: 1.25 });
-      // two blades crossed at the top, one per street — exactly how a real
-      // corner reads, and it costs four quads.
-      const nA = DK.h01(sx, sz, 0x4421), nB = DK.h01(sz, sx, 0x4422);
-      const cA = NAME_0 + ((nA * NAME_N) | 0) % NAME_N;
-      const cB = NAME_0 + ((nB * NAME_N) | 0) % NAME_N;
-      faces.quadWall(sx, y + 3.5, sz + 0.03, 1.35, 0.3, 0, 1, 0xffffff, DK.atlasCell(cA, GRID));
-      faces.quadWall(sx, y + 3.5, sz - 0.03, 1.35, 0.3, 0, -1, 0xffffff, DK.atlasCell(C_BLADE_BACK, GRID));
-      faces.quadWall(sx + 0.03, y + 3.16, sz, 1.35, 0.3, 1, 0, 0xffffff, DK.atlasCell(cB, GRID));
-      faces.quadWall(sx - 0.03, y + 3.16, sz, 1.35, 0.3, -1, 0, 0xffffff, DK.atlasCell(C_BLADE_BACK, GRID));
-      DK.solid(sx, sz, 0.14, 0.14, null);          // the 3.75 m mast, same rule as sign() above
-      DK.claim(sx, sz);
-      bladeN++;
+    // city/props.js hangs a blade under every mast arm (the cross street's
+    // name, facing the traffic that is about to cross it) and records where.
+    // A street carries ONE name everywhere: avenues take the AVE list in
+    // west-to-east order, cross streets the ST list south-to-north.
+    const blades = city._signalBlades || [];
+    if (blades.length) {
+      const vKeys = [], hKeys = [];
+      for (const b of blades) {
+        const list = b.vertical ? vKeys : hKeys;
+        if (list.indexOf(b.key) < 0) list.push(b.key);
+      }
+      const coord = function (k) { return +k.slice(2); };
+      vKeys.sort(function (a, b) { return coord(a) - coord(b); });
+      hKeys.sort(function (a, b) { return coord(a) - coord(b); });
+      const half = NAME_N / 2;
+      for (const b of blades) {
+        const cellI = b.vertical
+          ? NAME_0 + (vKeys.indexOf(b.key) % half)
+          : NAME_0 + half + (hKeys.indexOf(b.key) % half);
+        const uv = faceUV(cellI, BLADE_RECT);
+        // double-faced, like the real mast-arm signs: legible from both ways
+        faces.quadWall(b.x + b.nx * 0.015, b.y, b.z + b.nz * 0.015, b.w, b.h, b.nx, b.nz, 0xffffff, uv);
+        faces.quadWall(b.x - b.nx * 0.015, b.y, b.z - b.nz * 0.015, b.w, b.h, -b.nx, -b.nz, 0xffffff, uv);
+      }
+    }
+
+    // =====================================================================
+    //  2b) SPEED LIMIT signs mid-block, one per direction per block
+    // =====================================================================
+    // R2-1 on the near kerb of each approach, 35% of the way into the block
+    // (past the junction clutter, before the next one). The number follows
+    // the street's class: avenue 35, grid street 30, everything else 25.
+    const gridX = city.xLines || [], gridZ = city.zLines || [];
+    const onLine = function (lines, v) { for (let i = 0; i < lines.length; i++) if (Math.abs(lines[i] - v) < 0.6) return true; return false; };
+    let speedN = 0;
+    const SPEED_MAX = DK.count(160);
+    for (let a = 0; a < streets.length && speedN < SPEED_MAX; a++) {
+      const r = streets[a];
+      const cellI = r.avenue ? C_SPEED35 : ((r.vertical ? onLine(gridX, r.x) : onLine(gridZ, r.z)) ? C_SPEED : C_SPEED25);
+      const half = (r.w != null ? r.w : (city.ROAD || 18)) / 2;
+      const c0 = r.vertical ? r.z : r.x;
+      // the crossings along this road, plus its two ends
+      const cuts = [c0 - r.len / 2, c0 + r.len / 2];
+      const others = r.vertical ? horizontals : verticals;
+      for (let b = 0; b < others.length; b++) {
+        const o = others[b];
+        const along = r.vertical ? o.z : o.x, fixed = r.vertical ? r.x : r.z;
+        const oc = r.vertical ? o.x : o.z;
+        if (Math.abs(along - c0) > r.len / 2 || Math.abs(fixed - oc) > o.len / 2) continue;
+        cuts.push(along);
+      }
+      cuts.sort(function (p, q) { return p - q; });
+      for (let k = 0; k + 1 < cuts.length && speedN < SPEED_MAX; k++) {
+        const u0 = cuts[k], u1 = cuts[k + 1], gap = u1 - u0;
+        if (gap < 30) continue;
+        // +dir traffic (lanes on the + side) enters at u0; -dir at u1
+        for (let s = -1; s <= 1; s += 2) {
+          const u = s > 0 ? u0 + gap * 0.35 : u1 - gap * 0.35;
+          const lat = s * (half + 0.6);
+          const x = r.vertical ? r.x + lat : u, z = r.vertical ? u : r.z + lat;
+          const nx = r.vertical ? 0 : -s, nz = r.vertical ? -s : 0;
+          if (!DK.free(x, z, { doorR: 3.0, ring: 1 })) continue;
+          sign(x, z, nx, nz, cellI, C_SPEED_BACK, 0.6, 0.75, 2.1 + 0.375, 2.9);
+          speedN++;
+        }
+      }
     }
 
     // =====================================================================
@@ -460,8 +557,9 @@
         const sx = p.x + p.nx * 0.55, sz = p.z + p.nz * 0.55;
         if (!DK.free(sx, sz, { doorR: 3.4, ring: 1 })) return false;
         const pick = DK.h01(sx, sz, 0x4432);
-        const front = pick < 0.42 ? C_NOPARK : (pick < 0.62 ? C_TOW : (pick < 0.78 ? C_SPEED : (pick < 0.9 ? C_PARK : C_FIRELANE)));
-        sign(sx, sz, -p.nx, -p.nz, front, C_RECT_BACK, 0.44, 0.62, 2.05, 2.7);
+        // parking regulation only: speed limits are placed per block, above
+        const front = pick < 0.5 ? C_NOPARK : (pick < 0.72 ? C_TOW : (pick < 0.88 ? C_PARK : C_FIRELANE));
+        sign(sx, sz, -p.nx, -p.nz, front, C_RECT_BACK, 0.42, 0.63, 2.1 + 0.315, 2.8);
         plateN++;
         return true;
       }

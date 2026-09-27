@@ -997,6 +997,8 @@ document.body.appendChild(b);}}catch(e){}})();
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=shallow1"></script>
+<!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
+<script src="src/city/streetkit.js?v=streets1"></script>
 <script src="src/city/world.js?v=nodash1"></script>
 <script src="src/city/interior_programs.js?v=nodash1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
@@ -1080,12 +1082,15 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=waterv2"></script>
-<script src="src/city/highways.js?v=nodash1"></script>
+<script src="src/city/highways.js?v=hwy1"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=nodash1"></script>
+<script src="src/city/highwaynet.js?v=hwy1"></script>
+<!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
+     built in highways.js's late pass at 97.5). -->
+<script src="src/city/interchange.js?v=hwy1"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=nodash1"></script>
@@ -1216,6 +1221,9 @@ document.body.appendChild(b);}}catch(e){}})();
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=ironjaw1yz"></script>
 <script src="src/city/arena_fights.js?v=nodash1"></script>
+<!-- street hardware kit: signal/lamp prototypes + the additive road light
+     pools. Pure builders, no placement; props.js (next) places them. -->
+<script src="src/city/street_hardware.js?v=hw1"></script>
 <script src="src/city/props.js?v=nodash1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->

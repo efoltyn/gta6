@@ -48,10 +48,11 @@
 
    IT ADOPTS BY REPLACEMENT, never by parallel bookkeeping (THE BLOCK LAW):
 
-     · world.js's kerb ring asks this file where the crossings are and leaves a
-       GAP in the stone. One author (the approach), two consumers (the kerb and
-       the apron), so a dropped kerb can never end up somewhere the driveway
-       is not. Feature-detected: no approach.js -> the old unbroken ring.
+     · the grid's street kit (world.js -> city/streetkit.js) asks this file
+       where the crossings are and drops the kerb, ramps the footway and lays
+       the flared concrete apron there. One author (the approach), two
+       consumers (the street and the lot-side apron below), so a dropped kerb
+       can never end up somewhere the driveway is not.
      · `lot.building.garage` is FILLED IN for every parcel that hasn't got one,
        which is the field realestate.js ALREADY reads. That call site does not
        change by one character.
@@ -334,25 +335,37 @@
         half: DRIVE_W / 2,
       };
 
-      // ---- THE APRON. A paved run from the building's frontage out to the
-      // kerb, at the door's own centreline. Laid at y = 0.12: above the block
-      // pad (0.10) and the sidewalk (0.08), below nothing — so it reads as
-      // surfacing on top of the parcel rather than fighting it.
-      const along = Math.max(2.4, run);
-      const mx = lot.cx + nx * (frontage + along / 2 - 0.3);
-      const mz = lot.cz + nz * (frontage + along / 2 - 0.3);
-      const aw = a.nx ? along : DRIVE_W, ad = a.nx ? DRIVE_W : along;
-      apron.push(quad(mx, mz, aw, ad, 0.12));
-      // ---- THE DROPPED KERB. The flared mouth that sits in the gap world.js
-      // leaves in the stone ring, running from the kerb line out to the
-      // carriageway edge so the transition is surfaced, not a step into air.
-      const dw = a.nx ? 1.6 : DRIVE_W + FLARE * 2, dd = a.nx ? DRIVE_W + FLARE * 2 : 1.6;
-      dropped.push(quad(a.kerbX + a.nx * 0.55, a.kerbZ + a.nz * 0.55, dw, dd, 0.13));
-      // ---- the two painted edge lines that make the crossing read from a car
-      for (const s of [-1, 1]) {
-        const ox = a.nz ? s * (DRIVE_W / 2) : 0, oz = a.nx ? s * (DRIVE_W / 2) : 0;
-        const ew = a.nx ? along : 0.16, ed = a.nx ? 0.16 : along;
-        edges.push(quad(mx + ox, mz + oz, ew, ed, 0.135));
+      // ---- THE APRON. A paved run from the building's frontage out toward
+      // the street, at the door's own centreline.
+      // On the mainland grid the street kit (city/streetkit.js) already
+      // draws the footway crossing: the flared concrete apron, the dropped
+      // kerb and the ramp, from this same solve. So a grid parcel is surfaced
+      // only across its OWN pad, frontage to lot edge, 2 cm over the pad.
+      // Everywhere else (towns, farms, the annex) there is no kit, and the
+      // apron runs to the kerb with its own dropped mouth, as before.
+      const ST = city.street || null;
+      const kitted = !!(lot.grid && ST);
+      const along = kitted ? (kAlong - ST.footway) - frontage : Math.max(2.4, run);
+      if (!kitted || along >= 0.4) {
+        const off = kitted ? 0 : -0.3;
+        const ay = kitted ? ST.yLot + 0.02 : 0.12;
+        const mx = lot.cx + nx * (frontage + along / 2 + off);
+        const mz = lot.cz + nz * (frontage + along / 2 + off);
+        const aw = a.nx ? along : DRIVE_W, ad = a.nx ? DRIVE_W : along;
+        apron.push(quad(mx, mz, aw, ad, ay));
+        // ---- THE DROPPED KERB (off-grid only): the flared mouth from the
+        // kerb line out to the carriageway edge, so the transition is
+        // surfaced, not a step into air.
+        if (!kitted) {
+          const dw = a.nx ? 1.6 : DRIVE_W + FLARE * 2, dd = a.nx ? DRIVE_W + FLARE * 2 : 1.6;
+          dropped.push(quad(a.kerbX + a.nx * 0.55, a.kerbZ + a.nz * 0.55, dw, dd, 0.13));
+        }
+        // ---- the two painted edge lines that make the crossing read from a car
+        for (const s of [-1, 1]) {
+          const ox = a.nz ? s * (DRIVE_W / 2) : 0, oz = a.nx ? s * (DRIVE_W / 2) : 0;
+          const ew = a.nx ? along : 0.16, ed = a.nx ? 0.16 : along;
+          edges.push(quad(mx + ox, mz + oz, ew, ed, ay + 0.015));
+        }
       }
 
       const stand = {

@@ -619,9 +619,11 @@
     return out;
   };
 
-  // LAMP_INSTANCED street-lamp bulb/glow pools (filled by cityProps once the
-  // posts are placed; read by hitProp when a lamp is shot out). _zeroM4 is the
-  // collapse matrix for broken instances.
+  // Street-lamp instance pools (filled by cityProps once every luminaire is
+  // placed; read by hitProp when a lamp is shot out): `bulb` = the drop-lens
+  // pool, `glow` = the additive LIGHT POOLS on the road, whose first N
+  // instances are the lamps in lampIdx order (signal washes follow them).
+  // _zeroM4 is the collapse matrix for broken instances.
   const lampPools = { bulb: null, glow: null };
   const _zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -1562,6 +1564,11 @@
         // road reserved to one vehicle class (the apron's service lanes, a
         // compound's gate spur) is not a street and does not get a city corner.
         if (CBZ.roadPropRoadOk && (!CBZ.roadPropRoadOk(J.a) || !CBZ.roadPropRoadOk(J.b))) continue;
+        // The mainland grid's corners, kerbs, crosswalks and stop bars are
+        // drawn by city/streetkit.js as part of ONE street surface (rounded
+        // blocks, real kerbs, ramps). A second fan/kerb/paint layer here would
+        // only fight it, so both-grid junctions are left to the kit.
+        if (J.a && J.b && J.a.grid && J.b.grid) continue;
         list.push(J);
       }
       if (!list.length) return list;
@@ -1882,89 +1889,99 @@
       return DRAW ? list : [];
     })();
 
-    // ---- traffic-light heads at every intersection ----
-    // A REAL 4-way reads by APPROACH, not by axis-on-one-corner: a driver
-    // rolling up to the stop line must see a lit face turned square AT them.
-    // For each intersection we therefore build one head PER APPROACH THAT
-    // ACTUALLY HAS ONCOMING ROAD, parked on that approach's near-right corner,
-    // its lamp face rotated to point back at the oncoming driver.
-    //   • makeHead's lamp face is on local +z, so a head at world yaw rotY
-    //     shows its face along (sin rotY, 0, cos rotY). To face a driver who is
-    //     COMING FROM unit dir (fx,fz) we set rotY = atan2(fx, fz).
-    //   • the grid spans the whole map, so every interior crossing is a true
-    //     4-way — but a crossing on the OUTERMOST line (i==0/N or j==0/N) has
-    //     only a half-road stub on the outward side (the perimeter wall), i.e.
-    //     NO oncoming traffic: that approach is OMITTED so no head ever faces a
-    //     non-intersection. it.i / it.j vs N decide which approaches are real.
-    //   • heads are grouped by the axis they govern: ns[] = N–S-travel faces
-    //     (the avenue's north & south approaches), ew[] = E–W-travel faces
-    //     (the cross-street's west & east approaches). traffic.js lights a
-    //     whole axis array at once (and still handles the single-head path).
-    // Geometry is shared via geo() so adding ~2-4 heads/intersection stays
-    // draw-call cheap; the four base materials are shared, but each lamp keeps
-    // its OWN emissive material (traffic.js mutates it per-head every cycle).
-    const sigPoleG = geo("sigPole", () => new THREE.CylinderGeometry(0.12, 0.14, 5.2, 8));
-    const sigBoxG = geo("sigBox", () => new THREE.BoxGeometry(0.6, 1.6, 0.5));
-    const sigLampG = geo("sigLamp", () => new THREE.SphereGeometry(0.18, 10, 8));
-    const sigPoleM = mat(0x2c2f35), sigBoxM = mat(0x1c1f24);
-    // SIGNAL_INSTANCED (default ON): the 3 bulbs per head used to be 3 meshes
-    // with a FRESH lampMat() each — ~504 un-batchable draw calls + 504 unique
-    // materials city-wide, ~30% of the whole static draw budget (measured).
-    // Instanced mode pools every bulb of a colour slot into ONE InstancedMesh
-    // (3 total) with per-instance instanceColor carrying lit/dark, and hands
-    // traffic.js a tiny {lit, sigPool, sigIdx} handle instead of a mesh —
-    // CBZ.citySignalSet flips one instance colour on phase change.
-    if (CBZ.CONFIG && CBZ.CONFIG.SIGNAL_INSTANCED == null) CBZ.CONFIG.SIGNAL_INSTANCED = true;
-    const sigInstanced = !!(CBZ.CONFIG && CBZ.CONFIG.SIGNAL_INSTANCED && THREE.InstancedMesh);
-    const sigLampHandles = { red: [], yel: [], grn: [] };   // instanced-mode bulb handles
-    function makeHead(px, pz, rotY) {
-      const head = new THREE.Group();
-      // two approaches share a near corner (e.g. the S and E heads both want
-      // the +x/-z corner). Nudge each head sideways (perpendicular to its face)
-      // so the poles sit shoulder-to-shoulder on the kerb instead of z-fighting.
-      const sx = Math.cos(rotY) * 0.5, sz = -Math.sin(rotY) * 0.5;
-      head.position.set(px + sx, 0, pz + sz); head.rotation.y = rotY;
-      const pole = new THREE.Mesh(sigPoleG, sigPoleM);
-      pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
-      // VEH_COLLIDE_FIX: the pole is solid street furniture like the lamppost
-      // below — without this, cars drove straight through every signal.
-      // Slim, and matched to the mast: the shaft is r=0.14 at the butt, so a
-      // 0.25 half-extent was a 0.5 m block around a 0.28 m pole.
-      if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) solidCollider(px + sx, pz + sz, 0.16, pole);
-      const box = new THREE.Mesh(sigBoxG, sigBoxM);
-      box.position.set(0, 4.6, 0); head.add(box);
-      // lamp world position: head's world xz + its face offset (local z=0.28
-      // rotated by rotY) — needed up-front by both the instanced bulbs and the
-      // glow-shell spots below.
-      const faceX = Math.sin(rotY) * 0.28, faceZ = Math.cos(rotY) * 0.28;
-      const wx = px + sx + faceX, wz = pz + sz + faceZ;
-      let red, yel, grn;
-      if (sigInstanced) {
-        red = { lit: false, x: wx, y: 5.1, z: wz };
-        yel = { lit: false, x: wx, y: 4.6, z: wz };
-        grn = { lit: false, x: wx, y: 4.1, z: wz };
-        sigLampHandles.red.push(red); sigLampHandles.yel.push(yel); sigLampHandles.grn.push(grn);
-      } else {
-        red = new THREE.Mesh(sigLampG, lampMat(0xff3b3b));
-        yel = new THREE.Mesh(sigLampG, lampMat(0xffcf3b));
-        grn = new THREE.Mesh(sigLampG, lampMat(0x39ff66));
-        red.position.set(0, 5.1, 0.28); yel.position.set(0, 4.6, 0.28); grn.position.set(0, 4.1, 0.28);
-        head.add(red, yel, grn);
+    // ---- TRAFFIC SIGNALS: real US mast-arm installations ----
+    // Standard four-leg layout, FAR-SIDE signals (a driver reads the heads
+    // across the junction, not the ones beside their bumper):
+    //   • each approach gets a MAST ARM from the pole on its far-right corner,
+    //     reaching out over its lanes with one 3-section head centred over
+    //     every lane (lane centres come from the road record's lane contract,
+    //     the same numbers traffic drives on), and the cross street's name
+    //     blade hung from the arm beside the heads;
+    //   • plus a POLE-MOUNTED head on its far-left corner;
+    //   • pedestrian heads (hand over walking person) face across every
+    //     crosswalk from both ends, with a push button below each one.
+    // The lane geometry here is not mirror-symmetric (northbound runs at +x,
+    // eastbound at +z), so the four approaches are a literal table, checked
+    // against traffic.js's laneOffset(), not a rotated formula.
+    // Mast poles therefore stand on the NE and SW corners (two arms each, at
+    // right angles, plus a cobra luminaire on top); the NW and SE corners carry
+    // the slimmer pedestal poles.
+    // Every piece is one InstancedMesh prototype from city/street_hardware.js
+    // (a draw call per prototype for the whole city); the lenses are the
+    // three instanced colour pools traffic.js already drives through
+    // CBZ.citySignalSet — every extra head is simply another handle in the
+    // SAME ns/ew axis arrays, so traffic.js needed no change at all.
+    const HW = CBZ.streetHW || null;
+    const D = HW ? HW.D : {      // headless (no kit loaded): handles only, same numbers
+      MAST_TOP: 7.7, ARM_Y: 6.25, HEAD_HANG: 0.76, LENS_Z: 0.135, LENS_DY: 0.355, SIDE_BACK: 0.46,
+      PED_Y: 2.72, PED_OUT: 0.35, PED_LENS_DY: 0.19, SIDE_HEAD_Y: 3.95,
+      mastRAt: () => 0.18, pedRAt: () => 0.1, armYAt: (s, L) => 6.25 + 0.35 * s / (L || 1), armRAt: () => 0.1,
+    };
+    const sigLampHandles = { red: [], yel: [], grn: [] };  // every vehicle lens, by colour slot
+    const sigShellHeads = [];      // {head, spots}: mast-arm heads carry a Fresnel halo per bulb
+    const sigPoolSrc = [];         // one faint coloured wash on the road per approach
+    const pedHandles = [];         // {axis, hand, walk, state} per crosswalk end
+    const HWI = { mast: [], ped: [], arm: [], headTop: [], headSide: [], pedHead: [] };
+    const mastLums = [];           // {x,z,ang}: the luminaire on top of each mast pole
+    const signalBlades = city._signalBlades = [];   // drawn into the sign atlas by world/street_furniture.js
+    function vehHead(cx, cy, cz, ry, mount, halo) {
+      const fx = Math.sin(ry), fz = Math.cos(ry);
+      const lx = cx + fx * D.LENS_Z, lz = cz + fz * D.LENS_Z;
+      const red = { lit: false, x: lx, y: cy + D.LENS_DY, z: lz, ry: ry };
+      const yel = { lit: false, x: lx, y: cy, z: lz, ry: ry };
+      const grn = { lit: false, x: lx, y: cy - D.LENS_DY, z: lz, ry: ry };
+      sigLampHandles.red.push(red); sigLampHandles.yel.push(yel); sigLampHandles.grn.push(grn);
+      (mount === "top" ? HWI.headTop : HWI.headSide).push({ x: cx, y: cy, z: cz, ry: ry });
+      const head = { red, yel, grn };
+      if (halo) {
+        const hx = lx + fx * 0.06, hz = lz + fz * 0.06;
+        const spots = {
+          red: { x: hx, y: red.y, z: hz, r: 0.3 },
+          yel: { x: hx, y: yel.y, z: hz, r: 0.3 },
+          grn: { x: hx, y: grn.y, z: hz, r: 0.3 },
+        };
+        sigGlowSpots.red.push(spots.red); sigGlowSpots.yel.push(spots.yel); sigGlowSpots.grn.push(spots.grn);
+        sigShellHeads.push({ head, spots });
       }
-      root.add(head);
-      // SMARTER STREET-LIGHT RENDERING: a Fresnel glow shell per lamp and a
-      // light-pool CANDIDATE at the lit lamp's position (only the currently-
-      // green one ever needs a real light, but registering all three is cheap
-      // and the pool driver below only ever lights whichever bulb is ON).
-      const redSpot = { x: wx, y: 5.1, z: wz, r: 0.34 };
-      const yelSpot = { x: wx, y: 4.6, z: wz, r: 0.34 };
-      const grnSpot = { x: wx, y: 4.1, z: wz, r: 0.34 };
-      sigGlowSpots.red.push(redSpot); sigGlowSpots.yel.push(yelSpot); sigGlowSpots.grn.push(grnSpot);
-      // kept together (not just pushed into the flat arrays) so the sync
-      // driver below can dim/relight all three of THIS head's shells as a
-      // matched set without hunting for them by array index.
-      lightCandidates.push({ x: wx, y: 4.6, z: wz, kind: "signal", head: { red, yel, grn }, spots: { red: redSpot, yel: yelSpot, grn: grnSpot } });
-      return { red, yel, grn };
+      return head;
+    }
+    // |lateral offset| of every lane centre for travel in the +dir direction,
+    // read from the road record (avenues carry a median, streets do not).
+    function laneCentres(vertical, line) {
+      let road = null;
+      for (const r of city.roads) {
+        if (!!r.vertical === vertical && Math.abs((vertical ? r.x : r.z) - line) < 0.6) { road = r; break; }
+      }
+      const n = road && CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(road) : 2;
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(road && CBZ.roadLaneCenter ? Math.abs(CBZ.roadLaneCenter(road, 1, i)) : 3.6 * (i + 0.5));
+      return out;
+    }
+    // leg = the leg the approach ARRIVES on; mast/far = corner sign pairs
+    // (x, z); arm = the arm's direction from its pole; face = rotY that turns a
+    // head's +Z face back at the arriving driver.
+    const APPROACHES = [
+      { leg: "S", axis: "ns", vert: true,  mast: [1, 1],   far: [-1, 1], arm: [-1, 0], face: Math.PI },       // northbound, lanes at +x
+      { leg: "N", axis: "ns", vert: true,  mast: [-1, -1], far: [1, -1], arm: [1, 0],  face: 0 },             // southbound, lanes at -x
+      { leg: "W", axis: "ew", vert: false, mast: [1, 1],   far: [1, -1], arm: [0, -1], face: -Math.PI / 2 },  // eastbound, lanes at +z
+      { leg: "E", axis: "ew", vert: false, mast: [-1, -1], far: [-1, 1], arm: [0, 1],  face: Math.PI / 2 },   // westbound, lanes at -z
+    ];
+    // crosswalk ends: the head on `corner` faces the far kerb of that
+    // crosswalk; its WALK follows the travel axis the crossing runs beside.
+    const PED_ENDS = [
+      { leg: "N", corner: [1, 1],   face: -Math.PI / 2, axis: "ew" }, { leg: "N", corner: [-1, 1],  face: Math.PI / 2, axis: "ew" },
+      { leg: "S", corner: [1, -1],  face: -Math.PI / 2, axis: "ew" }, { leg: "S", corner: [-1, -1], face: Math.PI / 2, axis: "ew" },
+      { leg: "E", corner: [1, 1],   face: Math.PI,      axis: "ns" }, { leg: "E", corner: [1, -1],  face: 0,           axis: "ns" },
+      { leg: "W", corner: [-1, 1],  face: Math.PI,      axis: "ns" }, { leg: "W", corner: [-1, -1], face: 0,           axis: "ns" },
+    ];
+    // one instance transform (yaw only) for the pools this file builds itself
+    const _pm4 = new THREE.Matrix4(), _pp = new THREE.Vector3(), _pq = new THREE.Quaternion(), _ps = new THREE.Vector3(1, 1, 1), _pY = new THREE.Vector3(0, 1, 0);
+    function placeInst(im, i, x, y, z, ry, sx, sy, sz) {
+      _pp.set(x, y, z);
+      if (_pq.setFromAxisAngle) _pq.setFromAxisAngle(_pY, ry || 0);
+      _ps.set(sx, sy, sz);
+      _pm4.compose(_pp, _pq, _ps);
+      im.setMatrixAt(i, _pm4);
     }
     // THE POLE STANDS ON THE CORNER THE CORNER ACTUALLY HAS. This offset used
     // to be a flat ROAD/2 + 0.6 — 0.6 m outside the square kerb, which is
@@ -1980,40 +1997,126 @@
         by.set(Math.round(J.x) + "," + Math.round(J.z), J);
       }
       const BITE = CBZ.roadCornerBite != null ? CBZ.roadCornerBite : (1 - Math.SQRT1_2);
+      // the grid's own corner (city/streetkit.js, radius city.street.cornerR):
+      // the pole lands at the back of the corner footway, clear of the kerb
+      const gridOff = city.street && city.street.cornerR > 0
+        ? city.ROAD / 2 + BITE * city.street.cornerR + 0.55 : city.ROAD / 2 + 0.6;
       return function (it) {
         const J = by.get(Math.round(it.x) + "," + Math.round(it.z));
-        if (!J) return city.ROAD / 2 + 0.6;
+        if (!J) return gridOff;
         return Math.max(J.ha, J.hb) + BITE * J.r + 0.55;
       };
     })();
     const NL = city.N != null ? city.N : ((city.xLines || [1]).length - 1);
     for (const it of city.intersections) {
       const off = juncOff(it);
+      // a leg exists unless this crossing sits on the outermost line on that side
+      const legs = { S: it.j > 0, N: it.j < NL, W: it.i > 0, E: it.i < NL };
       const ns = [], ew = [];
-      // N–S travel runs along the avenue at this xLine. Its SOUTH (-z) approach
-      // exists unless this is the southmost line (j==0); the NORTH (+z) approach
-      // exists unless it's the northmost (j==N). Each head sits on the near-RIGHT
-      // corner of that approach, face turned to the oncoming driver.
-      if (it.j > 0)  ns.push(makeHead(it.x + off, it.z - off, Math.PI));   // from S, faces -z, right=+x
-      if (it.j < NL) ns.push(makeHead(it.x - off, it.z + off, 0));         // from N, faces +z, right=-x
-      // E–W travel runs along the cross-street at this zLine. WEST (-x) approach
-      // exists unless westmost (i==0); EAST (+x) unless eastmost (i==N).
-      if (it.i > 0)  ew.push(makeHead(it.x - off, it.z + off, -Math.PI / 2)); // from W, faces -x, right=+z
-      if (it.i < NL) ew.push(makeHead(it.x + off, it.z - off, Math.PI / 2));  // from E, faces +x, right=-z
+      const vL = laneCentres(true, it.x), hL = laneCentres(false, it.z);
+      const corners = new Map();
+      const corner = function (s, kind) {
+        const k = s[0] + "," + s[1];
+        let c = corners.get(k);
+        if (!c) { c = { sx: s[0], sz: s[1], x: it.x + s[0] * off, z: it.z + s[1] * off, kind: kind }; corners.set(k, c); }
+        else if (kind === "mast") c.kind = "mast";
+        return c;
+      };
+      // every mast corner first, so a corner's pole type is settled before
+      // anything measures its radius
+      for (const A of APPROACHES) if (legs[A.leg]) corner(A.mast, "mast");
+      for (const A of APPROACHES) {
+        if (!legs[A.leg]) continue;
+        const lanes = A.vert ? vL : hL;
+        const P = corner(A.mast, "mast");
+        const fvx = Math.sin(A.face), fvz = Math.cos(A.face);
+        // distance along the arm from the pole axis to each lane centre
+        const along = lanes.map(function (c) { return off - c; }).sort(function (a, b) { return a - b; });
+        const L = along[along.length - 1] + 0.55;
+        HWI.arm.push({ x: P.x, y: D.ARM_Y, z: P.z, ry: Math.atan2(A.arm[0], A.arm[1]), sx: 1, sy: 1, sz: L });
+        const axisHeads = A.axis === "ns" ? ns : ew;
+        let firstHead = null, fx0 = 0, fy0 = 0, fz0 = 0;
+        for (const s of along) {
+          const hx = P.x + A.arm[0] * s, hz = P.z + A.arm[1] * s;
+          const hy = D.armYAt(s, L) - D.armRAt(s, L) - D.HEAD_HANG + 0.02;
+          const h = vehHead(hx, hy, hz, A.face, "top", true);
+          axisHeads.push(h);
+          if (!firstHead) { firstHead = h; fx0 = hx; fy0 = hy; fz0 = hz; }
+        }
+        // one real-light candidate per approach (the pooled PointLights below)
+        lightCandidates.push({ x: fx0, y: fy0, z: fz0, kind: "signal", head: firstHead });
+        // a faint wash of the lit colour on the road in front of the heads
+        let cMid = 0; for (const c of lanes) cMid += c; cMid /= lanes.length;
+        const sMid = off - cMid, span = (lanes[lanes.length - 1] - lanes[0]) + 5;
+        sigPoolSrc.push({ head: firstHead, x: P.x + A.arm[0] * sMid + fvx * 5.5, z: P.z + A.arm[1] * sMid + fvz * 5.5, ry: A.face, sx: span, sz: 11 });
+        // the CROSS street's name, hung from the arm between pole and heads
+        const sb = along[0] - 0.25 - 0.9 - 0.35;
+        if (sb - 0.9 > 0.4) {
+          const by = D.armYAt(sb, L) - D.armRAt(sb, L) - 0.02 - 0.225;
+          signalBlades.push({
+            x: P.x + A.arm[0] * sb, y: by, z: P.z + A.arm[1] * sb, nx: fvx, nz: fvz, w: 1.8, h: 0.45,
+            key: A.vert ? "h:" + Math.round(it.z) : "v:" + Math.round(it.x), vertical: !A.vert,
+          });
+        }
+        // the supplementary head bolted to the far-left pole
+        const F = corner(A.far, "ped");
+        const rr = (F.kind === "mast" ? D.mastRAt(D.SIDE_HEAD_Y) : D.pedRAt(D.SIDE_HEAD_Y)) + D.SIDE_BACK;
+        axisHeads.push(vehHead(F.x + fvx * rr, D.SIDE_HEAD_Y, F.z + fvz * rr, A.face, "side", false));
+      }
+      // pedestrian heads + push buttons on every crosswalk end
+      for (const E of PED_ENDS) {
+        if (!legs[E.leg]) continue;
+        const C = corner(E.corner, "ped");
+        const rr = C.kind === "mast" ? D.mastRAt(D.PED_Y) : D.pedRAt(D.PED_Y);
+        const fvx = Math.sin(E.face), fvz = Math.cos(E.face);
+        const bx = C.x + fvx * rr, bz = C.z + fvz * rr;
+        HWI.pedHead.push({ x: bx, y: D.PED_Y, z: bz, ry: E.face });
+        const lx = bx + fvx * (D.PED_OUT + 0.004), lz = bz + fvz * (D.PED_OUT + 0.004);
+        pedHandles.push({
+          axis: E.axis, state: -1,
+          hand: { x: lx, y: D.PED_Y + D.PED_LENS_DY, z: lz, ry: E.face },
+          walk: { x: lx, y: D.PED_Y - D.PED_LENS_DY, z: lz, ry: E.face },
+        });
+      }
+      // the poles themselves: slim colliders matched to the shafts
+      corners.forEach(function (c) {
+        const ry = Math.atan2(c.sx, c.sz);     // handhole faces the footway, not the road
+        if (c.kind === "mast") {
+          HWI.mast.push({ x: c.x, y: 0, z: c.z, ry: ry });
+          // the junction is the best-lit spot on a real street: a cobra head
+          // on every mast top, aimed diagonally into the box
+          mastLums.push({ x: c.x, z: c.z, ang: Math.atan2(-c.sx, -c.sz) });
+          solidCollider(c.x, c.z, 0.23, null);
+        } else {
+          HWI.ped.push({ x: c.x, y: 0, z: c.z, ry: ry });
+          solidCollider(c.x, c.z, 0.15, null);
+        }
+      });
       // ns/ew are arrays of heads; traffic.js lights every head in an axis
-      // together. Keep the legacy single-head fields pointing at the first head
-      // of each axis (harmless back-compat; only traffic.js reads it.light).
+      // together. The single-head fields point at each axis' first head.
       const ns0 = ns[0] || null, ew0 = ew[0] || null;
       it.light = { ns, ew, head: ns0 || ew0, red: ns0 && ns0.red, yel: ns0 && ns0.yel, grn: ns0 && ns0.grn };
     }
+    if (HW) {
+      const M = HW.hardwareMaterial(false), MDS = HW.hardwareMaterial(true);
+      const put = function (im) { if (im) root.add(im); };
+      put(HW.instanced("signal-mast", HW.mastPole(), M, HWI.mast, { cast: true }));
+      put(HW.instanced("signal-pedestal", HW.pedPole(), M, HWI.ped, { cast: true }));
+      put(HW.instanced("signal-arm", HW.mastArm(), M, HWI.arm, { cast: true }));
+      // heads are DoubleSide: the visors are open tubes you see the inside of
+      put(HW.instanced("signal-head-arm", HW.vehicleHead("top"), MDS, HWI.headTop, { cast: true }));
+      put(HW.instanced("signal-head-pole", HW.vehicleHead("side"), MDS, HWI.headSide, {}));
+      put(HW.instanced("ped-head", HW.pedHead(), MDS, HWI.pedHead, {}));
+    }
 
-    // ---- street lamps along the avenues ----
+    // ---- STREET LIGHTS: cobra heads on davit poles, both kerbs ----
     // Roads span the whole map, so a lamp marched down a road's length will,
     // wherever it crosses a perpendicular street, land in the MIDDLE of that
-    // cross-road. Skip any position that falls inside an intersection box
-    // (within ROAD/2 + margin of a perpendicular road centre-line) so lamps
-    // only ever stand on real sidewalk, never out in the traffic.
-    const crossClear = city.ROAD / 2 + 1.6;
+    // cross-road. Skip any position within the junction box, its rounded
+    // corners and the signal poles standing on them (ROAD/2 + 4.5) so lamps
+    // only ever stand on real footway. The junction itself is lit by the
+    // luminaires on top of the signal masts.
+    const crossClear = city.ROAD / 2 + 4.5;
     const crossLines = (vertical) => (vertical ? (city.allZLines || city.zLines) : (city.allXLines || city.xLines));
     function inCrossRoad(t, vertical, road) {
       const lines = crossLines(vertical);
@@ -2037,164 +2140,127 @@
       }
       return false;
     }
-    // shared lamp-post geometry/material — a tall pole, a curved arm reaching out
-    // over the road, and a cobra-head lamp facing DOWN (real LA streetlamp shape).
-    const lampPoleG = geo("lampPole", () => new THREE.CylinderGeometry(0.11, 0.15, 5.6, 6));
-    const lampArmG = geo("lampArm", () => new THREE.CylinderGeometry(0.07, 0.07, 1.6, 5));
-    const lampHeadG = geo("lampHead", () => new THREE.BoxGeometry(0.34, 0.2, 0.7));
-    const lampGlowG = geo("lampGlow", () => new THREE.PlaneGeometry(0.5, 0.5));
-    const lampBaseG = geo("lampBase", () => new THREE.CylinderGeometry(0.26, 0.32, 0.5, 6));
-    const poleM = smat(0x33373e), darkM = smat(0x1d2026);
-    const headLampM = lampMat(0xffe9a8);          // shared, glow driven by night
+    // THE ONE SOLVE (CBZ.lampMast, top of this file): an 8 m shaft, the head
+    // 2.8 m out over the kerb lane, 0.35 m of climb. street_hardware.js builds
+    // the davit as one sweep from the shaft top to that solved tip and hangs
+    // the cobra head on it, so pole, arm and head cannot come apart.
+    const LM = CBZ.lampMast({ poleH: 8.0, reach: 2.8, rise: 0.35, poleR: 0.1 });
+    const LO = HW ? HW.lumOffsets(LM) : { bellyY: LM.tipY - 0.04, bulbY: LM.tipY - 0.075, bulbZ: LM.tipZ + 0.33 };
+    const headLampM = lampMat(0xffe9a8);          // the drop lens: shared, glow driven by night
     headLampM.emissiveIntensity = 0.0;
-    const glowM = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
-    // LAMP_INSTANCED (default ON): every post's bulb + street-glow plane used
-    // to be 2 meshes — ~300+ draw calls city-wide that batch.js must spare
-    // (emissive / transparent). Both already share ONE material each and the
-    // night driver writes those materials globally, so the whole population
-    // collapses to 2 InstancedMesh with zero behaviour change; a shot-out
-    // lamp zero-scales its instances (hitProp above).
-    if (CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED == null) CBZ.CONFIG.LAMP_INSTANCED = true;
-    const lampInstanced = !!(CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED && THREE.InstancedMesh);
-    const lampBulbSpots = [];                     // {x,z,ang} per post, world space
-    // LAMP CENSUS — every luminaire in this world and whether its head actually
+    // LIGHT ON THE ROAD. Warm (~3000 K) and roughly a type-III footprint:
+    // long along the kerb, shorter across, hot spot under the head.
+    const LAMP_POOL_HEX = 0xffc88a, LAMP_POOL_K = 0.5, LAMP_POOL_ALONG = 17, LAMP_POOL_ACROSS = 12;
+    const SIG_POOL = { red: [0xff2a1c, 0.3], yel: [0xffae00, 0.24], grn: [0x1cff8e, 0.22] };
+    const lampBulbSpots = [];                     // {x,z,ang} per luminaire; index == lampIdx
+    const lampPosts = [];                         // pole instances (the full lamp prototype)
+    // LAMP CENSUS — every lamp POLE in this world and whether its head actually
     // overhangs the carriageway. towngen.js writes into the SAME record (its
     // towns are built earlier in the same buildCity), so CBZ.streetAudit reads
     // ONE count for the whole map and a future lamp source costs it no edit.
+    // (The mast-top luminaires are not poles and are not counted.)
     const lampCensus = city._lampCensus = city._lampCensus || { lamps: 0, noCollider: 0, overRoad: 0 };
-    // THE ONE SOLVE (CBZ.lampMast, top of this file). Pole 5.6 m, 1.45 m of
-    // overhang, 0.30 m of climb — the same three numbers as before, except the
-    // arm and the head are now derived FROM them together instead of being
-    // typed independently and drifting apart. The `: {…}` arm is the literal
-    // old geometry, so this file still builds a lamp if lampMast is ever gone.
-    const LM = CBZ.lampMast ? CBZ.lampMast({ poleH: 5.6, reach: 1.45, rise: 0.30, poleR: 0.11 })
-      : { poleCY: 2.8, armLen: 1.6, armRotX: Math.PI / 2, armCY: 5.69, armCZ: 0.75,
-          headY: 5.80, headZ: 1.45, bulbY: 5.70, bulbZ: 1.45, glowY: 5.64, reach: 1.45 };
-    function makeLampPost(x, z, faceX, faceZ) {
-      const g = new THREE.Group();
-      g.position.set(x, 0, z);
-      const ang = Math.atan2(faceX, faceZ);       // arm reaches toward road centre
-      g.rotation.y = ang;
-      const pole = new THREE.Mesh(lampPoleG, poleM); pole.position.y = LM.poleCY; pole.castShadow = true; g.add(pole);
-      const base = new THREE.Mesh(lampBaseG, darkM); base.position.y = 0.25; g.add(base);
-      // ARM: rotation.X (not Z) lays the cylinder along the fixture's +Z, i.e.
-      // out over the carriageway, and armRotX also tilts it up to meet the tip.
-      // scale.y stretches the cached 1.6 m cylinder to the solved length, so
-      // the arm literally ENDS where the head begins.
-      const arm = new THREE.Mesh(lampArmG, poleM);
-      arm.rotation.x = LM.armRotX; arm.scale.y = LM.armLen / 1.6;
-      arm.position.set(0, LM.armCY, LM.armCZ); g.add(arm);
-      const head = new THREE.Mesh(lampHeadG, darkM); head.position.set(0, LM.headY, LM.headZ); g.add(head);
-      let bulb = null, glow = null, lampIdx = null;
-      if (lampInstanced) {
-        lampIdx = lampBulbSpots.length;
-        lampBulbSpots.push({ x, z, ang });
-      } else {
-        bulb = new THREE.Mesh(geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5)), headLampM);
-        bulb.position.set(0, LM.bulbY, LM.bulbZ); g.add(bulb);
-        glow = new THREE.Mesh(lampGlowG, glowM); glow.rotation.x = -Math.PI / 2; glow.position.set(0, LM.glowY, LM.bulbZ); g.add(glow);
-        nightLamps.push(glow);
-      }
-      root.add(g);
-      // SLIM COLLIDER, matched to the trunk. The shaft is r=0.11 at the top and
-      // 0.15 at the butt; the old 0.3 box was a 0.6 m obstacle around a 0.3 m
-      // pole — twice the pole, standing in the gutter, catching cars on nothing.
-      solidCollider(x, z, 0.17, pole);
-      city.streetProps.push({ x, z, type: "lamp" });
-      // SMARTER STREET-LIGHT RENDERING: this bulb's world position (the solved
-      // bulb offset rotated by `ang`, the same rotation the group itself uses)
-      // gets a Fresnel glow-shell spot AND is a candidate for the small real
-      // THREE.PointLight pool below — so the light a lamp casts comes off the
-      // HEAD, out over the road, never off the base. Shot-out lamps are handled
-      // at push time by wiring the SAME record's `.glowSpot` — hitProp (above)
-      // dims it through setGlowOn when it goes dark.
-      const bwx = x + Math.sin(ang) * LM.bulbZ, bwz = z + Math.cos(ang) * LM.bulbZ;
-      const glowSpot = { x: bwx, y: LM.bulbY, z: bwz, r: 0.42 };
+    // every luminaire (post or mast top) registers the same records: a lens
+    // instance, a light-pool instance at the SAME index (hitProp zero-scales
+    // both through lampPools when the head is shot out), a Fresnel glow shell,
+    // a shootable centred on the HEAD, and a real-light candidate.
+    function registerLamp(x, z, ang) {
+      const lampIdx = lampBulbSpots.length;
+      lampBulbSpots.push({ x, z, ang });
+      const bwx = x + Math.sin(ang) * LO.bulbZ, bwz = z + Math.cos(ang) * LO.bulbZ;
+      const glowSpot = { x: bwx, y: LO.bulbY, z: bwz, r: 0.36 };
       lampGlowSpots.push(glowSpot);
-      // shoot the HEAD and the light dies (the pole just sparks via walls/ground)
-      const shootRec = { type: "lamp", x, z, y: LM.bulbY, r: 0.7, bulb, glow, lampIdx, broken: false, glowSpot };
+      const shootRec = { type: "lamp", x: bwx, z: bwz, y: LO.bulbY, r: 0.7, bulb: null, glow: null, lampIdx, broken: false, glowSpot };
       shootables.push(shootRec);
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
-      lightCandidates.push({ x: bwx, y: LM.bulbY, z: bwz, kind: "lamp", ref: shootRec });
-      return g;
+      lightCandidates.push({ x: bwx, y: LO.bulbY, z: bwz, kind: "lamp", ref: shootRec });
     }
+    function makeLampPost(x, z, faceX, faceZ) {
+      const ang = Math.atan2(faceX, faceZ);       // davit reaches toward the road centre
+      lampPosts.push({ x, y: 0, z, ry: ang });
+      // SLIM COLLIDER, matched to the 0.155 m butt of the shaft.
+      solidCollider(x, z, 0.17, null);
+      city.streetProps.push({ x, z, type: "lamp" });
+      registerLamp(x, z, ang);
+    }
+    for (const m of mastLums) registerLamp(m.x, m.z, m.ang);
+    // Stations every LAMP_STEP metres alternate kerbs, so each kerb gets a
+    // lamp every 2*LAMP_STEP, staggered against the opposite one: the classic
+    // two-sided arterial layout, and the pools overlap into a continuous lit
+    // carriageway instead of isolated spots.
+    const LAMP_STEP = 13;
     for (const r of city.roads) {
       // NO STREET LAMPS ON HIGHWAYS/BRIDGES (owner: "dumb useless props like
-      // streetlights on the highway and bridges"). This loop is the SECOND lamp
-      // source — HWY_LAMPS only gates highways.js's own deck poles; this one
-      // walked EVERY road including causeways. Real highways/spans here run
-      // unlit, so skip those districts outright.
+      // streetlights on the highway and bridges"). Real highways/spans here
+      // run unlit, so skip those districts outright.
       if (r.district === "highway" || r.district === "bridge") continue;
-      // NO CITY STREET FURNITURE ON RESTRICTED GROUND (owner: "all the props
-      // that surround roads overlap with places like the airport"). A road the
-      // builder reserved to one vehicle class — the apron service lanes, a
-      // compound's gate spur — is not a street, and marching lamp posts down it
-      // is how streetlights ended up standing on a live airfield. One call,
-      // and it is the SAME law city/roadrules.js applies to the roads
-      // themselves. Degrade-safe: no roadrules.js, old behaviour exactly.
+      // NO CITY STREET FURNITURE ON RESTRICTED GROUND (roadrules.js): apron
+      // service lanes and compound spurs are not streets.
       if (CBZ.roadPropRoadOk && !CBZ.roadPropRoadOk(r)) continue;
-      const n = Math.max(2, Math.floor(r.len / 26));
+      const n = Math.max(2, Math.floor(r.len / LAMP_STEP));
+      const half = (r.w != null ? r.w : city.ROAD) / 2;
       for (let i = 0; i <= n; i++) {
         const t = -r.len / 2 + i * (r.len / n);
         if (inCrossRoad(t, r.vertical, r)) continue;     // would sit in a cross-street
         const sgn = (i % 2 === 0 ? 1 : -1);
-        // per-road offset: a lamp beside a wide highway (r.w=24) must clear the
-        // real carriageway, not the city-grid default — else it sits on the deck.
-        const side = sgn * ((r.w != null ? r.w : city.ROAD) / 2 + 1.0);
+        // per-road offset: clear the road's own stamped width, then 0.8 m of footway
+        const side = sgn * (half + 0.8);
         const x = r.vertical ? r.x + side : r.x + t;
         const z = r.vertical ? r.z + t : r.z + side;
         if (Math.abs(x) > 9999) continue;
-        // ...and never INSIDE a place this road is only passing, nor inside any
-        // declared keep-out. The lamp belongs to the road; the road does not
-        // own the airfield it drives past.
+        // ...never INSIDE a place this road is only passing, nor any keep-out
         if (CBZ.roadPropClear && !CBZ.roadPropClear(x, z, r)) continue;
         if (inOtherTravelLane(x, z, r)) continue;
         if (nearDoor(x, z, 1.8)) continue;
-        // arm reaches toward the road centre (opposite the sidewalk side)
         const fx = r.vertical ? -sgn : 0, fz = r.vertical ? 0 : -sgn;
         makeLampPost(x, z, fx, fz);
-        // CENSUS, measured not asserted: where did the head actually land? A
-        // luminaire over the pavement lights the shopfront and leaves the lane
-        // dark, which is what towngen.js's lamps did for their whole life.
+        // CENSUS, measured not asserted: where did the head actually land?
         lampCensus.lamps++;
-        const hx = x + fx * LM.reach, hz = z + fz * LM.reach;
-        const half = (r.w != null ? r.w : city.ROAD) / 2;
+        const hx = x + fx * LO.bulbZ, hz = z + fz * LO.bulbZ;
         if (r.vertical ? Math.abs(hx - r.x) < half : Math.abs(hz - r.z) < half) lampCensus.overRoad++;
       }
     }
-    // build the pooled bulb + glow InstancedMesh (LAMP_INSTANCED) now that
-    // every post is placed. Both share the SAME night-driven materials the
-    // per-mesh path used, so the global night writes light every instance.
-    if (lampInstanced && lampBulbSpots.length) {
-      const bulbG = geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5));
-      const bulbIM = new THREE.InstancedMesh(bulbG, headLampM, lampBulbSpots.length);
-      const glowIM = new THREE.InstancedMesh(lampGlowG, glowM, lampBulbSpots.length);
-      bulbIM.castShadow = false; bulbIM.receiveShadow = false;
-      glowIM.castShadow = false; glowIM.receiveShadow = false;
-      bulbIM.userData.terrain = true; glowIM.userData.terrain = true;   // farcull: city-wide pools
-      const _m4 = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
-      const _qy = new THREE.Quaternion(), _qx = new THREE.Quaternion(), _q = new THREE.Quaternion();
-      const _Y = new THREE.Vector3(0, 1, 0), _X = new THREE.Vector3(1, 0, 0);
+    // Build: the poles + davits + heads (two prototypes, one draw each), the
+    // lens pool, and the ground light pools — lamps first so a lamp's pool
+    // index IS its lampIdx, then one faint coloured wash per signal approach.
+    if (HW) {
+      const M = HW.hardwareMaterial(false);
+      const posts = HW.instanced("lamp-post", HW.luminaire(LM, true, "city"), M, lampPosts, { cast: true });
+      const tops = HW.instanced("mast-luminaire", HW.luminaire(LM, false, "city"), M,
+        mastLums.map(function (m) { return { x: m.x, y: 0, z: m.z, ry: m.ang }; }), { cast: true });
+      if (posts) root.add(posts);
+      if (tops) root.add(tops);
+    }
+    lampPools.bulb = null; lampPools.glow = null;      // never a previous world's pools
+    if (lampBulbSpots.length && THREE.InstancedMesh) {
+      const lensG = HW ? HW.lampLens() : geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5));
+      const bulbIM = new THREE.InstancedMesh(lensG, headLampM, lampBulbSpots.length);
+      bulbIM.name = "street-lamp-lenses";
+      bulbIM.castShadow = false; bulbIM.receiveShadow = false; bulbIM.frustumCulled = false;
+      bulbIM.userData.terrain = true;   // farcull: city-wide pool
       for (let i = 0; i < lampBulbSpots.length; i++) {
         const sp = lampBulbSpots[i];
-        // SAME solve as the mesh path above — the instanced lens sits under the
-        // instanced head, not at a second hand-typed offset.
-        const bx = sp.x + Math.sin(sp.ang) * LM.bulbZ, bz = sp.z + Math.cos(sp.ang) * LM.bulbZ;
-        _qy.setFromAxisAngle(_Y, sp.ang);
-        _p.set(bx, LM.bulbY, bz);
-        _m4.compose(_p, _qy, _s);
-        bulbIM.setMatrixAt(i, _m4);
-        _qx.setFromAxisAngle(_X, -Math.PI / 2);
-        _q.copy(_qy).multiply(_qx);
-        _p.set(bx, LM.glowY, bz);
-        _m4.compose(_p, _q, _s);
-        glowIM.setMatrixAt(i, _m4);
+        placeInst(bulbIM, i, sp.x + Math.sin(sp.ang) * LO.bulbZ, LO.bellyY - 0.003, sp.z + Math.cos(sp.ang) * LO.bulbZ, sp.ang, 1, 1, 1);
       }
       bulbIM.instanceMatrix.needsUpdate = true;
-      glowIM.instanceMatrix.needsUpdate = true;
-      root.add(bulbIM); root.add(glowIM);
-      lampPools.bulb = bulbIM; lampPools.glow = glowIM;
+      root.add(bulbIM);
+      lampPools.bulb = bulbIM;
+    }
+    if (HW) {
+      const items = [];
+      for (const sp of lampBulbSpots) {
+        const fx = Math.sin(sp.ang), fz = Math.cos(sp.ang);
+        const cx = sp.x + fx * (LO.bulbZ + 0.9), cz = sp.z + fz * (LO.bulbZ + 0.9);
+        items.push({ x: cx, y: HW.seatY(city, cx, cz, sp.ang, LAMP_POOL_ALONG, LAMP_POOL_ACROSS), z: cz, ry: sp.ang,
+          sx: LAMP_POOL_ALONG, sz: LAMP_POOL_ACROSS, color: LAMP_POOL_HEX, k: LAMP_POOL_K });
+      }
+      for (const s of sigPoolSrc) {
+        s.idx = items.length; s.key = null;
+        items.push({ x: s.x, y: HW.seatY(city, s.x, s.z, s.ry, s.sx, s.sz), z: s.z, ry: s.ry, sx: s.sx, sz: s.sz, color: 0x000000, k: 0 });
+      }
+      const pools = HW.lightPools(items);
+      if (pools) { root.add(pools); lampPools.glow = pools; }
     }
 
     // =====================================================================
@@ -3267,8 +3333,10 @@
         lastN = n;
         const on = n;                               // 0..1
         headLampM.emissiveIntensity = 0.05 + on * 0.95;
-        glowM.opacity = on * 0.72;     // brighter lamp pool — the street reads by lamplight after dark
-        for (const glow of nightLamps) { if (glow.material === glowM) continue; if (glow.material.emissive) glow.material.emissiveIntensity = on * 0.9; }
+        // the light pools on the asphalt: the street reads by lamplight after dark
+        const pools = lampPools.glow;
+        if (pools) { pools.material.opacity = on * 0.9; pools.visible = on > 0.02; }
+        for (const glow of nightLamps) { if (glow.material && glow.material.emissive) glow.material.emissiveIntensity = on * 0.9; }
         for (const am of nightAds) { am.emissiveIntensity = 0.06 + on * 0.6; }
       });
     }
@@ -3339,42 +3407,99 @@
     const sigYelIM = buildGlowShellPool(0xffcf3b, sigGlowSpots.yel, 0.4);
     const sigGrnIM = buildGlowShellPool(0x39ff66, sigGlowSpots.grn, 0.4);
 
-    // ---- INSTANCED SIGNAL BULBS (SIGNAL_INSTANCED) --------------------------
-    // one InstancedMesh per colour SLOT (red/yel/grn), unlit white Basic
-    // material — the actual hue lives in per-instance instanceColor so ONE
-    // upload flips a bulb between its colour and housing-dark. userData.terrain
-    // keeps core/farcull's distance culler off these city-wide pools (their
-    // prototype bounding sphere sits at the origin and would mis-measure).
-    const _sigDark = new THREE.Color(0x20242a);
-    if (sigInstanced) {
-      const sigBulbM = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      sigBulbM._shared = true;
-      const _m4 = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
+    // ---- SIGNAL LENSES ------------------------------------------------------
+    // One InstancedMesh per colour SLOT (red/amber/green) for every vehicle
+    // head in the city, flat 12-inch discs under their visors, unlit Basic
+    // material: the hue lives in instanceColor, so ONE upload flips a lens
+    // between LIT and its own dark tinted glass (a dark red lens still reads
+    // red-ish at noon, exactly like the real thing). traffic.js calls
+    // CBZ.citySignalSet with the handle; nothing there knows about meshes.
+    // userData.terrain keeps core/farcull off these city-wide pools.
+    const LENS_LIT = { red: 0xff2a1c, yel: 0xffae00, grn: 0x1cff8e };
+    const LENS_DARK = { red: 0x2a0806, yel: 0x2c1d04, grn: 0x052418 };
+    const _sigC = new THREE.Color();
+    if (THREE.InstancedMesh) {
+      const lensG = HW ? HW.signalLens() : geo("sigLens", () => new THREE.CircleGeometry(0.15, 14));
+      const lensM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      lensM._shared = true;
       for (const key of ["red", "yel", "grn"]) {
         const handles = sigLampHandles[key];
         if (!handles.length) continue;
-        const im = new THREE.InstancedMesh(sigLampG, sigBulbM, handles.length);
-        im.castShadow = false; im.receiveShadow = false;
-        im.userData.terrain = true;   // farcull: pool spans the city — never distance-cull
+        const im = new THREE.InstancedMesh(lensG, lensM, handles.length);
+        im.name = "signal-lenses-" + key;
+        im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
+        im.userData.terrain = true;
         for (let i = 0; i < handles.length; i++) {
-          _p.set(handles[i].x, handles[i].y, handles[i].z);
-          _m4.compose(_p, _q, _s);
-          im.setMatrixAt(i, _m4);
-          im.setColorAt(i, _sigDark);
-          handles[i].sigPool = im; handles[i].sigIdx = i;
+          const h = handles[i];
+          placeInst(im, i, h.x, h.y, h.z, h.ry, 1, 1, 1);
+          h.litHex = LENS_LIT[key]; h.darkHex = LENS_DARK[key];
+          im.setColorAt(i, _sigC.setHex(h.darkHex));
+          h.sigPool = im; h.sigIdx = i;
         }
         im.instanceMatrix.needsUpdate = true;
         if (im.instanceColor) im.instanceColor.needsUpdate = true;
         root.add(im);
       }
     }
-    const _sigC = new THREE.Color();
     CBZ.citySignalSet = function (lamp, on, colorHex) {
       if (!lamp || !lamp.sigPool) return;
       lamp.lit = !!on;
-      lamp.sigPool.setColorAt(lamp.sigIdx, on ? _sigC.setHex(colorHex) : _sigDark);
+      const hex = on ? (lamp.litHex != null ? lamp.litHex : colorHex) : (lamp.darkHex != null ? lamp.darkHex : 0x20242a);
+      lamp.sigPool.setColorAt(lamp.sigIdx, _sigC.setHex(hex));
       if (lamp.sigPool.instanceColor) lamp.sigPool.instanceColor.needsUpdate = true;
     };
+    // ---- PEDESTRIAN SIGNALS ---------------------------------------------------
+    // Two lens pools (raised hand, walking person) sharing one icon texture.
+    // They run off traffic.js's own phase clock (CBZ.cityPhase), so they can
+    // never disagree with the vehicle heads: WALK while the parallel traffic
+    // has green, flashing hand through its amber, steady hand otherwise.
+    const PED_LIT = { hand: 0xff7a14, walk: 0xeaf4ff }, PED_DARK = { hand: 0x2a1c12, walk: 0x1c2024 };
+    const pedTex = HW ? HW.pedTexture() : null;
+    if (pedTex && pedHandles.length && THREE.InstancedMesh) {
+      const pm = new THREE.MeshBasicMaterial({ color: 0xffffff, map: pedTex });
+      pm._shared = true;
+      for (const which of ["hand", "walk"]) {
+        const im = new THREE.InstancedMesh(HW.pedLens(which), pm, pedHandles.length);
+        im.name = "ped-signal-" + which;
+        im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
+        im.userData.terrain = true;
+        for (let i = 0; i < pedHandles.length; i++) {
+          const h = pedHandles[i][which];
+          placeInst(im, i, h.x, h.y, h.z, h.ry, 1, 1, 1);
+          im.setColorAt(i, _sigC.setHex(PED_DARK[which]));
+          h.pool = im; h.idx = i; h.which = which;
+        }
+        im.instanceMatrix.needsUpdate = true;
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        root.add(im);
+      }
+    }
+    function pedSet(h, on) {
+      if (!h || !h.pool) return;
+      h.pool.setColorAt(h.idx, _sigC.setHex(on ? PED_LIT[h.which] : PED_DARK[h.which]));
+      h.pool.instanceColor.needsUpdate = true;
+    }
+    if (CBZ.onAlways && pedHandles.length && !city._pedSignalHooked) {
+      city._pedSignalHooked = true;
+      let pacc = 0;
+      CBZ.onAlways(7.25, function (dt) {
+        const g = CBZ.game;
+        if (!g || g.mode !== "city" || !root.visible) return;
+        pacc += (dt || 0.016);
+        if (pacc < 0.2) return; pacc = 0;
+        const ph = CBZ.cityPhase ? CBZ.cityPhase() : null;
+        if (!ph) return;
+        const blink = ((((CBZ.now || 0) / 500) | 0) % 2) === 0;
+        for (let i = 0; i < pedHandles.length; i++) {
+          const p = pedHandles[i], st = ph[p.axis];
+          const walk = st === "green", hand = st === "red" || (st === "yellow" && blink);
+          const code = (walk ? 1 : 0) | (hand ? 2 : 0);
+          if (code === p.state) continue;
+          p.state = code;
+          pedSet(p.walk, walk); pedSet(p.hand, hand);
+        }
+      });
+    }
     // lit-state read that works for BOTH bulb representations: instanced
     // handles carry .lit (written by traffic.js's lampSet); legacy meshes are
     // read off their material exactly as before.
@@ -3406,7 +3531,7 @@
     // the phase clock here, so this never drifts from the real state machine
     // (traffic.js already IS the red/yellow/green timer this task asked for;
     // this only mirrors its output onto the Fresnel shells).
-    if (CBZ.onAlways && (sigRedIM || sigYelIM || sigGrnIM) && !city._sigGlowHooked) {
+    if (CBZ.onAlways && (sigRedIM || sigYelIM || sigGrnIM || (lampPools.glow && sigPoolSrc.length)) && !city._sigGlowHooked) {
       city._sigGlowHooked = true;
       let acc = 0;
       CBZ.onAlways(7.2, function (dt) {
@@ -3414,13 +3539,26 @@
         if (!g || g.mode !== "city" || !root.visible) return;
         acc += (dt || 0.016);
         if (acc < 0.15) return; acc = 0;   // a couple times a second is plenty — the phase itself only flips a few times per cycle
-        for (let i = 0; i < lightCandidates.length; i++) {
-          const c = lightCandidates[i];
-          if (c.kind !== "signal" || !c.head || !c.spots) continue;
-          const h = c.head, sp = c.spots;
+        for (let i = 0; i < sigShellHeads.length; i++) {
+          const h = sigShellHeads[i].head, sp = sigShellHeads[i].spots;
           setGlowOn(sp.red, sigLit(h.red));
           setGlowOn(sp.yel, sigLit(h.yel));
           setGlowOn(sp.grn, sigLit(h.grn));
+        }
+        // the coloured wash on the road in front of each approach retints
+        // only when that approach's phase actually changes
+        const pools = lampPools.glow;
+        if (pools && HW) {
+          let dirty = false;
+          for (let i = 0; i < sigPoolSrc.length; i++) {
+            const s = sigPoolSrc[i], h = s.head;
+            const key = sigLit(h.red) ? "red" : sigLit(h.yel) ? "yel" : sigLit(h.grn) ? "grn" : null;
+            if (key === s.key) continue;
+            s.key = key; dirty = true;
+            if (key) HW.setPoolColor(pools, s.idx, SIG_POOL[key][0], SIG_POOL[key][1]);
+            else HW.setPoolColor(pools, s.idx, 0x000000, 0);
+          }
+          if (dirty && pools.instanceColor) pools.instanceColor.needsUpdate = true;
         }
       });
     }
@@ -3512,7 +3650,10 @@
             // the city's bright ambient night. Keep the bounded eight-light
             // pool; give each selected cobra head enough reach to paint its
             // own patch of road after the global fill is removed.
-            slot.light.intensity = (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false ? 3.6 : 0.85) * nightK;
+            // The road under every head is painted by the additive light
+            // pools now; this real light only has to reach what a decal
+            // cannot (walls, cars, people), so it no longer doubles the pool.
+            slot.light.intensity = (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false ? 2.2 : 0.85) * nightK;
           }
           slot.light.visible = slot.light.intensity > 0.01;
         }
