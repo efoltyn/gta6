@@ -312,7 +312,13 @@
   // footway: 4 slabs of 1.5 m along u (6 m period), one slab across v
   function footwayCanvas() {
     const c = canvas(512, 128), g = c.getContext("2d"), rnd = lcg(71);
-    const tones = [150, 143, 156, 146];
+    // CONCRETE GREY, NOT PAPER. At ~150 sRGB these slabs washed out to a flat
+    // near-white under the city's sun + hemisphere (the Lambert sum runs well
+    // over 1), so the footway read as an untextured placeholder slab next to
+    // the asphalt. ~122 lands a sunlit slab at the grey real broom-finished
+    // concrete photographs at, and leaves headroom for the joints, stains and
+    // wear below to actually show.
+    const tones = [124, 118, 128, 121];
     for (let s = 0; s < 4; s++) {
       const t = tones[s];
       g.fillStyle = "rgb(" + t + "," + (t - 2) + "," + (t - 7) + ")";
@@ -326,24 +332,41 @@
       }
       g.globalAlpha = 1;
     }
-    speckle(g, 512, 128, 2600, rnd, 128, 70, 1.5);
+    speckle(g, 512, 128, 2600, rnd, 108, 64, 1.5);
+    // broom finish: fine streaks ACROSS the walk (v), the grain a real
+    // footway carries and a flat fill never does
+    for (let i = 0; i < 420; i++) {
+      g.globalAlpha = 0.05 + rnd() * 0.07;
+      g.fillStyle = rnd() < 0.5 ? "#5e5a54" : "#9c978e";
+      g.fillRect(rnd() * 512, rnd() * 128, 0.8, 10 + rnd() * 34);
+    }
+    g.globalAlpha = 1;
+    // old drip / rust stains
+    for (let i = 0; i < 5; i++) {
+      const sx = rnd() * 512, sy = rnd() * 128, r = 10 + rnd() * 22;
+      const gr = g.createRadialGradient(sx, sy, 1, sx, sy, r);
+      gr.addColorStop(0, "rgba(64,58,50,0.22)"); gr.addColorStop(1, "rgba(64,58,50,0)");
+      g.fillStyle = gr; g.fillRect(sx - r, sy - r, r * 2, r * 2);
+    }
     // a hairline crack in one slab, gum spots in another
-    g.strokeStyle = "rgba(70,66,60,0.55)"; g.lineWidth = 1;
+    g.strokeStyle = "rgba(52,49,45,0.6)"; g.lineWidth = 1;
     g.beginPath(); g.moveTo(290, 8); g.lineTo(304, 44); g.lineTo(298, 80); g.lineTo(312, 122); g.stroke();
+    g.beginPath(); g.moveTo(40, 128); g.lineTo(52, 96); g.lineTo(47, 70); g.stroke();
     g.fillStyle = "rgba(60,58,56,0.35)";
     for (let i = 0; i < 7; i++) { g.beginPath(); g.arc(20 + rnd() * 100, 20 + rnd() * 90, 1.5 + rnd() * 2, 0, 6.3); g.fill(); }
     // tooled joints between the 1.5 m slabs, with the trowelled edge beside them
     for (let s = 0; s <= 4; s++) {
       const x = s * 128;
-      g.fillStyle = "rgba(78,74,68,0.95)"; g.fillRect(x - 2, 0, 4, 128);
-      g.fillStyle = "rgba(190,186,178,0.5)"; g.fillRect(x + 2, 0, 1, 128);
+      g.fillStyle = "rgba(70,66,60,0.30)"; g.fillRect(x - 5, 0, 10, 128);        // dirt caught along it
+      g.fillStyle = "rgba(46,44,40,0.95)"; g.fillRect(x - 1.5, 0, 3, 128);       // the tooled joint (~1 cm)
+      g.fillStyle = "rgba(168,163,154,0.45)"; g.fillRect(x + 2, 0, 1, 128);     // trowelled arris
     }
     return c;
   }
   // plaza: 2 x 2 big slabs (3 m) with joints on the tile edges
   function plazaCanvas() {
     const c = canvas(256, 256), g = c.getContext("2d"), rnd = lcg(113);
-    const tones = [[152, 150, 146], [146, 144, 141], [157, 154, 148], [149, 147, 143]];
+    const tones = [[126, 124, 120], [120, 118, 115], [130, 127, 122], [123, 121, 117]];   // concrete, not paper (see footwayCanvas)
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
       const t = tones[i * 2 + j];
       g.fillStyle = "rgb(" + t[0] + "," + t[1] + "," + t[2] + ")"; g.fillRect(i * 128, j * 128, 128, 128);
@@ -353,8 +376,8 @@
       g.beginPath(); g.arc(rnd() * 256, rnd() * 256, 10 + rnd() * 30, 0, 6.3); g.fill();
     }
     g.globalAlpha = 1;
-    speckle(g, 256, 256, 2600, rnd, 130, 70, 1.4);
-    g.fillStyle = "rgba(80,76,70,0.9)";
+    speckle(g, 256, 256, 2600, rnd, 108, 64, 1.4);
+    g.fillStyle = "rgba(52,49,45,0.9)";
     for (let k = 0; k <= 2; k++) { g.fillRect(k * 128 - 2, 0, 3, 256); g.fillRect(0, k * 128 - 2, 256, 3); }
     return c;
   }
@@ -362,7 +385,7 @@
   function kerbCanvas() {
     const c = canvas(256, 128), g = c.getContext("2d"), rnd = lcg(29);
     for (let s = 0; s < 4; s++) {
-      const t = 166 + ((s * 37) % 11) - 5;
+      const t = 148 + ((s * 37) % 11) - 5;      // granite: a shade lighter than the slabs, never white
       g.fillStyle = "rgb(" + t + "," + t + "," + (t - 4) + ")"; g.fillRect(s * 64, 0, 64, 64);
       const f = t - 16;
       g.fillStyle = "rgb(" + f + "," + (f - 1) + "," + (f - 5) + ")"; g.fillRect(s * 64, 64, 64, 64);
@@ -735,7 +758,10 @@
             if (d < KT - 1e-6) continue;
             const x = s.x + s.nx * d, z = s.z + s.nz * d;
             const y = G.heightAt(x, z);
-            const kerbGrime = 1 - 0.07 * (1 - sstep((d - KT) / 0.6));
+            // gutter spray darkens the slab by the kerb; splash-back grime
+            // darkens the back edge where the walk meets the building line
+            const kerbGrime = (1 - 0.13 * (1 - sstep((d - KT) / 0.7)))
+              * (1 - 0.10 * sstep((d - (s.dmax - 0.55)) / 0.55));
             fc.push(foot.v(x, y, z, s.s / 6, (d - KT) / (FW - KT), tone * kerbGrime * footTone(x, z)));
           }
           fcols.push(fc);
@@ -1106,7 +1132,7 @@
       heightAt: G.heightAt, regionAt: G.regionAt,
       paintRedKerb: paintRedKerb, finishRed: finishRed, redCount: function () { return redCount; },
       lotMesh: lotMesh, plazaMaterial: plazaMaterial,
-      roadMesh: roadMesh,
+      roadMesh: roadMesh, kerbTexture: kerbTex,
     };
   }
 
