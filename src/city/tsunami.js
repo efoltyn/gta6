@@ -519,7 +519,9 @@
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     ev.debris = CBZ.tsuDebrisField({
       root: root,
-      seaY: function () { return seaSurface(); },
+      // the water where the object IS: ahead of the front that is still the
+      // pre-wave sea, so a car the bore has not reached is not yet afloat
+      seaY: function (x, z) { return seaSurface() - (CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(x, z) : 0); },
       groundY: groundAt,
       againstWall: function (x, z) {
         // a body with a wall behind it has nowhere to give — that is the
@@ -859,6 +861,18 @@
       phase: (ev.phase === "drain" || ev.phase === "ebb") ? "drain" : (s > 0.2 ? "flooded" : "warn"),
       cx: ev.cx, cz: ev.cz, dx: ev.dx, dz: ev.dz,
       frontS: ev.frontS, frontWet: -2, frontWidth: 24,
+      /* THE FLOOD HAS AN EDGE (2026-09-27). While a wave of the train is
+         coming in, the water AHEAD of its front is still at the level it was
+         before this wave (drawn back, or the ebb between waves): the streets
+         the wall has not reached stay dry, the harbour ahead of it stays
+         drained. water_spec.js pulls the city sea down by this much ahead of
+         frontS (uSeaFront) and waterfield.js subtracts the same number from
+         every flood query (CBZ.waterFrontDropAt), so the swimmer, drowning,
+         buoyancy and debris all follow the edge. It fades out over the last
+         15% of the surge so the hold starts on one sea, with no pop. */
+      aheadDrop: sg && sg.g.n === "surge"
+        ? Math.max(0, s - sg.g.a) * (1 - Math.max(0, Math.min(1, (sg.u - 0.85) / 0.15)))
+        : 0,
       level: seaSurface(), waveAmp: 1.1 + turbid * 0.8, chopAmp: 1.3 + turbid * 1.1,
       flow: flow, sediment: turbid,
     });

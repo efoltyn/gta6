@@ -1042,6 +1042,13 @@
     // costs one uniform instead of a second flood mesh. Driven from
     // CBZ.waterSurge() below; a zero surge leaves it at 0.5 exactly.
     u.uShoreCut = { value: 0.5 };
+    /* THE TSUNAMI'S EDGE on the shared sea (2026-09-27): (cx, cz, dx, dz) of
+       the live front and (frontS, aheadDrop, surge). Ahead of frontS the sea
+       sits aheadDrop metres lower and its shoreline cut is taken from the
+       surge that has actually arrived there, so a city street stays dry until
+       the wall reaches it. aheadDrop 0 (the default) is a no-op everywhere. */
+    u.uSeaFront = { value: new THREE.Vector4(0, 0, 1, 0) };
+    u.uSeaFrontS = { value: new THREE.Vector3(-1e9, 0, 0) };
     u.uInlandBodies = { value: inlandVecs };
     // BY REFERENCE, like uInlandBodies: waterSyncLandBoxes() mutates the
     // Vector4s in place, so a world built after the material still reaches the
@@ -1134,6 +1141,13 @@
     if (u.uShoreCut) {
       const sg = _surge > 0 ? _surge : 0;
       u.uShoreCut.value = 0.5 + Math.min(0.42, sg * SHORE_CUT_PER_M);
+    }
+    if (u.uSeaFront) {
+      const e = CBZ.waterEventGet ? CBZ.waterEventGet() : null;
+      if (e && e.aheadDrop > 0.001) {
+        u.uSeaFront.value.set(+e.cx || 0, +e.cz || 0, +e.dx || 0, +e.dz || 0);
+        u.uSeaFrontS.value.set(+e.frontS || 0, +e.aheadDrop, _surge);
+      } else u.uSeaFrontS.value.y = 0;
     }
 
     // Direction TO the sun (light travels sun -> target, so it is target->sun),
@@ -1325,6 +1339,13 @@
     return [
       "uniform float uSeaTime;",
       "uniform float uSeaY;",
+      "uniform vec4 uSeaFront;",
+      "uniform vec3 uSeaFrontS;",
+      "float cbzFrontDrop(vec2 xz) {",
+      "  if (uSeaFrontS.y < 0.001) return 0.0;",
+      "  float fk = clamp((dot(xz - uSeaFront.xy, uSeaFront.zw) - uSeaFrontS.x + 1.0) / 8.0, 0.0, 1.0);",
+      "  return uSeaFrontS.y * fk * fk * (3.0 - 2.0 * fk);",
+      "}",
       "uniform float uWaveAmp;",
       "uniform float uDeepGain;",
       "uniform float uChopGain;",
@@ -1595,6 +1616,18 @@
       "uniform vec4 uSeaLandBounds;",
       "uniform float uSeaHasLandMask;",
       "uniform float uShoreCut;",
+      "uniform vec4 uSeaFront;",
+      "uniform vec3 uSeaFrontS;",
+      "float cbzFrontDrop(vec2 xz) {",
+      "  if (uSeaFrontS.y < 0.001) return 0.0;",
+      "  float fk = clamp((dot(xz - uSeaFront.xy, uSeaFront.zw) - uSeaFrontS.x + 1.0) / 8.0, 0.0, 1.0);",
+      "  return uSeaFrontS.y * fk * fk * (3.0 - 2.0 * fk);",
+      "}",
+      // the shoreline cut where the surge has actually arrived (see uSeaFront)
+      "float cbzShoreCutAt(vec2 xz) {",
+      "  if (uSeaFrontS.y < 0.001) return uShoreCut;",
+      "  return 0.5 + min(0.42, max(0.0, uSeaFrontS.z - cbzFrontDrop(xz)) * " + gnum(SHORE_CUT_PER_M) + ");",
+      "}",
       "uniform vec4 uInlandBodies[" + MAX_INLAND + "];",
       "uniform vec3 uSunDir;",
       "uniform vec3 uSunColor;",
@@ -2188,7 +2221,7 @@
     // crests still report +-1 while the distance fade and the lake calm keep
     // shrinking the reported crest exactly as they always did.
     L.push("float wHeightN = wHeight * " + gnum(1 / TOTAL_AMP) + " / max(0.0001, wAmp3.z);");
-    L.push("vec3 wWorld = vec3(wXZ.x, wBase.y + wHeight, wXZ.y);");
+    L.push("vec3 wWorld = vec3(wXZ.x, wBase.y + wHeight - cbzFrontDrop(wXZ), wXZ.y);");
     L.push("vec3 wNormal = normalize(vec3(-wDhx * " + gnum(CBZ.WATER_NORMAL_EXAGGERATION) + ", 1.0, -wDhz * " + gnum(CBZ.WATER_NORMAL_EXAGGERATION) + "));");
     // The fragment stage's whitecap tip test rides on this (see cbzWhitecap).
     L.push("vCbzSteep = wNormal.y;");
@@ -3048,6 +3081,13 @@
       "  float hole = 1.0 - smoothstep( 0.16, 0.36, cA.x * 0.55 + nB * 0.45 );",
       "  foam *= 1.0 - hole * mix( 0.85, 0.55, rollF );",
       "  foam = clamp( foam * ( 0.80 + 0.35 * uFoam ), 0.0, 1.0 );",
+      /* WATER RUNNING THROUGH THE FOAM (2026-09-27). In a still frame the
+         roller read as snow on rock: every boil a solid lit lump. Real
+         whitewater is streaked with the dark water pouring through it, fall
+         lines running down the face and dragged with the roll. */
+      "  float fall2 = fbm( vec2( x * 0.55 + nA * 1.5, arc * 0.018 - T * uRollV * 0.05 ), fine );",
+      "  float runs = smoothstep( 0.52, 0.78, fall2 ) * side * ( 1.0 - sk );",
+      "  foam *= 1.0 - runs * 0.62;",
       /* THE WHITE LINE. Far out (or while the face is still low) the churn is
          sub-pixel and what the eye sees is a bright white line on the sea. */
       "  float far = max( smoothstep( 280.0, 900.0, dist ), 1.0 - smoothstep( 3.5, 9.0, uH ) );",
@@ -3079,7 +3119,10 @@
       "  float ao = mix( 0.64, 1.0, smoothstep( 0.0, 0.75, cA.x ) ) * mix( 0.90, 1.0, cB.x ) * mix( 1.0, mix( 0.72, 1.0, boilV ), roll );",
       "  ao = mix( ao, 1.0, far * 0.75 );",
       "  vec3 foamLit = fc * ao * ( 0.82 + 0.36 * nA ) * ( hemiL * 0.85 + uSunCol * ( 0.22 + 0.78 * ndl ) );",
-      "  vec3 col = mix( bodyLit, foamLit, foam );",
+      /* and it is TRANSLUCENT where it is thin: aerated water lit through,
+         the body's own colour glowing in it, not paper white on top of it */
+      "  vec3 thinLit = mix( bodyLit * 2.1 + uSkyCol * 0.06, foamLit, smoothstep( 0.35, 0.9, foam ) );",
+      "  vec3 col = mix( bodyLit, mix( thinLit, foamLit, far ), foam );",
       // ---- debris riding the churn
       "  if ( fine > 0.05 ) {",
       "    float dm = debris( vec2( x, arc - T * uRollV * 0.85 ) / 2.6, 0.05 + 0.30 * tb ) * fine;",
@@ -3163,15 +3206,15 @@
       "    p.y += uH * 0.03 + ( 1.0 + 2.6 * s.w ) * sh * tt + 0.08 * tt * tt;",
       "    p.z -= uWind * ( 0.9 * tt + 0.10 * tt * tt );",
       "    p.x += ( s.z - 0.5 ) * 1.6 * tt;",
-      "    size = ( 3.0 + 6.0 * s.z ) * ( 0.4 + 0.6 * uHs ) * ( 0.6 + 1.6 * life );",
-      "    a = 0.24 * sin( 3.14159 * life );",
+      "    size = ( 4.5 + 8.0 * s.z ) * ( 0.4 + 0.6 * uHs ) * ( 0.6 + 1.8 * life );",
+      "    a = 0.40 * sin( 3.14159 * life );",
       "  } else {",
       "    float vy = ( 2.5 + 7.0 * s.w ) * sh;",
       "    p.y += vy * tt - 3.4 * tt * tt;",
       "    p.z += ( 0.8 + 2.2 * s.z ) * tt - uWind * 0.6 * tt * tt;",
       "    p.x += ( s.z - 0.5 ) * 2.0 * tt;",
       "    size = ( 0.7 + 1.6 * s.y ) * ( 0.6 + 0.4 * uHs ) * ( 1.0 + 1.5 * life );",
-      "    a = 0.55 * smoothstep( 0.0, 0.08, life ) * pow( 1.0 - life, 1.3 );",
+      "    a = 0.70 * smoothstep( 0.0, 0.08, life ) * pow( 1.0 - life, 1.3 );",
       "  }",
       // no crest to tear where the wave has tapered into the sea
       "  a *= uSpray * smoothstep( 0.25, 0.6, position.y / max( 0.001, uH / uHs ) );",
