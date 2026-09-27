@@ -65,6 +65,10 @@ const subjects = [
     focus: "A battlefield's worth of cover through coverField(). Scraped facets, not smooth potatoes, and a handful of draw calls." },
   { id: "camp2", shot: "camp2", label: "YOUR BIVOUAC",
     focus: "Your own army at rest: fires, bedrolls, picket line, baggage cart and stacked arms built from the repo's REAL rifles." },
+  { id: "houses", shot: "houses", label: "HOUSES",
+    focus: "Flat-roofed adobe house, thatched rondavel, sheet lean-to: plaster falling off mud brick, vigas, lapped thatch, patchwork sheet. Not solid primitives." },
+  { id: "interior", shot: "interior", label: "INSIDE A HOUSE",
+    focus: "Standing in the adobe house: earth floor, rug, a made bed on a mud bench, jars, table, a real ceiling of beams. No open top, nothing floating." },
   { id: "range", shot: "range", label: "SILHOUETTES AT 900 m",
     focus: "The whole reason for the far LOD: four outposts at navigation range. Each must be a DIFFERENT shape — tall+box, spiky, round+flat, flat." },
 ];

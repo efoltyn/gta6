@@ -3760,22 +3760,41 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (!s) return null;
     s.order = "move";
     s.anchorX = x; s.anchorZ = z;
+    /* A MARKER STAKE, NOT A HOLOGRAM. The order used to paint a glowing
+       orange ring on the sand, a strategy-game cursor standing in a war (the
+       campaign threw its own out for the same reason). A line told to go
+       somewhere is told by a stake driven into the sand with a pennant on it:
+       a lit object in the world, seen from the command seat and from the
+       ground alike, hidden by a dune like anything else. */
     if (!moveMark && THREE) {
-      moveMark = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.4, 28),
-        new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
-      moveMark.rotation.x = -Math.PI / 2;
-      moveMark.renderOrder = 5;
+      moveMark = new THREE.Group();
+      const wood = new THREE.MeshLambertMaterial({ color: 0x120c06 });
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 2.6, 6), wood);
+      pole.position.y = 1.2;
+      moveMark.add(pole);
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute("position", new THREE.Float32BufferAttribute([0, 2.45, 0, 0, 1.95, 0, 1.1, 2.24, 0.12], 3));
+      pg.computeVertexNormals();
+      const pennant = new THREE.Mesh(pg, new THREE.MeshLambertMaterial({ color: 0x5a2a08, side: THREE.DoubleSide }));
+      moveMark.add(pennant);
+      const scuff = new THREE.Mesh(new THREE.CircleGeometry(0.9, 14),
+        new THREE.MeshLambertMaterial({ color: 0x3a2c18, transparent: true, opacity: 0.55, depthWrite: false }));
+      scuff.rotation.x = -Math.PI / 2; scuff.position.y = 0.23;   // the group is sunk 0.2 so the stake is driven in
+      moveMark.add(scuff);
+      moveMark.traverse(function (o) { if (o.isMesh && o !== scuff) o.castShadow = true; });
       scene.add(moveMark);
     }
-    if (moveMark) { moveMark.visible = true; moveMark.position.set(x, MAP.groundAt(x, z) + 0.18, z); }
+    if (moveMark) { moveMark.visible = true; moveMark.position.set(x, MAP.groundAt(x, z) - 0.2, z); }
     paintOrders();
     return { x: x, z: z };
   }
   function dropMoveMark() {
     if (!moveMark) return;
     if (moveMark.parent) moveMark.parent.remove(moveMark);
-    if (moveMark.geometry) moveMark.geometry.dispose();
-    if (moveMark.material) moveMark.material.dispose();
+    moveMark.traverse(function (o) {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
     moveMark = null;
   }
   function makeSide(key, dir, colour, vseed, band) {
