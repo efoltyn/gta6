@@ -193,7 +193,10 @@
     "  }\n" +
     "  prSum *= prVis;\n" +
     "  if ( prMk.g > 0.5 ) {\n" +
-    "    vec3 prC = vec3( prWPos.x + ( prMk.b - 0.5 ) * 6.0, ( prUpper ? " + FY.toFixed(2) + " : 0.0 ) + " + (CH - 0.2).toFixed(2) + ", prWPos.z + ( prMk.a - 0.5 ) * 6.0 );\n" +
+        // the offset was baked at the TEXEL centre: measure from there, or the
+    // fitting jumps a texel at a time and the ceiling shows 25 cm squares
+    "    vec2 prTc = ( floor( vec2( prWPos.x + 16.0, prWPos.z + 44.0 ) / " + MASK_RES.toFixed(2) + " ) + 0.5 ) * " + MASK_RES.toFixed(2) + " - vec2( 16.0, 44.0 );\n" +
+    "    vec3 prC = vec3( prTc.x + ( prMk.b - 0.5 ) * 6.0, ( prUpper ? " + FY.toFixed(2) + " : 0.0 ) + " + (CH - 0.2).toFixed(2) + ", prTc.y + ( prMk.a - 0.5 ) * 6.0 );\n" +
     "    vec3 prD = prC - prWPos; float prD2 = dot( prD, prD );\n" +
     "    float prNl = max( dot( prN2, prD * inversesqrt( prD2 + 1e-4 ) ), 0.0 ) * 0.75 + 0.25;\n" +
     "    prSum += vec3( 1.0, 0.86, 0.66 ) * ( prCellLamp * 1.25 * prNl / ( 1.0 + prD2 * 0.16 ) );\n" +
@@ -299,7 +302,7 @@
     lampsBuilt = hall.length > 0;
   }
   const HALL_COL = new THREE.Color(1.0, 0.9, 0.74), NIGHT_COL = new THREE.Color(0.55, 0.68, 0.95);
-  const TUNE = { hall: 2.2, night: 1.6, amb: 0.30, ambDay: 0.16, sun: 0.14 };
+  const TUNE = { hall: 2.2, night: 0.55, amb: 0.30, ambDay: 0.16, sun: 0.14 };
   let level = 1, nightLevel = 0;
   function drive(dt) {
     const g = CBZ.game;
