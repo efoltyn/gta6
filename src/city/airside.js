@@ -129,6 +129,14 @@
     return g;
   }
 
+  let _dome = null;
+  function domeGeom(r) {
+    if (_dome && _dome.r === r) return _dome.g;
+    const gg = new THREE.SphereGeometry(r, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    gg._shared = true;
+    _dome = { r: r, g: gg };
+    return gg;
+  }
   // Every mesh this file makes carries userData — which is also what spares it
   // from core/batch.js's static merge. A merged service vehicle would leave a
   // baked ghost of itself on the apron the first time it drove away.
@@ -163,8 +171,45 @@
   // Road wheels: forward is local +Z for every vehicle in this game (heading ->
   // (sin h, cos h)), so the axle runs along X — cylinder rotated PI/2 about Z,
   // spun about X. playercars.js's own wheel spin uses exactly this pair.
+  // A wheel is a tyre with a painted steel rim and a hub in it (a bare black
+  // puck read as a hockey disc). ONE geometry with vertex colours, so a
+  // wheel is still one draw: open tyre tread, sidewall rings, rim discs and
+  // hub caps merged per size.
+  const wheelCache = new Map();
+  let wheelMat = null;
+  function wheelGeom(r, wd) {
+    const k = r + "|" + wd;
+    let g = wheelCache.get(k);
+    if (g) return g;
+    const parts = [];
+    const tint = function (geo, hex) {
+      const c = new THREE.Color(hex), n = geo.attributes.position.count, a = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+      geo.setAttribute("color", new THREE.BufferAttribute(a, 3));
+      return geo;
+    };
+    parts.push(tint(new THREE.CylinderGeometry(r, r, wd, 16, 1, true), 0x16181b));
+    for (const sg of [-1, 1]) {
+      const side = new THREE.RingGeometry(r * 0.6, r, 16, 1);
+      const rim = new THREE.CircleGeometry(r * 0.6, 16);
+      const hub = new THREE.CircleGeometry(r * 0.2, 10);
+      for (const g2 of [side, rim, hub]) g2.rotateX(sg > 0 ? -Math.PI / 2 : Math.PI / 2);
+      side.translate(0, sg * wd / 2, 0);
+      rim.translate(0, sg * (wd / 2 - 0.03), 0);
+      hub.translate(0, sg * (wd / 2 - 0.01), 0);
+      parts.push(tint(side, 0x202327), tint(rim, 0xaeb3b8), tint(hub, 0x4a4f55));
+    }
+    const U = THREE.BufferGeometryUtils;
+    const nonIdx = parts.map(function (q) { return q.index ? q.toNonIndexed() : q; });
+    g = U && U.mergeBufferGeometries ? U.mergeBufferGeometries(nonIdx) : parts[0];
+    g._shared = true;
+    wheelCache.set(k, g);
+    return g;
+  }
   function wheel(parent, x, z, r, width, out) {
-    const w = geoMesh(parent, cylGeom(r, width == null ? 0.3 : width), vmat("tire", 0x14161a), x, r, z, { rz: Math.PI / 2, noCast: true });
+    const wd = width == null ? 0.3 : width;
+    if (!wheelMat) { wheelMat = new THREE.MeshLambertMaterial({ vertexColors: true }); wheelMat._shared = true; }
+    const w = geoMesh(parent, wheelGeom(r, wd), wheelMat, x, r, z, { rz: Math.PI / 2, noCast: true });
     w.userData.playerWheel = true;      // spins when the PLAYER drives it too
     if (out) out.push(w);
     return w;
@@ -177,6 +222,48 @@
     const mesh = bx(parent, w || 0.34, h || 0.16, w || 0.34, x, y, z, m, { noCast: true });
     mesh.userData.beaconMat = m;
     return m;
+  }
+
+  /* COMPACT A BODY. Every box above is its own Mesh (a tug was 17 draw calls
+     and the fleet with its carts well over a hundred, all moving, so none of
+     it can ever be batched). Once a body is assembled, every STATIC part is
+     merged into one mesh per material in the vehicle's own frame. Wheels
+     (they spin), beacons (they pulse a private material) and anything with
+     its own parent (the catering lift and its scissor arms) stay live. */
+  function compact(rig, keep) {
+    const U = THREE.BufferGeometryUtils;
+    if (!U || !U.mergeBufferGeometries) return rig;
+    const g = rig.grp, skip = new Set(rig.wheels || []);
+    if (keep) for (const k of keep) skip.add(k);
+    const byMat = new Map();
+    for (const o of g.children.slice()) {
+      if (!o.isMesh || skip.has(o) || (o.userData && o.userData.beaconMat) || o.children.length) continue;
+      let list = byMat.get(o.material);
+      if (!list) { list = []; byMat.set(o.material, list); }
+      list.push(o);
+    }
+    byMat.forEach(function (list, m) {
+      if (list.length < 2) return;
+      const geos = [];
+      let cast = false;
+      for (const o of list) {
+        o.updateMatrix();
+        let gg = o.geometry.clone();
+        gg.applyMatrix4(o.matrix);
+        if (gg.index) gg = gg.toNonIndexed();
+        if (!gg.attributes.uv) return;
+        geos.push(gg);
+        cast = cast || o.castShadow;
+      }
+      const merged = U.mergeBufferGeometries(geos);
+      if (!merged) return;
+      for (const o of list) g.remove(o);
+      const mesh = new THREE.Mesh(merged, m);
+      mesh.castShadow = cast; mesh.receiveShadow = false;
+      mesh.userData.airsidePart = true;
+      g.add(mesh);
+    });
+    return rig;
   }
 
   // ============================================================
@@ -249,7 +336,7 @@
     bx(g, 1.90, 0.10, 0.12, 0, 0.86, 1.72, cmat(0x1a1c20));           // rubber nose bumper
     const bm = beaconLamp(g, 0, 2.14, -0.62, 0xffb648, 0.30, 0.14);
     for (const s of [-1, 1]) for (const z of [1.06, -1.10]) wheel(g, s * 0.84, z, 0.36, 0.32, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 2.0, length: 3.6, height: 2.1, wheelbase: 2.2 } };
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 2.0, length: 3.6, height: 2.1, wheelbase: 2.2 } });
   }
 
   function buildBaggageTractor(tone) {
@@ -271,7 +358,7 @@
     bx(g, 0.26, 0.10, 0.10, 0, 1.02, 1.34, mat(0xfff2cc, { emissive: 0xffe9b8, ei: 0.7 }), { noCast: true });
     const bm = beaconLamp(g, 0, 2.16, -0.28, 0xffb648, 0.26, 0.13);
     for (const s of [-1, 1]) for (const z of [0.86, -0.94]) wheel(g, s * 0.66, z, 0.32, 0.28, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.7, length: 2.9, height: 2.15, wheelbase: 1.8 } };
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 1.7, length: 2.9, height: 2.15, wheelbase: 1.8 } });
   }
 
   function buildCart(seedX, seedZ, idx) {
@@ -299,7 +386,7 @@
         cmat(TONES[(ht * TONES.length) | 0]));
     }
     for (const s of [-1, 1]) for (const z of [0.74, -0.74]) wheel(g, s * 0.60, z, 0.26, 0.22, wheels);
-    return { grp: g, wheels: wheels, dims: { width: 1.7, length: 2.4, height: 1.6, wheelbase: 1.5 } };
+    return compact({ grp: g, wheels: wheels, dims: { width: 1.7, length: 2.4, height: 1.6, wheelbase: 1.5 } });
   }
 
   function buildCatering(tone) {
@@ -345,11 +432,11 @@
     bx(lift, 1.70, 0.06, 0.90, 0, 0.02, -1.90, steel, { noCast: true });        // fold-out platform
     const bm = beaconLamp(g, 0, 1.80, 1.62, 0xffb648, 0.30, 0.14);
     for (const s of [-1, 1]) for (const z of [1.70, -1.30, -2.02]) wheel(g, s * 0.94, z, 0.42, 0.34, wheels);
-    return {
+    return compact({
       grp: g, wheels: wheels, beacon: bm,
       mast: { lift: lift, arms: arms, armLen: ARM, baseY: 0.72, th0: TH0, th1: TH1, t: 0, target: 0 },
       dims: { width: 2.3, length: 5.4, height: 2.1, wheelbase: 3.2 },
-    };
+    }, arms.map(function (a) { return a.mesh; }));
   }
 
   function buildBowser(tone) {
@@ -368,7 +455,12 @@
     // the tank: one squat cylinder lying along the body (top at 2.04 — it has
     // to clear the jet-bridge underside on the head-of-stand road)
     geoMesh(g, cylGeom(0.72, 3.40, 14), paint, 0, 1.32, -0.80, { rx: Math.PI / 2 });
-    for (const z of [0.88, -2.48]) geoMesh(g, cylGeom(0.74, 0.10, 14), steel, 0, 1.32, z, { rx: Math.PI / 2, noCast: true });
+    // dished tank heads (a pressure tank is not closed with flat discs)
+    for (const e of [[0.9, Math.PI / 2], [-2.5, -Math.PI / 2]]) {
+      const head = geoMesh(g, domeGeom(0.72), paint, 0, 1.32, e[0], { rx: e[1] });
+      head.scale.set(1, 0.32, 1);
+      geoMesh(g, cylGeom(0.745, 0.06, 14), steel, 0, 1.32, e[0], { rx: Math.PI / 2, noCast: true });   // the seam ring
+    }
     bx(g, 1.86, 0.10, 2.90, 0, 2.02, -0.80, cmat(0xe6e9ec), { noCast: true });  // catwalk
     bx(g, 0.30, 0.14, 0.30, 0, 2.11, -0.80, steel, { noCast: true });           // fill hatch (roof stays < 2.2)
     bx(g, 1.10, 0.86, 0.66, 0, 0.94, -2.88, cmat(0x4a5058));                    // pump cabinet
@@ -377,7 +469,7 @@
     bx(g, 2.18, 0.14, 0.14, 0, 0.92, 0.60, cmat(0xd8b53a), { noCast: true });   // hazard band
     const bm = beaconLamp(g, 0, 1.86, 1.90, 0xffb648, 0.30, 0.14);
     for (const s of [-1, 1]) for (const z of [1.98, -1.20, -1.96]) wheel(g, s * 0.98, z, 0.44, 0.36, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 2.4, length: 6.0, height: 2.1, wheelbase: 3.6 } };
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 2.4, length: 6.0, height: 2.1, wheelbase: 3.6 } });
   }
 
   function buildFollowMe() {
@@ -414,8 +506,15 @@
     const bm = beaconLamp(g, 0.34, 1.98, -0.18, 0xffb648, 0.30, 0.16);
     bx(g, 1.60, 0.16, 0.10, 0, 0.62, 2.06, dark, { noCast: true });    // bumper
     for (const s of [-1, 1]) for (const z of [1.28, -1.30]) wheel(g, s * 0.80, z, 0.33, 0.26, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.9, length: 4.2, height: 2.2, wheelbase: 2.6 } };
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 1.9, length: 4.2, height: 2.2, wheelbase: 2.6 } });
   }
+
+  // THE BODIES ARE PUBLIC: island_airport.js's scripted pushback uses the
+  // same tug instead of hand-rolling a second one out of loose boxes.
+  CBZ.airsideBodies = {
+    tug: buildTug, tractor: buildBaggageTractor, cart: buildCart,
+    catering: buildCatering, bowser: buildBowser, followMe: buildFollowMe,
+  };
 
   // ============================================================
   //  4. THE FIELD — derived, never re-hardcoded.
@@ -1100,43 +1199,59 @@
     // ---- pave what we drive on ----------------------------------------
     // The airfield's baked surface texture paints grass, runway, taxiway and
     // apron; it has never painted a service road, because nothing drove one.
-    const y = 0.10;                       // the airfield surface plane sits at 0.08
+    // THE ROAD IS PAINT IN THAT SURFACE (de-slop 2026-09-27): these used to be
+    // dark ribbons laid 2 cm over the airfield plane (another coplanar layer,
+    // and a flat 8 m black stripe across the concrete apron the player
+    // spawns on). island_airport.js publishes city.airportPaint, a painter
+    // in world metres over its own canvas: the service road is now what an
+    // apron service road is, white edge lines and a dashed centreline on the
+    // concrete, with real asphalt only where it runs off the apron onto grass.
     const mid = (f.hsZ + f.hsBackZ) / 2;
-    const airsideRibbon = ribbonGeom([
-      { x: f.westX, z: mid }, { x: f.eastX, z: mid },       // the two-lane corridor
-    ], 8.4, y);
-    airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
-      { x: f.eastX, z: mid }, { x: f.eastX, z: f.laneZ },   // east link over the taxiway
-      { x: f.westX, z: f.laneZ }, { x: f.westX, z: mid },   // taxilane + west link
-    ], 7, y));
-    // the fuel spur, so the bowser's turn-off is visibly a road
     const fuelStand = stands[Math.min(1, stands.length - 1)];
-    airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
-      { x: fuelStand.x + 19, z: f.hsZ }, { x: fuelStand.x + 19, z: fuelStand.z - 3 },
-    ], 5, y));
-    pave(root, airsideRibbon, 0x35383d, 0);
-
-    // The kerb strip is ~3 m of land between the terminal wall and the island
-    // edge, so the kerb lane is painted to fit it exactly. It is a ONE-WAY LANE
-    // and the paint says so: the two legs that used to run down the terminal's
-    // east and west walls are GONE with the loop they served (a car turning
-    // there was the "circle around the airport building"), and the lane's east
-    // continuation is island_airport.js's own kerb road, which paints itself.
-    const kerbRibbon = ribbonGeom([
-      { x: f.kerbX0, z: f.kerbZ }, { x: f.kerbX1, z: f.kerbZ },
-    ], 2.6, y);
-    pave(root, kerbRibbon, 0x3b3f45, 1);
-
-    // Hold-short hatching where the service road crosses the LIVE taxiway.
-    // These bars are the visible statement of the rule in section 7: this is
-    // where a ground vehicle stops for an aircraft.
-    const marks = [];
-    for (const hx of [f.westX, f.eastX]) {
-      for (let k = 0; k < 4; k++) marks.push.apply(marks, ribbonGeom([
-        { x: hx - 3.4, z: f.taxZ + 11 + k * 0.9 }, { x: hx + 3.4, z: f.taxZ + 11 + k * 0.9 },
-      ], 0.4, y + 0.012));
+    const apronX0 = f.apronX - 132;             // island_airport.js APRON_X0
+    if (city.airportPaint) {
+      city.airportPaint(function (P) {
+        const ASPH = 0x3e4145, W = 0xe9ecef, Y = 0xd8b53a;
+        // off-apron stretches get a surface first
+        if (f.westX < apronX0) P.rect((f.westX - 4.2 + apronX0) / 2, mid, apronX0 - (f.westX - 4.2), 8.4, ASPH);
+        P.rect(f.westX, (mid + f.laneZ) / 2, 7, Math.abs(mid - f.laneZ) + 7, ASPH);
+        // corridor: two edge lines, dashed centre
+        for (const z of [mid - 4.1, mid + 4.1]) P.line([[f.westX - 3.5, z], [f.eastX + 3.5, z]], 0.25, W);
+        P.line([[f.westX, mid], [f.eastX, mid]], 0.18, W, [3, 3]);
+        // the two links over the taxiway
+        for (const x of [f.westX, f.eastX]) {
+          for (const s of [-1, 1]) P.line([[x + s * 3.4, mid - 4.1], [x + s * 3.4, f.laneZ]], 0.25, W);
+        }
+        // the fuel spur
+        for (const s of [-1, 1]) P.line([[fuelStand.x + 19 + s * 2.4, mid - 4.1], [fuelStand.x + 19 + s * 2.4, fuelStand.z - 3]], 0.2, W);
+        // hold-short hatching where the service road crosses the live taxiway
+        for (const hx of [f.westX, f.eastX]) {
+          for (let k = 0; k < 4; k++) P.line([[hx - 3.4, f.taxZ + 11 + k * 0.9], [hx + 3.4, f.taxZ + 11 + k * 0.9]], 0.4, Y, k > 1 ? [1.2, 0.8] : null);
+        }
+        // the landside kerb lane: a white edge line off the terminal wall
+        P.line([[f.kerbX0, f.kerbZ - 1.3], [f.kerbX1, f.kerbZ - 1.3]], 0.15, W);
+      });
+    } else {
+      // no airfield painter (a slice without it): the old ribbons
+      const y = 0.10;
+      const airsideRibbon = ribbonGeom([{ x: f.westX, z: mid }, { x: f.eastX, z: mid }], 8.4, y);
+      airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
+        { x: f.eastX, z: mid }, { x: f.eastX, z: f.laneZ },
+        { x: f.westX, z: f.laneZ }, { x: f.westX, z: mid },
+      ], 7, y));
+      airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
+        { x: fuelStand.x + 19, z: f.hsZ }, { x: fuelStand.x + 19, z: fuelStand.z - 3 },
+      ], 5, y));
+      pave(root, airsideRibbon, 0x35383d, 0);
+      pave(root, ribbonGeom([{ x: f.kerbX0, z: f.kerbZ }, { x: f.kerbX1, z: f.kerbZ }], 2.6, y), 0x3b3f45, 1);
+      const marks = [];
+      for (const hx of [f.westX, f.eastX]) {
+        for (let k = 0; k < 4; k++) marks.push.apply(marks, ribbonGeom([
+          { x: hx - 3.4, z: f.taxZ + 11 + k * 0.9 }, { x: hx + 3.4, z: f.taxZ + 11 + k * 0.9 },
+        ], 0.4, y + 0.012));
+      }
+      pave(root, marks, 0xd8b53a, 2);
     }
-    pave(root, marks, 0xd8b53a, 2);
 
     // ---- is every authored waypoint on real ground? ---------------------
     // Asked with the "service" class, so the airport keep-out (which is where
