@@ -60,7 +60,7 @@
        desert warlord game and a camel is the one animal that belongs on the
        island by name, so it is authored here — but as a real
        CBZ.defineSpecies() call with the bestiary's own contract (metres,
-       feet at y=0, nose +X, ctx.mat / CBZ.boxGeom), which means the shared
+       feet at y=0, nose +X, ctx.mat), which means the shared
        gait rig walks it and quadruped_ragdoll kills it the day any page
        loads those packs. It is a bestiary entry that happens to live here.
 
@@ -68,7 +68,12 @@
        makeTruck, and that file is 130 KB and comes chained to
        city/strategic.js at another 186 KB. 316 KB of archipelago for one
        pickup is a worse trade than the bestiary one we just refused, so the
-       chassis is boxes here and the GUN on it is the armoury's real one.
+       pickup is built here from the shape kit and the GUN on it is the
+       armoury's real one.
+
+     NEW — the tack.  Neither animal carried a saddle. dressTack() fits a
+       blanket, saddle, girth and saddlebags onto whatever barrel the species
+       file built, in the bake, and raises the seat by the saddle.
 
      NEW — the instanced bake.  core/batch.js merges static scenery IN PLACE
        (it hides originals and parents a merged copy into the scene); it
@@ -159,11 +164,11 @@
   const KINDS = M.KINDS = [
     { id: "camel", label: "CAMEL", species: "camel",
       pace: 3.4, dash: 9.5, mass: 600, seats: 1, hp: 150, thirst: 0.45,
-      seatY: 2.13, bodyH: 3.32,          // measured off the bake, not guessed
+      seatY: 2.17, bodyH: 3.36,          // measured off the bake (saddled), not guessed
       note: "slower than a horse and does not care. crosses the deep sand a horse refuses." },
     { id: "horse", label: "HORSE", species: "horse",
       pace: 4.2, dash: 15.0, mass: 500, seats: 1, hp: 120, thirst: 1,
-      seatY: 1.98, bodyH: 3.17,
+      seatY: 2.07, bodyH: 3.26,          // the saddle raises him 9 cm off the bare back
       note: "the charge. useless in rocks, decisive on open sand." },
     { id: "technical", label: "TECHNICAL", species: null,
       pace: 9.0, dash: 21.0, mass: 2600, seats: 4, hp: 260, thirst: 1.6,
@@ -983,75 +988,344 @@
   }
   M.ready = loadSpecies;
 
+  /* ============================================================ THE SHAPE KIT
+
+     THE CAMEL AND THE TRUCK USED TO BE BOX PILES, and a box pile is the one
+     thing an eye never mistakes for an animal or a vehicle. Everything below
+     builds SMOOTH shapes instead, and all of it lands in the bake the same
+     way the boxes did — as meshes whose geometry is merged into the
+     instanced buffers — so nothing downstream had to learn anything new.
+
+     loft()  rings of superellipse cross-section swept along a path. p=2 is
+             an ellipse (a barrel, a neck), p=4..6 a rounded rectangle (a
+             bumper, a saddlebag). Each ring can be deeper below its path
+             than above it (`bb`), which is what makes a belly hang and a
+             back stay level. The path's lateral axis is world Z unless told
+             otherwise, so a body swept nose-ward along X has its width on Z
+             and its height on Y exactly as the bestiary's contract wants.
+     tint()  bakes a per-vertex colour MULTIPLIER into the geometry. The
+             material keeps the base colour (so a page that renders the raw
+             species build still gets a camel-coloured camel) and the bake
+             multiplies the two, so the instanced camel has a darker hump,
+             a pale belly and a mottled coat without a single texture. */
+  function hash3(x, y, z) {
+    const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+    return s - Math.floor(s);
+  }
+  function vnoise(x, y, z) {
+    const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+    let fx = x - ix, fy = y - iy, fz = z - iz;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
+    const l = function (a, b, t) { return a + (b - a) * t; };
+    return l(
+      l(l(hash3(ix, iy, iz), hash3(ix + 1, iy, iz), fx), l(hash3(ix, iy + 1, iz), hash3(ix + 1, iy + 1, iz), fx), fy),
+      l(l(hash3(ix, iy, iz + 1), hash3(ix + 1, iy, iz + 1), fx), l(hash3(ix, iy + 1, iz + 1), hash3(ix + 1, iy + 1, iz + 1), fx), fy),
+      fz);
+  }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+  function tint(geo, fn) {
+    const p = geo.attributes.position, n = geo.attributes.normal, cnt = p.count;
+    const col = new Float32Array(cnt * 3);
+    for (let i = 0; i < cnt; i++) {
+      const c = fn(p.getX(i), p.getY(i), p.getZ(i), n ? n.getX(i) : 0, n ? n.getY(i) : 1, n ? n.getZ(i) : 0);
+      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return geo;
+  }
+
+  /* rings: [{c:[x,y,z], a, b, bb, p}]   a = half-size on the lateral axis,
+     b = half-size on the "up" side of the path, bb = on the down side.
+     opts: seg, lat:[x,y,z], closed, cap0/cap1 (default true), bulge, shade */
+  function loft(rings, o) {
+    o = o || {};
+    const seg = o.seg || 16, n = rings.length, closed = !!o.closed;
+    const P = rings.map(function (r) { return new THREE.Vector3(r.c[0], r.c[1], r.c[2] || 0); });
+    const lat0 = o.lat ? new THREE.Vector3(o.lat[0], o.lat[1], o.lat[2]).normalize() : new THREE.Vector3(0, 0, 1);
+    const pos = [], idx = [], Ts = [];
+    const T = new THREE.Vector3(), L = new THREE.Vector3(), U = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      const r = rings[i];
+      const prev = closed ? P[(i - 1 + n) % n] : P[Math.max(0, i - 1)];
+      const next = closed ? P[(i + 1) % n] : P[Math.min(n - 1, i + 1)];
+      T.copy(next).sub(prev).normalize();
+      Ts.push(T.clone());
+      L.copy(lat0).addScaledVector(T, -lat0.dot(T));
+      if (L.lengthSq() < 1e-8) L.set(1, 0, 0).addScaledVector(T, -T.x);
+      L.normalize();
+      U.crossVectors(L, T).normalize();
+      const a = r.a, b = r.b == null ? a : r.b, bb = r.bb == null ? b : r.bb, ex = 2 / (r.p || 2);
+      for (let k = 0; k < seg; k++) {
+        const th = (k / seg) * Math.PI * 2;
+        const cs = Math.cos(th), sn = Math.sin(th);
+        const lx = Math.sign(cs) * Math.pow(Math.abs(cs), ex) * a;
+        const uy = Math.sign(sn) * Math.pow(Math.abs(sn), ex) * (sn >= 0 ? b : bb);
+        pos.push(P[i].x + L.x * lx + U.x * uy, P[i].y + L.y * lx + U.y * uy, P[i].z + L.z * lx + U.z * uy);
+      }
+    }
+    const rows = closed ? n : n - 1;
+    for (let i = 0; i < rows; i++) {
+      const i2 = (i + 1) % n;
+      for (let k = 0; k < seg; k++) {
+        const k2 = (k + 1) % seg;
+        const A = i * seg + k, B = i * seg + k2, C = i2 * seg + k, D = i2 * seg + k2;
+        idx.push(A, C, B, B, C, D);
+      }
+    }
+    if (!closed) {
+      const cap = function (i, dir) {
+        const r = rings[i];
+        const bulge = (o.bulge == null ? 0.35 : o.bulge) * Math.min(r.a, r.b == null ? r.a : r.b) * dir;
+        const ci = pos.length / 3;
+        pos.push(P[i].x + Ts[i].x * bulge, P[i].y + Ts[i].y * bulge, P[i].z + Ts[i].z * bulge);
+        for (let k = 0; k < seg; k++) {
+          const k2 = (k + 1) % seg;
+          if (dir > 0) idx.push(i * seg + k, ci, i * seg + k2);
+          else idx.push(i * seg + k, i * seg + k2, ci);
+        }
+      };
+      if (o.cap0 !== false) cap(0, -1);
+      if (o.cap1 !== false) cap(n - 1, 1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    if (o.shade) tint(geo, o.shade);
+    return geo;
+  }
+
+  /* A STRAIGHT BAR WITH SOFTENED ENDS — a bumper, a pillar, a strap. Four
+     rings, the end pair 20% smaller, so the ends read as a chamfer instead
+     of a pillow. `a` is the half-size on the lateral axis (Z by default). */
+  function rbar(p0, p1, a, b, o) {
+    o = o || {};
+    const z0 = p0[2] || 0, z1 = p1[2] || 0;
+    const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], z1 - z0);
+    const e = Math.min(0.3, Math.min(a, b) * 0.7 / Math.max(1e-4, len));
+    const at = function (t, s) {
+      return { c: [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, z0 + (z1 - z0) * t],
+        a: a * s, b: b * s, bb: (o.bb == null ? b : o.bb) * s, p: o.p || 5 };
+    };
+    return loft([at(0, 0.8), at(e, 1), at(1 - e, 1), at(1, 0.8)], { seg: o.seg || 12, lat: o.lat, bulge: 0, shade: o.shade });
+  }
+
+  const kitMats = {};
+  function kitMat(hex) {
+    if (!kitMats[hex]) kitMats[hex] = new THREE.MeshLambertMaterial({ color: hex });
+    return kitMats[hex];
+  }
+
   /* ============================================================ THE CAMEL
 
      THE ONE ANIMAL THIS ISLAND OWES THE PLAYER, and the repo does not have
      it — grep `camel` across src/ and there are zero hits. So it is authored
-     here, but it is authored as a BESTIARY ENTRY, through the same
-     defineSpecies the other fifty-four go through and against the same
-     contract (metres, feet at y=0, nose toward +X, ctx.mat for materials,
-     CBZ.boxGeom for boxes). That is not ceremony: it means the shared gait
-     rig walks it, quadruped_ragdoll lays it on its flank when it dies, and
-     the seat solver finds its saddle, on the day any page loads those packs.
-     A camel defined as a private box pile inside a warlord file would have
-     been a camel only this file could ever use.
+     here, but as a BESTIARY ENTRY, through the same defineSpecies the other
+     fifty-four go through and against the same contract (metres, feet at
+     y=0, nose toward +X, ctx.mat for materials). That is not ceremony: it
+     means the shared gait rig walks it and quadruped_ragdoll lays it on its
+     flank the day any page loads those packs.
 
-     Reference: a dromedary. Long legs with a visible knee break, a deep
-     narrow chest, ONE hump set back over the shoulders, a long S-curved neck
-     carried high, a small head with a drooping muzzle, splayed two-toed
-     feet, and a sandy coat darker along the hump and the neck crest. */
+     Reference: a dromedary. A deep narrow barrel whose belly hangs well
+     below a level back; ONE tall hump over the middle of the back; a long
+     neck that drops forward from the chest and then curves UP to a small
+     head carried level, with a heavy drooping upper lip; long thin legs
+     with a knobbly knee in front and the hock pointing back behind; broad
+     flat two-toed pads; a sandy coat that is darker and shaggier along the
+     hump and the neck crest, paler under the belly, with leathery grey
+     calluses on the knees and the chest pad.
+
+     THE LEGS ARE TAGGED (userData.mountLeg / mountPivot) the way the
+     technical's wheels are, so the warlord bake never has to guess. Each is
+     also ONE tall thin ground-touching mesh plus its pad, so wildlife_rig's
+     discovery rule finds the same four on a page that runs the bestiary.
+
+     THE HUMP IS ITS OWN MESH, and it has to be: the saddle solver finds the
+     seat as the clear span of back with nothing standing over it, and the
+     hump's own bounding box is what tells it where the hump is. Folded into
+     the barrel it would be invisible to the solver and the rider would be
+     sat on the crown. */
   let camelDone = false;
+  /* LINEAR, and dark on purpose: through this page's sun, ACES and the sRGB
+     encode, 0x382611 lands on screen as a dromedary's sandy tan. The old
+     0xc9a267 arrived as cream paper (props.js has the arithmetic). */
+  const CAMEL_COAT = 0x382611;
+  const HX = 0.12;                                  // how far forward the head sits of the old draft
+  function camelShade(part) {
+    return function (x, y, z, nx, ny, nz) {
+      // two scales of hair mottle: big sun-bleached patches, fine grain
+      const mot = 1 + (vnoise(x * 1.8 + 3.1, y * 1.8, z * 1.8) - 0.5) * 0.18
+                    + (vnoise(x * 9, y * 9, z * 9) - 0.5) * 0.1;
+      let r = mot, g = mot, b = mot;
+      // pale belly and inner surfaces, cooler as well as lighter
+      const under = clamp01((-ny - 0.15) / 0.75);
+      r *= 1 + 0.22 * under; g *= 1 + 0.28 * under; b *= 1 + 0.4 * under;
+      // the crest: hump crown, neck ridge, back line — darker and redder
+      let crest = 0;
+      if (part === "hump") crest = 0.35 + 0.65 * clamp01((ny - 0.2) / 0.8);
+      else if (part === "neck") crest = clamp01((ny * 0.7 - nx * 0.7 - 0.2) / 0.7);
+      else if (part === "body") crest = clamp01((ny - 0.75) / 0.25) * 0.5;
+      r *= 1 - 0.26 * crest; g *= 1 - 0.32 * crest; b *= 1 - 0.4 * crest;
+      if (part === "body") {
+        // the chest pad: a leathery grey callus the animal kneels on
+        const pad = clamp01(1 - Math.hypot((x - 0.45) / 0.2, (y - 1.3) / 0.1, z / 0.16));
+        r *= 1 - 0.45 * pad; g *= 1 - 0.42 * pad; b *= 1 - 0.3 * pad;
+      }
+      if (part === "leg") {
+        // knee calluses (front of the carpus / hock) and paler shanks
+        const knee = clamp01(1 - Math.abs(y - 0.74) / 0.07) * clamp01((Math.abs(nx) - 0.2) / 0.6);
+        const shank = clamp01((0.6 - y) / 0.4);
+        r *= (1 - 0.42 * knee) * (1 + 0.1 * shank); g *= (1 - 0.4 * knee) * (1 + 0.13 * shank); b *= (1 - 0.3 * knee) * (1 + 0.18 * shank);
+      }
+      if (part === "head") {
+        // grey muzzle, dark nostril slits on the top of the lip
+        const muz = clamp01((x - 1.8 - HX) / 0.18);
+        const nos = clamp01((x - 1.9 - HX) / 0.06) * clamp01((ny - 0.2) / 0.5) * clamp01(1 - Math.abs(Math.abs(z) - 0.035) / 0.03);
+        const k = (1 - 0.3 * muz) * (1 - 0.6 * nos);
+        r *= k; g *= k * 1.02; b *= k * 1.08;
+      }
+      if (part === "tail") {
+        const tuft = clamp01((1.35 - y) / 0.3);
+        r *= 1 - 0.55 * tuft; g *= 1 - 0.58 * tuft; b *= 1 - 0.6 * tuft;
+      }
+      return [r, g, b];
+    };
+  }
   function defineCamel() {
     if (camelDone || !CBZ.defineSpecies || !window.THREE) return;
     camelDone = true;
     CBZ.defineSpecies({
       id: "camel", name: "Dromedary Camel", biome: "desert", rarity: "uncommon",
       hp: 150, fur: "Camel Hide", furValue: 70, herd: [3, 7], packs: 2,
-      spd: 3.2, danger: 0, spook: 20, scale: 1.15, color: 0xc9a267,
+      spd: 3.2, danger: 0, spook: 20, scale: 1.15, color: CAMEL_COAT,
       build: function (ctx) {
         const T = ctx.THREE, m = ctx.mat;
-        const sand = m(0xc9a267), dark = m(0xa07c46), pale = m(0xdcc094), hoof = m(0x4a3a26);
+        const coat = m(CAMEL_COAT), pad = m(0x140f0a), eyeM = m(0x030202), rope = m(0x2a0906);
         const g = new T.Group();
-        function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-        // deep NARROW chest — a camel is a slab seen from the side and a
-        // plank seen from the front, which is what makes its saddle usable
-        const body = box(1.75, 0.82, 0.62, sand); body.position.set(0, 1.72, 0); g.add(body);
-        const under = box(1.6, 0.26, 0.56, pale); under.position.set(0, 1.36, 0); g.add(under);
-        const chest = box(0.52, 0.86, 0.6, sand); chest.position.set(0.8, 1.7, 0); g.add(chest);
-        const rump = box(0.5, 0.78, 0.6, sand); rump.position.set(-0.82, 1.7, 0); g.add(rump);
-        // ONE hump, set back over the shoulders. Two boxes so it has a
-        // silhouette instead of a corner: a wide base and a narrower crown.
-        /* THE HUMP SITS BACK OVER THE LOINS. The first draft centred it and the
-           picture said so at once: with the hump over the barrel's middle
-           there was no clear span on the back forward of it, the saddle
-           solver fell back to the only room left — the rump — and the
-           rider read as sliding off the animal's tail. A dromedary's hump is
-           behind the shoulders and its rider sits in FRONT of it; moving the
-           two boxes 28 cm aft is both the anatomy and the fix. */
-        const humpB = box(0.78, 0.34, 0.56, sand); humpB.position.set(-0.34, 2.24, 0); g.add(humpB);
-        const humpC = box(0.54, 0.3, 0.44, dark); humpC.position.set(-0.34, 2.5, 0); g.add(humpC);
-        // long S-curved neck carried HIGH — three segments, alternating rake
-        const n1 = box(0.36, 0.7, 0.42, sand); n1.position.set(0.98, 2.16, 0); n1.rotation.z = -0.55; g.add(n1);
-        const n2 = box(0.32, 0.66, 0.36, sand); n2.position.set(1.26, 2.72, 0); n2.rotation.z = -0.14; g.add(n2);
-        const crest = box(0.16, 0.5, 0.18, dark); crest.position.set(1.1, 2.5, 0); crest.rotation.z = -0.4; g.add(crest);
-        // small head, drooping muzzle, ears back
-        const head = box(0.4, 0.32, 0.3, sand); head.position.set(1.44, 3.02, 0); g.add(head);
-        const muzz = box(0.38, 0.24, 0.24, pale); muzz.position.set(1.72, 2.9, 0); muzz.rotation.z = 0.22; g.add(muzz);
-        const nose = box(0.1, 0.12, 0.2, hoof); nose.position.set(1.9, 2.83, 0); g.add(nose);
-        [0.11, -0.11].forEach(function (z) {
-          const e = box(0.1, 0.14, 0.08, sand); e.position.set(1.3, 3.16, z); g.add(e);
+        const put = function (geo, mat) { const me = new T.Mesh(geo, mat); g.add(me); return me; };
+
+        // THE BARREL — level back at ~2.05, the belly hanging to ~1.28, the
+        // chest deepest just behind the front legs, narrow for its depth.
+        put(loft([
+          { c: [-1.14, 1.70], a: 0.12, b: 0.14, bb: 0.16 },
+          { c: [-1.05, 1.72], a: 0.24, b: 0.24, bb: 0.30 },
+          { c: [-0.85, 1.74], a: 0.31, b: 0.28, bb: 0.38 },
+          { c: [-0.45, 1.76], a: 0.36, b: 0.29, bb: 0.45 },
+          { c: [-0.05, 1.77], a: 0.37, b: 0.28, bb: 0.48 },
+          { c: [0.35, 1.78], a: 0.35, b: 0.28, bb: 0.50 },
+          { c: [0.65, 1.80], a: 0.31, b: 0.29, bb: 0.49 },
+          { c: [0.88, 1.84], a: 0.25, b: 0.27, bb: 0.42 },
+          { c: [1.00, 1.88], a: 0.17, b: 0.20, bb: 0.30 },
+        ], { seg: 22, bulge: 0.5, shade: camelShade("body") }), coat);
+
+        /* THE HUMP — its widest line sunk INSIDE the barrel, so it rises out of
+           the ribs; with the equator above the back it overhung them like a
+           helmet set on the animal. */
+        put(loft([
+          { c: [-0.98, 1.82], a: 0.10, b: 0.07, bb: 0.06, p: 2.4 },
+          { c: [-0.86, 1.83], a: 0.22, b: 0.21, bb: 0.06, p: 2.4 },
+          { c: [-0.70, 1.83], a: 0.29, b: 0.43, bb: 0.06, p: 2.4 },
+          { c: [-0.52, 1.83], a: 0.32, b: 0.59, bb: 0.06, p: 2.4 },
+          { c: [-0.34, 1.83], a: 0.32, b: 0.65, bb: 0.06, p: 2.4 },
+          { c: [-0.16, 1.83], a: 0.30, b: 0.54, bb: 0.06, p: 2.4 },
+          { c: [0.00, 1.83], a: 0.24, b: 0.32, bb: 0.06, p: 2.4 },
+          { c: [0.09, 1.83], a: 0.12, b: 0.11, bb: 0.06, p: 2.4 },
+        ], { seg: 20, bulge: 0.3, shade: camelShade("hump") }), coat);
+
+        // THE NECK — out of the chest, forward and DOWN, then up to the head
+        put(loft([
+          { c: [0.78, 1.80], a: 0.20, b: 0.26, bb: 0.30 },
+          { c: [1.05, 1.83], a: 0.16, b: 0.19, bb: 0.24 },
+          { c: [1.32, 1.96], a: 0.125, b: 0.14, bb: 0.18 },
+          { c: [1.52, 2.20], a: 0.11, b: 0.12, bb: 0.15 },
+          { c: [1.61, 2.50], a: 0.10, b: 0.11, bb: 0.125 },
+          { c: [1.62, 2.80], a: 0.095, b: 0.105, bb: 0.12 },
+        ], { seg: 16, shade: camelShade("neck") }), coat);
+
+        // THE HEAD — carried level, a broad cranium narrowing to a long
+        // muzzle, and the heavy split upper lip that hangs past the jaw
+        put(loft([
+          { c: [1.45 + HX, 2.87], a: 0.09, b: 0.09, bb: 0.1 },
+          { c: [1.56 + HX, 2.88], a: 0.12, b: 0.115, bb: 0.13 },
+          { c: [1.70 + HX, 2.86], a: 0.10, b: 0.095, bb: 0.115 },
+          { c: [1.84 + HX, 2.82], a: 0.075, b: 0.078, bb: 0.09 },
+          { c: [1.95 + HX, 2.78], a: 0.077, b: 0.082, bb: 0.09 },
+          { c: [2.00 + HX, 2.75], a: 0.052, b: 0.05, bb: 0.06 },
+        ], { seg: 16, bulge: 0.6, shade: camelShade("head") }), coat);
+        put(loft([
+          { c: [1.60 + HX, 2.80], a: 0.07, b: 0.04, bb: 0.05 },
+          { c: [1.80 + HX, 2.74], a: 0.055, b: 0.035, bb: 0.04 },
+          { c: [1.93 + HX, 2.71], a: 0.045, b: 0.03, bb: 0.04 },
+        ], { seg: 12, bulge: 0.7, shade: camelShade("head") }), coat);
+        const eyeG = new T.SphereGeometry(0.026, 8, 6);
+        const earG = new T.ConeGeometry(0.032, 0.085, 7);
+        [1, -1].forEach(function (s) {
+          const e = put(eyeG, eyeM); e.position.set(1.63 + HX, 2.93, 0.104 * s);
+          const ear = put(earG, coat); ear.position.set(1.49 + HX, 3.0, 0.075 * s);
+          ear.rotation.set(0.45 * s, 0, 0.55);
         });
-        /* LEGS WITH A VISIBLE KNEE. A camel's legs are the reason it reads as
-           a camel and not a tall horse: they are long, thin, and they BREAK
-           forward at the knee. Two boxes per leg with the lower one offset —
-           the discovery rule below reads the pair as one column, so the whole
-           leg swings from the shoulder as it should. */
-        [[0.62, 0.24], [0.62, -0.24], [-0.72, 0.24], [-0.72, -0.24]].forEach(function (o) {
-          const up = box(0.17, 0.78, 0.17, sand); up.position.set(o[0], 1.02, o[1]); g.add(up);
-          const lo = box(0.14, 0.62, 0.14, sand); lo.position.set(o[0], 0.42, o[1]); g.add(lo);
-          const pad = box(0.26, 0.12, 0.24, hoof); pad.position.set(o[0], 0.06, o[1]); g.add(pad);
+
+        // THE HALTER — a rope noseband and headstall with cheek pieces. A
+        // camel on this island belongs to somebody.
+        const band = function (cx, cy, T0, A, B, BB) {
+          const t = new T.Vector3(T0[0], T0[1], 0).normalize();
+          const up = new T.Vector3(0, 0, 1).cross(t).normalize();          // Z x T: the head's own "up"
+          const pts = [];
+          for (let k = 0; k < 18; k++) {
+            const ph = k / 18 * Math.PI * 2, c = Math.cos(ph), s = Math.sin(ph);
+            const u = s * (s >= 0 ? B : BB);
+            pts.push({ c: [cx + up.x * u, cy + up.y * u, c * A], a: 0.016, b: 0.007, p: 4 });
+          }
+          return loft(pts, { seg: 6, closed: true, lat: [t.x, t.y, 0] });
+        };
+        put(band(1.84 + HX, 2.82, [0.25, -0.08], 0.089, 0.092, 0.103), rope);
+        put(band(1.53 + HX, 2.875, [0.25, 0.0], 0.125, 0.123, 0.135), rope);
+        [1, -1].forEach(function (s) {
+          put(rbar([1.84 + HX, 2.82, 0.088 * s], [1.53 + HX, 2.875, 0.124 * s], 0.005, 0.011, { lat: [0, 0, 1] }), rope);
         });
-        const tail = box(0.12, 0.62, 0.12, dark); tail.position.set(-1.04, 1.44, 0); tail.rotation.z = 0.3; g.add(tail);
+
+        /* THE LEGS. Swept down a jointed path, so the knee is a real knee: the
+           front leg's carpus is a knob that faces forward, the hind leg's hock
+           kicks back, and both finish in a fetlock and a broad flat pad. */
+        const legShade = camelShade("leg");
+        const FRONT = [
+          [0.02, 1.80, 0.12, 0.16, 0.14], [0.0, 1.40, 0.10, 0.12, 0.10], [-0.02, 1.05, 0.06, 0.07, 0.06],
+          [-0.02, 0.74, 0.078, 0.09, 0.07], [-0.02, 0.62, 0.05, 0.05, 0.05], [-0.02, 0.24, 0.04, 0.045, 0.045],
+          [-0.01, 0.16, 0.05, 0.055, 0.05], [0.02, 0.07, 0.06, 0.06, 0.06],
+        ];
+        const HIND = [
+          [0.02, 1.78, 0.14, 0.20, 0.18], [0.06, 1.35, 0.11, 0.14, 0.12], [-0.02, 1.00, 0.07, 0.08, 0.08],
+          [-0.08, 0.76, 0.068, 0.06, 0.09], [-0.05, 0.62, 0.05, 0.05, 0.05], [0.0, 0.24, 0.04, 0.045, 0.045],
+          [0.01, 0.16, 0.05, 0.055, 0.05], [0.04, 0.07, 0.06, 0.06, 0.06],
+        ];
+        [[0.58, 0.19, FRONT], [0.58, -0.19, FRONT], [-0.72, 0.2, HIND], [-0.72, -0.2, HIND]].forEach(function (o, q) {
+          const x0 = o[0], z = o[1];
+          /* THE PATH RUNS DOWNWARD, so the loft's "up" side (b) is the FRONT of
+             the leg and the down side (bb) the back. */
+          const leg = put(loft(o[2].map(function (r) {
+            return { c: [x0 + r[0], r[1], z], a: r[2], b: r[3], bb: r[4] };
+          }), { seg: 12, shade: legShade }), coat);
+          const foot = put(loft([
+            { c: [x0 - 0.06, 0.045, z], a: 0.06, b: 0.03, bb: 0.045 },
+            { c: [x0 + 0.03, 0.045, z], a: 0.09, b: 0.04, bb: 0.045 },
+            { c: [x0 + 0.13, 0.04, z], a: 0.075, b: 0.03, bb: 0.04 },
+          ], { seg: 12, bulge: 0.8, shade: function (x, y, zz) {
+            // the split between the two toes, a dark seam down the front
+            const cleft = clamp01(1 - Math.abs(zz - z) / 0.012) * clamp01((x - x0) / 0.08);
+            return [1 - 0.5 * cleft, 1 - 0.5 * cleft, 1 - 0.5 * cleft];
+          } }), pad);
+          const pivot = { x: x0, y: 1.62, z: z };
+          leg.userData.mountLeg = q; leg.userData.mountPivot = pivot;
+          foot.userData.mountLeg = q; foot.userData.mountPivot = pivot;
+        });
+
+        // tail hanging to the hocks, ending in a dark tuft
+        put(loft([
+          { c: [-1.08, 1.86], a: 0.04, b: 0.045 }, { c: [-1.16, 1.74], a: 0.035, b: 0.035 },
+          { c: [-1.20, 1.50], a: 0.028, b: 0.028 }, { c: [-1.21, 1.24], a: 0.03, b: 0.03 },
+          { c: [-1.20, 1.04], a: 0.045, b: 0.04 },
+        ], { seg: 8, bulge: 0.8, shade: camelShade("tail") }), coat);
         return g;
       },
     });
@@ -1092,11 +1366,17 @@
          kind of thing a metric will never catch. */
       if (c && c.getHex() === COAT_SENTINEL) c = COAT_FALLBACK_C;
       const cr = c ? c.r : 1, cg = c ? c.g : 1, cb = c ? c.b : 1;
+      /* A GEOMETRY THAT CARRIES ITS OWN COLOUR ATTRIBUTE (the shape kit's
+         tint(): a camel's darker hump, a truck's sun-bleached roof) is a
+         MULTIPLIER on the material colour, not a replacement. The coat pass
+         bakes white and ignores it: the tint is per rider, not per vertex. */
+      const vc = (!forceWhite && geo.attributes.color) ? geo.attributes.color.array : null;
       for (let v = 0; v < p.length; v += 3) {
         pos.push(p[v], p[v + 1], p[v + 2]);
         if (n) nrm.push(n[v], n[v + 1], n[v + 2]);
         else nrm.push(0, 1, 0);
-        col.push(cr, cg, cb);
+        if (vc) col.push(cr * vc[v], cg * vc[v + 1], cb * vc[v + 2]);
+        else col.push(cr, cg, cb);
       }
       geo.dispose();
     }
@@ -1254,7 +1534,9 @@
          measured, and it dragged the horse's hip pivot from 1.20 up to 1.90,
          so the front legs pivoted about the middle of the barrel. He is
          tagged when he is seated and refused here. */
-      if (owner >= 0 && meshes[i].userData && meshes[i].userData.mountRider) owner = -1;
+      /* AND NEITHER IS HIS TACK: a saddlebag hangs down the flank exactly
+         where the rider's boot does, and for exactly the same reason. */
+      if (owner >= 0 && meshes[i].userData && (meshes[i].userData.mountRider || meshes[i].userData.mountTack)) owner = -1;
       if (owner < 0) { body.push({ mesh: meshes[i] }); continue; }
       legs[owner].push({ mesh: meshes[i] });
       if (!hips[owner]) {
@@ -1321,7 +1603,7 @@
       // and a horse's poll are both high and neither is a seat
       const score = area * (b.max.y - box.min.y);
       if (!best || score > best.score) {
-        best = { score: score, y: b.max.y, x0: b.min.x, x1: b.max.x, w: b.max.z - b.min.z };
+        best = { score: score, y: b.max.y, x0: b.min.x, x1: b.max.x, w: b.max.z - b.min.z, i: i };
       }
     }
     if (!best) return { x: 0, y: box.max.y * 0.72, w: 0.7 };
@@ -1358,6 +1640,7 @@
       i = j;
     }
     let x = (best.x0 + best.x1) / 2;
+    let span = null;
     if (runs.length) {
       /* THE FORWARDMOST RUN THAT IS BIG ENOUGH TO SIT IN. "Big enough" is the
          rider's own seat footprint — about 45 cm from the back of his thigh
@@ -1378,9 +1661,250 @@
       if (pick) {
         const f = (pick.a + (pick.b - pick.a) * 0.62 + 0.5) / N;
         x = best.x0 + (best.x1 - best.x0) * f;
+        span = { x0: best.x0 + (best.x1 - best.x0) * pick.a / N, x1: best.x0 + (best.x1 - best.x0) * (pick.b + 1) / N };
       }
     }
-    return { x: x, y: best.y, w: Math.max(0.48, best.w) };
+    /* ---- 3. HOW HIGH THE BACK ACTUALLY IS THERE ----------------------
+       A box's top is the back's highest point ANYWHERE. On the bestiary's
+       box horse that is also the height under the rider; on a lofted camel
+       whose back rises to the withers it is not, and seating the hips at the
+       box top floats him by the difference. So the height is measured where
+       he sits, straight down onto the back. */
+    const backMesh = parts.body[best.i].mesh;
+    let y = best.y;
+    const hit = castDown(backMesh, x, 0, box.max.y + 1);
+    if (hit) y = hit.y;
+    parts.back = { mesh: backMesh, span: span };
+    return { x: x, y: y, w: Math.max(0.48, best.w) };
+  }
+
+  /* RAYS IN THE BAKE FRAME. The bake's source group sits at identity (see
+     buildSource), so world and frame coincide; the point comes back in the
+     frame regardless, through the mesh's own parent chain. */
+  const _ray = new THREE.Raycaster();
+  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+  function castAt(meshes, ox, oy, oz, dx, dy, dz) {
+    _ro.set(ox, oy, oz); _rd.set(dx, dy, dz).normalize();
+    _ray.set(_ro, _rd);
+    _ray.far = 50;
+    const hits = _ray.intersectObjects(Array.isArray(meshes) ? meshes : [meshes], false);
+    return hits.length ? hits[0].point.clone() : null;
+  }
+  function castDown(mesh, x, z, fromY) { return castAt(mesh, x, fromY, z, 0, -1, 0); }
+
+  /* ============================================================ THE TACK
+
+     A CAVALRYMAN SAT ON A BARE ANIMAL, and in a still that reads as a man
+     who fell onto a horse, not a soldier. Neither the bestiary's horse nor
+     the camel carried anything, and the horse is not this file's to edit —
+     so the tack is an OVERLAY, fitted in the bake to whatever body the
+     species file built, using the seat the solver just measured:
+
+       blanket     draped over the barrel by casting rays at it round the
+                   spine, so it lies ON a lofted camel and ON a box horse
+                   alike — a striped wool blanket with an indigo hem
+       saddle      a curved seat rising to a pommel and a cantle; on the
+                   camel a tall Tuareg pommel with its cross
+       skirts      leather flaps down both sides over the blanket
+       girth       a strap cast all the way round the barrel under the saddle
+       saddlebags  a pair hung against the flanks behind the rider's leg,
+                   leaning with the ribs they rest on
+
+     The seat goes UP by the saddle's thickness, which is the whole point of
+     fitting it first: the rider's hips land in the saddle, not inside it.
+     Every piece is tagged `mountTack` so the leg discovery never hands a
+     saddlebag to a leg. */
+  const TACK = {
+    madder: 0x2a0806, indigo: 0x090b1a, ochre: 0x3a2809, wool: 0x2e2a21,
+    leather: 0x1c1008, leatherDark: 0x0e0804, girth: 0x231a0e, bag: 0x24160b,
+  };
+
+  /* One row of the drape: points round the spine at station x, cast from
+     outside toward (x, cy, 0) and lifted `lift` off whatever they hit. */
+  function drapeRow(meshes, x, cy, angs, lift) {
+    const row = [];
+    let lastR = 0.35;
+    for (let j = 0; j < angs.length; j++) {
+      const d = new THREE.Vector3(0, Math.cos(angs[j]), Math.sin(angs[j]));
+      const hit = castAt(meshes, x, cy + d.y * 4, d.z * 4, 0, -d.y, -d.z);
+      let p;
+      if (hit) { p = hit.addScaledVector(d, lift); lastR = Math.hypot(p.y - cy, p.z); }
+      else p = new THREE.Vector3(x, cy + d.y * lastR, d.z * lastR);
+      row.push({ p: p, d: d });
+    }
+    return row;
+  }
+
+  /* A CLOTH OR LEATHER SHEET WITH THICKNESS from a grid of draped points:
+     grid[i][j], i along the spine, j round it. The outer face is smooth
+     shaded with a FLAT colour per quad (so stripes stay crisp through the
+     bake's de-index); the inner face and the four edges are one plain
+     second geometry in `edgeHex`. */
+  function slab(grid, t, faceCol) {
+    const ni = grid.length, nj = grid[0].length;
+    const pos = [], idx = [];
+    for (let i = 0; i < ni; i++) for (let j = 0; j < nj; j++) { const p = grid[i][j].p; pos.push(p.x, p.y, p.z); }
+    for (let i = 0; i < ni - 1; i++) for (let j = 0; j < nj - 1; j++) {
+      const A = i * nj + j, B = (i + 1) * nj + j, C = i * nj + j + 1, D = (i + 1) * nj + j + 1;
+      idx.push(A, C, B, B, C, D);
+    }
+    let outer = new THREE.BufferGeometry();
+    outer.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    outer.setIndex(idx);
+    outer.computeVertexNormals();
+    outer = outer.toNonIndexed();
+    const tris = outer.attributes.position.count / 3;
+    const col = new Float32Array(tris * 9);
+    for (let f = 0; f < tris; f++) {
+      const q = f >> 1, i = Math.floor(q / (nj - 1)), j = q % (nj - 1);
+      const c = faceCol(i, j);
+      for (let v = 0; v < 3; v++) { col[f * 9 + v * 3] = c[0]; col[f * 9 + v * 3 + 1] = c[1]; col[f * 9 + v * 3 + 2] = c[2]; }
+    }
+    outer.setAttribute("color", new THREE.BufferAttribute(col, 3));
+
+    // the underside and the four edges, both windings on the edges so a hem
+    // seen from below is never a hole
+    const ip = [], iidx = [];
+    const inner = function (i, j) { const g = grid[i][j]; return g.p.clone().addScaledVector(g.d, -t); };
+    const V = function (v) { ip.push(v.x, v.y, v.z); return ip.length / 3 - 1; };
+    for (let i = 0; i < ni - 1; i++) for (let j = 0; j < nj - 1; j++) {
+      const A = V(inner(i, j)), B = V(inner(i + 1, j)), C = V(inner(i, j + 1)), D = V(inner(i + 1, j + 1));
+      iidx.push(A, B, C, B, D, C);
+    }
+    const edge = function (i0, j0, i1, j1) {
+      const a = V(grid[i0][j0].p), b = V(grid[i1][j1].p), c = V(inner(i0, j0)), d = V(inner(i1, j1));
+      iidx.push(a, b, c, b, d, c, a, c, b, b, c, d);
+    };
+    for (let i = 0; i < ni - 1; i++) { edge(i, 0, i + 1, 0); edge(i, nj - 1, i + 1, nj - 1); }
+    for (let j = 0; j < nj - 1; j++) { edge(0, j, 0, j + 1); edge(ni - 1, j, ni - 1, j + 1); }
+    const under = new THREE.BufferGeometry();
+    under.setAttribute("position", new THREE.Float32BufferAttribute(ip, 3));
+    under.setIndex(iidx);
+    under.computeVertexNormals();
+    return { outer: outer, under: under };
+  }
+
+  function dressTack(src, parts, seat, kindId) {
+    const back = parts.back;
+    if (!back || !back.mesh) return seat;
+    const mesh = back.mesh;
+    const bodyMeshes = parts.body.map(function (e) { return e.mesh; });
+    const camel = kindId === "camel";
+    const tack = new THREE.Group();
+    tack.name = "tack";
+    const put = function (geo, hex) {
+      const me = new THREE.Mesh(geo, kitMat(hex));
+      me.userData.mountTack = 1;
+      tack.add(me);
+      return me;
+    };
+    const ytop = function (x) { const h = castDown(mesh, x, 0, seat.y + 2); return h ? h.y : seat.y; };
+    const sx = seat.x;
+    const cy = seat.y - 0.4;
+
+    // ---- the blanket: across the clear span, never up the hump or the neck
+    let xa = sx - 0.38, xb = sx + 0.34;
+    if (back.span) { xa = Math.max(xa, back.span.x0 - 0.02); xb = Math.min(xb, back.span.x1 + 0.06); }
+    const NI = 10, A = 1.68, NJ = 15;
+    const angs = [];
+    for (let j = 0; j < NJ; j++) angs.push(-A + 2 * A * j / (NJ - 1));
+    const grid = [];
+    for (let i = 0; i < NI; i++) {
+      const row = drapeRow(mesh, xa + (xb - xa) * i / (NI - 1), cy, angs, 0.02);
+      // the hem hangs free for the last few centimetres instead of hugging
+      const lo = row[0], hi = row[row.length - 1];
+      row.unshift({ p: lo.p.clone().add(new THREE.Vector3(0, -0.07, 0)), d: lo.d });
+      row.push({ p: hi.p.clone().add(new THREE.Vector3(0, -0.07, 0)), d: hi.d });
+      grid.push(row);
+    }
+    const hexRGB = function (hex) { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+    const STRIPE = [TACK.indigo, TACK.madder, TACK.madder, TACK.ochre, TACK.wool, TACK.madder, TACK.wool, TACK.ochre, TACK.madder, TACK.indigo];
+    const nj = grid[0].length;
+    const bl = slab(grid, 0.018, function (i, j) {
+      const hem = j <= 1 || j >= nj - 3;
+      const c = hexRGB(hem ? TACK.indigo : STRIPE[i % STRIPE.length]);
+      const w = 1 + (hash3(i, j, 7) - 0.5) * 0.12;                 // hand-woven, not printed
+      return [c[0] * w, c[1] * w, c[2] * w];
+    });
+    put(bl.outer, 0xffffff);
+    put(bl.under, TACK.madder);
+
+    // ---- the saddle: a curved seat rising to a pommel and a cantle
+    const prof = camel
+      ? { x: [-0.33, -0.27, -0.17, 0, 0.14, 0.24, 0.30], rise: [0.2, 0.1, 0.015, 0, 0.02, 0.08, 0.12],
+          a: [0.15, 0.17, 0.17, 0.165, 0.15, 0.12, 0.08] }
+      : { x: [-0.33, -0.27, -0.17, 0, 0.14, 0.24, 0.30], rise: [0.12, 0.06, 0.012, 0, 0.018, 0.07, 0.13],
+          a: [0.10, 0.15, 0.17, 0.165, 0.15, 0.12, 0.075] };
+    /* the bottom of every ring sits IN the blanket and the pommel and cantle
+       grow upward from it — a saddle whose raised ends hovered off the
+       back read as a rocking chair balanced on the animal */
+    const rings = prof.x.map(function (dx, k) {
+      const h = prof.rise[k] / 2;
+      return { c: [sx + dx, ytop(sx + dx) + 0.01 + 0.06 + h], a: prof.a[k], b: 0.04 + h, bb: 0.06 + h, p: 2.4 };
+    });
+    put(loft(rings, { seg: 16, bulge: 0.3, shade: function (x, y, z, nx, ny) {
+      const wear = 1 + 0.25 * clamp01(ny) * clamp01(1 - Math.abs(x - sx) / 0.15);   // polished where he sits
+      const n = 1 + (vnoise(x * 14, y * 14, z * 14) - 0.5) * 0.12;
+      return [wear * n, wear * n, wear * n];
+    } }), TACK.leather);
+    if (camel) {
+      // the Tuareg pommel: a leather-bound post with its cross
+      const last = rings[rings.length - 1], px = sx + 0.29, py = last.c[1] + last.b - 0.02;
+      put(rbar([px, py, 0], [px + 0.04, py + 0.2, 0], 0.022, 0.022, { p: 2, seg: 10 }), TACK.leatherDark);
+      put(rbar([px + 0.04, py + 0.18, -0.085], [px + 0.04, py + 0.18, 0.085], 0.018, 0.018, { p: 2, seg: 10 }), TACK.leatherDark);
+    }
+
+    // ---- the skirts: leather flaps over the blanket, both sides
+    [[0.5, 1.3], [-1.3, -0.5]].forEach(function (rng) {
+      const sa = [];
+      for (let j = 0; j < 6; j++) sa.push(rng[0] + (rng[1] - rng[0]) * j / 5);
+      const sg = [];
+      for (let i = 0; i < 6; i++) sg.push(drapeRow(mesh, sx - 0.26 + 0.46 * i / 5, cy, sa, 0.048));
+      const sk = slab(sg, 0.012, function (i, j) {
+        const n = 1 + (hash3(i, j, 3) - 0.5) * 0.1;
+        return [n, n, n];
+      });
+      put(sk.outer, TACK.leather);
+      put(sk.under, TACK.leatherDark);
+    });
+
+    // ---- the girth: cast all the way round the barrel under the saddle
+    const gx = sx + (camel ? -0.02 : 0.1);
+    const bb = new THREE.Box3().setFromObject(mesh);
+    const gcy = (bb.min.y + bb.max.y) / 2;
+    const ga = [];
+    for (let k = 0; k < 28; k++) ga.push(k / 28 * Math.PI * 2);
+    const gr = drapeRow(bodyMeshes, gx, gcy, ga, 0.012);
+    put(loft(gr.map(function (e) { return { c: [e.p.x, e.p.y, e.p.z], a: 0.035, b: 0.006, p: 4 }; }),
+      { seg: 6, closed: true, lat: [1, 0, 0] }), TACK.girth);
+
+    // ---- the saddlebags: hung against the flanks behind the rider's leg
+    const bagGeo = loft([
+      { c: [-0.17, 0], a: 0.046, b: 0.14, p: 4 }, { c: [-0.15, 0], a: 0.055, b: 0.16, p: 4 },
+      { c: [0.15, 0], a: 0.055, b: 0.16, p: 4 }, { c: [0.17, 0], a: 0.046, b: 0.14, p: 4 },
+    ], { seg: 16, bulge: 0, shade: function (x, y, z) {
+      const flap = y > 0.03 ? 0.78 : 1;                             // the closing flap over the top
+      const strap = Math.abs(Math.abs(x) - 0.075) < 0.014 ? 0.62 : 1;
+      const n = 1 + (vnoise(x * 12, y * 12, z * 12) - 0.5) * 0.18;
+      const k = flap * strap * n;
+      return [k, k, k];
+    } });
+    const bx = xa + (camel ? 0.1 : 0.12);
+    const byc = ytop(bx) - 0.34;
+    [1, -1].forEach(function (s) {
+      const hLo = castAt(mesh, bx, byc - 0.1, 3 * s, 0, 0, -s);
+      const hHi = castAt(mesh, bx, byc + 0.1, 3 * s, 0, 0, -s);
+      if (!hLo || !hHi) return;
+      const zc = (hLo.z + hHi.z) / 2 + s * (0.02 + 0.018 + 0.055);
+      const bag = put(bagGeo, TACK.bag);
+      bag.position.set(bx, byc, zc);
+      bag.rotation.x = Math.atan2(hHi.z - hLo.z, 0.2);
+    });
+
+    src.add(tack);
+    src.updateMatrixWorld(true);
+    // the rider sits IN the saddle: its seat, less the little it gives under him
+    return { x: sx, y: ytop(sx) + 0.01 + 0.06 + 0.04 - 0.012, w: seat.w + 0.07 };
   }
 
   /* THE COAT SENTINEL. A rider is baked twice: everything that is his (skin,
@@ -1392,68 +1916,270 @@
   const COAT_SENTINEL = 0x00fe01;
   const COAT_FALLBACK_C = new THREE.Color(0x6b6446);
 
+  /* THE TECHNICAL. NOT THE REPO'S TRUCK, AND THAT IS A COST DECISION:
+     city/island_military.js's makeTruck drags 316 KB of archipelago behind
+     it through the `military` pack. So the pickup is built here — and built
+     as a pickup, not the box pile it used to be (box cab, box glass, box
+     bonnet, two cylinders per wheel, a spare "wheel" that was a black
+     brick). Reference: a sun-faded tan single-cab pickup, the Toyota shape
+     every technical in every desert war is.
+
+       lower body   ONE extruded side profile, bevelled, with the front wheel
+                    arch cut into it — bonnet, wings and doors in one skin
+       greenhouse   dark glass core with paint-coloured roof and A/B/C
+                    pillars standing proud of it, a raked windscreen
+       bed          floor, headboard, tailgate and two side panels with the
+                    rear arch cut in, capped rails
+       wheels       lathed tyres with a stepped tread and dusty sidewalls, a
+                    dished steel rim with lug nuts and vent holes — the holes
+                    and nuts are what make the spin readable
+       dress        arch flares, bumpers, grille slats, round headlights (a
+                    pale lens, not a glow), mirrors, door seams, tail lights
+       load         a raised gun platform on a welded frame, the pintle post,
+                    a spare tyre on its rim leant on the tailgate, two jerry
+                    cans with their pressed X
+
+     Nose toward +X, tyres on the ground at y=0 — the bestiary's convention,
+     so the bake and the seat need no special case. The gunner's deck is
+     still 1.23 (technicalSeat) and the gun still meets his hands.
+
+     PAINT is tan multiplied per vertex: bleached paler (and greyer) on every
+     upward face, road dust climbing the lower panels, two scales of blotch.
+     The colours are LINEAR hexes, dark on purpose — see props.js's palette
+     arithmetic; the old 0xc2a878 arrived on screen as paper white. */
+  const TECH = {
+    paint: 0x221a0e, steel: 0x0b0a08, rubber: 0x080707, rim: 0x1c1912, glass: 0x05080a,
+    chrome: 0x2a2a28, lens: 0x3c3a34, amber: 0x3a1d04, red: 0x2c0503, plastic: 0x100f0d,
+    canOlive: 0x10120a, canRed: 0x1e0904, hole: 0x050505,
+  };
+  function paintShade(x, y, z, nx, ny, nz) {
+    const up = clamp01(ny);
+    const dust = clamp01((0.95 - y) / 0.4);
+    const mot = 1 + (vnoise(x * 2.3, y * 2.3, z * 2.3) - 0.5) * 0.18 + (vnoise(x * 9, y * 9, z * 9) - 0.5) * 0.07;
+    const fade = 1 + 0.2 * up;
+    return [fade * mot * (1 + 0.1 * dust), fade * mot * (1 + 0.02 * up), (fade + 0.1 * up) * mot * (1 - 0.12 * dust)];
+  }
+  function dustShade(x, y, z, nx, ny) {
+    const dust = clamp01((0.9 - y) / 0.6) * 0.8 + clamp01(ny) * 0.5;
+    const n = 1 + (vnoise(x * 6, y * 6, z * 6) - 0.5) * 0.2;
+    return [(1 + 0.9 * dust) * n, (1 + 0.75 * dust) * n, (1 + 0.5 * dust) * n];
+  }
+
   function buildTechnical() {
-    /* NOT THE REPO'S TRUCK, AND THAT IS A COST DECISION. city/island_military
-       .js has a real army truck (makeTruck) and it is better geometry than
-       this. It is also 130 KB and it drags city/strategic.js's 186 KB behind
-       it through the `military` pack. 316 KB of archipelago for one pickup is
-       a worse trade than the bestiary trade we just refused, and unlike the
-       horse there is no ANIMAL here whose absence would be felt — a technical
-       is a box with wheels and a gun, and the gun is the part that matters.
-       THAT part is the armoury's real one. */
     const g = new THREE.Group();
-    const mats = {};
-    function mat(hex) {
-      if (!mats[hex]) mats[hex] = new THREE.MeshLambertMaterial({ color: hex });
-      return mats[hex];
-    }
-    function box(w, h, d, hex, x, y, z) {
-      const m = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d), mat(hex));
-      m.position.set(x, y, z);
-      g.add(m);
-      return m;
-    }
-    const TAN = 0xc2a878, TAN_D = 0x9a8154, DARK = 0x2b2622, GLASS = 0x30414a, RUB = 0x151312;
-    // nose toward +X, wheels on the ground at y=0 — the bestiary's convention,
-    // kept here so the bake and the saddle solver do not need a special case
-    box(3.9, 0.28, 1.9, DARK, 0, 0.62, 0);            // chassis
-    /* A CAB THAT CLEARS THE BED SIDES. At 0.78 high it topped out at 1.49
-       against bed rails at 1.41, and in a side-on still the truck read as an
-       open trough with a lump in it rather than as a pickup. */
-    box(1.5, 1.05, 1.86, TAN, 0.55, 1.32, 0);         // cab
-    box(0.9, 0.52, 1.7, GLASS, 1.3, 1.5, 0);          // windscreen
-    box(1.56, 0.1, 1.9, TAN_D, 0.5, 1.86, 0);         // roof lip
-    box(1.0, 0.62, 1.86, TAN_D, 1.55, 0.95, 0);       // bonnet
-    box(0.28, 0.3, 1.7, DARK, 2.05, 0.82, 0);         // grille
-    box(1.9, 0.46, 1.86, TAN, -1.0, 0.98, 0);         // bed floor
-    [0.9, -0.9].forEach(function (z) { box(1.9, 0.42, 0.1, TAN_D, -1.0, 1.2, z); });   // bed sides
-    box(0.12, 0.42, 1.8, TAN_D, -1.94, 1.2, 0);       // tailgate
-    box(1.7, 0.1, 1.7, DARK, -1.0, 1.23, 0);          // deck plate the gun stands on
-    box(0.22, 0.5, 0.22, DARK, -0.7, 1.5, 0);         // pintle post
-    // spare wheel and jerry cans, because a technical without them reads as a
-    // toy and they cost four boxes
-    box(0.18, 0.62, 0.62, RUB, -1.9, 1.5, 0.55);
-    box(0.3, 0.4, 0.22, 0x8a3a2a, -1.55, 1.4, -0.7);
-    box(0.3, 0.4, 0.22, 0x8a3a2a, -1.55, 1.4, -0.4);
-    // WHEELS: four cylinders on the ground, which the leg discovery below
-    // reads as four legs — and a wheel spinning about its axle is exactly
-    // what the leg swing already does.
-    [[1.25, 0.98], [1.25, -0.98], [-1.15, 0.98], [-1.15, -0.98]].forEach(function (o, qi) {
-      const axle = { x: o[0], y: 0.48, z: o[1] };
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.34, 12), mat(RUB));
-      w.rotation.x = Math.PI / 2;
-      w.position.set(o[0], 0.48, o[1]);
-      // TAGGED, not discovered: a wheel is a disc and no "tall thin
-      // ground-touching" rule will ever find it. The pivot is the AXLE, which
-      // is what makes the spin a spin instead of a wobble about the tread.
-      w.userData.mountLeg = qi; w.userData.mountPivot = axle;
-      g.add(w);
-      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.36, 8), mat(0x6c6156));
-      hub.rotation.x = Math.PI / 2;
-      hub.position.set(o[0], 0.48, o[1]);
-      hub.userData.mountLeg = qi; hub.userData.mountPivot = axle;
-      g.add(hub);
+    const put = function (geo, hex, shade) {
+      if (shade) tint(geo, shade);
+      const me = new THREE.Mesh(geo, kitMat(hex));
+      g.add(me);
+      return me;
+    };
+    // extrude a side-profile Shape into a slab centred on zc, `depth` across
+    const side = function (shape, zc, depth, bev) {
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: depth, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 2, curveSegments: 14,
+      });
+      geo.deleteAttribute("uv");
+      geo.translate(0, 0, zc - depth / 2);
+      return geo;
+    };
+    const archAngles = function (cx, cy, r, y) {
+      const h = y - cy, w = Math.sqrt(r * r - h * h);
+      return [Math.atan2(h, -w), Math.atan2(h, w), cx - w, cx + w];
+    };
+    const FX = 1.25, RX = -1.15, AY = 0.44, TR = 0.44;   // axles and tyre radius
+
+    // ---- lower body: bonnet, wings, doors and cab floor in one skin
+    const lb = new THREE.Shape();
+    const fa = archAngles(FX, AY, 0.54, 0.58);
+    lb.moveTo(-0.25, 0.58);
+    lb.lineTo(fa[2], 0.58);
+    lb.absarc(FX, AY, 0.54, fa[0], fa[1], true);
+    lb.lineTo(2.06, 0.58);
+    lb.quadraticCurveTo(2.14, 0.6, 2.14, 0.72);
+    lb.lineTo(2.14, 1.0);
+    lb.quadraticCurveTo(2.13, 1.1, 2.04, 1.11);
+    lb.lineTo(0.98, 1.19);
+    lb.lineTo(-0.25, 1.17);
+    lb.lineTo(-0.25, 0.58);
+    put(side(lb, 0, 1.72, 0.04), TECH.paint, paintShade);
+
+    // ---- greenhouse: glass core, then the roof and pillars proud of it
+    const gh = new THREE.Shape();
+    gh.moveTo(-0.22, 1.16); gh.lineTo(0.97, 1.16); gh.lineTo(0.6, 1.87);
+    gh.lineTo(0.52, 1.92); gh.lineTo(-0.12, 1.92); gh.lineTo(-0.21, 1.86); gh.lineTo(-0.22, 1.16);
+    put(side(gh, 0, 1.5, 0.015), TECH.glass, function (x, y, z, nx, ny) {
+      const sky = 1 + 0.35 * clamp01(ny + 0.3);                      // the sky in the raked glass
+      return [sky, sky * 1.05, sky * 1.15];
     });
+    const roof = new THREE.Shape();
+    roof.moveTo(0.63, 1.85); roof.lineTo(0.53, 1.95); roof.lineTo(-0.13, 1.95);
+    roof.lineTo(-0.24, 1.88); roof.lineTo(-0.24, 1.84); roof.lineTo(0.63, 1.85);
+    put(side(roof, 0, 1.56, 0.025), TECH.paint, paintShade);
+    [1, -1].forEach(function (s) {
+      const z = 0.785 * s;
+      put(rbar([0.975, 1.17, z], [0.6, 1.88, z], 0.03, 0.035, { lat: [0, 0, 1], shade: paintShade }), TECH.paint);   // A
+      put(rbar([0.19, 1.16, z], [0.19, 1.9, z], 0.03, 0.05, { lat: [0, 0, 1], shade: paintShade }), TECH.paint);     // B
+      put(rbar([-0.2, 1.16, z], [-0.2, 1.88, z], 0.03, 0.06, { lat: [0, 0, 1], shade: paintShade }), TECH.paint);    // C
+      // door shuts, handle and mirror
+      put(rbar([0.19, 0.62, 0.902 * s], [0.19, 1.16, 0.902 * s], 0.004, 0.006, { lat: [0, 0, 1] }), TECH.steel);
+      put(rbar([0.95, 0.62, 0.9 * s], [0.97, 1.16, 0.9 * s], 0.004, 0.006, { lat: [0, 0, 1] }), TECH.steel);
+      put(rbar([0.04, 1.06, 0.905 * s], [0.14, 1.06, 0.905 * s], 0.008, 0.012, { lat: [0, 0, 1] }), TECH.steel);
+      put(rbar([0.9, 1.22, 0.86 * s], [0.9, 1.3, 1.0 * s], 0.012, 0.012, { p: 2, lat: [1, 0, 0] }), TECH.plastic);
+      put(rbar([0.9, 1.33, 0.95 * s], [0.9, 1.33, 1.1 * s], 0.025, 0.075, { lat: [1, 0, 0] }), TECH.plastic);
+    });
+    put(rbar([0.99, 1.19, -0.8], [0.99, 1.19, 0.8], 0.03, 0.02, { lat: [1, 0, 0] }), TECH.steel);   // cowl
+
+    // ---- the nose: grille and slats, round lamps in chrome bezels, indicators
+    put(rbar([2.18, 0.87, -0.5], [2.18, 0.87, 0.5], 0.02, 0.13), TECH.steel);
+    [0.8, 0.87, 0.94].forEach(function (y) {
+      put(rbar([2.2, y, -0.48], [2.2, y, 0.48], 0.01, 0.014, { shade: paintShade }), TECH.paint);
+    });
+    const bezel = new THREE.TorusGeometry(0.085, 0.014, 6, 18); bezel.rotateY(Math.PI / 2);
+    const lensG = new THREE.CylinderGeometry(0.078, 0.078, 0.02, 18); lensG.rotateZ(Math.PI / 2);
+    [1, -1].forEach(function (s) {
+      const b = put(bezel, TECH.chrome); b.position.set(2.19, 0.9, 0.7 * s);
+      const l = put(lensG, TECH.lens); l.position.set(2.185, 0.9, 0.7 * s);
+      put(rbar([2.18, 0.74, 0.62 * s], [2.18, 0.74, 0.78 * s], 0.012, 0.025), TECH.amber);
+    });
+
+    // ---- bumpers, frame rails, axles, arch flares
+    put(rbar([2.21, 0.62, -0.97], [2.21, 0.62, 0.97], 0.07, 0.09, { shade: dustShade }), TECH.steel);
+    put(rbar([-2.08, 0.6, -0.92], [-2.08, 0.6, 0.92], 0.06, 0.06, { shade: dustShade }), TECH.steel);
+    [0.42, -0.42].forEach(function (z) {
+      put(rbar([-2.0, 0.5, z], [2.06, 0.5, z], 0.04, 0.07, { lat: [0, 0, 1], shade: dustShade }), TECH.steel);
+    });
+    [FX, RX].forEach(function (x) {
+      put(rbar([x, AY, -0.86], [x, AY, 0.86], 0.045, 0.045, { p: 2, shade: dustShade }), TECH.steel);
+    });
+    [[FX, 0.918], [FX, -0.918], [RX, 0.918], [RX, -0.918]].forEach(function (o) {
+      const pts = [];
+      for (let k = 0; k <= 12; k++) {
+        const a = 0.22 + (Math.PI - 0.44) * k / 12;
+        pts.push({ c: [o[0] + Math.cos(a) * 0.57, AY + Math.sin(a) * 0.57, o[1]], a: 0.055, b: 0.03, p: 4 });
+      }
+      put(loft(pts, { seg: 10, lat: [0, 0, 1], bulge: 0.2, shade: dustShade }), TECH.plastic);
+    });
+
+    // ---- the bed: floor, headboard, tailgate, arched sides with capped rails
+    put(rbar([-2.0, 0.95, 0], [-0.32, 0.95, 0], 0.84, 0.025, { lat: [0, 0, 1] }), TECH.steel);
+    const bs = new THREE.Shape();
+    const ra = archAngles(RX, AY, 0.54, 0.62);
+    bs.moveTo(-2.02, 0.62); bs.lineTo(ra[2], 0.62);
+    bs.absarc(RX, AY, 0.54, ra[0], ra[1], true);
+    bs.lineTo(-0.3, 0.62); bs.lineTo(-0.3, 1.45); bs.lineTo(-2.02, 1.45); bs.lineTo(-2.02, 0.62);
+    [0.865, -0.865].forEach(function (z) {
+      put(side(bs, z, 0.036, 0.012), TECH.paint, paintShade);
+      put(rbar([-2.03, 1.47, z], [-0.29, 1.47, z], 0.045, 0.022, { lat: [0, 0, 1], shade: paintShade }), TECH.paint);
+    });
+    put(rbar([-0.31, 1.2, -0.86], [-0.31, 1.2, 0.86], 0.025, 0.26, { shade: paintShade }), TECH.paint);
+    put(rbar([-2.03, 1.035, -0.86], [-2.03, 1.035, 0.86], 0.03, 0.41, { shade: paintShade }), TECH.paint);
+    [1, -1].forEach(function (s) {
+      put(rbar([-2.05, 1.12, 0.84 * s], [-2.05, 1.34, 0.84 * s], 0.03, 0.03, { lat: [0, 0, 1] }), TECH.red);
+    });
+
+    // ---- the gun platform, raised on a welded frame, and the pintle post
+    put(rbar([-1.45, 1.205, 0], [-0.42, 1.205, 0], 0.6, 0.025, { lat: [0, 0, 1], shade: dustShade }), TECH.steel);
+    [[-1.4, 0.55], [-1.4, -0.55], [-0.47, 0.55], [-0.47, -0.55]].forEach(function (o) {
+      put(rbar([o[0], 0.97, o[1]], [o[0], 1.19, o[1]], 0.025, 0.025), TECH.steel);
+    });
+    put(rbar([-0.64, 1.22, 0], [-0.64, 1.27, 0], 0.1, 0.1, { p: 2, seg: 14 }), TECH.steel);
+    put(rbar([-0.64, 1.25, 0], [-0.64, 1.84, 0], 0.042, 0.042, { p: 2, seg: 12 }), TECH.steel);
+
+    /* ---- WHEELS. One tyre, one rim, one nut and one vent geometry shared by
+       all five. TAGGED, not discovered: a wheel is a disc and no "tall thin
+       ground-touching" rule will ever find it. The pivot is the AXLE, which
+       is what makes the spin a spin instead of a wobble about the tread. */
+    const tyreProf = [
+      [0.285, -0.10], [0.31, -0.125], [0.37, -0.132], [0.415, -0.125], [0.435, -0.105], [0.44, -0.07],
+      [0.442, -0.02], [0.442, 0.02], [0.44, 0.07], [0.435, 0.105], [0.415, 0.125], [0.37, 0.132], [0.31, 0.125], [0.285, 0.10],
+    ].map(function (p) { return new THREE.Vector2(p[0], p[1]); });
+    const TSEG = 36;
+    let tyreG = new THREE.LatheGeometry(tyreProf, TSEG);
+    {
+      // the tread: alternate blocks stepped down 1.3 cm, staggered across
+      // the centre line — the pattern a spinning tyre shows
+      const p = tyreG.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        const r = Math.hypot(x, z);
+        if (r < 0.43) continue;
+        let ph = Math.atan2(x, z); if (ph < 0) ph += Math.PI * 2;
+        const k = Math.round(ph / (Math.PI * 2) * TSEG);
+        if (((k + (y > 0 ? 1 : 0)) >> 1) & 1) { p.setX(i, x * 0.97); p.setZ(i, z * 0.97); }
+      }
+      tyreG.computeVertexNormals();
+    }
+    tyreG.deleteAttribute("uv");
+    tint(tyreG, function (x, y, z) {
+      const r = Math.hypot(x, z);
+      const wall = clamp01((0.43 - r) / 0.1);                      // dusty sidewall, dark tread
+      const k = 0.85 + 0.5 * wall * clamp01((r - 0.3) / 0.05);
+      return [k * 1.12, k * 1.05, k * 0.95];
+    });
+    tyreG.rotateX(Math.PI / 2);                                     // lathe Y -> the axle along Z
+    const rimProf = [
+      [0.0, -0.11], [0.29, -0.11], [0.29, 0.085], [0.305, 0.1], [0.3, 0.11], [0.27, 0.1],
+      [0.2, 0.062], [0.1, 0.07], [0.09, 0.085], [0.07, 0.1], [0.0, 0.1],
+    ].map(function (p) { return new THREE.Vector2(p[0], p[1]); });
+    const rimG = new THREE.LatheGeometry(rimProf, 24);
+    rimG.deleteAttribute("uv");
+    rimG.rotateX(Math.PI / 2);
+    tint(rimG, function (x, y, z, nx, ny) {
+      const k = (1 + 0.18 * clamp01(ny)) * (1 + (vnoise(x * 20, y * 20, z * 20) - 0.5) * 0.15);
+      return [k, k, k];
+    });
+    const nutG = new THREE.CylinderGeometry(0.016, 0.016, 0.03, 6); nutG.rotateX(Math.PI / 2);
+    const ventG = new THREE.CircleGeometry(0.032, 10);
+    function wheel(parent, tagQ, pivot) {
+      const tag = function (me) { if (tagQ != null) { me.userData.mountLeg = tagQ; me.userData.mountPivot = pivot; } return me; };
+      const add = function (geo, hex) { const me = tag(new THREE.Mesh(geo, kitMat(hex))); parent.add(me); return me; };
+      add(tyreG, TECH.rubber);
+      add(rimG, TECH.rim);
+      for (let k = 0; k < 6; k++) {
+        const a = k / 6 * Math.PI * 2;
+        add(nutG, TECH.steel).position.set(Math.cos(a) * 0.055, Math.sin(a) * 0.055, 0.108);
+        const v = add(ventG, TECH.hole);
+        v.position.set(Math.cos(a + 0.52) * 0.16, Math.sin(a + 0.52) * 0.16, 0.071);
+        v.rotation.z = a + 0.52; v.scale.set(1.35, 1, 1);          // oval, long radially
+      }
+    }
+    [[FX, 0.98], [FX, -0.98], [RX, 0.98], [RX, -0.98]].forEach(function (o, qi) {
+      const wg = new THREE.Group();
+      wg.position.set(o[0], AY, o[1]);
+      if (o[1] < 0) wg.rotation.y = Math.PI;                        // the dished face looks outward
+      g.add(wg);
+      wheel(wg, qi, { x: o[0], y: AY, z: o[1] });
+    });
+
+    // ---- the load: the spare on its rim leant on the tailgate, two cans
+    const spare = new THREE.Group();
+    spare.position.set(-1.84, 0.97 + TR, 0.34);
+    spare.rotation.z = 0.12;                                        // top resting back on the gate
+    const spIn = new THREE.Group(); spIn.rotation.y = Math.PI / 2;  // face toward the cab
+    spare.add(spIn);
+    g.add(spare);
+    wheel(spIn, null, null);
+
+    const can = new THREE.Shape();
+    can.moveTo(-0.17, 0); can.lineTo(0.17, 0); can.lineTo(0.17, 0.40); can.lineTo(0.12, 0.47);
+    can.lineTo(-0.17, 0.47); can.lineTo(-0.17, 0);
+    const canBody = side(can, 0, 0.14, 0.012);
+    [[-1.72, -0.72, TECH.canOlive], [-1.72, -0.53, TECH.canRed]].forEach(function (o) {
+      const cg = new THREE.Group();
+      cg.position.set(o[0], 0.97, o[1]);
+      g.add(cg);
+      const add = function (geo, hex) { const me = new THREE.Mesh(geo, kitMat(hex)); cg.add(me); return me; };
+      add(tint(canBody.clone(), dustShade), o[2]);
+      // the pressed X on both faces, the three-post handle, the spout
+      [0.083, -0.083].forEach(function (z) {
+        add(rbar([-0.14, 0.05, z], [0.14, 0.38, z], 0.004, 0.012, { lat: [0, 0, 1] }), o[2]);
+        add(rbar([-0.14, 0.38, z], [0.14, 0.05, z], 0.004, 0.012, { lat: [0, 0, 1] }), o[2]);
+      });
+      add(rbar([-0.14, 0.505, 0], [0.06, 0.505, 0], 0.012, 0.012, { p: 2, lat: [0, 0, 1] }), o[2]);
+      [-0.13, -0.04, 0.05].forEach(function (x) { add(rbar([x, 0.47, 0], [x, 0.505, 0], 0.01, 0.01), o[2]); });
+      add(rbar([0.14, 0.44, 0], [0.18, 0.48, 0], 0.022, 0.022, { p: 2, lat: [0, 0, 1] }), TECH.steel);
+    });
+
     /* THE GUN IS THE ARMOURY'S. CBZ.buildActorWeapon("lmg") is the same M249
        this page already loaded for the men to carry, so a technical's gun and
        a gunner's gun cannot drift apart. It is built pointing down the
@@ -1509,7 +2235,11 @@
     if (kindId === "technical") return buildTechnical();
     const k = BY_ID[kindId];
     const sp = CBZ.WILDLIFE_SPECIES && k && CBZ.WILDLIFE_SPECIES[k.species];
-    if (!sp || !sp.build) return fallbackQuad(kindId === "camel" ? 0xc9a267 : 0x6e4326);
+    if (!sp || !sp.build) {
+      const ph = fallbackQuad(kindId === "camel" ? CAMEL_COAT : 0x6e4326);
+      ph.userData.placeholder = true;
+      return ph;
+    }
     const cache = {};
     // deterministic rng into the species build — a horse that reshuffles its
     // piebald every reload is a horse the before/after tool cannot photograph
@@ -1627,7 +2357,12 @@
     let seat;
     if (kindId === "__foot") seat = { x: 0, y: 0, w: 0.7 };
     else if (kindId === "technical") seat = technicalSeat(splitParts(src));
-    else seat = saddleOf(splitParts(src));
+    else {
+      const bare = splitParts(src);
+      seat = saddleOf(bare);
+      // the placeholder is labelled as one and stays bare; a real animal is saddled
+      if (!src.userData.placeholder) seat = dressTack(src, bare, seat, kindId);
+    }
 
     const stand = !!seat.stand;
     const rider = (kindId === "__foot" || stand) ? buildWalker(stand ? 0 : 1.4) : buildRider(seat.w, true);

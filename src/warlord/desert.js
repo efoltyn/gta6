@@ -1027,7 +1027,7 @@
      ten bent, tapered frond blades with a fold down the middle), instanced
      per oasis, two materials. */
   function palmGeometry() {
-    const trunkPos = [], trunkIdx = [], frondPos = [], frondIdx = [];
+    const trunkPos = [], trunkIdx = [], frondPos = [], frondIdx = [], frondUv = [];
     // trunk: 7 rings, 6 sides, leaning toward +x, tapering, ringed
     const R = 7, SIDES = 6, H = 7.2;
     for (let r = 0; r < R; r++) {
@@ -1059,10 +1059,11 @@
         const along = t * L;
         const y = top[1] + Math.sin(t * Math.PI * 0.62) * (1.1 + up) - t * t * (1.9 - up);
         const cx = top[0] + dx * along, cz = top[2] + dz * along;
-        const wdt = Math.sin(Math.min(1, t * 1.25) * Math.PI) * 0.55 + 0.04;
+        const wdt = Math.sin(Math.min(1, t * 1.25) * Math.PI) * 0.72 + 0.05;   // wider: the leaflet cut takes ~40 %
         // blade: left edge, spine (raised), right edge
         const px = -dz * wdt, pz = dx * wdt;
         frondPos.push(cx + px, y - 0.12 * wdt, cz + pz);
+        frondUv.push(0, t, 0.5, t, 1, t);   // across (0.5 = spine), along: the leaflet cut reads it
         frondPos.push(cx, y + 0.06, cz);
         frondPos.push(cx - px, y - 0.12 * wdt, cz - pz);
       }
@@ -1076,10 +1077,14 @@
     tg.setIndex(trunkIdx); tg.computeVertexNormals();
     const fg = new THREE.BufferGeometry();
     fg.setAttribute("position", new THREE.Float32BufferAttribute(frondPos, 3));
+    fg.setAttribute("skUv", new THREE.Float32BufferAttribute(frondUv, 2));
     fg.setIndex(frondIdx); fg.computeVertexNormals();
     return { trunk: tg, frond: fg };
   }
 
+  // the props library owns the surfaces (props.js SURFACES); a trunk with
+  // leaf-base rings and a pinnate frond instead of two flat colours
+  function skinned(m, kind) { return (W.props && W.props.skin) ? W.props.skin(m, kind) : m; }
   function makePalms() {
     if (FLAG_NOPALMS || !THREE.InstancedMesh || !oases.length) return null;
     const grp = new THREE.Group();
@@ -1087,9 +1092,9 @@
     const cap = oases.length * per;
     const pg = palmGeometry();
     const trunks = new THREE.InstancedMesh(pg.trunk,
-      new THREE.MeshLambertMaterial({ color: 0x3a2c1a }), cap);
+      skinned(new THREE.MeshLambertMaterial({ color: 0x3a2c1a }), "palm"), cap);
     const fronds = new THREE.InstancedMesh(pg.frond,
-      new THREE.MeshLambertMaterial({ color: 0x2c4a1a, side: THREE.DoubleSide }), cap);
+      skinned(new THREE.MeshLambertMaterial({ color: 0x2c4a1a, side: THREE.DoubleSide }), "frond"), cap);
     trunks.castShadow = fronds.castShadow = true;
     let n = 0;
     for (let i = 0; i < oases.length; i++) {

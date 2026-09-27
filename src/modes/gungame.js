@@ -479,6 +479,207 @@
     CBZ.registerGroundBase("gungame", function (x, z) { return mapFloor(x, z); });
   }
 
+  // ---- THE ZONE EDGE YOU CAN SEE ---------------------------------------------------
+  // The island's play zone is a circle over downtown, and clampZone() holds
+  // everybody inside it. Before this, that edge was an invisible wall in the
+  // middle of a street: you ran into nothing and stopped. Now the edge is a
+  // line of temporary site fencing (the 3.5 x 2 m galvanised mesh panels on
+  // concrete feet you see around any closed-off block), stood on the real
+  // ground where the circle crosses streets and plazas, left out wherever it
+  // would pass through a building (the building is already the wall there) or
+  // out over the sea. The jail needs none: its zone IS the compound walls.
+  // Visual only: it stands 0.5 m outside the clamp, so it never needs a collider.
+  // Shared: one merged mesh infill (prison kit's chain-link skin), one
+  // instanced tube frame, one instanced foot. Built once per island.
+  const FENCE = { group: null, key: "" };
+  function fenceSkin(kind, tint, fallback) {
+    const K = CBZ.prisonKit;
+    if (K && K.skin) { try { return K.skin(kind, tint); } catch (e) {} }
+    return fallback();
+  }
+  function colliderAt(x, z, fl) {
+    const cityOn = g.mode === "city";
+    for (const c of CBZ.colliders || []) {
+      if (!c || (c._city && !cityOn)) continue;
+      if (x < c.minX - 0.15 || x > c.maxX + 0.15 || z < c.minZ - 0.15 || z > c.maxZ + 0.15) continue;
+      if (c.y0 != null && c.y1 != null && (c.y1 <= fl + 0.4 || c.y0 >= fl + 1.9)) continue;
+      return true;
+    }
+    return false;
+  }
+  function buildZoneFence() {
+    const map = curMap(), Z = map.zone;
+    if (map.id !== "island" || !Z || Z.kind !== "circle") return null;
+    const key = Z.cx.toFixed(1) + "," + Z.cz.toFixed(1) + "," + Z.r.toFixed(1);
+    if (FENCE.group && FENCE.key === key) return FENCE.group;
+    disposeZoneFence();
+    const R = Z.r + 0.05, PANEL = 3.45, H = 2.0, LIFT = 0.1;
+    const n = Math.max(12, Math.round((Math.PI * 2 * R) / PANEL));
+    // post points on the circle: their ground, and whether a panel may stand there
+    const px = [], pz = [], py = [], ok = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const x = Z.cx + Math.cos(a) * R, z = Z.cz + Math.sin(a) * R;
+      const y = map.floorAt(x, z);
+      px.push(x); pz.push(z); py.push(isFinite(y) ? y : 0);
+      ok.push(isFinite(y) && y > map.sea(x, z) + 0.25 && !colliderAt(x, z, y));
+    }
+    const panels = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      if (!ok[i] || !ok[j] || Math.abs(py[i] - py[j]) > 0.7) continue;
+      const mx = (px[i] + px[j]) / 2, mz = (pz[i] + pz[j]) / 2;
+      const my = map.floorAt(mx, mz);
+      if (!isFinite(my) || colliderAt(mx, mz, my) || my < map.sea(mx, mz) + 0.25) continue;
+      panels.push([i, j]);
+    }
+    if (!panels.length) return null;
+
+    const group = new THREE.Group();
+    group.name = "gungame-zone-fence";
+    // 1. mesh infill: one merged quad per panel, world-metre UVs (2 m tile, 50 mm diamonds)
+    const pos = new Float32Array(panels.length * 12), uv = new Float32Array(panels.length * 8);
+    const idx = [];
+    let along = 0;
+    panels.forEach(function (p, k) {
+      const i = p[0], j = p[1];
+      const L = Math.hypot(px[j] - px[i], pz[j] - pz[i]);
+      const yi = py[i] + LIFT, yj = py[j] + LIFT;
+      const v = [px[i], yi + 0.04, pz[i], px[j], yj + 0.04, pz[j], px[j], yj + H - 0.04, pz[j], px[i], yi + H - 0.04, pz[i]];
+      pos.set(v, k * 12);
+      uv.set([along / 2, 0, (along + L) / 2, 0, (along + L) / 2, H / 2, along / 2, H / 2], k * 8);
+      along += L + 0.37;   // panels do not share a mesh phase
+      const b = k * 4;
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    });
+    const infill = new THREE.BufferGeometry();
+    infill.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    infill.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    infill.setIndex(idx);
+    infill.computeVertexNormals();
+    const meshMat = fenceSkin("chainlink", 0xb3bac1, function () {
+      return new THREE.MeshStandardMaterial({ color: 0xb3bac1, metalness: 0.7, roughness: 0.45, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+    });
+    const infillMesh = new THREE.Mesh(infill, meshMat);
+    infillMesh.castShadow = false; infillMesh.receiveShadow = false;
+    group.add(infillMesh);
+
+    // 2. the frame: a 40 mm galvanised tube round each panel (two stiles, top
+    //    and bottom rail) plus a coupler clamp where two panels meet
+    const tubeGeo = new THREE.CylinderGeometry(0.02, 0.02, 1, 6, 1, true);
+    const galv = fenceSkin("galv", 0xa7afb7, function () { return new THREE.MeshStandardMaterial({ color: 0xa7afb7, metalness: 0.7, roughness: 0.42 }); });
+    const tubes = new THREE.InstancedMesh(tubeGeo, galv, panels.length * 4);
+    const up = new THREE.Vector3(0, 1, 0), A = new THREE.Vector3(), B = new THREE.Vector3(), d = new THREE.Vector3();
+    const q = new THREE.Quaternion(), s = new THREE.Vector3(), m = new THREE.Matrix4();
+    let t = 0;
+    const tube = function (ax, ay, az, bx, by, bz) {
+      A.set(ax, ay, az); B.set(bx, by, bz);
+      d.subVectors(B, A); const len = d.length(); d.divideScalar(len || 1);
+      q.setFromUnitVectors(up, d);
+      s.set(1, len, 1);
+      m.compose(A.add(B).multiplyScalar(0.5), q, s);
+      tubes.setMatrixAt(t++, m);
+    };
+    // 3. feet: a cast concrete block per post, 0.62 x 0.14 x 0.2, across the line
+    const footGeo = new THREE.BoxGeometry(0.2, 0.14, 0.62);
+    const conc = fenceSkin("concrete", 0x8f8b84, function () { return new THREE.MeshStandardMaterial({ color: 0x8f8b84, roughness: 0.92 }); });
+    const usedPosts = [];
+    panels.forEach(function (p) {
+      const i = p[0], j = p[1];
+      // the stiles sit 0.06 m in from the panel ends so neighbours clamp side by side
+      const ux = (px[j] - px[i]), uz = (pz[j] - pz[i]), L = Math.hypot(ux, uz) || 1;
+      const ex = ux / L * 0.06, ez = uz / L * 0.06;
+      const ax = px[i] + ex, az = pz[i] + ez, bx = px[j] - ex, bz = pz[j] - ez;
+      const ya = py[i] + LIFT, yb = py[j] + LIFT;
+      tube(ax, ya, az, ax, ya + H, az);
+      tube(bx, yb, bz, bx, yb + H, bz);
+      tube(ax, ya + H - 0.02, az, bx, yb + H - 0.02, bz);
+      tube(ax, ya + 0.03, az, bx, yb + 0.03, bz);
+      if (usedPosts.indexOf(i) < 0) usedPosts.push(i);
+      if (usedPosts.indexOf(j) < 0) usedPosts.push(j);
+    });
+    tubes.count = t;
+    tubes.instanceMatrix.needsUpdate = true;
+    tubes.castShadow = true; tubes.receiveShadow = false;
+    tubes.frustumCulled = false;   // r128 culls an InstancedMesh by its ONE unit tube at the origin
+    group.add(tubes);
+    const feet = new THREE.InstancedMesh(footGeo, conc, usedPosts.length);
+    const e = new THREE.Euler();
+    usedPosts.forEach(function (i, k) {
+      const a = Math.atan2(pz[i] - Z.cz, px[i] - Z.cx);   // long axis across the fence line
+      e.set(0, -a + Math.PI / 2, 0);
+      q.setFromEuler(e);
+      A.set(px[i], py[i] + 0.07 - 0.015, pz[i]);          // seated, a hair into the ground
+      s.set(1, 1, 1);
+      m.compose(A, q, s);
+      feet.setMatrixAt(k, m);
+    });
+    feet.instanceMatrix.needsUpdate = true;
+    feet.castShadow = true; feet.receiveShadow = true;
+    feet.frustumCulled = false;
+    group.add(feet);
+
+    group.userData.panels = panels.length;
+    group.userData.posts = usedPosts.length;
+    FENCE.group = group; FENCE.key = key;
+    return group;
+  }
+  function showZoneFence(on) {
+    if (on && !FENCE.group) { try { buildZoneFence(); } catch (e) { console.error("[gungame fence]", e); } }
+    const G = FENCE.group;
+    if (!G) return;
+    if (on) { if (!G.parent && CBZ.scene) CBZ.scene.add(G); G.visible = true; }
+    else { G.visible = false; if (G.parent) G.parent.remove(G); }
+  }
+  function disposeZoneFence() {
+    const G = FENCE.group;
+    if (!G) return;
+    if (G.parent) G.parent.remove(G);
+    // materials are the prison kit's shared skins: only our geometry goes
+    G.traverse(function (o) { if (o.geometry && o.geometry.dispose) o.geometry.dispose(); });
+    FENCE.group = null; FENCE.key = "";
+  }
+
+  // ---- DROPPED GUNS ----------------------------------------------------------------------
+  // A man shot dead lets go of his gun. It used to stay glued in the ragdoll's
+  // fist until he respawned. Now the real held model leaves the hand on the
+  // shared weapon body (systems/actorweapons.js: it clatters, bounces and
+  // settles flat on a side, clear of the corpse) and lies where he fell. Not a
+  // pickup: in a gun game the ladder hands you your gun. Litter is capped; the
+  // oldest gun leaves first, and a new match starts on clean ground.
+  const DROP_CAP = 8;
+  const drops = [];
+  function dropBotGun(b, fromX, fromZ) {
+    const prop = b._weaponProp;
+    const WP = CBZ.weaponPhysics;
+    if (!prop || !prop.parent || prop.visible === false || !WP || !WP.drop) return;
+    const root = curMap().root() || CBZ.scene;
+    try {
+      root.attach(prop);                   // keeps the world pose it had in the hand
+      b._weaponProp = null; b._weaponPropId = null;   // armBot builds him a fresh one on respawn
+      let dx = b.pos.x - (fromX != null ? fromX : b.pos.x - 1), dz = b.pos.z - (fromZ != null ? fromZ : b.pos.z);
+      const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+      const sp = 0.8 + rand() * 1.4, side = rand() * 1.2 - 0.6;
+      WP.drop(prop, {
+        vx: dx * sp - dz * side, vy: 1.2 + rand() * 1.2, vz: dz * sp + dx * side,
+        source: "gungame-death", sound: "shell", corpseCollision: true,
+      });
+      drops.push(prop);
+      while (drops.length > DROP_CAP) disposeDrop(drops.shift());
+    } catch (e) { console.error("[gungame drop]", e); }
+  }
+  function disposeDrop(prop) {
+    if (!prop) return;
+    const WP = CBZ.weaponPhysics;
+    if (WP && WP.release) { try { WP.release(prop); } catch (e) {} }
+    if (prop.parent) prop.parent.remove(prop);
+    prop.traverse(function (o) { if (o.geometry && o.geometry.dispose && !o.geometry._shared) o.geometry.dispose(); });
+  }
+  function clearDrops() {
+    while (drops.length) disposeDrop(drops.pop());
+    if (CBZ.fpsDeathDropReset) { try { CBZ.fpsDeathDropReset(); } catch (e) {} }
+  }
+
   // ---- prison cast parking ---------------------------------------------------------
   function hidePrisonCast() {
     restorePrisonCast();
@@ -636,8 +837,9 @@
       const kr = kRec === "player" ? rungAt(gg.playerRung) : rungAt(kRec.rung);
       label = kr.melee ? "fists" : "gun butt";
     }
+    const kp = kRec === "player" ? CBZ.player.pos : (kRec ? kRec.pos : null);
+    dropBotGun(b, kp ? kp.x : null, kp ? kp.z : null);
     if (CBZ.body) {
-      const kp = kRec === "player" ? CBZ.player.pos : (kRec ? kRec.pos : null);
       if (kp) CBZ.body.hit(b, { fromX: kp.x, fromZ: kp.z, force: 6 + rand() * 3, fling: 4 + rand() * 3 });
       else {
         const a = rand() * 6.28;
@@ -674,6 +876,8 @@
     };
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);
+    // your gun leaves your hand too, and lies where you fell (fpsmode's shared drop)
+    if (CBZ.fpsDeathDrop) { try { CBZ.fpsDeathDrop(); } catch (e) {} }
     if (CBZ.shake) CBZ.shake(1.0);
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.4);
@@ -1463,6 +1667,8 @@
       if (map.id === "island" && A.reset) { try { A.reset(); } catch (e) { console.error("[gungame arena reset]", e); } }
     }
     if (map.id === "jail") hidePrisonCast(); else restorePrisonCast();
+    clearDrops();
+    showZoneFence(map.id === "island");
     if (CBZ.fx) CBZ.fx.clear();
     if (CBZ.clearGore) CBZ.clearGore();
     if (CBZ.killFeedReset) CBZ.killFeedReset();
@@ -1516,6 +1722,8 @@
   CBZ.gungameExit = function () {
     swapButtonIsMelee(false);
     despawnBots();
+    clearDrops();
+    showZoneFence(false);
     restorePrisonCast();
     gg.match = null;
     gg.respawnT = 0;
@@ -1583,6 +1791,8 @@
       matchOver: !!(gg.match && gg.match.over),
       spawnPool: gg.spawnPool.length,
       hiddenCast: gg.hiddenCast.length,
+      zoneFence: FENCE.group && FENCE.group.visible ? { panels: FENCE.group.userData.panels, posts: FENCE.group.userData.posts } : null,
+      droppedGuns: drops.length,
       // THE RATCHET (pin at 0): heat that arrived during a match means the
       // prison's wanted machine reached a deathmatch again, whatever the source.
       prisonLeak: (gg.match && g.mode === "gungame")

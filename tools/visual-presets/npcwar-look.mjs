@@ -30,6 +30,8 @@ const subjects = [
   { id: 'contact', at: 14, label: 'First contact', focus: 'The auto director on the first real firefight.' },
   { id: 'follow', at: 20, label: 'Follow the front', focus: 'FOLLOW RED on the man at the front of the red army: the soldier model at chest range.' },
   { id: 'field', at: 24, label: 'The field', focus: 'A wide, low look across the battle along its axis: ground, sky, fog and both armies.' },
+  { id: 'scenery', at: 25, label: 'The props, close', focus: 'The map\'s own built scenery at 16-22 m: a container stack in the Kill Box, a fishing boat on Open Water (dunes: the field centre).' },
+  { id: 'scenery-wide', at: 26, label: 'The venue, wide', focus: 'A high three-quarter look over the whole venue: the yard\'s container rows and block wall, or the fleet on the swell.' },
   { id: 'result', cap: 240, label: 'The result', focus: 'The war run to its end: the result card, and the sim-seconds it took (warSeconds).' },
 ];
 
@@ -74,6 +76,24 @@ async function stage(input) {
       B.lookAt({ x: mx, y: C.groundAt ? C.groundAt(mx, mz) : 0, z: mz, h: 0, yaw }, 70, 0.2);
       step(1 / 60);
     }
+  }
+  if (sub.id === 'scenery' || sub.id === 'scenery-wide') {
+    // THE MAP'S OWN PROPS (B.scenery(): containers, barriers, crates, reef,
+    // wreck, boats). Close: the container nearest the centre, or a boat.
+    // Wide: the venue from above its centre.
+    const list = (B.scenery && B.scenery()) || [];
+    const near = (k) => list.filter((o) => o.kind === k).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
+    const c = (B.mapCentre && B.mapCentre()) || { x: 0, z: 0 };
+    if (sub.id === 'scenery') {
+      const pick = near('boat') || near('container') || near('crates') || null;
+      const at = pick || c;
+      B.lookAt({ x: at.x, y: pick ? (pick.y || 0) : (C.groundAt ? C.groundAt(at.x, at.z) : 0), z: at.z, h: 0, yaw: 0.75 }, pick && pick.kind === 'boat' ? 24 : 16, 0.2);
+    } else {
+      const boats = list.filter((o) => o.kind === 'boat');
+      const at = boats.length ? boats.reduce((s, o) => ({ x: s.x + o.x / boats.length, z: s.z + o.z / boats.length }), { x: 0, z: 0 }) : c;
+      B.lookAt({ x: at.x, y: C.groundAt ? C.groundAt(at.x, at.z) : 0, z: at.z, h: 0, yaw: 0.6 }, boats.length ? 110 : 150, 0.5);
+    }
+    step(1 / 60);
   }
   if (sub.id === 'result') {
     // THE END OF THE WAR, and how long it took. Runs the sim on until the

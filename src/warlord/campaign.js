@@ -1112,10 +1112,23 @@
        that" decision has no information in it. Log, not linear, because a
        linear pole for 300 men is 120 m tall and looks like a bug. */
     const poleG = new THREE.CylinderGeometry(0.13, 0.13, 1, 5);
-    const flagG = whiteColors(new THREE.BoxGeometry(1, 0.62, 0.12));
+    /* CLOTH, NOT A SLAB. The flag was a 12 cm-thick box: every column on the
+       island flew a painted plank. A strip of cloth with a ripple running out
+       to the fly, two-sided so it reads from both sides of the pole. */
+    const flagG = new THREE.PlaneGeometry(1, 0.62, 10, 2);
+    {
+      const fp = flagG.attributes.position;
+      for (let i = 0; i < fp.count; i++) {
+        const u = fp.getX(i) + 0.5;
+        fp.setZ(i, Math.sin(u * 7.5) * 0.2 * (0.2 + u) + fp.getY(i) * u * 0.12);
+        fp.setY(i, fp.getY(i) - u * u * 0.06);
+      }
+      flagG.computeVertexNormals();
+      whiteColors(flagG);
+    }
     flagG.translate(0.5, 0, 0);
     pole = new THREE.InstancedMesh(poleG, new THREE.MeshLambertMaterial({ color: 0x3b3128 }), BANNER_CAP);
-    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), BANNER_CAP);
+    banner = new THREE.InstancedMesh(flagG, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }), BANNER_CAP);
     pole.frustumCulled = banner.frustumCulled = false;
     pole.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     banner.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
