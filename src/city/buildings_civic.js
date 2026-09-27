@@ -75,11 +75,6 @@
     // clock tower. OFF → civic buildings keep the masonry facade but meet the
     // street like any other shop.
     if (CBZ.CONFIG.BLD_CIVIC_PODIUM == null) CBZ.CONFIG.BLD_CIVIC_PODIUM = true;
-    // BLD_ROOF_CLUTTER_V1 — rooftop mechanical plant (HVAC condensers, vent
-    // stacks, a timber water tank, aerials, parapet caps). Pure merged deco
-    // ABOVE the roof slab: no colliders, so roof loot / helipads / snipers are
-    // untouched. OFF → bare roofs, exactly as before.
-    if (CBZ.CONFIG.BLD_ROOF_CLUTTER_V1 == null) CBZ.CONFIG.BLD_ROOF_CLUTTER_V1 = true;
     // BLD_WEATHERING_V1 — roofline soot streaking under cornices + painted
     // "ghost sign" ads on blank masonry flanks. Merged deco, zero draw calls.
     if (CBZ.CONFIG.BLD_WEATHERING_V1 == null) CBZ.CONFIG.BLD_WEATHERING_V1 = true;
@@ -655,83 +650,13 @@
   };
 
   // ============================================================
-  //  5. ROOF CLUTTER — the #2 "buildings look fake" tell after flat facades
+  //  5. ROOF CLUTTER — deleted 2026-09-27. It was a hashed slot grid of
+  //  primitive stand-ins (a box for a condenser, a box for a dish, a white
+  //  "skylight" slab pair) placed before the lifts, stashes and helipad
+  //  existed, with no colliders, and config.js had already switched it off.
+  //  Roof plant now lives in world/building_dress.js (placed after every
+  //  other roof claimant, real prototypes, y-gated colliders).
   // ============================================================
-  // Real roofs are machine yards. Everything here is merged deco ABOVE the
-  // roof slab with NO collider and NO platform, so rooftop gameplay (loot,
-  // snipers, helipads, the elevator headhouse) is completely unaffected, and
-  // a central KEEP-OUT square is left clear for exactly that reason.
-  CBZ.bldRoofClutter = function (ctx) {
-    if (!flag("BLD_ROOF_CLUTTER_V1")) return;
-    if (ctx.garageGround) return;                        // the flagship owns its roof
-    const { rTop, slabCx, slabCz, slabW, slabD } = ctx;
-    if (slabW < 5 || slabD < 5) return;
-    const METAL = 0x8f959c, DARKM = 0x5b626b, RUST = 0x7a5a44, DUCT = 0xa2a8ae;
-    const keepR = Math.min(slabW, slabD) * 0.22;         // central keep-out (helipad/loot)
-    // deterministic slot grid around the roof perimeter
-    const cols = Math.max(2, Math.min(5, Math.round(slabW / 5.5)));
-    const rows = Math.max(2, Math.min(5, Math.round(slabD / 5.5)));
-    // HARD CAP. This runs on EVERY building in the world, and the tank/mast/
-    // vent helpers mint real meshes (not merged dbox geometry), so an uncapped
-    // grid would multiply mesh count city-wide for plant nobody stands next to.
-    const CAP = ctx.storeys >= 2 ? 5 : 3;
-    let placed = 0;
-    for (let i = 0; i < cols && placed < CAP; i++) for (let j = 0; j < rows && placed < CAP; j++) {
-      const t = ctx.hash(0x4c00 + i * 37 + j * 101);
-      const lx = slabCx - slabW / 2 + (i + 0.5) * (slabW / cols);
-      const lz = slabCz - slabD / 2 + (j + 0.5) * (slabD / rows);
-      if (Math.abs(lx - slabCx) < keepR && Math.abs(lz - slabCz) < keepR) continue;
-      if (t < 0.30) continue;                            // leave gaps — a roof isn't a warehouse
-      placed++;
-      if (t < 0.56) {
-        // HVAC condenser: a ribbed box on a low curb with a fan grille on top
-        const uw = 1.5 + t * 1.6, ud = 1.2 + t * 1.1, uh = 0.85 + t * 0.5;
-        ctx.dbox(lx, rTop + 0.09, lz, uw + 0.3, 0.18, ud + 0.3, DARKM);            // curb
-        ctx.dbox(lx, rTop + 0.18 + uh / 2, lz, uw, uh, ud, METAL);
-        for (let r2 = 0; r2 < 4; r2++)
-          ctx.dbox(lx, rTop + 0.30 + r2 * (uh / 4.6), lz + ud / 2 + 0.02, uw * 0.82, 0.06, 0.05, DARKM);  // fins
-        ctx.dbox(lx, rTop + 0.18 + uh + 0.05, lz, uw * 0.62, 0.10, ud * 0.62, DARKM);                     // fan grille
-        ctx.dbox(lx, rTop + 0.18 + uh + 0.14, lz, uw * 0.20, 0.08, ud * 0.20, 0x2f343a);                  // hub
-      } else if (t < 0.72) {
-        // VENT STACK cluster: three pipes of different heights with cowls
-        for (let p = 0; p < 3; p++) {
-          const px = lx + (p - 1) * 0.55, ph = 0.7 + ((p * 7 + (t * 100 | 0)) % 5) * 0.28;
-          ctx.column(px, rTop + 0.02, lz, 0.14, ph, METAL, 8);
-          ctx.dbox(px, rTop + 0.02 + ph + 0.07, lz, 0.42, 0.14, 0.42, DARKM);
-        }
-      } else if (t < 0.84) {
-        // ROOFTOP DUCTWORK: a run of square duct on short legs, with a bend
-        const len = Math.min(slabW, slabD) * 0.35;
-        ctx.dbox(lx, rTop + 0.72, lz, len, 0.5, 0.5, DUCT);
-        ctx.dbox(lx + len / 2 - 0.25, rTop + 0.72, lz + 0.9, 0.5, 0.5, 1.8, DUCT);
-        for (let g2 = -1; g2 <= 1; g2 += 2)
-          ctx.dbox(lx + g2 * (len / 2 - 0.4), rTop + 0.24, lz, 0.14, 0.48, 0.14, DARKM);
-      } else if (t < 0.93) {
-        // WATER TANK: timber-staved cylinder on a steel frame — the New York
-        // rooftop silhouette, and the single most recognisable roof object.
-        const tr = 1.05, legH = 1.5;
-        for (const sx of [-1, 1]) for (const sz of [-1, 1])
-          ctx.dbox(lx + sx * tr * 0.62, rTop + legH / 2, lz + sz * tr * 0.62, 0.16, legH, 0.16, DARKM);
-        ctx.dbox(lx, rTop + legH + 0.08, lz, tr * 2, 0.16, tr * 2, DARKM);
-        ctx.column(lx, rTop + legH + 0.16, lz, tr, 2.5, RUST, 14);
-        for (let h2 = 0; h2 < 3; h2++)
-          ctx.column(lx, rTop + legH + 0.5 + h2 * 0.8, lz, tr + 0.05, 0.12, 0x4a4e54, 14);   // steel hoops
-        ctx.cone(lx, rTop + legH + 2.66, lz, tr + 0.1, 0.7, shade(RUST, 0.85));
-      } else {
-        // AERIAL MAST + satellite dish
-        ctx.column(lx, rTop + 0.02, lz, 0.09, 3.4, METAL, 6);
-        for (let a2 = 0; a2 < 3; a2++)
-          ctx.dbox(lx, rTop + 1.4 + a2 * 0.7, lz, 1.1 - a2 * 0.22, 0.06, 0.06, METAL);
-        ctx.dbox(lx + 0.8, rTop + 0.42, lz, 0.7, 0.06, 0.7, 0xd7dbe0);
-        ctx.dbox(lx + 0.8, rTop + 0.20, lz, 0.16, 0.44, 0.16, DARKM);
-      }
-    }
-    // a service DOOR HOOD + a low skylight lantern if anything else landed
-    if (placed) {
-      ctx.dbox(slabCx + slabW * 0.30, rTop + 0.06, slabCz - slabD * 0.30, 1.5, 0.12, 1.5, 0xd7dbe0);
-      ctx.dbox(slabCx + slabW * 0.30, rTop + 0.20, slabCz - slabD * 0.30, 1.2, 0.16, 1.2, 0xeef4f8);
-    }
-  };
 
   // ============================================================
   //  6. CANVAS PLAQUE / SEAL TEXTURES (bounded: civic anchors only)

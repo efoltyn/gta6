@@ -74,6 +74,14 @@
   const LAMP_LIT = () => cmat(0xffd9a0, { emissive: 0xffb347, ei: 0.9 });
   const STEEL = 0x39414c, LEAF = 0x8a93a0, SHAFT = 0x161b22, RAILC = 0x2c333d, LAND = 0x434b56;
   const CABWALL = 0x4a525c, CABFLOOR = 0x59616c;
+  // the roof end's ELEVATOR PENTHOUSE: rendered masonry, metal coping, a
+  // painted steel door frame, dark louvre plenum, galvanised ladder
+  const PH_RENDER = 0xa29c91, PH_COPING = 0x7c8084, PH_FRAME = 0x2f3337, PH_LOUVRE = 0x2a2d30, PH_LADDER = 0x8a8f93;
+  let _phMat = null;
+  function phMat() {
+    if (!_phMat) { _phMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); _phMat._shared = true; }
+    return _phMat;
+  }
 
   // outward face info for a wall side (0:-z 1:+z 2:-x 3:+x), in building-local coords
   function faceInfo(side, w, d) {
@@ -369,11 +377,11 @@
     // door frame: cheeks (solid) + header
     for (const s of [-1, 1]) {
       const p = P(s * FRAMELAT, RDOOR + 0.04), sz = tn(0.6, 0.55);
-      const m = box(grp, p.x, RBASE + 1.6, p.z, sz.w, 3.2, sz.d, STEEL, { cast: true });
+      const m = box(grp, p.x, RBASE + 1.6, p.z, sz.w, 3.2, sz.d, PH_RENDER, { cast: true });   // the penthouse front wall
       solid(RBASE, RBASE + 3.2, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
     { const p = P(0, RDOOR + 0.04), sz = tn(IW + 0.58, 0.55);
-      const m = box(grp, p.x, RBASE + 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
+      const m = box(grp, p.x, RBASE + 2.82, p.z, sz.w, 0.84, sz.d, PH_RENDER, { cast: true });
       solid(RBASE + 2.4, RBASE + 3.24, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
     const roof = { leaves: [], open: 0, target: 0, autoClose: null, autoCloseAudible: false, trav: LEAFTRAV };
@@ -396,6 +404,86 @@
     const lampR = box(grp, plR.x, RBASE + 3.05, plR.z, plRs.w, 0.2, plRs.d, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
     const padPR = P(0, V.dep + 0.5);
     const roofPad = { x: ox + padPR.x, z: oz + padPR.z };
+
+    // ---- THE ELEVATOR PENTHOUSE. From the roof (and from every window above
+    //      it) the roof end used to read as a bare steel booth: two steel side
+    //      panels, a flat cap and a steel frame. A real lift arrives on a roof
+    //      inside a rendered masonry penthouse, so it is wrapped in one: side
+    //      and back walls in render, a roof slab with a metal coping on top,
+    //      the front wall (the existing cheeks + header, recoloured) with a
+    //      painted steel door frame round the lift doors and a small drip
+    //      canopy, a louvred vent on one flank and a galvanised
+    //      access ladder up the other. ONE merged vertex-coloured mesh; the
+    //      cab interior, leafs, call panel, doorway and every existing
+    //      collider are untouched. The new side walls get y-gated colliders
+    //      so you cannot walk into the render.
+    {
+      const parts = [];
+      const _c = new THREE.Color();
+      // a box from lateral [l0,l1] x depth [d0,d1] x height [y0,y1] (roof-relative)
+      const pb = (l0, l1, d0, d1, y0, y1, col) => {
+        const c = P((l0 + l1) / 2, (d0 + d1) / 2), sz = tn(Math.abs(l1 - l0), Math.abs(d1 - d0));
+        const gg = new THREE.BoxGeometry(sz.w, y1 - y0, sz.d);
+        gg.translate(c.x, RBASE + (y0 + y1) / 2, c.z);
+        _c.setHex(col);
+        const n = gg.attributes.position.count, arr = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { arr[i * 3] = _c.r; arr[i * 3 + 1] = _c.g; arr[i * 3 + 2] = _c.b; }
+        gg.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+        parts.push(gg);
+        return { c: c, sz: sz };
+      };
+      const LO = FRAMELAT + 0.3;                          // outer lateral face (flush with the cheeks)
+      const LI = SIDE + 0.08;                             // outer face of the cab side walls
+      const DB = -S.wt + 0.03;                            // back face, just inside the facade plane
+      const DF = RDOOR + 0.04 - 0.275;                    // back face of the front wall (cheeks)
+      const DFF = RDOOR + 0.04 + 0.275;                   // street face of the front wall
+      const TOP = 3.45;
+      for (const s of [-1, 1]) {                          // side walls
+        const l0 = s > 0 ? LI : -LO, l1 = s > 0 ? LO : -LI;
+        const r = pb(l0, l1, DB, DF, 0, TOP, PH_RENDER);
+        solid(RBASE, RBASE + TOP, ox + r.c.x - r.sz.w / 2, ox + r.c.x + r.sz.w / 2, oz + r.c.z - r.sz.d / 2, oz + r.c.z + r.sz.d / 2);
+      }
+      pb(-LO, LO, DB, 0.02, 0, TOP, PH_RENDER);          // back wall
+      pb(-LO, LO, DF, DFF, 3.24, TOP, PH_RENDER);        // front wall above the header
+      pb(-LO - 0.05, LO + 0.05, DB - 0.02, DFF + 0.05, TOP, TOP + 0.16, PH_RENDER);        // roof slab
+      pb(-LO - 0.1, LO + 0.1, DB - 0.05, DFF + 0.1, TOP + 0.16, TOP + 0.22, PH_COPING);   // coping
+      pb(-LO - 0.1, LO + 0.1, DFF + 0.04, DFF + 0.1, TOP + 0.02, TOP + 0.22, PH_COPING);  // coping drip, door face
+      // painted steel door frame round the lift opening + a drip canopy
+      for (const s of [-1, 1]) pb(s * (DHW + 0.0), s * (DHW + 0.11), DFF, DFF + 0.05, 0, 2.5, PH_FRAME);
+      pb(-DHW - 0.11, DHW + 0.11, DFF, DFF + 0.05, 2.4, 2.5, PH_FRAME);
+      pb(-DHW - 0.35, DHW + 0.35, DFF, DFF + 0.55, 2.62, 2.68, PH_COPING);                // canopy
+      // louvred vent on the +lateral flank: dark plenum, five blades
+      {
+        const dv0 = Math.max(DB + 0.3, 0.35), dv1 = Math.min(DF - 0.3, dv0 + 0.8);
+        if (dv1 - dv0 > 0.3) {
+          pb(LO, LO + 0.02, dv0, dv1, 2.05, 2.75, PH_LOUVRE);
+          for (let k = 0; k < 5; k++) pb(LO, LO + 0.06, dv0, dv1, 2.1 + k * 0.14, 2.13 + k * 0.14, PH_COPING);
+          pb(LO, LO + 0.07, dv0 - 0.04, dv1 + 0.04, 2.75, 2.8, PH_COPING);                // head flashing
+        }
+      }
+      // access ladder to the penthouse roof on the -lateral flank, with a
+      // stiles carried 1 m past the coping and stand-off brackets into the render
+      {
+        const dl = Math.max(DB + 0.35, Math.min(DF - 0.5, (DB + DF) / 2)), lw = 0.2;
+        const lo = -LO - 0.16;
+        for (const s of [-1, 1]) {
+          pb(lo - 0.02, lo + 0.02, dl + s * lw - 0.02, dl + s * lw + 0.02, 0, TOP + 1.0, PH_LADDER);
+          for (const y of [1.2, 2.6]) pb(lo, -LO, dl + s * lw - 0.02, dl + s * lw + 0.02, y, y + 0.04, PH_LADDER);
+        }
+        for (let y = 0.6; y < TOP; y += 0.3) pb(lo - 0.015, lo + 0.015, dl - lw, dl + lw, y, y + 0.03, PH_LADDER);
+      }
+      const BGU = THREE.BufferGeometryUtils;
+      if (BGU && BGU.mergeBufferGeometries) {
+        const merged = BGU.mergeBufferGeometries(parts, false);
+        for (const gg of parts) gg.dispose();
+        if (merged) {
+          const ph = new THREE.Mesh(merged, phMat());
+          ph.castShadow = true; ph.receiveShadow = true;
+          ph.name = "lift-penthouse";
+          grp.add(ph);
+        }
+      }
+    }
 
     // ---- THE ENCLOSED SHAFT: opaque thin steel panels on the NON-door sides
     //      (back + both sides) rising the full column from the ground cab to the
@@ -558,6 +646,24 @@
     const zA = -d / 2 + 1.1, zB = d / 2 - 1.1, LD = 1.2;
     const S = b.storeys;
     let bz = 0;
+    // VISUALS: a real painted-steel escape, merged into ONE mesh per rig (it is
+    // built after the city batch pass, so every loose box used to be its own
+    // draw call). Channel stringers both sides, one grated tread per riser,
+    // guard rails with balusters, grated landings (frame + bars) carried on
+    // knee braces bolted to the facade, and at the top a grated bridge over
+    // the parapet with two steel treads down onto the roof. It replaces a
+    // tilted slab, a single rail and two bare full-height posts.
+    // The PHYSICS below (ramp + landing plats, y-gated rail colliders, the
+    // bridge plat) is exactly what it was.
+    const parts = [];
+    const pbox = (x, y, z, bw, bh, bd, rx, rz) => {
+      const gg = new THREE.BoxGeometry(bw, bh, bd);
+      if (rx) gg.rotateX(rx);
+      if (rz) gg.rotateZ(rz);
+      gg.translate(x, y, z);
+      parts.push(gg);
+    };
+    const LANE = X1 - X0;
     for (let k = 0; k < S; k++) {
       const dir = (k % 2 === 0) ? 1 : -1;
       const zStart = dir > 0 ? zA : zB, zEnd = dir > 0 ? zB : zA;
@@ -567,20 +673,46 @@
       plat(xLo(X0, X1), xHi(X0, X1), oz + Math.min(zStart, rampEnd), oz + Math.max(zStart, rampEnd), (k + 1) * FH,
         { z0: oz + zStart, z1: oz + rampEnd, y0: k * FH, y1: (k + 1) * FH });
       plat(xLo(X0, X1), xHi(X0, X1), oz + Math.min(rampEnd, zEnd), oz + Math.max(rampEnd, zEnd), (k + 1) * FH);
-      // visuals: one tilted stringer slab + one tilted outer rail per flight
-      // (no per-tread boxes — the game is mesh-count bound, the slab reads)
       const hyp = Math.hypot(run, FH), tilt = -dir * Math.atan2(FH, run);
-      const slab = box(grp, m * XC, k * FH + FH / 2 - 0.05, (zStart + rampEnd) / 2, 1.2, 0.1, hyp, 0x39414c);
-      slab.rotation.x = tilt;
-      const rail = box(grp, m * (X1 + 0.04), k * FH + FH / 2 + 0.45, (zStart + rampEnd) / 2, 0.07, 1.0, hyp, RAILC);
-      rail.rotation.x = tilt;
-      box(grp, m * XC, (k + 1) * FH - 0.06, (rampEnd + zEnd) / 2, 1.2, 0.12, LD + 0.15, LAND);
-      box(grp, m * (X1 + 0.04), (k + 1) * FH + 0.45, (rampEnd + zEnd) / 2, 0.07, 1.0, LD + 0.15, RAILC);
-      if (k === S - 1) bz = (rampEnd + zEnd) / 2;
+      const zm = (zStart + rampEnd) / 2, ym = k * FH + FH / 2;
+      // channel stringers, inboard and outboard
+      pbox(m * (X0 + 0.05), ym - 0.1, zm, 0.06, 0.22, hyp, tilt);
+      pbox(m * (X1 - 0.05), ym - 0.1, zm, 0.06, 0.22, hyp, tilt);
+      // one grated tread per riser, nosing on the walk line
+      const nT = Math.max(8, Math.round(FH / 0.2)), tr = run / nT;
+      for (let i = 0; i < nT; i++) {
+        const tz = zStart + dir * (i + 0.5) * tr, ty = k * FH + (i + 0.5) * FH / nT - 0.02;
+        pbox(m * XC, ty, tz, LANE - 0.12, 0.03, tr + 0.02);
+      }
+      // outboard guard: top rail + mid rail along the pitch, balusters
+      pbox(m * (X1 + 0.02), ym + 0.92, zm, 0.045, 0.045, hyp, tilt);
+      pbox(m * (X1 + 0.02), ym + 0.46, zm, 0.03, 0.03, hyp, tilt);
+      const nB = Math.max(2, Math.round(run / 1.1));
+      for (let i = 1; i < nB; i++) {
+        const f = i / nB, bzp = zStart + dir * run * f, by = k * FH + FH * f;
+        pbox(m * (X1 + 0.02), by + 0.46, bzp, 0.035, 0.92, 0.035);
+      }
+      // the LANDING: angle frame + grating bars, at the floor line
+      const ly = (k + 1) * FH, lz = (rampEnd + zEnd) / 2, LL = LD + 0.15;
+      pbox(m * XC, ly - 0.05, rampEnd, LANE, 0.1, 0.05);                       // frame, stair edge
+      pbox(m * XC, ly - 0.05, zEnd + dir * 0.075, LANE, 0.1, 0.05);           // frame, far edge
+      pbox(m * (X0 + 0.02), ly - 0.05, lz, 0.05, 0.1, LL);
+      pbox(m * (X1 - 0.02), ly - 0.05, lz, 0.05, 0.1, LL);
+      for (let i = 0; i < 9; i++) pbox(m * (X0 + 0.1 + i * (LANE - 0.2) / 8), ly - 0.02, lz, 0.035, 0.035, LL);
+      // landing guard on the open side and the far end
+      pbox(m * (X1 + 0.02), ly + 0.95, lz, 0.045, 0.045, LL);
+      pbox(m * (X1 + 0.02), ly + 0.48, lz, 0.03, 0.03, LL);
+      pbox(m * XC, ly + 0.95, zEnd + dir * 0.09, LANE, 0.045, 0.045);
+      pbox(m * XC, ly + 0.48, zEnd + dir * 0.09, LANE, 0.03, 0.03);
+      pbox(m * (X1 + 0.02), ly + 0.48, zEnd + dir * 0.09, 0.045, 0.96, 0.045);  // corner post
+      // two KNEE BRACES from the facade up under the landing's outer edge
+      const br = Math.hypot(LANE + 0.1, 0.8), ba = Math.atan2(0.8, LANE + 0.1);
+      for (const zz of [rampEnd + dir * 0.1, zEnd - dir * 0.05]) {
+        pbox(m * (w / 2 + (LANE + 0.25) / 2), ly - 0.5, zz, br, 0.06, 0.06, 0, m * ba);
+        pbox(m * (w / 2 + 0.02), ly - 0.82, zz, 0.04, 0.22, 0.16);             // anchor plate on the wall
+      }
+      if (k === S - 1) bz = lz;
     }
-    // two full-height support posts so the rig reads structural
-    box(grp, m * X1, h / 2, zA - 0.35, 0.1, h, 0.1, RAILC, { cast: true });
-    box(grp, m * X1, h / 2, zB + 0.35, 0.1, h, 0.1, RAILC, { cast: true });
     // outer rail + end caps as colliders, y-gated ABOVE 2m: a fall guard on
     // the climb that street peds walk straight under
     solid(2.0, h + 1.0, xLo(X1 - 0.02, X1 + 0.12), xHi(X1 - 0.02, X1 + 0.12), oz + zA - 0.1, oz + zB + 0.1);
@@ -588,8 +720,34 @@
     solid(2.0, h + 1.0, xLo(X0 - 0.05, X1 + 0.12), xHi(X0 - 0.05, X1 + 0.12), oz + zB + 0.15, oz + zB + 0.35);
     // the BRIDGE over the parapet onto the roof (sits just above the rim)
     plat(xLo(w / 2 - 1.35, X1), xHi(w / 2 - 1.35, X1), oz + bz - 0.8, oz + bz + 0.8, h + 0.75);
-    box(grp, m * w / 2, h + 0.69, bz, X1 - (w / 2 - 1.35), 0.12, 1.6, LAND);
-    box(grp, m * (w / 2 - 1.6), h + 0.3, bz, 0.7, 0.3, 1.3, 0x59616c);      // step block on the roof side
+    {
+      const bx0 = w / 2 - 1.35, bLen = X1 - bx0, bxc = (bx0 + X1) / 2, by = h + 0.75;
+      for (const s of [-1, 1]) {
+        pbox(m * bxc, by - 0.05, bz + s * 0.78, bLen, 0.1, 0.05);             // deck frame
+        pbox(m * bxc, by + 0.95, bz + s * 0.8, bLen, 0.045, 0.045);           // guard rails both sides
+        pbox(m * bxc, by + 0.48, bz + s * 0.8, bLen, 0.03, 0.03);
+        pbox(m * (bx0 + 0.05), by + 0.48, bz + s * 0.8, 0.045, 0.96, 0.045);
+      }
+      for (let i = 0; i < 12; i++) pbox(m * bxc, by - 0.02, bz - 0.7 + i * (1.4 / 11), bLen, 0.035, 0.035);
+      // two steel treads down onto the roof, on their own stringers
+      pbox(m * (w / 2 - 1.5), h + 0.5, bz, 0.3, 0.04, 1.2);
+      pbox(m * (w / 2 - 1.8), h + 0.25, bz, 0.3, 0.04, 1.2);
+      for (const s of [-1, 1]) pbox(m * (w / 2 - 1.62), h + 0.36, bz + s * 0.62, 0.62, 0.06, 0.05, 0, m * 0.9);
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    const steelM = cmat(0x2a2d31);
+    if (BGU && BGU.mergeBufferGeometries) {
+      const merged = BGU.mergeBufferGeometries(parts, false);
+      for (const gg of parts) gg.dispose();
+      if (merged) {
+        const esc = new THREE.Mesh(merged, steelM);
+        esc.castShadow = true; esc.receiveShadow = true;
+        esc.name = "fire-escape";
+        grp.add(esc);
+      }
+    } else {
+      for (const gg of parts) { const e = new THREE.Mesh(gg, steelM); e.receiveShadow = true; grp.add(e); }
+    }
     addParapets(lot, { z0: oz + bz - 0.9, z1: oz + bz + 0.9, side: m });    // rim colliders, gap at the bridge
     lot.building.fireEscape = { x: ox + m * X1, z: oz + bz, topY: h, side: m };
   }
