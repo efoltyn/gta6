@@ -4403,6 +4403,13 @@
 
     const job = (CBZ.collapse && CBZ.CONFIG.COLLAPSE_V2) ? CBZ.collapse.play({
       root: root(), ox: b.x, oz: b.z, gy: b.gy || 0,
+      /* THE BUILDING ITSELF. Without its group collapse.js had nothing to
+         read and fell back to its proxy: grey boxes in the wall colour with
+         a window strip, so every island house came down as a different,
+         blank building. With it, the stand-in is cut from this building's
+         own walls, facade, slabs and glass (collapse.js gatherSolids), its
+         whole-building merged meshes split by triangle into storey bands. */
+      group: b.group,
       w: b.w, d: b.d, h: b.h, storeys: b.storeys, FH: b.h / Math.max(1, b.storeys || 1),
       wall: b.color != null ? b.color : (b.wallColor != null ? b.wallColor : 0x8b9097),
       style: b.facadeStyle || null,

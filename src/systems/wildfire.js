@@ -1348,6 +1348,11 @@
       return { live, surf, near, nd: nd === 1e9 ? -1 : Math.round(nd), ny: Math.round(ny) };
     },
     seedPos() { return F.seed ? { x: F.seed.x, z: F.seed.z } : null; },
+    // the ONE flame look (a feathered, licking point-sprite tongue), lent to
+    // any other fire on the island (quake.js's gas fire) so nobody draws a
+    // second flame out of stacked additive cones. The caller owns the instance
+    // and drives uTime/uScale (see pointScale in tick).
+    flameMaterial: flameMaterial,
     live() { return F.live; },
     audit() { return CBZ.wildfireAudit(); },
   };
