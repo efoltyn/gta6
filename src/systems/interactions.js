@@ -1,6 +1,7 @@
 /* ============================================================
-   systems/interactions.js — keycard pickup, the door, breaker box,
-   security cameras, ventilation, and win check. (Cigarette-pack
+   systems/interactions.js — the door, breaker box, security cameras,
+   ventilation, and win check (the plan in systems/escapeplan.js signs
+   off on crawls and wins; it also owns the keycard now). (Cigarette-pack
    pickups used to live here too — that block is now the "coin"
    prop type in systems/proptypes.js / entities/coins.js, the F3
    proof that a migrated object type sheds its dedicated block here.)
@@ -478,6 +479,8 @@
 
   function crawlVent(vent) {
     if (!vent || CBZ.crawling) return;
+    // the culvert only goes when nobody is watching the ditch
+    if (CBZ.escapePlan && !CBZ.escapePlan.mayCrawl(vent)) return;
     CBZ.crawling = true;
     player.crouch = true;                 // you go in low; the stance is part of the act
     if (fadeEl) fadeEl.style.opacity = "1";
@@ -560,28 +563,11 @@
     if (!CBZ.game || CBZ.game.mode !== "escape") return;
 
     // ---- keycard ----
-    if (!keycard.collected) {
-      keycard.group.rotation.y += dt * 2;
-      keycard.group.position.y = keycard.baseY + Math.sin(CBZ.now * 0.004) * 0.12;
-      const d = player.pos.distanceTo(
-        new THREE.Vector3(keycard.group.position.x, player.pos.y, keycard.group.position.z)
-      );
-      if (d < 1.6) {
-        keycard.collected = true; g.hasKey = true;
-        keycard.group.visible = false; keycard.ring.visible = false;
-        el.keycard.classList.add("have");
-        // JAIL_HUD_UNIFIED (systems/inventory.js): the keycard rides the bag
-        // like every other pickup — the chip is css-hidden, and the class add
-        // above keeps the flag-off revert byte-identical. hasKey stays the
-        // door/AI truth; the item is display, never a second key check.
-        if (CBZ.CONFIG && CBZ.CONFIG.JAIL_HUD_UNIFIED !== false && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem("Keycard", 1);
-        // The chip above lit up, the bag took the item, and the key sound
-        // plays. "KEYCARD!" was a fourth telling of the same pickup. Deleted,
-        // not muted — there is no string left to turn back on.
-        CBZ.sfx("key");
-        CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
-      }
-    }
+    // THE FREE PICKUP IS GONE. Walking within 1.6 m of the desk used to hand
+    // you the card, and the card was the whole main-gate route. The desk card
+    // is now TAKEN, with your hands, while its officer is away and nobody is
+    // looking (systems/escapeplan.js owns that beat, the bag->hasKey sync and
+    // the other two ways to get a card). entities/keycard.js owns its idle.
 
     // ---- cigarette packs ---- migrated to systems/proptypes.js's "coin"
     // prop type (see entities/coins.js) — bob/spin + proximity pickup now
@@ -727,6 +713,8 @@
       for (const vent of CBZ.vents) {
         const vdx = player.pos.x - vent.x, vdz = player.pos.z - vent.z;
         const vd2 = vdx * vdx + vdz * vdz;
+        // a welded culvert grate is the plan's prompt ("Cut"), not a crawl
+        if (vd2 < 1.6 && CBZ.escapePlan && !CBZ.escapePlan.ventOpen(vent)) continue;
         if (vd2 < 1.6) {
           armedVent = vent;                       // what a pill tap would enter
           armedVentT = 0.25;
@@ -761,16 +749,24 @@
     // the admin door plates and every camera lens already speak. Nothing to
     // print here any more — just no win.
     if (g.role === "cop") return;
+    // THE PLAN SIGNS OFF ON EVERY WIN (systems/escapeplan.js): a gate is won
+    // only if nobody has you in sight in the port, the culvert mouth only if
+    // the grate was actually cut. Reaching the point is no longer the route.
     const ex = player.pos.x - CBZ.EXIT.x, ez = player.pos.z - CBZ.EXIT.z;
-    let routeWin = false;
+    let routeWin = null;
     if (CBZ.altExitZones) {
       for (const zone of CBZ.altExitZones) {
         const ax = player.pos.x - zone.x, az = player.pos.z - zone.z;
-        if (ax * ax + az * az < zone.r * zone.r) { routeWin = true; break; }
+        if (ax * ax + az * az < zone.r * zone.r) { routeWin = zone; break; }
       }
     }
-    if (ex * ex + ez * ez < 9) CBZ.winGame();
-    else if (routeWin) CBZ.winGame("route");
+    const plan = CBZ.escapePlan;
+    if (ex * ex + ez * ez < 9) {
+      if (!plan || plan.mayWin("gate", "prison-exit")) CBZ.winGame();
+    } else if (routeWin) {
+      const kind = routeWin.name === "culvert" ? "culvert" : "gate";
+      if (!plan || plan.mayWin(kind, routeWin.name)) CBZ.winGame("route");
+    }
   }
 
   // ---- ratchet declarations (see CBZ.prisonPromptAudit) ----

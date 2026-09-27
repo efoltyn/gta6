@@ -133,7 +133,7 @@
     el.keycard.classList.remove("have");
     el.bar.style.width = "0%";
     el.vignette.style.boxShadow = "inset 0 0 200px 40px rgba(220,30,40,0)";
-    CBZ.setObjective(role === "cop" ? "Patrol the block, break up fights, and raid the armory." : "Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
+    CBZ.setObjective(role === "cop" ? "Patrol the block, break up fights, and raid the armory." : "Plan your escape. The plan panel lists every route and its next step.");
 
     const spawn = role === "cop" ? CBZ.COP_SPAWN : CBZ.SPAWN;
     player.pos.copy(spawn); player.vy = 0; player.grounded = true;
@@ -156,6 +156,7 @@
 
     keycard.collected = false; keycard.group.visible = true;
     keycard.group.scale.setScalar(1); keycard.ring.visible = true;
+    if (CBZ.escapePlan) CBZ.escapePlan.reset();   // grate welded, nothing carried over (systems/escapeplan.js)
 
     CBZ.coins.forEach((c) => {
       c.collected = false; c.anim = 0; c.group.visible = true;

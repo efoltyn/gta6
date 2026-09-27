@@ -159,6 +159,13 @@
     const counting = !!(S && S.enabled() && (S.is("count") || S.is("secure") || S.is("wake")));
     if (counting && (actor.kind === "guard" || actor.kind === "warden")) return econ.talk(actor);
 
+    // THE FIXER. The Old Timer sells what your escape plan is missing (a
+    // staff card, a hacksaw blade) for cigs you earned doing the favours
+    // below. systems/escapeplan.js owns the stock and the prices; a null
+    // answer means he has nothing you need and is his usual self.
+    const fixer = CBZ.escapePlan && CBZ.escapePlan.fixerTalk ? CBZ.escapePlan.fixerTalk(actor) : null;
+    if (fixer) return fixer;
+
     // befriended enough? they spring you — alternative victory.
     if (actor.rep >= FRIEND) {
       CBZ.winGame("befriend", actor);

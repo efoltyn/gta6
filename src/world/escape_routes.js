@@ -48,14 +48,42 @@
     return mesh;
   }
 
-  function floorHatch(x, z, name, accent) {
+  /* opts.grate: the bars are a real, cuttable grate (systems/escapeplan.js
+     owns the cut). They are flagged dynamic so core/batch.js never bakes them
+     into a static merge, which would leave a cut grate still drawn shut. */
+  function floorHatch(x, z, name, accent, opts) {
     addBox(x, 0.055, z, 1.75, 0.11, 1.75, 0x26313a, { cast: false });
-    addBox(x, 0.13, z, 1.35, 0.08, 1.35, accent || 0x515a66, { cast: false });
+    const plate = addBox(x, 0.13, z, 1.35, 0.08, 1.35, accent || 0x515a66, { cast: false });
+    const bars = [];
     for (let i = -2; i <= 2; i++) {
-      addBox(x + i * 0.26, 0.2, z, 0.08, 0.08, 1.25, 0x11171c, { cast: false });
-      addBox(x, 0.22, z + i * 0.26, 1.25, 0.05, 0.06, 0x11171c, { cast: false });
+      bars.push(addBox(x + i * 0.26, 0.2, z, 0.08, 0.08, 1.25, 0x11171c, { cast: false }));
+      bars.push(addBox(x, 0.22, z + i * 0.26, 1.25, 0.05, 0.06, 0x11171c, { cast: false }));
     }
     const vent = { x, z, y: 0.12, name, dest: null, route: true };
+    if (opts && opts.grate) {
+      for (const b of bars) if (b) b.userData.dynamic = true;
+      if (plate) plate.userData.dynamic = true;
+      // the open shaft under a cut grate: black, a hair above the plate
+      const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({ color: 0x050607 }));
+      hole.rotation.x = -Math.PI / 2;
+      hole.position.set(x, 0.175, z);
+      hole.visible = false;
+      hole.userData.dynamic = true;
+      scene.add(hole);
+      vent.grate = {
+        cut: false,
+        set: function (cut) {
+          this.cut = !!cut;
+          for (let i = 0; i < bars.length; i++) {
+            // a cut grate keeps its two outer rails: the frame, not the bars
+            const edge = i === 0 || i === 1 || i === bars.length - 1 || i === bars.length - 2;
+            if (bars[i]) bars[i].visible = !cut || edge;
+          }
+          if (plate) plate.visible = !cut;
+          hole.visible = !!cut;
+        },
+      };
+    }
     CBZ.vents.push(vent);
     return vent;
   }
@@ -112,11 +140,19 @@
   // ---- route 2: drainage ditch to an outer culvert beyond the FAR south
   // wall (a long maintenance run that spits you out past the new gate) ----
   const SZ = (CBZ.WORLD && CBZ.WORLD.southBlock.z1) || 52;
-  const yardCulvert = floorHatch(-25.2, 18.2, "Perimeter Culvert", 0x4f6d75);
+  // THE CULVERT IS A PLAN, NOT A DOOR (systems/escapeplan.js). Its yard
+  // grate is welded: a hacksaw blade and a few unseen seconds cut it, and the
+  // crawl only goes when nobody is watching the ditch. The mouth outside the
+  // wall is where the route is won, and escapeplan.js checks the grate was
+  // really cut before it counts.
+  const yardCulvert = floorHatch(-25.2, 18.2, "Perimeter Culvert", 0x4f6d75, { grate: true });
   const outerCulvert = floorHatch(-9, SZ + 3, "Outer Culvert Mouth", 0x39ff88);
   yardCulvert.dest = outerCulvert;
+  yardCulvert.culvert = true;
   outerCulvert.dest = yardCulvert;
-  CBZ.altExitZones.push({ x: -9, z: SZ + 3, r: 3.4 });
+  outerCulvert.culvertMouth = true;
+  CBZ.culvertGrate = yardCulvert;
+  CBZ.altExitZones.push({ x: -9, z: SZ + 3, r: 3.4, name: "culvert" });
 
   // Give the ditch a readable path and some stealth cover.
   addBox(-25.3, 0.035, 14.4, 6.3, 0.07, 14.8, 0x3f4c54, { cast: false });

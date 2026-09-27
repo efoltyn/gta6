@@ -750,6 +750,7 @@
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=duty1"></script>
+<script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
      so every useBed() call silently degraded — measured: 21 props, 0 beds),
@@ -853,6 +854,7 @@
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
+<script src="src/systems/escapeplan.js?v=plan1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
