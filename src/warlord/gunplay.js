@@ -238,7 +238,8 @@
         "#crosshair.dry{color:#ffd451;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}" +
         "#ammo{position:absolute;right:22px;bottom:210px;display:none;pointer-events:none;font-weight:700;" +
           "font-size:22px;letter-spacing:1px;color:#fff;font-variant-numeric:tabular-nums;" +
-          "text-shadow:0 2px 0 rgba(0,0,0,.5);white-space:pre;text-align:right;line-height:1.18;z-index:46}" +
+          "text-shadow:0 2px 0 rgba(0,0,0,.5);white-space:pre;text-align:right;line-height:1.18;z-index:46;" +
+          "transition:opacity .5s}" +
         /* THE AMMO READOUT MOVES OFF THE THUMBS ON A PHONE — the same line
            css/hud.css carries, for the same reason: the trigger lives at
            bottom-right and a number under it is a number under a thumb. */
@@ -602,9 +603,28 @@
         A.shot(n);
       }
       lastRounds = now;
+      fadeAmmo(f);
     };
     CBZ.onAlways(53.2, ledgerFn);
     return { mode: "engine" };
+  }
+
+  /* THE ROUNDS SHOW WHEN THEY MATTER. fpsmode writes #ammo every frame and
+     sets it display:block for as long as a gun is out, which in a battle is
+     the whole battle. So the opacity is ours: it comes up when the readout
+     changes (a shot, a reload, a swap, a pickup) and when the magazine is
+     running low, and sleeps 2.5 s after the last change. */
+  let ammoTxt = "", ammoSeen = 0;
+  function fadeAmmo(f) {
+    const am = document.getElementById("ammo");
+    if (!am) return;
+    const t = performance.now();
+    const txt = am.textContent;
+    if (txt !== ammoTxt) { ammoTxt = txt; ammoSeen = t; }
+    const low = f && f.mag > 0 && f.ammo != null && f.ammo <= Math.max(1, f.mag * 0.25);
+    const show = t - ammoSeen < 2500 || low || (f && f.reloading > 0);
+    const want = show ? "1" : "0";
+    if (am.style.opacity !== want) am.style.opacity = want;
   }
 
   function ownedIds() {

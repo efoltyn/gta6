@@ -211,7 +211,7 @@
   let trailLen = 0;                // arc length of the last crumb
   let travelled = 0;
   let gapCur = 0;                  // damped column spacing, see drawMen
-  let hudRoot = null, plateBox = null, compass = null, compassG = null, mapWrap = null;
+  let hudRoot = null, plateBox = null, mapWrap = null;
   let fightTick = 0, spawnTick = 0;
   let lastWall = 0, clockH = null;
   let chase = null;                // the band you tapped, if any
@@ -1554,7 +1554,7 @@
   }
 
   /* ============================================================ THE HUD
-     Only the pieces this file owns: the compass, the nameplates, the map
+     Only the pieces this file owns: the nameplates, the map
      button and the world map. The top strip belongs to the shell. */
   function buildHud() {
     const d = document.createElement("div");
@@ -1571,18 +1571,11 @@
       '#wlCampHud .plate.flee{border-color:#5aa86a;color:#c9ffd4}' +
       '#wlCampHud .plate.op{border-color:#ffb15a;color:#ffd7bd}' +
       '#wlCampHud .plate.peer{border-color:#7fa8c8;color:#d8ecff}' +
-      '#wlCompass{position:absolute;left:50%;transform:translateX(-50%);' +
-        'bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 14px);opacity:.9}' +
       '#wlMapBtn{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);' +
         'top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 52px);pointer-events:auto;cursor:pointer;' +
         'appearance:none;border:1px solid rgba(255,255,255,.2);border-radius:12px;' +
         'background:rgba(12,9,5,.62);color:#f4ecd8;padding:10px 13px;font:700 12px/1 ui-sans-serif,system-ui,sans-serif;' +
         'letter-spacing:.16em}' +
-      '#wlZoom{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);' +
-        'top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 100px);display:flex;flex-direction:column;gap:8px}' +
-      '#wlZoom button{pointer-events:auto;cursor:pointer;width:42px;height:42px;border-radius:12px;' +
-        'border:1px solid rgba(255,255,255,.2);background:rgba(12,9,5,.62);color:#f4ecd8;' +
-        'font:700 18px/1 ui-sans-serif,system-ui,sans-serif}' +
       '#wlMap{position:fixed;inset:0;z-index:60;display:none;background:rgba(8,6,4,.93);' +
         'pointer-events:auto;align-items:center;justify-content:center;flex-direction:column;gap:12px}' +
       '#wlMap.on{display:flex}' +
@@ -1591,26 +1584,19 @@
       '#wlMap .cap{font:700 11px/1.4 ui-sans-serif,system-ui,sans-serif;letter-spacing:.22em;opacity:.6;color:#f4ecd8}' +
       '</style>' +
       '<div id="wlPlates"></div>' +
-      '<canvas id="wlCompass" width="460" height="36"></canvas>' +
-      '<button id="wlMapBtn">MAP</button>' +
-      '<div id="wlZoom"><button id="wlIn">+</button><button id="wlOut">&minus;</button></div>';
+      '<button id="wlMapBtn">MAP</button>';
     document.body.appendChild(d);
     hudRoot = d;
     plateBox = d.querySelector("#wlPlates");
-    compass = d.querySelector("#wlCompass");
-    compassG = compass.getContext("2d");
 
     const mw = document.createElement("div");
     mw.id = "wlMap";
-    mw.innerHTML = '<div class="cap">THE ISLAND — TAP TO CLOSE</div><canvas id="wlMapC"></canvas>' +
-                   '<div class="cap" id="wlMapLeg"></div>';
+    mw.innerHTML = '<canvas id="wlMapC"></canvas>';
     document.body.appendChild(mw);
     mapWrap = mw;
     mw.addEventListener("pointerdown", function () { mw.classList.remove("on"); });
 
     d.querySelector("#wlMapBtn").addEventListener("click", function (e) { e.stopPropagation(); toggleMap(); });
-    d.querySelector("#wlIn").addEventListener("click", function () { camDistWant = clamp(camDistWant * 0.62, 16, 520); });
-    d.querySelector("#wlOut").addEventListener("click", function () { camDistWant = clamp(camDistWant * 1.6, 16, 520); });
 
     window.addEventListener("keydown", function (e) {
       if (!live) return;
@@ -1683,89 +1669,6 @@
     g.strokeStyle = "#fff"; g.lineWidth = 2;
     g.beginPath(); g.arc(me.x, me.y, 6, 0, TAU); g.stroke();
     g.fillStyle = "#fff"; g.beginPath(); g.arc(me.x, me.y, 2.6, 0, TAU); g.fill();
-    const leg = document.getElementById("wlMapLeg");
-    if (leg) leg.textContent = S.bands.length + " PARTIES · " + S.outposts.length + " OUTPOSTS · " +
-      D.oases.length + " OASES · DAY " + S.day;
-  }
-
-  /* ============================================================ THE COMPASS
-     A ribbon, not a rose: a rose tells you which way north is, which in a
-     desert with no roads is worth nothing. This tells you where the nearest
-     WATER and the nearest MARKET are, which is the only navigation question
-     the game actually asks. */
-  function paintCompass() {
-    if (!compassG) return;
-    const g = compassG, w = compass.width;
-    g.clearRect(0, 0, w, compass.height);
-    g.fillStyle = "rgba(12,9,5,.42)";
-    g.fillRect(0, 0, w, compass.height);
-    const yaw = camYaw;
-    const span = 2.4;                     // radians of heading shown across the ribbon
-    function px(a) {
-      let d = a - yaw;
-      while (d > Math.PI) d -= TAU;
-      while (d < -Math.PI) d += TAU;
-      return w / 2 + (d / span) * w;
-    }
-    /* TWO ROWS, and it is not decoration: the first draft drew the cardinals
-       and both waypoints on ONE baseline and the readout said "WADUST GATE"
-       — two labels straight through each other. Cardinals get the top row,
-       waypoints the bottom, and a waypoint that would overlap the one
-       already drawn is dropped rather than smeared over it. */
-    const used = [];
-    function tick(a, label, colour, row) {
-      const x = px(a);
-      if (x < -40 || x > w + 40) return;
-      const yTick = row ? 18 : 8, yText = row ? 30 : 15;
-      g.strokeStyle = colour; g.lineWidth = row ? 1 : 2;
-      g.beginPath(); g.moveTo(x, yTick); g.lineTo(x, yTick + (row ? 5 : 6)); g.stroke();
-      g.textAlign = "center";
-      g.font = row ? "700 9px ui-sans-serif,system-ui,sans-serif" : "700 11px ui-sans-serif,system-ui,sans-serif";
-      if (row) {
-        const half = g.measureText(label).width / 2 + 5;
-        for (let i = 0; i < used.length; i++) if (Math.abs(used[i] - x) < half * 2) return;
-        used.push(x);
-      }
-      g.fillStyle = colour;
-      g.fillText(label, x, yText);
-    }
-    const CARD = [["N", 0], ["E", Math.PI / 2], ["S", Math.PI], ["W", -Math.PI / 2],
-                  ["NE", Math.PI / 4], ["SE", 3 * Math.PI / 4], ["SW", -3 * Math.PI / 4], ["NW", -Math.PI / 4]];
-    for (let i = 0; i < CARD.length; i++) tick(CARD[i][1], CARD[i][0], "rgba(244,236,216,.6)", 0);
-    const D = W.desert;
-    const o = nearest(D.oases);
-    if (o) tick(Math.atan2(o.x - S.you.x, o.z - S.you.z), "WATER " + km(o.d), "#39d0a8", 1);
-    const p = nearest(S.outposts);
-    if (p) tick(Math.atan2(p.x - S.you.x, p.z - S.you.z), p.name + " " + km(p.d), "#ffb15a", 1);
-    /* AND THE PEOPLE. The ribbon told you where water and a market were and
-       never where a party was — so a band hunting you from 900 m out was
-       invisible until it crossed nameplate range, and the men events.js had
-       just put on the road ahead were a surprise at 38 m. Two ticks: the
-       nearest party COMING FOR YOU in blood, and the nearest one waiting on
-       the road (held / cast) in the banner's own gold. */
-    let hunt = null, hd = 900, road = null, rd = 900;
-    for (let i = 0; i < S.bands.length; i++) {
-      const b = S.bands[i];
-      if (!b || !b.men || !b.men.length) continue;
-      const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
-      if (b.mood === "hunt" && !b.held && d < hd) { hd = d; hunt = b; }
-      if ((b.cast || b.held) && d < rd) { rd = d; road = b; }
-    }
-    if (hunt) tick(Math.atan2(hunt.x - S.you.x, hunt.z - S.you.z), W.bandSize(hunt) + " " + hunt.name + " " + km(hd), "#ff6b5a", 1);
-    if (road && road !== hunt) tick(Math.atan2(road.x - S.you.x, road.z - S.you.z), W.bandSize(road) + " " + road.name + " " + km(rd), "#ffd27a", 1);
-    g.fillStyle = "#ffb15a";
-    g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2 - 6, 7); g.lineTo(w / 2 + 6, 7); g.closePath(); g.fill();
-    g.textAlign = "left";
-  }
-  function km(d) { return d < 950 ? Math.round(d) + "m" : (Math.round(d / 100) / 10) + "km"; }
-  function nearest(list) {
-    let best = null, bd = 1e18;
-    for (let i = 0; i < list.length; i++) {
-      const d = Math.hypot(list[i].x - S.you.x, list[i].z - S.you.z);
-      if (d < bd) { bd = d; best = list[i]; }
-    }
-    if (!best) return null;
-    return { x: best.x, z: best.z, d: bd, name: best.name || "" };
   }
 
   /* ============================================================ THE PICK
@@ -1893,7 +1796,6 @@
       dest = { x: peer.x, z: peer.z };
       W.emit("campaign:peer", peer);
       if (W.warnet && W.warnet.engage) { try { W.warnet.engage(peer); } catch (e) {} }
-      else W.toast("riding at " + peer.name);
       return;
     }
     const tgt = pickParty(sx, sy);
@@ -1917,13 +1819,13 @@
          broken game. */
       // a party events.js has on the road for a card: ride to it, the card is
       // the meeting — engage() would only be refused by its hold
-      if (tgt.cast || tgt.held) { W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name); return; }
+      if (tgt.cast || tgt.held) return;
       if (d < CONTACT * 1.6) {
         if (!engage(tgt)) {
           chase = null; dest = null;
           W.toast(tgt.name + " breaks off", "bad");
         }
-      } else W.toast("riding at " + W.bandSize(tgt) + " " + tgt.name);
+      }
       return;
     }
     chase = null;
@@ -1948,7 +1850,7 @@
       if (oy + dy * m <= D.heightAt(ox + dx * m, oz + dz * m)) hi = m; else lo = m;
     }
     const x = ox + dx * hi, z = oz + dz * hi;
-    if (!D.onLand(x, z)) { W.toast("that is the sea", "bad"); return; }
+    if (!D.onLand(x, z)) return;
     dest = { x: x, z: z };
     markAt(x, z);
     W.emit("campaign:dest", dest);
@@ -2242,7 +2144,6 @@
     drawMarker(dt);
     updateCamera(dt);
     paintPlates();
-    paintCompass();
 
     // ---- handoffs -------------------------------------------------------
     checkContacts();
@@ -3665,20 +3566,18 @@
       const d = Math.hypot(b.x - S.you.x, b.z - S.you.z);
       if (d > NAMEPLATE_R) continue;
       list.push({ x: b.x, y: W.desert.heightAt(b.x, b.z) + 9, z: b.z, d: d,
-        text: W.bandSize(b) + " " + b.name, sub: b.cast ? "ON THE ROAD · " + Math.round(d) + "m" :
-          b.mood === "hunt" ? "COMING FOR YOU" :
-          b.mood === "flee" ? "RUNNING" : Math.round(d) + "m", cls: b.cast ? "cast" : b.mood });
+        text: b.name, sub: "", cls: b.cast ? "cast" : b.mood });
     }
     for (let i = 0; i < peerDraw.length && list.length < 8; i++) {
       const q = peerDraw[i];
       if (q.d > NAMEPLATE_R * 2.2) continue;
       list.push({ x: q.x, y: W.desert.heightAt(q.x, q.z) + 11, z: q.z, d: q.d,
-        text: q.size + " " + q.name, sub: "WARLORD", cls: "peer" });
+        text: q.name, sub: "", cls: "peer" });
     }
     if (nearOutpost) {
       const d = Math.hypot(nearOutpost.x - S.you.x, nearOutpost.z - S.you.z);
       list.push({ x: nearOutpost.x, y: nearOutpost.y + 20, z: nearOutpost.z, d: d,
-        text: nearOutpost.name + " " + nearOutpost.label, sub: nearOutpost.note, cls: "op" });
+        text: nearOutpost.name, sub: "", cls: "op" });
     }
     while (plates.length < list.length) {
       const p = document.createElement("div");
@@ -3693,7 +3592,7 @@
       if (_proj.z > 1) { p.style.display = "none"; continue; }
       p.style.display = "block";
       p.className = "plate " + (L.cls || "");
-      p.innerHTML = L.text + '<i>' + L.sub + '</i>';
+      p.textContent = L.text;
       p.style.left = ((_proj.x * 0.5 + 0.5) * window.innerWidth) + "px";
       p.style.top = ((-_proj.y * 0.5 + 0.5) * window.innerHeight) + "px";
     }

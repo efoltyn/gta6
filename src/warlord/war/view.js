@@ -1180,13 +1180,14 @@
   #warOverlay .wvA i{align-self:stretch;width:5px;display:block}
   #warOverlay .wvA b{padding:3px 5px 3px 4px}
   #warOverlay .wvA.sel{border-color:#ff8a3d;box-shadow:0 0 0 1px #ff8a3d,0 1px 3px rgba(0,0,0,.6)}
+  #warOverlay .wvA.cut{border-color:#e05a4a}
   #warOverlay .wvA.cut b{color:#ff9d8f}
-  #warOverlay .wvA.cut:after{content:"CUT OFF";font-size:8px;letter-spacing:.12em;color:#ffb3a8;padding-right:5px}
+  #warOverlay .wvA.far b{display:none}
   #warOverlay .wvA.gar{border-style:dashed}
   #warOverlay .wvB{position:absolute;left:0;top:0;white-space:nowrap;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;
     background:rgba(14,11,8,.86);border:1px solid #ff8a3d;border-radius:4px;padding:3px 6px;color:#f6efe0;will-change:transform;
     font-variant-numeric:tabular-nums}
-  #warOverlay .wvB em{font-style:normal;opacity:.6;margin:0 5px;font-size:9px;letter-spacing:.12em}
+  #warOverlay .wvB em{font-style:normal;opacity:.6;margin:0 4px}
   #warBox{position:fixed;border:1px solid #ff8a3d;background:rgba(255,138,61,.12);pointer-events:none;z-index:31;display:none}
   `;
   let townEls = [], armyEls = new Map(), battleEls = new Map();
@@ -1560,7 +1561,7 @@
         if (!s || s.x < -80 || s.x > vw + 80 || s.y < -20 || s.y > vh2 + 40) on = false;
       }
       if (on) {
-        const hgt = rec.h + (showSub ? 11 : 0);
+        const hgt = rec.h;
         const bx = s.x - rec.w / 2, by = s.y - hgt;
         for (let k = 0; k < boxes.length; k++) {
           const q = boxes[k];
@@ -1574,7 +1575,7 @@
       const o = G.townOwner[t];
       const dot = o ? G.factions[o].css : "#d8cfb4";
       if (rec.dot$ !== dot) { rec.dot.style.background = dot; rec.dot$ = dot; }
-      const sub = showSub ? V.fmt(WAR.sim.townDefence(G, t).garrison) : "";
+      const sub = "";
       if (rec.sub$ !== sub) { rec.sub.textContent = sub; rec.sub.style.display = sub ? "" : "none"; rec.sub$ = sub; }
     }
     // armies
@@ -1600,7 +1601,8 @@
       if (rec.men$ !== men) { rec.b.textContent = men; rec.men$ = men; }
       const css = cssOfOwner(a.owner, a);
       if (rec.css$ !== css) { rec.i.style.background = css; rec.css$ = css; }
-      const cls = "wvA" + (selSet.has(a.id) ? " sel" : "") + (!a.supplied && !a.rogue && !a.free && a.home < 0 ? " cut" : "") + (a.home >= 0 ? " gar" : "");
+      const cls = "wvA" + (selSet.has(a.id) ? " sel" : "") + (!a.supplied && !a.rogue && !a.free && a.home < 0 ? " cut" : "") + (a.home >= 0 ? " gar" : "") +
+        (!showSub && !selSet.has(a.id) ? " far" : "");
       if (rec.cls$ !== cls) { rec.el.className = cls; rec.cls$ = cls; }
     }
     armyEls.forEach(function (rec, id) {
@@ -1621,7 +1623,7 @@
         battleEls.set(b.id, rec);
       }
       bseen.add(b.id);
-      if (!s) { showEl(rec, false); continue; }
+      if (!s || !showSub) { showEl(rec, false); continue; }
       showEl(rec, true);
       place(rec.el, rec, s.x, s.y - 24);
       let am = 0, dm = 0;
@@ -1629,7 +1631,7 @@
       for (const id of b.def) { const a = WAR.sim.army(G, id); if (a) dm += a.men; }
       const A0 = WAR.sim.army(G, b.att[0]), D0 = WAR.sim.army(G, b.def[0]);
       const ca = cssOfOwner(b.attOwner, A0), cd = cssOfOwner(b.defOwner, D0);
-      const t = '<b style="color:' + ca + '">' + V.fmt(am) + '</b><em>VS</em><b style="color:' + cd + '">' + V.fmt(dm) + '</b>';
+      const t = '<b style="color:' + ca + '">' + V.fmt(am) + '</b><em>/</em><b style="color:' + cd + '">' + V.fmt(dm) + '</b>';
       if (rec.t$ !== t) { rec.el.innerHTML = t; rec.t$ = t; }
     }
     battleEls.forEach(function (rec, id) { if (!bseen.has(id)) { if (rec.el.parentNode) rec.el.parentNode.removeChild(rec.el); battleEls.delete(id); } });

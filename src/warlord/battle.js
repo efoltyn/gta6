@@ -1803,7 +1803,6 @@
      with the leash on the point instead of on the old anchor. The enemy
      commander does not use either; he has no thumb. */
   const ORDERS = ["charge", "hold", "flank", "fallback", "follow", "move"];
-  const ORDER_LABEL = { charge: "CHARGE", hold: "HOLD", flank: "FLANK", fallback: "FALL BACK", follow: "FOLLOW ME", move: "MOVE" };
   function orderOf(side) {
     return (Q && Q.get("orders") === "old") ? "hold" : side.order;
   }
@@ -3238,7 +3237,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const id = g && g.userData && g.userData.weaponId;
     if (!id) return "";
     const nm = W.gunLabel ? W.gunLabel(id) : gunName(id);
-    return (id === W.state.you.wid ? "AMMO · " : "TAKE ") + String(nm).toUpperCase();
+    return (id === W.state.you.wid ? "AMMO " : "TAKE ") + String(nm).toUpperCase();
   }
 
   /* TAKING IT. Six lines of bookkeeping and every one of them is somebody
@@ -3304,52 +3303,38 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   }
 
   /* ============================================================ THE HUD
-     Four orders, a retreat, two morale bars and the two things a man in a
-     firefight actually needs: how hurt he is and how many rounds are left.
-     Built in code and REMOVED on teardown — the page's #stage belongs to the
-     screens, and a battle is not a screen. */
+     SHOW, DON'T TELL. The top pill (two head counts, two morale bars, a
+     stopwatch, the current order's name), the corner panel (your name, an HP
+     bar, a gun-and-kills tally), the field-cap caption and the opening
+     "12 V 30 SAND BANDITS" banner are gone. What is left is only what a man
+     in a firefight acts on:
+       - the order rail, and only when there is an army to order;
+       - RETREAT, the one way out of a fight;
+       - the reach prompt when a rifle is at your feet;
+       - the end-of-fight line (THEY BREAK), for the beat before the screen;
+       - how hurt you are, as a red screen edge (#wbHit) that flashes on a
+         hit and pulses once you are below half, instead of a bar.
+     Whether you are winning is the field itself: your line and theirs, and
+     deaths.js's rim ticks at the bearing of every man of yours who falls.
+     The rail and RETREAT sit faded until the mouse is over them or an order
+     has just been given. */
   function buildHud() {
     const css = document.createElement("style");
     css.id = "wbCss";
     css.textContent =
       "#wb{position:fixed;inset:0;z-index:45;pointer-events:none;font:600 13px/1.3 ui-sans-serif,system-ui,sans-serif;color:#f4ecd8}" +
-      "#wb .bar{position:absolute;left:50%;top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 8px);transform:translateX(-50%);" +
-        "display:flex;gap:10px;align-items:center;padding:7px 13px;border-radius:999px;white-space:nowrap;" +
-        "background:rgba(12,10,7,.62);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(6px)}" +
-      "#wb .cnt{font-weight:800;font-size:15px}" +
-      "#wb .mo{width:min(19vw,120px);height:7px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}" +
-      "#wb .mo s{display:block;height:100%;transition:width .25s}" +
-      "#wb .mid{font-size:10px;letter-spacing:.2em;opacity:.65;text-align:center;min-width:74px}" +
-      /* width:max-content — an absolutely positioned box at left:50% shrink-fits
-         into the HALF of the screen to its right, so five orders plus the seat
-         toggle wrapped onto two rows at 1180 px with 500 px of empty screen
-         either side. max-width still caps it at the viewport. */
+      "#wb .ord,#wb .ret{opacity:.38;transition:opacity .45s}" +
+      "#wb.act .ord,#wb.act .ret,#wb .ord:hover,#wb .ret:hover{opacity:1;transition:opacity .12s}" +
       "#wb .ord{position:absolute;left:50%;bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 10px);transform:translateX(-50%);" +
         "display:flex;gap:7px;pointer-events:auto;flex-wrap:wrap;justify-content:center;width:max-content;max-width:96vw}" +
+      "#wb .ord:empty{display:none}" +
       "#wb .ord button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(12,10,7,.66);" +
         "color:inherit;border-radius:12px;padding:11px 14px;font:800 12px/1 inherit;letter-spacing:.1em;cursor:pointer;" +
         "backdrop-filter:blur(6px)}" +
       "#wb .ord button.on{background:rgba(255,138,61,.34);border-color:#ff8a3d}" +
-      "#wb .ord button.bad{border-color:#c4453a}" +
-      /* A PHONE HAS NO NUMBER KEYS, so the digits come off and the buttons
-         get small enough to sit on ONE row. At 393 pt the four orders plus a
-         camera toggle wrapped to five rows up the middle of the screen, on top
-         of the trigger and on top of the warlord's own health panel — the
-         touch cluster is drawn by warlord/gunplay.js above this rail and had
-         nowhere to be. The repo's own touch doctrine says the movement and
-         combat controls are ICONS and a prompt spells the VERB, never a
-         keyboard letter; this rail was doing the opposite on the one device
-         where the letter means nothing. */
       "body.coarse #wb .ord button{padding:12px 10px;font-size:11px;letter-spacing:.06em}" +
       "body.coarse #wb .ord{max-width:99vw;gap:5px;justify-content:center}" +
-      "body.coarse #wb .ord button .k{display:none}" +
-      "body.coarse #wb .me{bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 124px)}" +
       "body.coarse #wb .ret{bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 124px)}" +
-      "#wb .me{position:absolute;left:calc(var(--wl-safe-l, env(safe-area-inset-left,0px)) + 14px);bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 74px);" +
-        "padding:9px 12px;border-radius:12px;background:rgba(12,10,7,.55);border:1px solid rgba(255,255,255,.12)}" +
-      "#wb .hp{width:132px;height:5px;border-radius:3px;background:rgba(255,255,255,.16);margin:6px 0 6px;overflow:hidden}" +
-      "#wb .hp s{display:block;height:100%;background:#5aa86a}" +
-      "#wb .ammo{font-variant-numeric:tabular-nums;letter-spacing:.14em;font-size:12px;opacity:.85}" +
       "#wb .ret{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 74px);pointer-events:auto}" +
       "#wb .ret button{appearance:none;border:1px solid #c4453a;background:rgba(12,10,7,.66);color:#ffc9c4;" +
         "border-radius:12px;padding:10px 13px;font:700 11px/1 inherit;letter-spacing:.14em;cursor:pointer}" +
@@ -3357,15 +3342,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       "#wb .note{position:absolute;left:50%;top:20%;transform:translateX(-50%);font-size:clamp(16px,4.4vw,30px);" +
         "letter-spacing:.12em;opacity:0;transition:opacity .35s;text-shadow:0 2px 12px #000;white-space:nowrap}" +
       "#wb .note.on{opacity:.95}" +
-      "#wb .cap{position:absolute;left:50%;top:calc(var(--wl-safe-t, env(safe-area-inset-top,0px)) + 44px);transform:translateX(-50%);" +
-        "font-size:10px;letter-spacing:.16em;opacity:.55;white-space:nowrap}" +
-      /* THE REACH PROMPT. Centred and just under the reticle, which is
-         where a man looks when he is standing over the thing he wants —
-         not in a corner panel he would have to leave the fight to read.
-         The KEY CAP is a <b class="k">, the same class the order rail
-         uses for its digits, so the one `body.coarse` rule below takes
-         the letter off BOTH rails: on a phone the verb is the whole
-         prompt and the button beside it is the key. */
+      /* THE REACH PROMPT, just under the reticle where a man standing over
+         the thing he wants is already looking. On a phone gunplay.js's TAKE
+         pill in the thumb column is the prompt, so this one is not drawn. */
       "#wb .pick{position:absolute;left:50%;top:calc(50% + 42px);transform:translateX(-50%);" +
         "display:flex;align-items:center;gap:9px;padding:7px 14px;border-radius:999px;white-space:nowrap;" +
         "font-size:12px;font-weight:800;letter-spacing:.14em;opacity:0;transition:opacity .12s;" +
@@ -3373,26 +3352,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       "#wb .pick.on{opacity:.96}" +
       "#wb .pick .k{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;" +
         "border-radius:5px;background:rgba(255,138,61,.34);border:1px solid #ff8a3d;font-size:11px;font-weight:800}" +
-      /* AND ON A PHONE IT IS NOT HERE AT ALL. gunplay.js's reach control is a
-         word pill that already says TAKE .50 DESERT EAGLE in the thumb column;
-         printing the same sentence again under the reticle is the second
-         readout, and the first capture had it landing on the AIM button. */
       "body.coarse #wb .pick{display:none}";
     document.head.appendChild(css);
 
     const root = document.createElement("div");
     root.id = "wb";
     root.innerHTML =
-      '<div class="bar">' +
-        '<span class="cnt" id="wbMine" style="color:#ffb347">0</span>' +
-        '<span class="mo"><s id="wbMineMo" style="background:#ffb347;width:100%"></s></span>' +
-        '<span class="mid"><span id="wbClock">0:00</span><br><span id="wbOrd">HOLD</span></span>' +
-        '<span class="mo"><s id="wbThemMo" style="background:#c4593a;width:100%"></s></span>' +
-        '<span class="cnt" id="wbThem" style="color:#e08a6a">0</span>' +
-      '</div>' +
-      '<div class="cap" id="wbCap"></div>' +
-      '<div class="me"><div id="wbName">WARLORD</div><div class="hp"><s id="wbHp"></s></div>' +
-        '<div class="ammo" id="wbAmmo"></div></div>' +
       '<div class="ret"><button id="wbRetreat">RETREAT</button></div>' +
       /* THE ORDERS ARE FOR AN ARMY, so they only exist when there is one.
          The owner rode out alone, picked a fight, and was handed CHARGE /
@@ -3401,8 +3366,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          you the run. Fighting alone is not a degenerate case in this game,
          it is DAY ONE and the whole opening: you start with no men and you
          earn them. So the command rail is built empty and filled by
-         syncOrderRail() below, and a lone warlord gets a camera toggle and a
-         trigger, which is the entire control surface he actually has. */
+         syncOrderRail() below, and a lone warlord gets a trigger and C for
+         the camera, which is the entire control surface he actually has. */
       '<div class="ord" id="wbOrders"></div>' +
       '<div class="pick" id="wbPick"></div>' +
       '<div class="hit" id="wbHit"></div>' +
@@ -3420,11 +3385,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        buttons) and it is the only way the rail can stay honest about what you
        can actually order. */
     function syncOrderRail() {
-      /* wbOrders, NOT wbOrd — the header already owns wbOrd for the current
-         order NAME, and the first draft of this rail reused that id. Two
-         elements answered to it, getElementById returned the header span,
-         and the rail and the order readout spent the battle overwriting each
-         other: the buttons vanished and the header read "HOLD" as a div. */
       const ord = document.getElementById("wbOrders");
       if (!ord) return;
       // the men you can give an order to: your side, alive, not you
@@ -3437,24 +3397,19 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       if (had === String(commanded)) return;          // nothing changed; don't churn the DOM
       ord.setAttribute("data-n", String(commanded));
       let h = "";
-      // the digit is a KEYBOARD hint; on glass it is a lie taking up a third
-      // of the button. See the coarse CSS above.
-      const n = function (d, label) { return ctx.coarse ? label : (d + " " + label); };
+      /* NO DIGITS ON THE BUTTONS. 1-5 still work; a key legend printed on
+         every button for the whole fight is a cheat-sheet, not a control. The
+         camera seat button rides the rail only when there IS a rail: the
+         command seat is for commanding, and a lone warlord has C (desktop) or
+         gunplay.js's view icon (phone). */
       if (commanded > 0) {
-        h += '<button data-o="charge">' + n(1, "CHARGE") + '</button>' +
-             '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">' + n(2, "HOLD") + '</button>' +
-             '<button data-o="flank">' + n(3, "FLANK") + '</button>' +
-             '<button data-o="fallback">' + n(4, "FALL BACK") + '</button>' +
-             /* the fifth verb. "FOLLOW", not "FOLLOW ME": with the camera
-                toggle beside them six worded buttons wrapped onto two rows at
-                1180 px, and on glass five have to share one 393 pt row. */
-             '<button data-o="follow">' + n(5, "FOLLOW") + '</button>';
+        h += '<button data-o="charge">CHARGE</button>' +
+             '<button data-o="hold" class="' + ((SIDES.mine && SIDES.mine.order === "hold") ? "on" : "") + '">HOLD</button>' +
+             '<button data-o="flank">FLANK</button>' +
+             '<button data-o="fallback">FALL BACK</button>' +
+             '<button data-o="follow">FOLLOW</button>';
+        if (!ctx.coarse) h += '<button id="wbCam">' + camLabel(camMode) + '</button>';
       }
-      /* THE SEAT TOGGLE IS A BUTTON ONCE. gunplay.js draws a view icon in the
-         thumb cluster on a coarse pointer, and a second worded one in the
-         command rail is the same verb twice, in the row where a mis-tap
-         changes your army's orders. */
-      if (!ctx.coarse) h += '<button id="wbCam">' + camLabel(camMode) + '</button>';
       ord.innerHTML = h;
       ord.querySelectorAll("[data-o]").forEach(function (b) {
         b.addEventListener("click", function (e) { e.stopPropagation(); setOrder(b.dataset.o, "mine"); });
@@ -3475,78 +3430,52 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (!hud) return;
     const o = orderOf(SIDES.mine);
     hud.querySelectorAll("[data-o]").forEach(function (b) { b.classList.toggle("on", b.dataset.o === o); });
-    const el = document.getElementById("wbOrd");
-    if (el) el.textContent = ORDER_LABEL[o];
+    wake();
   }
-  /* THE KILL FEED IS GONE, ELEMENT AND ALL. It carried four kinds of line and
-     every one of them was a word standing in for something already on screen:
-     "X DOWN" and "X BREAKS" (now a red / amber tick on the rim at the man's
-     bearing — see warlord/deaths.js), "ORDER: FLANK" (the button you pressed
-     is lit and #wbOrd says so), and "AK-47 OFF THE SAND" (fpsmode's own #ammo
-     readout writes the weapon's name over its rounds). Deleting the box rather
-     than emptying it, because a five-line text panel that only ever prints
-     redundancies is a place the next redundancy goes. */
+  /* THE KILL FEED IS GONE, ELEMENT AND ALL. Its lines were words standing in
+     for things already on screen: "X DOWN" / "X BREAKS" are deaths.js's rim
+     ticks at the man's bearing, "ORDER: FLANK" is the lit button, and
+     "AK-47 OFF THE SAND" is the gun in your hands. */
   let noteT = 0;
   function note(txt) {
     const n = document.getElementById("wbNote");
     if (!n) return;
     n.textContent = txt;
-    n.classList.add("on");
+    n.classList.toggle("on", !!txt);
     noteT = 2.6;
   }
-  let uiT = 0;
+  /* THE RAIL WAKES WHEN IT IS USED and sleeps back to a ghost after a few
+     seconds, so the bottom of the screen is the battle and not a row of
+     buttons. Hover also wakes it (CSS). */
+  let wakeT = 0;
+  function wake(s) {
+    wakeT = s == null ? 3.5 : s;
+    if (hud) hud.classList.add("act");
+  }
   function paintHud(dt) {
     /* THE RAIL FOLLOWS THE ARMY. Orders appear the frame you actually have
-       somebody to order and vanish the frame your last man goes down — which
-       during a rout is a real transition the player should feel, not a set of
-       buttons that keep pretending. syncOrderRail no-ops unless the count
-       changed, so this costs a compare. */
+       somebody to order and vanish the frame your last man goes down.
+       syncOrderRail no-ops unless the count changed, so this costs a compare. */
     if (hudSyncOrders) hudSyncOrders();
+    if (wakeT > 0 && (wakeT -= dt) <= 0 && hud) hud.classList.remove("act");
+    /* HOW HURT YOU ARE IS THE EDGE OF THE SCREEN. A hit flashes it; below
+       half health it keeps breathing, faster and redder the closer you are
+       to going down. No bar, no number. */
     const h = document.getElementById("wbHit");
-    if (h) { hurtFlash = Math.max(0, hurtFlash - dt * 1.6); h.style.opacity = hurtFlash.toFixed(2); }
+    if (h) {
+      hurtFlash = Math.max(0, hurtFlash - dt * 1.6);
+      const f = YOU && YOU.maxHp ? clamp(YOU.hp / YOU.maxHp, 0, 1) : 1;
+      let low = 0;
+      if (!YOU.dead && f < 0.5) {
+        const k = (0.5 - f) / 0.5;
+        const t = performance.now() / 1000;
+        low = (0.25 + 0.55 * k) * (0.7 + 0.3 * Math.sin(t * (3 + 4 * k)));
+      }
+      h.style.opacity = Math.max(hurtFlash, low).toFixed(2);
+    }
     if (noteT > 0 && (noteT -= dt) <= 0) {
       const n = document.getElementById("wbNote"); if (n) n.classList.remove("on");
     }
-    uiT -= dt;
-    if (uiT > 0) return;
-    uiT = 0.2;
-    const M = SIDES.mine, Tm = SIDES.them;
-    setText("wbMine", M.alive + (YOU.dead ? "" : "+1"));
-    setText("wbThem", Tm.alive);
-    setW("wbMineMo", M.morale);
-    setW("wbThemMo", Tm.morale);
-    /* THE CLOCK COUNTS DOWN WHEN IT MATTERS. A ceiling nobody can see is a
-       battle that ends for no reason the player can name; inside the last
-       forty seconds it stops being a stopwatch and starts being a deadline. */
-    const leftT = BATTLE_MAX() - simT;
-    const cel = document.getElementById("wbClock");
-    if (cel) {
-      if (leftT < 40) {
-        cel.textContent = "-0:" + String(Math.max(0, Math.floor(leftT))).padStart(2, "0");
-        cel.style.color = leftT < 15 ? "#ff8a3d" : "";
-      } else {
-        cel.textContent = Math.floor(simT / 60) + ":" + String(Math.floor(simT % 60)).padStart(2, "0");
-        cel.style.color = "";
-      }
-    }
-    setW2("wbHp", clamp(YOU.hp / YOU.maxHp, 0, 1));
-    /* THE ROUNDS ARE NOT PRINTED HERE ANY MORE. fpsmode's own #ammo readout —
-       the big tabular "30 / 30  RES 120" with the weapon's name over it that
-       the jail and gun game use — is already on screen, and the first capture
-       after the mount had BOTH: the same magazine written twice, eight inches
-       apart, in two different fonts. This panel keeps the two things that are
-       the WARLORD's rather than the gun's: how hurt he is, and his tally. */
-    const gp = GP();
-    setText("wbAmmo", gp && gp.on() ? gp.tally() : "");
-    setText("wbName", W.state.you.name + (YOU.dead ? " — DOWN" : ""));
-  }
-  function setText(id, t) { const e = document.getElementById(id); if (e && e.textContent !== String(t)) e.textContent = t; }
-  function setW(id, f) { const e = document.getElementById(id); if (e) e.style.width = Math.round(clamp(f, 0, 1) * 100) + "%"; }
-  function setW2(id, f) {
-    const e = document.getElementById(id);
-    if (!e) return;
-    e.style.width = Math.round(clamp(f, 0, 1) * 100) + "%";
-    e.style.background = f > 0.55 ? "#5aa86a" : f > 0.28 ? "#e2c14a" : "#c4453a";
   }
 
   /* ============================================================ START */
@@ -3757,13 +3686,8 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     if (gp) safe(function () { gp.mount(gunplayApi()); });
     setCam(ctx.coarse ? "third" : "fps");
     paintOrders();
-    const capNote = (capped.mine + capped.them) > 0
-      ? (capped.mine + capped.them) + " MEN HELD WITH THE BAGGAGE — FIELD CAP " + cap + " A SIDE (?men=N)"
-      : "";
-    setText("wbCap", capNote);
-    note(opts.duel
-      ? "YOU  V  " + ((band.men[0] && band.men[0].name) || "HIM").toUpperCase() + "  ·  ONE ON ONE"
-      : W.armySize() + " V " + band.men.length + "  ·  " + (band.name || "").toUpperCase());
+    // no opening banner: the enemy line in front of you is the announcement
+    wake(4);
 
     started = true;
     frameFn = micro.onFrame(frame);
@@ -4338,8 +4262,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     over = true;
     report.outcome = outcome;
     report.duration = simT;
+    // said once, in the middle of the field, for the beat before the next
+    // screen. (It was also a toast: the same words twice.)
     note(why || "");
-    W.toast(why || "", outcome === "won" ? "good" : "bad");
 
     const r = buildReport(men, report, outcome, simT);
     if (outcome === "lost") W.state.you.hp = Math.max(1, Math.round(W.state.you.maxHp * 0.25));
