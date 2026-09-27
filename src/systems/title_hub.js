@@ -13,7 +13,8 @@
       running game to any other game was reloading the page. PLAY from the
       menu is a normal start (startRunPresented resets the run), exactly
       what the disaster result cards' Main Menu has always done.
-   3. HERO SWAP. Picking a tile fades the new game's key art in instead of
+   3. ENTER PLAYS on the menu when nothing is focused.
+   4. HERO SWAP. Picking a tile fades the new game's key art in instead of
       cutting to it (css/title_hub.css .hub-swap).
 
    Every hook is by id; nothing here moves DOM that other code addresses.
@@ -63,6 +64,16 @@
     }, true);
   }
   markLast();
+
+  // ENTER PLAYS. On the menu with nothing focused (a focused button already
+  // activates itself on Enter), Enter is PLAY: remembered game, one key.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.repeat || g.state !== "title") return;
+    if (!title || title.classList.contains("hidden")) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && /^(BUTTON|INPUT|TEXTAREA|SELECT|SUMMARY|A)$/.test(a.tagName)) return;
+    if (play) { e.preventDefault(); play.click(); }
+  });
 
   function toMenu(e) {
     if (e && e.preventDefault) e.preventDefault();

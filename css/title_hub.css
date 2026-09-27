@@ -345,6 +345,20 @@ body.mode-city #title .new-life-btn{
   #title .mode-btn span{font-size:15px;}
   #title .controls .keys{grid-template-columns:1fr;}
 }
+/* a 667pt phone carries the twelve stories six rows deep; tighten the rhythm
+   (not the 40px+ targets) so PLAY lands above the fold */
+@media (orientation:portrait) and (max-height:740px) and (max-width:759px){
+  #title .hub-kicker{margin-bottom:6px;}
+  #title .logo{font-size:clamp(36px,10.5vw,52px);}
+  #title .sub{font-size:14px; margin-top:6px;}
+  #title .origin-label, #title .gg-map-label{margin:12px 0 7px;}
+  #title .origin-select{gap:6px;}
+  #title .origin-btn{min-height:40px; padding:6px 12px;}
+  #title .controls{margin-top:6px;}
+  #title .title-actions{gap:8px;}
+  #title .quality-btn small{display:none;}
+  #title .quality-btn{min-height:40px;}
+}
 @media (max-width:420px){
   #title .origin-select{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
