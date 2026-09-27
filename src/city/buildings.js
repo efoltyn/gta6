@@ -2087,6 +2087,9 @@
        bounded whatever the ordnance was. Glass dices finer than concrete
        because glass breaks smaller. */
     rec.debrisKey = "hole" + (++holeDebrisSeq);
+    let shedBld = null;
+    for (let a = parent; a && !shedBld; a = a.parent) shedBld = (a.userData && a.userData.bld) || null;
+    const shedFacade = shedBld ? shedBld.facade : null;
     if (CBZ.debris && rec.shed.length) {
       let vol = 0;
       for (const b of rec.shed) vol += (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
@@ -2099,7 +2102,9 @@
         const budget = Math.max(2, Math.round(TOTAL * share));
         CBZ.debris.shatterBox(b, b.mat, {
           at: { x, y, z }, dir: outN, power: P,
-          kind: b.glass ? "glass" : undefined,
+          // what the wall is MADE of: a brick building sheds brick; civic /
+          // fortified shells are stone and concrete; glass is glass
+          kind: b.glass ? "glass" : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
           // the rim of surviving wall stays welded: a broken edge, not a saw cut
           keepEdge: b.glass ? 0 : 0.35,
           maxPieces: b.glass ? Math.min(budget, 14) : budget,
