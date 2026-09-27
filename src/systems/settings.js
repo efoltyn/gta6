@@ -99,7 +99,13 @@
   function applyStartupPrefs() {
     let savedPreset = false;
     try { savedPreset = !!localStorage.getItem("cbz_qualityPreset"); } catch (e) {}
-    if (savedPreset) {
+    // core/quality.js booted a phone/tablet/weak GPU on its own auto tier
+    // because nothing saved was picked on THIS device class; a Settings record
+    // from before device tiering must not re-pin it.
+    if (CBZ.qualityDeviceAuto) {
+      prefs.auto = true;
+      savePrefs(prefs);
+    } else if (savedPreset) {
       prefs.auto = false;
       prefs.qLevel = CBZ.getQualityLevel ? CBZ.getQualityLevel() : prefs.qLevel;
       savePrefs(prefs);
