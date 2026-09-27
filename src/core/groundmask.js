@@ -109,13 +109,20 @@
     "  vCbzGW = ( modelMatrix * vec4( position, 1.0 ) ).xyz;\n" +
     "#endif\n";
   const GLSL_PARS_F = "uniform vec4 uCbzHoles[" + SLOTS + "];\nvarying vec3 vCbzGW;\n";
+  /* length(a - b), NEVER distance(a, b) (2026-09-27). This is spliced into
+     fog_fragment, i.e. into EVERY material's fragment shader, including the
+     vendor mirror sea (world/waterfx.js) whose main() declares
+     `float distance = length(worldToEye);`. ESSL 1.00 then refuses the call
+     ("'distance' : function name expected") and three draws the mirror with
+     a dead program: at quality tier >= 2 the city ocean rendered NOTHING.
+     water_spec.js's INLAND_FN note records the same trap. */
   const GLSL_FRAG =
     "\n#ifndef CBZ_NOMASK\n" +
     "  for ( int cbzI = 0; cbzI < " + SLOTS + "; cbzI++ ) {\n" +
     "    vec4 cbzH = uCbzHoles[ cbzI ];\n" +
     "    if ( cbzH.z <= 0.0 ) break;\n" +
     "    if ( vCbzGW.y < cbzH.w + " + BAND_UP.toFixed(2) + " && vCbzGW.y > cbzH.w - " + BAND_DOWN.toFixed(2) + " &&\n" +
-    "         distance( vCbzGW.xz, cbzH.xy ) < cbzH.z ) discard;\n" +
+    "         length( vCbzGW.xz - cbzH.xy ) < cbzH.z ) discard;\n" +
     "  }\n" +
     "#endif\n";
 
