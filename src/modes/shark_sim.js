@@ -97,9 +97,9 @@
      game needs: learn to eat, get hunted, turn the tables. */
   const LADDER = [
     { id: "bull_shark",        name: "BULL SHARK",       need: 0 },
-    { id: "hammerhead_shark",  name: "GREAT HAMMERHEAD", need: 40 },
-    { id: "great_white_shark", name: "GREAT WHITE",      need: 110 },
-    { id: "megalodon",         name: "MEGALODON",        need: 260 },
+    { id: "hammerhead_shark",  name: "GREAT HAMMERHEAD", need: 30 },
+    { id: "great_white_shark", name: "GREAT WHITE",      need: 85 },
+    { id: "megalodon",         name: "MEGALODON",        need: 200 },
   ];
 
   CBZ.sharkSimLadder = LADDER;   // tools read the rungs from here, never a private copy
@@ -568,7 +568,12 @@
     /* Nose angled IN toward the beach (the tangent turned ~32 degrees
        shoreward), so the first frame of the match has the crowd in it: the
        thing the game is about is in front of you before you touch a key. */
-    a.heading = ang + Math.PI / 2 - 0.55; a.faceH = a.heading;
+    const tx = A.center.x + Math.cos(ang + 0.30) * (sim.waterline - 4);
+    const tz = A.center.z + Math.sin(ang + 0.30) * (sim.waterline - 4);
+    a.heading = Math.atan2(tz - z, tx - x); a.faceH = a.heading;
+    // the chase lens looks the same way (W swims where the lens looks):
+    // physics.js's basis, forward = (-sin yaw, -cos yaw)
+    sim.spawnYaw = Math.atan2(-(tx - x), -(tz - z));
     if (a._waterMove) { a._waterMove.x = x; a._waterMove.z = z; a._waterMove.heading = a.heading; a._waterMove.blocked = false; }
   }
   function mountShark() {
@@ -1203,7 +1208,7 @@
      island's survivor count used to sit (a count of FOOD, printed as if it
      were rivals) — score, and the frenzy multiplier while it is live. No
      sentences over the water; the owner's rule stands. */
-  const HUNGER = [1 / 95, 1 / 88, 1 / 80, 1 / 70];   // fraction of max HP burned per second, per form
+  const HUNGER = [1 / 120, 1 / 100, 1 / 90, 1 / 80];   // fraction of max HP burned per second, per form
   const HUNGER_GRACE = 20;                            // seconds of free swimming at the start of a match
   const COMBO_WINDOW = 3.5, COMBO_MAX = 8;
   const POD_GRACE = 45;                               // the pod ignores you while you learn to eat
@@ -1311,7 +1316,7 @@
     const k = burning ? Math.max(0, Math.min(1, (0.34 - f) / 0.34)) : 0;
     if (k <= 0) { if (starveEl.style.opacity !== "0") starveEl.style.opacity = "0"; return; }
     const beat = 0.5 + 0.5 * Math.sin(sim.clock * (4 + k * 6));
-    starveEl.style.opacity = (0.25 + 0.55 * k * (0.55 + 0.45 * beat)).toFixed(3);
+    starveEl.style.opacity = (0.12 + 0.43 * k * (0.55 + 0.45 * beat)).toFixed(3);
   }
   function hideScore() {
     if (scoreEl) scoreEl.style.display = "none";
@@ -1693,7 +1698,7 @@
     // keeps its own heading copy and the chase camera keeps the castaway's
     // yaw, so without this the match opened side-on to its own shark.
     if (CBZ.cityMountedHeading) { try { CBZ.cityMountedHeading(S.heading); } catch (e) {} }
-    if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(-Math.cos(S.heading), -Math.sin(S.heading)); CBZ.cam.pitch = 0.06; }
+    if (CBZ.cam && sim.spawnYaw != null) { CBZ.cam.yaw = sim.spawnYaw; CBZ.cam.pitch = 0.06; }
     hideRider();          // the frame you BECOME the shark, not the one after:
                           // step() used to own this and the oracle caught the
                           // one-frame window where a man sits on the shark
@@ -1758,6 +1763,9 @@
     }
     if (S.dead) { onSharkDead(); return; }
     if (sim.hintT > 0) sim.hintT -= dt;
+    // the island's own spawn writes the castaway's yaw back for a few frames
+    // after setup; hold the opening lens on the beach until it settles
+    if (sim.clock < 0.5 && sim.spawnYaw != null && CBZ.cam && !(CBZ.keys && (CBZ.keys.w || CBZ.keys.a || CBZ.keys.s || CBZ.keys.d))) CBZ.cam.yaw = sim.spawnYaw;
     sim.clock += dt;
     // the pod may only hunt you once you have had the grace period to learn to eat
     S.huntable = sim.clock >= POD_GRACE;

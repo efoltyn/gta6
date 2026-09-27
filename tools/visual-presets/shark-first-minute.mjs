@@ -24,8 +24,10 @@ const subjects = [
     focus: "Parked in the wade band facing the sand: the surf, the crowd, the island behind them." },
   { id: "body", label: "The body you wear",
     focus: "Tripod a body-length off the flank, underwater: skin, countershading, fins, the medium around it." },
-  { id: "above", label: "From above the swell",
-    focus: "Tripod 5 m over the sea behind the shark looking out along the coast: the surface itself." },
+  /* HARNESS TRAP: an "above the swell" tripod subject was cut. A tripod 2.4 m
+     over the live surface still rendered the underwater grade (the tint is
+     driven from something other than CBZ.camera at order 99.5), so it
+     photographed the sea from below. The spawn frame covers the surface. */
   { id: "hunt", label: "Ninety seconds of play, by an autopilot",
     focus: "A dumb bot plays the real game: steer at the nearest thing in the water, sprint when close, the bite is automatic. The numbers are the core loop: how soon the first meal, how many, how much health is left, whether hunger or the pod mattered. The frame is the last one." },
 ];
@@ -184,6 +186,11 @@ async function stageFirstMinute(input) {
   else if (sub.id === "hunt") {
     // THE AUTOPILOT. Real keys, real bite: it only chooses a bearing.
     const P = C.player, S0 = D.shark();
+    D.shot = null;
+    // every run starts from the same water: 30 m off the sand, nosing along the coast
+    { const ang = 0.9, r = WL + 30;
+      D.park(A.center.x + Math.cos(ang) * r, A.center.z + Math.sin(ang) * r, ang + Math.PI / 2); }
+    const x0 = P.pos.x, z0 = P.pos.z; let travel = 0, px = x0, pz = z0;
     const edible = new Set(["fish", "sardine", "barracuda", "dolphin", "sea_turtle"]);
     const depth = (x, z) => (C.cityWaterDepthAt ? Math.max(0, C.cityWaterDepthAt(x, z)) : 1);
     const t0 = (C.sharkSim && C.sharkSim.eaten) || 0;
@@ -212,6 +219,7 @@ async function stageFirstMinute(input) {
       }
       D.step(1);
       frames++;
+      travel += Math.hypot(P.pos.x - px, P.pos.z - pz); px = P.pos.x; pz = P.pos.z;
       const eaten = (C.sharkSim.eaten || 0) - t0;
       if (first < 0 && eaten > 0) first = +(frames * RUN).toFixed(1);
       if (S.maxHp) hpMin = Math.min(hpMin, S.hp / S.maxHp);
@@ -228,6 +236,7 @@ async function stageFirstMinute(input) {
       score: Math.round(sim.score || 0),
       alive: S && !S.dead && !sim.ended ? 1 : 0,
       simSeconds: +(frames * RUN).toFixed(1),
+      travelM: Math.round(travel),
     };
   }
   if (C.cityCameraSubmerged) { try { out.submerged = !!C.cityCameraSubmerged(); } catch (e) {} }

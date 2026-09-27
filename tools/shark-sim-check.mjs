@@ -413,9 +413,9 @@ try {
     // ================= STAGE 4: THE LADDER ================================
     say("— stage 4: the evolution ladder —");
     const LADDER = [
-      { tier: 1, id: "hammerhead_shark", massTo: 39 },
-      { tier: 2, id: "great_white_shark", massTo: 109 },
-      { tier: 3, id: "megalodon", massTo: 259 },
+      { tier: 1, id: "hammerhead_shark", massTo: 29 },
+      { tier: 2, id: "great_white_shark", massTo: 84 },
+      { tier: 3, id: "megalodon", massTo: 199 },
     ];
     for (const rung of LADDER) {
       /* staged in ROUNDS: by the later rungs the island's first disaster is
