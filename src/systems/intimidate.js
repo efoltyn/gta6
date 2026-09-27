@@ -514,7 +514,8 @@
       let r = null;
       try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
       if (!r || (!r.units && (!r.items || !r.items.length))) {
-        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left.", 1.6);
+        // he says it himself, over his head, not a narrator in the band
+        if (CBZ.speech) CBZ.speech.say(target, "That's all I got! I swear!", { secs: 2, force: true });
       }
     } else if (!target.looted) {
       if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }

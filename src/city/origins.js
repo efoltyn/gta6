@@ -821,7 +821,6 @@
     }
     if (CBZ.city) {
       CBZ.city.big("−" + fmt$(lost));
-      CBZ.city.note("Phone buzzes. Brokerage. " + fmt$(lost) + " · gone. You just became the poorest man in a suit.", 3.2, { urgent: true });
     }
     if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
   }
@@ -861,9 +860,7 @@
       else g.citySpawnPoint = { x: lot.cx, z: lot.cz };
     } catch (e) {}
 
-    if (CBZ.city) CBZ.city.note(eo
-      ? "Marcus Sterling. Sterling Capital, floor 50 of the Spire, the tallest tower in the city. On paper, a god."
-      : "Marcus Sterling. Top floor. Suit, gold watch, shades. On paper, a god.", 3.2);
+    // (no narrator card: the suite, the suit and the laptop say who he is)
 
     const T = ORIGIN_TUNING.exec;
     paintLaptop(g.cash != null ? g.cash : T.startCash, execBrokerage() || T.startBank, false);
@@ -914,10 +911,6 @@
         s.phase = "descend"; s.t = 0;
         s.wall0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
         if (CBZ.city) {
-          const hasLift = !!(s.lot && s.lot.building && s.lot.building.execOffice && s.lot.building.execOffice.lift);
-          CBZ.city.note(hasLift
-            ? "Take the express lift by the core, or find your own way down. Get to level 1. The street doesn't care who you were."
-            : "Take the elevator or stairs. Get to level 1. The street doesn't care who you were.", 4.0, { urgent: true });
           if (CBZ.city.big) CBZ.city.big("↓ GROUND FLOOR");
         }
         // The door waypoint, the objective line and the payout for reaching
@@ -928,10 +921,6 @@
     }
 
     if (s.phase === "descend") {
-      if (!s.hinted && s.t >= T.descendHintSec) {
-        s.hinted = true;
-        if (CBZ.city) CBZ.city.note("Every stranger gives you one YES / NO choice. Jail if the cops catch you.", 3.6);
-      }
       // Free movement — player can already use elevators/stairs. End the
       // scripted beat once they're near ground floor of this tower OR far
       // enough from the top plate that they clearly left the penthouse.
@@ -942,7 +931,6 @@
         s.phase = "street"; s.t = 0;
         if (CBZ.city) {
           CBZ.city.big("LEVEL 1");
-          CBZ.city.note("Broke. Suited. Dangerous only on paper. Make money or get cuffed, jail is still the game.", 4.2);
         }
         // (A 35% coin-flip 1-star "margin inquiry" used to fire here: the
         // reward for finishing the opening objective was a random police
@@ -962,7 +950,6 @@
     stripLoadout();                                // he drank the gun money
     game.cash = T.startCash; game.cityDebt = T.startDebt;   // cityOriginApply commits right after
     if (CBZ.cityDrink) { try { CBZ.cityDrink(T.drunkLevel); } catch (e) {} }
-    if (CBZ.city) CBZ.city.note("Last call came early tonight.", 2.6);
   }
   // SCENE (may fail — no bar lot AND no arena spawn to fall back to, which
   // only happens if the arena itself never built): the door + bouncer toss.
@@ -1116,7 +1103,6 @@
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.34; }
 
     if (A && A.root) buildAirMattress(A.root, mx, floorY, mz, facing + Math.PI);
-    if (CBZ.city) CBZ.city.note("One room, one mattress, one way out.", 2.8);
 
     scene = null;   // static dressing only — no ongoing scripted beat
     return { compact: true };
