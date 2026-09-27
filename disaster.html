@@ -450,7 +450,7 @@ document.body.appendChild(b);}}catch(e){}})();
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=sharkmode1"></script>
+<script src="src/config.js?v=inworld1"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -1369,8 +1369,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
-<script src="src/city/dossier.js?v=bureau1"></script>
-<script src="src/city/agency.js?v=bureau1"></script>
+<!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
+     hold it, the motel room that is his menu, the consequences of a kill. -->
+<script src="src/city/hitman_paper.js?v=inworld1"></script>
+<script src="src/city/hitman_hands.js?v=inworld1"></script>
+<script src="src/city/hitman_room.js?v=inworld1"></script>
+<script src="src/city/dossier.js?v=inworld1"></script>
+<script src="src/city/hitman_fallout.js?v=inworld1"></script>
+<script src="src/city/agency.js?v=inworld1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
