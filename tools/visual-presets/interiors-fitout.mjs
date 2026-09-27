@@ -150,9 +150,11 @@ export default {
     } else if (SUBJ === "gang-room") {
       // the duffel both builds draw, seen from 2.4 m toward the door side
       const dz = b.d / 2 - 2.6;
-      eye = { x: 1.2, z: dz - 2.6 };
-      look = { x: 0, z: dz + 0.3 };
-      lookY = baseY + 0.6;
+      // inside the back room: the count room's partition sits ~2.2 m in front
+      // of the bag, so the eye stands 1.7 m off it, to one side, looking down
+      eye = { x: 1.9, z: dz - 1.7 };
+      look = { x: -0.4, z: dz + 0.6 };
+      lookY = baseY + 0.5;
     } else {
       const din = b.localDoor || { x: xLo, z: zLo };
       eye.x = Math.abs(din.x - xLo) <= Math.abs(din.x - xHi) ? xLo + 1.3 : xHi - 1.3;

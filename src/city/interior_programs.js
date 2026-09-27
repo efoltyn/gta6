@@ -2212,6 +2212,7 @@
         lootNote("$" + add + " off the count table, rubber bands and all.", 2.4);
         return true;
       }
+      if (st && st.looted && rec.kind === "countroom") { lootNote(K.empty, 1.8); return true; }
     }
     if (rec.kind === "safe") {
       if (rec.klass === "item") {
