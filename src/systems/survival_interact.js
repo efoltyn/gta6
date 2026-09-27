@@ -32,13 +32,13 @@
 
   // verb sets — labels + the grapple call each one fires
   const HOLD_VERBS = [
-    { label: "Throw", sub: "fling", fn: () => CBZ.grapple && CBZ.grapple.release(true) },
-    { label: "Set down", sub: "safe", fn: () => CBZ.grapple && CBZ.grapple.release(false) },
+    { label: "Throw", fn: () => CBZ.grapple && CBZ.grapple.release(true) },
+    { label: "Set down", fn: () => CBZ.grapple && CBZ.grapple.release(false) },
   ];
   const FREE_VERBS = [
-    { label: "Grab", sub: "hold", fn: () => CBZ.grapple && CBZ.grapple.grab() },
-    { label: "Punch", sub: "hit", fn: () => CBZ.grapple && CBZ.grapple.punch() },
-    { label: "Shove", sub: "push", fn: () => CBZ.grapple && CBZ.grapple.push() },
+    { label: "Grab", fn: () => CBZ.grapple && CBZ.grapple.grab() },
+    { label: "Punch", fn: () => CBZ.grapple && CBZ.grapple.punch() },
+    { label: "Shove", fn: () => CBZ.grapple && CBZ.grapple.push() },
   ];
   // THE WATER'S ONE VERB (owner: "I want climb out placed like" these).
   // city/swim.js used to render the haul-out as a .tpill in the centre-screen
@@ -49,7 +49,7 @@
   // The label is swim.js's own (a moored hull says "Climb aboard", because that
   // press ends with you at its helm), so this file never re-decides it.
   const SWIM_VERBS = [
-    { label: "Climb out", sub: "haul up", fn: () => CBZ.citySwimClimbOut && CBZ.citySwimClimbOut() },
+    { label: "Climb out", fn: () => CBZ.citySwimClimbOut && CBZ.citySwimClimbOut() },
   ];
   function swimOffer() {
     const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
@@ -131,20 +131,16 @@
     return best ? { held: false, bot: best } : null;
   }
 
+  // The desktop card is the verbs and their keys, nothing else: the old
+  // "SURVIVOR / in reach" header and the one-word subtitles under each verb
+  // ("fling", "hold", "hit") labelled what the verb already says.
   function render(held) {
     verbs = held ? HOLD_VERBS : FREE_VERBS;
-    el.name.textContent = held ? "CARRYING" : "SURVIVOR";
-    // PRISON_TOUCH_PROMPTS: "LMB" and "E" are unactionable on a touchscreen.
-    // No pill is needed — renderDock() below already puts BOTH verbs on screen
-    // as tappable .svbtn buttons, so touch just gets told what it can see.
-    const ptp = !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
-    const touch = !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch")));
-    el.note.textContent = held
-      ? (ptp && touch ? "throw or set down" : "LMB throws · E sets down")
-      : "in reach";
+    if (el.name.textContent) el.name.textContent = "";
+    if (el.note.textContent) el.note.textContent = "";
     el.opts.innerHTML = verbs.map((v, i) =>
       `<div class="iopt" data-i="${i}"><span class="ikey">${OPT_KEYS[i].toUpperCase()}</span>` +
-      `<span class="ilab">${v.label}</span><span class="isub">${v.sub}</span></div>`).join("");
+      `<span class="ilab">${v.label}</span></div>`).join("");
   }
 
   function doAction(i) {

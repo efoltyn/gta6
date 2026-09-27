@@ -1736,32 +1736,19 @@
     const old = h.querySelectorAll(".wl-tchip");
     for (let i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
     if (!REG.length) return;
-    const s = T.share("you");
-    const c1 = document.createElement("span");
-    c1.className = "chip act wl-tchip";
-    c1.textContent = s.held + " OF " + s.of + " · YOURS AT " + s.need;
-    if (s.won) c1.style.color = "#8fe0a2";
-    c1.onclick = function () { if (W.phase() === "campaign") T.toggle(); };
-    h.appendChild(c1);
-
+    /* HUD PURGE: the "7 OF 40, YOURS AT 32" fraction and the always-on
+       province chip are gone (the MAP screen's share bar is the scoreboard,
+       and the ground rail is one tap away there). What stays is the one
+       moment the ground matters on the island: while you are TAKING it. No
+       minutes countdown, just the name, in the claim colour. */
+    const st = T.standing();
+    if (!st) return;
     const r = T.at(S().you.x, S().you.z);
     if (!r) return;
-    const o = T.owner(r.id);
-    const st = T.standing();
     const c2 = document.createElement("span");
     c2.className = "chip act wl-tchip";
-    if (st) {
-      c2.textContent = r.name + " · " + Math.max(1, Math.ceil(st.left * 60)) + " MIN";
-      c2.style.color = "#ff8a3d";
-    } else if (o === "you") {
-      const n = garrisonMen(r.id);
-      c2.textContent = r.name + (n ? " · " + n + " LEVY" : "");
-    } else if (o) {
-      c2.textContent = r.name + " · " + ownerLabel(o);
-      c2.style.color = hex(ownerColour(o));
-    } else {
-      c2.textContent = r.name + " · UNCLAIMED";
-    }
+    c2.textContent = "TAKING " + r.name;
+    c2.style.color = "#ff8a3d";
     c2.onclick = function () { groundRail(); };
     h.appendChild(c2);
   }
@@ -2450,23 +2437,19 @@
       'font:700 11px/1.4 ui-sans-serif,system-ui,sans-serif;letter-spacing:.09em;opacity:.74}' +
     '#wlTerrCard .facts b{color:#ffd166}' +
     '#wlTerrCard .wl-btns{margin-top:9px}' +
-    '#wlTerrHint{font:700 11px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;opacity:.55;text-align:center}';
+    '#wlTerrCard .in:empty{display:none}';
 
   function screenHtml() {
     return '<style>' + CSS + '</style>' +
       '<div id="wlTerr">' +
         '<canvas id="wlTerrCv"></canvas>' +
         '<div id="wlTerrTop">' +
-          '<b>THE <em style="font-style:normal;color:#ff8a3d">ISLAND</em></b>' +
-          '<span class="chip" id="wlTerrHold"></span>' +
           '<span class="sp"></span>' +
           '<button class="wl-btn" id="wlTerrFit">FIT</button>' +
           '<button class="wl-btn hot" id="wlTerrClose">CLOSE</button>' +
         '</div>' +
         '<div id="wlTerrShare"></div>' +
-        '<div id="wlTerrCard"><div class="in" id="wlTerrCardIn">' +
-          '<div id="wlTerrHint">TAP A HOLDING</div>' +
-        '</div></div>' +
+        '<div id="wlTerrCard"><div class="in" id="wlTerrCardIn"></div></div>' +
       '</div>';
   }
 
@@ -2485,16 +2468,6 @@
     const free = T.held(null).length;
     if (free) html += '<i style="width:' + (free / total * 100).toFixed(2) + '%;background:rgba(120,108,90,.42)"></i>';
     box.innerHTML = html;
-    const hold = document.getElementById("wlTerrHold");
-    if (hold) {
-      /* THE WIN CONDITION IS ON THE STRIP, not in a rulebook. It used to read
-         "7/40 · +$412/DAY" — a fraction with no denominator that means
-         anything, next to a number you already see in the top strip. What a
-         player standing at 7 needs to know is how far 32 is. */
-      const s = T.share("you");
-      hold.textContent = s.held + " OF " + s.of + " · YOURS AT " + s.need;
-      hold.style.color = s.won ? "#8fe0a2" : "";
-    }
   }
 
   /* THE CARD. Everything you can do on this screen is on it, and there are at
@@ -2514,11 +2487,8 @@
          So the empty state states the board instead: how many holdings there
          are, how many nobody holds, and how many men are standing on them.
          Every one of those is a reason to tap something. */
-      const t0 = tState();
-      let free = 0;
-      for (let i = 0; i < REG.length; i++) if (!t0.own[REG[i].id]) free++;
-      box.innerHTML = '<div id="wlTerrHint">' + REG.length + ' HOLDINGS · ' + free +
-        ' UNCLAIMED · ' + T.held("you").length + ' YOURS</div>';
+      /* HUD PURGE: nothing selected, nothing printed. The map is the board. */
+      box.innerHTML = "";
       return;
     }
     const r = selected;
@@ -2533,8 +2503,8 @@
       const odds = W.odds(p.force, defenceOf(r));
       if (o === "you") {
         risk = odds > 0.5
-          ? '<div class="who" style="color:#ffc9c4">' + ownerLabel(p.owner) + ' CAN TAKE THIS — GARRISON IT</div>'
-          : '<div class="who" style="color:rgba(244,236,216,.45)">' + ownerLabel(p.owner) + ' PRESSES THE BORDER · YOU HOLD</div>';
+          ? '<div class="who" style="color:#ffc9c4">' + ownerLabel(p.owner) + ' CAN TAKE THIS</div>'
+          : '';
       } else if (odds > 0.5) {
         risk = '<div class="who" style="color:rgba(244,236,216,.45)">' + ownerLabel(p.owner) + ' IS TAKING THIS</div>';
       }
@@ -2578,10 +2548,7 @@
       } else {
         dipBtns = '<button class="wl-btn" id="wlTerrOffer">OFFER ALLIANCE</button>';
       }
-      const hn = T.held(o).length;
-      dip += '<div class="facts" style="margin-bottom:0"><span>' + hn +
-        (hn === 1 ? ' HOLDING' : ' HOLDINGS') + '</span><span>' + cols +
-        (cols === 1 ? ' COLUMN' : ' COLUMNS') + '</span></div>';
+
     }
 
     let btns = '<div class="wl-btns">';
@@ -2597,14 +2564,14 @@
         btns += '<button class="wl-btn" id="wlTerrGarM"' + (gsz ? "" : " disabled") + '>&minus;10 MEN</button>';
         btns += '<button class="wl-btn" id="wlTerrGarP"' + (st.army.length ? "" : " disabled") + '>+10 MEN</button>';
       } else {
-        btns += '<span class="wl-small wl-dim" style="align-self:center">RIDE THERE TO GARRISON IT</span>';
+        /* nothing: RIDE HERE is the way to the garrison verbs */
       }
     } else if (o && inIt && stormable(r)) {
       /* STORM IS ONLY OFFERED WHERE YOU ARE STANDING. A button that starts a
          battle fourteen kilometres away is a teleport, and the one thing this
          map is not allowed to become is a place you play the game from. */
       const so = W.odds(W.yourPower(), defenceOf(r));
-      btns += '<button class="wl-btn ' + (so > 0.55 ? 'hot' : 'bad') + '" id="wlTerrStorm">STORM &middot; ' +
+      btns += '<button class="wl-btn ' + (so > 0.55 ? 'hot' : 'bad') + '" id="wlTerrStorm">STORM ' +
         Math.round(so * 100) + '%</button>';
     }
     btns += '</div>';
@@ -2615,16 +2582,12 @@
       risk +
       '<div class="facts">' +
         '<span>+<b>$' + T.regionIncome(r) + '</b>/DAY</span>' +
-        '<span>' + r.areaKm2.toFixed(0) + ' KM&sup2;</span>' +
-        (r.wells ? '<span>' + r.wells + ' WELL' + (r.wells > 1 ? "S" : "") + '</span>' : '') +
-        '<span>GARRISON ' + gsz + '</span>' +
-        '<span>' + (here < 900 ? "YOU ARE HERE" : (here / 1000).toFixed(1) + " KM AWAY") + '</span>' +
+        (gsz ? '<span>' + gsz + ' HOLD IT</span>' : '') +
       '</div>' + btns;
 
     const ride = document.getElementById("wlTerrRide");
     if (ride) ride.onclick = function () {
       if (W.campaign && W.campaign.dest) W.campaign.dest(r.x, r.z);
-      W.toast("RIDING FOR " + r.name);
       close();
     };
     const lv = document.getElementById("wlTerrLevy");

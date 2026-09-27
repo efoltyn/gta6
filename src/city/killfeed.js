@@ -350,7 +350,11 @@
     const a = CBZ.cityRecentDeaths, now = (CBZ.now || 0);
     // newest first, only the fresh ones, capped
     const show = [];
+    // CITY (HUD purge 2026-09-27): only deaths YOU are part of. A stranger
+    // dying three blocks away is the news app's business, not the screen's.
+    const mine = g.mode === "city";
     for (let i = a.length - 1; i >= 0 && show.length < MAX_LINES; i--) {
+      if (mine && !(a[i].you || a[i].by === "You")) continue;
       if (now - (a[i].t || 0) <= SHOW_MS) show.push(a[i]);
     }
     const fp = show.map(function (e) { return (e.by || "") + ">" + e.name + ":" + e.cause + "@" + e.t; }).join("|");

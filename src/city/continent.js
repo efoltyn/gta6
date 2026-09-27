@@ -1423,13 +1423,23 @@
       geo.setIndex(kept);
     }
     if (COAST || CFG.CONTINENT_RELIEF_V1 !== false) geo.computeVertexNormals(); // coast + country slopes want real shading
-    let plateMat = new THREE.MeshLambertMaterial({
+    // THE GROUND SKIN (world/textures_surface.js, shared with the disaster
+    // island): the land cover above stays the macro albedo; per pixel the
+    // shader lays grass / soil / sand / stone detail over it by what the
+    // ground is and how steep it is. Was a bare vertex-colour Lambert: a
+    // green blanket with Gouraud blotches from the road.
+    const plateParams = {
       vertexColors: true,
       // Positive polygon offset pushes this UNDERLAY away in depth space. It
       // protects the few seam triangles even when 0.06 world units quantise to
       // the same aircraft-distance depth value as a runway or road.
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 8,
-    });
+    };
+    let plateMat = CBZ.groundSkin
+      ? CBZ.groundSkin({ name: "continent-ground", extra: plateParams, far: 520,
+          // the plate's relief is gentle backcountry: rock on real banks only
+          rockSlope: [0.26, 0.48], sandY: [-0.35, -0.1] })
+      : new THREE.MeshLambertMaterial(plateParams);
     // Keep the dry continent's colour identity through aerial haze. Normal fog
     // made every point beyond the short city fog wall equal the sky's cyan and
     // therefore indistinguishable from flat water. This retains atmospheric

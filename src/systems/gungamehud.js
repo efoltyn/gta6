@@ -11,7 +11,10 @@
                    are filled, your rung glows, the last segment is a fist.
                    A small red tick under a segment marks the leading bot's
                    rung, ONLY while a bot is ahead of you. Promote flashes the segment gold;
-                   demote drains it red and shakes the track.
+                   demote drains it red and shakes the track. It is NOT
+                   permanent (HUD purge 2026-09-27): it shows for a few seconds
+                   when your rung changes, while a bot sits on the fists, and
+                   while you are dead, then fades (.gg-quiet).
      .gg-pulse     one full-screen edge pulse: gold (promote), red-gold
                    (you reached the fists), red (demoted).
      .gg-lowhp     blood-red vignette that breathes under 35 HP.
@@ -21,10 +24,13 @@
                    re-aimed every frame as you turn, gone in 0.9 s.
      .gg-kc        kill confirm under the reticle: skull pop + the victim's
                    name, tiny; melee kills are a gold fist (humiliation).
-     .gg-death     while dead: killer name + their gun's picture, countdown ring.
-     #survBars     restyled (css/screens.css, gungame only) into a glass HP
-                   plate: tabular HP number + bar + a hairline stamina bar.
-                   This file adds .gg-hpnum and a .gg-hpghost damage trail.
+     .gg-death     while dead: killer name + their gun's picture, countdown ring
+                   (the ring is the countdown; no digit inside it).
+     #survBars     restyled (css/screens.css, gungame only) into one slim HP
+                   bar with a .gg-hpghost damage trail. It fades in when you
+                   are hit and stays while you are hurt (.gg-show); at full
+                   health there is nothing on screen. No HP digit, no
+                   stamina hairline.
      CBZ.gungameResultCard(win)  standings table on #survwin/#survlose.
 
    Events come from modes/gungame.js via gg.on(type, fn). Every field is
@@ -173,7 +179,6 @@
   ringBg.setAttribute("class", "bg"); ringFg.setAttribute("class", "fg");
   ringFg.setAttribute("stroke-dasharray", RING_C.toFixed(2));
   ringWrap.appendChild(ringSvg);
-  const ringNum = mk("div", "gg-ring-n", ringWrap);
   const deathInfo = mk("div", "gg-death-info", deathEl);
   const deathSkull = svg(SKULL_D, "gg-death-skull", deathInfo);
   void deathSkull;
@@ -182,20 +187,14 @@
   const deathImg = mk("img", "", deathWep); deathImg.alt = "";
   const deathFist = svg(FIST_D, "gg-death-fist", deathWep);
   void deathFist;
-  const deathLbl = mk("span", "gg-death-lbl", deathWep);
 
-  // ---- health plate: restyle the shared #survBars, add a number + ghost trail
+  // ---- health plate: restyle the shared #survBars, add a ghost trail
   const bars = document.getElementById("survBars");
   const hpBar = document.getElementById("hpBar");
-  const stamBar = document.getElementById("stamBar");
-  let hpNum = null, hpGhost = null;
-  if (bars) {
-    hpNum = mk("div", "gg-hpnum");
-    bars.insertBefore(hpNum, bars.firstChild);
-    if (hpBar && hpBar.parentNode) {
-      hpGhost = mk("div", "gg-hpghost");
-      hpBar.parentNode.insertBefore(hpGhost, hpBar);
-    }
+  let hpGhost = null;
+  if (bars && hpBar && hpBar.parentNode) {
+    hpGhost = mk("div", "gg-hpghost");
+    hpBar.parentNode.insertBefore(hpGhost, hpBar);
   }
 
   // ======================================================================
@@ -204,8 +203,9 @@
   const S = {
     gg: null, subscribed: false, match: null,
     rung: -1, rival: -2, threat: null,
-    hp: -1, ghost: 100, ghostHoldT: 0, hpState: "", stam: -1, hpNumStr: "",
-    dead: false, deathBy: "", deathWeapon: null, respawnMax: 3, ringOff: "", ringN: "",
+    hp: -1, ghost: 100, ghostHoldT: 0, hpState: "", hpShowT: 0, hpShown: false,
+    trackT: 0, trackShown: true,
+    dead: false, deathBy: "", deathWeapon: null, respawnMax: 3, ringOff: "",
     low: false, shield: false,
     lastT: 0,
   };
@@ -215,6 +215,7 @@
     S.rung = -1; S.threat = null;
     S.ghost = 100; S.hp = -1;
     S.dead = false; S.deathBy = ""; S.deathWeapon = null;
+    S.trackT = 3.5; S.hpShowT = 0;
     for (const a of arcs) { a.live = false; a.t0 = -1e9; a.el.classList.remove("on"); }
     setCls(deathEl, "on", false);
     setCls(kcEl, "on", false);
@@ -226,20 +227,21 @@
   // ======================================================================
   function onPromote(e) {
     const r = e && typeof e.rung === "number" ? e.rung : (S.gg ? S.gg.playerRung : 0);
-    drawTrack(r);
+    drawTrack(r); S.trackT = 3;
     if (segs[r - 1]) fire(segs[r - 1], "flash", 650);
     if (segs[r]) fire(segs[r], "arrive", 650);
     if (r < N() - 1) fire(pulseEl, "promote", 600);
   }
   function onDemote(e) {
     const r = e && typeof e.rung === "number" ? e.rung : (S.gg ? S.gg.playerRung : 0);
-    drawTrack(r);
+    drawTrack(r); S.trackT = 3;
     if (segs[r + 1]) fire(segs[r + 1], "drain", 750);
     fire(trackEl, "shake", 480);
     fire(pulseEl, "demote", 700);
   }
   function onFinal(e) {
     if (!e) return;
+    S.trackT = 3;
     if (e.you) { fire(pulseEl, "final", 1100); if (segs[N() - 1]) fire(segs[N() - 1], "arrive", 900); }
     else fire(trackEl, "threatpop", 900);
   }
@@ -330,14 +332,8 @@
     setCls(deathWep, "melee", melee);
     setCls(deathWep, "img", !!src);
     if (src && deathImg.getAttribute("src") !== src) deathImg.setAttribute("src", src);
-    // no picture and not fists: the gun's own label is the only fallback
-    let lbl = "";
-    if (r && !melee && !src) {
-      const w = CBZ.weaponById && CBZ.weaponById(r.id);
-      lbl = (w && w.label) || r.name || r.id || "";
-    }
-    if (deathLbl.textContent !== lbl) deathLbl.textContent = lbl;
-    setCls(deathWep, "none", !r);
+    // no picture and not fists: nothing (a typed gun name was the old fallback)
+    setCls(deathWep, "none", !r || (!melee && !src));
   }
 
   function leaderBot(gg) {
@@ -375,7 +371,11 @@
     const lead = leaderBot(gg);
     const rv = lead && lead.rung > r ? lead.rung : -1;
     drawRival(rv);
-    setCls(trackEl, "threat", !!(lead && lead.rung >= N() - 1 && r < N() - 1));
+    const threat = !!(lead && lead.rung >= N() - 1 && r < N() - 1);
+    setCls(trackEl, "threat", threat);
+    if (S.trackT > 0) S.trackT -= step;
+    const showTrack = S.trackT > 0 || threat || !!(CBZ.player && CBZ.player.dead);
+    if (showTrack !== S.trackShown) { S.trackShown = showTrack; setCls(trackEl, "gg-quiet", !showTrack); }
 
     // ---- health plate
     const P = CBZ.player || {};
@@ -384,9 +384,8 @@
       if (hpBar) hpBar.style.width = hp + "%";
       if (hp > S.hp) { S.ghost = hp; if (hpGhost) hpGhost.style.width = hp + "%"; }
       else S.ghostHoldT = 0.45;
+      if (S.hp >= 0 && hp < S.hp) S.hpShowT = 3;
       S.hp = hp;
-      const str = String(hp);
-      if (hpNum && S.hpNumStr !== str) { S.hpNumStr = str; hpNum.textContent = str; }
       const st = hp > 60 ? "" : hp > 30 ? "gg-amber" : "gg-red";
       if (bars && st !== S.hpState) {
         bars.classList.remove("gg-amber", "gg-red");
@@ -402,8 +401,10 @@
         if (hpGhost) hpGhost.style.width = S.ghost.toFixed(1) + "%";
       }
     }
-    const stam = Math.max(0, Math.min(100, Math.round(P.stamina || 0)));
-    if (stamBar && stam !== S.stam) { S.stam = stam; stamBar.style.width = stam + "%"; }
+    // the plate: on for a few seconds after a hit, and while you are hurt
+    if (S.hpShowT > 0) S.hpShowT -= step;
+    const showHp = !P.dead && (S.hpShowT > 0 || hp <= 60);
+    if (showHp !== S.hpShown) { S.hpShown = showHp; setCls(bars, "gg-show", showHp); }
 
     // ---- low-HP breathing vignette
     const dead = !!P.dead;
@@ -427,7 +428,7 @@
     if (showDeath !== S.dead) {
       S.dead = showDeath;
       setCls(deathEl, "on", showDeath);
-      if (showDeath) { paintDeathInfo(); S.ringOff = ""; S.ringN = ""; }
+      if (showDeath) { paintDeathInfo(); S.ringOff = ""; }
     }
     if (showDeath) {
       const t = +gg.respawnT;
@@ -435,8 +436,6 @@
       const max = Math.max(S.respawnMax, +(CBZ.CONFIG && CBZ.CONFIG.GUNGAME_RESPAWN_SEC) || 3, 0.01);
       const off = (RING_C * (1 - Math.min(1, t / max))).toFixed(1);
       if (off !== S.ringOff) { S.ringOff = off; ringFg.setAttribute("stroke-dashoffset", off); }
-      const n = String(Math.max(1, Math.ceil(t)));
-      if (n !== S.ringN) { S.ringN = n; ringNum.textContent = n; }
     }
   });
 

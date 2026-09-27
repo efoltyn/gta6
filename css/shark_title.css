@@ -91,19 +91,7 @@ body.touch #sharkTitle .st-keys .st-touch{display:inline-flex;}
   #sharkTitle .st-mark{font-size:clamp(44px,11vh,120px);}
 }
 
-/* the record under PLAY: the one number the next run is for */
-#sharkTitle .st-best{font-weight:700; font-size:clamp(13px,1.6vw,18px); letter-spacing:.2em; text-indent:.2em; text-transform:uppercase; color:#ffd9a8; text-shadow:0 2px 8px rgba(2,24,40,.9);}
-
-/* ---- in play: the score rail (modes/shark_sim.js) ------------------------
-   The island's survivor count is a count of FOOD here; the score takes its
-   seat in the top-right rail, beside the clock. */
-body.mode-sharksim #survTop{display:none !important;}
-#topright #sharkScore{display:none; align-items:center; gap:8px; font-weight:700; min-width:92px; justify-content:center;}
-body.mode-sharksim.state-playing #topright #sharkScore{display:flex;}
-#sharkScore b{color:#fff; font-size:1.05em; letter-spacing:.02em; font-variant-numeric:tabular-nums;}
-#sharkScore #sharkCombo{color:#ff9a3c; font-weight:800; letter-spacing:.04em;}
-#sharkScore.pop{animation:sharkScorePop .32s ease-out;}
-@keyframes sharkScorePop{0%{transform:scale(1)} 30%{transform:scale(1.22)} 100%{transform:scale(1)}}
+/* ---- in play ---- */
 /* the starving edge: a red pulse that beats harder as the tank empties */
 #sharkStarve{position:fixed; inset:0; pointer-events:none; z-index:44; opacity:0;
   box-shadow:inset 0 0 70px 14px rgba(190,10,20,.8), inset 0 0 160px 20px rgba(120,0,10,.35);}
@@ -147,3 +135,43 @@ html.boot-sharksim #title{background:transparent !important;}
 #sharkIntro .si-keys .si-touch{display:none;}
 body.touch #sharkIntro .si-keys .si-kbd{display:none;}
 body.touch #sharkIntro .si-keys .si-touch{display:inline-flex;}
+
+/* ---- NOTHING OVER THE WATER (owner 2026-09-27: "SHOW DON'T TELL") --------
+   Shark Sim prints nothing while you swim. The island HUD family it borrows
+   (clock, alive counter, health/stamina bars, casualty feed, minimap, hint
+   and toast strips, weapon chrome) is off in this mode: hunger is the red
+   edge (#sharkStarve), growth is the shark's body, score and best are on the
+   death card. The touch glass is the move stick, RISE/DIVE and one pause
+   button. */
+body.mode-sharksim #topright,
+body.mode-sharksim #survBars,
+body.mode-sharksim #objective,
+body.mode-sharksim #cityKillFeed,
+body.mode-sharksim #minimap,
+body.mode-sharksim #simHud,
+body.mode-sharksim #hint,
+body.mode-sharksim #toast,
+body.mode-sharksim #crosshair,
+body.mode-sharksim #ammo,
+body.mode-sharksim #weaponStrip,
+body.mode-sharksim #interact{display:none !important;}
+
+/* the pause button: touch only (a keyboard pauses with Esc or P), top left,
+   clear of the notch. Two bars, no word. */
+#sharkPauseBtn{display:none;}
+body.touch.mode-sharksim.state-playing #sharkPauseBtn{
+  display:flex; align-items:center; justify-content:center; gap:6px;
+  position:fixed; z-index:60; top:max(12px,env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left));
+  width:48px; height:48px; padding:0; border:0; border-radius:50%;
+  background:rgba(4,24,40,.42); -webkit-tap-highlight-color:transparent; touch-action:none; cursor:pointer;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+#sharkPauseBtn i{display:block; width:5px; height:17px; border-radius:2px; background:rgba(255,255,255,.92);}
+#sharkPauseBtn:active{background:rgba(4,24,40,.65);}
+
+/* the pause card: Resume, Restart, Main Menu. The Settings panel (crowd
+   density, population, quality tiers) is not a shark game's business. */
+#sharkRestartBtn{display:none;}
+body.mode-sharksim #sharkRestartBtn{display:block;}
+body.mode-sharksim #settingsOpenBtn{display:none !important;}
+body.touch.mode-sharksim #pause .smallnote{display:none;}

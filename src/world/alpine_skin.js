@@ -98,6 +98,18 @@
     "  rock = mix( rock, veg * 0.9, vegW );",
     "  return mix( rock, snow * 0.55, snowW );",
     "}",
+    // RUNNELS: what water and rockfall cut into a steep face. The top-down
+    // relief above is a planar projection, so on a 50 degree face it smears
+    // into streaks running the wrong way. This is read on the VERTICAL plane
+    // the face looks along (x-facing faces on (z,y), z-facing on (x,y)),
+    // tight across (u, ~9 m / 3 m) and long down the fall line (y, ~80 m), so
+    // it draws gullies and ribs straight down every face, the way ash and
+    // scree streak the island volcano. Returns 0 (groove) .. 1 (rib).
+    "float alpRunnel( vec2 uy, float fine ) {",
+    "  float a = alpRidge( vec2( uy.x * 0.11, uy.y * 0.012 ) );",
+    "  float b = alpRidge( vec2( uy.x * 0.33 + 5.1, uy.y * 0.035 ) );",
+    "  return a * 0.68 + mix( 0.5, b, fine ) * 0.32;",
+    "}",
   ].join("\n");
 
   /**
@@ -161,7 +173,7 @@
         "uniform vec3 uAlpSnow;\nuniform vec2 uAlpFar;\n" + GLSL_NOISE + "\n" +
         // shared per-fragment scratch, filled in the albedo pass, read by the
         // normal and roughness passes further down the same main()
-        "float alpSnowMask = 0.0; float alpFine = 1.0; float alpMid = 1.0; vec2 alpG = vec2( 0.0 );");
+        "float alpSnowMask = 0.0; float alpFine = 1.0; float alpMid = 1.0; vec2 alpG = vec2( 0.0 ); vec3 alpRn = vec3( 0.0 );");
 
       // ---- 1. albedo: resolve the snow edge, texture rock and forest ------
       fs = fs.replace("#include <color_fragment>",
@@ -193,6 +205,26 @@
         // unless the field is deep enough to bury the rib
         "  float rib = smoothstep( 0.35, 1.15, length( alpG ) * ( 0.55 + 0.45 * rockW ) );\n" +
         "  snowM *= 1.0 - 0.85 * rib * ( 1.0 - cov * cov ) * uAlpDetail;\n" +
+        // ---- runnels + cliff faces: steep ground, read on the vertical
+        // plane, blended by how x- or z-facing the face is
+        "  vec3 nW = normalize( vAlpWNrm );\n" +
+        "  float steep = smoothstep( 0.24, 0.52, 1.0 - nW.y ) * alpMid * uAlpDetail;\n" +
+        "  float runnel = 0.5;\n" +
+        "  if ( steep > 0.001 ) {\n" +
+        "    vec2 wxz = vec2( nW.x * nW.x, nW.z * nW.z ); wxz /= max( 1e-4, wxz.x + wxz.y );\n" +
+        "    float yy = vAlpWPos.y / uAlpScale;\n" +
+        "    float er = max( 0.5, alpD * 0.002 ) / uAlpScale;\n" +
+        "    float rX = alpRunnel( vec2( xz.y, yy ), alpFine ), rZ = alpRunnel( vec2( xz.x, yy ), alpFine );\n" +
+        "    float gX = ( alpRunnel( vec2( xz.y + er, yy ), alpFine ) - rX ) / er;\n" +
+        "    float gZ = ( alpRunnel( vec2( xz.x + er, yy ), alpFine ) - rZ ) / er;\n" +
+        "    runnel = rX * wxz.x + rZ * wxz.y;\n" +
+        // perturb across the face: an x-facing face's tangent is world z
+        "    alpRn = vec3( - gZ * wxz.y, 0.0, - gX * wxz.x ) * 0.30 * steep;\n" +
+        // snow on a steep face survives only in the grooves: couloirs and
+        // streaks down the rock, not a sheet (a deep field still buries it)
+        "    float hold = smoothstep( 0.18, 0.50, 1.0 - runnel );\n" +
+        "    snowM *= mix( 1.0, hold, 0.75 * steep * ( 1.0 - cov * cov ) );\n" +
+        "  }\n" +
         "  alpSnowMask = snowM;\n" +
         // rock: bedding contacts on world height, grain, cracks
         "  float bed = fract( ( vAlpWPos.y + ( alpVn( xz * 0.012 ) - 0.5 ) * uAlpStep * 3.0 + ( alpVn( xz * 0.06 ) - 0.5 ) * uAlpStep * 0.8 ) / uAlpStep );\n" +
@@ -201,6 +233,13 @@
         "  float grain = mix( 0.5, alpVn( xz * 0.35 ), alpMid ) * 0.6 + mix( 0.5, alpVn( xz * 1.5 ), alpFine ) * 0.4;\n" +
         "  float crack = pow( alpRidge( xz * 0.20 ), 6.0 ) * 0.7 + pow( alpRidge( xz * 0.75 ), 8.0 ) * 0.3;\n" +
         "  float rockMod = ( 0.74 + 0.52 * grain ) * ( 1.0 - 0.20 * contact * bedMask * alpMid ) * ( 1.0 - 0.42 * crack * alpFine );\n" +
+        // the faces: dark wet grooves / pale ribs, and the bedding contacts
+        // read as CLIFF BANDS where the ground is steep enough to expose them
+        "  rockMod *= mix( 1.0, 0.70 + 0.55 * runnel, steep );\n" +
+        "  rockMod *= 1.0 - 0.22 * contact * steep * ( 1.0 - bedMask * 0.5 );\n" +
+        // scree: the moderate ground under steep rock is a paler, finer apron
+        "  float scree = rockW * ( 1.0 - steep ) * smoothstep( 0.08, 0.22, 1.0 - nW.y ) * alpMid;\n" +
+        "  rockMod *= mix( 1.0, 1.10 + 0.14 * ( alpVn( xz * 2.3 ) - 0.5 ) * alpFine, scree );\n" +
         "  rockMod = mix( 1.0, rockMod, uAlpDetail );\n" +
         // forest: closed dark canopy in the hollows, lit meadow on the open
         // ground, a 2 m crown speckle up close
@@ -228,7 +267,7 @@
         "#include <normal_fragment_maps>\n" +
         "{\n" +
         "  float amp = mix( 1.35, 0.75, alpSnowMask ) * uAlpDetail;\n" +
-        "  vec3 nP = normalize( vAlpWNrm + vec3( - alpG.x, 0.0, - alpG.y ) * amp );\n" +
+        "  vec3 nP = normalize( vAlpWNrm + vec3( - alpG.x, 0.0, - alpG.y ) * amp + alpRn * ( 1.0 - 0.6 * alpSnowMask ) );\n" +
         "  normal = normalize( normal + mat3( viewMatrix ) * ( nP - vAlpWNrm ) );\n" +
         "}");
 

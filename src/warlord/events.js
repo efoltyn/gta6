@@ -3722,44 +3722,20 @@
     const v = ev();
     const m = mood();
     const l = loyalty();
-    const c1 = document.createElement("span");
-    /* THE PULSE IS SPENT ON THE FIRST REPAINT AFTER THE CROSSING and then
-       cleared, so it fires once per crossing rather than on every one of the
-       four repaints a dawn triggers. */
+    /* HUD PURGE: the chip is only on screen while loyalty is a DANGER (low,
+       or unrest brewing) or in the repaint right after it moved. Weather is
+       in the sky and the sand, and the leaderboard rank chip is gone: the
+       loyalty screen still opens the war board. */
     const pulse = v.pulse; v.pulse = 0;
+    if (!(l < 46 || v.unrest || pulse)) return;
+    const c1 = document.createElement("span");
     c1.className = "chip act wl-evchip" + (pulse > 0 ? " wl-up" : pulse < 0 ? " wl-dn" : "");
     c1.style.color = l < 20 ? "#ff8f86" : l < 46 ? "#ffd166" : "";
-    c1.textContent = "LOYAL " + l + (v.unrest ? " !" : "");
-    /* the authored reason, on the thing that moved. Not printed into the
-       strip: the strip is already the tightest screen in this game and a
-       clause in it would be the fourth telling. */
+    // the men's mood as a word, never a system name and a number
+    c1.textContent = "THE MEN ARE " + m.label;
     c1.title = (v.why && v.whyDay === S.day) ? v.why : m.note;
     c1.onclick = function () { if (canOpen() || W.phase() === "campaign") openLoyalty(); };
     h.appendChild(c1);
-
-    if (!FLAG_NOWEATHER && (v.wea !== "clear" || isNight())) {
-      const c2 = document.createElement("span");
-      c2.className = "chip wl-evchip";
-      c2.style.color = v.wea === "storm" ? "#e0b070" : "";
-      c2.textContent = isNight() && v.wea === "clear" ? "NIGHT" : WEATHER[v.wea].label;
-      h.appendChild(c2);
-    }
-    /* THE CHIP IS THE RUN'S PROGRESS AND IT IS LAND. It read "0/4 WARLORDS",
-       which was a count of a win condition that has been deleted and which
-       printed 0/4 for the whole of a run in which you took half the island.
-       territory.js's own chip carries the fraction; this one is the rank —
-       where you stand on the leaderboard the screen behind it opens. */
-    const rows = board();
-    if (rows.length) {
-      let me = null;
-      for (let i = 0; i < rows.length; i++) if (rows[i].kind === "you") { me = rows[i]; break; }
-      const c3 = document.createElement("span");
-      c3.className = "chip act wl-evchip";
-      c3.textContent = me ? ("#" + me.rank + " OF " + rows.length) : "THE ISLAND";
-      if (me && me.rank === 1) c3.style.color = "#8fe0a2";
-      c3.onclick = function () { if (W.phase() === "campaign") openWar(); };
-      h.appendChild(c3);
-    }
   }
 
   /* ============================================================ THE DAWN

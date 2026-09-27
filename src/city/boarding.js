@@ -67,17 +67,21 @@
                                  bolts, and that outranks any order
      • what a favour is worth    `CBZ.cityRelShift`
 
-   THE SEAT-SIDE DISAGREEMENT (read before you add a fifth seat). Two live
-   conventions disagree about which side the driver is on. playercars.js:822
-   declares "+X is the car's LEFT: LHD" and vehicles.js:1303 seats the PLAYER
-   at `+ci.seatX`; but vehicles.js's own `OCC_SLOTS` gives the driver
-   `side: -1`, and gangs.js's `DB_SEATS.driver.x` is -0.42 to match. Both are
-   internally consistent and they are mirror images of each other. We follow
-   the PLAYER, because the player is the one body you can inspect and the one
-   that is definitely in the driver's seat: driver `+seatX`, shotgun
-   `-seatX`. Using `carOccupancySeat`'s slots here would have sat every
-   companion in the player's lap. Reconciling the two tables is owed work and
-   belongs to whoever owns vehicles.js, not to a boarding arc.
+   THE SEATS ARE city/carseats.js's (car wave 2026-09-27). This file used to
+   derive its own four (driver/shotgun/rearL/rearR) and write up, right
+   here, that vehicles.js's occupancy table put the driver on the OTHER side.
+   Both now read one model: driver at +X (the car's left), every body's own
+   seat count (a coupe's two, a van's 3-across bench, an SUV's third row),
+   each seat with the door that serves it, and one occupancy map
+   (car.seatOcc) that the player, companions, ambient occupants and a future
+   remote player all claim seats in. carSeats() below is a VIEW of that model
+   in the record shape the arcs need, not a second derivation.
+
+   THE PLAYER USES ANY DOOR. The door you walk up to decides the seat: the
+   driver's door drives (or drags the driver out), a passenger door of a car
+   somebody is driving is a RIDE (passengerseat.js cityRideVehicle), a
+   passenger door of an empty car sits you there with the wheel free ([G]).
+   The verb is pinned on the door (systems/interactions.js prompt layer).
 
    FLAGS (defaulted here, never in config.js — the wave law):
      COMPANION_BOARDING_V1  the arcs, the seats, the door leaves
@@ -185,52 +189,43 @@
      `y` is the CUSHION top, which is what npclife wants (island_airport's own
      seat records say so: "anchor y == cushion top"). */
   function carSeats(veh) {
-    const ci = cabin(veh); if (!ci) return null;
+    const S = CBZ.carSeats;
+    const m = S && S.of(veh); if (!m) return null;
+    const ci = m.ci;
     const d = dimsOf(veh);
     const halfW = Math.max(0.62, ((d && d.width) || (ci.w + 0.30)) * 0.5);
-    const cushionH = Math.max(0.10, ci.cushionY - ci.floorY);
-    const frontZ = ci.seatZ;
-    // The rear bench: authored when playercars.js dressed a two-row cabin,
-    // otherwise derived one seat-pitch behind the fronts — and only kept when
-    // it still lands inside the cabin box. A coupe honestly has two seats.
-    let rearZ = ci.rearSeatZ;
-    if (rearZ == null) {
-      const guess = frontZ - 0.80;
-      rearZ = (guess > ci.zRear + 0.26) ? guess : null;
-    }
-    const leafLen = Math.max(0.60, Math.min(1.08, (ci.zFront - ci.zRear) * 0.42));
     const y0 = Math.max(0.06, ci.floorY - 0.04), y1 = Math.max(y0 + 0.35, ci.roofY - 0.06);
     const belt = Math.max(y0 + 0.12, Math.min(y1 - 0.10, ci.beltY));
     const out = [];
-    function push(id, side, row, z, xk) {
+    for (let i = 0; i < m.seats.length; i++) {
+      const st = m.seats[i];
+      const door = st.doorId ? m.byDoor[st.doorId] : null;
+      // `side` is the flank you get in from — the middle of a bench has none
+      // of its own, it has its door's
+      const side = door ? door.side : (st.side || -1);
+      const zc = door ? door.zc : st.z + 0.06;
+      const len = door ? Math.max(0.6, door.z1 - door.z0) : 0.9;
       out.push({
-        id: id, kind: row ? "rear" : (id === "driver" ? "driver" : "front"),
-        side: side, row: row,
-        x: side * ci.seatX * xk, y: ci.cushionY, z: z, yaw: 0,
-        cushionH: cushionH, floorBelow: 0,
-        doorX: side * halfW, doorZ: z + 0.06,
-        outX: side * (halfW + 0.92), outZ: z + 0.04,
-        hinge: { x: side * (halfW - 0.03), z: z + leafLen * 0.5, len: leafLen, y0: y0, y1: y1, belt: belt },
+        id: st.id, kind: st.isDriver ? "driver" : (st.row ? "rear" : "front"),
+        side: side, col: st.col, row: st.row,
+        x: st.x, y: st.cushionY, z: st.z, yaw: 0,
+        cushionH: Math.max(0.10, st.cushionY - ci.floorY), floorBelow: 0,
+        doorId: st.doorId || null,
+        doorX: side * halfW, doorZ: zc,
+        outX: side * (halfW + 0.92), outZ: zc + 0.02,
+        hinge: { x: side * (halfW - 0.03), z: door ? door.z1 : zc + len * 0.5, len: len, y0: y0, y1: y1, belt: belt },
       });
     }
-    // +X is the car's LEFT and the driver sits there — see the header note.
-    push("driver", +1, 0, frontZ, 1);
-    push("shotgun", -1, 0, frontZ, 1);
-    if (rearZ != null) {
-      push("rearL", +1, 1, rearZ, 0.96);
-      push("rearR", -1, 1, rearZ, 0.96);
-    }
-    // A REAL DOOR SAYS WHERE ITS APERTURE IS. The seat-derived door point above
-    // is a guess (front doors "just ahead of the seat"); a body that carries
-    // real doors publishes their z-spans, and you stand at the middle of the
-    // opening — behind the leaf, which swings forward — not beside the seat.
-    for (let i = 0; i < out.length; i++) {
-      const sp = realDoorFor(veh, out[i]);
-      if (!sp) continue;
-      const zc = (sp.z0 + sp.z1) * 0.5;
-      out[i].doorZ = zc; out[i].outZ = zc + 0.02; out[i].doorId = sp.id;
-    }
     return out;
+  }
+  const carSeatKind = (seat) => seat && (seat.kind === "driver" || seat.kind === "front" || seat.kind === "rear");
+  function claimSeat(veh, seat, ped) {
+    if (CBZ.carSeats && carSeatKind(seat)) CBZ.carSeats.claim(veh, seat.id, { kind: "npc", ref: ped });
+  }
+  function releaseSeat(veh, seat, ped) {
+    if (!CBZ.carSeats || !carSeatKind(seat) || !veh) return;
+    const o = CBZ.carSeats.occupant(veh, seat.id);
+    if (o && o.ref === ped) CBZ.carSeats.release(veh, seat.id);
   }
 
   /* An aircraft. Three shapes, in order of how real they are:
@@ -330,18 +325,12 @@
        door, and the second one loses a race he never knew he was in. */
     const held = veh._cbzCrew && veh._cbzCrew[seat.id];
     if (held && !held.dead && (held._cbzSeat || held._cbzArc)) return true;
-    if (seat.id === "driver") {
-      const P = CBZ.player;
-      if (P && P.driving && P._vehicle === veh) return true;
-      if (veh.npcDriver) return true;
-    }
+    if (seat.id === "driver" && veh.npcDriver && !veh.npcDriver.dead) return true;
     if (seat.seatRef && seat.seatRef.occupant) return true;
-    if (veh.occ && Array.isArray(veh.occ.seats)) {
-      const slot = seat.id === "rearL" ? "rearL" : seat.id === "rearR" ? "rearR" : seat.id;
-      for (let i = 0; i < veh.occ.seats.length; i++) {
-        const s = veh.occ.seats[i];
-        if (s.slot === slot && s.ped && !s.ped.dead && !s.gone) return true;
-      }
+    // the ONE occupancy map: the player, the ambient crew, anybody seated
+    if (CBZ.carSeats && carSeatKind(seat)) {
+      const o = CBZ.carSeats.occupant(veh, seat.id);
+      if (o && !(held && o.ref === held && held._cbzArc)) return true;
     }
     return false;
   }
@@ -379,22 +368,20 @@
      — a coupe — the front door on its side. null = no real door, use the leaf. */
   function realDoorFor(veh, seat) {
     const list = CBZ.carDoors ? CBZ.carDoors(veh) : null;
-    if (!list || !list.length) return null;
-    const lr = seat.side > 0 ? "L" : "R";
-    const want = (seat.row ? "R" : "F") + lr;
-    for (let i = 0; i < list.length; i++) if (list[i].id === want) return list[i];
-    if (seat.row) for (let i = 0; i < list.length; i++) if (list[i].id === "F" + lr) return list[i];
+    if (!list || !list.length || !seat.doorId) return null;
+    for (let i = 0; i < list.length; i++) if (list[i].id === seat.doorId) return list[i];
     return null;
   }
   function leafFor(veh, seat) {
     if (!seat) return null;
     const f = frameOf(veh); if (!f) return null;
     const bag = f.userData._cbzDoorLeaves || (f.userData._cbzDoorLeaves = Object.create(null));
-    if (bag[seat.id]) return bag[seat.id];
+    const key = seat.doorId || seat.id;             // two seats, one door: one leaf
+    if (bag[key]) return bag[key];
     const spec = realDoorFor(veh, seat);
     if (spec) {
       const rec = { real: true, veh: veh, id: spec.id, t: 0 };
-      bag[seat.id] = rec;
+      bag[key] = rec;
       _leaves.push({ g: rec, seat: seat });
       return rec;
     }
@@ -460,7 +447,7 @@
     handle.userData._cbzDoorLeaf = seat.id;
     g.visible = false;
     f.add(g);
-    bag[seat.id] = g;
+    bag[key] = g;
     _leaves.push({ g: g, seat: seat });
     return g;
   }
@@ -537,6 +524,7 @@
     if (dir === "in") {
       crewOf(veh)[seat.id] = ped;               // claim it before the walk, so
       ped._cbzClaim = { veh: veh, id: seat.id }; // two companions never race
+      claimSeat(veh, seat, ped);
     }
     arcs.push(a);
     TALLY.arcsRun++;
@@ -553,6 +541,7 @@
       if (!ok && ped._cbzClaim && ped._cbzClaim.veh === a.veh) {
         const c = a.veh._cbzCrew;
         if (c && c[ped._cbzClaim.id] === ped) c[ped._cbzClaim.id] = null;
+        releaseSeat(a.veh, a.seat, ped);
       }
       ped._cbzClaim = null;
       if (!ped._cbzSeat) {
@@ -646,6 +635,7 @@
     ped._cbzSeat = { veh: veh, id: seat.id, seat: seat, role: a.role };
     if (seat.seatRef) seat.seatRef.occupant = ped;
     crewOf(veh)[seat.id] = ped;
+    claimSeat(veh, seat, ped);
     ped._cbzClaim = null;
     TALLY.boarded++;
     // riding with you is a favour, and the ledger that counts who is loyal is
@@ -683,6 +673,7 @@
     ped.controlled = !!a.save.controlled;
     if (seat.seatRef && seat.seatRef.occupant === ped) seat.seatRef.occupant = null;
     const c = veh._cbzCrew; if (c && c[seat.id] === ped) c[seat.id] = null;
+    releaseSeat(veh, seat, ped);
     // restrain.js's captive list is a public field on the car; a body that
     // leaves through this door leaves that list too, or "drag them out" keeps
     // offering to remove somebody who is already standing on the pavement.
@@ -1149,15 +1140,14 @@
     if (a.leaf) poseLeaf(a.leaf, a.seat, 0);
     if (commit && a.commit) { try { a.commit(); } catch (e) {} }
   }
-  function beginPlayerArc(car, commit) {
+  function beginPlayerArc(car, commit, seatId) {
     if (!carArcOn() || pArc) return false;
     if (CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active) return false;
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._aircraft) return false;
     if (P._doorArc) return false;                 // propuse / aircraft owns the body
-    const seat = seatById(car, "driver");
+    const seat = seatById(car, seatId || "driver");
     if (!seat || !seat.hinge) return false;
-    // already standing at the door? then this is a re-press, not a walk-up.
     pArc = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "walk", t: 0, walkT: 0, commit: commit };
     P._doorArc = true; P._doorArcOwner = "car";
     if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
@@ -1207,6 +1197,92 @@
     }
   });
 
+  /* WHICH SEAT A PRESS MEANS. The door you are nearest decides it (city/
+     carseats.js nearestDoor: the first free seat that door serves).
+       drive  the wheel — yours, or somebody's you are about to drag out
+       ride   another seat of a car somebody else is driving
+       sit    another seat of a car nobody is driving (you take the car, the
+              wheel stays free: [G] to slide over)
+     opts.seat forces a seat (scripts, the debug API). */
+  function choosePlayerSeat(car, opts) {
+    const S = CBZ.carSeats, P = CBZ.player;
+    if (!S || !P || !car) return null;
+    const m = S.of(car); if (!m) return null;
+    const npc = !!(CBZ.carNpcDriven && CBZ.carNpcDriven(car));
+    let seat = opts && opts.seat ? m.byId[opts.seat] : null;
+    let door = seat && seat.doorId ? m.byDoor[seat.doorId] : null;
+    if (!seat) {
+      const nd = S.nearestDoor(car, P.pos.x, P.pos.z, function (st, o) {
+        return !o || (st.isDriver && o.kind === "npc");       // a driver can be dragged out
+      });
+      if (!nd) return null;
+      seat = nd.seat; door = nd.door;
+    }
+    if (!seat || seat.isDriver) return { mode: "drive", seat: m.byId.driver || null, door: door };
+    const o = S.occupant(car, seat.id);
+    if (o && o.ref !== P) return { mode: "drive", seat: m.byId.driver || null, door: door };
+    return { mode: npc ? "ride" : "sit", seat: seat, door: door };
+  }
+  function crewTakesWheel(car) {
+    if (!warehouseDest()) return false;
+    const s = squad(45);
+    for (let i = 0; i < s.length; i++) {
+      const r = s[i].role, p = s[i].ped;
+      if (r === "captive" || r === "hostage" || p._cbzArc || p._cbzWait) continue;
+      if (orderDrive(p, { veh: car })) return true;
+    }
+    return false;
+  }
+  CBZ.boardingChooseSeat = choosePlayerSeat;
+
+  // ---- THE VERB ON THE DOOR ------------------------------------------------
+  // One pinned label over the door you are at: "Drive", "Ride" / "Sit" with
+  // the seat as the sub line, "Drag out" when somebody is at the wheel. It is
+  // the same press as the E router and the touch tap on the car (both land in
+  // cityEnterVehicle, which asks choosePlayerSeat the same question).
+  const _dw = { x: 0, y: 0, z: 0 };
+  function seatWords(seat) {
+    if (!seat) return "";
+    if (seat.row === 0) return seat.side ? "front" : "front, middle";
+    const where = seat.row === 1 ? "back" : "third row";
+    return seat.side ? where : where + ", middle";
+  }
+  let doorCar = null;
+  CBZ.cityDoorEnter = function () {
+    const car = doorCar;
+    if (!car || car.dead || !CBZ.cityEnterVehicle) return false;
+    return CBZ.cityEnterVehicle(car) !== false;
+  };
+  CBZ.onUpdate(33.3, function () {
+    doorCar = null;
+    if (!carArcOn() || !inCity() || !CBZ.prisonPrompt || pArc) return;
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || P._aircraft || P._doorArc) return;
+    const car = CBZ.cityNearestCar ? CBZ.cityNearestCar(P.pos.x, P.pos.z, 4.8) : null;
+    if (!car || car.dead || car._cineLocked || Math.abs(car.v || 0) > 2.4) return;
+    const pick = choosePlayerSeat(car, null);
+    if (!pick || !pick.door) return;
+    const S = CBZ.carSeats;
+    const w = S.doorWorld(car, pick.door, _dw);
+    const dx = w.x - P.pos.x, dz = w.z - P.pos.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > 3.2 * 3.2) return;
+    let verb, sub = "";
+    if (pick.mode === "drive") {
+      const o = S.occupant(car, "driver");
+      verb = (o && o.kind === "npc") || (CBZ.carOccupied && CBZ.carOccupied(car)) ? "Drag out" : "Drive";
+    } else {
+      verb = pick.mode === "ride" ? "Ride" : "Sit";
+      sub = seatWords(pick.seat);
+    }
+    doorCar = car;
+    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: w, sub: sub, d2: d2, city: true });
+  });
+  // the prompt census (systems/interactions.js prisonPromptAudit) counts this site
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "car-door", act: "@cityDoorEnter", was: "no prompt at all: E on a car always took the driver's seat" }
+  );
+
   function wrapEnter() {
     if (typeof CBZ.cityEnterVehicle !== "function") return false;
     if (CBZ.cityEnterVehicle._boardWrapped) return true;
@@ -1242,11 +1318,25 @@
       if (!carArcOn() || !car || car.player) return orig.apply(this, arguments);
       if (pArc) return true;                    // arc already playing: swallow the re-press
       const self = this, args = arguments;
-      const started = beginPlayerArc(car, function () { return orig.apply(self, args); });
-      if (!started) return orig.apply(this, arguments);
-      // THE CREW COMES WITH YOU. They start walking the moment you do, from
-      // wherever they are, to their OWN door — not to yours.
-      if (on()) squadBoard(car);
+      const pick = choosePlayerSeat(car, opts);
+      const mode = pick ? pick.mode : "drive";
+      const seatId = pick && pick.seat ? pick.seat.id : "driver";
+      let commit;
+      if (mode === "ride") commit = function () { return CBZ.cityRideVehicle && CBZ.cityRideVehicle(car, seatId); };
+      else if (mode === "sit") {
+        commit = function () {
+          const r = orig.apply(self, args);
+          if (r !== false && CBZ.citySeatShift) CBZ.citySeatShift({ to: seatId, quiet: true });
+          return r;
+        };
+      } else commit = function () { return orig.apply(self, args); };
+      const started = beginPlayerArc(car, commit, seatId);
+      if (!started) return commit();
+      // THE CREW COMES WITH YOU — to their OWN doors. A car you sat in the
+      // passenger side of gets a driver from the crew when there is somewhere
+      // to go (boarding's own "run it to the warehouse" errand).
+      if (on() && mode === "sit") crewTakesWheel(car);
+      if (on() && mode !== "ride") squadBoard(car);
       return true;                              // committed, same as the old call
     };
     for (const k in orig) { if (/Wrapped$/.test(k)) wrapped[k] = orig[k]; }
@@ -1268,12 +1358,14 @@
     const wrapped = function () {
       const P = CBZ.player;
       const car = P && P._vehicle;
+      const mine = car && CBZ.carSeats ? CBZ.carSeats.playerSeat(car) : null;
+      const npcRide = !!(car && CBZ.cityPaxNpcRide && CBZ.cityPaxNpcRide(car));
       const r = orig.apply(this, arguments);
       // YOU GOT OUT, SO THEY GET OUT — through their own doors, on their own
       // legs. Not the captive: see squadAlight's note.
-      if (on() && car && !car.dead) { try { squadAlight(car, { freeOnly: true }); } catch (e) {} }
+      if (on() && car && !car.dead && !npcRide) { try { squadAlight(car, { freeOnly: true }); } catch (e) {} }
       if (carArcOn() && car && !car.dead && car.group && car.group.parent) {
-        const seat = seatById(car, "driver");
+        const seat = seatById(car, mine ? mine.id : "driver");
         if (seat && seat.hinge) {
           const leaf = leafFor(car, seat);
           if (leaf) {
@@ -1405,6 +1497,7 @@
         if (p.dead || !s.veh || s.veh.dead || !(s.veh.group && s.veh.group.parent)) {
           const c = s.veh && s.veh._cbzCrew;
           if (c && c[s.id] === p) c[s.id] = null;
+          if (s.veh && s.seat) releaseSeat(s.veh, s.seat, p);
           if (s.seat && s.seat.seatRef && s.seat.seatRef.occupant === p) s.seat.seatRef.occupant = null;
           if (p.group && p._cbzFit) { p.group.scale.setScalar(1); p._cbzFit = 0; }
           p._cbzSeat = null; p.inCar = false;
@@ -1531,8 +1624,8 @@
        across to the shotgun seat instead and RIDE, which is the whole point of
        giving somebody else the keys; only fall back to the old step-out when
        the passenger seat is not available (flag off, no cabin, seat taken). */
-    if (P && P.driving && P._vehicle === car) {
-      const rode = !!(CBZ.citySeatShift && CBZ.citySeatShift({ to: "shotgun", quiet: true }));
+    if (P && P.driving && P._vehicle === car && !(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car))) {
+      const rode = !!(CBZ.citySeatShift && CBZ.citySeatShift({ to: "passenger", quiet: true }));
       if (!rode) { try { CBZ.cityExitVehicle(); } catch (e) {} }
     }
     const seat = seatById(car, "driver");

@@ -2074,6 +2074,24 @@
      starts running uphill. That is the signal that has actually saved lives.  */
   const TSU_DRAW = -6.7;          // metres of surge at the bottom of the drawdown
 
+  /* TWO WATER LEVELS, NOT ONE (2026-09-27). The event used to be a single
+     sea level walked up and down, so the moment the wave "crossed" the
+     island every street on it was rising at once, including the ones the
+     wall had not reached; the far side was a lake before the bore got
+     there. A tsunami has an EDGE. `behind` is the surge of the water the
+     front has already brought in (the flood); `ahead` is the surge of the
+     water it has not reached yet (the drawn-back sea, the dry town, the calm
+     far side). The ocean mesh rides `behind` and the sheet is pulled down
+     by the difference ahead of the front (water_spec.js uDwAhead), and every
+     survival water query subtracts the same difference
+     (CBZ.waterFrontDropAt), so the swimmer, the bots and the debris are wet
+     exactly where the flood is drawn. */
+  function tsuLevels(st, behind, ahead) {
+    surgeSet(behind);
+    st.behindSurge = behind; st.aheadSurge = ahead;
+    st.aheadDrop = Math.max(0, behind - ahead);
+  }
+
   // signed sweep coordinate of a point along the travel direction
   function tsuS(ctx, x, z) { const st = ctx.st; return (x - ctx.cx) * st.dx + (z - ctx.cz) * st.dz; }
 
@@ -2294,11 +2312,12 @@
       W.flowDir = seaward ? [-st.dx, -st.dz] : [st.dx, st.dz];
       W.flowSpeed = 0.6 + Math.abs(Number.isFinite(flow) ? flow : 0) * 0.9;
       W.stand = st.phase === "sweep" ? 0 : (st.phase === "flooded" ? 1 : 0.8);
+      W.aheadDrop = st.aheadDrop || 0;
     }
     if (CBZ.waterEventSet) CBZ.waterEventSet({
       owner: "survival-tsunami", kind: "tsunami", phase: st.phase,
       cx: ctx.cx, cz: ctx.cz, dx: st.dx, dz: st.dz,
-      frontS: st.frontS, frontWet: -2, frontWidth: 20,
+      frontS: st.frontS, frontWet: -2, frontWidth: 20, aheadDrop: st.aheadDrop || 0,
       level: CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.level,
       waveAmp: st.waveAmp, chopAmp: st.chopAmp,
       sediment: st.sediment || 0,
@@ -2494,6 +2513,30 @@
     });
   }
 
+  /* WADING IS NOT SAFE. Swimming players already ride the current
+     (city/swim.js reads waterEventSample), but a player still on their feet
+     in knee-to-waist deep flood walked through it as if it were a puddle.
+     Moving water at that depth takes your legs: you are shoved along the
+     flow, harder the deeper and the closer to the bore, and you cannot hold
+     a line against it. Pushed, not teleported: the body's own collision
+     still resolves against walls next step. */
+  const _wadeS = {};
+  function tsuWade(dt, ctx) {
+    const P = CBZ.player, st = ctx.st;
+    if (!P || P.dead || !CBZ.waterEventSample) return;
+    const sw = CBZ.citySwimState && CBZ.citySwimState();
+    if (sw && sw.swimming) return;
+    const s = CBZ.waterEventSample(P.pos.x, P.pos.z, null, _wadeS);
+    if (!s || !s.wet) return;
+    const depth = s.mean - (P.pos.y != null ? Math.max(P.pos.y, floor(P.pos.x, P.pos.z)) : floor(P.pos.x, P.pos.z));
+    if (depth < 0.25) return;
+    const k = Math.min(1, depth / 1.2);
+    const v = Math.min(3.2, Math.hypot(s.currentX || 0, s.currentZ || 0) * 0.32 * k) * dt;
+    const dl = Math.hypot(s.currentX || 0, s.currentZ || 0) || 1;
+    P.pos.x += (s.currentX || 0) / dl * v;
+    P.pos.z += (s.currentZ || 0) / dl * v;
+  }
+
   /* THE WRECKAGE IS THE BUILDING'S OWN WALLS. A swept house sheds no invented
      brown boxes any more: the biggest solid pieces of its actual group — the
      walls and slabs the arena built it from, wearing the building's own
@@ -2608,7 +2651,7 @@
     st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
-    surgeSet(st.floodSurge);
+    tsuLevels(st, st.floodSurge, st.floodSurge);
     tsuPublish(ctx, 1.6);
     narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
   }
@@ -2653,6 +2696,7 @@
       st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
       st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
+      st.aheadDrop = 0; st.behindSurge = 0; st.aheadSurge = 0;
       tsuPublish(ctx, 0);
       narrate("hint", "TSUNAMI, the sea is PULLING BACK. GET HIGH!", 3.6);
       soundAt("siren", ctx.cx, ctx.cz);
@@ -2674,6 +2718,31 @@
       st.waveAmp = 0.86 + k * 0.38;
       st.chopAmp = 0.72 + k * 0.62;
       st.foamGain = 0.34 + k * 0.18;
+      /* THE WHITE LINE ON THE HORIZON. Every piece of footage has it: while
+         the reef is still draining, a thin bright line appears far out and
+         grows. The bore is built here, 330 m out, and runs in at open-sea
+         speed to the 52 m mark where the sweep takes over, standing up as it
+         comes: long, low and mostly foam at first, a wall by the end. */
+      if (k > 0.3 && CBZ.CONFIG.TSU_FACE_V2 !== false && CBZ.tsuFaceBuild) {
+        if (!st.face) {
+          if (st.H == null) st.H = Math.max(10, Math.min(44, 34 * (st.mag != null ? st.mag : 1)));
+          tsuBuildWave(ctx);
+        }
+        const u = Math.min(1, (k - 0.3) / 0.7);
+        st.frontS = -(ctx.R + 330) + (330 - 52) * u;
+        const oy = (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + (st.draw != null ? st.draw : TSU_DRAW) * (k * k * (3 - 2 * k));
+        st.faceH = st.H * (0.10 + 0.26 * u * u);
+        if (st.face) CBZ.tsuFaceUpdate(st.face, {
+          t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
+          height: st.faceH, turbid: 0.12 * u, curl: 0.12 + 0.25 * u, foam: 0.9,
+          x: ctx.cx + st.dx * st.frontS, y: oy - 1.0, z: ctx.cz + st.dz * st.frontS, seaY: oy,
+          dirX: st.dx, dirZ: st.dz,
+        });
+        // the roar arrives before the water does
+        st.roarCd = (st.roarCd || 0) - dt;
+        if (st.roarCd <= 0) { st.roarCd = 1.1 - 0.6 * u; sound("rumble"); }
+        if (CBZ.shake) CBZ.shake(0.04 + 0.16 * u * u);
+      }
       tsuPublish(ctx, -0.5 * k);
       if (CBZ.shake) CBZ.shake(0.05);
       st.sirenCd = (st.sirenCd || 0) - dt;
@@ -2725,7 +2794,7 @@
       st.waveAmp = 1.55; st.chopAmp = 2.15; st.foamGain = 0.82;
       st.waveId = "tsu" + CBZ.now + rnd();
       st.landfall = false;
-      tsuBuildWave(ctx);
+      if (!st.wave) tsuBuildWave(ctx);
       // NO INUNDATION MESH. The sea itself comes over the island (surgeSet),
       // which is why the swimmer, the buoyancy, the drifting corpses and the
       // submergence test all agree without any of them being told.
@@ -2790,31 +2859,30 @@
           st.frontV = st.speed;
           st.frontS += st.speed * dt;
         }
-        /* THE ARC IS MEASURED AGAINST THE ISLAND, NOT AGAINST THE WHOLE RUN.
-           The first version of this walked one curve across the entire travel
-           (-R-52 → +R+52) with a lag exponent, and the arithmetic of that was
-           simply wrong: at the moment the wall reached the island CENTRE the
-           surge was still -1.15 m — BELOW resting sea level. The bore arrived
-           on dry ground and the water only turned up after the front had left,
-           which is the opposite of a tsunami.
-
-           Two beats, each with its own span, because they are two different
-           physical events:
-
-           APPROACH (frontS -R-52 → -R): the drawdown COMING BACK. The sea
-           returns from TSU_DRAW to rest over the 52 m of open water in front
-           of the beach, so it crosses mean level exactly as the wall makes
-           landfall — the water and the wall arrive together.
-
-           CROSSING (frontS -R → +R): the run-up piles in, on land^0.75. That
-           exponent is what keeps the crest AHEAD of full inundation (the wall
-           still reads as an edge, not the top of a rising pool) without ever
-           letting the ground behind it be dry. */
+        /* 2026-09-27, THE EDGE (tsuLevels above). The single-level arc this
+           replaced walked the WHOLE island's water up with `land^0.75`, so
+           the street 200 m ahead of the wall was already under 7 m of sea.
+           Now: AHEAD of the front the reef stays drained until the wall is
+           on it (the stranded boats and the bare seabed are in frame right
+           up to the impact), and the far side's sea eases back to rest as
+           the front crosses. BEHIND it the flood is deep at once (a bore
+           brings its water with it) and deepens to the full inundation by
+           the far shore; past the far beach the two levels meet, so the
+           flood phase inherits one sea with no pop. */
         const approach = Math.min(1, (st.frontS + ctx.R + 52) / 52);
         const land = Math.max(0, Math.min(1, (st.frontS + ctx.R) / (2 * ctx.R)));
-        surgeSet(land <= 0 ? (st.draw != null ? st.draw : TSU_DRAW) * (1 - ease(approach))
-                           : st.floodSurge * Math.pow(land, 0.75));
+        const drawM = st.draw != null ? st.draw : TSU_DRAW;
+        const out = Math.max(0, Math.min(1, (st.frontS - ctx.R) / 52));   // past the far beach
+        let behind, ahead;
+        if (land <= 0) { behind = drawM + (1.2 - drawM) * ease(approach); ahead = drawM; }
+        else {
+          behind = 1.2 + (st.floodSurge - 1.2) * Math.sqrt(land);
+          ahead = drawM * (1 - land) * (1 - land);
+          ahead += (behind - ahead) * ease(out);
+        }
+        tsuLevels(st, behind, ahead);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0.8;
+        const aheadY = (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + ahead;
         const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
         /* ---- THE FACE IS SCALED BY THE WATER UNDER IT ---------------------
            A tsunami in open water is long, low and barely visible; it stands
@@ -2876,14 +2944,21 @@
           const crashDip = st.broke ? (1 - 0.26 * Math.exp(-Math.max(0, st.crashT) * 1.15)) : 1;
           const crashCurl = st.broke ? Math.max(0.3, 1 - Math.max(0, st.crashT) * 1.1) : 1;
           const hs = (0.40 + 0.74 * Math.pow(shoal, 1.7)) * spent * crashDip;
-          st.faceH = st.H * hs;
+          /* THE FACE STANDS ON THE WATER IN FRONT OF IT, not on the flood
+             behind it: its foot is the drained reef / the dry street, and it
+             is as tall as the step it is carrying plus the breaking crest
+             above that. The crest's height over the flood is the old faceH,
+             unchanged; only the base moved down to where the water is. */
+          const step = Math.max(0, st.level - aheadY);
+          st.faceH = Math.max(2, st.H * hs + step - 1.2);
+          st.faceY = aheadY - 1.2;
           CBZ.tsuFaceUpdate(st.face, {
             t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
             height: st.faceH, turbid: turbid,
             // a spent surge does not overhang: the curl goes with the height
             curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent) * crashCurl,
             foam: st.foamGain,
-            x: fx0, y: st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0,
+            x: fx0, y: st.faceY + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0, seaY: aheadY,
             dirX: st.dx, dirZ: st.dz,
           });
           grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
@@ -2904,8 +2979,8 @@
         // the mist follows the curl as before
         st.spray.setActive(st.broke && st.crashT < 0.9 ? 1.5
           : (0.6 + 0.4 * shoal) * Math.max(0.18, spent));
-        st.spray.update(dt, fx0, st.level + (st.faceH || st.H) * 0.9, fz0);
-        tsuPublish(ctx, 2.2);
+        st.spray.update(dt, fx0, (st.faceY != null ? st.faceY : st.level) + (st.faceH || st.H) * 0.9, fz0);
+        tsuPublish(ctx, 4.2);
         // LEGACY LANDFALL (TSU_SHOAL_V2 off): the single blast + "BRACE!".
         // With the flag on, tsuCrash() already fired at the end of the stand
         // and set st.landfall, so this never runs twice.
@@ -2915,13 +2990,26 @@
           narrate("toast", "BRACE!");
           sound("collapse"); sound("water");
         }
-        const pd = Math.abs(tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z) - st.frontS);
-        if (pd < 40 && CBZ.shake) CBZ.shake(0.45 * (1 - pd / 40));   // the roar closes in
+        /* THE ROAR CLOSES IN. Shake and rumble scale with how close the
+           front is to YOU (ahead of it or already behind it), from 150 m
+           out, and with how big this one is; a tower roof 30 m up feels
+           the building shudder but not the water's fist. */
+        const pS = tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z);
+        const pd = Math.abs(pS - st.frontS);
+        const near = Math.max(0, 1 - pd / 150);
+        if (near > 0) {
+          const hk = Math.max(0.35, 1 - Math.max(0, CBZ.player.pos.y - st.level) / 30);
+          const mk = 0.6 + 0.4 * Math.min(1.3, st.mag != null ? st.mag : 1);
+          if (CBZ.shake) CBZ.shake((0.08 + 0.62 * near * near * near) * hk * mk);
+          st.roarCd = (st.roarCd || 0) - dt;
+          if (st.roarCd <= 0) { st.roarCd = 0.55 + 1.1 * (1 - near); soundAt("rumble", fx0, fz0); if (near > 0.6) sound("water"); }
+        }
         if (rnd() < dt * 8) sound("water");
         tsuCatch(dt, ctx);
+        tsuWade(dt, ctx);
         tsuSmash(ctx);
         tsuCarHandoff(ctx);
-        floodActors(dt, ctx, 2.2, "drowned in the flood", st.dx, st.dz);
+        floodActors(dt, ctx, 4.2, "drowned in the flood", st.dx, st.dz);
         // the debris rides the BORE's speed, not a constant: near-still while
         // the wave stands, then surging inland with the released front
         tsuFlotsam(dt, ctx, CBZ.CONFIG.TSU_SHOAL_V2 !== false && st.frontV != null
@@ -2929,7 +3017,7 @@
         if (st.frontS > ctx.R + 52) tsuEnterFlood(ctx);
       } else if (st.phase === "flooded") {
         st.floodT += dt;
-        surgeSet(st.floodSurge);
+        tsuLevels(st, st.floodSurge, st.floodSurge);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.floodSurge;
         st.sediment = 0.95;
         tsuPublish(ctx, 1.6);
@@ -2946,7 +3034,7 @@
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * (TSU_FAST() ? 0.17 : 0.2)));
-        surgeSet(next);
+        tsuLevels(st, next, next);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
         const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
         st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is back
@@ -2970,6 +3058,7 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, undertow);
         tsuUndertowDrown(dt, ctx, drainK);
+        tsuWade(dt, ctx);
       }
       // heavier fog with your face at the surface — city/swim.js owns the
       // swimmer now, so this reads its published state instead of a local flag
@@ -2981,11 +3070,12 @@
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
       surgeSet(0);
+      st.aheadDrop = 0; st.behindSurge = 0; st.aheadSurge = 0; st.faceY = null;
       // an event cancelled mid-stand must not leave the world muted
       if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
       // the sediment goes with it — one match's soup must never tint the next
-      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; }
+      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; W.aheadDrop = 0; }
       const o = ctx.arena && ctx.arena.ocean;
       if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1, sediment: 0 });
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;

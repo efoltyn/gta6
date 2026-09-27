@@ -207,6 +207,7 @@
   "src/city/police.js",
   "src/city/aircraft.js",
   "src/city/traffic.js",
+  "src/city/carseats.js",
   "src/city/playercars.js",
   "src/city/crashfx.js",
   "src/city/crashdeform.js",
