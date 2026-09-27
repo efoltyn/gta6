@@ -11,11 +11,15 @@
         sun glitter path, building shadows, a shallow tint and a surf line
         computed from an exact box SDF against every land rect, and the
         scene fog so the horizon melts into the haze.
-     2. THE SHORE. Every land rect gets a weathered concrete seawall from the
-        deck down to y = -3 with a wet band and algae line, a capstone lip, and
-        either iron bollards (a quay) or rip-rap (the base, the causeways, the
-        field). Edges that meet another rect are cut, so the causeway runs
-        straight onto the island instead of through a wall. Three draw calls.
+     2. THE SHORE. Every land rect gets a dressed-granite seawall from the
+        deck down to y = -3 with a wet band and algae line, a coping lip, and
+        either cast-iron bollards and ladders (a quay) or rip-rap (the base,
+        the causeways, the field). Edges that meet another rect are cut, so
+        the causeway runs straight onto the island instead of through a wall.
+        The town's harbour apron (granite setts, kerb flags) rings its pad.
+        Every surface here is a SURFACES kind (see below), not a flat colour.
+     5. THE FLAK KIT. The 40 mm twin mount, its sandbag pit and its ready
+        ammunition, shared by every gun on the page (BombScene.flakKit).
      3. THE GRADE. Late afternoon over a burning city: a low warm sun, a dusty
         horizon, fog matched to it. microboot re-asserts its BOOT light values
         every frame at CBZ.onAlways(9); this file re-asserts OURS at 9.5, so
@@ -162,6 +166,205 @@
     t.generateMipmaps = true;
     t.needsUpdate = true;
     return t;
+  }
+
+  // ============================================================ SURFACES
+  /* What things are MADE of. Same technique as world/prisonlook.js (the brick
+     the owner signed off on): analytic, world-space, no UVs, patched into the
+     stock MeshStandardMaterial with onBeforeCompile. Unlike prisonlook this
+     one also bends the NORMAL (a height field sampled three times per pixel),
+     so a joint is a recess the low sun actually rakes across, not a painted
+     line. Detail fades with distance so nothing shimmers from 600 m up.
+
+       QUAY   dressed granite ashlar on the seawalls, coping slabs on top,
+              rain streaks, a wet band that shines, algae below the tide line
+       SETTS  granite setts in running bond on the harbour apron, big kerb
+              flags along the coping, oil stains, standing puddles
+       ROCK   rip-rap: speckled granite, lichen on the dry tops, wet and green
+              where the sea reaches
+       PAINT  olive drab on steel, mottled and chipped to bare metal at edges
+              (OBJECT space: a gun that slews carries its chips with it)
+       IRON   cast-iron bollards and ladders: black paint, the cap polished by
+              rope, rust bleeding at the foot
+       WOOD   painted plank boxes, grain and board seams                     */
+  const K = { QUAY: 1, SETTS: 3, ROCK: 4, PAINT: 5, IRON: 6, WOOD: 7 };
+  const SURF_U = {
+    bsSeaY: { value: -0.4 },
+    bsRect: { value: null },          // apron: centre xz, half extents
+  };
+  const SURF_VP = "varying vec3 bsW;\nvarying vec3 bsNw;\nvarying vec3 bsL;\nvarying vec3 bsLN;\n";
+  const SURF_VM =
+    "{\n  vec4 bsP = vec4( transformed, 1.0 );\n" +
+    "  #ifdef USE_INSTANCING\n  bsP = instanceMatrix * bsP;\n  #endif\n" +
+    "  bsW = ( modelMatrix * bsP ).xyz;\n" +
+    "  bsNw = normalize( ( vec4( transformedNormal, 0.0 ) * viewMatrix ).xyz );\n" +
+    "  bsL = transformed; bsLN = objectNormal;\n}\n";
+  const SURF_FP = [
+    "varying vec3 bsW;", "varying vec3 bsNw;", "varying vec3 bsL;", "varying vec3 bsLN;",
+    "uniform float bsSeaY;", "uniform vec4 bsRect;",
+    "float bsH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }",
+    "float bsN( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );",
+    "  return mix( mix( bsH( i ), bsH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( bsH( i + vec2( 0.0, 1.0 ) ), bsH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }",
+    "float bsF( vec2 p ) { return bsN( p ) * 0.5 + bsN( p * 2.03 + 3.1 ) * 0.3 + bsN( p * 4.11 + 7.7 ) * 0.2; }",
+    // running bond: x = distance to the nearest joint, y = the unit's own hash
+    "vec2 bsBond( vec2 uv, vec2 sz, float stag ) {",
+    "  float row = floor( uv.y / sz.y );",
+    "  float x = uv.x / sz.x + stag * mod( row, 2.0 );",
+    "  vec2 f = vec2( fract( x ) * sz.x, fract( uv.y / sz.y ) * sz.y );",
+    "  return vec2( min( min( f.x, sz.x - f.x ), min( f.y, sz.y - f.y ) ), bsH( vec2( floor( x ), row ) ) );",
+    "}",
+    "float bsEdge() { return min( bsRect.z - abs( bsW.x - bsRect.x ), bsRect.w - abs( bsW.z - bsRect.y ) ); }",
+    // the height field each kind is carved by (0 = bottom of a joint, 1 = face)
+    "float bsHeight( vec2 uv, float up ) {",
+    "  #if BS_KIND == 1",
+    "  if ( up > 0.5 ) return smoothstep( 0.0, 0.012, bsBond( uv, vec2( 1.25, 0.9 ), 0.0 ).x );",
+    "  vec2 b = bsBond( uv, vec2( 1.15, 0.46 ), 0.5 );",
+    "  return smoothstep( 0.0, 0.035, b.x ) * ( 0.8 + 0.2 * bsN( uv * 7.0 + b.y * 13.0 ) );",   // rock-faced
+    "  #elif BS_KIND == 3",
+    "  if ( bsEdge() < 1.4 ) return smoothstep( 0.0, 0.01, bsBond( uv, vec2( 1.0, 0.7 ), 0.5 ).x );",
+    "  vec2 b = bsBond( uv, vec2( 0.21, 0.11 ), 0.5 );",
+    "  return smoothstep( 0.0, 0.03, b.x ) * ( 0.85 + 0.15 * bsH( vec2( b.y, 1.7 ) ) );",           // domed, uneven
+    "  #elif BS_KIND == 4",
+    "  return bsN( uv * 5.0 ) * 0.6 + bsN( uv * 15.0 ) * 0.4;",
+    "  #else",
+    "  return 0.0;",
+    "  #endif",
+    "}",
+  ].join("\n") + "\n";
+
+  const SURF_FM = [
+    "{",
+    "  vec3 bsN0 = normalize( bsNw );",
+    "  #if BS_KIND >= 5",
+    "  vec3 bsP = bsL; vec3 bsA = abs( normalize( bsLN ) );",
+    "  #else",
+    "  vec3 bsP = bsW; vec3 bsA = abs( bsN0 );",
+    "  #endif",
+    "  float bsUp = step( bsA.x, bsA.y ) * step( bsA.z, bsA.y );",
+    "  bool bsXf = bsA.x > bsA.z;",
+    "  vec2 uv = bsUp > 0.5 ? bsP.xz : ( bsXf ? bsP.zy : bsP.xy );",
+    "  float bsD = length( bsW - cameraPosition );",
+    "  float bsFar = 1.0 - smoothstep( 25.0, 140.0, bsD );",     // joints and relief
+    "  float bsFine = 1.0 - smoothstep( 6.0, 40.0, bsD );",      // grain
+    "  float shade = 1.0; float wet = 0.0; float relief = 0.0;",
+    "  float h = bsHeight( uv, bsUp );",
+    "  float sy = bsW.y - bsSeaY;",
+    // ------------------------------------------------ QUAY
+    "  #if BS_KIND == 1",
+    "  if ( bsUp > 0.5 ) {",
+    "    vec2 b = bsBond( uv, vec2( 1.25, 0.9 ), 0.0 );",
+    "    shade *= 1.0 + ( b.y - 0.5 ) * 0.14;",
+    "    shade *= mix( 0.93, mix( 0.6, 1.0, h ), bsFar );",
+    "    shade *= 1.0 - 0.18 * smoothstep( 0.6, 0.85, bsF( uv * 0.7 ) );",          // lichen / salt blotches
+    "    relief = 0.01;",
+    "  } else {",
+    "    vec2 b = bsBond( uv, vec2( 1.15, 0.46 ), 0.5 );",
+    "    shade *= 1.0 + ( b.y - 0.5 ) * 0.2;",
+    "    shade *= mix( 0.9, mix( 0.5, 1.0, h ), bsFar );",
+    "    shade *= 1.0 - 0.16 * smoothstep( 0.5, 0.9, bsN( vec2( uv.x * 2.2, uv.y * 0.18 ) ) ) * step( 0.6, sy );",   // rain streaks
+    "    wet = 1.0 - smoothstep( 0.45, 0.85, sy + ( bsN( vec2( uv.x * 1.3, 0.0 ) ) - 0.5 ) * 0.35 );",
+    "    relief = 0.018;",
+    "  }",
+    "  shade *= mix( 1.0, 0.9 + 0.2 * bsH( floor( uv * 70.0 ) ), bsFine );",          // granite grain
+    // ------------------------------------------------ SETTS
+    "  #elif BS_KIND == 3",
+    "  float e = bsEdge();",
+    "  vec2 b = e < 1.4 ? bsBond( uv, vec2( 1.0, 0.7 ), 0.5 ) : bsBond( uv, vec2( 0.21, 0.11 ), 0.5 );",
+    "  shade *= 1.0 + ( b.y - 0.5 ) * ( e < 1.4 ? 0.12 : 0.3 );",
+    "  diffuseColor.rgb *= mix( vec3( 1.04, 0.97, 0.9 ), vec3( 0.93, 0.97, 1.03 ), bsH( vec2( b.y, 9.1 ) ) );",
+    "  shade *= mix( 0.86, mix( 0.42, 1.0, h ), bsFar );",
+    "  shade *= 1.0 - 0.3 * smoothstep( 0.58, 0.86, bsF( bsW.xz * 0.07 ) );",        // oil and soot
+    "  shade *= 1.0 - 0.12 * ( 1.0 - smoothstep( 0.0, 3.0, e ) );",                  // spray darkens the edge
+    "  shade *= mix( 1.0, 0.9 + 0.2 * bsH( floor( uv * 90.0 ) ), bsFine );",
+    "  wet = smoothstep( 0.69, 0.73, bsF( bsW.xz * 0.045 + 11.0 ) );",              // standing water
+    "  relief = 0.02 * ( 1.0 - wet );",
+    // ------------------------------------------------ ROCK
+    "  #elif BS_KIND == 4",
+    "  shade *= 0.8 + 0.4 * bsF( uv * 1.7 );",
+    "  shade *= mix( 1.0, 0.85 + 0.3 * bsH( floor( uv * 40.0 ) ), bsFine );",
+    "  float lich = step( 0.45, bsN0.y ) * smoothstep( 0.7, 1.2, sy ) * smoothstep( 0.55, 0.75, bsF( uv * 2.3 + 5.0 ) );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.55, 0.52, 0.36 ), lich * 0.6 );",
+    "  wet = 1.0 - smoothstep( 0.35, 0.75, sy );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.07, 0.1, 0.07 ), 1.0 - smoothstep( -0.1, 0.25, sy ) );",
+    "  relief = 0.03;",
+    // ------------------------------------------------ PAINT
+    "  #elif BS_KIND == 5",
+    "  shade *= 0.9 + 0.18 * bsF( uv * 2.5 );",
+    "  float chip = smoothstep( 0.66, 0.7, bsF( uv * 11.0 + 3.0 ) ) * smoothstep( 0.3, 0.7, bsN( uv * 1.3 ) );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.16, 0.15, 0.14 ), chip );",
+    "  float rust = smoothstep( 0.72, 0.8, bsF( uv * 5.0 + 9.0 ) ) * ( 1.0 - chip );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.3, 0.17, 0.09 ), rust * 0.35 );",
+    "  roughnessFactor = mix( roughnessFactor, 0.45, chip );",
+    // ------------------------------------------------ IRON
+    "  #elif BS_KIND == 6",
+    "  shade *= 0.85 + 0.3 * bsF( uv * 6.0 );",
+    "  float worn = step( 0.6, bsLN.y ) * smoothstep( 0.55, 0.7, bsL.y ) * smoothstep( 0.4, 0.7, bsF( uv * 4.0 ) );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.32, 0.3, 0.28 ), worn );",
+    "  roughnessFactor = mix( roughnessFactor, 0.3, worn );",
+    "  float foot = ( 1.0 - smoothstep( 0.02, 0.2, bsL.y ) ) * smoothstep( 0.35, 0.65, bsF( uv * 8.0 ) );",
+    "  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.34, 0.16, 0.06 ), foot );",
+    // ------------------------------------------------ WOOD
+    "  #elif BS_KIND == 7",
+    "  float board = floor( bsP.y / 0.105 );",
+    "  shade *= 0.82 + 0.3 * bsN( vec2( bsP.x * 1.4 + bsP.z * 1.4, bsP.y * 55.0 + board * 7.0 ) );",
+    "  shade *= 1.0 - 0.45 * ( 1.0 - smoothstep( 0.0, 0.006, min( fract( bsP.y / 0.105 ), 1.0 - fract( bsP.y / 0.105 ) ) * 0.105 ) ) * ( 1.0 - bsUp );",
+    "  shade *= 1.0 + ( bsH( vec2( board, 2.0 ) ) - 0.5 ) * 0.15;",
+    "  #endif",
+    "  diffuseColor.rgb *= shade * mix( 1.0, 0.72, wet );",
+    "  roughnessFactor = mix( roughnessFactor, 0.12, wet );",
+    // bend the normal: finite differences of the height field along the face
+    "  #if BS_KIND < 5",
+    "  if ( relief > 0.0 && bsFar > 0.0 ) {",
+    "    float ep = 0.006;",
+    "    float gx = ( bsHeight( uv + vec2( ep, 0.0 ), bsUp ) - h ) / ep;",
+    "    float gy = ( bsHeight( uv + vec2( 0.0, ep ), bsUp ) - h ) / ep;",
+    "    vec3 T = bsUp > 0.5 ? vec3( 1.0, 0.0, 0.0 ) : ( bsXf ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) );",
+    "    vec3 B = bsUp > 0.5 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 0.0, 1.0, 0.0 );",
+    "    vec3 Np = normalize( bsN0 - ( gx * T + gy * B ) * relief * bsFar );",
+    "    normal = normalize( ( viewMatrix * vec4( Np, 0.0 ) ).xyz );",
+    "  }",
+    "  #endif",
+    "}",
+  ].join("\n") + "\n";
+
+  // a MeshStandardMaterial that knows what it is made of
+  function surfaceMat(THREE, kind, o) {
+    if (!SURF_U.bsRect.value) SURF_U.bsRect.value = new THREE.Vector4(0, 0, 1e6, 1e6);
+    const m = new THREE.MeshStandardMaterial(Object.assign({ roughness: 0.85, metalness: 0 }, o || {}));
+    m.onBeforeCompile = function (sh) {
+      for (const k in SURF_U) sh.uniforms[k] = SURF_U[k];
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\n" + SURF_VP)
+        .replace("#include <project_vertex>", "#include <project_vertex>\n" + SURF_VM);
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\n#define BS_KIND " + kind + "\n" + SURF_FP)
+        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + SURF_FM);
+    };
+    m.customProgramCacheKey = function () { return "bombsurf-v1-" + kind; };
+    return m;
+  }
+
+  // position + normal only, non-indexed: every builder here feeds this
+  function mergeGeos(THREE, list) {
+    let n = 0;
+    const parts = list.map(function (g) {
+      const u = g.index ? g.toNonIndexed() : g;
+      if (!u.attributes.normal) u.computeVertexNormals();
+      n += u.attributes.position.count;
+      return u;
+    });
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3);
+    let o = 0;
+    for (let i = 0; i < parts.length; i++) {
+      P.set(parts[i].attributes.position.array, o);
+      N.set(parts[i].attributes.normal.array, o);
+      o += parts[i].attributes.position.array.length;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    g.computeBoundingSphere();
+    return g;
   }
 
   // ================================================================ THE SEA
@@ -388,6 +591,7 @@
     }
 
     const cT = [], cM = [], cW = [], cB = [], cc = [];
+    const ladders = [];
     for (let li = 0; li < lands.length; li++) {
       const r = lands[li];
       const topY = (r.kind === "town" ? 0.03 : 0.05) + 0.02;
@@ -406,21 +610,22 @@
           const s0 = segs[si][0], s1 = segs[si][1];
           const n = Math.max(1, Math.round((s1 - s0) / 6));
           const step = (s1 - s0) / n;
+          // one tone per wall run: block-to-block variation comes from the
+          // QUAY surface now, so no more 6 m tinted stripes down the wall
+          tint(CONC, 1, cT); tint(CONC, 0.86, cM); tint(WET, 1, cW); tint(ALGAE, 1, cB);
           for (let k = 0; k < n; k++) {
             const u0 = s0 + k * step, u1 = u0 + step;
             let x0, z0, x1, z1;
             if (e.axis === "x") { x0 = u0; x1 = u1; z0 = z1 = e.line; } else { z0 = u0; z1 = u1; x0 = x1 = e.line; }
-            const j = 0.86 + rng() * 0.22;
-            tint(CONC, j, cT); tint(CONC, j * 0.8, cM); tint(WET, 0.9 + rng() * 0.2, cW); tint(ALGAE, 0.9 + rng() * 0.2, cB);
-            const yM = seaY + 0.28 + rng() * 0.08, yW = seaY - 0.15;
+            const yM = seaY + 0.3, yW = seaY - 0.15;
             vquad(x0, z0, x1, z1, topY, yM, e.nx, e.nz, cT, cM);
             vquad(x0, z0, x1, z1, yM, yW, e.nx, e.nz, cM, cW);
             vquad(x0, z0, x1, z1, yW, -3, e.nx, e.nz, cW, cB);
           }
           // capstone: 0.9 m wide lip standing 0.18 m proud of the deck, 0.25 m past the wall
           const capT = topY + 0.18, capIn = 0.65, capOut = 0.25;
-          tint(CAP, 0.92 + rng() * 0.1, cc);
-          const cs = tint(CAP, 0.8, []);
+          tint(CAP, 1, cc);
+          const cs = tint(CAP, 0.86, []);
           if (e.axis === "x") {
             const zi = e.line - e.nz * capIn, zo = e.line + e.nz * capOut;
             const za = e.nz < 0 ? zo : zi, zb = e.nz < 0 ? zi : zo;      // za < zb
@@ -457,6 +662,10 @@
               const z = e.axis === "x" ? e.line - e.nz * 0.9 : u;
               bollards.push(x, topY, z);
             }
+            // iron ladders down the face, clear of the bollards, every ~64 m
+            for (let u = s0 + 38; u < s1 - 6; u += 64) {
+              ladders.push({ axis: e.axis, line: e.line, u: u, nx: e.nx, nz: e.nz, top: topY - 0.04 });
+            }
           }
         }
       }
@@ -469,7 +678,7 @@
     g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
     g.computeBoundingSphere();
-    const wall = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const wall = new THREE.Mesh(g, surfaceMat(THREE, K.QUAY, { vertexColors: true, roughness: 0.92 }));
     wall.name = "bombQuay";
     wall.receiveShadow = true;
     wall.matrixAutoUpdate = false;
@@ -480,33 +689,77 @@
     const cl = new THREE.Color();
     const nR = rocks.length / 5;
     if (nR > 0) {
-      const rg = new THREE.IcosahedronGeometry(1, 0);
-      const rm = new THREE.InstancedMesh(rg, new THREE.MeshLambertMaterial({ color: 0xffffff }), nR);
-      for (let i = 0; i < nR; i++) {
-        const s = rocks[i * 5 + 3], rr = rocks[i * 5 + 4];
-        e3.set(rr * 6.1, rr * 17.3, rr * 3.7);
-        q.setFromEuler(e3);
-        v.set(rocks[i * 5], rocks[i * 5 + 1], rocks[i * 5 + 2]);
-        sc.set(s * (0.9 + rr * 0.5), s * (0.55 + (1 - rr) * 0.3), s * (1.3 - rr * 0.4));
-        m4.compose(v, q, sc);
-        rm.setMatrixAt(i, m4);
-        const k = 0.34 + ((rr * 7.13) % 1) * 0.16;
-        cl.setRGB(k * 1.02, k, k * 0.93);
-        rm.setColorAt(i, cl);
+      // three quarried shapes, not one squashed d20: a convex block cut by
+      // eight random planes, pulled off an icosphere so it stays watertight
+      const VAR = 3, rockMat = surfaceMat(THREE, K.ROCK, { roughness: 0.95 });
+      const groups = [];
+      for (let vi = 0; vi < VAR; vi++) {
+        const base = new THREE.IcosahedronGeometry(1, 1);
+        const pa = base.attributes.position;
+        const planes = [];
+        for (let k = 0; k < 8; k++) {
+          const a = rng() * Math.PI * 2, b = Math.acos(rng() * 2 - 1);
+          planes.push([Math.sin(b) * Math.cos(a), Math.cos(b), Math.sin(b) * Math.sin(a), 0.72 + rng() * 0.22]);
+        }
+        const bump = rng() * 10;
+        for (let i = 0; i < pa.count; i++) {
+          v.set(pa.getX(i), pa.getY(i), pa.getZ(i)).normalize();
+          let rr = 1.2;
+          for (let k = 0; k < planes.length; k++) {
+            const P = planes[k], d = v.x * P[0] + v.y * P[1] + v.z * P[2];
+            if (d > 0.05) rr = Math.min(rr, P[3] / d);
+          }
+          rr *= 1 + 0.05 * Math.sin(v.x * 7 + bump) * Math.sin(v.z * 6 - bump);
+          pa.setXYZ(i, v.x * rr, v.y * rr, v.z * rr);
+        }
+        base.computeVertexNormals();
+        const list = [];
+        list.geo = base;
+        groups.push(list);
       }
-      rm.instanceMatrix.needsUpdate = true;
-      if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
-      rm.receiveShadow = true;
-      rm.name = "bombRipRap";
-      rm.matrixAutoUpdate = false;
-      rm.updateMatrix();
-      out.push(rm);
+      for (let i = 0; i < nR; i++) groups[Math.min(VAR - 1, Math.floor(((rocks[i * 5 + 4] * 13.7) % 1) * VAR))].push(i);
+      for (let vi = 0; vi < VAR; vi++) {
+        const list = groups[vi];
+        if (!list.length) continue;
+        const rm = new THREE.InstancedMesh(list.geo, rockMat, list.length);
+        for (let j = 0; j < list.length; j++) {
+          const i = list[j];
+          const s = rocks[i * 5 + 3], rr = rocks[i * 5 + 4];
+          e3.set((rr - 0.5) * 0.5, rr * 17.3, (((rr * 3.7) % 1) - 0.5) * 0.5);
+          q.setFromEuler(e3);
+          v.set(rocks[i * 5], rocks[i * 5 + 1], rocks[i * 5 + 2]);
+          sc.set(s * (0.9 + rr * 0.5), s * (0.6 + (1 - rr) * 0.3), s * (1.3 - rr * 0.4));
+          m4.compose(v, q, sc);
+          rm.setMatrixAt(j, m4);
+          const k = 0.4 + ((rr * 7.13) % 1) * 0.18;
+          cl.setRGB(k * 1.03, k, k * 0.94);
+          rm.setColorAt(j, cl);
+        }
+        rm.instanceMatrix.needsUpdate = true;
+        if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
+        rm.receiveShadow = true;
+        rm.name = "bombRipRap";
+        rm.matrixAutoUpdate = false;
+        rm.updateMatrix();
+        out.push(rm);
+      }
     }
+    const ironMat = surfaceMat(THREE, K.IRON, { color: 0x1d1f21, roughness: 0.6, metalness: 0.15 });
     const nB = bollards.length / 3;
     if (nB > 0) {
-      const bg = new THREE.CylinderGeometry(0.2, 0.27, 0.75, 8);
-      bg.translate(0, 0.375, 0);
-      const bm = new THREE.InstancedMesh(bg, new THREE.MeshLambertMaterial({ color: 0x2c2e30 }), nB);
+      // a real mooring bollard: bolted base plate, waisted post, mushroom head
+      const prof = [[0.24, 0.05], [0.24, 0.09], [0.17, 0.13], [0.15, 0.4], [0.16, 0.52], [0.23, 0.6], [0.26, 0.66], [0.25, 0.71], [0.18, 0.75], [0.0, 0.76]]
+        .map(function (p) { return new THREE.Vector2(p[0], p[1]); });
+      const post = new THREE.LatheGeometry(prof, 14);
+      const plate = new THREE.BoxGeometry(0.62, 0.05, 0.62); plate.translate(0, 0.025, 0);
+      const bolts = [];
+      for (let k = 0; k < 4; k++) {
+        const bo = new THREE.CylinderGeometry(0.035, 0.035, 0.04, 6);
+        bo.translate((k & 1 ? 1 : -1) * 0.24, 0.07, (k & 2 ? 1 : -1) * 0.24);
+        bolts.push(bo);
+      }
+      const bg = mergeGeos(THREE, [post, plate].concat(bolts));
+      const bm = new THREE.InstancedMesh(bg, ironMat, nB);
       for (let i = 0; i < nB; i++) {
         m4.makeTranslation(bollards[i * 3], bollards[i * 3 + 1], bollards[i * 3 + 2]);
         bm.setMatrixAt(i, m4);
@@ -519,7 +772,70 @@
       bm.updateMatrix();
       out.push(bm);
     }
+    if (ladders.length) {
+      // two flat-bar stringers stood 12 cm off the face, round rungs at 30 cm,
+      // from under the coping lip down past low water. One merged mesh.
+      const parts = [];
+      for (let i = 0; i < ladders.length; i++) {
+        const L = ladders[i];
+        const yT = L.top, yB = -2.6, hgt = yT - yB, off = 0.12;
+        for (let sgn = -1; sgn <= 1; sgn += 2) {
+          const rail = new THREE.BoxGeometry(L.axis === "x" ? 0.05 : 0.06, hgt, L.axis === "x" ? 0.06 : 0.05);
+          const x = L.axis === "x" ? L.u + sgn * 0.23 : L.line + L.nx * off;
+          const z = L.axis === "x" ? L.line + L.nz * off : L.u + sgn * 0.23;
+          rail.translate(x, yB + hgt / 2, z);
+          parts.push(rail);
+        }
+        for (let y = yT - 0.2; y > yB + 0.1; y -= 0.3) {
+          const rung = new THREE.CylinderGeometry(0.016, 0.016, 0.46, 6);
+          rung.rotateZ(Math.PI / 2);
+          if (L.axis === "z") rung.rotateY(Math.PI / 2);
+          rung.translate(L.axis === "x" ? L.u : L.line + L.nx * off, y, L.axis === "x" ? L.line + L.nz * off : L.u);
+          parts.push(rung);
+        }
+      }
+      const lm = new THREE.Mesh(mergeGeos(THREE, parts), ironMat);
+      lm.name = "bombLadders";
+      lm.castShadow = true; lm.receiveShadow = true;
+      lm.matrixAutoUpdate = false; lm.updateMatrix();
+      out.push(lm);
+    }
     return out;
+  }
+
+  /* THE HARBOUR APRON. The strip of quay between the town's own pad and the
+     coping: granite setts, a band of big kerb flags along the edge. Built as
+     a frame around the town pad (hole = the pad), never under it, so the two
+     never fight for the same pixel from altitude. */
+  function buildApron(THREE, outer, hole) {
+    const y = 0.005;                                   // 2.5 cm under the pad (0.03)
+    const rects = [];
+    if (!hole) rects.push([outer.minX, outer.maxX, outer.minZ, outer.maxZ]);
+    else {
+      const ov = 0.05;                                   // tuck just under the pad edge
+      rects.push([outer.minX, outer.maxX, outer.minZ, hole.minZ + ov]);
+      rects.push([outer.minX, outer.maxX, hole.maxZ - ov, outer.maxZ]);
+      rects.push([outer.minX, hole.minX + ov, hole.minZ + ov, hole.maxZ - ov]);
+      rects.push([hole.maxX - ov, outer.maxX, hole.minZ + ov, hole.maxZ - ov]);
+    }
+    const parts = [];
+    for (let i = 0; i < rects.length; i++) {
+      const R = rects[i];
+      if (R[1] - R[0] < 0.1 || R[3] - R[2] < 0.1) continue;
+      const pg = new THREE.PlaneGeometry(R[1] - R[0], R[3] - R[2]);
+      pg.rotateX(-Math.PI / 2);
+      pg.translate((R[0] + R[1]) / 2, y, (R[2] + R[3]) / 2);
+      parts.push(pg);
+    }
+    if (!SURF_U.bsRect.value) SURF_U.bsRect.value = new THREE.Vector4();
+    SURF_U.bsRect.value.set((outer.minX + outer.maxX) / 2, (outer.minZ + outer.maxZ) / 2,
+      (outer.maxX - outer.minX) / 2, (outer.maxZ - outer.minZ) / 2);
+    const m = new THREE.Mesh(mergeGeos(THREE, parts), surfaceMat(THREE, K.SETTS, { color: 0x77736c, roughness: 0.88 }));
+    m.name = "bombApron";
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false; m.updateMatrix();
+    m.userData.terrain = true;
+    return m;
   }
 
   // ============================================================== THE SMOKE
@@ -931,6 +1247,266 @@
     };
   }
 
+  // ============================================================ THE FLAK KIT
+  /* A 40 mm twin mount in a sandbag pit, built as the thing it is instead of
+     a cylinder on a cylinder with a box for a shield and three crates stacked
+     at random by the door:
+       - a cruciform platform with levelling jacks, a flanged pedestal
+       - a turntable carrying two carriage cheeks (the trunnions sit in them),
+         hand-wheels, two layers' seats on arms, a reflector sight
+       - an armour shield with the barrel slot cut out and swept-back wings
+       - breech housing, a four-round clip standing in each feed guide,
+         barrels with recoil-spring sleeves and flared flash hiders
+       - SANDBAGS: pillow-shaped hessian sacks (60 x 34 x 16 cm, the real
+         size), six courses in running bond, battered inward, one entry
+       - ready ammunition: two wooden chests square against the pit wall, one
+         open with its clips showing, and spent brass on the ground
+     One set of geometries and materials shared by every gun (built once).
+     Rotating parts use OBJECT-space surfaces so the paint chips turn with
+     the mount rather than swimming across it. */
+  let FLAK = null;
+  function hessianTexture(THREE) {
+    const N = 128, c = document.createElement("canvas");
+    c.width = c.height = N;
+    const x = c.getContext("2d");
+    const img = x.createImageData(N, N), d = img.data;
+    const rng = rngFrom(null, "bombscene-hessian");
+    const blot = [];
+    for (let i = 0; i < 7; i++) blot.push([rng() * N, rng() * N, 10 + rng() * 26, 0.12 + rng() * 0.18]);
+    for (let y = 0; y < N; y++) for (let i = 0; i < N; i++) {
+      // plain weave: warp over weft in a checker of 2 px threads, each thread
+      // a little thicker or thinner than its neighbour
+      const tx = i >> 1, ty = y >> 1;
+      const over = (tx + ty) & 1;
+      const across = over ? (i & 1) : (y & 1);
+      let v = 0.78 + 0.16 * (over ? 1 : 0.6) - 0.1 * across + (rng() - 0.5) * 0.12;
+      v *= 0.92 + 0.08 * Math.sin(tx * 1.7 + ty * 0.3) * Math.sin(ty * 2.3);
+      for (let k = 0; k < blot.length; k++) {
+        const B = blot[k];
+        let dx = Math.abs(i - B[0]), dy = Math.abs(y - B[1]);
+        dx = Math.min(dx, N - dx); dy = Math.min(dy, N - dy);
+        const r = Math.sqrt(dx * dx + dy * dy) / B[2];
+        if (r < 1) v *= 1 - B[3] * (1 - r * r);               // earth and damp
+      }
+      const o = (y * N + i) * 4;
+      d[o] = Math.min(255, 156 * v); d[o + 1] = Math.min(255, 132 * v); d[o + 2] = Math.min(255, 92 * v); d[o + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(3, 2);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = 4;
+    return t;
+  }
+  function sandbagGeometry(THREE) {
+    // a box pushed out to a rounded pillow, ends gathered, the top sagging
+    const g = new THREE.BoxGeometry(1, 1, 1, 4, 2, 2);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i) * 2, y = p.getY(i) * 2, z = p.getZ(i) * 2;
+      const end = Math.pow(Math.abs(x), 3);
+      const round = 1 - 0.35 * (1 - (1 - y * y) * (1 - z * z));
+      y *= (1 - 0.5 * end) * (y < 0 ? 0.8 : 1) * round;
+      z *= (1 - 0.3 * end) * round;
+      x *= 1 - 0.06 * (1 - Math.abs(y));
+      p.setXYZ(i, x * 0.3, y * 0.08 + 0.08, z * 0.17);
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+  function flakKit(THREE) {
+    if (FLAK) return FLAK;
+    const M = {
+      paint: surfaceMat(THREE, K.PAINT, { color: 0x4d553f, roughness: 0.72, metalness: 0.2 }),
+      gunmetal: surfaceMat(THREE, K.PAINT, { color: 0x2b2d2b, roughness: 0.5, metalness: 0.35 }),
+      wood: surfaceMat(THREE, K.WOOD, { color: 0x5b5a3a, roughness: 0.85 }),
+      brass: new THREE.MeshStandardMaterial({ color: 0xa47e3a, roughness: 0.38, metalness: 0.45 }),
+      sack: new THREE.MeshLambertMaterial({ color: 0xffffff, map: hessianTexture(THREE) }),
+      char: new THREE.MeshLambertMaterial({ color: 0x1b1a18 }),
+    };
+    const V2 = function (a) { return a.map(function (p) { return new THREE.Vector2(p[0], p[1]); }); };
+    const box = function (w, h, d, x, y, z) { const b = new THREE.BoxGeometry(w, h, d); b.translate(x, y, z); return b; };
+    const cyl = function (r0, r1, h, seg, open) { return new THREE.CylinderGeometry(r0, r1, h, seg, 1, !!open); };
+
+    // ---- the platform (root, never moves) ----
+    const base = [box(4.4, 0.2, 0.32, 0, 0.12, 0), box(0.32, 0.2, 4.4, 0, 0.12, 0)];
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2, ex = Math.cos(a) * 2.1, ez = Math.sin(a) * 2.1;
+      const pad = cyl(0.24, 0.26, 0.05, 12); pad.translate(ex, 0.025, ez); base.push(pad);
+      const jack = cyl(0.045, 0.045, 0.22, 8); jack.translate(ex, 0.14, ez); base.push(jack);
+      const wheel = new THREE.TorusGeometry(0.1, 0.014, 5, 12); wheel.rotateX(Math.PI / 2); wheel.translate(ex, 0.27, ez); base.push(wheel);
+    }
+    const pedestal = new THREE.LatheGeometry(V2([[0.62, 0.22], [0.62, 0.3], [0.46, 0.34], [0.4, 0.44], [0.38, 0.9], [0.5, 0.94], [0.52, 1.02], [0.0, 1.02]]), 18);
+    const geo = { base: mergeGeos(THREE, base), pedestal: pedestal };
+
+    // ---- the turntable and carriage (yaw) ----
+    const table = new THREE.LatheGeometry(V2([[0.0, 0.0], [1.0, 0.0], [1.02, 0.04], [1.0, 0.12], [0.9, 0.14], [0.0, 0.14]]), 28);
+    const car = [table];
+    const cheek = new THREE.Shape();
+    cheek.moveTo(-0.72, 0.1); cheek.lineTo(0.62, 0.1); cheek.lineTo(0.4, 0.62); cheek.lineTo(0.22, 0.92);
+    cheek.lineTo(-0.04, 0.95); cheek.lineTo(-0.34, 0.7); cheek.lineTo(-0.72, 0.36); cheek.closePath();
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      const cg = new THREE.ExtrudeGeometry(cheek, { depth: 0.035, bevelEnabled: false });
+      cg.rotateY(-Math.PI / 2);                          // shape x -> world z, depth -> world -x
+      cg.translate(sgn * 0.44 + 0.0175, 0, 0.1);
+      car.push(cg);
+      const boss = cyl(0.11, 0.11, 0.1, 14); boss.rotateZ(Math.PI / 2); boss.translate(sgn * 0.49, 0.75, 0.1); car.push(boss);
+      const wheel = new THREE.TorusGeometry(0.16, 0.018, 6, 18); wheel.rotateY(Math.PI / 2); wheel.translate(sgn * 0.66, 0.58, -0.22); car.push(wheel);
+      const hub = cyl(0.02, 0.02, 0.2, 6); hub.rotateZ(Math.PI / 2); hub.translate(sgn * 0.56, 0.58, -0.22); car.push(hub);
+      const knob = cyl(0.018, 0.018, 0.1, 6); knob.rotateZ(Math.PI / 2); knob.translate(sgn * 0.71, 0.72, -0.22); car.push(knob);
+      // layer's seat on an arm off the cheek
+      const arm = box(0.34, 0.04, 0.05, sgn * 0.62, 0.36, -0.55); car.push(arm);
+      const post = cyl(0.025, 0.025, 0.14, 6); post.translate(sgn * 0.78, 0.43, -0.55); car.push(post);
+      car.push(box(0.36, 0.045, 0.3, sgn * 0.78, 0.52, -0.58));
+      car.push(box(0.34, 0.22, 0.035, sgn * 0.78, 0.66, -0.74));
+    }
+    // reflector sight on the right cheek
+    car.push(box(0.05, 0.3, 0.05, 0.36, 1.05, -0.1));
+    const sr = new THREE.TorusGeometry(0.09, 0.012, 5, 16); sr.translate(0.36, 1.25, -0.1); car.push(sr);
+    geo.carriage = mergeGeos(THREE, car);
+
+    // shield: a front plate with the barrel slot cut in, two swept wings
+    const sh = new THREE.Shape();
+    sh.moveTo(-1.05, 0.14); sh.lineTo(1.05, 0.14); sh.lineTo(1.05, 1.18); sh.lineTo(0.42, 1.3);
+    sh.lineTo(0.42, 0.6); sh.lineTo(-0.42, 0.6); sh.lineTo(-0.42, 1.3); sh.lineTo(-1.05, 1.18); sh.closePath();
+    const plate = new THREE.ExtrudeGeometry(sh, { depth: 0.014, bevelEnabled: false });
+    plate.rotateX(-0.1); plate.translate(0, 0, 0.9);
+    const shieldParts = [plate];
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      // each wing its own shape (mirroring by scale would turn it inside out)
+      const wingS = new THREE.Shape();
+      wingS.moveTo(0, 0.14); wingS.lineTo(sgn * 0.55, 0.14); wingS.lineTo(sgn * 0.55, 1.0); wingS.lineTo(0, 1.18); wingS.closePath();
+      const w = new THREE.ExtrudeGeometry(wingS, { depth: 0.014, bevelEnabled: false });
+      w.rotateY(sgn * 0.62);
+      w.translate(sgn * 1.05, 0, 0.9);
+      shieldParts.push(w);
+      shieldParts.push(box(0.04, 0.08, 0.36, sgn * 0.44, 0.3, 0.72));     // bracket to the cheek
+    }
+    geo.shield = mergeGeos(THREE, shieldParts);
+
+    // ---- the elevating mass (pitch; pivot at the trunnions, barrels along +Z) ----
+    const breech = [box(0.52, 0.4, 0.8, 0, 0, -0.05), box(0.62, 0.08, 0.5, 0, -0.2, -0.05)];
+    const trun = cyl(0.07, 0.07, 0.96, 10); trun.rotateZ(Math.PI / 2); breech.push(trun);
+    const barrel = [], brass = [];
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      const x = sgn * 0.19;
+      // feed guide standing over each breech, a clip of four rounds in it
+      breech.push(box(0.035, 0.34, 0.3, x - 0.08, 0.37, -0.25), box(0.035, 0.34, 0.3, x + 0.08, 0.37, -0.25));
+      for (let r = 0; r < 4; r++) {
+        const rd = cyl(0.021, 0.021, 0.36, 8); rd.translate(x, 0.38, -0.36 + r * 0.075); brass.push(rd);
+        const tip = cyl(0.004, 0.021, 0.08, 8); tip.translate(x, 0.6, -0.36 + r * 0.075); brass.push(tip);
+      }
+      const tube = cyl(0.042, 0.055, 2.85, 12); tube.rotateX(Math.PI / 2); tube.translate(x, 0.02, 1.82); barrel.push(tube);
+      const spring = cyl(0.085, 0.085, 0.95, 14); spring.rotateX(Math.PI / 2); spring.translate(x, 0.02, 0.85); barrel.push(spring);
+      const collar = cyl(0.07, 0.07, 0.08, 12); collar.rotateX(Math.PI / 2); collar.translate(x, 0.02, 1.36); barrel.push(collar);
+      const hider = cyl(0.095, 0.055, 0.34, 12, true); hider.rotateX(Math.PI / 2); hider.translate(x, 0.02, 3.4); barrel.push(hider);
+    }
+    geo.breech = mergeGeos(THREE, breech);
+    geo.barrels = mergeGeos(THREE, barrel);
+    geo.clips = mergeGeos(THREE, brass);
+
+    // ---- ready ammunition: two chests, one open ----
+    const chest = [];
+    function addChest(open) {
+      const L = [box(0.74, 0.28, 0.36, 0, 0.14, 0)];
+      if (!open) L.push(box(0.78, 0.05, 0.4, 0, 0.305, 0));
+      else { const lid = new THREE.BoxGeometry(0.78, 0.4, 0.04); lid.rotateX(0.25); lid.translate(0, 0.49, 0.23); L.push(lid); }   // hinged back against the wall
+      for (let sgn = -1; sgn <= 1; sgn += 2) L.push(box(0.03, 0.05, 0.14, sgn * 0.385, 0.2, 0));   // rope beckets
+      return L;
+    }
+    geo.chestShut = mergeGeos(THREE, addChest(false));
+    geo.chestOpen = mergeGeos(THREE, addChest(true));
+    const inChest = [];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) {
+      const cl = box(0.3, 0.05, 0.13, -0.17 + c * 0.34, 0.25, -0.1 + r * 0.1);
+      inChest.push(cl);
+    }
+    geo.chestClips = mergeGeos(THREE, inChest);
+    const casing = cyl(0.021, 0.021, 0.31, 8); casing.rotateZ(Math.PI / 2); casing.translate(0, 0.021, 0);
+    geo.casing = casing;
+    geo.bag = sandbagGeometry(THREE);
+
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+    const Y = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
+    function mesh(g, m, shadow) {
+      const o = new THREE.Mesh(g, m);
+      o.castShadow = shadow !== false; o.receiveShadow = true;
+      return o;
+    }
+
+    function build(x, gy, z, rnd) {
+      rnd = rnd || Math.random;
+      const root = new THREE.Group();
+      root.position.set(x, gy, z);
+      // the pit: six courses, 38 bags round, the entry facing +Z
+      const R0 = 3.75, COURSES = 6, PER = 38, GAP = 0.34;
+      const bags = new THREE.InstancedMesh(geo.bag, M.sack, COURSES * PER);
+      let k = 0;
+      for (let c = 0; c < COURSES; c++) {
+        const R = R0 - c * 0.035;
+        for (let i = 0; i < PER; i++) {
+          const a = (i + (c & 1 ? 0.5 : 0)) / PER * Math.PI * 2;
+          let da = a - Math.PI * 0.5; while (da > Math.PI) da -= Math.PI * 2; while (da < -Math.PI) da += Math.PI * 2;
+          if (Math.abs(da) < GAP) continue;
+          p.set(Math.cos(a) * R, c * 0.15 - 0.005, Math.sin(a) * R);
+          q.setFromAxisAngle(Y, -a + Math.PI / 2 + (rnd() - 0.5) * 0.12);
+          s.set(1 + (rnd() - 0.5) * 0.1, 0.92 + rnd() * 0.16, 1 + (rnd() - 0.5) * 0.1);
+          m4.compose(p, q, s);
+          bags.setMatrixAt(k, m4);
+          const t = 0.82 + rnd() * 0.26;
+          col.setRGB(t, t * (0.96 + rnd() * 0.06), t * (0.9 + rnd() * 0.1));
+          bags.setColorAt(k, col);
+          k++;
+        }
+      }
+      bags.count = k; bags.castShadow = true; bags.receiveShadow = true;
+      if (bags.instanceColor) bags.instanceColor.needsUpdate = true;
+      root.add(bags);
+
+      root.add(mesh(geo.base, M.paint));
+      const ped = mesh(geo.pedestal, M.paint); root.add(ped);
+      const yaw = new THREE.Group(); yaw.position.y = 1.05; root.add(yaw);
+      const carriage = mesh(geo.carriage, M.paint); yaw.add(carriage);
+      const shield = mesh(geo.shield, M.paint); yaw.add(shield);
+      const pitch = new THREE.Group(); pitch.position.set(0, 0.75, 0.1); yaw.add(pitch);
+      const breech = mesh(geo.breech, M.paint); pitch.add(breech);
+      pitch.add(mesh(geo.barrels, M.gunmetal));
+      pitch.add(mesh(geo.clips, M.brass, false));
+
+      // ready ammunition square against the pit wall, either side of the entry
+      const chests = [[geo.chestShut, 0.62], [geo.chestOpen, 0.88], [geo.chestShut, -1.25]];
+      for (let i = 0; i < chests.length; i++) {
+        const a = Math.PI * 0.5 + chests[i][1];
+        const R = R0 - 0.55;
+        const ch = mesh(chests[i][0], M.wood);
+        ch.position.set(Math.cos(a) * R, 0, Math.sin(a) * R);
+        ch.rotation.y = -a + Math.PI / 2;
+        root.add(ch);
+        if (chests[i][0] === geo.chestOpen) {
+          const cl = mesh(geo.chestClips, M.brass, false);
+          cl.position.copy(ch.position); cl.rotation.copy(ch.rotation);
+          root.add(cl);
+        }
+      }
+      // spent brass, thrown out to the right of the breech and lying there
+      const cas = new THREE.InstancedMesh(geo.casing, M.brass, 14);
+      for (let i = 0; i < 14; i++) {
+        const a = 0.25 + rnd() * 1.05, r = 1.3 + rnd() * 1.4;      // clear of the platform arms
+        p.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+        q.setFromAxisAngle(Y, rnd() * Math.PI * 2);
+        s.set(1, 1, 1);
+        m4.compose(p, q, s);
+        cas.setMatrixAt(i, m4);
+      }
+      cas.receiveShadow = true;
+      root.add(cas);
+      return { root: root, yaw: yaw, pitch: pitch, parts: [ped, carriage, shield, breech] };
+    }
+    FLAK = { build: build, paint: M.paint, char: M.char, materials: M };
+    return FLAK;
+  }
+
   // ============================================================== THE GRADE
   const GRADE = {
     skyTop: 0x4d77a3, skyBot: 0xe2c49e,            // deep blue overhead, dusty warm horizon
@@ -1014,8 +1590,17 @@
     if (opts.replaceSea !== false) scene.add(sea.mesh);
 
     // ---- shore ----
+    SURF_U.bsSeaY.value = seaY;
     const shore = buildShore(THREE, CBZ, lands, seaY);
     for (let i = 0; i < shore.length; i++) scene.add(shore[i]);
+    // ---- the harbour apron round the town pad ----
+    let apron = null;
+    for (let i = 0; i < lands.length; i++) {
+      if (lands[i].kind !== "town") continue;
+      apron = buildApron(THREE, lands[i], opts.apronHole || null);
+      scene.add(apron);
+      break;
+    }
 
     // ---- smoke ----
     const puffTex = makePuffTexture(THREE, rngFrom(CBZ, "bombscene-puff"));
@@ -1049,6 +1634,7 @@
         set wave(v) { sea.uniforms.uWave.value = v; }, get wave() { return sea.uniforms.uWave.value; },
       },
       shore: shore,
+      apron: apron,
       sunDir: sunDir,
       grade: G,
     };
@@ -1056,5 +1642,8 @@
     return handle;
   }
 
-  window.BombScene = { install: install, _handle: null };
+  window.BombScene = {
+    install: install, _handle: null,
+    flakKit: function (THREE) { return flakKit(THREE || window.THREE); },
+  };
 })();
