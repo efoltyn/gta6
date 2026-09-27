@@ -68,8 +68,6 @@
 
    Flags: CBZ.CONFIG.SURV_SHUFFLE (seeded per-run order, default on) ·
    CBZ.CONFIG.SURV_TELEGRAPH (warn tint/shake/cue, default on) ·
-   CBZ.CONFIG.SURV_TSUNAMI_V2 (the rebuilt tsunami event arc, default on;
-   false restores the legacy wall — see TSUNAMI_LEGACY below) ·
    SURV_SHOW_DONT_TELL · SURV_SHARED_WATER · SURV_SHARED_WEATHER ·
    SURV_SHARED_STRUCTURE (each a one-line revert to the old fork).
 
@@ -821,9 +819,7 @@
       },
     },
 
-    // ---- TSUNAMI: assigned right after this roster (DEFS.flood, below).
-    //      CBZ.CONFIG.SURV_TSUNAMI_V2 (default true) picks the rebuilt
-    //      real-event arc; false restores the legacy layered-plane wall. ----
+    // ---- TSUNAMI: assigned right after this roster (DEFS.flood, below). ----
 
     /* ---- FLASH FLOOD, REBUILT AS RAIN-FED (2026-08-03) -----------------------
        OWNER: "rain makes flash flood which is gang city water slowly filling
@@ -1953,126 +1949,9 @@
     },
   };
 
-  // ============================================================
-  // TSUNAMI — two implementations share the "flood" roster slot.
-  //
-  // TSUNAMI_LEGACY is the old build, preserved verbatim (flag off).
-  // Why it "didn't work": every water check tested the TERRAIN height
-  // (floor(x,z)) instead of the actor's actual Y — so a player on a
-  // tower roof 30m above the water was "caught" by the wall and then
-  // "drowned" bone dry, while the arena's own comments call roofs the
-  // tsunami refuge. And the flood pool rose everywhere AT ONCE, island-
-  // wide, from second one — you were drowning in water that visually
-  // hadn't arrived, ahead of the wave front. Wall + pool were two
-  // unrelated systems; the event had no arc.
-  //
-  // TSUNAMI_V2 is a real event arc:
-  //   WARN   — sirens; the whole OCEAN visibly recedes off the shelf,
-  //            exposing a huge ring of seabed (arena.ocean/seabed).
-  //   SWEEP  — one towering curling WALL (a single vertex-colored
-  //            ribbon mesh) surges across the island from a random
-  //            compass direction; the flood sheet advances only BEHIND
-  //            the front. Anyone actually below the crest is ragdolled
-  //            downstream; cars tumble; small buildings collapse; tower
-  //            glass blows out. Actual altitude is what saves you.
-  //   FLOOD  — the island stays under: player swims (buoyancy + drag +
-  //            stamina-as-air, the city swim.js pattern), bots paddle
-  //            and drown, corpses and debris planks float and drift.
-  //   DRAIN  — the water runs back out; planks strand; the ocean parks
-  //            back at its resting level.
-  // ============================================================
-  const TSUNAMI_LEGACY = {
-    name: "TSUNAMI", emoji: "", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
-    warn(ctx) { narrate("hint", "TSUNAMI, get to HIGH GROUND!", 3); sound("water"); },
-    start(ctx) {
-      // the rising flood pool that ultimately drowns the low ground
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(ctx.R * 3, ctx.R * 3),
-        new THREE.MeshLambertMaterial({ color: 0x2f7fb8, transparent: true, opacity: 0.8 }));
-      m.rotation.x = -Math.PI / 2; m.position.set(ctx.cx, -3, ctx.cz); m.renderOrder = 2;
-      m.material.depthWrite = false; root().add(m);
-      ctx.st.water = m; ctx.st.y = -3; ctx.st.peak = Math.min(ctx.arena.hills[0].peak - 3, 8 + scale(4, ctx));
-      const W = ctx.R * 3, Hh = 34;
-      const wave = new THREE.Group();
-      const planeL = (w, h, col, op, basic) => new THREE.Mesh(new THREE.PlaneGeometry(w, h),
-        (basic ? new THREE.MeshBasicMaterial : new THREE.MeshLambertMaterial)({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false }));
-      const base = planeL(W, Hh, 0x123c5e, 0.96); base.position.y = Hh / 2; base.renderOrder = 3;
-      const body = planeL(W, Hh * 0.94, 0x2a7fb1, 0.6); body.position.set(0, Hh * 0.5, 0.6); body.renderOrder = 3;
-      const lip = planeL(W, Hh * 0.42, 0x4aa6c8, 0.82); lip.position.set(0, Hh - Hh * 0.18, 2.8); lip.rotation.x = -0.98; lip.renderOrder = 4;
-      const crest = planeL(W, 6.5, 0xf2fbff, 0.92, true); crest.position.set(0, Hh - 2.6, 3.7); crest.rotation.x = -0.86; crest.renderOrder = 5;
-      const footFoam = planeL(W, 8, 0xeaf6ff, 0.85, true); footFoam.position.set(0, 3.4, 3.4); footFoam.rotation.x = -1.2; footFoam.renderOrder = 5;
-      wave.add(base, body, lip, crest, footFoam);
-      const streaks = [];
-      for (let i = 0; i < 9; i++) {
-        const st = planeL(1.2 + rnd() * 2.6, Hh * (0.45 + rnd() * 0.45), 0xdff1fb, 0.3, true);
-        st.position.set((rnd() - 0.5) * W * 0.88, Hh * 0.48, 1.1); st.renderOrder = 4;
-        wave.add(st); streaks.push(st);
-      }
-      wave.rotation.y = -Math.PI / 2;          // face +x, the travel direction
-      ctx.st.waveX = ctx.cx - (ctx.R + 24);
-      wave.position.set(ctx.st.waveX, ctx.st.y, ctx.cz);
-      root().add(wave);
-      ctx.st.wave = wave; ctx.st.waveH = Hh; ctx.st.passed = false;
-      ctx.st.foam = [crest, footFoam]; ctx.st.streaks = streaks;
-      ctx.st.waveSpeed = (2 * ctx.R + 48) / (ctx.activeSecs * 0.5);
-      ctx.st.waveId = (ctx.st.waveId || 0) + 1 + rnd();
-      ctx.st.spray = CBZ.fx.particleCloud({ mode: "fall", color: 0xeaf6ff, count: 340, radius: ctx.R, top: 13, size: 0.24, opacity: 0.75, vMin: 10, vMax: 20, drift: 8 });
-      ctx.st.spray.setActive(0.95);
-      if (CBZ.shake) CBZ.shake(0.85);
-    },
-    active(dt, ctx) {
-      const baseY = ctx.st.y;
-      if (!ctx.st.passed) {
-        ctx.st.waveX += ctx.st.waveSpeed * dt;
-        ctx.st.wave.position.set(ctx.st.waveX, baseY + Math.sin(CBZ.now * 0.006) * 0.5, ctx.cz);
-        ctx.st.wave.rotation.z = Math.sin(CBZ.now * 0.004) * 0.02;
-        if (ctx.st.foam) for (let i = 0; i < ctx.st.foam.length; i++) ctx.st.foam[i].material.opacity = 0.62 + 0.3 * Math.abs(Math.sin(CBZ.now * 0.02 + i * 1.7));
-        if (ctx.st.streaks) for (let i = 0; i < ctx.st.streaks.length; i++) { const s = ctx.st.streaks[i]; s.material.opacity = 0.18 + 0.22 * Math.abs(Math.sin(CBZ.now * 0.013 + i)); s.position.y = ctx.st.waveH * (0.42 + 0.05 * Math.sin(CBZ.now * 0.01 + i * 2)); }
-        ctx.st.spray.update(dt, ctx.st.waveX, baseY + ctx.st.waveH * 0.8, ctx.cz);
-        if (rnd() < dt * 7) sound("water");
-        const dpx = Math.abs(CBZ.player.pos.x - ctx.st.waveX);
-        if (dpx < 26 && CBZ.shake) CBZ.shake(0.28 * (1 - dpx / 26));
-        surv().forEachActor(function (a) {
-          if (floor(a.pos.x, a.pos.z) > baseY + 7) return;       // safe up high
-          if (a.pos.x <= ctx.st.waveX + 1.5 && a.pos.x >= ctx.st.waveX - 6 && a._waveId !== ctx.st.waveId) {
-            a._waveId = ctx.st.waveId;
-            if (CBZ.body) CBZ.body.hit(a, { dir: { x: 1, z: 0 }, force: 11, fling: 6 });
-            surv().hurt(a, scale(26, ctx));
-          }
-        });
-        const A = ctx.arena;
-        if (A.cars) for (let i = 0; i < A.cars.length; i++) { const car = A.cars[i]; if (!car.flung && car.x <= ctx.st.waveX + 2 && car.x >= ctx.st.waveX - 9 && floor(car.x, car.z) <= baseY + 7) flingCar(car, 1, 0, 16 + scale(7, ctx), 8); }
-        // A BUILDING FALLS THE WAY THE WATER PUSHED IT. The wave travels +x,
-        // so the wound is on the seaward face and the collapse grammar hinges
-        // it inland — which is what every photograph of a tsunami-struck
-        // street shows, and it costs one argument. `preShudder: 0` because the
-        // wave is ALREADY on the building; there is nothing to telegraph.
-        for (let i = 0; i < A.fragile.length; i++) { const b = A.fragile[i]; if (!b.fallen && b.x <= ctx.st.waveX + 2 && b.x >= ctx.st.waveX - 10 && floor(b.x, b.z) <= baseY + 9) collapse(b, ctx, { dirx: 1, dirz: 0, preShudder: 0 }); }
-        if (ctx.st.waveX > ctx.cx + ctx.R + 24) { ctx.st.passed = true; ctx.st.wave.visible = false; ctx.st.spray.setActive(0); }
-      }
-      ctx.st.y += (ctx.st.peak - ctx.st.y) * Math.min(1, dt * (ctx.st.passed ? 0.5 : 0.16));
-      const wy = ctx.st.y + Math.sin(CBZ.now * 0.004) * 0.18;
-      ctx.st.water.position.y = wy;
-      let playerSub = false;
-      surv().forEachActor(function (a) {
-        const gH = floor(a.pos.x, a.pos.z), sub = wy - gH;
-        if (sub > 1.7) { surv().hurt(a, scale(22, ctx) * dt, { cause: "drowned in the floodwater" }); if (a.isPlayer) playerSub = true; }
-        else if (sub > 0.5 && !a.isPlayer) { a.pos.x += (ctx.arena.hills[0].x - a.pos.x) * 0.02 * dt; a.pos.z += (ctx.arena.hills[0].z - a.pos.z) * 0.02 * dt; }
-      });
-      if (playerSub) { ctx.env.fog = 0x14506e; ctx.env.fogNear = 2; ctx.env.fogFar = 26; }
-    },
-    end(ctx) {
-      if (ctx.st.water) rmMesh(ctx.st.water);
-      if (ctx.st.wave) { ctx.st.wave.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(ctx.st.wave); }
-      if (ctx.st.spray) ctx.st.spray.dispose();
-    },
-    threat(x, z, ctx) {
-      let t = 0;
-      if (ctx.st.wave && !ctx.st.passed) { const d = Math.abs(x - (ctx.st.waveX || 0)); if (d < 30) t = Math.max(t, 0.6 + 0.4 * (1 - d / 30)); }
-      const sub = (ctx.st.y || -3) - floor(x, z); if (sub > -1) t = Math.max(t, Math.min(1, 0.4 + sub * 0.25));
-      return t;
-    },
-    safeDir(x, z, ctx) { const h = ctx.arena.hills[0]; const dx = h.x - x, dz = h.z - z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
-  };
+  // TSUNAMI: one event arc, TSUNAMI_V2 below. (The legacy build that tested
+  // terrain height instead of the actor and rose one island-wide pool from
+  // second one was deleted 2026-09-27; it lives in history.)
 
   /* ---------------- TSUNAMI V2 ----------------------------------------------
      REBUILT AS A CONSUMER OF THE SHARED SEA (SURV_SHARED_WATER).
@@ -2166,142 +2045,18 @@
     sound("collapse"); sound("water"); sound("rumble");
   }
 
-  // ---- THE WALL: one curling ribbon mesh (vertex-colored, lit) + additive
-  //      crest/foot foam + face streaks. A real overhanging 3D curl — you can
-  //      see up into the barrel as it breaks over you — instead of flat cards.
-  const TSU_PROFILE = [
-    // [forward z (m @ H=34), height 0..1] — foot → face → apex → curl → lip
-    [-8.0, 0.00], [-3.6, 0.30], [-1.4, 0.58], [0.4, 0.80], [2.2, 0.965],
-    [3.4, 1.00], [4.6, 0.945], [5.2, 0.80], [4.6, 0.62],
-  ];
-  const TSU_ROWCOL = [
-    [0.03, 0.12, 0.20], [0.05, 0.18, 0.30], [0.08, 0.28, 0.42], [0.12, 0.40, 0.55],
-    [0.22, 0.55, 0.68], [0.42, 0.72, 0.82], [0.60, 0.83, 0.90], [0.72, 0.90, 0.95], [0.55, 0.80, 0.88],
-  ];
-  /* THE FACE IS SHARED NOW. world/water_spec.js owns one bore — the turbid
-     gray-black Miyako soup at landfall, the towering blue-green curl in deep
-     water — and city/tsunami.js rides the same object, because a tsunami that
-     looks different in two modes is two tsunamis. Everything the audit and the
-     regression read (st.waveWall, st.waveBasePos, st.waveCols/Rows) is
-     re-exported from the handle, so nothing downstream can tell the difference
-     except by looking. TSU_FACE_V2=false falls through to the legacy ribbon
-     below, which is why it is still here. */
+  /* THE FACE IS SHARED: world/water_spec.js owns one bore and city/tsunami.js
+     rides the same object. Everything the audit and the regression read
+     (st.waveWall, st.waveBasePos, st.waveCols/Rows) is re-exported from it. */
   function tsuBuildWave(ctx) {
-    const st = ctx.st, H = st.H, W = ctx.R * 2.7, zs = H / 34;
-    if (CBZ.CONFIG.TSU_FACE_V2 !== false && CBZ.tsuFaceBuild) {
-      const h = CBZ.tsuFaceBuild({ width: W, height: H, rnd: rnd });
-      h.group.rotation.y = Math.atan2(st.dx, st.dz);
-      root().add(h.group);
-      st.face = h;
-      st.wave = h.group; st.waveWall = h.wall; st.waveBasePos = h.basePos;
-      st.waveCols = h.cols; st.waveRows = h.rows;
-      st.waveFoams = h.foams; st.waveStreaks = h.streaks;
-      return;
-    }
-    const grp = new THREE.Group();
-    const COLS = 30, ROWS = TSU_PROFILE.length;
-    // per-column jitter so the front churns instead of reading as a ruler
-    const zJit = [], hJit = [];
-    for (let c = 0; c <= COLS; c++) { zJit.push((rnd() - 0.5) * 4.5); hJit.push(0.9 + rnd() * 0.2); }
-    const pos = new Float32Array(ROWS * (COLS + 1) * 3);
-    const col = new Float32Array(ROWS * (COLS + 1) * 3);
-    let vi = 0;
-    for (let r = 0; r < ROWS; r++) {
-      const rc = TSU_ROWCOL[r], up = r / (ROWS - 1);
-      for (let c = 0; c <= COLS; c++) {
-        pos[vi] = (c / COLS - 0.5) * W;
-        pos[vi + 1] = TSU_PROFILE[r][1] * H * hJit[c];
-        pos[vi + 2] = TSU_PROFILE[r][0] * zs + zJit[c] * up;   // jitter grows toward the crest
-        col[vi] = rc[0]; col[vi + 1] = rc[1]; col[vi + 2] = rc[2];
-        vi += 3;
-      }
-    }
-    const idx = [];
-    for (let r = 0; r < ROWS - 1; r++) for (let c = 0; c < COLS; c++) {
-      const a0 = r * (COLS + 1) + c, b0 = a0 + 1, a1 = a0 + COLS + 1, b1 = a1 + 1;
-      idx.push(a0, a1, b0, b0, a1, b1);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const wall = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
-      vertexColors: true, transparent: true, opacity: 0.93, side: THREE.DoubleSide, depthWrite: false,
-      shininess: 72, specular: 0x9fd9eb, emissive: 0x061b25, emissiveIntensity: 0.18,
-    }));
-    wall.renderOrder = 3;
-    grp.add(wall);
-    // Broken ribbons, not two billboard rectangles. Each patch is an
-    // independent sloped quad with deterministic gaps, so from below or above
-    // the crest reads as churning white water rather than a white roof card.
-    function foamRibbon(kind, color, opacity) {
-      const fp = [], fi = [];
-      const n = 48;
-      for (let c = 0; c < n; c++) {
-        if ((c * 7 + (kind === "crest" ? 3 : 1)) % 11 < 2) continue;
-        const x0 = (c / n - 0.5) * W, x1 = ((c + 1.12) / n - 0.5) * W;
-        const w0 = Math.sin(c * 2.31 + (kind === "crest" ? 0.7 : 2.1));
-        const w1 = Math.sin((c + 1) * 2.31 + (kind === "crest" ? 0.7 : 2.1));
-        const y0 = kind === "crest" ? H * 0.985 + w0 * 0.9 : 1.15 + w0 * 0.18;
-        const y1 = kind === "crest" ? H * 0.985 + w1 * 0.9 : 1.15 + w1 * 0.18;
-        const z0 = (kind === "crest" ? 3.25 : 4.8) * zs + w0 * 0.45;
-        const z1 = (kind === "crest" ? 3.25 : 4.8) * zs + w1 * 0.45;
-        const depth = (kind === "crest" ? 2.4 : 4.0) + ((c * 13) % 7) * 0.32;
-        const q = fp.length / 3;
-        fp.push(x0, y0, z0, x1, y1, z1,
-          x0, y0 - (kind === "crest" ? depth * 0.48 : 0.05), z0 + depth,
-          x1, y1 - (kind === "crest" ? depth * 0.48 : 0.05), z1 + depth);
-        fi.push(q, q + 2, q + 1, q + 1, q + 2, q + 3);
-      }
-      const fg = new THREE.BufferGeometry();
-      fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(fi); fg.computeVertexNormals();
-      const fm = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: opacity,
-        side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
-      const mesh = new THREE.Mesh(fg, fm); mesh.renderOrder = 5; return mesh;
-    }
-    const crest = foamRibbon("crest", 0xffffff, 0.82);
-    const foot = foamRibbon("foot", 0xeaf8ff, 0.66);
-    grp.add(crest, foot);
-    const streaks = [];
-    for (let i = 0; i < 9; i++) {
-      const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.55 + rnd() * 0.85, H * (0.26 + rnd() * 0.34)),
-        new THREE.MeshBasicMaterial({ color: 0xdff1fb, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
-          depthWrite: false, blending: THREE.AdditiveBlending }));
-      sm.position.set((rnd() - 0.5) * W * 0.9, H * 0.45, 1.6 * zs);
-      sm.renderOrder = 4; grp.add(sm); streaks.push(sm);
-    }
-    grp.rotation.y = Math.atan2(st.dx, st.dz);   // local +z → the travel direction
-    root().add(grp);
-    st.wave = grp; st.waveWall = wall;
-    st.waveBasePos = new Float32Array(pos);
-    st.waveCols = COLS; st.waveRows = ROWS;
-    st.waveFoams = [crest, foot]; st.waveStreaks = streaks;
-  }
-
-  // The old wall only bobbed as one rigid group. This small CPU pass moves its
-  // 279 vertices in overlapping directional phases, then rebuilds the analytic
-  // face normals. The profile and physical front remain unchanged; only the
-  // visible water churns, so collision can never drift away from presentation.
-  function tsuAnimateWave(st, t) {
-    const wall = st.waveWall, base = st.waveBasePos;
-    if (!wall || !base) return;
-    const a = wall.geometry.attributes.position, p = a.array;
-    const cols = st.waveCols, rows = st.waveRows;
-    for (let r = 0; r < rows; r++) {
-      const up = r / Math.max(1, rows - 1);
-      for (let c = 0; c <= cols; c++) {
-        const q = (r * (cols + 1) + c) * 3, x = base[q];
-        const ph0 = t * 1.55 + x * 0.052 + r * 0.61;
-        const ph1 = t * -2.10 + x * 0.091 - r * 0.37;
-        p[q] = x + Math.sin(ph1) * up * 0.34;
-        p[q + 1] = base[q + 1] + Math.sin(ph0) * (0.16 + up * 0.72) + Math.sin(ph1) * up * 0.22;
-        p[q + 2] = base[q + 2] + Math.sin(ph0 * 0.77) * (0.08 + up * 0.78);
-      }
-    }
-    a.needsUpdate = true;
-    wall.geometry.computeVertexNormals();
-    wall.geometry.attributes.normal.needsUpdate = true;
+    const st = ctx.st, H = st.H, W = ctx.R * 2.7;
+    const h = CBZ.tsuFaceBuild({ width: W, height: H, rnd: rnd });
+    h.group.rotation.y = Math.atan2(st.dx, st.dz);
+    root().add(h.group);
+    st.face = h;
+    st.wave = h.group; st.waveWall = h.wall; st.waveBasePos = h.basePos;
+    st.waveCols = h.cols; st.waveRows = h.rows;
+    st.waveFoams = h.foams; st.waveStreaks = h.streaks;
   }
 
   const tsuSampleScratch = {};
@@ -2675,7 +2430,6 @@
     st.frontV = 0;                 // the front is gone; a stale sweep speed is a lie
     st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
-    if (st.spray) st.spray.setActive(0);
     tsuLevels(st, st.floodSurge, st.floodSurge);
     tsuPublish(ctx, 1.6);
     narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
@@ -2710,6 +2464,10 @@
       const mr = rnd();
       st.mag = Math.max(0.3, Math.min(1.45,
         (0.42 + 1.0 * mr * mr) * (0.75 + 0.45 * Math.min(1.4, ctx.intensity || 0))));
+      // window.__tsunamiMagPin: the key-art staging pin (same pattern as
+      // __volcanoMagPin; no game code sets it). The dice are still thrown.
+      const tpin = (typeof window !== "undefined") ? window.__tsunamiMagPin : null;
+      if (Number.isFinite(tpin)) st.mag = Math.max(0.3, Math.min(1.45, tpin));
       st.draw = TSU_DRAW * (0.35 + 0.65 * Math.min(1.2, st.mag));
       /* THE CLOCK. "Too slow" is a complaint about SECONDS, and until now the
          event published none: the storyboard could photograph every beat and
@@ -2748,7 +2506,7 @@
          grows. The bore is built here, 330 m out, and runs in at open-sea
          speed to the 52 m mark where the sweep takes over, standing up as it
          comes: long, low and mostly foam at first, a wall by the end. */
-      if (k > 0.3 && CBZ.CONFIG.TSU_FACE_V2 !== false && CBZ.tsuFaceBuild) {
+      if (k > 0.3) {
         if (!st.face) {
           if (st.H == null) st.H = Math.max(10, Math.min(44, 34 * (st.mag != null ? st.mag : 1)));
           tsuBuildWave(ctx);
@@ -2823,8 +2581,10 @@
       // NO INUNDATION MESH. The sea itself comes over the island (surgeSet),
       // which is why the swimmer, the buoyancy, the drifting corpses and the
       // submergence test all agree without any of them being told.
-      st.spray = CBZ.fx.particleCloud({ mode: "fall", color: 0xeaf6ff, count: 320, radius: R * 0.8, top: 15, size: 0.26, opacity: 0.8, vMin: 11, vMax: 22, drift: st.dx * 9, driftZ: st.dz * 9 });
-      st.spray.setActive(0.95);
+      /* NO ISLAND-WIDE SPRAY CLOUD. A 320-mote fx.particleCloud used to rain
+         square white points over 80% of the island from the moment the sweep
+         began: stars in the sky of every shot. The spray belongs to the lip
+         (the face's own GPU spray, below), and nowhere else. */
       st.sediment = 0; st.undertowT = 0; st.carWatch = null;
       st.debris = undefined;                    // built lazily on first contact
       if (CBZ.CONFIG.TSU_DEBRIS === false || !CBZ.tsuDebrisField) tsuSpawnPlanks(ctx);
@@ -2983,28 +2743,13 @@
             // a spent surge does not overhang: the curl goes with the height
             curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent) * crashCurl,
             foam: st.foamGain,
+            // the crash tears the whole crest into the air for a beat
+            spray: st.broke && st.crashT < 0.9 ? 1.9 - st.crashT : 1,
             x: fx0, y: st.faceY + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0, seaY: aheadY,
             dirX: st.dx, dirZ: st.dz,
           });
           grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
-        } else {
-          grp.position.set(fx0, st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, fz0);
-          grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
-          grp.scale.y = 1 + 0.035 * Math.sin(CBZ.now * 0.007);
-          tsuAnimateWave(st, CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001);
-          const fo = st.waveFoams;
-          if (fo) for (let i = 0; i < fo.length; i++) fo[i].material.opacity = 0.55 + 0.3 * Math.abs(Math.sin(CBZ.now * 0.02 + i * 1.7));
-          const sk = st.waveStreaks;
-          if (sk) for (let i = 0; i < sk.length; i++) { const s = sk[i]; s.material.opacity = 0.16 + 0.2 * Math.abs(Math.sin(CBZ.now * 0.013 + i)); s.position.y = st.H * (0.42 + 0.05 * Math.sin(CBZ.now * 0.01 + i * 2)); }
         }
-        // the spray-torn crest: thicker the harder the wave is curling, and it
-        // rides the LIVE crest — spray hanging at the height of a wave that is
-        // no longer there is the tell that the wave never really came down
-        // the crash tears the whole crest into the air for a beat; otherwise
-        // the mist follows the curl as before
-        st.spray.setActive(st.broke && st.crashT < 0.9 ? 1.5
-          : (0.6 + 0.4 * shoal) * Math.max(0.18, spent));
-        st.spray.update(dt, fx0, (st.faceY != null ? st.faceY : st.level) + (st.faceH || st.H) * 0.9, fz0);
         tsuPublish(ctx, 4.2);
         // LEGACY LANDFALL (TSU_SHOAL_V2 off): the single blast + "BRACE!".
         // With the flag on, tsuCrash() already fired at the end of the stand
@@ -3111,7 +2856,6 @@
         st.face = null; st.wave = null; st.waveWall = null; st.waveBasePos = null;
       }
       if (st.wave) { st.wave.traverse((ob) => { if (ob.geometry) ob.geometry.dispose(); if (ob.material && ob.material.dispose) ob.material.dispose(); }); root().remove(st.wave); st.wave = null; }
-      if (st.spray) { st.spray.dispose(); st.spray = null; }
       /* THE DEBRIS DOES NOT LEAVE WITH THE WATER. Everything the wave carried
          is stranded exactly where the drain put it — a car on its roof in a
          street, a pine across a doorway — and it stays there for the rest of
@@ -3153,8 +2897,7 @@
     },
   };
 
-  if (CBZ.CONFIG.SURV_TSUNAMI_V2 == null) CBZ.CONFIG.SURV_TSUNAMI_V2 = true;
-  DEFS.flood = CBZ.CONFIG.SURV_TSUNAMI_V2 !== false ? TSUNAMI_V2 : TSUNAMI_LEGACY;
+  DEFS.flood = TSUNAMI_V2;
 
   /* THE DUPLICATE STROKE POSE IS GONE. This file used to run a second
      order-46.5 pass that copied the player rig onto the water-owned position
