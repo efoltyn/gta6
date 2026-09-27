@@ -651,7 +651,7 @@
         "marinePodBreakOff", "marineHurt", "marineBleed", "marineGape",
         "marineBiteableHull", "marineDpsAgainst", "marineBodyLen",
         "marineSurfaceHit", "marineAudit",
-        "marineFrenzyAt", "marineFrenzySites", "marineFrenzyAbsorb",
+        "marineFrenzyAt", "marineFrenzySites",
         "marineFrenzyAudit", "marineFrenzyReset", "marineScavengeStep"],
     },
 

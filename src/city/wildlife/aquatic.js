@@ -220,6 +220,86 @@
     return new T.Mesh(geo, used > 1 ? mats : mats[0]);
   }
 
+  /* ---- ONE DRAW CALL PER RIGID BODY, for the fish that come in hundreds ----
+     A mackerel was twenty draw calls (a three-colour hull, two eyes, three
+     median fins, two-colour pectorals, pelvics, a two-colour peduncle and two
+     two-colour tail lobes) and the sea holds ~120 of them plus sardines: two
+     thousand draws for bait on an iPad. schoolBody() bakes every material
+     colour (times the hull's dorsal shade ramp) into a vertex colour on ONE
+     shared vertex-coloured material, merges everything that never moves
+     relative to the trunk into the hull, and leaves exactly the parts
+     wildlife_rig.js animates (the tail chain and the two pectorals) as their
+     own meshes, each baked to one draw as well. Geometry is cached per
+     species, so every sardine in the sea shares the same buffers. */
+  const _bm = new T.Matrix4(), _bn = new T.Matrix3(), _bv = new T.Vector3();
+  function bakeColours(meshes, apply, dx) {
+    const pos = [], nrm = [], col = [];
+    for (let k = 0; k < meshes.length; k++) {
+      const mesh = meshes[k];
+      mesh.updateMatrix();
+      const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+      const P = src.attributes.position, N = src.attributes.normal, C = src.attributes.color;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      if (apply) _bm.copy(mesh.matrix); else _bm.identity();
+      _bn.getNormalMatrix(_bm);
+      if (dx) _bm.elements[12] -= dx;
+      const groups = src.groups.length ? src.groups : [{ start: 0, count: P.count, materialIndex: 0 }];
+      for (let gi = 0; gi < groups.length; gi++) {
+        const gr = groups[gi], mt = mats[gr.materialIndex] || mats[0];
+        const c = mt.color, shaded = !!(mt.vertexColors && C);
+        const end = Math.min(P.count, gr.start + gr.count);
+        for (let v = gr.start; v < end; v++) {
+          _bv.fromBufferAttribute(P, v).applyMatrix4(_bm); pos.push(_bv.x, _bv.y, _bv.z);
+          _bv.fromBufferAttribute(N, v).applyMatrix3(_bn).normalize(); nrm.push(_bv.x, _bv.y, _bv.z);
+          const s = shaded ? C.getX(v) : 1, s2 = shaded ? C.getY(v) : 1, s3 = shaded ? C.getZ(v) : 1;
+          col.push(c.r * s, c.g * s2, c.b * s3);
+        }
+      }
+      if (src !== mesh.geometry) src.dispose();
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new T.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    return geo;
+  }
+  function schoolBody(g, m, key) {
+    const vc = shadedTwin(m(0xffffff));
+    const kids = g.children.slice();
+    let minX = 0, maxX = 0;
+    for (let i = 0; i < kids.length; i++) {
+      if (!kids[i].isMesh) continue;
+      if (kids[i].position.x < minX) minX = kids[i].position.x;
+      if (kids[i].position.x > maxX) maxX = kids[i].position.x;
+    }
+    const cut = minX * 0.5;                 // wildlife_rig.js buildSwimRig's own tail cut
+    const rigid = [], live = [];
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i]; if (!k.isMesh) continue;
+      const fs = k.userData && k.userData.finShape;
+      const pec = fs && fs.under && fs.spanDir && Math.abs(fs.spanDir[2]) > 0.5 &&
+        k.position.x > 0 && Math.abs(k.position.z) > 0.05 && (fs.span || 0) >= 0.3;
+      if (k.position.x <= cut || pec) live.push(k); else rigid.push(k);
+    }
+    // The merged body's ORIGIN sits where the front-most part's origin was
+    // (geometry shifted back by the same amount): wildlife_rig.js measures a
+    // swimmer's length off its children's origins, and a body parked at 0
+    // halved it — half the tail sweep, and a school spaced for a fish half as
+    // long, i.e. fish swimming through each other.
+    const body = new T.Mesh(cachedGeom("school-body|" + key, function () { return bakeColours(rigid, true, maxX); }), vc);
+    body.position.x = maxX;
+    body.name = "fishHull";
+    for (let i = 0; i < rigid.length; i++) g.remove(rigid[i]);
+    g.add(body);
+    for (let i = 0; i < live.length; i++) {
+      const k = live[i];
+      k.geometry = cachedGeom("school-part|" + key + "|" + i, function () { return bakeColours([k], false); });
+      k.material = vc;
+    }
+    return g;
+  }
+
   /* ======================================================================
      THE FIN. One blade grammar for every fin in the ocean.
 
@@ -3474,8 +3554,12 @@
     hp: 5, fur: "Fresh Fish", furValue: 8, meat: "Fish Fillet", meatValue: 5,
     // real mackerel school by the hundreds of thousands; game-scaled this is
     // "a proper swirling shoal", clearly smaller than a sardine ball
-    herd: [12, 30], packs: 4, spd: 2.0, danger: 0, aquatic: true,
-    scale: 0.5, color: 0x6a8fa8,
+    // SIZE: at scale 0.5 this "mackerel" was 1.13 m long, half the player's
+    // bull shark. A real one is 30-40 cm; game-scaled a touch up so a school
+    // still reads from the surface camera. Cruise ~2 m/s (it was ~4, i.e.
+    // ten body lengths a second at the new size), burst ~5.7.
+    herd: [12, 30], packs: 4, spd: 1.1, danger: 0, aquatic: true,
+    scale: 0.22, color: 0x6a8fa8, swimDepth: 1.7,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const back = m(0x2b6a63), belly = m(0xdde5e7), bar = m(0x143039);
@@ -3483,7 +3567,8 @@
         [0.05, 0.19, 0.27, 0.27, 0.24, 0.17, 0.09],
         [0.035, 0.115, 0.175, 0.175, 0.145, 0.105, 0.055], 12);
       const hull = hullMesh([back, belly, bar], rings, {
-        sides: 12, bellyCut: [-0.30, -0.22, -0.18, -0.20, -0.28, -0.40], ragged: 0.10, seed: 81,
+        // the barred back ends at the lateral line; below it is silver
+        sides: 12, bellyCut: [0.02, 0.06, 0.08, 0.06, 0.04, 0.0], ragged: 0.06, seed: 81,
         paintKey: "mackerel-bars",
         paint: function (i, u, j, s, isBelly) {
           if (isBelly || s < 0.06) return -1;
@@ -3538,7 +3623,7 @@
           under: true, spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
         });
       });
-      return g;
+      return schoolBody(g, m, "mackerel");
     },
   });
 
@@ -3561,8 +3646,11 @@
     hp: 3, fur: "Fresh Fish", furValue: 4, meat: "Fish Fillet", meatValue: 3,
     // the biggest school in this sea, always — surveyed sardine schools run
     // ~25 to millions; the RATIO to mackerel is what's kept here
-    herd: [25, 70], spd: 2.3, danger: 0, aquatic: true,
-    scale: 0.34, color: 0x9fb4c2, clearance: 14, swimDepth: 0.55,
+    // SIZE: 0.52 m at scale 0.34 (a real sardine is ~20 cm) -> ~0.3 m. The
+    // school now holds ~1.3 m under the surface as a VOLUME (wildlife.js
+    // SLOTS) instead of a sheet at 0.1-0.5 m that broke the surface.
+    herd: [25, 70], spd: 0.95, danger: 0, aquatic: true,
+    scale: 0.2, color: 0x9fb4c2, clearance: 14, swimDepth: 1.3,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const back = m(0x24565f), silver = m(0xeaf0f2);
@@ -3570,7 +3658,9 @@
         [0.035, 0.13, 0.18, 0.17, 0.12, 0.06],
         [0.025, 0.075, 0.105, 0.10, 0.07, 0.035], 8);
       const hull = hullMesh([back, silver], rings,
-        { sides: 10, bellyCut: [-0.24, -0.14, -0.16, -0.30], ragged: 0.10, seed: 83 });
+        // countershading: a sardine is dark only across the top third, the
+        // flanks are silver (the cut was -0.2: two-thirds of the fish dark)
+        { sides: 10, bellyCut: [0.34, 0.40, 0.38, 0.30], ragged: 0.06, seed: 83 });
       hull.name = "fishHull"; g.add(hull);
       [0.055, -0.055].forEach(function (z) {
         const e = new T.Mesh(cachedGeom("eye|0.026", function () {
@@ -3608,7 +3698,7 @@
           spanDir: [-0.56, s2 * 0.83, 0], chordDir: [1, 0, 0],
         });
       });
-      return g;
+      return schoolBody(g, m, "sardine");
     },
   });
 
@@ -3617,8 +3707,11 @@
   S({
     id: "tuna", name: "Bluefin Tuna", biome: "water", rarity: "uncommon",
     hp: 55, fur: "Fresh Fish", furValue: 90, meat: "Fish Fillet", meatValue: 26,
-    herd: [3, 9], spd: 4.2, danger: 0, aquatic: true,
-    scale: 0.85, color: 0x35506b, clearance: 90, swimDepth: 1.5,
+    // swimDepth 1.5 put the 1.5 m-tall first dorsal through the surface all
+    // the time: a tuna finning like a shark. Deeper, so it is a shape below.
+    // spd x the pelagic profile (2.4) is the cruise: 4.2 was a 10 m/s cruise
+    herd: [3, 9], spd: 2.0, danger: 0, aquatic: true,
+    scale: 0.85, color: 0x35506b, clearance: 90, swimDepth: 2.4,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const back = m(0x24364d), silver = m(0xc3ceD6), belly = m(0xeff3f5);
@@ -3709,8 +3802,9 @@
   S({
     id: "marlin", name: "Blue Marlin", biome: "water", rarity: "rare",
     hp: 130, fur: "Marlin Bill", furValue: 420, meat: "Fish Fillet", meatValue: 34,
-    packs: 1, spd: 4.6, danger: 0.15, aquatic: true,
-    scale: 1.05, color: 0x1c3f6d, clearance: 150, swimDepth: 1.9,
+    packs: 1, spd: 2.1, danger: 0.15, aquatic: true,
+    // the sail stands 2.4 m over the origin: at 1.9 it was permanently in air
+    scale: 1.05, color: 0x1c3f6d, clearance: 150, swimDepth: 3.2,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const back = m(0x14315f), belly = m(0xe9eef1), stripe = m(0x2f6fc4), eye = m(0x0a0d11);
@@ -3787,8 +3881,9 @@
     id: "barracuda", name: "Great Barracuda", biome: "water",
     rarity: "common", hp: 34, fur: "Fresh Fish", furValue: 46,
     meat: "Fish Fillet", meatValue: 14, herd: [1, 2], spd: 3.1, danger: 0.3,
-    bite: 10, aquatic: true, scale: 0.6, color: 0xa9b6bd,
-    clearance: 26, swimDepth: 1.2,
+    // 0.6 drew a 2 m barracuda; a great barracuda is ~1-1.5 m
+    bite: 10, aquatic: true, scale: 0.45, color: 0xa9b6bd,
+    clearance: 26, swimDepth: 1.6,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const back = m(0x46565f), silver = m(0xb6c2c8), belly = m(0xf1f4f5);
@@ -3891,8 +3986,9 @@
     hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
     // transient pods run 2-7, residents 5-50; [3,8] is the game-scaled band
     // (wildlife_orca.js re-registers this species — keep its herd in step)
-    herd: [3, 8], spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
-    scale: 1.55, color: 0x14171b, clearance: 110, swimDepth: 2.6,
+    // (and its size and bite: real 6-8 m adults, see wildlife_orca.js)
+    herd: [3, 8], spd: 3.4, danger: 0.5, bite: 33, aquatic: true,
+    scale: 0.95, color: 0x14171b, clearance: 110, swimDepth: 2.6,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const black = m(0x14171b), white = m(0xf4f6f6), saddle = m(0x4b545c), eye = m(0x06070a);
@@ -3961,7 +4057,10 @@
     // marine_frenzy's bait test (herd max ≥ 10 + no teeth = bait), which now
     // also requires a small body, so a real pod no longer reads as a bait ball
     hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [4, 12],
-    spd: 3.0, danger: 0, aquatic: true, scale: 0.9, color: 0x5c6873,
+    // REAL SIZE (2026-09-27): bottlenose adults 2-4 m. The model is 4.86
+    // units, so 0.9 made a 4.4 m dolphin — as long as a great white. 0.66 is
+    // a 3.2 m mean.
+    spd: 3.0, danger: 0, aquatic: true, scale: 0.66, color: 0x5c6873,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x5c6873), pale = m(0xd6dde1), eye = m(0x0d1013);
@@ -4086,7 +4185,7 @@
   S({
     id: "manta_ray", name: "Giant Manta Ray", biome: "water",
     rarity: "uncommon", hp: 90, fur: "Manta Hide", furValue: 210,
-    meat: "Fish Fillet", meatValue: 18, herd: [1, 3], spd: 1.9, danger: 0,
+    meat: "Fish Fillet", meatValue: 18, herd: [1, 3], spd: 1.1, danger: 0,
     aquatic: true, scale: 1.1, color: 0x262c33, clearance: 70, swimDepth: 2.2,
     swimStyle: "flap",         // wildlife_rig.js: the wings are the stroke
     build: function (ctx) {
@@ -4160,60 +4259,78 @@
     },
   });
 
-  /* ---- GREEN SEA TURTLE. A low domed carapace with a scute mosaic painted
-     into it, a cream plastron, and two long FLIPPERS that row. */
+  /* ---- GREEN SEA TURTLE. A low, wide, teardrop carapace with a scute
+     mosaic, a cream plastron, a blunt olive head, and two long paddle
+     FLIPPERS that row (wildlife_rig.js strokePecs).
+
+     What it was (seen side-on in the fish pass, 2026-09-27): a tall fish-
+     round hull with its scutes painted as BANDS right round the body (so it
+     read as a wasp-striped torpedo), a pale capsule of a neck with a cream
+     traffic-cone beak on the end, and flippers that tapered to a needle, so
+     at most angles each one was a thin spike. */
   S({
     id: "sea_turtle", name: "Green Sea Turtle", biome: "water",
     rarity: "common", hp: 45, fur: "Turtle Shell", furValue: 65,
-    meat: "Fish Fillet", meatValue: 12, herd: [1, 3], spd: 1.1, danger: 0,
-    aquatic: true, scale: 0.7, color: 0x4f6535,
+    meat: "Fish Fillet", meatValue: 12, herd: [1, 3], spd: 0.8, danger: 0,
+    aquatic: true, scale: 0.7, color: 0x5c5a36,
     clearance: 20, swimDepth: 1.1,
     swimStyle: "flipper",      // wildlife_rig.js: it rows with the front flippers
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const shell = m(0x4f6535), scute = m(0x384a26), cream = m(0xd6cfa8);
-      const skin = m(0x6f7b53), eye = m(0x121418);
-      const car = hullMesh([shell, cream, scute], bodyRings(-0.78, 0.80, 0.52,
-        [0.10, 0.22, 0.26, 0.24, 0.14], [0.26, 0.52, 0.58, 0.52, 0.30], 9), {
-        sides: 14, bellyCut: [-0.30], ragged: 0.03, seed: 105, paintKey: "turtle-scutes",
+      const shell = m(0x4a4a28), scute = m(0x2c2b17), cream = m(0xcfc38c);
+      const skin = m(0x4d4a31), beakM = m(0x22221a), eye = m(0x0e1012);
+      // low dome: height about 0.4 of the width, widest just ahead of centre
+      const car = hullMesh([shell, cream, scute], bodyRings(-0.80, 0.78, 0.50,
+        [0.06, 0.15, 0.20, 0.21, 0.19, 0.12, 0.07], [0.20, 0.42, 0.54, 0.58, 0.54, 0.42, 0.24], 13), {
+        sides: 16, bellyCut: [-0.45], ragged: 0.02, seed: 105, paintKey: "turtle-scutes2",
+        shade: { tint: [0.95, 0.95, 0.85] },
+        // THE MOSAIC: tiles, not bands. Along the shell four rows of scutes;
+        // across it the vertebral row on the crown and a costal row each side;
+        // tiles alternate shell/scute tone like the plates of a real carapace.
         paint: function (i, u, j, s, isBelly) {
-          if (isBelly || s < 0.15) return -1;
-          return ((i + ((j * 2 / 14) | 0)) % 2) === 0 ? 2 : -1;
+          if (isBelly || s < -0.1) return -1;
+          const along = Math.min(3, (u * 4) | 0);
+          const across = s > 0.82 ? 0 : (j < 4 || j >= 12 ? 1 : 2);
+          return ((along + across) % 2) === 0 ? 2 : -1;
         },
       });
       car.name = "turtleShell"; g.add(car);
-      const neck = hullMesh([skin, skin], bodyRings(-0.10, 0.44, 0,
-        [0.13, 0.09], [0.13, 0.10], 3), { sides: 10, bellyCut: [-1], seed: 106 });
-      neck.position.set(0.86, 0.520, 0); g.add(neck);
-      const beak = new T.Mesh(cachedGeom("turtle-beak", function () {
-        return new T.ConeGeometry(0.085, 0.16, 6);
-      }), cream);
-      beak.position.set(1.36, 0.500, 0); beak.rotation.z = -Math.PI / 2; g.add(beak);
+      // the head: a blunt rounded skull on a short neck, pale under the jaw
+      const head = hullMesh([skin, cream], bodyRings(-0.14, 0.40, 0,
+        [0.085, 0.105, 0.11, 0.095, 0.05], [0.09, 0.11, 0.115, 0.095, 0.045], 6),
+        { sides: 12, bellyCut: [-0.55], ragged: 0.03, seed: 106 });
+      head.name = "turtleHead";
+      head.position.set(0.90, 0.49, 0); g.add(head);
+      // the horny beak: a small dark hook at the front of the jaw
+      const beak = new T.Mesh(cachedGeom("turtle-beak2", function () {
+        return new T.ConeGeometry(0.04, 0.07, 6);
+      }), beakM);
+      beak.position.set(1.31, 0.47, 0); beak.rotation.z = -Math.PI / 2 - 0.35; g.add(beak);
       [0.085, -0.085].forEach(function (z) {
-        const e = new T.Mesh(cachedGeom("eye|0.035", function () {
-          return new T.SphereGeometry(0.035, 6, 5);
+        const e = new T.Mesh(cachedGeom("eye|0.03", function () {
+          return new T.SphereGeometry(0.03, 6, 5);
         }), eye);
-        e.position.set(1.16, 0.565, z); g.add(e);
+        e.position.set(1.16, 0.53, z); g.add(e);
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
       [1, -1].forEach(function (s2) {
-        fin([skin, cream], [0.44, 0.470, s2 * 0.34], {   // the long rowing flipper
-          span: 1.05, chordRoot: 0.42, chordTip: 0.05, sweep: 0.52, concavity: 0.20,
-          leadBow: 0.08, rearTipH: 0.12, rearTipBack: 0.14, apexRound: 0.08,
-          thick: 0.075, spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [-0.40, -0.24, s2 * 0.88], chordDir: [1, 0, s2 * 0.1],
+        fin([skin, cream], [0.46, 0.44, s2 * 0.40], {   // the long rowing flipper: a PADDLE
+          span: 1.00, chordRoot: 0.36, chordTip: 0.16, sweep: 0.46, concavity: 0.10,
+          leadBow: 0.10, rearTipH: 0.20, rearTipBack: 0.10, apexRound: 0.40,
+          thick: 0.06, spanSteps: 6, chordSteps: 4, under: true,
+          spanDir: [-0.40, -0.18, s2 * 0.90], chordDir: [1, 0, s2 * 0.1],
         });
-        fin([skin, cream], [-0.54, 0.450, s2 * 0.30], { // the short rear paddle
-          span: 0.42, chordRoot: 0.30, chordTip: 0.06, sweep: 0.42, concavity: 0.12,
-          rearTipH: 0.20, rearTipBack: 0.08, apexRound: 0.24, thick: 0.055,
+        fin([skin, cream], [-0.56, 0.44, s2 * 0.28], { // the short rear paddle
+          span: 0.36, chordRoot: 0.26, chordTip: 0.12, sweep: 0.40, concavity: 0.08,
+          rearTipH: 0.25, rearTipBack: 0.06, apexRound: 0.45, thick: 0.05,
           spanSteps: 4, chordSteps: 3, under: true,
-          spanDir: [-0.44, -0.20, s2 * 0.88], chordDir: [1, 0, 0],
+          spanDir: [-0.55, -0.15, s2 * 0.82], chordDir: [1, 0, 0],
         });
       });
       // a short pointed tail — the swim rig needs SOMETHING behind the origin
-      const tail = hullMesh([skin, skin], bodyRings(-0.24, 0.06, 0,
-        [0.030, 0.070], [0.030, 0.070], 3), { sides: 8, bellyCut: [-1], seed: 107 });
-      tail.position.set(-0.86, 0.470, 0); g.add(tail);
+      const tail = hullMesh([skin, skin], bodyRings(-0.20, 0.06, 0,
+        [0.025, 0.055], [0.025, 0.055], 3), { sides: 8, bellyCut: [-1], seed: 107 });
+      tail.position.set(-0.84, 0.46, 0); g.add(tail);
       return g;
     },
   });

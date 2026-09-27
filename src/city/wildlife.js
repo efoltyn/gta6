@@ -990,9 +990,13 @@
       if (!anchor) { if (!sp.aquatic || ++dry >= 3) return placed; continue; }
       const herd = sizes[s]; s++;
       const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
+      // A SCHOOL IS BORN TOGETHER: it used to be scattered over +-30 m like a
+      // pod, which is the 70 m "school" of fish 8 m apart the sea opened with.
+      const school = sp.aquatic && mmKind(sp) === "school";
+      const jit = school ? 4 + Math.sqrt(herd) : (sp.aquatic ? 60 : 22);
       for (let h = 0; h < herd; h++) {
-        let jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-        let jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        let jx = anchor.x + (rng() - 0.5) * jit;
+        let jz = anchor.z + (rng() - 0.5) * jit;
         if (sp.aquatic) {
           const wet = wetPointNear(jx, jz, sp, 260);
           if (!wet) continue;
@@ -1001,7 +1005,9 @@
         const a = makeActor(sp, jx, jz); placed++;
         joinHerd(a, hr);
         // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
-        if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
+        // (a school does not: every fish in it is the same size, which is
+        // half of why a school reads as one silver body)
+        if (h === herd - 1 && herd >= 2 && rng() < 0.75 && !school) {
           a.grow = rng() * 0.4;
           applyScale(a, a.grow);
         }
@@ -3563,9 +3569,95 @@
     dolphin: { cruise: 2.8,  burst: 1.8, turn: 1.5,  fturn: 3.0, acc: 7,   dec: 1.8, tire: 7.0, senseR: 55, gait: 0 },
     whale:   { cruise: 1.6,  burst: 1.3, turn: 0.2,  fturn: 0.35, acc: 0.7, dec: 0.4, tire: 5.0, senseR: 0, gait: 0 },
     shark:   { cruise: 2.4,  burst: 1.5, turn: 0.55, fturn: 1.3, acc: 3,   dec: 1.0, tire: 3.0, senseR: 45, gait: 0 },
-    orca:    { cruise: 1.75, burst: 1.3, turn: 0.45, fturn: 0.8, acc: 2,   dec: 0.8, tire: 5.0, senseR: 0, gait: 0 },
+    // orca: 1.3 x spd 3.4 = 4.4 m/s — a travelling pod's pace (real transit
+    // 2-3 m/s, fast travel 5-6 with porpoising). It was 6 m/s, which put the
+    // matriarch over wildlife_orca.js's 5.2 m/s porpoise threshold, so an
+    // unhurried pod breath-rolled like a sprinting one on every transit.
+    orca:    { cruise: 1.3,  burst: 1.3, turn: 0.45, fturn: 0.8, acc: 2,   dec: 0.8, tire: 5.0, senseR: 0, gait: 0 },
   };
   const MM_SCAN = 0.25;          // s between threat samples, per herd or loner
+
+  /* THE SCHOOL IS A FORMATION, NOT A FLOCK OF LONERS (fish pass 2026-09-27).
+     Owner: "in the game the fish are completely fucked up." Measured on this
+     tree before the change: a seeded mackerel school 70 m across with its
+     fish 8 m apart, every school a flat sheet 0.25 m thick skimming the
+     surface (a few breaking it), and a school turning only as fast as the
+     slowest straggler could catch the mean heading. Two roots: the seed
+     scattered a school over +-30 m, and the boids had no catch-up (every fish
+     cruised at the same speed, so a straggler aimed at the centre never
+     closed on a centre moving away at that speed).
+
+     Now a school has ONE frame: its live centroid, a heading SH that the
+     herd turns (rate-limited) toward its shared wander / away from a threat
+     / off a blocked shore, and every fish owns a SLOT in that frame, a point
+     of a compact 3D lattice sorted into an ellipsoid (longer than wide, flat
+     top to bottom), spaced ~1.4 body lengths. Each fish swims along SH at the
+     school's pace and corrects toward its slot: sideways by turning, fore
+     and aft by speeding up or easing off. Turning the frame turns the whole
+     school as one body (the outside of the turn really does swim faster);
+     a knotted bait ball is the same frame shrunk and SPUN, so the ball mills
+     because the fish are chasing slots going round. The vertical slot is the
+     fish's own depth, so a school is a volume, not a sheet. Flight still
+     belongs to the per-fish fountain below; afterwards each fish simply
+     swims back to its slot. */
+  const SLOT_AX = [1.35, 1.0, 0.62];      // ellipsoid: along, lateral, vertical
+  const SLOTS = (function () {
+    const pts = [];
+    for (let i = -7; i <= 7; i++) for (let j = -7; j <= 7; j++) for (let k = -4; k <= 4; k++) {
+      // staggered rows: a fish sits over the gap in the row below, never on top
+      const x = i + ((j + k) & 1) * 0.5, y = j + (k & 1) * 0.5, z = k * 0.86;
+      const r = (x / SLOT_AX[0]) * (x / SLOT_AX[0]) + (y / SLOT_AX[1]) * (y / SLOT_AX[1]) + (z / SLOT_AX[2]) * (z / SLOT_AX[2]);
+      pts.push({ x: x, y: y, z: z, r: r });
+    }
+    pts.sort(function (p, q) { return p.r - q.r; });
+    const out = [];
+    for (let n = 0; n < 200; n++) {
+      const p = pts[n];
+      // a small fixed jitter so the lattice never reads as a lattice
+      const h1 = CBZ.hash01 ? CBZ.hash01(n, 1, 0x5C01) : 0.5, h2 = CBZ.hash01 ? CBZ.hash01(n, 2, 0x5C01) : 0.5;
+      const h3 = CBZ.hash01 ? CBZ.hash01(n, 3, 0x5C01) : 0.5;
+      out.push({ a: p.x + (h1 - 0.5) * 0.4, l: p.y + (h2 - 0.5) * 0.4, v: p.z + (h3 - 0.5) * 0.3 });
+    }
+    return out;
+  })();
+  // The school frame, advanced ONCE per herd per frame (from whichever member
+  // steers first). Writes H.SH (heading), H.ma/ml/mv (the live slots' mean, so
+  // the targets always centre on the centroid and the school cannot creep
+  // sideways as fish die out of it) and H.sp (slot spacing, metres).
+  function schoolFrame(a, H, hr, dt, len) {
+    if (H.SH == null) H.SH = hr.heading;
+    let ma = 0, ml = 0, mv = 0, n = 0;
+    const mem = hr.members;
+    for (let k = 0; k < mem.length; k++) {
+      const o = mem[k];
+      if (o.dead || o.tamed || o.ridden || !o._mm || o._mm.slot < 0) continue;
+      const q = SLOTS[o._mm.slot % SLOTS.length];
+      ma += q.a; ml += q.l; mv += q.v; n++;
+    }
+    if (n) { ma /= n; ml /= n; mv /= n; }
+    H.ma = ma; H.ml = ml; H.mv = mv;
+    const bunch = hr.bunch || 0;
+    H.sp = len * 1.4 * (1 - 0.3 * bunch);
+    // where the school as a whole wants to go
+    let dx = Math.cos(H.H), dz = Math.sin(H.H);
+    const hx = a.home.x - hr.cx, hz = a.home.z - hr.cz, hd2 = hx * hx + hz * hz;
+    if (hd2 > 200 * 200) { const hd = Math.sqrt(hd2), k = Math.min(2, (hd - 200) / 60); dx += hx / hd * k; dz += hz / hd * k; }
+    let rate = 0.7;
+    if (H.mode === 1) {
+      const q = thPos(H);
+      if (q) {
+        const rx = hr.cx - q.x, rz = hr.cz - q.z, rd = Math.sqrt(rx * rx + rz * rz) || 1;
+        dx += rx / rd * 3 * H.lvl; dz += rz / rd * 3 * H.lvl;
+        rate = 1.2 + 1.6 * H.lvl;
+      }
+    }
+    if (H.blockT > 0) { H.blockT -= dt; rate = Math.max(rate, 1.6); }
+    const dh = wrapA(Math.atan2(dz, dx) - H.SH), lim = rate * dt;
+    H.SH += dh > lim ? lim : (dh < -lim ? -lim : dh);
+    // THE MILL: a knotted ball's frame spins, so the ball goes round
+    if (bunch > 0.25) H.SH += H.spin * (0.25 + 0.5 * bunch) * dt;
+    H.SH = wrapA(H.SH);
+  }
   function mmKind(sp) {
     if (sp.motion && MM[sp.motion]) return sp.motion;       // a row may declare it
     const id = String(sp.id || "");
@@ -3594,7 +3686,7 @@
       scanT: h * MM_SCAN, ref: null, boat: null, mode: 0, R: 0, lvl: 0, u: 0,
       zig: h < 0.5 ? 1 : -1, zigT: 0, fat: 0, gph: h * 6.283, glide: 0, beatT: 1 + h * 2,
       breathT: 18 + h * 26, breath: 0, depthK: 1, blockT: 0, lunge: 0, lungeT: 4 + h * 6,
-      cool: 0, rideT: 0, seed: h, ex: 0, ez: 0,
+      cool: 0, rideT: 0, seed: h, ex: 0, ez: 0, slot: -1, sy: 0, top: -1,
     };
     return m;
   }
@@ -3785,8 +3877,9 @@
         H.HT -= dt;
         if (H.HT <= 0) {
           H.HT = 6 + Math.random() * 9;
-          H.H = hr.heading + (Math.random() - 0.5) * 1.3;
+          H.H = (kind === "school" && H.SH != null ? H.SH : hr.heading) + (Math.random() - 0.5) * 1.3;
         }
+        if (kind === "school") schoolFrame(a, H, hr, dt, len);
       }
     } else {
       m.scanT -= dt;
@@ -3838,19 +3931,43 @@
       dx += hx / hd * k; dz += hz / hd * k;
     }
 
-    // ---- THE GROUP (boids) -------------------------------------------------
+    // ---- THE SCHOOL: swim your slot in the school's frame (see SLOTS) -------
     let bunch = 0;
-    if (hr && !a.tamed) {
+    const schooled = kind === "school" && H && H.SH != null && !a.tamed;
+    if (schooled) {
+      bunch = hr.bunch || 0;
+      if (m.slot < 0) m.slot = (H.slotN = (H.slotN || 0) + 1) - 1;
+      const q = SLOTS[m.slot % SLOTS.length], spc = H.sp || len * 1.4;
+      const fx = Math.cos(H.SH), fz = Math.sin(H.SH), px = -fz, pz = fx;
+      const la = (q.a - H.ma) * spc, ll = (q.l - H.ml) * spc;
+      m.sy = (q.v - H.mv) * spc;
+      const ex = hr.cx + fx * la + px * ll - x, ez = hr.cz + fz * la + pz * ll - z;
+      const along = ex * fx + ez * fz, lat = ex * px + ez * pz;
+      const far = Math.sqrt(ex * ex + ez * ez);
+      if (far > 12 + spc * 8) {
+        // lost the school entirely: head straight for it at a steady push
+        dx = ex / far; dz = ez / far;
+        wantV = cruise * 1.6;
+      } else {
+        const lk = Math.max(-1.6, Math.min(1.6, lat * 1.1));
+        dx = fx + px * lk; dz = fz + pz * lk;
+        // fore-and-aft is SPEED: fall behind and you swim harder, get ahead
+        // and you ease off; the ball's frame barely moves, it spins
+        const pace = 1 - 0.8 * Math.min(1, bunch * 1.4);
+        wantV = cruise * Math.max(0.45, Math.min(2.2, pace + along * 0.55 / Math.max(0.4, cruise * 0.5)));
+      }
+    } else if (hr && !a.tamed) {
+      // ---- THE GROUP (boids): pods, pairs, anything that is not a school ----
       bunch = hr.bunch || 0;
       const panic = S.mode === 1 ? S.lvl : 0;
-      const al = (kind === "school" ? 0.8 : 0.5) + panic * 1.2;
+      const al = 0.5 + panic * 1.2;
       dx += Math.cos(hr.heading) * al; dz += Math.sin(hr.heading) * al;
       const toCx = hr.cx - x, toCz = hr.cz - z;
       const cd = Math.sqrt(toCx * toCx + toCz * toCz) || 1;
       const coh = Math.min(1.1 + bunch * 0.9, Math.max(0, cd - 5 * (1 - bunch * 0.8)) / (14 - bunch * 7));
       dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
       // separation — the one neighbour query, over the herd's own members
-      const sepR = (kind === "school" ? 1.2 + len * 1.4 : 2.2 + len * 0.9) * (1 - bunch * 0.4);
+      const sepR = (2.2 + len * 0.9) * (1 - bunch * 0.4);
       const sepR2 = sepR * sepR;
       let sx = 0, sz = 0;
       const mem = hr.members;
@@ -3864,12 +3981,6 @@
         }
       }
       dx += sx * 1.6; dz += sz * 1.6;
-      // A BAIT BALL MILLS: a knotted school circles its own centre.
-      if (kind === "school" && bunch > 0.25) {
-        const tk = (bunch - 0.25) * 1.6 * H.spin;
-        dx += (-toCz / cd) * tk; dz += (toCx / cd) * tk;
-        wantV = cruise * (0.85 + 0.35 * bunch);
-      }
     }
 
     // ---- WHAT IT SENSED ----------------------------------------------------
@@ -3988,7 +4099,14 @@
     }
     if (kind !== "orca" && kind !== "whale" && kind !== "dolphin" && a._swimDepth0 > 0) {
       m.depthK += (depthWant - m.depthK) * Math.min(1, dt * (depthWant < m.depthK ? 0.5 : 0.8));
-      a.swimDepth *= m.depthK;
+      if (schooled) {
+        // A SCHOOL IS A VOLUME: one shared depth (not each fish's own hunger
+        // lean, which scattered a school over half a metre at random) plus
+        // the fish's vertical slot. Never shallower than its own body plus a
+        // hand of water — the old sheet at 0.1-0.5 m broke the surface.
+        if (m.top < 0) m.top = bodyTop(a);
+        a.swimDepth = Math.max(m.top + 0.3, a._swimDepth0 * m.depthK + m.sy);
+      } else a.swimDepth *= m.depthK;
     }
 
     // ---- GAIT: burst-and-glide / stroke --------------------------------------
@@ -4048,6 +4166,16 @@
   }
   // wildlife_rig.js draws the flipper stroke / wingbeat on this phase
   CBZ.wildlifeSwimPhase = function (a) { return a && a._mm ? a._mm.gph : null; };
+  // How far the highest point of the body (dorsal tip included) stands over
+  // the model origin, in metres. Measured once per animal off its own mesh.
+  const _topBox = THREE.Box3 ? new THREE.Box3() : null;
+  function bodyTop(a) {
+    const g = a.group;
+    if (!_topBox || !g) return 0.3;
+    g.updateMatrixWorld(true);
+    _topBox.setFromObject(g);
+    return Math.max(0.05, _topBox.max.y - g.position.y);
+  }
   // the probe: what one animal is doing, in words, for plain-node checks
   CBZ.wildlifeMotionRead = function (a) {
     const m = a && a._mm; if (!m) return null;
@@ -4285,7 +4413,8 @@
           // frames (it used to add 0.28 rad per blocked FRAME — a spin)
           if (nav.blocked && a._mm && a._mm.blockT <= 0) {
             const m0 = a._mm; m0.blockT = 0.7;
-            if (a.herd && a.herd._mm) a.herd._mm.H = a.heading + 2.2 * m0.zig;
+            // a school turns its whole frame off the shore, briskly
+            if (a.herd && a.herd._mm) { a.herd._mm.H = a.heading + 2.2 * m0.zig; a.herd._mm.blockT = 1.2; }
             else m0.wH = a.heading + 2.2 * m0.zig;
           }
           // The bob rides INSIDE the solved water column (it is a change of

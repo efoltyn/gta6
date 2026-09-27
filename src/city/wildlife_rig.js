@@ -777,7 +777,13 @@
     // ---- THE BEAT ----------------------------------------------------------
     // Frequency rides distance (so it scales with speed), plus the kick of
     // acceleration, minus the glide. Capped so nothing ever blurs.
-    const adv = Math.min(Math.min(moved, 1.5) * rig.freq, dt * 24)
+    // rig.freq is per MODEL unit (6 / model length) and `moved` is metres, so
+    // it is divided by the scale: a 0.3 m sardine drawn at scale 0.2 beat its
+    // tail five times too slowly — a fish sliding along on a lazy wag.
+    // (Only the small side is corrected: the big bodies' beats were tuned by
+    // eye against the old law and belong to the shark/orca passes.)
+    const sc0 = Math.min(1, (grp.scale && grp.scale.x) || 1);
+    const adv = Math.min(Math.min(moved, 1.5) / sc0 * rig.freq, dt * 24)
               + dt * (0.9 + 9 * rig.burst);
     rig.ph += adv * (1 - 0.8 * rig.glide);
     if (rig.ph > 1e6) rig.ph -= 1e6;
