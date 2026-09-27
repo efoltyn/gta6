@@ -3237,6 +3237,49 @@
   // the ORIGINAL five lines, kept for a driver that never went through the
   // occupancy record (a carjacker's own body, a gig driver, a scripted rider)
   // — but with the door solved instead of a blind +1.6 on X.
+  /* ---- BAILING OUT UNDER FIRE ---------------------------------------------
+     A driver stuck in traffic with shooting RIGHT THERE does not sit in the
+     queue waiting for the light. The same decision the jack uses (cityScare,
+     stable per person, fed by the live panic field) says who runs: a runner
+     is out his own door and gone, and his car is left standing in the lane
+     with the door open, which is the free getaway car GTA always leaves you.
+     The threat is a PLACE, not a gunman pointing at this seat, so cityScare
+     has no muzzle to freeze anyone with: they all get out and run from it
+     (the gunpoint freeze is for the jack, where somebody IS at the door).
+     Returns how many ran. */
+  const _bailThreat = { pos: { x: 0, z: 0 }, armed: false };
+  function occBail(c, tx, tz) {
+    if (!c || !c.occ || !occOn() || !occWanted(c) || CBZ.CONFIG.JACK_REACTIONS === false) return 0;
+    if (c.npcDriver && !c._occOwnsDriver) return 0;       // a carjacker is not a commuter
+    occPromote(c, true);
+    _bailThreat.pos.x = tx; _bailThreat.pos.z = tz;
+    let ran = 0;
+    const seats = c.occ.seats;
+    for (let i = 0; i < seats.length; i++) {
+      const st = seats[i], p = st.ped;
+      if (!p || st.gone || p.dead || st.frozen || p.hostage) continue;
+      const wasCtl = p.controlled;
+      p.controlled = false;                               // cityScare refuses a held body
+      const ans = CBZ.cityScare ? CBZ.cityScare(p, _bailThreat, { seat: true, bias: 0.35 }) : "bolt";
+      if (ans !== "bolt") { p.controlled = wasCtl; continue; }
+      st.react = "flee";
+      occStepOut(c, st, { state: "flee", keepTarget: true });
+      p.fear = Math.max(p.fear || 0, 9);
+      p.alarmed = Math.max(p.alarmed || 0, 7);
+      ran++;
+    }
+    if (ran) {
+      let driverGone = false;
+      for (let i = 0; i < seats.length; i++) if (seats[i].slot === "driver" && seats[i].gone) driverGone = true;
+      if (driverGone) {                                   // the DRIVER left: the car is dead weight now
+        c.abandoned = true; c.ai = false; c.v = 0; c.vx = 0; c.vz = 0; c._panicT = 0;
+        setBrake(c, false);
+      }
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(c.pos.x, c.pos.z, 0.6);
+    }
+    return ran;
+  }
+
   function legacyEject(car) {
     const ped = car.npcDriver; if (!ped) return;
     car.npcDriver = null; car._occOwnsDriver = false;
@@ -4268,7 +4311,7 @@
     CBZ.playerChar.group.visible = false;
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
-    const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
+    const worth = car.model ? ": " + car.model.name : "";   // value stays hidden until you chop it
     // a hull's controls are not a car's: Space stands you up onto your own
     // deck (city/boatwalk.js) and [V] is the wheel view, so the hint that
     // teaches the seat must teach THAT seat
@@ -4280,8 +4323,8 @@
     const seatHint = (CBZ.citySeatShift && !CBZ.touchMode &&
       (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false)) ? "  [G] passenger" : "";
     CBZ.city && CBZ.city.note(helmHint
-      ? "At the helm" + worth + " · [SPACE] get up  [V] wheel view"
-      : "Driving" + worth + " · [E] out  [C] car style" + seatHint, 1.8);
+      ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
+      : "Driving" + worth + "   [E] out  [C] car style" + seatHint, 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
@@ -4299,6 +4342,7 @@
     if (car && car._skid && !npcRide) car._skid.on = false;
     if (car && !npcRide) {
       car.player = false; car.v = 0; car.vx = car.vz = 0; car.ai = false;
+      car._playerLeft = true;             // nobody steers it now: a hit shoves it (order-37 slide)
       car._pitch = car._roll = 0;
       setBrake(car, false);               // parked — foot's off the pedal
       if (car.group) car.group.rotation.set(0, car.heading, 0);   // drop the weight-transfer lean
@@ -4642,6 +4686,7 @@
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
   const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
+  const _probePt = { x: 0, y: 0, z: 0 };   // ditto, the nose probe
   const _agroundN = { x: 0, z: 0 };        // ditto, for the aground shore normal
 
   /* ---- THE HEIGHT GATE A CAR NEVER HAD ---------------------------------
@@ -4728,7 +4773,8 @@
     if (reach > 0.2) {
       const sign = (car.v || 0) < -0.1 ? -1 : 1;
       const fx = Math.sin(car.heading || 0) * sign, fz = Math.cos(car.heading || 0) * sign;
-      const probe = { x: car.pos.x + fx * reach, y: car.pos.y || 0, z: car.pos.z + fz * reach };
+      const probe = _probePt;              // scratch: this runs for every near car, every frame
+      probe.x = car.pos.x + fx * reach; probe.y = car.pos.y || 0; probe.z = car.pos.z + fz * reach;
       const px = probe.x, pz = probe.z;
       CBZ.collide(probe, radius * 0.75, span.feet, span.head);
       car.pos.x += probe.x - px;
@@ -4916,7 +4962,7 @@
     car._gear = S.gear;
     car._rev = S.rpm;                 // the cabin tach reads the same rev the engine voice gets
     if (CBZ.carAudio) {
-      CBZ.carAudio.update(0.06 + S.rpm * 0.9, S.throttleOut, S.squeal, engineFlavor(car), S.shifted);
+      CBZ.carAudio.update(0.06 + S.rpm * 0.9, S.throttleOut, Math.max(S.squeal, car._scrapeAmt || 0), engineFlavor(car), S.shifted);   // a wall grind screams too
     }
     // ---- THE BODY ON ITS SPRINGS: pitch / roll / heave from the specific
     //      forces the tyres just produced (cardyn.suspStep). Applied to the
@@ -4967,104 +5013,107 @@
         }
       }
     }
-    const before = { x: car.pos.x, z: car.pos.z };
+    /* ---- HITTING A WALL IS ABOUT THE SPEED GOING INTO IT ------------------
+       The old block graded every contact by the car's TOTAL speed and had the
+       wall normal backwards. So a 5-degree brush along a facade at 80 mph was
+       a "catastrophic" 30+ u/s wall hit: engine gutted, 90+ HP off the driver,
+       a forced fire at 38, and the "push-back" then shoved the car 1-2 m INTO
+       the wall (before - after points into it), so the next frame re-collided
+       and crashed again. Scraping a building killed you.
+
+       Now: the resolver's own push is the wall normal (out of the wall), and
+       only the velocity component INTO the wall is the impact. A glancing
+       scrape keeps its speed along the wall (grinding friction, sparks, a
+       screech), a square hit stops you, and the damage/injury ladder reads the
+       impact speed, so a head-on at 30 is exactly as bad as it always was. */
+    const bx0 = car.pos.x, bz0 = car.pos.z;
     const moved = car._airborne && car._airY > 0.55 ? 0 : collideVehicle(car);
-    if (moved > 0.05 && vmag > 5) {
-      // CRASH — far cooler at speed: the car PILES INTO the wall, sheds nearly all
-      // its forward momentum but RICOCHETS back along the surface (keeps a chunk of
-      // the slide so it slews sideways instead of dead-stopping), spins out, jolts
-      // the driver, throws a big speed-scaled shake + hitstop, a metal crunch, and
-      // shatters / drives through any storefront glass ahead.
-      const hard = vmag >= CRASH.wallHard, catastrophic = vmag >= CRASH.wallCatastrophic;
-      // approximate the wall normal from how the collider pushed the car back
-      let nwx = before.x - car.pos.x, nwz = before.z - car.pos.z;
+    if (car._wallCD > 0) car._wallCD -= dt;
+    if (car._scrapeAmt > 0) car._scrapeAmt = Math.max(0, car._scrapeAmt - dt * 3);
+    if (moved > 0.03 && vmag > 1.5) {
+      let nwx = car.pos.x - bx0, nwz = car.pos.z - bz0;          // OUT of the wall
       const nl = Math.hypot(nwx, nwz) || 1; nwx /= nl; nwz /= nl;
-      car.v *= catastrophic ? 0.05 : (hard ? 0.14 : 0.48);
-      // momentum transfer into the wall: bleed the velocity, reflect a little of it
-      // back off the surface so the hull slews + scrubs rather than freezing.
-      const bounce = catastrophic ? 0.12 : (hard ? 0.2 : 0.35);
-      const vdotn = car.vx * nwx + car.vz * nwz;
-      car.vx = (car.vx - 2 * vdotn * nwx) * bounce; car.vz = (car.vz - 2 * vdotn * nwz) * bounce;
-      // the impact damages the engine on a SPEED-SCALED curve (NHTSA/IIHS ladder):
-      // a low-speed wall scuff barely touches the motor, a moderate hit dings it,
-      // and only a fast slam guts it. Even a catastrophic hit no longer instantly
-      // explodes (damageEngine routes crashes through the burn fuse) — it disables
-      // the car into a smoking/burning wreck the player can bail from.
-      //   below wallHard : 0.6 HP per unit of speed above the 5-unit no-damage floor
-      //                    (~9 HP at a 20 mph clip — survives many; many bumps to kill)
-      //   hard           : ~26 + speed-over-threshold ramp
-      //   catastrophic   : heavy enough to GUT the motor (engineHp→0) so it always
-      //                    becomes at least a disabled, smoking wreck (was 52 → a
-      //                    30-unit slam left it at HP 48, not even smoking; the bug
-      //                    fast-impact-velocity-detonate flags). Now it reliably
-      //                    disables, then cooks off via the (rare, slow) fire fuse.
-      const crashE = catastrophic ? (110 + (vmag - CRASH.wallCatastrophic) * 8)
-                   : hard         ? (24 + (vmag - CRASH.wallHard) * 2)
-                                  : Math.max(0, (vmag - 5) * 0.6);
-      damageEngine(car, crashE, false);
-      // TOP-SPEED ram ALWAYS ignites → explodes (fast-impact-velocity-detonate
-      // "things hitting things BLOW UP when they should"): a genuinely flat-out
-      // slam (normally vmag>=38 ≈ 91mph, near a car's top end) is past the point
-      // where it merely smokes — it GUARANTEES a cook-off, overriding the
-      // rare-fire roll. Race-prepped cars get a little more escape room (44).
-      // A mid-catastrophic ram (30..38) keeps the realistic odds (usually a
-      // disabled smoker, sometimes a slow burn). Guarded so a freak engine state
-      // never double-ignites. The breach above + the wreck flag dedup the carve.
-      const forceFireAt = car._raceCar ? CRASH.raceForceFire : 38;
-      if (catastrophic && vmag >= forceFireAt && !car._onFire && !car._exploded && !car.dead) {
-        car._smoking = true; car._crashFireRolled = true;   // we're forcing it — skip the chance roll
-        igniteCar(car, true);                               // slow crash-fire fuse → time to bail, then detonates
-        car._burnsOut = false;                              // a top-speed ram fireball does NOT just burn out
-      }
-      // crater point from the PRE-impact pose (group.matrixWorld still holds it) —
-      // captured before the push-back/spin below so the dent lands on the contact
-      const dentX = car.pos.x + Math.sin(car.heading) * 2.2, dentZ = car.pos.z + Math.cos(car.heading) * 2.2;
-      const back = Math.min(catastrophic ? 2.2 : 1.35, vmag * (catastrophic ? 0.075 : 0.05));
-      car.pos.x += nwx * back; car.pos.z += nwz * back;
-      // a glancing hit SPINS the car off the wall toward the surface tangent; a
-      // square hit just shudders. scaled by speed so a fast clip whips it around.
-      const tang = car.vx * -nwz + car.vz * nwx;     // sideways component along the wall
-      const spinKick = Math.sign(tang || (Math.random() - 0.5)) * Math.min(catastrophic ? 2.0 : 1.1, vmag * (catastrophic ? 0.08 : 0.05));
-      car.heading += spinKick + (Math.random() - 0.5) * (catastrophic ? 0.5 : 0.2);
-      // JOLT the driver: a sharp camera punch back from the impact (weighty stop)
-      if (CBZ.cam) { CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.25, vmag * 0.012); }
-      if (CBZ.shake) CBZ.shake(catastrophic ? 2.4 : (hard ? 1.3 : 0.34));
-      if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.16 : (hard ? 0.085 : 0.028));
-      if (catastrophic && CBZ.doSlowmo) CBZ.doSlowmo(0.34);
-      if (hard && CBZ.sfx) { CBZ.sfx("ko"); CBZ.sfx("punch"); }
-      const ix = car.pos.x + Math.sin(car.heading) * 2.2, iz = car.pos.z + Math.cos(car.heading) * 2.2;
-      crashBurst(ix, iz, vmag, hard, catastrophic, { x: -nwx, z: -nwz });   // debris sprays into the wall
-      if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
-      if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: vmag, hard, catastrophic, wall: true, car });
-      // the car visibly CRUMPLES (the building/post is only lightly scuffed)
-      crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08), { x: -nwx, z: -nwz });
-      // and the nose CRATERS at the contact — a 60mph wall hit stays cratered
-      if (CBZ.cityCarImpact) CBZ.cityCarImpact(car, { x: dentX, y: (vehicleDims(car).height || 1.5) * 0.42, z: dentZ }, { x: -nwx, y: 0, z: -nwz }, vmag);
-      // ---- STRUCTURAL COUPLING (ram-breaches-building): the WALL the car hit
-      //      reacts to the slam, not just the car. A HARD hit scorches/dents the
-      //      facade, bursts its panes and knocks chunks loose (the same damage
-      //      escalation an explosion uses, dialled modest so it scuffs — never
-      //      levels — at <=1.4 power). A CATASTROPHIC (top-speed, vmag>=30) ram
-      //      ALSO punches a car-sized WALK-THROUGH BREACH so a 70mph ram opens a
-      //      hole you can keep driving through — the exact ground-floor carve the
-      //      RPG ground-hit uses, which self-dedups via fracture.recent() and is
-      //      a harmless no-op on open air. NOT a detonation: a ram makes no
-      //      fireball unless the engine later cooks off through the damage fuse.
-      //      Contact point ix,iz + wall normal nwx,nwz are already derived above.
-      if (hard && CBZ.cityDamageBuilding) {
-        const wy = (CBZ.floorAt ? CBZ.floorAt(ix, iz) : 0) + 1.0;
-        CBZ.cityDamageBuilding(ix, wy, iz, catastrophic ? 1.4 : 0.8);
-      }
-      if (catastrophic && CBZ.cityBreach) CBZ.cityBreach(ix, iz, 1.6);
-      // Medium crashes hurt but are explicitly non-lethal. Only a truly
-      // catastrophic top-speed slam is allowed to kill the driver.
-      if (hard && CBZ.cityHurtPlayer) {
-        // a building crash should HURT, not auto-kill — you survive most of them
-        // (heavy damage), and only a genuinely extreme top-speed slam is fatal.
-        const dmg = catastrophic ? 90 + (vmag - CRASH.wallCatastrophic) * 12
-                                 : 16 + (vmag - CRASH.wallHard) * 8;
-        CBZ.cityHurtPlayer(Math.round(dmg), car.pos.x, car.pos.z, "crashed the car", false, null, !catastrophic);
-        if (P.dead) return;                  // death.js ejects + ragdolls the driver
+      const vIn = -(car.vx * nwx + car.vz * nwz);                // speed INTO the wall
+      const hfx = Math.sin(car.heading), hfz = Math.cos(car.heading);
+      const sup = collisionSupport(car, nwx, nwz);
+      const ix = car.pos.x - nwx * sup, iz = car.pos.z - nwz * sup;   // the contact patch
+      if (vIn < 4) {
+        // A SCRAPE. Kill the into-wall component, grind the rest down a bit.
+        if (vIn > 0) { car.vx += nwx * vIn; car.vz += nwz * vIn; }
+        const grind = Math.pow(0.6, dt);
+        car.vx *= grind; car.vz *= grind;
+        car.v = car.vx * hfx + car.vz * hfz;
+        const along = Math.hypot(car.vx, car.vz);
+        if (along > 5) {
+          car._scrapeAmt = Math.min(0.8, 0.3 + along * 0.02);
+          car._scrapeT = (car._scrapeT || 0) - dt;
+          if (car._scrapeT <= 0) {
+            car._scrapeT = 0.09;
+            crashBurst(ix, iz, along * 0.35, false, false, { x: nwx, z: nwz });   // sparks off the grind
+            if (CBZ.shake) CBZ.shake(0.06);
+          }
+        }
+        if (vIn > 1.5 && (car._wallCD || 0) <= 0) {
+          car._wallCD = 0.35;
+          crumpleCar(car, 0.03, { x: -nwx, z: -nwz });
+          if (CBZ.sfx) CBZ.sfx("punch");
+        }
+      } else {
+        const hard = vIn >= CRASH.wallHard, catastrophic = vIn >= CRASH.wallCatastrophic;
+        // split into wall-normal + along-wall, bounce the normal, scrub the rest
+        const tx = car.vx + nwx * vIn, tz = car.vz + nwz * vIn;   // tangential part
+        const rest = catastrophic ? 0.05 : (hard ? 0.14 : 0.25);
+        const keep = catastrophic ? 0.3 : (hard ? 0.5 : 0.78);
+        car.vx = tx * keep + nwx * vIn * rest;
+        car.vz = tz * keep + nwz * vIn * rest;
+        car.v = car.vx * hfx + car.vz * hfz;
+        // step clear of the face so next frame is not a second crash
+        const sep = Math.min(0.6, 0.05 + vIn * 0.02);
+        car.pos.x += nwx * sep; car.pos.z += nwz * sep;
+        // a glancing hit SPINS the car off the wall; a square one just shudders
+        const tMag = Math.hypot(tx, tz), glance = tMag / Math.max(1, tMag + vIn);
+        const tSide = (tx * hfz - tz * hfx) >= 0 ? 1 : -1;
+        car.heading += tSide * glance * Math.min(catastrophic ? 1.2 : 0.7, vIn * 0.035);
+        // one crash per contact: a car still pinned against the same face next
+        // frame is not a second crash unless it hit harder
+        const fresh = (car._wallCD || 0) <= 0 || vIn > (car._wallLastIn || 0) * 1.5;
+        car._wallCD = 0.3; car._wallLastIn = vIn;
+        if (fresh) {
+          // engine HP on the impact-speed ladder (NHTSA/IIHS bands unchanged)
+          const crashE = catastrophic ? (110 + (vIn - CRASH.wallCatastrophic) * 8)
+                       : hard         ? (24 + (vIn - CRASH.wallHard) * 2)
+                                      : (vIn - 4) * 0.9;
+          damageEngine(car, crashE, false);
+          const forceFireAt = car._raceCar ? CRASH.raceForceFire : 38;
+          if (catastrophic && vIn >= forceFireAt && !car._onFire && !car._exploded && !car.dead) {
+            car._smoking = true; car._crashFireRolled = true;
+            igniteCar(car, true);
+            car._burnsOut = false;
+          }
+          if (CBZ.cam) { CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.25, vIn * 0.012); }
+          if (CBZ.shake) CBZ.shake(catastrophic ? 2.4 : (hard ? 1.3 : 0.2 + vIn * 0.03));
+          if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.16 : (hard ? 0.085 : 0.028));
+          if (catastrophic && CBZ.doSlowmo) CBZ.doSlowmo(0.34);
+          if (CBZ.sfx) { if (hard) { CBZ.sfx("ko"); CBZ.sfx("punch"); } else CBZ.sfx("punch"); }
+          crashBurst(ix, iz, vIn, hard, catastrophic, { x: nwx, z: nwz });   // debris sprays back off the wall
+          if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
+          if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: vIn, hard, catastrophic, wall: true, car });
+          crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.06 + vIn * 0.012), { x: -nwx, z: -nwz });
+          if (CBZ.cityCarImpact) CBZ.cityCarImpact(car, { x: ix, y: (vehicleDims(car).height || 1.5) * 0.42, z: iz }, { x: nwx, y: 0, z: nwz }, vIn);
+          // the WALL reacts too (scuff / pane burst; a top-speed ram breaches)
+          if (hard && CBZ.cityDamageBuilding) {
+            const wy = (CBZ.floorAt ? CBZ.floorAt(ix, iz) : 0) + 1.0;
+            CBZ.cityDamageBuilding(ix, wy, iz, catastrophic ? 1.4 : 0.8);
+          }
+          if (catastrophic && CBZ.cityBreach) CBZ.cityBreach(ix, iz, 1.6);
+          // hard crashes hurt; only a flat-out square slam can kill
+          if (hard && CBZ.cityHurtPlayer) {
+            const dmg = catastrophic ? 90 + (vIn - CRASH.wallCatastrophic) * 12
+                                     : 16 + (vIn - CRASH.wallHard) * 8;
+            CBZ.cityHurtPlayer(Math.round(dmg), car.pos.x, car.pos.z, "crashed the car", false, null, !catastrophic);
+            if (P.dead) return;                  // death.js ejects + ragdolls the driver
+          }
+        }
       }
     }
     // MARINE: a hull on open water rides the water surface instead of the flat
@@ -5720,7 +5769,7 @@
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
     CBZ.city.addCash(pay); CBZ.city.addRespect(2);
     CBZ.city.big("CHOPPED " + (car.model ? car.model.name : "car") + " + $" + pay.toLocaleString());
-    CBZ.city.note("Condition: " + cond.label + " · payout adjusted", 1.5);
+    CBZ.city.note("Condition: " + cond.label + ", payout adjusted", 1.5);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (!car.owned && anyWitness(CBZ.player.pos.x, CBZ.player.pos.z, 26)) CBZ.cityCrime && CBZ.cityCrime((CBZ.CITY.econ && CBZ.CITY.econ.chopHeat) || 14, { type: "chop" });
   }
@@ -5813,9 +5862,61 @@
     _carGrid.rebuild(CBZ.cityCars, _carVec);
   }
 
+  /* ---- TRAFFIC HEARS GUNFIRE ---------------------------------------------
+     Before this, a firefight in the middle of an avenue was invisible to the
+     cars on it: they queued politely at the red with rounds going past the
+     windscreen. Every gunshot (systems/gunfx.js) and blast in the game already
+     goes through ONE bus, cityevents.js's cityPostEvent, so traffic listens
+     there instead of growing a second noise system. A fixed ring of the last
+     eight scares, deduplicated by place (an SMG burst is one scare, not ten);
+     the per-car test is a handful of distance checks and is skipped outright
+     when nothing has gone off for a few seconds. */
+  const SCARE_N = 8, SCARE_LIFE = 5000;
+  const scX = new Float32Array(SCARE_N), scZ = new Float32Array(SCARE_N), scR2 = new Float32Array(SCARE_N);
+  const scT = new Float64Array(SCARE_N).fill(-1e9);
+  let scHead = 0, scLast = -1e9, _scareHooked = false;
+  function trafficHear(ev) {
+    if (!ev || !ev.pos || (ev.type !== "gunshot" && ev.type !== "explosion")) return;
+    const x = ev.pos.x || 0, z = ev.pos.z || 0, now = CBZ.now || 0;
+    const r = Math.max(24, Math.min(55, (ev.radius || 30) * (ev.type === "explosion" ? 0.8 : 0.9)));
+    const prev = (scHead + SCARE_N - 1) % SCARE_N;
+    if (now - scT[prev] < SCARE_LIFE && (scX[prev] - x) * (scX[prev] - x) + (scZ[prev] - z) * (scZ[prev] - z) < 64) {
+      scT[prev] = now; scR2[prev] = Math.max(scR2[prev], r * r); scLast = now; return;
+    }
+    scX[scHead] = x; scZ[scHead] = z; scR2[scHead] = r * r; scT[scHead] = now;
+    scHead = (scHead + 1) % SCARE_N; scLast = now;
+  }
+  function hookScareBus() {
+    if (_scareHooked || typeof CBZ.cityPostEvent !== "function") return;
+    const inner = CBZ.cityPostEvent;
+    CBZ.cityPostEvent = function (ev) {
+      try { trafficHear(ev); } catch (e) {}
+      return inner.apply(this, arguments);
+    };
+    _scareHooked = true;
+  }
+  // nearest live scare to (x,z) inside its radius, or -1
+  function scareAt(x, z) {
+    const now = CBZ.now || 0;
+    if (now - scLast > SCARE_LIFE) return -1;
+    let best = -1, bd = 1e18;
+    for (let i = 0; i < SCARE_N; i++) {
+      if (now - scT[i] > SCARE_LIFE) continue;
+      const dx = scX[i] - x, dz = scZ[i] - z, d2 = dx * dx + dz * dz;
+      if (d2 < scR2[i] && d2 < bd) { bd = d2; best = i; }
+    }
+    return best;
+  }
+  // cars that have somewhere to be when shooting starts, and cars that do not
+  function panicsAtGunfire(c) {
+    return !c._patrolCar && !c._emergency && !c._raceCar && !c.pullover && !c.roadRageTarget &&
+      !(c.npcDriver && !c._occOwnsDriver);
+  }
+
   CBZ.onUpdate(37, function (dt) {
     if (g.mode !== "city") return;
     const A = CBZ.city.arena; if (!A) return;
+    hookScareBus();
     const baseDt = dt;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
@@ -5843,9 +5944,20 @@
          bailed from at 26 m/s stopped dead on the frame the door opened.
          `_runaway` is set in ONE place — city/passengerseat.js's jump — so no
          existing traffic case changes shape. */
-      const runaway = c._runaway === true && c.wreckT > 0;
+      /* A PARKED CAR YOU HIT MOVES. carCrash already hands a parked car its
+         share of the impulse and a wreck timer, but this gate sent every car
+         without a lane straight to parkSeat, so the kerb-side fleet, the car
+         you just got out of and every abandoned wreck were bolted to the road:
+         ram one at 60 and it only got shoved by the depenetration. Those three
+         kinds (nobody else steers them) now run the same spin-out slide. */
+      const knockable = !c.ai && !c.player && !c.dead && (c._propParked || c._playerLeft || c.abandoned);
+      const runaway = c.wreckT > 0 && (c._runaway === true || knockable);
       if (c.player || c.dead || (!runaway && (!c.ai || !c.road))) {
         if (!c.player && !c.dead) {
+          // a parked car is not moving: drop whatever velocity the last shove
+          // wrote, or carVel keeps reporting it and every later contact reads
+          // a phantom closing speed (the "cars crash into a parked car" jitter)
+          if (knockable && (c.v || c.vx || c.vz)) { c.v = 0; c.vx = 0; c.vz = 0; }
           // settled = parkSeat's own cache says nothing moved since last frame.
           // A settled parked car 60m+ from the camera is completely inert, so
           // its ~20-node subtree keeps last frame's world matrices — stamp it
@@ -5980,6 +6092,7 @@
         c.v += Math.max(-20 * dt, Math.min(12 * dt, tv - c.v));
         c.v = Math.max(0.8, c.v);
         advanceTurn(c, dt);
+        c.vx = Math.sin(c.heading) * c.v; c.vz = Math.cos(c.heading) * c.v;   // see the lane branch
         seatCar(c, dt);
         rollWheels(c, dt);
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
@@ -5990,8 +6103,39 @@
       }
       const r = c.road;
 
+      // ---- GUNFIRE: floor it away, or stop and bail if it is right ahead ----
+      let panicking = false, panicStop = false;
+      if (panicsAtGunfire(c)) {
+        const si = scareAt(c.pos.x, c.pos.z);
+        if (si >= 0) {
+          if (!(c._panicT > 0)) c._panicWait = 0;
+          c._panicT = Math.max(c._panicT || 0, 5 + rng() * 3);
+          c._panicX = scX[si]; c._panicZ = scZ[si];
+        }
+        if (c._panicT > 0) {
+          c._panicT -= dt;
+          if (c._panicT <= 0) c._panicBailed = false;    // calm again: the next scare is a new decision
+          panicking = true;
+          const fx = r.vertical ? 0 : c.dirSign, fz = r.vertical ? c.dirSign : 0;
+          const ex = c._panicX - c.pos.x, ez = c._panicZ - c.pos.z;
+          const ahead = ex * fx + ez * fz, d2 = ex * ex + ez * ez;
+          // the shooting is in FRONT of me and close: do not drive into it
+          panicStop = ahead > 0 && d2 < 22 * 22;
+          // stuck (stopped for it, or boxed in a queue) near the shooting: get
+          // out. Only near the player: the bodies have to be real to run.
+          c._panicWait = c.v < 1.2 ? (c._panicWait || 0) + dt : 0;
+          if (c._panicWait > 0.6 && d2 < 30 * 30 && !c._panicBailed) {
+            const pdx = c.pos.x - CBZ.player.pos.x, pdz = c.pos.z - CBZ.player.pos.z;
+            if (pdx * pdx + pdz * pdz < 45 * 45) {
+              c._panicBailed = true;                    // one decision per car, like a jack
+              if (occBail(c, c._panicX, c._panicZ) && !c.ai) { seatCar(c, dt); continue; }
+            }
+          }
+        }
+      }
+
       // ---- desired speed: cruise, modulated by lights, following, stops ----
-      let target = c.baseV;
+      let target = panicStop ? 0 : (panicking ? c.baseV * 1.6 : c.baseV);
       // IDM_V2 collects the frame's most restrictive constraint as an
       // ACCELERATION rather than as a speed cap (see the block above idmAccel).
       // Each hazard below folds its own virtual-leader term in with Math.min;
@@ -6000,7 +6144,7 @@
       // to exceed its cruise, and a free term pinned to cruise would cap it).
       const useIdm = IDM_ON();
       let idmA = 1e9;                    // most restrictive hazard so far
-      let idmDesired = c.baseV;          // v0 for the free-road term
+      let idmDesired = target;           // v0 for the free-road term (a panicked driver floors it)
 
       // red-light stop (calm drivers; the reckless gamble on it). HIGHWAY +
       // arterial roads (the new mini-city/island network) have NO city-grid
@@ -6034,7 +6178,7 @@
           }
         } catch (e) {}
       }
-      if (red && distToInt > 1.2 && distToInt < redLookahead) {
+      if (red && !panicking && distToInt > 1.2 && distToInt < redLookahead) {   // nobody waits for a light under fire
         if (!c.reckless || c.driver.aggr < 0.8) {
           target = Math.min(target, Math.max(0, (distToInt - stopBack) * 1.25));
           // IDM_V2: a red light is a STATIONARY VIRTUAL LEADER parked on the
@@ -6199,6 +6343,14 @@
       const dlat = dt > 0.0001 ? (lat - latNow) / dt : 0;
       const dalong = c.dirSign * Math.max(2, c.v);
       c.heading = moveAxisZ ? Math.atan2(dlat, dalong) : Math.atan2(dalong, dlat);
+      /* THE VELOCITY EVERYONE ELSE READS. carVel() (car-vs-car closing speed,
+         carAhead's leader speed) trusts c.vx/c.vz whenever they are non-zero,
+         and lane-following never wrote them: the last crash impulse or bump
+         stayed frozen in them forever. A queued car carried a ghost 8 m/s, so
+         its follower thought the leader was driving off and rear-ended it,
+         and every nudge in a jam scored as a fresh crash. Written every frame
+         from the motion this branch actually produced. */
+      c.vx = Math.sin(c.heading) * c.v; c.vz = Math.cos(c.heading) * c.v;
 
       // crossing the intersection: ran-a-red check + ONE committed route choice
       // per box (the old per-frame coin-flip re-rolled every frame a car sat in

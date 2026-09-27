@@ -382,7 +382,13 @@
       const o = oases[i];
       const dx = x - o.x, dz = z - o.z;
       const d2 = dx * dx + dz * dz;
-      const R = o.r * 1.85;
+      /* THE SHORE IS NOT A COMPASS CIRCLE. A bowl with one radius all the
+         way round puts a perfect disc of water in a perfect disc of green,
+         and from the strategic camera that read as a sticker. The radius
+         breathes with the bearing (two lobes and a bay), so the pond has a
+         shoreline the water plane finds on its own. */
+      const ang = Math.atan2(dz, dx);
+      const R = o.r * 1.85 * (1 + 0.16 * Math.sin(ang * 2 + o.x * 0.013) + 0.09 * Math.sin(ang * 3 + o.z * 0.011));
       if (d2 > R * R) continue;
       // saturates well before the middle, so the pond bottom is genuinely
       // flat and the water has one honest depth rather than a dimple
@@ -503,7 +509,9 @@
   const C_GRAVEL = [0.26, 0.22, 0.16];
   const C_SILT = [0.20, 0.17, 0.11];
   const C_WET = [0.20, 0.16, 0.12], C_BEACH = [0.52, 0.45, 0.31];
-  const C_GREEN = [0.09, 0.19, 0.05];
+  /* olive scrub, not lawn: an oasis margin is date palm litter, reeds and
+     salt-burnt grass, and the old 0.19 green photographed as a golf course */
+  const C_GREEN = [0.085, 0.13, 0.045], C_REED = [0.16, 0.17, 0.07];
   const C_SEABED = [0.10, 0.14, 0.11];
   /* One tonal patch every 260 m, at +/-2.5% of albedo. See the break-up term
      at the end of colourAt for why both numbers are what they are. */
@@ -515,27 +523,45 @@
     out[2] = a[2] + (b[2] - a[2]) * t;
     return out;
   }
+  /* HOW MUCH LOOSE SAND the shader should ripple here, 0..1 — written by
+     colourAt beside the colour and read by the callers that build a mesh.
+     Salt, rock, wet beach and oasis scrub do not carry wind ripples. */
+  let _sandW = 1;
+  D.sandWeightLast = function () { return _sandW; };
+  const _oc = [0, 0, 0];
   function colourAt(x, z, y, slope, out, cell) {
     const coast = coastAt(x, z);
+    _sandW = 0;
     if (y < SEA_Y - 0.2) return mix3(C_SEABED, C_WET, smr(y, -22, 0), out);
     if (coast < 130) {
       // the wet band is the two metres above the waterline, and it is the
       // single cheapest thing that makes a coast read as a coast
       mix3(C_WET, C_BEACH, smr(y, 0.2, 3.2), out);
-      if (coast > 70) mix3(out, C_SAND_LO, smr(coast, 70, 130), out);
+      _sandW = smr(y, 1.2, 4.0) * 0.8;
+      if (coast > 70) { mix3(out, C_SAND_LO, smr(coast, 70, 130), out); _sandW = Math.max(_sandW, smr(coast, 70, 130)); }
       return out;
     }
-    let b = FLAG_PLAIN ? "dune" : null;
-    if (!b) {
+    /* THE OASIS IS A WEIGHT, NOT A LABEL. It used to be a hard radius test
+       that switched the whole vertex to "oasis", and on a 10 m (or 40 m)
+       lattice that drew the green as a saw-toothed disc. Now the scrub fades
+       over the outer third of the bowl and whatever biome is under it shows
+       through the margin. */
+    let ow = 0;
+    if (!FLAG_PLAIN) {
       for (let i = 0; i < oases.length; i++) {
-        if (Math.hypot(x - oases[i].x, z - oases[i].z) < oases[i].r * 1.5) { b = "oasis"; break; }
+        const d = Math.hypot(x - oases[i].x, z - oases[i].z);
+        const r = oases[i].r;
+        if (d < r * 1.7) ow = Math.max(ow, 1 - smr(d, r * 0.85, r * 1.6));
       }
     }
+    let b = FLAG_PLAIN ? "dune" : null;
     if (!b) {
       const cut = wadiAt(x, z);
       b = cut > 6 ? "wadi" : provinceAt(x, z, coast).top;
     }
+    _sandW = 1;
     if (b === "salt") {
+      _sandW = 0;
       // polygon cracks: a high-frequency iso-contour, painted not modelled
       /* 62 m polygons. Real salt polygons are under three metres across and
          at 10 m per vertex that is not a thing this mesh can hold — the
@@ -545,20 +571,32 @@
       const cr = Math.abs(vn(x, z, 62, S(1201)) - 0.5);
       mix3(C_SALT, C_CRACK, cr < 0.075 ? 1 - cr / 0.075 : 0, out);
     } else if (b === "rock") {
+      _sandW = 0.15;
       mix3(C_ROCK_LO, C_ROCK_HI, vn(x, z, 60, S(1211)), out);
       mix3(out, C_CAP, clamp(1 - slope * 5.5, 0, 1) * smr(y, 26, 34), out);
     } else if (b === "gravel") {
-      mix3(C_GRAVEL, C_SAND_LO, vn(x, z, 130, S(1221)), out);
+      const gv = vn(x, z, 130, S(1221));
+      mix3(C_GRAVEL, C_SAND_LO, gv, out);
+      _sandW = 0.25 + gv * 0.55;
     } else if (b === "wadi") {
-      mix3(C_SILT, C_SAND_LO, smr(slope, 0.08, 0.5), out);
-    } else if (b === "oasis") {
-      mix3(C_GREEN, C_SAND_LO, smr(y - (oasisFloorNear(x, z)), 2.5, 11), out);
+      const sw = smr(slope, 0.08, 0.5);
+      mix3(C_SILT, C_SAND_LO, sw, out);
+      _sandW = 0.3 + sw * 0.6;
     } else {
       // dune: crests bleach, troughs hold the shadow of the last one
       mix3(C_SAND_LO, C_SAND_HI, smr(y, 4, 30), out);
     }
+    if (ow > 0) {
+      // scrub on the bowl floor and the lower bank, reeds at the waterline,
+      // sand coming back up the rim
+      const up = smr(y - oasisFloorNear(x, z), 2.5, 11);
+      mix3(C_REED, C_GREEN, smr(y - oasisFloorNear(x, z), 1.2, 3.0), _oc);
+      mix3(_oc, out, up, _oc);
+      mix3(out, _oc, ow, out);
+      _sandW *= 1 - ow * (1 - up);
+    }
     // sand cannot sit on a face this steep — anywhere on the island
-    if (slope > 0.34) mix3(out, C_ROCK_LO, smr(slope, 0.34, 0.85) * 0.78, out);
+    if (slope > 0.34) { mix3(out, C_ROCK_LO, smr(slope, 0.34, 0.85) * 0.78, out); _sandW *= 1 - smr(slope, 0.34, 0.7); }
     /* ---- TONAL BREAK-UP, AND WHY IT IS NOT A PER-VERTEX HASH ANY MORE -----
        OWNER (2026-09-01): "the sand varies in colour a little too much idk why
        it looks weird."
@@ -693,6 +731,78 @@
     return yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - v);
   }
 
+  /* ============================================================ THE SAND SHADER
+     The island used to be a per-VERTEX Lambert: lighting evaluated at vertices
+     10 m apart (640 m on the far rings) and smeared across the triangles, so
+     the sun could never draw anything smaller than a quad and the whole erg
+     photographed as smooth brown modelling clay. Two changes, one material:
+
+       - PER-PIXEL lighting (Phong with a near-zero specular: dry sand is
+         almost Lambertian, but a hair of sheen at grazing angles is what the
+         eye reads as grains catching the sun).
+       - a WORLD-SPACE SURFACE the mesh cannot carry: wind ripples (a 0.85 m
+         asymmetric band, warped so it never ruled-lines, plus a 7.5 m set on
+         top), perturbing the NORMAL rather than the colour, so they light
+         and shadow with the sun and swing as the day turns; and a grain
+         term in the albedo. All of it fades with distance and with fwidth
+         so the far rings do not shimmer, and all of it is weighted by the
+         per-vertex `sandW` colourAt writes: salt, rock, wet beach and oasis
+         scrub stay smooth.
+
+     The NO SCATTER block below said it: texture on the sand belongs in the
+     SURFACE, not in objects. This is that. */
+  let sandMat = null;
+  function sandMaterial() {
+    if (sandMat) return sandMat;
+    const m = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 7, specular: 0x0b0906 });
+    m.onBeforeCompile = function (sh) {
+      sh.uniforms.uWind = { value: new THREE.Vector2(0.83, 0.55) };
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute float sandW;\nvarying float vSand;\nvarying vec3 vWP;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSand = sandW;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", [
+          "#include <common>",
+          "uniform vec2 uWind;",
+          "varying float vSand;",
+          "varying vec3 vWP;",
+          "float wlH(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+          "float wlN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);",
+          "  return mix(mix(wlH(i), wlH(i+vec2(1.0,0.0)), f.x), mix(wlH(i+vec2(0.0,1.0)), wlH(i+vec2(1.0,1.0)), f.x), f.y); }",
+        ].join("\n"))
+        .replace("#include <color_fragment>", [
+          "#include <color_fragment>",
+          "float wlD = length(vViewPosition);",
+          "float wlFine = 1.0 - smoothstep(18.0, 90.0, wlD);",
+          "float wlMid = 1.0 - smoothstep(150.0, 900.0, wlD);",
+          "float wlG = wlN(vWP.xz * 2.7) * 0.6 + wlN(vWP.xz * 0.61) * 0.4;",
+          "float wlS = wlN(vWP.xz * 0.031 + 7.0) * 0.6 + wlN(vWP.xz * 0.0071) * 0.4;",
+          "diffuseColor.rgb *= 1.0 + (wlG - 0.5) * 0.12 * wlFine + (wlS - 0.5) * 0.16 * wlMid * (0.35 + 0.65 * vSand);",
+        ].join("\n"))
+        .replace("#include <normal_fragment_maps>", [
+          "#include <normal_fragment_maps>",
+          "{",
+          "  vec2 wp = vWP.xz;",
+          "  vec2 wd = normalize(uWind + (vec2(wlN(wp * 0.004), wlN(wp * 0.004 + 3.1)) - 0.5) * 0.9);",
+          "  float warp = wlN(wp * 0.045) * 5.0 + wlN(wp * 0.19) * 1.3;",
+          "  float ph1 = dot(wp, wd) * 7.39 + warp * 6.2832;",
+          "  float ph2 = dot(wp, wd) * 0.83 + warp * 2.1;",
+          "  float aa1 = clamp(1.6 - fwidth(ph1) * 0.9, 0.0, 1.0);",
+          "  float aa2 = clamp(1.6 - fwidth(ph2) * 0.9, 0.0, 1.0);",
+          "  float c1 = cos(ph1); float t1 = c1 * (1.0 + 0.55 * c1) - 0.27;",
+          "  float c2 = cos(ph2); float t2 = c2 * (1.0 + 0.45 * c2) - 0.2;",
+          "  float amp = vSand * (t1 * 0.30 * aa1 * wlFine + t2 * 0.16 * aa2 * wlMid);",
+          "  vec3 tw = vec3(wd.x, 0.0, wd.y) * amp;",
+          "  normal = normalize(normal - (viewMatrix * vec4(tw, 0.0)).xyz);",
+          "}",
+        ].join("\n"));
+    };
+    m.customProgramCacheKey = function () { return "wl-sand-1"; };
+    sandMat = m;
+    return m;
+  }
+  D.sandMaterial = function () { return THREE ? sandMaterial() : null; };
+
   function makeLevel(i) {
     const cell = CELL0 * Math.pow(2, FLAG_FLATLOD ? 6 : i);
     const span = cell * N;
@@ -723,6 +833,7 @@
     }
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setAttribute("sandW", new THREE.BufferAttribute(new Float32Array(VN * VN), 1));
     geo.setIndex(idx.length > 65535 ? new THREE.Uint32BufferAttribute(idx, 1)
                                     : new THREE.Uint16BufferAttribute(idx, 1));
     /* NO polygonOffset. Two drafts used it to keep the coarse ring behind the
@@ -739,7 +850,7 @@
        kilometres that level is ever seen from; and it slopes the far
        coastline slightly UNDER the water, which is the right direction for
        a shoreline nothing out there can resolve anyway. */
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const mat = sandMaterial();
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = i < 2;          // shadows only where you can see them
     mesh.frustumCulled = false;          // it is centred on the camera; culling it is never right
@@ -755,6 +866,7 @@
     L.cx = cx; L.cz = cz;
     const pos = L.geo.attributes.position.array;
     const col = L.geo.attributes.color.array;
+    const swA = L.geo.attributes.sandW.array;
     // pass 1: heights. Every vertex, hole included — the hole vertices cost
     // 25% more heightAt and buy correct slopes at the hole's edge, which is
     // where a wrong normal is most visible.
@@ -783,6 +895,7 @@
         const zl = heightBuf[t - (j > 0 ? VN : 0)], zr = heightBuf[t + (j < N ? VN : 0)];
         const slope = Math.hypot((xr - xl) * inv, (zr - zl) * inv);
         colourAt(cx + (k - RING) * cell, wz, y, slope, _c, cell);
+        swA[t] = _sandW;
         /* CURVATURE SHADING — the cheapest ambient occlusion there is, and
            the single biggest thing between "rolling cream hills" and "an
            erg". A Lambert sun tells you which way a face points and nothing
@@ -800,6 +913,7 @@
     }
     L.geo.attributes.position.needsUpdate = true;
     L.geo.attributes.color.needsUpdate = true;
+    L.geo.attributes.sandW.needsUpdate = true;
     L.geo.computeVertexNormals();
     L.mesh.position.set(cx, 0, cz);
     L.dirty = false;
@@ -906,37 +1020,164 @@
     return n + 1;
   }
 
+  /* THE PALMS WERE A CYLINDER WITH A CONE ON TOP, and from the strategic
+     camera an oasis read as a ring of green traffic cones. A date palm is a
+     slender, slightly curving, ringed trunk and a crown of long fronds that
+     arch up and droop. One merged geometry (trunk segments that lean, plus
+     ten bent, tapered frond blades with a fold down the middle), instanced
+     per oasis, two materials. */
+  function palmGeometry() {
+    const trunkPos = [], trunkIdx = [], frondPos = [], frondIdx = [];
+    // trunk: 7 rings, 6 sides, leaning toward +x, tapering, ringed
+    const R = 7, SIDES = 6, H = 7.2;
+    for (let r = 0; r < R; r++) {
+      const t = r / (R - 1);
+      const y = t * H;
+      const lean = t * t * 0.9;
+      const rad = (0.36 - t * 0.14) * (r % 2 ? 0.93 : 1.0);
+      for (let k = 0; k < SIDES; k++) {
+        const a = k / SIDES * TAU;
+        trunkPos.push(lean + Math.cos(a) * rad, y, Math.sin(a) * rad);
+      }
+    }
+    for (let r = 0; r < R - 1; r++) for (let k = 0; k < SIDES; k++) {
+      const a = r * SIDES + k, b = r * SIDES + (k + 1) % SIDES, c = a + SIDES, d = b + SIDES;
+      trunkIdx.push(a, c, b, b, c, d);
+    }
+    // fronds from the crown
+    const top = [0.9, H, 0];
+    const NF = 11, SEG = 6;
+    for (let f = 0; f < NF; f++) {
+      const az = f / NF * TAU + (f % 2) * 0.2;
+      const up = f % 3 === 0 ? 0.55 : 0.25;       // a few young fronds stand higher
+      const L = 3.6 + (f % 4) * 0.35;
+      const dx = Math.cos(az), dz = Math.sin(az);
+      const base = frondPos.length / 3;
+      for (let s = 0; s <= SEG; s++) {
+        const t = s / SEG;
+        // arc: rises then droops
+        const along = t * L;
+        const y = top[1] + Math.sin(t * Math.PI * 0.62) * (1.1 + up) - t * t * (1.9 - up);
+        const cx = top[0] + dx * along, cz = top[2] + dz * along;
+        const wdt = Math.sin(Math.min(1, t * 1.25) * Math.PI) * 0.55 + 0.04;
+        // blade: left edge, spine (raised), right edge
+        const px = -dz * wdt, pz = dx * wdt;
+        frondPos.push(cx + px, y - 0.12 * wdt, cz + pz);
+        frondPos.push(cx, y + 0.06, cz);
+        frondPos.push(cx - px, y - 0.12 * wdt, cz - pz);
+      }
+      for (let s = 0; s < SEG; s++) {
+        const a = base + s * 3;
+        frondIdx.push(a, a + 3, a + 1, a + 1, a + 3, a + 4, a + 1, a + 4, a + 2, a + 2, a + 4, a + 5);
+      }
+    }
+    const tg = new THREE.BufferGeometry();
+    tg.setAttribute("position", new THREE.Float32BufferAttribute(trunkPos, 3));
+    tg.setIndex(trunkIdx); tg.computeVertexNormals();
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute("position", new THREE.Float32BufferAttribute(frondPos, 3));
+    fg.setIndex(frondIdx); fg.computeVertexNormals();
+    return { trunk: tg, frond: fg };
+  }
+
   function makePalms() {
     if (FLAG_NOPALMS || !THREE.InstancedMesh || !oases.length) return null;
     const grp = new THREE.Group();
-    const per = 26;
+    const per = 30;
     const cap = oases.length * per;
-    const trunks = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.22, 0.4, 7, 5),
-      new THREE.MeshLambertMaterial({ color: 0x33270f }), cap);
-    const fronds = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(3.1, 1.7, 6),
-      new THREE.MeshLambertMaterial({ color: 0x1c3b12 }), cap);
+    const pg = palmGeometry();
+    const trunks = new THREE.InstancedMesh(pg.trunk,
+      new THREE.MeshLambertMaterial({ color: 0x3a2c1a }), cap);
+    const fronds = new THREE.InstancedMesh(pg.frond,
+      new THREE.MeshLambertMaterial({ color: 0x2c4a1a, side: THREE.DoubleSide }), cap);
     trunks.castShadow = fronds.castShadow = true;
-    let n = 0, f = 0;
+    let n = 0;
     for (let i = 0; i < oases.length; i++) {
       const o = oases[i];
       for (let j = 0; j < per; j++) {
+        // clumped, not a ring: palms stand in groves on the damp ground by the water
         const a = W.hash01(o.x + j, o.z, 501 + j) * TAU;
-        const r = o.r * (0.55 + W.hash01(o.x, o.z + j, 509 + j) * 0.85);
+        const r = o.r * (0.5 + Math.pow(W.hash01(o.x, o.z + j, 509 + j), 1.6) * 0.8);
         const x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
         const y = heightAt(x, z);
-        if (y < o.waterY + 0.2) continue;
-        const s = 0.8 + W.hash01(x, z, 517) * 0.6;
-        n = put(trunks, n, x, y + 3.5 * s, z, a, s, s, s);
-        f = put(fronds, f, x, y + 7.1 * s, z, a, s, s, s);
+        if (y < o.waterY + 0.25 || y > o.waterY + 9) continue;
+        const s = 0.75 + W.hash01(x, z, 517) * 0.6;
+        const yaw = W.hash01(x, z, 523) * TAU;
+        n = put(trunks, n, x, y - 0.2, z, yaw, s, s * (0.9 + W.hash01(x, z, 529) * 0.3), s);
+        put(fronds, n - 1, x, y - 0.2, z, yaw, s, s * (0.9 + W.hash01(x, z, 529) * 0.3), s);
       }
     }
-    trunks.count = n; fronds.count = f;
+    trunks.count = n; fronds.count = n;
     trunks.instanceMatrix.needsUpdate = fronds.instanceMatrix.needsUpdate = true;
     grp.add(trunks); grp.add(fronds);
     return grp;
   }
+
+  /* ============================================================ THE SKY
+     microboot's dome is a two-colour gradient and nothing else, so the sky
+     over the erg had no sun in it: a pink-to-grey wash with the light coming
+     from nowhere. The dome keeps its uniforms (campaign.js's tintDay and
+     events.js's sandstorm both write topColor/bottomColor every frame) and
+     gains what a desert sky actually has: the sun's disc, the bright
+     forward-scatter glow round it, a pale band of haze sitting on the
+     horizon, and a faint warm tint on the side of the sky facing the sun.
+     The sun direction is read off micro.sun each frame in onBeforeRender,
+     so it follows the day clock with no other code knowing. */
+  function upgradeSky() {
+    const M = CBZ.micro, dome = M && M.skyDome;
+    if (!dome || !dome.material || !dome.material.uniforms || dome.userData.wlSky) return;
+    const u = dome.material.uniforms;
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      uniforms: {
+        topColor: u.topColor, bottomColor: u.bottomColor, offset: u.offset, exponent: u.exponent,
+        sunDir: { value: new THREE.Vector3(0.3, 0.5, 0.2).normalize() },
+        sunColor: { value: new THREE.Color(0xfff1cf) },
+        sunUp: { value: 1 },
+      },
+      vertexShader:
+        "varying vec3 vW;void main(){vec4 w=modelMatrix*vec4(position,1.0);vW=w.xyz-cameraPosition;" +
+        "gl_Position=projectionMatrix*viewMatrix*w;}",
+      fragmentShader: [
+        "uniform vec3 topColor;uniform vec3 bottomColor;uniform float offset;uniform float exponent;",
+        "uniform vec3 sunDir;uniform vec3 sunColor;uniform float sunUp;",
+        "varying vec3 vW;",
+        "void main(){",
+        "  vec3 d = normalize(vW);",
+        "  float h = max(d.y + offset * 0.00004, 0.0);",
+        "  vec3 col = mix(bottomColor, topColor, pow(h, exponent));",
+        "  float mu = max(dot(d, sunDir), 0.0);",
+        // haze band on the horizon: brighter, paler, desaturated
+        "  float band = exp(-abs(d.y) * 14.0);",
+        "  vec3 haze = mix(bottomColor, vec3(dot(bottomColor, vec3(0.333))), 0.25) * 1.12;",
+        "  col = mix(col, haze, band * 0.55);",
+        // the sunward half of the sky warms
+        "  col += sunColor * pow(mu, 3.0) * 0.16 * sunUp;",
+        // forward scatter glow and the disc itself
+        "  col += sunColor * pow(mu, 48.0) * 0.55 * sunUp;",
+        "  col += sunColor * smoothstep(0.99955, 0.99985, mu) * 3.0 * sunUp;",
+        // below the horizon the dome is the far haze, never a black cap
+        "  if (d.y < 0.0) col = mix(col, haze, clamp(-d.y * 6.0, 0.0, 1.0));",
+        "  gl_FragColor = vec4(col, 1.0);",
+        "}",
+      ].join("\n"),
+    });
+    const _sd = new THREE.Vector3();
+    dome.onBeforeRender = function () {
+      const sun = M.sun;
+      if (!sun) return;
+      _sd.copy(sun.position);
+      if (sun.target) _sd.sub(sun.target.position);
+      _sd.normalize();
+      mat.uniforms.sunDir.value.copy(_sd);
+      mat.uniforms.sunColor.value.copy(sun.color);
+      // the disc fades as the sun goes down and is gone at night
+      mat.uniforms.sunUp.value = Math.max(0, Math.min(1, (_sd.y + 0.02) * 6)) * Math.min(1, sun.intensity);
+    };
+    dome.material = mat;
+    dome.userData.wlSky = true;
+  }
+  D.upgradeSky = function () { if (THREE) upgradeSky(); };
 
   /* ============================================================ BUILD */
   /* THE SEED IS SETTABLE WITHOUT THREE, on purpose: core.js is loadable in
@@ -978,6 +1219,7 @@
     const palms = makePalms();
     if (palms) root.add(palms);
     CBZ.scene.add(root);
+    upgradeSky();
     built = true; visible = true;
 
     // first fill is synchronous and complete: the campaign places the player
@@ -1237,6 +1479,7 @@
         }
         const cell = span / seg;
         const cbuf = new Float32Array(nv * 3);
+        const sbuf = new Float32Array(nv);
         for (let j = 0; j < side; j++) {
           for (let k = 0; k < side; k++) {
             const i = j * side + k, oi = i * 3;
@@ -1244,6 +1487,7 @@
             const zl = hbuf[i - (j > 0 ? side : 0)], zr = hbuf[i + (j < seg ? side : 0)];
             const slope = Math.hypot((xr - xl) / (2 * cell), (zr - zl) / (2 * cell));
             colourAt(wx + pos.getX(i), wz + pos.getZ(i), hbuf[i], slope, _c, cell);
+            sbuf[i] = _sandW;
             // same curvature term the island uses, so the arena and the
             // campaign are visibly the same desert and not two deserts
             const curv = ((xl + xr + zl + zr) * 0.25 - hbuf[i]) / cell;
@@ -1252,8 +1496,9 @@
           }
         }
         g.setAttribute("color", new THREE.BufferAttribute(cbuf, 3));
+        g.setAttribute("sandW", new THREE.BufferAttribute(sbuf, 1));
         g.computeVertexNormals();
-        const gm = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+        const gm = new THREE.Mesh(g, sandMaterial());
         gm.position.set(wx, 0, wz);
         gm.receiveShadow = true;
         gm.userData.terrain = true;

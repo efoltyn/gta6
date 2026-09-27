@@ -568,6 +568,156 @@
   let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null;
   let backdrop = null;
 
+  /* ============================================================
+     MARINE SNOW — the water column is not empty (2026-09-27).
+
+     An underwater frame with nothing IN the water reads as a shark floating in
+     a blue void: fog gives distance, but nothing gives MOTION. Real water is
+     full of suspended particulate (plankton, silt, organic flakes), and the
+     near field of it is the one cue that tells your eye the camera moved.
+
+     One THREE.Points cloud, one draw call. The buffer is written ONCE at build
+     (unit-cube seeds) and never touched again: the vertex shader lays the
+     seeds out on a world-anchored lattice of SNOW_BOX cells and wraps each one
+     into the box around `cameraPosition` with mod(). So the flakes hold still
+     in the world while you swim through them (real parallax), and recycle to
+     the far side silently once they leave the box. A time drift (slow current
+     plus a gentle sink) and a per-flake wobble keep them alive when you stop.
+
+     fog:false with its OWN fade from view distance: gone before the box edge
+     (so the wrap never pops) and before the medium's own range (so far flakes
+     dissolve into the water rather than float over it). Brightness follows
+     the downwelling light (eye depth, the column's k, daylight); the count
+     follows it too, through drawRange — shallow sunlit water is full of lit
+     specks, the deep at night has a few dim ones.
+  ============================================================ */
+  const SNOW_N = 3200;          // points in the buffer (drawRange draws a prefix)
+  const SNOW_BOX = 28;          // metres: the wrap cube around the eye
+  const SNOW_SIZE = 0.058;      // metres: mean flake diameter
+  const SNOW_ALPHA = 0.95;      // peak alpha in shallow daylight
+  const SNOW_DRIFT_X = 0.045, SNOW_DRIFT_Z = 0.028, SNOW_SINK = 0.035;   // m/s
+  let snow = null, snowU = null;
+
+  function buildSnow() {
+    const pos = new Float32Array(SNOW_N * 3);
+    const rnd = new Float32Array(SNOW_N);
+    // Local LCG, fixed seed: deterministic, and it never draws from the seeded
+    // world stream.
+    let s = 0x5eed1234 >>> 0;
+    const next = function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    for (let i = 0; i < SNOW_N; i++) {
+      pos[i * 3] = next(); pos[i * 3 + 1] = next(); pos[i * 3 + 2] = next();
+      rnd[i] = next();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("aRand", new THREE.BufferAttribute(rnd, 1));
+    // The shader moves every vertex, so the computed bounds would be a lie; a
+    // huge sphere keeps any probe or raycast from culling it by accident.
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    snowU = {
+      uBox: { value: SNOW_BOX },
+      uDrift: { value: new THREE.Vector3() },
+      uTime: { value: 0 },
+      uSize: { value: SNOW_SIZE },
+      uScale: { value: 500 },          // drawing-buffer px per metre at 1 m
+      uFadeFar: { value: 13 },
+      uSurfY: { value: 0 },
+      uOpacity: { value: 0 },
+      uColor: { value: new THREE.Color(0xf2eedd) },
+    };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: snowU,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.NormalBlending,
+      fog: false,
+      vertexShader: [
+        "attribute float aRand;",
+        "uniform float uBox;",
+        "uniform vec3 uDrift;",
+        "uniform float uTime;",
+        "uniform float uSize;",
+        "uniform float uScale;",
+        "uniform float uFadeFar;",
+        "uniform float uSurfY;",
+        "varying float vAlpha;",
+        "void main() {",
+        // world-anchored lattice + current, wrapped into the box around the eye
+        "  vec3 p = position * uBox + uDrift;",
+        "  float ph = aRand * 6.2831853;",
+        "  p += vec3(sin(uTime * 0.37 + ph * 3.0), sin(uTime * 0.29 + ph * 5.0) * 0.6, cos(uTime * 0.31 + ph * 7.0)) * 0.22;",
+        "  vec3 rel = mod(p - cameraPosition, uBox) - 0.5 * uBox;",
+        "  vec3 w = cameraPosition + rel;",
+        "  vec4 mv = viewMatrix * vec4(w, 1.0);",
+        "  gl_Position = projectionMatrix * mv;",
+        "  float dist = length(rel);",
+        "  float zv = max(0.05, -mv.z);",
+        // never above the water: straddling the surface, the top half is air
+        "  float wet = step(w.y, uSurfY - 0.12);",
+        "  vAlpha = wet * smoothstep(0.30, 1.10, dist) * (1.0 - smoothstep(uFadeFar * 0.45, uFadeFar, dist))",
+        "         * (0.45 + 0.55 * fract(aRand * 13.37));",
+        "  gl_PointSize = clamp(uSize * (0.55 + 0.9 * aRand) * uScale / zv, 1.0, 26.0) * wet;",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform vec3 uColor;",
+        "uniform float uOpacity;",
+        "varying float vAlpha;",
+        "void main() {",
+        "  float d = length(gl_PointCoord - 0.5) * 2.0;",
+        "  if (d > 1.0) discard;",
+        "  float a = pow(1.0 - d, 1.6) * vAlpha * uOpacity;",
+        "  if (a < 0.003) discard;",
+        "  gl_FragColor = vec4(uColor, a);",
+        "}",
+      ].join("\n"),
+    });
+    mat.name = "cbz-uw-snow";           // never water/ocean/sea (gate matches names)
+    snow = new THREE.Points(geo, mat);
+    snow.name = "cbz-uw-snow";
+    snow.frustumCulled = false;
+    snow.renderOrder = 5;
+    snow.userData.uwFx = true;
+    snow.layers.set(FX_LAYER);
+    snow.visible = false;
+    return snow;
+  }
+
+  function driveSnow(t, surfY, depth, day, tint) {
+    if (!snow || !snowU) return;
+    // Downwelling light on the flakes: strongest in the first metres, and in a
+    // shallow column (low k) where the sand throws light back up.
+    const lit = (0.30 + 0.70 * Math.exp(-depth / 18)) * (1 - 0.45 * kDepth);
+    const op = SNOW_ALPHA * lit * day * shown;
+    snowU.uOpacity.value = op;
+    snow.visible = op > 0.004;
+    if (!snow.visible) return;
+    // Sparser in the deep: draw a prefix of the (uniformly random) buffer.
+    snow.geometry.setDrawRange(0, Math.floor(SNOW_N * (0.35 + 0.65 * lit)));
+    const B = SNOW_BOX;
+    // Wrap the drift on the CPU so the shader never sees a large float.
+    snowU.uDrift.value.set((t * SNOW_DRIFT_X) % B, (-t * SNOW_SINK) % B, (t * SNOW_DRIFT_Z) % B);
+    snowU.uTime.value = t % 6283.1853;
+    snowU.uSurfY.value = surfY;
+    // Fade inside both the box (no wrap pop) and the medium's own range.
+    snowU.uFadeFar.value = Math.min(B * 0.5 - 0.6, Math.max(5, _sight.r0 * 0.55));
+    const cam = CBZ.camera, cvs = CBZ.renderer && CBZ.renderer.domElement;
+    if (cam && cvs && cvs.height > 0) {
+      snowU.uScale.value = cvs.height / (2 * Math.tan((cam.fov || 60) * Math.PI / 360));
+    }
+    // Pale warm white pulled 35% toward the water's HUE (normalised, so a dark
+    // navy tint colours the flakes without darkening them), then dimmed by the
+    // light that reaches them. The DOM veil over the canvas grades it further.
+    const mx = Math.max(tint.r, tint.g, tint.b, 1e-3);
+    const bright = 0.55 + 0.45 * lit;
+    snowU.uColor.value.setRGB(
+      (0.96 * 0.65 + (tint.r / mx) * 0.35) * bright,
+      (0.94 * 0.65 + (tint.g / mx) * 0.35) * bright,
+      (0.86 * 0.65 + (tint.b / mx) * 0.35) * bright);
+  }
+
   function buildFx() {
     if (fxRoot || typeof document === "undefined") return;
     fxRoot = new THREE.Group();
@@ -756,6 +906,8 @@
       }
     }
 
+    fxRoot.add(buildSnow());
+
     if (CBZ.scene) CBZ.scene.add(fxRoot);
   }
 
@@ -830,6 +982,7 @@
         m.rotation.z = Math.sin(t * 0.11 + i) * 0.06;
       }
     }
+    driveSnow(t, surfY, depth, day, tint);
   }
 
   function hideFx() {
@@ -838,6 +991,7 @@
     // the backdrop's own flag true makes every probe that asks "is the water
     // background up?" answer yes on a dry beach.
     if (backdrop) backdrop.visible = false;
+    if (snow) snow.visible = false;
   }
 
   /* ============================================================

@@ -4349,7 +4349,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
 
     // hand the screen over after a beat, so the last frame of the battle is a
     // frame of the battle and not a menu
+    /* opts.onEnd: a caller that owns what happens after (war/bridge.js, the
+       war layer's zoom-in) gets the report instead of the old campaign's
+       aftermath screen. */
+    const onEnd = startOpts && typeof startOpts.onEnd === "function" ? startOpts.onEnd : null;
     setTimeout(function () {
+      if (onEnd) { onEnd(r); return; }
       if (W.army && W.army.aftermath) W.army.aftermath(r);
       else W.setPhase("campaign");
     }, outcome === "won" ? 1400 : 1100);

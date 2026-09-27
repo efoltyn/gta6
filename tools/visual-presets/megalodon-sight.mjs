@@ -95,7 +95,7 @@ async function stageMegalodonSight(input) {
   const CBZ = window.CBZ, T = window.THREE, sub = input.subject;
   if (!CBZ || !T || !CBZ.stepSim || !CBZ.surv) return { ok: false, missing: "engine" };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const NEED = [0, 14, 34, 75];
+  const NEED = (CBZ.sharkSimLadder || []).map((r) => r.need);
   Math.random = (function (s) { return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })(20260831);
 
   let D = window.__megaSight;

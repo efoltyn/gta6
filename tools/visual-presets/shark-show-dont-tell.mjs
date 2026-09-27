@@ -232,7 +232,7 @@ async function stageShowDontTell(input) {
          The last rung is deliberately reached by a real evolve() so the growth
          beat under test is the production one, not a poked variable. */
       feedToTier(tier) {
-        const NEED = [0, 14, 34, 75], sim = CBZ.sharkSim;
+        const NEED = (CBZ.sharkSimLadder || []).map((r) => r.need), sim = CBZ.sharkSim;
         for (let round = 0; round < 8 && sim.tier < tier; round++) {
           D.peace(); D.shallow(4); D.step(12);
           sim.mass = Math.max(sim.mass, NEED[sim.tier + 1] - 1);

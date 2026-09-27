@@ -57,6 +57,9 @@
       if (b) b.click();
     });
     mid.appendChild(play);
+    // the device's record: the number the next run is for (modes/shark_sim.js owns it)
+    const best = el("div", "st-best"); best.id = "sharkBest";
+    mid.appendChild(best);
     const q = el("div", "st-quality");
     q.appendChild(el("span", null, "Graphics"));
     const seg = el("div", "st-seg");
@@ -96,7 +99,7 @@
     touch2.appendChild(el("kbd", null, "Rise / Dive")); touch2.appendChild(el("span", null, "the two buttons"));
     keys.appendChild(touch2);
     const bite = el("span", "st-k");
-    bite.appendChild(el("kbd", null, "Bite")); bite.appendChild(el("span", null, "automatic. Point your mouth at food"));
+    bite.appendChild(el("kbd", null, "Bite")); bite.appendChild(el("span", null, "automatic. Eat or starve"));
     keys.appendChild(bite);
     foot.appendChild(keys);
 
@@ -193,12 +196,21 @@
     }
     cast.length = 0;
   }
+  function showBest() {
+    const n = document.getElementById("sharkBest");
+    if (!n) return;
+    const b = CBZ.sharkSimBest && CBZ.sharkSimBest();
+    if (!b) { n.textContent = ""; n.style.display = "none"; return; }
+    n.textContent = "Best " + String(b.score).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    n.style.display = "";
+  }
   function attract(dt) {
     const g = CBZ.game;
     if (!g || g.state !== "title" || g.mode !== "sharksim") { if (seeded) castOut(); seeded = false; return; }
     const A = CBZ.surv && CBZ.surv.arena, cam = CBZ.camera, T = window.THREE;
     if (!A || !A.center) { ensureWorld(); return; }
     if (!cam || !T) return;
+    if (!seeded) { showBest(); }
     if (!seeded) { seeded = true; t = 0; ang0 = (CBZ.hash01 ? CBZ.hash01(7, 3, 0x5aac01) : Math.random()) * Math.PI * 2; }
     const step = Math.min(0.1, dt || 0.016);
     t += step;
@@ -223,7 +235,138 @@
     cam.updateMatrixWorld(true);
   }
 
-  CBZ.sharkTitle = { build, attract };
+  /* ================= LAUNCH: STRAIGHT INTO THE WATER =====================
+     2026-09-27. CrazyGames rejected the release: "when you launch the shark
+     game it shows a quick shot of another game, and the whole intro is
+     stupid". Launch used to be: Cell Block Z's static card for the whole
+     script parse, then this title over an attract lens, then PLAY, then the
+     boot meter's "BUILDING THE WORLD" card, then a PICK YOUR VIEW card, then
+     a banner. Five screens before a fin moved.
+
+     Now: index.html marks a shark page before its first paint and puts up
+     #sharkBoot (the sea, the wordmark, a moving line). The moment the engine
+     has parsed, this starts the match itself (no PLAY, no meter card), holds
+     the boot screen until the live frames are cheap, then fades it off a
+     shot that is already the game: the lens starts low beside the shark at
+     the waterline and swings in behind it over two and a half seconds, while
+     the wordmark and one line of controls sit over the live sea and leave on
+     the first input. The title card above is still the Main Menu the death
+     card goes back to; it is just no longer in the way on launch.
+
+     Gated on #sharkBoot, i.e. on a page index.html marked as a shark page
+     (START_MODE or ?mode=sharksim). The hub page never auto-starts.
+     The camera move is staged HERE at onAlways(60), after camera.js (50):
+     it blends from a hero pose into whatever the chase camera decided this
+     frame, so it lands on it exactly and never edits the chase code. */
+  const launch = { started: false, bootGone: false, live: 0, cheap: 0, last: 0, t: -1, introT: 0, intro: null, cam: null };
+  const HERO_SECS = 2.6;
+  function bootEl() { return document.getElementById("sharkBoot"); }
+  function hideBoot() {
+    launch.bootGone = true;
+    const b = bootEl();
+    document.documentElement.classList.remove("boot-sharksim");
+    if (!b) return;
+    b.classList.add("gone");
+    setTimeout(function () { if (b.parentNode) b.parentNode.removeChild(b); }, 900);
+  }
+  function buildIntro() {
+    if (launch.intro) return launch.intro;
+    const root = el("div"); root.id = "sharkIntro";
+    const head = el("div");
+    head.appendChild(el("div", "si-mark", "SHARK SIM"));
+    head.appendChild(el("div", "si-tag", "Eat. Grow. Become the megalodon."));
+    root.appendChild(head);
+    const keys = el("div", "si-keys");
+    const k = function (cls, key, lab) {
+      const s = el("span", cls); s.appendChild(el("kbd", null, key)); s.appendChild(el("span", null, lab)); keys.appendChild(s);
+    };
+    k("si-kbd", "WASD", "swim"); k("si-kbd", "Shift", "lunge"); k("si-kbd", "Space / C", "rise / dive");
+    k("si-touch", "Stick", "swim"); k("si-touch", "Rise / Dive", "the two buttons");
+    k(null, "Bite", "automatic");
+    root.appendChild(keys);
+    document.body.appendChild(root);
+    launch.intro = root;
+    return root;
+  }
+  function introOff() {
+    if (!launch.intro || !launch.intro.classList.contains("on")) return;
+    launch.intro.classList.remove("on");
+  }
+  CBZ.sharkIntroActive = function () { return launch.started; };
+  function anyInput() {
+    if (launch.t < 0) return;
+    introOff();
+    if (launch.t < HERO_SECS) launch.t = Math.max(launch.t, HERO_SECS - 0.45);   // hand the lens over quickly
+  }
+  ["keydown", "pointerdown", "touchstart"].forEach(function (ev) {
+    window.addEventListener(ev, anyInput, { passive: true });
+  });
+
+  const _v = { a: null, b: null, c: null, d: null };
+  function heroCam(dt) {
+    const T = window.THREE, cam = CBZ.camera, sim = CBZ.sharkSim;
+    const S = sim && sim.shark;
+    if (!T || !cam || !S || !S.group) { launch.t = -1; return; }
+    if (!_v.a) { _v.a = new T.Vector3(); _v.b = new T.Vector3(); _v.c = new T.Vector3(); _v.d = new T.Vector3(); }
+    launch.t += dt;
+    const e = Math.min(1, launch.t / HERO_SECS);
+    if (e >= 1) { launch.t = -1; return; }
+    const k = e * e * (3 - 2 * e);                        // smoothstep
+    const p = S.group.position;
+    const L = Math.max(2.5, (CBZ.marineBodyLen && CBZ.marineBodyLen(S)) || 3);
+    // the chase camera's own answer this frame: where it is and where it looks
+    const chasePos = _v.a.copy(cam.position);
+    const chaseLook = _v.b.set(0, 0, -1).applyQuaternion(cam.quaternion).multiplyScalar(12).add(chasePos);
+    // hero: off the shark's flank, a hand over the water, just ahead of the head
+    const fx = chaseLook.x - chasePos.x, fz = chaseLook.z - chasePos.z, fl = Math.hypot(fx, fz) || 1;
+    const ux = fx / fl, uz = fz / fl;                     // the way the lens (and W) points
+    const sea = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(p.x, p.z) : p.y;
+    const hero = _v.c.set(p.x + ux * L * 0.55 - uz * L * 1.15, sea + 1.05, p.z + uz * L * 0.55 + ux * L * 1.15);
+    const heroLook = _v.d.set(p.x + ux * L * 0.25, p.y + 0.25, p.z + uz * L * 0.25);
+    cam.position.copy(hero).lerp(chasePos, k);
+    heroLook.lerp(chaseLook, k);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(heroLook);
+    cam.updateMatrixWorld(true);
+  }
+
+  function launchTick(dt) {
+    const g = CBZ.game;
+    if (!g || !bootEl() && !launch.started) return;
+    const now = performance.now();
+    const fdt = launch.last ? (now - launch.last) / 1000 : 0.016;
+    launch.last = now;
+    if (!launch.started) {
+      if (!CBZ.bootComplete || g.mode !== "sharksim" || g.state !== "title" || !CBZ.startRun) return;
+      launch.started = true;
+      const m = CBZ.modes && CBZ.modes.sharksim;
+      if (m && m.build && !(CBZ.surv && CBZ.surv.built)) { try { m.build(); } catch (e) {} }
+      try { CBZ.startRun(); } catch (e) { console.error("[shark launch]", e); }
+      return;
+    }
+    if (!launch.bootGone) {
+      const sim = CBZ.sharkSim;
+      if (g.state !== "playing" || !sim || !sim.on) { if (g.state !== "playing" && g.state !== "title") hideBoot(); return; }
+      launch.live++;
+      launch.liveT = (launch.liveT || 0) + Math.min(fdt, 2);
+      launch.cheap = fdt < 0.09 ? launch.cheap + 1 : 0;
+      // shaders compile on the first frames of a new world; wait until three
+      // frames in a row are cheap, and on a device that never gets there
+      // (software GL, a loaded laptop) stop waiting after a few drawn frames
+      if (launch.cheap >= 3 || (launch.live >= 4 && launch.liveT > 5)) {
+        hideBoot();
+        buildIntro().classList.add("on");
+        launch.introT = 6.5;
+        launch.t = 0;
+      }
+      return;
+    }
+    if (launch.t >= 0 && g.state === "playing") heroCam(Math.min(0.05, fdt));
+    if (launch.introT > 0) { launch.introT -= fdt; if (launch.introT <= 0 || g.state !== "playing") introOff(); }
+  }
+
+  CBZ.sharkTitle = { build, attract, launch: launch };
+  if (CBZ.onAlways) CBZ.onAlways(60.1, launchTick);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build); else build();
   if (CBZ.onAlways) CBZ.onAlways(60, attract);
 })();

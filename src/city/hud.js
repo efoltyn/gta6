@@ -35,7 +35,7 @@
   let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl, crossEl;
   let armBar, armRowEl, armLabEl;   // ARMOR bar (the steel/blue outer-layer gauge under HP)
   let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
-  let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // retired prospect objective shell
+  let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // the one next-step line (renderObjective)
   let popEl, killEl;
   // wave-5 depth surfaces (all contextual — hidden unless currently relevant)
   let turfPayEl;            // tiny "+$x/min" tag under the money readout
@@ -327,9 +327,9 @@
       "</div>" +
       "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span aria-hidden='true' style='font-size:16px;color:var(--hud-dim)'>↠</span> <span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span> <span id='cSpeedFU' style='font-size:12px;font-weight:700;letter-spacing:1px;color:var(--hud-dim)'>MPH</span></div>" +
       "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
-      // Retired prospect objective shell. Kept hidden so older references stay
-      // harmless, but default story/prospect checklist text no longer reaches HUD.
-      "<div id='cObj' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
+      // THE ONE NEXT-STEP LINE (renderObjective): onboarding step or the
+      // prospect task. Hidden while a job's distance pill holds this slot.
+      "<div id='cObj'class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
       "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:var(--hud-accent);font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
       "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:var(--hud-accent);transition:width .4s ease'></i></div>" +
       "</div>" +
@@ -1077,10 +1077,37 @@
     if (gang && CBZ.fullMap.setGangWaypoint) { CBZ.fullMap.setGangWaypoint(gang.id); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
   }
 
-  // Retired objective line. The old prospect checklist read like a half-built
-  // storyline relic on the main screen; keep the shell hidden for compatibility.
+  // THE ONE NEXT-STEP LINE. Top-centre, in the slot the job distance pill
+  // uses (the two never show together: a live job with a place pre-empts it).
+  // Source, in order: the onboarding chain (city/origins.js
+  // CBZ.cityOnboardLine: "what do I do now", with a payoff flash when a step
+  // pays), then the gang you are prospecting (playergang.js
+  // CBZ.cityProspectTask, with its ROUTE chip and task progress). Nothing
+  // else writes here; with neither live the slot is hidden. It was switched
+  // off wholesale once, which also blinded the prospect ladder: a player who
+  // asked a crew for work had no way to see what the crew wanted next.
   function renderObjective() {
-    if (objEl) objEl.style.display = "none";
+    if (!objEl) return;
+    let L = null;
+    try { L = CBZ.cityOnboardLine ? CBZ.cityOnboardLine() : null; } catch (e) { L = null; }
+    let route = false;
+    if (!L && CBZ.cityProspectTask) {
+      let t = null; try { t = CBZ.cityProspectTask(); } catch (e) { t = null; }
+      if (t && t.label) { L = { title: t.label, progress: t.progress }; route = true; }
+    }
+    if (!L) { objEl.style.display = "none"; return; }
+    const col = L.flash ? "var(--money,#7ed957)" : "var(--hud-ink)";
+    wHTML(objTxtEl,
+      "<b style='color:" + col + ";font-weight:700;letter-spacing:.2px'>" + esc(L.title) + "</b>" +
+      (L.hint ? "<div style='font-size:12px;color:var(--hud-dim,#9fb0c6);margin-top:2px'>" + esc(L.hint) + "</div>" : ""));
+    if (objRouteEl) objRouteEl.style.display = route ? "" : "none";
+    const hasBar = L.progress != null && !L.flash;
+    if (objSlotEl) objSlotEl.style.display = hasBar ? "" : "none";
+    if (hasBar && objFillEl) {
+      const w = Math.round(Math.max(0, Math.min(1, +L.progress || 0)) * 100) + "%";
+      if (objFillEl.style.width !== w) objFillEl.style.width = w;
+    }
+    objEl.style.display = "block";
   }
 
   // ---- WEAPON HOTBAR — bring the city loadout up to jail's clarity, reading the
@@ -1671,7 +1698,10 @@
       // an empty #cJob used to keep display:block — a bare grey pill with no
       // words in it, floating top-centre. A box with no text does not render.
       jobEl.style.display = dist ? "block" : "none";
-      if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
+      // a job's distance pill owns the slot; a job with nothing to show there
+      // (a timer, a "pay what you owe") leaves the next-step line visible
+      if (dist) { if (objEl) objEl.style.display = "none"; }
+      else renderObjective();
     } else {
       jobEl.style.display = "none";
       renderObjective();

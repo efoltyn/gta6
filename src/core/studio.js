@@ -943,6 +943,14 @@
       hair: HAIRS[((v * 3 + 1) % HAIRS.length + HAIRS.length) % HAIRS.length],
     };
     if (pal.cap != null) body.cap = opts.color != null ? opts.color : pal.cap;
+    /* A UNIFORM, NOT A PAINT BUCKET. `color` repaints torso+collar+cap in one
+       flat team colour, which is how NPC War's armies came out as toy soldiers.
+       `uniform` names each part (legs/torso/arms/cap/shoes/collar/belt) and wins
+       over both the role palette and `color`. Only read when passed. */
+    if (opts.uniform) {
+      const u = opts.uniform;
+      ["legs", "torso", "collar", "arms", "shoes", "cap", "belt"].forEach(function (k) { if (u[k] != null) body[k] = u[k]; });
+    }
     /* CASTING IS ALSO A CASTING DECISION, not only a paint job.
        entities/character.js has always taken `build` ("m" | "f", default "m")
        and `hairStyle` (a key in its own HAIR_STYLES table) — but studio.cast

@@ -540,7 +540,10 @@
     if (memb()) return null;
     const rec = gangRecById(prospecting.gangId);
     // all tasks done → the objective is the initiation step itself
-    if (initiationReady()) return { label: "Get initiated with " + gangShort(rec) + " [O]", progress: 1, target: null };
+    // (no key cap: [O] is taken by charpanel's hide-HUD capture listener, so
+    // the crew menu it named never opened from here; the verb lives on the
+    // member's own interaction card, "Get initiated")
+    if (initiationReady()) return { label: "Get initiated: talk to a " + gangShort(rec) + " member", progress: 1, target: null };
     const t = curTask();
     if (!t) {
       return { label: "Get initiated with " + gangShort(rec), progress: 1, target: null };

@@ -1686,9 +1686,188 @@
   //        whose group.position IS the actor's pos needs nothing),
   //       { vy } the swimmer's vertical velocity, which pitches the body
   //        nose-down/up when it is driving through the column.
+  /* ---- THE PRONE SWIMMER (st.prone) — how the CROWD swims (2026-09-27) ----
+     The cycle above is an UPRIGHT body: torso leaning 17 degrees, legs hanging
+     straight down, arms rocking between -1.8 and -0.6 rad. From a boat or a
+     shark's-eye view that is a person standing in the sea waving — nobody was
+     actually swimming. A body that sets st.prone gets real strokes instead:
+
+       CRAWL        the body flat on the water, arms turning FULL circles half
+                    a turn apart (pull under the body, high-elbow recovery out
+                    to the side), the torso rolling with each pull, a breath
+                    to the side every other stroke, a six-beat flutter kick.
+       BREASTSTROKE (st.breast) the head and shoulders rising on an out-sweep,
+                    hands together under the chin and shot forward, a frog
+                    kick, then a glide — the slow, head-up swimmer.
+       FLEEING      (st.flee) a frantic head-up crawl, harder kicks, and every
+                    few seconds a glance back over the shoulder at the fin
+                    (st.look = the threat's bearing relative to the body).
+       TREADING /   the upright pose (mood) and the thrash layer are the old
+       THRASH       code, blended in by max(mood, thrash): a swimmer who stops,
+                    or whom the shark is ON, comes upright and goes to pieces.
+
+     The hips are lifted (ch.model.position.y, which animChar eases back to 0
+     every frame, so leaving the water is a blend) so the back rides at the
+     surface given the caller's float depth (st.floatD, feet below the surface
+     for an upright body). The player keeps the upright cycle (no st.prone). */
+  function sm01(x) { return x <= 0 ? 0 : (x >= 1 ? 1 : x * x * (3 - 2 * x)); }
+  const _swC = {}, _swB = {}, _swU = {}, _swW = { cr: 1, br: 0, P: 1, U: 0 };
+  function swMix(k) { return (_swC[k] * _swW.cr + _swB[k] * _swW.br) * _swW.P + _swU[k] * _swW.U; }
+  function poseSwimmerProne(ch, st, o) {
+    const TAU = 6.283185307179586;
+    const th = st.thrash > 0 ? Math.min(1, st.thrash) : 0;
+    const fl = st.flee > 0 ? Math.min(1, st.flee) : 0;
+    const U = Math.max(st.mood, th);            // upright share: tread / thrash
+    const P = 1 - U;                            // prone share
+    const br = st.breast ? 1 - fl : 0;          // a fleeing breaststroker crawls
+    const cr = 1 - br;
+    const ph = st.stroke;
+    const pitchDrive = Math.max(-0.45, Math.min(0.45, -(+o.vy || 0) * 0.22));
+
+    // ---- CRAWL -------------------------------------------------------------
+    // shoulder angle A: -pi = overhead (forward, along the spine), 0 = at the
+    // hip. rotation.z > 0 swings the LEFT arm out (and < 0 the right) — the
+    // left limbs sit on +x for the arms and -x for the legs on this rig,
+    // checked in plain node against the built character. The pull runs -pi..0 under the body, the recovery 0..pi over the
+    // back with the arm swung wide and the elbow high.
+    const aL = (ph % TAU + TAU) % TAU - Math.PI, aR = ((ph + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    const rL = aL > 0 ? Math.sin(aL) : 0, rR = aR > 0 ? Math.sin(aR) : 0;
+    const kick = ph * 3;
+    const kA = 0.24 * (1 + 0.9 * fl);
+    // breath: to the left on every other left-arm recovery
+    const breath = Math.max(0, -Math.sin(ph)) * sm01(Math.cos(ph * 0.5) * 2);
+    const c = _swC;
+    _swC.bx = 1.30 - 0.22 * fl + pitchDrive;
+    _swC.by = -0.42 * Math.sin(ph) * (1 - 0.3 * fl);
+    _swC.laX = aL;
+    _swC.laZ = 0.12 + 0.62 * rL;
+    _swC.raX = aR;
+    _swC.raZ = -(0.12 + 0.62 * rR);
+    _swC.elL = -(0.2 + 1.15 * rL);
+    _swC.elR = -(0.2 + 1.15 * rR);
+    _swC.llX = 1.36 + Math.sin(kick) * kA;
+    _swC.rlX = 1.36 - Math.sin(kick) * kA;
+    _swC.llZ = -0.05;
+    _swC.rlZ = 0.05;
+    _swC.knL = 0.10 + Math.max(0, Math.sin(kick)) * 0.45;
+    _swC.knR = 0.10 + Math.max(0, -Math.sin(kick)) * 0.45;
+    _swC.nX = -0.30 - 0.70 * fl;
+    _swC.nY = 1.15 * breath * (1 - fl);
+    // ---- BREASTSTROKE --------------------------------------------------------
+    const u = (ph * 0.5 / Math.PI) % 1;         // one cycle per 2pi of stroke
+    let bLaX, bZ, bEl;
+    if (u < 0.4) { const q = u / 0.4; bLaX = -Math.PI + 1.05 * sm01(q); bZ = 0.15 + 0.85 * Math.sin(Math.PI * q); bEl = -0.15 - 0.95 * q; }
+    else if (u < 0.58) { const q = (u - 0.4) / 0.18; bLaX = -2.09 - 0.25 * q; bZ = 0.15 * (1 - q); bEl = -1.1 - 0.6 * q; }
+    else if (u < 0.74) { const q = sm01((u - 0.58) / 0.16); bLaX = -2.34 - 0.80 * q; bZ = 0.05; bEl = -1.7 + 1.6 * q; }
+    else { bLaX = -Math.PI; bZ = 0.05; bEl = -0.1; }
+    // frog kick: knees draw up while the hands come in, the heels whip round
+    // and squeeze, then the legs trail in the glide.
+    let bHip, bKn, bAb;
+    if (u < 0.35) { bHip = 1.45; bKn = 0.1; bAb = 0.05; }
+    else if (u < 0.62) { const q = sm01((u - 0.35) / 0.27); bHip = 1.45 - 0.55 * q; bKn = 0.1 + 1.6 * q; bAb = 0.05 + 0.35 * q; }
+    else if (u < 0.78) { const q = sm01((u - 0.62) / 0.16); bHip = 0.90 + 0.55 * q; bKn = 1.7 - 1.6 * q; bAb = 0.40 - 0.35 * q; }
+    else { bHip = 1.45; bKn = 0.1; bAb = 0.05; }
+    const rise = Math.sin(Math.PI * Math.min(1, u / 0.55));
+    const b = _swB;
+    _swB.bx = 1.38 - 0.36 * rise + pitchDrive;
+    _swB.by = 0;
+    _swB.laX = bLaX;
+    _swB.laZ = bZ;
+    _swB.raX = bLaX;
+    _swB.raZ = -bZ;
+    _swB.elL = bEl;
+    _swB.elR = bEl;
+    _swB.llX = bHip;
+    _swB.rlX = bHip;
+    _swB.llZ = -bAb;
+    _swB.rlZ = bAb;
+    _swB.knL = bKn;
+    _swB.knR = bKn;
+    _swB.nX = -0.25 - 0.75 * rise;
+    _swB.nY = 0;
+    // ---- UPRIGHT (the tread cycle above, verbatim numbers) -----------------
+    const tw = Math.sin(st.tread), t2 = Math.sin(st.tread * 2);
+    const up = _swU;
+    _swU.bx = 0.95;
+    _swU.by = 0;
+    _swU.laX = -0.35 + t2 * 0.42;
+    _swU.laZ = -0.62;
+    _swU.raX = -0.35 - t2 * 0.42;
+    _swU.raZ = 0.62;
+    _swU.elL = -0.85;
+    _swU.elR = -0.85;
+    _swU.llX = 0.55 + t2 * 0.42;
+    _swU.rlX = 0.55 - Math.cos(st.tread * 2) * 0.42;
+    _swU.llZ = 0.06;
+    _swU.rlZ = -0.06;
+    _swU.knL = 0.9 + Math.max(0, tw) * 0.3;
+    _swU.knR = 0.9 + Math.max(0, -tw) * 0.3;
+    _swU.nX = -0.1;
+    _swU.nY = 0;
+    _swW.cr = cr; _swW.br = br; _swW.P = P; _swW.U = U;
+    // LOOK BACK: a glance over the shoulder every few seconds while fleeing,
+    // and an upright, thrashing body watches the thing that is coming.
+    const glance = Math.pow(Math.max(0, Math.sin(st.tread * 0.9)), 4) * fl * P;
+    const look = Math.max(-1.45, Math.min(1.45, +st.look || 0));
+    const lookSide = look >= 0 ? 1 : -1;
+    ch.group.rotation.x = 0;
+    // THE TORSO HINGES AT THE HIPS. ch.body's origin is at the feet, so a bare
+    // rotation.x of 1.3 swings the chest a metre and a half forward of the
+    // legs; animChar's hip lock is stripped here and re-solved at the end.
+    beginCharacterHipFrame(ch);
+    if (ch.body) {
+      ch.body.rotation.x = swMix("bx") - glance * 0.25;
+      ch.body.rotation.y = swMix("by") + glance * lookSide * 0.55;
+      ch.body.position.set(0, 0, 0);
+    }
+    if (ch.parts) {
+      if (ch.parts.la) { ch.parts.la.rotation.x = swMix("laX"); ch.parts.la.rotation.z = swMix("laZ"); ch.parts.la.rotation.y = 0; }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = swMix("raX"); ch.parts.ra.rotation.z = swMix("raZ"); ch.parts.ra.rotation.y = 0; }
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = swMix("llX"); ch.parts.ll.rotation.z = swMix("llZ"); }
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = swMix("rlX"); ch.parts.rl.rotation.z = swMix("rlZ"); }
+    }
+    if (ch.low) {
+      if (ch.low.la) ch.low.la.rotation.x = Math.min(0, swMix("elL"));
+      if (ch.low.ra) ch.low.ra.rotation.x = Math.min(0, swMix("elR"));
+      if (ch.low.ll) ch.low.ll.rotation.x = Math.max(0, swMix("knL"));
+      if (ch.low.rl) ch.low.rl.rotation.x = Math.max(0, swMix("knR"));
+    }
+    if (ch.neck) {
+      ch.neck.rotation.x = swMix("nX") - glance * 0.5;
+      ch.neck.rotation.y = swMix("nY") + glance * look * 0.9 + look * 0.8 * th;
+    }
+    // HIPS TO THE SURFACE. Upright, the caller's float depth hangs the feet
+    // st.floatD under the water; prone, the hips must ride ~0.1 m under it.
+    if (ch.model) {
+      // model.position is in the group's frame; the hip lives inside the
+      // model's (humanScale) scale.
+      const floatD = st.floatD > 0 ? st.floatD : 1.275;
+      ch.model.position.y = Math.max(0, floatD - 0.12 - hipYOf(ch) * (ch.model.scale.y || 1)) * P;
+    }
+    // THE THRASH LAYER (the upright code's, unchanged), on top.
+    if (th > 0) {
+      const f = Math.sin(st.tread * 3.3), gg = Math.cos(st.tread * 2.7);
+      if (ch.body) { ch.body.rotation.x += 0.20 * th * gg; ch.body.rotation.z = f * 0.26 * th; }
+      const FLAIL = -2.6;
+      if (ch.parts) {
+        if (ch.parts.la) { ch.parts.la.rotation.x = Math.max(FLAIL, ch.parts.la.rotation.x + (-1.45 - f * 0.80) * th); ch.parts.la.rotation.z -= 0.50 * th; }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = Math.max(FLAIL, ch.parts.ra.rotation.x + (-1.45 + f * 0.80) * th); ch.parts.ra.rotation.z += 0.50 * th; }
+        if (ch.parts.ll) ch.parts.ll.rotation.x += gg * 0.55 * th;
+        if (ch.parts.rl) ch.parts.rl.rotation.x -= gg * 0.55 * th;
+      }
+    } else if (ch.body) ch.body.rotation.z = 0;
+    lockCharacterHips(ch);
+    return true;
+  }
+
   function poseSwimmer(ch, st, opts) {
     if (!ch || !ch.group || !st) return false;
     const o = opts || {};
+    if (st.prone) {
+      ch.swimming = true;
+      if (o.pos) ch.group.position.copy(o.pos);
+      return poseSwimmerProne(ch, st, o);
+    }
     ch.swimming = true;
     if (o.pos) ch.group.position.copy(o.pos);
     const m = st.mood;                      // 0 = gliding crawl, 1 = treading

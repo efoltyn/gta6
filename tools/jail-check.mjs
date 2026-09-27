@@ -393,7 +393,7 @@ const death = await evl(`
   try{CBZ.cityWantedReset&&CBZ.cityWantedReset();}catch(e){}
   CBZ.game.escapedConvict = true;
   CBZ.cityForceStars(3);
-  if (CBZ.cityInfamyResetOnDeath) CBZ.cityInfamyResetOnDeath();
+  if (CBZ.cityDeathPenalty) CBZ.cityDeathPenalty();
   return { flag: CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH, convict: !!CBZ.game.escapedConvict, wanted: CBZ.game.wanted|0, heat: CBZ.game.heat||0 };
 `);
 check("death clears stars, heat AND the convict floor", death.flag === true && death.convict === false && death.wanted === 0 && death.heat === 0, JSON.stringify(death));

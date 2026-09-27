@@ -586,7 +586,11 @@
     if (depth >= SWIM_ENTER) b.swim = true;
     else if (depth <= SWIM_LEAVE) b.swim = false;
     if (b.swim) { swimStep(b, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
-    if (wasSwim && b.char) b.char.swimming = false;
+    if (wasSwim && b.char) {
+      b.char.swimming = false;
+      // the prone stroke turns the head; nothing on land ever resets that axis
+      if (b.char.neck) b.char.neck.rotation.y = 0;
+    }
 
     // ---- feet on the ground (or on the bed, in the shallows) ---------------
     // Wading is not a state, it is a scale: the water takes more of the step
@@ -658,6 +662,11 @@
       const r = +b.reactivity || 0;
       st.stroke = r * 6.283;
       st.tread = ((r * 3.7) % 1) * 6.283;
+      // a real stroke, flat on the water (character.js poseSwimmerProne):
+      // about a third of the beach swims breaststroke, head up, the rest crawl
+      st.prone = true;
+      st.floatD = FLOAT_DEPTH;
+      st.breast = ((r * 7.31) % 1) < 0.34;
     }
     const panic = b.state === "panic" || b.panicT > 0;
     const surf = seaAt(b.pos.x, b.pos.z);
@@ -691,8 +700,25 @@
     // ANIMATION. Panic runs the cycle hot AND layers the thrash on top; both
     // ease, so a body that has just seen a fin comes apart over a beat rather
     // than switching animation.
-    st.rate = panic ? 2.25 : 1;
-    st.thrash = damp(st.thrash || 0, panic ? 1 : 0, panic ? 5 : 3, dt);
+    /* FLEEING IS SWIMMING, THRASHING IS WHAT HAPPENS WHEN IT FAILS. A panicked
+       swimmer with a fin behind it sprints: a frantic head-up crawl, big kicks,
+       glances back at the thing (st.look is its bearing off the body's nose).
+       Only when the animal is right ON them do they come upright and go to
+       pieces. The breaststroke is slower than the crawl and runs a longer
+       cycle, so its cadence is eased down. */
+    let foeD = 99;
+    const foe = b.foe && !b.foe.dead && b.foe.pos ? b.foe : null;
+    if (foe) {
+      const fx = foe.pos.x - b.pos.x, fz = foe.pos.z - b.pos.z;
+      foeD = Math.hypot(fx, fz);
+      let rel = Math.atan2(fx, fz) - b.group.rotation.y;
+      while (rel > Math.PI) rel -= 6.283185307; while (rel < -Math.PI) rel += 6.283185307;
+      st.look = rel;
+    } else st.look = 0;
+    st.rate = panic ? 2.25 : (st.breast ? 0.8 : 1);
+    st.flee = damp(st.flee || 0, panic ? 1 : 0, panic ? 5 : 2, dt);
+    const close = panic ? Math.max(0, Math.min(1, (9 - foeD) / 5)) : 0;
+    st.thrash = damp(st.thrash || 0, close, close > (st.thrash || 0) ? 5 : 3, dt);
     CBZ.swimAnimStep(st, b.speed, dt);
     b.pos.y = b._floatY + st.bob;
     if (st.beat > 0) strokeSplash(b, surf, panic);

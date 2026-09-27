@@ -620,6 +620,13 @@
     if (!Number.isFinite(m)) return;
     shakeAmt = Math.max(shakeAmt, Math.min(3.5, m));
   };
+  // Read-only peek at the envelope for a rig that owns the lens outright
+  // (city/wildlife_tame.js's shark camera spends it as a smooth sway rather
+  // than this file's per-frame white noise, which it would overwrite anyway).
+  CBZ.camShakeLevel = function () { return shakeAmt; };
+  // ...and whether the arrival cinematic still owns the lens, so that rig
+  // stands down for it instead of overriding it.
+  CBZ.camIntroActive = function () { return introT > 0; };
 
   CBZ.requestLock = function () {
     if (CBZ.touchMode) return; // phones drive the camera via on-screen look-pad
@@ -767,13 +774,17 @@
     if (aqFollowLast != null && Math.abs(cam.yaw - aqFollowLast) > 1e-6) aqFollowIdle = 0;
     else aqFollowIdle += fdt;
     if (aqFollowIdle < AQ_FOLLOW_DELAY) { aqFollowLast = cam.yaw; return; }
+    // A shark sitting still has no "behind" worth swinging to: the follow
+    // fades in with swimming speed, so a parked animal can be orbited freely
+    // and a cruising one is trailed like a chase car.
+    const spdK = Math.max(0, Math.min(1, ((CBZ.player && CBZ.player.speed) || 0) / 3));
     // the yaw that looks ALONG a world heading: movement is (-sin, -cos)·yaw
     const h = a.heading || 0;
     const want = Math.atan2(-Math.cos(h), -Math.sin(h));
     let d = want - cam.yaw;
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
-    cam.yaw += d * (1 - Math.exp(-AQ_FOLLOW_RATE * fdt));
+    cam.yaw += d * (1 - Math.exp(-AQ_FOLLOW_RATE * spdK * fdt));
     aqFollowLast = cam.yaw;
   }
 

@@ -681,6 +681,35 @@
       faceBox(list, c, t, CH / 2, off, BAR, CH - 0.34, BAR);
   }
 
+  /* SOFT GOODS. A mattress, a pillow and a blanket are not boxes: the same
+     box, re-cut as a rounded solid (corners pulled onto a radius, a faint
+     sag on anything thin), keeps its size, its place, its LIFT and its plain
+     Lambert colour, so core/batch.js still merges it like any other box. */
+  function roundedBoxGeo(w, h, d, r, sag) {
+    r = Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3);
+    const g = new THREE.BoxGeometry(w, h, d, 6, 3, 10);
+    const p = g.attributes.position, v = new THREE.Vector3(), q = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      q.set(Math.max(-w / 2 + r, Math.min(w / 2 - r, v.x)), Math.max(-h / 2 + r, Math.min(h / 2 - r, v.y)),
+        Math.max(-d / 2 + r, Math.min(d / 2 - r, v.z)));
+      v.sub(q);
+      if (v.lengthSq() > 1e-10) v.normalize().multiplyScalar(r);
+      v.add(q);
+      if (sag) v.y += sag * Math.sin(v.x * 23 + v.z * 3.1) * (0.5 + 0.5 * Math.cos(Math.PI * v.z / d));
+      p.setXYZ(i, v.x, v.y, v.z);
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+  function soft(m, r, sag) {
+    if (!m || !m.geometry || !m.geometry.parameters) return m;
+    const P = m.geometry.parameters;
+    m.geometry.dispose();
+    m.geometry = roundedBoxGeo(P.width, P.height, P.depth, r, sag || 0);
+    return m;
+  }
+
   /* ==========================================================
      4. ONE CELL. Structure, then the barred face, then the fittings.
      ========================================================== */
@@ -906,16 +935,16 @@
     function rack(M, solidY0) {
       bb(0, M - 0.24, 0, LAT, 0.20, LON, C_BUNK,                         // frame → M-0.34..M-0.14
         { cast: true, solid: true, y0: solidY0, y1: M - 0.14 });
-      bb(0, M - 0.09, 0, MLAT, 0.18, MLON, C_MATT);                      // mattress → M
+      soft(bb(0, M - 0.09, 0, MLAT, 0.18, MLON, C_MATT), 0.06);          // mattress → M
       if (DET) {
         // a TUCKED SHEET: a thin lip of linen overhanging the frame all round.
         // It is the line that separates "mattress" from "slab on a shelf".
         bb(0, M - 0.175, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);
         bb(0, M - 0.20, LON / 2 - 0.05, LAT, 0.14, 0.10, C_DARK);        // foot rail
       }
-      bb(0, M + 0.01, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);           // blanket over the legs
-      if (DET) bb(0, M + 0.03, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);  // TURNED-DOWN fold
-      bb(0, M + 0.03, -1.00, 0.90, 0.16, 0.42, 0xe6e9ed);                // pillow
+      soft(bb(0, M + 0.01, 0.55, MLAT * 0.98, 0.07, 1.30, blanket), 0.03, 0.012);   // blanket over the legs
+      if (DET) soft(bb(0, M + 0.02, -0.09, MLAT * 0.97, 0.07, 0.18, C_MATT), 0.03);  // TURNED-DOWN fold
+      soft(bb(0, M + 0.06, -1.00, 0.84, 0.17, 0.42, 0xe6e9ed), 0.08);                // pillow
     }
 
     /* THE COLLIDERS, and why they arrive now. This file's fittings were all
@@ -1088,11 +1117,41 @@
       Math.min(z - bd / 2, z + nz * 0.26 - (side ? 0.33 : 0.08)),
       Math.max(x + bw / 2, x + nx * 0.26 + (side ? 0.08 : 0.33)),
       Math.max(z + bd / 2, z + nz * 0.26 + (side ? 0.33 : 0.08)), 0, 1.27);
-    addBox(x, 0.28, z, bw, 0.56, bd, C_STEEL, {});                                   // pedestal
-    addBox(x, 0.58, z, bw * 0.95, 0.10, bd * 0.95, 0xe6e9ed, { cast: false });       // rim
-    addBox(x + nx * 0.26, 0.92, z + nz * 0.26, side ? 0.16 : 0.66, 0.70, side ? 0.66 : 0.16, C_STEEL_D, { cast: false }); // cistern
-    addBox(x, 1.06, z, bw * 0.86, 0.12, bd * 0.86, 0xeef2f5, { cast: false });       // sink basin
-    addBox(x + nx * 0.20, 1.22, z + nz * 0.20, 0.06, 0.20, 0.06, 0xd7dce2, { cast: false }); // tap
+    /* THE STAINLESS COMBI. What a real cell has: one pressed-steel unit, a
+       chase panel against the wall with the basin on top and the pan in
+       front, no seat, push buttons. Lathed bowls (smooth normals, so the
+       steel catches the cell lamp) instead of the stack of white boxes. */
+    const tx = -nz, tz = nx;
+    const steel = CBZ.cmat(0xb9c1c5), steelD = CBZ.cmat(0x59636a);
+    const place = (geo, mat, lat, y, depth) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x + tx * lat + nx * depth, y + LIFT, z + tz * lat + nz * depth);
+      if (side) m.rotation.y = Math.PI / 2;
+      m.castShadow = false; m.receiveShadow = true;
+      root.add(m);
+      return m;
+    };
+    const unit = (lat, y, depth, w, h, d, mat, r) => place(roundedBoxGeo(w, h, d, r, 0), mat, lat, y, depth);
+    unit(0, 0.76, 0.25, 0.62, 1.02, 0.15, steel, 0.03);                    // chase panel
+    unit(0, 0.19, -0.02, 0.34, 0.38, 0.34, steel, 0.06);                   // pedestal
+    const bowl = (y, depth, r, h, stretch) => {
+      const prof = [[0, 0], [r * 0.45, 0], [r * 0.79, h * 0.55], [r, h * 0.94], [r, h], [r * 0.9, h], [r * 0.72, h * 0.55], [r * 0.25, h * 0.26], [0, h * 0.26]];
+      const g = new THREE.LatheGeometry(prof.map((q) => new THREE.Vector2(q[0], q[1])), 28);
+      g.scale(1, 1, stretch);
+      if (!toiletSink.bowlMat) toiletSink.bowlMat = new THREE.MeshLambertMaterial({ color: 0xb9c1c5, side: THREE.DoubleSide });
+      place(g, toiletSink.bowlMat, 0, y, depth);
+      const drain = new THREE.CylinderGeometry(r * 0.14, r * 0.14, 0.006, 16);
+      place(drain, steelD, 0, y + h * 0.26 + 0.004, depth);
+    };
+    bowl(0.34, -0.06, 0.27, 0.26, 1.15);                                   // the pan
+    bowl(0.98, 0.07, 0.24, 0.13, 0.8);                                     // the basin
+    unit(0, 1.17, 0.20, 0.05, 0.13, 0.05, steel, 0.015);                   // spout riser
+    unit(0, 1.22, 0.15, 0.05, 0.04, 0.13, steel, 0.015);                   // spout
+    for (const a of [-1, 1]) {
+      const b = new THREE.CylinderGeometry(0.03, 0.03, 0.02, 14);
+      b.rotateX(Math.PI / 2);
+      place(b, steelD, a * 0.2, 1.16, 0.165);
+    }
   }
 
   // a shelf + its two brackets, sized along the wall it hangs on
@@ -1175,7 +1234,22 @@
     // …and never upstairs: systems/pushprops.js slides a stool on the ground
     // plane, and a shovable on a floor it cannot see is a stool through a slab.
     if (north && !LIFT) {
-      const st = addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x6b6152, { cast: false });
+      const st = addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x5d6660, { cast: false });
+      // a bolted-steel round stool, not a crate: the pushable keeps its 0.44
+      // footprint and collider, only the drawing changes
+      {
+        const parts = [];
+        const seat = new THREE.CylinderGeometry(0.2, 0.19, 0.06, 22); seat.translate(0, 0.19, 0); parts.push(seat);
+        const ring = new THREE.TorusGeometry(0.13, 0.012, 6, 20); ring.rotateX(Math.PI / 2); ring.translate(0, -0.08, 0); parts.push(ring);
+        for (const a of [-1, 1]) for (const b of [-1, 1]) {
+          const leg = new THREE.CylinderGeometry(0.018, 0.022, 0.40, 8);
+          leg.translate(a * 0.12, -0.02, b * 0.12); parts.push(leg);
+        }
+        const flat = parts.map((g) => g.index ? g.toNonIndexed() : g);
+        st.geometry.dispose();
+        st.geometry = THREE.BufferGeometryUtils.mergeBufferGeometries(flat, false);
+        st.castShadow = true;
+      }
       useSeat(c.x + 1.15, c.z + 1.00, Math.atan2(-1.15, -1.00), 0.44);
       if (CBZ.pushProp) CBZ.pushProp({
         // `stand`: THE CELL STOOL IS THE OWNER'S OWN EXAMPLE. 7 kg, a 0.44 m
@@ -1677,6 +1751,7 @@
   const CHORD_LO = 8.05, CHORD_HI = 8.90;     // bottom / top chord centres
   const LAMP_Y = 7.55;                        // the cage, hung 0.4 m under the chord
   const cages = [];
+  CBZ.cellblockCages = cages;          // world/prisonlook.js lights the hall from these
   (function trusses() {
     const g = [];
     for (const z of TRUSS_Z) {

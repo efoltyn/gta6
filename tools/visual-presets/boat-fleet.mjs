@@ -34,17 +34,26 @@ const HULLS = [
   { key: "trawler", name: "Bergen Fisher 60", focus: "18 m working trawler: hull, bulwarks, wheelhouse, gantry." },
   { key: "yacht", name: "Nordholm Aurelia 112", focus: "34 m motor yacht: continuous hull, deck stack, bow form." },
   { key: "yacht46", name: "Verano 150", focus: "46 m superyacht: hull line from the water, not from above." },
+  // 2026-09-27 shark scene wave: three craft the shark sea did not have.
+  { key: "sup", name: "Paddleboard", focus: "A 3.35 m stand-up paddleboard: a rockered foam plank with a deck pad, a fin and a paddle. The smallest thing a bull shark can take off the surface." },
+  { key: "diveboat", name: "Dive boat", focus: "12 m aluminium dive catamaran: twin hulls, open dive deck with tank racks, a wheelhouse with a hardtop, ladders into the water." },
+  { key: "freighter", name: "Coastal freighter", focus: "140 m container feeder for the horizon: low-poly silhouette, bridge aft, stacked boxes, a bulbous bow and a red bottom." },
 ];
+// The keys the shark sim actually puts on its water, smallest to largest.
+// They are the ones that get the UNDER view: the shark sees bottoms first.
+const SHARK_SEA = ["sup", "kayak", "jetski", "skiff", "console", "diveboat", "sloop", "cruiser"];
 
 const VIEWS = [
   { id: "quarter", label: "3/4 bow, water level", focus: "Camera 1.4 m over the surface off the bow quarter — the angle a person actually sees a boat from. Sheer line, chine run, entry and transom must all read as one continuous surface." },
   { id: "bowon", label: "dead ahead", focus: "Dead-bow view: flare, deadrise, the V of the sections and the actual beam. A boat made of boxes has vertical sides here and nothing else." },
+  { id: "under", label: "from below, the shark's view", focus: "Camera under the surface looking up at the bottom: antifouling, strakes, keel, skeg, shafts, props and rudders. This is the view a shark game shows most.", only: SHARK_SEA },
 ];
 
 const subjects = [];
 let plate = 1;
 for (const h of HULLS) {
   for (const v of VIEWS) {
+    if (v.only && !v.only.includes(h.key)) continue;
     subjects.push({
       id: `${h.key}-${v.id}`,
       key: h.key,
@@ -62,6 +71,21 @@ subjects.push({
   label: `${String(plate++).padStart(2, "0")} · Small craft raft-up — kayak, jetski, skiff, panga`,
   focus: "All four small hulls side by side at the same scale and light. This is the plate that shows whether the fleet's small end is four distinct boats or four sizes of the same box.",
 });
+
+// THE LINEUP. Every craft on the shark sim's sea, stern to bow in one row at
+// one scale, with a 5.5 m great white and an 18 m megalodon beside them. The
+// question the owner asked was "the size of the boats": this plate answers it
+// against the animals the player actually is.
+for (const v of [
+  { id: "above", label: "above the water", focus: "The whole shark-sea fleet in one row, broadside, eye 2.5 m over the surface, a great white finning between them. Relative LENGTH and HEIGHT at one scale." },
+  { id: "under", label: "from below", focus: "The same row from 7 m down looking up: the bottoms, keels and running gear a shark actually swims under, with the great white and the megalodon at depth for scale." },
+]) {
+  subjects.push({
+    id: `lineup-${v.id}`, key: null, view: `lineup-${v.id}`, lineup: SHARK_SEA,
+    label: `${String(plate++).padStart(2, "0")} · Shark sea lineup, ${v.label}`,
+    focus: v.focus,
+  });
+}
 
 async function stageBoatFleet(input) {
   const T = window.THREE;
@@ -189,11 +213,14 @@ async function stageBoatFleet(input) {
   };
   const q0 = (sel) => ST.overlay.querySelector(sel);
 
-  const keys = sub.raft ? sub.raft.slice() : [sub.key];
-  const built = [];
+  const keys = sub.lineup ? sub.lineup.slice() : sub.raft ? sub.raft.slice() : [sub.key];
+  const built = [], absent = [];
   for (const key of keys) {
     let rec = null;
     try { rec = CBZ.marineHulls.get(key); } catch (_) { rec = null; }
+    // a LINEUP shows the fleet that exists on this side and names the rest;
+    // one missing kayak must not blank the whole row
+    if (!rec && sub.lineup) { absent.push(key); continue; }
     if (!rec) return missing(key, `NO SUCH HULL "${key}" IN THIS BUILD`);
     let root = null;
     try { root = CBZ.marineHulls.build(key); } catch (e) { root = null; }
@@ -201,9 +228,34 @@ async function stageBoatFleet(input) {
     built.push({ key, rec, root });
   }
 
+  // ---- the water: above, or under ------------------------------------------
+  // From below, the surface is a translucent ceiling and the light is the
+  // sea's: the hull is a silhouette against the bright sky-lit surface, and
+  // its bottom paint is read in the downwelling blue.
+  const under = sub.view === "under" || sub.view === "lineup-under";
+  if (!ST.env) ST.env = { bg: ST.scene.background.clone(), fog: ST.scene.fog };
+  ST.sea.material.transparent = under;
+  ST.sea.material.opacity = under ? 0.42 : 1;
+  ST.sea.material.side = under ? T.DoubleSide : T.FrontSide;
+  ST.sea.material.color.setHex(under ? 0x5fb4cc : 0x14657f);
+  ST.sea.material.needsUpdate = true;
+  ST.scene.background = under ? new T.Color(0x0f4a63) : ST.env.bg;
+  ST.scene.fog = under ? new T.Fog(0x0f4a63, 6, 90) : ST.env.fog;
+
   // ---- lay them out --------------------------------------------------------
   let spanX = 0;
-  if (sub.raft) {
+  if (sub.lineup) {
+    // Stern to bow along +x, smallest first, 3 m of water between each.
+    let x = 0;
+    built.forEach((b) => {
+      const L = Number((b.rec.spec && b.rec.spec.loa) || 5);
+      b.root.position.set(x + L / 2, 0, 0);
+      b.yaw = Math.PI / 2;
+      x += L + 3;
+    });
+    spanX = x - 3;
+    built.forEach((b) => { b.root.position.x -= spanX / 2; });
+  } else if (sub.raft) {
     // Side by side, beam-to-beam, sterns lined up: the point of the plate is
     // relative size and relative shape, so nothing is scaled or nudged.
     const gap = 1.6;
@@ -220,10 +272,45 @@ async function stageBoatFleet(input) {
     built[0].root.position.set(0, 0, 0);
   }
   for (const b of built) {
-    b.root.rotation.set(0, 0, 0);
+    b.root.rotation.set(0, b.yaw || 0, 0);
     b.root.updateMatrixWorld(true);
     ST.scene.add(b.root);
     ST.subjects.push(b.root);
+  }
+
+  // ---- sharks for scale ---------------------------------------------------
+  // Built from the registered species (the same builder the game spawns) and
+  // scaled to a stated length measured off the built mesh, so the plate says
+  // "5.5 m" and means it.
+  if (sub.lineup && CBZ.WILDLIFE_SPECIES) {
+    if (!ST.animalMats) ST.animalMats = new Map();
+    const amat = (c) => {
+      const k = Number(c == null ? 0x78858d : c);
+      if (!ST.animalMats.has(k)) ST.animalMats.set(k, new T.MeshStandardMaterial({ color: k, roughness: 0.86, metalness: 0.01 }));
+      return ST.animalMats.get(k);
+    };
+    const put = (id, len, x, y, z, yaw) => {
+      const sp = CBZ.WILDLIFE_SPECIES[id];
+      if (!sp || typeof sp.build !== "function") return;
+      let a = null;
+      try { a = sp.build({ THREE: T, mat: amat, rng: () => 0.25 }); } catch (_) { a = null; }
+      if (!a) return;
+      a.traverse((o) => { o.matrixAutoUpdate = true; });
+      a.updateMatrixWorld(true);
+      const bx = new T.Box3().setFromObject(a);
+      const raw = Math.max(bx.max.x - bx.min.x, bx.max.z - bx.min.z, 0.1);
+      a.scale.setScalar(len / raw);
+      a.position.set(x, y, z);
+      a.rotation.y = yaw || 0;
+      a.updateMatrixWorld(true);
+      ST.scene.add(a);
+      ST.subjects.push(a);
+    };
+    const front = under ? 5.5 : 7.5;
+    put("great_white_shark", 5.5, -spanX * 0.18, under ? -2.2 : -0.55, front, 0);
+    // the megalodon cruises BEHIND the row, so it reads against the hulls
+    // instead of filling the lens
+    if (under) put("megalodon", 18, spanX * 0.10, -5.5, -14, Math.PI);
   }
 
   // ---- measure -------------------------------------------------------------
@@ -268,7 +355,16 @@ async function stageBoatFleet(input) {
   // ---- the camera ----------------------------------------------------------
   const height = Math.max(0.5, box.max.y - Math.min(0, box.min.y));
   let desired;
-  if (sub.view === "raftup") {
+  if (sub.view === "lineup-above") {
+    const d = spanX * 0.62;
+    desired = { pos: [0, 3.2, d], target: [0, 2.2, 0], fov: 44 };
+  } else if (sub.view === "lineup-under") {
+    // wide, from 13 m down and 30 m off the row, looking UP at it
+    desired = { pos: [0, -13, 30], target: [0, -1.5, -2], fov: 70 };
+  } else if (sub.view === "under") {
+    const d = Math.max(loa * 1.05, beam * 3.6, 4.2);
+    desired = { pos: [d * 0.55, -Math.max(2.2, loa * 0.30), d * 0.62], target: [0, Math.min(-0.2, box.min.y * 0.5), 0], fov: 50 };
+  } else if (sub.view === "raftup") {
     const d = Math.max(spanX * 1.02, 10);
     desired = { pos: [d * 0.26, 2.4, d * 0.96], target: [0, 0.28, -0.1], fov: 40 };
   } else if (sub.view === "bowon") {
@@ -299,7 +395,9 @@ async function stageBoatFleet(input) {
   q("[data-name]").style.cssText = "position:absolute;left:24px;top:66px;font-size:26px;font-weight:900";
   q("[data-focus]").textContent = sub.focus || "";
   q("[data-focus]").style.cssText = "position:absolute;left:25px;top:104px;max-width:660px;color:#d5e2e8;font-size:13px;line-height:1.35";
-  q("[data-state]").textContent = sub.raft
+  q("[data-state]").textContent = sub.lineup
+    ? `${built.map((b) => `${b.key} ${round((b.rec.spec && b.rec.spec.loa) || 0, 1)} m`).join(" · ")}${absent.length ? ` · MISSING ${absent.join(", ")}` : ""}`
+    : sub.raft
     ? `${built.length} SMALL CRAFT · ${built.map((b) => b.key).join(" · ")}`
     : `${sub.key} · ${round(loa, 1)} m × ${round(beam, 2)} m · ${spec.stab ? "stab block" : "NO stab block"}`;
   q("[data-state]").style.cssText = "position:absolute;left:24px;bottom:57px;padding:7px 10px;background:rgba(6,13,18,.78);border:1px solid rgba(255,255,255,.25);border-radius:6px;font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace";

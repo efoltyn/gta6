@@ -211,34 +211,64 @@
     }
   }
 
-  // is `c` stuck right behind a much slower car physically in its lane? Counts
-  // same-direction dawdlers AND a head-on blocker (a stopped oncoming car / a
-  // U-turner in our lane) — either way the pull-around logic dissolves it.
+  /* WHAT IS IN MY LANE. Both of these used to match on `o.road === c.road`,
+     the ROAD RECORD a car was spawned or turned onto. The things a queue most
+     needs to see never carry the right one: the car you dumped (its record is
+     whatever road it was on when you stole it, blocks ago), a burnt-out husk
+     (`dead`, so filtered out entirely), a spun-out wreck that slid across the
+     box. vehicles.js's IDM brakes for them because it tests GEOMETRY, so the
+     queue stopped behind them forever while this layer, which is the one that
+     pulls around, could not see them and never built any patience. Both tests
+     are geometry now: a body in the lane, whoever it is. */
+  function inLaneFrame(c, o) {
+    if (o === c || (o.dead && !o._husk) || o._heldBy) return false;
+    return true;
+  }
+  // is `c` stuck right behind something physically in its lane? Counts
+  // same-direction dawdlers, a head-on blocker, parked/dumped cars and husks.
+  // `gap` is the BUMPER gap. It used to be centre-to-centre, tested `< 5`, and
+  // vehicles.js's IDM parks a queue at a 2 m bumper gap, which is ~6.4 m
+  // centre-to-centre for two saloons: no car was ever "stuck", so none of the
+  // honking, patience or pulling-around below ever ran on a stopped queue.
+  function halfLen(o) { const d = o._visualDims || o.dims; return ((d && d.length) || 4.4) * 0.5; }
+  const _blk = { car: null, gap: 0 };
   function blockedAhead(c) {
     if (!c.road) return null;
+    const vert = c.road.vertical, fx = vert ? 0 : c.dirSign, fz = vert ? c.dirSign : 0;
+    const latTol = laneWidth() * 0.7, myHalf = halfLen(c);
     let best = null, bg = 1e9;
-    for (const o of CBZ.cityCars) {
-      if (o === c || o.dead || o.road !== c.road) continue;
-      const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
-      const lat = c.road.vertical ? Math.abs(o.pos.x - c.pos.x) : Math.abs(o.pos.z - c.pos.z);
-      if (along > 0.4 && along < 7 && lat < laneWidth() * 0.7 && along < bg) { bg = along; best = o; }
+    const cars = CBZ.cityCars;
+    for (let i = 0; i < cars.length; i++) {
+      const o = cars[i];
+      if (!inLaneFrame(c, o)) continue;
+      const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;
+      const along = dx * fx + dz * fz;
+      if (along < 0.4 || along > 16) continue;
+      if (Math.abs(dx * fz - dz * fx) > latTol) continue;
+      const gap = along - myHalf - halfLen(o);
+      if (gap < bg) { bg = gap; best = o; }
     }
-    return best ? { car: best, gap: bg } : null;
+    if (!best) return null;
+    _blk.car = best; _blk.gap = bg;       // scratch: read immediately by the one caller
+    return _blk;
   }
 
   // is the lane at lateral offset `targetLat` on `c`'s road clear enough to pull
-  // into? Checks a window behind→ahead for anything sitting in (or barrelling
-  // down) that lane. Multi-lane: overtaking stays in the SAME direction (an
-  // adjacent lane index), so no head-on swerves into oncoming.
+  // into? Checks a window behind->ahead for anything sitting in (or barrelling
+  // down) that lane, on any road record: a husk or a dumped car counts.
   function laneFree(c, targetLat) {
     if (!c.road) return false;
-    const half = laneWidth() * 0.6;
-    for (const o of CBZ.cityCars) {
-      if (o === c || o.dead || o.road !== c.road) continue;
-      const oLat = c.road.vertical ? o.pos.x - c.road.x : o.pos.z - c.road.z;
+    const vert = c.road.vertical, half = laneWidth() * 0.6;
+    const cars = CBZ.cityCars;
+    for (let i = 0; i < cars.length; i++) {
+      const o = cars[i];
+      if (!inLaneFrame(c, o)) continue;
+      const oLat = vert ? o.pos.x - c.road.x : o.pos.z - c.road.z;
       if (Math.abs(oLat - targetLat) > half) continue;    // not in the target lane
-      const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
-      if (along > -8 && along < 14) return false;
+      const along = vert ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
+      // an ONCOMING car in that lane closes fast: give it more room ahead
+      const ahead = o.ai && o.dirSign === -c.dirSign && o.road && !!o.road.vertical === !!vert ? 30 : 14;
+      if (along > -8 && along < ahead) return false;
     }
     return true;
   }
@@ -375,6 +405,53 @@
       return true;
     }
     return false;
+  }
+
+  /* ---- THE POOL NEVER GOT ITS CARS BACK ------------------------------------
+     The ambient fleet is a FIXED pool, and every way a car leaves traffic is
+     one-way: you steal it and dump it (ai off for good), its driver is shot or
+     bails from gunfire, a gang drive-by leaves it at the kerb. recycleOne only
+     ever moves HEALTHY ai cars, so after an hour of play the streets were
+     measurably emptier and nothing refilled them. This returns one clean
+     abandoned ambient car at a time to the road network, only once it is far
+     from you and off camera (the same unseen roadPick recycleOne uses), with a
+     fresh crew. Damaged, burnt, shot-up, owned, parked-dressing and scripted
+     cars are left exactly where they are: those are evidence, not stock. */
+  function reclaimable(c, cam) {
+    if (c.player || c.dead || c.ai || c.owned || c._persist || c._propParked || c._heldBy || c.hold) return false;
+    if (!(c.baseV > 0) || !(c.abandoned || c._playerLeft)) return false;   // was ambient traffic once
+    if (c._patrolCar || c._emergency || c._raceCar || c._cineLocked || c.npcDriver) return false;
+    if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking || c._flats || (c.engineHp != null && c.engineHp < 70)) return false;
+    if (c._occRigged || (c.wreckT || 0) > 0) return false;
+    const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
+    if (dx * dx + dz * dz < FAR2) return false;
+    const P = CBZ.player.pos, px = c.pos.x - P.x, pz = c.pos.z - P.z;
+    return px * px + pz * pz >= FAR2;
+  }
+  let _reclaimScan = 0;
+  function reclaimOne() {
+    if (!CBZ.roadPick || !CBZ.roadPlace) return false;
+    const cars = CBZ.cityCars, n = cars.length;
+    if (!n) return false;
+    const cam = CBZ.camera.position;
+    let pick = null;
+    for (let k = 0; k < Math.min(n, 24) && !pick; k++) {    // a slice per beat: flat cost
+      _reclaimScan = (_reclaimScan + 1) % n;
+      if (reclaimable(cars[_reclaimScan], cam)) pick = cars[_reclaimScan];
+    }
+    if (!pick) return false;
+    const spot = CBZ.roadPick({ near: CBZ.player.pos, minDist: 60, maxDist: 140, camMin: 62, unseen: true, tries: 10, spread: 90 });
+    if (!spot) return false;
+    pick.abandoned = false; pick._playerLeft = false; pick.stolen = false;
+    pick.wreckT = 0; pick.spin = 0; pick._runaway = false; pick.pullover = 0; pick.npcWanted = 0;
+    pick.roadRageTarget = null; pick.roadRageT = 0; pick._panicT = 0; pick._panicBailed = false;
+    pick.vx = 0; pick.vz = 0; pick.blockedT = 0; pick._rageT = 0;
+    if (pick._rageBoost) { pick.baseV = Math.max(2, pick.baseV - pick._rageBoost); pick._rageBoost = 0; }
+    if (!CBZ.roadPlace(pick, spot)) return false;
+    pick.ai = true;
+    if (pick.occ) pick.occ.jacked = false;          // a new crew; the jack happened to somebody else
+    if (CBZ.carOccupancyReseat) CBZ.carOccupancyReseat(pick);
+    return true;
   }
 
   // ---- DISTRICT DISTRIBUTION (traffic-district-distribution + TRAF-1) --------
@@ -530,7 +607,8 @@
       targetNear = computeTarget(A);
       if (!(CBZ.player.driving && (g.wanted | 0) >= 2)) {
         const near = countNear();
-        if (near < targetNear) recycleOne(A);
+        // a dumped car goes back into traffic before a healthy one is moved
+        if (near < targetNear && !reclaimOne()) recycleOne(A);
       }
     }
 
@@ -568,21 +646,29 @@
 
       // don't honk/road-rage while crashing, turning, fleeing, pulled over, or
       // while vehicles.js is already driving a carjacker's rage chase.
+      // a driver fleeing gunfire (vehicles.js _panicT) leans on the horn the whole way
+      if ((c._panicT || 0) > 0 && c.honkCD <= 0 && Math.random() < 0.55) honkAt(c);
       if (c.wreckT > 0 || c.turning || c.pullover || (c.npcDriver && c.roadRageTarget)) { c.blockedT = 0; continue; }
 
       const slice = cars.length > SLICE ? cars.length / SLICE : 1;
       const blk = blockedAhead(c);
-      const stuck = blk && blk.car.v < 1.5 && blk.gap < 5;
+      const stuck = blk && Math.abs(blk.car.v || 0) < 1.5 && blk.gap < 4.5;   // bumper gap; IDM parks at 2
       const onGreen = CBZ.cityIsRed && !CBZ.cityIsRed(c.road.vertical);
       // a DEAD obstacle (wreck, abandoned car, somebody's parked car) is not a
       // queue — waiting behind it is never lawful, so patience runs even on red.
-      const deadAhead = stuck && (blk.car.abandoned || blk.car.dead || (blk.car.wreckT || 0) > 0 || !blk.car.ai);
+      // (the car the PLAYER is sitting in is a dawdler, not an obstacle: you
+      // might just be waiting at the light, so it builds patience on green only)
+      const deadAhead = stuck && (blk.car.abandoned || blk.car.dead || (blk.car.wreckT || 0) > 0 || (!blk.car.ai && !blk.car.player));
       if (stuck) {
         // HONK at whoever's dawdling right in front of us, harder if it's a green.
         if (c.honkCD <= 0 && Math.random() < arch.horny * (onGreen || deadAhead ? 1 : 0.5)) honkAt(c);
         // blocking on a GREEN — or by a dead obstacle — builds real
         // "why won't you MOVE" patience-loss; a queue at a red doesn't.
-        if (onGreen || deadAhead) c.blockedT += dt * slice; else c.blockedT = Math.max(0, c.blockedT - dt);
+        // Patience only runs against something that is not itself queueing: a
+        // car in a line pulling away on green is the IDM start-up wave, and
+        // losing patience with it had every car in the queue swerve lanes.
+        const dawdler = !blk.car.ai || blk.car.player || !!blk.car.pullover;
+        if ((onGreen && dawdler) || deadAhead) c.blockedT += dt * slice; else c.blockedT = Math.max(0, c.blockedT - dt);
         // blocked past this driver's patience → PULL AROUND, but only if the
         // opposing lane is actually clear (no head-on swerves). Everyone goes
         // eventually — that's how a queue behind a wreck dissolves — but an
@@ -601,7 +687,11 @@
           // right the instant the rage timer expires. WHY: the owner loves the
           // recklessness — a truly stuck lunatic crossing into traffic to
           // overtake reads as the city's worst driver, not a polite queue.
-          if (!ot && (c.trafArch === "reckless" || (c.driver && c.driver.aggr >= 0.82))) {
+          // AND ANYONE behind a DEAD obstacle (a wreck, a husk, your dumped car)
+          // goes round it the same way once the oncoming lane is clear. Before,
+          // a calm driver boxed in behind one on a one-lane-each-way street had
+          // no move at all and sat honking behind it until the car was recycled.
+          if (!ot && (deadAhead || c.trafArch === "reckless" || (c.driver && c.driver.aggr >= 0.82))) {
             const dir = c.dirSign || 1;
             const onLat = laneOffset(c.road, -dir, 0);     // oncoming INNER lane (across the centreline)
             if (laneFree(c, onLat)) ot = { idx: 0, lat: onLat, oncoming: true };

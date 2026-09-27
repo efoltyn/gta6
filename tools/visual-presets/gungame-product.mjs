@@ -30,9 +30,22 @@
    guard keeps it). Keep same-map subjects adjacent. */
 
 const subjects = [
+  // THE PLAYER'S OWN VIEW. The covers below hide every DOM node and pose a
+  // lens; a stranger's first screenshot is neither. These two are the match
+  // exactly as it is played: first person, the rung gun in the hand, HUD on,
+  // a bot on the duel line and two more further down the map, one round just
+  // fired. The sun is NOT pinned here — the match's own lighting is part of
+  // what is being judged. They run BEFORE their map's cover (the covers hide
+  // the DOM; a play subject restores whatever a cover hid).
+  { id: 'play-island', map: 'island', kind: 'play', playerRung: 1, botRung: 1, duelM: 12,
+    label: 'In play · first person · Disaster Island',
+    focus: 'What the player sees one minute into a match: the SMG in hand, crosshair on a bot twelve metres out, two more bots further down the street, HUD live.' },
   { id: 'cover-firefight', map: 'island', kind: 'fire', playerRung: 4, botRung: 3, duelM: 6.5, sun: 0.40,
     label: 'Two players trading fire · Disaster Island',
     focus: 'Low and close behind the player\'s hip: AK against carbine at six metres on a street of the island, both muzzles lit, the bot\'s round in the air, the island\'s towers and hills behind. Every body, gun and round is the shipped match.' },
+  { id: 'play-jail', map: 'jail', kind: 'play', playerRung: 3, botRung: 2, duelM: 12,
+    label: 'In play · first person · The Jail',
+    focus: 'The north yard mid-match: the rifle in hand, a bot twelve metres out, two more down the yard, HUD live.' },
   { id: 'cover-ladder', map: 'jail', kind: 'ko', playerRung: 8, botRung: 7, duelM: 1.75, sun: 0.35,
     label: 'The winning rung · bare fists · the knockout',
     focus: 'The final rung is categorical: whoever holds the Desert Eagle rung loses it to a punch. The player has climbed every gun and stands with nothing in his hands; the hook has just landed and the bot is leaving the ground. Jail yard, golden hour.' },
@@ -83,6 +96,13 @@ async function stage(input) {
     window.__cbzVisualCompare = {
       render() { try { C.renderer.render(C.scene, C.camera); } catch (_) {} },
     };
+  }
+
+  // a play subject shoots the HUD: undo whatever an earlier cover hid
+  if (sub.kind === 'play') {
+    for (const el of S.hidden || []) el.style.removeProperty('display');
+    S.hidden = [];
+    const t0 = document.getElementById('ggProductTitle'); if (t0) t0.remove();
   }
 
   // ---- the match, on the subject's map ---------------------------------------
@@ -197,6 +217,75 @@ async function stage(input) {
   }
   P.y = floorAt(P.x, P.z); B.y = floorAt(B.x, B.z);
   const faceYaw = Math.atan2(B.x - P.x, B.z - P.z);     // rig faces (sin y, cos y)
+
+  // ---- THE PLAY VIEW (kind 'play'): first person, HUD on, the match's light --
+  if (sub.kind === 'play') {
+    const dx = B.x - P.x, dz = B.z - P.z, dl = Math.hypot(dx, dz) || 1;
+    const ux = dx / dl, uz = dz / dl, rx = uz, rz = -ux;
+    const marks = [
+      { x: B.x, z: B.z },
+      { x: B.x + rx * 5 + ux * 7, z: B.z + rz * 5 + uz * 7 },
+      { x: B.x - rx * 6 + ux * 14, z: B.z - rz * 6 + uz * 14 },
+    ].filter((m, i) => i === 0 || !inSolid(m.x, m.z, 0.8));
+    const cast = gg.bots.slice(0, marks.length);
+    for (const o of gg.bots) if (cast.indexOf(o) < 0) { o.dead = true; o.respawnT = 1e9; o.hp = 0; if (o.group) o.group.visible = false; }
+    cast.forEach((b, i) => { b.rung = Math.max(0, sub.botRung - (i ? 1 : 0)); b.armed = true; b.weapon = LADDER_NAME[b.rung]; if (C.syncActorWeapon) C.syncActorWeapon(b); });
+    const faceYaw = Math.atan2(ux, uz);
+    const hold = () => {
+      cast.forEach((b, i) => {
+        const m = marks[i];
+        b.dead = false; b.ko = 0; b.respawnT = 0; b.baseSpeed = 0; b.speed = 0; b.hp = 100;
+        b.pos.set(m.x, floorAt(m.x, m.z), m.z); b.target.set(m.x, 0, m.z);
+        if (b._phys) { b._phys.down = 0; b._phys.air = false; b._phys.kx = 0; b._phys.kz = 0; }
+        if (b.group) { b.group.visible = true; if (!b.group.parent) C.scene.add(b.group); }
+      });
+      C.player.driving = false; C.player._swim = false; C.player.dead = false;
+      C.player.pos.set(P.x, floorAt(P.x, P.z) + 0.02, P.z);
+      C.player.vy = 0; C.player.grounded = true; C.player.ko = 0; C.player.stun = 0;
+      C.player.crouch = false; C.player.sprint = false;
+      if (C.playerChar && C.playerChar.group) { C.playerChar.group.position.copy(C.player.pos); C.playerChar.group.rotation.y = faceYaw; }
+      if (C.cam) C.cam.yaw = faceYaw + Math.PI;
+      if (C.fps) C.fps.fp = 0.035;
+    };
+    gg.playerRung = sub.playerRung; gg.playerRungKills = 0;
+    const arm = () => {
+      if (C.resetWeaponInventory) C.resetWeaponInventory();
+      if (LADDER[sub.playerRung] && C.unlockWeapon) C.unlockWeapon(LADDER[sub.playerRung], { select: true });
+      if (C.fpsResetWeapons) C.fpsResetWeapons();
+    };
+    arm();
+    if (C.fpsSetActive) C.fpsSetActive(true);
+    if (C.fpsSetAim) C.fpsSetAim(false);
+    for (let i = 0; i < 60; i++) { if (i === 30) arm(); hold(); C.player.hp = 100; tick(1); }
+    // one line of match history in the corner feed, the way the feed looks a minute in
+    if (C.killFeedReset) C.killFeedReset();
+    if (C.cityKillFeed && cast[1] && cast[2]) C.cityKillFeed(cast[1].name, cast[2].name, LADDER_NAME[cast[1].rung].toLowerCase());
+    for (let i = 0; i < 40; i++) { hold(); C.player.hp = 100; tick(1); }
+    C.player.hp = 72;
+    hold();
+    if (C.fpsFire) { C.fpsFire(true); C.fpsFire(false); }
+    const canvas = C.renderer && C.renderer.domElement;
+    // HARNESS TRAP: the boot meter overlays everything until something hides
+    // it; with rAF stubbed nothing does, so a play shot was a loading screen
+    if (C.bootMeter && C.bootMeter.hide) { try { C.bootMeter.hide(); } catch (_) {} }
+    for (const id of ['bootload']) { const e = document.getElementById(id); if (e) e.style.setProperty('display', 'none', 'important'); }
+    window.__cbzVisualCompare.render();
+    const hud = {};
+    for (const id of ['survBars', 'crosshair', 'ammo', 'timer', 'hotbar', 'ggHud']) {
+      const e = document.getElementById(id);
+      hud[id] = e ? getComputedStyle(e).display : null;
+    }
+    return {
+      ok: true, subject: sub.id, map: sub.map, fps: !!(C.fps && C.fps.active), weapon: C.fps && C.fps.weapon,
+      bots: cast.map((b) => ({ name: b.name, rung: b.rung, weapon: b.weapon })), hud,
+      canvas: canvas ? [canvas.width, canvas.height] : null,
+      scene: { fog: C.scene.fog ? [C.scene.fog.color.getHexString(), C.scene.fog.near, C.scene.fog.far] : null,
+        dayPhase: typeof C.dayPhase === 'function' ? +C.dayPhase().toFixed(3) : null,
+        sun: C.sun ? { i: +C.sun.intensity.toFixed(2), c: C.sun.color.getHexString() } : null,
+        hemi: C.hemi ? { i: +C.hemi.intensity.toFixed(2), c: C.hemi.color.getHexString() } : null,
+        exposure: C.renderer ? C.renderer.toneMappingExposure : null },
+    };
+  }
 
   // ---- the cast: one bot on the mark, the rest out of the frame -------------
   const bot = gg.bots[0];
@@ -313,6 +402,7 @@ async function stage(input) {
     if (el === canvas || (canvas && el.contains && el.contains(canvas))) continue;
     if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
     el.style.setProperty('display', 'none', 'important');
+    (S.hidden = S.hidden || []).push(el);
   }
   if (C.bootMeter && C.bootMeter.hide) { try { C.bootMeter.hide(); } catch (_) {} }
   if (C.playerChar && C.playerChar.group) C.playerChar.group.visible = true;

@@ -1399,6 +1399,13 @@
     if (!a || !a.group) return null;
     const grp = a.group, sp = a.species || {};
     corpseEuler(grp);
+    // IN WATER NOTHING BOUNCES: a sea animal goes limp, rolls and sinks (or
+    // floats) — city/wildlife_rig.js aquaticDeathBegin/Step.
+    if (sp.aquatic && CBZ.aquaticDeathBegin) {
+      a._deathPhys = null; a._dieT = null;
+      DEATHS.tumbles++;
+      return CBZ.aquaticDeathBegin(a, dir);
+    }
     let dx = dir ? (+dir.x || 0) : 0;
     const dy = dir ? (+dir.y || 0) : 0;
     let dz = dir ? (+dir.z || 0) : 0;
@@ -3560,7 +3567,9 @@
         // (When systems/quadruped_ragdoll.js took the body there is no
         //  _deathPhys at all and IT owns the transform — one simulation per
         //  corpse, never two.)
-        if (a._deathPhys) {
+        if (a._aqDeath) {
+          CBZ.aquaticDeathStep(a, dt);
+        } else if (a._deathPhys) {
           wildlifeDeathStep(a, dt);
         } else if (a._dieT != null) {
           // legacy fallback for a carcass created before the new state existed.
