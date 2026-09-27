@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "ab08fdf5a09fd07ea5bd334a26f437da6f6d8095",
-  "createdAt": "2026-09-27T08:12:44.247Z",
-  "fileCount": 1125,
-  "totalBytes": 45786803,
+  "sourceCommit": "f0772e1aa9f8c045aeb5fa600b26607f7a3a2f80",
+  "createdAt": "2026-09-27T08:17:34.406Z",
+  "fileCount": 1129,
+  "totalBytes": 45914412,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -23,8 +23,8 @@
     },
     {
       "file": "src/city/agency.js",
-      "bytes": 73125,
-      "sha256": "5c21adba560177924bb2be5ec6ff68e08488b78552876223117031a45394e3ad"
+      "bytes": 92464,
+      "sha256": "132267a89493b18830399f77c63db8a69b5071d4474db5ee936d45023a3c18b9"
     },
     {
       "file": "src/city/aigoals.js",
@@ -199,7 +199,7 @@
     {
       "file": "src/city/campaign.js",
       "bytes": 61169,
-      "sha256": "84568347cdc1e002232531eb7567cd2e04d9d53d69a9d7b02f0d534bc09dbef0"
+      "sha256": "69bb15a2b9a7e9db57f994be9e191769b827f53218857679c8c60c2328f9290d"
     },
     {
       "file": "src/city/campaign_ui.js",
@@ -468,8 +468,8 @@
     },
     {
       "file": "src/city/dossier.js",
-      "bytes": 26545,
-      "sha256": "080e93ccf58a1ac9c87064339496773650356b97361fe1aa0e00ba6d23d145ac"
+      "bytes": 3833,
+      "sha256": "082728035dd5242e19b896dc560f1cb53ae48a042d5d1d9e1ecc200769d17a31"
     },
     {
       "file": "src/city/drinking.js",
@@ -808,8 +808,28 @@
     },
     {
       "file": "src/city/hitman.js",
-      "bytes": 22037,
-      "sha256": "6bfabad8279843d8ad81b41247faf75036a3598d60621c2b358172ef3c6a2b8f"
+      "bytes": 11179,
+      "sha256": "5c09db2acb182744b1239fd80a6a780cd238a792e7dbf1da96e9662587adeea5"
+    },
+    {
+      "file": "src/city/hitman_fallout.js",
+      "bytes": 21041,
+      "sha256": "0e38f33b6cd2af6632645a86b69eb3c34b6927ed24ed16c1c5ccc13db8918f96"
+    },
+    {
+      "file": "src/city/hitman_hands.js",
+      "bytes": 17178,
+      "sha256": "f939abfa98a490ef5d9eb229b550ef062942b14c6cb85d503e0755dff8011bae"
+    },
+    {
+      "file": "src/city/hitman_paper.js",
+      "bytes": 34156,
+      "sha256": "7fea6ea4d6c160a8d3b4f6074d2a6525f6c7528ca8a33dbc11c2caf164f5e59b"
+    },
+    {
+      "file": "src/city/hitman_room.js",
+      "bytes": 68003,
+      "sha256": "fceb40c750a4d06e40c925f4c0f30b991562262783e7863e5a0c12ee91d6d3f4"
     },
     {
       "file": "src/city/housing.js",
@@ -1053,8 +1073,8 @@
     },
     {
       "file": "src/city/origins.js",
-      "bytes": 60902,
-      "sha256": "9ebf05b753e572af6783435053d8db703f3498344637d2160544abe4388483d1"
+      "bytes": 61159,
+      "sha256": "0c4a9a98a89682035d111981b8a0284d4399240b8ad341962e913e125c56ac80"
     },
     {
       "file": "src/city/outfits.js",
@@ -1599,7 +1619,7 @@
     {
       "file": "src/config.js",
       "bytes": 21148,
-      "sha256": "9229ac6edd22a2c8d1856703f2f02c14e3a36a320724ce8d1cffdf826ef75c46"
+      "sha256": "315aec1dd84bb3d55066cab6e1b204e8933673ec081312dd643555db0b333107"
     },
     {
       "file": "src/core/batch.js",
@@ -5498,28 +5518,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 55324,
-      "sha256": "15870625e679bfb4e9e03afb6ba0034e14411b7e371e022cb76b09721b7ff5f8"
+      "bytes": 55565,
+      "sha256": "7b35137e07b6b101569d13f0756fa9657eef35426ff391f4856e7a2dbf80fa99"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 55367,
-      "sha256": "66ca2ed8deb0c37d7ba8dcc19ff0feb6ba35ccae7e467bb90575efe70310b78d"
+      "bytes": 55608,
+      "sha256": "1ced625ee70cc50701dd74c38b6cf46f71af773d2454e33c49ab1feb14265d47"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 55336,
-      "sha256": "57ddb775e9ba5f0115b8c4d5e6b7bf368841a14051fb9b336ecaaf50f4dfc31b"
+      "bytes": 55577,
+      "sha256": "8193919d62b50980b15857c205e2ac5fd7d30e7493a23991ea8ce22045e8e672"
     },
     {
       "file": "gang-city.html",
-      "bytes": 55291,
-      "sha256": "f7fcd3fcb46937f91b68deb3b0c392f77585f30e67b755875491b09bf20c927e"
+      "bytes": 55532,
+      "sha256": "172934321bb4c015c8cf93ebaca048a6d5f9be146c432ef5e3aecca5cdeed385"
     },
     {
       "file": "gun-game.html",
-      "bytes": 55313,
-      "sha256": "acec94ce5df8850001aa300afa0ab0e93b2b27b6cd45635296110e0fb8181917"
+      "bytes": 55554,
+      "sha256": "755446c23d26f497274a8138b89fc35c017d5a9e2a60a93d18cd09c64c80f682"
     },
     {
       "file": "games/airport.html",
