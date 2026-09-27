@@ -1225,7 +1225,10 @@
     toiletSink(tx, tz, inx, inz);
     // the shelf/mirror over the sink — one shelf, and everything small sits ON it
     shelf(tx, 1.62, tz, north ? 0.78 : 0.44, north ? 0.44 : 0.78);
-    addBox(tx + inx * 0.24, 2.02, tz + inz * 0.24, north ? 0.44 : 0.06, 0.52, north ? 0.06 : 0.44, 0xd6e2ea, { cast: false }); // mirror
+    // the mirror: a polished steel plate (prisons never hang glass) bolted flat
+    // to the wall in a dark frame. It was a 6 cm pale block standing proud.
+    addBox(tx + inx * 0.012, 2.02, tz + inz * 0.012, north ? 0.46 : 0.02, 0.54, north ? 0.02 : 0.46, 0x4a5058, { cast: false }); // frame
+    addBox(tx + inx * 0.024, 2.02, tz + inz * 0.024, north ? 0.40 : 0.01, 0.48, north ? 0.01 : 0.40, 0x9ba6ae, { cast: false }); // plate
     // a stool, only where the 5.5 m north cells have the depth for one — and
     // deliberately 1.4 m clear of CBZ.SPAWN so the player never boots inside it.
     // IT IS THE FIRST THING IN THIS PRISON YOU CAN SHOVE. 7 kg of moulded
@@ -1281,8 +1284,14 @@
     if (h01(c.x, c.z, 5502) < 0.55) {   // a towel over the bunk rail
       // hung off the frame the rig actually drew — it used to be two literals
       // that happened to match a 0.79 mattress and stopped matching a 0.62 one.
-      addBox(c.bunk.x + c.bunk.latOut, c.bunk.top + 0.09, c.bunk.z + 0.70, 0.10, 0.56, 0.34,
-        pick([0xe2e2e2, 0xd8c9a8, 0xbcd2df], c.x, c.z, 5504), { cast: false });
+      // DRAPED over the frame edge: a folded strip lying on the mattress edge
+      // and a flap hanging flush down the frame's side. It used to be a 10 cm
+      // thick, 56 cm tall slab standing in the air beside the mattress (owner:
+      // "the bed has a floating white block next to it").
+      const tcol = pick([0xcfd0cc, 0xc8bb9c, 0xaec2cd], c.x, c.z, 5504);
+      const ex = c.bunk.x + c.bunk.latOut;
+      addBox(ex - 0.08, c.bunk.top + 0.012, c.bunk.z + 0.70, 0.18, 0.024, 0.34, tcol, { cast: false });
+      addBox(ex + 0.012, c.bunk.top - 0.19, c.bunk.z + 0.70, 0.024, 0.40, 0.34, tcol, { cast: false });
     }
     if (h01(c.x, c.z, 5505) < 0.50) {   // a cup on the sink shelf
       addBox(tx + (north ? -0.24 : 0), 1.74, tz + (north ? 0 : -0.24), 0.13, 0.17, 0.13, 0xdfe6ec, { cast: false });
@@ -1306,7 +1315,7 @@
           [0xe8e2cf, 0xd9cdb4, 0xefe8d6][i], { cast: false });
       for (let i = 0; i < 6; i++)
         addBox(sideX - (north ? 0.03 : 0), 1.62 - ((i / 4) | 0) * 0.24, sideZ + (north ? -0.9 + (i % 4) * 0.11 : -0.03),
-          north ? 0.02 : 0.03, 0.20, north ? 0.03 : 0.02, 0xdfe4ea, { cast: false });
+          north ? 0.006 : 0.012, 0.18, north ? 0.012 : 0.006, 0x8e969c, { cast: false });   // scratched in, not white bars
     }
 
     // a barred window through the north wall, one per north-row cell
@@ -1688,11 +1697,45 @@
   // recess, never a cell, so that escape route can never be locked away.
   function utilityAlcove(cx, cz, depth, len, side) {
     const wallX = cx - side * (depth / 2 - 0.06);
-    addBox(cx, 0.55, cz - len / 2 + 0.7, 0.8, 1.1, 0.8, 0x6b7480, { cast: false });     // mop sink
-    addBox(cx, 1.12, cz - len / 2 + 0.7, 0.7, 0.06, 0.7, 0xd7dce2, { cast: false });
-    for (let i = 0; i < 3; i++)
-      addBox(cx + side * 0.9, 0.32 + i * 0.4, cz + len / 2 - 0.8 - i * 0.12, 0.55, 0.4, 0.55,
-        [0x4f7f4f, 0xb07a3c, 0x54606d][i], { cast: false });                            // stacked buckets
+    // A FLOOR MOP BASIN, not a 1.1 m grey cube: a 0.3 m moulded curb basin on
+    // the floor with a faucet on the wall over it.
+    const mz = cz - len / 2 + 0.7;
+    addBox(cx, 0.15, mz, 0.8, 0.30, 0.8, 0xc9ccc8, { cast: false });                    // basin curb
+    addBox(cx, 0.29, mz, 0.62, 0.02, 0.62, 0x5e6468, { cast: false });                  // basin floor, recessed
+    addBox(wallX + side * 0.08, 0.95, mz, 0.12, 0.05, 0.05, C_STEEL_D, { cast: false }); // faucet
+    addBox(wallX + side * 0.14, 0.88, mz, 0.03, 0.12, 0.03, C_STEEL_D, { cast: false });
+    // THE THREE STACKED BOXES ARE GONE (owner: "3 random boxes stacked near the
+    // player spawn", this is them: a green, an orange and a grey 0.55 m cube
+    // stood on top of each other and labelled "stacked buckets"). A janitor's
+    // alcove has ONE wheeled mop bucket with its wringer, and the mop leaning
+    // on the wall. Merged into one static mesh; no collider (it never had one).
+    {
+      const bx = cx + side * 0.75, bzz = cz + len / 2 - 0.9;
+      const parts = [], cols = [];
+      const push = (g, col) => { parts.push(g.index ? g.toNonIndexed() : g); cols.push(col); };
+      const tub = new THREE.CylinderGeometry(0.2, 0.17, 0.34, 16, 1, true); tub.translate(0, 0.25, 0); push(tub, 0xd9b12a);
+      const base = new THREE.CylinderGeometry(0.17, 0.17, 0.02, 16); base.translate(0, 0.09, 0); push(base, 0xd9b12a);
+      const water = new THREE.CircleGeometry(0.185, 16); water.rotateX(-Math.PI / 2); water.translate(0, 0.33, 0); push(water, 0x5b6258);
+      const rim = new THREE.TorusGeometry(0.2, 0.012, 5, 18); rim.rotateX(Math.PI / 2); rim.translate(0, 0.42, 0); push(rim, 0xc49d22);
+      const wr = new THREE.BoxGeometry(0.16, 0.16, 0.2); wr.translate(0.12, 0.5, 0); push(wr, 0x3a3f44);      // wringer
+      const lever = new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6); lever.rotateZ(0.5); lever.translate(0.24, 0.72, 0); push(lever, 0x3a3f44);
+      for (const a of [-1, 1]) for (const b of [-1, 1]) {
+        const w = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8); w.rotateZ(Math.PI / 2); w.translate(a * 0.12, 0.04, b * 0.12); push(w, 0x222428);
+      }
+      // the mop, leaning into the corner: handle + a grey cotton head on the floor
+      const h = new THREE.CylinderGeometry(0.014, 0.014, 1.45, 6); h.translate(0, 0.72, 0); h.rotateZ(side * 0.2); h.translate(-side * 0.25, 0.0, -0.3); push(h, 0x8a6b45);
+      const head = new THREE.CylinderGeometry(0.1, 0.13, 0.12, 10); head.translate(-side * 0.25 + side * 0.0, 0.06, -0.3); push(head, 0xb9b6ad);
+      for (let i = 0; i < parts.length; i++) {
+        const g = parts[i], n = g.attributes.position.count, c = new THREE.Color(cols[i]), arr = new Float32Array(n * 3);
+        for (let k = 0; k < n; k++) { arr[k * 3] = c.r; arr[k * 3 + 1] = c.g; arr[k * 3 + 2] = c.b; }
+        g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+        if (g.attributes.uv) g.deleteAttribute("uv");
+      }
+      const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
+      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+      m.position.set(bx, 0, bzz);
+      root.add(m);
+    }
     addBox(wallX, 2.55, cz, 0.10, 0.3, len - 0.6, C_STEEL_D, { cast: false });          // conduit run
     addBox(cx, 3.1, cz, depth - 0.3, 0.14, len - 0.4, C_PART_D, { cast: false });       // low soffit
   }

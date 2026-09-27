@@ -28,80 +28,113 @@
    that runs just after interactions.js's, so the legacy spin/bob is overwritten
    in the same frame it is written and no fenced file had to be edited.
 
-   Flag: CBZ.CONFIG.PRISON_ARMORY_SPINE (declared in world/gunroom.js, the
-   owning file) reverts all of it — the card goes back to the floating, spinning
-   card at (13.5, 1.4, -11.5) with its floor ring, and no desk, lamp, cabinet or
-   belt fob is built.
+   2026-09-27: the card itself is now a real printed ID card on a lanyard (see
+   below), it no longer pulses, and the flag-off floating card is deleted.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
-  const { mat, COL } = CBZ;
+  const { mat } = CBZ;
   const addBox = CBZ.addBox;
 
-  // gunroom.js owns the default; if it somehow failed to load we still want
-  // the better room, so an undefined flag reads as ON.
-  const SPINE = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_ARMORY_SPINE === false);
-
   const KX = 13.5, KZ = -11.5;                 // unchanged: the pickup test is planar
-  const REST_Y = SPINE ? 0.985 : 1.4;          // on the desk, or the old hover height
+  const DESK_TOP = 0.94;                       // the desk slab below: 0.90 +- 0.04
+  const REST_Y = DESK_TOP + 0.0016;            // lying ON it, not hovering over it
+
+  /* THE CARD IS A CARD (2026-09-27, owner: "the keycard where it spawns should
+     look more like a keycard"). It was a 42 x 27 x 3.5 cm gold slab pulsing
+     emissive, i.e. a glowing brick, sitting 2.7 cm above the desk. It is now a
+     CR80 card at 2x (17 x 10.8 cm, still small on a desk; 1x would vanish at
+     third-person range), 3 mm thick, with rounded corners, a printed face
+     (blue header band, ID photo, name lines, contact chip), and a woven lanyard
+     through its punch slot trailing across the desk to a steel clip. It does
+     not glow: the desk lamp's spill is what lights it. */
+  const CW = 0.172, CH = 0.108, CT = 0.003, CR = 0.009;
+  function cardFace() {
+    const cv = document.createElement("canvas");
+    cv.width = 256; cv.height = 160;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#f2f1ec"; g.fillRect(0, 0, 256, 160);
+    g.fillStyle = "#1d4f86"; g.fillRect(0, 0, 256, 34);               // header band
+    g.fillStyle = "#c9a13a"; g.fillRect(0, 34, 256, 4);                // thin gold rule
+    g.fillStyle = "#b9c3cc"; g.fillRect(16, 50, 70, 88);               // photo well
+    g.fillStyle = "#58616b"; g.beginPath(); g.arc(51, 82, 17, 0, Math.PI * 2); g.fill();  // head
+    g.beginPath(); g.ellipse(51, 138, 30, 26, 0, Math.PI, 0); g.fill();                    // shoulders
+    g.fillStyle = "#3b4148";
+    g.fillRect(100, 56, 118, 10); g.fillRect(100, 74, 86, 7);          // name lines
+    g.fillStyle = "#8b939b"; g.fillRect(100, 90, 104, 6); g.fillRect(100, 104, 70, 6);
+    g.fillStyle = "#d8b25a"; g.fillRect(196, 104, 38, 30);             // contact chip
+    g.strokeStyle = "#9a7a2e"; g.lineWidth = 2; g.strokeRect(197, 105, 36, 28);
+    g.beginPath(); g.moveTo(215, 105); g.lineTo(215, 133); g.moveTo(197, 119); g.lineTo(233, 119); g.stroke();
+    const t = new THREE.CanvasTexture(cv);
+    t.anisotropy = 4;
+    return t;
+  }
+  const shape = new THREE.Shape();
+  shape.moveTo(-CW / 2 + CR, -CH / 2);
+  shape.lineTo(CW / 2 - CR, -CH / 2); shape.quadraticCurveTo(CW / 2, -CH / 2, CW / 2, -CH / 2 + CR);
+  shape.lineTo(CW / 2, CH / 2 - CR); shape.quadraticCurveTo(CW / 2, CH / 2, CW / 2 - CR, CH / 2);
+  shape.lineTo(-CW / 2 + CR, CH / 2); shape.quadraticCurveTo(-CW / 2, CH / 2, -CW / 2, CH / 2 - CR);
+  shape.lineTo(-CW / 2, -CH / 2 + CR); shape.quadraticCurveTo(-CW / 2, -CH / 2, -CW / 2 + CR, -CH / 2);
+  // the punch slot, near the top edge (+y in shape space)
+  const slot = new THREE.Path();
+  slot.moveTo(-0.009, CH / 2 - 0.016); slot.lineTo(-0.009, CH / 2 - 0.010); slot.lineTo(0.009, CH / 2 - 0.010); slot.lineTo(0.009, CH / 2 - 0.016); slot.lineTo(-0.009, CH / 2 - 0.016);
+  shape.holes.push(slot);
+  const cardGeo = new THREE.ExtrudeGeometry(shape, { depth: CT, bevelEnabled: false, curveSegments: 3 });
+  // planar UVs over the face (ExtrudeGeometry's UVs are raw shape coords)
+  {
+    const pos = cardGeo.attributes.position, uv = cardGeo.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / CW + 0.5, pos.getY(i) / CH + 0.5);
+    uv.needsUpdate = true;
+  }
+  const faceMat = new THREE.MeshLambertMaterial({ map: cardFace() });
+  const edgeMat = new THREE.MeshLambertMaterial({ color: 0xe6e4dc });
+  const card = new THREE.Mesh(cardGeo, [faceMat, edgeMat]);
+  // Extrude runs along +z; -90 deg about x lays it flat with the printed
+  // (z = CT) face UP and the shape's +y (the slot edge) pointing to -z.
+  card.rotation.x = -Math.PI / 2;
+  card.castShadow = false;
 
   const grp = new THREE.Group();
   grp.userData.dynamic = true;
+  grp.add(card);
 
-  const cardMat = mat(COL.KEY, { emissive: COL.KEY_E, ei: 1.3 });
-  const card = SPINE
-    ? new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.27, 0.035), cardMat)
-    : new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 0.06), cardMat);
-
-  if (SPINE) {
-    // LIE FLAT. The card mesh carries the -90° itself so the group's yaw (which
-    // systems/interactions.js still writes) only ever slews it in the ground
-    // plane — it can never stand the card back up.
-    card.rotation.x = -Math.PI / 2;
-    card.castShadow = true;
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.075, 0.02), mat(0x0a3b33));
-    stripe.position.set(0, 0.082, 0.026);      // card-local; ends up proud, on top
-    card.add(stripe);
-    const chip = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.018), mat(0xd6a33b, { emissive: 0x4a3308, ei: 0.5 }));
-    chip.position.set(-0.13, -0.03, 0.025);
-    card.add(chip);
-    const punch = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.022), mat(0x0a3b33));
-    punch.position.set(0.165, 0.0, 0.02);      // the lanyard slot
-    card.add(punch);
-    grp.add(card);
-  } else {
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, 0.07), mat(0x0a3b33));
-    stripe.position.y = 0.08;
-    grp.add(card, stripe);
+  // THE LANYARD: a flat woven strap from the slot, off the card's top edge in a
+  // loose S across the desk to its swivel clip. Group-local: x across the card,
+  // -z toward its slot edge, y up from the desk.
+  const strapMat = new THREE.MeshLambertMaterial({ color: 0x173a63 });
+  const pts = [[0, -CH / 2 + 0.013], [0.004, -CH / 2 - 0.01], [0.03, -CH / 2 - 0.05], [0.085, -CH / 2 - 0.07],
+    [0.13, -CH / 2 - 0.045], [0.16, -CH / 2], [0.2, -CH / 2 + 0.03], [0.26, -CH / 2 + 0.035]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const x0 = pts[i][0], z0 = pts[i][1], x1 = pts[i + 1][0], z1 = pts[i + 1][1];
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.0015, len + 0.004), strapMat);
+    seg.position.set((x0 + x1) / 2, i === 0 ? CT + 0.001 : 0.00075, (z0 + z1) / 2);
+    seg.rotation.y = Math.atan2(x1 - x0, z1 - z0);
+    grp.add(seg);
   }
+  const steel = new THREE.MeshLambertMaterial({ color: 0x9aa3ad });
+  const clip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.006, 0.018), steel);
+  clip.position.set(0.272, 0.003, -CH / 2 + 0.035);
+  const ringM = new THREE.Mesh(new THREE.TorusGeometry(0.008, 0.0016, 4, 10), steel);
+  ringM.rotation.x = Math.PI / 2; ringM.position.set(0, CT + 0.002, -CH / 2 + 0.013);
+  grp.add(clip, ringM);
 
   grp.position.set(KX, REST_Y, KZ);            // SE corner, past the indoor guard
+  grp.rotation.y = 0.42;                       // set down at an angle, not squared up
   scene.add(grp);
 
-  /* The ring. It stays on the exports because systems/state.js and
-     systems/interactions.js both toggle `ring.visible` — but a 1.15 m halo
-     painted on the floor is the pickup-marker language we are trying to get
-     rid of, so under the flag it becomes what it should always have been: the
-     small pool of light the desk lamp throws across the card. */
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: SPINE ? 0xffd9a0 : COL.KEY,
-    transparent: true, opacity: SPINE ? 0.16 : 0.4,
-    // depthWrite off only on the new light-spill disc; the legacy floor halo
-    // keeps its exact original material so the flag-off path is unchanged.
-    side: THREE.DoubleSide, depthWrite: !SPINE,
-  });
-  const ring = SPINE
-    ? new THREE.Mesh(new THREE.CircleGeometry(0.60, 22), ringMat)
-    : new THREE.Mesh(new THREE.RingGeometry(0.8, 1.15, 24), ringMat);
+  /* The ring export stays (systems/state.js toggles `ring.visible`), and it is
+     what it always should have been: the soft pool the desk lamp throws on the
+     desk around the card. Nothing on the floor, nothing pulsing. */
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false });
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(0.34, 22), ringMat);
   ring.rotation.x = -Math.PI / 2;
-  ring.position.set(KX, SPINE ? 0.952 : 0.06, KZ);
+  ring.position.set(14.0, DESK_TOP + 0.001, -11.6);
   scene.add(ring);
 
   CBZ.keycard = { group: grp, ring, collected: false, baseY: REST_Y };
-
-  if (!SPINE) return;
 
   // ==================================================================
   //  THE DUTY POST — a place, so the card is something you FIND
@@ -115,23 +148,22 @@
   addBox(13.05, 0.70, -11.50, 0.06, 0.06, 0.78, 0x8b95a1, { cast: false });                   // drawer pulls
   addBox(14.75, 0.70, -11.50, 0.06, 0.06, 0.78, 0x8b95a1, { cast: false });
 
-  // desk clutter — a shift log, a mug, a spare lanyard coil
-  addBox(14.28, 0.955, -11.72, 0.34, 0.03, 0.46, 0xe4e0d4, { cast: false });                  // clipboard paper
-  addBox(14.28, 0.975, -11.90, 0.30, 0.02, 0.06, 0x39424e, { cast: false });                  // its clip
-  addBox(14.52, 1.00, -11.24, 0.14, 0.16, 0.14, 0xd9dee5, { cast: false });                   // mug
-  addBox(14.60, 1.00, -11.24, 0.05, 0.09, 0.05, 0xd9dee5, { cast: false });                   // handle
-  addBox(13.16, 0.955, -11.26, 0.22, 0.03, 0.20, 0x0a3b33, { cast: false });                  // coiled lanyard
-  addBox(13.16, 0.975, -11.26, 0.10, 0.02, 0.09, 0x123f39, { cast: false });
-  // the lanyard still threaded through the card's punch slot, trailing off it
-  addBox(13.78, 0.958, -11.50, 0.16, 0.014, 0.035, 0x0a3b33, { cast: false });
-  addBox(13.94, 0.958, -11.58, 0.14, 0.014, 0.030, 0x0a3b33, { cast: false });
+  // desk clutter: a shift log on a clipboard and a mug. Everything sits ON the
+  // 0.94 desk top (the old paper, lamp base and lanyard hung 1-2.7 cm over it).
+  addBox(14.28, DESK_TOP + 0.003, -11.72, 0.23, 0.006, 0.32, 0x6b4f33, { cast: false });      // clipboard board
+  addBox(14.28, DESK_TOP + 0.007, -11.70, 0.21, 0.002, 0.28, 0xe4e0d4, { cast: false });      // paper
+  addBox(14.28, DESK_TOP + 0.012, -11.86, 0.09, 0.012, 0.03, 0x8b95a1, { cast: false });      // its clip
+  const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.04, 0.10, 12), mat(0xd9dee5));
+  mug.position.set(14.52, DESK_TOP + 0.05, -11.24); scene.add(mug);
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.008, 5, 10, Math.PI), mat(0xd9dee5));
+  handle.rotation.z = -Math.PI / 2; handle.position.set(14.563, DESK_TOP + 0.05, -11.24); scene.add(handle);
 
   // the desk lamp that is actually throwing the pool of light on the card
-  addBox(14.66, 0.98, -11.86, 0.20, 0.05, 0.20, 0x21262e, { cast: false });                   // base
-  addBox(14.66, 1.22, -11.86, 0.05, 0.44, 0.05, 0x21262e, { cast: false });                   // stem
-  addBox(14.40, 1.42, -11.78, 0.56, 0.05, 0.05, 0x21262e, { cast: false });                   // arm
-  addBox(14.14, 1.36, -11.74, 0.20, 0.14, 0.20, 0x2b313a, { cast: false });                   // shade
-  addBox(14.14, 1.28, -11.74, 0.15, 0.03, 0.15, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
+  addBox(14.66, DESK_TOP + 0.015, -11.86, 0.18, 0.03, 0.18, 0x21262e, { cast: false });      // base
+  addBox(14.66, 1.18, -11.86, 0.03, 0.44, 0.03, 0x21262e, { cast: false });                  // stem
+  addBox(14.45, 1.40, -11.80, 0.42, 0.03, 0.03, 0x21262e, { cast: false });                  // arm
+  addBox(14.24, 1.35, -11.76, 0.18, 0.12, 0.18, 0x2b313a, { cast: false });                  // shade
+  addBox(14.24, 1.285, -11.76, 0.13, 0.01, 0.13, 0xffe6b0, { emissive: 0xffb347, ei: 0.9, cast: false });  // bulb face
 
   /* THE KEY CABINET, AND WHY IT IS HERE. A card lying on a desk answers
      "what is this"; the steel cabinet on the wall behind it, door hanging
@@ -190,17 +222,10 @@
   // Order 40.6 puts this immediately AFTER systems/interactions.js's own
   // keycard block (order 40), which still writes rotation.y and a ±0.12 bob.
   // Overwriting them here is what let this land without touching that file.
+  // Order 40.6: after systems/interactions.js (order 40). The card lies still.
   const K = CBZ.keycard;
-  let t = 0;
-  CBZ.onUpdate(40.6, function (dt) {
-    t += dt;
-    if (!K.collected) {
-      grp.rotation.y = 0.42 + Math.sin(t * 0.35) * 0.02;   // a card set down at an angle
-      grp.position.y = REST_Y + Math.sin(t * 0.9) * 0.006; // barely — it is on a desk
-      const pulse = 0.78 + Math.sin(t * 2.2) * 0.34;
-      cardMat.emissiveIntensity = pulse;
-      ringMat.opacity = 0.11 + pulse * 0.07;
-    }
+  CBZ.onUpdate(40.6, function () {
+    if (!K.collected && grp.position.y !== REST_Y) grp.position.y = REST_Y;
     // A uniform is a claim about the man wearing it (CLAUDE.md). The Warden's
     // key is only on his belt while he still has it — the moment you bribe,
     // pick or loot it off him the world stops advertising it.
@@ -217,9 +242,9 @@
      the Warden's belt). It may only go UP. */
   CBZ.keycardAudit = function () {
     return {
-      spine: SPINE,
-      floatingPickups: SPINE ? 0 : 1,
-      visiblePromises: (SPINE ? 1 : 0) + (fob ? 1 : 0),
+      spine: true,
+      floatingPickups: 0,
+      visiblePromises: 1 + (fob ? 1 : 0),
       wardenFob: !!fob,
       wardenFound: !!fobHost,
       restY: REST_Y,

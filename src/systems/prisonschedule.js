@@ -200,7 +200,7 @@
   // north exercise yard
   paHorn(-29.4, 5.4, 20, Math.PI / 2);
   paHorn(29.4, 5.4, 20, -Math.PI / 2);
-  paHorn(0, 5.4, 51.4, Math.PI);
+  paHorn(6.0, 5.4, 51.4, Math.PI);   // on the wall beside the walkway gate; at x 0 it hung in the gate's open air
   // south block
   paHorn(-43.4, 5.4, 84, Math.PI / 2);
   paHorn(43.4, 5.4, 84, -Math.PI / 2);
