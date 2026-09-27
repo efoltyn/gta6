@@ -299,7 +299,7 @@
       if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
       const geo = o.geometry;
       if (!geo || !geo.attributes || !geo.attributes.position) return;
-      if (o._breached || (o.userData && (o.userData.debrisPiece || o.userData.cbzCollapseShell))) return;
+      if (o._breached || (o.userData && (o.userData.debrisPiece || o.userData.cbzCollapseShell || o.userData.cbzInterior))) return;   // (an island interior merge spans the footprint: it cannot be seen falling)
       if (!solids.has(o) && !visibleIn(o, grp.parent)) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       let any = false;
@@ -317,6 +317,7 @@
           && _bb.min.z - oz > -hd + IN && _bb.max.z - oz < hd - IN) return;   // interior
       const m = new THREE.Matrix4().makeTranslation(-ox, -oy, -oz).multiply(o.matrixWorld);
       out.push({ geo: geo, mat: o.material, m: m, cx: cx, cy: cy, cz: cz,
+        sx: _sz.x, sy: _sz.y, sz: _sz.z,
         vol: Math.max(1e-4, _sz.x * _sz.y * _sz.z), slab: slab, glass: isGlass(mats[0]) });
     });
     for (const gp of desc.panes || []) {
@@ -500,6 +501,11 @@
     for (const it of list) {
       const geo = it.geo, idx = geo.index, pos = geo.attributes.position;
       const n = idx ? idx.count : pos.count;
+      if (it.tris) {                        // a split piece of a taller mesh: its own triangles
+        let a = byMat.get(it.mat); if (!a) { a = []; byMat.set(it.mat, a); }
+        a.push({ geo: geo, m: it.m, s: 0, c: it.tris.length * 3, tris: it.tris });
+        continue;
+      }
       const groups = Array.isArray(it.mat) && geo.groups && geo.groups.length ? geo.groups : null;
       if (groups) {
         for (const gr of groups) {
@@ -540,8 +546,9 @@
         const pa = flat(pos, 3), ps = 3;
         const na = flat(nrm, 3), ua = flat(uv, 2), ca = flat(col, 3);
         const ia = idx ? idx.array : null;
-        const end = r.s + r.c - (r.c % 3);
-        for (let k = r.s; k < end; k++) {
+        const end = r.s + r.c - (r.c % 3), tr = r.tris;
+        for (let kk = r.s; kk < end; kk++) {
+          const k = tr ? tr[(kk / 3) | 0] + (kk % 3) : kk;
           const i = ia ? ia[k] : k;
           const x = pa[i * ps], y = pa[i * ps + 1], z = pa[i * ps + 2];
           P[o * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
@@ -606,16 +613,61 @@
       band.g.add(g); band.parts.push(p); band._p[key] = p;
       return p;
     }
+    const faceKey = function (cx, cz, slab) {
+      if (!opt.panels) return -2;                   // cheap tier: one part per band
+      const dist = [cz + hd, hd - cz, cx + hw, hw - cx];
+      let k = 0;
+      for (let j = 1; j < 4; j++) if (dist[j] < dist[k]) k = j;
+      return (slab || dist[k] > 1.6) ? -1 : k;      // floor plates + core
+    };
+    const bandOf = function (y) { return Math.max(0, Math.min(nBand - 1, Math.floor(y / bandH))); };
     for (const it of items) {
-      const band = bands[Math.max(0, Math.min(nBand - 1, Math.floor(it.cy / bandH)))];
-      let key = -2;                                   // cheap tier: one part per band
-      if (opt.panels) {
-        const dist = [it.cz + hd, hd - it.cz, it.cx + hw, hw - it.cx];
-        let k = 0;
-        for (let j = 1; j < 4; j++) if (dist[j] < dist[k]) k = j;
-        key = (it.slab || dist[k] > 1.6) ? -1 : k;    // floor plates + core
+      /* A MESH TALLER THAN A BAND IS CUT BY ITS TRIANGLES. The island's
+         buildings (and any merged host) carry whole-building meshes: the
+         shell merge, and the facade kit's one-mesh-per-colour flush that
+         wraps all four faces from plinth to cornice. Filed whole by its
+         bounding-box centre, such a mesh rode ONE band, so when the ground
+         floor failed the whole facade hung in the air above it. Each
+         triangle now goes to the band and face its centroid sits in. */
+      const tall = it.sy > bandH * 1.3 || (opt.panels && !it.slab && !it.glass && it.sx > w * 0.7 && it.sz > d * 0.7);
+      if (tall && it.geo && it.geo.attributes && it.geo.attributes.position) {
+        const geo = it.geo, idx = geo.index, pa = geo.attributes.position, e = it.m.elements;
+        const n = idx ? idx.count : pa.count;
+        const runs = Array.isArray(it.mat) && geo.groups && geo.groups.length
+          ? geo.groups.map(function (gr) { return { s: gr.start, c: Math.min(gr.count, n - gr.start), mat: it.mat[gr.materialIndex || 0] }; })
+          : [{ s: 0, c: n, mat: Array.isArray(it.mat) ? it.mat[0] : it.mat }];
+        const buckets = new Map();
+        for (const run of runs) {
+          if (!run.mat) continue;
+          const end = run.s + run.c - (run.c % 3);
+          for (let k = run.s; k < end; k += 3) {
+            let x = 0, y = 0, z = 0;
+            for (let v = 0; v < 3; v++) {
+              const i = idx ? idx.getX(k + v) : k + v;
+              const px = pa.getX(i), py = pa.getY(i), pz = pa.getZ(i);
+              x += e[0] * px + e[4] * py + e[8] * pz + e[12];
+              y += e[1] * px + e[5] * py + e[9] * pz + e[13];
+              z += e[2] * px + e[6] * py + e[10] * pz + e[14];
+            }
+            x /= 3; y /= 3; z /= 3;
+            const bk = bandOf(y) * 8 + faceKey(x, z, false) + 2;
+            let perMat = buckets.get(bk); if (!perMat) { perMat = new Map(); buckets.set(bk, perMat); }
+            let arr = perMat.get(run.mat); if (!arr) { arr = []; perMat.set(run.mat, arr); }
+            arr.push(k);
+          }
+        }
+        buckets.forEach(function (perMat, bk) {
+          const band = bands[Math.floor(bk / 8)], key = (bk % 8) - 2;
+          const p = partOf(band, key);
+          const lm = new THREE.Matrix4().makeTranslation(-p.g.position.x, -band.y0, -p.g.position.z).multiply(it.m);
+          perMat.forEach(function (arr, m) {
+            p.items.push({ geo: geo, mat: m, m: lm, vol: it.vol * arr.length * 3 / Math.max(3, n), glass: it.glass, tris: Uint32Array.from(arr) });
+          });
+        });
+        continue;
       }
-      const p = partOf(band, key);
+      const band = bands[bandOf(it.cy)];
+      const p = partOf(band, faceKey(it.cx, it.cz, it.slab));
       const lm = new THREE.Matrix4().makeTranslation(-p.g.position.x, -band.y0, -p.g.position.z).multiply(it.m);
       p.items.push({ geo: it.geo, mat: it.mat, m: lm, vol: it.vol, glass: it.glass });
     }
