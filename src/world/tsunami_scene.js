@@ -78,8 +78,10 @@
     // capped: at the grazing angles a standing eye sees the bared shelf from,
     // an uncapped fresnel turned the whole wet band into a white sky mirror
     // (read as snow); wet mud keeps its own dark colour under the sheen
-    "  col = mix(col, uSky * mix(0.55, 0.8, mirror), clamp(fr * gloss * mix(0.28, 0.7, mirror), 0.0, 0.7));",
-    "  return col + uSunCol * sp * gloss * mix(1.2, 3.5, mirror);",
+    // and the sky it mirrors is seen through silt-laden water: a brown-grey
+    // reflection, never the pale sky itself (that read as snow patches)
+    "  col = mix(col, uSky * vec3(0.60, 0.56, 0.48) * mix(0.55, 0.7, mirror), clamp(fr * gloss * mix(0.28, 0.6, mirror), 0.0, 0.6));",
+    "  return col + uSunCol * sp * gloss * mix(0.8, 1.8, mirror);",
     "}",
   ].join("\n");
 
@@ -650,7 +652,7 @@
           "  float a = cover * (0.32 + 0.40 * thick + 0.18 * n1) * mix(0.72, 1.0, wk);",
           "  a *= 0.72 + 0.40 * smoothstep(0.3, 0.85, streak);",
           // standing puddles, shrinking as it dries
-          "  float pth = 0.60 + (1.0 - wet) * 0.22;",
+          "  float pth = 0.68 + (1.0 - wet) * 0.18;",
           "  mdPud = smoothstep(pth, pth + 0.035, n1 * 0.62 + n2 * 0.28 + n3 * 0.10) * cover;",
           "  col = mix(col, vec3(0.040, 0.037, 0.030), mdPud);",
           "  a = max(a, mdPud * 0.95);",
