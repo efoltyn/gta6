@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "034e5262df077c40afeafea6a9abefe1d48477e0",
-  "createdAt": "2026-09-27T08:29:33.232Z",
+  "sourceCommit": "774771880ecf54b37e7ce63df39483168416f823",
+  "createdAt": "2026-09-27T16:29:31.027Z",
   "fileCount": 1132,
-  "totalBytes": 46019097,
+  "totalBytes": 46053301,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -2233,8 +2233,8 @@
     },
     {
       "file": "src/systems/disasters.js",
-      "bytes": 127943,
-      "sha256": "330e0370063b5fabf6a0edc55dac28405e1237b5bf32f10d94e2bc0b02638a43"
+      "bytes": 118780,
+      "sha256": "43e2f0f224c201c27624457cbf7062e9009a25e0ee8b74dc01ce7158adb7ef85"
     },
     {
       "file": "src/systems/dustfx.js",
@@ -2283,8 +2283,8 @@
     },
     {
       "file": "src/systems/fx.js",
-      "bytes": 8119,
-      "sha256": "bb7a2c016e0173a5301e151dff3b686e2a0c188bccf9d82fd98268620846254a"
+      "bytes": 8551,
+      "sha256": "55c4210d04b3a86a0b0464f663d6d6cb0da14cc51890d772664ab362875675fe"
     },
     {
       "file": "src/systems/gamepad.js",
@@ -3388,8 +3388,8 @@
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 79680,
-      "sha256": "652aa6c31d33a368ac7ba25abe2ca842beb25045a2f236acf4ff9daadde4e847"
+      "bytes": 81514,
+      "sha256": "e776b9c7162f4846a8a649b88e3847798346243ae77de6a5f03053d27a85c552"
     },
     {
       "file": "src/world/water_stability.js",
@@ -5458,8 +5458,8 @@
     },
     {
       "file": "assets/keyart/survival.jpg",
-      "bytes": 204817,
-      "sha256": "bc0876b0fcfb00b5f44c0f6fcbc54a4a47906c7c71fe8b5202ffe4ac8bcf6a39"
+      "bytes": 246700,
+      "sha256": "f279783e83e62cdd752770b44622315f84d2762655103ff38470dcd384673a6b"
     },
     {
       "file": "assets/keyart/warlord.jpg",
@@ -5623,8 +5623,8 @@
     },
     {
       "file": "thumbs/disaster-survival.jpg",
-      "bytes": 85440,
-      "sha256": "1fe26cc2d5c735f24b3a64c82419d386d051d5827ebfaa366919e4ab1ead2646"
+      "bytes": 84658,
+      "sha256": "fdd781bb04fe118a1fedc15d06ae764d7da20454737558e557b71bdbbaac4389"
     },
     {
       "file": "thumbs/prison-escape.jpg",
