@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "cd1ced4829d77350432ef5d279e2be4fb5e8e87a",
-  "createdAt": "2026-09-27T07:41:14.874Z",
+  "sourceCommit": "2bc339147b43d837cf35eeff2939682354777767",
+  "createdAt": "2026-09-27T07:44:20.150Z",
   "fileCount": 1119,
-  "totalBytes": 45289510,
+  "totalBytes": 45291246,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1398,8 +1398,8 @@
     },
     {
       "file": "src/city/tsunami.js",
-      "bytes": 16476,
-      "sha256": "3f75510bf5a613ab77ecc12f1dc3e65d96fb3b38e0e1d27460d35f022edc0d6e"
+      "bytes": 16627,
+      "sha256": "285fb2da7f670cd1d42edd45043561721b0457d95392ab5dcc3946b15d0da802"
     },
     {
       "file": "src/city/turf.js",
@@ -1443,8 +1443,8 @@
     },
     {
       "file": "src/city/waterfield.js",
-      "bytes": 14308,
-      "sha256": "83a5a2fbdbd8a927e76303344003dc35b5e957b5c98848cf4b419f8d8c352276"
+      "bytes": 14441,
+      "sha256": "8b813702a3f79c964cac0ecf29d37c9a973582355beca129af248b38310fa38c"
     },
     {
       "file": "src/city/wealth.js",
@@ -1548,8 +1548,8 @@
     },
     {
       "file": "src/city/world.js",
-      "bytes": 33275,
-      "sha256": "0fde18e8d570ef0c93fce51a9bb75aa7fb76adc0ba68d1f25d1789bc8bd21d87"
+      "bytes": 33293,
+      "sha256": "5cd43de9bf6cfa369d61c9a4de2a65a776a82cd3b081d3dc9d8d250892ba8fcc"
     },
     {
       "file": "src/city/worldmap.js",
@@ -1608,8 +1608,8 @@
     },
     {
       "file": "src/core/groundmask.js",
-      "bytes": 4231,
-      "sha256": "4dc820902ea06fcc827c3fd5a7188889610b48154f6c34a222820da09c6e3bcc"
+      "bytes": 4230,
+      "sha256": "25c017bfe5390da49a2067211409c7acaafbd9927cd01a43b8601b5257f0ed50"
     },
     {
       "file": "src/core/interfaces.js",
@@ -3323,8 +3323,8 @@
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 78269,
-      "sha256": "3b0dd04a72c2f7b2c4198dcabff8c9ed8d396c0ac04f14b48cbd33f9466b0d6e"
+      "bytes": 79680,
+      "sha256": "652aa6c31d33a368ac7ba25abe2ca842beb25045a2f236acf4ff9daadde4e847"
     },
     {
       "file": "src/world/water_stability.js",
@@ -3348,8 +3348,8 @@
     },
     {
       "file": "src/world/waterfx.js",
-      "bytes": 9967,
-      "sha256": "0f57cfe194cf1a458da88c21b0f4f62fdf2bc77f7af6dd4e661c4081f612b163"
+      "bytes": 9991,
+      "sha256": "37715f3b4528fabea3b1a60e9e62a5022f5baf96afa19f5fc31be796260e2373"
     },
     {
       "file": "src/world/wildnature.js",
@@ -5469,27 +5469,27 @@
     {
       "file": "shark-sim.html",
       "bytes": 55067,
-      "sha256": "84999548652ffb4e8904b547b7c15ac6fd57d64f6c6e4186adc1704e3c13abf8"
+      "sha256": "20069b980803e2a92f6d22e6eeeff45a522ee73adaed066223ac9b05745fdef4"
     },
     {
       "file": "disaster-survival.html",
       "bytes": 55110,
-      "sha256": "5f31310e26e97a6dfb7d0769cc1284922b5f485af298431e43193bf18c17ce5f"
+      "sha256": "82e7886a846d4e75d8242f068a19c951ea63da1ebcbb143579a601b37faee9a5"
     },
     {
       "file": "prison-escape.html",
       "bytes": 55079,
-      "sha256": "25fbc074bb2df98dbf5458d6656b2f692a072bd6771838cacd9c8dffd45edce5"
+      "sha256": "c26bcf29c247e7a1637325d9167bed3b93344f04ce55a1cbb1ff4c5fb0582f83"
     },
     {
       "file": "gang-city.html",
       "bytes": 55034,
-      "sha256": "51b86befd267cbdc580f816895b06805e3d7e4f7ebdf17352092377ebad26f81"
+      "sha256": "c434c748fc19562873287d228be2b7a5416d22c1c27721e9067cca2aae5455ce"
     },
     {
       "file": "gun-game.html",
       "bytes": 55056,
-      "sha256": "34fcfdfaca5ec192378fa601e7123b264014b8fcbf4cdcce40657ea7a79d4139"
+      "sha256": "8bcf4afc390cc3913b81b5f0a933691a2ce10e29d2125f983906e59427d765b7"
     },
     {
       "file": "games/airport.html",
