@@ -93,8 +93,23 @@
    wave, not this one's — so the button says so out loud instead of pretending,
    and the flag is declared here for whoever opens it. FORT_CONVOY's precedent.
 
+   ANY SEAT, AND SOMEBODY ELSE'S CAR (car wave 2026-09-27)
+   -------------------------------------------------------
+   The owner: "open any door and sit in that seat". A ride is now a SEAT of
+   city/carseats.js's one model (`ride.seatId`), not a sign flip: the middle
+   of a van's bench, an SUV's third row. [G] moves you to the wheel when it
+   is free, otherwise round the free seats. And a passenger door of a car an
+   NPC is driving is a RIDE, not a theft (CBZ.cityRideVehicle): the car stays
+   the traffic AI's (`car.player` stays false, the AI loop keeps driving it
+   down its lane), you sit in your seat, the camera rides along, [E] asks the
+   driver to pull over and a second [E] at speed is the jump. Get in with a
+   gun in your hand and the driver floors it.
+
    PUBLISHES
-     CBZ.citySeatShift(opts)     the button — driver <-> shotgun
+     CBZ.citySeatShift(opts)     the button — any seat; opts.to a seat id,
+                                 "driver", or "passenger" (first free)
+     CBZ.cityRideVehicle(car, seatId)  ride in a car somebody else drives
+     CBZ.cityPaxNpcRide(veh)     the player is riding an NPC-driven car
      CBZ.cityVehicleGetOut()     the door — step out, or jump at speed
      CBZ.cityPaxAboard(veh)      is the player riding shotgun in this thing
      CBZ.cityPaxRiding()         the vehicle he is riding, or null
@@ -141,7 +156,7 @@
 
   const TALLY = {
     shifts: 0, ridesStarted: 0, bails: 0, stepOuts: 0, refusedAircraft: 0,
-    refusedNoSeat: 0, chauffeuredFrames: 0, paxFrames: 0,
+    refusedNoSeat: 0, chauffeuredFrames: 0, paxFrames: 0, npcRides: 0,
     ghostThrottle: 0,              // PINNED AT 0
     orphanRides: 0,                // PINNED AT 0
     lastBailSpeed: 0, lastBailDamage: 0,
@@ -194,9 +209,11 @@
      player loop to stand down — two integrators on one car move it twice. */
   CBZ.cityPaxChauffeured = function (veh) {
     if (!chauffeurOn() || !ride || !veh || ride.veh !== veh) return false;
+    if (ride.npc) return !!(CBZ.carNpcDriven && CBZ.carNpcDriven(veh));
     const d = veh.npcDriver;
     return !!(d && !d.dead && d._cbzDriving);
   };
+  CBZ.cityPaxNpcRide = function (veh) { return !!(ride && ride.npc && veh && ride.veh === veh); };
   CBZ.cityPaxRelease = function (veh) {
     if (!ride) return false;
     if (veh && ride.veh !== veh) return false;
@@ -223,75 +240,132 @@
         note(CF.PAX_AIRCRAFT === true
           // Flipping the flag on must not silently do nothing — say what the
           // flag actually is, which is a declaration of owed work.
-          ? "PAX_AIRCRAFT is declared, not built — a cabin ride belongs to playeraircraft.js and bailout.js."
-          : "You're the only one flying this — [F] steps out, and up here that's a jump.", 2.4);
+          ? "PAX_AIRCRAFT is declared, not built: a cabin ride belongs to playeraircraft.js and bailout.js."
+          : "You're the only one flying this. [F] steps out, and up here that's a jump.", 2.4);
       }
       return false;
     }
     if (!P.driving || !P._vehicle) return false;
     const car = P._vehicle;
+    const S = CBZ.carSeats;
+    const m = S && !marine(car) ? S.of(car) : null;
 
-    // ---- back to the wheel ----
-    if (ride && ride.veh === car) {
-      // A caller that ASKED for the shotgun seat and is already in it has got
-      // what it wanted; only a toggle (or an explicit "driver") moves you back.
-      if (opts.to === "shotgun") return true;
+    // ---- a HULL keeps the old two-station swap (no seat model) ----
+    if (!m) return hullShift(car, opts);
+
+    const cur = S.seatOf(car, P) || (ride && ride.veh === car ? ride.seatId : "driver");
+    const freeFor = function (id) { const o = S.occupant(car, id); return !o || o.ref === P; };
+    let to = opts.to;
+    if (to === "shotgun" && !m.byId.shotgun) to = "passenger";
+    if (to === "passenger") {
+      to = null;
+      for (let i = 0; i < m.seats.length; i++) if (!m.seats[i].isDriver && freeFor(m.seats[i].id)) { to = m.seats[i].id; break; }
+      if (!to) { TALLY.refusedNoSeat++; if (!opts.quiet) note("Every seat's taken.", 1.8); return false; }
+    }
+    if (!to) {
+      // THE BUTTON: to the wheel when it is free, otherwise round the seats
+      if (cur !== "driver" && freeFor("driver") && !(ride && ride.npc)) to = "driver";
+      else {
+        const k = m.seats.findIndex(function (x) { return x.id === cur; });
+        for (let i = 1; i <= m.seats.length; i++) {
+          const st = m.seats[(k + i) % m.seats.length];
+          if (!st.isDriver && st.id !== cur && freeFor(st.id)) { to = st.id; break; }
+        }
+      }
+      if (!to) {
+        TALLY.refusedNoSeat++;
+        if (!opts.quiet) note(m.seats.length < 2 ? "There's only one seat on this thing." : "No free seat to move to.", 1.8);
+        return false;
+      }
+    }
+    if (to === cur) return true;
+    const seat = m.byId[to];
+    if (!seat) return false;
+    if (!freeFor(to)) {
+      TALLY.refusedNoSeat++;
+      const o = S.occupant(car, to);
+      if (!opts.quiet) note(((o && o.ref && o.ref.name) || "Someone") + " is in that seat.", 1.8);
+      return false;
+    }
+    S.releaseRef(car, P);
+    S.claim(car, to, S.playerOccupant());
+    TALLY.shifts++;
+    if (to === "driver") {
       /* Taking the wheel back ENDS a companion's errand, and it ends it in
-         boarding.js rather than here: that loop drops any run whose car is
-         `player` without a passenger aboard, so clearing the ride is the whole
-         handover. No second stop path, no second place to keep in sync. */
+         boarding.js: that loop drops any run whose car is `player` without a
+         passenger aboard, so clearing the ride is the whole handover. */
       const chauffeur = car.npcDriver;
       ride = null;
-      TALLY.shifts++;
+      if (!opts.quiet) note(chauffeur ? "You take the wheel back." : "Back behind the wheel.", 1.8);
+    } else {
+      if (!ride || ride.veh !== car) {
+        ride = { veh: car, seatId: to, npc: false, t: 0, lastSpeed: speedOf(car), lastSteer: Math.abs(car._steerInput || 0) };
+        TALLY.ridesStarted++;
+      } else ride.seatId = to;
       if (!opts.quiet) {
-        note(chauffeur ? "You take the wheel back." : (marine(car) ? "Back at the helm." : "Back behind the wheel."), 1.8);
+        const drv = ride.npc || (car.npcDriver && !car.npcDriver.dead);
+        note(seat.row === 0 ? (drv ? "You slide over." : "You slide over to the passenger seat, nobody's driving.")
+          : "You climb into the back.", 2.0);
       }
-      if (CBZ.sfx) CBZ.sfx("pickup", { volume: 0.5 });   // cloth: a body moving across upholstery
-      return true;
-    }
-    if (opts.to === "driver") return false;      // already there
-
-    // ---- across to the shotgun seat ----
-    if (!hasSecondSeat(car)) {
-      TALLY.refusedNoSeat++;
-      if (!opts.quiet) note("There's only one seat on this thing.", 1.8);
-      return false;
-    }
-    /* A SEAT WITH SOMEBODY IN IT IS NOT FREE. boarding.js seats companions,
-       hostages and cuffed captives in real chairs and knows which ones are
-       taken; asking it is the difference between riding shotgun and sitting in
-       your hostage's lap. Feature-detected — with boarding absent, the cabin's
-       own second seat is assumed empty, which is what it was before it existed. */
-    const held = shotgunOccupant(car);
-    if (held) {
-      TALLY.refusedNoSeat++;
-      if (!opts.quiet) note((held.name || "Someone") + " is in that seat.", 1.8);
-      return false;
-    }
-    ride = { veh: car, t: 0, lastSpeed: speedOf(car), lastSteer: Math.abs(car._steerInput || 0) };
-    TALLY.shifts++; TALLY.ridesStarted++;
-    if (!opts.quiet) {
-      note(marine(car)
-        ? "You step back from the helm — nobody's steering."
-        : "You slide over to the passenger seat — nobody's driving.", 2.2);
     }
     if (CBZ.sfx) CBZ.sfx("pickup", { volume: 0.5 });   // cloth: a body moving across upholstery
     return true;
   };
 
-  function shotgunOccupant(veh) {
-    const B = CBZ.boarding;
-    if (!B || !B.seatsOf || !B.aboard) return null;
-    let crew = null;
-    try { crew = B.aboard(veh); } catch (e) { return null; }
-    if (!crew || !crew.length) return null;
-    for (let i = 0; i < crew.length; i++) {
-      const p = crew[i];
-      const s = p && p._cbzSeat;
-      if (s && s.id === "shotgun") return p;
+  /* A HULL: helm <-> "stepped back", the original two-station swap. */
+  function hullShift(car, opts) {
+    if (ride && ride.veh === car) {
+      if (opts.to === "shotgun" || opts.to === "passenger") return true;
+      ride = null; TALLY.shifts++;
+      if (!opts.quiet) note("Back at the helm.", 1.8);
+      return true;
     }
-    return null;
+    if (opts.to === "driver") return false;
+    if (!hasSecondSeat(car)) {
+      TALLY.refusedNoSeat++;
+      if (!opts.quiet) note("There's only one seat on this thing.", 1.8);
+      return false;
+    }
+    ride = { veh: car, seatId: "shotgun", npc: false, t: 0, lastSpeed: speedOf(car), lastSteer: Math.abs(car._steerInput || 0) };
+    TALLY.shifts++; TALLY.ridesStarted++;
+    if (!opts.quiet) note("You step back from the helm, nobody's steering.", 2.2);
+    return true;
   }
+
+  // ============================================================
+  //  THE RIDE — a car somebody else is driving
+  // ============================================================
+  function gunOut() {
+    if (CBZ.game && CBZ.game.cityMeleeWeapon) return false;
+    const w = CBZ.equippedWeapon ? CBZ.equippedWeapon() : null;
+    return !!(w && !w.melee);
+  }
+  CBZ.cityRideVehicle = function (car, seatId) {
+    if (!on() || !inCity() || !car || car.dead || car.player) return false;
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || P._aircraft) return false;
+    const S = CBZ.carSeats;
+    const seat = S && S.seat(car, seatId);
+    if (!seat || seat.isDriver) return false;
+    if (S.occupant(car, seat.id)) { note("Someone's in that seat.", 1.6); return false; }
+    P.driving = true; P._vehicle = car;
+    S.releaseRef(car, P);
+    S.claim(car, seat.id, S.playerOccupant());
+    ride = { veh: car, seatId: seat.id, npc: true, t: 0, lastSpeed: speedOf(car), lastSteer: 0, stopAsked: false };
+    TALLY.ridesStarted++; TALLY.npcRides++;
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
+    const keys = CBZ.touchMode ? "" : "  [G] seat  [E] out";
+    if (gunOut()) {
+      // a gun in the back of the car: the driver does what he is told, fast
+      car.reckless = true;
+      car.baseV = Math.max(car.baseV || 0, (((CBZ.CITY && CBZ.CITY.traf && CBZ.CITY.traf.cruise) || [7, 12])[1]) * 1.5);
+      note("The driver sees the gun and floors it." + keys, 2.4);
+    } else {
+      note((seat.row === 0 ? "You get in up front. " : "You get in the back. ") + "The driver keeps going." + keys, 2.4);
+    }
+    if (CBZ.sfx) CBZ.sfx("door_close");
+    return true;
+  };
 
   // ============================================================
   //  THE DOOR — step out, or go out of a moving one
@@ -309,6 +383,15 @@
     if (!P.driving || !P._vehicle) return false;
     const car = P._vehicle;
     const speed = speedOf(car);
+    /* SOMEBODY ELSE IS DRIVING: the first press asks him to pull over (the
+       traffic AI's own pull-over beat: a hothead may run instead), the
+       second one at speed is you going out of the door. */
+    if (ride && ride.npc && ride.veh === car && speed > STEP_OUT_MS && !ride.stopAsked) {
+      ride.stopAsked = true;
+      if (CBZ.cityCarPullover) CBZ.cityCarPullover(car);
+      note("You tell the driver to pull over." + (CBZ.touchMode ? "" : " [E] again to jump."), 2.0);
+      return true;
+    }
     if (!bailOn() || speed <= STEP_OUT_MS) {
       TALLY.stepOuts++;
       if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
@@ -319,8 +402,11 @@
 
   function bail(car, speed) {
     const P = CBZ.player;
-    const pax = !!(ride && ride.veh === car);
-    const side = pax ? -1 : 1;                 // +X is the car's LEFT (the driver)
+    const npc = !!(ride && ride.npc && ride.veh === car);
+    const S = CBZ.carSeats;
+    const seat = S ? (S.playerSeat(car) || S.seat(car, (ride && ride.veh === car) ? ride.seatId : "driver")) : null;
+    const door = seat && seat.doorId && S ? S.door(car, seat.doorId) : null;
+    const side = door ? door.side : ((ride && ride.veh === car) ? -1 : 1);   // +X is the car's LEFT
     const h = car.heading || 0;
     // the car's own axes: forward (sin h, cos h), local +X (cos h, −sin h)
     const fx = Math.sin(h), fz = Math.cos(h);
@@ -333,7 +419,7 @@
     const hull = marine(car);
 
     // The leaf swings as you go through it and shuts itself a beat later.
-    doorOpen = { veh: car, id: pax ? "shotgun" : "driver", t: 0 };
+    doorOpen = { veh: car, id: seat ? seat.id : "driver", t: 0 };
     poseDoor(0.001);
 
     /* THE EXIT IS THE SHIPPED ONE. cityExitVehicle owns releasing the rig,
@@ -344,7 +430,7 @@
     if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
     ride = null;
 
-    if (!hull) {
+    if (!hull && !npc) {
       /* A ROAD CAR CARRIES ON. `_runaway` is read by exactly one place —
          vehicles.js's wreck branch — and it means "nothing hit this, its driver
          left". wreckT is the branch's own lease; 9 s is long enough for 40 m/s
@@ -384,7 +470,7 @@
     TALLY.bails++; TALLY.lastBailSpeed = +speed.toFixed(2); TALLY.lastBailDamage = dmg;
     if (CBZ.sfx) CBZ.sfx("whoosh");
     if (CBZ.shake) CBZ.shake(Math.min(0.7, 0.15 + speed * 0.012));
-    note(hull ? "Over the side!" : "You throw yourself out — the car keeps going.", 2.0);
+    note(hull ? "Over the side!" : npc ? "You throw yourself out of the moving car." : "You throw yourself out. The car keeps going.", 2.0);
     return true;
   }
 
@@ -415,7 +501,7 @@
   //  seat/camera sync for the frames a companion owns the car.
   //  Order 36.7: after boarding.js's driver loop (36.6) has moved it.
   // ============================================================
-  CBZ.onUpdate(36.7, function (dt) {
+  CBZ.onUpdate(37.6, function (dt) {
     if (!ride) return;
     const P = CBZ.player;
     const car = ride.veh;
@@ -432,6 +518,15 @@
     }
     ride.t += dt;
     TALLY.paxFrames++;
+    /* THE DRIVER IS GONE (shot, jacked, bolted): the car is nobody's now, and
+       the player in it is its only person. It becomes his — a player car
+       with an empty wheel, coasting — and [G] puts him behind it. */
+    if (ride.npc && !(CBZ.carNpcDriven && CBZ.carNpcDriven(car))) {
+      ride.npc = false;
+      car.ai = false; car.player = true; car.pullover = 0;
+      if (CBZ.cityPromotePlayerCar) { try { CBZ.cityPromotePlayerCar(car); } catch (e) {} }
+      note("Nobody's driving!" + (CBZ.touchMode ? "" : " [G] take the wheel"), 2.2);
+    }
 
     const chauffeured = CBZ.cityPaxChauffeured(car);
     const sp = speedOf(car);
@@ -470,7 +565,8 @@
         CBZ.playerChar.group.visible = false;
       }
     }
-    if (CBZ.cityUpdatePlayerCarVisual) { try { CBZ.cityUpdatePlayerCarVisual(car, dt); } catch (e) {} }
+    // an NPC-driven car is still traffic: the AI loop animates its visual
+    if (!ride.npc && CBZ.cityUpdatePlayerCarVisual) { try { CBZ.cityUpdatePlayerCarVisual(car, dt); } catch (e) {} }
     // the same recenter the driven car uses, on the same veto
     if (CBZ.cam && sp > 3 && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, car.heading + Math.PI, 1 - Math.pow(0.02, dt));
@@ -513,7 +609,7 @@
   CBZ.cityPaxAudit = function () {
     const car = ride ? ride.veh : null;
     return {
-      riding: !!ride,
+      riding: !!ride, seat: ride ? ride.seatId : null, npcRide: !!(ride && ride.npc), npcRides: TALLY.npcRides,
       vehicle: car ? (car.model && car.model.name) || (marine(car) ? "hull" : "car") : null,
       marine: car ? marine(car) : false,
       chauffeured: car ? CBZ.cityPaxChauffeured(car) : false,

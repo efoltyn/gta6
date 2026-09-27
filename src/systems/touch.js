@@ -1658,8 +1658,8 @@
     if (carButtonsActive() && stick.id !== null) releaseStick();
     // SHARK SIM: move is the whole game on the glass. The bite is automatic
     // (modes/shark_sim.js pulls the mount's own trigger), RISE/DIVE are
-    // touch_vehicle's mount rail, and the view is a settings choice now
-    // (CBZ.sharkSimViewSet) — so FIRE, JUMP and the eye button are chrome
+    // touch_vehicle's mount rail, and there is one camera (no view choice at
+    // all, owner 2026-09-27) — so FIRE, JUMP and the eye button are chrome
     // with no verb behind them. Owner 2026-08-29: "just rise dive and the
     // move pad". JUMP was even a duplicate: Space IS rise on a mount.
     const sharkSim = CBZ.game.mode === "sharksim";

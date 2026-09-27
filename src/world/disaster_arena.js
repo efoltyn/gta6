@@ -60,8 +60,11 @@
      knowing an island exists. Never build a second water height model.       */
   CBZ.survSeaMeanY = function () { return arena_meanY(); };
   CBZ.survSeaWave = function () { return arenaWave; };
+  // metres the water at (x,z) still sits below the flood because a tsunami
+  // front has not reached it (water_spec.js uDwAhead / waterFrontDropAt)
+  function frontDrop(x, z) { return CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(x, z) : 0; }
   CBZ.survSeaHeightAt = function (x, z) {
-    const mean = arena_meanY();
+    const mean = arena_meanY() - frontDrop(x, z);
     return CBZ.waterDisasterSurfaceY
       ? CBZ.waterDisasterSurfaceY(x, z, mean, arenaWave.amp, arenaWave.chop)
       : mean;
@@ -111,7 +114,7 @@
      and the BED question goes flat. One water, two honest readings of it. */
   CBZ.survFloodDepthMeanAt = function (x, z) {
     if (!arena) return 0;
-    return arena_meanY() - arena.groundHeightAt(x, z);
+    return arena_meanY() - frontDrop(x, z) - arena.groundHeightAt(x, z);
   };
   // "is this point in the water" — the survival twin of CBZ.cityWaterAt. Reads
   // the MEAN column for the same reason: a swell crest lapping over a kerb does
@@ -150,7 +153,7 @@
     for (let i = 0; i < S.n; i++) {
       // ±0.3 m of breathing swash, phased along the shore (θ·43 ≈ 21 m waves)
       const swash = 0.19 * Math.sin(t * 0.9 + S.th[i] * 43.0) + 0.11 * Math.sin(t * 0.53 - S.th[i] * 23.0);
-      const lip = S.h[i] - (sea + swash);          // m above the breathing waterline
+      const lip = S.h[i] - (sea - (S.x ? frontDrop(S.x[i], S.z[i]) : 0) + swash);   // m above the breathing waterline
       const target = lip <= 0 ? 1 : (lip >= 0.5 ? 0 : 1 - (lip / 0.5) * (lip / 0.5) * (3 - 2 * (lip / 0.5)));
       let w = S.wet[i];
       if (target > w) w = target;                  // soaks instantly
@@ -333,24 +336,46 @@
     finMats.set(key, m);
     return m;
   }
-  // Glass. Opaque on purpose: a transparent pane over an opaque wall is a
-  // second sorting problem, and there is nothing behind these panes to see.
+  /* GLASS YOU CAN SEE THROUGH.
+     OWNER: "You can't see out of any of the facades ... you can't really see
+     space and see what the hell is going on." In a disaster game the window
+     is how you watch the wave or the funnel coming, and every window on the
+     island was a painted card: an opaque quad 2 cm proud of a SOLID 30 cm
+     wall, with a fake room (dark, lit, curtained) painted on it. There was
+     nothing behind the glass, from either side.
+
+     Now the glazing pass cuts a real hole through the shell wall (and through
+     any cladding the grammar laid flush over it) for every window it finds,
+     and hangs real glass in the reveal: clear, faintly tinted, and a Fresnel
+     term so it mirrors the sky at a glancing angle the way glass does and
+     goes nearly clear when you look straight through it. From inside you see
+     the island; from outside you see the stairs, the tables and the people.
+     Curtains and blinds are now real cloth INSIDE the room, drawn part way,
+     never over the whole pane. Still merged per building: one glass mesh,
+     one cloth mesh, one lit-blind mesh. */
+  const GLASS_FRAG_OUT = "gl_FragColor = vec4( outgoingLight, diffuseColor.a );";
+  const GLASS_FRAG_NEW =
+    "float cbzFr = 1.0 - abs(dot(normalize(vViewPosition), normal));\n" +
+    "cbzFr = cbzFr * cbzFr * cbzFr;\n" +
+    "gl_FragColor = vec4( outgoingLight, clamp(diffuseColor.a + 0.62 * cbzFr, 0.0, 0.86) );";
   let glassMats = null;
   function islandGlassMats() {
     if (glassMats) return glassMats;
-    const refl = new THREE.MeshStandardMaterial({
-      color: 0xffffff, vertexColors: true, metalness: 0.9, roughness: 0.14,
-      envMap: CBZ.ENV || null, envMapIntensity: 1.1,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    const glass = new THREE.MeshStandardMaterial({
+      color: 0xffffff, vertexColors: true, metalness: 0.15, roughness: 0.05,
+      envMap: CBZ.ENV || null, envMapIntensity: 1.25,
+      transparent: true, opacity: 0.13, depthWrite: false, side: THREE.DoubleSide,
     });
-    const room = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    const lit = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true,
-      emissive: 0xffb866, emissiveIntensity: 0.28,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    refl._shared = room._shared = lit._shared = true;
-    glassMats = { refl: refl, room: room, lit: lit };
-    envWanting.push(refl); hookEnv();
+    glass.onBeforeCompile = function (sh) {
+      sh.fragmentShader = sh.fragmentShader.replace(GLASS_FRAG_OUT, GLASS_FRAG_NEW);
+    };
+    glass.customProgramCacheKey = function () { return "cbz-island-glass-fresnel"; };
+    const room = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
+    const lit = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide,
+      emissive: 0xffb866, emissiveIntensity: 0.34 });
+    glass._shared = room._shared = lit._shared = true;
+    glassMats = { glass: glass, room: room, lit: lit };
+    envWanting.push(glass); hookEnv();
     return glassMats;
   }
   // The environment map can arrive after the island is built (carfx makes it
@@ -391,24 +416,30 @@
     return l < 0.14 && b >= r && b >= g * 0.9;
   }
 
-  /* THE WINDOWS. o: { group, ox, oz, gy, w, d, storeys, fh, doorHalf, list,
-     boxes (the facade's boxes, local [x,y,z,w,h,d]), dbox (deco emitter),
-     frameCol, sillCol, noTopBand }. */
+  /* THE WINDOWS. o: { group, ox, oz, gy, w, d, storeys, fh, wt, doorHalf,
+     list, recs (the facade's deco boxes, local [x,y,z,w,h,d,col], CUT in
+     place), walls (the shell's wall meshes, see cutWall), dbox (deco
+     emitter), frameCol, sillCol, sillStain, tower }. */
   function glazeBuilding(o) {
     const THREE_ = window.THREE;
     const G = islandGlassMats();
     const h01 = function (a, b, s) { return CBZ.hash01 ? CBZ.hash01(o.ox + a, o.oz + b, s) : 0.5; };
-    const kinds = { refl: { p: [], n: [], c: [], i: [] }, room: { p: [], n: [], c: [], i: [] }, lit: { p: [], n: [], c: [], i: [] } };
+    const kinds = { glass: { p: [], n: [], c: [], i: [] }, room: { p: [], n: [], c: [], i: [] }, lit: { p: [], n: [], c: [], i: [] } };
     const panes = [];
-    const GP = 0.02;                      // glass plane, proud of the wall face
+    const holes = [];                     // {s, a0, a1, y0, y1}: a is local x (faces 0/1) or z (2/3)
+    const WT_ = o.wt || 0.3;
+    const GIN = 0.07;                     // glass set back into the reveal
     const FW = 0.055, FP = 0.05;          // frame bar width / projection
+    const frames = [];                    // frame boxes, laid AFTER the cut
 
-    function quad(K, cxx, cyy, czz, tx, tz, nx, nz, u0, u1, v0, v1, cBot, cTop, rec) {
+    function quad(K, off, f, u0, u1, v0, v1, cBot, cTop, rec) {
       const k = kinds[K], base = k.p.length / 3;
+      const nx = f.horiz ? 0 : f.out, nz = f.horiz ? f.out : 0;
+      const cxx = f.horiz ? 0 : f.out * off, czz = f.horiz ? f.out * off : 0;
       const pts = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
       for (let q = 0; q < 4; q++) {
         const u = pts[q][0], v = pts[q][1];
-        k.p.push(cxx + tx * u, cyy + v, czz + tz * u);
+        k.p.push(cxx + f.tx * u, v, czz + f.tz * u);
         k.n.push(nx, 0, nz);
         const c = v === v0 ? cBot : cTop;
         k.c.push(c[0], c[1], c[2]);
@@ -416,60 +447,53 @@
       k.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
       rec.parts.push({ K: K, v: base });
     }
-    // vertex colours in the same space as every material colour in the game
-    // (a hex is used as-is, the renderer encodes to sRGB on output)
     const lin = function (hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; };
     const mul = function (c, f) { return [c[0] * f, c[1] * f, c[2] * f]; };
-    // the four faces: normal axis, outward sign, tangent, span, halfN
     const faces = [
       { s: 0, horiz: true, out: -1, tx: -1, tz: 0, span: o.w, halfN: o.d / 2 },
       { s: 1, horiz: true, out: 1, tx: 1, tz: 0, span: o.w, halfN: o.d / 2 },
       { s: 2, horiz: false, out: -1, tx: 0, tz: 1, span: o.d, halfN: o.w / 2 },
       { s: 3, horiz: false, out: 1, tx: 0, tz: -1, span: o.d, halfN: o.w / 2 },
     ];
-    // a pane of glass with ONE interior, u across [u0,u1], v up [v0,v1]
-    function glass(f, cxx, czz, u0, u1, v0, v1, salt, rec, shop) {
-      const nx = f.horiz ? 0 : f.out, nz = f.horiz ? f.out : 0;
+    // one window: the glass in the reveal, and at most one piece of cloth
+    // hung inside the room (never over the whole pane: a window is for
+    // looking through)
+    function glass(f, u0, u1, v0, v1, salt, rec, shop) {
       let r = h01(u0 * 3.1 + f.s, v0 * 1.7, salt);
-      // a shopfront is plate glass or a lit display, never curtains
-      if (shop) r = r < 0.5 ? r * 0.9 : (r < 0.72 ? 0.7 : 0.95);
-      const hw = (u1 - u0);
-      if (r < 0.46) {
-        // sky in the glass; the head of the reveal shades the top of it
-        const tint = [[0.5, 0.58, 0.64], [0.44, 0.52, 0.48], [0.6, 0.6, 0.62]][(h01(f.s, v0, salt + 7) * 3) | 0];
-        quad("refl", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1 - 0.12, mul(tint, 0.8), tint, rec);
-        quad("refl", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v1 - 0.12, v1, mul(tint, 0.35), mul(tint, 0.3), rec);
-      } else if (r < 0.64) {
-        // curtains drawn to the sides, a dark room in the gap
+      if (shop) r = r < 0.8 ? 0.1 : 0.95;
+      const tint = [[0.8, 0.88, 0.92], [0.74, 0.84, 0.82], [0.86, 0.88, 0.9]][(h01(f.s, v0, salt + 7) * 3) | 0];
+      quad("glass", f.halfN - GIN, f, u0, u1, v0, v1, mul(tint, 0.9), tint, rec);
+      const inner = f.halfN - WT_ - 0.035;       // the room side of the wall
+      const hw = u1 - u0;
+      if (r < 0.55) return;                       // clear glass
+      if (r < 0.72) {
+        // curtains gathered at the sides
         const cloth = lin([0xd8cbb0, 0xb9a88a, 0x8c3b34, 0x5b6a7c, 0xe6e0d2][(h01(f.s, v1, salt + 3) * 5) | 0]);
-        const gap = Math.min(hw * 0.5, 0.25 + h01(u1, v0, salt + 5) * hw * 0.4);
-        const um = (u0 + u1) / 2;
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, um - gap / 2, v0, v1, mul(cloth, 0.55), mul(cloth, 0.4), rec);
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, um + gap / 2, u1, v0, v1, mul(cloth, 0.55), mul(cloth, 0.4), rec);
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, um - gap / 2, um + gap / 2, v0, v1, [0.12, 0.12, 0.13], [0.08, 0.08, 0.09], rec);
-      } else if (r < 0.78) {
-        // blinds part way down over a dim room
-        const vb = v1 - (v1 - v0) * (0.25 + h01(u0, v1, salt + 9) * 0.5);
+        const side = Math.min(hw * 0.24, 0.12 + h01(u1, v0, salt + 5) * hw * 0.14);
+        quad("room", inner, f, u0 - 0.06, u0 + side, v0 - 0.05, v1 + 0.08, mul(cloth, 0.6), mul(cloth, 0.5), rec);
+        quad("room", inner, f, u1 - side, u1 + 0.06, v0 - 0.05, v1 + 0.08, mul(cloth, 0.6), mul(cloth, 0.5), rec);
+      } else if (r < 0.88) {
+        // a blind part way down
+        const vb = v1 - (v1 - v0) * (0.18 + h01(u0, v1, salt + 9) * 0.27);
         const bl = lin([0xe9e4d6, 0xcfc6b0, 0xa9a39a][(h01(u1, v1, salt + 11) * 3) | 0]);
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, vb, v1, mul(bl, 0.5), mul(bl, 0.42), rec);
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, vb, [0.11, 0.11, 0.12], [0.17, 0.16, 0.15], rec);
-      } else if (r < 0.9) {
-        // a dark room: the back wall barely there, a little light at the top
-        quad("room", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1, [0.1, 0.105, 0.115], [0.2, 0.195, 0.19], rec);
+        quad("room", inner, f, u0, u1, vb, v1 + 0.04, mul(bl, 0.62), mul(bl, 0.55), rec);
       } else {
-        // somebody left the light on
-        quad("lit", cxx, 0, czz, f.tx, f.tz, nx, nz, u0, u1, v0, v1, [0.62, 0.5, 0.34], [0.78, 0.68, 0.5], rec);
+        // somebody left the light on: a lit blind glowing over the top third
+        const vb = v1 - (v1 - v0) * (0.28 + h01(u0, v1, salt + 13) * 0.12);
+        quad("lit", inner, f, u0, u1, vb, v1 + 0.04, [0.66, 0.54, 0.36], [0.8, 0.7, 0.52], rec);
       }
     }
 
-    // does the facade cover local point (t, y) on face f?
+    // does the facade cover local point (t, y) on face f? (only boxes that
+    // stand proud of the wall face count: a box flush with the wall is paint,
+    // and the window cut goes through it)
     function coveredFn(f) {
       const list = [];
-      for (const b of o.boxes) {
+      for (const b of o.recs) {
         const nC = f.horiz ? b[2] : b[0], nH = (f.horiz ? b[5] : b[3]) / 2;
         const outer = f.out > 0 ? (nC + nH) - f.halfN : -f.halfN - (nC - nH);
         const inner = f.out > 0 ? (nC - nH) - f.halfN : -f.halfN - (nC + nH);
-        if (outer < GP + 0.006 || inner > 0.12) continue;     // behind the glass, or standing well off the wall
+        if (outer < 0.026 || inner > 0.12) continue;
         const tC = (f.horiz ? b[0] : b[2]) * (f.horiz ? f.tx : f.tz), tH = (f.horiz ? b[3] : b[5]) / 2;
         list.push([tC - tH, tC + tH, b[1] - b[4] / 2, b[1] + b[4] / 2]);
       }
@@ -485,15 +509,11 @@
     const STEP = 0.06, VSTEP = 0.05;
     for (const f of faces) {
       const cov = coveredFn(f);
-      const cxx = f.horiz ? 0 : f.out * (f.halfN + GP), czz = f.horiz ? f.out * (f.halfN + GP) : 0;
       const half = f.span / 2 - 0.35;
       for (let k = 0; k < o.storeys; k++) {
-        // the street face's ground floor is a SHOPFRONT on a low-rise
-        // building: plate glass from a low stall riser, dark metal frames
         const shop = !o.tower && f.s === 0 && k === 0;
         const b0 = k * o.fh + (shop ? 0.4 : 0.55), b1 = (k + 1) * o.fh - 0.45;
         const yMid = b0 + (b1 - b0) * 0.55;
-        // runs of open wall along the band
         const runs = [];
         let start = null;
         for (let t = -half; t <= half + 1e-6; t += STEP) {
@@ -508,52 +528,88 @@
         }
         for (const run of runs) {
           const tm = (run[0] + run[1]) / 2;
-          // vertical extent of the opening at its centre, inside the band
           let v0 = yMid, v1 = yMid;
           while (v0 - VSTEP >= b0 && !cov(tm, v0 - VSTEP)) v0 -= VSTEP;
           while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
           if (v1 - v0 < 0.35) continue;
           const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
-          const bare = !cov(tm, v0 - 0.12);           // plain wall under it: give it a sill
-          // modules: a wide opening is several windows in one frame
+          const bare = !cov(tm, v0 - 0.12);
           const nMod = Math.max(1, Math.round((u1 - u0) / 1.45));
           const mw = (u1 - u0) / nMod;
           const tall = (v1 - v0) > 1.75;
           const vT = tall ? v1 - Math.min(0.55, (v1 - v0) * 0.26) : v1;
+          const nOut = f.out * (f.halfN - GIN);
           const rec = { parts: [], shattered: false, mesh: null,
-            x: o.ox + (f.horiz ? tm * f.tx : cxx), y: o.gy + (v0 + v1) / 2,
-            z: o.oz + (f.horiz ? czz : tm * f.tz), span: (u1 - u0) / 2 };
+            x: o.ox + (f.horiz ? tm * f.tx : nOut), y: o.gy + (v0 + v1) / 2,
+            z: o.oz + (f.horiz ? nOut : tm * f.tz), span: (u1 - u0) / 2,
+            hh: (v1 - v0) / 2, horiz: !!f.horiz, mat: null };
           for (let m = 0; m < nMod; m++) {
             const a = u0 + m * mw, bb = a + mw;
-            glass(f, cxx, czz, a, bb, v0, vT, 0x51 + m + k * 7, rec, shop);
-            if (tall) glass(f, cxx, czz, a, bb, vT, v1, 0x91 + m + k * 7, rec, shop);
+            glass(f, a, bb, v0, vT, 0x51 + m + k * 7, rec, shop);
+            if (tall) glass(f, a, bb, vT, v1, 0x91 + m + k * 7, rec, shop);
           }
           panes.push(rec);
           if (o.list) o.list.push(rec);
-          // ---- the frame, laid through the deco merge -------------------
+          // the hole, in the wall's own axis (local x on faces 0/1, z on 2/3)
+          const ta = u0 * (f.horiz ? f.tx : f.tz), tb = u1 * (f.horiz ? f.tx : f.tz);
+          holes.push({ s: f.s, a0: Math.min(ta, tb), a1: Math.max(ta, tb), y0: v0, y1: v1 });
+          // ---- the frame, laid through the deco merge after the cut ------
           const fb = function (t, y, len, hh, proj, col) {
             const n = f.halfN + proj / 2;
-            if (f.horiz) o.dbox(t * f.tx, y, f.out * n, len, hh, proj, col);
-            else o.dbox(f.out * n, y, t * f.tz, proj, hh, len, col);
+            if (f.horiz) frames.push([t * f.tx, y, f.out * n, len, hh, proj, col]);
+            else frames.push([f.out * n, y, t * f.tz, proj, hh, len, col]);
           };
           const fc = shop ? 0x2a2a2c : o.frameCol;
-          fb(tm, v1 - FW / 2, u1 - u0, FW, FP, fc);                      // head
-          fb(tm, v0 + FW / 2, u1 - u0, FW, FP, fc);                      // bottom rail
-          fb(u0 + FW / 2, (v0 + v1) / 2, FW, v1 - v0, FP, fc);           // jambs
+          fb(tm, v1 - FW / 2, u1 - u0, FW, FP, fc);
+          fb(tm, v0 + FW / 2, u1 - u0, FW, FP, fc);
+          fb(u0 + FW / 2, (v0 + v1) / 2, FW, v1 - v0, FP, fc);
           fb(u1 - FW / 2, (v0 + v1) / 2, FW, v1 - v0, FP, fc);
           for (let m = 1; m < nMod; m++) fb(u0 + m * mw, (v0 + v1) / 2, FW * 1.2, v1 - v0, FP, fc);
           if (tall) fb(tm, vT, u1 - u0, FW, FP, fc);
           if (shop && bare) {
-            fb(tm, v0 / 2, (u1 - u0) + 0.1, v0, 0.07, 0x3b3a38);            // stall riser
+            fb(tm, v0 / 2, (u1 - u0) + 0.1, v0, 0.07, 0x3b3a38);
           } else if (bare) {
             fb(tm, v0 - 0.045, (u1 - u0) + 0.16, 0.09, 0.13, o.sillCol);
-            fb(tm, v0 - 0.12, (u1 - u0) + 0.04, 0.06, 0.035, o.sillStain);   // the drip stain under a sill
+            fb(tm, v0 - 0.12, (u1 - u0) + 0.04, 0.06, 0.035, o.sillStain);
           }
         }
       }
     }
 
-    // ---- merge each interior kind into one mesh ------------------------
+    // ---- THE CUT: every opening goes through the cladding and the wall ----
+    const SUB = CBZ.FACADE_F && CBZ.FACADE_F.subtractBox;
+    if (holes.length && SUB) {
+      // (1) deco boxes lying in the wall's plane zone (flush paint, a panel
+      //     laid on the wall) lose the part inside the opening
+      const vol = holes.map(function (h) {
+        const f = faces[h.s], n0 = f.halfN - WT_ - 0.05, n1 = f.halfN + 0.03;
+        const lo = f.out > 0 ? n0 : -n1, hi = f.out > 0 ? n1 : -n0;
+        return f.horiz
+          ? { x0: h.a0, x1: h.a1, z0: lo, z1: hi, y0: h.y0, y1: h.y1 }
+          : { x0: lo, x1: hi, z0: h.a0, z1: h.a1, y0: h.y0, y1: h.y1 };
+      });
+      const kept = [];
+      const queue = o.recs.slice();
+      for (let qi = 0; qi < queue.length; qi++) {
+        const b = queue[qi];
+        const bx0 = b[0] - b[3] / 2, bx1 = b[0] + b[3] / 2, by0 = b[1] - b[4] / 2, by1 = b[1] + b[4] / 2, bz0 = b[2] - b[5] / 2, bz1 = b[2] + b[5] / 2;
+        let hit = null;
+        for (let j = 0; j < vol.length; j++) {
+          const c = vol[j];
+          if (bx1 > c.x0 + 1e-4 && bx0 < c.x1 - 1e-4 && bz1 > c.z0 + 1e-4 && bz0 < c.z1 - 1e-4 && by1 > c.y0 + 1e-4 && by0 < c.y1 - 1e-4) { hit = c; break; }
+        }
+        if (!hit) { kept.push(b); continue; }
+        const parts = SUB([bx0, bx1, by0, by1, bz0, bz1], hit);
+        for (const p of parts) queue.push([(p[0] + p[1]) / 2, (p[2] + p[3]) / 2, (p[4] + p[5]) / 2, p[1] - p[0], p[3] - p[2], p[5] - p[4], b[6]]);
+      }
+      o.recs.length = 0;
+      for (const b of kept) o.recs.push(b);
+      // (2) the shell walls themselves
+      if (o.walls) for (const wl of o.walls) cutWall(wl, holes.filter(function (h) { return h.s === wl.face; }));
+    }
+    for (const fr of frames) o.dbox(fr[0], fr[1], fr[2], fr[3], fr[4], fr[5], fr[6]);
+
+    // ---- merge each kind into one mesh ----------------------------------
     const meshes = {};
     for (const K in kinds) {
       const k = kinds[K];
@@ -565,14 +621,15 @@
       g2.setIndex(k.i);
       g2.computeBoundingSphere();
       const m = new THREE_.Mesh(g2, G[K]);
-      m.castShadow = false; m.receiveShadow = K !== "lit";
+      m.castShadow = false; m.receiveShadow = K === "room";
+      if (K === "glass") m.renderOrder = 2;
       m.name = "island-glass-" + K;
       o.group.add(m);
       meshes[K] = { mesh: m, orig: Float32Array.from(k.p) };
     }
-    // a pane is shattered by collapsing its quads to a point, restored from
-    // the copy of the original positions
     for (const rec of panes) {
+      // the pane's own glass material: what its shards are made of
+      rec.mat = meshes.glass ? meshes.glass.mesh.material : null;
       rec.hide = function () {
         for (const pt of rec.parts) {
           const mm = meshes[pt.K]; if (!mm) continue;
@@ -593,28 +650,100 @@
     return panes;
   }
 
+  /* CUT A WALL. wl: { mesh, face (0:-z 1:+z 2:-x 3:+x), lx, ly, lz, bw, bh,
+     bd } — a shell wall box in its building's local frame. Its geometry is
+     rebuilt as the wall MINUS the openings (a grid over the hole edges, solid
+     cells merged into runs, then runs merged down the rows), so the reveals
+     are real faces and the sun comes in through them. The collider is left
+     whole on purpose: glass is not a doorway. geometry.parameters is kept as
+     the original box's, because the tsunami picks walls to tear off by it. */
+  function cutWall(wl, hs) {
+    if (!hs.length || !wl.mesh) return;
+    const horiz = wl.face < 2;
+    const a0 = horiz ? wl.lx - wl.bw / 2 : wl.lz - wl.bd / 2, a1 = horiz ? wl.lx + wl.bw / 2 : wl.lz + wl.bd / 2;
+    const y0 = wl.ly - wl.bh / 2, y1 = wl.ly + wl.bh / 2;
+    const mine = hs.filter(function (h) { return h.a1 > a0 + 0.01 && h.a0 < a1 - 0.01 && h.y1 > y0 + 0.01 && h.y0 < y1 - 0.01; });
+    if (!mine.length) return;
+    const clampA = function (v) { return Math.max(a0, Math.min(a1, v)); };
+    const clampY = function (v) { return Math.max(y0, Math.min(y1, v)); };
+    const xs = [a0, a1], ys = [y0, y1];
+    for (const h of mine) { xs.push(clampA(h.a0), clampA(h.a1)); ys.push(clampY(h.y0), clampY(h.y1)); }
+    const uniq = function (arr) {
+      arr.sort(function (p, q) { return p - q; });
+      const o2 = [];
+      for (const v of arr) if (!o2.length || v - o2[o2.length - 1] > 0.004) o2.push(v);
+      return o2;
+    };
+    const X = uniq(xs), Y = uniq(ys);
+    const solidCell = function (i, j) {
+      const cx = (X[i] + X[i + 1]) / 2, cy = (Y[j] + Y[j + 1]) / 2;
+      for (const h of mine) if (cx > h.a0 && cx < h.a1 && cy > h.y0 && cy < h.y1) return false;
+      return true;
+    };
+    // runs per row, then stack identical runs in consecutive rows
+    let open = new Map();          // "i0|i1" -> {i0, i1, j0}
+    const rects = [];
+    for (let j = 0; j < Y.length - 1; j++) {
+      const rowRuns = [];
+      for (let i = 0; i < X.length - 1; ) {
+        if (!solidCell(i, j)) { i++; continue; }
+        let e = i;
+        while (e + 1 < X.length - 1 && solidCell(e + 1, j)) e++;
+        rowRuns.push(i + "|" + e);
+        i = e + 1;
+      }
+      const next = new Map();
+      for (const key of rowRuns) {
+        if (open.has(key)) { next.set(key, open.get(key)); open.delete(key); }
+        else { const pr = key.split("|"); next.set(key, { i0: +pr[0], i1: +pr[1], j0: j }); }
+      }
+      open.forEach(function (r) { rects.push([r.i0, r.i1, r.j0, j - 1]); });
+      open = next;
+    }
+    open.forEach(function (r) { rects.push([r.i0, r.i1, r.j0, Y.length - 2]); });
+    const geos = [];
+    const th = horiz ? wl.bd : wl.bw;
+    for (const r of rects) {
+      const ra0 = X[r[0]], ra1 = X[r[1] + 1], ry0 = Y[r[2]], ry1 = Y[r[3] + 1];
+      const g2 = horiz ? new THREE.BoxGeometry(ra1 - ra0, ry1 - ry0, th) : new THREE.BoxGeometry(th, ry1 - ry0, ra1 - ra0);
+      const ca = (ra0 + ra1) / 2 - (horiz ? wl.lx : wl.lz), cy = (ry0 + ry1) / 2 - wl.ly;
+      if (horiz) g2.translate(ca, cy, 0); else g2.translate(0, cy, ca);
+      geos.push(g2);
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    if (!geos.length || !BGU || !BGU.mergeBufferGeometries) return;
+    const merged = BGU.mergeBufferGeometries(geos, false);
+    for (const g2 of geos) g2.dispose();
+    if (!merged) return;
+    merged.parameters = { width: wl.bw, height: wl.bh, depth: wl.bd };
+    wl.mesh.geometry.dispose();
+    wl.mesh.geometry = merged;
+  }
+
   // o: { group, ox, oz, gy, w, d, storeys, fh, wt, rTop, pp, doorSide, color,
   //      style, plats, shell (buckets from the shell builder), glass list,
-  //      doorHalf }
+  //      doorHalf, walls (shell wall meshes the glazing cuts windows through),
+  //      liftShaft (a tower's shaft rect: see THE LIFT TOP) }
+  // Returns { def, lift }: lift is CBZ.facadeLiftTop's answer, or null.
   function dressIslandFacade(o) {
     const THREE = window.THREE;
     const mat = CBZ.mat;
-    const deco = new Map();          // colour -> [BufferGeometry], in first-painted order
-    const boxes = [];                // every deco box, local [x,y,z,w,h,d], for the glazing pass
+    // every deco box as a RECORD, local [x,y,z,w,h,d,col], so the glazing pass
+    // can cut window openings through the cladding before anything is built;
+    // colours keep the order they were first painted in (that order is the
+    // polygonOffset rank, see THE FINISH)
+    const recs = [];
+    const colOrder = [];
+    const seenCol = new Set();
     const group = o.group, ox = o.ox, oz = o.oz, gy = o.gy;
     const dressed = !!(CBZ.dressFacade && o.style && !(CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false));
 
     function dbox(lx, ly, lz, bw, bh, bd, col) {
       if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
       if (!Number.isFinite(lx + ly + lz + bw + bh + bd)) return;
-      const g2 = new THREE.BoxGeometry(bw, bh, bd);
-      g2.deleteAttribute("uv");      // the finish shader works in world space; no map ever reads these
-      g2.translate(lx, ly, lz);
       const key = col >>> 0;
-      let list = deco.get(key);
-      if (!list) { list = []; deco.set(key, list); }
-      list.push(g2);
-      boxes.push([lx, ly, lz, bw, bh, bd]);
+      if (!seenCol.has(key)) { seenCol.add(key); colOrder.push(key); }
+      recs.push([lx, ly, lz, bw, bh, bd, key]);
     }
     // the shell's own merge-able pieces (treads, slabs, landings) join the
     // deco merge at rank 0, so they cost one draw call per colour
@@ -669,7 +798,19 @@
       plaque: function () {}, seal: function () {},
     };
 
+    /* THE LIFT TOP. A tower's lift shaft is handed to the kit BEFORE the
+       grammar runs: the kit dry-runs the grammar, finds the top of the crown's
+       mass over the shaft, and says which volume the real build must leave
+       hollow so the car can get there (city/facade_kit.js, KEEP-CLEAR COLUMNS). */
+    let lift = null;
+    if (dressed && o.liftShaft && CBZ.facadeLiftTop) {
+      try {
+        lift = CBZ.facadeLiftTop(ctx, o.liftShaft, { ring: 1.2 });
+        ctx.keepClear = lift.keepClear;
+      } catch (e) { lift = null; }
+    }
     const def = dressed ? CBZ.dressFacade(ctx) : null;
+    if (!def) lift = null;
 
     // ---- the windows, read off what the grammar left open ------------------
     const fh = (CBZ.hash01 ? CBZ.hash01(ox, oz, 0xf4a3) : 0.3);
@@ -677,8 +818,8 @@
       : [0xe6e1d6, 0x34312d, 0x6b6f73, 0xe6e1d6, 0x2c3a33][(fh * 5) | 0];
     glazeBuilding({
       group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,
-      fh: o.fh, doorHalf: o.doorHalf || 1.3, list: o.glassList, boxes: boxes.slice(), tower: !!o.tower,
-      dbox: dbox, frameCol: frameCol,
+      fh: o.fh, wt: o.wt, doorHalf: o.doorHalf || 1.3, list: o.glassList, recs: recs, walls: o.walls,
+      tower: !!o.tower, dbox: dbox, frameCol: frameCol,
       sillCol: shadeHex(0xd6cfbf, 0.94 + fh * 0.1),
       sillStain: shadeHex(o.color, 0.72),
     });
@@ -700,12 +841,22 @@
       }
       return last;
     }
+    const byColour = new Map();
+    for (const r of recs) {
+      const g2 = new THREE.BoxGeometry(r[3], r[4], r[5]);
+      g2.deleteAttribute("uv");      // the finish shader works in world space; no map ever reads these
+      g2.translate(r[0], r[1], r[2]);
+      let list = byColour.get(r[6]);
+      if (!list) { list = []; byColour.set(r[6], list); }
+      list.push(g2);
+    }
+    recs.length = 0;
     let rank = 0;
-    deco.forEach(function (geos, col) {
+    for (const col of colOrder) {
       rank++;
-      flush(geos, isGlassHex(col) ? glassBoxMat(col, rank) : finishMat(col, rank, gy), false);
-    });
-    deco.clear();
+      const geos = byColour.get(col);
+      if (geos) flush(geos, isGlassHex(col) ? glassBoxMat(col, rank) : finishMat(col, rank, gy), false);
+    }
     if (o.shellMerge && o.shellMerge.length) {
       const byCol = new Map();
       for (const it of o.shellMerge) {
@@ -719,7 +870,7 @@
         if (m && b.los) CBZ.losBlockers.push(m);
       });
     }
-    return def;
+    return { def: def, lift: lift };
   }
 
   /* THE BUILD IS ONE SYNCHRONOUS BLOCK, SO IT REPORTS ON ITSELF.
@@ -837,25 +988,17 @@
       return out;
     }
     const GRASS_TILE = 3.2;
-    const grassMat = skinMat("grass");
+    /* THE TILE WAS A CHECKERBOARD (one 3.2 m repeat of a clumpy map is a grid
+       you can count from a boat). The fix that lived here, a second rotated
+       read of the same map, is now the shared ground material
+       (world/textures_surface.js CBZ.groundSkin), which the Gang Life
+       backcountry wears too: grass / soil / sand / stone detail by what the
+       vertex colour is, anti-tiled, normalised to mean 1. The island keeps
+       its full map chroma and a half-strength patch mottle over its own. */
+    const grassMat = CBZ.groundSkin
+      ? CBZ.groundSkin({ name: "survival-grass", tile: { grass: GRASS_TILE }, chroma: 1, mottle: 0.5, far: 300, sandY: [-0.4, -0.05] })
+      : skinMat("grass");
     grassMat.name = "survival-grass";
-    /* THE TILE WAS A CHECKERBOARD. One 3.2 m repeat of a map with clumps in
-       it is a grid you can count from the beach and a chessboard from a boat
-       (the mipmaps average each tile to its own blotch). A second read of the
-       same map, rotated 37 degrees at 3.2x the size, averaged in, breaks the
-       period without a second texture or a second draw. */
-    if (grassMat.map) {
-      grassMat.onBeforeCompile = function (sh) {
-        sh.fragmentShader = sh.fragmentShader.replace("#include <map_fragment>",
-          "#ifdef USE_MAP\n" +
-          "  vec2 uvB = mat2(0.8, -0.6, 0.6, 0.8) * vUv * 0.3125 + vec2(0.37, 0.11);\n" +
-          "  vec4 texelColor = mix(texture2D(map, vUv), texture2D(map, uvB), 0.5);\n" +
-          "  texelColor = mapTexelToLinear(texelColor);\n" +
-          "  diffuseColor *= texelColor;\n" +
-          "#endif");
-      };
-      grassMat.customProgramCacheKey = function () { return "survival-grass-2tap"; };
-    }
 
     // ---- hills / mountain (the high-ground height field) ----
     const hills = [
@@ -1705,6 +1848,7 @@
       const base = new Float32Array(vn * 3);   // authored colour, never mutated
       const vh = new Float32Array(vn);         // vertex height (the profile)
       const vth = new Float32Array(vn);        // vertex theta (alongshore phase)
+      const vwx = new Float32Array(vn), vwz = new Float32Array(vn);
       // DRY is the sand's real linear albedo (the normalised sand map adds
       // ripples and grain on top); BED stays the seabed mesh's own tone so
       // the shared outer rim is seamless in colour.
@@ -1716,6 +1860,7 @@
         const h = dist <= R ? -0.03 : coastHeightAt(dist);
         sa[i * 3 + 2] = h;
         vh[i] = h; vth[i] = Math.atan2(ly, lx);
+        vwx[i] = cx + lx; vwz[i] = cz - ly;     // world XZ (ring authored in XY, rotated -PI/2 about X)
         // dry sand, mottled: per-vertex grain (position hash — no rng draw,
         // the island build stream stays byte-identical) over a broad warm/cool
         // drift, blending into the seabed's own tone at the outer rim so the
@@ -1735,7 +1880,9 @@
       shoreGeo.computeVertexNormals();
       shoreGeo.computeBoundingSphere();
       worldUV(shoreGeo, 2.6, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
-      const shoreMat = skinMat("sand");
+      const shoreMat = CBZ.groundSkin
+        ? CBZ.groundSkin({ name: "survival-beach-shore", tile: { sand: 2.6 }, chroma: 1, mottle: 0.5, far: 300, sandY: [1.2, 2.4] })
+        : skinMat("sand");
       shoreMat.name = "survival-beach-shore";     // no water/ocean/sea in the name (test contract)
       const shore = new THREE.Mesh(shoreGeo, shoreMat);
       shore.rotation.x = -Math.PI / 2; shore.position.set(cx, 0, cz);
@@ -1743,7 +1890,7 @@
       shore.userData.coat = true;                 // it is the ground; blizzards coat it
       shore.userData.dynamic = true;              // never batch-merge a mesh we repaint
       root.add(shore);
-      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, wet: new Float32Array(vn), n: vn };
+      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, x: vwx, z: vwz, wet: new Float32Array(vn), n: vn };
       // start honest: everything the sea covers right now is wet
       for (let i = 0; i < vn; i++) {
         const w = vh[i] < OCEAN_Y + 0.12 ? 1 : 0;
@@ -2123,19 +2270,31 @@
       allGlass.push(rec); if (list) list.push(rec);
       return m;
     }
-    function burstPane(gp) {
+    /* A pane bursts into ITS OWN GLASS: the pane solid (the real mesh, or
+       for the merged facade glass a pane-thin slab of the facade's glass
+       material exactly where the window was) is fractured by CBZ.debris into
+       radial shards that fall and settle as glass on the pavement. `full`
+       false (the far panes of a mass blow-out) throws glass grit only, so a
+       collapsing tower does not fracture sixty windows in one frame. */
+    function burstPane(gp, full) {
       if (gp.shattered) return;
       gp.shattered = true;
-      if (gp.hide) gp.hide(); else gp.mesh.visible = false;
-      if (!CBZ.fx || !CBZ.fx.dropDebris) return;
-      const shards = 4 + ((rng() * 4) | 0);
-      for (let i = 0; i < shards; i++) {
-        CBZ.fx.dropDebris({
-          x: gp.x + (rng() - 0.5) * gp.span * 2, z: gp.z + (rng() - 0.5) * 0.5,
-          fromY: gp.y + (rng() - 0.5) * 1.2, vy: 1 + rng() * 2.6,
-          size: 0.15 + rng() * 0.18, color: 0xcdeefb, linger: 1.1,
-        });
+      const D = CBZ.debris;
+      const at = { x: gp.x, y: gp.y, z: gp.z };
+      if (gp.mesh && !gp.hide) {
+        if (D && full !== false) D.shatter(gp.mesh, { kind: "glass", at, power: 1, maxPieces: 8, owner: "fx" });
+        else if (D) D.chips(at.x, at.y, at.z, { kind: "glass", count: 6, power: 0.8, spread: gp.span || 0.5 });
+        gp.mesh.visible = false;
+        return;
       }
+      if (gp.hide) gp.hide(); else if (gp.mesh) gp.mesh.visible = false;
+      if (!D) return;
+      if (full === false || !gp.mat) { D.chips(at.x, at.y, at.z, { kind: "glass", count: 6, power: 0.8, spread: gp.span || 0.5 }); return; }
+      const hs = gp.span || 0.6, hh = gp.hh || 0.7, th = 0.012;
+      const box = gp.horiz
+        ? { minX: gp.x - hs, maxX: gp.x + hs, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - th, maxZ: gp.z + th }
+        : { minX: gp.x - th, maxX: gp.x + th, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - hs, maxZ: gp.z + hs };
+      D.shatterBox(box, gp.mat, { kind: "glass", at, power: 1, maxPieces: 8, owner: "fx" });
     }
     // shatter every intact pane within `r` of (x,z) — called by the quake (on
     // collapse) and by every explosion (CBZ.fx.blast). Caps work per call.
@@ -2144,7 +2303,7 @@
       for (let i = 0; i < allGlass.length; i++) {
         const gp = allGlass[i]; if (gp.shattered) continue;
         const dx = gp.x - x, dz = gp.z - z;
-        if (dx * dx + dz * dz <= r2) { burstPane(gp); if (++n > 60) break; }
+        if (dx * dx + dz * dz <= r2) { burstPane(gp, n < 8); if (++n > 60) break; }
       }
       return n;
     };
@@ -2213,21 +2372,27 @@
       lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true, merge: true });
 
       const wallOpt = { solid: true, los: true };
+      // every shell wall is remembered with the face it stands on, so the
+      // glazing pass can cut the real window openings through it
+      const walls = [];
+      function wall(face, lx, ly, lz, bw, bh, bd) {
+        const m = lbox(lx, ly, lz, bw, bh, bd, color, wallOpt);
+        walls.push({ mesh: m, face: face, lx: lx, ly: ly, lz: lz, bw: bw, bh: bh, bd: bd });
+      }
       for (let k = 0; k < storeys; k++) {
         const ly = k * FH + FH / 2;            // wall centre height (local)
-        // back / left / right walls (solid) + their windows
-        lbox(0, ly, d / 2 - WT / 2, w, FH, WT, color, wallOpt);          // +z back
-        lbox(-w / 2 + WT / 2, ly, 0, WT, FH, d, color, wallOpt);         // -x left
-        lbox(w / 2 - WT / 2, ly, 0, WT, FH, d, color, wallOpt);          // +x right
-        // front (-z) wall: ground floor has the doorway, upper floors are solid
+        wall(1, 0, ly, d / 2 - WT / 2, w, FH, WT);             // +z back
+        wall(2, -w / 2 + WT / 2, ly, 0, WT, FH, d);            // -x left
+        wall(3, w / 2 - WT / 2, ly, 0, WT, FH, d);             // +x right
+        // front (-z) wall: ground floor has the doorway
         if (k === 0) {
           const side = (w - DOORW) / 2;
-          lbox(-(DOORW / 2 + side / 2), ly, -d / 2 + WT / 2, side, FH, WT, color, wallOpt);
-          lbox(DOORW / 2 + side / 2, ly, -d / 2 + WT / 2, side, FH, WT, color, wallOpt);
+          wall(0, -(DOORW / 2 + side / 2), ly, -d / 2 + WT / 2, side, FH, WT);
+          wall(0, DOORW / 2 + side / 2, ly, -d / 2 + WT / 2, side, FH, WT);
           // door lintel above the opening (so the facade reads as a doorway)
           lbox(0, FH - 0.35, -d / 2 + WT / 2, DOORW, 0.7, WT, color, { los: true, merge: true });
         } else {
-          lbox(0, ly, -d / 2 + WT / 2, w, FH, WT, color, wallOpt);
+          wall(0, 0, ly, -d / 2 + WT / 2, w, FH, WT);
         }
       }
 
@@ -2295,7 +2460,7 @@
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
         color: color, style: style, plats: plats,
-        shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35,
+        shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35, walls: walls,
       });
       for (const gp of glassList) allGlass.push(gp);
 
@@ -2309,6 +2474,21 @@
         floorTop: gy + 0.08,               // the walkable ground-floor surface, published
                                            // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
+        // THE GROUND-FLOOR PLAN, building-local, for anyone who furnishes it
+        // (systems/quake.js's shelter tables): the room inside the walls and
+        // the strips that must stay walkable. The stair strip runs the whole
+        // depth of the -x side; the door is on -z, and the walk from the door
+        // to the foot of the stairs (zA, the -z end of lane one) runs along
+        // the front wall, so that whole front band stays clear too.
+        interior: {
+          kind: "house",
+          x0: ixMin, x1: ixMax, z0: izMin, z1: izMax,
+          keepOut: [
+            { x0: ixMin, x1: ixMin + SW + 0.35, z0: izMin, z1: izMax, why: "stairs" },
+            { x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4, why: "door" },
+            { x0: ixMin, x1: ixMax, z0: izMin, z1: izMin + 1.3, why: "front walk" },
+          ],
+        },
       };
       fragile.push(b);
       return b;
@@ -2360,15 +2540,22 @@
       }
 
       // ---- exterior walls (full-height, height-gated colliders + LOS) ----
-      tbox(0, realH / 2, d / 2 - TW / 2, w, realH, TW, color, { solid: true, los: true });   // back (+z)
-      tbox(-w / 2 + TW / 2, realH / 2, 0, TW, realH, d, color, { solid: true, los: true });    // left
-      tbox(w / 2 - TW / 2, realH / 2, 0, TW, realH, d, color, { solid: true, los: true });     // right
+      // Each is remembered with its face so the glazing pass cuts the real
+      // window openings through it (see GLASS YOU CAN SEE THROUGH).
+      const walls = [];
+      const wallT = function (face, lx, ly, lz, bw, bh, bd) {
+        const m = tbox(lx, ly, lz, bw, bh, bd, color, { solid: true, los: true });
+        walls.push({ mesh: m, face: face, lx: lx, ly: ly, lz: lz, bw: bw, bh: bh, bd: bd });
+      };
+      wallT(1, 0, realH / 2, d / 2 - TW / 2, w, realH, TW);      // back (+z)
+      wallT(2, -w / 2 + TW / 2, realH / 2, 0, TW, realH, d);     // left
+      wallT(3, w / 2 - TW / 2, realH / 2, 0, TW, realH, d);      // right
       // front (-z) wall: two pillars + a lintel, leaving a ground-floor doorway
       const fz = -d / 2 + TW / 2;
       const pw = (w - DW) / 2;                          // pillar width either side of the door
-      tbox(-(DW + pw) / 2, realH / 2, fz, pw, realH, TW, color, { solid: true, los: true });
-      tbox((DW + pw) / 2, realH / 2, fz, pw, realH, TW, color, { solid: true, los: true });
-      tbox(0, (DOORH + realH) / 2, fz, DW, realH - DOORH, TW, color, { solid: true, los: true });   // lintel above the doorway
+      wallT(0, -(DW + pw) / 2, realH / 2, fz, pw, realH, TW);
+      wallT(0, (DW + pw) / 2, realH / 2, fz, pw, realH, TW);
+      wallT(0, 0, (DOORH + realH) / 2, fz, DW, realH - DOORH, TW);   // lintel above the doorway
 
       // ---- per-floor landings + roof: a slab frame around the central shaft ----
       function landing(ly) {
@@ -2381,44 +2568,141 @@
       for (let k = 1; k < storeys; k++) landing(k * FH);
       landing(realH);                                   // roof (with the same shaft opening)
 
-      // The glazing is the facade pass's (dressIslandFacade → glazeBuilding):
-      // it reads what the tower grammar left open and glazes exactly that.
-      // rooftop plant box (offset off the shaft so it doesn't block the lift)
-      const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, id * 0.5), finishMat(0x8b9097, 0, gy));
-      capm.position.set(0, realH + 0.6, id * 0.55); capm.castShadow = true; g.add(capm);
-
-      // THE FACADE — the tower grammars (bundled tube, braced tube, setback
-      // ziggurat, radiator crown …) declare minStoreys in the range these
+      // THE FACADE: the tower grammars (bundled tube, braced tube, setback
+      // ziggurat, radiator crown ...) declare minStoreys in the range these
       // island towers actually reach, so they get the skyline half of the kit.
-      dressIslandFacade({
+      // The lift shaft goes in with it: the kit keeps the shaft hollow through
+      // the crown and says where the top of the crown is (THE LIFT TOP).
+      const dressedT = dressIslandFacade({
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
         color: color, style: style, plats: plats,
         shellMerge: shellMerge, glassList: glassT, doorHalf: DW / 2 + 0.35, tower: true,
+        walls: walls, liftShaft: { x0: -s, x1: s, z0: -s, z1: s },
       });
+      const lift = dressedT && dressedT.lift;
       for (const gp of glassT) allGlass.push(gp);
 
-      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, storeys,
+      /* ---- THE TOP OF THE BUILDING, REACHED ------------------------------
+         OWNER: "the elevator isn't getting me to the top of the building ...
+         because of the facade." It ran to realH, the shell's roof, and every
+         skyline grammar but one stands 5-45 m of crown on that roof, most of
+         it straight over the shaft: you rode up INTO the crown and stopped
+         there. Now the top stop is the top of the crown's mass over the shaft
+         (lift.y), the shaft is carved hollow up to it, and there is a real
+         deck to step out onto: a slab round the shaft as wide as the crown
+         leaves headroom for, with a rail, and a small open headhouse over the
+         car when the grammar stands a spire on top of the shaft. */
+      const topY = lift && lift.raised ? lift.y : realH;
+      if (lift && lift.raised) {
+        const D = lift.deck, dt = topY + 0.1;         // deck walk surface (car deck arrives level with it)
+        const strips = [
+          [D.x0, D.x1, D.z0, -s], [D.x0, D.x1, s, D.z1],
+          [D.x0, -s, -s, s], [s, D.x1, -s, s],
+        ];
+        for (const st of strips) {
+          const sw = st[1] - st[0], sd = st[3] - st[2];
+          if (sw < 0.05 || sd < 0.05) continue;
+          tbox((st[0] + st[1]) / 2, topY, (st[2] + st[3]) / 2, sw, 0.2, sd, 0x9fa6ad, { plat: true, los: true, cast: true, merge: true });
+        }
+        // the rail round the deck edge: posts, a top rail and a mid rail
+        // (merged), and one height-gated collider per side
+        const RH = 1.05;
+        const railSide = function (ax, x0, x1, z0, z1) {
+          const len = ax === "x" ? x1 - x0 : z1 - z0;
+          if (len < 0.3) return;
+          const cx2 = (x0 + x1) / 2, cz2 = (z0 + z1) / 2;
+          const bw = ax === "x" ? len : 0.06, bd = ax === "x" ? 0.06 : len;
+          tbox(cx2, dt + RH, cz2, bw, 0.06, bd, 0x3a3f46, { merge: true });
+          tbox(cx2, dt + RH * 0.5, cz2, bw * (ax === "x" ? 1 : 0.8), 0.04, bd * (ax === "x" ? 0.8 : 1), 0x3a3f46, { merge: true });
+          const n = Math.max(2, Math.round(len / 1.2) + 1);
+          for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);
+            const px = ax === "x" ? x0 + t * len : cx2, pz = ax === "x" ? cz2 : z0 + t * len;
+            tbox(px, dt + RH / 2, pz, 0.05, RH, 0.05, 0x3a3f46, { merge: true });
+          }
+          const c = { minX: ox + cx2 - Math.max(bw, 0.12) / 2, maxX: ox + cx2 + Math.max(bw, 0.12) / 2,
+            minZ: oz + cz2 - Math.max(bd, 0.12) / 2, maxZ: oz + cz2 + Math.max(bd, 0.12) / 2,
+            ref: null, y0: gy + dt, y1: gy + dt + RH + 0.05 };
+          CBZ.colliders.push(c); cols.push(c);
+        };
+        railSide("x", D.x0, D.x1, D.z0 + 0.03, D.z0 + 0.03);
+        railSide("x", D.x0, D.x1, D.z1 - 0.03, D.z1 - 0.03);
+        railSide("z", D.x0 + 0.03, D.x0 + 0.03, D.z0, D.z1);
+        railSide("z", D.x1 - 0.03, D.x1 - 0.03, D.z0, D.z1);
+      }
+      if (lift && lift.headhouse) {
+        // the headhouse: four posts and a roof over the car's top stop, open
+        // on every side so the ride still ends in daylight, with the spire
+        // the grammar stood over the shaft standing on its roof
+        const hy = topY + lift.head;
+        tbox(0, hy - 0.14, 0, 2 * s + 0.3, 0.28, 2 * s + 0.3, 0x8b9097, { los: true, cast: true, merge: true });
+        for (let cz2 = -1; cz2 <= 1; cz2 += 2) for (let cx2 = -1; cx2 <= 1; cx2 += 2)
+          tbox(cx2 * (s + 0.08), topY + 0.1 + (lift.head - 0.38) / 2, cz2 * (s + 0.08), 0.16, lift.head - 0.38, 0.16, 0x5a626d, { merge: true });
+      }
+      // rooftop plant box, only on a roof nobody built a crown on, and clear of
+      // the shaft AND of the apron you step out onto
+      if (!(lift && (lift.raised || lift.headhouse))) {
+        const pz0 = s + 1.4, pz1 = id - 0.2;
+        if (pz1 - pz0 > 0.8) {
+          const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, pz1 - pz0), finishMat(0x8b9097, 0, gy));
+          capm.position.set(0, realH + 0.7, (pz0 + pz1) / 2); capm.castShadow = true; g.add(capm);
+        }
+      }
+      // the deck, rail and headhouse are shell pieces queued AFTER the facade
+      // pass flushed the rest: one more merged mesh per colour for them
+      {
+        const late = new Map();
+        for (const it of shellMerge) {
+          if (it.length !== 8) continue;              // already flushed with the facade
+          const k = it[6] + (it[7] ? "|los" : "");
+          let bk = late.get(k);
+          if (!bk) { bk = { col: it[6], los: it[7], geos: [] }; late.set(k, bk); }
+          const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
+          g2.deleteAttribute("uv");
+          g2.translate(it[0], it[1], it[2]);
+          bk.geos.push(g2);
+        }
+        const BGU = THREE.BufferGeometryUtils;
+        late.forEach(function (bk) {
+          const geo = bk.geos.length > 1 && BGU ? BGU.mergeBufferGeometries(bk.geos) : bk.geos[0];
+          if (geo !== bk.geos[0]) for (const g2 of bk.geos) g2.dispose();
+          const m = new THREE.Mesh(geo, finishMat(bk.col, 0, gy));
+          m.castShadow = true; m.receiveShadow = true;
+          g.add(m);
+          if (bk.los) CBZ.losBlockers.push(m);
+        });
+      }
+
+      // h stays the SHELL's height (the collapse proxy and the ash roofs are
+      // built off h / storeys); the lift's top stop is published beside it
+      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, liftTop: topY, storeys,
         facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
-        colliders: cols, platforms: plats, glass: glassT, fallen: false };
+        colliders: cols, platforms: plats, glass: glassT, fallen: false,
+        // THE GROUND-FLOOR PLAN (see makeBuilding): the lift shaft and the
+        // apron you board it from, and the walk from the door to it
+        interior: {
+          kind: "tower",
+          x0: -iw, x1: iw, z0: -id, z1: id,
+          keepOut: [
+            { x0: -s - 1.4, x1: s + 1.4, z0: -s - 1.4, z1: s + 1.4, why: "lift" },
+            { x0: -DW / 2 - 0.6, x1: DW / 2 + 0.6, z0: -id, z1: 0, why: "door to lift" },
+          ],
+        },
+      };
       fragile.push(b);
 
-      // ---- the elevator car: a slab that rides the central shaft, gy → roof ----
+      // ---- the elevator car: a slab that rides the central shaft ----
       const carMesh = new THREE.Mesh(new THREE.BoxGeometry(2 * s - 0.1, 0.2, 2 * s - 0.1), mat(0x3a4150, { emissive: 0x10141c, ei: 0.5 }));
       carMesh.position.set(0, 0.12, 0); carMesh.castShadow = true; g.add(carMesh);
       for (let cz2 = -1; cz2 <= 1; cz2 += 2) for (let cx2 = -1; cx2 <= 1; cx2 += 2) {  // corner posts
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.6, 0.12), mat(0x5a626d));
         post.position.set(cx2 * (s - 0.12), 0.9, cz2 * (s - 0.12)); carMesh.add(post);
       }
-      // The car's deck is a MOVING PLATFORM (systems/platforms_moving.js), not a
-      // static CBZ.platforms record whose `.top` we poke each frame. That old
-      // shape was wrong in two ways: the record was driven at onUpdate(29),
-      // NINETEEN priority steps AFTER updatePlayer(10) had already resolved
-      // against last frame's height (the one-frame sink/pop), and a rider who
-      // jumped off inherited nothing. The rig ticks at 9.5 — before the player —
-      // and carries riders properly. `yaw:false`: this is a pure vertical lift.
-      // The parent is the FUNCTION form, because carMesh.position is local to
-      // the building group and the rig needs world coordinates.
+      // The car's deck is a MOVING PLATFORM (systems/platforms_moving.js): the
+      // rig ticks at 9.5, before the player (10), and carries riders properly.
+      // `yaw:false`: this is a pure vertical lift. The parent is the FUNCTION
+      // form, because carMesh.position is local to the building group.
       let carPlat = null, carRig = null;
       const carSpec = { decks: [{ x: 0, z: 0, w: 2 * s - 0.1, d: 2 * s - 0.1, top: 0.1 }], yaw: false, id: "arena-lift" };
       if (CBZ.movingPlatform) {
@@ -2429,43 +2713,40 @@
         carPlat = { minX: ox - s + 0.05, maxX: ox + s - 0.05, minZ: oz - s + 0.05, maxZ: oz + s - 0.05, top: gy + 0.22 };
         CBZ.platforms.push(carPlat); plats.push(carPlat);
       }
-      elevators.push({ b, mesh: carMesh, plat: carPlat, rig: carRig, gy, lo: 0.12, hi: realH, t: rng() * 8, slabTop: 0.1 });
+      /* THE STOPS: the ground, EVERY floor, the shell roof (unless the crown
+         fills it), and the top of the crown. Car mesh y per stop; its deck
+         (slabTop 0.1 above) arrives level with each landing's walk surface. */
+      const stops = [0.12];
+      for (let k = 1; k < storeys; k++) stops.push(k * FH);
+      if (!(lift && lift.roofBuried)) stops.push(realH);
+      if (topY > realH + 0.3) stops.push(topY);
+      rng();                     // was the car's start phase: keeps the island's rng stream (and so its town plan) where it was
+      elevators.push({ b, mesh: carMesh, plat: carPlat, rig: carRig, gy, ox, oz, s, stops,
+        y: 0.12, v: 0, dir: 1, at: 0, target: -1, dwell: 1.5, idle: 0, slabTop: 0.1 });
 
       return b;
     }
 
     if (CBZ.bootStep) CBZ.bootStep("island:streets");
-    // ---- STREETS: dark asphalt running in flat, contiguous runs along grid
-    // lines, with a dashed centre line. Hills/mountain break the runs so roads
-    // never float. roadSegs feeds the car scatter below. ----
-    // SURV_ROAD_LAYERS (round 2 of the flicker fix): the polygonOffset pass
-    // did NOT hold on real hardware (iPad) — mobile TBDR GPUs map offset
-    // factor/units to depth precision differently than SwiftShader, and the
-    // arena laid BOTH road directions at the same y (0.05) with the SAME
-    // material, so every avenue/cross-street intersection was two coplanar
-    // opaque planes z-fighting. The city never flickers because it separates
-    // by GEOMETRY, copying its exact proven constants here:
-    //   ground 0 → avenues +0.04 → cross-streets +0.045 → paint +0.057.
-    // Roads carry NO polygonOffset (pure y-separation, like city asphalt);
-    // only the paint dashes keep the city's decal recipe (offset -2/-2 +
-    // renderOrder 1 + userData.roadPaint so a batch pass can never strip the
-    // offset — the exact guard city/world.js documents). No two planes that
-    // can overlap ever share a y. false = the old 0.05/0.07 offset stack.
-    const LAYERS = !CBZ.CONFIG || CBZ.CONFIG.SURV_ROAD_LAYERS !== false;
-    const ROAD_Y_AVE = LAYERS ? 0.04 : 0.05;     // avenues (run along z)
-    const ROAD_Y_CROSS = LAYERS ? 0.045 : 0.05;  // cross-streets (run along x)
-    const ROAD_Y_PAD = LAYERS ? 0.05 : 0.05;     // forecourt/apron pads — ABOVE both road
-                                                 // levels (owner: gas-station ground flickered
-                                                 // where the pad overlapped an avenue at the
-                                                 // same 0.04), below the 0.057 dashes
-    const PAINT_Y = LAYERS ? 0.057 : 0.07;       // centre-line dashes
-    const roadMat = LAYERS ? skinMat("asphalt")
-      : skinMat("asphalt", { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    roadMat.name = "survival-asphalt";
-    const lineMat = LAYERS
-      ? new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
-      : new THREE.MeshLambertMaterial({ color: 0x9a7a1c, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-    const roadSegs = [];
+    // ---- STREETS: a real town's streets (world/island_roads.js) ----------
+    /* The roads used to be fixed-height ribbons of a generic tiling asphalt,
+       avenues and cross-streets overlapping at every crossing (split 5 mm
+       apart so iPad TBDR would not z-fight them), with a yellow dash every
+       6 m and nothing else. Now: layRoadLine only SCANS where a street can
+       run (flat ground, off the shore); after the scan the island road kit
+       turns the runs into pieces and junctions that never overlap (the
+       loop's finalize block), and finishRoads() lays everything once the
+       stations have reported their driveways: road-aligned asphalt, junction
+       squares, 0.15 m sidewalks with curbs, ramps and corner returns, paint,
+       signs and street lights, in 7 draw calls. Every surface follows the
+       terrain, so nothing floats at a hill skirt. surfaceHeightAt is the
+       walkable floor (terrain + sidewalks + station pads); the arena
+       descriptor hands THAT to physics as groundHeightAt. Build code keeps
+       calling the terrain-only groundHeightAt. */
+    const LAYERS = true;          // legacy name; roads no longer stack by height
+    const ROAD_Y_PAD = 0.05;      // legacy constants (no road code reads them)
+    const PAINT_Y = 0.057;
+    const roadSegs = [];          // one per road piece, junction squares excluded (the car scatter reads it)
     const ROADW = 7;
     /* THE STREET GRID, declared HERE rather than beside the code that draws
        it, because the buildings have to be placed with it in mind and they go
@@ -2474,6 +2755,11 @@
        the asphalt was then painted straight through them. */
     const GRID = 40;                 // avenue / cross-street pitch
     const KERB = ROADW / 2 + 1.4;    // corridor half-width plus a verge
+    // Driveways and raised slabs other builders report before finishRoads():
+    //   roadCuts  {x0,x1,z0,z1} world AABB over a sidewalk: the curb there
+    //             becomes a ramped apron (road level up to the 0.15 m top)
+    //   raisePads {x0,x1,z0,z1,top} absolute walkable top (station forecourt)
+    const roadCuts = [], raisePads = [];
 
     // The nearest grid line to a coordinate, and how far off it we are.
     function nearestLine(v, origin) {
@@ -2504,34 +2790,10 @@
       const nx = snapX ? seat : x, nz = snapX ? z : seat;
       return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
     }
-    /* THE ASPHALT. It was one flat 0x33363d plane per run plus ONE MESH PER
-       CENTRE-LINE DASH (a draw call for every 6 m of road). Now every run is
-       baked into ONE world-space mesh wearing the normalised asphalt map —
-       aggregate, patching, hairline cracks — with vertex-colour wear: a
-       dusty, sun-bleached kerb edge, darker tyre tracks down each lane, and
-       slow patchwork along the length. All the dashes are ONE mesh too. */
-    const roadParts = [], dashParts = [];
-    function roadGeo(x, z, w, len, vertical, y) {
-      const ax = vertical ? w : len, az = vertical ? len : w;         // world extents
-      const nL = Math.max(1, Math.round(len / 3)), nW = 6;
-      const g = new THREE.PlaneGeometry(ax, az, vertical ? nW : nL, vertical ? nL : nW);
-      g.rotateX(-Math.PI / 2);
-      g.translate(x, y, z);
-      const p = g.attributes.position, col = new Float32Array(p.count * 3), uv = new Float32Array(p.count * 2);
-      for (let i = 0; i < p.count; i++) {
-        const wx = p.getX(i), wz = p.getZ(i);
-        const across = (vertical ? wx - x : wz - z) / (w / 2);          // -1..1 across the road
-        const edge = Math.pow(Math.abs(across), 6);                    // kerb dust
-        const track = Math.exp(-Math.pow((Math.abs(across) - 0.5) / 0.14, 2));   // lane tyre lines
-        const patch = fbm2(wx, wz, 11, 0x7a01);
-        let v = 0.060 * (0.86 + 0.3 * patch) * (1 - 0.16 * track) + 0.05 * edge;
-        col[i * 3] = v * 1.02; col[i * 3 + 1] = v; col[i * 3 + 2] = v * 0.97 + 0.004;
-        uv[i * 2] = wx / 3; uv[i * 2 + 1] = wz / 3;
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-      return g;
-    }
+    // where a street can run on each grid line: flat ground, clear of the
+    // shore. Runs are [a, b] metres along the line from cx / cz.
+    const roadRuns = { ave: [[], [], [], [], []], cross: [[], [], [], [], []] };
+    let roadPlan = null, roadNet = null;
     function layRoadLine(fixed, vertical) {
       const step = 4, segs = [];
       let runStart = null;
@@ -2546,22 +2808,32 @@
           runStart = null;
         }
       }
-      segs.forEach(([a, bb]) => {
-        const midT = (a + bb) / 2, len = bb - a;
-        const x = vertical ? fixed : cx + midT, z = vertical ? cz + midT : fixed;
-        // avenues and cross-streets on SPLIT y levels (city constants) so the
-        // planes overlapping at every intersection can never z-fight
-        roadParts.push(roadGeo(x, z, ROADW, len, vertical, vertical ? ROAD_Y_AVE : ROAD_Y_CROSS));
-        const dashes = Math.max(1, Math.floor(len / 6));
-        for (let i = 0; i < dashes; i++) {
-          const tt = a + (i + 0.5) * (len / dashes);
-          const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
-          const dg = new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3);
-          dg.rotateX(-Math.PI / 2); dg.translate(lx, PAINT_Y, lz);
-          dashParts.push(dg);
-        }
-        roadSegs.push({ x, z, len, vertical });
+      const m = Math.round((fixed - (vertical ? cx : cz)) / GRID) + 2;
+      if (m >= 0 && m <= 4) roadRuns[vertical ? "ave" : "cross"][m] = segs;
+    }
+    // the walkable floor: terrain, plus the sidewalk top on a sidewalk, plus
+    // any raised pad; exactly groundHeightAt everywhere else
+    function surfaceHeightAt(x, z) {
+      if (roadNet) return roadNet.surfaceHeightAt(x, z);
+      let y = groundHeightAt(x, z);
+      for (let i = 0; i < raisePads.length; i++) {
+        const p = raisePads[i];
+        if (x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && p.top > y) y = p.top;
+      }
+      return y;
+    }
+    // lay the streets (after the stations have pushed roadCuts / raisePads)
+    function finishRoads() {
+      const kit = CBZ.islandRoadKit;
+      if (roadNet || !kit || !roadPlan) return;
+      roadNet = kit.build({
+        THREE: THREE, root: root, cx: cx, cz: cz, R: R, plan: roadPlan,
+        ground: groundHeightAt, cuts: roadCuts, pads: raisePads,
+        quality: CBZ.qualityLevel, renderer: CBZ.renderer, colliders: CBZ.colliders,
+        onUpdate: CBZ.onUpdate,
+        modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); },
       });
+      CBZ.survRoadStats = roadNet.stats;
     }
 
     /* ---- CARS: a real car silhouette in ONE draw ---------------------------
@@ -2660,44 +2932,63 @@
       return g;
     }
 
-    // ---- GAS STATION (GTA-style): a drive-under canopy on pillars, a row of
-    // fuel pumps, a price totem, and a small glass-fronted shop. The canopy
-    // roof is a height-gated collider so you drive/walk under it freely. ----
-    function makeGasStation(ox, oz) {
-      const gy = groundHeightAt(ox, oz);
-      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), LAYERS
-        ? new THREE.MeshLambertMaterial({ color: 0x41464d })
-        : new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-      // the forecourt apron rides its OWN level above both road planes — it
-      // can overlap an avenue, and coplanar overlap is exactly the TBDR
-      // z-fight the owner saw (SURV_ROAD_LAYERS)
-      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + (LAYERS ? ROAD_Y_PAD : 0.05), oz); pad.receiveShadow = true; root.add(pad);
-      if (LAYERS) pad.renderOrder = 1;
-      const CH = 5.2;
-      [[-6, -3.4], [6, -3.4], [-6, 3.4], [6, 3.4]].forEach(([px, pz]) => box(ox + px, gy + CH / 2, oz + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
-      box(ox, gy + CH + 0.45, oz, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: gy + CH, y1: gy + CH + 0.9 });
-      box(ox, gy + CH + 0.1, oz - 4.9, 14.6, 0.7, 0.25, 0xe53b3b);   // brand stripe
-      box(ox, gy + CH + 0.1, oz + 4.9, 14.6, 0.7, 0.25, 0xe53b3b);
-      for (let i = -1; i <= 1; i++) {
-        const px = ox + i * 4.0;
-        [oz - 1.4, oz + 1.4].forEach((pz) => {
-          box(px, gy + 0.75, pz, 0.7, 1.5, 0.5, 0x2a2d33, { solid: true });
-          box(px, gy + 1.6, pz, 0.85, 0.55, 0.62, 0xff7a1a);          // pump topper
-        });
+    /* ---- GAS STATIONS: world/fuel_station.js builds them (the same builder
+       the city annex uses). They used to be a grey pad, four posts under a
+       white slab, orange boxes for pumps and a yellow card on a stick.
+       placeStations() runs BEFORE the town is scattered: a station needs a
+       whole block frontage (24 m along the street, 26 m deep), and once the
+       houses are down there is never one free. It picks mid-block frontages
+       by a position hash (no rng(): the town's random stream is untouched),
+       on flat ground, on a street that is actually laid there, and seats the
+       lot's front edge on the back of the sidewalk. The station reports its
+       driveways (roadCuts: the sidewalk becomes a ramped apron there) and its
+       raised slabs (raisePads: the walkable floor follows the forecourt). */
+    function makeGasStation(site) {
+      if (!CBZ.buildFuelStation) return null;
+      return CBZ.buildFuelStation({
+        parent: root, x: site.x, z: site.z, y: site.y, rotY: site.rotY,
+        deck: 0.15, walkRise: 0.15, apron: 0,
+        onGlass: function (mesh, wx, wy, wz, span) { allGlass.push({ mesh: mesh, x: wx, y: wy, z: wz, span: span, shattered: false }); },
+        onCut: function (a) { roadCuts.push(a); },
+        onPad: function (a, top) { raisePads.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: a.z1, top: top }); },
+      });
+    }
+    function placeStations(want) {
+      const SZ = CBZ.FUEL_STATION_SIZE || { frontage: 24, depth: 26 };
+      const halfF = SZ.frontage / 2, halfD = SZ.depth / 2, SET = ROADW / 2 + 2 + halfD;
+      const cands = [];
+      for (let k = -2; k <= 2; k++) for (let j = -3; j <= 2; j++) for (const s of [-1, 1]) {
+        cands.push({ vertical: true, line: cx + k * GRID, along: cz + (j + 0.5) * GRID, s: s });
+        cands.push({ vertical: false, line: cz + k * GRID, along: cx + (j + 0.5) * GRID, s: s });
       }
-      box(ox - 9.6, gy + 2.4, oz - 5.6, 0.4, 4.8, 0.4, 0x6a7079, { solid: true });  // price totem
-      box(ox - 9.6, gy + 4.6, oz - 5.6, 2.2, 1.6, 0.3, 0xffd451);
-      // glass-fronted shop
-      const sw = 6, sd = 4.6, sh = 3.4, sxc = ox + 9.6, szc = oz;
-      box(sxc, gy + sh / 2, szc + sd / 2, sw, sh, 0.3, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc - sw / 2 + 0.15, gy + sh / 2, szc, 0.3, sh, sd, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc + sw / 2 - 0.15, gy + sh / 2, szc, 0.3, sh, sd, 0xe7eaef, { solid: true, y0: gy, y1: gy + sh });
-      box(sxc, gy + sh + 0.15, szc, sw, 0.3, sd, 0x9aa0a8, { solid: true, y0: gy + sh, y1: gy + sh + 0.3 });
-      addGlass(root, sxc - 1.95, gy + sh * 0.55, szc - sd / 2, 1.9, sh * 0.78, 0.06, 0, 0, 0, null);
-      addGlass(root, sxc + 1.95, gy + sh * 0.55, szc - sd / 2, 1.9, sh * 0.78, 0.06, 0, 0, 0, null);
-      addGlass(root, sxc - sw / 2 + 0.2, gy + sh * 0.55, szc, 0.06, sh * 0.7, sd * 0.7, 0, 0, 0, null);
-      addGlass(root, sxc + sw / 2 - 0.2, gy + sh * 0.55, szc, 0.06, sh * 0.7, sd * 0.7, 0, 0, 0, null);
-      box(sxc, gy + sh + 0.55, szc - sd / 2 + 0.12, 3, 0.7, 0.2, 0x39c06a);   // STORE sign
+      cands.forEach(function (c) { c.h = h01g(c.line * 1.7 + c.s, c.along * 0.9 + (c.vertical ? 3 : 7), 0x6a5); });
+      cands.sort(function (a, b) { return a.h - b.h; });
+      const sites = [];
+      for (const c of cands) {
+        if (sites.length >= want) break;
+        const x = c.vertical ? c.line + c.s * SET : c.along, z = c.vertical ? c.along : c.line + c.s * SET;
+        const w = c.vertical ? SZ.depth : SZ.frontage, d = c.vertical ? SZ.frontage : SZ.depth;
+        let ok = true, mx = -1e9, mn = 1e9;
+        for (let i = -2; i <= 2 && ok; i++) for (let jj = -2; jj <= 2; jj++) {
+          const px = x + i * w / 4, pz = z + jj * d / 4;
+          if (Math.hypot(px - cx, pz - cz) > R - 16) { ok = false; break; }
+          const h = groundHeightAt(px, pz); if (h > mx) mx = h; if (h < mn) mn = h;
+        }
+        if (!ok || mx - mn > 0.2 || mx > 0.9) continue;
+        // the street in front must really be laid along the whole frontage
+        for (let t = -halfF - 4; t <= halfF + 4; t += 4) {
+          const rx = c.vertical ? c.line : c.along + t, rz = c.vertical ? c.along + t : c.line;
+          if (Math.hypot(rx - cx, rz - cz) >= R - 5 || groundHeightAt(rx, rz) >= 0.5) { ok = false; break; }
+        }
+        if (!ok) continue;
+        if (sites.some(function (p) { return Math.hypot(p.x - x, p.z - z) < 70; })) continue;
+        if (placed.some(function (p) { return Math.abs(p.x - x) < (p.w + w) / 2 + 3 && Math.abs(p.z - z) < (p.d + d) / 2 + 3; })) continue;
+        const rotY = c.vertical ? c.s * Math.PI / 2 : (c.s > 0 ? 0 : Math.PI);
+        sites.push({ x: x, z: z, y: mx, rotY: rotY });
+        placed.push({ x: x, z: z, w: w, d: d });
+      }
+      sites.forEach(makeGasStation);
+      return sites;
     }
 
     // ---- CAR SHOWROOM (GTA dealership): no normal doors — the whole front is
@@ -2765,6 +3056,7 @@
     // place the town in a loose ring, ONLY on flat ground (off the mountain
     // and hill skirts so terrain never pokes through a floor), no overlaps
     const placed = [];
+    const stationSites = placeStations(2);   // gas stations claim their block frontages first
     let attempts = 0, want = Math.max(18, lowIds.length);
     while (placed.length < want && attempts < 1400) {
       attempts++;
@@ -2798,15 +3090,13 @@
       layRoadLine(cx + k * GRID, true);    // avenues (run along z)
       layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
     }
-    {
-      const BGU = THREE.BufferGeometryUtils;
-      const roads = new THREE.Mesh(BGU.mergeBufferGeometries(roadParts, false), roadMat);
-      roads.name = "survival-roads"; roads.receiveShadow = true; root.add(roads);
-      const paint = new THREE.Mesh(BGU.mergeBufferGeometries(dashParts, false), lineMat);
-      paint.name = "survival-road-paint";
-      if (LAYERS) { paint.renderOrder = 1; paint.userData.roadPaint = true; }
-      root.add(paint);
-      roadParts.forEach((g) => g.dispose()); dashParts.forEach((g) => g.dispose());
+    // the scanned runs become pieces + junctions (drawn by finishRoads)
+    if (CBZ.islandRoadKit) {
+      roadPlan = CBZ.islandRoadKit.plan({ cx: cx, cz: cz, GRID: GRID, runs: roadRuns });
+      for (const p of roadPlan.pieces) {
+        const mid = (p.a + p.b) / 2;
+        roadSegs.push({ x: p.vertical ? p.fixed : cx + mid, z: p.vertical ? cz + mid : p.fixed, len: p.b - p.a, vertical: p.vertical });
+      }
     }
 
     // a downtown cluster of tall towers, plus a few outliers, on flat ground
@@ -2864,9 +3154,8 @@
       }
       return null;
     }
-    const gs1 = placeFlat(11, 9); if (gs1) makeGasStation(gs1.x, gs1.z);
-    const gs2 = placeFlat(11, 9); if (gs2) makeGasStation(gs2.x, gs2.z);
     const dl1 = placeFlat(10, 8); if (dl1) makeShowroom(dl1.x, dl1.z);
+    finishRoads();
 
     // park cars along the streets (offset to one lane), skipping building spots
     roadSegs.forEach((seg) => {
@@ -2927,11 +3216,6 @@
       g.setAttribute("color", new THREE.BufferAttribute(c, 3));
       return g;
     }
-    function mergeGeos(parts) {
-      const BGU = THREE.BufferGeometryUtils;
-      const out = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts, false) : null;
-      return out || parts[0];
-    }
     // broadleaf bole: unit height (scaled per tree), roots into the soil
     function broadTrunkGeo() {
       return geoOnce("bt", function () {
@@ -2957,105 +3241,12 @@
         return g;
       });
     }
-    /* A COCONUT PALM, in two meshes. The trunk is a leaning curve (slender,
-       swelling at the foot, banded by the dark leaf-scar collars a palm trunk
-       is read by — vertex colour, not extra meshes); the crown is 11 pinnate
-       fronds — a spine that leaves the hub near level and hangs over its
-       length, with a leaflet pair at every step — merged into ONE geometry.
-       Geometry, not a texture: a frond's read is its comb of leaflets
-       against the sky. */
-    function palmTrunkGeo(v) {
-      return geoOnce("pt" + v, function () {
-        const SEG = 7, parts = [];
-        const bend = [0.10, 0.16, 0.06][v];
-        const at = function (t) { return new THREE.Vector3(bend * Math.pow(t, 1.8), t, 0); };
-        const up = new THREE.Vector3(0, 1, 0);
-        for (let i = 0; i < SEG; i++) {
-          const a = at(i / SEG), b = at((i + 1) / SEG);
-          const r0 = 0.20 - 0.07 * (i / SEG) + (i === 0 ? 0.06 : 0), r1 = 0.20 - 0.07 * ((i + 1) / SEG);
-          const len = a.distanceTo(b);
-          const c = new THREE.CylinderGeometry(r1, r0, len * 1.02, 8, 1, true);
-          const uv = c.attributes.uv;
-          for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * 1.5, uv.getY(k) * 0.35 + i * 0.35);
-          const dir = b.clone().sub(a).normalize();
-          c.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir)));
-          c.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-          parts.push(c);
-        }
-        const g = mergeGeos(parts);
-        rampColor(g, 0.62);
-        const p = g.attributes.position, col = g.attributes.color;
-        for (let i = 0; i < p.count; i++) {
-          const band = 0.5 + 0.5 * Math.cos(p.getY(i) * Math.PI * 2 * 9);
-          const k = 1 - 0.3 * Math.pow(band, 6);
-          col.setXYZ(i, col.getX(i) * k, col.getY(i) * k * 0.98, col.getZ(i) * k * 0.95);
-        }
-        g.userData.top = at(1);
-        g.computeBoundingSphere();
-        return g;
-      });
-    }
-    function palmCrownGeo(v) {
-      return geoOnce("pc" + v, function () {
-        const pos = [], col = [];
-        const N = 11, SEG = 17;
-        function tri(a, b, c, ca, cb, cc) {
-          pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-          col.push(ca, ca, ca * 0.85, cb, cb, cb * 0.85, cc, cc, cc * 0.85);
-        }
-        for (let f = 0; f < N; f++) {
-          const yaw = (f / N) * Math.PI * 2 + (h01t(f, v, 0x9a1) - 0.5) * 0.35;
-          const len = 2.6 + h01t(f, v, 0x9a2) * 0.9;
-          const lift = -0.2 + h01t(f, v, 0x9a3) * 0.7;              // start pitch, above/below level
-          const hang = 1.2 + h01t(f, v, 0x9a4) * 0.7;               // how hard it droops
-          const dx = Math.cos(yaw), dz = Math.sin(yaw);
-          const sx = -dz, sz = dx;                                   // leaflet side direction
-          // the spine: integrate the pitch so it is a real arc, not a chord
-          const pts = [new THREE.Vector3(0, 0, 0)];
-          const STEPS = 18;
-          for (let s = 1; s <= STEPS; s++) {
-            const u = (s - 0.5) / STEPS, ang = lift - hang * u * u, dl = len / STEPS;
-            const q = pts[s - 1];
-            pts.push(new THREE.Vector3(q.x + dx * Math.cos(ang) * dl, q.y + Math.sin(ang) * dl, q.z + dz * Math.cos(ang) * dl));
-          }
-          const spine = function (u) {
-            const f2 = u * STEPS, i0 = Math.min(STEPS - 1, Math.floor(f2));
-            return pts[i0].clone().lerp(pts[i0 + 1], f2 - i0);
-          };
-          for (let i = 0; i < SEG; i++) {
-            const u0 = 0.06 + (i / SEG) * 0.94, u1 = 0.06 + ((i + 1) / SEG) * 0.94;
-            // a leaflet is a narrow blade: its base spans only the first half
-            // of the step, so the comb has gaps between blades
-            const a = spine(u0), b = spine(u0 + (u1 - u0) * 0.5);
-            const w = 0.8 * Math.sin(Math.PI * Math.min(1, 0.12 + u0 * 0.95)) + 0.12;   // leaflet length
-            const shade = 0.6 + 0.4 * u0;
-            for (let sgn = -1; sgn <= 1; sgn += 2) {
-              const tip = new THREE.Vector3(
-                (a.x + b.x) / 2 + sx * sgn * w + dx * w * 0.55,
-                (a.y + b.y) / 2 - w * 0.6,
-                (a.z + b.z) / 2 + sz * sgn * w + dz * w * 0.55);
-              tri(a, b, tip, shade * 0.85, shade * 0.95, shade * 1.1);
-            }
-          }
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        // lighting normals point OUT of the crown, up-biased, so both faces
-        // of a leaflet shade as part of the canopy mass, not as a flipped card
-        const nrm = new Float32Array(pos.length);
-        for (let i = 0; i < pos.length; i += 3) {
-          const x = pos[i], y = pos[i + 1] + 0.8, z = pos[i + 2];
-          const l = Math.hypot(x, y, z) || 1;
-          let nx = x / l * 0.55, ny = y / l * 0.55 + 0.45, nz = z / l * 0.55;
-          const m = Math.hypot(nx, ny, nz) || 1;
-          nrm[i] = nx / m; nrm[i + 1] = ny / m; nrm[i + 2] = nz / m;
-        }
-        g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-        g.computeBoundingSphere();
-        return g;
-      });
-    }
+    /* A COCONUT PALM: the vegetation kit's (world/vegetation.js palmTrunk /
+       palmCrown, moved there from this file so every coast shares one
+       palm): a leaning barked trunk with leaf-scar collars and 11 pinnate
+       drooping fronds merged into one geometry. */
+    function palmTrunkGeo(v) { return geoOnce("pt" + v, function () { return VKIT.palmTrunk(v); }); }
+    function palmCrownGeo(v) { return geoOnce("pc" + v, function () { return VKIT.palmCrown(v); }); }
     // THE SHARED LOOKS. One material per role; each tree clones it (see the
     // record contract above). Tints multiply bright kit textures, so they are
     // authored DARK (linear albedo — this pipeline brightens on the way out).
@@ -3192,6 +3383,7 @@
       const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const gy = groundHeightAt(x, z);
       if (gy > 0.8) continue;                 // skip hillsides — no floating cubes on the mountain
+      if (onRoad(x, z, 3, 3) || surfaceHeightAt(x, z) > gy + 0.02) continue;   // not in a street corridor or on a forecourt
       const s = 1 + rng() * 2.2;
       const m = box(x, gy + s * 0.4, z, s, s, s, 0x6e675e, { solid: true });
       m.geometry.dispose();
@@ -3214,7 +3406,7 @@
       // published for tools and spawners; physics reads them via the height
       // field, never this list
       islets,
-      hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
+      hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt: surfaceHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;
         const d = (minD || 0) + rng() * ((maxD || R * 0.82) - (minD || 0));
@@ -3272,6 +3464,8 @@
             if (CBZ.colliders.indexOf(car.collider) === -1) CBZ.colliders.push(car.collider);
             car.flung = false;
           }
+          // its windows were shattered off the real pane (disasters.js flingCar)
+          if (car._pane) { car._pane.visible = true; car._pane = null; }
         }
         // re-glaze every shattered window for the new match
         for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; if (gp.show) gp.show(); else gp.mesh.visible = true; } }
@@ -3287,37 +3481,97 @@
       },
     };
 
-    // ---- ELEVATOR DRIVE: each tower lift auto-cycles ground → roof → ground.
-    // The car is a moving CBZ.platform, so the player's vertical physics simply
-    // rides it (rise rate stays under the auto-step height). Collapsed towers
-    // park their lift. ----
-    // PRIORITY 9.4, was 29. A platform must move BEFORE the character resolves
-    // against it (systems/platforms_moving.js ticks at 9.5, updatePlayer at 10);
-    // driving the car at 29 meant the rider spent every frame standing on last
-    // frame's height — the one-frame sink/pop. Nothing else reads these meshes,
-    // so moving the drive earlier in the frame is inert for every other system.
+    /* ---- ELEVATOR DRIVE -------------------------------------------------
+       A lift that serves EVERY floor, and the top of the crown. It used to
+       auto-cycle ground -> roof -> ground at 4.5 m/s and never stop between,
+       so the only floors it served were the two ends (and the top end was
+       inside the crown, see THE TOP OF THE BUILDING, REACHED). Now:
+
+         * standing on a landing next to the shaft CALLS it to your floor;
+         * standing still on the car sends it on, express, to the far end in
+           the direction it is going (up to the top of the crown by default,
+           because that is where you go in a tsunami);
+         * WALKING on the car while it moves stops it at the next floor it can
+           brake for, and it waits while you walk off. No button, no text:
+           you step towards the floor you want and the lift lets you out.
+         * left alone for a while it goes home to the ground floor, so the
+           next person through the door finds it waiting.
+
+       Collapsed towers park their lift. PRIORITY 9.4: a platform must move
+       BEFORE the character resolves against it (platforms_moving.js ticks at
+       9.5, updatePlayer at 10). */
+    const LIFT_V = 5.5, LIFT_A = 3.2;
+    function liftRiding(e, P) {
+      if (!P || !P.pos) return false;
+      if (e.rig && CBZ.movingPlatformRiding) return CBZ.movingPlatformRiding() === e.rig;
+      const top = e.gy + e.y + e.slabTop;
+      return Math.abs(P.pos.x - e.ox) < e.s && Math.abs(P.pos.z - e.oz) < e.s && Math.abs(P.pos.y - top) < 0.45;
+    }
+    // the stop whose landing the player is standing on, next to this shaft
+    function liftCall(e, P) {
+      if (!P || !P.pos || P.dead) return -1;
+      const dx = Math.abs(P.pos.x - e.ox), dz = Math.abs(P.pos.z - e.oz);
+      if (dx > e.s + 2.2 || dz > e.s + 2.2) return -1;
+      if (dx < e.s && dz < e.s) return -1;            // on the car (or in the shaft)
+      for (let i = 0; i < e.stops.length; i++) {
+        if (Math.abs(P.pos.y - (e.gy + e.stops[i] + e.slabTop)) < 0.5) return i;
+      }
+      return -1;
+    }
     CBZ.onUpdate(9.4, function (dt) {
       if (!CBZ.islandModeOn(CBZ.game.mode)) return;
+      if (!(dt > 0)) return;
+      dt = Math.min(dt, 0.1);
+      const P = CBZ.player;
       for (let i = 0; i < elevators.length; i++) {
         const e = elevators[i];
-        // a collapsed tower parks its lift: the rig stands down with the mesh
-        // (one line — it replaces the platform-splice the collapse used to need)
         if (e.rig) e.rig.setActive(!e.b.fallen);
         if (e.b.fallen) { if (e.mesh.visible) e.mesh.visible = false; continue; }
-        const span = e.hi - e.lo;
-        const upT = span / 4.5;          // ~4.5 m/s — slow enough to ride
-        const dwell = 2.2;               // pause at each end
-        const cycle = (upT + dwell) * 2;
-        e.t = (e.t + dt) % cycle;
-        const tt = e.t; let yl;
-        if (tt < upT) yl = e.lo + (tt / upT) * span;
-        else if (tt < upT + dwell) yl = e.hi;
-        else if (tt < upT * 2 + dwell) yl = e.hi - ((tt - upT - dwell) / upT) * span;
-        else yl = e.lo;
-        e.mesh.position.y = yl;
+        const riding = liftRiding(e, P);
+        const walking = riding && P.speed > 0.3;
+        const S = e.stops, last = S.length - 1;
+        if (e.target < 0) {
+          // parked at stop e.at
+          if (walking) e.dwell = Math.max(e.dwell, 0.8);   // hold it while they step off
+          if (e.dwell > 0) { e.dwell -= dt; }
+          else if (riding) {
+            if (e.at >= last) e.dir = -1; else if (e.at <= 0) e.dir = 1;
+            e.target = e.dir > 0 ? last : 0;
+            e.idle = 0;
+          } else {
+            const call = liftCall(e, P);
+            if (call >= 0 && call !== e.at) { e.target = call; e.idle = 0; }
+            else if (e.at !== 0) { e.idle += dt; if (e.idle > 9) { e.target = 0; e.idle = 0; } }
+          }
+        }
+        if (e.target >= 0) {
+          const goal = S[e.target], dir = goal > e.y ? 1 : -1;
+          e.dir = dir;
+          // walking aboard: stop at the next floor it can still brake for
+          if (walking && !e._stopReq) {
+            const brake = e.v * e.v / (2 * LIFT_A) + 0.05;
+            let best = -1;
+            for (let k = 0; k <= last; k++) {
+              const ahead = (S[k] - e.y) * dir;
+              if (ahead >= brake && (best < 0 || ahead < (S[best] - e.y) * dir)) best = k;
+            }
+            if (best >= 0 && (S[best] - e.y) * dir < (goal - e.y) * dir) e.target = best;
+            e._stopReq = true;
+          }
+          const g2 = S[e.target], rem = (g2 - e.y) * dir;
+          // trapezoid: accelerate, cruise, brake to land exactly on the stop
+          const vStop = Math.sqrt(Math.max(0, 2 * LIFT_A * rem));
+          e.v = Math.min(LIFT_V, e.v + LIFT_A * dt, vStop);
+          let step = e.v * dt;
+          if (step >= rem || rem < 0.004) {
+            e.y = g2; e.v = 0; e.at = e.target; e.target = -1; e._stopReq = false;
+            e.dwell = riding ? 1.4 : 2.2;
+          } else e.y += dir * step;
+        }
+        e.mesh.position.y = e.y;
         // the rig reads carMesh.position.y itself at 9.5; only the legacy
         // fallback record still needs poking
-        if (e.plat) e.plat.top = e.gy + yl + e.slabTop;
+        if (e.plat) e.plat.top = e.gy + e.y + e.slabTop;
       }
     });
 

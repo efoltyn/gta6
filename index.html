@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=launch1">
+<link rel="stylesheet" href="css/shark_title.css?v=uicut1">
 <link rel="stylesheet" href="css/mobile.css?v=onecall1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
@@ -303,14 +303,14 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
       <div class="quality-preset-label">Graphics</div>
       <div class="quality-select">
-        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span><small>Short horizon</small></button>
-        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span><small>Balanced</small></button>
-        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span><small>Full distance</small></button>
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span></button>
+        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span></button>
       </div>
     </div>
     <button class="btn" id="playBtn">Play</button>
     <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
-      <span>New Life</span><small>Clear every saved city character</small>
+      <span>New Life</span>
     </button>
     </div><!-- /.title-actions -->
 
@@ -320,14 +320,14 @@ document.body.appendChild(b);}}catch(e){}})();
          to them. src/systems/title_hub.js remembers the last one played. -->
     <div class="origin-label mode-strip-label">Games</div>
     <div id="modeSelect" class="mode-select" aria-label="Choose a game">
-      <button class="mode-btn active" type="button" data-mode="city"><img class="mode-art" src="assets/keyart/city.jpg" alt="" decoding="async"><span>Gang Life</span><small>Run the city</small></button>
-      <button class="mode-btn" type="button" data-mode="escape"><img class="mode-art" src="assets/keyart/escape.jpg" alt="" decoding="async"><span>Prison Escape</span><small>Cell Block Z</small></button>
-      <button class="mode-btn" type="button" data-mode="survival"><img class="mode-art" src="assets/keyart/survival.jpg" alt="" decoding="async"><span>Disaster Survival</span><small>Last one alive</small></button>
-      <button class="mode-btn" type="button" data-mode="gungame"><img class="mode-art" src="assets/keyart/gungame.jpg" alt="" decoding="async"><span>Gun Game</span><small>Climb the ladder</small></button>
-      <button class="mode-btn" type="button" data-mode="sharksim"><img class="mode-art" src="assets/keyart/sharksim.jpg" alt="" decoding="async"><span>Shark Sim</span><small>Become the megalodon</small></button>
-      <button class="mode-btn mode-launch" type="button" data-mode="npcwar" data-href="games/battle.html"><img class="mode-art" src="assets/keyart/npcwar.jpg" alt="" decoding="async"><span>NPC War</span><small>Two armies, any size</small></button>
-      <button class="mode-btn mode-launch" type="button" data-mode="warlord" data-href="games/warlord.html"><img class="mode-art" src="assets/keyart/warlord.jpg" alt="" decoding="async"><span>Desert Warlord</span><small>An army from nothing</small></button>
-      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivor" data-href="games/bomb-survivor.html"><img class="mode-art" src="assets/keyart/bombsurvivor.jpg" alt="" decoding="async"><span>Bomb Survivor</span><small>6 v 6 on the real island</small></button>
+      <button class="mode-btn active" type="button" data-mode="city"><img class="mode-art" src="assets/keyart/city.jpg" alt="" decoding="async"><span>Gang Life</span></button>
+      <button class="mode-btn" type="button" data-mode="escape"><img class="mode-art" src="assets/keyart/escape.jpg" alt="" decoding="async"><span>Prison Escape</span></button>
+      <button class="mode-btn" type="button" data-mode="survival"><img class="mode-art" src="assets/keyart/survival.jpg" alt="" decoding="async"><span>Disaster Survival</span></button>
+      <button class="mode-btn" type="button" data-mode="gungame"><img class="mode-art" src="assets/keyart/gungame.jpg" alt="" decoding="async"><span>Gun Game</span></button>
+      <button class="mode-btn" type="button" data-mode="sharksim"><img class="mode-art" src="assets/keyart/sharksim.jpg" alt="" decoding="async"><span>Shark Sim</span></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="npcwar" data-href="games/battle.html"><img class="mode-art" src="assets/keyart/npcwar.jpg" alt="" decoding="async"><span>NPC War</span></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="warlord" data-href="games/warlord.html"><img class="mode-art" src="assets/keyart/warlord.jpg" alt="" decoding="async"><span>Desert Warlord</span></button>
+      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivor" data-href="games/bomb-survivor.html"><img class="mode-art" src="assets/keyart/bombsurvivor.jpg" alt="" decoding="async"><span>Bomb Survivor</span></button>
     </div>
   </div>
 </div>
@@ -511,7 +511,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
      exists and appends rather than rewriting. -->
-<script src="src/core/groundmask.js?v=nodash1"></script>
+<script src="src/core/groundmask.js?v=nodist1"></script>
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
@@ -534,6 +534,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=surf1"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js"></script>
 <script src="src/world/corridorkit.js"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
@@ -563,7 +564,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/systems/pushables.js?v=push2"></script>
-<script src="src/world/carfx.js?v=racepaint1"></script>
+<script src="src/world/carfx.js?v=cars2"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
 <script src="src/world/yard.js"></script>
@@ -609,7 +610,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=nukefield1"></script>
+<script src="src/systems/audio.js?v=cars1"></script>
 <script src="src/systems/hud.js?v=allmain3"></script>
 <script src="src/systems/economy.js?v=radio1"></script>
 
@@ -776,7 +777,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=sharkscene1"></script>
+<script src="src/systems/camera.js?v=cars1"></script>
 <script src="src/systems/physics.js?v=sharkmode1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -846,7 +847,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
-<script src="src/systems/interactions.js?v=onebar1"></script>
+<script src="src/systems/interactions.js?v=cars1"></script>
 <script src="src/systems/escapeplan.js?v=plan1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
@@ -893,7 +894,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=nodash1"></script>
-<script src="src/systems/fpsmode.js?v=sharkmode1"></script>
+<script src="src/systems/fpsmode.js?v=cars1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=nodash1"></script>
 
@@ -902,6 +903,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
+<script src="src/systems/debris.js?v=debris1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -911,14 +913,15 @@ document.body.appendChild(b);}}catch(e){}})();
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=sharkmode1"></script>
+<script src="src/world/island_roads.js?v=roads1"></script>
+<script src="src/world/disaster_arena.js?v=merge0927a"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=sharkfix2"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=sharkscene1"></script>
+<script src="src/modes/shark_sim.js?v=uicut1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
-<script src="src/modes/shark_title.js?v=launch1"></script>
+<script src="src/modes/shark_title.js?v=uicut1"></script>
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
@@ -972,7 +975,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=plume2"></script>
+<script src="src/systems/disasters.js?v=tsureal1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=sharkmode1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -996,8 +999,12 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=shallow1"></script>
-<script src="src/city/world.js?v=nodash1"></script>
+<script src="src/world/water_spec.js?v=tsureal2"></script>
+<!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
+<script src="src/world/tsunami_debris.js?v=tsureal1"></script>
+<script src="src/world/tsunami_flow.js?v=tsureal1"></script>
+<script src="src/world/tsunami_scene.js?v=tsureal1"></script>
+<script src="src/city/world.js?v=tsuedge1"></script>
 <script src="src/city/interior_programs.js?v=nodash1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1009,7 +1016,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=civic1"></script>
-<script src="src/city/buildings.js?v=nodash1"></script>
+<script src="src/city/buildings.js?v=cpd1"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1062,24 +1069,24 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
-<script src="src/city/demolition.js?v=nukefix1"></script>
+<script src="src/city/demolition.js?v=cpd1"></script>
 <script src="src/city/elevators.js?v=onecall1"></script>
 <script src="src/city/exec_office.js?v=nodash1"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=onecall1"></script>
 <script src="src/city/beach.js?v=sharkfix2"></script>
-<script src="src/city/expansion.js?v=allmain1"></script>
+<script src="src/city/expansion.js?v=fuel1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=nodash1"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=riverchan1"></script>
+<script src="src/city/waterfield.js?v=tsuedge1"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
-<script src="src/world/waterfx.js?v=waterv2"></script>
+<script src="src/world/waterfx.js?v=tsuedge1"></script>
 <script src="src/city/highways.js?v=nodash1"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
@@ -1090,7 +1097,7 @@ document.body.appendChild(b);}}catch(e){}})();
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=nodash1"></script>
 <script src="src/city/placement.js?v=sims2"></script>
-<script src="src/city/official_assets.js?v=official5"></script>
+<script src="src/city/official_assets.js?v=cars1"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
      findSupport built on top of it + the CBZ.assets/physics.js contracts
@@ -1102,14 +1109,14 @@ document.body.appendChild(b);}}catch(e){}})();
      B2 lands the ghost preview/hotbar). Loads right after pieces.js
      (needs spawnPiece/despawnPiece/findSupport) and after placement.js
      above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
-<script src="src/systems/building.js?v=nodash1"></script>
+<script src="src/systems/building.js?v=cpd1"></script>
 <!-- B5 — the raid-tool damage matrix: CBZ.structDamage.hit/repair on top
      of B1's CATALOG hp + B4's cascade/stability (CBZ.building.remove).
      Loads right after building.js (needs CBZ.building.remove + CBZ.pieces,
      both already defined by this point); explosives.js/fpsmode.js's bullet
      hook call CBZ.structDamage.hit at runtime, so load order relative to
      THEM doesn't matter — only relative to building.js/pieces.js does. -->
-<script src="src/systems/structdamage.js?v=bld1"></script>
+<script src="src/systems/structdamage.js?v=cpd1"></script>
 <!-- B6 — OWNERSHIP: the tool cupboard + BaseRecord + placement-rejection
      radius + door locks/lockable containers, on top of B1's CATALOG and
      B5's damage matrix (structdamage.js's destroy path stamps the
@@ -1125,7 +1132,12 @@ document.body.appendChild(b);}}catch(e){}})();
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
-<script src="src/systems/buildmode.js?v=nohint1"></script>
+<script src="src/systems/buildmode.js?v=cpd1"></script>
+<!-- THE CITY BUILD KIT (city/compoundkit.js): concrete/brick walls, steel gates,
+     guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
+     into systems/building.js's CATALOG. City-only; everything city-side is looked
+     up lazily. -->
+<script src="src/city/compoundkit.js?v=cpd1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->
@@ -1222,7 +1234,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/propuse.js?v=nodash1"></script>
 <script src="src/city/adboard.js?v=onecall1"></script>
 <script src="src/city/mode.js?v=raceabort1"></script>
-<script src="src/city/economy.js?v=allmain1"></script>
+<script src="src/city/economy.js?v=cars1"></script>
 <script src="src/city/clothes.js?v=races1"></script>
 <script src="src/city/outfits.js?v=races1"></script>
 <script src="src/city/hunger.js?v=nodash1"></script>
@@ -1236,7 +1248,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gangs.js?v=nodash1"></script>
 <script src="src/city/social.js?v=nodash1"></script>
 <script src="src/city/realestate.js?v=nodash1"></script>
-<script src="src/city/view.js?v=cityfix2"></script>
+<script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
 <script src="src/city/peds.js?v=nodash1"></script>
@@ -1262,7 +1274,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=nodash1"></script>
 <script src="src/city/crowd.js?v=nukefield1"></script>
-<script src="src/city/blobshadows.js?v=blob1"></script>
+<script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
      After blobshadows.js (same pool shape) and before vehicles.js: it only
@@ -1271,17 +1283,25 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=nodash1"></script>
-<script src="src/city/police.js?v=nodash1"></script>
+<script src="src/city/police.js?v=cars1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=nodash1"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
-<script src="src/city/carparts.js?v=brands1"></script>
-<script src="src/city/playercars.js?v=nodash1"></script>
+<script src="src/city/carparts.js?v=cars2"></script>
+<script src="src/city/carbody.js?v=cars2"></script>
+<script src="src/city/carwheels.js?v=cars2"></script>
+<!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
+     per-car occupancy map). Before playercars.js (dressCabin upholsters its
+     seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
+<script src="src/city/carseats.js?v=cars1"></script>
+<script src="src/city/playercars.js?v=cars2"></script>
 <script src="src/city/crashfx.js?v=nukefix1"></script>
-<script src="src/city/crashdeform.js?v=deform1"></script>
+<script src="src/city/crashdeform.js?v=cars1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=racerstory1"></script>
+<script src="src/city/cardyn.js?v=cars1"></script>
+<script src="src/city/vehicles.js?v=cars1"></script>
+<script src="src/city/carinstances.js?v=cars1"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=nodash1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1339,7 +1359,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=racerstory1"></script>
+<script src="src/city/boarding.js?v=cars1"></script>
 <!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
      if I go to the door I can even jump out"). [G] / the SEAT pill slides the
      player across to the shotgun seat of a car or back from a boat's helm: the
@@ -1356,7 +1376,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ?cfg_PAX_CHAUFFEUR=0 (riding while a companion drives). PAX_AIRCRAFT is
      declared and OFF: a passenger deck in a machine the player is flying is
      playeraircraft.js/bailout.js's wave, and the button says so. -->
-<script src="src/city/passengerseat.js?v=pax1"></script>
+<script src="src/city/passengerseat.js?v=cars1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1378,8 +1398,8 @@ document.body.appendChild(b);}}catch(e){}})();
      are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1"></script>
-<script src="src/city/structural.js?v=collapse1"></script>
+<script src="src/city/collapse.js?v=cpd1"></script>
+<script src="src/city/structural.js?v=cpd1"></script>
 <script src="src/city/nukefx.js?v=nukefield4"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1399,7 +1419,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
      always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
      CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
-<script src="src/systems/lockon.js?v=lockon2"></script>
+<script src="src/systems/lockon.js?v=cars1"></script>
 <script src="src/city/jewelry.js?v=nodash1"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=nodash1"></script>
@@ -1497,7 +1517,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=fall1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
-<script src="src/city/zillow.js?v=nodash1"></script>
+<script src="src/city/zillow.js?v=cpd1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=nodash1"></script>
 <script src="src/city/pawnshop.js?v=nodash1"></script>
@@ -1508,6 +1528,16 @@ document.body.appendChild(b);}}catch(e){}})();
      merge. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
 <script src="src/city/storegoods.js?v=realgoods1"></script>
+<!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
+     in or at the door of is fitted out for real (finished floors, bathrooms,
+     kitchens, bedrooms, stockrooms, a gang's count room, baked light from
+     real fixtures) and freed when you leave. After storegoods (same lazy
+     dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
+     (which declares every floor to it). -->
+<script src="src/city/fitout.js?v=fit1"></script>
+<script src="src/city/fitout_plans.js?v=fit1"></script>
+<script src="src/city/fitout_work.js?v=fit1"></script>
+<script src="src/city/fitout_gang.js?v=fit1"></script>
 <script src="src/city/realtyoffice.js?v=nodash1"></script>
 <script src="src/city/family.js?v=nodash1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
@@ -1518,12 +1548,12 @@ document.body.appendChild(b);}}catch(e){}})();
      mask, crowd.js's flee and the predator dread bus do all of it. Fires only
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
-<script src="src/city/tsunami.js?v=wave1"></script>
+<script src="src/city/tsunami.js?v=tsureal2"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
 <script src="src/city/construction.js?v=nodash1"></script>
 <script src="src/city/companies.js?v=nodash1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
-<script src="src/city/playergang.js?v=nodash1"></script>
+<script src="src/city/playergang.js?v=cpd1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=nodash1"></script>
 <script src="src/city/aigoals.js?v=nodash1"></script>
@@ -1532,7 +1562,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/story.js?v=night1"></script>
 <script src="src/city/wealth.js?v=nodash1"></script>
 <script src="src/city/turf.js?v=nodash1"></script>
-<script src="src/city/gangops.js?v=nodash1"></script>
+<script src="src/city/gangops.js?v=cpd1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=nodash1"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
@@ -1543,7 +1573,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/loyalty.js?v=nodash1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
 <script src="src/city/wallet.js?v=sim2"></script>
-<script src="src/city/housing.js?v=sim2"></script>
+<script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
 <script src="src/city/minicities.js?v=sim4w9x"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
@@ -1576,7 +1606,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/regionlife.js?v=arch2"></script>
 <script src="src/city/modshop.js?v=nodash1"></script>
 <script src="src/city/stuntjumps.js?v=ballistic2z"></script>
-<script src="src/city/storage.js?v=nodash1"></script>
+<script src="src/city/storage.js?v=cpd1"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -1633,7 +1663,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=nodash1"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=speedunit1"></script>
+<script src="src/city/hud.js?v=cpd1"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nodash1"></script>
@@ -1669,7 +1699,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
-<script src="src/city/hitman.js?v=markphoto1"></script>
+<script src="src/city/hitman.js?v=bureau1"></script>
+<script src="src/city/dossier.js?v=bureau1"></script>
+<script src="src/city/agency.js?v=bureau1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=markphoto1"></script>
@@ -1691,7 +1723,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=sharkmode1"></script>
+<script src="src/systems/fullmap.js?v=cpd1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2128,6 +2160,12 @@ document.body.appendChild(b);}}catch(e){}})();
      Loads after storage.js (ownership), bank.js (the room) and cashstore.js
      (the bag verbs it hooks). -->
 <script src="src/city/propertyvault.js?v=pvault1"></script>
+<!-- LAND YOU OWN, AS A PLACE (city/plots.js): sale signs at the curb, the
+     property panel at your address post, the contractor's demolition, locked
+     doors, the deed map. Then the crew that lives there and the rival raids
+     on it (city/compoundcrew.js). -->
+<script src="src/city/plots.js?v=plots1"></script>
+<script src="src/city/compoundcrew.js?v=cpd2"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -2257,7 +2295,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=racerstory1"></script>
-<script src="src/city/cctv.js?v=nodraw1"></script>
+<script src="src/city/cctv.js?v=cars1"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>

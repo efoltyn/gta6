@@ -17,16 +17,17 @@
    1. THE SWAP WAS VISIBLE. city/structural.js hid a dressed, windowed,
       facade-clad tower and put EIGHT FLAT GREY BOXES in its place. The
       collapse was choreographed well and still read as fake, because the
-      thing that fell was not the thing that was standing. The shell here is
-      built FROM the building's own numbers — its wall colour, its storey
-      height, its window rhythm, its plinth and cornice — so the frame the
-      swap happens on is the frame nobody can see.
+      thing that fell was not the thing that was standing. The shell here IS
+      the building: its own walls, slabs, facade and glass, cut into storey
+      bands at the swap (section 3), so the frame the swap happens on is the
+      frame nobody can see.
    2. NOTHING BROKE. Every mode of destruction was the same downward SCALE.
       A building that shrinks is a building that is being deleted. Real
       collapse is DISINTEGRATION: the floor the front passes stops existing
       and becomes several hundred kilos of slab travelling outward. So every
-      band the front consumes is replaced by real fragments with real
-      ballistics that land, bounce, settle and stay.
+      band the front consumes is broken into pieces OF ITSELF (its own
+      geometry, material and paint, via CBZ.debris) that tumble as rigid
+      bodies, pile on each other and freeze into the rubble.
    3. ONE MOTION FOR EVERY BUILDING. A 52-storey steel tower, a brick
       walk-up and a timber ranch house all sank straight down at 2/3 g. They
       do not. A frame pancakes, a slender masonry stack HINGES AT ITS BASE
@@ -67,11 +68,12 @@
    PERFORMANCE ENVELOPE
    ------------------------------------------------------------------
    • Concurrency is the CALLER's cap (structural.js keeps its 1..4). This
-     file adds no unbounded work: the shell is qScale'd bands, the fragment
-     pool is hard-capped and recycles oldest-first, and a settled fragment
-     costs nothing but a lifetime counter.
-   • Materials are all CBZ.cmat() cache hits — a collapse allocates
-     geometry, never materials.
+     file adds no unbounded work: the shell is qScale'd bands drawn as one
+     merged copy per material per face, a burst reads at most SRC_CAP of
+     the band's biggest solids, and every piece lives in CBZ.debris's
+     device-capped pools (live bodies freeze into merged static rubble).
+   • Materials are the building's own (or CBZ.cmat() cache hits for the
+     proxy) — a collapse allocates geometry, never materials.
    • Everything is disposed on finish and on CBZ.collapse.reset().
 
    DETERMINISM: this is runtime spectacle over an already-decided outcome, so
@@ -90,9 +92,10 @@
   // the collapse it had before this file existed.
   if (CBZ.CONFIG.COLLAPSE_V2 == null) CBZ.CONFIG.COLLAPSE_V2 = true;
   // The disintegration. false → bands still move under their grammar but
-  // vanish instead of breaking into debris (the cheap tier).
+  // vanish instead of breaking into pieces of themselves.
   if (CBZ.CONFIG.COLLAPSE_FRAGMENTS == null) CBZ.CONFIG.COLLAPSE_FRAGMENTS = true;
-  // The progressive damage dressing on a building that is still STANDING.
+  // The progressive damage (real carves at the wound) on a building that is
+  // still STANDING.
   if (CBZ.CONFIG.COLLAPSE_SKIN == null) CBZ.CONFIG.COLLAPSE_SKIN = true;
 
   const C = (CBZ.collapse = {});
@@ -198,24 +201,9 @@
      (its footprint is wider than it is tall); above ~4 a brittle one almost
      always does.
   ------------------------------------------------------------------------ */
-  /* WHERE IS THE GROUND UNDER THIS PIECE? A collapse throws debris tens of
-     metres past its own footprint, and on the disaster island (hills, a
-     beach, a volcano skirt) that is a different height from the building's
-     base. Seating every fragment at the base height puts half the field
-     buried in a slope and the other half hovering over one.
-
-     The caller knows its own terrain oracle, so it hands one in
-     (`desc.groundAt`); this falls back to the building's own base, which is
-     exactly right for the flat city. Sampled once per fragment at spawn, not
-     per frame — a slab does not need to re-solve the hill it is falling
-     toward sixty times a second. */
-  function groundUnder(desc, x, z) {
-    if (desc.groundAt) {
-      try { const y = desc.groundAt(x, z); if (Number.isFinite(y)) return y; } catch (e) {}
-    }
-    return desc.gy || 0;
-  }
-
+  /* (desc.groundAt is no longer read here: the pieces are rigid bodies in
+     CBZ.debris, which lands every one of them on CBZ.floorAt, the real
+     ground under wherever it flew — hills, beach and volcano skirt included.) */
   C.profile = function (desc) {
     const w = Math.max(1, desc.w || 10), d = Math.max(1, desc.d || 10);
     const h = Math.max(2, desc.h || (desc.storeys || 1) * (desc.FH || 3.2));
@@ -235,139 +223,415 @@
   };
 
   /* ============================================================
-     2. THE FRAGMENT POOL — real debris with real ballistics.
+     2. THE DEBRIS IS THE BUILDING.
 
-     This is NOT city/crashfx.js's chunk pool and does not duplicate it.
-     That pool is for SHRAPNEL: it hard-refuses anything over 3 m
-     (cityDebrisAdopt's `debrisSize > 3.0` cull) because a car panel the size
-     of a wall reads as a flying billboard. A collapse is made of pieces that
-     are exactly the size that pool exists to reject — floor slabs, wall
-     sections, whole spandrel panels — so it needs its own budget, its own
-     size class and its own rest behaviour (a slab lands flat and STAYS,
-     a shrapnel chunk tumbles and expires).
+     This file used to own a private fragment pool: `new THREE.Mesh(unitBox)`
+     slabs in two blended greys, flown by its own ballistics loop and parked
+     on the street as seated cubes. Whatever fell — a sandstone walk-up, a
+     blue curtain-wall tower, a timber house — ended as the same grey boxes.
+     The owner's law (2026-09-27): "I hate big cubes of fake debris. Make
+     debris realer, all from the prop itself."
 
-     Everything else is shared: dust goes to crashfx's pooled puffs, small
-     spall goes to crashfx's chunk pool, glass goes to cityShatter.
+     So there is no pool here any more. A band that fails is handed, AS IT IS
+     AT THAT INSTANT (crushed, leaning, half-way through a topple), to
+     CBZ.debris.shatter: the building's OWN solids — its storey walls, floor
+     slabs, facade pieces and window panes, in their own materials and
+     vertex colours — are cut into Voronoi pieces that tumble as rigid
+     bodies, pile on each other and freeze into merged rubble owned by the
+     building's key. demolition.js clears that key when the lot is carted
+     off. Grit and dust come out in the building's own colours: a brick
+     block throws red dust, a white render tower white.
      ============================================================ */
-  const FRAG_CAP = () => Math.round(qs(70, 300));
-  const frags = [];
-  let unitBox = null;
-  function boxGeo() {
-    if (!unitBox && typeof THREE !== "undefined") unitBox = new THREE.BoxGeometry(1, 1, 1);
-    return unitBox;
+  const owners = new Set();           // every building key we have thrown debris for
+  const SRC_CAP = 44;                 // biggest solids read into one burst (the rest were grit anyway)
+  const GLASS_CAP = 8;                // panes read into one burst (radial shards)
+  // What the rubble is made of, from the building's structural system (the
+  // MATERIALS table above). Only used where the material itself says nothing
+  // more specific: a named/transparent pane stays glass, a metal trim metal.
+  const RUBBLE_KIND = {
+    masonry: "brick", brick: "brick", adobe: "dirt", stone: "rock",
+    concrete: "concrete", steel: "concrete", glassbox: "concrete", timber: "wood",
+  };
+
+  const HAS3 = typeof THREE !== "undefined";
+  const _bb = HAS3 ? new THREE.Box3() : null;
+  const _sz = HAS3 ? new THREE.Vector3() : null;
+  const _n3 = HAS3 ? new THREE.Matrix3() : null;
+  let paneUnit = null;                // a pooled (instanced) pane is read through a unit box
+  function paneGeo() {
+    if (!paneUnit) { paneUnit = new THREE.BoxGeometry(1, 1, 1); paneUnit._shared = true; }
+    return paneUnit;
   }
-  function recycleFrag() {
-    const f = frags.shift();
-    if (!f) return;
-    if (f.mesh.parent) f.mesh.parent.remove(f.mesh);
+  function isGlass(m) {
+    if (!m) return false;
+    if (m.transparent && m.opacity < 0.9) return true;
+    return /glass|window|pane/i.test(m.name || "");
+  }
+  function visibleIn(o, top) {
+    for (let a = o; a && a !== top; a = a.parent) if (a.visible === false) return false;
+    return true;
   }
 
-  /* Throw one piece. Sizes are in metres and are the CALLER's business — the
-     grammars size them off the band they came from, so a 40 m tower makes
-     slabs and a garden shed makes splinters, with no constant in between. */
-  function fragment(root, x, y, z, o) {
-    if (!CBZ.CONFIG.COLLAPSE_FRAGMENTS || typeof THREE === "undefined") return null;
-    const geo = boxGeo();
-    if (!geo || !root) return null;
-    const cap = FRAG_CAP();
-    while (frags.length >= cap) recycleFrag();
-    const sx = o.sx, sy = o.sy, sz = o.sz;
-    const mesh = new THREE.Mesh(geo, mat(o.col));
-    mesh.scale.set(sx, sy, sz);
-    mesh.position.set(x, y, z);
-    mesh.rotation.set(o.rx || 0, o.ry || 0, o.rz || 0);
-    mesh.castShadow = false; mesh.receiveShadow = true;
-    root.add(mesh);
-    const f = {
-      mesh: mesh, root: root,
-      vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0,
-      wx: o.wx || 0, wy: o.wy || 0, wz: o.wz || 0,
-      hh: Math.max(sx, sy, sz) * 0.5,
-      flat: Math.min(sx, sy, sz) * 0.5,
-      gy: o.gy || 0,
-      t: 0, settled: false,
-      // A slab that has come to rest is part of the rubble field, and the
-      // rubble field is the whole point of a collapse you can walk through.
-      // It outlives the animation by a long way, then thins out rather than
-      // popping — and demolition.js's own permanent pile has landed by then.
-      life: o.life || (34 + rnd() * 22),
-    };
-    frags.push(f);
-    return f;
-  }
-  C.fragment = fragment;
+  /* THE BUILDING'S OWN SOLIDS, read at the swap.
 
-  function stepFrags(dt) {
-    for (let i = frags.length - 1; i >= 0; i--) {
-      const f = frags[i];
-      f.t += dt;
-      if (!f.settled) {
-        f.vy -= G * 1.25 * dt;                 // slightly heavy: masonry does not float
-        const p = f.mesh.position;
-        p.x += f.vx * dt; p.y += f.vy * dt; p.z += f.vz * dt;
-        f.mesh.rotation.x += f.wx * dt;
-        f.mesh.rotation.y += f.wy * dt;
-        f.mesh.rotation.z += f.wz * dt;
-        const rest = f.gy + f.flat;
-        if (p.y <= rest && f.vy <= 0) {
-          if (f.vy < -5.5) {
-            // it bounces once, hard, and loses most of its energy — which is
-            // what makes a debris field spread past the footprint instead of
-            // stacking in a neat cone under the building.
-            f.vy = -f.vy * 0.20;
-            f.vx *= 0.55; f.vz *= 0.55;
-            f.wx *= 0.35; f.wy *= 0.35; f.wz *= 0.35;
-            p.y = rest;
-            if (CBZ.cityDustKick && rnd() < 0.22) {
-              try { CBZ.cityDustKick(p.x, rest, p.z, 0.5); } catch (e) {}
-            }
-          } else {
-            // settle: a slab comes to rest roughly flat, tipped by whatever
-            // it landed on. Snapping it dead level reads as a placed prop.
-            p.y = rest;
-            f.settled = true; f.t = 0;
-            f.mesh.rotation.x = (rnd() - 0.5) * 0.42;
-            f.mesh.rotation.z = (rnd() - 0.5) * 0.42;
-          }
+     desc.group   the building's real Object3D (city: b.group)
+     desc.solids  meshes that are drawn through core/batch.js's merged copy
+                  and are therefore visible=false on their own (the storey
+                  walls, slabs, parapets: b.losMeshes). They are still the
+                  building; batch only stopped them drawing individually.
+     desc.panes   b.windows — the glass lives in instanced pools, so each
+                  intact pane is read as its own world box in its pool's
+                  own material.
+     Furniture and interior partitions (anything that stays more than a
+     metre inside the footprint and is not a floor plate) are left out: they
+     cannot be seen during a fall and would only cost draw calls. A carved
+     wall (`_breached`) is left out too: its remnants stand in for it.
+     Returns [{geo, mat, m (building-local), cx, cy, cz, vol, slab, glass}]. */
+  function gatherSolids(desc) {
+    const grp = desc.group;
+    if (!HAS3 || !grp || !grp.isObject3D) return null;
+    const solids = new Set(desc.solids || []);
+    const ox = desc.ox, oy = desc.gy || 0, oz = desc.oz;
+    const hw = Math.max(1, desc.w || 10) / 2, hd = Math.max(1, desc.d || 10) / 2;
+    const out = [];
+    try { grp.updateWorldMatrix(true, true); } catch (e) { return null; }
+    grp.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
+      const geo = o.geometry;
+      if (!geo || !geo.attributes || !geo.attributes.position) return;
+      if (o._breached || (o.userData && (o.userData.debrisPiece || o.userData.cbzCollapseShell))) return;
+      if (!solids.has(o) && !visibleIn(o, grp.parent)) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      let any = false;
+      for (const m of mats) if (m && m.visible !== false && !(m.transparent && m.opacity < 0.05)) any = true;
+      if (!any) return;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      _bb.copy(geo.boundingBox).applyMatrix4(o.matrixWorld);
+      _bb.getSize(_sz);
+      const cx = (_bb.min.x + _bb.max.x) / 2 - ox, cz = (_bb.min.z + _bb.max.z) / 2 - oz;
+      const cy = (_bb.min.y + _bb.max.y) / 2 - oy;
+      if (Math.abs(cx) > hw + 3 || Math.abs(cz) > hd + 3) return;      // yard dressing
+      const slab = _sz.x >= hw * 1.2 && _sz.z >= hd * 1.2 && _sz.y < 1.2;
+      const IN = 1.2;
+      if (!slab && _bb.min.x - ox > -hw + IN && _bb.max.x - ox < hw - IN
+          && _bb.min.z - oz > -hd + IN && _bb.max.z - oz < hd - IN) return;   // interior
+      const m = new THREE.Matrix4().makeTranslation(-ox, -oy, -oz).multiply(o.matrixWorld);
+      out.push({ geo: geo, mat: o.material, m: m, cx: cx, cy: cy, cz: cz,
+        vol: Math.max(1e-4, _sz.x * _sz.y * _sz.z), slab: slab, glass: isGlass(mats[0]) });
+    });
+    for (const gp of desc.panes || []) {
+      if (!gp || gp.shattered || gp.mesh || !(gp.hw > 0) || !(gp.hh > 0)) continue;
+      const mat = (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material);
+      if (!mat) continue;
+      const sx = gp.hw * 2, sy = gp.hh * 2, sz = Math.max(gp.hd || 0, 0.006) * 2;
+      const m = new THREE.Matrix4().makeScale(sx, sy, sz).setPosition(gp.x - ox, gp.y - oy, gp.z - oz);
+      out.push({ geo: paneGeo(), mat: mat, m: m, cx: gp.x - ox, cy: gp.y - oy, cz: gp.z - oz,
+        vol: sx * sy * sz, slab: false, glass: true });
+    }
+    return out.length >= 4 ? out : null;
+  }
+
+  /* WHICH MATERIALS IS IT MADE OF — the wall (the biggest opaque non-slab
+     material by volume), the floor plates, and the glass. Shared with
+     demolition.js's rubble mound so the mound on the lot is the same stuff
+     that was standing on it. Cached on the record. */
+  function pickMats(items) {
+    const vol = new Map();
+    let glass = null, glassV = 0, slabM = null, slabV = 0;
+    for (const it of items) {
+      const m = Array.isArray(it.mat) ? it.mat[0] : it.mat;
+      if (!m) continue;
+      if (it.glass) { if (it.vol > glassV) { glassV = it.vol; glass = m; } continue; }
+      if (it.slab) { if (it.vol > slabV) { slabV = it.vol; slabM = m; } continue; }
+      vol.set(m, (vol.get(m) || 0) + it.vol);
+    }
+    let wall = null, best = 0;
+    vol.forEach(function (v, m) { if (v > best) { best = v; wall = m; } });
+    return { wall: wall || slabM, slab: slabM || wall, glass: glass };
+  }
+  C.materialsOf = function (b) {
+    if (!b) return null;
+    if (b._debrisMats) return b._debrisMats;
+    const items = gatherSolids({ group: b.group, solids: b.losMeshes, panes: b.windows,
+      ox: b.ox, oz: b.oz, gy: 0, w: b.w, d: b.d });
+    const r = items ? pickMats(items) : null;
+    if (r && r.wall) b._debrisMats = r;
+    return r;
+  };
+
+  // The building's own solids, cloned (geometry and material SHARED, nothing
+  // copied) at their live world pose, into a throwaway root for the reader.
+  function readSource(list, kind) {
+    const src = new THREE.Group();
+    for (const c of list) {
+      const mesh = new THREE.Mesh(c.geo, c.mat);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(c.world);
+      if (kind && !c.glass && CBZ.debris.kindOf(c.mat) === "concrete") mesh.userData.debrisKind = kind;
+      src.add(mesh);
+    }
+    return src;
+  }
+  // Every solid of these parts, at its pose this frame. A real shell carries
+  // its items; the proxy (no group to read) is read off its own meshes.
+  function partSolids(parts) {
+    const all = [];
+    for (const p of parts) {
+      if (!p || !p.g) continue;
+      p.g.updateWorldMatrix(true, true);
+      if (p.items) {
+        for (const it of p.items) {
+          all.push({ geo: it.geo, mat: it.mat, world: new THREE.Matrix4().multiplyMatrices(p.g.matrixWorld, it.m), vol: it.vol, glass: it.glass });
         }
-      } else if (f.t > f.life) {
-        // thin out from underneath rather than vanish
-        f.mesh.position.y -= dt * 0.55;
-        if (f.t > f.life + 3.2) {
-          if (f.mesh.parent) f.mesh.parent.remove(f.mesh);
-          frags.splice(i, 1);
-        }
+      } else {
+        p.g.traverse(function (o) {
+          // (the part group itself may already be hidden by the grammar)
+          if (!o.isMesh || !o.geometry || !visibleIn(o, p.g)) return;
+          _bb.setFromObject(o); _bb.getSize(_sz);
+          all.push({ geo: o.geometry, mat: o.material, world: o.matrixWorld.clone(), vol: Math.max(1e-4, _sz.x * _sz.y * _sz.z), glass: !!o.userData.cbzGlass || isGlass(o.material) });
+        });
       }
     }
+    return all;
   }
-  C.fragCount = function () { return frags.length; };
+
+  /* BREAK THESE PARTS. The one operation every grammar ends in: the parts
+     stop being a shell and become pieces of themselves.
+       o.at {x,y,z}   where the failure is (pieces there are smaller/faster)
+       o.vx/vy/vz     the velocity the collapse motion was carrying
+       o.dir          push direction; o.n budget; o.size piece size (m)
+       o.spread       how far the material throws (MATERIALS.spread) */
+  function breakParts(job, parts, o) {
+    for (const p of parts) if (p && p.g) p.g.visible = false;
+    if (!CBZ.CONFIG.COLLAPSE_FRAGMENTS || !CBZ.debris || !HAS3) return 0;
+    const sh = job.shell;
+    let all;
+    try { all = partSolids(parts); } catch (e) { return 0; }
+    if (!all.length) return 0;
+    // the biggest solids carry the budget; the smallest were only ever grit
+    const solid = all.filter(function (c) { return !c.glass; }).sort(function (a, b) { return b.vol - a.vol; }).slice(0, SRC_CAP);
+    const glass = all.filter(function (c) { return c.glass; }).sort(function (a, b) { return b.vol - a.vol; }).slice(0, GLASS_CAP);
+    const key = job.desc.key || "collapse";
+    owners.add(key);
+    // A CONTROLLED DEMOLITION (desc.tight) drops into its own footprint:
+    // the charges cut the columns, nothing is thrown, so the pieces barely
+    // leave the plan they stood on.
+    const tight = job.desc.tight ? 0.4 : 1;
+    const spread = (o.spread || 1) * tight;
+    const r = CBZ.debris.shatter(readSource(solid.concat(glass), sh.kind), {
+      at: o.at, dir: job.desc.tight ? null : (o.dir || null),
+      velocity: new THREE.Vector3((o.vx || 0) * tight, o.vy || 0, (o.vz || 0) * tight),
+      power: Math.max(0.6, Math.min(1.8, 0.8 * spread)),
+      speed: 2.4 * spread,
+      maxPieces: o.n, size: o.size, owner: key, solid: true,
+      dust: job.quiet ? false : job.prof.m.dust,
+    });
+    return r ? r.pieces : 0;
+  }
+
+  // The dust of THIS building: its wall colour ground into the grey of a
+  // pulverised floor plate. Handed to every dust kick this file makes.
+  function dustOf(sh, job) {
+    const wall = sh && sh.wall != null ? sh.wall : (job && job.desc.wall != null ? job.desc.wall : 0x8b8f94);
+    return mix(wall, 0xb3ada2, 0.5);
+  }
+
+  // Kept for any old caller: a lone fragment is a spit of chips of that
+  // colour now — a box of it would be exactly what the owner banned.
+  C.fragment = function (root, x, y, z, o) {
+    o = o || {};
+    if (!CBZ.debris) return null;
+    try {
+      CBZ.debris.chips(x, y, z, { color: o.col, count: 6, power: 1,
+        dir: (o.vx || o.vz) ? { x: o.vx || 0, y: 0.3, z: o.vz || 0 } : null });
+    } catch (e) {}
+    return null;
+  };
+  // Live (still tumbling) pieces in the shared debris sim.
+  C.fragCount = function () {
+    try { return CBZ.debris ? CBZ.debris.stats().live : 0; } catch (e) { return 0; }
+  };
+  /* HAULED OFF: the owner's crew clears a lot it was paid to clear
+     (demolition.js, when a held lot reaches its bare pad). Every real piece
+     within the radius goes — live bodies, frozen rubble, grit, the rubble's
+     colliders — leaving the lot bare. */
+  C.clearNear = function (x, z, r) {
+    if (!CBZ.debris || !CBZ.debris.clearNear) return 0;
+    try { return CBZ.debris.clearNear(x, z, r) || 0; } catch (e) { return 0; }
+  };
 
   /* ============================================================
-     3. THE LOOK-ALIKE SHELL.
+     3. THE SHELL — the building itself, cut into storey bands.
 
-     The proxy that stands in for the batched building. It is built out of the
-     building's OWN numbers so the swap is invisible:
-
-       • storey bands at the real floor height, in the real wall colour
-       • a window course per storey, inset, in a glass tone taken off the wall
-       • a darker plinth at the base and a cornice at the parapet, because a
-         building with neither reads as a packing crate
-       • FOUR FACE PANELS + A FLOOR SLAB per band on the quality tiers that
-         can afford them, so a grammar can peel one face off, expose the slab
-         edge, and hand the panel to the fragment pool as a real wall section
+     The real building's walls are merged into core/batch.js's static
+     buffers and cannot move, so a collapse animates a stand-in behind the
+     dust. The stand-in used to be a PROXY: boxes in the wall colour with a
+     window strip, a plinth and a cornice. It is now THE BUILDING: at the
+     swap its own solids (desc.group / desc.solids / desc.panes, see
+     gatherSolids) are sorted into storey bands and, per band, into the
+     four face panels and the floor plates, and each part is drawn as one
+     merged copy of its own geometry per material. Same windows, same
+     facade, same paint — the swap frame is the same picture, and when a
+     band fails the pieces are cut out of those very solids.
 
      THE PANEL DECOMPOSITION IS THE WHOLE TRICK. It is what lets one shell
      serve five completely different collapse motions without any of them
      knowing about the others: a pancake crushes the band, a topple sheds it
      tangentially, a shear drops the wound-side panels first, a fold rotates
      the panels inward at their base, a crumble blows all four outward.
+
+     THE PROXY stays only for a caller that cannot hand over its building
+     (no group): it is still built from that building's own numbers, and it
+     still breaks into pieces of itself rather than into invented slabs.
      ============================================================ */
   // How much shell can this quality tier afford? Band count, and whether a
   // band is decomposed into four face panels plus a floor slab (which is what
-  // lets a grammar peel one face off and expose the slabs behind it) or is a
-  // single box that still carries the right colour.
+  // lets a grammar peel one face off and expose the slabs behind it) or is
+  // one part per band.
   function shellBudget() {
     return { bands: Math.round(qs(3, 9)), panels: qs(0, 1) > 0.45 };
+  }
+
+  /* One merged copy of a part's solids per material: the draw-call cost of
+     a band is (faces x materials), never (meshes). Multi-material meshes
+     split by their own geometry groups. */
+  function mergeInto(g, list) {
+    const byMat = new Map();
+    for (const it of list) {
+      const geo = it.geo, idx = geo.index, pos = geo.attributes.position;
+      const n = idx ? idx.count : pos.count;
+      const groups = Array.isArray(it.mat) && geo.groups && geo.groups.length ? geo.groups : null;
+      if (groups) {
+        for (const gr of groups) {
+          const m = it.mat[gr.materialIndex || 0];
+          if (!m) continue;
+          let a = byMat.get(m); if (!a) { a = []; byMat.set(m, a); }
+          a.push({ geo: geo, m: it.m, s: gr.start, c: Math.min(gr.count, n - gr.start) });
+        }
+      } else {
+        const m = Array.isArray(it.mat) ? it.mat[0] : it.mat;
+        if (!m) continue;
+        let a = byMat.get(m); if (!a) { a = []; byMat.set(m, a); }
+        a.push({ geo: geo, m: it.m, s: 0, c: n });
+      }
+    }
+    byMat.forEach(function (runs, mat) {
+      let total = 0;
+      for (const r of runs) total += r.c - (r.c % 3);
+      if (!total) return;
+      const P = new Float32Array(total * 3), N = new Float32Array(total * 3), U = new Float32Array(total * 2);
+      const vc = !!mat.vertexColors, Cc = vc ? new Float32Array(total * 3) : null;
+      let o = 0;
+      for (const r of runs) {
+        const geo = r.geo, idx = geo.index, pos = geo.attributes.position;
+        const nrm = geo.attributes.normal, uv = geo.attributes.uv, col = geo.attributes.color;
+        // inlined affine transform: this runs once per vertex of a whole
+        // building on the swap frame, so no per-vertex method calls
+        _n3.getNormalMatrix(r.m);
+        const e = r.m.elements, q = _n3.elements;
+        // (an interleaved attribute is flattened once so the loop stays flat)
+        const flat = function (a, n) {
+          if (!a) return null;
+          if (!a.isInterleavedBufferAttribute && a.itemSize === n) return a.array;
+          const f = new Float32Array(a.count * n);
+          for (let j = 0; j < a.count; j++) for (let c = 0; c < n; c++) f[j * n + c] = a.getComponent ? a.getComponent(j, c) : [a.getX(j), a.getY(j), a.getZ(j)][c];
+          return f;
+        };
+        const pa = flat(pos, 3), ps = 3;
+        const na = flat(nrm, 3), ua = flat(uv, 2), ca = flat(col, 3);
+        const ia = idx ? idx.array : null;
+        const end = r.s + r.c - (r.c % 3);
+        for (let k = r.s; k < end; k++) {
+          const i = ia ? ia[k] : k;
+          const x = pa[i * ps], y = pa[i * ps + 1], z = pa[i * ps + 2];
+          P[o * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+          P[o * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+          P[o * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+          if (na) {
+            const a = na[i * 3], b = na[i * 3 + 1], c = na[i * 3 + 2];
+            const nx = q[0] * a + q[3] * b + q[6] * c, ny = q[1] * a + q[4] * b + q[7] * c, nz = q[2] * a + q[5] * b + q[8] * c;
+            const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+            N[o * 3] = nx / l; N[o * 3 + 1] = ny / l; N[o * 3 + 2] = nz / l;
+          }
+          if (ua) { U[o * 2] = ua[i * 2]; U[o * 2 + 1] = ua[i * 2 + 1]; }
+          if (vc) {
+            if (ca) { Cc[o * 3] = ca[i * 3]; Cc[o * 3 + 1] = ca[i * 3 + 1]; Cc[o * 3 + 2] = ca[i * 3 + 2]; }
+            else { Cc[o * 3] = 1; Cc[o * 3 + 1] = 1; Cc[o * 3 + 2] = 1; }
+          }
+          o++;
+        }
+      }
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      bg.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      bg.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      if (vc) bg.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      bg.computeBoundingSphere();
+      const mesh = new THREE.Mesh(bg, mat);
+      mesh.receiveShadow = true; mesh.castShadow = false;
+      g.add(mesh);
+    });
+  }
+
+  function realShell(desc, prof, items, opt, root) {
+    const w = prof.w, d = prof.d, h = prof.h, hw = w / 2, hd = d / 2;
+    const nBand = Math.max(2, Math.min(prof.storeys, opt.bands));
+    const bandH = h / nBand;
+    const outer = new THREE.Group(), pivot = new THREE.Group(), body = new THREE.Group();
+    pivot.add(body); outer.add(pivot);
+    outer.position.set(desc.ox, desc.gy || 0, desc.oz);
+    // a face part sits on its face's base line (the fold hinges it there)
+    const FACES = [
+      { nx: 0, nz: -1, px: 0, pz: -hd, w: w, d: 0.42 },
+      { nx: 0, nz: 1, px: 0, pz: hd, w: w, d: 0.42 },
+      { nx: -1, nz: 0, px: -hw, pz: 0, w: 0.42, d: d },
+      { nx: 1, nz: 0, px: hw, pz: 0, w: 0.42, d: d },
+    ];
+    const bands = [];
+    for (let i = 0; i < nBand; i++) {
+      const g = new THREE.Group();
+      g.position.y = bandH * i;
+      body.add(g);
+      bands.push({ g: g, y0: bandH * i, h: bandH, parts: [], crushed: 0, blew: false, dead: false, _p: {} });
+    }
+    function partOf(band, key) {
+      let p = band._p[key];
+      if (p) return p;
+      const g = new THREE.Group();
+      if (key >= 0) {
+        const f = FACES[key];
+        g.position.set(f.px, 0, f.pz);
+        p = { g: g, nx: f.nx, nz: f.nz, w: f.w, d: f.d, gone: false, items: [] };
+      } else p = { g: g, slab: key === -1, gone: false, items: [] };
+      band.g.add(g); band.parts.push(p); band._p[key] = p;
+      return p;
+    }
+    for (const it of items) {
+      const band = bands[Math.max(0, Math.min(nBand - 1, Math.floor(it.cy / bandH)))];
+      let key = -2;                                   // cheap tier: one part per band
+      if (opt.panels) {
+        const dist = [it.cz + hd, hd - it.cz, it.cx + hw, hw - it.cx];
+        let k = 0;
+        for (let j = 1; j < 4; j++) if (dist[j] < dist[k]) k = j;
+        key = (it.slab || dist[k] > 1.6) ? -1 : k;    // floor plates + core
+      }
+      const p = partOf(band, key);
+      const lm = new THREE.Matrix4().makeTranslation(-p.g.position.x, -band.y0, -p.g.position.z).multiply(it.m);
+      p.items.push({ geo: it.geo, mat: it.mat, m: lm, vol: it.vol, glass: it.glass });
+    }
+    for (const band of bands) { for (const p of band.parts) mergeInto(p.g, p.items); band._p = null; }
+    const mats = pickMats(items);
+    const wall = mats.wall && mats.wall.color ? mats.wall.color.getHex() : (desc.wall != null ? desc.wall : 0x8b8f94);
+    outer.userData.cbzCollapseShell = desc.key || true;
+    outer.name = "collapseShell";
+    root.add(outer);
+    return {
+      outer: outer, pivot: pivot, body: body, bands: bands, root: root,
+      bandH: bandH, wall: desc.wall != null ? desc.wall : wall,
+      slabCol: mats.slab && mats.slab.color ? mats.slab.color.getHex() : wall,
+      w: w, d: d, h: h, real: true, kind: RUBBLE_KIND[prof.material] || "concrete",
+      wallMat: mats.wall || mat(wall), glassMat: mats.glass,
+    };
   }
 
   C.shell = function (desc, prof) {
@@ -376,6 +640,24 @@
     if (!root) return null;
     prof = prof || C.profile(desc);
     const opt = shellBudget();
+
+    // THE BUILDING ITSELF when the caller hands it over.
+    if (desc.group) {
+      try {
+        const items = gatherSolids(desc);
+        if (items) { const sh = realShell(desc, prof, items, opt, root); if (sh) return sh; }
+      } catch (e) {}
+    }
+    return proxyShell(desc, prof, opt, root);
+  };
+
+  // ---- THE PROXY: for a caller with no group to read ------------------------
+  let unitBox = null;
+  function boxGeo() {
+    if (!unitBox && typeof THREE !== "undefined") { unitBox = new THREE.BoxGeometry(1, 1, 1); unitBox._shared = true; }
+    return unitBox;
+  }
+  function proxyShell(desc, prof, opt, root) {
 
     const w = prof.w, d = prof.d, h = prof.h;
     const wall = desc.wall != null ? desc.wall : 0x8b8f94;
@@ -436,6 +718,7 @@
             const wy = (k + 0.58) * (bandH / nWin);
             if (wy + winH / 2 > bandH) continue;
             const wm = new THREE.Mesh(boxGeo(), mat(glass));
+            wm.userData.cbzGlass = true;          // breaks as glass, not as wall
             if (f.nz) wm.scale.set(winLen, winH, T + 0.06);
             else wm.scale.set(T + 0.06, winH, winLen);
             wm.position.y = wy;
@@ -486,18 +769,19 @@
     return {
       outer: outer, pivot: pivot, body: body, bands: bands, root: root,
       bandH: bandH, wall: wall, glass: glass, slabCol: slabCol,
-      w: w, d: d, h: h,
+      w: w, d: d, h: h, real: false, kind: RUBBLE_KIND[prof.material] || "concrete",
+      wallMat: mat(wall), glassMat: null,
     };
-  };
+  }
 
   C.disposeShell = function (sh) {
     if (!sh || !sh.outer) return;
     if (sh.outer.parent) sh.outer.parent.remove(sh.outer);
     sh.outer.traverse(function (o) {
-      // the unit box is SHARED — disposing it would take out every fragment
-      // in flight and every other shell on screen. Materials are cmat cache
-      // entries and are never ours to dispose either.
-      if (o.isMesh && o.geometry && o.geometry !== unitBox) o.geometry.dispose();
+      // the proxy's unit box is SHARED with every other proxy on screen, and
+      // materials are the building's own (or cmat cache entries) — never
+      // ours to dispose. The merged band copies are ours.
+      if (o.isMesh && o.geometry && o.geometry !== unitBox && !o.geometry._shared) o.geometry.dispose();
     });
     sh.outer = null; sh.bands = null;
   };
@@ -514,53 +798,33 @@
     band.dead = true;
     // World-space seat of this band. Read its LIVE base off the group (a
     // pancaked band has already ridden a long way down by the time it lets
-    // go, and spawning its debris at the height it was standing at would put
-    // half a tower's rubble in the air above the collapse). For a hinge
-    // grammar the caller has already solved the rotated world point and
-    // passes x/z/wy in.
+    // go). For a hinge grammar the caller has already solved the rotated
+    // world point and passes x/z/wy in.
     const liveY = (band.g && band.g.position ? band.g.position.y : band.y0) + band.h / 2;
     const wy = o.wy != null ? o.wy : (job.desc.gy || 0) + liveY;
     const cx = o.x != null ? o.x : job.desc.ox;
     const cz = o.z != null ? o.z : job.desc.oz;
 
-    for (const p of band.parts) if (p.g) p.g.visible = false;
-
-    if (!CBZ.CONFIG.COLLAPSE_FRAGMENTS) return;
-    // COUNT scales with the band's actual mass, not with a constant, so a
-    // wide floor plate makes more pieces than a narrow one and a low quality
-    // tier makes fewer of everything.
+    // HOW MANY PIECES scales with the band's actual mass, never a constant,
+    // and HOW BIG with the band's own plate: a tower sheds slabs, a garden
+    // shed splinters. The pieces themselves are cut out of the band's own
+    // walls, plates and glass (breakParts).
     const area = sh.w * sh.d;
-    const base = Math.min(9, Math.max(2, Math.round(Math.sqrt(area) * 0.42)));
-    const n = Math.max(1, Math.round(base * m.frag * qs(0.45, 1.15) * (o.count || 1)));
-    // SIZE is the band's own slab, broken into that many pieces — that is
-    // what makes a tower shed slabs and a shed shed splinters.
-    const piece = Math.max(0.55, Math.sqrt(area / Math.max(1, n)) * 0.62 * m.fragSize);
-    const spread = (o.spread || 1) * m.spread;
-    for (let i = 0; i < n; i++) {
-      const a = rnd() * 6.2832;
-      const rx = (rnd() - 0.5) * sh.w * 0.72, rz = (rnd() - 0.5) * sh.d * 0.72;
-      const sx = piece * (0.55 + rnd() * 0.9);
-      const sz = piece * (0.55 + rnd() * 0.9);
-      const sy = Math.max(0.18, piece * (0.16 + rnd() * 0.35));    // slabs are FLAT
-      fragment(sh.root, cx + rx, wy + (rnd() - 0.4) * band.h, cz + rz, {
-        sx: sx, sy: sy, sz: sz,
-        col: rnd() < 0.30 ? sh.slabCol : mix(sh.wall, sh.slabCol, rnd() * 0.55),
-        vx: (o.vx || 0) + Math.cos(a) * (1.4 + rnd() * 3.4) * spread,
-        vy: (o.vy || 0) + (rnd() - 0.15) * 3.2,
-        vz: (o.vz || 0) + Math.sin(a) * (1.4 + rnd() * 3.4) * spread,
-        wx: (rnd() - 0.5) * 7, wy: (rnd() - 0.5) * 7, wz: (rnd() - 0.5) * 7,
-        gy: groundUnder(job.desc, cx + rx, cz + rz),
-        rx: rnd() * 3, ry: rnd() * 3, rz: rnd() * 3,
-      });
-    }
+    const n = Math.max(6, Math.round(Math.sqrt(area) * 0.9 * m.frag * qs(0.5, 1.1) * (o.count || 1)));
+    const size = Math.min(3.2, Math.max(0.55, Math.sqrt(area / n) * 0.62 * m.fragSize));
+    breakParts(job, band.parts.filter(function (p) { return !p.gone; }), {
+      at: { x: cx, y: wy, z: cz }, n: n, size: size,
+      vx: o.vx, vy: o.vy, vz: o.vz, spread: (o.spread || 1) * m.spread,
+    });
+    for (const p of band.parts) if (p.g) p.g.visible = false;
     // the air jet: every floor a front passes expels its air and its contents
     if (!band.blew) {
       band.blew = true;
       const a = rnd() * 6.2832;
       try {
-        if (CBZ.cityDustKick) CBZ.cityDustKick(cx + Math.cos(a) * sh.w * 0.5, wy, cz + Math.sin(a) * sh.d * 0.5, 1.5 * m.dust);
+        if (CBZ.cityDustKick) CBZ.cityDustKick(cx + Math.cos(a) * sh.w * 0.5, wy, cz + Math.sin(a) * sh.d * 0.5, 1.5 * m.dust, dustOf(sh, job));
         if (CBZ.cityChunk) CBZ.cityChunk(cx + Math.cos(a) * sh.w * 0.4, wy, cz + Math.sin(a) * sh.d * 0.4,
-          { count: 3, force: 6, dirx: Math.cos(a), dirz: Math.sin(a) });
+          { count: 3, force: 6, dirx: Math.cos(a), dirz: Math.sin(a), material: sh.wallMat });
       } catch (e) {}
     }
   }
@@ -855,44 +1119,29 @@
   /* A single panel becoming debris — the shear grammar's per-part burst. Hung
      off burstBand so the two can never drift on colour or sizing. */
   burstBand.panelBurst = function (job, band, part, mult) {
-    if (!CBZ.CONFIG.COLLAPSE_FRAGMENTS) return;
+    if (!CBZ.CONFIG.COLLAPSE_FRAGMENTS) { if (part.g) part.g.visible = false; return; }
     const sh = job.shell, m = job.prof.m;
     // A SHED is cheaper than a PEEL. A pancake sheds the cladding off every
-    // band it eats — up to four panels per band, on a nine-band shell — so at
-    // full count one tower would churn the whole fragment budget before its
-    // front was a third of the way down and the pieces that matter (the slabs
-    // the front is actually making) would evict the pieces that already
-    // landed. The shear grammar peels ONE face and can afford the detail.
-    const n = Math.max(1, Math.round(3 * m.frag * qs(0.5, 1.2) * (mult == null ? 1 : mult)));
-    const piece = Math.max(0.5, Math.sqrt(Math.max(part.w || 2, part.d || 2)) * 0.85 * m.fragSize);
-    // WHERE THE PANEL ACTUALLY IS. A cladding panel that lets go of floor 30
-    // starts at floor 30 and falls thirty floors — spawning it at the kerb
-    // (which the first draft of this did) turns the most recognisable read in
-    // collapse footage into a puff of dust at the wrong end of the building.
-    // The band's group carries the live crush/sink transform, so read the
-    // height off it rather than off the plan.
-    // band.g.position.y IS the band's base in shell-local space (shell() seats
-    // it at y0 and every grammar writes an absolute local base into it), so
-    // this is the band's live mid-height, wherever the collapse has moved it.
+    // band it eats — up to four panels per band, on a nine-band shell — so a
+    // shed panel gets a small budget and the pieces that matter (the plates
+    // the front is actually making) keep theirs. The shear grammar peels ONE
+    // face and can afford the detail.
+    const n = Math.max(3, Math.round(6 * m.frag * qs(0.5, 1.2) * (mult == null ? 1 : mult)));
+    // WHERE THE PANEL ACTUALLY IS: the band's group carries the live
+    // crush/sink transform, so its height is read off it — a cladding panel
+    // that lets go of floor 30 starts at floor 30 and falls thirty floors.
     const localY = (band.g && band.g.position ? band.g.position.y : band.y0) + band.h * 0.5;
     const wy = (job.desc.gy || 0) + Math.max(0.6, localY);
-    const tx = (part.nz || 0), tz = -(part.nx || 0);          // along the face
-    for (let i = 0; i < n; i++) {
-      const along = (rnd() - 0.5) * Math.max(part.w || 2, part.d || 2) * 0.9;
-      const px = job.desc.ox + (part.nx || 0) * sh.w * 0.5 + tx * along;
-      const pz = job.desc.oz + (part.nz || 0) * sh.d * 0.5 + tz * along;
-      fragment(sh.root, px, wy + (rnd() - 0.5) * band.h * 0.8, pz, {
-        sx: piece * (0.6 + rnd()), sy: Math.max(0.2, piece * 0.3), sz: piece * (0.6 + rnd()),
-        col: mix(sh.wall, sh.slabCol, rnd() * 0.6),
-        // outward off the face, and DOWN — a shed panel pours off the wall,
-        // it is not thrown up off it
-        vx: (part.nx || 0) * (1.6 + rnd() * 3.2) * m.spread + tx * (rnd() - 0.5) * 2,
-        vy: -0.5 - rnd() * 2.5,
-        vz: (part.nz || 0) * (1.6 + rnd() * 3.2) * m.spread + tz * (rnd() - 0.5) * 2,
-        wx: (rnd() - 0.5) * 8, wy: (rnd() - 0.5) * 8, wz: (rnd() - 0.5) * 8,
-        gy: groundUnder(job.desc, px, pz),
-      });
-    }
+    const nx = part.nx || 0, nz = part.nz || 0;
+    const px = job.desc.ox + nx * sh.w * 0.5, pz = job.desc.oz + nz * sh.d * 0.5;
+    // outward off the face and DOWN — a shed panel pours off the wall, it is
+    // not thrown up off it
+    breakParts(job, [part], {
+      at: { x: px, y: wy, z: pz }, n: n,
+      size: Math.min(2.4, Math.max(0.5, Math.sqrt(Math.max(part.w || 2, part.d || 2)) * 0.85 * m.fragSize)),
+      dir: { x: nx, y: -0.4, z: nz },
+      vx: nx * 1.6 * m.spread, vy: -0.5 - rnd() * 1.5, vz: nz * 1.6 * m.spread, spread: 0.8 * m.spread,
+    });
   };
 
   /* ---- FOLD — light timber ------------------------------------------------
@@ -1030,7 +1279,7 @@
       try {
         if (CBZ.shake) CBZ.shake(1.4);
         if (CBZ.sfx) CBZ.sfx("rumble");
-        if (CBZ.cityDustKick) CBZ.cityDustKick(desc.ox, desc.gy + 0.6, desc.oz, 2.2 * prof.m.dust);
+        if (CBZ.cityDustKick) CBZ.cityDustKick(desc.ox, desc.gy + 0.6, desc.oz, 2.2 * prof.m.dust, dustOf(null, job));
       } catch (e) {}
     }
     return job;
@@ -1058,13 +1307,16 @@
           try {
             if (CBZ.cityDustKick) CBZ.cityDustKick(
               job.desc.ox + (rnd() - 0.5) * job.prof.w, job.desc.gy + 0.5,
-              job.desc.oz + (rnd() - 0.5) * job.prof.d, 1.4 * job.prof.m.dust);
+              job.desc.oz + (rnd() - 0.5) * job.prof.d, 1.4 * job.prof.m.dust, dustOf(null, job));
             if (CBZ.shake) CBZ.shake(0.5);
           } catch (e) {}
         }
         if (job.t >= job.pre) {
+          // THE SHELL IS READ FIRST and the real building hidden second, in
+          // the same frame: the shell is built out of what is standing right
+          // now, and the swap is what stops it standing.
+          try { job.shell = C.shell(job.desc, job.prof); } catch (e) { job.shell = null; }
           try { if (job.onSwap) job.onSwap(job); } catch (e) {}
-          job.shell = C.shell(job.desc, job.prof);
           if (!job.shell) { try { if (job.onGround) job.onGround(job); if (job.onDone) job.onDone(job); } catch (e) {} jobs.splice(i, 1); continue; }
           try { if (job.mode.plan) job.mode.plan(job); } catch (e) {}
           job.phase = 1; job.t = 0;
@@ -1116,204 +1368,88 @@
       // THE PALL. Dust volume many times the footprint, rolling OUT along the
       // ground, is the signature of a real collapse and the thing that makes
       // it read at 200 m. Scaled by the material: a steel frame makes far
-      // less of it than a masonry block does.
+      // less of it than a masonry block does. It is THIS building's dust.
       if (CBZ.cityDustKick) {
+        const dc = dustOf(sh, job);
         const n = Math.round(qs(4, 11) * p.m.dust);
         for (let i = 0; i < n; i++) {
           const a = (i / n) * 6.2832 + rnd() * 0.4;
           const r = 0.6 + rnd() * 0.7;
-          CBZ.cityDustKick(d.ox + Math.cos(a) * p.w * r, d.gy + 0.5, d.oz + Math.sin(a) * p.d * r, 2.6 * p.m.dust);
+          CBZ.cityDustKick(d.ox + Math.cos(a) * p.w * r, d.gy + 0.5, d.oz + Math.sin(a) * p.d * r, 2.6 * p.m.dust, dc);
         }
       }
-      if (CBZ.cityChunk) CBZ.cityChunk(d.ox, d.gy + 1.4, d.oz, { count: 16, force: 10 });
+      if (CBZ.cityChunk) CBZ.cityChunk(d.ox, d.gy + 1.4, d.oz, { count: 16, force: 10, material: sh && sh.wallMat });
       if (CBZ.cityShatter) CBZ.cityShatter(d.ox, d.oz, Math.max(p.w, p.d) + 14);
     } catch (e) {}
   }
 
   /* ============================================================
-     6. THE DAMAGE SKIN — all the stages BEFORE the collapse.
+     6. THE DAMAGE — all the stages BEFORE the collapse, on the building.
 
      "All stages of destruction." A building that is hit and survives has to
-     LOOK hit, and it has to look progressively worse as it takes more. The
-     wall itself is merged into core/batch.js's static buffers and cannot be
-     edited, so the skin is a small un-batched group that stands a few
-     centimetres proud of the real facade and adds what damage actually adds:
+     LOOK hit, and progressively worse as it takes more. This used to be a
+     DRESSING: a group of invented boxes stood a few centimetres proud of the
+     facade — dark boxes for blown openings, grey boxes for slab edges, a box
+     "panel" hanging off its fixing, box columns, rebar sticks, and an apron
+     of seated grey lumps on the pavement. None of it was the building, and
+     the apron was exactly the fake rubble the owner banned.
 
-       stage 1 SCARRED   blown window openings on the hit face — the panes are
-                         out and the openings are dark. Nothing painted ON the
-                         wall (the owner purged facade decals for good reason:
-                         soot does not stick to a vertical pane).
-       stage 2 WOUNDED   whole spandrel panels missing, the FLOOR SLAB EDGES
-                         showing through the gap, a panel left hanging off its
-                         top fixing, and the first rubble on the pavement.
-       stage 3 BURNING   the fire model owns the flame; the skin darkens the
-                         openings on burning floors to soot black.
-       stage 4 CRITICAL  the load path is going: a bite taken out of the
-                         silhouette at the wound floor, columns standing bare
-                         where the cladding used to be, rebar, and a real
-                         apron of debris on the street. This is the stage that
-                         has to make a player say "that's coming down".
-
-     One group per building, rebuilt (not accumulated) whenever the stage
-     changes, so it can never grow without bound.
+     The wound is now the building's own wall, opened. At each stage the
+     wall at the wound is carved (CBZ.cityCarveWall, the same carve every
+     rocket uses): the wall's own material leaves through CBZ.debris as
+     pieces of itself, a ragged welded rim stays, the floor plates show
+     through the gap, and what lands on the pavement is the wall that came
+     out of the hole.
+       stage 2 WOUNDED   the bays at the wound open
+       stage 4 CRITICAL  the bays either side and the floor above go too
+     Each stage carves once per building. A caller with no wall point to
+     carve at (no desc.at — the island, whose own spall drops pieces of its
+     wall material) gets the bookkeeping only.
      ============================================================ */
-  const skins = new Map();                      // key -> {group, stage}
+  const skins = new Map();                      // key -> {key, stage, carved}
 
   C.skin = function (desc, stage, wound) {
     if (!CBZ.CONFIG.COLLAPSE_SKIN || !CBZ.CONFIG.COLLAPSE_V2) return null;
-    if (typeof THREE === "undefined") return null;
-    const root = desc.root || CBZ.scene;
-    if (!root) return null;
     const key = desc.key || (Math.round(desc.ox) + "," + Math.round(desc.oz));
     let rec = skins.get(key);
-    if (rec && rec.stage === stage) return rec;
-    if (rec) { if (rec.group.parent) rec.group.parent.remove(rec.group); disposeTree(rec.group); skins.delete(key); }
-    if (!(stage > 0)) return null;
-
-    const prof = C.profile(desc);
-    const wall = desc.wall != null ? desc.wall : 0x8b8f94;
-    const dark = mix(shade(wall, 0.18), 0x0a0c10, 0.6);      // the inside of a blown floor
-    const slabCol = mix(shade(wall, prof.m.tone), 0x6d7076, 0.45);
-    const rebarCol = 0x4a4038;
-    const w = { nx: (wound && wound.nx) || 1, nz: (wound && wound.nz) || 0, floor: (wound && wound.floor) || 0 };
-    const nl = Math.hypot(w.nx, w.nz) || 1; w.nx /= nl; w.nz /= nl;
-
-    const g = new THREE.Group();
-    g.position.set(desc.ox, desc.gy || 0, desc.oz);
-    // NAMED so a probe can find this group specifically. Without the tag the
-    // only way to identify it from outside is "a group near the building",
-    // which finds the BUILDING — and a check that cannot tell the dressing
-    // from the thing it is dressing proves nothing.
-    g.userData.cbzCollapseSkin = key;
-    g.name = "collapseSkin";
-    const horiz = Math.abs(w.nz) > Math.abs(w.nx);
-    const halfN = horiz ? prof.d / 2 : prof.w / 2;
-    const span = horiz ? prof.w : prof.d;
-    const out = horiz ? Math.sign(w.nz) || 1 : Math.sign(w.nx) || 1;
-    const FH = prof.FH;
-    /* HOW MUCH OF THE FACADE IS GONE, BY STAGE. Two numbers, and they scale
-       differently on purpose:
-
-         bite   how far ACROSS the face the wound reaches, as a fraction of
-                its bays. This is a fraction because a wide building loses
-                proportionally more of a wide face.
-         floors how far UP it reaches. This is NOT a fraction of the storeys:
-                a wound is LOCAL to where the thing hit, so "10% of the
-                building" on a 52-storey tower would put five floors of
-                destruction on the frame after one rocket. It grows with the
-                stage and only weakly with height (a tall building's wound
-                does run further, because there is more load above it to
-                redistribute), and it is centred on the floor that was hit. */
-    const bite = [0, 0.10, 0.30, 0.34, 0.62][Math.min(4, stage)] || 0;
-    const spanByStage = [0, 1, 2, 2, 4][Math.min(4, stage)] || 1;
-    const floors = Math.max(1, Math.min(prof.storeys,
-      Math.round(spanByStage * (1 + prof.storeys / 40))));
-    const f0 = Math.max(0, Math.min(prof.storeys - 1, w.floor - Math.floor(floors / 2)));
-
-    function put(t, y, len, h, depth, col, dz) {
-      const m = new THREE.Mesh(boxGeo(), mat(col));
-      const n = halfN + (dz || 0);
-      if (horiz) { m.scale.set(len, h, depth); m.position.set(t, y, out * n); }
-      else { m.scale.set(depth, h, len); m.position.set(out * n, y, t); }
-      g.add(m);
-      return m;
+    if (!(stage > 0)) { if (rec) skins.delete(key); return null; }
+    if (!rec) { rec = { key: key, stage: 0, carved: 0 }; skins.set(key, rec); }
+    if (rec.stage === stage) return rec;
+    rec.stage = stage;
+    const at = desc.at;
+    const want = stage >= 4 ? 4 : stage >= 2 ? 2 : 0;
+    if (!at || !CBZ.cityCarveWall || want <= rec.carved) return rec;
+    let nx = (wound && wound.nx) || 0, nz = (wound && wound.nz) || 0;
+    const nl = Math.hypot(nx, nz);
+    if (nl < 1e-3) return rec;
+    nx /= nl; nz /= nl;
+    const tx = -nz, tz = nx;                    // along the struck face
+    const FH = desc.FH || 3.2;
+    const bay = 3.4;
+    // the hit itself has usually already carved its own bay (a breached wall
+    // refuses a second carve), so the wound spreads to its neighbours
+    const spots = [];
+    if (rec.carved < 2) spots.push([0, 0], [bay, 0]);
+    if (want >= 4) spots.push([-bay, 0], [bay * 2, 0], [0, FH], [bay, FH]);
+    rec.carved = want;
+    for (const sp of spots) {
+      try { CBZ.cityCarveWall(at.x + tx * sp[0], at.y + sp[1], at.z + tz * sp[0], 1.3); } catch (e) {}
     }
-
-    const bays = Math.max(2, Math.round(span / 4.2));
-    const bayW = span / bays;
-    for (let fi = 0; fi < floors; fi++) {
-      const fl = f0 + fi;
-      if (fl >= prof.storeys) break;
-      const y = fl * FH;
-      // how wide the wound is on this floor — widest at the hit, tapering up
-      const rel = 1 - Math.abs(fl - w.floor) / Math.max(1, floors);
-      const nOut = Math.max(1, Math.round(bays * bite * (0.6 + rel * 0.9)));
-      for (let bi = 0; bi < nOut; bi++) {
-        const idx = Math.floor(bays / 2) + (bi % 2 ? 1 : -1) * Math.ceil(bi / 2);
-        if (idx < 0 || idx >= bays) continue;
-        const t = -span / 2 + (idx + 0.5) * bayW;
-        // THE OPENING — a dark void set slightly INTO the wall, which is what
-        // a missing panel actually looks like: you see the floor above's
-        // soffit and nothing else.
-        put(t, y + FH * 0.55, bayW * 0.86, FH * 0.72, 0.5, stage >= 3 ? shade(dark, 0.5) : dark, -0.26);
-        // THE SLAB EDGE — visible through the hole. This single detail is
-        // what stops a wound reading as a painted black rectangle.
-        if (stage >= 2) put(t, y + 0.14, bayW * 0.9, 0.26, 0.34, slabCol, -0.1);
-        // REBAR hanging out of the broken slab
-        if (stage >= 4 && (bi & 1) === 0) {
-          for (let k = 0; k < 3; k++) {
-            const m = put(t + (k - 1) * bayW * 0.22, y - 0.35, 0.05, 0.9, 0.05, rebarCol, 0.05);
-            m.rotation.z = (rnd() - 0.5) * 0.7;
-          }
-        }
-      }
-      // A PANEL LEFT HANGING off its top fixing — the most legible "this was
-      // violent" cue on any damaged building, and it costs one box.
-      if (stage >= 2 && fi === 0) {
-        const t = -span / 2 + (Math.floor(bays / 2) + 1.5) * bayW;
-        const m = put(t, y + FH * 0.35, bayW * 0.7, FH * 0.6, 0.3, shade(wall, 0.92), 0.34);
-        m.rotation[horiz ? "x" : "z"] = (horiz ? -out : out) * (0.5 + rnd() * 0.5);
-      }
-    }
-
-    // BARE COLUMNS at CRITICAL — the cladding is gone off a whole bay and
-    // what is left holding the building up is visible from the street.
-    if (stage >= 4) {
-      for (let bi = 0; bi <= bays; bi++) {
-        if ((bi & 1) === 0) continue;
-        const t = -span / 2 + bi * bayW;
-        put(t, w.floor * FH + FH, 0.55, FH * 2.1, 0.55, mix(slabCol, 0x3c4046, 0.5), -0.2);
-      }
-    }
-
-    // THE APRON. Everything that came off the building is on the pavement
-    // under it, and it grows with the stage. Not fragments — those are live
-    // physics and this is settled world — just seated lumps.
-    if (stage >= 2) {
-      const n = Math.round(qs(3, 9) * (stage >= 4 ? 2.1 : 1));
-      for (let i = 0; i < n; i++) {
-        const t = (rnd() - 0.5) * span * 0.95;
-        const off = halfN + 0.7 + rnd() * (stage >= 4 ? 4.5 : 2.2);
-        const s = 0.4 + rnd() * (stage >= 4 ? 1.7 : 0.9);
-        const m = new THREE.Mesh(boxGeo(), mat(mix(wall, slabCol, rnd())));
-        m.scale.set(s, s * (0.25 + rnd() * 0.4), s * (0.6 + rnd() * 0.8));
-        if (horiz) m.position.set(t, s * 0.18, out * off);
-        else m.position.set(out * off, s * 0.18, t);
-        m.rotation.set((rnd() - 0.5) * 0.5, rnd() * 3, (rnd() - 0.5) * 0.5);
-        m.receiveShadow = true;
-        g.add(m);
-      }
-    }
-
-    root.add(g);
-    rec = { group: g, stage: stage, key: key };
-    skins.set(key, rec);
     return rec;
   };
 
   C.skinClear = function (desc) {
     const key = (desc && desc.key) || (desc && (Math.round(desc.ox) + "," + Math.round(desc.oz)));
-    const rec = skins.get(key);
-    if (!rec) return false;
-    if (rec.group.parent) rec.group.parent.remove(rec.group);
-    disposeTree(rec.group);
-    skins.delete(key);
-    return true;
+    return skins.delete(key);
   };
   C.skinCount = function () { return skins.size; };
-
-  function disposeTree(o) {
-    o.traverse(function (n) { if (n.isMesh && n.geometry && n.geometry !== unitBox) n.geometry.dispose(); });
-  }
 
   /* ============================================================
      7. TICK + RESET + AUDIT
      ============================================================ */
   if (CBZ.onUpdate) CBZ.onUpdate(34.46, function (dt) {
-    if (!jobs.length && !frags.length) return;
-    const d = dt > 0.25 ? 0.25 : dt;
-    if (jobs.length) stepJobs(d);
-    if (frags.length) stepFrags(d);
+    if (!jobs.length) return;
+    stepJobs(dt > 0.25 ? 0.25 : dt);
   });
 
   /* WHAT IS HAPPENING RIGHT NOW — the probe seam. A collapse is a four-second
@@ -1323,6 +1459,13 @@
      second, which is the pacing fault tools/visual-presets/README.md calls
      out by name) is published here: which grammar each live job picked, what
      phase it is in, how far through the fall it is. */
+  function debrisStat(k) {
+    try {
+      const s = CBZ.debris ? CBZ.debris.stats() : null;
+      if (!s) return 0;
+      return k === "caps" ? s.caps.live : (s[k] || 0);
+    } catch (e) { return 0; }
+  }
   C.debug = function () {
     return {
       jobs: jobs.map(function (j) {
@@ -1337,17 +1480,18 @@
           standing: j.shell && j.shell.bands ? j.shell.bands.filter(function (b) { return !b.dead; }).length : 0,
         };
       }),
-      frags: frags.length, settled: frags.filter(function (f) { return f.settled; }).length,
-      skins: skins.size, cap: FRAG_CAP(),
+      // the pieces live in CBZ.debris now: live = still tumbling, settled =
+      // frozen into rubble (every building's, not just this file's)
+      frags: debrisStat("live"), settled: debrisStat("static"),
+      skins: skins.size, cap: debrisStat("caps"),
     };
   };
 
   C.reset = function () {
     for (const job of jobs) { if (job.shell) C.disposeShell(job.shell); }
     jobs.length = 0;
-    for (const f of frags) if (f.mesh.parent) f.mesh.parent.remove(f.mesh);
-    frags.length = 0;
-    skins.forEach(function (rec) { if (rec.group.parent) rec.group.parent.remove(rec.group); disposeTree(rec.group); });
+    if (CBZ.debris) owners.forEach(function (k) { try { CBZ.debris.clear(k); } catch (e) {} });
+    owners.clear();
     skins.clear();
   };
   C.active = function () { return jobs.length; };
@@ -1372,7 +1516,7 @@
     return {
       facades: list.length, hardcoded: undeclared, missing: missing,
       modes: C.modeList(), materials: Object.keys(MATERIALS),
-      live: jobs.length, frags: frags.length, skins: skins.size,
+      live: jobs.length, frags: debrisStat("live"), skins: skins.size,
     };
   };
   CBZ.collapseAudit = C.audit;

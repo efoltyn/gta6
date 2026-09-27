@@ -210,6 +210,9 @@
   function pickupNote(text, opts) {
     const name = String(text == null ? "" : text).trim();
     if (!name) return;
+    // CITY: no pickup text (HUD purge 2026-09-27). What you took shows in the
+    // world: it leaves the ground, the hotbar surfaces with it, cash pops.
+    if (CBZ.game && CBZ.game.mode === "city") return;
     opts = opts || {};
     const root = pickRoot();
     if (!root) return;

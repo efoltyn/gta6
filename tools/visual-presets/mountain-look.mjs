@@ -60,6 +60,8 @@ export default {
     snowGullyContrast: { label: "Gully-vs-spine snow contrast", unit: "0-1", better: "higher" },
     snowCoverMean: { label: "Mean snow coverage", unit: "0-1", better: "higher" },
     drawCalls: { label: "Draw calls", unit: "", better: "lower" },
+    triangles: { label: "Triangles (frame)", unit: "", better: "lower" },
+    massifTris: { label: "Massif triangles drawn (both ranges)", unit: "", better: "lower" },
   },
   defaultFocus:
     "Look at WHERE the white is (gullies and hollows, not a band), whether the green climbs the " +
@@ -454,6 +456,17 @@ export default {
         snowGullyContrast: Number(contrast.toFixed(4)),
         snowCoverMean: Number(coverMean.toFixed(4)),
         drawCalls: Number(info.calls || 0),
+        triangles: Number(info.triangles || 0),
+        // the two alpine meshes as drawn this frame (far LOD or full grid)
+        massifTris: (function () {
+          let t = 0;
+          CBZ.scene.traverse(function (o) {
+            if (!o.isMesh || !o.visible || !/mount-mercy-earth-terrain|greater-mercy-rounded-alpine-range/.test(o.name || "")) return;
+            const g = o.geometry;
+            t += (g.index ? g.index.count : g.attributes.position.count) / 3;
+          });
+          return Math.round(t);
+        })(),
       },
     };
   },

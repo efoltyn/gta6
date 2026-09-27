@@ -1,421 +1,163 @@
 /* ============================================================
-   city/hud.js — the CITY heads-up display: cash, the 5-star wanted
-   meter, health / hunger / stamina bars, equipped weapon + ammo, and
-   the active-job objective line with distance. Self-contained overlay
-   shown only in city mode (prison/survival HUD is hidden via .mode-city).
+   city/hud.js — the CITY heads-up display, after the 2026-09-27 HUD PURGE.
 
-   GTA-clean pass: money flashes a +/- delta on change, the wanted meter
-   only shows when you HAVE a level (and flashes while heat is rising),
-   the radar is the RDR2-style bottom-left instrument cluster (circular
-   heading-up map + slim vitals beside it, turf/home lines stacked above),
-   with a compass tick + your-car + crew + cop-direction blips + a
-   speedometer when driving + speed-based zoom in a car, and a tidy
-   city event feed (CBZ.cityFeed) stacks recent street events down the
-   left without fighting the engine's global toast.
+   OWNER: "Every HUD, the many overlapping tabs, everything should be
+   considered for removal ... pills that mean nothing. SHOW DON'T TELL."
+   Default is REMOVE; what survives earns its place by being needed at that
+   moment, and it leaves again when it is not.
 
-   PROFESSIONAL PASS — WHY: mixed opacities, emoji-stat wallpaper and
-   duplicate readouts are the #1 amateur tell, and screen space belongs to
-   the world. Tokens (css/hud.css :root, mirrored on #cityHud): one inset
-   (--hud-pad + safe-area), ONE panel rgba, one radius, EXACTLY three
-   opacity levels (chrome .55 / content .85 / alert 1), single-purpose
-   semantic colors (money-green = cash ONLY, gold = wanted/rank ONLY) and
-   one cyan accent for anything interactive. Counters use tabular numerals;
-   a value that CHANGES brightens then settles back to chrome
-   (flashThenFade). De-fluffed: crew chip is a labeled count only (respect/
-   bank live on the phone + leaderboard), no always-on DRIP line (the
-   boutique/rope owns it), no population bar under the count, no melee
-   caption under the lit chip, no default prospect checklist, no ✨/• chip
-   decorations, no star suffix on dispatch calls.
+   WHAT IS ON SCREEN, AND WHEN
+     • MINIMAP (#cRadar), bottom-left, 132px. Heading-up; streets, turf wash,
+       your car, crew, threats, cops, waypoint, mission, chopper. No labels,
+       no POI pictograms, no star row. The heat ring on its rim is the only
+       wanted read it carries.
+     • CASH (#cMoney + floating delta), top-right, INVISIBLE at rest. It
+       appears when the number changes, holds ~3 s, fades.
+     • WANTED (#cHeat): no stars, no pill. A slow red/blue siren wash on the
+       screen edges while wanted > 0, stronger per level. The rest is the
+       world: sirens, cruisers, the chopper, the roadblock.
+     • HEALTH (#cHurt): no bar, no hearts. A red screen-edge that deepens as
+       HP drops and pulses when it is low; the engine's #hitfx flash marks
+       each hit.
+     • WEAPON (#cWpn): the ammo count shows ONLY while a gun is the thing in
+       your hands. The slot bar surfaces for ~2.5 s when the loadout changes
+       (you switched, holstered, picked up, ate), then fades. On touch it
+       stays up, because there it is the input.
+     • NEXT STEP (#cObj): shows when a NEW objective line arrives, ~6 s, fades.
+     • RETICLE (#cCross): only with a gun out on foot when fpsmode is not
+       already drawing one.
+
+   GONE: the stars pill, crew count, level line, population pill, turf pay,
+   kill feed, event feed, gang badge, relationship chip, melee posture bars,
+   hearts/food/armor/stamina rows, the carried-loot row, the fallback
+   speedometer (carcluster.js owns the car), the job distance pill (the
+   waypoint guide already says it), the ROUTE chip and progress sliver.
+
+   PUBLIC API kept for the ~80 callers: CBZ.cityHudDirty, CBZ.cityFeed,
+   CBZ.cityFlavor (both route to the phone, never to the screen),
+   CBZ.weaponSlotsHTML + CBZ.weaponStripAudit (shared with the prison).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl, crossEl;
-  let armBar, armRowEl, armLabEl;   // ARMOR bar (the steel/blue outer-layer gauge under HP)
-  let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
-  let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // the one next-step line (renderObjective)
-  let popEl, killEl;
-  // wave-5 depth surfaces (all contextual — hidden unless currently relevant)
-  let turfPayEl;            // tiny "+$x/min" tag under the money readout
-  let membEl, membFillEl;   // gang-membership badge + its promotion sliver
-  let relEl;                // single-ped relationship chip (aim/near target)
-  let postWrap, postYouEl, postFoeEl, postFoeNameEl;  // melee posture bars
-  // Is THIS file's fallback speedometer the one currently on screen? Only ever
-  // true when city/carcluster.js is absent or switched off — see the render
-  // block below. Published so a probe can assert the owner's invariant
-  // (exactly one speed readout while driving) without reading the DOM.
-  let _speedShown = false;
-  CBZ.hudSpeedShown = function () { return _speedShown; };
+  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, ammoLineEl, objEl, radar, crossEl, heatEl, hurtEl;
   let dirty = true;
-  // ---- MINECRAFT-STYLE HUD (owner ask: "inventory on screen and health and
-  //      hunger just like Minecraft"). Hearts / drumsticks / armor-plate icon
-  //      rows above a square-slot hotbar. One-line revert: CBZ.CONFIG.CITY_HUD_MC
-  //      = false restores the slim vitals bars + pill hotbar chips exactly.
-  if (CBZ.CONFIG && CBZ.CONFIG.CITY_HUD_MC == null) CBZ.CONFIG.CITY_HUD_MC = true;
-  let mcHeartsEl, mcFoodEl, mcArmRowEl, mcArmIconsEl, mcArmLabEl, mcStamFEl;   // MC vitals cluster
-  let mcApplied = null, mcSig = "", mcStamLast = -1, mcArmLabLast = null;      // MC render guards
+
+  function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
+  function nowMs() { return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(); }
+  function isTouch() { return !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch"))); }
 
   function build() {
     if (root) return;
-    // one-time keyframes for the money pulse + delta float (cheap, GPU-friendly)
     if (!document.getElementById("cHudCss")) {
       const st = document.createElement("style");
       st.id = "cHudCss";
       st.textContent =
-        // ---- design TOKENS — mirror of css/hud.css :root, scoped onto the
-        //      overlay root so the city HUD stays coherent whatever the sheet
-        //      order. ONE inset, ONE panel rgba, ONE radius, ONE interactive
-        //      accent (cyan), and EXACTLY three opacity levels: chrome .55
-        //      (always-on furniture), content .85 (live readouts), alert 1
-        //      (act-now). Semantic colors are single-purpose — money-green is
-        //      cash ONLY, gold is wanted/rank ONLY, red health, blue armor.
-        "#cityHud{--hud-pad:14px;--hud-pad-t:calc(var(--hud-pad) + env(safe-area-inset-top,0px));--hud-pad-r:calc(var(--hud-pad) + env(safe-area-inset-right,0px));--hud-pad-b:calc(var(--hud-pad) + env(safe-area-inset-bottom,0px));--hud-pad-l:calc(var(--hud-pad) + env(safe-area-inset-left,0px));--panel-bg:rgba(8,11,17,.55);--radius:9px;--hud-line:rgba(232,236,242,.12);--hud-ink:#e8ecf2;--hud-dim:#9fb0c6;--hud-accent:#7de7ff;--money:#7ed957;--gold:#ffd166;--health:#ff5b5b;--armor:#7fd0ff;--o-chrome:.55;--o-content:.85;--o-alert:1}" +
-        // tabular numerals so money/ammo/level/speed counters never jitter
+        "#cityHud{--hud-pad:14px;--hud-pad-t:calc(var(--hud-pad) + env(safe-area-inset-top,0px));--hud-pad-r:calc(var(--hud-pad) + env(safe-area-inset-right,0px));--hud-pad-b:calc(var(--hud-pad) + env(safe-area-inset-bottom,0px));--hud-pad-l:calc(var(--hud-pad) + env(safe-area-inset-left,0px));--panel-bg:rgba(8,11,17,.5);--radius:9px;--hud-ink:#e8ecf2;--hud-dim:#9fb0c6;--hud-accent:#7de7ff;--money:#7ed957}" +
         "#cHud{font-variant-numeric:tabular-nums}" +
-        // the ONLY three opacity levels in the HUD (flashThenFade lifts a changed
-        // value to alert, then lets it settle back to its resting class)
-        "#cHud .oC{opacity:var(--o-chrome,.55)}" +
-        "#cHud .oM{opacity:var(--o-content,.85)}" +
-        "#cHud .oA{opacity:var(--o-alert,1)}" +
-        "@keyframes cMoneyPulse{0%{transform:scale(1)}35%{transform:scale(1.14)}100%{transform:scale(1)}}" +
-        "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-16px)}}" +
-        "@keyframes cStarFlash{0%,100%{opacity:1}50%{opacity:.35}}" +
-        "@keyframes cFeedIn{0%{opacity:0;transform:translateX(-14px)}100%{opacity:1;transform:translateX(0)}}" +
-        "@keyframes cKillIn{0%{opacity:0;transform:translateX(12px)}100%{opacity:1;transform:translateX(0)}}" +
-        "@keyframes cPopPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}" +
-        "#cHud .cPanel{background:var(--panel-bg);border:1px solid var(--hud-line);border-radius:var(--radius);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}" +
-        "#cHud .cFeedRow{animation:cFeedIn .22s ease-out;background:var(--panel-bg);border-left:3px solid var(--hud-dim);border-radius:4px;padding:4px 9px;margin-top:5px;color:var(--hud-ink);font-size:13px;line-height:1.25;max-width:300px;box-shadow:0 2px 6px rgba(0,0,0,.35)}" +
-        // population headcount pill — the battle-royale-style live count (the
-        // count alone is the signal; the old bar under it was wallpaper — F4)
-        "#cHud .cPop{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
-        "#cHud .cPop .dot{width:8px;height:8px;border-radius:50%;background:var(--health);box-shadow:0 0 7px rgba(255,91,91,.8)}" +
-        "#cHud .cPop b{font-size:18px;font-weight:700;color:var(--hud-ink);letter-spacing:.4px}" +
-        "#cHud .cPop .tot{font-size:12px;color:var(--hud-dim)}" +
-        // hud-local kill feed (fallback when turf.js's feed isn't mounted)
-        "#cHud .cKillRow{animation:cKillIn .2s ease-out;background:var(--panel-bg);border-right:3px solid #c33;border-radius:4px;padding:2px 9px;margin-top:4px;color:var(--hud-dim);font-size:12px;line-height:1.3;text-align:right;box-shadow:0 2px 6px rgba(0,0,0,.4)}" +
-        "#cHud .cKillRow b{color:var(--hud-ink)}" +
-        "#cHud .cKillRow.you{border-right-color:var(--gold)}" +
-        // --- wave-5 depth surfaces: gang badge, turf-pay tag, rel chip, posture ---
-        // turf passive-income tag — the rate in cash green, right under the money.
-        "#cHud .cTurfPay{display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:1px 7px;border-radius:var(--radius);background:var(--panel-bg);font-size:12px;font-weight:600;color:var(--money);text-shadow:0 1px 2px rgba(0,0,0,.6)}" +
-        // gang-membership badge: a small chip with the gang colour, your rank, and
-        // a hair-thin promotion sliver toward the next rung. Hidden when unaffiliated.
-        "#cHud .cMemb{display:inline-flex;flex-direction:column;gap:3px;padding:5px 9px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4);max-width:200px}" +
-        "#cHud .cMemb .row{display:flex;align-items:center;gap:6px;font-size:12px;line-height:1.1;white-space:nowrap}" +
-        "#cHud .cMemb .gdot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 6px rgba(0,0,0,.5)}" +
-        "#cHud .cMemb .gnm{font-weight:700;color:var(--hud-ink);letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis;max-width:118px}" +
-        "#cHud .cMemb .rnk{color:var(--gold);font-weight:700}" +
-        // progress slivers are interactive-chrome accent (a gold→green gradient
-        // here used to borrow BOTH reserved semantics at once)
-        "#cHud .cMemb .pslot{height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden}" +
-        "#cHud .cMemb .pslot>i{display:block;height:100%;background:var(--hud-accent);transition:width .4s ease}" +
-        // single-ped relationship chip (contextual to the ONE ped you target)
-        "#cHud .cRel{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.45);white-space:nowrap}" +
-        "#cHud .cRel .nm{color:var(--hud-ink);font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis}" +
-        "#cHud .cRel .lab{font-weight:700}" +
-        // melee posture bars (you vs current foe) — slim, only during a fight
-        "#cHud .cPost{display:flex;flex-direction:column;gap:5px;padding:6px 10px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.45);min-width:150px}" +
-        "#cHud .cPost .lbl{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--hud-dim);display:flex;justify-content:space-between;align-items:baseline}" +
-        "#cHud .cPost .pbar{height:6px;border-radius:4px;background:var(--hud-line);overflow:hidden}" +
-        "#cHud .cPost .pbar>i{display:block;height:100%;transition:width .12s linear}" +
-        "#cHud .cPost .you>i{background:linear-gradient(90deg,#39c0d0,#7fe0ff)}" +
-        "#cHud .cPost .foe>i{background:linear-gradient(90deg,#ff8b3c,#ffd166)}" +
-        "#cHud .cPost .brk>i{background:linear-gradient(90deg,#ff5b5b,#ff9e6b)!important;animation:cStarFlash .5s steps(1,end) infinite}" +
-        // --- WEAPON HOTBAR (bottom-centre): jail-clear loadout. A row of slots, one
-        // per OWNED gun (+ a Fists slot when unarmed), the held one lit, with the
-        // engine's live mag/reserve ammo for the equipped weapon underneath. ------
-        "#cHud .cBar{display:flex;flex-direction:column;align-items:center;gap:5px}" +
-        "#cHud .cSlots{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;max-width:560px}" +
-        // chips are CLICKABLE — opt back into pointer-events (the HUD root is
-        // pointer-events:none) so a tap dispatches CBZ.cityHotbarSelect. The
-        // leading position is the HOLSTER/fists chip; item chips reuse the gun
-        // chip frame with a tiny ×count badge so the unified bar reads as one row.
-        "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4);pointer-events:auto;cursor:pointer}" +
-        "#cHud .cSlot .s{font-size:14px;font-weight:700;color:var(--hud-dim);line-height:1.1;letter-spacing:.3px}" +
-        "#cHud .cSlot .key{position:absolute;left:3px;top:1px;font-size:8px;font-weight:800;color:var(--hud-dim);line-height:1}" +
-        "#cHud .cSlot>.ic{font-size:18px;line-height:1}" +
-        "#cHud .cSlot .ic.gun{font-size:20px;line-height:1;color:var(--hud-ink);transform:scaleX(1.25)}" +
-        "#cHud .cSlot .gunModel{display:block;width:42px;height:27px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-        "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
-        "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
-        // item chip: a DRAWN pictogram (city/itemicons.js) over a small ×count
-        // badge, sharing the gun chip's frame so the bar stays one visual run.
-        // The old glyph table here was emptied by the repo-wide emoji strip, so
-        // every usable item on this bar rendered as a bare "▣".
-        "#cHud .cSlot.item .ic{font-size:18px;line-height:1.05}" +
-        "#cHud .cSlot.item .s{font-size:11px}" +
+        // every surviving element rests INVISIBLE and is lifted by .on
+        "#cHud .fade{opacity:0;transition:opacity .8s ease;pointer-events:none}" +
+        "#cHud .fade.on{opacity:.9;transition:opacity .15s ease}" +
+        "#cMoney{font-size:26px;font-weight:700;color:var(--money);text-shadow:0 2px 0 #1f5a2a,0 0 12px rgba(0,0,0,.45)}" +
+        "#cDelta{position:absolute;right:0;top:-18px;font-size:16px;font-weight:700;opacity:0;pointer-events:none;white-space:nowrap}" +
+        "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-14px)}}" +
+        "#cObj{position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);max-width:56%;text-align:center;color:var(--hud-ink);font-size:15px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.85)}" +
+        // bottom-centre weapon cluster: slots over the ammo count
+        "#cWpn{position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px}" +
+        "#cHud .cSlots{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;max-width:520px}" +
+        "#cHud .cSlots.fade.on{pointer-events:auto}" +
+        "body.touch #cHud .cSlots.fade{opacity:.8;pointer-events:auto}" +
+        "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;width:40px;height:40px;box-sizing:border-box;padding:2px;border-radius:6px;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);pointer-events:inherit;cursor:pointer}" +
+        "#cHud .cSlot.held{border-color:rgba(232,236,242,.85);box-shadow:0 0 0 1px rgba(232,236,242,.4)}" +
+        "#cHud .cSlot .key{display:none}" +
+        "#cHud .cSlot>.ic{font-size:17px;line-height:1;color:var(--hud-ink)}" +
+        "#cHud .cSlot .ic.gun{font-size:18px;transform:scaleX(1.25)}" +
+        "#cHud .cSlot .gunModel{display:block;width:36px;height:24px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
         "#cHud .cSlot .itemIcn{width:26px;height:26px}" +
-        "#cHud .cSlot .cnt{position:absolute;right:2px;top:1px;font-size:9px;font-weight:700;color:var(--hud-ink);background:rgba(8,11,17,.85);border-radius:6px;padding:0 3px;line-height:1.3}" +
-        // PHONE chip (campaign_ui.js's handset, carried like a gun): the same
-        // frame as every other slot, plus the two signals the old corner
-        // button owned — an unread LED and the stowed-phone buzz.
-        "#cHud .cSlot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:#53606a;opacity:.35;box-shadow:0 0 0 2px rgba(0,0,0,.28)}" +
-        "#cHud .cSlot.unread .led{background:#ff6258;opacity:1;box-shadow:0 0 0 2px rgba(0,0,0,.28),0 0 8px #ff6258}" +
+        "#cHud .cSlot .a{font-size:9px;color:var(--hud-dim);line-height:1}" +
+        "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700}" +
+        "#cHud .cSlot .cnt{position:absolute;right:2px;bottom:1px;font-size:9px;font-weight:700;color:var(--hud-ink);text-shadow:1px 1px 0 #000}" +
+        "#cHud .cSlot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:transparent}" +
+        "#cHud .cSlot.unread .led{background:#ff6258;box-shadow:0 0 8px #ff6258}" +
         "#cHud .cSlot.buzz{animation:cPhoneBuzz .82s ease}" +
         "@keyframes cPhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}" +
-        // the held slot is a SELECTION (interactive chrome) → the one cyan accent,
-        // same for guns and melee. The old green/orange split spent the cash and
-        // heat semantics on a highlight that just means "in hand".
-        "#cHud .cSlot.held{border-color:var(--hud-accent);box-shadow:0 0 0 1px rgba(125,231,255,.35),0 2px 10px rgba(0,0,0,.5)}" +
-        "#cHud .cSlot.held .s{color:var(--hud-ink);text-shadow:0 0 8px rgba(125,231,255,.4)}" +
-        "#cHud .cSlot.held .a{color:var(--hud-ink)}" +
-        // the equipped-weapon ammo line under the slots: big mag / reserve, jail-style.
-        "#cHud .cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.7)}" +
-        "#cHud .cAmmo b{font-size:20px;color:var(--hud-ink);font-weight:700}" +
-        "#cHud .cAmmo .res{color:var(--hud-dim);font-weight:600}" +
-        "#cHud .cAmmo .rl{color:var(--gold)}" +
-        "#cHud .cAmmo .arm{color:var(--armor)}" +
-        // --- carried LOOT readout (above the hotbar): drugs / valuables /
-        // consumables you're holding, with counts. Compact chips; hidden when empty.
-        // one line, NEVER wraps — a second row used to climb into the centre
-        // toast ("Wallet" floating over dispatch lines). Tail rolls into "+N".
-        "#cHud .cLoot{display:flex;gap:5px;justify-content:center;flex-wrap:nowrap;max-width:520px;margin-bottom:1px;white-space:nowrap}" +
-        "#cHud .cLoot .it{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);font-size:12px;color:var(--hud-ink);box-shadow:0 1px 5px rgba(0,0,0,.35)}" +
-        "#cHud .cLoot .it b{color:var(--hud-ink);font-weight:700}" +
-        "#cHud .cLoot .it .x{color:var(--hud-dim);font-weight:600}" +
-        // --- VITALS rows (bottom-left cluster, beside the minimap): micro label +
-        // slim fill — RDR2-compact, no fat 12px slabs. Labels right-align against
-        // the bars so the column reads as one edge.
-        "#cHud .vRow{display:flex;align-items:center;gap:6px;margin-top:6px}" +
-        "#cHud .vRow:first-child{margin-top:0}" +
-        "#cHud .vLab{flex:none;width:32px;font-size:9px;font-weight:700;letter-spacing:.8px;text-align:right;text-shadow:0 1px 2px rgba(0,0,0,.8)}" +
-        "#cHud .vSlot{flex:1;background:rgba(0,0,0,.5);border-radius:4px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}" +
-        // coordinate with turf.js's overlays (loaded BEFORE us): nudge its kill
-        // feed down so it clears our top-right money/pop stack, and cap its width
-        // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
-        "#cKillFeed{top:230px !important;width:212px !important}" +
-        // --- MINECRAFT-STYLE HUD (CITY_HUD_MC): the .mc class on #cityHud flips
-        //     the whole skin — hearts left / drumsticks right in two icon rows
-        //     riding the hotbar's width, armor plates above the hearts, stamina
-        //     a slim sliver under them, square MC slots. Flag off = classic bars
-        //     (these selectors simply never match). Icon art itself (SVG data-
-        //     URIs) is appended by mcIconCss() at the sheet's tail.
-        "#cHud #cMcVit{display:none}" +
-        "#cityHud.mc #cMcVit{display:flex;flex-direction:column;align-items:stretch;align-self:stretch;gap:3px;margin-bottom:2px}" +
-        "#cityHud.mc #cVitals{display:none}" +
-        "#cityHud.mc .mcRow{display:flex;gap:2px}" +
-        "#cityHud.mc .mcI{width:18px;height:16px;flex:none;background-repeat:no-repeat;background-size:100% 100%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.65))}" +
-        "#cityHud.mc .mcMid{display:flex;justify-content:space-between;align-items:flex-end;gap:14px}" +
-        "#cityHud.mc .mcColL{display:flex;flex-direction:column;gap:2px}" +
-        "#cityHud.mc #cMcFood{justify-content:flex-end}" +
-        "#cityHud.mc #cMcArmRow{align-items:center;gap:8px}" +
-        "#cityHud.mc .mcLab{font-size:11px;font-weight:700;color:#c9d4e0;letter-spacing:.4px;text-shadow:0 1px 2px rgba(0,0,0,.8);white-space:nowrap}" +
-        "#cityHud.mc .mcStamSlot{height:3px;border-radius:2px;background:rgba(0,0,0,.55);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}" +
-        "#cityHud.mc .mcStamSlot>i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)}" +
-        // low health (< 3 hearts): a soft per-heart jitter, pure CSS, staggered
-        // by nth-child so the row wobbles like MC rather than bouncing as a slab
-        "@keyframes mcHeartBeat{0%,100%{transform:translateY(0)}20%{transform:translateY(-2px)}60%{transform:translateY(1px)}}" +
-        "#cityHud.mc #cMcHearts.low .mcI{animation:mcHeartBeat .55s ease-in-out infinite}" +
-        "#cityHud.mc #cMcHearts.low .mcI:nth-child(2n){animation-delay:.14s}" +
-        "#cityHud.mc #cMcHearts.low .mcI:nth-child(3n){animation-delay:.28s}" +
-        // MC hotbar skin: fixed square slots with a sunken bevel; the SELECTED
-        // slot gets the thick light frame + slight scale. Same ids / markup /
-        // click delegation as the pill chips — this is CSS-only reskinning.
-        "#cityHud.mc .cSlot{width:44px;height:44px;min-width:44px;box-sizing:border-box;padding:2px;border-radius:3px;background:rgba(10,12,16,.66);border:2px solid #0a0c10;box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),inset -2px -2px 0 rgba(255,255,255,.10),0 2px 6px rgba(0,0,0,.45);transition:transform .07s ease}" +
-        "#cityHud.mc .cSlot.held{border-color:#e8ecf2;box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35),inset -2px -2px 0 rgba(255,255,255,.14);transform:scale(1.1);z-index:1}" +
-        "#cityHud.mc .cSlot .s{font-size:12px;letter-spacing:0}" +
-        "#cityHud.mc .cSlot.item .ic{font-size:20px}" +
-        "#cityHud.mc .cSlot .itemIcn{width:30px;height:30px}" +
-        "#cityHud.mc .cSlot.item .s{font-size:10px}" +
-        "#cityHud.mc .cSlot .a{margin-top:0;font-size:9px}" +
-        "#cityHud.mc .cSlot .cnt{top:auto;bottom:1px;right:3px;font-size:10px;background:none;padding:0;text-shadow:1px 1px 0 #000,0 0 3px #000}" +
-        "#cityHud.mc .cSlots{gap:3px}" +
-        // keep the melee-posture/relationship contextual stack clear of the
-        // taller bottom-centre cluster (inline bottom:122px needs the !important)
-        "#cityHud.mc #cCtx{bottom:170px !important}" +
-        // --- SMALL SCREENS: the bottom-centre stack (loot+slots+ammo) must never
-        // collide or spill — shrink chips/slots/fonts under 900px wide / 560px tall.
-        "@media (max-width:900px),(max-height:560px){" +
-        "  #cHud .cLoot{max-width:340px;gap:4px}" +
-        "  #cHud .cLoot .it{font-size:10px;padding:1px 6px;gap:3px}" +
-        "  #cHud .cSlots{gap:4px;max-width:380px}" +
-        "  #cHud .cSlot{min-width:38px;height:34px;padding:2px 5px}" +
-        "  #cHud .cSlot .s{font-size:11px}" +
-        "  #cHud .cSlot.item .ic{font-size:15px}" +
-        "  #cHud .cSlot.item .s{font-size:9px}" +
-        "  #cHud .cSlot .itemIcn{width:22px;height:22px}" +
-        "  #cHud .cSlot .cnt{font-size:8px}" +
-        "  #cHud .cAmmo{font-size:11px}" +
-        "  #cHud .cAmmo b{font-size:15px}" +
-        "  #cMoney{font-size:24px !important}" +
-        // bottom-left cluster shrinks as a unit so it never reaches the hotbar:
-        // CSS-scale the canvas (the 190px backing store just downsamples) and
-        // pull the vitals/turf/home/badge offsets in to match.
-        "  #cityHud #cRadar{width:146px;height:146px}" +
-        "  #cHud #cVitals{left:calc(var(--hud-pad-l) + 154px) !important;width:92px !important;bottom:calc(var(--hud-pad-b) + 8px) !important}" +
-        "  #cHud #cTurf{bottom:calc(var(--hud-pad-b) + 152px) !important;font-size:11px !important}" +
-        "  #cHud #cHomeLine{bottom:calc(var(--hud-pad-b) + 168px) !important;font-size:11px !important}" +
-        "  #cHud #cMemb{bottom:calc(var(--hud-pad-b) + 186px) !important}" +
-        // MC skin shrinks with the same breakpoint: ~36px slots, 14px icons
-        "  #cityHud.mc .cSlot{width:36px;height:36px;min-width:36px}" +
-        "  #cityHud.mc .cSlot .s{font-size:10px}" +
-        "  #cityHud.mc .cSlot.item .ic{font-size:16px}" +
-        "  #cityHud.mc .mcI{width:14px;height:12px}" +
-        "  #cityHud.mc .mcMid{gap:10px}" +
-        "  #cityHud.mc #cCtx{bottom:150px !important}" +
-        "}" + mcIconCss();
+        "#cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);opacity:.9;min-height:1px}" +
+        "#cAmmo b{font-size:20px;font-weight:700}" +
+        "#cAmmo .res{color:var(--hud-dim)}" +
+        "#cAmmo .rl{color:#ffd166}" +
+        "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}}" +
+        // SCREEN-EDGE SIGNALS. Outside #cHud on purpose: the campaign's
+        // declutter (css/campaign.css) hides #cHud's children wholesale, and a
+        // wound or a manhunt is not narration.
+        "#cHurt,#cHeat{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .5s ease}" +
+        "#cHurt{background:radial-gradient(ellipse at center,rgba(150,0,0,0) 60%,rgba(150,0,0,.6) 100%)}" +
+        "#cHurt.low{animation:cHurtBeat 1.1s ease-in-out infinite}" +
+        "@keyframes cHurtBeat{0%,100%{filter:brightness(1)}45%{filter:brightness(1.6)}}" +
+        "#cHeat{box-shadow:inset 0 0 90px 10px rgba(255,40,40,.5)}" +
+        "#cHeat.on{animation:cSiren 1.6s linear infinite}" +
+        "@keyframes cSiren{0%,100%{box-shadow:inset 0 0 90px 10px rgba(255,40,40,.5)}50%{box-shadow:inset 0 0 90px 10px rgba(40,90,255,.5)}}" +
+        "@media (prefers-reduced-motion:reduce){#cHeat.on,#cHurt.low{animation:none}}";
       document.head.appendChild(st);
     }
-    // shared item-pictogram sizing (city/itemicons.js) — self-mounted once,
-    // so the hotbar's item chips are sized whether or not the [I] grid ever
-    // opened. Guarded: no module, no call, chips fall back to their glyph.
+    // shared item-pictogram sizing (city/itemicons.js), so hotbar item chips
+    // are sized whether or not the [I] grid ever opened.
     if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }
     root = document.createElement("div");
     root.id = "cityHud";
     root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:20;display:none;font-family:Fredoka,system-ui,sans-serif";
     root.innerHTML =
+      "<div id='cHurt'></div>" +
+      "<div id='cHeat'></div>" +
       "<div id='cHud' style='position:absolute;inset:0'>" +
-      // top-right stack — dropped to top:54px so it never collides with the
-      // takeover meta bar (turf.js #cTurfMeta sits at top:6px, ~48px tall).
-      // The whole column idles at chrome opacity; money lifts on change.
-      // #cTopRight: named so css/campaign.css can exempt the WANTED star meter
-      // from the campaign declutter (the stars live in this column).
-      "<div id='cTopRight' style='position:absolute;top:54px;right:var(--hud-pad-r);text-align:right;max-width:248px'>" +
-      "  <div class='cPop oM' id='cPop' style='display:none'><span class='dot'></span><b id='cPopN'>0</b><span class='tot' id='cPopTot'></span></div>" +
-      "  <div style='position:relative;display:inline-block;margin-top:6px'>" +
-      "    <div id='cMoney' class='oC' style='font-size:32px;font-weight:700;color:var(--money);text-shadow:0 2px 0 #1f5a2a,0 0 14px rgba(126,217,87,.35)'>$0</div>" +
-      "    <div id='cDelta' style='position:absolute;right:0;top:-6px;font-size:18px;font-weight:700;opacity:0;pointer-events:none'></div>" +
-      "  </div>" +
-      "  <div id='cTurfPay' class='cTurfPay oC' style='display:none'></div>" +
-      "  <div id='cStarsWrap' class='oA' style='display:none;margin-top:4px;padding:2px 8px;border-radius:var(--radius);background:var(--panel-bg)'><span id='cStars' style='font-size:23px;letter-spacing:3px'></span></div>" +
-      // crew headcount only, labeled (F1) — respect + bank read on the phone /
-      // leaderboard, where they're actionable; an always-on ★ here clashed with
-      // the wanted ★ a few px away.
-      "  <div id='cCrew' class='oC' style='font-size:13px;color:var(--hud-dim);margin-top:3px'></div>" +
-      // YOUR street read (level.js): the same LEVEL N the city floats over
-      // everyone else's head, derived live from worth/heat/crew/bodies.
-      "  <div id='cLvl' class='oC' style='display:none'></div>" +
-      "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px;display:none'></div>" +
-      "  <div id='cKill' class='oM' style='margin-top:7px;display:none'></div>" +
+      // #cTopRight keeps its name: css/mobile.css + css/campaign.css key off it
+      "<div id='cTopRight' style='position:absolute;top:var(--hud-pad-t);right:var(--hud-pad-r);text-align:right'>" +
+      "  <div class='fade' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
       "</div>" +
-      // VITALS — RDR2-style compact cluster: three slim labeled bars stacked just
-      // right of the minimap's lower edge, so the bottom-left corner reads as ONE
-      // instrument (map + body state) instead of a pile. Bars are content-level;
-      // they stay clear of the bottom-centre hotbar (capped width + media shrink).
-      "<div id='cVitals' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 200px);bottom:calc(var(--hud-pad-b) + 12px);width:124px'>" +
-      "  <div class='vRow'><span class='vLab' style='color:#ffb3b3'>♥</span><div class='vSlot' style='height:7px'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div></div>" +
-      // ARMOR — the GTA-style outer layer: a distinct steel/blue plate gauge that
-      // sits just under HP, shown ONLY when the player is wearing armor (driven by
-      // CBZ.player._armor / ._armorMax). The 🛡 label carries the equipped tier name
-      // (+ a ⛑ helmet glyph when _armorKit.head is set). Hidden whole when no armor.
-      "  <div id='cArmRow' class='vRow' style='display:none'><span class='vLab' id='cArmLab' style='color:#a9c7ff'></span><div class='vSlot' style='height:7px'><div id='cArm' style='height:100%;width:100%;background:linear-gradient(90deg,#5b86c9,#a9c7ff);transition:width .12s linear'></div></div></div>" +
-      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'></span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
-      "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>↯</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
-      "</div>" +
-      // WEAPON HOTBAR + carried-loot readout (bottom-centre). The hotbar is the
-      // jail-clarity loadout: every gun you OWN as a slot, the held one lit, live
-      // mag/reserve underneath. The loot row sits just above it. Slots + loot are
-      // chrome; the live ammo line is content.
-      "<div id='cWpn' class='cBar' style='position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%)'>" +
-      // MINECRAFT vitals cluster (CITY_HUD_MC): armor plates over hearts (+ a
-      // stamina sliver) on the left, drumsticks right-aligned opposite — the
-      // strip stretches to the hotbar's width and rides just above it. Icon
-      // rows are BUILT ONCE (fillIcons) and only have classes toggled per
-      // change. Hidden whole (and the classic #cVitals bars shown) when off.
-      "  <div id='cMcVit' class='oM'>" +
-      "    <div id='cMcArmRow' style='display:none'><div id='cMcArm' class='mcRow'></div><span id='cMcArmLab' class='mcLab'></span></div>" +
-      "    <div class='mcMid'>" +
-      "      <div class='mcColL'><div id='cMcHearts' class='mcRow'></div><div id='cMcStam' class='mcStamSlot'><i id='cMcStamF'></i></div></div>" +
-      "      <div id='cMcFood' class='mcRow'></div>" +
-      "    </div>" +
-      "  </div>" +
-      "  <div id='cLoot' class='cLoot oC' style='display:none'></div>" +
-      "  <div id='cSlots' class='cSlots oC'></div>" +
-      "  <div id='cAmmo' class='cAmmo oM'></div>" +
-      "</div>" +
-      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span aria-hidden='true' style='font-size:16px;color:var(--hud-dim)'>↠</span> <span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span> <span id='cSpeedFU' style='font-size:12px;font-weight:700;letter-spacing:1px;color:var(--hud-dim)'>MPH</span></div>" +
-      "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
-      // THE ONE NEXT-STEP LINE (renderObjective): onboarding step or the
-      // prospect task. Hidden while a job's distance pill holds this slot.
-      "<div id='cObj'class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
-      "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:var(--hud-accent);font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
-      "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:var(--hud-accent);transition:width .4s ease'></i></div>" +
-      "</div>" +
-      // MINIMAP — bottom-left, RDR2-style. The turf/home lines stack right above
-      // it (the "region name over the map" read), the vitals hug its right edge.
-      "<canvas id='cRadar' class='oM' width='190' height='190' style='position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.5)'></canvas>" +
-      // event feed takes the top-left corner the radar vacated
-      // shifted RIGHT past the top-left character panel (#cpPanel is ~128px wide
-      // at left:14) so street-event rows never overlap the player portrait/Lv/bounty.
-      "<div id='cFeed' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 150px);top:var(--hud-pad-t);width:300px'></div>" +
-      "<div id='cTurf' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 196px);font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
-      "<div id='cHomeLine' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 215px);font-size:12px;color:var(--hud-dim);text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
-      // gang-membership badge (left column, capping the bottom-left cluster —
-      // map → turf → home → crew badge). Hidden entirely unless patched into a crew.
-      "<div id='cMemb' class='cMemb oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 236px);display:none'>" +
-      "  <div class='row'><span class='gdot' id='cMembDot'></span><span class='gnm' id='cMembNm'></span><span class='rnk' id='cMembRnk'></span></div>" +
-      "  <div class='pslot' id='cMembSlot'><i id='cMembFill' style='width:0%'></i></div>" +
-      "</div>" +
-      // bottom-centre contextual zone: the relationship chip (when targeting one
-      // ped) and the melee posture bars (only mid-fight, so alert level). Sits
-      // between the bottom-left health stack and the hotbar — no overlap.
-      "<div id='cCtx' style='position:absolute;left:50%;bottom:122px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none'>" +
-      "  <div id='cPost' class='cPost oA' style='display:none'>" +
-      "    <div class='lbl'><span>YOU</span><span id='cPostFoeNm' style='color:#ffb37a'></span></div>" +
-      "    <div class='pbar you' id='cPostYou'><i style='width:0%'></i></div>" +
-      "    <div class='pbar foe' id='cPostFoe'><i style='width:0%'></i></div>" +
-      "  </div>" +
-      "  <div id='cRel' class='cRel oM' style='display:none'><span class='nm' id='cRelNm'></span><span class='lab' id='cRelLab'></span></div>" +
-      "</div>" +
-      "<div id='cCross' class='oA' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
+      "<div id='cObj' class='fade'></div>" +
+      "<div id='cWpn'><div id='cSlots' class='cSlots fade'></div><div id='cAmmo'></div></div>" +
+      "<canvas id='cRadar' width='190' height='190'></canvas>" +
+      "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
     document.body.appendChild(root);
+    hudEl = root.querySelector("#cHud");
     cashEl = root.querySelector("#cMoney"); deltaEl = root.querySelector("#cDelta");
-    starsEl = root.querySelector("#cStars"); starsWrap = root.querySelector("#cStarsWrap");
-    crewEl = root.querySelector("#cCrew"); worldEl = root.querySelector("#cWorld");
-    hpBar = root.querySelector("#cHp"); hungerBar = root.querySelector("#cFood"); stamBar = root.querySelector("#cStam");
-    armBar = root.querySelector("#cArm"); armRowEl = root.querySelector("#cArmRow"); armLabEl = root.querySelector("#cArmLab");
-    wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
-    slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo"); lootEl = root.querySelector("#cLoot");
-    // MC vitals cluster — build the icon rows ONCE (12 hearts is the cap;
-    // 10 shanks / 10 plates); per-frame code only toggles classes/display.
-    mcHeartsEl = root.querySelector("#cMcHearts"); mcFoodEl = root.querySelector("#cMcFood");
-    mcArmRowEl = root.querySelector("#cMcArmRow"); mcArmIconsEl = root.querySelector("#cMcArm"); mcArmLabEl = root.querySelector("#cMcArmLab");
-    mcStamFEl = root.querySelector("#cMcStamF");
-    fillIcons(mcHeartsEl, 12, "mcHrt"); fillIcons(mcFoodEl, 10, "mcFud"); fillIcons(mcArmIconsEl, 10, "mcArm");
-    // CLICK-TO-SELECT on the unified hotbar (city-only). Chips carry data-bi (the
-    // bar index); a tap routes straight to CBZ.cityHotbarSelect, which handles
-    // holster / gun-select / item-use byte-identically. Delegated so re-rendered
-    // chips stay live. Guarded like the key handlers (city + playing + no menu/map).
-    if (slotsEl) slotsEl.addEventListener("click", function (ev) {
-      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi]") : null;
+    wpnEl = root.querySelector("#cWpn");
+    slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo");
+    objEl = root.querySelector("#cObj");
+    radar = root.querySelector("#cRadar");
+    crossEl = root.querySelector("#cCross");
+    heatEl = root.querySelector("#cHeat"); hurtEl = root.querySelector("#cHurt");
+    // CLICK/TAP-TO-SELECT on the hotbar. Chips carry data-bi (the bar index); a
+    // tap routes to CBZ.cityHotbarSelect (holster / gun-select / item-use / phone).
+    slotsEl.addEventListener("click", function (ev) {
+      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi],.cSlot[data-inv]") : null;
       if (!chip) return;
       if (g.mode !== "city" || g.state !== "playing") return;
       if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+      if (chip.hasAttribute("data-inv")) { if (CBZ.cityCharPanel && CBZ.cityCharPanel.open) CBZ.cityCharPanel.open(); return; }
       const bi = parseInt(chip.getAttribute("data-bi"), 10);
-      if (bi >= 0 && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(bi); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+      if (bi >= 0 && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(bi); dirty = true; }
     });
-    objEl = root.querySelector("#cObj"); objTxtEl = root.querySelector("#cObjTxt"); objRouteEl = root.querySelector("#cObjRoute");
-    objSlotEl = root.querySelector("#cObjSlot"); objFillEl = root.querySelector("#cObjFill");
-    if (objRouteEl) objRouteEl.addEventListener("click", routeToProspectHQ);
-    radar = root.querySelector("#cRadar"); turfEl = root.querySelector("#cTurf"); homeLineEl = root.querySelector("#cHomeLine");
-    feedEl = root.querySelector("#cFeed"); speedEl = root.querySelector("#cSpeed");
-    // the aiming dot is read EVERY frame by the onAlways tick — resolve it here
-    // with the rest of the furniture instead of re-querying the subtree 60x/s.
-    crossEl = root.querySelector("#cCross");
-    popEl = root.querySelector("#cPop"); killEl = root.querySelector("#cKill");
-    turfPayEl = root.querySelector("#cTurfPay");
-    membEl = root.querySelector("#cMemb"); membFillEl = root.querySelector("#cMembFill");
-    relEl = root.querySelector("#cRel");
-    postWrap = root.querySelector("#cPost"); postYouEl = root.querySelector("#cPostYou"); postFoeEl = root.querySelector("#cPostFoe"); postFoeNameEl = root.querySelector("#cPostFoeNm");
   }
 
-  // ---- the city event feed: a tidy stack of recent street events down the
-  //      left, distinct from the engine's centre toast (flashToast). Other
-  //      systems can push to it via CBZ.cityFeed(msg, color). Self-pruning. ----
-  const feed = [];
-  // strip a trailing " (xN)" so repeats of the SAME flavor line collapse onto
-  // one row regardless of how many times it has already been bumped.
+  // ---- reveal-then-fade: an element lifts to .on and drops back after holdMs
+  function reveal(el, holdMs) {
+    if (!el) return;
+    el.classList.add("on");
+    if (el._fadeT) clearTimeout(el._fadeT);
+    el._fadeT = setTimeout(function () { el.classList.remove("on"); el._fadeT = 0; }, holdMs);
+  }
+
+  // ---- the event feed is not a screen surface any more. CBZ.cityFeed and
+  //      CBZ.cityFlavor stay as the callers' API and deliver to the phone. ----
   function feedBase(msg) { return String(msg).replace(/ \(x\d+\)$/, ""); }
   CBZ.cityFeed = function (msg, color, opts) {
     if (!msg) return;
     if (opts && opts.collapseOnly) return;
-    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(msg, opts, false)) {
-      renderFeed();
-      return;
-    }
+    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(msg, opts, false)) return;
     const payload = {
       app: (opts && opts.app) || "news",
       from: (opts && opts.from) || "City Desk",
@@ -423,270 +165,19 @@
     };
     if (typeof CBZ.cityPhoneNotify === "function") CBZ.cityPhoneNotify(payload);
     else if (CBZ.cityCampaignActive && CBZ.cityCampaignActive() && typeof CBZ.phoneNotify === "function") CBZ.phoneNotify(payload);
-    renderFeed();
   };
-  // world-FLAVOR lines (lore/ambience, nothing to act on) — a separate channel
-  // so they can exist in code without ever reaching the HUD. Default OFF via
-  // CBZ.CONFIG.CITY_FLAVOR_FEED (owner: "the HUD is not a tutorial space").
+  // world-FLAVOR lines (lore/ambience): off unless CBZ.CONFIG.CITY_FLAVOR_FEED.
   CBZ.cityFlavor = function (msg, color) {
     if (CBZ.CONFIG && CBZ.CONFIG.CITY_FLAVOR_FEED) CBZ.cityFeed(msg, color);
   };
-  function renderFeed() {
-    if (!feedEl) return;
-    feedEl.innerHTML = "";
-    feedEl.style.display = "none";
-  }
-  let feedAcc = 0;
-  function pruneFeed(dt) {
-    feedAcc += dt;
-    // prune cadence rides the perf/quality slider — tier0 drops to 2Hz (DOM
-    // rewrites are pure main-thread cost), Best (tier 4) keeps today's 4Hz.
-    if (feedAcc < 1 / (CBZ.qScale ? CBZ.qScale(2, 4) : 4)) return; feedAcc = 0;
-    const nowMs = performance.now();
-    let changed = false;
-    while (feed.length && nowMs - feed[0].born > 6500) { feed.shift(); changed = true; }
-    if (changed) renderFeed();
-  }
-
-  // ---- live POPULATION headcount (battle-royale-style alive count) + a hud-local
-  //      KILL FEED. Both feature-detect the engine: population reads
-  //      CBZ.cityPopulation() -> {alive,total}; the feed reads CBZ.cityRecentDeaths.
-  //      turf.js already mounts its OWN takeover meta-bar + kill feed; to avoid a
-  //      double feed we only render the hud-local feed when turf's (#cKillFeed)
-  //      isn't on screen, so the two systems read as ONE cohesive HUD. ----
-  let lastPopN = -1, popPulseT = 0;
-  function renderPop() {
-    if (!popEl) return;
-    if (!CBZ.cityPopulation) { popEl.style.display = "none"; return; }
-    const p = CBZ.cityPopulation();
-    if (!p || !p.total) { popEl.style.display = "none"; return; }
-    popEl.style.display = "inline-flex";
-    const n = p.alive | 0;
-    const nEl = popEl.querySelector("#cPopN"), totEl = popEl.querySelector("#cPopTot");
-    if (nEl) nEl.textContent = n.toLocaleString();
-    if (totEl) totEl.textContent = "";
-    // a quick pulse whenever the count drops, so a massacre reads at a glance
-    // (the count IS the signal — the old bar under it restated the same number)
-    if (lastPopN >= 0 && n < lastPopN) { popEl.style.animation = "none"; void popEl.offsetWidth; popEl.style.animation = "cPopPulse .4s ease-out"; }
-    lastPopN = n;
-  }
-
-  // hud-local kill feed (fallback). Mirrors turf.js's <Name> — <cause> rows.
-  let killSig = "";
-  function turfFeedLive() {
-    const tf = document.getElementById("cKillFeed");
-    return !!(tf && tf.style.display !== "none");
-  }
-  function renderKill() {
-    if (!killEl) return;
-    killSig = "";
-    killEl.innerHTML = "";
-    killEl.style.display = "none";
-  }
-  function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
-  function hex6(c) { return "#" + ("000000" + ((c >>> 0).toString(16))).slice(-6); }
-
-  // ---- wave-5 DEPTH SURFACES (all compact + contextual; nothing shows unless
-  //      currently relevant, so the screen stays one clean page) ----------------
-
-  // turf passive income — a tiny "+$x/min" under the money, ONLY when you earn it.
-  function renderTurfPay() {
-    if (!turfPayEl) return;
-    const econ = CBZ.cityEcon;
-    if (!econ || !econ.turfIncomeInfo) { turfPayEl.style.display = "none"; return; }
-    let info; try { info = econ.turfIncomeInfo(); } catch (e) { info = null; }
-    const perSec = info ? (info.perSec || 0) : 0;
-    if (!info || perSec <= 0 || !(info.zones > 0)) { turfPayEl.style.display = "none"; return; }
-    const perMin = Math.round(perSec * 60);
-    // the RATE is the payoff; the zone count lives on the [M] territory board
-    // where holding/taking turf is actually played (F5)
-    turfPayEl.textContent = "+$" + perMin.toLocaleString() + " ◷";
-    turfPayEl.style.display = "inline-flex";
-  }
-
-  // gang-membership badge: gang name (its colour) + your RANK + a thin sliver of
-  // progress toward the next rung. Hidden whole when you ride with no crew.
-  //
-  // DELETED (2026-07-27): a local MEMB_LADDER + MEMB_NEED pair used to live
-  // here — the fourth copy of gangs.js's rank order, and it DISAGREED with the
-  // authority. gangs.js's RANKS needs 1 body / $180 for Runner; this bar was
-  // charging 2 / $220. Every threshold was wrong the same way, so the sliver
-  // filled at a different rate than the promotion that actually fires: you were
-  // promoted with the bar at ~80%, or watched it sit full and nothing happen.
-  // A progress bar that lies about its own condition is worse than no bar.
-  //
-  // Both tables are gone. factions.js is the ONE tier table and gangs.js hands
-  // it the canonical RANKS verbatim, so the bar is now reading the very numbers
-  // the promotion check reads. `need.bodies`/`need.contrib` are normRanks()'
-  // normalised spelling of needBody/needContrib. Degrade-safe: no role layer
-  // and the sliver simply hides, which is what it already did at the top rung.
-  function membLadder() {
-    return (CBZ.factions && CBZ.factions.ladder) ? (CBZ.factions.ladder("gang") || []) : [];
-  }
-  // ladder + membership both migrated onto the role layer in one change.
-  if (CBZ.factionMigrated) CBZ.factionMigrated("memb:hud");
-  function renderMemb() {
-    if (!membEl) return;
-    // ONE membership query (CLAUDE.md: never re-derive g.playerGang again).
-    // factions.js normalises the record whether it came from g.cityMembership
-    // or a founded crew, so the badge shows a founded outfit too — which the
-    // old cityMembership() read could not see at all.
-    let m = null;
-    if (CBZ.factions && CBZ.factions.membership) {
-      const f = CBZ.factions.membership("gang");
-      if (f) m = { gangId: f.org, rank: f.rank, bodies: f.credits.bodies, contrib: f.credits.contrib };
-    }
-    if (!m) m = (CBZ.cityMembership && CBZ.cityMembership()) || null;
-    if (!m || !m.gangId) { membEl.style.display = "none"; return; }
-    // resolve the crew record for its name + colour (several lookup names exist)
-    let rec = null;
-    if (CBZ.cityGangById) rec = CBZ.cityGangById(m.gangId);
-    if (!rec && CBZ.cityGangs) rec = CBZ.cityGangs.find && CBZ.cityGangs.find((x) => x && x.id === m.gangId);
-    const col = rec && rec.color != null ? hex6(rec.color) : "#ffd451";
-    const name = (rec && rec.name) ? rec.name : (m.gangId || "Crew");
-    const rank = CBZ.cityRankName ? CBZ.cityRankName(m.rank) : (m.rank || "Crew");
-    membEl.querySelector("#cMembDot").style.background = col;
-    const nmEl = membEl.querySelector("#cMembNm"); nmEl.textContent = name; nmEl.style.color = col;
-    membEl.querySelector("#cMembRnk").textContent = rank;
-    // promotion sliver toward the next rung (min of the two earned currencies),
-    // read off the SAME thresholds the promotion check reads.
-    const slot = membEl.querySelector("#cMembSlot");
-    const L = membLadder();
-    let idx = -1;
-    for (let i = 0; i < L.length; i++) if (L[i].key === m.rank) { idx = i; break; }
-    let pct = -1;
-    // a LOCKED next rung (gangs.js: only succession makes a Boss) is not
-    // something you can fill a bar toward, so the sliver hides — the same
-    // answer it already gave at the top of the ladder.
-    if (idx >= 0 && idx < L.length - 1 && !L[idx + 1].locked) {
-      const need = L[idx + 1].need;
-      if (need) {
-        const bP = need.bodies > 0 ? Math.min(1, (m.bodies || 0) / need.bodies) : 1;
-        const cP = need.contrib > 0 ? Math.min(1, (m.contrib || 0) / need.contrib) : 1;
-        pct = Math.round(Math.min(bP, cP) * 100);
-      }
-    }
-    if (pct < 0) { slot.style.display = "none"; }     // top of the ladder → no sliver
-    else { slot.style.display = "block"; if (membFillEl) membFillEl.style.width = pct + "%"; }
-    membEl.style.display = "inline-flex";
-  }
-
-  // RELATIONSHIP chip — contextual to the ONE ped you're aiming at / standing
-  // beside. Reads THAT ped's standing toward you (cityRelLabel / cityRel) and
-  // colours it by sentiment. Never a list; vanishes the moment you stop pointing.
-  function focusPed() {
-    const peds = CBZ.cityPeds, P = CBZ.player;
-    if (!peds || !P || !P.pos || P.dead || P.driving) return null;
-    if (CBZ.cityMenuOpen) return null;            // the interact menu owns the screen
-    const px = P.pos.x, pz = P.pos.z;
-    const cam = CBZ.cam, yaw = cam ? cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = Infinity;
-    for (const p of peds) {
-      if (!p || p.dead || p.vendor || !p.pos) continue;
-      const dx = p.pos.x - px, dz = p.pos.z - pz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > 64) continue;                       // within ~8m only
-      const d = Math.sqrt(d2) || 0.001;
-      const dot = (dx / d) * fx + (dz / d) * fz;   // forward alignment
-      // accept anyone close in front, OR anyone within arm's reach in any dir
-      if (dot < 0.4 && d > 2.6) continue;
-      const score = d - dot * 2;                   // nearest + most-centred wins
-      if (score < bestScore) { bestScore = score; best = p; }
-    }
-    return best;
-  }
-  // sentiment tints deliberately avoid the reserved semantics (money-green,
-  // armor-blue, wanted-gold) so a glance never lies about WHAT a color means
-  const REL_COL = {
-    "wants you dead": "#ff5b5b", "hates you": "#ff8b6b", "terrified of you": "#c9a0ff",
-    "loves you": "#ff8bd0", "likes you": "#5ad17a", "respects you": "#8fb6ff",
-    "neutral": "#9fb0c6",
-  };
-  function renderRel() {
-    if (!relEl || !CBZ.cityRelLabel) { if (relEl) relEl.style.display = "none"; return; }
-    const p = focusPed();
-    if (!p) { relEl.style.display = "none"; return; }
-    let lab; try { lab = CBZ.cityRelLabel(p); } catch (e) { lab = null; }
-    if (!lab) { relEl.style.display = "none"; return; }
-    const col = REL_COL[lab] || "#9fb0c6";
-    // a tiny ▲/▼ arrow reads sentiment at a glance (good = up, bad = down)
-    const bad = (lab === "wants you dead" || lab === "hates you" || lab === "terrified of you");
-    const arrow = (lab === "neutral") ? "" : (bad ? " ▼" : " ▲");
-    relEl.querySelector("#cRelNm").textContent = p.name || "Stranger";
-    const labEl = relEl.querySelector("#cRelLab");
-    labEl.textContent = lab + arrow; labEl.style.color = col;
-    relEl.style.display = "inline-flex";
-  }
-
-  // MELEE POSTURE — a slim bar for YOU and your current foe, shown ONLY while a
-  // melee fight is live (you're unarmed/melee + recently fighting). Reads the
-  // player bar from CBZ.cityPosture(); the foe bar from the engine's per-ped
-  // posture fields (set by combat.js on any ped that's been struck), all
-  // feature-detected so it simply hides when the melee system isn't present.
-  function meleeFoe() {
-    const peds = CBZ.cityPeds, P = CBZ.player;
-    if (!peds || !P || !P.pos) return null;
-    const px = P.pos.x, pz = P.pos.z;
-    let best = null, bd = 3.4 * 3.4;
-    const cam = CBZ.cam, yaw = cam ? cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    const scan = (a) => {
-      if (!a || a.dead || !a.pos) return;
-      const dx = a.pos.x - px, dz = a.pos.z - pz, d2 = dx * dx + dz * dz;
-      if (d2 > bd) return;
-      const d = Math.sqrt(d2) || 0.001;
-      if ((dx / d) * fx + (dz / d) * fz < 0.2) return;   // must be roughly in front
-      bd = d2; best = a;
-    };
-    if (CBZ.cityCops) for (const c of CBZ.cityCops) scan(c);
-    for (const p of peds) if (!p.vendor) scan(p);
-    return best;
-  }
-  function renderPosture() {
-    if (!postWrap) return;
-    const P = CBZ.player;
-    // gate: melee only. Hide if holding a real gun, driving, dead, or no posture sys.
-    const gun = CBZ.cityHasGun ? CBZ.cityHasGun() : !!(CBZ.hasAnyWeapon && CBZ.hasAnyWeapon());
-    const fighting = P && ((P._fighting || 0) > 0);
-    if (!CBZ.cityPosture || gun || !P || P.dead || P.driving || !fighting) { postWrap.style.display = "none"; return; }
-    let ps; try { ps = CBZ.cityPosture(); } catch (e) { ps = null; }
-    if (!ps || !ps.max) { postWrap.style.display = "none"; return; }
-    const foe = meleeFoe();
-    // only surface the bars when there's actually a foe engaged OR your own guard
-    // is loaded/broken — otherwise it's just idle swinging, keep it hidden.
-    if (!foe && ps.p <= 0 && !ps.broken) { postWrap.style.display = "none"; return; }
-    const youPct = Math.max(0, Math.min(100, (ps.p / ps.max) * 100));
-    const youFill = postYouEl.querySelector("i"); if (youFill) youFill.style.width = youPct + "%";
-    postYouEl.classList.toggle("brk", !!ps.broken);
-    if (foe) {
-      const fmax = foe._postMax || 100, fp = foe._posture || 0;
-      const fbrk = (foe._broken || 0) > 0;
-      const fPct = Math.max(0, Math.min(100, (fp / fmax) * 100));
-      const fFill = postFoeEl.querySelector("i"); if (fFill) fFill.style.width = (fbrk ? 100 : fPct) + "%";
-      postFoeEl.classList.toggle("brk", fbrk);
-      postFoeEl.style.display = "block";
-      if (postFoeNameEl) postFoeNameEl.textContent = (foe.name || "Foe") + (fbrk ? " · OPEN" : "");
-    } else {
-      postFoeEl.style.display = "none";
-      if (postFoeNameEl) postFoeNameEl.textContent = "";
-    }
-    postWrap.style.display = "flex";
-  }
 
   // ============================================================
-  //  THE MINIMAP — a HEADING-UP tactical instrument.
-  //  WHY heading-up: the #1 question a minimap answers is "which way am I
-  //  facing + what's about to hurt me", so we rotate the world to put YOUR
-  //  forward at the top (fixed chevron, no mental trig) and spend colour ONLY
-  //  on things that demand a reaction. The base is desaturated; territory is a
-  //  faint crew wash (whose block am I in); threats are bright and layered:
-  //  cops scale with heat, the police chopper rides the rim with a bearing at
-  //  3★+, bosses are gold, armed offenders/rampagers are orange-red, your crew
-  //  is green. Off-map threats clamp to the rim so you always know where danger
-  //  is. The strategic detail (names, full turf board) lives on the [M] map.
+  //  MINIMAP — heading-up round instrument, bottom-left. Icons only, never
+  //  text (the N pip excepted). Threats clamp to the rim so danger off-map
+  //  still shows a bearing. The strategic detail lives on the [M] map.
   // ============================================================
-  let radarAcc = 0, popAcc = 0;
-  // smoothed view radius (world units). Tight on foot, wider at driving speed —
-  // the RDR2/GTA trick that makes the next three turns readable from the map.
+  let radarAcc = 0;
+  // smoothed view radius (world units): tight on foot, wider at driving speed.
   let viewR = 100;
   function hex6n(c) { return "#" + ("000000" + ((c >>> 0) & 0xffffff).toString(16)).slice(-6); }
   // district ground tints — a faint per-quadrant personality wash (desaturated;
@@ -869,34 +360,20 @@
     function tri(x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.9, y + r * 0.7); ctx.lineTo(x - r * 0.9, y + r * 0.7); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1; ctx.stroke(); }
     function diamond(x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1; ctx.stroke(); }
 
-    // ---- NOTABLE POIs near you (MAP_V2): mirrors the full map's icon language
-    //      so the radar answers "what's around me" — casinos/banks/hospital/
-    //      guns/gas/civic/venues. Ordinary shops stay OFF the radar (they're
-    //      the [M] map's job) so the instrument doesn't turn to measles.
-    //      A MINIMAP IS ICONS ONLY, NEVER TEXT — this one already was, and it
-    //      now draws the SHARED pictograms (CBZ.mapIcon, systems/fullmap.js)
-    //      instead of one undifferentiated diamond per trade, so a hospital and
-    //      a pawn shop stop being "two diamonds of slightly different colour".
-    //      Degrade-safe: no mapIcon block ⇒ byte-identical old diamond. ----
-    const MAPV2 = !CBZ.CONFIG || CBZ.CONFIG.MAP_V2 !== false;
-    const NOTABLE = { casino: 1, bank: 1, hospital: 1, guns: 1, gas: 1, cityhall: 1, transit: 1, arena: 1, raceway: 1, racepark: 1, airfield: 1 };
-    const poiFn = CBZ.fullMap && CBZ.fullMap.poi;
+    // (POI pictograms, casinos/banks/hospital/guns/gas, were cut in the
+    //  2026-09-27 HUD purge: "what's around me" is the street itself and the
+    //  [M] map. The radar keeps only what moves or threatens.)
     const MI = CBZ.mapIcon;
-    if (MAPV2 && poiFn) {
-      const shopLots = (A.shopLots && A.shopLots.length) ? A.shopLots : A.lots;
-      for (const lot of shopLots || []) {
-        if (!lot || !lot.building) continue;
-        const k = (lot.building.shop && lot.building.shop.kind) || lot.kind;
-        const info = poiFn(lot);
-        if (!info || !(info.key || k === "casino" || NOTABLE[k])) continue;
-        const dx = lot.cx - px, dz = lot.cz - pz; if (dx * dx + dz * dz > R2) continue;
-        S(lot.cx, lot.cz);
-        const big = info.key || k === "casino";
-        if (MI) MI.draw(ctx, _p[0], _p[1], info.key ? "home" : k, { size: big ? 6 : 5, tier: big });
-        else {
-          diamond(_p[0], _p[1], info.color, big ? 3.6 : 2.6);
-          if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.9)"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(_p[0], _p[1], 5.2, 0, 6.28); ctx.stroke(); }
-        }
+    // ---- YOUR LAND (city/plots.js): every lot you own is a home pin on the
+    //      radar, pinned to the rim when it is out of range so you can always
+    //      drive back to the compound. ----
+    if (CBZ.cityPlots && CBZ.cityPlots.list) {
+      let own = []; try { own = CBZ.cityPlots.list(); } catch (e) { own = []; }
+      for (const pl of own) {
+        blip(pl.center.x, pl.center.z, function (x, y, rim) {
+          if (MI) MI.draw(ctx, x, y, "home", { size: rim ? 4.5 : 6, tier: !rim });
+          else diamond(x, y, "#39ff88", rim ? 2.6 : 3.6);
+        }, true);
       }
     }
 
@@ -997,14 +474,6 @@
     ctx.fillStyle = "#ff6b6b"; ctx.font = "bold 10px Fredoka,sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("N", nx, ny);
 
-    // ---- WANTED STARS (MAP_V2): a compact gold row pinned to the TOP of the
-    //      instrument — only ever drawn when wanted > 0, so 0★ leaves the radar
-    //      clean. Fixed at screen-top (not rotated) so the heat read is instant.
-    if (MAPV2 && wanted > 0) {
-      const gap = 9, x0 = cx - ((wanted - 1) * gap) / 2, sy = 13;
-      for (let i = 0; i < wanted; i++) radarStar(ctx, x0 + i * gap, sy, 3.6, "#ffd451");
-    }
-
     // ---- PLAYER: a fixed up-pointing chevron at centre + a translucent VIEW CONE
     //      so "where I am AND what I'm looking at" is unmistakable. Up === forward. ----
     ctx.save();
@@ -1032,82 +501,38 @@
     ctx.fillStyle = "#ff5040"; ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.28); ctx.fill();
     ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.stroke();
   }
-  function ringMark(ctx, x, y, col, r) { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r || 5, 0, 6.28); ctx.stroke(); }
-  function markStar(ctx, x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r || 4, 0, 6.28); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.stroke(); }
-  // 5-point wanted star for the radar's heat row
-  function radarStar(ctx, cx, cy, r, col) {
-    ctx.save(); ctx.shadowColor = "rgba(255,190,60,.85)"; ctx.shadowBlur = 4;
-    ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.44 : r; const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
-    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
-  }
 
   CBZ.cityHudDirty = function () { dirty = true; };
 
-  // ---- objective line: resolve the crew the player is prospecting so [ROUTE]
-  //      can drop an HQ waypoint. cityProspectTask() exposes a label (and maybe a
-  //      target ped) but NOT the gangId, so we match the label's gang short-name
-  //      (last word) against the live roster — a self-contained lookup. ----
-  function shortName(n) { const w = String(n || "").split(" "); return w.length ? w[w.length - 1] : ""; }
-  function prospectGang() {
-    if (!CBZ.cityProspectTask || !CBZ.cityGangs) return null;
-    let task; try { task = CBZ.cityProspectTask(); } catch (e) { task = null; }
-    if (!task) return null;
-    const lbl = String(task.label || "");
-    let found = null;
-    for (const gang of CBZ.cityGangs) {
-      if (!gang || gang.isPlayer || gang.absorbed) continue;
-      // the label embeds the gang's SHORT name ("...with Bloods", "...for Kings")
-      if (lbl.indexOf(shortName(gang.name)) >= 0 || lbl.indexOf(gang.name) >= 0) { found = gang; break; }
-    }
-    return found;
-  }
-  function routeToProspectHQ() {
-    if (!CBZ.fullMap) return;
-    let task; try { task = CBZ.cityProspectTask && CBZ.cityProspectTask(); } catch (e) { task = null; }
-    // a live marked target (biz/rival hit) is the precise thing to chase — route
-    // straight to it; otherwise route to the prospected crew's HQ.
-    if (task && task.target && !task.target.dead && task.target.pos && CBZ.fullMap.setWaypoint) {
-      CBZ.fullMap.setWaypoint(task.target.pos.x, task.target.pos.z, "TARGET: " + (task.target.name || "mark"));
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      return;
-    }
-    const gang = prospectGang();
-    if (gang && CBZ.fullMap.setGangWaypoint) { CBZ.fullMap.setGangWaypoint(gang.id); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-  }
-
-  // THE ONE NEXT-STEP LINE. Top-centre, in the slot the job distance pill
-  // uses (the two never show together: a live job with a place pre-empts it).
-  // Source, in order: the onboarding chain (city/origins.js
-  // CBZ.cityOnboardLine: "what do I do now", with a payoff flash when a step
-  // pays), then the gang you are prospecting (playergang.js
-  // CBZ.cityProspectTask, with its ROUTE chip and task progress). Nothing
-  // else writes here; with neither live the slot is hidden. It was switched
-  // off wholesale once, which also blinded the prospect ladder: a player who
-  // asked a crew for work had no way to see what the crew wanted next.
-  function renderObjective() {
+  // ---- THE NEXT-STEP LINE: the onboarding chain (origins.js
+  //      CBZ.cityOnboardLine) or the prospect task (playergang.js
+  //      CBZ.cityProspectTask). Shown when the line CHANGES (a new step
+  //      arrived, or a step paid off), faded after a few seconds, never nags
+  //      twice. TITLE ONLY: the producers' hints carry key legends ("press H",
+  //      "(E)") and walkthrough prose, which breaks the fourth wall. A title
+  //      that itself reads as a control legend is dropped too. ----
+  const CONTROL_RE = /\[[A-Za-z0-9/\- ]{1,8}\]|\([A-Z]\)|\b(?:press|click|hold|tap)\b|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/i;
+  let objSig = null;
+  function pollObjective() {
     if (!objEl) return;
+    // a live race owns the top-centre slot (racehud.js's chip)
+    const race = document.getElementById("raceHud");
+    if (race && race.style.display === "block") { objEl.classList.remove("on"); return; }
     let L = null;
     try { L = CBZ.cityOnboardLine ? CBZ.cityOnboardLine() : null; } catch (e) { L = null; }
-    let route = false;
     if (!L && CBZ.cityProspectTask) {
       let t = null; try { t = CBZ.cityProspectTask(); } catch (e) { t = null; }
-      if (t && t.label) { L = { title: t.label, progress: t.progress }; route = true; }
+      if (t && t.label) L = { title: t.label };
     }
-    if (!L) { objEl.style.display = "none"; return; }
-    const col = L.flash ? "var(--money,#7ed957)" : "var(--hud-ink)";
-    wHTML(objTxtEl,
-      "<b style='color:" + col + ";font-weight:700;letter-spacing:.2px'>" + esc(L.title) + "</b>" +
-      (L.hint ? "<div style='font-size:12px;color:var(--hud-dim,#9fb0c6);margin-top:2px'>" + esc(L.hint) + "</div>" : ""));
-    if (objRouteEl) objRouteEl.style.display = route ? "" : "none";
-    const hasBar = L.progress != null && !L.flash;
-    if (objSlotEl) objSlotEl.style.display = hasBar ? "" : "none";
-    if (hasBar && objFillEl) {
-      const w = Math.round(Math.max(0, Math.min(1, +L.progress || 0)) * 100) + "%";
-      if (objFillEl.style.width !== w) objFillEl.style.width = w;
-    }
-    objEl.style.display = "block";
+    const title = L && L.title && !CONTROL_RE.test(String(L.title)) ? String(L.title) : "";
+    const sig = title + "|" + (L && L.flash ? 1 : 0);
+    if (sig === objSig) return;
+    const first = objSig === null;
+    objSig = sig;
+    if (!title) { objEl.classList.remove("on"); return; }
+    objEl.textContent = title;
+    objEl.style.color = L.flash ? "var(--money,#7ed957)" : "";
+    reveal(objEl, first ? 7000 : 6000);
   }
 
   // ---- WEAPON HOTBAR — bring the city loadout up to jail's clarity, reading the
@@ -1302,7 +727,7 @@
     // Instrumentation only: reload is a glyph and all remaining characters are
     // numbers. The old RELOADING/RES prose repeated what the animation conveys.
     return (reloading ? "<span class='rl'>↻</span> " : "") +
-      "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + "</span>";
+      "<b>" + cur + "</b><span class='res'> / " + reserve + "</span>";
   }
   function renderHotbar() {
     if (!slotsEl) return;
@@ -1357,6 +782,12 @@
               "<i class='led' aria-hidden='true'></i></div>";
           }
         }
+        // TOUCH: the bag. The keyboard opens the [I] screen; a thumb had only
+        // the character card's pill, which the HUD purge removed, so the bar
+        // carries one more chip on touch (never on desktop).
+        if (isTouch() && CBZ.cityCharPanel && CBZ.cityCharPanel.open) {
+          html += "<div class='cSlot item' data-inv='1' title='Bag'>" + hotbarItemFace("Bag", null) + "</div>";
+        }
         wHTML(slotsEl, html);
         // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
         // whichever gun is the active entry; holster/items show no ammo here.
@@ -1376,8 +807,6 @@
           line = ammoReadout(cur, mag, res, reloading);
           break;
         }
-        const armorU = (CBZ.player && CBZ.player._armor) || 0;
-        if (armorU > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armorU) + "</span>";
         wHTML(ammoLineEl, line);
         return;
       }
@@ -1404,155 +833,11 @@
     // melee / fists show NOTHING here — the lit chip already names them; a
     // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
     // aloud (F6).
-    const armor = (CBZ.player && CBZ.player._armor) || 0;
-    if (armor > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armor) + "</span>";
     wHTML(ammoLineEl, line);
   }
 
-  // ---- carried LOOT readout — the valuables / consumables you're holding from
-  //      g.cityInv, with counts. Guns + ammo are deliberately EXCLUDED (the hotbar
-  //      already owns those); we surface drugs, wearables, valuables, throwables,
-  //      tools and food so your loot reads at a glance without cluttering. Compact
-  //      chips, value-sorted so the jackpot (a lifted Rolex / Gold Bar) leads. ------
-  // The two glyph tables that used to live here (LOOT_ICON by tag,
-  // LOOT_ITEM_ICON by name) are DELETED. Every entry in both had been emptied
-  // to "" by the repo-wide emoji strip, so they answered nothing for every item
-  // in the game while looking like a working table — and a name table could
-  // never have covered the half of the catalog that is registered at runtime
-  // anyway. city/itemicons.js draws item faces from KIND now; this row draws
-  // nothing at all (see below), so nothing here needs a glyph.
-  function renderLoot() {
-    if (!lootEl) return;
-    // Carried items and guns share the boxed hotbar/inventory model. A second
-    // row of loose item names was the "floating outside the boxes" UI bug.
-    lootEl.innerHTML = "";
-    lootEl.style.display = "none";
-  }
+  function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
 
-  // ============================================================
-  //  MINECRAFT-STYLE VITALS (CITY_HUD_MC) — hearts / hunger shanks / armor
-  //  plates as pixel-art icon rows riding the hotbar. All DOM writes are
-  //  signature-guarded (refreshAmmoLive's pattern): rows are built once and
-  //  only have classes toggled when a QUANTIZED value actually moved.
-  // ============================================================
-  // icon art: tiny 9×8 pixel sprites baked into SVG data-URIs at load — crisp
-  // at the 2× display size (18×16), zero image fetches, one technique for all
-  // three rows so they read as a family. A split paints a LEFT|RIGHT half-icon
-  // (palIn left of the split column, palOut right) for half-hearts/shanks.
-  function mcIconCss() {
-    const HRT = [".OOO.OOO.", "OHHFOFFFO", "OHFFFFFFO", "OFFFFFFFO", ".OFFFFFO.", "..OFFFO..", "...OFO...", "....O...."];
-    const FUD = ["...OOOO..", "..OFFFFO.", ".OFHFFFFO", ".OFFFFFFO", "..OFFFFO.", ".OBOOOO..", "OBBO.....", "OBO......"];
-    const ARM = ["OOO...OOO", "OFFO.OFFO", "OFFOOOFFO", "OFHFFFHFO", "OFFFFFFFO", ".OFFFFFO.", ".OFFFFFO.", "..OOOOO.."];
-    const SOCKET = { O: "#0c0e12", F: "#3a3f47", H: "#525862", B: "#454b54" };   // empty container
-    const P_HRT = { O: "#1a090c", F: "#e8332b", H: "#ff9d94" };                  // red heart + highlight
-    const P_FUD = { O: "#1c1006", F: "#b5622a", H: "#e09a52", B: "#efe4d3" };    // meat brown + bone
-    const P_ARM = { O: "#0d1013", F: "#9aa8b8", H: "#d5dde6" };                  // steel chestplate
-    function uri(rows, palIn, palOut, split) {
-      let r = "";
-      for (let y = 0; y < rows.length; y++) {
-        const row = rows[y];
-        for (let x = 0; x < row.length; x++) {
-          const ch = row[x];
-          if (ch === ".") continue;
-          const pal = (split != null && x > split) ? palOut : palIn;
-          const col = pal[ch];
-          if (col) r += "<rect x='" + x + "' y='" + y + "' width='1' height='1' fill='" + col + "'/>";
-        }
-      }
-      const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 8' shape-rendering='crispEdges'>" + r + "</svg>";
-      return "url(\"data:image/svg+xml," + encodeURIComponent(svg) + "\")";
-    }
-    return (
-      "#cityHud.mc .mcHrt.f{background-image:" + uri(HRT, P_HRT) + "}" +
-      "#cityHud.mc .mcHrt.h{background-image:" + uri(HRT, P_HRT, SOCKET, 4) + "}" +
-      "#cityHud.mc .mcHrt.e{background-image:" + uri(HRT, SOCKET) + "}" +
-      "#cityHud.mc .mcFud.f{background-image:" + uri(FUD, P_FUD) + "}" +
-      // hunger fills from the RIGHT (mirrored row) → a half-shank keeps its RIGHT half
-      "#cityHud.mc .mcFud.h{background-image:" + uri(FUD, SOCKET, P_FUD, 4) + "}" +
-      "#cityHud.mc .mcFud.e{background-image:" + uri(FUD, SOCKET) + "}" +
-      "#cityHud.mc .mcArm.f{background-image:" + uri(ARM, P_ARM) + "}" +
-      "#cityHud.mc .mcArm.h{background-image:" + uri(ARM, P_ARM, SOCKET, 4) + "}" +
-      "#cityHud.mc .mcArm.e{background-image:" + uri(ARM, SOCKET) + "}"
-    );
-  }
-  // one-time row construction: N icon spans, all starting as empty sockets
-  function fillIcons(rowEl, n, cls) {
-    if (!rowEl) return;
-    let h = "";
-    for (let i = 0; i < n; i++) h += "<span class='mcI " + cls + " e'></span>";
-    rowEl.innerHTML = h;
-  }
-  // toggle each icon to full/half/empty for a half-unit total. mirror=true
-  // anchors the fill at the ROW'S RIGHT edge (Minecraft's hunger bar), so the
-  // last remaining shank sits at the screen edge. Class writes are compared
-  // first — untouched icons cost nothing.
-  function setMcIcons(rowEl, count, halfUnits, mirror, cls) {
-    if (!rowEl) return;
-    const kids = rowEl.children;
-    for (let i = 0; i < kids.length; i++) {
-      const el = kids[i];
-      if (i >= count) { if (el.style.display !== "none") el.style.display = "none"; continue; }
-      if (el.style.display === "none") el.style.display = "";
-      const li = mirror ? (count - 1 - i) : i;   // logical index from the fill origin
-      const st = halfUnits >= (li + 1) * 2 ? "f" : (halfUnits === li * 2 + 1 ? "h" : "e");
-      const cn = "mcI " + cls + " " + st;
-      if (el.className !== cn) el.className = cn;
-    }
-  }
-  // Armor is an instrument, not an outfit caption.  The inventory/character
-  // panel names the kit; live play only needs the chest/helmet glyphs.
-  function armorLabel(P) {
-    const kit = P._armorKit || null;
-    return "" + (kit && kit.head ? "" : "");
-  }
-  // flip the skin (root .mc class drives ALL the CSS swaps) + reset the render
-  // guards so every MC surface repaints on the next frame.
-  function applyMc(on) {
-    mcApplied = on;
-    if (root) root.classList.toggle("mc", !!on);
-    mcSig = ""; mcStamLast = -1; mcArmLabLast = null;
-  }
-  function renderMcVitals(P, maxHp) {
-    if (!mcHeartsEl) return;
-    // HEARTS: 10 hearts span maxHp at half-heart granularity (20ths of max).
-    // Gym gains past the city's 200 ADD hearts (one per +20) up to a 12 cap,
-    // beyond which each heart is simply worth more — the row never sprawls.
-    const hearts = maxHp > 200 ? Math.min(12, Math.ceil(maxHp / 20)) : 10;
-    const hp = Math.max(0, +P.hp || 0);
-    const hHalf = hp <= 0 ? 0 : Math.min(hearts * 2, Math.max(1, Math.ceil((hp / maxHp) * hearts * 2)));
-    // HUNGER: CBZ.game.hunger 0-100 (hunger.js; null ≈ full) → 20 half-shanks
-    const hu = g.hunger == null ? 100 : Math.max(0, Math.min(100, +g.hunger || 0));
-    const fHalf = hu <= 0 ? 0 : Math.max(1, Math.ceil(hu / 5));
-    // ARMOR plates — only when the armor system dressed the player (aMax > 0)
-    const aMax = +(P._armorMax) || 0;
-    const aCur = Math.max(0, +(P._armor) || 0);
-    const aHalf = aMax > 0 ? (aCur <= 0 ? 0 : Math.min(20, Math.max(1, Math.ceil((aCur / aMax) * 20)))) : -1;
-    const sig = hearts + ":" + hHalf + ":" + fHalf + ":" + aHalf;
-    if (sig !== mcSig) {
-      mcSig = sig;
-      setMcIcons(mcHeartsEl, hearts, hHalf, false, "mcHrt");
-      mcHeartsEl.classList.toggle("low", hHalf > 0 && hHalf < 6);   // < 3 hearts → pulse
-      setMcIcons(mcFoodEl, 10, fHalf, true, "mcFud");               // fills from the right
-      if (mcArmRowEl) {
-        if (aHalf >= 0) { setMcIcons(mcArmIconsEl, 10, aHalf, false, "mcArm"); mcArmRowEl.style.display = "flex"; }
-        else mcArmRowEl.style.display = "none";
-      }
-    }
-    // armor tier label — same text the bar HUD shows, string-guarded
-    if (aMax > 0 && mcArmLabEl) {
-      const lab = armorLabel(P);
-      if (lab !== mcArmLabLast) { mcArmLabLast = lab; mcArmLabEl.innerHTML = lab; }
-    }
-    // stamina keeps a slim sliver under the hearts (integer-quantized → the
-    // width style is only touched when the percent actually moves)
-    const st = Math.round(Math.max(0, Math.min(100, P.stamina == null ? 100 : P.stamina)));
-    if (st !== mcStamLast && mcStamFEl) { mcStamLast = st; mcStamFEl.style.width = st + "%"; }
-  }
-
-  // Live ammo follows the engine as you FIRE / RELOAD — firing never flips the HUD
-  // `dirty` flag, so the per-frame driver pokes this. It re-renders the hotbar only
-  // when the held weapon's mag/reserve/reload actually changed (a cheap signature
-  // compare → no needless DOM churn on phones). Returns nothing; safe when unarmed.
   let ammoSig = "";
   // a compact signature of the UNIFIED bar (holster state + each entry's
   // active/label + item counts) plus the held gun's live mag/reserve/reload. The
@@ -1587,265 +872,101 @@
     if (g.mode === "city" && typeof CBZ.cityHotbar === "function") {
       // city: signature spans the whole unified bar so holster/item/select changes
       // re-render too (legacy ammo-only sig missed those).
-      sig = unifiedBarSig() + "|" + ((CBZ.player && CBZ.player._armor) | 0);
+      sig = unifiedBarSig();
     } else if (heldGun && fps && fps.rounds && fps.reserves) {
       const m = weaponMetaById(heldGun);
       const i = m ? m.i : -1;
-      sig = heldGun + "|" + (i >= 0 ? fps.rounds[i] : "") + "|" + (i >= 0 ? fps.reserves[i] : "") + "|" + (fps.reloading > 0 ? 1 : 0) + "|" + ((CBZ.player && CBZ.player._armor) | 0);
+      sig = heldGun + "|" + (i >= 0 ? fps.rounds[i] : "") + "|" + (i >= 0 ? fps.reserves[i] : "") + "|" + (fps.reloading > 0 ? 1 : 0);
     } else {
-      sig = (melee || "fists") + "|" + ((CBZ.player && CBZ.player._armor) | 0);
+      sig = (melee || "fists");
     }
     if (sig === ammoSig) return;
     ammoSig = sig;
     renderHotbar();
   }
 
-  // ---- contextual reveal: a value that CHANGED brightens to alert level, then
-  //      settles back to quiet chrome. The HUD speaks when something happened
-  //      and idles as faint furniture the rest of the time — persistent
-  //      elements stay minimal, attention goes to the world. ----
-  function flashThenFade(el, holdMs) {
-    if (!el) return;
-    if (el._ftf) { clearTimeout(el._ftf); el._ftf = 0; }
-    el.style.transition = "none";
-    el.style.opacity = "var(--o-alert,1)";
-    el._ftf = setTimeout(function () {
-      el.style.transition = "opacity .8s ease";
-      el.style.opacity = "";   // fall back to the element's resting opacity class
-      el._ftf = 0;
-    }, holdMs || 1400);
-  }
 
-  // money delta: flash a floating +$/-$ when cash changes, GTA-style; the big
-  // counter lifts to full brightness with it, then settles back to chrome.
+  // ---- cash: invisible at rest; a change shows the total + a floating delta
+  //      for ~3 s, then it fades. ----
   let lastCash = null;
   function showMoney() {
     const c = g.cash || 0;
+    if (c === lastCash) return;
     cashEl.textContent = "$" + c.toLocaleString();
-    if (lastCash != null && c !== lastCash && deltaEl) {
+    if (lastCash != null && deltaEl) {
       const d = c - lastCash;
       deltaEl.textContent = (d > 0 ? "+$" : "-$") + Math.abs(d).toLocaleString();
       deltaEl.style.color = d > 0 ? "var(--money,#7ed957)" : "#ff6b6b";
-      deltaEl.style.animation = "none"; void deltaEl.offsetWidth;   // restart
-      deltaEl.style.animation = "cDeltaUp 1.1s ease-out forwards";
-      cashEl.style.animation = "none"; void cashEl.offsetWidth;
-      cashEl.style.animation = "cMoneyPulse .4s ease-out";
-      flashThenFade(cashEl);
+      deltaEl.style.animation = "none"; void deltaEl.offsetWidth;
+      deltaEl.style.animation = "cDeltaUp 1.4s ease-out forwards";
+      reveal(cashEl.parentNode, 3000);
     }
     lastCash = c;
   }
 
-  // Per-frame DOM writes are signature-guarded (refreshAmmoLive's pattern,
-  // extended to everything the onAlways(46) tick reaches): innerHTML
-  // assignment re-parses and style writes dirty layout even when the value is
-  // unchanged, and this tick measured 9.1ms/frame avg (2026-08-03 perfReport)
-  // — nearly all of it identical-string re-parses. Write only on change.
-  function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
-  function wWidth(el, pct) {
-    const w = Math.max(0, Math.min(100, pct)).toFixed(1);
-    if (el && el._cbzW !== w) { el._cbzW = w; el.style.width = w + "%"; }
+  // ---- the slot bar surfaces when the loadout's SHAPE changes (select,
+  //      holster, pick up, use up), not when a round leaves the magazine. ----
+  let barShapeSig = null;
+  function syncWeapon(P) {
+    let shape = "";
+    if (typeof CBZ.cityHotbar === "function") shape = unifiedBarSig().replace(/@[^|]*/g, "");
+    if (shape !== barShapeSig) {
+      // never over the car's instrument cluster: no reveal behind the wheel
+      if (barShapeSig !== null && !P.driving) reveal(slotsEl, 2500);
+      barShapeSig = shape;
+    }
+    // the ammo count exists only while a gun is the thing in your hands
+    const gunOut = !!ammoLineEl.innerHTML && !P.driving && !P.dead;
+    const disp = gunOut ? "" : "none";
+    if (ammoLineEl._disp !== disp) { ammoLineEl._disp = disp; ammoLineEl.style.display = disp; }
   }
 
-  function renderText() {
-    build();
-    showMoney();
-    // wanted meter — GTA convention: it only appears once you HAVE a level, and
-    // flashes while heat is actively climbing (a manhunt) so it grabs the eye.
-    const w = g.wanted | 0;
-    if (w > 0) {
-      starsWrap.style.display = "inline-block";
-      let s = "";
-      for (let i = 1; i <= 5; i++) s += i <= w ? "<span style='color:var(--gold,#ffd166);text-shadow:0 0 8px rgba(255,209,102,.6)'>★</span>" : "<span style='color:#4a4f57'>★</span>";
-      wHTML(starsEl, s);
-      const hot = (g.heat || 0) > 0 && w >= (g._wantedPeak || 0);
-      starsWrap.style.animation = hot ? "cStarFlash .7s steps(1,end) infinite" : "none";
-    } else { starsWrap.style.display = "none"; starsWrap.style.animation = "none"; }
-    // crew headcount only, labeled (F1/F2): respect + bank read on the phone /
-    // leaderboard and DRIP reads at the boutique mirror + the club rope — the
-    // always-on duplicates here were stat wallpaper, and a second ★ two inches
-    // from the wanted meter read as heat.
-    crewEl.textContent = "";
-    if (worldEl) { worldEl.textContent = ""; worldEl.style.display = "none"; }
-    // WEAPON HOTBAR + carried loot — reads the engine's authoritative weapon state
-    // (CBZ.weaponInventory / currentWeaponId / CBZ.fps ammo) so the city loadout is
-    // as clear as jail's: every gun you own as a slot, the held one lit, live ammo.
-    // The engine's #weaponStrip/#ammo are hidden in city (css/city.css), so this is
-    // the single weapon readout — no double display to fight.
-    renderHotbar();
-    renderLoot();
-    // job
-    const j = g.cityJob;
-    if (j) {
-      const dest = j.dest ? j.dest
-        : ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) ? j.target.pos
-        : null;
-      let dist = "";
-      if (dest) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - dest.x, CBZ.player.pos.z - dest.z)) + "m";
-      // Full contract prose/pay lives in the phone. The live HUD only carries
-      // the one piece of navigation state that matters while moving — and it
-      // carries it ONCE (the speedometer's cluster stand-down rule, applied to
-      // navigation): mission.start pins the map waypoint on this same
-      // destination, and #waypointGuide already renders arrow + distance for
-      // it bottom-centre. While the guide covers this target, a second bare
-      // number in a top-centre pill is the same distance said twice — the
-      // owner's airliner screenshots, "1237m" at both ends of the screen. It
-      // stands down and returns the moment the waypoint is cleared (Space) or
-      // moved elsewhere. A hit whose LIVE target has walked away from the
-      // pinned last-seen mark keeps both readouts: those are two facts.
-      const wp = dist && CBZ.fullMap && CBZ.fullMap.waypoint ? CBZ.fullMap.waypoint() : null;
-      if (wp && Math.hypot(wp.x - dest.x, wp.z - dest.z) < 40) dist = "";
-      wHTML(jobEl, "" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : ""));
-      // an empty #cJob used to keep display:block — a bare grey pill with no
-      // words in it, floating top-centre. A box with no text does not render.
-      jobEl.style.display = dist ? "block" : "none";
-      // a job's distance pill owns the slot; a job with nothing to show there
-      // (a timer, a "pay what you owe") leaves the next-step line visible
-      if (dist) { if (objEl) objEl.style.display = "none"; }
-      else renderObjective();
-    } else {
-      jobEl.style.display = "none";
-      renderObjective();
+  // ---- screen edges: wanted siren wash + wound vignette ----
+  let hurtOp = -1, heatOp = -1, hurtLow = null;
+  function syncEdges(P) {
+    const maxHp = P.maxHp || 100;
+    const f = Math.max(0, Math.min(1, (P.hp || 0) / maxHp));
+    // nothing above half; deepens to full at 10% (a scratch is not a wound)
+    let o = P.dead ? 0 : Math.max(0, Math.min(1, (0.5 - f) / 0.4));
+    o = Math.round(o * 20) / 20;
+    if (o !== hurtOp) { hurtOp = o; hurtEl.style.opacity = String(o); }
+    const low = !P.dead && f < 0.3;
+    if (low !== hurtLow) { hurtLow = low; hurtEl.classList.toggle("low", low); }
+    let w = g.wanted | 0;
+    try { if (CBZ.cityStars) w = CBZ.cityStars() | 0; } catch (e) {}
+    const ho = w > 0 && !P.dead ? Math.min(0.75, 0.22 + w * 0.11) : 0;
+    if (ho !== heatOp) {
+      heatOp = ho;
+      heatEl.style.opacity = String(ho);
+      heatEl.classList.toggle("on", ho > 0);
     }
-    dirty = false;
   }
 
   CBZ.onAlways(46, function () {
     build();
     const show = g.mode === "city";
-    // respect the [H] hide-HUD toggle (charpanel.js) — don't clobber it every frame
+    // respect the [Shift+O] hide-HUD toggle (charpanel.js)
     const hudHidden = show && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
     const rDisp = (show && !hudHidden) ? "block" : "none";
     if (root._cbzDisp !== rDisp) { root._cbzDisp = rDisp; root.style.display = rDisp; }
     if (document.body._cbzModeCity !== show) { document.body._cbzModeCity = show; document.body.classList.toggle("mode-city", show); }
     if (!show) return;
-    // track the wanted peak so the flashing only fires while it's RISING/held
-    const w = g.wanted | 0;
-    if (w > (g._wantedPeak || 0)) g._wantedPeak = w; else if (w === 0) g._wantedPeak = 0;
-    if (dirty) renderText();
-    // bars + live job distance update every frame (cheap)
-    const P = CBZ.player, maxHp = P.maxHp || 100;
-    // MINECRAFT-STYLE vitals (CITY_HUD_MC): hearts / shanks / plates above the
-    // hotbar replace the slim bars. applyMc flips the skin only when the flag
-    // actually changes; the icon renders inside are signature-guarded so the
-    // per-frame cost is a few comparisons. Flag off = the classic writes below.
-    const mcOn = !!(CBZ.CONFIG && CBZ.CONFIG.CITY_HUD_MC);
-    if (mcOn !== mcApplied) applyMc(mcOn);
-    if (mcOn) {
-      renderMcVitals(P, maxHp);
-    } else {
-      wWidth(hpBar, (P.hp / maxHp) * 100);
-      wWidth(hungerBar, g.hunger || 0);
-      wWidth(stamBar, P.stamina == null ? 100 : P.stamina);
-      // ARMOR — the outer-layer plate gauge. Shown only when the armor system has
-      // given the player a kit (_armorMax > 0); guarded against div-by-zero and a
-      // missing armor module (fields simply absent → row stays hidden). The label
-      // carries the equipped tier name + a ⛑ helmet glyph when a head piece is on.
-      if (armRowEl) {
-        const aMax = +(P._armorMax) || 0;
-        if (aMax > 0) {
-          const aCur = Math.max(0, +(P._armor) || 0);
-          wWidth(armBar, (aCur / aMax) * 100);
-          wHTML(armLabEl, armorLabel(P));
-          armRowEl.style.display = "";
-        } else armRowEl.style.display = "none";
-      }
-    }
-    if (g.cityJob && (g.cityJob.dest || g.cityJob.type === "hit")) renderText();
-    // keep the hotbar ammo live as you fire/reload (cheap: a signature guard means
-    // it only touches the DOM when the held weapon's mag/reserve actually changed).
+    const P = CBZ.player;
+    showMoney();
+    if (dirty) { renderHotbar(); dirty = false; }
+    // live ammo while firing/reloading (signature-guarded)
     refreshAmmoLive();
-    pruneFeed(1 / 60);
-    // Speedometer when driving — THE FALLBACK ONE. (OWNER: "DRIVING A CAR
-    // THERES 2 SPEEDS SHOWN IN BOTTOM RIGHT FOR THE PLAYER.") city/carcluster.js
-    // draws a real instrument cluster in this exact corner (bottom:92px against
-    // this element's bottom:74px) with the posted limit, the gear and the fuel
-    // gauge — and on the sim unit vehicles.js:68 actually documents, 2.4 mph per
-    // unit, where the line below guesses 3. So when the cluster is up, this
-    // readout stands down and there is exactly ONE number on screen.
-    // It is a stand-down, not a deletion, on purpose: flip CAR_CLUSTER off (or
-    // load without carcluster.js at all) and this comes straight back, because
-    // carClusterSpeedOwned() is feature-detected and answers false. The touch
-    // racing dial (systems/touch_vehicle.js) counts as owned too — the cluster
-    // reports true through its handoff — and css/mobile.css's
-    // `body.tveh-on #cSpeed` remains as a second belt on that path.
-    if (speedEl) {
-      const car = P.driving && P._vehicle;
-      // Two owners can outrank this readout, and BOTH are checked here rather
-      // than leaned on from CSS: the cluster, and — for the CAR_CLUSTER=false
-      // case, where the cluster answers false but the dial is still drawing —
-      // the touch racing dial itself.
-      const owned = !!((CBZ.carClusterSpeedOwned && CBZ.carClusterSpeedOwned()) ||
-                       (CBZ.touchVehicleActive && CBZ.touchVehicleActive()));
-      if (car && car.pos && !owned) {
-        // ADOPTED: vehicles.js's CBZ.speedRead is the one conversion (see its
-        // note). The `* 3` this replaces called itself "rough mph" in its own
-        // comment and disagreed with the instrument cluster by 25% — two
-        // different speeds for one car, which is the fault the owner reported
-        // as "shows km/h not mph". The `:` arm keeps the old guess for a
-        // harness loaded without vehicles.js.
-        const read = CBZ.speedRead ? CBZ.speedRead(car.v) : null;
-        const shown = read ? read.n : Math.round(Math.abs(car.v || 0) * 3);
-        speedEl.style.display = "block";
-        _speedShown = true;
-        const sn = speedEl.querySelector("#cSpeedN");
-        if (sn) { sn.textContent = shown; sn.style.color = shown > 100 ? "#ff9e6b" : "#e8ecf2"; }
-        // …and it says WHICH unit now. This readout drew a bare number with an
-        // arrow glyph and nothing else, so on the one path where it is the only
-        // speedometer on screen there was no way to tell what you were reading.
-        const su = speedEl.querySelector("#cSpeedFU");
-        if (su && read && su.textContent !== read.unit) su.textContent = read.unit;
-      } else { speedEl.style.display = "none"; _speedShown = false; }
-    }
-    // population headcount + kill feed (throttled — they change steadily, not
-    // every frame; ~4Hz keeps phones smooth)
-    popAcc += 1 / 60;
-    // cadence rides the perf/quality slider — tier0 drops to 2Hz, Best keeps
-    // today's 4Hz exactly (all writes below are already signature-gated).
-    if (popAcc >= 1 / (CBZ.qScale ? CBZ.qScale(2, 4) : 4)) {
-      popAcc = 0;
-      renderPop(); renderKill();
-      // wave-5 depth surfaces, all throttled here at ~4Hz (cheap on phones)
-      renderTurfPay(); renderMemb(); renderRel(); renderPosture();
-    }
-    // radar (throttled), turf + home/partner status
+    syncWeapon(P);
+    syncEdges(P);
+    // radar + objective poll, throttled (quality slider: tier0 7Hz, Best 14Hz)
     radarAcc += 1 / 60;
-    // radar repaint rides the perf/quality slider — tier0 drops to 7Hz (the
-    // canvas redraw is the HUD's priciest CPU line), Best keeps today's 14Hz.
-    if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); }
-    // These two rows were retired (their facts moved to the phone) but the tick
-    // kept re-asserting the SAME empty string and the SAME "none" every frame —
-    // a style write dirties layout whether or not the value changed. One-time
-    // latch, kept on the ELEMENT like _cbzH/_cbzW above, so a rebuilt HUD gets
-    // its fresh node cleared again.
-    if (turfEl && !turfEl._cbzCleared) {
-      turfEl._cbzCleared = true;
-      turfEl.textContent = "";
-      turfEl.style.display = "none";
-    }
-    if (homeLineEl && !homeLineEl._cbzCleared) {
-      homeLineEl._cbzCleared = true;
-      homeLineEl.textContent = "";
-      homeLineEl.style.display = "none";
-    }
-    // aiming reticle when holding a firearm on foot — but the engine gun system
-    // (fpsmode) draws its OWN reticle whenever it's presenting a weapon, so only
-    // show the city dot when fpsmode is NOT (avoids two crosshairs).
+    if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); pollObjective(); }
+    // aiming reticle when holding a firearm on foot, unless fpsmode draws its own
     if (crossEl) {
       const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
       const fpsAiming = (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()) || (CBZ.fpsActive && CBZ.fpsActive());
       const cDisp = (it && it.gun && !fpsAiming && !P.driving && !P.dead && !CBZ.cityMenuOpen) ? "block" : "none";
-      // cached-write, same shape as root._cbzDisp above: the dot changes state a
-      // handful of times a minute, not sixty times a second.
       if (crossEl._cbzDisp !== cDisp) { crossEl._cbzDisp = cDisp; crossEl.style.display = cDisp; }
     }
   });
-
-  // (CUT: the POLICE DISPATCH BANNER — "📻 DISPATCH / ⚠ CODE BLACK: Airstrike
-  //  authorized. Level the block." etc. flashing centre-screen on every star
-  //  step. You are the SUSPECT, not a unit on the radio net — nothing in the
-  //  world delivers that text to you. The escalation already announces itself
-  //  diegetically: sirens and extra cruisers at 1-2★, a visible light-bar wall
-  //  across the road at 3★, the chopper's rotor + radar blip at 4★, and at 5★
-  //  you HEAR the jet scream in before anything explodes. The star meter owns
-  //  the abstract readout; no popup needed.)
 })();

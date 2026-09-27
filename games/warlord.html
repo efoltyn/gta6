@@ -157,13 +157,24 @@
   .wl-dim{opacity:.5}
   .wl-small{font-size:11px;letter-spacing:.1em}
 
-  /* ---- the persistent strip: who you are, at all times ---- */
+  /* ---- the strip: MEN and $ ONLY WHEN THEY MATTER ----
+     HUD PURGE (owner: "pills that mean nothing, SHOW DON'T TELL"). It used to
+     be a permanent bar of MEN / $ / DAY / -$/DAY / PRISONERS / speed plus
+     loyalty, weather, rank and two territory chips. Now: while you are buying
+     (outpost, armoury) it shows your men and your money; while you face a
+     band it shows your men; on the open island it appears for a few seconds
+     when either number CHANGES and fades away. Everything else is gone or is
+     a chip another module adds only while it is true (low loyalty, ground
+     being taken). No gradient slab behind it: text-shadow carries it. */
   #hud{position:fixed;left:0;right:0;top:0;z-index:var(--z-hud);display:none;
-    padding:calc(var(--wl-safe-t) + 8px) 12px 8px;
-    background:linear-gradient(#0009,#0000);pointer-events:none}
+    padding:calc(var(--wl-safe-t) + 8px) 12px 8px;pointer-events:none;
+    text-shadow:0 1px 3px #000,0 0 8px rgba(0,0,0,.6)}
   #hud.on{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
   #hud b{font-size:15px;letter-spacing:.06em}
   #hud .chip{font-size:11px;letter-spacing:.16em;opacity:.75}
+  #hudCore{display:flex;gap:12px;align-items:baseline;opacity:0;transition:opacity .6s ease}
+  #hudCore.show{opacity:1;transition-duration:.15s}
+  #hudCore .q{display:none}
 
   /* ---- THE SPEED CONTROL ----
      OWNER: "a slider to speed up and slow down game speed going up to
@@ -196,6 +207,9 @@
     padding:5px 11px 5px 9px;border-radius:13px;
     background:rgba(12,9,5,.62);border:1px solid rgba(255,255,255,.2)}
   #wlSpeed.on{display:flex}
+  /* a control, not a readout: it sits dim until a hand is near it */
+  #wlSpeed{opacity:.38;transition:opacity .4s ease}
+  #wlSpeed:hover,#wlSpeed:focus-within,#wlSpeed.fast,#wlSpeed.slow,#wlSpeed.held{opacity:1}
   #wlSpeed input[type=range]{appearance:none;-webkit-appearance:none;
     width:126px;height:34px;margin:0;background:none;cursor:pointer;display:block}
   #wlSpeed input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;
@@ -552,15 +566,9 @@
      right edge. On a portrait phone the rail is a bottom strip, shares no
      column with them, and nothing here applies. */
   @media (min-width:900px), (min-width:600px) and (max-height:520px){
-    body.wl-rail #wlMapBtn,
-    body.wl-rail #wlIn,
-    body.wl-rail #wlOut{display:none !important}
+    body.wl-rail #wlMapBtn{display:none !important}
   }
-  /* #wlSpeed is in that list and #hud carries the truth instead: the speed
-     chip in the strip is the ONE thing that follows you into the armoury,
-     because at 8x a screen is not a stop — it is eight times the wages. The
-     slider itself would land on top of the map's own controls at that exact
-     coordinate, and the keyboard (, .) still reaches it from a screen. */
+  /* #wlSpeed hides under a screen; the keyboard (, .) still reaches it. */
   /* #wl-match deliberately STAYS. The whole design is that the clock never
      pauses, so hiding the countdown behind the armoury would be the interface
      telling the player the lie the engine refuses to tell. #stage pads its
@@ -575,6 +583,7 @@
   .toast.bad{border-color:var(--blood);color:#ffc9c4}
   .toast.good{border-color:#5aa86a;color:#c9ffd4}
   @keyframes tin{from{opacity:0;transform:translateY(6px)}}
+  .toast.out{opacity:0;transition:opacity .5s ease}
 
   body.coarse .wl-btn{padding:14px 17px}
 </style>
@@ -880,18 +889,30 @@ function start() {
   CBZ.warlordCtx = ctx;
 
   /* ---- the toast surface, wired once ---- */
+  /* HUD PURGE: at most two on screen (the oldest goes), the same line is
+     never stacked on itself, and the signage law (no em dashes, no middle
+     dots on screen) is applied here once for every module's text. */
   W.on("toast", function (t) {
     const box = el("toasts");
     if (!box) return;
+    const text = String(t.text || "").replace(/\s*[\u2014\u00b7]\s*/g, ", ").trim();
+    if (!text) return;
+    for (let i = 0; i < box.children.length; i++) {
+      if (box.children[i].textContent === text) return;
+    }
+    while (box.children.length >= 2) box.removeChild(box.firstChild);
     const n = document.createElement("div");
     n.className = "toast " + (t.kind || "");
-    n.textContent = t.text;
+    n.textContent = text;
     box.appendChild(n);
-    setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 2600);
+    setTimeout(function () { n.classList.add("out"); }, 2100);
+    setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 2650);
   });
 
-  /* ---- the strip. It is on for everything that happens on the island and
-         off for the battle, which draws its own. ---- */
+  /* ---- the strip. MEN and $, shown only when they matter (see the CSS).
+         Off for the battle, which draws its own. events.js and territory.js
+         append their own chips after #hudCore, and only while those are true. */
+  let hudMen = -1, hudGold = -1, hudUntil = 0, hudTimer = 0;
   function paintHud() {
     const h = el("hud");
     if (!h) return;
@@ -900,31 +921,39 @@ function start() {
     const show = p === "campaign" || p === "encounter" || p === "outpost" || p === "armoury";
     h.classList.toggle("on", show);
     if (!show) return;
-    const C = W.clock;
-    h.innerHTML =
-      '<b>' + (S.army.length + 1) + ' MEN</b>' +
-      '<span class="chip wl-gold">$' + S.gold + '</span>' +
-      '<span class="chip">DAY ' + S.day + '</span>' +
-      '<span class="chip wl-dim">-$' + W.payroll() + '/DAY</span>' +
-      (S.prisoners.length ? '<span class="chip">' + S.prisoners.length + ' PRISONERS</span>' : '') +
-      /* THE ONE THING THAT OUTRANKS A SCREEN. The slider is campaign
-         furniture and hides under the armoury; this chip does not, because a
-         day at 8x costs eight days of wages while you are reading a roster
-         and the strip is where DAY and -$/DAY already are. Absent at 1x on
-         purpose: a readout that is always there is furniture, and a readout
-         that appears only when something is true is information. */
-      (C.scale() !== 1 ? '<span class="chip" style="color:var(--hot)">' + C.label() + '</span>' : '');
-    /* PUBLISH THE STRIP'S REAL HEIGHT, ON THE NEXT FRAME AND NOT NOW.
-       #stage needs to clear this thing and used to guess 46 px, which is the
-       one-line form; events.js wraps this very function and APPENDS its own
-       chips (loyalty, the four warlords) immediately after it returns, which
-       wraps the strip to two rows. Measuring synchronously here reads the
-       height before that append and publishes 46 forever — which is exactly
-       what the phone screenshot showed: "SAND BANDITS" printed through
-       "0/4 WARLORDS". A rAF puts the read after every same-task appender,
-       whoever they turn out to be, without this file having to know about
-       them. The measured value is the content BELOW the safe-area inset,
-       because the screens pad for that inset themselves. */
+    let core = el("hudCore");
+    if (!core) {
+      core = document.createElement("span");
+      core.id = "hudCore";
+      core.innerHTML = '<b id="hudMen"></b><span class="chip wl-gold" id="hudGold"></span>';
+    }
+    if (h.firstChild !== core) h.insertBefore(core, h.firstChild);
+    const men = S.army.length + 1, gold = S.gold;
+    const now = performance.now();
+    // a change on the open island earns the numbers four seconds on screen
+    if (men !== hudMen || gold !== hudGold) hudUntil = now + 4000;
+    hudMen = men; hudGold = gold;
+    /* PINNED while a decision is open: trading at an outpost (body.wl-trading,
+       the phase stays "campaign"), the armoury, or any verb rail (a band, the
+       ground, a card), because every one of those prices something in men
+       or money. Otherwise only while fresh. */
+    const bc = document.body.classList;
+    const pinned = p === "outpost" || p === "armoury" || p === "encounter" ||
+                   bc.contains("wl-trading") || bc.contains("wl-rail");
+    const fresh = now < hudUntil;
+    const showMen = pinned || fresh;
+    const showGold = pinned || fresh;
+    const nm = el("hudMen"), ng = el("hudGold");
+    nm.textContent = men + " MEN";
+    nm.classList.toggle("q", !showMen);
+    ng.textContent = "$" + gold;
+    ng.classList.toggle("q", !showGold);
+    core.classList.toggle("show", showMen || showGold);
+    clearTimeout(hudTimer);
+    if (fresh && !pinned) hudTimer = setTimeout(paintHud, hudUntil - now + 30);
+    /* PUBLISH THE STRIP'S REAL HEIGHT on the next frame: #stage pads by it,
+       and the chips events.js/territory.js append land after this returns.
+       Measured below the safe-area inset (the screens pad for that). */
     requestAnimationFrame(function () {
       const hh = Math.max(0, h.offsetHeight -
         (parseFloat(getComputedStyle(document.documentElement)
@@ -935,8 +964,6 @@ function start() {
   W.on("phase", paintHud);
   W.on("army", paintHud);
   W.on("gold", paintHud);
-  W.on("dawn", paintHud);
-  W.on("clock", paintHud);
   ctx.paintHud = paintHud;
 
   /* ============================================================ THE SPEED
@@ -1002,12 +1029,10 @@ function start() {
       val.textContent = C.label();
       box.classList.toggle("fast", s > 1);
       box.classList.toggle("slow", s < 1);
-      /* THE SECOND TAG ONLY SAYS THINGS THE FIRST ONE CANNOT. Held: name the
-         holder. Falling behind by more than a fifth: name the real rate. */
-      const ach = C.achieved();
-      const lag = !held && s > 1 && ach < s * 0.8;
-      box.classList.toggle("lag", lag);
-      const t = held ? held : lag ? C.label(Math.max(1, Math.round(ach))) + " REAL" : "";
+      box.classList.toggle("held", !!held);
+      /* THE SECOND TAG ONLY NAMES WHO HOLDS THE CLOCK. The "32x REAL"
+         achieved-rate readout was a benchmark number, not a game fact. */
+      const t = held ? held : "";
       tag.textContent = t;
       tag.classList.toggle("on", !!t);
     }
@@ -1131,7 +1156,7 @@ function start() {
     if (spec.title || spec.sub) {
       html += '<div class="vhead">' +
         (spec.title ? '<b>' + spec.title + '</b>' : '') +
-        (spec.sub ? '<span class="vsub">' + spec.sub + '</span>' : '') +
+        (spec.sub ? '<span class="vsub">' + String(spec.sub).replace(/\s*(?:\u00b7|&middot;|\u2014|&mdash;)\s*/g, ", ") + '</span>' : '') +
         (spec.body ? '<button class="vtoggle" id="vToggle">HIDE</button>' : '') + '</div>';
     }
     /* THE BODY IS THE CONTENT, NOT A SUMMARY OF IT. The first pass at killing
@@ -1147,7 +1172,7 @@ function start() {
       html += '<button class="vbtn ' + (o.kind || '') + '" data-i="' + i + '"' +
         (o.disabled ? ' disabled' : '') + '>' +
         '<span>' + o.label + '</span>' +
-        '<span class="vk">' + (o.key || (i + 1)) + (o.note ? ' · ' + o.note : '') + '</span>' +
+        (o.note ? '<span class="vk">' + o.note + '</span>' : '') +
         '</button>';
     });
     html += '</div></div>';
@@ -1187,12 +1212,14 @@ function start() {
       if (n >= 1 && n <= opts.length) { e.preventDefault(); fire(n - 1); }
     };
     window.addEventListener("keydown", verbKeyHandler);
+    if (ctx.paintHud) ctx.paintHud();   // a decision is open: men and $ pin
   };
   ctx.closeVerbs = function () {
     const box = el("verbs");
     if (box) { box.classList.remove("on"); box.innerHTML = ""; }
     document.body.classList.remove("wl-rail");
     if (verbKeyHandler) { window.removeEventListener("keydown", verbKeyHandler); verbKeyHandler = null; }
+    if (ctx.paintHud) ctx.paintHud();   // and unpin (they fade)
   };
   ctx.verbsOpen = function () { const b = el("verbs"); return !!(b && b.classList.contains("on")); };
   /* A SCREEN THAT IS NOT THE CURRENT PHASE'S SCREEN MUST NOT BE UP. Every

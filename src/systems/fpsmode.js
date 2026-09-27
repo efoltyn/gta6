@@ -1095,7 +1095,7 @@
     const cars = CBZ.game.mode === "city" && CBZ.cityCars;
     if (cars) for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
-      if (!c || c.dead || c.player || !c.pos || !c.group || c.group.visible === false) continue;
+      if (!c || c.dead || c.player || !c.pos || !c.group || (c.group.visible === false && !c._proxy)) continue;   // proxied = drawn instanced
       const dims = c.dims || {};
       const cy = (c.pos.y || 0) + (dims.height || 1.8) * 0.5;
       const dx = c.pos.x - from.x, dy = cy - from.y, dz = c.pos.z - from.z;
@@ -1423,6 +1423,39 @@
     mesh.visible = false;
     CBZ.scene.add(mesh);
     impacts.push({ mesh, life: 0, max: 0.14 });
+  }
+
+  /* What a round actually hit: the struck mesh, its material (the face's own
+     slot of a multi-material mesh), and its colour AT the hit (the face's
+     vertex colour times the material colour, since merged city facades are
+     white materials painted per vertex). Feeds CBZ.bulletImpact so the chips
+     are made of the wall. */
+  const _surfC = new THREE.Color();
+  function surfaceAt(wh) {
+    const out = { material: null, object: null, color: undefined };
+    const o = wh && wh.object;
+    if (!o || !o.material) return out;
+    let m = o.material;
+    if (Array.isArray(m)) m = m[(wh.face && wh.face.materialIndex) || 0] || m[0];
+    out.material = m; out.object = o;
+    if (m && m.color) {
+      _surfC.copy(m.color);
+      const ca = o.geometry && o.geometry.attributes && o.geometry.attributes.color;
+      if (m.vertexColors && ca && wh.face) {
+        const f = wh.face;
+        _surfC.r *= (ca.getX(f.a) + ca.getX(f.b) + ca.getX(f.c)) / 3;
+        _surfC.g *= (ca.getY(f.a) + ca.getY(f.b) + ca.getY(f.c)) / 3;
+        _surfC.b *= (ca.getZ(f.a) + ca.getZ(f.b) + ca.getZ(f.c)) / 3;
+      }
+      if (o.isInstancedMesh && o.instanceColor && wh.instanceId != null) {
+        const ic = o.instanceColor;
+        _surfC.r *= ic.getX(wh.instanceId); _surfC.g *= ic.getY(wh.instanceId); _surfC.b *= ic.getZ(wh.instanceId);
+      }
+      // a textured face's colour is in its texture, not its (white) tint:
+      // leave it to debris.js to colour the chips by material kind
+      if (!(m.map && !(m.vertexColors && ca))) out.color = _surfC.getHex();
+    }
+    return out;
   }
 
   function spawnImpact(pos, blood, big, power) {
@@ -2964,12 +2997,15 @@
         const nl = Math.hypot(nx, nz) || 1;
         const wnx = nx / nl, wnz = nz / nl;
         if (CBZ.bulletImpact) {
-          CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: cal });
+          // the struck face's OWN material + colour: the impact throws chips
+          // of what was hit (gunfx.js: sparks only off metal)
+          const surf = surfaceAt(hit.wallHit);
+          CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: cal, material: surf.material, object: surf.object, color: surf.color });
           // heavy rounds CHEW concrete: a second dust kick + the odd chunk
           // knocked clean off the face (LOD: only worth drawing inside ~45u)
           if (cal >= 1.2 && hit.dist < 45) {
-            CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
-            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
+            CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3, material: surf.material, object: surf.object, color: surf.color });
+            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6, material: surf.material, color: surf.color, dirx: wnx, dirz: wnz });
           }
         }
         // persistent pock — static walls remember the hit in world space;
@@ -4164,7 +4200,8 @@
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "v" && CBZ.game.mode !== "city") CBZ.toggleFPS();   // city owns [V] via city/view.js
+    // city owns [V] via city/view.js; Shark Sim has one camera and no [V]
+    if (k === "v" && CBZ.game.mode !== "city" && CBZ.game.mode !== "sharksim") CBZ.toggleFPS();
     else if (k === "r" && (fps.active || shoulderActive())) reload();
     else if (k === "x" && (fps.active || shoulderActive()) && weapon().explosive &&
       !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active) &&

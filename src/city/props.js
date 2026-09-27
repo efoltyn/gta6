@@ -840,23 +840,11 @@
   // one shot reaction, by what the round actually hit
   function hitProp(s, p, n, d) {
     const imp = CBZ.bulletImpact, hole = CBZ.bulletHole;
+    if (s.smashed) return s;                           // already lying in pieces
     if (s.type === "lamp") {
       if (imp) imp(p, n, { kind: "spark", power: 1.2 });
       if (!s.broken) {
-        s.broken = true;
-        if (s.lampIdx != null && lampPools.bulb) {
-          // instanced bulbs (LAMP_INSTANCED): a broken lamp's bulb + glow
-          // instances collapse to zero scale — the dark cobra head stays.
-          lampPools.bulb.setMatrixAt(s.lampIdx, _zeroM4);
-          lampPools.bulb.instanceMatrix.needsUpdate = true;
-          if (lampPools.glow) {
-            lampPools.glow.setMatrixAt(s.lampIdx, _zeroM4);
-            lampPools.glow.instanceMatrix.needsUpdate = true;
-          }
-        }
-        if (s.bulb) s.bulb.material = deadLampM;       // the head goes DARK
-        if (s.glow) s.glow.visible = false;            // and so does its pool on the street
-        setGlowOn(s.glowSpot, false);                  // and its Fresnel glow-shell instance dims too
+        killLamp(s);
         if (imp) imp(p, { x: n.x, y: -0.6, z: n.z }, { kind: "chip", power: 1.2, color: 0xdfe9f2 });   // glass rains down
       }
     } else if (s.type === "hydrant") {
@@ -890,17 +878,7 @@
       if (hole) hole(p, n, { size: 0.14 });
       if (!s.exploded) {
         s.hp = (s.hp || 1) - 1;
-        if (s.hp > 0) {
-        } else {
-          s.exploded = true;
-          if (s.group) s.group.visible = false;        // the cage is gone in the fireball
-          const ex = s.x, ez = s.z;
-          if (CBZ.cityExplosion) CBZ.cityExplosion(ex, ez, { power: 1.2, radius: 6, byPlayer: true });
-          if (CBZ.cityShatter) CBZ.cityShatter(ex, ez, 8);
-          if (CBZ.cityCrime) CBZ.cityCrime(120, { x: ex, z: ez, type: "shots-fired" });
-          if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(ex, ez, 45, 1.8, CBZ.city.playerActor);
-          if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: ex, z: ez }, radius: 80, intensity: 2.0 });
-        }
+        if (s.hp <= 0) cookOff(s, true);
       }
     } else {                                           // mailbox / meter: bolted steel
       if (imp) imp(p, n, { kind: "spark", power: 0.9 });
@@ -925,6 +903,7 @@
     let best = null, bt = 2;
     for (let i = 0; i < shootables.length; i++) {
       const s = shootables[i];
+      if (s.smashed) continue;
       const ox = s.x - from.x, oy = s.y - from.y, oz = s.z - from.z;
       const t = (ox * dx + oy * dy + oz * dz) / len2;
       if (t < 0 || t > 1 || t >= bt) continue;
@@ -939,6 +918,340 @@
       { x: -dx * il, y: -dy * il, z: -dz * il },
       { x: dx * il, z: dz * il });
   };
+  /* ======================================================================
+     STREET PROPS BREAK INTO THEMSELVES (REAL DEBRIS, 2026-09-27)
+     ======================================================================
+     OWNER: "I hate big cubes of fake debris. Make debris realer, all from the
+     prop itself." A prop used to have two reactions: tip over, or nothing
+     (an RPG into a lamp post was blast FX around a lamp that stood there
+     untouched). Now a blast or a hard hit BREAKS it through CBZ.debris, cut
+     from its own meshes: a lamp mast snaps at the hit and the stump stays
+     planted, the head and arm fall as their own pieces, a pallet splinters
+     along the grain, a crown comes apart into clumps and leaves, a bin cracks
+     into a few plastic shards, a hydrant is iron and only a very close heavy
+     blast shears it off whole.
+
+     Still NOT a wall (memory: props-are-not-walls). Nothing here carves; the
+     prop's colliders keep noBreach. It is a separate, deliberate reaction.
+
+     WHY THE TEMP GROUP. core/batch.js merges a prop's inert meshes into
+     per-tile buffers and DETACHES the originals (parent = null), and
+     city/localinst.js instances some of the rest. So the prop that is drawn
+     is not the prop's scene graph any more. Each breakable records its meshes
+     at BUILD time (before batching); on a break we rebuild a throwaway group
+     from those meshes' own geometry + material + local transform under the
+     group's current world matrix (a tipped bin breaks where it lies), hand
+     THAT to CBZ.debris, and hide the drawn copy with CBZ.batchHideGroup (the
+     merged slices + local instances, the demolition contract) plus the live
+     group itself. Instanced lamp bulbs get a temp mesh of the pool's own
+     geometry at the lamp's own bulb offset, and the instance is zero-scaled
+     through the same broken-lamp path a bullet uses.
+  ====================================================================== */
+  // per type: kind (debris material), need (effective force to break),
+  // keepCol (leave the collider: a stump / a planter box still stands),
+  // whole (heavy iron: comes off in one piece or not at all), maxD (whole
+  // only: never further than this from the blast), pieces (budget cap).
+  const BREAK = {
+    lamp:     { kind: "metal",   need: 0.45, keepCol: true,  pieces: 12, carBreak: true },
+    signal:   { kind: "metal",   need: 0.45, keepCol: true,  pieces: 12, carBreak: true },
+    meter:    { kind: "metal",   need: 0.3,  keepCol: false, pieces: 6,  carBreak: true },
+    bin:      { kind: "plastic", need: 0.12, pieces: 6, carBreak: true },
+    newsbox:  { kind: "metal",   need: 0.25, pieces: 8, carBreak: true },
+    cone:     { kind: "plastic", need: 0.06, pieces: 3, carBreak: true },
+    mailbox:  { kind: "metal",   need: 0.8,  whole: true, maxD: 4 },
+    hydrant:  { kind: "metal",   need: 1.1,  whole: true, maxD: 2.6 },
+    tree:     { kind: "wood",    need: 0.3,  keepCol: true, pieces: 12, carBreak: true },
+    shrub:    { kind: "foliage", need: 0.18, keepCol: true, pieces: 6 },
+    aframe:   { kind: "wood",    need: 0.12, pieces: 6, carBreak: true },
+    patio:    { kind: "plastic", need: 0.2,  pieces: 12, carBreak: true },
+    bikerack: { kind: "metal",   need: 0.6,  pieces: 6 },
+    propane:  { kind: "metal",   need: 0.5,  pieces: 10 },
+    shelter:  { kind: "metal",   need: 0.55, pieces: 14 },
+  };
+  // world/street_furniture.js's instanced batches (CBZ.detailKit). Dumpsters
+  // are a tonne of steel and sign posts carry their faces in a separate sheet
+  // (a snapped post would leave the sign hanging in the air) — both stay out.
+  const DK_BREAK = {
+    "pallets":    { kind: "wood",    need: 0.15, pieces: 8, carBreak: true },
+    "crate":      { kind: "wood",    need: 0.2,  pieces: 10, carBreak: true },
+    "barrier":    { kind: "plastic", need: 0.15, pieces: 8, carBreak: true },
+    "trash-bags": { kind: "plastic", need: 0.08, pieces: 3, carBreak: true },
+    "bike":       { kind: "metal",   need: 0.3,  whole: true, maxD: 6, carBreak: true },
+    "bollard":    { kind: "metal",   need: 1.2,  whole: true, maxD: 2.4 },
+  };
+  const DK_CAR = {};
+  for (const k in DK_BREAK) if (DK_BREAK[k].carBreak) DK_CAR[k] = true;
+  const BLAST_MAX_PROPS = 6;              // nearest N props per blast actually break
+  const CAR_BREAK_V = 14;                 // m/s: below this a bumper tips, above it breaks
+
+  let breakables = [];                    // {type, x, z, g, parts, cols, rec, smashed}
+  const bgrid = new Map();                // 16 m cells -> breakables, for the per-frame car scan
+  const BCELL = 16;
+  function bkey(ix, iz) { return ix * 8192 + iz; }
+  function regBreakable(b) {
+    breakables.push(b);
+    const k = bkey(Math.floor(b.x / BCELL), Math.floor(b.z / BCELL));
+    let a = bgrid.get(k); if (!a) { a = []; bgrid.set(k, a); }
+    a.push(b);
+    return b;
+  }
+  function breakablesNear(x, z, R, out) {
+    out.length = 0;
+    const i0 = Math.floor((x - R) / BCELL), i1 = Math.floor((x + R) / BCELL);
+    const j0 = Math.floor((z - R) / BCELL), j1 = Math.floor((z + R) / BCELL);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const a = bgrid.get(bkey(i, j)); if (!a) continue;
+      for (let n = 0; n < a.length; n++) {
+        const b = a[n]; if (b.smashed) continue;
+        const dx = b.x - x, dz = b.z - z;
+        if (dx * dx + dz * dz <= R * R) out.push(b);
+      }
+    }
+    return out;
+  }
+  const _near = [];
+
+  // the lamp goes dark: bulb + glow instances zero-scaled, the per-mesh bulb
+  // swapped dead, its Fresnel shell dimmed, and (via .broken) the pooled
+  // real-light driver stops choosing it. Shared by a bullet and a break.
+  function killLamp(s) {
+    if (!s || s.broken) return;
+    s.broken = true;
+    if (s.lampIdx != null && lampPools.bulb) {
+      lampPools.bulb.setMatrixAt(s.lampIdx, _zeroM4);
+      lampPools.bulb.instanceMatrix.needsUpdate = true;
+      if (lampPools.glow) {
+        lampPools.glow.setMatrixAt(s.lampIdx, _zeroM4);
+        lampPools.glow.instanceMatrix.needsUpdate = true;
+      }
+    }
+    if (s.bulb) s.bulb.material = deadLampM;
+    if (s.glow) s.glow.visible = false;
+    setGlowOn(s.glowSpot, false);
+  }
+  // a signal head dies: its three instanced bulbs collapse, its glow shells
+  // go dark and stay dark (the sync driver reads cand.dead), no pooled light.
+  function killSignal(b) {
+    const c = b.cand;
+    if (!c || c.dead) return;
+    c.dead = true;
+    for (const k of ["red", "yel", "grn"]) {
+      const h = c.head && c.head[k];
+      if (h && h.sigPool && h.sigIdx != null) { h.sigPool.setMatrixAt(h.sigIdx, _zeroM4); h.sigPool.instanceMatrix.needsUpdate = true; }
+      if (c.spots) setGlowOn(c.spots[k], false);
+    }
+  }
+
+  const _tm = new THREE.Matrix4(), _tv = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
+  // throwaway group of this prop's recorded meshes with the given role,
+  // under the prop group's CURRENT world matrix. Not added to the scene.
+  function tempOf(b, role) {
+    const T = new THREE.Group();
+    b.g.updateWorldMatrix(true, false);
+    b.g.matrixWorld.decompose(_tv, _tq, _ts);
+    T.position.copy(_tv); T.quaternion.copy(_tq); T.scale.copy(_ts);
+    let n = 0;
+    for (const p of b.parts) {
+      if ((p.role || "main") !== role || !p.m || !p.m.geometry) continue;
+      const m = new THREE.Mesh(p.m.geometry, p.mat || p.m.material);
+      m.position.copy(p.m.position); m.quaternion.copy(p.m.quaternion); m.scale.copy(p.m.scale);
+      m.userData.debrisKind = p.kind || BREAK[b.type].kind;
+      m.castShadow = true;
+      T.add(m); n++;
+    }
+    return n ? T : null;
+  }
+  // ONE rigid body from a whole group: CBZ.debris.adopt makes one body per
+  // mesh, which would throw a hydrant's cap and nozzles off separately. Bake
+  // the group's meshes (world space) into one geometry with a material group
+  // per mesh, so the iron comes off its bolts in one piece.
+  function wholeSource(T) {
+    T.updateWorldMatrix(true, true);
+    const P = [], N = [], mats = [], spans = [];
+    let v = 0;
+    T.traverse(function (m) {
+      if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      const pa = g.attributes.position.array, na = g.attributes.normal ? g.attributes.normal.array : null;
+      const n = g.attributes.position.count;
+      for (let i = 0; i < n * 3; i++) { P.push(pa[i]); N.push(na ? na[i] : (i % 3 === 1 ? 1 : 0)); }
+      spans.push([v, n, mats.length]);
+      mats.push(Array.isArray(m.material) ? m.material[0] : m.material);
+      v += n;
+      g.dispose();
+    });
+    if (!v) return null;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    for (const sp of spans) geo.addGroup(sp[0], sp[1], sp[2]);
+    return { geometry: geo, matrixWorld: new THREE.Matrix4(), material: mats };
+  }
+  function dropCols(b) {
+    const cs = CBZ.colliders;
+    if (!cs || !b.cols || !b.cols.length) return;
+    let hit = false;
+    for (const c of b.cols) { const i = c ? cs.indexOf(c) : -1; if (i >= 0) { cs.splice(i, 1); hit = true; } }
+    b.cols.length = 0;
+    if (hit && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  /* BREAK ONE PROP. at = impact point, dir = push (x,z; y lifts), f = the
+     effective force at the prop (already over its need). Returns true when it
+     actually came apart. */
+  function smashProp(b, at, dir, f, o) {
+    const D = CBZ.debris, T0 = BREAK[b.type];
+    if (!D || !T0 || b.smashed || !b.g) return false;
+    o = o || {};
+    b.smashed = true;
+    if (b.rec) { b.rec.smashed = true; b.rec.over = true; }
+    if (b.type === "lamp" && b.rec) killLamp(b.rec);
+    if (b.type === "signal") killSignal(b);
+    const owner = o.owner || "street-props";
+    const over = Math.max(1, f / T0.need);
+    const power = Math.max(0.4, Math.min(2.6, f * 1.4));
+    const budget = Math.max(3, Math.min(T0.pieces || 10, Math.round(5 + over * 3)));
+    const dl = Math.hypot(dir.x, dir.z) || 1;
+    const push = { x: dir.x / dl, y: dir.y != null ? dir.y : 0.3, z: dir.z / dl };
+    const hitY = Math.max(0.35, Math.min(2.6, at.y != null ? at.y : 0.8));
+    const pt = { x: at.x, y: hitY, z: at.z };
+    try {
+      if (T0.whole) {
+        // heavy iron: it shears off its bolts in one piece, thrown along the blast
+        const T = tempOf(b, "main"), W = T && wholeSource(T);
+        const sp = Math.min(9, 2.5 + f * 3.5);
+        if (W) D.adopt(W, { owner, kind: T0.kind, velocity: new THREE.Vector3(push.x * sp, 1.5 + f * 1.8, push.z * sp),
+          angular: new THREE.Vector3(push.z * 3, (Math.random() - 0.5) * 2, -push.x * 3) });
+      } else {
+        const snap = tempOf(b, "snap");
+        if (snap) D.shatter(snap, { at: pt, dir: push, power, owner, snap: true, maxPieces: Math.max(2, Math.round(budget * 0.35)) });
+        const main = tempOf(b, "main");
+        if (main) D.shatter(main, { at: pt, dir: push, power, owner, maxPieces: snap ? Math.max(3, budget - Math.round(budget * 0.35)) : budget });
+        const keep = tempOf(b, "keep"), KW = keep && wholeSource(keep);   // a planter / a lamp's foot: stays where it stood
+        if (KW) D.adopt(KW, { owner });
+      }
+    } catch (e) { /* debris never throws, but a prop must never break the blast */ }
+    if (CBZ.batchHideGroup) try { CBZ.batchHideGroup(b.g); } catch (e) {}
+    b.g.visible = false;
+    b.g.userData.cullLocked = true;                    // core/farcull must never re-show it
+    if (!T0.keepCol) dropCols(b);
+    return true;
+  }
+  // PROPS_WIRED_V1 propane cook-off, shared by the last bullet and a blast
+  // (a queued blast cook-off detonates a beat later: chain reactions read).
+  const cookQ = [];
+  function cookOff(s, byPlayer) {
+    if (!s || s.exploded) return;
+    s.exploded = true;
+    const ex = s.x, ez = s.z;
+    if (s.brk && !s.brk.smashed && CBZ.debris) smashProp(s.brk, { x: ex, y: 0.5, z: ez }, { x: 0, y: 1, z: 0.01 }, 2.2);
+    else if (s.group) s.group.visible = false;         // headless: the cage is simply gone
+    if (CBZ.cityExplosion) CBZ.cityExplosion(ex, ez, { power: 1.2, radius: 6, byPlayer: !!byPlayer });
+    if (CBZ.cityShatter) CBZ.cityShatter(ex, ez, 8);
+    if (byPlayer) {
+      if (CBZ.cityCrime) CBZ.cityCrime(120, { x: ex, z: ez, type: "shots-fired" });
+      if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(ex, ez, 45, 1.8, CBZ.city.playerActor);
+    }
+    if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: ex, z: ez }, radius: 80, intensity: 2.0 });
+  }
+  if (CBZ.onAlways) CBZ.onAlways(7.85, function (dt) {
+    if (!cookQ.length) return;
+    for (let i = cookQ.length - 1; i >= 0; i--) {
+      const q = cookQ[i];
+      q.t -= dt;
+      if (q.t > 0) continue;
+      cookQ.splice(i, 1);
+      cookOff(q.s, q.byPlayer);
+    }
+  });
+
+  /* PUBLIC: an explosion at (x,y,z) with radius R and power (the blast's own
+     power, ~1 for a grenade, ~2 for an RPG, more for heavy ordnance) breaks
+     the street props it reaches. Effective force at a prop = power x (1 - d/R);
+     a prop whose force clears its material's `need` breaks for real (nearest
+     BLAST_MAX_PROPS only), a light knockable under it but over half tips away
+     from the blast, heavy iron under it just stands. opts: {owner, byPlayer,
+     maxProps}. Returns {broken, tipped}. Never throws. */
+  CBZ.cityPropsBlast = function (x, y, z, R, power, opts) {
+    const out = { broken: 0, tipped: 0 };
+    try {
+      opts = opts || {};
+      if (!(R > 0) || !isFinite(x) || !isFinite(z)) return out;
+      power = power > 0 ? power : 1;
+      y = isFinite(y) ? y : 0.5;
+      const cand = [];
+      breakablesNear(x, z, R, _near);
+      for (const b of _near) {
+        const T0 = BREAK[b.type]; if (!T0) continue;
+        const d = Math.hypot(b.x - x, b.z - z);
+        const f = power * Math.max(0, 1 - d / R);
+        cand.push({ b, d, f, T0 });
+      }
+      const DK = CBZ.detailKit;
+      if (DK && DK.instancesNear) {
+        const inst = DK.instancesNear(x, z, R, DK_BREAK);
+        for (const e of inst) {
+          const T0 = DK_BREAK[e.name];
+          cand.push({ dk: e, d: e.d, f: power * Math.max(0, 1 - e.d / R), T0 });
+        }
+      }
+      cand.sort((a, b) => a.d - b.d);
+      const cap = opts.maxProps || BLAST_MAX_PROPS;
+      for (const c of cand) {
+        const T0 = c.T0;
+        const px = c.b ? c.b.x : c.dk.item.x, pz = c.b ? c.b.z : c.dk.item.z;
+        const dir = { x: px - x, y: 0.35, z: pz - z };
+        if (Math.hypot(dir.x, dir.z) < 1e-3) { dir.x = 1; }
+        const breaks = c.f >= T0.need && (!T0.whole || c.d <= (T0.maxD || R));
+        if (breaks && out.broken < cap) {
+          if (c.b && c.b.type === "propane") {
+            // a cage caught in a fireball cooks off a beat later, and its own
+            // blast carries on down the street — a real chain, one per cage
+            const s = c.b.rec;
+            if (s && !s.exploded && !s.queued) { s.queued = true; cookQ.push({ s, t: 0.15 + Math.random() * 0.25, byPlayer: !!opts.byPlayer }); out.broken++; }
+            continue;
+          }
+          if (c.b ? smashProp(c.b, { x, y, z }, dir, c.f, opts) : smashInstance(c.dk, { x, y, z }, dir, c.f, T0, opts)) out.broken++;
+          continue;
+        }
+        // under its need: light things still get thrown over
+        if (c.b && c.b.rec && c.b.rec.group && !c.b.rec.over && c.f >= T0.need * 0.4 && !T0.whole) {
+          tipProp(c.b.rec, dir.x, dir.z, 0.15 + c.f * 0.3, 0.4 + c.f * 1.5);
+          out.tipped++;
+        }
+      }
+    } catch (e) { /* never into the explosion core */ }
+    return out;
+  };
+  // one detailKit instance (pallet, crate, barrier, bike, bags, bollard)
+  function smashInstance(e, at, dir, f, T0, o) {
+    const D = CBZ.debris, DK = CBZ.detailKit;
+    if (!D || !DK || !DK.instanceMesh) return false;
+    const m = DK.instanceMesh(e.batch, e.i);
+    if (!m) return false;
+    m.userData.debrisKind = T0.kind;
+    const owner = (o && o.owner) || "street-props";
+    const dl = Math.hypot(dir.x, dir.z) || 1;
+    const push = { x: dir.x / dl, y: dir.y != null ? dir.y : 0.3, z: dir.z / dl };
+    // an instance matrix is a WORLD matrix: shatter reads matrixWorld after
+    // updateWorldMatrix, which with matrixAutoUpdate off and no parent keeps it
+    const G = new THREE.Group(); G.add(m);
+    try {
+      if (T0.whole) {
+        const sp = Math.min(9, 2.5 + f * 3.5);
+        D.adopt(G, { owner, velocity: new THREE.Vector3(push.x * sp, 1.5 + f * 1.8, push.z * sp),
+          angular: new THREE.Vector3(push.z * 3, (Math.random() - 0.5) * 2, -push.x * 3) });
+      } else {
+        const over = Math.max(1, f / T0.need);
+        D.shatter(G, { at: { x: at.x, y: Math.max(0.3, Math.min(2, at.y != null ? at.y : 0.6)), z: at.z }, dir: push,
+          power: Math.max(0.4, Math.min(2.6, f * 1.4)), owner,
+          maxPieces: Math.max(3, Math.min(T0.pieces || 8, Math.round(4 + over * 3))) });
+      }
+    } catch (err) { /* never into the caller */ }
+    DK.hideInstance(e.batch, e.i);
+    return true;
+  }
+
   // one always-driver animates tips + geysers; idles to a length check when quiet
   if (CBZ.onAlways) CBZ.onAlways(7.8, function (dt) {
     if (!knocks.length && !geysers.length && !drops.length) return;
@@ -1004,11 +1317,53 @@
   // never a draw call, never touches vehicles.js's own crash/crumple path
   // (these are far too light to dent a hull).
   let _carKnockT = 0;
+  // HEAVY HITS BREAK. Every frame, for the few cars doing more than
+  // CAR_BREAK_V: a breakable prop in the car's path (ahead of its centre by
+  // up to a bonnet plus two frames of travel, within a half-width sideways)
+  // breaks along the car's velocity BEFORE the collider can stop the car —
+  // a lamp mast snaps over the bonnet, a pallet splinters, a bin bursts. The
+  // car pays for it (a mast costs real speed, a bin barely any). Under that
+  // speed the old 10 Hz tip below is untouched.
+  const _carNear = [];
+  function carBreakScan(cars, dt) {
+    const DK = CBZ.detailKit;
+    for (let j = 0; j < cars.length; j++) {
+      const car = cars[j];
+      if (!car || car.dead || !car.pos || !isFinite(car.pos.x) || !isFinite(car.pos.z)) continue;
+      const vmag = Math.abs(car.v || 0);
+      if (!isFinite(vmag) || vmag <= CAR_BREAK_V) continue;
+      const sg = car.v < 0 ? -1 : 1;
+      const fx = Math.sin(car.heading || 0) * sg, fz = Math.cos(car.heading || 0) * sg;
+      const reach = 2.6 + vmag * (dt || 0.016) * 2;
+      const f0 = 0.35 * vmag / CAR_BREAK_V;
+      breakablesNear(car.pos.x, car.pos.z, reach + 1.5, _carNear);
+      for (let i = 0; i < _carNear.length; i++) {
+        const b = _carNear[i], T0 = BREAK[b.type];
+        if (!T0 || !T0.carBreak || b.smashed) continue;
+        const dx = b.x - car.pos.x, dz = b.z - car.pos.z;
+        const along = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
+        if (along < -1.5 || along > reach || lat > 1.05 + (b.rec && b.rec.r ? Math.min(0.5, b.rec.r) : 0.3)) continue;
+        if (smashProp(b, { x: b.x, y: 0.75, z: b.z }, { x: fx, y: 0.25, z: fz }, Math.max(T0.need, f0))) {
+          const heavy = b.type === "lamp" || b.type === "signal" || b.type === "tree" || b.type === "meter";
+          car.v *= heavy ? 0.72 : 0.93;
+        }
+      }
+      if (DK && DK.instancesNear) {
+        const inst = DK.instancesNear(car.pos.x, car.pos.z, reach + 1.2, DK_CAR);
+        for (let i = 0; i < inst.length; i++) {
+          const e = inst[i], T0 = DK_BREAK[e.name];
+          const dx = e.item.x - car.pos.x, dz = e.item.z - car.pos.z;
+          const along = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
+          if (along < -1.5 || along > reach || lat > 1.35) continue;
+          if (smashInstance(e, { x: e.item.x, y: 0.6, z: e.item.z }, { x: fx, y: 0.25, z: fz }, Math.max(T0.need, f0), T0, null)) car.v *= 0.95;
+        }
+      }
+    }
+  }
   // order 14.7: strictly after vehicles.js's driving update (11, computes this
   // frame's car.pos/car.v) but its OWN slot — city/combat.js already owns 15
   // (a melee telegraph scan, unrelated but no need to tie-break against it).
   if (CBZ.onUpdate) CBZ.onUpdate(14.7, function (dt) {
-    if (!carKnockables.length) return;
     const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
     const cars = (CBZ.cityCars && CBZ.cityCars.length) ? CBZ.cityCars : null;
     // PROPS_KNOCK_PLAYER — A BODY AT A RUN DOES WHAT A BUMPER DOES.
@@ -1025,6 +1380,7 @@
     const runner = (CBZ.CONFIG.PROPS_KNOCK_PLAYER !== false && P && P.pos && !P.dead && !P.driving
       && isFinite(P.pos.x) && isFinite(P.pos.z) && (P.speed || 0) > 2.6) ? P : null;
     if (!cars && !runner) return;
+    if (cars && CBZ.debris) carBreakScan(cars, dt);
     _carKnockT += dt;
     if (_carKnockT < 0.1) return;                 // 10Hz — a bumper clip doesn't need 60Hz reaction
     _carKnockT = 0;
@@ -1306,6 +1662,7 @@
     // fresh world: drop every shootable record/animation from the old one
     shootables = [];
     carKnockables.length = 0;
+    breakables = []; bgrid.clear(); cookQ.length = 0;
     knocks.length = 0; geysers.length = 0;
     for (let i = drops.length - 1; i >= 0; i--) { drops[i].s.visible = false; dropPool.push(drops[i].s); }
     drops.length = 0;
@@ -1490,8 +1847,30 @@
        throws its debris here — the prop just never gets carved open, and never
        gets swept away as a "neighbour" of a real facade carve either. */
     function solidCollider(x, z, r, ref, noCam) {
-      if (!CBZ.colliders) return;
-      CBZ.colliders.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, ref, noCam: noCam !== false, noBreach: true });
+      if (!CBZ.colliders) return null;
+      const c = { minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, ref, noCam: noCam !== false, noBreach: true };
+      CBZ.colliders.push(c);
+      return c;
+    }
+    /* REAL DEBRIS registration (see STREET PROPS BREAK INTO THEMSELVES).
+       Records the group's meshes NOW, before core/batch.js detaches them.
+       o.snap / o.keep / o.skip: meshes with that role; o.kinds: [[mesh, kind]]
+       overrides; o.extra: parts that are not children (an instanced bulb);
+       o.cols: this prop's colliders; o.rec: its shootable/knock record. */
+    function breakable(g, type, x, z, o) {
+      o = o || {};
+      const parts = [];
+      const has = (arr, m) => !!arr && arr.indexOf(m) >= 0;
+      for (const m of g.children) {
+        if (!m.isMesh || m.isInstancedMesh || has(o.skip, m)) continue;
+        let kind = null;
+        if (o.kinds) for (const kv of o.kinds) if (kv[0] === m) kind = kv[1];
+        parts.push({ m, role: has(o.snap, m) ? "snap" : has(o.keep, m) ? "keep" : "main", kind });
+      }
+      if (o.extra) for (const p of o.extra) parts.push(p);
+      const b = regBreakable({ type, x, z, g, parts, cols: (o.cols || []).filter(Boolean), rec: o.rec || null, cand: o.cand || null, smashed: false });
+      if (o.rec) o.rec.brk = b;
+      return b;
     }
 
     function doorLots() {
@@ -1930,7 +2309,7 @@
       // below — without this, cars drove straight through every signal.
       // Slim, and matched to the mast: the shaft is r=0.14 at the butt, so a
       // 0.25 half-extent was a 0.5 m block around a 0.28 m pole.
-      if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) solidCollider(px + sx, pz + sz, 0.16, pole);
+      const sigCol = (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) ? solidCollider(px + sx, pz + sz, 0.16, pole) : null;
       const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
       // lamp world position: head's world xz + its face offset (local z=0.28
@@ -1963,7 +2342,12 @@
       // kept together (not just pushed into the flat arrays) so the sync
       // driver below can dim/relight all three of THIS head's shells as a
       // matched set without hunting for them by array index.
-      lightCandidates.push({ x: wx, y: 4.6, z: wz, kind: "signal", head: { red, yel, grn }, spots: { red: redSpot, yel: yelSpot, grn: grnSpot } });
+      const sigCand = { x: wx, y: 4.6, z: wz, kind: "signal", head: { red, yel, grn }, spots: { red: redSpot, yel: yelSpot, grn: grnSpot } };
+      lightCandidates.push(sigCand);
+      // a snapped signal: the mast snaps at the hit, the head box comes off
+      // whole, its bulbs die with it (killSignal)
+      breakable(head, "signal", px + sx, pz + sz, { snap: [pole], cols: [sigCol], cand: sigCand,
+        kinds: sigInstanced ? null : [[red, "glass"], [yel, "glass"], [grn, "glass"]] });
       return { red, yel, grn };
     }
     // THE POLE STANDS ON THE CORNER THE CORNER ACTUALLY HAS. This offset used
@@ -2099,7 +2483,7 @@
       // SLIM COLLIDER, matched to the trunk. The shaft is r=0.11 at the top and
       // 0.15 at the butt; the old 0.3 box was a 0.6 m obstacle around a 0.3 m
       // pole — twice the pole, standing in the gutter, catching cars on nothing.
-      solidCollider(x, z, 0.17, pole);
+      const lampCol = solidCollider(x, z, 0.17, pole);
       city.streetProps.push({ x, z, type: "lamp" });
       // SMARTER STREET-LIGHT RENDERING: this bulb's world position (the solved
       // bulb offset rotated by `ang`, the same rotation the group itself uses)
@@ -2117,6 +2501,17 @@
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
       lightCandidates.push({ x: bwx, y: LM.bulbY, z: bwz, kind: "lamp", ref: shootRec });
+      // the mast snaps at the hit (the stump and the cast foot stay planted,
+      // the collider with them), the arm and cobra head fall as their own
+      // pieces, and the lens breaks as glass. An instanced lens has no mesh:
+      // a stand-in of the pool's own geometry at the SAME solved offset.
+      let lens = null;
+      if (lampInstanced) {
+        lens = new THREE.Mesh(geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5)), deadLampM);
+        lens.position.set(0, LM.bulbY, LM.bulbZ);
+      }
+      breakable(g, "lamp", x, z, { snap: [pole], keep: [base], skip: glow ? [glow] : null, cols: [lampCol], rec: shootRec,
+        kinds: bulb ? [[bulb, "glass"]] : null, extra: lens ? [{ m: lens, role: "main", kind: "glass" }] : null });
       return g;
     }
     for (const r of city.roads) {
@@ -2281,9 +2676,11 @@
       const n1 = new THREE.Mesh(noz, hydCapM); n1.rotation.z = Math.PI / 2; n1.position.set(0.2, 0.4, 0); g.add(n1);
       const n2 = new THREE.Mesh(noz, hydCapM); n2.rotation.x = Math.PI / 2; n2.position.set(0, 0.4, 0.2); g.add(n2);
       root.add(g);
-      solidCollider(x, z, 0.26, body);
+      const hc = solidCollider(x, z, 0.26, body);
       city.streetProps.push({ x, z, type: "hydrant" });
-      shootables.push({ type: "hydrant", x, z, y: 0.5, r: 0.5, group: g, gy: null });
+      const hrec = { type: "hydrant", x, z, y: 0.5, r: 0.5, group: g, gy: null };
+      shootables.push(hrec);
+      breakable(g, "hydrant", x, z, { cols: [hc], rec: hrec });
     }
 
     // ----- MAILBOX: USPS-style blue drum letterbox on a foot ---------------
@@ -2300,9 +2697,11 @@
       const leg = geo("mailLeg", () => new THREE.BoxGeometry(0.08, 0.78, 0.08));
       for (const sx of [-0.22, 0.22]) { const l = new THREE.Mesh(leg, mailLegM); l.position.set(sx, 0.4, 0); g.add(l); }
       root.add(g);
-      solidCollider(x, z, 0.36, drum);
+      const mc = solidCollider(x, z, 0.36, drum);
       city.streetProps.push({ x, z, type: "mailbox" });
-      shootables.push({ type: "mailbox", x, z, y: 0.95, r: 0.5 });
+      const mrec = { type: "mailbox", x, z, y: 0.95, r: 0.5 };
+      shootables.push(mrec);
+      breakable(g, "mailbox", x, z, { cols: [mc], rec: mrec });
     }
 
     // ----- PUBLIC TRASH CAN: green mesh barrel + dome lid ------------------
@@ -2318,10 +2717,11 @@
       // small, light — a real hit (bullet OR bumper) knocks it flat, it never
       // stops a car. solidCollider's radius is trivial (barrel footprint) so
       // pedestrians route around it but a car barely notices the nudge.
-      solidCollider(x, z, 0.24, g);
+      const bc = solidCollider(x, z, 0.24, g);
       const rec = { type: "bin", x, z, y: 0.5, r: 0.48, group: g, over: false };
       shootables.push(rec);
       carKnockables.push(rec);
+      breakable(g, "bin", x, z, { cols: [bc], rec });
     }
 
     // ----- PARKING METER: post + head + tiny display -----------------------
@@ -2340,10 +2740,11 @@
       // mailbox as "bolted steel"), but a CAR is a different order of force:
       // it bends the post right over. Tiny collider + it joins carKnockables
       // below so a bumper clip actually topples it, unlike a gunshot.
-      solidCollider(x, z, 0.16, g);
+      const mtc = solidCollider(x, z, 0.16, g);
       const rec = { type: "meter", x, z, y: 1.25, r: 0.28, group: g, over: false };
       shootables.push(rec);
       carKnockables.push(rec);
+      breakable(g, "meter", x, z, { snap: [post], cols: [mtc], rec, kinds: [[face, "glass"]] });
     }
 
     // ----- NEWSPAPER / NEWS BOX: little coin-op vending box ----------------
@@ -2361,10 +2762,11 @@
       city.streetProps.push({ x, z, type: "newsbox" });
       // light sheet-metal box on skinny legs — a small collider so a bumper
       // clip registers as a real hit, not a ghost.
-      solidCollider(x, z, 0.22, g);
+      const nc = solidCollider(x, z, 0.22, g);
       const rec = { type: "newsbox", x, z, y: 0.55, r: 0.45, group: g, over: false };
       shootables.push(rec);
       carKnockables.push(rec);
+      breakable(g, "newsbox", x, z, { cols: [nc], rec, kinds: [[win, "glass"]] });
     }
 
     // ----- TRAFFIC CONE: orange cone + reflective collar -------------------
@@ -2380,10 +2782,11 @@
       root.add(g);
       // trivially light — smallest collider of the four (it's a hollow plastic
       // cone), so it's the easiest thing on the street to send flying.
-      solidCollider(x, z, 0.14, g);
+      const cc = solidCollider(x, z, 0.14, g);
       const rec = { type: "cone", x, z, y: 0.27, r: 0.32, group: g, over: false };
       shootables.push(rec);
       carKnockables.push(rec);
+      breakable(g, "cone", x, z, { cols: [cc], rec });
     }
 
     // ----- PLANTER + low-poly TREE -----------------------------------------
@@ -2435,8 +2838,13 @@
           c2.position.set(0.25, 2.55, 0.1); g.add(c2);
           if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("street");
         }
-        solidCollider(x, z, 0.5, trunk);
+        const tc = solidCollider(x, z, 0.5, trunk);
         city.streetProps.push({ x, z, type: "tree" });
+        // the bole snaps, the crown comes apart as clumps + leaves, the
+        // planter stays standing (and keeps the collider)
+        const crowns = g.children.filter((m) => m !== box && m !== soil && m !== trunk);
+        breakable(g, "tree", x, z, { snap: [trunk], keep: [box, soil], cols: [tc],
+          kinds: crowns.map((m) => [m, "foliage"]) });
       } else {
         // shrub planter: a couple of small bushes (leafy clumps in the same
         // grammar — a shrub is just a very squat crown)
@@ -2453,8 +2861,9 @@
           const b2 = new THREE.Mesh(geo("shrub2", () => new THREE.IcosahedronGeometry(0.3, 0)), sm);
           b2.position.set(0.2, 0.6, -0.12); g.add(b2);
         }
-        solidCollider(x, z, 0.55, box);
+        const sc = solidCollider(x, z, 0.55, box);
         city.streetProps.push({ x, z, type: "planter" });
+        breakable(g, "shrub", x, z, { keep: [box, soil], cols: [sc] });
       }
     }
 
@@ -2474,6 +2883,7 @@
       const foot = new THREE.Mesh(footG, smat(0x2a2a2a)); foot.position.y = 0.02; g.add(foot);
       root.add(g);
       city.streetProps.push({ x, z, type: "sign" });  // light, no collider
+      breakable(g, "aframe", x, z, { kinds: [[foot, "metal"]] });
     }
 
     // =====================================================================
@@ -2516,6 +2926,7 @@
       }
       root.add(g);
       city.streetProps.push({ x, z, type: "patio" });   // soft furniture, no collider
+      breakable(g, "patio", x, z, { kinds: [[top, "metal"], [stem, "metal"], [pole, "metal"]] });
     }
 
     // ----- BIKE RACK: a low U-loop rail (gym — somewhere to chain a bike) ----
@@ -2530,8 +2941,9 @@
       const loopG = geo("bikeLoop", () => new THREE.TorusGeometry(0.28, 0.04, 5, 9, Math.PI));
       for (const lx of [-0.66, 0.66]) { const lp = new THREE.Mesh(loopG, bikeM); lp.position.set(lx, 0.62, 0); g.add(lp); }
       root.add(g);
-      solidCollider(x, z, 0.4, rail);
+      const brc = solidCollider(x, z, 0.4, rail);
       city.streetProps.push({ x, z, type: "bikerack" });
+      breakable(g, "bikerack", x, z, { cols: [brc] });
     }
 
     // ----- PROPANE CAGE: a steel cage of swap-out tanks (hardware lot) ------
@@ -2555,14 +2967,19 @@
       // group so the explosion below can hide the WHOLE cage with g.visible=false
       // and leave nothing floating. Flag OFF keeps the original base ref (merged
       // decor) byte-for-byte — the one-line revert.
-      solidCollider(x, z, 0.55, CBZ.CONFIG.PROPS_WIRED_V1 ? g : base);
+      const pc = solidCollider(x, z, 0.55, CBZ.CONFIG.PROPS_WIRED_V1 ? g : base);
       city.streetProps.push({ x, z, type: "propane" });
       // PROPS_WIRED_V1: a shot cage COOKS OFF. Register it as a shootable so
       // gunfire (CBZ.cityShootProp → hitProp) whittles its hp and, on the last
       // hit, routes into the SAME player blast chain the grenade/C4 fire. Flag
       // off → never registered, the cage stays inert decor (one-line revert).
-      if (CBZ.CONFIG.PROPS_WIRED_V1)
-        shootables.push({ type: "propane", x, z, y: 0.5, r: 0.7, group: g, hp: 3 });
+      if (CBZ.CONFIG.PROPS_WIRED_V1) {
+        const prec = { type: "propane", x, z, y: 0.5, r: 0.7, group: g, hp: 3 };
+        shootables.push(prec);
+        // a blast that reaches it cooks it off (cityPropsBlast queues it);
+        // the cook-off itself breaks the cage into its own steel
+        breakable(g, "propane", x, z, { cols: [pc], rec: prec });
+      }
     }
 
     // ----- PER-SHOP SANDWICH BOARD: an A-frame whose panel reflects the shop --
@@ -2636,9 +3053,10 @@
       sign.position.set(2.1, 2.5, 0); g.add(sign);
       root.add(g);
       // colliders on the posts only (you can walk in, sit, take cover; cars crash the frame)
-      solidCollider(x - Math.cos(yaw) * 1.7, z + Math.sin(yaw) * 1.7, 0.5, roof, false);
-      solidCollider(x + Math.cos(yaw) * 1.7, z - Math.sin(yaw) * 1.7, 0.5, roof, false);
+      const shc1 = solidCollider(x - Math.cos(yaw) * 1.7, z + Math.sin(yaw) * 1.7, 0.5, roof, false);
+      const shc2 = solidCollider(x + Math.cos(yaw) * 1.7, z - Math.sin(yaw) * 1.7, 0.5, roof, false);
       city.streetProps.push({ x, z, type: "busstop" });
+      breakable(g, "shelter", x, z, { cols: [shc1, shc2], kinds: [[back, "glass"], [ad, "plastic"], [sign, "plastic"]] });
     }
 
     // ----- BILLBOARD: tall steel legs + a big lit ad board -----------------
@@ -3416,7 +3834,7 @@
         if (acc < 0.15) return; acc = 0;   // a couple times a second is plenty — the phase itself only flips a few times per cycle
         for (let i = 0; i < lightCandidates.length; i++) {
           const c = lightCandidates[i];
-          if (c.kind !== "signal" || !c.head || !c.spots) continue;
+          if (c.kind !== "signal" || !c.head || !c.spots || c.dead) continue;   // a snapped head stays dark (killSignal)
           const h = c.head, sp = c.spots;
           setGlowOn(sp.red, sigLit(h.red));
           setGlowOn(sp.yel, sigLit(h.yel));
@@ -3476,6 +3894,7 @@
           // a broken streetlamp or a currently-dark signal phase shouldn't
           // steal a pool slot from something actually lit.
           if (c.kind === "lamp" && c.ref && c.ref.broken) continue;
+          if (c.dead) continue;                     // a snapped signal head
           if (c.kind === "signal" && c.head) {
             const hh = c.head;
             const litOne = sigLit(hh.red) || sigLit(hh.yel) || sigLit(hh.grn);

@@ -1540,8 +1540,6 @@
         'background:radial-gradient(120% 90% at 50% 18%,#48331c,#191207 78%)}' +
       '.wl-wd-view canvas{position:absolute;inset:0;width:100%!important;height:100%!important;' +
         'touch-action:none;cursor:grab}' +
-      '.wl-wd-view .spin{position:absolute;right:9px;top:8px;font-size:9px;' +
-        'letter-spacing:.2em;opacity:.35}' +
       '.wl-wd-side{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;gap:7px;min-width:0}' +
       '.wl-wd-nm{font-size:clamp(19px,4.4vw,27px);letter-spacing:-.01em;line-height:1.04;margin:0}' +
       '.wl-wd-nt{font-size:12px;opacity:.62;line-height:1.4;margin:0}' +
@@ -1727,7 +1725,7 @@
     let h = '<h1 class="wl-h">THE <em>WARDROBE</em></h1>' +
       '<p class="wl-sub">WHAT THEY SEE COMING</p>' +
       '<div class="wl-wd-stage">' +
-        '<div class="wl-wd-view" id="wlWdView"><div class="spin">DRAG TO TURN</div></div>' +
+        '<div class="wl-wd-view" id="wlWdView"></div>' +
         '<div class="wl-wd-side">' +
           '<span class="wl-wd-rk">' + rank.label + ' &middot; <b>' + st + '</b> STANDING</span>' +
           '<h2 class="wl-wd-nm" id="wlWdName">' + cur.name + '</h2>' +
@@ -1912,9 +1910,11 @@
     chip = b;
     paintChip();
   }
+  /* HUD PURGE: not a permanent button on the open island. You change clothes
+     where there are clothes: at an outpost and in the armoury. */
   function chipPhase() {
     const p = W.phase();
-    return p === "campaign" || p === "outpost" || p === "armoury";
+    return p === "outpost" || p === "armoury";
   }
   function paintChip() {
     if (!chip) return;

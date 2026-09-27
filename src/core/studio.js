@@ -688,8 +688,8 @@
              "violent draws out of. Cheap because it is pooled, so a salvo " +
              "cannot flood the frame",
       needs: ["look"],
-      files: ["systems/fx.js"],
-      publishes: ["fx"],
+      files: ["systems/fx.js", "systems/debris.js"],
+      publishes: ["fx", "debris"],
     },
     blood: {
       gives: "what a body does when something opens it: the directional spray, " +
@@ -2135,9 +2135,11 @@
   const HUD_CSS = `
 .sHud{position:fixed;inset:0;pointer-events:none;font:600 14px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   color:#f4f1ea;text-shadow:0 1px 3px rgba(0,0,0,.75);z-index:40;-webkit-user-select:none;user-select:none}
-.sHud .hp{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));width:min(34vw,190px)}
+.sHud .hp{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));width:min(28vw,150px);
+  opacity:0;transition:opacity .6s}
+.sHud .hp.on{opacity:.9;transition:opacity .15s}
 .sHud .hp b{display:block;font-size:11px;letter-spacing:.16em;opacity:.75;margin-bottom:5px;font-weight:700}
-.sHud .hp i{display:block;height:9px;border-radius:5px;background:rgba(255,255,255,.16);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.5) inset}
+.sHud .hp i{display:block;height:5px;border-radius:5px;background:rgba(255,255,255,.16);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.5) inset}
 .sHud .hp i s{display:block;height:100%;width:100%;background:linear-gradient(90deg,#5fd07a,#a9e05a);transition:width .12s linear,background .2s}
 .sHud.low .hp i s{background:linear-gradient(90deg,#e0603a,#e8a33a)}
 .sHud .clk{position:absolute;left:50%;transform:translateX(-50%);top:calc(12px + env(safe-area-inset-top,0px));
@@ -2186,8 +2188,12 @@ body.micro-paused .sHud .pz{display:grid}
     const root = document.createElement("div");
     root.className = "sHud" + (COARSE ? " touch" : "");
     const mk = (cls, html) => { const d = document.createElement("div"); d.className = cls; if (html) d.innerHTML = html; root.appendChild(d); return d; };
-    // HEALTH. Top left. Always. One meter.
-    const hp = spec.health === false ? null : mk("hp", "<b>" + (spec.healthLabel || "HEALTH") + "</b><i><s></s></i>");
+    // HEALTH. Top left, one thin unlabelled meter, and ONLY when it matters:
+    // it wakes when you are hit and stays while you are hurt, then fades.
+    // A full-health bar on screen for a whole match is a pill that means nothing.
+    const hp = spec.health === false ? null
+      : mk("hp", (spec.healthLabel ? "<b>" + spec.healthLabel + "</b>" : "") + "<i><s></s></i>");
+    let hpLast = 1, hpWake = 0;
     const hpFill = hp ? hp.querySelector("s") : null;
     const clk = spec.clock === false ? null : mk("clk", "");
     const scr = spec.score === false ? null : mk("scr", "");
@@ -2209,8 +2215,12 @@ body.micro-paused .sHud .pz{display:grid}
       health: function (frac) {
         if (!hpFill) return;
         const f = Math.max(0, Math.min(1, frac));
+        const now = performance.now();
+        if (Math.abs(f - hpLast) > 0.004) hpWake = now + 2600;
+        hpLast = f;
         hpFill.style.width = (f * 100).toFixed(1) + "%";
         root.classList.toggle("low", f < 0.34);
+        hp.classList.toggle("on", (f > 0 && f < 0.6) || now < hpWake);
       },
       clock: function (t) { if (clk) clk.textContent = t == null ? "" : String(t); },
       score: function (rows) {

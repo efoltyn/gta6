@@ -381,6 +381,19 @@ async function stageCityTsunami(input) {
     waves: Number(S.waves || 1),
     crestVar: Number(((S.crestVar || 0)).toFixed(3)),
     endTaper: S.endTaper != null ? Number(S.endTaper.toFixed(3)) : 1,
+    /* SHADERS THAT FAILED TO LINK (2026-09-27). A GLSL error in the shared
+       sea chunk renders as "no sea", which in a pale headless frame is easy
+       to mistake for a camera problem. Count them so it is a number. */
+    badPrograms: (function () {
+      try {
+        const gl = CBZ.renderer.getContext(), ps = (CBZ.renderer.info && CBZ.renderer.info.programs) || [];
+        return ps.filter((p) => p && p.program && !gl.getProgramParameter(p.program, gl.LINK_STATUS)).map((p) => {
+          const sh = gl.getAttachedShaders(p.program) || [];
+          const log = sh.map((x) => gl.getShaderInfoLog(x) || "").join(" | ").replace(/\s+/g, " ").slice(0, 400);
+          return (p.name || "?") + ": " + (log || gl.getProgramInfoLog(p.program) || "").slice(0, 400);
+        }).join(" ;; ") || "none";
+      } catch (e) { return "n/a"; }
+    })(),
   };
 
   return { ok: true, phase: s2 ? s2.phase : "over", frontS: metrics.frontS, metrics };

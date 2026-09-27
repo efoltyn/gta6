@@ -528,9 +528,7 @@
      a band coming while you shop, which is the entire argument for not
      blocking). army.js's encounter rail will want these three lines the day it
      stops taking the phase too. */
-  body.wl-trading #wlCompass,
-  body.wl-trading #wlMapBtn,
-  body.wl-trading #wlZoom{display:none}
+  body.wl-trading #wlMapBtn{display:none}
   `;
   function styleOnce() {
     if (G.document && !G.document.getElementById("wl-op-css")) {
@@ -1046,7 +1044,7 @@
     } else if (o.kind !== "camp") {
       opts.push({ label: "BUY", kind: TAB === "buy" ? "hot" : "",
                   on: function () { TAB = "buy"; rail(o); } });
-      opts.push({ label: "SELL", kind: TAB === "sell" ? "hot" : "", note: "your cart",
+      opts.push({ label: "SELL", kind: TAB === "sell" ? "hot" : "",
                   on: function () { TAB = "sell"; rail(o); } });
     }
     opts.push({ label: "RIDE ON", on: close });

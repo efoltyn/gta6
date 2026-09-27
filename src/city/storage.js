@@ -132,7 +132,12 @@
     return best;
   }
   // total ground-vehicle storage capacity across owned garages + warehouse
-  function vehCapTotal() { let c = 0; for (const p of PROPERTIES) if (owns(p.id)) c += (p.vehCap || 0); return c; }
+  // + every garage you built on your own land (city/compoundkit.js, 2 bays each)
+  function vehCapTotal() {
+    let c = 0; for (const p of PROPERTIES) if (owns(p.id)) c += (p.vehCap || 0);
+    if (CBZ.compoundKit && CBZ.compoundKit.garageBays) { try { c += CBZ.compoundKit.garageBays() | 0; } catch (e) {} }
+    return c;
+  }
   function storedVehicleCount() { return state().vehicles.length; }
   function ammoCapTotal() { const w = ownedWarehouse(); return w ? (w.ammoCap || 0) : 0; }
 
@@ -453,7 +458,7 @@
     let html = "<div style='font-size:19px;font-weight:700;margin-bottom:3px'>" + prop.emoji + " " + prop.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + "</div>";
 
-    if (!owns(prop.id)) {
+    if (!prop.virtual && !owns(prop.id)) {
       html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:8px'>" + prop.blurb + "</div>";
       // THE ONE PROPERTY YOU CAN PART-PAY IN CASH BAGS. cashstore.js holds the
       // escrow; the desk quotes what is LEFT, so the two figures can never
@@ -497,7 +502,7 @@
          changes what the place can DO. The steel itself is city/bank.js's
          CBZ.cityVaultRoom — the identical room the branch has — so the thing
          you buy is not a stat, it is a building somebody can blow open. */
-      const PV = CBZ.cityPropVault;
+      const PV = prop.virtual ? null : CBZ.cityPropVault;
       if (PV) {
         const cur = PV.list().filter(function (r) { return r.propId === prop.id; })[0] || null;
         html += "<div style='font-size:12px;color:#9fd6ff;margin-top:8px;margin-bottom:3px'>YOUR VAULT</div>";
@@ -552,6 +557,11 @@
     if (panel) panel.style.display = "none";
     CBZ.cityMenuOpen = false;
     if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
+  }
+  // a building you raised yourself (a compound garage): the same menu, no
+  // purchase row, no vault upsell. prop = {id, name, kind:"garage"}.
+  function openVirtual(prop) {
+    open({ prop: Object.assign({ emoji: "", blurb: "", cost: 0 }, prop, { virtual: true }) });
   }
   CBZ.cityOpenStorage = function () {
     const P = CBZ.player; if (!P) return;
@@ -665,7 +675,7 @@
     owns, buy, grant, state,
     storeVehicle: storeCurrentVehicle, retrieveVehicle, vehCapTotal, storedVehicleCount,
     buyAmmo, loadOut, stashCount, ammoCapTotal,
-    open: CBZ.cityOpenStorage, close,
+    open: CBZ.cityOpenStorage, openVirtual, close,
     spots: buildSpots,
   };
 })();

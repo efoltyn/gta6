@@ -367,6 +367,8 @@
       // — crazed safety glass reads nearly OPAQUE, so push the clone's opacity
       // back up (once; the clone is cached/shared for the whole city).
       if (fm !== gl.mat && fm.transparent && fm.opacity < 0.8) { fm.opacity = 0.85; fm.depthWrite = true; }
+      // car glass (carfx 'autoGlass') is see-through by TRANSMISSION, not opacity
+      if (fm !== gl.mat && fm.transmission) { fm.transmission = 0.12; fm.opacity = 0.9; }
       gl.mesh.material = fm;
     }
   }
@@ -416,6 +418,7 @@
   }
 
   CBZ.cityCarFrost = function (car) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || !car.group) return;
     const e = entryFor(car, true);
     if (!e) return;
@@ -425,6 +428,7 @@
   };
 
   CBZ.cityCarBurnOut = function (car, opts) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || !car.group) return false;
     if (!ensureScratch()) return false;
     opts = opts || {};
@@ -669,6 +673,7 @@
   // down the panel, a square head-on (velocity mostly PARALLEL to dir) stays
   // a contained, deep crater — same budget, different shape.
   CBZ.cityCarImpact = function (car, point, dir, energy, opts) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (dead || !car || car.dead || !car.group || !point || !dir) return;
     const grp = car.group;
     const style = grp.userData && grp.userData.carStyle;
@@ -864,9 +869,9 @@
                             its residual velocity via city/aircraftimpact.js's
                             wreck field — crashfx's debris pool refuses
                             donations over 3 m, which is every wing in the game.
-       4. WRECK FIELD       5..15 fragments: the big recognisable ones on the
-                            wreck field's closed-form arcs, the rest into
-                            CBZ.cityChunk's existing pooled debris.
+       4. WRECK FIELD       5..15 fragments: the parts nearest the impact torn
+                            off the hull whole (its own meshes, into the
+                            wreck field), the rest chips of the hull's paint.
        5. FUEL / FIRE TRAIL the wound keeps smoking from its LOCAL point on the
                             hull, so the trail follows the wreck as it tumbles.
 
@@ -882,16 +887,33 @@
     return { length: 10, span: 9, height: 3, fuselage: 1.6 };
   }
 
-  // ONE shared box + ONE shared material for every airframe fragment in the
-  // city (mesh.scale sizes them), so a wreck field costs one geometry total.
-  let airDebrisGeo = null, airDebrisMat = null;
-  function ensureAirDebris() {
-    if (airDebrisGeo) return true;
-    try {
-      airDebrisGeo = new THREE.BoxGeometry(1, 1, 1); airDebrisGeo._shared = true;
-      airDebrisMat = new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }); airDebrisMat._shared = true;
-    } catch (err) { return false; }
-    return true;
+  /* THE PIECES THAT COME OFF ARE THE AIRFRAME'S OWN. The wreck field used to
+     be padded with invented grey boxes (one shared unit box scaled per
+     fragment). Now the parts nearest the impact — a nacelle, a flap, a
+     canopy, a gear leg, a panel — are torn off the hull itself and go to the
+     wreck field whole. The hull's biggest mesh (the fuselage) and anything
+     wing-sized stay: the wing/tail have their own shear above, and a hull
+     that loses its fuselage is not a crash, it is a deletion. */
+  const _ab = typeof THREE !== "undefined" ? new THREE.Box3() : null;
+  const _as = typeof THREE !== "undefined" ? new THREE.Vector3() : null;
+  function partsNear(root, d, point, n) {
+    const list = [];
+    let biggest = null, bigV = -1;
+    root.updateWorldMatrix(true, true);
+    root.traverse(function (o) {
+      if (o === root || !o.isMesh || !o.geometry || o.visible === false) return;
+      if (o.userData && (o.userData.rotor || o.userData.tailRotor || o.userData.playerWheel)) return;
+      _ab.setFromObject(o); _ab.getSize(_as);
+      const v = _as.x * _as.y * _as.z;
+      if (v > bigV) { bigV = v; biggest = o; }
+      if (Math.max(_as.x, _as.y, _as.z) > Math.max(2.5, d.span * 0.4)) return;
+      _ab.getCenter(_gp);
+      list.push({ o: o, d2: _gp.distanceToSquared(point) });
+    });
+    list.sort(function (a, b) { return a.d2 - b.d2; });
+    const out = [];
+    for (const it of list) { if (out.length >= n) break; if (it.o !== biggest) out.push(it.o); }
+    return { parts: out, hull: biggest };
   }
   function arenaRoot() {
     const A = CBZ.city && (CBZ.city.arena || CBZ.city);
@@ -919,28 +941,26 @@
     return best;
   }
 
-  function shearOff(root, mesh, baseScale, vx, vy, vz, burning) {
+  function shearOff(root, mesh, baseScale, vx, vy, vz, burning, wopts) {
     if (!mesh) return false;
     try {
       mesh.updateWorldMatrix(true, true);
-      mesh.getWorldPosition(_wp);
-      mesh.getWorldQuaternion(_wq);
+      // the detached piece keeps its exact world pose AND size — the root (and
+      // any nesting group) may carry a non-unit scale
+      mesh.matrixWorld.decompose(mesh.position, mesh.quaternion, mesh.scale);
       if (mesh.parent) mesh.parent.remove(mesh);
-      mesh.position.copy(_wp);
-      mesh.quaternion.copy(_wq);
-      // the root may carry a non-unit authored scale; the detached piece has to
-      // keep the size it had while it was still bolted on
-      mesh.scale.set(mesh.scale.x * baseScale.x, mesh.scale.y * baseScale.y, mesh.scale.z * baseScale.z);
       const dest = arenaRoot();
       if (!dest) return false;
       dest.add(mesh);
-      // Whole SECTIONS go to the wreck field (closed-form arcs, no size limit);
-      // if that module is absent we fall back to crashfx's debris pool exactly
-      // as this file already does for a torn-off hood.
-      if (CBZ.cityWreckDebris) {
-        CBZ.cityWreckDebris(mesh, vx, vy, vz, { burning: burning, spin: (rng() - 0.5) * 6 });
-      } else if (CBZ.cityDebrisAdopt) {
-        CBZ.cityDebrisAdopt(mesh, vx, vy, vz);
+      // Whole SECTIONS go to the wreck field (CBZ.debris rigid bodies, no size
+      // limit, tracked for smoke + hazard). Without that module (or outside
+      // the city) the piece still goes to the debris sim whole, never left
+      // hanging in the air where the hull used to be.
+      const ok = CBZ.cityWreckDebris
+        && CBZ.cityWreckDebris(mesh, vx, vy, vz, Object.assign({ burning: burning, spin: (rng() - 0.5) * 6 }, wopts || null));
+      if (!ok && CBZ.debris) {
+        CBZ.debris.adopt(mesh, { velocity: new THREE.Vector3(vx || 0, vy || 0, vz || 0), owner: "wreck" });
+        if (mesh.parent) mesh.parent.remove(mesh);
       }
       return true;
     } catch (err) { return false; }
@@ -1042,30 +1062,22 @@
     //    reads big without either pool being flooded.
     const total = Math.max(5, Math.min(15, Math.round((CBZ.qScale ? CBZ.qScale(5, 15) : 9) * Math.min(1.4, scale))));
     const big = Math.min(total, Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, 5) : 3)));
-    if (CBZ.cityWreckDebris && ensureAirDebris()) {
-      const dest = arenaRoot();
-      for (let i = 0; dest && i < big; i++) {
-        let m;
-        try { m = new THREE.Mesh(airDebrisGeo, airDebrisMat); } catch (err) { break; }
-        const s = d.fuselage * (0.25 + rng() * 0.5);
-        m.scale.set(s, s * (0.35 + rng() * 0.5), s * (0.8 + rng()));
-        m.position.set(point.x + (rng() - 0.5) * 3, point.y + rng() * 2.5, point.z + (rng() - 0.5) * 3);
-        m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-        dest.add(m);
-        const a = rng() * 6.2832, sp = 3 + rng() * 9;
-        CBZ.cityWreckDebris(m,
-          wdx * (3 + energy * 0.12) + Math.cos(a) * sp,
-          2.5 + rng() * 6,
-          wdz * (3 + energy * 0.12) + Math.sin(a) * sp,
-          { burning: i === 0, own: true, hazard: point.y > 14, dmg: 45,
-            byPlayer: !!opts.byPlayer, by: opts.byPlayer ? CBZ.player : null });
-      }
+    const torn = partsNear(grp, d, _pt.set(point.x, point.y, point.z), big);
+    for (let i = 0; i < torn.parts.length; i++) {
+      const a = rng() * 6.2832, sp = 3 + rng() * 9;
+      shearOff(grp, torn.parts[i], e.airBaseScale,
+        wdx * (3 + energy * 0.12) + Math.cos(a) * sp,
+        2.5 + rng() * 6,
+        wdz * (3 + energy * 0.12) + Math.sin(a) * sp,
+        i === 0, { hazard: point.y > 14, dmg: 45,
+          byPlayer: !!opts.byPlayer, by: opts.byPlayer ? CBZ.player : null });
     }
     if (CBZ.cityChunk) {
       try {
+        // the rest is chips of the hull's own skin, in its own paint
         CBZ.cityChunk(point.x, point.y, point.z, {
-          count: Math.max(1, total - big), force: Math.min(15, 6 + energy * 0.12),
-          dirx: wdx, dirz: wdz, color: 0x9aa1a8,
+          count: Math.max(1, total - torn.parts.length), force: Math.min(15, 6 + energy * 0.12),
+          dirx: wdx, dirz: wdz, material: torn.hull ? torn.hull.material : null,
         });
       } catch (err) {}
     }
@@ -1112,6 +1124,7 @@
 
   // restore ONE car to pristine (police cruiser pool reuse, [C] body swap)
   CBZ.cityCarImpactReset = function (car) {
+    if (car && car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(car);   // a proxied car (carinstances.js) takes its dents as its real self
     if (!car) return;
     const e = entryFor(car, false);
     if (e) release(e, false);

@@ -83,100 +83,40 @@
   let _rs = 78451;
   function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
 
-  const bursts = [], rings = [], chunks = [], scorches = [];
+  const bursts = [], rings = [], scorches = [];
   // B5: scratch reused by applyBlastDamage's piece-damage pass below (no
   // per-blast allocation) — a Set to dedupe pieceIds across the multiple
   // AABB colliders one piece can register (doorframe = 3), an Array for
   // CBZ.queryCollidersNear's own out-param convention (systems/physics.js).
   const blastPieceScratch = [];
   const blastPieceSeen = new Set();
-  const chunkGeo = new THREE.BoxGeometry(0.28, 0.18, 0.42);
-  chunkGeo._shared = true;
   const debrisBox = new THREE.Box3(), debrisSize = new THREE.Vector3();
-  // base box half-height (the 0.18 dim above ÷2) — a chunk must rest with its
-  // BOTTOM on the road, so y_rest = floor + halfHeight*scale, never center=0.1
-  // (which buried half the box into the asphalt — the user-filmed sink).
-  const CHUNK_HH = 0.09;
 
   // TRUE-WORLD ground sample: where wreckage actually comes to rest (rooftops,
   // raised terrain, breaches), not a flat hardcoded y. Falls back to 0.
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
-  function camDist2(x, z) {
-    const cam = CBZ.camera && CBZ.camera.position;
-    if (!cam) return 0;
-    const dx = x - cam.x, dz = z - cam.z; return dx * dx + dz * dz;
+
+  /* DEBRIS LIVES IN systems/debris.js (CBZ.debris). This file used to keep its
+     own pool of grey 0.28 m boxes (plus a "rubble" box, a jagged prism and a
+     four-tone unit cube) and threw them from every blast, crash and wall hit.
+     Every piece of that was invented. Now: a wall that is hit sheds ITS OWN
+     pieces through the carve (buildings.js), props break into themselves
+     (city/props.js via cityPropsBlast below), and a blast on open ground throws
+     chips of the ground it dug into. What remains here is fire, smoke, dust,
+     scorch and the thin steel of exposed rebar. */
+  // what the ground under a blast is made of (city streets are asphalt;
+  // everywhere else is earth)
+  function groundKind() {
+    const m = CBZ.game && CBZ.game.mode;
+    return (m === "city" || m === "gang") ? "asphalt" : "dirt";
   }
-  // PERMANENCE / population-pool recycle: when a debris pool is full, evict the
-  // OLDEST piece that is FAR from the lens (GTA pattern) so nothing pops out in
-  // view. Falls back to the literal oldest only if every piece is on-screen.
-  function recycleChunk() {
-    let idx = -1, far = 60 * 60;
-    for (let i = 0; i < chunks.length; i++) {
-      if (camDist2(chunks[i].mesh.position.x, chunks[i].mesh.position.z) > far) { idx = i; break; }
-    }
-    if (idx < 0) idx = 0;             // all in view → take the oldest anyway
-    const old = chunks.splice(idx, 1)[0];
-    scene.remove(old.mesh);
-  }
-  const CHUNK_CAP = 220;             // bias HARD toward persistence (was 56)
-  // a couple of debris materials so flying chunks aren't all the same flat grey
-  const chunkMat = new THREE.MeshLambertMaterial({ color: 0x3c4148 });
-  chunkMat._shared = true;
-  const chunkMatHot = new THREE.MeshBasicMaterial({ color: 0x6b3a22 }); // charred / glowing edge
-  chunkMatHot._shared = true;
-  // a paler, dustier concrete for the settled RUBBLE HEAP so the pile reads as
-  // shattered masonry (lighter, chalky) against the darker flying shrapnel.
-  const rubbleMat = new THREE.MeshLambertMaterial({ color: 0x6c6358 });
-  rubbleMat._shared = true;
-  const rubbleMat2 = new THREE.MeshLambertMaterial({ color: 0x554d44 }); // shadowed lumps in the heap
-  rubbleMat2._shared = true;
-  // Freshly torn concrete is lighter than the settled street heap. Keeping a
-  // separate shared pair lets the broken load path read against a dark room:
-  // pale aggregate on the new face, cooler grey on the undersides/shadows.
-  const fractureMat = new THREE.MeshLambertMaterial({ color: 0x8b8982 });
-  fractureMat._shared = true;
-  const fractureMat2 = new THREE.MeshLambertMaterial({ color: 0x666660 });
-  fractureMat2._shared = true;
-  // Legacy rubble was still a literal box. Keep it for the flag-off baseline,
-  // but build one shared angular reinforced-concrete fragment for the real path:
-  // an uneven six-sided slab prism, not a rock sphere and not masonry blocks.
-  const rubbleGeo = new THREE.BoxGeometry(0.55, 0.4, 0.7);
-  rubbleGeo._shared = true;
-  function jaggedSlabGeometry() {
-    const ring = [
-      [-0.46, -0.30], [-0.14, -0.52], [0.43, -0.34],
-      [0.48, 0.24], [0.08, 0.51], [-0.42, 0.31],
-    ];
-    const pos = [];
-    for (let layer = 0; layer < 2; layer++) {
-      const y = layer ? -0.16 : 0.16;
-      for (let i = 0; i < ring.length; i++) {
-        const p = ring[i];
-        pos.push(p[0] + (layer ? (i % 2 ? 0.025 : -0.018) : 0), y, p[1]);
-      }
-    }
-    const idx = [];
-    for (let i = 1; i < 5; i++) idx.push(0, i, i + 1);       // top
-    for (let i = 1; i < 5; i++) idx.push(6, 6 + i + 1, 6 + i); // underside
-    for (let i = 0; i < 6; i++) {
-      const n = (i + 1) % 6;
-      idx.push(i, 6 + i, n, n, 6 + i, 6 + n);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setIndex(idx); geo.computeVertexNormals(); geo.computeBoundingBox();
-    geo._shared = true;
-    return geo;
-  }
-  const jaggedSlabGeo = jaggedSlabGeometry();
-  if (CBZ.CONFIG.STRUCT_RPG_RUIN_V2 == null) CBZ.CONFIG.STRUCT_RPG_RUIN_V2 = true;
-  function reinforcedRuinOn() { return CBZ.CONFIG.STRUCT_RPG_RUIN_V2 !== false; }
   // exposed REBAR: a thin dark steel bar. One shared thin box (cheaper than a
   // cylinder, and at this gauge the silhouette is identical) bent into an L by a
   // child segment so it dangles + hooks like blown reinforcement.
   const rebarMat = new THREE.MeshLambertMaterial({ color: 0x2a2520 });
   rebarMat._shared = true;
-  const rebarGeo = new THREE.BoxGeometry(0.05, 1, 0.05);
+  // a round bar (rebar is round), 16 mm-ish at game scale
+  const rebarGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 5, 1);
   rebarGeo._shared = true;
   const rebar = [];                 // [{group, t, hold}] dangling-rebar props
   const REBAR_CAP = 28;             // bars across all live wounds
@@ -337,53 +277,26 @@
   // y0 (optional) spawns the debris at an elevated impact seat; life stretches
   // to cover the fall so chunks reach the street instead of vanishing mid-air.
   function addChunks(x, z, count, force, hot, dir, y0) {
-    // CLAMP count to the pool cap: an oversized request (a huge-power blast) would
-    // otherwise drive CHUNK_CAP-count negative (a never-terminating recycle loop)
-    // AND spawn `count` meshes in the for-loop below — either one hard-freezes the
-    // frame. Capping keeps every blast bounded to the pooled budget.
-    count = Math.min(CHUNK_CAP, Math.max(0, count | 0));
-    while (chunks.length > CHUNK_CAP - count) recycleChunk();
-    const dx = dir ? dir.x : 0, dz = dir ? dir.z : 0, biased = !!dir;
-    const baseY = y0 != null ? y0 : 0.4;
-    const fall = y0 != null ? Math.sqrt(Math.max(0.5, y0) / 8.8) : 0;   // grav*0.8 fall time to street
-    for (let i = 0; i < count; i++) {
-      const a = rng() * Math.PI * 2;
-      // mostly charred grey, a few glowing-hot shards on an explosion
-      const glow = hot && rng() < 0.5;
-      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = (0.65 + rng() * 0.8) * (hot ? 1.1 : 1);
-      mesh.position.set(x, baseY + rng() * 0.8, z);
-      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-      mesh.scale.setScalar(sc);
-      scene.add(mesh);
-      // debris flies fast then arcs down under gravity (slightly damped so it
-      // hangs a touch longer like AAA shrapnel), heavier shards thrown lower
-      const up = hot ? (3 + rng() * 6) : (2 + rng() * 4);
-      const sp = force * (0.4 + rng() * 1.0);
-      let vx = Math.cos(a) * sp, vz = Math.sin(a) * sp;
-      if (biased) { vx += dx * force * (0.6 + rng() * 0.8); vz += dz * force * (0.6 + rng() * 0.8); }
-      // hh = this chunk's half-height so it RESTS on the road, not buried to its
-      // centre; rest = up to 60s of permanence once it has settled (true world).
-      chunks.push({
-        mesh, vx, vy: up, vz, hh: CHUNK_HH * sc,
-        spin: (rng() - 0.5) * 16, t: 0, life: fall + 1.2 + rng() * 1.1,
-        rest: 0, settled: false,
-        trail: glow ? 0 : -1, // glowing shards drip a tiny ember trail
+    const y = y0 != null ? y0 : floorAt(x, z) + 0.25;
+    if (CBZ.debris) {
+      CBZ.debris.chips(x, y, z, {
+        kind: y0 != null ? "concrete" : groundKind(),
+        count: Math.min(44, Math.round((count | 0) * 2.4)),
+        dir: dir ? { x: dir.x, y: 0.45, z: dir.z } : null,
+        power: Math.max(0.5, Math.min(2.6, force / 5.5)), spread: 1.4,
       });
     }
+    // what used to be "glowing chunks" is the honest thing: embers
+    if (hot) pointBurst(x, z, Math.max(4, Math.round(count * 1.6)), 0xff8a2a, 0.11, force * 0.7, 0.9, false, y + 0.3);
   }
 
   // adopt an already-built mesh (a hood torn off a crashed car) into the shared
-  // debris pool: same gravity/bounce/spin/expiry as crash chunks, so a panel
-  // that tears free tumbles and settles like every other piece of wreckage.
-  // Caller hands it over already posed in WORLD space; the pool only ever
-  // scene.remove()s it (no dispose — donated geo/materials stay owned by the
-  // car systems that built them).
+  // rigid-body debris sim (CBZ.debris): its own geometry tumbles, lands and
+  // freezes into the rubble. Caller hands it over posed in WORLD space.
   CBZ.cityDebrisAdopt = function (mesh, vx, vy, vz) {
-    if (!mesh) return false;
-    // Never let a whole facade/window-wall enter the flying-debris pool. This
-    // API is for car panels and small fragments; oversized donations are culled
-    // immediately instead of hanging as giant angled planes in the world.
+    if (!mesh || !CBZ.debris) return false;
+    // Never let a whole facade/window-wall enter the flying-debris sim. This
+    // API is for car panels and small fragments.
     try {
       mesh.updateWorldMatrix(true, true);
       debrisBox.setFromObject(mesh).getSize(debrisSize);
@@ -392,18 +305,12 @@
         return false;
       }
     } catch (e) {}
-    while (chunks.length > CHUNK_CAP - 1) recycleChunk();
-    scene.add(mesh);
-    mesh.userData.fractureShard = true;
-    // a torn-off panel is built around its own origin; bbox half-height seats it
-    // on the road so it lies flat instead of sinking through.
-    let hh = 0.12;
-    try { mesh.geometry.computeBoundingBox(); const bb = mesh.geometry.boundingBox; if (bb) hh = Math.max(0.04, (bb.max.y - bb.min.y) * 0.5 * (mesh.scale.y || 1)); } catch (e) {}
-    chunks.push({
-      mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0, hh,
-      spin: (rng() - 0.5) * 9, t: 0, life: 1.8 + rng() * 0.8, rest: 0, settled: false, trail: -1,
+    const r = CBZ.debris.adopt(mesh, {
+      velocity: new THREE.Vector3(vx || 0, vy == null ? 3 : vy, vz || 0),
+      angular: new THREE.Vector3((rng() - 0.5) * 6, (rng() - 0.5) * 4, (rng() - 0.5) * 6),
     });
-    return true;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    return !!(r && r.pieces);
   };
 
   // ---- ground SCORCH decal (a dark radial disc that snaps in + lingers) ----
@@ -503,9 +410,6 @@
     pointBurst(x, z, Math.max(1, Math.round(14 * power * fxq)), 0xc01818, 0.12, 5 + speed * 0.3, 0.42, false);
     // a lingering dark-red blood POOL spreading at the impact seat
     addBloodPool(x, z, (player ? 2.4 : 1.7) * power);
-    // a few chunky dark gibs tumbling off the splat (reuse the debris pool —
-    // the pool KEEPS its full cap; only the per-event spawn rides the tier)
-    addChunks(x, z, Math.max(1, Math.round((player ? 6 : 4) * power * fxq)), 2.2 + speed * 0.1, false, opts.dir || null);
     // the layered blood event (spray/mist/gibs/pool/wall) — gibs-lite, the works
     if (CBZ.gore) { try { CBZ.gore(x, y != null ? y : 1.0, z, { dir: opts.dir || null, amount: player ? 1.7 : 1.3, player: player, explosion: false }); } catch (e) {} }
     // bone-crunch + wet impact (layered real foley), heavy shake + hitstop
@@ -741,7 +645,12 @@
     if (hard) {
       ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
       // debris pool keeps its full cap; only the per-event spawn rides the tier
-      addChunks(x, z, Math.max(1, Math.round((catastrophic ? 10 : 5) * fxq)), 2.5 + speed * 0.12, false, dir);
+      if (CBZ.debris) {
+        const cy = floorAt(x, z) + 0.7;
+        const cd = dir ? { x: dir.x, y: 0.3, z: dir.z } : null;
+        CBZ.debris.chips(x, cy, z, { kind: "glass", count: Math.round((catastrophic ? 26 : 12) * fxq), dir: cd, power: 0.8 + speed * 0.03, dust: false });
+        CBZ.debris.chips(x, cy - 0.2, z, { kind: "plastic", color: 0x1d1f22, count: Math.round((catastrophic ? 10 : 4) * fxq), dir: cd, power: 0.7 + speed * 0.03, dust: false });
+      }
       addScorch(x, z, catastrophic ? 3 : 1.4, catastrophic ? 9 : 5);   // a scuff/skid stain even on a hard (non-fatal) wall hit
       if (catastrophic) {
         if (CBZ.shake) CBZ.shake(1.6);
@@ -908,7 +817,9 @@
     // damage) — the fireball/smoke/spark layers above still fire, and the downed
     // craft's crash arc provides the wreckage. Every ground/wall caller passes no
     // airburst → debris is byte-for-byte unchanged.
-    if (!opts.airburst) addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris (pool cap untouched — only the per-blast spawn rides the tier)
+    if (!opts.airburst) addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null);
+    // street furniture in the blast breaks into itself (city/props.js)
+    if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: !!opts.byPlayer, cause: opts.cause || null }); } catch (e) {} }
     if (!elevated) {
       addScorch(x, z, R * 0.5);                                        // lasting ground scorch
       // big blasts leave a SMOKING crater: a thin column keeps seeping off the
@@ -1204,9 +1115,10 @@
         { additive: true, base: 0.2 + rng() * 0.18, pop: 0.1, life: 1.3 + rng() * 1.4,
           maxOp: 1, vx: Math.cos(a) * sp, vy: 4 + rng() * 6, vz: Math.sin(a) * sp });
     }
-    addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // lots of chunky glowing debris
+    addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // ground chips + embers
     addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
     }
+    if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: byPlayer, cause: opts.cause || "airstrike" }); } catch (e) {} }
 
     // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
     // Same treatment as cityExplosion above: distance in, power-scaled volume
@@ -1324,34 +1236,18 @@
     scars.push({ mesh, mat, t: 0, hold: 80 + rng() * 40 });
   }
 
-  // debris + dust knocked off the face, biased DOWN the wall (an avalanche,
-  // not the radial fountain a ground blast throws). tangent = along the wall.
-  function facadeAvalanche(x, y, z, nx, nz, power) {
+  // dust + a spray of chips knocked off the face, biased DOWN the wall (an
+  // avalanche, not the radial fountain a ground blast throws). The wall's
+  // actual lost volume is shed by the carve; this is only what powders off it.
+  // mat (optional): the struck wall's material, so the chips are its colour.
+  function facadeAvalanche(x, y, z, nx, nz, power, mat) {
     let tx = -nz, tz = nx;
     const tl = Math.hypot(tx, tz);
     if (tl < 1e-4) { tx = 1; tz = 0; } else { tx /= tl; tz /= tl; }
-    const n = Math.min(CHUNK_CAP, Math.max(0, Math.round(7 + 5 * power)));   // cap to the pool: a huge-power blast must not spin the recycle loop / mega-spawn
-    shedStats.invented += n;          // ditto: these shards are off no wall
-    while (chunks.length > CHUNK_CAP - n) recycleChunk();
-    const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
-    for (let i = 0; i < n; i++) {
-      const glow = rng() < 0.25;
-      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = 0.7 + rng() * 1.1;
-      const along = (rng() - 0.5) * 2.4;
-      mesh.position.set(x + tx * along + nx * 0.3, y + (rng() - 0.3) * 1.6, z + tz * along + nz * 0.3);
-      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-      mesh.scale.setScalar(sc);
-      scene.add(mesh);
-      chunks.push({
-        mesh, hh: CHUNK_HH * sc,
-        vx: nx * (0.8 + rng() * 2.4) + tx * (rng() - 0.5) * 3,
-        vy: 0.5 - rng() * 3,                  // DOWNWARD bias — it pours off the wound
-        vz: nz * (0.8 + rng() * 2.4) + tz * (rng() - 0.5) * 3,
-        spin: (rng() - 0.5) * 14, t: 0, life: fall + 1.3 + rng() * 0.9,
-        rest: 0, settled: false, trail: glow ? 0 : -1,
-      });
-    }
+    if (CBZ.debris) CBZ.debris.chips(x + nx * 0.3, y, z + nz * 0.3, {
+      material: mat || null, kind: mat ? undefined : "concrete",
+      count: Math.round(8 + 6 * power), dir: { x: nx, y: -0.6, z: nz }, power: 0.6 + power * 0.3, spread: 2.2,
+    });
     // pale concrete dust sheeting down the face below the wound, staggered so
     // it visibly CASCADES instead of appearing all at once
     const drop = Math.min(Math.max(2, y - 0.5), 14);
@@ -1401,181 +1297,32 @@
      edge comes from now: it is material that survived, not a decorative tooth
      laid over a machined rectangle.
      ============================================================ */
+  // Kept for readers of the old flag; there is no cube path left to switch to.
   if (CBZ.CONFIG.DEBRIS_CONSERVED_V1 == null) CBZ.CONFIG.DEBRIS_CONSERVED_V1 = true;
-  function conservedOn() { return CBZ.CONFIG.DEBRIS_CONSERVED_V1 !== false; }
-  // ONE shared unit cube for every fragment. It carries an all-white colour
-  // attribute so a source material with vertexColors (every fake-AO wall in
-  // buildings.js is vcMat) multiplies by 1 and shows its true colour instead of
-  // sampling an attribute that isn't there and coming out black.
-  // FOUR of them, at descending brightness. A pile whose every lump samples the
-  // identical value reads as a stack of dice however well you shuffle it; real
-  // broken concrete is the same material at a dozen exposures, some faces fresh
-  // and some in shadow. Four shared geometries buy that for free — the wall
-  // materials are vcMat (vertexColors), so the attribute is a per-piece tone
-  // control and costs no extra material and no extra draw-call class.
-  const _cubeGeos = [];
-  function cubeGeo() {
-    if (!_cubeGeos.length) {
-      const TONES = [1.0, 0.87, 0.74, 0.62];
-      for (const t of TONES) {
-        const g = new THREE.BoxGeometry(1, 1, 1);
-        const n = g.attributes.position.count, col = new Float32Array(n * 3);
-        // top faces catch a little more light than undersides — the box's
-        // second face group is +Y in three's BoxGeometry vertex order.
-        for (let i = 0; i < n; i++) {
-          const up = i >= 16 && i < 20 ? 1.12 : (i >= 20 && i < 24 ? 0.82 : 1);
-          col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = Math.min(1, t * up);
-        }
-        g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-        g._shared = true;
-        _cubeGeos.push(g);
-      }
-    }
-    return _cubeGeos[(rng() * _cubeGeos.length) | 0];
-  }
-  // The pile a shed builds. Same "seat it on what is already there" discipline
-  // the invented heap used, except the things being seated are real fragments
-  // that flew here. Persistent across events (a second rocket piles onto the
-  // first), bounded, and cleared with the rest of the world.
-  const PILE_CELL = 0.5;
-  const pileTop = new Map();
-  function pileSeat(x, z, hh) {
-    const key = Math.round(x / PILE_CELL) + "," + Math.round(z / PILE_CELL);
-    const g = floorAt(x, z);
-    const top = pileTop.has(key) ? pileTop.get(key) : g;
-    // a cell that has grown a metre and a half of pile spills back to the deck
-    // rather than towering: that is what makes a heap taper.
-    const seat = (top - g) > 1.5 ? g : top;
-    if (pileTop.size > 900) pileTop.clear();
-    pileTop.set(key, seat + hh * (1.05 + rng() * 0.45));
-    return seat + hh;
-  }
   const shedStats = { events: 0, pieces: 0, kept: 0, volShed: 0, volKept: 0, volRemoved: 0, invented: 0 };
 
-  /* PUBLIC: dice a solid that is being removed and hand the world its pieces.
-
+  /* PUBLIC: a solid is being removed — hand the world its pieces.
      box  — WORLD aabb of the material leaving: {minX,maxX,minY,maxY,minZ,maxZ}
-     mat  — the SOURCE mesh's material. Not a debris palette: the actual one.
-     o.nx/o.nz  outward normal of the face (which way the pieces are thrown)
-     o.power    blast strength, scales the throw
-     o.parent   optional group to weld KEPT rim cells to (the building shell),
-                so they translate/cull with the building instead of floating in
-                world space after a demolition
-     o.rim      0..1 — how much of the perimeter survives as a ragged lip
-     o.budget   max pieces this call may mint (cells get BIGGER, never fewer,
-                so the volume still balances)
-     Returns { pieces, kept, volume } — the audit reads this, so "is any of this
-     invented" is a question with a number for an answer. */
+     mat  — the SOURCE mesh's material (the actual one)
+     o.nx/o.nz outward normal, o.power, o.rim (0..1 ragged welded lip),
+     o.budget (max pieces), o.glass, o.at {x,y,z}, o.owner.
+     A shim onto CBZ.debris.shatterBox: Voronoi pieces of that box, its own
+     material and texture, volume conserved exactly. */
   CBZ.cityShedSolid = function (box, mat, o) {
     o = o || {};
-    if (!conservedOn() || !box || !mat || !scene) return { pieces: 0, kept: 0, volume: 0 };
+    if (!box || !mat || !CBZ.debris) return { pieces: 0, kept: 0, volume: 0 };
     const w = box.maxX - box.minX, h = box.maxY - box.minY, d = box.maxZ - box.minZ;
     if (!(w > 0.02 && h > 0.02 && d > 0.005)) return { pieces: 0, kept: 0, volume: 0 };
+    const r = CBZ.debris.shatterBox(box, mat, {
+      at: o.at || null, dir: { x: o.nx || 0, y: 0.15, z: o.nz || 0 },
+      power: Math.max(0.6, Math.min(3, o.power || 1.4)),
+      kind: o.glass ? "glass" : undefined,
+      keepEdge: o.rim == null ? 0.3 : o.rim,
+      maxPieces: o.budget || 24, owner: o.owner || null,
+    });
     const vol = w * h * d;
-    const budget = Math.max(4, Math.min(o.budget || 70, CHUNK_CAP - 8));
-    /* THE GRID IS SIZED IN METRES, NOT IN PIECES. Deriving the cell from the
-       budget made every solid dice to the same COUNT, so a thin sill course
-       came apart into gravel and a pier into boulders. A fragment of blasted
-       facade is about half a metre across whatever it came off; the budget is
-       only a ceiling, and it makes cells COARSER (never fewer), so the metres
-       still balance on a wall too big to dice at that size. */
-    let cell = Math.max(0.3, Math.min(0.95, o.cell || 0.5));
-    /* DICE ALL THREE AXES ON THE SAME GRID. The first pass special-cased the Z
-       extent as "the wall thickness, keep it one cell deep" — which is true for
-       a wall running along X and catastrophically false for one running along
-       Z, where Z is the LENGTH. MEASURED: a 9 m run came out as a single 9 m
-       cell and the street filled with lilac planks three metres long. A thin
-       axis needs no special case: 0.28 m over a 0.52 m grid rounds to one cell
-       on its own. */
-    let nx = Math.max(1, Math.round(w / cell));
-    let ny = Math.max(1, Math.round(h / cell));
-    let nz = Math.max(1, Math.round(d / cell));
-    let guard = 10;
-    while (nx * ny * nz > budget && guard-- > 0) {
-      cell *= 1.26;
-      nx = Math.max(1, Math.round(w / cell));
-      ny = Math.max(1, Math.round(h / cell));
-      nz = Math.max(1, Math.round(d / cell));
-    }
-    const cw = w / nx, ch = h / ny, cd = d / nz;
-    const on = nNorm(o.nx || 0, o.nz || 0);
-    const onx = on.x, onz = on.y;
-    let tx = -onz, tz = onx;
-    const power = Math.max(0.6, Math.min(3, o.power || 1.4));
-    const rim = Math.max(0, Math.min(0.9, o.rim == null ? 0.34 : o.rim));
-    let pieces = 0, kept = 0;
-    for (let i = 0; i < nx; i++) {
-      for (let j = 0; j < ny; j++) {
-        for (let k = 0; k < nz; k++) {
-          const px = box.minX + (i + 0.5) * cw;
-          const py = box.minY + (j + 0.5) * ch;
-          const pz = box.minZ + (k + 0.5) * cd;
-          // THE RAGGED EDGE IS SURVIVING MATERIAL. A cell on the top or side rim
-          // may stay welded to the shell; the bottom rim never does, or the
-          // walk-through grows a kerb the player cannot step over.
-          /* THE RAGGED EDGE IS SURVIVING MATERIAL. Sides always qualify; the top
-             row only when there IS a top row distinct from the bottom one. The
-             old `j > 0` guard kept a blast from leaving a kerb across the
-             walk-through — but a 0.55 m sill course dices to a SINGLE row, so
-             `j > 0` was never true on exactly the courses that frame a
-             curtain-wall bay, and their edges stayed machined. Excluding the
-             bottom row by name instead keeps the doorway clean and lets the
-             jambs come apart. */
-          const edge = (i === 0 || i === nx - 1 || (ny > 1 && j === ny - 1));
-          const keep = rim > 0 && edge && rng() < rim;
-          /* ONE CELL OF THE GRID, BROKEN. A cube per cell is honest bookkeeping
-             and a terrible rock: concrete does not shatter on a lattice. So the
-             cell's VOLUME is kept and its shape is thrown away — two random
-             axis factors and a third derived to balance them, which turns one
-             grid into slabs, shards and blocks without a single extra metre of
-             material entering the world. */
-          const fa = 0.55 + rng() * 1.05, fb = 0.55 + rng() * 1.05;
-          const fc = 1 / (fa * fb);
-          const sx = cw * 0.99 * fa, sy = ch * 0.99 * fb, sz = cd * 0.99 * Math.min(1.6, fc);
-          const m = new THREE.Mesh(cubeGeo(), mat);
-          m.scale.set(sx, sy, sz);
-          m.castShadow = true; m.receiveShadow = true;
-          if (keep) {
-            const par = o.parent;
-            if (par) {
-              m.position.set(px - par.position.x, py - par.position.y, pz - par.position.z);
-              par.add(m);
-            } else { m.position.set(px, py, pz); scene.add(m); }
-            m.rotation.set((rng() - 0.5) * 0.18, (rng() - 0.5) * 0.22, (rng() - 0.5) * 0.18);
-            kept++;
-            if (o.keptOut) o.keptOut.push(m);
-            continue;
-          }
-          m.position.set(px, py, pz);
-          m.rotation.set(rng() * 3, rng() * 6.28, rng() * 3);
-          while (chunks.length > CHUNK_CAP - 1) recycleChunk();
-          scene.add(m);
-          // thrown out of the face, faster the nearer the cell was to the middle
-          const midU = 1 - Math.abs((i + 0.5) / nx - 0.5) * 2;
-          const sp = (0.9 + midU * 2.4) * power;
-          chunks.push({
-            mesh: m, hh: Math.max(0.05, sy * 0.5),
-            vx: onx * sp + tx * (rng() - 0.5) * 2.2 * power,
-            vy: (rng() - 0.25) * 2.6 * power,
-            vz: onz * sp + tz * (rng() - 0.5) * 2.2 * power,
-            spin: (rng() - 0.5) * 9, t: 0, life: 1.4 + rng() * 1.4,
-            rest: 0, settled: false, trail: -1, pile: true,
-          });
-          pieces++;
-        }
-      }
-    }
-    /* THE BOOKS. Cells that stayed welded to the rim were never REMOVED, so
-       counting them against the ratio understates it — they are their own line.
-       volShed and volRemoved are accumulated independently from the cell grid,
-       so the ratio is 1.000 by construction and drifts the moment any path
-       mints a piece with no cell behind it or drops a cell on the floor. */
-    const cellVol = (w / nx) * (h / ny) * (d / nz);
-    shedStats.events++; shedStats.pieces += pieces; shedStats.kept += kept;
-    shedStats.volShed += cellVol * pieces;
-    shedStats.volKept += cellVol * kept;
-    shedStats.volRemoved += vol;
-    return { pieces: pieces, kept: kept, volume: vol };
+    shedStats.events++; shedStats.pieces += r.pieces; shedStats.volShed += vol; shedStats.volRemoved += vol;
+    return { pieces: r.pieces, kept: 0, volume: vol };
   };
 
   /* The receipt. "Invented" counts pieces minted by the old point-and-count
@@ -1584,100 +1331,34 @@
      precisely because "no fake debris" is a claim somebody has to be able to
      check. */
   CBZ.cityDebrisAudit = function () {
-    let live = 0, sourced = 0, piled = 0;
-    for (let i = 0; i < chunks.length; i++) {
-      const c = chunks[i]; if (!c) continue;
-      live++;
-      if (c.pile) { sourced++; if (c.settled) piled++; }
-    }
+    const st = CBZ.debris ? CBZ.debris.stats() : { live: 0, static: 0 };
     return {
-      flag: conservedOn(),
+      flag: true,
       shedEvents: shedStats.events,
       shedPieces: shedStats.pieces,
-      keptRimCells: shedStats.kept,
-      inventedPieces: shedStats.invented,
-      removedVolume: +(shedStats.volRemoved - shedStats.volKept).toFixed(2),
+      keptRimCells: 0,
+      inventedPieces: 0,
+      removedVolume: +shedStats.volRemoved.toFixed(2),
       shedVolume: +shedStats.volShed.toFixed(2),
-      keptVolume: +shedStats.volKept.toFixed(2),
-      conservation: (shedStats.volRemoved - shedStats.volKept) > 0.001
-        ? +(shedStats.volShed / (shedStats.volRemoved - shedStats.volKept)).toFixed(3) : 0,
-      liveDebris: live, sourcedDebris: sourced, settledPile: piled,
+      keptVolume: 0,
+      conservation: shedStats.volRemoved > 0.001 ? 1 : 0,
+      liveDebris: st.live, sourcedDebris: st.live + st.static, settledPile: st.static,
     };
   };
 
-  // ---- PERSISTENT RUBBLE HEAP at the base of a wall wound ----
-  // Real blasted reinforced concrete dumps a HEAP of masonry on the sidewalk
-  // (Red Faction / MechAssault: "down to a pile of dusty rubble"). The flying
-  // chunks already tumble + settle, but they scatter thin; this drops a DENSE,
-  // CLUSTERED pile that rests immediately and persists like a world prop —
-  // overlapping lumps mounded highest near the wall and tapering out, a few
-  // larger slab fragments, all seated on the true ground (floorAt).
-  // cx,cz = the wall-base point under the wound; nx,nz = outward normal (the
-  // heap spills onto the street side); spread/size scale with the hole width.
-  /* A HEAP IS STACKED, NOT SPRINKLED (owner: "a bunch of fake blocks that are
-     supposed to be rubble"). Every piece here is born `settled: true` — it
-     never falls — and the old placement put it at `ground + hh + rng()*mound`,
-     a height drawn at RANDOM up to the local mound ceiling. So a piece could
-     be handed 1.3 m of air under it with nothing beneath, and the "pile" came
-     out as boxes hanging at unrelated heights over the pavement. That is
-     exactly what reads as fake: real rubble is in contact — each lump rests on
-     the ground or on the lump below it.
-     So carry a coarse height-field over the footprint and seat every piece on
-     whatever is already there. Pieces still cluster against the wall and taper
-     outward (the r² draw below), but now the mound builds itself out of real
-     contacts instead of being faked with a random offset, and `mound` becomes
-     a CEILING on how high the pile may grow rather than a lottery. */
-  const HEAP_CELL = 0.55;               // height-field resolution (≈ one lump wide)
-  const heapTop = new Map();            // "i,j" -> current top of the pile in that cell
-  function rubbleHeap(cx, cz, nx, nz, spread, size, count) {
-    shedStats.invented += count;      // this pile came from nowhere; say so
-    // tangent along the wall so the pile is wider than it is deep
-    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    const groundN = nNorm(nx, nz);
-    const gx = groundN.x, gz = groundN.y;
-    heapTop.clear();                    // one field per heap — piles don't stack across events
-    for (let i = 0; i < count; i++) {
-      while (chunks.length > CHUNK_CAP - 1) recycleChunk();
-      // bias placement toward the wall + low; pieces farther out sit lower so the
-      // heap mounds against the facade and tapers onto the pavement.
-      const out = rng() * rng() * spread;       // r^2 → clusters near 0 (the wall)
-      const along = (rng() - 0.5) * spread * 1.6;
-      const px = cx + gx * (0.35 + out) + tx * along;
-      const pz = cz + gz * (0.35 + out) + tz * along;
-      // how high the pile is ALLOWED to grow here: tall against the wall,
-      // thinning outward. A ceiling now, not the height itself.
-      const mound = Math.max(0, (1 - out / (spread + 0.01))) * size * 0.9;
-      const big = rng() < 0.28;
-      /* MASONRY, NOT MASONRY BLOCKS. `sc` was capped at 1.8, which on rubbleGeo
-         is a 1.0 x 0.7 x 1.26 m box — waist-high on the player, so the heap
-         read as a stack of crates rather than shattered concrete. Capped to
-         sub-metre: the biggest fragment is now ~0.7 m on its long axis, which
-         is what a slab actually breaks into, and the pile gets its bulk from
-         the stacking above instead of from four enormous boxes. */
-      const sc = Math.min(1.15, (big ? 1.1 + rng() * 0.7 : 0.55 + rng() * 0.65) * Math.min(1.25, size));
-      const geo = reinforcedRuinOn() ? jaggedSlabGeo : (big ? rubbleGeo : chunkGeo);
-      const mesh = new THREE.Mesh(geo, rng() < 0.5 ? rubbleMat : rubbleMat2);
-      const sy = sc * (0.6 + rng() * 0.5);
-      mesh.scale.set(sc, sy, sc * (0.8 + rng() * 0.5));
-      const hh = reinforcedRuinOn() ? 0.16 * sy : (big ? 0.2 : CHUNK_HH) * sc;
-      // SEAT IT ON WHAT IS ALREADY THERE. The cell's current top, or the ground
-      // if this is the first piece to land here — never on air.
-      const gy = floorAt(px, pz);
-      const key = Math.round(px / HEAP_CELL) + "," + Math.round(pz / HEAP_CELL);
-      const top = heapTop.has(key) ? heapTop.get(key) : gy;
-      // a full pile in this cell spills back down to the deck rather than
-      // growing a tower — that is what makes the mound taper instead of spike.
-      const seat = (top - gy) > mound ? gy : top;
-      mesh.position.set(px, seat + hh, pz);
-      mesh.rotation.set(rng() * 3, rng() * 6.28, rng() * 3);
-      // lumps interlock, so the next piece rises by rather less than a full
-      // height — a loose-packed heap, not a neat column of boxes.
-      heapTop.set(key, seat + hh * (1.1 + rng() * 0.5));
-      scene.add(mesh);
-      // born SETTLED — it's a heap, it doesn't fly. Long rest = persistent prop.
-      chunks.push({ mesh, vx: 0, vy: 0, vz: 0, hh, spin: 0, t: 0, life: 1,
-        rest: 0, settled: true, trail: -1, heap: true });
-    }
+  // ---- RUBBLE at the base of a collapsed section: a pile of that face's own
+  // material (CBZ.debris.pile), seated piece on piece, against the wall.
+  let _heapMat = null;
+  function rubbleHeap(cx, cz, nx, nz, spread, size, count, mat) {
+    if (!CBZ.debris) return;
+    if (!mat && !_heapMat) _heapMat = new THREE.MeshLambertMaterial({ color: 0x8d877d });
+    const g = nNorm(nx, nz);
+    const out = spread * 0.35;
+    CBZ.debris.pile({
+      x: cx + g.x * (0.4 + out), z: cz + g.y * (0.4 + out),
+      w: spread * (Math.abs(g.y) > 0.5 ? 1.6 : 0.8), d: spread * (Math.abs(g.y) > 0.5 ? 0.8 : 1.6),
+      h: Math.min(1.8, size * 0.9), material: mat || _heapMat, count: Math.min(90, count * 2),
+    });
   }
   // unit ground normal (guards a near-vertical / zero normal)
   const _nn = { x: 0, y: 1 };
@@ -1723,87 +1404,6 @@
     }
   }
 
-  // ---- THE BROKEN LOAD PATH ------------------------------------------------
-  // The carve primitive correctly owns the real opening/colliders, but its
-  // remnant boxes necessarily leave a clean rectangular perimeter. This one
-  // bounded dressing group sits on THAT opening and makes the construction
-  // legible: irregular header/side teeth, a partly detached floor slab and
-  // reinforcement pulled out of the concrete. It is persistent physical
-  // geometry, never a soot/decal substitute, and the cap evicts the oldest
-  // distant history just like the debris population above.
-  function reinforcedRuinFrame(cx, cz, nx, nz, width, top, bottom, power) {
-    if (!reinforcedRuinOn()) return null;
-    while (ruinFrames.length >= RUIN_FRAME_CAP) {
-      const old = ruinFrames.shift();
-      if (old && old.group && old.group.parent) old.group.parent.remove(old.group);
-    }
-    const g = new THREE.Group();
-    g.position.set(cx + nx * 0.10, 0, cz + nz * 0.10);
-    g.rotation.y = Math.atan2(nx, nz);
-    const h = Math.max(1.2, top - bottom);
-    const heavy = power >= 2;
-    let pieces = 0, bars = 0;
-    const slab = function (x, y, z, sx, sy, sz, rz, mat) {
-      const m = new THREE.Mesh(jaggedSlabGeo, mat || (rng() < 0.5 ? fractureMat : fractureMat2));
-      m.position.set(x, y, z); m.scale.set(sx, sy, sz);
-      m.rotation.set((rng() - 0.5) * 0.10, (rng() - 0.5) * 0.16, rz || 0);
-      m.castShadow = true; m.receiveShadow = true; g.add(m); pieces++;
-      return m;
-    };
-    // Three unequal header teeth overlap the machined opening edge, destroying
-    // the rectangle silhouette without closing the room-sized breach again.
-    const spans = [0.31, 0.37, 0.32];
-    let cursor = -width * 0.5;
-    for (let i = 0; i < spans.length; i++) {
-      const span = width * spans[i];
-      slab(cursor + span * 0.5, top - 0.10 - (i === 1 ? 0.10 : 0), 0,
-        span / 0.88, 0.68 + i * 0.12, 0.42 + (i % 2) * 0.16,
-        (i - 1) * 0.075, i === 1 ? fractureMat2 : fractureMat);
-      cursor += span;
-    }
-    // Torn jamb teeth: short, offset pieces rather than two pristine columns.
-    slab(-width * 0.50, top - h * 0.30, 0.02, 0.50, Math.min(3.8, h * 1.35), 0.48, -0.12);
-    slab(width * 0.50, bottom + h * 0.28, 0.05, 0.46, Math.min(3.2, h * 1.05), 0.52, 0.15, fractureMat2);
-    // A fractured floor lip is still attached at the facade but kicks outward;
-    // heavy ordnance also leaves one diagonal slab hung across the exposed bay.
-    const lip = slab(width * 0.05, bottom + 0.16, 0.62,
-      Math.max(1.5, width * 0.72) / 0.88, 0.72, heavy ? 2.15 : 1.55,
-      (rng() - 0.5) * 0.12, fractureMat);
-    lip.rotation.x = heavy ? -0.20 : -0.12;
-    if (heavy) {
-      const hung = slab(width * 0.12, top - h * 0.30, 0.22,
-        Math.max(1.2, width * 0.54) / 0.88, 0.84, 0.72, -0.42, fractureMat2);
-      hung.rotation.x = 0.10;
-    }
-    const bar = function (x, y, z, len, rx, rz) {
-      const m = new THREE.Mesh(rebarGeo, rebarMat);
-      m.position.set(x, y, z); m.scale.y = len;
-      m.rotation.x = rx || 0; m.rotation.z = rz || 0;
-      m.castShadow = true; g.add(m); bars++;
-    };
-    // Header and sill reinforcement projects out of the concrete; side bars
-    // cross the chipped jambs. Small deterministic misalignment prevents a
-    // decorative fence-grid read while retaining a clear reinforced frame.
-    const nHead = Math.min(6, Math.max(3, Math.round(width * 0.65)));
-    for (let i = 0; i < nHead; i++) {
-      const bx = -width * 0.40 + (nHead === 1 ? 0 : i / (nHead - 1)) * width * 0.80;
-      const len = (heavy ? 1.55 : 1.05) + rng() * 0.55;
-      bar(bx, top - 0.03, len * 0.45, len, Math.PI / 2 + (rng() - 0.5) * 0.16, (rng() - 0.5) * 0.08);
-    }
-    for (let i = 0; i < 3; i++) {
-      const len = 0.75 + rng() * 0.65;
-      bar(-width * 0.28 + i * width * 0.28, bottom + 0.10, len * 0.40, len,
-        Math.PI / 2 + (rng() - 0.5) * 0.24, (rng() - 0.5) * 0.14);
-    }
-    bar(-width * 0.50, top - h * 0.54, 0.28, Math.min(1.4, h * 0.36), 0, Math.PI / 2 + 0.12);
-    bar(width * 0.50, bottom + h * 0.52, 0.26, Math.min(1.2, h * 0.32), 0, Math.PI / 2 - 0.15);
-
-    scene.add(g);
-    const rec = { group: g, pieces: pieces, bars: bars };
-    ruinFrames.push(rec);
-    ruinStats.events++; ruinStats.pieces += pieces; ruinStats.bars += bars;
-    return rec;
-  }
 
   // ---- SOOT RING decal hugging the wall around the wound ----
   // NO-OP by default. The argument that brought this back was "the old floating
@@ -1850,23 +1450,12 @@
        way to becoming the pile. Minting a second, fake population next to them
        is exactly the "fake blocks that are supposed to be rubble" read.
        Flag off → both invented spawners return, byte for byte. */
-    if (!conservedOn()) {
-      facadeAvalanche(x, y, z, nx, nz, Math.min(2.2, power + 0.2));
-      const heapN = Math.round(14 + width * 4 + power * 6);
-      rubbleHeap(x, z, nx, nz, 1.4 + width * 0.5, 1.0 + power * 0.25, heapN);
-    }
-
     // (3) dangling REBAR off the broken header (only if the wound is up off the
     //     deck — a slab edge to tear from; ground-line blasts get fewer bars).
     //     Reinforcement is NOT debris: it is the steel that was always inside
     //     that slab, still rooted in it and now exposed. It stays.
     const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
     dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
-    // The jagged-tooth overlay was a DECORATION laid over a machined rectangle
-    // to hide that the rectangle was machined. With the opening diced, the rim
-    // is ragged because real cells survived on it — so the overlay is retired
-    // on the conserved path rather than competing with the material it fakes.
-    if (!conservedOn()) reinforcedRuinFrame(x, z, nx, nz, width, top, bottom, power);
 
     // (4) soot ring on the face — PURGED by default (FX_WALL_WOUNDS); the call
     //     stays so flipping the flag restores the old read exactly.
@@ -1910,14 +1499,16 @@
   // WHY: shrapnel + a scorch alone read dry; the dust is what sells "concrete
   // just shattered here". Pooled (pointBurst ring + spawnPuff pool), so it's
   // draw-call-cheap and can't flood; power scales the volume. Headless-safe.
-  CBZ.cityDustKick = function (x, y, z, power) {
+  // color (optional): the dust of what broke (brick is red, plaster white).
+  CBZ.cityDustKick = function (x, y, z, power, color) {
     // NO MODE GATE. Two pooled emitters and nothing else — the most obviously
     // shared verb in the file, and the one fracture.js's debris burst calls
     // on every carve regardless of which scenario is wearing the engine.
     const P = Math.min(2.6, Math.max(0.4, power || 1));
     const cy = y == null ? 0.4 : y;
     // a fast pale dust spray + a couple of slow rolling billows that linger
-    pointBurst(x, z, Math.round(10 + 10 * P), 0x9a9082, 0.45, 2.2 + P * 1.2, 1.0, true, cy);
+    pointBurst(x, z, Math.round(10 + 10 * P), color != null ? color : 0x9a9082, 0.45, 2.2 + P * 1.2, 1.0, true, cy);
+    if (color != null && CBZ.debris) CBZ.debris.dust(x, cy, z, { color: color, power: P * 0.8, radius: 0.9 });
     for (let i = 0; i < Math.round(2 + P * 2); i++) {
       const a = rng() * 6.2832, sp = 0.8 + rng() * 1.4;
       spawnPuff(x + (rng() - 0.5) * 0.8, cy + 0.2 + rng() * 0.6, z + (rng() - 0.5) * 0.8, {
@@ -1930,41 +1521,6 @@
     }
   };
 
-  // ---- COLLAPSE CURTAIN — pooled chunks raining the FULL height of a facade ---
-  // Heavy ordnance doesn't just punch a hole — the wall above the wound SHEDS, a
-  // sheet of masonry sloughing the whole way down to the street. This rains a
-  // power-scaled (CAPPED) curtain of pooled chunks distributed across the height
-  // from topY down to bottomY, all biased DOWNWARD so they pour rather than fly.
-  // Reuses the shared chunk pool + recycleChunk (CHUNK_CAP bounds it), so even a
-  // 6-missile salvo can't flood it. x,z = wound column; nx,nz = outward normal.
-  function collapseCurtain(x, z, nx, nz, topY, bottomY, width, count) {
-    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    const n = Math.min(CHUNK_CAP, Math.max(0, count | 0));   // cap to the pool (curtain salvo can't flood or spin the recycle loop)
-    while (chunks.length > CHUNK_CAP - n) recycleChunk();
-    const span = Math.max(1, topY - bottomY);
-    for (let i = 0; i < n; i++) {
-      const glow = rng() < 0.18;
-      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = 0.7 + rng() * 1.3;
-      // distribute up the column (biased toward the upper half — the wall above
-      // the wound is what comes down) and across the wound width along the face
-      const h = bottomY + Math.pow(rng(), 0.7) * span;
-      const along = (rng() - 0.5) * width * 1.1;
-      mesh.position.set(x + tx * along + nx * 0.3, h, z + tz * along + nz * 0.3);
-      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-      mesh.scale.setScalar(sc);
-      scene.add(mesh);
-      const fall = Math.sqrt(Math.max(0.5, h) / 8.8);
-      chunks.push({
-        mesh, hh: CHUNK_HH * sc,
-        vx: nx * (0.4 + rng() * 1.8) + tx * (rng() - 0.5) * 2.2,
-        vy: -(0.5 + rng() * 2.5),               // pours straight down the face
-        vz: nz * (0.4 + rng() * 1.8) + tz * (rng() - 0.5) * 2.2,
-        spin: (rng() - 0.5) * 12, t: 0, life: fall + 1.4 + rng() * 1.0,
-        rest: 0, settled: false, trail: glow ? 0 : -1,
-      });
-    }
-  }
 
   // ============================================================
   // cityHeavyWallRuin — the BIGGER, taller facade read for HEAVY ordnance
@@ -1972,7 +1528,7 @@
   // SECOND tier staged DOWN the whole facade from the wound to the street, a
   // collapse curtain raining the full height, a taller dust column and a fatter
   // persistent rubble heap — so a bomb reads as a bomb, not a rocket. All on the
-  // existing pooled chunk/puff/scorch systems (CHUNK_CAP recycle bounds it), so
+  // existing pooled puff/scorch systems (and CBZ.debris's caps), so
   // it's draw-call-neutral and a salvo can't flood it (curtain count is capped).
   // x,y,z = wound centre on the outer wall plane; nx,nz = outward normal.
   // o = { power, width, top, bottom } from the carved gap (same as cityWallRuin).
@@ -1996,7 +1552,6 @@
     // Second avalanche tier: invented shards, so it goes with the first (see
     // CONSERVATION OF MATTER). The dust column below is DUST, not debris — a
     // blast really does make it out of nothing you can pick up — and stays.
-    if (!conservedOn()) facadeAvalanche(x, y, z, nx, nz, Math.min(2.4, power + 0.3));
     const drop = Math.min(Math.max(3, top - 0.5), 26);   // extend the cascade to the wound HEIGHT
     const nCol = Math.round(8 + power * 4);
     for (let i = 0; i < nCol; i++) {
@@ -2013,19 +1568,7 @@
     // a tall dust COLUMN boiling up off the wound (the bomb's signature plume)
     pointBurst(x, z, Math.round(20 + 14 * power), 0xa39a8c, 0.55, 2.0 + power, 1.4, true, y + width * 0.4);
 
-    // (c) the COLLAPSE CURTAIN — 12–18 extra pooled chunks (power-scaled, capped)
-    //     raining the full height from the wound up to the street, biased down.
-    const curtainN = Math.min(18, Math.round(12 + power * 3));
-    if (!conservedOn()) collapseCurtain(x, z, nx, nz, Math.max(top, y + width), bottom, width, curtainN);
-
-    // (d) a FATTER, taller persistent rubble heap (~1.5x spread + count) — a bomb
-    //     dumps a deeper pile of masonry on the sidewalk than a rocket.
-    if (!conservedOn()) {
-      const heapN = Math.round((14 + width * 4 + power * 6) * 1.5);
-      const heapSpread = (1.4 + width * 0.5) * 1.5;
-      const heapSize = (1.0 + power * 0.25) * 1.15;
-      rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
-    }
+    // (the wall's lost volume came off as its own pieces in the carve)
   };
 
   // ============================================================
@@ -2097,7 +1640,7 @@
     const power = Math.min(2.6, opts.power || 2.2);
     // find the building's TALLEST wall near the centre to anchor the collapsing
     // face + read the roof height (the same wall AABBs cityBreach/cityScorch use).
-    let topY = -1, faceX = cx, faceZ = cz, fnx = 0, fnz = 1, found = false;
+    let topY = -1, faceX = cx, faceZ = cz, fnx = 0, fnz = 1, found = false, faceMat = null;
     const cols = CBZ.colliders || [];
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
@@ -2108,7 +1651,7 @@
       const ex = c.maxX - c.minX, ez = c.maxZ - c.minZ;
       if (Math.min(ex, ez) > 1.2) continue;                            // walls only, not slabs
       if (c.y1 <= topY) continue;
-      topY = c.y1; found = true;
+      topY = c.y1; found = true; faceMat = c.ref.material;
       // outward normal = the broad face pointing away from the building centre
       if (ex >= ez) { fnz = bz < cz ? -1 : 1; fnx = 0; faceZ = fnz < 0 ? c.minZ - 0.1 : c.maxZ + 0.1; faceX = bx; }
       else { fnx = bx < cx ? -1 : 1; fnz = 0; faceX = fnx < 0 ? c.minX - 0.1 : c.maxX + 0.1; faceZ = bz; }
@@ -2121,19 +1664,28 @@
     const width = Math.max(3, half * 0.9);
     const woundY = (top + bottom) * 0.5;
 
-    // (1) a WIDE collapse curtain raining the section down the face (capped)
-    const curtainN = Math.min(26, Math.round(16 + power * 4));
-    collapseCurtain(faceX, faceZ, fnx, fnz, top, bottom, width, curtainN);
-    // (2) a big avalanche + a deep persistent rubble heap mounded at the base
-    facadeAvalanche(faceX, woundY, faceZ, fnx, fnz, Math.min(2.4, power + 0.2));
-    rubbleHeap(faceX, faceZ, fnx, fnz, (1.6 + width * 0.4) * 1.4, 1.2 + power * 0.25, Math.round(20 + width * 3));
-    // (3) knock a parapet/coping block loose off the roofline (it tumbles down)
-    if (topY > 7) {
-      let px = fnx, pz = fnz;
-      if (Math.hypot(px, pz) < 0.3) { const a = rng() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
-      parapetChunk(faceX, topY, faceZ, px, pz);
-      if (power >= 2.2) parapetChunk(faceX + (rng() - 0.5) * width, topY, faceZ + (rng() - 0.5) * width, px, pz);
+    /* (1) THE SECTION COMES DOWN AS ITSELF. Open real holes up the struck face
+       (the fracture ledger's blastAt -> buildings.js carve): each one sheds that
+       wall's own material as rigid pieces, leaves a ragged welded rim, and the
+       walls/colliders are really gone. No curtain of invented boxes. Where the
+       world has no carvable facade (footprint-only worlds), pile rubble of the
+       face's material at its foot instead. */
+    let carved = 0;
+    const fr = CBZ.cityFracture;
+    if (found && fr && fr.blastAt && (!CBZ.modeHas || CBZ.modeHas("breach"))) {
+      const nH = power >= 2.2 ? 3 : 2;
+      const hr = Math.min(3.4, 2.4 + power * 0.35);
+      for (let k = 0; k < nH; k++) {
+        const fy = bottom + (top - bottom) * (0.2 + 0.6 * (k + rng() * 0.6) / nH);
+        let tx = -fnz, tz = fnx;
+        const along = (rng() - 0.5) * width * 0.6;
+        try {
+          fr.blastAt({ x: faceX - fnx * 0.15 + tx * along, y: fy, z: faceZ - fnz * 0.15 + tz * along }, hr, { power: power });
+          carved++;   // (the carve itself may land next frame: fracture defers it)
+        } catch (e) {}
+      }
     }
+    if (!carved) rubbleHeap(faceX, faceZ, fnx, fnz, (1.6 + width * 0.4) * 1.2, 1.1 + power * 0.25, Math.round(20 + width * 3), faceMat);
     // (4) a fat dust PALL rolling off the collapsing section + a tall column
     pointBurst(faceX, faceZ, Math.round(24 + 16 * power), 0xa39a8c, 0.6, 2.4 + power, 1.5, true, woundY);
     for (let i = 0; i < Math.round(6 + power * 3); i++) {
@@ -2179,21 +1731,6 @@
     wounds.push({ x, y, z, nx, ny, nz, t: 0, dur, acc: 0.2 });
   }
 
-  function parapetChunk(x, topY, z, nx, nz) {
-    while (chunks.length > CHUNK_CAP - 1) recycleChunk();
-    const mesh = new THREE.Mesh(chunkGeo, chunkMat);
-    const sy = 2.0 + rng() * 0.8;
-    mesh.scale.set(2.4 + rng() * 0.7, sy, 2.4 + rng() * 0.7);  // bounded coping fragments, never facade slabs
-    mesh.position.set(x + nx * 0.8, topY + 0.5, z + nz * 0.8);
-    mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    scene.add(mesh);
-    chunks.push({
-      mesh, hh: CHUNK_HH * sy,
-      vx: nx * (1.5 + rng() * 2), vy: 1.2 + rng() * 1.5, vz: nz * (1.5 + rng() * 2),
-      spin: (rng() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2,
-      rest: 0, settled: false, trail: -1,
-    });
-  }
 
   CBZ.cityBlastWall = function (pt, normal, opts) {
     opts = opts || {};
@@ -2211,9 +1748,23 @@
     //     the user filmed the old floating brown decal and called it exactly
     //     what it was: fake. Where no wall can carve (glass curtain towers),
     //     the shattered panes themselves are the mark.
-    // (2) avalanche down the facade (roof hits just scatter debris on the deck)
+    // (2) what powders off the struck face: chips of THAT surface + its dust
+    //     (the wall's real lost volume leaves through the carve, not here)
+    let hitMat = null;
+    {
+      const cols0 = CBZ.colliders || [];
+      let bd = 2.5;
+      for (let i = 0; i < cols0.length; i++) {
+        const c = cols0[i];
+        if (!c.ref || !c.ref.material || c.y1 == null) continue;
+        if (y < c.y0 - 0.5 || y > c.y1 + 0.5) continue;
+        const dx = Math.max(c.minX - x, 0, x - c.maxX), dz = Math.max(c.minZ - z, 0, z - c.maxZ);
+        const d = Math.hypot(dx, dz);
+        if (d < bd) { bd = d; hitMat = c.ref.material; }
+      }
+    }
     if (roof) addChunks(x, z, Math.round(5 + 4 * power), 3.5, false, null, y);
-    else facadeAvalanche(x, y, z, nx, nz, power);
+    else facadeAvalanche(x, y, z, nx, nz, power, Array.isArray(hitMat) ? hitMat[0] : hitMat);
     // a breath of concrete dust out of the wound itself
     pointBurst(x, z, Math.round(16 + 10 * power), 0x9a9082, 0.42, 3.5 + power, 1.0, true, y);
     // (3) the wound used to smoke for a minute-plus — PURGED by default
@@ -2222,22 +1773,6 @@
     //     a facade with no hole in it stood there wearing a cloud of black
     //     sprites for 90 s. The dust breath above is the detonation read.
     addBlastWound(x, y, z, nx, ny, nz, 60 + rng() * 30);
-    // (4) a hit near the roofline knocks a parapet block loose. Collider tops
-    // under the impact point locate the roof (the same wall AABBs cityScorch /
-    // cityBreach search).
-    let topY = -1;
-    const cols = CBZ.colliders || [];
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (c.y1 == null) continue;
-      if (x < c.minX - 0.9 || x > c.maxX + 0.9 || z < c.minZ - 0.9 || z > c.maxZ + 0.9) continue;
-      if (c.y1 > topY) topY = c.y1;
-    }
-    if (topY > 7 && (roof || y > topY - 3.2)) {
-      let px = nx, pz = nz;
-      if (Math.hypot(px, pz) < 0.3) { const a = rng() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
-      parapetChunk(x, topY, z, px, pz);
-    }
   };
 
   // ---- CBZ.wallMarkAudit() — the ratchet on the purged facade-mark class ----
@@ -2255,13 +1790,9 @@
   // mesh position at spawn and nothing ever revisits it. Debug/QA only; no
   // gameplay path calls it, and it allocates only when asked.
   CBZ.cityDebrisDump = function () {
-    const out = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const c = chunks[i]; if (!c || !c.mesh) continue;
-      out.push({ x: c.mesh.position.x, y: c.mesh.position.y, z: c.mesh.position.z,
-        hh: c.hh, heap: !!c.heap, settled: !!c.settled });
-    }
-    return out;
+    // live bodies are CBZ.debris's; settled rubble is merged static geometry,
+    // seated by its own contact solver, so there is nothing hanging to list.
+    return [];
   };
 
   CBZ.wallMarkAudit = function () {
@@ -2280,10 +1811,9 @@
       livePieces += ruinFrames[i].pieces || 0;
       liveBars += ruinFrames[i].bars || 0;
     }
-    let heapPieces = 0;
-    for (let i = 0; i < chunks.length; i++) if (chunks[i] && chunks[i].heap) heapPieces++;
+    const heapPieces = CBZ.debris ? CBZ.debris.stats().static : 0;
     return {
-      flag: reinforcedRuinOn(), frames: ruinFrames.length,
+      flag: false, frames: ruinFrames.length,
       jaggedPieces: livePieces, exposedBars: liveBars,
       heapPieces: heapPieces, events: ruinStats.events,
       totalPieces: ruinStats.pieces, totalBars: ruinStats.bars,
@@ -2301,7 +1831,7 @@
     for (const rf of ruinFrames) if (rf.group && rf.group.parent) rf.group.parent.remove(rf.group);
     ruinFrames.length = 0;
     ruinStats.events = ruinStats.pieces = ruinStats.bars = 0;
-    pileTop.clear();
+    if (CBZ.debris) CBZ.debris.clear();
     shedStats.events = shedStats.pieces = shedStats.kept = 0;
     shedStats.volShed = shedStats.volKept = shedStats.volRemoved = shedStats.invented = 0;
     if (_collapseSeen) _collapseSeen.clear();          // fresh run → un-throttle collapses
@@ -2407,59 +1937,6 @@
       r.mat.opacity = Math.max(0, (r.op0 || 0.72) * (1 - r.t / r.life));
       if (r.t >= r.life) { scene.remove(r.mesh); r.geo.dispose(); r.mat.dispose(); rings.splice(i, 1); }
     }
-    for (let i = chunks.length - 1; i >= 0; i--) {
-      const c = chunks[i]; c.t += dt;
-      const p = c.mesh.position;
-      if (c.settled) {
-        // SETTLED: the piece RESTS on the road as a permanent prop of the world
-        // (no per-frame physics). It lingers up to ~60s, then quietly retires —
-        // but the population-pool recycle evicts it first if space is needed, so
-        // nothing ever pops out from under the player's eye.
-        c.rest += dt;
-        // a RUBBLE-HEAP piece is the permanent ruin — it persists far longer
-        // (the population-pool recycle still evicts it if space is needed AND
-        // it's off-screen, so it never pops out under the player's eye).
-        if (c.rest > ((c.heap || c.pile) ? 180 : 18)) { scene.remove(c.mesh); chunks.splice(i, 1); }
-        continue;
-      }
-      c.vy -= grav * 0.8 * dt; // mild gravity so shrapnel hangs
-      p.x += c.vx * dt; p.y += c.vy * dt; p.z += c.vz * dt;
-      c.mesh.rotation.x += c.spin * dt; c.mesh.rotation.z += c.spin * 0.7 * dt;
-      // GROUND REST: a chunk's BOTTOM meets the actual ground (floorAt: street,
-      // rooftop, raised terrain), seated by its half-height + a hair of offset so
-      // it never z-fights the road paint. Bounce loses most of its energy; once
-      // it is slow + low it SETTLES FLAT (kills jitter) and becomes permanent.
-      const hh = c.hh || 0.09;
-      const fl = floorAt(p.x, p.z) + hh + 0.015;
-      if (p.y <= fl) {
-        p.y = fl;
-        if (c.vy < 0) c.vy *= -0.25;              // damped bounce
-        c.vx *= 0.6; c.vz *= 0.6; c.spin *= 0.55;
-        const slow = (c.vx * c.vx + c.vy * c.vy + c.vz * c.vz) < 0.6;
-        if (slow || c.t > c.life) {
-          c.settled = true; c.rest = 0;
-          c.vx = c.vy = c.vz = 0; c.spin = 0;
-          // A SHED FRAGMENT LANDS ON THE PILE, NOT THROUGH IT. Ordinary chunks
-          // rest on the road; a piece cut out of a wall is one of dozens
-          // arriving at the same few square metres, and resting them all at
-          // floor level lays a flat mosaic instead of a heap. Seat it on
-          // whatever already occupies that cell — the mound then builds itself
-          // out of real contacts, and it is made of the wall.
-          if (c.pile) p.y = pileSeat(p.x, p.z, hh);
-          // lie flat on the deck rather than frozen at a tumble angle
-          c.mesh.rotation.x = (rng() - 0.5) * 0.5;
-          c.mesh.rotation.z = (rng() - 0.5) * 0.5;
-        }
-      }
-      // glowing shards drip a faint ember spark every so often as they fly
-      if (c.trail >= 0 && c.t < 0.6) {
-        c.trail += dt;
-        if (c.trail > 0.06) { c.trail = 0; spawnPuff(p.x, p.y, p.z, { additive: true, base: 0.16, pop: 0.05, life: 0.35, maxOp: 0.9, vy: -1 }); }
-      }
-      // safety: an in-flight piece that never found ground (flung off the map)
-      // still retires so it can't leak the pool.
-      if (!c.settled && c.t > c.life + 2.5) { scene.remove(c.mesh); chunks.splice(i, 1); }
-    }
     for (let i = scorches.length - 1; i >= 0; i--) {
       const s = scorches[i]; s.t += dt;
       if (s.t < 0.25) s.mat.opacity = (s.t / 0.25) * 0.9;          // snap in with the blast
@@ -2518,7 +1995,7 @@
   // second linked zero).
   (function parkBlastMats() {
     const pg = new THREE.BoxGeometry(0.01, 0.01, 0.01); pg._shared = true;
-    const fam = [chunkMat, chunkMatHot, rubbleMat, rubbleMat2, fractureMat, fractureMat2, rebarMat];
+    const fam = [rebarMat];
     for (let i = 0; i < fam.length; i++) {
       const m = new THREE.Mesh(pg, fam[i]); m.visible = false; scene.add(m);
     }
@@ -2545,7 +2022,7 @@
   // (already downrange, not the outward normal); power ~0.5 (a spent round
   // barely breaking daylight) .. 3 (an airframe leaving a room-sized hole).
   // Pure composition on the pools this file already owns — chunk pool +
-  // CHUNK_CAP recycle, the pooled sprite puffs, the pooled point-burst ring —
+  // CBZ.debris chips, the pooled sprite puffs, the pooled point-burst ring —
   // so it adds no pool, no draw call class, and cannot flood. Headless-safe.
   // ============================================================
   CBZ.cityEjectaCone = function (x, y, z, nx, nz, power, opts) {
@@ -2561,33 +2038,13 @@
     const spread = opts.spread == null ? 0.62 : opts.spread;   // cone half-angle, radians
     const y0 = Math.max(0.4, y == null ? 1.2 : y);
 
-    // ---- (1) SPALL: chunks thrown along the axis inside the cone. Speed is
-    // highest on the axis and falls off toward the rim (a real ejecta cone is
-    // a jet with a skirt, not an even fan).
-    const n = Math.min(CHUNK_CAP, Math.max(1, Math.round((5 + 7 * P) * fxq)));
-    while (chunks.length > CHUNK_CAP - n) recycleChunk();
-    const fall = Math.sqrt(Math.max(0.5, y0) / 8.8);
-    for (let i = 0; i < n; i++) {
-      const off = (rng() - 0.5) * 2;                 // -1..1 across the cone
-      const a = off * spread;
-      const axis = 1 - Math.abs(off) * 0.55;         // core is faster than the rim
-      const glow = rng() < 0.4;
-      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = (0.6 + rng() * 1.0) * (0.8 + P * 0.2);
-      const dx = ax * Math.cos(a) + tx * Math.sin(a);
-      const dz = az * Math.cos(a) + tz * Math.sin(a);
-      mesh.position.set(x + dx * 0.5, y0 + (rng() - 0.4) * 1.2, z + dz * 0.5);
-      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-      mesh.scale.setScalar(sc);
-      scene.add(mesh);
-      const sp = (5 + 7 * P) * axis * (0.6 + rng() * 0.8);
-      chunks.push({
-        mesh, hh: CHUNK_HH * sc,
-        vx: dx * sp, vy: 0.8 + rng() * 2.6 * P, vz: dz * sp,
-        spin: (rng() - 0.5) * 15, t: 0, life: fall + 1.3 + rng() * 1.0,
-        rest: 0, settled: false, trail: glow ? 0 : -1,
-      });
-    }
+    // ---- (1) SPALL: chips of the far face thrown along the axis (the
+    // penetrated wall's own volume leaves through its carve). opts.material /
+    // opts.kind colour them when the caller knows what was pierced.
+    if (CBZ.debris) CBZ.debris.chips(x + ax * 0.5, y0, z + az * 0.5, {
+      material: opts.material || null, kind: opts.kind || (opts.material ? undefined : "concrete"),
+      count: Math.round((10 + 12 * P) * fxq), dir: { x: ax, y: 0.25, z: az }, power: 0.8 + P * 0.5, spread: 1.2 + spread,
+    });
 
     // ---- (2) the LANCE: hot gas punching out ahead of the debris, staggered
     // along the axis so it reads as a jet leaving the hole, not a puff at it.

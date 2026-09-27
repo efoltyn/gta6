@@ -48,8 +48,16 @@
   #warUi *{box-sizing:border-box}
   #warUi .wu-p{pointer-events:auto}
   .wu-serif{font-family:"Cinzel","Cormorant SC",Georgia,"Times New Roman",serif}
-  #wuHud{position:absolute;left:calc(env(safe-area-inset-left,0px) + 12px);top:calc(env(safe-area-inset-top,0px) + 10px);
-    display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 330px)}
+  /* HUD PURGE: the six-chip stat strip (PEOPLE, MEN IN THE FIELD, GARRISONS,
+     TOWNS, LAND) is gone. What is left is ONE thin bar: your colour, and how
+     far your land is toward the win. It shows when the war starts and when a
+     town changes hands, then fades. The numbers live in the MENU panel. */
+  #wuHud{position:absolute;left:calc(env(safe-area-inset-left,0px) + 12px);top:calc(env(safe-area-inset-top,0px) + 14px);
+    display:flex;gap:6px;opacity:0;transition:opacity .8s ease}
+  #wuHud.show{opacity:1;transition-duration:.2s}
+  .wu-goal{display:flex;align-items:center;gap:8px;padding:7px 10px}
+  .wu-goal i{width:12px;height:12px;border-radius:3px;box-shadow:0 0 0 1px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.25)}
+  .wu-goal .wu-bar{width:120px;height:5px;margin:0}
   .wu-chip{background:rgba(14,11,8,.78);border:1px solid rgba(255,255,255,.13);border-radius:10px;padding:5px 10px 6px;
     backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:0 2px 10px rgba(0,0,0,.35)}
   .wu-chip small{display:block;font-size:9px;letter-spacing:.2em;opacity:.58;font-weight:700}
@@ -61,21 +69,22 @@
   .wu-bar{height:3px;border-radius:2px;background:rgba(255,255,255,.12);margin-top:3px;position:relative;overflow:hidden}
   .wu-bar i{position:absolute;left:0;top:0;bottom:0;background:#ff8a3d}
   .wu-bar u{position:absolute;top:-1px;bottom:-1px;width:2px;background:#f4ecd8;opacity:.8}
+  /* the clock is a CONTROL (pause, speed, menu), not a date readout; it
+     rests dim until a hand is near it or the war is paused */
   #wuClock{position:absolute;right:calc(env(safe-area-inset-right,0px) + 12px);top:calc(env(safe-area-inset-top,0px) + 10px);
-    display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px}
-  #wuDate{font:700 14px/1 "Cinzel",Georgia,serif;letter-spacing:.1em;min-width:150px;text-align:right}
+    display:flex;align-items:center;gap:8px;padding:5px 6px;opacity:.45;transition:opacity .4s ease}
+  #wuClock:hover,#wuClock.paused{opacity:1}
   .wu-seg{display:flex;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.14)}
   .wu-seg button{appearance:none;border:0;background:rgba(255,255,255,.04);color:#f4ecd8;font:800 12px/1 ui-sans-serif,system-ui,sans-serif;
     min-width:34px;height:32px;cursor:pointer;border-right:1px solid rgba(255,255,255,.1)}
   .wu-seg button:last-child{border-right:0}
   .wu-seg button.on{background:#ff8a3d;color:#1a1008}
-  #wuFeed{position:absolute;left:calc(env(safe-area-inset-left,0px) + 12px);top:calc(env(safe-area-inset-top,0px) + 70px);
+  #wuFeed{position:absolute;left:calc(env(safe-area-inset-left,0px) + 12px);top:calc(env(safe-area-inset-top,0px) + 50px);
     display:flex;flex-direction:column;gap:5px;width:min(330px,70vw)}
   .wu-toast{pointer-events:auto;cursor:pointer;background:rgba(14,11,8,.84);border:1px solid rgba(255,255,255,.12);border-left:3px solid #8c8374;
     border-radius:8px;padding:6px 10px;font-size:12px;letter-spacing:.03em;animation:wuIn .22s ease-out;transition:opacity .5s}
   .wu-toast.good{border-left-color:#6fbf73}.wu-toast.bad{border-left-color:#e05a4a}.wu-toast.hot{border-left-color:#ff8a3d}
   .wu-toast b{font-weight:800}
-  .wu-toast .d{opacity:.45;font-size:10px;letter-spacing:.12em;margin-right:6px}
   @keyframes wuIn{from{opacity:0;transform:translateX(-8px)}}
   #wuRail{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
     width:min(640px,calc(100% - 24px));display:none}
@@ -105,8 +114,6 @@
   .wu-vs{display:flex;align-items:center;justify-content:space-between;margin:4px 0 10px;font:800 20px/1 ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums}
   .wu-vs em{font-style:normal;font-size:10px;letter-spacing:.2em;opacity:.55}
   .wu-vs small{display:block;font-size:9px;letter-spacing:.18em;opacity:.6;margin-bottom:3px}
-  .wu-tbar{height:3px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;margin:-4px 0 9px}
-  .wu-tbar i{display:block;height:100%;background:#ff8a3d}
   .wu-sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:7px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
   .wu-mbtn{appearance:none;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:rgba(255,255,255,.05);color:#f4ecd8;
     font:800 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;height:32px;padding:0 11px;cursor:pointer}
@@ -117,10 +124,9 @@
   #wuPause .wu-v{flex:0 0 auto;width:100%;min-height:46px;font-size:13px}
   #wuMenu .hub{position:absolute;right:calc(env(safe-area-inset-right,0px) + 16px);top:calc(env(safe-area-inset-top,0px) + 16px)}
   #wuHint{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
-    font-size:11px;letter-spacing:.16em;opacity:.55;text-shadow:0 1px 3px #000;white-space:nowrap}
-  #wuHint.off{display:none}
-  @media (max-width:760px){#wuHud{max-width:calc(100% - 24px);top:calc(env(safe-area-inset-top,0px) + 56px)}
-    #wuFeed{top:calc(env(safe-area-inset-top,0px) + 170px)} .wu-chip b{font-size:13px}}
+    font-size:11px;letter-spacing:.16em;opacity:.55;text-shadow:0 1px 3px #000;white-space:nowrap;transition:opacity 1.2s ease}
+  #wuHint.off{opacity:0}
+  @media (max-width:760px){#wuFeed{top:calc(env(safe-area-inset-top,0px) + 56px)}}
 
   #wuMenu{position:fixed;inset:0;z-index:85;overflow:auto;display:none;color:#f4ecd8;
     background:radial-gradient(120% 90% at 50% 0%,#2b1f12 0%,#140f0a 55%,#0b0907 100%);
@@ -211,9 +217,10 @@
     root = el("div"); root.id = "warUi";
     root.innerHTML =
       '<div id="wuHud"></div>' +
-      '<div id="wuClock" class="wu-chip wu-p"><span id="wuDate"></span><div class="wu-seg" id="wuSeg"></div>' +
-        '<button class="wu-mbtn" id="wuMenuBtn" title="MENU (ESC)">MENU</button></div>' +
+      '<div id="wuClock" class="wu-chip wu-p"><div class="wu-seg" id="wuSeg"></div>' +
+        '<button class="wu-mbtn" id="wuMenuBtn">MENU</button></div>' +
       '<div id="wuPause" class="wu-p"><div class="wu-panel"><div class="wu-head"><b>PAUSED</b><span id="wuPauseSub"></span></div>' +
+        '<dl class="wu-kv" id="wuPauseKv"></dl>' +
         '<div class="wu-verbs" style="flex-direction:column">' +
         '<button class="wu-v hot" id="wuResume">RESUME</button>' +
         '<button class="wu-v" id="wuToMaps">CHOOSE ANOTHER MAP</button>' +
@@ -226,7 +233,6 @@
     const seg = root.querySelector("#wuSeg");
     SPEED_LABEL.forEach(function (l, i) {
       const b = el("button", "", l);
-      b.title = i ? "SPEED " + l : "PAUSE (SPACE)";
       b.onclick = function () { if (i === 0) setPaused(!paused); else { setSpeed(i); setPaused(false); } };
       seg.appendChild(b);
     });
@@ -247,6 +253,13 @@
     if (!root || pauseOpen) return;
     pauseOpen = true; pausedBefore = paused; setPaused(true);
     root.querySelector("#wuPauseSub").textContent = G ? dateStr() : "";
+    const kv = root.querySelector("#wuPauseKv");
+    if (kv && G) {
+      const st = S().stats(G, P), goal = (M.win && M.win.share) || 0.7;
+      kv.innerHTML = '<dt>TOWNS</dt><dd>' + st.towns + ' OF ' + M.towns.length + '</dd>' +
+        '<dt>LAND</dt><dd>' + pct(st.share) + ' OF ' + Math.round(goal * 100) + '%</dd>' +
+        '<dt>MEN</dt><dd>' + fmt(st.soldiers + st.garrisons) + '</dd>';
+    }
     root.querySelector("#wuPause").classList.add("on");
   }
   function closePause() {
@@ -260,24 +273,28 @@
   function showUi(on) { if (root) root.style.display = on ? "" : "none"; }
 
   /* ================================================================ HUD */
+  let hudShare = -1, hudTimer = 0;
   function paintHud() {
     if (!root || !G) return;
     const st = S().stats(G, P), F = G.factions[P];
     const share = st.share, goal = (M.win && M.win.share) || 0.7;
-    root.querySelector("#wuHud").innerHTML =
-      '<div class="wu-chip wu-fac"><i style="background:' + F.css + '"></i><span>' + esc(F.name).toUpperCase() + '</span></div>' +
-      '<div class="wu-chip"><small>PEOPLE</small><b>' + fmt(st.people) + '</b></div>' +
-      '<div class="wu-chip"><small>MEN IN THE FIELD</small><b>' + fmt(st.soldiers) + '</b></div>' +
-      '<div class="wu-chip"><small>GARRISONS</small><b>' + fmt(st.garrisons) + '</b></div>' +
-      '<div class="wu-chip"><small>TOWNS</small><b>' + st.towns + '<em> / ' + M.towns.length + '</em></b></div>' +
-      '<div class="wu-chip" style="min-width:108px"><small>LAND</small><b>' + pct(share) + '<em> OF ' + Math.round(goal * 100) + '%</em></b>' +
+    const hud = root.querySelector("#wuHud");
+    hud.innerHTML =
+      '<div class="wu-chip wu-goal"><i style="background:' + F.css + '"></i>' +
         '<div class="wu-bar"><i style="width:' + Math.min(100, share / goal * 100).toFixed(1) + '%"></i></div></div>';
+    // the bar speaks only when the land moved (a town changed hands), then fades
+    if (Math.abs(share - hudShare) > 1e-6) {
+      hudShare = share;
+      hud.classList.add("show");
+      clearTimeout(hudTimer);
+      hudTimer = setTimeout(function () { hud.classList.remove("show"); }, 4000);
+    }
     paintClock();
     hudDirty = false;
   }
   function paintClock() {
     if (!root) return;
-    root.querySelector("#wuDate").textContent = dateStr();
+    root.querySelector("#wuClock").classList.toggle("paused", paused);
     const bs = root.querySelectorAll("#wuSeg button");
     for (let i = 0; i < bs.length; i++) bs[i].classList.toggle("on", paused ? i === 0 : i === speed);
   }
@@ -289,13 +306,12 @@
   function feed(html, kind, tile) {
     if (!root) return;
     const box = root.querySelector("#wuFeed");
-    const t = el("div", "wu-toast " + (kind || ""), '<span class="d">' + esc(shortDate()) + '</span>' + html);
+    const t = el("div", "wu-toast " + (kind || ""), html);
     if (tile != null && tile >= 0) t.onclick = function () { Vw().focus(tile); };
     box.insertBefore(t, box.firstChild);
-    while (box.children.length > 7) box.removeChild(box.lastChild);
-    setTimeout(function () { t.style.opacity = "0"; setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 600); }, 9000);
+    while (box.children.length > 3) box.removeChild(box.lastChild);
+    setTimeout(function () { t.style.opacity = "0"; setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 600); }, 5000);
   }
-  function shortDate() { const sd = M && M.data && M.data.startDate; if (!sd) return "DAY " + (G.day + 1); const d = G.date(); return d.day + " " + MONTHS[d.month - 1].slice(0, 3); }
   UI.feed = feed;
 
   /* ================================================================ CARDS
@@ -309,11 +325,10 @@
     const box = root.querySelector("#wuCardIn");
     let h = '<div class="wu-head"><b>' + spec.title + '</b>' + (spec.sub ? '<span>' + spec.sub + '</span>' : '') + '</div>';
     if (spec.body) h += spec.body;
-    if (spec.timeout) h += '<div class="wu-tbar"><i id="wuTbar" style="width:100%"></i></div>';
     h += '<div class="wu-verbs">';
     (spec.verbs || []).forEach(function (v, i) {
       h += '<button class="wu-v ' + (v.kind || "") + '" data-i="' + i + '"' + (v.disabled ? " disabled" : "") + '>' + v.label +
-           '<small>' + (v.key || (i + 1)) + (v.note ? "  " + v.note : "") + '</small></button>';
+           (v.note ? '<small>' + v.note + '</small>' : '') + '</button>';
     });
     h += '</div>';
     box.innerHTML = h;
@@ -355,7 +370,7 @@
     const canRaise = here >= 0 && G.townOwner[here] === P && !a.battle ? S().raisable(G, here) : 0;
     const near = G.armies.filter(function (b) { return b !== a && b.owner === P && !b.free && b.home < 0 && !b.battle && Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) <= 1.6; });
     return [
-      { label: "HOLD", key: "1  H", on: function () { S().order(G, sel, { kind: "hold" }); Vw().select(sel); feed("<b>HOLD.</b> digging in", "", a.tile); paintRail(); } },
+      { label: "HOLD", key: "1  H", on: function () { S().order(G, sel, { kind: "hold" }); Vw().select(sel); paintRail(); } },
       { label: canRaise ? "RAISE " + fmt(canRaise) : "RAISE", key: "2  R", disabled: !canRaise, note: canRaise ? "" : (here >= 0 && G.townOwner[here] === P ? "NONE SPARE" : "IN YOUR TOWN"),
         on: function () { const n = S().raise(G, a.id); if (n) feed("<b>" + fmt(n) + "</b> men join from the garrison of " + esc(M.towns[here].name), "good", a.tile); paintRail(); hudDirty = true; } },
       { label: "SPLIT", key: "3", disabled: a.men < 100 || !!a.battle, note: a.men >= 100 ? fmt(Math.floor(a.men / 2)) : "",
@@ -365,26 +380,26 @@
       { label: "CLEAR", key: "5  ESC", on: function () { select([]); } },
     ];
   }
+  let hintDone = false;
   function paintRail() {
     if (!root) return;
     const rail = root.querySelector("#wuRail");
     const L = selArmies();
-    root.querySelector("#wuHint").classList.toggle("off", !!L.length || (G && G.day > 20));
+    // the one first-seconds hint: gone for good after the first selection or a week of war
+    if (L.length) hintDone = true;
+    root.querySelector("#wuHint").classList.toggle("off", hintDone || !!(G && G.day > 6));
     if (!L.length) { rail.classList.remove("on"); sel = []; return; }
     const a = L[0];
     const men = L.reduce(function (s, x) { return s + x.men; }, 0);
-    const ord = a.battle ? "IN BATTLE" : a.order.kind === "move" ? "MARCHING" : a.order.kind === "chase" ? "IN PURSUIT" : a.order.kind === "hold" ? "HOLDING" : "IDLE";
     root.querySelector("#wuRailHead").innerHTML =
       '<b>' + esc(L.length > 1 ? L.length + " ARMIES" : armyName(a)).toUpperCase() + '</b>' +
       '<span>' + fmt(men) + ' MEN</span>' +
-      '<span>ORDER ' + Math.round(a.org * 100) + '%</span>' +
-      '<span class="' + (a.supplied ? "" : "cut") + '">' + (a.supplied ? "SUPPLIED" : "CUT OFF") + '</span>' +
-      '<span>' + ord + '</span>';
+      (a.supplied ? '' : '<span class="cut">CUT OFF</span>');
     const vb = root.querySelector("#wuRailVerbs");
     const verbs = railVerbs();
     vb.innerHTML = "";
     verbs.forEach(function (v, i) {
-      const b = el("button", "wu-v " + (v.kind || ""), v.label + '<small>' + v.key + (v.note ? "  " + v.note : "") + '</small>');
+      const b = el("button", "wu-v " + (v.kind || ""), v.label + (v.note ? '<small>' + v.note + '</small>' : ''));
       if (v.disabled) b.disabled = true;
       b.onclick = function () { if (!v.disabled) v.on(); };
       vb.appendChild(b);
@@ -403,16 +418,13 @@
     Vw().select(sel);
     Vw().preview(null);
     if (!silent) {
-      const t = M.townAt[tile] - 1;
-      if (!ok) feed("<b>NO ROAD THERE.</b> the way is blocked or crosses a realm at peace", "bad", tile);
-      else feed("<b>MARCHING</b> on " + esc(t >= 0 ? M.towns[t].name : "the " + (M.TERRAIN[M.terrain[tile]] || { name: "land" }).name.toLowerCase()), "", tile);
+      if (!ok) feed("<b>NO ROAD THERE</b>", "bad", tile);
     }
     paintRail();
   }
   function orderChase(a) {
     S().order(G, sel, { kind: "chase", target: a.id });
     Vw().select(sel); Vw().preview(null);
-    feed("<b>PURSUIT.</b> after " + esc(armyName(a)) + " (" + fmt(a.men) + ")", "hot", a.tile);
     paintRail();
   }
   function marchCard(t) {
@@ -425,10 +437,9 @@
       title: esc(String(T.name).toUpperCase()),
       sub: '<span class="wu-sw" style="background:' + fCss(o) + '"></span>' + esc(fName(o)).toUpperCase(),
       body: '<div class="wu-vs"><div><small>YOU</small>' + fmt(mine) + '</div><em>AGAINST</em><div style="text-align:right"><small>GARRISON</small>' + fmt(d.garrison) + '</div></div>' +
-            '<dl class="wu-kv"><dt>WALLS</dt><dd>YES, THE WATCH HOLDS ' + fmt(d.watch) + '</dd><dt>PEOPLE</dt><dd>' + fmt(G.townPop[t]) + '</dd>' +
-            '<dt>ROAD</dt><dd>' + (path ? (path.length - 1) + " TILES" : "NONE") + '</dd></dl>',
+            '',
       verbs: [
-        { label: "MARCH", kind: "hot", disabled: !path, on: function () { orderMove(T.tile); } },
+        { label: "MARCH", kind: "hot", disabled: !path, note: path ? "" : "NO ROAD", on: function () { orderMove(T.tile); } },
         { label: "CANCEL", on: function () { Vw().preview(null); } },
       ],
       onClose: function () { Vw().preview(null); },
@@ -440,8 +451,7 @@
       const r = S().raisable(G, t);
       showCard({
         kind: "info", title: esc(String(T.name).toUpperCase()), sub: T.capital ? "YOUR CAPITAL" : "YOUR TOWN",
-        body: '<dl class="wu-kv"><dt>PEOPLE IN TOWN</dt><dd>' + fmt(G.townPop[t]) + '</dd><dt>COUNTRYSIDE</dt><dd>' + fmt(G.townCatch[t]) + '</dd>' +
-              '<dt>GARRISON</dt><dd>' + fmt(d.garrison) + '</dd><dt>SPARE MEN</dt><dd>' + fmt(r) + '</dd></dl>',
+        body: '<dl class="wu-kv"><dt>GARRISON</dt><dd>' + fmt(d.garrison) + '</dd></dl>',
         verbs: [
           { label: r >= 50 ? "LEVY " + fmt(r) : "LEVY", kind: "hot", disabled: r < 50, note: r < 50 ? "NONE SPARE" : "",
             on: function () { const a = S().levy(G, t); if (a) { Vw().dayTick(); select([a.id]); feed("<b>" + fmt(a.men) + "</b> men stand up at " + esc(T.name), "good", T.tile); hudDirty = true; } } },
@@ -454,8 +464,7 @@
     showCard({
       kind: "info", title: esc(String(T.name).toUpperCase()),
       sub: '<span class="wu-sw" style="background:' + fCss(o) + '"></span>' + esc(fName(o)).toUpperCase() + (o ? "  " + relText(o) : ""),
-      body: '<dl class="wu-kv"><dt>PEOPLE IN TOWN</dt><dd>' + fmt(G.townPop[t]) + '</dd><dt>COUNTRYSIDE</dt><dd>' + fmt(G.townCatch[t]) + '</dd>' +
-            '<dt>GARRISON</dt><dd>' + fmt(d.garrison) + (d.out ? " (MARCHED OUT)" : "") + '</dd></dl>',
+      body: '<dl class="wu-kv"><dt>GARRISON</dt><dd>' + fmt(d.garrison) + (d.out ? " (MARCHED OUT)" : "") + '</dd></dl>',
       verbs: verbs.concat([{ label: "CLOSE", on: function () {} }]),
       onOpen: function () { if (o) Vw().hiFaction(o); },
       onClose: function () { Vw().hiFaction(-1); },
@@ -483,9 +492,7 @@
     const st = S().stats(G, f);
     showCard({
       kind: "info", title: esc(F.name).toUpperCase(), sub: '<span class="wu-sw" style="background:' + F.css + '"></span>' + relText(f),
-      body: '<dl class="wu-kv"><dt>TOWNS</dt><dd>' + st.towns + '</dd><dt>PEOPLE</dt><dd>' + fmt(st.people) + '</dd>' +
-            '<dt>MEN IN THE FIELD</dt><dd>' + fmt(st.soldiers) + '</dd><dt>GARRISONS</dt><dd>' + fmt(st.garrisons) + '</dd>' +
-            '<dt>LAND</dt><dd>' + pct(st.share) + '</dd></dl>',
+      body: '<dl class="wu-kv"><dt>TOWNS</dt><dd>' + st.towns + '</dd><dt>MEN</dt><dd>' + fmt(st.soldiers + st.garrisons) + '</dd></dl>',
       verbs: diploVerbs(f).concat([{ label: "CLOSE", on: function () {} }]),
       onOpen: function () { Vw().hiFaction(f); },
       onClose: function () { Vw().hiFaction(-1); },
@@ -497,8 +504,8 @@
     showCard({
       kind: "info", title: esc(armyName(a)).toUpperCase(),
       sub: '<span class="wu-sw" style="background:' + (a.rogue ? "#8c8374" : fCss(o)) + '"></span>' + (a.rogue ? "WARBAND" : a.free ? "FREE TOWN" : esc(fName(o)).toUpperCase() + "  " + relText(o)),
-      body: '<dl class="wu-kv"><dt>MEN</dt><dd>' + fmt(a.men) + '</dd><dt>ORDER</dt><dd>' + Math.round(a.org * 100) + '%</dd>' +
-            '<dt>SUPPLY</dt><dd>' + (a.supplied ? "SUPPLIED" : "CUT OFF") + '</dd></dl>',
+      body: '<dl class="wu-kv"><dt>MEN</dt><dd>' + fmt(a.men) + '</dd>' +
+            (a.supplied ? '' : '<dt>SUPPLY</dt><dd style="color:#ff9d8f">CUT OFF</dd>') + '</dl>',
       verbs: verbs.concat([{ label: "CLOSE", on: function () {} }]),
     });
   }
@@ -565,7 +572,6 @@
           const T = M.towns[e.town];
           if (e.to === P) feed("<b>" + esc(T.name).toUpperCase() + " IS YOURS.</b> " + fmt(G.townPop[e.town]) + " people", "good", T.tile);
           else if (e.from === P) feed("<b>" + esc(T.name).toUpperCase() + " IS LOST</b> to " + esc(fName(e.to)), "bad", T.tile);
-          else if (T.capital) feed("<b>" + esc(T.name) + "</b> falls to " + esc(fName(e.to)), "", T.tile);
           hudDirty = true;
           break;
         }
@@ -687,8 +693,6 @@
     }
     if (card && card.timeout) {
       cardTimer += dt;
-      const bar = document.getElementById("wuTbar");
-      if (bar) bar.style.width = Math.max(0, 100 - cardTimer / card.timeout * 100).toFixed(1) + "%";
       if (cardTimer >= card.timeout) closeCard();
     }
     if (card && card.kind === "battle" && !S().battleById(G, card.battle)) closeCard(true);
@@ -774,10 +778,9 @@
     showUi(true);
     root.querySelector("#wuFeed").innerHTML = "";
     closeCard(true);
+    hintDone = false; hudShare = -1;
     paintHud();
     paintRail();
-    const F = G.factions[P];
-    feed("<b>" + esc(F.name).toUpperCase() + ".</b> " + F.towns + " towns, " + fmt(F.people) + " people. take the cities.", "hot", F.capital >= 0 ? M.towns[F.capital].tile : -1);
     UI.expose();
     return G;
   };
@@ -814,9 +817,7 @@
       '<h2 class="' + (won ? "win" : "lose") + '">' + (won ? "VICTORY" : "DEFEAT") + '</h2>' +
       '<p>' + (won ? esc(F.name) + " holds the map after " + (G.day) + " days."
                    : winner && winner.i !== P ? esc(winner.name) + " holds the map. " + esc(F.name) + " did not." : esc(F.name) + " has no towns left.") + '</p>' +
-      '<dl class="wu-kv"><dt>DATE</dt><dd>' + esc(dateStr()) + '</dd><dt>TOWNS HELD</dt><dd>' + st.towns + ' OF ' + M.towns.length + '</dd>' +
-      '<dt>PEOPLE</dt><dd>' + fmt(st.people) + '</dd><dt>MEN IN THE FIELD</dt><dd>' + fmt(st.soldiers) + '</dd>' +
-      '<dt>GARRISONS</dt><dd>' + fmt(st.garrisons) + '</dd><dt>LAND</dt><dd>' + pct(st.share) + '</dd></dl>' +
+      '<dl class="wu-kv"><dt>TOWNS HELD</dt><dd>' + st.towns + ' OF ' + M.towns.length + '</dd></dl>' +
       '<div class="wu-verbs"><button class="wu-v hot" id="wuAgain">PLAY AGAIN</button><button class="wu-v" id="wuMenuB">MENU</button></div></div>';
     endEl.classList.add("on");
     endEl.querySelector("#wuAgain").onclick = function () { const o = Object.assign({}, startOpts, { seed: 0 }); UI.stop(); UI.start(o); };
@@ -843,12 +844,11 @@
       '<button class="wm-btn small hub" id="wmHub">MAIN MENU</button>' +
       '<div class="in">' +
       '<h1>DESERT <em>WARLORD</em></h1>' +
-      '<p class="sub">No factories, no points. Cities, the people in them, and the men who hold them. March on a town, beat the garrison that comes out to meet you, and it is yours.</p>' +
+      '<div style="height:18px"></div>' +
       '<div class="lbl">CHOOSE A MAP</div><div class="wm-maps" id="wmMaps"></div>' +
       '<div class="lbl">CHOOSE A SIDE</div><div class="wm-facs" id="wmFacs"><div class="wm-note">PICK A MAP FIRST</div></div>' +
       '<div class="wm-go"><button class="wm-btn hot" id="wmPlay" disabled data-boot-entry>PLAY</button><span class="wm-note" id="wmPick"></span></div>' +
-      '<div class="lbl">THE OLD ROAD</div>' +
-      '<div class="wm-go" style="margin-top:0"><button class="wm-btn small" id="wmRide">RIDE THE ISLAND</button>' +
+      '<div class="wm-go"><button class="wm-btn small" id="wmRide">RIDE THE ISLAND</button>' +
       (resume ? '<button class="wm-btn small" id="wmCont">CONTINUE THE RIDE</button>' : '') +
       '<button class="wm-btn small" id="wmNet">MULTIPLAYER</button></div>' +
       '</div>';
@@ -951,7 +951,7 @@
         const b = el("button", "wm-fac");
         b.dataset.id = r.id;
         b.innerHTML = '<i style="background:' + r.css + '"></i><div><b>' + esc(r.name) + '</b><span>' +
-          r.st.towns + ' TOWNS   ' + fmt(r.st.people) + ' PEOPLE   ' + fmt(r.st.soldiers + r.st.garrisons) + ' MEN</span></div>';
+          r.st.towns + ' TOWNS</span></div>';
         b.onclick = function () { chooseFaction(r.id, r.name); };
         box.appendChild(b);
       });
@@ -969,6 +969,6 @@
   function paintPick(name) {
     const b = menuEl.querySelector("#wmPlay");
     b.disabled = !(pick.map && pick.faction);
-    menuEl.querySelector("#wmPick").textContent = pick.faction && name ? "AS " + String(name).toUpperCase() : "";
+    menuEl.querySelector("#wmPick").textContent = "";
   }
 })();

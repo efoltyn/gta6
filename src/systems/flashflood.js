@@ -18,7 +18,9 @@
        the crest: seeded along the live front line, launched forward and up
        with the front's own speed, pulled down by gravity, respawned at the
        crest when they land. The boiling white-brown face of the wall.
-     · DEBRIS — one InstancedMesh (ONE draw call) of entrained flotsam
+     · DEBRIS — entrained flotsam that is real stuff a flood picks up:
+       boards, snapped branches and tyres (three InstancedMeshes, one draw
+       call each, each its own shape and material, never a brown box),
        tumbling in the first metres behind the crest, riding the SAME depth
        field everything else reads. When the front stands down they drift on
        the flow; when the drain drops the water under ~15 cm they GROUND —
@@ -50,7 +52,7 @@
   if (CBZ.CONFIG.FLASHFLOOD_V2 == null) CBZ.CONFIG.FLASHFLOOD_V2 = true;
 
   const N_CHURN = 640;          // spray points in the ONE buffer
-  const N_DEBRIS = 26;          // flotsam instances in the ONE mesh
+  const N_DEBRIS = 27;          // flotsam instances (9 of each kind)
   const GROUND_D = 0.15;        // below this depth a piece of debris strands
 
   // ---- the shared-field reads (never a private water model) --------------
@@ -65,7 +67,7 @@
 
   // ---- state --------------------------------------------------------------
   let churn = null, churnGeo = null, churnP = null;   // Points + live particles
-  let debris = null, debrisSeeds = null;              // InstancedMesh + seeds
+  let debris = null, debrisSeeds = null;              // [InstancedMesh per kind] + seeds
   const dummy = new THREE.Object3D();
   let live = false, mudNow = 0, roarCd = 0;
   let sprayLaunched = 0;                              // audit evidence
@@ -109,28 +111,60 @@
     parent().add(churn);
   }
 
+  /* THE FLOTSAM KIT: what a flash flood actually carries down a street.
+     half = resting half-thickness (so a stranded piece lies ON the ground),
+     flat = the x-rotation it lies at when the water drops it. */
+  function flotsamKit() {
+    const plank = new THREE.BoxGeometry(2.2, 0.05, 0.22);
+    const br = new THREE.CylinderGeometry(0.04, 0.1, 2.3, 6, 1).toNonIndexed();
+    br.rotateZ(Math.PI / 2);
+    const tw = new THREE.CylinderGeometry(0.018, 0.035, 0.9, 5, 1).toNonIndexed();
+    tw.rotateZ(Math.PI / 2 - 0.6); tw.translate(0.35, 0.28, 0);
+    const branch = new THREE.BufferGeometry();
+    for (const k of ["position", "normal", "uv"]) {
+      const A = br.attributes[k], B = tw.attributes[k];
+      const arr = new Float32Array(A.array.length + B.array.length);
+      arr.set(A.array, 0); arr.set(B.array, A.array.length);
+      branch.setAttribute(k, new THREE.BufferAttribute(arr, A.itemSize));
+    }
+    br.dispose(); tw.dispose();
+    const tyre = new THREE.TorusGeometry(0.31, 0.11, 7, 16);
+    return [
+      { geo: plank,  mat: new THREE.MeshLambertMaterial({ color: 0x86684a }), half: 0.03, flat: 0 },
+      { geo: branch, mat: new THREE.MeshLambertMaterial({ color: 0x4b3a2a }), half: 0.09, flat: 0 },
+      { geo: tyre,   mat: new THREE.MeshLambertMaterial({ color: 0x1f1f20 }), half: 0.11, flat: Math.PI / 2 },
+    ];
+  }
   function buildDebris() {
     if (debris) return;
-    const geo = new THREE.BoxGeometry(1.5, 0.5, 0.8);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x5a4630 });
-    debris = new THREE.InstancedMesh(geo, mat, N_DEBRIS);
-    debris.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    debris.frustumCulled = false;
+    const kit = flotsamKit();
+    const per = Math.ceil(N_DEBRIS / kit.length);
+    debris = kit.map(function (K) {
+      const im = new THREE.InstancedMesh(K.geo, K.mat, per);
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.frustumCulled = false;
+      im.userData.half = K.half; im.userData.flat = K.flat;
+      return im;
+    });
     debrisSeeds = [];
     for (let i = 0; i < N_DEBRIS; i++) {
+      const kind = i % kit.length;
       debrisSeeds.push({
+        kind: kind, slot: (i / kit.length) | 0,
         lat: (i / N_DEBRIS - 0.5) * 2,                 // -1..1 across the channel
         back: 4 + (i * 7.13) % 26,                     // metres behind the crest
-        s: 0.55 + ((i * 3.77) % 1) * 1.1,              // size
+        s: 0.75 + ((i * 3.77) % 1) * 0.5,              // size (a board is a board)
         ph: (i * 2.399) % 6.28, rv: 0.6 + (i % 5) * 0.5,
         x: 0, z: 0, placed: false, grounded: false,
         rx: (i * 1.7) % 6.28, rz: (i * 0.9) % 6.28,
       });
-      dummy.position.set(0, -1e4, 0);
-      dummy.updateMatrix();
-      debris.setMatrixAt(i, dummy.matrix);
     }
-    parent().add(debris);
+    dummy.position.set(0, -1e4, 0);
+    dummy.updateMatrix();
+    for (const im of debris) {
+      for (let k = 0; k < im.count; k++) im.setMatrixAt(k, dummy.matrix);
+      parent().add(im);
+    }
   }
 
   function respawnSpray(p, F, halfW) {
@@ -238,24 +272,27 @@
       // placed pieces are the event's cargo and stay with the water.
       if (front) {
         sd.placed = d >= 0.22;
-        if (!sd.placed) { dummy.position.set(0, -1e4, 0); dummy.updateMatrix(); debris.setMatrixAt(i, dummy.matrix); continue; }
+        if (!sd.placed) { dummy.position.set(0, -1e4, 0); dummy.scale.setScalar(1); dummy.updateMatrix(); debris[sd.kind].setMatrixAt(sd.slot, dummy.matrix); continue; }
       }
       if (!sd.placed) continue;
       if (d < GROUND_D) sd.grounded = true;
       else sd.grounded = false;
       const t = CBZ.now ? CBZ.now * 0.001 : 0;
-      dummy.position.set(sd.x, sd.grounded ? g + 0.18 * sd.s : g + Math.max(0.15, d) - 0.1 + Math.sin(t * 2.1 + sd.ph) * 0.08, sd.z);
+      const im = debris[sd.kind];
+      dummy.position.set(sd.x, sd.grounded ? g + im.userData.half * sd.s : g + Math.max(0.15, d) - 0.1 + Math.sin(t * 2.1 + sd.ph) * 0.08, sd.z);
       if (!sd.grounded) {
         sd.rx += sd.rv * dt * (front ? 1.6 : 0.3);
         sd.rz += sd.rv * 0.6 * dt;
+        dummy.rotation.set(sd.rx, sd.ph, sd.rz * 0.4);
+      } else {
+        // stranded: it lies flat where the water left it
+        dummy.rotation.set(im.userData.flat, sd.ph, 0);
       }
-      dummy.rotation.set(sd.rx, sd.ph, sd.rz * 0.4);
       dummy.scale.setScalar(sd.s);
       dummy.updateMatrix();
-      debris.setMatrixAt(i, dummy.matrix);
+      im.setMatrixAt(sd.slot, dummy.matrix);
     }
-    debris.instanceMatrix.needsUpdate = true;
-    debris.visible = true;
+    for (const im of debris) { im.instanceMatrix.needsUpdate = true; im.visible = true; }
   }
 
   function clear() {
@@ -266,8 +303,10 @@
       churn = null; churnGeo = null; churnP = null;
     }
     if (debris) {
-      debris.parent && debris.parent.remove(debris);
-      debris.geometry.dispose(); debris.material.dispose();
+      for (const im of debris) {
+        if (im.parent) im.parent.remove(im);
+        im.geometry.dispose(); im.material.dispose();
+      }
       debris = null; debrisSeeds = null;
     }
   }
@@ -291,7 +330,7 @@
         sprayLaunched: sprayLaunched,
         debrisAfloat: afloat,          // pieces the water is carrying NOW
         debrisStranded: stranded,      // pieces the drain has grounded NOW
-        drawCallsOwned: (churn ? 1 : 0) + (debris ? 1 : 0),
+        drawCallsOwned: (churn ? 1 : 0) + (debris ? debris.length : 0),
       };
     },
   };

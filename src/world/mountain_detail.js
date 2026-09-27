@@ -786,6 +786,78 @@
     return geo;
   };
 
+  /* CBZ.mtnIndexLod(mesh, opts) — A FAR LOD THAT COSTS NO VERTEX MEMORY.
+
+     The two massifs are ~110k-vertex grids drawn TWICE a frame (colour pass
+     + shadow cascade) whether the camera stands on a summit or on a street
+     4 km away, where a 2-8 m grid is far below a pixel. This builds a second
+     index over the SAME vertex buffers — every `stride`-th grid line, the
+     same winding — and swaps mesh.geometry by camera distance. The shared
+     BufferAttributes are one GPU upload (WebGLAttributes is keyed by the
+     attribute object), so the far LOD is an index buffer and one VAO.
+     Every kept vertex is exactly where it was (same height, same normal,
+     same colour and aMat), so the silhouette is the full mesh's silhouette
+     sampled at the kept lines; `near` is set where the dropped lines are
+     sub-pixel.
+
+       opts.stride  grid lines kept (2 = a quarter of the triangles)
+       opts.near    metres from the mesh's world box at which it switches
+       opts.keepY   drop coarse cells whose every covered vertex is below
+                    this height (the sparse-terrain strip the full mesh did)
+     Needs a geometry from CBZ.mtnGridGeometry (userData.cols/rows). */
+  CBZ.mtnIndexLod = function (mesh, opts) {
+    opts = opts || {};
+    const full = mesh && mesh.geometry;
+    if (!full || !full.userData || !full.userData.cols) return null;
+    const S = Math.max(2, opts.stride | 0 || 2);
+    const near = +opts.near || 2000;
+    const keepY = opts.keepY == null ? -Infinity : +opts.keepY;
+    const nx = full.userData.cols, nz = full.userData.rows;
+    const py = full.attributes.position;
+    const idx = [];
+    for (let j0 = 0; j0 < nz - 1; j0 += S) {
+      const j1 = Math.min(j0 + S, nz - 1);
+      for (let i0 = 0; i0 < nx - 1; i0 += S) {
+        const i1 = Math.min(i0 + S, nx - 1);
+        if (keepY > -Infinity) {
+          let m = -Infinity;
+          for (let j = j0; j <= j1 && m < keepY; j++)
+            for (let i = i0; i <= i1; i++) { const y = py.getY(j * nx + i); if (y > m) m = y; }
+          if (m < keepY) continue;
+        }
+        const a = j0 * nx + i0, b = j0 * nx + i1, c = j1 * nx + i0, d = j1 * nx + i1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const far = new THREE.BufferGeometry();
+    for (const k in full.attributes) far.setAttribute(k, full.attributes[k]);
+    far.setIndex(new THREE.BufferAttribute(nx * nz > 65534 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+    far.boundingSphere = full.boundingSphere ? full.boundingSphere.clone() : null;
+    if (!far.boundingSphere) far.computeBoundingSphere();
+    far.userData = { lodOf: full.uuid, stride: S };
+    if (!full.boundingBox) full.computeBoundingBox();
+    const box = full.boundingBox.clone();
+    mesh.updateMatrixWorld(true);
+    box.applyMatrix4(mesh.matrixWorld);
+    const lod = { full: full, far: far, near: near, box: box, onFar: false,
+      fullTris: (full.index ? full.index.count : py.count) / 3, farTris: idx.length / 3 };
+    mesh.userData.farLod = lod;
+    const P = new THREE.Vector3();
+    function tick() {
+      const cam = CBZ.camera;
+      if (!cam || !mesh.parent) return;
+      if (mesh.geometry !== lod.full && mesh.geometry !== lod.far) return;   // someone else owns it now
+      box.clampPoint(cam.position, P);
+      const d = P.distanceTo(cam.position);
+      // 10% hysteresis so a camera on the boundary does not flip every frame
+      const want = lod.onFar ? d > near * 0.9 : d > near;
+      if (want !== lod.onFar) { lod.onFar = want; mesh.geometry = want ? far : full; }
+    }
+    if (CBZ.onAlways) CBZ.onAlways(91.8, tick);
+    tick();
+    return lod;
+  };
+
   // THE SHARED MEMO. A lazily-filled coarse grid with bilinear interpolation.
   // Both the mesh vertex loop and the registered ground-height provider call
   // the SAME returned closure — there is exactly one surface, so mesh and

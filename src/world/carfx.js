@@ -53,7 +53,7 @@
         if (role === "lightFront") return cmat(0x222018, { emissive: 0xfff2cc, ei: 1.15 });
         if (role === "lightTail") return cmat(0x220404, { emissive: 0xff2020, ei: 1.1 });
         const fallbackColor = {
-          glass: 0x10161c, chrome: 0xc8ccd2, metal: 0xc8ccd2, rim: 0xb9bdc4,
+          glass: 0x10161c, chrome: 0xc8ccd2, metal: 0xc8ccd2, rim: 0xb9bdc4, autoGlass: 0x10161c, wheel: 0x2a2c30,
           tire: 0x14161a, plastic: 0x1b1d20, interior: 0x0d0e10,
         }[role];
         return cmat(fallbackColor != null ? fallbackColor : (color != null ? color : 0xb0b4ba), {});
@@ -86,11 +86,135 @@
   // the way back to the MeshStandardMaterial recipe below, byte for byte.
   if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_GLASS_V2 == null) CBZ.CONFIG.VEHICLE_GLASS_V2 = true;
 
+  /* ---- THE ENV DIMS WITH THE SUN (cbzEnvK) --------------------------------
+     CBZ.ENV is a baked DAYLIGHT sky. Without this, midnight paint reflects a
+     noon sky: bodywork goes chalky, chrome glows, glass lights up like a
+     lamp. One shared uniform scales every env lookup (the specular
+     reflection, the clearcoat reflection AND the env's diffuse fill — both
+     return lines of r128's envmap_physical_pars_fragment) by daylight, and
+     one per-frame write moves the whole fleet.
+
+     SAME PROGRAM FOR EVERY CAR. r128 keys a program on
+     onBeforeCompile.toString(), so every material wearing this ONE function
+     shares the program its type/defines would have had anyway. Material.clone()
+     does NOT carry onBeforeCompile (r128 Material.copy skips it) — and every
+     traffic car's paint is a clone (playercars recolorBody), as is every
+     crash-frosted pane — so a hooked material gets an own `clone` that
+     re-hooks the copy. Without that the fleet would silently compile a
+     second, un-dimmed program. */
+  const ENV_K = { value: 1 };
+  const ENV_K_NIGHT = 0.1;
+  function envHook(shader) {
+    shader.uniforms.cbzEnvK = ENV_K;
+    shader.fragmentShader = "uniform float cbzEnvK;\n" + shader.fragmentShader.replace(
+      "#include <envmap_physical_pars_fragment>",
+      THREE.ShaderChunk.envmap_physical_pars_fragment.replace(/\* envMapIntensity;/g, "* envMapIntensity * cbzEnvK;"));
+  }
+  /* ---- METALLIC PAINT: flop + flake (paint materials only) ----------------
+     A metallic paint is not "a shinier solid". Its aluminium flakes lie
+     roughly parallel to the panel, so a panel FACING you is bright and one
+     turning away goes dark: the FLOP that makes a silver car read as metal
+     from across the street. Up close the flakes glint individually. Both are
+     a few lines after lighting, keyed by a per-material uniform (cbzFlake,
+     0 = solid paint: the multiply is 1 and the glint branch never runs), so
+     solid and metallic paint share ONE program. The glint cell is 3 mm in
+     the car's own frame and fades out by 3.5 m, before a cell drops under a
+     pixel and turns into shimmer. No uv needed (the loft has none). */
+  function paintHook(shader) {
+    envHook(shader);
+    shader.uniforms.cbzFlake = this._flakeU || (this._flakeU = { value: 0 });
+    shader.vertexShader = "varying vec3 vCbzObj;\n" + shader.vertexShader.replace(
+      "#include <begin_vertex>", "#include <begin_vertex>\n\tvCbzObj = position;");
+    shader.fragmentShader = "uniform float cbzFlake;\nvarying vec3 vCbzObj;\n" +
+      "float cbzHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n" +
+      shader.fragmentShader.replace(
+        "gl_FragColor = vec4( outgoingLight, diffuseColor.a );",
+        [
+          "if ( cbzFlake > 0.0 ) {",
+          "  vec3 cbzV = normalize( vViewPosition );",
+          "  float cbzNV = saturate( dot( normal, cbzV ) );",
+          "  outgoingLight *= mix( 1.0, mix( 0.5, 1.2, pow( cbzNV, 0.65 ) ), cbzFlake );",
+          "  float cbzD = length( vViewPosition );",
+          "  if ( cbzD < 3.5 ) {",
+          "    vec3 cbzC = floor( vCbzObj * 330.0 );",
+          "    vec3 cbzR = vec3( cbzHash( cbzC + 1.7 ), cbzHash( cbzC + 3.1 ), cbzHash( cbzC + 5.3 ) ) - 0.5;",
+          "    float cbzG = pow( saturate( dot( normalize( normal + cbzR * 0.7 ), cbzV ) ), 90.0 ) * step( 0.8, cbzHash( cbzC ) );",
+          "    outgoingLight += cbzG * cbzFlake * ( 1.0 - smoothstep( 1.0, 3.0, cbzD ) ) * 0.35 *",
+          "      ( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular );",
+          "  }",
+          "}",
+          "gl_FragColor = vec4( outgoingLight, diffuseColor.a );",
+        ].join("\n"));
+  }
+  function hookedClone() {
+    const c = new this.constructor().copy(this);
+    if (this._cbzPaint) {
+      c._cbzPaint = true;
+      c._flakeU = { value: this._flakeU ? this._flakeU.value : 0 };
+      c._paintResponse = this._paintResponse;
+    }
+    return hookEnv(c);
+  }
+  function hookEnv(mat) {
+    if (!mat || !("envMap" in mat)) return mat;
+    mat.onBeforeCompile = mat._cbzPaint ? paintHook : envHook;
+    mat.clone = hookedClone;
+    return mat;
+  }
+  /* WHICH PAINTS ARE METALLIC. Deterministic off the hex (multiplayer builds
+     identical cars): the neutrals a real lot is full of (silver, grey,
+     graphite, black, deep blue and green) are metallic, and a hash picks
+     roughly a third of the saturated colours. Solid paint keeps the authored
+     per-style response; metallic trades a little of the diffuse lobe for a
+     colour-tinted reflection, still under the washed-out ceiling below
+     (metalness x envMapIntensity <= 0.32). */
+  function isMetallicHex(hex) {
+    const r = ((hex >> 16) & 255) / 255, g = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    if (sat < 0.18) return true;                                    // silver / grey / black / white-pearl
+    if (mx < 0.42 && b >= r) return true;                           // deep blue / green / navy
+    return ((Math.imul(hex >>> 0, 2654435761) >>> 29) & 7) < 3;
+  }
+  function carPaintFinish(m, hex) {
+    if (!m || !m._cbzPaint) return m;
+    const P = m._paintResponse;
+    const metal = isMetallicHex(hex >>> 0);
+    if (!m._flakeU) m._flakeU = { value: 0 };
+    if (metal) {
+      m.metalness = 0.42;
+      m.roughness = 0.34;
+      m.envMapIntensity = 0.55;
+      m.clearcoatRoughness = 0.03;
+      m._flakeU.value = 1;
+    } else if (P) {
+      m.metalness = P.metalness; m.roughness = P.roughness;
+      m.envMapIntensity = P.envMapIntensity; m.clearcoatRoughness = P.clearcoatRoughness;
+      m._flakeU.value = 0;
+    }
+    m._metallic = metal;
+    return m;
+  }
+  CBZ.carPaintFinish = carPaintFinish;
+  CBZ.carPaintIsMetallic = isMetallicHex;
+  function envDaylight() {
+    const d = typeof CBZ.dayness === "number" ? CBZ.dayness : 1;
+    const k = d <= 0 ? 0 : d >= 1 ? 1 : d;
+    return ENV_K_NIGHT + (1 - ENV_K_NIGHT) * k;
+  }
+  let envTickOn = false;
+  function ensureEnvTick() {
+    if (envTickOn || typeof CBZ.onAlways !== "function") return;
+    envTickOn = true;
+    CBZ.onAlways(1.2, function () { ENV_K.value = envDaylight(); });
+  }
+  CBZ.vehicleEnvLevel = function () { return ENV_K.value; };
+
   // Registry of EVERY material this factory has produced, so we can back-fill
   // .envMap once CBZ.ENV exists (and bump .needsUpdate to recompile shaders).
   const envClients = [];
   function registerForEnv(mat) {
-    if (mat) envClients.push(mat);
+    if (mat) envClients.push(hookEnv(mat));
     return mat;
   }
   function applyEnv(mat) {
@@ -105,47 +229,102 @@
     for (let i = 0; i < envClients.length; i++) applyEnv(envClients[i]);
   }
 
-  // ---- the stylized 2-stop gradient sky used to bake the env map ----------
-  // Sky-bright top -> ground-dark bottom. Cheap, deterministic, no assets.
-  function gradientCanvas() {
+  /* ---- THE STUDIO-STREET SKY the env map is baked from ---------------------
+     Was an 8x256 two-stop gradient: a reflection with nothing IN it, so paint
+     could only ever be "lighter on top", never glossy. Real car paint reads as
+     paint because it carries a picture of the world that slides over the
+     panels as the car moves: a bright sky, a hard horizon, a dark street, and
+     a few bright sources to make highlights. So the equirect has exactly that:
+       - sky: deep blue zenith to a pale haze at the horizon
+       - the sun plus two soft bright cloud banks at other bearings, the
+         moving highlights on hoods and roofs
+       - a SKYLINE band on the horizon (blocks of different heights and
+         tones), which is what draws the dark reflected line along every
+         door and makes chrome look like chrome rather than grey
+       - a dark asphalt ground with a lighter kerb band at the horizon
+     Authored as sRGB and TAGGED sRGB (the old canvas was read as linear,
+     which lifted every stop and is half of why paint washed to white). */
+  /* 2026-09-27 (cars round 2): 512x256, and the HORIZON IS A HARD EDGE.
+     The line a stranger reads as "that's a car" is the reflected horizon
+     running down the flank: bright sky above, dark street below, meeting
+     in a crisp line that bends with every panel. At 256x128 the PMREM mip
+     the clearcoat samples smeared that edge into a grey gradient (matte
+     clay). Now: sky at full brightness right down to the skyline, a thin
+     bright kerb glint, then the street drops straight to dark asphalt, and
+     two long overhead light banks give the hood and roof a sharp moving
+     highlight instead of a blob. Same picture drives the studio plates
+     (CBZ.vehicleEnvCanvas), so the capture shows what the game shows. */
+  function envCanvas() {
+    const W = 512, H = 256;
     const c = document.createElement("canvas");
-    c.width = 8;
-    c.height = 256; // tall + thin: it's a vertical gradient, sampled equirect-style
+    c.width = W; c.height = H;
     const g = c.getContext("2d");
-    const grad = g.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0.0, "#9fc4ff"); // sky-bright top
-    grad.addColorStop(0.45, "#7d96bf"); // horizon-ish midband
-    grad.addColorStop(0.55, "#5b5560");
-    grad.addColorStop(1.0, "#35303a"); // ground-dark bottom
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 8, 256);
+    const hz = H * 0.5;
+    let grad = g.createLinearGradient(0, 0, 0, hz);
+    grad.addColorStop(0.0, "#36629f");
+    grad.addColorStop(0.45, "#7ea6d6");
+    grad.addColorStop(0.85, "#d4e2ef");
+    grad.addColorStop(1.0, "#f2f6fa");
+    g.fillStyle = grad; g.fillRect(0, 0, W, hz);
+    function blob(x, y, rx, ry, a) {
+      for (let dx = -W; dx <= W; dx += W) {          // wrap across the seam
+        const rg = g.createRadialGradient(x + dx, y, 0, x + dx, y, rx);
+        rg.addColorStop(0, "rgba(255,255,255," + a + ")");
+        rg.addColorStop(1, "rgba(255,255,255,0)");
+        g.save(); g.translate(x + dx, y); g.scale(1, ry / rx); g.translate(-(x + dx), -y);
+        g.fillStyle = rg; g.fillRect(x + dx - rx, y - rx, rx * 2, rx * 2);
+        g.restore();
+      }
+    }
+    blob(W * 0.62, H * 0.24, 80, 22, 0.8);
+    blob(W * 0.90, H * 0.34, 60, 14, 0.65);
+    blob(W * 0.36, H * 0.30, 50, 10, 0.5);
+    // two long bright bands high in the sky: the crisp streak on a hood/roof
+    g.fillStyle = "rgba(255,255,255,0.85)";
+    g.fillRect(0, H * 0.08, W, 5);
+    g.fillStyle = "rgba(255,255,255,0.6)";
+    g.fillRect(0, H * 0.17, W, 3);
+    blob(W * 0.20, H * 0.18, 18, 18, 1.0);          // sun
+    blob(W * 0.20, H * 0.18, 6, 6, 1.0);
+    // skyline on the horizon — deterministic blocks, dark against the bright haze
+    let s = 7;
+    function rnd() { s = (s * 16807) % 2147483647; return s / 2147483647; }
+    for (let x = 0; x < W;) {
+      const bw = 8 + Math.floor(rnd() * 24), bh = 4 + Math.floor(rnd() * 22);
+      const tone = 60 + Math.floor(rnd() * 50);
+      g.fillStyle = "rgb(" + tone + "," + (tone + 6) + "," + (tone + 16) + ")";
+      g.fillRect(x, hz - bh, bw, bh);
+      x += bw + (rnd() < 0.3 ? 4 + Math.floor(rnd() * 16) : 0);
+    }
+    // the street: a 2 px kerb glint, then straight down to dark asphalt
+    g.fillStyle = "#9a9894"; g.fillRect(0, hz, W, 2);
+    grad = g.createLinearGradient(0, hz + 2, 0, H);
+    grad.addColorStop(0.0, "#3c3c3f");
+    grad.addColorStop(0.25, "#2a2a2d");
+    grad.addColorStop(1.0, "#131315");
+    g.fillStyle = grad; g.fillRect(0, hz + 2, W, H - hz - 2);
     return c;
   }
+  CBZ.vehicleEnvCanvas = envCanvas;
 
-  // Build a tiny Scene whose backdrop IS the gradient, then PMREM-prefilter it
-  // into a roughness-aware env texture. One texture, reused by every car mat.
+  // PMREM-prefilter the equirect ONCE into a roughness-aware env texture,
+  // shared by every vehicle material.
   let envBuilding = false;
   function buildVehicleEnv() {
     if (CBZ.ENV) return CBZ.ENV; // idempotent
     if (envBuilding) return null;
-    if (!THREE || !CBZ.renderer) return null; // defer — no live renderer yet
-    if (!THREE.PMREMGenerator || !THREE.CanvasTexture || !THREE.Scene) return null;
+    if (!THREE || !CBZ.renderer || typeof document === "undefined") return null; // defer — no live renderer yet
+    if (!THREE.PMREMGenerator || !THREE.CanvasTexture) return null;
     envBuilding = true;
     try {
-      const tex = new THREE.CanvasTexture(gradientCanvas());
-      if (THREE.EquirectangularReflectionMapping) tex.mapping = THREE.EquirectangularReflectionMapping;
+      const tex = new THREE.CanvasTexture(envCanvas());
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
       tex.needsUpdate = true;
-
-      const envScene = new THREE.Scene();
-      envScene.background = tex;
-
       const pmrem = new THREE.PMREMGenerator(CBZ.renderer);
-      // compileEquirectangularShader avoids a first-frame stall on r128.
       if (pmrem.compileEquirectangularShader) pmrem.compileEquirectangularShader();
-      const rt = pmrem.fromScene(envScene); // r128: returns a WebGLRenderTarget
+      const rt = pmrem.fromEquirectangular(tex); // r128: returns a WebGLRenderTarget
       CBZ.ENV = rt.texture;
-
-      // gradient source no longer needed; PMREM holds the baked result
       tex.dispose();
       pmrem.dispose();
 
@@ -216,6 +395,126 @@
   const GLASS_LIFT_VEH = 0x3f8aa6, GLASS_LIFT_EI = 0.36;
 
   const vehGlass = [];          // every vehicle-glass material minted, for the audit
+  const carGlass = [];          // the car-only reflective panes (role 'autoGlass')
+
+  // ---- the WHEEL RAMP: 16x1 texels, g = roughness, b = metalness -----------
+  // Index names are exported so city/carwheels.js tags its vertices by name.
+  // Rubber is three channels on purpose: the tread face is dead matte, the
+  // groove floors deader still, the sidewall a satin a hair shinier, and only
+  // the SHOULDER roll carries the sheen that tells you it is a tyre. Metal is
+  // split the way a real two-tone alloy is: a machined bright spoke face and
+  // polished lip over gunmetal-painted pockets, a dark barrel, a rotor whose
+  // friction ring is bare steel and whose hat is dull.
+  const WHEEL_CH = {
+    tread: 0, side: 1, alloy: 2, chrome: 3, rotor: 4, satin: 5, gloss: 6, dark: 7,
+    groove: 8, shoulder: 9, face: 10, pocket: 11, hat: 12, lip: 13,
+  };
+  const WHEEL_RAMP = [
+    [0.93, 0.00],   // 0  tread rubber
+    [0.88, 0.00],   // 1  sidewall (satin rubber)
+    [0.30, 0.90],   // 2  painted silver alloy (mesh wheels, aero fins)
+    [0.05, 1.00],   // 3  chrome
+    [0.40, 0.90],   // 4  rotor friction ring (bare steel)
+    [0.50, 0.15],   // 5  satin paint (steelies, dust shield)
+    [0.20, 0.10],   // 6  gloss paint (aero covers, centre caps)
+    [0.36, 0.80],   // 7  dark alloy (barrel)
+    [0.97, 0.00],   // 8  groove floors / sipe walls
+    [0.66, 0.00],   // 9  tyre shoulder (the only rubber with a sheen)
+    [0.14, 1.00],   // 10 machined spoke face
+    [0.42, 0.55],   // 11 gunmetal-painted pockets / spoke flanks
+    [0.62, 0.55],   // 12 rotor hat
+    [0.08, 1.00],   // 13 polished lip
+    [0.93, 0.00],   // 14 spare (= tread)
+    [0.93, 0.00],   // 15 spare (= tread)
+  ];
+  CBZ.WHEEL_CH = WHEEL_CH;
+  CBZ.WHEEL_RAMP_W = WHEEL_RAMP.length;
+  let _wheelRamp = null;
+  function wheelRamp() {
+    if (_wheelRamp) return _wheelRamp;
+    const d = new Uint8Array(WHEEL_RAMP.length * 4);
+    for (let i = 0; i < WHEEL_RAMP.length; i++) {
+      d[i * 4] = 255;
+      d[i * 4 + 1] = Math.round(WHEEL_RAMP[i][0] * 255);
+      d[i * 4 + 2] = Math.round(WHEEL_RAMP[i][1] * 255);
+      d[i * 4 + 3] = 255;
+    }
+    const t = new THREE.DataTexture(d, WHEEL_RAMP.length, 1, THREE.RGBAFormat);
+    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    _wheelRamp = t;
+    return t;
+  }
+
+  /* ---- NUMBER PLATES: one small canvas atlas, eight plates ----------------
+     Plain plates, as they are: a light field, a thin dark border, and a
+     registration of a digit, three letters and three digits ("7KQ 482").
+     No state names, no slogans, no brand (signage law). One 512x128 canvas
+     holds all eight; each plate material is a texture VIEW of it (clone +
+     offset/repeat, so it uploads once per variant at 64 KB). A box's faces
+     each carry the full 0..1 UV, so on a plate box the front face shows one
+     whole plate, upright, from outside. */
+  const PLATE_N = 8;
+  const PLATE_STYLE = [
+    ["#f3f3ef", "#1c2440"], ["#f1ecd8", "#1a1a1a"], ["#f4f4f2", "#7a1c1c"], ["#f2d33a", "#141414"],
+    ["#e9eef2", "#15315e"], ["#f3f3ef", "#1a1a1a"], ["#f1ecd8", "#123a22"], ["#f4f4f2", "#1c2440"],
+  ];
+  let plateCanvas = null, plateTex = null;
+  const plateMats = [];
+  let plateNext = 0;
+  function plateAtlas() {
+    if (plateCanvas || typeof document === "undefined") return plateCanvas;
+    const cw = 128, ch = 64;
+    const c = document.createElement("canvas");
+    c.width = cw * 4; c.height = ch * 2;
+    const g = c.getContext("2d");
+    let s = 91;
+    function rnd() { s = (s * 16807) % 2147483647; return s / 2147483647; }
+    const L = "ABCDEFGHJKLMNPRSTUVWXYZ";
+    for (let i = 0; i < PLATE_N; i++) {
+      const x = (i % 4) * cw, y = Math.floor(i / 4) * ch, st = PLATE_STYLE[i];
+      g.fillStyle = st[0]; g.fillRect(x, y, cw, ch);
+      g.strokeStyle = st[1]; g.lineWidth = 3; g.strokeRect(x + 3.5, y + 3.5, cw - 7, ch - 7);
+      const reg = String(1 + Math.floor(rnd() * 9)) + L[Math.floor(rnd() * L.length)] + L[Math.floor(rnd() * L.length)] +
+        L[Math.floor(rnd() * L.length)] + " " + String(Math.floor(rnd() * 900) + 100);
+      g.fillStyle = st[1];
+      g.font = "bold 30px Arial, Helvetica, sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(reg, x + cw / 2, y + ch / 2 + 2, cw - 16);
+    }
+    plateCanvas = c;
+    return c;
+  }
+  function carPlateMat(variant) {
+    const i = variant == null ? (plateNext++ % PLATE_N) : (((variant | 0) % PLATE_N) + PLATE_N) % PLATE_N;
+    if (plateMats[i]) return plateMats[i];
+    let map = null;
+    const atlas = plateAtlas();
+    if (atlas && THREE.CanvasTexture) {
+      if (!plateTex) {
+        plateTex = new THREE.CanvasTexture(atlas);
+        if (THREE.sRGBEncoding != null) plateTex.encoding = THREE.sRGBEncoding;
+        plateTex.anisotropy = 4;
+      }
+      map = plateTex.clone();
+      map.needsUpdate = true;
+      map.repeat.set(0.25, 0.5);
+      map.offset.set((i % 4) * 0.25, Math.floor(i / 4) === 0 ? 0.5 : 0);   // flipY: row 0 is the TOP half
+    }
+    const m = new THREE.MeshStandardMaterial({
+      color: map ? 0xffffff : 0xe8e8e2,
+      map: map,
+      metalness: 0.25,
+      roughness: 0.45,
+      envMap: CBZ.ENV || null,
+      envMapIntensity: 0.7,
+    });
+    m._shared = true;
+    registerForEnv(m);
+    plateMats[i] = m;
+    return m;
+  }
   let glassTintRefused = 0;     // caller tints rejected by the frost window
 
   function frostOk(hex) {
@@ -248,12 +547,14 @@
 
   // ---- the public factory --------------------------------------------------
   // role table (B and C agents depend on this exact contract):
-  //   'paint'      FRESH MeshStandardMaterial per call, _bodyPaint=true,
-  //                metalness .55 / roughness .38 / flatShading, subtle emissive
-  //   'glass'      SHARED dark reflective, opaque (no transparent sort cost)
-  //   'chrome'/'metal' SHARED bright metal
+  //   'paint'      FRESH MeshPhysicalMaterial per call, _bodyPaint=true,
+  //                satin base + clearcoat (see CLEARCOAT below)
+  //   'glass'      THE ONE GLASS (Lambert pool) - aircraft, boats
+  //   'autoGlass'  SHARED car glass: Physical transmission, reflective tint
+  //   'chrome'/'metal' SHARED mirror metal
   //   'rim'        SHARED alloy
-  //   'tire'       SHARED matte rubber (no envMap)
+  //   'wheel'      SHARED vertex-coloured wheel material (carwheels.js ramp)
+  //   'tire'       SHARED matte rubber (env for diffuse fill)
   //   'lightFront' SHARED emissive warm white
   //   'lightTail'  SHARED emissive red
   //   'plastic'    SHARED dark matte (slight env)
@@ -303,24 +604,54 @@
      is what the residual metalness is for. `metalEnvLoad` (metalness x
      envMapIntensity) is the number that was wrong and it is the ratchet.
 
-     ONE FLAG: CAR_PAINT_V2=false restores the authored numbers verbatim at
-     every call site at once. ========================================== */
-  const PAINT_V2 = { metalness: 0.40, envMapIntensity: 0.45, roughness: 0.92 };
+     CLEARCOAT (2026-09 car wave). The paint is now what real paint is: a
+     coloured, satin, mostly-dielectric BASE under a glossy CLEARCOAT
+     (r128 MeshPhysicalMaterial clearcoat / clearcoatRoughness). The coat is
+     where the sharp moving highlight and the skyline reflection live; it is
+     Fresnel-weighted (about 4% face-on, strong at grazing), so it cannot
+     repeat the white-car wash above: a roof seen from above reflects ~4% of
+     the sky, a door seen along the street reflects the skyline. The base
+     keeps the scaled metalness (flake) and a broader roughness, so the colour
+     stays most of the pixel. The CAR_PAINT_V2 flag is gone (git is the undo);
+     the ratchet below still reads metalness x envMapIntensity off the BASE.
+
+     COST: r128 always compiles CLEARCOAT for a Physical material, so every
+     paint in the city is ONE program (one extra specular lobe per light plus
+     one env fetch, on car pixels only). Draw calls unchanged. */
+  /* Measured in the car-showcase studio: at base metalness 0.40 x authored the
+     base layer mirrored the bright street sky across every panel and a navy
+     sedan photographed powder blue. Solid paint is a dielectric; the gloss
+     lives in the CLEARCOAT lobe, so the base keeps only a trace of metal
+     (flake) and the car keeps its colour. */
+  const PAINT_V2 = { metalness: 0.12, envMapIntensity: 0.75 };
   // A paint whose env reflection out-weighs this much of its own colour is the
-  // defect above. 0.35 sits above every value the scaled table produces (the
-  // lowrider, the hottest entry, lands at 0.19) and below every value the
-  // unscaled one did (the softest, a hatch, was 0.48).
+  // defect above. paintResponse clamps envMapIntensity so metalness x env can
+  // never exceed 0.32 (the old unscaled table's softest, a hatch, was 0.48).
   const METAL_ENV_CEIL = 0.35;
+  /* PAINT IS AUTHORED IN sRGB, THIS RENDERER IS NOT. The game runs the legacy
+     pipeline (hex taken as linear, sRGB output), which lifts every mid-tone:
+     a catalog navy 0x2d5f9a photographed powder blue and a red went salmon.
+     Car paint is the one surface a stranger judges by saturation, so its hex
+     is pulled most of the way into linear (gamma 1.7, not the full 2.2, so a
+     car still sits in the same world as the lifted buildings around it). */
+  function paintColor(hex) {
+    const c = new THREE.Color(hex);
+    c.r = Math.pow(c.r, 1.7); c.g = Math.pow(c.g, 1.7); c.b = Math.pow(c.b, 1.7);
+    return c;
+  }
+  CBZ.carPaintColor = paintColor;
   function paintResponse(metalness, roughness, envMapIntensity) {
-    const on = CBZ.CONFIG ? CBZ.CONFIG.CAR_PAINT_V2 !== false : true;
-    const m = on ? metalness * PAINT_V2.metalness : metalness;
-    const e = on ? envMapIntensity * PAINT_V2.envMapIntensity : envMapIntensity;
-    const r = on ? Math.min(0.95, roughness * PAINT_V2.roughness) : roughness;
+    const m = metalness * PAINT_V2.metalness;
+    const e = Math.min(0.32 / Math.max(m, 0.05), envMapIntensity * PAINT_V2.envMapIntensity);
+    // base: satin under the coat; the authored table's ordering is kept
+    const r = Math.min(0.9, 0.34 + roughness * 0.5);
+    // coat: the wetter the authored paint, the tighter the coat (~0.04..0.09)
+    const cr = Math.min(0.12, 0.02 + roughness * 0.16);
     return {
-      metalness: m, roughness: r, envMapIntensity: e,
+      metalness: m, roughness: r, envMapIntensity: e, clearcoatRoughness: cr,
       diffuseShare: 1 - m,          // how much of the pixel is the car's colour
       metalEnvLoad: m * e,          // how much of it is the sky
-      v2: on,
+      v2: true,
     };
   }
   /* CBZ.carPaintAudit() — THE RATCHET. `washed` is the number that matters:
@@ -332,7 +663,7 @@
      hide behind the same symptom, so it is counted separately and pinned too. */
   CBZ.carPaintAudit = function () {
     const out = {
-      v2: CBZ.CONFIG ? CBZ.CONFIG.CAR_PAINT_V2 !== false : true,
+      v2: true,                     // the flag is gone; kept for readers of the shape
       cars: 0, paints: 0, washed: 0, mutedHex: 0, marine: 0,
       minDiffuseShare: 1, maxMetalEnvLoad: 0, ceiling: METAL_ENV_CEIL,
       liveried: 0, distinctHex: 0, muted: [],
@@ -433,6 +764,7 @@
 
     // Opportunistically build the env the moment a renderer is available.
     if (!CBZ.ENV) buildVehicleEnv();
+    ensureEnvTick();
 
     if (role === "paint") {
       // ALWAYS fresh — per-car recolor clones the FIRST instance, but each
@@ -441,21 +773,27 @@
       const P = paintResponse(num(opts.metalness, 0.55),
                              num(opts.roughness, 0.38),
                              num(opts.envMapIntensity, 1.0));
-      const m = new THREE.MeshStandardMaterial({
-        color: col,
+      // flatShading OFF: a panel shades by the normals its geometry carries
+      // (faceted geometry still reads faceted; a smooth panel can now be one).
+      const m = new THREE.MeshPhysicalMaterial({
+        color: paintColor(col),
         metalness: P.metalness,
         roughness: P.roughness,
-        flatShading: true,
+        clearcoat: 1.0,
+        clearcoatRoughness: P.clearcoatRoughness,
         envMap: CBZ.ENV || null,
         envMapIntensity: P.envMapIntensity,
       });
       m._paintResponse = P;                    // read by CBZ.carPaintAudit()
-      // subtle self-glow so paint doesn't go black in shadow (recolorBody also
-      // expects an .emissive to exist — it sets it to color*0.16 on the clone).
-      m.emissive = new THREE.Color(col).multiplyScalar(0.04);
+      // a whisper of self-glow only: the env's diffuse fill lifts the shadow
+      // side now, and a bigger glow is what turns paint chalky after dark.
+      m.emissive = paintColor(col).multiplyScalar(0.03);
       m.emissiveIntensity = num(opts.emissiveIntensity, 1.0);
       m._bodyPaint = true; // <-- EXACT flag matched from playercars.js recolorBody
+      m._cbzPaint = true;  // paintHook (flop + flake) — survives clone via hookedClone
+      m._flakeU = { value: 0 };
       registerForEnv(m); // back-fill envMap if ENV builds after this
+      carPaintFinish(m, col);
       return m;
     }
 
@@ -539,14 +877,54 @@
       return m;
     }
 
+    /* ---- CAR GLASS: dark tinted, REFLECTIVE, and see-through ---------------
+       The 'glass' role above is THE ONE GLASS (Lambert + emissive lift) and
+       stays that for aircraft/boats/buildings. On a CAR it read as a flat
+       tinted film: no reflection at all, so a windscreen never looked like
+       glass, and its lift glowed after dark. Car glass is its own role now.
+
+       r128's MeshPhysicalMaterial `transmission` does exactly what automotive
+       glass needs, cheaply (no extra pass in r128): alpha becomes
+           opacity x (1 - transmission + luminance(specular reflection))
+       so where the pane reflects bright sky (grazing angles: a windscreen
+       from the street, a side window along the car) it turns into a mirror,
+       and face-on, or looking out from the cabin at the dark street, it is
+       ~36% tint over a clear view. At night the env term is dimmed by
+       cbzEnvK, so the pane goes back to plain dark tint: nothing glows.
+
+       Frost law: the tint 0x24435a sits inside crashdeform.js's isGlassMat
+       window, and crashdeform's frost clone drops `transmission` so a crazed
+       pane goes opaque (the hooked clone keeps the program shared). */
+    if (role === "autoGlass") {
+      const tint = glassTint(color);
+      const m = shared("autoGlass|" + tint, function () {
+        return new THREE.MeshPhysicalMaterial({
+          color: tint,
+          metalness: 0.0,
+          roughness: 0.04,
+          transmission: num(opts.transmission, 0.5),   // 0.64 read as pale grey-blue glass in daylight
+          transparent: true,
+          opacity: 1.0,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          envMap: CBZ.ENV || null,
+          envMapIntensity: num(opts.envMapIntensity, 1.5),
+        });
+      });
+      if (carGlass.indexOf(m) < 0) carGlass.push(m);
+      return m;
+    }
+
     if (role === "chrome" || role === "metal") {
+      // a MIRROR: full metal, nearly polished. What it shows is the env's
+      // skyline + sky, which is exactly what reads as chrome.
       return shared("chrome", function () {
         return new THREE.MeshStandardMaterial({
-          color: 0xc8ccd2,
-          metalness: num(opts.metalness, 0.95),
-          roughness: num(opts.roughness, 0.22),
+          color: 0xe4e7eb,
+          metalness: num(opts.metalness, 1.0),
+          roughness: num(opts.roughness, 0.07),
           envMap: CBZ.ENV || null,
-          envMapIntensity: num(opts.envMapIntensity, 1.0),
+          envMapIntensity: num(opts.envMapIntensity, 1.2),
         });
       });
     }
@@ -554,9 +932,29 @@
     if (role === "rim") {
       return shared("rim", function () {
         return new THREE.MeshStandardMaterial({
-          color: 0xb9bdc4,
-          metalness: num(opts.metalness, 0.85),
-          roughness: num(opts.roughness, 0.3),
+          color: 0xc4c9cf,
+          metalness: num(opts.metalness, 0.9),
+          roughness: num(opts.roughness, 0.26),
+          envMap: CBZ.ENV || null,
+          envMapIntensity: num(opts.envMapIntensity, 1.0),
+        });
+      });
+    }
+
+    /* ---- THE WHEEL: one material for tyre, rim, rotor and lugs ------------
+       city/carwheels.js builds each wheel as ONE mesh with vertex colours and
+       a uv whose u picks a texel of this 16x1 ramp: green = roughness, blue =
+       metalness (r128 reads roughnessMap.g and metalnessMap.b). Rubber,
+       alloy, chrome, rotor steel and satin paint in one draw call. */
+    if (role === "wheel") {
+      return shared("wheel", function () {
+        return new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          vertexColors: true,
+          roughness: 1.0,
+          metalness: 1.0,
+          roughnessMap: wheelRamp(),
+          metalnessMap: wheelRamp(),
           envMap: CBZ.ENV || null,
           envMapIntensity: num(opts.envMapIntensity, 1.0),
         });
@@ -565,11 +963,14 @@
 
     if (role === "tire") {
       return shared("tire", function () {
-        // matte rubber — no envMap (rubber barely reflects; saves the lookup)
+        // matte rubber. It takes the env now, for its DIFFUSE fill: without
+        // it a tyre in shade was a flat black hole.
         return new THREE.MeshStandardMaterial({
-          color: 0x14161a,
+          color: 0x1c1d20,
           metalness: num(opts.metalness, 0.0),
-          roughness: num(opts.roughness, 0.95),
+          roughness: num(opts.roughness, 0.9),
+          envMap: CBZ.ENV || null,
+          envMapIntensity: num(opts.envMapIntensity, 0.8),
         });
       });
     }
@@ -599,11 +1000,12 @@
     }
 
     if (role === "plastic") {
+      // black trim: SATIN, dielectric — a soft sheen, never a mirror
       return shared("plastic", function () {
         return new THREE.MeshStandardMaterial({
-          color: 0x1b1d20,
-          metalness: num(opts.metalness, 0.1),
-          roughness: num(opts.roughness, 0.72),
+          color: 0x17191c,
+          metalness: num(opts.metalness, 0.0),
+          roughness: num(opts.roughness, 0.52),
           envMap: CBZ.ENV || null,
           envMapIntensity: num(opts.envMapIntensity, 1.0),
         });
@@ -701,8 +1103,9 @@
     }
     let inWindow = true, worst = null, worstMargin = null;
     const tints = [];
-    for (let i = 0; i < vehGlass.length; i++) {
-      const m = vehGlass[i];
+    const allGlass = vehGlass.concat(carGlass);   // car panes must stay frostable too
+    for (let i = 0; i < allGlass.length; i++) {
+      const m = allGlass[i];
       if (!m || !m.color) continue;
       const r = m.color.r, b = m.color.b;
       // the three clearances of crashdeform.js's isGlassMat, smallest wins
@@ -729,6 +1132,8 @@
       transparent: !!(first && first.transparent),
       opacity: first ? first.opacity : null,
       doubleSided: !!(first && THREE && first.side === THREE.DoubleSide),
+      carGlassVariants: carGlass.length,    // 'autoGlass': Physical transmission panes on cars
+      carGlassTransmission: carGlass[0] ? carGlass[0].transmission : null,
     };
   }
 
@@ -737,10 +1142,13 @@
   CBZ.vehicleMat = vehicleMat;
   CBZ.glassAudit = glassAudit;
   CBZ.taperBox = taperBox;
+  // CBZ.carPlateMat(i) -> shared plate material i (0..7); no argument cycles.
+  CBZ.carPlateMat = carPlateMat;
   if (CBZ.ENV === undefined) CBZ.ENV = null;
 
   // Try once at load (renderer usually already exists here).
   buildVehicleEnv();
+  ensureEnvTick();
 
   // Per-frame backstop: if the renderer wasn't ready at load, build the env on
   // the first frame it IS, then back-fill, then stop trying. Cheap no-op once
