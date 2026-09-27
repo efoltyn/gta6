@@ -641,12 +641,28 @@
     // back: a tall cushion tilted a few degrees, on a spine off the mechanism
     const tilt = -0.13, bh = back, by = seatTop + 0.05 + bh / 2;
     K.box(M.satin, 0, seatTop - 0.02, -0.25, 0.06, 0.16, 0.03, C.black, tilt);
-    K.rbox(mat, 0, by, -0.27 - Math.sin(-tilt) * bh / 2, 0.5, bh, 0.09, 0.04, up, tilt);
     if (o.channels && bh > 0.6) {
-      for (let i = 1; i <= 3; i++) {
-        const yy = seatTop + 0.05 + bh * i / 4;
-        K.box(mat, 0, yy, -0.27 - Math.sin(-tilt) * (yy - seatTop - 0.05) + 0.047, 0.44, 0.006, 0.006, 0x0c0908, tilt);
+      // CHANNEL-STITCHED HIGH BACK. The old version was one smooth cushion
+      // with three 6 mm lines drawn on it, which at any distance past a metre
+      // is a plain box. A real channel back is a row of separately stuffed
+      // tubes sewn onto a shell: each tube is its own rounded pad here, so the
+      // light rolls over every channel and the seams read as dark grooves.
+      // Everything is placed in the back's own tilted frame: u runs up the
+      // back from its foot, f runs out of its face toward the sitter.
+      const ct = Math.cos(tilt), st = Math.sin(tilt), y0 = seatTop + 0.05, z0 = -0.27;
+      const at = function (u, f) { return [y0 + u * ct - f * st, z0 + u * st + f * ct]; };
+      const sp = at(bh / 2, -0.012);
+      K.rbox(M.satin, 0, sp[0], sp[1], 0.5, bh, 0.065, 0.03, up, tilt);            // the shell
+      const N = 6, rim = 0.035, ph = (bh - 2 * rim) / N;
+      for (let i = 0; i < N; i++) {
+        const p = at(rim + ph * (i + 0.5), 0.034);
+        K.rbox(mat, 0, p[0], p[1], 0.455, ph - 0.012, 0.05, 0.022, up, tilt, 0, 0, 3);
       }
+      // a rolled head bolster over the top channel
+      const hp = at(bh - 0.03, 0.03);
+      K.rbox(mat, 0, hp[0], hp[1], 0.47, 0.07, 0.07, 0.03, up, tilt);
+    } else {
+      K.rbox(mat, 0, by, -0.27 - Math.sin(-tilt) * bh / 2, 0.5, bh, 0.09, 0.04, up, tilt);
     }
     if (armed) for (const s of [-1, 1]) {
       K.box(M.satin, s * 0.285, seatTop + 0.06, -0.02, 0.028, 0.2, 0.05, C.black);
@@ -789,6 +805,9 @@
       const m = new THREE.Mesh(proxyGeo(), proxyMat());
       m.position.set(x, Y + y, z); m.scale.set(w, h, d);
       m.visible = false; m.matrixAutoUpdate = false; m.updateMatrix();
+      // non-empty userData: core/batch.js never bakes this body into a drawn
+      // merged shell (it did, and the desk drew as a flat tan box)
+      m.userData.hitProxy = true;
       b.group.add(m);
       const c = { minX: ox + x - w / 2, maxX: ox + x + w / 2, minZ: oz + z - d / 2, maxZ: oz + z + d / 2, ref: m, y0: Y + y - h / 2, y1: Y + y + h / 2 };
       if (CBZ.colliders) CBZ.colliders.push(c);

@@ -4550,6 +4550,10 @@
         // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
         // every existing caller, so the kit is inert until someone asks for it.
         dress: opts.dress === false ? false : (opts.dress || null),   // false = explicit opt-out
+        // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
+        // open: dressFacade re-emits any grammar box through one as the pieces
+        // around it. The mega-tower hands in its executive storey here.
+        keepClear: Array.isArray(opts.keepClear) && opts.keepClear.length ? opts.keepClear : null,
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -7144,8 +7148,25 @@
     // suite is SEEING the city 160m below; the reflective mirror kit is
     // near-opaque from inside. Flag off → the exact old layout + mirror skin.
     const EXECF = !!(CBZ.CONFIG && CBZ.CONFIG.EXEC_TOP_OFFICE);
+    const execY = (STOREYS - 2) * FH;
+    // THE SUITE HAS TO SEE OUT. The flagship wears a skyline facade grammar
+    // (the city's position-hash pick; megabrace.js's "Braced Tube" on the
+    // current map), and those grammars skin the tower in a CONTINUOUS dark
+    // window field standing 0.04-0.2 m proud of the glass, with X-brace and
+    // megacolumn blocks up to ~1.7 m thick whose inner faces reach a metre
+    // INTO the rooms. From storey 50 that read as opaque brown panels in
+    // every bay and as floating planks / boxes over the floor by the sills.
+    // Two keep-clear volumes for the facade kit's carve: nothing a grammar
+    // lays may stand inside the executive storey's footprint, and nothing
+    // within 0.35 m of the wall may cross its window band. The spandrel
+    // lines at the slab edges and the outer faces of any brace or column
+    // stay, so from the street the structure still reads continuous.
+    const execClear = EXECF ? [
+      { x0: -w / 2, x1: w / 2, z0: -d / 2, z1: d / 2, y0: execY + 0.01, y1: execY + FH - 0.01 },
+      { x0: -w / 2 - 0.35, x1: w / 2 + 0.35, z0: -d / 2 - 0.35, z1: d / 2 + 0.35, y0: execY + 0.5, y1: execY + FH - 0.4 },
+    ] : null;
     const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
-      EXECF ? { garageGround: true, district: "core", glassKind: "clear" }
+      EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear }
             : { garageGround: true, district: "core" });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
@@ -7157,7 +7178,6 @@
     // the storey just below the penthouse is the EXECUTIVE FLOOR (flag on) or
     // the mansion NATATORIUM (flag off; the pool then rides one lower);
     // every other floor is a dressed flat (merged tris; no extra draw calls).
-    const execY = (STOREYS - 2) * FH;
     for (let k = 1; k < STOREYS - 1; k++) {
       if (EXECF && k === STOREYS - 2) continue;           // the executive suite — dressed below
       if (k === STOREYS - (EXECF ? 3 : 2)) furnishPoolFloor(b, k * FH);
