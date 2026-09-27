@@ -2910,11 +2910,12 @@
       uLumpS: { value: 4 }, uLumpA: { value: 1.5 }, uRollV: { value: 3 },
       uLobe: { value: new THREE.Vector4() }, uLobeFrom: { value: 0.79 },
       uLP: { value: new THREE.Vector3() }, uHalfW: { value: 160 },
-      uBodySea: { value: new THREE.Color(0.032, 0.066, 0.058) },
-      uBodyMud: { value: new THREE.Color(0.046, 0.036, 0.026) },
-      uFoamClean: { value: new THREE.Color(0.88, 0.90, 0.89) },
-      uFoamMud: { value: new THREE.Color(0.60, 0.56, 0.49) },
-      uDebrisCol: { value: new THREE.Color(0.055, 0.040, 0.028) },
+      uBodySea: { value: new THREE.Color(0.045, 0.085, 0.074) },
+      uBodyMud: { value: new THREE.Color(0.072, 0.058, 0.040) },
+      uGlowSea: { value: new THREE.Color(0.08, 0.13, 0.115) },
+      uGlowMud: { value: new THREE.Color(0.12, 0.105, 0.08) },
+      uFoamClean: { value: new THREE.Color(0.90, 0.92, 0.92) },
+      uFoamMud: { value: new THREE.Color(0.66, 0.62, 0.55) },
     });
     // the light uniforms are SHARED objects across the face's materials
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol;
@@ -2937,7 +2938,7 @@
       // where the whitewater is: the roller on the upper front (deeper with
       // sediment), a little over the back of the crest, the foot, the skirt
       "float rollMask( float u, float side, float sk, float sdn ) {",
-      "  float lo = mix( 0.70, 0.44, uTurbid );",
+      "  float lo = mix( 0.84, 0.72, uTurbid );",
       "  float r = smoothstep( lo, lo + 0.22, u ) * mix( 0.30, 1.0, side ) * ( 1.0 - sk );",
       "  r = max( r, side * ( 1.0 - sk ) * ( 1.0 - smoothstep( 0.12, 0.30, u ) ) * 0.65 );",
       "  r = max( r, sk * ( 1.0 - smoothstep( 0.0, 0.8, sdn ) ) * ( 0.55 + 0.45 * uTurbid ) );",
@@ -3010,7 +3011,7 @@
     const FRAG = [
       "uniform float uTime, uTurbid, uCurlN, uH, uHs, uFoam, uLumpS, uRollV, uHalfW;",
       "uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol;",
-      "uniform vec3 uBodySea, uBodyMud, uFoamClean, uFoamMud, uDebrisCol;",
+      "uniform vec3 uBodySea, uBodyMud, uGlowSea, uGlowMud, uFoamClean, uFoamMud;",
       "varying vec4 vFace;",
       "varying vec4 vAux;",
       "varying vec3 vWPos;",
@@ -3024,26 +3025,6 @@
       "  s += a * vn( p ); w += a; a *= 0.52; p *= 2.07;",
       "  s += a * fine * vn( p ); w += a * fine;",
       "  return s / max( w, 0.0001 );",
-      "}",
-      /* DEBRIS: a sparse cellular scatter of rotated slivers (planks, beams,
-         panels) riding the same scroll as the foam, each one turning. */
-      "float debris( vec2 q, float dens ) {",
-      "  vec2 i = floor( q ), f = fract( q );",
-      "  float m = 0.0;",
-      "  for ( int yy = -1; yy <= 1; yy++ ) {",
-      "    for ( int xx = -1; xx <= 1; xx++ ) {",
-      "      vec2 g = vec2( float( xx ), float( yy ) );",
-      "      vec4 h = h42( i + g );",
-      "      if ( h.w > dens ) continue;",
-      "      vec2 c = g + 0.2 + 0.6 * h.xy - f;",
-      "      float an = h.z * 6.283 + uTime * ( h.x - 0.5 ) * 1.6;",
-      "      vec2 cs = vec2( cos( an ), sin( an ) );",
-      "      vec2 r = vec2( dot( c, cs ), dot( c, vec2( -cs.y, cs.x ) ) );",
-      "      float d = length( r / vec2( 0.05 + 0.15 * h.y, 0.022 + 0.05 * h.x ) );",
-      "      m = max( m, 1.0 - smoothstep( 0.65, 1.0, d ) );",
-      "    }",
-      "  }",
-      "  return m;",
       "}",
       "void main() {",
       "  vec3 toCam = cameraPosition - vWPos;",
@@ -3064,11 +3045,11 @@
       /* THE ROLLER: its lower edge is torn into tongues metres long, and it
          reaches further down the wall the more sediment it is carrying. */
       "  float jag = fbm( vec2( x * 0.05 - T * 0.02, 3.7 ), 0.4 );",
-      "  float edge = mix( 0.74, 0.46, tb ) - ( jag - 0.5 ) * 0.40 - ( nS - 0.5 ) * 0.35 - 0.06 * uCurlN;",
+      "  float edge = mix( 0.88, 0.76, tb ) - ( jag - 0.5 ) * 0.26 - ( nS - 0.5 ) * 0.22 - 0.05 * uCurlN;",
       "  float rollF = smoothstep( edge - 0.03, edge + 0.08, up ) * smoothstep( 0.2, 0.7, side ) * ( 1.0 - sk );",
       // tongues pouring down the dark wall below it
-      "  float nT = fbm( vec2( x * 0.13 + nA * 2.0, ( arc - T * uRollV * 1.4 ) * 0.07 ), fine );",
-      "  float tongue = side * ( 1.0 - sk ) * smoothstep( 0.56, 0.80, nT ) * smoothstep( 0.0, edge, up ) * ( 0.35 + 0.4 * tb );",
+      "  float nT = fbm( vec2( x * 0.34 + nA * 2.6, ( arc - T * uRollV * 1.4 ) * 0.06 ), fine );",
+      "  float tongue = side * ( 1.0 - sk ) * smoothstep( 0.55, 0.76, nT ) * smoothstep( edge - 0.38, edge - 0.02, up ) * ( 0.55 + 0.35 * tb );",
       // the crest rolling over the back, and aerated sheets running down it
       "  float backF = ( 1.0 - side ) * ( smoothstep( 0.82, 0.97, up + ( nB - 0.5 ) * 0.25 )",
       "              + smoothstep( 0.62, 0.86, nS ) * smoothstep( 0.25, 0.8, up ) * 0.45 );",
@@ -3085,9 +3066,22 @@
          roller read as snow on rock: every boil a solid lit lump. Real
          whitewater is streaked with the dark water pouring through it, fall
          lines running down the face and dragged with the roll. */
-      "  float fall2 = fbm( vec2( x * 0.55 + nA * 1.5, arc * 0.018 - T * uRollV * 0.05 ), fine );",
+      "  float fall2 = fbm( vec2( x * 0.95 + nA * 1.5, arc * 0.022 - T * uRollV * 0.05 ), fine );",
       "  float runs = smoothstep( 0.52, 0.78, fall2 ) * side * ( 1.0 - sk );",
-      "  foam *= 1.0 - runs * 0.62;",
+      "  foam *= 1.0 - runs * 0.45;",
+      /* LACE (2026-09-27, keyart pass). Between the roller and the foot the
+         wall was one flat dark sheet, which is what made the whole face read
+         as rock with snow on it. A real face is MARBLED: a torn net of foam
+         stretched over the dark water, being drawn UP the face toward the
+         crest. The net is the creases of a warped, stretched cellular field
+         (irregular cells, never parallel stripes), patchy, densest just under
+         the roller where the foam is tearing off it. */
+      "  vec2 lq = vec2( x * 0.20 + nA * 2.4, ( arc + T * uRollV * 0.55 ) * 0.085 + nB * 0.9 );",
+      "  float cl = fine > 0.03 ? cellB( lq, T * 0.35 ).x : 0.6;",
+      "  float net = 1.0 - smoothstep( 0.60, 0.74, cl );",
+      "  net *= smoothstep( 0.30, 0.62, fbm( vec2( x * 0.035 + 11.0, arc * 0.03 + T * 0.08 ), fine ) );",
+      "  float lace = net * side * ( 1.0 - sk ) * ( 0.30 + 0.70 * smoothstep( 0.15, edge, up ) ) * ( 1.0 - rollF ) * fine;",
+      "  foam = max( foam, lace * ( 0.55 + 0.25 * tb ) );",
       /* THE WHITE LINE. Far out (or while the face is still low) the churn is
          sub-pixel and what the eye sees is a bright white line on the sea. */
       "  float far = max( smoothstep( 280.0, 900.0, dist ), 1.0 - smoothstep( 3.5, 9.0, uH ) );",
@@ -3101,34 +3095,44 @@
       "  vec3 Bt = cross( nrm, Tt );",
       "  vec2 gA = cA.yz * 3.0, gB = cB.yz * 3.0;",
       "  vec2 g = ( gA * 0.55 + gB * 0.35 * fine ) * foam + vec2( nB - 0.5, nS - 0.5 ) * 0.7 * ( 1.0 - foam );",
-      "  vec3 N = normalize( nrm - ( Tt * g.x + Bt * g.y ) * 0.62 * ( 1.0 - far * 0.7 ) );",
+      "  vec3 N = normalize( nrm - ( Tt * g.x + Bt * g.y ) * 0.38 * ( 1.0 - far * 0.7 ) );",
       "  float ndl = max( dot( N, uSunDir ), 0.0 );",
+      "  float ndlW = clamp( ( dot( N, uSunDir ) + 0.45 ) / 1.45, 0.0, 1.0 );",
       "  vec3 hemiL = mix( uGndCol, uSkyCol, 0.5 + 0.5 * N.y );",
       // ---- the body: dark, heavy, never glass
       "  vec3 body = mix( uBodySea, uBodyMud, pow( tb, 1.2 ) );",
-      "  body *= ( 0.62 + 0.62 * nA + 0.30 * ( nB - 0.5 ) ) * ( 0.75 + 0.55 * up * ( 1.0 - sk ) );",
+      "  body *= ( 0.80 + 0.34 * nA + 0.30 * ( nB - 0.5 ) ) * ( 0.75 + 0.55 * up * ( 1.0 - sk ) );",
       "  vec3 bodyLit = body * ( hemiL + uSunCol * ndl );",
       "  vec3 Hv = normalize( uSunDir + V );",
       "  float ndh = max( dot( N, Hv ), 0.0 );",
       "  float fres = pow( 1.0 - clamp( dot( N, V ), 0.0, 1.0 ), 5.0 );",
       "  bodyLit += uSunCol * ( pow( ndh, 60.0 ) * 0.45 * ( 1.0 - tb * 0.6 ) + pow( ndh, 8.0 ) * 0.05 );",
-      "  bodyLit += uSkyCol * ( 0.015 + 0.45 * fres ) * ( 1.0 - 0.5 * tb );",
+      /* the sky in it: a steep face seen from the beach is at near-normal
+         incidence, so this is the few percent a real one shows, carried by
+         the rippled normal so it reads as moving water, not paint */
+      "  vec3 Rv = reflect( -V, N );",
+      "  vec3 skyR = mix( uGndCol, uSkyCol * 1.25, smoothstep( -0.2, 0.5, Rv.y ) );",
+      "  bodyLit += skyR * ( 0.035 + 0.9 * fres ) * ( 1.0 - 0.45 * tb );",
+      /* THIN WATER NEAR THE LIP. Light comes THROUGH the top of the wall:
+         green-grey offshore, olive-brown with sediment, strongest with the
+         sun behind the wave. Without it the crest is a black silhouette. */
+      "  float thinW = side * ( 1.0 - sk ) * smoothstep( 0.50, 0.93, up );",
+      "  float back = pow( max( dot( -V, uSunDir ), 0.0 ), 3.0 );",
+      "  vec3 glow = mix( uGlowSea, uGlowMud, tb ) * ( hemiL * 0.9 + uSunCol * ( 0.25 + 1.2 * back ) );",
+      "  bodyLit += glow * thinW * ( 0.6 + 0.8 * nA );",
       // ---- the foam: lit boils with dark creases, dirty with sediment
       "  vec3 fc = mix( uFoamClean, uFoamMud, tb * tb * 0.8 + tb * 0.2 );",
       "  fc = mix( fc, uFoamClean, far * 0.6 );",
-      "  float ao = mix( 0.64, 1.0, smoothstep( 0.0, 0.75, cA.x ) ) * mix( 0.90, 1.0, cB.x ) * mix( 1.0, mix( 0.72, 1.0, boilV ), roll );",
+      "  float ao = mix( 0.78, 1.0, smoothstep( 0.0, 0.75, cA.x ) ) * mix( 0.93, 1.0, cB.x ) * mix( 1.0, mix( 0.84, 1.0, boilV ), roll );",
       "  ao = mix( ao, 1.0, far * 0.75 );",
-      "  vec3 foamLit = fc * ao * ( 0.82 + 0.36 * nA ) * ( hemiL * 0.85 + uSunCol * ( 0.22 + 0.78 * ndl ) );",
+      "  float grain = fine > 0.05 ? vn( vec2( x, fall ) * 2.7 ) * 0.5 + vn( vec2( x, fall ) * 6.1 + 3.3 ) * 0.5 : 0.5;",
+      "  vec3 foamLit = fc * ao * ( 0.84 + 0.20 * nA + 0.16 * ( grain - 0.5 ) * fine ) * ( hemiL * 1.05 + uSunCol * ( 0.34 + 0.66 * ndlW ) );",
+      // foam in its own shadow is lit through: aerated water, not grey plaster
+      "  foamLit += mix( uGlowSea, uGlowMud, tb ) * ( hemiL + uSunCol * 0.3 ) * ( 1.0 - ndlW ) * 1.4;",
       /* and it is TRANSLUCENT where it is thin: aerated water lit through,
          the body's own colour glowing in it, not paper white on top of it */
       "  vec3 thinLit = mix( bodyLit * 2.1 + uSkyCol * 0.06, foamLit, smoothstep( 0.35, 0.9, foam ) );",
       "  vec3 col = mix( bodyLit, mix( thinLit, foamLit, far ), foam );",
-      // ---- debris riding the churn
-      "  if ( fine > 0.05 ) {",
-      "    float dm = debris( vec2( x, arc - T * uRollV * 0.85 ) / 2.6, 0.05 + 0.30 * tb ) * fine;",
-      "    dm *= 0.30 + 0.70 * max( foam, side * ( 1.0 - sk ) );",
-      "    col = mix( col, uDebrisCol * ( hemiL + uSunCol * ndl * 0.6 ), dm * 0.85 );",
-      "  }",
       // ---- alpha: the back tail melts into the sea, the skirt is patches, the ends dissolve
       "  float a = mix( smoothstep( 0.0, 0.14, up ), 1.0, side );",
       "  a *= mix( 1.0, clamp( skirtF * 1.3 + 0.18 * ( 1.0 - smoothstep( 0.0, 0.9, sdn ) ), 0.0, 1.0 ), sk );",
@@ -3152,14 +3156,33 @@
 
   /* ============================================================
      THE CREST SPRAY: one Points draw, fully GPU-animated.
-     Two populations in one buffer: DROPLETS (small, dense, launched up off
-     the lip and dragged back and down) and MIST (big soft puffs that rise
-     and stream far behind the crest). The wind blows toward local -z, i.e.
-     against the direction of travel, which is what tears plumes back off a
-     real bore. Round soft sprites are generated in the fragment shader.
+     Three populations in one buffer:
+       DROPLETS (kind 0): small, dense, launched up off the lip and dragged
+         back and down by the wind.
+       MIST (kind 1): soft puffs that rise and stream far back behind the
+         crest; the plume you see torn off every big breaker.
+       VEIL (kind 2): huge, faint, slow puffs hugging the crest and the top
+         of the front. They are what dissolves the lip's silhouette into the
+         sky: without them the crest is a hard cut-out edge, which is the
+         single strongest "this is a mesh" tell.
+     The wind blows toward local -z (against the travel), which is what
+     tears plumes back off a real bore. Every sprite is a round, lumpy,
+     alpha-falloff puff computed in the fragment shader: never a card, never
+     a triangle, and it fades out before it reaches the lens.
      ============================================================ */
-  function tsuSprayBuild(W, H, hJitAt, zJitAt, rnd, light) {
-    const N = Math.max(280, Math.min(640, Math.round(W * 1.1)));
+  function tsuSprayBuild(W, H, hJitAt, zJitAt, rnd0, light) {
+    /* ONE draw off the caller's stream, then a private one: the sprite count
+       is a look knob, and tuning it must never reroll the caller's seeded
+       gameplay stream (the survival director's bearing, timing, crowd). */
+    let st = (Math.floor(rnd0() * 4294967296) >>> 0) || 1;
+    const rnd = function () {
+      st = (st + 0x6D2B79F5) >>> 0;
+      let t = st;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const N = Math.max(600, Math.min(1800, Math.round(W * 3.0)));
     const zs = H / 34;
     const pos = new Float32Array(N * 3), seed = new Float32Array(N * 4), kind = new Float32Array(N);
     for (let i = 0; i < N; i++) {
@@ -3168,7 +3191,8 @@
       pos[i * 3 + 1] = hJitAt(x) * H;
       pos[i * 3 + 2] = 2.6 * zs + zJitAt(x);
       seed[i * 4] = rnd(); seed[i * 4 + 1] = rnd(); seed[i * 4 + 2] = rnd(); seed[i * 4 + 3] = rnd();
-      kind[i] = rnd() < 0.34 ? 1 : 0;
+      const k = rnd();
+      kind[i] = k < 0.30 ? 0 : (k < 0.52 ? 1 : 2);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -3178,8 +3202,8 @@
     Object.assign(uni, {
       uTime: { value: 0 }, uHs: { value: 1 }, uH: { value: H }, uCurl: { value: 0.5 },
       uTurbid: { value: 0 }, uSpray: { value: 1 }, uWind: { value: 6 }, uScale: { value: 450 },
-      uClean: { value: new THREE.Color(0.86, 0.90, 0.92) },
-      uMud: { value: new THREE.Color(0.55, 0.50, 0.42) },
+      uClean: { value: new THREE.Color(0.90, 0.93, 0.95) },
+      uMud: { value: new THREE.Color(0.70, 0.66, 0.58) },
     });
     uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol;
     const VERT = [
@@ -3188,11 +3212,12 @@
       "uniform float uTime, uHs, uH, uCurl, uTurbid, uSpray, uWind, uScale;",
       "uniform vec3 uClean, uMud, uSunCol, uSkyCol;",
       "varying vec4 vCol;",
+      "varying vec3 vPuff;",   // seed, lumpiness, kind
       "#include <fog_pars_vertex>",
       "void main() {",
       "  vec4 s = aSeed;",
-      "  float mist = aKind;",
-      "  float L = mist > 0.5 ? 3.4 + 2.6 * s.y : 1.3 + 1.2 * s.y;",
+      "  float kd = aKind;",
+      "  float L = kd > 1.5 ? 5.0 + 4.0 * s.y : ( kd > 0.5 ? 3.4 + 2.6 * s.y : 1.3 + 1.2 * s.y );",
       "  float cyc = uTime / L + s.x;",
       "  float life = fract( cyc );",
       "  float gen = floor( cyc );",
@@ -3202,38 +3227,63 @@
       "  p.x += ( fract( sin( gen * 12.9898 + s.z * 78.233 ) * 43758.5453 ) - 0.5 ) * 4.0;",
       "  p.z += uCurl * 6.2 * uHs * 0.8;",
       "  float size, a;",
-      "  if ( mist > 0.5 ) {",
+      "  if ( kd > 1.5 ) {",
+      /* the veil: a churning cloud ON the roller, not behind it. s.w is how
+         far down the front a puff is born (0 = the lip, 1 = 12% down the
+         wall); the deep ones sit out in front of the face and tumble down
+         with the roll, the high ones lift off the lip and blow back. */
+      "    float dn = s.w;",
+      "    p.y += -uH * 0.12 * dn + ( 0.25 + 1.0 * ( 1.0 - dn ) ) * sh * tt - dn * 1.3 * sh * tt;",
+      "    p.z += ( 1.4 + 2.6 * dn + 2.0 * s.z ) * uH / 34.0 - uWind * 0.30 * ( 1.0 - dn ) * tt;",
+      "    p.x += ( s.y - 0.5 ) * 1.2 * tt;",
+      "    size = ( 9.0 + 16.0 * s.z ) * ( 0.35 + 0.65 * uHs ) * ( 0.75 + 0.7 * life );",
+      "    a = 0.50 * ( 1.0 - 0.5 * dn ) * sin( 3.14159 * life );",
+      "  } else if ( kd > 0.5 ) {",
       "    p.y += uH * 0.03 + ( 1.0 + 2.6 * s.w ) * sh * tt + 0.08 * tt * tt;",
       "    p.z -= uWind * ( 0.9 * tt + 0.10 * tt * tt );",
       "    p.x += ( s.z - 0.5 ) * 1.6 * tt;",
-      "    size = ( 4.5 + 8.0 * s.z ) * ( 0.4 + 0.6 * uHs ) * ( 0.6 + 1.8 * life );",
-      "    a = 0.40 * sin( 3.14159 * life );",
+      "    size = ( 5.5 + 9.0 * s.z ) * ( 0.4 + 0.6 * uHs ) * ( 0.6 + 1.8 * life );",
+      "    a = 0.50 * sin( 3.14159 * life );",
       "  } else {",
       "    float vy = ( 2.5 + 7.0 * s.w ) * sh;",
       "    p.y += vy * tt - 3.4 * tt * tt;",
       "    p.z += ( 0.8 + 2.2 * s.z ) * tt - uWind * 0.6 * tt * tt;",
       "    p.x += ( s.z - 0.5 ) * 2.0 * tt;",
-      "    size = ( 0.7 + 1.6 * s.y ) * ( 0.6 + 0.4 * uHs ) * ( 1.0 + 1.5 * life );",
-      "    a = 0.70 * smoothstep( 0.0, 0.08, life ) * pow( 1.0 - life, 1.3 );",
+      "    size = ( 0.6 + 1.3 * s.y ) * ( 0.6 + 0.4 * uHs ) * ( 1.0 + 1.5 * life );",
+      "    a = 0.75 * smoothstep( 0.0, 0.08, life ) * pow( 1.0 - life, 1.3 );",
       "  }",
       // no crest to tear where the wave has tapered into the sea
       "  a *= uSpray * smoothstep( 0.25, 0.6, position.y / max( 0.001, uH / uHs ) );",
-      "  vec3 c = mix( uClean, uMud, uTurbid * uTurbid ) * ( 0.88 + 0.12 * s.y ) * ( mist > 0.5 ? 0.9 : 1.0 );",
-      "  vCol = vec4( c * ( uSkyCol * 0.8 + uSunCol * 0.6 ), a );",
+      "  vec3 c = mix( uClean, uMud, uTurbid * uTurbid * 0.8 ) * ( 0.9 + 0.1 * s.y );",
+      // spray is lit from everywhere at once (it scatters): never darker than overcast
+      "  vec3 lit = max( uSkyCol * 0.95 + uSunCol * 0.55, vec3( 0.42 ) );",
+      "  vCol = vec4( c * lit, a );",
       "  vec4 mvPosition = modelViewMatrix * vec4( p, 1.0 );",
+      "  float dz = -mvPosition.z;",
+      // a puff that reaches the lens fades instead of filling the frame
+      "  vCol.a *= smoothstep( 1.5, 9.0, dz );",
+      "  vPuff = vec3( s.z * 17.0 + gen * 3.1, s.w, kd );",
       "  gl_Position = projectionMatrix * mvPosition;",
-      "  gl_PointSize = a > 0.003 ? clamp( size * projectionMatrix[1][1] * uScale / max( 0.5, -mvPosition.z ), 1.0, 256.0 ) : 0.0;",
+      "  gl_PointSize = vCol.a > 0.003 ? clamp( size * projectionMatrix[1][1] * uScale / max( 0.5, dz ), 1.0, 420.0 ) : 0.0;",
       "  #include <fog_vertex>",
       "}",
     ].join("\n");
     const FRAG = [
       "varying vec4 vCol;",
+      "varying vec3 vPuff;",
       "#include <fog_pars_fragment>",
+      TSU_GLSL_NOISE,
       "void main() {",
       "  vec2 c = gl_PointCoord * 2.0 - 1.0;",
       "  float d = dot( c, c );",
       "  if ( d > 1.0 ) discard;",
       "  float a = vCol.a * ( 1.0 - d ) * ( 1.0 - d );",
+      // the big puffs are lumpy, not discs: a cheap two-octave billow inside the falloff
+      "  if ( vPuff.z > 0.5 ) {",
+      "    vec2 q = gl_PointCoord * 2.6 + vec2( vPuff.x, vPuff.x * 0.7 );",
+      "    float n = vn( q ) * 0.65 + vn( q * 2.3 + 4.1 ) * 0.35;",
+      "    a *= smoothstep( 0.15, 0.85, n + 0.35 * ( 1.0 - d ) );",
+      "  }",
       "  gl_FragColor = vec4( vCol.rgb, a );",
       "  #include <tonemapping_fragment>",
       "  #include <encodings_fragment>",
@@ -3348,7 +3398,7 @@
     const phA = rnd() * 6.283, phB = rnd() * 6.283, phC = rnd() * 6.283, phD = rnd() * 6.283;
     const KSTEP = Math.max(3, Math.round(10 / (W / COLS))), KN = Math.ceil(COLS / KSTEP) + 2;
     const knH = [], knZ = [];
-    for (let k = 0; k < KN; k++) { knH.push(0.92 + rnd() * 0.16); knZ.push((rnd() - 0.5) * 3.4); }
+    for (let k = 0; k < KN; k++) { knH.push(0.96 + rnd() * 0.08); knZ.push((rnd() - 0.5) * 2.0); }
     const knot = function (arr, c) {
       const f = c / KSTEP, i = Math.min(KN - 2, Math.floor(f)), a = f - i;
       return arr[i] + (arr[i + 1] - arr[i]) * a * a * (3 - 2 * a);
@@ -3357,8 +3407,8 @@
       const u = c / COLS;
       const edge = Math.min(1, Math.min(u, 1 - u) / 0.14);
       const taper = 0.08 + 0.92 * edge * edge * (3 - 2 * edge);
-      const lf = 1 + 0.15 * Math.sin(u * 9.7 + phA) + 0.11 * Math.sin(u * 23 + phB) + 0.06 * Math.sin(u * 57 + phD);
-      zJit.push(knot(knZ, c) + Math.sin(u * 6.9 + phC) * 3.4 + Math.sin(u * 31 + phD) * 0.9);
+      const lf = 1 + 0.035 * Math.sin(u * 9.7 + phA) + 0.02 * Math.sin(u * 23 + phB) + 0.01 * Math.sin(u * 57 + phD);
+      zJit.push(knot(knZ, c) + Math.sin(u * 6.9 + phC) * 1.8 + Math.sin(u * 31 + phD) * 0.6);
       hJit.push(knot(knH, c) * lf * taper);
     }
     let hMean = 0; for (let c = 0; c <= COLS; c++) hMean += hJit[c];
@@ -3488,15 +3538,15 @@
     u.uFoam.value = foamGain;
     u.uSeaLocal.value = seaLocal;
     u.uSkirt.value = 0.75 + 0.45 * turbid;
-    u.uLumpA.value = Math.max(0.35, Math.min(3.2, H * 0.085)) * (0.75 + 0.5 * turbid);
+    u.uLumpA.value = Math.max(0.25, Math.min(1.3, H * 0.032)) * (0.75 + 0.45 * turbid);
     u.uRollV.value = (2.4 + 2.6 * turbid + 1.2 * curl) * Math.sqrt(Math.max(0.2, hs));
     /* THE LIP TEARS HARDEST WHEN IT IS BROKEN: curl is smallest exactly then
        (the callers fold the overhang at the crash), so sediment drives the
        crest raggedness too. */
     u.uLobe.value.set(
-      H * 0.055 * (0.35 + 0.80 * curl + 0.95 * turbid),
+      H * 0.022 * (0.35 + 0.80 * curl + 0.95 * turbid),
       (2.4 * curl + 3.2 * turbid) * hs,
-      H * 0.05 * (0.25 + 1.05 * turbid + 0.35 * curl),
+      H * 0.022 * (0.25 + 1.05 * turbid + 0.35 * curl),
       (0.6 + 1.8 * turbid) * hs);
     u.uLobeFrom.value = 0.79 - 0.13 * turbid;
 
@@ -3522,7 +3572,8 @@
       su.uTime.value = t; su.uHs.value = hs; su.uH.value = H;
       su.uCurl.value = curl; su.uTurbid.value = turbid;
       // a wave standing up hard, or one breaking through a town, tears the most
-      su.uSpray.value = Math.min(1.5, (0.35 + 0.55 * curl + 0.55 * turbid) * (0.6 + 0.5 * foamGain));
+      const burst = Number.isFinite(s.spray) ? Math.max(0, +s.spray) : 1;
+      su.uSpray.value = Math.min(2.0, (0.45 + 0.55 * curl + 0.55 * turbid) * (0.6 + 0.5 * foamGain) * burst);
       su.uWind.value = 4.5 + 3.5 * Math.sqrt(Math.max(0.2, hs));
       const r = CBZ.renderer;
       const ph = r && r.domElement ? r.domElement.height : 900;

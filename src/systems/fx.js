@@ -34,6 +34,22 @@
 
   function rng() { return Math.random(); }
 
+  // one shared radial-falloff sprite for every cloud (built on first use)
+  let discTex = null;
+  function softDisc() {
+    if (discTex) return discTex;
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d");
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, "rgba(255,255,255,1)");
+    gr.addColorStop(0.45, "rgba(255,255,255,0.75)");
+    gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    discTex = new THREE.CanvasTexture(c);
+    return discTex;
+  }
+
   // ---------------------------------------------------------------
   // particleCloud: one pooled Points cloud. The owner calls update()
   // each frame with a world center (camera for global weather, or a
@@ -84,7 +100,10 @@
     geo.setDrawRange(0, 0);
     const mat = new THREE.PointsMaterial({
       color: o.color != null ? o.color : 0xbcd2e8,
-      size: o.size || 0.18,
+      // a round, soft mote: an untextured PointsMaterial draws hard SQUARES,
+      // which is what every ash/smoke/spray cloud used to be
+      map: softDisc(),
+      size: (o.size || 0.18) * 1.35,     // the falloff eats the rim; keep the read size
       transparent: true, opacity: 0, depthWrite: false, fog: true,
       sizeAttenuation: o.sizeAttenuation !== false,
     });
