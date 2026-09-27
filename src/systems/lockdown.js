@@ -1,8 +1,12 @@
 /* ============================================================
    systems/lockdown.js — FACILITY LOCKDOWN.
 
-   When HEAT (game.detection) maxes out (~100) the whole block goes
-   into a one-shot, debounced LOCKDOWN:
+   THE WARDEN ORDERS IT (systems/prisonwarden.js). An assault on staff, an
+   escape, a riot, or the alarm (heat maxed out) on top of other trouble:
+   he calls CBZ.lockdown.begin(reason, {hunt, max}). Heat topping out on its
+   own no longer seals the block; it is reported to him as an "alarm"
+   incident and he decides (a first alarm is a shakedown). With no warden
+   module loaded the old heat trigger still fires. A lockdown is:
      • "LOCKDOWN" toast + a hard red flash + screen shake
      • a dedicated brief lockdown siren
      • a pulsing red full-screen vignette overlay (one fixed DIV,
@@ -11,11 +15,13 @@
        temporary speed boost (originals saved + restored on lift)
      • the yard door is slammed shut (CBZ.closeDoor)
 
-   It LIFTS only once the player has stayed UNSEEN (witnessGuard()
-   null) AND heat has cooled below ~25 for ~6 CONTINUOUS seconds —
-   any glimpse or heat spike resets that timer. On lift the siren
-   stops, the overlay fades out, guard speeds restore, and the door
-   re-opens *only if the player actually holds the keycard*.
+   It LIFTS once the player has stayed UNSEEN (witnessGuard() null)
+   AND heat has cooled below ~25 for ~6 CONTINUOUS seconds, or when the
+   order's own clock runs out (`max`, 2.5 in-game hours from the warden),
+   whichever is first. A lockdown always ends. On lift the overlay fades,
+   guard speeds restore, and the door re-opens *only if the player
+   actually holds the keycard*. Guards are aimed at the player only when
+   he is the reason (`hunt`); a riot lockdown just racks the block.
 
    Tense but always escapable: drop out of sight, let it cool.
 
@@ -65,6 +71,10 @@
   let elapsedT = 0;            // seconds this lockdown has been live (for GRACE)
   let pulse = 0;              // 0..1 vignette intensity envelope (eased)
   let fading = false;          // overlay is fading out after a lift
+  let huntPlayer = true;       // is the player the reason for this one?
+  let maxT = 0;                // the order's own clock (0 = none)
+  let reason = "";
+  let alarmArmed = true;       // heat must fall back before it reports again
   // boosted-guard bases live in the shared CBZ.jailBoost ledger (tag
   // "lockdown"); new-run detection shares its elapsed watcher too. The tight
   // 0.001 epsilon is this module's original threshold, kept verbatim.
@@ -114,7 +124,6 @@
       // SHOW DON'T TELL: the grace IS the screws walking past your door
       // without stopping. Printing "they walk past" over the top of them
       // walking past is the caption track the owner asked us to delete.
-      if (grace) tellHint("Count time, stay in your cell and they walk past.", 2.2);
     }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;
@@ -123,8 +132,9 @@
       // lockdown ran. entities/guards.js now reads a hunt honestly: chase
       // what he sees, otherwise sweep outward from the last fix the block
       // has (his own sighting, a radio call, a lens). Hiding works.
-      if (!grace && !(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
-      gd.alert = Math.max(gd.alert || 0, grace ? 0.6 : 1.0);
+      if (huntPlayer && !grace && !(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
+      // a riot lockdown racks the block; it does not freeze every screw staring
+      if (huntPlayer) gd.alert = Math.max(gd.alert || 0, grace ? 0.6 : 1.0);
       // apply the boost once per guard; the ledger remembers its real base
       // speed (snapshotted on first scale) so repeats can never compound
       if (typeof gd.speed === "number" && CBZ.jailBoost && !CBZ.jailBoost.held("lockdown", gd)) {
@@ -379,6 +389,13 @@
   CBZ.cellMusterActive = function () { return musterOn; };
   // entities/guards.js: out of your cell during a lockdown is a reason to look
   CBZ.lockdownActive = function () { return active; };
+  // the warden's hand on it (systems/prisonwarden.js)
+  CBZ.lockdown = {
+    begin: function (why, opts) { if (CBZ.game.mode !== "escape") return false; return begin(why, opts); },
+    end: function () { return end(); },
+    active: function () { return active; },
+    audit: function () { return { active: active, reason: reason, hunt: huntPlayer, t: Math.round(elapsedT * 10) / 10, max: maxT }; },
+  };
   CBZ.cellMusterAudit = function () {
     return { active: musterOn, held: mustered.size, sealed: sealedCells.size,
       cells: wing() ? wing().cells.length : 0 };
@@ -392,9 +409,13 @@
   let graceSaid = false;
 
   // ---- begin / end ----
-  function begin() {
-    if (active) return;
+  function begin(why, opts) {
+    if (active) return false;
+    opts = opts || {};
     active = true;
+    reason = why || "heat";
+    huntPlayer = opts.hunt !== false;
+    maxT = opts.max > 0 ? +opts.max : 0;
     fading = false;
     sirenT = 0;          // blare immediately
     clearT = 0;
@@ -413,7 +434,7 @@
       const fl = CBZ.el && CBZ.el.flash;
       if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); }
     } catch (e) {}
-    if (CBZ.setObjective) try { CBZ.setObjective("LOCKDOWN. Get out of sight and lay low to lift it."); } catch (e) {}
+    if (CBZ.setObjective) try { CBZ.setObjective("Lockdown. Get to your cell."); } catch (e) {}
     // a BRIEF real siren burst as the block seals — then the guards take over
     // (whipped up to beat/bed inmates). No annoying sustained loop.
     if (CBZ.sfx) try { CBZ.sfx("lockdown"); } catch (e) {}
@@ -424,10 +445,11 @@
     // ...and the block goes behind its doors. The seal itself lands SEAL_DELAY
     // later, so there is a walk between the siren and the racking of the bars.
     if (CBZ.cellMuster) try { CBZ.cellMuster(true); } catch (e) {}
+    return true;
   }
 
   function end() {
-    if (!active) return;
+    if (!active) return false;
     active = false;
     fading = true;       // overlay eases out in the always-tick
     restoreGuards();
@@ -435,13 +457,11 @@
     graceSaid = false;
 
     tellToast("ALL CLEAR");
-    if (CBZ.setObjective) try { CBZ.setObjective("The block calms down. Keep your head low."); } catch (e) {}
+    if (CBZ.setObjective) try { CBZ.setObjective(""); } catch (e) {}
 
     // re-open the yard door ONLY if the player actually has the keycard
-    if (g && g.hasKey && CBZ.openDoor) {
-      try { CBZ.openDoor(); } catch (e) {}
-      tellHint("Your keycard pops the gate back open.", 2.0);   // the gate opening says it
-    }
+    if (g && g.hasKey && CBZ.openDoor) { try { CBZ.openDoor(); } catch (e) {} }
+    return true;
   }
 
   // fully reset everything (new run / leaving play). Hard-clears the overlay
@@ -453,6 +473,7 @@
     active = false;
     fading = false;
     sirenT = 0; clearT = 0; elapsedT = 0; pulse = 0;
+    maxT = 0; reason = ""; huntPlayer = true; alarmArmed = true;
     if (overlay) overlay.style.opacity = "0";
   }
   // leaving play must also hand the block back — the live driver below only
@@ -483,8 +504,14 @@
     musterDrive(d);
 
     if (!active) {
-      // arm the lockdown when heat tops out
-      if (typeof g.detection === "number" && g.detection >= TRIGGER_HEAT) begin();
+      // heat topping out is an ALARM, and the warden decides what it is worth
+      const heat = typeof g.detection === "number" ? g.detection : 0;
+      if (heat < TRIGGER_HEAT - 20) alarmArmed = true;
+      if (alarmArmed && heat >= TRIGGER_HEAT) {
+        alarmArmed = false;
+        if (CBZ.warden && CBZ.warden.incident) CBZ.warden.incident("alarm", { player: true, seen: true });
+        else begin("heat", { hunt: true });
+      }
       return;
     }
 
@@ -505,6 +532,7 @@
     if (seen && playerAtCount()) seen = false;
     const cool = typeof g.detection === "number" ? g.detection < COOL_HEAT : true;
 
+    if (maxT > 0 && elapsedT >= maxT) { end(); return; }
     if (!seen && cool && elapsedT >= GRACE) {
       clearT += d;
       if (clearT >= CLEAR_SECS) { end(); return; }

@@ -439,6 +439,10 @@
      the old behaviour was `undefined` — which is falsy, same as the new
      `false`. systems/interact.js's prisonSay has always done this. */
   function say(ped, text, color, secs) {
+    // In the prison a person's line goes over his head (systems/interact.js).
+    // Prison actors keep their position on .group.position, not .pos, so this
+    // band's range gate below used to throw for every one of them.
+    if (CBZ.game && CBZ.game.mode === "escape" && CBZ.prisonSay) return CBZ.prisonSay(ped, text, { secs: secs || 2.2 });
     if (!ped || ped.dead || !ped.group || !text) return false;
     // only show near the camera so we don't pay for the whole map
     const P = CBZ.player;

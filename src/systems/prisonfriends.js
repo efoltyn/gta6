@@ -364,7 +364,7 @@
     if (!offered(a)) {
       // The offer lapsed between render and press (a count started, he took a
       // swing at you). Say so rather than silently doing nothing.
-      return { ok: false, msg: `${nameOf(a)} isn't in the mood.` };
+      return { ok: false, msg: "Not now." };
     }
     a.pfFriend = true;
     a.pfPitchT = 0;
@@ -380,8 +380,8 @@
     CBZ.sfx && CBZ.sfx("coin");
     const n = count();
     const msg = n >= 3
-      ? `From here I'm with you. That's ${n} of us now.`
-      : "From here I'm with you. Anyone comes at you, they come at me.";
+      ? "I'm with you."
+      : "I'm with you. Anybody comes at you, comes at me.";
     return { ok: true, msg: msg };
   }
 
@@ -484,7 +484,7 @@
       ? CBZ.GANG_NAMES[a.gang]
       : ((CBZ.GANG_NAMES || ["the Reds", "the Blues"])[CBZ.player && CBZ.player.gang === 0 ? 1 : 0]);
     const n = numword(a.pfMissed || MISSED_QUIT);
-    say(a, `${n.charAt(0).toUpperCase()}${n.slice(1)} chows and nothing. I eat with ${table} now.`, 3.4);
+    say(a, `${n.charAt(0).toUpperCase()}${n.slice(1)} meals. I'm done.`, 2.4);
     a.pfMissed = 0;
     unshadow(a);
     syncCrew();
@@ -571,7 +571,7 @@
           const c = held.cigs;
           // Only a line somebody actually heard counts as handed over; out of
           // earshot he tries again next slice until the half minute is up.
-          if (near && say(near, `They didn't check my sock. ${c} of yours ${c === 1 ? "is" : "are"} still in it.`, 3.2)) held = null;
+          if (near && say(near, `Kept ${c} of yours in my sock.`, 2.4)) held = null;
         }
       }
     }
@@ -614,10 +614,10 @@
         a.pfPitchT = OFFER_LINE_GAP;
         const why = reasonFor(a);
         const line = why === "you saved him"
-          ? "You didn't have to step in back there. I don't forget that."
+          ? "You stepped in. I owe you."
           : why === "a regular"
-            ? "You keep coming back to me. Say the word and I'm yours."
-            : "You've run every errand I gave you. Ask me for anything.";
+            ? "You want me with you, say so."
+            : "You did right by me. I'm with you if you want.";
         if (CBZ.prisonSay) CBZ.prisonSay(a, line, { secs: 3.2 });
         else if (CBZ.citySay) CBZ.citySay(a, line, null, 3.2);
       }
@@ -630,7 +630,7 @@
       if (!(a.pfPitchT > 0) && !a.pfHeldSaid && heldBack(a) && dist2ToPlayer(a) < 64) {
         a.pfHeldSaid = true;
         a.pfPitchT = OFFER_LINE_GAP;
-        say(a, `You already run with ${crewNames()}. I'm not standing ${ordinal(crewN + 1)} in nobody's line.`, 3.6);
+        say(a, "You got enough people.", 2.2);
       }
     }
   }

@@ -1,7 +1,7 @@
 /* ============================================================
-   interact_touch.css — the prison interaction surface on TOUCH
-   (systems/interact.js, flags PRISON_INTERACT_TOUCH /
-   PRISON_INTERACT_SUBTITLE). Linked AFTER mobile.css.
+   interact_touch.css — the prison interaction surface on TOUCH, and the
+   prison's over-head speech (systems/interact.js, flag
+   PRISON_INTERACT_TOUCH). Linked AFTER mobile.css.
 
    OWNER, 2026-08-20: "the prison game buttons suck on iPhone but the
    nat disaster buttons are PERFECT — switch the style."
@@ -30,10 +30,9 @@
                 four" and "overflow" is a KEYBOARD fact (I J K L) and a
                 thumb should never see a seam because of it. On iPad
                 they become the explained vertical rail below.
-     #pinteractWho / .pi-subtitle
-                the actor's name, read and one teaching line, and the
-                spoken result — both in hud.css's .world-subtitle
-                grammar (Fredoka 700 white, black stroke, NO box)
+     #pinteractWho
+                one line above the verbs: a stall's item and price, and
+                nothing else (no name plate, no read, no teaching line)
 
    --------------------------------------------------------------------
    WHERE THE DOCK SITS — copied from the thing being copied.
@@ -60,12 +59,6 @@
      reserve is the name plate plus a top margin. */
   --pi-stack-max: calc(100vh - var(--sv-bottom) - 128px);
 
-  /* ---- the spoken line, mirroring hud.css's .world-subtitle band ------- */
-  --pi-sub-line: clamp(21px, min(2.45vw, 4.2vh), 36px);
-  --pi-sub-floor: calc(env(safe-area-inset-bottom, 0px) + 206px);
-}
-@media (max-width:900px),(max-height:560px){
-  :root{ --pi-sub-floor: calc(env(safe-area-inset-bottom, 0px) + 186px); }
 }
 /* ---- THE FLOOR IS NOT EMPTY IN PORTRAIT ----------------------------------
    34px seats the first pill level with the thumb, which is right, and was
@@ -235,9 +228,7 @@
 #pinteractWho > span{
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#pinteractWho .piw-name{ font-size: 15px; font-weight: 700; letter-spacing: 1.3px; color: #fff; }
 #pinteractWho .piw-note{ font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #ffd451; }
-#pinteractWho .piw-tip{ font-size: 11.5px; font-weight: 600; color: #d7e4f3; opacity: .92; }
 
 /* the 0.35 s post-action cooldown, made visible: interact.js refuses the
    input anyway, so this only stops the row from LOOKING live while it is not.
@@ -246,52 +237,30 @@
 #pinteract.cool button{ pointer-events: none; }
 
 /* ============================================================
-   4. THE SPOKEN LINE — hud.css's .world-subtitle grammar, reproduced
+   4. SPEECH OVER THE SPEAKER'S HEAD (#prisonSpeech .psay, interact.js)
 
-   Owner: "instead of the current text options use from the gang city
-   game that exact look of dialogue." That look is one line of heavy
-   white Fredoka with a 1.6px black stroke and a layered shadow, bottom
-   centre, with NO panel behind it. Reproduced here under our own class
-   names rather than borrowing .world-subtitle, so a change to the city
-   dialogue band can never silently move the prison one (and this file
-   stays revertible on its own). The speaker stays in the accessible
-   text and out of the picture — the observed world shows the LINE.
+   One short line per speaker, pinned above his head by projecting the
+   world point through the live camera every frame. Two on screen at most.
+   No box, no name, no stroke and no offset shadow: the shared zero-offset
+   ink halo from css/hud.css (--ink-shadow), so the words can never render
+   as two layers. Small on purpose: it is a man talking across a yard.
 ============================================================ */
-.pi-subtitle{
-  --pi-sub-shadow:
-    -2px -2px 0 #090909, 2px -2px 0 #090909,
-    -2px 2px 0 #090909, 2px 2px 0 #090909,
-    0 3px 1px rgba(0,0,0,.9);
-  position: fixed;
-  left: 50%;
-  /* --subtitle-rank is hud.css's ONE subtitle ladder (see "TWO SUBTITLE LAYERS
-     NEVER SHARE PIXELS" there). This band and #citySpeech's resolve to the same
-     120px floor on touch, so this layer is a rung in that ladder rather than a
-     third element quietly parked on top of it. 0px when nothing is under it. */
-  bottom: calc(var(--pi-sub-floor) + var(--subtitle-rank, 0px));
-  width: min(940px, calc(100vw - 34px));
-  box-sizing: border-box;
-  z-index: 27;
+#prisonSpeech{ position: fixed; inset: 0; pointer-events: none; z-index: 27; }
+#prisonSpeech .psay{
+  position: absolute;
+  transform: translate(-50%, -100%);
+  max-width: min(46vw, 340px);
+  width: max-content;
   font-family: Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
-  text-align: center;
-  pointer-events: none;
-  opacity: 0; transform: translate(-50%, 10px);
-  transition: opacity .14s ease, transform .14s ease;
+  font-size: clamp(14px, 1.9vh, 19px);
+  font-weight: 600; line-height: 1.12; letter-spacing: .005em;
+  color: #fff; text-align: center; text-wrap: balance;
+  text-shadow: var(--ink-shadow, 0 0 2px #000, 0 0 5px rgba(0,0,0,.7));
+  opacity: 1;
+  transition: opacity .3s ease;
+  white-space: normal;
 }
-.pi-subtitle.show{ opacity: 1; transform: translate(-50%, 0); }
-.pi-subtitle .pi-subtitle-speaker{
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-}
-.pi-subtitle .pi-subtitle-line{
-  margin: 0; color: #fff;
-  font-size: var(--pi-sub-line);
-  font-weight: 700; line-height: 1.1; letter-spacing: .005em;
-  text-align: center; text-wrap: balance;
-  -webkit-text-stroke: var(--ink-stroke, 1.6px) var(--ink, #090909);
-  paint-order: stroke fill;
-  text-shadow: var(--ink-shadow, var(--pi-sub-shadow));
-}
+#prisonSpeech .psay.out{ opacity: 0; }
 
 /* ============================================================
    5. WHO YIELDS TO WHOM
@@ -306,9 +275,9 @@
 
 /* every surface that already hides #interact hides its replacement too */
 body.full-map-open #pinteract,
-body.full-map-open .pi-subtitle,
+body.full-map-open #prisonSpeech,
 body.sim-view #pinteract,
-body.sim-view .pi-subtitle,
+body.sim-view #prisonSpeech,
 body.tveh-on #pinteract{ display: none !important; }
 
 /* ============================================================
@@ -339,7 +308,6 @@ body.tveh-on #pinteract{ display: none !important; }
     width: 100%;
     align-items: flex-end;
   }
-  #pinteractWho .piw-tip{ display: none !important; }
   #pinteract .pi-row{
     display: flex;
     flex-direction: column;      /* not the phone's column-reverse: this rail
@@ -435,36 +403,5 @@ body.tveh-on #pinteract{ display: none !important; }
     transform: translateY(3px);
     box-shadow: 0 1px 0 rgba(0,0,0,.35);
   }
-  .pi-choice .pi-tips-action{
-    border-color: rgba(255,255,255,.3);
-    color: #d2d9e1;
-    background: rgba(22,28,36,.92);
-    font-size: 12px;
-  }
-  .pi-choice .pi-tips-action.on{ border-color: rgba(125,231,255,.48); color: #7de7ff; }
 }
 
-/* ---- THE TOUCH SUBTITLE BAND ---------------------------------------------
-   Identical reasoning to mobile.css's own .world-subtitle block: on a tablet
-   the two thumb clusters are in the CORNERS, so the answer is a narrower
-   centre column rather than a higher band — lifting dialogue over the
-   joystick would put it a third of the way up the screen.
-
-   THE 196px CLEARANCE THIS USED TO CLAIM IS GONE. It was true while the verb
-   row was parked level with the eye button; the row is a thumb dock now and
-   the band would have run straight through it. The clearance is measured
-   instead of asserted — see --pi-dock-h below. */
-body.touch{
-  --pi-sub-line: clamp(16px, 2.35vh, 24px);
-  /* 120 clears the #hotbar (bottom:16px, 50px tall). --pi-dock-h is the live
-     height of the whole dock — name plate and verb stack — as published by
-     interact.js after every re-render
-     (0 on iPad, where the rail is a right-edge column that never reaches the
-     centre band): on a phone the band rides above the buttons instead of
-     through them. */
-  --pi-sub-floor: max(calc(120px + env(safe-area-inset-bottom, 0px)),
-                      calc(var(--sv-bottom) + var(--pi-dock-h, 0px) + 14px));
-}
-body.touch .pi-subtitle{
-  width: max(46vw, min(640px, calc(100vw - 512px)));
-}

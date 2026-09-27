@@ -1,17 +1,29 @@
 /* ============================================================
-   systems/capture.js — what happens when a HUNT closes in. No freeze,
-   no teleport-on-meter. Guards inside the wire carry less-lethal gear
-   (researched: batons, OC spray, tasers — never firearms), so they
-   escalate hands-on:
+   systems/capture.js — what happens to your BODY in the prison: hurt, downed,
+   arrested, cuffed, held, carried, killed.
 
-       1st contact → BATON      (short stun)
-       2nd contact → TASER      (longer stun)
-       3rd contact → HAULED back to your cell
+   THE LAW (2026-09-27, with systems/prisonlaw.js). Owner: "getting handcuffed
+   is way too easy. It's way too easy to die." Before: a hunting screw that
+   touched you tased, tackled and cuffed you; every cuffing was a strike and
+   every strike below the top tier was a TRANSFER; losing a fistfight at 0 hp
+   was a cuffing. Now:
 
-   Firearms only exist on the perimeter: if you're deep in the exit
-   corridor while red-hot, the TOWER opens fire. And if YOU lifted a
-   piece from the armory, you can shoot back (press F) — at the cost
-   of a ton of heat.
+     ARREST   a hunting guard inside ~4 m ORDERS you ("On the ground!").
+              ~2.2 s to comply (stop, or crouch). No offense on file or a
+              minor one: comply = a pat-down and a warning, no cuffs. A real
+              offense + comply = calm cuffs. Resist (run, swing) = taser, and
+              resisting after the taser = tackle, then cuffs.
+     CUFFS    only an ESCAPE capture (offense "escape", out of bounds, the
+              sterile zone, a hot exit run) goes up a tier. Every other
+              cuffing is THE HOLE: walked to your cell, door sealed 25-40 s,
+              contraband gone, a small cigarette cut, then released with a
+              grace window. No strike.
+     DOWNED   0 hp from fists = down, not dead and not captured: guards break
+              it up and carry you to the infirmary. A shank or a bullet downs
+              you too, but a second lethal down inside 3 min, being stabbed
+              while down, or tower fire in the sterile zone is DEATH.
+     REGEN    out of a fight for 8 s you heal slowly to 70; Doc Mercer in the
+              infirmary heals you to full.
 ============================================================ */
 (function () {
   "use strict";
@@ -21,17 +33,7 @@
 
   const fadeEl = document.getElementById("fade");
 
-  // ---- THREE STRIKES (JAIL_STRIKES) ----
-  // Getting caught finally MATTERS. Every capture (tower haul or cuffed
-  // escort) is a strike:
-  //   1 — warning: shakedown (half your cigs) + a short cell confinement beat
-  //   2 — final warning: same, plus a permanent heat floor (detection.js
-  //       reads g.strikeHeatFloor) and extra guard sweeps past your cell
-  //       block (g.cellWatch drives the pulse below)
-  //   3 — TRANSFERRED TO MAX SECURITY: the run is LOST (CBZ.loseGame)
-  // The campaign's prison phase never hard-fails ("no mission fails · the
-  // manhunt follows"): there, strike 3+ repeats the strike-2 squeeze.
-  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES == null) CBZ.CONFIG.JAIL_STRIKES = true;
+  // THE HOLE / ESCAPE STRIKES: confineT is the sealed-cell clock both use.
   let confineT = 0;          // cell-confinement countdown after a strike
   let confineShown = -1;     // last whole second painted on the hint line
   let cellWatchCD = 0;       // strike-2+: cadence of extra cell-block sweeps
@@ -164,7 +166,7 @@
   CBZ.releasePlayerCell = releasePlayerCell;
 
   // ---- watch-tower armed response (telegraphed, escalating) ----
-  let towerSeq = 0;        // 0 idle · 1 warning shots · 2 final volley · 3 hit
+  let towerSeq = 0;        // 0 idle, 1 warning shots, 2 final volley, 3 firing on you
   let towerT = 0;          // seconds elapsed in the current engagement
   let towerShotCD = 0;     // spacing between tower bursts
   let towerSrc = null;     // {x,z} of the firing tower
@@ -234,204 +236,215 @@
   // straight through to the popup it used to write.
   CBZ.jailTell = { toast: tellToast, hint: tellHint, on: showing };
 
-  // A MAN IS RESTRAINED BEFORE HE IS MOVED. This used to be the "instant
-  // version": string → teleport → strike on the same frame — and with the
-  // tier ladder on, applyStrike() turns a strike straight into the
-  // TRANSFERRED card, so a tower round or an empty stomach reclassified you
-  // to a higher security level without a hand ever landing on you (USER:
-  // "you can just get transferred without being physically restrained").
-  // The city never does that — wanted.js's bust() runs hands → cuff → walk →
-  // ride before book-in — so every haul now runs the pen's own restraint
-  // beat: you are already down (every caller fires at hp<=0 or
-  // dead-to-rights), the screws cuff you, fade to black, wake in the cell.
-  // The strike/transfer fires at the blackout, cuffed, like every capture.
-  // opts.strike:false = a medical drag (starvation), not a capture: no
-  // strike, no transfer — the screws just put you back in your bunk.
+  // Every haul runs the pen's restraint/carry SCENE (startEscort below), never
+  // a string and a teleport. opts.kind picks what the blackout means:
+  //   "hole"     cuffed, walked to your cell, sealed in for a while (default)
+  //   "transfer" cuffed after an ESCAPE: the strike/tier path (applyStrike)
+  //   "medical"  carried to the infirmary (downed, starving): no cuffs, no strike
+  // opts.strike:false (the old medical-drag flag) still means "medical".
   function haulToCell(msg, opts) {
-    // the red flash IS the hit that dropped you; the cuffs follow it
-    if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-    startEscort(msg || "BACK TO YOUR CELL", opts);
+    opts = Object.assign({}, opts || {});
+    if (opts.strike === false && !opts.kind) opts.kind = "medical";
+    if (!opts.kind) opts.kind = (CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture()) ? "transfer" : "hole";
+    flash();
+    startEscort(msg, opts);
   }
   CBZ.haulToCell = haulToCell;
+  function law(k, n) { if (CBZ.prisonLawCount) CBZ.prisonLawCount(k, n); }
+  function clock() { return (g && g.elapsed) || 0; }
 
-  // one CAUGHT = one strike. Called right after g.caughtCount++ from both
-  // capture paths (instant tower haul + cuffed-escort blackout).
+  // AN ESCAPE CAPTURE, cuffed, at the blackout. The only path that moves the
+  // tier ladder (systems/prisontiers.js transfer()); at the top of the ladder
+  // it is a long stretch in the hole instead.
   function applyStrike() {
-    if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES)) return;
     if (g.mode !== "escape" || g.role === "cop") return;
     const campaign = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
-    /* THE LADDER MOVES ON EVERY CAPTURE (systems/prisontiers.js). OWNER:
-       "each time you get caught escaping you go to the higher level" — so
-       below ULTRA-MAX any capture ships you UP a security level, not just
-       the third; the in-tier strike squeeze now belongs to the campaign and
-       to the top of the ladder. At ULTRA-MAX there is nowhere left to send
-       you, so the count is held at the final-warning rung and every further
-       capture is what a segregation unit actually does with you — the door
-       of your own cell. The regime IS the punishment there, which is the
-       whole point of having built one. With the ladder OFF this file is the
-       legacy three-strikes-then-loss it always was. */
     const T = CBZ.prisonTier;
     const tiered = !!(T && T.enabled());
     if (tiered && T.top()) g.caughtCount = Math.min(g.caughtCount || 0, 2);
     const strike = g.caughtCount || 0;
-
-    // a capture closes the manhunt that led to it — the strike IS the payback
     g.witnessReportT = 0; g.lastKnown = null;
-
-    // ---- AND IT COSTS YOU TIME. A strike used to be worth nothing at all
-    // until the third one; now every capture lengthens the thing you are
-    // actually in here spending. It is the same clock the release runs on, so
-    // there is no second penalty ledger.
-    if (pipeOn() && (+g.jailSentence || 0) > 0) {
-      g.jailSentence = (+g.jailSentence || 0) + STRIKE_TIME;
-      sentShown = -1;
-      // no "+45s" popup: the number the popup announced is the number already
-      // standing in the objective readout, and it visibly jumps.
-      tellHint("+" + STRIKE_TIME + "s on your sentence.", 2.2);
-    }
-
-    /* Shakedown: the screws pocket half your cigs on every strike — EXCEPT
-       the capture that is a transfer. A man cannot be robbed twice for one
-       arrest, and the destination's reception search (systems/prisontiers.js
-       packs it as you leave) is a strictly harder one: half into MEDIUM, a
-       quarter into HIGH, nothing at all into segregation. Skipping the wing
-       shakedown here is what keeps the tier table's own rule TRUE rather than
-       silently a half of a half. */
-    // BELT + BRACES on the city's law (wanted.js: hands → cuff → ride before
-    // book-in): a TRANSFER is the end of an ARREST, so it requires the cuffs
-    // to actually be on. Every live caller reaches here through the escort
-    // blackout and IS cuffed; a future unrestrained caller degrades to the
-    // in-tier strike below, never to the card.
+    if (pipeOn() && (+g.jailSentence || 0) > 0) { g.jailSentence = (+g.jailSentence || 0) + STRIKE_TIME; sentShown = -1; }
+    // a TRANSFER is the end of an ARREST: the cuffs must actually be on
     const restrained = !!(CBZ.playerChar && CBZ.playerChar.cuffed) || player.captureState === "cuffed";
     const transferring = tiered && !T.top() && !campaign && restrained;
+    // the destination's reception search is the shakedown on a transfer
     let taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
-    // CREW PALM A CUT. systems/prisonfriends.js: each of your men within
-    // arm's reach of the shakedown quietly holds a slice (0.25/man, cap
-    // 0.75) — and the nearest one tells you what he palmed a beat later.
-    // Banking through people you earned is what a posse is FOR.
     if (taken > 0 && CBZ.posseShelterCut) taken = CBZ.posseShelterCut(taken);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
-
     if (transferring || (!tiered && strike >= 3 && !campaign && restrained)) {
-      // TRANSFERRED TO MAX SECURITY — the run is over. Clean up any capture
-      // theatrics first so the lose screen isn't hidden under the fade.
       endEscort();
       confineT = 0; confineShown = -1;
-      releasePlayerCell();        // a transferred man leaves no door of ours shut
-      // the next run names what the reception search took (escapeplan.js)
+      releasePlayerCell();
       if (CBZ.escapePlan && CBZ.escapePlan.noteTransferLoss) { try { CBZ.escapePlan.noteTransferLoss(); } catch (e) {} }
-      // TRANSFERRED, and now it means it. The tier owns the whole beat from
-      // here — it packs what survives a reception shakedown, moves you up the
-      // ladder and shows the between-levels card through CBZ.loseGame, which
-      // is the same result screen this line always ended on. It only declines
-      // when the ladder is off, and then this is the flat loss it always was.
+      law("transfers");
       if (tiered && T.transfer()) return;
       if (CBZ.loseGame) CBZ.loseGame("transferred");
       return;
     }
-
-    /* THE SHAKEDOWN TAKES THE PLAN. Half your cigs was the whole price of a
-       capture, and a keycard, a gate key or a hacksaw blade walked back to the
-       cell with you, so getting caught cost nothing that mattered to the
-       escape. Now every key and tool goes, the cut culvert grate is welded
-       again and the desk card goes back on the desk; systems/escapeplan.js
-       does it and says what you lost, on screen and on the plan panel. */
     if (CBZ.escapePlan && CBZ.escapePlan.confiscate) { try { CBZ.escapePlan.confiscate(); } catch (e) {} }
-
     if (strike >= 2) {
-      // strike two (and every campaign strike after it): the block stays hot
       g.strikeHeatFloor = Math.max(g.strikeHeatFloor || 0, 12);
       g.detection = Math.max(g.detection, g.strikeHeatFloor);
-      g.cellWatch = true;               // extra sweeps past your cell (below)
-      confineT = 7;
-      tellToast(campaign && strike >= 3 ? "STRIKE · THE WARDEN KEEPS YOU"
-        : (tiered && T.top() ? "STRIKE · SEGREGATION" : "STRIKE 2 · FINAL WARNING"));
-      tellHint(campaign && strike >= 3
-        ? `The warden blocks your transfer${taken ? ` — but the screws take ${taken} cigs` : ""} and the block stays hot.`
-        : (tiered && T.top()
-          ? `${taken ? taken + " cigs confiscated. " : ""}Nowhere left to send you. The block stays hot.`
-          : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`), 3.4);
-    } else {
-      confineT = 4;
-      tellToast("STRIKE 1 · SHAKEDOWN");
-      tellHint(`${taken ? taken + " cigs confiscated. " : ""}Two more strikes and you're shipped to max security.`, 3.2);
+      g.cellWatch = true;
     }
-    // THE SHAKEDOWN IS A THING THAT HAPPENS TO YOU, not a sentence about a
-    // thing. Cigs already left your pocket above (the counter drops in front of
-    // you); the strike now also lands ON the body — a shove into the cell and a
-    // hard flash — so a capture reads as being handled rather than being told.
-    if (showing()) {
-      if (CBZ.shake) CBZ.shake(strike >= 2 ? 0.85 : 0.6);
-      if (CBZ.sfx) { try { CBZ.sfx(taken > 0 ? "coin" : "punch"); } catch (e) {} }
-      if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-    }
-    // the confinement beat is safe time: guards can't re-grab you in the cell
+    confineT = strike >= 2 ? 40 : 32; confineShown = -1;
+    law("shu");
+    if (CBZ.shake) CBZ.shake(strike >= 2 ? 0.85 : 0.6);
+    if (CBZ.sfx) { try { CBZ.sfx(taken > 0 ? "coin" : "punch"); } catch (e) {} }
+    flash();
     g.invuln = Math.max(g.invuln || 0, confineT + 0.5);
   }
 
+  // THE HOLE. Every cuffing that is not an escape: sealed in your own cell
+  // for 25-40 s (severity scales it), contraband and tools gone, a small cut
+  // of your cigarettes, and NO strike, NO tier change. It ends.
+  function holeSentence(sev) {
+    sev = Math.max(2, Math.min(4, sev || 2));
+    confineT = Math.min(40, 13 + sev * 6.5 + Math.random() * 4); confineShown = -1;
+    if (CBZ.escapePlan && CBZ.escapePlan.confiscate) { try { CBZ.escapePlan.confiscate(); } catch (e) {} }
+    const cigs = g.cigs || 0;
+    let cut = Math.min(cigs, Math.min(6, Math.ceil(cigs * 0.1)));
+    if (cut > 0 && CBZ.posseShelterCut) cut = CBZ.posseShelterCut(cut);
+    if (cut > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-cut);
+    g.witnessReportT = 0; g.lastKnown = null;
+    g.detection = g.strikeHeatFloor || 0;
+    law("shu");
+    if (CBZ.shake) CBZ.shake(0.5);
+    g.invuln = Math.max(g.invuln || 0, confineT + 0.5);
+  }
+
+  // THE GRACE WINDOW after the hole, a warning or the infirmary: no screw
+  // re-grabs you for a while, the record is wiped, the hunt is called off.
+  let lawGraceT = 0;
+  function lawGrace(secs) {
+    lawGraceT = Math.max(lawGraceT, secs);
+    g.invuln = Math.max(g.invuln || 0, Math.min(4, secs));
+    if (CBZ.prisonOffenseClear) CBZ.prisonOffenseClear();
+    for (const gd of CBZ.guards || []) {
+      if (!gd) continue;
+      gd.hunt = 0; gd._chase = null; gd.warnT = null; gd.radioT = null; gd.radioKind = null;
+      if (gd.investigate && (gd.investigate.type === "search" || gd.investigate.looking)) gd.investigate = null;
+      gd.capCD = Math.max(gd.capCD || 0, secs);
+    }
+    g.witnessReportT = 0; g.lastKnown = null;
+    g.detection = Math.min(g.detection || 0, g.strikeHeatFloor || 0);
+    // a man they just searched and let go is CLEARED: the tips and sightings
+    // that sent them are answered, so the case file does not re-send them
+    if (g.caseFile) { g.caseFile.heat = 0; g.caseFile.reports = []; }
+  }
+  // detection.js asks this before it lets a sighting or a tip turn into a
+  // hunt: during the grace only a FRESH offense brings the screws back.
+  CBZ.prisonLawGrace = function () {
+    return lawGraceT > 0 && !(CBZ.prisonOffenseFresh && CBZ.prisonOffenseFresh());
+  };
+
   // ============================================================
   //  THE ONE WAY THE PLAYER IS HURT IN THIS MODE (CBZ.hurtPlayer).
-  //
-  //  OWNER: "don't say you're getting beat up — have an NPC punch the player
-  //  and health go down." The pen had exactly one damage entry and it was
-  //  called `shootPlayer`, so a FIST had nowhere to go: entities/ai.js's
-  //  jump-you wrote `player.stun = 0.5` by hand and printed a sentence, because
-  //  the only function that could take health off you was named after a bullet.
-  //
-  //  Same body, honest name, one added seam (`opts.melee` picks the sound and a
-  //  softer sting). `CBZ.shootPlayer` stays exactly what it was — it is the
-  //  gun-shaped call and towers/guards.js still make it — so nothing migrates
-  //  and nothing can break. Anything that lands a HIT calls this.
-  //  Hurt counter is exported through CBZ.jailShowAudit().playerHits, which is
-  //  what proves the beating is real damage rather than another caption.
+  //  opts: melee, by (actor), weapon "fist"|"shank"|"gun"|"blast", stun,
+  //  shake, sfx, tower. Being hurt is NOT heat: a man getting beaten is not
+  //  a crime he committed (the old default poured 4-10 heat per blow YOU took).
+  //  At 0 hp: DOWNED (fists), DOWNED or DEAD (steel, bullets), never cuffed.
   // ============================================================
   let playerHits = 0;
+  let lastHurtT = -1e9;
+  let down = null;                 // { t, weapon, by, wakeHp } while on the floor
+  let deathT = 0;                  // seconds to the loss card once dead
+  const lethalDowns = [];          // clock() of each shank/gun down (3 min memory)
+  const DOWN_BEAT = 3.2;           // s on the floor before the screws carry you
+  const LETHAL_MEMORY = 180;
+  function weaponOf(opts) {
+    if (opts.weapon) return opts.weapon;
+    if (opts.melee) return opts.sfx === "hit" ? "shank" : "fist";
+    return "gun";
+  }
+  CBZ.playerDowned = function () { return !!down || !!(esc && esc.kind === "medical"); };
   CBZ.hurtPlayer = function (dmg, fromX, fromZ, opts) {
     opts = opts || {};
-    if (player.dead || (g.invuln || 0) > 0) return false;
+    if (player.dead) return false;
+    const weapon = weaponOf(opts);
+    const lethal = weapon !== "fist";
+    // ON THE FLOOR: fists stop (SOCIAL honours playerDowned), steel does not.
+    // A blade or a bullet into a downed man is the lethal mistake.
+    if (down) {
+      if (lethal && !((g.invuln || 0) > 0)) { die(weapon === "shank" ? "Stabbed on the floor" : "Shot on the floor", opts); return true; }
+      return false;
+    }
+    if ((g.invuln || 0) > 0) return false;
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return false;
     playerHits++;
+    lastHurtT = clock();
+    if (opts.melee && CBZ.prisonLawNoteBlow) CBZ.prisonLawNoteBlow(opts.by || null, "player");
     player.hp = (player.hp == null ? 100 : player.hp) - (dmg || 30);
-    // A FIST IS NOT A TASER. `player.stun` is the hard lock — no input at all
-    // — and it is the right thing for a drive-stun or a tackle. A punch used
-    // to write the same lock for 0.42-0.72 s, so three men hitting you on
-    // their own clocks kept it armed forever ("they freeze you"). A melee hit
-    // goes through the reaction in systems/combat.js instead: a short slow,
-    // an impact beat you cannot swing through, and POISE so the next fist
-    // inside the window still hurts but does not re-arm the reaction.
+    // a fist is a reaction (combat.js poise), not the hard input lock
     if (opts.melee && CBZ.playerHitReact) CBZ.playerHitReact(opts.stun != null ? opts.stun : 0.42, opts);
     else player.stun = Math.max(player.stun || 0, opts.stun || 0.25);
-    if (CBZ.addHeat) CBZ.addHeat(opts.heat != null ? opts.heat : 10);
     if (CBZ.shake) CBZ.shake(opts.shake || 0.6);
-    if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-    // a fist is not a rifle round: it gets the punch report, and it ROCKS the
-    // head rather than punching a hole. (systems/wounds.js is deliberately NOT
-    // called: bodyWound wants an actor with a `.char` and a world impact point,
-    // and the player here is a bare `pos` — a call that would silently return
-    // on its first guard is a dead path, not a wound system.)
+    flash();
     CBZ.sfx && CBZ.sfx(opts.sfx || (opts.melee ? "punch" : "hit"));
-    // The NECK is the rig's head joint (character.js's head layer damps it back
-    // to level over ~9/s), so a shove here reads as the head snapping and
-    // recovering without fighting the animator for ownership.
     if (opts.melee && CBZ.playerChar && CBZ.playerChar.neck) {
       CBZ.playerChar.neck.rotation.x += 0.34;
       CBZ.playerChar.neck.rotation.z += (Math.random() < 0.5 ? -1 : 1) * 0.22;
     }
-    if (player.hp <= 0) {
-      player.hp = 100;
-      haulToCell(opts.haulMsg || (opts.melee ? "BEATEN DOWN" : "SHOT · DRAGGED TO YOUR CELL"));
-      return true;
-    }
-    // NO "You're hit — get to cover!". The red flash IS the hit, and the health
-    // bar you can see falling is the report.
-    tellHint(opts.hint || "You're hit, get to cover!", 1.1);
-    return false;
+    if (player.hp > 0) return false;
+    player.hp = 0;
+    const t = clock();
+    for (let i = lethalDowns.length - 1; i >= 0; i--) if (t - lethalDowns[i] > LETHAL_MEMORY) lethalDowns.splice(i, 1);
+    const sterile = !!opts.tower && CBZ.prisonSterileAt && CBZ.prisonSterileAt(player.pos.x, player.pos.z);
+    if (sterile) { die("Shot on the wire", opts); return true; }
+    if (lethal && lethalDowns.length > 0) { die(weapon === "shank" ? "Stabbed" : "Shot", opts); return true; }
+    if (lethal) lethalDowns.push(t);
+    goDown(weapon, opts);
+    return true;
   };
-  // An NPC (or a tower) lands a SHOT on the player. Unchanged contract; it is
-  // now one word of configuration on the shared entry above.
   CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
-    return CBZ.hurtPlayer(dmg, fromX, fromZ, opts || {});
+    return CBZ.hurtPlayer(dmg, fromX, fromZ, Object.assign({ weapon: "gun" }, opts || {}));
   };
+
+  function goDown(weapon, opts) {
+    law("downs");
+    cancelArrest();
+    if (CBZ.killstreakBreak) CBZ.killstreakBreak("Down");
+    down = { t: 0, weapon, by: opts.by || null, wakeHp: weapon === "fist" ? 55 : 30 };
+    player.stun = Math.max(player.stun || 0, 1);
+    setCaptureState("downed", 60);
+    // a thief who put you down goes through your pockets
+    const by = opts.by;
+    if (by && (by.role === "thief" || (by.data && by.data.role === "thief")) && (g.cigs || 0) > 0 && CBZ.econ && CBZ.econ.addCigs) {
+      const n = Math.min(g.cigs || 0, 1 + ((Math.random() * 3) | 0));
+      CBZ.econ.addCigs(-n);
+      by.cigs = (by.cigs || 0) + n;
+    }
+    if (CBZ.breakUpFight) { try { CBZ.breakUpFight(player.pos.x, player.pos.z, { reason: "down", starter: null }); } catch (e) {} }
+  }
+  function downTick(dt) {
+    const d = down;
+    d.t += dt;
+    player.stun = Math.max(player.stun || 0, 0.5);
+    player.captureState = "downed"; player.captureT = 60;
+    const ch = CBZ.playerChar;
+    ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, Math.PI / 2, 10, dt);
+    if (d.t < DOWN_BEAT) return;
+    // hauled off the floor: to the infirmary, or in cuffs if this was an escape
+    const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
+    const wake = d.wakeHp;
+    down = null;
+    if (escapeCap) { player.hp = wake; law("cuffs"); startEscort(null, { kind: "transfer", tased: true }); }
+    else startEscort(null, { kind: "medical", wakeHp: wake, tased: true });
+  }
+  function die(cause, opts) {
+    if (player.dead) return;
+    law("deaths");
+    down = null;
+    cancelArrest();
+    if (esc) endEscort();
+    player.hp = 0;
+    player.dead = true;
+    g._deathLine = cause || "Dead";
+    deathT = 2.6;                       // you see it happen before the card
+    if (CBZ.shake) CBZ.shake(0.9);
+    flash();
+  }
 
   // ============================================================
   //  THE HAUL IS A SCENE — OWNER: "goes to this stupid screen way too fast,
@@ -584,17 +597,54 @@
     return CBZ.SPAWN ? { x: CBZ.SPAWN.x, z: CBZ.SPAWN.z } : { x: player.pos.x, z: player.pos.z };
   }
 
-  // EVERY capture path ends here (haulToCell routes through it), so the cuffs
-  // are always ON before applyStrike can ever say TRANSFERRED.
+  // THE INFIRMARY (world/southblock.js: x[26,42] z[88,104], door W at z 96,
+  // beds at x 30/38, z 92/100, Doc Mercer at (33,96)). You come to beside the
+  // first ward bed, on your side, and get up.
+  const INFIRMARY = { x0: 26, x1: 42, z0: 88, z1: 104, wakeX: 31.9, wakeZ: 92.2, docX: 33, docZ: 96 };
+  function landInInfirmary() {
+    player.pos.set(INFIRMARY.wakeX, 0, INFIRMARY.wakeZ);
+    player.vy = 0;
+    const ch = CBZ.playerChar;
+    if (ch && ch.group) {
+      ch.group.position.copy(player.pos);
+      ch.group.rotation.y = -Math.PI / 2;          // facing the bed
+      ch.group.rotation.z = Math.PI / 2;           // still on his side
+    }
+    if (CBZ.cam) CBZ.cam.yaw = Math.PI / 2;
+  }
+  let docRef = null;
+  function doc() {
+    if (docRef && !docRef.dead && docRef.group) return docRef;
+    docRef = null;
+    for (const n of CBZ.npcs || []) if (n && n.data && n.data.name === "Doc Mercer") { docRef = n; break; }
+    return docRef;
+  }
+  function inInfirmary(x, z) { return x > INFIRMARY.x0 && x < INFIRMARY.x1 && z > INFIRMARY.z0 && z < INFIRMARY.z1; }
+
+  // EVERY haul ends here (haulToCell routes through it), so the cuffs are
+  // always ON before applyStrike can ever say TRANSFERRED. opts.kind:
+  // "hole" | "transfer" | "medical" (see haulToCell); opts.lead = the screw
+  // who made the arrest; opts.tased = no drive-stun on the floor.
   function startEscort(msg, opts) {
     if (esc) return;
-    if (CBZ.killstreakBreak) CBZ.killstreakBreak(msg || "Cuffed");
+    opts = opts || {};
+    const kind = opts.kind || (opts.strike === false ? "medical" : "hole");
+    if (CBZ.killstreakBreak) CBZ.killstreakBreak(kind === "medical" ? "Down" : "Cuffed");
+    cancelArrest();
+    down = null;
     CBZ.playerChar.cuffed = false;
     player.stun = 2.2;
-    setCaptureState("cuffed", 60);             // non-normal for the whole scene; escortTick keeps it alive
-    tellToast(msg || "CUFFED · BACK TO YOUR CELL");
-    CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
+    // non-normal for the whole scene; escortTick keeps it alive
+    setCaptureState(kind === "medical" ? "downed" : "cuffed", 60);
+    CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd._chase = null; });
+    if (opts.lead) opts.lead._escort = false;
     const screws = pickScrews();
+    if (opts.lead && screwUsable(opts.lead) && screws[0] !== opts.lead) {
+      const k = screws.indexOf(opts.lead);
+      if (k >= 0) screws.splice(k, 1);
+      screws.unshift(opts.lead);
+      if (screws.length > 2) screws.length = 2;
+    }
     for (const gd of screws) { gd._escort = true; gd.approach = null; }
     let cx = Math.sin(CBZ.playerChar.group.rotation.y + Math.PI * 0.5), cz = Math.cos(CBZ.playerChar.group.rotation.y + Math.PI * 0.5);
     if (screws[0]) {
@@ -604,9 +654,11 @@
     esc = {
       cam: false, cx, cz,
       phase: "down", t: 0, total: 0,
-      strike: !(opts && opts.strike === false),
-      // a man tased on his feet (tryCapture) is not tased again on the floor
-      tased: (player.subdue || 0) >= 1,
+      kind, severity: opts.severity || 2, wakeHp: opts.wakeHp || 55,
+      strike: kind === "transfer",
+      // a man tased on his feet, or one who lay down when told, is not tased
+      // again on the floor; a medical carry is never tased
+      tased: !!opts.tased || kind === "medical",
       tied: false, stall: 0,
       screws, tx: 0, tz: 0, hx: 0, hz: 1,
     };
@@ -615,13 +667,16 @@
   // a death, leaving play. Safe from anywhere, any number of times.
   function endEscort() {
     if (!esc) return;
+    const e0 = esc;
     camDrop();
     releaseScrews();
     esc = null;
     tiesOn(false);
     player.subdue = 0; player.stun = 0;
     setCaptureState("normal", 0);
-    CBZ.playerChar.group.rotation.z = 0;
+    // a man waking in the infirmary gets up off his side (the normal-state
+    // damp below stands him); everyone else is already on his feet
+    if (!(e0 && e0.kind === "medical")) CBZ.playerChar.group.rotation.z = 0;
     if (fadeEl) fadeEl.style.opacity = "0";
   }
   function escortTick(dt) {
@@ -629,7 +684,7 @@
     e.t += dt; e.total += dt;
     // nothing else may move, hit or grab you mid-scene
     P.stun = Math.max(P.stun || 0, 0.5); g.invuln = Math.max(g.invuln || 0, 0.6);
-    P.captureT = 60; P.captureState = "cuffed";
+    P.captureT = 60; P.captureState = e.kind === "medical" ? "downed" : "cuffed";
     // a screw shot off the scene drops out of it; the man is still cuffed
     for (let i = e.screws.length - 1; i >= 0; i--) if (!screwUsable(e.screws[i])) { e.screws[i]._escort = false; e.screws.splice(i, 1); }
     const lead = e.screws[0], second = e.screws[1];
@@ -654,8 +709,24 @@
       if (lead) { if (near < (e.gain == null ? Infinity : e.gain) - 0.02) { e.gain = near; e.stuck = 0; } else e.stuck = (e.stuck || 0) + dt; }
       const arrived = lead ? (near <= 0.35 || (e.stuck > 0.8 && near < 3.0)) : false;
       if (arrived || e.t >= (lead ? ESC.DOWN_MAX : ESC.DOWN_ALONE)) {
-        e.phase = (!e.tased && lead) ? "tase" : "cuff"; e.t = 0;
+        e.phase = e.kind === "medical" ? "carry" : (!e.tased && lead) ? "tase" : "cuff"; e.t = 0;
       }
+      return;
+    }
+    // THE CARRY (downed / starving): two screws get you off the floor and the
+    // lens goes dark on the way to the infirmary. No cuffs, no strike.
+    if (e.phase === "carry") {
+      lie(); camGround(px, P.pos.y, pz);
+      if (lead) { screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt); if (lead.char) lead.char.crouch = e.t < 1.2; }
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); if (second.char) second.char.crouch = e.t < 1.2; }
+      if (e.t >= 1.4 && fadeEl) fadeEl.style.opacity = Math.min(1, (e.t - 1.4) / ESC.FADE).toFixed(2);
+      if (e.t < 1.4 + ESC.FADE) return;
+      camDrop(); releaseScrews();
+      landInInfirmary();
+      P.hp = Math.max(P.hp || 0, e.wakeHp || 55);
+      lawGrace(12);
+      g.invuln = Math.max(g.invuln || 0, 4);
+      e.phase = "wake"; e.t = 0;
       return;
     }
     if (e.phase === "tase") {
@@ -683,7 +754,7 @@
         e.tied = true;
         tiesOn(true);
         if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (er) {} }   // the ratchet click
-        if (lead && CBZ.prisonSay) { try { CBZ.prisonSay(lead, "Hands. Behind your back.", { secs: 2.0, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 }); } catch (er) {} }
+        if (lead && CBZ.guardLine) { try { CBZ.guardLine(lead, "cuff", { force: true }); } catch (er) {} }
       }
       if (e.t >= ESC.CUFF) { e.phase = "lift"; e.t = 0; if (lead && lead.char) lead.char.crouch = false; }
       return;
@@ -740,18 +811,19 @@
       // fade
       if (fadeEl) fadeEl.style.opacity = Math.min(1, e.t / ESC.FADE).toFixed(2);
       if (e.t < ESC.FADE) return;
-      // ---- THE HAUL SITE — every capture (and every drag) ends at the same
-      // real door; this blackout is the ONE place a strike can land, and the
-      // player is cuffed by construction when it does.
+      // ---- THE HAUL SITE: your own cell door. An ESCAPE capture is the one
+      // place a strike (and a transfer) can land, cuffed by construction; any
+      // other cuffing is the hole, which is time, not a strike.
       camDrop(); releaseScrews();
       if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; ch.group.position.copy(P.pos); }
       g.detection = 0; g.invuln = 2.0;
-      if (e.strike) {
+      if (e.kind === "transfer") {
         g.caughtCount++;
         applyStrike();                            // a transfer ends the scene (and the run) in here
         if (!esc) return;
-        if (confineT > 0) sealPlayerCell();
-      }
+      } else holeSentence(e.severity);
+      holeRelease = true;
+      if (confineT > 0) sealPlayerCell();
       e.phase = "wake"; e.t = 0;
       return;
     }
@@ -770,68 +842,206 @@
   const sprayEl = document.getElementById("spray");
   function spray(sec) { sprayT = sec; }
 
-  // called from guards.js when a hunting guard is right on top of you.
-  // less-lethal escalation: baton → taser → TACKLE → hauled off.
-  //
-  // THE TEXT WAS DOING THE WORK THE ANIMATION SHOULD HAVE DONE. "TASED — you
-  // hit the floor!" was printed on the exact frame the body went prone and the
-  // camera shook; the sentence added nothing except a fourth wall. All three
-  // beats keep their physics and lose their captions, and the THIRD one — the
-  // one that used to jump straight from a string to a fade-to-black — is now a
-  // real grab: CBZ.predatorSeize's wind → strike → hold arc with its ONE
-  // telegraphed break-free press, style "pin" (a screw kneeling on you; the
-  // stillness is the beat), nonLethal because a guard inside the wire is
-  // taking you IN. Break the hold and you are loose with a stun to run off;
-  // lose it and the escort starts, exactly as before.
-  //
-  // Degrade: no predator.js, no seize — startEscort() fires directly and this
-  // file behaves byte-for-byte the way it always did.
+  /* ============================================================
+     THE ARREST (CBZ.tryCapture). guards.js calls this every frame a hunting
+     screw has eyes on you inside ORDER_R, and walks him to the stand-off
+     distance it returns.
+
+       ORDER   he stops ~2 m off and says it once ("On the ground! Now!").
+               You have WINDOW seconds. Stop moving (under COMPLY_SPD) or
+               crouch = comply. Keep running away fast, or swing = resist.
+       comply  no offense on file, or a minor one: a pat-down and a warning,
+               the hunt is called off, heat drops, he walks away. NO cuffs.
+               A real offense: he cuffs you calm, no taser.
+       resist  the TASER (range TASE_R). Get up and resist again = the
+               TACKLE (the shared pin grab with its one break-free press).
+               Lie there = cuffs.
+     Cuffs: only an escape capture goes up a tier (applyStrike); everything
+     else is the hole (holeSentence). No one re-grabs you during the grace.
+     ============================================================ */
+  const ARREST = {
+    ORDER_R: 4.2,        // m: where the order is given (guards.js reads it)
+    STANDOFF: 1.9,       // m: where he stands while you decide
+    WINDOW: 2.2,         // s: the comply window
+    COMPLY_SPD: 0.6,     // m/s: under this you are standing still
+    COMPLY_HOLD: 0.6,    // s of standing still that reads as "complied"
+    FLEE_SPD: 2.2,       // m/s: over this, moving away, is running
+    FLEE_HOLD: 0.55,     // s of running that reads as "resisting"
+    TASE_R: 5.5,         // m: the taser's reach
+    AFTER_TASE: 3.0,     // s after the probes wear off to see what you do
+    LOSE_R: 15,          // m: the order is void, it is a chase again
+  };
+  let arrest = null;
   let seizedBy = null;
-  CBZ.tryCapture = function (gd, dt) {
-    if (player.dead) return;
-    if (g.role === "cop") return;
-    if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return;
-    if (gd._seizing) return;                       // this screw already has you
-    gd.capCD = (gd.capCD || 0) - dt;
-    if (gd.capCD > 0) return;
-    gd.capCD = 1.6;
-    player.subdue = (player.subdue || 0) + 1;
-    if (player.subdue === 1) {
-      player.stun = 1.85; setCaptureState("tased", 1.35);
-      // The guard visibly draws the shared taser, launches its twin probes and
-      // energizes the same body-pose signal used when the player fires one.
-      // Capture still owns stun/state; taserfx owns only what that event looks like.
-      if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) CBZ.taserFx.actorTasePlayer(gd);
-      tellHint("TASED, you hit the floor!", 1.6);
-      CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
-      if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-    } else if (player.subdue === 2) {
-      player.stun = 2.05; setCaptureState("tackled", 1.55);
-      tellHint("TACKLED, cuffs coming out!", 1.6);
-      CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.7);
-      spray(1.1);                                   // the OC goes in your eyes — an overlay, not a line
-    } else if (showing() && CBZ.predatorSeize && !seizedBy) {
+  let holeRelease = false;          // the next confinement end is a hole release (grace)
+  // the player's measured ground speed (not his input): what a screw sees
+  let spdPX = null, spdPZ = null, pSpd = 0;
+  function trackSpeed(dt) {
+    const px = player.pos.x, pz = player.pos.z;
+    if (spdPX != null && dt > 0) {
+      const v = Math.min(12, Math.hypot(px - spdPX, pz - spdPZ) / dt);
+      pSpd += (v - pSpd) * Math.min(1, dt * 10);
+    }
+    spdPX = px; spdPZ = pz;
+  }
+  function swungSince(t0) { return ((g._lawSwingT != null ? g._lawSwingT : -1e9)) > t0; }
+  function arrestGuardOk(gd) {
+    return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) &&
+      !gd.tied && gd.intimidMode !== "scared");
+  }
+  function gdDist(gd) { return Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z); }
+  function cancelArrest(chaseOn) {
+    if (!arrest) return;
+    const gd = arrest.gd;
+    if (gd) {
+      gd._escort = false;
+      if (gd.char) gd.char.crouch = false;
+      gd.capCD = chaseOn ? 0.4 : Math.max(gd.capCD || 0, 2.5);
+      if (chaseOn && arrestGuardOk(gd)) gd.hunt = Math.max(gd.hunt || 0, 4);
+    }
+    arrest = null;
+  }
+  CBZ.prisonArrestPhase = function () { return arrest ? arrest.phase : null; };
+  CBZ.lawOrderRange = ARREST.ORDER_R;
+
+  function startArrest(gd) {
+    const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+    arrest = { gd, phase: "order", t: 0, t0: clock(), comply: 0, flee: 0, lastD: gdDist(gd), after: 0 };
+    gd.hunt = Math.max(gd.hunt || 0, 4);
+    gd.capCD = 0;
+    law("orders");
+    // a man who already ran from an order does not get a second one
+    if (off && off.resisted) { resist("again"); return; }
+    if (CBZ.guardLine) CBZ.guardLine(gd, "order", { force: true });
+  }
+  function complied() {
+    const a = arrest, gd = a.gd;
+    law("complied");
+    const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+    if (!off || off.severity <= 1) {
+      // THE PAT-DOWN: hands on the wall for a beat, a word, and he walks off
+      law("warnings");
+      arrest = null;
+      player.stun = Math.max(player.stun || 0, 1.1);
+      if (CBZ.sfx) { try { CBZ.sfx("step"); } catch (e) {} }
+      if (CBZ.guardLine) CBZ.guardLine(gd, "warned", { force: true });
+      lawGrace(60);
+      gd.capCD = 60;
+      gd.alert = 0.8;
+      return;
+    }
+    cuffs(false);
+  }
+  function resist(why) {
+    const a = arrest, gd = a.gd;
+    law("resisted");
+    let off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+    // running from an order is an offense of its own: serious enough for the hole
+    if (!off && CBZ.prisonOffense) off = CBZ.prisonOffense("minor", { severity: 2, seenBy: gd });
+    if (off) { off.resisted = true; off.severity = Math.max(off.severity, 2); }
+    if (gdDist(gd) > ARREST.TASE_R) { cancelArrest(true); return; }
+    // THE TASER: probes, the body pose, you hit the floor
+    law("tases");
+    a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
+    player.stun = 1.85; setCaptureState("tased", 1.35);
+    if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(gd); } catch (e) {} }
+    if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(0.55);
+    flash();
+    gd._escort = true;                 // this file walks him in to the body now
+  }
+  function tackle() {
+    const a = arrest, gd = a.gd;
+    law("tackles");
+    a.phase = "tackle"; a.t = 0;
+    player.stun = 2.05; setCaptureState("tackled", 1.55);
+    if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(0.7);
+    spray(1.1);
+    gd._escort = false;
+    if (CBZ.predatorSeize && !seizedBy) {
       const h = CBZ.predatorSeize(gd, player, {
         style: "pin", nonLethal: true, hold: 2.4, dps: 4, thrash: 0.55, escape: 0.5,
         cause: "restrained by a guard",
-        // predator.js resolves a hold as "escaped" (you made the window),
-        // "taken"/"killed" (it ran out — nonLethal maps killed→taken) or
-        // "aborted" (the grab became invalid: the screw died, the distance blew
-        // out, the mode changed). ONLY a completed hold cuffs you — an aborted
-        // one must not, or a guard shot off you mid-grab would still book you.
+        // "taken"/"killed" = the hold ran out: cuffs. "escaped" = you made the
+        // press: he is on the floor a beat and you are loose. "aborted" = the
+        // grab became invalid (the screw was hit off you): nothing lands.
         onEnd: function (res) {
           seizedBy = null;
-          if (res === "taken" || res === "killed") { startEscort(); return; }
-          // YOU GOT OUT OF IT. That is the reward for the press: he is on the
-          // floor for a beat and the escalation resets, so the run continues.
-          player.subdue = 0; gd.capCD = 3.2;
+          if (res === "taken" || res === "killed") { if (!arrest) arrest = { gd, phase: "tackle" }; cuffs(true); return; }
+          if (arrest && arrest.gd === gd) arrest = null;
+          gd.capCD = 3.2;
           if (res === "escaped") gd.ko = Math.max(gd.ko || 0, 1.2);
           setCaptureState("normal", 0);
         },
       });
-      if (h) { seizedBy = h; setCaptureState("tackled", 2.4); }
-      else startEscort();
-    } else startEscort();
+      if (h) { seizedBy = h; setCaptureState("tackled", 2.4); return; }
+    }
+    cuffs(true);
+  }
+  function cuffs(rough) {
+    const a = arrest, gd = a && a.gd;
+    const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
+    const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
+    arrest = null;
+    if (gd) gd._escort = false;
+    law("cuffs");
+    startEscort(null, {
+      kind: escapeCap ? "transfer" : "hole",
+      severity: Math.max(2, (off && off.severity) || 2) + (rough ? 0.5 : 0),
+      lead: gd, tased: true,
+    });
+  }
+  function arrestTick(dt) {
+    const a = arrest, gd = a.gd;
+    if (!arrestGuardOk(gd)) { cancelArrest(false); return; }
+    a.t += dt;
+    const d = gdDist(gd);
+    const px = player.pos.x, pz = player.pos.z;
+    if (a.phase === "order") {
+      gd.hunt = Math.max(gd.hunt || 0, 1.5);
+      if (swungSince(a.t0)) { resist("swing"); return; }
+      const still = pSpd < ARREST.COMPLY_SPD || !!player.crouch;
+      a.comply = still ? a.comply + dt : Math.max(0, a.comply - dt * 0.5);
+      const away = pSpd > ARREST.FLEE_SPD && d > a.lastD - 0.002;
+      a.flee = away ? a.flee + dt : Math.max(0, a.flee - dt * 0.5);
+      a.lastD = d;
+      if (a.comply >= ARREST.COMPLY_HOLD) { complied(); return; }
+      if (a.flee >= ARREST.FLEE_HOLD || d > ARREST.LOSE_R) { resist("run"); return; }
+      if (a.t >= ARREST.WINDOW) { if (pSpd < 1.4) complied(); else resist("ignored"); }
+      return;
+    }
+    if (a.phase === "tased") {
+      // he walks in to the body while the probes hold you
+      screwStep(gd, px, pz, ESC.REACH, px, pz, d > 2.5, dt);
+      if ((player.stun || 0) > 0.05) return;
+      a.after += dt;
+      if (swungSince(a.tasedAt + 0.05) || (pSpd > ARREST.FLEE_SPD && a.after > 0.25)) {
+        if (d <= 3.2) { tackle(); return; }
+        cancelArrest(true); return;
+      }
+      if ((d <= ESC.REACH + 0.4 && a.after > 0.5) || a.after > ARREST.AFTER_TASE) {
+        if (d <= 3.2) { cuffs(false); return; }
+        cancelArrest(true);
+      }
+      return;
+    }
+    // "tackle": predator.js owns the hold until its onEnd
+  }
+
+  // called from guards.js when a hunting guard has eyes on you inside
+  // ORDER_R. Returns how close he should stand (null = his own reach).
+  CBZ.tryCapture = function (gd, dt) {
+    if (player.dead || g.role === "cop") return null;
+    if (esc || down) return null;
+    if (arrest) return arrest.gd === gd ? (arrest.phase === "order" ? ARREST.STANDOFF : ESC.REACH) : ARREST.STANDOFF + 1.2;
+    if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return null;
+    if (gd._seizing || (gd.capCD || 0) > 0) return ARREST.STANDOFF;
+    if ((g.invuln || 0) > 0) return ARREST.STANDOFF;
+    // the grace after a release: only a NEW offense brings the order back
+    if (lawGraceT > 0 && !(CBZ.prisonOffenseFresh && CBZ.prisonOffenseFresh())) return ARREST.STANDOFF;
+    startArrest(gd);
+    return arrest ? (arrest.phase === "order" ? ARREST.STANDOFF : ESC.REACH) : null;
   };
 
   // shoot-back when armed
@@ -856,9 +1066,10 @@
       // a kill has ONE surface in this game and it is the corner feed.
       if (CBZ.cityLogDeath && best.data) {
         try { CBZ.cityLogDeath(best.data.name, "shot", { by: "You" }); } catch (e) {}
-      } else tellHint(`You dropped ${best.data.name}!`, 1.6);
+      }
     }
     CBZ.addHeat(45); // gunfire brings the whole block down on you
+    if (CBZ.prisonOffense) CBZ.prisonOffense("assault", { severity: 4, seenBy: null });
   }
   addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "f") fire(); });
 
@@ -873,7 +1084,11 @@
   });
   // leaving play (title / won / lost) — the shared run-lifecycle dispatcher
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) {
-    CBZ.jailBoost.onStateExit(function () { endEscort(); releasePlayerCell(); confineT = 0; confineShown = -1; });
+    // not on PAUSE: a pause mid-haul used to end the scene and set you loose
+    CBZ.jailBoost.onStateExit(function () {
+      endEscort(); releasePlayerCell(); confineT = 0; confineShown = -1;
+      arrest = null; down = null; deathT = 0; holeRelease = false;
+    }, ["title", "won", "lost"]);
   }
 
   // ============================================================
@@ -936,31 +1151,15 @@
     g.jailSentence = Math.max(0, left - dt);
     g.jailServed = (g.jailServed || 0) + dt;
     const s = Math.ceil(g.jailSentence);
-    if (s !== sentShown) {
-      sentShown = s;
-      // the countdown lives in the objective line below — printing it twice was
-      // the whole disease.
-      if (s === 60 || s === 30 || s === 10) tellHint("Sentence: " + s + "s left.", 2.0);
-    }
+    if (s !== sentShown) sentShown = s;
     // the mode's OWN readout — state.js already writes this line on reset, so
     // the sentence rides the surface the prison run already has.
     sentCallT -= dt;
     if (sentCallT <= 0) {
       sentCallT = 1;
       if (CBZ.setObjective) {
-        /* STRIKES BELONG HERE, NOT IN A TOAST.
-           Being caught is the one piece of prison bookkeeping that is both
-           invisible and permanent: three and you are shipped to max security.
-           It was announced by a popup you could be looking away from, and then
-           never shown again — so the fact that decides your run lived for two
-           seconds and then only inside a variable.
-           This line already rewrites every second on the readout the mode
-           always has, so the count rides it. A standing fact on a standing
-           surface, instead of a warning you had to catch. */
-        const st = CBZ.game.caughtCount || 0;
-        const strikes = st > 0 ? " · caught " + st + "/3" : "";
-        CBZ.setObjective("Serving " + s + "s" + strikes + (sentCall ? " · " + sentCall : "") +
-          ". Or find a keycard, a vent or a tunnel and don't wait.");
+        // one standing line: the time left and what the block is doing
+        CBZ.setObjective("Time left: " + s + "s" + (sentCall ? ". " + sentCall : "") + ".");
       }
     }
     // the day beat rotates the block
@@ -977,7 +1176,6 @@
       // popup. With nobody in earshot it is silent, which is correct: you
       // missed the call, and that is information you get by being somewhere
       // else, not information the HUD owes you.
-      tellHint(b.call + ". " + b.s, 2.4);
       if (showing() && CBZ.citySay && CBZ.guards) {
         let crier = null, cd = 34 * 34;
         for (const gd of CBZ.guards) {
@@ -1004,7 +1202,6 @@
     if (g.jailSentence <= 0) {
       g.jailSentence = 0;
       // the gate opening is the announcement.
-      tellToast("TIME SERVED · GATE'S OPEN");
       beatLock = false;
       releasePlayerCell(); muster(false);   // nothing of ours stays shut past the gate
       if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
@@ -1051,15 +1248,29 @@
     // lines that used to say so are gone; what is left is the room, the bars
     // racking across in front of you (sealPlayerCell, above) and the sentence
     // standing in the objective readout the pipe already writes.
-    tellToast("BOOKED · YOUR CELL");
-    tellHint("Intake. The door stays shut for the count · " +
-      Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
     // NO SOUND REQUEST HERE. The bars racking shut on you is the one sound the
     // intake is about, and it was silent — this asked for a generic `door` cue
     // that had been retired months earlier, so it warned and played nothing.
     // The fix is not a corrected cue name at this line: a state change does not
     // get to voice hardware. sealPlayerCell() above drives the real leaf
     // through cellblock.setDoor, and that is where the leaf now speaks.
+  }
+
+  // ---- HEALING: out of a fight for REGEN_WAIT s you come back slowly to
+  // REGEN_CAP; standing with Doc Mercer in the infirmary puts you back to full.
+  const REGEN_WAIT = 8, REGEN_CAP = 70, REGEN_RATE = 2.2, DOC_RATE = 14, DOC_R = 3.6;
+  function healTick(dt) {
+    if (player.dead || down || esc) return;
+    const hp = player.hp == null ? 100 : player.hp;
+    if (hp >= 100) return;
+    const px = player.pos.x, pz = player.pos.z;
+    if (inInfirmary(px, pz)) {
+      const d = doc();
+      const dx = d ? d.group.position.x : INFIRMARY.docX, dz = d ? d.group.position.z : INFIRMARY.docZ;
+      if ((!d || !(d.ko > 0)) && Math.hypot(px - dx, pz - dz) < DOC_R) { player.hp = Math.min(100, hp + DOC_RATE * dt); return; }
+    }
+    if (clock() - lastHurtT < REGEN_WAIT || hp >= REGEN_CAP) return;
+    player.hp = Math.min(REGEN_CAP, hp + REGEN_RATE * dt);
   }
 
   // per-frame bookkeeping
@@ -1072,49 +1283,41 @@
     sentenceTick(dt);
     if (CBZ.game.mode !== "escape") return;
 
-    // new run? clear strike-beat leftovers before anything else ticks
+    // new run? clear every leftover before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
       endEscort(); releasePlayerCell(); muster(false);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
       beatLock = false; intakeDone = false; lastServed = -1;
+      arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false; lethalDowns.length = 0;
+      lastHurtT = -1e9; spdPX = null; pSpd = 0;
     }
     // ...and if you were SENT here, you wake in the cell with the door shut.
     intakeWatch();
+    trackSpeed(dt);
+    if (lawGraceT > 0) lawGraceT -= dt;
+    for (const gd of CBZ.guards) if ((gd.capCD || 0) > 0 && !gd._escort) gd.capCD -= dt;
 
-    // ---- strike confinement: held in your cell for a beat after a capture ----
+    // ---- confinement: the hole, the intake count, an escape strike ----
     if (confineT > 0 && !player.dead) {
       confineT -= dt;
       if (confineT > 0) {
         // retried every frame: a haul that landed you half in the doorway
         // refuses the lock on that frame and takes it the moment you're clear.
         sealPlayerCell();
-        player.stun = Math.max(player.stun || 0, Math.min(confineT, 0.4));
-        const s = Math.ceil(confineT);
-        if (s !== confineShown) {
-          confineShown = s;
-          // the SHUT DOOR is the confinement. A per-second countdown line was a
-          // caption on a locked cell you are standing inside.
-          if (!showing()) CBZ.showHint(heldDoor != null ? `Cell door locked. ${s}s` : `Confined to your cell. ${s}s`);
-          else toldHints++;
-        }
+        // the shut door holds you; you can pace the cell. Only with no door
+        // to shut (no wing published) does the old stun stand in for it.
+        if (heldDoor == null) player.stun = Math.max(player.stun || 0, Math.min(confineT, 0.4));
       } else {
         confineT = 0; confineShown = -1;
-        const wasShut = releasePlayerCell();
+        releasePlayerCell();
         CBZ.hideHint();
-        // the leaf sliding into its pocket + the rack is the "yard time" line.
-        tellHint(wasShut ? "The door racks open. Yard time." : "The screws lose interest. Yard time.", 1.6);
-        // (releasePlayerCell drives the same leaf, and the leaf speaks — see
-        // the intake note above.)
+        // out of the hole: a clean slate and a grace window, so the same
+        // offense can never cuff you twice
+        if (holeRelease) { holeRelease = false; lawGrace(15); }
       }
     }
 
     // ---- strike-2 cell-block watch: guards sweep past your cell more ----
-    // reuses the ordinary investigate plumbing (guards.js) — no new movement
-    // code, and any disturbance (hunt/social/ko) naturally takes priority.
-    // The sweep now walks past the REAL cell. It used to orbit CBZ.SPAWN — the
-    // coordinate the player happened to start on — which was only ever "your
-    // cell" by accident of the old geometry. The cell record knows where it is;
-    // the door mouth is where a screw actually stands to look in.
     if (g.cellWatch) {
       const watchCell = beatOn() ? playerCell() : null;
       const watchX = watchCell && isFinite(+watchCell.doorX) ? +watchCell.doorX
@@ -1126,13 +1329,12 @@
         cellWatchCD = 9 + Math.random() * 6;
         let best = null, bd = Infinity;
         for (const gd of CBZ.guards) {
-          if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.hunt > 0 || gd.approach || (gd.investigate && gd.investigate.t > 0)) continue;
+          if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.hunt > 0 || gd.approach || gd._escort || (gd.investigate && gd.investigate.t > 0)) continue;
           const dx = watchX - gd.group.position.x, dz = watchZ - gd.group.position.z;
           const d2 = dx * dx + dz * dz;
           if (d2 < bd) { bd = d2; best = gd; }
         }
         if (best) {
-          // a tighter scatter on a real door than on an open patch of floor
           const spread = watchCell ? 3.2 : 8;
           best.investigate = {
             x: watchX + (Math.random() - 0.5) * spread,
@@ -1146,6 +1348,8 @@
 
     if (player.dead) {
       if (esc) { camDrop(); releaseScrews(); esc = null; tiesOn(false); }
+      if (arrest) cancelArrest(false);
+      down = null;
       player.captureState = "dead";
       player.captureT = 0;
       player.stun = 0;
@@ -1155,11 +1359,24 @@
       CBZ.playerChar.cuffed = false;
       CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
       if (fadeEl) fadeEl.style.opacity = "0";
+      // A REAL LOSS, seen first: the body drops, then the card (state.js
+      // styleLossCard reads reason "dead").
+      if (deathT > 0) {
+        deathT -= dt;
+        if (deathT <= 0 && g.state === "playing" && CBZ.loseGame) CBZ.loseGame("dead");
+      }
       return;
     }
 
     // the haul owns the body, the screws and the lens until it is done
     if (esc) { escortTick(dt); return; }
+    // on the floor: the screws are coming, and steel can still finish you
+    if (down) { downTick(dt); return; }
+    if (arrest) {
+      arrestTick(dt);
+      if (arrest && arrest.phase === "tackle" && arrest.t > 6 && !seizedBy) cuffs(true);
+    }
+    healTick(dt);
 
     if (player.captureT > 0) {
       player.captureT -= dt;
@@ -1175,41 +1392,38 @@
       if (Math.abs(CBZ.playerChar.group.rotation.z) < 0.02) CBZ.playerChar.group.rotation.z = 0;
     }
 
-    // if nobody is hunting, the escalation resets (fresh start next time)
-    let hunted = false;
-    for (const gd of CBZ.guards) if (gd.hunt > 0) { hunted = true; break; }
-    if (!hunted && player.subdue) player.subdue = 0;
-
-    // ---- WATCH-TOWER ARMED RESPONSE (telegraphed, not an instant teleport) ----
-    // Deep in the exit run while red-hot, the NEAREST tower lights you up — but
-    // it WARNS first: a burst of tracers stitches WIDE past you, then a closer
-    // volley. Keep pushing for the gate and the third one drops you (hauled to
-    // your cell). Back off — leave the run or cut the heat — and it ceases fire.
+    // ---- WATCH-TOWER ARMED RESPONSE (telegraphed, then real rounds) ----
+    // Red-hot on the exit run or the sterile zone, the NEAREST tower lights
+    // you up: a WIDE warning burst, a close volley, then it is shooting AT
+    // you (real damage through hurtPlayer). Back off and it holds fire. Hit
+    // to the floor in the sterile zone is death; on the sally-port run it is
+    // a down, and the screws cuff you as an escapee.
     if (towerShotCD > 0) towerShotCD -= dt;
-    const inKillZone = g.detection >= 85 && player.pos.z > 49 && g.invuln <= 0 && !CBZ.door.open;
+    const tzone = CBZ.restrictedZoneAt ? CBZ.restrictedZoneAt(player.pos) : null;
+    const onTheRun = tzone === "the exit corridor" || tzone === "the sterile zone" ||
+      (CBZ.prisonOutOfBounds && CBZ.prisonOutOfBounds(player.pos.x, player.pos.z));
+    const inKillZone = g.detection >= 85 && onTheRun && g.invuln <= 0 && !(CBZ.door && CBZ.door.open);
     if (inKillZone) {
       if (towerSeq === 0) { towerSrc = nearestTower(player.pos.x, player.pos.z); towerSeq = 1; towerT = 0; towerShotCD = 0; }
       towerT += dt;
       if (towerSeq === 1 && towerShotCD <= 0) {
         towerBurst(towerSrc, 6.0, 3);                                   // warning shots, WIDE
         CBZ.shake && CBZ.shake(0.3);
-        tellHint("TOWER · WARNING SHOTS! TURN BACK!", 1.6);
         towerShotCD = 1.1;
         if (towerT > 1.4) towerSeq = 2;
       } else if (towerSeq === 2 && towerShotCD <= 0) {
         towerBurst(towerSrc, 2.4, 4);                                   // final volley, CLOSE
         CBZ.shake && CBZ.shake(0.5);
-        if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-        tellHint("LAST WARNING · GET OUT OF THE OPEN!", 1.6);
+        flash();
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {
-        towerBurst(towerSrc, 0.8, 5);                                   // dead-to-rights
-        haulToCell("TOWER OPENS FIRE!");
-        towerSeq = 0; towerT = 0;
+        towerBurst(towerSrc, 0.8, 5);                                   // on you
+        towerShotCD = 1.25;
+        if (CBZ.prisonOffense) CBZ.prisonOffense("escape", { severity: 4 });
+        CBZ.hurtPlayer(38, towerSrc.x, towerSrc.z, { weapon: "gun", tower: true, shake: 0.8, stun: 0.3 });
       }
     } else if (towerSeq !== 0) {
-      if (towerSeq >= 2) tellHint("Tower holds fire.", 1.0);
       towerSeq = 0; towerT = 0;
     }
   });

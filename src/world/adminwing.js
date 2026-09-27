@@ -60,20 +60,18 @@
        the safe ....... LOCKPICK, ~9 s on the barrel — or 5 lb.
 
    Both card doors OPEN FOR STAFF, because a staff door with a reader on it
-   does. The warden walks through them four times a day, which makes
+   does. The warden walks through them several times a day, which makes
    tailgating a real answer and makes his routine legible from the corridor.
 
-   ---- AND HE IS NOT ALWAYS THERE ----------------------------------------
-   OWNER (2026-08-11): "the warden should not always be in the office — of
-   course sometimes you should see the warden, but it's too common now." The
-   desk used to own three of the eight schedule blocks and the chair then
-   nailed him inside it. Now `work` is the only block that CAN be his desk,
-   `mess` and `supper` put him on the tier and at the checkpoint where you can
-   see him, and even the desk block rolls against the day (deterministic — see
-   DUTY below). He is at that desk about one working block in three days.
+   ---- HIS DAY -----------------------------------------------------------
+   systems/prisonwarden.js owns his head: the DUTY table (office most of the
+   working day, rounds at 11:30 and 17:00 with officers at his shoulders, the
+   wing throat for the evening count, quarters from 21:00), his incident
+   orders and his summons. This file owns his BODY: the posts, the walk
+   between them, the chair, the doors. Each frame it asks CBZ.warden which
+   post he belongs on and walks him there.
 
-   Flags PRISON_ADMIN_WING · PRISON_WARDEN_ROUTINE · PRISON_WARDEN_SUIT ·
-   PRISON_WARDEN_SEATED.
+   Flags PRISON_ADMIN_WING, PRISON_WARDEN_SUIT, PRISON_WARDEN_SEATED.
    Ratchet CBZ.adminWingAudit(): `unreachable` (a locked thing with no route)
    and `keyBothPlaces` (the key on his hip AND in the safe) both pinned at 0.
 ============================================================ */
@@ -87,7 +85,6 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
-  if (CBZ.CONFIG.PRISON_WARDEN_ROUTINE == null) CBZ.CONFIG.PRISON_WARDEN_ROUTINE = true;
   if (CBZ.CONFIG.PRISON_WARDEN_SUIT == null) CBZ.CONFIG.PRISON_WARDEN_SUIT = true;
   /* HE SITS DOWN (owner 2026-08-11: "the warden should be seated at his own
      locked office"). He had the office, the lock and the routine, and then
@@ -568,9 +565,9 @@
      is world/door.js's yard door — the locked one the whole keycard hunt is
      about — and a warden who walked through it twice a day would either need
      it to open for him (handing the player a free tailgate through the
-     game's central lock) or would grind against it forever. So the morning
-     yard hour puts him AT the checkpoint looking out through it, which is
-     where a warden stands at yard call anyway. */
+     game's central lock) or would grind against it forever. So the evening
+     count puts him AT the checkpoint (the wing throat) watching the block
+     file in through it, which is where a warden stands at count anyway. */
   const SPINE = [
     [8.4, -59.5],    // 0  his quarters, inside the door
     [8.4, -55.5],    // 1  the quarters door, office side
@@ -590,15 +587,14 @@
     // and the partition.
     quarters: { at: 0, post: [[10.0, -60.2], [15.4, -60.2]], speed: 1.4 },
     office:   { at: 2, post: [[12.95, -53.6], [17.6, -52.2], [9.2, -52.2]], speed: 1.9 },
-    wing:     { at: 6, post: [[0, -36], [0, -26], [0, -39]], speed: 2.6 },
+    // where entities/guards.js starts him; a new run walks him home from here
     check:    { at: 8, post: [[-5, -11], [5, -11], [5, -12.5], [-5, -12.5]], speed: 2.4 },
-    /* ROUNDS. Node 3 is the corridor's east end, and the corridor is the one
-       run in this building that crosses it end to end: the two partitions
-       (PX_A -7, PX_B 6) stop at CORR_Z, so z = -46.6 is clear from x 11.4 to
-       x -13.6 and every leg below is a straight walk through open floor —
-       which is the whole constraint on a post here (entities/guards.js's
-       patrol mover walks straight at its waypoint with no steering at all). */
-    rounds:   { at: 3, post: [[11.4, -46.6], [-13.6, -46.6], [-13.6, -47.8], [11.4, -47.8]], speed: 2.1 },
+    // ROUNDS: the length of the tier and back, slow, where the whole wing
+    // sees him. prisonwarden.js walks one or two officers at his shoulders.
+    rounds:   { at: 6, post: [[0, -39], [0, -26], [0, -14], [0, -26]], speed: 1.5 },
+    // THE THROAT: the evening count. He stands at the wing's mouth and the
+    // block files in past him. One point: he does not pace, he watches.
+    throat:   { at: 8, post: [[-3.6, -11.8]], speed: 2.0 },   // to one side: the file walks past, not round him
   };
   // the walk between two posts is the slice of the spine between them
   function route(from, to) {
@@ -607,65 +603,18 @@
     return a.at < b.at ? SPINE.slice(a.at + 1, b.at + 1)
                        : SPINE.slice(b.at, a.at).reverse();
   }
-  /* WHICH POST EACH SCHEDULE BLOCK PUTS HIM ON. The keys are
-     systems/prisonschedule.js's own BLOCKS ids (:82-91) verbatim — wake ·
-     yard · mess · work · supper · count · secure · night — and `secure` and
-     `night` are the two that matter, because those are the hours his key is
-     hanging in the safe instead of riding on his hip. A block id this table
-     does not know is DECLARED rather than guessed at: it lands him at his
-     desk and is counted, so a future block added next door shows up as a
-     number instead of a warden quietly standing in the wrong room. */
-  /* ---- HE IS NOT ALWAYS AT HIS DESK -------------------------------------
-     OWNER (2026-08-11, on the first cut of the seated warden): "the warden
-     should not always be in the office — of course sometimes you should see
-     the warden, but it's too common now."
-
-     He was right and the fault was mine: THREE of the eight schedule blocks
-     (mess, work, supper) parked him in that room, and the seating change then
-     nailed him to the chair inside it — so the whole working day was one
-     reliable answer at one address. A prize you can collect whenever you like
-     is not a prize, it is a shop; the safe next door already states the
-     opposite design in this same file (the key is on his hip OR on the hook,
-     and WHICH decides what game you have to play).
-
-     Two things fix it, and neither is a timer:
-       1. THE DESK IS ONE BLOCK, NOT THREE. `mess` and `supper` put him on the
-          tier and at the checkpoint — where a warden actually is at chow and
-          at yard call, and where you can SEE him from the block. Only `work`
-          is his desk. That is the "sometimes you should see him" half.
-       2. EVEN THAT BLOCK IS NOT A PROMISE. An office block rolls against the
-          DAY (deterministic — CBZ.hash01 of the block id and the day count, no
-          Math.random, so a run replays identically and every client agrees)
-          and better than half the time he is walking his corridor instead.
-     Net: he is at the desk in roughly one working block in three days rather
-     than every hour of every day, and the office door is worth picking when
-     the light behind it says somebody is in.                              */
-  const DUTY = {
-    wake: "wing",       // unlock and count: he is on the tier for it
-    yard: "check",      // yard call: at the checkpoint, watching them go out
-    mess: "wing",       // chow: a warden walks his own serving line
-    work: "office",     // the ONE block that can be his desk — and only might be
-    supper: "check",    // evening feed: back at the checkpoint
-    count: "wing",      // evening count: on the tier again
-    secure: "quarters", night: "quarters",
-  };
-  const DESK_ODDS = 0.42;     // how often an office block is actually the desk
-  let unknownBlocks = 0, deskBlocks = 0, roundsBlocks = 0;
+  /* WHICH POST HE IS ON is systems/prisonwarden.js's DUTY table (the one
+     copy of his day) plus its override (his office while he has you called
+     in, the tier during a lockdown he ordered). An id that table does not
+     know lands him at his desk. */
+  let unknownBlocks = 0;
   function dutyFor(id) {
-    let want;
-    if (!id) want = "office";
-    else {
-      const k = String(id).toLowerCase().replace(/[^a-z]/g, "");
-      if (!DUTY[k]) { unknownBlocks++; want = "office"; } else want = DUTY[k];
-    }
-    if (want !== "office") return want;
-    // deterministic per (block, day): the same day always plays the same, and
-    // two clients in a session agree without sending anything.
-    const day = (CBZ.dayCount ? (CBZ.dayCount() | 0) : 0);
-    const h = CBZ.hash01 ? CBZ.hash01(day * 131 + 7, String(id || "").length * 17 + 3) : 0.5;
-    if (h < DESK_ODDS) { deskBlocks++; return "office"; }
-    roundsBlocks++;
-    return "rounds";
+    const W = CBZ.warden;
+    const o = W && W.override ? W.override() : null;
+    if (o && POST[o]) return o;
+    const want = W && W.duty ? W.duty(id) : (id === "secure" || id === "night" ? "quarters" : "office");
+    if (!POST[want]) { unknownBlocks++; return "office"; }
+    return want;
   }
 
   const V3 = function (p) { return new THREE.Vector3(p[0], 0, p[1]); };
@@ -754,8 +703,9 @@
     g.wi = 0;
     warden.transit = chain.length;
     g.speed = P.speed;
-    // a man walking his own corridors at 2 a.m. carries a torch
-    g.flashlightPatrol = (want === "quarters" || want === "wing");
+    // a man walking his own corridors in the dark carries a torch
+    const S = CBZ.prisonSchedule;
+    g.flashlightPatrol = want === "quarters" || ((want === "rounds" || want === "throat") && !!(S && S.torches && S.torches()));
   }
   function offShift() { return warden.at === "quarters"; }
 
@@ -773,15 +723,15 @@
      the ladder holds its tongue. He only reacts to what he can KNOW: same
      room, or close enough to hear you through the quarters doorway. */
   function sayWarden(w, group) {
-    const V = CBZ.econ && CBZ.econ.voice;
-    const line = V && V[group] && CBZ.econ.pickLine ? CBZ.econ.pickLine(V[group]) : "";
+    const line = CBZ.warden && CBZ.warden.line ? CBZ.warden.line(group) : "";
     if (line && CBZ.prisonSay) CBZ.prisonSay(w, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
   }
   function wardenTerritory(w, dt, P) {
     if (CBZ.game.role === "cop") return;
     const inRooms = P.x > PX_B + 0.2 && P.x < IX1 && P.z > IZ0 && P.z < CORR_Z - 0.2;
     const silent = w.asleep || w.tied || w.intimidMode === "scared";
-    const invited = !!(CBZ.cityCampaignPrisonVerbs && CBZ.cityCampaignPrisonVerbs(w));
+    const invited = !!(CBZ.cityCampaignPrisonVerbs && CBZ.cityCampaignPrisonVerbs(w)) ||
+      !!(CBZ.warden && CBZ.warden.pass && CBZ.warden.pass());      // he sent for you
     let knows = false;
     if (inRooms && !silent && !invited) {
       const wp = w.group.position;
@@ -800,16 +750,17 @@
     w.alert = Math.max(w.alert || 0, 0.8);          // he stops and faces you
     if (warden.tresStage < 1 && warden.tresT > 0.5) {
       warden.tresStage = 1;
-      sayWarden(w, "wardenOut1");
+      sayWarden(w, "trespass1");
     } else if (warden.tresStage < 2 && warden.tresT > 4.5) {
       warden.tresStage = 2;
-      sayWarden(w, "wardenOut2");
+      sayWarden(w, "trespass2");
       if (CBZ.addHeat) CBZ.addHeat(8);
     } else if (warden.tresStage < 3 && warden.tresT > 9) {
       warden.tresStage = 3;
-      sayWarden(w, "wardenOut3");
+      sayWarden(w, "trespass3");
       if (CBZ.addHeat) CBZ.addHeat(18);
-      w.hunt = Math.max(w.hunt || 0, 3.5);
+      // he calls it in; he does not chase you round his own desk
+      if (CBZ.prisonOffense) { try { CBZ.prisonOffense("restricted", { by: w, seenBy: w, severity: 2, at: { x: P.x, z: P.z } }); } catch (e) {} }
       let sent = 0;
       for (const gd of CBZ.guards || []) {
         if (gd === w || gd.dead || gd.ko > 0 || gd.asleep || gd.hunt > 0) continue;
@@ -940,7 +891,7 @@
     //      never exit (same one-way-lock law as the staff door above).
     if (!officeDoor.open) {
       const s = staffNear(officeDoor);
-      if (s && s.kind === "warden") officeDoor.setOpen(true);
+      if (s && (s.kind === "warden" || s._wardenCall)) officeDoor.setOpen(true);
       else {
         const dx = P.x - officeDoor.x, dz = P.z - officeDoor.z;
         const insideOffice = P.z < CORR_Z - 0.3 && P.x > PX_B + 0.2;
@@ -968,7 +919,6 @@
     }
 
     // ---- THE DAY ----
-    if (CBZ.CONFIG.PRISON_WARDEN_ROUTINE === false) return;
     if (!warden.g) {
       warden.g = findWarden();
       if (warden.g) { warden.at = "check"; }   // entities/guards.js starts him there
@@ -994,14 +944,19 @@
       if (busy(w)) standUp(w);
       else if (!w._propSeat) sitAtDesk(w);
     } else if (w._propSeat) standUp(w);
+    // asked every frame: an order (a summons, a lockdown) moves him mid-block
     const S = CBZ.prisonSchedule;
     const block = S && S.id ? S.id() : null;
-    if (block !== lastBlock) {
-      lastBlock = block;
-      const want = dutyFor(block);
-      if (want !== warden.at) sendTo(w, want);
-    }
+    lastBlock = block;
+    const want = dutyFor(block);
+    if (want !== warden.at) sendTo(w, want);
   });
+  // prisonwarden.js reads his body through this, never through the roster
+  CBZ.wardenRoutine = {
+    guard: function () { return warden.g; },
+    post: function () { return warden.at; },
+    transit: function () { return warden.transit > 0; },
+  };
 
   /* ---- ONE hold-to-defeat beat, shared by the office lock and the safe.
        Same shape as world/gunroom.js's hacksaw: a polled [E], a touch pill
@@ -1100,9 +1055,8 @@
       rect: { x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: AW.z1 },
       unreachable: unreachable,                       // MUST be 0
       keyBothPlaces: (SAFE.fob.visible && !offShift()) ? 1 : 0,   // MUST be 0
-      unknownBlocks: unknownBlocks,                   // schedule ids DUTY has no post for
+      unknownBlocks: unknownBlocks,                   // duty posts this file has no POST for
       seated: !!(warden.g && warden.g._propSeat),
-      deskOdds: DESK_ODDS, deskBlocks: deskBlocks, roundsBlocks: roundsBlocks,
       chair: warden.seat ? { x: Math.round(warden.seat.x * 10) / 10, z: Math.round(warden.seat.z * 10) / 10, kind: warden.seat.kind } : null,
       warden: warden.g ? {
         post: warden.at, transit: warden.transit, suited: warden.suited,
