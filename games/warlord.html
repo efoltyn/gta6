@@ -709,6 +709,17 @@ const WARLORD = [
   "warlord/feel.js",       // sound, impact, and the mixer that makes 300 rifles a war
   "warlord/warnet.js",     // TRANSPORT: sockets, host election, snapshot/apply
   "warlord/match.js",      // the rival warlords: who they are, their columns, the handshake
+  /* THE WAR LAYER (src/warlord/war/CONTRACT.md): real maps, towns with real
+     people, armies as counters. The menu below is its menu now; the island
+     ride is still one button away. Order is the contract's load order. */
+  "warlord/war/mapkit.js",             // map format -> runtime map
+  "warlord/war/maps/island.js",        // the desert island, baked from desert.js
+  "warlord/war/maps/mediterranean.js", // 218 BC
+  "warlord/war/sim.js",                // the war, as things standing on a map
+  "warlord/war/ai.js",                 // every other side, playing the same loop
+  "warlord/war/view.js",               // the painted relief map
+  "warlord/war/ui.js",                 // menu, clock, HUD, orders, diplomacy
+  "warlord/war/bridge.js",             // a map battle, fought for real in battle.js
 ];
 /* THE ORDER HERE IS EXECUTION ORDER, NOT DEPENDENCY ORDER, and the difference
    matters. These files only DECLARE themselves — W.module() registers a name
@@ -1205,6 +1216,11 @@ function start() {
 
   /* ============================================================ MENU */
   function menu() {
+    /* THE MENU IS THE WAR LAYER'S: choose a map, choose a side, play. The
+       old island ride is a button on it (RIDE THE ISLAND), and ?go=1 below
+       still drops straight onto the island for every existing preset. The
+       body below is the fallback for a page where the war files failed. */
+    if (W.war && W.war.ui && W.war.ui.menu) { W.war.ui.menu(); return; }
     W.setPhase("menu");
     const resume = W.hasSave();
     ctx.screen(
@@ -1217,11 +1233,12 @@ function start() {
          game's central mechanic described to somebody who has not played it
          yet, i.e. a manual page on a title screen. Deleted, 137 characters.
          The mechanic teaches itself in the first ten minutes. */
-      '<p class="wl-sub">ONE MAN · ONE PISTOL · FOURTEEN KILOMETRES OF SAND</p>' +
+      '<p class="wl-sub">ONE MAN, ONE PISTOL, FOURTEEN KILOMETRES OF SAND</p>' +
       '<div class="wl-btns">' +
         '<button class="wl-btn hot" id="mNew" data-boot-entry>RIDE OUT</button>' +
         (resume ? '<button class="wl-btn" id="mLoad">CONTINUE</button>' : '') +
         '<button class="wl-btn" id="mNet">MULTIPLAYER</button>' +
+        '<a class="wl-btn ghost" href="../index.html" style="text-decoration:none">MAIN MENU</a>' +
       '</div>'
     );
     el("mNew").onclick = function () {
@@ -1249,9 +1266,21 @@ function start() {
      `seed: 1337` beside `battle=1` was photographing a different island
      from the one it named (measured: ?battle=1&seed=1337 → state.seed 1). */
   const seedQ = parseInt(Q.get("seed") || "", 10) || 1337;
+  /* ?war=<mapId>&faction=<factionId> boots straight into the war map: the
+     door the capture presets use. window.__warReady goes true when the map
+     has drawn its first frame; window.__war = { M, G, view, ui } for tools. */
+  const warQ = Q.get("war");
   if (Q.get("go") === "1") {
     W.newGame({ seed: seedQ });
     if (W.campaign && W.campaign.enter) W.campaign.enter();
+  } else if (warQ && W.war && W.war.ui && W.war.ui.start) {
+    try {
+      W.war.ui.start({ map: warQ, faction: Q.get("faction") || null,
+                       seed: parseInt(Q.get("seed") || "", 10) || 1 });
+    } catch (e) {
+      console.error("[warlord] war boot", e);
+      menu();
+    }
   } else {
     if (Q.get("battle") === "1") W.newGame({ seed: seedQ });
     menu();
