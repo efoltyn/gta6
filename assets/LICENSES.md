@@ -67,6 +67,17 @@ mild envelope flattening), encoded to mono AAC 96 kbps.
 Fredoka is by Milena Brandão and Hafontia. The OFL permits bundling the font
 inside an application and redistributing it with the software.
 
+| `fonts/oswald-latin-var.woff2` | Google Fonts, Oswald v57 latin subset (variable, wght 400–700), 2026-09-27 | the title hub's display face (game names, PLAY, labels); see `css/fonts.css`, `css/title_hub.css` | SIL Open Font License 1.1 |
+
+Oswald is by Vernon Adams, Kalapi Gajjar and Cyreal. Same OFL terms as Fredoka.
+
+## Menu key art (`assets/keyart/`) — 2026-09-27
+
+One 1600x900 JPEG per game, shown by the title hub as the hero backdrop and
+the game tile. These are screenshots of this game's own engine rendering its
+own scenes (the `*-product` visual presets, title overlay hidden), made by
+`tools/hub-keyart.sh`. No third-party imagery. Re-run the script to refresh.
+
 ## Vendored library (`assets/vendor/`) — 2026-09-04, multiplayer without a server
 
 | File | Source | Notes | License |
