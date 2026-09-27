@@ -196,6 +196,7 @@
     for (let i = 0; i < L.length; i++) { try { L[i](data || {}); } catch (e) { console.error("[gungame " + type + "]", e); } }
   }
 
+  const BR = CBZ.brain;       // systems/brain.js: the bots' senses and memory live there
   const rand = Math.random;   // runtime match randomness (FX-class; no world is built here)
 
   // ---- NAV: a walk grid over the zone -------------------------------------------
@@ -412,9 +413,18 @@
   }
   function eyeY(a) { return (a.pos.y || 0) + (a.isPlayer ? ((CBZ.player && CBZ.player.crouch) ? 1.05 : 1.55) : 1.5); }
   function chestY(a) { return (a.pos.y || 0) + (a.isPlayer && CBZ.player && CBZ.player.crouch ? 0.85 : 1.25); }
+  /* SIGHT IS CBZ.brain's (systems/brain.js perception); THE WALLS ARE THIS
+     MAP'S. The walk grid's collider list is installed as the brain's occlusion
+     for the length of a match (startMatch / gungameExit), so the bots' cone,
+     the awareness meter and gunshot hearing through a wall all ask the same
+     boxes the bullets do. sees() below is the raw eye-to-chest line (no cone,
+     no range) that spawn safety, cover and the trigger ask. */
+  function ggOcclusion(ox, oy, oz, tx, ty, tz) {
+    const N = gg.nav;
+    return !!N && segBlocked(N.cols, ox, oy, oz, tx, ty, tz);
+  }
   function sees(a, b) {
-    const N = gg.nav; if (!N) return true;
-    return !segBlocked(N.cols, a.pos.x, eyeY(a), a.pos.z, b.pos.x, chestY(b), b.pos.z);
+    return !BR.perception.occluded(a.pos.x, eyeY(a), a.pos.z, b.pos.x, chestY(b), b.pos.z);
   }
   function canFire(a, b) {
     if (!sees(a, b)) return false;
@@ -704,6 +714,9 @@
     get dead() { return CBZ.player.dead; },
     get group() { return CBZ.playerChar && CBZ.playerChar.group; },
     get rung() { return gg.playerRung; },
+    // what the bots' awareness meter reads off a target (brain.awareness)
+    get crouch() { return !!CBZ.player.crouch; },
+    get speed() { return playerSpeed; },
   };
   gg.playerTarget = PLAYER_TGT;
 
@@ -730,7 +743,7 @@
       skill: 0.45 + ((idx * 0.37 + rand() * 0.3) % 1) * 0.45,
       speed: 0, target: new THREE.Vector3(x, 0, z),
       foe: null, foeSeen: false, lostT: 99, react: 0, track: 0,
-      mem: null, heard: null, hurtBy: null, hurtT: 99,
+      hurtBy: null, hurtT: 99, glance: null, giveUpT: -1e9, percT: -1, coverAt: null,
       path: null, pathI: 0, pathGoal: null, repathT: 0,
       stuckT: 0, lastX: x, lastZ: z,
       strafe: rand() < 0.5 ? 1 : -1, strafeT: 0,
@@ -764,6 +777,10 @@
       const b = makeBot(p.x, p.z, taken, i);
       root.add(b.group);
       gg.bots.push(b);
+      BR.register(b, "gg_bot", {
+        game: "gungame", faction: "ffa",
+        personality: { courage: 0.5 + b.skill * 0.5, aggression: 0.6 + b.skill * 0.4, discipline: b.skill },
+      });
       CBZ.bots.push(b);   // grapple.js's shared body physics steps CBZ.bots in every non-escape mode
       CBZ.npcs.push(b);   // fpsmode's non-city bullet/punch scan reads CBZ.npcs
       armBot(b);
@@ -783,6 +800,7 @@
           else if (!m._shared && m.dispose) try { m.dispose(); } catch (e) {}
         }
       });
+      BR.unregister(b); BR.memory.forget(b);
       let i = CBZ.bots.indexOf(b); if (i >= 0) CBZ.bots.splice(i, 1);
       i = CBZ.npcs.indexOf(b); if (i >= 0) CBZ.npcs.splice(i, 1);
     }
@@ -790,7 +808,8 @@
   }
   function resetBrain(b) {
     b.foe = null; b.foeSeen = false; b.lostT = 99; b.react = 0; b.track = 0;
-    b.mem = null; b.heard = null; b.hurtBy = null; b.hurtT = 99;
+    BR.memory.forget(b);                              // lastSeen, heard, awareness
+    b.hurtBy = null; b.hurtT = 99; b.glance = null; b.giveUpT = -1e9; b.percT = -1; b.coverAt = null;
     b.path = null; b.pathI = 0; b.pathGoal = null; b.repathT = 0; b.stuckT = 0;
     b.mode = "hunt"; b.meleeCD = 0; b.burst = 0;
   }
@@ -1165,15 +1184,14 @@
     }
   }
 
-  // ---- NOISE: gunfire is heard ------------------------------------------------------
+  // ---- NOISE: gunfire is heard (through CBZ.brain.perception.noise) --------------------
+  // Every registered bot inside the radius hears it; through a wall the
+  // radius halves (the map's colliders are the brain's occlusion this match).
+  // The brain keeps the nearest/newest sound in memory.heard. A bot already in
+  // a fight it can see simply doesn't act on it (decide() reads heard only
+  // when nobody is in sight), which is what the old "busy" skip did.
   function noise(src, x, z, radius) {
-    for (const b of gg.bots) {
-      if (b.dead || b === src) continue;
-      const d = Math.hypot(b.pos.x - x, b.pos.z - z);
-      if (d > radius) continue;
-      if (b.foe && b.foeSeen) continue;              // busy with a fight it can see
-      if (!b.heard || d < b.heard.d) b.heard = { x: x, z: z, t: 0, d: d, who: src };
-    }
+    BR.perception.noise(x, z, radius, "gunshot", src);
   }
   let lastRounds = -1;
   function playerShotWatch() {
@@ -1199,23 +1217,46 @@
     for (const o of gg.bots) if (o.rung > r) r = o.rung;
     return r;
   }
-  // who is this bot fighting? Visible enemies only, scored by distance, by who
-  // is shooting at it, by rung (the leader is hunted) and by stickiness.
+  /* WHO IS THIS BOT FIGHTING? The senses are CBZ.brain's: the gg_bot archetype
+     is this file's old numbers (70 m, the ~200 degree cone cos > -0.2, a 5 m
+     touch radius), and a candidate now has to be SPOTTED — the brain's
+     awareness meter, which fills fast close and centre-of-cone, slower at the
+     edge of vision and on a crouched or still target, and holds 1.4 s after
+     sight breaks. Before, anybody inside the cone with a clear line was seen
+     on the frame he stepped into it, at 70 m, crouched or not. Three things
+     skip the meter, because they are not a question of noticing: a man inside
+     5 m, the man who just shot you, and the man you were already fighting.
+     A candidate that is half-noticed becomes the bot's GLANCE: with nobody to
+     fight it turns and checks where it caught the movement.
+     Scoring (distance, who shot me, the leader is hunted, stickiness) and the
+     aim model below are unchanged. */
+  const GG_FOV = 1.77, GG_RANGE = 70;
+  const _spot = { range: GG_RANGE, fovHalf: GG_FOV, eyeY: 1.5, targetY: 1.25 };
   function perceive(b) {
-    const fx = Math.sin(b.group.rotation.y), fz = Math.cos(b.group.rotation.y);
+    const t = BR.now();
+    const dt = b.percT < 0 ? 0 : Math.min(0.6, Math.max(0, t - b.percT));
+    b.percT = t;
     const top = leaderRung();
-    let best = null, bestS = Infinity;
+    let best = null, bestS = Infinity, glance = null, glanceA = 0.25;
     enemiesOf(b, _cands);
     for (let i = 0; i < _cands.length; i++) {
       const e = _cands[i];
       if (!e.isPlayer && e.spawnT > 0) continue;
       if (e.isPlayer && gg.spawnProtectT > 0) continue;
       const dx = e.pos.x - b.pos.x, dz = e.pos.z - b.pos.z, d = Math.hypot(dx, dz);
-      if (d > 70) continue;
-      const cos = d > 0.01 ? (dx * fx + dz * fz) / d : 1;
-      const aware = d < 5 || cos > -0.2 || e === b.hurtBy || e === b.foe;   // ~200 degree cone, plus touch
-      if (!aware) continue;
-      if (!sees(b, e)) continue;
+      if (d > GG_RANGE) continue;
+      const known = e === b.hurtBy || e === b.foe;
+      _spot.fovHalf = known ? Math.PI : GG_FOV;                 // you turn to the man shooting you
+      _spot.eyeY = eyeY(b) - (b.pos.y || 0);
+      _spot.targetY = chestY(e) - (e.pos.y || 0);
+      const aw = BR.perception.awareness(b, e, dt, _spot);
+      const rec = BR.memory.lastSeen(b, e);
+      if (!rec || !rec.visible) continue;                       // no line this think
+      const primed = d < 5 || (e === b.hurtBy && b.hurtT < 4) || (e === b.foe && b.lostT < 1.5);
+      if (aw < 1 && !primed) {
+        if (aw > glanceA) { glanceA = aw; glance = e; }         // something moved over there
+        continue;
+      }
       let s = d;
       if (e === b.foe) s -= 10;
       if (e.isPlayer) s -= 5;                          // the human is the one everybody noticed
@@ -1225,6 +1266,7 @@
       if (e.isPlayer && top - gg.playerRung >= 3) s += 12;   // a trailing player gets breathing room
       if (s < bestS) { bestS = s; best = e; }
     }
+    b.glance = best ? null : glance;
     if (best) {
       if (best !== b.foe || !b.foeSeen) {
         // reaction time: shorter if we were already looking for them
@@ -1233,13 +1275,44 @@
         if (best !== b.foe) b.track = 0;
       }
       b.foe = best; b.foeSeen = true; b.lostT = 0;
-      b.mem = { x: best.pos.x, z: best.pos.z, t: 0 };
+      BR.memory.see(b, best);                          // where the fight is
     } else if (b.foe) {
       b.foeSeen = false;
     }
   }
 
-  // where should this bot be going right now? Sets b.goal (world x/z) + b.mode
+  /* MOVEMENT GOES THROUGH CBZ.brain.act. This file's own mover (A* on the walk
+     grid, the vault, the stall sidestep, all in the frame loop below) is
+     registered as the gungame executor: act.moveTo writes b.goal + b.moveKind
+     and the loop walks it. CBZ.moves, when it exists, is tried first by the
+     brain. HARNESS TRAP: a generic CBZ.moves.moveTo knows nothing of this
+     map's nav grid; if it lands without it, give this executor prefer: true. */
+  function gait(b, kind) {
+    const r = rungAt(b.rung);
+    return kind === "strafe" ? 2.3 : kind === "back" ? 2.6 : b.mode === "retreat" ? 4.6
+      : (r.melee && b.foeSeen) ? 5.4 : b.foeSeen ? 3.6 : 4.2;
+  }
+  BR.act.use("gungame", {
+    moveTo: function (a, x, z, o) {
+      const G = a.goal || (a.goal = { x: 0, z: 0 });
+      G.x = x; G.z = z;
+      a.moveKind = (o && o.kind) || "run";
+      return true;
+    },
+    stop: function (a) { a.goal = null; a.moveKind = "hold"; return true; },
+    face: function (a, x, z) {
+      const dx = x - a.pos.x, dz = z - a.pos.z;
+      if (dx * dx + dz * dz > 0.01) a.group.rotation.y = Math.atan2(dx, dz);
+      return true;
+    },
+  });
+  const _go = { speed: 0, kind: "run", arrive: 0.6, face: false };
+  function go(b, x, z, kind) {
+    _go.kind = kind; _go.speed = gait(b, kind);
+    BR.act.moveTo(b, x, z, _go);
+  }
+
+  // where should this bot be going right now? (through go() / act.stop) + b.mode
   function decide(b) {
     const r = rungAt(b.rung), P = playOf(r);
     const foe = b.foe && !b.foe.dead ? b.foe : null;
@@ -1249,31 +1322,43 @@
       // hurt and holding a gun: break line of sight
       if (b.hp < 38 && !r.melee && b.mode !== "retreat" && rand() < 0.7) {
         const hide = findCover(b, foe);
-        if (hide) { b.mode = "retreat"; b.goal = hide; b.path = null; return; }
+        if (hide) { b.mode = "retreat"; b.coverAt = hide; b.path = null; go(b, hide.x, hide.z, "run"); return; }
       }
-      if (b.mode === "retreat" && b.goal && Math.hypot(b.goal.x - b.pos.x, b.goal.z - b.pos.z) > 1.2 && b.hp < 60) return;
-      b.mode = "engage";
+      if (b.mode === "retreat" && b.coverAt && Math.hypot(b.coverAt.x - b.pos.x, b.coverAt.z - b.pos.z) > 1.2 && b.hp < 60) return;
+      b.mode = "engage"; b.coverAt = null;
       const lo = P.band[0], hi = P.band[1];
-      if (d > hi) { b.goal = { x: foe.pos.x - ux * (hi * 0.8), z: foe.pos.z - uz * (hi * 0.8) }; b.moveKind = "close"; }
-      else if (d < lo && !r.melee) { b.goal = { x: b.pos.x - ux * (lo - d + 2), z: b.pos.z - uz * (lo - d + 2) }; b.moveKind = "back"; }
-      else if (P.still && b.track > 0.4) { b.goal = null; b.moveKind = "hold"; }
-      else if (r.melee) { b.goal = { x: foe.pos.x, z: foe.pos.z }; b.moveKind = "close"; }
+      let gx, gz, kind;
+      if (d > hi) { gx = foe.pos.x - ux * (hi * 0.8); gz = foe.pos.z - uz * (hi * 0.8); kind = "close"; }
+      else if (d < lo && !r.melee) { gx = b.pos.x - ux * (lo - d + 2); gz = b.pos.z - uz * (lo - d + 2); kind = "back"; }
+      else if (P.still && b.track > 0.4) { BR.act.stop(b); return; }
+      else if (r.melee) { gx = foe.pos.x; gz = foe.pos.z; kind = "close"; }
       else {
         // strafe across the line, swapping sides on a human rhythm
-        b.goal = { x: b.pos.x - uz * b.strafe * 3.5, z: b.pos.z + ux * b.strafe * 3.5 };
-        b.moveKind = "strafe";
+        gx = b.pos.x - uz * b.strafe * 3.5; gz = b.pos.z + ux * b.strafe * 3.5; kind = "strafe";
+        if (gg.nav && !navLine(gg.nav, b.pos.x, b.pos.z, gx, gz)) {
+          b.strafe = -b.strafe;
+          gx = b.pos.x - uz * b.strafe * 3.5; gz = b.pos.z + ux * b.strafe * 3.5;
+        }
       }
-      if (b.goal && gg.nav && !navLine(gg.nav, b.pos.x, b.pos.z, b.goal.x, b.goal.z)) {
-        if (b.moveKind === "strafe") { b.strafe = -b.strafe; b.goal = { x: b.pos.x - uz * b.strafe * 3.5, z: b.pos.z + ux * b.strafe * 3.5 }; }
-      }
+      go(b, gx, gz, kind);
       return;
     }
-    // no one in sight: go where the fight was, then where the noise is, then
-    // hunt the nearest enemy (bots know roughly where people are, like a
-    // radar ping every few seconds, otherwise a big map goes quiet)
-    b.mode = "hunt"; b.moveKind = "run";
-    if (b.mem && b.mem.t < 6) { b.goal = { x: b.mem.x, z: b.mem.z }; return; }
-    if (b.heard && b.heard.t < 8) { b.goal = { x: b.heard.x, z: b.heard.z }; return; }
+    // no one in sight: go where the fight was (memory.lastSeen), then check the
+    // movement it half-caught (the glance), then where the shooting is
+    // (memory.heard), then hunt the nearest enemy (bots know roughly where
+    // people are, like a radar ping every few seconds, otherwise a big map
+    // goes quiet). A goal the grid could not path to is given up (giveUpT).
+    b.mode = "hunt";
+    const t = BR.now();
+    const ls = foe ? BR.memory.lastSeen(b, foe) : null;
+    if (ls && t - ls.t < 6 && ls.t > b.giveUpT) { go(b, ls.x, ls.z, "run"); return; }
+    const gl = b.glance && !b.glance.dead ? BR.memory.lastSeen(b, b.glance) : null;
+    if (gl && t - gl.t < 3 && gl.t > b.giveUpT) {
+      go(b, gl.x, gl.z, "run");
+      return;
+    }
+    const h = BR.memory.heard(b);
+    if (h && t - h.t < 8 && h.t > b.giveUpT) { go(b, h.x, h.z, "run"); return; }
     if (!b.huntGoal || b.huntT <= 0) {
       let best = null, bd = Infinity;
       enemiesOf(b, _cands);
@@ -1292,7 +1377,7 @@
       }
       b.huntT = 5 + rand() * 4;
     }
-    b.goal = b.huntGoal;
+    if (b.huntGoal) go(b, b.huntGoal.x, b.huntGoal.z, "run");
   }
 
   // a nearby walkable spot the foe cannot see from where it stands
@@ -1331,7 +1416,7 @@
       b.path = findPath(N, b.pos.x, b.pos.z, goal.x, goal.z);
       b.pathI = 0; b.pathGoal = { x: goal.x, z: goal.z };
       b.repathT = 1.6 + rand() * 0.8;
-      if (!b.path) { b.huntT = 0; b.mem = null; b.heard = null; }
+      if (!b.path) { b.huntT = 0; b.giveUpT = BR.now(); }
     }
     if (!b.path) return null;
     // advance through reached waypoints; skip ahead when a later one is directly walkable
@@ -1499,8 +1584,6 @@
       if (b.hp < b._hpSeen - 0.5) { b.hurtBy = PLAYER_TGT; b.hurtT = 0; b.react = Math.min(b.react, 0.15); }
       b._hpSeen = b.hp;
       b.hurtT += dt; b.lostT += dt; b.spawnT = Math.max(0, b.spawnT - dt);
-      if (b.mem) b.mem.t += dt;
-      if (b.heard) b.heard.t += dt;
       b.huntT = (b.huntT || 0) - dt;
       b.strafeT -= dt;
       if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = 0.6 + rand() * 1.3; }
@@ -1517,13 +1600,10 @@
       }
 
       // locomotion
-      const r = rungAt(b.rung);
       const st = steer(b, dt);
       let spd = 0;
       if (st) {
-        const mk = b.moveKind;
-        spd = mk === "strafe" ? 2.3 : mk === "back" ? 2.6 : b.mode === "retreat" ? 4.6
-          : (r.melee && b.foeSeen) ? 5.4 : b.foeSeen ? 3.6 : 4.2;
+        spd = gait(b, b.moveKind);
         if (ggTraverse(b, dt, st.x, st.z, spd)) continue;
         const tx = st.x - b.pos.x, tz = st.z - b.pos.z, dist = Math.hypot(tx, tz);
         if (dist > 0.05) {
@@ -1683,6 +1763,9 @@
 
     despawnBots();
     gg.nav = buildNav();
+    // the brain's walls, for this match: the same collider boxes the rounds hit
+    // (cleared in gungameExit; see the contract gap noted on ggOcclusion)
+    BR.perception.setOcclusion(ggOcclusion);
     gg.spawnPool = gg.nav ? gg.nav.open.map((k) => ({ x: cellX(gg.nav, k), z: cellZ(gg.nav, k) })) : [];
     gg.playerRung = 0; gg.playerRungKills = 0; gg.playerKills = 0; gg.playerDeaths = 0;
     gg.respawnT = 0; gg.winner = null; gg.killer = null; gg.leader = null; lastLeader = null;
@@ -1728,6 +1811,7 @@
     gg.match = null;
     gg.respawnT = 0;
     gg.nav = null;
+    BR.perception.setOcclusion(null);                 // back to the brain's default walls
     CBZ.player._death = null;
     if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();

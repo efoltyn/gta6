@@ -239,6 +239,131 @@
   function brnd() { return botRng ? botRng() : Math.random(); }
   let matchNo = 0;
 
+  /* ============================================================
+     THE CROWD HAS NERVES (CBZ.brain: morale + threat + perception).
+
+     Every survivor is a brain-registered "survivor" in ONE morale group, the
+     crowd. That is the same morale the armies run (systems/brain.js, lifted
+     from warlord/battle.js and games/battle.html), so panic SPREADS the way a
+     rout does:
+       • a death is a jolt to the whole crowd (morale.death: shock ~1.8x the
+         dead man's share, decaying over ~7 s, capped per death) and a harder
+         one to anybody within 7 m (their rattle);
+       • everybody who could SEE it (perception.seesPoint: the survivor's
+         field of view, 24 m, a 6 m "heard it" radius) is rattled by how close
+         it was and answers it through threat.respond — personality decides:
+         the timid FLEE (a 3.5 s sprint away from the body), the ones right on
+         top of it may FREEZE (1.6 s staring at it), the steady ignore it and
+         keep to their plan;
+       • when the crowd's own morale, less his rattle and his wounds, falls
+         under a survivor's nerve (morale.broken: latched, with the rally band
+         and a 6 s no-break-again window, so nobody flickers) he BREAKS: he
+         drops what he was doing and runs down the hazard gradient, or away
+         from the last death he saw. A body already hiding under a slab stays
+         there — breaking is running from the open, not out of the shelter.
+     DETERMINISM: nothing here draws a random number. Personality and the
+     nerve jitter are hashed from the two spawn draws every body already has
+     (hmix(hidOf(b), k), like skillOf), morale ticks on the sim clock, and the
+     sight test is arithmetic on positions and yaw (occlude:false: the crowd's
+     witness test does not cast rays, so a mass-casualty frame costs nothing).
+     ============================================================ */
+  const BR = CBZ.brain || null;
+  const CROWD = "surv-crowd";
+  const WIT = { range: 24, touch: 6, occlude: false };
+  const TH = { kind: "hazard", x: 0, z: 0, distance: 0, armed: false, aimingAtMe: false, source: null };
+  const SCARE_HOLD = { flee: 3.5, freeze: 1.6 };
+  const CROWD_K = { lostK: 0.2, routK: 0.15, shockK: 3, shockCap: 0.12 };
+  /* AND A CIVILIAN'S NERVE IS NOT A SOLDIER'S BREAK POINT. combat_iq's civ row
+     (0.62) is "the hp fraction at which he breaks for cover" in a gunfight;
+     as a crowd's nerve, with the rally band on top (+0.16), the most timid
+     needed a morale of ~0.99 to ever calm down again, and never did. 0.5,
+     pushed +-0.2 by courage, is measured in tools/brain-sim-war.mjs 3: a
+     mass-casualty minute breaks ~a fifth of the crowd (the timid, near the
+     bodies) and a quiet ten seconds brings every one of them back. */
+  if (BR) BR.define("survivor", { nerve: 0.5 });
+  let moraleAcc = 0;
+  function crowdReset() {
+    if (!BR) return;
+    // one crowd per match: the group record is the brain's, emptied here
+    // (HARNESS TRAP / contract gap: brain.morale has no clear(id) yet)
+    const G = BR.morale.group(CROWD);
+    G.members.length = 0; G.men0 = 0; G.p0 = 0; G.pNow = 0; G.dead = 0;
+    G.shock = 0; G.morale = 1; G.alive = 0; G.routing = 0; G.broken = false; G.leaderDown = false;
+    /* A CROWD OF STRANGERS IS NOT AN ARMY. An army's morale is mostly what it
+       has LOST (lostK 1.5): the dead were your side's strength. A crowd's is
+       what it just SAW: the recent deaths (shock, ~7 s decay) and the people
+       running past it (routK). With the army's lostK a disaster that took 40%
+       of the lobby left every timid survivor broken for the rest of the match
+       (measured in tools/brain-sim-war.mjs 3), and routK 0.35 turned the
+       first few runners into the whole crowd running with nobody ever calming
+       down (a runner never leaves the field the way a routed soldier does, so
+       the army's contagion term has no drain here). With these numbers a
+       mass-casualty minute breaks the timid, and a quiet ten seconds brings
+       them back. */
+    BR.morale.config(CROWD, CROWD_K);
+    moraleAcc = 0;
+  }
+  function joinBrain(b) {
+    if (!BR) return;
+    const h = hidOf(b), sk = skillOf(b);
+    const rec = BR.register(b, "survivor", {
+      game: "survival", group: CROWD,
+      personality: {
+        courage: 0.12 + sk * 0.6 + hmix(h, 29) * 0.2,
+        aggression: 0.1 + hmix(h, 31) * 0.35,
+        discipline: 0.15 + sk * 0.7,
+        curiosity: hmix(h, 37),
+        loyalty: 0.3 + hmix(h, 41) * 0.5,
+      },
+    });
+    rec.nerveJ = (hmix(h, 43) - 0.5) * 0.12;       // the brain's jitter is id-ordered; this one is the body's
+    b._survBrain = true;
+  }
+  const _wit = [];
+  function witnessDeath(d) {
+    if (!BR || !d._survBrain) return;
+    BR.morale.death(CROWD, d);
+    const x = d.pos.x, y = d.pos.y || 0, z = d.pos.z;
+    const list = BR.near(x, z, WIT.range, _wit);
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i].actor;
+      if (o === d || !o._survBrain || o.dead) continue;
+      if (!BR.perception.seesPoint(o, x, y, z, WIT)) continue;
+      const dd = Math.hypot(o.pos.x - x, o.pos.z - z);
+      BR.morale.rattle(o, 0.25 + 0.45 * Math.max(0, 1 - dd / WIT.range));
+      TH.x = x; TH.z = z; TH.distance = dd; TH.sheltered = o.state === "hide";
+      const resp = BR.threat.respond(o, TH);
+      if (resp !== "flee" && resp !== "freeze") continue;         // the steady keep to their plan
+      const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
+      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp];
+    }
+  }
+  /* one think of the nerves: true = it owns the body this tick */
+  function panicThink(b) {
+    if (!BR || !b._survBrain) return false;
+    const sc = b._scare;
+    const scared = !!(sc && simT - sc.t < sc.hold);
+    const broke = BR.morale.broken(b);
+    if (!scared && !broke) return false;
+    if (b.state === "hide") return false;                          // under the slab: stay under it
+    if (scared && sc.resp === "freeze" && !broke) {
+      b.state = "look"; b._lookX = sc.x; b._lookZ = sc.z;
+      b.urg = 0; b.pause = 0;
+      b.target.set(b.pos.x, 0, b.pos.z);
+      return true;
+    }
+    // RUN: down the hazard gradient if there is one, else away from the body
+    let fx = 0, fz = 0;
+    const fv = CBZ.disasters && CBZ.disasters.fleeVector ? CBZ.disasters.fleeVector(b.pos.x, b.pos.z) : null;
+    if (fv && (fv.x || fv.z)) { fx = fv.x; fz = fv.z; }
+    else if (sc) { fx = b.pos.x - sc.x; fz = b.pos.z - sc.z; }
+    const m = Math.hypot(fx, fz);
+    if (m < 1e-6) return false;
+    b.state = "panic"; b.urg = 1; b.pause = 0;
+    b.target.set(b.pos.x + (fx / m) * 18, 0, b.pos.z + (fz / m) * 18);
+    return true;
+  }
+
   CBZ.spawnSurvivorBots = function (n) {
     CBZ.clearSurvivorBots();
     const arena = CBZ.buildDisasterArena();
@@ -264,6 +389,8 @@
       arena.root.add(b.group);
       CBZ.bots.push(b);
     }
+    crowdReset();
+    for (let i = 0; i < CBZ.bots.length; i++) joinBrain(CBZ.bots[i]);
   };
 
   /* WHAT THE CROWD'S SCHEDULE IS DOING. Both numbers are match state that no
@@ -314,12 +441,14 @@
     const b = makeBot(x, z, brnd);
     arena.root.add(b.group);
     CBZ.bots.push(b);
+    joinBrain(b);
     if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.total++;
     return b;
   };
 
   CBZ.clearSurvivorBots = function () {
     for (const b of CBZ.bots) {
+      if (b._survBrain && BR) { BR.unregister(b); b._survBrain = false; }
       if (b.group) {
         if (b.group.parent) b.group.parent.remove(b.group);
         b.group.traverse(function (o) {
@@ -997,6 +1126,10 @@
       }
     } else if (b.panicT > 0) { b.panicT = 0; b.foe = null; }
 
+    // THE NERVES (see "THE CROWD HAS NERVES"): a body that saw somebody die,
+    // or whose nerve the crowd's losses have broken, runs or freezes first
+    if (panicThink(b)) return;
+
     // the survivor brain goes to the right KIND of place (see above); when it
     // has no plan (a panicker, a tornado, a sinkhole) the gradient below runs
     if (survOn() && CBZ.disasters && survivorThink(b)) return;
@@ -1354,9 +1487,14 @@
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
     lingering = 0;                                   // recounted in the pass below
+    // the crowd's morale on the sim clock, 4 Hz (shock decay, recount, latch)
+    if (BR) { moraleAcc += dt; if (moraleAcc >= 0.25) { BR.morale.tick(moraleAcc); moraleAcc = 0; } }
     for (let i = 0; i < bots.length; i++) {
       const b = bots[i];
       if (b.dead) {                                    // corpse: body.js poses the ragdoll; just count + cull
+        // the frame he went down, whoever saw it feels it (any cause: the
+        // disaster, the shark, a thrown car)
+        if (b._survBrain && !b._mourned) { b._mourned = true; witnessDeath(b); }
         if (b.tag) b.tag.visible = false;
         b.deadT = (b.deadT || 0) + dt;
         /* THE BODY DOESN'T VANISH WHILE YOU'RE LOOKING AT IT (SURV_CORPSE_LINGER).
@@ -1413,6 +1551,7 @@
          The stride is measured from the PLAYER now — a body in the world, at
          the same place on every client. `near` (the camera) still decides
          animation, which is a view decision and is allowed to differ. */
+      if (b._survBrain) BR.memory.tick(b, dt);         // the rattle wears off, the rally window runs
       const sdx = b.pos.x - px, sdz = b.pos.z - pz;
       const stride = (sdx * sdx + sdz * sdz) < ANIM_DIST2 ? 3 : 7;
       if ((frame + b.slice) % stride === 0) think(b);
