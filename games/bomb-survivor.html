@@ -118,6 +118,33 @@
   #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
     background:transparent;color:inherit;padding:15px 32px;border-radius:999px;font:700 15px/1 inherit;
     letter-spacing:.16em;cursor:pointer}
+/* ============================================================
+   SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)
+   The only place a spoken line appears, in every game. One short line per
+   speaker, pinned above his head by projecting the world point through the
+   live camera each frame; scale and --a (distance/occlusion fade) are set
+   there. No box, no name, no stroke, no offset shadow: the zero-offset ink
+   halo, so the words can never render as two layers.
+============================================================ */
+#speech{ position:fixed; inset:0; pointer-events:none; z-index:27; overflow:hidden; }
+#speech .say{
+  position:absolute; left:0; top:0;
+  transform-origin:50% 100%;
+  max-width:min(46vw, 300px); width:max-content;
+  font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size:clamp(14px, 1.9vh, 19px);
+  font-weight:600; line-height:1.12; letter-spacing:.005em;
+  color:#fff; text-align:center; text-wrap:balance; white-space:normal;
+  text-shadow:var(--ink-shadow, 0 0 2px #000, 0 0 5px rgba(0,0,0,.7));
+  opacity:var(--a, 1);
+  transition:opacity .3s ease;
+  will-change:transform;
+}
+#speech .say.out{ opacity:0; }
+#speech .say.edge{ font-size:clamp(13px, 1.7vh, 17px); }
+/* a voice on the phone: smaller, cooler, by the hand */
+#speech .say.phone{ color:#dff3ff; font-weight:500; font-style:italic; max-width:min(40vw, 260px); }
+body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 </style>
 </head>
 <body>
@@ -167,7 +194,7 @@ const WANT_AIRPORT = Q.get("airport") !== "0";
 const WORLD_SEED = Q.get("seed") || "talloran";
 
 const NEEDS = [
-  "caps", "batch", "green", "people", "military", "militaryisland", "citycore",
+  "caps", "speech", "batch", "green", "people", "military", "militaryisland", "citycore",
   "airbase", "air", "ordnance", "damage", "nukefx", "radar", "match",
 ];
 if (WANT_AIRPORT) NEEDS.push("airport");
