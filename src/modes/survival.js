@@ -184,14 +184,12 @@
     document.body.appendChild(overlay);
     resultsBtn.addEventListener("click", finishRound);
   }
-  // The live spectate status line. It carries GAME STATE only — placement and
-  // how many are left — never how you died: that already went to the killfeed
-  // (the one sanctioned popup), and repeating it under a giant "ELIMINATED"
-  // was the death screen telling you what the screen had just shown you.
+  // The spectate status line: your placement and nothing else. The running
+  // "N left" tail was a second live counter under the ELIMINATED title; the
+  // world you are watching is the count now.
   function spectateLine() {
     const s = surv.stats;
-    return "#" + (s.placement || 1) + " of " + (s.total || "?") +
-      "  ·  " + surv.aliveCount() + " left";
+    return "#" + (s.placement || 1) + " of " + (s.total || "?");
   }
   function showSpectateOverlay() {
     buildOverlay();
@@ -232,14 +230,10 @@
     // Only DISASTER rounds land in the persistent survival record (and show
     // its lifetime line) — a shark-sim death is a different game's loss.
     if (g.mode === "survival") recordSurvRun(surv.stats.placement || (liveBots() + 1));
+    // the lose card says how it ended; the lifetime Wins/best tally is gone
+    // from every screen (a record readout nobody asked to be shown)
     const sub = document.querySelector("#survlose .sub");
-    if (sub) {
-      const s = CBZ.survStats();
-      const bits = ["You were " + (surv._deathCause || "eliminated")];
-      if (winner) bits.push(winner + " outlasted everyone");
-      if (g.mode === "survival" && s.runs) bits.push("Wins " + s.wins + "/" + s.runs + (s.bestPlacement ? " · best #" + s.bestPlacement : ""));
-      sub.textContent = bits.join("  ·  ");
-    }
+    if (sub) sub.textContent = "You were " + (surv._deathCause || "eliminated") + "." + (winner ? " " + winner + " outlasted everyone." : "");
     if (CBZ.loseGame) CBZ.loseGame(surv._deathCause || "eliminated");
   }
   function clearSpectate() {
@@ -373,18 +367,10 @@
   //      pattern, own key). state.js's winGame() calls CBZ.recordSurvWin();
   //      the death path calls recordSurvRun(placement) via finishRound().
   //      Guarded by surv._runRecorded so each round counts exactly once.
-  //      Read back on the title card's survival note + both end screens. ----
+  //      Kept as data (CBZ.survStats); no screen prints it any more. ----
   const STATS_KEY = "cellblockz_surv_stats";
   let survSaved = (function () { try { return JSON.parse(localStorage.getItem(STATS_KEY)) || {}; } catch (e) { return {}; } })();
   function persistSurvStats() { try { localStorage.setItem(STATS_KEY, JSON.stringify(survSaved)); } catch (e) {} }
-  const titleNote = document.querySelector("#title .smallnote.mode-survival-only");
-  const titleNoteBase = titleNote ? titleNote.textContent : "";
-  function refreshSurvTitle() {
-    if (!titleNote) return;
-    titleNote.textContent = !survSaved.runs ? titleNoteBase
-      : titleNoteBase + "  ·  Wins " + (survSaved.wins || 0) + "/" + survSaved.runs +
-        (survSaved.bestPlacement ? "  ·  Best #" + survSaved.bestPlacement : "");
-  }
   function recordSurvRun(placement) {
     if (surv._runRecorded) return;
     surv._runRecorded = true;
@@ -392,14 +378,12 @@
     if (placement === 1) survSaved.wins = (survSaved.wins || 0) + 1;
     if (placement >= 1 && (!survSaved.bestPlacement || placement < survSaved.bestPlacement)) survSaved.bestPlacement = placement;
     persistSurvStats();
-    refreshSurvTitle();
   }
   CBZ.recordSurvWin = function () {
     if (!surv.stats.placement) surv.stats.placement = 1;
     recordSurvRun(1);
   };
   CBZ.survStats = function () { return { wins: survSaved.wins || 0, runs: survSaved.runs || 0, bestPlacement: survSaved.bestPlacement || 0 }; };
-  refreshSurvTitle();
 
   /* THE CLEAR-DAY LIGHT, in one place (systems/disasters.js resets the
      env to this every tick before the live disaster re-tints it). It was
@@ -451,7 +435,6 @@
   });
 
   // ---- stamina + spectate watcher + last-one-standing check ----
-  let specHudT = 0;
   CBZ.onUpdate(30, function (dt) {
     if (!CBZ.islandModeOn(g.mode)) return;
     const P = CBZ.player, S = CBZ.SURV;
@@ -466,7 +449,7 @@
       surv.stats.placement = 1;
       if (CBZ.winGame) CBZ.winGame("survival");   // fills #survwin + CBZ.recordSurvWin
       const sub = document.querySelector("#survwin .sub");
-      if (sub) { const s = CBZ.survStats(); sub.textContent = "Last one standing" + (s.runs ? "  ·  Wins " + s.wins + "/" + s.runs : ""); }
+      if (sub) sub.textContent = "Last one standing";
       return;
     }
 
@@ -483,8 +466,6 @@
       if (liveBots() <= 1) { finishRound(); return; }
       // the held-back ELIMINATED banner lands once the fling has played out
       if (overlayHoldT > 0) { overlayHoldT -= dt; if (overlayHoldT <= 0) showSpectateOverlay(); }
-      specHudT -= dt;
-      if (specHudT <= 0 && subEl) { specHudT = 0.5; subEl.textContent = spectateLine(); }
     }
   });
 
