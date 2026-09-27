@@ -2084,6 +2084,13 @@
       if (!op.mission || !op.mission.alive || (!op.mission.alive() && op.mission.state !== "done")) {
         if (!missionBusyOther("agency-")) startOpMission(op);
       }
+      // a mark the world swept away alive (a mode change, a cull sweep) is
+      // re-staged at the top of his loop rather than left as a ghost target
+      if (op.ped && !op.ped.dead && !op.dead && (!op.ped.group || !op.ped.group.parent || (CBZ.cityPeds || []).indexOf(op.ped) < 0)) {
+        const m0 = op.mission; teardownOp(op); RT.op = null;
+        if (m0 && m0.retire) m0.retire("restage");
+        return;
+      }
       if (op.ped && op.ped.dead && !op.dead) onMarkDead(op);
       if (!op.dead) { tickAlarm(op, dt); tickRoutine(op, dt); tickIntel(op, dt); tickDisguise(op); }
       refreshFile();
@@ -2096,6 +2103,14 @@
         stageFinale(RT.fin);
       }
       const F = RT.fin;
+      // govcomplex re-posts a swept head of state as a NEW body; follow it
+      if (!F.dead && F.site.actor && F.site.actor !== F.ped && !F.site.actor.dead) {
+        for (let i = 0; i < F.cars.length; i++) if (F.cars[i] && !F.cars[i].player && CBZ.cityScrapCar) { try { CBZ.cityScrapCar(F.cars[i]); } catch (e) {} }
+        dropCrowd(F);
+        const m0 = F.mission; RT.fin = null;
+        if (m0 && m0.retire) m0.retire("restage");
+        return;
+      }
       if (!F.mission || !F.mission.alive || (!F.mission.alive() && F.mission.state !== "done")) {
         if (!missionBusyOther("agency-")) startFinaleMission(F);
       }
