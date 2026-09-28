@@ -530,9 +530,10 @@ function playerCase(B, id, aiming, st) {
   }
   {
     const prop = CBZ.buildActorWeapon("sidearm"), o = new T.Object3D();
-    o.name = "anchor_mag"; o.position.set(0.01, -0.2, 0.03); prop.add(o); prop.userData._anchors = null;
-    const A = HO.anchors(prop);
-    check(A.mag && Math.abs(A.mag.y + 0.2) < 1e-9, "holds: a named anchor child wins over the old data");
+    o.name = "anchor_pouch"; o.position.set(0.01, -0.2, 0.03); prop.add(o); prop.userData._anchors = null;
+    const A = HO.anchors(prop), R = prop.userData.anchors;
+    check(A.pouch && Math.abs(A.pouch.y + 0.2) < 1e-9, "holds: a named anchor child is read");
+    if (R && R.mag) check(A.mag && A.mag.distanceTo(R.mag.pos) < 1e-9, "holds: the appearance's own anchor record is read first");
   }
 }
 // arm solver: exact, rigid, elbow down

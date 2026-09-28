@@ -54,12 +54,15 @@
 
      ANCHORS. Every held thing's grip points come from the MODEL, never from a
      per-gun table here: CBZ.holds.anchors(prop) reads the appearance's own
-     named anchors (userData.anchors = { grip, trigger, support, muzzle, mag,
-     stock, bolt, pump, ... } as Vector3 or Object3D in the prop's space, or
-     children named "anchor_<name>"), and falls back to what the older models
-     publish (the kit's K.hand grip spec, userData.grips, userData.muzzle, the
-     measured buttstock). The solvers (CBZ.gunHold below, fpsmode's grasped
-     hands, gunhands' reload paths) take their points from here. */
+     anchor record (userData.anchors, the contract at the top of
+     weapons/appearances/sidearm.js: { pos, quat } per grip, trigger,
+     support, muzzle, mag (+ well), stock, bolt, charge, sight, lens; also a
+     Vector3 / Object3D, or a child named "anchor_<name>"), and only falls
+     back to older data (the kit's K.hand grip spec, userData.grips) for a
+     point a model does not name. Positions come back here; the frames
+     (quat) are CBZ.gunAnchors.world's. The solvers (CBZ.gunHold below,
+     fpsmode's grasped hands, gunhands' reload paths) take their points from
+     here. */
   const HOLD_CLASS = {
     handgun: { tp: 1, fpAimed: 2, fpHip: 1 },
     long: { tp: 2, fpAimed: 2, fpHip: 2 },
@@ -116,6 +119,7 @@
       return out;
     }
     if (Array.isArray(v) && v.length >= 3) return out.set(v[0], v[1], v[2]);
+    if (v.pos && v.pos.isVector3) return out.copy(v.pos);         // the appearance contract's { pos, quat }
     return null;
   }
   /* anchors(prop) -> { name: Vector3 in prop (model) space }, cached on the
@@ -128,7 +132,14 @@
     const A = {};
     // 1. the appearance's own named anchors
     const auth = ud.anchors;
-    if (auth) for (const k in auth) { const p = anchorLocal(prop, auth[k], new THREE.Vector3()); if (p) A[k] = p; }
+    if (auth) for (const k in auth) {
+      const v = auth[k];
+      if (!v || typeof v !== "object") continue;                  // k (units per metre)
+      const p = anchorLocal(prop, v, new THREE.Vector3());
+      if (p) A[k] = p;
+      if (v.well && v.well.isVector3 && !A.well) A.well = v.well.clone();       // the mag's mouth
+      else if (v.well && v.well.pos && !A.well) A.well = v.well.pos.clone();
+    }
     prop.traverse(function (o) {
       const m = o.name && /^anchor[_:]?(\w+)$/.exec(o.name);
       if (m && !A[m[1]]) A[m[1]] = anchorLocal(prop, o, new THREE.Vector3());
