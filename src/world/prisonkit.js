@@ -234,6 +234,23 @@
         else if (ej < 0.011 || ev < 0.011) l -= 14;
         grey(px, l);
       });
+    } else if (kind === "wood") {
+      /* sawn hardwood, 1 m tile: grain streaks running along v (with the
+         world-metre UVs that is along z on a top face and up a side face),
+         wavy growth rings, a few darker figure flecks and one faint plank
+         joint per metre. Grey, so the tint is the species (oak, walnut). */
+      c = canvasOf(512, function (u, v, px) {
+        const warp = (fbm(u, v, 3, 2, 101) - 0.5) * 0.08 + Math.sin(v * 6.283 * 2 + u * 9) * 0.004;
+        const ring = (u + warp) * 46;
+        const fr = ring - Math.floor(ring);
+        let l = 206 + (fbm(u * 0.5, v, 8, 3, 102) - 0.5) * 22;
+        l -= Math.pow(Math.max(0, Math.sin(fr * Math.PI)), 6) * 34;          // latewood lines
+        l += (fbm(u, v * 0.2, 60, 1, 103) - 0.5) * 12;                         // pores
+        if (fbm(u, v, 18, 2, 104) > 0.74) l -= 16;                             // figure
+        const j = (u * 5) % 1;
+        if (j < 0.006 || j > 0.994) l -= 40;                                   // plank joint
+        grey(px, l);
+      });
     } else if (kind === "grating") {
       // open steel grating for the deck: 30 x 100 mm bars, seen from above
       c = canvasOf(256, function (u, v, px) {
@@ -254,7 +271,7 @@
         environment through core/gfx.js when a tier has one.
      ========================================================== */
   const MATS = new Map();
-  const TILE = { panel: 4, concrete: 2, steel: 1, galv: 1, chainlink: 2, roller: 1, corrugated: 1, grating: 1, block: 1.6, polished: 2 };
+  const TILE = { panel: 4, concrete: 2, steel: 1, galv: 1, chainlink: 2, roller: 1, corrugated: 1, grating: 1, block: 1.6, polished: 2, wood: 1 };
   // `rough` overrides the kind's roughness (a polished floor is the concrete
   // map at 0.3); "polished" is that as a kind of its own
   function skin(kind, tint, rough) {
@@ -278,8 +295,8 @@
       m = new THREE.MeshStandardMaterial({
         color: tint != null ? tint : 0xffffff, map: map,
         bumpMap: kind === "chainlink" ? null : map,
-        bumpScale: kind === "panel" ? 0.02 : kind === "concrete" ? 0.008 : kind === "block" ? 0.012 : kind === "roller" ? 0.01 : kind === "corrugated" ? 0.012 : kind === "polished" ? 0.003 : 0.002,
-        roughness: rough != null ? rough : metal ? 0.42 : kind === "steel" ? 0.55 : kind === "roller" ? 0.6 : kind === "block" ? 0.72 : 0.92,
+        bumpScale: kind === "wood" ? 0.003 : kind === "panel" ? 0.02 : kind === "concrete" ? 0.008 : kind === "block" ? 0.012 : kind === "roller" ? 0.01 : kind === "corrugated" ? 0.012 : kind === "polished" ? 0.003 : 0.002,
+        roughness: rough != null ? rough : kind === "wood" ? 0.62 : metal ? 0.42 : kind === "steel" ? 0.55 : kind === "roller" ? 0.6 : kind === "block" ? 0.72 : 0.92,
         metalness: metal ? 0.72 : kind === "steel" || kind === "roller" || kind === "corrugated" ? 0.35 : kind === "polished" ? 0.06 : 0.0,
         envMap: CBZ.ENV || null, envMapIntensity: metal ? 0.8 : kind === "polished" ? 0.7 : 0.45,
       });

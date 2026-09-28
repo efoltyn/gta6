@@ -180,13 +180,28 @@
   }
   // the dais and the altar table with its cloth
   addBox(39.6, 0.1, 69, 3.2, 0.2, 7.0, 0x8a7358, { solid: true, y0: 0, y1: 0.2 });
-  addBox(40.2, 0.62, 69, 0.9, 0.84, 2.0, 0x6b4a2a, { solid: true, y0: 0, y1: 1.05 });   // altar
+  // THE ALTAR: an oak table on the dais, not a brown block. Four square legs,
+  // an apron, a thick top, and a panelled front (stiles, rails, two fielded
+  // panels) facing the pews; the cloth lies ON the top and falls down the front.
+  CBZ.colliders.push({ minX: 39.75, maxX: 40.65, minZ: 68.0, maxZ: 70.0, y0: 0, y1: 1.05 });
+  if (K) {
+    const oak = K.skin("wood", 0x7a5130), oakD = K.skin("wood", 0x5e3c20);
+    const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+    for (const lx of [39.8, 40.6]) for (const lz of [68.05, 69.95]) stat(B(0.09, 0.8, 0.09), oakD, lx, 0.6, lz, { uv: 1 });
+    stat(B(0.94, 0.05, 2.04), oak, 40.2, 1.015, 69, { uv: 1 });                             // top
+    stat(B(0.8, 0.1, 1.9), oakD, 40.2, 0.94, 69, { uv: 1, cast: false });                   // apron
+    stat(B(0.03, 0.72, 1.9), oak, 39.79, 0.58, 69, { uv: 1, cast: false });                 // front board
+    for (const pz of [68.55, 69.45]) {
+      stat(B(0.02, 0.5, 0.72), oakD, 39.77, 0.56, pz, { uv: 1, cast: false });              // fielded panel
+      stat(B(0.012, 0.42, 0.64), oak, 39.757, 0.56, pz, { uv: 1, cast: false });            // its raised field
+    }
+  } else addBox(40.2, 0.62, 69, 0.9, 0.84, 2.0, 0x6b4a2a, {});
   addBox(40.2, 1.055, 69, 0.96, 0.03, 2.06, 0xefe9da, { cast: false });                 // altar cloth
-  addBox(39.73, 0.8, 69, 0.02, 0.5, 2.06, 0xefe9da, { cast: false });                   // its front fall
-  addBox(39.72, 0.86, 69, 0.012, 0.3, 0.18, 0x7a2f2f, { cast: false });                 // the stole mark
-  // the cross: plain wood, on the wall, lit by the room
-  addBox(41.68, 2.7, 69, 0.08, 2.0, 0.16, 0x6b4a2a, { cast: false });
-  addBox(41.68, 3.15, 69, 0.08, 0.16, 1.0, 0x6b4a2a, { cast: false });
+  addBox(39.705, 0.86, 69, 0.012, 0.38, 2.06, 0xefe9da, { cast: false });               // its front fall, clear of the panels
+  addBox(39.697, 0.9, 69, 0.006, 0.3, 0.18, 0x7a2f2f, { cast: false });                 // the stole mark
+  // the cross: oak, 2.0 x 1.0 m in 160 x 80 mm section, on the wall
+  for (const c of [addBox(41.68, 2.7, 69, 0.08, 2.0, 0.16, 0x6b4a2a, { cast: false }),
+    addBox(41.68, 3.15, 69, 0.08, 0.16, 1.0, 0x6b4a2a, { cast: false })]) if (K) K.skinBox(c, "wood", 0x6b4526, 1);
   // three tall narrow windows in the east wall, clear leaded glass in a frame
   for (let i = -1; i <= 1; i += 2) {
     const z = 69 + i * 4.2;
@@ -195,14 +210,58 @@
     for (const t of [-0.6, 0, 0.6]) addBox(41.665, 2.6 + t, z, 0.01, 0.02, 0.74, 0x3a3f46, { cast: false });
     addBox(41.665, 2.6, z, 0.01, 2.44, 0.02, 0x3a3f46, { cast: false });
   }
-  // PEWS, facing +x at the altar: seat, raked back, two end panels. The seat
-  // is the collider (waist-gated), and each pew declares three seats.
+  /* PEWS, facing +x at the altar (rebuilt 2026-09-28). They were a slab, a
+     tilted slab, a stick and two boxes. Now an oak pew as a joiner builds
+     one: two shaped END PANELS cut from a side profile (the scrolled arm,
+     the seat line and the raked back all in the one board, an arched cut
+     between the feet), a seat board with a rounded nosing, three raked back
+     boards under a cap rail, a hymnal shelf on the back for the row behind
+     with a few books in it, a padded kneeler on brackets, and a stretcher.
+     All of it goes through the kit's merger, so twelve pews are a handful of
+     draw calls. The seat stays at 0.475 m, the three sit anchors and the
+     waist-gated seat collider are exactly where they were. */
+  const OAK = K ? K.skin("wood", 0x8e5f33) : null, OAK_D = K ? K.skin("wood", 0x6e4724) : null;
+  const VINYL = new THREE.MeshLambertMaterial({ color: 0x5a2226 });
+  const BOOKS = [0x5a1f1f, 0x1f2a3a, 0x2c2a26].map((c) => new THREE.MeshLambertMaterial({ color: c }));
+  const PEW_END = [[0.27, 0], [0.27, 0.6], [0.25, 0.655], [0.2, 0.685], [0.13, 0.69], [0.07, 0.665], [0.02, 0.6],
+    [-0.14, 0.58], [-0.23, 0.66], [-0.29, 0.88], [-0.3, 0.955], [-0.34, 0.99], [-0.39, 0.99], [-0.42, 0.96],
+    [-0.4, 0.85], [-0.36, 0.62], [-0.35, 0], [-0.24, 0], [-0.23, 0.045], [-0.18, 0.085], [-0.05, 0.1],
+    [0.08, 0.085], [0.13, 0.045], [0.14, 0]];
   function pew(x, zc, len) {
-    addBox(x, 0.45, zc, 0.46, 0.05, len, 0x8a5e2b, { solid: true, y0: 0, y1: 0.95 });
-    const back = addBox(x - 0.25, 0.72, zc, 0.05, 0.52, len, 0x7a5226, { cast: false });
-    back.rotation.z = 0.1;
-    addBox(x - 0.1, 0.24, zc, 0.03, 0.2, len - 0.1, 0x6e4a22, { cast: false });       // stretcher
-    for (const e of [-1, 1]) addBox(x - 0.02, 0.47, zc + e * (len / 2 + 0.03), 0.58, 0.94, 0.05, 0x6e4a22, { cast: false });
+    CBZ.colliders.push({ minX: x - 0.23, maxX: x + 0.23, minZ: zc - len / 2, maxZ: zc + len / 2, y0: 0, y1: 0.95 });
+    if (!K) {
+      addBox(x, 0.45, zc, 0.46, 0.05, len, 0x8a5e2b, {});
+      for (const e of [-1, 1]) addBox(x - 0.02, 0.47, zc + e * (len / 2 + 0.03), 0.58, 0.94, 0.05, 0x6e4a22, { cast: false });
+    } else {
+      const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+      // the end panels: profile in (x, y), 45 mm thick, just outside the seat
+      for (const e of [-1, 1]) {
+        const g = K.profileGeo(PEW_END, 0.045, 0.006); g.rotateY(Math.PI / 2);
+        stat(g, OAK_D, x, 0, zc + e * (len / 2 + 0.0225), { uv: 1 });
+      }
+      // seat board with a rounded nosing
+      stat(B(0.44, 0.035, len), OAK, x - 0.01, 0.4575, zc, { uv: 1 });
+      const nose = new THREE.CylinderGeometry(0.018, 0.018, len, 10); nose.rotateX(Math.PI / 2);
+      stat(nose, OAK, x + 0.21, 0.4575, zc, { uv: 1, cast: false });
+      stat(B(0.05, 0.07, len), OAK_D, x + 0.19, 0.405, zc, { uv: 1, cast: false });              // front apron
+      // three raked back boards and the cap rail (rake 0.1 rad, top leaning back)
+      for (const y of [0.58, 0.72, 0.86]) stat(B(0.025, 0.12, len), OAK, x - 0.255 - 0.1 * (y - 0.5), y, zc, { rz: 0.1, uv: 1 });
+      stat(B(0.075, 0.035, len + 0.02), OAK_D, x - 0.3, 0.965, zc, { uv: 1 });
+      // the hymnal shelf on the back, for the row behind: shelf + front lip
+      stat(B(0.1, 0.018, len - 0.06), OAK_D, x - 0.34, 0.6, zc, { uv: 1, cast: false });
+      stat(B(0.015, 0.09, len - 0.06), OAK_D, x - 0.39, 0.645, zc, { uv: 1, cast: false });
+      for (let k = 0; k < 6; k++) {
+        const bz = zc - len / 2 + 0.4 + k * (len - 0.8) / 5 + (((x * 7 + k * 13) % 3) - 1) * 0.05;
+        stat(B(0.06, 0.2, 0.032), BOOKS[(k + Math.round(x)) % 3], x - 0.345, 0.709, bz, { cast: false });
+        stat(B(0.06, 0.19, 0.03), BOOKS[(k + 1 + Math.round(x)) % 3], x - 0.345, 0.704, bz + 0.036, { cast: false });
+      }
+      // the kneeler for the row behind, padded, on two brackets off the end panels
+      stat(B(0.17, 0.06, len - 0.06), VINYL, x - 0.62, 0.12, zc, { cast: false });
+      stat(B(0.15, 0.03, len - 0.06), OAK_D, x - 0.62, 0.075, zc, { uv: 1, cast: false });
+      for (const e of [-1, 1]) stat(B(0.3, 0.04, 0.03), OAK_D, x - 0.49, 0.08, zc + e * (len / 2 - 0.015), { uv: 1, cast: false });
+      // the stretcher between the panels, under the seat
+      stat(B(0.03, 0.08, len), OAK_D, x - 0.08, 0.14, zc, { uv: 1, cast: false });
+    }
     for (let k = 0; k < 3; k++) if (CBZ.roomSeatAnchor)
       CBZ.roomSeatAnchor(x + 0.04, 0, zc - len / 3 + k * len / 3, Math.PI / 2, "bench", null, { cushion: 0.475, floorBelow: 0 });
   }

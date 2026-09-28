@@ -1885,47 +1885,118 @@
   // The break the ventilation grate lives in (ventilation.js:41, z = -31) — a
   // recess, never a cell, so that escape route can never be locked away.
   function utilityAlcove(cx, cz, depth, len, side) {
-    const wallX = cx - side * (depth / 2 - 0.06);
-    // A FLOOR MOP BASIN, not a 1.1 m grey cube: a 0.3 m moulded curb basin on
-    // the floor with a faucet on the wall over it.
-    const mz = cz - len / 2 + 0.7;
-    addBox(cx, 0.15, mz, 0.8, 0.30, 0.8, 0xc9ccc8, { cast: false });                    // basin curb
-    addBox(cx, 0.29, mz, 0.62, 0.02, 0.62, 0x5e6468, { cast: false });                  // basin floor, recessed
-    addBox(wallX + side * 0.08, 0.95, mz, 0.12, 0.05, 0.05, C_STEEL_D, { cast: false }); // faucet
-    addBox(wallX + side * 0.14, 0.88, mz, 0.03, 0.12, 0.03, C_STEEL_D, { cast: false });
-    // THE THREE STACKED BOXES ARE GONE (owner: "3 random boxes stacked near the
-    // player spawn", this is them: a green, an orange and a grey 0.55 m cube
-    // stood on top of each other and labelled "stacked buckets"). A janitor's
-    // alcove has ONE wheeled mop bucket with its wringer, and the mop leaning
-    // on the wall. Merged into one static mesh; no collider (it never had one).
+    /* A JANITOR'S RECESS, FITTED THE WAY ONE IS (2026-09-28). The basin was a
+       0.8 m grey box in the MIDDLE of the floor, 1.8 m from the tap that was
+       meant to fill it; the tap was two sticks; the "conduit" was a 0.1 x 0.3
+       grey bar the length of the wall; the wringer a cube. Now, against the
+       back wall and all in ONE vertex-coloured mesh with the bucket:
+         - a moulded mop sink in the corner: a 0.25 m curb with a rolled top
+           edge, a dished floor and a strainer drain;
+         - over it a wall-mounted service faucet: two supply pipes out of the
+           wall, a body with two cross handles, a vacuum breaker on top, a
+           spout with a hose thread, and a bucket hook under it;
+         - galvanised EMT conduit: two runs on one-hole straps under the
+           soffit, a pull box with a screwed cover where they meet, and a drop
+           to a fused disconnect with its handle;
+         - the wheeled mop bucket with a press wringer, and the mop.
+       No collider (the alcove never had one), nothing within 0.5 m of the
+       ventilation grate at z -32.2 on the back wall (world/ventilation.js). */
+    const F = cx - side * depth / 2;                  // the back wall's face
+    const wx = (d) => F + side * d;                   // d metres out from the wall
+    const parts = [], cols = [];
+    const push = (g, col) => { parts.push(g.index ? g.toNonIndexed() : g); cols.push(col); };
+    const box = (x, y, z, w, h, d, col) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); push(g, col); };
+    const cylY = (x, y, z, r, h, col, seg) => { const g = new THREE.CylinderGeometry(r, r, h, seg || 10); g.translate(x, y, z); push(g, col); };
+    const cylZ = (x, y, z, r, h, col, seg) => { const g = new THREE.CylinderGeometry(r, r, h, seg || 10); g.rotateX(Math.PI / 2); g.translate(x, y, z); push(g, col); };
+    const cylX = (x, y, z, r, h, col, seg) => { const g = new THREE.CylinderGeometry(r, r, h, seg || 10); g.rotateZ(Math.PI / 2); g.translate(x, y, z); push(g, col); };
+    const SINK = 0xc3c5bf, SINK_D = 0x6a6f70, CHROME = 0xc9ced3, GALV = 0x9aa0a6, BOXG = 0x7f858b, DARK = 0x2a2d31;
+
+    // ---- the mop sink, in the corner against the back wall ----
+    const S = 0.66, CURB = 0.25, T = 0.06;
+    const mz = cz - len / 2 + 0.5, sx = wx(0.02 + S / 2);
+    box(sx, CURB / 2, mz - S / 2 + T / 2, S, CURB, T, SINK);          // curb, four sides
+    box(sx, CURB / 2, mz + S / 2 - T / 2, S, CURB, T, SINK);
+    box(wx(0.02 + T / 2), CURB / 2, mz, T, CURB, S - 2 * T, SINK);
+    box(wx(0.02 + S - T / 2), CURB / 2, mz, T, CURB, S - 2 * T, SINK);
+    cylZ(sx - side * (S / 2 - T / 2), CURB, mz, T / 2, S, SINK, 8);                // the rolled top edge
+    cylX(sx, CURB, mz - S / 2 + T / 2, T / 2, S, SINK, 8);
+    cylX(sx, CURB, mz + S / 2 - T / 2, T / 2, S, SINK, 8);
+    cylZ(sx + side * (S / 2 - T / 2), CURB, mz, T / 2, S, SINK, 8);
+    box(sx, 0.035, mz, S - 2 * T, 0.03, S - 2 * T, SINK_D);                       // dished floor
+    cylY(sx, 0.052, mz, 0.05, 0.006, DARK, 14);                                    // strainer
+    for (const t of [-0.025, 0, 0.025]) box(sx + t, 0.056, mz, 0.006, 0.004, 0.09, CHROME);
+
+    // ---- the service faucet over it ----
+    const fy = 0.98, fz = mz;
+    for (const dz of [-0.1, 0.1]) {
+      cylX(wx(0.035), fy, fz + dz, 0.012, 0.07, CHROME);                           // supply stubs out of the wall
+      cylY(wx(0.07), fy + 0.03, fz + dz, 0.022, 0.06, CHROME, 12);                 // valve bonnet
+      box(wx(0.07), fy + 0.07, fz + dz, 0.07, 0.012, 0.012, CHROME);               // cross handle
+      box(wx(0.07), fy + 0.07, fz + dz, 0.012, 0.012, 0.07, CHROME);
+    }
+    cylZ(wx(0.07), fy, fz, 0.018, 0.24, CHROME, 12);                               // the body between them
+    cylY(wx(0.07), fy + 0.07, fz, 0.024, 0.09, CHROME, 12);                        // vacuum breaker
+    cylX(wx(0.13), fy - 0.01, fz, 0.016, 0.12, CHROME);                            // spout out
+    cylY(wx(0.19), fy - 0.06, fz, 0.016, 0.1, CHROME);                             // and down
+    cylY(wx(0.19), fy - 0.125, fz, 0.019, 0.03, CHROME);                           // hose thread
+    const hook = new THREE.TorusGeometry(0.04, 0.006, 5, 10, Math.PI); hook.rotateY(Math.PI / 2); hook.rotateX(Math.PI);
+    hook.translate(wx(0.13), fy - 0.2, fz); push(hook, CHROME);                    // bucket hook
+    box(wx(0.06), fy - 0.18, fz, 0.1, 0.012, 0.012, CHROME);
+    for (const dz of [-0.1, 0.1]) cylY(wx(0.025), (fy + 2.45) / 2, fz + dz, 0.011, 2.45 - fy, 0xb87333);   // copper risers
+
+    // ---- conduit: two EMT runs under the soffit, a pull box, a drop ----
+    // the runs come in from the far end and stop in a pull box at the mouth
+    // of the recess, well clear of (and above) the grate at z -32.8..-31.6
+    const z0 = cz - len / 2 + 0.25, jz = cz + len / 2 - 0.3;
+    const runs = [[2.62, 0.013], [2.72, 0.011]];
+    for (const [y, r] of runs) {
+      cylZ(wx(0.03), y, (z0 + jz - 0.08) / 2, r, jz - 0.08 - z0, GALV);
+      cylZ(wx(0.03), y, jz - 0.085, r + 0.006, 0.02, GALV);                        // connector
+      for (let z = z0 + 0.3; z < jz - 0.15; z += 0.8) {
+        if (Math.abs(z - jz) < 0.2) continue;
+        box(wx(0.03 + r * 0.6), y, z, 0.012, r * 2 + 0.012, 0.022, GALV);          // one-hole strap
+        box(wx(0.004), y + r + 0.012, z, 0.008, 0.022, 0.022, GALV);                // its foot on the wall
+      }
+    }
+    box(wx(0.035), 2.67, jz, 0.07, 0.15, 0.15, BOXG);                              // pull box
+    box(wx(0.073), 2.67, jz, 0.006, 0.16, 0.16, 0x8a9096);                         // screwed cover
+    for (const a of [-1, 1]) for (const b of [-1, 1]) cylX(wx(0.077), 2.67 + a * 0.065, jz + b * 0.065, 0.006, 0.004, DARK, 6);
+    cylY(wx(0.03), (2.595 + 1.72) / 2, jz, 0.011, 2.595 - 1.72, GALV);            // the drop
+    box(wx(0.05), 1.58, jz, 0.1, 0.28, 0.2, 0x6c747c);                             // fused disconnect
+    box(wx(0.102), 1.58, jz, 0.004, 0.26, 0.18, 0x767e86);                         // its door
+    box(wx(0.08), 1.6, jz + 0.115, 0.03, 0.12, 0.03, DARK);           // operating handle
+    for (const a of [-1, 1]) box(wx(0.002), 1.58 + a * 0.16, jz, 0.004, 0.02, 0.05, GALV);   // mounting ears
+
+    // ---- the wheeled mop bucket and the mop ----
     {
       const bx = cx + side * 0.75, bzz = cz + len / 2 - 0.9;
-      const parts = [], cols = [];
-      const push = (g, col) => { parts.push(g.index ? g.toNonIndexed() : g); cols.push(col); };
-      const tub = new THREE.CylinderGeometry(0.2, 0.17, 0.34, 16, 1, true); tub.translate(0, 0.25, 0); push(tub, 0xd9b12a);
-      const base = new THREE.CylinderGeometry(0.17, 0.17, 0.02, 16); base.translate(0, 0.09, 0); push(base, 0xd9b12a);
-      const water = new THREE.CircleGeometry(0.185, 16); water.rotateX(-Math.PI / 2); water.translate(0, 0.33, 0); push(water, 0x5b6258);
-      const rim = new THREE.TorusGeometry(0.2, 0.012, 5, 18); rim.rotateX(Math.PI / 2); rim.translate(0, 0.42, 0); push(rim, 0xc49d22);
-      const wr = new THREE.BoxGeometry(0.16, 0.16, 0.2); wr.translate(0.12, 0.5, 0); push(wr, 0x3a3f44);      // wringer
-      const lever = new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6); lever.rotateZ(0.5); lever.translate(0.24, 0.72, 0); push(lever, 0x3a3f44);
+      const at = (g) => { g.translate(bx, 0, bzz); return g; };
+      const tub = new THREE.CylinderGeometry(0.2, 0.17, 0.34, 16, 1, true); tub.translate(0, 0.25, 0); push(at(tub), 0xd9b12a);
+      const base = new THREE.CylinderGeometry(0.17, 0.17, 0.02, 16); base.translate(0, 0.09, 0); push(at(base), 0xd9b12a);
+      const water = new THREE.CircleGeometry(0.185, 16); water.rotateX(-Math.PI / 2); water.translate(0, 0.33, 0); push(at(water), 0x5b6258);
+      const rim = new THREE.TorusGeometry(0.2, 0.012, 5, 18); rim.rotateX(Math.PI / 2); rim.translate(0, 0.42, 0); push(at(rim), 0xc49d22);
+      // the press wringer: a housing over the rim, two press plates, the lever
+      const wh = new THREE.BoxGeometry(0.2, 0.05, 0.24); wh.translate(0.1, 0.45, 0); push(at(wh), 0x3a3f44);
+      for (const t of [-0.05, 0.05]) { const pl = new THREE.BoxGeometry(0.02, 0.16, 0.2); pl.translate(0.1 + t, 0.54, 0); push(at(pl), 0x4a5056); }
+      const lever = new THREE.CylinderGeometry(0.012, 0.012, 0.55, 6); lever.rotateZ(0.35); lever.translate(0.28, 0.72, 0); push(at(lever), 0x3a3f44);
+      const grip = new THREE.CylinderGeometry(0.018, 0.018, 0.12, 8); grip.rotateX(Math.PI / 2); grip.translate(0.18, 0.98, 0); push(at(grip), 0x1f2226);
       for (const a of [-1, 1]) for (const b of [-1, 1]) {
-        const w = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8); w.rotateZ(Math.PI / 2); w.translate(a * 0.12, 0.04, b * 0.12); push(w, 0x222428);
+        const w = new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8); w.rotateZ(Math.PI / 2); w.translate(a * 0.12, 0.04, b * 0.12); push(at(w), 0x222428);
       }
       // the mop, leaning into the corner: handle + a grey cotton head on the floor
-      const h = new THREE.CylinderGeometry(0.014, 0.014, 1.45, 6); h.translate(0, 0.72, 0); h.rotateZ(side * 0.2); h.translate(-side * 0.25, 0.0, -0.3); push(h, 0x8a6b45);
-      const head = new THREE.CylinderGeometry(0.1, 0.13, 0.12, 10); head.translate(-side * 0.25 + side * 0.0, 0.06, -0.3); push(head, 0xb9b6ad);
-      for (let i = 0; i < parts.length; i++) {
-        const g = parts[i], n = g.attributes.position.count, c = new THREE.Color(cols[i]), arr = new Float32Array(n * 3);
-        for (let k = 0; k < n; k++) { arr[k * 3] = c.r; arr[k * 3 + 1] = c.g; arr[k * 3 + 2] = c.b; }
-        g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
-        if (g.attributes.uv) g.deleteAttribute("uv");
-      }
-      const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
-      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-      m.position.set(bx, 0, bzz);
-      root.add(m);
+      const h = new THREE.CylinderGeometry(0.014, 0.014, 1.45, 6); h.translate(0, 0.72, 0); h.rotateZ(side * 0.2); h.translate(-side * 0.25, 0.0, -0.3); push(at(h), 0x8a6b45);
+      const head = new THREE.CylinderGeometry(0.1, 0.13, 0.12, 10); head.translate(-side * 0.25, 0.06, -0.3); push(at(head), 0xb9b6ad);
     }
-    addBox(wallX, 2.55, cz, 0.10, 0.3, len - 0.6, C_STEEL_D, { cast: false });          // conduit run
+    for (let i = 0; i < parts.length; i++) {
+      const g = parts[i], n = g.attributes.position.count, c = new THREE.Color(cols[i]), arr = new Float32Array(n * 3);
+      for (let k = 0; k < n; k++) { arr[k * 3] = c.r; arr[k * 3 + 1] = c.g; arr[k * 3 + 2] = c.b; }
+      g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+      if (g.attributes.uv) g.deleteAttribute("uv");
+    }
+    const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
+    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    m.receiveShadow = true;
+    root.add(m);
     addBox(cx, 3.1, cz, depth - 0.3, 0.14, len - 0.4, C_PART_D, { cast: false });       // low soffit
   }
 
