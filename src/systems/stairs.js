@@ -220,7 +220,7 @@
     const cand = [];
     for (let i = 0; i < links.length; i++) {
       const L = links[i];
-      if (!ladders && L.kind === "ladder") continue;
+      if (L.off || (!ladders && L.kind === "ladder")) continue;   // off = its building is rubble
       const near = dist2(L.a.x, L.a.z, from.x, from.z) < R2 || dist2(L.a.x, L.a.z, to.x, to.z) < R2 ||
                    dist2(L.b.x, L.b.z, from.x, from.z) < R2 || dist2(L.b.x, L.b.z, to.x, to.z) < R2;
       if (near) cand.push(L);
@@ -283,11 +283,14 @@
     const plats = CBZ.platforms;
     for (let i = 0; i < links.length; i++) {
       const L = links[i];
-      const pl = L.plats && L.plats[0];
-      if (!pl || x < pl.minX || x > pl.maxX || z < pl.minZ || z > pl.maxZ) continue;
+      if (!L.plats || !L.plats.length) continue;
       if (y != null && (y < Math.min(L.a.y, L.b.y) - 0.5 || y > Math.max(L.a.y, L.b.y) + 0.5)) continue;
-      if (plats.indexOf(pl) < 0) continue;
-      return L;
+      for (let j = 0; j < L.plats.length; j++) {
+        const pl = L.plats[j];
+        if (!pl.ramp || x < pl.minX || x > pl.maxX || z < pl.minZ || z > pl.maxZ) continue;
+        if (plats.indexOf(pl) < 0) continue;
+        return L;
+      }
     }
     return null;
   }
@@ -332,6 +335,13 @@
     flight: flight,
     link: link,
     removeOwner: removeOwner,
+    // a demolished building keeps its records (a heal re-seats them): its links go dormant
+    setOwnerActive: function (owner, on) {
+      let n = 0;
+      for (const L of links) if (L.owner === owner) { L.off = !on; n++; }
+      if (n) version++;
+      return n;
+    },
     route: route,
     flightAt: flightAt,
     links: function () { return links; },

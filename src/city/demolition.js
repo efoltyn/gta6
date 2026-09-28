@@ -688,7 +688,8 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // 4) the lot's obligations pause while it's a hole in the ground
     lot.demolished = true;
-    suspendAir(b);              // the pad/hangar go with the building (see DEMO_LANDMARKS)
+    if (CBZ.stairs) CBZ.stairs.setOwnerActive(b, false);   // no AI routes up a building that is rubble
+    suspendAir(b);             // the pad/hangar go with the building (see DEMO_LANDMARKS)
     if (b.home) { b.home._demoListed = b.home.listed; b.home.listed = false; }
 
     const rec = {
@@ -736,7 +737,8 @@
     // any piece of the old building still lying on the lot goes before it stands again
     if (CBZ.debris) { try { CBZ.debris.clear(rec.k); } catch (e) {} }
     lot.demolished = false;
-    restoreAir(b);              // the rebuild calendar gives the pad/hangar back
+    if (CBZ.stairs) CBZ.stairs.setOwnerActive(b, true);
+    restoreAir(b);             // the rebuild calendar gives the pad/hangar back
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);
     b.group.visible = true;
     /* RE-SEAT (DEMO_FAST_PURGE). The mirror of destroy()'s disease: this used
