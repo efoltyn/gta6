@@ -605,7 +605,7 @@
                    "Come back with a number I can call."],
     guardPaid: ["I'm looking at the wall for the next while.",
                 "Never saw you. Keep it that way.",
-                "Two minutes of blind. Use them."],
+                "I'm on my break. You hear me?"],
     /* THE WARDEN'S VOICE IS AUTHORITY, NOT COMMERCE (owner, 2026-08-19: "he
        should not accept cigs... he legit acted like an inmate"). Every warden
        line below exists because the generic guard/inmate line was wrong in
@@ -637,17 +637,20 @@
                  "You've been straight with me. That counts.",
                  "You're alright. Most in here aren't."],
     // night in a cellblock is a whisper, and whispers are where the truth is
-    nightTalk: ["Keep it down. Sound carries on the tier at night.",
-                "Nights are the only hours in here that belong to us.",
-                "Lights out is when you learn who's really awake.",
-                "The man hates the dark as much as we do. Remember that."],
-    yardTalk: ["Yard's the only market in here. Everything moves out here.",
-               "You want business done, you do it in daylight, in the open.",
-               "Nobody looks twice at two men talking in a yard."],
+    nightTalk: ["Keep it down. Sound carries at night.",
+                "Can't sleep either, huh.",
+                "Hear him two cells down? Every night.",
+                "Lights out's the only quiet in here.",
+                "I dream about cereal. Just cereal."],
+    yardTalk: ["Sun feels different out here.",
+               "That court's ours. Don't.",
+               "Hot one today.",
+               "Heard they're shipping ten guys out Friday.",
+               "Chow was a crime this morning."],
     noStock: ["Nothing on me worth your smokes.",
-              "Sold out. Come back when the yard's open."],
-    notNow: ["Not now. Wrong hour for it.",
-             "Ask me at yard time like a normal person."],
+              "Sold out. Try tomorrow."],
+    notNow: ["Not now.",
+             "Not here. Later."],
   };
 
   /* SHOW THE HAND — the missing physical half of a pickpocket.
@@ -682,7 +685,6 @@
     if (name !== "Keycard") return;
     if (g.hasKey) return;
     g.hasKey = true;
-    if (CBZ.setObjective) CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
   }
 
   // ---------- TALK: free flavour / hints ----------
@@ -695,6 +697,10 @@
     if (guardish && counting()) {
       return { ok: true, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy), sfx: null };
     }
+    // what is in front of him first: the gun in your hand, the blood, the man
+    // you just dropped, the uniform (systems/prisonvoice.js)
+    const R = CBZ.prisonVoice && CBZ.prisonVoice.react ? CBZ.prisonVoice.react(actor) : null;
+    if (R) return { ok: true, msg: R, sfx: null };
     if (!guardish) {
       const S = socialRead(actor);
       if (S.standing === "enemy" || S.standing === "sour") return { ok: false, msg: pick(VOICE.inmateSour), sfx: null };
@@ -747,9 +753,9 @@
      ========================================================================== */
   const PHONE_TIME_SECS = 90;
   // He says the terms in his own mouth: what the money is, and where it goes.
-  const PHONE_TERMS = "Not in smokes. Have your people put it on my sister's app. You got a phone or you don't.";
+  const PHONE_TERMS = "Not in smokes. My sister's got an app.";
   // Once per officer. Long, because it is the only time the game explains it.
-  const PHONE_TEACH = "What am I doing with cigarettes? You can't reach the street, we got nothing to talk about.";
+  const PHONE_TEACH = "What am I doing with cigarettes?";
   function hasPhoneAccess() { return hasItem("Burner Phone") || (g.phoneTimeT || 0) > 0; }
   function phoneTerms() { return phoneBridge() ? PHONE_TERMS : ""; }
   function grantPhoneTime(secs) {
@@ -947,9 +953,9 @@
         // he sells; he does not buy — teach it once, in his own voice
         if (!actor._saidNoCigs) {
           actor._saidNoCigs = true;
-          return { ok: false, msg: "What am I going to do with prison smokes? I stop at a store like a person. Bring me a name, or buy off my shelf." };
+          return { ok: false, msg: "What am I going to do with prison smokes?" };
         }
-        return { ok: false, msg: "My shelf's for sale. My eyes aren't. Not for smokes." };
+        return { ok: false, msg: "My shelf's for sale. My eyes aren't." };
       }
       const cost = bribeCost(actor);
       if (g.cigs < cost) return { ok: false, msg: `It's ${cost} to look the other way. ${pick(VOICE.guardShort)}` };
@@ -977,6 +983,9 @@
     const cost = 3;
     if (g.cigs < cost) return { ok: false, msg: `Three smokes buys goodwill in here. ${pick(VOICE.guardShort)}` };
     addCigs(-cost);
+    // SHARING ACROSS CARS: your own car sees you hand smokes to another car
+    // (systems/prisoncars.js); the gift still lands with him
+    if (CBZ.prisonCars) CBZ.prisonCars.noteShare(actor);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
     addRespect(actor, 2);            // standing, capped — a gift is not a favor
     nudgeGang(actor, 4, -2);

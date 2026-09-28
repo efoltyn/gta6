@@ -184,9 +184,9 @@
         if (st.lastPoll) bits.push("Last poll " + st.lastPoll.aPct + "–" + st.lastPoll.bPct + ".");
       }
     }
-    say(p, appr >= 55 ? "“Always glad to hear from a constituent.”"
-      : appr >= 35 ? "“Make it quick.”"
-        : "“If you're here to shout, join the queue.”", "#cfe6ff", 2.4);
+    say(p, appr >= 55 ? "Always glad to hear from a constituent."
+      : appr >= 35 ? "Make it quick."
+        : "If you're here to shout, get in line.", "#cfe6ff", 2.4);
     toPhone("City Desk", bits.join(" "));
   }
 
@@ -220,7 +220,7 @@
     const seat = seatOf(p); if (!seat) return;
     const price = priceFor(seat);
     if (!(CBZ.city && CBZ.city.canAfford && CBZ.city.canAfford(price))) {
-      say(p, "“That is not a serious number.”", "#ff9aa2", 2);
+      say(p, "That is not a serious number.", "#ff9aa2", 2);
       return;
     }
     // A favour that cannot be delivered must not be sold, and a favour worth
@@ -231,11 +231,11 @@
     const heatRoad = stars() >= 1 && !!CBZ.cityReduceWanted;
     const purse = Math.max(0, seat.rec.treasury || 0);
     if (!heatRoad && purse <= 0) {
-      say(p, "“There is nothing in the account and nothing on your record. What exactly do you want?”", "#ff9aa2", 2.8);
+      say(p, "The account's empty. What do you want from me?", "#ff9aa2", 2.8);
       return;
     }
     if (!heatRoad && purse < price) {
-      say(p, "“Look at the books. " + seat.rec.name + " could not pay you what you are offering me.”", "#ff9aa2", 2.8);
+      say(p, "This city couldn't pay that if it wanted to.", "#ff9aa2", 2.8);
       return;
     }
     if (!CBZ.city.spend(price)) return;
@@ -245,7 +245,7 @@
     const pol = politicsRec();
     if (pol) pol.corruption = (pol.corruption || 0) + CORRUPTION_PER_GREASE;
     if (CBZ.approvalShock) { try { CBZ.approvalShock(seat.rec.id, GREASE_APPROVAL); } catch (e) {} }
-    say(p, "“We never had this conversation.”", "#e8c84a", 2.6);
+    say(p, "We never had this conversation.", "#e8c84a", 2.6);
     toPhone("City Desk", "Quiet money moved through " + seat.rec.name + " — " + got + ".");
   }
 
@@ -265,16 +265,16 @@
   }
   function endorse(p) {
     const seat = seatOf(p); if (!seat) return;
-    if (stars() > 0) { say(p, "“Not with sirens on you.”", "#ff9aa2", 2.4); return; }
+    if (stars() > 0) { say(p, "Not with sirens on you.", "#ff9aa2", 2.4); return; }
     if ((g.respect | 0) < ENDORSE_RESPECT) {
-      say(p, "“I don't lend my name to people I have to look up.”", "#ff9aa2", 2.6);
+      say(p, "I don't lend my name to people I have to look up.", "#ff9aa2", 2.6);
       return;
     }
     p._endorsedYou = true;
     const R = CBZ.cityRun;
     if (R && R.hook && p._sid) { try { R.hook(p._sid, { kind: "endorsement", note: titleOf(seat.rec, seat.deputy) + " " + nameOf(p._sid) + " backs you publicly" }); } catch (e) {} }
     if (R && R.momentumGain) { try { R.momentumGain(ENDORSE_MOMENTUM, "a sitting officeholder's endorsement"); } catch (e) {} }
-    say(p, "“I'll stand next to you once. Don't embarrass me.”", "#8fe08a", 2.8);
+    say(p, "I'll stand next to you once. Don't embarrass me.", "#8fe08a", 2.8);
     toPhone("City Desk", titleOf(seat.rec, seat.deputy) + " " + nameOf(p._sid) + " has endorsed your candidacy.");
   }
 
@@ -298,7 +298,7 @@
     // official"; crimeInfo() answers {stars:0} for an unknown id and report()
     // bails, so the "real crime report" in this file's header was a no-op.
     if (CBZ.cityCrime) CBZ.cityCrime(70, { x: p.pos.x, z: p.pos.z, type: "extortion" });
-    say(p, got ? "“Take it. Take it and get out.”" : "“There is nothing left to give you!”", "#ff9aa2", 2.8);
+    say(p, got ? "Take it. Take it and get out." : "There is nothing left to give you!", "#ff9aa2", 2.8);
     toPhone("City Desk", "A public official was threatened in the open. " + seat.rec.name + "'s office is not commenting.");
   }
 

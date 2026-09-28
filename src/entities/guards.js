@@ -12,6 +12,9 @@
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
 
   let guardNo = 0;
+  const CO_NAMES = ["Diaz", "Kowalski", "Brennan", "Okafor", "Reyes", "Haskell", "Morrow", "Pruitt", "Nguyen", "Castellano",
+    "Doyle", "Whitaker", "Boone", "Ferris", "Lindqvist", "Tate", "Mendez", "Harlan", "Sutter", "Greer", "Dunleavy", "Abernathy",
+    "Rourke", "Vasquez", "Bell", "Kincaid", "Oduya", "Marsh", "Tillman", "Soto"];
   function addFlashlight(ch) {
     // ONE MODEL at every scale: weapons/flashlight.js also feeds the physical
     // death drop and the inventory thumbnail.  Its +Z is the light direction;
@@ -20,6 +23,9 @@
     const group = CBZ.buildFlashlight ? CBZ.buildFlashlight() : new THREE.Group();
     group.position.set(0.01, -0.025, 0.025);
     group.rotation.x = Math.PI / 2;
+    // the model is life-size now (weapons/flashlight.js); the rig socket draws
+    // at ~0.7x, so undo that or a guard carries a pen light
+    group.scale.setScalar(1 / 0.70);
     const lens = group.userData.lens || null;
     const lensMat = group.userData.lensMat || (lens && lens.material) || CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
     group.visible = false;
@@ -51,7 +57,8 @@
     ch.group.add(wedge);
     const flashlight = addFlashlight(ch);
 
-    const name = warden ? "the Warden" : "Officer #" + (++guardNo);
+    // a CO has a surname on his shirt; inmates use it ("Officer #3" was a spreadsheet row)
+    const name = warden ? "the Warden" : "Officer " + CO_NAMES[guardNo % CO_NAMES.length] + (guardNo++ >= CO_NAMES.length ? " " + Math.ceil(guardNo / CO_NAMES.length) : "");
     const id = guardNo || 0;
     const g = {
       char: ch, group: ch.group, wedge, flashlight,
@@ -65,8 +72,8 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["What do you want.", "Keep walking.", "Not now."]
-          : ["Keep moving.", "Move along.", "Back to your block."],
+          ? ["What do you want.", "Keep walking.", "Not now.", "My prison runs on time."]
+          : ["Keep moving.", "Move along.", "Back to your block.", "Twelve-hour shift. Don't start.", "Two years to my pension. Two.", "Tuck your shirt in."],
       },
     };
     // a post named by the roster outranks the one systems/economy.js derives
@@ -1681,6 +1688,15 @@
     // running the ladder on the one who started it — break it up, on the
     // ground, cuffs. CBZ.brain.authority decides the phase; this is his body.
     if (g._yardCase && CBZ.prisonBrain && CBZ.prisonBrain.guardLawStep(g, dt)) {
+      noteState(g, "law");
+      updateFlashlight(g, dt);
+      return true;
+    }
+
+    // ---- A DOOR OFF THE CLOCK (systems/prisondoorwatch.js): he saw, heard or
+    // was radioed about a door standing open when the day says shut. He calls
+    // it, walks over, asks the officer, and shuts it himself if nobody does.
+    if (g._doorCase && CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.guardStep(g, dt)) {
       noteState(g, "law");
       updateFlashlight(g, dt);
       return true;

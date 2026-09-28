@@ -415,7 +415,7 @@
     }
   }
   function removePed(p) {
-    if (!p) return;
+    if (!p || (p.dead && !p.collected)) return;   // a corpse belongs to the world
     if (CBZ.cityUnpostNpc) { CBZ.cityUnpostNpc(p); return; }         // the matching half of the shared post
     try {
       if (p.group && p.group.parent) p.group.parent.remove(p.group);

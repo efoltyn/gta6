@@ -1760,7 +1760,7 @@
     return null;
   }
   function wreckImpact(x, y, z, building) {
-    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: building ? 1.9 : 1.5, radius: building ? 9 : 7, byPlayer: false, y });
+    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: building ? 1.9 : 1.5, radius: building ? 9 : 7, byPlayer: false, y, kind: "aircraft" });
     else detonate(x, y, z);
     if (building && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(x, y, z, 2.2); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, building ? 12 : 8); } catch (e) {} }
@@ -1780,7 +1780,7 @@
     if (heli.smokeCD <= 0) {
       heli.smokeCD = 0.045;
       if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(heli.pos.x, heli.pos.y, heli.pos.z); } catch (e) {} }
-      else if (CBZ.cityExplosion && rng() < 0.12) { try { CBZ.cityExplosion(heli.pos.x, heli.pos.z, { power: 0.2, radius: 1.5, byPlayer: false, y: heli.pos.y, noDamage: true }); } catch (e) {} }
+      else if (CBZ.cityExplosion && rng() < 0.12) { try { CBZ.cityExplosion(heli.pos.x, heli.pos.z, { power: 0.2, radius: 1.5, byPlayer: false, y: heli.pos.y, noDamage: true, kind: "ember" }); } catch (e) {} }
     }
     // ground / rooftop impact → detonate where it lands (the explode-on-landing the
     // player asked for: it rides down THEN blows, it doesn't pop in mid-air).

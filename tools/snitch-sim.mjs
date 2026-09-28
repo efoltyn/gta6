@@ -151,19 +151,26 @@ console.log("3. your car turns on you over the threshold");
   check(C.carTurns(C.CAR_REP, 0, 6), "rep at the line: done");
   const W = world();
   const { CBZ } = W;
-  CBZ.player.gang = 0;
-  const car = [0, 1, 2, 3, 4, 5].map((i) => W.inmate("Car" + i, 8 + i * 2, 12, { gang: 0 }));
+  // systems/prisoncars.js's surface: the player runs with the Black car (1)
+  CBZ.player.yardCar = 1;
+  CBZ.prisonCars = {
+    CARS: [{ label: "Southsiders", yard: { x: -22, z: 30 } }, { label: "Black car", yard: { x: 22, z: 16 } }],
+    carOf(a) { if (a === CBZ.player) return CBZ.player.yardCar; return typeof a.yardCar === "number" ? a.yardCar : -1; },
+    label(i) { return this.CARS[i] ? this.CARS[i].label : ""; },
+  };
+  const car = [0, 1, 2, 3, 4, 5].map((i) => W.inmate("Car" + i, 8 + i * 2, 12, { yardCar: 1 }));
+  W.inmate("Other", 9, 14, { yardCar: 0 });
   const officer = W.officer("Officer #3", 1, 0);
   W.run(0.6);                        // running with a car = knowing its stash
   check(CBZ.prisonSnitch.facts().some((f) => f.kind === "stash"), "the player knows his own car's stash");
   CBZ.prisonSnitch.open(officer);
   const items = CBZ.prisonSnitch.menu(officer);
   const slot = items.find((v) => /stash/.test(CBZ.prisonSnitch.label(v)));
-  check(!!slot, "the stash is on the card");
+  check(!!slot && CBZ.prisonSnitch.label(slot) === "Black car stash", "the stash is on the card, by car name");
   CBZ.prisonSnitch.pick(officer, slot);
   W.run(40);
   check(CBZ.prisonSnitch.carTurned(), "the stash got raided; only the car knew: the car turned");
-  check(CBZ.player.gang == null, "he is out of the car");
+  check(CBZ.player._carOutcast === true, "he is out of the car");
   check(car.every((m) => m._ratTarget), "every man in it has him down as a rat");
   W.run(30);
   check(car.some((m) => (m.huntPlayer || 0) > 0), "and they come for him");

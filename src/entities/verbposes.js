@@ -562,7 +562,8 @@
     const R = 0.965 * (((P.armUp || 0.46) - 0.02) + Math.abs(wristLocalY(ch)));
     const wx = 0.017;
     const wz = -(back + armW * 0.42);
-    const dx = armX - CUFF_IN - wx, dz = Math.abs(wz + CUFF_BACK);
+    const rk = armW / 0.30;                    // a smaller shoulder retracts less (the deltoid still covers it)
+    const dx = armX - CUFF_IN * rk - wx, dz = Math.abs(wz + CUFF_BACK * rk);
     const dy = Math.sqrt(Math.max(0.0025, R * R - dx * dx - dz * dz));
     // stacked, not side by side: the left wrist rides a hair behind the right
     return out.set(side * wx, sy - dy, wz - (side > 0 ? 0.024 : 0));
@@ -577,7 +578,7 @@
   function retract(ch, k) {
     const P = ch.profile || {}, armX = P.armX || 0.62;
     const la = ch.parts.la, ra = ch.parts.ra;
-    const kk = Math.max(0, Math.min(1, k));
+    const kk = Math.max(0, Math.min(1, k)) * (P.armW || 0.3) / 0.30;   // scaled to the shoulder (see cuffLocal)
     if (la) { la.position.x = armX - CUFF_IN * kk; la.position.z = -CUFF_BACK * kk; la.userData._armRestZ = -CUFF_BACK * kk; }
     if (ra) { ra.position.x = -(armX - CUFF_IN * kk); ra.position.z = -CUFF_BACK * kk; ra.userData._armRestZ = -CUFF_BACK * kk; }
   }

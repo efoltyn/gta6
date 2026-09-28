@@ -208,6 +208,7 @@
     if (holstered()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
+  CBZ.fpsArmed = armed;   // systems/helditems.js: a drawn gun puts the held charge/frag away
   // ---- YOU ARE THE ANIMAL: NO HANDS ------------------------------------
   // Owner, on shark sim: "our first person is still a person mounted on shark,
   // which is a cool angle but human ARMS occasionally show lol." They did:
@@ -1170,6 +1171,7 @@
       // the reload walks the hand through the gun's own anchors
       const mode = supportReloadOffset(model, sup, _rOff);
       sup.position.copy(sup.userData.basePos).add(_rOff);
+      if (model.userData.reloadWarhead && typeof rocketReloadProp === "function") rocketReloadProp(model, sup);   // the fresh PG-7V rides this hand into the muzzle
       FPH.setPose(sup, mode === 1 ? "relaxed" : (mode === 2 ? "grip" : sup.userData.pose0));
       gunArm(1, sup, armL);
     }
@@ -1202,6 +1204,14 @@
     }
     FPH.poseArm(arm, _aW, _aE, _aS, _aQ, k, armSleeved);
   }
+  // THE TORCH HAND (systems/playerflashlight.js CBZ.fpTorchHold): called right
+  // after poseFpArms with this view of the viewmodel, so a lit torch can take
+  // an off hand (or the empty right hand) and re-solve its arm the same way.
+  const FP_TORCH_VIEW = {
+    vm, fists, handR, handL, armR, armL, HAND_K, gunArm, inVm, worldScaleInVm,
+    model: () => (gun.visible && vm.visible ? weaponModels[fps.weapon] || null : null),
+    dying: () => ddT >= 0,
+  };
   let aimHeld = false;     // third-person ADS (right mouse): raise the gun to aim
   let switchCD = 0;        // debounce weapon switching so mashing Q can't spam/stall
   let qWasDown = false;    // edge-detect Q in the frame loop (not per keydown event)
@@ -1246,8 +1256,43 @@
   // shoot()'s explosive branch builds a `detonate` closure that runs the
   // EXACT same FX call sequence the old instant branch ran and passes it in
   // as onArrive — see (b) there for the full original-vs-new diff explanation.
-  const rocketGeo = new THREE.CylinderGeometry(0.065, 0.075, 0.46, 10);
-  const rocketMat = new THREE.MeshLambertMaterial({ color: 0x2a2e22 });
+  // ---- THE ROUND IN FLIGHT IS A PG-7V -----------------------------------------
+  // (was: a cylinder, a cone and four box fins, one flat sprite smoke puff per
+  // frame that died in 0.7 s, and two flame sprites drawn THROUGH walls with
+  // depthTest off). Now, the same profile as the round seated in the launcher
+  // (weapons/appearances/bazooka.js CBZ.rpgRound): the 85 mm bulb, the ogive
+  // nose, the slim sustainer tail, and four fins that SPRING OPEN in the first
+  // 0.1 s. It leaves the tube on its booster (a kick of flame and a cloud at
+  // the muzzle, the BACKBLAST out of the venturi behind the shooter), coasts,
+  // and ~10 m out the sustainer lights: a flickering white-orange motor flare
+  // and a dense smoke trail laid down BY DISTANCE (a fast rocket leaves no
+  // gaps) that billows, drifts downwind and hangs for seconds. The body spins
+  // and corkscrews slightly the way a spin-stabilised RPG does.
+  // Two pooled GPU point clouds carry every particle (one draw call each).
+  const RR = CBZ.rpgRound || null;
+  const FLY_K = 1.3;                          // drawn 1.3x real: readable at street range
+  const ROUND_LEN = 0.90 * FLY_K;             // fuze tip → nozzle
+  const roundGeo = (function () {
+    const prof = RR ? RR.flightProfile() : [[0, -0.9], [0.03, -0.9], [0.03, -0.3], [0.0425, -0.2], [0.0425, -0.1], [0, 0]];
+    const g = new THREE.LatheGeometry(prof.map((p) => new THREE.Vector2(p[0] * FLY_K, p[1] * FLY_K)), 14);
+    g.computeVertexNormals();
+    return g;
+  })();
+  const roundMat = new THREE.MeshPhongMaterial({ color: 0x4d5337, shininess: 12, specular: 0x23261b });
+  // 40 mm grenade (the launcher's plain flight): a short blunt shell, not a rocket
+  const shellGeo = (function () {
+    const P = [[0, -0.11], [0.021, -0.11], [0.021, -0.045], [0.020, -0.036], [0.017, -0.020], [0.011, -0.007], [0.005, 0], [0, 0]];
+    const g = new THREE.LatheGeometry(P.map((p) => new THREE.Vector2(p[0] * 1.5, p[1] * 1.5)), 12);
+    g.computeVertexNormals();
+    return g;
+  })();
+  const shellMat = new THREE.MeshPhongMaterial({ color: 0x6b6f52, shininess: 20, specular: 0x333322 });
+  // a fin: a thin blade hinged at its root (local origin), length up +Y, chord +X
+  const FIN_L = 0.105 * FLY_K, FIN_C = 0.032 * FLY_K;
+  const finGeo = new THREE.BoxGeometry(FIN_C, FIN_L, 0.0035 * FLY_K);
+  finGeo.translate(FIN_C / 2, FIN_L / 2, 0);
+  const finMat = new THREE.MeshLambertMaterial({ color: 0x2c3024 });
+  const FIN_HINGE_Y = -0.86 * FLY_K, FIN_HINGE_R = 0.0195 * FLY_K, FIN_OPEN = 1.5708;
   const rockets = [];
   // Pool of 6: the old pool of 3 round-robined onto ACTIVE slots — fire 4
   // rockets at long range (5 carried; a 450u shot flies ~4s) and the first
@@ -1256,66 +1301,382 @@
   // launchRocket below now FLUSHES a still-active slot (detonating it where
   // it is) instead of eating it.
   for (let i = 0; i < 6; i++) {
-    const body = new THREE.Mesh(rocketGeo, rocketMat);
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.16, 10), new THREE.MeshLambertMaterial({ color: 0x485042 }));
-    nose.position.y = 0.31; body.add(nose);
-    const finMat = new THREE.MeshLambertMaterial({ color: 0x20251f });
+    const root = new THREE.Group();         // flies the path; +Y is the travel direction
+    const spin = new THREE.Group();         // rolls + corkscrews inside it
+    root.add(spin);
+    const body = new THREE.Mesh(roundGeo, roundMat);
+    spin.add(body);
+    const shell = new THREE.Mesh(shellGeo, shellMat);
+    shell.visible = false;
+    spin.add(shell);
     const fins = [];
     for (let f = 0; f < 4; f++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.15, 0.14), finMat);
-      fin.position.y = -0.16; fin.rotation.y = f * Math.PI * 0.5; body.add(fin);
-      fins.push(fin);
+      const a = f * Math.PI * 0.5;
+      const pivot = new THREE.Group();
+      pivot.position.set(Math.cos(a) * FIN_HINGE_R, FIN_HINGE_Y, Math.sin(a) * FIN_HINGE_R);
+      pivot.rotation.set(0, -a, 0);        // local +X points radially out
+      pivot.add(new THREE.Mesh(finGeo, finMat));
+      spin.add(pivot);
+      fins.push(pivot);
     }
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0.85,
-    }));
-    glow.scale.set(0.34, 0.72, 1);
-    glow.position.y = -0.46;  // body points +Y; fire leaves the actual tail
-    body.add(glow);
-    const core = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: flashTex, color: 0xff9b35, transparent: true, depthTest: false,
-      blending: THREE.AdditiveBlending, opacity: 1,
-    }));
-    core.scale.set(0.18, 0.42, 1); core.position.y = -0.34; body.add(core);
-    body.visible = false;
-    CBZ.scene.add(body);
+    root.visible = false;
+    CBZ.scene.add(root);
     rockets.push({
-      mesh: body, active: false, t: 0, dur: 0.3,
-      flame: [glow, core], fins: fins,             // dressing a plain (launched-shell) flight hides
+      mesh: root, spin: spin, body: body, shell: shell, fins: fins, slot: i,
+      active: false, t: 0, dur: 0.3, plain: false,
       ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
       sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
       detonate: null,                               // bound closure: () => runs the exact old detonation block
       homing: false, seek: null, speed: 0, turnRate: 0, life: 0, maxLife: 0, targetRadius: 2,
       velocity: new THREE.Vector3(), impactPoint: null, onImpact: null,
-      smokeT: 0,
+      age: 0, flown: 0, lit: false, spinA: 0,
+      dir: new THREE.Vector3(0, 0, -1), lastEmit: new THREE.Vector3(),
     });
   }
-  const rocketSmokeTex = (function () {
-    const c = document.createElement("canvas"); c.width = c.height = 48;
-    const x = c.getContext("2d"), g = x.createRadialGradient(24, 24, 2, 24, 24, 23);
-    g.addColorStop(0, "rgba(195,195,185,.75)"); g.addColorStop(.42, "rgba(105,108,105,.48)"); g.addColorStop(1, "rgba(55,58,60,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 48, 48); return new THREE.CanvasTexture(c);
+
+  // ---- the particle clouds ----------------------------------------------------
+  // cosmetic randomness on its own stream: rng() is the gameplay stream and a
+  // smoke puff must never shift a spread cone
+  let _fxs = 0x2f6b9d1;
+  function fxr() { _fxs = (_fxs * 1664525 + 1013904223) >>> 0; return _fxs / 4294967296; }
+  const puffTex = (function () {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const x = c.getContext("2d");
+    // a billow: a soft core with a few lumps round it, not a perfect disc
+    const blob = (cx, cy, r, a) => {
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, "rgba(255,255,255," + a + ")"); g.addColorStop(0.55, "rgba(255,255,255," + (a * 0.55) + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    };
+    blob(32, 32, 26, 0.75);
+    blob(22, 26, 14, 0.45); blob(42, 24, 13, 0.4); blob(38, 42, 15, 0.45); blob(24, 40, 12, 0.35);
+    return new THREE.CanvasTexture(c);
   })();
-  const rocketSmoke = [];
-  let rocketSmokeIdx = 0;
-  for (let i = 0; i < 42; i++) {
-    const mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: rocketSmokeTex, transparent: true, depthWrite: false, opacity: 0 }));
-    mesh.visible = false; CBZ.scene.add(mesh); rocketSmoke.push({ mesh, life: 0, max: 0.72 });
+  const PUFF_VS = [
+    "attribute float aSize; attribute float aAlpha; attribute float aRot; attribute vec3 aCol;",
+    "uniform float uScale; varying float vA; varying float vR; varying vec3 vC;",
+    "#include <fog_pars_vertex>",
+    "void main() {",
+    "  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);",
+    "  gl_Position = projectionMatrix * mvPosition;",
+    "  gl_PointSize = aAlpha > 0.001 ? aSize * uScale / max(0.05, -mvPosition.z) : 0.0;",
+    "  vA = aAlpha; vR = aRot; vC = aCol;",
+    "  #include <fog_vertex>",
+    "}",
+  ].join("\n");
+  const PUFF_FS = [
+    "uniform sampler2D map; uniform float uLight; varying float vA; varying float vR; varying vec3 vC;",
+    "#include <fog_pars_fragment>",
+    "void main() {",
+    "  vec2 p = gl_PointCoord - 0.5; float c = cos(vR), s = sin(vR);",
+    "  p = vec2(c * p.x - s * p.y, s * p.x + c * p.y) + 0.5;",
+    "  vec4 t = texture2D(map, p);",
+    "  gl_FragColor = vec4(vC * uLight, t.a * vA);",
+    "  if (gl_FragColor.a < 0.004) discard;",
+    "  #include <fog_fragment>",
+    "}",
+  ].join("\n");
+  function makeCloud(n, additive) {
+    const geo = new THREE.BufferGeometry();
+    const A = {
+      pos: new Float32Array(n * 3), col: new Float32Array(n * 3),
+      size: new Float32Array(n), alpha: new Float32Array(n), rot: new Float32Array(n),
+    };
+    geo.setAttribute("position", new THREE.BufferAttribute(A.pos, 3));
+    geo.setAttribute("aCol", new THREE.BufferAttribute(A.col, 3));
+    geo.setAttribute("aSize", new THREE.BufferAttribute(A.size, 1));
+    geo.setAttribute("aAlpha", new THREE.BufferAttribute(A.alpha, 1));
+    geo.setAttribute("aRot", new THREE.BufferAttribute(A.rot, 1));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uScale: { value: 500 }, uLight: { value: 1 }, map: { value: null } }]),
+      vertexShader: PUFF_VS, fragmentShader: PUFF_FS,
+      transparent: true, depthWrite: false, depthTest: true, fog: !additive,
+      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    });
+    mat.uniforms.map.value = puffTex;
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    pts.renderOrder = additive ? 3 : 2;
+    CBZ.scene.add(pts);
+    return {
+      n: n, A: A, geo: geo, mat: mat, next: 0, live: 0,
+      life: new Float32Array(n), max: new Float32Array(n),
+      vel: new Float32Array(n * 3), s0: new Float32Array(n), s1: new Float32Array(n),
+      a0: new Float32Array(n), drag: new Float32Array(n), rise: new Float32Array(n),
+      spinV: new Float32Array(n), windK: new Float32Array(n), fadeIn: new Float32Array(n),
+    };
   }
-  function emitRocketSmoke(pos) {
-    const s = rocketSmoke[rocketSmokeIdx]; rocketSmokeIdx = (rocketSmokeIdx + 1) % rocketSmoke.length;
-    s.mesh.position.copy(pos); s.mesh.position.y += (rng() - 0.5) * 0.04;
-    s.mesh.scale.setScalar(0.16 + rng() * 0.08); s.mesh.material.opacity = 0.62;
-    s.mesh.visible = true; s.life = s.max = 0.62 + rng() * 0.18;
+  // smoke/dust: capped 220 (a long shot's trail + two backblasts), oldest recycled
+  const smokeCloud = makeCloud(220, false);
+  // fire: slots 0..11 are the six rockets' motor flares (core + halo), rewritten
+  // every frame; the rest cycle for muzzle flashes, booster kicks, backblast flame
+  const FLARE_SLOTS = 12;
+  const fireCloud = makeCloud(FLARE_SLOTS + 60, true);
+  fireCloud.next = FLARE_SLOTS;
+  const WIND_X = 0.9, WIND_Z = 0.45;          // a light breeze the smoke drifts on (m/s)
+  function puff(C, x, y, z, vx, vy, vz, s0, s1, life, a0, r, g, b, o) {
+    let i = C.next;
+    C.next = i + 1 >= C.n ? (C === fireCloud ? FLARE_SLOTS : 0) : i + 1;   // oldest recycled
+    const A = C.A, i3 = i * 3;
+    A.pos[i3] = x; A.pos[i3 + 1] = y; A.pos[i3 + 2] = z;
+    A.col[i3] = r; A.col[i3 + 1] = g; A.col[i3 + 2] = b;
+    A.size[i] = s0; A.alpha[i] = 0; A.rot[i] = fxr() * 6.283;
+    C.vel[i3] = vx; C.vel[i3 + 1] = vy; C.vel[i3 + 2] = vz;
+    C.s0[i] = s0; C.s1[i] = s1; C.a0[i] = a0; C.life[i] = C.max[i] = life;
+    C.drag[i] = o && o.drag != null ? o.drag : 1.6;
+    C.rise[i] = o && o.rise != null ? o.rise : 0.22;
+    C.windK[i] = o && o.wind != null ? o.wind : 1;
+    C.fadeIn[i] = o && o.fadeIn != null ? o.fadeIn : 0.06;
+    C.spinV[i] = (fxr() - 0.5) * 0.8;
+    return i;
   }
-  function updateRocketSmoke(dt) {
-    for (let i = 0; i < rocketSmoke.length; i++) {
-      const s = rocketSmoke[i]; if (s.life <= 0) continue;
-      s.life -= dt; s.mesh.position.y += dt * 0.16; s.mesh.scale.multiplyScalar(1 + dt * 1.8);
-      s.mesh.material.opacity = Math.max(0, s.life / s.max) * 0.5;
-      if (s.life <= 0) s.mesh.visible = false;
+  function stepCloud(C, dt) {
+    const A = C.A;
+    let live = 0;
+    for (let i = (C === fireCloud ? FLARE_SLOTS : 0); i < C.n; i++) {
+      if (C.life[i] <= 0) { if (A.alpha[i] !== 0) A.alpha[i] = 0; continue; }
+      live++;
+      C.life[i] -= dt;
+      const i3 = i * 3, k = 1 - Math.max(0, C.life[i]) / C.max[i];     // 0 → 1 over its life
+      const dg = Math.max(0, 1 - C.drag[i] * dt);
+      C.vel[i3] *= dg; C.vel[i3 + 1] = C.vel[i3 + 1] * dg + C.rise[i] * dt; C.vel[i3 + 2] *= dg;
+      const wk = C.windK[i] * Math.min(1, k * 3);
+      A.pos[i3] += (C.vel[i3] + WIND_X * wk) * dt;
+      A.pos[i3 + 1] += C.vel[i3 + 1] * dt;
+      A.pos[i3 + 2] += (C.vel[i3 + 2] + WIND_Z * wk) * dt;
+      // grows fast then slows (a billow), fades in, holds, fades slowly out
+      A.size[i] = C.s0[i] + (C.s1[i] - C.s0[i]) * (1 - (1 - k) * (1 - k));
+      const fin = C.fadeIn[i] > 0 ? Math.min(1, k * C.max[i] / C.fadeIn[i]) : 1;
+      A.alpha[i] = C.a0[i] * fin * (1 - k) * (1 - k * 0.35);
+      A.rot[i] += C.spinV[i] * dt;
+      if (C.life[i] <= 0) A.alpha[i] = 0;
+    }
+    C.live = live;
+  }
+  function flushCloud(C) {
+    const a = C.geo.attributes;
+    a.position.needsUpdate = true; a.aSize.needsUpdate = true; a.aAlpha.needsUpdate = true;
+    a.aRot.needsUpdate = true; a.aCol.needsUpdate = true;
+  }
+  // point sprites are sized in pixels: world size × (buffer height / 2·tan(fov/2))
+  function cloudScale() {
+    const cam = CBZ.camera, r = CBZ.renderer;
+    const h = r && r.domElement ? r.domElement.height : 900;
+    const fov = cam && cam.fov ? cam.fov : 70;
+    return h / (2 * Math.tan(fov * Math.PI / 360));
+  }
+
+  // ---- launch: booster kick, muzzle cloud, backblast ------------------------
+  const _bbDir = new THREE.Vector3(), _bbSide = new THREE.Vector3(), _bbUp = new THREE.Vector3(), _bbP = new THREE.Vector3();
+  function coneDir(axis, spread, out) {
+    // a random direction within `spread` (radians-ish) of axis
+    _bbSide.set(axis.z, 0, -axis.x);
+    if (_bbSide.lengthSq() < 1e-6) _bbSide.set(1, 0, 0);
+    _bbSide.normalize();
+    _bbUp.crossVectors(_bbSide, axis).normalize();
+    const a = fxr() * 6.283, r = Math.sqrt(fxr()) * spread;
+    return out.copy(axis).addScaledVector(_bbSide, Math.cos(a) * r).addScaledVector(_bbUp, Math.sin(a) * r).normalize();
+  }
+  function launchFx(muzzle, dir, tail) {
+    // BOOSTER KICK at the muzzle: a hard white-orange flash and a grey cloud
+    // blown forward and out (the booster burns out inside the first metres)
+    puff(fireCloud, muzzle.x + dir.x * 0.3, muzzle.y + dir.y * 0.3, muzzle.z + dir.z * 0.3, dir.x * 4, dir.y * 4, dir.z * 4, 0.9, 1.6, 0.07, 1, 1, 0.92, 0.7, { drag: 6, rise: 0, wind: 0, fadeIn: 0 });
+    for (let i = 0; i < 4; i++) {
+      coneDir(dir, 0.35, _bbDir);
+      const v = 10 + fxr() * 12;
+      puff(fireCloud, muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.35, 0.9, 0.06 + fxr() * 0.05, 0.9, 1, 0.55 + fxr() * 0.2, 0.18, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
+    }
+    for (let i = 0; i < 9; i++) {
+      coneDir(dir, 0.9, _bbDir);
+      const v = 2 + fxr() * 5, sh = 0.62 + fxr() * 0.12;
+      puff(smokeCloud, muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v + 0.3, _bbDir.z * v, 0.35, 1.8 + fxr() * 1.2, 2.2 + fxr() * 1.6, 0.5, sh, sh, sh * 0.97, { drag: 2.4 });
+    }
+    // BACKBLAST: a cone of flame and a wall of dust out of the venturi, 2-4 m
+    // behind the shooter. If a wall is right behind him it slaps back off it.
+    if (!tail) return;
+    _bbP.copy(dir).negate();
+    const back = _bbP.clone();
+    const wall = wallDistance(tail, back, 3.2);
+    const reach = wall && wall.distance < 3.2 ? Math.max(0.25, wall.distance - 0.15) : 3.4;
+    for (let i = 0; i < 14; i++) {
+      coneDir(back, 0.32, _bbDir);
+      const d = fxr() * Math.min(reach, 2.4), v = 6 + fxr() * 14;
+      puff(fireCloud, tail.x + _bbDir.x * d, tail.y + _bbDir.y * d, tail.z + _bbDir.z * d,
+        _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.35 + d * 0.25, 1.1 + d * 0.5, 0.09 + fxr() * 0.12, 0.95,
+        1, 0.45 + fxr() * 0.35, 0.12, { drag: 10, rise: 0.5, wind: 0, fadeIn: 0 });
+    }
+    for (let i = 0; i < 20; i++) {
+      coneDir(back, 0.5, _bbDir);
+      const d = fxr() * reach, v = 2 + fxr() * 7;
+      // dust kicked off the ground reads warmer than the propellant smoke
+      const dust = fxr() < 0.5, g0 = dust ? 0.56 + fxr() * 0.08 : 0.66 + fxr() * 0.1;
+      puff(smokeCloud, tail.x + _bbDir.x * d, tail.y + _bbDir.y * d - (dust ? 0.4 : 0), tail.z + _bbDir.z * d,
+        _bbDir.x * v, _bbDir.y * v + (dust ? 0.2 : 0.6), _bbDir.z * v, 0.5, 2.2 + fxr() * 1.8, 2.6 + fxr() * 2.2, dust ? 0.42 : 0.5,
+        g0 * (dust ? 1.06 : 1), g0 * (dust ? 0.98 : 1), g0 * (dust ? 0.86 : 0.98), { drag: 2.2 });
+    }
+    if (wall && wall.distance < 2.2) {
+      // the billow back off the wall: flame and dust spread along the face and
+      // roll back toward (and around) the shooter
+      const hp = wall.point || _bbP.copy(tail).addScaledVector(back, wall.distance);
+      for (let i = 0; i < 12; i++) {
+        coneDir(dir, 1.1, _bbDir);
+        const v = 3 + fxr() * 5;
+        puff(smokeCloud, hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v + 0.4, _bbDir.z * v, 0.6, 2.4 + fxr() * 1.4, 2.2 + fxr() * 1.8, 0.52, 0.62, 0.6, 0.55, { drag: 2.6 });
+      }
+      for (let i = 0; i < 6; i++) {
+        coneDir(dir, 1.2, _bbDir);
+        const v = 4 + fxr() * 6;
+        puff(fireCloud, hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.5, 1.4, 0.1 + fxr() * 0.08, 0.8, 1, 0.5, 0.15, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
+      }
     }
   }
+
+  // ---- per-frame dressing of a flying round -----------------------------------
+  const IGNITE_AT = 10;                       // m: the sustainer lights clear of the shooter
+  const _trTail = new THREE.Vector3(), _trSeg = new THREE.Vector3(), _trP = new THREE.Vector3();
+  function dressRocket(r, dt, stepLen) {
+    r.age += dt;
+    r.flown += stepLen;
+    if (r.plain) return;
+    // fins spring open in the first 0.1 s
+    const fk = Math.min(1, r.age / 0.1), fo = 1 - (1 - fk) * (1 - fk);
+    for (let f = 0; f < r.fins.length; f++) r.fins[f].rotation.z = -FIN_OPEN * fo;
+    // spin + a slight corkscrew (the round is spin-stabilised, not a dart)
+    r.spinA += dt * 6.283 * 4.5;
+    r.spin.rotation.y = r.spinA;
+    const wob = Math.min(1, r.flown / 12) * 0.035 * FLY_K;
+    r.spin.position.set(Math.cos(r.spinA * 0.5) * wob, 0, Math.sin(r.spinA * 0.5) * wob);
+    // the tail, in world
+    _trTail.copy(r.spin.position).setY(-ROUND_LEN);
+    r.mesh.localToWorld(_trTail);
+    if (!r.lit && r.flown >= IGNITE_AT) {
+      r.lit = true;
+      // ignition: a bright pop and a small knot of smoke where it caught
+      puff(fireCloud, _trTail.x, _trTail.y, _trTail.z, 0, 0, 0, 0.5, 1.3, 0.08, 1, 1, 0.9, 0.6, { drag: 0, rise: 0, wind: 0, fadeIn: 0 });
+      for (let i = 0; i < 4; i++) puff(smokeCloud, _trTail.x, _trTail.y, _trTail.z, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, 0.3, 1.6, 2.5 + fxr() * 1.5, 0.5, 0.74, 0.73, 0.7);
+    }
+    // the trail, laid by distance from the last puff to the tail now
+    _trSeg.copy(_trTail).sub(r.lastEmit);
+    const segLen = _trSeg.length();
+    const spacing = r.lit ? Math.min(2.2, 0.6 + r.flown * 0.008) : 1.4;   // dense by the shooter, thinner far out (the pool is capped)
+    if (segLen >= spacing) {
+      const n = Math.min(40, Math.floor(segLen / spacing));
+      _trSeg.multiplyScalar(1 / segLen);
+      for (let k = 1; k <= n; k++) {
+        _trP.copy(r.lastEmit).addScaledVector(_trSeg, k * spacing);
+        const j = (fxr() - 0.5) * 0.25;
+        if (r.lit) {
+          const sh = 0.70 + fxr() * 0.12;
+          puff(smokeCloud, _trP.x + j, _trP.y + j * 0.5, _trP.z - j,
+            -r.dir.x * 1.2 + (fxr() - 0.5) * 0.6, -r.dir.y * 1.2 + (fxr() - 0.5) * 0.5, -r.dir.z * 1.2 + (fxr() - 0.5) * 0.6,
+            0.28, 1.7 + fxr() * 1.5, 3 + fxr() * 3, 0.55, sh, sh, sh * 0.97, { drag: 1.2, rise: 0.25 });
+        } else {
+          // the coast before ignition: a thin grey wisp off the spent booster
+          puff(smokeCloud, _trP.x + j, _trP.y, _trP.z - j, 0, 0, 0, 0.18, 0.7, 1.2 + fxr() * 0.8, 0.3, 0.7, 0.7, 0.68, { drag: 1, rise: 0.15 });
+        }
+      }
+      r.lastEmit.copy(_trP);
+    }
+  }
+  // the motor flare: two reserved additive slots per rocket, rewritten per frame
+  function flareRocket(r) {
+    const A = fireCloud.A, i0 = r.slot * 2, i1 = i0 + 1;
+    const on = r.active && r.lit && !r.plain;
+    if (!on) { A.alpha[i0] = 0; A.alpha[i1] = 0; return; }
+    _trTail.copy(r.spin.position).setY(-ROUND_LEN - 0.06);
+    r.mesh.localToWorld(_trTail);
+    const fl = 0.75 + fxr() * 0.5;
+    for (let s = 0; s < 2; s++) {
+      const i = s ? i1 : i0, i3 = i * 3;
+      A.pos[i3] = _trTail.x - r.dir.x * 0.12 * s; A.pos[i3 + 1] = _trTail.y - r.dir.y * 0.12 * s; A.pos[i3 + 2] = _trTail.z - r.dir.z * 0.12 * s;
+      A.size[i] = (s ? 1.25 : 0.45) * fl;
+      A.alpha[i] = s ? 0.75 * fl : 1;
+      A.col[i3] = 1; A.col[i3 + 1] = s ? 0.55 : 0.95; A.col[i3 + 2] = s ? 0.16 : 0.8;
+      A.rot[i] = fxr() * 6.283;
+    }
+  }
+
+  // ---- the round on the launcher: gone when fired, back when reloaded ----------
+  // Derived every frame from the ammo itself (rounds in the tube, and how far
+  // the reload has run), so it cannot desync from the count: the fresh round
+  // is in the off hand from 36% of the reload, is pushed into the muzzle, and
+  // is SEATED (on the launcher, out of the hand) from 84% — the same window
+  // gunhands.js carries it in for the third-person body.
+  const RELOAD_GRAB = 0.36, RELOAD_PUSH = 0.76, RELOAD_SEAT = 0.84;
+  function rocketReloadP(i) {
+    if (!(fps.reloading > 0) || reloadWeapon !== i) return -1;
+    const w = WEAPONS[i];
+    return Math.max(0, Math.min(1, 1 - fps.reloading / Math.max(0.05, w.reload || fps.reloading)));
+  }
+  function syncWarheads() {
+    for (let i = 0; i < weaponModels.length; i++) {
+      const vmM = weaponModels[i], tpM = carriedModels[i];
+      const wh = vmM && vmM.userData.warhead;
+      if (!wh) continue;
+      const p = rocketReloadP(i);
+      const seated = (fps.rounds[i] || 0) > 0 || p >= RELOAD_SEAT;
+      wh.visible = seated;
+      if (tpM && tpM.userData.warhead) tpM.userData.warhead.visible = seated;
+      if (tpM && tpM.userData.reloadWarhead) tpM.userData.reloadWarhead.visible = false;   // the body's own hand carries its copy
+      const spare = vmM.userData.reloadWarhead;
+      if (spare) {
+        const rp = CBZ.gunReloadPose ? CBZ.gunReloadPose() : null;
+        spare.visible = !!(rp && rp.active) && p >= RELOAD_GRAB && p < RELOAD_SEAT && i === fps.weapon;
+      }
+    }
+  }
+  // first person: the spare round rides the off hand (poseFpArms calls this
+  // right after walking the hand along the reload path), then is PUSHED into
+  // the muzzle along the bore and seats
+  const _rlOff = new THREE.Vector3();
+  function rocketReloadProp(model, sup) {
+    const spare = model && model.userData.reloadWarhead, wh = model && model.userData.warhead;
+    const gr = model && model.userData.grips;
+    if (!spare || !wh || !gr || !sup.userData.basePos) return;
+    const p = rocketReloadP(fps.weapon);
+    if (p < RELOAD_GRAB || p >= RELOAD_SEAT) return;
+    // the hand's travel from its rest on the support grip, plus the seat
+    // offset (hand under the bulb → round seated) = the round in the hand
+    _rlOff.copy(sup.position).sub(sup.userData.basePos).add(gr.support).sub(gr.mag);
+    spare.position.copy(wh.position).add(_rlOff);
+    const e = p <= RELOAD_PUSH ? 0 : Math.min(1, (p - RELOAD_PUSH) / (RELOAD_SEAT - RELOAD_PUSH - 0.02));
+    spare.position.z -= 0.14 * (1 - e * e * (3 - 2 * e));   // held clear of the mouth, then shoved home
+  }
+
+  // The venturi in WORLD space, for the backblast. Third person: the drawn
+  // launcher's own venturi socket. First person the viewmodel is a
+  // camera-space prop, so the real tube's end is reckoned from the round's
+  // world muzzle back along the bore by the loaded length (~1.35 m).
+  const _tailW = new THREE.Vector3();
+  function rocketTailWorld(muzzle, dir) {
+    const m = shoulderActive() ? carriedModels[fps.weapon] : null;
+    if (m && m.userData.venturi && m.visible !== false) {
+      m.updateWorldMatrix(true, false);
+      return m.localToWorld(_tailW.copy(m.userData.venturi)).clone();
+    }
+    return _tailW.copy(muzzle).addScaledVector(dir, -1.45).clone();
+  }
+
+  // the old API name the frame loop calls: all the rocket FX that live past a flight
+  function updateRocketSmoke(dt) {
+    syncWarheads();
+    for (let i = 0; i < rockets.length; i++) flareRocket(rockets[i]);
+    stepCloud(smokeCloud, dt);
+    stepCloud(fireCloud, dt);
+    const sc = cloudScale();
+    smokeCloud.mat.uniforms.uScale.value = sc;
+    fireCloud.mat.uniforms.uScale.value = sc;
+    // smoke is unlit paint: take the day/night rig's level so it isn't a grey
+    // glow at midnight (fire is its own light and keeps 1)
+    const sun = CBZ.sun, hemi = CBZ.hemi;
+    smokeCloud.mat.uniforms.uLight.value = (sun || hemi)
+      ? Math.max(0.3, Math.min(1.2, 0.25 + (sun ? sun.intensity : 0.6) * 0.45 + (hemi ? hemi.intensity : 0.5) * 0.6))
+      : 1;
+    flushCloud(smokeCloud);
+    flushCloud(fireCloud);
+  }
+  CBZ.rpgFxStats = function () { return { smoke: smokeCloud.live, smokeCap: smokeCloud.n, fire: fireCloud.live, fireCap: fireCloud.n - FLARE_SLOTS }; };
   let rocketIdx = 0;
   // launch a projectile from `from`→`to` over `dur` seconds, sagging under
   // `sag` world-units of (visual) gravity at the midpoint, then call `onArrive`.
@@ -1405,21 +1766,29 @@
     r.turnRate = opts.turnRate || 2.4;
     r.life = 0;
     r._owe = 0;                     // sustainer deficit ledger (softAuthority)
-    r.smokeT = 0;
     r.maxLife = opts.maxLife || Math.max(3.2, r.dur + 2.0);
     r.targetRadius = opts.targetRadius || 2;
     r.impactPoint = opts.impactPoint || null;
     r.onImpact = typeof opts.onImpact === "function" ? opts.onImpact : null;
-    // plain flight (grenade launcher): a launched shell, not a burning rocket —
-    // hide the exhaust flame sprites + fins for this flight; restore on reuse.
+    // plain flight (grenade launcher): a launched 40 mm shell, not a burning
+    // rocket — the short blunt shell instead of the PG-7V, no motor, no trail.
     const plain = !!opts.plain;
-    if (r.flame) for (let i = 0; i < r.flame.length; i++) r.flame[i].visible = !plain;
-    if (r.fins) for (let i = 0; i < r.fins.length; i++) r.fins[i].visible = !plain;
+    r.plain = plain;
+    r.body.visible = !plain;
+    r.shell.visible = plain;
+    for (let i = 0; i < r.fins.length; i++) { r.fins[i].visible = !plain; r.fins[i].rotation.z = 0; }   // folded in the tube
+    r.age = 0; r.flown = 0; r.lit = false; r.spinA = 0;
+    r.spin.position.set(0, 0, 0); r.spin.rotation.set(0, 0, 0);
     r.velocity.set(to.x - from.x, to.y - from.y, to.z - from.z);
     if (r.velocity.lengthSq() < 1e-6) r.velocity.set(0, 0, -1);
+    r.dir.copy(r.velocity).normalize();
     r.velocity.normalize().multiplyScalar(r.speed || (from.distanceTo(to) / r.dur));
     r.mesh.position.copy(from);
+    r.mesh.quaternion.setFromUnitVectors(UP, r.dir);
     r.mesh.visible = true;
+    // the trail starts at the tail as it leaves the tube
+    r.lastEmit.copy(from).addScaledVector(r.dir, -ROUND_LEN);
+    if (!plain) launchFx(from, r.dir, opts.tail || null);
     return r;
   }
   // quadratic sag added to a straight-line lerp (peaks at the midpoint, zero
@@ -1501,9 +1870,6 @@
       const r = rockets[i];
       if (!r.active) continue;
       _rocketPrev.copy(r.mesh.position);
-      r.smokeT += dt;
-      // denser trail during the slow phase — the visible-launch beauty beat
-      if (r.smokeT >= ((softOn() && r.t < softT1()) ? 0.018 : 0.035)) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
       if (r.homing) {
         r.t += dt; r.life += dt;
         // ONE authority sample per frame (it owns the deficit bookkeeping) —
@@ -1543,7 +1909,8 @@
           if (dx * dx + dy * dy + dz * dz <= Math.pow(r.targetRadius + Math.min(2, stepLen), 2)) impact = _rocketPos;
         }
         if (!impact && r.life >= r.maxLife) impact = _rocketPos;
-        if (stepLen > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, _rocketDir);
+        if (stepLen > 1e-6) { r.dir.copy(_rocketDir); r.mesh.quaternion.setFromUnitVectors(UP, _rocketDir); }
+        dressRocket(r, dt, stepLen);   // fins, spin, ignition, the trail up to here
         if (impact) finishRocket(r, impact, wallHit);
         continue;
       }
@@ -1561,7 +1928,9 @@
       // orient along the instantaneous travel direction so the body+exhaust
       // glow visibly pitches through the arc instead of staying level.
       tmp.copy(_rocketPos).sub(_rocketPrev);
-      if (tmp.lengthSq() > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, tmp.normalize());
+      const stepB = tmp.length();
+      if (stepB > 1e-3) { tmp.multiplyScalar(1 / stepB); r.dir.copy(tmp); r.mesh.quaternion.setFromUnitVectors(UP, tmp); }
+      dressRocket(r, dt, stepB);
       if (k >= 1) {
         finishRocket(r, _rocketPos, null);
       }
@@ -3668,6 +4037,7 @@
             CBZ.detonate(pt.x, pt.y, pt.z, "rpg", {
               byPlayer: true, airburst: airburst,
               dirx: launchDir.x, dirz: launchDir.z,
+              kind: w.projPlain ? undefined : "rpg", dir: launchDir,
             });
           } else {
             // CBZ.cityExplosion is the head of a wrapper chain that couples the
@@ -3678,7 +4048,8 @@
             // damage, sound and shake, before any of those wraps. City mode is
             // untouched and still runs the full chain.
             const boom = cityWorld ? CBZ.cityExplosion : (CBZ.cityBlastCore || null);
-            if (boom) boom(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
+            if (boom) boom(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst,
+              kind: w.projPlain ? undefined : "rpg", dir: launchDir });
           }
           /* ENOUGH ROCKETS OPEN IT (systems/breach.js). The rocket banks its
              warhead mass into the wall it hit, at the STANDOFF coupling — a
@@ -3883,6 +4254,7 @@
         } : null;
         const flightOpts = guideOpts || {};
         if (w.projPlain) flightOpts.plain = true;   // launched shell, no exhaust dressing
+        else flightOpts.tail = rocketTailWorld(origin, launchDir);   // where the backblast leaves
         launchRocket(origin, pt, flightDur, sag, detonate, flightOpts);
         // a brief launch flare only (the flying mesh IS the tracer now) — no
         // fireTracer() instant line all the way to `pt`, which would visibly
@@ -3972,6 +4344,9 @@
       triggerHeld = false;
       return;
     }
+    // a charge / the detonator / a frag in your hand (systems/helditems.js):
+    // the trigger is that object's use, never a punch or a shot
+    if (CBZ.heldItem && CBZ.heldItem.use(animalDown)) { triggerHeld = false; return; }
     if (typeof down === "boolean") {
       triggerHeld = down;
       if (down) shoot();
@@ -4071,7 +4446,7 @@
   // medicine are not chips any more: city/hunger.js eats and patches up on its
   // own when you need it. Drugs are product; the dealers' trade flows read them
   // straight out of g.cityInv.
-  // Each entry: { kind:"gun"|"throwable"|"flashlight"|"phone", label, short,
+  // Each entry: { kind:"gun"|"throwable"|"detonator"|"flashlight"|"phone", label, short,
   //   id?, gunSlot?, item?, count?, active }. city/hud.js renders exactly this;
   // CBZ.cityHotbarSelect dispatches a bar index. Pure read so renderers poll.
   //
@@ -4087,7 +4462,12 @@
     const th = s.throwables || [];
     for (let i = 0; i < th.length; i++) {
       if (!(th[i].count > 0)) continue;
-      bar.push({ kind: "throwable", item: th[i].name, label: th[i].name, short: th[i].name, count: th[i].count | 0, active: false });
+      bar.push({ kind: "throwable", item: th[i].name, label: th[i].name, short: th[i].name, count: th[i].count | 0,
+                 held: th[i].held || null, active: !!(th[i].held && th[i].held === s.held) });
+    }
+    // the detonator is its own thing in your hand once a charge is out
+    if ((s.planted | 0) > 0) {
+      bar.push({ kind: "detonator", item: "Detonator", label: "Detonator", short: "DET", held: "detonator", count: s.planted | 0, active: s.held === "detonator" });
     }
     if (s.flashlight && s.flashlight.owned) {
       bar.push({ kind: "flashlight", item: "Flashlight", label: "Flashlight", short: "LIGHT", active: !!s.flashlight.on });
@@ -4102,9 +4482,12 @@
     // stable order: ITEMS catalog declaration order, filtered to owned throwables
     const inv = CBZ.game.cityInv || {}, ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
     const out = [];
+    const HM = CBZ.heldItemModel;
     for (const name in ITEMS) {
       const it = ITEMS[name];
-      if (it && it.tag === "throwable" && (inv[name] || 0) > 0) out.push({ name: name, count: inv[name] | 0 });
+      if (it && it.tag === "throwable" && (inv[name] || 0) > 0) {
+        out.push({ name: name, count: inv[name] | 0, held: HM ? HM.heldKindOf(name, it) : null });
+      }
     }
     return out;
   }
@@ -4126,7 +4509,9 @@
     } catch (e) { fl = null; }
     let ph = null;
     try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
-    return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph });
+    const H = CBZ.heldItem;
+    return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph,
+      held: H ? H.current() : null, planted: CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0 });
   }
   CBZ.cityHotbar = cityHotbar;
 
@@ -4144,9 +4529,13 @@
       CBZ.game.cityHolstered = false;
       return selectWeaponSlot(e.gunSlot);
     }
+    // a charge, a frag, the detonator: it goes IN YOUR HAND (systems/
+    // helditems.js); the use input does the rest. Anything else throwable
+    // with no held form still leaves on the tap.
+    if ((e.kind === "throwable" || e.kind === "detonator") && e.held && CBZ.heldItem) {
+      return !!CBZ.heldItem.select(e.held);
+    }
     if (e.kind === "throwable") {
-      const it = ((CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {})[e.item] || {};
-      if (it.c4) return !!(CBZ.cityC4Plant && CBZ.cityC4Plant());
       if (CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
       return false;
     }
@@ -4986,10 +5375,14 @@
     // TAKING A THING (systems/verbs_pickup.js): for its beat a pickup owns one
     // hand's wrist target; a held gun dips out of frame and comes back after.
     const pick = CBZ.verbs && CBZ.verbs.fpPickup ? CBZ.verbs.fpPickup(vm, fistT, handR, handL, armed() || fpStowingGun) : null;
+    // the charge / detonator / frag in the right hand owns its wrist target
+    // (systems/helditems.js), unless a pickup has the hand this beat
+    if (CBZ.heldItem) CBZ.heldItem.fpHold(pick ? null : vm, fistT, pick ? null : handR, handL);
     gun.visible = (armed() || fpStowingGun) && !(pick && pick.hands);
     fists.visible = (!armed() && !fpStowingGun) || !!(pick && pick.hands);
     if (ddT < 0) gun.position.y = pick ? -0.9 * pick.gunDip : 0;
     poseFpArms();
+    if (CBZ.fpTorchHold) CBZ.fpTorchHold(FP_TORCH_VIEW);
 
     if (muzzleT > 0) {
       muzzleT -= dt;

@@ -489,7 +489,7 @@
       refreshSlotVisual(slot);
       CBZ.sfx("pickup");
       if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name + " ×" + (slot.grant || 1), { rare: true }); } catch (e) {} }
-      else tellHint("Took " + (slot.grant || 1) + " charges. [B] plants, hold [B] fires.", 2.2);
+      else tellHint("Took " + (slot.grant || 1) + " charges.", 2.2);
       return;
     }
     const owned = CBZ.hasWeapon && CBZ.hasWeapon(slot.id);
@@ -908,7 +908,7 @@
            anyway: in here you have no people, so the ledger route was
            unreachable while still quoting a cash price at the player. The key
            is the way, which is exactly the story. */
-        const have = !!(CBZ.game.hasKey || CBZ.game.role === "cop");
+        const have = !!(CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop"));
         const L = CBZ.cityLock
           ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"], power: LOCK_POWER })
           : { open: have, line: "The armory door needs a Keycard." };
@@ -991,9 +991,7 @@
                   // instruction, exactly as crates.js/prisondrops.js do.
                   // The instruction is on the padlock now (the prompt above);
                   // the sentence keeps only the fact.
-                  tellHint(saw
-                    ? "Padlocked. That blade will go through it."
-                    : "Padlocked, the Warden has that key. Or find something that cuts.", 1.5);
+                  tellHint("Padlocked.", 1.5);
                 }
               }
             }
@@ -1089,7 +1087,7 @@
     col: function () { return armory.collider; },
     isOpen: function () { return !!armory.open; },
     permanent: function () { return false; },
-    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop")); },
+    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop"))); },
     set: function (v) { armory.setOpen(v); return armory.open === !!v; },
   });
   if (inner.gate) {

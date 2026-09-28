@@ -145,7 +145,7 @@
         case "sells":  return w + " sells " + (f.item || "dope");
         case "escape": return w + "'s running";
         case "bent":   return w + " is bent";
-        case "stash":  return "The " + w + " stash";
+        case "stash":  return w + " stash";
         case "gun":    return w === "Him" ? "The warden's gun" : w + " has the gun";
         case "lie":    return "Name " + w;
         default:       return w;
@@ -214,42 +214,40 @@
   }
   const CONTRA = /shiv|shank|knuckle|razor|burner|phone|pills|powder|hooch|painkiller|lockpick|handcuff key|hacksaw|contraband map|rope|revolver|pistol|shotgun|gun/i;
 
-  /* ---- CARS. The GANGS/RACE lead is building racial "cars"; until that
-     lands a car is the clique. Everything below asks through these four. ---- */
-  function carApi() { return CBZ.prisonCars || CBZ.prisonCar || CBZ.cars || null; }
+  /* ---- CARS (systems/prisoncars.js): six racial cars keyed by heritage.
+     Every man, the player included, has one. A man whose car turned on him
+     for talking is out of it here (S.carTurned), whatever his skin says. ---- */
+  function cars() { return CBZ.prisonCars || null; }
   function carOf(a) {
-    const C = carApi();
-    if (C && a) {
-      try {
-        const fn = C.of || C.carOf;
-        if (typeof fn === "function") { const c = fn.call(C, a); if (c != null && c !== -1) return c; }
-      } catch (e) {}
+    if (!a) return null;
+    if (a === CBZ.player && S.carTurned) return null;
+    const C = cars();
+    if (C && C.carOf) {
+      try { const c = C.carOf(a); return c != null && c >= 0 ? c : null; } catch (e) {}
     }
     if (a === CBZ.player) { const pg = CBZ.player && CBZ.player.gang; return pg != null && pg >= 0 ? pg : null; }
-    return a && a.gang != null && a.gang >= 0 ? a.gang : null;
+    return a.gang != null && a.gang >= 0 ? a.gang : null;
   }
   function carName(c) {
-    const C = carApi();
-    if (C && typeof C.name === "function") { try { const n = C.name(c); if (n) return String(n); } catch (e) {} }
-    if (CBZ.cliqueName) { try { return String(CBZ.cliqueName(c)); } catch (e) {} }
+    const C = cars();
+    if (C && C.label) { try { const n = C.label(c); if (n) return String(n); } catch (e) {} }
     return "crew";
   }
-  const STASH = [{ x: -22, z: 30 }, { x: 22, z: 16 }];     // ai.js TURF: where a set keeps its things
   function stashOf(c) {
-    const C = carApi();
-    if (C && typeof C.stash === "function") { try { const s = C.stash(c); if (s && isFinite(s.x)) return s; } catch (e) {} }
-    return STASH[c] || null;
+    const C = cars();
+    const Y = C && C.CARS && C.CARS[c] && C.CARS[c].yard;
+    return Y ? { x: Y.x, z: Y.z } : null;
   }
   function expelPlayer() {
-    const C = carApi();
-    try {
-      if (C && typeof C.expel === "function") { C.expel(CBZ.player, "snitch"); return; }
-      if (C && typeof C.leave === "function") { C.leave(CBZ.player, "snitch"); return; }
-    } catch (e) {}
+    // no door out of a car in prisoncars.js: this file holds the fact
+    // (carOf(player) is null from here), and the old clique band comes off
+    CBZ.player._carOutcast = true;
     const gid = CBZ.player.gang;
-    CBZ.player.gang = null;
-    if (CBZ.player._bandMesh) CBZ.player._bandMesh.visible = false;
-    if (gid != null && gid >= 0 && CBZ.addGangStanding) CBZ.addGangStanding(gid, -45);
+    if (gid != null && gid >= 0) {
+      CBZ.player.gang = null;
+      if (CBZ.player._bandMesh) CBZ.player._bandMesh.visible = false;
+      if (CBZ.addGangStanding) CBZ.addGangStanding(gid, -45);
+    }
   }
 
   // ---- state ----
@@ -1007,6 +1005,7 @@
     S.knowers.forEach(function (m) { m._knowsRat = false; m._ratTarget = false; m._saidRat = false; });
     S.facts.length = 0; S.tasks.length = 0; S.seg.length = 0; S.knowers.clear();
     S.mode = null; S.carTurned = false; S.plan = null; S.now = 0; S.planT = 0;
+    if (CBZ.player) CBZ.player._carOutcast = false;
     for (const k in S.log) S.log[k] = 0;
     g.snitchRep = 0; g.snitchPass = 0;
   }

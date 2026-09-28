@@ -449,8 +449,11 @@
       if (S.weapon && S.weapon.blade && CBZ.bodyWound) {
         try { CBZ.bodyWound(c, res.point, { melee: "blade", cal: 0.7, fromX: S.Ba.pos.x, fromZ: S.Ba.pos.z }); } catch (e) { /* wounds off */ }
       }
-      if (res.blood > 0 && CBZ.goreImpact) {
-        CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: res.blood, dir: { x: res.dir.x, y: 0.35, z: res.dir.z } });
+      // a blade that lands CUTS, and a cut bleeds into the air (gore.js: heavy
+      // drops + a short stream); a fist bleeds only when combat says it split
+      const cut = !!(S.weapon && S.weapon.blade);
+      if ((res.blood > 0 || cut) && CBZ.goreImpact) {
+        CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: res.blood || 0.8, blade: cut, dir: { x: res.dir.x, y: 0.35, z: res.dir.z } });
       }
       // you beat him to the punch: whatever he was throwing is gone
       const his = strikeOf(c);

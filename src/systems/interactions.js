@@ -456,13 +456,19 @@
     dsafe(function () { return s.set(want); }, false);
     if (doorIsOpen(s) !== want) return "refused";
     s._latch = !want;                                   // shutting it LATCHES it shut
+    // the block notices a door opened off the clock (systems/prisondoorwatch.js)
+    if (CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.acted) dsafe(function () { return CBZ.prisonDoorWatch.acted(s, want); }, null);
     return want ? "opened" : "closed";
   }
+  // open === null: either state (the [E] verb offers whichever the door is not)
   function nearestDoor(open, reach, facing) {
     let best = null, bd = reach * reach;
     for (let i = 0; i < doorSpecs.length; i++) {
       const s = doorSpecs[i];
-      if (doorIsOpen(s) !== open || doorGone(s) || !doorCred(s)) continue;
+      const o = doorIsOpen(s);
+      if (open !== null && o !== open) continue;
+      if (doorGone(s) || !doorCred(s)) continue;
+      if (!o && s.openByTap === false) continue;        // a pick beat owns its opening
       const d2 = doorD2(s);
       if (d2 >= bd) continue;
       if (facing) {
@@ -495,6 +501,12 @@
     const s = nearestDoor(true, DOOR_KEY_REACH, true);
     return s ? doorAct(s, false) : null;
   };
+  // THE ONE DOOR VERB: the door in front of you, opened if it is shut and
+  // shut if it is open — the pill pinned on the leaf fires this.
+  CBZ.prisonDoorVerbNearest = function () {
+    const s = nearestDoor(null, DOOR_KEY_REACH, true);
+    return s ? doorAct(s, !doorIsOpen(s)) : null;
+  };
   /* THE RATCHET. `doors` is every declared leaf; `closeable` is the number
      that expose the verb RIGHT NOW (open, not blown, credential in hand) and
      is the number the owner asked to stop being zero. `latched` may only be
@@ -524,29 +536,25 @@
       latched: latched, closeable: closeable, rows: rows };
   };
 
-  // The polled half. Runs from updateInteractions.
-  let doorKeyWas = false;
-  function doorCloseKey() {
+  /* The [E] half. Runs from updateInteractions.
+     OWNER (2026-09-28): "the cop should be able to open one on his own." The
+     verb used to be CLOSE only — a door opened by approach or not at all —
+     so the officer stood at a racked cell with the keys on his belt and no
+     way to use them. Now the door in front of you says what it will do,
+     "Open" or "Close", pinned on the leaf, and it is a BOUND pill: its key
+     fires only while it is the prompt shown, so a bunk or a man beside the
+     door never gets the same press. On touch the same pill is the button
+     (a tap on the bars still works too: systems/touch.js ends in doorAct). */
+  function doorVerbPrompt() {
     // updateInteractions runs in the CITY too (its mode gate is the win check
     // at the bottom), and the compound shares the city's coordinate space
     // near the origin — so without this a city walk past z=-8 would be
     // offered the yard checkpoint. The tap path carries the same guard.
-    if (!CBZ.game || CBZ.game.mode !== "escape") { doorKeyWas = false; return; }
-    const down = !!(CBZ.keys && CBZ.keys["e"]);
-    const s = nearestDoor(true, DOOR_KEY_REACH, true);
-    if (s) {
-      /* THE WORD IS ON THE DOOR: "[E] Close" pinned over the leaf itself, so
-         nothing has to say WHICH door. TOUCH GETS NO PILL, ON PURPOSE: the
-         owner asked for this verb as a TAP ON THE DOOR ("no button needed"),
-         and systems/touch.js's tapWorld fires the very doorAct() this key
-         does — a pill would be the chrome LAW 5 forbids. */
-      if (!onTouch()) CBZ.prisonPrompt("door", "@prisonDoorCloseNearest", "Close", { at: doorPoint(s), d2: doorD2(s) });
-      // EDGE-TRIGGERED, unlike every other polled prison verb: this one acts
-      // on a door whose auto-open is still live, so a held key would flap the
-      // leaf open/shut at 60 Hz.
-      if (down && !doorKeyWas) doorAct(s, false);
-    }
-    doorKeyWas = down;
+    if (!CBZ.game || CBZ.game.mode !== "escape") return;
+    const s = nearestDoor(null, DOOR_KEY_REACH, true);
+    if (!s) return;
+    CBZ.prisonPrompt("door", "@prisonDoorVerbNearest", doorIsOpen(s) ? "Close" : "Open",
+      { at: doorPoint(s), d2: doorD2(s), bind: true });
   }
 
   /* LATCH UPKEEP. Order 41.46 sits AFTER every door tick (gunroom 41,
@@ -676,7 +684,7 @@
        "Cross the yard or scout tunnels for another way out." A vent that
        teleports you off the map is not a feature of a gun game.
        (The city was already living with the near-miss version of this — see
-       doorCloseKey's guard, which exists because the compound shares the
+       doorVerbPrompt's guard, which exists because the compound shares the
        city's coordinate space near the origin. One gate at the top is what
        that comment wanted and could not have on its own.) */
     if (!CBZ.game || CBZ.game.mode !== "escape") return;
@@ -703,7 +711,7 @@
       if (nearDoor && g.hasKey && !CBZ.prisonDoorLatched("prison-yard-door")) {
         CBZ.openDoor();
         readerK = ""; readerRung = false;
-        CBZ.setObjective("Cross the yard, dodge the searchlights, reach the glowing exit.");
+        CBZ.setObjective("");
       } else if (nearDoor) {
         readerLamp("deny", 0.013);
         if (!readerRung) {
@@ -852,8 +860,8 @@
     }
     if (armedVentT > 0 && (armedVentT -= dt) <= 0) armedVent = null;
 
-    // ---- shut it behind you (every registered door, one implementation) ----
-    doorCloseKey();
+    // ---- open / shut the door in front of you (every registered door, one implementation) ----
+    doorVerbPrompt();
 
     // ---- win ---- (escape-mode only, and role-gated: only the ESCAPING role
     // wins by crossing the wire. A cop reaching the gate is just on shift —

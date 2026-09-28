@@ -90,7 +90,7 @@
   function tierOpen(t) { return !TIERS[t].key || haveSeal(); }
   function keyLine(t) {
     if (!TIERS[t] || !TIERS[t].key) return "No names today.";
-    return "That name needs the city seal. It is behind the steel door in City Hall.";
+    return "That name is above your clearance.";
   }
   CBZ.hitmanTier = function () {
     let t = 0;

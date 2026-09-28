@@ -480,9 +480,6 @@
     a.pfSaved = false;
     a.pfTrades = 0;
     a.pfPitchT = OFFER_LINE_GAP;
-    const table = a.gang >= 0 && CBZ.GANG_NAMES && CBZ.GANG_NAMES[a.gang]
-      ? CBZ.GANG_NAMES[a.gang]
-      : ((CBZ.GANG_NAMES || ["the Reds", "the Blues"])[CBZ.player && CBZ.player.gang === 0 ? 1 : 0]);
     const n = numword(a.pfMissed || MISSED_QUIT);
     say(a, `${n.charAt(0).toUpperCase()}${n.slice(1)} meals. I'm done.`, 2.4);
     a.pfMissed = 0;

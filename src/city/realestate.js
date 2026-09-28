@@ -288,7 +288,7 @@
     if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
     let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     g.cityOwnsHangar = true;
-    CBZ.city.big("HANGAR ACQUIRED, now STEAL an F-22 and land it here to keep it.");
+    CBZ.city.big("HANGAR ACQUIRED");
     CBZ.city.addRespect(40);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

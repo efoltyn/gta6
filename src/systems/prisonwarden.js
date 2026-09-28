@@ -179,7 +179,7 @@
     checked: ["It checked out.", "Good. It was there."],
     noYard: ["No yard for you. Inside."],
     protect: ["You'll have an officer on you."],
-    favorAsk: ["There's a blade in the yard, by the far fence. Bring it here."],
+    favorAsk: ["Somebody buried a blade in my yard. Find it."],
     handOver: ["Good. We're square."],
     threatWin: ["...Get out of my office."],
     threatLose: ["Officer. Take him down."],
@@ -1261,6 +1261,14 @@
     verbs: verbs,
     act: act,
     line: function (group) { return LINE[group] ? pick(LINE[group]) : ""; },
+    // THE OFFICER'S RECORD (systems/prisondoorwatch.js): a cop who keeps
+    // opening doors off the schedule loses standing, and the PA says so
+    officer: function (dv, lines) {
+      if (g.role !== "cop" || g.mode !== "escape") return false;
+      standing(dv || 0);
+      if (lines && lines.length) paSay(lines);
+      return true;
+    },
     CORE: CORE,
     // entities/guards.js: his body, every frame
     body: body,

@@ -102,7 +102,7 @@
   // ---- COMPLIMENT (slot K, low prio so the relationship ladder in interact.js
   //      wins when it has something to say; this fills the slot for a plain
   //      stranger). Words buy a sliver of warmth — and they remember you said it.
-  const COMP_BACK = ["“Ha, appreciate that.”", "“Aw, thanks.”", "“You're alright, you know that?”", "“Means a lot, stranger.”"];
+  const COMP_BACK = ["Ha, appreciate that.", "Aw, thanks.", "You're alright, you know that?", "Tell that to my wife."];
   function compliment(p) {
     meet(p);
     // a small, genuine goodwill nudge — the "flirted" table is mostly affection
@@ -116,8 +116,8 @@
   // ---- INSULT (slot L, low prio — sits under pickpocket only when nothing
   //      meaner applies). A jab plants a grudge; the person snubs you, and a
   //      bold/armed one may square up. Free to throw, not free to eat.
-  const INSULT_MEEK = ["“…whatever, man.”", "“Why you gotta be like that?”", "“Jerk.”"];
-  const INSULT_BOLD = ["“The HELL you say to me?!”", "“Say that again. I dare you.”", "“You want a problem?!”"];
+  const INSULT_MEEK = ["Whatever, man.", "Why you gotta be like that?", "Jerk.", "Okay. Okay."];
+  const INSULT_BOLD = ["The HELL you say to me?!", "Say that again. I dare you.", "You want a problem?!"];
   function insult(p) {
     meet(p);
     // AN INSULT SCALES WITH WHO IS THROWING IT (owner: "insults scaling to
@@ -159,14 +159,14 @@
     if (readsMeAsBigger(p)) {
       // they outrank you — the threat lands flat. A real reaction, not a toast:
       // they scoff, your respect with them takes a small ding for overreaching.
-      say(p, "“Cute. Run along.”", "#dfe7ff", 2);
+      say(p, "Cute. Run along.", "#dfe7ff", 2);
       const r = rel(p); if (r) r.respect = Math.max(0, r.respect - 3);
       return;
     }
     relShift(p, "intimidated", readsMeAsSmaller(p) ? 1.3 : 1);   // a big gap lands harder
     p.alarmed = Math.max(p.alarmed || 0, 4);
     p.fear = Math.min(10, (p.fear || 0) + 3);
-    say(p, ["“O-okay, okay…”", "“I don't want trouble.”"][(Math.random() * 2) | 0], "#ffd1c4", 2.2);
+    say(p, ["O-okay, okay…", "I don't want trouble."][(Math.random() * 2) | 0], "#ffd1c4", 2.2);
     sfx("blip");
   }
 
@@ -201,10 +201,10 @@
     meet(p);
     const P = CBZ.player;
     const tgt = nearestUsefulLot(P.pos.x, P.pos.z);
-    if (!tgt) { say(p, "“Honestly? Couldn't tell you. New here too.”", "#dfe7ff", 2.4); relShift(p, "greeted", 0.4); return; }
+    if (!tgt) { say(p, "Couldn't tell you. I'm new here.", "#dfe7ff", 2.4); relShift(p, "greeted", 0.4); return; }
     const dir = compassFrom(P.pos.x, P.pos.z, tgt.x, tgt.z);
     const label = shopLabel(tgt.kind);
-    say(p, "“" + cap(label) + "? " + dir + ", not far.”", "#dfe7ff", 3);
+    say(p, cap(label) + "? " + dir + ", not far.", "#dfe7ff", 3);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(tgt.x, tgt.z, cap(tgt.kind));
     relShift(p, "greeted", 0.6);          // a helpful exchange = a little warmth
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.2);
@@ -243,7 +243,7 @@
     // 1) ARMORED TRUCK on the move = the headline score. If one's live, tip it.
     const truck = (CBZ.cityArmored && CBZ.cityArmored.active && CBZ.cityArmored.active() && CBZ.cityArmored.truck) ? CBZ.cityArmored.truck() : null;
     if (truck && truck.pos && Math.random() < 0.85) {
-      say(p, "“Armored truck's rolling. You didn't hear it from me.”", "#bfe0ff", 3);
+      say(p, "Armored truck's out today. You didn't hear it from me.", "#bfe0ff", 3);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(truck.pos.x, truck.pos.z, "ARMORED TRUCK");
       sfx("blip");
       return;
@@ -251,7 +251,7 @@
     // 2) a VIP/celebrity nearby = a name to find (photo, or a fat mark).
     const vip = nearestVipOther(p);
     if (vip && vip.pos) {
-      say(p, "“See that one? That's " + (vip.name || vipTitle(vip)) + ". A real somebody.”", "#bfe0ff", 3);
+      say(p, "See that one? That's " + (vip.name || vipTitle(vip)) + ".", "#bfe0ff", 3);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(vip.pos.x, vip.pos.z, vipTitle(vip));
       if (CBZ.cityMarkTarget) try { CBZ.cityMarkTarget(vip); } catch (e) {}
       sfx("blip");
@@ -259,10 +259,12 @@
     }
     // 3) nothing hot — they still gossip about YOU (and warm a touch).
     const lines = [
-      "“Quiet out here today. Stay sharp.”",
-      "“Cops have been thick around the blocks lately.”",
-      "“Money's out there if you know where to look.”",
-      "“People talk about you, you know.”",
+      "Cops have been thick around here lately.",
+      "People talk about you, you know.",
+      "My cousin says the mayor's dirty.",
+      "Somebody got shot by the water last week.",
+      "Rent went up again. Nobody's hiring.",
+      "Nothing. I don't know nothing.",
     ];
     say(p, lines[(Math.random() * lines.length) | 0], "#cdeccd", 2.6);
   }
@@ -276,9 +278,9 @@
     if (warm) {
       relShift(p, "greeted", 0.5);
       if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.15);
-      say(p, "“Here.”", "#dfe7ff", 1.8);
+      say(p, "Here.", "#dfe7ff", 1.8);
     } else {
-      say(p, "“Buy your own.”", "#cfd6e6", 1.8);
+      say(p, "Buy your own.", "#cfd6e6", 1.8);
     }
     sfx("blip");
   }
@@ -294,7 +296,7 @@
     p.cash = (p.cash | 0) + HANDOUT;       // it's real — into their pocket
     relShift(p, "gift", 1);                // affection + loyalty + respect, ripples to their circle
     if (p.mood != null) p.mood = 1;
-    say(p, ["“God bless you.”", "“You're a real one.”", "“I won't forget this.”"][(Math.random() * 3) | 0], "#cdeccd", 2.4);
+    say(p, ["God bless you.", "You're a real one.", "I won't forget this."][(Math.random() * 3) | 0], "#cdeccd", 2.4);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);   // a public soft touch reads on the street
     sfx("coin");
   }
@@ -306,7 +308,7 @@
     const photo = Math.random() < 0.5;
     relShift(p, "greeted", 0.6);
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.3);
-    say(p, photo ? "“Make it quick.”" : "“Stay classy.”", "#ffe9a8", 2.2);
+    say(p, photo ? "Make it quick." : "Stay classy.", "#ffe9a8", 2.2);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);   // being SEEN with a name buys cred
     sfx("blip");
   }

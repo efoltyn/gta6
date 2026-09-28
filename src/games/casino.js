@@ -259,7 +259,7 @@
   function rlPlace(key) {
     if (RL.spinning) return;
     const s = bag(), amt = Math.min(RL.unit, s.chips);
-    if (amt <= 0) { staffSay("croupier", "No chips. The cage sells them."); return; }
+    if (amt <= 0) { staffSay("croupier", "No chips, no bet."); return; }
     if (rlStake() + amt > LIMITS.RL_MAX) { staffSay("croupier", "Table cap is $" + LIMITS.RL_MAX + "."); return; }
     s.chips -= amt; RL.bets[key] = (RL.bets[key] || 0) + amt; save(); renderRL();
   }
@@ -353,7 +353,7 @@
   /* ======================= CAGE / SHARK / HUB ============================= */
   function renderCage() {
     const s = bag();
-    if (s.debt > 0) staffSay("cashier", "You carry the Shark's marker. He gets paid first.");
+    if (s.debt > 0) staffSay("cashier", "The Shark gets paid first.");
     const body = "<div style='margin:2px 0 8px'>" + chipsHUD() + "</div>" +
       btn("buy100", "Buy 100", "#1c6b40", C.wallet.cash() < 100) + btn("buy250", "Buy 250", "#1c6b40", C.wallet.cash() < 250) +
       btn("buy1000", "Buy 1,000", "#1c6b40", C.wallet.cash() < 1000) +
@@ -373,7 +373,7 @@
   function renderShark() {
     // HIS words go over HIS head; the panel keeps only the terms + buttons
     const s = bag();
-    sharkSay(s.debt > 0 ? "You already carry my marker. Pay the cage. Then we talk."
+    sharkSay(s.debt > 0 ? "You still owe me. Pay first, then we talk."
       : "I'll front you " + LIMITS.LOAN_GIVE + " in chips. You owe me " + fmt(LIMITS.LOAN_OWE) + ".");
     const body = s.debt > 0
       ? "<div style='margin:6px 0'>Marker outstanding: <b>" + fmt(s.debt) + "</b></div>" + btn("hub", "Walk away", "#26343c")
@@ -432,58 +432,55 @@
     drainCast(ctx);
   }
   // Dialogue: [E] Talk cycles these lines via the engine's interaction system.
-  // Golden Ace register — the house always wins, politely. Two dealers get
-  // distinct sets so a full table doesn't read copy-pasted.
+  // Short and real: dealers who have stood here too long, not a rules card.
   const DEALER_LINES = [[
-    "Dealer stands on all seventeens. The shoe doesn't care what you feel.",
-    "Blackjack pays three to two. Insurance pays for the chandeliers.",
-    "Fresh six-deck shoe, cut card's buried. Count it if you like, the pit counts you right back.",
-    "Double when you're sure. This felt has heard a lot of sure.",
+    "Dealer stands on all seventeens.",
+    "Insurance pays for the chandeliers.",
+    "Eleven hours on my feet. Cards, sir?",
+    "My feet hurt. Your call.",
   ], [
-    "Hit sixteen, stand on seventeen, lose with a smile. That's the whole game.",
-    "Cards don't run hot or cold, friend. They run house.",
-    "Nice hand. Now win it eight more times, that's when the felt starts to notice.",
-    "You want a system? Mine's simple: I deal, you pay, we both stay polite.",
+    "Cards don't run hot, friend. They run house.",
+    "Nice hand. Now win it eight more times.",
+    "Nine years dealing. Never played once.",
+    "Tips are appreciated. Rent is due.",
   ]];
   const CROUPIER_LINES = [
-    "Single zero, true wheel, honest ball. That one green pocket is the whole business model.",
-    "Place your bets... and no more bets. The wheel doesn't take requests.",
-    "Red, black, odd, even, the zero quietly collects from all of them.",
-    "Every system ever devised dies in that little green slot. Yours will keep it company.",
-    "Thirty-six numbers, thirty-five to one. That missing number is the house's whole living.",
+    "Place your bets.",
+    "The wheel doesn't take requests.",
+    "Every system dies in that green slot.",
+    "A man lost his car on this wheel last week.",
+    "No hands on the table while it spins.",
   ];
   const CASHIER_LINES = [
-    "Chips play, cash doesn't. Nothing touches the felt until it's passed my window.",
-    "Cashing out? If you carry the Shark's marker, the cage settles him first. House policy.",
-    "Buy in here, color up here. Whatever the tables leave you, this is where it lands.",
-    "Big win or bad beat, it all comes back to this counter. Everything here does.",
+    "Chips play. Cash doesn't.",
+    "Count it in front of me, please.",
+    "Big win or bad beat, it ends at this window.",
+    "Nobody tips the cashier.",
   ];
   const GUARD_LINES = [
-    "Hands where the cameras can see them. Enjoy your evening.",
-    "Cage stays behind the brass. You stay in front of it.",
+    "Hands where the cameras can see them.",
     "I watch the floor. The floor watches you.",
-    "No trouble tonight. There's never any trouble here.",
+    "No trouble tonight.",
+    "Keep walking, sir.",
   ];
   const PITBOSS_LINES = [
     "Table three's running warm. We notice warm.",
-    "Win or lose, you're on camera the whole time. Do smile.",
-    "Nobody beats this floor for long. The floor is extremely patient.",
-    "You're up? Wonderful. Stay a while, let it find its way home.",
-    "Comps are for friends of the house. Keep playing; we'll see how friendly you get.",
+    "Win or lose, you're on camera. Do smile.",
+    "The floor is extremely patient.",
+    "You're up? Stay a while.",
   ];
   // The pit boss also BARKS live lines keyed to the player's night (read straight
   // off bag()): pointed when you're hot, cold when you're down. Deterministic pick
-  // off the play counters (runtime flavor, no rng churn); guarded so it no-ops off
-  // the flagship or before the facade lands.
+  // off the play counters (runtime flavor, no rng churn).
   const PITBOSS_HOT = [
     "Table's running warm. We notice warm.",
-    "Three on the trot, enjoy it. The wheel has a long memory.",
+    "Enjoy it. The wheel has a long memory.",
     "A heater like that draws eyes. Mostly ours.",
   ];
   const PITBOSS_COLD = [
-    "Rough shoe. The cage still honors the Shark's marker, if it comes to that.",
-    "Cold runs happen. To you, tonight, apparently.",
-    "Down to felt lint? There's a booth in the back for exactly that.",
+    "Rough shoe.",
+    "Cold runs happen. To you, tonight.",
+    "Go home, pal. Come back Friday.",
   ];
   function pickLine(pool, salt) { const s = bag().stats; return pool[(s.hands + s.spins + s.pulls + (salt || 0)) % pool.length]; }
   function pitBossBark(mood) { const h = V && V.pitBoss; if (h && h.say) h.say(pickLine(mood === "hot" ? PITBOSS_HOT : PITBOSS_COLD, mood === "hot" ? 0 : 1)); }

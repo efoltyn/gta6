@@ -2,7 +2,8 @@
    entities/ai.js — the "give NPCs life" brain.
 
    Every inmate runs a little state machine: WANDER → FIGHT / FLEE /
-   ESCAPE. They form two gangs, brawl with rivals, sometimes betray
+   ESCAPE. They sort into their race's car (systems/prisoncars.js), brawl
+   with rivals, sometimes betray
    and jump their OWN gang leader, occasionally take a swing at a
    guard, and now and then make a break for the exit. Anyone can be
    beaten down or killed — by you, by each other, by the guards.
@@ -15,7 +16,18 @@
   "use strict";
   const CBZ = window.CBZ;
   const rng = () => CBZ.econ.rng();
-  const GANG_COLORS = [0xff3b3b, 0x3b7bff]; // red vs blue armbands
+  /* THE CARS (systems/prisoncars.js). `n.yardCar` is the car a man belongs to by
+     who he is (every inmate has one); `n.gang` is the same index when he is
+     ACTIVE in its business (dues, turf, work) and -1 when he just does his
+     time under its umbrella. There are no colours: no arm band, no painted
+     turf disc, no name-plate colour. You can see who a man runs with. */
+  function PCARS() { return CBZ.prisonCars || null; }
+  function NCARS() { const P = PCARS(); return P ? P.N : 2; }
+  function carOfA(a) { const P = PCARS(); return P ? P.carOf(a) : (a && a.gang >= 0 ? a.gang : -1); }
+  function playerCar() { const P = PCARS(); return P ? P.playerCar() : -1; }
+  function rivalCar(g) { const P = PCARS(); return P ? P.rivalOf(g) : (g === 0 ? 1 : 0); }
+  // the car that backs a man (retaliation is the car's, active or not)
+  function carK(n) { return n && typeof n.yardCar === "number" && n.yardCar >= 0 ? n.yardCar : (n && n.gang >= 0 ? n.gang : -1); }
 
   /* ============================================================
      THE YARD BEATING — the strike table for a man who has decided to jump you.
@@ -284,12 +296,12 @@
   // "undefined see you ducking work." came from. A crew with no id is "the
   // block", because that is who actually noticed.
   function gangName(gid) {
-    const N = ["the Reds", "the Blues"];
-    return (gid >= 0 && N[gid]) ? N[gid] : "the block";
+    const P = PCARS();
+    return P && gid >= 0 && gid < P.N ? P.phrase(gid) : "the block";
   }
 
-  // two gang home turfs (centres) — gang 0 west, gang 1 east
-  const TURF = [{ x: -22, z: 30 }, { x: 22, z: 16 }];
+  // each car's spot on the yard (systems/prisoncars.js CARS[i].yard)
+  function turfOf(g) { const P = PCARS(); return P && g >= 0 && P.CARS[g] ? P.CARS[g].yard : null; }
   const APPROACH_NEAR = 2.35;
   const APPROACH_FAR = 13.5;
 
@@ -334,24 +346,21 @@
     if (ch === "!" && CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
 
-  /* CLIQUES BY WHERE A MAN CAME FROM (2026-09-27).
+  /* THE CAR IS WHO YOU ARE (2026-09-28, owner: "instead of a colorful band
+     showing what gang you're in, it's the race ... and those are the gangs").
 
-     This used to be `gi++ % 2` over every generic inmate: the yard dealt into
-     two gangs like a deck of cards, so a Pacific Islander and a skinhead could
-     wear the same armband and half the prison was somebody's soldier. A real
-     yard sorts itself: the Reds are the Latino car, the Blues the Black car
-     (npc.js's named crews already say so), and most men are in NEITHER. They
-     mind their own business, and that is what makes the ones who don't read.
-
-     The mapping is DETERMINISTIC per man (a hash of his name and spawn point,
-     no draw on the shared rng stream): a Latino inmate runs with the Reds ~60%
-     of the time, a Black inmate with the Blues ~55%; everyone else stays
-     unaffiliated. Men housed in the cells run with their car at half that
-     rate (a cell resident is his cell's business first). The named crews keep
-     their preset colours; named loners (Tiny, the Professor, Iron Mike...)
-     stay loners. Roughly six in ten of the yard ends up unaffiliated. */
-  const CLIQUE_OF = { latino: 0, black: 1 };
-  const CLIQUE_P = [0.6, 0.55];
+     Before: the Reds (Latino) and the Blues (Black), a red or blue box on the
+     left forearm, a red and a blue disc on the yard floor, everybody else in
+     neither. Now every inmate is in his race's car (systems/prisoncars.js:
+     Southsiders, Black, White, Paisas, Asian, Others), dealt from his
+     heritage and nothing else. About four in ten are ACTIVE in the car's
+     business (n.gang = the car); the rest ride under it (n.gang = -1, n.yardCar
+     still set): they sit at its tables, answer to its shot-caller and are
+     backed by it, but do not collect dues or hold ground. Named loners (Tiny,
+     the Professor, Iron Mike...) are in their car and inactive. A cell
+     resident is active at half the rate. The roll is a hash of the man (no
+     draw on the shared rng stream). */
+  const ACTIVE_P = 0.4;
   function cliqueHash(n, i) {
     const name = (n.data && n.data.name) || "";
     const p = n.group ? n.group.position : { x: 0, z: 0 };
@@ -365,61 +374,60 @@
   }
   function assignClique(n, i) {
     if (n._baseGang !== undefined) return n._baseGang;
-    const preset = n.gang === 0 || n.gang === 1 ? n.gang : null;
+    const convict = n.kind === "inmate" || n.role === "inmate" || n.role === "thief";
+    n.yardCar = convict ? carOfA(n) : -1;
+    // a man the roster put in the car's business stays in it; if the roster
+    // named a car that is not his own, his own wins (the car is who he is)
+    const preset = n.gang != null && n.gang >= 0 ? n.gang : null;
     let gang = -1;
-    if (preset != null) gang = preset;
-    else if (n.role === "inmate" || n.role === "thief") {
-      // a NAMED loner stays a loner; the anonymous (crowd, cell residents)
-      // roll against their heritage
-      const anon = !!(n.data && (n.data.cell || n.data.name === "an inmate"));
-      if (anon || !n.forceNeutral) {
-        const c = CLIQUE_OF[heritageOf(n)];
-        if (c != null) {
-          const p = CLIQUE_P[c] * (n.data && n.data.cell ? 0.5 : 1);
-          if (cliqueHash(n, i) < p) gang = c;
+    if (n.yardCar >= 0) {
+      if (preset != null) gang = n.yardCar;
+      else if (n.role !== "merchant" && n.role !== "dealer") {
+        const anon = !!(n.data && (n.data.cell || n.data.name === "an inmate"));
+        if (anon || !n.forceNeutral) {
+          const p = ACTIVE_P * (n.data && n.data.cell ? 0.5 : 1);
+          if (cliqueHash(n, i) < p) gang = n.yardCar;
         }
       }
-    }
+    } else if (preset != null) gang = preset;
     n._baseGang = gang;
     return gang;
   }
 
   let inited = false;
+  function electLeaders() {
+    for (let g = 0; g < NCARS(); g++) {
+      const pool = CBZ.npcs.filter((n) => n.yardCar === g && alive(n));
+      let m = pool.find((n) => n.gang === g && crewRole(n) === "shotcaller") || null;
+      if (!m) {
+        // no named key holder: the car's most feared ACTIVE man, else its most feared man
+        let bs = -Infinity;
+        for (const n of pool) {
+          if (n.role === "merchant" || n.role === "dealer") continue;
+          const s = (n.gang === g ? 1000 : 0) + ((CBZ.npcPower && CBZ.npcPower(n)) || 0);
+          if (s > bs) { bs = s; m = n; }
+        }
+        if (m && m.gang !== g) setClique(m, g);
+      }
+      if (m) { m.isLeader = true; leaders[g] = m; }
+      else leaders[g] = null;
+    }
+  }
   function initWorld() {
     inited = true;
     const list = CBZ.npcs;
     for (let i = 0; i < list.length; i++) {
       const n = list[i];
       n.gang = assignClique(n, i);
-      if (n.gang >= 0) addBand(n, n.gang);
     }
-    // shotcallers lead first; fallback to the first member of each gang
-    for (const g of [0, 1]) {
-      const m = CBZ.npcs.find((n) => n.gang === g && crewRole(n) === "shotcaller") || CBZ.npcs.find((n) => n.gang === g);
-      if (m) { m.isLeader = true; leaders[g] = m; }
-    }
-    // paint the turf on the ground
-    TURF.forEach((t, g) => {
-      const disc = new THREE.Mesh(
-        new THREE.CircleGeometry(9, 28),
-        new THREE.MeshBasicMaterial({ color: GANG_COLORS[g], transparent: true, opacity: 0.1, depthWrite: false })
-      );
-      disc.rotation.x = -Math.PI / 2; disc.position.set(t.x, 0.04, t.z);
-      (CBZ.prisonRoot || CBZ.scene).add(disc);
-    });
+    electLeaders();
   }
   const leaders = {};
+  CBZ.prisonCarLeader = function (car) { const m = leaders[car]; return m && alive(m) ? m : null; };
 
-  function addBand(actor, gang) {
-    if (actor._band) { actor._band.material = CBZ.mat(GANG_COLORS[gang]); actor._band.visible = true; return; }
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.34), CBZ.mat(GANG_COLORS[gang]));
-    band.position.y = -0.2; actor.char.parts.la.add(band);
-    actor._band = band;
-  }
   function setClique(n, gang) {
     n.gang = gang;
-    if (gang >= 0) addBand(n, gang);
-    else if (n._band) n._band.visible = false;
+    if (n._band) { if (n._band.parent) n._band.parent.remove(n._band); n._band = null; }
   }
 
   // ---- ratings (CAPABILITY) + behaviour (TEMPERAMENT), decoupled -------
@@ -874,9 +882,10 @@
 
   function protectionGang() {
     if (CBZ.player && CBZ.player.gang != null) return CBZ.player.gang;
-    const gp = CBZ.game.gangProtection || [0, 0];
-    if ((gp[0] || 0) <= 0 && (gp[1] || 0) <= 0) return null;
-    return (gp[0] || 0) >= (gp[1] || 0) ? 0 : 1;
+    const gp = CBZ.game.gangProtection || [];
+    let best = null, bv = 0;
+    for (let g = 0; g < NCARS(); g++) if ((gp[g] || 0) > bv) { bv = gp[g]; best = g; }
+    return best;
   }
 
   const DELIVERY_TARGETS = [
@@ -888,7 +897,7 @@
 
   function makeGangJob(n) {
     const gang = n.gang;
-    const rival = gang === 0 ? 1 : 0;
+    const rival = rivalCar(gang);
     const debt = gangDebt(gang);
     const role = crewRole(n);
     let roll = rng();
@@ -1021,7 +1030,7 @@
     // THE PAYER IS A PERSON. `job.actor` is whoever handed the job over
     // (startGangJob records it) — they pay you, out loud, in front of you.
     { const jv = jobVoice(job); if (jv) say(jv, `${job.reward || 4}. Good work.`, null, 2.0); }
-    CBZ.setObjective && CBZ.setObjective("Job done. Keycard checkpoints or tunnels can still get you out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -1031,7 +1040,7 @@
     addGangDebt(job.gang, 3);
     const jv = jobVoice(job);
     if (jv) say(jv, "You blew it.", null, 2.0);
-    CBZ.setObjective && CBZ.setObjective("Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -1552,9 +1561,9 @@
   }
 
   function isOnTurf(gang, p) {
-    if (gang < 0 || !TURF[gang]) return false;
-    const t = TURF[gang];
-    return Math.hypot(p.x - t.x, p.z - t.z) < 11.5;
+    const t = turfOf(gang);
+    if (!t || !p) return false;
+    return Math.hypot(p.x - t.x, p.z - t.z) < t.r + 2;
   }
 
   /* THE OPENER. This is SPOKEN (the greet block in approachPlayer says it
@@ -1872,7 +1881,7 @@
     const sameGang = playerGang != null && playerGang === gang;
     const rivalGang = playerGang != null && playerGang !== gang;
     let mode = "warning";
-    if (playerGang == null && standing >= -8) mode = "recruit";
+    if (playerGang == null && standing >= -8 && n && n.yardCar === playerCar() && (CBZ.game || {}).carClaim !== "out") mode = "recruit";
     else if (sameGang || standing > 28) mode = "work";
     else if (debt > 0 || standing < -16 || rivalGang) mode = "truce";
     const pressure = Math.ceil(Math.max(0, -standing) / 13) + Math.ceil(debt * 0.55) + (rivalGang ? 3 : 0);
@@ -2067,11 +2076,17 @@
     { name: "exit corridor", x: 0, z: 52, r: 20 },
     { name: "cell block", x: 0, z: -28, r: 22 },
     { name: "yard gate", x: 0, z: -8, r: 10 },
-    { name: "Reds' corner", x: -22, z: 30, r: 13 },
-    { name: "Blues' corner", x: 22, z: 16, r: 13 },
   ];
+  // each car's spot is a named place too ("where the Paisas stand")
+  function carLandmarks() {
+    const P = PCARS();
+    if (!P || LANDMARKS._cars) return;
+    LANDMARKS._cars = true;
+    for (let i = 0; i < P.N; i++) { const Y = P.CARS[i].yard; LANDMARKS.push({ name: "car:" + i, x: Y.x, z: Y.z, r: Y.r + 2 }); }
+  }
   function nearestLandmark(x, z) {
     if (!(isFinite(x) && isFinite(z))) return null;
+    carLandmarks();
     let best = null, bd = Infinity;
     for (let i = 0; i < LANDMARKS.length; i++) {
       const L = LANDMARKS[i], d = Math.hypot(x - L.x, z - L.z);
@@ -2273,6 +2288,61 @@
     return fallback || "guard chatter";
   }
 
+  /* HEARSAY. What a yard actually trades in: names, grudges, who is soft and
+     who is bent. Built off the live roster, and only SOMETIMES true, because
+     a rumor you can act on blind is a walkthrough, and nobody in here knows
+     anything for sure (owner, 2026-09-28: "rumors that are sometimes true and
+     sometimes false"; never a route, a room, a key or the gun room).
+       bent screw   true when he is corrupt, told about a clean man a third
+                    of the time
+       snitch       true when the man's snitch trait is high, else gossip
+       holding      true when his pockets are actually heavy
+       the rest     flavour nobody can check */
+  function hearsay(n) {
+    const pickOf = (a) => a[(rng() * a.length) | 0];
+    const co = (gd) => actorName(gd).replace(/^Officer /, "");
+    const guards = (CBZ.guards || []).filter((gd) => gd && gd.data && !gd.dead && gd.kind !== "warden");
+    const cons = (CBZ.npcs || []).filter((m) => m !== n && alive(m) && m.data && !m._crowd &&
+      m.data.name && !/^(a|an) /.test(m.data.name));
+    const r = rng();
+    if (r < 0.28 && guards.length) {
+      const bent = guards.filter((gd) => gd.corrupt);
+      const liar = !bent.length || rng() < 0.33;
+      const gd = liar ? pickOf(guards) : pickOf(bent);
+      return pickOf([`${co(gd)} takes money. Heard it.`, `${co(gd)}'s bent. Maybe.`,
+        `Heard ${co(gd)} sleeps on nights.`]);
+    }
+    if (r < 0.46 && guards.length) {
+      const gd = pickOf(guards);
+      return pickOf([`${co(gd)} did two tours. Don't swing on him.`,
+        `${co(gd)}'s wife left him. He's mean this week.`,
+        `${co(gd)} writes everybody up. Everybody.`,
+        `${co(gd)} used to box. Watch the left.`]);
+    }
+    if (r < 0.62 && cons.length) {
+      const m = pickOf(cons);
+      const snitchy = ((m.personality && m.personality.snitch) || 0) > 0.3;
+      return snitchy || rng() < 0.4
+        ? pickOf([`${actorName(m)} talks to the COs.`, `Watch what you say around ${actorName(m)}.`])
+        : pickOf([`${actorName(m)}'s alright. Solid.`, `${actorName(m)} owes half the yard.`]);
+    }
+    if (r < 0.74 && cons.length) {
+      const m = pickOf(cons);
+      const load = CBZ.econ && CBZ.econ.rollLoadout ? CBZ.econ.rollLoadout(m) : null;
+      const heavy = load && (load.cigs || 0) >= 8;
+      return heavy || rng() < 0.35 ? `${actorName(m)}'s holding. Heard it.` : `${actorName(m)}'s broke. Don't bother.`;
+    }
+    return pickOf([
+      "Heard they're shipping ten guys out Friday.",
+      "Somebody got cut in the laundry last week.",
+      "New warden's worse. Wait and see.",
+      "Kitchen's watering the milk again.",
+      "They're gonna toss the whole tier. Soon.",
+      "Guy in seven hung up. Nobody talks about it.",
+      "Parole board's denying everybody this year.",
+    ]);
+  }
+
   /* WHAT A MAN TELLS YOU WHEN HE TELLS YOU SOMETHING. One fact, the way a
      man in a yard says it: a name, a place, a number. No advice, no system
      explained (owner: "no mechanics in dialogue"). */
@@ -2284,10 +2354,10 @@
     const knownReporter = (CBZ.npcs || []).find((m) => alive(m) && (m.reportedPlayerT || 0) > 0);
     if (knownReporter) return `${actorName(knownReporter)} talked. About you.`;
     if (g.lastKnown && g.lastKnown.t > 0) return `They're looking for you. ${g.lastKnown.source ? g.lastKnown.source + " pointed." : ""}`.trim();
-    const bent = (CBZ.guards || []).filter((gd) => gd && gd.corrupt && !gd.dead && !(gd.ko > 0));
-    if (bent.length && rng() < 0.4) return `${actorName(bent[Math.floor(rng() * bent.length)])} takes money.`;
+
     if (n.gang >= 0 && debt > 0) return `You owe us ${debt}. Don't forget.`;
     if ((g.cigs || 0) >= 18) return "People see you carrying.";
+    if (rng() < 0.7) return hearsay(n);
     return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your head down.";
   }
 
@@ -2723,7 +2793,7 @@
       startApproach(n, "deal", 0);
       return;
     }
-    if (n.gang >= 0 && CBZ.player.gang == null && standing > -8 && (n.isLeader || (n.rep || 0) > 30) && rng() < 0.026) {
+    if (n.gang >= 0 && CBZ.player.gang == null && n.yardCar === playerCar() && CBZ.game.carClaim !== "out" && standing > -8 && (n.isLeader || (n.rep || 0) > 30) && rng() < 0.026) {
       startApproach(n, "gangInvite", 0);
       return;
     }
@@ -2892,7 +2962,7 @@
         add("buyItem", 8 + p.greed * 7, wanted, { item: wanted, price: Math.max(2, Math.ceil(base * ((sameGang || protectedHere || standing > 24) ? 0.9 : 0.7) + p.greed * 4)) });
       }
       if (n.role === "dealer" && cigs >= 6) add("deal", 8 + p.greed * 4, 0);
-      if (n.gang >= 0 && CBZ.player.gang == null && standing > -8 && (n.isLeader || (n.rep || 0) > 30)) add("gangInvite", 7 + standing * 0.10 + (n.isLeader ? 5 : 0), 0);
+      if (n.gang >= 0 && CBZ.player.gang == null && n.yardCar === playerCar() && CBZ.game.carClaim !== "out" && standing > -8 && (n.isLeader || (n.rep || 0) > 30)) add("gangInvite", 7 + standing * 0.10 + (n.isLeader ? 5 : 0), 0);
       if ((sameGang || protectedHere || buzz.score > 20 || helperRead > 3) && p.loyalty > 0.28) add("rumor", 7 + p.loyalty * 5 + buzz.score * 0.05 + helperRead * 0.22, 0);
     }
 
@@ -2958,6 +3028,8 @@
       if (n.approach || n.standingOffer || n.aiState === "fight" || n.aiState === "snitch" || (n.huntPlayer || 0) > 0) continue;
       if (n._fishTested || heldInCell(n) || (n._brokenUpT || 0) > 0) continue;
       if (CBZ.player.gang != null && n.gang === CBZ.player.gang) continue;
+      const nocar = (CBZ.game || {}).carClaim === "out";
+      if (n.yardCar != null && n.yardCar >= 0 && n.yardCar === playerCar() && !nocar) continue;
       // inside the range an approach survives (APPROACH_FAR + 5), or he
       // "walks away" from his own test before he reaches you
       const d = playerDist(n);
@@ -2969,6 +3041,7 @@
       else if (beh !== "pacifist" && ((n.personality && n.personality.nerve) || 0) > 0.62) score += 0.9;
       const role = crewRole(n);
       if (n.gang >= 0 && isOnTurf(n.gang, CBZ.player.pos)) score += (role === "collector" || role === "enforcer") ? 3.4 : 1.2;
+      if (nocar) score += 1.5;                        // nobody behind him
       if (score <= 0) continue;
       score += ((n.personality && n.personality.nerve) || 0.5) - d * 0.06 - watched(n) * 1.4;
       if (score > bs) { bs = score; best = n; }
@@ -3081,10 +3154,10 @@
     const nf = (CBZ.game || {}).newFish;
     const pref = nf && nf.lastTester && nf.lastTester.gang >= 0 ? nf.lastTester.gang : null;
     let best = null, bs = -Infinity;
-    for (const gg of [0, 1]) {
+    for (let gg = 0; gg < NCARS(); gg++) {
       const ld = leaders[gg];
       if (!alive(ld) || ld.approach || ld.aiState === "fight" || (ld.huntPlayer || 0) > 0 || heldInCell(ld)) continue;
-      if (CBZ.player.gang === gg) continue;
+      if (CBZ.player.gang === gg || playerCar() === gg) continue;
       const d = playerDist(ld);
       if (d > 17 || d < 3) continue;
       const s = (gg === pref ? 10 : 0) - d;
@@ -3095,7 +3168,8 @@
   function startSizeUp(ld) {
     const nf = CBZ.game.newFish;
     const o = nf.outcome;
-    const mode = CBZ.player.gang == null && (o === "stood" || o === "paid") ? (o === "stood" ? "recruit" : "work") : "warning";
+    // another car's key holder never recruits you; he sizes you up for his car
+    const mode = "warning";
     const msg = o === "stood" ? "Heard about you. Sit down a minute."
       : o === "paid" ? "You're paying now. Might as well work."
       : o === "snitched" ? "I know what you did."
@@ -3111,6 +3185,7 @@
     const nf = g.newFish;
     if (!nf || g.role === "cop") return;
     nf.t += dt;
+    if (g.state === "playing") updateCarClaim(nf);
     const pd = nf.pending;
     if (pd) {
       pd.t -= dt;
@@ -3145,17 +3220,18 @@
 
   /* ONE LINE FOR A CONSOLE: is the yard a mob or a set of people? */
   CBZ.prisonSocialAudit = function () {
-    const cl = { 0: 0, 1: 0, neutral: 0 };
+    const cl = { neutral: 0 }, cars = {};
     let wanting = 0;
     for (const n of CBZ.npcs || []) {
       if (!n || n.dead || n.escaped || n.role === "merchant") continue;
-      if (n.gang === 0) cl[0]++; else if (n.gang === 1) cl[1]++; else cl.neutral++;
+      if (n.gang >= 0) cl[n.gang] = (cl[n.gang] || 0) + 1; else cl.neutral++;
+      if (n.yardCar >= 0) cars[n.yardCar] = (cars[n.yardCar] || 0) + 1;
       if ((n.huntPlayer || 0) > 0) wanting++;
     }
     const g = CBZ.game || {};
     const nf = g.newFish;
     return {
-      cliques: cl,
+      cliques: cl, cars, carClaim: g.carClaim || null, playerCar: playerCar(),
       hunters: huntersNow(), wantHunt: wanting, cap: huntCap(),
       maxHuntersSeen: _maxHuntersSeen, huntStarts: _huntStarts, huntRefused: _huntRefused,
       newFish: nf ? { tier: nf.tier, tested: nf.tested, outcome: nf.outcome, t: Math.round(nf.t),
@@ -3170,7 +3246,7 @@
   };
   /* The warden deal's slow leak lived here (rollWardenDeal). Telling, and
      the yard finding out, is systems/prisonsnitch.js now. */
-  CBZ.cliqueName = function (id) { return id === 0 ? "Reds" : id === 1 ? "Blues" : "nobody"; };
+  CBZ.cliqueName = function (id) { const P = PCARS(); return P && id >= 0 && id < P.N ? P.label(id) : "nobody"; };
   CBZ.prisonNewFish = freshNewFish;
   CBZ.prisonYardRep = yardRep;
   CBZ.prisonNoteSnitched = noteFishSnitched;
@@ -3845,10 +3921,9 @@
     if (where === "cell block") return "He's on the tier most days.";
     if (where === "staff lounge") return "He works up by the staff lounge.";
     if (where === "exit corridor") return "He hangs down the exit corridor.";
-    if (where === "armory door") return "He's always near the armory door.";
+    if (where === "armory door") return "He's always on the staff side.";
     if (where === "yard gate") return "He stands at the yard gate.";
-    if (where === "Reds' corner") return "He posts up at the Reds' corner.";
-    if (where === "Blues' corner") return "He posts up at the Blues' corner.";
+    if (where && where.indexOf("car:") === 0) return "He posts up where " + gangName(+where.slice(4)) + " stand.";
     return "He's out on the yard.";
   }
 
@@ -4421,16 +4496,18 @@
     for (const a of nearbyNpcs(n, 9, _foeNear)) {
       if (a === n || !alive(a) || a.gang < 0 || a.gang === n.gang) continue;
       if (!isOnTurf(n.gang, a.group.position)) continue;    // he is on OUR grass
-      const heat = 1 + Math.max(0, -gangStanding(n.gang)) * 0.02;
+      const P = PCARS();
+      const politics = P ? 0.35 + P.tension(n.gang, a.gang) / 30 : 1;
+      const heat = (1 + Math.max(0, -gangStanding(n.gang)) * 0.02) * politics;
       addBeef(n, a, 1.7 * dt * heat * (0.5 + behaviorOf(n).init * 2));
       break;                                                // one insult at a time
     }
   }
 
   function pickTurfTarget(n) {
-    if (n.gang < 0 || !TURF[n.gang]) return false;
-    const t = TURF[n.gang];
-    const r = 4 + rng() * 8;
+    const t = turfOf(n.gang);
+    if (!t) return false;
+    const r = 1 + rng() * (t.r - 1);
     const a = rng() * Math.PI * 2;
     n.target.set(t.x + Math.cos(a) * r, 0, t.z + Math.sin(a) * r);
     return true;
@@ -4438,6 +4515,7 @@
 
   function startFight(n, foe) {
     n.aiState = "fight"; n.foe = foe; n.hitCD = 0;
+    if (PCARS() && foe && foe.kind !== "guard" && foe.kind !== "warden") PCARS().incident(n, foe, 5);
     // WHO THREW FIRST is what a screw acts on (systems/brain_prison.js)
     n._fightStarter = n;
     if (foe && foe.group) foe._fightStarter = n;
@@ -4744,7 +4822,7 @@
     const heat = g.detection || 0;
     const caseHeat = CBZ.caseSummary ? ((CBZ.caseSummary() || {}).heat || 0) : 0;
     const searchHeat = heat > 22 || caseHeat > 14 || (g.witnessReportT || 0) > 0 || (g.lastKnown && g.lastKnown.t > 0);
-    for (let gang = 0; gang < 2; gang++) {
+    for (let gang = 0; gang < NCARS(); gang++) {
       timers[gang] = Math.max(0, (timers[gang] || 0) - dt);
       if (timers[gang] > 0) continue;
       timers[gang] = 4.4 + rng() * 3.6;
@@ -4864,7 +4942,7 @@
     if (g.state !== "playing" || g.role === "cop" || (CBZ.player.stun || 0) > 0) return;
     if (playerApproachBusy()) return;
     const timers = g.turfCheckpointT || (g.turfCheckpointT = [0, 0]);
-    for (let gang = 0; gang < 2; gang++) {
+    for (let gang = 0; gang < NCARS(); gang++) {
       timers[gang] = Math.max(0, (timers[gang] || 0) - dt);
       if (timers[gang] > 0) continue;
       const onTurf = CBZ.player && isOnTurf(gang, CBZ.player.pos);
@@ -4964,11 +5042,13 @@
       }
     }
 
-    const debts = CBZ.game.gangDebt || [0, 0];
-    const first = (debts[0] || 0) >= (debts[1] || 0) ? 0 : 1;
+    const debts = CBZ.game.gangDebt || [];
+    const order = [];
+    for (let g = 0; g < NCARS(); g++) order.push(g);
+    order.sort((a, b) => (debts[b] || 0) - (debts[a] || 0));
+    const first = order[0], other = order[1];
     if ((debts[first] || 0) > 8 && rng() < 0.36 && maybeStartDebtCollector(first)) return;
-    const other = first === 0 ? 1 : 0;
-    if ((debts[other] || 0) > 12 && rng() < 0.26 && maybeStartDebtCollector(other)) return;
+    if (other != null && (debts[other] || 0) > 12 && rng() < 0.26 && maybeStartDebtCollector(other)) return;
     if (rng() < 0.30) maybeStartCashPredator();
   }
 
@@ -5038,13 +5118,14 @@
     if (CBZ.prisonBrain) {
       CBZ.prisonBrain.memberDown(victim, killer, true);
       const byInmate = killer && killer.group && !(CBZ.playerChar && killer.group === CBZ.playerChar.group);
-      if (byInmate && victim.gang >= 0 && killer.gang !== victim.gang && CBZ.npcs.indexOf(killer) >= 0) answerFor(victim, killer, 1);
+      if (byInmate && carK(victim) >= 0 && carK(killer) !== carK(victim) && CBZ.npcs.indexOf(killer) >= 0) answerFor(victim, killer, 1);
     }
     // leadership passes to a surviving gang-mate
     if (victim.isLeader && victim.gang >= 0) {
       victim.isLeader = false;
-      const heir = CBZ.npcs.find((m) => m.gang === victim.gang && alive(m) && m !== victim);
-      if (heir) { heir.isLeader = true; leaders[victim.gang] = heir; }
+      const heir = CBZ.npcs.find((m) => m.gang === victim.gang && alive(m) && m !== victim) ||
+        CBZ.npcs.find((m) => m.yardCar === victim.gang && alive(m) && m !== victim);
+      if (heir) { if (heir.gang !== victim.gang) setClique(heir, victim.gang); heir.isLeader = true; leaders[victim.gang] = heir; }
     }
     // A DEATH HAS A SURFACE ALREADY, AND IT IS NOT A HINT LINE. city/killfeed.js
     // owns the ONE sanctioned popup in this game (engine-systems.md), and every
@@ -5099,7 +5180,7 @@
       // put down by steel can get steel back. It used to book the same +5 beef
       // on the nearest two whatever had happened.
       // (a screw's baton is the law's business, not a crew's: no riot over it)
-      if (actor.gang >= 0 && by.gang !== actor.gang && by.kind !== "guard" && by.kind !== "warden") answerFor(actor, by, by._shankOut || (by._steelT || 0) > 0 ? 0.85 : 0.5);
+      if (carK(actor) >= 0 && carK(by) !== carK(actor) && by.kind !== "guard" && by.kind !== "warden") answerFor(actor, by, by._shankOut || (by._steelT || 0) > 0 ? 0.85 : 0.5);
     }
     // his clique's nerve takes it (the shotcaller down is the big one)
     if (CBZ.prisonBrain) CBZ.prisonBrain.memberDown(actor, by, false);
@@ -5149,7 +5230,7 @@
     if (CBZ.brain && CBZ.brain.morale && f._brain) CBZ.brain.morale.rattle(f, steel > 1 ? 0.35 : 0.12);
     // THE FIRST BLOW of a beef is when his people notice: a glare, a shove
     // (proportional: a punch never brings a blade)
-    if (!guardF && f.gang >= 0 && (CBZ.game.elapsed || 0) - (f._retAt || -1e9) > 6) {
+    if (!guardF && carK(f) >= 0 && (CBZ.game.elapsed || 0) - (f._retAt || -1e9) > 6) {
       f._retAt = CBZ.game.elapsed || 0;
       answerFor(f, n, steel > 1 ? 0.7 : 0.2);
     }
@@ -5801,9 +5882,9 @@
               if (rng() < 0.3) { n.aiState = "wander"; n.social = null; n.aiTimer = 0.4 + rng(); } // walked off
               break;
             }
-            // a drifter from the same car sometimes gets pulled in; a man
-            // from somewhere else does not get an armband for chatting
-            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3 && CLIQUE_OF[heritageOf(n)] === p.gang && rng() < 0.1) setClique(n, p.gang);
+            // a man riding under his car sometimes gets pulled into its
+            // business by one of its active men; another car's man never is
+            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3 && n.yardCar === p.gang && rng() < 0.1) setClique(n, p.gang);
             if (rng() < 0.45) { n.aiState = "wander"; n.social = null; }
           }
         } else {
@@ -5916,8 +5997,11 @@
           const pal = findPal(n);
           if (pal && rng() < 0.45) { n.aiState = "socialize"; n.social = pal; break; }
           if (rng() < 0.015 && !blockGateShut(n)) { n.aiState = "escape"; break; }
-          // a cell resident keeps his own routine; his car is who he stands with, not where he walks
-          if (n.gang >= 0 && !(n.data && n.data.cell) && (rng() < 0.52 || !isOnTurf(n.gang, n.group.position))) pickTurfTarget(n);
+          // HIS CAR'S ROUTINE: his car's end of the table at chow, its spot on
+          // the yard, its phone, its turn in the shower (systems/prisoncars.js)
+          if (PCARS() && PCARS().errand(n)) { /* target set */ }
+          // an active man with no errand holds his car's ground
+          else if (n.gang >= 0 && !(n.data && n.data.cell) && (rng() < 0.4 || !isOnTurf(n.gang, n.group.position))) pickTurfTarget(n);
           else CBZ.npcPickTarget(n);
         }
         return n.baseSpeed;
@@ -5967,10 +6051,10 @@
     CBZ.game.pitches = 0;
     CBZ.game.contract = null;
     for (const g of CBZ.guards) { g.hp = null; g.dead = false; if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(g); }
-    for (const gang of [0, 1]) {
-      const m = CBZ.npcs.find((n) => n.gang === gang && crewRole(n) === "shotcaller") || CBZ.npcs.find((n) => n.gang === gang);
-      if (m) { m.isLeader = true; leaders[gang] = m; }
-    }
+    electLeaders();
+    if (PCARS()) PCARS().reset();
+    CBZ.game.carClaim = null; CBZ.game.carClaimTries = 0;
+    if (CBZ.player) { CBZ.player.yardCar = null; }
   }
 
   /* THE WRONGED MAN COMES FOR YOU, AND WHOEVER OF HIS SAW IT.
@@ -6015,6 +6099,10 @@
     if (victim.gang >= 0) {
       addGangStanding(victim.gang, -(opts.standing != null ? opts.standing : 6));
       noteGangIncident(victim, "attack", Math.max(3, Math.min(8, dur * 0.42)), { skipStanding: true, skipDebt: true, source: "fight", noResponders: true });
+    }
+    // HIS CAR ANSWERS, active in its business or not: a man is backed by his car
+    if (carK(victim) >= 0) {
+      if (PCARS() && playerCar() >= 0 && playerCar() !== carK(victim)) PCARS().addTension(playerCar(), carK(victim), struck ? 3 : 1);
       const want = opts.crew != null ? opts.crew : 2;
       if (want > 0 && victim.group) {
         // HOW BAD WAS IT: what came off him (or his life), or the words that
@@ -6038,7 +6126,7 @@
   }
   function answerFor(victim, aggressor, harm, max, dur) {
     const PBr = CBZ.prisonBrain;
-    if (!PBr || !victim || !aggressor || victim.gang < 0) return 0;
+    if (!PBr || !victim || !aggressor || carK(victim) < 0) return 0;
     const isP = aggressor === CBZ.player;
     const list = PBr.retaliate(victim, aggressor, harm);
     const cap = max != null ? max : 2;
@@ -6341,7 +6429,10 @@
       if (a.kind === "gangInvite") {
         clearApproach(n);
         const res = joinGang(n);
-        addGangStanding(n.gang, 18);
+        if (res.ok) {
+          addGangStanding(n.gang, 18);
+          if (a.claim) addGangProtection(n.gang, 40);
+        }
         return res;
       }
       if (a.kind === "gangParley") {
@@ -7209,6 +7300,20 @@
       return { ok: false, msg: "" };
     }
 
+    if (action === "refuse" && a.kind === "gangInvite") {
+      /* TURNING YOUR OWN CAR DOWN. It is not an insult they swing over; it
+         is a man telling the yard he is nobody's. His car stops backing him,
+         and every other car now has a man with nobody behind him. */
+      clearApproach(n);
+      if (a.claim) {
+        CBZ.game.carClaim = "out";
+        addGangStanding(n.gang, -12);
+        n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 2);
+        return { ok: false, msg: "Then you're on your own." };
+      }
+      addGangStanding(n.gang, -2);
+      return { ok: false, msg: "Suit yourself." };
+    }
     if (action === "refuse") {
       /* WALKING AWAY FROM WORK COSTS NOTHING — it is an OFFER, and OFFER_STANDS
          already keeps it warm for three minutes. He does not take it
@@ -7589,25 +7694,58 @@
     actor.group.position.z += (dz / d) * f;
   }
 
-  const GANG_NAMES = ["the Reds", "the Blues"];
-  // the player throws in with a gang (called from the interact menu)
+  const GANG_NAMES = (function () {
+    const P = PCARS();
+    return P ? P.CARS.map((c) => c.phrase) : ["the block", "the block"];
+  })();
+  // the player is taken in by HIS car (called from the interact menu / claim)
   function joinGang(actor) {
-    if (actor.gang < 0) return { ok: false, msg: "" };
-    CBZ.player.gang = actor.gang;
-    addGangStanding(actor.gang, 22);
-    addGangDebt(actor.gang, -999);
-    for (const n of CBZ.npcs) if (n.gang === actor.gang) n.huntPlayer = 0; // crew stands down
-    if (CBZ.playerChar && !CBZ.player._bandMesh) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.34), CBZ.mat(GANG_COLORS[actor.gang]));
-      b.position.y = -0.2; CBZ.playerChar.parts.la.add(b); CBZ.player._bandMesh = b;
-    } else if (CBZ.player._bandMesh) {
-      CBZ.player._bandMesh.material.color.setHex(GANG_COLORS[actor.gang]);
-      CBZ.player._bandMesh.visible = true;
-    }
+    if (!actor || actor.gang == null) return { ok: false, msg: "" };
+    const car = actor.yardCar != null && actor.yardCar >= 0 ? actor.yardCar : actor.gang;
+    if (car < 0) return { ok: false, msg: "" };
+    const mine = playerCar();
+    if (mine >= 0 && car !== mine) return { ok: false, msg: "You ain't one of us." };
+    CBZ.player.gang = car;
+    CBZ.player.yardCar = car;
+    CBZ.game.carClaim = "in";
+    addGangStanding(car, 22);
+    addGangDebt(car, -999);
+    for (const n of CBZ.npcs) if (n.gang === car || n.yardCar === car) n.huntPlayer = 0; // his own stand down
+    if (CBZ.player._bandMesh) CBZ.player._bandMesh.visible = false;
     return { ok: true, msg: "You're with us now." };
   }
 
+  /* THE CLAIM. A new man is met by his own car inside his first minute or
+     so, and told how it works. Accept: you ride with them (you sit at their
+     tables, they back you, you answer to their key holder). Refuse: you are
+     nobody's, which on a yard means anybody's. */
+  const CLAIM_LINES = [
+    "You're with us. We eat over there. You don't share with nobody else and you don't sit at their tables.",
+    "Who you with? You're with us now. Our tables, our phone. Anything happens, you come to us first.",
+    "New? You ride with us. Don't sit with them, don't eat with them. We look out for our own.",
+  ];
+  function updateCarClaim(nf) {
+    const g = CBZ.game || {};
+    // he never answered (walked off, got pulled away): they come back once more
+    if (g.carClaim === "asked" && CBZ.player.gang == null && !(CBZ.npcs || []).some((n) => n.approach && n.approach.claim)) {
+      g.carClaimTries = (g.carClaimTries || 0) + 1;
+      g.carClaim = g.carClaimTries >= 2 ? "none" : null;
+      nf.claimAt = nf.t + 60 + rng() * 40;
+    }
+    if (g.carClaim || !PCARS() || CBZ.player.gang != null) return;
+    if (nf.claimAt == null) nf.claimAt = 14 + rng() * 14;
+    if (nf.t < nf.claimAt || nf.testOpen || nf.pending || playerApproachBusy() || huntersNow() > 0 || playerDownedNow()) return;
+    const m = PCARS().claimer();
+    if (!m) { nf.claimAt = nf.t + 6 + rng() * 6; if (nf.t > 420) g.carClaim = "none"; return; }
+    if (m.gang < 0) setClique(m, m.yardCar);
+    const ok = startApproach(m, "gangInvite", 0, { forced: true, claim: true,
+      msg: CLAIM_LINES[(rng() * CLAIM_LINES.length) | 0], motive: "your car" });
+    if (ok) g.carClaim = "asked";
+    else nf.claimAt = nf.t + 6 + rng() * 6;
+  }
+
   CBZ.aiThink = aiThink;
+  CBZ.prisonStartApproach = startApproach;
   CBZ.aiKill = kill;
   CBZ.aiReset = aiReset;
   CBZ.provokeGang = provokeGang;

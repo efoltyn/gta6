@@ -725,7 +725,7 @@
   const AIM_ELEV_MAX = 0.70;   // rad (~40°) arm pitch clamp (reactions used 0.55; raised for rooftops)
   const AIM_DAMP = 0.0008;     // damp base → ~130ms acquire/release blend (k = 1 - AIM_DAMP^dt)
   const AIM_HOLD = 1.2;        // s the arm holds its aim after the last shot (> max NPC fire cadence)
-  const AIM_SHOULDER_Y = 1.29; // shoulder height above actor.pos.y — character.js collar (1.84 local) × HUMAN_SCALE 0.70 for the shrunk ~1.82m rig (was 1.84, aimed the gun-arm ~0.55m high)
+  const AIM_SHOULDER_Y = 1.25; // shoulder height above actor.pos.y — character.js arm pivot (1.78 local since the TORSO block; was 1.84) × HUMAN_SCALE 0.70 for the shrunk ~1.82m rig (was 1.84, aimed the gun-arm ~0.55m high)
   const RA_BASE = -1.45, RA_BASE_LONG = -1.50, LA_BASE_LONG = -1.20; // MUST match actorweapons setReadyPose
   // per-slot tracer spread half-angle (rad); table lives with the weapon data
   const SPREAD_DEF = { pistol: 0.065, rifle: 0.040, auto: 0.090, long: 0.075, utility: 0.055, _def: 0.055 };
@@ -1343,7 +1343,7 @@
     // otherwise be a silent dud.
     if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
       CBZ.detonate(x, CBZ.blastSeatY ? CBZ.blastSeatY(x, z) : 1.0, z, "grenade", { byPlayer: true });
-    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
+    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true, kind: "grenade" });
     if (CBZ.cityShatter) CBZ.cityShatter(x, z, GREN.radius + 2);
     if (CBZ.shake) CBZ.shake(1.2);
     if (CBZ.doHitstop) CBZ.doHitstop(0.05);
@@ -1388,10 +1388,13 @@
   };
 
   // PLAYER throw: consume one carried grenade, lob it from the hand along the aim.
-  function throwGrenade() {
+  // opts.power (0.45..1, systems/helditems.js: how long the throw was wound
+  // up) scales the launch; no opts = the full-strength [G] quick throw.
+  function throwGrenade(opts) {
+    const pw = (opts && opts.power > 0) ? Math.min(1, opts.power) : 1;
     if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
     if ((P.stun || 0) > 0) return;
-    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades, buy them at the gun shop", 1.4); return; }
+    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades", 1.4); return; }
     if (live.length >= GREN.maxLive) return;
     if (!(CBZ.cityEcon && CBZ.cityEcon.take && CBZ.cityEcon.take("Grenade"))) return;
     const dir = aimVec();
@@ -1399,7 +1402,7 @@
     const ox = P.pos.x + dir.x * 0.6;
     const oz = P.pos.z + dir.z * 0.6;
     const oy = P.pos.y + 1.55;
-    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, {});
+    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, { speed: GREN.speed * pw, up: GREN.up * (0.6 + 0.4 * pw) });
     syncGrenadeHud();
     if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // a quick throwing arm swing
     throwCD = GREN.throwCD;

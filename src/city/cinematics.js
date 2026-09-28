@@ -351,7 +351,7 @@
     const beaconAt = toWorld(0, 0, 3.2);
     makeBeacon(beaconAt.x, beaconAt.z, 0xd9a441);
     officeCtx = { anchor, boss, fy, toWorld, trigger: beaconAt };
-    notify("BLOCKED NUMBER", "Sal Vetti is asking for you in person. The gold light marks the room. Come unarmed or don't come.");
+    notify("BLOCKED NUMBER", "Sal Vetti wants you in person. Come unarmed or don't come.");
     return true;
   }
 
@@ -392,7 +392,7 @@
       {
         dur: 1.6,
         cam: { pos: W(6.4, 4.4, 7.2), look: bossHead },
-        enter() { notify("SAL VETTI", "The car is marked. FRONT seat. Don't keep the driver waiting."); },
+        enter() { notify("SAL VETTI", "Car's out front. FRONT seat. Don't keep the driver waiting."); },
       },
     ];
   }
@@ -528,7 +528,7 @@
           const w = seatWorld(car, seatLocal.frontP);
           ctx.shadow = spawnActor("a stranger", w.x, w.z, { archetype: "professional", armed: true });
           if (ctx.shadow) seatRig(ctx.shadow, car, seatLocal.frontP);
-          say(driver, "Smart. Front seat's for men who don't look behind.");
+          say(driver, "Huh. Suit yourself.");
         },
       },
       { // the shooter turns; the muzzle rests on the seat-back. a long beat.
@@ -536,13 +536,12 @@
         cam: () => carCamera(car, -0.42, 1.2, -0.78, -0.42, 1.15, 0.42),
         enter(ctx) {
           if (ctx.shadow && ctx.shadow.group) ctx.shadow.group.rotation.y = car.heading + Math.PI;
-          say(ctx.shadow, "Back seat, you're hired. Front seat, well.");
         },
       },
       { // pull out; you live
         dur: 2.4, cut: true, hideRig: false,
         cam: () => carCamera(car, 6.0, 2.6, -4.2, 0, 1.0, 0),
-        enter() { say(driver, "Vetti pays for instincts. Get out."); },
+        enter() { say(driver, "Out. He'll call you."); },
       },
     ];
   }

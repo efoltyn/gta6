@@ -136,7 +136,7 @@
     CBZ.refreshInventory();
     el.bar.style.width = "0%";
     el.vignette.style.boxShadow = "inset 0 0 200px 40px rgba(220,30,40,0)";
-    CBZ.setObjective(role === "cop" ? "Patrol the block, break up fights, and raid the armory." : "Plan your escape. The plan panel lists every route and its next step.");
+    CBZ.setObjective(role === "cop" ? "Patrol the block." : "");   // nobody tells you the way out (owner, 2026-09-28)
 
     const spawn = role === "cop" ? CBZ.COP_SPAWN : CBZ.SPAWN;
     player.pos.copy(spawn); player.vy = 0; player.grounded = true;

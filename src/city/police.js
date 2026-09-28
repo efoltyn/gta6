@@ -710,9 +710,9 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    copSay(cop, STOP.susp >= 2.2 ? "You again. Walk off and I call it in."
+    copSay(cop, STOP.susp >= 2.2 ? "You again. Last warning."
       : STOP.susp >= 1.2 ? "You again? Put that away."
-      : "Hey! Hold up, is that a firearm? Put it away.", 2.4);
+      : "Hey! Is that a gun? Put it away.", 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -752,7 +752,7 @@
       endStop(false);
       return;
     }
-    copSay(c, "Walking away from me with that thing out. Noted.", 1.7);
+    copSay(c, "I got your face. Remember that.", 1.7);
     endStop(true);
   }
 
@@ -772,7 +772,7 @@
     const c = STOP.cop;
     if (c) c._stopRefused = 0;                       // you did what he asked — the ledger clears
     stowGuns();
-    copSay(c, "Good. Stay out of trouble.", 2.2);
+    copSay(c, "Good. Have a nice day.", 2.2);
     if (c) { c._gunLowered = true; }
     endStop(true);
   }
@@ -870,7 +870,7 @@
         const r = BA.step(c, dt, _stopSt);
         if (K.outcome === "released") { endStop(true); return; }
         if (r && (r.phase === "escalate" || r.phase === "force" || r.phase === "lethal")) {
-          copSay(c, "That's it. Suspect refusing to disarm!", 2.0);
+          copSay(c, "Armed subject, not complying! Send units!", 2.0);
           if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
           c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
           return;
@@ -1790,7 +1790,7 @@
     if (c.pos.y > surf + 1.3) return;
     const ix = c.pos.x, iz = c.pos.z, iy = surf + 1.0;
     const onRoof = surf > ground + 0.5;
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ix, iz, { power: onRoof ? 1.9 : 1.5, radius: onRoof ? 9 : 7, byPlayer: false, y: iy }); } catch (e) {} }
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ix, iz, { power: onRoof ? 1.9 : 1.5, radius: onRoof ? 9 : 7, byPlayer: false, y: iy, kind: "aircraft" }); } catch (e) {} }
     if (onRoof && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(ix, iy, iz, 2.2); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(ix, iz, onRoof ? 12 : 8); } catch (e) {} }
     if (!onRoof && CBZ.cityScorch) { try { CBZ.cityScorch(ix, iz, 4.5); } catch (e) {} }   // burnt ground under the wreck
@@ -2278,7 +2278,14 @@
         CBZ.gore(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, { dir, amount: imp && imp.headshot ? 1.3 : 1.0, head: !!(imp && imp.headshot), player: false });
       }
       let copRagged = false;
-      if (CBZ.cityRagdoll && imp) {
+      // ONLY WHAT THROWS A BODY GETS THE LIMP VERLET ONE (a car, a blast: the
+      // callers that pass a fling). A shot officer collapses in the one fall
+      // (systems/bodyfall.js via the knockdown below), legs first, no spin.
+      // (a round carries a fling too, for the old tumble; only a point-blank
+      // shotgun blast counts as a launch among shots)
+      const copShot = !!(imp && (imp.wkey || imp.shot || imp.cal || imp.point));
+      const copLaunch = !!(imp && imp.fling != null && imp.fling > 0 && (!copShot || imp.fling >= 6));
+      if (CBZ.cityRagdoll && imp && copLaunch) {
         let rx, ry, rz;
         if (imp.dir) { rx = imp.dir.x || 0; ry = imp.dir.y || 0; rz = imp.dir.z || 0; }
         else if (imp.fromX != null) { rx = cop.pos.x - imp.fromX; ry = 0; rz = cop.pos.z - imp.fromZ; }
@@ -2288,7 +2295,13 @@
         const mag = Math.max(4.5, Math.min(18, rawForce * (imp.headshot ? 1.18 : 1)));
         copRagged = CBZ.cityRagdoll(cop, imp.point || null, { x: rx / rl, y: ry / rl, z: rz / rl }, mag);
       }
-      if (CBZ.body && !copRagged) {
+      if (CBZ.body && !copRagged && !copLaunch && CBZ.body.knockdown) {
+        let kx = 0, kz = 0;
+        if (imp && imp.dir) { kx = imp.dir.x || 0; kz = imp.dir.z || 0; }
+        else if (imp && imp.fromX != null) { kx = cop.pos.x - imp.fromX; kz = cop.pos.z - imp.fromZ; }
+        if (kx * kx + kz * kz < 1e-8) { const yw = cop.group ? cop.group.rotation.y : 0; kx = -Math.sin(yw); kz = -Math.cos(yw); }
+        CBZ.body.knockdown(cop, { dir: { x: kx, z: kz }, force: imp && imp.force != null ? imp.force : 6, t: 9999 });
+      } else if (CBZ.body && !copRagged) {
         if (imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ,
           dir: imp.dir, force: imp.force != null ? imp.force : 7,
           // An explicit zero is nuclear horizontal drag, not a request for the
@@ -3300,7 +3313,7 @@
         // a corpse across the map costs no draw call while it waits for EMS.
         else if (!c.culled && c.group) {
           const cdx = c.pos.x - camx, cdz = c.pos.z - camz;
-          c.group.visible = cdx * cdx + cdz * cdz < 95 * 95;
+          c.group.visible = cdx * cdx + cdz * cdz < 200 * 200;   // a body you shot at range stays drawn
         }
         continue;
       }
@@ -3425,7 +3438,7 @@
         const h = LAW.heard(c);
         if (h) {
           goSearch(c, h);
-          copBark(c, h.kind === "gunshot" ? ["Shots fired! Moving.", "That was gunfire."] : ["What was that?"]);
+          copBark(c, h.kind === "gunshot" ? ["Shots fired! Moving.", "That was gunfire.", "Shots fired, I need units."] : ["What was that?", "Hey. What's going on over there?"]);
         }
       }
 
@@ -3740,9 +3753,9 @@
           if (dd > 2.4 && D.hold == null) { stepTo(c, ddx, ddz, c.baseSpeed * 0.85, dt, near); continue; }
           if (D.hold == null) {
             D.hold = 2.6;
-            copBark(c, D.kind === "corpse" ? ["Step back, this is a scene now.", "Nothing to see here. Keep it moving."]
-              : D.kind === "brawl" ? ["HEY! Break it up. NOW.", "Hands off each other. Walk away."]
-                : ["You can't camp here. Move along.", "Off the block. There's a shelter east side."]);
+            copBark(c, D.kind === "corpse" ? ["Step back. This is a scene now.", "Back up. Behind the car.", "Nobody touches anything."]
+              : D.kind === "brawl" ? ["HEY! Break it up. NOW.", "Hands off each other. Walk away.", "You want to go to jail? Keep going."]
+                : ["You can't sleep here. Move along.", "Come on, up. Let's go.", "Don't make me come back."]);
             disperse(c, p.pos.x, p.pos.z, D.kind);
           }
           D.hold -= dt;

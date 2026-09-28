@@ -727,11 +727,12 @@
 
   function makeBot(x, z, taken, idx) {
     const top = pick(TOPS), skin = pick(SKIN);
-    const ch = CBZ.makeCharacter({
+    const lookOpts = {
       legs: pick(LEGS), torso: top, collar: top, arms: top,
       skin: skin, hair: pick(HAIR), shoes: rand() < 0.5 ? 0x1f1d1b : 0x3a3129,
       beard: rand() < 0.3 ? pick(["stubble", "full", "goatee"]) : undefined,
-    });
+    };
+    const ch = CBZ.makeCharacter(lookOpts);
     ch.group.position.set(x, mapFloor(x, z), z);
     ch.group.rotation.y = rand() * 6.28;
     const name = pickName(taken);
@@ -754,7 +755,7 @@
       strafe: rand() < 0.5 ? 1 : -1, strafeT: 0,
       fireCD: 0.8 + rand() * 1.0, burst: 0, meleeCD: 0,
       thinkT: rand() * 0.2, spawnT: 1.2, respawnT: 0, _hpSeen: 100,
-      mode: "hunt",
+      mode: "hunt", _lookOpts: lookOpts,
     };
     // a third of the roster wears plates + helmet, a third a soft vest: pure
     // costume (nothing in this mode reads the armour pool), pooled meshes
@@ -810,6 +811,7 @@
       i = CBZ.npcs.indexOf(b); if (i >= 0) CBZ.npcs.splice(i, 1);
     }
     gg.bots.length = 0;
+    if (CBZ.corpses) CBZ.corpses.clear("gungame");   // the match is over: its dead go with it
   }
   function resetBrain(b) {
     b.foe = null; b.foeSeen = false; b.lostT = 99; b.react = 0; b.track = 0;
@@ -818,8 +820,28 @@
     b.path = null; b.pathI = 0; b.pathGoal = null; b.repathT = 0; b.stuckT = 0;
     b.mode = "hunt"; b.meleeCD = 0; b.burst = 0;
   }
+  /* THE BODY STAYS WHERE HE FELL. A respawn used to teleport the same rig
+     to a spawn point, so the man you shot vanished off the floor three seconds
+     later. Now the dead rig is handed to the corpse keeper (it lies there under
+     the corpse law: never on screen, never within 60 m, oldest first past the
+     cap) and the bot comes back in a fresh body of the same look. */
+  function freshBody(b) {
+    if (!CBZ.corpses || !b.char || !b._lookOpts) return false;
+    const root = curMap().root() || CBZ.scene;
+    CBZ.corpses.keep(b, { tag: "gungame" });
+    if (b._weaponProp && b._weaponProp.parent) b._weaponProp.parent.remove(b._weaponProp);
+    b._weaponProp = null; b._weaponPropId = null;
+    b._armorMeshes = null;                           // they lie on the corpse now
+    const ch = CBZ.makeCharacter(b._lookOpts);
+    b.char = ch; b.group = ch.group; b.pos = ch.group.position;
+    b._phys = null; b._mv = null;
+    root.add(ch.group);
+    if (b._armorKit && b._armorKit.length && CBZ.cityArmorDressPed) { try { CBZ.cityArmorDressPed(b, b._armorKit); } catch (e) { /* armour off */ } b._armor = 0; }
+    return true;
+  }
   function respawnBot(b) {
     const p = spawnPoint(b);
+    freshBody(b);
     b.dead = false; b.hp = 100; b._hpSeen = 100; b.ko = 0; b.respawnT = 0;
     b.pos.set(p.x, mapFloor(p.x, p.z), p.z);
     b.lastX = p.x; b.lastZ = p.z;
@@ -864,11 +886,14 @@
     }
     const kp = kRec === "player" ? CBZ.player.pos : (kRec ? kRec.pos : null);
     dropBotGun(b, kp ? kp.x : null, kp ? kp.z : null);
+    // HE FALLS, HE IS NOT LAUNCHED: the one collapse (systems/bodyfall.js via
+    // grapple's knockdown), along the round, legs first. The old fling threw
+    // every dead bot into the air spinning on two axes.
     if (CBZ.body) {
-      if (kp) CBZ.body.hit(b, { fromX: kp.x, fromZ: kp.z, force: 6 + rand() * 3, fling: 4 + rand() * 3 });
+      if (kp) CBZ.body.knockdown(b, { fromX: kp.x, fromZ: kp.z, force: 6 + rand() * 3, t: 9999 });
       else {
-        const a = rand() * 6.28;
-        CBZ.body.hit(b, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 2.5 + rand() * 3, fling: 4 + rand() * 3 });
+        const yw = b.group ? b.group.rotation.y : 0;
+        CBZ.body.knockdown(b, { dir: { x: -Math.sin(yw), z: -Math.cos(yw) }, force: 1, t: 9999 });
       }
     }
     if (CBZ.gore) CBZ.gore(b.pos.x, b.pos.y + 1.0, b.pos.z, { amount: melee ? 0.4 : 0.95, cloth: b.outfit, skin: b.skin });

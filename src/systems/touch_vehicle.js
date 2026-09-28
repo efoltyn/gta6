@@ -496,13 +496,8 @@
       h += pill("tvBomb", "BOMB", "tv-big tv-warn");
       h += pill("tvPay", "PAYLOAD", "tv-sm");
     }
-    // THE GETAWAY BOOM. explosives.js is explicit that hold-[B] detonates
-    // "from a car, so the drive-away bomb actually plays" — and body.tveh-on
-    // hides the on-foot cluster that carries the touch bomb button, so in the
-    // driver's seat a thumb had no path to the one verb the plan ends on.
-    // Worded, not a glyph: this rail is the verb-pill vocabulary, and DETONATE
-    // is the word. Hidden until charges are actually out (refreshAux).
-    if (drv || boat) h += pill("tvBoom", "DETONATE", "tv-sm tv-warn");
+    // (the DETONATE pill is gone: the detonator is a held object now, and the
+    // phone keeps its own DETONATE for the getaway boom from a car)
     auxWrap.innerHTML = h;
     const q = (id) => auxWrap.querySelector("#" + id);
     // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
@@ -535,7 +530,6 @@
     // reimplementing a faster, more dangerous copy of it. holdFn registers
     // the release, so blur/app-switch lands the keyup a lost touchend never
     // sends and the hold can never wedge armed.
-    if (q("tvBoom")) holdFn(q("tvBoom"), (down) => { if (CBZ.touchKeyHold) CBZ.touchKeyHold("b", down); });
   }
 
   // Is the touch vehicle layer currently OWNING the bottom-right instrument
@@ -733,12 +727,6 @@
       if (lab !== lastPay) { lastPay = lab; pb.textContent = lab; }
       pb.classList.toggle("tv-warn", !!flash || (pay.count | 0) <= 0);
     }
-    // DETONATE: only while charges are actually out there. cityC4Planted is
-    // the module's own count — when a mode without the blast capability clears
-    // the field, or the last charge fires, the count hits zero and the pill
-    // stands down on the next tick with no second source of truth.
-    const bm = auxWrap.querySelector("#tvBoom");
-    if (bm) show(bm, !!(CBZ.cityC4Planted && CBZ.cityC4Planted() > 0 && CBZ.cityC4Detonate));
   }
 
   // ---- key pump: held buttons win over a released stick ---------------------

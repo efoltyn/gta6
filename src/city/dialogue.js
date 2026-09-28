@@ -326,22 +326,22 @@
     const r = gv.row;
     const pay = r.pay > 0 ? money(r.pay) : "no pay, all name";
     const line = m.declines > 0
-      ? "“Still open: " + r.title + ". " + pay + ". Door won't stay open forever.”"
+      ? "Still open. " + r.title + ", " + pay + "."
       : gv.org === "gang"
         ? pick(["“Set's got work. " + r.title + ", " + pay + ". You in or out?”",
-                "“Been waiting on somebody solid. " + r.title + ". " + pay + " when it's done.”"])
-        : pick(["“Ops flagged you. " + r.title + ", " + pay + ". Taking it?”",
-                "“Garrison needs a body for " + r.title.toLowerCase() + ". " + pay + ". You want it?”"]);
+                "I need somebody solid. " + r.title + ", " + pay + "."])
+        : pick(["Got something. " + r.title + ", " + pay + ".",
+                "We're short a man. " + r.title + ", " + pay + "."]);
     return {
       id: "job", line: line,
       a: {
         label: pick(["I'm in", "Deal me in", "Say less"]),
-        closer: "“Knew you would.”",
+        closer: "Knew you would.",
         deferred: true,                    // the handshake: take at the beat's end
         run: function () {
           if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
           const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(r.id) : null;
-          if (!started || started.inert) { sayP(p, "“Hold up, it fell through. Another time.”", "#cfd6e6"); return false; }
+          if (!started || started.inert) { sayP(p, "Hold up, it fell through. Another time.", "#cfd6e6"); return false; }
           routed++;
           contactAdd(p, "work", gv.org);
           return true;
@@ -349,7 +349,7 @@
       },
       b: {
         label: pick(["Not my thing", "Pass", "Find someone else"]),
-        closer: "“Your loss.”",
+        closer: "Your loss.",
         mem: function () { m.declines++; m.lastDay = day(); relShift(p, "snubbed", 0.4); },
       },
     };
@@ -358,25 +358,25 @@
   function intentTrade(p, m, row) {
     const j = jobKey(p);
     const LINES = {
-      doctor: "“You look rough. Sit down, let me look at that.”",
-      nurse: "“That needs cleaning before it needs anything else.”",
-      paramedic: "“Hey, you bleeding? Sit down a second.”",
-      bartender: "“Long day? I pour for long days.”",
-      "line cook": "“Kitchen's hot and the plate's honest.”",
-      "personal trainer": "“You move like you sit all day. I can fix that.”",
-      barber: "“That lineup's a week past due, friend.”",
-      farmer: "“Fresh off the field this morning. Interested?”",
-      fisherman: "“Caught this morning. You won't find fresher.”",
-      courier: "“Got runs stacked up and one pair of legs. You want one?”",
-      chauffeur: "“Car's warm. Beats walking.”",
+      doctor: "You look rough. Sit down, let me look at that.",
+      nurse: "That needs cleaning. Sit.",
+      paramedic: "Hey, you bleeding? Sit down a second.",
+      bartender: "Long day? I pour for long days.",
+      "line cook": "Kitchen's open. You hungry?",
+      "personal trainer": "You sit all day, huh? I can fix that.",
+      barber: "That lineup's a week past due, friend.",
+      farmer: "Picked this morning.",
+      fisherman: "Caught this morning.",
+      courier: "More runs than legs today. Want one?",
+      chauffeur: "Car's warm. Beats walking.",
     };
-    const line = LINES[j] || "“You need something? This is what I do all day.”";
+    const line = LINES[j] || "You need something?";
     return {
       id: "trade", line: line,
-      a: { poolId: "rv-role", closer: "“Smart.”", fallback: { label: "Alright", run: function () { meet(p); relShift(p, "greeted", 0.4); } } },
+      a: { poolId: "rv-role", closer: "Smart.", fallback: { label: "Alright", run: function () { meet(p); relShift(p, "greeted", 0.4); } } },
       b: {
         label: pick(["Just passing through", "Maybe later"]),
-        closer: "“Suit yourself.”",
+        closer: "Suit yourself.",
         mem: function () { relShift(p, "greeted", 0.15); },
       },
     };
@@ -385,11 +385,11 @@
   function intentScore(p, m) {
     return {
       id: "score",
-      line: pick(["“You looking? I got you.”", "“Walk with me. You need something, I'm holding.”"]),
-      a: { poolId: "rv-score", bad: true, fallback: { label: "Show me", run: function () { sayP(p, "“Not here. Come back.”", "#cfd6e6"); } } },
+      line: pick(["You looking? I got you.", "Walk with me. You need something, I'm holding."]),
+      a: { poolId: "rv-score", bad: true, fallback: { label: "Show me", run: function () { sayP(p, "Not here. Come back.", "#cfd6e6"); } } },
       b: {
         label: pick(["I'm good", "Not tonight"]),
-        closer: "“Then keep it moving.”",
+        closer: "Then keep it moving.",
         mem: function () { relShift(p, "snubbed", 0.2); },
       },
     };
@@ -397,32 +397,32 @@
 
   function intentStreet(p, m, o) {
     const LINE = {
-      tribute: "“Whoa, easy. Take it. We're square, right?”",
-      tax: "“Toll's a toll. Everybody pays on this block.”",
-      handout: "“You look like the floor's been winning. Here.”",
-      charity: "“Spare something? Anything helps out here.”",
+      tribute: "Whoa, easy. Take it. We're square, right?",
+      tax: "Toll's a toll. Everybody pays on this block.",
+      handout: "You look rough. Here.",
+      charity: "Spare something? Anything helps out here.",
     };
     const b = (o.kind === "tax")
       ? {
           label: "I'm not paying", bad: true,
-          closer: "“Remember that.”",
+          closer: "Remember that.",
           mem: function () {
             relShift(p, "snubbed", 1);
             // refusing the toll can go physical — if THEY dare (sizeup, not a coin flip)
             const pa = playerActor();
             if (CBZ.citySizeUp && pa && CBZ.citySizeUp(p, pa) && Math.random() < 0.35) {
               p.rage = pa; p.state = "fight"; p.fear = 0;
-              sayP(p, "“Wrong answer.”", "#ff8a7a");
+              sayP(p, "Wrong answer.", "#ff8a7a");
             }
           },
         }
       : (o.kind === "tribute")
-        ? { label: "Keep your money", closer: "“…thanks? Okay.”", mem: function () { relShift(p, "greeted", 0.3); } }
+        ? { label: "Keep your money", closer: "…thanks? Okay.", mem: function () { relShift(p, "greeted", 0.3); } }
         : (o.kind === "handout")
-          ? { label: "Keep it", closer: "“Respect.”", mem: function () { relShift(p, "greeted", 0.5); } }
-          : { label: "Not today", closer: "“…yeah. Every day's not today.”", mem: function () { const mm = mem(p); mm.declines++; relShift(p, "snubbed", 0.15); } };
+          ? { label: "Keep it", closer: "Respect.", mem: function () { relShift(p, "greeted", 0.5); } }
+          : { label: "Not today", closer: "…yeah. Every day's not today.", mem: function () { const mm = mem(p); mm.declines++; relShift(p, "snubbed", 0.15); } };
     return {
-      id: "street", line: LINE[o.kind] || "“Got a second?”",
+      id: "street", line: LINE[o.kind] || "Got a second?",
       a: { poolId: "street-offer", fallback: { label: "Alright", run: function () { meet(p); relShift(p, "greeted", 0.3); } } },
       b: b,
     };
@@ -431,15 +431,15 @@
   function intentFavor(p, m) {
     const ASK = 8 + ((pedHash(p, 0xFA) * 10) | 0);
     const line = m.helped > 0
-      ? "“You again, you're one of the good ones. Anything spare?”"
-      : pick(["“Brother, anything helps. Even a few bucks.”", "“Haven't eaten since yesterday. Anything spare?”"]);
+      ? "You again. Anything spare?"
+      : pick(["Brother, anything helps.", "Haven't eaten since yesterday. Anything spare?"]);
     return {
       id: "favor", line: line,
       a: {
         label: "Here you go " + money(ASK),
-        closer: "“God bless. For real.”",
+        closer: "God bless. For real.",
         run: function () {
-          if (!spend(ASK)) { sayP(p, "“…you're broke too, huh. City's eating everybody.”", "#cfd6e6"); return; }
+          if (!spend(ASK)) { sayP(p, "…you're broke too, huh. City's eating everybody.", "#cfd6e6"); return; }
           if (p.cash != null) p.cash = (p.cash | 0) + ASK;
           m.helped++; relShift(p, "gift", 1); addRespect(1);
           if (CBZ.sfx) CBZ.sfx("coin");
@@ -448,7 +448,7 @@
       },
       b: {
         label: pick(["Not today", "Can't help you"]),
-        closer: "“…yeah. Heard that one.”",
+        closer: "…yeah. Heard that one.",
         mem: function () { m.declines++; relShift(p, "snubbed", 0.15); },
       },
     };
@@ -457,7 +457,7 @@
   function intentIntro(p, m, t) {
     return {
       id: "intro",
-      line: "“You move like you're looking for somebody. I know a guy, " + t.what + ".”",
+      line: "I know a guy, " + t.what + ".",
       a: {
         label: "Who?",
         closer: "“Ask for " + t.name + ". You didn't hear it from me.”",
@@ -479,7 +479,7 @@
           }
         },
       },
-      b: { label: "Not looking", closer: "“Everybody's looking for somebody.”", mem: function () { relShift(p, "snubbed", 0.2); } },
+      b: { label: "Not looking", closer: "Everybody's looking for somebody.", mem: function () { relShift(p, "snubbed", 0.2); } },
     };
   }
 
@@ -487,19 +487,19 @@
     const l = p._jobLot;
     const where = (l && l.building && l.building.name) ? l.building.name : null;
     const line = where
-      ? pick(["“Twelve hours at " + where + " and my feet are done talking to me.”",
-              "“" + where + " again tomorrow. Same shift, same pay, same everything.”"])
-      : "“Work's work, but this week's been a war.”";
+      ? pick(["Twelve hours at " + where + ". My feet are done.",
+              where + " again tomorrow. Same shift, same pay."])
+      : "My boss docked me again. For nothing.";
     return {
       id: "gripe", line: line,
       a: {
         label: pick(["That's rough", "You've earned a break"]),
-        closer: "“…thanks for hearing it. Most don't.”",
+        closer: "…thanks for hearing it. Most don't.",
         run: function () { meet(p); relShift(p, "greeted", 0.9); m.warm++; maybeBefriend(p, m); },
       },
       b: {
         label: pick(["We've all got problems", "Tell your boss, not me"]),
-        closer: "“Forget I said anything.”",
+        closer: "Forget I said anything.",
         mem: function () { relShift(p, "snubbed", 0.5); },
       },
     };
@@ -508,12 +508,12 @@
   function intentSocial(p, m) {
     const att = CBZ.cityAttending ? CBZ.cityAttending(p) : null;   // {what, venue} or null
     const line = m.friend
-      ? pick(["“There you are. Still causing trouble?”", "“My guy. What's the word?”"])
+      ? pick(["There you are. Still causing trouble?", "My guy. What's the word?"])
       : (att && att.what)
         ? "“You out for " + att.what + " too? Whole block is.”"
-        : pick(["“Don't know you. That's rare on this block.”",
-                "“Crazy city lately, huh. You holding up?”",
-                "“You've got the look of somebody with a story.”"]);
+        : pick(["Don't know you. That's rare on this block.",
+                "Crazy city lately, huh. You holding up?",
+                "My kid starts school Monday. Can you believe it?"]);
     return {
       id: "social", line: line,
       a: {
@@ -521,12 +521,12 @@
         closer: null,   // maybeBefriend / warmCloser speaks
         run: function () {
           meet(p); relShift(p, "greeted", 0.6); m.warm++;
-          if (!maybeBefriend(p, m)) sayP(p, pick(["“Stay dangerous.”", "“You're alright.”", "“See you around, yeah?”"]), "#cdeccd");
+          if (!maybeBefriend(p, m)) sayP(p, pick(["Stay dangerous.", "You're alright.", "See you around, yeah?"]), "#cdeccd");
         },
       },
       b: {
         label: pick(["We're done here", "Walk on"]),
-        closer: "“Whatever, man.”",
+        closer: "Whatever, man.",
         mem: function () { relShift(p, "snubbed", 0.3); },
       },
     };
@@ -534,8 +534,8 @@
 
   function intentBrushoff(p, m) {
     return {
-      id: "brushoff", line: pick(["“The hell you want?”", "“Keep stepping. This ain't a meet-and-greet.”"]),
-      a: { label: pick(["Easy, wrong guy", "My mistake"]), closer: "“Then move.”", mem: function () { relShift(p, "greeted", 0.1); } },
+      id: "brushoff", line: pick(["The hell you want?", "Keep stepping."]),
+      a: { label: pick(["Easy, wrong guy", "My mistake"]), closer: "Then move.", mem: function () { relShift(p, "greeted", 0.1); } },
       b: {
         label: "Make it my problem", bad: true,
         closer: null,
@@ -546,10 +546,10 @@
           if (CBZ.citySizeUp && pa && !CBZ.citySizeUp(p, pa)) {
             if (CBZ.cityScare) CBZ.cityScare(p, pa, { bias: 0.1 });
             addRespect(1);
-            sayP(p, "“…forget it. Forget it!”", "#cfd6e6");
+            sayP(p, "…forget it. Forget it!", "#cfd6e6");
           } else if (pa) {
             p.rage = pa; p.state = "fight"; p.fear = 0;
-            sayP(p, "“BIG mistake.”", "#ff8a7a");
+            sayP(p, "BIG mistake.", "#ff8a7a");
           }
         },
       },
@@ -557,19 +557,19 @@
   }
 
   function intentCop(c, m) {
-    const line = pick(["“Keep it moving. Nothing to see on this corner.”",
-                       "“Evening. You live around here?”",
-                       "“Quiet night. Let's keep it that way.”"]);
+    const line = pick(["Keep it moving.",
+                       "Evening. You live around here?",
+                       "Quiet night. Let's keep it that way."]);
     return {
       id: "cop", line: line,
       a: {
         label: pick(["You got it, officer", "Just heading home"]),
-        closer: "“Good answer.”",
+        closer: "Good answer.",
         run: function () { meet(c); relShift(c, "greeted", 0.5); },
       },
       b: {
         label: pick(["Don't you have real crimes?", "Quiet for who?"]),
-        closer: "“Keep walking, smart guy.”",
+        closer: "Keep walking, smart guy.",
         mem: function () { relShift(c, "snubbed", 0.8); addRespect(1); c._faceT = 2.0; },
       },
     };
@@ -585,7 +585,7 @@
     else p.friendOfPlayer = true;
     relShift(p, "gift", 1);
     contactAdd(p, "friend");
-    sayP(p, "“You're alright. I mean it. You need me, you know where I am.”", "#cdeccd", 3);
+    sayP(p, "You're alright. I mean it.", "#cdeccd", 3);
     return true;
   }
 
@@ -631,7 +631,7 @@
     if (!silent) {
       if (why === "walkaway") { tailBeat(p, "dlgShrug", 0.8 + Math.random() * 0.3); }
       else if (why === "ignored") {
-        sayP(p, pick(["“…forget it, then.”", "“Right. Good talk.”", "“Hello? …unbelievable.”"]), "#cfd6e6");
+        sayP(p, pick(["…forget it, then.", "Right. Good talk.", "Hello? Unbelievable."]), "#cfd6e6");
         tailBeat(p, "dlgShrug", 0.9);
         p._dlgCD = nowSec() + 60;
       } else if (why === "violence") {
