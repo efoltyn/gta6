@@ -18,7 +18,7 @@
   "use strict";
   const CBZ = window.CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
-  const { mat, addBox, checkerTex, concreteTex } = CBZ;
+  const { addBox } = CBZ;
   // Every flat patch below overlaps another (base under yard, walkway on
   // yard) a centimetre or two apart, which a 0.1..1000 depth range cannot
   // separate past ~50 m: the dark walkway's edges shimmered and stair-stepped
@@ -26,29 +26,24 @@
   const layer = (m, y) => (CBZ.groundLayer ? CBZ.groundLayer(m, y) : m);
   CBZ.CONFIG = CBZ.CONFIG || {};
 
-  // On  -> institutional ground (worn turf / asphalt / painted court).
-  // Off -> the exact checker path this file shipped with, byte for byte:
-  //        same planes, same positions, same repeats, same materials.
-  // Declared HERE rather than in config.js: config.js is a known Edit-race
-  // file and this flag has exactly one owner.
-  if (CBZ.CONFIG.PRISON_GROUND_V2 == null) CBZ.CONFIG.PRISON_GROUND_V2 = true;
-  // Degrade-safe: an older materials.js with no generator falls straight back
-  // to the checker, so this file can never break on a partial merge.
-  const V2 = !!(CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
+  // The checker path (PRISON_GROUND_V2 off) is deleted: git is the undo.
+  // world/materials.js's CBZ.prisonGroundTex is the one ground author.
+  // (world/prisonwings.js still gates its ground on this flag reading true.)
+  CBZ.CONFIG.PRISON_GROUND_V2 = true;
+  const GT = CBZ.prisonGroundTex;
+  if (!GT) return;
 
   // huge base ground so the world continues past the exit gate
   let baseMat;
-  if (V2) {
+  {
     // The country outside the wall was one flat green sheet. Same mean colour
     // (0x4ea84e), now with slow relief in it. ~26 m tile over the 420x520
     // plane — nobody walks here until the gate opens, so the tile is large.
     // 2026-09-27: the city's #57b257 lawn read as mint under the yard fog; a
     // prison's country is rough, dry pasture. Prison-only tones, passed in.
-    const field = CBZ.prisonGroundTex("field-grass", { a: "#6a7a44", b: "#5b6b3a" });
+    const field = GT("field-grass", { a: "#6a7a44", b: "#5b6b3a" });
     field.repeat.set(16, 20);
     baseMat = new THREE.MeshLambertMaterial({ map: field });
-  } else {
-    baseMat = mat(0x4ea84e);
   }
   const base = new THREE.Mesh(new THREE.PlaneGeometry(420, 520), layer(baseMat, -0.02));
   base.rotation.x = -Math.PI / 2;
@@ -57,13 +52,11 @@
   scene.add(base);
 
   // yard grass — worn exercise-yard turf (was: a 4 m checker)
-  const grass = V2
-    ? CBZ.prisonGroundTex("yard-grass", { a: "#6f7f45", b: "#5d6c3a", wear: 0.72 })
-    : checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2);
+  const grass = GT("yard-grass", { a: "#6f7f45", b: "#5d6c3a", wear: 0.72 });
   // 5 -> a 12 m tile across the 60 m yard. The old 15 put a 4 m draughts
   // square under your feet; a mottle needs a tile bigger than the eye's
   // pattern-finding window, not smaller.
-  if (V2) grass.repeat.set(5, 5); else grass.repeat.set(15, 15);
+  grass.repeat.set(5, 5);
   const yard = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 60),
     layer(new THREE.MeshLambertMaterial({ map: grass }), 0)
@@ -99,23 +92,19 @@
   //
   //  The width is PUBLISHED (CBZ.prisonWalkway) because world/southblock.js
   //  draws the other 76 m of the same path and the two must never disagree
-  //  again. Flag off restores the 9 m band and both lane lines exactly.
+  //  again.
   // ============================================================
-  if (CBZ.CONFIG.PRISON_ROAD_FIX == null) CBZ.CONFIG.PRISON_ROAD_FIX = true;
-  const ROADFIX = CBZ.CONFIG.PRISON_ROAD_FIX !== false;
-  const WALK_W = ROADFIX ? 2.8 : 9;
-  CBZ.prisonWalkway = { w: WALK_W, fixed: ROADFIX, legacyW: 9 };
+  const WALK_W = 2.8;
+  CBZ.prisonWalkway = { w: WALK_W, fixed: true, legacyW: 9 };
 
   // central asphalt walkway from the cell door toward the exit
-  const asphalt = V2
-    ? CBZ.prisonGroundTex("asphalt", { a: "#4e5257", b: "#474b50", srgb: true })
-    : checkerTex(CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, 2);
+  const asphalt = GT("asphalt", { a: "#4e5257", b: "#474b50", srgb: true });
   // the tile stays SQUARE as the path narrows — the repeat is derived from the
   // width rather than retyped, so a future width change cannot stretch it.
   // A 6.3 m square tile, the same as every other paving patch (prisonkit's
   // ground()); the old 1 x 20 on a 2.8 m path was a 2.8 x 2.8 tile, the
   // bitumen grain repeated twenty times down the path you walk.
-  if (V2) asphalt.repeat.set(WALK_W / 6.3, 56 / 6.3); else asphalt.repeat.set(2, 12);
+  asphalt.repeat.set(WALK_W / 6.3, 56 / 6.3);
   const path = new THREE.Mesh(
     new THREE.PlaneGeometry(WALK_W, 56),
     layer(new THREE.MeshLambertMaterial({ map: asphalt }), 0.02)
@@ -139,10 +128,8 @@
   // are the wing's own partition greys (world/cellblock.js C_PART_D 0x767f8a
   // shaded down), so the floor reads as the same pour as the walls standing
   // on it rather than a different material laid under them.
-  const ctex = V2
-    ? CBZ.prisonGroundTex("concrete", { a: "#676d75", b: "#5c626a", wear: 0.10, crack: 0 })
-    : concreteTex("#6e7682", "#3b424c");
-  if (V2) ctex.repeat.set(Math.round(32 / 6.3), Math.round(36 / 6.3)); else ctex.repeat.set(8, 9);
+  const ctex = GT("concrete", { a: "#676d75", b: "#5c626a", wear: 0.10, crack: 0 });
+  ctex.repeat.set(Math.round(32 / 6.3), Math.round(36 / 6.3));
   const cell = new THREE.Mesh(
     new THREE.BoxGeometry(32, 0.1, 36),
     new THREE.MeshLambertMaterial({ map: ctex })
@@ -160,8 +147,7 @@
   //  (props.js's hoop at -28,14; the 9 m walkway; the yard walls in
   //  config.js's CBZ.WORLD.northYard, x[-30,30] z[-8,52]).
   // ============================================================
-  if (V2) {
-    const PAINT = 0xc9c5b8;   // worn white: sun-bleached, walked on
+  {
     const YEL = 0xb9a052;     // worn safety yellow, not a fresh tin
     // y = 0.04 (a 0.02 slab, so 0.03..0.05): clear of the yard plane (0) and
     // of the walkway/court pad (0.01). The height southblock.js already paints
@@ -176,16 +162,6 @@
     // z[6,22]): a hoop and a painted key stood INSIDE the dining room. The
     // lower yard (world/southblock.js) and the recreation yard (world/
     // prisongrounds.js) have the prison's real courts. Deleted 2026-09-27.
-
-    // ---- walkway edge lines ------------------------------------------------
-    // ONLY on the legacy 9 m band. A continuous white line down each side of a
-    // nine-metre bitumen strip is the marking that made this read as a road;
-    // with PRISON_ROAD_FIX on, the kerb above does the job that paint was
-    // failing to do, and no lane markings are drawn inside a prison at all.
-    if (!ROADFIX) {
-      paint(-4.15, 24, 0.14, 55, PAINT);
-      paint(4.15, 24, 0.14, 55, PAINT);
-    }
 
     // ---- the dead line -----------------------------------------------------
     // The painted limit an inmate may not cross. The WEST wall is the

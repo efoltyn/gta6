@@ -16,8 +16,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || !CBZ.addBox || !CBZ.scene) return;
-  const { addBox } = CBZ;
+  if (!CBZ || !CBZ.scene) return;
 
   // `cushion` = cushion top above the floor (propuse's 7th `geom` argument).
   // LOAD ORDER: this file parses before world/roombuild.js defines
@@ -35,7 +34,7 @@
   // A slatted bench flush to the west (bs -1) or east (bs +1) wall, long axis
   // along z, facing into the yard. The seat is solid (real cover).
   function bench(x, z, bs) {
-    const len = 2.6, seatH = 0.5;
+    const len = 2.6;
     const face = bs < 0 ? Math.PI / 2 : -Math.PI / 2;
     const F = CBZ.furnish;
     let r = null, drew = false;
@@ -47,16 +46,12 @@
       for (const s of r.seats) if (s) seatAnchor(s.x, s.z, s.face != null ? s.face : (s.yaw != null ? s.yaw : face), s.cushion);
       return;
     }
-    if (!drew) {
-      addBox(x, seatH, z, 0.6, 0.16, len, 0xa9742f, { solid: true });                       // seat
-      addBox(x + 0.24 * bs, seatH + 0.45, z, 0.1, 0.5, len, 0x8a5e2b, { cast: false });     // backrest
-      addBox(x, seatH / 2, z - len / 2 + 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false }); // legs
-      addBox(x, seatH / 2, z + len / 2 - 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false });
-    }
+    // (no furniture kit: no bench. The four-box stand-in is deleted.)
+    if (!drew) return;
     for (const dz of [-0.7, 0.7]) seatAnchor(x, z + dz, face, 0.58);
   }
 
   bench(-28.6, 4, -1);
   bench(-28.6, 38, -1);
-  bench(28.6, 20, 1);
+  bench(28.6, 14, 1);          // z 20 stood the solid bench in the east yard gate (z 19..25)
 })();

@@ -37,7 +37,7 @@
    where a building's services go: the kitchen extract, the laundry/workshop
    riser, the staff side, and the one maintenance crawl the cell wing already
    has an alcove for (world/cellblock.js's WEST_ROW leaves a utility recess at
-   z = -31 precisely so this route can never be locked away).
+   z[-34.5,-30.9] precisely so this route can never be locked away).
 
      T1  Cell Block utility alcove  <->  Armory duct        (the gun-room spine)
      T2  Kitchen extract            <->  Staff lounge riser
@@ -51,8 +51,22 @@
    junction would have to ask you which way to go — and a menu inside a
    crawlspace is a UI, not a place.
 
-   REVERT: CBZ.CONFIG.PRISON_VENTS_V2 = false restores the original four
-   hard-coded grates, byte for byte, exit-point bug included.
+   THE GRILLE (2026-09-28). The mesh used to stand 16 cm PROUD of the wall
+   (its centre pushed along the INWARD normal, i.e. into the room) with a
+   black "throat" box 30 cm out in front of it: from inside the room it read
+   as a black 1 m cube parked against the wall. Now it is a real return-air
+   grille set in the wall: a 12 mm steel frame, a dark void plane a hair off
+   the masonry, angled louvre blades and four screws, merged by the kit.
+   THE GRILLE COMES OFF (2026-09-28, owner: "vents, and the buttons to jump
+   into vents are also dumb"). The louvre panel is its own mesh now, held by
+   its four screws: systems/interactions.js unscrews it with a blade (or
+   wrenches it off by hand, slowly and loudly) and it is set down leaning
+   on the wall beside the opening, which is left as a dark 1.1 x 0.8 m duct
+   mouth a man fits through. vent.cover = {open, set(v)} is that state;
+   vent.mouth = {kind:"wall", x, z, nx, nz, y, sill} is the opening the crawl
+   drives the body into. The crawl itself (a prone crawl in, a stretch of
+   real duct, a crawl out of the far grille) is CBZ.ventDuct below plus the
+   driver in systems/interactions.js; there is no fade and no teleport card.
    Ratchet: CBZ.ventAudit() — `anchored` (grates solved off a real room rect)
    may only go UP, and `outsideDest` (crawl points that do not land inside the
    room they are named after) is pinned at 0.
@@ -62,51 +76,10 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.scene) return;
   const scene = CBZ.prisonRoot || CBZ.scene;
-  const { addBox } = CBZ;
-
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_VENTS_V2 == null) CBZ.CONFIG.PRISON_VENTS_V2 = true;
 
   CBZ.vents = CBZ.vents || [];   // world/prisonkit.js's tower ladders are vents too, registered before this parses
   const solved = [];        // every grate this file placed, for the audit
-
-  /* ----------------------------------------------------------
-     LEGACY — the original file, kept callable so the flag is a true
-     one-line revert and the before-state stays inspectable.
-     ---------------------------------------------------------- */
-  function buildLegacy() {
-    function makeGrate(x, y, z, ax, name) {
-      const w = ax === "x" ? 0.1 : 1.2;
-      const d = ax === "x" ? 1.2 : 0.1;
-      addBox(x, y, z, w, 1.2, d, 0x515a66, { solid: false, cast: false });
-      for (let i = -2; i <= 2; i++) {
-        const sx = ax === "x" ? x : x + i * 0.22;
-        const sz = ax === "x" ? z + i * 0.22 : z;
-        addBox(sx, y, sz, ax === "x" ? 0.12 : 0.14, 1.0, 0.08, 0x1a1d22, { cast: false });
-      }
-      const vent = {
-        x: x + (ax === "x" ? (x < 0 ? 1.2 : -1.2) : 0),
-        z: z + (ax === "z" ? (z < 0 ? 1.2 : -1.2) : 0),
-        y: 0.1, name: name, dest: null,
-      };
-      CBZ.vents.push(vent);
-      return vent;
-    }
-    const cellVent = makeGrate(-15.4, 0.8, -31, "x", "Cell Block Aisle");
-    const armoryVent = makeGrate(18.6, 0.8, -4.5, "x", "Locked Armory");
-    cellVent.dest = armoryVent; armoryVent.dest = cellVent;
-    const cafeVent = makeGrate(-18.6, 0.8, 8.5, "x", "Mess Hall");
-    const loungeVent = makeGrate(18.6, 0.8, 41.5, "x", "Staff Lounge");
-    cafeVent.dest = loungeVent; loungeVent.dest = cafeVent;
-  }
-
-  if (CBZ.CONFIG.PRISON_VENTS_V2 === false) {
-    buildLegacy();
-    CBZ.ventAudit = function () {
-      return { v2: false, vents: CBZ.vents.length, anchored: 0, outsideDest: 0, hubs: 0, rooms: 0, refused: 0 };
-    };
-    return;
-  }
+  const K = CBZ.prisonKit || null;
 
   /* ==========================================================
      1. THE ROOMS. Shell records first (they carry the door, which is the one
@@ -156,14 +129,13 @@
         S = +z, W = -x, E = +x) and `at` is the coordinate ALONG that wall.
         Everything else — plane, facing, crawl point — is derived.
      ========================================================== */
-  const GH = 1.05;              // grate height (a duct a man crawls, not a door)
+  const GH = 0.90;              // grate height (a duct a man crawls, not a door)
   const GW = 1.20;              // grate width
-  const GY = 0.62;              // centre height: LOW on the wall, where a duct is
+  const GY = 0.66;              // centre: sill clear of the skirting (0.16), head under the dado rail (1.26)
   const IN = 1.35;              // how far inside the room the crawl point lands
-  const WT = 0.16;              // how deep the grate sits into the masonry
+  const FW = 0.05, FD = 0.02, P = 0.01;   // grille flange width/depth; P: clear of a room dado
 
-  const C_FRAME = 0x515a66, C_SLAT = 0x1a1d22, C_SCREW = 0x8b95a1;
-
+  const C_FRAME = 0x6b737c, C_VOID = 0x0b0d10;
   // the inward normal + the wall plane for one side of a rect
   function wall(room, side) {
     if (side === "W") return { px: +room.x0, pz: null, nx: 1, nz: 0, along: "z", a0: +room.z0, a1: +room.z1 };
@@ -179,7 +151,10 @@
     return Math.abs(at - (+d.center || 0)) < (+d.width || 0) / 2 + GW / 2 + 0.2;
   }
 
-  function grate(name, room, side, at) {
+  // `lean` (+1/-1 along the wall's increasing coordinate) forces the side the
+  // removed panel is leaned on, where the wall the solver sees is longer than
+  // the bay the grille is really in (the cell wing's utility alcove).
+  function grate(name, room, side, at, lean) {
     if (!room || !isFinite(+room.x0)) return null;
     const w = wall(room, side);
     // keep the grate off the corners — 1.1 m of return is what a wall needs to
@@ -202,26 +177,11 @@
     const gx = horiz ? (w.px + w.nx * ins) : a;
     const gz = horiz ? a : (w.pz + w.nz * ins);
 
-    // ---- the mesh. FLUSH: the frame's centre is pushed HALF ITS DEPTH into the
-    //      masonry along the inward normal, so its outer face is the wall face.
-    const fx = gx + w.nx * (WT / 2), fz = gz + w.nz * (WT / 2);
-    const fw = horiz ? WT : GW, fd = horiz ? GW : WT;
-    addBox(fx, GY, fz, fw, GH, fd, C_FRAME, { solid: false, cast: false });
-    // recessed dark throat behind the slats — what makes it read as a HOLE
-    addBox(gx + w.nx * (WT * 1.4), GY, gz + w.nz * (WT * 1.4),
-      horiz ? WT : GW - 0.16, GH - 0.14, horiz ? GW - 0.16 : WT, 0x0a0d11, { cast: false });
-    // ---- louvred slats, angled-looking (four thin bars) + four corner screws
-    for (let i = -2; i <= 2; i++) {
-      const sy = GY + i * 0.19;
-      if (Math.abs(sy - GY) > GH / 2 - 0.10) continue;
-      addBox(gx + w.nx * 0.03, sy, gz + w.nz * 0.03,
-        horiz ? 0.06 : GW - 0.14, 0.075, horiz ? GW - 0.14 : 0.06, C_SLAT, { cast: false });
-    }
-    for (const sa of [-1, 1]) for (const sb of [-1, 1]) {
-      const oa = sa * (GW / 2 - 0.12), ob = sb * (GH / 2 - 0.11);
-      addBox(gx + w.nx * 0.02 + (horiz ? 0 : oa), GY + ob, gz + w.nz * 0.02 + (horiz ? oa : 0),
-        horiz ? 0.05 : 0.07, 0.07, horiz ? 0.07 : 0.05, C_SCREW, { cast: false });
-    }
+    // which side of the opening has more wall to lean the panel on, in the
+    // grille's local +x (local +x = world (nz, -nx) for a frame turned by ry)
+    const more = lean || ((Math.max(w.a0, w.a1) - a) >= (a - Math.min(w.a0, w.a1)) ? 1 : -1);
+    const localX = horiz ? -w.nx : w.nz;          // the world "along" axis sign of local +x
+    const panel = drawGrille(gx, gz, Math.atan2(w.nx, w.nz), more * localX);
 
     // ---- THE CRAWL POINT. On the INWARD normal, inside the room. This is the
     //      line the old file got wrong on three grates out of four.
@@ -233,6 +193,8 @@
       dest: null,
       grate: { x: gx, z: gz, side: side },
       room: room,
+      mouth: { kind: "wall", x: gx, z: gz, nx: w.nx, nz: w.nz, y: GY, sill: GY - GH / 2 + FW },
+      cover: cover(panel),
     };
     CBZ.vents.push(vent);
     solved.push(vent);
@@ -240,15 +202,152 @@
   }
   let refused = 0;
 
+  // the removable louvre panel's two poses. Closed: in the frame, screwed.
+  // Open: turned on its end and leaned on the wall beside the opening, its
+  // foot on the floor (portrait, so it always fits the 1.1 m of wall the
+  // solver keeps either side of a grille).
+  const PH = (GW - 2 * FW) / 2;           // half the panel's long side (it sits inside the flange)
+  const LEAN = Math.asin(0.24 / (2 * PH));
+  function cover(panel) {
+    const c = {
+      open: false,
+      set: function (v) {
+        c.open = !!v;
+        if (!panel) return;
+        const p = panel.pivot, m = panel.mesh;
+        if (c.open) {
+          m.rotation.z = Math.PI / 2;
+          p.rotation.x = -LEAN;
+          p.position.set(panel.side * (GW / 2 + 0.1 + GH / 2), -GY + PH * Math.cos(LEAN) + 0.012, 0.03 + PH * Math.sin(LEAN) - (P + 0.012));
+        } else {
+          m.rotation.z = 0;
+          p.rotation.x = 0;
+          p.position.set(0, 0, 0);
+        }
+      },
+    };
+    return c;
+  }
+
+  /* ONE GRILLE, drawn in a local frame (x along the wall, +z out of it into
+     the room) and turned onto the wall. The FRAME (a 50 mm steel flange round
+     the opening) and the dark duct mouth are static and merged by the kit;
+     the LOUVRE PANEL (its border, blades, mullion and four screw heads) is
+     one merged mesh on a pivot so it can come off. Nothing here is solid
+     (a grille in a wall is the wall). */
+  let panelGeo = null;
+  function louvreGeo() {
+    if (panelGeo) return panelGeo;
+    const parts = [];
+    const add = (g, x, y, z, tilt) => { if (tilt) g.rotateX(tilt); g.translate(x, y, z); parts.push(g.index ? g.toNonIndexed() : g); };
+    const iw = GW - 2 * FW, ih = GH - 2 * FW;
+    // the panel's own border (it sits INSIDE the flange, a few mm proud of it)
+    add(new THREE.BoxGeometry(iw, 0.03, 0.016), 0, ih / 2 - 0.015, 0);
+    add(new THREE.BoxGeometry(iw, 0.03, 0.016), 0, -ih / 2 + 0.015, 0);
+    add(new THREE.BoxGeometry(0.03, ih - 0.06, 0.016), -iw / 2 + 0.015, 0, 0);
+    add(new THREE.BoxGeometry(0.03, ih - 0.06, 0.016), iw / 2 - 0.015, 0, 0);
+    // louvre blades, 75 mm pitch, tipped 40 degrees so you see slots, not bars
+    const n = Math.floor((ih - 0.06) / 0.075);
+    for (let i = 0; i < n; i++) add(new THREE.BoxGeometry(iw - 0.06, 0.07, 0.004), 0, -ih / 2 + 0.03 + 0.0375 + i * 0.075, 0.002, -0.7);
+    add(new THREE.BoxGeometry(0.02, ih - 0.06, 0.02), 0, 0, 0);                    // centre mullion
+    // four pan-head screws through the border into the flange
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const g = new THREE.CylinderGeometry(0.009, 0.009, 0.006, 8); g.rotateX(Math.PI / 2);
+      add(g, sx * (iw / 2 - 0.015), sy * (ih / 2 - 0.015), 0.011);
+    }
+    for (const g of parts) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k);
+    panelGeo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
+    return panelGeo;
+  }
+  function drawGrille(gx, gz, ry, side) {
+    const frame = K ? K.skin("steel", C_FRAME) : CBZ.cmat(C_FRAME);
+    const voidM = K ? K.skin("steel", C_VOID, 0.95) : CBZ.cmat(C_VOID);
+    const put = (geo, lx, ly, lz, mat) => {
+      geo.translate(lx, ly, lz);
+      if (K) K.stat(geo, mat, gx, GY, gz, { ry: ry, cast: false });
+      else { const m = new THREE.Mesh(geo, mat); m.position.set(gx, GY, gz); m.rotation.y = ry; scene.add(m); }
+    };
+    put(new THREE.PlaneGeometry(GW - FW, GH - FW), 0, 0, P + 0.002, voidM);                     // the duct mouth, dark
+    put(new THREE.BoxGeometry(GW, FW, FD), 0, GH / 2 - FW / 2, P + FD / 2, frame);                 // flange: head
+    put(new THREE.BoxGeometry(GW, FW, FD), 0, -GH / 2 + FW / 2, P + FD / 2, frame);                // sill
+    put(new THREE.BoxGeometry(FW, GH - 2 * FW, FD), -GW / 2 + FW / 2, 0, P + FD / 2, frame);       // jambs
+    put(new THREE.BoxGeometry(FW, GH - 2 * FW, FD), GW / 2 - FW / 2, 0, P + FD / 2, frame);
+    // the removable panel: a group on the grille's frame, a pivot for the lean
+    const base = new THREE.Group();
+    base.position.set(gx, GY, gz); base.rotation.y = ry;
+    base.userData.dynamic = true;
+    const pivot = new THREE.Group();
+    pivot.userData.dynamic = true;
+    const mesh = new THREE.Mesh(louvreGeo(), frame);
+    mesh.position.z = P + 0.012;
+    mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.userData.dynamic = true;
+    pivot.add(mesh); base.add(pivot); scene.add(base);
+    return { base: base, pivot: pivot, mesh: mesh, side: side || 1 };
+  }
+
+  /* ==========================================================
+     2b. THE DUCT. One stretch of real sheet-metal duct, built once, parked
+         70 m under the compound (out of every guard's sight range and every
+         camera's), shown only while somebody is crawling it. It is the
+         middle of every crawl: systems/interactions.js drives the prone body
+         along it with the camera low behind his boots, toward the slots of
+         the grille at the far end. Galvanised panels (BackSide: you are
+         inside the box), a standing seam every 1.2 m, a dim leak of light so
+         it is never pitch black. No lamp: the far grille IS the light.
+     ========================================================== */
+  CBZ.ventDuct = (function () {
+    const DW = 0.82, DH = 0.74, DL = 9.0;
+    const O = { x: 0, y: -70, z: 20 };                  // the near end; the duct runs toward -z
+    const g = new THREE.Group();
+    g.position.set(O.x, O.y, O.z);
+    g.visible = false;
+    g.userData.dynamic = true;
+    const tag = (m) => { m.userData.dynamic = true; m.castShadow = false; m.receiveShadow = false; g.add(m); return m; };
+    const skinM = K ? K.skin("galv", 0x8a9299) : CBZ.cmat(0x8a9299);
+    const inner = skinM.clone();
+    inner.side = THREE.BackSide;
+    if (inner.emissive) inner.emissive.setHex(0x1c1f22);
+    const shell = tag(new THREE.Mesh(new THREE.BoxGeometry(DW, DH, DL), inner));
+    shell.position.set(0, DH / 2, -DL / 2);
+    // standing seams: a flat bar round the inside every 1.2 m
+    const seamM = K ? K.skin("steel", 0x5d656c) : CBZ.cmat(0x5d656c);
+    const parts = [];
+    for (let z = -1.2; z > -DL + 0.3; z -= 1.2) {
+      for (const sy of [0.012, DH - 0.012]) { const b = new THREE.BoxGeometry(DW - 0.02, 0.012, 0.03); b.translate(0, sy, z); parts.push(b); }
+      for (const sx of [-1, 1]) { const b = new THREE.BoxGeometry(0.012, DH - 0.02, 0.03); b.translate(sx * (DW / 2 - 0.012), DH / 2, z); parts.push(b); }
+    }
+    tag(new THREE.Mesh(THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false), seamM));
+    // the far grille: daylight through louvre slots (unlit: it IS the light)
+    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+    const x2 = c.getContext("2d");
+    x2.fillStyle = "#15181b"; x2.fillRect(0, 0, 64, 64);
+    x2.fillStyle = "#b9c0c6";
+    for (let i = 0; i < 9; i++) x2.fillRect(4, 4 + i * 6.6, 56, 3);
+    x2.fillStyle = "#15181b"; x2.fillRect(31, 0, 2, 64);
+    const slots = tag(new THREE.Mesh(new THREE.PlaneGeometry(DW - 0.06, DH - 0.06), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c) })));
+    slots.position.set(0, DH / 2, -DL + 0.01);
+    scene.add(g);
+    return {
+      group: g, width: DW, height: DH, length: DL,
+      // the world point `s` metres down the duct's centre line, on its floor
+      at: function (s, out) { out = out || {}; out.x = O.x; out.y = O.y + 0.02; out.z = O.z - s; return out; },
+      yaw: Math.PI,                       // a body facing down the duct (-z)
+      show: function (v) { g.visible = !!v; },
+    };
+  })();
+
   /* ==========================================================
      3. THE THREE RUNS.
      ========================================================== */
   // T1 — THE SPINE. The cell wing's own utility alcove (cellblock.js WEST_ROW
-  //      leaves the recess at z = -31 for exactly this) into the armory. This
+  //      leaves the recess at z[-34.5,-30.9] for exactly this) into the armory. This
   //      is the keycard/gun-room chain's second door and the reason the owner
   //      ran the jail hundreds of times; it is the one run that must never be
   //      lockable, which is why it starts in an alcove and not in a cell.
-  const cellVent = grate("Cell Block Utility", ROOM.cell, "W", -31);
+  // -32.2: the middle of the alcove (z[-34.5,-30.9]); at -31 the 1.2 m grille
+  // ran into the B-1 partition. Clear of the mop basin at z -33.8.
+  const cellVent = grate("Cell Block Utility", ROOM.cell, "W", -32.2, -1);
   const armoryVent = grate("Armory Duct", ROOM.armory, "W", -3.2);
   if (cellVent && armoryVent) { cellVent.dest = armoryVent; armoryVent.dest = cellVent; }
 
@@ -286,7 +385,6 @@
     let hubs = 0;
     perRoom.forEach(function (n) { if (n > 1) hubs++; });
     return {
-      v2: true,
       vents: solved.length,
       anchored: solved.length,          // every V2 grate is solved off a rect
       outsideDest: outside,             // MUST be 0
