@@ -791,8 +791,7 @@
       // the wanted level (force to the engine's 4★ ceiling over a beat) and roll
       // an immediate response so the clock is real from second one.
       h.silent = true;
-      big(h.physical ? "THIS IS A ROBBERY · GET THAT DOOR OPEN!" : "THIS IS A ROBBERY · DRILL THE VAULT!");
-      if (h.physical) note("Blow the vault door, or put a gun on a bank officer and make him open it.", 3.2);
+      big("THIS IS A ROBBERY");
       if (CBZ.cityAlarm) CBZ.cityAlarm(x, z, 40, 1.8, CBZ.city.playerActor);
       if (CBZ.cityPanic) CBZ.cityPanic(x, z, 2.0, CBZ.city.playerActor);
       // a robbery report (caps at 2★ on its own) PLUS forceStars to push the

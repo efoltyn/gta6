@@ -1294,7 +1294,7 @@
       if (!sc._told) {
         sc._told = true; sc._tied = true;
         g.cityHolstered = true;
-        const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
+        const line = sc.petty ? "You're under arrest. It's a ticket, relax."
           : "You're under arrest. You're going to County.";
         if (cop && CBZ.citySay) CBZ.citySay(cop, line, "#9fc3ff", { secs: 3.0, force: true });
       }
@@ -1353,7 +1353,7 @@
         if (!sc.cuffS && CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click (the verb has its own)
         if (CBZ.city && CBZ.city.big) CBZ.city.big((sc.opts || {}).bigLabel || ((sc.opts || {}).peaceful ? "SURRENDERED" : "CUFFED"));
         // the officer tells you where this ride ends, on screen, over him
-        const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
+        const line = sc.petty ? "You're under arrest. It's a ticket, relax."
           : "You're under arrest. You're going to County.";
         if (cop && CBZ.citySay) CBZ.citySay(cop, line, "#9fc3ff", { secs: 3.0, force: true });
       }

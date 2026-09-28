@@ -227,7 +227,7 @@
   function tryPlant() {
     const P = CBZ.player, e = econ();
     if (!P || !e || P.driving) return;
-    if (count() <= 0) { note(g.mode === "escape" ? "No C4, the armory cage keeps the charges." : "No C4, the gun store sells charges.", 1.6); return; }
+    if (count() <= 0) { note("No C4.", 1.6); return; }
     if (planted.length >= C4.maxPlanted) { note("The receiver only tracks " + C4.maxPlanted + " charges, send what's out there first.", 2); return; }
     const f = aimFwd();
     const px = P.pos.x, pz = P.pos.z, py = (P.pos.y || 0) + 1.2;

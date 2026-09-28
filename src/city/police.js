@@ -710,9 +710,9 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    copSay(cop, STOP.susp >= 2.2 ? "You again. Walk off and I call it in."
+    copSay(cop, STOP.susp >= 2.2 ? "You again. Last warning."
       : STOP.susp >= 1.2 ? "You again? Put that away."
-      : "Hey! Hold up, is that a firearm? Put it away.", 2.4);
+      : "Hey! Is that a gun? Put it away.", 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -752,7 +752,7 @@
       endStop(false);
       return;
     }
-    copSay(c, "Walking away from me with that thing out. Noted.", 1.7);
+    copSay(c, "I got your face. Remember that.", 1.7);
     endStop(true);
   }
 
@@ -772,7 +772,7 @@
     const c = STOP.cop;
     if (c) c._stopRefused = 0;                       // you did what he asked — the ledger clears
     stowGuns();
-    copSay(c, "Good. Stay out of trouble.", 2.2);
+    copSay(c, "Good. Have a nice day.", 2.2);
     if (c) { c._gunLowered = true; }
     endStop(true);
   }
@@ -870,7 +870,7 @@
         const r = BA.step(c, dt, _stopSt);
         if (K.outcome === "released") { endStop(true); return; }
         if (r && (r.phase === "escalate" || r.phase === "force" || r.phase === "lethal")) {
-          copSay(c, "That's it. Suspect refusing to disarm!", 2.0);
+          copSay(c, "Armed subject, not complying! Send units!", 2.0);
           if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
           c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
           return;
@@ -3425,7 +3425,7 @@
         const h = LAW.heard(c);
         if (h) {
           goSearch(c, h);
-          copBark(c, h.kind === "gunshot" ? ["Shots fired! Moving.", "That was gunfire."] : ["What was that?"]);
+          copBark(c, h.kind === "gunshot" ? ["Shots fired! Moving.", "That was gunfire.", "Shots fired, I need units."] : ["What was that?", "Hey. What's going on over there?"]);
         }
       }
 
@@ -3740,9 +3740,9 @@
           if (dd > 2.4 && D.hold == null) { stepTo(c, ddx, ddz, c.baseSpeed * 0.85, dt, near); continue; }
           if (D.hold == null) {
             D.hold = 2.6;
-            copBark(c, D.kind === "corpse" ? ["Step back, this is a scene now.", "Nothing to see here. Keep it moving."]
-              : D.kind === "brawl" ? ["HEY! Break it up. NOW.", "Hands off each other. Walk away."]
-                : ["You can't camp here. Move along.", "Off the block. There's a shelter east side."]);
+            copBark(c, D.kind === "corpse" ? ["Step back. This is a scene now.", "Back up. Behind the car.", "Nobody touches anything."]
+              : D.kind === "brawl" ? ["HEY! Break it up. NOW.", "Hands off each other. Walk away.", "You want to go to jail? Keep going."]
+                : ["You can't sleep here. Move along.", "Come on, up. Let's go.", "Don't make me come back."]);
             disperse(c, p.pos.x, p.pos.z, D.kind);
           }
           D.hold -= dt;

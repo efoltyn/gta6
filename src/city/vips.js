@@ -948,18 +948,18 @@
     // and whether the law is currently behind you. No dice.
     const respect = Math.max(0, (g.respect | 0));
     if ((g.wanted | 0) > 0) {
-      if (CBZ.citySay) CBZ.citySay(p, "“Not with sirens on you. Are you insane?”", "#cfe6ff", 2.4);
+      if (CBZ.citySay) CBZ.citySay(p, "Not with sirens on you. Are you insane?", "#cfe6ff", 2.4);
       p._endorseAsked = false;                       // a refusal for cause can be re-asked later
       return false;
     }
     if (respect < SENATOR_ASK_RESPECT) {
-      if (CBZ.citySay) CBZ.citySay(p, "“I don't know you. Come back when somebody does.”", "#cfe6ff", 2.4);
+      if (CBZ.citySay) CBZ.citySay(p, "I don't know you.", "#cfe6ff", 2.4);
       p._endorseAsked = false;
       return false;
     }
     if (sid && R.hook) { try { R.hook(sid, { kind: "endorsement", note: "the senator's public backing" }); } catch (e) {} }
     if (R.momentumGain) { try { R.momentumGain(4, "a senator's endorsement"); } catch (e) {} }
-    if (CBZ.citySay) CBZ.citySay(p, "“Fine. I'll say your name out loud. Once.”", "#8fe08a", 2.6);
+    if (CBZ.citySay) CBZ.citySay(p, "Fine. I'll say your name out loud. Once.", "#8fe08a", 2.6);
     if (CBZ.cityFeed) CBZ.cityFeed("A sitting senator put their name behind your campaign.", "#8fe08a");
     return true;
   }
@@ -980,7 +980,7 @@
       label: function () { return "Approach the bench · " + "$" + judgeFee().toLocaleString("en-US"); },
       onSelect: function (p) {
         if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(judgeFee()))) {
-          if (CBZ.citySay) CBZ.citySay(p, "“That is not a serious offer.”", "#cfe6ff", 2);
+          if (CBZ.citySay) CBZ.citySay(p, "That is not a serious offer.", "#cfe6ff", 2);
           return;
         }
         benchFavour(p, false);
@@ -1006,7 +1006,7 @@
         // and crimeInfo() returns {stars:0} for an unknown id, so report()
         // bailed and this charge was a silent no-op. Never invent a type.
         if (CBZ.cityCrime) CBZ.cityCrime(55, { x: p.pos.x, z: p.pos.z, type: "extortion" });
-        if (CBZ.citySay) CBZ.citySay(p, "“You have no idea what you've just done.”", "#ff9aa2", 2.6);
+        if (CBZ.citySay) CBZ.citySay(p, "You have no idea what you've just done.", "#ff9aa2", 2.6);
       },
     });
 

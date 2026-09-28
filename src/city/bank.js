@@ -835,7 +835,7 @@
       if (box) {
         atmService(box);
         const got = CBZ.cityTill.take(box, { max: amt, by: "player" });
-        if (!(got.taken > 0)) { note("This machine's out of cash. Try the teller.", 2.2, { from: "Meridian Trust", app: "bank" }); return; }
+        if (!(got.taken > 0)) { note("Out of cash.", 2.2, { from: "Meridian Trust", app: "bank" }); return; }
         if (got.taken < amt) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: "Meridian Trust", app: "bank" });
         amt = got.taken;
       }
@@ -1939,7 +1939,7 @@
     if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(dr._drawX, dr._drawZ, 1.1);
     if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(dr._drawX, dr._drawZ, 34, 1.5, CBZ.city.playerActor);
     if (CBZ.cityCrime) { try { CBZ.cityCrime(190, { instant: true, x: dr._drawX, z: dr._drawZ, type: "armed-robbery" }); } catch (e) {} }
-    note("Took " + fmt$(r.taken) + " out of the window. The vault's where the money is.", 2.4);
+    note("Took " + fmt$(r.taken) + " out of the window.", 2.4);
     return true;
   };
   CBZ.cityBankDrawerAt = function (px, pz, reach, py) {
