@@ -1600,6 +1600,10 @@
       stats.damage += Math.max(0, hp0 - best.hp);
       if (best.dead) { stats.kills++; stats.lastKillT = stats.t; }
       if (CBZ.bodyWound) safe(function () { CBZ.bodyWound(best, hitPoint, {}); });
+      // a man the round did not drop takes it on his rig (CBZ.verbs.shot)
+      if (!best.dead && CBZ.verbs && CBZ.verbs.shot) {
+        safe(function () { CBZ.verbs.shot(best, { point: hitPoint, dir: L.ray.d, cal: w.pellets > 1 ? 1.5 : ((w.damage || 24) >= 30 ? 1.2 : 0.85) }); });
+      }
     } else CBZ.bulletImpact(hitPoint, { x: 0, y: 1, z: 0 }, { kind: "dust", power: 0.7 });
     if (best && CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(best, 1.1);
   }

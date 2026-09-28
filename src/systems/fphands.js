@@ -139,9 +139,9 @@
   const T_ALONG = [[-0.30, -0.72, -0.62], [-0.10, -0.30, -0.95], [-0.05, -0.16, -0.99]];
   const T_PINCH = [[-0.48, -0.55, -0.68], [-0.10, -0.62, -0.78], [0.10, -0.55, -0.83]];
   const POSES = {
-    open:    { flex: [[0.08, 0.10, 0.06], [0.06, 0.08, 0.05], [0.08, 0.10, 0.06], [0.12, 0.12, 0.08]], thumb: T_OPEN, cup: 0.001 },
-    relaxed: { flex: [[0.30, 0.42, 0.22], [0.36, 0.50, 0.26], [0.44, 0.58, 0.30], [0.52, 0.66, 0.34]], thumb: T_REST, cup: 0.004 },
-    fist:    { flex: [[1.48, 1.80, 0.95], [1.52, 1.84, 0.95], [1.52, 1.84, 0.95], [1.50, 1.80, 0.95]], thumb: T_FIST, cup: 0.006 },
+    open:    { flex: [[0.08, 0.10, 0.06], [0.06, 0.08, 0.05], [0.08, 0.10, 0.06], [0.12, 0.12, 0.08]], thumb: T_OPEN, cup: 0.001, stub: 0 },
+    relaxed: { flex: [[0.30, 0.42, 0.22], [0.36, 0.50, 0.26], [0.44, 0.58, 0.30], [0.52, 0.66, 0.34]], thumb: T_REST, cup: 0.004, stub: 0 },
+    fist:    { flex: [[1.48, 1.80, 0.95], [1.52, 1.84, 0.95], [1.52, 1.84, 0.95], [1.50, 1.80, 0.95]], thumb: T_FIST, cup: 0.006, stub: 0 },
     // BODY gun poses (character.js setHandPose "pistol" / "support" on
     // third-person rigs). The first-person gun hands take no table pose:
     // every one is a GRASP solved against the gun's own grip — see grasp().
@@ -150,7 +150,7 @@
     cupover: { wrap: 0.040, thumb: T_ALONG, cup: 0.006 },
     wheel:   { wrap: 0.016, thumb: T_WRAP, cup: 0.005 },
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
-    card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004 },
+    card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004, stub: 0 },
   };
   /* BODY GUN HOLDS, SIZED TO WHAT IS HELD (systems/gunhands.js CBZ.gunHold).
      A body hand closes round a gun drawn at 1.45-1.75x real size (weapon-
@@ -167,8 +167,8 @@
   const HOLD_RADII = [0.022, 0.028, 0.034, 0.040, 0.046, 0.052, 0.058];
   HOLD_RADII.forEach(function (R) {
     const n = Math.round(R * 1000);
-    POSES["trig" + n] = { wrap: R, flex: [[0.62, 0.62, 0.30]], thumb: T_ALONG, cup: 0.005, stub: 0.030 };
-    POSES["hold" + n] = { wrap: R, thumb: T_ALONG, cup: 0.006, stub: 0.030 };
+    POSES["trig" + n] = { wrap: R, flex: [[0.62, 0.62, 0.30]], thumb: T_ALONG, cup: 0.005, stub: 0 };
+    POSES["hold" + n] = { wrap: R, thumb: T_ALONG, cup: 0.006, stub: 0 };
   });
   // the hold pose of `kind` ("trig" | "hold") whose wrap radius is nearest R (hand metres)
   function holdPose(kind, R) {
@@ -225,6 +225,74 @@
   function seg(parts, a, b, r0, r1) {
     const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     place(new THREE.CylinderGeometry(r1, r0, L, 8, 1, true), a, b, parts);
+  }
+  /* A CLOSED lathe along the hand's Z: rings [z, rx, ry, cy] from the bottom
+     up, each an ellipse (rx across X, ry across Y, centred at y = cy); a ring
+     with rx = 0 is an apex (one vertex), so a table that starts and ends on
+     an apex is a closed solid with no open end to look into. Outward winding,
+     smooth shared normals. The wrist stubs (first-person and body hands) and
+     nothing else. */
+  function lathe(parts, rings, sides, phase) {
+    const P = [], idx = [], start = [];
+    for (let i = 0; i < rings.length; i++) {
+      const r = rings[i];
+      start.push(P.length / 3);
+      if (!(r[1] > 0)) { P.push(0, r[3] || 0, r[0]); continue; }
+      for (let s = 0; s < sides; s++) {
+        const a = (phase || 0) + s / sides * Math.PI * 2;
+        P.push(r[1] * Math.cos(a), (r[3] || 0) + r[2] * Math.sin(a), r[0]);
+      }
+    }
+    const at = function (i, s) { return rings[i][1] > 0 ? start[i] + (s % sides) : start[i]; };
+    for (let i = 0; i < rings.length - 1; i++) {
+      const apA = !(rings[i][1] > 0), apB = !(rings[i + 1][1] > 0);
+      for (let s = 0; s < sides; s++) {
+        const a0 = at(i, s), a1 = at(i, s + 1), b0 = at(i + 1, s), b1 = at(i + 1, s + 1);
+        if (!apA) idx.push(a0, a1, b1);
+        if (!apB) idx.push(a0, b1, b0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    parts.push(g);
+    return g;
+  }
+  /* THE WRIST STUB (hand frame, metres): the hand's own skin from the heel of
+     the palm up into the forearm. Its top is a dome CENTRED ON THE WRIST
+     PIVOT (the hand's origin), about as tall as it is thick, so bending the
+     wrist turns the dome about its own centre instead of swinging a tube out
+     through the side of the forearm; its bottom tapers into the heel of the
+     palm. At the pivot it is a real wrist: 6 cm across the palm plane, 4 cm
+     through (a little thicker than the 2.8 cm palm, a little narrower than
+     its 6.7 cm heel). `back` > the dome = a long stub (a body hand that
+     slides down its wrist onto a held socket keeps its wrist in the sleeve). */
+  /* The dome is round in the thickness plane (height = thickness, so a
+     flex/extend bend turns it on the spot) and draws its width in fast (the
+     6 cm only matters AT the crease, where the heel of the palm meets the
+     forearm): a radial/ulnar bend, or a gun hold that rolls the hand on the
+     forearm, then keeps it inside the forearm's end too. Rows [height share,
+     width share, thickness share]. */
+  const WRIST = { hw: 0.029, ht: 0.0200, cy: 0.0005, dome: 0.0205, heel: 0.034 };
+  const DOME_FINE = [[0.35, 0.80, 0.937], [0.65, 0.58, 0.76], [0.88, 0.34, 0.475]];
+  const DOME_BODY = [[0.50, 0.70, 0.866]];
+  // [sides, phase]: the body's hexagon stands a vertex on the thickness axis
+  // (its flats go to the width, which the palm's heel covers)
+  const STUB_LATHE = { fp: [12, 0], body: [6, 0] };
+  function stubRings(back, fine) {
+    const W = WRIST, cy = W.cy;
+    const r = fine
+      ? [[-W.heel, 0, 0, cy], [-0.025, W.hw * 0.72, W.ht * 0.70, cy], [-0.013, W.hw * 0.93, W.ht * 0.93, cy], [0, W.hw, W.ht, cy]]
+      : [[-W.heel * 0.85, 0, 0, cy], [-0.005, W.hw * 1.20, W.ht * 1.20, cy], [0, W.hw, W.ht, cy]];
+    if (back > W.dome) {
+      // a long stub: straight on up inside the forearm, then shut
+      r.push([back, W.hw * 1.15, W.ht * 1.15, cy], [back + 0.010, 0, 0, cy]);
+    } else {
+      (fine ? DOME_FINE : DOME_BODY).forEach(function (d) { r.push([W.dome * d[0], W.hw * d[1], W.ht * d[2], cy]); });
+      r.push([W.dome, 0, 0, cy]);
+    }
+    return r;
   }
   function ball(parts, p, r, sx, sy, sz) {
     const g = new THREE.SphereGeometry(r, sx ? 12 : 8, sx ? 8 : 6);
@@ -306,10 +374,9 @@
   function buildHandGeo(side, pose) {
     const p = resolvePose(pose);
     const parts = [palmGeo(p.cup || 0.004)];
-    // wrist stub: the hand's own skin, elliptical, sitting into the forearm
-    // (a closed ellipsoid: the old open tube showed its hollow end whenever
-    // the wrist bent off the forearm's line)
-    ball(parts, [0, 0.0005, 0.004], 1, 0.031, 0.0205, 0.040);
+    // wrist stub: the hand's own skin, closed, its top a dome on the wrist
+    // pivot that turns inside the forearm's end when the wrist bends
+    lathe(parts, stubRings(0, true), STUB_LATHE.fp[0], STUB_LATHE.fp[1]);
     FINGERS.forEach(function (f, i) {
       const pts = p._joints.fingers[i];
       const rs = [f.r * 1.04, f.r * 0.95, f.r * 0.86, f.r * 0.78];
@@ -453,16 +520,15 @@
     const far = lod >= 2;
     const parts = [palmGeo(p.cup || 0.004, far ? [4, 3] : [6, 4])];
     if (!far) {
-      // the wrist runs 7 cm back up into the sleeve: a body's hand slides down
-      // its wrist when it closes on a held socket (character.js HANDS block)
-      // and this is what keeps the cuff from opening a gap
-      // A gun hold (trigNN / holdNN) hangs AT the crease with no slide but
-      // bends the wrist onto the grip; its stub is short (p.stub) so the bend
-      // cannot swing 7 cm of wrist out through the side of the forearm.
+      // A closed stub (it was an OPEN 6-sided tube: a hole at each end the
+      // moment a bend showed it). Table holds run it 7 cm back up the arm:
+      // the hand slides down its wrist onto a held socket (character.js
+      // HANDS block) and this keeps the crease from opening a gap. A gun
+      // hold (trigNN / holdNN, p.stub 0) hangs AT the crease and bends the
+      // wrist onto the grip: its stub is only the pivot dome, which a bend
+      // turns about its own centre inside the forearm's end.
       const back = p.stub != null ? p.stub : 0.070;
-      const wr = new THREE.CylinderGeometry(0.027, 0.029, back + 0.022, 6, 1, true);
-      wr.scale(1.18, 1, 0.78);
-      place(wr, [0, 0, back], [0, 0.001, -0.022], parts);
+      lathe(parts, stubRings(back, false), STUB_LATHE.body[0], STUB_LATHE.body[1]);
     }
     const chains = p._joints.fingers;
     if (!far) {
@@ -513,24 +579,45 @@
     const key = (side < 0 ? "L:" : "R:") + poseKey(pose || "relaxed") + ":" + (lod >= 2 ? 2 : 1);
     return GEO[key] || (GEO[key] = buildBodyHandGeo(side < 0 ? -1 : 1, pose || "relaxed", lod >= 2 ? 2 : 1));
   }
-  // unit forearm: +Z from the wrist (z=0) to the elbow (z=1), elliptical and
-  // tapered — flat and narrow at the wrist, full at the muscle belly
+  /* THE FIRST-PERSON FOREARM. Unit length: +Z from the wrist (z 0) to the
+     elbow (z 1), laid by poseArm with scale (k, k, lf). Section (metres at
+     hand scale 1): foreHalf(u). At the wrist it is the hand's own wrist
+     (WRIST) plus a few percent, so the stub's pivot dome hides just inside it
+     and there is no step either way; then the belly, then the elbow.
+
+     The wrist end is CLOSED: a shallow dome (FORE_DOME deep) under the
+     crease, inside the hand's stub, so a bent wrist shows skin, never the
+     hollow inside of a tube. Every caller poses the forearm at lf/k 0.23 ..
+     0.29 (fists 0.44/1.9, gun arms 0.265, car 0.27/1.08, bailout 0.48/1.7);
+     the dome and the cuff are authored at FORE_NOM and the dome's depth
+     varies with that ratio by +-15% (tools/wrist-seam-check.mjs sweeps it). */
+  const FORE_NOM = 0.25, FORE_DOME = 0.012;
+  function foreHalf(u) {
+    const belly = Math.sin(Math.min(1, Math.max(0, u) / 0.72) * Math.PI * 0.5);
+    const rx0 = WRIST.hw * 1.05, ry0 = WRIST.ht * 1.06;
+    return {
+      rx: rx0 + (0.046 - rx0) * belly - (u > 0.72 ? (u - 0.72) * 0.02 : 0),
+      ry: ry0 + (0.041 - ry0) * belly,
+    };
+  }
   let FORE = null, UPPER = null, CUFF = null, ELBOW = null;
   function foreGeo() {
     if (FORE) return FORE;
-    const g = new THREE.CylinderGeometry(1, 1, 1, 12, 6, true);
-    g.rotateX(Math.PI / 2);                   // along Z, centred
-    g.translate(0, 0, 0.5);
-    const pos = g.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const z = pos.getZ(i);
-      // wrist 0.029 x 0.022 -> belly 0.045 x 0.040 at 70% -> elbow 0.040
-      const belly = Math.sin(Math.min(1, z / 0.72) * Math.PI * 0.5);
-      const rx = 0.029 + (0.046 - 0.029) * belly - (z > 0.72 ? (z - 0.72) * 0.02 : 0);
-      const ry = 0.021 + (0.041 - 0.021) * belly;
-      pos.setXYZ(i, pos.getX(i) * rx, pos.getY(i) * ry, z);
+    // rings bottom-up: the dome's apex, two dome rings, then the tube
+    const rings = [], d = FORE_DOME / FORE_NOM;
+    const w = foreHalf(0);
+    rings.push([-d, 0, 0]);
+    for (let k = 2; k >= 1; k--) {
+      const th = Math.PI / 2 * k / 3;
+      rings.push([-d * Math.sin(th), w.rx * Math.cos(th), w.ry * Math.cos(th)]);
     }
-    g.computeVertexNormals();
+    for (let i = 0; i <= 6; i++) {
+      const u = i / 6, s = foreHalf(u);
+      rings.push([u, s.rx, s.ry]);
+    }
+    // the elbow end stays open: the elbow ball covers it
+    const parts = [];
+    const g = lathe(parts, rings, 12, 0);
     g._shared = true; g.userData._shared = true;
     return (FORE = g);
   }
@@ -542,12 +629,43 @@
     g._shared = true; g.userData._shared = true;
     return (UPPER = g);
   }
+  /* THE SLEEVE CUFF. It was an OPEN 12-sided ring standing 4-8 mm off the
+     wrist (and inside the forearm at its top end): single-sided, so from
+     most angles it drew as a hollow band floating round the arm. Now it is
+     a closed solid of cloth wrapped ON the forearm: a closed profile swept
+     round the forearm's own section (foreHalf) — an inner wall under the
+     skin, a rolled lip at the wrist whose underside is a closed annulus the
+     hand comes out of, an outer band 3.5-5 mm proud, and a top edge that
+     feathers back onto the sleeve. Authored in hand metres at FORE_NOM and
+     posed with scale (k, k, lf / FORE_NOM), so it follows the forearm's
+     section exactly for any forearm length. Profile [z, offset off the
+     forearm's surface], walked inner-top -> down -> lip -> outer -> top. */
+  const CUFF_PROFILE = [
+    [0.058, -0.0035], [0.006, -0.0035], [0.0015, -0.0015], [0.0005, 0.0012], [0.0025, 0.0038],
+    [0.0065, 0.0048], [0.020, 0.0041], [0.046, 0.0035], [0.056, 0.0013], [0.059, 0.0002],
+  ];
   function cuffGeo() {
     if (CUFF) return CUFF;
-    const g = new THREE.CylinderGeometry(0.036, 0.034, 0.05, 12, 1, true);
-    g.scale(1.12, 1, 0.9);
-    g.rotateX(Math.PI / 2);
-    g.translate(0, 0, 0.045);
+    const sides = 12, n = CUFF_PROFILE.length, P = [], idx = [];
+    for (let j = 0; j < n; j++) {
+      const z = CUFF_PROFILE[j][0], o = CUFF_PROFILE[j][1], s = foreHalf(z / FORE_NOM);
+      for (let i = 0; i < sides; i++) {
+        const a = i / sides * Math.PI * 2;
+        P.push((s.rx + o) * Math.cos(a), (s.ry + o) * Math.sin(a), z);
+      }
+    }
+    for (let j = 0; j < n; j++) {
+      const j1 = (j + 1) % n;              // the profile is a closed loop
+      for (let i = 0; i < sides; i++) {
+        const i1 = (i + 1) % sides;
+        const a0 = j * sides + i, a1 = j * sides + i1, b0 = j1 * sides + i, b1 = j1 * sides + i1;
+        idx.push(a0, a1, b1, a0, b1, b0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
     g._shared = true; g.userData._shared = true;
     return (CUFF = g);
   }
@@ -673,7 +791,7 @@
     P.fore.quaternion.copy(_fq);
     P.fore.scale.set(k, k, lf);
     P.cuff.visible = !!sleeved;
-    if (sleeved) { P.cuff.position.copy(wrist); P.cuff.quaternion.copy(_fq); P.cuff.scale.setScalar(k); }
+    if (sleeved) { P.cuff.position.copy(wrist); P.cuff.quaternion.copy(_fq); P.cuff.scale.set(k, k, lf / FORE_NOM); }
     P.elbow.position.copy(elbow);
     P.elbow.scale.setScalar(k);
     if (shoulder) {
@@ -987,6 +1105,7 @@
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
     grasp, graspHand, prismSdf, holdPose, HOLD_RADII,
-    math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore },
+    math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },
+    WRIST, STUB_LATHE, FORE_NOM, FORE_DOME, CUFF_PROFILE,
   };
 })();

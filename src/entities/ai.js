@@ -5041,11 +5041,13 @@
     credit(killer, "kills");
     CBZ.game.deaths = (CBZ.game.deaths || 0) + 1;
     if (victim.wedge) victim.wedge.visible = false;
-    if (killer && killer.group && !opts.noKnock) knockback(victim, killer.group.position.x, killer.group.position.z, 1.1);
-    // AFTER the knockback, so the lie direction is picked from where the body
-    // actually ends up. systems/prisoncorpse.js finds the one direction this
-    // man can lie without a wall through him and owns the corpse from here.
-    if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer);
+    // THE BODY GOES DOWN (systems/prisoncorpse.js -> systems/bodyfall.js): the
+    // killer's shove is real root momentum that slides against the walls, not
+    // the 1.1 m position write this line used to teleport him with (which
+    // started a corpse killed against a wall INSIDE it).
+    if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer, {
+      force: opts.force != null ? opts.force : (opts.noKnock ? 5 : 8), dirX: opts.dirX, dirZ: opts.dirZ,
+    });
     if (killer === CBZ.player) addBuzz("fear", 25, actorName(victim));
     if (victim.gang >= 0 && killer && CBZ.playerChar && killer.group === CBZ.playerChar.group) {
       noteGangIncident(victim, "kill", victim.isLeader ? 18 : 13, { source: "killing" });
@@ -7601,11 +7603,26 @@
   }
 
   // shove an actor away from a point (impact reaction)
+  /* A SHOVE IS A STEP, NOT A TELEPORT. This wrote `force` metres straight
+     into the group position on one frame (a player's prison round moved a
+     guard 1.35 m between two frames), and every jail shove (brain_prison,
+     economy, humancontact, reactions' recoil) popped the same way. A living
+     man with a rig now takes it as a real footwork step along the push
+     (CBZ.verbs.step: feet and root on one curve, walls respected), about half
+     the old distance because it is no longer instant. A round that already
+     landed on his rig this frame (CBZ.verbs.shot) owns the motion: the gun's
+     shove is not a second push. No rig / knocked out: the old nudge. */
   function knockback(actor, fx, fz, force) {
     const dx = actor.group.position.x - fx, dz = actor.group.position.z - fz;
     const d = Math.hypot(dx, dz) || 1;
-    actor.group.position.x += (dx / d) * (force || 0.8);
-    actor.group.position.z += (dz / d) * (force || 0.8);
+    const f = force || 0.8;
+    const V = CBZ.verbs, ch = actor.char;
+    if (!actor.dead && !(actor.ko > 0) && ch && V && V.step) {
+      if (ch._shotR && ch._shotR.queued) return;
+      if (V.step(actor, dx / d, dz / d, Math.min(0.7, 0.12 + f * 0.4), 0.3)) return;
+    }
+    actor.group.position.x += (dx / d) * f;
+    actor.group.position.z += (dz / d) * f;
   }
 
   const GANG_NAMES = ["the Reds", "the Blues"];

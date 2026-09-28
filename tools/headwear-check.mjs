@@ -43,7 +43,7 @@ vm.runInContext(`
     CBZ.pbrMat = (c, o) => { const k = "p" + c + "|" + JSON.stringify(o || {}); let m = mc.get(k); if (!m) { m = new THREE.MeshStandardMaterial({ color: c, roughness: (o && o.roughness) || 0.8 }); m._shared = true; mc.set(k, m); } return m; };
     CBZ.boxGeom = (w, h, d) => { const k = w + "," + h + "," + d; let g = gc.get(k); if (!g) { g = new THREE.BoxGeometry(w, h, d); g._shared = true; gc.set(k, g); } return g; };
   })();`, ctx);
-for (const f of ["src/systems/fphands.js", "src/entities/character.js", "src/entities/heritage.js", "src/entities/headwear.js"]) {
+for (const f of ["src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/heritage.js", "src/entities/headwear.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { if (!f.includes("fphands")) throw e; }
 }

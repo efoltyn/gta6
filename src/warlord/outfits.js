@@ -1492,6 +1492,8 @@
       }
       paintSlot(s.collar, yoke);
     }
+    // boots on a soldier, the job's shoes on a civilian (entities/footwear.js)
+    if (CBZ.footwear) CBZ.footwear.restyle(ch, rec, Object.assign({}, c, { shoes: shoes }));
     paintSlot(s.shoes, shoes);
 
     // ---- 4. the kit: webbing, badge, headwear

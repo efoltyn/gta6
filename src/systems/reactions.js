@@ -94,18 +94,23 @@
   const STAG_DUR = 0.25;        // directional stagger length (matches the old flinch beat)
   const STAG_PITCH = 0.5;       // torso pitch along the push direction at peak
   const STAG_ROLL = 0.3;        // torso roll for a side hit
-  const STAG_YAW = 0.35;        // shoulder twist away from the impact
+  // shoulder twist away from the impact. It was 0.35 (x amp up to 1.2, plus a
+  // bullet flinch's 0.25 and a clutch's 0.18 on top): ~45 degrees of torso
+  // yaw on a body that PIVOTS AT THE FEET, i.e. the shoulders swinging round
+  // a planted stance: the "spinning round one foot" read. A shove turns the
+  // shoulders a little; the push itself is the lurch.
+  const STAG_YAW = 0.12;
   const STAG_HEAD = 0.5;        // the head whips harder than the torso (whiplash sells force)
   const STAG_KNEE = 0.55;       // both knees flex as the stepped-back leg absorbs the shove
   const STAG_WINDMILL = 0.7;    // arms flail for balance — scales with amp² (heavy hits only)
   const DAZE_ARM = 0.3;         // guard-broken arms hang slack behind the hips
   const DAZE_SWAY = 0.12;       // slow drunken sway while broken (the foe is OPEN — go)
   const DAZE_HEAD = 0.42;       // head sags when the guard shatters
-  const FLIN_DUR = 0.22;        // bullet flinch: sharp jerk, dead in ~220ms
-  const FLIN_PITCH = 0.3;       // upper-body jerk along the push
-  const FLIN_HEAD = 0.65;       // the head snap is what reads the caliber
-  const FLIN_YAW = 0.25;        // shoulders wrenched off the impact
-  const CLUTCH_DUR = 0.6;       // wound-clutch: hand reaches to the hit for ~0.6s after a non-fatal shot
+  // (the city BULLET FLINCH and the shot WOUND-CLUTCH that used to fire off
+  // every _phys.fl edge are gone: a round that hits a living man is
+  // CBZ.verbs.shot now, zone by zone on the rig, systems/verbs_strike.js.
+  // The clutch below stays for CBZ.reactPunch's heavy head blow.)
+  const CLUTCH_DUR = 0.6;       // clutch: a hand to the hurt for ~0.6s
   const CLUTCH_ARM = -1.35;     // the clutching arm folds in across the wound (pitch up + across)
 
   // Prison bullets used only the old 0.55-radian torso hinge: a torch carrier
@@ -116,7 +121,7 @@
   const JAIL_HIT_DUR = 0.30;
   const JAIL_HIT_PITCH = 0.25;
   const JAIL_HIT_ROLL = 0.18;
-  const JAIL_HIT_YAW = 0.20;
+  const JAIL_HIT_YAW = 0.08;    // shoulders only: the body pivots at the feet
   const JAIL_HIT_HEAD = 0.34;
   const JAIL_HIT_KNEE = 0.30;
   const JAIL_HIT_FREE_ARM = -0.46;
@@ -185,7 +190,6 @@
         nkOff: 0, byOff: 0, llOff: 0, rlOff: 0, gbx: 0, gbz: 0,
         lowLaOff: 0, lowRaOff: 0, lowLlOff: 0, lowRlOff: 0,   // low-joint (elbow/knee) additive offsets
         stagT: 0, stagX: 0, stagZ: 1, stagAmp: 0,
-        flinT: 0, flinX: 0, flinZ: 1, flinAmp: 0,
         clutchT: 0, clutchSide: 0, clutchAmp: 0,   // wound-clutch (non-fatal): timer / which hand (±1) / caliber weight
         jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
         stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
@@ -217,7 +221,7 @@
     if (a.poseAimBack || a.poseHandsUp || (a.poseCower || 0) > 0 || a.surrender) { _qWhy = _qWhy || "pose"; return false; }
     if (a.state === "flee" || a.aiState === "flee") { _qWhy = _qWhy || "flee"; return false; }
     if ((a._broken || 0) > 0) { _qWhy = _qWhy || "broken"; return false; }
-    if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT ||
+    if (r.recoil || r.flash || r.stagT || r.clutchT ||
         r.jailHitT || r.stK || r.stOff ||
         r.aimK || r.dazeK || r.pkK || r.cowerLean || r.gbx || r.gbz ||
         r.laOff || r.raOff || r.nkOff || r.byOff || r.hyOff || r.llOff || r.rlOff ||
@@ -377,7 +381,7 @@
                 old.nkOff = 0; old.byOff = 0; old.llOff = 0; old.rlOff = 0;
                 old.lowLaOff = 0; old.lowRaOff = 0; old.lowLlOff = 0; old.lowRlOff = 0;
                 old.gbx = 0; old.gbz = 0; old.stagT = 0; old.dazeK = 0;
-                old.flinT = 0; old.clutchT = 0; old.aimK = 0; old.hyOff = 0;
+                old.clutchT = 0; old.aimK = 0; old.hyOff = 0;
                 // park the edge detector HIGH so the first frame back in range
                 // can't read a stale value as a fresh hit.
                 old.lastFl = 9;
@@ -566,30 +570,14 @@
           // carries the TRUE world push direction + shock energy — far better
           // than the hp-drop recoil, which can only guess "away from the
           // player" and points the wrong way in NPC-vs-NPC brawls.
+          // (a body already reacting on its own rig, a blow's snap or a
+          // round's fold, keeps that one: two lurches for one hit is the
+          // double-up that made a hit man wobble round his feet)
           if (pp) {
-            if (pp.fl > r.lastFl + 0.01) {
+            if (pp.fl > r.lastFl + 0.01 && !rigReacting(a)) {
               r.stagT = STAG_DUR;
               r.stagX = pp.fdx; r.stagZ = pp.fdz;
               r.stagAmp = Math.min(1.2, 0.45 + (pp.shock || 0) * 0.5);   // force-scaled
-              // BULLET FLINCH rides the same edge: a sharper, faster jerk on top
-              // of the lurch — shock is force-scaled, so caliber sets the snap.
-              r.flinT = FLIN_DUR;
-              r.flinX = pp.fdx; r.flinZ = pp.fdz;
-              r.flinAmp = Math.min(1.5, 0.45 + (pp.shock || 0) * 0.6);
-              // WOUND-CLUTCH: a NON-fatal hit makes them clap a hand over the
-              // wound + take half a step off it for ~0.6s — the long, readable
-              // tell that a living body absorbed the round (the fast flinch above
-              // is the impact, this is the recoil-from-pain after). Dead bodies
-              // ragdoll, so gate it on still-alive; caliber scales the magnitude.
-              if (!a.dead && (a.ko == null || a.ko <= 0)) {
-                const ry0 = a.group.rotation.y || 0;
-                // lateral component of the push in the actor's local frame → which
-                // side took it → which hand reaches across to clutch.
-                const lsr = Math.cos(ry0) * pp.fdx - Math.sin(ry0) * pp.fdz;
-                r.clutchSide = lsr >= 0 ? -1 : 1;   // hit pushed right → wound on the left → left hand clutches
-                r.clutchT = CLUTCH_DUR;
-                r.clutchAmp = Math.min(1.2, 0.55 + (pp.shock || 0) * 0.5);
-              }
             }
             r.lastFl = pp.fl;
           }
@@ -821,28 +809,9 @@
             }
           }
 
-          // ---- (1b) BULLET FLINCH: a sharper jerk + head snap layered over the
-          //      stagger — dies off exponentially in ~220ms, magnitude rides the
-          //      round's force. A close shotgun hit pairs this snap WITH the big
-          //      stagger lurch; a 9mm graze barely tics the head. ----
-          if (r.flinT > 0) {
-            r.flinT = Math.max(0, r.flinT - dt);
-            if (live) {
-              const e = r.flinT / FLIN_DUR;
-              const k = e * e * e * r.flinAmp;               // sharp attack, exponential-feel die-off
-              const lf = Math.cos(ry) * r.flinZ + Math.sin(ry) * r.flinX;
-              const ls = Math.cos(ry) * r.flinX - Math.sin(ry) * r.flinZ;
-              bodyOff += lf * FLIN_PITCH * k;                // torso jerked along the push
-              bodyRoll += -ls * 0.18 * k;
-              r.byOff += ls * FLIN_YAW * k;                  // shoulders wrenched off it
-              if (neck) r.nkOff += lf * FLIN_HEAD * k;       // the head snap sells the round
-            }
-          }
-
-          // ---- (1c) WOUND-CLUTCH: after a non-fatal shot the near hand claps
-          //      over the wound and the torso curls protectively off it. Eases
-          //      out over CLUTCH_DUR; the longer "he's hurt" read that sits under
-          //      the sharp flinch above. Skips the gun arm (actorweapons owns it)
+          // ---- (1c) CLUTCH: after a heavy head blow (CBZ.reactPunch) the near
+          //      hand comes up over the hurt and the torso curls off it. Eases
+          //      out over CLUTCH_DUR. Skips the gun arm (actorweapons owns it)
           //      and any frame an overriding pose (block/aim/surrender) is up. ----
           if (r.clutchT > 0) {
             r.clutchT = Math.max(0, r.clutchT - dt);

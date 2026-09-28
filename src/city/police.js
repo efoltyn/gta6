@@ -308,11 +308,12 @@
   //  would be a bug the day somebody tuned a number; this one cannot, by
   //  construction rather than by tuning.
   //
-  //  The counterplay is a VERB, not a stat: ONE telegraphed window (qteMax 1,
-  //  escape 0 — the probability roll is switched OFF so nothing but your own
-  //  press can save you). Beat it and predator.js's own escaped branch flings
-  //  you clear and forces the officer to disengage; you are loose, and charged
-  //  with resisting. Miss it and you are booked the hard way.
+  //  2026-09-28: the tackle on the player is a COMMITTED LUNGE (verbs.js +
+  //  systems/arrest.js): he only goes from arm's reach, he picks where you'll
+  //  be and dives, and a cut, a stop or simply more pace than the gap makes
+  //  him MISS — he goes full length on the pavement and that is your head
+  //  start. Landed: you are pinned under him (you can still buck him), then
+  //  hauled up for the cuffs, which are a struggle of their own.
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE == null) CBZ.CONFIG.ARREST_TACKLE = true;
   function tackleOn() {
@@ -340,8 +341,19 @@
         c._seizing = null;
         const k = S.result && S.result.outcome;
         if (k === "open" || k === "wall") {
-          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }   // up onto your knees for the cuffs
-          if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
+          // PINNED: he is on you. Up onto your feet with his hands on you, and
+          // the cuffs (CBZ.arrest.take: you can still fight them, winded)
+          const AR = CBZ.arrest;
+          if (AR && AR.subdue) AR.subdue(2.2, "pinned");
+          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }
+          if (CBZ.cityArrestTake) { try { CBZ.cityArrestTake(c, { pinned: true, violent: true }); } catch (e) {} }
+          else if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
+          return;
+        }
+        if (k === "missed" || k === "shrugged") {
+          // he dove and got pavement (STRIKE's knockdown has him for a beat):
+          // running from him was already resisting, the ladder carries on
+          c.arrestT = 0;
           return;
         }
         // anything but a takedown (you broke his grip, or he never got his arms
@@ -2227,8 +2239,10 @@
       const soak = Math.min(cop._armor, dmg);
       cop._armor -= soak; dmg -= soak;
       if (dmg <= 0) {
-        // shot stopped by armor — still react to the impact, but no flesh damage
-        if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: Math.min(3, (imp.force || 2) * 0.35) });
+        // shot stopped by armor — still react to the impact, but no flesh damage:
+        // the plate takes it, the man still rocks back off it (a third of the round)
+        if (imp && imp.point && shotOnRig(cop, imp, 0.35)) { /* CBZ.verbs.shot has him */ }
+        else if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: Math.min(3, (imp.force || 2) * 0.35) });
         return;
       }
     }
@@ -2295,8 +2309,21 @@
         else if (CBZ.cityCrime) CBZ.cityCrime(120, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "cop-kill" });
       }
       if (CBZ.pushKill) CBZ.pushKill("An officer was killed", "#ff6b6b");
+    } else if (imp && (imp.point || imp.shot) && shotOnRig(cop, imp, 1)) {
+      // a round into a living officer: zone, caliber and steps on his rig
     } else if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 3 });
   };
+  // CBZ.verbs.shot for an officer (false = no rig: the caller's body impulse)
+  const _copShot = { point: null, dir: null, fromX: 0, fromZ: 0, cal: 1, wkey: "", dist: 0, share: 1, head: false, power: 1 };
+  function shotOnRig(cop, imp, power) {
+    const V = CBZ.verbs;
+    if (!V || !V.shot) return false;
+    _copShot.point = imp.point || null; _copShot.dir = imp.dir || null;
+    _copShot.fromX = imp.fromX; _copShot.fromZ = imp.fromZ;
+    _copShot.cal = imp.cal || 1; _copShot.wkey = imp.wkey || ""; _copShot.dist = imp.dist || 0;
+    _copShot.share = imp.share || 1; _copShot.head = !!imp.headshot; _copShot.power = power;
+    return V.shot(cop, _copShot);
+  }
 
   // GTA wanted-tier ramp: how many of the responders to you should be SWAT/NOOSE.
   // 0-1★ none, 2★ a token, 3★ a chunk, 4★ most, 5★ nearly the whole heavy column —
@@ -3290,6 +3317,12 @@
       // for the length of the hold (it drives the pose and anchors the victim to
       // him). Patrol logic must not walk him out from under his own tackle.
       if (c._seizing) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- HANDS ON THE PLAYER (systems/arrest.js's take: the cuffs, the
+      // escort): the verb has his body; the beat must not walk him off it
+      if (c._arresting) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- ON THE PAVEMENT (a lunge that missed, a blow that dropped him):
+      // STRIKE's fall has the rig and gets him up in its own time
+      if (c.ko > 0) { c.speed = 0; if (_near) animChar(c.char, 0, dt); continue; }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
@@ -3931,6 +3964,7 @@
     }
   }
 
+  const _copWP = { x: 0, y: 0, z: 0 };   // where an officer's round lands on a ped (reused)
   // fireAt(c, tgt, dist, dt) — dt is optional and only used by the competence
   // layer (systems/combat_iq.js). Returns true if a round actually left the gun.
   function fireAt(c, tgt, dist, dt) {
@@ -3989,9 +4023,12 @@
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", rng() < 0.012, c);
     } else {
       tgt.hp -= dmg;
-      if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.0 + rng() * 0.6, z: tgt.pos.z }, { cal: c.swat ? 1.1 : 0.85, fromX: c.pos.x, fromZ: c.pos.z });
+      _copWP.x = tgt.pos.x; _copWP.y = (tgt.pos.y || 0) + 1.0 + rng() * 0.6; _copWP.z = tgt.pos.z;
+      if (CBZ.bodyWound) CBZ.bodyWound(tgt, _copWP, { cal: c.swat ? 1.1 : 0.85, fromX: c.pos.x, fromZ: c.pos.z });
       if (tgt.hp <= 0) CBZ.cityKillPed && CBZ.cityKillPed(tgt, { fromX: c.pos.x, fromZ: c.pos.z, attacker: c, byPlayer: false, force: 5, fling: 4 }, "shot by police");
-      else if (CBZ.body) CBZ.body.hit(tgt, { fromX: c.pos.x, fromZ: c.pos.z, force: 3 });
+      // alive: the round lands on his rig (CBZ.verbs.shot via peds.js); the
+      // old slide only for a body with no rig
+      else if (!(CBZ.cityStreetShot && CBZ.cityStreetShot(tgt, c.pos.x, c.pos.z, _copWP, c.swat ? 1.1 : 0.85)) && CBZ.body) CBZ.body.hit(tgt, { fromX: c.pos.x, fromZ: c.pos.z, force: 3 });
     }
     return true;
   }

@@ -248,7 +248,7 @@
       needs: ["look"],
       // fphands.js first: every body's hand IS the first-person hand (body LOD),
       // built inside makeCharacter
-      files: ["systems/fphands.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
+      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
       publishes: ["human", "makeCharacter", "headwear", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
@@ -261,7 +261,7 @@
              "over a rail, off a ledge, into water), plus strike / knockdown / " +
              "getUp and the fighter's timing. CBZ.verbs.grab(a, b) and it plays",
       needs: ["people"],
-      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/verbs_pickup.js"],
+      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/bodyfall.js", "systems/verbs_pickup.js"],
       publishes: ["verbs", "verbPoses", "meleePoses"],
     },
 

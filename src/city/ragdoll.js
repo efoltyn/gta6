@@ -118,10 +118,10 @@
   // 13 points, rig-local rest offsets (character.js joint positions)
   const OFF = [
     0, 2.18, 0,                          // 0 head
-    -0.62, 1.84, 0, 0.62, 1.84, 0,       // 1,2 shoulders
+    0.62, 1.84, 0, -0.62, 1.84, 0,       // 1,2 shoulders (1 = la, which the rig builds on +x)
     -0.23, 0.95, 0, 0.23, 0.95, 0,       // 3,4 hips
-    -0.62, 1.375, 0, 0.62, 1.375, 0,     // 5,6 elbows
-    -0.62, 0.91, 0, 0.62, 0.91, 0,       // 7,8 hands
+    0.62, 1.375, 0, -0.62, 1.375, 0,     // 5,6 elbows
+    0.62, 0.91, 0, -0.62, 0.91, 0,       // 7,8 hands
     -0.23, 0.475, 0, 0.23, 0.475, 0,     // 9,10 knees
     -0.23, 0.02, 0, 0.23, 0.02, 0,       // 11,12 feet
   ];
@@ -159,91 +159,14 @@
   // stance or a crossed-legs sit/slump.
   stickMin(9, 10, RAD[9] + RAD[10]);   // knee vs knee
   stickMin(5, 6, RAD[5] + RAD[6]);     // elbow vs elbow
+  // LIMB FOLD: a limp knee or elbow folds a long way but not flat on itself
+  // (heel to buttock, fist to shoulder). A floor on the hip-ankle and
+  // shoulder-hand distance caps the fold at roughly 125 degrees; spacers are
+  // distances, so the relaxation stays stable. (The solver shaves minOnly
+  // rests by 0.8, so these are authored at 1/0.8 of the wanted floor.)
+  stickMin(3, 11, 0.93 * 0.45 / 0.8); stickMin(4, 12, 0.93 * 0.45 / 0.8);
+  stickMin(1, 7, 0.93 * 0.42 / 0.8); stickMin(2, 8, 0.93 * 0.42 / 0.8);
   const NS = STICKS.length / 4;
-
-  // JOINT ANGLE LIMITS (Jakobsen §"Angular constraints"): plain distance
-  // sticks keep bone LENGTH honest but say nothing about bend DIRECTION, so a
-  // tumbling body can hyperextend a knee/elbow straight backward — the limb
-  // still measures the right length, it's just bent the wrong way, which
-  // reads as broken the instant the camera lingers on a corpse.
-  //
-  // [top, mid, end, axisA, axisB, minBend, maxBend] per hinge:
-  //   top/mid/end   — the 3 points of the 2-bone chain (hip/knee/foot etc).
-  //   axisA/axisB   — a live pair of points (opposite hip or shoulder) whose
-  //                   connecting line approximates the hinge's rotation axis
-  //                   (knees/elbows only really hinge side-to-side around the
-  //                   body's left-right line, never twist arbitrarily).
-  //   minBend/maxBend — signed bend range where 0 == dead straight. With THIS
-  //                   file's point order (top always the lower-index/"left"
-  //                   joint, axis always low-index→high-index) gravity/verlet
-  //                   sag on a falling body drives the bend NEGATIVE — checked
-  //                   empirically off both the dying-beat knee buckle (existing
-  //                   code above) and a gravity-drooped arm, both land negative
-  //                   — so minBend is the deep, permissive limit (legs/arms may
-  //                   fold a long way that direction) and maxBend is pinned
-  //                   just barely above 0: only a hair of positive slack so a
-  //                   dead-straight limb doesn't jitter at the boundary, but a
-  //                   real hyperextension (bend the OTHER way) gets pushed back.
-  const JOINTS = [
-    [3, 9, 11, 3, 4, -2.35, 0.06],   // left knee  (hinge axis = hip line)
-    [4, 10, 12, 3, 4, -2.35, 0.06],  // right knee
-    [1, 5, 7, 1, 2, -2.55, 0.06],    // left elbow (hinge axis = shoulder line)
-    [2, 6, 8, 1, 2, -2.55, 0.06],    // right elbow
-  ];
-  const NJ = JOINTS.length;
-  // scratch for the angle pass — zero per-call allocation, mirrors the file's
-  // existing _r/_u/_f/_a scratch-vector convention (kept as plain numbers
-  // here since this runs NJ*ITER*2 times per body per frame and a Vector3
-  // method-call chain would be needless overhead at that rate).
-  let _ux, _uy, _uz, _lx, _ly, _lz, _hx2, _hy2, _hz2;
-  // Soft angular correction: whenever the signed bend falls outside
-  // [minBend, maxBend], rotate the LOWER segment direction around the hinge
-  // axis by the excess angle to get where "end" *should* sit for a legal
-  // bend, then nudge the elbow/knee's MIDDLE point (never the fixed top/end
-  // anchors) a small fraction of the way to close that gap — moving mid
-  // opposite the would-be end displacement rotates the mid→end vector back
-  // toward legal without ever touching end directly. Blended at 35% per call
-  // (same soft-correction spirit as the stick pass above: several relaxation
-  // passes converge it, no single pass snaps it, so no velocity spike gets
-  // injected into the verlet integrator).
-  function clampJointAngle(p, top, mid, end, aA, aB, minBend, maxBend) {
-    const ti = top * 3, mi = mid * 3, ei = end * 3, aAi = aA * 3, aBi = aB * 3;
-    _ux = p[mi] - p[ti]; _uy = p[mi + 1] - p[ti + 1]; _uz = p[mi + 2] - p[ti + 2];
-    _lx = p[ei] - p[mi]; _ly = p[ei + 1] - p[mi + 1]; _lz = p[ei + 2] - p[mi + 2];
-    const ul = Math.sqrt(_ux * _ux + _uy * _uy + _uz * _uz) || 0.0001;
-    const ll = Math.sqrt(_lx * _lx + _ly * _ly + _lz * _lz) || 0.0001;
-    _ux /= ul; _uy /= ul; _uz /= ul;
-    _lx /= ll; _ly /= ll; _lz /= ll;
-    _hx2 = p[aBi] - p[aAi]; _hy2 = p[aBi + 1] - p[aAi + 1]; _hz2 = p[aBi + 2] - p[aAi + 2];
-    const hl = Math.sqrt(_hx2 * _hx2 + _hy2 * _hy2 + _hz2 * _hz2) || 0.0001;
-    _hx2 /= hl; _hy2 /= hl; _hz2 /= hl;
-    // signed bend around the hinge axis: 0 == dead straight. Gravity/verlet
-    // sag on a falling body drives this NEGATIVE for both knee and elbow with
-    // this file's point/axis order (see the JOINTS comment above) — so
-    // negative is the deep, anatomically-normal fold and positive is
-    // hyperextension.
-    const cx = _uy * _lz - _uz * _ly, cy = _uz * _lx - _ux * _lz, cz = _ux * _ly - _uy * _lx;
-    const sinA = cx * _hx2 + cy * _hy2 + cz * _hz2;
-    const cosA = _ux * _lx + _uy * _ly + _uz * _lz;
-    const bend = Math.atan2(sinA, cosA);
-    let target = bend;
-    if (bend < minBend) target = minBend; else if (bend > maxBend) target = maxBend;
-    if (target === bend) return;                     // inside the legal range — untouched
-    const dAngle = target - bend;
-    const c = Math.cos(dAngle), sn = Math.sin(dAngle);
-    // Rodrigues' rotation of the (unit) lower-segment direction around the
-    // (unit) hinge axis by dAngle — l' = l*cosθ + (h×l)*sinθ + h*(h·l)*(1-cosθ)
-    const hxl_x = _hy2 * _lz - _hz2 * _ly, hxl_y = _hz2 * _lx - _hx2 * _lz, hxl_z = _hx2 * _ly - _hy2 * _lx;
-    const hdl = _hx2 * _lx + _hy2 * _ly + _hz2 * _lz;
-    const lpx = _lx * c + hxl_x * sn + _hx2 * hdl * (1 - c);
-    const lpy = _ly * c + hxl_y * sn + _hy2 * hdl * (1 - c);
-    const lpz = _lz * c + hxl_z * sn + _hz2 * hdl * (1 - c);
-    // where "end" would need to be for that legal bend, holding mid fixed —
-    // then nudge MID by the opposite (blended) delta so the mid→end vector
-    // rotates toward legal without moving the end/top anchors this pass.
-    const k = (0.35 * ll);
-    p[mi] -= (lpx - _lx) * k; p[mi + 1] -= (lpy - _ly) * k; p[mi + 2] -= (lpz - _lz) * k;
-  }
 
   function makeSlot(idx) {
     return {
@@ -258,6 +181,10 @@
       //      dyt counts down; while >0 the solver bends the legs to a brace
       //      then a collapse and shoves the hips along dyx/dyz.
       dyt: 0, dyMax: 0, dyx: 0, dyz: 0, dyForce: 0, dyHead: false,
+      // the skeleton is authored for the 2.60 u rig; k scales it to THIS body
+      // (humanScale x its own hip height), and fwx/fwz is the way he faced
+      k: 1, fwx: 0, fwz: 1, hk: 0.95, noBeat: false,
+      rest: new Float32Array(64),            // this body's bone lengths (per stick)
       // ---- held by something (see applyPin) and the water column this body
       //      is in (see waterProbe). wet=false is the land path, byte-identical.
       pin: null, wet: false, seaY: 0, seaDy: 0,
@@ -320,67 +247,100 @@
     if (t._deathSeed == null) t._deathSeed = Math.random() * 6.28;
   }
 
-  // distribute the impulse over the points with falloff from the hit, a topple
-  // bias toward the high points, headshot head-kick, explosive lift past imp 20.
-  //
-  // REALISM (research: GTA Euphoria, procedural hit-reaction systems): a body
-  // doesn't slide as a rigid plank along the bullet — it TOPPLES. So the high
-  // mass (head/shoulders) gets far more horizontal push than the planted feet,
-  // and the feet get a small COUNTER push back toward the shooter: the pair is
-  // a couple that pitches the body over AWAY from the gun (forward if shot in
-  // the back, backward if shot in the chest, sideways for a flank). A headshot
-  // takes the legs out from under and the body drops nearly straight down. A
-  // shotgun/blast (imp >= ~14) overpowers the topple and HURLS the whole body.
+  /* THE ROUND'S IMPULSE, and nothing that spins him.
+     What was here was a TOPPLE COUPLE: the head and shoulders pushed along
+     the round at up to 1.6x, the feet kicked BACK toward the gun, a random
+     sideways jitter on every point, and a falloff measured in 3D from the
+     wound, so a hit on one shoulder pushed that side harder than the other.
+     With ground friction holding the planted feet, that is a plank levered
+     over its own soles while it twists about them: the "weird pivot, almost
+     like one part of their foot is stuck to the ground and they're spinning
+     around it" the owner saw.
+     A bullet moves a body very little; the fall is the legs giving out. So:
+       · the whole body shares the round's momentum along its line (its
+         centre of mass moves with the round), the upper body a little more
+         because it is struck above the hips, and NOTHING goes back toward the
+         gun;
+       · the falloff is by HEIGHT only: left and right get the same push, so
+         no yaw torque, so no spin;
+       · the collapse (the DYING BEAT in solve) takes the knees forward and
+         the hips down, with the feet loose on the floor, so the body folds
+         and drops along the round instead of hinging on its feet;
+       · a headshot drops him almost straight down; a point-blank shotgun or
+         a blast still HURLS the whole body (that one is real). */
   function kick(s, point, dir, imp) {
     const p = s.p, q = s.kv; s.kicked = true; // velocities park in kv; solve() converts at its real substep
     let dx = dir ? (dir.x || 0) : 0, dy = dir ? (dir.y || 0) : 0, dz = dir ? (dir.z || 0) : 0;
     const dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (dl < 0.001) { const a = Math.random() * 6.28; dx = Math.cos(a); dz = Math.sin(a); dy = 0; }
+    if (dl < 0.001) { dx = -s.fwx; dz = -s.fwz; dy = 0; }   // no line at all: he folds back where he stands
     else { dx /= dl; dy /= dl; dz /= dl; }
     const m = Math.max(1, Math.min(34, imp || 6));
     const boom = m >= 20;          // explosion / RPG: lift the whole body
-    const heavy = m >= 14;         // point-blank shotgun / car: a real launch, topple gives way to fling
+    const heavy = m >= 14;         // point-blank shotgun / car: a real launch
+    const k = s.k || 1;
     const px = point ? point.x : null, py = point ? point.y : 0, pz = point ? point.z : 0;
+    const hr = 0.6 * k;
     const hs = px != null &&
-      ((px - p[0]) * (px - p[0]) + (py - p[1]) * (py - p[1]) + (pz - p[2]) * (pz - p[2])) < 0.36;
+      ((px - p[0]) * (px - p[0]) + (py - p[1]) * (py - p[1]) + (pz - p[2]) * (pz - p[2])) < hr * hr;
     // arm the DYING BEAT (solve() reads it): the heavier the hit the shorter
-    // the on-his-feet stumble before he's fully limp — a blast gives no stumble
-    // at all (the body is already airborne), a pistol gives the full lurch.
-    if (s.dyt <= 0 && !boom) {
-      s.dyMax = s.dyt = Math.max(0.12, Math.min(0.34, 0.34 - (m - 1) * 0.012));
+    // the on-his-feet collapse before he's fully limp — a blast gives none at
+    // all (the body is already airborne), a pistol gives the full buckle.
+    if (s.dyt <= 0 && !heavy && !s.noBeat) {
+      s.dyMax = s.dyt = Math.max(0.16, Math.min(0.36, 0.36 - (m - 1) * 0.012));
       s.dyx = dx; s.dyz = dz; s.dyForce = m / 6; s.dyHead = hs;
     }
+    // the share of the round the body keeps: a pistol ~0.5 m/s, a rifle ~0.9,
+    // a close shotgun ~1.6 (theatrical, but a body not a crate)
+    const base = heavy ? m * 0.12 : Math.min(1.0, 0.08 * m + 0.05);
     for (let i = 0; i < 13; i++) {
       const ix = i * 3, iy = ix + 1, iz = ix + 2;
-      // distance falloff from the wound (close points take the round hardest)
-      let w = 0.75;
-      if (px != null) {
-        const d = Math.sqrt((p[ix] - px) * (p[ix] - px) + (p[iy] - py) * (p[iy] - py) + (p[iz] - pz) * (p[iz] - pz));
-        w = Math.max(0.3, 1 - d / 2.4);
-      }
-      // height factor 0 (feet) .. 1 (head). TOPPLE COUPLE: high points pushed
-      // hard along the round, low points get a small kick BACK toward the gun.
-      const hf = OFF[ix + 1] / 2.18;
-      // a headshot buckles the legs — almost no horizontal couple, the body
-      // folds and drops; a body shot topples about the feet.
-      const toppleHi = hs ? (0.35 + 0.25 * hf) : (0.45 + 1.15 * hf);
-      const toppleLo = hs ? 0 : (1 - hf) * 0.45;          // counter-kick at the legs
-      const along = m * VK * w * (toppleHi - toppleLo);
-      let vx = dx * along, vz = dz * along;
-      // vertical: a tiny upward toss off a body shot (rounds carry up the torso),
-      // legs sag for a headshot collapse. dy from the caller adds an aimed lift.
-      let vy = (dy * m * VK + m * 0.04 * hf) * w;
-      if (hs) vy -= m * 0.10 * (1 - hf) * w;              // legs give → hips drop
+      const hf = OFF[ix + 1] / 2.18;                     // 0 feet .. 1 head
+      let w = 1;
+      if (px != null) w = Math.max(0.55, 1 - Math.abs(p[iy] - py) / (2.2 * k));
+      const along = base * w * (hs ? 0.55 : (0.75 + 0.5 * hf));
+      const vx = dx * along, vz = dz * along;
+      let vy = dy * base * w * 0.5;
+      if (hs) vy -= m * 0.05 * (1 - hf);                 // legs give → hips drop
       if (boom) vy += (m * 0.3 + Math.random() * 2) * w;  // a blast LIFTS the whole body
-      else if (heavy) vy += m * 0.10 * hf * w;            // a shotgun lofts the upper body as it hurls it
-      vx += (Math.random() - 0.5) * m * 0.06;
-      vz += (Math.random() - 0.5) * m * 0.06;
+      else if (heavy) vy += m * 0.06 * hf * w;            // a shotgun lofts the upper body as it hurls it
       q[ix] -= vx * KICK_DT; q[iy] -= vy * KICK_DT; q[iz] -= vz * KICK_DT;
     }
-    if (hs) {  // headshot: the skull whips with the round, snaps back, head dumps down
-      q[0] -= dx * m * 0.34 * KICK_DT; q[2] -= dz * m * 0.34 * KICK_DT;
-      q[1] += m * 0.10 * KICK_DT;       // (kv is subtracted in solve → +q here = the head DROPS)
+    if (hs) {  // headshot: the skull whips with the round, then the head drops
+      q[0] -= dx * m * 0.12 * KICK_DT; q[2] -= dz * m * 0.12 * KICK_DT;
+      q[1] += m * 0.05 * KICK_DT;       // (kv is subtracted in solve → +q here = the head DROPS)
     }
+  }
+  // HE WAS MOVING: every point keeps the run he died in, so a man shot while
+  // running carries it into the fall (the ground friction takes it off).
+  function carry(s, vx, vz) {
+    if (!(vx || vz)) return;
+    const q = s.kv; s.kicked = true;
+    for (let i = 0; i < 13; i++) { q[i * 3] -= vx * KICK_DT; q[i * 3 + 2] -= vz * KICK_DT; }
+  }
+
+  // the 13 points as the rig's own joints (see OFF for the order): head,
+  // shoulders (la = point 1, on the rig's +x), hips (ll = point 3, on -x),
+  // elbows, hands, knees, ankles
+  const _sj = new THREE.Vector3();
+  function jointAt(o, out, dy) {
+    if (!o || !o.matrixWorld) return false;
+    out.setFromMatrixPosition(o.matrixWorld);
+    if (dy) out.y += dy;
+    return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+  }
+  function seedFromRig(s, ch, grp) {
+    const P = ch.parts, L = ch.low || {}, S = ch.sockets || {};
+    if (!P || !P.la || !P.ra || !P.ll || !P.rl) return false;
+    grp.updateMatrixWorld(true);
+    const ank = 0.07 * s.k / 0.7;                  // shoe origin is the sole; the point is the ankle
+    const src = [ch.head, P.la, P.ra, P.ll, P.rl, L.la, L.ra, S.leftHand, S.rightHand, L.ll, L.rl,
+      P.ll.userData && P.ll.userData.cap, P.rl.userData && P.rl.userData.cap];
+    for (let i = 0; i < 13; i++) {
+      if (!jointAt(src[i], _sj, i >= 11 ? ank : 0)) return false;
+      const ix = i * 3;
+      s.p[ix] = s.q[ix] = _sj.x; s.p[ix + 1] = s.q[ix + 1] = _sj.y; s.p[ix + 2] = s.q[ix + 2] = _sj.z;
+    }
+    return true;
   }
 
   function start(target, point, dir, imp, fromNet) {
@@ -433,14 +393,45 @@
     // seed the points from the rig's CURRENT root transform — canonical joint
     // offsets through the group quaternion, so an already-toppled body works too.
     const grp = target.group;
-    _qt.copy(grp.quaternion);
-    for (let i = 0; i < 13; i++) {
-      _a.set(OFF[i * 3], OFF[i * 3 + 1], OFF[i * 3 + 2]).applyQuaternion(_qt);
-      const ix = i * 3;
-      s.p[ix] = s.q[ix] = grp.position.x + _a.x;
-      s.p[ix + 1] = s.q[ix + 1] = grp.position.y + _a.y;
-      s.p[ix + 2] = s.q[ix + 2] = grp.position.z + _a.z;
+    /* THE SKELETON IS THIS BODY'S SIZE. OFF is authored for the legacy 2.60 u
+       rig, but every rig renders at humanScale (0.70): the solver was
+       simulating a man 1.43x taller than the one on screen, so the drawn
+       pelvis sat 0.3 m off the physical hips and the body lay on joints that
+       were not its own (floating, and resolving walls it never touched). */
+    const sm = CBZ.charSeatMetrics ? CBZ.charSeatMetrics(ch) : null;
+    s.k = sm && sm.hipY > 0 ? sm.hipY / 0.95
+      : ((grp.userData && grp.userData.humanScale) || 1);
+    { const ry = grp.rotation.y || 0; s.fwx = Math.sin(ry); s.fwz = Math.cos(ry); }
+    s.hk = sm && sm.hipY > 0 ? sm.hipY : 0.95 * s.k;
+    /* SEED FROM THE BODY AS IT IS. The points are the rig's own joints, read
+       in world space off the pose it has THIS frame (standing, mid-stride,
+       or already lying in its collapse), and every bone's rest length is
+       measured off them, so the skeleton has this man's proportions and
+       starts exactly where the drawn body is. The canonical OFF pose is
+       only the fallback for a rig missing a joint. */
+    const seeded = seedFromRig(s, ch, grp);
+    if (!seeded) {
+      _qt.copy(grp.quaternion);
+      for (let i = 0; i < 13; i++) {
+        _a.set(OFF[i * 3] * s.k, OFF[i * 3 + 1] * s.k, OFF[i * 3 + 2] * s.k).applyQuaternion(_qt);
+        const ix = i * 3;
+        s.p[ix] = s.q[ix] = grp.position.x + _a.x;
+        s.p[ix + 1] = s.q[ix + 1] = grp.position.y + _a.y;
+        s.p[ix + 2] = s.q[ix + 2] = grp.position.z + _a.z;
+      }
     }
+    for (let c = 0; c < NS; c++) {
+      const i = STICKS[c * 4] * 3, j = STICKS[c * 4 + 1] * 3;
+      s.rest[c] = seeded
+        ? Math.hypot(s.p[j] - s.p[i], s.p[j + 1] - s.p[i + 1], s.p[j + 2] - s.p[i + 2])
+        : STICKS[c * 4 + 2] * s.k;
+    }
+    // a body already down in its collapse (systems/bodyfall.js) hands over
+    // here: the rig's keyed lie is replaced by the points, so its model drop
+    // goes, and it does not get a second dying beat on the floor
+    const wasDown = !!(target._bf && target._bf.on);
+    if (wasDown && CBZ.bodyFall) CBZ.bodyFall.clear(target);
+    s.noBeat = wasDown;
     s.used = true; s.ped = target; s.ch = ch; s.isPlayer = !!target.isPlayer;
     s.age = ++seq; s.still = 0; s.asleep = false; s.life = 0; s.thud = false;
     s.dyt = 0;                                       // cleared so kick() arms a fresh beat
@@ -456,6 +447,9 @@
     if (ch.body) { ch.body.rotation.set(0, 0, 0); ch.body.position.y = 0; }
     bumpPhys(target);
     kick(s, point, dir, imp);
+    { const mv = target._mv, vel = target.vel;
+      if (mv && (mv.vx || mv.vz)) carry(s, mv.vx || 0, mv.vz || 0);
+      else if (vel && (vel.x || vel.z)) carry(s, vel.x || 0, vel.z || 0); }
     if (!fromNet && CBZ.netRagEmit) CBZ.netRagEmit(target, point, dir, imp);
     return true;
   }
@@ -535,9 +529,60 @@
     for (let i = 1; i < 39; i += 3) { p[i] += dy; q[i] += dy; }
   }
 
+  /* THE BODY AS IT FROZE, fitted to the world once. The points rest on
+     their own radii, but the drawn body is boxes of its own thickness, and
+     the extremity wall push above only knows six points: measured, a frozen
+     corpse still had a shoulder box or a shoe 6-19 cm under the street and
+     a hand in a wall. At the moment it sleeps (once per body, never per
+     frame) we read the real posed meshes: lift it by however far its lowest
+     vertex is under the floor, and slide it out of any wall by its own
+     extremities (systems/bodyfall.js's resolver), by moving the POINTS, so
+     the frozen pose keeps the fix. */
+  const _fv = new THREE.Vector3(), _fp = { x: 0, y: 0, z: 0 };
+  function restFit(s) {
+    const ch = s.ch, g = s.ped && s.ped.group;
+    if (!ch || !g) return;
+    writePose(s);
+    g.updateMatrixWorld(true);
+    let low = Infinity;
+    g.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+      for (let q = o; q && q !== g; q = q.parent) if (q.visible === false) return;
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) { _fv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); if (_fv.y < low) low = _fv.y; }
+    });
+    const floor = groundUnder(s.cx, s.cz, s.cy + 0.5);
+    let dy = Number.isFinite(low) ? floor - low : 0;
+    dy = dy > 0 ? Math.min(0.35, dy) : 0;
+    _fp.x = g.position.x; _fp.y = g.position.y; _fp.z = g.position.z;
+    if (CBZ.bodyFall && CBZ.bodyFall.unwall && CBZ.collide) {
+      // twice: the first slide can bring another extremity to the wall
+      CBZ.bodyFall.unwall(ch, g, _fp);
+      const ox = g.position.x, oz = g.position.z;
+      g.position.x = _fp.x; g.position.z = _fp.z;
+      CBZ.bodyFall.unwall(ch, g, _fp);
+      g.position.x = ox; g.position.z = oz;
+    }
+    const dx = _fp.x - g.position.x, dz = _fp.z - g.position.z;
+    if (!dy && !dx && !dz) return;
+    const p = s.p, q = s.q;
+    for (let i = 0; i < 39; i += 3) {
+      p[i] += dx; q[i] += dx; p[i + 1] += dy; q[i + 1] += dy; p[i + 2] += dz; q[i + 2] += dz;
+    }
+    writePose(s);
+  }
+
+  // move one point's velocity (per substep, verlet p - q) toward a target
+  // in m/s on the axes given (NaN = leave that axis alone)
+  function steer(p, q, i, vx, vy, vz, h, gain) {
+    if (vx === vx) { const c = p[i] - q[i]; p[i] += (vx * h - c) * gain; }
+    if (vy === vy) { const c = p[i + 1] - q[i + 1]; p[i + 1] += (vy * h - c) * gain; }
+    if (vz === vz) { const c = p[i + 2] - q[i + 2]; p[i + 2] += (vz * h - c) * gain; }
+  }
+
   function solve(s, dt) {
     if (dt <= 0) return;
-    const p = s.p, q = s.q;
+    const p = s.p, q = s.q, sk = s.k;
     // support columns at the two body ends — points use the nearer column, so a
     // body straddling a roof edge folds over it and a stair run reads per-tread.
     const hx = p[0], hz = p[2];
@@ -550,38 +595,24 @@
       for (let j = 0; j < 39; j++) { q[j] += kv[j] * ks; kv[j] = 0; }
       s.kicked = false;
     }
-    // ---- DYING BEAT: a brief active stumble before full limp. While dyt runs
-    //      the body still "fights" gravity a little — the knees BUCKLE (feet
-    //      drift in under the hips, the hip line sags) and the whole frame
-    //      lurches a step in the bullet's travel direction — so the death reads
-    //      as absorbing the round and stumbling, not snapping flat. It eases out
-    //      to nothing, handing off seamlessly to the limp verlet fall below.
+    // ---- DYING BEAT: the legs give out first. While dyt runs the muscles
+    //      quit from the ground up: the knees drive forward over the toes and
+    //      down, the hips drop under them, and the feet stay where they stood
+    //      (ground friction), so the body FOLDS and its centre of mass falls
+    //      nearly straight down, carried along the round by the kick, rather
+    //      than a straight body hinging over its soles. A headshot folds
+    //      hardest (everything stops at once). Written as velocity TARGETS,
+    //      not per-frame nudges, so the frame rate cannot change how hard he
+    //      goes down. It hands off to the limp fall below as it ends.
     if (s.dyt > 0) {
       s.dyt = Math.max(0, s.dyt - dt);
       const k = s.dyMax > 0 ? s.dyt / s.dyMax : 0;   // 1 at impact → 0
-      const step = h * s.dyForce;
-      // lurch the upper body a stagger-step along the force (sets velocity by
-      // moving p ahead of q): strongest at impact, fades as he goes limp.
-      const drive = (s.dyHead ? 0.45 : 1.0) * k * step * 1.4;
-      // shoulders + head carry the stumble; hips follow a touch
-      const PUSH = [0, 1, 2, 3, 4];                   // head, shoulders, hips
-      for (let n = 0; n < PUSH.length; n++) {
-        const ix = PUSH[n] * 3;
-        const wgt = ix < 9 ? 1 : 0.5;                 // head/shoulders > hips
-        p[ix] += s.dyx * drive * wgt;
-        p[ix + 2] += s.dyz * drive * wgt;
-      }
-      // KNEES BUCKLE: collapse the legs so the body sinks instead of staying
-      // planted — feet ease in toward under the hips, knees fold, hip line dips.
-      const buckle = (s.dyHead ? 1.3 : 0.8) * k;
+      const give = (s.dyHead ? 1.35 : 1.0) * (0.35 + 0.65 * k);
+      const kneeF = 1.25 * sk * give, kneeD = 1.1 * sk * give, hipD = 1.9 * sk * give;
       for (let n = 0; n < 2; n++) {
-        const hip = (3 + n) * 3, knee = (9 + n) * 3, foot = (11 + n) * 3;
-        // drag the feet horizontally toward the hips (knees give out)
-        p[foot] += (p[hip] - p[foot]) * 0.10 * buckle;
-        p[foot + 2] += (p[hip + 2] - p[foot + 2]) * 0.10 * buckle;
-        // sag the knee + hip down a hair so the stance collapses
-        p[knee + 1] -= 0.012 * buckle;
-        p[hip + 1] -= 0.010 * buckle;
+        const hip = (3 + n) * 3, knee = (9 + n) * 3;
+        steer(p, q, knee, s.fwx * kneeF, -kneeD, s.fwz * kneeF, h, 0.55);
+        steer(p, q, hip, NaN, -hipD, NaN, h, 0.55);
       }
     }
     const gh2 = GRAV() * h * h;
@@ -606,7 +637,7 @@
         if (wet) {
           const dep = seaTop - p[iy];
           if (dep > 0) {
-            const k = dep < RAD[i] ? dep / RAD[i] : 1;
+            const k = dep < RAD[i] * s.k ? dep / (RAD[i] * s.k) : 1;
             g = gh2 * (1 + (BUOY_G - 1) * k);          // k=1 → net upward
             const dr = 1 - (1 - BUOY_DRAG) * k;        // water drag, same ramp
             vx *= dr; vy *= dr; vz *= dr;
@@ -617,7 +648,7 @@
       for (let it = 0; it < ITER; it++) {
         for (let c = 0; c < NS; c++) {
           const b = c * 4, i = STICKS[b] * 3, j = STICKS[b + 1] * 3;
-          const rest = STICKS[b + 3] ? STICKS[b + 2] * 0.8 : STICKS[b + 2];
+          const rest = STICKS[b + 3] ? STICKS[b + 2] * 0.8 * sk : s.rest[c];
           let dx = p[j] - p[i], dy = p[j + 1] - p[i + 1], dz = p[j + 2] - p[i + 2];
           const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
           if (STICKS[b + 3] && d > rest) continue;   // minOnly: spacer, not a rod
@@ -626,20 +657,21 @@
           p[i] -= dx; p[i + 1] -= dy; p[i + 2] -= dz;
           p[j] += dx; p[j + 1] += dy; p[j + 2] += dz;
         }
-        // knee/elbow angle limits — same relaxation pass, same soft-blend
-        // philosophy as the sticks above, just correcting bend DIRECTION
-        // instead of bone LENGTH (see clampJointAngle's header comment).
-        for (let jn = 0; jn < NJ; jn++) {
-          const J = JOINTS[jn];
-          clampJointAngle(p, J[0], J[1], J[2], J[3], J[4], J[5], J[6]);
-        }
+        // (The per-iteration knee/elbow ANGLE clamp that ran here is gone. It
+        // had the knee's sign inverted, so it forbade a knee's natural fold
+        // and allowed it to bend backward, and even with the sign right it
+        // injected energy: measured in tools/bodyfall-check.mjs, one body in
+        // three flipped over, its centre of mass jumping up to 1.4 m, and
+        // spun past 90 degrees. The fold limits are one-sided DISTANCE
+        // spacers now (hip-ankle, shoulder-hand; see LIMB FOLD below), which
+        // a verlet relaxation can never pump energy into.)
       }
       // ground: clamp + friction + a whisper of bounce
       for (let i = 0; i < 13; i++) {
         const ix = i * 3, iy = ix + 1, iz = ix + 2;
         const dh = (p[ix] - hx) * (p[ix] - hx) + (p[iz] - hz) * (p[iz] - hz);
         const df = (p[ix] - fx) * (p[ix] - fx) + (p[iz] - fz) * (p[iz] - fz);
-        const fl = (dh < df ? g0 : g1) + RAD[i];
+        const fl = (dh < df ? g0 : g1) + RAD[i] * sk;
         if (p[iy] < fl) {
           const vy = p[iy] - q[iy];
           p[iy] = fl;
@@ -665,7 +697,7 @@
       for (let k = 0; k < WALLPTS.length; k++) {
         const i = WALLPTS[k] * 3;
         _c.x = p[i]; _c.y = p[i + 1]; _c.z = p[i + 2];
-        CBZ.collide(_c, 0.16, p[i + 1] - 0.1, p[i + 1] + 0.1);
+        CBZ.collide(_c, 0.16 * sk, p[i + 1] - 0.1, p[i + 1] + 0.1);
         p[i] = _c.x; p[i + 2] = _c.z;
       }
     }
@@ -678,7 +710,7 @@
     // a held body never freezes — but the pin's own `until` (hard-capped at
     // PIN_MAX) is what bounds that, so a pin can never keep a body awake
     // forever. The frame the pin expires, MAX_LIFE takes it straight to sleep.
-    if (!s.pin && (s.still > SLEEP_T || s.life > MAX_LIFE)) s.asleep = true;
+    if (!s.pin && (s.still > SLEEP_T || s.life > MAX_LIFE)) { s.asleep = true; restFit(s); }
   }
 
   // re-orient the EXISTING rig from the points (assign, never add — we run after
@@ -689,7 +721,7 @@
     const p = s.p;
     const msx = (p[3] + p[6]) * 0.5, msy = (p[4] + p[7]) * 0.5, msz = (p[5] + p[8]) * 0.5;
     const mhx = (p[9] + p[12]) * 0.5, mhy = (p[10] + p[13]) * 0.5, mhz = (p[11] + p[14]) * 0.5;
-    _r.set(p[6] - p[3], p[7] - p[4], p[8] - p[5]);
+    _r.set(p[3] - p[6], p[4] - p[7], p[5] - p[8]);   // the rig's +x: la (point 1) minus ra (point 2)
     _u.set(msx - mhx, msy - mhy, msz - mhz);
     if (_u.lengthSq() < 1e-6 || _r.lengthSq() < 1e-6) return;
     _u.normalize();
@@ -700,10 +732,15 @@
     _m.makeBasis(_r, _u, _f);
     _qt.setFromRotationMatrix(_m);
     grp.quaternion.copy(_qt);                       // syncs .rotation — grapple/busy read it fine
-    grp.position.set(mhx - _u.x * 0.95, mhy - _u.y * 0.95, mhz - _u.z * 0.95);
+    const hk = s.hk;
+    grp.position.set(mhx - _u.x * hk, mhy - _u.y * hk, mhz - _u.z * hk);
     s.cx = mhx; s.cy = mhy; s.cz = mhz;
     _qi.copy(_qt).invert();
     if (ch.body) { ch.body.rotation.set(0, 0, 0); ch.body.position.y = 0; }
+    // the torso sits on the hips at rest: re-solve the hip socket for the
+    // zeroed torso, or whatever lean translation it last carried stays in
+    // (measured: the drawn shoulders sat 9 cm off the points)
+    if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
     if (ch.neck) {  // neck local +y points at the head mass
       _a.set(p[0] - msx, p[1] - msy, p[2] - msz).applyQuaternion(_qi);
       const l = _a.length();
@@ -890,6 +927,13 @@
       kick(s, point, dir, imp);
       s.asleep = false; s.still = 0; s.life = 0; s.age = ++seq;   // freshen LRU so the jolt isn't instantly re-frozen
       bumpPhys(target);
+      stampWound(target, point, dir);
+      return true;
+    }
+    // a body lying in its collapse (systems/bodyfall.js) takes the round as a
+    // nudge where it lies; it does not get stood back up into a new skeleton
+    if (target._bf && target._bf.on && CBZ.bodyFall && imp < 14) {
+      CBZ.bodyFall.poke(target, dir ? dir.x : 0, dir ? dir.z : 0, imp);
       stampWound(target, point, dir);
       return true;
     }

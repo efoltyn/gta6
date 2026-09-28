@@ -557,11 +557,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=grasp2"></script>
-  <script src="src/entities/character.js?v=hats1"></script>
+  <script src="src/systems/fphands.js?v=wrist1"></script>
+  <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
+  <script src="src/entities/footwear.js?v=feet1"></script>
+  <script src="src/entities/character.js?v=hats2"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=watch1"></script>
+  <script src="src/entities/watch.js?v=watch2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -581,10 +583,16 @@ document.body.appendChild(b);}}catch(e){}})();
      while they do it (verbposes.js), and the strikes and hit reactions
      (meleeposes.js + verbs_strike.js). Everything else is feature-detected at
      call time; the late pass runs at CBZ.onUpdate(91). -->
-<script src="src/systems/verbs.js?v=verbs1"></script>
+<script src="src/systems/verbs.js?v=arrest1"></script>
+<!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
+     (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
+     committed tackle lunge, the taser, and the one physical take of the
+     player (hands on, two wrists, the escort) every game's law calls. -->
+<script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
-<script src="src/entities/meleeposes.js?v=verbs1"></script>
-<script src="src/systems/verbs_strike.js?v=verbs1"></script>
+<script src="src/entities/meleeposes.js?v=fallreal1"></script>
+<script src="src/systems/verbs_strike.js?v=fallreal1"></script>
+<script src="src/systems/bodyfall.js?v=fall2"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -840,7 +848,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=nohint1"></script>
+<script src="src/systems/grapple.js?v=fallankle1"></script>
 <script src="src/entities/survivorbot.js?v=armed1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays

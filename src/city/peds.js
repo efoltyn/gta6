@@ -1,4 +1,4 @@
-/* ============================================================
+      let kdx/* ============================================================
    city/peds.js — the city's people, driven by ONE personality
    spectrum: `aggr` ∈ [0,1], from meek (flees everything) to violent
    (full agency — mugs, brawls, carjacks, fights cops, snatches a downed
@@ -2823,7 +2823,15 @@
     // one-shot CBZ.charSeatSlump death pose. (CHAR_SEATED_HITTABLE)
     const seatedCorpse = !!(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false);
     let ragged = false;
-    if (CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar && !seatedCorpse) {
+    /* WHO GETS THE LIMP VERLET BODY: only what really throws a body, a blast
+       or a car (city/ragdoll.js flops it through the air and down stairs).
+       A man who is SHOT, stabbed or beaten collapses (systems/bodyfall.js
+       via the knockdown below): the legs give first and he goes down along
+       the round and his own run, no spin. The verlet body used to take every
+       near kill, and a limp stick figure hit by a pistol is a plank levered
+       over its planted feet. */
+    const launches = cause === "explosion" || cause === "run over" || cause === "killed in the crash";
+    if (launches && CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar && !seatedCorpse) {
       let mag;
       const f0 = (imp && imp.force) || 0;
       if (cause === "explosion") mag = 20 + Math.min(14, (f0 || 10) * 0.8);
@@ -2860,20 +2868,30 @@
     // off-chance a fling can't resolve (e.g. body already at floor), so we never
     // depend on the airborne path alone.
     if (CBZ.body && !ragged && !seatedCorpse) {
-      if (imp && (imp.fromX != null || imp.dir)) {
-        // Zero is meaningful for a nuclear pressure impulse: horizontal blast
-        // wind may topple/slide a body without the generic explosion's upward
-        // launch. `|| 4` converted that explicit zero back into grenade fling.
-        const hitForce = imp.force != null ? imp.force : 7;
-        const hitFling = imp.fling != null ? imp.fling : 4;
-        CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir,
-          force: hitForce, fling: hitFling });
+      /* A MAN WHO IS SHOT FALLS; HE IS NOT LAUNCHED. Every cheap-path death
+         used to be an airborne fling (callers pass fling 3-5 for a bullet or a
+         fist), so the body left the ground spinning on two random axes, and
+         then a SECOND knockdown with a hardcoded +z direction overwrote the
+         real one, so every such corpse turned to face the same compass point
+         as it fell: the pivot-on-a-foot the owner saw. Only what really lifts
+         a body (a blast, a car) flings it now; everything else is the one
+         collapse (systems/bodyfall.js through grapple's knockdown): legs
+         first, along the round and his own momentum, no spin. */
+      let kdx = 0, kdz = 0;
+      if (imp && imp.dir) { kdx = imp.dir.x || 0; kdz = imp.dir.z || 0; }
+      else if (imp && imp.fromX != null) { kdx = ped.pos.x - imp.fromX; kdz = ped.pos.z - imp.fromZ; }
+      const hasDir = kdx * kdx + kdz * kdz > 1e-8;
+      // Zero is meaningful for a nuclear pressure impulse: horizontal blast
+      // wind may topple/slide a body without the generic explosion's upward
+      // launch. `|| 4` converted that explicit zero back into grenade fling.
+      const hitForce = imp && imp.force != null ? imp.force : 7;
+      if (launches && imp && hasDir && (imp.fling == null || imp.fling > 0)) {
+        CBZ.body.hit(ped, { dir: { x: kdx, z: kdz }, force: hitForce, fling: imp.fling != null ? imp.fling : 4 });
+      } else if (CBZ.body.knockdown) {
+        // no direction at all (a bleed-out, a heart attack): he folds where he stands
+        if (!hasDir) { const yw = (ped.group && ped.group.rotation.y) || 0; kdx = -Math.sin(yw); kdz = -Math.cos(yw); }
+        CBZ.body.knockdown(ped, { dir: { x: kdx, z: kdz }, force: hasDir ? hitForce : 1, t: 9999 });
       }
-      else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
-      // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,
-      // so even if the fling lands the same frame the body is already flagged DOWN
-      // and grapple owns it — a dead ped can never be left upright or half-sunk.
-      if (CBZ.body.knockdown) CBZ.body.knockdown(ped, { dir: { x: 0, z: 1 }, force: 1, t: 9999 });
     }
     // attribute the kill: a real actor (player or NPC) is the offender; a
     // driverless run-over has none (just a death, nobody to blame/witness).
@@ -3077,7 +3095,7 @@
       return;
     }
     if (tgt.kind === "cop") {
-      if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz });
+      if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz, shot: !melee, point: melee ? null : shotPoint(tgt), cal: att.swat ? 1.1 : 0.9 });
       if (res && tgt.dead) res.reaction = "dead";
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 60 : 110, "attacked-officer");
       return;
@@ -3101,8 +3119,26 @@
     } else if (res) {
       // a clean one can put him down: he falls in his own rig (CBZ.verbs.knockdown)
       if (!res.blocked && rng() < 0.3) res.reaction = "knockdown";
-    } else if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: 3 });
+    } else if (melee || !streetShot(tgt, fx, fz, _hurtWP, 0.9)) { if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: 3 }); }
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
+  }
+  /* A STREET ROUND INTO A LIVING MAN (NPC or cop fire): CBZ.verbs.shot, the
+     same answer on his rig as a player's round. False = no rig (a far,
+     instanced body): the caller keeps the old impulse. Shared by police.js. */
+  const _streetShot = { point: null, dir: null, fromX: 0, fromZ: 0, cal: 0.9, share: 1, head: false };
+  function streetShot(tgt, fx, fz, point, cal) {
+    const V = CBZ.verbs;
+    if (!V || !V.shot || !tgt || tgt.dead) return false;
+    _streetShot.point = point || null; _streetShot.fromX = fx; _streetShot.fromZ = fz; _streetShot.cal = cal || 0.9;
+    return V.shot(tgt, _streetShot);
+  }
+  CBZ.cityStreetShot = streetShot;
+  // where a street round lands on a man: chest to head height on his centre
+  // line (the shooters here roll a hit, they do not trace a ray)
+  const _shotPt = { x: 0, y: 0, z: 0 };
+  function shotPoint(t) {
+    _shotPt.x = t.pos.x; _shotPt.y = (t.pos.y || 0) + 1.0 + rng() * 0.6; _shotPt.z = t.pos.z;
+    return _shotPt;
   }
 
   // ---- CROSSFIRE: a fired round that doesn't cleanly hit its mark can catch an

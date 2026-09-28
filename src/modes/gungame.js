@@ -1049,6 +1049,11 @@
       actor._hpSeen = actor.hp;
       if (imp.by) { actor.hurtBy = imp.by; actor.hurtT = 0; }
       if (actor.hp <= 0) botDeath(actor, imp.by, imp.cause, imp.head);
+      // a round that did not finish him lands on his rig (CBZ.verbs.shot);
+      // a fist's reaction is the strike's own
+      else if (imp.cause !== "melee" && imp.by && imp.by.pos && CBZ.verbs && CBZ.verbs.shot) {
+        CBZ.verbs.shot(actor, { fromX: imp.by.pos.x, fromZ: imp.by.pos.z, head: !!imp.head, cal: imp.cal || 1 });
+      }
     }
   }
   gg.hurt = hurt;
@@ -1655,9 +1660,12 @@
         if (ggTraverse(b, dt, st.x, st.z, spd)) { MV.reset(m, b.pos); continue; }
       }
       const O = _mo;
-      O.speed = spd;
+      // on a knee from a round (the rig's own fall): no legs to walk on and
+      // no turning round on the knee, the motor brakes where he went down
+      const onRig = !!(b.char && b.char.fall && b.char.fall.on);
+      O.speed = onRig ? 0 : spd;
       O.leg = !!(st && b.goal && (st.x !== b.goal.x || st.z !== b.goal.z));   // a path waypoint: pass through
-      O.face = fighting ? Math.atan2(b.foe.pos.x - b.pos.x, b.foe.pos.z - b.pos.z) : null;
+      O.face = fighting && !onRig ? Math.atan2(b.foe.pos.x - b.pos.x, b.foe.pos.z - b.pos.z) : null;
       O.strafe = fighting;
       O.nbrs = gg.bots; O.nbrN = gg.bots.length;
       O.lod = MV.lodFor(d2cam, near);

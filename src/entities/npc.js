@@ -271,12 +271,15 @@
     // knocked out: topple to the floor, skip AI, then climb back up
     if (n.ko > 0) {
       n.ko -= dt;
-      // a man knocked down by a blow falls in his own rig (entities/
-      // meleeposes.js: knees, hips, back, then the get-up) — the old whole-body
-      // roll onto its side stays only for a KO that has no fall
+      // a man knocked down falls in his own rig (entities/meleeposes.js:
+      // knees, hips, back, then the get-up). A KO with no fall of its own (a
+      // taser, a baton) gets one too: the old whole-body roll onto its side
+      // pivoted the plank on its feet.
+      if (CBZ.koFall) CBZ.koFall(n);
       const rigFall = n.char && n.char.fall && n.char.fall.on;
       if (!rigFall) n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 11, dt);
       if (near || rigFall) animChar(n.char, 0, dt);
+      if (n.ko <= 0 && CBZ.koRise) CBZ.koRise(n);
       return;
     } else if (n.group.rotation.z !== 0) {
       n.group.rotation.z = CBZ.damp(n.group.rotation.z, 0, 9, dt);
