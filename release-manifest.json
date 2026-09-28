@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "f55505b396e9379a16d54fce36bd3d7e7873a4b0",
-  "createdAt": "2026-09-28T15:17:11.832Z",
+  "sourceCommit": "fc5f16f732125dde1805776fa7489302c67c5a58",
+  "createdAt": "2026-09-28T15:33:40.689Z",
   "fileCount": 1158,
-  "totalBytes": 47170428,
+  "totalBytes": 47171854,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -213,8 +213,8 @@
     },
     {
       "file": "src/city/campaign.js",
-      "bytes": 60708,
-      "sha256": "c3fea8adea41926e34157ce5b0df070de60cceac06c708f0a2b448c7f6a99077"
+      "bytes": 60772,
+      "sha256": "135dc7589d954807693c2a3914c4ad46440279f86b56dbabc9cc904e71c0294a"
     },
     {
       "file": "src/city/campaign_ui.js",
@@ -708,8 +708,8 @@
     },
     {
       "file": "src/city/family.js",
-      "bytes": 13671,
-      "sha256": "31f0cbabd335aab117abb0e804d39e16902d6267f310ded5aa85e63a5cbaf49f"
+      "bytes": 13805,
+      "sha256": "d266abc58043cf8645bc32ed6d71c2703506f14d90e0c8e69d6468aa0f207734"
     },
     {
       "file": "src/city/familypanel.js",
@@ -838,8 +838,8 @@
     },
     {
       "file": "src/city/hitman_hands.js",
-      "bytes": 14808,
-      "sha256": "5e610062ca6af9222fa6bfc3b795efa545311b8750fc5acfb1201e6b555ce84c"
+      "bytes": 14975,
+      "sha256": "e4bea7ab9b0e0647c9eda84a5642ba9995935add51b8a858d8a64844149dbd9a"
     },
     {
       "file": "src/city/hitman_paper.js",
@@ -1143,8 +1143,8 @@
     },
     {
       "file": "src/city/piracy.js",
-      "bytes": 50571,
-      "sha256": "d9865c5be517761171863f0d4e0106bc89ef07416e5b3133ed62d6da2be8ecb2"
+      "bytes": 50705,
+      "sha256": "04260c1fc7618a7052fa528b8acbfff18a8b6be86f6ee868c01c899fbece49b0"
     },
     {
       "file": "src/city/placement.js",
@@ -2148,8 +2148,8 @@
     },
     {
       "file": "src/systems/arrest.js",
-      "bytes": 17715,
-      "sha256": "b7c85e66fc6b6c6799c5a13f388b9747bed1b75a16664d76451284dc46729615"
+      "bytes": 18642,
+      "sha256": "0f980a3f14d9057432ab86217882652f11a9ea2e0e663448e695cf74e7d238cd"
     },
     {
       "file": "src/systems/audio.js",
