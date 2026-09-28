@@ -469,10 +469,11 @@
      three sources, the grate to cut, the ditch to crawl). That was a
      walkthrough on a key. It is gone. What is left is what a man in a cell
      actually knows: the hour, his smokes, what the screws took off him, and
-     the Map/Ranks/Pause buttons. */
+     the Map/Ranks buttons (pausing is the shared top-left button,
+     systems/title_hub.js #hudPauseBtn, so the panel and its chip sit right
+     of it on touch). */
 
   let panel = null, dirty = true, panelT = 0, btn = null, open = false;
-  function onTouch() { return !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch"))); }
   function ensureCss() {
     if (document.getElementById("escapePlanCss")) return;
     const st = document.createElement("style");
@@ -488,6 +489,8 @@
       "#escapePlan .ep-btns button:active{transform:translateY(1px);}",
       "#planBtn{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));z-index:29;display:none;font:600 12px/1 Fredoka,system-ui,sans-serif;letter-spacing:.6px;color:rgba(232,236,242,.82);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:8px 13px;pointer-events:auto;}",
       "body.touch.escape-plan-live:not(.escape-plan-open) #planBtn{display:block;}",
+      "body.touch #escapePlan,body.touch #planBtn{left:calc(70px + env(safe-area-inset-left,0px));}",
+      "body.touch #escapePlan{width:min(300px,calc(100vw - 90px));}",
       "body.full-map-open #escapePlan,body.full-map-open #planBtn,body.sim-view #planBtn{display:none!important;}",
     ].join("\n");
     document.head.appendChild(st);
@@ -505,7 +508,6 @@
       '<div class="ep-lost"></div>' +
       '<div class="ep-btns"><button type="button" data-ep="map">Map</button>' +
       '<button type="button" data-ep="ranks">Ranks</button>' +
-      '<button type="button" data-ep="pause" class="ep-pause">Pause</button>' +
       '<button type="button" data-ep="close">Close</button></div>';
     document.body.appendChild(panel);
     panel.addEventListener("click", function (e) {
@@ -516,7 +518,6 @@
       if (act === "close") setOpen(false);
       else if (act === "map") { setOpen(false); if (CBZ.fullMap && CBZ.fullMap.toggle) CBZ.fullMap.toggle(); }
       else if (act === "ranks") { setOpen(false); if (CBZ.dashboardCycle) CBZ.dashboardCycle(); }
-      else if (act === "pause") { setOpen(false); if (CBZ.setState) CBZ.setState("paused"); }
     });
     return panel;
   }
@@ -546,7 +547,7 @@
     if (k === "escape" && open) setOpen(false);
   });
 
-  let nowEl = null, cigEl = null, lostEl = null, pauseEl = null;
+  let nowEl = null, cigEl = null, lostEl = null;
   function setText(node, t) { if (node && node.textContent !== t) node.textContent = t; }
   function render() {
     const p = ensurePanel();
@@ -554,13 +555,11 @@
     if (!nowEl) {
       nowEl = p.querySelector(".ep-now"); cigEl = p.querySelector(".ep-cigs");
       lostEl = p.querySelector(".ep-lost");
-      pauseEl = p.querySelector(".ep-pause");
     }
     const c = clockParts();
     const t = CBZ.fmtTime ? CBZ.fmtTime(g.elapsed || 0) : "";
     setText(nowEl, c ? c.now : t);
     setText(cigEl, (g.cigs || 0) + " cigs");
-    pauseEl.style.display = onTouch() ? "" : "none";
     const lostOn = S.lostT > 0 && !!S.lost;
     lostEl.style.display = lostOn ? "" : "none";
     if (lostOn) setText(lostEl, S.lost);

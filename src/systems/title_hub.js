@@ -16,6 +16,8 @@
    3. ENTER PLAYS on the menu when nothing is focused.
    4. HERO SWAP. Picking a tile fades the new game's key art in instead of
       cutting to it (css/title_hub.css .hub-swap).
+   5. PAUSE BUTTON. The one touch pause (#hudPauseBtn), top-left, in every
+      game on this page. See the block at the bottom.
 
    Every hook is by id; nothing here moves DOM that other code addresses.
 ============================================================ */
@@ -91,4 +93,57 @@
     const b = document.getElementById(id);
     if (b) b.addEventListener("click", markLast);
   });
+
+  /* 5. THE PAUSE BUTTON. ONE button for every game on this page (Gang Life,
+     prison, Survival, Gun Game, Shark Sim, and every city sub-mode), in ONE
+     place: the TOP-LEFT corner, 12 px in, clear of the notch. It opens the
+     ONE pause card above (#pause: Resume, Settings, Main Menu, plus whatever
+     a mode slots in, like Shark Sim's Restart).
+
+     Before this only Shark Sim had a touch pause (its own #sharkPauseBtn),
+     the prison hid one inside the Plan panel, and Gang Life, Survival and
+     Gun Game had none: on a phone they could not be stopped at all. Every
+     mode's top-left HUD now starts BELOW or BESIDE this button (the jail
+     minimap at top:64, the city radar moved to top:64 in css/mobile.css,
+     the prison Plan chip and Gun Game's health plate step right of it).
+
+     Touch only: a keyboard pauses with Esc, and on desktop the cursor is
+     locked while playing, so a button there could never be clicked. The
+     pause itself is setState("paused"), the same one Esc and the gamepad's
+     START use, so each mode's freeze (core/loop.js's playing gate, audio,
+     Shark Sim's clock) happens exactly as it always did. No pointer lock is
+     touched here: on touch there is none, so nothing joins camera.js's
+     exemption list. */
+  function pauseGame() {
+    if (g.state !== "playing" || !CBZ.setState) return false;
+    if (CBZ.settingsOpen) return false;
+    // a death / arrest cinematic owns the screen; camera.js's pointer-lock
+    // pause skips these for the same reason
+    if (g.busted || (CBZ.cityCam && CBZ.cityCam.death)) return false;
+    if (g.mode === "city" && CBZ.player && CBZ.player.dead) return false;
+    if (CBZ.surv && CBZ.surv.spectating) return false;
+    CBZ.setState("paused");
+    return true;
+  }
+  CBZ.pauseGame = pauseGame;
+
+  function buildPauseBtn() {
+    if (document.getElementById("hudPauseBtn")) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "hudPauseBtn";
+    b.setAttribute("aria-label", "Pause");
+    b.innerHTML = "<i></i><i></i>";
+    const go = function (e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      pauseGame();
+    };
+    // touchstart, not click: touch.js owns window-level touches for the stick
+    // and a click would arrive ~300 ms late (or never, after preventDefault)
+    b.addEventListener("touchstart", go, { passive: false });
+    b.addEventListener("click", go);
+    document.body.appendChild(b);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", buildPauseBtn);
+  else buildPauseBtn();
 })();

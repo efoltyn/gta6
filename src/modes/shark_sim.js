@@ -1382,12 +1382,13 @@
   }
 
   /* ---- THE CHROME WHILE SWIMMING -------------------------------------------
-     Touch: the move stick, RISE / DIVE (touch_vehicle's mount rail) and ONE
-     pause button, top left. The bite is automatic. Keyboard players pause
+     Touch: the move stick, RISE / DIVE (touch_vehicle's mount rail) and the
+     one pause button every game on this page shares (systems/title_hub.js
+     #hudPauseBtn, top left). The bite is automatic. Keyboard players pause
      with Esc (pointer lock) or P. The pause card itself is cut to Resume,
      Restart, Main Menu; the Settings panel (crowd density, total population,
      quality tiers) is hidden in this mode by css/shark_title.css. */
-  let pauseBtn = null, restartBtn = null;
+  let restartBtn = null;
   function restartMatch() {
     if (g.mode !== "sharksim" || !CBZ.startRun) return;
     // setup() only runs when sim.on is false: stand the old match down first
@@ -1395,20 +1396,6 @@
     try { CBZ.startRun(); } catch (e) { console.error("[shark restart]", e); }
   }
   function buildChrome() {
-    if (!pauseBtn) {
-      pauseBtn = document.createElement("button");
-      pauseBtn.type = "button";
-      pauseBtn.id = "sharkPauseBtn";
-      pauseBtn.setAttribute("aria-label", "Pause");
-      pauseBtn.innerHTML = "<i></i><i></i>";
-      const go = function (e) {
-        if (e) { e.preventDefault(); e.stopPropagation(); }
-        if (g.mode === "sharksim" && g.state === "playing" && CBZ.setState) CBZ.setState("paused");
-      };
-      pauseBtn.addEventListener("touchstart", go, { passive: false });
-      pauseBtn.addEventListener("click", go);
-      document.body.appendChild(pauseBtn);
-    }
     if (!restartBtn) {
       const resume = document.getElementById("resumeBtn");
       if (resume && resume.parentNode) {
