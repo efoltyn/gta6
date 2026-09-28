@@ -66,11 +66,20 @@
         "#cObj{position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);max-width:56%;text-align:center;color:var(--hud-ink);font-size:15px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.85)}" +
         // bottom-centre weapon cluster: slots over the ammo count
         "#cWpn{position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px}" +
-        "#cHud .cSlots{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;max-width:520px}" +
+        // ONE ROW, ALWAYS. A big arsenal never wraps into a second shelf: the
+        // cells shrink past eight, and past the screen the row scrolls sideways
+        // (no scrollbar) with the held chip kept in view by renderHotbar.
+        "#cHud .cSlots{position:relative;display:flex;gap:4px;justify-content:flex-start;flex-wrap:nowrap;max-width:min(520px,calc(100vw - 32px));overflow-x:auto;overflow-y:hidden;scrollbar-width:none;touch-action:pan-x;overscroll-behavior:contain}" +
+        "#cHud .cSlots::-webkit-scrollbar{display:none}" +
+        "body.touch #cHud .cSlots{max-width:max(150px,calc(100vw - 380px))}" +
+        "#cHud .cSlots>.cSlot{flex:0 0 auto}" +
+        "#cHud .cSlots.many .cSlot{width:34px;height:34px}#cHud .cSlots.many .cSlot .gunModel{width:30px;height:20px}#cHud .cSlots.many .cSlot .itemIcn{width:22px;height:22px}" +
         "#cHud .cSlots.fade.on{pointer-events:auto}" +
         "body.touch #cHud .cSlots.fade{opacity:.8;pointer-events:auto}" +
         "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;width:40px;height:40px;box-sizing:border-box;padding:2px;border-radius:6px;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);pointer-events:inherit;cursor:pointer}" +
-        "#cHud .cSlot.held{border-color:rgba(232,236,242,.85);box-shadow:0 0 0 1px rgba(232,236,242,.4)}" +
+        "#cHud .cSlot.held{border-color:rgba(232,236,242,.85);box-shadow:0 0 0 1px rgba(232,236,242,.4);background:rgba(20,26,36,.72)}" +
+        "#cHud .cSlot.flashlight img{display:block;width:30px;height:30px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
+        "#cHud .cSlot.flashlight.held img{filter:drop-shadow(0 0 5px rgba(255,236,170,.9)) drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
         "#cHud .cSlot .key{display:none}" +
         "#cHud .cSlot>.ic{font-size:17px;line-height:1;color:var(--hud-ink)}" +
         "#cHud .cSlot .ic.gun{font-size:18px;transform:scaleX(1.25)}" +
@@ -88,7 +97,7 @@
         "#cAmmo .res{color:var(--hud-dim)}" +
         "#cAmmo .rl{color:#ffd166}" +
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
-        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}}" +
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}#cHud .cSlots.many .cSlot{width:30px;height:30px}#cHud .cSlots.many .cSlot .gunModel{width:26px;height:18px}#cHud .cSlots.many .cSlot .itemIcn,#cHud .cSlot.flashlight img{width:20px;height:20px}}" +
         // SCREEN-EDGE SIGNALS. Outside #cHud on purpose: the campaign's
         // declutter (css/campaign.css) hides #cHud's children wholesale, and a
         // wound or a manhunt is not narration.
@@ -130,14 +139,14 @@
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
     heatEl = root.querySelector("#cHeat"); hurtEl = root.querySelector("#cHurt");
-    // CLICK/TAP-TO-SELECT on the hotbar. Chips carry data-bi (the bar index); a
-    // tap routes to CBZ.cityHotbarSelect (holster / gun-select / item-use / phone).
+    // CLICK/TAP-TO-SELECT on the bar. Chips carry data-bi (the bar index); a
+    // tap routes to CBZ.cityHotbarSelect (draw / put away a gun, throw, lamp,
+    // phone).
     slotsEl.addEventListener("click", function (ev) {
-      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi],.cSlot[data-inv]") : null;
+      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi]") : null;
       if (!chip) return;
       if (g.mode !== "city" || g.state !== "playing") return;
       if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
-      if (chip.hasAttribute("data-inv")) { if (CBZ.cityCharPanel && CBZ.cityCharPanel.open) CBZ.cityCharPanel.open(); return; }
       const bi = parseInt(chip.getAttribute("data-bi"), 10);
       if (bi >= 0 && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(bi); dirty = true; }
     });
@@ -565,6 +574,30 @@
   // KIND, which also covers everything registered at runtime (species meat,
   // pelts, the fishing catch, C4, produce) that no name table could reach.
   // Degrade-safe: no module / flag off -> the old expression exactly.
+  // THE LEAD'S ONE FACE BOOK (systems/inventory.js CBZ.hotbarFace) when it is
+  // loaded, so the city bar and the prison bar draw a thing identically; the
+  // city's own photographs otherwise.
+  function hotbarFace(entry) {
+    if (typeof CBZ.hotbarFace === "function") { try { const h = CBZ.hotbarFace(entry); if (h) return h; } catch (e) {} }
+    if (entry.kind === "phone") return hotbarItemFace("Phone", null);
+    return "";
+  }
+  function flashlightFace(on) {
+    const h = hotbarFace({ kind: "flashlight", on: !!on });
+    if (h) return h;
+    let src = "";
+    try { if (CBZ.flashlightThumbnail) src = CBZ.flashlightThumbnail(); } catch (e) { src = ""; }
+    return src ? "<img src='" + src + "' alt=''>" : hotbarItemFace("Flashlight", null);
+  }
+  // a scrolled row keeps the chip in your hands on screen
+  function keepHeldInView() {
+    if (!slotsEl || slotsEl.scrollWidth <= slotsEl.clientWidth + 1) return;
+    const h = slotsEl.querySelector(".cSlot.held");
+    if (!h) return;
+    const l = h.offsetLeft, r = l + h.offsetWidth;          // .cSlots is the offsetParent
+    if (l < slotsEl.scrollLeft) slotsEl.scrollLeft = l - 4;
+    else if (r > slotsEl.scrollLeft + slotsEl.clientWidth) slotsEl.scrollLeft = r - slotsEl.clientWidth + 4;
+  }
   function hotbarItemFace(name, item) {
     if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, item); if (h) return h; }
     return "<span class='ic'>▣</span>";
@@ -626,37 +659,6 @@
     const melee = CBZ.game.cityMeleeWeapon || null;   // Bat/Knife — held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
     let html = "";
-
-    // Prison Escape is the one fixed rail: [1] is always fists and [2]..[0]
-    // are the player's rearrangeable loadout. Empty cells stay visible so the
-    // number is a physical place in the stash, not an acquisition-order label
-    // that slides every time a gun is picked up.
-    if (opts.prisonLoadout) {
-      const keys = CBZ.PRISON_WEAPON_SLOT_KEYS || ["2", "3", "4", "5", "6", "7", "8", "9", "0"];
-      const slots = CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout() : inv.slice(0, keys.length);
-      const fistsHeld = !!CBZ.game.prisonHolstered || !heldGun;
-      html += "<div class='cSlot fists" + (fistsHeld ? " held" : "") +
-        "' data-prison-slot='-1' data-key='1'><span class='key'>1</span><span class='s fist'>FIST</span></div>";
-      for (let i = 0; i < keys.length; i++) {
-        const id = slots[i] || null;
-        const m = id ? weaponMetaById(id) : null;
-        const held = !!(id && id === heldGun && !CBZ.game.prisonHolstered);
-        let ammoTxt = "";
-        if (m && !held && fps2 && fps2.rounds && fps2.reserves) {
-          const cur = (fps2.rounds[m.i] != null) ? fps2.rounds[m.i] : (m.w.mag || 0);
-          const res = (fps2.reserves[m.i] != null) ? fps2.reserves[m.i] : (m.w.reserve || 0);
-          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (icons ? "∅" : "DRY") + "</span>";
-        }
-        const face = m
-          ? (icons ? hotbarGunFace(m, id) : "<span class='s'>" + esc(m.w.short || m.w.label || id) + "</span>")
-          : "<span class='s empty'>—</span>";
-        html += "<div class='cSlot" + (held ? " held" : "") + (id ? "" : " empty") +
-          "' data-prison-slot='" + i + "' data-key='" + keys[i] + "'" +
-          (id ? " data-weapon-id='" + esc(id) + "' draggable='true'" : "") + ">" +
-          "<span class='key'>" + keys[i] + "</span>" + face + ammoTxt + "</div>";
-      }
-      return html;
-    }
 
     let slot = 1;
     const key = function () { return "<span class='key'>" + (slot++) + "</span>"; };
@@ -747,13 +749,9 @@
         for (let bi = 0; bi < bar.length; bi++) {
           const e = bar[bi];
           const held = !!e.active;
-          if (e.kind === "holster") {
-            // Leading empty-hand chip. Slot number + pose glyph, no label.
-            html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='key'>" + (bi + 1) + "</span><span class='ic'></span></div>";
-          } else if (e.kind === "gun") {
-            // Weapon silhouette + slot number. Empty is ∅; live rounds stay in
-            // the numeric ammo instrument below.
+          if (e.kind === "gun") {
+            // The real gun, photographed. Empty is the only mark (∅); live
+            // rounds stay in the numeric ammo instrument below.
             const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
             let ammoTxt = "";
             if (!held && m && fps && fps.rounds && fps.reserves) {
@@ -762,34 +760,27 @@
               if (cur + res <= 0) ammoTxt = "<span class='a dry'>∅</span>";
             }
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='key'>" + (bi + 1) + "</span>" + hotbarGunFace(m, e.id) + ammoTxt + "</div>";
-          } else if (e.kind === "item") {
-            // Usable item: its drawn pictogram + count. A stack whose name the
-            // catalog has never heard of still gets a face (the parcel), never
-            // a word — words on the moving HUD are the thing this bar removed.
+              hotbarGunFace(m, e.id) + ammoTxt + "</div>";
+          } else if (e.kind === "throwable") {
+            // A grenade / a brick of C4: its drawn object + how many you carry.
             const iname = e.item || e.label;
             const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            const face = hotbarItemFace(iname, ITEMS[iname]);
-            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "' title='" +
-              String(iname).replace(/'/g, "&#39;") + "'>" +
-              "<span class='key'>" + (bi + 1) + "</span>" + face + cnt + "</div>";
+            html += "<div class='cSlot item' data-bi='" + bi + "'>" + hotbarItemFace(iname, ITEMS[iname]) + cnt + "</div>";
+          } else if (e.kind === "flashlight") {
+            // The torch itself, lit like a held gun while it is on.
+            html += "<div class='cSlot flashlight" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              flashlightFace(held) + "</div>";
           } else if (e.kind === "phone") {
-            // The handset as a carried thing: itemicons.js already photographs
-            // a "phone" kind, so the slot shows the object — same face the
-            // full I inventory would draw — never the word PHONE.
+            // The handset as a carried thing, never the word PHONE.
             html += "<div class='cSlot item phone" + (held ? " held" : "") +
-              (e.unread ? " unread" : "") + (e.buzz ? " buzz" : "") + "' data-bi='" + bi + "' title='Phone'>" +
-              "<span class='key'>" + (bi + 1) + "</span>" + hotbarItemFace("Phone", null) +
-              "<i class='led' aria-hidden='true'></i></div>";
+              (e.unread ? " unread" : "") + (e.buzz ? " buzz" : "") + "' data-bi='" + bi + "'>" +
+              hotbarFace({ kind: "phone" }) + "<i class='led' aria-hidden='true'></i></div>";
           }
         }
-        // TOUCH: the bag. The keyboard opens the [I] screen; a thumb had only
-        // the character card's pill, which the HUD purge removed, so the bar
-        // carries one more chip on touch (never on desktop).
-        if (isTouch() && CBZ.cityCharPanel && CBZ.cityCharPanel.open) {
-          html += "<div class='cSlot item' data-inv='1' title='Bag'>" + hotbarItemFace("Bag", null) + "</div>";
-        }
+        const many = bar.length > 8;
+        if (slotsEl._many !== many) { slotsEl._many = many; slotsEl.classList.toggle("many", many); }
         wHTML(slotsEl, html);
+        keepHeldInView();
         // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
         // whichever gun is the active entry; holster/items show no ammo here.
         for (let bi = 0; bi < bar.length; bi++) {
@@ -854,7 +845,7 @@
     for (let i = 0; i < bar.length; i++) {
       const e = bar[i];
       s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
-      if (e.kind === "item") s += "#" + (e.count | 0);
+      if (e.kind === "throwable") s += "#" + (e.count | 0);
       // the phone chip's LED and buzz are state the bar must repaint on
       if (e.kind === "phone") s += (e.unread ? "u" : "") + (e.buzz ? "z" : "");
       if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {

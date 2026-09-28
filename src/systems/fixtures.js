@@ -232,6 +232,16 @@
         const dx = x - sp.x, dz = z - sp.z;
         if (dx * dx + dz * dz < TORCH2) L = 0.95;
       }
+      /* A LIT TORCH LIGHTS ITS HOLDER TOO. The player carries the same
+         `flashlightOn` a guard does (systems/playerflashlight.js); anyone
+         looking at the point where he stands holding it sees a lit man, the
+         way a figure with a torch in a black yard is the brightest thing in
+         it. The night's cover is the price of the light. */
+      const pl = CBZ.player;
+      if (L < 0.95 && pl && pl !== sensor && pl.flashlightOn && pl.pos) {
+        const px = x - pl.pos.x, pz = z - pl.pos.z;
+        if (px * px + pz * pz < 2.25) L = 0.95;
+      }
       if (L >= 0.95) return 1;
       return MIN + (1 - MIN) * clamp01(L * 1.5);
     }

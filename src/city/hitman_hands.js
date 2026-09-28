@@ -14,11 +14,14 @@
                       case, the TV): the camera eases in through CBZ.cineCam.
      CBZ.hmSay/hmCall a line said by someone: over his head, or by your hand
                       on the phone (CBZ.speech). Never a subtitle box.
-     CBZ.hmBinoculars hold Option/Alt: binoculars. First person, a long lens, a
-                      two-circle mask. Scouting is looking.
+     CBZ.hmBinoculars AIM with empty hands: binoculars. First person, a long
+                      lens, a two-circle mask. Scouting is looking.
 
-   Alt is the binocular key because it is the one key nothing in src/ binds
-   (every letter is taken by some system; see the survey in the wave notes).
+   Binoculars are a CONTEXT, not a button (owner: "the binoculars button is
+   dumb"): hold AIM (right mouse; the touch AIM control) with no gun out and
+   the glasses come up; let go and they come down. Armed, AIM still aims the
+   gun. Option/Alt stays as a desktop alias (the one key nothing else binds).
+   No rangefinder readout: the lens and the mask are the whole picture.
    Zero per-frame cost when nothing is held, inspected or offered.
 ============================================================ */
 (function () {
@@ -52,12 +55,6 @@
     "-webkit-mask-image:radial-gradient(circle at 37% 50%,transparent 0 23.5vmin,#000 25.5vmin),radial-gradient(circle at 63% 50%,transparent 0 23.5vmin,#000 25.5vmin);",
     "mask-image:radial-gradient(circle at 37% 50%,transparent 0 23.5vmin,#000 25.5vmin),radial-gradient(circle at 63% 50%,transparent 0 23.5vmin,#000 25.5vmin);",
     "-webkit-mask-composite:source-in;mask-composite:intersect;}",
-    ".hm-bino u{position:absolute;left:50%;bottom:22vh;transform:translateX(-50%);color:rgba(200,255,210,.65);font:600 13px/1 'Courier New',monospace;",
-    "letter-spacing:.2em;text-decoration:none;text-shadow:0 0 4px rgba(0,0,0,.9);}",
-    ".hm-binobtn{position:fixed;right:14px;top:calc(150px + env(safe-area-inset-top));z-index:44;width:48px;height:44px;display:none;border:0;border-radius:10px;",
-    "background:rgba(12,12,14,.5);color:#e9e4d8;font:600 12px/44px 'Helvetica Neue',Arial,sans-serif;-webkit-tap-highlight-color:transparent;touch-action:manipulation;padding:0;}",
-    ".hm-binobtn.hm-on{display:block;}",
-    ".hm-binobtn svg{width:30px;height:22px;vertical-align:middle;}",
     ".hm-fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:69;transition:opacity .6s ease;}",
   ].join("");
   let dom = null;
@@ -77,14 +74,7 @@
     document.body.appendChild(dom.verb);
     dom.bino = document.createElement("div"); dom.bino.className = "hm-bino";
     dom.bino.appendChild(document.createElement("i"));
-    dom.range = document.createElement("u"); dom.bino.appendChild(dom.range);
     document.body.appendChild(dom.bino);
-    dom.binoBtn = document.createElement("button"); dom.binoBtn.type = "button"; dom.binoBtn.className = "hm-binobtn";
-    dom.binoBtn.setAttribute("aria-label", "Binoculars");
-    dom.binoBtn.innerHTML = '<svg viewBox="0 0 30 22"><circle cx="8" cy="13" r="7" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="22" cy="13" r="7" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 8h6" stroke="currentColor" stroke-width="2.4"/></svg>';
-    dom.binoBtn.addEventListener("touchend", function (e) { e.preventDefault(); e.stopPropagation(); bino.toggle(!bino.on); }, { passive: false });
-    dom.binoBtn.addEventListener("click", function (e) { e.stopPropagation(); bino.toggle(!bino.on); });
-    document.body.appendChild(dom.binoBtn);
     dom.fade = document.createElement("div"); dom.fade.className = "hm-fade";
     document.body.appendChild(dom.fade);
     return dom;
@@ -384,27 +374,34 @@
     w._hmBino = true;
     CBZ.cityScopeFov = w;
   }
-  const _rc = new THREE.Raycaster();
-  let rangeT = 0;
-  function tickBino(dt) {
-    if (!bino.on) return;
+  // AIM WITH EMPTY HANDS = GLASSES UP. Two sources of "aim held": our own
+  // right-mouse (fpsmode only listens for it in first person / over a gun, so
+  // a holstered third-person walker would never reach it) and fpsmode's aim
+  // truth (CBZ.fpsAimHeld), which the touch AIM control writes. The glasses
+  // rise on the PRESS only when nothing is in your hands, and fall on the
+  // release, so aiming a gun and then holstering mid-aim never pops them.
+  const aim = { rmb: false, was: false, byAim: false };
+  function emptyHanded() { return !(CBZ.playerArmed && CBZ.playerArmed()); }
+  function tickBino() {
     const pl = P();
-    if (!playing() || !pl || pl.dead || pl.driving) { bino.toggle(false); return; }
-    rangeT -= dt;
-    if (rangeT <= 0 && dom && CBZ.camera) {
-      rangeT = 0.3;
-      // the rangefinder: first thing along the line of sight
-      let r = null;
-      try {
-        _rc.setFromCamera({ x: 0, y: 0 }, CBZ.camera);
-        _rc.far = 900;
-        const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
-        const hits = root ? _rc.intersectObject(root, true) : [];
-        for (let i = 0; i < hits.length; i++) { if (hits[i].distance > 2) { r = hits[i].distance; break; } }
-      } catch (e) { r = null; }
-      dom.range.textContent = r ? (Math.round(r) + " M") : "- - -";
-    }
+    let held = aim.rmb;
+    if (!held && CBZ.fpsAimHeld) { try { held = !!CBZ.fpsAimHeld(); } catch (e) { held = false; } }
+    if (held && !aim.was && !bino.on && emptyHanded()) { bino.toggle(true); aim.byAim = bino.on; }
+    if (!held && aim.was && aim.byAim) bino.toggle(false);
+    if (!bino.on) aim.byAim = false;
+    aim.was = held;
+    if (!bino.on) return;
+    if (!playing() || !pl || pl.dead || pl.driving) bino.toggle(false);
   }
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 2 || !playing() || CBZ.cityMenuOpen) return;
+    const t = e.target;
+    if (t && t.closest && t.closest("button,a,input,textarea,.panel")) return;
+    aim.rmb = true;
+  });
+  document.addEventListener("mouseup", function (e) { if (e.button === 2) aim.rmb = false; });
+  // the context menu would otherwise eat the release on an unlocked pointer
+  document.addEventListener("contextmenu", function (e) { if (playing() && aim.rmb) e.preventDefault(); });
   CBZ.hmBinoculars = {
     active: function () { return bino.on; },
     toggle: function (on) { bino.toggle(on == null ? !bino.on : on); },
@@ -444,7 +441,7 @@
   window.addEventListener("keyup", function (e) {
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") { bino.toggle(false); e.preventDefault(); }
   }, true);
-  window.addEventListener("blur", function () { bino.toggle(false); });
+  window.addEventListener("blur", function () { aim.rmb = false; bino.toggle(false); });
   window.addEventListener("wheel", function (e) {
     if (!I.active || !I.o || !I.o.stops || I.o.stops.length < 2) return;
     inspectStop(I.i + (e.deltaY > 0 ? 1 : -1));
@@ -480,13 +477,11 @@
     wrapScopeFov();
     tickHold(dt);
     tickInspect(dt);
-    tickBino(dt);
+    tickBino();
     V.evalT -= dt;
     if (V.evalT <= 0) {
       V.evalT = 0.1;
       if (!I.active) evalVerbs();
-      if (dom) dom.binoBtn.classList.toggle("hm-on", touch() && playing() && bino.owned && !(P() && P().driving) && !I.active);
-      else if (touch()) ensureDom();
     }
     void lastT;
   });

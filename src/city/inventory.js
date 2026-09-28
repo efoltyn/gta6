@@ -21,13 +21,11 @@
    resync() reconciles the grid against truth with STABLE placement (the
    systems/inventory.js pattern): correctly-placed stacks never move.
 
-   HOTBAR: the city already has ONE unified quick bar —
-   CBZ.cityHotbar()/cityHotbarSelect (fpsmode.js), drawn Minecraft-style
-   by city/hud.js (#cSlots, CITY_HUD_MC) with number keys [1]-[9] wired.
-   We do NOT draw a second bar next to it; this module carries a
-   fallback bar (#invHotbar, same source, same indices, click-to-select)
-   that only appears if the hud.js bar is absent, so a hotbar is ALWAYS
-   on screen during city play no matter which HUD variant is loaded.
+   HOTBAR: the city has ONE bar — CBZ.cityHotbar()/cityHotbarSelect
+   (fpsmode.js), drawn by city/hud.js (#cSlots). It is the inventory the
+   player sees; this module keeps the truth behind it (drops, chests,
+   death) and draws no bar of its own. (A fallback #invHotbar used to live
+   here; css/city.css hid it in every city frame, so it was deleted.)
 
    PERSISTENCE: worldstate ledger (the storage.js pattern) — add-only
    fields w.invSlots (slot arrangement) + w.chests ([{id,x,z,slots}]),
@@ -962,19 +960,7 @@
       // proximity chip (roofloot pattern)
       "#ci2Chip{position:fixed;left:50%;transform:translateX(-50%);bottom:252px;z-index:24;display:none;padding:6px 12px;border-radius:9px;" +
       "background:rgba(8,14,22,.78);border:1px solid rgba(255,209,102,.30);color:#ffe9bd;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;" +
-      "pointer-events:none;text-shadow:0 1px 2px #000}" +
-      // fallback HUD hotbar (only if the hud.js unified bar is absent)
-      "#invHotbar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:30;display:none;gap:3px}" +
-      "#invHotbar .ci2Slot{cursor:pointer;pointer-events:auto}" +
-      "#invHotbar .ci2Slot .s{font-size:11px;font-weight:800;color:#cdd6e2;pointer-events:none;text-shadow:0 1px 2px #000}" +
-      "#invHotbar .ci2Slot.sel{box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35);transform:scale(1.08)}" +
-      // PHONE slot — the campaign handset carried like a gun (campaign_ui.js).
-      // The unread LED and the stowed buzz are the two signals the retired
-      // corner button owned; they ride the chip now, unchanged in kind.
-      "#invHotbar .ci2Slot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:#53606a;opacity:.35;box-shadow:0 0 0 2px rgba(0,0,0,.28)}" +
-      "#invHotbar .ci2Slot.unread .led{background:#ff6258;opacity:1;box-shadow:0 0 0 2px rgba(0,0,0,.28),0 0 8px #ff6258}" +
-      "#invHotbar .ci2Slot.buzz{animation:ci2PhoneBuzz .82s ease}" +
-      "@keyframes ci2PhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}";
+      "pointer-events:none;text-shadow:0 1px 2px #000}";
     document.head.appendChild(st);
   }
 
@@ -1342,82 +1328,13 @@
   }
 
   // ============================================================
-  //  FALLBACK HUD HOTBAR — the city hud (city/hud.js #cSlots) already draws
-  //  the unified CBZ.cityHotbar() bar Minecraft-style with [1]-[9] wired
-  //  (fpsmode.js). This fallback renders the SAME bar at the SAME indices
-  //  only when that HUD bar is missing, so a hotbar is ALWAYS visible.
-  // ============================================================
-  let hotbarEl = null, _hotSig = "";
-  function hudBarPresent() {
-    const el = document.getElementById("cSlots");
-    if (!el) return false;
-    // COMPUTED visibility, not existence: the campaign's declutter CSS hides
-    // #cSlots with display:none !important (css/campaign.css) while the node
-    // stays in the DOM — the owner's session had NO hotbar because this check
-    // used to stop at "the element exists".
-    try {
-      const cs = getComputedStyle(el);
-      if (cs.display === "none" || cs.visibility === "hidden") return false;
-      const r = el.getBoundingClientRect();
-      if (r.width < 8 || r.height < 8) return false;
-    } catch (e) {}
-    const wrap = document.getElementById("cityHud");
-    if (wrap && wrap.style.display === "none") return false;
-    return true;
-  }
-  function renderFallbackHotbar() {
-    if (typeof document === "undefined" || !document.body) return;
-    const show = on() && cityNow() && playing() && !hudBarPresent();
-    if (!hotbarEl) {
-      if (!show) return;
-      ensureCss();
-      hotbarEl = document.createElement("div");
-      hotbarEl.id = "invHotbar";
-      document.body.appendChild(hotbarEl);
-      hotbarEl.addEventListener("mousedown", function (e) {
-        const cell = e.target.closest && e.target.closest(".ci2Slot");
-        if (!cell) return;
-        e.preventDefault();
-        if (CBZ.cityHotbarSelect) CBZ.cityHotbarSelect(+cell.dataset.i);
-      });
-    }
-    if (!show) { if (hotbarEl.style.display !== "none") { hotbarEl.style.display = "none"; _hotSig = ""; } return; }
-    let bar = [];
-    try { bar = (CBZ.cityHotbar && CBZ.cityHotbar()) || []; } catch (e) { bar = []; }
-    let sig = "";
-    // the phone chip's LED/buzz are state too — without them in the signature
-    // the bar would never repaint when the handset actually buzzes.
-    for (let i = 0; i < bar.length; i++) {
-      const b = bar[i];
-      sig += (b.short || b.label) + ":" + (b.count | 0) + ":" + (b.active ? 1 : 0) +
-        (b.unread ? "u" : "") + (b.buzz ? "z" : "") + "|";
-    }
-    if (sig === _hotSig && hotbarEl.style.display === "flex") return;
-    _hotSig = sig;
-    let html = "";
-    for (let i = 0; i < bar.length && i < 9; i++) {
-      const b = bar[i];
-      const face = (b.kind === "item" || b.kind === "phone") ? itemFace(b.item || b.label, "md")
-        : b.kind === "gun" ? weaponFace(b.id, b.label)
-        : "<span class='s'>" + String(b.short || b.label || "?").slice(0, 6) + "</span>";
-      const flags = b.kind === "phone" ? ((b.unread ? " unread" : "") + (b.buzz ? " buzz" : "")) : "";
-      html += "<div class='ci2Slot" + (b.active ? " sel" : "") + flags + "' data-i='" + i + "'>" + face +
-        (b.kind === "phone" ? "<i class='led' aria-hidden='true'></i>" : "") +
-        (b.count != null && b.count > 1 ? "<span class='ct'>" + (b.count | 0) + "</span>" : "") + "</div>";
-    }
-    hotbarEl.innerHTML = html;
-    hotbarEl.style.display = "flex";
-  }
-
-  // ============================================================
   //  PER-FRAME — chest prompts, item drops, arena-change hygiene
   // ============================================================
-  let _promptT = 0, _hotT = 0;
+  let _promptT = 0;
   CBZ.onUpdate(37.4, function (dt) {
     if (!on() || !cityNow()) {
       chipText(null);
       if (openChestRef) closeChest();
-      if (hotbarEl && hotbarEl.style.display !== "none") hotbarEl.style.display = "none";
       return;
     }
     registerChestItem();
@@ -1436,10 +1353,6 @@
 
     tickItemDrops(dt);
     tickCorpseProps(dt);
-
-    // fallback hotbar (throttled ~5 Hz; it's signature-gated inside)
-    _hotT += dt;
-    if (_hotT >= 0.2) { _hotT = 0; renderFallbackHotbar(); }
 
     // chest proximity chip at ~10 Hz
     _promptT += dt;
