@@ -5072,6 +5072,12 @@
         // this choke point simply never passed it, so every death in the
         // prison — shanking included — sprayed like a gunshot.
         melee: opts.melee || null,
+        // WHO: the body the blood belongs to, so a blade kill's arterial
+        // pulse rides the falling body instead of the spot he stood on
+        actor: victim,
+        // a round through him sprays out of the far side (the gun paths say
+        // so, V.roundExits); a blade or a fist never exits
+        exit: opts.melee ? false : (opts.exit != null ? !!opts.exit : undefined),
       });
     }
     victim.aiState = "dead";
