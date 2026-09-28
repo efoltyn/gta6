@@ -693,6 +693,7 @@ const ARMOURY = [
   "systems/actorweapons.js",   // guns in hands + muzzle points + drop physics
   "systems/gunfx.js",          // tracers, flashes, impacts, holes, suppression
   "systems/combat_iq.js",      // HOW WELL A PERSON FIGHTS — the whole point
+  "systems/brain.js",          // CBZ.brain: the ONE morale (brain.morale) every army shares
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
   "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
 ];
@@ -3594,30 +3595,27 @@ CBZ.studio.need(NEED).then(function () {
      an army with no man left fighting for BREAK_GRACE seconds has LOST
      (inFight(), read by frame()'s win check). Beasts have their own logic
      (thinkBeast's own flight rule) and are never moved by any of this. */
-  const NERVE_FALLBACK = { civ: 0.62, thug: 0.42, pro: 0.30, elite: 0.20, swat: 0.16 };
+  /* ONE MORALE. The formula, the constants, the nerve column and the latched
+     break/rally live in systems/brain.js (CBZ.brain.morale — the same module
+     src/warlord/battle.js now calls); this page keeps only what is its own:
+     who counts (the roster walk, the fled splice), the run, the cornered last
+     stand and the war events. The constants are the brain's, aliased: */
+  const MO = CBZ.brain.morale, MK = MO.K;
   // what a man is worth to his army's nerve: training (a veteran's death is
-  // felt more than a recruit's) and the gun he carries
-  const TIER_W = { civ: 0.7, thug: 0.85, pro: 1.0, elite: 1.25, swat: 1.4 };
-  const SUPP_CAP = 1.2;          // the rattle meter's ceiling
-  const SUPP_HIT = 0.4;          // a round that lands
-  const SUPP_SNAP = 0.26;        // a round that snaps within ~2 m (scaled by how close)
-  const SUPP_MATE = 0.22;        // a mate dropping within 7 m of you
-  const SUPP_DECAY = 0.28;       // per second: ~4 s from pinned to composed
-  const SUPP_K = 0.16;           // morale cost per unit of rattle (max ~0.19)
-  const WOUND_K = 0.28;          // morale cost of being at zero hp (linear)
-  const SHOCK_K = 1.8;           // a death costs ~1.8x its share of the army...
-  const SHOCK_TAU = 7;           // ...decaying over ~7 s
-  const RALLY_BAND = 0.16;       // back over nerve by this much to rally
-  const FLEE_GAPS = 2.2;         // routed this many start gaps from the enemy = fled
-  const BREAK_GRACE = 5;         // s with nobody fighting before a broken army LOSES
-  function nerveFor(tier, i) {
-    const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[tier];
-    const base = (R && R.nerve != null) ? R.nerve : (NERVE_FALLBACK[tier] != null ? NERVE_FALLBACK[tier] : 0.3);
-    return base + (((i * 37) % 11) - 5) * 0.012;
-  }
+  // felt more than a recruit's) and the gun he carries — MK.TIER_W
+  const SUPP_CAP = MK.SUPP_CAP;       // the rattle meter's ceiling (1.2)
+  const SUPP_HIT = MK.SUPP_HIT;       // a round that lands (0.4)
+  const SUPP_SNAP = MK.SUPP_SNAP;     // a round that snaps within ~2 m (0.26, scaled by how close)
+  const SUPP_MATE = MK.SUPP_MATE;     // a mate dropping within 7 m of you (0.22)
+  const SUPP_DECAY = MK.SUPP_DECAY;   // per second: ~4 s from pinned to composed (0.28)
+  const RALLY_BAND = MK.RALLY_BAND;   // back over nerve by this much to rally (0.16)
+  const FLEE_GAPS = MK.FLEE_GAPS;     // routed this many start gaps from the enemy = fled (2.2)
+  const BREAK_GRACE = MK.BREAK_GRACE; // s with nobody fighting before a broken army LOSES (5)
+  // combat_iq's ROLE[].nerve for his training, plus a seeded +-0.06
+  function nerveFor(tier, i) { return MO.nerveFor(tier, i); }
   function manWeight(m) {
     if (m.beast) return Math.max(0.5, (m.maxHp || 100) / 100);
-    let w = TIER_W[m.tier] || 1;
+    let w = MK.TIER_W[m.tier] || 1;
     if (m.launcher) w *= 1.4;
     else if (m.wid === "sniper" || m.wid === "lmg") w *= 1.15;
     return w;
@@ -3641,6 +3639,8 @@ CBZ.studio.need(NEED).then(function () {
     fledMen.length = 0;
     moraleT = -1;
   }
+  const _ao = { fearless: false };
+  function _armyOpts(fearless) { _ao.fearless = !!fearless; return _ao; }
   function updateMorale() {
     /* A NEW ROSTER IS A NEW WAR. restage() and begin() rebuild `men`
        without telling this section; a roster with no man this tick has
@@ -3679,24 +3679,15 @@ CBZ.studio.need(NEED).then(function () {
       const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
       A.pNow += m._mw * (0.45 + 0.55 * hf);
     }
-    const k = Math.exp(-dt / SHOCK_TAU);
     ["red", "blue"].forEach(function (t) {
       const A = ARMY[t], F = ARMY[t === "red" ? "blue" : "red"];
-      A.shock *= k;
-      const lost = A.p0 > 0 ? Math.max(0, 1 - A.pNow / A.p0) : 0;
-      const theirLost = F.p0 > 0 ? Math.max(0, 1 - F.pNow / F.p0) : 0;
-      let mo = 1 - lost * 1.5 + theirLost * 0.5 - (A.alive ? A.routing / A.alive : 0) * 0.35 - A.shock;
-      // an army of animals does not do arithmetic about its chances
-      if (bench || (A.alive && A.beasts === A.alive)) mo = 1;
-      A.morale = Math.max(0, Math.min(1, mo));
-      // THE BREAK, latched, and the rally if it genuinely comes back
-      if (!A.broken && A.alive >= 2 && A.routing >= A.alive * 0.5) {
-        A.broken = true;
-        emitWar("rout", { team: t });
-      } else if (A.broken && A.alive - A.routing > 0 && A.routing < A.alive * 0.25) {
-        A.broken = false;
-        emitWar("rally", { team: t });
-      }
+      /* brain.morale.armyStep: shock decays over ~7 s, then
+         1 - lost*1.5 + theirLost*0.5 - routingFrac*0.35 - shock, and THE
+         BREAK (half routing), latched, and the rally if it genuinely comes
+         back (under a quarter). An army of animals does not do arithmetic
+         about its chances (fearless). */
+      const ev = MO.armyStep(A, F, dt, _armyOpts(bench || (A.alive && A.beasts === A.alive)));
+      if (ev) emitWar(ev, { team: t });
       // nobody left fighting: the clock the win check reads
       if (A.alive > 0 && A.alive - A.routing <= 0 && spawnQueue.length === 0) A.noFightT += dt;
       else A.noFightT = 0;
@@ -3724,7 +3715,7 @@ CBZ.studio.need(NEED).then(function () {
   function moraleOnDeath(m, aliveMine) {
     const A = ARMY[m.team];
     if (!A) return;
-    if (m._mc && !m.beast && A.p0 > 0) A.shock += SHOCK_K * (m._mw || 1) / A.p0;
+    if (m._mc && !m.beast) MO.deathShock(A, m._mw || 1);      // ~1.8x his share of the army
     if (!m.beast) {
       const a = fineNear(m.pos.x, m.pos.z, 7, _mates);
       for (let i = 0; i < a.length; i++) {
@@ -3748,7 +3739,7 @@ CBZ.studio.need(NEED).then(function () {
   function manMorale(m) {
     const A = ARMY[m.team];
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
-    return (A ? A.morale : 1) - (m.supp || 0) * SUPP_K - (1 - hf) * WOUND_K;
+    return MO.manMorale(A ? A.morale : 1, m.supp, hf);
   }
   function foeCentre(m) { return teamCOM[m.team === "red" ? "blue" : "red"]; }
   /* THE BREAK, THE RUN, THE RALLY — one man, on his think tick. Returns true
@@ -4199,8 +4190,25 @@ CBZ.studio.need(NEED).then(function () {
      LOS tests only happen on a RE-target — a man keeps his mark until it dies
      or the dead-end timer gives up on it — so this is a handful of segment
      tests per casualty, not per frame. */
+  /* AND ONLY MEN HE COULD HAVE NOTICED. The candidates used to be every enemy
+     inside SIGHT on every bearing, and when none of them had a line the man
+     took the NEAREST ANYWAY and walked at him — radar, through a hill, behind
+     his own back. Now a candidate has to pass CBZ.brain.perception (the
+     brain's one sight test): the soldier archetype's range, a ~200 degree
+     field of view off m.yaw (a human's, so the front of a line sees the whole
+     front of the other), and a 10 m touch radius. The LOS rays below still
+     decide who is actually visible (occlude:false here, so the brain does not
+     cast a second ray), and "nobody visible: go to the nearest" now means the
+     nearest he could have SEEN go behind that wall. Nobody in his field at all
+     is no mark: marchGoal and the squad's shared contact bring him in, and
+     the man who shoots him is his mark anyway (hurtMan). What this buys: a
+     FLANK is a flank. A column coming round the rear is not answered by every
+     man turning at once on the frame it enters range. Pure arithmetic on
+     positions and yaw: the seeded replay stays identical. */
+  const SPOT = { range: 0, fovHalf: 1.75, touch: 10, occlude: false };   // range set per call
   const _cand = [];
   function pickTarget(m, range) {
+    SPOT.range = range;
     const cx = Math.floor(m.pos.x / GRID_CELL), cz = Math.floor(m.pos.z / GRID_CELL);
     const maxR = Math.ceil(range / GRID_CELL);
     _cand.length = 0;
@@ -4213,7 +4221,7 @@ CBZ.studio.need(NEED).then(function () {
           const o = a[i];
           if (o.team === m.team || o.dead) continue;
           const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
-          if (d2 < range * range) _cand.push(o, d2);
+          if (d2 < range * range && CBZ.brain.perception.sees(m, o, SPOT)) _cand.push(o, d2);
         }
       }
       if (_cand.length >= 12 && r > 1) break;
