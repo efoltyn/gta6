@@ -986,6 +986,9 @@
     const cost = 3;
     if (g.cigs < cost) return { ok: false, msg: `Three smokes buys goodwill in here. ${pick(VOICE.guardShort)}` };
     addCigs(-cost);
+    // SHARING ACROSS CARS: your own car sees you hand smokes to another car
+    // (systems/prisoncars.js); the gift still lands with him
+    if (CBZ.prisonCars) CBZ.prisonCars.noteShare(actor);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
     addRespect(actor, 2);            // standing, capped — a gift is not a favor
     nudgeGang(actor, 4, -2);

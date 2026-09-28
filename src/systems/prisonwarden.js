@@ -537,6 +537,7 @@
       if (!n || n.dead || n.escaped || !n.group) continue;
       const cl = n.clique != null ? n.clique : n.gang;
       if (cl == null || cl < 0 || cl === mine) continue;
+      if (CBZ.prisonCars && n.yardCar != null && n.yardCar === CBZ.prisonCars.playerCar()) continue;   // not your own car
       const load = n.loadout;
       const s = (load && load.items ? load.items.length * 4 : 1) + (n.isLeader ? 3 : 0) + ((n.playerGrudge || 0) > 3 ? 2 : 0);
       if (s > bs) { bs = s; best = n; }
@@ -545,7 +546,7 @@
   }
   function cliqueName(id) {
     if (CBZ.cliqueName) { try { return CBZ.cliqueName(id); } catch (e) {} }
-    const names = CBZ.GANG_NAMES || ["Reds", "Blues"];
+    const names = CBZ.GANG_NAMES || [];
     return String(names[id] || "crew").replace(/^the /i, "");
   }
   function act(v, a) {

@@ -44,8 +44,10 @@
     if (a === CBZ.player) return { txt: "You", cls: "f-you" };
     if (a.kind === "warden") return { txt: "Warden", cls: "f-staff" };
     if (a.kind === "guard") return a.corrupt ? { txt: "Bent Cop", cls: "f-bent" } : { txt: "Staff", cls: "f-staff" };
-    if (a.gang === 0) return { txt: "Reds", cls: "f-red" };
-    if (a.gang === 1) return { txt: "Blues", cls: "f-blue" };
+    // his race's car (systems/prisoncars.js); no team colours
+    const P = CBZ.prisonCars;
+    const car = a.yardCar != null && a.yardCar >= 0 ? a.yardCar : (a.gang != null && a.gang >= 0 ? a.gang : -1);
+    if (P && car >= 0) return { txt: P.label(car), cls: "f-loner" };
     return { txt: "Loner", cls: "f-loner" };
   }
   function behaviorCell(a) {
@@ -114,6 +116,7 @@
      currently walking at you about it — the same records, finally in one frame.
      Nothing here computes: every cell reads a field some system already owns.
      ========================================================================== */
+  function carName(gi) { return CBZ.prisonCars ? CBZ.prisonCars.phrase(gi) : "crew " + gi; }
   function crewRow(gi) {
     const g = CBZ.game || {};
     const st = Math.round((g.gangStanding || [0, 0])[gi] || 0);
@@ -130,8 +133,8 @@
     const word = st >= 48 ? "loyal" : st >= 16 ? "friendly" : st <= -42 ? "hostile" : st <= -12 ? "sour" : "neutral";
     const cls = st >= 16 ? "s-ok" : st <= -12 ? "s-fight" : "s-flee";
     return `<div class="drow${mine ? " me" : ""}">` +
-      `<span class="dname">${gi === 0 ? "the Reds" : "the Blues"}${mine ? " · your crew" : ""}</span>` +
-      `<span class="dfac ${gi === 0 ? "f-red" : "f-blue"}">${st > 0 ? "+" : ""}${st}</span>` +
+      `<span class="dname">${carName(gi)}${mine ? " · your car" : ""}</span>` +
+      `<span class="dfac f-loner">${st > 0 ? "+" : ""}${st}</span>` +
       `<span class="dstatus ${cls}">${word}</span>` +
       `<span class="dpow">${debt > 0 ? debt + " owed" : "clear"}</span>` +
       `<span class="drec">${cover > 0 ? cover + "s cover" : ". "}</span>` +
@@ -140,7 +143,8 @@
   }
   function standingRows() {
     const g = CBZ.game || {};
-    let rows = crewRow(0) + crewRow(1);
+    let rows = "";
+    for (let gi = 0; gi < (CBZ.prisonCars ? CBZ.prisonCars.N : 2); gi++) rows += crewRow(gi);
     // THE BENT SCREW'S LEDGER — entities/guards.js's racket, same shape.
     const rs = Math.round(g.racketStanding || 0), rd = Math.round(g.racketDebt || 0);
     const rc = Math.ceil(g.racketProtectionT || 0);
@@ -175,7 +179,7 @@
       const left = job.need ? Math.floor(job.progress || 0) + "/" + Math.ceil(job.need) : Math.ceil(job.t) + "s";
       rows += `<div class="drow me">` +
         `<span class="dname">${job.label || "Gang job"}</span>` +
-        `<span class="dfac ${job.gang === 0 ? "f-red" : "f-blue"}">${job.gang === 0 ? "Reds" : "Blues"}</span>` +
+        `<span class="dfac f-loner">${CBZ.prisonCars ? CBZ.prisonCars.label(job.gang) : "crew"}</span>` +
         `<span class="dstatus s-ok">running</span>` +
         `<span class="dpow">${left}</span>` +
         `<span class="drec">${job.reward || 4} cigs</span>` +

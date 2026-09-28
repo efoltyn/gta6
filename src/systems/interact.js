@@ -219,10 +219,14 @@
     max = max || 28;
     return s.length > max ? s.slice(0, Math.max(0, max - 1)) + "…" : s;
   }
+  // WHO HE RUNS WITH is his race's car (systems/prisoncars.js), every inmate
+  // has one, active in its business or not. No colour, no gang name.
   function gangShort(a) {
-    if (!a || a.gang == null || a.gang < 0) return "";
-    const names = CBZ.GANG_NAMES || ["Reds", "Blues"];
-    return (names[a.gang] || "Crew").replace(/^the /, "");
+    if (!a) return "";
+    const P = CBZ.prisonCars;
+    const car = a.yardCar != null && a.yardCar >= 0 ? a.yardCar : (a.gang != null && a.gang >= 0 ? a.gang : -1);
+    if (car < 0) return "";
+    return P ? P.label(car) : "";
   }
   /* THE CARD CARRIES VERBS, NOT A DOSSIER (owner, 2026-09-27: "all the
      text... there's just too much bullshit in the way").
@@ -418,7 +422,10 @@
     // a man carrying real bad blood leads with the way OUT of it — the most
     // fleeting thing about him, and the one the other verbs are useless under
     const sore = !!CBZ.squashGrudge && (a.playerGrudge || 0) >= 4;
-    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40;
+    // only your OWN car takes you in (systems/prisoncars.js); another car's man never offers
+    const PCs = CBZ.prisonCars;
+    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40 &&
+      (!PCs || (a.yardCar === PCs.playerCar() && (CBZ.game || {}).carClaim !== "out"));
     /* TWO NEW RUNGS, ON THE SAME LADDER AND FOR THE SAME REASON — how fleeting
        the thing is (PRISON_CONTRACTS).
 
@@ -544,7 +551,7 @@
       case "coverStory": return "Take the cover story";
       case "heatWarning":return "Duck the heat";
       case "alibiDeal":  return "Take the alibi";
-      case "gangInvite": return `Join the ${(CBZ.GANG_NAMES && CBZ.GANG_NAMES[a.gang]) || "crew"}`;
+      case "gangInvite": return `Ride with ${gangShort(a) ? (CBZ.prisonCars ? CBZ.prisonCars.phrase(a.yardCar != null && a.yardCar >= 0 ? a.yardCar : a.gang) : "them") : "them"}`;
       case "contract":   return ap.contract
         ? (ap.contract.kind === "repo" ? `Go take the ${ap.contract.item}`
           : ap.contract.kind === "roughUp" ? `Go put ${ap.contract.name} down`
@@ -573,7 +580,7 @@
       case "snitch":   return "Give the warden a name";
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
-      case "join":     return `Run with the ${gangShort(a) || "crew"}`;
+      case "join":     return `Ride with ${gangShort(a) || "them"}`;
       case "listen":   return "Hear them out";
       case "accept":   return acceptLine(a);
       case "respect":  return "Show respect, back off";
