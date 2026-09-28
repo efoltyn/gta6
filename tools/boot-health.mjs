@@ -42,10 +42,13 @@
      node tools/boot-health.mjs --wait 180     # slower box, longer build budget
 
    Exit codes are meant for CI and agents: 0 boots, 1 the script chain is
-   broken, 2 the build never finished. Run it before you go hunting for a
+   broken, 2 the build never finished, 3 the tool lost its browser. Run it before you go hunting for a
    regression that may not be there.
 ============================================================ */
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,11 +65,37 @@ const PAGE = opt("--page", "index.html");
    else. */
 const ENTRY = opt("--entry", "#playBtn, #start, #play, [data-boot-entry]");
 const WAIT = Math.max(20, Number(opt("--wait", 120)) || 120);
-const PORT = Number(opt("--port", 9788));
-const DBG = PORT + 1;
-
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* EVERY RUN GETS ITS OWN PORTS AND ITS OWN PROFILE. 2026-09-28: this tool
+   reported "FAIL: the world build never finished" on Gang City for several
+   merges running, even at --wait 480, while the same sha built in 22 s when
+   measured alone (boot-trace: every build checkpoint closes, no stage loops).
+   The defaults were a FIXED page port 9788, debug port 9789 and profile
+   /tmp/cbz-boot-health-9788, and several agents run this tool at once. A
+   second run's Chrome cannot bind the debug port or take the locked profile,
+   so /json/list answered from the FIRST run's browser: both runs drove one
+   tab, and when the first run finished it killed that browser, the second
+   run's polls all failed into a silent catch, and it printed a build failure
+   for a build it never watched. Free random ports and a fresh temp profile
+   per run make runs independent; --port still pins the page port. */
+async function freePort(lo, span) {
+  for (let i = 0; i < 60; i++) {
+    const p = lo + Math.floor(Math.random() * span);
+    const busy = await new Promise((res) => {
+      const s = http.createServer();
+      s.once("error", () => res(true));
+      s.once("listening", () => s.close(() => res(false)));
+      s.listen(p, "127.0.0.1");
+    });
+    if (!busy) return p;
+  }
+  throw new Error("no free port");
+}
+const PORT = argv.includes("--port") ? Number(opt("--port", 0)) : await freePort(9800, 400);
+const DBG = await freePort(11300, 400);
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), "cbz-boot-health-"));
 
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
   { env: { ...process.env, PORT: String(PORT) }, stdio: "ignore" });
@@ -85,13 +114,17 @@ const chrome = spawn(CHROME, [
   "--use-gl=angle", "--use-angle=swiftshader", "--mute-audio",
   "--no-first-run", "--no-default-browser-check", "--hide-scrollbars",
   "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-  "--window-size=1000,640", `--user-data-dir=/tmp/cbz-boot-health-${PORT}`, "about:blank",
+  "--window-size=1000,640", `--user-data-dir=${PROFILE}`, "about:blank",
 ], { stdio: "ignore" });
 
+let finishing = false;
 function finish(code, msg) {
+  if (finishing) return;
+  finishing = true;
   log(msg);
   try { chrome.kill("SIGKILL"); } catch (_) {}
   try { server.kill("SIGTERM"); } catch (_) {}
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch (_) {}
   process.exit(code);
 }
 
@@ -100,7 +133,7 @@ for (let i = 0; i < 40; i++) {
   await sleep(500);
   try {
     const tabs = await (await fetch(`http://127.0.0.1:${DBG}/json/list`)).json();
-    const t = tabs.find((x) => x.webSocketDebuggerUrl);
+    const t = tabs.find((x) => x.type === "page" && x.webSocketDebuggerUrl);
     if (t) { wsUrl = t.webSocketDebuggerUrl; break; }
   } catch (_) {}
 }
@@ -136,6 +169,9 @@ const dump = (label) => {
 };
 
 await new Promise((r) => sock.addEventListener("open", r));
+// A dead browser is not a dead build: say which one it was.
+sock.addEventListener("close", () => finish(3,
+  "FAIL: lost the browser (CDP socket closed). The tool's Chrome died or was killed; this says nothing about the build."));
 await send("Runtime.enable");
 await send("Page.enable");
 
