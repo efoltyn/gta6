@@ -88,12 +88,14 @@
     K.prof(g, "ak.buttplate", [[-0.470, 0.000], [-0.488, 0.000], [-0.488, -0.190], [-0.470, -0.194]], 0.068, steel, { bevel: 0.003 });
 
     // the firing hand on the grip
-    K.hand(g, { at: [-0.050, -0.056], rake: R, gripW: 0.056, gripD: 0.078, size: 0.86, trigger: [-0.066, -0.146] });
+    K.hand(g, { at: [-0.050, -0.056], rake: R, gripW: 0.056, gripD: 0.078, trigger: [-0.066, -0.146] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.25);
     // WHERE THE HANDS GO — see systems/gunhands.js for the contract.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.050, -0.580),   // under the wood handguard
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: 0.008, z: -0.580, w: 0.074, h: 0.098, rc: 0.026, len: 0.27 },
       mag: new THREE.Vector3(0, -0.230, -0.330),       // the banana, mid-curve
       charge: new THREE.Vector3(0.060, 0.050, -0.285), // AK charging handle: RIGHT side of the carrier
       style: "mag",

@@ -102,13 +102,15 @@
     box(g, 0.062, 0.192, 0.018, K.fin("rubber"), 0, -0.010, 0.337);
 
     // the firing hand on the A2 grip
-    K.hand(g, { at: [-0.040, -0.036], rake: R, gripW: 0.052, gripD: 0.074, size: 0.86, trigger: [-0.060, -0.126] });
+    K.hand(g, { at: [-0.040, -0.036], rake: R, gripW: 0.052, gripD: 0.074, trigger: [-0.060, -0.126] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.16);
     // WHERE THE HANDS GO (systems/gunhands.js reads these; model space,
     // barrel along -Z, +X = the gun's right flank).
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.022, -0.580),   // under the ribbed handguard
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: 0.045, z: -0.580, w: 0.096, h: 0.096, rc: 0.048, len: 0.32 },
       mag: new THREE.Vector3(0, -0.220, -0.290),       // magwell / mag body
       charge: new THREE.Vector3(0, 0.076, 0.058),      // charging-handle latch
       style: "mag",

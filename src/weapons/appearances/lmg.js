@@ -137,13 +137,15 @@
     box(g, 0.072, 0.176, 0.020, K.fin("rubber"), 0, -0.034, 0.428);
 
     // the firing hand on the grip
-    K.hand(g, { at: [-0.052, -0.052], rake: R, gripW: 0.056, gripD: 0.080, size: 0.86, trigger: [-0.084, -0.156] });
+    K.hand(g, { at: [-0.052, -0.052], rake: R, gripW: 0.056, gripD: 0.080, trigger: [-0.084, -0.156] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.204);
     // WHERE THE HANDS GO — see systems/gunhands.js. A belt gun is reloaded
     // through the feed cover and the ammo box, not a magwell.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.090, -0.520),   // under the ribbed handguard
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: -0.033, z: -0.520, w: 0.080, h: 0.074, rc: 0.020, len: 0.23 },
       mag: new THREE.Vector3(-0.012, -0.070, -0.240),  // ammo-box lid
       charge: new THREE.Vector3(0, 0.112, -0.030),     // feed-tray cover latch
       style: "belt",

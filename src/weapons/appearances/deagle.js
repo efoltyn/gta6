@@ -68,7 +68,7 @@
     box(g, 0.090, 0.018, 0.150, ss, 0, (b0[1] + b1[1]) / 2 - 0.006, -(b0[0] + b1[0]) / 2, -R);
 
     // the firing hand on the grip
-    K.hand(g, { at: [-0.062, -0.012], rake: R, gripW: 0.086, gripD: 0.142, size: 1.08, trigger: [-0.096, -0.126] });
+    K.hand(g, { at: [-0.062, -0.012], rake: R, gripW: 0.086, gripD: 0.142, trigger: [-0.096, -0.126] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -0.609);
     // WHERE THE HANDS GO — see systems/gunhands.js.

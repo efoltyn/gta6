@@ -45,13 +45,15 @@
     box(g, 0.022, 0.08, 0.024, mat.black, -0.03, 0.17, -0.30);
     box(g, 0.05, 0.04, 0.012, mat.steel, -0.03, 0.22, -0.30);
     // hand on the fire grip
-    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.008, 0.046], rake: 0.15, gripW: 0.07, gripD: 0.09, size: 0.9, trigger: [-0.03, -0.005] });
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.008, 0.046], rake: 0.15, gripW: 0.07, gripD: 0.09, trigger: [-0.03, -0.005] });
     // projectile + flash originate at the bore tip
     g.userData.muzzle = new THREE.Vector3(0, 0.05, -0.78);
     // WHERE THE HANDS GO — see systems/gunhands.js. Six chambers in a drum:
     // reloaded like a revolver, swung out to the weapon's LEFT.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.130, -0.420),   // the authored forward vertical grip
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "vgrip", y: -0.010, z: -0.427, rake: 0.10, w: 0.060, d: 0.080 },
       mag: new THREE.Vector3(-0.140, 0.020, -0.180),
       charge: null,
       style: "cylinder",

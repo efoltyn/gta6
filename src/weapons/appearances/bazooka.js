@@ -53,7 +53,7 @@
     box(g, 0.022, 0.10, 0.028, mat.black, -0.04, 0.16, -0.42);
     box(g, 0.05, 0.05, 0.012, mat.steel, -0.04, 0.225, -0.42);
     // hand on the fire grip
-    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.042, -0.066], rake: 0.18, gripW: 0.075, gripD: 0.10, size: 0.95, trigger: [-0.045, -0.10] });
+    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(g, { at: [-0.042, -0.066], rake: 0.18, gripW: 0.075, gripD: 0.10, trigger: [-0.045, -0.10] });
     // The projectile originates at the fuze tip, not inside the launcher's
     // bell.  Keeping this socket on the authored nose also keeps recoil from
     // making the first rocket frame look like it came through the weapon.
@@ -62,6 +62,8 @@
     // FRONT of the tube, so the reload runs the off hand all the way out.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.150, -0.420),   // the authored forward support grip
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "vgrip", y: -0.030, z: -0.428, rake: 0.10, w: 0.070, d: 0.090 },
       mag: new THREE.Vector3(0, 0.050, -1.330),        // the bell, where the warhead seats
       charge: null,
       style: "rocket",

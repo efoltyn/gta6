@@ -417,17 +417,24 @@
     return builder ? builder(appearanceCtx) : fallbackAppearance();
   }
 
-  /* THE OFF HAND, IN FIRST PERSON. Every weapon already publishes where its
-     support hand goes (userData.grips.support, read by gunhands.js for the
-     third-person body) — first person simply never drew one, so a rifle was
-     held by one floating hand. The support hand is systems/fphands.js's hand,
-     closed round what is there: cupped under a handguard (index forward,
-     back of the hand down-left), round a vertical foregrip, or wrapped over
-     the firing fist on a two-hand pistol hold. It is a child of the model
-     (of the pump on a pump gun, so it racks with it); the arm behind it is
-     solved per frame (poseFpArms). A melee weapon gets its fist here too. */
+  /* THE OFF HAND, IN FIRST PERSON — GRASPED onto the part it really holds.
+     Each gun names that part in userData.grips.hold (weapons/appearances/*):
+       guard  a handguard / pump / fore-end: a prism along the bore. The palm
+              cups UNDER it, the fingers close up the far side until they
+              touch, the thumb runs forward along the near side, the hand
+              yawed so the wrist sits back and left (where the forearm comes
+              from). On a pump gun the hand is a child of the pump and racks it.
+       vgrip  a vertical foregrip (RPG, grenade launcher): wrapped like a
+              pistol grip, back of the hand to the left.
+       (none, on a two-hand pistol) the modern thumbs-forward hold: the palm
+              fills the left panel, the fingers close round the FIRING fingers
+              (the grip plus their thickness), the thumb points forward along
+              the frame under the firing thumb.
+     The old version closed a fixed-size table pose round a guessed centre,
+     so on the M4 the off hand gripped air in front of the handguard and on
+     the pistols it floated below the fist. The arm is solved per frame
+     (poseFpArms). A melee weapon gets its fist here too. */
   const FPH = CBZ.fpHands || null;
-  const SUPPORT_K = 1.95;            // hand size in model units (the guns are ~2.1x real)
   const _ofA = new THREE.Vector3(), _ofB = new THREE.Vector3(), _ofC = new THREE.Vector3();
   function fitOffHand(model, w) {
     if (!FPH || !mat.skin) return;
@@ -442,32 +449,69 @@
         axis: _ofA.set(0, 0.1, -1), dorsal: _ofB.set(-0.84, -0.5, 0.1),
       }, mat.skin);
       fire.userData.fpGripHand = true;
+      fire.userData.foreLocal = new THREE.Vector3(0, 0, 1);
     }
     model.userData.fpFire = fire;
-    const gr = model.userData.grips, sp = gr && gr.support;
-    if (!sp) { model.userData.fpSupport = null; return; }
-    let spec;
-    if (sp.z > -0.2 && sp.x < -0.04) {
-      // two-hand pistol: the off hand closes over the firing fingers from the left
-      spec = { side: -1, pose: FPH.POSES.cupover, scale: SUPPORT_K,
-        axis: _ofA.set(0.05, 0.93, -0.36), dorsal: _ofB.set(-0.95, -0.1, -0.25) };
-    } else if (sp.y < -0.1) {
-      // a vertical foregrip (RPG, grenade launcher): index on top, palm round the front
-      spec = { side: -1, pose: FPH.POSES.grip, scale: SUPPORT_K,
-        axis: _ofA.set(0, 1, -0.12), dorsal: _ofB.set(-1, 0, -0.2) };
+    const gr = model.userData.grips, hold = gr && gr.hold;
+    const fg = fire && fire.userData.grasp;
+    if (!gr || !gr.support || !fg || hold === null) { model.userData.fpSupport = null; return; }
+    // the off hand is the same size as the firing hand, in MODEL units
+    const k = fg.k * (fire.parent && fire.parent !== model ? fire.parent.scale.x : 1);
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    let spec, foreDir;
+    if (hold && hold.kind === "guard") {
+      // cupped under the handguard, yawed: fingers up the far side and forward
+      const yaw = 0.62;
+      spec = {
+        side: -1, k: k, name: "guard:" + [hold.y, hold.z, hold.w, hold.h].join("/"),
+        prism: { o: V(0, hold.y, hold.z), axis: V(0, 0, -1), u: V(1, 0, 0), hw: hold.w / 2, hh: hold.h / 2, rc: hold.rc, hl: hold.len ? hold.len / 2 : Infinity },
+        n: V(-0.30, -1, 0),
+        heading: V(Math.cos(yaw), 0.18, -Math.sin(yaw)),
+        // a touch behind the part's middle: the elbow stays bent under the gun
+        at: V(0, hold.y, hold.z + (hold.slide == null ? 0.03 : hold.slide)),
+        palm: [0.004, -FPH.PALM.th * 0.5, -0.056],
+        thumbAim: V(-0.10, 0.22, -1),
+        thumbBend: [0.9, 0.7, 0.5],
+      };
+      foreDir = V(-0.55, -0.62, 0.56);          // wrist -> elbow: down, back, out to the left
+    } else if (hold && hold.kind === "vgrip") {
+      const ax = V(0, Math.cos(hold.rake || 0), -Math.sin(hold.rake || 0));
+      const u = V(1, 0, 0), fwd = new THREE.Vector3().crossVectors(ax, u);
+      const top = V(0, hold.y, hold.z);
+      spec = {
+        side: -1, k: k, name: "vgrip:" + [hold.y, hold.z, hold.w, hold.d].join("/"),
+        prism: { o: top, axis: ax, u: u, hw: hold.w / 2, hh: hold.d / 2, rc: Math.min(hold.w, hold.d) * 0.22 },
+        n: u.clone().negate().addScaledVector(fwd, -0.22),
+        heading: fwd.clone(),
+        at: top.clone().addScaledVector(ax, -0.050 * k),
+        palm: [0, -FPH.PALM.th * 0.5, -(0.096 - hold.d * 0.5 / k - 0.004)],
+        thumbAim: u.clone().addScaledVector(fwd, -0.35).addScaledVector(ax, 0.10),
+      };
+      foreDir = V(-0.45, -0.55, 0.70);
     } else {
-      // a handguard: cupped under it, index forward, back of the hand down-left
-      spec = { side: -1, pose: FPH.POSES.support, scale: SUPPORT_K,
-        axis: _ofA.set(-0.35, 0, -0.94), dorsal: _ofB.set(-0.3, -0.95, 0) };
+      // THUMBS FORWARD on a pistol: over the firing fist, from the left
+      const P = fg.prism, e = 0.020 * k;             // the firing fingers' thickness
+      const fwd = P.v.clone();                       // front strap side
+      spec = {
+        side: -1, k: k, name: "cup:" + fg.pose.name,
+        prism: { o: P.o.clone(), axis: P.axis.clone(), u: P.u.clone(), hw: P.hw + e, hh: P.hh + e * 0.8, rc: P.rc + e },
+        n: P.u.clone().negate().addScaledVector(fwd, -0.30),
+        heading: fwd.clone().multiplyScalar(0.90).addScaledVector(P.axis, -0.40),
+        at: P.o.clone().addScaledVector(P.axis, -0.046 * k),
+        palm: [0.006, -FPH.PALM.th * 0.5, -0.050],
+        thumbAim: V(0.25, -0.10, -1),
+        thumbAim2: V(0.12, -0.02, -1),
+      };
+      foreDir = V(-0.35, -0.45, 0.82);
     }
-    // the grip point is where the PALM touches; the hand closes round an axis
-    // one wrap-radius beyond it, away from the back of the hand
-    const R = (spec.pose.wrap || 0.02) * SUPPORT_K;
-    spec.center = _ofC.copy(sp).addScaledVector(_ofB.clone().normalize(), -R);
+    // on a pump gun the hand rides the pump (it racks with it)
     const holder = (model.userData.pump && model.userData.pump.parent === model) ? model.userData.pump : model;
-    if (holder !== model) spec.center.sub(holder.position);
-    const hand = FPH.attachGrip(holder, spec, mat.skin);
-    hand.userData.pose0 = spec.pose;
+    const hand = FPH.graspHand(null, spec, mat.skin);
+    if (holder !== model) hand.position.sub(holder.position);
+    holder.add(hand);
+    // the forearm's natural line, in the hand's own frame (so it rides every rack, dip and kick)
+    hand.userData.foreLocal = foreDir.normalize().applyQuaternion(hand.quaternion.clone().invert());
+    hand.userData.pose0 = hand.userData.pose;
     hand.userData.baseQ = hand.quaternion.clone();
     hand.userData.basePos = hand.position.clone();
     model.userData.fpSupport = hand;
@@ -999,7 +1043,23 @@
      pole is always down and OUT on the arm's own side. */
   const SHOULDER_CAM = [[0.30, -0.45, 0.12], [-0.30, -0.45, 0.12]];
   const ARM_FIST = [0.46, 0.44];            // upper, fore (vm metres at HAND_K)
-  const ARM_GUN = [0.60, 0.62];             // the gun world is bigger still
+  /* ARMED, THE BODY IS THE GUN'S SCALE. The viewmodel is a ~2.56x world (the
+     guns are built ~2x real and vm scales them 1.28), and the old arms were
+     not: shoulders 0.30 m out and 0.45 down with 0.60/0.62 bones, so a
+     rifle's support hand was out of reach (the arm locked straight and lay
+     along the gun as a giant sleeve) and a pistol's arms folded into a V
+     under the gun. Now a real body at the hand's own scale: shoulder joints
+     17 cm out, 24 cm under and 6 cm behind the eye, upper arm 30 cm, forearm
+     26.5 cm, all times the hand's vm scale. And the wrist is limited
+     (fphands.math.clampFore): the forearm leaves each hand within
+     WRIST_DEV of its natural line, so the joint never kinks at an angle no
+     wrist can make, and the forearms enter from the bottom corners. */
+  const SHOULDER_BODY = [[0.17, -0.24, 0.06], [-0.17, -0.24, 0.06]];
+  const ARM_BODY = [0.30, 0.265];
+  const WRIST_DEV = [0.70, 0.70];                 // firing, support (radians)
+  // where each forearm LEAVES the frame (camera space, wrist -> elbow): down
+  // and back toward its own bottom corner, never at the lens
+  const ARM_EXIT = [[0.30, -1, 0.30], [-0.50, -1, 0.30]];
   const _vmInv = new THREE.Matrix4();
   const _aS = new THREE.Vector3(), _aW = new THREE.Vector3(), _aE = new THREE.Vector3(), _aAlong = new THREE.Vector3();
   const _aQ = new THREE.Quaternion(), _aP = new THREE.Vector3();
@@ -1103,12 +1163,7 @@
     const fire = model && model.userData.fpFire;
     const sup = model && model.userData.fpSupport;
     armR.visible = !!fire;
-    if (fire) {
-      inVm(fire, null, _aW, _aQ);
-      shoulderVm(0, _aS);
-      elbowFor(0, _aW, _aS, defaultPole(1, 0, _poleArr), ARM_GUN, _aE);
-      FPH.poseArm(armR, _aW, _aE, _aS, _aQ, worldScaleInVm(fire), armSleeved);
-    }
+    if (fire) gunArm(0, fire, armR);
     armL.visible = !!sup;
     if (sup) {
       sup.visible = true;
@@ -1116,11 +1171,36 @@
       const mode = supportReloadOffset(model, sup, _rOff);
       sup.position.copy(sup.userData.basePos).add(_rOff);
       FPH.setPose(sup, mode === 1 ? "relaxed" : (mode === 2 ? "grip" : sup.userData.pose0));
-      inVm(sup, null, _aW, _aQ);
-      shoulderVm(1, _aS);
-      elbowFor(1, _aW, _aS, defaultPole(-1, 0, _poleArr), ARM_GUN, _aE);
-      FPH.poseArm(armL, _aW, _aE, _aS, _aQ, worldScaleInVm(sup), armSleeved);
+      gunArm(1, sup, armL);
     }
+  }
+  const _aF = new THREE.Vector3(), _eArr = [0, 0, 0], _fArr = [0, 0, 0];
+  function armShoulderVm(i, k, out) {
+    const s = SHOULDER_BODY[i];
+    return out.set(s[0] * k, s[1] * k, s[2] * k).applyMatrix4(_vmInv);
+  }
+  // one gun arm: the forearm heads for its bottom corner of the frame, as far
+  // as the wrist allows off the hand's natural line; the upper arm joins it
+  // to a shoulder at the hand's own scale (below and behind the lens)
+  const _vmQi = new THREE.Quaternion();
+  function gunArm(i, hand, arm) {
+    const k = worldScaleInVm(hand);
+    inVm(hand, null, _aW, _aQ);
+    armShoulderVm(i, k, _aS);
+    const lens = [ARM_BODY[0] * k, ARM_BODY[1] * k];
+    const x = ARM_EXIT[i];
+    _vmQi.copy(vm.quaternion).invert();
+    _aE.set(x[0], x[1], x[2]).normalize().applyQuaternion(_vmQi).multiplyScalar(lens[1]).add(_aW);
+    const fl = hand.userData.foreLocal;
+    if (fl) {
+      _aF.copy(fl).applyQuaternion(_aQ);
+      _wArr[0] = _aW.x; _wArr[1] = _aW.y; _wArr[2] = _aW.z;
+      _eArr[0] = _aE.x; _eArr[1] = _aE.y; _eArr[2] = _aE.z;
+      _fArr[0] = _aF.x; _fArr[1] = _aF.y; _fArr[2] = _aF.z;
+      const e = FPH.math.clampFore(_wArr, _eArr, _fArr, WRIST_DEV[i], lens[1]);
+      _aE.set(e[0], e[1], e[2]);
+    }
+    FPH.poseArm(arm, _aW, _aE, _aS, _aQ, k, armSleeved);
   }
   let aimHeld = false;     // third-person ADS (right mouse): raise the gun to aim
   let switchCD = 0;        // debounce weapon switching so mashing Q can't spam/stall

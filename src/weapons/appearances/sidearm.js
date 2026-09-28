@@ -166,44 +166,91 @@
     return pts;
   }
 
-  /* The firing hand around a pistol grip, on mat.skin — systems/fphands.js's
-     ONE hand (real palm, jointed fingers, opposed thumb, wrist), closed in its
-     pistol pose. `at` = centre of the top of the grip, `rake` = grip angle
-     back from vertical (radians), gripW / gripD = the grip's width and
-     front-to-back depth there, `size` scales the whole hand, `trigger` = [y, z]
-     of the trigger face (the index finger's knuckle sits level with it and
-     the finger reaches forward onto it). The hand's origin is the WRIST and it
-     is flagged userData.fpGripHand, so fpsmode can grow the forearm out of it.
-     These models are ~2.1x real scale, so the hand is too. */
-  const _hv = { a: null, b: null };
+  /* THE FIRING HAND, CLOSED ON THIS GUN'S GRIP. systems/fphands.js's one
+     hand, GRASPED onto the grip that is actually modelled here instead of a
+     fixed "pistol" pose (the old table pose buried the fingers in a fat grip
+     and left them floating beside a thin one, and sized the hand per gun, so
+     the same hand shrank 22% when you swapped a pistol for the shotgun).
+
+       at      [y, z] of the top centre of the grip (model units)
+       rake    grip angle back from vertical (radians)
+       gripW   side-to-side width of the grip, gripD front-to-back depth
+       trigger [y, z] of the trigger blade
+
+     The hand is ONE size on every gun: GUN_K model units per real metre (the
+     appearances are ~1.6-2.3x real; 2.0 is their middle), divided by the
+     parent's own scale (the taser builds inside a 0.82 group). The palm lies
+     flush on the right panel with the web as high as the tang allows, the
+     index knuckle level with the trigger, three fingers close round the
+     front strap until they touch it, the index finger's pad lands on the
+     trigger's face and the thumb wraps the back strap and rides forward along
+     the left flank. The hand's origin is the WRIST; it is flagged
+     userData.fpGripHand and carries userData.foreLocal (the straight-wrist
+     line) so fpsmode grows a forearm out of it that cannot kink the wrist. */
+  const GUN_K = 2.0;
   function hand(ctx, parent, h) {
     // a rack/shop display has no hand; a caller whose rig draws its own
     // hands (NPC props) passes ctx.noHand
     if (ctx.display || ctx.noHand || !ctx.mat.skin) return null;
     const FPH = CBZ.fpHands;
-    if (!FPH) return null;
+    if (!FPH || !FPH.grasp) return null;
     const THREE = ctx.THREE;
-    if (!_hv.a) { _hv.a = new THREE.Vector3(); _hv.b = new THREE.Vector3(); }
-    const k = (h.size || 1) * 2.1, w = h.gripW, d = h.gripD;
-    const g = new THREE.Group();
-    g.position.set(0, h.at[0], h.at[1]);
-    g.rotation.x = -(h.rake || 0);
-    parent.add(g);
-    // grip frame: +Y up the grip, -Z toward the muzzle, +X the gun's right.
-    // Index/thumb side UP the grip, back of the hand to the right and a touch
-    // forward, so the fingers run forward-left round the front strap.
-    const hd = FPH.makeHand(1, "pistol", ctx.mat.skin);
-    FPH.orientGrip(1, _hv.a.set(0, 1, 0), _hv.b.set(1, 0, -0.2), hd.quaternion);
-    hd.scale.setScalar(k);
-    const F = FPH.FINGERS[0];
-    // the index knuckle: on the right flank, level with the trigger, far
-    // enough back that the finger's length lands on the trigger face
-    const idxY = h.trigger ? Math.min(-0.012, (h.trigger[0] - h.at[0]) * Math.cos(h.rake || 0)) : -0.028 * k;
-    const target = _hv.b.set(w * 0.5 + (FPH.PALM.th * 0.5 + 0.002) * k, idxY, -d * 0.5 + 0.034 * k);
-    _hv.a.set(F.x, 0, F.z).multiplyScalar(k).applyQuaternion(hd.quaternion);
-    hd.position.copy(target).sub(_hv.a);
+    const k = GUN_K / ((parent && parent.scale && parent.scale.x) || 1);
+    const R = h.rake || 0;
+    const axis = new THREE.Vector3(0, Math.cos(R), -Math.sin(R));       // up the grip
+    const u = new THREE.Vector3(1, 0, 0);
+    const fwd = new THREE.Vector3().crossVectors(axis, u);               // front strap side
+    const top = new THREE.Vector3(0, h.at[0], h.at[1]);
+    const prism = { o: top, axis: axis, u: u, hw: h.gripW * 0.5, hh: h.gripD * 0.5, rc: Math.min(h.gripW, h.gripD) * 0.22 };
+    // the pad presses the FRONT face of the blade
+    const trig = h.trigger ? new THREE.Vector3(0, h.trigger[0], h.trigger[1] - 0.007) : null;
+    const hhM = h.gripD * 0.5 / k;
+    const spec = {
+      side: 1, k: k, prism: prism, name: "fire:" + [h.at, R.toFixed(3), h.gripW, h.gripD, h.trigger, k.toFixed(3)].join("/"),
+      n: new THREE.Vector3().copy(u).addScaledVector(fwd, -0.22),           // back of the hand out, a touch rearward
+      // fingers across the front strap; a steep stock wrist (the shotgun) is
+      // taken diagonally, fingers along the bore, the way a hand really
+      // closes on it (square to it the forearm would point at your eye)
+      heading: h.heading ? new THREE.Vector3(h.heading[0], h.heading[1], h.heading[2]) : fwd.clone(),
+      palm: [0, -FPH.PALM.th * 0.5, -(0.096 - hhM - 0.004)],            // knuckles just past the front strap
+      trigger: trig,
+      // the thumb: round the back strap, then forward along the left of the
+      // frame, riding high (the modern thumbs-forward grip)
+      thumbAim: new THREE.Vector3().copy(u).negate().addScaledVector(fwd, -0.35).addScaledVector(axis, 0.10),
+      thumbAim2: new THREE.Vector3(-0.30, 0.10, -1),
+      at: top.clone(),
+    };
+    /* Slide the hand along the grip. The web goes as high as the grip allows
+       (a high grip, not a hovering one: the thumb-side edge of the palm, web
+       or index knuckle, whichever a diagonal hold lifts higher, stays under
+       the top), and the index knuckle sits where the trigger is a relaxed
+       finger's reach away (7 cm to the pad), as level with it as it can be.
+       Sliding moves every point of the hand 1:1 along the axis, so one grasp
+       measures the whole family and the search is arithmetic. */
+    let t = -0.045 * k;
+    spec.at.copy(top).addScaledVector(axis, t);
+    {
+      const G = FPH.grasp(spec);
+      const idx0 = G.toM([FPH.FINGERS[0].x, 0, FPH.FINGERS[0].z]).clone();
+      const hi0 = Math.max(G.toM([-FPH.PALM.hw, 0, -0.030]).clone().sub(top).dot(axis),
+        G.toM([-FPH.PALM.hw * 0.8, 0, -0.090]).clone().sub(top).dot(axis));
+      const tMax = t + (-0.004 * k - hi0);
+      let best = tMax, bestC = Infinity;
+      for (let tt = tMax; tt > tMax - 0.10 * k; tt -= 0.002 * k) {
+        const idx = idx0.clone().addScaledVector(axis, tt - t);
+        let c = (tMax - tt) * 0.2;                     // prefer high
+        if (trig) {
+          const d = idx.distanceTo(trig);
+          c += Math.abs(d - 0.070 * k) + 0.3 * Math.abs(trig.clone().sub(idx).dot(axis));
+        }
+        if (c < bestC) { bestC = c; best = tt; }
+      }
+      t = best;
+    }
+    spec.at.copy(top).addScaledVector(axis, t);
+    const hd = FPH.graspHand(parent, spec, ctx.mat.skin);
     hd.userData.fpGripHand = true;
-    g.add(hd);
+    hd.userData.foreLocal = new THREE.Vector3(0, 0, 1);                    // a straight wrist
     return hd;
   }
 
@@ -283,7 +330,7 @@
     box(g, 0.072, 0.016, 0.118, mat.black, 0, by - 0.004, -bx + 0.004, -R);
 
     // the firing hand on the grip
-    K.hand(g, { at: [-0.036, -0.030], rake: R, gripW: 0.068, gripD: 0.118, size: 1.0, trigger: [-0.062, -0.118] });
+    K.hand(g, { at: [-0.036, -0.030], rake: R, gripW: 0.068, gripD: 0.118, trigger: [-0.062, -0.118] });
 
     g.userData.muzzle = new THREE.Vector3(0, 0.036, -0.424);
     // WHERE THE HANDS GO — see systems/gunhands.js. A pistol is a two-hand
