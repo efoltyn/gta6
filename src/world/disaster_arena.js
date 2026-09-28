@@ -3504,7 +3504,7 @@
     if (CBZ.bootStep) CBZ.bootStep("island:towers");
     // ---- SKYSCRAPERS: enterable hollow towers with floor landings and a
     // working ELEVATOR up the central shaft. Walk in the ground-floor door,
-    // ride the lift up (it auto-cycles), step off at any floor or the roof
+    // call the lift, ride it up, stop it at any floor or the roof
     // (high ground for the tsunami). Still one group so the quake topples the
     // whole thing; its walls/floors register as height-gated colliders +
     // walkable platforms (collapse yanks them all). ----
@@ -3958,8 +3958,47 @@
       if (!(lift && lift.roofBuried)) stops.push(realH);
       if (topY > realH + 0.3) stops.push(topY);
       rng();                     // was the car's start phase: keeps the island's rng stream (and so its town plan) where it was
-      elevators.push({ b, mesh: carMesh, plat: carPlat, rig: carRig, gy, ox, oz, s, stops,
-        y: stop0, v: 0, dir: 1, at: 0, target: -1, dwell: 1.5, idle: 0, slabTop: 0.1 });
+      /* THE LANDING DOORS. Every storey's shaft opening (towerInterior's
+         steel-framed hole in the front wall, facing the street door) was an
+         open drop into the shaft whenever the car was elsewhere, and the
+         car had no doors either. Now each opening has two sliding steel
+         leafs over one height-gated collider: shut unless the car stands at
+         that landing with its doors open. ONE instanced mesh per tower holds
+         every leaf (two per storey), so a tower of eleven floors is still
+         one draw call; only the landing the car is at ever animates. The
+         roof and crown stops have no shaft wall round them and no doors. */
+      const SWT = 0.15, so = s + SWT, dw = Math.min(2 * s - 0.5, 1.6), LDH = 2.2;
+      const leafTrav = Math.min(dw / 2 - 0.01, Math.max(0.3, s - dw / 2 - 0.02));
+      const fyOfK = function (k) { return k === 0 ? lobbyTop : k * FH + 0.1; };
+      const leafMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(dw / 2 - 0.006, LDH, 0.04),
+        new THREE.MeshLambertMaterial({ color: 0xa8adb2 }), 2 * storeys);
+      leafMesh.name = "island-lift-doors";
+      leafMesh.castShadow = true; leafMesh.receiveShadow = true;
+      leafMesh.frustumCulled = false;   // r128 culls an InstancedMesh by ONE leaf's sphere at the origin
+      g.add(leafMesh);
+      const doors = { mesh: leafMesh, n: storeys, dw: dw, trav: leafTrav, z: -s - SWT / 2, h: LDH,
+        fy: [], open: [], target: [], col: [], solid: [] };
+      for (let k = 0; k < stops.length; k++) {
+        doors.open.push(0); doors.target.push(0); doors.solid.push(true);
+        if (k >= storeys) { doors.fy.push(stops[k] + 0.1); doors.col.push(null); continue; }
+        const fy = fyOfK(k);
+        doors.fy.push(fy);
+        const c = { minX: ox - dw / 2, maxX: ox + dw / 2, minZ: oz - so - 0.02, maxZ: oz - s + 0.02, ref: null,
+          y0: gy + fy, y1: gy + fy + LDH, cy0: gy + fy, cy1: gy + fy + LDH };
+        CBZ.colliders.push(c); cols.push(c);
+        doors.col.push(c);
+      }
+      // the call button's LIT face: one small glowing chip moved to the
+      // landing that pressed it, shown while the lift answers
+      const litBtn = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.008),
+        new THREE.MeshBasicMaterial({ color: 0xffc14a }));
+      litBtn.visible = false; litBtn.name = "island-lift-lit";
+      g.add(litBtn);
+      const e = { b, mesh: carMesh, plat: carPlat, rig: carRig, gy, ox, oz, s, so, dw, stops, storeys,
+        y: stop0, v: 0, slabTop: 0.1, doors: doors, litBtn: litBtn, litAt: -1, idle: 0,
+        m: CBZ.liftCore ? CBZ.liftCore.create(stops.length, 0) : null };
+      for (let k = 0; k < storeys; k++) poseLandingDoors(e, k);
+      elevators.push(e);
 
       return b;
     }
@@ -4877,97 +4916,235 @@
     };
 
     /* ---- ELEVATOR DRIVE -------------------------------------------------
-       A lift that serves EVERY floor, and the top of the crown. It used to
-       auto-cycle ground -> roof -> ground at 4.5 m/s and never stop between,
-       so the only floors it served were the two ends (and the top end was
-       inside the crown, see THE TOP OF THE BUILDING, REACHED). Now:
+       A lift that serves EVERY floor, and the top of the crown, driven by the
+       one lift machine (systems/liftcore.js, shared with the city's walk-in
+       cabs). It used to have no button and no doors: standing near the shaft
+       summoned it, standing on the car sent it express, and walking on the
+       car stopped it at the next floor, which read as a lift that ignored
+       you and then did things on its own (owner: "fix the elevator button
+       opening the elevator"). Now it is a lift:
 
-         * standing on a landing next to the shaft CALLS it to your floor;
-         * standing still on the car sends it on, express, to the far end in
-           the direction it is going (up to the top of the crown by default,
-           because that is where you go in a tsunami);
-         * WALKING on the car while it moves stops it at the next floor it can
-           brake for, and it waits while you walk off. No button, no text:
-           you step towards the floor you want and the lift lets you out.
-         * left alone for a while it goes home to the ground floor, so the
-           next person through the door finds it waiting.
+         * "Call" pinned over the landing's call button ([E], or tap it): the
+           button lights, the car comes to your floor and its doors OPEN.
+         * in the car, "Up" / "Down" ([E] / [Q], or tap): the doors close and
+           it runs express towards the top of the crown or the lobby.
+         * while it runs, "Stop" ([E], or tap) with the floor it can still
+           brake for: it stops there and the doors open. That is how you pick
+           any floor with one button: ride, and stop where you want.
+         * the doors hold while you stand in the doorway or in the car; an
+           empty car shuts its doors, and after a while goes home to the lobby.
 
        Collapsed towers park their lift. PRIORITY 9.4: a platform must move
        BEFORE the character resolves against it (platforms_moving.js ticks at
        9.5, updatePlayer at 10). */
-    const LIFT_V = 5.5, LIFT_A = 3.2;
-    function liftRiding(e, P) {
-      if (!P || !P.pos) return false;
-      if (e.rig && CBZ.movingPlatformRiding) return CBZ.movingPlatformRiding() === e.rig;
-      const top = e.gy + e.y + e.slabTop;
-      return Math.abs(P.pos.x - e.ox) < e.s && Math.abs(P.pos.z - e.oz) < e.s && Math.abs(P.pos.y - top) < 0.45;
-    }
-    // the stop whose landing the player is standing on, next to this shaft
-    function liftCall(e, P) {
-      if (!P || !P.pos || P.dead) return -1;
-      const dx = Math.abs(P.pos.x - e.ox), dz = Math.abs(P.pos.z - e.oz);
-      if (dx > e.s + 2.2 || dz > e.s + 2.2) return -1;
-      if (dx < e.s && dz < e.s) return -1;            // on the car (or in the shaft)
-      for (let i = 0; i < e.stops.length; i++) {
-        if (Math.abs(P.pos.y - (e.gy + e.stops[i] + e.slabTop)) < 0.5) return i;
+    const LIFT_V = 5.5, LIFT_A = 3.2, LEAF_V = 2.4;
+    const LiftCore = CBZ.liftCore;
+    function deckY(e, i) { return e.gy + e.stops[i] + e.slabTop; }
+    // the leaf pair at landing k, posed from its open amount (0 shut .. 1 open)
+    function poseLandingDoors(e, k) {
+      const D = e.doors;
+      if (!D || k >= D.n) return;
+      // (a property, not a const: makeTower poses every landing at build
+      // time, before this part of the builder has run)
+      const M4 = poseLandingDoors.m || (poseLandingDoors.m = new THREE.Matrix4());
+      const o = D.open[k], x0 = D.dw / 4;
+      for (let sd = 0; sd < 2; sd++) {
+        const sg = sd ? 1 : -1;
+        M4.makeTranslation(sg * (x0 + D.trav * o), D.fy[k] + D.h / 2, D.z);
+        D.mesh.setMatrixAt(2 * k + sd, M4);
       }
-      return -1;
+      D.mesh.instanceMatrix.needsUpdate = true;
     }
+    function inCar(e, P) {
+      if (!P || !P.pos) return false;
+      const top = e.gy + e.y + e.slabTop;
+      return Math.abs(P.pos.x - e.ox) < e.s - 0.05 && Math.abs(P.pos.z - e.oz) < e.s - 0.05 &&
+        P.pos.y > top - 0.5 && P.pos.y < top + 1.2;
+    }
+    function onStop(e, i, P) { const dy = P.pos.y - deckY(e, i); return dy > -0.6 && dy < 1.2; }
+    // in the landing's opening, between the car and the landing floor
+    function inDoorway(e, i, P) {
+      if (!P || !P.pos || !onStop(e, i, P)) return false;
+      const dx = P.pos.x - e.ox, dz = P.pos.z - e.oz;
+      return Math.abs(dx) < e.dw / 2 + 0.1 && dz > -e.so - 0.5 && dz < -e.s + 0.05;
+    }
+    // standing at the landing's call panel (in front of the opening), or at a
+    // doorless top stop, beside the shaft
+    function atLanding(e, i, P) {
+      if (!P || !P.pos || !onStop(e, i, P) || inCar(e, P)) return false;
+      const dx = P.pos.x - e.ox, dz = P.pos.z - e.oz;
+      if (i < e.doors.n) return Math.abs(dx) < e.dw / 2 + 1.4 && dz > -e.so - 2.4 && dz < -e.s + 0.05;
+      return Math.abs(dx) < e.so + 2.2 && Math.abs(dz) < e.so + 2.2;
+    }
+    function nearTower(e, P) { return !!(P && P.pos && Math.abs(P.pos.x - e.ox) < 14 && Math.abs(P.pos.z - e.oz) < 14); }
+    function btnAt(e, i) {
+      const D = e.doors;
+      if (i < D.n) return { x: e.ox - e.dw / 2 - 0.26, y: e.gy + D.fy[i] + 1.12, z: e.oz - e.so - 0.03 };
+      return { x: e.ox, y: deckY(e, i) + 1.4, z: e.oz - e.so - 0.1 };
+    }
+    function floorWord(e, i) {
+      if (i === 0) return "lobby";
+      if (i < e.storeys) return "floor " + i;
+      return i === e.stops.length - 1 ? "the top" : "the roof";
+    }
+    function setDoor(e, i, open, P) {
+      const D = e.doors, t = open ? 1 : 0;
+      if (D.target[i] === t) return;
+      D.target[i] = t;
+      if (i >= D.n) { D.open[i] = t; return; }        // a top stop has no doors
+      if (CBZ.sfx && P && nearTower(e, P) && onStop(e, i, P)) CBZ.sfx(open ? "door_open" : "door_close");
+    }
+    function gate(e, i) {
+      const D = e.doors, c = D.col[i];
+      if (!c) return;
+      const solid = D.open[i] < 0.25;
+      if (solid === D.solid[i]) return;
+      D.solid[i] = solid;
+      if (solid) { c.y0 = c.cy0; c.y1 = c.cy1; } else { c.y0 = 1e9; c.y1 = 1e9 + 1; }
+    }
+    // the next stop the car can still brake for, in its direction of travel
+    function brakeStop(e) {
+      const S = e.stops, goal = S[e.m.dest], dir = goal > e.y ? 1 : -1;
+      const brake = e.v * e.v / (2 * LIFT_A) + 0.05;
+      let best = -1;
+      for (let k = 0; k < S.length; k++) {
+        const ahead = (S[k] - e.y) * dir;
+        if (ahead >= brake && (best < 0 || ahead < (S[best] - e.y) * dir)) best = k;
+      }
+      return best;
+    }
+    // trapezoid: accelerate, cruise, brake to land exactly on the stop
+    function driveCar(e, dt) {
+      const goal = e.stops[e.m.dest], dir = goal > e.y ? 1 : -1, rem = (goal - e.y) * dir;
+      const vStop = Math.sqrt(Math.max(0, 2 * LIFT_A * rem));
+      e.v = Math.min(LIFT_V, e.v + LIFT_A * dt, vStop);
+      const step = e.v * dt;
+      if (step >= rem || rem < 0.004) { e.y = goal; e.v = 0; return true; }
+      e.y += dir * step;
+      return false;
+    }
+    function ioFor(e, P) {
+      return {
+        inside: (i) => e.m.at === i && Math.abs(e.y - e.stops[i]) < 0.01 && inCar(e, P),
+        doorway: (i) => inDoorway(e, i, P),
+        doorOpen: (i) => e.doors.open[i],
+        door: (i, open) => setDoor(e, i, open, P),
+        seal: (i) => gate(e, i),
+        travel: (m, dt) => driveCar(e, dt),
+        lit: (on) => { e.litOn = on; },
+        sfx: (s) => { if (CBZ.sfx && nearTower(e, P)) CBZ.sfx(s); },
+      };
+    }
+
+    // ---- the controls: the verb pinned over the thing (systems/interactions.js
+    //      prisonPrompt, bound to its key; on touch the same pill is the tap)
+    let callArm = null, stopArm = null;
+    const goArm = [];
+    CBZ.islandLiftCall = function () {
+      const a = callArm, P = CBZ.player;
+      if (!a || !P || P.dead) return false;
+      a.e.litAt = a.i;
+      return LiftCore.call(a.e.m, a.i, ioFor(a.e, P));
+    };
+    for (let r = 0; r < 2; r++) {
+      CBZ["islandLiftGo" + r] = function () {
+        const a = goArm[r], P = CBZ.player;
+        if (!a || !P || P.dead) return false;
+        a.e.litAt = -1;
+        return LiftCore.go(a.e.m, a.j, ioFor(a.e, P));
+      };
+    }
+    CBZ.islandLiftStop = function () {
+      const a = stopArm;
+      if (!a || a.e.m.st !== "ride") return false;
+      const k = brakeStop(a.e);
+      if (k < 0) return false;
+      a.e.m.dest = k;
+      if (CBZ.sfx) CBZ.sfx("switch");
+      return true;
+    };
+    (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+      { id: "island-lift-call", act: "@islandLiftCall", was: "no button: standing near the shaft summoned the car", now: "Call, over the call button" },
+      { id: "island-lift-go-0", act: "@islandLiftGo0", was: "standing on the car sent it; walking on it stopped it", now: "Up / Down, then Stop, in the car" }
+    );
+    function armControls(P) {
+      callArm = null; stopArm = null; goArm.length = 0;
+      if (!P || !P.pos || P.dead || P._mountedAnimal || !CBZ.prisonPrompt || CBZ.game.mode !== "survival") return;
+      for (let q = 0; q < elevators.length; q++) {
+        const e = elevators[q], m = e.m;
+        if (!m || e.b.fallen || !inCar(e, P)) continue;
+        const at = { x: e.ox + e.s - 0.25, y: e.gy + e.y + e.slabTop + 1.3, z: e.oz - e.s + 0.35 };
+        if (m.st === "ride") {
+          const k = brakeStop(e);
+          if (k >= 0 && k !== m.dest) {
+            stopArm = { e: e };
+            CBZ.prisonPrompt("island-lift-stop", "@islandLiftStop", "Stop", { at: at, sub: floorWord(e, k), key: "e", bind: true, d2: 0.01 });
+          }
+          return;
+        }
+        if ((m.st === "open" || m.st === "idle") && Math.abs(e.y - e.stops[m.at]) < 0.01) {
+          const last = e.stops.length - 1, rows = [];
+          if (m.at < last) rows.push({ j: last, verb: "Up" });
+          if (m.at > 0) rows.push({ j: 0, verb: "Down" });
+          for (let r = 0; r < rows.length; r++) {
+            goArm[r] = { e: e, j: rows[r].j };
+            CBZ.prisonPrompt("island-lift-go-" + r, "@islandLiftGo" + r, rows[r].verb,
+              { at: at, key: r ? "q" : "e", bind: true, group: "island-lift-car", row: r, d2: 0.01 });
+          }
+        }
+        return;
+      }
+      let best = null;
+      for (let q = 0; q < elevators.length; q++) {
+        const e = elevators[q], m = e.m;
+        if (!m || e.b.fallen) continue;
+        for (let i = 0; i < e.stops.length; i++) {
+          if (!atLanding(e, i, P)) continue;
+          if (m.st === "ride" || (m.at === i && (m.st === "open" || (m.st === "close" && m.dest >= 0)))) continue;
+          const b2 = btnAt(e, i), d2 = (b2.x - P.pos.x) * (b2.x - P.pos.x) + (b2.z - P.pos.z) * (b2.z - P.pos.z);
+          if (!best || d2 < best.d2) best = { e: e, i: i, d2: d2, at: b2 };
+        }
+      }
+      if (best) {
+        callArm = best;
+        CBZ.prisonPrompt("island-lift-call", "@islandLiftCall", "Call", { at: best.at, key: "e", bind: true, d2: Math.min(best.d2, 0.3) });
+      }
+    }
+
     CBZ.onUpdate(9.4, function (dt) {
       if (!CBZ.islandModeOn(CBZ.game.mode)) return;
       if (!(dt > 0)) return;
       dt = Math.min(dt, 0.1);
       const P = CBZ.player;
-      for (let i = 0; i < elevators.length; i++) {
-        const e = elevators[i];
+      if (!LiftCore) return;
+      for (let q = 0; q < elevators.length; q++) {
+        const e = elevators[q], m = e.m, D = e.doors;
         if (e.rig) e.rig.setActive(!e.b.fallen);
-        if (e.b.fallen) { if (e.mesh.visible) e.mesh.visible = false; continue; }
-        const riding = liftRiding(e, P);
-        const walking = riding && P.speed > 0.3;
-        const S = e.stops, last = S.length - 1;
-        if (e.target < 0) {
-          // parked at stop e.at
-          if (walking) e.dwell = Math.max(e.dwell, 0.8);   // hold it while they step off
-          if (e.dwell > 0) { e.dwell -= dt; }
-          else if (riding) {
-            if (e.at >= last) e.dir = -1; else if (e.at <= 0) e.dir = 1;
-            e.target = e.dir > 0 ? last : 0;
-            e.idle = 0;
-          } else {
-            const call = liftCall(e, P);
-            if (call >= 0 && call !== e.at) { e.target = call; e.idle = 0; }
-            else if (e.at !== 0) { e.idle += dt; if (e.idle > 9) { e.target = 0; e.idle = 0; } }
-          }
+        if (e.b.fallen) { if (e.mesh.visible) e.mesh.visible = false; if (D.mesh.visible) D.mesh.visible = false; e.litBtn.visible = false; continue; }
+        LiftCore.step(m, dt, ioFor(e, P));
+        // an empty car with its doors shut goes home to the lobby after a while
+        if (m.st === "idle" && m.at !== 0 && !inCar(e, P)) {
+          e.idle += dt;
+          if (e.idle > 9) { e.idle = 0; LiftCore.park(m, 0); }
+        } else e.idle = 0;
+        // the landing doors: only the ones not at rest move
+        for (let k = 0; k < e.stops.length; k++) {
+          if (D.open[k] === D.target[k]) continue;
+          if (k >= D.n) { D.open[k] = D.target[k]; continue; }
+          D.open[k] = D.open[k] < D.target[k] ? Math.min(D.target[k], D.open[k] + LEAF_V * dt) : Math.max(D.target[k], D.open[k] - LEAF_V * dt);
+          poseLandingDoors(e, k);
+          gate(e, k);
         }
-        if (e.target >= 0) {
-          const goal = S[e.target], dir = goal > e.y ? 1 : -1;
-          e.dir = dir;
-          // walking aboard: stop at the next floor it can still brake for
-          if (walking && !e._stopReq) {
-            const brake = e.v * e.v / (2 * LIFT_A) + 0.05;
-            let best = -1;
-            for (let k = 0; k <= last; k++) {
-              const ahead = (S[k] - e.y) * dir;
-              if (ahead >= brake && (best < 0 || ahead < (S[best] - e.y) * dir)) best = k;
-            }
-            if (best >= 0 && (S[best] - e.y) * dir < (goal - e.y) * dir) e.target = best;
-            e._stopReq = true;
-          }
-          const g2 = S[e.target], rem = (g2 - e.y) * dir;
-          // trapezoid: accelerate, cruise, brake to land exactly on the stop
-          const vStop = Math.sqrt(Math.max(0, 2 * LIFT_A * rem));
-          e.v = Math.min(LIFT_V, e.v + LIFT_A * dt, vStop);
-          let step = e.v * dt;
-          if (step >= rem || rem < 0.004) {
-            e.y = g2; e.v = 0; e.at = e.target; e.target = -1; e._stopReq = false;
-            e.dwell = riding ? 1.4 : 2.2;
-          } else e.y += dir * step;
-        }
+        // the lit call button, on the landing that pressed it
+        const showLit = !!e.litOn && e.litAt >= 0 && e.litAt < D.n;
+        if (showLit) { const b2 = btnAt(e, e.litAt); e.litBtn.position.set(b2.x - e.ox, b2.y - e.gy, b2.z - 0.012 - e.oz); }
+        if (e.litBtn.visible !== showLit) e.litBtn.visible = showLit;
         e.mesh.position.y = e.y;
         // the rig reads carMesh.position.y itself at 9.5; only the legacy
         // fallback record still needs poking
         if (e.plat) e.plat.top = e.gy + e.y + e.slabTop;
       }
+      armControls(P);
     });
 
     root.visible = false; // hidden until survival mode activates

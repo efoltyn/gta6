@@ -555,7 +555,7 @@
       const act = b.getAttribute("data-ep");
       if (act === "close") setOpen(false);
       else if (act === "map") { setOpen(false); if (CBZ.fullMap && CBZ.fullMap.toggle) CBZ.fullMap.toggle(); }
-      else if (act === "ranks") { setOpen(false); const d = document.getElementById("dashBtn"); if (d) d.click(); }
+      else if (act === "ranks") { setOpen(false); if (CBZ.dashboardCycle) CBZ.dashboardCycle(); }
       else if (act === "pause") { setOpen(false); if (CBZ.setState) CBZ.setState("paused"); }
     });
     return panel;

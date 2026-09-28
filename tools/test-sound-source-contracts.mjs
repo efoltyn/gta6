@@ -42,6 +42,9 @@ const physicalDoorOwners = new Set([
   // on 2026-08-09 (a state change voicing a door) visible instead of buried.
   "src/city/boarding.js",
   "src/city/vehicle_hold.js",
+  // the island towers' landing doors (2026-09-28): the lift drive owns the
+  // sliding leafs and their collider and voices them only as they move.
+  "src/world/disaster_arena.js",
 ]);
 const foundDoorOwners = new Set();
 

@@ -381,7 +381,7 @@
      right now (display/visibility/opacity), so a CSS regression shows up as
      a number rather than a screenshot. */
   const PANEL_IDS = ["objective", "topright", "timer", "cigs", "keycard", "inventory", "detectWrap", "gangHud",
-    "compass", "minimap", "simHud", "dashBtn", "runStats", "pickupFeed", "crateChip", "streakHud", "streakMeter",
+    "compass", "minimap", "simHud", "runStats", "pickupFeed", "crateChip", "streakHud", "streakMeter",
     "waypointGuide", "escapePlan", "weaponStrip", "ammo", "hitfx", "toast"];
   function painted(e) {
     if (!e || !e.isConnected) return false;

@@ -1713,7 +1713,9 @@
       // flying → eject; on foot → board nearest owned aircraft if close.
       // Both verbs run the elevator-grammar door arc when available: canopy
       // pops open, you climb in/out through the opening, it closes.
-      if (P._aircraft) { e.preventDefault(); exitAircraftWithDoors(); return; }
+      // flying: [F] out is systems/seat_exit.js's (it consumes the press in the
+      // capture phase and calls cityPlayerAircraftExit, the same door arc).
+      if (P._aircraft) return;
       if (P.driving) return;                // in a car — vehicles.js owns [F]
       const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
       if (c) {

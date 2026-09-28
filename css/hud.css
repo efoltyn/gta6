@@ -621,8 +621,7 @@ body.mode-survival #keycard,
 body.mode-survival #inventory,
 body.mode-survival #detectWrap,
 body.mode-survival #gangHud,
-body.mode-survival #compass,
-body.mode-survival #dashBtn { display:none !important; }
+body.mode-survival #compass { display:none !important; }
 
 body.mode-survival #topright #survTop{ display:flex; }
 body.mode-survival #survBars{ display:block; }
@@ -725,7 +724,6 @@ body.prison-bare #inventory,
 body.prison-bare #detectWrap,
 body.prison-bare #compass,
 body.prison-bare #minimap,
-body.prison-bare #dashBtn,
 body.prison-bare #runStats,
 body.prison-bare #pickupFeed,
 body.prison-bare #crateChip,
