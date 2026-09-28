@@ -19,7 +19,7 @@
    Days are advanced through polity's own wrap hook (_checkDayWrap), never by
    waiting 150 real seconds. Sim time runs through CBZ.stepSim(1/60).
 
-   Usage: node tools/president-check.mjs [--seed N] [--quick]
+   Usage: node tools/president-check.mjs [--seed N] [--quick] [--motorcade]
    Boot boilerplate: tools/city-nav-check.mjs. */
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
@@ -30,12 +30,13 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const SEED = arg("--seed", "260811");
 const QUICK = process.argv.includes("--quick");
+const ONLY_MC = process.argv.includes("--motorcade");   // boot + spine + the ride only
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const port = 8760 + Math.floor(Math.random() * 40);
+const port = +(process.env.CBZ_PORT || 21000 + Math.floor(Math.random() * 9000));   // private: never collides with another agent's run
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
 const base = `http://127.0.0.1:${port}/`;
-const target = `${base}?seed=${SEED}`;
-const dbg = 9760 + Math.floor(Math.random() * 40);
+const target = `${base}?seed=${SEED}&cfg_RENDER_FRAMES=0`;   // sim only: no swiftshader frames between evaluates
+const dbg = +(process.env.CBZ_DBG || 31000 + Math.floor(Math.random() * 9000));
 const profile = `/tmp/cbz-president-${dbg}`;
 await rm(profile, { recursive: true, force: true });
 for (let i = 0; i < 60; i++) { try { const r = await fetch(base); if (r.ok) break; } catch (_) {} await sleep(250); }
@@ -49,6 +50,7 @@ const chrome = spawn(CHROME_BIN, [
   ...(proxy ? [`--proxy-server=${proxy}`, "--proxy-bypass-list=127.0.0.1;localhost;[::1]"] : []),
   `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`, target,
 ], { stdio: "ignore" });
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => done(130));   // never orphan Chrome + the server
 function done(code) { try { chrome.kill("SIGTERM"); } catch (_) {} try { server.kill("SIGTERM"); } catch (_) {} rm(profile, { recursive: true, force: true }).catch(() => {}); process.exit(code); }
 
 let page = null;
@@ -66,13 +68,38 @@ ws.addEventListener("message", (ev) => {
   if (m.method === "Runtime.exceptionThrown") { const d = m.params.exceptionDetails; errors.push(`${d.url || "?"}:${d.lineNumber} ${(d.exception && d.exception.description || d.text || "").split("\n")[0]}`); }
   else if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") { errors.push("console.error: " + m.params.args.map((a) => a.value || a.description || "").join(" ").slice(0, 240)); }
 });
-const send = (method, params = {}) => new Promise((r) => { const i = id++; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
-const evl = async (expr) => {
-  const r = await send("Runtime.evaluate", { expression: `(function(){${expr}})()`, returnByValue: true, awaitPromise: true });
+// Every CDP call carries a hard deadline: the check can never hang silently.
+// A dead socket fails every pending call at once (no "unsettled top-level
+// await"), and an evaluate that blows its budget PAUSES the page in the
+// debugger and prints the JS stack it was stuck in, so a sim hang names its
+// own function instead of looking like machine load.
+let pausedFrames = null;
+ws.addEventListener("message", (ev) => { const m = JSON.parse(ev.data); if (m.method === "Debugger.paused") pausedFrames = m.params.callFrames; });
+ws.addEventListener("close", () => { for (const [, r] of pending) r({ __closed: true }); pending.clear(); });
+const send = (method, params = {}, ms = 60000) => new Promise((r) => {
+  const i = id++; let t = null;
+  pending.set(i, (m) => { clearTimeout(t); r(m); });
+  t = setTimeout(() => { if (pending.has(i)) { pending.delete(i); r({ __timeout: true }); } }, ms);
+  ws.send(JSON.stringify({ id: i, method, params }));
+});
+async function hangReport(label, ms) {
+  console.error(`FAIL: ${label} did not return within ${Math.round(ms / 1000)} s; pausing the page to see where it is stuck`);
+  pausedFrames = null;
+  send("Debugger.pause", {}, 60000);
+  for (let i = 0; i < 240 && !pausedFrames; i++) await sleep(250);
+  if (pausedFrames) for (const f of pausedFrames.slice(0, 14)) console.error(`    at ${f.functionName || "(anon)"} ${(f.url || "").replace(base, "")}:${f.location.lineNumber + 1}:${f.location.columnNumber + 1}`);
+  else console.error("    (the page never paused: renderer wedged or dead)");
+  done(3);
+}
+const evl = async (expr, ms = 120000, label) => {
+  label = label || JSON.stringify(expr.replace(/\s+/g, " ").trim().slice(0, 90));
+  const r = await send("Runtime.evaluate", { expression: `(function(){${expr}})()`, returnByValue: true, awaitPromise: true }, ms);
+  if (r.__closed) { console.error(`FAIL: Chrome went away during ${label}`); done(3); }
+  if (r.__timeout) await hangReport(label, ms);
   if (r.result && r.result.exceptionDetails) return { __err: r.result.exceptionDetails.exception && r.result.exceptionDetails.exception.description };
   return r.result && r.result.result && r.result.result.value;
 };
-await send("Runtime.enable"); await send("Page.enable");
+await send("Runtime.enable"); await send("Page.enable"); await send("Debugger.enable");
 
 // ---- boot THE PRESIDENT through the real title card --------------------------
 let ready = false;
@@ -98,6 +125,21 @@ if (!site) { console.error("FAIL: Executive Mansion never built"); done(2); }
 // settle: the origin swears in, lazy builders (room, staff, car) get frames
 await evl("for (var k=0;k<240;k++) CBZ.stepSim(1/60); return true;");
 console.log(`President run booted (seed ${SEED}).`);
+// per-updater wall-time profile: every updater/always fn is timed (lazily, so
+// late registrations are covered). profTop() names the slowest organs.
+await evl(`
+  if (window.__prof) return true;
+  var PR = window.__prof = {}, raw = CBZ.stepSim;
+  function wrap(list, tag) { for (var i = 0; i < list.length; i++) { var u = list[i]; if (u.__w) continue;
+    (function (u, key) { var f = u.fn; u.fn = function (dt) { var t = performance.now(); try { return f(dt); } finally {
+      var d = performance.now() - t, r = PR[key] || (PR[key] = { n: 0, tot: 0, max: 0 }); r.n++; r.tot += d; if (d > r.max) r.max = d; } }; u.__w = true;
+    })(u, tag + ":" + u.order + ":" + (u.fn.name || "anon") + (u.source ? "@" + u.source : "")); } }
+  CBZ.stepSim = function (dt) { wrap(CBZ.updaters, "u"); wrap(CBZ.always, "a"); return raw(dt); };
+  return true;`);
+const profTop = async (reset) => evl(`var PR = window.__prof || {}, L = Object.keys(PR).map(function (k) { var r = PR[k]; return k + " max " + Math.round(r.max) + " avg " + (r.tot / r.n).toFixed(1); });
+  L.sort(function (a, b) { return +b.split(" max ")[1].split(" ")[0] - +a.split(" max ")[1].split(" ")[0]; });
+  ${reset ? "window.__prof && Object.keys(window.__prof).forEach(function (k) { delete window.__prof[k]; });" : ""}
+  return L.slice(0, 6);`, 30000, "profTop");
 
 const results = [];
 function check(name, ok, detail) { results.push(ok); console.log((ok ? "  ok  " : "FAIL  ") + name + (detail != null ? "  " + detail : "")); }
@@ -168,29 +210,54 @@ else {
     ds.sort(function (a, b) { return Math.hypot(a.x - sc.pos.x, a.z - sc.pos.z) - Math.hypot(b.x - sc.pos.x, b.z - sc.pos.z); });
     var d = ds[0], P = CBZ.player, S = CBZ.carSeats;
     var arr0 = CBZ.motorcadeAudit().arrivals | 0;
+    // who hurts the state car: a trap on engineHp keeps the stack of every drop
+    // (the column evacuates "under fire" on any drop, so a phantom one aborts the ride)
+    window.__scHits = [];
+    (function (c) { var v = c.engineHp; try { Object.defineProperty(c, "engineHp", { configurable: true, enumerable: true,
+      get: function () { return v; },
+      set: function (n) { if (v != null && n != null && n < v - 0.01 && window.__scHits.length < 6) window.__scHits.push({ from: +(+v).toFixed(1), to: +(+n).toFixed(1),
+        stack: String(new Error().stack).split("\\n").slice(2, 8).map(function (l) { return l.trim().replace(location.origin + "/", ""); }).join(" < ") }); v = n; } }); } catch (e) {} })(sc);
+    // ...and what it hit: cityCarImpact is called for both cars of a crash, a then b
+    if (CBZ.cityCarImpact && !CBZ.cityCarImpact.__mcw) { var ci = CBZ.cityCarImpact, pend = false, last = null, lastT = -1;
+      var who = function (c) { return c ? (c._motorcade ? "convoy:" + c._motorcade : (c.player ? "player" : (c.ai ? "traffic" : "parked/other"))) + " v=" + (+(c.v || 0)).toFixed(1) : "?"; };
+      CBZ.cityCarImpact = function (car) { var mine = CBZ.motorcade.car(), T = CBZ._matrixOwnStamp;
+        var note = function (o) { if (window.__scHits.length < 8) window.__scHits.push({ from: 0, to: 0, stack: "IMPACT state car <-> " + who(o) }); };
+        if (pend) { pend = false; if (car !== mine) note(car); }
+        else if (car === mine) { if (last && last !== car && lastT === T) note(last); else pend = true; }
+        last = car; lastT = T; return ci.apply(this, arguments); };
+      CBZ.cityCarImpact.__mcw = true; }
     var r = CBZ.motorcade.go(d.id);
     var act = CBZ.motorcade.active();
     window.__mcRide = { dest: d, arr0: arr0, c0: { x: sc.pos.x, z: sc.pos.z }, last: { x: sc.pos.x, z: sc.pos.z }, path: 0, offSeat: 0, apart: 0, samples: 0 };
     var drv = S ? S.occupant(sc, "driver") : null;
     return { r: r, dest: d.id, straight: Math.round(Math.hypot(d.x - sc.pos.x, d.z - sc.pos.z)),
-      route: act && act.route ? act.route.length : 0,
+      route: act && act.route ? act.route.length : 0, len: (CBZ.motorcadeAudit().drive || {}).len,
       inCar: P._vehicle === sc, seat: S ? S.seatOf(sc, P) : null,
       riding: CBZ.cityPaxRiding ? CBZ.cityPaxRiding() === sc : null,
       chauffeured: CBZ.cityPaxChauffeured ? CBZ.cityPaxChauffeured(sc) : null,
       driver: drv ? drv.kind : null, bulletproof: !!sc.bulletproof };`);
-  if (!b || b.noDest || b.noCar) skip("motorcade ride", b ? JSON.stringify(b) : "no motorcade.go");
+  if (b && b.__err) check("the ride evaluates", false, b.__err.split("\n")[0]);
+  else if (!b || b.noDest || b.noCar) skip("motorcade ride", b ? JSON.stringify(b) : "no motorcade.go");
   else {
-    check("go() boards the President (a ride, not a teleport)", !!(b.r && b.r.ok) && b.route >= 2, JSON.stringify({ r: b.r, route: b.route, dest: b.dest, straight: b.straight }));
+    check("go() boards the President (a ride, not a teleport)", !!(b.r && b.r.ok) && b.route >= 2, JSON.stringify({ r: b.r, route: b.route, len: b.len, dest: b.dest, straight: b.straight }));
+    check("…by a sane road, not a tour of the country", b.len > 0 && b.len < Math.max(600, b.straight * 3.5), `path ${b.len} m for ${b.straight} m as the crow flies`);
     check("…in the BACK seat, chauffeured, an agent at the wheel", b.inCar && b.seat === "rearR" && b.riding === true && b.chauffeured === true && b.driver === "npc",
       JSON.stringify({ inCar: b.inCar, seat: b.seat, riding: b.riding, chauffeured: b.chauffeured, driver: b.driver }));
     check("the state car is bulletproof", b.bulletproof === true);
-    // drive: 10 s of sim per evaluate, up to 6 sim-minutes
-    let arrived = null;
-    for (let chunk = 0; chunk < 36 && !arrived; chunk++) {
-      arrived = await evl(`
+    // drive: 1 s of sim (60 steps) per evaluate, up to 6 sim-minutes. Each
+    // chunk logs its wall time and its slowest single step, and has a 45 s
+    // hard deadline (hangReport prints the stuck stack), so a slow machine
+    // and a sim hang can never look alike again.
+    let replanned = null, arrived = null, wallSum = 0, worstStep = 0, worstChunk = 0;
+    for (let chunk = 0; chunk < 360 && !arrived; chunk++) {
+      const t0 = Date.now();
+      const r = await evl(`
         var M = window.__mcRide, sc = CBZ.motorcade.car(), P = CBZ.player, S = CBZ.carSeats;
-        for (var k = 0; k < 600; k++) {
+        var slow = 0, tAll = performance.now();
+        for (var k = 0; k < 60; k++) {
+          var t = performance.now();
           CBZ.stepSim(1/60);
+          t = performance.now() - t; if (t > slow) slow = t;
           if (k % 30 !== 0 || !sc) continue;
           M.path += Math.hypot(sc.pos.x - M.last.x, sc.pos.z - M.last.z); M.last = { x: sc.pos.x, z: sc.pos.z };
           M.samples++;
@@ -198,15 +265,27 @@ else {
           if (Math.hypot(P.pos.x - sc.pos.x, P.pos.z - sc.pos.z) > 2.5) M.apart++;
         }
         var a = CBZ.motorcadeAudit();
-        if ((a.arrivals | 0) > M.arr0 || a.phase === "halted" || a.phase === "done") return { phase: a.phase, arrivals: a.arrivals };
-        return null;`);
+        return { ms: Math.round(performance.now() - tAll), slow: Math.round(slow), phase: a.phase, arrivals: a.arrivals, at: a.drive, why: a.lastReason, hits: window.__scHits.splice(0),
+          done: (a.arrivals | 0) > M.arr0 || a.phase === "halted" || a.phase === "done" };`, 45000, `drive chunk ${chunk}`);
+      if (r && r.__err) { check("drive chunk evaluates", false, r.__err.split("\n")[0]); break; }
+      const wall = Date.now() - t0; wallSum += wall;
+      if (r && r.slow > worstStep) worstStep = r.slow;
+      if (wall > worstChunk) worstChunk = wall;
+      if (chunk % 10 === 0 || wall > 5000) console.log(`      drive t=${chunk + 1}s  wall ${wall} ms  sim ${r && r.ms} ms  slowest step ${r && r.slow} ms  phase ${r && r.phase}  ${JSON.stringify(r && r.at)}${r && r.why ? "  why: " + r.why : ""}`);
+      if (wall > 5000) console.log("        slowest updaters:", JSON.stringify(await profTop(true)));
+      if (r && r.hits && r.hits.length) for (const h of r.hits) console.log(`        state car hurt ${h.from} -> ${h.to}: ${h.stack}`);
+      if (r && r.at && r.at.len !== b.len && !replanned) replanned = `path ${b.len} m became ${r.at.len} m at t=${chunk + 1}s (phase ${r.phase})`;
+      if (r && r.done) arrived = { phase: r.phase, arrivals: r.arrivals };
     }
+    console.log("      slowest updaters during the drive:", JSON.stringify(await profTop(true)));
+    console.log(`      drive total wall ${Math.round(wallSum / 1000)} s, worst chunk ${worstChunk} ms, slowest single step ${worstStep} ms`);
     const drive = await evl(`
       var M = window.__mcRide, sc = CBZ.motorcade.car(), a = CBZ.motorcadeAudit();
       return { phase: a.phase, arrivals: a.arrivals, arr0: M.arr0, path: Math.round(M.path),
         fromCourt: sc ? Math.round(Math.hypot(sc.pos.x - M.c0.x, sc.pos.z - M.c0.z)) : null,
         toDest: sc ? Math.round(Math.hypot(sc.pos.x - M.dest.x, sc.pos.z - M.dest.z)) : null,
         samples: M.samples, offSeat: M.offSeat, apart: M.apart };`);
+    check("nothing re-routes the President's own ride under him", !replanned, replanned);
     check("the column drives the route (the car itself moves, step by step)", !!(drive && drive.path > 150 && drive.fromCourt > 100), JSON.stringify(drive));
     check("…with the President in the back seat the whole way", !!(drive && drive.samples > 0 && drive.offSeat === 0 && drive.apart === 0), drive && `offSeat=${drive.offSeat} apart=${drive.apart} of ${drive.samples}`);
     check("…and arrives at the venue", !!(arrived && drive && drive.arrivals > drive.arr0 && drive.phase === "venue" && drive.toDest < 120), JSON.stringify(arrived));
@@ -224,6 +303,7 @@ else {
   }
 }
 
+if (!ONLY_MC) {
 // ---- 5. the threat comes to the gate ----------------------------------------
 if (!st) skip("gate attack", "no status()");
 else {
@@ -251,7 +331,7 @@ else {
       if (seen.gateTarget && seen.bodies) break;
       CBZ.polity._checkDayWrap(0.95); CBZ.polity._checkDayWrap(0.05);
     }
-    return seen;`);
+    return seen;`, 900000, "gate attack (4 days x 45 s sim)");
   check("an armed attack reports its target", atk && atk.armed >= 1, JSON.stringify(atk));
   check("within a few days the target is MY gate", !!(atk && atk.gateTarget >= 1), `targets: ${atk && JSON.stringify(atk.targets)}`);
   check("…and it arrives as bodies at the gate, not a headline", !!(atk && atk.bodies >= 1), `cell bodies near gate: ${atk && atk.bodies}`);
@@ -301,6 +381,8 @@ const ia = await evl("return CBZ.presidentInteriorAudit ? CBZ.presidentInteriorA
 if (!ia) skip("interior audit", "no presidentInteriorAudit");
 // baseline measured before the interior wave (seed 260811): rooms 6, usable 56, symbols 13
 else check("the authored rooms did not regress", (ia.namedRooms | 0) >= 6 && (ia.usableProps | 0) >= 56 && (ia.stateSymbols | 0) >= 13, `rooms=${ia.namedRooms} usable=${ia.usableProps} symbols=${ia.stateSymbols} empty=${ia.emptyDecor}`);
+
+}
 
 // ---- errors from the president files ---------------------------------------
 const uniq = [...new Set(errors)].filter((e) => !/ProgressEvent/.test(e));

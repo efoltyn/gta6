@@ -1537,8 +1537,16 @@
     }
     // motorcade / visit
     if (L.who === "player" && L.phase === "board") {
-      if (playerNearCourt()) {
-        const M = CBZ.motorcade;
+      const M = CBZ.motorcade;
+      // a ride the President already took (he picked a place himself) is his:
+      // the appointment never re-routes it. It waits for the column to be free
+      // and, if he is still away when the window closes, it is a no-show.
+      // (This used to call run() over the top of his ride: motorcade.run
+      // replaces a boarding player run, so the car he sat in for a 700 m hop
+      // to the Capitol silently re-planned a 13 km trip to the appointment.)
+      const busy = M && typeof M.active === "function" ? M.active() : null;
+      if (busy) { if (T >= L.waitUntil) { skip(L, "no-show"); return; } }
+      else if (playerNearCourt()) {
         L.phase = "on";
         if (M && typeof M.run === "function") {
           try {

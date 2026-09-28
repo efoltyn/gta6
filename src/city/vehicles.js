@@ -3767,6 +3767,9 @@
     const armor = Math.max(0, Math.min(0.35, car.armor || 0));
     amount *= Math.max(0.55, 1 - armor * (fromGun ? 1.25 : 0.85));
     car.engineHp = Math.max(-50, car.engineHp - amount);
+    // what hurt it, kept apart: readers that must tell an attack from a
+    // scrape (motorcade.js threatCheck) watch this, never the raw HP drop
+    if (fromGun) car._shotDmg = (car._shotDmg || 0) + amount;
     if (car.engineHp <= 0 && !car._exploded) {
       if (fromGun) {
         // THE ENGINE IS GONE. What happens next is the mode's business, and it
@@ -4247,7 +4250,7 @@
     // Flag off => the literal `true`, byte-identical.
     // A creature bite is structural impact, never gunfire: no fireball grows
     // out of a shark's mouth, including when the cook-off feature is disabled.
-    damageEngine(car, amount, opts.bite ? false : (COOKOFF()
+    damageEngine(car, amount, (opts.bite || opts.crash) ? false : (COOKOFF()
       ? (opts.direct ? "direct" : opts.blast ? "blast" : opts.fire ? "fire" : "gun")
       : true));
     // A megalodon-sized bite that guts a marine engine tears open the hull.

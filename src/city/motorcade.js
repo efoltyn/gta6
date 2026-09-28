@@ -121,6 +121,8 @@
     { role: "follow", off: -12 },
   ];
   const ADV_OFF = 38;                              // the advance car's staging slot
+  const ADV_GAP = 10;                              // arc metres a column car keeps behind the advance car
+  const RAM_HP = 12;                               // engine HP one crash must take off the state car to count as a ram
   const V_ROAD = 14, V_EVAC = 22, V_YARD = 6;      // m/s
   const LAT_N = 3.0, LAT_E = 5.5;                  // lateral grip budget (m/s^2) for bend speed
   const BRAKE_N = 3.2, BRAKE_E = 5.0, ACC_N = 2.2, ACC_E = 4.0;
@@ -1153,6 +1155,7 @@
     crewUp(R);
     const sc = stateCar();
     R.lastHp = sc ? sc.engineHp : null;
+    R.lastShot = sc ? (sc._shotDmg || 0) : null;
     planPosts(R);
     // the advance car leaves now; the column after the lead time
     if (MC.adv && carLive(MC.adv.car)) { MC.adv.parked = false; MC.adv.staged = false; }
@@ -1194,6 +1197,17 @@
       for (let i = 0; i < L.length; i++) vt = Math.min(vt, capAt(P, MC.s + L[i].off, panic));
       const brake = panic ? BRAKE_E : BRAKE_N;
       vt = Math.min(vt, Math.sqrt(2 * brake * Math.max(0, MC.stopS - MC.s)));
+      // the advance car is on the same path: the column never drives into it.
+      // scanRoad ignores convoy cars, so this is the only thing that keeps a
+      // column car off its bumper (the state car used to rear-end it at
+      // 13 m/s, and the crash read as "the state car is under fire": an
+      // evacuation home in the middle of every ride).
+      const A0 = MC.adv;
+      if (A0 && carLive(A0.car) && !A0.car.player) {
+        let behind = -Infinity;                           // the column car nearest behind it
+        for (let i = 0; i < L.length; i++) { const cs = MC.s + L[i].off; if (cs < A0.s && cs > behind) behind = cs; }
+        if (behind > -Infinity) vt = Math.min(vt, Math.sqrt(2 * brake * Math.max(0, A0.s - behind - ADV_GAP)));
+      }
       if (MC.blocked && !panic) vt = 0;
       const acc = panic ? ACC_E : ACC_N;
       MC.v += clamp(vt - MC.v, -brake * 1.5 * dt, acc * dt);
@@ -1211,7 +1225,13 @@
       const end = P.len;
       let vt = Math.min(16, capAt(P, A.s, false) * 1.15, Math.sqrt(2 * BRAKE_N * Math.max(0, end - A.s)));
       // never run into the back of the column (a new trip's path starts behind it)
-      if (MC.phase === "drive" || MC.phase === "hold") { const gap = A.s - (MC.s + maxOff()); if (gap < 14) vt = Math.min(vt, MC.phase === "drive" ? MC.v * 0.9 : 0); }
+      // Only a car wholly BEHIND the column (a new trip's path can start behind
+      // it) holds back. One level with or ahead of any column car drives its
+      // own profile and the column yields to it (tickDrive above). The old
+      // rule slowed it to 0.9x the column whenever it was less than 14 m
+      // ahead of the FRONT car, which included sitting between the lead car
+      // and the state car: exactly when the column was closing on it.
+      if (MC.phase === "drive" || MC.phase === "hold") { if (A.s < MC.s + minOff() - 2) vt = Math.min(vt, MC.phase === "drive" ? MC.v * 0.9 : 0); }
       A.v += clamp(vt - A.v, -BRAKE_N * 1.5 * dt, 3 * dt);
       if (A.v < 0) A.v = 0;
       A.s = Math.min(end, A.s + A.v * dt);
@@ -1467,8 +1487,16 @@
       stateCarDestroyed(R, f.car);
       return;
     }
-    if (sc && R.lastHp != null && sc.engineHp != null && sc.engineHp < R.lastHp - 0.5) { R.lastHp = sc.engineHp; evacuate("the state car is under fire"); }
-    else if (sc) R.lastHp = sc.engineHp;
+    // Gunfire and blasts (vehicles.js damageEngine tallies them in _shotDmg)
+    // are an attack at any amount; a CRASH is one only when it is a real ram.
+    // Reading the raw engineHp drop called every scrape with a parked car
+    // "the state car is under fire" and turned the ride round for home.
+    if (sc) {
+      const shot = sc._shotDmg || 0, hp = sc.engineHp;
+      if (R.lastShot != null && shot > R.lastShot + 0.5) evacuate("the state car is under fire");
+      else if (R.lastHp != null && hp != null && hp < R.lastHp - RAM_HP) evacuate("the state car was rammed");
+      R.lastShot = shot; R.lastHp = hp;
+    }
     // shots near any car of the column
     for (let i = SHOTS.length - 1; i >= 0; i--) {
       const s = SHOTS[i];
@@ -2227,6 +2255,10 @@
       posts: AUDIT.posts, boarded: AUDIT.boarded, lastReason: AUDIT.lastReason, lastDest: AUDIT.lastDest,
       graph: G ? { nodes: G.nx.length, segs: G.segs.length } : null,
       doorAgent: !!(MC.doorAgent && !MC.doorAgent.dead),
+      // where the column is on its path (tools read this to tell "slow" from "stuck")
+      drive: MC.path ? { s: Math.round(MC.s), stopS: Math.round(MC.stopS), len: Math.round(MC.path.len), v: +MC.v.toFixed(1),
+        blocked: MC.blocked ? (MC.blocked === CBZ.player ? "player" : "car") : null, stopT: +(MC.stopT || 0).toFixed(1),
+        adv: MC.adv && carLive(MC.adv.car) ? Math.round(MC.adv.s - MC.s) : null } : null,
     };
   };
 })();

@@ -287,7 +287,7 @@
       // the ladder foot, not on the building's front desk.
       let bestUp = null, ud = 9;
       for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) {
-        const gp = el.groundPad; if (!gp) continue;
+        const gp = el.stops && el.stops[0] && el.stops[0].pad; if (!gp) continue;
         const d = Math.hypot(gp.x - x, gp.z - z);
         if (d < ud) { bestUp = { x: gp.x, z: gp.z, label: "Roof lift" }; ud = d; }
       }
@@ -2018,10 +2018,10 @@
   }
   function drawClimbMarks(p, A) {
     for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) {
-      if (!el.groundPad) continue;
-      const mx = p.x(el.groundPad.x); if (mx < -20 || mx > W + 20) continue;
-      const my = p.z(el.groundPad.z); if (my < -20 || my > H + 20) continue;
-      drawLiftMark(el.groundPad.x, el.groundPad.z, p);
+      const gp = el.stops && el.stops[0] && el.stops[0].pad; if (!gp) continue;   // the lift's ground landing
+      const mx = p.x(gp.x); if (mx < -20 || mx > W + 20) continue;
+      const my = p.z(gp.z); if (my < -20 || my > H + 20) continue;
+      drawLiftMark(gp.x, gp.z, p);
     }
     const lots = (A.lots || []).concat(A.annex ? A.annex.lots || [] : []);
     for (const lot of lots) {
