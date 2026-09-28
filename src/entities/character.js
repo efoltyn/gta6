@@ -125,13 +125,23 @@
         [0.00, 0.94, 0.95, 0.00], [0.15, 0.99, 0.99, 0.01], [0.45, 0.88, 0.93, 0.04],
         [0.80, 0.80, 0.83, 0.02], [1.00, 0.78, 0.78, 0.00]] },
     },
+    // THE WRIST. It ended in a stump 0.40 x 0.51 of the box: on a man 7 x 8.7
+    // cm half-extents in hand metres round a hand whose own wrist is 2 x 2.9
+    // (fphands WRIST) and whose heel is 3.4 wide, so the hand came out of a
+    // pipe twice its size. Now the crease is the hand's wrist plus ~10-20%
+    // (rx 0.26 / rz 0.40 of the box = 2.2 x 3.4 cm on a man, x across the
+    // palm's thickness, z along its width): the stub's pivot dome hides just
+    // inside it and the heel of the palm continues it with no step. A sleeve
+    // ends looser (a hem hangs round a wrist) in a flat cuff band that rolls
+    // in at the edge instead of flaring out into a ring. tools/wrist-seam-
+    // check.mjs measures the fit on man / woman / child in every hand pose.
     armLo: {   // the elbow (t 0) .. the wrist crease (t 1), where the hand's stub enters
-      bare: { top: 1, bot: 0.35, rows: [
-        [0.00, 0.80, 0.76, 0.00], [0.17, 0.88, 0.85, 0.02], [0.45, 0.71, 0.73, 0.02],
-        [0.76, 0.52, 0.60, 0.00], [1.00, 0.40, 0.51, 0.00]] },
-      cloth: { top: 1, bot: 0.30, rows: [
-        [0.00, 0.84, 0.80, 0.00], [0.20, 0.88, 0.86, 0.01], [0.60, 0.72, 0.76, 0.00],
-        [0.90, 0.60, 0.66, 0.00], [0.96, 0.64, 0.70, 0.00], [1.00, 0.57, 0.63, 0.00]] },
+      bare: { top: 1, bot: 0.20, rows: [
+        [0.00, 0.80, 0.76, 0.00], [0.17, 0.88, 0.85, 0.02], [0.45, 0.70, 0.72, 0.02],
+        [0.78, 0.43, 0.52, 0.00], [1.00, 0.26, 0.40, 0.00]] },
+      cloth: { top: 1, bot: 0.22, rows: [
+        [0.00, 0.84, 0.80, 0.00], [0.20, 0.88, 0.86, 0.01], [0.60, 0.70, 0.74, 0.00],
+        [0.90, 0.40, 0.50, 0.00], [0.965, 0.40, 0.50, 0.00], [1.00, 0.37, 0.47, 0.00]] },
     },
     legUp: {
       bare: { top: 0.85, bot: 1, rows: [
@@ -295,6 +305,7 @@
     lod = lod >= 2 ? 2 : 1;
     const s = rig && rig.skinSlots;
     if (!s) return;
+    if (CBZ.footwear) CBZ.footwear.lod(rig, lod);
     const lists = [s.arms, s.armsLower, s.legs, s.legsLower];
     for (let j = 0; j < lists.length; j++) {
       const list = lists[j];
@@ -386,6 +397,7 @@
   const HAND_HOLD = { pistol: 1, grip: 1, support: 1, cupover: 1, wheel: 1 };
   const HAND_STUB_M = 0.06;            // how far the hand may slide down (its wrist stub reaches 0.07 m back)
   let _handWarned = false;
+  let _footWarned = false;
   function bodyHandFit(P) {
     const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.sqrt((P.armW || 0.30) / 0.30);
     return {
@@ -465,8 +477,39 @@
       m.userData.handPose = pose;
       m.geometry = H.bodyHandGeometry(m.userData.side, pose, m.userData.handLod);
       placeBodyHand(m);
+      const fore = foreOf(rig, m);
+      if (fore) fore.rotation.y = 0;               // a new pose starts untwisted (wristTwist)
     }
   }
+  function foreOf(rig, hand) {
+    const part = rig.parts && rig.parts[hand.userData.side < 0 ? "la" : "ra"];
+    return part && part.userData.cap === hand ? part.userData.lower : null;
+  }
+  /* PRONATION. The hand hangs in the elbow group, the forearm loft is rigid
+     and flatter across than front-to-back (so is the wrist). A gun hold
+     orients the hand ON the grip and the arm IK owns the elbow's roll, so the
+     hand could sit up to ~90 deg rolled against its forearm: the wrist's long
+     axis across the forearm's short one, the forearm's end sticking out of
+     both sides of the hand. A real forearm twists with the hand; so does this
+     one: the lower loft turns about its own axis (+Y, through the crease) to
+     the hand's roll, mod 180 (the section is symmetric under a half turn, so
+     the twist never exceeds a quarter turn). Called by systems/actorweapons.js
+     after it writes a gun hand's rotation; setHandPose resets it. The elbow
+     end is near round, so the elbow does not visibly turn with it. */
+  const _twx = new THREE.Vector3();
+  function wristTwist(rig, side) {
+    const hs = handsOf(rig, side == null ? "both" : side);
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i], fore = m && foreOf(rig, m);
+      if (!fore) continue;
+      _twx.set(1, 0, 0).applyQuaternion(m.quaternion);        // the hand's width, elbow frame
+      if (_twx.x * _twx.x + _twx.z * _twx.z < 0.04) continue;  // width along the arm: no roll to read
+      let th = Math.atan2(_twx.x, _twx.z);                     // rest (hold basis): width along +-Z = 0
+      th = th - Math.PI * Math.round(th / Math.PI);
+      fore.rotation.y = th;
+    }
+  }
+  CBZ.charWristTwist = wristTwist;
   function setBodyHandLod(rig, lod) {
     const H = CBZ.fpHands;
     if (!H) return;
@@ -1683,64 +1726,46 @@
       return mergeGeos(parts);
     });
   }
-  /* THE SHOE — one unit geometry (x -0.5..0.5, y 0..1, z -0.5 heel .. 0.5
-     toe), scaled per body: a full-height heel/ankle, an instep that falls to
-     a low rounded toe, a sole lip. The ankle zone is full width and full
-     height exactly where the shin box ends, so no trouser corner pokes out. */
-  function shoeGeometry(kind) {
-    const foot = kind === "foot";
-    return shared(foot ? "foot" : "shoe", function () {
-      const shape = function (v) {
-        const t = cl01(v.z + 0.5);                                           // 0 heel .. 1 toe
-        const top = t < 0.45 ? 1 : lerpN(1, foot ? 0.30 : 0.40, sm01((t - 0.45) / 0.45));
-        v.y *= top;
-        v.x *= t > 0.66 ? lerpN(1, 0.70, sm01((t - 0.66) / 0.34)) : (t < 0.08 ? lerpN(0.93, 1, t / 0.08) : 1);
-        if (v.z > 0.36) v.z -= 0.12 * Math.pow(Math.min(1, Math.abs(v.x) * 2 / 0.70), 2);
-        if (v.z < -0.42) v.z += 0.04 * Math.pow(Math.min(1, Math.abs(v.x) * 2), 2);
-      };
-      /* THE COLLAR HUGS THE ANKLE. The shoe used to be full width and full
-         height all the way up, so a leg ended in a brick with a flat lid. Now
-         the upper draws in round the ankle (the leg's axis sits at unit z
-         SHOE_ANKLE_Z) over its top half, so the tapered shin goes INTO a
-         collar that fits it and a trouser hem, wider than the collar, breaks
-         over it. A bare foot draws in harder and its instep sits lower. */
-      const cx = foot ? 0.52 : 0.60, cz = foot ? 0.50 : 0.62;
-      const collar = function (v) {
-        const k = sm01((v.y - 0.45) / 0.55);
-        if (k <= 0) return;
-        v.x *= lerpN(1, cx, k);
-        v.z = SHOE_ANKLE_Z + (v.z - SHOE_ANKLE_Z) * lerpN(1, cz, k);
-      };
-      const upper = rbox(1, 1, 1, 0.16, [2, 4, 4]);
-      upper.translate(0, 0.5, 0);
-      sculpt(upper, function (v) { shape(v); collar(v); v.y = 0.02 + v.y * 0.98; });   // its sole face sits inside the sole's
-      if (foot) return mergeGeos([flatUV(finishGeo(upper), 0.5, 0.5)]);
-      const sole = rbox(1.05, 0.13, 1.04, 0.05, [2, 1, 4]);
-      sole.translate(0, 0.065, 0.004);
-      sculpt(sole, function (v) { const y = v.y; shape(v); v.y = y; });
-      return mergeGeos([flatUV(finishGeo(upper), 0.5, 0.5), flatUV(finishGeo(sole), 0.5, 0.5)]);
-    });
+  /* ==== THE ANKLE ===========================================================
+     A leg used to end in a shoe bolted to the SHIN (no ankle), with the shin
+     tube running on inside it down to the sole line — the tube's end dome
+     came out through the heel and sole, which is what you saw on a man lying
+     with his feet toward you. Now the leg has an ankle: a `foot` group at the
+     pivot inside the knee group (leg.userData.foot, rig.feet), the shoe lives
+     in it (entities/footwear.js dresses it by role), and the shin is re-baked
+     to END inside the shoe (humanSetShinEnd): bare skin at the pivot, a
+     trouser leg at the style's hem. animChar's ankle solve (ankleSolve,
+     below) poses it. The sole's bottom sits exactly on the floor when the
+     leg is straight: hip -> knee is legUp - LIMB_TUCK, knee -> sole is
+     legLo + LIMB_TUCK, so hip -> sole = legUp + legLo = hipY. */
+  function addFoot(leg, P) {
+    const lw = P.legW * 0.9;
+    const H = P.shoeH * 0.8 + 0.03;
+    const sole = -(P.legLo + LIMB_TUCK);                   // the sole's bottom, knee frame
+    const aY = CBZ.footwear ? CBZ.footwear.ANKLE_Y : 0.52;
+    const foot = new THREE.Group();
+    foot.name = "ankle";
+    foot.position.set(0, sole + aY * H, 0);
+    foot.userData.dims = { W: lw * 1.06, H: H, D: lw * 1.62, sole: sole };
+    foot.userData.flex = [-0.35, 0.7];
+    foot.userData.lod = 1;
+    leg.userData.low.add(foot);
+    leg.userData.foot = foot;
+    return foot;
   }
-  // where the leg's axis (leg-frame z 0) lands in the unit shoe, for the
-  // adult proportions below: (lw/2 + 0.035) / (1.62 lw) - 0.5
-  const SHOE_ANKLE_Z = -0.12;
-  // The shoe on a leg: the slot contract (leg.userData.cap, skinSlots.shoes)
-  // is unchanged — only the shape is. A "shoe" the colour of the skin is a
-  // BARE FOOT (city/beach.js swimmers): a lower, closer-fitting foot, no sole.
-  // Height: a 0.16 m boot was every shoe in the game; a sneaker's collar is
-  // ~0.13 m, which is what the leg's ankle is shaped to meet.
-  function addShoe(leg, P, color, bare) {
-    const lw = P.legW * 0.9, lowerH = P.legLo;
-    const W = lw * 1.06, H = bare ? P.shoeH * 0.62 + 0.03 : P.shoeH * 0.8 + 0.03, D = lw * 1.62;
-    const shoe = new THREE.Mesh(shoeGeometry(bare ? "foot" : "shoe"), cmat(color));
-    shoe.scale.set(W, H, D);
-    shoe.position.set(0, -lowerH - 0.03, -lw / 2 - 0.035 + D / 2);   // the sole plane never moved
-    shoe.castShadow = true;
-    shoe.name = "shoe";
-    leg.userData.low.add(shoe);
-    leg.userData.cap = shoe;
-    return shoe;
+  /* The lower leg ends `len` below the knee (its loft is re-baked; the paint
+     band and the box it reports are unchanged). footwear.js calls this so
+     the leg always ends INSIDE whatever shoe it wears. */
+  function setShinEnd(leg, len) {
+    const m = leg && leg.userData && leg.userData.lower, spec = m && m.userData.limb;
+    if (!spec || !(len > 0.05)) return;
+    if (Math.abs(spec.len - len) < 1e-6) return;
+    spec.len = len;
+    const flat = m.userData._cbzFlat;
+    if (flat && flat.g && flat.g.userData && flat.g.userData.limb) flat.g = limbBake(spec, spec.lod, null);
+    if (m.geometry && m.geometry.userData && m.geometry.userData.limb) m.geometry = limbGeometry(m);
   }
+  CBZ.humanSetShinEnd = setShinEnd;
 
   /* ---- DEFAULT FEATURES (pure functions of the colours asked for) ---------
      No RNG lives in this file (see hairStyleFor), so a body built without
@@ -2027,8 +2052,6 @@
     const hipY = P.legUp + P.legLo;
     // c.shins: a different colour below the knee (bare legs under shorts or a
     // swimsuit). Absent = the whole leg is c.legs, exactly as before.
-    // The shoe is built here, not by limb(): a shaped shared shoe (see
-    // SHAPED PARTS), same slot (leg.userData.cap), same planted sole.
     // BARE OR CLOTHED picks the loft (LIMBS block): a segment the colour of
     // the skin is a bare limb (muscle, knee, calf, ankle); anything else is
     // cloth over it (a trouser leg that falls straight and breaks on the shoe).
@@ -2037,7 +2060,9 @@
     const shinC = c.shins != null ? c.shins : c.legs;
     const ll = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
     const rl = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
-    if (c.shoes != null) { const bf = c.shoes === skinC; addShoe(ll, P, c.shoes, bf); addShoe(rl, P, c.shoes, bf); }
+    // the ANKLE (addFoot): the shoe itself is entities/footwear.js's, fitted
+    // once the rig exists (CBZ.footwear.dress below), by role
+    addFoot(ll, P); addFoot(rl, P);
     ll.position.set(-P.hipX, hipY, 0); rl.position.set(P.hipX, hipY, 0);
     // STEP WIDTH, from frame zero. animChar damps this channel toward the same
     // value every frame, but a rig that never animates (the charpanel portrait,
@@ -2486,6 +2511,11 @@
       });
     }
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
+    // THE SHOES (entities/footwear.js): by role, on the ankle pivots; the
+    // wardrobe re-rolls them against the outfit (CBZ.footwear.restyle)
+    if (CBZ.footwear) CBZ.footwear.dress(rig, c);
+    else if (!_footWarned && typeof console !== "undefined") { _footWarned = true; console.warn("character.js: entities/footwear.js not loaded before makeCharacter — bodies have no shoes"); }
+    rig.feet = { ll: ll.userData.foot, rl: rl.userData.foot };
     if (CBZ.wristwatch) CBZ.wristwatch.fit(rig, c);   // entities/watch.js: the watch on the left wrist, by role
     // every face on the page lives (blinks, looks, talks, LODs) through
     // systems/facial.js; a page without it keeps a still, near-tier face
@@ -3545,7 +3575,71 @@
        Double support ≈ θ=π/2, 3π/2 (feet apart) → CoM lowest there.
        Arms counter-swing the legs; elbows carry a base bend that deepens
        with speed (jogger's ~90° pump at sprint) and on the forward swing. */
+  /* ==== THE ANKLE SOLVE — run after every animChar (and once on a corpse) ===
+     The foot (leg.userData.foot, see THE ANKLE) is posed from the pose the
+     rest of the rig already took, so no pose writer has to know it exists:
+       UPRIGHT (the model's up within ~50 deg of the world's): the sole is laid
+         flat to the world (ankle = world-up pitch in the model frame - hip -
+         knee), which plants a standing, walking, sitting, crouching or
+         kneeling foot on the floor. A foot that is off the floor (a strongly
+         bent knee on a body that is not sitting/crouching/kneeling/riding:
+         the swing of a run) hangs a little pointed instead.
+       LYING (knocked down, dead, asleep, prone): the foot falls into relaxed
+         plantar flexion, toes pointing away, the way a body lies, instead of
+         standing straight up off the end of the leg.
+     Clamped to the shoe's own range (foot.userData.flex: a cowboy boot barely
+     flexes, a bare foot points), and the stance roll is undone so the sole
+     stays flat across its width. Cost: a few trig ops per leg. */
+  const ANKLE_LIE = 0.55, ANKLE_HANG = 0.22;
+  function ankleSolve(ch, dt, forceLying) {
+    const parts = ch && ch.parts;
+    const ll = parts && parts.ll, rl = parts && parts.rl;
+    if (!ll || !rl || !ll.userData.foot) return;
+    const model = ll.parent;
+    // world up, in the model's frame (the rotation's transpose times +Y)
+    let wx = 0, wy = 1, wz = 0;
+    if (model) {
+      const e = model.matrixWorld.elements;
+      const l = Math.hypot(e[1], e[5], e[9]) || 1;
+      wx = e[1] / l; wy = e[5] / l; wz = e[9] / l;
+    }
+    const planted = !!(ch.sitting || ch.riding || (ch.kneelB || 0) > 0.3 || (ch._cb || 0) > 0.3);
+    const pitch = Math.atan2(wz, wy);
+    for (let i = 0; i < 2; i++) {
+      const leg = i ? rl : ll, foot = leg.userData.foot, low = leg.userData.low;
+      if (!foot) continue;
+      const knee = low ? low.rotation.x : 0;
+      const s = leg.rotation.x + knee;                      // the shin's sagittal angle in the model
+      // how upright the SHIN is in the world: a lying body (on its back, its
+      // face, its side, a KO keyframed with the model still upright) has a
+      // shin lying along the floor, whatever the model's own frame says
+      const shinUp = forceLying ? 0 : wy * Math.cos(s) + wz * Math.sin(s);
+      const up = planted && !forceLying ? 1 : sm01((shinUp - 0.35) / 0.4);
+      const level = pitch - s;
+      const hang = planted ? 0 : sm01((knee - 0.45) / 0.6);
+      let a = level + (ANKLE_HANG - level) * hang;
+      const fl = foot.userData.flex || [-0.35, 0.7];
+      // lying: slack, toes away; if that would still drive the toes into the
+      // floor (face down), point them fully so the instep lies on it
+      let lie = ANKLE_LIE + (i ? 0.07 : -0.04) + (ch.phase ? 0.06 * Math.sin(ch.phase * (i ? 3.1 : 2.3)) : 0);
+      if (!forceLying && -wy * Math.sin(s + lie) + wz * Math.cos(s + lie) < -0.3) lie = fl[1];
+      void wx;
+      a = lie + (a - lie) * up;
+      a = a < fl[0] ? fl[0] : (a > fl[1] ? fl[1] : a);
+      const roll = Math.max(-0.2, Math.min(0.2, -leg.rotation.z * up));
+      if (dt > 0 && dt < 0.25) {
+        const k = 1 - Math.exp(-18 * dt);
+        foot.rotation.x += (a - foot.rotation.x) * k;
+        foot.rotation.z += (roll - foot.rotation.z) * k;
+      } else { foot.rotation.x = a; foot.rotation.z = roll; }
+    }
+  }
+  CBZ.charAnkleSolve = ankleSolve;
   function animChar(ch, speed, dt) {
+    animCharBody(ch, speed, dt);
+    ankleSolve(ch, dt, false);
+  }
+  function animCharBody(ch, speed, dt) {
     // BODY LOD for every rig nobody manages (prison, warlord, disasters...):
     // city/peds.js drives its crowd through rig.setHandLod itself.
     if (!ch._lodExt && ch._autoLod) ch._autoLod();
@@ -5285,6 +5379,8 @@
       if (ch.neck) ch.neck.rotation.set(-0.55, 0.5 * j(1.5), 0.3 * j(2.2));
     }
     lockCharacterHips(ch);
+    // a corpse's feet fall slack (animChar stops running on the dead)
+    ankleSolve(ch, 0, true);
   }
 
   // ---- seated death slump (owner: shot plane passengers die IN the seat).
@@ -5880,7 +5976,7 @@
     hairStyles: function () { return Object.keys(HAIR_STYLES); },
     eyeColours: EYE_COLOURS,
     // shared-geometry builders, for tools and previews (all cached)
-    geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: shoeGeometry,
+    geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: function (style, lod, side) { return CBZ.footwear ? CBZ.footwear.geometry(style || "sneaker", lod, side).upper : null; },
                 eyeball: eyeballGeometry, lid: lidGeometry, lip: lipGeometry },
     // THE FACE: facePose(rig, pose) is the one writer of eyes/lids/lips/brow;
     // faceLod(rig, near) the tier; facial.js drives both. faceRestPose is the
