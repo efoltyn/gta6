@@ -601,13 +601,37 @@
       (CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) ||
       (CBZ.cityCops && CBZ.cityCops.indexOf(a) >= 0);
   }
+  // the prison cast: entities/npc.js + guards.js skip a body V.held() names
+  function prisonCast(a) {
+    return mode() === "escape" && ((CBZ.npcs && CBZ.npcs.indexOf(a) >= 0) || (CBZ.guards && CBZ.guards.indexOf(a) >= 0));
+  }
+  /* OWN a body: its own game stops moving and animating it while a verb has it,
+     and the verb animates it instead. Bodies grapple.js steps are owned through
+     its _phys.heldBy (every mover already skips CBZ.body.busy); the prison cast
+     through V.held(), which entities/npc.js and entities/guards.js ask. The
+     player is never owned (his controller is his). */
   function own(a, tok) {
-    // only a body grapple.js steps can be OWNED (its game skips a busy body);
-    // anyone else (prison cast, studio people) is simply placed over the top
-    if (!a || isPlayerA(a) || !grappleSteps(a) || !CBZ.body.phys) return false;
-    const p = CBZ.body.phys(a);
-    p.heldBy = tok; p.down = 0; p.air = false; p.kx = p.kz = 0; p.vx = p.vy = p.vz = 0;
-    return true;
+    if (!a || isPlayerA(a)) return false;
+    if (grappleSteps(a) && CBZ.body.phys) {
+      const p = CBZ.body.phys(a);
+      p.heldBy = tok; p.down = 0; p.air = false; p.kx = p.kz = 0; p.vx = p.vy = p.vz = 0;
+      return true;
+    }
+    return prisonCast(a);
+  }
+  /* a STRIKE fall (entities/meleeposes.js) ends the instant a verb picks the
+     body up: the carry / drag pose owns every joint from here, and the fall's
+     model offsets are refunded the way its own getup refunds them */
+  function endFall(ch) {
+    const f = ch && ch.fall;
+    if (!f || !f.on) return;
+    f.on = false; f.phase = ""; f.hold = false;
+    const m = ch.model;
+    if (m) {
+      m.position.y -= ch._mMy || 0; m.position.z -= ch._mMz || 0; m.position.x -= ch._mMx || 0;
+      m.rotation.y -= ch._mMr || 0;
+    }
+    ch._mMy = ch._mMz = ch._mMx = ch._mMr = 0;
   }
   function disown(a, tok) {
     const p = a && a._phys;
@@ -832,6 +856,16 @@
       default: vh = 3.2 * power + 0.6; vy = 1.5 + 1.2 * power;
     }
     if (S && S.verb === "throw") { vh *= 1.45; vy += kind === "bed" || kind === "table" || kind === "rail" ? 0 : 1.2; }
+    if (B.isPlayer) {
+      // THE PLAYER'S FLIGHT IS HIS OWN CONTROLLER'S (systems/physics.js flies
+      // CBZ.player._phys.air and lands it on groundAt, then puts him on his
+      // back): a verb only hands it the launch. A rail or a bed is just the air.
+      const P = CBZ.player;
+      const ph = P._phys || (CBZ.body && CBZ.body.phys ? CBZ.body.phys(a) : (P._phys = { kx: 0, kz: 0, fl: 0, air: false, vx: 0, vy: 0, vz: 0, spin: 0, down: 0 }));
+      ph.air = true; ph.vx = dx * vh; ph.vz = dz * vh; ph.vy = Math.min(vy, 6);
+      ph.spin = -2.4 * (0.8 + 0.4 * power);
+      return;
+    }
     const own = !surface && kind !== "rail" && grappleSteps(a);
     if (own && CBZ.body.hit) {
       const p = CBZ.body.phys(a);
@@ -855,8 +889,10 @@
      SESSIONS
      ============================================================ */
   const PH = ["approach", "align", "contact", "drive", "outcome", "hold", "release"];
+  // verbs done standing in one spot (an NPC grabber is held there, see enterPhase)
+  const STILL = { cuff: 1, uncuff: 1, frisk: 1, mug: 1, shove: 1, throw: 1, grab: 1, carry: 1 };
   const sessions = [];
-  const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "" };
+  const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0 };
   const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3();
 
   // hands-on weight for the ordinary shape of a verb
@@ -1029,6 +1065,9 @@
         S.ctx = copyCtx(S, context(S.T.pos, S.dir, 1.4));
         S.result = S.result || {};
         S.result.outcome = S.ctx.kind === "bed" || S.ctx.kind === "table" ? "open" : S.ctx.kind;
+        // the player is not launched off a ledge by a verb (his controller owns
+        // his flight): a tackle on him is the ground or the wall
+        if (S.T.isPlayer && S.result.outcome !== "wall") S.result.outcome = "open";
         // the drive goes as far as the world lets it
         S.travel = S.ctx.kind === "wall" ? Math.max(0, S.ctx.dist - 0.05) : S.ctx.kind === "open" || S.ctx.kind === "bed" || S.ctx.kind === "table" ? 0.9 : Math.min(0.9, S.ctx.dist);
         S.travelDone = 0;
@@ -1333,6 +1372,109 @@
     if (S.T.ch) { S.T.ch.verbHold = null; const vp = VP(); if (vp) vp.clear(S.T.ch); }
   }
 
+  /* ============================================================
+     THE STRUGGLE: a held man can fight his way out.
+     Owner: getting caught was "way too easy". Whoever has his hands on you
+     re-sets his grip in a rhythm you can SEE (his brace tightens, then eases);
+     a press in the ease tears at it, a press into the brace barely does, and
+     the grip he lost comes back if you stop. Nothing on screen names it: the
+     meter is his body. How hard he holds is who he is: his mass against yours
+     (CBZ.meleeScale) and his trade (a guard or a cop holds harder than a man
+     off the yard). Breaking free: he staggers a step, you are loose. Cuffs,
+     once they are on, do not come off this way.
+       player  Space / W, or a click / tap while held (predator.js's escape keys)
+       NPC     opts.struggle 0..1: how well he picks his moment (a verb opts in)
+     ============================================================ */
+  const STRUGGLE_VERBS = { grab: 1, tackle: 1, choke: 1, shield: 1, escort: 1, cuff: 1, carry: 1, drag: 1, mug: 1 };
+  const BEAT = 1.55;                       // grip re-sets a second, roughly
+  let pressAt = -1, pressSeen = -1, clockS = 0;
+  function markPress() { pressAt = clockS; }
+  function playerHeld() {
+    for (let i = 0; i < sessions.length; i++) {
+      const S = sessions[i];
+      if (!S.done && S.T.isPlayer && S.phase !== "approach" && !S.tFree) return true;
+    }
+    return false;
+  }
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("keydown", function (e) {
+      if (!e || e.repeat) return;
+      const k = e.key ? String(e.key).toLowerCase() : "";
+      if ((k === " " || k === "w" || k === "spacebar") && playerHeld()) markPress();
+    }, true);
+    // a click or tap only counts while somebody actually has you
+    window.addEventListener("mousedown", function (e) { if (e && e.button === 0 && playerHeld()) markPress(); }, true);
+    window.addEventListener("touchstart", function () { if (playerHeld()) markPress(); }, { passive: true, capture: true });
+  }
+  function gripOf(S) {
+    if (S.opts.grip > 0) return S.opts.grip;
+    let k = CBZ.meleeScale ? CBZ.meleeScale(S.a, S.t) : 1;
+    if (!(k > 0)) k = 1;
+    const a = S.a;
+    const trade = a.kind === "guard" || a.kind === "warden" || a.kind === "cop" || a.swat ? 1.4
+      : S.A.isPlayer ? 1.2 : 1.0;
+    return Math.max(0.45, Math.min(3.2, k * trade * (a.gripSkill || 1)));
+  }
+  function canStruggle(S) {
+    if (!STRUGGLE_VERBS[S.verb] || S.tFree || S.opts.noStruggle) return false;
+    if (S.T.ch && S.T.ch.cuffed) return false;                 // the cuffs hold, not the man
+    if (S.verb === "cuff" && S.phase !== "contact" && S.phase !== "drive") return false;   // before they close
+    if (S.phase !== "contact" && S.phase !== "drive" && S.phase !== "hold" && S.phase !== "outcome") return false;
+    if (S.sag > 0.7) return false;                             // a choke that far in has him
+    return S.T.isPlayer || S.opts.struggle > 0;
+  }
+  function struggle(S, dt) {
+    S.writhe = Math.max(0, (S.writhe || 0) - dt * 3.2);
+    const b = (S.beat || 0) + dt * BEAT;
+    if (b >= 1) S.cycle = (S.cycle || 0) + 1;
+    S.beat = b % 1;
+    // his brace: tight on the first half of the beat, easing on the second
+    const brace = S.beat < 0.5 ? Math.sin(S.beat * 2 * PI) : 0;
+    S.strain = Math.max(brace * 0.6, S.strain > 0 ? S.strain - dt * 2.5 : 0);
+    if (!canStruggle(S)) return;
+    if (S.grip == null) { S.grip = gripOf(S); S.grip0 = S.grip; }
+    let pressed = false;
+    if (S.T.isPlayer) {
+      if (pressAt > pressSeen && pressAt >= S.age0) pressed = true;
+      pressSeen = pressAt;
+    } else if (S.opts.struggle > 0) {
+      // an NPC picks his moments as well as he fights
+      S._npcT = (S._npcT || 0) - dt;
+      if (S._npcT <= 0) {
+        S._npcT = 0.22 + Math.random() * 0.5;
+        const good = S.beat >= 0.5 && S.beat < 0.95;
+        pressed = good ? Math.random() < 0.3 + 0.7 * S.opts.struggle : Math.random() < 0.15;
+      }
+    }
+    // what he let go of comes back while you are not fighting it
+    S.grip = Math.min(S.grip0, S.grip + dt * 0.18);
+    if (!pressed) return;
+    // one good wrench per ease: mashing inside it is only the first press
+    const good = S.beat >= 0.5 && S.beat < 0.95 && S.goodCycle !== (S.cycle || 0);
+    if (good) S.goodCycle = S.cycle || 0;
+    S.grip -= good ? 0.26 : 0.05;
+    // A MAN FIGHTING IT HOLDS THE VERB UP: the second cuff will not close,
+    // the mount will not settle, while he is wrenching at the hands on him
+    if (good && S.phase !== "hold" && isFinite(S.dur)) S.pt = Math.max(0, S.pt - 0.32);
+    S.writhe = 1;
+    S.strain = 1;                                             // he clamps down on it
+    if (S.T.isPlayer && CBZ.shake) CBZ.shake(good ? 0.16 : 0.07);
+    if (S.grip <= 0) escape(S);
+  }
+  // BROKE FREE: he staggers back a step, you are loose
+  function escape(S) {
+    const A = S.A, T = S.T;
+    S.result = S.result || {}; S.result.outcome = "escaped";
+    S.leaveDown = false; S.how = null;
+    if (S.opts.onOutcome && !S._escCb) { S._escCb = true; try { S.opts.onOutcome(S, "escaped"); } catch (e) {} }
+    const dx = A.pos.x - T.pos.x, dz = A.pos.z - T.pos.z, d = Math.hypot(dx, dz) || 1;
+    finish(S, false);
+    if (typeof V.step === "function") { try { V.step(S.a, dx / d, dz / d, 0.45, 0.4); } catch (e) {} }
+    else setPos(A, A.pos.x + dx / d * 0.3, A.pos.y, A.pos.z + dz / d * 0.3);
+    if (CBZ.sfx) CBZ.sfx("punch");
+    if (CBZ.shake && T.isPlayer) CBZ.shake(0.3);
+  }
+
   /* ---- START ------------------------------------------------------------ */
   function start(verb, a, t, opts) {
     const def = DEF[verb];
@@ -1364,6 +1506,7 @@
     if (tprev && !tprev.done) { if (!opts.force) return null; cancel(tprev); }
     const tf = flightOf(t);
     if (tf && tf.mode === "air") return null;
+    if (t._apeHeld || t._apeFlying) return null;          // in an ape's fist / thrown by one
     const down = T.down() || (tf && tf.mode === "down");
     if (def.needDown && !down) return null;
     if (down && !def.allowDown && !from) return null;
@@ -1409,6 +1552,7 @@
       enterPhase(S, "approach");
     }
     a._verbS = S; t._verbS = S;
+    S.age0 = clockS;                 // presses from before the grab are not a struggle
     sessions.push(S);
     return S;
   }
@@ -1430,11 +1574,20 @@
       }
       S.x0.set = true;
       if (!S.ownT) S.ownT = own(S.t, S);
+      if (S.wasDown && S.T.ch) endFall(S.T.ch);
       if (S.T.ch) S.T.ch.verbHold = { verb: S.verb, role: "t", k: 0, phase: ph };
       if (S.A.ch) S.A.ch.verbHold = { verb: S.verb, role: "a", k: 0, phase: ph };
     }
     if (S.def.enter) S.def.enter(S, ph);
     if (ph === "contact" && S.opts.onContact) { try { S.opts.onContact(S); } catch (e) {} }
+    // AN NPC GRABBER STANDS HIS GROUND while his hands work: his own brain may
+    // want to walk on (a cop picking his next target mid-cuff), and a body
+    // placed off him would be dragged along. The player's feet stay his own.
+    if (ph === "contact" && !S.A.isPlayer && STILL[S.verb]) {
+      S.aLock = S.aLock || { x: 0, y: 0, z: 0, yaw: 0 };
+      S.aLock.x = S.A.pos.x; S.aLock.y = S.A.pos.y; S.aLock.z = S.A.pos.z; S.aLock.yaw = S.A.yaw();
+    }
+    if (ph === "hold" || ph === "release") S.aLock = S.verb === "grab" || S.verb === "carry" ? null : S.aLock;
     if (ph === "outcome" && S.def.outcome && S.verb !== "tackle") {
       S.def.outcome(S);
       if (S.opts.onOutcome && !S._cbDone) { S._cbDone = true; try { S.opts.onOutcome(S, S.result && S.result.outcome); } catch (e) {} }
@@ -1506,6 +1659,11 @@
     // a body that died or went down mid-verb (shot, blast) ends it
     if (A.dead() || (!S.tFree && T.dead() && S.verb !== "drag" && S.verb !== "carry")) { finish(S, true); return; }
     S.pt += dt; S.age += dt;
+    // opts.holdFor / opts.then: hold him that long, then "throw" | "set" | "drop"
+    if (S.phase === "hold" && S.opts.holdFor > 0 && S.pt >= S.opts.holdFor && !S.how) {
+      release(S, S.opts.then || "set");
+      if (S.done) return;
+    }
 
     // ---- timeline
     for (let guard = 0; guard < 8 && !S.done; guard++) {
@@ -1523,8 +1681,14 @@
     if (S.done) return;
     S.k = S.dur > 0 && isFinite(S.dur) ? clamp01(S.pt / S.dur) : 1;
     if (S.phase === "approach") return;
+    struggle(S, dt);
+    if (S.done) return;
 
     const vp = VP();
+    if (S.aLock && S.phase !== "approach" && S.phase !== "align") {
+      setPos(A, S.aLock.x, S.aLock.y, S.aLock.z);
+      if (A._yawLock == null) A.face(S.aLock.yaw, 1);
+    }
     const yawA = A.yaw();
 
     // ---- the grabber squares up to him until the hands are on
@@ -1632,6 +1796,9 @@
     if (!vp || !name) return;
     _pp.k = S.k; _pp.t = S.age; _pp.phase = S.phase; _pp.seed = S.seed; _pp.verb = S.verb;
     _pp.sag = S.sag; _pp.crouch = S.crouch;
+    // the fight inside the hold: his brace strains, the held man writhes
+    _pp.strain = B === S.A ? S.strain : 0;
+    _pp.writhe = B === S.T ? S.writhe : 0;
     _pp.moving = B === S.A ? S.aSpeed > 0.4 : S.tSpeed > 0.4;
     _pp.ground = S.verb === "tackle" && (S.phase === "outcome" || S.phase === "release") && S.result && S.result.outcome === "open" && (B === S.T || S.phase === "outcome" || S.k < 0.5);
     if (S.verb === "carry" && B === S.A && (S.phase === "drive" || S.phase === "contact" || S.phase === "release")) {
@@ -1717,6 +1884,8 @@
     o.anchor = null; o.anchorK = 0; o.anchorPitch = 0; o.anchorBack = null; o.liftUp = 0; o.ground = false; o.drag = false;
     S.def.place(S, o);
     const fx = fwdX(yawA), fz = fwdZ(yawA);
+    // a man fighting the grip wrenches away from it
+    if (S.writhe > 0 && !o.ground && !o.drag && !o.anchor) o.lz += 0.05 * S.writhe;
     // held off the grabber's CHEST, not his feet (see stepSession), and off
     // his own lean toward the grabber
     if (!S.def.feetRel && !o.ground && !o.drag) {
@@ -1860,7 +2029,8 @@
     m.scale.set(r, r, r * 1.3);
     return m;
   }
-  function setCuffs(a, on) {
+  // opts.whileKo: the ties come off by themselves when his count (a.ko) runs out
+  function setCuffs(a, on, opts) {
     a = norm(a);
     const ch = rigOf(a);
     if (!ch || !ch.low || !ch.low.la || !ch.low.ra) return false;
@@ -1878,7 +2048,7 @@
       return true;
     }
     ch.cuffed = true;
-    if (e) return true;
+    if (e) { if (opts && opts.whileKo) e.whileKo = true; return true; }
     cuffAssets();
     const wy = VP() ? VP().wristLocalY(ch) : -0.22;
     const ringL = ringMesh(ch), ringR = ringMesh(ch);
@@ -1887,7 +2057,7 @@
     const link = new THREE.Mesh(linkGeo, cuffMat);
     link.name = "cuff-link"; link.castShadow = false;
     ch.low.la.add(link);
-    cuffed.push({ a: a, ch: ch, ringL: ringL, ringR: ringR, link: link, k: 0 });
+    cuffed.push({ a: a, ch: ch, ringL: ringL, ringR: ringR, link: link, k: 0, whileKo: !!(opts && opts.whileKo) });
     return true;
   }
   function isCuffed(a) { const ch = rigOf(norm(a)); return !!(ch && ch.cuffed); }
@@ -1897,7 +2067,7 @@
     if (!vp) return;
     for (let i = cuffed.length - 1; i >= 0; i--) {
       const e = cuffed[i], ch = e.ch;
-      if (!ch.cuffed) { setCuffs(e.a, false); continue; }
+      if (!ch.cuffed || (e.whileKo && !(e.a.ko > 0))) { setCuffs(e.a, false); continue; }
       e.k = Math.min(1, e.k + dt * 4);
       if (ch._vcufF !== cuffFrame && ch.group && ch.group.visible !== false) vp.cuffArms(ch, smooth(e.k));
       // the bridge between the two rings, re-seated every frame
@@ -1928,6 +2098,7 @@
   function update(dt) {
     if (!(dt > 0)) return;
     if (dt > 0.1) dt = 0.1;
+    clockS += dt;
     // a mode change drops every hold and every body in flight: the next world
     // has different people in it
     const m = mode();
@@ -1964,15 +2135,20 @@
     const S = sessionOf(a);
     return S && S.a === norm(a) && !S.tFree && S.phase !== "approach" ? S.t : null;
   }
+  // one question for "who has him": a verb's grabber, or an ape's fist
+  // (systems/ape_combat.js keeps its own swing; the answer is shared)
   function heldBy(t) {
+    t = norm(t);
     const S = sessionOf(t);
-    return S && S.t === norm(t) && !S.tFree && S.phase !== "approach" ? S.a : null;
+    if (S && S.t === t && !S.tFree && S.phase !== "approach") return S.a;
+    return (t && t._apeHeld) || null;
   }
   function busy(a) {
     a = norm(a);
     if (!a) return false;
     if (sessionOf(a)) return true;
     if (flightOf(a)) return true;
+    if (a._apeHeld || a._apeFlying) return true;
     const B = body(a);
     return B.down();
   }
@@ -2078,6 +2254,27 @@
   V.sessionOf = sessionOf;
   V.holding = holding;
   V.heldBy = heldBy;
+  // a body its own game must leave alone right now: held by a verb, or in a
+  // verb's flight / on-the-floor beat (entities/npc.js, guards.js ask this)
+  V.held = function (a) { a = norm(a); return !!(a && (heldBy(a) || flightOf(a))); };
+  /* WALK A HOLD. The grabber of a session walks to (x,z) through CBZ.moves
+     (the one locomotion layer) and the held body goes with him, hands on. For
+     a scripted march (a screw walking a prisoner to his cell, a cop to the car).
+     Returns the distance still to go. */
+  V.walk = function (x, S, gx, gz, speed, dt, face) {
+    S = S && S.def ? S : sessionOf(x);
+    if (!S || S.done || !(dt > 0)) return 0;
+    const A = body(S.a);
+    if (!A.pos) return 0;
+    const d = Math.hypot(gx - A.pos.x, gz - A.pos.z);
+    if (d < 0.05) return 0;
+    stepTo(S, A, S.a, gx, gz, face == null ? Math.atan2(gx - A.pos.x, gz - A.pos.z) : face, speed || 1.4, dt);
+    return Math.hypot(gx - A.pos.x, gz - A.pos.z);
+  };
+  V.endFall = endFall;
+  // the struggle input (tools/verbs-check.mjs presses it by hand); gripOf(S) for a read
+  V.press = markPress;
+  V.grip = function (S) { return S && S.grip != null ? S.grip : null; };
   V.busy = busy;
   V.setCuffs = setCuffs;
   V.cuffed = isCuffed;

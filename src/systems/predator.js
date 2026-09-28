@@ -3605,18 +3605,6 @@
     // creature_combat.js: the opts.seize seam + the maul opt-in. MIGRATED — it
     // adopts from its own file, which is the only place that can say so honestly.
     "creature_combat:seize-seam",
-    // police.js: THE ARREST TACKLE. A human grappler, and the first NON-LETHAL
-    // consumer of the seize — running from an officer inside reach gets you put
-    // on the pavement through the same wind->strike->hold->resolve FSM every
-    // animal uses, with `nonLethal` so its worst outcome is "taken". MIGRATED in
-    // the change that added the id; nothing here was ever hand-rolled.
-    "police:arrest-tackle",
-    // piracy.js: THE BOARDING GRAB. The SECOND non-lethal human consumer — a
-    // crew takes somebody off a deck through the same wind->strike->hold FSM,
-    // resolving to "taken" rather than "killed", with the drag style so being
-    // hauled off your own boat feels different from being tackled on a
-    // pavement. MIGRATED in the change that added the id; nothing hand-rolled.
-    "piracy:boarding-seize",
     // wildlife.js: A WOUND IS A PROVOCATION. Every damage class that reaches an
     // animal (gunshot, melee, blast, car, another animal's bite, a companion)
     // funnels through cityWildlifeHit, and the bruiser band — the moose, the

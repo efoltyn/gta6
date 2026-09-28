@@ -295,15 +295,159 @@ results.push(playerRun(vS, "player LMB", (v, t, row) => {
 }, (v, t, row) => (v.CBZ.verbs.strike ? (row.outcome === "landed" ? null : "the punch never landed on a man in reach") : null)));
 
 const vE = vmFor("escape");
+
+// ---- PHASE 2 ROUTES (prison): a guard's hands on the PLAYER, and the cast's ownership
+function measureHands(v, S, row) {
+  const { CBZ, THREE } = v, V = CBZ.verbs;
+  const hp = new THREE.Vector3(), cp = new THREE.Vector3();
+  for (let h = 0; h < 2; h++) {
+    if (!S.onA[h] || !S.handsA[h] || S.tFree) continue;
+    V.handPoint(S.A.ch, h === 0 ? "l" : "r", hp);
+    V.contactPoint(S.T.ch, S.handsA[h], cp);
+    row.maxA = Math.max(row.maxA, hp.distanceTo(cp)); row.onFrames++;
+  }
+}
+function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], okOrder: true, onFrames: 0, maxA: 0, maxT: 0, pen: -1, outcome: "", ok: true, notes: [] }; }
+{
+  // THE ARREST, as capture.js runs it: tackle the man, he goes down, he gets
+  // up, turned and cuffed standing, then marched (the guard walks, V.walk).
+  const v = vE, { CBZ } = v, V = CBZ.verbs;
+  v.clearActors(); v.world({});
+  CBZ.player.pos.set(0, 0, 2.4); CBZ.playerChar.group.position.set(0, 0, 2.4); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
+  const gd = v.actor({ x: 0, z: 0, yaw: 0, name: "guard" });
+  CBZ.guards = [gd]; CBZ.npcs = [];
+  v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
+  for (let i = 0; i < 6; i++) v.frame(DT);
+  const row = prisonRow("arrest (player)");
+  let S = V.tackle(gd, V.playerActor(), { far: true });
+  const seq = [];
+  const run = (S, max, fn) => { for (let i = 0; i < max && S && !S.done; i++) { v.frame(DT); if (seq[seq.length - 1] !== S.verb + ":" + S.phase) seq.push(S.verb + ":" + S.phase); measureHands(v, S, row); if (fn) fn(S); } };
+  run(S, 400);
+  const tk = S ? S.result && S.result.outcome : "none";
+  const fellDown = !!(CBZ.playerChar.fall && CBZ.playerChar.fall.on);
+  if (V.getUp) V.getUp(V.playerActor());
+  for (let i = 0; i < 180 && CBZ.playerChar.fall && CBZ.playerChar.fall.on; i++) v.frame(DT);
+  S = V.cuff(gd, V.playerActor(), { far: true });
+  run(S, 400);
+  const cuffed = !!CBZ.playerChar.cuffed;
+  S = V.escort(gd, V.playerActor(), { far: true });
+  const z0 = CBZ.player.pos.z;
+  run(S, 360, (S) => { if (S.phase === "hold") { if (V.walk(S, S, 0, 12, 1.35, DT) < 0.1) V.release(S, "set"); if (S.pt > 3) V.release(S, "set"); } });
+  const marched = CBZ.player.pos.z - z0;
+  row.phases = seq.map((x) => x.replace(/:(....).*/, ":$1"));
+  row.outcome = cuffed ? "cuffed" : "-";
+  const errs = v.errors.splice(0);
+  if (tk !== "open") row.notes.push("tackle outcome " + tk);
+  if (!fellDown) row.notes.push("no fall after the tackle");
+  if (!cuffed) row.notes.push("not cuffed");
+  if (!(marched > 1.5)) row.notes.push(`not marched (${marched.toFixed(2)} m)`);
+  if (row.maxA > TOL_HAND) row.notes.push(`guard hand ${row.maxA.toFixed(3)} m off`);
+  if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
+  row.ok = !row.notes.length;
+  row.phases = ["tackle>fall>getup>cuff>escort " + marched.toFixed(1) + "m"];
+  results.push(row);
+  V.setCuffs(V.playerActor(), false);
+  CBZ.guards = []; v.actors.length = 0;
+}
+{
+  // A HELD INMATE IS THE VERB'S: V.held names him (npc.js / guards.js skip
+  // him), the verb animates him, and a mover obeying that guard leaves him put.
+  const v = vE, { CBZ } = v, V = CBZ.verbs;
+  v.clearActors(); v.world({});
+  const gd = v.actor({ x: 0, z: 0, yaw: 0, name: "guard" }), n = v.actor({ x: 0, z: 0.9, yaw: Math.PI, name: "inmate", build: "f" });
+  CBZ.guards = [gd]; CBZ.npcs = [n];
+  for (let i = 0; i < 6; i++) v.frame(DT);
+  const row = prisonRow("held inmate");
+  const S = V.escort(gd, n, {});
+  let heldFrames = 0, drift = 0;
+  for (let i = 0; i < 400 && !S.done; i++) {
+    // the prison's own movers, with the one-line guard they now carry
+    if (!(V.held && V.held(n))) n.pos.x += 1.5 * DT;
+    v.frame(DT); measureHands(v, S, row);
+    if (S.phase === "hold") {
+      heldFrames++;
+      const yaw = gd.char.group.rotation.y;
+      drift = Math.max(drift, Math.abs((n.pos.x - gd.pos.x) * Math.cos(yaw) - (n.pos.z - gd.pos.z) * Math.sin(yaw)));
+      if (S.pt > 1) V.release(S, "set");
+    }
+  }
+  row.outcome = S.ownT ? "owned" : "-";
+  if (!S.ownT) row.notes.push("prison cast not owned");
+  if (!heldFrames) row.notes.push("never held");
+  if (drift > 0.05) row.notes.push(`moved off the hold by ${drift.toFixed(2)} m`);
+  if (V.held(n)) row.notes.push(`still held after release (done ${S.done} ${S.phase} flights ${V.flights.length} sess ${!!V.sessionOf(n)})`);
+  if (row.maxA > TOL_HAND) row.notes.push(`hand ${row.maxA.toFixed(3)} m off`);
+  const errs = v.errors.splice(0); if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
+  row.ok = !row.notes.length;
+  row.phases = ["escort hold, AI mover guarded"];
+  results.push(row);
+  CBZ.guards = []; CBZ.npcs = [];
+}
 for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name === "tackle" || s.name === "carry")) {
   const r = runVerb(vE, s); r.mode = "esc"; results.push(r);
+}
+
+// ---- THE STRUGGLE: well-timed presses break a weak grip; a guard's needs more
+{
+  const v = vE, { CBZ } = v, V = CBZ.verbs;
+  function tryBreak(grabberOpts, presses) {
+    v.clearActors(); v.world({});
+    CBZ.player.pos.set(0, 0, 0.9); CBZ.playerChar.group.position.set(0, 0, 0.9); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
+    const a = v.actor(Object.assign({ x: 0, z: 0, yaw: 0, name: "grabber" }, grabberOpts));
+    if (grabberOpts.kind) a.kind = grabberOpts.kind;
+    v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
+    for (let i = 0; i < 6; i++) v.frame(DT);
+    const S = V.grab(a, V.playerActor(), {});
+    let n = 0, lastPressBeat = -1;
+    for (let i = 0; i < 900 && !S.done; i++) {
+      v.frame(DT);
+      // press once per beat, in the ease (the grabber's brace letting off)
+      if (S.phase === "hold" && S.beat >= 0.6 && S.beat < 0.8 && n < presses && lastPressBeat !== Math.floor(S.age * 1.55)) {
+        lastPressBeat = Math.floor(S.age * 1.55); V.press(); n++;
+      }
+      if (S.phase === "hold" && n >= presses && S.pt > 12) V.release(S, "set");
+    }
+    const out = { escaped: !!(S.result && S.result.outcome === "escaped"), grip0: S.grip0, presses: n };
+    v.actors.length = 0;
+    return out;
+  }
+  const weak = tryBreak({ build: "f", age: 13 }, 6);
+  const strongSame = tryBreak({ kind: "guard" }, 6);
+  const strongMore = tryBreak({ kind: "guard" }, 14);
+  // cuffs, once closed, hold whatever he does; an NPC that opts in fights a weak grip off
+  v.clearActors();
+  CBZ.player.pos.set(0, 0, 0.9); CBZ.playerChar.group.position.set(0, 0, 0.9); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
+  const cop = v.actor({ x: 0, z: 0, yaw: 0, name: "cop" }); cop.kind = "cop";
+  v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
+  V.setCuffs(V.playerActor(), true);
+  const E = V.escort(cop, V.playerActor(), {});
+  for (let i = 0; i < 400 && !E.done; i++) { v.frame(DT); if (E.phase === "hold" && i % 20 === 0) V.press(); if (E.phase === "hold" && E.pt > 5) V.release(E, "set"); }
+  const cuffHeld = !(E.result && E.result.outcome === "escaped");
+  V.setCuffs(V.playerActor(), false); v.actors.length = 0;
+  v.clearActors();
+  const bully = v.actor({ x: 0, z: 0, yaw: 0, build: "f", age: 12, name: "kid" }), fighter = v.actor({ x: 0, z: 0.9, yaw: Math.PI, name: "fighter" });
+  for (let i = 0; i < 6; i++) v.frame(DT);
+  const N = V.grab(bully, fighter, { struggle: 1 });
+  for (let i = 0; i < 900 && !N.done; i++) v.frame(DT);
+  const npcBroke = !!(N.result && N.result.outcome === "escaped");
+  const row = prisonRow("struggle");
+  if (!cuffHeld) row.notes.push("struggled out of an escort in cuffs");
+  if (!npcBroke) row.notes.push("an opted-in NPC never broke a weak grab");
+  row.outcome = weak.escaped ? "escaped" : "-";
+  if (!weak.escaped) row.notes.push(`a weak grip (${weak.grip0.toFixed(2)}) held through ${weak.presses} timed presses`);
+  if (strongSame.escaped) row.notes.push(`a guard's grip (${strongSame.grip0.toFixed(2)}) broke on ${strongSame.presses} presses`);
+  if (!strongMore.escaped) row.notes.push(`a guard's grip never broke (${strongMore.presses} presses)`);
+  const errs = v.errors.splice(0); if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
+  row.ok = !row.notes.length;
+  row.phases = [`grip ${weak.grip0.toFixed(2)}/guard ${strongSame.grip0.toFixed(2)} 6:brk/hold 14:brk cuffs hold npc brk`];
+  results.push(row);
 }
 
 const pad = (s, n) => String(s).padEnd(n);
 console.log(pad("verb", 20) + pad("mode", 6) + pad("phases", 44) + pad("on", 5) + pad("handA", 7) + pad("handT", 7) + pad("pen cm", 8) + pad("outcome", 10) + "ok");
 for (const r of results) {
   if (!r.ok) fails++;
-  const ph = r.phases.map((p) => p.slice(0, 4)).join(">");
+  const ph = r.phases.map((p) => (p.indexOf(" ") >= 0 ? p : p.slice(0, 4))).join(">");
   console.log(pad(r.name, 20) + pad(r.mode, 6) + pad(ph, 44) + pad(r.onFrames, 5) + pad(r.maxA.toFixed(3), 7) + pad(r.maxT.toFixed(3), 7) +
     pad(r.pen > 0 ? (r.pen * 100).toFixed(1) : "-", 8) + pad(r.outcome || "-", 10) + (r.ok ? "ok" : "FAIL  " + r.notes.join("; ")));
 }

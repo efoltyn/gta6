@@ -922,7 +922,15 @@
   }
 
   // hand the whole scene back: cuffs off, officer released, input returned.
+  // the officer's hands on you (CBZ.verbs: the cuff, the march) end with the arc
+  function dropHolds(sc) {
+    if (!sc) return;
+    if (sc.cuffS && !sc.cuffS.done) sc.cuffS.cancel();
+    if (sc.escS && !sc.escS.done) sc.escS.cancel();
+    sc.cuffS = sc.escS = null;
+  }
   function clearArc(sc) {
+    dropHolds(sc);
     if (sc && sc.cop) sc.cop._arrestingPlayer = false;
     if (sc && sc.car) { sc.car._arrestRide = false; sc.car.ai = !!sc.car.road; }
     if (sc && sc.cine && CBZ.cineBusy && CBZ.cineBusy() && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
@@ -1202,17 +1210,32 @@
       return;
     }
 
-    // ---------- 2. THE CUFFS GO ON: real ties, real wrists ----------
+    // ---------- 2. THE CUFFS GO ON: HIS hands, your wrists (CBZ.verbs.cuff:
+    // he turns you round, both wrists behind your back, the ratchet) ----------
     if (sc.phase === "cuff") {
+      const V = CBZ.verbs;
+      if (!sc._cuffTried) {
+        sc._cuffTried = true;
+        if (V && V.cuff && cop && !cop.dead) sc.cuffS = V.cuff(cop, V.playerActor(), { far: true, onOutcome: function (S, k) { if (k === "cuffed") sc._tiedNow = true; } });
+      }
+      // TORE LOOSE before the cuffs closed (verbs.js struggle): the arrest is
+      // off and you are resisting, which the street already has a report for
+      if (sc.cuffS && sc.cuffS.done && !sc._tied && sc.cuffS.result && sc.cuffS.result.outcome === "escaped") {
+        const x = P ? P.pos.x : 0, z = P ? P.pos.z : 0;
+        abortArc("escaped");
+        if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: x, z: z, type: "resisting" }); } catch (e) {} }
+        return;
+      }
+      const cuffing = sc.cuffS && !sc.cuffS.done;
       if (ch) {
-        ch.handsUp = sc.t < 0.18;
-        ch.cuffed = sc.t >= 0.16;
+        ch.handsUp = !sc.cuffS && sc.t < 0.18;
+        if (!sc.cuffS) ch.cuffed = sc.t >= 0.16;
         if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
       }
-      if (!sc._tied && sc.t >= 0.16) {
+      if (!sc._tied && (sc.cuffS ? (sc._tiedNow || !cuffing || sc.t > CUFF_T + 3) : sc.t >= 0.16)) {
         sc._tied = true;
         if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(true); } catch (e) {} }
-        if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click
+        if (!sc.cuffS && CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click (the verb has its own)
         if (CBZ.city && CBZ.city.big) CBZ.city.big((sc.opts || {}).bigLabel || ((sc.opts || {}).peaceful ? "SURRENDERED" : "CUFFED"));
         // the officer tells you where this ride ends, on screen, over him
         const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
@@ -1221,10 +1244,10 @@
       }
       if (cop && !cop.dead && P) {
         cop.speed = 0;
-        if (cop.group) cop.group.rotation.y = Math.atan2(P.pos.x - cop.pos.x, P.pos.z - cop.pos.z);
+        if (cop.group && !cuffing) cop.group.rotation.y = Math.atan2(P.pos.x - cop.pos.x, P.pos.z - cop.pos.z);
         if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
       }
-      if (sc.t >= CUFF_T) {
+      if (sc.t >= CUFF_T && !cuffing) {
         const found = P ? findCruiser(P, cop) : null;
         if (!found && sc.petty) { bookIn(sc); return; }       // no unit to ride in: processed on the kerb
         if (!found) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) { bookIn(sc); return; } }
@@ -1246,6 +1269,7 @@
 
     // ---------- 4. THE DOOR: it opens, you go in, it shuts ----------
     if (sc.phase === "door") {
+      dropHolds(sc);                                 // he lets go of your arm at the door
       if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
       const car = sc.car;
       if (car && !car.dead && sc.t >= DOOR_T * 0.5 && P) {
@@ -1286,6 +1310,7 @@
         // traffic from a place it was never routed to.
         if (sc.car) { sc.car._arrestRide = false; sc.car.ai = false; sc.car.v = 0; }
         sc.phase = "walkin"; sc.t = 0;
+        sc._escTried = false;                        // his hand goes back on your arm for the walk-in
       }
       return;
     }
@@ -1314,9 +1339,41 @@
   // Returns the distance still to run (0 = arrived).
   const _copHands = { speed: 2.4, stop: 1.4, face: null, lod: 1 };
   const _copEscort = { speed: 2.6, stop: 0.12, face: null, strafe: true, vffX: 0, vffZ: 0, lod: 1 };
+  // THE MARCH IS A HOLD (CBZ.verbs.escort): his hand on your arm, the other on
+  // the cuffs, you a pace in front. He walks (through CBZ.moves, V.walk) and
+  // you go where his hands send you.
+  function marchHold(cop) {
+    const sc = arrestScene, V = CBZ.verbs;
+    if (!sc || !V || !V.escort || !cop || cop.dead) return null;
+    if (sc.escS && !sc.escS.done) return sc.escS.a === cop ? sc.escS : null;
+    if (sc._escTried) return null;
+    sc._escTried = true;
+    sc.escS = V.escort(cop, V.playerActor(), { far: true });
+    return sc.escS;
+  }
   function marchTo(P, ch, cop, tx, tz, dt) {
     if (!P) return 0;
     const dx = tx - P.pos.x, dz = tz - P.pos.z, d = Math.hypot(dx, dz);
+    const S = marchHold(cop);
+    if (S) {
+      if (d <= 0.55) {
+        if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
+        return 0;
+      }
+      const ux = dx / d, uz = dz / d;
+      const sc = arrestScene, lp = sc._lp || (sc._lp = { x: P.pos.x, z: P.pos.z });
+      const v = Math.hypot(P.pos.x - lp.x, P.pos.z - lp.z) / Math.max(dt, 1e-4);
+      lp.x = P.pos.x; lp.z = P.pos.z;
+      if (S.phase !== "approach") CBZ.verbs.walk(S, S, tx - ux * S.work, tz - uz * S.work, WALK_SPD, dt, Math.atan2(ux, uz));
+      if (ch && CBZ.animChar) CBZ.animChar(ch, v, dt);
+      if (CBZ.cam) {
+        const want = Math.atan2(ux, uz) + Math.PI;
+        CBZ.cam.yaw = CBZ.lerpAngle ? CBZ.lerpAngle(CBZ.cam.yaw, want, 1 - Math.pow(0.55, dt)) : want;
+      }
+      if (cop.target) cop.target.set(cop.pos.x, 0, cop.pos.z);
+      cop.speed = 0;
+      return d;
+    }
     if (d <= 0.55) {
       if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
       if (cop && !cop.dead && CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);

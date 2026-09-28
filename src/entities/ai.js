@@ -32,11 +32,12 @@
 
      MELEE_BLOW is what the count now buys instead. One row per strike the rig
      can throw, and the numbers say what the strike IS:
-       dmg/roll  damage floor and spread
+       dmg/roll  damage floor and spread (scaled by WHERE it lands: res.dmgMul)
        stun      how long you cannot act — bone weapons stun more than they cut
        shake     camera kick
-       push      metres you are moved; a shove is almost all push and no damage,
-                 which is precisely why a man throws one
+     How far a blow MOVES you is no longer a column here: it is the blow's own
+     power through CBZ.verbs (a hard one puts you on a stagger step), and a
+     shove is CBZ.verbs.shove, which asks the world where you end up.
      ============================================================ */
   const JUMP_GRAB_P_DEFAULT = 0.12;
   /* 2026-09-27 (owner: "it's way too easy to die"): FISTS HURT, THEY RARELY
@@ -47,36 +48,28 @@
      seconds. The blade row keeps its teeth: 12-18 a stab is why a shank is
      the thing to be afraid of. */
   const MELEE_BLOW = {
-    "":         { dmg: 4,  roll: 3, stun: 0.42, shake: 0.42, push: 0.42 },  // straight
-    hook:       { dmg: 5,  roll: 3, stun: 0.50, shake: 0.52, push: 0.55 },
-    upper:      { dmg: 6,  roll: 3, stun: 0.55, shake: 0.55, push: 0.34 },
-    elbow:      { dmg: 4,  roll: 3, stun: 0.62, shake: 0.50, push: 0.30 },
-    knee:       { dmg: 5,  roll: 3, stun: 0.72, shake: 0.48, push: 0.24 },
-    headbutt:   { dmg: 7,  roll: 3, stun: 0.66, shake: 0.66, push: 0.36 },
-    shove:      { dmg: 1,  roll: 2, stun: 0.26, shake: 0.28, push: 1.30 },
-    stab:       { dmg: 12, roll: 6, stun: 0.34, shake: 0.32, push: 0.30 },
+    "":         { dmg: 4,  roll: 3, stun: 0.42, shake: 0.42 },  // straight
+    hook:       { dmg: 5,  roll: 3, stun: 0.50, shake: 0.52 },
+    upper:      { dmg: 6,  roll: 3, stun: 0.55, shake: 0.55 },
+    elbow:      { dmg: 4,  roll: 3, stun: 0.62, shake: 0.50 },
+    knee:       { dmg: 5,  roll: 3, stun: 0.72, shake: 0.48 },
+    headbutt:   { dmg: 7,  roll: 3, stun: 0.66, shake: 0.66 },
+    shove:      { dmg: 1,  roll: 2, stun: 0.26, shake: 0.28 },
+    stab:       { dmg: 12, roll: 6, stun: 0.34, shake: 0.32 },
   };
   const HUNT_HIT_CD = 1.35;
 
-  /* THE BLOW LANDS ON THE FIST'S FRAME, AND A CROWD TAKES TURNS.
+  /* THE BLOW LANDS WHERE THE FIST LANDS, AND A CROWD TAKES TURNS.
 
-     Two things made "fight a group and they freeze you" true, and both lived
-     in the swing below:
-
-       · the hit was billed on the WIND-UP frame. `hurtPlayer` fired on the
-         same line that set `punchT`, so you were hurt 0.12 s before the fist
-         moved, nothing you did to him in that window mattered, and a man you
-         floored mid-swing still landed the punch he had not thrown yet;
-       · every man swung on his own 1.0 s clock. Three men = a hit every
-         0.33 s, each one re-arming a 0.42-0.72 s full input lock — the lock
-         never expired. That was the freeze.
-
-     `_blow` is the pending strike: it lands `t` seconds after the swing
-     starts (the rig's drive peak — character.js's `drive` maxes at prog
-     0.43), and only if he is still in reach and nobody cut the swing
-     (systems/combat.js nulls `_blow` when your fist lands first). The
-     swing log is the attack token every brawler game ends up with: at most
-     two men are inside a swing beat at once, the rest circle. */
+     A man's swing is CBZ.verbs.strike (systems/verbs_strike.js): a real
+     strike on his rig that lands on the frame his fist (elbow, forehead,
+     knee) actually reaches your jaw, head, ribs or legs, whiffs if you
+     stepped out of it, never lands through a wall, and is cut off if your
+     fist lands first or a screw breaks it up (both zero his punch clock).
+     The reaction (head snap, fold, stagger step) is the verbs' too; this
+     file only says what the blow costs you (landBlow → CBZ.hurtPlayer). The
+     swing log is the attack token every brawler game ends up with: one man
+     is inside a swing beat at once, the rest circle. */
   // one fist at a time on the player: the others circle and wait their turn
   const SWING_WINDOW = 0.6, SWING_SLOTS = 1;
   const _swingLog = [];
@@ -91,27 +84,36 @@
     return k >= SWING_SLOTS;
   }
   function logSwing(n) { _swingLog.push({ n, until: (CBZ.now || 0) / 1000 + SWING_WINDOW }); }
-  function landBlow(n, B) {
-    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
-    const d = Math.hypot(px - n.group.position.x, pz - n.group.position.z);
-    // you stepped out of it: a whiff, which is what a fight is mostly made of
-    if (d > 2.15 || CBZ.player.dead) return false;
-    n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
+  const PLAYER_A = { isPlayer: true, get pos() { return CBZ.player.pos; } };
+  function playerA() { const V = CBZ.verbs; return V && V.playerActor ? V.playerActor() : PLAYER_A; }
+  const SHANK_W = { kind: "shank", blade: true, mass: 0.2 };
+  function swinging(n) { const V = CBZ.verbs; return !!(V && V.strikeOf && V.strikeOf(n)); }
+  function cutSwing(n) { const V = CBZ.verbs; if (V && V.cancelStrike && V.strikeOf && V.strikeOf(n)) V.cancelStrike(n); }
+  // throw one blow of the vocabulary at the player through the shared strike
+  function throwBlow(n, kind, arm, M, swing, stabbing) {
+    const V = CBZ.verbs;
+    if (!V || !V.strike) return null;
+    const blow = { M, swing, stabbing };
+    return V.strike(n, playerA(), {
+      kind, arm, weapon: stabbing ? SHANK_W : null, maxLunge: 0.6,
+      heavy: kind === "headbutt" || kind === "upper",
+      onLand: function (res) { if (!landBlow(n, blow, res)) res.reaction = "none"; },
+      // a shove is CBZ.verbs.shove when CORE's sessions exist: the world
+      // decides where you go, and it costs what a shove costs
+      onOutcome: function () { landBlow(n, blow, null); },
+    });
+  }
+  // the fist found you: what it costs (res.dmgMul is where it landed)
+  function landBlow(n, B, res) {
+    if (CBZ.player.dead) return false;
     // he stops when you are down, unless he came with a blade and a reason
     if (playerDownedNow() && !lethalGrudge(n)) return false;
+    const blocked = !!(res && res.blocked);
     if (CBZ.hurtPlayer) {
-      CBZ.hurtPlayer(B.swing, n.group.position.x, n.group.position.z,
-        { melee: true, stun: B.M.stun, heat: B.stabbing ? 4 : 2, shake: B.M.shake,
-          sfx: B.stabbing ? "hit" : "punch", by: n, weapon: B.stabbing ? "shank" : "fist" });
+      CBZ.hurtPlayer(B.swing * (res ? res.dmgMul : 1), n.group.position.x, n.group.position.z,
+        { melee: true, stun: B.M.stun * (blocked ? 0.4 : 1), heat: B.stabbing ? 4 : 2, shake: B.M.shake,
+          sfx: B.stabbing ? "hit" : "punch", by: n, weapon: B.stabbing ? "shank" : "fist", reacted: true });
     }
-    // A LANDED PUNCH MOVES YOU. `CBZ.knockback` is deliberately NOT used:
-    // it reads `actor.group.position`, and the player is a `pos` vector
-    // with no group — calling it here would throw on every blow. The shove
-    // is the same two lines against the surface the player actually has.
-    const kx = px - n.group.position.x, kz = pz - n.group.position.z;
-    const kd = Math.hypot(kx, kz) || 1;
-    CBZ.player.pos.x += (kx / kd) * B.M.push;
-    CBZ.player.pos.z += (kz / kd) * B.M.push;
     return true;
   }
 
@@ -5073,14 +5075,24 @@
 
   // most beatdowns are survivable knockdowns; death is the exception —
   // and a tougher target is harder to put in the ground for good.
-  function down(actor, by) {
+  function down(actor, by, dir) {
     const tough = actor.ratings ? actor.ratings.toughness : 50;
     // fists rarely kill a grown man (3%); steel is what puts one in the ground
     const lethal = by && by._shankOut ? 0.22 : 0.03;
     if (rng() < lethal * (1.2 - tough / 200)) { kill(actor, by); return; }
     credit(by, "knockdowns");
     credit(actor, "downs");
-    actor.ko = 6 + rng() * 4; actor.hp = Math.round((actor.maxHp || 100) * 0.5); actor.aiState = "wander"; actor.foe = null;
+    // he goes down in his own rig along the blow (entities/meleeposes.js:
+    // knees, hips, back; the ko timer holds him there, then the get-up)
+    const V = CBZ.verbs;
+    let kd = dir;
+    if (!kd && by && by.group) {
+      const dx = actor.group.position.x - by.group.position.x, dz = actor.group.position.z - by.group.position.z, l = Math.hypot(dx, dz) || 1;
+      kd = { x: dx / l, z: dz / l };
+    }
+    if (!(V && V.knockdown && V.knockdown(actor, { dir: kd, ko: true, dur: 3.5 + rng() * 4, power: 0.8 }))) actor.ko = 6 + rng() * 4;
+    actor.hp = Math.round((actor.maxHp || 100) * 0.5); actor.aiState = "wander"; actor.foe = null;
+    if (actor.char) actor.char.fightStance = false;
     // PUT A MAN DOWN AND YOU HAVE MADE AN ENEMY — his, and his crew's. This is
     // the retaliation loop: today's beating is tomorrow's reason, which is what
     // a yard with a memory feels like from the inside.
@@ -5097,33 +5109,58 @@
     }
     if (actor.gang >= 0 && by === CBZ.player) addGangStanding(actor.gang, -14);
     if (by === CBZ.player) addBuzz("fear", 12, actorName(actor));
-    if (CBZ.knockback && by) CBZ.knockback(actor, by.group.position.x, by.group.position.z, 0.8);
   }
-  function exchangeBlows(n, f) {
-    const guardish = f.kind === "guard" || f.kind === "warden";
-    const nf = (n.ratings && n.ratings.fighting) || 50;
-    const ff = (f.ratings && f.ratings.fighting) || (guardish ? 72 : 50);
-    const nt = (n.ratings && n.ratings.toughness) || 50;
-    const ft = (f.ratings && f.ratings.toughness) || (guardish ? 78 : 50);
-    credit(n, "fights");
-    // damage = base swing × attacker's fighting edge × defender's guard
-    f.hp -= (4 + rng() * 5) * (0.55 + nf / 80) * (1 - ft / 320);
-    n.hp -= ((guardish ? 7 : 3) + rng() * 4) * (0.55 + ff / 80) * (1 - nt / 320);
-    if (guardish) f.alert = 2.5;
+  /* TWO MEN FIGHTING BOX EACH OTHER. This used to be exchangeBlows: every
+     0.7 s both men lost stat damage and NEITHER moved — a yard fight was two
+     inmates standing chest to chest while their hp ticked down. Now each man
+     in a fight is a CBZ.verbs.fighter (systems/verbs_strike.js): combinations
+     with rhythm, the guard back between them, a read on the other man's
+     wind-up to cover or slip it, footwork in and out of range, never more
+     than 4 blows in 2 s. The stat damage lives in boxLanded and is paid only
+     by blows that actually land (a blocked one chips through the forearms). */
+  const BOX_O = { perform: true, onLand: boxLanded };
+  // his fighter is made once (seeded off the yard's rng) and kept on him
+  function boxer(a) {
+    if (a._boxF) return a._boxF;
+    const guardish = a.kind === "guard" || a.kind === "warden";
+    const fr = (a.ratings && a.ratings.fighting) || (guardish ? 72 : 50);
+    return (a._boxF = CBZ.verbs.fighter(a, { skill: Math.min(1, fr / 100), aggression: guardish ? 0.6 : 0.4 + fr / 250, seed: (rng() * 1e9) | 0 }));
+  }
+  function boxTick(n, f, dt) {
+    const V = CBZ.verbs;
+    if (!V || !V.fighter) return;
+    // a man your fist just caught does not throw back on the same beat
+    if ((n.hitCD || 0) <= 0) boxer(n).tick(dt, f, BOX_O);
+    // a screw who was swung on answers from here (his own brain is guards.js);
+    // an inmate who stood his ground runs his own fight state and his own fighter
+    const answers = (f.kind === "guard" || f.kind === "warden") && alive(f) && !(f.aiState === "fight" && f.foe === n);
+    if (answers && (f.hitCD || 0) <= 0) boxer(f).tick(dt, n, BOX_O);
+  }
+  function boxLanded(res) {
+    const n = res.attacker, f = res.target;
+    if (!alive(f) || !alive(n) || f === CBZ.player || !f.group) { res.reaction = "none"; return; }
+    const guardN = n.kind === "guard" || n.kind === "warden";
+    const guardF = f.kind === "guard" || f.kind === "warden";
+    const nf = (n.ratings && n.ratings.fighting) || (guardN ? 72 : 50);
+    const ft = (f.ratings && f.ratings.toughness) || (guardF ? 78 : 50);
+    if (f.hp == null) f.hp = f.maxHp || 100;
+    if (n._boxFoe !== f) { n._boxFoe = f; credit(n, "fights"); }
+    // damage = base swing × attacker's fighting edge × defender's toughness × where it landed
+    f.hp -= ((guardN ? 7 : 4) + rng() * (guardN ? 4 : 5)) * (0.55 + nf / 80) * (1 - ft / 320) * res.dmgMul;
+    if (guardF) f.alert = 2.5;
     // BEING HIT IS A REASON. This is where most of the yard's beef is booked,
     // and it is why violence here comes back around: the man on the receiving
     // end of a beating remembers who gave it to him long after this fight ends.
-    addBeef(f, n, 3.2);
-    // TWO OTHER MEN FIGHTING IS NOT A SOUND IN YOUR HEAD. This was a bare
-    // CBZ.sfx("punch") — no distance — and with the yard's two or three
-    // standing brawls each swinging every 0.7 s it measured 90 full-volume
-    // body impacts per minute while the player stood still doing nothing
-    // (tools/sound-census.mjs). CBZ.worldSfx gives the blow the place it
-    // always had: attenuated by range, silent past 42 m, one voice for the
-    // whole yard, and the NEAREST fight owns that voice.
-    if (CBZ.worldSfx) CBZ.worldSfx("punch", n.group.position.x, n.group.position.z, { y: n.group.position.y });
-    if (f.hp <= 0 && alive(f)) down(f, n);
-    if (n.hp <= 0 && alive(n)) down(n, f);
+    if (!res.blocked) addBeef(f, n, 3.2);
+    // TWO OTHER MEN FIGHTING IS NOT A SOUND IN YOUR HEAD: CBZ.worldSfx
+    // attenuates by range, is silent past 42 m and gives the whole yard one
+    // voice that the NEAREST fight owns (tools/sound-census.mjs).
+    if (CBZ.worldSfx) CBZ.worldSfx("punch", f.group.position.x, f.group.position.z, { y: f.group.position.y });
+    if (f.hp <= 0) {
+      // the knockdown (or the kill) is his fall now, not the reaction's
+      res.reaction = "none";
+      down(f, n, res.dir);
+    }
   }
 
   // ---- the per-NPC think, returns desired move speed ----
@@ -5195,11 +5232,11 @@
     if ((n._brokenUpT || 0) > 0) {
       // a screw broke it up: he backs off and does not come again for a while
       n._brokenUpT -= dt;
-      if (n.huntPlayer > 0) { n.huntPlayer = 0; n._blow = null; if (n.char) n.char.fightStance = false; }
+      if (n.huntPlayer > 0) { n.huntPlayer = 0; cutSwing(n); if (n.char) n.char.fightStance = false; }
     }
     if (n.huntPlayer > 0 && playerDownedNow() && !lethalGrudge(n)) {
       // you are down. He made his point; he walks off and leaves it there.
-      n.huntPlayer = 0; n._blow = null;
+      n.huntPlayer = 0; cutSwing(n);
       n._brokenUpT = Math.max(n._brokenUpT || 0, 25);
       if (n.char) n.char.fightStance = false;
       n.aiState = "wander"; n.aiTimer = 0.5 + rng();
@@ -5207,7 +5244,7 @@
     if (n.huntPlayer > 0 && !huntSlot(n)) {
       // two men are already on you: he is the ring around it, not the pile
       n.huntPlayer -= dt;
-      n._blow = null;
+      cutSwing(n);
       if (n.char) n.char.fightStance = false;
       const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
       const dx = n.group.position.x - px, dz = n.group.position.z - pz;
@@ -5228,12 +5265,8 @@
       // he SQUARES UP inside striking range — the wind-up is the telegraph, and
       // it is what the printed line used to stand in for.
       if (n.char) n.char.fightStance = d < 3.4;
-      // the blow in flight lands on its own frame (see landBlow above)
-      if (n._blow) {
-        n._blow.t -= dt;
-        if (n._blow.t <= 0) { const B = n._blow; n._blow = null; landBlow(n, B); }
-      }
-      if (d < 1.9 && n.hitCD <= 0 && !n._blow) {
+      // the blow in flight lands on its own frame (CBZ.verbs.strike; see throwBlow)
+      if (d < 1.9 && n.hitCD <= 0 && !swinging(n)) {
         // two men are already swinging: he waits his turn and keeps his feet
         if (swingCrowded(n)) { n.hitCD = 0.22 + rng() * 0.30; return n.baseSpeed * 1.5; }
         n.hitCD = HUNT_HIT_CD;
@@ -5260,11 +5293,17 @@
            shoves — which is the exchange the owner asked for. */
         const grabP = (CBZ.CONFIG && CBZ.CONFIG.JAIL_GRAB_P != null)
           ? +CBZ.CONFIG.JAIL_GRAB_P : JUMP_GRAB_P_DEFAULT;
+        // THE GRAB IS A MAN'S, NOT A BEAR'S (CBZ.verbs.grab): both fists in your
+        // collar, your hands on his wrists, a second of it, then he throws you
+        // where the yard lets him (a wall, the rail, the floor). No orbiting lens.
+        const V = CBZ.verbs;
         const grabs = n.jumpBlows >= 5 && !n._jumpGrabbed && rng() < grabP &&
-          CBZ.predatorSeize && !(CBZ.game && (CBZ.game.invuln || 0) > 0) && !n._seizing;
-        if (grabs && CBZ.predatorSeize(n, CBZ.player, {
-          style: "drag", nonLethal: true, hold: 2.6, dps: 6, thrash: 0.7,
-          cause: "jumped in the yard",
+          V && V.grab && !(CBZ.game && (CBZ.game.invuln || 0) > 0) && !n._seizing;
+        if (grabs && V.grab(n, V.playerActor(), {
+          holdFor: 1.1, then: "throw",
+          onOutcome: function (S, kind) {
+            if (S.verb === "throw" && CBZ.hurtPlayer) CBZ.hurtPlayer(kind === "wall" ? 14 : 9, n.group.position.x, n.group.position.z, { melee: true, by: n });
+          },
           onEnd: function () { n.jumpBlows = 0; if (n.char) n.char.fightStance = false; },
         })) {
           n._jumpGrabbed = 1;              // his one takedown this fight is spent
@@ -5305,36 +5344,13 @@
         else if (r < 0.34) kind = "hook";
         else if (r < 0.48) kind = "upper";
         else kind = "";                                        // the straight: still the staple
-        if (n.char) {
-          n.char.punchArm = stabbing ? "r" : ((blows & 1) ? "r" : "l");
-          if (kick) {
-            // a knee is a KICK on this rig, not a punch — different limb,
-            // different layer, and the punch channel has to be left alone or
-            // both fire in the same frame and fight for the torso
-            n.char.kickLeg = (blows & 1) ? "r" : "l";
-            n.char.kickKind = "knee";
-            n.char.kickDur = 0.42;
-            n.char.kickT = n.char.kickDur;
-            n.char.punchT = 0;
-          } else {
-            n.char.punchKind = kind;
-            // the short weapons are FAST — that is most of why they land in
-            // close; a headbutt is slower because the wind-up is the whole tell
-            n.char.punchDur = kind === "elbow" ? 0.22 : kind === "headbutt" ? 0.34
-              : kind === "shove" ? 0.30 : (n.char.punchDur || 0.28);
-            n.char.punchT = n.char.punchDur;
-          }
-        }
-        // face him at you so the fist travels the right way
-        n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
         /* AND EACH ONE COSTS SOMETHING DIFFERENT, or the vocabulary above is
            choreography over one number. These are the honest relationships:
            an elbow is short and sharp (less damage than a hook, more stun
            because it lands on bone); a knee to the body takes the wind out of
            you (the most stun in the set); a headbutt is the heaviest single
            strike a bare-handed man has and it costs him too; a shove barely
-           hurts and is thrown for the ground it buys. `push` is how far it
-           moves you, and it is the reason a shove exists at all. */
+           hurts and is thrown for the ground it buys. */
         const M = MELEE_BLOW[kick ? "knee" : (stabbing ? "stab" : kind)] || MELEE_BLOW[""];
         /* AND THE MAN THROWING IT IS A BODY TOO. The table above says what the
            BLOW is worth; what it costs YOU also depends on who is throwing it,
@@ -5344,17 +5360,19 @@
            genuinely bigger or smaller than you. */
         const swing = (M.dmg + rng() * M.roll) *
           (CBZ.meleeScale ? CBZ.meleeScale(n, CBZ.player) : 1);
-        // the fist arrives on the rig's drive peak, not on this frame
-        const flight = kick ? (n.char ? n.char.kickDur : 0.42) * 0.45
-          : (n.char ? n.char.punchDur : 0.28) * 0.43;
-        n._blow = { t: flight, M, swing, stabbing, kick: !!kick, kind };
-        logSwing(n);
+        // the swing on his rig (a knee is the leg; the blade is the right hand;
+        // the straight alternates lead jab and rear cross); it lands on the
+        // frame it reaches you, or it does not
+        const side = (blows & 1) ? "r" : "l";
+        const vk = kick ? "knee" : stabbing ? "stab" : kind === "" ? (side === "l" ? "jab" : "cross") : kind;
+        const arm = kick ? side : stabbing ? "r" : (kind === "" || kind === "shove" || kind === "headbutt") ? undefined : side;
+        if (throwBlow(n, vk, arm, M, swing, stabbing)) logSwing(n);
       }
       return n.baseSpeed * 1.5;
     }
     // he broke off (or the hunt timed out): the blow count and his one
     // takedown both reset, so "once" means once per fight and not once ever
-    if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; n._blow = null; if (n.char) n.char.fightStance = false; }
+    if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; cutSwing(n); if (n.char) n.char.fightStance = false; }
 
     // DEFEND: once you've joined a gang, your crew jumps whoever's hunting you
     if (CBZ.player.gang != null && n.gang === CBZ.player.gang && n.aiState !== "fight") {
@@ -5428,11 +5446,9 @@
                gone; the offer itself is the whole message. */
             if (CBZ.prisonSay) CBZ.prisonSay(n, a.msg, { secs: 2.6, force: true });
             // the shove IS the question: a hand in your chest, not a sentence
-            if (a.shove) {
-              const kx = px - n.group.position.x, kz = pz - n.group.position.z, kd = Math.hypot(kx, kz) || 1;
-              CBZ.player.pos.x += (kx / kd) * 0.55; CBZ.player.pos.z += (kz / kd) * 0.55;
-              if (CBZ.playerHitReact) CBZ.playerHitReact(0.14);
-              if (n.char) { n.char.punchKind = "shove"; n.char.punchDur = 0.30; n.char.punchT = 0.30; }
+            if (a.shove && CBZ.verbs && CBZ.verbs.strike) {
+              const felt = function () { if (CBZ.playerHitReact) CBZ.playerHitReact(0.14); };
+              CBZ.verbs.strike(n, playerA(), { kind: "shove", power: 0.45, onLand: felt, onOutcome: felt });
             }
             if (CBZ.npcStare) CBZ.npcStare(n, 2.2);   // and he holds your eye while he says it
           }
@@ -5787,15 +5803,23 @@
       }
       case "fight": {
         const f = n.foe;
-        if (!alive(f) || dist(n, f) > 14) { n.aiState = "wander"; n.foe = null; n.aiTimer = 0; break; }
+        // a man dropped to a knee by a body shot who is still in it with you
+        // (his foe is still you) is not a finished fight: you stand over him
+        const winded = f && !f.dead && !f.escaped && (f.ko || 0) > 0 && f.foe === n && f.aiState === "fight";
+        if ((!alive(f) && !winded) || dist(n, f) > 14) { n.aiState = "wander"; n.foe = null; n.aiTimer = 0; if (n.char) n.char.fightStance = false; break; }
         n.target.set(f.group.position.x, 0, f.group.position.z);
         n.hitCD -= dt;
-        if (dist(n, f) < 1.8) { if (n.hitCD <= 0) { n.hitCD = 0.7; exchangeBlows(n, f); } }
+        if (winded) return 0;
+        // inside a step of him the fighter owns the feet (it steps in, out and
+        // round); the mover only closes the gap
+        const fd = dist(n, f);
+        if (fd < 2.6) boxTick(n, f, dt);
         // break off when badly hurt — how readily depends on temperament
         if (n.hp < (n.maxHp || 100) * 0.3 && rng() < behaviorOf(n).fleeHurt * 0.06) {
           n.aiState = "flee"; n.fleeT = 2.5; n.foe = null; emote(n, "");
+          cutSwing(n); if (n.char) n.char.fightStance = false;
         }
-        return n.baseSpeed * 1.45;
+        return fd < 1.6 ? 0 : n.baseSpeed * 1.45;
       }
       case "flee": {
         n.fleeT -= dt;

@@ -237,9 +237,7 @@
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const dmg = hurtOf(res, attack, actor);
     actor.hp -= dmg;
-    // YOU BEAT HIM TO THE PUNCH. entities/ai.js parks his blow in `_blow`
-    // until his fist's own frame; verbs_strike has already cut his swing.
-    actor._blow = null;
+    // YOU BEAT HIM TO THE PUNCH: verbs_strike has already cut his swing
     actor.hitCD = Math.max(actor.hitCD || 0, heavy ? 0.85 : 0.45);
     /* A PUNCH LEAVES NO MARK (owner, 2026-08-15: no purple bruise decal over
        clothes). A BLADE STILL CUTS: verbs_strike opens the wound at the real

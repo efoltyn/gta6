@@ -24,15 +24,12 @@
                   direction + force), head whipping harder than torso.
                   WHY: directional reactions are how the watcher reads
                   WHO hit WHOM in a crowd brawl.
-     • SWING    — an NPC's landed punch (peds.js npcAttack has no anim:
-                  it just sets attackCD) gets a lean-in + jab follow-
-                  through, plus a cock-back off combat.js's _windup
-                  telegraph. WHY: a punch with no weight transfer reads
-                  as a glitch, not a threat.
-     • GUARD    — _blockT keeps the rig's own high guard up (entities/
-                  meleeposes.js — the same forearms verbs_strike.js stops
-                  head shots with); _broken drops the arms slack + a dazed
-                  sway so the finisher window is visibly OPEN.
+     • WIND-UP  — a cock-back off combat_iq's _windup telegraph loads
+                  the next fist before it is thrown. The punch itself is
+                  the rig's (CBZ.verbs.strike → entities/meleeposes.js),
+                  and so is a raised guard (CBZ.verbs.block → ch.blockT).
+     • DAZE     — _broken drops the arms slack + a dazed sway so the
+                  finisher window is visibly OPEN.
      • GET-UP   — knockdown recovery picks one of 3 variants (sit-up
                   push / roll to either knee) seeded per person, so two
                   peds dropped by the same sweep don't rise in lockstep.
@@ -101,10 +98,6 @@
   const STAG_HEAD = 0.5;        // the head whips harder than the torso (whiplash sells force)
   const STAG_KNEE = 0.55;       // both knees flex as the stepped-back leg absorbs the shove
   const STAG_WINDMILL = 0.7;    // arms flail for balance — scales with amp² (heavy hits only)
-  const SWING_DUR = 0.3;        // lean-in/follow-through after an NPC punch lands
-  const SWING_LEAN = 0.3;       // forward commit at the moment of impact
-  const SWING_TWIST = 0.3;      // shoulder rotation behind the punching arm
-  const SWING_ARM = -1.9;       // punching arm extended, snapping back over the swing
   const DAZE_ARM = 0.3;         // guard-broken arms hang slack behind the hips
   const DAZE_SWAY = 0.12;       // slow drunken sway while broken (the foe is OPEN — go)
   const DAZE_HEAD = 0.42;       // head sags when the guard shatters
@@ -177,9 +170,8 @@
   //                       their own back-out instead of riding its assign)
   //   stagT/stagX/stagZ/stagAmp : directional stagger timer + world push
   //                       direction + force-scaled amplitude
-  //   swingT/swingArm   : NPC punch follow-through timer + which arm (±1)
   //   dazeK             : eased 0..1 weight of the guard-broken sway
-  //   lastFl/atkCd      : last seen _phys.fl / attackCD (edge detectors)
+  //   lastFl            : last seen _phys.fl (edge detector)
   const R = new Map();
 
   function rec(a) {
@@ -200,11 +192,10 @@
         avSide: 0, avSeed: (R.size % 7) * 0.37,    // AVERT: which way he turns off you (fixed per bout) + glance phase
         pkK: 0, px: null, pz: null,                // POCKET GUARD weight (CBZ.npcGuardPockets) + last ground position (walking gate)
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
-        swingT: 0, swingArm: 1, dazeK: 0,
-        // seed the detectors from the CURRENT values so an actor first seen
-        // mid-flinch / mid-cooldown doesn't fire a phantom stagger/swing.
+        dazeK: 0,
+        // seed the detector from the CURRENT value so an actor first seen
+        // mid-flinch doesn't fire a phantom stagger.
         lastFl: a._phys ? (a._phys.fl || 0) : 0,
-        atkCd: a.attackCD || 0,
       };
       R.set(a, r);
     }
@@ -221,12 +212,12 @@
     if (a.hp !== r.hp) { _qWhy = _qWhy || "hp"; return false; }   // un-consumed hit/heal edge
     const pp = a._phys;
     if (pp && pp.fl !== r.lastFl) { _qWhy = _qWhy || "fl"; return false; }  // un-consumed impact edge
-    if ((a.attackCD || 0) !== r.atkCd) { _qWhy = _qWhy || "cd"; return false; }  // un-consumed swing edge / live cadence
+    if ((a._windup || 0) > 0) { _qWhy = _qWhy || "windup"; return false; }
     if (a.rage || (a.stareT || 0) > 0 || (a.pocketGuardT || 0) > 0) { _qWhy = _qWhy || "rage/stare"; return false; }
     if (a.poseAimBack || a.poseHandsUp || (a.poseCower || 0) > 0 || a.surrender) { _qWhy = _qWhy || "pose"; return false; }
     if (a.state === "flee" || a.aiState === "flee") { _qWhy = _qWhy || "flee"; return false; }
-    if ((a._blockT || 0) > 0 || (a._broken || 0) > 0) { _qWhy = _qWhy || "block"; return false; }
-    if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT || r.swingT ||
+    if ((a._broken || 0) > 0) { _qWhy = _qWhy || "broken"; return false; }
+    if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT ||
         r.jailHitT || r.stK || r.stOff ||
         r.aimK || r.dazeK || r.pkK || r.cowerLean || r.gbx || r.gbz ||
         r.laOff || r.raOff || r.nkOff || r.byOff || r.hyOff || r.llOff || r.rlOff ||
@@ -394,11 +385,11 @@
                 old.laOff = 0; old.raOff = 0; old.cowerLean = 0;
                 old.nkOff = 0; old.byOff = 0; old.llOff = 0; old.rlOff = 0;
                 old.lowLaOff = 0; old.lowRaOff = 0; old.lowLlOff = 0; old.lowRlOff = 0;
-                old.gbx = 0; old.gbz = 0; old.stagT = 0; old.swingT = 0; old.dazeK = 0;
+                old.gbx = 0; old.gbz = 0; old.stagT = 0; old.dazeK = 0;
                 old.flinT = 0; old.clutchT = 0; old.aimK = 0; old.hyOff = 0;
-                // park the edge detectors HIGH so the first frame back in range
-                // can't read a stale value as a fresh hit / fresh swing.
-                old.lastFl = 9; old.atkCd = 1e9;
+                // park the edge detector HIGH so the first frame back in range
+                // can't read a stale value as a fresh hit.
+                old.lastFl = 9;
               }
               continue;
             }
@@ -611,22 +602,6 @@
             }
             r.lastFl = pp.fl;
           }
-          // SWING: peds.js npcAttack's only tell is attackCD JUMPING up at the
-          // instant the blow lands (melee sets 0.5..0.9). A jump while in fight
-          // state with the victim at arm's length = a punch we should sell.
-          // (range gate keeps point-blank GUNFIRE cadence from reading as a jab;
-          // the _broken/stun gate keeps combat.js's guard-break — which jacks
-          // attackCD up to freeze their offense — from reading as a swing)
-          const cd = a.attackCD || 0;
-          if (cd > r.atkCd + 0.12 && a.state === "fight" && a.rage && !a.rage.dead &&
-              !(a.armed && a.ammo > 0) && !((a._broken || 0) > 0) && !((a.stun || 0) > 0) && a.rage.pos) {
-            const tdx = a.rage.pos.x - a.pos.x, tdz = a.rage.pos.z - a.pos.z;
-            if (tdx * tdx + tdz * tdz < 12) {            // ~3.4m: melee reach
-              r.swingT = SWING_DUR;
-              r.swingArm = -r.swingArm;                  // alternate hands, like a real flurry
-            }
-          }
-          r.atkCd = cd;
           }
         }
 
@@ -880,7 +855,7 @@
           //      and any frame an overriding pose (block/aim/surrender) is up. ----
           if (r.clutchT > 0) {
             r.clutchT = Math.max(0, r.clutchT - dt);
-            if (live && !aimBack && !handsUp && !((a._broken || 0) > 0) && !((a._blockT || 0) > 0)) {
+            if (live && !aimBack && !handsUp && !((a._broken || 0) > 0) && !(ch.blockT > 0)) {
               const k = r.clutchT / CLUTCH_DUR;          // 1 → 0
               const ease = Math.sin(Math.min(1, k * 1.7) * 1.5708);  // quick reach, slow release
               const w = ease * r.clutchAmp;
@@ -898,51 +873,33 @@
             }
           }
 
-          // ---- (2) SWING LEAN-IN: weight committed behind an NPC punch
-          //      (and a cock-back off combat.js's _windup telegraph first). ----
-          if (r.swingT > 0) {
-            r.swingT = Math.max(0, r.swingT - dt);
-            if (live) {
-              const k = r.swingT / SWING_DUR;                // 1 at impact → 0
-              bodyOff += SWING_LEAN * k;                     // lean INTO the target
-              r.byOff += r.swingArm * SWING_TWIST * k;       // hips behind the fist
-              if (!gunArm) {
-                const arm = r.swingArm > 0 ? parts.ra : parts.la;
-                if (arm) {
-                  const off = SWING_ARM * k * k;             // extended, snaps back
-                  arm.rotation.x += off;
-                  if (r.swingArm > 0) r.raOff += off; else r.laOff += off;
-                }
-              }
-            }
-          } else if ((a._windup || 0) > 0 && live && a.state === "fight") {
-            // the swing alternates hands on detection, so wind up the NEXT fist
+          // ---- (2) THE COCK-BACK: combat_iq's _windup telegraph loads the
+          //      NEXT fist before the swing starts. The punch itself (its lean,
+          //      hips and follow-through) is the rig's strike: CBZ.verbs.strike
+          //      → entities/meleeposes.js. ----
+          if ((a._windup || 0) > 0 && live && a.state === "fight" && !(ch.punchT > 0)) {
+            // the fist that did NOT throw last is the one that loads
             const w = Math.min(1, a._windup / 0.25);
             bodyOff += -0.12 * w;                            // rock back to load it
             if (!gunArm) {
-              const arm = r.swingArm > 0 ? parts.la : parts.ra;
+              const left = ch.punchArm === "r";
+              const arm = left ? parts.la : parts.ra;
               if (arm) {
                 const off = 0.5 * w;                         // fist drawn behind the hip
                 arm.rotation.x += off;
-                if (r.swingArm > 0) r.laOff += off; else r.raOff += off;
+                if (left) r.laOff += off; else r.raOff += off;
               }
             }
           }
 
-          // ---- (3) GUARD READ: _blockT poses the block, _broken shows the
-          //      opening — the pose teaches "jab eaten → throw the heavy". ----
+          // ---- (3) GUARD READ: _broken shows the opening — the pose teaches
+          //      "jab eaten → throw the heavy". (A covering man is the rig's
+          //      own high guard: CBZ.verbs.block → ch.blockT → meleeposes.) ----
           const dazed = (a._broken || 0) > 0 && live;
           if (dazed) {
             // arms hang slack — visibly OPEN for the finisher
             if (parts.la) { const b0 = parts.la.rotation.x; const w = damp(b0, DAZE_ARM, 10, dt); r.laOff += w - b0; parts.la.rotation.x = w; }
             if (parts.ra && !gunArm) { const b0 = parts.ra.rotation.x; const w = damp(b0, DAZE_ARM * 0.8, 10, dt); r.raOff += w - b0; parts.ra.rotation.x = w; }
-          } else if ((a._blockT || 0) > 0 && live && !aimBack && !handsUp && !gunArm) {
-            // A COVERING MAN IS THE RIG'S OWN HIGH GUARD (entities/meleeposes.js:
-            // forearms up in front of the face, elbows in, chin down — the guard
-            // verbs_strike.js actually stops head shots with). This file used to
-            // hard-assign a second, different guard over it; now the brain's
-            // `_blockT` (combat_iq, city/combat) just keeps that guard raised.
-            ch.blockT = Math.max(ch.blockT || 0, Math.min(0.2, a._blockT));
           }
           // ---- (3b) AIM PRESENCE: an armed shooter visibly TRACKS its mark —
           //      head turned to the target, shoulders opened, and the gun arm's

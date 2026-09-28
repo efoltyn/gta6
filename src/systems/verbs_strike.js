@@ -479,13 +479,19 @@
     }
     for (let i = falls.length - 1; i >= 0; i--) {
       const F = falls[i], ch = F.B.ch, f = ch && ch.fall;
-      if (!f || !f.on || F.a.dead) { falls.splice(i, 1); continue; }
+      if (!f || !f.on || F.a.dead) {
+        // he is back on his feet: a ko timer only this pass was counting ends
+        // with the get-up (left over, it kept him "down" for good: B.down()
+        // true, never hit again, his fighter never ticking)
+        if (F.counted && !F.a.dead && F.a.ko > 0 && F.a.ko === F.lastKo) F.a.ko = 0;
+        falls.splice(i, 1); continue;
+      }
       if (F.B.isPlayer) continue;
       // the brain is off while he is down (a.ko); the rig stands up in time
       // for it to come back on. A body whose ko nobody counts down (a mode
       // without a ko brain) gets it counted here.
       let ko = F.a.ko || 0;
-      if (ko > 0 && ko === F.lastKo) { ko = Math.max(0, ko - dt); F.a.ko = ko; }
+      if (ko > 0 && ko === F.lastKo) { ko = Math.max(0, ko - dt); F.a.ko = ko; F.counted = true; }
       F.lastKo = ko;
       if (f.phase === "fall" || f.phase === "down") f.hold = ko > F.gt + 0.05;
       if (f.phase === "down" && !f.hold) MP.getUp(ch);

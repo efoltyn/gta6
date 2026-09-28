@@ -148,9 +148,17 @@
     detain:   { label: "Cuff",            fn: (a) => {
       if (a.approach) return approachAction(a, "detain");
       const justified = CBZ.game.role === "cop" && (a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
-      a.ko = Math.max(a.ko || 0, 5.5); a.hp = Math.max(a.hp || 0, 45); a.aiState = "flee"; a.foe = null;
+      a.hp = Math.max(a.hp || 0, 45); a.aiState = "flee"; a.foe = null;
       if (a.copMarked > 0) a.copMarked = 0;
-      CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.45);
+      // YOUR HANDS DO IT (CBZ.verbs.cuff): turned round, wrists behind his
+      // back, the cuffs ON them; then he goes down for a beat, cuffed
+      const V = CBZ.verbs;
+      const land = function () {
+        a.ko = Math.max(a.ko || 0, 5.5);
+        if (V && V.setCuffs) V.setCuffs(a, true, { whileKo: true });   // off again when he is let up
+      };
+      const S = V && V.cuff && !(a.ko > 0) ? V.cuff(V.playerActor(), a, { far: true, onEnd: land }) : null;
+      if (!S) { land(); CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.45); }
       CBZ.game.kos = (CBZ.game.kos || 0) + 1;
       if (CBZ.game.role === "cop" && CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 5);
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, "detain");
@@ -160,12 +168,19 @@
       const justified = a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
       if (a.copMarked > 0) a.copMarked = 0;
-      CBZ.econ.addCigs(found);
-      if (CBZ.addComplaint) {
-        if (justified) CBZ.addComplaint(-3);
-        else if (CBZ.econ.rng() < 0.25) CBZ.addComplaint(6);
-      }
-      CBZ.sfx("coin");
+      // THE PAT-DOWN (CBZ.verbs.frisk): hands up, turned to the wall, your
+      // hands down him collar to thighs; what you find you find at the end
+      const loot = function () {
+        CBZ.econ.addCigs(found);
+        if (CBZ.addComplaint) {
+          if (justified) CBZ.addComplaint(-3);
+          else if (CBZ.econ.rng() < 0.25) CBZ.addComplaint(6);
+        }
+        CBZ.sfx("coin");
+      };
+      const V = CBZ.verbs;
+      const S = V && V.frisk ? V.frisk(V.playerActor(), a, { far: true, onOutcome: loot }) : null;
+      if (!S) loot();
       return { ok: true, msg: justified ? "Alright, it's yours." : "That's mine, man." };
     } },
     // ---- held at gunpoint (systems/intimidate.js owns the state) ----------

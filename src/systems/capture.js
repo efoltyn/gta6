@@ -382,9 +382,12 @@
     if (CBZ.shake) CBZ.shake(opts.shake || 0.6);
     flash();
     CBZ.sfx && CBZ.sfx(opts.sfx || (opts.melee ? "punch" : "hit"));
-    if (opts.melee && CBZ.playerChar && CBZ.playerChar.neck) {
-      CBZ.playerChar.neck.rotation.x += 0.34;
-      CBZ.playerChar.neck.rotation.z += (Math.random() < 0.5 ? -1 : 1) * 0.22;
+    // the blow on YOUR body: a strike through CBZ.verbs has already played
+    // its reaction (opts.reacted); anything else gets the same one from here
+    if (opts.melee && !opts.reacted && CBZ.verbs && CBZ.verbs.react && fromX != null && isFinite(fromX)) {
+      const dx = player.pos.x - fromX, dz = player.pos.z - (fromZ || 0), l = Math.hypot(dx, dz) || 1;
+      CBZ.verbs.react(CBZ.verbs.playerActor ? CBZ.verbs.playerActor() : { isPlayer: true, pos: player.pos },
+        { zone: "head", kind: weapon === "shank" ? "stab" : "cross", dir: { x: dx / l, z: dz / l }, power: Math.min(1, 0.35 + (dmg || 10) / 30) });
     }
     if (player.hp > 0) return false;
     player.hp = 0;
@@ -524,11 +527,20 @@
   // move a screw toward (tx,tz), stopping `stop` short of it, facing (fx,fz).
   // Returns the distance still to go.
   function screwStep(gd, tx, tz, stop, fx, fz, run, dt) {
+    // a screw holding the man (CBZ.verbs) is walked by the verb, not here
+    if (CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(gd)) return Math.hypot(tx - gd.group.position.x, tz - gd.group.position.z);
     const gp = gd.group.position;
     const dx = tx - gp.x, dz = tz - gp.z, d = Math.hypot(dx, dz);
     const sp = (gd.speed || 3) * (run ? 1.7 : 1.15);
-    const step = Math.max(0, Math.min(d - stop, sp * dt));
-    if (step > 0 && d > 1e-4) { gp.x += dx / d * step; gp.z += dz / d * step; }
+    let step = Math.max(0, Math.min(d - stop, sp * dt));
+    const M = CBZ.moves;
+    if (M && M.motor && M.step) {
+      // THE ONE LOCOMOTION LAYER: arrival, turn rate, the stride the legs get
+      const ox = gp.x, oz = gp.z;
+      const m = M.motor(gd);
+      M.step(m, gp, gd.group.rotation.y, tx, tz, { speed: sp, stop: stop, lod: 1 }, dt);
+      step = Math.hypot(gp.x - ox, gp.z - oz);
+    } else if (step > 0 && d > 1e-4) { gp.x += dx / d * step; gp.z += dz / d * step; }
     // a body on the gallery is worked on at the gallery's height
     if (d < 3) gp.y = CBZ.damp(gp.y, player.pos.y, 8, dt);
     const ax = fx - gp.x, az = fz - gp.z;
@@ -542,8 +554,31 @@
   }
   function tiesOn(on) {
     CBZ.playerChar.cuffed = !!on;
-    const R = CBZ.cityRestrain;
-    if (R && R.cuffPlayer) { try { R.cuffPlayer(!!on); } catch (e) {} }
+    if (CBZ.verbs && CBZ.verbs.setCuffs) CBZ.verbs.setCuffs(CBZ.verbs.playerActor(), !!on);
+  }
+  /* THE BODIES ARE CBZ.verbs' AND STRIKE'S. The screw's hands on you are the
+     shared verbs (tackle, cuff, escort, carry: systems/verbs.js); you on the
+     floor is the real fall (entities/meleeposes.js), held down until the lift,
+     not the old whole-group rotation.z roll. */
+  const VB = () => CBZ.verbs || null;
+  const pa = () => (VB() ? VB().playerActor() : player);
+  function holdDown(dt, side) {
+    const ch = CBZ.playerChar, MP = CBZ.meleePoses;
+    if (MP && MP.startFall && ch) {
+      if (!(ch.fall && ch.fall.on)) MP.startFall(ch, { variant: "back", side: side, ko: true, hold: true });
+      ch.fall.hold = true;
+      if (ch.group.rotation.z) ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 10, dt);
+      return;
+    }
+    ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, side * Math.PI / 2, 10, dt);   // no melee poses loaded
+  }
+  function standUp() {
+    const ch = CBZ.playerChar, MP = CBZ.meleePoses;
+    if (MP && MP.getUp && ch && ch.fall && ch.fall.on) MP.getUp(ch);
+  }
+  function dropHolds(e) {
+    if (!e) return;
+    for (const k of ["cuffS", "escS", "carryS"]) { const S = e[k]; if (S && !S.done) S.cancel(); e[k] = null; }
   }
   // THE LENS. The pen's camera is a tight room-aware boom over your shoulder,
   // so a scene played under it is a wall: you lie under the pivot and the
@@ -608,7 +643,13 @@
     if (ch && ch.group) {
       ch.group.position.copy(player.pos);
       ch.group.rotation.y = -Math.PI / 2;          // facing the bed
-      ch.group.rotation.z = Math.PI / 2;           // still on his side
+      const MP = CBZ.meleePoses;
+      if (MP && MP.startFall) {
+        // still down: the real fall's lying key, held until the wake
+        const f = MP.startFall(ch, { variant: "back", side: 1, ko: true, hold: true });
+        f.t = MP.fallTimes("back").fall; f.phase = "down";
+        ch.group.rotation.z = 0;
+      } else ch.group.rotation.z = Math.PI / 2;    // still on his side
     }
     if (CBZ.cam) CBZ.cam.yaw = Math.PI / 2;
   }
@@ -668,10 +709,12 @@
   function endEscort() {
     if (!esc) return;
     const e0 = esc;
+    dropHolds(e0);
     camDrop();
     releaseScrews();
     esc = null;
     tiesOn(false);
+    standUp();
     player.subdue = 0; player.stun = 0;
     setCaptureState("normal", 0);
     // a man waking in the infirmary gets up off his side (the normal-state
@@ -691,7 +734,7 @@
     const px = P.pos.x, pz = P.pos.z;
     // down on whichever side the hit put you on (a tackle lands you on the other)
     const side = ch.group.rotation.z < -0.05 ? -1 : 1;
-    const lie = () => { ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, side * Math.PI / 2, 10, dt); };
+    const lie = () => holdDown(dt, side);
     // the second screw takes the far side of the body
     const flank = (sx, sz, sgn) => {
       const ax = lead ? lead.group.position.x - px : 1, az = lead ? lead.group.position.z - pz : 0;
@@ -709,18 +752,25 @@
       if (lead) { if (near < (e.gain == null ? Infinity : e.gain) - 0.02) { e.gain = near; e.stuck = 0; } else e.stuck = (e.stuck || 0) + dt; }
       const arrived = lead ? (near <= 0.35 || (e.stuck > 0.8 && near < 3.0)) : false;
       if (arrived || e.t >= (lead ? ESC.DOWN_MAX : ESC.DOWN_ALONE)) {
-        e.phase = e.kind === "medical" ? "carry" : (!e.tased && lead) ? "tase" : "cuff"; e.t = 0;
+        e.phase = e.kind === "medical" ? "carry" : (!e.tased && lead) ? "tase" : "lift"; e.t = 0;
       }
       return;
     }
     // THE CARRY (downed / starving): two screws get you off the floor and the
     // lens goes dark on the way to the infirmary. No cuffs, no strike.
     if (e.phase === "carry") {
-      lie(); camGround(px, P.pos.y, pz);
-      if (lead) { screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt); if (lead.char) lead.char.crouch = e.t < 1.2; }
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); if (second.char) second.char.crouch = e.t < 1.2; }
-      if (e.t >= 1.4 && fadeEl) fadeEl.style.opacity = Math.min(1, (e.t - 1.4) / ESC.FADE).toFixed(2);
-      if (e.t < 1.4 + ESC.FADE) return;
+      camGround(px, P.pos.y, pz);
+      // the lead screw gets you up over his shoulder (CBZ.verbs.carry) and
+      // walks off with you toward the infirmary; the lens goes dark on the way
+      if (!e.carryS && !e.carryTried && lead && VB()) { e.carryTried = true; e.carryS = VB().carry(lead, pa(), { far: true }); }
+      const S = e.carryS && !e.carryS.done ? e.carryS : null;
+      if (!S) lie();
+      if (S && S.phase === "hold") VB().walk(S, S, INFIRMARY.x0, (INFIRMARY.z0 + INFIRMARY.z1) / 2, 1.2, dt);
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      const fadeAt = S ? 2.6 : 1.4;
+      if (e.t >= fadeAt && fadeEl) fadeEl.style.opacity = Math.min(1, (e.t - fadeAt) / ESC.FADE).toFixed(2);
+      if (e.t < fadeAt + ESC.FADE) return;
+      dropHolds(e);
       camDrop(); releaseScrews();
       landInInfirmary();
       P.hp = Math.max(P.hp || 0, e.wakeHp || 55);
@@ -743,38 +793,58 @@
       if (ch.body) ch.body.rotation.x += 0.28 * Math.max(0, 1 - e.t / ESC.TASE);
       if (lead) screwStep(lead, px, pz, ESC.REACH, px, pz, false, dt);
       if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      if (e.t >= ESC.TASE) { e.phase = "cuff"; e.t = 0; }
+      if (e.t >= ESC.TASE) { e.phase = "lift"; e.t = 0; }
       return;
     }
-    if (e.phase === "cuff") {
-      lie(); camGround(px, P.pos.y, pz);
-      if (lead) { screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt); if (lead.char) lead.char.crouch = true; }
-      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      if (!e.tied && e.t >= 0.45) {
-        e.tied = true;
-        tiesOn(true);
-        if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (er) {} }   // the ratchet click
-        if (lead && CBZ.guardLine) { try { CBZ.guardLine(lead, "cuff", { force: true }); } catch (er) {} }
-      }
-      if (e.t >= ESC.CUFF) { e.phase = "lift"; e.t = 0; if (lead && lead.char) lead.char.crouch = false; }
-      return;
-    }
+    // UP, THEN THE CUFFS: the screws get you onto your feet, the lead turns
+    // you round, both wrists behind your back and the ratchet (CBZ.verbs.cuff)
     if (e.phase === "lift") {
       camGround(px, P.pos.y, pz);
-      ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 7, dt);
+      standUp();
+      if (ch.group.rotation.z) ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, 0, 7, dt);
       if (ch.body && ch.body.rotation.x) ch.body.rotation.x = CBZ.damp(ch.body.rotation.x, 0, 9, dt);
       if (lead) screwStep(lead, px, pz, ESC.REACH * 0.75, px, pz, false, dt);
       if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
-      if (e.t >= ESC.LIFT) {
-        const w = walkTarget();
-        e.tx = w.x; e.tz = w.z;
-        const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
-        if (d > 0.01) { e.hx = dx / d; e.hz = dz / d; }
-        else { e.hx = Math.sin(ch.group.rotation.y); e.hz = Math.cos(ch.group.rotation.y); }
+      // on his feet first (the get-up plays out), then the cuffs
+      if ((e.t >= ESC.LIFT && !(ch.fall && ch.fall.on)) || e.t >= ESC.LIFT + 2.5) {
         ch.group.rotation.z = 0;
-        if (CBZ.cineCam && e.cam) CBZ.cineCam.snap = true;      // CUT to the walk
-        e.phase = "walk"; e.t = 0;
+        const tied = function () {
+          if (e.tied) return;
+          e.tied = true;
+          tiesOn(true);
+          if (lead && CBZ.guardLine) { try { CBZ.guardLine(lead, "cuff", { force: true }); } catch (er) {} }
+        };
+        e.cuffS = lead && VB() ? VB().cuff(lead, pa(), { far: true, onOutcome: function (S, k) { if (k === "cuffed") tied(); } }) : null;
+        if (!e.cuffS) { tied(); if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (er) {} } }
+        e.phase = "cuff"; e.t = 0;
       }
+      return;
+    }
+    if (e.phase === "cuff") {
+      camGround(px, P.pos.y, pz);
+      if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
+      // HE TORE LOOSE before the cuffs closed (verbs.js struggle): the scene is
+      // over, you are on your feet with a screw staggering off you, and it is
+      // a chase again
+      if (e.cuffS && e.cuffS.done && !e.tied && e.cuffS.result && e.cuffS.result.outcome === "escaped") {
+        const gd = lead;
+        endEscort();
+        if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
+        return;
+      }
+      const busy = e.cuffS && !e.cuffS.done;
+      if (busy && e.t < ESC.CUFF + 2.5) return;
+      if (!e.tied) { e.tied = true; tiesOn(true); }
+      dropHolds(e);
+      const w = walkTarget();
+      e.tx = w.x; e.tz = w.z;
+      const dx = e.tx - px, dz = e.tz - pz, d = Math.hypot(dx, dz);
+      if (d > 0.01) { e.hx = dx / d; e.hz = dz / d; }
+      else { e.hx = Math.sin(ch.group.rotation.y); e.hz = Math.cos(ch.group.rotation.y); }
+      // the march: a hand on your arm, one on the ties (CBZ.verbs.escort)
+      e.escS = lead && VB() ? VB().escort(lead, pa(), { far: true }) : null;
+      if (CBZ.cineCam && e.cam) CBZ.cineCam.snap = true;      // CUT to the walk
+      e.phase = "walk"; e.t = 0;
       return;
     }
     // ---- walk / fade: the march, with the blackout riding on the end of it
@@ -784,24 +854,35 @@
       // the legs follow the GROUND COVERED, never the intent: a wall between
       // you and the door must not make a cuffed man jog on the spot
       let moved = 0;
+      const held = e.escS && !e.escS.done && e.phase === "walk" ? e.escS : null;
       if (d > 0.6) {
         e.hx = dx / d; e.hz = dz / d;
         const step = Math.min(d - 0.5, ESC.WALK_SPD * dt);
         const ox = P.pos.x, oz = P.pos.z;
-        P.pos.x += e.hx * step; P.pos.z += e.hz * step; P.vy = 0;
-        if (CBZ.collide) { try { CBZ.collide(P.pos, BODY_R, 0, 1.7); } catch (er) {} }
-        moved = Math.hypot(P.pos.x - ox, P.pos.z - oz);
+        if (held) {
+          // the screw walks behind you; you go where his hands send you
+          // (you are placed at the end of this frame: measure last frame's step)
+          const lp = e.lastP || (e.lastP = { x: ox, z: oz });
+          VB().walk(held, held, e.tx - e.hx * 0.9, e.tz - e.hz * 0.9, ESC.WALK_SPD, dt, Math.atan2(e.hx, e.hz));
+          moved = Math.hypot(ox - lp.x, oz - lp.z); lp.x = ox; lp.z = oz;
+        } else {
+          P.pos.x += e.hx * step; P.pos.z += e.hz * step; P.vy = 0;
+          if (CBZ.collide) { try { CBZ.collide(P.pos, BODY_R, 0, 1.7); } catch (er) {} }
+          moved = Math.hypot(P.pos.x - ox, P.pos.z - oz);
+        }
         e.stall = moved < 0.25 * step ? e.stall + dt : 0;
       }
-      ch.group.position.copy(P.pos);
-      ch.group.rotation.y = lerpAng(ch.group.rotation.y, Math.atan2(e.hx, e.hz), 1 - Math.pow(0.002, dt));
+      if (!held) {
+        ch.group.position.copy(P.pos);
+        ch.group.rotation.y = lerpAng(ch.group.rotation.y, Math.atan2(e.hx, e.hz), 1 - Math.pow(0.002, dt));
+      }
       ch.cuffed = true;
       if (CBZ.animChar) CBZ.animChar(ch, moved / Math.max(dt, 1e-4), dt);
       camWalk(P.pos.x, P.pos.y, P.pos.z, e.hx, e.hz);
       // the lens eases round behind the march — slowly, never a locked camera
       if (CBZ.cam) CBZ.cam.yaw = lerpAng(CBZ.cam.yaw, Math.atan2(e.hx, e.hz) + Math.PI, 1 - Math.pow(0.55, dt));
       const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
-      if (lead) screwStep(lead, P.pos.x - e.hx * (back + 0.55), P.pos.z - e.hz * (back + 0.55), 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
+      if (lead && !held) screwStep(lead, P.pos.x - e.hx * (back + 0.55), P.pos.z - e.hz * (back + 0.55), 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
       if (second) screwStep(second, P.pos.x - e.hx * 0.6 - e.hz * 1.0, P.pos.z - e.hz * 0.6 + e.hx * 1.0, 0.02, P.pos.x + e.hx, P.pos.z + e.hz, false, dt);
       if (e.phase === "walk") {
         // arrived, walked long enough, or walled off: the rest is off-screen
@@ -814,6 +895,7 @@
       // ---- THE HAUL SITE: your own cell door. An ESCAPE capture is the one
       // place a strike (and a transfer) can land, cuffed by construction; any
       // other cuffing is the hole, which is time, not a strike.
+      dropHolds(e);
       camDrop(); releaseScrews();
       if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; ch.group.position.copy(P.pos); }
       g.detection = 0; g.invuln = 2.0;
@@ -959,23 +1041,24 @@
     if (CBZ.shake) CBZ.shake(0.7);
     spray(1.1);
     gd._escort = false;
-    if (CBZ.predatorSeize && !seizedBy) {
-      const h = CBZ.predatorSeize(gd, player, {
-        style: "pin", nonLethal: true, hold: 2.4, dps: 4, thrash: 0.55, escape: 0.5,
-        cause: "restrained by a guard",
-        // "taken"/"killed" = the hold ran out: cuffs. "escaped" = you made the
-        // press: he is on the floor a beat and you are loose. "aborted" = the
-        // grab became invalid (the screw was hit off you): nothing lands.
-        onEnd: function (res) {
+    // THE TACKLE (CBZ.verbs.tackle): he runs in low, shoulder at your waist,
+    // arms round your thighs, drives you down and ends kneeling on you. Down
+    // (or pinned to a wall) = the cuffs. The session ending any other way (he
+    // was hit off you, it never connected) = you are loose.
+    const V = VB();
+    if (V && V.tackle && !seizedBy) {
+      const S = V.tackle(gd, pa(), {
+        far: true,
+        onEnd: function (S) {
           seizedBy = null;
-          if (res === "taken" || res === "killed") { if (!arrest) arrest = { gd, phase: "tackle" }; cuffs(true); return; }
+          const k = S.result && S.result.outcome;
+          if (k === "open" || k === "wall") { if (!arrest) arrest = { gd, phase: "tackle" }; cuffs(true); return; }
           if (arrest && arrest.gd === gd) arrest = null;
           gd.capCD = 3.2;
-          if (res === "escaped") gd.ko = Math.max(gd.ko || 0, 1.2);
           setCaptureState("normal", 0);
         },
       });
-      if (h) { seizedBy = h; setCaptureState("tackled", 2.4); return; }
+      if (S) { seizedBy = S; setCaptureState("tackled", 2.4); return; }
     }
     cuffs(true);
   }

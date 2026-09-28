@@ -2047,7 +2047,7 @@
     // gives the roster its own two plans; prisonnav re-opens it for the cast.
     if (navOn()) CBZ.navGrid.frame(2, 1.5);
     auditPre();
-    for (const g of CBZ.guards) updateGuard(g, dt);
+    for (const g of CBZ.guards) { if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(g)) continue; updateGuard(g, dt); }   // a body a verb holds is the verb's
   });
   CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });
 })();

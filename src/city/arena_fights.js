@@ -1722,11 +1722,21 @@ function recordLoss(box){
   commitCareer();
 }
 
-function resetFighter(ch,x){
-  if(!ch)return;
+/* EVERY BLOW HERE IS CBZ.verbs (systems/verbs_strike.js): a fighter is an
+   actor the verbs can read ({char, group, pos, hp}); his punches are real
+   strikes that land where the fist lands, his cover is his forearms, his
+   KO is a fall in his own rig. The ring pair box through two CBZ.verbs
+   fighters (combinations, reads, footwork); the file only keeps score. */
+function VB(){ return (CBZ.verbs&&CBZ.verbs.strike)?CBZ.verbs:null; }
+function fighterActor(ch,name,hp){
+  return {char:ch,group:ch.group,pos:ch.group.position,hp:hp,maxHp:hp,name:name,dead:false,ko:0};
+}
+function resetFighter(a,x){
+  if(!a)return;
+  var ch=a.char, Vb=VB();
   ch.group.position.set(x,RY,RZ);
-  ch.koT=0; ch.blockT=0; ch.dodgeT=0; ch.staggerT=0; ch.punchT=0; ch.kickT=0;
-  ch.fightStance=true;
+  if(Vb){ Vb.cancelStrike(a); if(ch.fall&&ch.fall.on)Vb.getUp(a); Vb.guard(a,true); }
+  a.ko=0;
 }
 function newBout(){
   if(!redCh||!blueCh)return;
@@ -1735,10 +1745,10 @@ function newBout(){
   if(i2===i1)i2=(i2+1)%NAMES.length;
   var p=0.35+Math.random()*0.30; // red's true win prob
   bout={id:boutSeq,state:"circle",t:2.5,ang:Math.random()*Math.PI*2,
-    dir:(Math.random()<0.5)?-1:1,atkCd:1,exT:0,attacker:"red",winner:null,pRed:p,
-    red:{ch:redCh,hp:100,name:NAMES[i1]},blue:{ch:blueCh,hp:100,name:NAMES[i2]},
+    dir:(Math.random()<0.5)?-1:1,winner:null,pRed:p,
+    red:fighterActor(redCh,NAMES[i1],100),blue:fighterActor(blueCh,NAMES[i2],100),
     oddsRed:Math.round(94/p)/100,oddsBlue:Math.round(94/(1-p))/100}; // ~6% vig
-  resetFighter(redCh,RX-1.8); resetFighter(blueCh,RX+1.8);
+  resetFighter(bout.red,RX-1.8); resetFighter(bout.blue,RX+1.8);
   board("BOUT #"+bout.id,bout.red.name+"  vs  "+bout.blue.name,
         "RED @"+bout.oddsRed.toFixed(2)+"   ·   BLUE @"+bout.oddsBlue.toFixed(2));
   if(nearRing)note("Next bout. RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
@@ -1751,29 +1761,23 @@ function clampRing(p){
   p.z=Math.min(RZ+RING_FIGHT,Math.max(RZ-RING_FIGHT,p.z));
   p.y=RY;
 }
-function strike(b,A,D){
-  var kick=Math.random()<0.22;
-  if(kick){A.ch.kickDur=0.55;A.ch.kickT=0.55;}
-  else{
-    A.ch.punchKind=PUNCHES[(Math.random()*PUNCHES.length)|0];
-    A.ch.punchArm=(Math.random()<0.5)?"l":"r";
-    A.ch.punchDur=0.34; A.ch.punchT=0.34;
-  }
-  var roll=Math.random();
-  if(roll<0.18){ D.ch.dodgeT=0.4; D.ch.dodgeDir=(Math.random()<0.5)?-1:1; return; } // slipped it
-  var dmg=(kick?12:7)+Math.random()*6;
-  if(roll<0.48){ D.ch.blockT=0.45; dmg*=0.3; }     // caught on the guard
-  else{ D.ch.staggerT=0.35; }                       // clean
-  D.hp-=dmg;
-  if(D.hp<=0){
-    D.hp=0; D.ch.koT=6; D.ch.fightStance=false;
-    b.winner=(D===b.red)?"blue":"red";
-    b.state="ko"; b.t=3.5;
-    var w0=(b.winner==="red")?b.red:b.blue;
-    board("DOWN!",w0.name+" drops "+D.name,"the referee is counting");
-    if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" · the ref is counting...",3,{urgent:true});
-  }
+// a ring blow that LANDED (the verbs call this on the fist's frame): what it
+// costs, and the knockdown that ends the bout
+function ringLanded(res){
+  var b=bout, D=res.target, A=res.attacker;
+  if(!b||b.state!=="exchange"||!D||D.hp<=0||(D!==b.red&&D!==b.blue)){ res.reaction="none"; return; }
+  D.hp-=(7+Math.random()*6)*res.dmgMul;
+  if(D.hp>0)return;
+  D.hp=0; res.reaction="none";
+  var Vb=VB(); if(Vb)Vb.knockdown(D,{dir:res.dir,ko:true,dur:6,power:res.power});
+  b.winner=(D===b.red)?"blue":"red";
+  b.state="ko"; b.t=3.5;
+  var w0=(b.winner==="red")?b.red:b.blue;
+  board("DOWN!",w0.name+" drops "+D.name,"the referee is counting");
+  if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" · the ref is counting...",3,{urgent:true});
+  void A;
 }
+var RING_O={perform:true,onLand:ringLanded};
 function settleRingBet(b){
   if(!ringBet)return;
   if(ringBet.boutId!==b.id){ ringBet=null; return; }
@@ -1788,45 +1792,43 @@ function settleRingBet(b){
 }
 function tickRing(dt){
   var b=bout; if(!b)return;
-  var r=b.red,u=b.blue, rp=r.ch.group.position, up=u.ch.group.position;
+  var r=b.red,u=b.blue, rp=r.pos, up=u.pos;
   if(b.state==="circle"){
     b.t-=dt; b.ang+=dt*0.55*b.dir;
     moveTo(rp,RX+Math.cos(b.ang)*1.7,RZ+Math.sin(b.ang)*1.7,1.6*dt);
     moveTo(up,RX-Math.cos(b.ang)*1.7,RZ-Math.sin(b.ang)*1.7,1.6*dt);
     clampRing(rp); clampRing(up);
-    face(r.ch,up.x,up.z); face(u.ch,rp.x,rp.z);
-    anim(r.ch,0.7,dt); anim(u.ch,0.7,dt);
-    if(b.t<=0){
-      b.state="exchange"; b.exT=2+Math.random()*2.5; b.atkCd=0.5;
-      b.attacker=(Math.random()<b.pRed)?"red":"blue"; // favourite presses more
-    }
+    face(r.char,up.x,up.z); face(u.char,rp.x,rp.z);
+    anim(r.char,0.7,dt); anim(u.char,0.7,dt);
+    // the walk-out: then they fight until one of them is down (the fighters
+    // take their own rests between combinations, and circle on their own feet)
+    if(b.t<=0)b.state="exchange";
   }else if(b.state==="exchange"){
     var dx=up.x-rp.x,dz=up.z-rp.z,d=Math.hypot(dx,dz)||0.001,mv=0.3;
-    if(d>1.2){
-      var s=Math.min(1.4*dt,(d-1.15)*0.5);
+    var Vb=VB(), busy=!!(Vb&&(Vb.strikeOf(r)||Vb.strikeOf(u)));
+    if(d>1.9&&!busy){
+      // walk into range; inside it the fighters own their feet (and nothing moves a man mid-blow)
+      var s=Math.min(1.4*dt,(d-1.7)*0.8);
       rp.x+=dx/d*s; rp.z+=dz/d*s; up.x-=dx/d*s; up.z-=dz/d*s; mv=1.3;
     }
+    // the fight works its way back off the ropes: a pair pinned in a corner
+    // cannot step in, and the clamp would eat every lunge
+    var mx=(rp.x+up.x)*0.5-RX, mz=(rp.z+up.z)*0.5-RZ, md=Math.hypot(mx,mz);
+    if(md>0.4&&!busy){ var k=Math.min(md-0.4,0.6*dt)/md; rp.x-=mx*k; rp.z-=mz*k; up.x-=mx*k; up.z-=mz*k; }
     clampRing(rp); clampRing(up);
-    face(r.ch,up.x,up.z); face(u.ch,rp.x,rp.z);
-    anim(r.ch,mv,dt); anim(u.ch,mv,dt);
-    b.atkCd-=dt;
-    if(d<1.6&&b.atkCd<=0){
-      b.atkCd=0.75+Math.random()*0.7;
-      if(Math.random()<0.45)b.attacker=(b.attacker==="red")?"blue":"red";
-      var A=(b.attacker==="red")?r:u, D=(b.attacker==="red")?u:r;
-      strike(b,A,D);
-    }
-    if(b.state==="exchange"){
-      b.exT-=dt;
-      if(b.exT<=0){ b.state="circle"; b.t=1.2+Math.random()*2; b.dir=(Math.random()<0.5)?-1:1; }
-    }
+    anim(r.char,mv,dt); anim(u.char,mv,dt);
+    if(Vb&&d<2.4){
+      // the favourite presses more: his odds are his edge in the ring
+      Vb.fighter(r,{skill:0.3+0.5*b.pRed,aggression:0.35+0.5*b.pRed}).tick(dt,u,RING_O);
+      if(b.state==="exchange")Vb.fighter(u,{skill:0.3+0.5*(1-b.pRed),aggression:0.35+0.5*(1-b.pRed)}).tick(dt,r,RING_O);
+    }else{ face(r.char,up.x,up.z); face(u.char,rp.x,rp.z); }
   }else if(b.state==="ko"){
     b.t-=dt;
     var W=(b.winner==="red")?r:u, L=(b.winner==="red")?u:r;
-    W.ch.fightStance=false;
-    anim(W.ch,0.5,dt); anim(L.ch,0,dt);
-    var refMoved=refCh?moveTo(refCh.group.position,L.ch.group.position.x+0.9,L.ch.group.position.z,1.9*dt):0;
-    if(refCh){ refCh.group.position.y=RY; face(refCh,L.ch.group.position.x,L.ch.group.position.z); anim(refCh,refMoved>0?1.2:0.15,dt); }
+    if(W.char.fightStance&&VB())VB().guard(W,false);
+    anim(W.char,0.5,dt); anim(L.char,0,dt);
+    var refMoved=refCh?moveTo(refCh.group.position,L.pos.x+0.9,L.pos.z,1.9*dt):0;
+    if(refCh){ refCh.group.position.y=RY; face(refCh,L.pos.x,L.pos.z); anim(refCh,refMoved>0?1.2:0.15,dt); }
     if(b.t<=0){
       board("WINNER BY KO",W.name,"IRONJAW ARENA");
       if(nearRing)note((b.winner==="red"?"RED ":"BLUE ")+W.name+" wins by KO!",4,{urgent:true});
@@ -1835,7 +1837,7 @@ function tickRing(dt){
     }
   }else if(b.state==="reset"){
     b.t-=dt;
-    anim(r.ch,0,dt); anim(u.ch,0,dt);
+    anim(r.char,0,dt); anim(u.char,0,dt);
     if(refCh){ moveTo(refCh.group.position,RX-3.1,RZ+3.1,1.6*dt); refCh.group.position.y=RY; anim(refCh,0.4,dt); }
     if(b.t<=0)newBout();
   }
@@ -1864,7 +1866,6 @@ function startBout(box){
   var opp=CBZ.makeCharacter({legs:0x111111,torso:box?0x8a1f1f:0x40342a,collar:box?0x8a1f1f:0x40342a,arms:box?0x8a1f1f:0x40342a,
     skin:0xc89878,hair:0x0a0a0a,shoes:0x222222,cap:0});
   opp.group.position.set(cx+rad*0.7,cy,cz);
-  opp.fightStance=true;
   arenaRoot.add(opp.group);
   // Put the player ON the deck, not through it: the ring canvas and cage mat
   // are now real platforms, and physics only adopts a platform within STEP_UP
@@ -1873,7 +1874,14 @@ function startBout(box){
   var purse=purseFor(c,card,box);
   pfight={opp:opp,card:card,box:!!box,purse:purse,cx:cx,cz:cz,cy:cy,rad:rad,t:0,
     oppHp:100*(0.75+card.skill*0.8),oppHpMax:100*(0.75+card.skill*0.8),
-    myHp:60,pcd:0.6,ocd:1.4,over:0,won:false,name:card.name};
+    myHp:60,ocd:1.4,over:0,won:false,name:card.name};
+  // HE IS A BODY YOUR FISTS CAN FIND. The only damage he takes is a blow of
+  // yours that lands (city/combat.js swings through CBZ.verbs and hands a
+  // landed one to meleeHit); nothing is dealt on a timer.
+  var oa=pfight.oppA=fighterActor(opp,card.name,pfight.oppHp);
+  oa.meleeHit=function(res,dmg){ cageLanded(res,dmg); };
+  if(VB())VB().guard(oa,true);
+  cageTargets.length=0; cageTargets.push(oa);
   board((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE BOUT":" BOUT"),
         "YOU  vs  "+card.name,"purse "+money(purse));
   note((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
@@ -1883,6 +1891,7 @@ function startCageFight(){ startBout(false); }
 function startBoxMatch(){ startBout(true); }
 function endCageFight(){
   if(!pfight)return;
+  cageTargets.length=0;
   if(arenaRoot&&pfight.opp)arenaRoot.remove(pfight.opp.group);
   if(pfight.box){ // hand the ring back to the house card
     ringSuspended=false;
@@ -1896,6 +1905,26 @@ function clampCage(p){
   var dx=p.x-cx,dz=p.z-cz,d=Math.hypot(dx,dz);
   if(d>r){p.x=cx+dx/d*r;p.z=cz+dz/d*r;}
   p.y=cy;
+}
+var cageTargets=[];
+CBZ.cityMeleeTargets=cageTargets;       // city/combat.js swings can land on these
+// the cage and the ring as a probe drives them (tools/verbs-route-check.mjs)
+CBZ.arenaFightProbe={
+  root:function(r){ if(r)arenaRoot=r; return arenaRoot; },
+  startCage:function(box){ startBout(!!box); return pfight; },
+  endCage:function(){ endCageFight(); },
+  tickCage:function(dt,pp){ tickCage(dt,pp||CBZ.player.pos); return pfight; },
+  newBout:function(){ newBout(); return bout; },
+  tickRing:function(dt){ tickRing(dt); return bout; },
+  rigs:function(r,b){ redCh=r; blueCh=b; }
+};
+// one of YOUR blows landed on him (res from CBZ.verbs, dmg already scaled by
+// where it landed): that is the only way his health goes down
+var _koDir={x:0,z:1};
+function cageLanded(res,dmg){
+  var f=pfight; if(!f||f.over>0){ res.reaction="none"; return; }
+  f.oppHp-=dmg; f.oppA.hp=f.oppHp;
+  if(f.oppHp<=0){ res.reaction="none"; _koDir.x=res.dir.x; _koDir.z=res.dir.z; f.koDir=_koDir; }
 }
 function tickCage(dt,pp){
   var f=pfight; if(!f)return;
@@ -1917,31 +1946,29 @@ function tickCage(dt,pp){
     mv=1.6;
   }
   clampCage(og.position);
-  face(opp,pp.x,pp.z);
-  if(Math.random()<dt*(0.3+sk*0.6))opp.blockT=0.5;           // brings the guard up
+  var Vb=VB(), oa=f.oppA;
+  if(!(Vb&&Vb.strikeOf(oa)))face(opp,pp.x,pp.z);
+  if(Vb&&Math.random()<dt*(0.3+sk*0.6))Vb.block(oa,0.5);          // brings the guard up
   f.ocd-=dt;
-  if(d<2.0&&f.ocd<=0){                                       // he swings at you
+  if(Vb&&d<2.0&&f.ocd<=0){                                       // he swings at you
     f.ocd=Math.max(0.55,1.35-sk*0.9)+Math.random()*0.7;
-    if(!f.box&&Math.random()<0.25){opp.kickDur=0.55;opp.kickT=0.55;}   // kicks are MMA-only
-    else{opp.punchKind=PUNCHES[(Math.random()*PUNCHES.length)|0];
-      opp.punchArm=(Math.random()<0.5)?"l":"r";opp.punchDur=0.34;opp.punchT=0.34;}
-    if(Math.random()<0.35+sk*0.45){
-      var oh=6+sk*10;
-      if(typeof CBZ.cityHurtPlayer==="function"){try{CBZ.cityHurtPlayer(oh,f.name);}catch(e){}}
-      f.myHp-=oh;
+    var oh=6+sk*10, pa=(CBZ.city&&CBZ.city.playerActor)||(Vb.playerActor&&Vb.playerActor());
+    var hit=function(res){
+      if(!pfight||pfight.over>0){ res.reaction="none"; return; }
+      // your guard is the city's own parry/chip system (it wraps cityHurtPlayer)
+      var took=res.blocked?oh:oh*res.dmgMul;
+      if(typeof CBZ.cityHurtPlayer==="function"){try{CBZ.cityHurtPlayer(took,og.position.x,og.position.z,"beaten in the cage",false,oa);}catch(e){}}
+      f.myHp-=res.blocked?took*0.3:took;
+    };
+    if(pa){
+      if(!f.box&&Math.random()<0.25)Vb.kick(oa,pa,{kind:Math.random()<0.5?"roundKick":"lowKick",onLand:hit}); // kicks are MMA-only
+      else Vb.strike(oa,pa,{kind:PUNCHES[(Math.random()*PUNCHES.length)|0],onLand:hit});
     }
-  }
-  f.pcd-=dt;
-  if(d<2.4&&f.pcd<=0){                                       // your work lands (forgiving)
-    f.pcd=0.85;
-    var dmg=10+Math.random()*5;
-    if(opp.blockT&&opp.blockT>0)dmg*=0.3;
-    else if(Math.random()<0.08+sk*0.15){opp.dodgeT=0.35;opp.dodgeDir=(Math.random()<0.5)?-1:1;dmg=0;}
-    if(dmg>0){f.oppHp-=dmg;opp.staggerT=0.3;}
   }
   anim(opp,mv,dt);
   if(f.oppHp<=0){
-    opp.koT=5; opp.fightStance=false;
+    if(Vb)Vb.knockdown(oa,{dir:f.koDir||null,ko:true,dur:5,power:0.8});
+    cageTargets.length=0;
     var war=f.t>30&&f.myHp<=24;                              // a genuine WAR, not a walkover
     board("WINNER BY KO","YOU","purse "+money(f.purse));
     note("You KO "+f.name+"! Purse +"+money(f.purse)+".",5,{urgent:true});

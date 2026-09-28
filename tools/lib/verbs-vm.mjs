@@ -75,7 +75,7 @@ export function loadVerbsVM(opts = {}) {
   CBZ.player = { pos: new THREE.Vector3(0, 0, -30), radius: 0.38, dead: false, hp: 100, speed: 0, vy: 0, grounded: true };
   CBZ.camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 500);
   CBZ.camera.position.set(0, 3, -8);
-  for (const f of ["src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js", "src/entities/poses.js", "src/entities/moves.js"]) run(f);
+  for (const f of ["src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js", "src/entities/poses.js", "src/systems/bodymass.js", "src/entities/moves.js"]) run(f);
   if (has("src/entities/moves_posture.js")) { try { run("src/entities/moves_posture.js"); } catch (e) { /* posture needs the city; the verbs do not */ } }
   // the player rig exists before physics.js destructures it
   CBZ.playerChar = CBZ.makeCharacter({ skin: 0xd6a57e, torso: 0x335577, legs: 0x222222, arms: 0x335577, shoes: 0x111111, hair: 0x221100 });
@@ -132,6 +132,7 @@ export function loadVerbsVM(opts = {}) {
     for (const a of actors) {
       if (a.dead) continue;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) continue;
+      if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(a) && (CBZ.npcs || []).concat(CBZ.guards || []).indexOf(a) >= 0) continue;   // npc.js / guards.js skip a held body
       CBZ.animChar(a.char, speeds.get(a) || 0, dt);
     }
     for (const u of updaters) {

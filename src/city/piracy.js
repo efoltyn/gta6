@@ -160,14 +160,8 @@
 
   const ORG = "pirates";
 
-  // ADOPTION IS DECLARED, NOT SNIFFED (predator.js's own rule). The boarding
-  // grab runs the shared wind->strike->hold->resolve seize with `nonLethal`,
-  // never a hand-rolled grapple, and this is the one guarded line that says so.
-  // The id is NOT in predator.js's LEGACY_SITES yet, so this cannot move
-  // predatorAudit() on its own — see the seam patch in the report, which is
-  // what turns adopted 9 into 10.
-  if (CBZ.predatorAdopt) CBZ.predatorAdopt("piracy:boarding-seize");
-  else (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("piracy:boarding-seize");
+  // (the boarding grab is a person's verb, CBZ.verbs.grab; the animal seize it
+  // used to borrow is predator.js's again)
 
   function on() { return C.PIRACY !== false; }
   function ransomOn() { return C.RANSOM_V1 !== false; }
@@ -1987,16 +1981,20 @@
         say(grabber, "Nothing here worth a call. Strip it.");
         return;
       }
-      // THE GRAB IS THE SHARED SEIZE, non-lethal — the same wind/strike/hold/
-      // resolve FSM the arrest tackle runs, whose worst outcome is "taken".
-      if (CBZ.predatorSeize && !cr.hold) {
+      // THE GRAB IS A MAN'S (CBZ.verbs.grab): both fists in the collar, a
+      // second of it on the deck, and then he is theirs. It not connecting
+      // (the mark backed off, the grabber was shot) is a boarding that failed.
+      const V = CBZ.verbs;
+      if (V && V.grab && !cr.hold) {
         const mark = victim || player();
-        const h = CBZ.predatorSeize(grabber, mark, {
-          nonLethal: true, style: "drag", hold: 2.6, escape: 0.5, thrash: 0.5,
-          cause: "taken off the deck",
-          onEnd: function (result) {
+        let had = false;
+        const h = V.grab(grabber, mark, {
+          far: true, holdFor: 1.6, then: "set",
+          onContact: function () { had = true; },
+          onEnd: function (S) {
             cr.hold = null;
-            if (result === "taken" || result === "killed") {
+            // a mark who fought his way out of the grip is not taken
+            if (had && !(S.result && S.result.outcome === "escaped")) {
               if (victim) {
                 const rec = take(victim, { by: cr.id, crew: cr, threat: grabber, limit: 300, vessel: tgt });
                 if (rec) { rec._onDeck = true; cr.hold = rec; cr.state = "withdraw"; return; }
@@ -2014,7 +2012,7 @@
         });
         cr.hold = h || null;
         if (!h) cr.state = "leave";
-      } else if (!CBZ.predatorSeize) {
+      } else if (!V) {
         // Degrade path: no seize FSM, the take still happens.
         if (victim) { const rec = take(victim, { by: cr.id, crew: cr, threat: grabber, limit: 300, vessel: tgt }); if (rec) { cr.hold = rec; cr.state = "withdraw"; return; } }
         cr.state = "leave";

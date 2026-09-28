@@ -336,15 +336,16 @@
     const fx = A ? A.pos.x : CBZ.player.pos.x + 1, fz = A ? A.pos.z : CBZ.player.pos.z;
     if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(m.dmg, fx, fz, (m.melee ? "beaten down by " : "shot by ") + who, !!m.head, A, !!m.nl);
     if (m.melee) {
-      // show their swing + a real chance the blow knocks you off your feet.
-      // Full-duration punch (0.001s left the remote attacker's arm frozen at
-      // the recovery frame — their swing was invisible): heavy blows read as
-      // a hook, lights as a jab, arms alternate so a flurry looks like one.
-      if (A && A.ch) {
-        A.ch.punchKind = m.heavy ? "hook" : "jab";
-        A.ch.punchArm = ((A.ch._netCombo = (A.ch._netCombo || 0) + 1) % 2) ? "r" : "l";
-        A.ch.punchDur = m.heavy ? 0.38 : 0.30;
-        A.ch.punchT = A.ch.punchDur;
+      // show their swing (CBZ.verbs.strike on their puppet's rig) and, on its
+      // impact beat, the blow on your body. The damage above is the sender's
+      // decision: nothing here resolves by contact.
+      const V = CBZ.verbs, pa = CBZ.city && CBZ.city.playerActor;
+      if (A && A.ch && V && V.strike && pa) {
+        const heavy = !!m.heavy, kind = heavy ? "hook" : ((A._netCombo = (A._netCombo || 0) + 1) % 2 ? "jab" : "cross");
+        V.strike(A, pa, { kind, heavy, lunge: false, onBeat: function () {
+          const dx = CBZ.player.pos.x - A.pos.x, dz = CBZ.player.pos.z - A.pos.z, l = Math.hypot(dx, dz) || 1;
+          V.react(pa, { zone: "jaw", kind, arm: kind === "jab" ? "l" : "r", dir: { x: dx / l, z: dz / l }, power: heavy ? 0.85 : 0.5 });
+        } });
       }
       if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && Math.random() < 0.3 && !CBZ.body.busy(CBZ.city.playerActor)) {
         CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
@@ -361,10 +362,13 @@
     } else {
       net.sendEv({ e: "hit", to: net.hostId, k: a.netKind, nid: a.nid, dmg: Math.round(dmg), melee: 1 });
     }
-    if (CBZ.body) {
-      try { CBZ.body.hit(a, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: heavy ? 5 : 3.5 }); } catch (e) {}
-      try { CBZ.body.flash(a); } catch (e) {}
+    // local juice so the blow reads NOW (their client owns the damage): the
+    // same reaction a landed strike plays on any body
+    if (CBZ.verbs && CBZ.verbs.react && a.pos) {
+      const dx = a.pos.x - CBZ.player.pos.x, dz = a.pos.z - CBZ.player.pos.z, l = Math.hypot(dx, dz) || 1;
+      CBZ.verbs.react(a, { zone: "jaw", kind: heavy ? "hook" : "jab", dir: { x: dx / l, z: dz / l }, power: heavy ? 0.85 : 0.5 });
     }
+    if (CBZ.body && CBZ.body.flash) { try { CBZ.body.flash(a); } catch (e) {} }
     if (CBZ.sfx) CBZ.sfx(heavy ? "punch2" : "punch");
     if (CBZ.doHitstop) CBZ.doHitstop(heavy ? 0.07 : 0.045);
     return true;

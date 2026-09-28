@@ -113,7 +113,6 @@
     if (!a || a.dead) return;
     a._broken = BROKEN_TIME;
     a._posture = a._postMax || postureMax(a);
-    a._blockT = 0;                               // guard's gone
     a.stun = Math.max(a.stun || 0, BROKEN_TIME); // generic stun flag (any reader)
     // freeze their offense for the whole break: peds.js gates every swing/shot on
     // attackCD, so holding it high keeps a guard-broken foe from retaliating while
@@ -226,6 +225,10 @@
     const cops = CBZ.cityCops, peds = CBZ.cityPeds;
     if (cops) for (let i = 0; i < cops.length; i++) { const c = cops[i]; if (c && !c.dead) out.push(c); }
     if (peds) for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (p && !p.dead && !p.vendor && !p.inCar) out.push(p); }
+    // bodies another system scores itself (the arena cage opponent): a landed
+    // blow is handed to its meleeHit(res, dmg) instead of the street's paths
+    const ex = CBZ.cityMeleeTargets;
+    if (ex) for (let i = 0; i < ex.length; i++) { const a = ex[i]; if (a && !a.dead) out.push(a); }
     return out;
   }
   // square up to where you are looking (the rig faces +Z at yaw 0; the camera
@@ -336,8 +339,11 @@
   function blockedCity(res, dmg, kind) {
     const t = res.target;
     if (!t || t.dead || g.mode !== "city") return;
-    t._blockT = Math.max(t._blockT || 0, 0.7);            // he is covering → punish it with a heavy
-    addPosture(t, dmg * 0.22 * weaponFeel().post);
+    if (t.meleeHit) t.meleeHit(res, dmg * res.dmgMul, "blocked");
+    else {
+      if (CBZ.verbs && CBZ.verbs.block) CBZ.verbs.block(t, 0.7);   // he is covering → punish it with a heavy
+      addPosture(t, dmg * 0.22 * weaponFeel().post);
+    }
     if (CBZ.sfx) CBZ.sfx("hit");
     addSelfPosture(10);
     if (Math.random() < 0.5) selfStagger(0.30);
@@ -368,6 +374,12 @@
   function landCity(res, dmg, tier, kind, extra) {
     const t = res.target;
     if (!t || t.dead || P.dead || g.mode !== "city") { res.reaction = "none"; return; }
+    if (t.meleeHit) {
+      t.meleeHit(res, dmg * res.dmgMul, tier);
+      if (CBZ.sfx) CBZ.sfx("punch");
+      if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(false, false);
+      return;
+    }
     /* THE SAME BLOW IS NOT THE SAME BLOW. `dmg` describes the swing; WHERE it
        landed (res.dmgMul: jaw 1.3, liver 1.25, head 1, body 0.8, legs 0.6)
        and WHO it landed on (systems/bodymass.js — adult on adult is 1.0)
@@ -380,8 +392,9 @@
     const feel = weaponFeel();
     const broken = (t._broken || 0) > 0;        // foe is guard-broken & wide open
     // punishing a covering enemy with a heavy = COUNTER (bonus dmg + a knockdown)
-    const counter = heavy && t._blockT > 0 && !broken;
-    if (counter) { dmg = Math.round(dmg * 1.6); t._blockT = 0; }
+    // (his guard is his rig's: ch.blockT, raised by CBZ.verbs.block)
+    const counter = heavy && !!(t.char && t.char.blockT > 0) && !broken;
+    if (counter) { dmg = Math.round(dmg * 1.6); t.char.blockT = 0; }
     // a broken foe eats EVERYTHING amplified — this is the payoff window
     if (broken) dmg = Math.round(dmg * 1.55);
     // --- POSTURE damage: how much this blow batters their guard. Capping it =
@@ -1206,9 +1219,6 @@
       pch.winded = pBrokenT > 0 ? 1 : Math.max(0, Math.min(1, 1 - stam() / 45));
     }
 
-    // bleed off enemy block flags
-    for (const c of CBZ.cityCops) if (c._blockT > 0) c._blockT -= dt;
-    for (const p of CBZ.cityPeds) if (p._blockT > 0) p._blockT -= dt;
   });
 
   // ---- input: LMB = light combo, RMB = heavy / hold-guard --------------

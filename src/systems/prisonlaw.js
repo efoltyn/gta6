@@ -194,8 +194,8 @@
       if (Math.hypot(nx - x, nz - z) > STAND_DOWN_R) continue;
       n.huntPlayer = 0;
       n._brokenUpT = 20;
-      n._blow = null;
-      if (n.char) { n.char.fightStance = false; n.char.punchT = 0; }
+      if (CBZ.verbs && CBZ.verbs.cancelStrike) CBZ.verbs.cancelStrike(n);
+      if (n.char) n.char.fightStance = false;
       if (n.target && typeof n.target.set === "function") {
         const ax = nx - x, az = nz - z, al = Math.hypot(ax, az) || 1;
         n.target.set(nx + ax / al * 5, 0, nz + az / al * 5);

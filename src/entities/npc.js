@@ -766,6 +766,6 @@
     frame++;
     const cam = CBZ.camera.position, cx = cam.x, cz = cam.z;
     const npcs = CBZ.npcs;
-    for (let i = 0; i < npcs.length; i++) updateNpc(npcs[i], dt, cx, cz);
+    for (let i = 0; i < npcs.length; i++) { if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(npcs[i])) continue; updateNpc(npcs[i], dt, cx, cz); }   // a body a verb holds is the verb's
   });
 })();

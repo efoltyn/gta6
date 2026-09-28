@@ -322,6 +322,10 @@ let stopRow = {};
 // ================================================================ THE FIGHTER
 function bout(seed) {
   const { A, B } = pair(1.6);
+  // a rig's gait/breath phase is Math.random (character.js): pin it so the
+  // bout is a function of the seed alone (a man dropped by a liver shot now
+  // gets up and fights on, and the rest of the bout must replay too)
+  for (const a of [A, B]) { a.char.phase = 0; a.char.breath = 0; }
   const FA = V.fighter(A, { seed, skill: 0.7, aggression: 0.7 }), FB = V.fighter(B, { seed: seed + 1, skill: 0.4, aggression: 0.6 });
   const log = [];
   let maxWin = 0, guardBetween = 0, combosEnded = 0, blocks = 0, slips = 0, steps = 0;

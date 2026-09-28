@@ -221,6 +221,8 @@
     if (!isEnemy(ape, o)) return false;
     if (!o.group || !o.group.parent) return false;
     if (o._apeHeld || o._apeFlying) return false;
+    // a man somebody already has his hands on (CBZ.verbs) is not free to take
+    if (CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(o)) return false;
     if (o.isPlayer || (CBZ.player && o.pos === CBZ.player.pos)) return false;  // the player has no rig to swing
     var os = scaleOf(o) * ((o.rad || 0.45) / 0.45);
     return os <= scaleOf(ape) * 1.35;

@@ -1058,60 +1058,49 @@
   // clean hits drop a man; a melee kill humiliates him down a rung. The fists
   // rung punches through this path too, so the final rung is a weapon, not a
   // prison scuffle (combat.js's jail punch took six swings to put a bot down).
-  let meleeCD = 0, meleeCombo = 0, meleePending = null;
-  // starts the swing (body + viewmodel); the blow LANDS ~0.14 s later, on the
-  // animation's drive frame, against whoever is in front of you THEN
+  // The swing is CBZ.verbs.strike (systems/verbs_strike.js): the blow lands
+  // on the frame your fist reaches a bot's jaw, head, ribs or legs, whiffs if
+  // he stepped out of it, and never lands through a wall.
+  let meleeCD = 0, meleeCombo = 0;
+  function meleeCandidates(out) {
+    for (const b of gg.bots) if (!b.dead) out.push(b);
+    return out;
+  }
   function playerMelee(fromClick) {
     if (g.mode !== "gungame" || g.state !== "playing" || !gg.match || gg.match.over) return false;
     if (CBZ.player.dead || meleeCD > 0) return false;
+    const V = CBZ.verbs;
+    if (!V || !V.strike) return false;
     const fists = rungAt(gg.playerRung).melee;
+    const kind = fists ? ((meleeCombo + 1) % 3 === 0 ? "hook" : (meleeCombo + 1) % 2 ? "jab" : "cross") : "hook";
+    // square up to where you are looking; the swing finds whoever is there
+    const ch = CBZ.playerChar;
+    if (ch && CBZ.cam) ch.group.rotation.y = Math.atan2(-Math.sin(CBZ.cam.yaw), -Math.cos(CBZ.cam.yaw));
+    const S = V.strike(V.playerActor ? V.playerActor() : PLAYER_TGT, null, {
+      kind, heavy: !fists, candidates: meleeCandidates,
+      onLand: function (res) { landMelee(res, fists); },
+      onWhiff: function () { if (CBZ.sfx) CBZ.sfx("step"); },
+    });
+    if (!S) return false;
     meleeCD = fists ? 0.42 : 0.6;
     gg.spawnProtectT = 0;
     meleeCombo++;
-    const ch = CBZ.playerChar;
-    if (ch) {
-      ch.punchArm = fists ? (meleeCombo % 2 ? "r" : "l") : "l";
-      ch.punchKind = fists ? (meleeCombo % 3 === 0 ? "hook" : meleeCombo % 2 ? "jab" : "cross") : "hook";
-      ch.punchDur = fists ? 0.34 : 0.4;
-      ch.punchT = ch.punchDur;
-    }
     // the fists viewmodel swings itself when fpsmode's click path gets ok:true;
     // F / touch have to ask for it
     if (fists && !fromClick && CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
-    meleePending = { t: 0.14, fists: fists };
     return true;
   }
-  function landMelee(fists) {
-    const P = CBZ.player.pos, yaw = CBZ.cam ? CBZ.cam.yaw : 0;
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bd = 2.5;
-    for (const b of gg.bots) {
-      if (b.dead) continue;
-      const dx = b.pos.x - P.x, dz = b.pos.z - P.z, d = Math.hypot(dx, dz);
-      if (d > bd || d < 0.01) continue;
-      if ((dx * fx + dz * fz) / d < 0.5) continue;
-      if (Math.abs((b.pos.y || 0) - (P.y || 0)) > 1.4) continue;
-      best = b; bd = d;
-    }
-    if (!best) { if (CBZ.sfx) CBZ.sfx("step"); return; }
-    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(fists ? "hook" : "bash", true);
+  // two clean hits drop a man; a melee kill humiliates him down a rung
+  function landMelee(res, fists) {
+    const best = res.target;
+    if (!best || best.dead || gg.bots.indexOf(best) < 0) { res.reaction = "none"; return; }
     if (CBZ.sfx) CBZ.sfx("punch");
-    if (CBZ.body) CBZ.body.hit(best, { fromX: P.x, fromZ: P.z, force: 5.5 });
-    if (CBZ.doHitstop) CBZ.doHitstop(0.06);
-    if (CBZ.shake) CBZ.shake(0.12);
     best.hurtBy = PLAYER_TGT; best.hurtT = 0;
-    // two clean hits drop a man; a melee kill humiliates him down a rung
-    best.hp -= fists ? 52 : 58; best._hpSeen = best.hp;
-    if (best.hp <= 0) botDeath(best, "player", "melee");
+    best.hp -= (fists ? 52 : 58) * Math.min(1, res.dmgMul + 0.2); best._hpSeen = best.hp;
+    if (best.hp <= 0) { res.reaction = "dead"; botDeath(best, "player", "melee"); }
   }
   function meleeTick(dt) {
     meleeCD = Math.max(0, meleeCD - dt);
-    if (!meleePending) return;
-    meleePending.t -= dt;
-    if (meleePending.t > 0) return;
-    const f = meleePending.fists;
-    meleePending = null;
-    if (!CBZ.player.dead) landMelee(f);
   }
   // combat.js's jail punch took six swings to put a bot down and knew nothing
   // of the ladder: in a match every punch (fists rung click, third-person
@@ -1371,11 +1360,21 @@
     if ((r.melee || (dh < 1.7 && rand() < 0.5)) && dh < 2.0 && Math.abs((foe.pos.y || 0) - (b.pos.y || 0)) < 1.5) {
       if (b.meleeCD > 0) return;
       b.meleeCD = r.melee ? 0.62 + rand() * 0.25 : 0.9;
-      if (b.char) { b.char.punchT = 0.4; b.char.punchKind = rand() < 0.5 ? "jab" : "hook"; }
-      if (CBZ.body && !foe.isPlayer) CBZ.body.hit(foe, { fromX: b.pos.x, fromZ: b.pos.z, force: 5 });
-      if (CBZ.sfx) CBZ.sfx("punch");
-      const hitP = 0.55 + b.skill * 0.35;
-      if (rand() < hitP) hurt(foe, (r.melee ? 34 + rand() * 10 : 45) * (foe.isPlayer ? 1 : 0.7), { by: b, cause: "melee" });
+      // a real swing on his rig (CBZ.verbs.strike): it costs what it costs
+      // only if the fist (or the gun butt) actually reaches the man
+      const V = CBZ.verbs;
+      if (V && V.strike) {
+        const dmg = (r.melee ? 34 + rand() * 10 : 45) * (foe.isPlayer ? 1 : 0.7);
+        V.strike(b, foe.isPlayer && V.playerActor ? V.playerActor() : foe, {
+          kind: r.melee ? (rand() < 0.5 ? "jab" : "hook") : "hook", heavy: !r.melee,
+          onLand: function (res) {
+            if (b.dead || foe.dead) { res.reaction = "none"; return; }
+            if (CBZ.sfx) CBZ.sfx("punch");
+            hurt(foe, dmg * Math.min(1, res.dmgMul + 0.2), { by: b, cause: "melee" });
+            if (foe.dead || (foe.isPlayer && CBZ.player.dead)) res.reaction = "dead";
+          },
+        });
+      }
       return;
     }
     if (r.melee) return;

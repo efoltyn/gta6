@@ -353,14 +353,20 @@
     if (playerDist(t) > ROB_RANGE) return "";
     if (!(CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope"))) return "norope";
     if (!CBZ.econ.takeItem || !CBZ.econ.takeItem("Bedsheet Rope")) return "norope";
-    t.tied = true;
-    t.ko = Math.max(t.ko || 0, 9999);          // down for the run
+    t.tied = true;                              // the rule lands now; the hands take a second
     t.radioT = null;                            // the call dies with his hands
     t.hunt = 0; t.alert = 0; t.investigate = null;
     if (t.intimidMode) {
       if (t.kind === "guard" || t.kind === "warden") clearGuardHoldup(t);
       else endIntimid(t);
     }
+    // YOUR HANDS DO IT (CBZ.verbs.cuff): turn him, wrists behind his back, the
+    // sheet knotted ON them; a man already down is tied where he lies. Then
+    // he is down for the run, tied.
+    const V = CBZ.verbs;
+    const done = function () { t.ko = Math.max(t.ko || 0, 9999); };
+    const S = V && V.cuff && !down ? V.cuff(V.playerActor(), t, { far: true, onEnd: done }) : null;
+    if (!S) { if (V && V.setCuffs) V.setCuffs(t, true); done(); }
     CBZ.sfx && CBZ.sfx("switch", { volume: 0.4, pitch: 0.85 });
     return "tied";
   };

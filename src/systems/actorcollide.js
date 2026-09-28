@@ -43,7 +43,8 @@
   const TRAV_SPEED = 2.6;
   const TRAV_PROBE_CD = 0.12;  // seconds between probes for one actor
 
-  function standing(a) { return !a.dead && !(a.ko > 0) && !a.escaped; }
+  // (two people with their hands on each other are not pushed apart: CBZ.verbs places them)
+  function standing(a) { return !a.dead && !(a.ko > 0) && !a.escaped && !(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(a)); }
   function posOf(a) { return a._p ? a.pos : a.group.position; }
   function radOf(a) { return a._p ? a.r : R; }
 
@@ -178,7 +179,7 @@
       if (vaultOn && traverse(n, dt)) continue;
       list.push(n);
     }
-    if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
+    if (!CBZ.player.dead && !(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(CBZ.player))) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
 
     // Shared human-contact rules block ordinary movement. A prison knockdown
     // requires an explicit combat action, never merely sprinting into someone.

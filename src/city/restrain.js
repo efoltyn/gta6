@@ -287,7 +287,9 @@
     // THE CLINCH IS A COLLAR GRIP: both fists in his shirt, his hands on your
     // wrists (CBZ.verbs.grab). No grip, no clinch.
     const v = VB();
-    if (!v || !pa() || !v.grab(pa(), ped, { far: true })) return false;
+    // he FIGHTS the grip (CBZ.verbs struggle), as well as your read of each
+    // other says he can: a better man than you tears loose sooner
+    if (!v || !pa() || !v.grab(pa(), ped, { far: true, struggle: clinchFight(ped) })) return false;
     ped.restraint = { state: "grappled", by: "player", t: 0, vehicle: null };
     track(ped);
     ped.controlled = true; ped.rage = null; ped.state = "walk"; ped.speed = 0;
@@ -299,11 +301,11 @@
     I.refresh();
     return true;
   }
-  // how long they last in your clinch: your read vs theirs (sizeup levels)
-  function breakTime(ped) {
+  // how well he fights your clinch, 0..1: your read vs theirs (sizeup levels)
+  function clinchFight(ped) {
     const mine = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 10;
     const theirs = CBZ.cityLevel ? CBZ.cityLevel(ped) : 10;
-    return Math.max(1.4, Math.min(7, 2.6 + (mine - theirs) * 0.09));
+    return Math.max(0.1, Math.min(1, 0.45 + (theirs - mine) * 0.03));
   }
   function breakFree(ped) {
     letGo(ped, "drop");
@@ -458,7 +460,6 @@
         ped.attackCD = Math.max(ped.attackCD || 0, 0.5);   // no swings from inside the clinch
         ped.pause = Math.max(ped.pause || 0, 0.5);
         if (ped.char) ped.char.guardBroke = r.t >= WEAR_T ? 1 : 0;   // visibly wearing down
-        if (r.t >= breakTime(ped)) { breakFree(ped); continue; }
         continue;
       }
 

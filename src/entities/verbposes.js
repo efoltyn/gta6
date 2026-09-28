@@ -637,6 +637,15 @@
     if (!fn) return 0;
     const s = state(ch);
     const mask = fn(ch, s.tgt, p);
+    // THE FIGHT INSIDE A HOLD (verbs.js struggle): the grabber's brace clamps
+    // down (hips lower, weight back); the held man wrenches his shoulders and
+    // twists against it. Additive on whatever the pose is.
+    if (p.strain > 0) { s.tgt[DROP] += 0.035 * p.strain; s.tgt[B_RX] -= 0.07 * p.strain; }
+    if (p.writhe > 0) {
+      const w = p.writhe, ph = Math.sin((p.t || 0) * 23);
+      s.tgt[B_RY] += 0.28 * w * ph; s.tgt[B_RZ] += 0.10 * w * ph; s.tgt[B_RX] -= 0.12 * w;
+      s.tgt[N_RY] -= 0.30 * w * ph;
+    }
     s.wt[0] = mask & G_BODY ? 1 : 0;
     s.wt[1] = mask & G_ARML ? 1 : 0;
     s.wt[2] = mask & G_ARMR ? 1 : 0;

@@ -21,14 +21,15 @@
        open north plaza so arena_fights' ring/cage/pit keep running.
      - PEDS: every fighter/ref/judge/bookie/cutman is a REAL city ped via
        ctx.npc (brain, wardrobe, gunpoint hands-up, cityKillPed death).
-     - POSES/ANIMS: punches are the ENGINE's shared fight layer in
-       character.js animChar — we only SET the flags it already reads
-       (ch.fightStance / punchT+punchKind+punchArm / blockT / dodgeT /
-       staggerT / koPose). Pinned peds get animChar(ch,0,dt) every frame
-       (peds.js move()), so setting flags renders wind-up/extension/
-       recoil/guard/slip/crumple with zero new animation code. The pose
-       registry (poses.js) still OUTRANKS us where it must: a gun drawn on
-       a fighter throws his hands up (animChar precedence) — for free.
+     - POSES/ANIMS: every visible blow, guard, slip, knockdown and get-up
+       is the engine's ONE library of physical fighting, CBZ.verbs
+       (systems/verbs_strike.js + entities/meleeposes.js): the sim decides
+       what happened and when, and the verbs play it on the fighters' rigs
+       (strike timed so the fist arrives on the sim's impact beat, the
+       reaction by where it landed, the knockdown as a real fall held
+       until the sim's get-up). The pose registry (poses.js) still
+       OUTRANKS us where it must: a gun drawn on a fighter throws his
+       hands up (animChar precedence), for free.
      - COMBAT MATH: the pure state machine salvaged from games/boxing.html
        (RULES/PUNCH, stamina, openings/counters, 10-point-must scoring,
        knockdown/get-up). No THREE, no DOM — the player bout, the AI
@@ -377,54 +378,88 @@
   const CANVAS_Y = DECK_Y + 0.92; // fighters' feet on the ring canvas (world)
 
   function chOf(h) { return h && h.ped && h.ped.char ? h.ped.char : null; }
-  function clearFightFlags(ch) {
-    if (!ch) return;
-    ch.punchT = 0; ch.blockT = 0; ch.dodgeT = 0; ch.staggerT = 0; ch.kickT = 0;
-    ch.koT = 0; ch.koPose = false; ch.fightStance = false;
+  const VB = () => (CBZ.verbs && CBZ.verbs.strike ? CBZ.verbs : null);
+  function fighterOf(h) { return h && h.ped && h.ped.char ? h.ped : null; }
+  function fallen(ch) { return !!(ch && ch.fall && ch.fall.on); }
+  // back to a clean start: no swing in flight, on his feet, guard down
+  function resetFighter(h) {
+    const a = fighterOf(h), Vb = VB();
+    if (!a || !Vb) return;
+    Vb.cancelStrike(a);
+    if (fallen(a.char)) Vb.getUp(a);
+    a.ko = 0;
+    Vb.guard(a, false);
   }
-  function throwPunch(h, type) {
-    const ch = chOf(h); if (!ch) return;
-    const rear = (type === "cross" || type === "hook" || type === "body");
-    ch.punchArm = rear ? "r" : "l";
-    ch.punchKind = (type === "hook" || type === "body") ? "hook" : null;   // null => straight jab/cross
-    ch.punchDur = (type === "jab") ? 0.30 : (type === "hook" || type === "body") ? 0.5 : 0.4;
-    ch.punchT = ch.punchDur;
+  const _bxDir = { x: 0, z: 1 };
+  function dirFrom(att, tgt) {
+    const dx = tgt.pos.x - att.pos.x, dz = tgt.pos.z - att.pos.z, l = Math.hypot(dx, dz) || 1;
+    _bxDir.x = dx / l; _bxDir.z = dz / l;
+    return _bxDir;
+  }
+  const BEAT_NOW = function () {};    // the sim resolved it: the fist only has to arrive
+  // the sim threw: the rig throws the same punch, timed so the fist is out on
+  // the sim's impact beat (wu), never resolved by contact (the sim owns that)
+  function throwPunch(h, opp, type, wu) {
+    const a = fighterOf(h), o = fighterOf(opp), Vb = VB(), MP = CBZ.meleePoses;
+    if (!a || !Vb) return;
+    const speed = MP && wu > 0 ? (MP.durOf(type) * MP.BEAT.impact) / wu : 1;
+    Vb.strike(a, o, { kind: type, lunge: false, speed, onBeat: BEAT_NOW });
   }
   // drive one fighter ped's WORLD transform from its sim side (peds are world-space,
   // parented to the arena root — origin is the ring centre).
   function placeFighter(h, side, opp) {
     const ch = chOf(h); if (!ch || !h.ped) return;
     const o = V.origin;
-    const down = (ch.koPose || ch.koT > 0);
+    const down = fallen(ch);
     const zoff = Math.sin(LIVE.bout.time * 0.7 + (side.dir < 0 ? 0 : Math.PI)) * 0.45; // gentle circling
     const wx = o.x + side.x * XS, wz = o.z + zoff;
     h.ped.pos.x = wx; h.ped.pos.z = wz;
     h.ped.group.position.x = wx; h.ped.group.position.z = wz;
-    if (!down) h.ped.group.position.y = CANVAS_Y;    // KO layer owns Y while down (its crumple sink)
+    h.ped.group.position.y = CANVAS_Y;               // a fall is in the rig: the feet stay on the canvas
     // face the opponent
     const ox = o.x + opp.x * XS, oz = o.z + Math.sin(LIVE.bout.time * 0.7 + (opp.dir < 0 ? 0 : Math.PI)) * 0.45;
     const face = Math.atan2(ox - wx, oz - wz);
     h.ped.group.rotation.y = face;
     if (h.ped.staffPost) h.ped.staffPost.face = face;
-    ch.fightStance = !down;                          // bladed hands-up idle (shared layer) unless down
+    if (ch.fightStance !== !down && VB()) VB().guard(h.ped, !down);   // bladed hands-up unless down
+    if (side.act === "block" && !down && VB()) VB().block(h.ped, 0.12);   // the sim's cover is his forearms up
   }
   // map fresh sim events -> ped rigs + the HUD feed
   function pumpEvents(bout) {
     const A = V.fA, B = V.fB;
     const byDir = (d) => (d < 0 ? A : B);
     const foe = (d) => (d < 0 ? B : A);
+    const Vb = VB();
     while (bout.evI < bout.events.length) {
       const e = bout.events[bout.evI++];
       const d = e.d;
       switch (e.t) {
-        case "throw": throwPunch(byDir(d.s), d.type); break;
-        case "land": { const ch = chOf(foe(d.s)); if (ch) { ch.staggerT = d.counter ? 0.5 : 0.35; ch.staggerDur = 0.55; } break; }
-        case "blocked": { const ch = chOf(foe(d.s)); if (ch) { ch.blockT = 0.45; ch.blockHitT = 0.15; } break; }
-        case "slip": { const ch = chOf(foe(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = nextRand() < 0.5 ? -1 : 1; } break; }
-        case "slipmove": { const ch = chOf(byDir(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = d.dir; } break; }
-        case "knockdown": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = true; ch.koT = 0.7; ch.koDur = 0.7; ch.fightStance = false; }
-          break; }
-        case "getup": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = false; ch.koT = 0; } break; }
+        case "throw": {
+          const s = d.s < 0 ? bout.a : bout.b, P = PUNCH[d.type];
+          if (Vb && P) throwPunch(byDir(d.s), foe(d.s), d.type, P.wu * windupMult(s.st / 100) / (s.def.spd || 1));
+          break;
+        }
+        case "land": {
+          // the head snaps along the punch, a body shot folds him, a counter
+          // or a heavy one puts him on a step back; both rigs stop together
+          const a = fighterOf(byDir(d.s)), t = fighterOf(foe(d.s));
+          if (Vb && a && t) {
+            const power = Math.min(1, (d.dmg || 4) / 10 + (d.counter ? 0.3 : 0));
+            Vb.react(t, { zone: d.type === "body" ? "body" : "jaw", kind: d.type, dir: dirFrom(a, t), power });
+            Vb.hitstop(a, t, 0.05 + 0.05 * power);
+          }
+          break;
+        }
+        case "blocked": { const t = fighterOf(foe(d.s)); if (Vb && t) Vb.block(t, 0.45); break; }
+        case "slip": { const t = fighterOf(foe(d.s)); if (Vb && t) Vb.slip(t, nextRand() < 0.5 ? -1 : 1, "slip"); break; }
+        case "slipmove": { const a = fighterOf(byDir(d.s)); if (Vb && a) Vb.slip(a, d.dir, "slip"); break; }
+        case "knockdown": {
+          // down in his own rig, held there until the sim says he beat the count
+          const t = fighterOf(byDir(d.s)), a = fighterOf(foe(d.s));
+          if (Vb && t) Vb.knockdown(t, { dir: a ? dirFrom(a, t) : null, ko: true, dur: 60 });
+          break;
+        }
+        case "getup": { const t = fighterOf(byDir(d.s)); if (Vb && t) Vb.getUp(t); break; }
         case "count": if (near && V && V.ref && V.ref.say) V.ref.say(d.n + "!", 1.6); break;   // the ref counts over his own head
         case "bell": if (near) sayBy(V.ref, "Round " + d.n + ". Fight!", 1.8); break;
         case "bellEnd": if (near) sayBy(V.ref, "Break! Corners.", 1.6); break;
@@ -459,7 +494,7 @@
     openFighterHUD();
   }
   function resetFighterRigs() {
-    [V.fA, V.fB].forEach((h) => { const ch = chOf(h); if (ch) { clearFightFlags(ch); ch.fightStance = true; } });
+    [V.fA, V.fB].forEach((h) => { resetFighter(h); const a = fighterOf(h); if (a && VB()) VB().guard(a, true); });
   }
   function endOfBout(bout) {
     if (!LIVE || LIVE.done) return;
@@ -717,7 +752,7 @@
     h.ped.group.position.x = h.ped.pos.x; h.ped.group.position.z = h.ped.pos.z; h.ped.group.position.y = CANVAS_Y;
     const cx = o.x, cz = o.z;
     h.ped.group.rotation.y = Math.atan2(cx - h.ped.pos.x, cz - h.ped.pos.z);
-    if (ch) ch.fightStance = false;
+    if (ch && ch.fightStance && VB()) VB().guard(h.ped, false);
   }
 
   // player input: apply the last-queued action to side A (jab/cross/hook/body/block/slip)
