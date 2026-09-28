@@ -1,304 +1,430 @@
 /* ============================================================
-   systems/facial.js — micro facial animation for EVERY rig.
+   systems/facial.js — EVERY HUMAN FACE ALIVE, AND CHEAP.
 
-   Brings the blocky faces to life with cheap, layered detail:
-     • Blinks          — squash face.eyeL/R.scale.y to ~0.1 for a
-                          few frames at random intervals (desynced).
-     • Eye darts       — the IRIS (face.irisL/R) slides inside the
-                          still eye white, flicking to a new spot now
-                          and then, eased (whole-eye offset on a rig
-                          built without irises).
-     • Talking         — when an actor is socializing (npc.aiState===
-                          "socialize") or fighting, the mouth opens /
-                          closes (scale.y + a small position.y dip) on
-                          a fast wobble so they look like they're
-                          yapping at each other.
-     • Head tracking   — when the player is within ~6 units AND
-                          roughly in front of the actor's facing, the
-                          neck gently yaws/pitches to glance at the
-                          player. Eased; tiny angles only.
+   The face itself (sockets, eyeballs, lids, lashes, lips, teeth, the far
+   eye line) is built by entities/character.js and posed ONLY through
+   CBZ.human.facePose(rig, pose) / CBZ.human.faceLod(rig, near). This file
+   decides WHAT the face does:
 
-   Everything is additive on top of what entities/character.js's
-   animChar() already wrote this frame, so we run LATE (order 88) and
-   carefully remove last frame's contribution before re-reading the
-   animChar base for neck.rotation.x — otherwise our offset would feed
-   back into animChar's damp() and drift. (animChar runs via onUpdate
-   only while playing; on menus it never touches the neck, but our
-   back-out/re-add is self-consistent there too — we only ever undo and
-   re-apply OUR OWN offset, so there is no drift in any state.)
+     • TIER — every rig makeCharacter builds registers here
+       (CBZ.faceRegister). Within ~16 m of the camera a face is NEAR (the
+       socketed head, real eyes, animated every frame); past ~19 m it drops
+       to the FAR tier (light skull, a flat eye line, face at rest) and gets
+       NO per-frame work — its tier is re-checked every 4th frame, a
+       distance compare, nothing else.
+     • BLINKS at human intervals (~every 2.5-6 s; quicker while talking,
+       rarer when staring in fear or anger), a fast close and a slower open,
+       the occasional double blink, and a blink on a big gaze shift.
+     • GAZE — the eyeballs turn to what the person is looking at: the man
+       they are fighting, what they are running from, whoever is talking
+       near them (over-head speech lines, systems/speech.js), the player when
+       he walks up in front of them, else idle glances. Eyes lead, the head
+       follows (an additive neck offset, backed out every frame so it never
+       feeds animChar's damp), small micro-saccades keep a stare alive, the
+       lids follow the eye up and down.
+     • EXPRESSION — a mood read off the actor and the rig:
+         dead / knocked out   eyes shut, jaw slack
+         asleep               eyes shut, mouth closed
+         hit / falling        a grimace: eyes squeezed, teeth clenched, brows down
+         afraid / fleeing     eyes wide, brows up, lips pulled back, mouth open
+         fighting / hunting   a squint, brows down, lips pressed (a snarl when
+                              throwing a punch or shouting)
+         friendly / chatting  a smile that reaches the eyes
+     • MOUTH — shut by default. It opens in time with the words of the
+       person's live speech line (vowels open, m/b/p close, pauses on
+       punctuation); a socialising pair with no line on screen murmurs in
+       bursts.
 
-   CHEAP-FOR-PHONES: we round-robin — only a handful of actors get a
-   full update each frame; the rest just hold their current eased
-   state. Blinks/darts are driven off CBZ.now so a skipped frame never
-   freezes mid-blink. No per-frame allocation in the hot loop.
+   CBZ.faceMood(rig, mood, k, ms) lets a system force a mood for a while
+   (reactions.js: the terrified stare at gunpoint).
 
-   Reset-safe: facial state lives on the rig as ._fa and is purely
-   cosmetic + self-correcting (time-driven blinks, eased offsets that
-   converge), so reusing rigs across runs needs no explicit reset. The
-   round-robin cursor is bounded and re-clamped every frame.
+   Runs LATE (88) so animChar has posed the neck this frame. No per-frame
+   allocation in the hot loop.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ) return;
+  if (!CBZ || typeof THREE === "undefined") return;
 
-  // resting local positions: read per rig from ch.faceRest (character.js);
-  // these are the fallback for a rig that predates it.
-  const EYE_X = 0.14;       // rest |x| of each eye
-  const EYE_Y = 0.34;       // rest y of each eye
-  const MOUTH_Y = 0.16;     // rest y of the mouth
-  const TRACK_DIST = 8;     // start glancing at the player within this ("noticed you" range)
-  const TRACK_DIST2 = TRACK_DIST * TRACK_DIST;
-  const NEAR_GLANCE2 = 12 * 12;   // within this, recompute the glance EVERY frame (responsive)
-  const MAX_PER_FRAME = 4;  // round-robin budget (rest hold their ease)
+  const NEAR_IN2 = 16 * 16, NEAR_OUT2 = 19 * 19;   // tier hysteresis (m², camera to body)
+  const FAR_EVERY = 4;                              // far rigs: tier check every Nth frame
+  const TRACK_DIST = 8;                             // the player is "noticed" inside this
+  const SPEAK_RATE = 14;                            // characters per second of a spoken line
 
-  // frame-rate-independent approach toward a target (per-second rate)
-  function damp(cur, target, rate, dt) {
-    return cur + (target - cur) * (1 - Math.exp(-rate * dt));
+  const rigs = [];
+  let frame = 0;
+
+  function damp(cur, target, rate, dt) { return cur + (target - cur) * (1 - Math.exp(-rate * dt)); }
+  const HU = () => CBZ.human;
+
+  // ---- registry -------------------------------------------------------------
+  function register(rig) {
+    if (!rig || rig._faceReg || !rig.faceRest || !rig.faceRest.v2) return;
+    rig._faceReg = true;
+    rig._faceOrphan = 0;
+    rigs.push(rig);
   }
-  // shortest-arc angle lerp, falls back to a local copy if the engine's
-  // helper isn't present yet.
-  const lerpAngle = CBZ.lerpAngle || function (a, b, t) {
-    let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
-    if (d < -Math.PI) d += Math.PI * 2;
-    return a + d * t;
+  CBZ.faceRegister = register;
+  // rigs built before this file loaded, and the actor behind each rig
+  function sweepActors() {
+    const lists = [CBZ.guards, CBZ.npcs, CBZ.cityPeds, CBZ.cityCops, CBZ.bots];
+    for (let l = 0; l < lists.length; l++) {
+      const L = lists[l];
+      if (!L) continue;
+      for (let i = 0; i < L.length; i++) {
+        const a = L[i], ch = a && a.char;
+        if (!ch || !ch.faceRest) continue;
+        if (ch._faceActor !== a) ch._faceActor = a;
+        if (!ch._faceReg) register(ch);
+      }
+    }
+    const pc = CBZ.playerChar;
+    if (pc && pc.faceRest) { pc._faceActor = CBZ.player || null; pc._facePlayer = true; if (!pc._faceReg) register(pc); }
+  }
+
+  CBZ.faceMood = function (rig, mood, k, ms) {
+    if (!rig) return false;
+    const o = rig._faceOv || (rig._faceOv = { mood: "n", k: 1, until: 0 });
+    o.mood = mood; o.k = k == null ? 1 : k; o.until = (CBZ.now || 0) + (ms || 250);
+    return true;
   };
 
-  // is an actor down / gone? (skip facial work for these — they lie down)
-  function downed(a) {
-    return !a || a.dead || (a.ko > 0) || a.escaped;
+  // ---- the mood ---------------------------------------------------------------
+  function moodOf(rig, a, now) {
+    const ov = rig._faceOv;
+    if (ov && now < ov.until) return ov.mood;
+    if (a) {
+      if (a.dead || a.health === 0) return "dead";
+      if (a.ko > 0 || a.knockedOut || a.ragdoll === true || a.unconscious) return "out";
+      if (a.asleep || a._propLie || a.sleeping) return "sleep";
+    }
+    if ((rig.fall && rig.fall.on) || (rig.hitReact && rig.hitReact.on)) return "hurt";
+    if (a) {
+      if (a.state === "flee" || a.aiState === "flee" || a.state === "surrender" || a.mood === "flee" ||
+          a.panic > 0 || a.fear > 4 || a.fleeT > 0 || a.cowering) return "fear";
+      if (a.state === "fight" || a.aiState === "fight" || a.aiState === "attack" || a.state === "confront" ||
+          a.mood === "hunt" || a.rage || a.hunt > 0 || a.huntPlayer > 0) return "angry";
+    }
+    if (rig.punchT > 0 || rig.kickT > 0) return "angry";
+    if (a && (a.aiState === "socialize" || a.state === "chat" || a.friendly === true)) return "smile";
+    return "n";
+  }
+  // per mood: lidU (+ squint / - wide), lidL (+ raise), closed 0..1, brow key,
+  // browY, mouth shape, resting lip gap, blink interval scale, can it look?
+  const MOODS = {
+    n:     { lidU: 0,     lidL: 0,     closed: 0, brow: "n", browY: 0,      mouth: "n",       open: 0,     blink: 1.0, look: true },
+    smile: { lidU: 0.04,  lidL: 0.10,  closed: 0, brow: "n", browY: 0.003,  mouth: "smile",   open: 0,     blink: 1.0, look: true },
+    angry: { lidU: 0.17,  lidL: 0.13,  closed: 0, brow: "a", browY: -0.010, mouth: "n",       open: 0,     blink: 1.6, look: true },
+    fear:  { lidU: -0.22, lidL: -0.04, closed: 0, brow: "f", browY: 0.013,  mouth: "fear",    open: 0.012, blink: 2.0, look: true },
+    hurt:  { lidU: 0.30,  lidL: 0.20,  closed: 0.7, brow: "a", browY: -0.009, mouth: "grimace", open: 0.007, blink: 9, look: false },
+    dead:  { lidU: 0,     lidL: 0,     closed: 1, brow: "n", browY: -0.002, mouth: "n",       open: 0.014, blink: 99, look: false },
+    out:   { lidU: 0,     lidL: 0,     closed: 1, brow: "n", browY: -0.003, mouth: "n",       open: 0.022, blink: 99, look: false },
+    sleep: { lidU: 0,     lidL: 0,     closed: 1, brow: "n", browY: 0,      mouth: "n",       open: 0.003, blink: 99, look: false },
+  };
+
+  // ---- where things are ----------------------------------------------------------
+  const _m = new THREE.Matrix4(), _v = new THREE.Vector3();
+  // a world point for a look target (an actor, a rig, a point), written into out
+  function headPoint(x, out) {
+    if (!x) return false;
+    // the player seen from his own eyes: look into the lens (eye contact)
+    if (x === CBZ.player && CBZ.camera && x.pos) {
+      const e = CBZ.camera.matrixWorld.elements, dx = e[12] - x.pos.x, dz = e[14] - x.pos.z;
+      if (dx * dx + dz * dz < 0.8) { out.set(e[12], e[13], e[14]); return true; }
+    }
+    const ch = x.char || (x.faceRest ? x : null) || (x === CBZ.player ? CBZ.playerChar : null);
+    const h = ch && ch.head;
+    if (h && h.matrixWorld) {
+      const e = h.matrixWorld.elements;
+      if (e[15] === 1 && (e[12] !== 0 || e[13] !== 0 || e[14] !== 0)) { out.set(e[12], e[13], e[14]); return true; }
+    }
+    const p = (x.group && x.group.position) || x.pos || (x.isVector3 ? x : null);
+    if (!p) return false;
+    out.set(p.x, (p.y || 0) + 1.6, p.z);
+    return true;
+  }
+  function rigPos(rig) { const e = rig.group.matrixWorld.elements; _v.set(e[12], e[13], e[14]); return _v; }
+
+  // ---- speech ---------------------------------------------------------------------
+  // how open the mouth is on the character being spoken right now (0..1), or -1
+  // when the line has been said
+  function speechOpen(say, now) {
+    const t = (now - say.t0) / 1000;
+    if (t < 0) return 0;
+    const f = t * (say.rate || SPEAK_RATE), i = f | 0, txt = say.text;
+    if (i >= txt.length) return -1;
+    const k = txt.charCodeAt(i) | 32;
+    let v;
+    if (k === 97) v = 1;                                   // a
+    else if (k === 111) v = 0.85;                          // o
+    else if (k === 101) v = 0.7;                           // e
+    else if (k === 117 || k === 119) v = 0.5;              // u w
+    else if (k === 105 || k === 121) v = 0.55;             // i y
+    else if (k === 109 || k === 98 || k === 112) v = 0;    // m b p: lips together
+    else if (k === 102 || k === 118) v = 0.12;             // f v
+    else if (k >= 97 && k <= 122) v = 0.3;                 // any other consonant
+    else if (k === 32) v = 0.08;                           // a breath between words
+    else v = 0;                                            // punctuation: a pause
+    // shape inside the syllable so it is never a square wave
+    return v * (0.75 + 0.25 * Math.sin((f - i) * Math.PI));
   }
 
-  // ---- per-rig facial state, stashed on the rig itself (._fa) ----
-  function ensure(ch) {
-    if (ch._fa) return ch._fa;
-    const now = CBZ.now || 0;
-    const fa = {
-      // blink: closed amount 0..1, schedule next blink time
-      blink: 0, blinkUntil: 0, nextBlink: now + 600 + Math.random() * 4000,
-      blinking: false,
-      // eye dart: current + target x/y offset, schedule next dart
-      dartX: 0, dartXT: 0, dartY: 0, dartYT: 0, nextDart: now + Math.random() * 2500,
-      // mouth: open amount 0..1 + a desynced talk phase
-      mouth: 0, talkPh: Math.random() * 6.28,
-      // head tracking: yaw/pitch offsets we ADDED last frame, so we can
-      // back them out before reading animChar's fresh base.
-      addYaw: 0, addPitch: 0, look: 0, // look = 0..1 blend of "glance"
+  // ---- per-rig state -------------------------------------------------------------
+  function stateOf(rig, now) {
+    let s = rig._fa;
+    if (s && s.v2) return s;
+    s = rig._fa = {
+      v2: true,
+      blinkT: -1, blinkDur: 0.2, nextBlink: now + 500 + Math.random() * 3500,
+      lidU: 0, lidL: 0, closed: 0, browY: 0, open: 0,
+      yaw: 0, pitch: 0, verge: 0, sYaw: 0, sPitch: 0, nextSacc: now + Math.random() * 1500,
+      tgt: new THREE.Vector3(), hasTgt: false, nextPick: 0, look: 0, lastMood: "n",
+      idleYaw: 0, idlePitch: 0,
+      addYaw: 0, addPitch: 0,
+      murmur: Math.random() * 6.28, murOn: false, murT: now + Math.random() * 3000,
+      pose: { blink: 0, lidU: 0, lidL: 0, yaw: 0, pitch: 0, verge: 0, open: 0, mouth: "n", brow: "n", browY: 0 },
     };
-    ch._fa = fa;
-    return fa;
+    return s;
   }
 
-  // one actor's eased visual state. `talking`/`lookT` are computed by the
-  // caller; we still ease toward existing targets even on frames where we
-  // skip the actor, so motion never hitches.
-  function updateRig(ch, dt, now, talking, lookT) {
-    const face = ch && ch.face;
-    if (!face) return;                 // guard for missing rig.face
-    const fa = ensure(ch);
+  function isSpeaking(rig, now) { const s = rig._say; return !!(s && now - s.t0 < s.text.length / (s.rate || SPEAK_RATE) * 1000 + 150); }
 
-    // ---------- BLINK (time-driven; survives skipped frames) ----------
-    if (!fa.blinking && now >= fa.nextBlink) {
-      fa.blinking = true;
-      // most blinks are a single quick close; occasionally a double.
-      fa.blinkUntil = now + 90 + Math.random() * 70;
-    }
-    if (fa.blinking) {
-      if (now >= fa.blinkUntil) {
-        fa.blinking = false;
-        // talkers / agitated actors blink a touch more often
-        const base = talking ? 1400 : 2600;
-        fa.nextBlink = now + base + Math.random() * (talking ? 2600 : 4500);
-        // ~12% chance of an immediate second blink (natural double-blink)
-        if (Math.random() < 0.12) fa.nextBlink = now + 120 + Math.random() * 90;
+  // what is this person looking at? writes st.tgt, returns true, or false for "nothing"
+  function pickTarget(rig, a, st, mood, now) {
+    // the fight / the threat
+    if (a && (mood === "angry" || mood === "fear")) {
+      const foe = a.rage || a.foe || a.attacker || a.threat || a.mem;
+      if (foe && typeof foe === "object" && headPoint(foe, st.tgt)) return true;
+      if (a.hunt > 0 || a.huntPlayer > 0 || a.alarmed > 0 || mood === "fear") {
+        if (CBZ.player && headPoint(CBZ.player, st.tgt)) return true;
       }
     }
-    // ease the lid: snap mostly-closed during a blink, spring open after
-    const blinkTarget = fa.blinking ? 1 : 0;
-    fa.blink = damp(fa.blink, blinkTarget, fa.blinking ? 34 : 22, dt);
-    const eyeSy = 1 - fa.blink * 0.9;  // 1 → ~0.1 closed
-    if (face.eyeL) face.eyeL.scale.y = eyeSy;
-    if (face.eyeR) face.eyeR.scale.y = eyeSy;
-
-    // ---------- EYE DART (tiny shared x/y offset, eased) ----------
-    if (now >= fa.nextDart) {
-      // pick a small new resting spot for the pupils
-      fa.dartXT = (Math.random() - 0.5) * 0.05;   // ±0.025 local units
-      fa.dartYT = (Math.random() - 0.5) * 0.03;
-      // looking at the player biases the gaze toward them (forward, so
-      // mostly a recentre) and darts settle for longer.
-      if (lookT > 0.4) { fa.dartXT *= 0.4; fa.dartYT *= 0.4; }
-      fa.nextDart = now + 500 + Math.random() * 2600;
-    }
-    fa.dartX = damp(fa.dartX, fa.dartXT, 16, dt);
-    fa.dartY = damp(fa.dartY, fa.dartYT, 16, dt);
-    // A rig with irises (entities/character.js) darts the IRIS inside a still
-    // eye white — the eye itself never slides across the face. An older rig
-    // (a single dark eye block) darts the whole eye, as before.
-    const rest = ch.faceRest;
-    const ex = rest ? rest.eyeX : EYE_X, ey = rest ? rest.eyeY : EYE_Y;
-    if (face.irisL || face.irisR) {
-      if (face.eyeL) face.eyeL.position.set(-ex, ey, face.eyeL.position.z);
-      if (face.eyeR) face.eyeR.position.set(ex, ey, face.eyeR.position.z);
-      if (face.irisL) { face.irisL.position.x = fa.dartX; face.irisL.position.y = fa.dartY * 0.2; }
-      if (face.irisR) { face.irisR.position.x = fa.dartX; face.irisR.position.y = fa.dartY * 0.2; }
-    } else {
-      if (face.eyeL) { face.eyeL.position.x = -ex + fa.dartX; face.eyeL.position.y = ey + fa.dartY; }
-      if (face.eyeR) { face.eyeR.position.x = ex + fa.dartX; face.eyeR.position.y = ey + fa.dartY; }
-    }
-
-    // ---------- MOUTH / TALKING ----------
-    let mouthTarget = 0;
-    if (talking) {
-      // a fast, irregular flap: two sines beat against each other so the
-      // jaw never looks metronomic, with a tiny floor so it stays parted.
-      fa.talkPh += dt * 13;
-      const flap = 0.5 + 0.5 * Math.sin(fa.talkPh) * Math.cos(fa.talkPh * 0.47 + 1.3);
-      mouthTarget = 0.25 + Math.max(0, flap) * 0.75; // 0.25 .. 1
-    }
-    fa.mouth = damp(fa.mouth, mouthTarget, talking ? 24 : 14, dt);
-    if (face.mouth) {
-      // open = taller + dropped a hair so it reads as a moving jaw
-      face.mouth.scale.y = 1 + fa.mouth * 1.8;
-      face.mouth.position.y = (rest ? rest.mouthY : MOUTH_Y) - fa.mouth * 0.05;
-    }
-
-    // ---------- HEAD TRACKING (neck yaw/pitch toward player) ----------
-    const neck = ch.neck;
-    if (neck) {
-      // back out last frame's additive contribution so we read the
-      // *fresh* base that animChar wrote this frame (prevents feedback
-      // through animChar's own damp on rotation.x). On menus animChar
-      // doesn't run, but undoing then re-adding our own offset is still
-      // exactly neutral, so there is no drift there either.
-      neck.rotation.x -= fa.addPitch;
-      neck.rotation.y -= fa.addYaw;
-
-      // ease the glance blend toward the requested intensity
-      fa.look = damp(fa.look, lookT, 7, dt);
-
-      let yawOff = 0, pitchOff = 0;
-      if (fa.look > 0.001 && CBZ.player && CBZ.player.pos && ch.group) {
-        const gp = ch.group.position;
-        const dx = CBZ.player.pos.x - gp.x;
-        const dz = CBZ.player.pos.z - gp.z;
-        // desired world yaw to face the player, then express it relative
-        // to the actor's body facing (group.rotation.y).
-        const facing = ch.group.rotation.y || 0;
-        const want = Math.atan2(dx, dz);          // +z forward convention
-        let rel = ((want - facing + Math.PI) % (Math.PI * 2)) - Math.PI;
-        if (rel < -Math.PI) rel += Math.PI * 2;
-        // clamp to a believable neck turn (~34°) and scale by the blend
-        const cl = 0.6;
-        if (rel > cl) rel = cl; else if (rel < -cl) rel = -cl;
-        yawOff = rel * fa.look;
-        // a gentle downward/upward tilt toward the player (head at ~y2.2)
-        const dy = (CBZ.player.pos.y + 1.4) - (gp.y + 2.2);
-        const horiz = Math.sqrt(dx * dx + dz * dz) || 0.001;
-        let pitch = Math.atan2(-dy, horiz) * 0.5; // halve it, stays subtle
-        if (pitch > 0.22) pitch = 0.22; else if (pitch < -0.22) pitch = -0.22;
-        pitchOff = pitch * fa.look;
+    const me = rigPos(rig), mx = me.x, mz = me.z;
+    // a voice nearby: people look at whoever is talking
+    const sp = CBZ.speech && CBZ.speech.speakers ? CBZ.speech.speakers() : null;
+    if (sp && sp.length) {
+      let best = null, bd = 64;
+      for (let i = 0; i < sp.length; i++) {
+        const x = sp[i];
+        if (!x || x === a || x === rig || x.char === rig) continue;
+        const p = (x.group && x.group.position) || x.pos;
+        if (!p) continue;
+        const d = (p.x - mx) * (p.x - mx) + (p.z - mz) * (p.z - mz);
+        if (d < bd) { bd = d; best = x; }
       }
-
-      // smooth the offsets themselves so a sudden look doesn't snap
-      fa.addYaw = lerpAngle(fa.addYaw, yawOff, 1 - Math.exp(-9 * dt));
-      fa.addPitch = damp(fa.addPitch, pitchOff, 9, dt);
-
-      neck.rotation.x += fa.addPitch;
-      neck.rotation.y += fa.addYaw;
+      if (best && headPoint(best, st.tgt)) return true;
     }
-  }
-
-  // ---- decide whether an actor is "talking" right now ----
-  function isTalking(a) {
-    if (downed(a)) return false;
-    // npcs socialising or anyone mid-fight runs their mouth
-    if (a.aiState === "socialize" || a.aiState === "fight") return true;
-    // guards barking while hunting / alerted (fields may be undefined on
-    // some actor kinds — `undefined > 0` is false, so this stays safe)
-    if (a.hunt > 0 || a.alert > 0 || a.huntPlayer > 0) return true;
+    // the player, when he is near and in front (or is the one being talked to)
+    const P = CBZ.player && CBZ.player.pos;
+    if (P && !rig._facePlayer) {
+      const dx = P.x - mx, dz = P.z - mz, d2 = dx * dx + dz * dz;
+      if (d2 < TRACK_DIST * TRACK_DIST && d2 > 0.01) {
+        const e = rig.group.matrixWorld.elements;
+        // the body's forward (+z) in world
+        const fx = e[8], fz = e[10], fl = Math.sqrt(fx * fx + fz * fz) || 1;
+        const dot = (dx * fx + dz * fz) / (fl * Math.sqrt(d2));
+        if (dot > 0.1 || isSpeaking(rig, now)) {
+          if (headPoint(CBZ.player, st.tgt)) return true;
+        }
+      }
+    }
     return false;
   }
 
-  // ---- how strongly should this actor glance at the player (0..1)? ----
-  // 0 if downed/out, or the player is behind / too far.
-  function lookStrength(a) {
-    if (downed(a)) return 0;
-    if (!CBZ.player || !CBZ.player.pos || !a.group) return 0;
-    const gp = a.group.position;
-    const dx = CBZ.player.pos.x - gp.x;
-    const dz = CBZ.player.pos.z - gp.z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 > TRACK_DIST2 || d2 < 0.0004) return 0;
-    // must be roughly in front: dot of body-forward with the to-player dir.
-    const facing = a.group.rotation.y || 0;
-    const fwdX = Math.sin(facing), fwdZ = Math.cos(facing);
-    const inv = 1 / Math.sqrt(d2);
-    const dot = (dx * inv) * fwdX + (dz * inv) * fwdZ;
-    if (dot < 0.15) return 0;          // player is behind / hard to the side
-    // closer + more head-on = a stronger glance
-    const dist = Math.sqrt(d2);
-    const near = 1 - dist / TRACK_DIST;            // 1 at touch → 0 at edge
-    return Math.min(1, near * (0.4 + 0.6 * dot));
+  // the lids follow the head's tone (crowd.js re-skins pooled rigs, gore.js
+  // greys the dead, warlord relinearises): a shared cached material per tone
+  function syncLidTone(rig) {
+    const f = rig.face, h = rig.head, H = HU();
+    if (!f || !f.lidUp || !h || !h.material || !h.material.color || !CBZ.cmat || !H.lidTone) return;
+    const hex = h.material.color.getHex();
+    if (rig._lidFor === hex) return;
+    rig._lidFor = hex;
+    const m = CBZ.cmat(H.lidTone(hex));
+    if (f.lidUp.material !== m) { f.lidUp.material = m; f.lidLow.material = m; }
   }
 
-  // round-robin cursor over the combined actor list (rebuilt cheaply)
-  let cursor = 0;
+  function updateRig(rig, dt, now) {
+    const H = HU();
+    const st = stateOf(rig, now);
+    const a = rig._faceActor || null;
+    const mood = moodOf(rig, a, now);
+    const M = MOODS[mood] || MOODS.n;
+    const speaking = isSpeaking(rig, now);
+    if (mood !== st.lastMood) { st.lastMood = mood; st.nextPick = 0; }
+    if ((frame + (rig._faceIx | 0)) % 30 === 0) syncLidTone(rig);
 
-  function tick(dt) {
-    const now = CBZ.now || 0;
-
-    // the player rig isn't in guards/npcs and is always on screen, so it
-    // gets a full update EVERY frame (it's only one rig — cheap, and the
-    // player's own face shouldn't visibly stutter).
-    const pc = CBZ.playerChar;
-    if (pc && pc.face) {
-      // the player "talks" only when throwing hands (a punch is queued)
-      const pTalk = pc.punchT > 0;
-      // the player never glances at themselves
-      updateRig(pc, dt, now, pTalk, 0);
-    }
-
-    // every interactable actor across the modes: jail guards/inmates AND city
-    // pedestrians, so city folks glance at you too.
-    const guards = CBZ.guards || [];
-    const npcs = CBZ.npcs || [];
-    const peds = CBZ.cityPeds || [];
-    const gl = guards.length, nl = npcs.length, pl = peds.length, total = gl + nl + pl;
-    if (total === 0) { cursor = 0; return; }
-    const at = function (i) { return i < gl ? guards[i] : (i < gl + nl ? npcs[i - gl] : peds[i - gl - nl]); };
-
-    // 1) NEAR pass — anyone you've walked up to glances at you PROMPTLY (every
-    //    frame, not on the round-robin), so "they look when I approach" feels
-    //    responsive. Still gated to roughly-in-front (lookStrength), so it
-    //    reads as a natural glance, never a creepy locked stare.
-    const pp = CBZ.player && CBZ.player.pos;
-    if (pp) {
-      for (let i = 0; i < total; i++) {
-        const a = at(i);
-        if (!a || !a.char || downed(a)) continue;
-        const gp = a.group && a.group.position; if (!gp) continue;
-        const dx = gp.x - pp.x, dz = gp.z - pp.z;
-        if (dx * dx + dz * dz <= NEAR_GLANCE2) updateRig(a.char, dt, now, isTalking(a), lookStrength(a));
+    // ---- lids: mood + blink ----
+    st.lidU = damp(st.lidU, M.lidU, 9, dt);
+    st.lidL = damp(st.lidL, M.lidL, 9, dt);
+    // dying eyes drift shut; a knockout snaps them; waking opens them slowly
+    st.closed = damp(st.closed, M.closed, M.closed > st.closed ? (mood === "dead" ? 2.5 : 9) : 4, dt);
+    let blink = 0;
+    if (M.blink < 50) {
+      if (st.blinkT < 0 && now >= st.nextBlink) { st.blinkT = 0; st.blinkDur = 0.17 + Math.random() * 0.08; }
+      if (st.blinkT >= 0) {
+        st.blinkT += dt;
+        const t = st.blinkT, c = st.blinkDur * 0.38;
+        blink = t < c ? t / c : Math.max(0, 1 - (t - c) / (st.blinkDur - c));
+        blink = blink * blink * (3 - 2 * blink);
+        if (t >= st.blinkDur) {
+          st.blinkT = -1;
+          const base = (speaking ? 1800 : 2600) * M.blink;
+          st.nextBlink = now + base + Math.random() * base * 1.3;
+          if (Math.random() < 0.12) st.nextBlink = now + 110 + Math.random() * 90;   // a double blink
+        }
       }
     }
 
-    // 2) ROUND-ROBIN — cheap idle blinks/talk/glance for everyone else.
-    const n = Math.min(MAX_PER_FRAME, total);
-    if (cursor >= total) cursor = 0;
-    for (let k = 0; k < n; k++) {
-      let i = cursor + k;
-      if (i >= total) i -= total;
-      const a = at(i);
-      if (!a || !a.char) continue;
-      if (downed(a)) continue;
-      updateRig(a.char, dt, now, isTalking(a), lookStrength(a));
+    // ---- gaze ----
+    if (M.look) {
+      if (now >= st.nextPick) {
+        const had = st.hasTgt;
+        st.hasTgt = pickTarget(rig, a, st, mood, now);
+        st.nextPick = now + (mood === "fear" ? 180 : 300) + Math.random() * 500;
+        if (!st.hasTgt && (had || Math.random() < 0.3)) {
+          st.idleYaw = (Math.random() - 0.5) * 0.7;
+          st.idlePitch = (Math.random() - 0.6) * 0.25;
+          st.nextPick = now + 900 + Math.random() * 2400;
+        }
+      }
+    } else st.hasTgt = false;
+    let wantYaw = st.hasTgt ? 0 : (M.look ? st.idleYaw : 0), wantPitch = st.hasTgt ? 0 : (M.look ? st.idlePitch : 0), wantVerge = 0.012;
+    const near = rig.faceNodes.near;
+    if (st.hasTgt && near.matrixWorld) {
+      _m.copy(near.matrixWorld).invert();
+      _v.copy(st.tgt).applyMatrix4(_m);
+      const R = rig.faceRest;
+      const dx = _v.x, dy = _v.y - R.eyeY, dz = _v.z - R.eyeZ;
+      const hz = Math.sqrt(dx * dx + dz * dz) || 1e-4;
+      if (dz > 0.05) {
+        wantYaw = Math.atan2(dx, dz);
+        wantPitch = Math.atan2(dy, hz);
+        wantVerge = Math.min(0.12, Math.atan2(R.eyeX, Math.sqrt(dx * dx + dy * dy + dz * dz)));
+      } else st.hasTgt = false;                             // it went behind him
     }
-    cursor += n;
-    if (cursor >= total) cursor = 0;
+    // micro-saccades: a live stare is never perfectly still
+    if (now >= st.nextSacc) {
+      const k = mood === "fear" ? 2.2 : 1;
+      st.sYaw = (Math.random() - 0.5) * 0.07 * k; st.sPitch = (Math.random() - 0.5) * 0.045 * k;
+      st.nextSacc = now + (mood === "fear" ? 250 : 600) + Math.random() * 1900;
+    }
+    const ty = wantYaw + st.sYaw, tp = wantPitch + st.sPitch;
+    // a big jump of the eyes often carries a blink with it
+    if (Math.abs(ty - st.yaw) > 0.3 && st.blinkT < 0 && Math.random() < 0.35 && M.blink < 50) st.nextBlink = now;
+    st.yaw = damp(st.yaw, Math.max(-0.5, Math.min(0.5, ty)), 26, dt);
+    st.pitch = damp(st.pitch, Math.max(-0.34, Math.min(0.34, tp)), 26, dt);
+    st.verge = damp(st.verge, wantVerge, 8, dt);
+
+    // ---- mouth ----
+    let open = M.open;
+    let shape = M.mouth;
+    if (speaking && mood !== "dead" && mood !== "out" && mood !== "sleep") {
+      const so = speechOpen(rig._say, now);
+      if (so >= 0) {
+        open = so > 0.02 ? Math.max(open * 0.5, 0.003 + so * (rig._say.loud ? 0.036 : 0.027)) : 0;
+        if (mood === "angry") shape = so > 0.4 && rig._say.loud ? "snarl" : "n";
+      }
+    } else if (a && (a.aiState === "socialize" || a.state === "chat") && mood === "smile") {
+      // a pair talking with no line on screen: murmur in bursts
+      if (now >= st.murT) { st.murOn = !st.murOn; st.murT = now + (st.murOn ? 900 + Math.random() * 1800 : 1200 + Math.random() * 2600); }
+      if (st.murOn) {
+        st.murmur += dt * 11;
+        open = 0.003 + 0.016 * Math.max(0, Math.sin(st.murmur) * Math.cos(st.murmur * 0.43 + 1.1));
+        shape = "n";
+      }
+    }
+    if (mood === "angry" && (rig.punchT > 0 || rig.kickT > 0)) { shape = "snarl"; open = Math.max(open, 0.006); }
+    st.open = damp(st.open, open, speaking ? 45 : 12, dt);
+    st.browY = damp(st.browY, M.browY + (speaking ? 0.002 * Math.sin(now * 0.004) : 0), 8, dt);
+
+    const p = st.pose;
+    p.blink = Math.max(st.closed, blink);
+    p.lidU = st.lidU; p.lidL = st.lidL;
+    p.yaw = st.yaw; p.pitch = st.pitch; p.verge = st.verge;
+    p.open = st.open < 0.002 ? 0 : st.open;
+    p.mouth = shape; p.brow = M.brow; p.browY = st.browY;
+    H.facePose(rig, p);
+
+    // ---- the head follows the eyes (additive neck offset, never the player's own) ----
+    const neck = rig.neck;
+    if (neck && !rig._facePlayer) {
+      neck.rotation.x -= st.addPitch;
+      neck.rotation.y -= st.addYaw;
+      st.look = damp(st.look, st.hasTgt ? 1 : 0, 5, dt);
+      let yawOff = 0, pitchOff = 0;
+      if (st.look > 0.002 && neck.parent && neck.parent.matrixWorld) {
+        _m.copy(neck.parent.matrixWorld).invert();
+        _v.copy(st.tgt).applyMatrix4(_m);
+        const dx = _v.x - neck.position.x, dz = _v.z - neck.position.z;
+        const dy = _v.y - (neck.position.y + (rig.profile ? rig.profile.headSize * 0.55 : 0.33));
+        const hz = Math.sqrt(dx * dx + dz * dz) || 1e-4;
+        if (dz > -0.2) {
+          yawOff = Math.max(-0.6, Math.min(0.6, Math.atan2(dx, dz) * 0.7)) * st.look;
+          pitchOff = Math.max(-0.24, Math.min(0.24, -Math.atan2(dy, hz) * 0.55)) * st.look;
+        }
+      }
+      st.addYaw = damp(st.addYaw, yawOff, 6, dt);
+      st.addPitch = damp(st.addPitch, pitchOff, 6, dt);
+      neck.rotation.x += st.addPitch;
+      neck.rotation.y += st.addYaw;
+    }
   }
 
-  // run on EVERY frame (faces should live on menus too, where rigs idle),
-  // and LATE (88) so animChar has already posed the neck this frame.
-  CBZ.onAlways(88, tick);
+  // leaving the near tier: hand the neck back clean
+  function releaseNeck(rig) {
+    const st = rig._fa;
+    if (!st || !st.v2 || !rig.neck) return;
+    rig.neck.rotation.x -= st.addPitch; rig.neck.rotation.y -= st.addYaw;
+    st.addPitch = 0; st.addYaw = 0; st.look = 0;
+  }
+
+  function tick(dt) {
+    const H = HU();
+    if (!H || !H.facePose) return;
+    frame++;
+    if (frame % 30 === 1) sweepActors();
+    const now = CBZ.now || 0;
+    const cam = CBZ.camera;
+    const ce = cam && cam.matrixWorld ? cam.matrixWorld.elements : null;
+    const cx = ce ? ce[12] : 0, cy = ce ? ce[13] : 0, cz = ce ? ce[14] : 0;
+    const prune = frame % 240 === 0;
+    for (let i = rigs.length - 1; i >= 0; i--) {
+      const rig = rigs[i], g = rig.group, R = rig.faceRest;
+      if (!g || !g.parent) {
+        // off the scene: forget it after a while, and leave it whole (near,
+        // at rest) in case it comes back unregistered
+        if (prune && ++rig._faceOrphan >= 2) {
+          releaseNeck(rig); H.faceLod(rig, true); H.facePose(rig, H.faceRestPose);
+          rig._faceReg = false; rig._fa = null;
+          rigs[i] = rigs[rigs.length - 1]; rigs.pop();
+        }
+        continue;
+      }
+      rig._faceOrphan = 0;
+      rig._faceIx = i;
+      const isNear = R.near;
+      if (!isNear && (i + frame) % FAR_EVERY) continue;     // far: nothing, most frames
+      if (!g.visible) continue;
+      let wantNear = true;
+      if (ce) {
+        const e = g.matrixWorld.elements;
+        const dx = e[12] - cx, dy = e[13] - cy, dz = e[14] - cz, d2 = dx * dx + dy * dy + dz * dz;
+        wantNear = isNear ? d2 < NEAR_OUT2 : d2 < NEAR_IN2;
+      }
+      if (wantNear !== isNear) {
+        if (!wantNear) releaseNeck(rig);
+        H.faceLod(rig, wantNear);
+      }
+      if (wantNear) updateRig(rig, Math.min(dt, 0.1), now);
+    }
+  }
+
+  CBZ.faceAudit = function () {
+    let near = 0, far = 0;
+    for (let i = 0; i < rigs.length; i++) (rigs[i].faceRest.near ? near++ : far++);
+    return { rigs: rigs.length, near: near, far: far };
+  };
+
+  // every frame (faces live on menus too), LATE (88): after animChar posed the neck
+  if (typeof CBZ.onAlways === "function") CBZ.onAlways(88, tick);
 })();

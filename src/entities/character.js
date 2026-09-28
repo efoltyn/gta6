@@ -632,12 +632,11 @@
          it). Sized per body by mesh.scale, so pedinstance pools every head of
          a form on one geometry. Its UVs ARE the heritage.js ink atlas (front /
          side / back columns, the neck at the bottom of the atlas) — an inked
-         head only gets a `map`, the geometry never swaps.
-       · EYES — a white (rig.face.eyeL/eyeR, still a true box, still what
-         facial.js blinks) with an iris child carrying a tiny pupil texture
-         (rig.face.irisL/irisR, what facial.js darts). Eye colour per body.
+         head only gets a `map`; the geometry swaps only between the near
+         (socketed) and far (light) skull of the same form — faceLod.
+       · EYES / LIDS / MOUTH — see THE FACE below (eyeballs in carved
+         sockets, lids that close, lips that part over teeth).
        · BROWS — one mesh, two shaped brows (per eye, arched for f), hair-toned.
-       · MOUTH — the same animated box, in a LIP tone derived from the skin.
        · HAIR — every piece is a ROUNDED box now (one merged shell as before),
          with fringes, a tapered ponytail, a round bun, and three heritage
          textures: afro, curly, locs.
@@ -645,8 +644,9 @@
        · SHOES — one shared unit shoe (sole, heel, a toe that drops and
          narrows), scaled per body. Same slot, same colour, same planted sole.
 
-     Mesh count per adult body: +2 (the irises). Every new geometry is cached
-     and shared (see SHAPE); nothing is built per body.
+     Face meshes per body: 2 balls + 2 lid shells + lashes + brow + 2 lips
+     (+ the far eye line, hidden up close; + cavity/teeth, hidden while shut).
+     Every geometry is cached and shared (see SHAPE); nothing is built per body.
   ============================================================ */
   const SHAPE = Object.create(null);
   function shared(key, build) {
@@ -666,13 +666,16 @@
      Returns positions only reshaped: its normals are still the BoxGeometry's
      per-face normals (callers read them to pick an atlas column), and
      finishGeo() recomputes smooth ones after any further sculpting. */
-  function rbox(w, h, d, r, n, flatBottom) {
+  function rbox(w, h, d, r, n, flatBottom, rs) {
     const ns = Array.isArray(n) ? n : [n || 4, n || 4, n || 4];
     const g = new THREE.BoxGeometry(2, 2, 2, ns[0], ns[1], ns[2]);
     const half = [w / 2, h / 2, d / 2];
     const rad = [Math.min(r, half[0]), Math.min(r, half[1]), Math.min(r, half[2])];
     const core = [half[0] - rad[0], half[1] - rad[1], half[2] - rad[2]];
-    const fi = ns.map((k) => Math.max(0, 1 - 2 * (k <= 4 ? 1 : 2) / k));
+    // rs: rounding segments per side per axis (default 1 for k<=4, else 2) —
+    // the near head spends more of its grid on the rounding so the eye socket
+    // at the skull's front corner has vertices to carve.
+    const fi = ns.map((k, i) => Math.max(0, 1 - 2 * (rs ? rs[i] : (k <= 4 ? 1 : 2)) / k));
     const pos = g.attributes.position;
     const p = [0, 0, 0], q = [0, 0, 0];
     for (let i = 0; i < pos.count; i++) {
@@ -816,12 +819,77 @@
   }
   function headForm(P) { return (P.child && (P.ageYears == null || P.ageYears < 12)) ? "c" : (P.fem ? "f" : "m"); }
 
-  function headGeometry(form, nose) {
+  /* ==== THE FACE — EYES IN SOCKETS, LIDS THAT CLOSE, A MOUTH THAT OPENS ====
+     Owner 2026-09-28: "eyes and mouths much more realistic".
+
+     WHAT IT WAS: two flat white boxes stuck ON the face plane with a textured
+     box for an iris sliding across them, a blink that squashed the whole white
+     box to a sliver, and a mouth that was one lip-coloured box stretched taller
+     to "talk". No lids, no socket, no teeth, no inside of a mouth.
+
+     WHAT IT IS (all geometry SHARED + cached; nothing is built per body):
+       · SOCKETS — the near head is a denser skull (headGeometry(.., far=false))
+         with an elliptical socket CARVED into it behind each eye. The eyeball
+         sits inside the carve, its front flush with the face plane, so the
+         brow and cheek stand proud of it and the socket shades.
+       · EYEBALL — a real sphere (face.eyeL/eyeR) with one painted texture per
+         eye colour: sclera shading darker toward the corners, a few veins, an
+         iris with radial fibres and a DARK LIMBAL RING, a pupil and a
+         catch-light, on a Phong material so a light gives it a wet specular
+         highlight. GAZE ROTATES THE BALL (rotation order YXZ: yaw, then pitch).
+       · LIDS — skin-toned spherical shells just outside the ball: ONE mesh for
+         both upper lids (face.lidUp, rotation.x closes them), one for both
+         lower lids (face.lidLow). Their edges are almond curves that meet at
+         the corners (canthal tilt per eye shape), with a margin row tucked back
+         to the ball so a lid has thickness. The upper lid carries a dark LASH
+         line (face.lashes, its child). Where a shell disappears into the carved
+         socket is the lid CREASE. Shell radius: upper < lower, so a closing
+         upper lid tucks BEHIND the lower one — closed is closed.
+       · MOUTH — two shaped lips (face.mouth = the upper, face.lipLow) lofted
+         along the mouth: cupid's bow, a fuller lower lip, corners that sink
+         into the face, a philtrum groove carved into the skull above. Closed by
+         default. Opening drops the lower lip and shows rig.mouthIn: a dark
+         cavity lens and upper/lower teeth, which are HIDDEN whenever the mouth
+         is shut. Expressions swap the lip geometry (smile / snarl / grimace /
+         fear) and the brow geometry (angry / raised) — a tier change, never a
+         per-frame rebuild.
+       · FAR TIER — faceLod(rig, false): the head swaps to the light skull, the
+         near eyes (balls, lids, lashes) hide, and one merged "eye line" decal
+         (faceNodes.farEyes) shows instead. systems/facial.js drives the tier
+         off the camera and poses near faces through facePose(); far faces get
+         no per-frame work at all.
+     Heritage varies it: c.eyeShape (0 round, 1 almond, 2 hooded/monolid),
+     c.lips (fuller), c.nose, c.eye (colour). */
+  const EYE = { x: 0.14, y: 0.34, front: 0.302 };
+  const EYE_R = { m: 0.057, f: 0.059, c: 0.063 };
+  function eyeR(form) { return EYE_R[form] || EYE_R.m; }
+  // eU/eL: open elevation (rad) of the upper/lower lid edge at the pupil line;
+  // tilt: the outer corner's lift; azc: the half-width (azimuth) of the opening
+  const EYE_SHAPES = [
+    // the painted iris spans +/-0.555 rad: a resting upper lid covers its top
+    // a touch and the lower lid just meets its bottom (no staring white ring)
+    { eU: 0.48, eL: -0.44, tilt: 0.00, azc: 1.18 },   // 0 round, open
+    { eU: 0.42, eL: -0.40, tilt: 0.07, azc: 1.22 },   // 1 almond
+    { eU: 0.34, eL: -0.35, tilt: 0.13, azc: 1.26 },   // 2 hooded / monolid
+  ];
+  function lidShape(si, fk) {
+    const S = EYE_SHAPES[si] || EYE_SHAPES[1];
+    const b = fk === "f" ? 0.03 : (fk === "c" ? 0.05 : 0);
+    return { eU: S.eU + b, eL: S.eL - b * 0.3, tilt: S.tilt, azc: S.azc };
+  }
+  // how far (rad) the upper lid rotates to meet the lower one, with overlap
+  function lidCloseAngle(si, fk) { const S = lidShape(si, fk); return S.eU - S.eL + 0.24; }
+  const SOCKET = { ax: 0.084, ayUp: 0.066, ayDn: 0.050, depth: 0.24 };
+
+  function headGeometry(form, nose, far) {
     const fk = HEAD_FORMS[form] ? form : "m";
     const ni = Math.max(0, Math.min(2, nose | 0));
-    return shared("head|" + fk + "|" + ni, function () {
+    return shared("head|" + fk + "|" + ni + (far ? "|far" : "|near"), function () {
       const F = HEAD_FORMS[fk];
-      const skull = rbox(0.60, 0.60, 0.60, F.round, [6, 6, 6]);
+      // near: a denser grid with more of it spent on the rounding, so the
+      // socket (which straddles the skull's front corner) has vertices to carve
+      const skull = far ? rbox(0.60, 0.60, 0.60, F.round, [6, 6, 6])
+                        : rbox(0.60, 0.60, 0.60, F.round, [18, 18, 8], false, [4, 4, 2]);
       atlasUV(skull, 0, HEAD_ATLAS.headV);
       sculpt(skull, function (v) {
         let u = v.y + 0.30;
@@ -830,6 +898,20 @@
         // the chin juts a touch, the jaw tapers
         if (v.z > 0.1 && u < 0.12) v.z += F.chin * (1 - u / 0.12);
         v.x *= jawMul(F, u, v.z);
+        if (!far && v.z > 0.05) {
+          // EYE SOCKETS: an elliptical bowl behind each eye, deep enough that
+          // the skull is behind the eyeball everywhere the lids leave it open,
+          // shallow at the rim so brow and cheek stay where they were
+          const dx = Math.abs(v.x) - EYE.x, dy = u - EYE.y;
+          const ay = dy > 0 ? SOCKET.ayUp : SOCKET.ayDn;
+          const e2 = (dx / SOCKET.ax) * (dx / SOCKET.ax) + (dy / ay) * (dy / ay);
+          if (e2 < 1) { const b = 1 - e2; v.z -= SOCKET.depth * b * b; }
+          // PHILTRUM: the groove from under the nose to the cupid's bow
+          if (u > 0.168 && u < 0.222) {
+            const w = Math.sin((u - 0.168) / 0.054 * Math.PI);
+            v.z -= 0.007 * Math.exp(-(v.x * v.x) / (0.014 * 0.014)) * w * cl01((v.z - 0.2) / 0.05);
+          }
+        }
         // the skull base lifts at the back: the neck shows under it
         const back = cl01(-v.z / 0.30);
         if (u < 0.24) u += 0.12 * (1 - u / 0.24) * back * back;
@@ -839,11 +921,19 @@
       const parts = [skull];
       // NOSE — a wedge: narrow bridge between the eyes, the tip and nostrils proud
       const nw = NOSE_W[ni] * F.nose, nh = 0.165 * (fk === "c" ? 0.78 : 1), nd = 0.066 * F.nose + 0.012;
-      const nose3 = rbox(nw, nh, nd, 0.018, [2, 3, 1]);
+      const nose3 = far ? rbox(nw, nh, nd, 0.018, [2, 3, 1]) : rbox(nw, nh, nd, Math.min(nw * 0.42, nd * 0.48), [4, 6, 3]);
       sculpt(nose3, function (v) {
         const t = cl01((v.y + nh / 2) / nh);              // 0 nostrils .. 1 bridge
-        v.x *= lerpN(1.08, 0.50, t);
-        if (v.z > 0) v.z -= 0.042 * t * F.nose;
+        if (far) { v.x *= lerpN(1.08, 0.50, t); if (v.z > 0) v.z -= 0.042 * t * F.nose; return; }
+        const hx = cl01(Math.abs(v.x) / (nw / 2));        // 0 centre .. 1 side
+        // nostril wings flare at the base, the tip narrows, the bridge is slim
+        v.x *= t < 0.28 ? lerpN(1.12, 0.80, t / 0.28) : lerpN(0.80, 0.44, (t - 0.28) / 0.72);
+        if (v.z > 0) {
+          v.z -= 0.040 * sm01((t - 0.12) / 0.88) * F.nose;                       // a shallow bridge
+          v.z += 0.011 * Math.exp(-((t - 0.16) / 0.13) * ((t - 0.16) / 0.13)) * (1 - hx * hx);   // the tip
+          if (t < 0.36) v.z -= 0.024 * hx * hx * (1 - t / 0.36);                // the wings sit back
+          if (t < 0.06) v.y += 0.012 * cl01(v.z / (nd / 2));                    // the underside lifts to the lip
+        }
       });
       nose3.translate(0, 0.215 + nh / 2 - 0.30, 0.30 + nd / 2 - 0.024);
       flatUV(finishGeo(nose3), PLAIN_U, PLAIN_V);
@@ -880,12 +970,13 @@
   }
 
   /* ---- FACE FEATURE GEOMETRY (face frame: y 0 chin .. 0.60 crown) -------- */
-  const SCLERA = 0xd8d2c4;
-  const EYE_REST = { x: 0.14, y: 0.34, z: 0.295 };   // facial.js reads rig.faceRest
   const MOUTH_REST_Y = 0.16;
-  function browGeometry(form) {
+  const BROW_REST_Y = 0.448;
+  // brow expression: n neutral, a angry/pained (inner ends down), f fear/surprise (inner ends up)
+  function browGeometry(form, expr) {
     const fk = form === "f" ? "f" : (form === "c" ? "c" : "m");
-    return shared("brow|" + fk, function () {
+    const ek = expr === "a" || expr === "f" ? expr : "n";
+    return shared("brow|" + fk + (ek === "n" ? "" : "|" + ek), function () {
       const parts = [];
       const w = fk === "f" ? 0.128 : 0.146, h = fk === "f" ? 0.022 : (fk === "c" ? 0.024 : 0.034), d = 0.034;
       const arch = fk === "f" ? 0.016 : 0.006;
@@ -896,6 +987,9 @@
           v.y *= lerpN(1.15, 0.65, out);                                    // thick head, thin tail
           v.y += arch * (1 - Math.pow(2 * out - 1.1, 2)) - (fk === "m" ? 0.006 * out : 0);
           v.z -= 0.012 * out * out;                                         // the tail wraps round the brow
+          const inner = (1 - out) * (1 - out);
+          if (ek === "a") { v.y -= 0.020 * inner - 0.004 * out; v.z += 0.005 * inner; v.x -= s * 0.006 * inner; }
+          else if (ek === "f") { v.y += 0.016 * inner - 0.003 * out; }
         });
         b.translate(s * 0.145, -h / 2 - arch, 0);
         flatUV(finishGeo(b), 0.5, 0.5);
@@ -904,33 +998,403 @@
       return mergeGeos(parts);
     });
   }
-  // A tiny pupil texture per eye colour (degrade-safe: no canvas -> flat colour).
-  const irisMats = Object.create(null);
-  function irisMat(hex) {
-    let m = irisMats[hex];
+
+  /* EYEBALL: a sphere whose UVs are an azimuthal projection about +z (the
+     front) — r_uv = sin(angle/2)/2 — so the painted iris is a disc at the
+     texture's centre with most texels spent on the front of the ball. */
+  function eyeballGeometry(form) {
+    const fk = EYE_R[form] ? form : "m";
+    return shared("eyeball|" + fk, function () {
+      const R = eyeR(fk);
+      const g = new THREE.SphereGeometry(R, 18, 12);
+      const pos = g.attributes.position, uv = g.attributes.uv;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i) / R, y = pos.getY(i) / R, z = pos.getZ(i) / R;
+        const a = Math.acos(Math.max(-1, Math.min(1, z)));
+        const rho = Math.sqrt(x * x + y * y);
+        if (rho < 1e-6) { uv.setXY(i, z > 0 ? 0.5 : 1, 0.5); continue; }
+        const k = 0.5 * Math.sin(a / 2) / rho;
+        uv.setXY(i, 0.5 + x * k, 0.5 + y * k);
+      }
+      // warlord/outfits.js faceLine reads parameters.height as the eye line's
+      // height: give it the open aperture, not the ball
+      g.parameters = Object.assign({}, g.parameters, { width: 2 * R, height: 0.066, depth: 2 * R });
+      return g;
+    });
+  }
+  const _eyeMats = Object.create(null);
+  function eyeMat(hex) {
+    let m = _eyeMats[hex];
     if (m) return m;
     let map = null;
     try {
       if (typeof document !== "undefined" && document.createElement) {
-        const cv = document.createElement("canvas"); cv.width = cv.height = 16;
+        const S = 128, C = 64;
+        const cv = document.createElement("canvas"); cv.width = cv.height = S;
         const x = cv.getContext && cv.getContext("2d");
-        if (x) {
+        if (x && x.createRadialGradient) {
           const css = (h) => "#" + ("00000" + (h >>> 0).toString(16)).slice(-6);
-          const dk = ((((hex >> 16) & 255) * 0.55) << 16) | ((((hex >> 8) & 255) * 0.55) << 8) | ((hex & 255) * 0.55);
-          x.fillStyle = css(dk); x.fillRect(0, 0, 16, 16);                  // limbal ring
-          x.fillStyle = css(hex); x.beginPath(); x.arc(8, 8, 6.6, 0, 6.2832); x.fill();
-          x.fillStyle = "#050505"; x.beginPath(); x.arc(8, 8.4, 3.1, 0, 6.2832); x.fill();   // pupil
-          x.fillStyle = "rgba(255,255,255,0.85)"; x.fillRect(5, 4, 2, 2);  // catch-light
+          const sc = (h, k) => {
+            const r = Math.min(255, Math.round(((h >> 16) & 255) * k)), g = Math.min(255, Math.round(((h >> 8) & 255) * k)), b = Math.min(255, Math.round((h & 255) * k));
+            return (r << 16) | (g << 8) | b;
+          };
+          let seed = Math.imul(hex | 0, 2654435761) >>> 0 || 1;
+          const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return (seed >>> 8) / 16777216; };
+          // SCLERA: bright at the front, shading into the corners (the lids and
+          // the socket shadow it), a warm pink at the very edge
+          let gr = x.createRadialGradient(C, C, 0, C, C, C);
+          gr.addColorStop(0, "#f3efe7"); gr.addColorStop(0.42, "#ece6dc");
+          gr.addColorStop(0.70, "#d6cabd"); gr.addColorStop(1, "#a88d82");
+          x.fillStyle = gr; x.fillRect(0, 0, S, S);
+          // a few fine veins from the corners
+          x.lineWidth = 0.8;
+          for (let i = 0; i < 9; i++) {
+            const a0 = (i < 5 ? Math.PI : 0) + (rnd() - 0.5) * 1.1;
+            let r = 58, a = a0;
+            x.strokeStyle = "rgba(176,70,64," + (0.16 + rnd() * 0.14).toFixed(2) + ")";
+            x.beginPath(); x.moveTo(C + Math.cos(a) * r, C + Math.sin(a) * r);
+            while (r > 30) { r -= 5; a += (rnd() - 0.5) * 0.18; x.lineTo(C + Math.cos(a) * r, C + Math.sin(a) * r); }
+            x.stroke();
+          }
+          // IRIS: lighter round the pupil, the colour, darker to the rim
+          const rI = 17.5, rP = 6.0;
+          gr = x.createRadialGradient(C, C, rP, C, C, rI);
+          gr.addColorStop(0, css(sc(hex, 1.45))); gr.addColorStop(0.45, css(sc(hex, 1.1)));
+          gr.addColorStop(0.85, css(sc(hex, 0.85))); gr.addColorStop(1, css(sc(hex, 0.6)));
+          x.fillStyle = gr; x.beginPath(); x.arc(C, C, rI, 0, 6.2832); x.fill();
+          // radial fibres
+          x.lineWidth = 0.9;
+          for (let i = 0; i < 44; i++) {
+            const a = i / 44 * 6.2832 + rnd() * 0.1;
+            x.strokeStyle = i & 1 ? "rgba(255,255,255," + (0.08 + rnd() * 0.12).toFixed(2) + ")" : "rgba(0,0,0," + (0.10 + rnd() * 0.14).toFixed(2) + ")";
+            x.beginPath(); x.moveTo(C + Math.cos(a) * (rP + 1), C + Math.sin(a) * (rP + 1));
+            const re = rI - 2.5 - rnd() * 3;
+            x.lineTo(C + Math.cos(a) * re, C + Math.sin(a) * re); x.stroke();
+          }
+          // the LIMBAL RING: the dark outline that makes an iris read at distance
+          x.strokeStyle = css(sc(hex, 0.28)); x.lineWidth = 2.8;
+          x.beginPath(); x.arc(C, C, rI - 1.3, 0, 6.2832); x.stroke();
+          // pupil
+          x.fillStyle = "#050404"; x.beginPath(); x.arc(C, C, rP, 0, 6.2832); x.fill();
+          // catch-light (upper left as you look at the face) + a faint second
+          x.fillStyle = "rgba(255,255,255,0.92)"; x.beginPath(); x.arc(C - 4.6, C - 5.2, 2.3, 0, 6.2832); x.fill();
+          x.fillStyle = "rgba(255,255,255,0.45)"; x.beginPath(); x.arc(C + 3.8, C + 3.4, 1.1, 0, 6.2832); x.fill();
           map = new THREE.CanvasTexture(cv);
-          map.magFilter = THREE.NearestFilter;
           map._shared = true;
         }
       }
     } catch (e) { map = null; }
-    if (map) { m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: map }); m._shared = true; }
-    else m = cmat(hex);
-    irisMats[hex] = m;
+    // Phong: the specular highlight off a light is the WET look of a real eye
+    m = new THREE.MeshPhongMaterial({ color: map ? 0xffffff : 0xe6e0d4, map: map, specular: 0x3c3c3c, shininess: 80 });
+    m._shared = true;
+    _eyeMats[hex] = m;
     return m;
+  }
+
+  /* LIDS. A lid edge is an almond: at the pupil line it sits at the shape's
+     eU / eL elevation, and toward the corners both edges converge on a
+     midline that the canthal tilt lifts at the outer corner (o > 0). Past the
+     corner the two shells overlap (upper under lower), so no sliver of white
+     ever shows at a corner. */
+  function lidEdge(kind, S, az, s) {
+    const o = az * s;                                           // + toward the OUTER corner
+    const q = Math.min(1, Math.abs(az) / S.azc);
+    const env = Math.pow(1 - q * q, 0.75);
+    const mid = 0.03 + S.tilt * Math.max(-1, Math.min(1, o / S.azc));
+    return kind === "U" ? mid + (S.eU - mid) * env - (1 - env) * 0.07
+                        : mid + (S.eL - mid) * env + (1 - env) * 0.03;
+  }
+  function gridGeo(P, I) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    g.setIndex(I);
+    g.computeVertexNormals();
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(P.length / 3 * 2).fill(0.5), 2));
+    return g;
+  }
+  // wind triangle (a,b,c) so its normal agrees with test vector (tx,ty,tz)
+  function windTri(P, I, a, b, c, tx, ty, tz) {
+    const ax = P[a * 3], ay = P[a * 3 + 1], az = P[a * 3 + 2];
+    const ux = P[b * 3] - ax, uy = P[b * 3 + 1] - ay, uz = P[b * 3 + 2] - az;
+    const vx = P[c * 3] - ax, vy = P[c * 3 + 1] - ay, vz = P[c * 3 + 2] - az;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    if (nx * tx + ny * ty + nz * tz >= 0) I.push(a, b, c); else I.push(a, c, b);
+  }
+  // one upper ("U") or lower ("L") lid pair, in the lid mesh's frame (origin on
+  // the eyes' shared centre line: x 0, y EYE.y, z = eyeball centre)
+  function lidGeometry(kind, shape, form) {
+    const fk = EYE_R[form] ? form : "m";
+    const si = Math.max(0, Math.min(2, shape | 0));
+    return shared("lid|" + kind + "|" + si + "|" + fk, function () {
+      const S = lidShape(si, fk), R = eyeR(fk);
+      const up = kind === "U";
+      const rad = R * (up ? 1.04 : 1.065), rim = R * 1.01;
+      /* Parameterised about the X axis (the axis the lid ROTATES about): th
+         is the angle up from forward in the y-z plane, ph the angle out to the
+         side (the poles sit at the eye's corners, buried in the socket). So a
+         blink is a pure shift in th, and "closed" is exactly "the upper edge
+         has passed the lower edge" at every ph. */
+      const NA = 22, NE = 8, PHM = 1.45, TOP = 2.6;
+      const parts = [];
+      for (const s of [-1, 1]) {
+        const P = [], I = [], A = [], E = [];
+        for (let i = 0; i <= NA; i++) {
+          const ph = -PHM + 2 * PHM * i / NA;
+          const e0 = lidEdge(kind, S, ph, s);
+          for (let j = -1; j <= NE; j++) {                     // row -1 = the lid margin
+            const t = j < 0 ? 0 : Math.pow(j / NE, 1.5);
+            const th = up ? e0 + t * (TOP - e0) : e0 - t * (TOP + e0);
+            const r = j < 0 ? rim : rad, cp = Math.cos(ph);
+            P.push(s * EYE.x + r * Math.sin(ph), r * cp * Math.sin(th), r * cp * Math.cos(th));
+            A.push(ph); E.push(th);
+          }
+        }
+        const C = NE + 2;
+        for (let i = 0; i < NA; i++) for (let c = 0; c < C - 1; c++) {
+          const a = i * C + c, b = (i + 1) * C + c, d = a + 1, e = b + 1;
+          let tx, ty, tz;
+          const ph = A[a], th = E[a];
+          if (c === 0) {
+            // the margin faces out of the opening: down for the upper lid, up for the lower
+            const k = up ? -1 : 1;
+            tx = 0; ty = k * Math.cos(th); tz = k * -Math.sin(th);
+          } else { const cp = Math.cos(ph); tx = Math.sin(ph); ty = cp * Math.sin(th); tz = cp * Math.cos(th); }
+          windTri(P, I, a, b, e, tx, ty, tz);
+          windTri(P, I, a, e, d, tx, ty, tz);
+        }
+        parts.push(gridGeo(P, I));
+      }
+      return mergeGeos(parts);
+    });
+  }
+  // the upper lash line: a dark band along the upper lid's edge that flares
+  // out and down a touch (child of the upper lid, so it closes with it)
+  function lashGeometry(shape, form) {
+    const fk = EYE_R[form] ? form : "m";
+    const si = Math.max(0, Math.min(2, shape | 0));
+    return shared("lash|" + si + "|" + fk, function () {
+      const S = lidShape(si, fk), R = eyeR(fk), rad = R * 1.04;
+      const NA = 14, parts = [];
+      for (const s of [-1, 1]) {
+        const P = [], I = [], A = [], E = [];
+        const azm = S.azc * 1.02;
+        for (let i = 0; i <= NA; i++) {
+          const ph = -azm + 2 * azm * i / NA;
+          const e0 = lidEdge("U", S, ph, s);
+          const q = Math.min(1, Math.abs(ph) / S.azc), w = 0.3 + 0.7 * Math.sqrt(Math.max(0, 1 - q * q));
+          const rows = [[e0 + 0.05 * w, rad * 1.004], [e0 - 0.055 * w, rad * (1 + 0.075 * w)]];
+          for (let k = 0; k < 2; k++) {
+            const th = rows[k][0], r = rows[k][1], cp = Math.cos(ph);
+            P.push(s * EYE.x + r * Math.sin(ph), r * cp * Math.sin(th), r * cp * Math.cos(th));
+            A.push(ph); E.push(th);
+          }
+        }
+        for (let i = 0; i < NA; i++) {
+          const a = i * 2, b = a + 2, d = a + 1, e = b + 1;
+          const ph = A[a], th = E[a], cp = Math.cos(ph);
+          const tx = Math.sin(ph), ty = cp * Math.sin(th), tz = cp * Math.cos(th);
+          windTri(P, I, a, b, e, tx, ty, tz); windTri(P, I, a, e, d, tx, ty, tz);
+        }
+        parts.push(gridGeo(P, I));
+      }
+      return mergeGeos(parts);
+    });
+  }
+  // FAR TIER: both eyes as one flat almond decal on the light skull
+  function farEyeGeometry() {
+    return shared("farEyes", function () {
+      const P = [], I = [], U = [], NX = 8, hw = 0.062;
+      for (const s of [-1, 1]) {
+        const base = P.length / 3;
+        for (let i = 0; i <= NX; i++) {
+          const t = i / NX, xx = (t - 0.5) * 2 * hw, env = Math.pow(Math.max(0, 1 - (2 * t - 1) * (2 * t - 1)), 0.7);
+          P.push(s * EYE.x + xx, EYE.y + 0.028 * env, 0.304); U.push(t, 1);
+          P.push(s * EYE.x + xx, EYE.y - 0.022 * env, 0.304); U.push(t, 0);
+        }
+        for (let i = 0; i < NX; i++) { const a = base + i * 2; windTri(P, I, a, a + 1, a + 3, 0, 0, 1); windTri(P, I, a, a + 3, a + 2, 0, 0, 1); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(U), 2));
+      g.setIndex(I);
+      g.computeVertexNormals();
+      return g;
+    });
+  }
+  let _farEyeMat = null;
+  function farEyeMat() {
+    if (_farEyeMat) return _farEyeMat;
+    let map = null;
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const cv = document.createElement("canvas"); cv.width = 32; cv.height = 16;
+        const x = cv.getContext && cv.getContext("2d");
+        if (x) {
+          x.fillStyle = "#d9d1c4"; x.fillRect(0, 0, 32, 16);
+          x.fillStyle = "#24170f"; x.beginPath(); x.arc(16, 8, 5, 0, 6.2832); x.fill();
+          x.fillStyle = "#1a1210"; x.fillRect(0, 0, 32, 3);           // the lash line
+          map = new THREE.CanvasTexture(cv); map._shared = true;
+        }
+      }
+    } catch (e) { map = null; }
+    _farEyeMat = new THREE.MeshLambertMaterial({ color: map ? 0xffffff : 0x9a8f84, map: map });
+    _farEyeMat._shared = true;
+    return _farEyeMat;
+  }
+
+  /* LIPS. Lofted along the mouth (t -1..1 corner to corner), each section a
+     half-roll from the SEAM (phi 0) round the proud front to the vermilion
+     BORDER (phi pi). The back is buried in the skull; the corners sink into it
+     (that is what makes a corner). Expressions bend the seam: smile lifts the
+     corners, snarl raises one side of the upper lip off the teeth, grimace
+     stretches both lips thin and wide, fear pulls the corners down and back. */
+  const LIP_EXPR = {
+    n:       { lift: 0,      wide: 1.00, tU: 1.00, tL: 1.00, sn: 0,     back: 0 },
+    smile:   { lift: 0.020,  wide: 1.10, tU: 0.85, tL: 0.82, sn: 0,     back: 0.002 },
+    snarl:   { lift: -0.004, wide: 1.04, tU: 1.00, tL: 0.95, sn: 0.016, back: 0 },
+    grimace: { lift: -0.008, wide: 1.16, tU: 0.68, tL: 0.68, sn: 0.004, back: 0.004 },
+    fear:    { lift: -0.010, wide: 1.08, tU: 0.85, tL: 0.90, sn: 0,     back: 0.002 },
+  };
+  const LIP_W = 0.160, LIP_HU = 0.026, LIP_HL = 0.031, LIP_Z = 0.296;
+  const TEETH_W = 0.100, TEETH_H = 0.014, TEETH_Z = 0.3085, CAVITY_Z = 0.3025;
+  function lipGeometry(which, expr) {
+    const ek = LIP_EXPR[expr] ? expr : "n", E = LIP_EXPR[ek], up = which === "U";
+    return shared("lip|" + (up ? "U" : "L") + "|" + ek, function () {
+      const H = up ? LIP_HU * E.tU : LIP_HL * E.tL;
+      const NX = 16, NP = 6, P = [], I = [], YC = [];
+      for (let i = 0; i <= NX; i++) {
+        const t = -1 + 2 * i / NX, a = Math.abs(t);
+        const h = up ? H * (0.22 + 0.78 * Math.pow(Math.max(0, 1 - Math.pow(a, 2.2)), 0.6))
+                     : H * (0.18 + 0.82 * Math.pow(Math.max(0, 1 - a * a), 0.8));
+        const dz = (up ? 0.020 : 0.023) * (0.35 + 0.65 * Math.pow(Math.max(0, 1 - a * a), 0.6));
+        const zc = LIP_Z - 0.014 * a * a - E.back;
+        let seam = E.lift * t * t;
+        if (up) seam += E.sn * Math.exp(-((t - 0.3) / 0.32) * ((t - 0.3) / 0.32));
+        // cupid's bow: a dip at the middle of the upper border, peaks either side
+        const bow = up ? (-0.006 * Math.exp(-(t / 0.10) * (t / 0.10)) + 0.003 * Math.exp(-((a - 0.24) / 0.10) * ((a - 0.24) / 0.10))) : 0;
+        const x = t * LIP_W / 2 * E.wide;
+        const yc = up ? seam + h / 2 : seam - h / 2;
+        YC.push(yc, zc);
+        // row -1: the lip rolls IN past the seam (behind the other lip), so a
+        // shut mouth has no crack to see skin through and an open one shows a
+        // lip with thickness
+        P.push(x, seam + (up ? -0.0014 : 0.0014), zc - 0.006);
+        for (let j = 0; j <= NP; j++) {
+          const ph = Math.PI * j / NP, cp = Math.cos(ph);
+          const y = up ? seam + h / 2 - (h / 2) * cp + bow * (1 - cp) / 2
+                       : seam - h / 2 + (h / 2) * cp;
+          // proud at the seam (the lips press together in FRONT of the skin),
+          // fullest past the middle, buried at the vermilion border
+          const sp = ph < Math.PI / 2 ? 0.85 + 0.15 * Math.sin(ph) : Math.sin(ph);
+          // the lower lip's fullest point sits a little below its middle
+          P.push(x, y, zc + dz * sp * (up ? 1 : (1 + 0.15 * Math.sin(ph * 1.5))));
+        }
+      }
+      const C = NP + 2;
+      for (let i = 0; i < NX; i++) for (let j = 0; j < C - 1; j++) {
+        const a = i * C + j, b = (i + 1) * C + j, d = a + 1, e = b + 1;
+        // outward: away from the section's centre; the in-roll faces the other lip
+        let ty = P[a * 3 + 1] + P[d * 3 + 1] - 2 * YC[i * 2], tz = P[a * 3 + 2] + P[d * 3 + 2] - 2 * YC[i * 2 + 1];
+        if (j === 0) { ty = up ? -1 : 1; tz = 0; }
+        windTri(P, I, a, b, e, 0, ty, tz); windTri(P, I, a, e, d, 0, ty, tz);
+      }
+      const g = gridGeo(P, I);
+      // warlord/outfits.js faceLine reads top = position.y + height/2: the
+      // envelope is symmetric about the seam, so the top lands on the border
+      g.parameters = { width: LIP_W * E.wide, height: 2 * (H + 0.004), depth: 0.03 };
+      return g;
+    });
+  }
+  // the inside of an open mouth: a unit lens (pointed at the corners), scaled
+  // per frame to the gap by facePose
+  function cavityGeometry() {
+    return shared("mouthCavity", function () {
+      const P = [], I = [], NX = 12;
+      for (let i = 0; i <= NX; i++) {
+        const x = -0.5 + i / NX, env = Math.sqrt(Math.max(0, 1 - 4 * x * x));
+        P.push(x, 0.5 * env, 0, x, -0.5 * env, 0);
+      }
+      for (let i = 0; i < NX; i++) { const a = i * 2; windTri(P, I, a, a + 1, a + 3, 0, 0, 1); windTri(P, I, a, a + 3, a + 2, 0, 0, 1); }
+      return gridGeo(P, I);
+    });
+  }
+  // a row of teeth, curving back round the arch: "U" hangs down from y 0, "L" stands up
+  function teethGeometry(which) {
+    const up = which === "U";
+    return shared("teeth|" + (up ? "U" : "L"), function () {
+      const P = [], I = [], NX = 10;
+      for (let i = 0; i <= NX; i++) {
+        const t = -1 + 2 * i / NX, x = t * TEETH_W / 2, z = -0.006 * t * t;
+        const h = TEETH_H * (1 - 0.35 * t * t);
+        P.push(x, 0, z + 0.002, x, up ? -h : h, z);
+      }
+      for (let i = 0; i < NX; i++) {
+        const a = i * 2;
+        windTri(P, I, a, a + 1, a + 3, 0, 0, 1); windTri(P, I, a, a + 3, a + 2, 0, 0, 1);
+      }
+      return gridGeo(P, I);
+    });
+  }
+  const LASH = 0x17110e, TEETH = 0xe2dac8, CAVITY = 0x2a0e0d;
+  function defaultEyeShape(skin, hair) { const h = hashN(skin ^ 0x5bd1e995, hair) % 10; return h < 3 ? 0 : (h < 8 ? 1 : 2); }
+
+  /* THE FACE'S POSE — the ONE writer of every face transform (facial.js calls
+     it; tools/face-check.mjs proves it). p:
+       blink 0..1 (1 = shut)    lidU  rad, + lowers the upper lid (squint), - widens
+       lidL  rad, + raises the lower lid        yaw / pitch  gaze (rad, + left / up)
+       open  lip gap in face units (0 = closed) mouth  n|smile|snarl|grimace|fear
+       brow  n|a|f                              browY  brow lift (face units) */
+  const REST_POSE = { blink: 0, lidU: 0, lidL: 0, yaw: 0, pitch: 0, open: 0, mouth: "n", brow: "n", browY: 0 };
+  function facePose(rig, p) {
+    const f = rig && rig.face, R = rig && rig.faceRest, M = rig && rig.mouthIn;
+    if (!f || !R || !R.v2 || !f.lidUp) return false;
+    p = p || REST_POSE;
+    const yaw = Math.max(-0.55, Math.min(0.55, p.yaw || 0)), pitch = Math.max(-0.38, Math.min(0.38, p.pitch || 0));
+    const verge = p.verge || 0;
+    f.eyeL.rotation.set(-pitch, yaw + verge, 0);
+    f.eyeR.rotation.set(-pitch, yaw - verge, 0);
+    const bl = Math.max(0, Math.min(1, p.blink || 0));
+    const upOpen = Math.min(R.lidClose, (p.lidU || 0) - pitch * 0.55);
+    f.lidUp.rotation.x = upOpen + (R.lidClose - upOpen) * bl;
+    f.lidLow.rotation.x = -(p.lidL || 0) - pitch * 0.22 - bl * 0.12;
+    // mouth
+    const ek = LIP_EXPR[p.mouth] ? p.mouth : "n", E = LIP_EXPR[ek];
+    if (R.lipExpr !== ek) { R.lipExpr = ek; f.mouth.geometry = lipGeometry("U", ek); f.lipLow.geometry = lipGeometry("L", ek); }
+    const gap = Math.max(0, Math.min(0.055, p.open || 0));
+    const top = R.mouthY + gap * 0.12, bot = R.mouthY - gap * 0.88;
+    f.mouth.position.y = top; f.lipLow.position.y = bot;
+    if (M) {
+      const show = gap > 0.0015 || E.sn > 0;
+      if (M.cavity.visible !== show) M.cavity.visible = show;
+      if (M.teethUp.visible !== show) M.teethUp.visible = show;
+      const lowT = show && gap > 0.005;
+      if (M.teethLow.visible !== lowT) M.teethLow.visible = lowT;
+      if (show) {
+        const sx = R.lipSx * E.wide, hTop = top + E.sn * R.lipSy;
+        M.cavity.scale.set(LIP_W * 0.86 * sx, (hTop - bot) + 0.014, 1);
+        M.cavity.position.set(0, (hTop + bot) / 2, CAVITY_Z);
+        M.teethUp.scale.x = sx * 0.95; M.teethUp.position.set(0, R.mouthY + 0.004, TEETH_Z);
+        M.teethLow.scale.x = sx * 0.86; M.teethLow.position.set(0, bot - 0.004, TEETH_Z - 0.002);
+      }
+    }
+    // brow
+    const bk = p.brow === "a" || p.brow === "f" ? p.brow : "n";
+    if (R.browExpr !== bk) { R.browExpr = bk; f.brow.geometry = browGeometry(R.form, bk); }
+    f.brow.position.y = R.browY + (p.browY || 0);
+    return true;
+  }
+  /* The tier. near: the socketed head + real eyes; far: the light head + the
+     eye-line decal, face at rest. Only ever called on a CHANGE. */
+  function faceLod(rig, near) {
+    const R = rig && rig.faceRest, N = rig && rig.faceNodes;
+    if (!R || !N || !R.v2) return false;
+    near = !!near;
+    if (R.near === near) return false;
+    R.near = near;
+    N.near.visible = near; N.far.visible = !near;
+    if (rig.head && rig.head.geometry && rig.head.geometry._shared) rig.head.geometry = headGeometry(R.form, R.nose, !near);
+    if (!near) facePose(rig, REST_POSE);
+    return true;
   }
   /* BEARDS follow the tapered jaw: each piece is authored around the skull,
      then squeezed by the SAME jawMul the head uses, with a ~0.02 margin, so
@@ -943,10 +1407,17 @@
       const parts = [];
       const hug = (g) => sculpt(g, function (v) { v.x *= jawMul(F, v.y, v.z); });
       const put = (g, x, y, z, hugJaw) => { g.translate(x, y, z); if (hugJaw) hug(g); parts.push(flatUV(finishGeo(g), 0.5, 0.5)); };
+      // a moustache sits ON the skin between nose and upper lip: thick in the
+      // middle, thinning and drooping to the mouth corners, wrapped round the face
       const moustache = () => {
-        const m = rbox(0.25, 0.046, 0.05, 0.02, [4, 1, 1]);
-        sculpt(m, function (v) { v.y -= 0.022 * Math.pow(2 * v.x / 0.25, 2); });
-        put(m, 0, 0.203, 0.318, false);
+        const m = rbox(0.20, 0.034, 0.030, 0.012, [8, 2, 2]);
+        sculpt(m, function (v) {
+          const t = 2 * v.x / 0.20, t2 = t * t;
+          v.y *= 1 - 0.5 * t2;
+          v.y -= 0.022 * t2;
+          v.z -= 0.028 * t2;
+        });
+        put(m, 0, 0.203, 0.312, false);
       };
       if (style === "full" || style === "stubble") {
         const thick = style === "full" ? 1 : 0.55;
@@ -954,7 +1425,14 @@
         for (const s of [-1, 1]) put(rbox(0.030 + 0.03 * thick, 0.22, 0.20, 0.02, [1, 2, 2]), s * (0.290 + 0.012 * thick), 0.205, 0.045, true);
         if (style === "full") moustache();
       } else if (style === "goatee") {
-        put(rbox(0.20, 0.13, 0.07, 0.03, [2, 2, 1]), 0, 0.068, 0.284, false);
+        // a goatee: under the lower lip, tapering to the point of the chin
+        const gt = rbox(0.15, 0.115, 0.05, 0.03, [4, 4, 2]);
+        sculpt(gt, function (v) {
+          const u = cl01((v.y + 0.0575) / 0.115);
+          v.x *= lerpN(0.66, 1, u);
+          v.z -= 0.02 * Math.pow(2 * v.x / 0.15, 2);
+        });
+        put(gt, 0, 0.068, 0.300, false);
         moustache();
       } else if (style === "moustache") {
         moustache();
@@ -1024,6 +1502,12 @@
   // city of skins lands on a handful of cached materials
   function lipTone(skin) {
     const t = mixHex(skin, 0x8a3438, 0.34), q = (c) => Math.min(255, Math.round(c * 0.78 / 8) * 8);
+    return (q(t >> 16 & 255) << 16) | (q(t >> 8 & 255) << 8) | q(t & 255);
+  }
+  // lids: the skin a shade down (the socket's own shade), so an open eye has
+  // no pale ring round it; quantised like the lips
+  function lidTone(skin) {
+    const t = mixHex(skin, 0x3a2418, 0.09), q = (c) => Math.min(255, Math.round(c / 4) * 4);
     return (q(t >> 16 & 255) << 16) | (q(t >> 8 & 255) << 8) | q(t & 255);
   }
   function browTone(hair) { return lumOf(hair) > 0.35 ? mixHex(hair, 0x2a1f16, 0.35) : mixHex(hair, 0x0a0806, 0.25); }
@@ -1441,44 +1925,66 @@
     head.position.y = headSize / 2; head.scale.setScalar(hk); head.castShadow = true;
     head.name = "head";
     neck.add(head);
-    // FACE SCALE NODE: systems/facial.js owns eye/iris/mouth positions at
-    // runtime as ABSOLUTE numbers for the 0.60 adult head (it reads them from
-    // rig.faceRest). Parenting the features to a group scaled by headSize/0.60
-    // means those writes land in a frame that shrinks WITH the head, so a
-    // toddler's face is a toddler's face without facial.js knowing children
-    // exist.
+    // FACE SCALE NODES: systems/facial.js poses the face through facePose in
+    // ABSOLUTE numbers for the 0.60 adult head. Parenting the features to
+    // groups scaled by headSize/0.60 means those land in a frame that shrinks
+    // WITH the head, so a toddler's face is a toddler's face. Three siblings,
+    // all the same frame: `face` (brow, lips, mouth interior, beard), `eyesNear`
+    // (balls + lids + lashes) and `eyesFar` (the far-tier eye line). The tier
+    // (faceLod) toggles only the two EYE GROUPS, never a member mesh, so the
+    // per-mesh LODs elsewhere (npc.js ch.detail, warlord campaign faces) and
+    // this one can never fight over the same `visible` flag.
     const face = new THREE.Group();
     face.scale.setScalar(hk);
+    face.name = "face";
     neck.add(face);
-    // EYES: a white you can see at street distance (the silhouette of a face
-    // is its eye line), an iris with a pupil and a catch-light up close. The
-    // white stays a true box — it is what facial.js blinks and what
-    // warlord/outfits.js measures the brow line off.
-    const kid = form === "c";
-    const scl = cmat(c.sclera != null ? c.sclera : SCLERA);
-    const eyeW = kid ? 0.135 : 0.13, eyeH = kid ? 0.095 : (form === "f" ? 0.088 : 0.082);
-    // 0.05 deep: the back face stays buried where the skull rounds away at
-    // the outer corner, the front stands 0.02 proud of the face plane
-    const le = new THREE.Mesh(boxGeom(eyeW, eyeH, 0.05), scl);
-    const re = new THREE.Mesh(boxGeom(eyeW, eyeH, 0.05), scl);
-    le.position.set(-EYE_REST.x, EYE_REST.y, EYE_REST.z); re.position.set(EYE_REST.x, EYE_REST.y, EYE_REST.z);
-    const im = irisMat(c.eye != null ? c.eye : defaultEye(skinHex, hairHex));
-    const irisW = kid ? 0.068 : 0.062;
-    const li = new THREE.Mesh(boxGeom(irisW, eyeH - 0.004, 0.02), im);
-    const ri = new THREE.Mesh(boxGeom(irisW, eyeH - 0.004, 0.02), im);
-    li.position.set(0, 0, 0.022); ri.position.set(0, 0, 0.022);   // front 0.007 proud of the white
-    li.name = ri.name = "iris";
-    le.add(li); re.add(ri);
+    const eyesNear = new THREE.Group();
+    eyesNear.scale.setScalar(hk); eyesNear.name = "eyesNear";
+    const eyesFar = new THREE.Group();
+    eyesFar.scale.setScalar(hk); eyesFar.name = "eyesFar"; eyesFar.visible = false;
+    neck.add(eyesNear, eyesFar);
+    // EYES in their sockets (see THE FACE): the ball, then the lids over it
+    const eyeShape = Math.max(0, Math.min(2, (c.eyeShape != null ? c.eyeShape : defaultEyeShape(skinHex, hairHex)) | 0));
+    const eyeZ = EYE.front - eyeR(form);
+    const em = eyeMat(c.eye != null ? c.eye : defaultEye(skinHex, hairHex));
+    const le = new THREE.Mesh(eyeballGeometry(form), em);
+    const re = new THREE.Mesh(eyeballGeometry(form), em);
+    le.position.set(-EYE.x, EYE.y, eyeZ); re.position.set(EYE.x, EYE.y, eyeZ);
+    le.rotation.order = re.rotation.order = "YXZ";
+    le.name = re.name = "eye";
+    const lidMat = cmat(lidTone(skinHex));
+    const lidUp = new THREE.Mesh(lidGeometry("U", eyeShape, form), lidMat);
+    const lidLow = new THREE.Mesh(lidGeometry("L", eyeShape, form), lidMat);
+    lidUp.position.set(0, EYE.y, eyeZ); lidLow.position.set(0, EYE.y, eyeZ);
+    lidUp.name = "lidUpper"; lidLow.name = "lidLower";
+    const lashes = new THREE.Mesh(lashGeometry(eyeShape, form), cmat(LASH));
+    lashes.name = "lashes";
+    lidUp.add(lashes);
+    eyesNear.add(le, re, lidUp, lidLow);
+    const farEyes = new THREE.Mesh(farEyeGeometry(), farEyeMat());
+    farEyes.name = "farEyes";
+    eyesFar.add(farEyes);
     // BROWS: one mesh, a shaped brow over each eye, in the hair's own tone.
     // Its geometry hangs BELOW its origin, so position.y is the brow's top.
-    const brow = new THREE.Mesh(browGeometry(form), cmat(c.brow != null ? c.brow : browTone(hairHex)));
-    brow.position.set(0, 0.448, 0.303);
-    // MOUTH: the animated box, in a lip tone off the skin (fuller for f, and
-    // for c.lips — heritage.js rolls it).
-    const mouth = new THREE.Mesh(boxGeom(0.17, (form === "f" ? 0.05 : 0.044) + (c.lips ? 0.008 : 0), 0.04), cmat(c.lip != null ? c.lip : lipTone(skinHex)));
-    mouth.position.set(0, MOUTH_REST_Y, 0.305);
-    le.castShadow = re.castShadow = brow.castShadow = mouth.castShadow = false;
-    face.add(le, re, brow, mouth);
+    const brow = new THREE.Mesh(browGeometry(form, "n"), cmat(c.brow != null ? c.brow : browTone(hairHex)));
+    brow.position.set(0, BROW_REST_Y, 0.303);
+    // MOUTH: two lips in a lip tone off the skin (fuller for f and for c.lips —
+    // heritage.js rolls it), closed; the inside + teeth only exist when open
+    const lipM = cmat(c.lip != null ? c.lip : lipTone(skinHex));
+    const lipSx = form === "c" ? 0.84 : (form === "f" ? 0.94 : 1);
+    const lipSy = (form === "f" ? 1.12 : (form === "c" ? 0.92 : 1)) * (c.lips ? 1.25 : 1);
+    const mouth = new THREE.Mesh(lipGeometry("U", "n"), lipM);
+    const lipLow = new THREE.Mesh(lipGeometry("L", "n"), lipM);
+    mouth.position.set(0, MOUTH_REST_Y, 0); lipLow.position.set(0, MOUTH_REST_Y, 0);
+    mouth.scale.set(lipSx, lipSy, 1); lipLow.scale.set(lipSx, lipSy, 1);
+    mouth.name = "lipUpper"; lipLow.name = "lipLower";
+    const cavity = new THREE.Mesh(cavityGeometry(), cmat(CAVITY));
+    const teethUp = new THREE.Mesh(teethGeometry("U"), cmat(TEETH));
+    const teethLow = new THREE.Mesh(teethGeometry("L"), cmat(TEETH));
+    cavity.name = "mouthCavity"; teethUp.name = teethLow.name = "teeth";
+    cavity.visible = teethUp.visible = teethLow.visible = false;
+    for (const m of [le, re, lidUp, lidLow, lashes, farEyes, brow, mouth, lipLow, cavity, teethUp, teethLow]) m.castShadow = false;
+    face.add(brow, mouth, lipLow, cavity, teethUp, teethLow);
     /* ---- FACIAL HAIR (entities/heritage.js) --------------------------------
        c.beard: "full" | "goatee" | "moustache" | "stubble". ONE merged mesh
        per (style, form), squeezed by the head's own jaw taper so it hugs the
@@ -1650,12 +2156,19 @@
         hair: hairParts,
         beard: beardParts,
       },
-      // animated by systems/facial.js (eyeL/eyeR blink, irisL/irisR dart,
-      // mouth talks); faceRest is where it returns them to.
-      face: { eyeL: le, eyeR: re, irisL: li, irisR: ri, brow, mouth },
-      faceRest: { eyeX: EYE_REST.x, eyeY: EYE_REST.y, mouthY: MOUTH_REST_Y },
+      // posed ONLY through CBZ.human.facePose (systems/facial.js animates it):
+      // eyeL/eyeR the balls (gaze = rotation), lidUp/lidLow the lids (blink =
+      // lidUp.rotation.x), mouth = the upper lip, lipLow the lower. Everything
+      // here is safe to show at any time; the mouth interior is NOT in this
+      // record (rig.mouthIn) because it must stay hidden while the mouth is shut.
+      face: { eyeL: le, eyeR: re, lidUp, lidLow, lashes, brow, mouth, lipLow },
+      mouthIn: { cavity, teethUp, teethLow },
+      faceNodes: { near: eyesNear, far: eyesFar, farEyes },
+      faceRest: { v2: true, eyeX: EYE.x, eyeY: EYE.y, eyeZ: eyeZ, mouthY: MOUTH_REST_Y, browY: BROW_REST_Y,
+                  form: form, nose: noseV, eyeShape: eyeShape, lidClose: lidCloseAngle(eyeShape, form),
+                  lipSx: lipSx, lipSy: lipSy, lipExpr: "n", browExpr: "n", near: true },
       headForm: form,
-      detail: [le, re, brow, mouth].concat(hairParts, beardParts, capParts, body.userData.stripes || [], badgeParts),
+      detail: [le, re, lidUp, lidLow, farEyes, brow, mouth, lipLow].concat(hairParts, beardParts, capParts, body.userData.stripes || [], badgeParts),
       phase: Math.random() * 6.28,  // desync gaits between actors
       bob: 0, breath: Math.random() * 6.28,
       lean: 0, sway: 0, headYaw: 0,
@@ -1685,6 +2198,9 @@
       });
     }
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
+    // every face on the page lives (blinks, looks, talks, LODs) through
+    // systems/facial.js; a page without it keeps a still, near-tier face
+    if (typeof CBZ.faceRegister === "function") CBZ.faceRegister(rig);
     return rig;
   }
 
@@ -4822,7 +5338,7 @@
     const t = L(s.torso), f = rig && rig.face;
     return {
       head: L(s.head),
-      face: f ? L([f.eyeL, f.eyeR, f.irisL, f.irisR, f.brow, f.mouth]) : [],
+      face: f ? L([f.eyeL, f.eyeR, f.lidUp, f.lidLow, f.brow, f.mouth, f.lipLow]) : [],
       hair: L(s.hair).concat(L(s.beard)),
       torso: t.slice(0, 1).concat(L(s.collar)),
       waist: t.slice(1),
@@ -4873,6 +5389,15 @@
     hairStyles: function () { return Object.keys(HAIR_STYLES); },
     eyeColours: EYE_COLOURS,
     // shared-geometry builders, for tools and previews (all cached)
-    geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: shoeGeometry },
+    geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: shoeGeometry,
+                eyeball: eyeballGeometry, lid: lidGeometry, lip: lipGeometry },
+    // THE FACE: facePose(rig, pose) is the one writer of eyes/lids/lips/brow;
+    // faceLod(rig, near) the tier; facial.js drives both. faceRestPose is the
+    // neutral pose object (read-only), faceExpressions the lip shapes.
+    facePose: facePose,
+    faceLod: faceLod,
+    faceRestPose: REST_POSE,
+    faceExpressions: Object.keys(LIP_EXPR),
+    lidTone: lidTone,
   };
 })();

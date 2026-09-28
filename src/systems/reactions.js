@@ -252,19 +252,10 @@
     if (r) { r.savedEm = -1; r.savedCol = -1; }
   }
 
-  // force a wide-eyed, open-mouthed FEAR face. We run after facial.js (88), so
-  // for this frame we win; reacting actors hold a frozen terrified stare.
-  // k 0..1 scales the gape (0.4 = tense stand-off, 1 = pure terror).
+  // a wide-eyed, open-mouthed FEAR face, held for this frame and a beat after
+  // (systems/facial.js owns the face; k 0.4 = tense stand-off, 1 = terror)
   function setFearFace(a, k) {
-    const f = a.char && a.char.face;
-    if (!f) return;
-    if (f.eyeL) f.eyeL.scale.y = 1;          // override the blink — eyes wide
-    if (f.eyeR) f.eyeR.scale.y = 1;
-    if (f.mouth) {
-      const o = 0.35 + 0.65 * k;
-      f.mouth.scale.y = 1 + o * 1.8;
-      f.mouth.position.y = 0.16 - o * 0.05;
-    }
+    if (a && a.char && CBZ.faceMood) CBZ.faceMood(a.char, "fear", k, 300);
   }
 
   // a melee blow already has its reaction on the rig (entities/meleeposes.js:

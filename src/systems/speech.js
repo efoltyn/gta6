@@ -9,6 +9,9 @@
                                             sits by the player's hand
      CBZ.speech.clear()                  -> drop every live line
      CBZ.speech.audit()                  -> counters + the live lines
+     CBZ.speech.speakers()               -> who is talking now (facial.js: heads
+                                            turn to them; the speaker's rig gets
+                                            rig._say so his lips move with the words)
 
    speaker is anything with a place: an actor (.group.position / .pos /
    .position), a THREE.Vector3, or a plain {x,y,z}. opts:
@@ -206,7 +209,23 @@
     s.occT = 0;
     place(s, 0);
     said++;
+    // THE MOUTH SAYS IT: systems/facial.js opens the speaker's lips in time
+    // with these words (rig._say), and the people around him look at him
+    const rig = rigOf(spk);
+    if (rig && rig.faceRest) rig._say = { t0: CBZ.now || 0, text: line, rate: 14, loud: line.indexOf("!") >= 0 };
     return true;
+  }
+  function rigOf(s) {
+    if (!s) return null;
+    if (isPlayer(s)) return CBZ.playerChar || null;
+    return s.char || (s.group && s.group.userData && typeof s.group.userData.charRig === "object" ? s.group.userData.charRig : null) || (s.faceRest ? s : null);
+  }
+  // who is talking right now (live, non-phone lines): facial.js turns heads to them
+  const _speakers = [];
+  function speakers() {
+    _speakers.length = 0;
+    for (let i = 0; i < live.length; i++) if (!live[i].phone && live[i].spk) _speakers.push(live[i].spk);
+    return _speakers;
   }
 
   // a voice on the phone: by the player's hand, not in a HUD box
@@ -380,6 +399,7 @@
     then: then,
     stopAll: stopAll,
     say: say,
+    speakers: speakers,
     phone: phone,
     clear: clear,
     words: words,

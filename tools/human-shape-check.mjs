@@ -83,14 +83,15 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   let t = 0;
   for (const m of ms) { geomOk(m.geometry, `${id}/${b.tag} ${m.name || m.geometry.type}`); t += tris(m.geometry); }
   rows.push({ id, tag: b.tag, meshes: ms.length, tris: t, hair: rig.skinSlots.hair[0] ? rig.skinSlots.hair[0].userData.hairStyle : "-", beard: look.beard || "-" });
-  check(ms.length >= 20 && ms.length <= 27, `${id}/${b.tag} mesh count ${ms.length} in the 20-27 band`);
-  // face wiring
+  check(ms.length >= 24 && ms.length <= 32, `${id}/${b.tag} mesh count ${ms.length} in the 24-32 band`);
+  // face wiring (entities/character.js THE FACE)
   const f = rig.face;
-  check(f && f.eyeL && f.eyeR && f.irisL && f.irisR && f.brow && f.mouth, `${id}/${b.tag} face parts present`);
-  check(f.eyeL.parent === f.brow.parent && f.eyeL.parent.parent === rig.neck, `${id}/${b.tag} face node under the neck`);
-  check(f.irisL.parent === f.eyeL && f.irisR.parent === f.eyeR, `${id}/${b.tag} irises under the eye whites`);
-  check(isTrueBox(f.eyeL.geometry) && isTrueBox(f.mouth.geometry), `${id}/${b.tag} eye white + mouth stay true boxes (facial.js/outfits.js measure them)`);
-  check(rig.faceRest && rig.faceRest.eyeY === 0.34 && rig.faceRest.mouthY === 0.16, `${id}/${b.tag} faceRest`);
+  check(f && f.eyeL && f.eyeR && f.lidUp && f.lidLow && f.lashes && f.brow && f.mouth && f.lipLow, `${id}/${b.tag} face parts present`);
+  check(f.brow.parent.parent === rig.neck && f.eyeL.parent === rig.faceNodes.near && rig.faceNodes.near.parent === rig.neck, `${id}/${b.tag} face nodes under the neck`);
+  check(f.eyeL.parent.scale.y === f.brow.parent.scale.y && f.eyeL.parent.position.y === f.brow.parent.position.y, `${id}/${b.tag} eye node and face node share one frame (outfits.js faceLine)`);
+  check(f.lashes.parent === f.lidUp, `${id}/${b.tag} lashes ride the upper lid`);
+  check(rig.mouthIn && !rig.mouthIn.cavity.visible && !rig.mouthIn.teethUp.visible && !rig.mouthIn.teethLow.visible, `${id}/${b.tag} mouth built shut`);
+  check(rig.faceRest && rig.faceRest.v2 && rig.faceRest.eyeY === 0.34 && rig.faceRest.mouthY === 0.16, `${id}/${b.tag} faceRest`);
   check(rig.head.material && !rig.head.material._shared, `${id}/${b.tag} head material is its own`);
   check(rig.skinSlots.shoes.length === 2 && rig.skinSlots.torso[0] && rig.skinSlots.arms.length === 2 && rig.skinSlots.legs.length === 2, `${id}/${b.tag} slot shapes`);
   // box parts that clothes.js paints stay true boxes with their tags
@@ -114,7 +115,7 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   check(uv.every((x) => x >= 0 && x <= 1), `${id}/${b.tag} head uv in atlas`);
   // regions
   const R = CBZ.human.regions(rig);
-  check(R.head.length === 1 && R.shoes.length === 2 && R.legsUpper.length === 2 && R.armsUpper.length === 2 && R.face.length === 6, `${id}/${b.tag} regions`);
+  check(R.head.length === 1 && R.shoes.length === 2 && R.legsUpper.length === 2 && R.armsUpper.length === 2 && R.face.length === 7, `${id}/${b.tag} regions`);
 }
 // NO PER-BODY GEOMETRY: rebuild each (heritage, body) twice with identical input
 {

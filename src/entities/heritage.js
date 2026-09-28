@@ -57,6 +57,7 @@
   // eyes     weighted eye colours (names from CBZ.human.eyeColours)
   // nose     weights for [narrow, medium, broad] (character.js head variants)
   // lips     odds of fuller lips
+  // lids     weights for [round, almond, hooded/monolid] (character.js c.eyeShape)
   const H = {
     black: { name: "Black", weight: 34,
       // the game's exposure lifts every tone ~a stop (a 0x25282d shoe reads
@@ -65,61 +66,61 @@
       hair: [0x141010, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2], ["curly", 2], ["afro", 1], ["locs", 1]],
       bald: 0.18, beard: { full: 0.22, goatee: 0.28, stubble: 0.15 },
       ink: 0.45, sets: [["script", 3], ["chest", 2]], tank: 0.35,
-      eyes: [["dark", 8], ["brown", 2]], nose: [1, 3, 6], lips: 0.70 },
+      eyes: [["dark", 8], ["brown", 2]], nose: [1, 3, 6], lips: 0.70, lids: [4, 5, 1] },
     white: { name: "White", weight: 26,
       skins: [0xf0c39a, 0xfae0c8, 0xe8b58c, 0xe8c39a, 0xf5d3b3, 0xd9b08e],
       hair: [0x4a3526, 0x2a2018, 0x7a4a2e, 0xb08a4a, 0xa3401f, 0x8c7a68], styles: [["short", 4], ["crop", 3], ["buzz", 3], ["long", 1]],
       bald: 0.12, beard: { full: 0.20, goatee: 0.18, stubble: 0.22, moustache: 0.06 },
       ink: 0.35, sets: [["script", 2], ["web", 2]], tank: 0.30,
-      eyes: [["brown", 3], ["hazel", 2], ["blue", 3], ["green", 1.5], ["grey", 1]], nose: [4, 5, 1], lips: 0.15 },
+      eyes: [["brown", 3], ["hazel", 2], ["blue", 3], ["green", 1.5], ["grey", 1]], nose: [4, 5, 1], lips: 0.15, lids: [3, 6, 1] },
     skinhead: { name: "White-power crew", weight: 8,
       skins: [0xf5d3b3, 0xfae0c8, 0xf0c39a, 0xecc6a3],
       hair: [0x8c7a68, 0x7a4a2e, 0x4a3526], styles: [["buzz", 1]],
       bald: 0.65, beard: { goatee: 0.35, stubble: 0.30 },
       ink: 1.0, sets: [["skinhead", 1]], tank: 0.85,
-      eyes: [["blue", 3], ["grey", 2], ["green", 1], ["brown", 1], ["hazel", 1]], nose: [4, 5, 1], lips: 0.10 },
+      eyes: [["blue", 3], ["grey", 2], ["green", 1], ["brown", 1], ["hazel", 1]], nose: [4, 5, 1], lips: 0.10, lids: [3, 6, 1] },
     latino: { name: "Latino", weight: 22,
       skins: [0xc08a5a, 0xd8a177, 0xb5825a, 0xb67b52, 0xa87049, 0xd9a983],
       hair: [0x101820, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2], ["curly", 1]],
       bald: 0.28, beard: { goatee: 0.35, moustache: 0.18, stubble: 0.20 },
       ink: 0.80, sets: [["chicano", 4], ["script", 1], ["teardrop", 1]], tank: 0.60,
-      eyes: [["dark", 3], ["brown", 5], ["hazel", 2], ["amber", 1]], nose: [2, 5, 3], lips: 0.30 },
+      eyes: [["dark", 3], ["brown", 5], ["hazel", 2], ["amber", 1]], nose: [2, 5, 3], lips: 0.30, lids: [3, 6, 1] },
     eastasian: { name: "East Asian", weight: 5,
       skins: [0xf0d0a8, 0xe8c39a, 0xd9b08e, 0xf5d3b3],
       hair: [0x0d0b0a, 0x101820], styles: [["short", 3], ["crop", 3], ["buzz", 2]],
       bald: 0.05, beard: { stubble: 0.12, goatee: 0.08 },
       ink: 0.30, sets: [["sleeve", 1]], tank: 0.25,
-      eyes: [["dark", 7], ["brown", 3]], nose: [2, 5, 3], lips: 0.20 },
+      eyes: [["dark", 7], ["brown", 3]], nose: [2, 5, 3], lips: 0.20, lids: [1, 3, 6] },
     southasian: { name: "South Asian (Indian)", weight: 4,
       skins: [0x9c6a45, 0x8a5a3a, 0xb5825a, 0x7a4a2e, 0xa87049],
       hair: [0x0d0b0a, 0x141010], styles: [["short", 4], ["crop", 2], ["buzz", 2]],
       bald: 0.10, beard: { full: 0.40, stubble: 0.30, moustache: 0.15 },
       ink: 0.15, sets: [["script", 1]], tank: 0.20,
-      eyes: [["dark", 6], ["brown", 3], ["hazel", 1]], nose: [2, 5, 3], lips: 0.25 },
+      eyes: [["dark", 6], ["brown", 3], ["hazel", 1]], nose: [2, 5, 3], lips: 0.25, lids: [3, 6, 1] },
     mideast: { name: "Middle Eastern", weight: 4,
       skins: [0xd0b08a, 0xc9a27a, 0xb58a62, 0xdcb691],
       hair: [0x0d0b0a, 0x1a120c], styles: [["short", 4], ["crop", 2], ["buzz", 2]],
       bald: 0.15, beard: { full: 0.50, stubble: 0.30 },
       ink: 0.10, sets: [["script", 1]], tank: 0.15,
-      eyes: [["brown", 5], ["dark", 3], ["hazel", 2], ["green", 1]], nose: [3, 6, 1], lips: 0.20 },
+      eyes: [["brown", 5], ["dark", 3], ["hazel", 2], ["green", 1]], nose: [3, 6, 1], lips: 0.20, lids: [3, 6, 1] },
     native: { name: "Native American", weight: 4,
       skins: [0xb06f48, 0x9c5f3c, 0xc4835a, 0xa8683f],
       hair: [0x0d0b0a, 0x141010], styles: [["long", 4], ["pony", 3], ["short", 2]],
       bald: 0.04, beard: { stubble: 0.10 },
       ink: 0.35, sets: [["chest", 2], ["script", 1]], tank: 0.30,
-      eyes: [["dark", 6], ["brown", 4]], nose: [2, 6, 2], lips: 0.20 },
+      eyes: [["dark", 6], ["brown", 4]], nose: [2, 6, 2], lips: 0.20, lids: [2, 5, 3] },
     islander: { name: "Pacific Islander", weight: 4,
       skins: [0x8a5a3a, 0x9c6a45, 0x7a4a2e, 0xa87049],
       hair: [0x0d0b0a, 0x141010], styles: [["buzz", 3], ["short", 3], ["crop", 2], ["bun", 1], ["curly", 2]],
       bald: 0.12, beard: { goatee: 0.30, full: 0.20, stubble: 0.20 },
       ink: 0.85, sets: [["tribal", 1]], tank: 0.70,
-      eyes: [["dark", 6], ["brown", 4]], nose: [1, 3, 6], lips: 0.50 },
+      eyes: [["dark", 6], ["brown", 4]], nose: [1, 3, 6], lips: 0.50, lids: [3, 5, 2] },
     easteuro: { name: "Eastern European", weight: 6,
       skins: [0xf0c39a, 0xfae0c8, 0xe8b58c, 0xecc6a3],
       hair: [0x4a3526, 0x2a2018, 0x8c7a68, 0xb08a4a], styles: [["buzz", 5], ["short", 2]],
       bald: 0.30, beard: { stubble: 0.35, goatee: 0.10 },
       ink: 0.75, sets: [["vory", 1]], tank: 0.55,
-      eyes: [["blue", 4], ["grey", 3], ["green", 2], ["brown", 2], ["hazel", 1]], nose: [3, 6, 1], lips: 0.10 },
+      eyes: [["blue", 4], ["grey", 3], ["green", 2], ["brown", 2], ["hazel", 1]], nose: [3, 6, 1], lips: 0.10, lids: [3, 6, 1] },
   };
   const IDS = Object.keys(H);
   let totalW = 0;
@@ -171,6 +172,8 @@
     const nw = d.nose || [1, 2, 1];
     look.nose = pickW([[0, nw[0]], [1, nw[1]], [2, nw[2]]], r());
     look.lips = r() < (d.lips || 0);
+    const lw = d.lids || [3, 6, 1];
+    look.eyeShape = pickW([[0, lw[0]], [1, lw[1]], [2, lw[2]]], r());
     if (over) Object.assign(look, over);
     return look;
   }

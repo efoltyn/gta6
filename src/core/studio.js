@@ -983,7 +983,7 @@
     if (look) {
       body.skin = look.skin; body.hair = look.hair;
       if (look.eye != null) body.eye = look.eye;
-      body.nose = look.nose; body.lips = look.lips;
+      body.nose = look.nose; body.lips = look.lips; body.eyeShape = look.eyeShape;
       if (!fem && look.beard && opts.beard !== false) body.beard = look.beard;
       // the roll's hair texture for men; a woman keeps the body's own default
       if (!fem) { body.hairStyle = look.hairStyle; if (look.bald) body.bald = true; }
