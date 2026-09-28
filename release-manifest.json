@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "fb0c5d1e67f80d03d2eaecb420418f5fd85f5f56",
-  "createdAt": "2026-09-28T08:13:42.804Z",
+  "sourceCommit": "9040372356279389024578939c59948cc8337fba",
+  "createdAt": "2026-09-28T08:56:28.112Z",
   "fileCount": 1154,
-  "totalBytes": 47059708,
+  "totalBytes": 47065545,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1218,8 +1218,8 @@
     },
     {
       "file": "src/city/props.js",
-      "bytes": 109896,
-      "sha256": "295c56fdf6deceb4c6145f22199ea5c2a95b3fa12c653442e5ecfd2b8599583d"
+      "bytes": 109933,
+      "sha256": "56eff36c76abd2467128f1e69cd7deb87e41eba66924664251f53b0aa7ace939"
     },
     {
       "file": "src/city/propuse.js",
@@ -1263,8 +1263,8 @@
     },
     {
       "file": "src/city/ragdoll.js",
-      "bytes": 17685,
-      "sha256": "df19962b14df9d87bfccfbf774296f253158a5a0c31794cb63cd7efa333066f9"
+      "bytes": 18638,
+      "sha256": "ec72e70fc9ab2e1bc74fb1687d2b5a0abe5b327a8113e4fce8812c2044730619"
     },
     {
       "file": "src/city/read.js",
@@ -1648,8 +1648,8 @@
     },
     {
       "file": "src/config.js",
-      "bytes": 21042,
-      "sha256": "45e1604d4db4f900790b22a258bf230f5b47efd271e0beeab6fe5fe2bbd0e5ae"
+      "bytes": 21054,
+      "sha256": "5a292c559b831fd5c8e7cd8e0b5e8cee6d4ae683113513264a8f703dcdabdcca"
     },
     {
       "file": "src/core/batch.js",
@@ -1778,8 +1778,8 @@
     },
     {
       "file": "src/entities/ai.js",
-      "bytes": 217496,
-      "sha256": "c542384d2d34902838ee3cf84f8949db7ff64cc8045a9002a9f2b294991a3b7d"
+      "bytes": 217740,
+      "sha256": "b867a766d7a6bb7f23cdcf6c7f4f1bd05ddeb5095b2e1c7f6dbb35f1f04d22ea"
     },
     {
       "file": "src/entities/ambientstate.js",
@@ -1843,8 +1843,8 @@
     },
     {
       "file": "src/entities/npc.js",
-      "bytes": 25323,
-      "sha256": "6d2ff8bee01f9195bc17faad8268936feaca04b36de8f4e2ec06ec5622617338"
+      "bytes": 25470,
+      "sha256": "ce72d142075f2c4c69b2a7d8803183e0c713bf367d6689a15186f31ae58189d2"
     },
     {
       "file": "src/entities/npclife.js",
@@ -2343,8 +2343,8 @@
     },
     {
       "file": "src/systems/fpsmode.js",
-      "bytes": 122298,
-      "sha256": "1348041f1c4682ad50f6e5d375f238240f239e07f74282471c21457084a9d2a5"
+      "bytes": 122815,
+      "sha256": "3474bf9ae86b55010b5efc495cfcc7a283fa3d05ce9b68699c144eb2494407cf"
     },
     {
       "file": "src/systems/fullmap.js",
@@ -2443,8 +2443,8 @@
     },
     {
       "file": "src/systems/interact.js",
-      "bytes": 21580,
-      "sha256": "0b05483501616190630011ed7d6e37a8804bb4b514e3a62fe0c340e825ee850f"
+      "bytes": 21948,
+      "sha256": "cac46863676d54252761d96b8900f299d4098f520839a9edf18f92d67ca989c7"
     },
     {
       "file": "src/systems/interactions.js",
@@ -2563,8 +2563,8 @@
     },
     {
       "file": "src/systems/prisoncars.js",
-      "bytes": 14266,
-      "sha256": "7812bceb854d1a14e1dfced3aab1a03cf13d8fdc8414ccfefc0f5b73d82012a7"
+      "bytes": 15494,
+      "sha256": "18c153883614558a09cbf6ad66fb8178c692f898cf6cb25d8b006927d3a95220"
     },
     {
       "file": "src/systems/prisoncorpse.js",
@@ -2608,8 +2608,8 @@
     },
     {
       "file": "src/systems/prisonrest.js",
-      "bytes": 9170,
-      "sha256": "a54ff39b0fffb8cd365ae0c9b5771e91ecd1de0377076c060094f7ee5c875ff2"
+      "bytes": 9481,
+      "sha256": "a15926a4f56b783ad2db1b11833415ea2fe19745996fa80a9ce286b935b7b8d0"
     },
     {
       "file": "src/systems/prisonschedule.js",
@@ -2798,8 +2798,8 @@
     },
     {
       "file": "src/systems/verbs.js",
-      "bytes": 65411,
-      "sha256": "9f00efff852f285baac2c51eb7ba4f1f4f32a22800dc62d40385b6b61183d3df"
+      "bytes": 66969,
+      "sha256": "3ad0a128dc5d26a5a3b5ec248a5c5c92b000da699b67cf0352c1b725c2d2f59c"
     },
     {
       "file": "src/systems/verbs_pickup.js",
@@ -2808,8 +2808,8 @@
     },
     {
       "file": "src/systems/verbs_strike.js",
-      "bytes": 32100,
-      "sha256": "2a43ae9ffc341418a365a6a5f2e70c0508b3f4f762c5f3c551b3cbbe56bd6646"
+      "bytes": 32562,
+      "sha256": "2a4ab77217b7dba2fcaacb408ee6b6118537290904a086bb7fb5d73af62a49ab"
     },
     {
       "file": "src/systems/weather.js",
