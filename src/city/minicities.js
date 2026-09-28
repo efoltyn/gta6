@@ -146,11 +146,15 @@
   }
 
   // merge helper (one mesh per pad; fallback = a single flat plane mesh).
-  function addPad(root, cx, cz, w, d, color, y) {
+  // `step` > 0: a private clone pulled that many polygonOffset steps forward
+  // (never the shared cmat, which every same-coloured wall draws with).
+  function addPad(root, cx, cz, w, d, color, y, step) {
     const g = new THREE.PlaneGeometry(w, d);
     g.rotateX(-Math.PI / 2);
     g.translate(cx, y == null ? 0.02 : y, cz);
-    const m = new THREE.Mesh(g, cmat(color));
+    let mt = cmat(color);
+    if (step) { mt = mt.clone(); mt.polygonOffset = true; mt.polygonOffsetFactor = -step; mt.polygonOffsetUnits = -2 * step; }
+    const m = new THREE.Mesh(g, mt);
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.terrain = true;
     m.userData.worldSurface = true;
@@ -226,9 +230,13 @@
         cMinX = cx - HW; cMaxX = cx + HW; midX = cx; midZ = (cMinZ + cMaxZ) / 2;
         vertical = true; len = cMaxZ - cMinZ;
       }
-      // deck plane + region + a traffic road segment down the corridor
+      // deck plane + region + a traffic road segment down the corridor.
+      // The dark deck lies 1 cm over the town's ground pad (0.03) and 2.2 cm
+      // over the mini-city pad (0.018) along its first metres: pulled one step
+      // forward so it owns them. (Its far end runs under the highway it plugs
+      // into, 4.5 cm lower, which the highway still wins.)
       addPad(root, midX, midZ, vertical ? HW * 2 : (cMaxX - cMinX), vertical ? (cMaxZ - cMinZ) : HW * 2,
-        (tpl.palette && tpl.palette.road != null ? tpl.palette.road : 0x3c3f46), 0.04);
+        (tpl.palette && tpl.palette.road != null ? tpl.palette.road : 0x3c3f46), 0.04, 1);
       CBZ.registerCityRegion(city, {
         name: tpl.name + " Causeway", subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
         minX: cMinX, maxX: cMaxX, minZ: cMinZ, maxZ: cMaxZ, pad: 1,

@@ -349,25 +349,35 @@
       tex.anisotropy = 4;
       return tex;
     }
-    function deckPlane(w, d, hex, fallbackColor, y) {
+    // The deck and its road START AT THE MAINLAND CARRIAGEWAY'S EDGE, not at
+    // bridgeStart (2 m short of the last street's centreline): laid from
+    // there, the dark bridge road sat 5 mm over 11 m of the city street and
+    // the concrete deck 2.5 cm under it, two different grains fighting for
+    // the same pixels. The railings, pylons and road record keep bridgeStart.
+    const deckX0 = Math.max(bridgeStart, city.xLines[city.xLines.length - 1] + ((CBZ.CITY && CBZ.CITY.road) || 18) / 2);
+    function deckPlane(d, hex, fallbackColor, y, step) {
+      const w = bridgeEnd - deckX0;
       const tex = bakeTarmac(hex);
       let mtl;
       if (tex) { tex.repeat.set(w / 8, d / 8); mtl = new THREE.MeshLambertMaterial({ map: tex }); }
       else mtl = new THREE.MeshLambertMaterial({ color: fallbackColor });   // no-canvas stub — colour fallback
+      // depth order over the island street its far end lands on (step 2 beats
+      // the island network's step 1, see roadMat below)
+      if (step) { mtl.polygonOffset = true; mtl.polygonOffsetFactor = -step; mtl.polygonOffsetUnits = -2 * step; }
       const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mtl);
-      p.rotation.x = -Math.PI / 2; p.position.set(bridgeX, y, cz);
+      p.rotation.x = -Math.PI / 2; p.position.set((deckX0 + bridgeEnd) / 2, y, cz);
       p.receiveShadow = true; root.add(p);
       return p;
     }
-    deckPlane(bridgeLen, 18, "#8d939c", C_DECK, 0.025);
-    deckPlane(bridgeLen, ROADW, "#33363d", 0x33363d, 0.055);
+    deckPlane(18, "#8d939c", C_DECK, 0.025, 0);
+    deckPlane(ROADW, "#33363d", 0x33363d, 0.055, 2);
     {
       // same dash cadence/footprint as the old per-plane loop (centres at x,
       // 2.8×0.28), accumulated into one BufferGeometry; y sits paint-thin over
       // the road (0.015) with a polygonOffset decal material doing the real
       // depth separation — paint, not hovering geometry.
       const dashPos = [], dashY = 0.07, hw = 0.14;
-      for (let x = bridgeStart + 3; x < bridgeEnd; x += 7) {
+      for (let x = deckX0 + 3; x < bridgeEnd; x += 7) {
         const x0 = x - 1.4, x1 = x + 1.4;
         dashPos.push(
           x0, dashY, cz - hw, x0, dashY, cz + hw, x1, dashY, cz + hw,
@@ -376,7 +386,7 @@
       const dg = new THREE.BufferGeometry();
       dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
       const dash = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({
-        color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+        color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
       dash.matrixAutoUpdate = false; dash.renderOrder = 1;
       dash.userData.roadPaint = true;   // batch-exempt: keeps its decal material + culls as one full span
       root.add(dash);
@@ -606,11 +616,16 @@
     const rdP = [], rdN = [], rdU = [];      // asphalt
     const kbP = [], kbN = [], kbU = [];      // concrete shoulder
     const dashAll = [];                      // every centre dash, one mesh
+    // WORLD-SPACE UVs. They were per-quad (0 at each quad's own corner), so
+    // at every crossing the two road quads, 2 mm apart, showed the tarmac
+    // grain at two different offsets and fought over which one you saw.
+    // Anchored to the world, both quads sample the same texel at the same
+    // spot, and the crossing reads as one surface.
     function surfQuad(P, N, U, x0, x1, z0, z1, y) {
-      const uw = (x1 - x0) / SURF_UV, uh = (z1 - z0) / SURF_UV;
+      const u0 = x0 / SURF_UV, u1 = x1 / SURF_UV, v0 = -z1 / SURF_UV, v1 = -z0 / SURF_UV;
       P.push(x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0);
       for (let i = 0; i < 6; i++) N.push(0, 1, 0);
-      U.push(0, uh, 0, 0, uw, 0, 0, uh, uw, 0, uw, uh);
+      U.push(u0, v1, u0, v0, u1, v0, u0, v1, u1, v0, u1, v1);
     }
     function surfMesh(P, N, U, material, name) {
       if (!P.length) return null;
@@ -629,7 +644,16 @@
     // road-paint decal material: polygonOffset (not y-lift) does the depth
     // separation, so the dashes read as paint on the asphalt (shared by every
     // merged per-segment dash mesh below).
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+    // The asphalt is pulled one step forward of the concrete shoulders: each
+    // axis's shoulder runs on under the crossing road only 6-10 mm below it,
+    // which the depth buffer cannot hold apart at street distance. (The paint
+    // above sits a step beyond the asphalt, the bridge road a step beyond it.)
+    roadMat.polygonOffset = true; roadMat.polygonOffsetFactor = -1; roadMat.polygonOffsetUnits = -2;
+    // ...and the shoulder one step BACK: it is the lowest street layer (4 cm
+    // over the island turf), and the fuel stations' drive-in aprons (0.056,
+    // world/fuel_station.js) lie on it only 1.2 cm up.
+    kerbMat.polygonOffset = true; kerbMat.polygonOffsetFactor = 1; kerbMat.polygonOffsetUnits = 2;
     function blocked(x, z) {
       for (const p of placed) {
         if (Math.abs(p.x - x) < p.w / 2 + ROADW / 2 + 0.8 && Math.abs(p.z - z) < p.d / 2 + ROADW / 2 + 0.8) return true;

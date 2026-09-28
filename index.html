@@ -14,15 +14,15 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=name1">
+<link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=exit1">
+<link rel="stylesheet" href="css/mobile.css?v=flick1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
-<link rel="stylesheet" href="css/interact_touch.css?v=name1">
+<link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=hub1">
 </head>
 <body class="campaign-build">
@@ -527,7 +527,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js"></script>
+<script src="src/world/prisonkit.js?v=flick1"></script>
 <script src="src/world/corridorkit.js"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
@@ -557,7 +557,7 @@ document.body.appendChild(b);}}catch(e){}})();
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/systems/pushables.js?v=push2"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
-<script src="src/world/ground.js"></script>
+<script src="src/world/ground.js?v=flick1"></script>
 <script src="src/world/cellblock.js"></script>
 <script src="src/world/yard.js"></script>
 <script src="src/world/razorwire.js?v=mapflow2"></script>
@@ -672,7 +672,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/gunroom.js?v=nodash1"></script>
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
-<script src="src/world/southblock.js?v=bigmap1"></script>
+<script src="src/world/southblock.js?v=flick1"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
      builds four walls and no ceiling), so you could stand in the mess hall and
      watch the crows. roofs.js lays a real ceiling over each of them and hangs
@@ -863,7 +863,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=nodash1"></script>
 <script src="src/systems/combat.js?v=sharkmode1"></script>
-<script src="src/systems/killstreaks.js?v=sharkmode1"></script>
+<script src="src/systems/killstreaks.js?v=flick1"></script>
 <script src="src/systems/interact.js?v=name1"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
@@ -921,7 +921,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=sharkmode1"></script>
+<script src="src/systems/touch.js?v=flick1"></script>
 <script src="src/systems/touch_vehicle.js?v=exit1"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -930,7 +930,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=grasp2"></script>
+<script src="src/systems/fpsmode.js?v=flick1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=armed1"></script>
 
@@ -1113,8 +1113,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/exec_office.js?v=leaf2"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=deslop1"></script>
-<script src="src/city/beach.js?v=sharkfix2"></script>
-<script src="src/city/expansion.js?v=fuel1"></script>
+<script src="src/city/beach.js?v=flick1"></script>
+<script src="src/city/expansion.js?v=flick1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=nodash1"></script>
@@ -1126,7 +1126,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=roadmerge1"></script>
-<script src="src/city/highways.js?v=roadmerge1"></script>
+<script src="src/city/highways.js?v=flick1"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1134,7 +1134,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/highwaynet.js?v=hwy1"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
-<script src="src/city/interchange.js?v=hwy1"></script>
+<script src="src/city/interchange.js?v=flick1"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=nodash1"></script>
@@ -1198,14 +1198,14 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=skylinecluster4t"></script>
+<script src="src/city/towngen.js?v=flick1"></script>
 <!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
      raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
      hoardings, marshal posts, tyre walls, paddock. Authored against the track
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=racerstory1"></script>
+<script src="src/city/island_speedway.js?v=flick1"></script>
 <script src="src/city/island_airport.js?v=deslop1"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
@@ -1215,7 +1215,7 @@ document.body.appendChild(b);}}catch(e){}})();
      island_airport.js: it is what publishes CBZ.airportKit. -->
 <script src="src/city/airport_kit.js?v=deslop1"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
-<script src="src/city/island_military.js?v=nodash1"></script>
+<script src="src/city/island_military.js?v=flick1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=allmain1"></script>
 <script src="src/city/biome_farmland.js?v=nodash1"></script>
@@ -1273,7 +1273,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=deslop1"></script>
+<script src="src/city/props.js?v=flick1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=moves1"></script>
@@ -1634,7 +1634,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
-<script src="src/city/minicities.js?v=sim4w9x"></script>
+<script src="src/city/minicities.js?v=flick1"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=nodash1"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
@@ -1685,7 +1685,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the near lane. After marina.js/boatyard.js — marina wraps the same spawn
      for boats first, and this wrapper passes every marine hull straight
      through to it. Revert with ?cfg_LOT_APPROACH=0. -->
-<script src="src/city/approach.js?v=approach1"></script>
+<script src="src/city/approach.js?v=flick1"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2359,7 +2359,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js"></script>
+<script src="src/core/batch.js?v=flick1"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

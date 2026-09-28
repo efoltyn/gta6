@@ -290,6 +290,12 @@
       // its OWN material (the shared cmat pool must never learn vertexColors)
       const sandMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
       sandMat.name = "beach-dry-sand";
+      // The dry field starts at ES-1.5 but the swash apron runs flat at 0.048
+      // up to ES+0.5, and the field is clamped to 0.052 there: a 2 m strip the
+      // whole length of the beach with the pale sand 4 mm over the dark wet
+      // sand, shimmering at any distance. The dry sand is pulled one
+      // polygonOffset step forward, so it always owns that strip.
+      sandMat.polygonOffset = true; sandMat.polygonOffsetFactor = -1; sandMat.polygonOffsetUnits = -2;
       const sandMesh = mergeAdd(sandGeoms, sandMat);
       if (sandMesh) {
         // non-empty userData = core/batch.js keeps its hands off (the swash
