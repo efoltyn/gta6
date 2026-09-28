@@ -36,10 +36,10 @@
     // 0.3 s). They used to be a different navy, so every guard popped colour.
     const ch = makeCharacter(warden ? {
       legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d,
-      skin: 0xdcae84, cap: 0x171d29, shoes: 0x090b0f, belt: 0x111419, badge: true,
+      skin: 0xdcae84, cap: 0x171d29, capKind: "peaked:officer", shoes: 0x090b0f, belt: 0x111419, badge: true,
     } : {
       legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
-      skin: 0xe7b58c, cap: 0x202b3b, shoes: 0x111419, belt: 0x111419, badge: true,
+      skin: 0xe7b58c, cap: 0x202b3b, capKind: "peaked:police", shoes: 0x111419, belt: 0x111419, badge: true,
     });
     ch.group.userData.dynamic = true;
     (CBZ.prisonRoot || CBZ.scene).add(ch.group);

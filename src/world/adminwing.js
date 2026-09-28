@@ -803,8 +803,9 @@
     try { ok = CBZ.applyClothes(g.char, { id: "suit", style: 8 }); } catch (e) { ok = null; }
     if (!ok) return;
     warden.suited = true;
-    const cap = g.char.skinSlots.cap || [];
-    for (let i = 0; i < cap.length; i++) if (cap[i]) cap[i].visible = false;
+    // the officer's cap is the outfit's headwear layer (entities/headwear.js):
+    // taking it off lets the hair spring back out from under it
+    if (CBZ.headwear) CBZ.headwear.wear(g.char, null, { owner: "outfit" });
   }
 
   /* ==========================================================

@@ -27,6 +27,13 @@
 ============================================================ */
 (function () {
   "use strict";
+  // job -> [colour, headwear.js kind] for peds cast into a hatted job
+  const HAT_BY_JOB = [
+    [/construction/i, 0xe8c020, "hardhat"],
+    [/sheriff|deputy/i, 0x8a7752, "campaign:sheriff"],
+    [/soldier/i, 0x44503a, "milcap"],
+    [/pilot|first officer|aviator/i, 0x151c2e, "peaked:captain"],
+  ];
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
@@ -927,15 +934,13 @@
     // shoulder/upper-arm + bare forearm: arms stay the shirt color, and we
     // add a skin forearm box below mid-arm (see makeCharacter call's aftermath).
     const shortSleeve = !opts.outfit && r() < 0.45;
-    // headgear where the JOB wears one — a rig only grows a cap slot at build
-    // time (that's how cops get theirs), so it's decided here, off the cast job:
-    // construction = the yellow hardhat, deputy = the khaki campaign hat read,
-    // soldier = the olive patrol cap, pilot = the navy captain's cap (pairs
-    // with the Captain's Stripes uniform jobFit casts).
-    const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
-      : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
-        : /soldier/i.test(opts.job || "") ? 0x44503a
-          : /pilot|first officer|aviator/i.test(opts.job || "") ? 0x151c2e : null;
+    // headgear where the JOB wears one, decided off the cast job (colour AND
+    // kind, one row each, so the same job always wears the same hat):
+    // construction = the yellow hard hat, deputy = the khaki campaign hat with
+    // the star, soldier = the olive patrol cap, pilot = the navy captain's cap
+    // (pairs with the Captain's Stripes uniform jobFit casts).
+    const jobHat = HAT_BY_JOB.find((h) => h[0].test(opts.job || "")) || null;
+    const capCol = jobHat ? jobHat[1] : null, capKind = jobHat ? jobHat[2] : undefined;
     // stashed on the ped below (_longHair) so schedule.js's ledger can persist
     // this roll — otherwise a woman who despawns and re-deals comes back bald.
     const longHair = gender === "f" && r() < 0.6;
@@ -973,7 +978,7 @@
     // (the old bolt-on forearm box detached the moment the elbow bent).
     const ch = makeCharacter({
       legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: hairFor(r()),
-      shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve,
+      shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, capKind: capKind, shortSleeve: shortSleeve,
       build: gender === "f" ? "f" : "m", longHair,
       // ONE FIELD is the whole child adoption. character.js reads it and builds
       // the body; null/absent = the adult rig, byte-identical to before.

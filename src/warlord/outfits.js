@@ -1081,30 +1081,6 @@
       mouthTop: f.mouth ? top(f.mouth) : H * FACE_F.mouthTop,
     };
   }
-  /* HOW HIGH A HAT HAS TO REACH, and it is not the skull. A cloth wrap laid
-     on a haired head must cover the HAIR or the merged shell pokes through
-     the crown — so the wrap's ceiling is the hair mesh's own bounding box,
-     measured, not the head cube. A rig built with c.cap has no hair mesh at
-     all (character.js:986's `if (c.cap) {...} else {hair}`), and then the
-     skull IS the ceiling. */
-  function skullTop(ch, H) {
-    const hm = ch && ch.skinSlots && ch.skinSlots.hair && ch.skinSlots.hair[0];
-    const g = hm && hm.geometry;
-    if (g) {
-      if (!g.boundingBox && g.computeBoundingBox) { try { g.computeBoundingBox(); } catch (e) {} }
-      if (g.boundingBox && isFinite(g.boundingBox.max.y)) return Math.max(H, g.boundingBox.max.y);
-    }
-    return H;
-  }
-  function skullWidth(ch, H) {
-    const hm = ch && ch.skinSlots && ch.skinSlots.hair && ch.skinSlots.hair[0];
-    const g = hm && hm.geometry;
-    if (g && g.boundingBox && isFinite(g.boundingBox.max.x)) {
-      return Math.max(H, g.boundingBox.max.x - g.boundingBox.min.x);
-    }
-    return H;
-  }
-
   function headSizeOf(ch) {
     if (ch && ch.profile && ch.profile.headSize > 0) return ch.profile.headSize;
     const hd = ch && ch.skinSlots && ch.skinSlots.head && ch.skinSlots.head[0];
@@ -1120,159 +1096,29 @@
     mesh.receiveShadow = false;
     return mesh;
   }
+  /* THE HAT ITSELF IS entities/headwear.js's (CBZ.headwear) — the same real
+     hats the city and the prison wear, fitted to the real skull: a rag is a
+     rolled headband on the brow line, a shemagh a wrap with the cloth
+     hanging beside the face and down the neck (the agal cord in the rank
+     colour when there is one), a cap the army patrol cap, a beret a beret
+     pulled over the right ear, a helmet the old full-cut K-pot. The box
+     ladder that lived here (and the FLOOR arithmetic above that kept its
+     boxes off the eyes) is gone: every piece of the library already sits on
+     the brow line by construction, and the hair under it is compressed, not
+     hidden. Kits can also name any library kind directly (ballistic,
+     hardhat, race, ballcap...). */
+  const HEAD_KIND = { rag: "headband", shemagh: "shemagh", cap: "milcap", beret: "beret", helmet: "pasgt" };
   function headwear(ch, type, hex, band) {
     if (!ch || !THREE) return null;
-    const host = ch.neck || ch.head || (ch.skinSlots && ch.skinSlots.head && ch.skinSlots.head[0]);
-    if (!host || !host.add) return null;
-    let g = ch._wlHead;
-    if (g && g.userData.wl === type + "|" + hex + "|" + band) { g.visible = type !== "none"; return g; }
-    if (g) { host.remove(g); ch._wlHead = null; g = null; }
-    if (type === "none") { paintSlot(ch.skinSlots && ch.skinSlots.hair, null, true); return null; }
-    const H = headSizeOf(ch), k = H / 0.6;
-    const F = faceLine(ch, H);
-    const CL = clearOf();
-    /* THE ONE LINE. Everything a man wears on his head starts here. */
-    const FLOOR = F.browTop + CL;
-    /* THE CEILING FOR HARD KIT is character.js's own cap crown — top face at
-       headSize + 0.18k (crown centre H + 0.07k, height 0.22k, character.js:977).
-       Citing it rather than inventing a second "how tall is a hat" means an
-       attached helmet and a built-in cap are the same object as far as the
-       silhouette is concerned, and if that cap is ever retuned this follows. */
-    const CROWN = H + 0.18 * k;
-    const WRAP_TOP = skullTop(ch, H) + CL;          // cloth has to cover the hair
-    const WRAP_W = Math.max(H * 1.06, skullWidth(ch, H) + CL * 2);
-    g = new THREE.Group();
-    g.name = "warlord-headwear";
-    if (type === "rag") {
-      /* A FOREHEAD BAND: floor on the brow line, ceiling one clearance over
-         the skull's own crown so it laps the top of the forehead instead of
-         floating as a ring. Height falls out of the two (0.183 H on the adult
-         male, ~7.7 mm real at HUMAN_SCALE) — it is not typed. The hair is
-         left VISIBLE above and behind it, which is what a headband is. */
-      const bh = Math.max(CL * 2, (H + CL) - FLOOR);
-      const b = box(WRAP_W, bh, WRAP_W, hex); b.position.y = FLOOR + bh / 2; g.add(b);
-      /* the knot tail hangs from the band's BACK — behind the head, where
-         there is no face to hit — and it is anchored to the band rather than
-         to a fraction of the skull so it cannot drift off it again. */
-      const th = H * 0.34;
-      const tail = box(H * 0.16, th, H * 0.1, hex);
-      tail.position.set(H * 0.26, FLOOR + bh * 0.5 - th * 0.42, -H * 0.55);
-      tail.rotation.z = 0.35; g.add(tail);
-    } else if (type === "shemagh") {
-      /* THE WRAP: brow to over the hair, wide enough to swallow the hair
-         shell. The desert's own silhouette and the widest in the ladder. */
-      const ch2 = Math.max(CL * 2, WRAP_TOP - FLOOR);
-      const crown = box(WRAP_W * 1.04, ch2, WRAP_W * 1.04, hex);
-      crown.position.y = FLOOR + ch2 / 2; g.add(crown);
-      /* THE DRAPE hangs off the BACK of that crown and its top is the crown's
-         own floor (lapped by one clearance so no seam can open between them),
-         not a fraction of the head — which is what left a bare gap at the
-         nape once the crown moved up to the brow line. */
-      const dh = H * 0.62;
-      const drape = box(WRAP_W * 1.1, dh, H * 0.24, hex);
-      // top face one clearance INSIDE the crown's floor: lapped, never seamed
-      drape.position.set(0, (FLOOR + CL) - dh / 2, -H * 0.52); g.add(drape);
-      /* THE FACE CLOTH is the one piece anchored from ABOVE: its top face is
-         the eye BOTTOM less a clearance, because a veil covers nose and mouth
-         and stops UNDER the eyes. Only the men who get an accent band get it,
-         which keeps the mesh count down and reads as "he covered up" rather
-         than "everybody covered up". */
-      if (band != null) {
-        const fh = H * 0.26;
-        const face = box(H * 0.72, fh, H * 0.12, tone(hex, -0.18));
-        face.position.set(0, (F.eyeBot - CL) - fh / 2, H * 0.52); g.add(face);
-      }
-      /* THE CHEEK PANELS, and they are the reason a keffiyeh stops looking
-         like a small cap once its crown is lifted onto the brow line. Cloth
-         hangs beside the jaw — that is the whole silhouette of the thing —
-         and it may hang PAST the eye because it is OUTBOARD of it: the eye
-         box's outer edge is at 0.35 H and these panels' inner faces are at
-         0.42 H, so nothing of them is ever in front of an eye. Beside the
-         face is not over the face, and conflating the two is what would make
-         this rule turn every desert wrap into a beanie. */
-      const kh = H * 0.5;
-      for (const sgn of [-1, 1]) {
-        const cheek = box(H * 0.14, kh, H * 0.78, hex);
-        cheek.position.set(sgn * (WRAP_W * 0.5 - H * 0.06), (FLOOR + CL) - kh / 2, -H * 0.06);
-        g.add(cheek);
-      }
-      // the agal cord rides the lower third of the crown, on the crown, never
-      // on the brow.
-      if (band != null) {
-        const cordH = H * 0.07;
-        const cord = box(WRAP_W * 1.06, cordH, WRAP_W * 1.06, band);
-        cord.position.y = FLOOR + ch2 * 0.34; g.add(cord);
-      }
-    } else if (type === "cap") {
-      /* character.js's own cap numbers (0.66/0.22 crown, 0.66/0.1/0.3 brim,
-         y = headSize + 0.07k) so an attached cap and a built-in cap are the
-         same hat. If those ever change, this follows by construction.
-
-         MEASURED CLEAR: brim floor lands at 0.883 H against a brow top of
-         0.817 H, so the cap was the one item in this ladder that never
-         touched the face. It is clamped anyway rather than trusted — the
-         clamp is a no-op today and stops the next edit to character.js from
-         silently reopening the bug the rest of this block exists to fix. */
-      const lift = function (m, h2) {
-        const floor = m.position.y - h2 / 2;
-        if (floor < FLOOR) m.position.y += FLOOR - floor;
-      };
-      const crown = box(0.66 * k, 0.22 * k, 0.66 * k, hex);
-      crown.position.y = H + 0.07 * k; lift(crown, 0.22 * k); g.add(crown);
-      const brim = box(0.66 * k, 0.1 * k, 0.3 * k, hex);
-      brim.position.set(0, H - 0.02 * k, 0.42 * k); lift(brim, 0.1 * k); g.add(brim);
-      if (band != null) {
-        const bnd = box(0.68 * k, 0.07 * k, 0.68 * k, band);
-        bnd.position.y = H - 0.01 * k; lift(bnd, 0.07 * k); g.add(bnd);
-      }
-    } else if (type === "beret") {
-      /* THE LIP IS THE BAND A BERET IS PULLED DOWN ONTO, so the lip owns the
-         floor and the crown sits on the lip. The old pair had the lip
-         straddling the eye tops (floor 0.695 H) and the crown 0.077 H below
-         the brow. */
-      const lipH = H * 0.09;
-      const lip = box(H * 1.1, lipH, H * 1.1, tone(hex, -0.25));
-      lip.position.y = FLOOR + lipH / 2; g.add(lip);
-      const cH = Math.max(CL * 2, CROWN - (FLOOR + lipH) + CL);
-      const crown = box(H * 1.02, cH, H * 1.02, hex);
-      crown.position.y = FLOOR + lipH - CL + cH / 2;
-      crown.rotation.z = 0.12; g.add(crown);
-      if (band != null) {
-        const flash = box(H * 0.2, H * 0.16, H * 0.06, band);
-        flash.position.set(-H * 0.34, crown.position.y, H * 0.36); g.add(flash);
-      }
-    } else if (type === "helmet") {
-      /* THE RIM OWNS THE FLOOR and the dome stands on it. The shipped pair
-         both had their floors at 0.390 H — 0.31 H below the top of the eye,
-         which is a blindfold with a chinstrap. */
-      const rimH = H * 0.1;
-      const rim = box(H * 1.2, rimH, H * 1.2, tone(hex, -0.3));
-      rim.position.y = FLOOR + rimH / 2; g.add(rim);
-      const dH = Math.max(CL * 2, CROWN - FLOOR);
-      const dome = box(H * 1.14, dH, H * 1.14, hex);
-      dome.position.y = FLOOR + dH / 2; g.add(dome);
-      /* THE NAPE SKIRT is what the single dome box used to buy by hanging
-         over the eyes: a helmet covers the back of the skull to below the
-         ear. Put it BEHIND the head, where there is no face to reach, and the
-         front stays on the brow line. It is also the cheapest thing in this
-         file that makes a helmeted silhouette unmistakable from the side. */
-      const sH = H * 0.34;
-      const skirt = box(H * 1.1, sH, H * 0.22, tone(hex, -0.12));
-      skirt.position.set(0, FLOOR + rimH - sH / 2, -H * 0.52); g.add(skirt);
-      if (band != null) {
-        const flash = box(H * 0.24, H * 0.12, H * 0.06, band);
-        flash.position.set(H * 0.32, FLOOR + dH * 0.5, H * 0.58); g.add(flash);
-      }
-    }
-    g.userData.wl = type + "|" + hex + "|" + band;
-    g.userData.floor = FLOOR;                 // what the audit and the presets read
-    host.add(g);
+    const HW = CBZ.headwear;
+    if (!HW) return null;
+    if (!type || type === "none") { HW.wear(ch, null, { owner: "warlord" }); ch._wlHead = null; return null; }
+    const kind = HEAD_KIND[type] || type;
+    const variant = kind === "shemagh" ? (band != null ? "agal" : "") : (kind === "ballistic" ? "swat" : "");
+    const g = HW.wear(ch, kind, { owner: "warlord", variant: variant,
+      color: toLinear(hex), accent: band != null ? toLinear(band) : undefined });
+    if (g) g.userData.wl = type + "|" + hex + "|" + band;
     ch._wlHead = g;
-    // hair under a full wrap or a helmet is a mohawk poking through a hat.
-    // A RAG NO LONGER COVERS: it is a band on the forehead now, and hiding
-    // the hair under one made a bandana read as a bald man in a ribbon.
-    const covers = (type === "shemagh" || type === "helmet" || type === "cap");
-    paintSlot(ch.skinSlots && ch.skinSlots.hair, null, !covers);
     return g;
   }
 
@@ -2038,16 +1884,22 @@
              on purpose;
            · and the face veil is anchored from the eye BOTTOM by design (it
              is a mouth covering) so it is not measured against the brow. */
-      const eyeOutX = H * 0.35;               // outer edge of the eye box, measured
+      /* measured off the hat's own vertices (entities/headwear.js geometry is
+         authored in the adult 0.60 head frame and scaled by the group), and
+         only over the eyes: in front of the face plane and inside the eye
+         boxes' outer edges — a drape, a knot or a nape skirt never counts. */
       hatFloor = Infinity;
+      const hk = hw.scale ? hw.scale.y : 1;
       for (let i = 0; i < hw.children.length; i++) {
-        const m = hw.children[i];
-        const gp = (m.geometry && m.geometry.parameters) || {};
-        const front = m.position.z + (gp.depth || 0) / 2;
-        if (front < H * 0.5 - clearOf()) continue;                     // behind the face
-        if (Math.abs(m.position.x) - (gp.width || 0) / 2 >= eyeOutX) continue;  // beside it
-        if (m.position.y + (gp.height || 0) / 2 <= F.eyeBot) continue; // the veil
-        hatFloor = Math.min(hatFloor, m.position.y - (gp.height || 0) / 2);
+        const m = hw.children[i], role = m.userData && m.userData.hatRole;
+        if (!m.geometry || role === "strap" || role === "clear" || m.visible === false) continue;
+        const p = m.geometry.attributes && m.geometry.attributes.position;
+        if (!p) continue;
+        for (let j = 0; j < p.count; j++) {
+          const z = p.getZ(j), x = p.getX(j), y = p.getY(j);
+          if (z < 0.22 || Math.abs(x) > 0.21 || y < 0.2) continue;
+          if (y * hk < hatFloor) hatFloor = y * hk;
+        }
       }
       if (!isFinite(hatFloor)) hatFloor = null;
     }

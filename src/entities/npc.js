@@ -496,7 +496,7 @@
     pos: [14, 18], region: [10, 17, 12, 24], role: "dealer", speed: 2.0,
     prisonOutfit: "cap",
     tagText: "Dealer · product", tagColor: "#b07aff",
-    skin: jump("black", "the Dealer", { cap: 0x222222, shoes: 0x111111 }),
+    skin: jump("black", "the Dealer", { cap: 0x222222, capKind: "ballcap", shoes: 0x111111 }),
     data: {
       name: "the Dealer", pool: "drugs", offer: econ.pickOffer("drugs"),
       tip: "You didn't get it from me, yeah?",

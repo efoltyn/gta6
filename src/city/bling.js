@@ -5,8 +5,7 @@
    valuables (peds.js/economy.js: "Gold Chain", "Rolex", "Engagement
    Ring"…) already decide the payout; this makes them VISIBLE so you
    can spot the gold chain / iced watch with your EYES and pick your
-   mark — no menus, no inspection, just looking at people. Gang
-   members also get a crew-colored rag so a block reads at a glance.
+   mark — no menus, no inspection, just looking at people.
 
    What you see (REAL jewelry scale — reads at street distance, not
    clownish up close):
@@ -30,16 +29,16 @@
                 one classifier now answers for both.
      • crown  — an arc of stones across the front of the skull (Diamond
                 Tiara — the mob wife's seven-figure set)
-     • head   — gang-colored rag (ped.gang), a headband wrapping the
-                hair, so crews read as crews
+   (Crew colours on the head are NOT bling: every crew member's bandana
+   is clothes.js's CBZ.cityAttachBandana -> entities/headwear.js, put on
+   by the outfit (gang record) — and for YOUR crew by syncPlayerRag here.)
    (The FORMAL KIT — tux shirt-front / bow-tie / pocket square — is
    now PAINTED into the outfit textures by clothes.js; bling carries
    jewelry + colors only.)
 
    PERF (the game is draw-call bound):
      • ONE shared geometry per accessory part kind + ONE shared
-       material per finish (gold/silver/ice/glint; rag materials
-       shared per gang color via cmat's cache). Meshes are POOLED
+       material per finish (gold/silver/ice/glint). Meshes are POOLED
        and reused.
      • A piece that reads as jewelry needs more PARTS than a box, and
        these mount on every dripped ped in the crowd bubble — so a run
@@ -63,8 +62,8 @@
    watch / ring you actually OWN (g.cityInv, classified through
    CBZ.cityEcon.ITEMS — the looted Patek on your wrist, the $5M rock a
    glint on your hand), a VIP-level fit (CBZ.cityPlayerDrip ≥ VIP_DRIP)
-   ices the off-wrist too, and your crew's colors as a rag (own founded
-   gang first, else the set you're patched into). Mounted on
+   ices the off-wrist too, and your crew's colors as a bandana (own
+   founded gang first, else the set you're patched into). Mounted on
    CBZ.playerChar's rig — third person, shoulder cam, the club line and
    the WASTED kill-cam all show your status; pure first person hides it
    for free because fpsmode hides the whole playerChar.group. Selling /
@@ -94,7 +93,7 @@
   // dress within 45u, undress past 60u (hysteresis so border peds don't flicker)
   const DRESS_D2 = 45 * 45, UNDRESS_D2 = 60 * 60;
   // cap on dressed peds — rides the LIVE quality tier (lo 30 → hi 120); read at
-  // every check so the slider applies instantly. Budget per ped: a rag is 1, a
+  // every check so the slider applies instantly. Budget per ped: a
   // chain 3, a watch 5-6 (the repetition is inside merged geometry, not in the
   // mesh count) — a body carrying the whole set is ~15 and almost nobody does.
   const CAP = () => Math.round(CBZ.qScale ? CBZ.qScale(30, 120) : 60);
@@ -267,7 +266,7 @@
       }
       gm = mergeBoxes(specs);
     }
-    else gm = CBZ.boxGeom(0.68, 0.16, 0.68);                          // rag: headband enclosing the 0.64 hair
+    else gm = CBZ.boxGeom(0.05, 0.05, 0.05);                          // unknown kind: a speck, never a lid
     geos[kind] = gm;
     return gm;
   }
@@ -305,26 +304,6 @@
     };
     return _mats;
   }
-  // gang rag material — per-gang shared (cmat caches by color, so every member
-  // of a crew shares ONE material). Color resolved once per gang id.
-  const _ragMats = {};
-  function ragMat(gangId) {
-    let m = _ragMats[gangId];
-    if (m) return m;
-    let col = 0xb079ea;
-    try {
-      const gg = CBZ.cityGangById && CBZ.cityGangById(gangId);
-      if (gg && gg.color != null) col = gg.color;
-      else {
-        const defs = (CBZ.CITY && CBZ.CITY.gangs) || [];
-        for (let i = 0; i < defs.length; i++) if (defs[i].id === gangId) { col = defs[i].color; break; }
-      }
-    } catch (e) { /* color lookup must never break dressing */ }
-    m = CBZ.cmat(col, { emissive: col, ei: 0.12 });   // slight glow so the rag pops at dusk
-    _ragMats[gangId] = m;
-    return m;
-  }
-
   // ---- LOOKS: each wearable is a small list of PARTS (kind + finish + local
   // transform). Positions are in the anchor's local space (character.js):
   //   body — torso front face at z 0.25, yoke bottom ≈ y 1.75
@@ -506,23 +485,10 @@
     // teeth have to stand just proud of THAT, not of the skull.
     L.grill = [{ kind: "grillTeeth", mat: M.glint, x: 0, y: 0.172, z: 0.340 }];
   }
-  // gang rag looks cached per gang id (one tiny array each, shared material)
-  const _ragLooks = {};
-  function ragLook(gangId) {
-    let lk = _ragLooks[gangId];
-    if (!lk) { lk = _ragLooks[gangId] = [{ kind: "rag", mat: ragMat(gangId), x: 0, y: 0.66, z: 0 }]; }
-    return lk;
-  }
-  function customRagLook(mat, key) {
-    let lk = _ragLooks[key];
-    if (!lk) { lk = _ragLooks[key] = [{ kind: "rag", mat: mat, x: 0, y: 0.66, z: 0 }]; }
-    return lk;
-  }
-
   // ---- which rig anchor each slot hangs from. `ears` and `crown` ride the
-  // neck (head) group with the rag and the shades, so they turn with the head.
-  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", ears: "neck", crown: "neck", head: "neck", mouth: "neck", eyes: "neck" };
-  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "ears", "crown", "head", "mouth", "eyes"];
+  // neck (head) group with the shades, so they turn with the head.
+  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", ears: "neck", crown: "neck", mouth: "neck", eyes: "neck" };
+  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "ears", "crown", "mouth", "eyes"];
   // which slot a look belongs to — declared ONCE, beside the look names, so a
   // classifier can answer "where does this hang" without a second keyword pass.
   const LOOK_SLOT = {
@@ -723,8 +689,8 @@
   }
 
   // ---- what a ped SHOULD be wearing right now, straight from their valuables.
-  // A looted corpse is picked clean (jewelry gone) but keeps its gang colors —
-  // the rag is clothing, not loot. First match wins per slot (one chain, one
+  // A looted corpse is picked clean (jewelry gone); its crew bandana is
+  // clothing (outfits.js), not bling, so it stays. First match wins per slot (one chain, one
   // watch: legibility beats completeness). Each slot value is a parts LIST.
   function lootedOut(ped) {
     return !!(ped.dead && ped.deadLoot && ped.deadLoot.looted);
@@ -745,11 +711,10 @@
         want[cl.slot] = parts; any = true;
       }
     }
-    if (ped.gang) { want.head = ragLook(ped.gang); any = true; }
     return any ? want : null;
   }
 
-  // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted, gang } ----
+  // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted } ----
   const dressed = [];   // peds currently wearing meshes (≤ CAP)
   function anchorsOf(ped) {
     const ch = ped.char;
@@ -773,7 +738,6 @@
       meshes,
       nVal: ped.valuables ? ped.valuables.length : 0,
       looted: lootedOut(ped),
-      gang: ped.gang || null,
     };
     dressed.push(ped);
   }
@@ -790,8 +754,7 @@
   }
 
   // re-mirror ONE ped after their valuables changed (mug/loot/pickpocket):
-  // strip, then re-dress with whatever they still have on (e.g. the gang rag
-  // stays after a mugging — you took the ice, not the colors).
+  // strip, then re-dress with whatever they still have on.
   function resyncPed(ped) {
     undress(ped);
     if (!ped || ped.culled || !ped.group || !ped.group.parent) return;
@@ -846,18 +809,37 @@
   }
 
   // crew colors: your FOUNDED gang's color outranks the set you're patched into
-  // (a boss flies his own flag). Returns { parts, key } or null. cmat caches per
-  // color, so this is the same shared material every member of the crew wears.
-  function playerRag() {
+  // (a boss flies his own flag). Returns the colour hex or null.
+  function playerCrewColor() {
     const pg = g.playerGang;
-    if (pg && pg.founded) {
-      const col = pg.color != null ? pg.color : 0xb079ea;
-      const key = "own:" + col;
-      return { parts: customRagLook(CBZ.cmat(col, { emissive: col, ei: 0.12 }), key), key };
-    }
+    if (pg && pg.founded) return pg.color != null ? pg.color : 0xb079ea;
     const m = g.cityMembership;
-    if (m && m.gangId) return { parts: ragLook(m.gangId), key: "memb:" + m.gangId };
-    return null;
+    if (!m || !m.gangId) return null;
+    try {
+      const gg = CBZ.cityGangById && CBZ.cityGangById(m.gangId);
+      if (gg && gg.color != null) return gg.color;
+      const defs = (CBZ.CITY && CBZ.CITY.gangs) || [];
+      for (let i = 0; i < defs.length; i++) if (defs[i].id === m.gangId) return defs[i].color;
+    } catch (e) { /* colour lookup must never break dressing */ }
+    return 0xb079ea;
+  }
+  // YOUR crew bandana goes through the ONE gang headwear (clothes.js
+  // cityAttachBandana -> headwear.js). Wearing a gang's COLOURS (outfits.js)
+  // already ties that bandana, so this only covers the patched-in player in
+  // any other fit, re-asserted each tick because every re-dress (applyPlayer)
+  // clears a non-gang fit's bandana. Only a bandana THIS put on is removed.
+  let _pRag = null;
+  function syncPlayerRag(off) {
+    const ch = CBZ.playerChar;
+    if (!ch || !CBZ.cityAttachBandana) return;
+    const outfitGang = CBZ.cityOutfitGangId && CBZ.cityOutfitGangId();
+    const col = (off || outfitGang) ? null : playerCrewColor();
+    if (col != null) {
+      if (_pRag !== col || !ch._bandana) { CBZ.cityAttachBandana(ch, col); _pRag = col; }
+    } else if (_pRag != null) {
+      if (!outfitGang) CBZ.cityAttachBandana(ch, null);
+      _pRag = null;
+    }
   }
 
   // The player's SHOULD-WEAR set + a cheap signature (best item names + gang +
@@ -878,20 +860,17 @@
     // without a Tennis Bracelet — full luxury reads iced on BOTH wrists.
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() | 0 : 0;
     const vip = drip >= ((CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70);
-    const rag = playerRag();
     const want = {};
     let any = false, sig = "";
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const k = SLOT_KEYS[i];
-      if (k === "head") continue;                       // the rag is not an owned item
       const e = best[k];
       const parts = e ? lookParts(e.look) : null;
       if (parts) { want[k] = parts; any = true; }
       sig += (e ? e.name : "") + "|";
     }
     if (!want.wristR && vip) { want.wristR = lookParts("bracelet"); any = !!want.wristR || any; }
-    if (rag) { want.head = rag.parts; any = true; }
-    sig += (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
+    sig += "|" + (vip ? 1 : 0);
     return { want: any ? want : null, sig };
   }
 
@@ -941,12 +920,13 @@
     if (g.mode !== "city") {
       if (dressed.length) clearAll();
       if (_pMeshes) undressPlayer();           // jail jumpsuit wears no city ice
+      if (_pRag != null) syncPlayerRag(true);  // ...and no city crew bandana
       return;
     }
     // the player's drip: re-derive at 1Hz (or next frame when poked dirty) —
     // a signature compare, so an unchanged inventory costs ~nothing.
     _pT -= dt || 0.016;
-    if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); }
+    if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); syncPlayerRag(false); }
     // lazy idempotent wrapping — load order with peds.js/social.js doesn't matter,
     // wrappers chain through whatever is current.
     if (!_wRob) _wRob = wrapStrip("cityRobPed");
@@ -964,7 +944,7 @@
       const dx = p.pos.x - camx, dz = p.pos.z - camz;
       if (dx * dx + dz * dz > UNDRESS_D2) { undress(p); continue; }
       const nVal = p.valuables ? p.valuables.length : 0;
-      if (nVal !== b.nVal || lootedOut(p) !== b.looted || (p.gang || null) !== b.gang) resyncPed(p);
+      if (nVal !== b.nVal || lootedOut(p) !== b.looted) resyncPed(p);
     }
 
     // 2) sliced scan: dress newly-near peds (a few per frame; full roster ~every
