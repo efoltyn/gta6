@@ -2734,6 +2734,20 @@
     if (y <= 1.98 && Math.abs(x) > 0.47) return "limb";   // lateral in the torso band → arm
     return "torso";
   }
+  /* A ROUND INTO A LIVING MAN. One call for every survivor of a player shot
+     in every mode: CBZ.verbs.shot (systems/verbs_strike.js) reads the zone
+     off his rig at the hit point, sums a shotgun's pellets into one blast,
+     and answers with a snap / fold and steps / a knee / a dead arm. False =
+     no rig to answer with; the caller keeps its old body impulse. */
+  const _shotO = { point: null, dir: null, cal: 1, wkey: "", dist: 0, share: 1, head: false };
+  function shotLiving(a, hit, w, shotDir, cal) {
+    const V = CBZ.verbs;
+    if (!V || !V.shot || w.nonlethal || !a || a.dead || a.animal || a.netKind) return false;
+    _shotO.point = hit.point || null; _shotO.dir = shotDir || null; _shotO.cal = cal;
+    _shotO.wkey = w.key || ""; _shotO.dist = hit.dist || 0;
+    _shotO.share = w.pellets > 1 ? 1 / w.pellets : 1; _shotO.head = !!hit.head;
+    return V.shot(a, _shotO);
+  }
   function cityGunHit(a, hit, w, shotDir) {
     if (shotDir) hit.dir = shotDir; // wildlife + downstream death physics read the same resolved trajectory
     // WILDLIFE: an animal routes into the hunting system (its own damage/skin
@@ -2768,6 +2782,7 @@
     const imp = {
       fromX: fx, fromZ: fz, dir: dir, force: force, fling: fling,
       cal: cal, wkey: w.key, dist: hit.dist, point: hit.point,
+      share: w.pellets > 1 ? 1 / w.pellets : 1,     // one pellet's part of the blast (CBZ.verbs.shot)
       headshot: !!hit.head, byPlayer: true,
     };
     if (a.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(a.gang, 0.4);
@@ -2784,7 +2799,9 @@
         // a suppressed round barely carries — far fewer bystanders snap to it
         const supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId));
         CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, supp ? 6 : 16, 1, CBZ.city.playerActor);
-        CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, dir: dir, force: force * (hit.head ? 1.2 : 1) });
+        // a living man takes the round on his rig: zone, caliber, steps
+        // (CBZ.verbs.shot); the old slide + limb flail only for a body with no rig
+        if (!shotLiving(a, hit, w, shotDir, cal)) CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, dir: dir, force: force * (hit.head ? 1.2 : 1) });
         // getting shot provokes fight-or-flight. ANYONE HOLDING A GUN shoots BACK —
         // a person who's strapped and gets hit draws and returns fire (self-defence),
         // even a normally-meek civilian. Only the UNARMED + non-bold flee.
@@ -2823,7 +2840,7 @@
     // player's position—the torch hand folded through the face and the real ray
     // direction was lost. Keep the established root shove below; this record
     // supplies the missing direction/energy to the pose without changing travel.
-    if (!w.nonlethal && !lethalHeadshot && a.hp > 0 && CBZ.body && CBZ.body.hit) {
+    if (!w.nonlethal && !lethalHeadshot && a.hp > 0 && !shotLiving(a, hit, w, shotDir, caliber(w)) && CBZ.body && CBZ.body.hit) {
       const cal = caliber(w);
       const force = (3.0 + ((w.knock || 1) * 2.7)) * (0.72 + cal * 0.28) * Math.sqrt(Math.max(0.25, fall));
       const dir = shotDir ? { x: shotDir.x, y: shotDir.y, z: shotDir.z } : null;

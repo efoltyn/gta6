@@ -314,6 +314,20 @@
     const stanceOK = ch.fightStance && !ch.aimingPose && !ch.carryPose && !ch.bladeCarry;
     const act = punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || (fs && fs.on) ||
       (hr && hr.on) || ch.staggerT > 0;
+    /* A MAN WHO IS NOT FIGHTING DOES NOT SQUARE UP TO BE HIT. A reaction or
+       a step on a body with no guard up (a bystander shot in the street, a
+       guard shoved by an inmate) used to pull the whole boxing stance in
+       under it for the length of the beat: lead foot out, rear foot back,
+       torso bladed 17 degrees, fists at the chin, then all of it easing back
+       out. On a walking man that read as his feet swapping under him while
+       his shoulders swung round, the "stuck foot, spinning" the owner saw.
+       A passive body reacts from the pose it was already in: every channel
+       below starts at its current value and the reaction adds deltas. */
+    // (latched at rest, so a guard that drops still fades out of its stance)
+    const fighting = ch.fightStance || punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging;
+    if (fighting) ch._mPas = false;
+    else if (!(ch._mK > 0.01)) ch._mPas = true;
+    const passive = !!ch._mPas;
     const want = !hard && (act || stanceOK) ? 1 : 0;
     if (want && hr && hr.on && hr.t < 0.05) ch._mK = Math.max(ch._mK || 0, 0.85);   // a hit does not fade in
     ch._mK = damp(ch._mK || 0, want, want ? 16 : 7, dt);
@@ -324,7 +338,7 @@
     // never touched here.
     if (typeof ch.setHandPose === "function") {
       const armed = ch.aimingPose || ch.carryPose || ch.bladeCarry;
-      const hand = hard || ch._mK < 0.25 ? null : (punching && ch.punchKind === "shove") ? "open" : "fist";
+      const hand = hard || passive || ch._mK < 0.25 ? null : (punching && ch.punchKind === "shove") ? "open" : "fist";
       if (hand !== (ch._mHand || null)) {
         if (hand) { ch.setHandPose("l", hand); if (!armed) ch.setHandPose("r", hand); }
         else if (!fallActive(ch)) { ch.setHandPose("l", "relaxed"); if (!armed) ch.setHandPose("r", "relaxed"); }
@@ -343,6 +357,23 @@
 
     // ================= STANCE (the base everything overlays) ==============
     const gas = clamp01(ch.winded || 0);
+    const leadF = lead === "L" ? FL : FR, rearF = lead === "L" ? FR : FL;
+    if (passive) {
+      // the NEUTRAL base: the rig as animChar left it, feet under the hips,
+      // arms hanging; reactions below add to this and nothing else moves
+      const b0 = ch.body.rotation, n0 = ch.neck ? ch.neck.rotation : null;
+      S.dl = 0; S.mZ = 0; S.mX = 0; S.mYaw = 0;
+      S.bx = b0.x - ch.lean * mv; S.by = b0.y; S.bz = b0.z - ch.sway * mv;
+      S.nx = (n0 ? n0.x : 0) + S.bx * 0.5; S.ny = (n0 ? n0.y : 0) + S.by * 0.8;
+      S.pzL = ch.parts.la ? ch.parts.la.position.z : 0; S.pzR = ch.parts.ra ? ch.parts.ra.position.z : 0;
+      S.rollL = 0; S.rollR = 0;
+      S.armK = 0; S.legK = 1 - mv; S.kickSide = null;
+      const hang = D.shY - (D.l1 + D.l2) * 0.93;
+      WL.set(D.shX + 0.04, hang, 0.05); WR.set(-(D.shX + 0.04), hang, 0.05);
+      PL.set(0.25, -0.3, -1); PR.set(-0.25, -0.3, -1);
+      FL.set(D.hipX, D.footY, 0.02); FR.set(-D.hipX, D.footY, 0.02);
+      QL.set(0.05, 0, 1); QR.set(-0.05, 0, 1);
+    } else {
     ch.fightPh = (ch.fightPh || 0) + mdt * (1 - gas * 0.45);
     const w1 = Math.sin(ch.fightPh * 2.6), w2 = Math.sin(ch.fightPh * 5.2 + 1.3);
     S.dl = 0.07 + 0.014 * w2 * (1 - gas * 0.7) - gas * 0.03;   // bouncing on the balls of the feet; a gassed man stands up
@@ -361,10 +392,10 @@
     rearW.set(-lx * 0.22, D.chinY - 0.02 - gy, D.faceZ + 0.02);
     PL.set(0.55, -1, -0.25); PR.set(-0.55, -1, -0.25);          // elbows down, tucked to the ribs
     // feet (group frame, rig units): lead foot forward, rear back and out, rear heel up
-    const leadF = lead === "L" ? FL : FR, rearF = lead === "L" ? FR : FL;
     leadF.set(lx * (D.hipX + 0.03), D.footY, 0.30);
     rearF.set(-lx * (D.hipX + 0.10), D.footY + 0.025, -0.30);
     QL.set(0.25, 0.1, 1); QR.set(-0.25, 0.1, 1);                 // knees track over the toes
+    }
 
     // ================= PUNCH ===============================================
     let aimSide = null;
@@ -495,7 +526,7 @@
     }
 
     // ================= HIT REACTIONS (the body half) =======================
-    if (hr && hr.on) reactBody(ch, hr, D, lead);
+    if (hr && hr.on) reactBody(ch, hr, D, lead, passive);
     else if (ch.staggerT > 0) legacyStagger(ch, D);
 
     // ================= FOOTWORK (a real step) ==============================
@@ -687,7 +718,7 @@
   }
 
   // ---- the body half of a hit reaction (inside the stance frame) ----
-  function reactBody(ch, hr, D, lead) {
+  function reactBody(ch, hr, D, lead, passive) {
     const t = hr.t, amt = hr.amt == null ? 1 : hr.amt;
     const lx = hr.lx || 0, lz = hr.lz == null ? -1 : hr.lz;      // push direction in HIS frame
     if (hr.kind === "snap") {
@@ -707,6 +738,24 @@
       S.nx += 0.30 * amt * f;
       _t.set(0.16, D.hipY + 0.42, 0.34); WL.lerp(_t, 0.75 * f);   // the arms come in to cover the belly
       _t.x = -0.16; WR.lerp(_t, 0.75 * f);
+      if (passive) S.armK = Math.max(S.armK, f);
+    } else if (hr.kind === "arm") {
+      /* SHOT THROUGH THE ARM: that arm goes dead and hangs straight, the
+         other hand comes across and clamps the shoulder, the torso curls
+         over it and turns the hurt side away. `side` "L" = his left (+X). */
+      const f = sstep(0, 0.06, t) * (1 - sstep(hr.dur * 0.55, hr.dur, t));
+      const sg = hr.side === "L" ? 1 : -1;
+      const hurtW = sg > 0 ? WL : WR, holdW = sg > 0 ? WR : WL;
+      const hurtP = sg > 0 ? PL : PR, holdP = sg > 0 ? PR : PL;
+      _t.set(sg * (D.shX + 0.06), D.shY - (D.l1 + D.l2) * 0.97, 0.02); hurtW.lerp(_t, f);
+      _t2.set(sg * 0.25, -0.2, -1); hurtP.lerp(_t2, f);
+      _t.set(sg * D.shX * 0.45, D.shY - 0.26, D.torsoD * 0.5 + 0.10); holdW.lerp(_t, f);
+      _t2.set(-sg * 0.6, -1, 0.1); holdP.lerp(_t2, f);
+      S.bx += 0.14 * amt * f;                                      // hunched over it
+      S.bz += -sg * 0.10 * amt * f;                                // dips onto the hurt side
+      S.by += sg * 0.10 * amt * f;                                 // the hurt shoulder turns away
+      S.nx += 0.18 * f;                                            // looks down at it
+      S.armK = Math.max(S.armK, f);
     } else if (hr.kind === "buckle") {
       const f = sstep(0, 0.06, t) * (1 - sstep(0.25, hr.dur, t));
       const sgn = hr.side === "L" ? 1 : -1;                        // the leg that was kicked
@@ -725,6 +774,7 @@
         // arms go out for balance
         _t.set(0.42, D.shY - 0.30, 0.25); WL.lerp(_t, 0.55 * s * amt);
         _t.x = -0.42; WR.lerp(_t, 0.55 * s * amt);
+        if (passive) S.armK = Math.max(S.armK, Math.min(1, 0.7 * s * amt));
       }
     }
   }
@@ -815,6 +865,13 @@
                L: { f: -0.10, lift: 0, z: -0.02 }, R: { f: 0.14, lift: 0, z: 0.02 }, aL: [-0.10, 0.30, -0.60], aR: [-0.70, -0.20, -1.60] },
     liverKneel: { h: 0.58, mZ: 0.02, bx: 0.48, by: 0.20, bz: -0.20, nx: 0.35, ny: -0.10, nz: -0.08,
                L: { f: -0.40, lift: 0.07, z: -0.02 }, R: { f: 0.40, lift: 0, z: 0.06 }, aL: [-0.55, 0.05, -0.90], aR: [-0.55, -0.25, -1.65] },
+    // ---- shot through the RIGHT leg (mirrored for the left): that knee
+    //      gives, he drops onto it, the good foot planted in front, the
+    //      right hand clamped on the thigh and the left braced on the knee ----
+    legGive:  { h: 0.74, mZ: -0.02, bx: 0.20, by: 0, bz: 0.10, nx: 0.30, ny: 0, nz: 0.04,
+               L: { f: 0.12, lift: 0, z: 0.05 }, R: { f: -0.18, lift: 0.06, z: -0.02 }, aL: [-0.25, 0.25, -0.40], aR: [-0.30, 0.10, -0.70] },
+    shotKneel: { h: 0.56, mZ: 0.02, bx: 0.26, by: 0, bz: 0.08, nx: 0.32, ny: 0, nz: 0.04,
+               L: { f: 0.46, lift: 0, z: 0.07 }, R: { f: -0.44, lift: 0.08, z: -0.02 }, aL: [-0.55, 0.08, -0.55], aR: [-0.30, 0.06, -0.85] },
   };
   // the sequences: [key, t_end] — the first segment blends from whatever the
   // body was doing, the last hands back to it (weight → 0)
@@ -827,7 +884,17 @@
     upBack:   [["sitUp", 0.40], ["tuck", 0.75], ["kneel", 1.15], ["rise", 1.45], [null, 1.75]],
     upFace:   [["pushUp", 0.45], ["kneel", 0.95], ["rise", 1.30], [null, 1.60]],
     upKneel:  [["rise", 0.40], [null, 0.72]],
+    kneel:    [["legGive", 0.14], ["shotKneel", 0.36]],
   };
+  /* one row per way of going down: its fall (KO'd / conscious), the key it
+     lies (or kneels) in, how it gets up, and a beat before anything moves */
+  const FALLS = {
+    back:  { fall: "back", fallC: "backC", lie: "lieBack", lieC: "lieBack", up: "upBack", getup: "roll", delay: 0 },
+    face:  { fall: "face", fallC: "faceC", lie: "lieFace", lieC: "lieFaceBrace", up: "upFace", getup: "push", delay: 0 },
+    liver: { fall: "liver", fallC: "liver", lie: "liverKneel", lieC: "liverKneel", up: "upKneel", getup: "knee", delay: 0.22 },
+    kneel: { fall: "kneel", fallC: "kneel", lie: "shotKneel", lieC: "shotKneel", up: "upKneel", getup: "knee", delay: 0 },
+  };
+  function fallRow(variant) { return FALLS[variant] || FALLS.back; }
   const CH = 20;   // resolved channel count
   // resolved key: [dl, mZ, bx, by, bz, nx, ny, nz, LLx, LLz, LLk, RLx, RLz, RLk, LAx, LAz, LAe, RAx, RAz, RAe]
   function legAngles(D, h, spec, out, o) {
@@ -916,7 +983,7 @@
     o = o || {};
     let f = ch.fall;
     if (!f || typeof f !== "object") f = ch.fall = {};
-    const variant = o.variant || ((o.dirF != null ? o.dirF : 1) < 0 ? "face" : "back");
+    const variant = FALLS[o.variant] ? o.variant : ((o.dirF != null ? o.dirF : 1) < 0 ? "face" : "back");
     f.on = true; f.t = 0; f.gt = 0; f.variant = variant;
     f.dirF = variant === "face" ? -1 : 1;
     f.side = o.side < 0 ? -1 : 1;
@@ -924,7 +991,7 @@
     f.dur = o.dur != null ? o.dur : 2.0;
     f.hold = !!o.hold;
     f.phase = "fall";
-    f.getup = variant === "face" ? "push" : variant === "liver" ? "knee" : "roll";
+    f.getup = fallRow(variant).getup;
     // the fall owns the whole body: every strike and reaction on it ends
     ch.punchT = 0; ch.kickT = 0; ch.blockT = 0; ch.dodgeT = 0;
     if (ch.hitReact) ch.hitReact.on = false;
@@ -940,9 +1007,8 @@
     return true;
   };
   MP.fallTimes = function (variant) {
-    const fall = SEQ[variant === "face" ? "face" : variant === "liver" ? "liver" : "back"];
-    const up = SEQ[variant === "face" ? "upFace" : variant === "liver" ? "upKneel" : "upBack"];
-    return { fall: fall[fall.length - 1][1], getup: up[up.length - 1][1] };
+    const F = fallRow(variant), fall = SEQ[F.fall], up = SEQ[F.up];
+    return { fall: fall[fall.length - 1][1], getup: up[up.length - 1][1], delay: F.delay };
   };
   function seqSample(ch, seq, t, side, cur, out) {
     const keys = keysOf(ch);
@@ -981,24 +1047,25 @@
       const side = f.side;
       readCur(ch, CUR);
       let w = 1;
+      const FR = fallRow(variant);
       if (f.phase === "fall") {
         f.t += mdt;
-        const seq = SEQ[variant === "face" ? (f.ko ? "face" : "faceC") : variant === "liver" ? "liver" : (f.ko ? "back" : "backC")];
+        const seq = SEQ[f.ko ? FR.fall : FR.fallC];
         // the liver: a beat where nothing happens yet, then the fold
-        const tt = variant === "liver" ? Math.max(0, f.t - 0.22) : f.t;
+        const tt = Math.max(0, f.t - FR.delay);
         w = seqSample(ch, seq, tt, side, CUR, OUT);
         if (tt >= seq[seq.length - 1][1]) { f.phase = "down"; f.t = 0; }
       } else if (f.phase === "down") {
         f.t += mdt;
-        const key = keysOf(ch)[variant === "face" ? (f.ko ? "lieFace" : "lieFaceBrace") : variant === "liver" ? "liverKneel" : "lieBack"];
+        const key = keysOf(ch)[f.ko ? FR.lie : FR.lieC];
         mirrorInto(key, side, OUT);
         OUT[2] += (variant === "face" ? -1 : 1) * 0.025 * Math.sin(ch.breath * 2.4);   // he is still breathing
         if (!f.hold && f.t >= f.dur) { f.phase = "getup"; f.gt = 0; }
       } else {
         f.gt += mdt;
-        const seq = SEQ[variant === "face" ? "upFace" : variant === "liver" ? "upKneel" : "upBack"];
+        const seq = SEQ[FR.up];
         // the first get-up segment starts from the lying key, not the live base
-        const lie = keysOf(ch)[variant === "face" ? (f.ko ? "lieFace" : "lieFaceBrace") : variant === "liver" ? "liverKneel" : "lieBack"];
+        const lie = keysOf(ch)[f.ko ? FR.lie : FR.lieC];
         mirrorInto(lie, side, MIR);
         w = seqSample(ch, seq, f.gt, side, MIR, OUT);
         // the final segment returns to the live standing base: blend by w

@@ -2654,6 +2654,11 @@
       m.side.hits++;
       if (CBZ.bodyWound && cd2 < 90 * 90) safe(function () { CBZ.bodyWound(tgt, _v, {}); });
       hurtMan(tgt, r.dmg * (head ? 2.2 : 1), { by: m, headshot: head });
+      // a man it did not drop takes the round on his rig (CBZ.verbs.shot):
+      // only where a camera could see it, the same 90 m the wound uses
+      if (!tgt.dead && !tgt.isYou && cd2 < 90 * 90 && CBZ.verbs && CBZ.verbs.shot) {
+        safe(function () { CBZ.verbs.shot(tgt, { point: _v, fromX: m.pos.x, fromZ: m.pos.z, head: head, cal: w && w.pellets > 1 ? 1.5 : 1 }); });
+      }
     }
   }
   const _mq = [];

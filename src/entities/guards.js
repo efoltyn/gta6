@@ -1556,12 +1556,15 @@
       noteState(g, "ko");
       g.ko -= dt;
       g._chase = null;
-      // a rig fall (entities/meleeposes.js) is the visible fall; the side roll
-      // is only for a KO without one
+      // a rig fall (entities/meleeposes.js) is the visible fall, for every
+      // KO (CBZ.koFall gives one to a KO that came without it); the side
+      // roll about the feet is only the no-rig fallback
+      if (CBZ.koFall) CBZ.koFall(g);
       if (!(g.char && g.char.fall && g.char.fall.on)) g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
       still(g);
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
+      if (g.ko <= 0 && CBZ.koRise) CBZ.koRise(g);
       return false;
     } else if (g.group.rotation.z !== 0) {
       g.group.rotation.z = CBZ.damp(g.group.rotation.z, 0, 9, dt); // stand back up
