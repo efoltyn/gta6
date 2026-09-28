@@ -1757,8 +1757,11 @@
       // pad disc + painted H
       const pad = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 0.08, 20), cm(M.tarmac));
       pad.position.set(px, 0.02, padZ); pad.receiveShadow = true; root.add(pad);
-      box(root, px, 0.06, padZ, 1.0, 0.02, 4.0, M.paint, { cast: false });           // H verticals
-      box(root, px - 1.4, 0.06, padZ, 0.02 + 2.8, 0.02, 0.8, M.paint, { cast: false }); // H crossbar
+      // the H stands 3 cm proud of the disc top (0.06): it was 1 cm, both in
+      // shared untextured colours, and the pale paint shimmered through the
+      // tarmac from any height a helicopter flies at
+      box(root, px, 0.075, padZ, 1.0, 0.03, 4.0, M.paint, { cast: false });           // H verticals
+      box(root, px - 1.4, 0.075, padZ, 0.02 + 2.8, 0.03, 0.8, M.paint, { cast: false }); // H crossbar
       const ring = new THREE.Mesh(new THREE.TorusGeometry(6.2, 0.12, 6, 24), cm(M.paint));
       ring.rotation.x = Math.PI / 2; ring.position.set(px, 0.05, padZ); root.add(ring);
       placeModel(root, makeHeli, px, padZ, rng() * 0.4 - 0.2, 1, "heli", "Helicopter");

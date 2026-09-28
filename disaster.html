@@ -23,15 +23,15 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=name1">
+<link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=exit1">
+<link rel="stylesheet" href="css/mobile.css?v=flick1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
-<link rel="stylesheet" href="css/interact_touch.css?v=name1">
+<link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=hub1">
 </head>
 <body class="campaign-build">
@@ -514,7 +514,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js"></script>
+<script src="src/world/prisonkit.js?v=flick1"></script>
 <script src="src/world/corridorkit.js"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
@@ -813,7 +813,7 @@ document.body.appendChild(b);}}catch(e){}})();
      core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
      puts survival back on the variable step, live. -->
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
-<script src="src/systems/touch.js?v=sharkmode1"></script>
+<script src="src/systems/touch.js?v=flick1"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
@@ -998,7 +998,7 @@ document.body.appendChild(b);}}catch(e){}})();
      continent plate reads its relief-corridor gate). -->
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
-<script src="src/city/interchange.js?v=hwy1"></script>
+<script src="src/city/interchange.js?v=flick1"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
@@ -1924,7 +1924,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=vs1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js"></script>
+<script src="src/core/batch.js?v=flick1"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

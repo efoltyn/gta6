@@ -175,34 +175,69 @@
     m.customProgramCacheKey = function () { return "hwdeck" + kind; };
     return m;
   }
+  // ONE recipe per deck kind, so a depth-layered variant is built exactly
+  // like the base (a clone would drop onBeforeCompile and the asphalt chain).
+  function makeDeck(kind) {
+    let m;
+    if (kind === "asphalt") {
+      m = deckMaterial(0x2c2e33, 0);
+      // ONE asphalt for city streets and freeways: the street builder's shader
+      // (world/materials.js) when it is loaded — base colour white, its tone
+      // owns the albedo — chained after ours (rumble, shoulders stay ours).
+      if (CBZ.asphaltDetail) {
+        try {
+          m.color.setHex(0xffffff);
+          CBZ.asphaltDetail(m, { scale: 1, crackiness: 0.7, patchiness: 0.6, lanes: { laneW: 3.6, lanesPerDir: 3, median: 0 } });
+        } catch (e) { m.color.setHex(0x2c2e33); }
+      }
+    } else if (kind === "ramp") {
+      // bridge decks get their own, darker, fresher surfacing (a flyover is
+      // newer pavement than the road it crosses and reads as its own layer)
+      m = deckMaterial(0x202125, 0);
+      if (CBZ.asphaltDetail) {
+        try {
+          m.color.setHex(0xffffff);
+          CBZ.asphaltDetail(m, { scale: 1, crackiness: 0.25, patchiness: 0.15, tone: 0.72 });
+        } catch (e) { m.color.setHex(0x202125); }
+      }
+    } else if (kind === "concrete") m = deckMaterial(0x8a8e94, -1);
+    else m = deckMaterial(0x6b5a42, 1);
+    return m;
+  }
+  /* DECKS THAT MEET ARE DEPTH-ORDERED, NOT MILLIMETRE-STACKED. Two freeways
+     crossing lay their junction boxes over each other 0.8 mm apart, and a
+     slip ramp rides the mainline 1.5 mm up through its taper: far below the
+     depth buffer's resolution past a few metres, and the two decks are shaded
+     differently (lane/edge attributes), so the dark crossing shimmered in
+     stair-steps. Every deck now carries a polygonOffset step: mainlines 0-3.5
+     in half steps by build order (the deckY cycle), slips 4, the flyover 5,
+     and the paint (6) beyond all of them.
+     polygonOffset is GL state, not a shader: the variants share one program. */
+  const _decks = new Map();
+  function deckLayer(kind, step) {
+    const k = kind + "|" + step;
+    let m = _decks.get(k);
+    if (!m) {
+      m = step === 0 && _mats && _mats[kind] ? _mats[kind] : makeDeck(kind);
+      if (step) { m.polygonOffset = true; m.polygonOffsetFactor = -step; m.polygonOffsetUnits = -2 * step; }
+      _decks.set(k, m);
+    }
+    return m;
+  }
   function mats() {
     if (_mats) return _mats;
     _mats = {
-      asphalt: deckMaterial(0x2c2e33, 0),
-      // bridge decks get their own, darker, fresher surfacing (a flyover is
-      // newer pavement than the road it crosses and reads as its own layer)
-      ramp: deckMaterial(0x202125, 0),
-      concrete: deckMaterial(0x8a8e94, -1),
-      dirt: deckMaterial(0x6b5a42, 1),
-      // LIT paint (Lambert), pulled toward the camera in depth only: no
-      // coplanar fight with the deck and no floating either.
-      paint: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+      asphalt: makeDeck("asphalt"),
+      ramp: makeDeck("ramp"),
+      concrete: makeDeck("concrete"),
+      dirt: makeDeck("dirt"),
+      // LIT paint (Lambert), pulled toward the camera in depth only, one step
+      // beyond the highest deck layer (deckLayer): no coplanar fight with any
+      // deck and no floating either.
+      paint: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -12 }),
       furn: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
     };
     if (CBZ.onQualityChange) CBZ.onQualityChange(function (lv) { _detailU.value = lv >= 1 ? 1 : 0; });
-    // ONE asphalt for city streets and freeways: the street builder's shader
-    // (world/materials.js) when it is loaded — base colour white, its tone
-    // owns the albedo — chained after ours (rumble, shoulders stay ours).
-    if (CBZ.asphaltDetail) {
-      try {
-        _mats.asphalt.color.setHex(0xffffff);
-        CBZ.asphaltDetail(_mats.asphalt, { scale: 1, crackiness: 0.7, patchiness: 0.6, lanes: { laneW: 3.6, lanesPerDir: 3, median: 0 } });
-      } catch (e) { _mats.asphalt.color.setHex(0x2c2e33); }
-      try {
-        _mats.ramp.color.setHex(0xffffff);
-        CBZ.asphaltDetail(_mats.ramp, { scale: 1, crackiness: 0.25, patchiness: 0.15, tone: 0.72 });
-      } catch (e) { _mats.ramp.color.setHex(0x202125); }
-    }
     return _mats;
   }
 
@@ -408,6 +443,7 @@
       spec: {
         path, smooth, isDirt, markings, theme: opts.theme || "asphalt", lanesPerDir, laneW, median, medianW,
         medHalf, trav, half, deckY, heightAt, route: opts.route || null,
+        layer: (_highways.length % 8) * 0.5,    // deck depth order (deckLayer), same cycle as deckY
         bank: smooth && !heightAt && !isDirt && opts.bank !== false,
       },
       // interchange hooks (set before the late pass): world rects where the
@@ -908,7 +944,7 @@
     }
 
     // ---- emit chunk meshes ---------------------------------------------------
-    const deckMat = S.isDirt ? M.dirt : (S.theme === "concrete" ? M.concrete : M.asphalt);
+    const deckMat = deckLayer(S.isDirt ? "dirt" : (S.theme === "concrete" ? "concrete" : "asphalt"), S.layer || 0);
     for (const C of chunks) {
       if (!C) continue;
       const d = C.deck.mesh(deckMat);
@@ -1307,7 +1343,7 @@
   }
 
   // ---- the kit city/interchange.js builds with --------------------------------
-  CBZ._hwyKit = { Acc: Acc, col: col, mats: mats, registerChunk: registerChunk, stationize: stationize };
+  CBZ._hwyKit = { Acc: Acc, col: col, mats: mats, deckLayer: deckLayer, registerChunk: registerChunk, stationize: stationize };
 
   // ---- pipeline hooks -----------------------------------------------------------
   if (CBZ.addLandmass) {

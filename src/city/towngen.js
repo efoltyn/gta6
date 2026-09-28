@@ -72,6 +72,26 @@
     }
     return null;
   }
+  /* THE TOWN FLOOR IS FOUR SHEETS A CENTIMETRE APART: ground pad 0.03,
+     sidewalk 0.04 (running 1 m under every street), road 0.05, square 0.06.
+     A centimetre is below the depth buffer's resolution past ~50 m, so the
+     dark street shimmered through the sidewalk band in stair-steps. Each
+     sheet above the pad is pulled FORWARD one more step (the pad stays put:
+     it is the one sitting on terrain), so an upper sheet always wins its
+     overlap. A private clone, never the shared cmat: that material is used
+     by walls and props of the same colour. Paint (PY 0.075) sits one step
+     beyond the road. core/batch.js never merges a polygonOffset material. */
+  const _layerMats = new Map();
+  function layerMat(hex, step) {
+    const k = hex + "|" + step;
+    let m = _layerMats.get(k);
+    if (!m) {
+      m = cmat(hex).clone();
+      m.polygonOffset = true; m.polygonOffsetFactor = -step; m.polygonOffsetUnits = -2 * step;
+      _layerMats.set(k, m);
+    }
+    return m;
+  }
   function planeGeo(x, z, w, d, y, rotY) {
     const g = new THREE.PlaneGeometry(w, d);
     g.rotateX(-Math.PI / 2);
@@ -216,7 +236,7 @@
       for (let k = 0; k <= cols; k++) roadSeg(xLines[k], cz, true, maxZ - minZ);
       for (let k = 0; k <= rows; k++) roadSeg(cx, zLines[k], false, maxX - minX);
     }
-    mergeAdd(root, roadGeoms, cmat(pal.road != null ? pal.road : 0x5a4f3e), { receive: true });
+    mergeAdd(root, roadGeoms, layerMat(pal.road != null ? pal.road : 0x5a4f3e, 2), { receive: true });
     // ---- ROAD MARKINGS (ROAD_MARKINGS_V1) --------------------------------
     // Make town streets READ like streets. The mainland downtown grid (world.js)
     // is already lane-painted under ROADS_V2; town streets were bare asphalt
@@ -306,7 +326,7 @@
         for (let s = -1; s <= 1; s += 2) for (let k = -zkH; k <= zkH; k++) paintRect(ix + s * (boxH + 1.3), iz + k * 1.1, 1.7, 0.6, C_WHITE, 0.85);
       }
       if (paintGeoms.length) {
-        const pmat = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        const pmat = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
         if (BGU && BGU.mergeBufferGeometries) {
           const pm = new THREE.Mesh(BGU.mergeBufferGeometries(paintGeoms), pmat);
           pm.castShadow = false; pm.receiveShadow = false; pm.matrixAutoUpdate = false; pm.updateMatrix();
@@ -319,7 +339,7 @@
       // (flag OFF) original faded centre dashes on the spine — byte-identical
       const n = Math.max(6, ((maxX - minX) / 7) | 0);
       for (let i = 0; i < n; i++) lineGeoms.push(planeGeo(minX + 8 + i * ((maxX - minX - 16) / n), cz, 2.4, 0.3, 0.07));
-      mergeAdd(root, lineGeoms, cmat(pal.line != null ? pal.line : 0xc9bf8e), { receive: false });
+      mergeAdd(root, lineGeoms, layerMat(pal.line != null ? pal.line : 0xc9bf8e, 3), { receive: false });
     }
 
     // =====================================================================
@@ -400,7 +420,7 @@
         reserveRect({ minX: lt.cx - lt.w / 2, maxX: lt.cx + lt.w / 2, minZ: lt.cz - lt.d / 2, maxZ: lt.cz + lt.d / 2 });
       }
     }
-    mergeAdd(root, sidewalkGeoms, cmat(SIDEWALK), { receive: true });
+    mergeAdd(root, sidewalkGeoms, layerMat(SIDEWALK, 1), { receive: true });
 
     // ANCHOR PLAN — now that lots[] exist, ask the composer which central lots
     // must become which purposeful shop. Deterministic (siteRng only). The fill
@@ -727,7 +747,7 @@
     let square = null;
     if (squareCell && squareCell.bx != null) {
       const sx = squareCell.bx, sz = squareCell.bz, sw = squareCell.w, sd = squareCell.d;
-      mergeAdd(root, [planeGeo(sx, sz, sw - 3, sd - 3, 0.06)], cmat(pal.plaza != null ? pal.plaza : SIDEWALK), { receive: true });
+      mergeAdd(root, [planeGeo(sx, sz, sw - 3, sd - 3, 0.06)], layerMat(pal.plaza != null ? pal.plaza : SIDEWALK, 3), { receive: true });
       reserveRect({ minX: sx - sw / 2, maxX: sx + sw / 2, minZ: sz - sd / 2, maxZ: sz + sd / 2 });
       // central landmark — a stone WELL (cylinder base + low ring) by default,
       // or a flagpole if the recipe asks. Decor with a thin collider.

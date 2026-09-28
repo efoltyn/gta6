@@ -247,9 +247,16 @@
       g.translate(x, y, z);
       return g;
     }
-    function mergeAdd(geoms, hex, y) {
+    // `step`: the driveway is a sheet 2 cm over the lot pad (and its edge
+    // paint 1.5 cm over that; off-grid, the dropped kerb 1 cm over the apron's
+    // last half metre), which the depth buffer stops separating a
+    // hundred metres out; each is pulled one polygonOffset step further
+    // forward than the sheet it lies on. A PRIVATE material: cmat's is a
+    // shared cache every same-coloured wall and prop draws with.
+    function mergeAdd(geoms, hex, step) {
       if (!geoms.length) return null;
-      const mat = CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex });
+      const mat = CBZ.cmat ? CBZ.cmat(hex).clone() : new THREE.MeshLambertMaterial({ color: hex });
+      if (step) { mat.polygonOffset = true; mat.polygonOffsetFactor = -step; mat.polygonOffsetUnits = -2 * step; }
       if (BGU && BGU.mergeBufferGeometries) {
         const mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geoms), mat);
         mesh.receiveShadow = true; mesh.castShadow = false;
@@ -399,9 +406,9 @@
     }
 
     if (C.LOT_APPROACH_PAVING !== false) {
-      mergeAdd(apron, 0x8f9298);        // asphalt-grey driveway surfacing
-      mergeAdd(dropped, 0xa9aeb3);      // the dropped kerb: lighter poured concrete
-      mergeAdd(edges, 0xd6dade);        // the painted edge lines
+      mergeAdd(apron, 0x8f9298, 1);     // asphalt-grey driveway surfacing
+      mergeAdd(dropped, 0xa9aeb3, 2);   // the dropped kerb: 1 cm over the off-grid apron's end
+      mergeAdd(edges, 0xd6dade, 3);     // the painted edge lines (5 mm over the dropped kerb)
     }
     return null;
   }, 67);

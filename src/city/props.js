@@ -4038,7 +4038,19 @@
       // warm light POOL on the pavement — an emissive disc, not a real light;
       // the flicker driver fades it up after dark (firelight for free)
       const pool = new THREE.Mesh(poolGeo, firePoolM);
-      pool.rotation.x = -Math.PI / 2; pool.position.set(bp.x, 0.165, bp.z); root.add(pool);   // floats above pad+cardboard (no z-fight)
+      // SEATED ON THE REAL STREET. The fixed 0.165 was authored for the old
+      // 8 cm sidewalk / 10 cm pad; the camp stands on the lot edge, so the 2 m
+      // disc now spans the 0.125 lot pad, the back slope and the 0.18 footway,
+      // and lay 1.5 cm UNDER the footway it glowed through, flickering. A flat
+      // disc cannot follow the kerb profile, so it rides 2 cm over the highest
+      // ground under it.
+      let poolY = 0.165;
+      if (city.groundDecalY) {
+        poolY = 0;
+        for (const o of [[0, 0], [1.9, 0], [-1.9, 0], [0, 1.9], [0, -1.9]]) poolY = Math.max(poolY, +city.groundDecalY(bp.x + o[0], bp.z + o[1]) || 0);
+        poolY += 0.02;
+      }
+      pool.rotation.x = -Math.PI / 2; pool.position.set(bp.x, poolY, bp.z); root.add(pool);
       campFires.push({ flame, smoke, y0: GY + 1.4, ph: rng() * 6.28 });
       solidCollider(bp.x, bp.z, 0.42, barrel);
       // flattened CARDBOARD bedding between the tents and the fire — each one
@@ -4049,7 +4061,10 @@
         const p = at(tOff + (rng() - 0.5) * 5.0, 0.7 + rng() * 0.8);
         const card = new THREE.Mesh(cardG, cardM);
         const cyaw = rng() * 6.28;
-        card.position.set(p.x, 0.12, p.z); card.rotation.y = cyaw; root.add(card);
+        // on the drawn ground, 2 cm proud: the fixed 0.12 left the card's top
+        // 7 mm over the lot pad (fighting it) or buried in the footway
+        const cardY = city.groundDecalY ? (+city.groundDecalY(p.x, p.z) || 0) + 0.0325 : 0.12;
+        card.position.set(p.x, cardY, p.z); card.rotation.y = cyaw; root.add(card);
         // head toward the card's local +z end (world (sin cyaw, cos cyaw))
         if (CBZ.propRegisterBed) CBZ.propRegisterBed(p.x, 0, p.z, Math.sin(cyaw), Math.cos(cyaw), 1.9, 0.14, "bedroll", null);
       }

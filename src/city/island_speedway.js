@@ -960,6 +960,13 @@
     surfaceTex.generateMipmaps = true;
     surfaceTex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
     const grassSurfaceMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: surfaceTex });
+    // THE SITE IS THE UNDERLAY. It runs under the whole oval at 0.015, and the
+    // infield verge, the outside embankment and the dark pit verge all feather
+    // down through it, lying within a centimetre or two of it for metres at a
+    // time: they shimmered through the grass all the way round the lap. Pushed
+    // one step back (the continent plate below it is pushed further), every
+    // surface laid on the site owns the pixels it shares with it.
+    grassSurfaceMat.polygonOffset = true; grassSurfaceMat.polygonOffsetFactor = 1; grassSurfaceMat.polygonOffsetUnits = 2;
     const speedwaySurface = flat(stadiumSiteGeometry(), grassSurfaceMat, 0.015, { x: CX, z: CZ });
     speedwaySurface.userData.terrain = true; speedwaySurface.userData.worldSurface = true;
     speedwaySurface.userData.surfaceOwner = "speedway";

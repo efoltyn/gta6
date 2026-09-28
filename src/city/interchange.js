@@ -649,7 +649,9 @@
         if (d && detail.length && K.registerChunk) K.registerChunk(d, detail);
       }
     }
-    emit(chunks, M.ramp || M.asphalt);
+    // depth-ordered over the mainline it hugs through the diverge/merge
+    // tapers (highways.js deckLayer: the flyover is layer 5, slips 4)
+    emit(chunks, K.deckLayer ? K.deckLayer("ramp", 5) : (M.ramp || M.asphalt));
     // ---- the at-grade slip ramps: same surface builder, ordinary asphalt -------
     for (const SL of (G.slips || [])) {
       const sc = [];
@@ -666,7 +668,7 @@
         if (T[i].s <= SL.sT2) jAcc = i;
       }
       surface(T, m, jG, jND, jNM, jAcc, Math.round(R0.taper / R0.step), Math.round(R0.taper / R0.step), C2, M.asphalt);
-      emit(sc, M.asphalt);
+      emit(sc, K.deckLayer ? K.deckLayer("asphalt", 4) : M.asphalt);   // 1.5 mm over the mainline shoulder
     }
     if (CBZ.colliders) for (const c of colliders) CBZ.colliders.push(c);
 
