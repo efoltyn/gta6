@@ -2346,6 +2346,7 @@
     } catch (e) { try { console.error("[city origin] apply:", e); } catch (e2) {} }
     return { introActive: introActiveFlag };
   }
+  let pendingTP = false;    // one-shot: disarm fpsmode's FP-after-intro on the first frame
   CBZ.cityOriginIntroActive = function () { return !!introActiveFlag; };
   // Every origin cinematic ends on the shoulder camera, never pushed into the
   // eyes (camera.js honours keepThirdPerson). state.js still arms fpsmode's
