@@ -519,7 +519,20 @@
     const p = resolvePose(pose);
     const far = lod >= 2;
     const parts = [palmGeo(p.cup || 0.004, far ? [4, 3] : [6, 4])];
-    if (!far) {
+    if (far) {
+      // THE FAR WRIST. The far hand had no stub at all, so past ~30 m the
+      // palm's heel stopped ~3 cm short of the forearm's crease and every
+      // crowd hand floated off its arm. A 4-sided stub (16 tris: heel apex,
+      // the crease ring, one ring up the arm, shut) turned a quarter so its
+      // flats face the palm. The crease ring is scaled up so the square reads
+      // as full as the round stub; the ring up inside the forearm keeps its
+      // corners ON the round stub's section so they cannot poke out of the
+      // far 8-sided forearm loft.
+      const back = p.stub != null ? p.stub : 0.070;
+      const rings = stubRings(back, false).filter(function (r, i) { return i !== 1; })
+        .map(function (r) { const k = r[0] > 0 ? 1 : 1.2; return [r[0], r[1] * k, r[2] * k, r[3]]; });
+      lathe(parts, rings, 4, Math.PI / 4);
+    } else {
       // A closed stub (it was an OPEN 6-sided tube: a hole at each end the
       // moment a bend showed it). Table holds run it 7 cm back up the arm:
       // the hand slides down its wrist onto a held socket (character.js
