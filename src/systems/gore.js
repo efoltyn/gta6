@@ -3885,7 +3885,10 @@
       else if (!hasDir) omniBlood(x, y + 0.35, z, amt, al);
       else {
         const hy = head ? 1.1 : 0.35;
-        shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt * (sprayedHere(x, z) ? 0.4 : 1), true, head, al, popHead);
+        // opts.exit: the fire path's own answer (verbs_strike V.roundExits);
+        // absent = the old assumption that a killing round went through
+        const through = opts.exit != null ? !!opts.exit : true;
+        shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt * (sprayedHere(x, z) ? 0.4 : 1), through, head, al, popHead);
       }
     }
 
@@ -3996,7 +3999,7 @@
   // directional wet spray/mist with no pool, gibs, flash, slow-mo or kill-context
   // consumption. fpsmode uses this once per connecting pellet; the actual death
   // pipeline calls CBZ.gore exactly once if that hit puts the actor down.
-  CBZ.gore.spray = function (point, amount, dir) {
+  CBZ.gore.spray = function (point, amount, dir, opts) {
     if (!point || !CBZ.scene) return;
     const d2 = dist2Cam(point.x, point.z);
     if (CBZ.camera && CBZ.camera.position && d2 > 65 * 65) return;
@@ -4016,8 +4019,10 @@
     // WHAT GOES THROUGH. A full-bore round (0.58 x calibre for a body, 0.95
     // for a head) exits and throws the big spray out of the far side; a
     // buckshot pellet (0.28-0.34) or a spent round stays in, so it is the
-    // entry spatter alone.
-    shotBlood(point.x, point.y, point.z, dx, dy, dz, amt, amt >= 0.45, amt >= 0.9, al, false);
+    // entry spatter alone. When the fire path knows (opts.exit, decided by
+    // verbs_strike's V.roundExits) its answer wins over the amount guess.
+    const through = opts && opts.exit != null ? !!opts.exit : amt >= 0.45;
+    shotBlood(point.x, point.y, point.z, dx, dy, dz, amt, through, amt >= 0.9, al, false);
   };
 
   /* ============================================================
