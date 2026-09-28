@@ -2114,9 +2114,9 @@
         // is numeric, with no weapon/reserve labels floating over the world.
         // One compact lock glyph is enough to reveal that homing is armed; no
         // floating tutorial prose is introduced into the minimal campaign HUD.
-        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + (rocketSpec && rocketSpec.homing ? "◎ " : "") + fps.ammo + " / " + fps.mag + " · " + fps.reserve;
+        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + (rocketSpec && rocketSpec.homing ? "◎ " : "") + fps.ammo + " / " + fps.reserve;   // rounds in the gun / rounds you carry (signage law: no middle dots)
       } else {
-        const held = rocketMode ? w.short + " · " + rocketMode : w.label;
+        const held = rocketMode ? w.short + " " + rocketMode : w.label;
         const top = fps.reloading > 0 ? "RELOADING " + w.short : held;
         ammoEl.textContent = top + "\n" + fps.ammo + " / " + fps.mag + "   RES " + fps.reserve;
       }

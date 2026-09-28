@@ -350,8 +350,6 @@ body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
 #streakHud .streak-brackets span:first-child{border-left:3px solid rgba(230,255,230,.8);}
 #streakHud .streak-brackets span:last-child{border-right:3px solid rgba(230,255,230,.8);}
 #streakHud.pop{animation:streakpop 1.55s ease forwards;}
-#streakHud.nuke{color:#fff7b0; text-shadow:0 0 12px rgba(255,212,81,.75),0 3px 0 rgba(0,0,0,.75);}
-#streakHud.nuke .streak-title{font-size:36px;}
 #streakHud.ended{color:#ff9a9a;}
 @keyframes streakpop{
   0%{opacity:0; transform:translate(-50%,-50%) scale(.92);}
@@ -364,7 +362,6 @@ body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
   display:none; padding:9px 13px; font-size:13px; font-weight:700; letter-spacing:1.5px;
   color:#eaffdf; text-shadow:0 1px 0 rgba(0,0,0,.55);
 }
-#streakMeter.armed{color:#ffd451; border-color:rgba(255,212,81,.65); box-shadow:0 6px 0 rgba(0,0,0,.18),0 0 18px rgba(255,212,81,.24);}
 
 /* alarm vignette + flash */
 #vignette{position:fixed; inset:0; pointer-events:none; box-shadow:inset 0 0 200px 40px rgba(220,30,40,0); transition:box-shadow .15s;}
@@ -682,6 +679,9 @@ body.mode-survival #objective:not(.killfeed){ display:none; }
 #prisonPrompts.on{display:block;}
 .wprompt{position:absolute; left:0; top:0; transform:translate(-50%,-100%); padding-bottom:10px; pointer-events:none; white-space:nowrap;}
 .wprompt.band{position:fixed; left:50%; top:auto; bottom:calc(168px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%); padding-bottom:0;}
+/* touch: a band pill never lands on the verb stack or the lifted cluster;
+   it rides above whichever is taller (touch.js / interact.js write the vars) */
+body.touch .wprompt.band{bottom:max(calc(168px + var(--tb-lift, 0px) + env(safe-area-inset-bottom,0px)), calc(var(--sv-bottom, 34px) + var(--pi-dock-h, 0px) + 14px));}
 .wprompt .tpill{margin:0;}
 body:not(.touch) .wprompt .tpill{
   display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 7px;

@@ -169,6 +169,8 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   right: calc(16px + env(safe-area-inset-right, 0px));
   bottom: calc(22px + env(safe-area-inset-bottom, 0px));
   display: flex; flex-direction: column-reverse; align-items: center; gap: 12px;
+  /* stands ON the hotbar when the bar runs under it (touch.js measures it) */
+  margin-bottom: var(--tb-lift, 0px);
 }
 .tbtn {
   pointer-events: auto; width: 64px; height: 64px; border-radius: 50%; padding: 0;
@@ -257,8 +259,8 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
     gap: 9px;
     flex-wrap: wrap-reverse;
     align-content: flex-start;
-    max-height: calc(100vh  - 86px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
-    max-height: calc(100svh - 86px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+    max-height: calc(100vh  - 86px - var(--tb-lift, 0px) - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+    max-height: calc(100svh - 86px - var(--tb-lift, 0px) - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
   }
   /* flex-shrink:0 is the difference between wrapping and SQUASHING. A capped
      column flex container shrinks its items before it does anything else, so

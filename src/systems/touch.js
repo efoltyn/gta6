@@ -728,6 +728,61 @@
   function carButtonsActive() {
     return !!(CBZ.touchVehicleMode && CBZ.touchVehicleMode() === "drive");
   }
+  /* ONE FLOOR, NO STACKS (owner's phone screenshot, 2026-09-28: Steal / Talk
+     / Trade printed over the AIM and SCOPE roundels and over a band pill, the
+     hotbar running under FIRE). Every seat on the phone was a hand-typed
+     number derived from a cluster that no longer had that shape: the verb
+     dock sat at right:112 on the belief that the cluster is one 84px column,
+     but .tslide parks AIM and SCOPE in a SECOND column left of FIRE, so the
+     verbs landed on them; and the hotbar grew to the full width with the
+     cluster still standing on the glass floor beside it.
+     So the seats are MEASURED, from the live rects, every few frames:
+       --tb-lift   the cluster stands ON the hotbar when the two share x
+       --sv-right  the verb docks start 12px left of the cluster's REAL
+                   left edge (every visible roundel, the slide pair included)
+       --sv-bottom the verb docks start 12px above the hotbar's top
+     css/mobile.css, css/interact_touch.css and hud.css's band read them. */
+  let floorTick = 0, floorSig = "", tbLift = 0;
+  function visibleRect(el) {
+    if (!el || !el.getClientRects().length) return null;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden") return null;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
+  }
+  function syncTouchFloor() {
+    if (!enabled || (floorTick++ % 6)) return;
+    const root = document.documentElement;
+    const tb = document.getElementById("tbtns");
+    const hb = visibleRect(document.getElementById("hotbar"));
+    let cl = Infinity, cr = -Infinity, cb = -Infinity;
+    if (tb && !document.body.classList.contains("tveh-on")) {
+      for (const c of tb.children) {
+        const r = visibleRect(c);
+        if (!r) continue;
+        cl = Math.min(cl, r.left); cr = Math.max(cr, r.right); cb = Math.max(cb, r.bottom);
+      }
+    }
+    const haveCluster = cl < cr;
+    // lift: only when the hotbar actually runs under the cluster
+    let lift = 0;
+    if (haveCluster && hb && hb.right > cl - 6 && hb.left < cr + 6) {
+      const baseGap = innerHeight - cb - tbLift;          // the cluster's own floor
+      lift = Math.max(0, Math.round(innerHeight - hb.top + 10 - baseGap));
+    }
+    const right = haveCluster ? Math.round(Math.max(112, innerWidth - cl + 12)) : 0;
+    const bottom = hb ? Math.round(innerHeight - hb.top + 12) : 0;
+    const sig = lift + "|" + right + "|" + bottom + "|" + innerWidth + "x" + innerHeight;
+    if (sig === floorSig) return;
+    floorSig = sig;
+    tbLift = lift;
+    root.style.setProperty("--tb-lift", lift + "px");
+    // Portrait/landscape defaults live in interact_touch.css; a measurement
+    // only ever moves the dock AWAY from something, never closer.
+    if (right) root.style.setProperty("--sv-right", right + "px"); else root.style.removeProperty("--sv-right");
+    if (bottom) root.style.setProperty("--sv-bottom", "max(" + bottom + "px, 34px)"); else root.style.removeProperty("--sv-bottom");
+  }
+
   let interactDockSig = "";
   function syncInteractionDock() {
     const prisonPanel = document.querySelector("#pinteract.show");
@@ -1664,6 +1719,7 @@
       if (bm.style.display !== want) bm.style.display = want;
       bm.classList.toggle("tarmed", out > 0);
     }
+    syncTouchFloor();
     syncInteractionDock();
   });
 
