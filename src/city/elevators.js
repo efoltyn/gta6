@@ -107,12 +107,11 @@
     return 0;
   }
 
-  // slab extents (mirror makeBuilding's roof math) so everything we add lands
-  // on the SOLID roof, never over the open -x stairwell shaft.
+  // slab extents (mirror makeBuilding's roof math)
   function slabInfo(b) {
     const wt = b.wt != null ? b.wt : 0.4;
     const ixMax = b.w / 2 - wt, izMin = -b.d / 2 + wt, izMax = b.d / 2 - wt;
-    const slabMinX = b.hasStairs ? (-b.w / 2 + wt + b.stairW) : (-b.w / 2 + wt);
+    const slabMinX = -b.w / 2 + wt;
     return { wt, ixMax, izMin, izMax, slabMinX, slabW: ixMax - slabMinX, slabD: izMax - izMin };
   }
 
@@ -139,22 +138,13 @@
     // so the strict pass steers it into the suite's furniture-free wall slots.
     if (b.execOffice && b.execOffice.keepClear) for (const c of b.execOffice.keepClear) a.push({ x: c.x, z: c.z, r: c.r || 2.0 });
     if (b.shop) {
-      // the SOLID back counter: same placement math as worldgen (door-relative
-      // back wall, shifted onto the solid half on climbable buildings)
+      // the SOLID back counter, off its vendor spot (worldgen slides the
+      // counter along the back wall clear of the reserved stair core, and the
+      // clerk stands 1.2 m in front of it)
       const n = INWARD[doorSideOf(b)];
-      let ccx = n.x * (w / 2 - 2.8), ccz = n.z * (d / 2 - 2.8);
-      let cw = n.x ? 0.8 : Math.min(w - 2, 4.5);
-      const cd = n.z ? 0.8 : Math.min(d - 2, 4.5);
-      if (b.hasStairs) {
-        const stairRight = -w / 2 + wt + b.stairW;
-        if (cw > 1) {
-          const roomRight = w / 2 - wt;
-          cw = Math.min(cw, Math.max(1.8, roomRight - stairRight - 1.0));
-          ccx = (stairRight + roomRight) / 2;
-        } else if (ccx - cw / 2 < stairRight + 0.5) ccx = stairRight + 0.5 + cw / 2;
-        ccx = Math.max(ccx, stairRight + 0.4 - n.x * 1.2);
-      }
-      a.push({ x: b.ox + ccx, z: b.oz + ccz, r: Math.max(cw, cd) / 2 + 1.0 });
+      const cw = n.x ? 0.8 : Math.min(w - 2, 4.5), cd = n.z ? 0.8 : Math.min(d - 2, 4.5);
+      if (b.vendorSpot) a.push({ x: b.vendorSpot.x - n.x * 1.2, z: b.vendorSpot.z - n.z * 1.2, r: Math.max(cw, cd) / 2 + 1.0 });
+      else a.push({ x: b.ox + n.x * (w / 2 - 2.8), z: b.oz + n.z * (d / 2 - 2.8), r: Math.max(cw, cd) / 2 + 1.0 });
     } else if (b.home && !b.hangar) {
       // tower ground floors are dressed flats (furnishApartmentFloor at k=0):
       // bed in the (+x,-z) corner, kitchen run on the +z wall, lamp + living set
@@ -167,10 +157,10 @@
   }
 
   // pick the INTERIOR wall + lateral slot for the lobby alcove. Never the
-  // door face (the entrance aisle owns it), never the -x face on climbable
-  // buildings (that's the open stair strip), and the back face — where shop
+  // door face (the entrance aisle owns it), and the back face — where shop
   // counters / kitchen runs live — only as a last resort. Each slot is
-  // sampled through b.clearFloorPoint (door aisle + stair strip + bounds)
+  // sampled through b.clearFloorPoint (door aisle + reserved stair core and
+  // its landing + bounds)
   // plus the keep-clear anchors above; a second pass relaxes the anchors so
   // a cramped room still gets its lift rather than none. The sampled
   // footprint covers the FULL cab room (~2.2 deep into the lobby) plus the
@@ -188,8 +178,8 @@
     const avoid = interiorAvoids(b);
     const faces = [];
     for (const c of [3, 0, 1]) if (c !== ds && c !== OPP[ds]) faces.push(c);
-    if (!b.hasStairs && ds !== 2 && OPP[ds] !== 2) faces.push(2);
-    if (OPP[ds] !== 2 || !b.hasStairs) faces.push(OPP[ds]);   // back wall: last resort
+    if (ds !== 2 && OPP[ds] !== 2) faces.push(2);
+    faces.push(OPP[ds]);                                      // back wall: last resort
     function tryFace(side, strict, V) {
       const f = faceInfo(side, w, d);
       const CABHALF = V.half;                                 // cab room half-width + a touch of margin (variant-driven)
@@ -203,7 +193,7 @@
       // gets a valid slot, then bias the search toward the slab centre.
       let latLo, latHi;
       if (side === 0 || side === 1) {                         // lat == X
-        const xLo = (b.hasStairs ? S.slabMinX : -w / 2 + S.wt);
+        const xLo = -w / 2 + S.wt;
         const xHi = S.ixMax;
         latLo = xLo + CABHALF; latHi = xHi - CABHALF;
       } else {                                                // lat == Z
@@ -550,174 +540,216 @@
   }
 
   // ============================ FIRE ESCAPE ===============================
-  // Exterior switchback stairs hugging a ±x facade. The CLIMB is the same
-  // proven z-axis RAMP platforms the interior stairs use (groundAt only
-  // interpolates ramps along z — that's WHY these live on a ±x face), so
-  // every flight glides under STEP_UP at a dead run. The top landing bridges
-  // OVER the parapet onto the roof (step up 0.75 / step down 0.75, both
-  // inside STEP_UP/STEP_DOWN). A y-gated outer-rail collider keeps you on
-  // the stairs above ~2m — but never snags street-level peds below it.
+  // Exterior switchback stairs hanging off a ±x facade, street to roof.
+  //
+  // IT WAS NEVER BUILT, AND IT COULD NOT BE WALKED. buildings.js picked the
+  // escape lots out of a list filtered on the dead `hasStairs` gate, so the
+  // list was always empty. Had it run: every flight sat in ONE 1.2 m lane,
+  // flight k+1 doubling back directly over flight k. Near each landing the
+  // two were centimetres apart, so a climber's head was in the next flight,
+  // and a descender stepping off a landing was always within STEP_UP of the
+  // flight ABOVE (groundAt keeps the higher surface): you could only ever go
+  // up. The roof bridge sat 0.75 m over the top landing when STEP_UP is
+  // 0.45: the roof was unreachable too.
+  //
+  // NOW: two lanes side by side (inner = even flights climbing +z, outer =
+  // odd flights climbing -z), a full-width grated landing at each end, one
+  // storey per flight, CBZ.stairs flights (ramp + landing overlap + AI link)
+  // for the walk surface, a y-banded rail between the lanes, and the last
+  // flight rising to a bridge deck over the parapet coping, with a short
+  // flight down onto the roof. Same-lane flights are two storeys apart.
+  const FE_LW = 1.0, FE_GAP = 0.04, FE_LD = 1.2, FE_OFF = 0.15;
+  function feGeom(b) {
+    const X0 = b.w / 2 + FE_OFF, X1 = X0 + 2 * FE_LW + FE_GAP;
+    const hr = Math.min((b.d - 1.2 - 2 * FE_LD) / 2, 3.2);  // half the flight run (27 degrees at 3.2)
+    return { X0, X1, hr, xi: X0 + FE_LW / 2, xo: X1 - FE_LW / 2, zMin: -hr - FE_LD, zMax: hr + FE_LD };
+  }
 
   // DOOR-FACE GUARD: the rig must never hang on the facade that holds the
-  // entrance, or drop its ground flight across the walk-up to the door. The
-  // flight footprint (stringers + posts, with a step of margin) is tested
-  // against the door's approach corridor read off the lot's OWN door stamp.
+  // entrance, or drop its ground flight across the walk-up to the door.
   function flightCrossesDoor(b, m) {
     const w = b.w, d = b.d, ox = b.ox, oz = b.oz, ds = doorSideOf(b);
     if ((m > 0 ? 3 : 2) === ds) return true;                  // facade IS the door face
     const n = INWARD[ds];
-    // door wall point from the stamped door (doorPt sits 1.6 inside the wall)
     const dwx = b.door && b.door.x != null ? b.door.x - n.x * 1.6 : (ds === 2 ? ox - w / 2 : ds === 3 ? ox + w / 2 : ox);
     const dwz = b.door && b.door.z != null ? b.door.z - n.z * 1.6 : (ds === 0 ? oz - d / 2 : ds === 1 ? oz + d / 2 : oz);
-    // approach corridor: 4.2 out from the threshold, doorway + shoulder wide
     const hw = 2.45, L = 4.2;
     const cx0 = Math.min(dwx, dwx - n.x * L) - (n.x ? 0 : hw), cx1 = Math.max(dwx, dwx - n.x * L) + (n.x ? 0 : hw);
     const cz0 = Math.min(dwz, dwz - n.z * L) - (n.z ? 0 : hw), cz1 = Math.max(dwz, dwz - n.z * L) + (n.z ? 0 : hw);
-    // the rig's ground footprint on facade m (stringer strip + posts + margin)
-    const fx0 = ox + (m > 0 ? w / 2 - 0.05 : -(w / 2 + 1.75)), fx1 = ox + (m > 0 ? w / 2 + 1.75 : -(w / 2 - 0.05));
-    const fz0 = oz - (d / 2 - 0.3), fz1 = oz + (d / 2 - 0.3);
+    const G = feGeom(b);
+    const fx0 = ox + (m > 0 ? w / 2 - 0.05 : -(G.X1 + 0.4)), fx1 = ox + (m > 0 ? G.X1 + 0.4 : -(w / 2 - 0.05));
+    const fz0 = oz + G.zMin - 0.3, fz1 = oz + G.zMax + 0.3;
     return fx0 < cx1 && fx1 > cx0 && fz0 < cz1 && fz1 > cz0;
   }
+  // nothing else may stand where the rig hangs (a neighbour's wall, a fence,
+  // a kiosk): any collider in the footprint that is not this building's own
+  function feFootprintBlocked(b, m) {
+    const G = feGeom(b), ox = b.ox, oz = b.oz;
+    const x0 = ox + Math.min(m * (b.w / 2 + 0.05), m * (G.X1 + 0.25)), x1 = ox + Math.max(m * (b.w / 2 + 0.05), m * (G.X1 + 0.25));
+    const z0 = oz + G.zMin - 0.2, z1 = oz + G.zMax + 0.2;
+    const own = new Set(b.colliders || []);
+    for (const c of CBZ.colliders) {
+      if (own.has(c) || c.maxX <= x0 || c.minX >= x1 || c.maxZ <= z0 || c.minZ >= z1) continue;
+      if (c.y1 != null && c.y1 < 0.3) continue;                // kerbs and flat stuff
+      if (c.y0 != null && c.y0 > b.h + 1.5) continue;
+      return true;
+    }
+    return false;
+  }
+  // the top landing's z span and the roof strip its bridge flight lands on
+  function feTop(b, m) {
+    const G = feGeom(b), S = b.storeys;
+    const endDir = ((S - 1) % 2 === 0) ? 1 : -1;               // the last flight's climb direction
+    const lz0 = endDir > 0 ? G.hr : -G.hr - FE_LD, lz1 = lz0 + FE_LD;
+    const wt = b.wt != null ? b.wt : 0.4;
+    const rx0 = b.w / 2 - wt - 2.2, rx1 = b.w / 2;             // bridge + the flight down (building-local)
+    return { endDir, lz0, lz1, rect: { x0: Math.min(m * rx0, m * rx1), x1: Math.max(m * rx0, m * rx1), z0: lz0 - 0.2, z1: lz1 + 0.2 } };
+  }
+  function feRoofClear(b, m) {
+    const r = feTop(b, m).rect;
+    for (const q of (b.shaftRects || []).concat(b.keepRects || []))
+      if (r.x0 < q.x1 + 0.3 && r.x1 > q.x0 - 0.3 && r.z0 < q.z1 + 0.3 && r.z1 > q.z0 - 0.3) return false;
+    return true;
+  }
 
-  // FACADE PICK for the escape (returns ±1 = the +x / -x face, or 0 if none).
-  // HARD ENGINE CONSTRAINT: the climb is z-axis RAMP platforms and physics.js
-  // interpolates ramp height ONLY along z (t = (z-z0)/(z1-z0)). An escape on a
-  // ±z face would run its slope along x where ramps DON'T interpolate — you'd
-  // hit a vertical wall, not a stair. So a real fire escape can only hang on a
-  // ±x face here; "rear/side, away from the door" therefore means the ±x face
-  // FARTHEST from the door/display face (b.side), never the door face itself.
-  // buildings.js (AGENT BUILD) stamps the chosen face on the lot; we HONOR a
-  // valid stamp and otherwise DERIVE the correct rear face, so a missing/stale
-  // stamp never strands the rig on the glass front. The -x face is off-limits
-  // on stair buildings (its slab gap is the open interior stairwell — a bridge
-  // there drops you down it).
+  // FACADE PICK (±1 = the +x / -x face, 0 = none). buildings.js stamps a
+  // preferred face; the other ±x face is tried too. Never the door face,
+  // never across the door walk-up, never into something standing there, and
+  // the roof bridge never lands on the stair bulkhead or a lift headhouse.
   function escapeFaceSign(stamp) {
-    // accept either a face index (2:-x, 3:+x) or a raw sign (±1)
     if (stamp === 2 || stamp === -1) return -1;
     if (stamp === 3 || stamp === 1) return 1;
     return 0;
   }
   function pickEscapeFace(b) {
     const ds = doorSideOf(b);
-    // candidate ±x faces, ordered so the REAR (away from the door) wins:
-    //   door on +x(3) → prefer -x ; door on -x(2) → prefer +x ;
-    //   door on ±z     → +x first (the alley side on most lots), then -x.
-    let order;
-    if (ds === 3) order = [-1, 1];
-    else if (ds === 2) order = [1, -1];
-    else order = [1, -1];
-    // honor a valid stamp first by floating it to the front of the order
-    const stamped = escapeFaceSign(b.feSide != null ? b.feSide
-      : (b.fireEscapeSide != null ? b.fireEscapeSide : null));
+    let order = ds === 3 ? [-1, 1] : [1, -1];
+    const stamped = escapeFaceSign(b.feSide != null ? b.feSide : (b.fireEscapeSide != null ? b.fireEscapeSide : null));
     if (stamped) order = [stamped].concat(order.filter((m) => m !== stamped));
+    if (feGeom(b).hr < 1.6) return 0;                        // too shallow a facade for a storey flight
     for (const m of order) {
-      if (m < 0 && b.hasStairs) continue;            // -x is the open stairwell on stair buildings
-      if ((m > 0 ? 3 : 2) === ds) continue;          // never the door/display face
-      if (flightCrossesDoor(b, m)) continue;         // never across the door walk-up
+      if ((m > 0 ? 3 : 2) === ds) continue;
+      if (flightCrossesDoor(b, m)) continue;
+      if (!feRoofClear(b, m)) continue;
+      if (feFootprintBlocked(b, m)) continue;
       return m;
     }
     return 0;
   }
 
   function buildFireEscape(lot) {
-    const b = lot.building, w = b.w, d = b.d, grp = b.group, ox = b.ox, oz = b.oz, h = b.h;
-    // facade pick: the REAR ±x face away from the door (see pickEscapeFace).
-    // If every valid facade hosts the door / crosses its walk-up, the lot
-    // simply goes unserved — a clear doorway beats a fourth escape route.
+    const b = lot.building, w = b.w, grp = b.group, ox = b.ox, oz = b.oz, h = b.h;
     const m = pickEscapeFace(b);
     if (!m) return;
-    const X0 = w / 2 + 0.15, X1 = w / 2 + 1.35, XC = w / 2 + 0.75;
+    const G = feGeom(b), S = b.storeys, T = feTop(b, m);
+    const bH = Math.min(1.25, (b.parapetH != null ? b.parapetH : 0.7) + 0.12);   // bridge deck just over the coping
+    const W = (x, y, z) => ({ x: ox + m * x, y: y, z: oz + z });
     const xLo = (a, c) => ox + Math.min(m * a, m * c), xHi = (a, c) => ox + Math.max(m * a, m * c);
-    const zA = -d / 2 + 1.1, zB = d / 2 - 1.1, LD = 1.2;
-    const S = b.storeys;
-    let bz = 0;
-    // VISUALS: a real painted-steel escape, merged into ONE mesh per rig (it is
-    // built after the city batch pass, so every loose box used to be its own
-    // draw call). Channel stringers both sides, one grated tread per riser,
-    // guard rails with balusters, grated landings (frame + bars) carried on
-    // knee braces bolted to the facade, and at the top a grated bridge over
-    // the parapet with two steel treads down onto the roof. It replaces a
-    // tilted slab, a single rail and two bare full-height posts.
-    // The PHYSICS below (ramp + landing plats, y-gated rail colliders, the
-    // bridge plat) is exactly what it was.
+    const bp = b.platforms || null, bc = b.colliders || null;
+    function landPlat(x0, x1, z0, z1, top) {
+      const p = plat(xLo(x0, x1), xHi(x0, x1), oz + Math.min(z0, z1), oz + Math.max(z0, z1), top);
+      if (bp) bp.push(p);
+      return p;
+    }
+    function feSolid(y0, y1, x0, x1, z0, z1) {
+      const c = solid(y0, y1, xLo(x0, x1), xHi(x0, x1), oz + Math.min(z0, z1), oz + Math.max(z0, z1));
+      if (bc) bc.push(c);
+      return c;
+    }
+    // ---- THE WALK SURFACE ------------------------------------------------
+    const ys = [];
+    for (let j = 0; j <= S; j++) ys.push(j === S ? h + bH : j * FH);
+    const rWall = w / 2 - (b.wt != null ? b.wt : 0.4);
+    for (let k = 0; k < S; k++) {
+      const dir = (k % 2 === 0) ? 1 : -1, lx = (k % 2 === 0) ? G.xi : G.xo;
+      if (CBZ.stairs) CBZ.stairs.flight({
+        bottom: W(lx, ys[k], -dir * G.hr), top: W(lx, ys[k + 1], dir * G.hr),
+        width: FE_LW, overlap: 0.35, owner: b, plats: bp || undefined, kind: "fire-escape",
+      });
+      // the landing it arrives on: full width, both lanes, at its far end
+      // (the top one reaches back over the wall as the bridge deck)
+      const z0 = dir > 0 ? G.hr - 0.02 : -G.hr - FE_LD, z1 = dir > 0 ? G.hr + FE_LD : -G.hr + 0.02;
+      landPlat(k === S - 1 ? rWall - 0.6 : G.X0, G.X1, z0, z1, ys[k + 1]);
+      // THE RAIL BETWEEN THE LANES, banded to this flight: it holds a body on
+      // its own flight where the other lane's flight passes at a similar height
+      const n = Math.max(2, Math.ceil(2 * G.hr / 0.8));
+      for (let i = 0; i < n; i++) {
+        const s0 = i / n, s1 = (i + 1) / n;
+        const za = -dir * G.hr + dir * 2 * G.hr * s0, zb = -dir * G.hr + dir * 2 * G.hr * s1;
+        const ya = ys[k] + (ys[k + 1] - ys[k]) * s0, yb = ys[k] + (ys[k + 1] - ys[k]) * s1;
+        feSolid(Math.max(ys[k] + 0.1, ya - 0.6), yb + 1.05, G.X0 + FE_LW - 0.01, G.X0 + FE_LW + FE_GAP + 0.01, za, zb);
+      }
+    }
+    // the flight down from the bridge deck onto the roof membrane
+    if (CBZ.stairs) CBZ.stairs.flight({
+      bottom: W(rWall - 0.6 - 1.5, h, (T.lz0 + T.lz1) / 2), top: W(rWall - 0.6, h + bH, (T.lz0 + T.lz1) / 2),
+      width: FE_LD, overlap: 0.3, owner: b, plats: bp || undefined, kind: "fire-escape",
+    });
+    // outer guard (y-gated above street head height, so peds walk under it)
+    feSolid(2.0, h + bH + 1.0, G.X1 - 0.02, G.X1 + 0.1, G.zMin - 0.05, G.zMax + 0.05);
+    // end guards past each landing
+    feSolid(2.0, h + bH + 1.0, G.X0 - 0.02, G.X1 + 0.1, G.zMin - 0.15, G.zMin - 0.03);
+    feSolid(2.0, h + bH + 1.0, G.X0 - 0.02, G.X1 + 0.1, G.zMax + 0.03, G.zMax + 0.15);
+    // the bridge's side rails over the roof edge
+    for (const zz of [T.lz0 - 0.08, T.lz1 + 0.02]) feSolid(h + bH - 0.05, h + bH + 1.0, rWall - 0.6, G.X0, zz, zz + 0.06);
+
+    // ---- THE STEEL (one merged mesh) ------------------------------------
     const parts = [];
     const pbox = (x, y, z, bw, bh, bd, rx, rz) => {
       const gg = new THREE.BoxGeometry(bw, bh, bd);
       if (rx) gg.rotateX(rx);
       if (rz) gg.rotateZ(rz);
-      gg.translate(x, y, z);
+      gg.translate(m * x, y, z);
       parts.push(gg);
     };
-    const LANE = X1 - X0;
     for (let k = 0; k < S; k++) {
-      const dir = (k % 2 === 0) ? 1 : -1;
-      const zStart = dir > 0 ? zA : zB, zEnd = dir > 0 ? zB : zA;
-      const rampEnd = zEnd - dir * LD;
-      const run = Math.abs(rampEnd - zStart);
-      // the walkable ramp + the flat landing at the floor line
-      plat(xLo(X0, X1), xHi(X0, X1), oz + Math.min(zStart, rampEnd), oz + Math.max(zStart, rampEnd), (k + 1) * FH,
-        { z0: oz + zStart, z1: oz + rampEnd, y0: k * FH, y1: (k + 1) * FH });
-      plat(xLo(X0, X1), xHi(X0, X1), oz + Math.min(rampEnd, zEnd), oz + Math.max(rampEnd, zEnd), (k + 1) * FH);
-      const hyp = Math.hypot(run, FH), tilt = -dir * Math.atan2(FH, run);
-      const zm = (zStart + rampEnd) / 2, ym = k * FH + FH / 2;
-      // channel stringers, inboard and outboard
-      pbox(m * (X0 + 0.05), ym - 0.1, zm, 0.06, 0.22, hyp, tilt);
-      pbox(m * (X1 - 0.05), ym - 0.1, zm, 0.06, 0.22, hyp, tilt);
-      // one grated tread per riser, nosing on the walk line
-      const nT = Math.max(8, Math.round(FH / 0.2)), tr = run / nT;
+      const dir = (k % 2 === 0) ? 1 : -1, lx = (k % 2 === 0) ? G.xi : G.xo;
+      const y0 = ys[k], y1 = ys[k + 1], run = 2 * G.hr, rise = y1 - y0;
+      const hyp = Math.hypot(run, rise), tilt = -dir * Math.atan2(rise, run), ym = (y0 + y1) / 2;
+      for (const sx of [-1, 1]) pbox(lx + sx * (FE_LW / 2 - 0.03), ym - 0.1, 0, 0.06, 0.22, hyp, tilt);    // channel stringers
+      const nT = Math.max(8, Math.round(rise / 0.19)), tr = run / nT;
       for (let i = 0; i < nT; i++) {
-        const tz = zStart + dir * (i + 0.5) * tr, ty = k * FH + (i + 0.5) * FH / nT - 0.02;
-        pbox(m * XC, ty, tz, LANE - 0.12, 0.03, tr + 0.02);
+        const tz = -dir * G.hr + dir * (i + 0.5) * tr, ty = y0 + (i + 1) * rise / nT - 0.02;
+        pbox(lx, ty, tz, FE_LW - 0.1, 0.03, tr + 0.02);                                                 // grated tread
       }
-      // outboard guard: top rail + mid rail along the pitch, balusters
-      pbox(m * (X1 + 0.02), ym + 0.92, zm, 0.045, 0.045, hyp, tilt);
-      pbox(m * (X1 + 0.02), ym + 0.46, zm, 0.03, 0.03, hyp, tilt);
+      // handrail on the open side (inner flights: the lane rail; outer: the guard)
+      const rx = k % 2 === 0 ? G.X0 + FE_LW + FE_GAP / 2 : G.X1 + 0.02;
+      pbox(rx, ym + 0.92, 0, 0.045, 0.045, hyp, tilt);
+      pbox(rx, ym + 0.46, 0, 0.03, 0.03, hyp, tilt);
       const nB = Math.max(2, Math.round(run / 1.1));
-      for (let i = 1; i < nB; i++) {
-        const f = i / nB, bzp = zStart + dir * run * f, by = k * FH + FH * f;
-        pbox(m * (X1 + 0.02), by + 0.46, bzp, 0.035, 0.92, 0.035);
+      for (let i = 0; i <= nB; i++) {
+        const f = i / nB;
+        pbox(rx, y0 + rise * f + 0.46, -dir * G.hr + dir * run * f, 0.035, 0.92, 0.035);
       }
-      // the LANDING: angle frame + grating bars, at the floor line
-      const ly = (k + 1) * FH, lz = (rampEnd + zEnd) / 2, LL = LD + 0.15;
-      pbox(m * XC, ly - 0.05, rampEnd, LANE, 0.1, 0.05);                       // frame, stair edge
-      pbox(m * XC, ly - 0.05, zEnd + dir * 0.075, LANE, 0.1, 0.05);           // frame, far edge
-      pbox(m * (X0 + 0.02), ly - 0.05, lz, 0.05, 0.1, LL);
-      pbox(m * (X1 - 0.02), ly - 0.05, lz, 0.05, 0.1, LL);
-      for (let i = 0; i < 9; i++) pbox(m * (X0 + 0.1 + i * (LANE - 0.2) / 8), ly - 0.02, lz, 0.035, 0.035, LL);
-      // landing guard on the open side and the far end
-      pbox(m * (X1 + 0.02), ly + 0.95, lz, 0.045, 0.045, LL);
-      pbox(m * (X1 + 0.02), ly + 0.48, lz, 0.03, 0.03, LL);
-      pbox(m * XC, ly + 0.95, zEnd + dir * 0.09, LANE, 0.045, 0.045);
-      pbox(m * XC, ly + 0.48, zEnd + dir * 0.09, LANE, 0.03, 0.03);
-      pbox(m * (X1 + 0.02), ly + 0.48, zEnd + dir * 0.09, 0.045, 0.96, 0.045);  // corner post
-      // two KNEE BRACES from the facade up under the landing's outer edge
-      const br = Math.hypot(LANE + 0.1, 0.8), ba = Math.atan2(0.8, LANE + 0.1);
-      for (const zz of [rampEnd + dir * 0.1, zEnd - dir * 0.05]) {
-        pbox(m * (w / 2 + (LANE + 0.25) / 2), ly - 0.5, zz, br, 0.06, 0.06, 0, m * ba);
-        pbox(m * (w / 2 + 0.02), ly - 0.82, zz, 0.04, 0.22, 0.16);             // anchor plate on the wall
+      // the landing it arrives on: angle frame + grating bars
+      const lz = dir * (G.hr + FE_LD / 2), ly = y1, LW2 = G.X1 - G.X0, XC = (G.X0 + G.X1) / 2;
+      pbox(XC, ly - 0.05, dir * G.hr, LW2, 0.1, 0.05);
+      pbox(XC, ly - 0.05, dir * (G.hr + FE_LD), LW2, 0.1, 0.05);
+      pbox(G.X0 + 0.02, ly - 0.05, lz, 0.05, 0.1, FE_LD);
+      pbox(G.X1 - 0.02, ly - 0.05, lz, 0.05, 0.1, FE_LD);
+      for (let i = 0; i < 12; i++) pbox(G.X0 + 0.08 + i * (LW2 - 0.16) / 11, ly - 0.02, lz, 0.035, 0.035, FE_LD);
+      pbox(G.X1 + 0.02, ly + 0.95, lz, 0.045, 0.045, FE_LD);                    // landing guard, outer side
+      pbox(XC, ly + 0.95, dir * (G.hr + FE_LD + 0.06), LW2, 0.045, 0.045);      // …and the far end
+      pbox(G.X1 + 0.02, ly + 0.48, dir * (G.hr + FE_LD + 0.06), 0.045, 0.96, 0.045);
+      const br = Math.hypot(LW2 + 0.1, 0.8), ba = Math.atan2(0.8, LW2 + 0.1);
+      for (const zz of [dir * (G.hr + 0.1), dir * (G.hr + FE_LD - 0.05)]) {
+        pbox(w / 2 + (LW2 + 0.25) / 2, ly - 0.5, zz, br, 0.06, 0.06, 0, m * ba);   // knee brace
+        pbox(w / 2 + 0.02, ly - 0.82, zz, 0.04, 0.22, 0.16);                      // anchor plate
       }
-      if (k === S - 1) bz = lz;
     }
-    // outer rail + end caps as colliders, y-gated ABOVE 2m: a fall guard on
-    // the climb that street peds walk straight under
-    solid(2.0, h + 1.0, xLo(X1 - 0.02, X1 + 0.12), xHi(X1 - 0.02, X1 + 0.12), oz + zA - 0.1, oz + zB + 0.1);
-    solid(2.0, h + 1.0, xLo(X0 - 0.05, X1 + 0.12), xHi(X0 - 0.05, X1 + 0.12), oz + zA - 0.35, oz + zA - 0.15);
-    solid(2.0, h + 1.0, xLo(X0 - 0.05, X1 + 0.12), xHi(X0 - 0.05, X1 + 0.12), oz + zB + 0.15, oz + zB + 0.35);
-    // the BRIDGE over the parapet onto the roof (sits just above the rim)
-    plat(xLo(w / 2 - 1.35, X1), xHi(w / 2 - 1.35, X1), oz + bz - 0.8, oz + bz + 0.8, h + 0.75);
     {
-      const bx0 = w / 2 - 1.35, bLen = X1 - bx0, bxc = (bx0 + X1) / 2, by = h + 0.75;
-      for (const s of [-1, 1]) {
-        pbox(m * bxc, by - 0.05, bz + s * 0.78, bLen, 0.1, 0.05);             // deck frame
-        pbox(m * bxc, by + 0.95, bz + s * 0.8, bLen, 0.045, 0.045);           // guard rails both sides
-        pbox(m * bxc, by + 0.48, bz + s * 0.8, bLen, 0.03, 0.03);
-        pbox(m * (bx0 + 0.05), by + 0.48, bz + s * 0.8, 0.045, 0.96, 0.045);
+      // bridge deck over the parapet + its rails, and the steps down to the roof
+      const bx0 = rWall - 0.6, bLen = G.X0 - bx0, bxc = (bx0 + G.X0) / 2, by = h + bH, bz = (T.lz0 + T.lz1) / 2;
+      for (let i = 0; i < 10; i++) pbox(bxc, by - 0.02, T.lz0 + 0.06 + i * (FE_LD - 0.12) / 9, bLen, 0.035, 0.035);
+      for (const zz of [T.lz0 - 0.05, T.lz1 + 0.05]) {
+        pbox(bxc, by + 0.95, zz, bLen, 0.045, 0.045);
+        pbox(bx0 + 0.05, by + 0.48, zz, 0.045, 0.96, 0.045);
       }
-      for (let i = 0; i < 12; i++) pbox(m * bxc, by - 0.02, bz - 0.7 + i * (1.4 / 11), bLen, 0.035, 0.035);
-      // two steel treads down onto the roof, on their own stringers
-      pbox(m * (w / 2 - 1.5), h + 0.5, bz, 0.3, 0.04, 1.2);
-      pbox(m * (w / 2 - 1.8), h + 0.25, bz, 0.3, 0.04, 1.2);
-      for (const s of [-1, 1]) pbox(m * (w / 2 - 1.62), h + 0.36, bz + s * 0.62, 0.62, 0.06, 0.05, 0, m * 0.9);
+      const nS = Math.max(3, Math.round(bH / 0.19));
+      for (let i = 0; i < nS; i++) {
+        const f = (i + 0.5) / nS;
+        pbox(bx0 - 1.5 * (1 - f), h + bH * (i + 1) / nS - 0.02, bz, 1.5 / nS + 0.02, 0.04, FE_LD - 0.1);
+      }
     }
     const BGU = THREE.BufferGeometryUtils;
     const steelM = cmat(0x2a2d31);
@@ -733,8 +765,8 @@
     } else {
       for (const gg of parts) { const e = new THREE.Mesh(gg, steelM); e.receiveShadow = true; grp.add(e); }
     }
-    addParapets(lot, { z0: oz + bz - 0.9, z1: oz + bz + 0.9, side: m });    // rim colliders, gap at the bridge
-    lot.building.fireEscape = { x: ox + m * X1, z: oz + bz, topY: h, side: m };
+    addParapets(lot, { z0: oz + T.lz0 - 0.05, z1: oz + T.lz1 + 0.05, side: m });    // rim colliders, gap at the bridge
+    lot.building.fireEscape = { x: ox + m * G.X1, z: oz + (T.lz0 + T.lz1) / 2, topY: h, side: m };
   }
 
   // ---- ROOF BOOKKEEPING (shared by both routes) ---------------------------
@@ -1148,109 +1180,126 @@
   // ======================================================================
   //  THE INTERIOR STAIR CORE — CBZ.cityStairCore(lot, opts)
   //
-  //  WHY THIS EXISTS: buildings.js has a complete switchback stair rig
-  //  (buildings.js:3338-3420) that has NEVER RUN. Its gate is
-  //      stairW = min(SW=4.2, ...);  hasStairs = ... && stairW >= 4.4
-  //  and 4.2 can never be >= 4.4, so `hasStairs` is false for every building
-  //  ever built in this game. The consequence: there is no walkable vertical
-  //  traversal ANYWHERE — the lift is a sealed ground<->roof two-stop, every
-  //  floor between them is reachable by nobody. You cannot fight your way UP
-  //  a building that has no up.
+  //  The one way up a city building on foot. Every multi-storey shell
+  //  reserves a core at birth (buildings.js CBZ.cityStairPlan: a back corner,
+  //  flush to the far wall and one side wall, its door facing the room); this
+  //  builds it — the first time somebody walks up to the building (the scan
+  //  at the bottom of this section), or when occupy/gang/govcomplex ask.
   //
-  //  This is the fix, and it lives HERE because this file is already "VERTICAL
-  //  ACCESS" — lifts and fire escapes. It is the third rig in the same family,
-  //  not a fourth parallel system, and it reuses this file's own box/solid/plat
-  //  helpers and buildings.js's own carve (CBZ.cityCarveShaft) rather than
-  //  re-deriving any of it. It also does NOT touch buildings.js's dead gate:
-  //  the core is opt-in per building, so nothing changes for the other ~thousand
-  //  shells until somebody asks for stairs.
+  //  THE RIG, per storey k (tops[k] -> tops[k+1]):
+  //    the arrival strip inside the door (flat, both lanes)
+  //    flight A up lane A, away from the door, to the half landing
+  //    the half landing across the far end (flat, both lanes)
+  //    flight B up lane B, back toward the door, onto the next strip.
+  //  The walk surface of each flight is CBZ.stairs.flight (one ramp record,
+  //  flat overlap into both landings, owner = the building so demolition /
+  //  removeOwner take it). Landings are flat platforms that meet the flights'
+  //  overlap. Between the lanes a stepped rail collider, banded to the
+  //  flights, keeps a body on its own flight (the other lane runs up to a
+  //  storey above or below it). The highest level the stair reaches gets a
+  //  guard across the open well.
   //
-  //  THE RIG (per storey, exactly the proportions buildings.js authored):
-  //    arrival strip (flat, full core width)  ->  flight A up the -lateral lane
-  //    ->  half-landing at the far end (flat, full width)  ->  flight B back
-  //    down the +lateral lane, arriving on the next floor's strip.
-  //  Equal risers ~0.185m. Ramp platforms carry the frozen {z0,z1,y0,y1} shape
-  //  (or the additive {axis:"x",x0,x1,y0,y1} twin) so systems/physics.js walks
-  //  them with no changes. Lanes ABUT in the lateral axis and never overlap —
-  //  overlapping lanes at different heights make the resolver snap a climber up
-  //  a whole storey at the seam (buildings.js learned this the hard way).
+  //  HEADROOM (FH 3.2, slab 0.2): every walk surface in the core has the one
+  //  above it a full storey higher (lane A over lane A, strip over strip,
+  //  half landing over half landing), i.e. 3.0 m clear. The two places that
+  //  break that rule are handled: the ground floor under flight B (nothing
+  //  below lane B there — a closet collider stops a body walking under the
+  //  low end), and the top: the stair either stops a storey short under the
+  //  intact roof, or the roof is carved over the core and a stair BULKHEAD
+  //  (walls + a lid 2.7 m over the roof) stands over it with a door out.
   //
-  //  It sits in the interior corner FURTHEST from the front door, flush to two
-  //  building walls, so only ONE new wall is needed to enclose the shaft — and
-  //  that leaves exactly ONE opening per floor. That opening is the chokepoint
-  //  the whole floor is defended around.
+  //  AI: one CBZ.stairs link per storey, from just outside the stair door on
+  //  floor k to just outside it on floor k+1, through the door, up both
+  //  flights and out again. CBZ.stairs.route chains them; rec.route(k0, k1)
+  //  is exactly those paths concatenated (the same objects), so the two agree.
   // ======================================================================
-  const CORE_RISE = 0.185;     // target riser (buildings.js's own number)
+  const CORE_RISE = 0.185;     // target riser
   const CORE_LD = 1.3;         // landing depth at each end of a flight
-  const CORE_OVL = 0.9;        // ramp AABB overlap into its landings
-  const CORE_LIP = 0.22;       // lateral overhang, OUTWARD only (never between lanes)
+  const CORE_SEAM = 0.02;      // the rail's slot between the lanes
+  const CORE_DOORHALF = 0.9, CORE_DOORH = 2.15;
+  const CORE_BULK_H = 2.7;     // stair bulkhead: clear height over the roof
+  const COREC = { tread: 0x8b929b, riser: 0x5d646d, soffit: 0x7a818a, land: 0xb9bec6, rail: RAILC, lamp: 0xeef2ff };
 
-  function coreFrame(b) {
-    const wt = b.wt != null ? b.wt : 0.4;
-    const ixMin = -b.w / 2 + wt, ixMax = b.w / 2 - wt;
-    const izMin = -b.d / 2 + wt, izMax = b.d / 2 - wt;
-    const dn = b.localDoor || { x: 0, z: izMin, nx: 0, nz: 1 };
-    const nx = dn.nx, nz = dn.nz;
-    const along = Math.abs(nx) > 0.5;                   // door on a ±x wall
-    const tx = -nz, tz = nx;
-    const base = along
-      ? { x: nx > 0 ? ixMin : ixMax, z: (izMin + izMax) / 2 }
-      : { x: (ixMin + ixMax) / 2, z: nz > 0 ? izMin : izMax };
-    return {
-      nx, nz, tx, tz, along, base,
-      depthSpan: along ? (ixMax - ixMin) : (izMax - izMin),
-      latSpan: along ? (izMax - izMin) : (ixMax - ixMin),
-      // (depth-from-the-door, lateral-from-the-centreline) -> building-local
-      pt: function (dep, lat) { return { x: base.x + nx * dep + tx * lat, z: base.z + nz * dep + tz * lat }; },
+  function coreOf(b) {
+    if (!b) return null;
+    const g = b.group && b.group.userData;
+    return b._stairCore || (g && g.stairCore) || (g && g.bld && g.bld._stairCore) || null;
+  }
+
+  // remove every collider / raised walk top of building b lying within the
+  // core rect (building-local `hole`, 0.3 m slack); returns how many went
+  function clearCore(b, hole, groundTop) {
+    const x0 = b.ox + hole.x0 - 0.3, x1 = b.ox + hole.x1 + 0.3, z0 = b.oz + hole.z0 - 0.3, z1 = b.oz + hole.z1 + 0.3;
+    const inside = (r) => r.minX >= x0 && r.maxX <= x1 && r.minZ >= z0 && r.maxZ <= z1;
+    let n = 0;
+    const hide = (m) => {
+      if (!m || !m.isMesh) return;
+      if (!(CBZ.batchWallHide && CBZ.batchWallHide(m))) m.visible = false;
+      for (const L of [CBZ.losBlockers, b.losMeshes]) { const i = L ? L.indexOf(m) : -1; if (i >= 0) L.splice(i, 1); }
     };
+    for (const c of (b.colliders || []).slice()) {
+      if (!inside(c)) continue;
+      for (const L of [CBZ.colliders, b.colliders]) { const i = L.indexOf(c); if (i >= 0) L.splice(i, 1); }
+      hide(c.ref); n++;
+    }
+    for (const p of (b.platforms || []).slice()) {
+      if (!inside(p) || p.ramp || p.stair || !(p.top > groundTop + 0.05)) continue;
+      for (const L of [CBZ.platforms, b.platforms]) { const i = L.indexOf(p); if (i >= 0) L.splice(i, 1); }
+      hide(p.ref); n++;
+    }
+    if (n) { if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty(); }
+    return n;
   }
 
   CBZ.cityStairCore = function (lot, opts) {
     opts = opts || {};
     const b = lot && lot.building;
     if (!b || !b.group || b.w == null || b.d == null) return null;
-    if (b._stairCore) return b._stairCore;                 // idempotent
+    const had = coreOf(b);
+    if (had) { b._stairCore = had; return had; }
+    if (b._stairCoreFailed) return null;
     const FHl = b.FH != null ? b.FH : FH;
     const tops = (Array.isArray(b.floorTops) && b.floorTops.length >= 2)
       ? b.floorTops
       : (function () { const o = [0.14]; for (let L = 1; L <= (b.storeys || 1); L++) o.push(L * FHl); return o; })();
-    const nFloors = tops.length - 1;                       // interior floors (last top is the roof)
-    if (nFloors < 2) return null;                          // nothing to climb
-
-    const F = coreFrame(b);
-    // size the core to the plate; bail rather than build something unwalkable
-    const CW = Math.min(4.8, F.latSpan - 2.2);             // lateral width (two lanes)
-    const CD = Math.min(6.8, F.depthSpan - 2.6);           // depth (the flight run)
-    if (CW < 3.0 || CD < 4.4) return null;
-    const side = opts.side === -1 ? -1 : 1;                // which corner (lateral sign)
-    const D1 = F.depthSpan, D0 = D1 - CD;                  // flush to the far wall
-    const L1 = side * (F.latSpan / 2), L0 = L1 - side * CW; // flush to one side wall
-    const latMid = (L0 + L1) / 2;
-    // HAIRLINE SEAM: the two lanes sit at DIFFERENT heights over the same
-    // depth band, and groundAt's AABB test is inclusive on both bounds — a
-    // climber standing exactly on a shared edge is a candidate for both, and
-    // near the half-landing the height gap drops under STEP_UP (0.45), so the
-    // resolver could snap them across. 1cm of daylight (the handrail already
-    // lives in it) makes that impossible. buildings.js:3341 warns about
-    // precisely this failure mode.
-    const SEAM = 0.01;
-    const laneA0 = L0, laneA1 = latMid - side * SEAM, laneB0 = latMid + side * SEAM, laneB1 = L1;
-
-    // building-local axis-aligned rect from a (depth, lateral) rect
-    function rect(d0, d1, l0, l1) {
-      const a = F.pt(d0, l0), c = F.pt(d1, l1);
-      return { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x), z0: Math.min(a.z, c.z), z1: Math.max(a.z, c.z) };
+    const nFloors = tops.length - 1;                       // interior floors (tops[nFloors] is the roof)
+    if (nFloors < 2) return null;
+    const roofAccess = opts.roof !== false && !b.roofCrowned && !!b.roofSlab;
+    const kTop = roofAccess ? nFloors : nFloors - 1;       // the highest level the stair reaches
+    let P = b.stairPlan || null;
+    if (!P && CBZ.cityStairPlan) {
+      P = CBZ.cityStairPlan(b, opts.side);
+      if (P) {                                             // a shell made before plans existed: reserve now
+        b.stairPlan = P;
+        if (b.shaftRects) b.shaftRects.push(P.rect);
+        if (b.keepRects) b.keepRects.push(P.mouth);
+      }
     }
+    if (!P) { b._stairCoreFailed = true; return null; }
+    // a lift chase (or anything else reserved) inside the core would be walked
+    // through: never build over one — the plan avoids them, this is the proof
+    for (const r of (b.shaftRects || [])) {
+      if (r === P.rect) continue;
+      if (r.x0 < P.hole.x1 - 0.01 && r.x1 > P.hole.x0 + 0.01 && r.z0 < P.hole.z1 - 0.01 && r.z1 > P.hole.z0 + 0.01) {
+        b._stairCoreFailed = true; return null;
+      }
+    }
+
+    const side = P.side, D0 = P.D0, D1 = P.D1, L0 = P.L0, L1 = P.L1, latMid = P.latMid;
+    const laneA0 = L0, laneA1 = latMid - side * CORE_SEAM / 2, laneB0 = latMid + side * CORE_SEAM / 2, laneB1 = L1;
+    const aC = (laneA0 + laneA1) / 2, bC = (laneB0 + laneB1) / 2, laneW = Math.abs(laneA1 - laneA0);
+    const dA0 = D0 + CORE_LD, dA1 = D1 - CORE_LD, runLen = dA1 - dA0;
+    const ox = b.ox, oz = b.oz;
+    const Wp = function (dep, lat, y) { const p = P.pt(dep, lat); return { x: ox + p.x, y: y, z: oz + p.z }; };
     function wrect(d0, d1, l0, l1) {
-      const r = rect(d0, d1, l0, l1);
-      return { minX: b.ox + r.x0, maxX: b.ox + r.x1, minZ: b.oz + r.z0, maxZ: b.oz + r.z1 };
+      const r = P.rect2(d0, d1, l0, l1);
+      return { minX: ox + r.x0, maxX: ox + r.x1, minZ: oz + r.z0, maxZ: oz + r.z1 };
     }
     const cols = [], plats = [];
-    function addPlat(d0, d1, l0, l1, top, ramp) {
+    function addPlat(d0, d1, l0, l1, top) {
       const p = wrect(d0, d1, l0, l1); p.top = top;
-      if (ramp) p.ramp = ramp;
       CBZ.platforms.push(p); plats.push(p);
-      if (b.platforms) b.platforms.push(p);     // so demolition splices it back out
+      if (b.platforms) b.platforms.push(p);
       return p;
     }
     function addSolid(d0, d1, l0, l1, y0, y1, ref) {
@@ -1260,175 +1309,306 @@
       if (b.colliders) b.colliders.push(c);
       return c;
     }
-    // a ramp record in the FROZEN shape physics.js expects, oriented on
-    // whichever world axis this building's depth runs along.
-    function rampRec(dFrom, dTo, y0, y1) {
-      const a = F.pt(dFrom, latMid), c = F.pt(dTo, latMid);
-      return F.along
-        ? { axis: "x", x0: b.ox + a.x, x1: b.ox + c.x, y0: y0, y1: y1 }
-        : { z0: b.oz + a.z, z1: b.oz + c.z, y0: y0, y1: y1 };
+
+    // ---- DECO, merged: one mesh per colour for the whole core -------------
+    const parts = new Map();
+    function part(hex, g) { let a = parts.get(hex); if (!a) parts.set(hex, a = []); a.push(g); }
+    // an axis box in (dep, lat) terms: centre, extents along depth / across
+    function dbox(hex, dep, lat, y, dd, ll, hh) {
+      const p = P.pt(dep, lat);
+      const g = new THREE.BoxGeometry(P.along ? dd : ll, hh, P.along ? ll : dd);
+      g.translate(p.x, y, p.z);
+      part(hex, g);
+    }
+    // a slab tilted along the depth axis from (d0,y0) to (d1,y1), centred on lat
+    function slope(hex, d0, y0, d1, y1, lat, ll, th) {
+      const run = d1 - d0, rise = y1 - y0, len = Math.hypot(run, rise);
+      const g = new THREE.BoxGeometry(ll, th, len);          // local: x across, z along
+      g.rotateX(-Math.atan2(rise, Math.abs(run)));            // +z climbs
+      const ux = P.nx * Math.sign(run), uz = P.nz * Math.sign(run);
+      g.rotateY(Math.atan2(ux, uz));                          // +z -> the climb direction
+      const m = P.pt((d0 + d1) / 2, lat);
+      g.translate(m.x, (y0 + y1) / 2, m.z);
+      part(hex, g);
     }
 
-    // ---- CARVE the chase through every intermediate slab. buildings.js owns
-    // the slabs, so buildings.js does the carve (the elevator's exact idiom).
-    // A slab a lift already carved is skipped by that function — harmless: the
-    // slabs are platforms + LOS, never colliders, so a flight passing through
-    // one clips visually for ~0.2m and never blocks anybody.
+    // ---- CARVE the core out of every slab it rises through (and the roof
+    // when it surfaces). buildings.js owns the slabs and the carve; the core's
+    // footprint is already reserved, so the carve does not reserve again.
     if (CBZ.cityCarveShaft) {
-      const cc = F.pt((D0 + D1) / 2, latMid);
-      const rr = rect(D0, D1, L0, L1);
-      try {
-        CBZ.cityCarveShaft(b, b.ox + cc.x, b.oz + cc.z,
-          (rr.x1 - rr.x0) / 2 - 0.05, (rr.z1 - rr.z0) / 2 - 0.05);
-      } catch (e) {}
+      const h = P.hole;
+      CBZ.cityCarveShaft(b, ox + (h.x0 + h.x1) / 2, oz + (h.z0 + h.z1) / 2, (h.x1 - h.x0) / 2, (h.z1 - h.z0) / 2,
+        { roof: roofAccess, reserve: false });
     }
 
-    // ---- THE SHAFT WALL: one new wall, on the open lateral side. The far
-    // wall and the side wall are the building's own — flush by construction —
-    // so this single box turns the corner into a sealed stairwell with exactly
-    // ONE opening per floor (at D0, facing back into the room).
-    // stop the shaft EXACTLY at the roof slab top: any overshoot leaves a
-    // collider ridge on the walkable roof that you trip over.
-    const wallTop = tops[nFloors];
-    {
-      const wl = L0 - side * 0.09, wl2 = L0 + side * 0.09;
-      const r = rect(D0 - 0.1, D1, Math.min(wl, wl2), Math.max(wl, wl2));
-      const m = box(b.group, (r.x0 + r.x1) / 2, wallTop / 2, (r.z0 + r.z1) / 2,
-        Math.max(0.18, r.x1 - r.x0), wallTop, Math.max(0.18, r.z1 - r.z0), SHAFT);
-      addSolid(D0 - 0.1, D1, Math.min(wl, wl2), Math.max(wl, wl2), 0, wallTop, m);
-      if (CBZ.losBlockers) CBZ.losBlockers.push(m);
-      if (b.losMeshes) b.losMeshes.push(m);
+    // ---- THE CORE IS EMPTY. Anything a furnisher stood inside the core's
+    // footprint (a piece that ignored the reservation) is taken out — its
+    // collider, its walk top, its mesh — before a flight is laid through it.
+    const cleared = clearCore(b, P.hole, tops[0]);
+
+    // ---- THE SHAFT: one wall on the open lateral side, two door stubs across
+    // the mouth, a header over each floor's doorway. The far and side walls
+    // are the building's own. With roof access all of it rises into the
+    // bulkhead, which adds its own far/side walls over the parapet and a lid.
+    const roofY = tops[nFloors];
+    const wallTop = roofAccess ? roofY + CORE_BULK_H : roofY;
+    function wall(d0, d1, l0, l1, y0, y1, los) {
+      const r = P.rect2(d0, d1, l0, l1);
+      const m = box(b.group, (r.x0 + r.x1) / 2, (y0 + y1) / 2, (r.z0 + r.z1) / 2,
+        Math.max(0.05, r.x1 - r.x0), y1 - y0, Math.max(0.05, r.z1 - r.z0), SHAFT);
+      addSolid(d0, d1, l0, l1, y0, y1, m);
+      if (los !== false) { if (CBZ.losBlockers) CBZ.losBlockers.push(m); if (b.losMeshes) b.losMeshes.push(m); }
+      return m;
+    }
+    wall(D0 - 0.09, D1, L0 - side * 0.09, L0 + side * 0.09, 0, wallTop);                  // the shaft wall (lane A's outer side)
+    const dL0 = latMid - side * CORE_DOORHALF, dL1 = latMid + side * CORE_DOORHALF;
+    if (Math.abs(dL0 - L0) > 0.12) wall(D0 - 0.09, D0 + 0.09, L0, dL0, 0, wallTop);       // door stubs
+    if (Math.abs(L1 - dL1) > 0.12) wall(D0 - 0.09, D0 + 0.09, dL1, L1, 0, wallTop);
+    for (let k = 0; k <= kTop; k++) {                                                      // header over each doorway
+      const hy0 = tops[k] + CORE_DOORH, hy1 = k < nFloors ? tops[k + 1] : wallTop;
+      if (hy1 - hy0 > 0.1) wall(D0 - 0.09, D0 + 0.09, dL0, dL1, hy0, hy1);
+    }
+    if (roofAccess) {
+      // THE BULKHEAD: far + side walls standing on the building's own walls
+      // (outside the core, so they never crowd a landing), and a lid
+      const wt = b.wt != null ? b.wt : 0.4;
+      wall(D1, D1 + Math.min(0.2, wt), L0 - side * 0.09, L1 + side * Math.min(0.2, wt), roofY, wallTop);
+      wall(D0 - 0.09, D1 + Math.min(0.2, wt), L1, L1 + side * Math.min(0.2, wt), roofY, wallTop);
+      const lr = P.rect2(D0 - 0.2, D1 + Math.min(0.2, wt), L0 - side * 0.2, L1 + side * Math.min(0.2, wt));
+      const lid = box(b.group, (lr.x0 + lr.x1) / 2, wallTop + 0.1, (lr.z0 + lr.z1) / 2, lr.x1 - lr.x0, 0.2, lr.z1 - lr.z0, PH_COPING, { cast: true });
+      if (CBZ.losBlockers) CBZ.losBlockers.push(lid);
+      if (b.losMeshes) b.losMeshes.push(lid);
     }
 
-    // ---- THE STAIRWELL DOOR: two stubs across the open face narrow the
-    // 4.8m mouth to a 1.8m doorway, and a header above each floor's opening
-    // closes the shaft between storeys. Result: ONE ~1.8m opening per floor.
-    // That opening is the chokepoint the floor's guards are posted around —
-    // the published rule is 3-4 chokepoints a level and never two coverable
-    // from a single post, and one stair door per floor is exactly that.
-    const DOORHALF = 0.9, DOORH = 2.15;
-    {
-      const stub = function (l0, l1) {
-        if (Math.abs(l1 - l0) < 0.12) return;
-        const r = rect(D0 - 0.09, D0 + 0.09, Math.min(l0, l1), Math.max(l0, l1));
-        const m = box(b.group, (r.x0 + r.x1) / 2, wallTop / 2, (r.z0 + r.z1) / 2,
-          Math.max(0.18, r.x1 - r.x0), wallTop, Math.max(0.18, r.z1 - r.z0), SHAFT);
-        addSolid(D0 - 0.09, D0 + 0.09, Math.min(l0, l1), Math.max(l0, l1), 0, wallTop, m);
-        if (CBZ.losBlockers) CBZ.losBlockers.push(m);
-        if (b.losMeshes) b.losMeshes.push(m);
-      };
-      stub(L0, latMid - side * DOORHALF);
-      stub(latMid + side * DOORHALF, L1);
-      // the header over each floor's doorway (the shaft is sealed between
-      // storeys; only the doorway band is open)
-      for (let k = 0; k < nFloors; k++) {
-        const hy0 = tops[k] + DOORH, hy1 = tops[k + 1];
-        if (hy1 - hy0 < 0.1) continue;
-        const r = rect(D0 - 0.09, D0 + 0.09, latMid - side * DOORHALF, latMid + side * DOORHALF);
-        const m = box(b.group, (r.x0 + r.x1) / 2, (hy0 + hy1) / 2, (r.z0 + r.z1) / 2,
-          Math.max(0.18, r.x1 - r.x0), hy1 - hy0, Math.max(0.18, r.z1 - r.z0), SHAFT);
-        addSolid(D0 - 0.09, D0 + 0.09, latMid - side * DOORHALF, latMid + side * DOORHALF, hy0, hy1, m);
-      }
+    // ---- THE WALK SURFACE --------------------------------------------------
+    const flights = [];
+    for (let k = 0; k <= kTop; k++) {
+      // arrival strip at every level the stair serves (the ground one sits on
+      // the foundation, every other one in the carved hole)
+      addPlat(D0 - 0.05, dA0 + 0.02, L0, L1, tops[k]);
+      if (k > 0) dbox(COREC.land, (D0 + dA0) / 2, latMid, tops[k] - 0.1, dA0 - D0, Math.abs(L1 - L0), 0.2);
     }
-
-    // ---- THE FLIGHTS -----------------------------------------------------
-    const dA0 = D0 + CORE_LD, dA1 = D1 - CORE_LD;          // the sloped run
-    const runLen = dA1 - dA0;
-    for (let k = 0; k < nFloors; k++) {
+    for (let k = 0; k < kTop; k++) {
       const y0 = tops[k], y2 = tops[k + 1], y1 = (y0 + y2) / 2;
-      // arrival strip at this floor (flat, full width, at the OPEN end)
-      addPlat(D0 - 0.05, dA0 + 0.35, L0, L1, y0);
-      // flight A: -lateral lane, climbing away from the opening
-      addPlat(dA0 - CORE_OVL, dA1 + CORE_OVL, laneA0 - side * CORE_LIP, laneA1,
-        y1, rampRec(dA0, dA1, y0, y1));
-      // half landing at the far end (flat, full width)
-      addPlat(dA1 - 0.35, D1, L0, L1, y1);
-      // flight B: +lateral lane, climbing back toward the opening
-      addPlat(dA0 - CORE_OVL, dA1 + CORE_OVL, laneB0, laneB1 + side * CORE_LIP,
-        y2, rampRec(dA1, dA0, y1, y2));
-      // ---- DECORATIVE treads/risers/rail (no collision — the ramps are the
-      // collision, exactly as buildings.js does it) ------------------------
+      addPlat(dA1 - 0.02, D1, L0, L1, y1);                                                  // half landing
+      dbox(COREC.land, (dA1 + D1) / 2, latMid, y1 - 0.1, D1 - dA1, Math.abs(L1 - L0), 0.2);
+      const fA = CBZ.stairs && CBZ.stairs.flight({
+        bottom: Wp(dA0, aC, y0), top: Wp(dA1, aC, y1), width: laneW, overlap: 0.35,
+        owner: b, plats: b.platforms || undefined, link: false, kind: "stair",
+      });
+      const fB = CBZ.stairs && CBZ.stairs.flight({
+        bottom: Wp(dA1, bC, y1), top: Wp(dA0, bC, y2), width: laneW, overlap: 0.35,
+        owner: b, plats: b.platforms || undefined, link: false, kind: "stair",
+      });
+      if (fA) plats.push(fA.plat);
+      if (fB) plats.push(fB.plat);
+      flights.push(fA, fB);
+      // THE RAIL BETWEEN THE LANES: stepped, each step banded from lane A's
+      // tread under it to a handrail over lane B's (lane B is the higher one
+      // everywhere in a storey: yB - yA = FH (1 - f)), so a body on either
+      // flight is held off the seam and nobody is walled off along it
+      const nSeg = Math.max(3, Math.ceil(runLen / 0.5));
+      for (let i = 0; i < nSeg; i++) {
+        const f0 = i / nSeg, f1 = (i + 1) / nSeg;
+        const s0 = dA0 + 0.05 + (runLen - 0.1) * f0, s1 = dA0 + 0.05 + (runLen - 0.1) * f1;
+        const yA0 = y0 + (y1 - y0) * ((s0 - dA0) / runLen), yB0 = y2 - (y2 - y1) * ((s0 - dA0) / runLen);
+        addSolid(s0, s1, latMid - side * CORE_SEAM / 2, latMid + side * CORE_SEAM / 2, yA0 + 0.1, yB0 + 1.0);
+      }
+      // ---- the stair you see: treads + risers, a sloped soffit under each
+      // flight, a handrail + balusters on the open (centre) edge ------------
       const nSteps = Math.max(2, Math.round((y1 - y0) / CORE_RISE));
-      const rise = (y1 - y0) / nSteps, run = runLen / nSteps;
+      const rise = (y1 - y0) / nSteps, go = runLen / nSteps;
       for (let lane = 0; lane < 2; lane++) {
-        const lo = lane === 0 ? laneA0 : laneB0, hi = lane === 0 ? laneA1 : laneB1;
-        const lc = (lo + hi) / 2, lw = Math.abs(hi - lo);
-        const base = lane === 0 ? y0 : y1;
+        const lc = lane === 0 ? aC : bC, base = lane === 0 ? y0 : y1;
         for (let i = 1; i <= nSteps; i++) {
           const vt = base + i * rise;
-          const dCentre = lane === 0 ? (dA0 + (i - 0.5) * run) : (dA1 - (i - 0.5) * run);
-          const p = F.pt(dCentre, lc);
-          box(b.group, p.x, vt - 0.03, p.z,
-            F.along ? run + 0.03 : lw - 0.12, 0.06, F.along ? lw - 0.12 : run + 0.03, LAND);
+          const dC = lane === 0 ? dA0 + (i - 0.5) * go : dA1 - (i - 0.5) * go;
+          const dR = lane === 0 ? dA0 + (i - 1) * go : dA1 - (i - 1) * go;
+          dbox(COREC.tread, dC, lc, vt - 0.025, go + 0.03, laneW - 0.04, 0.05);
+          dbox(COREC.riser, dR, lc, vt - rise / 2, 0.03, laneW - 0.06, rise);
         }
-        // handrail along the OPEN (centre) edge of the lane
-        const railLat = lane === 0 ? laneA1 - side * 0.07 : laneB0 + side * 0.07;
+        const dF = lane === 0 ? dA0 : dA1, dT = lane === 0 ? dA1 : dA0;
+        slope(COREC.soffit, dF, base - 0.16, dT, base + (y1 - y0) - 0.16, lc, laneW - 0.02, 0.14);
+        const railLat = latMid + (lane === 0 ? -side : side) * 0.06;
+        slope(COREC.rail, dF, base + 0.92, dT, base + (y1 - y0) + 0.92, railLat, 0.05, 0.06);
         for (let i = 0; i <= nSteps; i += 2) {
-          const vt = base + i * rise;
-          const dAt = lane === 0 ? (dA0 + i * run) : (dA1 - i * run);
-          const p = F.pt(dAt, railLat);
-          box(b.group, p.x, vt + 0.48, p.z, 0.05, 0.95, 0.05, RAILC);
+          const dAt = lane === 0 ? dA0 + i * go : dA1 - i * go;
+          dbox(COREC.rail, dAt, railLat, base + i * rise + 0.46, 0.035, 0.035, 0.92);
         }
       }
-      // one strip light over each landing so the shaft is never a black hole
-      { const p = F.pt(dA1 - 0.5, latMid);
-        box(b.group, p.x, y1 + FHl * 0.42, p.z, F.along ? 0.4 : 1.5, 0.07, F.along ? 1.5 : 0.4,
-          0xeef2ff, { emissive: 0xeef2ff, ei: 0.3 }); }
+      // a strip light over each half landing so the shaft is never a black hole
+      const lampY = k + 1 < kTop ? y1 + FHl - 0.3 : (roofAccess ? wallTop - 0.08 : roofY - 0.28);
+      dbox(COREC.lamp, dA1 + CORE_LD / 2, latMid, lampY, 0.4, 1.5, 0.06);
     }
-    // (no roof landing needed: the ROOF slab is never carved — buildings.js
-    // excludes it from floorSlabs — so it already covers this footprint.)
-
+    // THE GROUND FLOOR UNDER FLIGHT B: nothing below lane B there, and the
+    // flight and its half landing are 1.4-1.6 m over the ground floor at the
+    // far end. A closet collider under them (banded below lane B's lowest
+    // walk height, 0.25 under the half landing) stops a body walking in under.
+    if (kTop >= 1) {
+      const y1g = (tops[0] + tops[1]) / 2;
+      addSolid(dA0 + 0.3, D1, laneB0, laneB1, tops[0] - 0.3, y1g - 0.25);
+      const panTop = tops[1] - (tops[1] - y1g) * (0.31 / runLen) - 0.2;                         // flight B's underside there
+      dbox(COREC.soffit, dA0 + 0.31, bC, (tops[0] + panTop) / 2, 0.06, laneW, panTop - tops[0]);  // its front panel
+    }
+    // THE GUARD across the open well at the top level (lane A: the flight that
+    // would have climbed on is not there)
+    {
+      const yT = tops[kTop];
+      addSolid(dA0 - 0.03, dA0 + 0.03, L0, latMid, yT, yT + 1.05);
+      dbox(COREC.rail, dA0, (L0 + latMid) / 2, yT + 1.0, 0.06, laneW, 0.06);
+      dbox(COREC.rail, dA0, (L0 + latMid) / 2, yT + 0.5, 0.04, laneW, 0.04);
+    }
+    // merge the deco: one mesh per colour
+    {
+      const BGU = THREE.BufferGeometryUtils;
+      parts.forEach(function (list, hex) {
+        const mat = hex === COREC.lamp ? cmat(hex, { emissive: hex, ei: 0.3 }) : cmat(hex);
+        if (BGU && BGU.mergeBufferGeometries) {
+          const g = BGU.mergeBufferGeometries(list, false);
+          for (const q of list) q.dispose();
+          if (g) { const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = "stair-core"; b.group.add(m); }
+        } else for (const q of list) { const m = new THREE.Mesh(q, mat); m.receiveShadow = true; b.group.add(m); }
+      });
+    }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
-    // the STAIRHEAD, building-local, in the same {x,z,nx,nz} shape as
-    // b.localDoor — so every per-floor interior program can be oriented off
-    // "the way you arrive on this floor" with no special case.
-    const hp = F.pt(D0, latMid);
-    const head = { x: hp.x, z: hp.z, nx: -F.nx, nz: -F.nz };
+    // ---- THE AI LINKS: one per storey, stair door to stair door ------------
+    const OUT = 0.9, IN = 0.45;
+    const storeyPaths = [];
+    for (let k = 0; k < kTop; k++) {
+      const y0 = tops[k], y2 = tops[k + 1], y1 = (y0 + y2) / 2;
+      const path = [
+        Wp(D0 - OUT, latMid, y0), Wp(D0 + IN, latMid, y0),
+        Wp(dA0 - 0.3, aC, y0), Wp(dA1 + CORE_LD / 2, aC, y1),
+        Wp(dA1 + CORE_LD / 2, bC, y1), Wp(dA0 - 0.3, bC, y2),
+        Wp(D0 + IN, latMid, y2), Wp(D0 - OUT, latMid, y2),
+      ];
+      storeyPaths.push(path);
+      if (CBZ.stairs) {
+        const L = CBZ.stairs.link({ path: path, width: laneW, kind: "stair", owner: b });
+        if (L) {                     // removeOwner(b) takes the whole storey's walk surface with it
+          const fa = flights[2 * k], fb = flights[2 * k + 1];
+          L.plats = [fa && fa.plat, fb && fb.plat].filter(Boolean);
+          if (k === 0) { L.plats = L.plats.concat(plats.filter((p) => L.plats.indexOf(p) < 0)); L.cols = cols; }
+        }
+      }
+    }
+
+    const hp = P.pt(D0, latMid);
+    const head = { x: hp.x, z: hp.z, nx: -P.nx, nz: -P.nz };
     const rec = {
-      lot: lot, b: b, head: head, stops: tops.slice(), floors: nFloors,
-      // `depth`/`width` are what the core EATS out of each floorplate — an
-      // interior program hands this to the kit as `opts.inset` so it furnishes
-      // the room, not the stairwell.
-      depth: CD, width: CW,
-      rect: rect(D0, D1, L0, L1), colliders: cols, platforms: plats,
+      lot: lot, b: b, head: head, stops: tops.slice(0, kTop + 1), floors: kTop, roof: roofAccess, cleared: cleared,
+      // what the core EATS out of each floorplate (interior programs inset by it)
+      depth: P.CD, width: P.CW,
+      rect: P.hole, colliders: cols, platforms: plats,
       // world-space centre of the opening on floor k (the chokepoint)
       headAt: function (k) {
-        const y = tops[Math.max(0, Math.min(nFloors, k | 0))];
-        return { x: b.ox + hp.x, y: y, z: b.oz + hp.z, nx: -F.nx, nz: -F.nz };
+        const y = tops[Math.max(0, Math.min(kTop, k | 0))];
+        return { x: ox + hp.x, y: y, z: oz + hp.z, nx: -P.nx, nz: -P.nz };
       },
-      // THE WALK THROUGH THE CORE, for anybody who has to climb it on foot (an
-      // AI body sent back to its post a storey up). World {x, y, z} waypoints
-      // from just outside floor k0's stair door to just outside floor k1's:
-      // arrival strip, up lane A, across the half landing, up lane B, onto the
-      // next arrival strip, and so on. Walked point to point on the ramps the
-      // flights already are (physics' groundAt carries the Y); descending is
-      // the same list reversed. Same floor, or out of range: [].
+      // THE WALK THROUGH THE CORE: world {x,y,z} waypoints from just outside
+      // floor k0's stair door to just outside floor k1's — the registered
+      // CBZ.stairs link paths, concatenated (descending: reversed). [] when
+      // k0 === k1 after clamping to the levels the stair serves.
       route: function (k0, k1) {
-        k0 = Math.max(0, Math.min(nFloors - 1, k0 | 0));
-        k1 = Math.max(0, Math.min(nFloors - 1, k1 | 0));
+        k0 = Math.max(0, Math.min(kTop, k0 | 0));
+        k1 = Math.max(0, Math.min(kTop, k1 | 0));
         if (k0 === k1) return [];
         const lo = Math.min(k0, k1), hi = Math.max(k0, k1);
-        const aC = (laneA0 + laneA1) / 2, bC = (laneB0 + laneB1) / 2;
-        const W = function (dep, lat, y) { const p = F.pt(dep, lat); return { x: b.ox + p.x, y: y, z: b.oz + p.z }; };
-        const out = [W(D0 - 0.9, latMid, tops[lo]), W(D0 + 0.45, latMid, tops[lo])];
+        const out = [];
         for (let k = lo; k < hi; k++) {
-          const y0 = tops[k], y2 = tops[k + 1], y1 = (y0 + y2) / 2;
-          out.push(W(dA0 - 0.25, aC, y0), W(dA1 + 0.3, aC, y1),
-                    W(dA1 + 0.3, bC, y1), W(dA0 - 0.25, bC, y2));
+          const pth = storeyPaths[k];
+          for (let i = (k === lo ? 0 : 1); i < pth.length; i++) out.push({ x: pth[i].x, y: pth[i].y, z: pth[i].z, stair: true });
         }
-        out.push(W(D0 + 0.45, latMid, tops[hi]), W(D0 - 0.9, latMid, tops[hi]));
         return k1 > k0 ? out : out.reverse();
       },
     };
     b._stairCore = rec;
+    if (b.group.userData) {
+      b.group.userData.stairCore = rec;
+      if (b.group.userData.bld && b.group.userData.bld !== b) b.group.userData.bld._stairCore = rec;
+    }
     return rec;
   };
   // has this building got walkable vertical traversal at all?
   CBZ.cityHasStairs = function (lot) {
     const b = lot && lot.building;
-    return !!(b && (b._stairCore || b.hasStairs));
+    return !!(b && (coreOf(b) || (b.stairPlan && !b._stairCoreFailed)));
   };
+
+  // THE AUDIT (tools / the lead's live probes): every built core, walked on
+  // paper — a slab platform or a foreign collider over the core rect is a
+  // stair you cannot use. Returns {cores, blockedPlats, blockedCols, samples}.
+  CBZ.cityStairAudit = function () {
+    const A = CBZ.city && CBZ.city.arena;
+    const shells = (A && A.root && A.root.userData && A.root.userData.shells) || [];
+    const out = { shells: shells.length, planned: 0, cores: 0, failed: 0, blockedPlats: 0, blockedCols: 0, samples: [] };
+    for (const b of shells) {
+      if (!b) continue;
+      if (b.stairPlan) out.planned++;
+      if (b._stairCoreFailed) out.failed++;
+      const core = coreOf(b);
+      if (!core) continue;
+      out.cores++;
+      const h = core.rect, x0 = b.ox + h.x0 + 0.05, x1 = b.ox + h.x1 - 0.05, z0 = b.oz + h.z0 + 0.05, z1 = b.oz + h.z1 - 0.05;
+      const own = new Set(core.platforms.concat(core.colliders));
+      for (const p of CBZ.platforms) {
+        if (own.has(p) || p.stair || p.maxX <= x0 || p.minX >= x1 || p.maxZ <= z0 || p.minZ >= z1) continue;
+        if (!(p.top > core.stops[0] + 0.05) || p.top > b.h + 0.5) continue;
+        out.blockedPlats++;
+        if (out.samples.length < 8) out.samples.push({ kind: "plat", x: +b.ox.toFixed(1), z: +b.oz.toFixed(1), top: +p.top.toFixed(2) });
+      }
+      for (const c of CBZ.colliders) {
+        if (own.has(c) || c.maxX <= x0 || c.minX >= x1 || c.maxZ <= z0 || c.minZ >= z1) continue;
+        if (c.y0 != null && c.y0 > b.h + 3) continue;
+        out.blockedCols++;
+        if (out.samples.length < 8) out.samples.push({ kind: "col", x: +b.ox.toFixed(1), z: +b.oz.toFixed(1), y0: c.y0, y1: c.y1 });
+      }
+    }
+    return out;
+  };
+
+  // ---- THE LAZY BUILD: the core goes up when somebody walks up to it -------
+  // Thousands of shells reserve a core; only the ones you approach pay for
+  // one (a few platforms, ~20 colliders a storey, ~6 merged meshes). One per
+  // scan, nearest first, within CORE_R of the footprint. Built cores stay.
+  const CORE_R = 14, CORE_TICK = 0.25, CORE_CELL = 48;
+  let coreScanT = 0, coreGrid = null, coreGridOf = null, coreGridN = -1;
+  function coreGridBuild(shells) {
+    coreGrid = new Map(); coreGridOf = shells; coreGridN = shells.length;
+    for (const b of shells) {
+      if (!b || !b.stairPlan) continue;
+      const key = Math.floor(b.ox / CORE_CELL) + "," + Math.floor(b.oz / CORE_CELL);
+      let a = coreGrid.get(key); if (!a) coreGrid.set(key, a = []); a.push(b);
+    }
+  }
+  CBZ.onUpdate(36.65, function (dt) {
+    const G = CBZ.game;
+    if (!G || G.mode !== "city") return;
+    coreScanT -= dt;
+    if (coreScanT > 0) return;
+    coreScanT = CORE_TICK;
+    const A = CBZ.city && CBZ.city.arena, P = CBZ.player;
+    const shells = A && A.root && A.root.userData && A.root.userData.shells;
+    if (!shells || !P || !P.pos) return;
+    if (coreGridOf !== shells || coreGridN !== shells.length) coreGridBuild(shells);
+    const px = P.pos.x, pz = P.pos.z;
+    const gx = Math.floor(px / CORE_CELL), gz = Math.floor(pz / CORE_CELL);
+    let best = null, bd = CORE_R;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const a = coreGrid.get((gx + i) + "," + (gz + j));
+      if (!a) continue;
+      for (const b of a) {
+        if (b._stairCore || b._stairCoreFailed || !b.group || !b.group.parent) continue;
+        const dx = Math.max(0, Math.abs(px - b.ox) - b.w / 2), dz = Math.max(0, Math.abs(pz - b.oz) - b.d / 2);
+        const d = Math.hypot(dx, dz);
+        if (d < bd) { bd = d; best = b; }
+      }
+    }
+    if (!best) return;
+    try { CBZ.cityStairCore({ building: best }); } catch (e) { best._stairCoreFailed = true; console.warn("[stair core]", e); }
+  });
 
   // PUBLIC: the built lifts (minimap markers / missions can target a roof)
   CBZ.cityElevators = function () { return elevators; };

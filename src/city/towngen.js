@@ -633,8 +633,8 @@
           if (sk === "realtor") bb.realtor = true;
           stampShopOwner(bb, sk, storeys);
           // V2 — NO HOLLOW SHELLS: a real sales counter just inside the back
-          // wall (mirrors buildings.js's mainland counter math incl. the stair-
-          // strip clamp) + the full trade-specific interior dresser + dressed
+          // wall (buildings.js's mainland counter math, slid clear of the stair
+          // core the shell reserved) + the full trade-specific interior dresser + dressed
           // upper floors. Town shops were bare boxes before this.
           if (V2 && b.lbox) {
             const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
@@ -642,19 +642,10 @@
             let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
             let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
             const cdp = inz ? 0.8 : Math.min(d - 2, 4.5);
-            if (b.hasStairs) {
-              const stairRight = -w / 2 + wt + (b.stairW || 4.2);
-              if (cw > 1) {
-                const roomRight = w / 2 - wt;
-                cw = Math.min(cw, Math.max(1.8, roomRight - stairRight - 1.0));
-                ccx = (stairRight + roomRight) / 2;
-              } else if (ccx - cw / 2 < stairRight + 0.5) {
-                ccx = stairRight + 0.5 + cw / 2;
-              }
-              ccx = Math.max(ccx, stairRight + 0.4 - inx * 1.2);
-            }
+            let cdp2 = cdp;
+            if (CBZ.cityFitCounter) ({ ccx, ccz, cw, cd: cdp2 } = CBZ.cityFitCounter(b, inx, ccx, ccz, cw, cdp));
             const drawCounter = function () {
-              return b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp, 0x6b4a2a, { solid: true });
+              return b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp2, 0x6b4a2a, { solid: true });
             };
             if (CBZ.interiorBounded) CBZ.interiorBounded(b, drawCounter, "town-counter");
             else drawCounter();

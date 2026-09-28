@@ -432,9 +432,23 @@
     const ceil = (floor.k + 1 < (Array.isArray(b.floorTops) ? b.floorTops.length : (b.storeys | 0) + 1))
       ? nextTop - 0.2 : y0 + FH - 0.2;                // underside of the slab above
     const fy = y0 + (floor.k === 0 ? 0.06 : 0.05);    // finished floor top (over the eager covering)
-    const SHAFTS = [];
+    // THE CORE IS SACRED: the lift chase, the stair core (reserved by every
+    // multi-storey shell at birth, whether or not it is built yet) and the
+    // landing in front of the stair door (b.keepRects) take nothing a planner
+    // draws — no partition, no furniture, no collider — on any floor.
+    const SHAFTS = [], MOUTHS = [];
     for (let i = 0, sr = b.shaftRects || []; i < sr.length; i++)
       SHAFTS.push({ x0: sr[i].x0 - 0.1, x1: sr[i].x1 + 0.1, z0: sr[i].z0 - 0.1, z1: sr[i].z1 + 0.1 });
+    for (let i = 0, kr = b.keepRects || []; i < kr.length; i++)
+      MOUTHS.push({ x0: kr[i].x0 - 0.1, x1: kr[i].x1 + 0.1, z0: kr[i].z0 - 0.1, z1: kr[i].z1 + 0.1 });
+    function hits(L, x0, x1, z0, z1) {
+      for (let i = 0; i < L.length; i++) {
+        const R = L[i];
+        if (x1 > R.x0 && x0 < R.x1 && z1 > R.z0 && z0 < R.z1) return true;
+      }
+      return false;
+    }
+    function inCore(x0, x1, z0, z1) { return hits(SHAFTS, x0, x1, z0, z1) || hits(MOUTHS, x0, x1, z0, z1); }
     function bucket(key) {
       let k = buckets[key];
       if (!k) k = buckets[key] = { key: key, pos: [], nor: [], col: [], uv: [], idx: [], tex: key !== "flat" && key !== "glow" && key !== "glass" };
@@ -446,15 +460,9 @@
     function box(x, y, z, w, h, d, color, o) {
       if (!(w > 0.002 && h > 0.002 && d > 0.002)) return null;
       o = o || {};
-      // THE CORE IS SACRED: nothing a planner draws may stand in a lift shaft
-      // or a stair core carved after the eager pass (occupy.js cuts stair cores
-      // into occupied buildings at runtime) — flat finishes excepted.
-      if (SHAFTS.length && h > 0.05) {
-        for (let i = 0; i < SHAFTS.length; i++) {
-          const R = SHAFTS[i];
-          if (x + w / 2 > R.x0 && x - w / 2 < R.x1 && z + d / 2 > R.z0 && z - d / 2 < R.z1) return null;
-        }
-      }
+      // (a flat finish may cover the landing mouth, which is floor — never a shaft, which is a hole)
+      if (SHAFTS.length && hits(SHAFTS, x - w / 2, x + w / 2, z - d / 2, z + d / 2)) return null;
+      if (MOUTHS.length && h > 0.05 && hits(MOUTHS, x - w / 2, x + w / 2, z - d / 2, z + d / 2)) return null;
       const key = o.glow ? "glow" : o.glass ? "glass" : (o.mat || "flat");
       const bk = bucket(key);
       const c = hexRGB(color == null ? 0xffffff : color);
@@ -494,6 +502,7 @@
       return true;
     }
     function solid(x0, x1, z0, z1, ya, yb) {
+      if (inCore(Math.min(x0, x1), Math.max(x0, x1), Math.min(z0, z1), Math.max(z0, z1))) return;
       cols.push({ minX: ox + Math.min(x0, x1), maxX: ox + Math.max(x0, x1), minZ: oz + Math.min(z0, z1),
                   maxZ: oz + Math.max(z0, z1), y0: ya, y1: yb, ref: null, _fitout: site.key });
     }
@@ -537,8 +546,20 @@
       const gaps = (o.gaps || []).slice().sort(function (a, b2) { return a.c - b2.c; });
       let cur = lo;
       const mat = o.mat || "plaster", tint = o.tint == null ? 0xe9e4da : o.tint;
-      const seg = function (a, c2, ya, yb) {
+      const seg = function seg(a, c2, ya, yb) {
         if (c2 - a < 0.02 || yb - ya < 0.02) return;
+        // a partition that runs into the lift chase / stair core / its landing
+        // stops at it (the core's own wall closes the gap) instead of being
+        // dropped whole by box()'s core guard
+        for (const L of [SHAFTS, MOUTHS]) for (let i = 0; i < L.length; i++) {
+          const R = L[i];
+          const c0 = axis === "x" ? R.z0 : R.x0, c1 = axis === "x" ? R.z1 : R.x1;
+          const r0 = axis === "x" ? R.x0 : R.z0, r1 = axis === "x" ? R.x1 : R.z1;
+          if (at + t / 2 <= c0 || at - t / 2 >= c1 || c2 <= r0 || a >= r1) continue;
+          seg(a, Math.min(c2, r0), ya, yb);
+          seg(Math.max(a, r1), c2, ya, yb);
+          return;
+        }
         const mid = (a + c2) / 2, cy = (ya + yb) / 2;
         if (axis === "x") box(mid, cy, at, c2 - a, yb - ya, t, tint, { mat: mat, solid: ya < y0 + 1.8 });
         else box(at, cy, mid, t, yb - ya, c2 - a, tint, { mat: mat, solid: ya < y0 + 1.8 });
@@ -741,10 +762,6 @@
     let HOLES = [];
     const sr = b.shaftRects || [];
     for (let i = 0; i < sr.length; i++) HOLES.push({ x0: sr[i].x0 - 0.05, x1: sr[i].x1 + 0.05, z0: sr[i].z0 - 0.05, z1: sr[i].z1 + 0.05 });
-    if (b.hasStairs) {
-      const wt = b.wt != null ? b.wt : 0.4;
-      HOLES.push({ x0: -b.w / 2, x1: -b.w / 2 + wt + (b.stairW || 0) + 0.05, z0: -b.d / 2, z1: b.d / 2 });
-    }
     B.addHole = function (r) { HOLES.push(r); };
 
     // ---- FINISH: arrays -> meshes, light baked into the vertex colours ----
