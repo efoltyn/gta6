@@ -350,7 +350,7 @@
       if (CBZ.pickupNote) { try { CBZ.pickupNote(item); } catch (er) {} }
       sfx("coin");
       if (item === "Keycard") syncKey();
-      return { ok: true, msg: item === "Keycard" ? "You didn't get it from me." : "Saw slow. Not near a screw." };
+      return { ok: true, msg: item === "Keycard" ? "You didn't get it from me." : "Don't ask where it came from." };
     }
     // the pitch, once in a while; otherwise he is his normal self
     const now = (g.elapsed || 0);
@@ -433,7 +433,7 @@
 
      Owner, 2026-09-27: show don't tell; nothing on screen unless the
      player opens it. The panel used to sit top-left for the whole run
-     (clock, three routes, a lost-items line). Now it is closed by default
+     (clock, three routes, a lost-items line; the routes are deleted, see below). Now it is closed by default
      with NOTHING on screen, and opens on P (keyboard) or the small Plan
      button (touch, the one pill left on a touch prison screen). Open, it is
      also where the things the bare HUD dropped live: the clock and the
@@ -462,43 +462,14 @@
       until: Math.floor(u / 60) + ":" + pad(u % 60) + " left" };
   }
 
-  function gateRoute() {
-    const card = g.hasKey || has("Gate Key");
-    const key = has("Gate Key");
-    let next;
-    if (!card) next = "Keycard: the block desk, a screw's belt, or the Old Timer";
-    else if (!key) next = "Gate Key: the gate booth, or the gate officer";
-    else {
-      const o = gateOfficer();
-      next = (!o || !upright(o)) ? "Gate 3 is open. Walk out" : "Slip a gate unseen";
-    }
-    return { id: "gate", name: "Gate", steps: [card, key, false], next: next };
-  }
-  function culvertRoute() {
-    const blade = S.grateCut || has("Hacksaw Blade");
-    let next;
-    if (!blade) next = "A blade: the workshop bench, or the Old Timer";
-    else if (!S.grateCut) next = "Cut the grate in the yard ditch";
-    else next = "Crawl out when nobody watches the ditch";
-    return { id: "culvert", name: "Culvert", steps: [blade, S.grateCut, false], next: next };
-  }
-  function favourRoute() {
-    let best = null, br = 0;
-    const lists = [CBZ.npcs || [], CBZ.guards || []];
-    for (let l = 0; l < lists.length; l++) {
-      for (let i = 0; i < lists[l].length; i++) {
-        const a = lists[l][i];
-        if (!a || a.dead || a._crowd || !a.data) continue;
-        const r = a.rep || 0;
-        if (r > br) { br = r; best = a; }
-      }
-    }
-    const F = (CBZ.quests && CBZ.quests.FRIEND) || 100;
-    const ready = br >= F;
-    const next = ready ? short(best.data.name) + " can walk you out"
-      : (best && br > 0 ? "Keep working for " + short(best.data.name) : "Somebody who owes you");
-    return { id: "favour", name: "Favours", steps: null, frac: Math.min(1, br / F), next: next, ready: ready };
-  }
+  /* THE PLAN NO LONGER TELLS YOU THE WAY OUT (owner, 2026-09-28: "Nobody
+     should ever tell you to go in the gun room. That should be something
+     you figure out on your own. Nothing should tell you that.") The panel
+     used to list three routes with the next step spelled out (the keycard's
+     three sources, the grate to cut, the ditch to crawl). That was a
+     walkthrough on a key. It is gone. What is left is what a man in a cell
+     actually knows: the hour, his smokes, what the screws took off him, and
+     the Map/Ranks/Pause buttons. */
 
   let panel = null, dirty = true, panelT = 0, btn = null, open = false;
   function onTouch() { return !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch"))); }
@@ -511,15 +482,6 @@
       "body.escape-plan-live.escape-plan-open #escapePlan{display:block;}",
       "#escapePlan .ep-top{display:flex;justify-content:space-between;gap:8px;white-space:pre;font-weight:700;color:#ffd451;font-variant-numeric:tabular-nums;margin-bottom:4px;}",
       "#escapePlan .ep-sub{opacity:.7;font-weight:600;}",
-      "#escapePlan .ep-route{margin-top:6px;padding:2px 4px;margin-left:-4px;margin-right:-4px;border-radius:6px;}",
-      "#escapePlan .ep-marks{display:inline-flex;gap:4px;align-items:center;}",
-      "#escapePlan .ep-head{display:flex;align-items:center;gap:6px;font-weight:700;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#ffb35c;}",
-      "#escapePlan .ep-box{display:inline-block;width:9px;height:9px;border:2px solid rgba(255,255,255,.55);border-radius:2px;}",
-      "#escapePlan .ep-box.on{background:#39ff88;border-color:#39ff88;}",
-      "#escapePlan .ep-bar{display:inline-block;width:54px;height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden;}",
-      "#escapePlan .ep-bar i{display:block;height:100%;background:#39ff88;}",
-      "#escapePlan .ep-next{font-size:12.5px;opacity:.93;margin-top:1px;}",
-      "#escapePlan .ep-route.ready .ep-head{color:#39ff88;}",
       "#escapePlan .ep-lost{margin-top:6px;color:#ff8e8e;font-weight:600;font-size:12.5px;}",
       "#escapePlan .ep-btns{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;}",
       "#escapePlan .ep-btns button{font:600 13px/1 Fredoka,system-ui,sans-serif;color:#e8ecf2;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.22);border-radius:9px;padding:8px 12px;min-height:34px;cursor:pointer;}",
@@ -540,7 +502,7 @@
     panel.setAttribute("aria-label", "Escape plan");
     panel.innerHTML =
       '<div class="ep-top"><span class="ep-now"></span><span class="ep-sub ep-cigs"></span></div>' +
-      '<div class="ep-routes"></div><div class="ep-lost"></div>' +
+      '<div class="ep-lost"></div>' +
       '<div class="ep-btns"><button type="button" data-ep="map">Map</button>' +
       '<button type="button" data-ep="ranks">Ranks</button>' +
       '<button type="button" data-ep="pause" class="ep-pause">Pause</button>' +
@@ -584,33 +546,14 @@
     if (k === "escape" && open) setOpen(false);
   });
 
-  // Persistent rows, updated in place.
-  const rows = {};
-  let nowEl = null, cigEl = null, routesEl = null, lostEl = null, pauseEl = null;
+  let nowEl = null, cigEl = null, lostEl = null, pauseEl = null;
   function setText(node, t) { if (node && node.textContent !== t) node.textContent = t; }
-  function setCls(node, c, on) { if (node && node.classList.contains(c) !== !!on) node.classList.toggle(c, !!on); }
-  function row(id) {
-    if (rows[id]) return rows[id];
-    const root = document.createElement("div");
-    root.className = "ep-route";
-    const head = document.createElement("div");
-    head.className = "ep-head";
-    const name = document.createElement("span");
-    const marks = document.createElement("span");
-    marks.className = "ep-marks";
-    head.appendChild(name); head.appendChild(marks);
-    const next = document.createElement("div");
-    next.className = "ep-next";
-    root.appendChild(head); root.appendChild(next);
-    routesEl.appendChild(root);
-    return (rows[id] = { root: root, name: name, marks: marks, next: next, sig: "" });
-  }
   function render() {
     const p = ensurePanel();
     if (!p) return;
     if (!nowEl) {
       nowEl = p.querySelector(".ep-now"); cigEl = p.querySelector(".ep-cigs");
-      routesEl = p.querySelector(".ep-routes"); lostEl = p.querySelector(".ep-lost");
+      lostEl = p.querySelector(".ep-lost");
       pauseEl = p.querySelector(".ep-pause");
     }
     const c = clockParts();
@@ -618,26 +561,6 @@
     setText(nowEl, c ? c.now : t);
     setText(cigEl, (g.cigs || 0) + " cigs");
     pauseEl.style.display = onTouch() ? "" : "none";
-    routesEl.style.display = g.role === "cop" ? "none" : "";
-    const routes = [gateRoute(), culvertRoute(), favourRoute()];
-    for (let i = 0; i < routes.length; i++) {
-      const r = routes[i], R = row(r.id);
-      let sig, html;
-      if (r.steps) {
-        let done = 0; html = "";
-        for (let k = 0; k < r.steps.length; k++) { if (r.steps[k]) done++; html += '<span class="ep-box' + (r.steps[k] ? " on" : "") + '"></span>'; }
-        r.ready = done === r.steps.length - 1;
-        sig = html;
-      } else {
-        const w = Math.round(r.frac * 100);
-        html = '<span class="ep-bar"><i style="width:' + w + '%"></i></span>';
-        sig = "b" + w;
-      }
-      if (R.sig !== sig) { R.marks.innerHTML = html; R.sig = sig; }
-      setText(R.name, r.name);
-      setText(R.next, r.next);
-      setCls(R.root, "ready", r.ready);
-    }
     const lostOn = S.lostT > 0 && !!S.lost;
     lostEl.style.display = lostOn ? "" : "none";
     if (lostOn) setText(lostEl, S.lost);
@@ -701,7 +624,6 @@
     audit: function () {
       const d = deskState();
       return {
-        routes: [gateRoute(), culvertRoute(), favourRoute()].map(function (r) { return { id: r.id, steps: r.steps, next: r.next }; }),
         hasKey: !!g.hasKey, gateKey: has("Gate Key"), blade: has("Hacksaw Blade"), grateCut: S.grateCut,
         work: S.work ? { kind: S.work.kind, t: +S.work.t.toFixed(2) } : null,
         desk: d ? { officer: d.officer ? gname(d.officer) : null, d: +Math.sqrt(d.d2).toFixed(1) } : null,
