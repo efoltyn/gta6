@@ -1065,6 +1065,70 @@
     return [W[0] + (wx * c + px * s) * L2, W[1] + (wy * c + py * s) * L2, W[2] + (wz * c + pz * s) * L2];
   }
 
+  // ------------------------------------------------------------ THE TORCH GRIP
+  /* A hand torch is a ~3 cm tube held in the REVERSE (ice-pick / Harries)
+     fist: all four fingers wrap the body, the lens comes out of the LITTLE-
+     FINGER side, the tail cap sits just past the index knuckle and the
+     thumb rests over the tail switch, ready to click it. This is the one
+     hold that lets the thumb reach a tail switch and still leaves the beam
+     free of the hand.
+
+     Hand frame (right hand): the torch axis runs along the hand's X, lens
+     toward +X (the little finger), tail toward -X; its centre is exactly
+     gripCentre("torch") — the same point every other wrap pose closes on.
+       · the fingers are a GRASP (curl-until-contact) on that cylinder, sized
+         by the tube's real radius, cut off at the tail face;
+       · the thumb cannot be a grasp: the grasp bends a thumb toward the part's
+         (infinite) axis and so can only lay it along a side, never on an end
+         face. Its pad is put ON the tail switch with the same two-bone solve
+         the arms use (math.solveElbow), knuckle bulging out and up, the tip
+         segment pressing along +X into the switch.
+     torchMount() is placeGrip() inverted: where a torch goes in a hand's
+     frame so its handle sits in that hand's grip. */
+  const TORCH = { R: 0.015, tailX: -0.050, headX: 0.045, padR: 0.0085 };
+  const _tmO = new THREE.Object3D(), _tmM = new THREE.Matrix4(), _tmS = new THREE.Vector3();
+  const _tmA = new THREE.Vector3(), _tmUp = new THREE.Vector3(0, 1, 0);
+  (function buildTorchPose() {
+    const R = TORCH.R;
+    const gc = [-0.006, -(PALM.th * 0.5 + R), FINGERS[1].z + 0.012];
+    const G = grasp({
+      side: 1, k: 1, name: "torch",
+      prism: {
+        o: new THREE.Vector3((TORCH.tailX + TORCH.headX) / 2, gc[1], gc[2]),
+        axis: new THREE.Vector3(1, 0, 0), u: new THREE.Vector3(0, 1, 0),
+        hw: R, hh: R, rc: R, hl: (TORCH.headX - TORCH.tailX) / 2,
+      },
+      n: new THREE.Vector3(0, 1, 0), heading: new THREE.Vector3(0, 0, -1),
+      // the palm's contact point directly over the axis, so the solved wrist
+      // lands on the hand's own origin (identity frame, p = 0)
+      at: new THREE.Vector3(gc[0], gc[1], gc[2]),
+      palm: [gc[0], -PALM.th * 0.5, gc[2]],
+      cup: 0.006,
+    });
+    // THE THUMB ON THE SWITCH: pad centre one pad-radius off the tail face
+    const T = [TORCH.tailX - TORCH.padR, gc[1] + 0.002, gc[2]];
+    const d3 = [0.55, -0.10, -0.83], dl = Math.hypot(d3[0], d3[1], d3[2]);
+    const P2 = [T[0] - d3[0] / dl * THUMB.seg[2], T[1] - d3[1] / dl * THUMB.seg[2], T[2] - d3[2] / dl * THUMB.seg[2]];
+    const B = THUMB.base.slice();
+    const P1 = solveElbow(B, P2, [-1, 0.35, 0.1], THUMB.seg[0], THUMB.seg[1]);
+    const pose = { name: "torch", wrap: R, cup: 0.006, joints: { fingers: G.pose.joints.fingers, thumb: [B, P1, P2, T] } };
+    pose.contacts = { tips: G.contacts.tips.slice(), thumb: T };
+    POSES.torch = pose;
+  })();
+  /* torchMount(side, handle, outPos, outQ): the local transform (hand frame,
+     hand metres) that seats a torch model whose handle is `handle` =
+     { center: Vector3, axis: Vector3 (tail -> lens) } in the model's own
+     metres. Parent the model to the hand and apply these: the handle's centre
+     lands on the torch grip's centre, the lens out of the little-finger side. */
+  function torchMount(side, handle, outPos, outQ) {
+    _tmO.userData.side = side < 0 ? -1 : 1;
+    _tmA.copy(handle.axis).negate();                      // the thumb side points at the tail
+    placeGrip(_tmO, { pose: "torch", center: handle.center, axis: _tmA, dorsal: _tmUp, scale: 1 });
+    _tmO.updateMatrix();
+    _tmM.copy(_tmO.matrix).invert().decompose(outPos, outQ, _tmS);
+    return outPos;
+  }
+
   // ------------------------------------------------------------ dress
   function readHex(list) {
     if (!list) return null;
@@ -1104,7 +1168,7 @@
     POSES, PALM, FINGERS, THUMB,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    grasp, graspHand, prismSdf, holdPose, HOLD_RADII,
+    grasp, graspHand, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },
     WRIST, STUB_LATHE, FORE_NOM, FORE_DOME, CUFF_PROFILE,
   };

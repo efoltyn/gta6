@@ -1011,7 +1011,7 @@
     if (ch.t > 0) return;
     if (ch.mesh && ch.mesh.parent) ch.mesh.parent.remove(ch.mesh);
     R.charge = null; R.blasts++;
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ch.x, ch.z, { power: 1.5, radius: 6, byPlayer: false, y: 1.0 }); } catch (e) {} }
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ch.x, ch.z, { power: 1.5, radius: 6, byPlayer: false, y: 1.0, kind: "c4" }); } catch (e) {} }
     R.checkBreach = 0.4;
   }
 

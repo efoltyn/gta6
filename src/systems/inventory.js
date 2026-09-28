@@ -57,6 +57,8 @@
         return img(tryCall(CBZ.itemIcon, e.name || "Key", {}));
       case "throwable":
         return (CBZ.itemIconHtml && tryCall(CBZ.itemIconHtml, e.name)) || img(tryCall(CBZ.itemIcon, e.name));
+      case "detonator":
+        return tryCall(CBZ.detonatorFaceHtml);
       case "phone":
         return img(tryCall(CBZ.itemIcon, "Phone", {}));
       default:
@@ -103,6 +105,19 @@
     if (!F) return null;
     try { return { owned: !!F.owned(), on: !!F.on() }; } catch (e) { return null; }
   }
+  // the charge / detonator you carry (the pen's armory cage has them)
+  function heldCells() {
+    const HM = CBZ.heldItemModel, H = CBZ.heldItem;
+    if (!HM || !H) return [];
+    const live = CBZ.modeHas ? CBZ.modeHas("blast") : mode() === "city";
+    if (!live) return [];
+    return HM.cells({
+      c4: CBZ.cityC4Count ? CBZ.cityC4Count() : 0,
+      planted: CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0,
+      grenades: 0,
+      held: H.current(),
+    });
+  }
   function entries() {
     const g = CBZ.game || {};
     const inv = g.inventory || {};
@@ -117,6 +132,7 @@
       hasKeycard: !!(g.hasKey || inv["Keycard"] > 0 || (mode() === "escape" && g.role === "cop" && !g.copKeysPulled)),
       keys: keys,
       flashlight: flashlightState(),
+      items: heldCells(),
     });
     for (let i = 0; i < list.length; i++) if (list[i].kind === "gun" && !list[i].active) list[i].dry = isDry(list[i].id);
     return list;
@@ -168,6 +184,7 @@
       const F = CBZ.playerFlashlight;
       if (F && F.toggle) { F.toggle(); return true; }
     }
+    if ((e.kind === "throwable" || e.kind === "detonator") && e.held && CBZ.heldItem) return !!CBZ.heldItem.select(e.held);
     return false;
   }
   function stepGun(dir) {

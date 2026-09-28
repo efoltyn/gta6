@@ -489,7 +489,7 @@
       refreshSlotVisual(slot);
       CBZ.sfx("pickup");
       if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name + " ×" + (slot.grant || 1), { rare: true }); } catch (e) {} }
-      else tellHint("Took " + (slot.grant || 1) + " charges. [B] plants, hold [B] fires.", 2.2);
+      else tellHint("Took " + (slot.grant || 1) + " charges.", 2.2);
       return;
     }
     const owned = CBZ.hasWeapon && CBZ.hasWeapon(slot.id);

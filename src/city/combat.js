@@ -1343,7 +1343,7 @@
     // otherwise be a silent dud.
     if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
       CBZ.detonate(x, CBZ.blastSeatY ? CBZ.blastSeatY(x, z) : 1.0, z, "grenade", { byPlayer: true });
-    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
+    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true, kind: "grenade" });
     if (CBZ.cityShatter) CBZ.cityShatter(x, z, GREN.radius + 2);
     if (CBZ.shake) CBZ.shake(1.2);
     if (CBZ.doHitstop) CBZ.doHitstop(0.05);
@@ -1388,7 +1388,10 @@
   };
 
   // PLAYER throw: consume one carried grenade, lob it from the hand along the aim.
-  function throwGrenade() {
+  // opts.power (0.45..1, systems/helditems.js: how long the throw was wound
+  // up) scales the launch; no opts = the full-strength [G] quick throw.
+  function throwGrenade(opts) {
+    const pw = (opts && opts.power > 0) ? Math.min(1, opts.power) : 1;
     if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
     if ((P.stun || 0) > 0) return;
     if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades", 1.4); return; }
@@ -1399,7 +1402,7 @@
     const ox = P.pos.x + dir.x * 0.6;
     const oz = P.pos.z + dir.z * 0.6;
     const oy = P.pos.y + 1.55;
-    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, {});
+    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, { speed: GREN.speed * pw, up: GREN.up * (0.6 + 0.4 * pw) });
     syncGrenadeHud();
     if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // a quick throwing arm swing
     throwCD = GREN.throwCD;

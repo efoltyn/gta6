@@ -26,7 +26,7 @@
 <link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=flick1">
+<link rel="stylesheet" href="css/mobile.css?v=boom2">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
@@ -557,7 +557,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=wrist1"></script>
+  <script src="src/systems/fphands.js?v=boom2"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=hats2"></script>
@@ -612,6 +612,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
+<script src="src/weapons/appearances/c4.js?v=boom2"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -700,7 +701,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=torch1"></script>
+<script src="src/systems/playerflashlight.js?v=boom2"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -803,7 +804,8 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/systems/hotbar_model.js?v=hotbar1"></script>
+<script src="src/systems/hotbar_model.js?v=boom2"></script>
+<script src="src/systems/helditem_model.js?v=boom2"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -828,7 +830,7 @@ document.body.appendChild(b);}}catch(e){}})();
      core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
      puts survival back on the variable step, live. -->
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
-<script src="src/systems/touch.js?v=flick1"></script>
+<script src="src/systems/touch.js?v=boom2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
@@ -912,7 +914,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=tsureal1"></script>
+<script src="src/systems/disasters.js?v=boom2"></script>
 <script src="src/systems/survival_interact.js?v=name1"></script>
 <script src="src/systems/survivalhud.js?v=name1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -1225,7 +1227,7 @@ document.body.appendChild(b);}}catch(e){}})();
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=nukefield2"></script>
+<script src="src/systems/impactbus.js?v=boom2"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1326,6 +1328,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
+<script src="src/systems/helditems.js?v=boom2"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1449,7 +1452,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/hitman_room.js?v=inworld1"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=inworld1"></script>
-<script src="src/city/agency.js?v=detail1"></script>
+<script src="src/city/agency.js?v=boom2"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
@@ -1844,7 +1847,7 @@ document.body.appendChild(b);}}catch(e){}})();
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
 <script src="src/city/plots.js?v=plots1"></script>
-<script src="src/city/compoundcrew.js?v=cpd2"></script>
+<script src="src/city/compoundcrew.js?v=boom2"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
