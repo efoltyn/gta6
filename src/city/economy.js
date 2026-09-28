@@ -78,8 +78,10 @@
     //   tiers: cheap STREETWEAR (1-4), mid DESIGNER (5-10), LUXURY (12-30). Money
     //   → clothes → drip → past the rope. Existing pieces kept, now slotted. ----
     //   STREETWEAR — cheap, low drip (a broke fit stays well under CLUB_DRIP):
-    Snapback:        { value: 45,   tag: "wearable", slot: "hat",     drip: 1 },
-    "Beanie":        { value: 35,   tag: "wearable", slot: "hat",     drip: 1 },
+    // `hatLook` names the entities/headwear.js kind the worn hat puts on the
+    // player's head (city/bling.js syncPlayerHat), with its colour.
+    Snapback:        { value: 45,   tag: "wearable", slot: "hat",     drip: 1, hatLook: "snapback", hatColor: 0x1b1d22 },
+    "Beanie":        { value: 35,   tag: "wearable", slot: "hat",     drip: 1, hatLook: "beanie", hatColor: 0x2a2d33 },
     Hoodie:          { value: 90,   tag: "wearable", slot: "top",     drip: 2 },
     Tee:             { value: 40,   tag: "wearable", slot: "top",     drip: 1 },
     Tracksuit:       { value: 180,  tag: "wearable", slot: "outer",   drip: 3 },
@@ -108,7 +110,7 @@
     "Designer Jeans":{ value: 480,  tag: "wearable", slot: "bottom",  drip: 5 },
     Loafers:         { value: 560,  tag: "wearable", slot: "shoes",   drip: 6 },
     "Designer Shades":{ value: 420, tag: "wearable", slot: "glasses", drip: 5, blingLook: "shadesDesigner" },
-    "Fedora":        { value: 380,  tag: "wearable", slot: "hat",     drip: 5 },
+    "Fedora":        { value: 380,  tag: "wearable", slot: "hat",     drip: 5, hatLook: "fedora", hatColor: 0x3b3a38 },
     "Designer Jacket": { value: 450, tag: "wearable", slot: "outer", drip: 5 },
     "Gold Chain":  { value: 600,  tag: "wearable", slot: "chain",   drip: 7,  blingLook: "chainGold" },
     "Diamond Ring":{ value: 1500, tag: "wearable", slot: "ring",    drip: 10, blingLook: "ring" },
@@ -501,6 +503,7 @@
     if (count(name) <= 0) return false;                 // you have to OWN it to wear it
     outfit()[it.slot] = name;                            // worn, not consumed
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();   // on the body this frame (the hat)
     return true;
   }
   // Take off whatever is in a slot (or a named item's slot).
@@ -508,7 +511,12 @@
     const o = outfit();
     let slot = slotOrName;
     if (!SLOTS.includes(slotOrName)) { const s = slotOf(slotOrName); if (s) slot = s; }
-    if (slot && o[slot]) { delete o[slot]; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return true; }
+    if (slot && o[slot]) {
+      delete o[slot];
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();
+      return true;
+    }
     return false;
   }
   function isEquipped(name) { const o = g.cityOutfit; if (!o) return false; for (const s in o) if (o[s] === name) return true; return false; }

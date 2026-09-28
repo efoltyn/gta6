@@ -842,6 +842,33 @@
     }
   }
 
+  /* THE HAT YOU WEAR. economy.js sells hats (Snapback / Beanie / Fedora, slot
+     "hat") and equips them into g.cityOutfit.hat; nothing ever put one on the
+     player. The worn, still-owned hat goes on the real head through
+     headwear.js on the "shop" owner, which ranks under any uniform / role hat
+     (outfits.js "outfit", player.js "player", armor) and over the gang rag, so
+     in civvies your hat shows and in a uniform the uniform's does. Re-asserted
+     on the 1 Hz tick: a re-dress or a rebuilt rig gets it back, and unequip /
+     sell / swap takes it off or changes it. First person hides the whole body
+     (fpsmode) or the neck (vehicles), and the hat rides the neck. */
+  let _hatRig = null, _hatKey = "";
+  function syncPlayerHat(off) {
+    const ch = CBZ.playerChar, HW = CBZ.headwear;
+    if (!HW) return;
+    let kind = null, it = null;
+    if (!off && ch) {
+      const econ = CBZ.cityEcon, name = econ && econ.outfit ? econ.outfit().hat : null;
+      it = name && econ.ITEMS ? econ.ITEMS[name] : null;
+      if (it && it.hatLook && econ.count(name) > 0 && HW.canon(it.hatLook)) kind = it.hatLook;
+    }
+    const key = kind ? kind + "|" + (it.hatColor | 0) : "";
+    const onRig = !!(ch && ch._hw && ch._hw.layers && ch._hw.layers.shop);
+    if (ch === _hatRig && key === _hatKey && onRig === !!kind) return;     // unchanged
+    if (_hatRig && _hatRig !== ch) HW.wear(_hatRig, null, { owner: "shop" });
+    if (ch) HW.wear(ch, kind, { owner: "shop", color: kind ? it.hatColor : undefined });
+    _hatRig = ch; _hatKey = key;
+  }
+
   // The player's SHOULD-WEAR set + a cheap signature (best item names + gang +
   // VIP flag). Best per slot = highest catalog value among what you still OWN —
   // sell or lose the piece and the next tick strips it off your body.
@@ -912,6 +939,7 @@
   // so the chain appears the FRAME you buy it; the 1s timer catches everything
   // anyway (sell, drop, rob-loss, gang join/leave) without any caller changes.
   CBZ.cityBlingPlayerDirty = function () { _pDirty = true; };
+  CBZ.citySyncPlayerHat = syncPlayerHat;               // tools/headwear-check.mjs
   CBZ.cityPlayerBlingCount = function () { return _pMeshes ? _pMeshes.length : 0; };
 
   // ---- per-frame: maintain the dressed set (cheap, ≤60), time-slice the scan ----
@@ -921,12 +949,13 @@
       if (dressed.length) clearAll();
       if (_pMeshes) undressPlayer();           // jail jumpsuit wears no city ice
       if (_pRag != null) syncPlayerRag(true);  // ...and no city crew bandana
+      if (_hatKey) syncPlayerHat(true);         // ...and no shop hat over the jail role
       return;
     }
     // the player's drip: re-derive at 1Hz (or next frame when poked dirty) —
     // a signature compare, so an unchanged inventory costs ~nothing.
     _pT -= dt || 0.016;
-    if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); syncPlayerRag(false); }
+    if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); syncPlayerRag(false); syncPlayerHat(false); }
     // lazy idempotent wrapping — load order with peds.js/social.js doesn't matter,
     // wrappers chain through whatever is current.
     if (!_wRob) _wRob = wrapStrip("cityRobPed");

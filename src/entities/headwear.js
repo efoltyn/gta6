@@ -35,13 +35,15 @@
    COST: every geometry is shared and cached per (kind, form, variant, lod);
    materials are the shared cmat/pbrMat caches; a hat is 2-5 meshes, all
    poolable by entities/pedinstance.js (no vertex colours, no transparency —
-   except the riot shield's clear visor, which is a real mesh by design).
+   except the see-through glass: the riot shield's clear visor and the moto /
+   race tinted visors, which stay real meshes by design).
    A far LOD (fewer segments, no small furniture) swaps in with the body's.
 
    API (CBZ.headwear):
      wear(rig, kind|null, {owner, color, accent, variant, backward})
          put a hat on (or take the owner's off). Owners stack by priority —
-         armor > warlord > outfit > bandana — and only the top one shows, so
+         armor > warlord > outfit/player role > shop (a hat the player bought
+         and wears, city/bling.js) > bandana — and only the top one shows, so
          a SWAT helmet over a patrol cap never double-draws. Returns the group.
      setHidden(rig, why, on)  hide all headwear for a reason (swimming).
      setLod(rig, lod)         the body's LOD (1 near, 2 far) — swaps hat + hair.
@@ -108,11 +110,18 @@
     const b = 0.30 - F.round;
     return boxSdf(xx, u - 0.30, zz, b, b, b, F.round);
   }
-  // the ears: rbox(0.048, 0.150*ear, 0.100*ear) at x +-0.316, y 0.305, z -0.035,
-  // back rim flared 0.012 outward
+  // the ears: character.js earGeometry / EAR_SPEC — an ear plane (a up, b to
+  // the face, w out) at x0 0.290, centre y 0.305 z -0.035, tilted back 0.20
+  // rad and swung out 0.35 rad about its front edge (b = 0.040*ear). Undo
+  // both turns, then a rounded slab round the ear's relief (w 0..0.035*ear)
   function earSdf(F, x, y, z) {
-    const s = F.ear || 1;
-    return boxSdf(Math.abs(x) - 0.322, y - 0.305, z + 0.035, 0.024, 0.075 * s - 0.012, 0.05 * s - 0.012, 0.014);
+    const s = F.ear || 1, ca = 0.9394, sa = 0.3429, cb = 0.9801, sb = 0.1987;
+    const w2 = Math.abs(x) - 0.290, db2 = z + 0.035 - 0.040 * s;
+    const db = db2 * ca - w2 * sa, w = db2 * sa + w2 * ca;
+    const b1 = db + 0.040 * s, a1 = y - 0.305;
+    const b = b1 * cb + a1 * sb, a = a1 * cb - b1 * sb;
+    const r = 0.012;
+    return boxSdf(w - 0.0175 * s, a, b, 0.0192 * s - r, 0.076 * s - r, 0.0540 * s - r, r);
   }
   function neckSdf(F, x, y, z) {
     const r = lerp(F.neck[1], F.neck[0], cl01((y + 0.14) / 0.30));
@@ -628,8 +637,9 @@
     return M;
   }
   /* G[j][i] (rows j, cols i). closedU wraps i. hint(i, j, p) -> the way the
-     face should look; checked on a middle quad and the grid flipped to it. */
-  function addGrid(part, G, closedU, hint) {
+     face should look; checked on a middle quad and the grid flipped to it.
+     skip(i, j) -> true leaves quad (i, j) out. */
+  function addGrid(part, G, closedU, hint, skip) {
     const rows = G.length, cols = G[0].length;
     if (rows < 2 || cols < 2) return;
     const base = part.p.length / 3;
@@ -652,6 +662,7 @@
       flip = vote < 0;
     }
     for (let j = 0; j < rows - 1; j++) for (let i = 0; i < qi; i++) {
+      if (skip && skip(i, j)) continue;               // a hole (a helmet's eye port)
       const i2 = (i + 1) % cols;
       const a = base + j * cols + i, b = base + j * cols + i2, c = base + (j + 1) * cols + i2, d = base + (j + 1) * cols + i;
       if (flip) part.ix.push(a, c, b, a, d, c); else part.ix.push(a, b, c, a, c, d);
@@ -930,6 +941,7 @@
   function buildBallcap(lod, form, v) {
     const H = Head(form), P = parts();
     const rot = v === "back" ? PI : 0;              // worn backward: every feature turns, the band does not
+    const snap = v === "snap";                       // a snapback: high structured front, FLAT brim
     const seg = Q(lod, 48, 24);
     const openW = 0.40;                              // the snapback opening, half-width (rad)
     const arch = (ac) => sm01(1 - Math.abs(wrapA(ac - PI)) / openW);
@@ -939,7 +951,7 @@
       off(a, t) {
         const ac = a - rot;
         const fw = Math.pow(Math.max(0, Math.cos(ac)), 1.5);
-        let o = O_SOFT + 0.02 * sm01(t * 1.3) + 0.036 * fw * Math.sin(PI * Math.min(1, t * 1.15)) * (1 - 0.3 * t);
+        let o = O_SOFT + 0.02 * sm01(t * 1.3) + (snap ? 0.05 : 0.036) * fw * Math.sin(PI * Math.min(1, t * 1.15)) * (1 - 0.3 * t);
         if (!lod) for (let s = 0; s < 6; s++) {          // six panels: a groove on every seam
           const dd = wrapA(ac - s * PI / 3);
           o -= 0.0024 * Math.exp(-(dd / 0.05) * (dd / 0.05)) * sm01(t * 5) * (1 - sm01((t - 0.92) * 14));
@@ -965,6 +977,7 @@
     }, Q(lod, 5, 3), false, 0.011, { top: "main", bottom: "under", edge: "main" }, function (i, vv, pi) {
       const u = i / (cols - 1) * 2 - 1;
       // worn backward the bill rides up off the nape and the hair, its sides barely curled
+      if (snap) return lerp(pi[1], yC - 0.02 - 0.01 * u * u, vv);
       const yo = yC - (rot ? -0.02 : 0.042) - (rot ? 0.03 : 0.085) * u * u;
       return lerp(pi[1], yo, vv) - 0.006 * Math.sin(PI * vv) * (1 - u * u);
     });
@@ -1381,25 +1394,70 @@
     return { P, cover: { slice: [(a) => B(a) - 0.03, (a) => B(a) + 0.03], room: () => HA + 0.004 } };
   }
 
+  /* THE TURBAN: a length of cloth WOUND round the head, not a cap. Under it a
+     full body of cloth (the "under" shell, darker, which is all that shows in
+     the creases between passes) standing well above the skull and peaking at
+     the front; on it, the passes themselves: ribbons each laid a little
+     proud of the one below (upper passes overlap lower ones like shingles),
+     rising from the nape to the forehead, alternately crossing left and
+     right across the front so they meet in the front V, and the last end
+     run diagonally up the left side and tucked in. Each pass has a rounded,
+     heavier lower edge (the fold) and a thin upper edge that runs under the
+     next pass, so the shading reads as cloth. It sits low on the forehead
+     and over the tops of the ears. */
   function buildTurban(lod, form) {
     const H = Head(form, { ears: true }), P = parts(), seg = Q(lod, 56, 24);
-    const B = band([[0, 0.47], [1.0, 0.44], [1.6, 0.375], [2.3, 0.27], [PI, 0.22]]);
-    const G = crownGrid(H, {
-      seg, rowsT: Q(lod, linRows(16), linRows(6)), band: B,
-      radial(a, t, d, R) {
-        const aa = Math.abs(wrapA(a));
-        let r = R + 0.045 + 0.075 * sm01(t * 1.2) + 0.03 * Math.max(0, Math.cos(a)) * sm01((t - 0.2) * 2);
-        if (!lod) {
-          // wrapped layers rising from the nape to a V at the front
-          const q = t * 5.2 - 1.7 * (1 - aa / PI);
-          r += 0.0095 * Math.pow(0.5 - 0.5 * Math.cos(TAU * q), 0.6) * sm01(t * 6) * (1 - sm01((t - 0.9) * 10));
-          r -= 0.006 * Math.exp(-(aa / 0.07) * (aa / 0.07)) * sm01((t - 0.25) * 4);
+    const B = band([[0, 0.468], [1.0, 0.44], [1.6, 0.372], [2.3, 0.27], [PI, 0.22]]);
+    // the cloth body's outer surface, as a radius from HC along (a, t)
+    const bodyR = (a, t, R) => R + 0.02 + 0.046 * sm01(t * 1.3)
+      + 0.036 * Math.pow(Math.max(0, Math.cos(a)), 1.5) * sm01((t - 0.1) * 2.2) * (1 - sm01((t - 0.72) * 3.5));
+    const G = crownGrid(H, { seg, rowsT: Q(lod, linRows(14), linRows(6)), band: B, radial: (a, t, d, R) => bodyR(a, t, R) });
+    addGrid(P("under"), G, true, HINT_OUT);
+    lipUnder(P("under"), H, G, 0.0012);
+    // a point on (or `off` proud of) the cloth body at azimuth a, row t
+    const ebA = (a) => H.bandE(a, B(a));
+    const eb = []; for (let i = 0; i < seg; i++) eb.push(ebA(i / seg * TAU));
+    const at = (a, e0, t, off) => {
+      t = cl01(t);
+      const d = H.dirAE(a, e0 + (PI / 2 - 0.002 - e0) * t), r = bodyR(a, t, H.hitDir(d)) + off;
+      return [HC[0] + d[0] * r, HC[1] + d[1] * r, HC[2] + d[2] * r];
+    };
+    // a pass's cross-section: heavy rounded fold below (u = -1), thin above;
+    // both edges run just under the body so no raw edge ever shows
+    const prof = (u, lift) => -0.003 + (0.0105 + lift) * Math.pow(Math.max(0, 1 - u * u), 0.5) * (1 - 0.45 * u);
+    const NF = Q(lod, 7, 4), dc = Q(lod, 0.1, 0.17), wt = Q(lod, 0.075, 0.1);
+    const across = Q(lod, [-1, -0.8, -0.45, 0, 0.5, 1], [-1, -0.3, 1]);
+    for (let k = 0; k < NF; k++) {
+      const sg = k % 2 ? -1 : 1, c0 = 0.1 + k * dc;
+      // the centre line: level with the band, a touch higher over the brow,
+      // and across the front it climbs to one side (alternating), so
+      // neighbouring passes cross in an X and stack into the front V
+      const tc = (a) => c0 + 0.06 * Math.cos(a) + sg * 0.28 * Math.sin(a) * Math.exp(-(a / 0.9) * (a / 0.9));
+      const Gk = across.map((u) => {
+        const row = [];
+        for (let i = 0; i < seg; i++) {
+          const a = wrapA(i / seg * TAU);
+          row.push(at(a, eb[i], Math.min(0.93, Math.max(0.004, tc(a) + u * wt)), prof(u, k * 0.0022)));
         }
-        return r;
-      },
-    });
-    addGrid(P("main"), G, true, HINT_OUT);
-    lipUnder(P("main"), H, G, 0.0012);
+        return row;
+      });
+      addGrid(P("main"), Gk, true, HINT_OUT);
+    }
+    if (!lod) {
+      // the tucked end: the last pass leaves the wrap on the left, runs up
+      // across the others and is pushed in under them
+      const cols = 10, T = [];
+      for (const u of [-1, -0.4, 0.3, 1]) {
+        const row = [];
+        for (let s = 0; s < cols; s++) {
+          const v = s / (cols - 1), a = lerp(-0.55, -1.75, v), t0 = lerp(0.42, 0.8, v);
+          const w = 0.06 * lerp(1, 0.35, v), fade = Math.pow(Math.sin(PI * lerp(0.06, 1, v)), 0.6);
+          row.push(at(a, ebA(a), t0 + u * w, -0.003 + (prof(u, NF * 0.0022) + 0.006) * fade));
+        }
+        T.push(row);
+      }
+      addGrid(P("main"), T, false, HINT_OUT);
+    }
     return { P, cover: { band: B, room: () => HA + 0.01 } };
   }
 
@@ -1610,6 +1668,21 @@
     _clearMat._shared = true;
     return _clearMat;
   }
+  /* A full-face visor is tinted glass, not paint: dark smoke (moto) or a blue
+     iridium mirror (race), glossy, and see-through so the rider's face reads
+     behind it. Only its outward face draws (FrontSide), so this opacity is
+     the whole tint. Transparent, so the crowd instancer leaves it a real
+     mesh (pedinstance poolable() refuses transparent) like the riot shield. */
+  const _visor = {};
+  function visorMat(kind) {
+    if (_visor[kind]) return _visor[kind];
+    const m = kind === "iridium"
+      ? new THREE.MeshPhongMaterial({ color: 0x2a3f6e, specular: 0x9fc4ff, shininess: 120, transparent: true, opacity: 0.5, depthWrite: false })
+      : new THREE.MeshPhongMaterial({ color: 0x0c0e12, specular: 0xffffff, shininess: 110, transparent: true, opacity: 0.42, depthWrite: false });
+    m._shared = true;
+    return (_visor[kind] = m);
+  }
+  const SEE_THROUGH = { smoke: 1, accent2: 1, clear: 1 };
   function buildRiot(lod, form) {
     const H = Head(form, { ears: true }), P = parts(), seg = Q(lod, 48, 24);
     const RIM = band([[0, 0.478], [1.0, 0.44], [1.5, 0.3], [2.1, 0.215], [PI, 0.195]]);
@@ -1651,8 +1724,10 @@
     return { P, cover: { band: RIM, room: () => HA + 0.02 } };
   }
   function buildFullface(lod, form, kind) {
-    // moto / race: a closed shell round the whole head with a chin bar, the
-    // eye port under a visor, a padded neck roll
+    // moto / race: a closed shell round the whole head with a chin bar, an
+    // OPEN eye port (the shell is cut there and a rubber gasket lines the cut)
+    // under a tinted see-through visor, a padded neck roll. The port used to be
+    // solid shell under an opaque visor: a rider had no face.
     const P = parts(), seg = Q(lod, 48, 24), race = kind === "race";
     const Cm = [0, 0.29, 0.015], R3 = race ? [0.382, 0.402, 0.425] : [0.39, 0.41, 0.435], pw = 2.5;
     const rS = (d) => Math.pow(Math.pow(Math.abs(d[0] / R3[0]), pw) + Math.pow(Math.abs(d[1] / R3[1]), pw) + Math.pow(Math.abs(d[2] / R3[2]), pw), -1 / pw);
@@ -1660,28 +1735,47 @@
     const at = (a, e, extra) => { const d = dirAE(a, e), r = rS(d) + (extra || 0); return [Cm[0] + d[0] * r, Cm[1] + d[1] * r, Cm[2] + d[2] * r]; };
     const RIM = band([[0, -0.045], [1.2, -0.005], [1.8, 0.03], [PI, 0.075]]);
     const eAt = (a, y) => { let lo = -1.5, hi = 1.4; for (let k = 0; k < 26; k++) { const m = (lo + hi) / 2; if (at(a, m)[1] < y) lo = m; else hi = m; } return (lo + hi) / 2; };
-    const rowsT = Q(lod, [0, 0.03, 0.08, 0.16, 0.26, 0.37, 0.48, 0.6, 0.72, 0.84, 1], [0, 0.1, 0.35, 0.65, 1]);
-    const eb = [];
-    for (let i = 0; i < seg; i++) { const a = i / seg * TAU; eb.push(eAt(a, RIM(a))); }
-    const G = rowsT.map((t) => eb.map((e0, i) => at(i / seg * TAU, e0 + (PI / 2 - 0.002 - e0) * t)));
-    addGrid(P("main"), G, true, outFrom(Cm));
+    // the port: azimuth -aw..aw, height y0..y1. Columns land exactly on its
+    // sides and rows on its sill and brow, so the cut is clean and the visor
+    // is the same lattice lifted off the shell.
+    const aw = race ? 1.12 : 1.02, y0 = race ? 0.272 : 0.278, y1 = race ? 0.472 : 0.462;
+    const np = Q(lod, 16, 8), vr = Q(lod, 5, 3), nLo = Q(lod, 4, 2), nHi = Q(lod, 6, 3);
+    const A = [];
+    for (let i = 0; i < seg; i++) A.push(i <= np ? -aw + i * 2 * aw / np : aw + (i - np) * (TAU - 2 * aw) / (seg - np));
+    const eRim = A.map((a) => eAt(a, RIM(a))), eLo = A.map((a) => eAt(a, y0)), eHi = A.map((a) => eAt(a, y1));
+    const G = [];
+    for (let j = 0; j <= nLo; j++) G.push(A.map((a, i) => at(a, lerp(eRim[i], eLo[i], j / nLo))));
+    for (let j = 1; j < vr; j++) G.push(A.map((a) => at(a, eAt(a, lerp(y0, y1, j / (vr - 1))))));
+    for (let j = 1; j <= nHi; j++) G.push(A.map((a, i) => at(a, lerp(eHi[i], PI / 2 - 0.002, Math.pow(j / nHi, 0.85)))));
+    const jP0 = nLo, jP1 = nLo + vr - 1;
+    addGrid(P("main"), G, true, outFrom(Cm), (i, j) => i < np && j >= jP0 && j < jP1);
+    // the gasket: the cut edge turned in toward the face, so the shell reads
+    // as a shell (it has a thickness) and nothing is seen past its edge
+    const edge = [];
+    for (let i = 0; i <= np; i++) edge.push(G[jP0][i]);
+    for (let j = jP0 + 1; j <= jP1; j++) edge.push(G[j][np]);
+    for (let i = np - 1; i >= 0; i--) edge.push(G[jP1][i]);
+    for (let j = jP1 - 1; j > jP0; j--) edge.push(G[j][0]);
+    const pc = at(0, eAt(0, (y0 + y1) / 2), -0.08);
+    const gIn = edge.map((p) => V.add(p, V.mul(V.norm(V.sub(Cm, p)), 0.026)));
+    addGrid(P("trim"), [edge, gIn], true, (i, j, p) => V.sub(pc, p));
     // the neck roll: from the rim in to the padding round the neck
     const Hc = Head(form, { neck: true, ears: true });
     const inner = G[0].map((p, i) => {
-      const a = i / seg * TAU, y = p[1] + 0.012;
+      const a = A[i], y = p[1] + 0.012;
       const r = Math.max(Math.hypot(Math.sin(a) * 0.235, Math.cos(a) * 0.255 + 0.03), Hc.ring(a, y) + 0.012);
       return [Math.sin(a) * r, y, Math.cos(a) * r];
     });
     addGrid(P("trim"), [G[0], inner], true, () => [0, -1, 0]);
-    // the visor over the eye port
-    const cols = Q(lod, 17, 9), vr = Q(lod, 5, 3), M = [];
-    const aw = race ? 1.12 : 1.02, y0 = race ? 0.272 : 0.278, y1 = race ? 0.472 : 0.462;
+    // the visor over the port, a little bigger than the cut so its edge lies
+    // on the shell: tinted, glossy and see-through (roleMat), the face behind it
+    const cols = np + 1, M = [];
     for (let j = 0; j < vr; j++) {
-      const y = lerp(y0, y1, j / (vr - 1)), row = [];
-      for (let i = 0; i < cols; i++) { const a = (i / (cols - 1) * 2 - 1) * aw; row.push(at(a, eAt(a, y), 0.007)); }
+      const y = lerp(y0 - 0.012, y1 + 0.012, j / (vr - 1)), row = [];
+      for (let i = 0; i < cols; i++) { const a = (i / (cols - 1) * 2 - 1) * (aw + 0.05); row.push(at(a, eAt(a, y), 0.007)); }
       M.push(row);
     }
-    slab(P, M, false, 0.007, (i, j, p) => V.sub(p, Cm), { top: race ? "accent2" : "smoke", bottom: race ? "accent2" : "smoke", edge: "hard" });
+    slab(P, M, false, 0.006, (i, j, p) => V.sub(p, Cm), { top: race ? "accent2" : "smoke", bottom: race ? "accent2" : "smoke", edge: "hard" });
     if (!lod) {
       // visor pivots, a chin vent, a brow vent pair
       for (const s of [-1, 1]) {
@@ -1745,7 +1839,7 @@
   const ALIAS = { cap: "ballcap", snapback: "ballcap", patrol: "peaked", police: "peaked", visor: "peaked", captain: "peaked",
     helmet: "ballistic", mich: "ballistic", swat: "ballistic", kpot: "pasgt", rag: "headband", sunhat: "sun", smokey: "campaign",
     stetson: "cowboy", scarf: "hijab", headscarf: "hijab", keffiyeh: "shemagh", fullface: "moto", motorcycle: "moto" };
-  const VARIANT_OF = { captain: "captain" };
+  const VARIANT_OF = { captain: "captain", snapback: "snap" };
   function canon(kind) { return BUILDERS[kind] ? kind : (ALIAS[kind] || null); }
 
   // every geometry, cached: kind|form|variant|lod -> { geos: {role: geo}, cover }
@@ -1806,13 +1900,13 @@
       case "main": return GLOSSY[kind] ? pm(main, { roughness: 0.38, metalness: 0.05 }) : cm(main);
       case "under": return cm(shade(main, 0.72));
       case "accent": return GLOSSY[kind] ? pm(acc, { roughness: 0.38, metalness: 0.05 }) : cm(acc);
-      case "accent2": return pm(0x31466e, { roughness: 0.12, metalness: 0.75 });      // an iridium race visor
+      case "accent2": return visorMat("iridium");                                     // an iridium race visor
       case "trim": return cm(kind === "shemagh" ? acc : 0x121315);
       case "hard": return cm(0x1c1e21);
       case "strap": return cm(0x1a1b1d);
       case "metal": return cm(0xc9a44a, { emissive: 0x5a4210, ei: 0.35 });
       case "peak": return pm(0x0b0c0f, { roughness: 0.18, metalness: 0.1 });
-      case "smoke": return pm(0x14171b, { roughness: 0.08, metalness: 0.35 });
+      case "smoke": return visorMat("smoke");
       case "clear": return clearMat();
       case "tail": return cm(main);
     }
@@ -1958,7 +2052,10 @@
 
   /* ---- WEARING --------------------------------------------------------- */
   let SEQ = 0;
-  const PRIO = { armor: 4, warlord: 3, warlordKit: 3, outfit: 2, role: 2, beach: 2, player: 2, bandana: 1 };
+  // shop: the hat the player chose to wear. Under any uniform / role hat (a
+  // cop in his peaked cap stays a cop), over the gang rag (the chosen hat is
+  // the look; the rag is the default when there is none).
+  const PRIO = { armor: 4, warlord: 3, warlordKit: 3, outfit: 2, role: 2, beach: 2, player: 2, shop: 1.5, bandana: 1 };
   function detachLayer(L) { if (L && L.group && L.group.parent) L.group.parent.remove(L.group); }
   function syncCapSlot(rig) {
     // skinSlots.cap = the meshes of the ROLE headwear (outfit/player/beach
@@ -2004,6 +2101,7 @@
       m.receiveShadow = false;
       m.userData.hatRole = role;
       m.userData.clothingPart = "headwear";
+      if (SEE_THROUGH[role]) { m.renderOrder = 2; m.castShadow = false; }   // glass after the head it shows
       group.add(m);
       meshes.push(m);
     }
@@ -2082,6 +2180,8 @@
   }
   function worn(rig) { const st = rig && rig._hw; return st && st.active ? st.active.kind : null; }
 
+  let _liner = null;
+  const linerGeo = () => _liner || (_liner = Object.assign(new THREE.SphereGeometry(1, 16, 12), { _shared: true }));
   // a standalone hat for props, racks and vehicle dummies (adult 0.60 head frame)
   function build(kind, opts) {
     opts = opts || {};
@@ -2090,6 +2190,13 @@
     const g = new THREE.Group();
     g.name = "headwear-" + entry.kind;
     makeMeshes(g, entry, entry.kind, opts);
+    // a prop full-face lid (a dummy rider) has no head inside to see through
+    // the visor: fill it with the dark padded liner
+    if (entry.kind === "moto" || entry.kind === "race") {
+      const m = new THREE.Mesh(linerGeo(), cm(0x0b0c0e));
+      m.name = "hat-liner"; m.position.set(0, 0.29, 0.015); m.scale.set(0.36, 0.38, 0.40);
+      g.add(m);
+    }
     return g;
   }
 
