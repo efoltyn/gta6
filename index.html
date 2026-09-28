@@ -494,6 +494,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
+<!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
+<script src="src/systems/stairs.js?v=stairs1"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=crater1"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
