@@ -1775,145 +1775,645 @@
   }
   function browTone(hair) { return lumOf(hair) > 0.35 ? mixHex(hair, 0x2a1f16, 0.35) : mixHex(hair, 0x0a0806, 0.25); }
 
-  /* ---- HAIR SHELL -------------------------------------------------------
-     OWNER BUG: "the back-of-head hair reads as two separate blocks."
-     It did, and no amount of tucking two boxes together fixes it, because
-     the old rig showed hair-lid / BARE SKIN / hair-plank stacked down the
-     back of the skull from any 3/4-rear angle — the gap was the sides of
-     the head, not the seam. Low-poly practice (and every stylised asset
-     pack) models hair as ONE continuous shell spanning crown -> nape ->
-     tail, never a skull cap plus a floating tail.
+  /* ---- HAIR -------------------------------------------------------------
+     Owner 2026-09-28: "long hair looks terrible" — it was rounded boxes: a lid
+     on the crown, a plank down the back, two side slabs, a box fringe and a
+     box ponytail. Nothing grew from a scalp, there was no hairline, no
+     parting, and long hair was one solid slab that clipped the upper back.
 
-     So hair is literally one mesh: the pieces are merged into a single
-     cached BufferGeometry per (style, head size). The pieces are ROUNDED
-     boxes now (rbox) — a hard-edged crown on a rounded skull is a helmet —
-     and the crown shares the skull's corner radius with a clear margin on
-     every side, so it contains the head it sits on by construction.
+     WHAT HAIR IS NOW (every style is ONE merged, cached, indexed geometry per
+     (style, head size, tier) in the neck frame, one hair-colour material, no
+     vertex colours, no transparency — the pedinstance pooling contract):
 
-     The nape/lower-back-of-skull volume is the highest-leverage female cue
-     at gameplay distance: it reads from front, side AND behind, unlike a
-     fringe or hairline which only reads face-on. That is why every style
-     below is defined by how far its mass hangs BELOW the crown line.
-     fringe: 1 full bangs, 2 a side-swept fringe. afro/curls/locs: the
-     textured styles heritage.js rolls. */
+       · THE SCALP SHELL — a skull-hugging cap lofted in COLUMNS that start on
+         the parting (or a pole: the crown whorl, a ponytail tie, a bun) and
+         run to a real HAIRLINE: a curve on the skull that sits back off the
+         brow, recedes at the temples (men), drops to a sideburn in front of
+         the ear, arcs OVER the ear and falls to the nape behind it. The last
+         row dives just under the scalp, so the hairline is the clean line
+         where hair meets skin — no helmet rim, nothing coplanar with skin.
+         Across the columns the surface is ridged into LOCKS (rounded crowns,
+         narrow grooves) with a slight wave, so the geometry itself carries
+         the combing direction, and the parting is a groove where the two
+         halves meet. Thickness is per style (buzz 1 cm, afro 13 cm).
+       · LOCKS — tapered lofted tubes (a lens cross-section, 6 sides) laid over
+         the shell and then hanging under gravity from the widest point of the
+         head. A lock is SEATED on the skull (+ ears) so it can never go through
+         them, tucked behind the ear or over it, and pulled behind the yoke /
+         torso below the neck with enough slope to survive the head tilting
+         back 0.3 rad. Tips are staggered, taper to a point and flick.
+       · Ponytail / bun / pigtails gather INTO a tie or a coil: the shell's
+         pole sits on the tie, so every groove on the head runs to it.
+
+     Built at the adult unit head (face frame: skull centre (0, 0.30, 0), +z
+     the face) and scaled by S/0.60. `far` is a light tier (half the columns,
+     fewer and cruder locks) for rig.setHandLod(2) — see setHairLod.
+     HATS: the lead's headwear.js compresses a clone of this; everything that
+     hangs (pony tail, bun, pigtails, locs, long/bob curtains) is attached at
+     the back/sides BELOW the crown so it reads under a brim. */
   const HAIR_STYLES = {
-    buzz:  { crownH: 0.13, backH: 0.24, sideW: 0.05, sideH: 0.18 },
-    short: { crownH: 0.21, backH: 0.34, sideW: 0.09, sideH: 0.25 },
-    crop:  { crownH: 0.24, backH: 0.30, sideW: 0.08, sideH: 0.21 },
-    bob:   { crownH: 0.22, backH: 0.60, sideW: 0.11, sideH: 0.54, fringe: 1 },
-    long:  { crownH: 0.22, backH: 0.98, sideW: 0.115, sideH: 0.66, fringe: 2 },
-    pony:  { crownH: 0.21, backH: 0.34, sideW: 0.085, sideH: 0.26, tail: 0.62 },
-    bun:   { crownH: 0.21, backH: 0.30, sideW: 0.085, sideH: 0.24, bun: 1 },
-    pigtail: { crownH: 0.21, backH: 0.36, sideW: 0.13, sideH: 0.46, fringe: 1 },
-    afro:  { crownH: 0.22, backH: 0.30, sideW: 0.09, sideH: 0.24, afro: 1 },
-    curly: { crownH: 0.22, backH: 0.34, sideW: 0.09, sideH: 0.25, curls: 1 },
-    locs:  { crownH: 0.22, backH: 0.40, sideW: 0.09, sideH: 0.30, locs: 1 },
+    // fringe: 1 full bangs, 2 a side-swept fringe off the parting
+    buzz: {}, short: {}, crop: {},
+    bob: { fringe: 1 }, long: { fringe: 2 }, pony: {}, bun: {}, pigtail: { fringe: 1 },
+    afro: {}, curly: {}, locs: {},
   };
 
-  /* TEMPLE TAPER (owner: "everyone has too much hair on left and right side of
-     their head"). MEASURED CAUSE: the side pieces were authored as OUTBOARD
-     SLABS whose whole declared `sideW` hung outside the skull — 4.9 cm (short)
-     to 6.7 cm (long) of real hair standing off each ear while the crown was
-     1.4 cm proud. So the side is a skull-hugging layer: inner face BURIED at
-     S/2 - 0.062k, outer face only `sideT` proud (same family as the crown),
-     tapering to 0.58 toward the ear, pulled back behind the temple. */
-  function hairGeometry(styleId, S) {
-    const st = HAIR_STYLES[styleId] || HAIR_STYLES.short;
-    const key = "hair|" + (HAIR_STYLES[styleId] ? styleId : "short") + "|" + S.toFixed(3);
-    return shared(key, function () {
-      const k = S / 0.60;                       // every offset scales with the head
-      const hw = S + 0.04, hd = S + 0.04;
-      const crownH = st.crownH * k, backH = st.backH * k, sideH = st.sideH * k;
-      const crownTop = S + 0.06 * k;            // sits proud of the skull crown
-      const crownBot = crownTop - crownH;
-      const shellTop = crownBot + 0.07 * k;     // everything else tucks UP into the crown
-      const parts = [];
-      const put = (g, x, y, z, flat) => {
-        g.translate(x, y, z);
-        if (flat) g.computeVertexNormals(); else finishGeo(g);     // a slab keeps its hard faces
-        parts.push(flatUV(g, 0.5, 0.5));
-      };
-      /* One side panel, sculpted. `sign` is +1 starboard / -1 port. The box
-         spans from a face BURIED inside the skull out to `outer`, and every
-         vertex's OUTBOARD component is scaled by a factor that falls with
-         height — the taper toward the ear. Measured WITH the sign rather than
-         mirrored: a negative scale would flip the winding inside-out. */
-      const sidePanel = (sign, inner, outer, yTop, yBot, zc, dz, botMul) => {
-        const w = outer - inner, h = yTop - yBot;
-        const g = new THREE.BoxGeometry(w, h, dz, 1, 3, 1);
-        sculpt(g, function (v) {
-          const t = (v.y + h / 2) / h, f = botMul + (1 - botMul) * t;
-          const out = sign > 0 ? v.x + w / 2 : w / 2 - v.x;
-          v.x = sign > 0 ? out * f - w / 2 : w / 2 - out * f;
-        });
-        put(g, sign * (inner + w / 2), (yTop + yBot) / 2, zc, true);
-      };
-      const skullR = 0.15 * k;
-      if (st.afro) {
-        // one round mass over the crown, set back so the forehead and hairline read
-        put(rbox(0.82 * k, 0.54 * k, 0.76 * k, 0.25 * k, [4, 4, 4]), 0, 0.56 * k, -0.10 * k);
-      } else {
-        // crown: pulled back off the brow so a hairline reads, top edges rounded
-        put(rbox(hw, crownH, hd * 0.92, skullR, [4, 2, 4], true), 0, (crownTop + crownBot) / 2, -0.03 * k);
-        // OCCIPITAL WEDGE — extra mass over the occipital bone breaks the
-        // perfectly round rear silhouette that reads as a helmet
-        put(rbox(hw * 0.80, crownH * 0.85, 0.11 * k, 0.045 * k, [3, 2, 2]), 0, crownBot + 0.01 * k, -(S / 2 + 0.085 * k));
+  // ---- the head the hair is fitted to (face frame, unit head) --------------
+  // The OUTERMOST of the three head forms: the tightest corner radius (m), the
+  // widest jaw (c) and no forehead lean, so hair built on it contains every
+  // skull. The back-of-skull lift headGeometry applies is inverted exactly.
+  const HAIR_CY = 0.30, HAIR_RND = 0.15;
+  function hairSkullSdf(x, y, z) {
+    const b = cl01(-z / 0.30), b2 = b * b;
+    let u = y;
+    if (u < 0.24) {
+      if (u < 0.12 * b2) return 0.05;
+      u = (u - 0.12 * b2) / (1 - 0.5 * b2);
+    }
+    x /= jawMul(HEAD_FORMS.c, u, z);
+    const c = 0.30 - HAIR_RND;
+    const qx = Math.abs(x) - c, qy = Math.abs(u - 0.30) - c, qz = Math.abs(z) - c;
+    const ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0, oz = qz > 0 ? qz : 0;
+    return Math.sqrt(ox * ox + oy * oy + oz * oz) + Math.min(Math.max(qx, qy, qz), 0) - HAIR_RND;
+  }
+  // the ear (headGeometry's EARS, largest form, flared back rim included)
+  const HAIR_EAR = { x0: 0.290, x1: 0.354, y0: 0.228, y1: 0.382, z0: -0.087, z1: 0.017 };
+  const HAIR_EAR_M = 0.014;                       // clearance hair keeps off an ear
+  function hairIn(x, y, z, ears) {
+    if (hairSkullSdf(x, y, z) < 0) return true;
+    if (!ears) return false;
+    const E = HAIR_EAR, m = HAIR_EAR_M, ax = x < 0 ? -x : x;
+    return ax > E.x0 - m && ax < E.x1 + m && y > E.y0 - m && y < E.y1 + m && z > E.z0 - m && z < E.z1 + m;
+  }
+  // how far along a unit ray from o the head (+ ears) ends for good
+  function hairReach(ox, oy, oz, dx, dy, dz, ears) {
+    let last = 0;
+    for (let t = 0.01; t <= 0.76; t += 0.01) if (hairIn(ox + dx * t, oy + dy * t, oz + dz * t, ears)) last = t;
+    let lo = last, hi = last + 0.01;
+    for (let i = 0; i < 12; i++) {
+      const m = (lo + hi) / 2;
+      if (hairIn(ox + dx * m, oy + dy * m, oz + dz * m, ears)) lo = m; else hi = m;
+    }
+    return (lo + hi) / 2;
+  }
+  const hairR = (d, ears) => hairReach(0, HAIR_CY, 0, d[0], d[1], d[2], ears);
+  const hairRho = (a, y) => hairReach(0, y, 0, Math.sin(a), 0, Math.cos(a), true);
+  function hairUnit(x, y, z) { const l = Math.sqrt(x * x + y * y + z * z) || 1e-9; return [x / l, y / l, z / l]; }
+  function hairDir(a, e) { const c = Math.cos(e); return [Math.sin(a) * c, Math.sin(e), Math.cos(a) * c]; }
+  function hairSlerp(d0, d1, v) {
+    const dot = Math.max(-1, Math.min(1, d0[0] * d1[0] + d0[1] * d1[1] + d0[2] * d1[2]));
+    const om = Math.acos(dot);
+    if (om < 1e-4) return hairUnit(lerpN(d0[0], d1[0], v), lerpN(d0[1], d1[1], v), lerpN(d0[2], d1[2], v));
+    const s = Math.sin(om), a = Math.sin((1 - v) * om) / s, b = Math.sin(v * om) / s;
+    return hairUnit(d0[0] * a + d1[0] * b, d0[1] * a + d1[1] * b, d0[2] * a + d1[2] * b);
+  }
+  // deterministic jitter (appearance is seed-pure: no Math.random in hair)
+  function hairHash(i, j) { const s = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return s - Math.floor(s); }
+  // smooth piecewise curve through [x, y] keys (x ascending), clamped
+  function hairKeys(K, x) {
+    if (x <= K[0][0]) return K[0][1];
+    for (let i = 1; i < K.length; i++) if (x <= K[i][0]) {
+      const t = (x - K[i - 1][0]) / (K[i][0] - K[i - 1][0]);
+      return lerpN(K[i - 1][1], K[i][1], t * t * (3 - 2 * t));
+    }
+    return K[K.length - 1][1];
+  }
+  /* HAIRLINES: height of the hairline on the skull by |azimuth| (0 = the middle
+     of the forehead, PI = the nape). The ear sits at |a| 1.52..1.83 up to
+     y 0.38: every line goes to a sideburn in front of it, OVER it, and down
+     behind it. "m": temples recede (the M); "f": a rounded front. */
+  const HAIRLINES = {
+    m: [[0, 0.522], [0.30, 0.530], [0.58, 0.562], [0.80, 0.545], [0.98, 0.510], [1.10, 0.470], [1.20, 0.405], [1.28, 0.330], [1.38, 0.268],
+        [1.46, 0.320], [1.54, 0.418], [1.70, 0.428], [1.86, 0.405], [1.97, 0.250], [2.15, 0.150], [2.50, 0.100], [Math.PI, 0.085]],
+    f: [[0, 0.512], [0.35, 0.516], [0.70, 0.506], [0.95, 0.490], [1.10, 0.450], [1.20, 0.395], [1.29, 0.330], [1.38, 0.290],
+        [1.46, 0.330], [1.54, 0.420], [1.70, 0.430], [1.86, 0.407], [1.97, 0.250], [2.15, 0.145], [2.50, 0.092], [Math.PI, 0.078]],
+  };
+  // the skull direction where the hairline crosses azimuth a
+  function hairlineDir(a, yh) {
+    let lo = -1.35, hi = 1.45;
+    for (let i = 0; i < 20; i++) {
+      const e = (lo + hi) / 2, d = hairDir(a, e);
+      if (HAIR_CY + d[1] * hairR(d, false) < yh) lo = e; else hi = e;
+    }
+    return hairDir(a, (lo + hi) / 2);
+  }
+
+  // indexed part from flat arrays
+  function hairPart(P, I) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(P.length), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(P.length / 3 * 2), 2));
+    g.setIndex(new THREE.BufferAttribute(new Uint16Array(I), 1));
+    return flatUV(finishGeo(g), 0.5, 0.5);
+  }
+
+  /* THE SHELL. o:
+       cols          columns round the head (multiple of `ridges`*4 reads best)
+       rows          v stations from the root (0) to the hairline (1)
+       aPart         azimuth where the two combing halves meet (the parting)
+       root(t, side) the scalp point a column starts from (t: 0 at the
+                     parting's front .. 1 at the back seam)
+       line          HAIRLINES key, or a function (|a|, a) -> height
+       T(d, a, v)    thickness over the skull along direction d
+       band          the hairline taper (share of v), bury = how far the
+                     last row dives under the scalp
+       partT/partV   thickness AT the parting and how fast it grows out of it
+       ridges/rAmp/wave  lock grooves across the columns
+       lump(d)       extra radial noise (afro) */
+  function hairShell(o) {
+    const rows = o.rows, R = rows.length, aP = o.aPart || 0, TAU = 2 * Math.PI;
+    const line = typeof o.line === "function" ? o.line : ((aa) => hairKeys(HAIRLINES[o.line], aa));
+    // columns: uniform round the head, plus extra ones where the hairline
+    // turns sharply round the front and back of each ear
+    const A = [];
+    for (let j = 0; j <= o.cols; j++) A.push(aP - Math.PI + TAU * j / o.cols);
+    const extra = o.far ? [1.47, 1.95] : [1.33, 1.41, 1.47, 1.52, 1.60, 1.90, 1.96, 2.04];
+    for (const e of extra) for (const sg of [-1, 1]) {
+      let a = sg * e;
+      while (a < aP - Math.PI) a += TAU;
+      while (a > aP + Math.PI) a -= TAU;
+      if (A.every((b) => Math.abs(b - a) > 0.03)) A.push(a);
+    }
+    A.sort((x, y) => x - y);
+    const cols = A.length - 1;
+    // directions first (the sag pass needs every neighbour)
+    const D = [], AW = [];
+    for (let j = 0; j <= cols; j++) {
+      const a = A[j], aw = Math.atan2(Math.sin(a), Math.cos(a));
+      const q = o.root(Math.abs(a - aP) / Math.PI, a < aP ? -1 : 1);
+      const d0 = hairUnit(q[0], q[1] - HAIR_CY, q[2]);
+      const d1 = hairlineDir(aw, line(Math.abs(aw), aw));
+      AW.push(aw);
+      // a column whose great arc would run ACROSS the ear (a pole at the back
+      // combing to a sideburn) is routed over the top of it instead: hair
+      // pulled back goes above the ear, never through it
+      let dm = null;
+      for (let k = 1; k < 12 && !dm; k++) {
+        const t = hairSlerp(d0, d1, k / 12), ta = Math.abs(Math.atan2(t[0], t[2]));
+        // (a column ending in FRONT of the ear passes over its front-top corner)
+        if (ta > 1.42 && ta < 1.98 && HAIR_CY + t[1] * 0.31 < 0.455) dm = hairDir(Math.abs(aw) < 1.52 ? Math.sign(aw) * 1.40 : Math.atan2(t[0], t[2]), 0.56);
       }
-      // back of the skull down to the nape (and past it, for long styles),
-      // narrowing and thinning to the tips when it is long
-      const back = rbox(hw * 0.97, backH, 0.17 * k, 0.06 * k, [3, backH > 0.5 * k ? 4 : 2, 2]);
-      if (backH > 0.5 * k) sculpt(back, function (v) { const t = cl01((backH / 2 - v.y) / backH); v.x *= 1 - 0.20 * sm01(t); v.z *= 1 - 0.30 * sm01(t); });
-      put(back, 0, shellTop - backH / 2, -(S / 2 + 0.025 * k));
-      // sides: temple -> ear -> jaw, closed from INSIDE the skull
-      const sideT = Math.min(st.sideW * 0.34, 0.020 + st.sideW * 0.14) * k;
-      for (const sgn of [-1, 1]) sidePanel(sgn, S / 2 - 0.062 * k, S / 2 + sideT, shellTop, shellTop - sideH, -0.085 * k, hd * 0.64, 0.58);
-      if (st.fringe === 1) {
-        // bangs across the brow, a hair side-swept
-        const f = rbox(0.56 * k, 0.10 * k, 0.05 * k, 0.025 * k, [3, 2, 1]);
-        f.rotateZ(0.06);
-        put(f, -0.015 * k, 0.515 * k, 0.297 * k);
-      } else if (st.fringe === 2) {
-        // a long side-swept fringe falling off the parting
-        const f = rbox(0.34 * k, 0.10 * k, 0.05 * k, 0.025 * k, [3, 2, 1]);
-        f.rotateZ(-0.22);
-        put(f, 0.10 * k, 0.53 * k, 0.29 * k);
-      }
-      if (st.tail) {
-        const tH = st.tail * k;
-        const t = rbox(0.16 * k, tH, 0.15 * k, 0.07 * k, [2, 3, 2]);
-        sculpt(t, function (v) { const u = cl01((tH / 2 - v.y) / tH); v.x *= 1 - 0.45 * u; v.z *= 1 - 0.45 * u; });
-        t.rotateX(0.18);
-        put(t, 0, shellTop - 0.05 * k - tH / 2, -(S / 2 + 0.15 * k));
-      }
-      if (st.bun) put(rbox(0.26 * k, 0.22 * k, 0.26 * k, 0.12 * k, [2, 2, 2]), 0, crownTop - 0.02 * k, -(S / 2 + 0.02 * k));
-      if (st.curls) {
-        // a crown of tight curls: the silhouette goes lumpy, which is the read
-        const C = [[-0.20, 0.64, 0.10], [0, 0.67, 0.12], [0.20, 0.64, 0.10], [-0.24, 0.63, -0.12], [0.24, 0.63, -0.12],
-          [0, 0.68, -0.08], [-0.13, 0.60, -0.28], [0.13, 0.60, -0.28], [-0.12, 0.57, 0.22], [0.12, 0.57, 0.22]];
-        for (const c of C) put(rbox(0.15 * k, 0.13 * k, 0.15 * k, 0.07 * k, [2, 2, 2]), c[0] * k, c[1] * k, c[2] * k);
-      }
-      if (st.locs) {
-        // locs hang round the back and sides, never across the face
-        for (let i = 0; i < 10; i++) {
-          const a = -1.75 + i * (3.5 / 9);                       // radians round from the back
-          const L = (0.58 - 0.12 * Math.abs(a)) * k;
-          const g = rbox(0.06 * k, L, 0.06 * k, 0.03 * k, [1, 2, 1]);
-          g.rotateZ(-Math.sin(a) * 0.10); g.rotateX(Math.cos(a) * 0.10);
-          put(g, Math.sin(a) * 0.32 * k, shellTop - L / 2 + 0.02 * k, -Math.cos(a) * 0.32 * k - 0.03 * k);
+      if (dm) {
+        const l0 = Math.acos(Math.max(-1, Math.min(1, d0[0] * dm[0] + d0[1] * dm[1] + d0[2] * dm[2])));
+        const l1 = Math.acos(Math.max(-1, Math.min(1, dm[0] * d1[0] + dm[1] * d1[1] + dm[2] * d1[2])));
+        const vm = l0 / (l0 + l1 || 1);
+        for (let i = 0; i < R; i++) { const v = rows[i]; D.push(v < vm ? hairSlerp(d0, dm, v / vm) : hairSlerp(dm, d1, (v - vm) / (1 - vm))); }
+      } else for (let i = 0; i < R; i++) D.push(hairSlerp(d0, d1, rows[i]));
+    }
+    const ang = (p, q) => Math.acos(Math.max(-1, Math.min(1, p[0] * q[0] + p[1] * q[1] + p[2] * q[2])));
+    const P = [], I = [];
+    for (let j = 0; j <= cols; j++) {
+      const aw = AW[j], s = (o.ridges || 0) * (A[j] - aP + Math.PI) / TAU;
+      // the thinning band is a DISTANCE on the scalp, not a share of the
+      // column: a long column (crown -> sideburn) must not thin its whole
+      // sideburn away
+      let arc = 0;
+      for (let i = 1; i < R; i++) arc += ang(D[j * R + i - 1], D[j * R + i]);
+      const band = Math.min(0.6, o.band * 0.62 / Math.max(0.3, arc) * 0.5);
+      for (let i = 0; i < R; i++) {
+        const v = rows[i], d = D[j * R + i];
+        // `round` (afro): the mass rises off the hairline like a quarter circle
+        const eb = cl01((1 - v) / band), out = o.round ? Math.sqrt(1 - (1 - eb) * (1 - eb)) : sm01(eb);
+        const grow = o.partT != null ? lerpN(o.partT, 1, sm01(v / (o.partV || 0.1))) : 1;
+        // the hair thins over `band` toward the hairline and only the very last
+        // station dives under the scalp: the visible edge IS the hairline
+        let off = o.T(d, aw, v) * out * grow - (o.bury || 0.012) * sm01((v - 0.93) / 0.07);
+        if (o.ridges) {
+          const prof = Math.sqrt(Math.abs(Math.sin(Math.PI * (s + (o.wave || 0) * Math.sin(v * 7.0)))));
+          // grooves fade out WITH the thickness, so the hairline never breaks
+          // into bare notches (a groove can't dig below the scalp)
+          off += (o.rAmp || 0.006) * sm01(v / 0.22) * out * (prof - 0.62);
         }
+        if (o.lump) off += o.lump(d) * out;
+        // SAG: a flat triangle between two stations cuts inside the curve they
+        // sit on — lift each station by the chord sag to its widest neighbour
+        let h = 0;
+        if (j > 0) h = Math.max(h, ang(d, D[(j - 1) * R + i]));
+        if (j < cols) h = Math.max(h, ang(d, D[(j + 1) * R + i]));
+        if (i > 0) h = Math.max(h, ang(d, D[j * R + i - 1]));
+        if (i < R - 1) h = Math.max(h, ang(d, D[j * R + i + 1]));
+        // (the quad diagonals are chords too)
+        if (j < cols && i > 0) h = Math.max(h, 0.8 * ang(d, D[(j + 1) * R + i - 1]));
+        if (j > 0 && i < R - 1) h = Math.max(h, 0.8 * ang(d, D[(j - 1) * R + i + 1]));
+        off += (0.10 * h * h + (o.far ? 0.013 : 0.0025)) * (0.3 + 0.7 * out);
+        const r = hairR(d, false) + off;
+        P.push(d[0] * r, HAIR_CY + d[1] * r, d[2] * r);
       }
-      if (styleId === "pigtail") {
-        // pigtails stand off the head — that is what a pigtail IS — pulled in
-        // with the sides so the pair reads as bunched hair, not ear muffs
-        const tH = 0.34 * k, pw = 0.115, px = 0.052;
-        for (const s of [-1, 1]) {
-          const g = rbox(pw * k, tH, pw * k, 0.05 * k, [2, 3, 2]);
-          sculpt(g, function (v) { const u = cl01((tH / 2 - v.y) / tH); v.x *= 1 - 0.35 * u; v.z *= 1 - 0.35 * u; });
-          put(g, s * (S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
-        }
+    }
+    // winding: outward — every quad votes (columns can pinch to a pole or a
+    // parting, so no single quad is trusted)
+    let vote = 0;
+    for (let j = 0; j < cols; j++) for (let i = 0; i < R - 1; i++) {
+      const pa = (j * R + i) * 3, pb = ((j + 1) * R + i) * 3, pc = (j * R + i + 1) * 3;
+      const ux = P[pb] - P[pa], uy = P[pb + 1] - P[pa + 1], uz = P[pb + 2] - P[pa + 2];
+      const wx = P[pc] - P[pa], wy = P[pc + 1] - P[pa + 1], wz = P[pc + 2] - P[pa + 2];
+      vote += (uy * wz - uz * wy) * P[pa] + (uz * wx - ux * wz) * (P[pa + 1] - HAIR_CY) + (ux * wy - uy * wx) * P[pa + 2];
+    }
+    const flip = vote < 0;
+    for (let j = 0; j < cols; j++) for (let i = 0; i < R - 1; i++) {
+      const a = j * R + i, b = (j + 1) * R + i, c = a + 1, d = b + 1;
+      if (flip) I.push(a, c, b, b, c, d); else I.push(a, b, c, b, d, c);
+    }
+    return hairPart(P, I);
+  }
+
+  // where hanging hair must stay behind the yoke/torso: tuned so the head can
+  // tilt back 0.3 rad (animChar's "look up") without the hair entering the back
+  function hairBackZ(y) { return -0.296 + 0.25 * Math.min(0, y - 0.05); }
+
+  /* SEAT a point on the head: above the skull's middle it goes out RADIALLY
+     from the skull centre to `off` over the skull + ears; below, it HANGS —
+     horizontally out to the widest the head has been anywhere above it at
+     that azimuth, which is exactly how hair falls off a head. */
+  function hairSeat(a, y, off, halfW) {
+    // a wide lock must clear the head across its whole width, not just its middle
+    const da = halfW ? halfW / 0.31 : 0, as = da ? [a - da, a - da / 2, a, a + da / 2, a + da] : [a];
+    if (y >= HAIR_CY) {
+      const dy = Math.min(0.305, y - HAIR_CY), h = Math.sqrt(Math.max(1e-6, 0.31 * 0.31 - dy * dy));
+      const d = hairUnit(Math.sin(a) * h, dy, Math.cos(a) * h);
+      let r = 0;
+      for (const b of as) r = Math.max(r, hairR(hairUnit(Math.sin(b) * h, dy, Math.cos(b) * h), true));
+      r += off;
+      return [d[0] * r, HAIR_CY + d[1] * r, d[2] * r];
+    }
+    let rho = 0;
+    for (const b of as) for (let k = 0; k <= 5; k++) rho = Math.max(rho, hairRho(b, lerpN(y, HAIR_CY, k / 5)));
+    rho += off;
+    return [Math.sin(a) * rho, y, Math.cos(a) * rho];
+  }
+
+  /* A LOCK: control stations [a, y] (azimuth, height) -> a Catmull-Rom path,
+     seated on the head, pulled behind the back when `back`, then lofted as a
+     tapered lens-section tube with a pointed tip. o:
+       n, seg   stations along / sides around
+       w, t     full width / thickness; wRoot, wTip share of w at the ends
+       off      how far the lock's centre rides over the scalp (above the shell)
+       back     keep it behind the yoke/torso below the neck
+       flick    radial flick of the tip (+ out, - curls under)
+       wave     lateral wave amplitude; ph its phase */
+  function hairLock(ctrl, o) {
+    const n = o.n || 9, seg = o.seg || 6, S = [];
+    const cr = (p0, p1, p2, p3, t) => {
+      const t2 = t * t, t3 = t2 * t;
+      return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+    };
+    const m = ctrl.length - 1;
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1) * m, k = Math.min(m - 1, Math.floor(u)), t = u - k;
+      const c0 = ctrl[Math.max(0, k - 1)], c1 = ctrl[k], c2 = ctrl[k + 1], c3 = ctrl[Math.min(m, k + 2)];
+      S.push([cr(c0[0], c1[0], c2[0], c3[0], t), cr(c0[1], c1[1], c2[1], c3[1], t), i / (n - 1)]);
+    }
+    const tHalf = (o.t || 0.03) / 2;
+    const pts = S.map(function (st) {
+      const s = st[2];
+      const off = (typeof o.off === "function" ? o.off(s) : o.off) + (o.flick || 0) * sm01((s - 0.72) / 0.28);
+      const p = hairSeat(st[0], st[1], off, (o.w || 0.08) * 0.5);
+      if (o.back) {
+        const zl = hairBackZ(p[1]) - tHalf, w = sm01((HAIR_CY - p[1]) / 0.25);
+        if (p[2] > zl) p[2] = lerpN(p[2], zl, w);
       }
-      return mergeGeos(parts);
+      return p;
     });
+    return hairTube(pts, function (s) {
+      const wr = o.wRoot != null ? o.wRoot : 0.45, wt = o.wTip != null ? o.wTip : 0.12;
+      const f = s < 0.18 ? lerpN(wr, 1, sm01(s / 0.18)) : lerpN(1, wt, sm01((s - 0.45) / 0.55));
+      return [(o.w || 0.08) * f, (o.t || 0.03) * lerpN(f, 1, 0.35)];
+    }, seg, o.wave || 0, o.ph || 0);
+  }
+
+  /* TUBE: pts along a centreline, size(s) -> [width, thickness]; the section is
+     a lens whose width lies ACROSS the head (perpendicular to the path and to
+     the outward direction), so neighbouring locks overlap at their thin edges
+     and read apart. Closed with a point at each end. */
+  function hairTube(pts, size, seg, wave, ph, upHint) {
+    const n = pts.length, P = [], I = [], C = [];
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], pa = pts[Math.max(0, i - 1)], pb = pts[Math.min(n - 1, i + 1)];
+      const tg = hairUnit(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+      const out = upHint ? upHint(p, i / (n - 1)) : hairUnit(p[0], p[1] - Math.min(p[1], HAIR_CY), p[2]);
+      let sd = hairUnit(tg[1] * out[2] - tg[2] * out[1], tg[2] * out[0] - tg[0] * out[2], tg[0] * out[1] - tg[1] * out[0]);
+      const nr = [sd[1] * tg[2] - sd[2] * tg[1], sd[2] * tg[0] - sd[0] * tg[2], sd[0] * tg[1] - sd[1] * tg[0]];
+      const s = i / (n - 1), wz = size(s), wv = (wave || 0) * Math.sin(s * 9.0 + (ph || 0)) * sm01(s / 0.3);
+      const cx = p[0] + sd[0] * wv, cy = p[1] + sd[1] * wv, cz = p[2] + sd[2] * wv;
+      C.push([cx, cy, cz, tg]);
+      for (let k = 0; k < seg; k++) {
+        const f = 2 * Math.PI * k / seg, cw = Math.cos(f), sw = Math.sin(f);
+        const lens = sw * (0.55 + 0.45 * Math.abs(sw));   // a lens: thin edges, full middle
+        P.push(cx + sd[0] * wz[0] / 2 * cw + nr[0] * wz[1] / 2 * lens,
+               cy + sd[1] * wz[0] / 2 * cw + nr[1] * wz[1] / 2 * lens,
+               cz + sd[2] * wz[0] / 2 * cw + nr[2] * wz[1] / 2 * lens);
+      }
+    }
+    // end points
+    const e0 = C[0], e1 = C[n - 1], l0 = 0.012, l1 = 0.02;
+    const r0 = P.length / 3; P.push(e0[0] - e0[3][0] * l0, e0[1] - e0[3][1] * l0, e0[2] - e0[3][2] * l0);
+    const r1 = P.length / 3; P.push(e1[0] + e1[3][0] * l1, e1[1] + e1[3][1] * l1, e1[2] + e1[3][2] * l1);
+    // quads, each oriented away from its own ring centre (sections are convex)
+    const tri = (a, b, c, cc) => {
+      const ax = P[a * 3], ay = P[a * 3 + 1], az = P[a * 3 + 2];
+      const ux = P[b * 3] - ax, uy = P[b * 3 + 1] - ay, uz = P[b * 3 + 2] - az;
+      const vx = P[c * 3] - ax, vy = P[c * 3 + 1] - ay, vz = P[c * 3 + 2] - az;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const gx = (ax + P[b * 3] + P[c * 3]) / 3 - cc[0], gy = (ay + P[b * 3 + 1] + P[c * 3 + 1]) / 3 - cc[1], gz = (az + P[b * 3 + 2] + P[c * 3 + 2]) / 3 - cc[2];
+      if (nx * gx + ny * gy + nz * gz < 0) I.push(a, c, b); else I.push(a, b, c);
+    };
+    for (let i = 0; i < n - 1; i++) {
+      const cc = [(C[i][0] + C[i + 1][0]) / 2, (C[i][1] + C[i + 1][1]) / 2, (C[i][2] + C[i + 1][2]) / 2];
+      for (let k = 0; k < seg; k++) {
+        const a = i * seg + k, b = i * seg + (k + 1) % seg, c = a + seg, d = b + seg;
+        tri(a, c, d, cc); tri(a, d, b, cc);
+      }
+    }
+    for (let k = 0; k < seg; k++) {
+      const a = k, b = (k + 1) % seg;
+      tri(r0, b, a, [e0[0] + e0[3][0] * 0.05, e0[1] + e0[3][1] * 0.05, e0[2] + e0[3][2] * 0.05]);
+      const a2 = (n - 1) * seg + k, b2 = (n - 1) * seg + (k + 1) % seg;
+      tri(r1, a2, b2, [e1[0] - e1[3][0] * 0.05, e1[1] - e1[3][1] * 0.05, e1[2] - e1[3][2] * 0.05]);
+    }
+    return hairPart(P, I);
+  }
+
+  // ---- shell presets ------------------------------------------------------
+  const HAIR_CROWN = [0.0, 0.60, -0.10];                    // the whorl, back of the crown
+  const poleAt = (p) => () => p;
+  // a parting from the front hairline (at x) back to the crown
+  function partRoot(x, line, reach) {
+    const aF = Math.atan2(x, 0.29), dF = hairlineDir(aF, hairKeys(HAIRLINES[line], Math.abs(aF)) + 0.004);
+    const rF = hairR(dF, false), F = [dF[0] * rF, HAIR_CY + dF[1] * rF, dF[2] * rF];
+    const B = [x * 0.35, 0.60, -0.08];
+    return { aPart: aF, root: (t) => { const u = Math.min(1, t / (reach || 0.6)); return [lerpN(F[0], B[0], u), lerpN(F[1], B[1], u), lerpN(F[2], B[2], u)]; } };
+  }
+  // thickness helpers: top/side/back mix by direction
+  function hairT(top, side, back, front, d) {
+    const up = cl01(d[1] * 1.6 + 0.2), bk = cl01(-d[2] * 1.3), fr = cl01(d[2] * 1.4);
+    const around = lerpN(lerpN(side, back, bk), front != null ? front : side, fr);
+    return lerpN(around, top, up);
+  }
+
+  function hairBuild(styleId, far) {
+    const st = HAIR_STYLES[styleId] ? styleId : "short";
+    const F = far ? 0.5 : 1;                      // column density
+    const parts = [];
+    const rowsShort = far ? [0, 0.3, 0.55, 0.78, 0.92, 1] : [0, 0.18, 0.42, 0.66, 0.84, 0.94, 1];
+    const rowsFull = far ? [0, 0.3, 0.6, 0.85, 1] : [0, 0.08, 0.2, 0.36, 0.54, 0.7, 0.84, 0.93, 1];
+    const cols = (n) => Math.max(20, Math.round(n * F / 4) * 4);
+    const lk = (ctrl, o) => parts.push(hairLock(ctrl, far ? Object.assign({}, o, { n: Math.max(4, Math.round((o.n || 9) * 0.55)), seg: 4, wave: 0 }) : o));
+    // a lock rises out of the shell at its root, then rides `top` over the scalp
+    const rise = (top) => (s) => lerpN(0.016, top, sm01(s / 0.22));
+
+    if (st === "buzz") {
+      parts.push(hairShell({ far, cols: cols(24), rows: far ? [0, 0.3, 0.55, 0.78, 0.92, 1] : [0, 0.16, 0.32, 0.47, 0.61, 0.74, 0.86, 0.95, 1], root: poleAt(HAIR_CROWN), line: "m",
+        T: (d) => hairT(0.013, 0.010, 0.010, 0.012, d) + (far ? 0.006 : 0), band: 0.14, bury: 0.012, ridges: far ? 0 : 10, rAmp: 0.003 }));
+    } else if (st === "short") {
+      // a side part, volume on top and a lift at the front, tapered sides and nape
+      const pr = partRoot(0.095, "m", 0.55);
+      parts.push(hairShell({ far, cols: cols(44), rows: rowsShort, aPart: pr.aPart, root: pr.root, line: "m",
+        T: (d, a, v) => hairT(0.040, 0.016, 0.020, 0.048, d) * lerpN(1, 0.55, sm01((v - 0.55) / 0.45) * cl01(-d[1] * 2 + 0.6)),
+        band: 0.20, partT: 0.12, partV: 0.12, ridges: far ? 0 : 13, rAmp: 0.009, wave: 0.12 }));
+    } else if (st === "crop") {
+      // textured crop: combed FORWARD from the whorl to a short blunt fringe
+      parts.push(hairShell({ far, cols: cols(44), rows: rowsShort, root: poleAt(HAIR_CROWN),
+        line: (aa) => hairKeys(HAIRLINES.m, aa) - 0.012 * cl01(1 - aa / 0.7),
+        T: (d, a, v) => hairT(0.034, 0.013, 0.012, 0.036, d) * lerpN(1, 0.6, sm01((v - 0.5) / 0.5) * cl01(-d[1] * 2 + 0.6)),
+        band: 0.12, bury: 0.014, ridges: far ? 0 : 13, rAmp: 0.012, wave: 0.18 }));
+    } else if (st === "afro") {
+      // a rounded, slightly lumpy halo; the hairline stays where a hairline is
+      const lump = (d) => 0.014 * Math.sin(d[0] * 9.1 + 1.3) * Math.sin(d[1] * 8.3 + 0.4) + 0.011 * Math.sin(d[2] * 10.7 + d[0] * 4.0) + 0.009 * Math.sin((d[0] + d[1] - d[2]) * 17.0) + 0.006 * Math.sin((d[0] - d[2]) * 23.0 + d[1] * 11.0);
+      parts.push(hairShell({ far, cols: cols(52), rows: far ? [0, 0.3, 0.6, 0.8, 0.9, 0.96, 1] : [0, 0.12, 0.26, 0.40, 0.54, 0.66, 0.76, 0.84, 0.90, 0.945, 0.975, 1],
+        root: poleAt([0, 0.60, -0.04]), line: "f",
+        // a round halo: rounder than the skull box (the corners fill less than the faces)
+        // the halo is an ELLIPSOID round the head (set up and back), so the
+        // silhouette is round whatever the box skull under it does
+        T: (d) => {
+          const ox = 0, oy = HAIR_CY - 0.40, oz = 0.05, rx = 0.44, ry = 0.40, rz = 0.45;
+          const a = (d[0] / rx) ** 2 + (d[1] / ry) ** 2 + (d[2] / rz) ** 2;
+          const b = 2 * (ox * d[0] / (rx * rx) + oy * d[1] / (ry * ry) + oz * d[2] / (rz * rz));
+          const c = (ox / rx) ** 2 + (oy / ry) ** 2 + (oz / rz) ** 2 - 1;
+          const t = (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a);
+          return Math.max(0.03, t - hairR(d, false));
+        }, band: 0.30, round: true, bury: 0.016, lump: far ? null : lump }));
+    } else if (st === "curly") {
+      parts.push(hairShell({ far, root: poleAt(HAIR_CROWN), line: "f",
+        cols: far ? 20 : 60, rows: far ? rowsShort : [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.79, 0.87, 0.94, 1],
+        T: (d) => hairT(0.050, 0.034, 0.042, 0.044, d), band: 0.16, round: true,
+        lump: (d) => { const b = Math.sin(d[0] * 17.0 + 0.7) * Math.sin(d[1] * 15.0 + 1.9) * Math.sin(d[2] * 16.0 + 0.3); return 0.024 * Math.pow(Math.max(0, b), 0.6) - 0.004; } }));
+      // clustered curls: squashed balls sat in the shell, a golden-spiral scatter
+      // over the hair-covered part of the head, a few tumbling over the hairline
+      const N = far ? 12 : 30;
+      for (let i = 0; i < N; i++) {
+        const y = 1 - (i + 0.5) / N * 1.15, rr = Math.sqrt(Math.max(0, 1 - y * y)), ph = i * 2.39996;
+        const d = [Math.sin(ph) * rr, y, Math.cos(ph) * rr];
+        const a = Math.atan2(d[0], d[2]), el = Math.asin(d[1]);
+        const lineE = Math.asin(hairlineDir(a, hairKeys(HAIRLINES.f, Math.abs(a)))[1]);
+        if (el < lineE + 0.12) continue;
+        const r0 = 0.046 + 0.018 * hairHash(i, 3);
+        const g = new THREE.SphereGeometry(r0, far ? 5 : 6, far ? 3 : 4);
+        g.scale(1, 0.72, 1);
+        g.rotateX(hairHash(i, 5) * 3.0); g.rotateY(hairHash(i, 7) * 6.3);
+        const R = hairR(d, false) + 0.018 + 0.012 * hairHash(i, 9);
+        g.translate(d[0] * R, HAIR_CY + d[1] * R, d[2] * R);
+        parts.push(flatUV(finishGeo(g), 0.5, 0.5));
+      }
+    } else if (st === "locs") {
+      parts.push(hairShell({ far, cols: cols(40), rows: rowsShort, root: poleAt([0, 0.60, -0.04]), line: "m",
+        T: (d) => hairT(0.030, 0.020, 0.024, 0.024, d), band: 0.16, ridges: far ? 0 : 10, rAmp: 0.012 }));
+      // rope locs: two tiers of roots round the head, never across the face
+      const N = far ? 10 : 22;
+      for (let i = 0; i < N; i++) {
+        const half = N / 2, sgn = i < half ? -1 : 1, tier = i % 2;
+        const aa = sgn * lerpN(0.80, Math.PI - 0.08, ((i % half) + 0.5) / half);
+        const front = Math.abs(aa) < 1.55;
+        const back = Math.abs(aa) > 1.95;
+        const yTip = front ? 0.135 + 0.03 * hairHash(i, 2) : back ? -0.10 - 0.12 * hairHash(i, 4) * (1 - (Math.PI - Math.abs(aa)) / 1.2) : 0.08;
+        const drift = back ? (Math.PI - Math.abs(aa)) * 0.10 : 0;
+        const a2 = Math.sign(aa) * (Math.abs(aa) + (front ? 0 : 0.05) + drift);
+        const yRoot = tier ? 0.56 : 0.47;
+        lk([[aa * (tier ? 0.9 : 1), yRoot], [aa, lerpN(yRoot, 0.30, 0.5)], [a2, 0.30], [a2, lerpN(0.30, yTip, 0.5)], [a2, yTip]],
+           { n: 8, seg: 5, w: 0.046, t: 0.044, wRoot: 0.8, wTip: 0.55, off: 0.040 + tier * 0.018, back: !front, flick: 0.004, wave: 0.006, ph: i * 1.7 });
+      }
+    } else {
+      // ---- the long and tied styles: a parting or a tie drives the shell ----
+      if (st === "pony" || st === "bun") {
+        const tie = st === "pony" ? [0, 0.40, -0.32] : [0, 0.56, -0.24];
+        parts.push(hairShell({ far, cols: cols(48), rows: rowsFull, root: poleAt(tie), line: "f",
+          // pulled back: sleek over the skull, gathered thick into the tie
+          T: (d, a, v) => hairT(0.021, 0.015, 0.019, 0.014, d) + 0.016 * (1 - sm01(v / 0.25)),
+          band: 0.12, bury: 0.014, ridges: far ? 0 : 16, rAmp: 0.009, wave: 0.04 }));
+        if (st === "pony") {
+          // the tie: a short gathered collar, then the tail — a bundle of five
+          // locks round one swinging axis, staggered tips
+          const axis = [[0, 0.425, -0.33], [0, 0.415, -0.40], [0.012, 0.33, -0.465], [0.022, 0.19, -0.485], [0.018, 0.05, -0.48], [0.0, -0.08, -0.48]];
+          parts.push(hairTube(sampleAxis(axis, far ? 3 : 4, 0, 0.16), () => [0.066, 0.066], far ? 5 : 8, 0, 0, tubeUp));
+          const NL = far ? 3 : 7;
+          for (let i = 0; i < NL; i++) {
+            const f = 2 * Math.PI * i / NL + 0.4, rad = 0.028;
+            const len = 1 - 0.14 * hairHash(i, 11);
+            const pts = sampleAxis(axis, far ? 5 : 10, 0.12, len).map(function (p, k, arr) {
+              const s = k / (arr.length - 1), sp = rad * (0.6 + 1.2 * Math.sin(Math.PI * Math.min(1, s * 1.4))) ;
+              const tw = f + s * 1.1;
+              return [p[0] + Math.cos(tw) * sp, p[1], p[2] + Math.sin(tw) * sp * 0.8];
+            });
+            parts.push(hairTube(pts, (s) => { const k = s < 0.1 ? lerpN(0.55, 1, s / 0.1) : lerpN(1, 0.1, sm01((s - 0.3) / 0.7)); return [0.084 * k, 0.062 * k]; }, far ? 4 : 6, 0, 0, tubeUp));
+          }
+        } else {
+          // the bun: a coiled rope, wound flat against the head and domed out
+          const c0 = hairUnit(0, 0.56 - HAIR_CY, -0.24);
+          const base = hairR(c0, false) + 0.012;
+          const O = [c0[0] * base, HAIR_CY + c0[1] * base, c0[2] * base];
+          const nrm = c0, ax1 = hairUnit(1, 0, 0), ax2 = hairUnit(nrm[1] * ax1[2] - nrm[2] * ax1[1], nrm[2] * ax1[0] - nrm[0] * ax1[2], nrm[0] * ax1[1] - nrm[1] * ax1[0]);
+          const NS = far ? 16 : 40, turns = 2.2, pts = [];
+          for (let i = 0; i < NS; i++) {
+            const s = i / (NS - 1), ang = s * turns * 2 * Math.PI;
+            const rad = lerpN(0.112, 0.022, s), h = 0.034 + 0.088 * Math.sin(s * Math.PI * 0.5);
+            pts.push([O[0] + ax1[0] * Math.cos(ang) * rad + ax2[0] * Math.sin(ang) * rad + nrm[0] * h,
+                      O[1] + ax1[1] * Math.cos(ang) * rad + ax2[1] * Math.sin(ang) * rad + nrm[1] * h,
+                      O[2] + ax1[2] * Math.cos(ang) * rad + ax2[2] * Math.sin(ang) * rad + nrm[2] * h]);
+          }
+          parts.push(hairTube(pts, (s) => { const k = s < 0.06 ? lerpN(0.5, 1, s / 0.06) : lerpN(1, 0.55, s); return [0.080 * k, 0.066 * k]; }, far ? 5 : 7, 0, 0,
+            (p) => hairUnit(p[0] - O[0], p[1] - O[1], p[2] - O[2])));
+        }
+      } else {
+        // bob / long / pigtail: a parting, and locks that fall from it
+        const px = st === "bob" ? -0.085 : (st === "long" ? 0.075 : 0.0);
+        const pr = partRoot(px, "f", 0.6);
+        parts.push(hairShell({ far, cols: cols(40), rows: rowsFull, aPart: pr.aPart, root: pr.root, line: "f",
+          T: (d) => hairT(0.030, 0.020, 0.026, 0.024, d), band: 0.14, partT: 0.15, partV: 0.12,
+          ridges: far ? 0 : 12, rAmp: 0.008, wave: 0.08 }));
+        const aP = pr.aPart;
+        if (st === "bob") {
+          // a curtain to the jaw, over the ears, the ends turned under
+          const N = far ? 8 : 14;
+          for (let i = 0; i < N; i++) {
+            const u = (i + 0.5) / N, a = (u * 2 - 1) * Math.PI;
+            const aa = Math.sign(a) * lerpN(0.98, Math.PI, Math.abs(a) / Math.PI);
+            const front = cl01((1.8 - Math.abs(aa)) / 0.8);
+            const yTip = (Math.abs(aa) > 2.3 ? 0.085 : lerpN(0.125, 0.145, front)) + 0.012 * hairHash(i, 1);
+            lk([[aa, 0.545], [aa, 0.46], [aa, 0.36], [aa, 0.22], [aa - front * Math.sign(aa) * 0.06, yTip]],
+               { n: 7, w: 0.135, t: 0.030, off: rise(0.036 + 0.008 * (i % 2)), flick: -0.016, wave: 0.004, ph: i, back: Math.abs(aa) > 2.3, wRoot: 0.6, wTip: 0.6 });
+          }
+        } else if (st === "long") {
+          // face-framing locks in front of the ears, then the rest tucked behind
+          // the ears and falling down the back in a soft V
+          for (const sg of [-1, 1]) {
+            lk([[aP + sg * 0.22, 0.575], [sg * 0.85, 0.53], [sg * 1.18, 0.42], [sg * 1.29, 0.30], [sg * 1.31, 0.19], [sg * 1.27, 0.115]],
+               { n: 9, w: 0.095, t: 0.030, off: rise(0.036), flick: 0.008, wave: 0.006, ph: sg });
+            lk([[sg * 0.95, 0.56], [sg * 1.40, 0.51], [sg * 1.86, 0.43], [sg * 2.06, 0.30], [sg * 2.12, 0.14], [sg * 2.22, -0.04], [sg * 2.30, -0.15]],
+               { n: 10, w: 0.125, t: 0.032, off: rise(0.038), back: true, flick: 0.010, wave: 0.008, ph: sg * 2 });
+            lk([[sg * 1.5, 0.56], [sg * 1.8, 0.51], [sg * 2.02, 0.42], [sg * 2.2, 0.30], [sg * 2.28, 0.12], [sg * 2.36, -0.06], [sg * 2.42, -0.19]],
+               { n: 10, w: 0.125, t: 0.032, off: rise(0.046), back: true, flick: 0.010, wave: 0.008, ph: sg * 3 });
+          }
+          const NB = far ? 5 : 8;
+          for (let i = 0; i < NB; i++) {
+            const u = NB === 1 ? 0.5 : i / (NB - 1), aa = Math.PI + (u * 2 - 1) * 0.80;
+            const mid = 1 - Math.abs(u * 2 - 1);
+            const yTip = -0.20 - 0.10 * mid - 0.03 * hairHash(i, 5);
+            const aT = Math.PI + (aa - Math.PI) * 1.04;
+            lk([[aa, 0.555], [aa, 0.46], [aa, 0.33], [aT, 0.16], [aT, 0.0], [aT, yTip]],
+               { n: 9, w: 0.150, t: 0.034, off: rise(0.036 + 0.010 * (i % 2)), back: true, flick: 0.012, wave: 0.008, ph: i * 1.3 });
+          }
+          // the side-swept fringe falling off the parting across to the far temple
+          if (HAIR_STYLES[st].fringe === 2) {
+            lk([[aP + 0.12, 0.605], [0.02, 0.555], [-0.45, 0.535], [-0.86, 0.505], [-1.13, 0.40], [-1.26, 0.27], [-1.28, 0.15]],
+               { n: 10, w: 0.080, t: 0.030, off: 0.030, flick: 0.006, wave: 0.004, ph: 0.3 });
+            lk([[aP + 0.05, 0.61], [-0.2, 0.575], [-0.66, 0.545], [-1.02, 0.47], [-1.22, 0.34], [-1.29, 0.22]],
+               { n: 9, w: 0.080, t: 0.030, off: 0.040, flick: 0.006, wave: 0.004, ph: 1.1 });
+          }
+        } else {
+          // pigtails: everything combs from the centre parting down to two ties
+          // low behind the ears; each tie a short collar, then a bunch of locks
+          for (const sg of [-1, 1]) {
+            const tieA = sg * 2.05, tie = hairSeat(tieA, 0.33, 0.030);
+            const outD = hairUnit(Math.sin(tieA) * 1.0, -0.25, Math.cos(tieA) * 0.55);
+            const axis = [tie, [tie[0] + outD[0] * 0.05, tie[1] + outD[1] * 0.05, tie[2] + outD[2] * 0.05],
+              [tie[0] + sg * 0.090, tie[1] - 0.07, tie[2] - 0.05], [tie[0] + sg * 0.125, tie[1] - 0.15, tie[2] - 0.06], [tie[0] + sg * 0.145, tie[1] - 0.21, tie[2] - 0.055]];
+            parts.push(hairTube(sampleAxis(axis, 3, 0, 0.2), () => [0.060, 0.060], far ? 5 : 7, 0, 0, tubeUp));
+            const NL = far ? 3 : 5;
+            for (let i = 0; i < NL; i++) {
+              const f = 2 * Math.PI * i / NL + sg, len = 1 - 0.12 * hairHash(i, sg + 5);
+              const pts = sampleAxis(axis, far ? 5 : 8, 0.12, len).map(function (p, k, arr) {
+                const s = k / (arr.length - 1), sp = 0.024 * (0.6 + Math.sin(Math.PI * Math.min(1, s * 1.3)));
+                return [p[0] + Math.cos(f + s) * sp, p[1], p[2] + Math.sin(f + s) * sp];
+              });
+              parts.push(hairTube(pts, (s) => { const k = s < 0.1 ? lerpN(0.55, 1, s / 0.1) : lerpN(1, 0.12, sm01((s - 0.3) / 0.7)); return [0.068 * k, 0.052 * k]; }, far ? 4 : 6, 0, 0, tubeUp));
+            }
+          }
+        }
+        // full bangs across the brow (bob, pigtail): short locks from the
+        // front of the parting, tips staggered above the brows
+        if (HAIR_STYLES[st].fringe === 1) {
+          const NF = far ? 4 : 7;
+          for (let i = 0; i < NF; i++) {
+            const u = (i + 0.5) / NF, ax = (u * 2 - 1) * 0.95;
+            const yTip = 0.492 + 0.016 * hairHash(i, 8) + 0.02 * Math.pow(Math.abs(u * 2 - 1), 2);
+            lk([[ax * 0.55 + aP * 0.3, 0.605], [ax * 0.85, 0.575], [ax, 0.535], [ax * 1.02, yTip]],
+               { n: 5, w: 0.095, t: 0.026, off: (s) => lerpN(0.034, 0.016, s), wRoot: 0.8, wTip: 0.45, flick: 0.004 });
+          }
+        }
+      }
+    }
+    return mergeGeos(parts);
+  }
+  // resample a polyline axis (share `from`..`to` of its length), Catmull-Rom
+  function sampleAxis(ax, n, from, to) {
+    const out = [], m = ax.length - 1;
+    for (let i = 0; i < n; i++) {
+      const u = lerpN(from, to, i / (n - 1)) * m, k = Math.min(m - 1, Math.floor(u)), t = u - k;
+      const c0 = ax[Math.max(0, k - 1)], c1 = ax[k], c2 = ax[k + 1], c3 = ax[Math.min(m, k + 2)];
+      const t2 = t * t, t3 = t2 * t, q = [];
+      for (let e = 0; e < 3; e++) q.push(0.5 * ((2 * c1[e]) + (-c0[e] + c2[e]) * t + (2 * c0[e] - 5 * c1[e] + 4 * c2[e] - c3[e]) * t2 + (-c0[e] + 3 * c1[e] - 3 * c2[e] + c3[e]) * t3));
+      out.push(q);
+    }
+    return out;
+  }
+  // a hanging bundle's section faces away from the head's back
+  function tubeUp(p) { return hairUnit(p[0], 0, p[2]); }
+
+  /* hairGeometry(styleId, S, far) — the public builder. The unit hair is built
+     once per (style, tier) and scaled per head size. */
+  function hairGeometry(styleId, S, far) {
+    const id = HAIR_STYLES[styleId] ? styleId : "short";
+    const unit = shared("hairU|" + id + (far ? "|far" : ""), function () { return hairBuild(id, !!far); });
+    return shared("hair|" + id + "|" + S.toFixed(3) + (far ? "|far" : ""), function () {
+      const g = unit.clone(), k = S / 0.60;
+      if (S < 0.53) hairChildFit(g, S);
+      g.scale(k, k, k);
+      g.computeBoundingBox(); g.computeBoundingSphere();
+      return g;
+    });
+  }
+  /* A CHILD'S HEAD SITS DOWN IN THE SHOULDERS (charProfile's neckDrop) and the
+     yoke is deeper than the head, so hair hung for an adult would sit inside a
+     small child's back. Measured off the profiles (unit-head frame): the yoke
+     top runs 0.137 -> 0.085 and its back -0.322 -> -0.270 as the head grows
+     0.37 -> 0.47. Whatever HANGS (not what hugs the skull) behind the neck is
+     eased back behind that yoke — one smooth displacement field, so nothing
+     tears. Adults (S >= 0.53) are never touched. */
+  function hairChildFit(g, S) {
+    const t = Math.max(0, S - 0.368) * 0.53;
+    const yTop = 0.137 - t + 0.03, zBack = -0.322 + t - 0.016;
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      if (y > yTop + 0.06 || z > zBack + 0.06) continue;
+      const hang = sm01((hairSkullSdf(x, y, z) - 0.012) / 0.03) * sm01((yTop + 0.06 - y) / 0.06);
+      const zt = Math.min(z, zBack - 0.06 * cl01((yTop - y) / 0.3));
+      if (hang > 0 && zt < z) pos.setZ(i, lerpN(z, zt, hang));
+    }
+    pos.needsUpdate = true;
+  }
+  // the hair's LOD, swapped with the body's: userData.hairLods holds the pair
+  // (headwear may replace them with hat-compressed versions)
+  function setHairLod(rig, lod) {
+    if (rig && rig._hw && CBZ.headwear) CBZ.headwear.setLod(rig, lod);   // the hat swaps with the hair
+    const hs = rig && rig.skinSlots && rig.skinSlots.hair;
+    if (!hs) return;
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i], L = m && m.userData.hairLods;
+      if (!L) continue;
+      const g = lod >= 2 ? L.far : L.near;
+      if (g && m.geometry !== g) m.geometry = g;
+    }
   }
 
   /* Pick a style. NO RNG LIVES HERE — this file has no seeded stream in scope
@@ -2322,13 +2822,13 @@
       badge.position.set(-0.28, chestBot + chestH * 0.64, P.torsoD / 2 + 0.02);
       body.add(badge); badgeParts.push(badge);
     }
-    if (c.cap) {
-      const ck = headSize / 0.60;
-      const cap = new THREE.Mesh(boxGeom(0.66 * ck, 0.22 * ck, 0.66 * ck), cmat(c.cap));
-      cap.position.y = headSize + 0.07 * ck; neck.add(cap); capParts.push(cap);
-      const brim = new THREE.Mesh(boxGeom(0.66 * ck, 0.1 * ck, 0.3 * ck), cmat(c.cap));
-      brim.position.set(0, headSize - 0.02 * ck, 0.42 * ck); neck.add(brim); capParts.push(brim);
-    } else if (!c.bald) {
+    /* HEADWEAR (entities/headwear.js, CBZ.headwear) is fitted AFTER the rig
+       exists — c.cap (a role's uniform hat: c.capKind picks which) and c.hat
+       (a civilian's sun hat or cap) both go through CBZ.headwear.wear below.
+       The HAIR IS ALWAYS BUILT now (a cap no longer deletes it): headwear
+       compresses it under the crown, and whatever hangs below the band (a
+       ponytail, long hair under a helmet) still falls out from under it. */
+    if (!c.bald) {
       // c.bald (entities/heritage.js): a SHAVED head is no hair mesh at all —
       // the scalp is the skull's own skin, not a skin-coloured cap.
       // ONE MERGED SHELL — see the HAIR SHELL block above for the owner bug and
@@ -2337,33 +2837,13 @@
       // cannot exist (there is no seam) and a long-haired woman now costs ONE
       // draw call where she used to cost two.
       let styleId = hairStyleFor(c, P);
-      if (styleId === "afro" && c.hat) styleId = "curly";   // an afro would stand through any hat crown
       const hairMesh = new THREE.Mesh(hairGeometry(styleId, headSize), cmat(c.hair || 0x4a3526));
       hairMesh.castShadow = true;
       hairMesh.userData.hairStyle = styleId;
+      hairMesh.userData.hairS = headSize;       // headwear.js rebuilds the style (afro -> curly) under a crown
+      // the near/far pair setHairLod swaps between (headwear may replace both)
+      hairMesh.userData.hairLods = { near: hairMesh.geometry, far: hairGeometry(styleId, headSize, true) };
       neck.add(hairMesh); hairParts.push(hairMesh);
-    }
-    /* ---- A HAT WORN OVER THE HAIR (c.hat: "sun" | "cap", c.hatColor) -------
-       c.cap above REPLACES the hair (a uniform cap, a shaved line under it),
-       so taking it off leaves a bald man. A beach hat comes off at the water's
-       edge and the hair has to still be there — survivorbot.js hides
-       skinSlots.cap while its wearer swims. So these are built OVER the hair
-       shell: the crown is 0.70k wide against the hair's 0.64k (hairGeometry's
-       S + 0.04) and tops out 0.10k above its 0.06k crown, so the shell is
-       enclosed with a clear margin on every face and nothing is coplanar.
-       Same cached boxes and colour materials as everything else here. */
-    if (c.hat === "sun" || c.hat === "cap") {
-      const hk = headSize / 0.60;
-      const hm = cmat(c.hatColor != null ? c.hatColor : 0xe6d3a3);
-      const crown = new THREE.Mesh(boxGeom(0.70 * hk, 0.20 * hk, 0.70 * hk), hm);
-      crown.position.y = headSize + 0.06 * hk; neck.add(crown); capParts.push(crown);
-      const brim = c.hat === "sun"
-        ? new THREE.Mesh(boxGeom(1.12 * hk, 0.04 * hk, 1.12 * hk), hm)     // wide straw brim, all round
-        : new THREE.Mesh(boxGeom(0.60 * hk, 0.06 * hk, 0.30 * hk), hm);    // a peak, forward
-      if (c.hat === "sun") brim.position.y = headSize - 0.03 * hk;
-      else brim.position.set(0, headSize - 0.01 * hk, 0.47 * hk);
-      brim.castShadow = true;
-      neck.add(brim); capParts.push(brim);
     }
 
     // painted-clothing atlas metadata: which vertical band of the garment row
@@ -2453,7 +2933,7 @@
     rig.setHandPose = function (side, pose) { setBodyHandPose(rig, side, pose); };
     // one distance LOD for the whole body: the hands (fphands body LODs) and
     // the limb lofts (LIMBS block) swap together
-    rig.setHandLod = function (lod) { rig._lodExt = true; setBodyHandLod(rig, lod); setLimbLod(rig, lod); };
+    rig.setHandLod = function (lod) { rig._lodExt = true; setBodyHandLod(rig, lod); setLimbLod(rig, lod); setHairLod(rig, lod); };
     /* A rig no system LODs (every mode but the city crowd) checks its own
        distance to the camera every 24th animChar and takes the far hands and
        limbs past ~30 m, with the same 26/30 m hysteresis as peds.js. The
@@ -2467,12 +2947,23 @@
       const e = g.matrixWorld.elements, c = cam.matrixWorld.elements, dx = e[12] - c[12], dy = e[13] - c[13], dz = e[14] - c[14];
       const d2 = dx * dx + dy * dy + dz * dz;
       const want = lodNow === 2 ? (d2 < 26 * 26 ? 1 : 2) : (d2 > 30 * 30 ? 2 : 1);
-      if (want !== lodNow) { lodNow = want; setBodyHandLod(rig, want); setLimbLod(rig, want); }
+      if (want !== lodNow) { lodNow = want; setBodyHandLod(rig, want); setLimbLod(rig, want); setHairLod(rig, want); }
     };
+    // HEADWEAR: the role's uniform hat (c.cap = its colour, c.capKind the kind,
+    // "peaked" when unsaid — the police/guard cap every c.cap caller wanted)
+    // and a civilian's hat over the hair (c.hat "sun" | "cap", c.hatColor).
+    // skinSlots.cap is kept filled with the role hat's meshes (headwear.js).
+    const HW = CBZ.headwear;
+    if (HW) {
+      if (c.cap) HW.wear(rig, c.capKind || "peaked:police", { owner: "outfit", color: c.cap, accent: c.capAccent,
+        metal: c.capMetal || (/police/.test(c.capKind || "peaked:police") ? "silver" : undefined) });
+      if (c.hat) HW.wear(rig, c.hat === "sun" ? "sun" : (c.hat === "cap" ? "ballcap" : c.hat), { owner: "beach", color: c.hatColor, backward: !!c.hatBack });
+    }
     // A c.hat comes off in the water: every swimmer's pose (poseSwimmer) sets
     // rig.swimming true and the caller clears it on landing, so the hat rides
     // that one flag — no caller has to remember it, and it costs a compare.
-    if (c.hat && capParts.length) {
+    // The hair under it springs back (headwear.js un-compresses it).
+    if (c.hat && HW) {
       let swimFlag = false;
       Object.defineProperty(rig, "swimming", {
         configurable: true, enumerable: true,
@@ -2481,7 +2972,7 @@
           v = !!v;
           if (v === swimFlag) return;
           swimFlag = v;
-          for (let i = 0; i < capParts.length; i++) capParts[i].visible = !v;
+          HW.setHidden(rig, "swim", v);
         },
       });
     }
@@ -5878,6 +6369,9 @@
     regions: humanRegions,
     headAtlas: HEAD_ATLAS,
     hairStyles: function () { return Object.keys(HAIR_STYLES); },
+    // the skull entities/headwear.js fits every hat to (read live, not copied)
+    headForms: HEAD_FORMS,
+    jawMul: jawMul,
     eyeColours: EYE_COLOURS,
     // shared-geometry builders, for tools and previews (all cached)
     geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: shoeGeometry,
