@@ -765,7 +765,9 @@
       }
       return;
     }
-    if (f.done) return;
+    // a settled body that a round (CBZ.corpseHit) woke: the collapse drives
+    // it again until it sleeps
+    if (f.done && !(f.bf && CBZ.bodyFall && CBZ.bodyFall.active(m) && !CBZ.bodyFall.asleep(m))) return;
     f.t += sdt;
 
     if (f.t < f.struck) {

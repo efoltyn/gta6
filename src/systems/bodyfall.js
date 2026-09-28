@@ -50,7 +50,9 @@
                                     landed, fromX, fromZ } -> record | null
      tick(a, dt)              drive it; true while it owns the body's transform
      getUp(a)                 a living man gets up (the rig's own get-up)
-     poke(a, dirX, dirZ, f)   a settled body takes another hit (a nudge)
+     poke(a, dirX, dirZ, f, point?)  a settled body takes another hit: a
+                              shove you can see, a jolt in the part struck
+   CBZ.corpseHit(target, point, dir, force)  a round into a dead body, any game
      active(a) / asleep(a) / clear(a)
 ============================================================ */
 (function () {
@@ -311,6 +313,7 @@
     M.react(ch, dt, false, ch.low || {});
     const down = !fall || !fall.on || fall.phase === "down";
     if (R.dead) sprawl(ch, R, Math.min(1, R.t / Math.max(0.2, R.fallT)));
+    const jolting = jolt(ch, R, dt);
     if (fall && fall.on) {
       const ft = fall.t || 0;
       groundFit(ch, R, fall.phase === "down" ? 1
@@ -383,7 +386,7 @@
     //      instead of passing through. ----
     if (CBZ.collide) unwall(ch, g, pos);
     // ---- sleep: on the floor, not sliding, the collapse played out ----
-    const still = down && Math.hypot(R.vx, R.vz) < 0.05;
+    const still = down && !jolting && Math.hypot(R.vx, R.vz) < 0.05;
     R.still = still ? R.still + dt : 0;
     if (R.still > SETTLE_T && fall && fall.phase === "down" && (R.dead || fall.hold)) R.asleep = true;
     if (!fall || !fall.on) {                         // a living man finished his get-up
@@ -407,15 +410,84 @@
     R.asleep = false;
     return M.getUp(ch);
   }
-  function poke(a, dirX, dirZ, f) {
+  /* ---- A SETTLED BODY TAKES ANOTHER HIT. It used to be a root velocity of
+     0.05 * force against a 9 m/s^2 floor skid: a pistol round (force ~5)
+     moved a corpse 3 MILLIMETRES and nothing else happened, so shooting a
+     body in any game but the city (whose verlet slots re-kick) read as
+     shooting a picture of one. Now the round does what it does to a body:
+       - a shove along its line that you can see (a pistol ~5 cm, a close
+         shotgun ~20 cm), sliding against the walls like the fall's own;
+       - a JOLT in the part it struck: the nearest limb flicks out along the
+         floor and swings back, a torso or head hit snaps the head over and
+         shudders both arms (abduction and head roll only: lying down, those
+         keep every part ON the floor, like the sprawl);
+     and the body settles and sleeps again once the jolt has played.
+     `point` (world {x,y,z}, optional) picks the part; no point = the core. */
+  const JOLT_T = 0.55;
+  function nearestPart(ch, point) {
+    const THREE = window.THREE;
+    if (!point || !THREE || !ch.parts) return "core";
+    const V = _V || (_V = new THREE.Vector3());
+    const P = ch.parts, L = ch.low || {}, S = ch.sockets || {};
+    const cand = [["la", L.la || P.la], ["ra", L.ra || P.ra], ["ll", L.ll || P.ll], ["rl", L.rl || P.rl],
+      ["la", S.leftHand], ["ra", S.rightHand], ["core", ch.head], ["core", ch.neck], ["core", ch.body]];
+    let best = "core", bd = 1e9;
+    for (let i = 0; i < cand.length; i++) {
+      const o = cand[i][1];
+      if (!o || !o.getWorldPosition) continue;
+      o.getWorldPosition(V);
+      const d = (V.x - point.x) * (V.x - point.x) + (V.y - point.y) * (V.y - point.y) + (V.z - point.z) * (V.z - point.z);
+      if (d < bd) { bd = d; best = cand[i][0]; }
+    }
+    return best;
+  }
+  function poke(a, dirX, dirZ, f, point) {
     const R = a && a._bf;
     if (!R || !R.on) return false;
-    const imp = Math.min(1.2, 0.05 * (f || 4));
     const l = Math.hypot(dirX || 0, dirZ || 0);
     if (!(l > 1e-6)) return false;
+    const F = Math.max(0, f || 4);
+    // v^2 / (2 * G_SLIDE_FLOOR): 0.18 * 5 = 0.9 m/s slides ~4.5 cm
+    const imp = Math.min(1.8, 0.18 * F);
     R.vx += dirX / l * imp; R.vz += dirZ / l * imp;
+    // the jolt: which part, how hard, which way along the floor
+    const ch = rigOf(a), g = grpOf(a);
+    if (ch && g) {
+      const ya = g.rotation.y || 0;
+      const right = (dirX / l) * Math.cos(ya) - (dirZ / l) * Math.sin(ya);   // + = along his right
+      R.joltPart = nearestPart(ch, point);
+      R.joltA = Math.min(0.65, 0.08 + 0.035 * F);
+      R.joltS = right > 0 ? -1 : 1;
+      R.joltT = 0;
+    }
     R.asleep = false; R.still = 0;
     return true;
+  }
+  // the jolt's weight at time t: a snap out in 50 ms, then an eased return
+  function joltW(t) {
+    if (t < 0.05) return t / 0.05;
+    const u = Math.min(1, (t - 0.05) / (JOLT_T - 0.05));
+    return (1 - u) * (1 - u) * (1 + 2 * u) * Math.exp(-2.2 * u);
+  }
+  function jolt(ch, R, dt) {
+    if (R.joltT == null || R.joltT > JOLT_T) return false;
+    R.joltT += dt;
+    const w = joltW(Math.min(JOLT_T, R.joltT)) * R.joltA * R.joltS, P = ch.parts;
+    const part = R.joltPart;
+    if (part === "la" || part === "ra") {
+      const arm = part === "la" ? P.la : P.ra;
+      if (arm) arm.rotation.z += w;
+      if (ch.neck) ch.neck.rotation.y += 0.25 * w;
+    } else if (part === "ll" || part === "rl") {
+      const hit = part === "ll" ? P.ll : P.rl, other = part === "ll" ? P.rl : P.ll;
+      if (hit) hit.rotation.z += 0.45 * w;
+      if (other) other.rotation.z += 0.15 * w;
+    } else {
+      if (ch.neck) ch.neck.rotation.y += 0.9 * w;
+      if (P.la) P.la.rotation.z += 0.35 * Math.abs(w);
+      if (P.ra) P.ra.rotation.z -= 0.35 * Math.abs(w);
+    }
+    return R.joltT <= JOLT_T;
   }
   function clear(a) {
     if (!a || !a._bf) return;
@@ -564,6 +636,29 @@
       disposeRig(r.group);
     }
   });
+
+  /* ============================================================
+     CBZ.corpseHit(target, point, dir, force) -> bool: A ROUND INTO A BODY,
+     IN EVERY GAME. Every gun asks this one question about a dead man it hit:
+       - a body in a verlet ragdoll slot (the city, warlord's solver) re-kicks
+         there (city/ragdoll.js cityCorpseHit, which also stamps the wound);
+       - a body lying in its collapse (this file: prison, survival, gun game,
+         warlord, the city's cheap path) takes it as a shove and a jolt
+         (poke) and wears the wound (systems/wounds.js).
+     dir is the round's travel ({x,z}, y ignored), force on the ragdoll's
+     scale (~6 pistol, ~14 shotgun). False = nothing here could take it.
+   ============================================================ */
+  CBZ.corpseHit = function (target, point, dir, force) {
+    if (!target) return false;
+    if (!target.group && target.actor) target = target.actor;
+    if (CBZ.cityCorpseHit) { try { if (CBZ.cityCorpseHit(target, point, dir, force)) return true; } catch (e) { /* ragdoll off */ } }
+    if (!target.dead || !target._bf || !target._bf.on) return false;
+    if (!poke(target, dir ? dir.x : 0, dir ? dir.z : 0, Math.max(1, force || 6), point)) return false;
+    if (CBZ.bodyWound && point) {
+      try { CBZ.bodyWound(target, point, { dir: dir || null }); } catch (e) { /* wounds off */ }
+    }
+    return true;
+  };
 
   CBZ.bodyFall = {
     plan, start, tick, getUp, poke, clear, resume, unwall,
