@@ -615,6 +615,22 @@
       return Math.max(-lim, Math.min(lim, v));
     };
     const spin = spinOverride != null ? spinOverride : Math.random() * 6.28;   // decal spin in its own plane
+    // A LOFTED LIMB (entities/character.js LIMBS) is round, not a box: the
+    // mark goes ON its real surface at the hit's height, along the hit's own
+    // bearing, facing out along the section's normal — the box face would
+    // float it off a wrist by several centimetres.
+    const lh = ax !== "y" && CBZ.humanLimbHalfAt ? CBZ.humanLimbHalfAt(part.geometry, cl(lp.y, hy)) : null;
+    if (lh) {
+      let dx = lp.x, dz = lp.z - lh.cz;
+      if (Math.abs(dx) + Math.abs(dz) < 1e-6) dz = 1;
+      const k = 1 / Math.sqrt((dx * dx) / (lh.hx * lh.hx) + (dz * dz) / (lh.hz * lh.hz));
+      const px = dx * k, pz = dz * k;
+      let nx = px / (lh.hx * lh.hx), nz = pz / (lh.hz * lh.hz);
+      const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+      m.position.set(px + nx * proud, cl(lp.y, hy), lh.cz + pz + nz * proud);
+      m.rotation.set(0, Math.atan2(nx, nz), spin);
+      return;
+    }
     if (ax === "x") {
       const s = lp.x >= 0 ? 1 : -1;
       m.position.set(s * (hx + proud), cl(lp.y, hy), cl(lp.z, hz));

@@ -2818,6 +2818,33 @@
     return g;
   }
 
+  // ---- LOFTED LIMBS (entities/character.js LIMBS) ---------------------------
+  // A limb segment is a rounded loft now, not a box. It carries its own shape,
+  // so the garment row is handed to it as a PAINTER — the same face column, u
+  // direction and band slice clothGeom writes into a box's UVs — and the body
+  // bakes (and caches) the painted loft. One painter per (row, band), shared.
+  const painters = {};
+  function limbPainter(part, band) {
+    let b0 = band ? band[0] : 0, b1 = band ? band[1] : 1;
+    if (!(b0 >= 0) || !(b1 > b0)) { b0 = 0; b1 = 1; }
+    const key = part + "|" + b0.toFixed(3) + "," + b1.toFixed(3);
+    let p = painters[key];
+    if (p) return p;
+    const row = ROWS[part === "jacket" ? "jacket" : part] || ROWS.arm, ry0 = row[0], ry1 = row[1];
+    p = painters[key] = {
+      key: "cloth:" + key,
+      fn: function (face, u, v) {
+        const col = COLS[face] || COLS.side, vv = b0 + v * (b1 - b0);
+        return [(col[0] + u * (col[1] - col[0])) / W, 1 - (ry1 - vv * (ry1 - ry0)) / H];
+      },
+    };
+    return p;
+  }
+  function limbDressGeom(mesh, part) {
+    if (!mesh.userData.limb || !CBZ.humanLimbGeometry) return null;
+    return CBZ.humanLimbGeometry(mesh, limbPainter(part, mesh.userData.clothBand));
+  }
+
   // ============================================================
   //  DRESS / STRIP — swap part materials+geometry in place; the original
   //  flat geometry+material is saved ONCE per mesh and restored on strip,
@@ -2830,8 +2857,9 @@
       const mesh = list[i];
       if (!mesh) continue;
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
-      // split-limb segments carry their own dims + row band (character.js tags)
-      mesh.geometry = clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
+      // split-limb segments carry their own dims + row band (character.js tags);
+      // a lofted limb bakes the same row onto its own shape
+      mesh.geometry = limbDressGeom(mesh, part) || clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
       mesh.material = m;
       mesh.userData._cbzPart = part;                 // "this mesh is wearing painted cloth" (audit read)
     }
@@ -2865,7 +2893,10 @@
       // _cbzPart is cleared on BOTH paths: outfits.js's paint() now refuses to
       // tint a mesh that still claims to be wearing painted cloth, so a stale
       // tag on a restored (flat) mesh would leave it permanently uncolourable.
-      if (!guard) { mesh.geometry = f.g; mesh.material = f.m; mesh.userData._cbzPart = null; continue; }
+      // a lofted limb goes back to its FLAT loft at its CURRENT lod (the saved
+      // original may be a different lod by now — character.js setLimbLod)
+      const flatLimb = mesh.userData.limb && CBZ.humanLimbGeometry ? CBZ.humanLimbGeometry(mesh, null) : null;
+      if (!guard) { mesh.geometry = flatLimb || f.g; mesh.material = f.m; mesh.userData._cbzPart = null; continue; }
       // A FLAT ORIGINAL THAT DIED TAKES THE BODY WITH IT. `_cbzFlat` is captured
       // ONCE, at the very first dress, and then held for the whole life of the
       // rig — which is long enough for a teardown sweep to have disposed it, for
@@ -2873,7 +2904,8 @@
       // it simply never to have existed on a stub rig. Putting an unrenderable
       // material back on the body IS the owner's bug, so a dead stash falls
       // through to a live flat default instead of onto a person.
-      if (geomOk(f.g)) mesh.geometry = f.g;
+      if (flatLimb) mesh.geometry = flatLimb;
+      else if (geomOk(f.g)) mesh.geometry = f.g;
       mesh.material = clothMatOk(f.m) ? f.m : defaultFlat(mesh);
       mesh.userData._cbzPart = null;
     }
@@ -3072,6 +3104,7 @@
         if (CBZ.pedInstanceRelease) CBZ.pedInstanceRelease(mesh);
         const f = mesh.userData && mesh.userData._cbzFlat;
         if (f && geomOk(f.g)) mesh.geometry = f.g;
+        if (mesh.userData && mesh.userData.limb && CBZ.humanLimbGeometry) mesh.geometry = CBZ.humanLimbGeometry(mesh, null) || mesh.geometry;
         if (row[3] && !geomOk(mesh.geometry)) {
           mesh.geometry = clothGeom(row[1], mesh.userData && mesh.userData.clothDims, mesh.userData && mesh.userData.clothBand);
         }

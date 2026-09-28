@@ -107,7 +107,11 @@ function handReport(r, tag) {
   for (const [k, h] of [["la", l], ["ra", rr]]) {
     const fore = r.parts[k].userData.lower;
     const fb = bb(fore.geometry.clone());
-    const foreBottom = fore.position.y + fb.min.y;       // in the elbow frame
+    // a lofted forearm (character.js LIMBS) ends its last SECTION at the crease
+    // and closes with a shallow dome that tucks into the hand's wrist stub
+    const lf = fore.geometry.userData && fore.geometry.userData.limb;
+    const foreBottom = fore.position.y + (lf ? lf.y0 - lf.sy : fb.min.y);       // in the elbow frame
+    if (lf) check(fb.min.y > lf.y0 - lf.sy - 0.04, `${tag} ${k} wrist dome is shallow (${(lf.y0 - lf.sy - fb.min.y).toFixed(3)})`);
     check(Math.abs(h.position.y - foreBottom) < 0.005, `${tag} ${k} wrist at the forearm's end (${h.position.y.toFixed(3)} vs ${foreBottom.toFixed(3)})`);
     check(Math.abs(foreBottom - (P.handH - P.armLo)) < 0.005, `${tag} ${k} forearm ends at the crease`);
     // fingers point DOWN the arm, palm faces the body, thumb forward
