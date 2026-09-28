@@ -748,6 +748,9 @@
       m.outfit = toGang.color; m.homeGuard = toGang.center ? { x: toGang.center.x, z: toGang.center.z } : m.homeGuard;
       m.guard = m.homeGuard; toGang.members.push(m);
       applyRankGear(m, toGang); tagWithRank(m, toGang.color);
+      // CHANGE COLOURS. m.gang moved but the body kept the OLD crew's shirt
+      // and bandana until some unrelated re-dress happened to reach him.
+      if (CBZ.cityRedressPed) { try { CBZ.cityRedressPed(m); } catch (e) {} }
     }
     const s = memStats(m); s.loyalty = 0.5; s.joined = "defect"; s.bodies = 0; s.contrib = 0;
     if (nearPlayer(m.pos.x, m.pos.z, 90)) {

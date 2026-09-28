@@ -48,6 +48,7 @@ function load(relativePath) {
 }
 
 load("../src/systems/reality.js");
+load("../src/systems/fphands.js");   // every body's hand (character.js builds it)
 load("../src/entities/character.js");
 load("../src/city/wildlife_species.js");
 const wildlifeDir = new URL("../src/city/wildlife/", import.meta.url);

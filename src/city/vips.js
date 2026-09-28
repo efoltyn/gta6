@@ -403,8 +403,8 @@
     q.hp = q.maxHp = 170; q.baseSpeed = 2.3;
     q.snitch = 0; q.fear = 0; q.alarmed = 0; q.rage = null; q.guard = null;
     q.state = "walk"; q.path = null; q.pause = 0;
-    // canonical wardrobe: "close protection" is a jobFit row (the painted
-    // All Black Tactical) — a guard drafted out of a sundress actually
+    // canonical wardrobe: "close protection" is a jobFit row (CAT.detail,
+    // the black suit + shades + earpiece) — a guard drafted out of a sundress actually
     // changes into the detail's blacks now instead of keeping the dress.
     if (vipWardrobe()) CBZ.cityRedressPed(q);
     else paintFit(q, def.suit != null ? def.suit : 0x171a21);

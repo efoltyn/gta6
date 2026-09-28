@@ -222,7 +222,7 @@
     sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
     soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
-                 colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22 } },
+                 colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22, gloves: 0x3a3a2c } },
     office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
                  colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
     // ---- the LAW (never sold — taken off a body; the street reads the badge) ----
@@ -231,18 +231,31 @@
     // SWAT redesign: dark-olive carrier over graphite-olive fatigues (torso
     // drives the CARRIER, legs the fatigues — clothes.js PAINT.swat reads both).
     swat:      { id: "swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true,
-                 colors: { legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e, shoes: 0x101216, belt: 0x0d111c } },
+                 colors: { legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e, shoes: 0x101216, belt: 0x0d111c, gloves: 0x17191c } },
     // ---- money fits (boutique racks → the apex tuxedo) ----
     leather:   { id: "leather",   name: "Leather Jacket",   tier: "fit",    who: "the night crowd",  price: 520,  drip: 6,
                  colors: { legs: 0x23262e, torso: 0x241c18, collar: 0x100c0a, arms: 0x241c18, shoes: 0x16110d } },
     tactical:  { id: "tactical",  name: "All Black Tactical", tier: "fit",  who: "professionals",    price: 700,  drip: 7,
-                 colors: { legs: 0x121418, torso: 0x121418, collar: 0x0b0c0f, arms: 0x121418, shoes: 0x0b0c0f } },
+                 colors: { legs: 0x121418, torso: 0x121418, collar: 0x0b0c0f, arms: 0x121418, shoes: 0x0b0c0f, gloves: 0x0e0f12 } },
     // formal: "suit"/"tux" — bling.js attaches the FORMAL KIT for the read:
     // suit = a modest white shirt-front sliver on a navy/charcoal body;
     // tux = the full black-tie set (white shirt-front panel + bow-tie +
     // pocket square). colors.gloss puts a patent-leather sheen on the shoes.
     suit:      { id: "suit",      name: "Two-Piece Suit",   tier: "money",  who: "made men",         price: 1200, drip: 9, formal: "suit",
                  colors: { legs: 0x14161c, torso: 0x1c2030, collar: 0x2a3047, arms: 0x1c2030, shoes: 0x0c0d10 } },
+    // THE PROTECTIVE DETAIL. Owner: "The President's security wear different
+    // coloured suits; they should wear black suits." They wore CAT.suit, which
+    // has no style, so clothes.js keyOf picked SUIT_STYLES[rig.id % 23] — Tan,
+    // Powder-Blue, All-White — a different suit per body. This record IS the
+    // uniform: one pinned style (clothes.js "Detail Black": near-black jacket
+    // and trousers, white shirt, black tie), black shoes, and the kit
+    // (sunglasses + a coiled earpiece, recolorRig's detailKit). Every
+    // secret-service / close-protection / bodyguard / hired-security job casts
+    // it through jobFit, so a re-dress can never hand them a random suit back.
+    // id stays "suit" because that is the painter key; `uniform` names the role.
+    detail:    { id: "suit",      name: "Protective Detail Suit", tier: "law", who: "protective details", price: 0, drip: 9, formal: "suit",
+                 uniform: "detail", style: null, kit: { shades: 1, earpiece: 1 },
+                 colors: { legs: 0x101115, torso: 0x121318, collar: 0xf1f2ec, arms: 0x121318, shoes: 0x08090c, shirt: 0xf1f2ec, tie: 0x08090c } },
     designer:  { id: "designer",  name: "Designer Drip",    tier: "money",  who: "ballers",          price: 1600, drip: 12,
                  colors: { legs: 0xe9e4da, torso: 0x7a3df0, collar: 0xffd451, arms: 0x7a3df0, shoes: 0xffffff } },
     // THE APEX: priced like a car, and the rope opens for the cloth alone
@@ -276,6 +289,27 @@
     }
     _gangBuilt = true;
   }
+
+  // Pin CAT.detail to its SUIT_STYLES row by NAME (clothes.js owns the table
+  // and may load after this file on a slice page). Mutating the catalog row is
+  // right here: it is one uniform, every wearer shares it.
+  function pinDetail() {
+    const d = CAT.detail;
+    if (d.style != null) return d;
+    const tbl = CBZ.citySuitStyles;
+    if (!tbl || !tbl.length) return d;
+    let idx = -1;
+    for (let i = 0; i < tbl.length; i++) if (tbl[i] && tbl[i].name === "Detail Black") { idx = i; break; }
+    if (idx < 0) for (let i = 0; i < tbl.length; i++) if (tbl[i] && tbl[i].name === "Black Suit") { idx = i; break; }
+    if (idx < 0) return d;
+    d.style = idx;
+    const st = tbl[idx];
+    d.colors.torso = d.colors.arms = st.body;
+    if (st.legs != null) d.colors.legs = st.legs;
+    if (st.tie != null) d.colors.tie = st.tie;
+    return d;
+  }
+  pinDetail();
 
   // ---- worn state ------------------------------------------------------------
   function ownedMap() { if (!g.cityOutfitsOwned) g.cityOutfitsOwned = { street: true }; return g.cityOutfitsOwned; }
@@ -632,6 +666,8 @@
       sheen(s.shoes, !!c.gloss);
       // a composite is never a gang fit → make sure no stale bandana lingers
       if (ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
+      detailKit(ch, null);
+      paintGloves(ch, null);
       return true;
     }
     // A direct catalog role must also remove any tie/collar/blazer meshes left
@@ -701,6 +737,9 @@
       if (rec && rec.gang) CBZ.cityAttachBandana(ch, c.torso != null ? c.torso : 0xb079ea);
       else if (ch._bandana) CBZ.cityAttachBandana(ch, null);
     }
+    // the protective detail's sunglasses + earpiece; any other fit strips them
+    detailKit(ch, rec && rec.kit);
+    paintGloves(ch, c.gloves);
     // Role headwear is still the rig's existing cap slot: cheap silhouette,
     // no parallel prop system. Every following outfit explicitly clears it.
     if (rec) {
@@ -712,6 +751,77 @@
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
+
+  // ---- GLOVES: a gloved uniform (SWAT, soldier, all-black tactical) paints
+  //      the hand caps its `gloves` colour. Only a rig that WAS gloved is
+  //      walked back to skin — painting every bare hand on every re-dress would
+  //      clone the shared cmat hand material off thousands of civilians and
+  //      split the ped instancer's batches for nothing.
+  //      The hands are character.js's real (fphands) hand meshes; a glove is
+  //      the SHARED cmat of its colour, not a clone, so a squad of gloved
+  //      SWAT still pools into one instanced batch per glove colour.
+  function paintGloves(ch, hex) {
+    const hands = ch && ch.skinSlots && ch.skinSlots.hands;
+    if (!hands || !hands.length) return;
+    const wear = function (h) {
+      for (let i = 0; i < hands.length; i++) {
+        const m = hands[i];
+        if (!m || !m.material) continue;
+        if (CBZ.cmat) m.material = CBZ.cmat(h);
+        else paint([m], h);
+      }
+    };
+    if (hex != null) { wear(hex); ch._gloved = hex; return; }
+    if (ch._gloved != null) { wear(ch.skinTone != null ? ch.skinTone : 0xcf9a72); ch._gloved = null; }
+  }
+
+  // ---- THE DETAIL KIT: sunglasses + a coiled earpiece, parented to the neck
+  //      pivot in the FACE frame (character.js scales the face node by
+  //      headSize/0.60; eyes sit at y 0.34, face plane z 0.315), so the same
+  //      numbers fit a smaller head. Shared cached boxes + shared cmat
+  //      materials: nothing is allocated per wearer except the Mesh nodes.
+  const KIT_PARTS = [
+    // shades: two lenses, bridge, two temple arms
+    { k: "shades", w: 0.2, h: 0.12, d: 0.035, x: -0.135, y: 0.345, z: 0.335, hex: 0x0b0c10 },
+    { k: "shades", w: 0.2, h: 0.12, d: 0.035, x: 0.135, y: 0.345, z: 0.335, hex: 0x0b0c10 },
+    { k: "shades", w: 0.09, h: 0.028, d: 0.03, x: 0, y: 0.38, z: 0.34, hex: 0x1a1c21 },
+    { k: "shades", w: 0.025, h: 0.03, d: 0.33, x: -0.31, y: 0.37, z: 0.17, hex: 0x1a1c21 },
+    { k: "shades", w: 0.025, h: 0.03, d: 0.33, x: 0.31, y: 0.37, z: 0.17, hex: 0x1a1c21 },
+    // earpiece: the bud in the right ear and the clear coiled lead running
+    // down behind the jaw into the collar (the lead is the recognisable part)
+    { k: "earpiece", w: 0.045, h: 0.06, d: 0.05, x: 0.315, y: 0.3, z: 0.02, hex: 0xdcd8cf },
+    { k: "earpiece", w: 0.02, h: 0.36, d: 0.02, x: 0.3, y: 0.1, z: -0.07, hex: 0xd2cec5, rz: 0.1 },
+  ];
+  function kitMask(kit) { return kit ? ((kit.shades ? 1 : 0) | (kit.earpiece ? 2 : 0)) : 0; }
+  function detailKit(ch, kit) {
+    if (!ch) return;
+    const want = kitMask(kit);
+    const cur = ch._detailKit;
+    if (cur && cur.userData.mask === want) return;
+    if (cur) { if (cur.parent) cur.parent.remove(cur); ch._detailKit = null; }
+    const neck = ch.neck;
+    if (!want || !neck || typeof THREE === "undefined") return;
+    const node = new THREE.Group();
+    node.name = "detail-kit";
+    node.userData.mask = want;
+    const hs = (ch.profile && ch.profile.headSize) || 0.6;
+    node.scale.setScalar(hs / 0.6);
+    for (let i = 0; i < KIT_PARTS.length; i++) {
+      const q = KIT_PARTS[i];
+      if (!((q.k === "shades" ? 1 : 2) & want)) continue;
+      const geo = CBZ.boxGeom ? CBZ.boxGeom(q.w, q.h, q.d) : new THREE.BoxGeometry(q.w, q.h, q.d);
+      const mat = CBZ.cmat ? CBZ.cmat(q.hex) : new THREE.MeshLambertMaterial({ color: q.hex });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(q.x, q.y, q.z);
+      if (q.rz) m.rotation.z = q.rz;
+      m.castShadow = false; m.receiveShadow = false;
+      m.userData.clothingPart = "detail-" + q.k;
+      node.add(m);
+    }
+    neck.add(node);
+    ch._detailKit = node;
+  }
+  CBZ.cityDetailKit = detailKit;
   // ---- EVERY RE-DRESS GOES THROUGH THE EXPORTED NAME ----------------------
   // city/armor.js lazily WRAPS CBZ.cityRecolorRig so that mounted armour is
   // re-solved against whatever the body is wearing NOW — its own comment names
@@ -1236,7 +1346,7 @@
     if (w && PLAIN_BASE[w.id] && plainCivvies() && !w.swiped) w = fitRecord();
     return w;
   };
-  CBZ.cityOutfitCatalog = function () { buildGangOutfits(); return CAT; };
+  CBZ.cityOutfitCatalog = function () { buildGangOutfits(); pinDetail(); return CAT; };
   CBZ.cityWearOutfit = function (id, opts) { buildGangOutfits(); return CAT[id] ? wearRecord(CAT[id], opts) : false; };
   CBZ.cityBuyOutfit = buyOutfit;
 
@@ -1639,7 +1749,15 @@
     if (/pit crew|crew chief|race mechanic/i.test(job)) return CAT.pitcrew;
     if (/track marshal|gate steward/i.test(job)) return CAT.marshal;
     if (/pro racer|race driver|racing driver|driver for /i.test(job)) return CAT.racer;
-    if (/bodyguard|close protection|secret service|intelligence agent|bureau agent/i.test(job)) return CAT.tactical;
+    // THE PROTECTIVE DETAIL — one black suit for every body whose job is to
+    // stand next to a principal (see CAT.detail). Counter-snipers and bureau
+    // field agents are the tactical side: all black, gloved.
+    if (/secret service|close protection|bodyguard|protective detail|hired security/i.test(job)) return pinDetail();
+    if (/counter-?sniper|intelligence agent|bureau agent/i.test(job)) return CAT.tactical;
+    // uniformed police by JOB, not only by kind:"cop" — the President's gate
+    // (Uniformed Division), motorcade and checkpoint officers are posted as
+    // kind "security" and fell through to a random civilian shirt on re-dress.
+    if (/police officer|patrol officer|uniformed division|state trooper|highway patrol/i.test(job)) return CAT.police;
     if (/bank teller|bank manager|count clerk|pit boss|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
     if (/cage cashier/i.test(job)) return CAT.waiter || CAT.vendor;
     if (/\bbutler\b/i.test(job)) return CAT.waiter || CAT.vendor;
@@ -1711,6 +1829,11 @@
     }
     const a = spec.archetype || "";
     const seed = Math.abs((spec.seed | 0) || 0);
+    // a uniformed ARCHETYPE with a job no row names still wears the uniform —
+    // this used to return null (random civilian shirt) for every "security"
+    // or "military" body posted with an unlisted job string.
+    if (a === "security") return CAT.security;
+    if (a === "military") return CAT.soldier;
     // ---- BUM RAGS: peds.js has THREE bum producers now (spawnVagrants' camp,
     //      aigoals' evictions, and cityDealRole's dealt bums) and they share one
     //      identity (vagrant) — so they share one wardrobe: the same drab

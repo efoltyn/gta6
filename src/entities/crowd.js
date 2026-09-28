@@ -174,7 +174,9 @@
 
   function setRigSkin(rig, skin, hair) {
     if (rig.head.material && rig.head.material.color) rig.head.material.color.setHex(skin);
-    (rig.skinSlots.hands || []).forEach(function (m) { if (m.material.color) m.material.color.setHex(skin); });
+    // cloneShared first: a glove come off (outfits.js paintGloves) hands the rig
+    // back a SHARED cmat, and tinting that would repaint every hand in the game
+    (rig.skinSlots.hands || []).forEach(function (m) { cloneShared(m); if (m.material.color) m.material.color.setHex(skin); });
     (rig.skinSlots.hair || []).forEach(function (m) { if (m.material.color) m.material.color.setHex(hair); });
   }
   function assignRig(e, id) {

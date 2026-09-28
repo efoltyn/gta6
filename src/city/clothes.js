@@ -2463,10 +2463,25 @@
     { name: "Midnight-Blue Tuxedo",     tux: true, body: 0x141a2e, lapel: "shawl" },
     { name: "White Dinner Jacket",      tux: true, body: 0xeae8e0, lapel: "shawl", legs: 0x16171c, lapelCss: "rgb(225,222,212)" },
     { name: "Double-Breasted Peak Tuxedo", tux: true, body: 0x16171c, lapel: "peak", db: true },
+    // 22: the protective-detail uniform (outfits.js CAT.detail; warlord's black suit too):
+    // near-black two-piece, white shirt, BLACK tie. "Black Suit" (3) wears a banker's grey tie.
+    { name: "Detail Black",             body: 0x121318, tie: 0x08090c, pattern: "solid", legs: 0x101115 },
   ];
   CBZ.citySuitStyles = SUIT_STYLES;                 // outfits.js reads names/indices
 
   // resolve an outfit record/id to a cache key (null = no painted look)
+  function nearestSuitStyle(hex) {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < SUIT_STYLES.length; i++) {
+      const st = SUIT_STYLES[i];
+      if (st.tux || st.vest || st.db || (st.pattern && st.pattern !== "solid")) continue;
+      const a = st.body | 0;
+      const dr = (a >> 16 & 255) - (hex >> 16 & 255), dg = (a >> 8 & 255) - (hex >> 8 & 255), db = (a & 255) - (hex & 255);
+      const d = dr * dr + dg * dg + db * db;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
   function keyOf(rec, ch) {
     if (!rec) return null;
     const id = rec.id || (typeof rec === "string" ? rec : null);
@@ -3389,7 +3404,11 @@
     // + open front) so it reads as a real jacket, tinted to the item color.
     if (shell) {
       const sp = COMP[shell], hex = sp.bomberHex != null ? sp.bomberHex : (sp.color != null ? sp.color : 0x1c2030);
-      applyClothes(ch, { id: "suit", colors: { torso: hex, legs, arms: hex } });
+      // The shell ASKS for a colour; a style-less suit record used to fall to
+      // keyOf's per-rig pick (group.id % n), so a "navy blazer" came out tan,
+      // powder blue or all-white depending on who wore it. Pin the plain solid
+      // style nearest the asked colour instead: same jacket on every wearer.
+      applyClothes(ch, { id: "suit", style: nearestSuitStyle(hex), colors: { torso: hex, legs, arms: hex } });
     }
     // layer the small attached meshes (collar/tie/bow) onto the torso
     const host = (ch.skinSlots.torso && ch.skinSlots.torso[0]) || ch.body || ch.group;

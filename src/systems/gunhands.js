@@ -328,6 +328,7 @@
       // contract entities/poses.js and the reach layer rely on.
       blend = 0;
       if (carried) carried.visible = false;
+      if (ch && ch.setHandPose) ch.setHandPose("l", "relaxed");
       seen.why = !prop ? "no drawn weapon"
         : !ch ? "no player rig"
         : ch.slidePose ? "slide pose owns the rig"
@@ -339,6 +340,8 @@
     }
     seen.drive++; seen.why = "";
     blend += (1 - blend) * Math.min(1, 9 * (dt || 0.016));
+    // the body's real off hand cups the handguard (character.js HANDS block)
+    if (ch.setHandPose) ch.setHandPose("l", "support");
 
     R.style = grips.style || "mag";
     prop.updateWorldMatrix(true, false);

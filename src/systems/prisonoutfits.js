@@ -14,16 +14,14 @@
    speak, die and reset in mode "escape". Medical and chapel looks are explicit
    assignments on entities/npc.js; everyone else stays in the same institutional
    orange. Riot reinforcements reuse the real Gang City SWAT record and armor
-   API. PRISON_OUTFITS_V2=false leaves the original builders untouched next boot.
+   API. Always on: the flat constructor colours are only the first frame.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_OUTFITS_V2 == null) CBZ.CONFIG.PRISON_OUTFITS_V2 = true;
-  function on() { return CBZ.CONFIG.PRISON_OUTFITS_V2 !== false; }
+  function on() { return true; }
 
   const NPC_FIT = {
     inmate: "inmate",

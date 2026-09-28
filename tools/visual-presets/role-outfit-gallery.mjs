@@ -24,7 +24,7 @@ const subjects = [
   role("sheriff", "Sheriff's deputy", "sheriff's deputy", "County khaki, brown trousers, star badge, and duty-belt read."),
   role("soldier", "Soldier", "soldier", "Fatigues must read as authored camouflage rather than a green civilian shirt."),
   role("security", "Security guard", "security guard", "Guard blacks, epaulettes, and SECURITY chest tape."),
-  role("close-protection", "Close protection / agent", "close protection", "Slim all-black tactical shell, harness, pockets, and dark trousers."),
+  role("close-protection", "Close protection / agent", "close protection", "Black suit, white shirt, black tie, sunglasses and a coiled earpiece."),
   role("paramedic", "Paramedic", "paramedic", "Navy EMS workwear with reflective bands and medical patch."),
   role("nurse", "Nurse", "nurse", "Recognizable scrub V-neck, pocket, and matching trousers."),
   role("doctor", "Doctor", "doctor", "White coat shell, open scrub front, pockets, and stethoscope."),

@@ -757,7 +757,22 @@
   // `s` scales a shared part instead of authoring a second geometry for it (a
   // pinky ring is a ring, a lume pip is a small stone) — always written, never
   // defaulted, because pooled meshes come back wearing the last wearer's scale.
+  // Returns the object the part must be parented to when it is NOT the slot's
+  // anchor: a ring goes on the real hand (character.js HANDS block), which
+  // curls and slides on its own, so the ring rides the HAND MESH, in its metre
+  // frame, at the base of a finger (ring finger; the pinky ring's authored
+  // outboard x picks the little finger). Authored sizes are rig units for the
+  // old 0.29-wide box hand; lm.ringK brings them down onto a real finger.
   function placePart(mesh, p, lm, side) {
+    if (p.at === "hand" && lm && lm.ringHand && lm.ringFingers) {
+      const f = lm.ringFingers[p.x > 0.12 ? 3 : 2];
+      const k = (p.s == null ? 1 : p.s) * lm.ringK;
+      const dorsal = p.kind === "gem" ? f.r + 0.0028 + 0.030 * k * 0.5 : (p.kind === "ring" ? f.r : 0);
+      mesh.position.set(f.x, 0.001 + dorsal, f.z - 0.007);
+      mesh.rotation.set(p.kind === "ringBand" ? Math.PI / 2 : 0, 0, 0);
+      mesh.scale.set(k, k, k);
+      return lm.ringHand;
+    }
     const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
     if (p.at === "wrist") {   // dorsal roll: ±90° about Y swaps the authored x/z
       mesh.position.set(side * p.z, base + p.y, -side * p.x);
@@ -779,8 +794,7 @@
       const p = parts[i];
       const mesh = acquire(p.kind);
       mesh.material = p.mat;
-      placePart(mesh, p, lm, side);
-      parent.add(mesh);
+      (placePart(mesh, p, lm, side) || parent).add(mesh);
       out.push(mesh);
     }
   }
@@ -1074,8 +1088,7 @@
       if (!geo || !p.mat) continue;
       const m = new THREE.Mesh(geo, p.mat);
       m.castShadow = false; m.receiveShadow = false;
-      placePart(m, p, lm, side);
-      parent.add(m);
+      (placePart(m, p, lm, side) || parent).add(m);
       out.push(m);
     }
     return out;
