@@ -42,11 +42,11 @@
    player stood still holding a gun that silently refilled itself.
 
    A reload is the off hand's job, and the off hand is now solvable — so it is
-   choreographed as a path THROUGH the same anchors: handguard → magwell →
-   belt → magwell → charging handle → handguard, with the real magazine
-   falling out of the gun on the way and a fresh one carried up in the fist.
-   Five styles, picked from the weapon's own `grips.style`, because a belt-fed
-   M249, a pump shotgun, a revolver and an RPG are not reloaded alike.
+   choreographed as a path THROUGH the gun's own parts (CBZ.gunReload, the
+   block below: the magazine, the slide, the bolt, the cylinder, the feed
+   cover all move, and the hands go to them). Six styles, picked from the
+   weapon's own `grips.style`, because a belt-fed M249, a pump shotgun, a
+   revolver, a bolt rifle and an RPG are not reloaded alike.
 
    Everything is driven off fps.reloading, which fpsmode.js already owns — no
    second timer, so the animation cannot desync from the ammo count.
@@ -150,7 +150,7 @@
         [0.93, 1.00, "charge", "support", 0.04],
       ],
       eject: 0.18, grab: 0.50, seat: 0.82, charge: [0.87, 0.93], carry: "l", fresh: "mag",
-      at: [-0.03, 1.53, 0.62], work: [0.50, -0.30, 0.81], fp: [-0.14, 0, 0.10, 0.30, 0.30],
+      at: [0.00, 1.53, 0.62], atCharge: [0.05, 1.46, 0.74], work: [0.50, -0.30, 0.81], fp: [-0.14, 0, 0.10, 0.30, 0.30],
     },
     // pump gun: one shell at a time up into the loading port under the
     // receiver; the pump racks when the last one is in (fpsmode pumpT)
@@ -163,7 +163,7 @@
         [0.84, 1.00, "port", "support", 0.05],
       ],
       grab: 0.34, seat: 0.82, carry: "l", fresh: "shell",
-      at: [-0.18, 1.48, 0.62], work: [0.42, -0.22, 0.88], fp: [-0.06, 0, 0.04, 0.15, 0.35],
+      at: [-0.08, 1.54, 0.58], work: [0.42, -0.22, 0.88], fp: [-0.06, 0, 0.04, 0.15, 0.35],
     },
     // revolver / revolving drum: swing it out, dump the empties, speedloader
     // into the chambers, swing it shut
@@ -198,7 +198,7 @@
         [0.95, 1.00, "latch", "support", 0.04],
       ],
       eject: 0.36, grab: 0.58, seat: 0.82, cover: [0.10, 0.20, 0.90, 0.95], carry: "l", fresh: "box",
-      at: [-0.20, 1.44, 0.62], work: [0.40, -0.18, 0.90], fp: [-0.06, 0, 0.04, 0.12, 0.15],
+      at: [-0.14, 1.40, 0.70], work: [0.40, -0.18, 0.90], fp: [-0.06, 0, 0.04, 0.12, 0.15],
     },
     // a rocket goes in the FRONT of the tube
     rocket: {
@@ -216,8 +216,9 @@
     // hand leaves the grip, lifts the bolt and draws it back, thumbs the
     // rounds down through the open action, runs the bolt home and down
     bolt: {
+      l: [[0.00, 1.00, "support", "support", 0]],
       r: [
-        [0.00, 0.08, "grip", "bolt", 0.03],
+        [0.00, 0.08, "grip", "bolt", 0.03],   // (l: the off hand keeps the rifle while the gun is brought in)
         [0.08, 0.20, "bolt", "bolt", 0],            // up, back
         [0.20, 0.40, "bolt", "pouch", 0.12],
         [0.40, 0.50, "pouch", "pouch", 0],          // rounds out of the pouch
@@ -228,7 +229,7 @@
         [0.94, 1.00, "bolt", "grip", 0.03],
       ],
       grab: 0.45, seat: 0.78, bolt: [0.08, 0.13, 0.13, 0.20, 0.86, 0.91, 0.91, 0.94], carry: "r", fresh: "clip",
-      work: [0.25, -0.25, 0.93], fp: [0, 0, 0.04, 0, -0.20],
+      at: [-0.08, 1.46, 0.76], work: [0.25, -0.25, 0.93], fp: [0, 0, 0.04, 0, -0.20],
     },
   };
   // between shots (CBZ.fpsBoltCycle, 0..1): up, back, forward, down
@@ -964,7 +965,11 @@
        does: the well comes to the hand, not the hand out to the well. */
     if (rec.at && ch.parts.ra && aw > 0) {
       const sc = torsoScale(ch);
-      _t.set(rec.at[0] * sc, rec.at[1] * sc, rec.at[2] * sc);
+      // (the charging handle sits back by the face: the gun goes out and
+      // left for it, eased across the charge window)
+      const k = rec.atCharge && rec.charge ? smooth(clamp01(Math.min((R.p - rec.charge[0] + 0.05) / 0.05, (rec.charge[1] + 0.04 - R.p) / 0.04))) : 0;
+      const A0 = rec.at, A1 = rec.atCharge || rec.at;
+      _t.set((A0[0] + (A1[0] - A0[0]) * k) * sc, (A0[1] + (A1[1] - A0[1]) * k) * sc, (A0[2] + (A1[2] - A0[2]) * k) * sc);
       ch.body.localToWorld(_t);
       CBZ.charArmTo.rest(ch, "r", 0);
       CBZ.charArmTo(ch, _t, "r", aw);
@@ -1363,11 +1368,13 @@
       const hr = ch.parts.ra.userData.cap;
       if (hr) { hr.getWorldQuaternion(_eq); _t.set(0, 0, 1).applyQuaternion(_eq); }
       CBZ.charArmTo.wrist(ch, _a, "r", hr ? _t : null, 1);
-      // onto the crosshair from the new place, then the gun seated in the
-      // fist as it now points (a trim after the seat turned a launcher's
-      // grip out of the hand: its origin is a tube-length from the grip)
-      if (aimed) aimTrim(ch, prop);
+      // prone, onto the crosshair from the new place and THEN the gun seated
+      // in the fist as it now points (a trim after the seat turned a prone
+      // launcher's grip out of the hand: its origin is a tube-length away);
+      // upright the trim is a fraction of a degree and the seat goes first
+      if (prone && aimed) aimTrim(ch, prop);
       GH.fire(ch, prop, aimed, 0);
+      if (!prone && aimed) aimTrim(ch, prop);
     }
   }
   function chestPitch(ch) {

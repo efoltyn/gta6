@@ -171,6 +171,8 @@
         if (sz.y > 1e-4) m.scale.multiplyScalar(0.09 / sz.y);
       }
     }
+    // what it is, for the hold engine (systems/actorweapons.js CBZ.holds.classOf)
+    if (m) m.userData.heldKind = kind;
     return m;
   }
   // FP copies ride the viewmodel's late queue (after its depth clear), so they

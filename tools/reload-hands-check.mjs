@@ -57,7 +57,7 @@ const TOL = 0.03;                  // 3 cm, real
 const CARRY_TOL = 0.015;
 const DWELL_PART = {               // which drawn part a dwell anchor is ON
   well: "mag", charge: "charge", bolt: "bolt", cyl: "cylinder", cylFace: "cylinder",
-  latch: "cover", box: "box", port: null, round: "round", tray: "cover",
+  latch: "cover", box: "box", port: null, round: "round", tray: null,
 };
 
 // ================================================================ THIRD PERSON
@@ -109,7 +109,7 @@ function partTris(obj) {
   return tris;
 }
 const _cp = new T.Vector3();
-function surfDist(tris, p) { let d = Infinity; for (const t of tris) { t.closestPointToPoint(p, _cp); d = Math.min(d, _cp.distanceTo(p)); } return d; }
+function surfDist(tris, p) { let d = Infinity; for (const t of tris) { if (t.getArea() < 1e-12) continue; t.closestPointToPoint(p, _cp); const e = _cp.distanceTo(p); if (e < d) d = e; } return d; }
 // the drawn part a dwell anchor is on
 function partFor(model, key) {
   const R = RL.rig(model);
@@ -124,15 +124,31 @@ function partFor(model, key) {
   return (name && R.pv[name]) || null;
 }
 
-function freshRig(c) {
+// ONE BODY THROUGH EVERY GUN, as the game does it (a state one reload leaves
+// behind must not poison the next gun): the last pass reuses one rig
+let shared = null;
+function freshRig(c, keep) {
+  if (keep && shared) return shared;
   const scene = new T.Scene();
   const rig = CBZ.makeCharacter(Object.assign({}, base, c || {}));
   scene.add(rig.group);
   rig.group.updateMatrixWorld(true);
-  return { scene, rig, rest: restLengths(rig) };
+  const r = { scene, rig, rest: restLengths(rig) };
+  if (keep) shared = r;
+  return r;
 }
+// flat ground under the player (the ground rest, the floor clamp and weaponPhysics all read it)
+CBZ.floorAt = () => 0;
 const drops = [];
-CBZ.debris = { adopt(m) { m.updateMatrixWorld(true); drops.push(m.getWorldPosition(new T.Vector3())); } };
+// the REAL debris sim takes the empties (its bodies then live in the world
+// the player stands in); wrapped only to count what it was handed
+if (process.env.RHC_REAL_DEBRIS) {
+  try { vm.runInContext(read("src/systems/debris.js"), ctx, { filename: "src/systems/debris.js" }); } catch (e) { console.log("  note: debris.js did not load (" + e.message + ")"); }
+}
+if (CBZ.debris && CBZ.debris.adopt) {
+  const real = CBZ.debris.adopt;
+  CBZ.debris.adopt = function (m, o) { m.updateMatrixWorld(true); drops.push(m.getWorldPosition(new T.Vector3())); return real(m, o); };
+} else CBZ.debris = { adopt(m) { m.updateMatrixWorld(true); drops.push(m.getWorldPosition(new T.Vector3())); } };
 function frame(rig, dt) {
   for (const [o, fn] of updates) if (o < 10) fn(dt);
   CBZ.animChar(rig, 0, dt);
@@ -140,9 +156,9 @@ function frame(rig, dt) {
   for (const [, fn] of always) fn(dt);
 }
 const rowsTP = [];
-const BODIES = [{ label: "man", c: {} }, { label: "woman", c: { build: "f" } }, { label: "teen", c: { age: 13 } }];
+const BODIES = [{ label: "man", c: {} }, { label: "woman", c: { build: "f" } }, { label: "teen", c: { age: 13 } }, { label: "one-rig", c: {}, keep: true }, { label: "aimed", c: {}, keep: true, aim: true }];
 function tpCase(id, B) {
-  const { scene, rig, rest } = freshRig(B.c);
+  const { scene, rig, rest } = freshRig(B.c, B.keep);
   CBZ.scene = scene; CBZ.game = { mode: "city" };
   CBZ.player = { dead: false, pos: rig.group.position };
   CBZ.playerChar = rig;
@@ -151,7 +167,7 @@ function tpCase(id, B) {
   scene.add(CBZ.camera);
   CBZ.cam = { pitch: 0 };
   CBZ.playerArmed = () => true; CBZ.currentWeaponId = id; CBZ.weaponInventory = [id];
-  CBZ.tpPresenting = () => false;
+  CBZ.tpPresenting = () => !!B.aim;
   CBZ.playerAimDir = (o) => o.set(0, 0, 1);
   const wi = CBZ.FPS_WEAPONS.findIndex((w) => w.id === id);
   const row = CBZ.FPS_WEAPONS[wi];
@@ -160,7 +176,7 @@ function tpCase(id, B) {
   CBZ.cityPeds = []; CBZ.cityCops = [];
   const slot = CBZ.buildActorWeapon(id).userData.weaponSlot;
   const dt = 1 / 60;
-  const setPose = () => { rig.aimingPose = false; rig.carryPose = true; rig.aimLong = slot !== "pistol" && slot !== "utility"; };
+  const setPose = () => { rig.aimingPose = !!B.aim; rig.carryPose = !B.aim; rig.aimLong = slot !== "pistol" && slot !== "utility"; };
   for (let f = 0; f < 60; f++) { setPose(); frame(rig, dt); }
   const prop = CBZ.tpHandWeapon();
   const tag = `3p/${B.label}/${id}`;
@@ -186,6 +202,8 @@ function tpCase(id, B) {
     const p = rp.p;
     // no arm stretched
     const L = restLengths(rig);
+    const fin = [-1, 1].every((sd) => { const q = armPoints(rig, sd); return Number.isFinite(q.sh.x + q.el.y + q.wr.z); });
+    if (!fin) { check(false, `${tag}: the arms went non-finite at p ${p.toFixed(2)}`); break; }
     out.stretch = Math.max(out.stretch, ...[-1, 1].flatMap((s) => [Math.abs(L[s][0] - rest[s][0]), Math.abs(L[s][1] - rest[s][1])]));
     // the parts
     const f0 = R.fresh;
@@ -210,7 +228,7 @@ function tpCase(id, B) {
         out.carry = Math.max(out.carry, g.distanceTo(hw));
       }
       // the key moments: mid-dwell on a part, and arriving at one
-      const key = s.dwell ? (s.u >= 0.35 && s.u <= 0.65 ? s.a : null) : (s.u >= 0.95 ? s.b : null);
+      const key = s.dwell ? (s.u >= 0.35 && s.u <= 0.65 ? s.a : null) : (s.u >= 0.985 ? s.b : null);
       if (!key || !(key in DWELL_PART)) continue;
       const a = RL.point(prop, key, new T.Vector3());
       if (!a) { check(false, `${tag}: no anchor "${key}"`); continue; }
@@ -303,7 +321,7 @@ const armSrc = `
   const vm = new THREE.Group(); camera.add(vm);
   const gun = new THREE.Group();
   const weaponModels = [];
-  let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = []; let adsSightK = 1;
+  let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
   let punchT = 0, vmPunch = 0, guardK = 0;
   const fistT = [{ vis: false }, { vis: false }];
 ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
@@ -335,7 +353,7 @@ function partTrisM(model, obj) {
   return tris;
 }
 const _cpF = new FT.Vector3();
-function surfDistF(tris, p) { let d = Infinity; for (const t of tris) { t.closestPointToPoint(p, _cpF); d = Math.min(d, _cpF.distanceTo(p)); } return d; }
+function surfDistF(tris, p) { let d = Infinity; for (const t of tris) { if (t.getArea() < 1e-12) continue; t.closestPointToPoint(p, _cpF); const e = _cpF.distanceTo(p); if (e < d) d = e; } return d; }
 function partForF(model, key) {
   const R = FRL.rig(model), name = DWELL_PART[key];
   if (key === "port") { let o = null; model.traverse((m) => { if (!o && (m.name === "part_receiver" || m.name === "part_action")) o = m; }); return o; }
@@ -395,7 +413,7 @@ function fpCase(id) {
         out.carry = Math.max(out.carry, g.distanceTo(palm) / GUN_K);
       }
       // the key moments: mid-dwell on a part, and arriving at one
-      const key = s.dwell ? (s.u >= 0.35 && s.u <= 0.65 ? s.a : null) : (s.u >= 0.95 ? s.b : null);
+      const key = s.dwell ? (s.u >= 0.35 && s.u <= 0.65 ? s.a : null) : (s.u >= 0.985 ? s.b : null);
       if (!key || !(key in DWELL_PART)) continue;
       const a = FRL.point(model, key, new FT.Vector3());
       if (!a) { check(false, `${tag}: no anchor "${key}"`); continue; }
