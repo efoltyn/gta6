@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "7b85fbfd26692bee436b7e4ae00855514137889c",
-  "createdAt": "2026-09-28T15:36:33.539Z",
+  "sourceCommit": "b721cfb87314d2cbbcd70289d62505e06109f330",
+  "createdAt": "2026-09-28T22:22:24.412Z",
   "fileCount": 1158,
-  "totalBytes": 47172667,
+  "totalBytes": 47186148,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1793,8 +1793,8 @@
     },
     {
       "file": "src/entities/character.js",
-      "bytes": 189205,
-      "sha256": "0cd5208051a8c39b1ea381e5048bbbaebcda64d9aa9102aa9a7a89b49c32263c"
+      "bytes": 196916,
+      "sha256": "34568e7ba6fc851a9e65285e7389347509fa8b3a3c827194d073bb8091e82a92"
     },
     {
       "file": "src/entities/coins.js",
@@ -2113,8 +2113,8 @@
     },
     {
       "file": "src/systems/actorweapons.js",
-      "bytes": 44573,
-      "sha256": "cfe486ac4a337d5ec3d31c97de838b62a5f2a508f2e9e921407cb44e2634118a"
+      "bytes": 46555,
+      "sha256": "18c7303b69f31fa9d66ef995d3ad699364e847d9fe35563b5f83b6aba2361b62"
     },
     {
       "file": "src/systems/airframe.js",
@@ -2358,13 +2358,13 @@
     },
     {
       "file": "src/systems/fphands.js",
-      "bytes": 34424,
-      "sha256": "5df9289668f2166705abc2175a56d2e58a6b174ff7b7a0b3dea11478035dccc4"
+      "bytes": 34658,
+      "sha256": "9cc5b90deb4f332d9329dbb5969313ca12d588ac19cfdca337bf9d5bfe811f20"
     },
     {
       "file": "src/systems/fpsmode.js",
-      "bytes": 129881,
-      "sha256": "d58eed57311422d0ffebaa174e26b4cc920ff4943d087b96c232f45a1f23b8ee"
+      "bytes": 131740,
+      "sha256": "ea042ac6a18d82123ff236444fe1500e873fd9c98306e51aa29b29b80c0b52b1"
     },
     {
       "file": "src/systems/fullmap.js",
@@ -2408,8 +2408,8 @@
     },
     {
       "file": "src/systems/gunhands.js",
-      "bytes": 17152,
-      "sha256": "3bb8eca51a9e6422e804703f78f173e49435efb9c11a264e4989be99ecb332b6"
+      "bytes": 18071,
+      "sha256": "14d9e686b9691ff72eafaf3eaa04d6237224d2b05f02f4341ea2d0c217d42c78"
     },
     {
       "file": "src/systems/helditem_model.js",
@@ -2423,8 +2423,8 @@
     },
     {
       "file": "src/systems/holsterprops.js",
-      "bytes": 13341,
-      "sha256": "ae4cf7630a84ce88c4375e1e87d99a96b2dc6443d36eb760e3261aca20b2af0e"
+      "bytes": 13491,
+      "sha256": "b1c13804925863b1a7034878d0ab5dbf433dbefb3a873da0ead4c83b4f62da56"
     },
     {
       "file": "src/systems/hotbar_model.js",
@@ -2468,8 +2468,8 @@
     },
     {
       "file": "src/systems/interactions.js",
-      "bytes": 25706,
-      "sha256": "691644b8ed0d95b89093ebefd896a6455dc89dd68e274a5359ec0bdae669c967"
+      "bytes": 26281,
+      "sha256": "8bb984ce7d2184251309d6bf37b320aa4fbf5959176219de27eeb5e6b50443cc"
     },
     {
       "file": "src/systems/intimidate.js",
@@ -2553,8 +2553,8 @@
     },
     {
       "file": "src/systems/physics.js",
-      "bytes": 44085,
-      "sha256": "9e6976076bddbb522e1fc0053792316b27fbaf36917ae82c74ba7adcfc7e8e11"
+      "bytes": 44136,
+      "sha256": "78519e5b74c2f147f7c608589420d5be94eaa2fbacb02e059ee83e851dc7170a"
     },
     {
       "file": "src/systems/pieces.js",
