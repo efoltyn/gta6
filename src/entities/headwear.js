@@ -1833,6 +1833,9 @@
     const H = Head(form);
     const shell = cover.shell ? cover.shell(tails) : null, body = shell ? bodyMap(form) : null;
     const out = geo.clone();
+    // a hat holds the hair still: no follow morphs on the compressed copy
+    // (character.js hairFollowSync then keeps every influence at 0)
+    out.morphAttributes = {}; out.morphTargetsRelative = false;
     const pos = out.attributes.position;
     const BL = 0.045;
     for (let i = 0; i < pos.count; i++) {
@@ -1895,7 +1898,7 @@
     if (!ud.hairLods0) ud.hairLods0 = ud.hairLods || { near: m.geometry, far: m.geometry };
     const hairFn = CBZ.human && CBZ.human.geometry && CBZ.human.geometry.hair;
     if (styleOverride && hairFn && ud.hairS > 0) {
-      try { return { near: hairFn(styleOverride, ud.hairS, false), far: hairFn(styleOverride, ud.hairS, true) }; } catch (e) { /* fall through */ }
+      try { return { near: hairFn(styleOverride, ud.hairS, false, ud.hairYoke), far: hairFn(styleOverride, ud.hairS, true, ud.hairYoke) }; } catch (e) { /* fall through */ }
     }
     return ud.hairLods0;
   }

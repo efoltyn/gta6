@@ -407,14 +407,22 @@
     if (K.shades && neck) {
       const g1 = box(0.52 * k, 0.10 * k, 0.05 * k, 0x0c0d11);
       g1.position.set(0, hs * 0.60, hs * 0.50); add(neck, g1);
-      const arm = box(0.60 * k, 0.03 * k, 0.03 * k, 0x14161b);
+      const arm = box(0.62 * k, 0.03 * k, 0.03 * k, 0x14161b)   /* ends off the skull sides (0.60 lay on them) */;
       arm.position.set(0, hs * 0.61, hs * 0.30); add(neck, arm);
     }
     if (K.earpiece && neck) {
       const bud = box(0.06 * k, 0.08 * k, 0.06 * k, 0xdcd8cf);
       bud.position.set(hs * 0.46, hs * 0.56, hs * 0.06); add(neck, bud);
-      const wire = box(0.022 * k, 0.30 * k, 0.022 * k, 0xd2cec5);
-      wire.position.set(hs * 0.44, hs * 0.28, -hs * 0.06); wire.rotation.z = 0.14; add(neck, wire);
+      /* the lead STOPS AT THE COLLAR: it rides the neck, and run 0.30 down it
+         ended 3 cm inside the yoke, so every head turn swept it through the
+         shoulders (tools/overlap-audit.mjs). Its bottom is the yoke top as
+         this rig built it (measured), plus a nod's worth of air. */
+      const wTop = hs * 0.28 + 0.15 * k;
+      let wBot = hs * 0.28 - 0.15 * k;
+      const yp = yoke && yoke.geometry && yoke.geometry.parameters;
+      if (yp && yoke.parent === neck.parent) wBot = Math.max(wBot, yoke.position.y + yp.height / 2 - neck.position.y + 0.015 * k);
+      const wire = box(0.022 * k, (wTop - wBot) / Math.cos(0.14), 0.022 * k, 0xd2cec5);
+      wire.position.set(hs * 0.44, (wTop + wBot) / 2, -hs * 0.06); wire.rotation.z = 0.14; add(neck, wire);
     }
     /* EPAULETTES ride the SHOULDER YOKE, which is the slab character.js calls
        `collar` — it is the top of the torso column and it is exactly where a
@@ -424,11 +432,19 @@
          and clothes.js's jacket shell is 0.62, so the first boards were built
          INSIDE the coat and no general had any. Sized off the shell's own
          depth plus a margin, and lifted clear of the slab's top face. */
-      const cw = P.collarW || 0.94, chh = P.collarH || 0.18;
+      /* …AND THE HEAD (tools/overlap-audit.mjs: a 0.21 board centred 0.12 in
+         from the yoke's end reached in under the jaw and the ear, 23 mm into
+         the head on a walking woman). The board spans from a clearance
+         outside the ears to the yoke's own end, both MEASURED on this rig
+         (the yoke is clamped wider than the profile says; ears 0.35 of a
+         unit head out). */
+      const yp = yoke.geometry && yoke.geometry.parameters;
+      const cw = (yp && yp.width) || P.collarW || 0.94, chh = (yp && yp.height) || P.collarH || 0.18;
       const dep = ((P.jacketD || (P.torsoD || 0.5) + 0.12)) + 0.06;
-      const ex = cw / 2 - 0.12;
+      const inner = 0.35 * k + 0.02, outer = cw / 2 - 0.01;   // (its end ON the yoke's end face was a 429-sample stipple)
+      const bw = Math.max(0.05, Math.min(0.21, outer - inner)), ex = outer - bw / 2;
       for (let s2 = -1; s2 <= 1; s2 += 2) {
-        const ep = box(0.21, 0.05, dep, K.epauletteColor != null ? K.epauletteColor : trim);
+        const ep = box(bw, 0.05, dep, K.epauletteColor != null ? K.epauletteColor : trim);
         ep.position.set(s2 * ex, chh / 2 + 0.008, 0);
         add(yoke, ep);
         if (K.pips) {
@@ -503,10 +519,13 @@
             // the forearm is a tapered loft now (entities/character.js LIMBS):
             // each ring is sized to the sleeve's REAL section at its own height
             // (a box ring sized off the old forearm box stood 4 cm off the cuff)
-            for (const [y, h] of [[-ah * 0.5 + 0.075, 0.038], [-ah * 0.5 + 0.135, 0.026]]) {
-              const lh = CBZ.humanLimbHalfAt ? CBZ.humanLimbHalfAt(a.geometry, y) : null;
-              const aw = lh ? lh.hx * 2 + 0.018 : (gp.width || 0.3) * 1.06;
-              const ad = lh ? lh.hz * 2 + 0.018 : (gp.depth || 0.3) * 1.06;
+            // both rings well down the forearm: the upper arm's joint dome hangs
+            // ~0.11 below the elbow and a ring inside it crossed the sleeve (15 mm)
+            const Lf = a.geometry && a.geometry.userData && a.geometry.userData.limb, yEnd = Lf ? Lf.y0 - Lf.sy : -ah * 0.5;
+            for (const [y, h] of [[yEnd + 0.06, 0.038], [yEnd + 0.115, 0.026]]) {
+              const lh = CBZ.humanLimbHalfAt ? CBZ.humanLimbHalfAt(a.geometry, y + h / 2) : null;   // the section at its THICKER (elbow-side) edge
+              const aw = lh ? lh.hx * 2 + 0.024 : (gp.width || 0.3) * 1.06;
+              const ad = lh ? lh.hz * 2 + 0.024 : (gp.depth || 0.3) * 1.06;
               const ring = box(aw, h, ad, gold);
               ring.position.set(0, y, lh ? lh.cz : 0);
               add(a, ring);
@@ -560,31 +579,71 @@
           coatHex = enc(shade(base != null ? base : (fit.colors.torso || 0x1a1c22), -0.55));
         }
         const jw = (P.jacketW || cb.w + 0.06), jd = (P.jacketD || cb.d + 0.12);
-        const top = -cb.h / 2 - 0.10, skirtH = 0.34, tailH = 0.48;
+        const top = -cb.h / 2 - 0.10, skirtH = 0.34;
         const side = shade(coatHex, -0.12);
-        const mk = function (w, h, d, hex, x, y, z) {
-          const m2 = box(w, h, d, hex); m2.position.set(x, y, z); add(chest, m2); return m2;
-        };
-        // the flare: four panels, open top and bottom
-        mk(jw - 0.03, skirtH, 0.05, coatHex, 0, top - skirtH / 2, jd / 2 - 0.025);
-        mk(jw - 0.03, skirtH, 0.05, side,    0, top - skirtH / 2, -jd / 2 + 0.025);
-        mk(0.05, skirtH, jd - 0.05, side, (jw - 0.03) / 2 - 0.025, top - skirtH / 2, 0);
-        mk(0.05, skirtH, jd - 0.05, side, -(jw - 0.03) / 2 + 0.025, top - skirtH / 2, 0);
-        // the tails, front and back, with the legs swinging between them
-        mk(jw - 0.14, tailH, 0.05, coatHex, 0, top - skirtH - tailH / 2 + 0.02, cb.d / 2 + 0.03);
-        mk(jw - 0.09, tailH + 0.04, 0.05, side, 0, top - skirtH - tailH / 2, -cb.d / 2 - 0.03);
-        // one hem line so the skirt has an edge instead of ending in the air
-        mk(jw - 0.02, 0.03, jd + 0.005, shade(coatHex, -0.35), 0, top - skirtH + 0.015, 0);
+        /* THE SKIRT RIDES THE THIGHS (tools/overlap-audit.mjs). Hung on the
+           chest, a panel in front of a leg is a panel a stride walks through:
+           77 mm standing, 89 mm walking, the tails worse still. So the coat
+           is split down the middle and each HALF — its front, back and side
+           panels — hangs on its own leg's hip pivot: it swings with that
+           thigh, the two halves part and close like real coat skirts, and no
+           thigh can reach its own panels. It stops at the knee (a panel on
+           the thigh cannot follow the shin, so the old below-knee tails and
+           the hem bar that crossed both legs are gone). Chest-local numbers
+           are carried into each leg's frame off the rig. */
+        // …and clear of the hips it hangs round: a woman's pelvis (0.46 deep)
+        // and waist sit INSIDE a 0.56 jacket-depth skirt's panels (26 mm
+        // standing) — so the skirt is at least a standoff outside whichever is
+        // widest / deepest, measured
+        let jwE = jw, jdE = jd;
+        for (const m of [rig.skinSlots.pelvis && rig.skinSlots.pelvis[0], rig.skinSlots.torso && rig.skinSlots.torso[1]]) {
+          const f = m && m.userData && m.userData._cbzFlat && m.userData._cbzFlat.g, pp = (f || (m && m.geometry)) && (f || m.geometry).parameters;
+          if (pp && pp.width) { jwE = Math.max(jwE, pp.width + 0.03 + 0.16); jdE = Math.max(jdE, pp.depth + 0.12); }
+        }
+        const legs = [rig.parts && rig.parts.ll, rig.parts && rig.parts.rl];
+        for (let li = 0; li < legs.length; li++) {
+          const leg = legs[li];
+          if (!leg || !leg.add || !leg.position) continue;
+          const sgn = leg.position.x < 0 ? -1 : 1;
+          const ox = -leg.position.x, oy = chest.position.y - leg.position.y, oz = 0;   // chest-local -> leg-local
+          const mk = function (w, h, d, hex, x, y, z) {
+            const m2 = box(w, h, d, hex); m2.position.set(x + ox, y + oy, z + oz); add(leg, m2); return m2;
+          };
+          // the skirt starts well BELOW the hip joint (a stride lifts its top
+          // corner ~0.15 toward the chest; a woman's chest box ends 0.3
+          // above it, and a panel hung from there swung up into her ribs)
+          const hw = (jwE - 0.03) / 2, y = Math.min(oy + top, -0.18) - skirtH / 2 - oy;
+          mk(hw, skirtH, 0.05, coatHex, sgn * hw / 2, y, jdE / 2 - 0.025);         // front half
+          mk(hw, skirtH, 0.05, side, sgn * hw / 2, y, -jdE / 2 + 0.025);           // back half
+          mk(0.05, skirtH, jdE - 0.05, side, sgn * (hw - 0.025), y, 0);            // the side
+        }
       }
       /* A CAPE hangs off the YOKE, not the chest: it has to clear the
          shoulders or it reads as a backpack. */
       if (K.cape != null && yoke) {
         const cw = P.collarW || 0.94;
-        const cp = box(cw + 0.10, 1.02, 0.05, K.cape);
-        cp.position.set(0, -0.50, -(P.collarD || 0.52) / 2 - 0.03);
+        /* A RIGID cape can only hang where nothing swings through it
+           (tools/overlap-audit.mjs): at 0.10 wider than the yoke it hung behind
+           the arms, which swing back into it every stride, and at 1.02 long
+           it reached past the hips into the back-swing of the thighs (11 mm).
+           It is the yoke's own width (the arms swing OUTSIDE it) and it ends
+           a clearance above the hip joints, both measured on this rig. */
+        const yw = (yoke.geometry && yoke.geometry.parameters && yoke.geometry.parameters.width) || cw;
+        const capeW = Math.min(cw + 0.10, yw - 0.02);
+        let capeBot = -1.01;
+        const hipLeg = rig.parts && rig.parts.ll;
+        if (hipLeg && hipLeg.position && rig.body && yoke.parent === rig.body) {   // body sits at the model origin
+          capeBot = Math.max(capeBot, hipLeg.position.y + (P.legW || 0.34) / 2 - yoke.position.y);
+        }
+        const cp = box(capeW, 0.01 - capeBot, 0.05, K.cape);
+        cp.position.set(0, (0.01 + capeBot) / 2, -(P.collarD || 0.52) / 2 - 0.03);
         cp.rotation.x = -0.05; add(yoke, cp);
         const collarRoll = box(cw + 0.14, 0.11, 0.16, K.capeTrim != null ? K.capeTrim : shade(K.cape, 0.3));
-        collarRoll.position.set(0, 0.03, -(P.collarD || 0.52) / 2 - 0.02); add(yoke, collarRoll);
+        // its top face sits just UNDER the yoke's (at 0.03 + 0.055 it landed on a
+        // 0.17 yoke's top exactly: 645 samples of stipple; proud of it, the skull
+        // base met it at every step)
+        const yh = (yoke.geometry && yoke.geometry.parameters && yoke.geometry.parameters.height) || P.collarH || 0.18;
+        collarRoll.position.set(0, yh / 2 - 0.012 - 0.055, -(P.collarD || 0.52) / 2 - 0.02); add(yoke, collarRoll);
       }
       if (K.plate != null) {
         // a slab carrier over the chest: the one silhouette change that makes

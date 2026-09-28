@@ -268,8 +268,8 @@
       // cannot drift into the coplanar vest/jacket stipple the live body just
       // had. Degrade-safe: no export → the authored shells, exactly as before.
       const fit = CBZ.cityArmorFit && CBZ.cityArmorFit(rig);
-      mountArmorMesh("vest", rig.body, chest.color, 0, 1.40, 0, out, fit && fit.vest);
-      if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, 1.58, fit ? fit.bandZ : 0.02, out, fit && fit.band);   // raised plate band (SWAT/plate reads heavier)
+      mountArmorMesh("vest", rig.body, chest.color, 0, fit ? fit.vestY : 1.40, 0, out, fit && fit.vest);
+      if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, fit ? fit.bandY : 1.58, fit ? fit.bandZ : 0.02, out, fit && fit.band);   // raised plate band (SWAT/plate reads heavier)
     }
     const head = k.head && KITS[k.head];
     // the helmet is the same fitted ballistic lid armor.js puts on the live

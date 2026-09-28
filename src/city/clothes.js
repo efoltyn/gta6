@@ -209,10 +209,24 @@
     const P = ch && ch.profile;
     if (!P || !bodyFit()) return null;
     const sp = torsoSplit(P);
-    return {
+    const f = {
       sx: P.torsoW / 0.92, sy: sp.colH / 0.95, sz: P.torsoD / 0.50,
       y: -sp.waistH / 2,
     };
+    /* UNDER THE CHIN, MEASURED (tools/overlap-audit.mjs: a teen's bow tie
+       sat 29 mm up inside his chin). The frame was authored against the adult
+       male, whose neck pivot — the jaw line — is 0.46 above his chest centre,
+       exactly where the knot tops out; a younger body's neck sits LOWER on its
+       chest than the scaled frame puts the knot. So the frame's neck line is
+       held at least a clearance under THIS rig's neck pivot (read off the rig,
+       so a reshaped torso or neck carries it along). */
+    const host = ch.skinSlots && ch.skinSlots.torso && ch.skinSlots.torso[0];
+    if (host && ch.neck && host.parent === ch.neck.parent) {
+      const clear = (CBZ.CHAR_YOKE_CLEAR != null) ? CBZ.CHAR_YOKE_CLEAR : 0.01;
+      const neckRel = ch.neck.position.y - host.position.y;
+      f.y = Math.min(f.y, neckRel - 0.46 * f.sy - 4 * clear);   // a seated nod (0.04 rad) still clears
+    }
+    return f;
   }
 
   // ---- color helpers --------------------------------------------------------
