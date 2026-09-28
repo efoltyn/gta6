@@ -217,13 +217,23 @@ function arenaWorld() {
       f.oppA.char.group.rotation.y = Math.PI;
       // he is not swinging back this beat (his fist landing first would cut yours)
       f.ocd = 99; V.cancelStrike(f.oppA);
-      for (let i = 0; i < 50; i++) { AP.tickCage(DT); CBZ.player.pos.set(op.x, op.y, op.z - 1.15); playerFrame(W); W.frame(DT); }
+      // his 10 s of free swings can have put YOU down (a flash knockdown on
+      // the jaw, a leg kick): a man on the floor throws nothing, so get up
+      // first (the flake this check had: seed 7 swung from the floor)
+      const pcF = CBZ.playerChar;
+      for (let i = 0; i < 50 || (i < 900 && pcF.fall && pcF.fall.on); i++) { f.ocd = 99; AP.tickCage(DT); CBZ.player.pos.set(op.x, op.y, op.z - 1.15); playerFrame(W); W.frame(DT); }
       f.ocd = 99;
       const hpB = f.oppHp;
-      V.strike(pa, null, { kind: "cross", candidates: (out) => { for (const a of CBZ.cityMeleeTargets) out.push(a); return out; },
-        onLand: (res) => res.target.meleeHit(res, 12 * res.dmgMul, "light") });
+      let how = "no contact";
+      const oc = f.oppA.char;
+      const pre = `his fall ${!!(oc.fall && oc.fall.on)}, block ${f2(oc.blockK)}, dodge ${f2(oc.dodgeT)}, gap ${f2(Math.hypot(op.x - CBZ.player.pos.x, op.z - CBZ.player.pos.z))}`;
+      const pc = CBZ.playerChar;
+      const mine = `you: fall ${!!(pc.fall && pc.fall.on)}, punchT ${f2(pc.punchT)}, strike ${!!V.strikeOf(pa)}`;
+      const SS = V.strike(pa, null, { kind: "cross", candidates: (out) => { for (const a of CBZ.cityMeleeTargets) out.push(a); return out; },
+        onLand: (res) => { how = res.blocked ? "blocked" : "landed " + res.zone; res.target.meleeHit(res, 12 * res.dmgMul, "light"); },
+        onWhiff: (res) => { how = res.slipped ? "slipped" : "whiffed"; } });
       for (let i = 0; i < 40; i++) { f.ocd = 99; AP.tickCage(DT); CBZ.player.pos.set(op.x, op.y, op.z - 1.15); playerFrame(W); W.frame(DT); }
-      check(f.oppHp < hpB, "arena cage: your landed fist scores (" + f2(hpB) + " -> " + f2(f.oppHp) + ")");
+      check(f.oppHp < hpB, "arena cage: your landed fist scores (" + f2(hpB) + " -> " + f2(f.oppHp) + ", " + how + "; " + pre + "; " + mine + ", started " + !!SS + ")");
     }
     AP.endCage();
     check(!CBZ.cityMeleeTargets.length, "arena cage: the target list empties when the bout ends");

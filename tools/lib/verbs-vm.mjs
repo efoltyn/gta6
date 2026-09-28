@@ -23,8 +23,28 @@ const ROOT = new URL("../../", import.meta.url);
 const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const has = (f) => existsSync(new URL(f, ROOT));
 
+/* A SEEDED Math.random inside the sandbox: every check that loads the rigs
+   through here is deterministic (the struggle's brace noise, a cage
+   opponent's random guard, a ragdoll's scatter...). opts.seed, else
+   CBZ_SEED from the environment (sweep it to hunt a real flake), else a
+   fixed default. The host's own Math is untouched. */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export function seededMath(seed) {
+  const M = Object.create(null);
+  for (const k of Object.getOwnPropertyNames(Math)) M[k] = Math[k];
+  M.random = mulberry32(seed | 0);
+  return M;
+}
 export function loadVerbsVM(opts = {}) {
-  const ctx = vm.createContext({ console, Math, performance, setTimeout, clearTimeout, Float32Array, Uint8Array });
+  const seed = opts.seed != null ? opts.seed : (process.env.CBZ_SEED ? +process.env.CBZ_SEED : 20260928);
+  const ctx = vm.createContext({ console, Math: seededMath(seed), performance, setTimeout, clearTimeout, Float32Array, Uint8Array });
   ctx.window = ctx; ctx.self = ctx;
   const noop = () => {};
   const el = () => ({
