@@ -487,6 +487,7 @@
             id: def.id + ":" + z.id + ":use", slot: "e", prio: 30,
             label: z.label,
             canShow: z.canShow || null,
+            cuffOk: !!z.cuffOk,           // usable with your hands cuffed (a booking desk)
             onSelect() { z.onUse(ctx); },
           }],
         });

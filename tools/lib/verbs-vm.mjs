@@ -103,6 +103,7 @@ export function loadVerbsVM(opts = {}) {
   run("src/systems/physics.js");
   const loaded = { physics: !!CBZ.groundAt, moves: !!(CBZ.moves && CBZ.moves.step), grapple: false, strike: false, meleePoses: false };
   if (opts.grapple !== false) { run("src/systems/grapple.js"); loaded.grapple = !!CBZ.body; }
+  if (has("src/entities/handcuffs.js")) run("src/entities/handcuffs.js");
   run("src/systems/verbs.js");
   if (has("src/systems/arrest.js")) run("src/systems/arrest.js");
   run("src/entities/verbposes.js");

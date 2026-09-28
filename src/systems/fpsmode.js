@@ -204,8 +204,21 @@
     if (CBZ.game.mode !== "city") return false;
     return CBZ.playerHolster(on);
   };
+  /* CUFFED: THE HANDS ARE BEHIND YOUR BACK (CBZ.arrest.playerCuffed, the
+     one question). Nothing is in them, so nothing is drawn: armed() reads
+     false (no fire, no swap, no aim, no carried gun on the body in third
+     person), and the whole first-person viewmodel goes (no fists, no arms,
+     no gun, no reticle). Ownership and the selected gun are untouched, so
+     taking the cuffs off hands everything straight back. */
+  function cuffedHands() {
+    const C = CBZ.cuffedPlayer;
+    if (C && C.on) return C.on();
+    const pc = CBZ.playerChar;
+    return !!(pc && pc.cuffed);
+  }
   function armed() {
-    if (holstered()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
+    if (holstered()) return false;
+    if (cuffedHands()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
   CBZ.fpsArmed = armed;   // systems/helditems.js: a drawn gun puts the held charge/frag away
@@ -2291,7 +2304,7 @@
   };
   // respawn / mode reset: cancel the tumble, restore the gun group, clear the prop
   CBZ.fpsDeathDropReset = function () {
-    if (ddT >= 0) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = fps.active; }
+    if (ddT >= 0) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = fps.active && !cuffedHands(); }
     clearWorldDrop();
   };
 
@@ -4648,6 +4661,7 @@
   // WHY: scrolling/Q through a growing arsenal is clumsy; an RPG, an AK and a
   // sidearm should each be one keypress (GTA/CS muscle memory). 0-based slot.
   function selectWeaponSlot(slot) {
+    if (cuffedHands()) return false;
     const oldId = armed() ? (CBZ.currentWeaponId || weaponIdOf(fps.weapon)) : null;
     if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // drawing a gun un-holsters (re-arms)
     if (CBZ.game.mode === "escape") CBZ.game.prisonHolstered = false;
@@ -4784,7 +4798,7 @@
   // EXISTING throw / plant path for that kind; flashlight -> click the lamp;
   // phone -> raise/stow the handset. Returns true if it acted on a valid slot.
   function cityHotbarSelect(barIdx) {
-    if (CBZ.game.mode !== "city") return false;
+    if (CBZ.game.mode !== "city" || cuffedHands()) return false;
     const bar = cityHotbar();
     if (barIdx < 0 || barIdx >= bar.length) return false;
     const e = bar[barIdx];
@@ -4833,7 +4847,7 @@
     // Same owner as the per-frame pass below (aquaticRide): the eye toggle can
     // land AFTER this frame's onAlways(52), so without it a [V] pressed mid-ride
     // flashed one frame of fists before the next frame took them away.
-    vm.visible = on && !aquaticRide();
+    vm.visible = on && !aquaticRide() && !cuffedHands();
     const cross = crossEl();
     if (cross) {
       // Leaving FP used to write display:none even though shoulderActive()
@@ -4976,13 +4990,15 @@
     // scoped look is proportionally finer (systems/lockon.js real sniper scope)
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - e.movementY * SENS * sensMul));
+    // cuffed: you can still look round, just not straight up or down at your feet
+    if (CBZ.cuffedPlayer && cuffedHands()) fps.fp = CBZ.cuffedPlayer.clampPitch(true, fps.fp);
   });
   document.addEventListener("mousedown", (e) => {
     if (CBZ.islandModeOn(CBZ.game.mode)) return;   // island games: grapple / the mount own the pointer, not gunplay
     if ((fps.active || shoulderActive() || carGunEligible()) && CBZ.game.state === "playing" && document.pointerLockElement) {
       e.preventDefault();
       if (e.button === 0) fireControl(true);
-      else if (e.button === 2) aimHeld = true;   // RMB raises the gun to aim (in a car: out of the window)
+      else if (e.button === 2) aimHeld = !cuffedHands();   // RMB raises the gun to aim (in a car: out of the window)
     }
   });
   document.addEventListener("mouseup", (e) => {
@@ -5168,7 +5184,8 @@
        fpsScopeTube(), not fpsScoped(), is the question. */
     const tubeUp = !!(CBZ.fpsScopeTube && CBZ.fpsScopeTube());
     const seatGun = carGun();
-    if (ddT < 0) vm.visible = !!((fps.active || seatGun) && !chutePresentation && !aquaticRide() && !tubeUp);
+    const cuffs = cuffedHands();
+    if (ddT < 0) vm.visible = !!((fps.active || seatGun) && !chutePresentation && !aquaticRide() && !tubeUp && !cuffs);
     const aiming = fps.active || shoulderActive() || seatGun;
     /* A SHARK HAS NO GUNSIGHT.
 
@@ -5186,7 +5203,7 @@
 
        Same predicate as the hands, for the same reason, so the two cannot
        disagree about whether you are currently a person. */
-    const crossShow = aiming && !chutePresentation && !aquaticRide() &&
+    const crossShow = aiming && !chutePresentation && !aquaticRide() && !cuffs &&
       CBZ.game.state === "playing";
     const cross = crossEl();
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }

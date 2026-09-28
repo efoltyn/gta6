@@ -9,9 +9,12 @@
    60 fps in plain node (tools/lib/verbs-vm.mjs). A scripted player (keys,
    presses and feet) against real officers:
 
-     1. COMPLIANT   a man who stands still for the order is cuffed in ~3 s,
-                    and his controls are his until the hands land (never
-                    held, stunned or locked during the approach)
+     1. COMPLIANT   a man who puts his hands up for the order is cuffed in
+                    ~3 s, and his controls are his until the hands land
+                    (never held, stunned or locked during the approach).
+                    A man who only STANDS there (hands down) is not cuffed on
+                    his feet: he is tased and cuffed on the floor (owner:
+                    "I need to get knocked down or knocked out or tased")
      2. WALK OFF    a man who walks away while the officer reaches is not
                     cuffed (the reach misses)
      3. THE LUNGE   a standing man is taken down; a man sprinting away from
@@ -165,7 +168,7 @@ const EXEC = {
         far: true,
         onEnd(S) {
           const k = S.result && S.result.outcome;
-          if (k === "open" || k === "wall") { A.subdue(2.2, "pinned"); V.getUp(V.playerActor()); A.take(a, { pinned: true }); }
+          if (k === "open" || k === "wall") { A.subdue(2.2, "pinned"); if (!V.cuffDown) V.getUp(V.playerActor()); A.take(a, { pinned: true }); }
         },
       });
       return S || false;
@@ -181,7 +184,8 @@ function enlist(c) {
 }
 const SS = { speed: 0, handsUp: false, kneeling: false, prone: false, subdued: false, cuffed: false, behind: false, backup: 0, armed: false, aiming: false, attacking: false, fled: false, seen: true, dist: 0 };
 function suspect(c) {
-  SS.speed = P.speed; SS.subdued = A.subdued(); SS.cuffed = !!PC.cuffed; SS.prone = SS.subdued;
+  SS.speed = P.speed; SS.subdued = A.subdued(); SS.cuffed = !!PC.cuffed; SS.prone = SS.subdued || !!A.downState(V.playerActor());
+  SS.handsUp = !!PC.handsUp;
   SS.behind = A.behind(c); SS.backup = A.backup(c, 3.2);
   SS.dist = Math.hypot(P.pos.x - c.pos.x, P.pos.z - c.pos.z);
   return SS;
@@ -194,6 +198,7 @@ function suspect(c) {
     reset(); resetPlayer(0, 3.0, 0);
     const c = cop(0, 0, { yaw: 0 }); enlist(c);
     settle();
+    PC.handsUp = true;               // he gives up: hands up for the order
     B.authority.begin(c, P, "wanted", { roe: "nonlethal", warnRange: 14, orderRange: 6, cuffRange: 1.5, patience: 6, skipWarn: true });
     let t = 0, grabT = -1, cuffT = -1, leak = null;
     for (let f = 0; f < 60 * 12; f++) {
@@ -215,6 +220,37 @@ function suspect(c) {
   check(ok && Math.abs(avg(handsToCuffs) - 2.7) < 0.8, "compliant: hands-on to cuffs ~2.5-3 s (one wrist, then the other)", `avg ${avg(handsToCuffs).toFixed(2)} s, order to cuffs ${avg(times).toFixed(2)} s`);
   check(!leaks.length, "compliant: controls are his until the hands land", leaks[0] || "never held / stunned / locked before the grab");
   // (then the escort: cuffed men are walked)
+}
+// ======================================================= 1b. HANDS DOWN, ON HIS FEET
+// he stops for the order but never gives up: never cuffed standing; the
+// officer takes him down (the taser) and cuffs him on the floor
+{
+  let standingCuffs = 0, cuffedN = 0, tasedN = 0, groundCuffs = 0;
+  for (let i = 0; i < 10; i++) {
+    reset(); resetPlayer(0, 3.0, 0);
+    const c = cop(0, 0, { yaw: 0 }); enlist(c);
+    settle();
+    B.authority.begin(c, P, "wanted", { roe: "nonlethal", warnRange: 14, orderRange: 6, cuffRange: 1.5, patience: 3, skipWarn: true });
+    let handsOnDown = null, tased = false;
+    for (let f = 0; f < 60 * 20; f++) {
+      const r = B.authority.caseOf(c) ? B.authority.step(c, DT, suspect(c)) : null;
+      if (r && r.verb === "tase") tased = true;
+      moveCop(c, DT);
+      frame();
+      const held = V.playerHeld();
+      if (held && handsOnDown == null) handsOnDown = !!A.downState(V.playerActor());
+      if (PC.cuffed) break;
+    }
+    if (PC.cuffed) {
+      cuffedN++;
+      if (handsOnDown === false && !tased) standingCuffs++;
+      if (handsOnDown) groundCuffs++;
+    }
+    if (tased) tasedN++;
+  }
+  check(standingCuffs === 0, "hands down: a man on his feet who never gave up is never cuffed standing", `cuffed ${cuffedN}/10, tased ${tasedN}/10, standing-untased cuffs ${standingCuffs}`);
+  check(tasedN >= 8, "hands down: the officer takes him down first (the taser)", `tased ${tasedN}/10`);
+  if (V.cuffDown) check(groundCuffs === cuffedN && cuffedN > 0, "hands down: tased, he is cuffed ON the floor (knee on his back)", `${groundCuffs}/${cuffedN} cuffed down`);
 }
 
 // =============================================================== 2. WALK OFF
@@ -324,7 +360,7 @@ function chase(n, stamina, dist) {
     const r = A.tase(c, { chance: 1 });
     pl.strategy = "timed";
     for (let f = 0; f < 30; f++) frame();
-    V.getUp(V.playerActor());
+    if (!V.cuffDown) V.getUp(V.playerActor());
     const h = A.take(c, { subdued: true });
     for (let f = 0; f < 60 * 8 && h && !PC.cuffed && !h.done; f++) frame();
     if (r.hit && PC.cuffed) cuffed++;
@@ -342,6 +378,10 @@ function trial(sc) {
   if (sc.cuffed) V.setCuffs(V.playerActor(), true);
   P.stamina = sc.stamina != null ? sc.stamina : 100;
   settle();
+  // the hands only come for a man who gave up (then thinks better of it) or
+  // one pinned under a tackle
+  if (!sc.cuffed) PC.handsUp = true;
+  if (sc.pinned) A.subdue(2.2, "pinned");
   let res = null;
   const h = A.take(c, {
     pinned: !!sc.pinned,

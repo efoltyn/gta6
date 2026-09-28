@@ -535,7 +535,9 @@
     if (!CBZ.islandModeOn(g.mode)) return;
     const P = CBZ.player, S = CBZ.SURV;
     if (P.stamina === undefined) P.stamina = S.staminaMax;
-    if (P.sprint) P.stamina = Math.max(0, P.stamina - S.staminaDrain * dt);
+    // cuffed (systems/cuffedplayer.js): running with your hands behind you blows you faster
+    const cufK = CBZ.cuffedPlayer ? CBZ.cuffedPlayer.staminaMul(CBZ.cuffedPlayer.on()) : 1;
+    if (P.sprint) P.stamina = Math.max(0, P.stamina - S.staminaDrain * cufK * dt);
     else P.stamina = Math.min(S.staminaMax, P.stamina + S.staminaRegen * dt);
 
     // LAST ONE STANDING is the DISASTER game's win alone. The shark sim keeps

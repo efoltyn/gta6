@@ -1176,7 +1176,8 @@
             if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
             if (CBZ.shake) CBZ.shake(0.7);
             if (AR()) AR().subdue(2.2, "pinned");
-            if (V.getUp) { try { V.getUp(pa()); } catch (e) {} }
+            // he stays on you and cuffs you on the floor
+            if (!V.cuffDown && V.getUp) { try { V.getUp(pa()); } catch (e) {} }
             cuffs(true, { pinned: true });
             return;
           }
@@ -1213,6 +1214,13 @@
     if (mine == null) return out;
     for (const n of CBZ.npcs || []) if (n && !n.dead && n.gang === mine) out.push(n);
     return out;
+  }
+  // down on the floor or on your knees (crouched) with your hands empty:
+  // the only man the screw cuffs (systems/arrest.js's rule)
+  function gaveUp() {
+    const A = AR();
+    if (A && A.downState && A.downState(pa())) return true;
+    return !!player.crouch || !!(CBZ.playerChar && (CBZ.playerChar.handsUp || CBZ.playerChar.surrender));
   }
   function cuffs(rough, o) {
     o = o || {};
@@ -1364,6 +1372,8 @@
       if (au && au.caseOf(gd)) {
         // THE LADDER DECIDES: what the screw sees of you, it reads
         _sus.speed = pSpd; _sus.kneeling = !!player.crouch; _sus.attacking = swung; _sus.dist = d;
+        _sus.handsUp = !!(CBZ.playerChar && CBZ.playerChar.handsUp);
+        _sus.prone = !!(AR() && AR().downState && AR().downState(pa()));
         const r = au.step(gd, dt, _sus);
         const ph = r ? r.phase : "done";
         if (ph === "approach" || ph === "cuff") { complied(); return; }
@@ -1379,9 +1389,10 @@
       screwStep(gd, px, pz, ESC.REACH, px, pz, d > 2.5, dt);
       const subdued = AR() ? AR().subdued() : (player.stun || 0) > 0.05;
       if (subdued && d <= ESC.REACH + 0.5) {
-        // on you while you are jelly: up by the arm and into the cuffs
+        // on you while you are jelly: he kneels on you and cuffs you where
+        // you lie (a verbs.js without the ground cuff hauls you up first)
         const V = VB();
-        if (V && V.getUp) { try { V.getUp(pa()); } catch (e) {} }
+        if (V && !V.cuffDown && V.getUp) { try { V.getUp(pa()); } catch (e) {} }
         cuffs(false, { subdued: true });
         return;
       }
@@ -1389,7 +1400,10 @@
       a.after += dt;
       if (swungSince(a.tasedAt + 0.05) || (pSpd > ARREST.FLEE_SPD && a.after > 0.25)) { a.phase = "chase"; a.t = 0; gd._escort = false; return; }
       if ((d <= ESC.REACH + 0.4 && a.after > 0.5) || a.after > ARREST.AFTER_TASE) {
-        if (d <= 3.2) { cuffs(false); return; }
+        // the probes wore off before he got to you: still down or on your
+        // knees = the cuffs; back on your feet = it is a chase again
+        if (d <= 3.2 && gaveUp()) { cuffs(false); return; }
+        if (d <= ARREST.TASE_R) { a.phase = "chase"; a.t = 0; gd._escort = false; return; }
         cancelArrest(true);
       }
       return;
@@ -1402,8 +1416,10 @@
       if (d > ARREST.LOSE_R) { cancelArrest(true); return; }
       if (a.taseCD <= 0 && d <= ARREST.TASE_R && (swinging || pSpd > 0.8)) { tase(); return; }
       if (!swinging && d <= ARREST.LUNGE_R && pSpd > 0.8 && a.tackles < 3 && !seizedBy) { tackle(); return; }
-      // he stopped and stood for it: that is compliance after all
-      if (!swinging && pSpd < ARREST.COMPLY_SPD && d <= ESC.REACH + 0.6 && a.t > 0.6) { cuffs(false); return; }
+      // he went down on his knees for it (or is on the floor): compliance
+      // after all. Standing there with his hands down is not: the taser.
+      if (!swinging && pSpd < ARREST.COMPLY_SPD && d <= ESC.REACH + 0.6 && a.t > 0.6 && gaveUp()) { cuffs(false); return; }
+      if (!swinging && pSpd < ARREST.COMPLY_SPD && a.taseCD <= 0 && d <= ARREST.TASE_R && a.t > 1.2) { tase(); return; }
       return;
     }
     // "tackle": the lunge owns the hold until its onEnd

@@ -1710,6 +1710,7 @@
   CBZ.onUpdate(38, function () {
     if (g.mode !== "city" || g.state !== "playing" || CBZ.player.dead) return;
     if (!CBZ.cityNearestCorpse || !CBZ.cityLootCorpse) return;
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return;     // cuffed: no hands to go through his pockets
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
     // ON FOOT IT IS A HAND (systems/verbs_pickup.js): one body at a time, the
     // hand takes what spilled out of his pockets (the wallet/cash prop beside

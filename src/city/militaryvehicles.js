@@ -605,6 +605,7 @@
        on to board the nearest parked car. */
     if (CBZ.seatExit && CBZ.seatExit()) return true;
     if (P.driving || P._aircraft || armor) return false;
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return false;   // cuffed: no hands for a door, a hatch or a stick
 
     const aimed = aimedVehicle(P, 24, 10.5);
     if (aimed) {

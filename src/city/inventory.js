@@ -579,7 +579,7 @@
       const d = drops[i];
       d.t += dt;
       if (d._taking) continue;           // a hand is already on it
-      if (P && !P.dead && !P.driving && Math.abs(P.pos.y - d.y0) < 2.5 &&
+      if (P && !P.dead && !P.driving && !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) && Math.abs(P.pos.y - d.y0) < 2.5 &&
           Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
         // TAKEN WITH A HAND (systems/verbs_pickup.js): it leaves the ground in
         // the hand and is yours on the grab frame

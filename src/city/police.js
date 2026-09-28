@@ -345,7 +345,9 @@
           // the cuffs (CBZ.arrest.take: you can still fight them, winded)
           const AR = CBZ.arrest;
           if (AR && AR.subdue) AR.subdue(2.2, "pinned");
-          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }
+          // he stays on you: cuffed where you lie (verbs.js's ground cuff),
+          // hauled up only once both wrists are closed
+          if (!V.cuffDown && V.getUp) { try { V.getUp(victim); } catch (e) {} }
           if (CBZ.cityArrestTake) { try { CBZ.cityArrestTake(c, { pinned: true, violent: true }); } catch (e) {} }
           else if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
           return;
@@ -2156,8 +2158,8 @@
   };
   CBZ.cityRegisterCarSuspect = function (car) { if (car && carSuspects.indexOf(car) < 0) carSuspects.push(car); };
   // cop (optional): the officer making it. His hands do it (CBZ.verbs.cuff):
-  // turned round, wrists behind the back, the cuffs ON them, then put on the
-  // ground for the count, cuffed until he is let up.
+  // turned round (or knelt on, if he is already down), wrists behind the
+  // back, the cuffs ON them; he sits out the count cuffed until he is let up.
   CBZ.cityNpcArrest = function (ped, cop) {
     if (!ped || ped.dead) return;
     ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.armed = false; ped.weapon = null;
@@ -2167,7 +2169,7 @@
     const down = function () {
       ped.ko = Math.max(ped.ko || 0, 4);
       if (V && V.setCuffs) V.setCuffs(ped, true, { whileKo: true });
-      if (CBZ.body) CBZ.body.hit(ped, { dir: { x: 0, z: 1 }, force: 3, knockdown: 1.2 });
+      // (no shove to the ground: a cuffed man who gave up is not hit again)
     };
     const S = V && V.cuff && cop && !cop.dead ? V.cuff(cop, ped, { far: true, onEnd: down }) : null;
     if (!S) down();
@@ -3982,6 +3984,10 @@
   // fireAt(c, tgt, dist, dt) — dt is optional and only used by the competence
   // layer (systems/combat_iq.js). Returns true if a round actually left the gun.
   function fireAt(c, tgt, dist, dt) {
+    // A MAN IN CUFFS IS NOT SHOT (systems/cuffedplayer.js): his hands are
+    // behind his back. Officers hold fire and walk him; if he runs, the lone
+    // escort's chase (systems/arrest.js) takes him down, not a round.
+    if (tgt && tgt.isPlayer && CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) { c.shootCD = Math.max(c.shootCD || 0, 0.5); return false; }
     // COMPETENCE FIRST, before any of the visual commitment below: a shooter who
     // has just swung onto a new mark has not finished REACTING yet, and a cop
     // who fires on the frame he sees you is the "they're really bad at shooting"

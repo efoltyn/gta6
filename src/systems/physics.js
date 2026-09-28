@@ -2102,7 +2102,9 @@
       // otherwise stay set at whatever value the frame before the knockdown
       // left them and fight the KO pose for the whole ragdoll.
       playerChar.airPose = null; playerChar.landPose = null; player._airT = 0;
-      if (!player.dead) player.ko = Math.max(0, (player.ko || 0) - dt);
+      // cuffed: no hands to push off the floor with, so it takes longer to get up
+      const CPk = CBZ.cuffedPlayer;
+      if (!player.dead) player.ko = Math.max(0, (player.ko || 0) - dt * (CPk ? CPk.getUpMul(CPk.on()) : 1));
       player.speed = 0;
       player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
@@ -2191,8 +2193,13 @@
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
     // the mount's gait). It COMPOSES with the limp — a wounded rider still rides.
-    // running in cuffs (you tore out of an escort): hands behind you, no arms to run with
-    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * (playerChar.cuffed ? 0.7 : 1) *
+    // CUFFED (systems/cuffedplayer.js, CBZ.arrest.playerCuffed): hands behind
+    // you, no arms to drive a stride — a shuffle at 0.65 and a run that tops
+    // out at 0.75 of a free sprint, with a stagger in it (below)
+    const CPm = CBZ.cuffedPlayer;
+    const cuffedMove = CPm ? CPm.on() : !!playerChar.cuffed;
+    const cuffScale = CPm ? CPm.moveScale(cuffedMove, player.sprint) : (cuffedMove ? 0.7 : 1);
+    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * cuffScale *
       (CBZ.vitals ? CBZ.vitals.speedMul(player) : 1);            // groggy, bled, a shot leg, wrapping a wound (systems/vitals.js)
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
@@ -2206,7 +2213,15 @@
       const u = Math.min(1, st.slideT / SLIDE_DUR);
       const v = SLIDE_END + (st.slideV0 - SLIDE_END) * (1 - u * u);
       desX = st.dirX * v; desZ = st.dirZ * v;
-    } else if (len > 0) { desX = mx * moveSpeed; desZ = mz * moveSpeed; }
+    } else if (len > 0) {
+      desX = mx * moveSpeed; desZ = mz * moveSpeed;
+      // the cuffed stagger: a sideways weave across the line of travel, no
+      // arms to balance with (bigger at a run). Same speed, wobblier path.
+      if (cuffedMove && CPm) {
+        const sw = CPm.sway(true, player.sprint, (CBZ.game && CBZ.game.elapsed) || 0);
+        desX += -mz * moveSpeed * sw; desZ += mx * moveSpeed * sw;
+      }
+    }
     player.speed = Math.hypot(desX, desZ);
     // ...and the DIRECTION that speed is aimed in. `player.speed` has always
     // been the DESIRED speed — what the body is trying to do, before a wall

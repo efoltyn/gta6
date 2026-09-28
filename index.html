@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/shark_title.css?v=pause1">
 <link rel="stylesheet" href="css/mobile.css?v=pause1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
-<link rel="stylesheet" href="css/inventory.css?v=hotbar1">
+<link rel="stylesheet" href="css/inventory.css?v=cuffs1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
@@ -596,12 +596,20 @@ document.body.appendChild(b);}}catch(e){}})();
      while they do it (verbposes.js), and the strikes and hit reactions
      (meleeposes.js + verbs_strike.js). Everything else is feature-detected at
      call time; the late pass runs at CBZ.onUpdate(91). -->
+<!-- CBZ.handcuffs: the one pair of handcuffs (hinged chain cuffs at real
+     size), the cuffs the cuff verb closes on a wrist, the open pair in an
+     officer's hand and the case on a cop's / prison officer's duty belt. -->
+<script src="src/entities/handcuffs.js?v=cuffs1"></script>
 <script src="src/systems/verbs.js?v=arrest1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
 <script src="src/systems/arrest.js?v=arrest1"></script>
+<!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
+     phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
+     CBZ.arrest.playerCuffed. Before input.js and every game module. -->
+<script src="src/systems/cuffedplayer.js?v=cuffs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
 <script src="src/systems/verbs_strike.js?v=ba1"></script>

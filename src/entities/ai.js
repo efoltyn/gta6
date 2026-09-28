@@ -162,6 +162,11 @@
   function playerDownedNow() {
     return !!(CBZ.playerDowned && CBZ.playerDowned());
   }
+  // a cuffed man is nobody's fight (systems/cuffedplayer.js): the one blow a
+  // rival sneaks in is brain_prison.js's cuffedPoll ("cheap"), and that is all
+  function playerCuffedNow() {
+    return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on());
+  }
   // THE LETHAL MISTAKE: a man with a blade out and a real grudge, and no screw
   // looking, does not stop because you are on the floor.
   function lethalGrudge(n) {
@@ -184,6 +189,7 @@
   function requestHunt(n, secs, why) {
     if (!n || !alive(n) || !n.group || n.role === "merchant") return false;
     if ((n._brokenUpT || 0) > 0 || (playerDownedNow() && !lethalGrudge(n))) { _huntRefused++; return false; }
+    if (playerCuffedNow() && why !== "cheap" && !lethalGrudge(n)) { _huntRefused++; return false; }
     if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged") return false;
     // A GUN IS OUT. Nobody walks at a muzzle because his feelings are hurt:
     // CBZ.brain.threat decides (systems/brain_prison.js 5c) — a blade inside
@@ -5388,6 +5394,15 @@
       // you are down. He made his point; he walks off and leaves it there.
       n.huntPlayer = 0; cutSwing(n);
       n._brokenUpT = Math.max(n._brokenUpT || 0, 25);
+      if (n.char) n.char.fightStance = false;
+      n.aiState = "wander"; n.aiTimer = 0.5 + rng();
+    }
+    if (n.huntPlayer > 0 && playerCuffedNow() && !lethalGrudge(n) &&
+        (n._huntWhy !== "cheap" || ((n.jumpBlows || 0) > (n._cheapShot || 0) && !swinging(n)))) {
+      // you are in cuffs: whatever he came for, it is not a fight any more.
+      // The cheap shot gets its one blow, then he walks off smirking.
+      n.huntPlayer = 0; cutSwing(n); n._cheapShot = null;
+      n._brokenUpT = Math.max(n._brokenUpT || 0, 20);
       if (n.char) n.char.fightStance = false;
       n.aiState = "wander"; n.aiTimer = 0.5 + rng();
     }

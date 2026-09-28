@@ -297,7 +297,7 @@
 
   // Priority for the dwell rule: a held reaction may only be cut short by a
   // MORE urgent one.
-  const PRI = { ignore: 0, cheer: 0, hold: 0, film: 1, report: 1, intervene: 2, fight: 2, "fight-confront": 2,
+  const PRI = { ignore: 0, cheer: 0, hold: 0, stare: 0, film: 1, report: 1, intervene: 2, fight: 2, "fight-confront": 2,
     comply: 3, cover: 3, freeze: 3, cower: 3, flee: 4, surrender: 5 };
   function holding(p, t) { return !!(p._cbResp && t < (p._cbUntil || 0)); }
   function hold(p, resp, secs) { p._cbResp = resp; p._cbUntil = now() + secs; p._reactHold = secs; }
@@ -709,6 +709,45 @@
   }
 
   // ============================================================
+  //  A MAN WALKED PAST IN CUFFS (systems/cuffedplayer.js). He is not a threat
+  //  (systems/brain.js reads cuffs as "none"), so nobody runs and nobody
+  //  screams. The street does what a street does: about half the people near
+  //  him stop, turn and look; one who is right on top of him steps back out
+  //  of his way first. Now and then somebody says something — one short line,
+  //  over their head, never more than one every ~8 s on the whole street.
+  //  A body raging at him lets it go: there is no fight in a cuffed man.
+  // ============================================================
+  const CUF = { lineT: -1e9, onT: -1, seenT: -1 };
+  const _cufO = { dist: 0, rival: false, aggression: 0, guardNear: true, sinceLine: 0, sinceCheap: 0, sinceSteal: 0, roll: 1, canSteal: false };
+  function playerCuffed() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
+  function cuffedStare(p, t) {
+    const C = CBZ.cuffedPlayer, P = CBZ.player;
+    if (!P || !P.pos || !p.pos) return false;
+    if (p.kind === "cop" || p.guard || p.companion || p.recruited || p.inCar || p.vendor || p.state === "flee" || p.state === "sit" || p.reportState) return false;
+    const dx = P.pos.x - p.pos.x, dz = P.pos.z - p.pos.z, d = Math.hypot(dx, dz);
+    if (d > 10 || d < 0.05) return false;
+    if (t < (p._cbStareNext || 0)) return false;
+    p._cbStareNext = t + 20 + hash01(p, 0x57A1) * 12;
+    if (hash01(p, 0x57A2 + ((t / 20) | 0)) > 0.55) return false;            // not everyone looks
+    if (d < 2.4) {
+      // out of his way first: a step back, facing him
+      p._cbStareBackT = t + 0.8;
+      p._cbStareBX = p.pos.x - (dx / d) * 1.5; p._cbStareBZ = p.pos.z - (dz / d) * 1.5;
+      order(p, p._cbStareBX, p._cbStareBZ, (p.baseSpeed || 1.5) * 0.8, 0.25);
+    } else EXEC.stop(p);
+    EXEC.face(p, P.pos.x, P.pos.z);
+    hold(p, "stare", 2.2 + hash01(p, 0x57A3) * 2.4);
+    _cufO.dist = d; _cufO.rival = false; _cufO.aggression = 0; _cufO.guardNear = true;
+    _cufO.sinceLine = t - CUF.lineT; _cufO.roll = hash01(p, 0x57A4 + ((t * 3) | 0));
+    _cufO.fade = C.novelty(t - CUF.onT);
+    if (C.pickTreatment(_cufO) === "jeer") {
+      CUF.lineT = t;
+      say(p, C.pick(C.LINES.street, hash01(p, 0x57A5 + ((t * 7) | 0))), 1.8);
+    }
+    return true;
+  }
+
+  // ============================================================
   //  PER-THINK CONSUMER (peds.js think() calls this near the top).
   //  Returns true when the brain owns this tick.
   // ============================================================
@@ -718,6 +757,15 @@
     if (!b || p.dead) return false;
     if (!adopt(p)) return false;
     const t = now();
+    const cuffs = playerCuffed();
+    if (cuffs) {
+      // how long the street has had to get used to him (a new run, or cuffs
+      // off for a while, and he is news again)
+      if (CUF.onT < 0 || t < CUF.onT || t - CUF.seenT > 5) CUF.onT = t;
+      if (t < CUF.lineT) CUF.lineT = -1e9;
+      CUF.seenT = t;
+    }
+    if (cuffs && p.rage && isPlayerActor(p.rage) && p.kind !== "cop") { p.rage = null; if (p.state === "fight" || p.state === "confront") p.state = "walk"; }
     // a fight or a levelled gun OUTRANKS every held street reaction: a gawker
     // who gets punched swings back, a runner covered at gunpoint freezes
     if ((p.rage && !p.rage.dead) || p.surrender || (p.surrenderT || 0) > 0) {
@@ -803,6 +851,14 @@
         return true;
       }
       if (p._cbResp === "cower" || p._cbResp === "cover") { p.speed = 0; return true; }
+      if (p._cbResp === "stare") {
+        const P = CBZ.player;
+        if (!cuffs || !P || !P.pos) { p._cbResp = null; return false; }
+        if (t < (p._cbStareBackT || 0)) order(p, p._cbStareBX, p._cbStareBZ, (p.baseSpeed || 1.5) * 0.8, 0.25);
+        else { dropOrder(p); p.speed = 0; }
+        EXEC.face(p, P.pos.x, P.pos.z);
+        return true;
+      }
       if (p._cbResp === "flee") { if (p.state !== "flee") p.state = "flee"; return true; }
       return false;                                          // fight / confront / intervene: think's rage path carries it
     }
@@ -812,6 +868,8 @@
       if (after === "flee" && (prev === "cower" || prev === "cover")) return perform(p, "flee", setTh(_wth, p._cbAfterX, p._cbAfterZ, null, true));
       if (after === "report" && callLive(witnessOf(p)) && !p.reportState) { beginReport(p); hold(p, "report", 1); return true; }
     }
+    // 5) nothing else on: a cuffed man going by is worth a look
+    if (cuffs && cuffedStare(p, t)) return true;
     return false;
   }
 

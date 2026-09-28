@@ -65,6 +65,8 @@
     if (mode() === "city" && CBZ.cityHolster) CBZ.cityHolster(true);
     else if (CBZ.playerHolster) CBZ.playerHolster(true);
   }
+  // cuffed (CBZ.arrest.playerCuffed): hands behind the back hold nothing
+  function cuffed() { const C = CBZ.cuffedPlayer; return !!(C && C.on && C.on()); }
   function sfx(name, o) { if (CBZ.sfx) { try { CBZ.sfx(name, o || {}); } catch (e) {} } }
 
   function setHeld(k) {
@@ -76,6 +78,7 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   function select(kind) {
+    if (cuffed()) return false;
     const s = state();
     const k = M.resolveHeld(kind, s);
     if (!k) return false;
@@ -424,6 +427,7 @@
       const P = CBZ.player;
       if (G.state !== "playing" || !P || P.dead) setHeld(null);
       else if (gunDrawn()) setHeld(null);                 // a gun came up: the item went away
+      else if (cuffed()) setHeld(null);                   // the cuffs went on: it went back in the pocket
       else {
         const k = M.resolveHeld(held, state());
         if (k !== held) setHeld(k);                       // last brick on: the detonator is in your hand

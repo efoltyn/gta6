@@ -241,7 +241,8 @@
   // HOLSTERED counts as NO gun drawn (the FIST/holster slot lowers the weapon):
   // gunpointSweep / witness / aim systems read this, so peds no longer throw
   // their hands up at an unarmed/holstered/fists player. Selecting a gun un-holsters.
-  CBZ.cityHasGun = function () { return !g.cityMeleeWeapon && !g.cityHolstered && !!(CBZ.equippedWeapon && CBZ.equippedWeapon()); };
+  // (cuffed: nothing is in your hands, whatever you own — systems/cuffedplayer.js)
+  CBZ.cityHasGun = function () { return !g.cityMeleeWeapon && !g.cityHolstered && !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) && !!(CBZ.equippedWeapon && CBZ.equippedWeapon()); };
   CBZ.cityOwnsGun = function () {
     return !!((CBZ.weaponInventory && CBZ.weaponInventory.length) || (g._copStow && g._copStow.inv && g._copStow.inv.length));
   };
@@ -1324,9 +1325,33 @@
   // ---- input: LMB = light combo, RMB = heavy / hold-guard --------------
   //      Only when unarmed / holding a melee weapon. With a firearm out,
   //      fpsmode.js owns LMB (fire) and RMB (aim). ----
-  // cuffed: no hands to swing with; held: the click is a wrench against his grip (verbs.js)
-  function handsFree() { const pc = CBZ.playerChar; return !(pc && pc.cuffed) && !(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()); }
+  // held: the click is a wrench against his grip (verbs.js), not a swing
+  function handsFree() { return !(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()); }
   function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving && handsFree(); }
+  // CUFFED (CBZ.arrest.playerCuffed): no fists, no guard, no finisher, no
+  // weapon. What is left is a foot: one front kick, slow to throw, with a
+  // real gap before the next, off-balance so it lands soft and costs wind.
+  function cuffedNow() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
+  function cuffKick() {
+    if (pBrokenT > 0 || staggerT > 0 || tired()) return;
+    const V = CBZ.verbs, pa = playerActor();
+    if (!V || !V.strike || !pa) return;
+    markFighting();
+    combo = 0; comboT = 0;
+    const special = aimSpecial(2.1, 0.3);
+    faceLook();
+    const dmg = 13;
+    const S = V.strike(pa, special, {
+      kind: "kick", heavy: false, speed: 0.8,
+      candidates: special ? null : cityCandidates,
+      onLand: function (res) { landCity(res, dmg, "light", "kick"); },
+      onBlocked: function (res) { blockedCity(res, dmg, "kick"); },
+      onBeat: special ? function () { landSpecial(special, dmg, "light"); } : null,
+    });
+    if (!S) return;
+    spend(10);
+    fireCD = 0.95;
+  }
 
   document.addEventListener("mousedown", function (e) {
     if (!active()) return;
@@ -1334,6 +1359,10 @@
     if (e.button === 0 && CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(true)) {
       e.preventDefault();
       return;
+    }
+    if (cuffedNow()) {
+      if (e.button === 0 && fireCD <= 0) { e.preventDefault(); cuffKick(); }
+      return;                                // no guard, no heavy: the hands are behind you
     }
     if (CBZ.cityHasGun()) return;            // a gun is out → the engine gun system owns the mouse
     if (e.button === 0) {
@@ -1353,7 +1382,7 @@
     if (!rmbDown) return;
     rmbDown = false;
     // a quick RMB tap (short hold) = a HEAVY swing; a long hold was just a guard
-    if (rmbT < 0.22 && active() && !CBZ.cityHasGun() && !CBZ.cityMenuOpen) heavyAttack();
+    if (rmbT < 0.22 && active() && !cuffedNow() && !CBZ.cityHasGun() && !CBZ.cityMenuOpen) heavyAttack();
     guardT = Math.min(guardT, 0.06);
   });
 
@@ -1487,7 +1516,7 @@
   function throwGrenade(opts) {
     const pw = (opts && opts.power > 0) ? Math.min(1, opts.power) : 1;
     if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
-    if ((P.stun || 0) > 0) return;
+    if ((P.stun || 0) > 0 || cuffedNow()) return;   // cuffed: nothing leaves a hand behind your back
     if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades", 1.4); return; }
     if (live.length >= GREN.maxLive) return;
     if (!(CBZ.cityEcon && CBZ.cityEcon.take && CBZ.cityEcon.take("Grenade"))) return;

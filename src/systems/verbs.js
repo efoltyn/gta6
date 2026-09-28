@@ -31,9 +31,11 @@
                     a drop behind it, a ledge, water, a bed, a table, or open
                     ground. A shove near a ledge is a fall; a throw at a rail
                     goes over it; a throw at a wall is a slam.
-     cuffs          any game can cuff anyone: the ties sit ON the wrists
-                    (CBZ.charArmLandmarks) with the hands behind the back and
-                    the wrists touching, solved every frame after the gait.
+     cuffs          any game can cuff anyone: a real pair of handcuffs
+                    (entities/handcuffs.js) closed ON the wrists, the hands
+                    behind the back side by side, solved every frame after the
+                    gait. A man who is DOWN is cuffed where he lies (the
+                    officer kneels on his back) and left lying: V.cuffDown.
 
    Late pass: CBZ.onUpdate(91) — after animChar (the actors' own updaters),
    reactions.js (89) and grapple.js (90). It moves roots, writes the hold
@@ -943,7 +945,7 @@
   // verbs done standing in one spot (an NPC grabber is held there, see enterPhase)
   const STILL = { cuff: 1, uncuff: 1, frisk: 1, mug: 1, shove: 1, throw: 1, grab: 1, carry: 1 };
   const sessions = [];
-  const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0 };
+  const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0, knee: null, kneeSide: 1, twist: 0 };
   const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3(), _V = new THREE.Vector3();
 
   // hands-on weight for the ordinary shape of a verb
@@ -1158,37 +1160,65 @@
      from here it is a struggle); contact: the first wrist behind your back;
      drive: the first cuff ratchets on (the click at a third of the way), the
      second wrist is brought round to it and closes at the end. ~2.5 s, and
-     a man fighting it holds the drive up (the struggle rewinds it). */
+     a man fighting it holds the drive up (the struggle rewinds it).
+
+     ON THE FLOOR (S.ground: he is down — tased, knocked down, tackled, KO'd)
+     he is NOT stood up for it. He stays where he lies, face down (rolled
+     over first if he is on his back), and the officer comes to him: down
+     beside his back, a knee on his shoulder blade (a.kneelCuff), one wrist
+     taken behind him and cuffed (the click), the other brought round to it.
+     ~3.4 s: align 0.6 (the knee goes down), contact 0.6 (the first wrist),
+     drive 1.6, outcome, release 0.5 (the officer comes up). He is LEFT
+     LYING, cuffed: whoever cuffed him hauls him up (V.getUp) after. */
   DEF.cuff = {
-    face: "same", hold: false, speed: 2.4, close: 1.0,
+    face: "same", hold: false, speed: 2.4, close: 1.0, allowDown: true, onExplicit: 3,
     work: (S) => S.A.depth + S.T.depth + 0.27 * S.A.arm,
     dur(S, ph) {
       if (S.verb === "uncuff") return ph === "align" ? 0.45 : ph === "contact" ? 0.32 : ph === "drive" ? 0.6 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
+      if (S.ground) return ph === "align" ? 0.6 : ph === "contact" ? 0.6 : ph === "drive" ? 1.6 : ph === "outcome" ? 0.1 : ph === "release" ? 0.5 : 0;
       return ph === "align" ? 0.45 : ph === "contact" ? 0.5 : ph === "drive" ? 1.45 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
     },
-    poseA: (S) => S.phase === "approach" || S.phase === "align" ? "a.reach" : "a.cuff",
-    poseT: () => "t.cuffed",
+    poseA: (S) => S.ground ? "a.kneelCuff" : S.phase === "approach" || S.phase === "align" ? "a.reach" : "a.cuff",
+    // on the floor his body is STRIKE's own face-down lie (meleeposes.js
+    // lieFace, the one lying pose in the game); only his arms are the verb's
+    poseT: (S) => S.ground ? null : "t.cuffed",
     selfT(S) {       // his arms come behind his back as he is turned
       const k = S.phase === "align" ? 0.7 * smooth(S.k) : S.phase === "approach" ? 0 : 1;
       return k;
     },
     hands(S) {
-      S.handsA[0] = "cuffGripL"; S.handsA[1] = "wristR"; S.gA[0] = "support";
-      S.kA[0] = S.kA[1] = kIn(S);
+      if (S.ground) groundHands(S);
+      else {
+        // the first cuff goes on his RIGHT wrist, under the officer's right hand
+        S.handsA[0] = "cuffGripL"; S.handsA[1] = "wristR"; S.gA[0] = "support";
+        S.kA[0] = S.kA[1] = kIn(S);
+        S.onA[0] = S.onA[1] = S.kA[0] >= 0.999 && (S.phase !== "contact" || S.k >= 1);
+        S.first = -1;
+      }
       // the first ratchet: one wrist is in, the other is still coming round
       if (S.verb === "cuff" && S.phase === "drive" && S.k >= 0.34 && !S._click1) {
         S._click1 = true;
         if (CBZ.sfx) CBZ.sfx("reload");
+        handCuffsOff(S);
+        setCuffs(S.t, "half", { side: S.first || -1, hand: handSocket(S.A.ch), handK: rigCuffK(S.A.ch) });
       }
     },
     place(S, o) { o.lz = S.work; o.lx = 0; o.relYaw = 0; },
+    enter(S, ph) {
+      // the open cuffs come out in his right hand as his hands go on
+      if (ph === "contact" && S.ground) groundFirst(S);
+      if (ph === "contact" && S.verb === "cuff") handCuffsOn(S);
+      if (ph === "align" && S.ground) groundAlign(S);
+    },
     outcome(S) {
       setCuffs(S.t, S.verb === "cuff");
       S.result = S.result || {}; S.result.outcome = S.verb === "cuff" ? "cuffed" : "uncuffed";
       if (CBZ.sfx) CBZ.sfx("reload");
+      // off a man: the officer has them in his hand again
+      if (S.verb === "uncuff") handCuffsOn(S);
     },
   };
-  DEF.uncuff = Object.assign({}, DEF.cuff);
+  DEF.uncuff = Object.assign({}, DEF.cuff, { allowDown: false });
 
   const FRISK_L = ["shoulderTopL", "ribsL", "waistL", "pocketL", "thighL"];
   const FRISK_R = ["shoulderTopR", "ribsR", "waistR", "pocketR", "thighR"];
@@ -1391,6 +1421,207 @@
     // the root is solved from the collar point and the heels (placeTarget)
   }
 
+  /* ---- THE GROUND CUFF ----------------------------------------------------
+     Where the officer goes: beside the man's back, facing across it, the
+     knee on his head side over the near shoulder blade (GROUND.kneeIn off
+     the spine toward the officer), that hip GROUND.hipBack straight behind
+     the knee. Read off the lying body's LIVE contact points every frame of
+     the approach (he may still be going down). Pure of the session except
+     for which side of him the officer took (kept once chosen). */
+  const GROUND = { kneeIn: 0.10, hipBack: 0.30, twist: 0.2, kneeUp: 0.5 };
+  const _gB = new THREE.Vector3(), _gL = new THREE.Vector3(), _gR = new THREE.Vector3();
+  function groundSpot(S, out) {
+    const A = S.A, T = S.T;
+    out = out || S.gs || (S.gs = { x: 0, z: 0, yaw: 0, side: 1, twist: 0, nx: 0, nz: 1, ux: 1, uz: 0, kx: 0, ky: 0, kz: 0 });
+    contactPoint(T.ch, "back", _gB, false);
+    contactPoint(T.ch, "lowBackL", _gL, true);
+    contactPoint(T.ch, "lowBackR", _gR, true);
+    const mx = (_gL.x + _gR.x) * 0.5, mz = (_gL.z + _gR.z) * 0.5;
+    // his spine, lower back -> shoulder blades, on the floor plane
+    let ux = _gB.x - mx, uz = _gB.z - mz, ul = Math.hypot(ux, uz);
+    if (ul < 0.05) { ux = _gB.x - T.pos.x; uz = _gB.z - T.pos.z; ul = Math.hypot(ux, uz); }
+    if (ul < 1e-4) { ux = fwdX(T.yaw()); uz = fwdZ(T.yaw()); ul = 1; }
+    ux /= ul; uz /= ul;
+    // the side of him the officer is on (kept once chosen)
+    let nx = uz, nz = -ux;
+    if (S._gn == null) S._gn = ((A.pos.x - (mx + _gB.x) * 0.5) * nx + (A.pos.z - (mz + _gB.z) * 0.5) * nz) >= 0 ? 1 : -1;
+    nx *= S._gn; nz *= S._gn;
+    const P = A.ch.profile || {};
+    const kx = _gB.x + nx * GROUND.kneeIn, kz = _gB.z + nz * GROUND.kneeIn;
+    // the knee JOINT rides a leg's half-thickness above his back
+    const ky = _gB.y + (P.legW || 0.34) * GROUND.kneeUp * A.scale;
+    // the officer faces across him (-n); his own +x in the world
+    const yaw = Math.atan2(-nx, -nz), xwx = Math.cos(yaw), xwz = -Math.sin(yaw);
+    const side = ux * xwx + uz * xwz >= 0 ? 1 : -1;          // the knee leg is the head-side one
+    const hipXm = (P.hipX || 0.2) * A.scale * side;
+    const hx = kx + nx * GROUND.hipBack, hz = kz + nz * GROUND.hipBack;
+    out.x = hx - xwx * hipXm; out.z = hz - xwz * hipXm;
+    out.yaw = yaw; out.side = side; out.twist = -side * GROUND.twist;
+    out.nx = nx; out.nz = nz; out.ux = ux; out.uz = uz;
+    out.kx = kx; out.ky = ky; out.kz = kz;
+    return out;
+  }
+  // the knee target in the officer's own group frame (a.kneelCuff's p.knee)
+  const _gk = { x: 0, y: 0, z: 0 };
+  function groundKnee(S) {
+    const gs = groundSpot(S), A = S.A, y = A.yaw();
+    const dx = gs.kx - A.pos.x, dz = gs.kz - A.pos.z;
+    _gk.x = dx * Math.cos(y) - dz * Math.sin(y);
+    _gk.z = dx * Math.sin(y) + dz * Math.cos(y);
+    _gk.y = gs.ky - A.pos.y;
+    return _gk;
+  }
+  /* how he goes down for it. A man who went down on his face stays so; on
+     his knees (the kneel / liver fall) he is put down on his face as the
+     officer comes (STRIKE's conscious face fall, from where he kneels); a
+     body down some other way (a legacy KO count, grapple's knockdown, the
+     player's physics tumble) is laid face down at the knee (align). On his
+     BACK he is rolled over during the align (groundTarget). */
+  function groundPrep(S) {
+    const MP = CBZ.meleePoses, ch = S.T.ch, f = ch.fall;
+    if (f && f.on && f.phase !== "getup" && (f.variant === "kneel" || f.variant === "liver")) {
+      MP.startFall(ch, { variant: "face", ko: false, side: f.side || 1, dur: 3 });
+    }
+  }
+  function groundAlign(S) {
+    const MP = CBZ.meleePoses, T = S.T, ch = T.ch;
+    if (!T.down()) { S._gMiss = true; return; }
+    if (T.isPlayer && CBZ.player && CBZ.player._phys) CBZ.player._phys.down = 0;   // the verb has his body now
+    let f = ch.fall;
+    if (!f || !f.on || f.phase === "getup" || (f.variant !== "face" && f.variant !== "back")) {
+      uprightGroup(T);
+      f = MP.startFall(ch, { variant: "face", ko: !!(f && f.on && f.ko), side: (f && f.side) || 1, hold: true, dur: 2 });
+      f.phase = "down"; f.t = 0;
+    }
+    f.hold = true;
+    S.gTyaw = T.yaw();
+    if (f.variant === "back") {
+      // on his back: he is rolled over onto his face, toward the officer
+      const gs = groundSpot(S), yaw0 = T.yaw();
+      const front = -(Math.cos(yaw0) * gs.nx - Math.sin(yaw0) * gs.nz);
+      S.roll = { yaw0: yaw0, sw: false, rs: front >= 0 ? 1 : -1 };
+    }
+  }
+  function rollSwitch(S) {
+    const R = S.roll, ch = S.T.ch, f0 = ch.fall, MP = CBZ.meleePoses;
+    const f = MP.startFall(ch, { variant: "face", ko: !!(f0 && f0.ko), side: (f0 && f0.side) || 1, hold: true, dur: (f0 && f0.dur) || 2 });
+    f.phase = "down"; f.t = 0;
+    R.sw = true;
+    S.gTyaw = wrap(R.yaw0 + PI);
+  }
+  // he stays down while the officer is on him (the fall's own clock is held)
+  function holdFall(S) {
+    const f = S.T.ch && S.T.ch.fall;
+    if (!f || !f.on) return;
+    f.hold = true;
+    if (f.phase === "getup" && (f.gt || 0) < 0.4) { f.phase = "down"; f.gt = 0; }
+  }
+  // where he lies is where he stays: the verb pins the root and the yaw (the
+  // player's controller would otherwise turn a lying body with the camera)
+  function groundTarget(S) {
+    const T = S.T;
+    S.tSpeed = 0;
+    if (S.opts.noMove || !S.x0.set) return;
+    const R = S.roll;
+    let yaw = S.gTyaw, roll = 0, lift = 0;
+    if (R && S.phase === "align") {
+      const th = PI * smooth(S.k);
+      if (!R.sw && th >= PI / 2) rollSwitch(S);
+      roll = R.sw ? R.rs * (PI - th) : R.rs * th;
+      yaw = R.sw ? S.gTyaw : R.yaw0;
+      lift = Math.sin(th) * T.width * 0.5;                // on his side for a moment: up on his shoulder
+    } else if (R && !R.sw) { rollSwitch(S); yaw = S.gTyaw; }
+    setPos(T, S.x0.x, S.x0.y + lift, S.x0.z);
+    orient(T, yaw, 0, roll);
+  }
+  // which wrist is taken first: the one nearest the officer
+  const _gw = new THREE.Vector3();
+  function groundFirst(S) {
+    const b = S.T.ch.body;
+    b.updateWorldMatrix(true, false);
+    _gw.set(S.A.pos.x, S.A.pos.y + S.A.hipY, S.A.pos.z);
+    b.worldToLocal(_gw);
+    S.first = _gw.x >= 0 ? 1 : -1;
+  }
+  /* his hands on the man on the floor: the left on the forearm of the first
+     arm (drawing it behind his back), the right at that wrist with the cuffs;
+     after the first click the left goes to the other forearm and brings it
+     round (the grip slides across, it does not jump). */
+  function groundHands(S) {
+    const f = S.first || 1, sec = -f;
+    const gF = f > 0 ? "cuffGripL" : "cuffGripR", wF = f > 0 ? "wristL" : "wristR", gS = sec > 0 ? "cuffGripL" : "cuffGripR";
+    S.gA[0] = "support"; S.gA[1] = "grip";
+    S.handsA[0] = gF; S.handsA[1] = wF;
+    S.kA[0] = S.kA[1] = kIn(S);
+    const mix = S.phase === "drive" ? smooth((S.k - 0.3) / 0.15) : S.phase === "outcome" || S.phase === "release" ? 1 : 0;
+    if (mix >= 0.999) S.handsA[0] = gS;
+    else if (mix > 0) { S.handsA2[0] = gS; S.mixA[0] = mix; }
+    const on = (h) => S.kA[h] >= 0.999 && (S.phase !== "contact" || S.k >= 1);
+    S.onA[0] = on(0) && !(mix > 0 && mix < 0.999);
+    S.onA[1] = on(1);
+  }
+  // his own arms, one then the other (the first by contact, the second by drive)
+  function groundArms(S, vp) {
+    const T = S.T;
+    if (T.ch.cuffed) { vp.cuffArms(T.ch, 1); T.ch._vcufF = cuffFrame; return; }
+    const ph = S.phase;
+    const k1 = ph === "contact" ? smooth(S.k) : ph === "approach" || ph === "align" ? 0 : 1;
+    const k2 = ph === "drive" ? smooth((S.k - 0.3) / 0.55) : ph === "outcome" || ph === "release" ? 1 : 0;
+    if (k1 <= 0 && k2 <= 0) return;
+    const f = S.first || 1;
+    vp.cuffArms(T.ch, f > 0 ? k1 : k2, f > 0 ? k2 : k1);
+    T.ch._vcufF = cuffFrame;
+  }
+  // out cold: nothing in him fights it (a KO, not a knockdown he is awake for)
+  function outCold(S) {
+    const Vt = CBZ.vitals;
+    if (Vt && typeof Vt.state === "function") { try { const s = Vt.state(S.t); if (s) return s === "ko"; } catch (e) {} }
+    const ch = S.T.ch, f = ch && ch.fall;
+    return !!(ch && (ch.koPose || (f && f.on && f.ko)));
+  }
+  // the session is over: he is left where he lies. Cuffed, he lies a beat
+  // (whoever cuffed him hauls him up with V.getUp; left alone he gets up on
+  // his own clock); not cuffed, his own down clock takes him again.
+  function groundEnd(S) {
+    const T = S.T, ch = T.ch, f = ch && ch.fall;
+    if (S.roll && !S.roll.sw && S.phase !== "align" && S.phase !== "approach") rollSwitch(S);
+    if (ch && ch.group && S.x0.set && !S.opts.noMove) {
+      setPos(T, S.x0.x, S.x0.y, S.x0.z);
+      orient(T, S.roll && !S.roll.sw ? S.roll.yaw0 : (S.gTyaw != null ? S.gTyaw : T.yaw()), 0, 0);
+    }
+    T._yawLock = null;
+    if (f && f.on) {
+      f.hold = false;
+      if (ch.cuffed) { f.t = 0; f.dur = Math.max(1.5, Math.min(f.dur || 0, 4)); }
+    }
+  }
+
+  /* THE CUFFS IN THE OFFICER'S HAND: out of the case as his hands go on (the
+     contact beat), gone from the hand when the first one closes on a wrist
+     (the pair is then half on the man: setCuffs "half"). */
+  function handSocket(ch) { return ch && ch.sockets ? ch.sockets.rightHand || null : null; }
+  function rigCuffK(ch) {
+    const cap = ch && ch.parts && ch.parts.ra && ch.parts.ra.userData && ch.parts.ra.userData.cap;
+    return cap && cap.scale && cap.scale.x > 0 ? cap.scale.x : 1 / scaleOf(ch);
+  }
+  function handCuffsOn(S) {
+    if (S.hc || !CBZ.handcuffs || !S.A.ch) return;
+    const sock = handSocket(S.A.ch);
+    if (!sock) return;
+    const p = CBZ.handcuffs.buildOpen();
+    p.scale.setScalar(rigCuffK(S.A.ch));
+    // the first cuff's lock box in the fist, the rest hanging below it
+    p.rotation.set(0, 0, -PI / 2);
+    p.position.set(0, -0.02, 0.03);
+    sock.add(p);
+    S.hc = p;
+  }
+  function handCuffsOff(S) {
+    if (!S.hc) return;
+    if (S.hc.parent) S.hc.parent.remove(S.hc);
+    S.hc = null;
+  }
+
   function copyCtx(S, c) {
     const o = S._ctxBuf || (S._ctxBuf = { kind: "open", point: { x: 0, y: 0, z: 0 }, dist: 0, drop: 0, surfaceY: 0, obj: null, top: 0 });
     o.kind = c.kind; o.point.x = c.point.x; o.point.y = c.point.y; o.point.z = c.point.z;
@@ -1495,6 +1726,7 @@
     if (S.verb === "cuff" && S.phase !== "align" && S.phase !== "contact" && S.phase !== "drive") return false;   // before they close
     if (S.phase !== "align" && S.phase !== "contact" && S.phase !== "drive" && S.phase !== "hold" && S.phase !== "outcome") return false;
     if (S.sag > 0.7) return false;                             // a choke that far in has him
+    if (S.ground && outCold(S)) return false;                  // knocked out cold: nothing in him fights it
     return S.T.isPlayer || S.opts.struggle > 0;
   }
   // the held player's side of it, off the same keys the controller reads
@@ -1554,12 +1786,14 @@
     // what state HE is in: tased is jelly, winded is winded (arrest.js)
     const pm = S.opts.pullMulFn ? S.opts.pullMulFn() : 1;
     inp.pullMul = (pm > 0 ? pm : 1) * (S.opts.pullMul > 0 ? S.opts.pullMul : 1);
+    // tased on the floor with nobody passing his state in: jelly all the same
+    if (!S.opts.pullMulFn && S.T.isPlayer && AR.subduedWhy && AR.subduedWhy() === "tased") inp.pullMul *= 0.2;
     inp.strength = 1;
     const cuffedT = !!(S.T.ch && S.T.ch.cuffed);
     inp.hold = AR.holdOf(S.grip0, {
       tierHold: S.opts.tierHold,
       backup: S.opts.backupN | 0,
-      pinned: !!S.opts.pinned || (S.verb === "tackle" && S.phase === "outcome"),
+      pinned: !!S.opts.pinned || (S.verb === "tackle" && S.phase === "outcome") || !!S.ground,
       cuffed: cuffedT,
       behind: S.def.face === "same",
       hpRatio: S.A.hpRatio ? S.A.hpRatio() : 1,
@@ -1608,7 +1842,18 @@
       if (S._ahp != null && hp < S._ahp) drop = S._ahp - hp;
       S._ahp = hp;
     }
-    if (!down && drop < 22) {
+    // CUFFING TAKES BOTH HANDS AND HIS EYES ON THE WRISTS: a blow that lands
+    // on him (a fresh hit reaction on his rig, or 5+ hp off him) ends it,
+    // and the cuffs are not on
+    let struck = false;
+    if (S.verb === "cuff" || S.verb === "uncuff") {
+      const hr = A.ch && A.ch.hitReact;
+      const on = !!(hr && hr.on), ht = hr ? hr.t : 0;
+      const working = S.phase === "align" || S.phase === "contact" || S.phase === "drive";
+      struck = working && ((on && (!S._hrOn || ht < S._hrT - 1e-4)) || drop >= 5);
+      S._hrOn = on; S._hrT = ht;
+    }
+    if (!down && drop < 22 && !struck) {
       if (drop >= 5 && S.cst) S.cst.prog = Math.min(0.97, S.cst.prog + 0.3 + drop * 0.02);
       return false;
     }
@@ -1686,6 +1931,12 @@
     const A = body(a), T = body(t);
     if (!A.pos || !T.pos || !A.ch || !T.ch) return null;
     if (A.dead() || T.dead()) return null;
+    // THE RULE (systems/arrest.js): cuffs go on a man who is down or gave up
+    if (verb === "cuff" && !opts.force && CBZ.arrest && typeof CBZ.arrest.cuffable === "function") {
+      let ok = true;
+      try { ok = !!CBZ.arrest.cuffable(t); } catch (e) { ok = true; }
+      if (!ok) return null;
+    }
     // an existing hold between the same two people is handed over (throw
     // from a grab, carry from a grab, shove out of a clinch)
     let from = null;
@@ -1712,6 +1963,15 @@
     if (def.needDown && !down) return null;
     if (down && !def.allowDown && !from) return null;
     if (A.down()) return null;
+    // cuffed where he lies: STRIKE's falls are what lay him there (a page
+    // without them has no lying body to cuff), and not a body in the air
+    const ground = verb === "cuff" && !!down && !from;
+    if (ground) {
+      const MP = CBZ.meleePoses;
+      if (!MP || typeof MP.startFall !== "function") return null;
+      const ph = T.isPlayer && CBZ.player ? CBZ.player._phys : t._phys;
+      if (ph && ph.air) return null;
+    }
     if (tf) { const i = flights.indexOf(tf); if (i >= 0) endFlight(tf, i); }
 
     const S = {
@@ -1730,8 +1990,13 @@
       pl: { lx: 0, lz: 0, dy: 0, relYaw: 0, pitch: 0, pitchA: 0, anchor: null, anchorK: 0, anchorPitch: 0, liftUp: 0, ground: false, drag: false },
       t0: CBZ.now || 0, tSpeed: 0, _tx: 0, _tz: 0, _off: new THREE.Vector3(), _offOk: false,
       travel: 0, travelDone: 0, seed: Math.random(), _cbDone: false, _handover: false,
+      handsA2: [null, null], mixA: [0, 0],
+      ground: ground, first: 0, hc: null, roll: null, gs: null, _gn: null, gTyaw: null, _gMiss: false,
       cancel: null,
     };
+    // a blow already landing on him before this began is not a new one
+    const hr0 = A.ch.hitReact;
+    S._hrOn = !!(hr0 && hr0.on); S._hrT = hr0 ? hr0.t : 0;
     S.cancel = function () { cancel(S); };
     S.work = def.work(S);
     // direction: the caller's, or the grabber's line to the target
@@ -1745,9 +2010,13 @@
     // reach plus one dive, never a homing run from across the street
     const lunge = verb === "tackle" && T.isPlayer && !from && !opts.homing && !!(CBZ.arrest && CBZ.arrest.lungeAim);
     const reachMax = lunge ? S.work + CBZ.arrest.LUNGE.REACH
-      : def.pull ? (def.pullReach || 8) : S.work + (def.close || 1.0) + (def.needDown ? 1.8 : 0) + (opts.far ? (opts.far > 1 ? +opts.far : 2.6) : 0);
+      : def.pull ? (def.pullReach || 8) : S.work + (def.close || 1.0) + (def.needDown || ground ? 1.8 : 0) + (opts.far ? (opts.far > 1 ? +opts.far : 2.6) : 0);
     if (!from && ll > reachMax) return null;
     if (lunge) lungeBegin(S);
+    if (ground) groundPrep(S);
+    // the ring line on his wrists, measured once, so the arms are solved to
+    // where the cuffs will close from the first beat
+    if (verb === "cuff" && T.ch.low) cuffFit(T.ch);
     if (from) {
       // straight into the drive from the hold that was already there
       S.phase = "drive";
@@ -1780,7 +2049,7 @@
       }
       S.x0.set = true;
       if (!S.ownT) S.ownT = own(S.t, S);
-      if (S.wasDown && S.T.ch) endFall(S.T.ch);
+      if (S.wasDown && S.T.ch && !S.ground) endFall(S.T.ch);
       if (S.T.ch) S.T.ch.verbHold = { verb: S.verb, role: "t", k: 0, phase: ph };
       if (S.A.ch) S.A.ch.verbHold = { verb: S.verb, role: "a", k: 0, phase: ph };
     }
@@ -1828,6 +2097,9 @@
     if (S.a._verbS === S) S.a._verbS = null;
     if (S.t._verbS === S) S.t._verbS = null;
     S.A._yawLock = null;
+    handCuffsOff(S);
+    // the pair half on him (one wrist closed) comes off with the officer's hands
+    if (S.verb === "cuff" && S.T.ch && !S.T.ch.cuffed && halfCuffed(S.T.ch)) setCuffs(S.t, false);
     const vp = VP();
     if (!S._handover) {
       restoreHands(S.A.ch, S.hpA);
@@ -1836,7 +2108,11 @@
     if (S.A.ch) { S.A.ch.verbHold = null; if (vp && !S._handover) vp.clear(S.A.ch); }
     if (!S.tFree) {
       if (S.T.ch) { S.T.ch.verbHold = null; if (vp && !S._handover) vp.clear(S.T.ch); }
-      if (!S._handover) {
+      if (!S._handover && S.ground) {
+        // left where he lies (cuffed or not): no knockdown, no stand-up
+        disown(S.t, S);
+        groundEnd(S);
+      } else if (!S._handover) {
         disown(S.t, S);
         // a body we were holding off the ground goes back to standing — or,
         // if it was down / knocked out, lies back down through the handoff
@@ -1887,6 +2163,11 @@
     if (S.done) return;
     S.k = S.dur > 0 && isFinite(S.dur) ? clamp01(S.pt / S.dur) : 1;
     if (S.phase === "approach") return;
+    // on the floor: he got up before the knee went down (his own clock ran
+    // out on the walk over), or something else stood him up: not cuffed
+    if (S.ground && (S._gMiss || (S.phase !== "release" && !(T.ch.fall && T.ch.fall.on)))) {
+      S.result = { outcome: "missed" }; finish(S, false); return;
+    }
     if (grabberHit(S)) return;
     struggle(S, dt);
     if (S.done) return;
@@ -1898,8 +2179,11 @@
     }
     const yawA = A.yaw();
 
-    // ---- the grabber squares up to him until the hands are on
-    if (S.phase === "align" && def.face !== "none") {
+    // ---- the grabber squares up to him until the hands are on (on the
+    // floor: across his back, where the approach turned him)
+    if (S.phase === "align" && S.ground) {
+      if (S.gs) A.face(S.gs.yaw, 1 - Math.exp(-14 * dt));
+    } else if (S.phase === "align" && def.face !== "none") {
       const ty = Math.atan2(T.pos.x - A.pos.x, T.pos.z - A.pos.z);
       A.face(ty, 1 - Math.exp(-14 * dt));
     }
@@ -1916,7 +2200,14 @@
     // not drive his chest through the other man's back. Then the target is
     // placed, posed, and his own arms solved, before any hand goes on him.
     poseSide(S, A, def.poseA(S), dt);
-    if (!S.tFree) {
+    if (!S.tFree && S.ground) {
+      // ON THE FLOOR: his body is his fall's (held down), his root stays
+      // where he lies, only his arms are taken
+      holdFall(S);
+      if (S.ownT && CBZ.animChar && !T.isPlayer) CBZ.animChar(T.ch, 0, dt);
+      groundTarget(S);
+      if (vp) groundArms(S, vp);
+    } else if (!S.tFree) {
       if (S.ownT && CBZ.animChar && !T.isPlayer) CBZ.animChar(T.ch, S.tSpeed, dt);
       placeTarget(S, A, T, dt, yawA);
       poseSide(S, T, def.poseT(S), dt);
@@ -1936,6 +2227,7 @@
     S.onA[0] = S.onA[1] = false; S.onT[0] = S.onT[1] = false;
     S.kA[0] = S.kA[1] = S.kT[0] = S.kT[1] = 0;
     S.gA[0] = S.gA[1] = "grip"; S.gT[0] = S.gT[1] = "support";
+    S.handsA2[0] = S.handsA2[1] = null; S.mixA[0] = S.mixA[1] = 0;
     def.hands(S);
     // the fingers close on what they hold, and open again when they let go
     // (set every frame: an armed body's weapon sync rewrites the right hand)
@@ -1962,6 +2254,8 @@
       S.resA[h] = -1;
       if (!name || S.tFree || !(S.kA[h] > 0.001)) continue;
       contactPoint(T.ch, name, S.pA[h], true);
+      // a grip sliding from one point to another (the ground cuff's left hand)
+      if (S.mixA[h] > 0 && S.handsA2[h]) { contactPoint(T.ch, S.handsA2[h], _V, true); S.pA[h].lerp(_V, S.mixA[h]); }
       if (S.press) {
         // a pat presses IN toward his centre line
         _C.set(T.pos.x, S.pA[h].y, T.pos.z).sub(S.pA[h]);
@@ -2007,6 +2301,8 @@
     _pp.strain = B === S.A ? S.strain : 0;
     _pp.writhe = B === S.T ? S.writhe : 0;
     _pp.moving = B === S.A ? S.aSpeed > 0.4 : S.tSpeed > 0.4;
+    _pp.knee = null;
+    if (S.ground && B === S.A && S.gs) { _pp.knee = groundKnee(S); _pp.kneeSide = S.gs.side; _pp.twist = S.gs.twist; }
     _pp.ground = S.verb === "tackle" && (S.phase === "outcome" || S.phase === "release") && S.result && S.result.outcome === "open" && (B === S.T || S.phase === "outcome" || S.k < 0.5);
     if (S.verb === "carry" && B === S.A && (S.phase === "drive" || S.phase === "contact" || S.phase === "release")) {
       _pp.k = S.phase === "contact" ? 0.3 * smooth(S.k) : S.phase === "drive" ? S.k : 1 - S.k;
@@ -2023,11 +2319,12 @@
      head and turns his back on the body. Walks through CBZ.moves (the one
      locomotion layer) when it is loaded; a plain capped step otherwise.
      Returns true when he is there. */
-  function stepTo(S, B, mover, gx, gz, face, speed, dt) {
+  // strafe: step sideways / back while holding `face` (the last half metre)
+  function stepTo(S, B, mover, gx, gz, face, speed, dt, strafe) {
     const M = CBZ.moves;
     if (M && M.motor && M.step) {
       const m = M.motor(mover);
-      M.step(m, B.pos, B.yaw(), gx, gz, { speed: speed, stop: 0.03, face: face, lod: 1, accel: 12, decel: 12 }, dt);
+      M.step(m, B.pos, B.yaw(), gx, gz, { speed: speed, stop: 0.03, face: face, lod: 1, accel: 12, decel: 12, strafe: !!strafe }, dt);
       setPos(B, B.pos.x, groundY(B.pos.x, B.pos.z, B.pos.y + 0.45), B.pos.z);
       if (m.yaw != null) B.face(m.yaw, 1);
       return m.gs || 0;
@@ -2045,8 +2342,15 @@
     if (S.opts.noMove) return true;
     if (S.lunge) return lungeStep(S, dt);
     const A = S.A, T = S.T, def = S.def;
-    let gx, gz, face = null;
-    if (def.needDown) {
+    let gx, gz, face = null, settling = false;
+    if (S.ground) {
+      // beside his back, facing across it (read off where he lies NOW: he
+      // may still be going down)
+      const gs = groundSpot(S);
+      gx = gs.x; gz = gs.z; face = gs.yaw;
+      const f = T.ch.fall;
+      settling = !!(f && f.on && f.phase === "fall");
+    } else if (def.needDown) {
       // beyond his head, facing away from his feet
       contactPoint(T.ch, "backCollar", _W, false);
       let vx = _W.x - T.pos.x, vz = _W.z - T.pos.z;
@@ -2069,11 +2373,17 @@
     }
     const rem = Math.hypot(gx - A.pos.x, gz - A.pos.z);
     const turned = face == null || Math.abs(angDiff(A.yaw(), face)) < 0.3;
-    if (rem <= 0.04 && turned) { S.aSpeed = 0; return true; }
-    if (S.age > (S.opts.far ? (S.opts.far > 1 ? 1.6 + S.opts.far / 2.2 : 2.6) : 1.6)) {
+    if (rem <= 0.04 && turned && !settling) { S.aSpeed = 0; return true; }
+    if (S.age > (S.opts.far ? (S.opts.far > 1 ? 1.6 + S.opts.far / 2.2 : 2.6) : 1.6) + (S.ground ? 1.4 : 0)) {
       // could not get there (blocked, or he backed off faster than we walk)
       if (rem > 0.35) { S.result = { outcome: "missed" }; finish(S, false); return false; }
       return true;
+    }
+    if (S.ground) {
+      // walk to him facing where he goes; the last step taken square to his back
+      const near = rem < 0.6;
+      S.aSpeed = stepTo(S, A, S.a, gx, gz, near ? face : null, def.speed || 2.5, dt, near);
+      return false;
     }
     S.aSpeed = stepTo(S, A, S.a, gx, gz, face, def.speed || 2.5, dt);
     return false;
@@ -2248,85 +2558,292 @@
   }
 
   /* ============================================================
-     CUFFS: the ties, ON the wrists, on anybody
+     CUFFS: a real pair of handcuffs (entities/handcuffs.js), ON the wrists,
+     on anybody.
+
+     Each cuff closes round ITS wrist: the ring sits at the waist of the
+     wrist (the narrowest the forearm and hand are, just above the hand,
+     measured off this rig's own meshes, clear of the watch), sized to it,
+     scaled with this body's hand. The chain is re-seated between the two
+     swivels every frame at its own fixed length: the wrists lie side by side
+     (verbposes cuffLocal: a ring's width apart) and the cuffs turn on the
+     wrists, lock boxes out from his back, just far enough toward each other
+     that the swivels sit a chain apart. Nothing is ever stretched.
+
+     setCuffs(a, true | false | "half", opts)
+       "half"  the first cuff closed on one wrist (opts.side +1 left / -1
+               right), the other still in the officer's hand (opts.hand, an
+               Object3D, opts.handK its rig scale): a cuff verb mid-drive
+       true    both closed (completes a half pair where it is)
+       opts.whileKo: they come off by themselves when his count (a.ko) runs out
      ============================================================ */
-  const cuffed = [];         // { a, ch, ringL, ringR, link, k }
-  let cuffMat = null, ringGeo = null, linkGeo = null;
+  const cuffed = [];         // { a, ch, cuffs: [L, R], chain, fit, k, whileKo, half, hand, handK }
   let cuffFrame = 0;
-  function cuffAssets() {
-    if (cuffMat) return;
-    cuffMat = CBZ.cmat ? CBZ.cmat(0xd7dbe0) : new THREE.MeshLambertMaterial({ color: 0xd7dbe0 });
-    ringGeo = new THREE.TorusGeometry(1, 0.14, 4, 12); ringGeo._shared = true;
-    linkGeo = new THREE.BoxGeometry(0.035, 0.035, 1); linkGeo._shared = true;
+  const HC = () => CBZ.handcuffs || null;
+  /* where on the forearm the ring goes and how big: the elbow frame (rig
+     units). The hand hangs from the wrist crease (character.js HANDS) and
+     the forearm loft ends there in a dome: between the two is the waist a
+     ratchet cuff closes on. Once per rig (and per profile). */
+  const _fv = new THREE.Vector3(), _fm = new THREE.Matrix4(), _fi = new THREE.Matrix4();
+  function cuffFit(ch) {
+    if (ch._cuffFit && ch._cuffFitP === ch.profile) return ch._cuffFit;
+    const H = HC(), P = ch.profile || {};
+    const k = rigCuffK(ch);
+    const lm = CBZ.charArmLandmarks ? CBZ.charArmLandmarks(ch) : null;
+    const top = lm && isFinite(lm.handTop) ? lm.handTop : (P.handH || 0.2) - (P.armLo || 0.46);
+    const D = H ? H.DIM : { R_IN: 0.0325, R_MIN: 0.026, R_MAX: 0.043, SWING: 0.0026, LOCK_Y: 0.012 };
+    let bestY = top, bestR = D.R_IN * k;
+    const low = ch.low && ch.low.la, part = ch.parts && ch.parts.la;
+    const meshes = [];
+    if (part && part.userData) { if (part.userData.lower) meshes.push(part.userData.lower); if (part.userData.cap) meshes.push(part.userData.cap); }
+    if (low && meshes.length) {
+      low.updateWorldMatrix(true, true);
+      _fi.copy(low.matrixWorld).invert();
+      const n = 24, y0 = top - 0.02, y1 = top + 0.012, band = D.LOCK_Y * 0.5 * k;
+      const rr = new Float32Array(n + 1);
+      for (let mi = 0; mi < meshes.length; mi++) {
+        const m = meshes[mi];
+        const pos = m.geometry && m.geometry.attributes && m.geometry.attributes.position;
+        if (!pos) continue;
+        m.updateWorldMatrix(true, false);
+        _fm.multiplyMatrices(_fi, m.matrixWorld);
+        // the forearm is a loft (rings of vertices): its radius BETWEEN the
+        // rings is interpolated; the hand is not, so its vertices count
+        // across the ring's own width
+        const lvY = [], lvR = [];
+        for (let i = 0; i < pos.count; i++) {
+          _fv.fromBufferAttribute(pos, i).applyMatrix4(_fm);
+          if (_fv.y < y0 - 0.05 || _fv.y > y1 + 0.05) continue;
+          const r = Math.hypot(_fv.x, _fv.z);
+          if (mi === 0) {
+            let j = 0;
+            while (j < lvY.length && Math.abs(lvY[j] - _fv.y) > 1e-4) j++;
+            if (j === lvY.length) { lvY.push(_fv.y); lvR.push(r); } else if (r > lvR[j]) lvR[j] = r;
+          } else {
+            for (let j = 0; j <= n; j++) {
+              const y = y0 + (y1 - y0) * j / n;
+              if (Math.abs(_fv.y - y) <= band && r > rr[j]) rr[j] = r;
+            }
+          }
+        }
+        if (mi === 0 && lvY.length > 1) {
+          const ord = lvY.map((y, i) => i).sort((p, q) => lvY[p] - lvY[q]);
+          for (let j = 0; j <= n; j++) {
+            const y = y0 + (y1 - y0) * j / n;
+            for (let q = 0; q + 1 < ord.length; q++) {
+              const a0 = ord[q], a1 = ord[q + 1];
+              if (y < lvY[a0] || y > lvY[a1]) continue;
+              const t = (y - lvY[a0]) / Math.max(1e-6, lvY[a1] - lvY[a0]);
+              const r = lvR[a0] + (lvR[a1] - lvR[a0]) * t;
+              if (r > rr[j]) rr[j] = r;
+              break;
+            }
+          }
+        }
+      }
+      let bj = -1;
+      for (let j = n; j >= 0; j--) if (rr[j] > 0 && (bj < 0 || rr[j] < rr[bj] - 1e-4)) bj = j;
+      if (bj >= 0) { bestY = y0 + (y1 - y0) * bj / n; bestR = rr[bj]; }
+    }
+    // a ratchet cuff closes down onto the wrist: snug (it takes up the last
+    // few percent of a soft forearm), never looser than it has to be
+    const rIn = Math.max(D.R_MIN * k, Math.min(D.R_MAX * k, bestR * 0.96));
+    const f = { y: bestY, rIn: rIn, rOut: rIn + 2 * D.SWING * k, k: k };
+    ch._cuffFit = f; ch._cuffFitP = ch.profile;
+    return f;
   }
-  function ringMesh(ch) {
-    const P = ch.profile || {};
-    const r = ((P.armW || 0.3) * 0.9) * 0.60;           // hugs the forearm box
-    const m = new THREE.Mesh(ringGeo, cuffMat);
-    m.name = "cuff-ring"; m.castShadow = false;
-    m.rotation.x = PI / 2;                              // around the forearm (low's +y)
-    m.scale.set(r, r, r * 1.3);
-    return m;
+  function entryOf(ch) { for (let i = 0; i < cuffed.length; i++) if (cuffed[i].ch === ch) return cuffed[i]; return null; }
+  function halfCuffed(ch) { const e = entryOf(ch); return !!(e && e.half); }
+  function lowOf(ch, side) { return ch.low ? (side > 0 ? ch.low.la : ch.low.ra) : null; }
+  function seatOnWrist(e, cuff, side) {
+    const low = lowOf(e.ch, side);
+    low.add(cuff);
+    cuff.position.set(0, e.fit.y, 0);
+    cuff.scale.setScalar(e.fit.k);
+    if (HC()) HC().setOpen(cuff, 0);
   }
-  // opts.whileKo: the ties come off by themselves when his count (a.ko) runs out
+  function dropEntry(e) {
+    for (const o of [e.cuffs[0], e.cuffs[1], e.chain]) if (o && o.parent) o.parent.remove(o);
+    const i = cuffed.indexOf(e);
+    if (i >= 0) cuffed.splice(i, 1);
+  }
   function setCuffs(a, on, opts) {
     a = norm(a);
     const ch = rigOf(a);
     if (!ch || !ch.low || !ch.low.la || !ch.low.ra) return false;
-    let e = null, ei = -1;
-    for (let i = 0; i < cuffed.length; i++) if (cuffed[i].ch === ch) { e = cuffed[i]; ei = i; break; }
+    let e = entryOf(ch);
     if (!on) {
       ch.cuffed = false;
       if (VP() && VP().unretract) VP().unretract(ch);
-      if (e) {
-        if (e.ringL.parent) e.ringL.parent.remove(e.ringL);
-        if (e.ringR.parent) e.ringR.parent.remove(e.ringR);
-        if (e.link.parent) e.link.parent.remove(e.link);
-        cuffed.splice(ei, 1);
+      if (e) dropEntry(e);
+      return true;
+    }
+    const half = on === "half";
+    if (!half) ch.cuffed = true;
+    if (e) {
+      if (opts && opts.whileKo) e.whileKo = true;
+      // the second cuff closes on the other wrist
+      if (!half && e.half) {
+        if (e.cuffs[1]) seatOnWrist(e, e.cuffs[1], -e.half);
+        // from here [0] is the one on his LEFT wrist, [1] his right
+        if (e.half < 0) { const c = e.cuffs[0]; e.cuffs[0] = e.cuffs[1]; e.cuffs[1] = c; }
+        e.half = 0; e.hand = null;
       }
       return true;
     }
-    ch.cuffed = true;
-    if (e) { if (opts && opts.whileKo) e.whileKo = true; return true; }
-    cuffAssets();
-    const wy = VP() ? VP().wristLocalY(ch) : -0.22;
-    const ringL = ringMesh(ch), ringR = ringMesh(ch);
-    ringL.position.set(0, wy, 0); ringR.position.set(0, wy, 0);
-    ch.low.la.add(ringL); ch.low.ra.add(ringR);
-    const link = new THREE.Mesh(linkGeo, cuffMat);
-    link.name = "cuff-link"; link.castShadow = false;
-    ch.low.la.add(link);
-    cuffed.push({ a: a, ch: ch, ringL: ringL, ringR: ringR, link: link, k: 0, whileKo: !!(opts && opts.whileKo) });
+    const fit = cuffFit(ch);
+    e = { a: a, ch: ch, cuffs: [null, null], chain: null, fit: fit, k: 0, whileKo: !!(opts && opts.whileKo), half: 0, hand: null, handK: 1 };
+    const H = HC();
+    if (H) {
+      const pair = H.build({ r: fit.rIn / fit.k });
+      const hc = pair.userData.handcuffs;
+      e.chain = hc.chain;
+      ch.group.add(hc.chain);
+      if (half) {
+        // [0] closed on the first wrist, [1] still open in the officer's hand
+        e.half = opts && opts.side > 0 ? 1 : -1;
+        e.cuffs[0] = hc.cuffs[0]; e.cuffs[1] = hc.cuffs[1];
+        seatOnWrist(e, e.cuffs[0], e.half);
+        const hand = opts && opts.hand;
+        if (hand) {
+          e.hand = hand; e.handK = (opts.handK > 0 ? opts.handK : fit.k);
+          hand.add(e.cuffs[1]);
+          e.cuffs[1].scale.setScalar(e.handK);
+          e.cuffs[1].position.set(0, -0.02, 0.03);
+          e.cuffs[1].rotation.set(0, 0, PI / 2);          // swivel up out of the fist, toward the chain
+          H.setOpen(e.cuffs[1], 0.6);
+        } else seatOnWrist(e, e.cuffs[1], -e.half);
+      } else {
+        // [0] on the LEFT wrist, [1] on the right
+        e.cuffs[0] = hc.cuffs[0]; e.cuffs[1] = hc.cuffs[1];
+        seatOnWrist(e, e.cuffs[0], 1);
+        seatOnWrist(e, e.cuffs[1], -1);
+      }
+    }
+    cuffed.push(e);
     return true;
   }
   function isCuffed(a) { const ch = rigOf(norm(a)); return !!(ch && ch.cuffed); }
-  const _l0 = new THREE.Vector3(), _l1 = new THREE.Vector3(), _q = new THREE.Quaternion(), _z = new THREE.Vector3(0, 0, 1);
+
+  /* TURN A CUFF ON ITS WRIST so its lock box (and swivel) points along
+     `u` (world), square round the forearm. */
+  const _u = new THREE.Vector3(), _ax = new THREE.Vector3(0, 1, 0), _bz = new THREE.Vector3(), _mb = new THREE.Matrix4();
+  const _qi = new THREE.Quaternion();
+  function aimCuff(cuff, low, u) {
+    low.getWorldQuaternion(_qi).invert();
+    _u.copy(u).applyQuaternion(_qi);
+    _u.y = 0;
+    const l = _u.length();
+    if (l < 1e-5) _u.set(1, 0, 0); else _u.multiplyScalar(1 / l);
+    _bz.crossVectors(_u, _ax);
+    _mb.makeBasis(_u, _ax, _bz);
+    cuff.quaternion.setFromRotationMatrix(_mb);
+  }
+  const _w0 = new THREE.Vector3(), _w1 = new THREE.Vector3(), _p0 = new THREE.Vector3(), _q0 = new THREE.Vector3();
+  const _g0 = new THREE.Vector3(), _g1 = new THREE.Vector3();
+  // both cuffs turned th from "out of his back" (_q0) toward each other
+  // (_p0, left -> right); returns how far apart that leaves the swivels
+  function cuffGapAt(A, B, lowL, lowR, th) {
+    const H = HC(), c = Math.cos(th), s = Math.sin(th);
+    _u.copy(_q0).multiplyScalar(c).addScaledVector(_p0, s);
+    _g0.copy(_u); aimCuff(A, lowL, _g0);
+    _u.copy(_q0).multiplyScalar(c).addScaledVector(_p0, -s);
+    _g1.copy(_u); aimCuff(B, lowR, _g1);
+    H.swivel(A, _g0); H.swivel(B, _g1);
+    return _g0.distanceTo(_g1);
+  }
+  const _s0 = new THREE.Vector3(), _s1 = new THREE.Vector3(), _dn = new THREE.Vector3(), _gq = new THREE.Quaternion();
+  function poseEntry(e) {
+    const H = HC(), ch = e.ch;
+    if (!H || !e.chain || !e.cuffs[0] || !e.cuffs[1]) return;
+    const hs = scaleOf(ch);
+    const kw = e.fit.k * hs;                                  // world metres per real metre on this body
+    const A = e.cuffs[0], B = e.cuffs[1];
+    if (e.half) {
+      // the one on his wrist turns toward the one in the officer's hand
+      const lowA = lowOf(ch, e.half);
+      lowA.updateWorldMatrix(true, false);
+      _w0.set(0, e.fit.y, 0).applyMatrix4(lowA.matrixWorld);
+      B.getWorldPosition(_w1);
+      _p0.subVectors(_w1, _w0);
+      aimCuff(A, lowA, _p0);
+    } else {
+      const lowL = ch.low.la, lowR = ch.low.ra;
+      lowL.updateWorldMatrix(true, false); lowR.updateWorldMatrix(true, false);
+      _w0.set(0, e.fit.y, 0).applyMatrix4(lowL.matrixWorld);
+      _w1.set(0, e.fit.y, 0).applyMatrix4(lowR.matrixWorld);
+      // lock boxes out from his back (the body's -Z), turned toward each other
+      // by just what brings the swivels a chain's length apart (a little slack)
+      ch.body.getWorldQuaternion(_gq);
+      _q0.set(0, 0, -1).applyQuaternion(_gq);
+      _p0.subVectors(_w1, _w0);
+      const d = _p0.length();
+      if (d > 1e-6) _p0.multiplyScalar(1 / d);
+      _q0.addScaledVector(_p0, -_q0.dot(_p0));
+      if (_q0.lengthSq() < 1e-8) _q0.set(0, -1, 0);
+      _q0.normalize();
+      // the turn that leaves the swivels 0.9 of a chain apart (bisected: the
+      // forearms are not parallel, so no closed form holds); none if the
+      // wrists already sit closer than that
+      const want = 0.9 * H.CHAIN_LEN * kw;
+      let lo = 0, hi = PI / 2, th = 0;
+      if (cuffGapAt(A, B, lowL, lowR, 0) > want) {
+        for (let it = 0; it < 7; it++) {
+          th = (lo + hi) * 0.5;
+          if (cuffGapAt(A, B, lowL, lowR, th) > want) lo = th; else hi = th;
+        }
+        th = (lo + hi) * 0.5;
+      }
+      cuffGapAt(A, B, lowL, lowR, th);
+    }
+    // the chain, swivel to swivel, in the rig's group frame
+    H.swivel(A, _s0); H.swivel(B, _s1);
+    const g = ch.group;
+    g.updateWorldMatrix(true, false);
+    g.worldToLocal(_s0); g.worldToLocal(_s1);
+    g.getWorldQuaternion(_gq).invert();
+    _dn.set(0, -1, 0).applyQuaternion(_gq);
+    H.seatChain(e.chain, _s0, _s1, _dn, kw / (g.scale.x || 1));
+  }
+  // every rig a script cuffed with just the flag (a jail cutscene, a prison
+  // brain, the city's arrest scenes) wears the pair too: a slow roster sweep
+  let rosterT = 0;
+  function cuffRoster(dt) {
+    rosterT -= dt;
+    if (rosterT > 0) return;
+    rosterT = 0.3;
+    const pc = CBZ.playerChar;
+    if (pc && pc.cuffed && !entryOf(pc)) setCuffs(playerActor(), true);
+    const lists = [CBZ.npcs, CBZ.guards, CBZ.cityPeds, CBZ.cityCops, CBZ.bots];
+    for (let li = 0; li < lists.length; li++) {
+      const L = lists[li];
+      if (!L || !L.length) continue;
+      for (let i = 0; i < L.length; i++) {
+        const a = L[i], ch = a && (a.char || a.ch);
+        if (ch && ch.cuffed && ch.parts && !entryOf(ch)) setCuffs(a, true);
+      }
+    }
+  }
   function poseCuffs(dt) {
     const vp = VP();
     if (!vp) return;
+    cuffRoster(dt);
     for (let i = cuffed.length - 1; i >= 0; i--) {
       const e = cuffed[i], ch = e.ch;
-      if (!ch.cuffed || (e.whileKo && !(e.a.ko > 0))) { setCuffs(e.a, false); continue; }
-      e.k = Math.min(1, e.k + dt * 4);
-      if (ch._vcufF !== cuffFrame && ch.group && ch.group.visible !== false) vp.cuffArms(ch, smooth(e.k));
-      // the bridge between the two rings, re-seated every frame
-      const wy = vp.wristLocalY(ch);
-      if (vp.wristWorld(ch, -1, _l1)) {
-        ch.low.la.worldToLocal(_l1);
-        _l0.set(0, wy, 0);
-        _l1.sub(_l0);
-        const len = _l1.length();
-        e.link.position.set(_l1.x * 0.5, wy + _l1.y * 0.5, _l1.z * 0.5);
-        if (len > 1e-4) { _q.setFromUnitVectors(_z, _l1.multiplyScalar(1 / len)); e.link.quaternion.copy(_q); }
-        e.link.scale.set(1, 1, Math.max(0.02, len));
+      if (e.half) {
+        // the pair half on him belongs to a cuff verb: gone with it
+        if (!e.a._verbS || e.a._verbS.done) { dropEntry(e); continue; }
+      } else if (!ch.cuffed || (e.whileKo && !(e.a.ko > 0))) { setCuffs(e.a, false); continue; }
+      if (!ch.group || ch.group.visible === false) continue;
+      if (!e.half) {
+        e.k = Math.min(1, e.k + dt * 4);
+        if (ch._vcufF !== cuffFrame) vp.cuffArms(ch, smooth(e.k));
       }
-    }
-    // the player can be cuffed by any mode's script with just the flag
-    const pc = CBZ.playerChar;
-    if (pc && pc.cuffed && pc._vcufF !== cuffFrame) {
-      let reg = false;
-      for (let i = 0; i < cuffed.length; i++) if (cuffed[i].ch === pc) { reg = true; break; }
-      if (!reg) vp.cuffArms(pc, 1);
+      // the steel is 5 mm: past 40 m nobody sees the cuffs turn on the wrists
+      const cam = CBZ.camera;
+      if (cam && cam.position && ch.group.position.distanceToSquared(cam.position) > 1600 && e.posed) continue;
+      e.posed = true;
+      poseEntry(e);
     }
   }
 
@@ -2533,6 +3050,12 @@
   V.busy = busy;
   V.setCuffs = setCuffs;
   V.cuffed = isCuffed;
+  // THE GROUND CUFF is in (a caller may cuff a man where he lies: V.cuff on
+  // a downed target kneels on him and leaves him lying, cuffed)
+  V.cuffDown = true;
+  V.GROUND = GROUND;
+  V.groundSpot = function (S) { return S && S.def ? groundSpot(S, {}) : null; };
+  V.cuffFit = function (a) { const ch = rigOf(norm(a)); return ch ? cuffFit(ch) : null; };
   V.reach = reach;
   V.pick = pick;
   V.CONE = 0.3;
