@@ -400,6 +400,7 @@
           vx: opts.vx, vy: opts.vy, vz: opts.vz,
           wx: (Math.random() - 0.5) * 9, wy: (Math.random() - 0.5) * 7, wz: (Math.random() - 0.5) * 9,
           bounces: 0, rest: false, age2: 0, far: 0, taken: false,
+          life: TTL,           // s of far-clock before it goes; Infinity = never (placed / planted)
           body: null, inst: null,
         },
       };
@@ -432,9 +433,13 @@
       // LIFETIME. The clock only runs while you are far away — morgue.js's
       // witness law applied to loot. A thing lying at your feet never blinks
       // out; a shiv dropped in a brawl on the far side of the yard does.
+      // `life` is the per-drop budget: TTL for loot, Infinity for anything
+      // placed in the world (prisonPlaceItem) or planted by a system (the
+      // warden's favour shiv). It used to be written and never read, so a
+      // tool on a workbench blinked out 90 s after you left the room.
       const d2 = planarD2(inst);
-      if (d2 > KEEP_R2) d.far += dt;
-      if (d.far > TTL) {
+      if (d2 > KEEP_R2 && d.life !== Infinity) d.far += dt;
+      if (d.far > d.life) {
         d.blink = (d.blink || 0) + dt;
         m.visible = Math.floor(d.blink * 7) % 2 === 0;
         if (d.blink > BLINK) { expired++; CBZ.removeProp && CBZ.removeProp(inst); dropGone(inst); }
@@ -650,15 +655,23 @@
   // THE CAP. Prefer to evict something you are nowhere near — yanking a pile
   // out of the room you are standing in to make space for one across the yard
   // is the wrong trade every time.
+  // A PERMANENT drop (placed in the world, or planted with life = Infinity) is
+  // not loot: it neither counts toward the cap nor is ever the one evicted.
+  // The eleven cage/bench items alone used to fill half the cap, and a brawl
+  // could evict the Lockpick off the tool-crib rack.
+  function permanent(inst) { return !!(inst.data && (inst.data.world || inst.data.life === Infinity)); }
   function enforceCap() {
-    if (live.length < CAP) return;
-    let victim = null;
+    let n = 0;
+    for (let i = 0; i < live.length; i++) if (!permanent(live[i])) n++;
+    if (n < CAP) return;
+    let victim = null, oldest = null;
     for (let i = 0; i < live.length; i++) {
       const inst = live[i];
-      if (inst.data.taken) continue;
+      if (inst.data.taken || permanent(inst)) continue;
+      if (!oldest) oldest = inst;
       if (planarD2(inst) > EVICT_R2) { victim = inst; break; }   // oldest far one
     }
-    if (!victim) victim = live[0];
+    if (!victim) victim = oldest;
     if (!victim) return;
     evicted++;
     CBZ.removeProp && CBZ.removeProp(victim);
