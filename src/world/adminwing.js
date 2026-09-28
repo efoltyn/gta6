@@ -147,11 +147,15 @@
   const CORR_Z = -49.4;             // corridor / north-range partition plane
   const PX_A = -7.0, PX_B = 6.0;    // records|staff and staff|office partitions
   const QZ = -57.4;                 // office|quarters partition
-  // door openings, each {x0,x1} on its partition
-  const D_REC = { x0: -14.5, x1: -12.7 };
-  const D_STAFF = { x0: -2.5, x1: -0.7 };
+  // door openings, each {x0,x1} on its partition. A room door is a 1.1 m
+  // rough opening for one 0.9 m leaf in a frame (they were 1.8 m holes with
+  // no door at all); the Warden's office keeps its 1.8 m for a PAIR of leaves,
+  // the one room in the block that gets double doors.
+  const D_REC = { x0: -14.15, x1: -13.05 };
+  const D_STAFF = { x0: -2.15, x1: -1.05 };
   const D_OFF = { x0: 10.5, x1: 12.3 };
-  const D_QRT = { x0: 7.5, x1: 9.3 };
+  const D_QRT = { x0: 7.85, x1: 8.95 };      // centred on the warden's route x = 8.4
+  const FL = 0.06;                            // finished floor (PD.floor's top)
 
   // a partition run with gaps knocked in it. `gaps` are {x0,x1} (for a run
   // along x) or {z0,z1} (along z); every gap gets a real head above it, so a
@@ -189,7 +193,9 @@
     if (PD && PD.floor) return PD.floor(x0, x1, z0, z1, kind || "vct", color);
     addBox((x0 + x1) / 2, 0.02, (z0 + z1) / 2, x1 - x0, 0.08, z1 - z0, color, { solid: false, cast: false });
   }
-  floor(IX0, IX1, CORR_Z, IZ1, 0xc9cac4, "vct");               // corridor: VCT
+  // corridor VCT: mid grey. At 0xc9 under five troffers it read as a white
+  // void through the staff door from the cell block (owner's screenshot).
+  floor(IX0, IX1, CORR_Z, IZ1, 0xa3a59f, "vct");
   floor(IX0, PX_A, IZ0, CORR_Z, 0xc3bdae, "vct");              // records
   floor(PX_A, PX_B, IZ0, CORR_Z, 0xbfc3bd, "vct");             // staff room
   floor(PX_B, IX1, QZ, CORR_Z, 0x6e5d4c, "carpet");            // the office gets carpet tile
@@ -239,11 +245,11 @@
       PD.ceiling(F, CEIL, { id: R.id, kind: "acoustic", lights: "troffer", along: R.axis,
         nx: R.axis === "x" ? R.n : 1, nz: R.axis === "x" ? 1 : R.n });
     }
-    // caged lamps either side of the two locked doors — a lock you cannot
-    // see at 2 a.m. is a lock you cannot find.
-    PD.lamp(-3.2, 2.62, -45.6, "z+");
-    PD.lamp(11.4, 2.62, -48.7, "z-");
-    PD.lamp(11.4, 2.62, -50.1, "z+");
+    // a caged lamp over each locked door, ON the wall above its architrave
+    // (x,y,z = the plate 6 cm off the face, `face` = the wall's outward
+    // normal). They hung 0.5-1.1 m out in the air facing the wrong way.
+    PD.lamp(-3.2, 2.84, SG.z - 0.5 - 0.06, "z-", { w: 0.36, h: 0.22 });   // staff door, admin side
+    PD.lamp(11.4, 2.66, CORR_Z + PH + 0.06, "z+");           // the Warden's doors, corridor side
   }
   // the wing is an INTERIOR as far as systems/prisonnight.js's sensors are
   // concerned: a body in here is lit by these fittings, not by the sky.
@@ -273,9 +279,9 @@
     } catch (e) { return null; }
   }
   const plans = {};
-  plans.records = furnish("admin-records", IX0, PX_A, IZ0, CORR_Z, "office", [-13.6, CORR_Z], 0x9101);
-  plans.staff = furnish("admin-staff", PX_A, PX_B, IZ0, CORR_Z, "breakroom", [-1.6, CORR_Z], 0x9102);
-  plans.office = furnish("warden-office", PX_B, IX1, QZ, CORR_Z, "bossoffice", [11.4, CORR_Z], 0x9103);
+  plans.records = furnish("admin-records", IX0, PX_A, IZ0, CORR_Z, "office", [(D_REC.x0 + D_REC.x1) / 2, CORR_Z], 0x9101);
+  plans.staff = furnish("admin-staff", PX_A, PX_B, IZ0, CORR_Z, "breakroom", [(D_STAFF.x0 + D_STAFF.x1) / 2, CORR_Z], 0x9102);
+  // the office is NOT planner-furnished: see WARDEN'S OFFICE below
   plans.quarters = furnish("warden-quarters", PX_B, IX1, IZ0, QZ, "bedroom", [8.4, QZ], 0x9104);
 
   // ---- RECORDS: the property cage. Bars, not drywall — the same read the
@@ -394,43 +400,580 @@
     });
   })();
 
-  // ---- THE OFFICE: the things a warden's office has that no kit ships.
-  (function officeDress() {
-    // barred window in the north wall — the outside world, three metres of
-    // steel away. Fixed pane behind real bars; the wall behind it is solid,
-    // so this is a view and never a route. (OWNER RULE: no grey panes — the
-    // glass behind bars is the same clear tint the city and the wing use.)
-    const pane = addBox(12.9, 1.8, -63.62, 3.0, 1.3, 0.08, 0xbfe9f7,
-      { cast: false, emissive: 0x3f8aa6, ei: 0.35 });
+  // ---- THE QUARTERS' WINDOW, in the building's north wall behind his bed.
+  //      Fixed pane behind real bars; the wall behind it is solid, so this is
+  //      a view and never a route. (It sat in "officeDress" for years although
+  //      the office has no north outside wall. The pane no longer glows: an
+  //      emissive window read as a lit panel at 3 a.m.)
+  (function quartersWindow() {
+    const pane = addBox(12.9, 1.8, -63.62, 3.0, 1.3, 0.08, 0xbfe9f7, { cast: false });
     pane.material.transparent = true; pane.material.opacity = 0.62;
     addBox(12.9, 1.8, -63.6, 3.16, 1.46, 0.05, 0x3a3f46, { cast: false });           // frame
     addBox(12.9, 1.1, -63.5, 3.2, 0.05, 0.2, 0xd8d2c4, { cast: false });             // sill
     for (let i = 0; i < 5; i++) addBox(11.7 + i * 0.6, 1.8, -63.45, 0.05, 1.3, 0.05, 0x2a2f38, { cast: false });
-    // the state flag and the framed commission: the two things on the wall
-    // of every warden's office ever photographed
-    addBox(19.66, 1.95, -52.6, 0.03, 1.0, 1.6, 0x2c3f6b, { cast: false });          // flag, framed flat
-    addBox(19.64, 1.95, -52.6, 0.012, 0.34, 0.6, 0xd9b64c, { cast: false });
-    // (the commission hangs in the NEAR third: the planner's sideboard or
-    // locker can take the far third of this wall and would bury it)
-    addBox(19.66, 1.8, -50.7, 0.04, 0.62, 0.48, 0x6b5636, { cast: false });          // the commission
-    addBox(19.635, 1.8, -50.7, 0.012, 0.5, 0.36, 0xefe8d6, { cast: false });
-    /* a decanter set ON the sideboard, because he is that kind of warden. It
-       was two brown/grey boxes at a typed (9.6, -56.4) that is not where the
-       planner puts the sideboard — they hung in the air in the middle of the
-       room. Now they stand on the sideboard's second board, wherever the
-       plan put it, or are not drawn. */
-    const sb = plans.office && plans.office.pieces && plans.office.pieces.filter((p) => p.tag === "sideboard")[0];
-    if (sb && PD && PD.Paint) {
-      const D = new PD.Paint(), top = 0.30 + (2.0 - 0.35) / 4 * 2 + 0.05;   // F.shelf's second board
-      D.cyl(-0.35, 0.09, 0, 0.075, 0.085, 0.18, 0x7a4f1c, 16);                          // the whisky in it
-      D.cyl(-0.35, 0.19, 0, 0.03, 0.075, 0.03, 0xb8c6cc, 16);                           // shoulder
-      D.cyl(-0.35, 0.24, 0, 0.025, 0.025, 0.07, 0xb8c6cc, 12);                          // neck
-      D.add(new THREE.SphereGeometry(0.035, 10, 8).translate(-0.35, 0.3, 0), 0xb8c6cc);  // stopper
-      D.box(-0.1, 0.012, 0, 0.36, 0.024, 0.22, 0x6a563c);                               // silver tray (dark wood)
-      for (const dz of [-0.06, 0.06]) D.cyl(-0.05 + dz, 0.07, dz, 0.035, 0.03, 0.08, 0xc9d6dd, 12, 0, 0, true);   // tumblers
-      D.mesh(sb.x, top, sb.z, sb.yaw);
+  })();
+
+  /* ==========================================================
+     THE WARDEN'S OFFICE, BUILT BY HAND (2026-09-28).
+     The owner looked through the door and saw a planner room: CBZ.furnish's
+     boxy bossDesk + two kitchen chairs in 100 m2 of carpet, a flag that was a
+     blue rectangle painted flat on the wall, a "commission" that was a cream
+     card, and no door. A warden's office is a set piece every prison film
+     agrees on, so it is drawn as one: a panelled executive desk facing the
+     door with a tufted leather chair behind it, two leather guest chairs, a
+     flag on a stand, a bookcase, filing cabinets, the CCTV bank he watches
+     the block on, framed photographs and his diploma, a window with the
+     blinds drawn, a rug, a credenza with the decanter, and the GUN CASE on
+     the wall behind him.
+     One Paint (merged, vertex-coloured, one draw) per piece; two small
+     canvas atlases (the CCTV feeds, the pictures); no lights. Everything
+     stands on the finished floor (FL) or hangs on a wall face.
+     Room faces: x 6.2 .. 19.7, z -57.2 (north) .. -49.6 (south, the doors).
+     ========================================================== */
+  const OFF = { x0: PX_B + PH, x1: IX1, zN: QZ + PH, zS: CORR_Z - PH };
+  const OFFICE = { pieces: [] };
+  plans.office = OFFICE;
+  const WALNUT = 0x5b3a22, WALNUT_D = 0x3e2716, WALNUT_L = 0x70492a, BRASS = 0xb08d4a;
+  const LEATHER = 0x5a2118, LEATHER_D = 0x3a130e, NYLON = 0x1f1f22;
+  function solid(x0, x1, z0, z1, y1) {
+    (CBZ.colliders || (CBZ.colliders = [])).push({ minX: x0, maxX: x1, minZ: z0, maxZ: z1, y0: 0, y1: y1 });
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function seatAt(x, z, face, kind, cushion) {
+    const geom = { cushion: cushion, floorBelow: 0 };
+    try {
+      if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(x, 0, z, face, kind, "warden-office", geom);
+      else if (CBZ.roomSeatAnchor) CBZ.roomSeatAnchor(x, 0, z, face, kind, "warden-office", geom);
+    } catch (e) {}
+  }
+  // a tiny seeded LCG so the bookcase is the same bookcase every load
+  function lcg(seed) { let s = seed >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+  // an atlas tile: a plane whose UVs cover tile (col,row) of a cols x rows
+  // canvas; row 0 is the TOP row of the canvas
+  function tilePlane(w, h, col, cols, row, rows) {
+    rows = rows || 1; row = row || 0;
+    const g = new THREE.PlaneGeometry(w, h), uv = g.attributes.uv;
+    for (let k = 0; k < uv.count; k++) {
+      uv.setX(k, (col + uv.getX(k)) / cols);
+      uv.setY(k, (rows - 1 - row + uv.getY(k)) / rows);
+    }
+    return g;
+  }
+  function mergeGeos(list) {
+    const BGU = THREE.BufferGeometryUtils;
+    if (!list.length) return null;
+    return list.length === 1 || !BGU ? list[0] : BGU.mergeBufferGeometries(list, false);
+  }
+  // THE CCTV FEEDS: six grey camera views of corridors and a yard, drawn once
+  // (no text, no timestamp: a feed is a picture)
+  let cctvMat = null, picMat = null;
+  function cctvMaterial() {
+    if (cctvMat) return cctvMat;
+    const c = document.createElement("canvas"); c.width = 768; c.height = 256;
+    const g = c.getContext("2d"), r = lcg(0x5eed);
+    for (let i = 0; i < 6; i++) {
+      const ox = (i % 3) * 256, oy = ((i / 3) | 0) * 128, W = 256, H = 128;
+      const base = 70 + ((r() * 30) | 0);
+      g.fillStyle = "rgb(" + base + "," + (base + 6) + "," + base + ")"; g.fillRect(ox, oy, W, H);
+      // a corridor in one-point perspective, or a yard with a fence
+      const vx = ox + 60 + r() * 136, vy = oy + 30 + r() * 30;
+      g.fillStyle = "rgb(" + (base + 40) + "," + (base + 46) + "," + (base + 40) + ")";
+      g.beginPath(); g.moveTo(ox, oy + H); g.lineTo(vx - 12, vy + 14); g.lineTo(vx + 12, vy + 14); g.lineTo(ox + W, oy + H); g.fill();
+      g.strokeStyle = "rgba(20,24,20,0.8)"; g.lineWidth = 2;
+      for (const ex of [ox, ox + W]) { g.beginPath(); g.moveTo(ex, oy); g.lineTo(vx + (ex > vx ? 12 : -12), vy - 14); g.stroke(); }
+      for (let k = 0; k < 4; k++) {                 // doors / cell fronts down the side
+        const t = 0.25 + k * 0.17, dx = ox + (vx - ox) * t, dh = (1 - t) * 60 + 8;
+        g.fillStyle = "rgba(30,34,30,0.75)"; g.fillRect(dx, vy + (oy + H - vy) * t - dh, 6 + (1 - t) * 10, dh);
+      }
+      if (r() < 0.5) {                               // a figure somewhere on the floor
+        const fx = vx + (r() - 0.5) * 60, fy = vy + 30 + r() * 30;
+        g.fillStyle = "rgba(25,28,25,0.9)"; g.fillRect(fx, fy - 18, 6, 18); g.beginPath(); g.arc(fx + 3, fy - 21, 3.5, 0, 6.3); g.fill();
+      }
+      const img = g.getImageData(ox, oy, W, H), d = img.data;
+      for (let p = 0; p < d.length; p += 4) {        // sensor noise + scanlines + vignette
+        const y = ((p / 4) / W) | 0, x = (p / 4) % W;
+        const v = (Math.random() - 0.5) * 18 - (y % 3 === 0 ? 10 : 0) - Math.hypot(x - W / 2, y - H / 2) * 0.22;
+        d[p] += v; d[p + 1] += v + 3; d[p + 2] += v;
+      }
+      g.putImageData(img, ox, oy);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    cctvMat = new THREE.MeshBasicMaterial({ map: tex, color: 0xaebbb2 });
+    return cctvMat;
+  }
+  // THE PICTURES: his diploma (a seal and ruled script lines, no words) and
+  // three photographs (a group on steps, a lake, a handshake before a flag)
+  function pictureMaterial() {
+    if (picMat) return picMat;
+    const c = document.createElement("canvas"); c.width = 512; c.height = 128;
+    const g = c.getContext("2d");
+    // 0 diploma
+    g.fillStyle = "#efe8d6"; g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = "#8a7440"; g.lineWidth = 3; g.strokeRect(8, 8, 112, 112); g.lineWidth = 1; g.strokeRect(13, 13, 102, 102);
+    g.fillStyle = "#3b3326"; g.fillRect(34, 26, 60, 6);
+    g.fillStyle = "#6d6555";
+    for (let i = 0; i < 6; i++) g.fillRect(26 + (i % 2) * 6, 44 + i * 8, 76 - (i % 3) * 10, 2);
+    g.fillStyle = "#b0892f"; g.beginPath(); g.arc(64, 100, 11, 0, 6.3); g.fill();
+    g.fillStyle = "#8a2020"; g.fillRect(58, 108, 4, 12); g.fillRect(66, 108, 4, 12);
+    // 1 group photo on steps
+    let grd = g.createLinearGradient(0, 0, 0, 128); grd.addColorStop(0, "#9aa3a0"); grd.addColorStop(1, "#6d6a62");
+    g.fillStyle = grd; g.fillRect(128, 0, 128, 128);
+    g.fillStyle = "#58564f"; for (let i = 0; i < 3; i++) g.fillRect(128, 84 + i * 14, 128, 6);
+    for (let row = 0; row < 2; row++) for (let k = 0; k < 6; k++) {
+      const x = 140 + k * 18 + row * 9, y = 58 + row * 22;
+      g.fillStyle = row ? "#2e3440" : "#3a3a3a"; g.fillRect(x, y, 12, 26);
+      g.fillStyle = "#c9a88a"; g.beginPath(); g.arc(x + 6, y - 4, 5, 0, 6.3); g.fill();
+    }
+    // 2 a lake at dusk
+    grd = g.createLinearGradient(0, 0, 0, 70); grd.addColorStop(0, "#5f7c9a"); grd.addColorStop(1, "#e2b98a");
+    g.fillStyle = grd; g.fillRect(256, 0, 128, 70);
+    g.fillStyle = "#35463a"; g.beginPath(); g.moveTo(256, 70); g.lineTo(290, 40); g.lineTo(318, 58); g.lineTo(350, 34); g.lineTo(384, 62); g.lineTo(384, 70); g.fill();
+    grd = g.createLinearGradient(0, 70, 0, 128); grd.addColorStop(0, "#8a8474"); grd.addColorStop(1, "#3d4a55");
+    g.fillStyle = grd; g.fillRect(256, 70, 128, 58);
+    // 3 a handshake before a flag
+    g.fillStyle = "#7d8288"; g.fillRect(384, 0, 128, 128);
+    g.fillStyle = "#23315e"; g.fillRect(452, 6, 40, 58); g.fillStyle = "#b0892f"; g.fillRect(450, 4, 3, 110);
+    for (const x of [404, 452]) { g.fillStyle = "#26282c"; g.fillRect(x, 46, 26, 82); g.fillStyle = "#c29c80"; g.beginPath(); g.arc(x + 13, 38, 10, 0, 6.3); g.fill(); }
+    g.fillStyle = "#c29c80"; g.fillRect(428, 78, 26, 6);
+    const tex = new THREE.CanvasTexture(c);
+    picMat = new THREE.MeshLambertMaterial({ map: tex });
+    return picMat;
+  }
+  function paintMesh(P, x, y, z, ry, parent) {
+    const geo = P.geometry();
+    if (!geo) return null;
+    const m = new THREE.Mesh(geo, PD.vcMat());
+    m.position.set(x, y, z); m.rotation.y = ry || 0;
+    m.castShadow = false; m.receiveShadow = true;
+    (parent || ROOT).add(m);
+    return m;
+  }
+  function atlasMesh(geos, mat, x, y, z, ry) {
+    const geo = mergeGeos(geos);
+    if (!geo) return null;
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z); m.rotation.y = ry || 0;
+    ROOT.add(m);
+    return m;
+  }
+
+  // THE DESK — faces the door. 2.2 x 0.95, twin pedestals with drawers on
+  // his side, a panelled modesty front on yours, a green leather writing
+  // surface, and what is on it. Local +z = toward the door.
+  const DESK = { x: 14.0, z: -55.1, L: 2.2, D: 0.95, top: 0.76 };
+  if (PD && PD.Paint) (function desk() {
+    const P = new PD.Paint(), L = DESK.L, D = DESK.D, T = DESK.top;
+    P.box(0, T - 0.02, 0, L, 0.04, D, WALNUT);                                   // top
+    P.box(0, T - 0.047, 0, L - 0.05, 0.014, D - 0.05, WALNUT_D);                 // shadow line under it
+    P.box(0, T + 0.0015, -0.06, 1.16, 0.003, 0.6, 0xa88a4a);                     // gilt tooling
+    P.box(0, T + 0.003, -0.06, 1.12, 0.004, 0.56, 0x2f4a33);                     // green leather
+    for (const s of [-1, 1]) {
+      const px = s * (L / 2 - 0.25);
+      P.box(px, 0.03, 0, 0.42, 0.06, D - 0.12, WALNUT_D);                        // toe kick
+      P.box(px, 0.06 + 0.33, 0, 0.46, 0.66, D - 0.06, WALNUT);                   // pedestal
+      // his side: a pencil drawer, a box drawer, a file drawer, brass pulls
+      const bands = [[0.55, 0.70], [0.38, 0.535], [0.07, 0.365]];
+      for (const b of bands) {
+        const cy = (b[0] + b[1]) / 2, hh = b[1] - b[0];
+        P.box(px, cy, -(D - 0.06) / 2 - 0.006, 0.42, hh, 0.012, WALNUT_L);
+        P.box(px, cy + hh * 0.18, -(D - 0.06) / 2 - 0.022, 0.12, 0.012, 0.012, BRASS);
+        for (const e of [-0.05, 0.05]) P.box(px + e, cy + hh * 0.18, -(D - 0.06) / 2 - 0.015, 0.012, 0.012, 0.018, BRASS);
+      }
+      P.box(px, 0.4, (D - 0.06) / 2 + 0.004, 0.34, 0.5, 0.008, WALNUT_L);        // raised panel, your side
+    }
+    const mw = L - 2 * 0.48;
+    P.box(0, 0.4, D / 2 - 0.1, mw, 0.62, 0.025, WALNUT);                          // modesty front
+    P.box(0, 0.42, D / 2 - 0.085, mw - 0.14, 0.44, 0.008, WALNUT_L);              // its raised panel
+    // on the desk: a banker's lamp, a monitor turned to him, a keyboard, the
+    // phone, a stack of files, a pen stand
+    P.cyl(-0.86, T + 0.012, 0.22, 0.075, 0.08, 0.024, BRASS, 18);
+    P.cyl(-0.86, T + 0.17, 0.22, 0.009, 0.009, 0.3, BRASS, 8);
+    P.add(new THREE.CylinderGeometry(0.075, 0.075, 0.34, 14, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).translate(-0.86, T + 0.33, 0.14), 0x1f5a36);
+    P.box(0.5, T + 0.006, 0.26, 0.2, 0.012, 0.15, NYLON);                          // monitor foot
+    P.box(0.5, T + 0.14, 0.28, 0.04, 0.26, 0.03, NYLON);                           // neck
+    P.box(0.5, T + 0.36, 0.26, 0.58, 0.35, 0.03, 0x16181b);                        // monitor
+    P.box(0.5, T + 0.36, 0.244, 0.55, 0.32, 0.003, 0x0d1115);                      // its dark glass, toward him
+    P.box(0.42, T + 0.01, -0.16, 0.44, 0.018, 0.14, 0x2a2c30);                     // keyboard
+    P.box(0.94, T + 0.028, -0.12, 0.2, 0.05, 0.18, NYLON);                         // phone
+    P.box(0.94, T + 0.066, -0.13, 0.22, 0.03, 0.05, NYLON);                        // handset
+    for (let i = 0; i < 4; i++) P.box(-0.38 + i * 0.006, T + 0.008 + i * 0.016, -0.18, 0.24, 0.014, 0.32, [0xc9b27a, 0xb89f68, 0x8fa0b0, 0xc9b27a][i], 0.03 * (i % 2 ? 1 : -1));
+    P.cyl(0.08, T + 0.05, 0.25, 0.035, 0.035, 0.1, WALNUT_D, 12);                 // pen stand
+    const m = paintMesh(P, DESK.x, FL, DESK.z, 0);
+    if (m) m.castShadow = true;
+    solid(DESK.x - L / 2, DESK.x + L / 2, DESK.z - D / 2, DESK.z + D / 2, FL + T + 0.02);
+    OFFICE.pieces.push({ tag: "desk", x: DESK.x, z: DESK.z });
+  })();
+
+  // HIS CHAIR — a high-back leather executive chair on a five-star base,
+  // buttoned back, headroll, padded arms. The seat anchor is his ("throne",
+  // the kind findChair() asks for).
+  const CHAIR = { x: DESK.x, z: -56.1 };
+  if (PD && PD.Paint) (function chair() {
+    const P = new PD.Paint(), t = -0.12;
+    for (let i = 0; i < 5; i++) {
+      const a = i * Math.PI * 2 / 5;
+      P.box(Math.sin(a) * 0.15, 0.085, Math.cos(a) * 0.15, 0.05, 0.035, 0.3, 0x9aa0a6, a);
+      P.cyl(Math.sin(a) * 0.29, 0.03, Math.cos(a) * 0.29, 0.028, 0.028, 0.03, NYLON, 10, HALF);
+    }
+    P.cyl(0, 0.26, 0, 0.026, 0.026, 0.32, NYLON, 10);                              // gas lift
+    P.box(0, 0.43, -0.02, 0.24, 0.05, 0.24, NYLON);                                // tilt mechanism
+    P.box(0, 0.47, 0, 0.54, 0.07, 0.52, LEATHER_D);                                // seat pan
+    P.box(0, 0.5, 0.01, 0.5, 0.04, 0.48, LEATHER);                                 // cushion -> 0.52
+    P.cyl(0, 0.495, 0.25, 0.035, 0.035, 0.5, LEATHER, 10, 0, HALF);                // front roll
+    const bk = function (x, y, z) {                 // a point on the reclined back
+      return [x, 0.92 + y * Math.cos(t) - z * Math.sin(t), -0.27 + y * Math.sin(t) + z * Math.cos(t)];
+    };
+    P.add(new THREE.BoxGeometry(0.54, 0.7, 0.1).rotateX(t).translate(0, 0.92, -0.27), LEATHER);
+    P.add(new THREE.BoxGeometry(0.5, 0.64, 0.02).rotateX(t).translate(bk(0, 0, -0.058)[0], bk(0, 0, -0.058)[1], bk(0, 0, -0.058)[2]), LEATHER_D);
+    const hr = bk(0, 0.36, 0.01);
+    P.cyl(hr[0], hr[1], hr[2], 0.06, 0.06, 0.52, LEATHER, 12, 0, HALF);           // headroll
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {                      // buttoning
+      const q = bk(-0.15 + c * 0.15 + (r % 2) * 0.075 - 0.0375, -0.24 + r * 0.15, 0.052);
+      P.add(new THREE.SphereGeometry(0.012, 6, 4).translate(q[0], q[1], q[2]), LEATHER_D);
+    }
+    for (const s of [-1, 1]) {
+      P.box(s * 0.3, 0.6, -0.04, 0.035, 0.22, 0.05, NYLON);                          // arm post
+      P.box(s * 0.3, 0.725, 0.0, 0.075, 0.045, 0.36, LEATHER);                       // arm pad
+    }
+    const m = paintMesh(P, CHAIR.x, FL, CHAIR.z, 0);
+    if (m) m.castShadow = true;
+    seatAt(CHAIR.x, CHAIR.z + 0.01, 0, "throne", FL + 0.52);
+    OFFICE.pieces.push({ tag: "chair", x: CHAIR.x, z: CHAIR.z });
+  })();
+
+  // TWO GUEST CHAIRS across the desk: leather on turned walnut legs, facing him
+  if (PD && PD.Paint) (function guests() {
+    for (const gx of [DESK.x - 0.62, DESK.x + 0.62]) {
+      const P = new PD.Paint(), gz = DESK.z + DESK.D / 2 + 0.66;
+      for (const lx of [-0.21, 0.21]) for (const lz of [-0.2, 0.2]) P.cyl(lx, 0.21, lz, 0.022, 0.016, 0.42, WALNUT, 8);
+      P.box(0, 0.44, 0, 0.5, 0.07, 0.48, LEATHER_D);                                // seat frame
+      P.box(0, 0.465, 0.01, 0.48, 0.03, 0.46, LEATHER);                             // cushion -> 0.48
+      P.add(new THREE.BoxGeometry(0.5, 0.46, 0.07).rotateX(-0.1).translate(0, 0.73, -0.23), LEATHER);
+      for (const s of [-1, 1]) {
+        P.box(s * 0.265, 0.62, -0.02, 0.05, 0.03, 0.46, WALNUT);                    // arm rail
+        P.cyl(s * 0.265, 0.53, 0.19, 0.016, 0.016, 0.16, WALNUT, 8);                 // arm post
+      }
+      paintMesh(P, gx, FL, gz, Math.PI);                                             // facing the desk
+      seatAt(gx, gz, Math.PI, "chair", FL + 0.48);
+      OFFICE.pieces.push({ tag: "guest", x: gx, z: gz });
     }
   })();
+
+  // THE RUG under the desk group: a navy border round an oxblood field
+  (function rug() {
+    const x0 = 12.35, x1 = 15.65, z0 = -56.85, z1 = -53.25;
+    const b = addBox((x0 + x1) / 2, FL + 0.005, (z0 + z1) / 2, x1 - x0, 0.01, z1 - z0, 0x27294a, { cast: false });
+    const f = addBox((x0 + x1) / 2, FL + 0.0065, (z0 + z1) / 2, x1 - x0 - 0.36, 0.013, z1 - z0 - 0.36, 0x6a2a24, { cast: false });
+    const i = addBox((x0 + x1) / 2, FL + 0.0075, (z0 + z1) / 2, x1 - x0 - 0.7, 0.015, z1 - z0 - 0.7, 0x7b3a2c, { cast: false });
+    for (const m of [b, f, i]) m.receiveShadow = true;
+  })();
+
+  // FILING CABINETS: three four-drawer steel cabinets on the west wall
+  if (PD && PD.Paint) (function files() {
+    const P = new PD.Paint(), STEEL = 0x8a877c;
+    for (const cx of [-0.48, 0, 0.48]) {
+      P.box(cx, 0.665, 0, 0.47, 1.33, 0.62, STEEL);
+      P.box(cx, 1.337, 0, 0.475, 0.014, 0.625, 0x77746a);
+      for (let i = 0; i < 4; i++) {
+        const cy = 0.17 + i * 0.325;
+        P.box(cx, cy, 0.316, 0.43, 0.305, 0.012, 0x97948a);                          // drawer front
+        P.box(cx, cy + 0.03, 0.334, 0.15, 0.028, 0.024, 0xc2c6ca);                   // pull
+        P.box(cx, cy + 0.095, 0.323, 0.085, 0.035, 0.003, 0xd8d4c8);                 // blank label card
+      }
+    }
+    const x = OFF.x0 + 0.03 + 0.31, z = -50.9;
+    paintMesh(P, x, FL, z, HALF);
+    solid(OFF.x0, OFF.x0 + 0.66, z - 0.72, z + 0.72, FL + 1.35);
+    OFFICE.pieces.push({ tag: "files", x: x, z: z });
+  })();
+
+  // THE CCTV BANK: a console on the west wall, six monitors on a wall rack
+  // above it, the block's feeds on them. The screens are the one thing in
+  // the room that glows, because they are screens.
+  if (PD && PD.Paint) (function cctv() {
+    const P = new PD.Paint(), L = 2.6, x = OFF.x0 + 0.03 + 0.3, z = -53.85;
+    P.box(0, 0.78, 0, L, 0.04, 0.6, 0x3b3f45);                                      // worktop
+    for (const s of [-1, 1]) P.box(s * (L / 2 - 0.02), 0.39, 0, 0.04, 0.78, 0.58, 0x2c3036);
+    P.box(0, 0.42, -0.27, L - 0.08, 0.7, 0.02, 0x2c3036);                           // back panel
+    P.box(0, 0.08, 0.27, L - 0.08, 0.12, 0.02, 0x2c3036);                           // kick
+    P.box(-0.4, 0.81, 0.12, 0.45, 0.02, 0.15, 0x2a2c30);                            // keyboard
+    P.box(0.35, 0.82, 0.1, 0.3, 0.04, 0.2, NYLON);                                  // PTZ controller
+    P.cyl(0.42, 0.88, 0.1, 0.012, 0.016, 0.1, NYLON, 8);                            // its joystick
+    P.add(new THREE.SphereGeometry(0.022, 8, 6).translate(0.42, 0.94, 0.1), 0x8a1a14);
+    for (const s of [-1, 1]) P.box(s * 1.24, 1.8, -0.27, 0.05, 1.2, 0.04, 0x4a5058);   // rack uprights
+    for (const ry of [1.2, 2.34]) P.box(0, ry, -0.27, 2.52, 0.04, 0.04, 0x4a5058);        // rails
+    const screens = [];
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+      const sx = -0.82 + c * 0.82, sy = 1.5 + r * 0.54;
+      P.box(sx, sy, -0.22, 0.78, 0.5, 0.06, 0x16181b);                               // monitor
+      P.box(sx, sy - 0.27, -0.26, 0.08, 0.06, 0.06, 0x4a5058);                        // bracket
+      screens.push(tilePlane(0.72, 0.43, c, 3, r, 2).translate(sx, sy, -0.188));
+    }
+    paintMesh(P, x, FL, z, HALF);
+    atlasMesh(screens, cctvMaterial(), x, FL, z, HALF);
+    solid(OFF.x0, OFF.x0 + 0.66, z - L / 2, z + L / 2, FL + 0.8);
+    OFFICE.pieces.push({ tag: "cctv", x: x, z: z });
+  })();
+
+  // THE BOOKCASE on the north wall, west of his chair: two bays, five shelves
+  if (PD && PD.Paint) (function books() {
+    const P = new PD.Paint(), r = lcg(0xb00c), W = 2.0, Dd = 0.36;
+    const x = 10.6, z = OFF.zN + 0.03 + Dd / 2;
+    for (const s of [-1, 0, 1]) P.box(s * (W / 2 - 0.015), 1.05, 0, s ? 0.03 : 0.025, 2.1, Dd, WALNUT);
+    P.box(0, 2.12, 0.005, W + 0.04, 0.04, Dd + 0.03, WALNUT_D);                     // cornice
+    P.box(0, 0.05, -0.01, W - 0.03, 0.1, Dd - 0.02, WALNUT_D);                       // plinth
+    P.box(0, 1.06, -Dd / 2 + 0.006, W - 0.03, 2.0, 0.012, WALNUT_D);                 // back
+    const PAL = [0x5a1f1b, 0x1f2c4a, 0x2d4a2f, 0x8a6a3e, 0x1e1d1b, 0x6b2e2a, 0x3a4a5e, 0x9a8a62, 0x4a2a3a];
+    for (let sh = 0; sh < 5; sh++) {
+      const sy = 0.12 + sh * 0.4;
+      P.box(0, sy, 0, W - 0.04, 0.025, Dd - 0.02, WALNUT);
+      for (const bay of [-1, 1]) {
+        let bx = bay < 0 ? -W / 2 + 0.04 : 0.02;
+        const end = bay < 0 ? -0.02 : W / 2 - 0.04;
+        const binders = sh === 0 && bay > 0;
+        while (bx < end - 0.1) {
+          if (!binders && r() < 0.06) { bx += 0.08 + r() * 0.1; continue; }      // a gap
+          const bw = binders ? 0.06 : 0.022 + r() * 0.03, bh = binders ? 0.31 : 0.2 + r() * 0.13, bd = binders ? 0.28 : 0.19 + r() * 0.07;
+          if (bx + bw > end) break;
+          const col = binders ? (r() < 0.5 ? 0x1e2a44 : 0x1b1b1d) : PAL[(r() * PAL.length) | 0];
+          P.box(bx + bw / 2, sy + 0.0125 + bh / 2, -Dd / 2 + 0.02 + bd / 2, bw, bh, bd, col);
+          bx += bw + 0.002;
+        }
+        if (!binders) {                                                               // one leaning at the end
+          const lh = 0.24;
+          P.add(new THREE.BoxGeometry(0.03, lh, 0.21).rotateZ(0.22).translate(end - 0.05, sy + 0.0125 + lh / 2 - 0.012, -Dd / 2 + 0.13), PAL[(r() * PAL.length) | 0]);
+        }
+      }
+    }
+    paintMesh(P, x, FL, z, 0);
+    solid(x - W / 2 - 0.02, x + W / 2 + 0.02, OFF.zN, OFF.zN + 0.03 + Dd, FL + 2.14);
+    OFFICE.pieces.push({ tag: "bookcase", x: x, z: z });
+  })();
+
+  // THE FLAG, on a stand in the corner behind the desk: weighted base, a
+  // turned pole, a spear finial, and the flag hanging off it in folds with a
+  // gold fringe. No state is named: a plain navy field.
+  if (PD && PD.Paint) (function flag() {
+    const P = new PD.Paint(), H = 2.3, x = 12.35, z = -56.72;
+    P.cyl(0, 0.03, 0, 0.17, 0.19, 0.06, 0x3a2d1c, 20);
+    P.cyl(0, 0.08, 0, 0.05, 0.08, 0.06, BRASS, 14);
+    P.cyl(0, H / 2, 0, 0.016, 0.019, H - 0.1, 0x6e4c2a, 10);
+    P.add(new THREE.SphereGeometry(0.032, 10, 8).translate(0, H - 0.02, 0), BRASS);
+    P.add(new THREE.ConeGeometry(0.028, 0.14, 8).translate(0, H + 0.08, 0), BRASS);
+    const N = 6, fly = 0.72;
+    for (let i = 0; i < N; i++) {
+      const u0 = i / N, u1 = (i + 1) / N, w = fly / N;
+      const drop = 1.3 - (u0 + u1) / 2 * 0.28;                      // the fly sags lower than the hoist
+      const cx = 0.03 + (u0 + u1) / 2 * fly, zz = (i % 2 ? 0.035 : -0.035);
+      const yaw = i % 2 ? 0.55 : -0.55;
+      P.add(new THREE.BoxGeometry(w * 1.12, drop, 0.008).rotateY(yaw).translate(cx, H - 0.08 - drop / 2, zz), 0x1f2c55);
+      P.add(new THREE.BoxGeometry(w * 1.12, 0.045, 0.012).rotateY(yaw).translate(cx, H - 0.08 - drop - 0.02, zz), 0xc9a449);
+    }
+    paintMesh(P, x, FL, z, 0);
+    OFFICE.pieces.push({ tag: "flag", x: x, z: z });
+  })();
+
+  // THE WALLS: his diploma and three photographs in real frames, a big one
+  // behind the desk, and the east window with its venetian blind drawn.
+  if (PD && PD.Paint) (function walls() {
+    const F = new PD.Paint(), pics = [];
+    // hung(x, y, z, ry, w, h, tile, frameColour): frame + mat + picture,
+    // local +z out of the wall, the frame's back on the wall face
+    function hung(x, y, z, ry, w, h, tile, fc) {
+      const c = Math.cos(ry), s = Math.sin(ry);
+      const at = (lx, ly, lz) => [x + lx * c + lz * s, y + ly, z - lx * s + lz * c];
+      const box = (lx, ly, lz, bw, bh, bd, col) => {
+        const p = at(lx, ly, lz);
+        F.add(new THREE.BoxGeometry(bw, bh, bd).rotateY(ry).translate(p[0], p[1], p[2]), col);
+      };
+      const fw = 0.045;
+      box(0, h / 2 - fw / 2, 0.02, w, fw, 0.04, fc); box(0, -h / 2 + fw / 2, 0.02, w, fw, 0.04, fc);
+      box(-w / 2 + fw / 2, 0, 0.02, fw, h - 2 * fw, 0.04, fc); box(w / 2 - fw / 2, 0, 0.02, fw, h - 2 * fw, 0.04, fc);
+      box(0, 0, 0.006, w - 2 * fw, h - 2 * fw, 0.012, 0xe9e4d8);                     // mat board
+      const p = at(0, 0, 0.0135);
+      pics.push(tilePlane(w - 2 * fw - 0.08, h - 2 * fw - 0.08, tile, 4).rotateY(ry).translate(p[0], p[1], p[2]));
+    }
+    const E = OFF.x1, N = OFF.zN;
+    hung(DESK.x, FL + 1.95, N, 0, 1.0, 0.72, 1, 0x2a1c12);                         // the group photo, behind him
+    hung(E, FL + 1.72, -50.55, -HALF, 0.5, 0.64, 0, 0x8a6a2e);                     // the diploma, gilt
+    hung(E, FL + 1.92, -51.4, -HALF, 0.46, 0.36, 2, 0x1e1e20);
+    hung(E, FL + 1.44, -51.4, -HALF, 0.46, 0.36, 3, 0x1e1e20);
+    // THE WINDOW + BLIND on the east wall (local +z = into the room)
+    const wz = -53.2, W = 1.8, y0 = FL + 0.98, y1 = FL + 2.38;
+    const B = new PD.Paint();
+    B.box(0, (y0 + y1) / 2, 0.004, W, y1 - y0, 0.008, 0x7f97a6);                    // the glass behind the slats
+    for (const s of [-1, 1]) B.box(s * (W / 2 + 0.03), (y0 + y1) / 2, 0.03, 0.06, y1 - y0 + 0.12, 0.06, 0xc9cdd0);
+    B.box(0, y1 + 0.03, 0.03, W + 0.12, 0.06, 0.06, 0xc9cdd0);
+    B.box(0, y0 - 0.02, 0.07, W + 0.2, 0.035, 0.14, 0xd8d4c8);                       // sill
+    B.box(0, y1 - 0.03, 0.08, W - 0.02, 0.05, 0.06, 0xe6e3dc);                       // blind head rail
+    for (let yy = y1 - 0.08; yy > y0 + 0.04; yy -= 0.045)
+      B.add(new THREE.BoxGeometry(W - 0.06, 0.004, 0.05).rotateX(0.55).translate(0, yy, 0.08), 0xe9e6de);
+    B.box(0, y0 + 0.03, 0.08, W - 0.04, 0.02, 0.05, 0xe6e3dc);                       // bottom rail
+    B.cyl(W / 2 - 0.12, (y0 + y1) / 2 + 0.2, 0.11, 0.006, 0.006, 0.9, 0xd8d4cc, 6);  // tilt wand
+    paintMesh(B, E, 0, wz, -HALF);
+    const fm = paintMesh(F, 0, 0, 0, 0);
+    atlasMesh(pics, pictureMaterial(), 0, 0, 0, 0);
+    OFFICE.pieces.push({ tag: "window", x: E, z: wz });
+    if (fm) fm.castShadow = false;
+  })();
+
+  // THE CREDENZA on the south wall east of the doors, and the decanter on it
+  // (it used to stand on whatever sideboard the planner happened to place)
+  if (PD && PD.Paint) (function credenza() {
+    const P = new PD.Paint(), L = 1.8, Dd = 0.46, T = 0.76;
+    const x = 15.3, z = OFF.zS - 0.03 - Dd / 2;
+    P.box(0, 0.03, 0, L - 0.08, 0.06, Dd - 0.08, WALNUT_D);
+    P.box(0, 0.06 + (T - 0.1) / 2, 0, L - 0.02, T - 0.1, Dd - 0.02, WALNUT);
+    P.box(0, T - 0.02, 0, L, 0.04, Dd, WALNUT);
+    for (let i = 0; i < 4; i++) {
+      const dx = -L / 2 + 0.03 + (i + 0.5) * ((L - 0.06) / 4);
+      P.box(dx, 0.38, Dd / 2, (L - 0.06) / 4 - 0.012, 0.6, 0.012, WALNUT_L);
+      P.box(dx + (i % 2 ? -1 : 1) * 0.16, 0.52, Dd / 2 + 0.018, 0.012, 0.12, 0.012, BRASS);
+    }
+    // the decanter set, on the top
+    const D = (lx, ly, lz) => [lx, T + ly, lz];
+    let q = D(-0.35, 0.09, 0); P.cyl(q[0], q[1], q[2], 0.075, 0.085, 0.18, 0x7a4f1c, 16);
+    q = D(-0.35, 0.19, 0); P.cyl(q[0], q[1], q[2], 0.03, 0.075, 0.03, 0xb8c6cc, 16);
+    q = D(-0.35, 0.24, 0); P.cyl(q[0], q[1], q[2], 0.025, 0.025, 0.07, 0xb8c6cc, 12);
+    q = D(-0.35, 0.3, 0); P.add(new THREE.SphereGeometry(0.035, 10, 8).translate(q[0], q[1], q[2]), 0xb8c6cc);
+    q = D(-0.1, 0.006, 0); P.box(q[0], q[1], q[2], 0.36, 0.012, 0.22, 0xb9bec2);  // silver tray
+    for (const dz of [-0.06, 0.06]) { q = D(-0.05 + dz, 0.05, dz); P.cyl(q[0], q[1], q[2], 0.035, 0.03, 0.08, 0xc9d6dd, 12, 0, 0, true); }
+    q = D(0.45, 0.14, -0.08); P.box(q[0], q[1], q[2], 0.26, 0.2, 0.03, 0x2a1c12);   // a standing photo frame, back to the wall
+    paintMesh(P, x, FL, z, Math.PI);
+    solid(x - L / 2, x + L / 2, OFF.zS - 0.03 - Dd, OFF.zS, FL + T);
+    OFFICE.pieces.push({ tag: "credenza", x: x, z: z });
+  })();
+
+  /* THE GUN CASE: a steel wall case on the north wall east of his chair, a
+     wired-glass door on a piano hinge, green baize, a pistol on two pegs and
+     a box of rounds on the floor of it. Locked: the Lockpick opens it (the
+     same held pick the office door takes, shorter: a cabinet lock is not a
+     mortice). What is inside is the REAL pistol the moment the door is open:
+     systems/prisondrops.js lays a "Gun" drop on the case's shelf and the
+     walk-over pickup takes it like any gun on any floor. Nothing announces it. */
+  const CASE = { x: 16.3, z: OFF.zN + 0.13, y: FL + 1.5, open: false, t: 0, picked: 0, laid: false, gun: null };
+  (function gunCase() {
+    const W = 0.84, H = 0.9, Dd = 0.24, cz = CASE.z, cy = CASE.y, x = CASE.x;
+    const STEEL = 0x2e3338;
+    if (PD && PD.Paint) {
+      const P = new PD.Paint();
+      P.box(0, 0, -Dd / 2 + 0.01, W, H, 0.02, STEEL);                               // back
+      for (const s of [-1, 1]) P.box(s * (W / 2 - 0.015), 0, 0, 0.03, H, Dd, STEEL);
+      for (const s of [-1, 1]) P.box(0, s * (H / 2 - 0.015), 0, W, 0.03, Dd, STEEL);
+      P.box(0, 0, -Dd / 2 + 0.023, W - 0.06, H - 0.06, 0.006, 0x2f4a36);          // baize
+      P.box(0, -H / 2 + 0.05, 0, W - 0.06, 0.02, Dd - 0.02, 0x3a4048);             // shelf
+      for (const px of [-0.12, 0.1]) P.cyl(px, 0.02, -Dd / 2 + 0.05, 0.007, 0.007, 0.06, 0x9aa3ad, 6, HALF);   // pegs
+      P.box(0.22, -H / 2 + 0.09, -0.02, 0.12, 0.06, 0.08, 0x3d5a2e);                 // rounds
+      P.box(0.22, -H / 2 + 0.121, -0.02, 0.121, 0.004, 0.081, 0xc9a449);
+      paintMesh(P, x, cy, cz, 0);
+    }
+    CASE.shelfY = cy - H / 2 + 0.06;
+    // the door, on a pivot at its west edge so it SWINGS out toward the room
+    const pivot = new THREE.Group();
+    pivot.position.set(x - W / 2 + 0.03, cy, cz + Dd / 2);
+    pivot.userData.mover = true;
+    ROOT.add(pivot);
+    const frameM = CBZ.mat(0x3a4048, {});
+    const bar = function (w, h, d, px, py) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameM);
+      m.position.set(px, py, 0.012); pivot.add(m); return m;
+    };
+    const dw = W - 0.06;
+    bar(dw, 0.04, 0.024, dw / 2, H / 2 - 0.05); bar(dw, 0.04, 0.024, dw / 2, -H / 2 + 0.05);
+    bar(0.04, H - 0.06, 0.024, 0.02, 0); bar(0.04, H - 0.06, 0.024, dw - 0.02, 0);
+    const K2 = CBZ.prisonKit;
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(dw - 0.06, H - 0.14, 0.006),
+      K2 ? K2.skin("glass", 0xa9bcc4) : new THREE.MeshLambertMaterial({ color: 0xa9bcc4, transparent: true, opacity: 0.35 }));
+    glass.position.set(dw / 2, 0, 0.012); pivot.add(glass);
+    const lock = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 12).rotateX(HALF), CBZ.mat(0xb9bfc4, {}));
+    lock.position.set(dw - 0.02, 0, 0.03); pivot.add(lock);
+    CASE.pivot = pivot;
+    // the display pistol: the game's own pistol model, side-on, on the pegs
+    if (CBZ.buildActorWeapon) {
+      try {
+        const gun = CBZ.buildActorWeapon("Gun");
+        gun.position.set(x + 0.02, cy + 0.06, cz - Dd / 2 + 0.058);
+        gun.rotation.set(0, HALF, 0);
+        gun.scale.setScalar((CBZ.weaponWorldScale && CBZ.weaponWorldScale("Gun")) || 0.66);
+        gun.userData.mover = true;
+        ROOT.add(gun);
+        CASE.display = gun;
+      } catch (e) { CASE.display = null; }
+    }
+    // the shelf is a support the dropped pistol can rest on
+    (CBZ.platforms || (CBZ.platforms = [])).push({
+      minX: x - W / 2 + 0.03, maxX: x + W / 2 - 0.03, minZ: cz - Dd / 2 + 0.02, maxZ: cz + Dd / 2 - 0.01, top: CASE.shelfY });
+    OFFICE.pieces.push({ tag: "guncase", x: x, z: cz });
+  })();
+  function openCase() {
+    if (CASE.open) return false;
+    CASE.open = true;
+    if (CBZ.worldSfx) CBZ.worldSfx("door_open", CASE.x, CASE.z, { ref: 6 });
+    layCaseGun();
+    return true;
+  }
+  // the real pistol, laid where the display hung. prisonDropOne rather than
+  // prisonPlaceItem: a placed item is re-laid by every new run whether the
+  // case is open or not (and would be walked over through the glass); a drop
+  // exists only once the case is open, and a new run sweeps it.
+  function layCaseGun() {
+    if (CASE.laid || !CBZ.prisonDropOne) return;
+    const SPAWN_Y = 1.06;                               // prisondrops.js's chest-height offset
+    let inst = null;
+    try {
+      inst = CBZ.prisonDropOne("Gun", CASE.x + 0.02, CASE.y + 0.06 - SPAWN_Y, CASE.z - 0.04, { dir: 0, speed: 0, up: 0 });
+    } catch (e) { inst = null; }
+    if (!inst) return;
+    CASE.laid = true; CASE.gun = inst;
+    if (inst.data) inst.data.life = Infinity;          // it lies in his case until someone takes it
+    if (CASE.display) CASE.display.visible = false;
+    // it leaves the pegs the way it hung (side-on along the wall), not
+    // spinning: a gun slipping off two pegs onto a shelf 30 cm below
+    const b = inst.data && inst.data.body;
+    if (b) {
+      if (b.q) b.q.setFromEuler(new THREE.Euler(0, HALF, 0));
+      b.wx = 0; b.wy = 0; b.wz = 0;
+    }
+    if (inst.data && inst.data.mesh) inst.data.mesh.rotation.set(0, HALF, 0);
+  }
+
+  /* THE SEAM: CBZ.wardenGun. The warden's behaviour and the missing-gun
+     lockdown feature-detect exactly this shape. `present()` is true while the
+     pistol is in his case (on the pegs, or lying on the case shelf once the
+     glass is open); `take(who)` removes it for whoever takes it (the caller
+     arms them); `put(who)` hangs it back. */
+  function caseGunLying() {
+    const g = CASE.gun;
+    if (!g || !g.data || g.data.taken) return false;
+    const m = g.data.mesh;
+    if (m && !m.parent) return false;
+    const p = m ? m.position : null;
+    return !p || (Math.abs(p.x - CASE.x) < 1.2 && Math.abs(p.z - CASE.z) < 1.2);
+  }
+  CBZ.wardenGun = {
+    x: CASE.x, z: CASE.z, weapon: "Gun",
+    present: function () {
+      if (CASE.taken) return false;
+      return CASE.laid ? caseGunLying() : true;
+    },
+    take: function (who) {
+      if (!CBZ.wardenGun.present()) return false;
+      CASE.taken = true;
+      if (CASE.laid && CASE.gun) {
+        try { CASE.gun.data.taken = true; if (CBZ.removeProp) CBZ.removeProp(CASE.gun); } catch (e) {}
+        CASE.gun = null;
+      }
+      if (CASE.display) CASE.display.visible = false;
+      return true;
+    },
+    put: function (who) {
+      if (CBZ.wardenGun.present()) return false;
+      CASE.taken = false;
+      if (CASE.open) { CASE.laid = false; CASE.gun = null; layCaseGun(); }
+      else if (CASE.display) CASE.display.visible = true;
+      return true;
+    },
+  };
 
   /* ==========================================================
      4. THE SAFE. NOT A CONTAINER VERB — world/crates.js's whole doctrine is
@@ -476,42 +1019,133 @@
     keyFob.visible = false;
     // an interior shelf with the confiscated property on it
     addBox(SAFE.x, 0.72, SAFE.z, 0.86, 0.05, 1.02, 0x4a525c, { cast: false });
+    // ...and the shelf is a support, so what is laid on it stays on it
+    (CBZ.platforms || (CBZ.platforms = [])).push({
+      minX: SAFE.x - 0.43, maxX: SAFE.x + 0.43, minZ: SAFE.z - 0.51, maxZ: SAFE.z + 0.51, top: 0.745 });
     SAFE.pivot = pivot; SAFE.leaf = leaf; SAFE.hook = hook; SAFE.fob = keyFob;
   })();
 
   /* ==========================================================
-     5. THE DOORS. Same shape as world/gunroom.js's armoury gate: the leaf
-        and its collider move together, the collider is spliced in and out
-        of CBZ.colliders, and the lock answer comes from CBZ.cityLock so the
-        police/keycard routes stay whatever the shared ledger says they are.
+     5. THE DOORS. Every doorway in the block is a real door set now
+     (world/corridorkit.js's CBZ.corridorKit.doorSet): a steel frame that
+     wraps the wall, a stop, architraves both faces, leaves on three hinges
+     at the face they swing to, animated open and shut, SOLID when shut (the
+     collider spans the wall's depth and is spliced in and out of
+     CBZ.colliders with the leaf) and out of the way when open (square to the
+     wall). The owner's "stupid opening, the door has no physics": the staff
+     door was a 2 m slab pivoting on the wall's centre line that swung 109
+     degrees back through its own wall; the Warden's office door was the same
+     slab in a raw hole; the records room, staff room and his quarters had
+     1.8 m holes and no door at all.
+     The lock answer still comes from CBZ.cityLock / the Lockpick, so the
+     police/keycard routes stay whatever the shared ledger says they are.
      ========================================================== */
+  const CK = CBZ.corridorKit || null;
+  const LEAF_T = 0.05;
+  // one lever set: rose, neck and lever on BOTH faces, pointing at the hinge
+  function lever(P, x, y, dir, col) {
+    for (const f of [-1, 1]) {
+      P.cyl(x, y, f * (LEAF_T / 2 + 0.006), 0.027, 0.027, 0.012, col, 14, HALF);
+      P.cyl(x, y, f * (LEAF_T / 2 + 0.03), 0.009, 0.009, 0.045, col, 8, HALF);
+      P.box(x - dir * 0.055, y, f * (LEAF_T / 2 + 0.05), 0.13, 0.018, 0.02, col);
+      P.cyl(x, y - 0.09, f * (LEAF_T / 2 + 0.004), 0.017, 0.017, 0.008, col, 12, HALF);   // key escutcheon
+    }
+  }
+  function leafMesh(P, g) {
+    const geo = P.geometry();
+    if (!geo) return null;
+    const m = new THREE.Mesh(geo, PD.vcMat());
+    m.receiveShadow = true;
+    g.add(m);
+    return m;
+  }
+  function glassPane(g, w, h, x, y) {
+    const K2 = CBZ.prisonKit;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.008),
+      K2 ? K2.skin("glass", 0xa9bcc4) : new THREE.MeshLambertMaterial({ color: 0xa9bcc4, transparent: true, opacity: 0.35 }));
+    m.position.set(x, y, 0); g.add(m);
+    return m;
+  }
+  /* A PANELLED WALNUT OFFICE LEAF: stiles and rails round a raised lower
+     panel and a glazed upper light, kick plates, a lever set. `hold` gets
+     the leaf's lock LED when this leaf carries the lock. */
+  function woodLeaf(hold, lockOn) {
+    return function (g, w, h, dir, i) {
+      if (!PD || !PD.Paint) return null;
+      const P = new PD.Paint(), WD = 0x6b4426, WDD = 0x55361e, ST = 0.13, xs = function (u) { return dir * u; };
+      P.box(xs(ST / 2), h / 2, 0, ST, h, LEAF_T, WD);                                   // hinge stile
+      P.box(xs(w - ST / 2), h / 2, 0, ST, h, LEAF_T, WD);                               // lock stile
+      const iw = w - 2 * ST, ic = xs(w / 2);
+      P.box(ic, 0.12, 0, iw, 0.24, LEAF_T, WD);                                         // bottom rail
+      P.box(ic, 1.0, 0, iw, 0.2, LEAF_T, WD);                                           // lock rail
+      P.box(ic, h - 0.09, 0, iw, 0.18, LEAF_T, WD);                                     // top rail
+      P.box(ic, 0.57, 0, iw, 0.66, LEAF_T - 0.018, WDD);                                // lower panel (sunk)
+      P.box(ic, 0.57, 0, iw - 0.12, 0.54, LEAF_T - 0.004, WD);                          // its raised field
+      for (const f of [-1, 1]) P.box(ic, 0.13, f * (LEAF_T / 2 + 0.001), w - 0.05, 0.22, 0.002, 0xa7adb3);   // kick plates
+      // the glazed light: beads round the glass, both faces
+      const gy0 = 1.1, gy1 = h - 0.18, gh = gy1 - gy0;
+      for (const f of [-1, 1]) {
+        P.box(ic, gy0 + 0.01, f * 0.016, iw, 0.02, 0.012, WDD); P.box(ic, gy1 - 0.01, f * 0.016, iw, 0.02, 0.012, WDD);
+        P.box(xs(ST + 0.01), (gy0 + gy1) / 2, f * 0.016, 0.02, gh, 0.012, WDD);
+        P.box(xs(w - ST - 0.01), (gy0 + gy1) / 2, f * 0.016, 0.02, gh, 0.012, WDD);
+      }
+      lever(P, xs(w - 0.075), 1.02, dir, 0xb9bfc4);
+      const slab = leafMesh(P, g);
+      glassPane(g, iw - 0.02, gh - 0.02, ic, (gy0 + gy1) / 2);
+      if (lockOn === i && hold) {
+        // the lock's status LED in its escutcheon, corridor face
+        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.006, 12).rotateX(HALF),
+          new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+        lamp.position.set(xs(w - 0.075), 1.19, LEAF_T / 2 + 0.004);
+        g.add(lamp);
+        hold.lamp = lamp;
+      }
+      return slab;
+    };
+  }
+  /* A PAINTED STEEL LEAF with a narrow wired-glass vision panel at the lock
+     side: the staff door between the wing and administration. */
+  function steelLeaf(g, w, h, dir) {
+    if (!PD || !PD.Paint) return null;
+    const P = new PD.Paint(), C = 0x4f5d6b, xs = function (u) { return dir * u; };
+    const vx0 = w - 0.42, vx1 = w - 0.18, vy0 = 1.25, vy1 = 1.95;
+    P.box(xs(vx0 / 2), h / 2, 0, vx0, h, LEAF_T, C);                                    // hinge side
+    P.box(xs((vx1 + w) / 2), h / 2, 0, w - vx1, h, LEAF_T, C);                           // lock edge
+    P.box(xs((vx0 + vx1) / 2), vy0 / 2, 0, vx1 - vx0, vy0, LEAF_T, C);                   // under the light
+    P.box(xs((vx0 + vx1) / 2), (vy1 + h) / 2, 0, vx1 - vx0, h - vy1, LEAF_T, C);         // over it
+    for (const f of [-1, 1]) {
+      P.box(xs(w / 2), 0.15, f * (LEAF_T / 2 + 0.001), w - 0.05, 0.26, 0.002, 0xa7adb3);  // kick plate
+      P.box(xs((vx0 + vx1) / 2), vy0, f * 0.028, vx1 - vx0 + 0.04, 0.02, 0.008, 0x3a4550);   // glazing frame
+      P.box(xs((vx0 + vx1) / 2), vy1, f * 0.028, vx1 - vx0 + 0.04, 0.02, 0.008, 0x3a4550);
+      P.box(xs(vx0), (vy0 + vy1) / 2, f * 0.028, 0.02, vy1 - vy0, 0.008, 0x3a4550);
+      P.box(xs(vx1), (vy0 + vy1) / 2, f * 0.028, 0.02, vy1 - vy0, 0.008, 0x3a4550);
+      for (let k = 1; k < 5; k++) P.box(xs((vx0 + vx1) / 2), vy0 + k * (vy1 - vy0) / 5, f * 0.005, vx1 - vx0, 0.002, 0.002, 0x5a626b);   // the wire
+      for (let k = 1; k < 3; k++) P.box(xs(vx0 + k * (vx1 - vx0) / 3), (vy0 + vy1) / 2, f * 0.005, 0.002, vy1 - vy0, 0.002, 0x5a626b);
+    }
+    lever(P, xs(w - 0.075), 1.02, dir, 0xb9bfc4);
+    const slab = leafMesh(P, g);
+    glassPane(g, vx1 - vx0, vy1 - vy0, xs((vx0 + vx1) / 2), (vy0 + vy1) / 2);
+    return slab;
+  }
+
+  /* cfg { id, label, x0, x1, z, t (wall), h, pair, build, keys, pick, free,
+           frame, lamp (a mesh, if the lock's LED lives off the leaf) } */
   function makeDoor(cfg) {
     const d = {
       id: cfg.id, x: (cfg.x0 + cfg.x1) / 2, z: cfg.z, open: false, t: 0,
       x0: cfg.x0, x1: cfg.x1, keys: cfg.keys, label: cfg.label, pick: cfg.pick || 0, picked: 0,
+      free: !!cfg.free, lamp: null,
     };
-    const w = cfg.x1 - cfg.x0;
-    // pivot at the west jamb; the leaf swings into the room it serves
-    const pivot = new THREE.Group();
-    pivot.position.set(cfg.x0, 0, cfg.z);
-    pivot.userData.mover = true;
-    ROOT.add(pivot);
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, DH - 0.06, 0.1),
-      CBZ.mat(cfg.color != null ? cfg.color : 0x3f4a57, {}));
-    leaf.position.set(w / 2, (DH - 0.06) / 2, 0);
-    leaf.castShadow = false; leaf.receiveShadow = true;
-    pivot.add(leaf);
-    // hardware: a plate, a handle, and a lamp that is the lock's whole HUD
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.05), CBZ.mat(0x21262e, {}));
-    plate.position.set(w - 0.26, 1.02, 0.075); pivot.add(plate);
-    // the lock's LED: a 7 cm lens set in the plate, not a 12 cm glowing cube
-    const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 16).rotateX(HALF),
-      new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-    lamp.position.set(w - 0.26, 1.18, 0.105); pivot.add(lamp);
-    d.pivot = pivot; d.leaf = leaf; d.lamp = lamp;
-    d.collider = { minX: cfg.x0, maxX: cfg.x1, minZ: cfg.z - 0.09, maxZ: cfg.z + 0.09, ref: leaf };
+    const T = cfg.t || PT;
+    const hold = {};
+    d.set = CK.doorSet({ axis: "x", a0: cfg.x0, a1: cfg.x1, fixed: cfg.z, t: T, h: cfg.h || DH, y0: FL,
+      open: -1, hinge: cfg.pair ? 0 : -1, build: cfg.build(hold), frame: cfg.frame != null ? cfg.frame : 0x5b636d });
+    d.pivots = d.set.leaves.map(function (L) { return L.pivot; });
+    d.slabs = d.set.leaves.map(function (L) { return L.slab; }).filter(Boolean);
+    d.lamp = cfg.lamp || hold.lamp || null;
+    d.collider = { minX: cfg.x0, maxX: cfg.x1, minZ: cfg.z - T / 2, maxZ: cfg.z + T / 2, ref: d.slabs[0] || d.pivots[0] };
     CBZ.colliders.push(d.collider);
-    if (CBZ.losBlockers) CBZ.losBlockers.push(leaf);
+    if (CBZ.losBlockers) for (const s of d.slabs) CBZ.losBlockers.push(s);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     d.setOpen = function (v, quiet) {
       v = !!v;
@@ -520,32 +1154,38 @@
       const i = CBZ.colliders.indexOf(d.collider);
       if (v && i >= 0) CBZ.colliders.splice(i, 1);
       else if (!v && i < 0) CBZ.colliders.push(d.collider);
-      if (CBZ.losBlockers) {
-        const li = CBZ.losBlockers.indexOf(leaf);
+      if (CBZ.losBlockers) for (const s of d.slabs) {
+        const li = CBZ.losBlockers.indexOf(s);
         if (v && li >= 0) CBZ.losBlockers.splice(li, 1);
-        else if (!v && li < 0) CBZ.losBlockers.push(leaf);
+        else if (!v && li < 0) CBZ.losBlockers.push(s);
       }
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-      lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
-      lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
+      if (d.lamp) {
+        d.lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
+        d.lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
+      }
       if (!quiet && CBZ.worldSfx) CBZ.worldSfx(v ? "door_open" : "door_close", d.x, d.z, { ref: 10 });
       if (!v) d.picked = 0;
       return v;
     };
+    d.blow = function () {
+      d.setOpen(true); d.blown = true;
+      for (const p of d.pivots) p.visible = false;
+    };
     /* ---- AND A WAY TO SHUT IT: the shared registry in
-       systems/interactions.js, declared exactly as world/prisonwings.js does
-       it. The credential is the tick's own test — the staff door reads the
-       Keycard (or the uniform), the Warden's office is picked, so its spec
-       wants the Lockpick and refuses to be OPENED by a tap: three and a half
-       seconds of picking is the door, and a finger must not skip it. */
+       systems/interactions.js. The credential is the tick's own test: the
+       staff door reads the Keycard (or the uniform); the Warden's office is
+       picked, so its spec wants the Lockpick and refuses to be OPENED by a
+       tap; a room door (free) asks nothing. */
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-      id: d.id, label: d.label, autoR: 2.3, openByTap: !d.pick,   // tick opens at d2 < 5.2
+      id: d.id, label: d.label, autoR: d.free ? 1.6 : 2.3, openByTap: !d.pick,
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
-      pick: function () { return [pivot]; },
+      pick: function () { return d.pivots; },
       col: function () { return d.collider; },
       isOpen: function () { return !!d.open; },
       permanent: function () { return !!d.blown; },
       canUse: function () {
+        if (d.free) return true;
         if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop"));
         const econ = CBZ.econ;
         return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
@@ -556,14 +1196,40 @@
     return d;
   }
   const doors = [];
+  // the staff door's card reader: on the WING face beside the frame, a
+  // stainless back plate, the reader body, its read pad, and the LED
+  const readerLed = (function () {
+    const rx = SG.x0 - 0.3, ry = 1.2, rz = SG.z + (SG.t || 1) / 2;
+    const K2 = CBZ.prisonKit;
+    const plate = addBox(rx, ry, rz + 0.006, 0.1, 0.17, 0.012, 0xaeb7c0, { cast: false });
+    if (K2) K2.skinBox(plate, "galv", 0xb4bcc4);
+    addBox(rx, ry, rz + 0.027, 0.084, 0.145, 0.03, 0x1b1e22, { cast: false });
+    addBox(rx, ry - 0.02, rz + 0.0425, 0.06, 0.07, 0.002, 0x2c3138, { cast: false });
+    const led = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 14).rotateX(HALF),
+      new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+    led.position.set(rx, ry + 0.045, rz + 0.045);
+    led.userData.dynamic = true;
+    ROOT.add(led);
+    return led;
+  })();
   const staffDoor = makeDoor({
-    id: "prison-admin-staff", x0: SG.x0, x1: SG.x1, z: SG.z, keys: ["Keycard"],
-    label: "The staff door", color: 0x4a5560,
+    id: "prison-admin-staff", x0: SG.x0, x1: SG.x1, z: SG.z, t: SG.t || 1, h: SG.h || 2.6, keys: ["Keycard"],
+    label: "The staff door", pair: true, build: function () { return steelLeaf; }, lamp: readerLed,
   });
   const officeDoor = makeDoor({
     id: "prison-warden-office", x0: D_OFF.x0, x1: D_OFF.x1, z: CORR_Z, keys: null,
-    label: "The Warden's office", color: 0x5c4326, pick: 3.4,
+    label: "The Warden's office", pick: 3.4, pair: true, frame: 0x3e2d1e,
+    build: function (hold) { return woodLeaf(hold, 1); },
   });
+  // the three room doors: unlocked, they open as you (or staff) walk up
+  const roomDoors = [
+    makeDoor({ id: "prison-admin-records", x0: D_REC.x0, x1: D_REC.x1, z: CORR_Z, free: true,
+      label: "The records room", build: function () { return woodLeaf(null, -1); } }),
+    makeDoor({ id: "prison-admin-staffroom", x0: D_STAFF.x0, x1: D_STAFF.x1, z: CORR_Z, free: true,
+      label: "The staff room", build: function () { return woodLeaf(null, -1); } }),
+    makeDoor({ id: "prison-warden-quarters", x0: D_QRT.x0, x1: D_QRT.x1, z: QZ, free: true, frame: 0x3e2d1e,
+      label: "The Warden's quarters", build: function () { return woodLeaf(null, -1); } }),
+  ];
 
   // A card door OPENS FOR STAFF. The warden crosses both of these four times
   // a day; that he does is the only reason his routine is legible from the
@@ -595,13 +1261,13 @@
       id: "prison-admin-staff", lb: 5, reach: 2.4,
       at: function () { return { x: staffDoor.x, y: 1.4, z: staffDoor.z }; },
       done: function () { return staffDoor.open; },
-      defeat: function () { staffDoor.setOpen(true); staffDoor.blown = true; staffDoor.leaf.visible = false; },
+      defeat: function () { staffDoor.blow(); },
     });
     CBZ.registerBreachTarget({
       id: "prison-warden-office", lb: 5, reach: 2.4,
       at: function () { return { x: officeDoor.x, y: 1.4, z: officeDoor.z }; },
       done: function () { return officeDoor.open; },
-      defeat: function () { officeDoor.setOpen(true); officeDoor.blown = true; officeDoor.leaf.visible = false; },
+      defeat: function () { officeDoor.blow(); },
     });
     CBZ.registerBreachTarget({
       id: "prison-warden-safe", lb: 5, reach: 2.0,
@@ -866,24 +1532,30 @@
     stockSafe();
     return true;
   }
-  // WHAT IS ACTUALLY IN IT. Objects, laid where they lie — never a payout.
+  /* WHAT IS ACTUALLY IN IT. Objects, laid where they lie — never a payout.
+     Laid as DROPS the moment the door opens (they were prisonPlaceItem world
+     items, which every new run re-lays whether the safe is open or not — and
+     the walk-over radius reaches through a shut safe door). A new run sweeps
+     the drops and re-stocks on the next opening. */
+  function layDrop(item, x, y, z) {
+    if (!CBZ.prisonDropOne) return null;
+    try { return CBZ.prisonDropOne(item, x, y - 1.06, z, { dir: 0, speed: 0, up: 0 }); } catch (e) { return null; }
+  }
   function stockSafe() {
-    if (SAFE.stocked || !CBZ.prisonPlaceItem) return;
+    if (SAFE.stocked || !CBZ.prisonDropOne) return;
     SAFE.stocked = true;
-    try {
-      CBZ.prisonPlaceItem("Contraband Map", SAFE.x - 0.05, 0.80, SAFE.z + 0.26);
-      CBZ.prisonPlaceItem("Luxury Watch", SAFE.x + 0.12, 0.80, SAFE.z - 0.24);
-    } catch (e) {}
+    layDrop("Contraband Map", SAFE.x - 0.05, 0.80, SAFE.z + 0.26);
+    layDrop("Luxury Watch", SAFE.x + 0.12, 0.80, SAFE.z - 0.24);
   }
   let keyLaid = false;
   function driveHook() {
     // ON THE HOOK, OR ON HIS HIP. Never both — see CBZ.adminWingAudit.
     const hung = offShift();
     SAFE.fob.visible = hung && !keyLaid;
-    if (!hung || !SAFE.open || keyLaid || !CBZ.prisonPlaceItem) return;
+    if (!hung || !SAFE.open || keyLaid || !CBZ.prisonDropOne) return;
     keyLaid = true;
     SAFE.fob.visible = false;
-    try { CBZ.prisonPlaceItem("Gun-Room Key", SAFE.x + 0.1, 1.10, SAFE.z - 0.2); } catch (e) {}
+    layDrop("Gun-Room Key", SAFE.x + 0.1, 0.80, SAFE.z - 0.2);
   }
 
   let lockReg = false, lastBlock = null;
@@ -904,10 +1576,11 @@
       if (d.t !== want) {
         d.t += (want - d.t) * Math.min(1, dt * 4.4);
         if (Math.abs(want - d.t) < 0.01) d.t = want;
-        d.pivot.rotation.y = -d.t * 1.9;
+        d.set.set(d.t);
       }
     }
     if (SAFE.open && SAFE.pivot.rotation.y > -1.7) SAFE.pivot.rotation.y -= dt * 2.6;
+    if (CASE.open && CASE.t < 1) { CASE.t = Math.min(1, CASE.t + dt * 2.2); CASE.pivot.rotation.y = -CASE.t * 1.75; }
     driveHook();
 
     if (g.state !== "playing") return;
@@ -984,6 +1657,35 @@
       const dx = P.x - SAFE.x, dz = P.z - SAFE.z;
       if (dx * dx + dz * dz < 4.4) pickBeat(SAFE, dt, "warden-safe", 9.0, openSafe);
       else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("warden-safe");
+    }
+    // ---- THE GUN CASE: a cabinet lock, three seconds with the pick
+    if (!CASE.open) {
+      const dx = P.x - CASE.x, dz = P.z - CASE.z;
+      if (dx * dx + dz * dz < 2.6) pickBeat(CASE, dt, "warden-case", 3.0, openCase);
+      else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("warden-case");
+    }
+
+    // ---- THE ROOM DOORS: unlocked; they open for whoever walks up to them
+    //      (you, an officer, the warden going to bed) and swing shut behind
+    for (let i = 0; i < roomDoors.length; i++) {
+      const d = roomDoors[i];
+      if (d.blown) continue;
+      const dx = P.x - d.x, dz = P.z - d.z, you = dx * dx + dz * dz;
+      let staff = false;
+      const list = CBZ.guards || [];
+      for (let k = 0; k < list.length && !staff; k++) {
+        const q = list[k];
+        if (!q || q.dead || q.ko > 0 || !q.group) continue;
+        const ex = q.group.position.x - d.x, ez = q.group.position.z - d.z;
+        if (ex * ex + ez * ez < 3.2) staff = true;
+      }
+      const latched = CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id);
+      if (!d.open) {
+        if (staff || (you < 2.2 && !latched)) { d.setOpen(true); d.shutT = 2.5; }
+      } else {
+        d.shutT = (staff || you < 4.8) ? 2.5 : (d.shutT || 0) - dt;
+        if (d.shutT <= 0) d.setOpen(false);
+      }
     }
 
     // ---- THE DAY ----
@@ -1088,11 +1790,13 @@
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
       d.blown = false; d.picked = 0; d.shutT = 0;
-      if (d.leaf) d.leaf.visible = true;
       d.setOpen(false, true);
-      d.t = 0; d.pivot.rotation.y = 0;
+      for (const p of d.pivots) p.visible = true;
+      d.t = 0; d.set.set(0);
     }
-    SAFE.open = false; SAFE.picked = 0; SAFE.pivot.rotation.y = 0;
+    SAFE.open = false; SAFE.picked = 0; SAFE.pivot.rotation.y = 0; SAFE.stocked = false;
+    CASE.open = false; CASE.picked = 0; CASE.t = 0; CASE.pivot.rotation.y = 0; CASE.laid = false; CASE.gun = null; CASE.taken = false;
+    if (CASE.display) CASE.display.visible = true;
     keyLaid = false; lastBlock = null;
     warden.tresT = 0; warden.tresStage = 0;
     if (warden.g) { warden.at = "check"; sendTo(warden.g, "check"); warden.transit = 0; }
@@ -1134,6 +1838,7 @@
       block: S && S.id ? S.id() : null,
       offShift: offShift(),
       safeOpen: SAFE.open, keyOnHook: !!SAFE.fob.visible,
+      caseOpen: CASE.open, caseGunLaid: CASE.laid,
       staffOpen: staffDoor.open, officeOpen: officeDoor.open,
       tres: { t: Math.round(warden.tresT * 10) / 10, stage: warden.tresStage },
       plans: {

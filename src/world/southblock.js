@@ -580,6 +580,15 @@
     doors: [{ side: "E", a0: 118.9, a1: 121.1 }], dado: 0x3f4751, dadoH: 1.1, base: 0x1d1f22,
     ceilingY: 2.8, ceiling: { kind: "acoustic", lights: "troffer", nx: 2, nz: 2 },
   });
+  /* the hut's doorway was a 3.2 m slot to the roof slab with no head and no
+     door. A head over 2.4 m (never solid: see the dorm's note below) and a
+     pair of steel leaves in a frame, hooked back against the yard face: the
+     post is manned all day and its door stands open. */
+  addBox(-14, 2.8, 120, 0.5, 0.8, 2.2, 0x515a66, { cast: false, blockLOS: true });
+  if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
+    CBZ.corridorKit.doorSet({ axis: "z", a0: 118.9, a1: 121.1, fixed: -14, t: 0.5, h: 2.4, y0: 0.06,
+      open: -1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+  }
   // the hut's roof: a poured slab on its walls with a steel drip fascia
   // (world/roofs.js knows it is roofed and hangs no second lid)
   const hutRoof = addBox(-18, 3.4, 120, 8.4, 0.4, 8.4, 0x44505a, { cast: true });
@@ -762,6 +771,75 @@
     // face: the hut's east wall face is -13.75 and the pillars' inner faces
     // are +/-6.0, and the hut lamp ducks under its own 3.2-3.6 m roof slab.
     PD.lamp(-13.69, 2.9, 122.4, "x+");
+  })();
+
+  /* ---- THE FOUR ROOM DOORWAYS WERE 4 m HOLES (2026-09-28). A raw slot in a
+     block wall with a lintel over it, no frame, no door, nothing to say what
+     closes it at night. Each now gets what that room would really have, and
+     every one of them stays OPEN for the day's traffic (inmates are walked in
+     and out of all four on the schedule; nothing here is a collider):
+       workshop, laundry  a steel roller shutter, raised: guides on the inner
+                          face, the coil hood over the opening, the curtain's
+                          last slats and bottom bar showing under the head
+       chapel             a pair of panelled oak doors, hooked back square to
+                          the wall inside the nave, clear of the pews
+       infirmary          a pair of steel-framed glazed doors, hooked back
+     All four openings get a steel frame lining the reveal and an angle trim
+     on the yard face. ---- */
+  if (K && K.stat) (function roomDoorways() {
+    const stat = K.stat, steel = K.skin("steel", 0x4a525c, 0.5), galv = K.skin("galv", 0xa9b0b7);
+    const roller = K.skin("roller", 0x9aa1a8), rubber = K.skin("steel", 0x1c1e22, 0.8);
+    const CK = CBZ.corridorKit;
+    const HEAD = 3.1, T = 0.5;
+    function lining(wallX, dc, dw) {
+      for (const s of [-1, 1]) {
+        stat(new THREE.BoxGeometry(T + 0.02, HEAD, 0.04), steel, wallX, HEAD / 2, dc + s * (dw / 2 - 0.02), { cast: false });   // reveal
+        for (const f of [-1, 1])
+          stat(new THREE.BoxGeometry(0.02, HEAD + 0.08, 0.08), steel, wallX + f * (T / 2 + 0.01), (HEAD + 0.08) / 2, dc + s * (dw / 2 + 0.04), { cast: false });
+      }
+      stat(new THREE.BoxGeometry(T + 0.02, 0.04, dw), steel, wallX, HEAD - 0.02, dc, { cast: false });                          // head soffit
+      for (const f of [-1, 1]) stat(new THREE.BoxGeometry(0.02, 0.08, dw + 0.16), steel, wallX + f * (T / 2 + 0.01), HEAD + 0.04, dc, { cast: false });
+    }
+    function shutter(wallX, dc, dw, dirIn) {
+      const inX = wallX + dirIn * T / 2;
+      lining(wallX, dc, dw);
+      for (const s of [-1, 1]) {
+        stat(new THREE.BoxGeometry(0.1, HEAD + 0.05, 0.1), steel, inX + dirIn * 0.05, (HEAD + 0.05) / 2, dc + s * (dw / 2 + 0.06), { cast: false });   // guide
+        stat(new THREE.BoxGeometry(0.06, 0.34, 0.26), steel, inX + dirIn * 0.2, HEAD + 0.27, dc + s * (dw / 2 + 0.13), { cast: false });              // bracket
+      }
+      stat(new THREE.BoxGeometry(0.44, 0.52, dw + 0.34), steel, inX + dirIn * 0.24, HEAD + 0.29, dc, { cast: false });                            // coil hood
+      stat(new THREE.BoxGeometry(0.03, 0.26, dw + 0.06), roller, inX + dirIn * 0.05, HEAD - 0.13, dc, { cast: false, uv: 1 });                   // last slats
+      stat(new THREE.BoxGeometry(0.07, 0.06, dw + 0.06), galv, inX + dirIn * 0.05, HEAD - 0.29, dc, { cast: false });                             // bottom bar
+      stat(new THREE.BoxGeometry(0.05, 0.02, dw + 0.02), rubber, inX + dirIn * 0.05, HEAD - 0.33, dc, { cast: false });                           // seal
+      stat(new THREE.BoxGeometry(0.1, 0.05, 0.16), galv, inX + dirIn * 0.1, HEAD - 0.29, dc, { cast: false });                                    // pull handle
+      // the hand-chain drive on one side: a gearbox on the guide, the loop to hand height
+      const cz = dc + dw / 2 + 0.2;
+      stat(new THREE.BoxGeometry(0.16, 0.2, 0.14), steel, inX + dirIn * 0.14, HEAD + 0.05, cz, { cast: false });
+      for (const o of [-0.03, 0.03]) stat(new THREE.CylinderGeometry(0.006, 0.006, HEAD - 1.05, 5), galv, inX + dirIn * 0.14, (HEAD + 1.05) / 2, cz + o, { cast: false });
+    }
+    function woodPair(g, w, h, dir) {
+      if (!PD || !PD.Paint) return null;
+      const P = new PD.Paint(), OAK = 0x7a5530, OAKD = 0x5e3f22, IRON = 0x2a2d31, xs = function (u) { return dir * u; };
+      P.box(xs(w / 2), h / 2, 0, w, h, 0.05, OAKD);
+      for (let i = 0; i < 6; i++) P.box(xs(0.02 + (i + 0.5) * (w - 0.04) / 6), h / 2, 0, (w - 0.04) / 6 - 0.012, h - 0.02, 0.058, OAK);   // boards
+      for (const f of [-1, 1]) for (const hy of [0.35, h / 2, h - 0.35]) P.box(xs(w * 0.36), hy, f * 0.032, w * 0.66, 0.06, 0.008, IRON);   // strap hinges
+      for (const f of [-1, 1]) P.add(new THREE.TorusGeometry(0.06, 0.01, 6, 14).translate(xs(w - 0.16), 1.05, f * 0.045), IRON);           // ring pull
+      const geo = P.geometry();
+      if (!geo) return null;
+      const m = new THREE.Mesh(geo, PD.vcMat()); m.receiveShadow = true; g.add(m);
+      return m;
+    }
+    function heldPair(wallX, dc, dw, open, build) {
+      if (!CK || !CK.doorSet) { lining(wallX, dc, dw); return; }
+      const set = CK.doorSet({ axis: "z", a0: dc - dw / 2, a1: dc + dw / 2, fixed: wallX, t: T, h: HEAD, y0: 0.06,
+        open: open, hinge: 0, build: build, frame: 0x4a525c });
+      set.set(1);                 // hooked back, square to the wall
+    }
+    shutter(-24, 69, 4.2, -1);    // workshop (east wall, room to the west)
+    shutter(-26, 96, 4.0, -1);    // laundry
+    // chapel / infirmary: west wall, room to the east = world +x = local -z
+    heldPair(24, 69, 4.2, -1, woodPair);
+    heldPair(26, 96, 4.0, -1, CK && CK.glassLeaf ? CK.glassLeaf : woodPair);
   })();
 
   // The facade pass (world/building_dress.js) dresses whatever registers here.

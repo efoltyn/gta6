@@ -517,7 +517,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/digsite.js?v=dig1"></script>
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
-<script src="src/core/daynight.js?v=dsl2"></script>
+<script src="src/core/daynight.js?v=dsl3"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -527,8 +527,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=dsl2"></script>
-<script src="src/world/corridorkit.js?v=dsl2"></script>
+<script src="src/world/prisonkit.js?v=dsl3"></script>
+<script src="src/world/corridorkit.js?v=dsl3"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -557,10 +557,10 @@ document.body.appendChild(b);}}catch(e){}})();
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/systems/pushables.js?v=push2"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
-<script src="src/world/ground.js?v=dsl2"></script>
-<script src="src/world/cellblock.js?v=dsl2"></script>
+<script src="src/world/ground.js?v=dsl3"></script>
+<script src="src/world/cellblock.js?v=dsl3"></script>
 <script src="src/world/yard.js"></script>
-<script src="src/world/razorwire.js?v=dsl2"></script>
+<script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
@@ -568,8 +568,8 @@ document.body.appendChild(b);}}catch(e){}})();
      depended on their (synchronous, load-time) execution happening this
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
-<script src="src/world/clutter.js?v=dsl2"></script>
-<script src="src/world/door.js?v=dsl2"></script>
+<script src="src/world/clutter.js?v=dsl3"></script>
+<script src="src/world/door.js?v=dsl3"></script>
 <script src="src/world/exit.js"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
@@ -666,12 +666,12 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
-<script src="src/world/cafeteria.js?v=dsl2"></script>
-<script src="src/world/lounge.js?v=dsl2"></script>
-<script src="src/world/gunroom.js?v=dsl2"></script>
-<script src="src/world/ventilation.js?v=dsl2"></script>
-<script src="src/world/escape_routes.js?v=dsl2"></script>
-<script src="src/world/southblock.js?v=dsl2"></script>
+<script src="src/world/cafeteria.js?v=dsl3"></script>
+<script src="src/world/lounge.js?v=dsl3"></script>
+<script src="src/world/gunroom.js?v=dsl3"></script>
+<script src="src/world/ventilation.js?v=dsl3"></script>
+<script src="src/world/escape_routes.js?v=dsl3"></script>
+<script src="src/world/southblock.js?v=dsl3"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
      builds four walls and no ceiling), so you could stand in the mess hall and
      watch the crows. roofs.js lays a real ceiling over each of them and hangs
@@ -679,12 +679,12 @@ document.body.appendChild(b);}}catch(e){}})();
      what flushes CBZ.prisonDress's fixture queue into CBZ.prisonLights, so
      every caged lamp in the compound joins the schedule. AFTER every file that
      draws a room; BEFORE world/adminwing.js, which asks it for its own roof. -->
-<script src="src/world/roofs.js?v=dsl2"></script>
+<script src="src/world/roofs.js?v=dsl3"></script>
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
 <script src="src/entities/guards.js?v=nodash1"></script>
-<script src="src/entities/searchlight.js?v=dsl2"></script>
+<script src="src/entities/searchlight.js?v=dsl3"></script>
 <script src="src/entities/keycard.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
@@ -702,7 +702,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=dsl2"></script>
+<script src="src/world/adminwing.js?v=dsl4"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -717,9 +717,9 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisonwings.js?v=dsl2"></script>
-<script src="src/world/prisongrounds.js?v=dsl2"></script>
-<script src="src/world/corridors.js?v=dsl2"></script>
+<script src="src/world/prisonwings.js?v=dsl3"></script>
+<script src="src/world/prisongrounds.js?v=dsl3"></script>
+<script src="src/world/corridors.js?v=dsl3"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -758,8 +758,8 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js's cameras multiply by, so darkness is priced once.
      After cellblock/guards/searchlight/npc (all read at parse), before the
      detection sweep that consumes the result. -->
-<script src="src/systems/prisonschedule.js?v=dsl2"></script>
-<script src="src/systems/prisonnight.js?v=dsl2"></script>
+<script src="src/systems/prisonschedule.js?v=dsl3"></script>
+<script src="src/systems/prisonnight.js?v=dsl3"></script>
 <!-- THE PLAYER'S FLASHLIGHT: owning a Guard Torch (prison) or a Flashlight
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
@@ -790,7 +790,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=dsl2"></script>
+<script src="src/systems/prisontiers.js?v=dsl3"></script>
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=radio1"></script>
@@ -874,7 +874,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
-<script src="src/systems/interactions.js?v=lift1"></script>
+<script src="src/systems/interactions.js?v=dsl3"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
@@ -1183,13 +1183,13 @@ document.body.appendChild(b);}}catch(e){}})();
      "2. world geometry" wave above, right after towers.js): it needs
      spawnPiece to exist at parse time. (world/crates.js, the five yard
      packing cases, deleted 2026-09-28: yardfurniture.js had replaced them.) -->
-<script src="src/world/props.js?v=dsl2"></script>
+<script src="src/world/props.js?v=dsl3"></script>
 <!-- THE YARD IS A PRISON YARD: what a real exercise yard contains on the
      five spots the old packing cases held — handball wall, weight pile,
      shade pavilion, phone bank, notice board — keeping every metre of the
      line-of-sight cover the stealth layer is built on. It also puts the
      Hacksaw Blade and the Lockpick in the workshop and the laundry. -->
-<script src="src/world/yardfurniture.js?v=dsl2"></script>
+<script src="src/world/yardfurniture.js?v=dsl3"></script>
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->

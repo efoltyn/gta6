@@ -168,25 +168,115 @@
     };
     return registerDoor(d, cfg);
   }
-  /* cfg: { id, label, axis, a0, a1, fixed, h, keys, lb, swing (+1 opens
-            toward +z for axis x / +x for axis z), hinge (-1 at a0),
-            build(group, w, h, dir), autoShut } */
+  /* ==========================================================
+     THE DOOR SET. A leaf in a hole is not a door (owner, 2026-09-28: "look
+     at how stupid the opening to the warden's room is ... his door doesn't
+     have physics"). Every swinging leaf in the compound was a slab pivoting
+     on the wall's CENTRE LINE in a raw hole: no frame, no stop, no hinges,
+     and opened past 90 degrees it swung back through the wall it hung in.
+     A real door set is a frame that wraps the opening (two jambs and a head,
+     the full depth of the wall), a stop the leaf closes against, an
+     architrave on both faces that covers the joint with the wall, and a
+     leaf hung on three hinges at the FACE of the frame on the side it opens
+     to, so it swings clear of the jamb and stops square to the wall.
+
+     cfg: { axis "x" (wall along x, plane z = fixed) | "z" (plane x = fixed),
+            a0, a1        the rough opening along the wall
+            t             wall thickness (the frame wraps all of it)
+            h             head height; y0 the finished floor the leaf clears
+            open          +1 | -1: which side of the wall the leaf swings to,
+                          in LOCAL z (axis x: world z; axis z: world -x)
+            hinge         -1 hung at a0, +1 at a1, 0 = a PAIR meeting mid-span
+            meet          this set is one half of a pair drawn as two sets:
+                          no jamb or stop on the free side
+            build(g, w, h, dir)  draws one leaf from its hinge edge along
+                          +dir x, centred on g's z = 0, LT thick
+            frame         frame colour; max  fraction of 90 deg it opens }
+     -> { leaves: [{ pivot, base, swing, slab }], set(t 0..1), clear }     */
+  const JW = 0.05, AW = 0.075, AP = 0.025, LT = 0.05;
+  function doorSet(cfg) {
+    const along = cfg.axis === "z";
+    const a0 = Math.min(cfg.a0, cfg.a1), a1 = Math.max(cfg.a0, cfg.a1), fixed = cfg.fixed;
+    const t = cfg.t || 0.3, h = cfg.h || 2.3, y0 = cfg.y0 || 0, open = cfg.open < 0 ? -1 : 1;
+    const hinge = cfg.hinge == null ? -1 : cfg.hinge;
+    const fmat = K.skin("steel", cfg.frame != null ? cfg.frame : 0x5b636d, 0.5);
+    const hmat = K.skin("galv", 0xa9b0b7);
+    // local (lx along the wall, lz across it) -> world
+    const W = (lx, lz) => along ? [fixed - lz, lx] : [lx, fixed + lz];
+    const ry = along ? -Math.PI / 2 : 0;
+    function piece(w, hh, d, lx, y, lz, mat) {
+      const p = W(lx, lz);
+      stat(new THREE.BoxGeometry(w, hh, d), mat || fmat, p[0], y, p[1], { ry: ry, cast: false });
+    }
+    // which jambs this set owns: a pair-half has only its hinge jamb
+    const jamb0 = !(cfg.meet && hinge > 0), jamb1 = !(cfg.meet && hinge < 0);
+    const in0 = a0 + (jamb0 ? JW : 0), in1 = a1 - (jamb1 ? JW : 0);
+    // FRAME: jambs + head wrap the wall's full depth (+1 cm proud each face)
+    if (jamb0) piece(JW, h, t + 0.02, a0 + JW / 2, h / 2, 0);
+    if (jamb1) piece(JW, h, t + 0.02, a1 - JW / 2, h / 2, 0);
+    piece(a1 - a0, JW, t + 0.02, (a0 + a1) / 2, h - JW / 2, 0);
+    // STOP: the rebate the leaf shuts against, just behind the leaf's plane
+    const sz = open * (t / 2) - open * (LT + 0.02);
+    if (jamb0) piece(0.018, h - JW, 0.035, in0 + 0.009, (h - JW) / 2, sz);
+    if (jamb1) piece(0.018, h - JW, 0.035, in1 - 0.009, (h - JW) / 2, sz);
+    piece(in1 - in0, 0.018, 0.035, (in0 + in1) / 2, h - JW - 0.009, sz);
+    // ARCHITRAVE, both faces
+    for (const f of [-1, 1]) {
+      const az = f * (t / 2 + AP / 2);
+      if (jamb0) piece(AW, h + AW, AP, a0 - AW / 2, (h + AW) / 2, az);
+      if (jamb1) piece(AW, h + AW, AP, a1 + AW / 2, (h + AW) / 2, az);
+      const hx0 = a0 - (jamb0 ? AW : 0), hx1 = a1 + (jamb1 ? AW : 0);
+      piece(hx1 - hx0, AW, AP, (hx0 + hx1) / 2, h + AW / 2, az);
+    }
+    // THE LEAVES, each on three hinges at the frame face it opens to
+    const spans = hinge === 0 ? [[-1, in0, (in0 + in1) / 2 - 0.003], [1, (in0 + in1) / 2 + 0.003, in1]]
+      : [[hinge < 0 ? -1 : 1, in0, in1]];
+    const leaves = [];
+    const lh = h - JW - y0 - 0.012;
+    for (const s of spans) {
+      const side = s[0], dir = side < 0 ? 1 : -1, hx = side < 0 ? s[1] : s[2];
+      const lw = s[2] - s[1] - 0.004;
+      const pz = open * (t / 2);
+      const pivot = new THREE.Group(); pivot.userData.mover = true;
+      const p = W(hx, pz);
+      pivot.position.set(p[0], 0, p[1]);
+      pivot.rotation.y = ry;
+      const g = new THREE.Group();
+      g.position.set(0, y0 + 0.008, -open * LT / 2);
+      pivot.add(g);
+      const slab = cfg.build(g, lw, lh, dir, leaves.length) || null;
+      // hinges: knuckles on the frame at the pivot line (static), leaves on the leaf
+      for (const hy of [0.24, lh * 0.5, lh - 0.26]) {
+        const k = W(hx, pz + open * 0.004);
+        stat(new THREE.CylinderGeometry(0.012, 0.012, 0.11, 10), hmat, k[0], y0 + hy, k[1], { cast: false });
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.004), hmat);
+        m.position.set(dir * 0.03, hy - 0.008, open * (LT / 2 + 0.002)); g.add(m);
+      }
+      root().add(pivot);
+      leaves.push({ pivot: pivot, base: ry, swing: -open * dir * (Math.PI / 2) * (cfg.max || 0.97), slab: slab });
+    }
+    return {
+      leaves: leaves,
+      clear: { a0: in0, a1: in1 },
+      set: function (u) { for (const L of leaves) L.pivot.rotation.y = L.base + L.swing * u; },
+    };
+  }
+  /* cfg: { id, label, axis, a0, a1, fixed, t, h, keys, lb, swing,
+            hinge (-1 at a0), meet, build(group, w, h, dir), autoShut }
+     `swing` keeps its historic meaning in the LOCAL frame: the leaf goes to
+     local z = -swing (for axis "x" that is world -z at swing +1; for axis
+     "z", world +x). The door set above hangs it on that face. */
   function door(cfg) {
     const along = cfg.axis === "z";
-    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed;
-    const w = a1 - a0, h = cfg.h || 2.3, hingeA = cfg.hinge < 0 ? a0 : a1, dir = cfg.hinge < 0 ? 1 : -1;
-    const pivot = new THREE.Group(); pivot.userData.mover = true;
-    pivot.position.set(along ? fixed : hingeA, 0, along ? hingeA : fixed);
-    const g = new THREE.Group(); pivot.add(g);
-    cfg.build(g, w, h, dir);
-    root().add(pivot);
-    const base = along ? -Math.PI / 2 : 0;
-    pivot.rotation.y = base;
+    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed, t = cfg.t || 0.3;
+    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: cfg.h || 2.3, y0: cfg.y0,
+      open: -(cfg.swing || 1), hinge: cfg.hinge < 0 ? -1 : 1, meet: cfg.meet, build: cfg.build, frame: cfg.frame });
+    const L = set.leaves[0];
     const d = {
-      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed, group: pivot, kind: "swing", base: base,
-      swing: (cfg.swing || 1) * dir * (Math.PI / 2) * 0.94,
-      collider: along ? { minX: fixed - 0.1, maxX: fixed + 0.1, minZ: a0, maxZ: a1, ref: pivot }
-        : { minX: a0, maxX: a1, minZ: fixed - 0.1, maxZ: fixed + 0.1, ref: pivot },
+      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed, group: L.pivot, kind: "swing", base: L.base,
+      swing: L.swing,
+      collider: along ? { minX: fixed - t / 2, maxX: fixed + t / 2, minZ: a0, maxZ: a1, ref: L.pivot }
+        : { minX: a0, maxX: a1, minZ: fixed - t / 2, maxZ: fixed + t / 2, ref: L.pivot },
       autoShut: cfg.autoShut != null ? cfg.autoShut : 4,
     };
     if (cfg.lamp) d.lamp = cfg.lamp;
@@ -381,9 +471,9 @@
     K.sign("AUTHORIZED PERSONNEL ONLY\nBEYOND THIS POINT", rp[0], 2.05, rp[1], 1.3, 0.42, D > 0 ? Math.PI : 0, "#f3f3ef", "#b3261e");
     // the entry pair and the way out
     const ez = P(0, Z0 + T / 2)[1], oz = P(0, Z1 - T / 2)[1];
-    door({ id: cfg.id + "-entry-w", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X, fixed: ez, h: 2.4, keys: null, hinge: -1, swing: -D, build: glassLeaf });
-    door({ id: cfg.id + "-entry-e", label: "The sally port", axis: "x", a0: X, a1: X + DW / 2, fixed: ez, h: 2.4, keys: null, hinge: 1, swing: -D, build: glassLeaf });
-    door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, h: 2.3, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
+    door({ id: cfg.id + "-entry-w", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: -1, swing: -D, build: glassLeaf });
+    door({ id: cfg.id + "-entry-e", label: "The sally port", axis: "x", a0: X, a1: X + DW / 2, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: 1, swing: -D, build: glassLeaf });
+    door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, t: T, h: 2.35, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
     const stp = P(0, Z1 + 0.6);
     const step = addBox(stp[0], 0.08, stp[1], 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
     const olp = P(0, Z1 + 0.06); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
@@ -427,7 +517,7 @@
       if (CBZ.prisonPlaceItem) { try { CBZ.prisonPlaceItem.apply(null, keyAt); } catch (e) {} }
       else (CBZ._prisonLateItems || (CBZ._prisonLateItems = [])).push(keyAt);
       strip(X + side * (BX + 2.1), B.h - 0.02, wc, 2.2, "z");
-      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, h: 2.2, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, build: steelLeaf(0x4f6f60) });
+      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, t: 0.5, h: 2.3, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, build: steelLeaf(0x4f6f60) });
       K.sign("AUTHORIZED\nPERSONNEL ONLY", (side > 0 ? B.x1 : B.x0) + side * 0.28, 2.6, wc, 0.9, 0.42, side > 0 ? Math.PI / 2 : -Math.PI / 2, "#f3f3ef", "#b3261e");
     }
     // the walkway
@@ -444,6 +534,6 @@
     return { gate: gate, win: { x: win[0], z: win[1] } };
   }
 
-  CBZ.corridorKit = { grille, door, lining, exitSign, strip, cagedLamp, keyTest, steelLeaf, glassLeaf, doors };
+  CBZ.corridorKit = { grille, door, doorSet, lining, exitSign, strip, cagedLamp, keyTest, steelLeaf, glassLeaf, doors };
   CBZ.buildSallyPort = buildSallyPort;
 })();

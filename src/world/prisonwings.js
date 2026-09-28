@@ -224,6 +224,62 @@
      ========================================================== */
   const DH = 2.6;
   const doors = [];
+  /* THE LEAVES (2026-09-28). This primitive hung a slab (or a 6 m grille)
+     on a pivot at the wall's CENTRE LINE, in a raw hole, and swung it 109
+     degrees: past square, back through the wall it stood in. The sally gates
+     were single 6 m leaves. Every leaf now hangs in a real door set
+     (world/corridorkit.js's CBZ.corridorKit.doorSet: frame, stop,
+     architraves, three hinges at the face it opens to), openings wider than
+     2.4 m are a PAIR, and open means square to the wall. The lock is a lock
+     box on the lock stile with a 20 mm LED lens in it (it was a 13 cm
+     glowing cube). */
+  const CK = CBZ.corridorKit;
+  const barMat = K.skin("steel", 0x2a2f38, 0.5), lockMat = K.skin("steel", 0x21262e, 0.55);
+  const hidePane = new THREE.MeshBasicMaterial({ visible: false });
+  function barLeaf(hold, lockOn) {
+    return function (g, w, h, dir, i) {
+      const xs = function (u) { return dir * u; };
+      const geos = [];
+      const bx = function (cx, cy, bw, bh, bd) { geos.push(new THREE.BoxGeometry(bw, bh, bd).translate(cx, cy, 0)); };
+      bx(xs(0.035), h / 2, 0.07, h, 0.07); bx(xs(w - 0.035), h / 2, 0.07, h, 0.07);        // stiles
+      for (const y of [0.05, 1.1, h - 0.05]) bx(xs(w / 2), y, w - 0.07, 0.08, 0.05);      // rails
+      const n = Math.max(2, Math.round((w - 0.14) / 0.16));
+      for (let k = 1; k < n; k++)
+        geos.push(new THREE.CylinderGeometry(0.012, 0.012, h - 0.1, 6, 1, true).translate(xs(0.07 + k * (w - 0.14) / n), h / 2, 0));
+      const BGU = THREE.BufferGeometryUtils;
+      for (let k = 0; k < geos.length; k++) if (geos[k].index) geos[k] = geos[k].toNonIndexed();
+      const geo = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(geos, false) : geos[0];
+      const m = new THREE.Mesh(geo, barMat); m.castShadow = false; m.receiveShadow = true; g.add(m);
+      // the leaf still blocks sight the way it always did: an unseen pane
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), hidePane);
+      pane.position.set(xs(w / 2), h / 2, 0); g.add(pane);
+      if (i === lockOn && hold) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.3, 0.1), lockMat);
+        box.position.set(xs(w - 0.09), 1.1, 0); g.add(box);
+        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.006, 12).rotateX(Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+        lamp.position.set(xs(w - 0.09), 1.2, 0.053); g.add(lamp);
+        hold.lamp = lamp;
+      }
+      return pane;
+    };
+  }
+  function plateLeaf(hold, lockOn, color) {
+    const draw = CK.steelLeaf(color || 0x4f5d6b);
+    return function (g, w, h, dir, i) {
+      draw(g, w, h, dir);
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.05), hidePane);
+      pane.position.set(dir * w / 2, h / 2, 0); g.add(pane);
+      if (i === lockOn && hold) {
+        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.006, 12).rotateX(Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+        lamp.position.set(dir * (w - 0.12), 1.25, 0.034); g.add(lamp);
+        hold.lamp = lamp;
+      }
+      return pane;
+    };
+  }
+  /* cfg { id, label, keys, pick, bars, lb, axis, a0, a1, fixed, t (wall), h, color } */
   function makeDoor(cfg) {
     const d = {
       id: cfg.id, label: cfg.label, keys: cfg.keys || null, pick: cfg.pick || 0,
@@ -231,43 +287,23 @@
       axis: cfg.axis || "x",                       // 'x' = the opening runs along x
       a0: cfg.a0, a1: cfg.a1, fixed: cfg.fixed,
     };
-    const span = cfg.a1 - cfg.a0;
     d.x = d.axis === "x" ? (cfg.a0 + cfg.a1) / 2 : cfg.fixed;
     d.z = d.axis === "x" ? cfg.fixed : (cfg.a0 + cfg.a1) / 2;
-    const pivot = new THREE.Group();
-    pivot.position.set(d.axis === "x" ? cfg.a0 : cfg.fixed, 0, d.axis === "x" ? cfg.fixed : cfg.a0);
-    if (d.axis === "z") pivot.rotation.y = -Math.PI / 2;
-    pivot.userData.mover = true;
-    ROOT.add(pivot);
-    // the leaf, built INTO the pivot (addBox parents to CBZ.prisonRoot, so a
-    // leaf that has to ride a pivot must be built here, not adopted out).
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(span - 0.06, DH - 0.06, 0.12),
-      CBZ.mat(cfg.color != null ? cfg.color : 0x3f4a57, {}));
-    leaf.position.set(span / 2, (DH - 0.06) / 2, 0);
-    leaf.castShadow = false; leaf.receiveShadow = true;
-    if (cfg.bars) {
-      leaf.material = new THREE.MeshLambertMaterial({ color: 0x39424e, transparent: true, opacity: 0.06, depthWrite: false });
-      const bar = (w, h, px, py) => {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.09), CBZ.mat(0x2a2f38, {}));
-        m.position.set(px, py, 0); m.castShadow = false; pivot.add(m); return m;
-      };
-      const nb = Math.max(3, Math.round(span / 0.42));
-      for (let i = 0; i <= nb; i++) bar(0.075, DH - 0.1, 0.05 + i * (span - 0.1) / nb, (DH - 0.06) / 2);
-      bar(span - 0.06, 0.1, span / 2, 0.35);
-      bar(span - 0.06, 0.1, span / 2, DH - 0.35);
-    }
-    pivot.add(leaf);
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.06), CBZ.mat(0x21262e, {}));
-    plate.position.set(span - 0.26, 1.02, 0.085); pivot.add(plate);
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.07),
-      new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-    lamp.position.set(span - 0.26, 1.44, 0.1); pivot.add(lamp);
-    d.pivot = pivot; d.leaf = leaf; d.lamp = lamp;
+    const T = cfg.t || 0.5, pair = cfg.a1 - cfg.a0 > 2.4, hold = {};
+    // the leaves open to local +z, the side the old pivot swung them to
+    d.set = CK.doorSet({ axis: d.axis, a0: cfg.a0, a1: cfg.a1, fixed: cfg.fixed, t: T, h: cfg.h || DH,
+      open: 1, hinge: pair ? 0 : -1, frame: 0x39424e,
+      build: cfg.bars ? barLeaf(hold, pair ? 1 : 0) : plateLeaf(hold, pair ? 1 : 0, cfg.color) });
+    d.pivots = d.set.leaves.map(function (L) { return L.pivot; });
+    d.slabs = d.set.leaves.map(function (L) { return L.slab; }).filter(Boolean);
+    d.lamp = hold.lamp || null;
+    const leaf = d.slabs[0] || d.pivots[0];
+    d.leaf = leaf;
     d.collider = d.axis === "x"
-      ? { minX: cfg.a0, maxX: cfg.a1, minZ: cfg.fixed - 0.1, maxZ: cfg.fixed + 0.1, ref: leaf }
-      : { minX: cfg.fixed - 0.1, maxX: cfg.fixed + 0.1, minZ: cfg.a0, maxZ: cfg.a1, ref: leaf };
+      ? { minX: cfg.a0, maxX: cfg.a1, minZ: cfg.fixed - T / 2, maxZ: cfg.fixed + T / 2, ref: leaf }
+      : { minX: cfg.fixed - T / 2, maxX: cfg.fixed + T / 2, minZ: cfg.a0, maxZ: cfg.a1, ref: leaf };
     CBZ.colliders.push(d.collider);
-    if (CBZ.losBlockers) CBZ.losBlockers.push(leaf);
+    if (CBZ.losBlockers) for (const sl of d.slabs) CBZ.losBlockers.push(sl);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     d.setOpen = function (v, quiet) {
       v = !!v;
@@ -276,14 +312,16 @@
       const i = CBZ.colliders.indexOf(d.collider);
       if (v && i >= 0) CBZ.colliders.splice(i, 1);
       else if (!v && i < 0) CBZ.colliders.push(d.collider);
-      if (CBZ.losBlockers) {
-        const li = CBZ.losBlockers.indexOf(leaf);
+      if (CBZ.losBlockers) for (const sl of d.slabs) {
+        const li = CBZ.losBlockers.indexOf(sl);
         if (v && li >= 0) CBZ.losBlockers.splice(li, 1);
-        else if (!v && li < 0) CBZ.losBlockers.push(leaf);
+        else if (!v && li < 0) CBZ.losBlockers.push(sl);
       }
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-      lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
-      lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
+      if (d.lamp) {
+        d.lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
+        d.lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
+      }
       if (!quiet && CBZ.worldSfx) CBZ.worldSfx(v ? "door_open" : "door_close", d.x, d.z, { ref: 10 });
       if (!v) d.picked = 0;
       return v;
@@ -299,7 +337,7 @@
         id: d.id, lb: cfg.lb || 5, reach: 2.6,
         at: function () { return { x: d.x, y: 1.4, z: d.z }; },
         done: function () { return d.open; },
-        defeat: function () { d.setOpen(true); d.blown = true; d.leaf.visible = false; },
+        defeat: function () { d.setOpen(true); d.blown = true; for (const p of d.pivots) p.visible = false; },
       });
     }
     /* ---- AND A WAY TO SHUT IT ------------------------------------------
@@ -315,7 +353,7 @@
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
       id: d.id, label: d.label, autoR: 2.5, openByTap: !d.pick,   // tick opens at near2 < 6.2
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
-      pick: function () { return [pivot]; },
+      pick: function () { return d.pivots; },
       col: function () { return d.collider; },
       isOpen: function () { return !!d.open; },
       permanent: function () { return !!(d.blown || RELEASE.thrown); },
@@ -357,11 +395,12 @@
     // reads full height to every body and seals the gate for the whole cast).
     addBox(g.fixed, (DH + YH) / 2, g.c, 1, YH - DH, GATE_W, WALL, { cast: false, blockLOS: true });
     addBox(g.fixed, DH + 0.2, g.c, 1.3, 0.34, GATE_W + 0.5, 0x39424e, { cast: false });
-    for (const s of [-1, 1]) addBox(g.fixed, 1.5, g.c + s * (GATE_W / 2), 1.3, 3.0, 0.28, 0x39424e, { cast: false });
-    if (PD && PD.lamp) { try { PD.lamp(g.fixed + 0.62, 3.0, g.c, "x+"); } catch (e) {} }
+    // (the two 1.3 m steel piers that stood IN the opening are gone: the
+    // door set's frame lines the reveal, and they buried both leaves' edges)
+    if (PD && PD.lamp) { try { PD.lamp(g.fixed + 0.56, 3.0, g.c, "x+"); } catch (e) {} }
     return makeDoor({
       id: g.id, label: g.label, keys: ["Keycard"], bars: true, lb: 5,
-      axis: "z", a0: g.c - GATE_W / 2, a1: g.c + GATE_W / 2, fixed: g.fixed,
+      axis: "z", a0: g.c - GATE_W / 2, a1: g.c + GATE_W / 2, fixed: g.fixed, t: 1,
     });
   });
 
@@ -610,7 +649,7 @@
   stockCage([["Hacksaw Blade", -110, 0.80, 43.23], ["Lockpick", -108, 0.80, 43.23], ["Pickaxe", -112, 0.80, 43.23]]);
   const cribDoor = makeDoor({
     id: "prison-tool-crib", label: "The tool crib", pick: 3.2, bars: true, lb: 5,
-    axis: "x", a0: CRIB_DOOR.a0, a1: CRIB_DOOR.a1, fixed: CRIB_DOOR.fixed, color: 0x39424e,
+    axis: "x", a0: CRIB_DOOR.a0, a1: CRIB_DOOR.a1, fixed: CRIB_DOOR.fixed, t: 0.12, h: 2.84,
   });
 
   /* POWERHOUSE — deliberately UNLOCKED. An empty-handed room is a legitimate
@@ -785,7 +824,7 @@
   stockCage([["Contraband Map", 104.5, 0.62, 41.0]]);
   const segDoor = makeDoor({
     id: "prison-segregation", label: "The segregation gate", keys: ["Keycard"], bars: true, lb: 5,
-    axis: "x", a0: 99, a1: 102.6, fixed: 44, color: 0x39424e,
+    axis: "x", a0: 99, a1: 102.6, fixed: 44,
   });
 
   /* KITCHEN. A prison this size feeds nine hundred men from one room, and
@@ -867,7 +906,7 @@
   stockCage([["Shiv", 104, 0.80, 95.23], ["Razor Blade", 105.6, 0.80, 95.23], ["Hatchet", 102.4, 0.80, 95.23]]);
   const knifeDoor = makeDoor({
     id: "prison-knife-cage", label: "The knife cage", pick: 4.4, bars: true, lb: 5,
-    axis: "x", a0: KNIFE_DOOR.a0, a1: KNIFE_DOOR.a1, fixed: KNIFE_DOOR.fixed, color: 0x39424e,
+    axis: "x", a0: KNIFE_DOOR.a0, a1: KNIFE_DOOR.a1, fixed: KNIFE_DOOR.fixed, t: 0.12, h: 2.84,
   });
 
   /* VISITATION & PROPERTY. The room a man is processed through, and the room
@@ -922,7 +961,7 @@
       ["Luxury Watch", 100.4, 0.80, 104.77], ["Burner Phone", 105.6, 0.80, 104.77]]);
   const propDoor = makeDoor({
     id: "prison-property", label: "The property cage", pick: 5.6, bars: true, lb: 5,
-    axis: "x", a0: PROP_DOOR.a0, a1: PROP_DOOR.a1, fixed: PROP_DOOR.fixed, color: 0x39424e,
+    axis: "x", a0: PROP_DOOR.a0, a1: PROP_DOOR.a1, fixed: PROP_DOOR.fixed, t: 0.12, h: 2.84,
   });
 
   // -------------------------------------------------------------- THE BUBBLE
@@ -937,7 +976,7 @@
       ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", nx: 10, nz: 6 } } });
   const ctrlDoor = makeDoor({
     id: "prison-control", label: "Central control", keys: ["Gun-Room Key"], lb: 7,
-    axis: "x", a0: -2, a1: 2, fixed: -78, color: 0x5c4326,
+    axis: "x", a0: -2, a1: 2, fixed: -78, h: 3.1, color: 0x4f5d6b,
   });
   /* THE CONSOLE (rebuilt 2026-09-28): one 16 m operator desk drawn from its
      side profile (a toe kick, the writing ledge on the officer's side, the
@@ -1090,7 +1129,7 @@
       if (d.t !== want) {
         d.t += (want - d.t) * Math.min(1, dt * 4.4);
         if (Math.abs(want - d.t) < 0.01) d.t = want;
-        d.pivot.rotation.y = (d.axis === "z" ? -Math.PI / 2 : 0) - d.t * 1.9;
+        d.set.set(d.t);
       }
     }
     if (g.state !== "playing") return;
@@ -1148,9 +1187,9 @@
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
       d.blown = false; d.picked = 0; d.shutT = 0;
-      if (d.leaf) d.leaf.visible = true;
+      for (const p of d.pivots) p.visible = true;
       d.setOpen(false, true);
-      d.t = 0; d.pivot.rotation.y = (d.axis === "z" ? -Math.PI / 2 : 0);
+      d.t = 0; d.set.set(0);
     }
     RELEASE.thrown = false;
     releaseLamp.material.color.setHex(0xff3b3b);

@@ -255,6 +255,10 @@
   if (CBZ.prisonDress && CBZ.prisonDress.floor) CBZ.prisonDress.floor(UB.x0, UB.x1, UB.z0, UB.z1, "slab", 0x8e9296);
   else addBox((UB.x0 + UB.x1) / 2, 0.02, (UB.z0 + UB.z1) / 2, UB.x1 - UB.x0, 0.08, UB.z1 - UB.z0, 0x6a6f78, { cast: false });
   addBox(-35.5, (3.0 + UB.h) / 2, UB.z1, 3.0, UB.h - 3.0, 0.5, WALL, { cast: false });
+  // the unit's door (the opening was a bare 3 m hole): a framed pair of
+  // steel leaves hooked back inside the unit, clear of the bunk rows
+  if (CK.doorSet) CK.doorSet({ axis: "x", a0: -37.0, a1: -34.0, fixed: UB.z1, t: 0.5, h: 3.0, y0: 0.06,
+    open: -1, hinge: 0, max: 1.0, build: CK.steelLeaf(0x4f5d6b) }).set(1);
   if (CBZ.prisonRoof) CBZ.prisonRoof({ id: "unit-b", x0: UB.x0, x1: UB.x1, z0: UB.z0, z1: UB.z1, top: UB.h, over: 0.25, cast: true });
   CK.lining(UB.x0 + 0.25, UB.x0 + 0.31, UB.z0 + 0.25, UB.z1 - 0.25, 3.6);
   CK.lining(UB.x1 - 0.31, UB.x1 - 0.25, UB.z0 + 0.25, UB.z1 - 0.25, 3.6);

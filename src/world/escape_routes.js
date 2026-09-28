@@ -9,12 +9,10 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || !CBZ.scene || !CBZ.addBox) return;
+  if (!CBZ || !CBZ.scene) return;
   const THREE = window.THREE;
-  const { addBox } = CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
   const K = CBZ.prisonKit || null;
-  const skin = (m, kind, tint) => { if (K && m) { m.material = K.skin(kind, tint); } return m; };
 
   CBZ.vents = CBZ.vents || [];
   CBZ.altExitZones = CBZ.altExitZones || [];
@@ -44,18 +42,26 @@
     return mesh;
   }
 
-  /* opts.grate: the bars are a real, cuttable grate (systems/escapeplan.js
-     owns the cut). They are flagged dynamic so core/batch.js never bakes them
-     into a static merge, which would leave a cut grate still drawn shut. */
-  /* A FLOOR HATCH IS FLUSH WITH THE FLOOR. It was a 22 cm stack — an 11 cm
-     curb, a plate on it and a grid of bars standing on the plate — which read
-     as a crate lid lying on the concrete. Now a steel curb frame 3 cm proud,
-     the plate inside it and the bars as a grating in the plate's own plane.
-     `opts.size` scales it (a hatch inside a cell is not a yard culvert);
-     `opts.floor` is the surface it is set into (the ditch slab is 7 cm). */
-  /* Materials are the kit's (2026-09-28): a galvanised curb angle, a
-     steel plate (open GRATING where the hatch is a drain), black bearing
-     bars. They were flat colours, and the culvert mouth's plate was lime. */
+  /* A FLOOR HATCH IS FLUSH WITH THE FLOOR: a galvanised curb angle 3 cm
+     proud, and inside it the LID, a steel plate (open grating where the
+     hatch is a drain) with black bearing bars, screwed down at its four
+     corners. `opts.size` scales it (a hatch inside a cell is not a yard
+     culvert); `opts.floor` is the surface it is set into (the ditch slab is
+     7 cm).
+     THE LID COMES OFF (2026-09-28). It is one group now, not addBox pieces
+     batch.js bakes into the floor: systems/interactions.js unscrews it (or
+     prises it up by hand) and it is slid off onto the floor beside the curb,
+     leaving the black shaft. vent.cover = {open, set(v)}; vent.mouth =
+     {kind:"floor"} tells the crawl to lower the body into it.
+     opts.grate: the culvert's WELDED grate (systems/escapeplan.js owns the
+     cut): no screws, no cover, its bars go and the shaft shows when cut. */
+  const HATCH = {
+    curb: K ? K.skin("galv", 0x8e959c) : CBZ.cmat(0x8e959c),
+    bar: K ? K.skin("steel", 0x24282d) : CBZ.cmat(0x24282d),
+    grating: K ? K.skin("grating", 0x6b737c) : CBZ.cmat(0x6b737c),
+    screw: K ? K.skin("galv", 0xb4bcc4) : CBZ.cmat(0xb4bcc4),
+    hole: new THREE.MeshBasicMaterial({ color: 0x050607 }),
+  };
   function floorHatch(x, z, name, accent, opts) {
     const k = (opts && opts.size ? opts.size : 1.75) / 1.75, f = (opts && opts.floor) || 0;
     const drain = !!(opts && (opts.grate || opts.drain));
@@ -64,25 +70,38 @@
       CBZ.vents.push(v);
       return v;
     }
-    skin(addBox(x, f + 0.015, z, 1.75 * k, 0.03, 1.75 * k, 0x26313a, { cast: false }), "galv", 0x8e959c);
-    const plate = skin(addBox(x, f + 0.035, z, 1.45 * k, 0.012, 1.45 * k, accent || 0x515a66, { cast: false }),
-      drain ? "grating" : "steel", drain ? 0x6b737c : (accent || 0x515a66));
+    // the curb: four galvanised angles round the opening (static, merged)
+    const C = 1.75 * k, cw = 0.15 * k;
+    for (const s of [-1, 1]) {
+      const a = new THREE.Mesh(new THREE.BoxGeometry(C, 0.03, cw), HATCH.curb); a.position.set(x, f + 0.015, z + s * (C - cw) / 2); a.receiveShadow = true; scene.add(a);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(cw, 0.03, C - 2 * cw), HATCH.curb); b.position.set(x + s * (C - cw) / 2, f + 0.015, z); b.receiveShadow = true; scene.add(b);
+    }
+    // the shaft under the lid: black, a hair above the floor inside the curb
+    const hole = new THREE.Mesh(new THREE.PlaneGeometry(C - 2 * cw, C - 2 * cw), HATCH.hole);
+    hole.rotation.x = -Math.PI / 2;
+    hole.position.set(x, f + 0.006, z);
+    hole.visible = false;
+    hole.userData.dynamic = true;
+    scene.add(hole);
+    // THE LID, one group: the plate, the bearing bars, four corner screws
+    const lid = new THREE.Group();
+    lid.position.set(x, f, z);
+    lid.userData.dynamic = true;
+    const lm = (geo, mat, lx, ly, lz) => { const m = new THREE.Mesh(geo, mat); m.position.set(lx, ly, lz); m.receiveShadow = true; m.userData.dynamic = true; lid.add(m); return m; };
+    const plateMat = drain ? HATCH.grating : (K ? K.skin("steel", accent || 0x515a66) : CBZ.cmat(accent || 0x515a66));
+    const plate = lm(new THREE.BoxGeometry(1.45 * k, 0.012, 1.45 * k), plateMat, 0, 0.035, 0);
     const bars = [];
     for (let i = -2; i <= 2; i++) {
-      bars.push(skin(addBox(x + i * 0.26 * k, f + 0.045, z, 0.05 * k, 0.012, 1.3 * k, 0x11171c, { cast: false }), "steel", 0x24282d));
-      bars.push(skin(addBox(x, f + 0.047, z + i * 0.26 * k, 1.3 * k, 0.012, 0.04 * k, 0x11171c, { cast: false }), "steel", 0x24282d));
+      bars.push(lm(new THREE.BoxGeometry(0.05 * k, 0.012, 1.3 * k), HATCH.bar, i * 0.26 * k, 0.045, 0));
+      bars.push(lm(new THREE.BoxGeometry(1.3 * k, 0.012, 0.04 * k), HATCH.bar, 0, 0.047, i * 0.26 * k));
     }
-    const vent = { x, z, y: 0.12, name, dest: null, route: true };
+    if (!(opts && opts.grate)) for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      lm(new THREE.CylinderGeometry(0.012, 0.012, 0.008, 8), HATCH.screw, sx * 0.66 * k, 0.045, sz * 0.66 * k);
+    }
+    scene.add(lid);
+    const vent = { x, z, y: 0.12, name, dest: null, route: true,
+      mouth: { kind: "floor", x: x, z: z, y: f, size: C - 2 * cw, off: (opts && opts.off) || null } };   // off: the side you climb out and step off to
     if (opts && opts.grate) {
-      for (const b of bars) if (b) b.userData.dynamic = true;
-      if (plate) plate.userData.dynamic = true;
-      // the open shaft under a cut grate: black, a hair above the plate
-      const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.2 * k, 1.2 * k), new THREE.MeshBasicMaterial({ color: 0x050607 }));
-      hole.rotation.x = -Math.PI / 2;
-      hole.position.set(x, f + 0.043, z);
-      hole.visible = false;
-      hole.userData.dynamic = true;
-      scene.add(hole);
       vent.grate = {
         cut: false,
         set: function (cut) {
@@ -90,10 +109,22 @@
           for (let i = 0; i < bars.length; i++) {
             // a cut grate keeps its two outer rails: the frame, not the bars
             const edge = i === 0 || i === 1 || i === bars.length - 1 || i === bars.length - 2;
-            if (bars[i]) bars[i].visible = !cut || edge;
+            bars[i].visible = !cut || edge;
           }
-          if (plate) plate.visible = !cut;
+          plate.visible = !cut;
           hole.visible = !!cut;
+        },
+      };
+    } else {
+      // unscrewed: the lid is lifted off and laid on the floor beside the
+      // curb, turned a little, the way a man puts a heavy plate down
+      vent.cover = {
+        open: false,
+        set: function (v) {
+          this.open = !!v;
+          hole.visible = this.open;
+          if (this.open) { lid.position.set(x + C * 0.5 + 0.8 * k, f - 0.025, z + 0.15 * k); lid.rotation.y = 0.35; }
+          else { lid.position.set(x, f, z); lid.rotation.y = 0; }
         },
       };
     }
@@ -153,8 +184,12 @@
   // floor. At (-12.2, -38.2) and 1.75 m square it straddled the cell's barred
   // front, half in the cell and half in the aisle under the bars; a 0.9 m
   // access plate between the bunk's foot and the door sits wholly inside.
-  const cellCrawl = floorHatch(-12.2, -39.6, "Cell Utility Crawl", 0x6b7480, { size: 0.9 });
-  const yardDrainIn = floorHatch(-25.4, 10.5, "Yard Drainage Ditch", 0x4f6d75, { floor: 0.07, drain: true });
+  // The far end is the drain access in the mess hall's queue lane (the hall
+  // was built over the old drainage ditch; world/cafeteria.js lays its tables
+  // clear of it). It was named "Yard Drainage Ditch" from before the hall
+  // stood on it, and that is what the crawl's destination line said.
+  const cellCrawl = floorHatch(-12.2, -39.6, "Cell Utility Crawl", 0x6b7480, { size: 0.9, off: { x: 0, z: 1 } });
+  const yardDrainIn = floorHatch(-25.4, 10.5, "Mess Hall Drain", 0x4f6d75, { floor: 0.07, drain: true });
   cellCrawl.dest = yardDrainIn;
   yardDrainIn.dest = cellCrawl;
 
@@ -168,6 +203,8 @@
   // really cut before it counts.
   const yardCulvert = floorHatch(-25.2, 18.2, "Perimeter Culvert", 0x4f6d75, { grate: true, floor: 0.07 });
   const outerCulvert = floorHatch(-9, SZ + 3, "Outer Culvert Mouth", null, { hidden: true });
+  // the crawl comes out of the precast bore below (invert 22 cm under grade)
+  outerCulvert.mouth = { kind: "bore", x: -9, z: SZ + 2.2, nx: 0, nz: 1, y: 0.28, sill: -0.2 };   // the pipe lip
   yardCulvert.dest = outerCulvert;
   yardCulvert.culvert = true;
   outerCulvert.dest = yardCulvert;
@@ -216,31 +253,16 @@
     }
   })(-9, SZ + 0.5);
 
-  // ---- route 3: a ceiling service hatch that bypasses the checkpoint ----
-  const ceilingCell = floorHatch(11.6, -36.4, "Ceiling Service Hatch", 0x8b95a1);
-  const checkpointDrop = floorHatch(12.4, -5.4, "Checkpoint Ceiling Drop", 0x8b95a1);
-  ceilingCell.dest = checkpointDrop;
-  checkpointDrop.dest = ceilingCell;
-  // THE TWO CEILING PATCHES ARE GONE (PRISON_PROP_USE_V1). Route 3's two ends
-  // are drawn by floorHatch() on the line above: a 1.75 m grated hatch ON THE
-  // FLOOR, flush, with the CBZ.vents record — the thing the player
-  // actually crawls into — registered at y 0.12. These two boxes were 2.2 x
-  // 0.18 x 2.2 grey squares hung 6.5 m ABOVE those hatches, saying "ceiling"
-  // because the route is named "Ceiling Service Hatch", with nothing at that
-  // height to enter and no relationship to the grate you use. 0.871 m3 each:
-  // the single largest dead prop in the north yard and the second largest in
-  // the cell house. A grey square in the air is the definition of the thing
-  // this pass deletes.
-
-  // ---- route 4: cafeteria grease duct into the same ditch network ----
-  const kitchenDuct = floorHatch(-27.1, 19.2, "Kitchen Grease Duct", 0x6b6258, { floor: 0.07, drain: true });
-  const ditchService = floorHatch(-25.5, 25.3, "Drain Service Grate", 0x4f6d75, { drain: true });
-  kitchenDuct.dest = ditchService;
-  ditchService.dest = kitchenDuct;
-  // (2026-09-28) Deleted: a 0.44 m "grease duct" hung in mid-air 2.6 m up
-  // inside the mess hall, running out through its south wall, and a yellow
-  // "MAINT" plaque glowing 5 cm inside the hall's west wall. The route is the
-  // floor drain above; the plaque was the game labelling itself.
+  // ROUTES 3 AND 4 ARE GONE (2026-09-28, "delete any vent that is not at a
+  // real vent"). Route 3 was a "Ceiling Service Hatch" drawn as a 1.75 m
+  // grating ON THE FLOOR of the cell house cross-aisle, paired with a
+  // "Checkpoint Ceiling Drop" that was another floor grating in the yard:
+  // a ceiling you walked on, doing what the cell wing's west-wall grille (the
+  // armory duct, world/ventilation.js T1) already does. Route 4 was a
+  // "Kitchen Grease Duct" as a floor drain in the dining room paired with a
+  // "Drain Service Grate" six metres away in the yard: a crawl from one side
+  // of the mess hall's door to the other. The mess hall keeps its two real
+  // return-air grilles and its drain; the culvert keeps its welded grate.
 
   // "Extra yard detail that makes routes legible from the camera" — DELETED
   // (PRISON_PROP_USE_V1). Fourteen 3.3 m sticks, 12 cm square, bolted 5.2 m up

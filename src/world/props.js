@@ -122,64 +122,98 @@
     K.stat(new THREE.CylinderGeometry(0.018, 0.018, 1.8, 8), bar, px, 2.4, pz, { rx: Math.PI / 2, cast: false });
   })(-22, 32);
 
-  /* ---- THE ELECTRICAL DISTRIBUTION PANEL in the officer's post ----------
-     It was a grey slab with a green glowing square, a yellow box and a latch
-     box, hung at x -3.5: INSIDE the staff doorway to the admin wing
-     (world/cellblock.js's CBZ.cellblockStaffGap, x[-4.2,-2.2]), floating in
-     the opening. Now a real surface-mount board on the duty board panel east
-     of the key cabinet: a steel cabinet with a hinged door (two hinge
-     barrels, a quarter-turn handle), a louvre, the hazard label, a pilot
-     lamp in a bezel, and two conduits running from its top to the tier slab
-     overhead (3.6 m). CBZ.breaker keeps its fields: `box` is the cabinet,
-     `light` the pilot lens with its OWN material (systems/interactions.js
-     and systems/state.js write its color + emissive). */
+  /* ---- THE CELL HOUSE LIGHTING PANEL, in the utility chase -------------
+     OWNER (2026-09-28, at the officer's post): "there's literally the power
+     thing right there." It had been a grey slab with a glowing green square
+     floating in the staff doorway, then a panel bolted to the duty board
+     beside the officer's desk. Neither is where a building keeps its power:
+     a cell house's lighting board lives in the services chase, with the mop
+     sink and the return-air grille. world/cellblock.js leaves exactly that
+     room in the west row (the utility alcove, x[-15.5,-11.7] z[-34.5,-30.9]),
+     open to the aisle and never lockable, so an inmate can reach it, but in
+     full view of the flats while he does.
+     Mounted on the alcove's south partition face (z -34.5, facing +z), front
+     half of the bay, clear of the mop basin (x[-14,-13.2]) and the grille
+     crawl (-14.15,-32.2): a steel NEMA cabinet with a HINGED door on two
+     barrels, a quarter-turn latch, the hazard label, the pilot lamp on the
+     door, and behind the door a dead-front with two columns of branch
+     breakers and the main handle. Two EMT conduits run from knockouts in its
+     top up to the tier slab at 3.6 m with couplings and straps.
+     Throwing the main (CBZ.prisonSabotagePower) swings the door open; it
+     shuts again when the power comes back (CBZ.breaker.setOpen). CBZ.breaker
+     keeps its fields: `box` is the cabinet, `light` the lens with its OWN
+     material (systems/interactions.js and systems/state.js write it). */
   (function breakerBox() {
-    const bx = 3.2, face = -43.14, by = 1.5;        // the duty board's front face (cellblock officerPost)
-    const W = 0.6, H = 0.9, D = 0.2, bz = face + D / 2;
-    const grey = K ? K.skin("steel", 0x9aa0a4) : null, dark = K ? K.skin("steel", 0x2b2f34, 0.6) : null;
-    const galv = K ? K.skin("galv", 0xb4bcc4) : null;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), grey || CBZ.mat(0x9aa0a4));
-    body.position.set(bx, by, bz); body.castShadow = true; body.receiveShadow = true;
+    const bx = -12.6, wallZ = -34.5, by = 1.45;     // cellblock WEST_ROW "util" bay, south partition face
+    const W = 0.56, H = 0.82, D = 0.16, bz = wallZ + D / 2, fz = wallZ + D;
+    const grey = K ? K.skin("steel", 0x8f969c) : CBZ.mat(0x8f969c), dark = K ? K.skin("steel", 0x24282d, 0.6) : CBZ.mat(0x24282d);
+    const galv = K ? K.skin("galv", 0xb4bcc4) : CBZ.mat(0xb4bcc4), dead = K ? K.skin("steel", 0x6e757c, 0.5) : CBZ.mat(0x6e757c);
+    const put = (geo, mat, x, y, z, o) => {
+      if (K) return K.stat(geo, mat, x, y, z, o || { cast: false });
+      const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); ROOT.add(m); return m;
+    };
+    // the cabinet: five sheet-steel walls (open front) so the door opening
+    // shows the inside, not a solid block
+    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.012), grey);          // back pan
+    body.position.set(bx, by, wallZ + 0.006); body.receiveShadow = true;
     ROOT.add(body);
-    // pilot lamp: a chrome bezel and a 36 mm lens. Private material.
-    const lampMat = new THREE.MeshLambertMaterial({ color: 0x39ff88, emissive: 0x14c258, emissiveIntensity: 1.0 });
-    const light = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.02, 14), lampMat);
-    light.rotation.x = Math.PI / 2;
-    light.position.set(bx + 0.18, by + 0.34, face + D + 0.028);
-    light.userData.dynamic = true;
-    ROOT.add(light);
-    if (K) {
-      const fz = face + D;                          // cabinet front
-      // the door: a slab 12 mm proud with a dark 4 mm shadow gap round it
-      K.stat(new THREE.BoxGeometry(W - 0.03, H - 0.03, 0.006), dark, bx, by, fz + 0.003, { cast: false });
-      K.stat(new THREE.BoxGeometry(W - 0.04, H - 0.04, 0.014), grey, bx, by, fz + 0.009, { cast: false });
-      for (const hy of [0.3, -0.3]) K.stat(new THREE.CylinderGeometry(0.009, 0.009, 0.08, 8), galv, bx - W / 2 + 0.006, by + hy, fz + 0.01, { cast: false });
-      // quarter-turn handle
-      K.stat(new THREE.CylinderGeometry(0.02, 0.02, 0.02, 12), dark, bx + W / 2 - 0.06, by, fz + 0.026, { rx: Math.PI / 2, cast: false });
-      K.stat(new THREE.BoxGeometry(0.018, 0.09, 0.016), dark, bx + W / 2 - 0.06, by - 0.03, fz + 0.04, { cast: false });
-      // louvre: a dark recess with six angled blades across the lower door
-      K.stat(new THREE.PlaneGeometry(0.34, 0.16), dark, bx - 0.04, by - 0.3, fz + 0.0165, { cast: false });
-      for (let i = 0; i < 6; i++) K.stat(new THREE.BoxGeometry(0.34, 0.024, 0.004), grey, bx - 0.04, by - 0.37 + i * 0.028, fz + 0.02, { rx: -0.6, cast: false });
-      // bezel for the pilot lamp
-      K.stat(new THREE.CylinderGeometry(0.026, 0.026, 0.014, 16), galv, bx + 0.18, by + 0.34, fz + 0.022, { rx: Math.PI / 2, cast: false });
-      // the hazard label: the standard yellow triangle and bolt, no words
-      K.stat(new THREE.PlaneGeometry(0.12, 0.105), hazardMat(), bx - 0.02, by + 0.2, fz + 0.0165, { cast: false });
-      // conduits: two EMT runs from knockouts in the top to the slab, with
-      // their couplings and one-hole straps back to the board
-      for (const cx of [bx - 0.14, bx + 0.1]) {
-        K.stat(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 12), dark, cx, by + H / 2 + 0.02, bz, { cast: false });   // connector
-        K.tube(cx, by + H / 2 + 0.04, bz, cx, 3.6, bz, 0.018, galv, { cast: false, seg: 10 });
-        for (const sy of [2.3, 2.85]) K.stat(new THREE.BoxGeometry(0.05, 0.022, 0.12), galv, cx, sy, bz - 0.04, { cast: false });
-        K.stat(new THREE.CylinderGeometry(0.023, 0.023, 0.04, 10), galv, cx, 3.2, bz, { cast: false });                // coupling
-      }
+    put(new THREE.BoxGeometry(0.012, H, D), grey, bx - W / 2 + 0.006, by, bz);
+    put(new THREE.BoxGeometry(0.012, H, D), grey, bx + W / 2 - 0.006, by, bz);
+    put(new THREE.BoxGeometry(W, 0.012, D), grey, bx, by + H / 2 - 0.006, bz);
+    put(new THREE.BoxGeometry(W, 0.012, D), grey, bx, by - H / 2 + 0.006, bz);
+    // inside: the dead-front plate, two columns of branch breakers, the main
+    put(new THREE.BoxGeometry(W - 0.06, H - 0.08, 0.006), dead, bx, by, fz - 0.05);
+    for (let r = 0; r < 8; r++) for (const c of [-1, 1]) {
+      const y = by - 0.26 + r * 0.055;
+      put(new THREE.BoxGeometry(0.1, 0.04, 0.03), dark, bx + c * 0.09, y, fz - 0.04);
+      put(new THREE.BoxGeometry(0.014, 0.024, 0.02), galv, bx + c * 0.09 + c * 0.02, y, fz - 0.018);   // the toggle
     }
+    put(new THREE.BoxGeometry(0.2, 0.1, 0.04), dark, bx, by + 0.28, fz - 0.04);      // main breaker
+    put(new THREE.BoxGeometry(0.03, 0.07, 0.03), K ? K.skin("steel", 0x9a2a22, 0.5) : dark, bx, by + 0.3, fz - 0.012);
+    put(new THREE.BoxGeometry(0.015, H - 0.12, 0.02), galv, bx, by - 0.02, fz - 0.06);   // neutral bus
+    // THE DOOR: hinged on its west edge. A group pivoting on the hinge line,
+    // dynamic (core/batch.js leaves it alone) because it swings.
+    const door = new THREE.Group();
+    door.position.set(bx - W / 2, by, fz);
+    door.userData.dynamic = true;
+    const dm = (geo, mat, x, y, z, rx) => {
+      const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); if (rx) m.rotation.x = rx;
+      m.userData.dynamic = true; door.add(m); return m;
+    };
+    dm(new THREE.BoxGeometry(W - 0.004, H - 0.004, 0.014), grey, W / 2, 0, 0.007).castShadow = true;
+    dm(new THREE.CylinderGeometry(0.02, 0.02, 0.02, 12), dark, W - 0.06, 0, 0.024, Math.PI / 2);   // latch boss
+    dm(new THREE.BoxGeometry(0.018, 0.09, 0.014), dark, W - 0.06, -0.03, 0.036);                  // quarter-turn handle
+    dm(new THREE.PlaneGeometry(0.12, 0.105), hazardMat(), W / 2 - 0.02, 0.2, 0.0145);
+    dm(new THREE.CylinderGeometry(0.026, 0.026, 0.012, 16), galv, W / 2 + 0.18, 0.32, 0.02, Math.PI / 2);   // lamp bezel
+    const lampMat = new THREE.MeshLambertMaterial({ color: 0x39ff88, emissive: 0x14c258, emissiveIntensity: 1.0 });
+    const light = dm(new THREE.CylinderGeometry(0.017, 0.017, 0.012, 14), lampMat, W / 2 + 0.18, 0.32, 0.028, Math.PI / 2);
+    ROOT.add(door);
+    for (const hy of [0.28, -0.28]) put(new THREE.CylinderGeometry(0.009, 0.009, 0.08, 8), galv, bx - W / 2 - 0.004, by + hy, fz + 0.004);
+    // conduits: two EMT runs from knockouts in the top to the tier slab
+    for (const cx of [bx - 0.14, bx + 0.12]) {
+      put(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 12), dark, cx, by + H / 2 + 0.02, bz - 0.02);
+      if (K) K.tube(cx, by + H / 2 + 0.04, bz - 0.02, cx, 3.6, bz - 0.02, 0.018, galv, { cast: false, seg: 10 });
+      for (const sy of [2.35, 3.1]) put(new THREE.BoxGeometry(0.05, 0.022, 0.07), galv, cx, sy, wallZ + 0.035);
+      put(new THREE.CylinderGeometry(0.023, 0.023, 0.04, 10), galv, cx, 2.75, bz - 0.02);
+    }
+    let open = 0;
     CBZ.breaker = {
       box: body,
       light,
+      door,
       sabotaged: false,
       timer: 0,
       x: bx,
-      z: face + 0.7, // the spot you stand on to throw it
+      z: fz + 0.62,                     // the spot you stand on to throw it
+      face: { x: bx, y: by, z: fz },    // where the verb hangs
+      // the door swings 105 degrees out on its hinge (about +y, west edge)
+      setOpen: function (v) {
+        const want = v ? 1 : 0;
+        if (want === open) return;
+        open = want;
+        door.rotation.y = -want * 1.83;
+      },
+      isOpen: function () { return !!open; },
     };
   })();
   function hazardMat() {

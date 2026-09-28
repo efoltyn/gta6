@@ -1050,6 +1050,13 @@
   addBox(-19, 4.45, 14, 0.5, 3.1, 3.4, 0x8a929c, { cast: false });
   addBox(-19.3, 2.88, 14, 0.14, 0.16, 3.5, 0x6b7480, { cast: false });   // inside lintel nose
   addBox(-18.7, 2.88, 14, 0.14, 0.16, 3.5, 0x6b7480, { cast: false });   // yard-side nose
+  // and a DOOR in it (it was a 3.4 m hole): a framed pair of steel leaves
+  // with vision panels, hooked back against the yard face for the day's
+  // traffic (world/corridorkit.js's door set; nothing here is a collider)
+  if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
+    CBZ.corridorKit.doorSet({ axis: "z", a0: 12.3, a1: 15.7, fixed: -19, t: 0.5, h: 2.8, y0: 0.06,
+      open: -1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+  }
   PD.lamp(-18.69, 3.4, 16.9, "x+");                                       // over the door, outside
   PD.extinguisher(-19.42, 1.1, 17.6, "x-");
   PD.hoseCab(-19.45, 1.6, 10.4, "x-");
