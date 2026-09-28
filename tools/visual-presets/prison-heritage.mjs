@@ -8,7 +8,7 @@
    crowd all exist exactly as in play), freezes the rAF loop, then photographs
    two things:
 
-     THE LINEUP (studio pages) — for each of the ten heritages in
+     THE LINEUP (studio pages) — for each of the sixteen heritages in
      entities/heritage.js, four men rolled from that heritage's own tables,
      built with CBZ.makeCharacter and dressed through the SAME
      CBZ.cityRecolorRig seam systems/prisonoutfits.js uses on the yard. They
@@ -24,9 +24,13 @@
    hair, no ink, every man in the zipped coverall. That IS the before. */
 
 const HER = [
-  ["black", "Black"], ["white", "White"], ["skinhead", "White-power crew"], ["latino", "Latino"],
-  ["eastasian", "East Asian"], ["southasian", "South Asian (Indian)"], ["mideast", "Middle Eastern"],
-  ["native", "Native American"], ["islander", "Pacific Islander"], ["easteuro", "Eastern European"],
+  ["black", "Black"], ["caribbean", "Afro-Caribbean"],
+  ["white", "White"], ["easteuro", "Eastern European"],
+  ["latino", "Mexican-American"], ["centralam", "Central American"], ["carlatino", "Caribbean Latino"],
+  ["mexican", "Mexican national (Paisa)"],
+  ["eastasian", "East Asian"], ["seasian", "Southeast Asian"], ["filipino", "Filipino"],
+  ["native", "Native American"], ["islander", "Pacific Islander"], ["mideast", "Middle Eastern"],
+  ["southasian", "South Asian"], ["mixed", "Mixed race"],
 ];
 
 const subjects = [];
@@ -37,15 +41,19 @@ for (const [id, name] of HER) {
   });
 }
 subjects.push(
-  { id: "ink-skinhead-head", label: "White-power crew — head and neck ink, close", studio: true, heritage: "skinhead", count: 2, view: "head",
-    over: { bald: true, ink: "skinhead", tank: true, beard: "goatee" },
-    focus: "The heaviest set in the game at conversational range: the throat block with script through it, the mark under the eye, temple bars and the bolt behind the ear, the nape crest. Shaved head, goatee, tank." },
-  { id: "ink-skinhead-arms", label: "White-power crew — the blackwork sleeve", studio: true, heritage: "skinhead", count: 2, view: "arms",
-    over: { ink: "skinhead", tank: true },
+  { id: "ink-blackwork-head", label: "White car: blackwork, head and neck, close", studio: true, heritage: "white", count: 2, view: "head",
+    over: { bald: true, ink: "blackwork", tank: true, beard: "goatee" },
+    focus: "The heaviest generic set at conversational range: the throat block with script reversed out of it, the mark under the eye, temple bars, a web behind the ear, the nape block. Shaved head, goatee, tank." },
+  { id: "ink-blackwork-arms", label: "White car: the blackwork sleeve", studio: true, heritage: "white", count: 2, view: "arms",
+    over: { ink: "blackwork", tank: true },
     focus: "Both arms bare: solid bands, the elbow web, the wrist block. The ink lives in the shared clothes atlas keyed by skin + ink set, so it costs one canvas per combination, not one per man." },
-  { id: "ink-latino-arms", label: "Latino — chicano script, teardrop, three dots", studio: true, heritage: "latino", count: 2, view: "arms",
+  { id: "ink-latino-arms", label: "Mexican-American: fine-line portrait block, script, three dots", studio: true, heritage: "latino", count: 2, view: "arms",
     over: { ink: "chicano", tank: true, hairStyle: "buzz", bald: false, beard: "goatee" },
-    focus: "Fine script down the forearm, a motif high on the upper arm, throat script, three dots by the eye." },
+    focus: "Black-and-grey fine line: a framed portrait block high on the arm, script down the forearm, throat script, three dots by the eye." },
+  { id: "ink-black-paisa", label: "Black car block lettering · Paisa sparse ink", studio: true, mixed: [["black", { ink: "block", tank: true }], ["mexican", { ink: "paisa", tank: true, beard: "moustache" }]], count: 2, view: "arms",
+    focus: "Block lettering across the forearm and a knuckle row on the left; one small name line and nothing on the face on the right." },
+  { id: "ink-asian", label: "Asian car: wave sleeve · yant rows · batok chevrons", studio: true, mixed: [["eastasian", { ink: "sleeve", tank: true }], ["seasian", { ink: "yant", tank: true }], ["filipino", { ink: "batok", tank: true }]], count: 3, view: "arms",
+    focus: "Three ink cultures inside one car: irezumi-style waves shoulder to wrist, rows of fine dotted script on the upper arm, geometric chevron bands." },
   { id: "ink-islander-vory", label: "Islander tribal bands · Eastern European stars", studio: true, mixed: [["islander", { ink: "tribal", tank: true }], ["easteuro", { ink: "vory", tank: true, bald: true }]], count: 2, view: "arms",
     focus: "Two more ink cultures side by side: thick curved Polynesian bands on the left; the shoulder star and forearm rings of the Russian prison tradition on the right." },
   { id: "yard-live", label: "The yard — the live population, mustered", studio: false,
@@ -291,10 +299,10 @@ export async function stageHeritage(input) {
 
 export default {
   id: "prison-heritage",
-  title: "Prison: who is in the yard — ten heritages",
-  description: "Ten heritages, four men each, built and dressed through the live wardrobe; ink close-ups; then the real north yard crowd. The before side is the old eight-tint roll with no facial hair and no ink.",
+  title: "Prison: who is in the yard — sixteen heritages",
+  description: "Sixteen heritages, four men each, built and dressed through the live wardrobe; ink close-ups; then the real north yard crowd. The before side is the old eight-tint roll with no facial hair and no ink.",
   beforeLabel: "BEFORE · one palette",
-  afterLabel: "AFTER · ten heritages",
+  afterLabel: "AFTER · sixteen heritages",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
