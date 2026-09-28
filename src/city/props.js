@@ -566,6 +566,7 @@
     ["gov:security-bollard", "fixed", "32, and the PITCH was solved too. 3.4 m let a car through the Capitol line"],
     ["annex:cooler/snack-rack/parts-shelf", "fixed", "free-standing, in rooms with no walls to cover them"],
     ["town:welcome-sign", "fixed", "the INVERSE fault: an 11 m solid wall filling the gap between two posts"],
+    ["gov/military:watchtower-deck-rail", "fixed", "a climbable ladder (world/ladderkit.js + systems/climb.js) and height-gated rail colliders with a gap at its head"],
     // ---- already solid before this pass (spot-checked, not re-listed in full)
     ["military:perimeter-fence", "solid", "island_military.js col() runs the full 2.4 m edge, split around gates"],
     ["venue:perimeter-fence", "solid", "speedway_structures fence() flushes contiguous AABBs; colliderPitch is BOX LENGTH, not spacing"],
@@ -589,7 +590,6 @@
     ["facade:fire-escape-drop-ladder", "bare", "hangs into 0.7-3.4 m body height, ~100 of them; a 1.25 m collider off a wall risks blocking the pavement it overhangs, needs a measured footprint, not a guess"],
     ["gov:perimeter-GATE-opening", "bare", "7 complexes have a 16-24 m gap with no gate leaf at all; that is a missing OBJECT, not a missing collider"],
     ["gov:hedge", "bare", "99 x 4.4-5.4 m parterres; hedges are the one class this pass deliberately did not decide"],
-    ["gov:watchtower-deck-rail", "bare", "deck is unreachable (no ladder) AND unfenced, fix the ladder first"],
     ["bunker:ammo-crate-stack", "bare", "the single missing col() in an otherwise complete file"],
     ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up, but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
     ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],

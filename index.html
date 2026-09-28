@@ -515,6 +515,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=dsl3"></script>
+<!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
+     off the same numbers systems/climb.js climbs, + railed landings. Every
+     tower ladder in every game is made here and registered with climb.js. -->
+<script src="src/world/ladderkit.js?v=lad1"></script>
 <script src="src/world/corridorkit.js?v=gate1"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
@@ -731,7 +735,7 @@ document.body.appendChild(b);}}catch(e){}})();
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
 <script src="src/world/prisonwings.js?v=dsl3"></script>
-<script src="src/world/prisongrounds.js?v=dsl3"></script>
+<script src="src/world/prisongrounds.js?v=lad1"></script>
 <script src="src/world/corridors.js?v=dsl3"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
@@ -814,6 +818,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
 <script src="src/systems/physics.js?v=vit3"></script>
+<!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
+<script src="src/systems/climb.js?v=lad1"></script>
+<!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
+<script src="src/entities/towerwatch.js?v=lad1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -1200,7 +1208,7 @@ document.body.appendChild(b);}}catch(e){}})();
      guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
      into systems/building.js's CATALOG. City-only; everything city-side is looked
      up lazily. -->
-<script src="src/city/compoundkit.js?v=cpd1"></script>
+<script src="src/city/compoundkit.js?v=lad1"></script>
 <!-- F7 — world/props.js migrated onto CBZ.spawnPiece (moved from the
      "2. world geometry" wave above, right after towers.js): it needs
      spawnPiece to exist at parse time. (world/crates.js, the five yard
@@ -1238,10 +1246,10 @@ document.body.appendChild(b);}}catch(e){}})();
      island_airport.js: it is what publishes CBZ.airportKit. -->
 <script src="src/city/airport_kit.js?v=deslop1"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
-<script src="src/city/island_military.js?v=flick1"></script>
-<script src="src/city/biome_desert.js?v=organicdesert9"></script>
+<script src="src/city/island_military.js?v=lad1"></script>
+<script src="src/city/biome_desert.js?v=lad1"></script>
 <script src="src/city/biome_forest.js?v=allmain1"></script>
-<script src="src/city/biome_farmland.js?v=nodash1"></script>
+<script src="src/city/biome_farmland.js?v=lad1"></script>
 <script src="src/city/biome_snow.js?v=nodash1"></script>
 <script src="src/city/snowboard.js?v=nodash1"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
@@ -1296,7 +1304,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=flick1"></script>
+<script src="src/city/props.js?v=lad1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=moves1"></script>
@@ -1327,7 +1335,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=vit3"></script>
+<script src="src/city/peds.js?v=lad1"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -2174,7 +2182,7 @@ document.body.appendChild(b);}}catch(e){}})();
      still bolt or put hands up through cityScare. After police, militia,
      checkpoints, citystaff and power: it posts bodies those files already
      cast. -->
-<script src="src/city/garrison.js?v=nodash1"></script>
+<script src="src/city/garrison.js?v=lad1"></script>
 <!-- FORT RESPONSE. A base that answers for itself: one alert bus rung from the
      two names every loud thing in the game already goes through (cityAlarm,
      cityCrime — installed as wraps, so no call site is edited), a section that
@@ -2219,7 +2227,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=pres3"></script>
+<script src="src/city/govcomplex.js?v=lad1"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2266,7 +2274,7 @@ document.body.appendChild(b);}}catch(e){}})();
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
 <script src="src/city/plots.js?v=onebet1"></script>
-<script src="src/city/compoundcrew.js?v=boom2"></script>
+<script src="src/city/compoundcrew.js?v=lad1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker

@@ -6844,6 +6844,16 @@
         p.group.visible = !p._spawnHidden && bx * bx + bz * bz < VIS_D2;
         continue;
       }
+      // A BODY ON A LADDER IS OWNED BY THE LADDER (systems/climb.js): it
+      // writes the transform and poses every limb on the rungs. Same contract.
+      if (p._climb) {
+        // the feet resample the floor the moment he steps off (a cached
+        // ground height from before the climb would drop him off the deck)
+        p._feetT = 0; p._feetY = null;
+        const lx = p.pos.x - camx, lz = p.pos.z - camz;
+        p.group.visible = !p._spawnHidden && lx * lx + lz * lz < VIS_D2;
+        continue;
+      }
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;
       // FAR-BAND STAGGER — see the flag comment above the updater. Runs after
       // the timer decrements (those stay full-rate/cheap) and before all

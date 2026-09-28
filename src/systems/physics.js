@@ -2029,6 +2029,13 @@
       return;
     }
 
+    // ON A LADDER (systems/climb.js): the climb owns the transform and the pose.
+    if (CBZ.climb && CBZ.climb.playerStep(dt)) {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
+      if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
+      return;
+    }
+
     // A strapped-in snowboard owns the player transform just like a vehicle.
     // The controller is installed by city/snowboard.js after this module.
     if (CBZ.citySnowboardStep && CBZ.citySnowboardStep(dt)) return;

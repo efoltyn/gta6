@@ -676,19 +676,40 @@
     if (_curSite) _bays.push({ site: _curSite, slots: slots, stalls: slots.length });
   }
 
-  // WATCHTOWER — legs, a deck you can actually stand on, a roof.
-  function watchtower(root, x, z, hex) {
+  // WATCHTOWER — legs, a deck you can actually stand on, a roof, and a caged
+  // ladder up the face toward the estate (world/ladderkit.js draws it,
+  // systems/climb.js climbs it). The deck was a platform nobody could reach
+  // (props.js's solidity ledger listed it: "deck is unreachable (no ladder)
+  // AND unfenced, fix the ladder first") on top of a solid 3.6 m column. Now
+  // the legs are the columns, and the waist-high rail is a collider with a
+  // gap where the ladder comes over. `inX`: the estate's centre x.
+  function watchtower(root, x, z, hex, inX) {
+    const DECK = 6.25, HW = 2.2;
+    const s = (inX == null ? x + 1 : inX) >= x ? 1 : -1;       // the ladder face, +x or -x
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       box(root, x + sx * 1.6, 3.0, z + sz * 1.6, 0.3, 6.0, 0.3, M.timber);
+      col(x + sx * 1.6, z + sz * 1.6, 0.34, 0.34, 0, 6.0);
     }
     box(root, x, 6.1, z, 4.4, 0.3, 4.4, hex || M.timber);
-    plat(x, z, 4.4, 4.4, 6.25);
-    for (const s of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-      box(root, x + s[0] * 2.1, 6.7, z + s[1] * 2.1, s[0] ? 0.2 : 4.4, 0.9, s[1] ? 0.2 : 4.4, hex || M.timber, { cast: false });
+    for (const f of [[0, -1], [0, 1], [-s, 0]]) {
+      box(root, x + f[0] * 2.1, 6.7, z + f[1] * 2.1, f[0] ? 0.2 : 4.4, 0.9, f[1] ? 0.2 : 4.4, hex || M.timber, { cast: false });
     }
+    // the ladder face: two lengths of parapet either side of the gap
+    for (const sz of [-1, 1]) box(root, x + s * 2.1, 6.7, z + sz * 1.31, 0.2, 0.9, 1.78, hex || M.timber, { cast: false });
     box(root, x, 8.5, z, 5.0, 0.24, 5.0, M.steelD);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(root, x + sx * 2.0, 7.6, z + sz * 2.0, 0.16, 1.6, 0.16, M.steelD);
-    col(x, z, 3.6, 3.6, 0, 6.0);
+    if (CBZ.ladderKit) {
+      CBZ.ladderKit.deck({
+        minX: x - HW, maxX: x + HW, minZ: z - HW, maxZ: z + HW, top: DECK, rail: 1.0,
+        gaps: [{ x: x + s * HW, z: z, w: 0.42 }],
+      });
+      CBZ.ladderKit.build(root, {
+        x: x + s * (HW + 0.05), z: z, nx: s, nz: 0, y0: 0, y1: DECK,
+        name: "watchtower", tag: "gov:watchtower", mode: "city",
+      }, cm(M.steelD));
+    } else {
+      plat(x, z, 4.4, 4.4, DECK);
+    }
   }
 
   function flagpole(root, x, z, h) {
@@ -1595,8 +1616,8 @@
         repeat(root, bg(9, 0.02, 0.6), M.paint, dash, function () { return YM; });
         cyl(root, cx - 96, 4.0, cz + 58, 0.12, 0.16, 8.0, M.steel, 8);
         box(root, cx - 93, 7.4, cz + 58, 4.4, 1.1, 0.06, M.warn, { cast: false });
-        watchtower(root, R.minX + 16, R.minZ + 16, M.timber);
-        watchtower(root, R.maxX - 16, R.minZ + 16, M.timber);
+        watchtower(root, R.minX + 16, R.minZ + 16, M.timber, cx);
+        watchtower(root, R.maxX - 16, R.minZ + 16, M.timber, cx);
         // the stock the money pretends to come from
         const hedge = [];
         for (let i = 0; i < 13; i++) hedge.push({ x: cx - 80 + i * 6.2, z: cz - 78 });
@@ -2050,7 +2071,7 @@
         // the same edge because all three read GZ.
         perimeter(root, R, { style: "fence", h: 3.4, hex: M.fence, gate: GZ > 0 ? 1 : 0, gateW: 18 });
         gatehouse(root, cx, Z(74), true, M.concreteD);
-        watchtower(root, R.minX + 16, Z(36), M.steelD);
+        watchtower(root, R.minX + 16, Z(36), M.steelD, cx);
         for (const p of [[R.minX + 14, R.minZ + 14], [R.maxX - 14, R.minZ + 14], [R.minX + 14, R.maxZ - 14], [R.maxX - 14, R.maxZ - 14]]) {
           floodMast(root, p[0], p[1], 11.0);
         }
