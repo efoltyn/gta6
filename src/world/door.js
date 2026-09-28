@@ -183,7 +183,8 @@
     col: function () { return door.collider; },
     isOpen: function () { return !!door.open; },
     permanent: function () { return !!door.blown; },
-    canUse: function () { return !!(CBZ.game && CBZ.game.hasKey); },
+    // the stolen card, or the officer's own keys (CBZ.prisonStaffKey)
+    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey && CBZ.prisonStaffKey()))); },
     set: function (v) {
       if (v) { CBZ.openDoor(); return !!door.open; }
       CBZ.closeDoor(true);

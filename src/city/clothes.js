@@ -3142,44 +3142,26 @@
   CBZ.cityClothesRepairRig = cityClothesRepairRig;
 
   // ============================================================
-  //  GANG BANDANA — a small MESH accessory (NOT painted canvas), worn at the
-  //  neck/forehead in the crew color. Pooled per rig (one mesh, reused) so
-  //  attaching it is draw-call-cheap and re-dressing never leaks materials.
+  //  GANG BANDANA — THE one gang headwear. A crew member wears a bandana
+  //  tied over the head in the crew's flag colour: entities/headwear.js's
+  //  "bandana" (a square fitted to the real skull, knot and two tails at the
+  //  back) on the lowest owner, so a cap, a helmet or a warlord's headgear
+  //  covers it and it shows again when they come off. bling.js used to draw
+  //  a second rag (a 0.68 box ring) for the same crews; it now calls this.
   //  CBZ.cityAttachBandana(ch, hex) — pass null/undefined hex to remove it.
+  //  ch._bandana is the worn group (null when bare) so callers can test it.
   // ============================================================
-  const bandanaGeo = (function () {              // built lazily (THREE may load late)
-    let g = null;
-    return function () {
-      if (!g && window.THREE) { g = new THREE.BoxGeometry(0.64, 0.13, 0.66); g._shared = true; }
-      return g;
-    };
-  })();
   function cmat(hex) { return CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex }); }
   function cityAttachBandana(ch, hex) {
-    if (!ch || !window.THREE) return null;
-    let b = ch._bandana;
-    if (hex == null) { if (b) b.visible = false; return b; }
-    const geo = bandanaGeo();
-    if (!b) {
-      // tied just below the hairline at the back of the head — rides the neck
-      // so it animates with the head turn for free. Its own cloned material so
-      // a per-rig recolor never bleeds onto the shared cache.
-      b = new THREE.Mesh(geo, cmat(hex).clone());
-      b.castShadow = false; b.receiveShadow = false;
-      b.position.set(0, 0.46, 0);                  // a forehead band wrapping the upper head
-      const host = ch.neck || ch.head || (ch.skinSlots && ch.skinSlots.head && ch.skinSlots.head[0]);
-      if (host && host.add) host.add(b); else if (ch.group) ch.group.add(b);
-      // a small knot tail trailing at the back
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.1), b.material);
-      tail.position.set(0.18, -0.04, -0.34); tail.rotation.z = 0.4; b.add(tail);
-      ch._bandana = b;
+    const HW = CBZ.headwear;
+    if (!ch || !HW) return null;
+    if (hex == null) {
+      HW.wear(ch, null, { owner: "bandana" });
+      ch._bandana = null;
+      return null;
     }
-    if (b.material && b.material.color && b.material.color.setHex) {
-      if (b.material._shared) b.material = b.material.clone();
-      b.material.color.setHex(hex);
-    }
-    b.visible = true;
-    return b;
+    ch._bandana = HW.wear(ch, "bandana", { owner: "bandana", color: hex }) || null;
+    return ch._bandana;
   }
   CBZ.cityAttachBandana = cityAttachBandana;
 

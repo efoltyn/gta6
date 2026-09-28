@@ -454,7 +454,7 @@
         const r = recFor(lot);
         respondToRob(lot, r, r.robs[r.robs.length - 1], "player", null);
       } else {
-        note("The teller float is caged — the real money is behind the vault door.", 2.6);
+        note("The drawer is caged.", 2);
       }
       return true;
     }
@@ -489,7 +489,7 @@
     // markGunpoint refuses vendors, which is why this call, not that one)
     if (v && armed && CBZ.citySurrender) CBZ.citySurrender(v, { hold: 6, pause: 1.2, alarmed: 6, fear: 9, toward: pa, panic: false });
     if (v && CBZ.cityRelShift) CBZ.cityRelShift(v, "robbed");
-    if (v && CBZ.citySay) CBZ.citySay(v, take > 0 ? "“Take it, take it and GO.”" : "“There's nothing IN it, man!”", "#ffb09b", 2.2);
+    if (v && CBZ.citySay) CBZ.citySay(v, take > 0 ? "Take it, take it and GO." : "There's nothing IN it, man!", "#ffb09b", 2.2);
 
     // heat + panic: the exact robTill consequence block (shops.js) — one rule.
     if (CBZ.cityCrime) CBZ.cityCrime(resisted ? 220 : (armed ? 170 : 90), { instant: armed, x: door.x, z: door.z, type: armed ? "store robbery" : "till grab" });
@@ -570,12 +570,12 @@
         note("" + (v.name || "The owner") + " won't be leaned on — and draws!", 2.6);
       } else if (rec.gang) {
         const nm = sideName(rec.gang);
-        if (v && CBZ.citySay) CBZ.citySay(v, "“The " + nm + " keep us safe. Walk away.”", "#cfe6ff", 2.6);
+        if (v && CBZ.citySay) CBZ.citySay(v, "The " + nm + " keep us safe. Walk away.", "#cfe6ff", 2.6);
         const gp = gangRec(rec.gang);
         if (gp && !gp.playerFriendly && CBZ.cityGangProvoke) CBZ.cityGangProvoke(gp.id, 0.3);
         rec.trust = clamp(rec.trust + 0.05, 0, 1);         // saying no and surviving PROVES the crew
       } else {
-        if (v && CBZ.citySay) CBZ.citySay(v, "“We don't pay. Get out.”", "#cfe6ff", 2.2);
+        if (v && CBZ.citySay) CBZ.citySay(v, "We don't pay. Get out.", "#cfe6ff", 2.2);
       }
       return true;
     }
@@ -589,7 +589,7 @@
     const trib = tributeOf(lot);
     // ONE line from the owner carries the whole arrangement — the price, the
     // drawer, the plea. No narrator explains a mechanic the man just agreed to.
-    if (v && CBZ.citySay) CBZ.citySay(v, "“…okay. Okay. " + money(trib) + " a day, it'll be in the drawer. Just keep the wolves off us.”", "#ffd9a8", 3.2);
+    if (v && CBZ.citySay) CBZ.citySay(v, "Okay. Okay. " + money(trib) + " a day.", "#ffd9a8", 3.2);
     big(prevGang ? ("TERRITORY TAKEN — " + storeName(lot)) : ("PROTECTION SIGNED — " + storeName(lot)));
     CBZ.city.addRespect(prevGang ? 8 : 4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -641,7 +641,7 @@
     const paid = (r && r.taken) | 0;
     const v = vendorOf(lot);
     if (paid <= 0) {
-      if (v && CBZ.citySay) CBZ.citySay(v, "“Drawer's light today. Come back after we trade.”", "#cfe6ff", 2.4);
+      if (v && CBZ.citySay) CBZ.citySay(v, "Slow day. Drawer's light.", "#cfe6ff", 2.4);
       else note("The drawer can't cover it today.", 2);
       return true;
     }
@@ -665,7 +665,7 @@
       big("PROTECTION COLLECTED +$" + paid);
     }
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (v && CBZ.citySay) CBZ.citySay(v, "“We're square. Keep the wolves off, yeah?”", "#cfe6ff", 2.2);
+    if (v && CBZ.citySay) CBZ.citySay(v, "We're square. Keep the wolves off, yeah?", "#cfe6ff", 2.2);
     return true;
   }
 
@@ -698,7 +698,7 @@
     // the boss takes the envelope in person when he's standing right there
     const boss = gp && gp.boss && !gp.boss.dead ? gp.boss : null;
     if (boss && CBZ.citySay && Math.hypot(boss.pos.x - P.pos.x, boss.pos.z - P.pos.z) < 14) {
-      CBZ.citySay(boss, "“$" + pay + ", all there. That buys you weight around here.”", "#ffd9a8", 2.8);
+      CBZ.citySay(boss, "$" + pay + ". All there.", "#ffd9a8", 2.8);
     } else {
       note("$" + pay + ", counted twice. The books remember who walks it in themselves.", 2.8, { from: bossNameOf(gid) });
     }
@@ -876,10 +876,10 @@
         v.nerve = Math.max(v.nerve || 0, 0.85);
         v.surrender = false; v.poseHandsUp = false; v.fear = 0;
         v.rage = playerActor() || null; v.state = "fight"; v.mem = playerActor() || null;
-        if (CBZ.citySay) CBZ.citySay(v, "“YOU. You robbed us " + when + ". I kept something under the counter since.”", "#ff9b8b", 3);
+        if (CBZ.citySay) CBZ.citySay(v, "YOU. You robbed us " + when + ".", "#ff9b8b", 3);
       } else {
         if (CBZ.citySurrender) CBZ.citySurrender(v, { hold: 4, pause: 1, fear: 10, toward: playerActor(), panic: false });
-        if (CBZ.citySay) CBZ.citySay(v, "“P-please. You cleaned us out " + when + ". Just… take what you want.”", "#ffd9a8", 3);
+        if (CBZ.citySay) CBZ.citySay(v, "P-please. Take what you want.", "#ffd9a8", 3);
         rec.fear = clamp(rec.fear + 0.05, 0, 1);   // terror compounds — extortion gets easier
       }
     }
@@ -927,28 +927,28 @@
       const when = (day - openRob.d) <= 0 ? "today" : (day - openRob.d) === 1 ? "yesterday" : (day - openRob.d) + " days back";
       const ped = openRob._ped && !openRob._ped.dead ? openRob._ped : null;
       if (ped && CBZ.cityMarkTarget) CBZ.cityMarkTarget(ped);
-      if (ped) return { say: "“" + who + " emptied my register " + when + " — " + money(openRob.c) + " — and NOBODY did a thing. He's still strutting around out there. Bring it back and I won't forget it.”" };
-      return { say: "“" + who + " took " + money(openRob.c) + " out of that drawer " + when + ". Long gone now. Nobody even chased him.”" };
+      if (ped) return { say: who + " robbed me " + when + ". He's still around." };
+      return { say: who + " robbed me " + when + ". Cops did nothing." };
     }
     // 2) squeezed by a crew they don't believe in
     if (rec.gang && !isPlayerSide(rec.gang) && rec.trust < 0.35) {
-      return { say: "“The " + sideName(rec.gang) + " bleed us " + money(tributeOf(lot)) + " a day and were NOWHERE when it mattered. Someone who actually kept us safe… we'd pay them instead.”" };
+      return { say: "We pay the " + sideName(rec.gang) + ". For what?" };
     }
     // 3) unprotected and scared
     if (!rec.gang && (rec.fear > 0.3 || unavengedCount(rec) > 0)) {
-      return { say: "“Every week somebody walks in with a piece. We'd pay for REAL protection — someone the street actually fears.”" };
+      return { say: "Every week somebody walks in with a gun." };
     }
     // 4) yours — the state of the arrangement, money included
     if (isPlayerSide(rec.gang)) {
-      if (rec.owed > 0) return { say: "“We're good. Your money's in the drawer — " + money(rec.owed) + ".”" };
-      return { say: "“Quiet week. That's what we pay for.”" };
+      if (rec.owed > 0) return { say: "Your money's in the drawer." };
+      return { say: "Quiet week. Thank God." };
     }
     // 5) protected and content — how content is readable in the phrasing
     if (rec.gang) {
-      if (rec.trust > 0.6) return { say: "“The " + sideName(rec.gang) + " look after us. Always have. We don't want trouble.”" };
-      return { say: "“The " + sideName(rec.gang) + " look after us. …Mostly. We don't want trouble.”" };
+      if (rec.trust > 0.6) return { say: "The " + sideName(rec.gang) + " look after us." };
+      return { say: "The " + sideName(rec.gang) + " look after us. Mostly." };
     }
-    return { say: "“Business is business. You buying?”" };
+    return { say: "Slow. Always slow. You buying?" };
   }
 
   // ============================================================

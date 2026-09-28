@@ -385,57 +385,20 @@
     const hs = P.headSize || 0.6, k = hs / 0.6;
     const cb = chestBox(rig), zF = chestZ(rig);
 
-    /* HEADWEAR. studio.cast("officer") builds the rig with a cap, and
-       character.js's `if (c.cap) {...} else {hair}` means such a rig has NO
-       HAIR MESH AT ALL. So the engine cap is always hidden here and this file
-       draws every hat itself (the engine one is a crown box plus a slab brim
-       — it cannot be a beret or a shemagh), and a bare-headed fit on a
-       cap-built rig gets a cropped hair shell so the warlord is not bald in a
-       suit and haired in the preview. */
-    if (rig.skinSlots) {
-      const caps = rig.skinSlots.cap || [];
-      for (let i = 0; i < caps.length; i++) if (caps[i]) caps[i].visible = false;
-      /* A BARE HEAD ON A CAP-BUILT RIG IS A BALD HEAD. character.js branches
-         `if (c.cap) {...} else {hair}` at BUILD time, and studio.cast's
-         `officer` row passes a cap — so the player's rig has two cap boxes
-         and no hair mesh at all, and hiding the cap for the black suit leaves
-         a bald man. outfits.js's headwear only toggles the hair it finds, so
-         when there is none this draws a cropped shell: two boxes, cached
-         geometry, and the warlord keeps his head. */
-      const hair = rig.skinSlots.hair || [];
-      const bare = !K.head;
-      for (let i = 0; i < hair.length; i++) if (hair[i]) hair[i].visible = bare;
-      if (bare && !hair.length && neck) {
-        const hairHex = K.hair != null ? K.hair : 0x1b1712;
-        const sh = box(hs * 1.03, hs * 0.30, hs * 1.02, hairHex);
-        sh.position.set(0, hs * 0.90, -hs * 0.02);
-        add(neck, sh);
-        const nape = box(hs * 0.95, hs * 0.34, hs * 0.18, hairHex);
-        nape.position.set(0, hs * 0.60, -hs * 0.45);
-        add(neck, nape);
-      }
-    }
+    /* HEADWEAR is entities/headwear.js's (CBZ.headwear), on the real head,
+       with the hair kept and compressed under it. The engine cap a
+       studio.cast("officer") rig was built with is the "outfit" owner and is
+       taken off here; outfits.js dresses every SIB_HEAD hat as the "warlord"
+       owner; this file owns the one hat that says OFFICER — the peaked
+       service cap, band in the trim colour, a gold badge — as its own owner,
+       so neither dresser can take the other's hat off. */
+    const HW = CBZ.headwear;
     const hcol = K.headColor != null ? K.headColor : (fit.colors && fit.colors.torso) || 0x2b3223;
     const trim = K.trim != null ? K.trim : shade(hcol, -0.3);
-    /* EVERY HAT EXCEPT THE PEAKED CAP IS outfits.js'S — see SIB_HEAD. This
-       branch draws the one it does not have, and it is four parts, all of
-       which matter: a crown that flares forward, a dark band, a HARD VISOR
-       set below the band, and one gold badge. Drop any of them and a general
-       is wearing a baseball cap. */
-    if (K.head === "peaked") {
-      /* PROPORTION IS THE WHOLE HAT. The first cut made the band 0.72 wide
-         against a 0.60 head — 6 cm of overhang each side — and it read as a
-         mortarboard, a flat plate the man was balancing. A service cap's band
-         is HEAD WIDTH and only the crown flares over it; the visor is
-         narrower still and tilts down hard enough to shade the eyes. */
-      const band = box(0.63 * k, 0.075 * k, 0.63 * k, trim);
-      band.position.set(0, hs + 0.020 * k, 0); add(neck, band);
-      const crown = box(0.69 * k, 0.20 * k, 0.63 * k, hcol);
-      crown.position.set(0, hs + 0.145 * k, 0.020 * k); add(neck, crown);
-      const visor = box(0.56 * k, 0.040 * k, 0.26 * k, shade(trim, -0.3));
-      visor.position.set(0, hs - 0.012 * k, 0.40 * k); visor.rotation.x = 0.30; add(neck, visor);
-      const badge = box(0.09 * k, 0.10 * k, 0.03 * k, K.badgeColor != null ? K.badgeColor : 0xe8c454);
-      badge.position.set(0, hs + 0.135 * k, 0.325 * k); add(neck, badge);
+    if (HW) {
+      HW.wear(rig, null, { owner: "outfit" });
+      if (K.head === "peaked") HW.wear(rig, "peaked", { owner: "warlordKit", variant: "officer", color: lin(hcol), accent: lin(trim) });
+      else HW.wear(rig, null, { owner: "warlordKit" });
     }
     /* SUNGLASSES AND AN EARPIECE — the two details that turn a black suit
        into a DETAIL. The wire matters more than the bud: a coiled clear lead
@@ -710,7 +673,7 @@
      no use for — no army issues a service cap to a levy — and it is exactly
      the hat that says "officer", so this file draws that one and tells
      outfits.js to leave the head alone. */
-  const SIB_HEAD = { cap: 1, rag: 1, shemagh: 1, beret: 1, helmet: 1 };
+  const SIB_HEAD = { cap: 1, rag: 1, shemagh: 1, beret: 1, helmet: 1, ballcap: 1, hardhat: 1, ballistic: 1, race: 1 };
   function styleIndex(name) {
     const i = SUIT_IDX[name];
     return i != null ? i : 0;
@@ -887,12 +850,12 @@
     // city/outfits.js's SWAT record, desert-shifted: its own comment says
     // torso drives the CARRIER and legs the fatigues, so only those move.
     colors: { legs: 0x6a6248, torso: 0x7c7154, collar: 0x4e4835, arms: 0x6f6650, shoes: 0x201c15, belt: 0x1a1710 },
-    kit: { head: "helmet", headColor: 0x6c6349, belt: 0x2a2419 } });
+    kit: { head: "ballistic", headColor: 0x6c6349, belt: 0x2a2419 } });
   F("field_night", { name: "Looted Riot Kit", group: "field", rank: R_CMD,
     note: "somebody's tactical squad, stencil and all. you kept the stencil.",
     paint: "swat", family: "night", role: "nco",
     colors: { legs: 0x1a1c1e, torso: 0x212427, collar: 0x121416, arms: 0x1d2022, shoes: 0x0d0f11, belt: 0x0b0d0f },
-    kit: { head: "helmet", headColor: 0x1b1e21, shades: 1, belt: 0x0e1013 } });
+    kit: { head: "ballistic", headColor: 0x1b1e21, shades: 1, belt: 0x0e1013 } });
   F("field_tactical", { name: "All Black Tactical", group: "field", rank: R_CAPT,
     note: "taken straight off the city's professionals.",
     paint: "tactical", family: "night", role: "line",
@@ -919,22 +882,22 @@
     note: "layers, a shell and no armour at all.",
     paint: "hiker", family: "irregular", role: "line",
     colors: { legs: 0x3d4650, torso: 0xb94f2f, collar: 0x27313a, arms: 0xb94f2f, shoes: 0x3a2e20 },
-    kit: { head: "cap", headColor: 0x27313a } });
+    kit: { head: "ballcap", headColor: 0x27313a } });
   F("field_oilskin", { name: "Coast Oilskins", group: "field", rank: R_RIDER,
     note: "for the shore, where it actually rains.",
     paint: "fisherman", family: "irregular", role: "line",
     colors: { legs: 0xc99928, torso: 0x283d50, collar: 0xe1bd45, arms: 0x283d50, shoes: 0x1d2924 },
-    kit: { head: "cap", headColor: 0xc99928 } });
+    kit: { head: "ballcap", headColor: 0xc99928 } });
   F("field_sapper", { name: "Sapper's Turnout", group: "field", rank: R_CAPT,
     note: "tan turnout with the yellow trim. mines and doors.",
     paint: "firefighter", family: "engineer", role: "nco",
     colors: { legs: 0xb09a6e, torso: 0xb09a6e, collar: 0xe8d44a, arms: 0xb09a6e, shoes: 0x16110d },
-    kit: { head: "helmet", headColor: 0xe0c53a, belt: 0x2a2118 } });
+    kit: { head: "hardhat", headColor: 0xe0c53a, belt: 0x2a2118 } });
   F("field_engineer", { name: "Engineer Hi-Vis", group: "field", rank: R_RIDER,
     note: "the man who builds the outpost you are standing in.",
     paint: "construction", family: "engineer", role: "line",
     colors: { legs: 0x2e4a6b, torso: 0xff5f08, collar: 0xbfc6c5, arms: 0x1d3352, shoes: 0x4a3a26 },
-    kit: { head: "helmet", headColor: 0xf0c51b } });
+    kit: { head: "hardhat", headColor: 0xf0c51b } });
   F("field_quarter", { name: "Quartermaster Hi-Vis", group: "field", rank: R_RIDER,
     note: "counts crates, never misses one.",
     paint: "hivis", family: "engineer", role: "line",
@@ -1072,12 +1035,12 @@
     note: "airside yellow. one strip, one plane, no tower.",
     paint: "groundcrew", family: "engineer", role: "line",
     colors: { legs: 0x24344d, torso: 0xd8ca2f, collar: 0x24344d, arms: 0x24344d, shoes: 0x171b22 },
-    kit: { head: "cap", headColor: 0xe2cf31 } });
+    kit: { head: "ballcap", headColor: 0xe2cf31 } });
   F("crew_racer", { name: "Runner's Suit", group: "crew", rank: R_CAPT,
     note: "a racing suit. the fastest thing you own that isn't a horse.",
     paint: "racer", family: "irregular", role: "line",
     colors: { legs: 0xb52d32, torso: 0xb52d32, collar: 0xf1eee7, arms: 0xb52d32, shoes: 0x15171b },
-    kit: { head: "helmet", headColor: 0xb52d32 } });
+    kit: { head: "race", headColor: 0xb52d32 } });
 
   /* ---- IRREGULAR. What you rode out in, and what you looted since. ---- */
   F("rag_rags", { name: "What You Rode Out In", group: "rag", rank: R_RIDER,

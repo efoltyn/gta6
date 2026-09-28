@@ -891,6 +891,9 @@
      wide open on purpose: the campaign camera is a lens over the column, and
      CBZ.player.pos is the LAST battle's position, not where you stand now. */
   let talkT = 0;
+  /* one of a man's lines, picked off Math.random, never RND: the words are
+     cosmetic and must not shift the seeded campaign stream */
+  function aLine(arr) { return arr[(Math.random() * arr.length) | 0]; }
   function mouthOf(b) {
     if (b._mouth) return b._mouth;
     b._mouth = {
@@ -2012,7 +2015,7 @@
       return {
         title: 'MEN WITH NO <em>FLAG</em>',
         sub: place().toUpperCase(),
-        say: ["We left our last flag. Do not ask which one.", "Feed us and give us a share. We march."],
+        say: [aLine(["We left our last flag. Do not ask which one.", "Our captain ran off with the pay. We did not.", "We have not eaten since the wells at Farkh."]), "Feed us and give us a share. We march."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "take", label: "TAKE THEM ALL", cls: "hot",
@@ -2195,7 +2198,7 @@
       return {
         title: 'A <em>WARLORD</em> WITH A HOLE IN HIM',
         sub: "WHAT IS LEFT OF HIS COLUMN",
-        say: ["I am finished. Let me ride out alive.", "Do that and my men are yours."],
+        say: [aLine(["I am finished. Let me ride out alive.", "I have a wife in the hills. Let me go to her."]), "Do that and my men are yours."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "let", label: "LET HIM GO. TAKE HIS MEN.", cls: "hot",
@@ -2516,7 +2519,7 @@
         sub: "ALONE, WITH A GOOD RIFLE",
         /* "and he says the second one is the better deal for you and he is
            right" was the card telling the player which button to press. */
-        say: ["Thirty years of other men's wars.", "Money up front or a share. Either way, I come."],
+        say: [aLine(["Thirty years of other men's wars.", "I buried two sons in this sand. I still fight.", "I fought for your father's enemies. Good pay."]), "Money up front or a share. Either way, I come."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,
@@ -2623,7 +2626,7 @@
       return {
         title: 'A <em>TOLL</em> AT THE NARROWS',
         sub: place().toUpperCase(),
-        say: ["Only road through the rock. $" + toll + " to pass.", "Pay the toll or turn around."],
+        say: ["Only road through the rock. $" + toll + " to pass.", aLine(["Pay the toll or turn around.", "My grandfather took this toll. So do I."])],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY THE TOLL", cls: "", enabled: S.gold >= toll,
@@ -2848,7 +2851,7 @@
       return {
         title: 'HE HAS BEEN <em>WATCHING</em> YOU',
         sub: "A SERGEANT FROM SOMEBODY ELSE'S COLUMN",
-        say: ["My warlord has not paid us in nine days.", "Pay me and I bring " + n + " men over tonight."],
+        say: [aLine(["My warlord has not paid us in nine days.", "He shot my cousin for sleeping on watch.", "He drinks. We starve. I am done."]), "Pay me and I bring " + n + " men over tonight."],
         band: b, bands: arg && arg.bands,
         choices: [
           { key: "pay", label: "PAY HIM", cls: "hot", enabled: S.gold >= price,

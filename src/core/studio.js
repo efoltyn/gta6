@@ -248,8 +248,8 @@
       needs: ["look"],
       // fphands.js first: every body's hand IS the first-person hand (body LOD),
       // built inside makeCharacter
-      files: ["systems/fphands.js", "entities/character.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
-      publishes: ["human", "makeCharacter", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
+      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
+      publishes: ["human", "makeCharacter", "headwear", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
     // ---- two people, hands on each other -------------------------------------
@@ -261,7 +261,7 @@
              "over a rail, off a ledge, into water), plus strike / knockdown / " +
              "getUp and the fighter's timing. CBZ.verbs.grab(a, b) and it plays",
       needs: ["people"],
-      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/verbs_pickup.js"],
+      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/bodyfall.js", "systems/verbs_pickup.js"],
       publishes: ["verbs", "verbPoses", "meleePoses"],
     },
 
@@ -933,18 +933,18 @@
      the full city ped loads the city and calls makePed.
      ========================================================================== */
   const CASTING = {
-    soldier:   { pal: { legs: 0x3e4630, torso: 0x47503a, arms: 0x47503a, shoes: 0x241f19, cap: 0x3a4230 }, armed: "Rifle", hp: 170 },
-    officer:   { pal: { legs: 0x2f3626, torso: 0x39412e, arms: 0x39412e, shoes: 0x1e1a15, cap: 0x2b3223 }, armed: "Pistol", hp: 200 },
-    guard:     { pal: { legs: 0x22242a, torso: 0x2b2e36, arms: 0x2b2e36, shoes: 0x17181c, cap: 0x22242a }, armed: "Pistol", hp: 140 },
-    security:  { pal: { legs: 0x22242a, torso: 0x2b2e36, arms: 0x2b2e36, shoes: 0x17181c, cap: 0x22242a }, armed: "Pistol", hp: 140 },
-    agent:     { pal: { legs: 0x18181c, torso: 0x1f1f24, arms: 0x1f1f24, shoes: 0x101013, cap: 0x18181c }, armed: "Pistol", hp: 150 },
+    soldier:   { pal: { legs: 0x3e4630, torso: 0x47503a, arms: 0x47503a, shoes: 0x241f19, cap: 0x3a4230, capKind: "milcap" }, armed: "Rifle", hp: 170 },
+    officer:   { pal: { legs: 0x2f3626, torso: 0x39412e, arms: 0x39412e, shoes: 0x1e1a15, cap: 0x2b3223, capKind: "peaked:officer" }, armed: "Pistol", hp: 200 },
+    guard:     { pal: { legs: 0x22242a, torso: 0x2b2e36, arms: 0x2b2e36, shoes: 0x17181c, cap: 0x22242a, capKind: "peaked:police" }, armed: "Pistol", hp: 140 },
+    security:  { pal: { legs: 0x22242a, torso: 0x2b2e36, arms: 0x2b2e36, shoes: 0x17181c, cap: 0x22242a, capKind: "peaked:police" }, armed: "Pistol", hp: 140 },
+    agent:     { pal: { legs: 0x18181c, torso: 0x1f1f24, arms: 0x1f1f24, shoes: 0x101013 }, armed: "Pistol", hp: 150 },
     muscle:    { pal: { legs: 0x1d1d20, torso: 0x3a2f2a, arms: 0x3a2f2a, shoes: 0x141416 }, armed: "Pistol", hp: 150 },
     thug:      { pal: { legs: 0x2a2f38, torso: 0x6d2f2f, arms: 0x6d2f2f, shoes: 0x1a1a1d }, armed: "Pistol", hp: 110 },
     civilian:  { pal: { legs: 0x3a4152, torso: 0x9aa3b4, arms: 0x9aa3b4, shoes: 0x2a2622 }, hp: 100 },
     worker:    { pal: { legs: 0x394a63, torso: 0xc8862c, arms: 0xc8862c, shoes: 0x2a2622 }, hp: 110 },
     exec:      { pal: { legs: 0x23252c, torso: 0x2c2f38, arms: 0x2c2f38, shoes: 0x191a1e }, hp: 100 },
     medic:     { pal: { legs: 0xe9edf2, torso: 0xf3f6fa, arms: 0xf3f6fa, shoes: 0x2a2622 }, hp: 110 },
-    pilot:     { pal: { legs: 0x3f4438, torso: 0x5a6046, arms: 0x5a6046, shoes: 0x241f19, cap: 0xd8dce2 }, hp: 120 },
+    pilot:     { pal: { legs: 0x3f4438, torso: 0x5a6046, arms: 0x5a6046, shoes: 0x241f19, cap: 0xd8dce2, capKind: "peaked:captain" }, hp: 120 },
     runner:    { pal: { legs: 0x2f3a48, torso: 0xb4643a, arms: 0xb4643a, shoes: 0x22201c }, hp: 100 },
   };
   CBZ.studio.roles = function () { return Object.keys(CASTING).slice(); };
@@ -990,14 +990,16 @@
     } else {
       body.skin = 0xc9a07a; body.hair = 0x2a1f18;       // heritage.js not loaded: one plain person
     }
-    if (pal.cap != null) body.cap = opts.color != null ? opts.color : pal.cap;
+    // the role's hat KIND rides with its colour (entities/headwear.js): a
+    // soldier's patrol cap, an officer's peaked cap, a pilot's captain's cap
+    if (pal.cap != null) { body.cap = opts.color != null ? opts.color : pal.cap; body.capKind = pal.capKind; }
     /* A UNIFORM, NOT A PAINT BUCKET. `color` repaints torso+collar+cap in one
        flat team colour, which is how NPC War's armies came out as toy soldiers.
        `uniform` names each part (legs/torso/arms/cap/shoes/collar/belt) and wins
        over both the role palette and `color`. Only read when passed. */
     if (opts.uniform) {
       const u = opts.uniform;
-      ["legs", "torso", "collar", "arms", "shoes", "cap", "belt"].forEach(function (k) { if (u[k] != null) body[k] = u[k]; });
+      ["legs", "torso", "collar", "arms", "shoes", "cap", "capKind", "belt"].forEach(function (k) { if (u[k] != null) body[k] = u[k]; });
     }
     /* CASTING IS ALSO A CASTING DECISION, not only a paint job.
        entities/character.js has always taken `build` ("m" | "f", default "m")

@@ -2142,7 +2142,11 @@
     // stunned (baton / taser): no input this frame, gravity still applies
     if (player.stun > 0) { player.stun -= dt; mx = mz = 0; }
     if (player._cityArrested) mx = mz = 0;
-    const stunned = player.stun > 0 || !!player._cityArrested;
+    // HANDS ON YOU (CBZ.verbs: a grab, the cuffs, an escort): the verb places
+    // your body and your keys are the struggle (systems/arrest.js), not a walk
+    const heldNow = !!(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld());
+    if (heldNow) mx = mz = 0;
+    const stunned = player.stun > 0 || !!player._cityArrested || heldNow;
     // the melee hit reaction (systems/combat.js playerHitReact): a beat of
     // slow, not a lock — you keep the controls while a fist rocks you
     if (player.hitLock > 0) player.hitLock -= dt;
@@ -2186,7 +2190,8 @@
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
     // the mount's gait). It COMPOSES with the limp — a wounded rider still rides.
-    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1);
+    // running in cuffs (you tore out of an escort): hands behind you, no arms to run with
+    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * (playerChar.cuffed ? 0.7 : 1);
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
       : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale * hitSlow;

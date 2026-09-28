@@ -223,7 +223,7 @@
       brief: [
         "Teodor Brandt moves the President's money. Every account the palace has passes through his hands.",
         "He keeps a routine. Office, coffee, bank. Watch it once before you touch him.",
-        "One bodyguard. The cafe is the soft spot. The vial is in your case.",
+        "One bodyguard. The vial is in your case.",
       ],
     },
     cargo: {
@@ -256,7 +256,7 @@
       ],
       brief: [
         "Casimir Dranov sells the Presidential Guard its rifles. He is in town to close an order.",
-        "He arrives by car, inspects the stock, drinks, and leaves. His car is the weak point.",
+        "He arrives by car, inspects the stock, drinks, and leaves.",
         "There is a charge in your case.",
       ],
     },
@@ -834,7 +834,7 @@
     const x = car.pos.x, z = car.pos.z;
     if (victim && !victim.dead) victim.killedBy = { name: "A car fire", isPlayer: false };
     RT.killWatch = { t: now() + 1200, blast: true };
-    try { if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.5, radius: 6, byPlayer: false }); } catch (e) {}
+    try { if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.5, radius: 6, byPlayer: false, kind: "car" }); } catch (e) {}
     try { if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, 9999); } catch (e) {}
     try { if (CBZ.cityCarIgnite) CBZ.cityCarIgnite(car); } catch (e) {}
     car.dead = true;
@@ -1834,7 +1834,7 @@
     call([
       { by: mt.voss, line: "Good." },
       { by: mt.voss, line: "He speaks from the Mansion steps in the afternoon. Then the motorcade, out the gate and back." },
-      { by: mt.voss, line: "Find the gap. My car takes you to the Mansion road when you are ready. The ride out is on me." },
+      { by: mt.voss, line: "My car takes you to the Mansion road. The ride out is on me." },
     ], null);
     setStep("finale");
     boardDirty();
@@ -1875,7 +1875,7 @@
     call([
       { by: "phone", line: "You don't know me. I work for the President." },
       { by: "phone", line: "We read the Bureau's cable. The one with your number on it." },
-      { by: "phone", line: "The man in the parking lot was going to bury you. Now nobody will. The President would like to keep you." },
+      { by: "phone", line: "The man in the lot was going to bury you. The President would like to keep you." },
       { by: "phone", line: "Your first payment is waiting. Check your phone." },
     ], function () {
       if (F && F.drop) F.drop({ pay: 100000, from: "Unknown number", line: function (where) { return "A bag by the bins outside " + where + ". With the President's thanks."; } });

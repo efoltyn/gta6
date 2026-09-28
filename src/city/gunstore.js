@@ -733,7 +733,7 @@
     try {
       rig = CBZ.makeCharacter({
         legs: FORM_SKIN, torso: FORM_SKIN, collar: FORM_SKIN, arms: FORM_SKIN,
-        skin: FORM_SKIN, hair: FORM_SKIN, shoes: FORM_DARK, cap: 0,
+        skin: FORM_SKIN, hair: FORM_SKIN, shoes: FORM_DARK,
       });
     } catch (e) { rig = null; }
     if (!rig || !rig.group) return null;
@@ -905,7 +905,7 @@
       if (s.name === "C4 Charge") g.cityC4 = n;
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note(s.name === "C4 Charge"
-        ? "C4 in the bag (" + n + " carried). [B] plants it, hold [B] to send the signal."
+        ? "C4 in the bag (" + n + " carried)."
         : "Frag in the bag (" + n + " carried). [G] throws it.", 2.4);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
@@ -960,7 +960,7 @@
       return "<b style='color:#ffd166'>[E]</b> Ammo Box, <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>+" + (meta.rounds || 60) + " rounds</span>";
     }
     if (s.boom) {
-      const use = s.name === "C4 Charge" ? "remote det, [B] plant, hold [B] boom" : "frag, [G] throws it";
+      const use = s.name === "C4 Charge" ? "sticks to anything, remote det" : "frag, [G] throws it";
       return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + ", <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>" + use + "</span>";
     }
     if (s.armor) {

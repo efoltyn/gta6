@@ -86,8 +86,8 @@
   // case, and reaching it means 24 dead inside one block — which is precisely
   // the scene where every one of them should still be lying there. Ordinary
   // play leaves 5-12 at a bad firefight.
-  if (C.CORPSE_KEEP == null) C.CORPSE_KEEP = 24;
-  const MIN_AGE = 12;          // s — a body may never be reaped younger than this
+  if (C.CORPSE_KEEP == null) C.CORPSE_KEEP = 60;   // owner 2026-09-28: "they just DISAPPEAR" (was 24)
+  const MIN_AGE = 180;         // s — a body may never be reaped younger than this (was 12: a man you shot, turned from and looked back at was gone)
   const LEGACY_AGE = 75;       // the peds.js timer this replaces (fallback when flagged off)
   const LEGACY_COP_AGE = 8;    // the police.js timer this replaces
 
@@ -275,7 +275,7 @@
     // projection every population system uses; `true` means the player cannot
     // be looking at this point. minDistance 22 refuses anything at arm's
     // length even if the camera faces away — you would hear it go.
-    if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(a.pos.x, a.pos.z, { minDistance: 22, maxDistance: 240 })) return false;
+    if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(a.pos.x, a.pos.z, { minDistance: 60, maxDistance: 240 })) return false;
     return true;
   };
 

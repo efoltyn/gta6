@@ -1021,7 +1021,7 @@
     // THE PAYER IS A PERSON. `job.actor` is whoever handed the job over
     // (startGangJob records it) — they pay you, out loud, in front of you.
     { const jv = jobVoice(job); if (jv) say(jv, `${job.reward || 4}. Good work.`, null, 2.0); }
-    CBZ.setObjective && CBZ.setObjective("Job done. Keycard checkpoints or tunnels can still get you out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -1031,7 +1031,7 @@
     addGangDebt(job.gang, 3);
     const jv = jobVoice(job);
     if (jv) say(jv, "You blew it.", null, 2.0);
-    CBZ.setObjective && CBZ.setObjective("Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -2273,6 +2273,61 @@
     return fallback || "guard chatter";
   }
 
+  /* HEARSAY. What a yard actually trades in: names, grudges, who is soft and
+     who is bent. Built off the live roster, and only SOMETIMES true, because
+     a rumor you can act on blind is a walkthrough, and nobody in here knows
+     anything for sure (owner, 2026-09-28: "rumors that are sometimes true and
+     sometimes false"; never a route, a room, a key or the gun room).
+       bent screw   true when he is corrupt, told about a clean man a third
+                    of the time
+       snitch       true when the man's snitch trait is high, else gossip
+       holding      true when his pockets are actually heavy
+       the rest     flavour nobody can check */
+  function hearsay(n) {
+    const pickOf = (a) => a[(rng() * a.length) | 0];
+    const co = (gd) => actorName(gd).replace(/^Officer /, "");
+    const guards = (CBZ.guards || []).filter((gd) => gd && gd.data && !gd.dead && gd.kind !== "warden");
+    const cons = (CBZ.npcs || []).filter((m) => m !== n && alive(m) && m.data && !m._crowd &&
+      m.data.name && !/^(a|an) /.test(m.data.name));
+    const r = rng();
+    if (r < 0.28 && guards.length) {
+      const bent = guards.filter((gd) => gd.corrupt);
+      const liar = !bent.length || rng() < 0.33;
+      const gd = liar ? pickOf(guards) : pickOf(bent);
+      return pickOf([`${co(gd)} takes money. Heard it.`, `${co(gd)}'s bent. Maybe.`,
+        `Heard ${co(gd)} sleeps on nights.`]);
+    }
+    if (r < 0.46 && guards.length) {
+      const gd = pickOf(guards);
+      return pickOf([`${co(gd)} did two tours. Don't swing on him.`,
+        `${co(gd)}'s wife left him. He's mean this week.`,
+        `${co(gd)} writes everybody up. Everybody.`,
+        `${co(gd)} used to box. Watch the left.`]);
+    }
+    if (r < 0.62 && cons.length) {
+      const m = pickOf(cons);
+      const snitchy = ((m.personality && m.personality.snitch) || 0) > 0.3;
+      return snitchy || rng() < 0.4
+        ? pickOf([`${actorName(m)} talks to the COs.`, `Watch what you say around ${actorName(m)}.`])
+        : pickOf([`${actorName(m)}'s alright. Solid.`, `${actorName(m)} owes half the yard.`]);
+    }
+    if (r < 0.74 && cons.length) {
+      const m = pickOf(cons);
+      const load = CBZ.econ && CBZ.econ.rollLoadout ? CBZ.econ.rollLoadout(m) : null;
+      const heavy = load && (load.cigs || 0) >= 8;
+      return heavy || rng() < 0.35 ? `${actorName(m)}'s holding. Heard it.` : `${actorName(m)}'s broke. Don't bother.`;
+    }
+    return pickOf([
+      "Heard they're shipping ten guys out Friday.",
+      "Somebody got cut in the laundry last week.",
+      "New warden's worse. Wait and see.",
+      "Kitchen's watering the milk again.",
+      "They're gonna toss the whole tier. Soon.",
+      "Guy in seven hung up. Nobody talks about it.",
+      "Parole board's denying everybody this year.",
+    ]);
+  }
+
   /* WHAT A MAN TELLS YOU WHEN HE TELLS YOU SOMETHING. One fact, the way a
      man in a yard says it: a name, a place, a number. No advice, no system
      explained (owner: "no mechanics in dialogue"). */
@@ -2284,10 +2339,10 @@
     const knownReporter = (CBZ.npcs || []).find((m) => alive(m) && (m.reportedPlayerT || 0) > 0);
     if (knownReporter) return `${actorName(knownReporter)} talked. About you.`;
     if (g.lastKnown && g.lastKnown.t > 0) return `They're looking for you. ${g.lastKnown.source ? g.lastKnown.source + " pointed." : ""}`.trim();
-    const bent = (CBZ.guards || []).filter((gd) => gd && gd.corrupt && !gd.dead && !(gd.ko > 0));
-    if (bent.length && rng() < 0.4) return `${actorName(bent[Math.floor(rng() * bent.length)])} takes money.`;
+
     if (n.gang >= 0 && debt > 0) return `You owe us ${debt}. Don't forget.`;
     if ((g.cigs || 0) >= 18) return "People see you carrying.";
+    if (rng() < 0.7) return hearsay(n);
     return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your head down.";
   }
 
@@ -3881,7 +3936,7 @@
     if (where === "cell block") return "He's on the tier most days.";
     if (where === "staff lounge") return "He works up by the staff lounge.";
     if (where === "exit corridor") return "He hangs down the exit corridor.";
-    if (where === "armory door") return "He's always near the armory door.";
+    if (where === "armory door") return "He's always on the staff side.";
     if (where === "yard gate") return "He stands at the yard gate.";
     if (where === "Reds' corner") return "He posts up at the Reds' corner.";
     if (where === "Blues' corner") return "He posts up at the Blues' corner.";
@@ -5041,11 +5096,13 @@
     credit(killer, "kills");
     CBZ.game.deaths = (CBZ.game.deaths || 0) + 1;
     if (victim.wedge) victim.wedge.visible = false;
-    if (killer && killer.group && !opts.noKnock) knockback(victim, killer.group.position.x, killer.group.position.z, 1.1);
-    // AFTER the knockback, so the lie direction is picked from where the body
-    // actually ends up. systems/prisoncorpse.js finds the one direction this
-    // man can lie without a wall through him and owns the corpse from here.
-    if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer);
+    // THE BODY GOES DOWN (systems/prisoncorpse.js -> systems/bodyfall.js): the
+    // killer's shove is real root momentum that slides against the walls, not
+    // the 1.1 m position write this line used to teleport him with (which
+    // started a corpse killed against a wall INSIDE it).
+    if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer, {
+      force: opts.force != null ? opts.force : (opts.noKnock ? 5 : 8), dirX: opts.dirX, dirZ: opts.dirZ,
+    });
     if (killer === CBZ.player) addBuzz("fear", 25, actorName(victim));
     if (victim.gang >= 0 && killer && CBZ.playerChar && killer.group === CBZ.playerChar.group) {
       noteGangIncident(victim, "kill", victim.isLeader ? 18 : 13, { source: "killing" });
@@ -7601,11 +7658,26 @@
   }
 
   // shove an actor away from a point (impact reaction)
+  /* A SHOVE IS A STEP, NOT A TELEPORT. This wrote `force` metres straight
+     into the group position on one frame (a player's prison round moved a
+     guard 1.35 m between two frames), and every jail shove (brain_prison,
+     economy, humancontact, reactions' recoil) popped the same way. A living
+     man with a rig now takes it as a real footwork step along the push
+     (CBZ.verbs.step: feet and root on one curve, walls respected), about half
+     the old distance because it is no longer instant. A round that already
+     landed on his rig this frame (CBZ.verbs.shot) owns the motion: the gun's
+     shove is not a second push. No rig / knocked out: the old nudge. */
   function knockback(actor, fx, fz, force) {
     const dx = actor.group.position.x - fx, dz = actor.group.position.z - fz;
     const d = Math.hypot(dx, dz) || 1;
-    actor.group.position.x += (dx / d) * (force || 0.8);
-    actor.group.position.z += (dz / d) * (force || 0.8);
+    const f = force || 0.8;
+    const V = CBZ.verbs, ch = actor.char;
+    if (!actor.dead && !(actor.ko > 0) && ch && V && V.step) {
+      if (ch._shotR && ch._shotR.queued) return;
+      if (V.step(actor, dx / d, dz / d, Math.min(0.7, 0.12 + f * 0.4), 0.3)) return;
+    }
+    actor.group.position.x += (dx / d) * f;
+    actor.group.position.z += (dz / d) * f;
   }
 
   const GANG_NAMES = ["the Reds", "the Blues"];

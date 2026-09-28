@@ -55,7 +55,7 @@ async function load() {
     cmat: (c) => new T.MeshLambertMaterial({ color: c == null ? 0x888888 : c }), mat: (c) => new T.MeshLambertMaterial({ color: c == null ? 0x888888 : c }),
     boxGeom: (w, h, d) => new T.BoxGeometry(w, h, d), sfx() {}, shake() {}, doHitstop() {} };
   ctx.CBZ.player = { pos: new T.Vector3(0, 0, -30), dead: false };
-  for (const f of ["src/systems/fphands.js", "src/entities/character.js", "src/entities/poses.js", "src/entities/meleeposes.js", "src/systems/verbs_strike.js"]) vm.runInContext(read(f), ctx, { filename: f });
+  for (const f of ["src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/poses.js", "src/entities/meleeposes.js", "src/systems/verbs_strike.js"]) vm.runInContext(read(f), ctx, { filename: f });
   updaters.sort((a, b) => a.order - b.order);
   const CBZ = ctx.CBZ, actors = [], speeds = new Map(), errors = [];
   return {

@@ -331,9 +331,12 @@
     p.settle = 0;                                  // any hit wakes a settled body
     // shock = reaction energy that drives the limb flail; bigger hits ring more
     const sk = Math.min(2.2, 0.18 + f * 0.085 + (o.fling ? 0.6 : 0));
+    const BF = !a.isPlayer && CBZ.bodyFall ? CBZ.bodyFall : null;
     if (o.fling) {
       // LAUNCH: a blast/throw — full airborne tumble, both spin axes, every
       // limb thrown wide. vy is the launch height; horizontal carries the body.
+      // A body lying in its collapse leaves it: the landing starts a new one.
+      if (BF && BF.active(a)) BF.clear(a);
       p.air = true;
       p.vx += dx * f; p.vz += dz * f;
       p.vy = Math.max(p.vy, 0) + o.fling;
@@ -361,6 +364,7 @@
         if (p.spinZ > 12) p.spinZ = 12; else if (p.spinZ < -12) p.spinZ = -12;
       }
     } else {
+      const kx0 = p.kx, kz0 = p.kz;
       p.kx += dx * f; p.kz += dz * f;
       if (CBZ.CONFIG.SURV_RAGDOLL_STABLE !== false) {
         const hk = Math.hypot(p.kx, p.kz);
@@ -381,6 +385,19 @@
         // a hard non-knockdown shove can still buckle a ped (euphoria stumble)
         p.down = Math.max(p.down, 0.8 + Math.random() * 0.5);
         p.ddir = Math.atan2(dx, dz);
+      }
+      /* THE FALL (systems/bodyfall.js): a man who goes down collapses in his
+         own rig along the blow, the legs first, with his centre of mass
+         dropping, instead of the group toppling about his FEET while it
+         yawed toward the hit (the pivot-on-a-foot). It carries its own root
+         momentum, so the knockback slide above is handed to it instead. */
+      if (BF && p.down > 0) {
+        const going = BF.active(a) ? BF.poke(a, dx, dz, f)
+          : !!BF.start(a, { dirX: dx, dirZ: dz, force: f, dead: !!a.dead, hold: true });
+        if (going) { p.kx = kx0; p.kz = kz0; }
+      } else if (BF && BF.active(a)) {
+        BF.poke(a, dx, dz, f);
+        p.kx = kx0; p.kz = kz0;
       }
     }
     flashHead(a);
@@ -410,7 +427,7 @@
       // landing (see step()). Dead bodies keep the legacy deathPose + flail.
       grp.rotation.x += p.spin * dt;
       grp.rotation.z += p.spinZ * dt;
-      if (intact) { bracePose(a); return; }
+      if (intact) { bracePose(a); if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true); return; }
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
       applyRag(a, p, dt);
       return;
@@ -430,9 +447,16 @@
          the push (ddir + pi) he goes over backward, head along the push. With
          x = z = 0 the two orders are the same rotation, so nothing standing
          changes. */
+      /* FALLBACK ONLY (a rig bodyfall.js cannot drive). It no longer TURNS
+         the body toward the hit while it topples: yawing a group whose origin
+         is its feet while it tips over is exactly a pirouette on one foot.
+         He goes over backward or forward, whichever way the blow carries
+         him in his own frame. */
       if (grp.rotation.order !== "YXZ") grp.rotation.order = "YXZ";
-      grp.rotation.x = damp(grp.rotation.x, -topple, a.dead ? 7 : 11, dt); // fall onto back (never past flat)
-      grp.rotation.y = (CBZ.lerpAngle || lerpA)(grp.rotation.y, p.ddir + Math.PI, 1 - Math.exp(-8 * dt));
+      const ry = grp.rotation.y || 0;
+      const fwdK = Math.sin(p.ddir) * Math.sin(ry) + Math.cos(p.ddir) * Math.cos(ry);
+      if (p._tsg == null || Math.abs(grp.rotation.x) < 0.05) p._tsg = fwdK > 0.1 ? 1 : -1;
+      grp.rotation.x = damp(grp.rotation.x, p._tsg * topple, a.dead ? 7 : 11, dt); // never past flat
       const roll = a.dead ? 0.6 * Math.sin(a._deathSeed * 1.7) : 0;   // ~±35° onto a shoulder
       grp.rotation.z = damp(grp.rotation.z, roll, 9, dt);
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
@@ -441,9 +465,13 @@
         // (animChar is skipped while owned, so the additive write had no base
         // and accumulated — the wind-up half of the mangled-bodies bug).
         integRag(a, p, dt); writeRag(a, p, true);
+        // animChar is skipped while owned: the feet fall slack here instead of
+        // standing straight up off the end of the legs (character.js ANKLE SOLVE)
+        if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
         return;
       }
       applyRag(a, p, dt);     // limbs jiggle as the body lands & settles, then still
+      if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
       return;
     }
     // getting up: ease back upright
@@ -484,7 +512,32 @@
       p.kx = p.kz = 0; p.vx = p.vy = p.vz = 0; p.air = false; p.down = 0;
       return false;
     }
-    if (p.heldBy) { poseActor(a, p, dt); return true; } // position (and, for a verb, pose) set by the holder
+    if (p.heldBy) {                                     // position (and, for a verb, pose) set by the holder
+      if (a._bf && a._bf.on) a._bf.held = true;
+      poseActor(a, p, dt);
+      return true;
+    }
+
+    // ---- A BODY IN ITS COLLAPSE (systems/bodyfall.js) owns its own root:
+    //      momentum, ground, slope, walls, and the rig's keyed fall. The
+    //      living get up when the knockdown (or the city KO) runs out; the
+    //      dead lie until the corpse timeline takes them. ----
+    const BF = CBZ.bodyFall;
+    if (BF && !p.air && a._bf && a._bf.on) {
+      if (a._bf.held) { a._bf.held = false; BF.resume(a); }
+      p.kx = p.kz = 0;
+      if (a.dead) p.down = Math.max(p.down, 9999);
+      else {
+        const ko = CBZ.game.mode === "city" ? (a.ko || 0) : 0;
+        if (p.down < ko) p.down = ko;
+        if (p.down > 0) p.down = Math.max(0, p.down - dt);
+        if (p.down <= 0) { BF.getUp(a); p.down = 0.001; }   // busy until the get-up has played
+      }
+      if (p.fl > 0) p.fl = Math.max(0, p.fl - dt);
+      if (BF.tick(a, dt)) return true;
+      p.down = 0;                                            // stood up: the mover has him back
+      return false;
+    }
 
     if (p.air) {
       p.vy -= G() * dt;
@@ -580,6 +633,14 @@
         if (!a.dead && intactOn()) kickRag(a, p, Math.min(1.6, 0.5 + impact * 0.05), 0, a._deathSeed);
         if (CBZ.shake && lensNear(grp.position, 16)) CBZ.shake(Math.min(0.4, 0.12 + impact * 0.012));
         if (CBZ.sfx && impact > 9 && near(grp.position, 12)) CBZ.sfx("hit");
+        // the landing is where the collapse takes the body: it arrives on the
+        // floor, skids along its travel and settles (bodyfall.js)
+        if (BF && !a.isPlayer && BF.start(a, { dirX: p.kx, dirZ: p.kz, vx: p.kx * 0.6, vz: p.kz * 0.6, force: 0,
+          dead: !!a.dead, hold: true, landed: true })) {
+          p.kx = p.kz = 0; p.spin = p.spinZ = 0;
+          BF.tick(a, dt);
+          return true;
+        }
       }
       poseActor(a, p, dt);
       return true;
@@ -665,7 +726,8 @@
       const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
       if (flat > 0.4) {
         const ry = grp.rotation.y || 0, ext = 1.7 * flat;
-        const hx = -Math.sin(ry) * ext, hz = -Math.cos(ry) * ext;   // toward the head
+        const hs = grp.rotation.x > 0 ? 1 : -1;                    // face down: head ahead of the feet
+        const hx = hs * Math.sin(ry) * ext, hz = hs * Math.cos(ry) * ext;   // toward the head
         _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
         CBZ.collide(_corpseC, BOT_R);
         grp.position.x += _corpseC.x - (grp.position.x + hx);        // shift body by the head's push
@@ -682,6 +744,28 @@
     return owns;
   }
 
+  /* NO DEATH WITHOUT A FALL. Plenty of code kills a man with a bare
+     `dead = true` (a fire, a drowning, a bleed-out, a scripted death) and
+     never tells the body. Such a rig used to stand there dead, or be culled.
+     The first frame we see a dead man that nothing is laying down (no fall,
+     no verlet body, not in the air, not held, not seated or in a car), he
+     collapses where he stands through the one fall. Once per death. */
+  function ensureFall(a) {
+    if (!a) return;
+    if (!a.dead) { if (a._fallSeen) a._fallSeen = false; return; }
+    if (a._fallSeen || a.culled || a.isPlayer) return;
+    a._fallSeen = true;
+    if (!CBZ.bodyFall || !a.char || !a.char.parts || !a.group || !a.group.parent) return;
+    if (a.inCar || a._npcAttached || a._parked || a._morgueClaimed || a._propSeat || a._propLie) return;
+    if (a._bf && a._bf.on) return;
+    if (a._ragSlot != null) return;
+    const p = a._phys;
+    if (p && (p.air || p.heldBy || p.down > 0)) return;
+    const gp = a.group.position;
+    if (CBZ.waterSubmergence && CBZ.waterSubmergence(gp.x, gp.y + 0.9, gp.z) > 0) return;   // the sea has him (water_float)
+    const yw = a.group.rotation.y || 0;
+    hit(a, { dir: { x: -Math.sin(yw), z: -Math.cos(yw) }, force: 1, knockdown: 9999 });
+  }
   function lerpA(a, b, t) { let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
   function near(pos, r) {
     const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z;
@@ -837,9 +921,9 @@
     if (CBZ.game.mode === "escape") return;
     physFrame++;
 
-    for (const b of CBZ.bots) step(b, dt);
-    if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) step(CBZ.cityPeds[i], dt);
-    if (CBZ.cityCops) for (let i = 0; i < CBZ.cityCops.length; i++) step(CBZ.cityCops[i], dt);
+    for (const b of CBZ.bots) { ensureFall(b); step(b, dt); }
+    if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) { ensureFall(CBZ.cityPeds[i]); step(CBZ.cityPeds[i], dt); }
+    if (CBZ.cityCops) for (let i = 0; i < CBZ.cityCops.length; i++) { ensureFall(CBZ.cityCops[i]); step(CBZ.cityCops[i], dt); }
 
     // the player's own knockback slide (knockdown/thrown handled in physics.js)
     const P = CBZ.player;

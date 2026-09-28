@@ -56,7 +56,7 @@ ctx.window = ctx; ctx.self = ctx;
 const hooks = { always: [], update: [] };
 ctx.CBZ = { CONFIG: {}, onAlways(o, f) { hooks.always.push([o, f]); }, onUpdate(o, f) { hooks.update.push([o, f]); }, on() {} };
 const APPEAR = ["sidearm", "shotgun", "carbine", "smg", "taser", "bazooka", "glauncher", "ak47", "revolver", "deagle", "uzi", "sniper", "lmg", "shank"];
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js",
+for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js",
   "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/systems/actorweapons.js", "src/systems/holsterprops.js", "src/systems/gunhands.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
@@ -216,14 +216,18 @@ function measure(rig, prop, tag, stance, opts) {
     const fore = rig.parts.la.userData.lower;
     if (fore && fore.geometry && CBZ.humanLimbHalfAt) {
       hl.updateMatrix(); fore.updateMatrix();
+      // measured in the forearm's OWN frame: it twists with the hand (character.js wristTwist)
+      const foreInv = fore.matrix.clone().invert();
       const pos = hl.geometry.attributes.position, crease = hl.userData.fit.wristY;
       let poke = 0;
       for (let i = 0; i < pos.count; i++) {
         _v.fromBufferAttribute(pos, i).applyMatrix4(hl.matrix);
         if (_v.y <= crease) continue;
-        const sec = CBZ.humanLimbHalfAt(fore.geometry, _v.y - fore.position.y);
+        const h = _v.y - crease;
+        _v.applyMatrix4(foreInv);
+        const sec = CBZ.humanLimbHalfAt(fore.geometry, _v.y);
         if (!sec) continue;
-        if (Math.abs(_v.x) > sec.hx + 0.004 || Math.abs(_v.z - sec.cz) > sec.hz + 0.004) poke = Math.max(poke, _v.y - crease);
+        if (Math.abs(_v.x) > sec.hx + 0.004 || Math.abs(_v.z - sec.cz) > sec.hz + 0.004) poke = Math.max(poke, h);
       }
       r.poke = poke;
       check(poke < 0.012, `${tag}: support hand stays inside the wrist above the crease (${(poke * 100).toFixed(1)} cm rig)`);

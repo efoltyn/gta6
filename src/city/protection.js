@@ -415,7 +415,7 @@
     }
   }
   function removePed(p) {
-    if (!p) return;
+    if (!p || (p.dead && !p.collected)) return;   // a corpse belongs to the world
     if (CBZ.cityUnpostNpc) { CBZ.cityUnpostNpc(p); return; }         // the matching half of the shared post
     try {
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
@@ -1162,6 +1162,7 @@
       t.hp -= 95;
       if (CBZ.bodyWound) { try { CBZ.bodyWound(t, { x: t.pos.x, y: (t.pos.y || 0) + 1.3, z: t.pos.z }, { fromX: q.pos.x, fromZ: q.pos.z }); } catch (e) {} }
       if (t.hp <= 0 && CBZ.cityKillPed) { try { CBZ.cityKillPed(t, { fromX: q.pos.x, fromZ: q.pos.z, attacker: q, byPlayer: false, force: 6 }, "shot"); } catch (e) {} }
+      else if (CBZ.cityStreetShot) { try { CBZ.cityStreetShot(t, q.pos.x, q.pos.z, _to, 1.9); } catch (e) {} }   // a sniper round into a man it did not kill
     }
     return true;
   }

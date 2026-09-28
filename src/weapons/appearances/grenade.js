@@ -41,6 +41,7 @@
     ring.position.set(0, 0.2, 0);
     ring.rotation.x = Math.PI / 2;
     g.add(ring);
+    g.userData.ring = ring;   // the held frag drops it when you pull the pin (systems/helditems.js)
 
     // REAL-DIMENSION SIZING (weapons/weapon-scale.js, gun-scale pass): the
     // model portrays an M67 frag — 64mm wide, 90mm tall — but the authored

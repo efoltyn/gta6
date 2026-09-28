@@ -550,7 +550,8 @@
   let curfewT = 0;
   function enforceCurfew(dt) {
     const g = CBZ.game;
-    if (!isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0) return;
+    // the officer on the night shift IS the curfew: nobody hunts him for being up
+    if (!isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0 || g.role === "cop") return;
     const p = CBZ.player && CBZ.player.pos;
     if (!p || (CBZ.player.captureState && CBZ.player.captureState !== "normal")) return;
     if (belongs(p.x, p.z)) return;

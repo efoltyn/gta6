@@ -322,13 +322,14 @@
        control-room release, which are holes, not doors. */
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
       id: d.id, label: d.label, autoR: 2.5, openByTap: !d.pick,   // tick opens at near2 < 6.2
+      keyed: !!(d.keys || d.pick),   // needs a card or a pick (systems/prisondoorwatch.js)
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return [pivot]; },
       col: function () { return d.collider; },
       isOpen: function () { return !!d.open; },
       permanent: function () { return !!(d.blown || RELEASE.thrown); },
       canUse: function () {
-        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop"));
+        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop")));
         const econ = CBZ.econ;
         return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
       },
@@ -1029,7 +1030,7 @@
             // out — staffNear above is untouched, because a guard with a card
             // opens his own door and that is the tailgating window.
             if (CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id)) continue;
-            const have = !!(g.hasKey || g.role === "cop");
+            const have = !!(g.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop"));
             const L = CBZ.cityLock
               ? CBZ.cityLock({ id: d.id, verb: "press", label: d.label, have: have,
                   keys: d.keys, orgs: ["police"], power: false })

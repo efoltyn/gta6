@@ -1230,7 +1230,9 @@
   // ---- input: LMB = light combo, RMB = heavy / hold-guard --------------
   //      Only when unarmed / holding a melee weapon. With a firearm out,
   //      fpsmode.js owns LMB (fire) and RMB (aim). ----
-  function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving; }
+  // cuffed: no hands to swing with; held: the click is a wrench against his grip (verbs.js)
+  function handsFree() { const pc = CBZ.playerChar; return !(pc && pc.cuffed) && !(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()); }
+  function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving && handsFree(); }
 
   document.addEventListener("mousedown", function (e) {
     if (!active()) return;
@@ -1341,7 +1343,7 @@
     // otherwise be a silent dud.
     if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
       CBZ.detonate(x, CBZ.blastSeatY ? CBZ.blastSeatY(x, z) : 1.0, z, "grenade", { byPlayer: true });
-    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
+    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true, kind: "grenade" });
     if (CBZ.cityShatter) CBZ.cityShatter(x, z, GREN.radius + 2);
     if (CBZ.shake) CBZ.shake(1.2);
     if (CBZ.doHitstop) CBZ.doHitstop(0.05);
@@ -1386,10 +1388,13 @@
   };
 
   // PLAYER throw: consume one carried grenade, lob it from the hand along the aim.
-  function throwGrenade() {
+  // opts.power (0.45..1, systems/helditems.js: how long the throw was wound
+  // up) scales the launch; no opts = the full-strength [G] quick throw.
+  function throwGrenade(opts) {
+    const pw = (opts && opts.power > 0) ? Math.min(1, opts.power) : 1;
     if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
     if ((P.stun || 0) > 0) return;
-    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades, buy them at the gun shop", 1.4); return; }
+    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades", 1.4); return; }
     if (live.length >= GREN.maxLive) return;
     if (!(CBZ.cityEcon && CBZ.cityEcon.take && CBZ.cityEcon.take("Grenade"))) return;
     const dir = aimVec();
@@ -1397,7 +1402,7 @@
     const ox = P.pos.x + dir.x * 0.6;
     const oz = P.pos.z + dir.z * 0.6;
     const oy = P.pos.y + 1.55;
-    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, {});
+    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, { speed: GREN.speed * pw, up: GREN.up * (0.6 + 0.4 * pw) });
     syncGrenadeHud();
     if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // a quick throwing arm swing
     throwCD = GREN.throwCD;

@@ -17,7 +17,7 @@
 <link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=flick1">
+<link rel="stylesheet" href="css/mobile.css?v=boom2">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
@@ -467,7 +467,7 @@ document.body.appendChild(b);}}catch(e){}})();
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
      the same unit. Must precede any file registering a breach target. -->
-<script src="src/systems/breach.js?v=breach1"></script>
+<script src="src/systems/breach.js?v=boom2"></script>
 <!-- THE AIRPORT REGISTRY (CBZ.registerAirport / CBZ.airports / the local
      airfield frame). An airport stops being a rectangle of the map and becomes
      a RECORD with an origin, a bearing and a runway, so a second field is a
@@ -582,10 +582,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=grasp2"></script>
-  <script src="src/entities/character.js?v=face1"></script>
+  <script src="src/systems/fphands.js?v=boom2"></script>
+  <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
+  <script src="src/entities/footwear.js?v=feet1"></script>
+  <script src="src/entities/character.js?v=hats2"></script>
+  <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=watch1"></script>
+  <script src="src/entities/watch.js?v=watch2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -607,12 +610,18 @@ document.body.appendChild(b);}}catch(e){}})();
      while they do it (verbposes.js), and the strikes and hit reactions
      (meleeposes.js + verbs_strike.js). Everything else is feature-detected at
      call time; the late pass runs at CBZ.onUpdate(91). -->
-<script src="src/systems/verbs.js?v=verbs1"></script>
+<script src="src/systems/verbs.js?v=arrest1"></script>
+<!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
+     (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
+     committed tackle lunge, the taser, and the one physical take of the
+     player (hands on, two wrists, the escort) every game's law calls. -->
+<script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
-<script src="src/entities/meleeposes.js?v=verbs1"></script>
-<script src="src/systems/verbs_strike.js?v=verbs1"></script>
+<script src="src/entities/meleeposes.js?v=fallreal1"></script>
+<script src="src/systems/verbs_strike.js?v=airblood2"></script>
+<script src="src/systems/bodyfall.js?v=m0928a"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
-<script src="src/entities/player.js?v=radio1"></script>
+<script src="src/entities/player.js?v=hats1"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -641,9 +650,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/appearances/carbine.js?v=grasp2"></script>
 <script src="src/weapons/appearances/smg.js?v=grasp2"></script>
 <script src="src/weapons/appearances/taser.js?v=grasp2"></script>
-<script src="src/weapons/appearances/bazooka.js?v=grasp2"></script>
+<script src="src/weapons/appearances/bazooka.js?v=boom2"></script>
 <script src="src/weapons/appearances/glauncher.js?v=grasp2"></script>
-<script src="src/weapons/appearances/grenade.js"></script>
+<script src="src/weapons/appearances/grenade.js?v=boom2"></script>
+<script src="src/weapons/appearances/c4.js?v=boom2"></script>
 <script src="src/weapons/appearances/ak47.js?v=grasp2"></script>
 <script src="src/weapons/appearances/revolver.js?v=grasp2"></script>
 <script src="src/weapons/appearances/deagle.js?v=grasp2"></script>
@@ -653,8 +663,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/appearances/shank.js"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
-<script src="src/weapons/flashlight.js?v=duty1"></script>
-<script src="src/systems/actorweapons.js?v=weaphold1"></script>
+<script src="src/weapons/flashlight.js?v=boom2"></script>
+<script src="src/systems/actorweapons.js?v=boom2"></script>
 <script src="src/city/weapon_thumbnails.js?v=duty1"></script>
 <script src="src/systems/holsterprops.js?v=gunhands1"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -662,14 +672,14 @@ document.body.appendChild(b);}}catch(e){}})();
      frame (instead of the old hand-tuned Euler guess, which could not
      know which gun was out) and choreographs the reload the same way.
      After holsterprops — it reads the gun that module just placed. -->
-<script src="src/systems/gunhands.js?v=hands1"></script>
+<script src="src/systems/gunhands.js?v=boom2"></script>
 <script src="src/systems/prisondrops.js?v=duty1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js"></script>
 <script src="src/world/lounge.js?v=screen1"></script>
-<script src="src/world/gunroom.js?v=nodash1"></script>
+<script src="src/world/gunroom.js?v=boom2"></script>
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
 <script src="src/world/southblock.js?v=flick1"></script>
@@ -684,7 +694,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=nodash1"></script>
+<script src="src/entities/guards.js?v=boom2"></script>
 <script src="src/entities/searchlight.js"></script>
 <script src="src/entities/keycard.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -694,8 +704,8 @@ document.body.appendChild(b);}}catch(e){}})();
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
 <script src="src/entities/heritage.js?v=face1"></script>
-<script src="src/entities/npc.js?v=races1"></script>
-<script src="src/entities/ai.js?v=armed1"></script>
+<script src="src/entities/npc.js?v=hats2"></script>
+<script src="src/entities/ai.js?v=fallreal1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -703,7 +713,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=warden2"></script>
+<script src="src/world/adminwing.js?v=hats1"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -765,7 +775,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=torch1"></script>
+<script src="src/systems/playerflashlight.js?v=boom2"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -791,10 +801,11 @@ document.body.appendChild(b);}}catch(e){}})();
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=radio1"></script>
+<script src="src/systems/prisontiers.js?v=fallstay1"></script>
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=radio1"></script>
+<script src="src/systems/prisonvoice.js?v=voice1"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
@@ -819,7 +830,7 @@ document.body.appendChild(b);}}catch(e){}})();
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
      from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
      restores the legacy feet-pivot flop. -->
-<script src="src/systems/prisoncorpse.js?v=deadreal1"></script>
+<script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
@@ -856,7 +867,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=face1"></script>
+<script src="src/systems/reactions.js?v=fallreal1"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
@@ -876,6 +887,11 @@ document.body.appendChild(b);}}catch(e){}})();
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=lift1"></script>
+<!-- A door opened off the clock is noticed: the screws who see, hear or get
+     radioed about it, the inmates it was shut on, and the Warden's record of
+     the officer. After interactions.js (the door registry); guards.js,
+     brain_prison.js and prisonwarden.js are all read lazily. -->
+<script src="src/systems/prisondoorwatch.js?v=doors1"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
@@ -893,8 +909,9 @@ document.body.appendChild(b);}}catch(e){}})();
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=deslop1"></script>
-<script src="src/systems/hotbar_model.js?v=hotbar1"></script>
-<script src="src/systems/inventory.js?v=cop1"></script>
+<script src="src/systems/hotbar_model.js?v=boom2"></script>
+<script src="src/systems/helditem_model.js?v=boom2"></script>
+<script src="src/systems/inventory.js?v=boom2"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -921,8 +938,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=flick1"></script>
-<script src="src/systems/touch_vehicle.js?v=exit1"></script>
+<script src="src/systems/touch.js?v=boom2"></script>
+<script src="src/systems/touch_vehicle.js?v=boom2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <script src="src/systems/seat_exit.js?v=exit1"></script>
@@ -930,7 +947,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=flick1"></script>
+<script src="src/systems/fpsmode.js?v=boom2"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -952,8 +969,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=armed1"></script>
+<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/entities/survivorbot.js?v=m0928a"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=uicut1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
@@ -962,7 +979,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=armed1"></script>
+<script src="src/modes/gungame.js?v=fallstay1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1012,7 +1029,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=tsureal1"></script>
+<script src="src/systems/disasters.js?v=boom2"></script>
 <script src="src/systems/survival_interact.js?v=name1"></script>
 <script src="src/systems/survivalhud.js?v=name1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -1107,7 +1124,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=deslop1"></script>
 <script src="src/city/citynav.js?v=moves1"></script>
-<script src="src/city/fracture.js?v=ruin1"></script>
+<script src="src/city/fracture.js?v=boom2"></script>
 <script src="src/city/demolition.js?v=cpd1"></script>
 <script src="src/city/elevators.js?v=lift1"></script>
 <script src="src/city/exec_office.js?v=leaf2"></script>
@@ -1269,7 +1286,7 @@ document.body.appendChild(b);}}catch(e){}})();
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=ironjaw1yz"></script>
-<script src="src/city/arena_fights.js?v=nodash1"></script>
+<script src="src/city/arena_fights.js?v=hats1"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
@@ -1284,8 +1301,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=onecall1"></script>
 <script src="src/city/mode.js?v=raceabort1"></script>
 <script src="src/city/economy.js?v=cars1"></script>
-<script src="src/city/clothes.js?v=races1"></script>
-<script src="src/city/outfits.js?v=races1"></script>
+<script src="src/city/clothes.js?v=hats2"></script>
+<script src="src/city/outfits.js?v=hats2"></script>
 <script src="src/city/hunger.js?v=nodash1"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1298,13 +1315,13 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=nodash1"></script>
-<script src="src/city/gangs.js?v=brainmoves1"></script>
+<script src="src/city/gangs.js?v=fallstay1"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
 <script src="src/city/realestate.js?v=lift1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=armed1"></script>
+<script src="src/city/peds.js?v=m0928a"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1315,7 +1332,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=nodash1"></script>
+<script src="src/city/occupy.js?v=fallstay1"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1330,7 +1347,7 @@ document.body.appendChild(b);}}catch(e){}})();
      bump), peds.js (trade + greet), interactions_rich.js (insult scaling). -->
 <script src="src/city/read.js?v=nodash1"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
-<script src="src/city/bling.js?v=fit3"></script>
+<script src="src/city/bling.js?v=hats1"></script>
 <script src="src/city/club.js?v=deslop1"></script>
 <script src="src/city/crowd.js?v=brainmoves1"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
@@ -1342,9 +1359,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=moves1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=brainmoves1"></script>
-<script src="src/city/police.js?v=brainmoves1"></script>
+<script src="src/city/police.js?v=boom2"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
-<script src="src/city/aircraft.js?v=nodash1"></script>
+<script src="src/city/aircraft.js?v=boom2"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
 <script src="src/city/carparts.js?v=cars2"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
@@ -1353,16 +1370,16 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=cars1"></script>
-<script src="src/city/playercars.js?v=hands1"></script>
-<script src="src/city/crashfx.js?v=nukefix1"></script>
-<script src="src/city/crashdeform.js?v=cars1"></script>
+<script src="src/city/playercars.js?v=hats1"></script>
+<script src="src/city/crashfx.js?v=boom2"></script>
+<script src="src/city/crashdeform.js?v=boom2"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/cardyn.js?v=cars1"></script>
-<script src="src/city/vehicles.js?v=hands1"></script>
+<script src="src/city/vehicles.js?v=boom2"></script>
 <script src="src/city/carinstances.js?v=cars1"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
-<script src="src/city/playeraircraft.js?v=exit1"></script>
+<script src="src/city/playeraircraft.js?v=hats1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1439,13 +1456,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=air2w11"></script>
+<script src="src/city/airtraffic.js?v=boom2"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=nukefield2"></script>
+<script src="src/systems/impactbus.js?v=boom2"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1468,7 +1485,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=tornado1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=nodash1"></script>
-<script src="src/city/gunstore.js?v=deslop1"></script>
+<script src="src/city/gunstore.js?v=boom2"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
 <script src="src/city/gunmods.js?v=nodash1"></script>
@@ -1561,7 +1578,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=nodash1"></script>
 <script src="src/city/restrain.js?v=nodash1"></script>
-<script src="src/city/combat.js?v=nodash1"></script>
+<script src="src/city/combat.js?v=boom2"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1570,11 +1587,12 @@ document.body.appendChild(b);}}catch(e){}})();
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=deslop1"></script>
-<script src="src/city/explosives.js?v=nodash1"></script>
+<script src="src/city/explosives.js?v=boom2"></script>
+<script src="src/systems/helditems.js?v=boom2"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=nodash1"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
-<script src="src/city/ragdoll.js?v=fall1"></script>
+<script src="src/city/ragdoll.js?v=fallreal1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=cpd1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
@@ -1610,7 +1628,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/tsunami.js?v=tsureal2"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
 <script src="src/city/construction.js?v=nodash1"></script>
-<script src="src/city/companies.js?v=nodash1"></script>
+<script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
 <script src="src/city/playergang.js?v=cpd1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
@@ -1708,7 +1726,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (registration), citystaff (posts) and wildlife (the sea it sails on). -->
 <script src="src/city/yachts.js?v=sharkscene1"></script>
 <script src="src/city/seacrew.js?v=yacht1"></script>
-<script src="src/city/armor.js?v=nodash1"></script>
+<script src="src/city/armor.js?v=hats1"></script>
 <!-- Direct Prison Escape cast through Gang City's canonical painted wardrobe.
      Loaded after clothes/outfits/armor so the adapter only assigns roles; the
      shared garment and fit owners do every actual visual operation. -->
@@ -1722,15 +1740,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=nodash1"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=cpd1"></script>
+<script src="src/city/hud.js?v=boom2"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nodash1"></script>
-<script src="src/city/charpanel.js?v=markphoto1"></script>
+<script src="src/city/charpanel.js?v=hats1"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
      card on the phone shows the mark instead of describing him. -->
-<script src="src/city/mugshot.js?v=markphoto1"></script>
+<script src="src/city/mugshot.js?v=hats1"></script>
 <!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
      renders the interactive [I] slot grid into charpanel's overlay, owns world
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
@@ -1749,7 +1767,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the EMS dispatcher that puts traffic.js's ambulance and medics.js's
      paramedic on the same scene. Needs peds.js, police.js, traffic.js,
      armor.js and interact.js — all above. -->
-<script src="src/city/morgue.js?v=weaponphysics1"></script>
+<script src="src/city/morgue.js?v=fallstay1"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
@@ -1766,7 +1784,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/hitman.js?v=inworld1"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=inworld1"></script>
-<script src="src/city/agency.js?v=detail1"></script>
+<script src="src/city/agency.js?v=boom2"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=markphoto1"></script>
@@ -1792,7 +1810,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=stain1"></script>
+<script src="src/systems/gore.js?v=airblood2"></script>
 <script src="src/systems/wounds.js?v=soak4w9"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
@@ -1998,8 +2016,8 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=brainmoves1"></script>
-<script src="src/city/protection.js?v=brainmoves1"></script>
-<script src="src/city/officials.js?v=seawave1"></script>
+<script src="src/city/protection.js?v=fallstay1"></script>
+<script src="src/city/officials.js?v=fallstay1"></script>
 <script src="src/city/approval.js?v=pres3"></script>
 <script src="src/city/elections.js?v=nodash1"></script>
 
@@ -2239,7 +2257,7 @@ document.body.appendChild(b);}}catch(e){}})();
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
 <script src="src/city/plots.js?v=plots1"></script>
-<script src="src/city/compoundcrew.js?v=cpd2"></script>
+<script src="src/city/compoundcrew.js?v=boom2"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker

@@ -44,7 +44,7 @@ for (const f of ["src/vendor/three.r128.min.js", "src/systems/fphands.js",
   "src/weapons/appearances/smg.js", "src/weapons/appearances/revolver.js", "src/weapons/appearances/deagle.js",
   "src/weapons/appearances/ak47.js", "src/weapons/appearances/uzi.js", "src/weapons/appearances/sniper.js",
   "src/weapons/appearances/lmg.js", "src/weapons/appearances/bazooka.js", "src/weapons/appearances/taser.js",
-  "src/weapons/appearances/glauncher.js", "src/weapons/appearances/shank.js"]) {
+  "src/weapons/appearances/glauncher.js", "src/weapons/appearances/shank.js", "src/entities/watch.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ } = ctx;
@@ -227,6 +227,8 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
   const ASPECT = 16 / 10;
   const outOfLens = (c, fov) => { const t = Math.tan(fov * Math.PI / 360); return c.z > -0.05 || Math.abs(c.y / -c.z) > t || Math.abs(c.x / -c.z) > t * ASPECT; };
   const handK = [];
+  let watchWorst = 0;
+  CBZ.playerChar = { _ww: { role: "diver", over: null } };        // the player's watch (entities/watch.js styleOf)
   for (const id of guns) {
     const model = CBZ.weaponAppearance[id](actx);
     model.scale.setScalar(1.28);
@@ -288,6 +290,30 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
       if (!sup) { if (pose[0] === "hip") console.log(`  ${id.padEnd(9)} one-handed`); continue; }
       const L = arm(A.armL);
       const La = { W: arr(L.W), E: arr(L.E), S: arr(L.S) };
+      // 9. the player's watch (entities/watch.js rides the LEFT arm's poseArm):
+      // real scale on screen, never a big dial facing the lens from the
+      // bottom-centre (owner: "a HUGE dial at the bottom-centre over the hotbar")
+      const ww = A.armL.userData.ww && A.armL.userData.ww.inst;
+      if (lensFov && ww && ww.visible) {
+        const head = ww.children[1];
+        ww.updateMatrix(); head.updateMatrix();
+        const Mh = ww.matrix.clone().multiply(head.matrix).premultiply(A.vm.matrix), pos = head.geometry.attributes.position, v = new T.Vector3();
+        const tanH = Math.tan(lensFov * Math.PI / 360);
+        let x0 = Infinity, x1 = -Infinity, cx = 0, cy = 0;
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).applyMatrix4(Mh);
+          const nx = v.x / (-v.z * tanH * ASPECT), ny = v.y / (-v.z * tanH);
+          x0 = Math.min(x0, nx); x1 = Math.max(x1, nx); cx += nx; cy += ny;
+        }
+        cx /= pos.count; cy /= pos.count;
+        const span = (x1 - x0) / 2;
+        const hc = new T.Vector3().applyMatrix4(Mh), face = new T.Vector3(0, 0, 1).transformDirection(Mh);
+        const facing = face.dot(hc.clone().negate().normalize());
+        const inBand = Math.abs(cx) < 0.25 && cy < -0.55 && cy > -1;
+        check(span < 0.12, `${tag}: the watch spans ${(span * 100).toFixed(1)}% of the lens`);
+        check(!(inBand && facing > 0.5 && span > 0.06), `${tag}: no big dial facing the lens at the bottom-centre (${cx.toFixed(2)}, ${cy.toFixed(2)}, facing ${facing.toFixed(2)})`);
+        watchWorst = Math.max(watchWorst, span);
+      }
       if (lensFov) check(outOfLens(L.E, lensFov), `${tag}: support elbow out of the lens (${arr(L.E).map((v) => v.toFixed(2))})`);
       check(L.E.y < L.W.y && L.E.x < L.W.x + 0.05, `${tag}: support forearm heads down and out`);
       check(wristAngle(sup, L) <= A.WRIST_DEV[1] + 1e-3, `${tag}: support wrist within its limit (${(wristAngle(sup, L) * 57.3).toFixed(0)} deg)`);
@@ -297,6 +323,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     }
     reloadP = -1;
   }
+  console.log(`  the player's watch on the support arm: widest ${(watchWorst * 100).toFixed(1)}% of the lens`);
   // 6. one hand size
   const k0 = handK[0][1];
   for (const [id, k] of handK) check(Math.abs(k / k0 - 1) < 0.01, `${id}: the same hand size as every other gun (${k.toFixed(3)} vs ${k0.toFixed(3)})`);

@@ -72,12 +72,189 @@
    stretched long before; the fireball itself used to die before the eye could
    register it.
 ============================================================ */
+
+/* ============================================================
+   THE PURE HALF OF THE ONE EXPLOSION (CBZ.blastFxPure). No THREE, no scene,
+   no DOM: the kind->look table, the persistent-decal ledger (cap + merge), the
+   single pooled flash light's envelope, and the distance curves for shake and
+   sound. It loads in plain node (tools/check-blast-aftermath.mjs) with a fake
+   window, which is the whole reason it is its own block.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ) return;
+
+  /* KIND -> LOOK. Every field is a MULTIPLIER on the shared recipe in
+     blastVisual (the render block below), so "a grenade is smaller, more dust
+     and fragments, less fire" is one row, not a second explosion.
+       fire/core   rolling fireball body / additive hot cores
+       fireSize    fireball puff size
+       rise        buoyancy: how tall the fireball climbs (a car's fuel ball is tall)
+       smoke,tone  soot volume, soot colour [r,g,b] (car = oily black)
+       dust        ground shockwave skirt
+       frag        ground chunks + charred bits thrown
+       sparks,embers
+       dirK        how hard the look is thrown along opts.normal / opts.dir
+       column      seconds the smoke column keeps rising (0 = none)
+       mushroom    the column caps and spreads at the top
+       fires,fireDur  small fires left burning on the debris/crater
+       decal       crater scorch radius factor (0 = no ground mark)
+       light       flash light peak factor
+       surface     forced ground material ("rock"), else asphalt/dirt by mode */
+  const T = function (o) { return Object.freeze(Object.assign({
+    fire: 1, core: 1, fireSize: 1, rise: 1, smoke: 1, tone: [0.1, 0.092, 0.086], dust: 1, frag: 1,
+    sparks: 1, embers: 1, dirK: 0.35, column: 24, mushroom: false, fires: 1, fireDur: [20, 40],
+    decal: 1, light: 1, surface: null,
+  }, o)); };
+  const KINDS = {
+    blast:    T({}),
+    rpg:      T({ fire: 1.05, smoke: 1.1, frag: 1.1, column: 30, fires: 2, fireDur: [20, 45] }),
+    grenade:  T({ fire: 0.45, core: 0.8, fireSize: 0.75, rise: 0.7, smoke: 0.55, tone: [0.2, 0.19, 0.17],
+                  dust: 1.5, frag: 1.7, sparks: 1.6, embers: 0.7, column: 10, fires: 0, decal: 0.7, light: 0.7 }),
+    c4:       T({ fire: 0.9, smoke: 1.25, dust: 1.5, frag: 1.3, sparks: 1.1, dirK: 1, column: 32, fires: 1,
+                  decal: 1.05, light: 1.1 }),
+    car:      T({ fire: 1.6, core: 1.1, fireSize: 1.15, rise: 1.7, smoke: 1.5, tone: [0.055, 0.05, 0.047],
+                  dust: 0.5, frag: 0.35, sparks: 0.8, embers: 1.4, column: 42, fires: 3, fireDur: [30, 60],
+                  decal: 0.85, light: 1.3 }),
+    aircraft: T({ fire: 1.8, core: 1.1, fireSize: 1.2, rise: 1.6, smoke: 1.5, tone: [0.06, 0.055, 0.05],
+                  dust: 0.9, frag: 0.8, embers: 1.5, column: 45, mushroom: true, fires: 4, fireDur: [30, 60],
+                  light: 1.4 }),
+    heavy:    T({ fire: 1.3, smoke: 1.4, dust: 1.5, frag: 1.3, sparks: 1.2, embers: 1.2, rise: 1.3,
+                  column: 40, mushroom: true, fires: 3, fireDur: [25, 60], decal: 1.15, light: 1.4 }),
+    volcano:  T({ fire: 0.7, core: 0.6, smoke: 1.2, tone: [0.24, 0.22, 0.2], dust: 1.3, frag: 0.8,
+                  sparks: 0.5, embers: 1.5, rise: 0.9, column: 14, fires: 1, decal: 0.8, surface: "rock" }),
+    impact:   T({ fire: 0.35, core: 0.5, fireSize: 0.8, smoke: 0.6, tone: [0.3, 0.27, 0.23], dust: 1.8,
+                  frag: 1.4, sparks: 0.6, embers: 0.6, column: 8, fires: 0, decal: 0.8, light: 0.6 }),
+    ember:    T({ fire: 0.35, core: 0.5, smoke: 0.3, dust: 0, frag: 0, sparks: 0.4, embers: 0.6,
+                  column: 0, fires: 0, decal: 0, light: 0.3 }),
+  };
+  // ordnance ids (systems/impactbus.js rows) and caller spellings -> a look
+  const ALIAS = {
+    carcook: "car", vehicle: "car", truck: "car",
+    crashSmall: "aircraft", crashJet: "aircraft", crashAirliner: "aircraft", plane: "aircraft", heli: "aircraft",
+    airstrike: "heavy", missile: "heavy", bomb: "heavy", jdam: "heavy", moab: "heavy", tank: "heavy",
+    meteor: "impact", kinetic: "impact", lightning: "impact", tornado: "impact",
+    frag: "grenade", breach: "c4", satchel: "c4", lava: "volcano",
+  };
+  function kindName(kind) {
+    if (kind && KINDS[kind]) return kind;
+    return (kind && ALIAS[kind]) || "blast";
+  }
+  function blastKind(kind) { return KINDS[kindName(kind)]; }
+
+  /* THE PERSISTENT MARK LEDGER. Capped and merged: a second blast inside half
+     an existing mark's radius GROWS that mark (and makes it the newest) instead
+     of stacking a second disc on the same metre of road; past the cap the
+     OLDEST retires and hands its instance slot to the new one. Slots are the
+     instanced-mesh indices the render block writes, so the draw never grows.
+     `y` is optional (wall soot merges in 3D so a hole two storeys up is not
+     folded into the one at the kerb). */
+  function makeDecalLedger(cap) {
+    const live = [];
+    const free = [];
+    for (let i = cap - 1; i >= 0; i--) free.push(i);
+    const res = { op: "", rec: null, evicted: null };
+    return {
+      live: live, cap: cap,
+      place: function (x, z, r, variant, yaw, y) {
+        res.evicted = null;
+        const yy = y == null ? 0 : y;
+        for (let i = live.length - 1; i >= 0; i--) {
+          const d = live[i];
+          const dist = Math.hypot(x - d.x, z - d.z, yy - d.y);
+          const big = Math.max(d.r, r);
+          if (dist < big * 0.5) {
+            d.r = Math.min(big * 1.45, Math.max(big, dist + r * 0.75));
+            d.x += (x - d.x) * 0.25; d.z += (z - d.z) * 0.25;
+            d.hits++;
+            live.splice(i, 1); live.push(d);
+            res.op = "merge"; res.rec = d; return res;
+          }
+        }
+        let slot;
+        if (free.length) slot = free.pop();
+        else { const old = live.shift(); res.evicted = old; slot = old.slot; }
+        const rec = { x: x, z: z, y: yy, r: r, slot: slot, variant: variant | 0, yaw: yaw || 0,
+                      hits: 1, gy: 0, w: 0, h: 0, nx: 0, nz: 0 };
+        live.push(rec);
+        res.op = "add"; res.rec = rec; return res;
+      },
+      remove: function (rec) {
+        const i = live.indexOf(rec);
+        if (i < 0) return false;
+        live.splice(i, 1); free.push(rec.slot);
+        return true;
+      },
+      clear: function () {
+        live.length = 0; free.length = 0;
+        for (let i = cap - 1; i >= 0; i--) free.push(i);
+      },
+    };
+  }
+
+  /* ONE FLASH LIGHT FOR EVERY BLAST. r128 recompiles every lit material when
+     the scene's light count changes, so the light is made ONCE (the factory
+     runs at init) and idles at intensity 0; a blast moves it and spikes it and
+     it decays to dark over `dur`. Overlapping blasts reuse it: it jumps to the
+     newest seat and keeps the brighter of the two peaks. */
+  function makeFlashPool(factory, dur) {
+    dur = dur || 0.26;
+    let L = null, made = 0, t = 1e9, peak = 0;
+    function ensure() { if (!L) { L = factory(); made++; } return L; }
+    function level() {
+      if (t >= dur) return 0;
+      if (t < 0.035) return peak;                 // the white-hot frame or two
+      const f = 1 - (t - 0.035) / (dur - 0.035);
+      return peak * f * f;
+    }
+    return {
+      init: ensure,
+      made: function () { return made; },
+      level: level,
+      flash: function (x, y, z, pk, range) {
+        const l = ensure(); if (!l) return;
+        peak = Math.max(pk, level()); t = 0;
+        if (l.position && l.position.set) l.position.set(x, y, z);
+        if (range != null) l.distance = range;
+        l.intensity = peak;
+      },
+      step: function (dt) {
+        if (!L || t >= dur) return 0;
+        t += dt;
+        const v = level();
+        L.intensity = v;
+        return v;
+      },
+    };
+  }
+
+  // camera shake by distance: full at the seat, half at ~1.5 blast radii + 4 m,
+  // nothing past max(250 m, 12 radii)
+  function shakeAtten(d, R) {
+    const lim = Math.max(250, R * 12);
+    if (!(d >= 0)) return 1;
+    if (d >= lim) return 0;
+    const k = d / (R * 1.5 + 4);
+    return 1 / (1 + k * k);
+  }
+  // light arrives now, sound at 343 m/s (skipped close in, capped far out)
+  function soundDelay(d) { return d > 40 ? Math.min(6, d / 343) : 0; }
+
+  CBZ.blastFxPure = {
+    KINDS: KINDS, ALIAS: ALIAS, blastKind: blastKind, kindName: kindName,
+    makeDecalLedger: makeDecalLedger, makeFlashPool: makeFlashPool,
+    shakeAtten: shakeAtten, soundDelay: soundDelay,
+  };
+})();
+
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE || !CBZ.scene) return;
   const THREE = window.THREE;
   const scene = CBZ.scene;
+  const PURE = CBZ.blastFxPure;
 
   // ---- deterministic seeded LCG (NEVER Math.random() — replay/MP sync) ------
   let _rs = 78451;
@@ -191,7 +368,7 @@
   // instead of the default street level.
   function pointBurst(x, z, count, color, size, speed, life, dust, y0) {
     if (count > BURST_MAX) count = BURST_MAX;   // never overrun the pooled buffer
-    const baseY = y0 != null ? y0 : 0.35;
+    const baseY = y0 != null ? y0 : floorAt(x, z) + 0.35;
     const pooled = CBZ.fxPool !== false;
     // pooled path reuses the slot's preallocated buffers; the fallback (flag off)
     // allocates exactly as before so behavior degrades to today byte-for-byte.
@@ -245,10 +422,8 @@
   }
 
   // owner: "the fake ring that comes around at first is stupid and should be
-  // gone" — the ground shockwave rings on explosions are OFF unless
-  // CBZ.CONFIG.FX_EXPLOSION_RINGS === true (one-line restore). The car-crash
-  // glass ring and the dust skirt are different effects and keep running.
-  function ringsOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.FX_EXPLOSION_RINGS === true); }
+  // gone" — explosions draw no ground ring at all (the dust skirt in
+  // blastVisual is the shockwave). Only the car-crash glass ring uses this.
   function ring(x, z, radius, color, opt) {
     opt = opt || {};
     const inner = opt.inner == null ? 0.7 : opt.inner;
@@ -313,7 +488,8 @@
     return !!(r && r.pieces);
   };
 
-  // ---- ground SCORCH decal (a dark radial disc that snaps in + lingers) ----
+  // ---- crash SCUFF (a dark radial disc that snaps in, lingers, fades) ----
+  // Crashes only. Explosions leave the persistent crater mark (queueMark).
   // Pooled flat circles laid just above the road; one shared scorch texture.
   let scorchTex = null;
   function makeScorchTexture() {
@@ -334,7 +510,7 @@
     const t = new THREE.Texture(c); t.needsUpdate = true; return t;
   }
   const scorchGeo = new THREE.PlaneGeometry(1, 1); scorchGeo._shared = true;
-  function addScorch(x, z, radius, hold) {
+  function addScuff(x, z, radius, hold) {
     // Never stamp a burn decal on open water — it floated on the sea as a flat
     // black disc. Guarding the single builder covers all three call sites.
     if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
@@ -343,7 +519,7 @@
     const mat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
     const mesh = new THREE.Mesh(scorchGeo, mat);
     mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = rng() * 6.28;
-    mesh.position.set(x, 0.045, z); mesh.scale.setScalar(radius * 2);
+    mesh.position.set(x, floorAt(x, z) + 0.045, z); mesh.scale.setScalar(radius * 2);
     mesh.renderOrder = 1; scene.add(mesh);
     // scorch marks linger as black road stains; airstrikes pass a longer hold
     scorches.push({ mesh, mat, t: 0, hold: (hold || 11) + rng() * 5, grow: 0 });
@@ -461,7 +637,7 @@
     if (!smokeTex) smokeTex = makeSmokeTexture();
     return { flame: puffTex, smoke: smokeTex };
   };
-  function getPuff(additive, smoke) {
+  function getPuff(additive, smoke, tex) {
     if (!puffTex) puffTex = makePuffTexture();
     if (smoke && !smokeTex) smokeTex = makeSmokeTexture();
     let p = puffPool.pop();
@@ -470,11 +646,22 @@
       const m = new THREE.SpriteMaterial({ map: puffTex, depthWrite: false, depthTest: true, transparent: true, opacity: 0 });
       p = new THREE.Sprite(m); p.renderOrder = 9; scene.add(p);
     }
-    const wantMap = smoke ? smokeTex : puffTex;
+    const wantMap = tex || (smoke ? smokeTex : puffTex);
     if (p.material.map !== wantMap) { p.material.map = wantMap; p.material.needsUpdate = true; } // rebind sampler on swap
     p.material.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending;
-    p.renderOrder = smoke ? 6 : 9; // smoke sits behind flame
+    // smoke sits behind the rolling fireball body, which sits behind the hot cores
+    p.renderOrder = smoke ? 6 : (additive ? 9 : 8);
     p.visible = true; return p;
+  }
+  // THE ROLLING BODY's ramp (normal-blended, dark-edged puffs): it starts as
+  // yellow-white fire, drops through orange and deep red, and ends as the soot
+  // it turns into. The additive RAMP below stays the hot cores' ramp.
+  const BODY = [[0, 1, 0.9, 0.62], [0.14, 1, 0.6, 0.2], [0.32, 0.86, 0.3, 0.08], [0.52, 0.36, 0.12, 0.05], [0.78, 0.1, 0.085, 0.075], [1, 0.07, 0.065, 0.06]];
+  function rampBody(out, t) {
+    for (let i = 1; i < BODY.length; i++) {
+      if (t <= BODY[i][0]) { const a = BODY[i - 1], b = BODY[i], p = (t - a[0]) / (b[0] - a[0]); return out.setRGB(a[1] + (b[1] - a[1]) * p, a[2] + (b[2] - a[2]) * p, a[3] + (b[3] - a[3]) * p); }
+    }
+    return out.setRGB(0.07, 0.065, 0.06);
   }
   // white → yellow → orange → deep-red → smoke over normalized life t
   const RAMP = [[0, 1, 1, 0.95], [0.15, 1, 0.95, 0.55], [0.35, 1, 0.55, 0.15], [0.6, 0.65, 0.12, 0.05], [1, 0.12, 0.1, 0.1]];
@@ -522,30 +709,55 @@
       punchQ.splice(i, 1);
     }
   }
+  /* A puff is one pooled sprite with a small motion law. The original fields
+     (base, pop, life, maxOp, spin, vx/vy/vz, shade, smoke, delay) behave exactly as before;
+     the explosion added the ones below, all optional:
+       tex        a specific sprite texture (the billow variants)
+       body       a normal-blended fireball puff (dark-edged, BODY ramp)
+       drag       per-second velocity loss (smoke default 0.5 on x/z, else 0)
+       buoy       upward acceleration (smoke default 0.6, else 0)
+       grav       downward acceleration (embers)
+       capY       above this height the puff stops rising and spreads (mushroom)
+       rx,rz      the outward direction it spreads in above capY
+       wx,wz      wind drift, m/s
+       tone       [r,g,b] soot colour (else grey `shade`)
+       noHeat     smoke that never glowed (dust)
+       fin        smoke fade-in fraction of life (default 0.25) */
   function spawnPuff(x, y, z, o) {
-    const p = getPuff(o.additive !== false, o.smoke);
+    const p = getPuff(o.additive !== false, o.smoke, o.tex || null);
     if (!p) return false;
     p.position.set(x, y, z); p.material.rotation = rng() * 6.2832;
     p.scale.set(o.base, o.base, 1); p.material.opacity = 0; p.visible = (o.delay || 0) <= 0;
+    const fin = o.fin == null ? 0.25 : o.fin;
     // FIRST-FRAME TRUTH — see the flag block above. Delayed puffs (the
     // deliberate smoke staging) keep their opacity-0 birth.
     if (firstFrameOn() && (o.delay || 0) <= 0 && o.life > 0) {
       const t0 = Math.min(0.999, (1 / 60) / o.life);
       const mo = o.maxOp == null ? 1 : o.maxOp;
       if (o.smoke) {
-        p.material.opacity = Math.max(0, (t0 < 0.25 ? t0 / 0.25 : 1) * mo);
+        p.material.opacity = Math.max(0, (t0 < fin ? t0 / fin : 1) * mo);
+      } else if (o.body) {
+        p.material.opacity = Math.max(0, (t0 < 0.06 ? t0 / 0.06 : 1) * mo);
+        rampBody(p.material.color, t0);
       } else {
         p.material.opacity = Math.max(0, (t0 < 0.1 ? t0 / 0.1 : 1 - (t0 - 0.1) / 0.9) * mo);
         rampColor(p.material.color, t0);
       }
     }
+    const shade = o.shade == null ? 0.16 : o.shade;
+    const tone = o.tone || null;
     puffs.push({
       s: p, age: -(o.delay || 0), life: o.life, base: o.base, pop: o.pop,
       x: x, y: y, z: z, vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0,
       spin: o.spin || 0, rot: p.material.rotation,
-      smoke: !!o.smoke, maxOp: o.maxOp == null ? 1 : o.maxOp,
-      // smoke fades from charred-orange to dark grey as it cools
-      shade: o.shade == null ? 0.16 : o.shade,
+      smoke: !!o.smoke, body: !!o.body, maxOp: o.maxOp == null ? 1 : o.maxOp,
+      // smoke fades from charred-orange to its soot tone as it cools
+      tr: tone ? tone[0] : shade, tg: tone ? tone[1] : shade, tb: tone ? tone[2] : shade,
+      drag: o.drag != null ? o.drag : (o.smoke ? 0.5 : 0),
+      buoy: o.buoy != null ? o.buoy : (o.smoke ? 0.6 : 0),
+      grav: o.grav || 0, capY: o.capY != null ? o.capY : null,
+      rx: o.rx || 0, rz: o.rz || 0, wx: o.wx || 0, wz: o.wz || 0,
+      noHeat: !!o.noHeat, fin: fin,
     });
     return true;
   }
@@ -561,21 +773,40 @@
       if (p.spin) { p.rot += p.spin * dt; p.s.material.rotation = p.rot; }
       if (p.smoke) {
         // negative gravity: smoke rises, drifts, and slows as it expands/cools
-        p.vy += 0.6 * dt; p.vx *= (1 - 0.5 * dt); p.vz *= (1 - 0.5 * dt);
-        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        p.vy += p.buoy * dt;
+        const k = Math.max(0, 1 - p.drag * dt);
+        p.vx *= k; p.vz *= k;
+        if (p.capY !== null && p.y > p.capY) {
+          // the column's head: rising stalls and the smoke rolls outward
+          p.vy *= Math.max(0, 1 - 1.6 * dt);
+          p.vx += p.rx * 1.5 * dt; p.vz += p.rz * 1.5 * dt;
+        }
+        p.x += (p.vx + p.wx) * dt; p.y += p.vy * dt; p.z += (p.vz + p.wz) * dt;
         p.s.position.set(p.x, p.y, p.z);
         // first instant glows hot from the dying fireball, then darkens to soot
-        const heat = Math.max(0, 1 - t * 4);
-        const g = p.shade;
-        p.s.material.color.setRGB(g + heat * 0.55, g + heat * 0.18, g);
-        // smoke fades IN then slowly OUT (lingers): ease in over first 25%
-        const fade = t < 0.25 ? t / 0.25 : 1 - (t - 0.25) / 0.75;
+        const heat = p.noHeat ? 0 : Math.max(0, 1 - t * 4);
+        p.s.material.color.setRGB(p.tr + heat * 0.55, p.tg + heat * 0.18, p.tb);
+        // smoke fades IN then slowly OUT (lingers)
+        const fade = t < p.fin ? t / p.fin : 1 - (t - p.fin) / (1 - p.fin);
         p.s.material.opacity = Math.max(0, fade * p.maxOp);
       } else {
-        // flame puffs drift outward a touch and ramp white->yellow->orange->red
-        if (p.vx || p.vy || p.vz) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.s.position.set(p.x, p.y, p.z); }
-        p.s.material.opacity = Math.max(0, (t < 0.1 ? t / 0.1 : 1 - (t - 0.1) / 0.9) * p.maxOp);
-        rampColor(p.s.material.color, t);
+        if (p.drag) { const k = Math.max(0, 1 - p.drag * dt); p.vx *= k; p.vy *= k; p.vz *= k; }
+        if (p.buoy || p.grav) p.vy += (p.buoy - p.grav) * dt;
+        if (p.capY !== null && p.y > p.capY && p.vy > 0) p.vy *= Math.max(0, 1 - 2.5 * dt);
+        if (p.vx || p.vy || p.vz || p.wx || p.wz) {
+          p.x += (p.vx + p.wx) * dt; p.y += p.vy * dt; p.z += (p.vz + p.wz) * dt;
+          p.s.position.set(p.x, p.y, p.z);
+        }
+        if (p.body) {
+          // the rolling fireball: snaps in, holds while it climbs, then thins
+          // as the soot puffs spawned behind it take over
+          p.s.material.opacity = Math.max(0, (t < 0.06 ? t / 0.06 : (t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45)) * p.maxOp);
+          rampBody(p.s.material.color, t);
+        } else {
+          // flame puffs ramp white->yellow->orange->red
+          p.s.material.opacity = Math.max(0, (t < 0.1 ? t / 0.1 : 1 - (t - 0.1) / 0.9) * p.maxOp);
+          rampColor(p.s.material.color, t);
+        }
       }
     }
   }
@@ -651,7 +882,7 @@
         CBZ.debris.chips(x, cy, z, { kind: "glass", count: Math.round((catastrophic ? 26 : 12) * fxq), dir: cd, power: 0.8 + speed * 0.03, dust: false });
         CBZ.debris.chips(x, cy - 0.2, z, { kind: "plastic", color: 0x1d1f22, count: Math.round((catastrophic ? 10 : 4) * fxq), dir: cd, power: 0.7 + speed * 0.03, dust: false });
       }
-      addScorch(x, z, catastrophic ? 3 : 1.4, catastrophic ? 9 : 5);   // a scuff/skid stain even on a hard (non-fatal) wall hit
+      addScuff(x, z, catastrophic ? 3 : 1.4, catastrophic ? 9 : 5);   // a scuff/skid stain even on a hard (non-fatal) wall hit
       if (catastrophic) {
         if (CBZ.shake) CBZ.shake(1.6);
         // a clutch of small lingering flames + a thin smoke wisp so a wrecked car
@@ -677,178 +908,727 @@
     }
   };
 
-  // ---- lingering ground SMOLDER columns — a big blast's crater keeps smoking
-  // for tens of seconds (same pooled-emitter idea as the wall wounds below).
-  // Hard cap 3 live smolders: the oldest crater just stops smoking.
-  const smolders = [];
-  function addSmolder(x, z, dur) {
-    while (smolders.length >= 3) smolders.shift();
-    smolders.push({ x, z, t: 0, dur, acc: 0.3 });
+  /* ============================================================
+     THE ONE EXPLOSION — its picture (blastVisual) and what it leaves behind
+     (blastAftermath). Owner (2026-09-28): "the explosion is not very real,
+     especially the effect it leaves on the environment."
+
+     BEFORE: additive white discs summed into one flat orange bloom, a few
+     grey smoke dots that were gone in four seconds, and a soft black circle
+     on the road that faded after ~15 s. Nothing burned, nothing stayed.
+
+     NOW, in the order the eye reads a real detonation:
+       1. FLASH     one or two frames of white-hot core, plus the ONE pooled
+                    PointLight (made at load, idle at 0, never added/removed)
+                    spiking and dying over ~0.25 s so the street lights up.
+       2. FIREBALL  hot additive cores INSIDE a body of normal-blended,
+                    dark-edged billow puffs (baked noise textures with soot
+                    folds) that roll outward, lose speed, climb on buoyancy
+                    and ramp white -> yellow -> orange -> deep red -> soot.
+       3. SOOT      thick dark puffs born on the fireball as it cools, then a
+                    SMOKE COLUMN emitter that keeps rising for 10-45 s by kind,
+                    thinning, drifting with CBZ.weatherWind, capping into a
+                    mushroom head for heavy ordnance.
+       4. SHOCK     a low tan/grey dust skirt racing out along the ground.
+                    (The bright ground RING stays off: the owner called it
+                    "the fake ring that comes around at first", FX_EXPLOSION_RINGS.)
+       5. DEBRIS    CBZ.debris: real chunks of the ground it tore (asphalt in
+                    the city, earth elsewhere, rock for the volcano), charred
+                    bits that stay where they land, sparks and slow embers.
+       6. AFTERMATH a crater scorch that DOES NOT FADE (capped at 24, merged
+                    when blasts overlap, oldest retires), small fires that
+                    keep burning 20-60 s on the debris, and the column.
+     Kind (opts.kind / opts.ordnance) picks the proportions from
+     CBZ.blastFxPure.KINDS: a grenade is dust and fragments, a car is a tall
+     fuel ball and oily black smoke, C4 throws itself along opts.normal.
+     ============================================================ */
+
+  // ---- baked billow textures (value-noise fbm on a canvas, once, at load) ----
+  function hash2(x, y, s) {
+    let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1442695041)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function vnoise(x, y, s) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  function fbm(x, y, s, oct) {
+    let sum = 0, amp = 0.5, f = 1, norm = 0;
+    for (let o = 0; o < oct; o++) { sum += amp * vnoise(x * f, y * f, s + o * 17); norm += amp; amp *= 0.5; f *= 2.03; }
+    return sum / norm;
+  }
+  function sstep(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+  // smoke=false: a fire billow whose RGB darkens toward the rim and in soot
+  // folds (so a normal-blended puff has dark edges and an additive one has
+  // structure); smoke=true: a lumpy cloud lit a little from above.
+  function makeBillowTex(seed, smoke) {
+    const N = 128, c = document.createElement("canvas"); c.width = c.height = N;
+    const ctx = c.getContext("2d"), img = ctx.createImageData(N, N), d = img.data;
+    const ox = seed * 13.7, oy = seed * 7.3;
+    for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+      const u = (px + 0.5) / N * 2 - 1, v = (py + 0.5) / N * 2 - 1;
+      const r = Math.sqrt(u * u + v * v);
+      const n = fbm(u * 2.6 + ox, v * 2.6 + oy, seed, 4);
+      const n2 = fbm(u * 5.5 + oy, v * 5.5 + ox, seed + 91, 3);
+      let a, b;
+      if (smoke) {
+        a = sstep(0.95, 0.5, r + (n - 0.5) * 0.8) * (0.72 + 0.28 * n2);
+        b = 0.72 + 0.26 * n2 - v * 0.1;
+      } else {
+        a = sstep(0.93, 0.58, r + (n - 0.5) * 0.62);
+        b = 1.12 - r * 0.9 + (n - 0.5) * 0.6;
+        b *= 1 - sstep(0.55, 0.74, n2) * (0.3 + r * 0.7) * 0.85;
+      }
+      const o = (py * N + px) * 4, g = Math.round(Math.max(0, Math.min(1, b)) * 255);
+      d[o] = g; d[o + 1] = g; d[o + 2] = g; d[o + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+  }
+  const fireTex = [], smokeB = [];
+  function blastTexReady() {
+    if (fireTex.length) return;
+    for (let i = 0; i < 4; i++) fireTex.push(makeBillowTex(11 + i * 7, false));
+    for (let i = 0; i < 3; i++) smokeB.push(makeBillowTex(53 + i * 5, true));
   }
 
-  // a real EXPLOSION (super-fast car-on-car, grenades later, etc.): fireball +
-  // smoke + shockwave + white flash + blast damage to everyone in radius. Reusable.
+  // a local seeded LCG for the decal art, so baking it never shifts rng()
+  function lcg(seed) { let s = seed | 0; return function () { s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff; return s / 0x7fffffff; }; }
+
+  /* GROUND CRATER ATLAS: 2x2 variants on one 512 canvas, one texture, one
+     material. Each: a burnt black centre with an ashy pit, radial scorch rays,
+     a ragged rim, and a spray of dirt and dark specks thrown past it. */
+  function makeCraterAtlas() {
+    const S = 512, H = 256, c = document.createElement("canvas"); c.width = c.height = S;
+    const ctx = c.getContext("2d");
+    for (let q = 0; q < 4; q++) {
+      const R = lcg(7001 + q * 131);
+      const cx = (q & 1) * H + H / 2, cz = (q >> 1) * H + H / 2, r = H / 2 - 4;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(cx - H / 2, cz - H / 2, H, H); ctx.clip();
+      const g = ctx.createRadialGradient(cx, cz, 0, cx, cz, r * 0.62);
+      g.addColorStop(0, "rgba(10,9,8,0.97)");
+      g.addColorStop(0.55, "rgba(16,13,11,0.93)");
+      g.addColorStop(0.85, "rgba(26,21,18,0.6)");
+      g.addColorStop(1, "rgba(30,24,20,0)");
+      ctx.fillStyle = g; ctx.fillRect(cx - H / 2, cz - H / 2, H, H);
+      // scorch rays: thin dark wedges of uneven reach
+      const nr = 46 + ((R() * 30) | 0);
+      for (let i = 0; i < nr; i++) {
+        const a = R() * 6.2832, w = 0.015 + R() * 0.06, L = r * (0.45 + R() * 0.55);
+        const l0 = r * 0.25;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a - w) * l0, cz + Math.sin(a - w) * l0);
+        ctx.lineTo(cx + Math.cos(a) * L, cz + Math.sin(a) * L);
+        ctx.lineTo(cx + Math.cos(a + w) * l0, cz + Math.sin(a + w) * l0);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(14,12,10," + (0.25 + R() * 0.45).toFixed(2) + ")"; ctx.fill();
+      }
+      // ashy pit: pale grey ash flecks in the black
+      for (let i = 0; i < 40; i++) {
+        const a = R() * 6.2832, d = R() * r * 0.3;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cz + Math.sin(a) * d, 1 + R() * 4, 0, 6.2832);
+        ctx.fillStyle = "rgba(70,66,62," + (0.25 + R() * 0.35).toFixed(2) + ")"; ctx.fill();
+      }
+      // thrown dirt + charred specks past the burn
+      for (let i = 0; i < 170; i++) {
+        const a = R() * 6.2832, d = r * (0.3 + Math.sqrt(R()) * 0.68);
+        const dark = R() < 0.55;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cz + Math.sin(a) * d, 0.8 + R() * (dark ? 2.2 : 3), 0, 6.2832);
+        ctx.fillStyle = dark ? "rgba(18,16,14," + (0.5 + R() * 0.4).toFixed(2) + ")"
+                             : "rgba(92,78,60," + (0.35 + R() * 0.35).toFixed(2) + ")";
+        ctx.fill();
+      }
+      // ragged rim: bite the edge so it never reads as a circle
+      ctx.globalCompositeOperation = "destination-out";
+      for (let i = 0; i < 60; i++) {
+        const a = R() * 6.2832, d = r * (0.5 + R() * 0.45);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cz + Math.sin(a) * d, 3 + R() * 9, 0, 6.2832);
+        ctx.fillStyle = "rgba(0,0,0," + (0.25 + R() * 0.5).toFixed(2) + ")"; ctx.fill();
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = "source-over";
+    }
+    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+  }
+
+  /* WALL SOOT: two variants on one 256x512 canvas. Top half: a RING whose
+     centre is empty (it frames a carved hole, the frame geometry below has no
+     triangles over the opening at all, so nothing ever hangs in the air of the
+     hole); bottom half: a SPLASH for a blast against a wall that held. Soot is
+     heaviest above the opening: the smoke poured out of the top of it. */
+  const SOOT_INNER = 0.3125;           // the hole is the central 62.5% of the ring decal
+  function makeSootTex() {
+    const W = 256, c = document.createElement("canvas"); c.width = W; c.height = W * 2;
+    const ctx = c.getContext("2d");
+    for (let v = 0; v < 2; v++) {
+      const R = lcg(9107 + v * 77), oy = v * W, cx = W / 2, cy = oy + W / 2;
+      ctx.save(); ctx.beginPath(); ctx.rect(0, oy, W, W); ctx.clip();
+      // body: an ellipse pushed up (y is down on a canvas)
+      const g = ctx.createRadialGradient(cx, cy - W * 0.08, 0, cx, cy - W * 0.06, W * 0.5);
+      g.addColorStop(0, "rgba(12,11,10,0.92)");
+      g.addColorStop(v ? 0.35 : 0.42, "rgba(16,14,12,0.85)");
+      g.addColorStop(0.7, "rgba(24,21,19,0.4)");
+      g.addColorStop(1, "rgba(30,26,22,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, oy, W, W);
+      // upward licks: the smoke that rolled up the face
+      for (let i = 0; i < 26; i++) {
+        const x = cx + (R() - 0.5) * W * 0.6, top = oy + W * (0.02 + R() * 0.3);
+        const lg = ctx.createLinearGradient(x, cy, x, top);
+        lg.addColorStop(0, "rgba(14,12,11,0.55)"); lg.addColorStop(1, "rgba(14,12,11,0)");
+        ctx.fillStyle = lg;
+        ctx.beginPath(); ctx.ellipse(x, (cy + top) / 2, 6 + R() * 16, (cy - top) / 2, (R() - 0.5) * 0.3, 0, 6.2832); ctx.fill();
+      }
+      // pitting from fragments
+      for (let i = 0; i < 90; i++) {
+        const a = R() * 6.2832, d = W * (0.15 + R() * 0.33);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 0.7 + R() * 2, 0, 6.2832);
+        ctx.fillStyle = "rgba(8,7,6,0.7)"; ctx.fill();
+      }
+      ctx.globalCompositeOperation = "destination-out";
+      for (let i = 0; i < 40; i++) {
+        const a = R() * 6.2832, d = W * (0.3 + R() * 0.2);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 4 + R() * 10, 0, 6.2832);
+        ctx.fillStyle = "rgba(0,0,0," + (0.3 + R() * 0.5).toFixed(2) + ")"; ctx.fill();
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = "source-over";
+    }
+    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+  }
+
+  // ---- the ONE pooled flash light --------------------------------------------
+  const flashPool = PURE.makeFlashPool(function () {
+    const l = new THREE.PointLight(0xffc88a, 0, 40, 2);
+    l.position.set(0, -500, 0);
+    l.castShadow = false;
+    scene.add(l);            // added ONCE at load; it only ever changes intensity
+    return l;
+  }, 0.26);
+  CBZ.blastFlashLightCount = function () { return flashPool.made(); };
+
+  // ---- persistent ground crater scorch (instanced, never fades) --------------
+  const MARK_CAP = 24;
+  const marks = PURE.makeDecalLedger(MARK_CAP);
+  let markMeshes = null;                 // 4 InstancedMesh, one per atlas quadrant
+  const ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _dm = new THREE.Matrix4(), _dq = new THREE.Quaternion(), _dq2 = new THREE.Quaternion();
+  const _dv = new THREE.Vector3(), _ds = new THREE.Vector3(), _dn = new THREE.Vector3();
+  const _UP = new THREE.Vector3(0, 1, 0), _ZF = new THREE.Vector3(0, 0, 1);
+  function ensureMarks() {
+    if (markMeshes) return markMeshes;
+    const tex = makeCraterAtlas();
+    const mat = new THREE.MeshLambertMaterial({
+      map: tex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    mat._shared = true;
+    markMeshes = [];
+    for (let q = 0; q < 4; q++) {
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.rotateX(-Math.PI / 2);
+      const uv = g.attributes.uv, u0 = (q & 1) * 0.5, v0 = (q >> 1) ? 0 : 0.5;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * 0.5, v0 + uv.getY(i) * 0.5);
+      g._shared = true;
+      const im = new THREE.InstancedMesh(g, mat, MARK_CAP);
+      for (let i = 0; i < MARK_CAP; i++) im.setMatrixAt(i, ZERO_M);
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false; im.renderOrder = 1; im.matrixAutoUpdate = false;
+      im.userData.blastMarks = true;
+      scene.add(im);
+      markMeshes.push(im);
+    }
+    return markMeshes;
+  }
+  function writeMark(rec) {
+    const M = ensureMarks();
+    // lie on the ground's actual slope, clamped (a kerb is not a slope)
+    const h = Math.max(0.6, rec.r * 0.5);
+    const sx = (floorAt(rec.x + h, rec.z) - floorAt(rec.x - h, rec.z)) / (2 * h);
+    const sz = (floorAt(rec.x, rec.z + h) - floorAt(rec.x, rec.z - h)) / (2 * h);
+    if (Math.abs(sx) > 0.45 || Math.abs(sz) > 0.45) _dn.set(0, 1, 0);
+    else _dn.set(-sx, 1, -sz).normalize();
+    _dq.setFromUnitVectors(_UP, _dn);
+    _dq2.setFromAxisAngle(_UP, rec.yaw); _dq.multiply(_dq2);
+    _dm.compose(_dv.set(rec.x, rec.gy + 0.03, rec.z), _dq, _ds.set(rec.r * 2, 1, rec.r * 2));
+    const im = M[rec.variant & 3];
+    im.setMatrixAt(rec.slot, _dm); im.instanceMatrix.needsUpdate = true;
+  }
+  // blasts queue their mark and it lands a few frames later, AFTER any crater
+  // craters.js digs (its wrap runs after this core returns): a flat decal must
+  // not hover over a freshly dug bowl, so a sunk floor skips the mark.
+  const pendingMarks = [];
+  function queueMark(x, z, r, gy) {
+    if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;       // never on water
+    if (pendingMarks.length >= 8) pendingMarks.shift();
+    pendingMarks.push({ x: x, z: z, r: r, gy: gy, t: 0 });
+  }
+  function landMark(m) {
+    const gy = floorAt(m.x, m.z);
+    if (gy < m.gy - 0.35) return;          // a crater was dug here: the bowl is the mark
+    const res = marks.place(m.x, m.z, m.r, (rng() * 4) | 0, rng() * 6.2832);
+    if (res.evicted && markMeshes) {
+      markMeshes[res.evicted.variant & 3].setMatrixAt(res.evicted.slot, ZERO_M);
+      markMeshes[res.evicted.variant & 3].instanceMatrix.needsUpdate = true;
+    }
+    res.rec.gy = res.op === "merge" ? Math.max(res.rec.gy, gy) : gy;
+    writeMark(res.rec);
+  }
+
+  // ---- wall soot (instanced ring around a carved hole, or a splash) ----------
+  const SOOT_CAP = 12;
+  const sootRing = PURE.makeDecalLedger(SOOT_CAP), sootSplash = PURE.makeDecalLedger(SOOT_CAP);
+  let sootMeshes = null;
+  function ensureSoot() {
+    if (sootMeshes) return sootMeshes;
+    const tex = makeSootTex();
+    const mat = new THREE.MeshLambertMaterial({
+      map: tex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    mat._shared = true;
+    // the ring frame: outer unit square minus the central opening, as 8 tris
+    const q = SOOT_INNER, P = [-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -q, -q, q, -q, q, q, -q, q];
+    const pos = [], uv = [], nrm = [];
+    const quads = [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+    for (let k = 0; k < 4; k++) {
+      const Q = quads[k], tri = [Q[0], Q[1], Q[2], Q[0], Q[2], Q[3]];
+      for (let j = 0; j < 6; j++) {
+        const x = P[tri[j] * 2], y = P[tri[j] * 2 + 1];
+        pos.push(x, y, 0); nrm.push(0, 0, 1);
+        uv.push(x + 0.5, 0.5 + (y + 0.5) * 0.5);            // top half of the canvas
+      }
+    }
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    ringGeo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+    ringGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    ringGeo._shared = true;
+    const splashGeo = new THREE.PlaneGeometry(1, 1);
+    const suv = splashGeo.attributes.uv;
+    for (let i = 0; i < suv.count; i++) suv.setXY(i, suv.getX(i), suv.getY(i) * 0.5);   // bottom half
+    splashGeo._shared = true;
+    sootMeshes = [ringGeo, splashGeo].map(function (g) {
+      const im = new THREE.InstancedMesh(g, mat, SOOT_CAP);
+      for (let i = 0; i < SOOT_CAP; i++) im.setMatrixAt(i, ZERO_M);
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false; im.renderOrder = 2; im.matrixAutoUpdate = false;
+      im.userData.blastSoot = true;
+      scene.add(im);
+      return im;
+    });
+    return sootMeshes;
+  }
+  function writeSoot(im, rec) {
+    _dn.set(rec.nx, 0, rec.nz);
+    _dq.setFromUnitVectors(_ZF, _dn);
+    _dm.compose(_dv.set(rec.x + rec.nx * 0.025, rec.y, rec.z + rec.nz * 0.025), _dq, _ds.set(rec.w, rec.h, 1));
+    im.setMatrixAt(rec.slot, _dm); im.instanceMatrix.needsUpdate = true;
+  }
+  function isGlassMat(m) {
+    if (!m) return false;
+    if (Array.isArray(m)) m = m[0];
+    if (!m) return false;
+    if (m.transparent && m.opacity < 0.95) return true;
+    if (m.transmission) return true;
+    return !!(CBZ.debris && CBZ.debris.kindOf && CBZ.debris.kindOf(m) === "glass");
+  }
+  /* CBZ.blastWallSoot(x, y, z, nx, nz, w, h, o)
+     Soot on the OUTER face of a masonry wall. o.hole true = the ring that
+     frames a carved opening of size w x h centred at (x,y,z); false = a splash
+     of size w x h for a blast the wall held. o.material skips glass (soot on
+     an intact pane was the floating smudge the owner purged). o.bounds
+     {minU,maxU,top,horiz} refuses a decal that would hang past the wall. */
+  CBZ.blastWallSoot = function (x, y, z, nx, nz, w, h, o) {
+    o = o || {};
+    if (!(w > 0.2 && h > 0.2)) return false;
+    if (isGlassMat(o.material)) return false;
+    const nl = Math.hypot(nx, nz); if (nl < 1e-3) return false;
+    nx /= nl; nz /= nl;
+    const hole = !!o.hole;
+    const k = hole ? 1 / (2 * SOOT_INNER) : 1;      // ring spans 1.6x the opening
+    let W = w * k, Hh = h * k;
+    const b = o.bounds;
+    if (b) {
+      const u = b.horiz ? x : z;
+      if (u - W / 2 < b.minU - 0.05 || u + W / 2 > b.maxU + 0.05) return false;
+      if (b.top != null && y + Hh / 2 > b.top + 0.05) {
+        if (hole) return false;
+        Hh = Math.max(0.4, 2 * (b.top - y)); if (Hh < 0.5) return false;
+      }
+    }
+    const M = ensureSoot();
+    const L = hole ? sootRing : sootSplash, im = hole ? M[0] : M[1];
+    // a hole opened where a splash was: the splash covered what is now the
+    // opening, so it goes (the ring frames the hole instead)
+    if (hole) {
+      for (let i = sootSplash.live.length - 1; i >= 0; i--) {
+        const s = sootSplash.live[i];
+        if (Math.hypot(s.x - x, s.y - y, s.z - z) < Math.max(W, Hh) * 0.6) {
+          M[1].setMatrixAt(s.slot, ZERO_M); M[1].instanceMatrix.needsUpdate = true;
+          sootSplash.remove(s);
+        }
+      }
+    }
+    const res = L.place(x, z, Math.max(W, Hh) * 0.5, 0, 0, y);
+    const rec = res.rec;
+    if (res.op === "add") { rec.nx = nx; rec.nz = nz; rec.w = W; rec.h = Hh; }
+    else if (!hole) { rec.w = Math.max(rec.w, W); rec.h = Math.max(rec.h, Hh); }
+    else return true;                               // same hole: the ring is already there
+    rec.y = y;
+    writeSoot(im, rec);
+    return true;
+  };
+  // fracture.js hands every REAL carve here (city/fracture.js debris()).
+  CBZ.cityBlastWallSoot = function (rec, power) {
+    if (!rec || !rec.gap || rec.curtain) return false;
+    const g = rec.gap;
+    if (isGlassMat(rec.wall && rec.wall.material)) return false;
+    const uc = (g.u0 + g.u1) / 2, vc = (g.v0 + g.v1) / 2;
+    const face = g.fixed + g.outS * (g.thick || 0.3) / 2;
+    const x = g.horiz ? uc : face, z = g.horiz ? face : uc;
+    const nx = g.horiz ? 0 : g.outS, nz = g.horiz ? g.outS : 0;
+    return CBZ.blastWallSoot(x, vc, z, nx, nz, g.u1 - g.u0, g.v1 - g.v0, {
+      hole: true, material: rec.wall && rec.wall.material,
+      bounds: { horiz: g.horiz, minU: g.minU != null ? g.minU : -1e9, maxU: g.maxU != null ? g.maxU : 1e9, top: g.y1 },
+    });
+  };
+
+  // ---- small fires left burning on the debris / crater ------------------------
+  const FIRE_CAP = 6;
+  const fires = [];
+  function addFire(x, y, z, dur, size) {
+    if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
+    while (fires.length >= FIRE_CAP) fires.shift();
+    fires.push({ x: x, y: y, z: z, t: 0, dur: dur, acc: rng() * 0.2, sacc: 0.3 + rng() * 0.5, size: size });
+  }
+  CBZ.blastFire = function (x, y, z, dur, size) { addFire(x, y == null ? floorAt(x, z) : y, z, dur || 30, size || 1); };
+
+  // ---- the SMOKE COLUMN (was addSmolder, cap 3, big blasts only) --------------
+  const COL_CAP = 4;
+  const columns = [];
+  function addColumn(x, gy, z, dur, str, tone, mush) {
+    if (!(dur > 0)) return;
+    while (columns.length >= COL_CAP) columns.shift();
+    columns.push({ x: x, gy: gy, z: z, t: 0, dur: dur, acc: 0.2, str: str,
+      tone: tone, capY: mush ? gy + 15 + 7 * str : null });
+  }
+
+  const _wind = { x: 0.8, z: 0.3 };
+  function windNow() {
+    let wx = 1, wz = 0, sp = 0;
+    if (CBZ.weatherWind) {
+      try { const w = CBZ.weatherWind(); if (w) { if (Number.isFinite(w.x)) wx = w.x; if (Number.isFinite(w.z)) wz = w.z; sp = +w.speed || 0; } } catch (e) {}
+    }
+    const l = Math.hypot(wx, wz) || 1, s = Math.max(0.6, Math.min(4.5, sp * 0.45));
+    _wind.x = wx / l * s; _wind.z = wz / l * s;
+    return _wind;
+  }
+  function camDist(x, y, z) {
+    const c = CBZ.camera;
+    return c && c.position ? Math.hypot(x - c.position.x, y - c.position.y, z - c.position.z) : 0;
+  }
+
+  // shared ground chunk materials (debris freezes rubble per material, so one each)
+  const groundMats = {};
+  function groundMat(kind) {
+    let m = groundMats[kind];
+    if (!m) {
+      const col = kind === "asphalt" ? 0x2e2e30 : kind === "rock" ? 0x3f3a36 : kind === "concrete" ? 0x8a857c : 0x5b4938;
+      m = groundMats[kind] = new THREE.MeshLambertMaterial({ color: col });
+      m._shared = true;
+    }
+    return m;
+  }
+
+  const DUST_ROCK = [0.36, 0.33, 0.3], DUST_ASPHALT = [0.46, 0.44, 0.41], DUST_EARTH = [0.5, 0.44, 0.36];
+  /* THE PICTURE. (x,cy,z) the seat, gy the ground under it, P the visual power,
+     K the kind row. o: {fxq, elevated, airburst, nrm, dir}. */
+  function blastVisual(x, gy, cy, z, P, K, o) {
+    blastTexReady();
+    const q = o.fxq, S = Math.min(P, 2.6), sq = Math.sqrt(Math.max(0.2, P));
+    const W = windNow(), wx = W.x, wz = W.z;
+    // directional throw: a charge on a wall goes OUT along the wall normal; a
+    // rocket's leftover momentum carries a little downrange
+    let bx = 0, by = 0, bz = 0;
+    if (o.nrm) { bx = o.nrm.x * 4.5 * K.dirK; by = o.nrm.y * 4.5 * K.dirK; bz = o.nrm.z * 4.5 * K.dirK; }
+    else if (o.dir) { bx = o.dir.x * 2.2 * K.dirK; bz = o.dir.z * 2.2 * K.dirK; }
+
+    // (1) FLASH: a white-hot core that lives one or two frames, a bright inner
+    //     pop, and the pooled light
+    spawnPuff(x, cy, z, { additive: true, tex: fireTex[0], base: 5.5 * P, pop: 7 * P, life: 0.07, maxOp: 1 });
+    spawnPuff(x, cy, z, { additive: true, tex: fireTex[1], base: 1.2 * P, pop: 5 * P * K.core, life: 0.3, maxOp: 1 });
+    if (K.light > 0) flashPool.flash(x, cy + 0.6, z, 3.4 * K.light * Math.min(2.2, P), 24 + 12 * Math.min(3, P));
+    const capY = cy + 5 * P * K.rise;
+
+    // (2) HOT CORES: additive, inside the body, burn out fast
+    const nCore = Math.max(2, Math.round(6 * S * K.core * (0.6 + 0.4 * q)));
+    for (let i = 0; i < nCore; i++) {
+      const a = rng() * 6.2832, sp = (1.5 + rng() * 3) * sq;
+      spawnPuff(x + Math.cos(a) * 0.3 * P, cy + rng() * 0.5 * P, z + Math.sin(a) * 0.3 * P, {
+        additive: true, tex: fireTex[i & 3], base: 0.8 * P, pop: (2.4 + rng() * 1.4) * P * K.core * K.fireSize,
+        life: 0.45 + rng() * 0.45, maxOp: 0.95, spin: (rng() - 0.5) * 2.4,
+        vx: Math.cos(a) * sp + bx * 0.6, vy: (1 + rng() * 2) * K.rise + by * 0.6, vz: Math.sin(a) * sp + bz * 0.6,
+        drag: 2.2, buoy: 2.5 * K.rise, capY: capY,
+      });
+    }
+    // (3) THE ROLLING BODY: dark-edged billows punched out on a hemisphere,
+    //     dragged to a stop, then climbing — outward-then-up is the roll
+    const nBody = Math.max(3, Math.round(12 * S * K.fire * (0.5 + 0.5 * q)));
+    for (let i = 0; i < nBody; i++) {
+      const a = rng() * 6.2832, el = rng() * 1.2, sp = (3 + rng() * 4.5) * sq;
+      const ce = Math.cos(el), dxh = Math.cos(a) * ce, dzh = Math.sin(a) * ce, dyh = Math.sin(el);
+      spawnPuff(x + dxh * 0.4 * P, cy + dyh * 0.4 * P, z + dzh * 0.4 * P, {
+        additive: false, body: true, tex: fireTex[(i + 1) & 3],
+        base: 0.9 * P, pop: (3.2 + rng() * 2.2) * P * K.fireSize, life: 1.5 + rng() * 1.1 + 0.3 * (K.rise - 1),
+        maxOp: 0.96, spin: (rng() - 0.5) * 1.6,
+        vx: dxh * sp + bx, vy: dyh * sp * 0.8 + 0.8 * K.rise + by, vz: dzh * sp + bz,
+        drag: 1.9, buoy: 3.0 * K.rise, capY: capY, delay: rng() * 0.05,
+      });
+    }
+    // (4) SOOT HANDOFF: thick dark smoke born where the fireball cools
+    const nSoot = Math.max(2, Math.round(9 * S * K.smoke * (0.5 + 0.5 * q)));
+    for (let i = 0; i < nSoot; i++) {
+      const a = rng() * 6.2832, rr = (0.4 + rng() * 0.9) * P, sp = 0.8 + rng() * 1.4;
+      spawnPuff(x + Math.cos(a) * rr + bx * 0.25, cy + (0.8 + rng() * 1.2) * P * K.rise, z + Math.sin(a) * rr + bz * 0.25, {
+        smoke: true, additive: false, tex: smokeB[i % 3],
+        base: 1.4 * P, pop: (4.8 + rng() * 3) * P * Math.sqrt(K.smoke), life: 7 + rng() * 5,
+        maxOp: 0.62, tone: K.tone, spin: (rng() - 0.5) * 0.7,
+        vx: Math.cos(a) * sp, vy: (1.8 + rng() * 1.2) * K.rise, vz: Math.sin(a) * sp,
+        drag: 0.6, buoy: 0.45, capY: o.elevated ? null : gy + (9 + 5 * P) * K.rise,
+        rx: Math.cos(a), rz: Math.sin(a), wx: wx, wz: wz, fin: 0.12,
+        delay: 0.3 + rng() * 0.5,
+      });
+    }
+    // (5) THE SHOCK: a low dust skirt racing out along the ground
+    if (!o.elevated && K.dust > 0) {
+      const nDust = Math.max(3, Math.round(14 * S * K.dust * q));
+      const dt0 = K.surface === "rock" ? DUST_ROCK : (groundKind() === "asphalt" ? DUST_ASPHALT : DUST_EARTH);
+      for (let i = 0; i < nDust; i++) {
+        const a = (i / nDust) * 6.2832 + rng() * 0.4, sp = (9 + rng() * 6) * sq;
+        spawnPuff(x + Math.cos(a) * 0.8, gy + 0.35 + rng() * 0.3, z + Math.sin(a) * 0.8, {
+          smoke: true, additive: false, tex: smokeB[i % 3],
+          base: 0.8, pop: (3.2 + rng() * 2) * sq * K.dust, life: 1.8 + rng() * 1.3,
+          maxOp: 0.42, tone: dt0, noHeat: true, spin: (rng() - 0.5),
+          vx: Math.cos(a) * sp, vy: 0.3 + rng() * 0.5, vz: Math.sin(a) * sp,
+          drag: 2.6, buoy: 0.12, wx: wx * 0.5, wz: wz * 0.5, fin: 0.08,
+          delay: 0.02 + rng() * 0.04,
+        });
+      }
+      pointBurst(x, z, Math.max(1, Math.round(16 * S * K.dust * q)), 0x8b8175, 0.42, 2 + P * 0.5, 0.95, true, gy + 0.35);
+    }
+    // (6) SPARKS (fast bright streaks) and EMBERS (slow, glowing, falling)
+    if (K.sparks > 0) {
+      pointBurst(x, z, Math.max(1, Math.round(26 * S * K.sparks * q)), 0xffd890, 0.14, 11 + 6 * P, 0.55, false, cy);
+      pointBurst(x, z, Math.max(1, Math.round(12 * S * K.sparks * q)), 0xfff4d0, 0.09, 16 + 7 * P, 0.35, false, cy);
+    }
+    const nEmber = Math.round(14 * S * K.embers * q);
+    for (let i = 0; i < nEmber; i++) {
+      const a = rng() * 6.2832, sp = (1.5 + rng() * 4) * sq, b0 = 0.12 + rng() * 0.14;
+      spawnPuff(x + Math.cos(a) * 0.5, cy + rng() * 0.8, z + Math.sin(a) * 0.5, {
+        additive: true, base: b0, pop: b0 * 0.8, life: 2.2 + rng() * 2.4, maxOp: 1,
+        vx: Math.cos(a) * sp + bx * 0.5, vy: 4 + rng() * 6 * sq, vz: Math.sin(a) * sp + bz * 0.5,
+        grav: 5.5, drag: 0.9, wx: wx * 0.6, wz: wz * 0.6,
+      });
+    }
+  }
+
+  /* WHAT STAYS. Ground blasts only (an airburst or a hit 20 m up a facade
+     leaves no crater on the street; the carve and wall soot are that hit's
+     mark). Never on water. */
+  function blastAftermath(x, gy, z, P, K, o) {
+    if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
+    const S = Math.min(P, 2.6), q = o.fxq;
+    const wallCharge = !!(o.nrm && Math.abs(o.nrm.y) < 0.6);
+    // (a) the crater scorch — persistent, capped, merged
+    if (K.decal > 0) queueMark(x + (o.nrm ? o.nrm.x * 0.6 : 0), z + (o.nrm ? o.nrm.z * 0.6 : 0), Math.max(1, Math.min(9, 1 + 1.3 * P * K.decal)), gy);
+    // (b) the ground it tore up: real chunks of the surface + charred bits
+    //     that stay where they land (CBZ.debris grit persists in its ring)
+    const surf = K.surface || groundKind();
+    if (CBZ.debris && K.frag > 0) {
+      try {
+        CBZ.debris.chips(x, gy + 0.3, z, {
+          kind: surf, color: 0x1d1a17, count: Math.max(2, Math.round(10 * S * K.frag * q)),
+          power: 0.55 + 0.25 * S, spread: 2.5, dust: false,
+        });
+        if (!wallCharge && CBZ.debris.shatter) {
+          const s = 0.45 + 0.3 * S;
+          CBZ.debris.shatter({ box: { minX: x - s, maxX: x + s, minY: gy + 0.02, maxY: gy + 0.2 + 0.05 * S, minZ: z - s, maxZ: z + s }, material: groundMat(surf) }, {
+            at: { x: x, y: gy + 0.1, z: z },
+            dir: { x: o.dir ? o.dir.x * 0.4 : 0, y: 1, z: o.dir ? o.dir.z * 0.4 : 0 },
+            power: Math.min(2.6, 0.9 + 0.5 * S), kind: surf,
+            maxPieces: Math.max(2, Math.round((3 + 3 * S) * K.frag * q)), owner: "blastfx", dust: 0.6,
+          });
+        }
+      } catch (e) {}
+    }
+    // (c) small fires on the debris
+    const nF = Math.min(4, Math.round(K.fires * Math.min(1.5, S / 1.4)));
+    for (let i = 0; i < nF; i++) {
+      const on = K === PURE.KINDS.car && i === 0;          // the shell itself keeps burning
+      const a = rng() * 6.2832, d = on ? 0 : (0.6 + rng() * 1.6) * Math.min(2, P);
+      const fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d;
+      const dur = K.fireDur[0] + rng() * (K.fireDur[1] - K.fireDur[0]);
+      addFire(fx, floorAt(fx, fz) + (on ? 0.9 : 0.05), fz, dur, on ? 1.3 : 0.6 + rng() * 0.5);
+    }
+    // (d) the column
+    if (K.column > 0) addColumn(x, gy, z, K.column * (0.75 + 0.15 * Math.min(2, S)), Math.min(2.2, 0.55 + 0.45 * S) * Math.sqrt(K.smoke), K.tone, K.mushroom);
+  }
+
+  // ---- per-frame: the light, the queued marks, the columns, the fires --------
+  function stepAftermath(dt) {
+    flashPool.step(dt);
+    for (let i = pendingMarks.length - 1; i >= 0; i--) {
+      const m = pendingMarks[i]; m.t += dt;
+      if (m.t < 0.06) continue;
+      pendingMarks.splice(i, 1);
+      landMark(m);
+    }
+    if (!columns.length && !fires.length) return;
+    const W = windNow(), rate = CBZ.qScale ? CBZ.qScale(0.5, 1) : 1;
+    for (let i = columns.length - 1; i >= 0; i--) {
+      const c = columns[i]; c.t += dt;
+      if (c.t >= c.dur) { columns.splice(i, 1); continue; }
+      c.acc -= dt;
+      if (c.acc > 0) continue;
+      c.acc = (0.34 + rng() * 0.2) / rate;
+      if (camDist(c.x, c.gy, c.z) > 260) continue;
+      const cool = 1 - c.t / c.dur, a = rng() * 6.2832;
+      spawnPuff(c.x + Math.cos(a) * 0.6 * c.str, c.gy + 0.8 + rng() * 0.6, c.z + Math.sin(a) * 0.6 * c.str, {
+        smoke: true, additive: false, tex: smokeB[(rng() * 3) | 0],
+        base: 1.2 * c.str, pop: (4.5 + rng() * 3) * c.str * (0.6 + 0.4 * cool), life: 9 + rng() * 4,
+        maxOp: 0.56 * (0.2 + 0.8 * cool), tone: c.tone, noHeat: c.t > 2.5,
+        spin: (rng() - 0.5) * 0.5,
+        vx: Math.cos(a) * 0.3, vy: 2.4 + rng() * 0.9 * c.str, vz: Math.sin(a) * 0.3,
+        drag: 0.35, buoy: 0.15, capY: c.capY, rx: Math.cos(a), rz: Math.sin(a),
+        wx: W.x, wz: W.z, fin: 0.12,
+      });
+    }
+    for (let i = fires.length - 1; i >= 0; i--) {
+      const f = fires[i]; f.t += dt;
+      if (f.t >= f.dur) { fires.splice(i, 1); continue; }
+      const life = 1 - f.t / f.dur, k = Math.min(1, life * 3), s = f.size * (0.45 + 0.55 * k);
+      if (camDist(f.x, f.y, f.z) > 150) continue;
+      f.acc -= dt;
+      if (f.acc <= 0) {
+        f.acc = (0.11 + rng() * 0.1) / rate;
+        spawnPuff(f.x + (rng() - 0.5) * 0.5 * s, f.y + 0.1, f.z + (rng() - 0.5) * 0.5 * s, {
+          additive: true, tex: fireTex[(rng() * 4) | 0], base: 0.3 * s, pop: (0.9 + rng() * 0.6) * s,
+          life: 0.5 + rng() * 0.35, maxOp: 0.85, spin: (rng() - 0.5) * 2.4,
+          vy: 1.2 + rng() * 1.0, buoy: 1.5, wx: W.x * 0.3, wz: W.z * 0.3,
+        });
+      }
+      f.sacc -= dt;
+      if (f.sacc <= 0) {
+        f.sacc = (0.55 + rng() * 0.4) / rate;
+        spawnPuff(f.x, f.y + 0.6 * s, f.z, {
+          smoke: true, additive: false, tex: smokeB[(rng() * 3) | 0],
+          base: 0.6 * s, pop: (2.4 + rng() * 1.6) * s, life: 4 + rng() * 2.4,
+          maxOp: 0.36 * k, tone: PURE.KINDS.car.tone, spin: (rng() - 0.5) * 0.6,
+          vx: (rng() - 0.5) * 0.3, vy: 1.3 + rng() * 0.6, vz: (rng() - 0.5) * 0.3,
+          buoy: 0.35, wx: W.x, wz: W.z, fin: 0.15,
+        });
+      }
+    }
+  }
+
+  CBZ.blastFxAudit = function () {
+    return {
+      marks: marks.live.length, markCap: MARK_CAP,
+      soot: sootRing.live.length + sootSplash.live.length, sootCap: SOOT_CAP * 2,
+      fires: fires.length, fireCap: FIRE_CAP, columns: columns.length, columnCap: COL_CAP,
+      lights: flashPool.made(), lightLevel: +flashPool.level().toFixed(3),
+      puffsLive: puffs.length, puffPooled: puffPool.length, puffCap: PUFF_CAP,
+    };
+  };
+
+  // normalise the directional opts a caller may pass (no allocation on the hot
+  // path: two scratch records, read synchronously inside one blast)
+  const _nrmS = { x: 0, y: 0, z: 0 }, _dirS = { x: 0, y: 0, z: 0 };
+  function blastNormal(o) {
+    const n = o.normal;
+    if (!n) return null;
+    const l = Math.hypot(n.x || 0, n.y || 0, n.z || 0);
+    if (l < 1e-4) return null;
+    _nrmS.x = (n.x || 0) / l; _nrmS.y = (n.y || 0) / l; _nrmS.z = (n.z || 0) / l;
+    return _nrmS;
+  }
+  function blastDir(o) {
+    let dx = 0, dz = 0;
+    if (o.dir) { dx = o.dir.x || 0; dz = o.dir.z || 0; }
+    else if (o.dirx != null || o.dirz != null) { dx = +o.dirx || 0; dz = +o.dirz || 0; }
+    const l = Math.hypot(dx, dz);
+    if (l < 1e-4) return null;
+    _dirS.x = dx / l; _dirS.y = 0; _dirS.z = dz / l;
+    return _dirS;
+  }
+
+  /* THE ONE EXPLOSION. Every ordnance in the game ends here: the RPG, the
+     grenade, C4 (systems/breach.js), a car cook-off, aircraft, the ordnance
+     bus's "blast" composer, and outside the city CBZ.cityBlastCore (the same
+     function, unwrapped).
+     opts: power, radius, byPlayer, y, noDamage, airburst, cause, ordnance
+           kind    "rpg"|"grenade"|"c4"|"car"|"aircraft"|"heavy"|"volcano"|
+                   "impact"|... (or any impactbus row id; `ordnance` is read
+                   when kind is absent) — picks the look, never the damage
+           normal  {x,y,z} surface the charge sat on (C4 on a wall): the
+                   fireball and debris are thrown OUT along it
+           dir     {x,z} (or dirx/dirz) travel direction of the round */
   function cityExplosionCore(x, z, opts) {
     opts = opts || {};
     const power = opts.power || 1, R = (opts.radius || 6) * power, byPlayer = !!opts.byPlayer;
     const P = Math.min(2.2, power);            // visual scale is clamped so huge blasts stay cheap
-    // FX budget rides the perf/quality slider — tier0 sheds ~65% of burst
-    // particles, Best (tier 4) is byte-identical. Sampled ONCE per blast.
+    const K = PURE.blastKind(opts.kind || opts.ordnance);
+    // FX budget rides the perf/quality slider — tier0 sheds ~65% of the
+    // particles, Best (tier 4) is the full picture. Sampled ONCE per blast.
     const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
-    // opts.y = detonation HEIGHT. A rocket that lands 30u up a tower face must
-    // bloom THERE — not pop at the kerb below it (the filmed "dumb" hit). Every
-    // ground-level caller passes no y and keeps the exact old seat; elevated
-    // blasts skip the ground-coupled layers (rings/scorch/road-wash) and their
-    // damage only reaches the street if the blast sphere actually does.
-    const cy = opts.y != null ? Math.max(1.0, opts.y) : 1.0;
-    const elevated = cy > 3;
+    // opts.y = detonation HEIGHT. A rocket that lands 30 m up a tower face must
+    // bloom THERE, not at the kerb below it. Everything is measured from the
+    // REAL ground under the blast (this used to compare y against a flat 3 m,
+    // so every blast on a hill counted as an airburst and a seat clamped under
+    // 3 m sat inside the hill).
+    const gy = floorAt(x, z);
+    const cy = opts.y != null ? Math.max(gy + 1.0, +opts.y) : gy + 1.0;
+    const hAbove = cy - gy;
+    const elevated = hAbove > 3;
+    const nrm = blastNormal(opts), dir = blastDir(opts);
 
-    // ---- LAYER 1: FLASH (t=0) — a blinding white-hot core that snaps in and
-    // dies in ~0.1s; this is the muzzle of the blast that backlights everything.
-    // FB: fireball boost (owner: "the explosion should be even bigger") —
-    // grows the FLASH + FIREBALL reads ~35% while smoke/debris counts stay
-    // put (size-led growth, not particle spam).
-    const FB = 1.35;
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 7 * P, pop: 7.5 * P * FB, life: 0.1, maxOp: 1 });
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 1, pop: 4.5 * P * FB, life: 0.22, maxOp: 1 }); // bright inner pop
-
-    // ---- LAYER 2: FIREBALL — a cluster of soft additive puffs that punch
-    // outward and ramp white→yellow→orange→deep-red. Overlap sums toward
-    // white-hot in the middle; outer puffs drift out a little for a roiling rim.
-    // LIFETIMES STRETCHED (was 0.7-1.45s — gone before the eye registered it):
-    // the fireball core now visibly burns for a couple of seconds, same as the
-    // ramp/fade math in updatePuffs already supports — only the spawn-side
-    // `life` was too short. Background smoke (LAYER 3 below) was already long.
-    const nFire = Math.round(16 * P);
-    for (let i = 0; i < nFire; i++) {
-      const a = rng() * 6.2832, rr = rng() * 0.9 * P, sp = (1.0 + rng() * 2.2);
-      spawnPuff(x + Math.cos(a) * rr, cy + (rng() - 0.15) * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.6, pop: (3.4 + rng() * 1.8) * P * FB, life: 1.9 + rng() * 1.3,
-          maxOp: 1, spin: (rng() - 0.5) * 3,
-          vx: Math.cos(a) * sp, vy: 0.4 + rng() * 1.2, vz: Math.sin(a) * sp });
-    }
-    // a few low fireballs that hug the ground (blast spreading along the road —
-    // meaningless 30u up a facade, so elevated blasts skip the road wash)
-    if (!elevated) for (let i = 0; i < Math.round(5 * P); i++) {
-      const a = rng() * 6.2832, sp = 3 + rng() * 4 * P;
-      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + rng()) * P * FB, life: 1.4 + rng() * 0.9,
-        maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.2, vz: Math.sin(a) * sp });
-    }
-    // lingering FLAMES that keep licking up from the blast seat for a beat
-    // after the fireball collapses — sells a "still burning" crater cheaply.
-    for (let i = 0; i < Math.round(4 * P); i++) {
-      const a = rng() * 6.2832, rr = rng() * 0.7 * P;
-      spawnPuff(x + Math.cos(a) * rr, elevated ? cy - 0.4 : 0.5, z + Math.sin(a) * rr,
-        { additive: true, base: 0.4, pop: (1.4 + rng() * 0.8) * P, life: 2.6 + rng() * 1.6,
-          maxOp: 0.85, spin: (rng() - 0.5) * 2, vy: 0.6 + rng() * 0.7,
-          delay: 0.12 + rng() * 0.25 });
-    }
-
-    // ---- LAYER 3: SMOKE — lumpy dark plume that emerges as the flame cools,
-    // RISES (negative gravity), drifts, expands and LINGERS the longest. Two
-    // densities: a tall central column + wider low billows for volume.
-    const nSmoke = Math.round(6 * P);
-    for (let i = 0; i < nSmoke; i++) {
-      const a = rng() * 6.2832, dr = 0.4 + rng() * 0.6;
-      spawnPuff(x + (rng() - 0.5) * 1.4 * P, cy + 0.3 + rng() * 0.6, z + (rng() - 0.5) * 1.4 * P,
-        { additive: false, smoke: true, base: 1.6, pop: (5.5 + rng() * 3) * P,
-          life: 2.6 + rng() * 1.8, maxOp: 0.42, shade: 0.13 + rng() * 0.06,
-          spin: (rng() - 0.5) * 1.2,
-          vx: Math.cos(a) * dr, vy: 1.1 + rng() * 0.8, vz: Math.sin(a) * dr,
-          delay: 0.08 + rng() * 0.18 });
-    }
-    // ROLLING HANDOFF: a few smoke billows spawn ON the fireball's rim with its
-    // outward velocity inherited, so the orange roils visibly into black-orange
-    // smoke instead of the plume just appearing at the centre (their early
-    // heat-glow in updatePuffs paints them fire-orange before they sooty out).
-    for (let i = 0; i < Math.round(3 * P); i++) {
-      const a = rng() * 6.2832, rr = (0.8 + rng() * 0.8) * P, sp = 1.6 + rng() * 1.8;
-      spawnPuff(x + Math.cos(a) * rr, cy + 0.4 + rng() * 0.8 * P, z + Math.sin(a) * rr,
-        { additive: false, smoke: true, base: 1.2, pop: (4.5 + rng() * 2.5) * P,
-          life: 2.2 + rng() * 1.4, maxOp: 0.46, shade: 0.12 + rng() * 0.05,
-          spin: (rng() - 0.5) * 1.6,
-          vx: Math.cos(a) * sp, vy: 1.4 + rng() * 1.0, vz: Math.sin(a) * sp,
-          delay: 0.18 + rng() * 0.2 });
-    }
-    // low rolling billows that spread outward at the base (ground blasts only)
-    if (!elevated) for (let i = 0; i < Math.round(4 * P); i++) {
-      const a = rng() * 6.2832, sp = 1.4 + rng() * 1.6;
-      spawnPuff(x, 0.6, z, { additive: false, smoke: true, base: 1.2, pop: (4 + rng() * 2) * P,
-        life: 2.2 + rng() * 1.3, maxOp: 0.3, shade: 0.15, spin: (rng() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.4 + rng() * 0.5, vz: Math.sin(a) * sp, delay: 0.05 + rng() * 0.12 });
-    }
-
-    // ---- LAYER 4: SHOCKWAVE — a fast thin bright additive ring on the ground
-    // that races out JUST AFTER the flash, plus a slower glowing hot rim.
-    // (an elevated blast never touched the road — no ground ring/scorch)
-    if (!elevated) {
-      if (ringsOn()) {
-        ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
-        ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
-      }
-      // ---- LAYER 4b: GROUND DUST — the pressure wave SLAPS the street: a pale
-      // dust skirt races outward just behind the bright ring (fast, low, short-
-      // lived) plus a kicked-up dust haze that hangs a beat. This is what makes
-      // a blast read as touching the WORLD instead of floating on it.
-      pointBurst(x, z, Math.max(1, Math.round(16 * P * fxq)), 0x8b8175, 0.42, 2 + power * 0.5, 0.95, true);
-      for (let i = 0; i < Math.round(5 * P); i++) {
-        const a = rng() * 6.2832, sp = 4.5 + rng() * 3.5 * P;
-        spawnPuff(x + Math.cos(a) * 0.6, 0.45, z + Math.sin(a) * 0.6,
-          { additive: false, smoke: true, base: 0.9, pop: (3 + rng() * 1.6) * P,
-            life: 0.9 + rng() * 0.5, maxOp: 0.3, shade: 0.34 + rng() * 0.06,
-            spin: (rng() - 0.5), vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp,
-            delay: 0.03 + rng() * 0.05 });
-      }
-    }
-
-    // ---- LAYER 5: SPARKS + EMBERS + DEBRIS (nearest layer) ----
-    pointBurst(x, z, Math.max(1, Math.round(28 * P * fxq)), 0xffe08a, 0.16, 9 + 7 * power, 0.6, false, elevated ? cy : null); // fast bright sparks
-    // glowing embers that arc up and rain down, lingering longer than sparks
-    const nEmber = Math.round(16 * P);
-    for (let i = 0; i < nEmber; i++) {
-      const a = rng() * 6.2832, sp = 1.5 + rng() * 3.5 * P;
-      spawnPuff(x + Math.cos(a) * 0.5, cy + rng() * 0.8, z + Math.sin(a) * 0.5,
-        { additive: true, base: 0.18 + rng() * 0.16, pop: 0.1, life: 1.0 + rng() * 1.1,
-          maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + rng() * 4, vz: Math.sin(a) * sp });
-    }
-    // AIRBURST (opts.airburst, set by fpsmode when a rocket detonates on an
-    // aircraft / high in open air): skip the solid chunk spray so debris cubes
-    // never rain out of empty sky (owner: "shooting cubes down" instead of real
-    // damage) — the fireball/smoke/spark layers above still fire, and the downed
-    // craft's crash arc provides the wreckage. Every ground/wall caller passes no
-    // airburst → debris is byte-for-byte unchanged.
-    if (!opts.airburst) addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null);
+    blastVisual(x, gy, cy, z, P, K, { fxq: fxq, elevated: elevated, airburst: !!opts.airburst, nrm: nrm, dir: dir });
     // street furniture in the blast breaks into itself (city/props.js)
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: !!opts.byPlayer, cause: opts.cause || null }); } catch (e) {} }
-    if (!elevated) {
-      addScorch(x, z, R * 0.5);                                        // lasting ground scorch
-      // big blasts leave a SMOKING crater: a thin column keeps seeping off the
-      // scorch for ~half a minute (pooled emitter, hard cap 3 — the show-off
-      // plume that tells the whole block something detonated here).
-      if (power >= 1.3) addSmolder(x, z, 22 + Math.min(20, power * 9));
+    // what stays: crater scorch, torn ground, fires, the column. An airburst
+    // (a rocket caught an aircraft) and a hit high on a facade leave none of it
+    // on the street. A charge ON a wall still scorches the ground at its foot.
+    if (!opts.airburst && power >= 0.5 && (!elevated || (nrm && Math.abs(nrm.y) < 0.6 && hAbove < 4.5))) {
+      blastAftermath(x, gy, z, P, K, { fxq: fxq, nrm: nrm, dir: dir });
+    }
+    // WINDOWS. In the city, buildings.js's wrap already blows the panes near
+    // every blast (structuralBlast -> cityDamageBuilding -> cityShatter). The
+    // shared worlds (the disaster island) register their glass with
+    // CBZ.shatterGlass instead, and the unwrapped core never reached it.
+    if (!opts.noDamage && CBZ.shatterGlass && CBZ.game && CBZ.game.mode !== "city") {
+      try { CBZ.shatterGlass(x, z, Math.min(30, R * 0.8)); } catch (e) {}
     }
 
-    // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash. Shake/stop
-    // scale with how close the blast is to the LENS — a rocket at your feet
-    // rattles the camera, one landing 120u up a tower only rumbles. ----
-    // A GRENADE AND A JDAM MADE THE IDENTICAL BOOM. This line was
-    // `CBZ.sfx("explosion")` with no options at all — while systems/audio.js
-    // has supported `{dist, volume}` the whole time (dist drives its own
-    // attenuation AND swaps to the far-field muffle bus past 60 u), and the
-    // distance was being computed two lines below for the camera shake and
-    // then thrown away. Scale is the cheapest thing an explosion can tell you.
-    // CBZ.blastVolume is the shared curve (systems/impactbus.js) so this and
-    // the bus's own sound cue can never disagree; it is floored at 1, so
-    // nothing gets quieter than it was — only bigger things get louder and
-    // distant ones recede.
-    let att = 1, cd = 0;
-    const cam = CBZ.camera;
-    if (cam && cam.position) {
-      cd = Math.hypot(x - cam.position.x, cy - cam.position.y, z - cam.position.z);
-      att = Math.max(0.25, Math.min(1, 1.25 - cd / 130));
+    // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash, by DISTANCE
+    // to the lens. The shake falls off as 1/(1+(d/(1.5R+4))^2): full at your
+    // feet, half at ~a blast radius and a half, nothing past a few hundred
+    // metres (it used to floor at 25% at any range). Sound keeps
+    // CBZ.blastVolume's shared curve and now ARRIVES LATE by distance
+    // (343 m/s): a blast across the district flashes, then booms.
+    const cd = camDist(x, cy, z);
+    const att = PURE.shakeAtten(cd, R);
+    if (CBZ.sfx) {
+      const dl = PURE.soundDelay(cd);
+      const so = { dist: cd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 };
+      if (dl > 0) so.delay = dl;
+      CBZ.sfx("explosion", so);
     }
-    if (CBZ.sfx) CBZ.sfx("explosion", { dist: cd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 });
-    if (CBZ.shake) CBZ.shake(3.2 * Math.min(2, power) * att);
+    if (CBZ.shake && att > 0.02) CBZ.shake(3.2 * Math.min(2, power) * att);
     // punch is DEFERRED two frames (blastPunch) so the flash renders before
     // time stops — see the FX_BLAST_FIRSTFRAME block.
     if (att > 0.5) blastPunch(0.18, 0.34);
@@ -857,7 +1637,7 @@
     // An elevated blast only reaches the street where its SPHERE does: the
     // ground footprint shrinks with height (and vanishes past the radius).
     if (!opts.noDamage) {
-      const drop = elevated ? cy - 1.2 : 0;   // height above a standing chest
+      const drop = elevated ? hAbove - 1.2 : 0;   // height above a standing chest
       const gR = elevated ? Math.sqrt(Math.max(0, R * R - drop * drop)) : R;
       if (gR > 0.4) {
         const cause = opts.cause ||
@@ -867,47 +1647,19 @@
     }
     // The world-state ledger (city/worldstate.js) is the CITY's persistent
     // truth — panic, damage, repair debt, insurance. A rocket fired in the
-    // prison yard or on the disaster island must not write into it. Before the
-    // blast was shared this line was unreachable outside city mode, so adding
-    // the gate is a no-op there and a correctness guard everywhere else.
+    // prison yard or on the disaster island must not write into it.
     if (CBZ.cityEvent && (!CBZ.game || CBZ.game.mode === "city")) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
 
     // ---- STRUCTURAL COUPLING (the one place a blast wounds a building) --------
-    // EVERY ordnance routes through cityExplosion (RPG, grenade, C4, airstrike),
-    // so this is THE coupling point: after the FX/damage, carve+scar the nearest
-    // facade within the blast radius, AT the blast HEIGHT (cy) — near or far, any
-    // floor of a tower, not just the kerb. The carve primitive is height-aware
-    // (cityFracture.blastAt(pt, r) → cityCarveWall at pt.y, finding the nearest
-    // wall within `search`); blastAt floors the hole to a dramatic, room-exposing
-    // size by ordnance class, so the wound is SATISFYING, not a dimple.
-    //
-    // ANTI-DOUBLE-CARVE: buildings.js wraps cityExplosion to run its own
-    // structuralBlast→blastAt AFTER this returns. When that wrap is installed
-    // (CBZ.cityExplosion._structWrapped), we SKIP here and let the wrap do it —
-    // exactly one carve. We only self-couple as a FALLBACK when the wrap is
-    // absent (buildings.js not loaded / not yet wrapped), so cityExplosion ALWAYS
-    // wounds a building no matter the load order. Either path uses the SAME
-    // deferral/coalescing in fracture.js (DEFER_CELL), so even a redundant call
-    // collapses into one hole.
-    //
-    // GATES (mirror buildings.js structuralBlast): only meaningful ordnance
-    // (power ≳1) carves; the heli ember (power 0.2, noDamage) and tiny car-pops
-    // must NOT punch holes — noDamage is skipped outright, weak blasts scar at
-    // most. CITY-ONLY (cityFracture.blastAt self-guards mode==="city").
-    // ANTI-DOUBLE-CARVE, SCOPED. The skip below exists because buildings.js's
-    // wrap on CBZ.cityExplosion runs structuralBlast->blastAt AFTER this
-    // returns. That wrap only runs when the call came through the WRAPPED
-    // chain — and outside the city, systems/fpsmode.js detonates through
-    // CBZ.cityBlastCore precisely to avoid the chain, so nothing runs after us
-    // and suppressing here would mean no prison wall ever opens. Test the mode,
-    // not just the marker: in city this is byte-identical to before.
+    // buildings.js wraps cityExplosion to run structuralBlast->blastAt AFTER
+    // this returns; when that wrap is installed in the city we skip here so
+    // there is exactly one carve. Outside the city (CBZ.cityBlastCore, no
+    // chain) we self-couple, so a prison wall still opens. Only meaningful
+    // ordnance (power >= 1) carves; noDamage never does.
     const chainWillCarve = (!CBZ.game || CBZ.game.mode === "city") &&
       !!(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped);
     if (!opts.noDamage && power >= 1.0 && CBZ.cityFracture && CBZ.cityFracture.blastAt
         && !chainWillCarve) {
-      // hole radius by ordnance class (blastAt re-floors it to a room-exposing
-      // size); search left to blastAt's radius-scaled default so a blast a few
-      // units off the wall still couples to the NEAREST facade at this height.
       const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
       try { CBZ.cityFracture.blastAt({ x: x, y: cy, z: z }, hr, { power: power }); } catch (e) {}
     }
@@ -1016,9 +1768,11 @@
     opts = opts || {};
     const power = opts.power || 2, R = (opts.radius || 12) * power, byPlayer = !!opts.byPlayer;
     const P = Math.min(4.6, power * 1.35);     // bigger visual ceiling than a car blast (airstrike = huge)
-    // detonation seat: air-bursts (missile caught a wall) sit higher, ground hits low
-    const seat = Math.max(0, (opts.y || 0));
-    const cy = 1.2 + seat * 0.5;
+    // detonation seat, from the REAL ground: air-bursts (a missile caught a
+    // wall) sit higher, ground hits low
+    const gy = floorAt(x, z);
+    const seat = opts.y != null ? Math.max(0, +opts.y - gy) : 0;
+    const cy = gy + 1.2 + seat * 0.5;
 
     /* A nuke has its own physically staged dome/fireball/cloud composer. Before
        `noVisual`, this generic prefab still added roughly 400 independent
@@ -1027,96 +1781,17 @@
        Keep every gameplay/feedback owner below this block running; skip only
        this prefab's redundant picture. */
     if (opts.noVisual !== true) {
-    // ---- FLASH: a huge blinding white-hot core, brighter + a beat longer ----
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 10 * P, pop: 11 * P, life: 0.14, maxOp: 1 });
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 1.5, pop: 7 * P, life: 0.3, maxOp: 1 });
-
-    // ---- FIREBALL: a dense cluster that punches out then BALLOONS upward into a
-    // mushroom head (buoyant rise). White→yellow→orange→deep-red, longer life. ----
-    // LIFETIMES STRETCHED (was 1.0-2.0s — an "airstrike" whose flame died faster
-    // than the eye could track it): the heavy-ordnance fireball now visibly burns
-    // for several seconds, bigger than a car blast's, before it sootily collapses
-    // into the smoke column (LAYER below, already long-lived).
-    const nFire = Math.round(22 * P);
-    for (let i = 0; i < nFire; i++) {
-      const a = rng() * 6.2832, rr = rng() * 1.2 * P, sp = (1.4 + rng() * 3.0);
-      spawnPuff(x + Math.cos(a) * rr, cy + (rng() - 0.1) * 1.4 * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.8, pop: (4.2 + rng() * 2.4) * P, life: 2.6 + rng() * 1.6,
-          maxOp: 1, spin: (rng() - 0.5) * 3,
-          vx: Math.cos(a) * sp, vy: 1.0 + rng() * 2.4, vz: Math.sin(a) * sp });
-    }
-    // the rising MUSHROOM HEAD — a few big slow fireballs that climb and bloom
-    for (let i = 0; i < Math.round(5 * P); i++) {
-      const a = rng() * 6.2832, dr = 0.4 + rng() * 0.7;
-      spawnPuff(x + Math.cos(a) * dr * P, cy + 1.2 * P, z + Math.sin(a) * dr * P,
-        { additive: true, base: 1.2, pop: (5 + rng() * 3) * P, life: 3.2 + rng() * 1.8,
-          maxOp: 1, spin: (rng() - 0.5) * 1.5,
-          vx: Math.cos(a) * 0.8, vy: 3.2 + rng() * 2.2, vz: Math.sin(a) * 0.8,
-          delay: 0.05 + rng() * 0.12 });
-    }
-    // low fireballs spreading along the ground (blast wash)
-    for (let i = 0; i < Math.round(8 * P); i++) {
-      const a = rng() * 6.2832, sp = 4 + rng() * 6 * P;
-      spawnPuff(x, 0.6, z, { additive: true, base: 0.6, pop: (2.6 + rng() * 1.4) * P, life: 1.6 + rng() * 1.0,
-        maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp });
-    }
-    // lingering flames cooking in the crater after the fireball collapses
-    for (let i = 0; i < Math.round(7 * P); i++) {
-      const a = rng() * 6.2832, rr = rng() * 1.0 * P;
-      spawnPuff(x + Math.cos(a) * rr, 0.5, z + Math.sin(a) * rr,
-        { additive: true, base: 0.5, pop: (1.8 + rng() * 1.1) * P, life: 3.4 + rng() * 2.0,
-          maxOp: 0.88, spin: (rng() - 0.5) * 2, vy: 0.6 + rng() * 0.8,
-          delay: 0.15 + rng() * 0.35 });
-    }
-
-    // ---- SMOKE: a tall black COLUMN — many puffs with strong upward velocity and
-    // long life so the plume towers and lingers, plus wide low billows for girth. ----
-    const nSmoke = Math.round(10 * P);
-    for (let i = 0; i < nSmoke; i++) {
-      const a = rng() * 6.2832, dr = 0.3 + rng() * 0.6;
-      spawnPuff(x + (rng() - 0.5) * 1.6 * P, cy + 0.4 + rng() * 1.0, z + (rng() - 0.5) * 1.6 * P,
-        { additive: false, smoke: true, base: 1.8, pop: (6.5 + rng() * 3.5) * P,
-          life: 4.2 + rng() * 2.6, maxOp: 0.5, shade: 0.1 + rng() * 0.05,
-          spin: (rng() - 0.5) * 1.0,
-          vx: Math.cos(a) * dr, vy: 2.2 + rng() * 1.6, vz: Math.sin(a) * dr,
-          delay: 0.06 + rng() * 0.2 });
-    }
-    // the column's upper reaches — slower, darker, the longest-lived smoke
-    for (let i = 0; i < Math.round(5 * P); i++) {
-      spawnPuff(x + (rng() - 0.5) * 1.0 * P, cy + 2.0 + rng() * 1.5, z + (rng() - 0.5) * 1.0 * P,
-        { additive: false, smoke: true, base: 2.2, pop: (7 + rng() * 3) * P,
-          life: 5.0 + rng() * 3.0, maxOp: 0.42, shade: 0.09,
-          spin: (rng() - 0.5) * 0.8, vy: 1.6 + rng() * 1.2,
-          delay: 0.25 + rng() * 0.5 });
-    }
-    // wide low billows rolling out at the base
-    for (let i = 0; i < Math.round(6 * P); i++) {
-      const a = rng() * 6.2832, sp = 1.8 + rng() * 2.2;
-      spawnPuff(x, 0.7, z, { additive: false, smoke: true, base: 1.4, pop: (5 + rng() * 2.5) * P,
-        life: 3.0 + rng() * 1.6, maxOp: 0.34, shade: 0.14, spin: (rng() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.5 + rng() * 0.6, vz: Math.sin(a) * sp, delay: 0.05 + rng() * 0.15 });
-    }
-
-    // ---- SHOCKWAVE: a bigger, faster bright ground ring + a slower glowing rim ----
-    if (ringsOn()) {
-      ring(x, z, R * 1.2, 0xffe7b0, { additive: true, opacity: 0.9, inner: 1.05, spd: 6.0, life: 0.5, flat: true, y: 0.06, r0: 0.7 });
-      ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.65, inner: 0.78, spd: 2.8, life: 0.7, y: 0.1 });
-      ring(x, z, R * 0.7, 0xfff2cc, { additive: true, opacity: 0.7, inner: 0.9, spd: 7.5, life: 0.4, flat: true, y: 0.08, r0: 0.5 });
-    }
-
-    // ---- SPARKS + EMBERS + DEBRIS ----
-    pointBurst(x, z, Math.round(40 * P), 0xffe08a, 0.18, 12 + 8 * power, 0.7, false); // fast bright sparks
-    pointBurst(x, z, Math.round(20 * P), 0xfff0c0, 0.12, 16 + 9 * power, 0.5, false); // white-hot spray
-    pointBurst(x, z, Math.round(26 * P), 0x8b8175, 0.5, 2 + power * 0.4, 1.1, true);  // big dust kick-up
-    const nEmber = Math.round(26 * P);
-    for (let i = 0; i < nEmber; i++) {
-      const a = rng() * 6.2832, sp = 2 + rng() * 5 * P;
-      spawnPuff(x + Math.cos(a) * 0.6, cy + rng() * 1.0, z + Math.sin(a) * 0.6,
-        { additive: true, base: 0.2 + rng() * 0.18, pop: 0.1, life: 1.3 + rng() * 1.4,
-          maxOp: 1, vx: Math.cos(a) * sp, vy: 4 + rng() * 6, vz: Math.sin(a) * sp });
-    }
-    addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // ground chips + embers
-    addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
+      // THE SAME ONE EXPLOSION as cityExplosion, drawn at heavy proportions.
+      // This used to be its own ~400-sprite additive recipe; it is now the
+      // shared picture with the "heavy" row (or the caller's own kind: an
+      // airliner is "aircraft", a meteor "impact").
+      const kn = PURE.kindName(opts.kind || opts.ordnance);
+      const K = PURE.blastKind(kn === "blast" ? "heavy" : kn);
+      const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
+      const elevated = cy - gy > 6;
+      const dir = blastDir(opts);
+      blastVisual(x, gy, cy, z, Math.min(4.2, P), K, { fxq: fxq, elevated: elevated, airburst: false, nrm: null, dir: dir });
+      if (!elevated) blastAftermath(x, gy, z, Math.min(4.2, P), K, { fxq: fxq, nrm: null, dir: dir });
     }
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: byPlayer, cause: opts.cause || "airstrike" }); } catch (e) {} }
 
@@ -1131,7 +1806,10 @@
       let sd = 0;
       const scam = CBZ.camera;
       if (scam && scam.position) sd = Math.hypot(x - scam.position.x, cy - scam.position.y, z - scam.position.z);
-      CBZ.sfx("explosion", { dist: sd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 });
+      const so = { dist: sd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 };
+      const dl = PURE.soundDelay(sd);                 // the boom arrives at 343 m/s
+      if (dl > 0) so.delay = dl;
+      CBZ.sfx("explosion", so);
     }
     if (CBZ.shake) CBZ.shake(5.5 * Math.min(2.4, power));
     // deferred like cityExplosion's — the fireball exists before time stops
@@ -1205,9 +1883,18 @@
   // WHAT DELIBERATELY SURVIVES: every DETONATION-TIME layer (flash, fireball,
   // concrete dust burst, the cascading dust sheet, the facade avalanche, the
   // rubble heap, the dangling rebar, the parapet chunk, the ejecta cone) — the
-  // explosion still looks like an explosion — and every GROUND mark (addScorch's
-  // flat pavement stain and its addSmolder column), which sit on a HORIZONTAL
-  // surface where settled soot is exactly what physics leaves behind.
+  // explosion still looks like an explosion — and every GROUND mark (the
+  // crater scorch and its smoke column), which sit on a HORIZONTAL surface
+  // where settled soot is exactly what physics leaves behind.
+  //
+  // WALL SOOT CAME BACK ONLY WHERE IT IS PHYSICAL (CBZ.blastWallSoot, 2026-09-28):
+  // both purged producers failed for the same two reasons, glass and hanging
+  // in the air. The new mark is neither: it is stamped only by a REAL carve in
+  // a MASONRY wall (fracture.js -> cityBlastWallSoot; curtain walls and any
+  // glass material refuse), it lies flush on the outer face with
+  // polygonOffset (2.5 cm, not 8), and its geometry is a FRAME with no
+  // triangles over the opening, so nothing can ever float in the hole. It is
+  // refused outright when it would overhang the wall's end or its top.
   //
   // Gating the two PRODUCERS (rather than their four call sites) is what keeps
   // this a one-line revert: flip true and cityWallRuin, cityHeavyWallRuin,
@@ -1713,7 +2400,7 @@
     // (5) the wall plume is PURGED (FX_WALL_WOUNDS); the GROUND scorch ring at
     //     the foot of the collapse stays — soot settling on pavement is real.
     addBlastWound(faceX, woundY, faceZ, fnx, 0, fnz, 60 + rng() * 30);
-    addScorch(faceX + fnx * 1.2, faceZ + fnz * 1.2, width * 0.5 + 2, 18);
+    queueMark(faceX + fnx * 1.2, faceZ + fnz * 1.2, Math.min(9, width * 0.5 + 2), floorAt(faceX + fnx * 1.2, faceZ + fnz * 1.2));
     // (6) feedback — a heavy structural rumble (sound is owned by the caller's
     // explosion; we add the felt shake of a section coming down).
     if (CBZ.shake) CBZ.shake(Math.min(4.0, 2.4 + power));
@@ -1798,7 +2485,7 @@
   CBZ.wallMarkAudit = function () {
     return {
       wallScars: scars.length, wallWounds: wounds.length,
-      groundScorches: scorches.length, groundSmolders: smolders.length,
+      groundScorches: scorches.length + marks.live.length, groundSmolders: columns.length,
       livePuffs: puffs.length,
       puffAllocated: puffs.length + puffPool.length, puffCap: PUFF_CAP,
       flag: CBZ.CONFIG.FX_WALL_WOUNDS === true,
@@ -1823,7 +2510,17 @@
   // fresh run → cold facades (fpsmode's reset path calls this with the pocks)
   CBZ.cityBlastFxReset = function () {
     wounds.length = 0;
-    smolders.length = 0;
+    columns.length = 0; fires.length = 0; pendingMarks.length = 0;
+    // the persistent marks go with the run
+    if (markMeshes) {
+      for (let i = 0; i < marks.live.length; i++) { const m = marks.live[i]; markMeshes[m.variant & 3].setMatrixAt(m.slot, ZERO_M); }
+      for (let q = 0; q < markMeshes.length; q++) markMeshes[q].instanceMatrix.needsUpdate = true;
+    }
+    marks.clear();
+    if (sootMeshes) {
+      for (let q = 0; q < 2; q++) { for (let i = 0; i < SOOT_CAP; i++) sootMeshes[q].setMatrixAt(i, ZERO_M); sootMeshes[q].instanceMatrix.needsUpdate = true; }
+    }
+    sootRing.clear(); sootSplash.clear();
     for (const s of scars) { scene.remove(s.mesh); s.mat.dispose(); }
     scars.length = 0;
     for (const rb of rebar) scene.remove(rb.group);   // shared geo/mats — remove only
@@ -1883,26 +2580,8 @@
         maxOp: 0.85, vy: 0.7, spin: (rng() - 0.5) * 2,
       });
     }
-    // smoking craters: a thin smoke column rises off each big-blast scorch,
-    // thinning as it cools; the first beats still glow with small flame licks.
-    for (let i = smolders.length - 1; i >= 0; i--) {
-      const w = smolders[i]; w.t += dt;
-      if (w.t >= w.dur) { smolders.splice(i, 1); continue; }
-      w.acc -= dt;
-      if (w.acc > 0) continue;
-      w.acc = 0.5 + rng() * 0.4;
-      const cool = 1 - w.t / w.dur;
-      spawnPuff(w.x + (rng() - 0.5) * 0.9, 0.6, w.z + (rng() - 0.5) * 0.9, {
-        additive: false, smoke: true, base: 1.0, pop: (3.4 + rng() * 2.4) * (0.5 + 0.5 * cool),
-        life: 3.4 + rng() * 1.8, maxOp: 0.3 * (0.4 + 0.6 * cool), shade: 0.12 + rng() * 0.04,
-        spin: (rng() - 0.5) * 0.8,
-        vx: (rng() - 0.5) * 0.4, vy: 1.2 + rng() * 0.7, vz: (rng() - 0.5) * 0.4,
-      });
-      if (w.t < 5) spawnPuff(w.x, 0.4, w.z, {
-        additive: true, base: 0.35, pop: 1.0 + rng() * 0.6, life: 0.6 + rng() * 0.4,
-        maxOp: 0.8, vy: 0.7, spin: (rng() - 0.5) * 2,
-      });
-    }
+    // the flash light, the queued crater marks, the smoke columns, the fires
+    stepAftermath(dt);
     const grav = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
     for (let i = bursts.length - 1; i >= 0; i--) {
       const b = bursts[i]; b.t += dt;
@@ -1978,7 +2657,14 @@
   // seed the fireball/smoke sprite pool with enough bodies for a full rocket
   // blast (fireball+smoke+embers layers peak around this count) — same shape
   // getPuff() builds, parked invisible exactly like updatePuffs() retires them.
-  for (let i = 0; i < 64; i++) {
+  // the one explosion peaks around 110-190 sprites (flash + cores + body +
+  // soot + dust + embers) plus the columns and fires it leaves, so the pool
+  // is seeded for that instead of letting the first blast mint materials
+  blastTexReady();
+  ensureMarks();
+  ensureSoot();
+  flashPool.init();          // the ONE PointLight, in the scene from load, intensity 0
+  for (let i = 0; i < 180; i++) {
     const m = new THREE.SpriteMaterial({ map: puffTex, depthWrite: false, depthTest: true, transparent: true, opacity: 0 });
     const p = new THREE.Sprite(m);
     p.renderOrder = 9; p.visible = false;

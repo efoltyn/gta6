@@ -240,7 +240,7 @@
     gang:     { "*": { "2": ["…my fault. My fault.", "Didn't see you, sorry."],
                        "0": ["Wrong block to be clumsy on.", "Watch it."],
                        "-2": ["You just put hands on the wrong man.", "Do you know whose block this is?"] },
-                crew: ["Easy, we're the same colours.", "Careful, family."],
+                crew: ["Easy, we're family.", "Careful, family."],
                 boss: ["My fault, boss.", "Sorry, didn't see you."],
                 cop: { "1": ["…nothing. Wasn't nothing.", "Keep walking, officer."],
                        "-1": ["You're a long way from backup, officer.", "Badge don't mean much here."] },
@@ -285,17 +285,17 @@
 
   // --- TRADE: what they pitch, and whether they dare. ---------------------
   const TRADE = {
-    dealer: { "*":      ["You buying? I'm holding.", "Got product if you're interested."],
+    dealer: { "*":      ["You buying?", "You look like you need something."],
               hitman:   ["You do work, right? I'll pay double for a problem.", "I need somebody gone. Name a price."],
               boss:     ["Your cut's ready whenever you want it, boss.", "I move on your say-so."],
-              crew:     ["Tell your people I'm good for the tax.", "Same colours. I'll do you a price."],
+              crew:     ["Tell your people I'm good for the tax.", "You're family. I'll do you a price."],
               cop:      ["…just talking. Nothing going on here.", "I got nothing on me."] },
-    gang:   { "*":      ["You lost? This is our block.", "State your business."],
+    gang:   { "*":      ["You lost?", "What you want?", "Who sent you?"],
               hitman:   ["We could use somebody like you. Interested in work?", "There's a name we need gone. You listening?"],
               boss:     ["Whatever you need, boss.", "We're yours. Say the word."],
               crew:     ["Family. What do you need?", "You good? We got you."],
               cop:      ["We're just standing here.", "Move along, officer."] },
-    vendor: { "*":      ["Best prices in the city, my friend.", "Take a look, you won't beat it."],
+    vendor: { "*":      ["Take a look.", "Cash only.", "That one's real, I swear."],
               boss:     ["On the house for you. Please.", "Anything you want, it's yours."],
               cop:      ["All above board here, officer.", "Papers are in order."] },
     bum:    { "*":      ["Spare a few bucks?", "Anything helps. Anything."],
@@ -304,13 +304,13 @@
               hitman:   ["I. I don't want any trouble.", "Please, I just work here."] },
     "*":    { hitman:   ["Word is you handle problems. I've got one.", "They say you do work. I'm paying."],
               boss:     ["I'll pay tribute, just say the word.", "Your block, your rules."],
-              crew:     ["You ride with them, right? I got something for your crew."],
+              crew:     ["You ride with them, right?", "Tell your people I said hi."],
               cop:      ["I didn't do anything, officer.", "We're good here, right?"] },
   };
   const TRADE_GAP = {
     "2":  ["You need anything, I can get it.", "Name it and I'll find it."],
     "1":  ["I got something you might want.", "You buying? I'm holding."],
-    "0":  ["You buying or selling?", "Let's talk business.", "I got a little something."],
+    "0":  ["You buying or selling?", "What you need?", "I got a little something."],
     "-1": ["You got money on you?", "Make it quick."],
     "-2": ["You can't afford what I move.", "Not for you.", "Run along."],
   };
@@ -326,10 +326,10 @@
   const GREET_STANDING = {
     friend:  ["There they are!", "My friend!", "Good to see you."],
     solid:   ["Respect.", "'Sup.", "Good to see you out here."],
-    known:   ["Hey.", "You again.", "Alright."],
+    known:   ["Hey.", "You again.", "Alright.", "Still around, huh?"],
     sour:    ["…you.", "Great. You."],
     enemy:   ["You've got nerve showing up.", "I see you."],
-    stranger:["Hey.", "Alright."],
+    stranger:["Hey.", "Alright.", "How you doing?"],
   };
 
   const TABLES = { contact: CONTACT, trade: TRADE, greet: GREET };

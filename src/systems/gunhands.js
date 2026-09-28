@@ -303,22 +303,40 @@
   }
 
   /* ---- the fresh magazine, carried in the fist -------------------------- */
-  let carried = null, carriedStyle = null;
-  function showCarried(ch, style, on) {
+  /* A ROCKET is not a magazine: the fresh round in the fist is a copy of the
+     launcher's own PG-7V (weapons/appearances/bazooka.js userData.warhead),
+     held round the bulb, nose along the fingers, at the launcher's own size.
+     The launcher shows its seated round again from the same 84% at which
+     this one leaves the hand (fpsmode.js syncWarheads). */
+  let carried = null, carriedStyle = null, carriedSrc = null;
+  const _wsA = new THREE.Vector3(), _wsB = new THREE.Vector3();
+  function showCarried(ch, style, on, prop) {
     if (!on) { if (carried) carried.visible = false; return; }
     const socket = ch.sockets && ch.sockets.leftHand;
     if (!socket) return;
-    if (!carried || carriedStyle !== style) {
+    const round = style === "rocket" && prop && prop.userData.warhead ? prop.userData.warhead : null;
+    if (!carried || carriedStyle !== style || (round && carriedSrc !== round)) {
       if (carried && carried.parent) carried.parent.remove(carried);
-      if (carried) carried.geometry.dispose();
-      carried = magMesh(style);
+      if (carried && carried.isMesh) carried.geometry.dispose();   // a round's geometry is shared
+      carried = round ? round.clone() : magMesh(style);
       carriedStyle = style;
+      carriedSrc = round;
     }
     if (carried.parent !== socket) socket.add(carried);
-    const s = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
-    carried.scale.setScalar(1 / (s || 1));
-    carried.position.set(0, -0.10, 0.02);
-    carried.rotation.set(0.4, 0, 0.15);
+    if (round) {
+      // the launcher's world scale over the hand's: the same size as the tube's round
+      prop.getWorldScale(_wsA); socket.getWorldScale(_wsB);
+      const k = _wsA.x / (_wsB.x || 1);
+      carried.scale.setScalar(k);
+      carried.rotation.set(-Math.PI / 2, 0, 0);          // nose (-Z) along the fingers (socket -Y)
+      const bulb = (CBZ.rpgRound && CBZ.rpgRound.bulbZ) || -0.32;
+      carried.position.set(0, -0.10 - bulb * k, 0.02);   // the bulb in the palm
+    } else {
+      const s = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
+      carried.scale.setScalar(1 / (s || 1));
+      carried.position.set(0, -0.10, 0.02);
+      carried.rotation.set(0.4, 0, 0.15);
+    }
     carried.visible = true;
   }
 
@@ -419,7 +437,7 @@
         if (mp) dropMag(mp, R.style);
         target = computeTarget();      // _a was the scratch the drop just used
       }
-      showCarried(ch, R.style, R.carry > 0);
+      showCarried(ch, R.style, R.carry > 0, prop);
       // The body squares up for the work even if the player never raised the
       // sights: animChar reads these, and fpsmode rewrites them each frame
       // from its own state the moment the reload is done.

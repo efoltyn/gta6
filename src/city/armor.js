@@ -27,8 +27,8 @@
    Mesh layout against the rig (entities/character.js):
      • torso box at body-local y 1.42 (0.92×0.95×0.5) → a vest is a
        slightly-inflated shell over it, mounted on ch.body.
-     • neck pivot at y 1.88, head 0.6 cube at neck-local y 0.3 → a helmet
-       is a shell over the head, mounted on ch.neck.
+     • the helmet is entities/headwear.js's ballistic lid, fitted to the
+       real head on the "armor" owner (CBZ.headwear.wear).
 
    Headless-safe: every THREE / rig / API touch is guarded so the harness
    (stub THREE, rigs with empty parts) never throws. A death-reset hook is
@@ -42,10 +42,8 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  // SWAT REDESIGN (city-swat-redesign): the helmet becomes a real tactical lid
-  // (brim + rails + clear visor + NVG stub + counterweight) and the SWAT plate
-  // becomes a full carrier (shoulder pads, side plates, groin flap). One-line
-  // revert: flip the flag and the old plain dome/box mount is back.
+  // SWAT REDESIGN (city-swat-redesign): the SWAT plate becomes a full carrier
+  // (shoulder pads, side plates, groin flap). Flip the flag for the bare vest.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_REDESIGN == null) CBZ.CONFIG.CITY_SWAT_REDESIGN = true;
   function redesignOn() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
 
@@ -75,17 +73,10 @@
     let gm = geos[kind];
     if (gm) return gm;
     if (!THREE || !CBZ.boxGeom) return null;
-    // vest = inflated shell over the 0.92×0.95×0.5 torso; helmet = shell over
-    // the 0.6 head cube.
+    // vest = inflated shell over the 0.92×0.95×0.5 torso. (The helmet is not
+    // a pooled box any more: entities/headwear.js fits a real ballistic lid.)
     if (kind === "vest")        gm = CBZ.boxGeom(1.02, 0.86, 0.62);
     else if (kind === "vestHi") gm = CBZ.boxGeom(1.04, 0.30, 0.64);   // plate band across the chest
-    else if (kind === "helmet") gm = CBZ.boxGeom(0.70, 0.46, 0.70);   // dome over the upper head
-    // tactical-helmet furniture (city-swat-redesign) — all chunky voxel blocks
-    else if (kind === "helmBrim")  gm = CBZ.boxGeom(0.74, 0.09, 0.30);   // brim lip over the eyes
-    else if (kind === "helmRail")  gm = CBZ.boxGeom(0.07, 0.14, 0.46);   // side accessory rails
-    else if (kind === "helmRear")  gm = CBZ.boxGeom(0.30, 0.18, 0.12);   // rear counterweight pack
-    else if (kind === "helmMount") gm = CBZ.boxGeom(0.12, 0.10, 0.10);   // NVG mount stub
-    else if (kind === "visor")     gm = CBZ.boxGeom(0.56, 0.20, 0.05);   // clear face visor slab
     // plate-carrier furniture (city-swat-redesign)
     else if (kind === "shPad")     gm = CBZ.boxGeom(0.30, 0.12, 0.44);   // shoulder pad blocks
     else if (kind === "sidePlate") gm = CBZ.boxGeom(0.08, 0.44, 0.36);   // cummerbund side plates
@@ -109,6 +100,15 @@
   }
   function releaseMesh(mesh) {
     if (!mesh) return;
+    // the helmet is a headwear LAYER on its rig, not a pooled mesh: taking it
+    // off is headwear.wear(rig, null) (the role cap underneath shows again).
+    const hwRig = mesh._armorRig;
+    if (hwRig) {
+      mesh._armorRig = null;
+      if (CBZ.headwear) CBZ.headwear.wear(hwRig, null, { owner: "armor" });
+      else if (mesh.parent) mesh.parent.remove(mesh);
+      return;
+    }
     if (mesh.parent) mesh.parent.remove(mesh);
     const pool = pools[mesh.userData.armorKind];
     if (pool && pool.length < POOL_MAX) pool.push(mesh);
@@ -124,17 +124,6 @@
     _kitMat[kitId] = m;
     return m;
   }
-  // the visor is the one see-through piece: ONE shared translucent slab material
-  // (cmat can't do transparency; built once, flagged _shared so nothing disposes it)
-  let _visorMat = null;
-  function visorMat() {
-    if (_visorMat) return _visorMat;
-    if (!THREE || !THREE.MeshLambertMaterial) return null;
-    _visorMat = new THREE.MeshLambertMaterial({ color: 0xaad4e8, transparent: true, opacity: 0.35 });
-    _visorMat._shared = true;
-    return _visorMat;
-  }
-
   /* ---- ARMOUR SITS ON TOP OF CLOTHES, AND "ON TOP" IS A MEASUREMENT --------
      OWNER: "outfits with armour on glitch — the outfit and armour glitch
      colors." Exactly the shoulder-yoke fault (entities/character.js), one file
@@ -421,21 +410,16 @@
         const gf = put(an.body, "groin", mat, 0, 0.88, fit.groinZ);
         if (gf) { const gg = dimGeo(fit.groin); if (gg) gf.geometry = gg; }
       }
-    } else if (k.slot === "head" && an.neck && an.neck.add) {
-      const mat = matFor(k.id, k.color);
-      const helm = acquire("helmet");
-      if (helm) { helm.material = mat; helm.position.set(0, 0.40, 0); an.neck.add(helm); out.push(helm); }
-      // real tactical lid (city-swat-redesign): brim lip, side rails, a clear
-      // visor slab under the brim, NVG mount stub + rear counterweight. Head is
-      // the 0.6 cube at neck-local y 0.3; the dome spans y 0.17–0.63.
-      if (redesignOn()) {
-        put(an.neck, "helmBrim", mat, 0, 0.22, 0.26);
-        put(an.neck, "helmRail", mat, -0.37, 0.40, 0.02);
-        put(an.neck, "helmRail", mat, 0.37, 0.40, 0.02);
-        put(an.neck, "helmRear", mat, 0, 0.42, -0.40);
-        put(an.neck, "helmMount", mat, 0, 0.55, 0.32);
-        put(an.neck, "visor", visorMat(), 0, 0.30, 0.36);
-      }
+    } else if (k.slot === "head" && an.ch && CBZ.headwear) {
+      // the ballistic helmet is entities/headwear.js's fitted lid (shell over
+      // pads, rails, NVG shroud, chinstrap) on the "armor" owner — it outranks
+      // the role cap, which comes back the moment the helmet is taken off. The
+      // group rides out[] like any mounted piece so every strip path (recast,
+      // corpse loot, ARMOR GONE, respawn) releases it through releaseMesh.
+      const grp = CBZ.headwear.wear(an.ch, "ballistic", { owner: "armor", variant: "swat", color: k.color });
+      // (the rig rides a plain property, not userData: Object3D.copy JSON-clones
+      // userData and a rig is cyclic)
+      if (grp) { grp.userData.armorKind = "helmet"; grp._armorRig = an.ch; out.push(grp); }
     }
   }
 

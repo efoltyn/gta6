@@ -34,16 +34,12 @@
   CBZ.scene.add(playerChar.group);
 
   // Cop-mode accessories live on the same rig so existing systems keep
-  // their references and only the outfit changes.
-  const copCap = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.22, 0.66), CBZ.mat(0x17223c));
-  copCap.position.y = 0.67; copCap.visible = false; playerChar.neck.add(copCap);
-  const copBrim = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.1, 0.3), CBZ.mat(0x17223c));
-  copBrim.position.set(0, 0.58, 0.42); copBrim.visible = false; playerChar.neck.add(copBrim);
+  // their references and only the outfit changes. The cop's cap is not one of
+  // them: it is entities/headwear.js's peaked police cap (applyPlayerRole).
   const copBadge = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.05), CBZ.mat(0xffd451));
   copBadge.position.set(-0.28, 1.55, 0.27); copBadge.visible = false; playerChar.body.add(copBadge);
   const radio = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.08), CBZ.mat(0x0b0f18));
   radio.position.set(0.33, 1.55, 0.29); radio.visible = false; playerChar.body.add(radio);
-  playerChar.skinSlots.cap.push(copCap, copBrim);
   playerChar.skinSlots.badge.push(copBadge, radio);
 
   function paint(list, color, visible) {
@@ -82,8 +78,14 @@
     paint(s.stripes, 0xc85c00, !cop);
     paint(s.belt, cop ? 0x0d111c : 0x6b4a2a, true);
     paint(s.badge, null, cop);
-    paint(s.cap, null, cop);
-    paint(s.hair, null, !cop);
+    // the officer's peaked cap, fitted on the head with the hair under it. The
+    // jail role owns the whole look, so a city fit's role hat (outfits.js,
+    // "outfit" owner — same rank) comes off with the rest of the city cloth.
+    if (CBZ.headwear) {
+      CBZ.headwear.wear(playerChar, null, { owner: "outfit" });
+      if (cop) CBZ.headwear.wear(playerChar, "peaked:police", { owner: "player", color: 0x17223c, metal: "silver" });
+      else CBZ.headwear.wear(playerChar, null, { owner: "player" });
+    }
     CBZ.player.role = cop ? "cop" : "inmate";
     // The base role swap happens before the shared painted wardrobe in the
     // script-tag monolith. Invalidate its memo so systems/prisonoutfits.js can

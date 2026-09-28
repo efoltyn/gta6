@@ -254,6 +254,10 @@
   // the matching teardown (the other half every caller also hand-rolled)
   CBZ.cityUnpostNpc = function (ped) {
     if (!ped) return false;
+    // A CORPSE BELONGS TO THE WORLD. A role ending (a detail stood down, a
+    // shop closed, a drive-by pulled) must never take a dead body with it:
+    // it stays where it fell under peds.js's corpse law (city/morgue.js).
+    if (ped.dead && !ped.collected) return true;
     try {
       if (ped._npcAttached && CBZ.npcLife && CBZ.npcLife.detach) CBZ.npcLife.detach(ped, { parent: arenaRoot() });
       unlift(ped);

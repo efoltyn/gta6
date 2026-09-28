@@ -36,7 +36,7 @@ vm.runInContext(`
     CBZ.cmat = (c) => { let m = mc.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); m._shared = true; mc.set(c, m); } return m; };
     CBZ.boxGeom = (w, h, d) => { const k = w + "," + h + "," + d; let g = gc.get(k); if (!g) { g = new THREE.BoxGeometry(w, h, d); g._shared = true; gc.set(k, g); } return g; };
   })();`, ctx);
-for (const f of ["src/systems/fphands.js", "src/entities/character.js", "src/entities/heritage.js"]) {
+for (const f of ["src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/heritage.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { if (f.includes("fphands")) console.log("  (fphands.js not loadable here: " + e.message + ")"); else throw e; }
 }
@@ -83,7 +83,7 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   let t = 0;
   for (const m of ms) { geomOk(m.geometry, `${id}/${b.tag} ${m.name || m.geometry.type}`); t += tris(m.geometry); }
   rows.push({ id, tag: b.tag, meshes: ms.length, tris: t, hair: rig.skinSlots.hair[0] ? rig.skinSlots.hair[0].userData.hairStyle : "-", beard: look.beard || "-" });
-  check(ms.length >= 24 && ms.length <= 32, `${id}/${b.tag} mesh count ${ms.length} in the 24-32 band`);
+  check(ms.length >= 24 && ms.length <= 36, `${id}/${b.tag} mesh count ${ms.length} in the 24-36 band (+2 sole units)`);
   // face wiring (entities/character.js THE FACE)
   const f = rig.face;
   check(f && f.eyeL && f.eyeR && f.lidUp && f.lidLow && f.lashes && f.brow && f.mouth && f.lipLow, `${id}/${b.tag} face parts present`);
@@ -111,14 +111,17 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   const key = rig.headForm + "|" + b.tag;
   const set = nonBoxByForm[key] || (nonBoxByForm[key] = []);
   set.push(ms.filter((m) => !isTrueBox(m.geometry)).map((m) => m.geometry));
-  // the shoe sole sits where limb()'s box cap's bottom was: -legLo - 0.03 in the knee frame
-  const shoe = rig.skinSlots.shoes[0], P = rig.profile;
-  if (!shoe.geometry.boundingBox) shoe.geometry.computeBoundingBox();
-  const soleY = shoe.position.y + shoe.geometry.boundingBox.min.y * shoe.scale.y;
-  check(Math.abs(soleY - (-P.legLo - 0.03)) < 1e-6, `${id}/${b.tag} shoe sole plane unchanged (${soleY.toFixed(4)})`);
-  // the shoe encloses the shin box's bottom (trouser corners never poke out)
-  const lw = P.legW * 0.9, sb = shoe.geometry.boundingBox;
-  check(sb.max.x * shoe.scale.x > lw / 2 && shoe.position.z + sb.min.z * shoe.scale.z < -lw / 2, `${id}/${b.tag} shoe wider + deeper than the shin`);
+  // the shoe hangs on the ANKLE (entities/footwear.js): its sole's bottom is
+  // at -(legLo + 0.02) in the knee frame, so a straight leg stands the sole
+  // exactly on the floor (hip -> sole = legUp + legLo = hipY)
+  const shoe = rig.skinSlots.shoes[0], P = rig.profile, foot = shoe.parent;
+  const sole = shoe.userData.trim && shoe.userData.trim.visible ? shoe.userData.trim : shoe;
+  if (!sole.geometry.boundingBox) sole.geometry.computeBoundingBox();
+  const soleY = foot.position.y + shoe.position.y + sole.geometry.boundingBox.min.y * shoe.scale.y;
+  check(Math.abs(soleY - (-P.legLo - 0.02)) < 0.004, `${id}/${b.tag} shoe sole on the floor line (${soleY.toFixed(4)})`);
+  // the shoe is wider than the shin and its heel runs out behind it
+  const lw = P.legW * 0.9, sb = sole.geometry.boundingBox;
+  check(sb.max.x * shoe.scale.x > lw * 0.4 && shoe.position.z + sb.min.z * shoe.scale.z < -lw * 0.4, `${id}/${b.tag} shoe wider + deeper than the ankle`);
   // head UVs inside the atlas
   const uv = rig.head.geometry.attributes.uv.array;
   check(uv.every((x) => x >= 0 && x <= 1), `${id}/${b.tag} head uv in atlas`);
@@ -136,10 +139,10 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   const fresh = ga.filter((g) => !g._shared);
   check(fresh.length === 0, `every geometry is a shared cache entry (${fresh.length} fresh: ${fresh.map((g) => g.type).join(",")})`);
   // different people of one form still share the head geometry (nose variant aside)
-  const m1 = CBZ.human.build({ torso: 1, arms: 1, legs: 1, skin: 0x6b4a32, hair: 0x111111, nose: 1, shoes: 1 }), m2 = CBZ.human.build({ torso: 1, arms: 1, legs: 1, skin: 0xf0c39a, hair: 0x7a4a2e, nose: 1, shoes: 1 });
+  const m1 = CBZ.human.build({ torso: 1, arms: 1, legs: 1, skin: 0x6b4a32, hair: 0x111111, nose: 1, shoes: 1, footwear: "sneaker" }), m2 = CBZ.human.build({ torso: 1, arms: 1, legs: 1, skin: 0xf0c39a, hair: 0x7a4a2e, nose: 1, shoes: 1, footwear: "sneaker" });
   check(m1.head.geometry === m2.head.geometry, "two men with one nose variant share one head geometry");
   check(m1.head.material !== m2.head.material, "…but not one head material");
-  check(m1.skinSlots.shoes[0].geometry === m2.skinSlots.shoes[0].geometry, "one shoe geometry for everyone");
+  check(m1.skinSlots.shoes[0].geometry === m2.skinSlots.shoes[0].geometry, "one shoe geometry per style, shared by everyone");
 }
 // dress + hand pose through the seam
 {
