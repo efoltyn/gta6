@@ -791,7 +791,6 @@
     if (!got) { W.toast("NOT ENOUGH GOLD", "bad"); return 0; }
     // "into the baggage" — the cart row under the crate list is what shows
     // where it went, and it updates in the same frame.
-    W.toast(got + " × " + W.gunLabel(id), "good");
     W.emit("outpost:buy", { o: o, id: id, n: got, spent: got * p });
     return got;
   }
@@ -805,7 +804,6 @@
       got++;
     }
     if (got) {
-      W.toast("+$" + (got * p), "good");
       W.emit("outpost:sell", { o: o, id: id, n: got, got: got * p });
     }
     return got;
@@ -828,7 +826,6 @@
     if (!got) { W.toast("NOT ENOUGH GOLD", "bad"); return 0; }
     W.state.stats.recruited += got;
     W.log("hired " + got + " " + W.tier(tierId).label.toLowerCase() + (got > 1 ? "s" : "") + " at " + o.name + " for $" + (got * p) + ".");
-    W.toast(got + " " + W.tier(tierId).label + " joined", "good");
     W.emit("outpost:hire", { o: o, tier: tierId, n: got, spent: got * p });
     return got;
   }
@@ -865,7 +862,6 @@
         const id = t.getAttribute("data-abuy"), p = armourBuyPrice(o, id);
         if ((o.armourStock[id] || 0) > 0 && W.pay(p)) {
           o.armourStock[id]--; W.stashArmour(id, 1);
-          W.toast(W.armour(id).label + " into the baggage", "good");
         } else W.toast("NOT ENOUGH GOLD", "bad");
         repaint(o); return;
       }

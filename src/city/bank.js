@@ -282,7 +282,7 @@
       // same "approved up to X" UX the personal-capacity gate above uses.
       o.principal = Math.floor(headroom);
       o.payment = paymentFor(o.principal, o.rate, o.termTicks);
-      o.reason = "approved up to " + fmt$(o.principal) + " · bank credit ceiling binding";
+      o.reason = "approved up to " + fmt$(o.principal) + ", the credit ceiling";
     }
     return o;
   }
@@ -595,8 +595,11 @@
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     root.add(group);
 
-    const door = lot.building.door;
-    const inx = num(door.nx, 0), inz = num(door.nz, 1);   // inward unit (one axis ~0)
+    // inward unit (one axis 0), measured the same way the strongroom is, so
+    // the teller line and the vault behind it can never disagree about which
+    // wall is the back one
+    const IN = CBZ.cityInwardOf(lot);
+    const inx = IN.inx, inz = IN.inz;
     const tx = -inz, tz = inx;                            // wall tangent
     const w = num(lot.building.w, 10), d = num(lot.building.d, 10);
     const WT = 0.4;
@@ -785,7 +788,7 @@
     if (c <= 0) { note("No cash on you to deposit.", 1.4); return; }
     g.cityBank = num(g.cityBank, 0) + c; g.cash = 0;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Deposited " + fmt$(c) + " · insured account balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
+    note("Deposited " + fmt$(c) + ", balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
@@ -909,7 +912,7 @@
       for (const r of open) {
         openRows += "<div style='display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0'>" +
           "<span>" + (r.kind === "mortgage" ? "Mortgage" : r.kind === "auto" ? "Auto" : "Personal") +
-          " · " + fmt$(Math.round(r.balance)) + " left</span>" +
+          ", " + fmt$(Math.round(r.balance)) + " left</span>" +
           "<button data-pay='" + r.id + "' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#bcffd0;border-radius:8px;padding:2px 8px;font-family:inherit'>Pay $500</button></div>";
       }
       openRows += "</div>";
@@ -917,7 +920,7 @@
     el.innerHTML =
       "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>Meridian Trust. Lending</div>" +
       "<div style='color:#7f8794;font-size:13px;margin-bottom:14px'>Net worth " + fmt$(netWorth()) +
-        " · unsecured credit up to <span style='color:#bcffd0'>" + fmt$(cap) + "</span></div>" +
+        ", unsecured credit up to <span style='color:#bcffd0'>" + fmt$(cap) + "</span></div>" +
       "<div style='display:flex;gap:8px;margin-bottom:14px'>" +
         "<div style='flex:1;background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px'>" +
           "<div style='color:#9fb0c8;font-size:12px'>Personal loan</div>" +
@@ -932,7 +935,7 @@
             "<button data-term='12' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#e8eef7;border-radius:8px;padding:2px 8px;font-family:inherit'>+</button>" +
           "</div>" +
           "<div style='margin-top:10px;font-size:13px'>Rate <b style='color:#ffd166'>" + Math.round(o.rate * 100) + "%</b>" +
-            " · payment <b style='color:#bcffd0'>" + fmt$(pay) + "</b>/cycle" +
+            ", payment <b style='color:#bcffd0'>" + fmt$(pay) + "</b>/cycle" +
             "<div style='color:#7f8794;font-size:12px;margin-top:2px'>~" + fmt$(total) + " over the term</div></div>" +
           "<button data-take='personal' style='cursor:pointer;width:100%;margin-top:10px;background:#1e7a44;border:1px solid #2a9c58;color:#eafff0;border-radius:10px;padding:8px;font-family:inherit;font-size:14px'>Borrow " + fmt$(amt) + "</button>" +
         "</div>" +
@@ -954,12 +957,12 @@
   function takePersonal() {
     const amt = clampPersonalAmt(S.pAmt);
     const o = offer("personal", amt, {});
-    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined · " + (o.reason || "not approved") + ".", 2); return; }
+    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined, " + (o.reason || "not approved") + ".", 2); return; }
     o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
     const id = take(o);
     if (id) {
-      big("Loan funded · " + fmt$(o.principal) + " in your pocket.");
-      note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "% · " + fmt$(o.payment) + "/cycle auto-paid.", 2.6);
+      big("Loan funded, " + fmt$(o.principal) + " in your pocket.");
+      note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "%, " + fmt$(o.payment) + " a cycle, auto-paid.", 2.6);
       renderPanel();
     }
   }
@@ -1460,6 +1463,23 @@
      count room behind the cage. A third caller (a jeweller's back room, an
      evidence locker) costs a spec object and nothing else.
        spec: { tier, kind, till:{src,point}, name, lat, guard } */
+  /* WHICH WAY IS IN, for any lot with a building: the axis the door faces
+     along, signed from the door point toward the building's centre. Falls back
+     to the door normal read as INWARD (the city's doorPt convention, which
+     buildDisplays below has always used) when the door sits on the centre. */
+  CBZ.cityInwardOf = function (lot) {
+    const b = lot.building;
+    const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+    const door = b.door || { nx: 0, nz: 1 };
+    const axisX = Math.abs(door.nx || 0) > Math.abs(door.nz || 0);
+    let sgn = axisX ? Math.sign(door.nx || 1) : Math.sign(door.nz || 1);
+    if (door.x != null && door.z != null) {
+      const dd = axisX ? (ox - door.x) : (oz - door.z);
+      if (Math.abs(dd) > 0.05) sgn = Math.sign(dd);
+    }
+    return { inx: axisX ? sgn : 0, inz: axisX ? 0 : sgn };
+  };
+
   CBZ.cityVaultRoom = function (lot, spec) {
     if (CBZ.CONFIG.BANK_VAULT_V1 === false) return null;
     spec = spec || {};
@@ -1468,9 +1488,14 @@
     const w = b.w, d = b.d, wt = b.wt != null ? b.wt : 0.3;
     const floorY = (b.floorTops && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
     const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
-    const door = b.door || { nx: 0, nz: 1 };
     // INTO the building from the street door, i.e. toward the back wall.
-    const inx = -(door.nx || 0), inz = -(door.nz || (door.nx ? 0 : 1));
+    // MEASURED, not read off door.nx: builders disagree on whether that normal
+    // points in or out (Gang City's doorPt carries the INWARD one), and reading
+    // it as outward put every strongroom against the FRONT wall, beside the
+    // entrance, with the teller line facing it. Door point to building centre
+    // is the one answer that cannot be wrong.
+    const IN = CBZ.cityInwardOf(lot);
+    const inx = IN.inx, inz = IN.inz;
     const hx = w / 2 - wt, hz = d / 2 - wt;
     const hDeep = Math.abs(inx) * hx + Math.abs(inz) * hz;    // door wall → back wall
     const hTan = Math.abs(inx) * hz + Math.abs(inz) * hx;     // across
@@ -1673,7 +1698,7 @@
     const justOpening = (v.kind === "player" && how === "key");
     let moved = 0;
     if (justOpening) {
-      big("YOUR VAULT IS OPEN");
+      /* your own door swinging open is its own announcement */
     } else if (TL && TL.take && v.till && v.till.src) {
       try { moved = TL.take(v.till.src, { point: v.till.point || "vault", by: "player", rob: true }).taken || 0; }
       catch (e) { moved = 0; }
@@ -1687,14 +1712,11 @@
       });
       v.bags = r.bags; v.bagsOut = true;
       VTALLY.bags += r.bags.length; VTALLY.bagged += moved;
-      big((v.tier === "reserve" ? "THE CASH CENTRE IS OPEN" : "VAULT OPEN") +
-          " — " + fmt$(moved) + " in bags. Carry it out.");
+      // no banner: the duffels on the strongroom floor ARE the result
     } else if (moved > 0) {
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(moved);
-      big("VAULT OPEN · " + fmt$(moved) + ".");
     } else {
-      big("VAULT OPEN, and it's empty. Somebody got here first.");
-      note("They banked it. Come back when the branch has taken money in again.", 3);
+      /* bare shelves under the lights say it: nothing to narrate */
     }
     /* CONSEQUENCE. A blown vault door is the loudest thing that happens in a
        bank; an insider-opened one is quieter but still a robbery in progress.
@@ -1733,10 +1755,8 @@
     v.hp -= dmg;
     v.glow = Math.max(v.glow, Math.min(1, 1 - v.hp / v.hp0));
     if (v.hp <= 0) { vaultBreach(v, "blast", byPlayer ? CBZ.player : null); return; }
-    if (byPlayer) {
-      const pct = Math.max(0, Math.round(v.hp / v.hp0 * 100));
-      note("The door held (" + pct + "%). It needs more than that.", 1.8);
-    }
+    // no "the door held (N%)" line: the scorch glow and the crack pattern on
+    // the steel are how a charge that was not enough reads
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { x: v.x, z: v.z, type: "bombing" }); } catch (e) {} }
   }
 
@@ -2036,7 +2056,7 @@
             after: (function (id, nm) {
               return function (ped) {
                 ped._vaultStaff = id;
-                if (CBZ.cityKeys && CBZ.cityKeys.givePed) CBZ.cityKeys.givePed(ped, id, "Vault Key · " + nm);
+                if (CBZ.cityKeys && CBZ.cityKeys.givePed) CBZ.cityKeys.givePed(ped, id, "Vault Key, " + nm);
               };
             })(v.id, lot.building.name || "Meridian Trust"),
           });

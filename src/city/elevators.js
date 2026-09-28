@@ -1397,6 +1397,29 @@
         const y = tops[Math.max(0, Math.min(nFloors, k | 0))];
         return { x: b.ox + hp.x, y: y, z: b.oz + hp.z, nx: -F.nx, nz: -F.nz };
       },
+      // THE WALK THROUGH THE CORE, for anybody who has to climb it on foot (an
+      // AI body sent back to its post a storey up). World {x, y, z} waypoints
+      // from just outside floor k0's stair door to just outside floor k1's:
+      // arrival strip, up lane A, across the half landing, up lane B, onto the
+      // next arrival strip, and so on. Walked point to point on the ramps the
+      // flights already are (physics' groundAt carries the Y); descending is
+      // the same list reversed. Same floor, or out of range: [].
+      route: function (k0, k1) {
+        k0 = Math.max(0, Math.min(nFloors - 1, k0 | 0));
+        k1 = Math.max(0, Math.min(nFloors - 1, k1 | 0));
+        if (k0 === k1) return [];
+        const lo = Math.min(k0, k1), hi = Math.max(k0, k1);
+        const aC = (laneA0 + laneA1) / 2, bC = (laneB0 + laneB1) / 2;
+        const W = function (dep, lat, y) { const p = F.pt(dep, lat); return { x: b.ox + p.x, y: y, z: b.oz + p.z }; };
+        const out = [W(D0 - 0.9, latMid, tops[lo]), W(D0 + 0.45, latMid, tops[lo])];
+        for (let k = lo; k < hi; k++) {
+          const y0 = tops[k], y2 = tops[k + 1], y1 = (y0 + y2) / 2;
+          out.push(W(dA0 - 0.25, aC, y0), W(dA1 + 0.3, aC, y1),
+                    W(dA1 + 0.3, bC, y1), W(dA0 - 0.25, bC, y2));
+        }
+        out.push(W(D0 + 0.45, latMid, tops[hi]), W(D0 - 0.9, latMid, tops[hi]));
+        return k1 > k0 ? out : out.reverse();
+      },
     };
     b._stairCore = rec;
     return rec;

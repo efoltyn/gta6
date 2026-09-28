@@ -159,9 +159,9 @@
     if (pg.founded) { CBZ.city.note("You already run the " + pg.name + ".", 1.8); return false; }
     // FOUNDing your own crew is a LATE-game move: you must have been patched into
     // a real crew first (prospect → initiation → membership is the primary path).
-    if (!g.cityWasMember) { CBZ.city.note("Prove yourself first, get patched into a crew before you found your own. · O prospect", 3); return false; }
+    if (!g.cityWasMember) return false;
     const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew");
-    if (crew.length < 3) { CBZ.city.note("Need 3 crew to found a gang (you have " + crew.length + "). Recruit more .", 2.6); return false; }
+    if (crew.length < 3) return false;
     pg.name = name || (pick(NAME_A) + " " + pick(NAME_B));
     pg.color = color != null ? color : pick(FOUND_COLORS).hex;
     pg.founded = true;
@@ -174,8 +174,6 @@
     g.career = "gangster";
     pg.order = "follow"; applyOrder();
     g.cityCrew = liveMembers().length;
-    CBZ.city.big("" + pg.name + " FOUNDED");
-    CBZ.city.note("You run the " + pg.name + " now. · O orders", 3.2);
     CBZ.city.addRespect(15);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-founded", { members: crew.length });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -304,8 +302,7 @@
   CBZ.cityPlayerGangBossKilled = function (gangRec) {
     if (!gangRec || gangRec.isPlayer || gangRec.id === "player") return;
     pendingClaim = { rec: gangRec, t: 20 };
-    CBZ.city.big("" + (gangRec.name || "Gang") + " BOSS DOWN");
-    CBZ.city.note("Claim the " + (gangRec.name || "gang") + " · their crew defects to you. · O", 4);
+    crewSays(gangRec, "He's down. So who's running this now?", 3.4);
   };
 
   function claimRivalGang(rec) {
@@ -334,8 +331,7 @@
     g.career = "gangster";
     g.cityCrew = liveMembers().length;
     pendingClaim = null;
-    CBZ.city.big("" + pg.name + " TAKEOVER");
-    CBZ.city.note("You took over the " + rec.name + ". " + defected + " soldiers ride with you now.", 3.4);
+    crewSays({ members: liveMembers() }, "Alright. We ride with you.", 3);
     CBZ.city.addRespect(25);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("takeover", { gang: rec, defected });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -369,6 +365,33 @@
 
   function gangRecById(id) { return (CBZ.cityGangs || []).find((x) => x.id === id); }
   function gangShort(rec) { return rec ? shortGang(rec.name) : "them"; }
+  /* THE CREW TELLS YOU, OR NOBODY DOES. Prospecting used to run on banners
+     ("PROSPECTING: X", "HANDLE BUSINESS: drop Y. Follow the beacon."), a HUD
+     objective line, a map waypoint to their HQ and a beacon over every mark:
+     the game narrating its own quest. Now what you are told comes out of the
+     mouth of whichever member of the set is standing near you, in his own
+     words, and if nobody is near, nobody tells you. */
+  function crewSays(rec, line, secs) {
+    if (!rec || !line || !CBZ.citySay) return false;
+    const P = CBZ.player; if (!P || !P.pos) return false;
+    let best = null, bd = 26;
+    for (const m of (rec.members || [])) {
+      if (!m || m.dead || !m.pos) continue;
+      const d = Math.hypot(m.pos.x - P.pos.x, m.pos.z - P.pos.z);
+      if (d < bd) { bd = d; best = m; }
+    }
+    if (!best) return false;
+    try { return !!CBZ.citySay(best, line, "#ffffff", secs || 3); } catch (e) { return false; }
+  }
+  // "over by the east side" from a speaker toward a point, in words
+  function pointWords(from, to) {
+    if (!from || !from.pos || !to || !to.pos) return "";
+    const dx = to.pos.x - from.pos.x, dz = to.pos.z - from.pos.z;
+    if (Math.hypot(dx, dz) < 12) return "right there";
+    const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
+    const dir = Math.abs(dx) > Math.abs(dz) * 1.6 ? ew : Math.abs(dz) > Math.abs(dx) * 1.6 ? ns : ns + ew;
+    return "down the " + dir + " end";
+  }
 
   // nearest rival crew the player could prospect (on/near their turf, has a boss)
   function prospectableGang() {
@@ -428,7 +451,6 @@
       const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
       if (d < bd) { bd = d; best = p; }
     }
-    if (best && CBZ.cityMarkTarget) CBZ.cityMarkTarget(best);
     return best;
   }
 
@@ -446,11 +468,6 @@
         if (d < bd) { bd = d; mark = p; }
       }
     }
-    if (mark) {
-      if (CBZ.cityMarkTarget) CBZ.cityMarkTarget(mark);
-      // beacon the rival HQ on the full map / radar so they know where to hunt
-      if (CBZ.fullMap && CBZ.fullMap.setGangWaypoint && mark.gang) CBZ.fullMap.setGangWaypoint(mark.gang);
-    }
     return mark;
   }
 
@@ -459,12 +476,14 @@
     const t = curTask(); if (!t) return;
     if (t.id === "biz" && !t.mark) {
       t.mark = pickBizMark(rec);
-      if (t.mark) CBZ.city.note("HANDLE BUSINESS: drop " + (t.mark.name || "the marked target") + ". Follow the beacon.", 3.4);
-      else CBZ.city.note("HANDLE BUSINESS: find a civilian to drop for " + gangShort(rec) + ".", 3);
+      const P = CBZ.player;
+      crewSays(rec, t.mark ? "Him. " + (t.mark.name ? t.mark.name + ", " : "") + pointWords(P, t.mark) + ". He owes us. Handle it."
+                           : "Somebody around here owes us. Keep your eyes open.", 3.6);
     } else if (t.id === "rival" && !t.mark) {
       t.mark = pickRivalMark(rec); t.markGang = t.mark ? t.mark.gang : null;
-      if (t.mark) CBZ.city.note("HIT A RIVAL: take out " + (t.mark.name || "the marked rival") + " of " + gangShort(gangRecById(t.markGang)) + ". Waypoint set to their HQ.", 4);
-      else CBZ.city.note("HIT A RIVAL: drop ANY member of a rival crew for " + gangShort(rec) + ".", 3);
+      const rv = t.mark ? gangRecById(t.markGang) : null;
+      crewSays(rec, rv ? "Last thing. " + gangShort(rv) + " been walking our side. Put one of them down."
+                       : "Last thing. Bring us blood from another set.", 3.6);
     }
   }
 
@@ -472,18 +491,16 @@
   function advanceTask(rec, msg) {
     const T = prospecting && prospecting.tasks; if (!T) return;
     const t = T.list[T.idx]; if (t) t.done = true;
-    if (msg) CBZ.city.note(msg, 2.6);
+    if (msg) crewSays(rec, msg, 2.6);
     if (T.idx < T.list.length - 1) {
       T.idx++;
-      const labels = { trust: "EARN TRUST", work: "PUT IN WORK", biz: "HANDLE BUSINESS", rival: "HIT A RIVAL" };
-      CBZ.city.big("✓ " + (labels[t ? t.id : ""] || "WORK") + " DONE");
       activateTask(rec);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     } else {
       // all four done → initiation unlocked. One quiet line FROM the crew —
       // (the old centre flash "They'll get you made — find the boss." said the
       // same thing twice, as an instruction popup.)
-      CBZ.city.note(gangShort(rec) + " have seen enough, get patched in. · O", 3.4);
+      crewSays(rec, "Alright. We seen enough. Come get your patch.", 3.4);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
@@ -491,16 +508,13 @@
   // begin prospecting a crew — kicks off the TASK SEQUENCE + drops an HQ waypoint
   CBZ.cityProspectGang = function (rec) {
     rec = rec || prospectableGang();
-    if (!rec) { CBZ.city.note("No crew nearby to prospect. Find a gang's turf.", 2.2); return false; }
+    if (!rec) return false;
     if (exists()) { CBZ.city.note("You already run your own gang.", 2); return false; }
     if (memb()) { CBZ.city.note("You're already patched into a crew.", 2); return false; }
-    if (prospecting && prospecting.gangId === rec.id) { CBZ.city.note("Already prospecting " + gangShort(rec) + " · your tasks are waiting. · O", 2.4); return false; }
+    if (prospecting && prospecting.gangId === rec.id) return false;
     if (CBZ.cityAtWar && CBZ.cityAtWar("player", rec.id)) { CBZ.city.note(gangShort(rec) + " are at war with you. Make peace first.", 2.4); return false; }
     prospecting = { gangId: rec.id, t: 0, tasks: makeTasks() };
-    CBZ.city.big("PROSPECTING: " + (rec.name || "gang"));
-    CBZ.city.note("EARN TRUST: build standing with " + gangShort(rec) + " · do favors for members + hang on their turf.", 4);
-    // drop a waypoint to the gang HQ so the player knows where their crew is
-    if (CBZ.fullMap && CBZ.fullMap.setGangWaypoint) CBZ.fullMap.setGangWaypoint(rec.id);
+    crewSays(rec, "You want in? Then be around. Do right by us and we'll see.", 3.6);
     activateTask(rec);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
@@ -529,27 +543,14 @@
     return 0;   // kill-tasks are binary (0 until the right body drops)
   }
 
-  // PUBLIC: describe the active prospect task for the HUD objective line.
-  // -> { label, progress(0..1), target? } | null
+  // PUBLIC: are you courting a crew right now -> { active, ready, progress }
+  // | null. It carries NO label on purpose: hud.js prints a label as the
+  // objective line, and a quest line on the screen is exactly the narration
+  // this file stopped doing. interact.js reads it as a plain truthy "courting".
   CBZ.cityProspectTask = function () {
     if (!prospecting || !prospecting.tasks) return null;
     if (memb()) return null;
-    const rec = gangRecById(prospecting.gangId);
-    // all tasks done → the objective is the initiation step itself
-    // (no key cap: [O] is taken by charpanel's hide-HUD capture listener, so
-    // the crew menu it named never opened from here; the verb lives on the
-    // member's own interaction card, "Get initiated")
-    if (initiationReady()) return { label: "Get initiated: talk to a " + gangShort(rec) + " member", progress: 1, target: null };
-    const t = curTask();
-    if (!t) {
-      return { label: "Get initiated with " + gangShort(rec), progress: 1, target: null };
-    }
-    const sn = gangShort(rec);
-    if (t.id === "trust") return { label: "Earn trust with " + sn, progress: trustProgress(rec), target: null };
-    if (t.id === "work") return { label: "Put in work: drop a civilian for " + sn, progress: 0, target: null };
-    if (t.id === "biz") return { label: "Handle business: drop " + ((t.mark && t.mark.name) || "the marked target"), progress: 0, target: (t.mark && !t.mark.dead) ? t.mark : null };
-    if (t.id === "rival") return { label: "Hit a rival: drop " + ((t.mark && t.mark.name) || "a rival-gang member"), progress: 0, target: (t.mark && !t.mark.dead) ? t.mark : null };
-    return null;
+    return { active: true, ready: initiationReady(), progress: CBZ.cityProspectStanding() };
   };
 
   // the gang accepts you for initiation once ALL FOUR tasks are done.
@@ -574,8 +575,7 @@
       n++;
     }
     jumpedIn = { gangId: rec.id, t: 12, need: n, startHp: CBZ.player.hp || 100 };
-    CBZ.city.big("JUMPED IN · SURVIVE");
-    CBZ.city.note("Take the beating. Stay on your feet for the count. Don't fight back to death.", 3.6);
+    crewSays(rec, "Hands down. Take it and stay on your feet.", 3);
     if (CBZ.sfx) CBZ.sfx("punch");
   }
 
@@ -585,13 +585,9 @@
     }
     jumpedIn = null;
     if (success) patchIn(rec, "jumped");
-    else { CBZ.city.big("YOU FOLDED"); CBZ.city.note("You couldn't take it. " + gangShort(rec) + " sent you packing.", 3); prospecting = null; clearProspectWaypoint(); }
+    else { crewSays(rec, "That's it? Get out of here.", 2.6); prospecting = null; }
   }
 
-  // clear any prospect/initiation waypoint (HQ + hit markers) off the map.
-  function clearProspectWaypoint() {
-    if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
-  }
 
   // ---- PUT IN WORK: accept a hit contract; fulfil it to be patched in ----
   function startWork(rec) {
@@ -603,11 +599,9 @@
       const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
       if (d < bd) { bd = d; mark = p; }
     }
-    if (!mark) { CBZ.city.note("No rival mark around. Find a rival gang member to hit.", 2.6); return false; }
+    if (!mark) { crewSays(rec, "Nobody from the other sets around right now. Later.", 2.6); return false; }
     workContract = { gangId: rec.id, target: mark, t: 90 };
-    if (CBZ.cityMarkTarget) CBZ.cityMarkTarget(mark);   // beacon the mark (gangs.js sets a 'HIT:' waypoint)
-    CBZ.city.big("PUT IN WORK");
-    CBZ.city.note("Hit " + (mark.name || "the marked rival") + " (" + gangShort(gangRecById(mark.gang)) + ") to earn your patch.", 4);
+    crewSays(rec, (mark.name ? mark.name + ", " : "One of ") + gangShort(gangRecById(mark.gang)) + ". " + pointWords(CBZ.player, mark) + ". Do him and you're in.", 3.8);
     return true;
   }
 
@@ -618,14 +612,12 @@
     // gangs.js's `bind` — same record, no second store.
     g.cityMembership = { gangId: rec.id, rank: "prospect", standing: 0, bodies: 0, contrib: 0, served: 0, orders: 0, loyalty: 0.6, how: how };
     prospecting = null; workContract = null; jumpedIn = null;
-    clearProspectWaypoint();       // the HQ / hit beacon's job is done
     g.playerGangId = rec.id;       // peds.js / turf can read which crew you ride with
     g.cityWasMember = true;        // having been patched in unlocks FOUNDing your own gang
     // your standing with this crew flips friendly: make them stop seeing you as prey
     if (CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(rec.id, true);
     g.career = g.career || "gangster";
-    CBZ.city.big("PATCHED IN · " + (rec.name || "gang"));
-    CBZ.city.note("You're a Prospect in the " + (rec.name || "gang") + " (" + (how === "jumped" ? "jumped in" : "put in work") + "). Climb on merit. · O", 4.5);
+    crewSays(rec, how === "jumped" ? "You took it. You're one of us now." : "That's work. You're one of us now.", 3.2);
     CBZ.city.addRespect(12);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-joined", { gang: rec, how });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -731,16 +723,14 @@
       if (rec && t && !t.done) {
         if (t.id === "work") {
           // PUT IN WORK — ANY player kill proves willingness.
-          advanceTask(rec, "Body's down. " + gangShort(rec) + " saw you put in work.");
+          advanceTask(rec, "We saw that. Cold.");
         } else if (t.id === "biz" && t.mark && detail.ped === t.mark) {
           // HANDLE BUSINESS — completes ONLY on the exact marked ped.
-          clearProspectWaypoint();
-          advanceTask(rec, "Handled. The marked target's gone.");
+          advanceTask(rec, "Handled. He won't be owing nobody now.");
         } else if (t.id === "rival" && isHostileTo(rec.id, vg)) {
           // HIT A RIVAL — any non-allied rival-gang member counts (the beaconed
           // mark is a pointer, not a hard requirement).
-          clearProspectWaypoint();
-          advanceTask(rec, "Rival's down. You drew blood for " + gangShort(rec) + ".");
+          advanceTask(rec, "That's blood for the set.");
         }
         // T1 (trust) ignores kills entirely — it advances off standing in the tick.
       }
@@ -919,7 +909,6 @@
       const foe = pg.raidGangId ? gangRecById(pg.raidGangId) : null;
       const zn = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx, lot.cz) : null;
       CBZ.city.note("Crew rolls on the " + (foe ? foe.name : "rival") + " stash" + (zn ? " in " + zn.name : "") + ". Clear the block and they crack it.", 3);
-      if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(lot.cx, lot.cz, "RAID");
       if (pg.raidGangId && CBZ.cityGangProvoke) CBZ.cityGangProvoke(pg.raidGangId, 0.8);
     } else if (kind === "fortify") {
       // FORTIFY: spread the crew across YOUR blocks as standing guards (the
@@ -1017,27 +1006,16 @@
         const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
         hudEl.innerHTML =
           "<div style='font-weight:700;color:" + hex6(rec ? rec.color : 0x8a93a3) + "'>" + (rec ? rec.name : "Crew") + "</div>" +
-          "<div style='color:#aeb6c2'>You: <b style='color:#e8eef7'>" + pip + "</b> · Bodies " + M.bodies + "</div>" +
+          "<div style='color:#aeb6c2'>You: <b style='color:#e8eef7'>" + pip + "</b>, " + M.bodies + " bodies</div>" +
           (bk ? "<div style='color:#aeb6c2'>Book <b style='color:#e8eef7'>" + bk.stores + "</b>" +
                 (bk.owed > 0 ? " · <b style='color:#ffd166'>$" + bk.owed + "</b> in drawers" : "") +
                 (bk.hot > 0 ? " · owes the crew $" + bk.hot : "") + "</div>" +
                 (bk.job ? "<div style='color:#ffd166;font-size:12px'>" + bk.job + "</div>" : "")
-              : "") +
-          "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>Put in work to climb · [O] crew</div>";
+              : "");
         hudEl.style.display = "block"; return;
       }
-      if (prospecting) {
-        const rec = gangRecById(prospecting.gangId);
-        const task = CBZ.cityProspectTask();
-        const T = prospecting.tasks;
-        const step = T ? Math.min(T.idx + 1, T.list.length) : 1, n = T ? T.list.length : 4;
-        const ready = initiationReady();
-        hudEl.innerHTML =
-          "<div style='font-weight:700;color:#ffd166'>Prospecting " + (rec ? shortGang(rec.name) : "a crew") + "</div>" +
-          "<div style='color:#aeb6c2'>Task <b style='color:#e8eef7'>" + step + "/" + n + "</b>" + (ready ? " · initiation ready!" : "") + "</div>" +
-          "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>" + (ready ? "[O] → get patched in" : (task ? task.label : "Work the tasks") + " · [O]") + "</div>";
-        hudEl.style.display = "block"; return;
-      }
+      // prospecting has no HUD card: no "Task 2/4", no step label. Where you
+      // stand with the set is in how its members talk to you.
       hudEl.style.display = "none"; return;
     }
     const mem = liveMembers();
@@ -1093,18 +1071,7 @@
       const rec = gangRecById(prospecting.gangId);
       const T = prospecting.tasks;
       const ready = initiationReady();
-      html += "<div style='color:#ffd166;margin:-2px 0 6px'>Prospecting " + (rec ? rec.name : "a crew") + (ready ? " · initiation ready" : "") + "</div>";
-      // render the ordered task checklist (✓ done / ▶ active / · pending)
-      if (T) {
-        const labels = { trust: "Earn trust", work: "Put in work (drop a civilian)", biz: "Handle business (drop the marked target)", rival: "Hit a rival (drop a rival member)" };
-        const lines = T.list.map((t, i) => {
-          const mark = (i === T.idx) ? "▶" : (t.done ? "✓" : "·");
-          const col = t.done ? "#7ed957" : (i === T.idx ? "#ffd166" : "#8a93a3");
-          // (no "(NN%)" on trust: they warm to you, you do not watch a meter fill)
-          return "<div style='color:" + col + ";font-size:12px'>" + mark + " " + labels[t.id] + "</div>";
-        }).join("");
-        html += "<div style='margin:-2px 0 8px'>" + lines + "</div>";
-      }
+      html += "<div style='color:#ffd166;margin:-2px 0 6px'>Hanging with " + (rec ? rec.name : "a crew") + "</div>";
       if (ready) {
         add("jumpin", "GET JUMPED IN (survive the beating)", "#ff9a9a");
         add("putwork", "PUT IN WORK (hit a rival mark)", "#ffd166");
@@ -1218,7 +1185,7 @@
     else if (act === "warrival") { const r = nearestRival(); if (r && CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(r.id, "war"); }
     // ---- prospect / initiation / membership ----
     else if (act === "prospect") { CBZ.cityProspectGang(prospectableGang()); }
-    else if (act === "stopprospect") { prospecting = null; clearProspectWaypoint(); CBZ.city.note("Walked away from prospecting.", 1.8); }
+    else if (act === "stopprospect") { prospecting = null; }
     else if (act === "jumpin") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startJumpIn(rec); }
     else if (act === "putwork") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startWork(rec); }
     else if (act === "leavegang") { CBZ.cityLeaveGang(); }
@@ -1276,7 +1243,7 @@
     // ---- PROSPECTING: work the ORDERED TASK SEQUENCE ----
     if (prospecting && !memb()) {
       const rec = gangRecById(prospecting.gangId);
-      if (!rec || rec.absorbed || !rec.boss || rec.boss.dead) { prospecting = null; clearProspectWaypoint(); }
+      if (!rec || rec.absorbed || !rec.boss || rec.boss.dead) { prospecting = null; }
       else {
         prospecting.t += dt;
         const t = curTask();
@@ -1290,7 +1257,7 @@
           if (onTurf && nearMember) {
             CBZ.cityGangAddStanding(rec.id, dt * 1.1);   // ~32s of hanging to pass (brain.rep, via gangs.js)
           }
-          if (trustProgress(rec) >= 1) advanceTask(rec, gangShort(rec) + " trust you now.");
+          if (trustProgress(rec) >= 1) advanceTask(rec, "You're alright. We been watching.");
         }
         // T3 / T4 — if the beaconed mark despawned or got dropped by someone
         // ELSE, re-pick a fresh one so the objective is always reachable.
@@ -1322,19 +1289,18 @@
       workContract.t -= dt;
       const rec = gangRecById(workContract.gangId);
       const mk = workContract.target;
-      if (!rec || rec.absorbed) { workContract = null; clearProspectWaypoint(); }
+      if (!rec || rec.absorbed) { workContract = null; }
       else if (mk && mk.dead && workContract._byPlayer) {
         // confirmed: the player dropped the mark → patched in (patchIn clears wp)
         CBZ.city.note("Mark's down. You put in work for " + gangShort(rec) + ".", 2.4);
         patchIn(rec, "work");
       } else if (mk && mk.dead && !workContract._byPlayer) {
         // someone else clipped your mark — contract's blown, pick a new one
-        CBZ.city.note("Someone else got to your mark. Find another rival.", 2.4);
-        workContract = null; clearProspectWaypoint();
+        crewSays(rec, "Somebody else got him first. Doesn't count.", 2.4);
+        workContract = null;
       } else if (workContract.t <= 0) {
-        CBZ.city.big("CONTRACT EXPIRED");
-        CBZ.city.note("You took too long. The mark walked.", 2.6);
-        workContract = null; clearProspectWaypoint();
+        crewSays(rec, "Took too long. Forget it.", 2.4);
+        workContract = null;
       }
     }
 
@@ -1488,7 +1454,6 @@
     g.cityMembership = null; g.playerGangId = null;
     g.cityWasMember = false;
     pendingClaim = null; prospecting = null; jumpedIn = null; workContract = null;
-    clearProspectWaypoint();   // drop any HQ / hit beacon left on the map
     if (hudEl) hudEl.style.display = "none";
     if (menuEl) menuEl.style.display = "none";
   };

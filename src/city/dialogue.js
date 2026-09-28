@@ -454,30 +454,27 @@
     };
   }
 
+  // A NAME AND A DIRECTION, IN HIS OWN WORDS. The old intro opened a
+  // "Meet X" mission with a reach marker (or dropped a map waypoint): the
+  // game walking you there by the hand. Now all you get is what a man on the
+  // street would actually tell you, and finding it is yours to do.
+  function roughlyWhere(p, t) {
+    const at = (t.live && t.live.pos) ? t.live.pos : t.at;
+    if (!at || !p || !p.pos) return "";
+    const dx = at.x - p.pos.x, dz = at.z - p.pos.z, d = Math.hypot(dx, dz);
+    if (d < 25) return " Around here somewhere.";
+    const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
+    const dir = Math.abs(dx) > Math.abs(dz) * 1.6 ? ew : Math.abs(dz) > Math.abs(dx) * 1.6 ? ns : ns + ew;
+    return d > 400 ? " Other side of town, " + dir + "." : " Up " + dir + " a ways.";
+  }
   function intentIntro(p, m, t) {
     return {
       id: "intro",
       line: "I know a guy, " + t.what + ".",
       a: {
         label: "Who?",
-        closer: "“Ask for " + t.name + ". You didn't hear it from me.”",
-        run: function () {
-          meet(p); relShift(p, "greeted", 0.6);
-          if (CBZ.mission && CBZ.mission.start) {
-            CBZ.mission.start({
-              id: "dlg:intro", title: "Meet " + t.name, giver: nm(p),
-              goal: "reach", radius: 7,
-              at: t.live ? function () { return (t.live && !t.live.dead) ? t.live : (t.at || null); } : t.at,
-              reward: { respect: 2 },
-              brief: t.name + " " + t.what + ".",
-              doneText: "You found " + t.name + ".",
-              onComplete: function () { if (t.live) { meet(t.live); relShift(t.live, "greeted", 0.5); } },
-            });
-          } else if (CBZ.fullMap && CBZ.fullMap.setWaypoint) {
-            const at = t.live && t.live.pos ? t.live.pos : t.at;
-            if (at) try { CBZ.fullMap.setWaypoint(at.x, at.z, ("MEET " + t.name).toUpperCase()); } catch (e) {}
-          }
-        },
+        closer: "\u201cAsk for " + t.name + "." + roughlyWhere(p, t) + " You didn't hear it from me.\u201d",
+        run: function () { meet(p); relShift(p, "greeted", 0.6); },
       },
       b: { label: "Not looking", closer: "Everybody's looking for somebody.", mem: function () { relShift(p, "snubbed", 0.2); } },
     };

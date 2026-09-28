@@ -85,10 +85,31 @@
     return ((k + ph) & 1) ? "kitchen" : "crash";
   }
 
+  // THE STAIR CORE (elevators.js CBZ.cityStairCore): stamped on the building
+  // record AND its group, because the lot carries a shallow copy of the record
+  // buildings.js made and the fit-out planner is handed the original. Both
+  // share the group, so both readers find the same core.
+  function coreOf(b) {
+    if (!b) return null;
+    return b._stairCore || (b.group && b.group.userData && b.group.userData.stairCore) || null;
+  }
+
   // ---- the placement ledger: a floor's free space, door lane and taken rects
   function ctx(b, r, k) {
-    return { b: b, r: r, k: k, X0: r.x0 - 0.4, X1: r.x1 + 0.4, Z0: r.z0 - 0.4, Z1: r.z1 + 0.4,
-             door: doorOf(b), taken: [] };
+    const C = { b: b, r: r, k: k, X0: r.x0 - 0.4, X1: r.x1 + 0.4, Z0: r.z0 - 0.4, Z1: r.z1 + 0.4,
+                door: doorOf(b), taken: [] };
+    // the stairwell and the walk out of its door stay empty on every floor:
+    // the shaft itself is already off limits through clearFloorPoint (the
+    // carve reserves it), this keeps a sofa from being parked across the
+    // landing you step out onto.
+    const core = coreOf(b);
+    if (core && core.rect && core.head) {
+      const R = core.rect, h = core.head;
+      take(C, R.x0 - 0.12, R.z0 - 0.12, R.x1 + 0.12, R.z1 + 0.12);
+      const ax = h.x + h.nx * 2.4, az = h.z + h.nz * 2.4, lx = Math.abs(h.nz) * 1.1, lz = Math.abs(h.nx) * 1.1;
+      take(C, Math.min(h.x, ax) - lx, Math.min(h.z, az) - lz, Math.max(h.x, ax) + lx, Math.max(h.z, az) + lz);
+    }
+    return C;
   }
   // the street door's walk-in lane (wider than buildings.js's, which only
   // keeps furniture out of the doorway itself: nobody parks a sofa 3 m in)
@@ -151,7 +172,11 @@
     const zp = zw - cs * D;                          // partition line
     // THE DOORWAY is pushed to the far end: from the street door the
     // partition is all you see; the table is round the corner.
-    const side = onZ ? (hsh(b, 0, 1, 2, 0x51) < 0.5 ? -1 : 1) : (d.x < 0 ? 1 : -1);
+    // With a stair core in a back corner, the doorway goes to the OTHER end:
+    // the core's own wall closes that end of the partition.
+    const core = coreOf(b);
+    const side = (onZ && core && core.rect) ? ((core.rect.x0 + core.rect.x1) / 2 > 0 ? -1 : 1)
+      : onZ ? (hsh(b, 0, 1, 2, 0x51) < 0.5 ? -1 : 1) : (d.x < 0 ? 1 : -1);
     const gapW = 1.0;
     const gx = side > 0 ? C.X1 - 0.85 : C.X0 + 0.85;
     // the partition's clear runs (a lift shaft or stair core may bite a corner)
@@ -165,9 +190,15 @@
         if (!ok && a != null) { segs.push([a, x - step]); a = null; }
       }
       if (a != null) segs.push([a, C.X1 - 0.06]);
+      // a run that stops at the stair core's side wall is carried onto it (the
+      // 0.25 m sampling would otherwise leave a slot beside the shaft)
+      const cr = core && core.rect;
+      const onCore = !!(cr && zp > cr.z0 - 0.3 && zp < cr.z1 + 0.3);
       for (let i = 0; i < segs.length; i++) {
         if (Math.abs(segs[i][0] - (C.X0 + 0.06)) < 1e-3) segs[i][0] = C.X0;
         if (Math.abs(segs[i][1] - (C.X1 - 0.06)) < 0.2) segs[i][1] = C.X1;
+        if (onCore && Math.abs(segs[i][0] - cr.x1) < 0.5) segs[i][0] = cr.x1;
+        if (onCore && Math.abs(segs[i][1] - cr.x0) < 0.5) segs[i][1] = cr.x0;
         covered += segs[i][1] - segs[i][0];
       }
       if (covered < 0.6 * (C.X1 - C.X0)) { wall = false; segs.length = 0; D = Math.min(Dw, 2.8); }
@@ -1708,15 +1739,21 @@
     if (!lots) return;
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i], b = lot && lot.building;
-      if (!b || b.w == null || b.d == null || b.park) continue;
+      if (!b || b.w == null || b.d == null || b.park || lot.demolished) continue;
+      const n = floorsOf(b);
+      // THE STAIRS, before anything is planned: the core is carved out of
+      // every floor it rises through, and every plan below (and the fit-out
+      // that draws the same plans later) furnishes round it.
+      stairsFor(lot, b, n);
       const r0 = roomOf(b, 0);
       if (!r0) continue;
-      const n = floorsOf(b);
       let g = null;
       try { g = planGround(b, r0); } catch (e) { g = null; }
       if (!g) continue;
-      // the gang's stash point moves onto the count table the fit-out stands
-      if (b.stash) { b.stash.x = (b.ox || 0) + g.table.x; b.stash.z = (b.oz || 0) + g.table.z; }
+      // the gang's stash point moves onto the count table the fit-out stands,
+      // and the table's own take (interior_programs.js "countroom") is the one
+      // verb for it: interact.js's bare stash grab stands down for this lot
+      if (b.stash) { b.stash.x = (b.ox || 0) + g.table.x; b.stash.z = (b.oz || 0) + g.table.z; b.stash.countRoom = true; }
       let cook = null, cookK = -1;
       for (let k = 1; k < n; k++) {
         if (floorKind(b, k, n) !== "kitchen") continue;
@@ -1730,6 +1767,26 @@
     }
   }
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) { index(city || (CBZ.city && CBZ.city.arena)); }, 90.6);
+
+  // A walk-up of two or more floors gets a real stair core (the switchback
+  // rig elevators.js builds for occupied buildings: treads, handrails, a
+  // landing per half-storey, ramp platforms you and the AI walk on, the slabs
+  // carved where it rises). It stands in a back corner; with the street door
+  // on a side wall it takes the corner away from the count room's wall.
+  function stairsFor(lot, b, n) {
+    if (n < 2 || !CBZ.cityStairCore) return null;
+    let core = coreOf(b);
+    if (!core) {
+      const d = doorOf(b);
+      const side = Math.abs(d.nx) > 0.5 ? (d.nx > 0 ? -1 : 1) : (hsh(b, 0, 4, 9, 0x5c) < 0.5 ? -1 : 1);
+      try { core = CBZ.cityStairCore(lot, { side: side }); } catch (e) { core = null; }
+    }
+    if (core) {
+      b._stairCore = core;
+      if (b.group) b.group.userData.stairCore = core;
+    }
+    return core;
+  }
 
   function jobsFor(rec, gid) {
     const b = rec.b, g = rec.g, ox = b.ox || 0, oz = b.oz || 0, fy0 = fyOf(b, 0);
@@ -1763,11 +1820,12 @@
                      hp: hp, aggr: 0.82, wealth: 0.4 };
       if (J.floorY != null) opts.floorY = J.floorY;
       const seatArgs = J.seat;
+      const seatFn = seatArgs ? function () { return seatAt(seatArgs[0], seatArgs[1], seatArgs[2], seatArgs[3], seatArgs[4], seatArgs[5], rec.lot); } : null;
       const p = CBZ.cityStaffPost({
         venue: "hideouts", id: "hide:" + rec.i + ":" + gid + ":" + J.role,
         x: J.x, z: J.z, face: J.face,
         job: "gang " + J.rank, archetype: "gangster", opts: opts,
-        seat: seatArgs ? function () { return seatAt(seatArgs[0], seatArgs[1], seatArgs[2], seatArgs[3], seatArgs[4], seatArgs[5], rec.lot); } : null,
+        seat: seatFn,
         alive: function () { return held(rec, gid); },
         after: function (ped) {
           ped.kind = "gang"; ped.gang = gid; ped.faction = gid;
@@ -1778,6 +1836,7 @@
           ped._occupyGarrison = true;
           ped._hideout = rec;
           ped._occupyPost = { x: J.x, z: J.z, face: J.face };
+          ped._hideJob = J; ped._hideSeat = seatFn;     // where he goes back to (see THE WAY BACK)
           const GG = gangOf(gid);
           if (GG && GG.members && GG.members.indexOf(ped) < 0) GG.members.push(ped);
           if (CBZ.cityMemberStats) { try { CBZ.cityMemberStats(ped); } catch (e) {} }
@@ -1802,6 +1861,8 @@
   // the same field trio occupy.js's wake() and lootConsequence write
   function wake(p, threat) {
     if (!p || p.dead) return;
+    notePost(p);                                       // before the chair is left
+    stopHoming(p);
     if ((p._propSeat || p.state === "sit") && CBZ.propStand) { try { CBZ.propStand(p, { instant: true }); } catch (e) {} }
     p._deskAnchor = null;
     p.mem = threat; p.alarmed = Math.max(p.alarmed || 0, 4);
@@ -1819,6 +1880,167 @@
     return out;
   }
 
+  /* ---- THE WAY BACK ------------------------------------------------------
+     A house that got up for a robbery sits back down once it is over. Each
+     body's post (the chair, the sofa seat, the cook's spot at the burners,
+     its facing and its floor) is noted the moment it is woken. When the threat
+     is gone (the robber dead, or out of the building and nobody on him for a
+     while, longer while he is still wanted) every body walks home through the
+     shared move-order seam (peds.js move() -> CBZ.moves): round the count-room
+     partition by its doorway, up or down the stair core by its flights, then
+     back into the chair (propSit walks the last step in) or back onto the
+     post. If the house wakes again on the way, the walk is dropped and the
+     fight brain has him. */
+  const HOMING = [];
+  function floorAt(b, y) {
+    const n = floorsOf(b);
+    let k = 0;
+    for (let i = 1; i < n; i++) if (y >= topOf(b, i) - 0.6) k = i;
+    return k;
+  }
+  function notePost(p) {
+    if (!p || p._hideHome || !p._hideJob || !p._hideout) return;
+    const J = p._hideJob, b = p._hideout.b;
+    const up = J.floorY != null && J.floorY > 0.2;
+    p._hideHome = {
+      x: J.x, z: J.z, face: J.face,
+      y: up ? J.floorY : 0, k: up ? floorAt(b, J.floorY) : 0,
+      seat: p._hideSeat || null,
+      pose: (p.char && p.char.pose) || null,
+    };
+  }
+  function homeOrder(p, x, z, stop, leg) {
+    let o = p.moveOrder;
+    if (!o || !o._hide) o = p.moveOrder = { _hide: true, x: 0, z: 0, speed: 0, stop: 0.3, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+    o.x = x; o.z = z; o.speed = p.baseSpeed || 1.5; o.stop = stop; o.leg = !!leg; o.t = CBZ.now || 0;
+    if (p.state !== "walk") p.state = "walk";
+    p.pause = 0;
+  }
+  function stopHoming(p) {
+    if (!p) return;
+    if (p.moveOrder && p.moveOrder._hide) p.moveOrder = null;
+    for (let i = HOMING.length - 1; i >= 0; i--) if (HOMING[i].p === p) HOMING.splice(i, 1);
+  }
+  // the walk home, as world waypoints: the stair core's flights when he is on
+  // another floor, the count-room doorway when the partition is between him
+  // and his post, then the post itself
+  function routeHome(rec, p) {
+    const b = rec.b, H = p._hideHome, ox = b.ox || 0, oz = b.oz || 0;
+    const pts = [];
+    const kNow = floorAt(b, p.pos.y || 0), core = coreOf(b);
+    if (kNow !== H.k && core && core.route) {
+      const r = core.route(kNow, H.k);
+      for (let i = 0; i < r.length; i++) pts.push({ x: r[i].x, z: r[i].z, stair: true });
+    }
+    const g = rec.g;
+    if (H.k === 0 && g && g.wall) {
+      const cs = g.cs, from = pts.length ? pts[pts.length - 1] : p.pos;
+      const inA = cs * (from.z - oz) > cs * g.zp, inB = cs * (H.z - oz) > cs * g.zp;
+      if (inA !== inB) {
+        const lounge = { x: ox + g.gx, z: oz + g.zp - cs * 0.9 }, band = { x: ox + g.gx, z: oz + g.zp + cs * 0.9 };
+        if (inA) pts.push(band, lounge); else pts.push(lounge, band);
+      }
+    }
+    pts.push({ x: H.x, z: H.z });
+    return pts;
+  }
+  function sendHome(rec, p) {
+    if (!p || p.dead || !p.pos || p.controlled || p.companion || p.recruited || p.restraint || p.driving || p.inCar) return;
+    notePost(p);
+    const H = p._hideHome;
+    if (!H) return;
+    p.rage = null; p.mem = null; p.alarmed = 0; p._combatFace = null;
+    if (p.state === "fight" || p.state === "confront") p.state = "walk";
+    // the loiter anchor is the post (should the order lapse, he idles THERE)
+    p.guard = { x: H.x, z: H.z }; p.homeGuard = p.guard;
+    stopHoming(p);
+    const pts = routeHome(rec, p);
+    // a body held at storey height by occupy.js's floor lift is let go for a
+    // climb, so the flights' ramps carry his feet
+    if (pts.length && pts[0].stair && p._occupyY > 0.2 && CBZ.cityFloorPed) CBZ.cityFloorPed(p, 0);
+    HOMING.push({ p: p, rec: rec, pts: pts, i: 0, t: 0 });
+  }
+  function settleHome(h, snap) {
+    const p = h.p, H = p._hideHome;
+    stopHoming(p);
+    if (!H || p.dead) return;
+    if (snap) {
+      p.pos.x = H.x; p.pos.z = H.z;
+      if (p.target && p.target.set) p.target.set(H.x, 0, H.z);
+      if (!(H.y > 0.2)) p.pos.y = fyOf(h.rec.b, 0) - 0.06;
+      if (CBZ.moves && CBZ.moves.reset && CBZ.moves.motor) CBZ.moves.reset(CBZ.moves.motor(p), p.pos);
+    }
+    if (H.y > 0.2 && CBZ.cityFloorPed) CBZ.cityFloorPed(p, H.y);
+    p.guard = null; p.homeGuard = null; p.path = null; p.finalGoal = null;
+    let seated = false;
+    if (H.seat && CBZ.propSit) {
+      let s = null;
+      try { s = H.seat(); } catch (e) { s = null; }
+      if (s) { try { seated = !!CBZ.propSit(p, s, snap ? { instant: true } : null); } catch (e) { seated = false; } }
+    }
+    if (!seated) {
+      // back on the post: peds.js's posted brain roots him, facing his way
+      p.staffPost = { x: H.x, z: H.z, face: H.face };
+      p.state = "idle"; p.speed = 0;
+      if (H.pose && CBZ.setCharPose && p.char) { try { CBZ.setCharPose(p.char, H.pose); } catch (e) {} }
+    }
+  }
+  function driveHoming(dt, P) {
+    for (let i = HOMING.length - 1; i >= 0; i--) {
+      const h = HOMING[i], p = h.p;
+      if (!p || p.dead || !p.pos || (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0)) { HOMING.splice(i, 1); continue; }
+      // woken again, cuffed, held up, knocked down, taken over: not ours
+      if (p.rage || p.state === "fight" || p.surrender || p.surrenderT > 0 || (p.ko | 0) > 0
+          || p.controlled || p.restraint || p.driving || p.inCar) {
+        if (p.moveOrder && p.moveOrder._hide) p.moveOrder = null;
+        HOMING.splice(i, 1);
+        continue;
+      }
+      h.t += dt;
+      const q = h.pts[h.i], last = h.i === h.pts.length - 1;
+      const dx = q.x - p.pos.x, dz = q.z - p.pos.z;
+      // a chair is walked up to, not into: propSit takes the last step
+      const rad = last ? (p._hideHome && p._hideHome.seat ? 1.0 : 0.5) : 0.65;
+      if (dx * dx + dz * dz < rad * rad) {
+        h.i++;
+        if (h.i >= h.pts.length) settleHome(h, false);
+        continue;
+      }
+      // nobody walks forever: out of your sight a stuck or overlong walk is
+      // finished for him, in view he keeps trying a good while longer
+      const pdx = p.pos.x - P.pos.x, pdz = p.pos.z - P.pos.z, far = pdx * pdx + pdz * pdz > 35 * 35;
+      const stuck = !!(p._mv && p._mv.stuckN > 5);
+      if ((far && (h.t > 30 || stuck)) || h.t > 120) { settleHome(h, true); continue; }
+      homeOrder(p, q.x, q.z, last ? (rad > 0.6 ? 0.8 : 0.3) : 0.2, !last);
+    }
+  }
+  // is whatever woke the house still a threat to it
+  function isPlayerish(T, P) { return !!T && (T === P || T === (CBZ.city && CBZ.city.playerActor) || T.isPlayer); }
+  function threatNear(rec, T, P) {
+    if (!T) return false;
+    const isP = isPlayerish(T, P);
+    if (isP ? P.dead : T.dead) return false;
+    const tp = isP ? P.pos : T.pos;
+    if (!tp) return false;
+    const lot = rec.lot, b = rec.b;
+    const hw = (b.w || 20) / 2 + 12, hd = (b.d || 20) / 2 + 12;
+    if (Math.abs(tp.x - lot.cx) < hw && Math.abs(tp.z - lot.cz) < hd) return true;
+    // outside, but somebody is still on him close up
+    const bodies = bodiesOf(rec);
+    for (let j = 0; j < bodies.length; j++) {
+      const q = bodies[j];
+      if (!q.rage || !q.pos) continue;
+      const dx = q.pos.x - tp.x, dz = q.pos.z - tp.z;
+      if (dx * dx + dz * dz < 22 * 22) return true;
+    }
+    return false;
+  }
+  function standDown(rec) {
+    rec.awake = false; rec.threat = null; rec.calmT = 0;
+    const bodies = bodiesOf(rec);
+    for (let j = 0; j < bodies.length; j++) sendHome(rec, bodies[j]);
+  }
+
   CBZ.onUpdate && CBZ.onUpdate(41.9, function (dt) {
     const game = CBZ.game;
     if (!game || game.mode !== "city") return;
@@ -1829,6 +2051,7 @@
     if (!P || !P.pos) return;
     const px = P.pos.x, pz = P.pos.z;
     const threat0 = (CBZ.city && CBZ.city.playerActor) || P;
+    if (HOMING.length) driveHoming(dt || 0, P);
 
     // ---- the house wakes together (2 Hz, only hideouts you are close to)
     HIDE.wacc += dt || 0;
@@ -1838,7 +2061,8 @@
         const rec = HIDE.list[i], lot = rec.lot;
         const dx = lot.cx - px, dz = lot.cz - pz, d2 = dx * dx + dz * dz;
         const st = lot.building && lot.building.stash;
-        if (d2 > 60 * 60) { if (st) rec.looted = !!st.looted; if (rec.awake) { rec.awake = false; rec.threat = null; } continue; }
+        // walked well away: whatever was up is over, they go back to work
+        if (d2 > 60 * 60) { if (st) rec.looted = !!st.looted; if (rec.awake) standDown(rec); continue; }
         const bodies = bodiesOf(rec);
         let trig = null;
         if (st && st.looted && !rec.looted) {
@@ -1846,18 +2070,41 @@
           // the stacks leave the table the moment the count is gone
           if (CBZ.fitoutRebuild) CBZ.fitoutRebuild(lot.building, 0);
           if (d2 < 30 * 30) trig = threat0;
-        } else if (st && !st.looted) rec.looted = false;
-        for (let j = 0; j < bodies.length && !trig; j++) {
-          const p = bodies[j];
-          if (p.rage || p.state === "fight" || (p.alarmed > 0 && p.mem)) trig = p.rage || p.mem || threat0;
+        } else if (st && !st.looted && rec.looted) {
+          // restocked: the count is back on the table (and takeable again)
+          rec.looted = false;
+          if (CBZ.fitoutRebuild) CBZ.fitoutRebuild(lot.building, 0);
         }
-        if (!trig) continue;
-        rec.awake = true; rec.threat = trig;
-        for (let j = 0; j < bodies.length; j++) {
-          const p = bodies[j];
-          if (p.rage && p.state === "fight") continue;
-          wake(p, trig);
+        if (!rec.awake) {
+          for (let j = 0; j < bodies.length && !trig; j++) {
+            const p = bodies[j];
+            if (p.rage || p.state === "fight" || (p.alarmed > 0 && p.mem)) trig = p.rage || p.mem || threat0;
+          }
+        } else if (!trig) {
+          // up already: one that is newly on somebody else re-aims the house
+          for (let j = 0; j < bodies.length && !trig; j++) {
+            const p = bodies[j];
+            if (p.rage && p.rage !== rec.threat && !(isPlayerish(p.rage, P) && isPlayerish(rec.threat, P))
+                && threatNear(rec, p.rage, P)) trig = p.rage;
+          }
         }
+        if (trig) {
+          rec.awake = true; rec.threat = trig; rec.calmT = 0;
+          for (let j = 0; j < bodies.length; j++) {
+            const p = bodies[j];
+            if (p.rage && p.state === "fight") { notePost(p); stopHoming(p); continue; }
+            wake(p, trig);
+          }
+          continue;
+        }
+        if (!rec.awake) continue;
+        // ---- the threat passing: out of the building and nobody on him for a
+        // while (twice as long while the robber is still wanted), or dead
+        const T = rec.threat, TP = isPlayerish(T, P);
+        const tDead = !T || (TP ? !!P.dead : !!T.dead);
+        if (tDead || !threatNear(rec, T, P)) rec.calmT = (rec.calmT || 0) + 0.5; else rec.calmT = 0;
+        const hot = !tDead && TP && ((game.wanted | 0) > 0);
+        if (rec.calmT >= (tDead ? 4 : hot ? 24 : 12)) standDown(rec);
       }
     }
 

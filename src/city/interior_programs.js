@@ -444,6 +444,8 @@
   // deliberate read from the street and the one variant that must be per-FLOOR.
   function shell(h, r, dark) {
     const w = Math.max(1, r.x1 - r.x0), d = Math.max(1, r.z1 - r.z0);
+    // r.y is a slab top (interiorProgram lifts a ground room onto the poured
+    // slab); a slabless host at 0 still lifts its covering over grade
     const fy = r.y < 0.1 ? r.y + 0.13 : r.y + 0.02;
     h.b.lbox(cx(r), fy, cz(r), w, 0.04, d, P.floor, { cast: false });
     if (dark) return;
@@ -2267,20 +2269,19 @@
     // gangs.js keeps on the lot: taking it empties that stash (so the crew
     // raid and the turf repaint agree), pays what the stash held, and the
     // gang finds out the way gangs.js's own stash robbery tells it.
+    // gangs.js cityRobStash is the one robbery: the stash empties, the gang
+    // is provoked, the block hears it, the cops get the tip. The table only
+    // adds its loose count on top of what the stash held.
     if (rec.kind === "countroom" || rec.kind === "lab") {
       const lot = lootLotOf(rec);
       const st = lot && lot.building && lot.building.stash;
-      if (st && st.gang && CBZ.cityGangProvoke) { try { CBZ.cityGangProvoke(st.gang, 1); } catch (e) {} }
-      if (st && !st.looted && rec.kind === "countroom") {
-        st.looted = true;
-        const add = (st.cash | 0) + K.cash[0] + ((Math.random() * (K.cash[1] - K.cash[0])) | 0);
-        lootCash(add);
-        if (st.drugs > 0 && CBZ.cityEcon && CBZ.cityEcon.add && lootHasItem("Meth")) CBZ.cityEcon.add("Meth", st.drugs | 0);
-        if (st.weapon && CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add(st.weapon, 1);
-        if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(6);
-        lootNote("$" + add + " off the count table, rubber bands and all.", 2.4);
+      if (st && !st.looted && rec.kind === "countroom" && CBZ.cityRobStash) {
+        const extra = K.cash[0] + ((Math.random() * (K.cash[1] - K.cash[0])) | 0);
+        const got = CBZ.cityRobStash(lot, { extra: extra, note: function (n) { return "$" + n + " off the count table, rubber bands and all."; } });
+        LOOT_TALLY.cash += got | 0;
         return true;
       }
+      if (st && st.gang && CBZ.cityGangProvoke) { try { CBZ.cityGangProvoke(st.gang, 1); } catch (e) {} }
       if (st && st.looted && rec.kind === "countroom") { lootNote(K.empty, 1.8); return true; }
     }
     if (rec.kind === "safe") {
@@ -3313,7 +3314,12 @@
     if (!(room.x1 - room.x0 > 2) || !(room.z1 - room.z0 > 2)) return null;   // degenerate plate
     const r = CBZ.interiorClampRect(h.b,
       { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1 });
+    // a ground-floor room handed in at y = 0 stands on the foundation slab's
+    // TOP (0.14), not inside it: every piece a program lays is floor-relative
     r.y = room.y || 0;
+    // (only for a shell that poured one: a host with no floorTops has its
+    // floor at 0 and keeps it)
+    if (r.y < 0.1 && h.b && Array.isArray(h.b.floorTops) && h.b.floorTops[0] != null) r.y = h.b.floorTops[0];
     if (!(r.x1 - r.x0 > 2) || !(r.z1 - r.z0 > 2)) return null;
     // THE SHELL IS THE LAW — every box this program draws (its own, roombuild's
     // planner pieces, furniture.js's kit) goes through the host's lbox, so one

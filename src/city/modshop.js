@@ -1015,14 +1015,14 @@
       const r = (car._boostReady == null ? 1 : car._boostReady);
       const pct = Math.round(r * 100);
       const bars = Math.round(r * 10);
-      parts.push("BOOST [" + "█".repeat(bars) + "·".repeat(10 - bars) + "] " + (r >= 1 ? "READY" : pct + "%"));
+      parts.push("BOOST [" + "█".repeat(bars) + "-".repeat(10 - bars) + "] " + (r >= 1 ? "READY" : pct + "%"));
     }
     const w = activeWeapon(car);
     if (m.turret || m.launcher) {
       let ws = "";
       if (w === "turret") ws = "TURRET";
       else if (w === "launcher") ws = "ROCKETS x" + ((m.launcher && m.launcher.ammo) | 0);
-      if (m.turret && m.launcher) ws += "  ·  [R] swap";
+      if (m.turret && m.launcher) ws += "   [R] swap";
       parts.push(ws);
     }
     const txt = parts.join("   |   ");
@@ -1104,26 +1104,26 @@
       case "sell": {
         const sp = sellPayout(car);
         return [{ label: "SELL this " + (car.model ? car.model.name : "car"), price: -sp.pay,
-          sub: (sp.cond.label || "") + " · payout", action: function () { doSell(car); } }];
+          sub: (sp.cond.label ? sp.cond.label + ", " : "") + "payout", action: function () { doSell(car); } }];
       }
       case "respray":
-        return [{ label: "Respray + restyle", price: PRICE.respray, sub: "fresh paint · sheds heat",
+        return [{ label: "Respray + restyle", price: PRICE.respray, sub: "fresh paint, sheds heat",
           action: function () { doRespray(car); } }];
       case "armor":
         return [
           { label: "Light plating", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
             owned: m.armor === "light", action: function () { doMod(car, "armor", "light", PRICE.armor.light); } },
-          { label: "Heavy plating", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms · RPG still kills",
+          { label: "Heavy plating", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms, RPG still kills",
             owned: m.armor === "heavy", action: function () { doMod(car, "armor", "heavy", PRICE.armor.heavy); } },
         ];
       case "booster":
-        return [{ label: "Rocket booster", price: PRICE.booster, sub: "[Shift] burst · recharges",
+        return [{ label: "Rocket booster", price: PRICE.booster, sub: "[Shift] burst, recharges",
           owned: !!m.booster, action: function () { doMod(car, "booster", null, PRICE.booster); } }];
       case "turret":
-        return [{ label: "Roof MG turret", price: PRICE.turret, sub: "aim with camera · hold L-click",
+        return [{ label: "Roof MG turret", price: PRICE.turret, sub: "aim with camera, hold L-click",
           owned: !!m.turret, action: function () { doMod(car, "turret", null, PRICE.turret); } }];
       case "launcher": {
-        const rows = [{ label: "Twin rocket launcher", price: PRICE.launcher, sub: "L-click · " + TUNE.launcherAmmoMax + " rockets",
+        const rows = [{ label: "Twin rocket launcher", price: PRICE.launcher, sub: "L-click, " + TUNE.launcherAmmoMax + " rockets",
           owned: !!m.launcher, action: function () { doMod(car, "launcher", null, PRICE.launcher); } }];
         if (m.launcher) rows.push({ label: "Resupply",
           price: PRICE.launcherAmmo, sub: "currently " + ((m.launcher.ammo) | 0) + " loaded",
@@ -1132,11 +1132,11 @@
       }
       case "wedge":
         return [{ label: "Hydraulic ram wedge", price: PRICE.wedge,
-          sub: "ram traffic over " + TUNE.wedgeMinSpeed + " m/s → they FLIP",
+          sub: "ram traffic over " + TUNE.wedgeMinSpeed + " m/s and they flip",
           owned: !!m.wedge, action: function () { doMod(car, "wedge", null, PRICE.wedge); } }];
       case "perf": {
         const cur = m.perf | 0;
-        const sub = { 1: "faster · chrome exhaust", 2: "grippier · intercooler + vents", 3: "top stage · scoop + big wing" };
+        const sub = { 1: "faster, chrome exhaust", 2: "grippier, intercooler + vents", 3: "top stage, scoop + big wing" };
         return [1, 2, 3].map(function (t) {
           return { label: "Performance stage " + t, price: PRICE.perf[t], sub: sub[t],
             owned: cur >= t, action: function () { doMod(car, "perf", t, PRICE.perf[t]); } };
@@ -1144,7 +1144,7 @@
       }
       case "glow":
         return Object.keys(GLOW_COLORS).map(function (name) {
-          return { label: "Underglow " + name.toLowerCase(), price: PRICE.glow, sub: "neon kit · pulses",
+          return { label: "Underglow " + name.toLowerCase(), price: PRICE.glow, sub: "neon kit, pulses",
             owned: m.glow === name, action: function () { doMod(car, "glow", name, PRICE.glow); } };
         });
       default: return [];
@@ -1178,7 +1178,7 @@
         : (cash() >= r.price ? "<span style='color:#e7c84f'>" + fmt$(r.price) + "</span>"
                              : "<span style='color:#c46a6a'>" + fmt$(r.price) + "</span>");
       html += "<div class='msRow' data-k='" + String.fromCharCode(97 + i) + "' style='display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-top:1px solid #262b22;cursor:pointer'>" +
-        "<span>" + r.label + (r.sub ? "<span style='color:#7f8794'> · " + r.sub + "</span>" : "") + "</span>" +
+        "<span>" + r.label + (r.sub ? "<span style='color:#7f8794;margin-left:8px'>" + r.sub + "</span>" : "") + "</span>" +
         "<span>" + priceTxt + "</span></div>";
     });
     html += "<div style='border-top:1px solid #2a3122;margin:12px 0 4px'></div>";
