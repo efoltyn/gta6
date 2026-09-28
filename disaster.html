@@ -1145,7 +1145,11 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=cars1"></script>
 <script src="src/city/cardyn.js?v=cars1"></script>
-<script src="src/city/carinstances.js?v=cars1"></script>
+<!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
+     geometry, switched in pixel space). Before vehicles.js (buildCar queues
+     each style's twins) and carinstances.js (proxied cars draw the far tier). -->
+<script src="src/city/carlod.js?v=lod1"></script>
+<script src="src/city/carinstances.js?v=cars2"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's

@@ -344,7 +344,7 @@
     }
     if (X0 == null) return null;
     const stemRec = stem.roads[0];
-    const L = CBZ.roadLaneCenter || function (r, d) { return d; };
+    const L = CBZ.roadLaneCenter;
     const sIn = sgn(L(stemRec, -sStem, 0));                        // z side of the inbound lanes
     let tDir = 1;
     if (sgn(L(thrRec, 1, 0)) !== -sStem) tDir = -1;                 // the far carriageway's travel

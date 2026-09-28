@@ -1423,7 +1423,7 @@
       // outbound carriageway = the side traffic moving (tx,tz) uses (CBZ.roadLaneCenter)
       const r0 = rec.roads[0] || { vertical: Math.abs(tz) > Math.abs(tx), w: rec.width, lanesPerDir: 3, laneW: 3.6, median: true, medianW: rec.spec.medianW };
       const dir = r0.vertical ? (tz > 0 ? 1 : -1) : (tx > 0 ? 1 : -1);
-      const off = CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r0, dir, 0) : dir * 2;
+      const off = CBZ.roadLaneCenter(r0, dir, 0);
       const sideSign = Math.sign(off) || 1;                     // world axis sign of the carriageway
       // posts: one in the median barrier line, one beyond the outer shoulder
       const S = rec.spec, mid = S.medHalf + (S.trav - S.medHalf) / 2, outer = S.half + 1.2;

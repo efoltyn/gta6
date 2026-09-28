@@ -651,25 +651,53 @@
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       vertexShader: [
         "attribute vec3 aTint;",
+        "attribute vec2 aShape;",
         "varying vec3 vTint;",
         "varying vec2 vUv;",
+        "varying vec2 vM;",
+        "varying vec2 vShape;",
         "void main() {",
         "  vTint = aTint;",
         "  vUv = uv;",
+        "  vShape = aShape;",
+        // the quad in METRES (local x along uv.x, local +z toward the road =
+        // -uv.y; see poolGeometry), from the instance's own scale
+        "  vec2 sc = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[2].xyz));",
+        "  vM = vec2(uv.x - 0.5, 0.5 - uv.y) * sc;",
         "  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);",
         "}",
       ].join("\n"),
+      /* THE LAMP FOOTPRINT (aShape = (nadir z offset m, lamp height m)).
+         The output is added AFTER tone mapping (a raw ShaderMaterial writes
+         display values), so the falloff is the tone-mapped one, fitted in a
+         plain-node model of the real pipeline (renderer.js ACES+grade at the
+         deep-night exposure 1.16 x 0.68, asphalt albedo 0.068, night hemi
+         0x2c3c62 x 0.34, 8.4 m heads every 13 m on alternating kerbs of an
+         18 m road) against the physical sum of cos^3 illuminance:
+           a = (1 + d^2/H^2)^-0.9   i.e. (inverse-square x cosine = cos^3)^0.6,
+         the 0.6 standing in for the tone curve's low-end compression, times a
+         smoothstep(0.6, 1) rim so the ellipse edge is never seen.
+         Fit rms 0.047 display. The old exp/(1-r)^2 disc at 15 x 11 m is kept
+         for aShape.y == 0 (the signal washes, which were not re-tuned). */
       fragmentShader: [
         "uniform float uI;",
         "varying vec3 vTint;",
         "varying vec2 vUv;",
+        "varying vec2 vM;",
+        "varying vec2 vShape;",
         "void main() {",
         "  vec2 d = vUv * 2.0 - 1.0;",
         "  float r2 = dot(d, d);",
         "  if (r2 >= 1.0) discard;",
         "  float r = sqrt(r2);",
-        // hot spot under the head + a soft shoulder that reaches 0 at the rim
-        "  float a = 0.62 * exp(-r2 * 9.0) + 0.38 * pow(1.0 - r, 2.0);",
+        "  float a;",
+        "  if (vShape.y > 0.0) {",
+        "    vec2 q = vec2(vM.x, vM.y - vShape.x);",
+        "    a = pow(1.0 + dot(q, q) / (vShape.y * vShape.y), -0.9) * (1.0 - smoothstep(0.6, 1.0, r));",
+        "  } else {",
+        // hot spot + a soft shoulder that reaches 0 at the rim (signal washes)
+        "    a = 0.62 * exp(-r2 * 9.0) + 0.38 * pow(1.0 - r, 2.0);",
+        "  }",
         "  gl_FragColor = vec4(vTint * (a * uI), 1.0);",
         "}",
       ].join("\n"),
@@ -686,6 +714,17 @@
     a.array[j] = rgb[0] * s; a.array[j + 1] = rgb[1] * s; a.array[j + 2] = rgb[2] * s;
     a.needsUpdate = true;
   }
+  // it.nz / it.h: a lamp's nadir along local z (metres from the quad centre)
+  // and its height over the pool; h 0 = the plain wash (signals)
+  function setPoolShape(set, i, nz, h) {
+    const im = set.meshOf ? set.meshOf(i) : null;
+    if (!im) return;
+    const a = im.geometry.attributes.aShape;
+    if (!a) return;
+    const j = set.local[i] * 2;
+    a.array[j] = nz || 0; a.array[j + 1] = h || 0;
+    a.needsUpdate = true;
+  }
   function lightPools(items) {
     if (!items.length || !THREE.InstancedMesh || !THREE.ShaderMaterial || !THREE.InstancedBufferAttribute) return null;
     const mat = poolMaterial();
@@ -697,9 +736,13 @@
       userData: { roadPaint: true },
       perMesh: function (im, count) {
         im.geometry.setAttribute("aTint", new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3));
+        im.geometry.setAttribute("aShape", new THREE.InstancedBufferAttribute(new Float32Array(count * 2), 2));
       },
     });
-    for (let i = 0; i < items.length; i++) setPoolColor(set, i, items[i].color, items[i].k);
+    for (let i = 0; i < items.length; i++) {
+      setPoolColor(set, i, items[i].color, items[i].k);
+      setPoolShape(set, i, items[i].nz, items[i].h);
+    }
     set.enabled = false;              // the night driver turns it on at dusk
     for (const m of set.meshes) m.visible = false;
     return set;
@@ -736,6 +779,6 @@
     signalLens: signalLens, pedLens: pedLens, lampLens: lampLens,
     pedTexture: pedTexture,
     hardwareMaterial: hardwareMaterial, chunked: chunked, cullSets: cullSets, resetSets: resetSets, registerMeshes: registerMeshes, setInst: setInst, CELL: CELL,
-    lightPools: lightPools, setPoolColor: setPoolColor, setPoolIntensity: setPoolIntensity, seatY: seatY,
+    lightPools: lightPools, setPoolColor: setPoolColor, setPoolShape: setPoolShape, setPoolIntensity: setPoolIntensity, seatY: seatY,
   };
 })();

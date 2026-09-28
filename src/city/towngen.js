@@ -219,7 +219,9 @@
       // correctly placed sidewalk lamps look like lane intrusions.
       const lanesPerDir = w >= 13 ? 2 : 1;
       const laneW = Math.min(3.6, w / (lanesPerDir * 2));
-      const seg = { x, z, vertical, len, district: cfg.district || "town", w, lanesPerDir, laneW };
+      // litByTown: section 6 below lights this street with the town's own
+      // lamps; city/props.js's lamp walk skips it instead of lighting it twice
+      const seg = { x, z, vertical, len, district: cfg.district || "town", w, lanesPerDir, laneW, litByTown: true };
       townRoads.push(seg);
       // T1: push town streets onto the REAL arena road list (traffic/citynav read
       // arena.roads), not the empty CBZ.city.roads.
@@ -858,8 +860,14 @@
     // WHERE: on the kerb of a real town street, alternating sides, never inside
     // a junction box, and never where the ground is already claimed.
     const lampSpots = [];
-    const LAMP_MAX = Math.min(24, cols * rows * 3);
-    for (let si = 0; si < townRoads.length && lampSpots.length < LAMP_MAX; si++) {
+    // The town OWNS its streets' light now (city/props.js skips roads tagged
+    // litByTown), so the cap must not leave the last streets dark: 24 ran out
+    // on a 4x3 grid (~27 stations). The spacing already bounds the count; 64
+    // is a sanity ceiling, and any street the cap still cuts off is handed
+    // back to the city lamp walk below.
+    const LAMP_MAX = 64;
+    let si = 0;
+    for (; si < townRoads.length && lampSpots.length < LAMP_MAX; si++) {
       const seg = townRoads[si];
       const half = seg.w / 2;
       const n = Math.max(1, Math.floor(seg.len / 26));
@@ -884,6 +892,7 @@
         lampSpots.push({ x: lx, z: lz, ang: Math.atan2(fx, fz), fx: fx, fz: fz, half: half, off: off });
       }
     }
+    for (; si < townRoads.length; si++) townRoads[si].litByTown = false;   // cap cut these off: the city walk lights them
     const lampN = lampSpots.length;
     const lampIM = lampN ? new THREE.InstancedMesh(lampProto, cmat(ACCENT), lampN) : null;
     const headIM = lampN ? new THREE.InstancedMesh(new THREE.BoxGeometry(0.26, 0.16, 0.56), headMat, lampN) : null;
@@ -897,6 +906,9 @@
       // authored beside it
       dummy2.position.set(sp.x + sp.fx * LM.headZ, LM.headY, sp.z + sp.fz * LM.headZ);
       dummy2.updateMatrix(); headIM.setMatrixAt(i, dummy2.matrix);
+      // the head's light on the road: city/props.js builds one ground pool per
+      // entry with the city's lamp pools (these streets are skipped by its walk)
+      if (A) (A._townLampHeads = A._townLampHeads || []).push({ x: sp.x + sp.fx * LM.headZ, z: sp.z + sp.fz * LM.headZ, y: LM.headY - 0.08, h: LM.headY, ang: sp.ang });
       // A POLE YOU CAN WALK THROUGH IS SCENERY. Slim, matched to the 0.16 butt.
       if (CBZ.colliders) {
         CBZ.colliders.push({ minX: sp.x - 0.18, maxX: sp.x + 0.18, minZ: sp.z - 0.18, maxZ: sp.z + 0.18, ref: null, noCam: true });

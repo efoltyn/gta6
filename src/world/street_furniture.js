@@ -442,10 +442,11 @@
         // A two-way stop on the north-south road: one sign per opposing
         // approach, on that approach's near kerb (the side its lanes run on)
         // with its face turned back at the oncoming driver. s = +1 governs
-        // traffic arriving from the south (travelling +z, lanes at +x), so
-        // it stands east and south of the junction facing -z.
+        // traffic arriving from the south (travelling +z; keep right puts its
+        // lanes at -x, config.js roadLaneSide), so it stands west and south
+        // of the junction facing -z.
         for (let s = -1; s <= 1; s += 2) {
-          const sx = ix + s * (halfV + 1.3), sz = iz - s * (halfH + 1.3);
+          const sx = ix - s * (halfV + 1.3), sz = iz - s * (halfH + 1.3);
           if (!DK.free(sx, sz, { doorR: 3.0, ring: 1 })) continue;
           stopSign(sx, sz, 0, -s);
           (city._stopSigns = city._stopSigns || []).push({ x: sx, z: sz, nx: 0, nz: -s });   // for shots + audits

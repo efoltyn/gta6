@@ -372,7 +372,7 @@
   // uses), corners where a vertical leg meets a horizontal one.
   function laneOff(r, dir) {
     if (CBZ.roadLaneCenter) { try { const o = +CBZ.roadLaneCenter(r, dir, 0); if (isFinite(o)) return o; } catch (e) {} }
-    return (dir < 0 ? -1 : 1) * 2.1;
+    return CBZ.roadLaneSide(r, dir) * 2.1;
   }
   function lanePolyline(G, R) {
     const legs = [];

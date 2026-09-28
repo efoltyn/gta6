@@ -515,7 +515,7 @@
      lane keeper reads, so roadPlace can write them without the caller knowing
      which ones they are. */
   function lanesPerDir(r) { return CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (r.lanesPerDir || 2) | 0); }
-  function laneCenter(r, dir, idx) { return CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * 3.6 * (idx + 0.5); }
+  function laneCenter(r, dir, idx) { return CBZ.roadLaneCenter(r, dir, idx); }
 
   // Weighted segment draw. The cumulative table is rebuilt only when the road
   // list length changes (i.e. when the world was rebuilt) — same invalidation

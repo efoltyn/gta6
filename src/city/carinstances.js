@@ -17,6 +17,12 @@
    the fleet materials (playercars.js mats cache), so N parked cars of a
    style cost ~22 draws total instead of 22 x N.
 
+   FAR TIER: past carlod.js's pixel-space switch a proxied car's meshes are
+   drawn with their simplified twins (CBZ.carLod.lodOf: same materials, same
+   attributes, geometric error < 1 px there) in their own pools; crossing the
+   switch (with hysteresis) releases and re-acquires the car on the other
+   tier. The captured real car is always at full detail (carLodRestore).
+
    PAINT is the one per-car material (recolorBody clones it per car). It is
    drawn through ONE shared paint material per paint signature (white base,
    identical clearcoat/env/roughness, emissive k*white) with instanceColor =
@@ -86,6 +92,7 @@
   const _keys = [];                             // acquire scratch: pool keys
   const _sigs = [];                             // acquire scratch: paint signature or null
   const _negs = [];                             // acquire scratch: mirrored (negative determinant)
+  const _geos = [];                             // acquire scratch: the geometry each mesh is drawn with (full or LOD)
   const NOOP_RENDER = THREE.Object3D.prototype.onBeforeRender;
   function noRaycast() {}
   const WARM = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1e4, 0, 1]);
@@ -216,11 +223,11 @@
     mesh.userData.carInstancePool = true;
     return mesh;
   }
-  function getPool(key, src, paint, neg, paintSigKey) {
+  function getPool(key, src, geo, paint, neg, paintSigKey) {
     let p = pools.get(key);
     if (p) return p;
     p = {
-      key: key, geo: src.geometry, mat: null, paintRec: null, colored: false,
+      key: key, geo: geo, mat: null, paintRec: null, colored: false,
       cast: !!src.castShadow, recv: !!src.receiveShadow, order: src.renderOrder | 0, neg: neg,
       mesh: null, cap: 0, members: [], dirty: true, emptyAt: 0, warmUntil: frame + 3,
     };
@@ -293,7 +300,7 @@
   }
   function newRec() {
     return freeRecs.pop() || { car: null, entries: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
-      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0 };
+      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false };
   }
   function carDist2(c) {
     const cam = CBZ.camera && CBZ.camera.position;
@@ -326,7 +333,11 @@
     if (grp.visible === false || !grp.parent) return false;
     const d2 = carDist2(c);
     if (d2 <= PROXY_IN2 || d2 >= SLEEP_D2) return false;
-    _found.length = 0; _keys.length = 0; _sigs.length = 0; _negs.length = 0;
+    // the real car is captured at full detail; the pools pick the tier (carlod.js)
+    if (CBZ.carLodRestore) CBZ.carLodRestore(c);
+    const L = CBZ.carLod, lod = !!(L && L.wantLod(d2, false));
+    let lodPending = false;
+    _found.length = 0; _keys.length = 0; _sigs.length = 0; _negs.length = 0; _geos.length = 0;
     if (!collect(grp) || !_found.length) { _found.length = 0; c._proxyRetry = frame + 120; return false; }
     // world matrices straight from the transforms (updateWorldMatrix is not
     // subject to core/matrixskip's hidden/stamped skips)
@@ -339,7 +350,14 @@
       else if (isPaint(m) && (sig = paintKey(m))) { mk = sig; paint = true; }
       else mk = "M" + m.id;
       const neg = o.matrixWorld.determinant() < 0;
-      const key = o.geometry.id + "|" + mk + "|" + (o.castShadow ? 1 : 0) + (o.receiveShadow ? 1 : 0) + "|" + (o.renderOrder | 0) + "|" + (neg ? "n" : "p");
+      // FAR TIER: the same mesh drawn with its simplified twin (null = still being built -> full)
+      let geo = o.geometry;
+      if (lod) {
+        const lg = L.lodOf(geo, L.relScale(o, grp), m);
+        if (lg) geo = lg; else lodPending = true;
+      }
+      _geos.push(geo);
+      const key = geo.id + "|" + mk + "|" + (o.castShadow ? 1 : 0) + (o.receiveShadow ? 1 : 0) + "|" + (o.renderOrder | 0) + "|" + (neg ? "n" : "p");
       _keys.push(key); _sigs.push(paint ? sig : null); _negs.push(neg);
       if (!pools.has(key)) {
         // A NEW POOL IS A NEW SHADER VARIANT (instancing, + instanceColor for
@@ -347,7 +365,7 @@
         // with one zero-scale instance, so r128 compiles its program), at most
         // NEW_POOLS_PER_FRAME per frame; the car proxies once all of its pools
         // exist. The first sight of a style never compiles 20 programs at once.
-        if (newPoolsThisFrame < NEW_POOLS_PER_FRAME) getPool(key, o, paint, neg, sig);
+        if (newPoolsThisFrame < NEW_POOLS_PER_FRAME) getPool(key, o, geo, paint, neg, sig);
         missing++;
       } else if (pools.get(key).warmUntil) missing++;
     }
@@ -366,7 +384,7 @@
     for (let i = 0; i < _found.length; i++) {
       const o = _found[i], mw = o.matrixWorld, key = _keys[i];
       const m = o.material, sig = _sigs[i], paint = sig !== null;
-      const p = getPool(key, o, paint, _negs[i], sig);
+      const p = getPool(key, o, _geos[i], paint, _negs[i], sig);
       const e = newEntry();
       e.pool = p; e.rec = rec; e.src = o; e.mat = m; e.geo = o.geometry; e.paint = paint;
       const src = mw.elements, dst = e.m;
@@ -388,7 +406,8 @@
     }
     rec.r = rad;
     rec.inView = view ? sphereInView(rec) : true;
-    _found.length = 0; _keys.length = 0; _sigs.length = 0;
+    rec.lod = lod; rec.lodPending = lodPending;
+    _found.length = 0; _keys.length = 0; _sigs.length = 0; _geos.length = 0;
     grp.visible = false;
     c._proxy = true;
     proxies.push(rec);
@@ -469,6 +488,16 @@
       if (d2 > SLEEP_D2) {
         release(c);
         if (CBZ.citySleepCar) CBZ.citySleepCar(c);  // hidden past the ring, exactly like vehicles.js would next frame
+        continue;
+      }
+      // crossed the LOD switch (carlod.js, hysteresis in pixel space), or a
+      // far-tier LOD it was waiting on has landed: re-proxy on the right tier.
+      // If the other tier's pools are still warming, acquire() refuses and the
+      // car draws itself at full detail until vehicles.js re-proxies it.
+      const L = CBZ.carLod;
+      if (L && (L.wantLod(d2, rec.lod) !== rec.lod || (rec.lodPending && (frame & 63) === 0))) {
+        release(c);
+        acquire(c);
         continue;
       }
       if (view) {
