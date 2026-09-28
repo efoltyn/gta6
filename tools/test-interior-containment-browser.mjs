@@ -83,7 +83,6 @@ const expectedSites = {
   "src/city/bank.js": "bank-lobby",
   "src/city/pawnshop.js": "pawn-shop",
   "src/city/clothingstore.js": "clothing-store",
-  "src/city/realtyoffice.js": "realty-office",
 };
 for (const [rel, site] of Object.entries(expectedSites)) {
   const text = await source(rel);
@@ -133,7 +132,7 @@ if (staticOnly) {
 
 const EXPECTED_RUNTIME = [
   "airport-terminal", "bank-lobby", "clothing-store", "forex-airport",
-  "forex-bank", "gun-store", "jewelry-store", "pawn-shop", "realty-office",
+  "forex-bank", "gun-store", "jewelry-store", "pawn-shop",
 ];
 const expression = `(function () {
   const audit = CBZ.interiorAudit();

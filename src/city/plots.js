@@ -535,8 +535,10 @@
   function saleEligible(lot) {
     const z = Z(); if (!z || !z.canBuyLot) return false;
     if (lot.demolished || !lot.building || lot.building.park) return false;
-    return z.canBuyLot(lot);
+    return z.canBuyLot(lot) || seizable(lot);
   }
+  // a gang op on YOUR turf (or whose crew trusts you) is taken over, not bought
+  function seizable(lot) { const z = Z(); return !!(z && z.canSeizeLot && z.canSeizeLot(lot)); }
   function refreshSigns(force) {
     const P = CBZ.player; if (!P || !P.pos || !ensureSigns()) return;
     const moved = Math.hypot(P.pos.x - lastSX, P.pos.z - lastSZ);
@@ -571,7 +573,11 @@
       s.group.visible = true;
     }
   }
-  function priceOf(lot) { const z = Z(); return z && z.buyPriceForLot ? z.buyPriceForLot(lot) : null; }
+  function priceOf(lot) {
+    const z = Z(); if (!z) return null;
+    if (seizable(lot) && z.seizePriceForLot) return z.seizePriceForLot(lot);
+    return z.buyPriceForLot ? z.buyPriceForLot(lot) : null;
+  }
   function paintSignFor(s, lot) {
     const p = priceOf(lot);
     const rec = listing(lot);
@@ -693,6 +699,16 @@
       "<div><span>Parcel</span><b style='font-size:13px'>" + esc(lotFacts(lot)) + "</b></div></div>";
     h += "<div class='ps' style='margin-top:6px'>You have " + money(g.cash || 0) + " cash and " + money(g.cityBank || 0) + " in the bank.</div>";
     const can = z.canBuyLot ? z.canBuyLot(lot) : false;
+    if (!can && seizable(lot)) {
+      h += "<div class='sec'><div class='row'><span>Take it over<span class='sub'>The block is yours, so is the operation. Pay the crew off and it changes hands.</span></span><span class='bts'>" +
+        btn("Take over " + (price != null ? money(price) : ""), function () {
+          const had = ownsLot(lot);
+          if (z.seizeByLot) z.seizeByLot(lot);
+          afterBuy(lot, had);
+        }, "ok", price == null || !canAfford(price)) + "</span></div></div><div class='msg'>" + esc(msg) + "</div>";
+      panel.innerHTML = h;
+      return;
+    }
     h += "<div class='sec'><div class='row'><span>Buy it outright<span class='sub'>The deed, the building and the ground under it.</span></span><span class='bts'>" +
       btn("Buy " + (price != null ? money(price) : ""), function () {
         const had = ownsLot(lot);
@@ -715,7 +731,8 @@
       note("It's yours. The address post by the front is where you run the place.", 3);
       if (plot) setTimeout(function () { if (playing() && !CBZ.cityMenuOpen) openPanel(plot); }, 900);
     } else {
-      msg = "The sale didn't close. Check your cash.";
+      const z = Z();
+      msg = (z && z.lastMessage && z.lastMessage()) || "The sale didn't close. Check your cash.";
       renderListing();
     }
   }
@@ -745,6 +762,13 @@
         btn(q.ok ? "Demolish " + money(q.cost) : "Demolish", function () { orderDemolition(plot); }, "bad", !q.ok || !!pendingDemo || (q.ok && !canAfford(q.cost))) + "</span></div>";
     } else {
       h += "<div class='row'><span>Build on it<span class='sub'>Press N standing on the lot to place walls, gates and buildings piece by piece.</span></span></div>";
+    }
+    const mort = z && z.mortgageForLot ? z.mortgageForLot(lot) : null;
+    if (mort && mort.balance > 0) {
+      const half = Math.round(mort.balance * 0.5);
+      h += "<div class='row'><span>Mortgage<span class='sub'>" + money(mort.balance) + " still owed to the bank.</span></span><span class='bts'>" +
+        btn("Pay " + money(half), function () { msg = z.payMortgageByLot(lot, 0.5) || ""; renderPanel(); }, null, !canAfford(half)) +
+        btn("Pay off", function () { msg = z.payMortgageByLot(lot, 1) || ""; renderPanel(); }, "ok", !canAfford(mort.balance)) + "</span></div>";
     }
     const home = lot.building && lot.building.home;
     if (home && !lot.demolished && z && z.setHomeByLot && !(g.cityHome && g.cityHome.lot === lot)) {

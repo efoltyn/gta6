@@ -23,7 +23,7 @@
       then asserts: results board shown, purse paid, championship round
       bumped + points awarded, race book settled, field despawned
    STREET RACE
-   6. opens the activity board, clicks Illegal Street Race → GO, asserts 3
+   6. starts the city street race (CBZ.cityStreetRacing.start), asserts 3
       REAL rival cars spawn with road-legal waypoint paths, progress over a
       window, HUD live; screenshot; forfeit by exiting the car and assert
       full cleanup.
@@ -375,14 +375,10 @@ const street = await evl(`(() => {
   if (!car) return "no car";
   CBZ.cityEnterVehicle(car);
   CBZ.city.addCash(1000);
-  CBZ.cityOpenActivities("Racing");
-  const card = document.querySelector("#cityActivities .ca-card[data-id=street-race]");
-  if (!card) return "no card";
-  card.click();
-  const go = document.querySelector("#cityActivityModal [data-act=go]");
-  if (!go) return "no go button";
-  go.click();
-  return "ok";
+  // the one street race (city/racing.js): what calling out a racer on the
+  // street starts. (The activity board's checkpoint copy is deleted.)
+  if (!CBZ.cityStreetRacing) return "no street racing";
+  return CBZ.cityStreetRacing.start() ? "ok" : "refused";
 })()`);
 check("street race started", street === "ok", String(street));
 check("game resumed after menus", await resume());

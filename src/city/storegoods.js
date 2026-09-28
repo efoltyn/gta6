@@ -59,7 +59,7 @@
   const THREE = window.THREE;
 
   // Kinds a FLAGSHIP walk-in already owns end to end (gunstore.js's wall,
-  // jewelry.js's cases, clothingstore.js's racks, pawnshop.js, realtyoffice.js,
+  // jewelry.js's cases, clothingstore.js's racks, pawnshop.js, the realtor's office,
   // modshop/carlot showrooms), the civic counters, the bar, the bank — and the
   // trap house, which is a gang's front room, not a shop with gondolas.
   const SKIP = {

@@ -131,7 +131,7 @@
       html += "<div style='margin-top:8px;font-size:12px;color:#9fb0c6'>"
         + "[<b style='color:#ffd166'>&larr;</b>] Prev &nbsp; [<b style='color:#ffd166'>&rarr;</b>] Next &nbsp; · Page <b style='color:#ffd166'>" + (rpage + 1) + "</b>/" + pages + " (" + entries.length + " listings)</div>";
     }
-    if (!CBZ.touchMode) html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select · [Esc] close · more at Zillow [Z]</div>";
+    if (!CBZ.touchMode) html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select, [Esc] close. Shops and land for sale carry a sign at the curb.</div>";
     open(html);
     realtyPages = pages;
   };

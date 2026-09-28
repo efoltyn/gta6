@@ -26,7 +26,7 @@
              frame/grid/nearest-point/length contract), and
              CBZ.cityRacing's roster.
      ADDED   the EVENT loop (qualify→grid→race→purse→bet→championship night),
-             the salvaged ECON math from games/racing.html (entry/purse/odds/
+             the salvaged ECON math from the old games/racing.html (deleted 2026-09-28) (entry/purse/odds/
              points/champion bonus/jump penalty), the paddock dressing
              (start gantry, live timing tower, bookmaker stand), and the cast
              (marshal, bookmaker, patrons via ctx.npc).
@@ -96,7 +96,7 @@
   if (CBZ.raceKit && CBZ.raceKit.adopt) CBZ.raceKit.adopt("apex-night");
 
   /* ============================================================
-     SALVAGED EVENT ECONOMY — ported verbatim from games/racing.html's
+     SALVAGED EVENT ECONOMY — ported verbatim from the old games/racing.html (deleted 2026-09-28)'s
      ECON block (the only pure logic worth lifting; the .html's world
      geometry / physics are all superseded by the city engine). This is
      the whole reason a "night" is a game and not a time-trial: real cash
@@ -114,7 +114,7 @@
   function purseFor(pos) { return ECON.purse[clamp((pos | 0) - 1, 0, ECON.purse.length - 1)] || 0; }
   function pointsFor(pos) { return ECON.points[clamp((pos | 0) - 1, 0, ECON.points.length - 1)] || 0; }
   function oddsForGrid(grid) { return ECON.odds[clamp((grid | 0) - 1, 0, ECON.odds.length - 1)]; }
-  // bet on yourself: only a WIN (P1) pays, at your grid-slot odds. (racing.html)
+  // bet on yourself: only a WIN (P1) pays, at your grid-slot odds. (from the deleted racing.html)
   function settleBet(stake, grid, finishPos) { return finishPos === 1 ? Math.round(stake * oddsForGrid(grid)) : 0; }
 
   /* ============================================================
@@ -398,8 +398,12 @@
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(place <= 1 ? 12 : place <= 3 ? 5 : 1);
     let betPay = 0, betMsg = "";
     if (NIGHT.bet && NIGHT.bet.stake > 0) {
+      const bOdds = oddsForGrid(NIGHT.playerGrid);
+      const give = (n) => C.wallet.give(n, "Side bet WON @ " + bOdds + "x");
       betPay = settleBet(NIGHT.bet.stake, NIGHT.playerGrid, pRow.dnf ? 99 : place);
-      if (betPay > 0) { C.wallet.give(betPay, "Side bet WON @ " + oddsForGrid(NIGHT.playerGrid) + "x"); NIGHT.night$ += betPay; betMsg = "Side bet pays " + fmtCash(betPay) + "!"; }
+      if (CBZ.betSlip) CBZ.betSlip.settle({ stake: NIGHT.bet.stake, odds: bOdds }, betPay > 0, { pay: give });
+      else if (betPay > 0) give(betPay);
+      if (betPay > 0) { NIGHT.night$ += betPay; betMsg = "Side bet pays " + fmtCash(betPay) + "!"; }
       else betMsg = "Side bet lost (−" + fmtCash(NIGHT.bet.stake) + ").";
     }
     NIGHT.bet = null;
@@ -764,6 +768,7 @@
     });
   }
 
+  // the bookmaker writes the side bet on THE one bet slip (city/betslip.js)
   function openBetPanel(standalone) {
     if (!C) return;
     // standalone = opened from the bookmaker stand outside qualifying flow
@@ -774,18 +779,23 @@
     NIGHT.phase = "bet";
     const odds = oddsForGrid(NIGHT.playerGrid);
     castSay("bookmaker", "Only a win pays. " + odds + " to one on you.");
-    let body = "<div style='margin:2px 0 8px;font-size:13px'>Qualified <b style='color:#5ad1ff'>P" + NIGHT.playerGrid + "</b>, lap " + fmtT(NIGHT.qualTime) +
-      "<br>WIN pays <b style='color:#e8b64c'>" + odds + "x</b></div>";
-    body += ECON.stakes.map((s) => s === 0 ? btn("stake", "NO BET", "#26343c") : btn("stake", "$" + s + " → " + fmtCash(s * odds), "#16301f", C.wallet.cash() < s, { s: s })).join("");
-    body += "<div style='margin-top:8px'>" + btn("grid", "GO TO THE GRID →", "#c98f22") + "</div>";
-    C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + ", " + odds + "x") + body, {
-      stake: function (el) {
-        const s = el && el.getAttribute ? (el.getAttribute("data-s") | 0) : 0;
-        if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; castSay("bookmaker", "You're on. " + fmtCash(s) + " at " + odds + " to one."); }
-        else NIGHT.bet = null;
-        beginGrid();
+    C.hud.closePanel();
+    if (!CBZ.betSlip) { NIGHT.bet = null; beginGrid(); return; }
+    const toGrid = () => { if (NIGHT.active && NIGHT.phase === "bet") beginGrid(); };
+    CBZ.betSlip.open({
+      key: "apex", title: "The Bookmaker", sub: "Qualified P" + NIGHT.playerGrid + ", lap " + fmtT(NIGHT.qualTime) + ". Only a win pays.",
+      picks: [{ id: "you", label: "You, to win", odds: odds, color: "#5ad1ff" }],
+      stakes: ECON.stakes.filter((s) => s > 0),
+      ticket: NIGHT.bet ? "You're on for " + fmtCash(NIGHT.bet.stake) + "." : "",
+      locked: NIGHT.bet ? "One side bet a race." : "",
+      spend: (n) => C.wallet.spend(n, "Side bet on yourself"),
+      onPlace: function (p, s) {
+        NIGHT.bet = { stake: s }; NIGHT.night$ -= s;
+        castSay("bookmaker", "You're on. " + fmtCash(s) + " at " + odds + " to one.");
+        toGrid();
       },
-      grid: beginGrid,
+      skip: NIGHT.bet ? null : { label: "No bet", fn: function () { NIGHT.bet = null; toGrid(); } },
+      onClose: toGrid,
     });
   }
 
