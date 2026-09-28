@@ -10,7 +10,9 @@
    on your belt that change what you can DO:
 
      gun         every firearm you own, one cell each, in carry order
-     throwable   a grenade / molotov / C4 kind (city), one cell per kind
+     throwable   a grenade / a demolition charge: selecting one puts it IN
+                 YOUR HAND (systems/helditems.js), the use input uses it
+     detonator   appears once a charge is out; in hand, squeeze = boom
      flashlight  the light (systems/playerflashlight.js); lit = emphasized
      phone       the city campaign handset
      keycard     the staff card (prison); passive, it opens doors by itself
@@ -26,15 +28,17 @@
 (function (root) {
   "use strict";
 
-  const KINDS = ["gun", "throwable", "flashlight", "phone", "keycard", "key"];
+  const KINDS = ["gun", "throwable", "detonator", "flashlight", "phone", "keycard", "key"];
   // selectable cells answer a digit / a tap; passive cells only show.
-  const SELECTABLE = { gun: 1, throwable: 1, flashlight: 1, phone: 1 };
+  const SELECTABLE = { gun: 1, throwable: 1, detonator: 1, flashlight: 1, phone: 1 };
   const DOOR_KEYS = ["Gun-Room Key", "Gate Key", "Corridor Key", "Cell Key"];
 
   /* s = {
        mode, guns:[id...], held:id|null, holstered:bool,
        hasKeycard:bool, keys:[name...],
-       flashlight:{owned,on}|null
+       flashlight:{owned,on}|null,
+       items:[{kind:"throwable"|"detonator", item, held, count, active}]
+         (systems/helditem_model.js cells(): the held things you carry)
      }  ->  [{kind, id?, name?, active, selectable}] in draw order:
      selectable first (guns, flashlight), passive last (keycard, keys), so a
      digit key always means the Nth thing you can pick up and use. */
@@ -48,6 +52,13 @@
       if (!id || seen["g" + id]) continue;          // a gun is never listed twice
       seen["g" + id] = 1;
       out.push({ kind: "gun", id: String(id), active: !s.holstered && id === s.held, selectable: true });
+    }
+    const items = Array.isArray(s.items) ? s.items : [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it || (it.kind !== "throwable" && it.kind !== "detonator") || seen["i" + it.item]) continue;
+      seen["i" + it.item] = 1;
+      out.push({ kind: it.kind, name: it.item, held: it.held || null, count: it.count | 0, active: !!it.active, selectable: true });
     }
     const fl = s.flashlight;
     if (fl && fl.owned) out.push({ kind: "flashlight", active: !!fl.on, selectable: true });

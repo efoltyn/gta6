@@ -3719,7 +3719,7 @@
              resolving to 1e6, so the splash maims and the rock kills. */
           survBlast("kinetic", x, z, {
             r: 8, dmg: scale(34, ctx), cause: "caught by a volcanic bomb", ctx: ctx,
-            mass: 900, speed: 55, struct: 0.4, structR: 12,
+            mass: 900, speed: 55, struct: 0.4, structR: 12, fx: { kind: "volcano" },
             color: 0xff7a30, sfx: "punch", flash: 0.25, knockback: 12, fling: 6,
           });
         },

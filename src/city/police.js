@@ -1790,7 +1790,7 @@
     if (c.pos.y > surf + 1.3) return;
     const ix = c.pos.x, iz = c.pos.z, iy = surf + 1.0;
     const onRoof = surf > ground + 0.5;
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ix, iz, { power: onRoof ? 1.9 : 1.5, radius: onRoof ? 9 : 7, byPlayer: false, y: iy }); } catch (e) {} }
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ix, iz, { power: onRoof ? 1.9 : 1.5, radius: onRoof ? 9 : 7, byPlayer: false, y: iy, kind: "aircraft" }); } catch (e) {} }
     if (onRoof && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(ix, iy, iz, 2.2); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(ix, iz, onRoof ? 12 : 8); } catch (e) {} }
     if (!onRoof && CBZ.cityScorch) { try { CBZ.cityScorch(ix, iz, 4.5); } catch (e) {} }   // burnt ground under the wreck
