@@ -668,8 +668,9 @@
       const d = Math.hypot(P.pos.x - k.x, P.pos.z - k.z);
       if (d < 5) {
         if ((g.cash || 0) >= k.ransom) {
-          if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " · or kill the three holding " + (k.ped.name || "them"), 1.4);
-          if (CBZ.keys && (CBZ.keys["e"] || CBZ.keys["E"])) {
+          if (CBZ.city && CBZ.city.note && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " · or kill the three holding " + (k.ped.name || "them"), 1.4);
+          // cuffed hands cannot count out money
+          if (CBZ.keys && (CBZ.keys["e"] || CBZ.keys["E"]) && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
             /* THE MONEY GOES SOMEWHERE. `g.cash -= k.ransom` DESTROYED it: the
                crew that took your family got not one dollar richer for it, so
                the most personal shakedown in the game had no consequence on the

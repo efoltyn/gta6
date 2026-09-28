@@ -1055,7 +1055,8 @@
       return;
     }
     const keys = CBZ.keys || {};
-    if (!(keys.e || keys.E)) {
+    // the copy needs hands on the relay: cuffed, it does not start
+    if (!(keys.e || keys.E) || (CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
       R.transitionT = Math.max(0, R.transitionT - dt * 2);
       return;
     }

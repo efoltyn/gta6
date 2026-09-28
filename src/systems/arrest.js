@@ -138,6 +138,7 @@
     const vs = vitalsOf(a);
     if (vs === "dead") return null;
     if (vs === "ko") return "ko";
+    if (vs === "tased") return "tased";
     const Vt = CBZ.vitals;
     if (Vt && typeof Vt.tased === "function") { try { if (Vt.tased(a)) return "tased"; } catch (e) {} }
     if (vs === "down") return "down";
@@ -414,16 +415,39 @@
   /* ============================================================
      SUBDUED: the taser, the floor. subduedUntil is the one clock.
      ============================================================ */
+  /* ONE TASER CLOCK. When systems/vitals.js is loaded it owns "tased" for
+     every body, the player included (VT.tase / state() === "tased"): this
+     file only asks it. subduedUntil is the clock for the rest (pinned, the
+     floor) and for a build without vitals. */
   let subduedUntil = -1, subduedWhy = null, clock = 0;
-  A.subdued = function () { return clock < subduedUntil; };
-  A.subduedWhy = function () { return clock < subduedUntil ? subduedWhy : null; };
-  A.subdue = function (secs, why) {
-    subduedUntil = Math.max(subduedUntil, clock + (secs || 2));
-    subduedWhy = why || subduedWhy || "down";
-    const P = CBZ.player;
-    if (P) P.stun = Math.max(P.stun || 0, secs || 2);
+  function vitalsTase() { const Vt = CBZ.vitals; return Vt && typeof Vt.tase === "function" && typeof Vt.state === "function" ? Vt : null; }
+  function playerA() { const Vb = V(); try { return Vb && Vb.playerActor ? Vb.playerActor() : CBZ.player; } catch (e) { return CBZ.player; } }
+  function vitalsTased() {
+    const Vt = vitalsTase();
+    if (!Vt) return false;
+    try { return Vt.state(playerA()) === "tased"; } catch (e) { return false; }
+  }
+  A.subduedWhy = function () {
+    if (clock < subduedUntil) return subduedWhy;
+    return vitalsTased() ? "tased" : null;
   };
-  A.unsubdue = function () { subduedUntil = -1; subduedWhy = null; };
+  A.subdued = function () { return A.subduedWhy() != null; };
+  A.subdue = function (secs, why) {
+    secs = secs || 2;
+    why = why || subduedWhy || "down";
+    const P = CBZ.player;
+    if (P) P.stun = Math.max(P.stun || 0, secs);
+    const Vt = why === "tased" ? vitalsTase() : null;
+    if (Vt) { try { Vt.tase(playerA(), secs, { fall: false }); return; } catch (e) {} }
+    subduedUntil = Math.max(subduedUntil, clock + secs);
+    subduedWhy = why;
+  };
+  A.unsubdue = function () {
+    subduedUntil = -1; subduedWhy = null;
+    // the trigger is off: the one taser clock (vitals) stops for him too
+    const Vt = vitalsTase();
+    if (Vt && Vt.peek) { try { const R = Vt.peek(playerA()); if (R && R.tasedT > 0) R.tasedT = 0; } catch (e) {} }
+  };
   // how much of your strength you have right now
   A.pullMul = function () {
     const why = A.subduedWhy();
@@ -829,8 +853,17 @@
     }
     if (live && !live.done) stepTake(live, dt);
     tickLoose(dt);
-    // hands up is a promise: walk off and they come down
+    // THE BODY RIDES THE TASER: while the one taser clock says tased (or a
+    // man is kneeling on him to cuff him), a player on the floor stays on
+    // the floor; when it runs out he gets up on his own
     const pc = CBZ.playerChar;
+    const pcf = pc && pc.fall;
+    if (pcf && pcf.on) {
+      const held = A.subduedWhy() === "tased" || !!(live && !live.done && live.onGround && (live.phase === "reach" || live.phase === "cuffing"));
+      if (held && pcf.phase !== "getup") { pcf.hold = true; pcf._taseHold = true; }
+      else if (pcf._taseHold && !held) { pcf.hold = false; pcf._taseHold = false; }
+    } else if (pcf && pcf._taseHold) pcf._taseHold = false;
+    // hands up is a promise: walk off and they come down
     if (pc && pc.handsUp && P && !live && !g.busted && !P._cityArrested && (+P.speed || 0) > 1.0) {
       pc.handsUp = false;
       if (g._citySurrender) g._citySurrender = false;

@@ -1052,8 +1052,9 @@
         const P = player();
         if (P && !P.dead && h.state === "demanded" && dist(P.pos.x, P.pos.z, h.x, h.z) < 9) {
           if ((g.cash || 0) >= h.amount) {
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay " + money(h.amount) + " for " + nameOf(ped, "them"), 1.3);
-            if (CBZ.keys && (CBZ.keys.e || CBZ.keys.E)) {
+            if (CBZ.city && CBZ.city.note && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) CBZ.city.note("[E] Pay " + money(h.amount) + " for " + nameOf(ped, "them"), 1.3);
+            // cuffed hands cannot count out money
+            if (CBZ.keys && (CBZ.keys.e || CBZ.keys.E) && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
               // THE SAME LAW POINTED AT YOU. Paying is a take out of the
               // player's own balance and it goes through the one block, so the
               // ratchet sees both directions of every ransom in the game.
