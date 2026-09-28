@@ -639,6 +639,9 @@ document.body.appendChild(b);}}catch(e){}})();
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
 <script src="src/entities/heritage.js?v=cars1"></script>
+<!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
+     Before npc.js (its key holders are indexed by car) and ai.js. -->
+<script src="src/systems/prisoncars.js?v=cars1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -770,7 +773,7 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=warden1"></script>
+<script src="src/systems/prisonwarden.js?v=cars1"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -782,7 +785,7 @@ document.body.appendChild(b);}}catch(e){}})();
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=crew1"></script>
+<script src="src/systems/prisonfriends.js?v=cars1"></script>
 <script src="src/systems/interactions.js?v=lift1"></script>
 <!-- A door opened off the clock is noticed: the screws who see, hear or get
      radioed about it, the inmates it was shut on, and the Warden's record of
@@ -1466,7 +1469,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=cpd1"></script>
+<script src="src/systems/fullmap.js?v=cars1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
