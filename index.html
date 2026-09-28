@@ -952,9 +952,8 @@ document.body.appendChild(b);}}catch(e){}})();
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
      through to COMPOSERS.heavy — which is cityAirstrikeExplosion, i.e. an
-     orange fireball with a debris cone. WITHOUT THIS TAG systems/disasters.js
-     detects the missing CBZ.lightningStrike and keeps the old blast, so the
-     page still runs; it just looks like an RPG again. Needs only config.js +
+     orange fireball with a debris cone. REQUIRED by systems/disasters.js (the
+     old fireball fallback was deleted 2026-09-28). Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
@@ -979,7 +978,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the pyroclastic density current, the lahar and the ash LOAD, all keyed on
      a position + a height field so a city-side eruption calls the same four
      builders. Must precede systems/disasters.js so the roster finds
-     CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. -->
+     CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
+     old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
 <script src="src/world/volcanofx.js?v=plume2"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
@@ -1015,7 +1015,8 @@ document.body.appendChild(b);}}catch(e){}})();
      query, the gusting whiteout, the lee-side drifts and the burial. -->
 <script src="src/systems/blizzard.js?v=snow1"></script>
 <!-- seam:meteor — systems/meteor.js owns the radiant, the bolides and their smoke
-     trains, the airbursts, the delayed-sound queue and the crater digs. -->
+     trains, the airbursts, the delayed-sound queue and the crater digs.
+     REQUIRED by systems/disasters.js (no legacy shower any more). -->
 <script src="src/systems/meteor.js?v=meteor1"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->

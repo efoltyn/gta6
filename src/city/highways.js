@@ -201,9 +201,45 @@
         } catch (e) { m.color.setHex(0x202125); }
       }
     } else if (kind === "concrete") m = deckMaterial(0x8a8e94, -1);
-    else m = deckMaterial(0x6b5a42, 1);
+    else m = dirtDeckMaterial();
     return m;
   }
+  /* DIRT TRACKS WEAR THE ONE GROUND (world/textures_surface.js groundSkin).
+     The old dirt deck was a flat 0x6b5a42 Lambert with a hash speckle: from
+     the road it read as a brown ribbon of paint laid on textured country.
+     Now the deck's vertex colour is the track's soil tone (DIRT_TRACK_RGB,
+     set per triangle by the deck builder), groundSkin brings the real soil
+     map, mottle and far fade, and the two wheel ruts plus a grassy crown are
+     layered on top from the deck's own lateral attribute (aSec.x). */
+  function dirtDeckMaterial() {
+    if (!CBZ.groundSkin) return deckMaterial(0x6b5a42, 1);
+    // sandY far below the deck: a causeway at sea level is a track, not a beach
+    const m = CBZ.groundSkin({ name: "dirt-track", far: 320, sandY: [-9, -8], chroma: 0.5 });
+    const skin = m.onBeforeCompile;
+    m.onBeforeCompile = function (sh) {
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec4 aSec;\nvarying float vTrkLat;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\nvTrkLat = aSec.x;");
+      // inserted first, so the skin's block lands between the chunk and ours
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying float vTrkLat;")
+        .replace("#include <color_fragment>", [
+          "#include <color_fragment>",
+          "{",
+          "  float lt = mod(vTrkLat, 3.6) - 1.8;",                                    // one 3.6 m lane
+          "  float rut = smoothstep(0.55, 0.0, abs(lt - 0.9)) + smoothstep(0.55, 0.0, abs(lt + 0.9));",
+          "  float crown = smoothstep(0.45, 0.0, abs(lt));",                          // grass between the ruts
+          "  diffuseColor.rgb *= 1.0 - 0.16 * min(rut, 1.0);",
+          "  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 1.05, 0.62), crown * 0.45);",
+          "}",
+        ].join("\n"));
+      if (skin) skin(sh);
+    };
+    m.customProgramCacheKey = function () { return "cbzGroundSkin1-dirtdeck"; };
+    m.userData.dirtDeck = true;
+    return m;
+  }
+  const DIRT_TRACK_RGB = (function () { const c = new THREE.Color(0x7a6448); return [c.r, c.g, c.b]; })();
   /* DECKS THAT MEET ARE DEPTH-ORDERED, NOT MILLIMETRE-STACKED. Two freeways
      crossing lay their junction boxes over each other 0.8 mm apart, and a
      slip ramp rides the mainline 1.5 mm up through its taper: far below the
@@ -662,8 +698,9 @@
       const box = inBox((a.s + b.s) / 2);
       const eo = (S.isDirt || box) ? 1e4 : S.trav, ei = (S.median && !S.isDirt && !box) ? S.medHalf : 0;
       const la = box ? [0, 3.6, 0, half] : laneAttr;
-      C.deck.tri(aL, aR, bR, null, true, [-eN_a, va, eo, ei], [eP_a, va, eo, ei], [eP_b, vb, eo, ei], la);
-      C.deck.tri(aL, bR, bL, null, true, [-eN_a, va, eo, ei], [eP_b, vb, eo, ei], [-eN_b, vb, eo, ei], la);
+      const dc = S.isDirt ? DIRT_TRACK_RGB : null;   // groundSkin reads the soil tone off the vertex
+      C.deck.tri(aL, aR, bR, dc, true, [-eN_a, va, eo, ei], [eP_a, va, eo, ei], [eP_b, vb, eo, ei], la);
+      C.deck.tri(aL, bR, bL, dc, true, [-eN_a, va, eo, ei], [eP_b, vb, eo, ei], [-eN_b, vb, eo, ei], la);
     }
 
     // ---- PAINT (paved only) -------------------------------------------------

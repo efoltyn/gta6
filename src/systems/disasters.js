@@ -75,11 +75,10 @@
    a see-through orange box on it. world/volcanofx.js owns four builders —
    opaque crusted lava, the pyroclastic density current, the lahar and the
    ash LOAD — all keyed on a position + a height field so a city-side
-   eruption calls the same code. Its flags (VOLCANO_V2 · VOLCANO_PYRO ·
-   VOLCANO_LAHAR · VOLCANO_ASH_LOAD) are declared THERE, in the owning file;
-   VOLCANO_V2=false (or the older SURV_VOLCANO_LAVA_V2=false) drops this file
-   back to the legacy additive streams, which are kept verbatim as the revert
-   path and counted by disasterAudit().lavaLegacy.
+   eruption calls the same code. Its flags (VOLCANO_PYRO · VOLCANO_LAHAR ·
+   VOLCANO_ASH_LOAD) are declared THERE, in the owning file. volcanofx.js is
+   loaded on every page that loads this file; the old additive stream boxes
+   were deleted 2026-09-28.
 
    NUKE_FINALE_REAL (declared here, default on) is the finale's LENS: the
    real cloud was always being drawn, it was being clipped at a 1 km far
@@ -106,8 +105,6 @@
   const surv = () => CBZ.surv;
   if (CBZ.CONFIG.SURV_SHUFFLE == null) CBZ.CONFIG.SURV_SHUFFLE = true;
   if (CBZ.CONFIG.SURV_TELEGRAPH == null) CBZ.CONFIG.SURV_TELEGRAPH = true;
-  // visible lava pools + downwind ash choke on the eruption (false = legacy streams/bombs only)
-  if (CBZ.CONFIG.SURV_VOLCANO_LAVA_V2 == null) CBZ.CONFIG.SURV_VOLCANO_LAVA_V2 = true;
 
   // ---- THE WAVE'S FIVE FLAGS. Each is a genuine one-line revert. ----
   // SHOW DON'T TELL: the banner/hint/toast prose. ON (default) = silence; the
@@ -652,7 +649,7 @@
         if (rnd() < dt * (0.3 + k) * (0.4 + 0.6 * (ctx.st.mag == null ? 0.6 : ctx.st.mag))) soundAt("thunder", ctx.st.cellX, ctx.st.cellZ);
       },
       start(ctx) {
-        ctx.st.pending = []; ctx.st.bolts = [];
+        ctx.st.pending = [];
         ctx.st.cd = 1.4 - 0.9 * (ctx.st.mag == null ? 0.6 : ctx.st.mag);
       },
       active(dt, ctx) {
@@ -708,8 +705,7 @@
           // WHAT IT WILL ACTUALLY HIT — resolved now, not at the moment of the
           // strike, so the leader spends its whole descent pointing at the real
           // termination and the bolt lands where the warning said it would.
-          // Skipped entirely on the revert path, which aims at bare coordinates.
-          const at = (CBZ.CONFIG.LIGHTNING_FX_V2 !== false) ? attachPoint(tx, tz, ctx) : null;
+          const at = attachPoint(tx, tz, ctx);
           if (at) { tx = at.x; tz = at.z; }
           /* THE TELEGRAPH IS THE BOLT'S OWN APPROACH, not a decal (2026-08-13).
              This was CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff) — a pulsing
@@ -720,22 +716,18 @@
              cloud before a stroke, seeded off these coordinates so the return
              stroke runs up the same path. Same handle, so the pending list
              below — and the threat model and bot scatter that read it — did
-             not change by a line. Falls back to the disc if the renderer is
-             absent or LIGHTNING_FX_V2 is off. */
-          const tele = (CBZ.CONFIG.LIGHTNING_FX_V2 !== false && CBZ.lightningLeader)
-            ? CBZ.lightningLeader(tx, tz)
-            : CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff);
+             not change by a line. systems/lightningfx.js is loaded on every
+             page that loads this file. */
+          const tele = CBZ.lightningLeader(tx, tz);
           ctx.st.pending.push({ x: tx, z: tz, t: 0.95, m: tele, at: at });
         }
         for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
           const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 0.95);
           if (p.t <= 0) { strike(p.x, p.z, ctx, p.at); p.m.dispose(); ctx.st.pending.splice(i, 1); }
         }
-        for (let i = ctx.st.bolts.length - 1; i >= 0; i--) { const b = ctx.st.bolts[i]; b.life -= dt; b.mesh.material.opacity = Math.max(0, b.life / 0.16); if (b.life <= 0) { rmMesh(b.mesh); ctx.st.bolts.splice(i, 1); } }
       },
-      // `st.bolts` only ever fills on the LIGHTNING_FX_V2=false path; the live
-      // renderer pools its own meshes and hands them back through its reset.
-      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); (ctx.st.bolts || []).forEach((b) => rmMesh(b.mesh)); if (CBZ.lightningFxReset) CBZ.lightningFxReset(); },
+      // the renderer pools its own meshes and hands them back through its reset
+      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); CBZ.lightningFxReset(); },
       threat(x, z, ctx) { let t = 0.1; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < 7) t = Math.max(t, 0.95 * (1 - d / 7)); }); return t; },
       // in the sirens the smart move is OFF the exposed high ground and out of
       // the open, so the crowd visibly scatters toward the town before the
@@ -1766,11 +1758,8 @@
       },
     },
 
-    // ---- METEOR SHOWER: telegraphed impacts, big blast ----
-    // ---- METEOR SHOWER: rebuilt around systems/meteor.js (CBZ.meteor).
-    //      The def is METEOR_DEF(), in its own block further down ("THE
-    //      METEOR SHOWER") beside the sky-streak helpers it owns. METEOR_V2
-    //      off — or meteor.js absent — plays the legacy shower verbatim. ----
+    // ---- METEOR SHOWER: built on systems/meteor.js (CBZ.meteor). The def is
+    //      METEOR_DEF(), in its own block further down ("THE METEOR SHOWER"). ----
     meteor: METEOR_DEF(),
 
     /* ---- SINKHOLES: THE GROUND OPENS AND YOU GO DOWN IT ---------------------
@@ -2167,6 +2156,15 @@
         soundAt("collapse", a.pos.x, a.pos.z);
       },
     });
+    /* THE TOE ARRIVES LOADED: the arena's own parked-car meshes (shared
+       geometry and paint, not copies) plus lumber, pallets and roof sections
+       ride the foot of the front and drop out of it across the crossing. */
+    const tpl = [], seen = new Set();
+    (A.cars || []).forEach(function (c) {
+      const b = c && c.group && c.group.children[0];
+      if (b && b.isMesh && !seen.has(b.geometry)) { seen.add(b.geometry); tpl.push(b); }
+    });
+    st.debris.churn({ cars: tpl.slice(0, 4), halfW: ctx.R * 1.05 });
     tsuLastDebris = st.debris;
     return st.debris;
   }
@@ -2198,48 +2196,22 @@
     }
   }
 
-  // ---- floating debris planks — the LEGACY path (TSU_DEBRIS=false) --------
-  function tsuSpawnPlanks(ctx) {
-    const st = ctx.st;
-    st.plankGeo = new THREE.BoxGeometry(1.7, 0.22, 0.55);
-    st.plankMats = [new THREE.MeshLambertMaterial({ color: 0x8a6b45 }), new THREE.MeshLambertMaterial({ color: 0x66563c })];
-    st.planks = [];
-    for (let i = 0; i < 16; i++) {
-      const p = ctx.arena.randomPoint(6, ctx.R * 0.9);
-      const m = new THREE.Mesh(st.plankGeo, st.plankMats[i % 2]);
-      m.rotation.y = rnd() * 6.28; m.visible = false; m.castShadow = false;
-      root().add(m);
-      st.planks.push({ m, x: p.x, z: p.z, ph: rnd() * 6.28, spin: (rnd() - 0.5) * 0.8 });
-    }
-  }
-  function tsuPlanks(dt, ctx, current) {
-    const st = ctx.st; if (!st.planks) return;
-    for (let i = 0; i < st.planks.length; i++) {
-      const pl = st.planks[i];
-      if (st.phase === "sweep" && tsuS(ctx, pl.x, pl.z) > st.frontS - 2) continue;   // not swept yet
-      // ONE surface: the same query the swimmer and the shader use
-      const surface = seaY(pl.x, pl.z);
-      const land = floor(pl.x, pl.z);
-      if (surface - land < 0.25) { continue; }
-      pl.m.visible = true;
-      pl.x += st.dx * current * dt; pl.z += st.dz * current * dt;
-      const floatY = surface - 0.08 + Math.sin(CBZ.now * 0.004 + pl.ph) * 0.1;
-      pl.m.position.set(pl.x, Math.max(floor(pl.x, pl.z) + 0.12, floatY), pl.z);   // strands on land as it drains
-      pl.m.rotation.y += pl.spin * dt;
-      pl.m.rotation.z = Math.sin(CBZ.now * 0.003 + pl.ph) * 0.12;
-    }
-  }
-
-  /* ONE CALL FOR EVERYTHING FLOATING. With TSU_DEBRIS on this is the real
-     entrained load (cars, logs, house panels, tumbling and striking); with it
-     off it is the sixteen legacy planks and nothing else changes. */
+  /* ONE CALL FOR EVERYTHING FLOATING: the real entrained load (cars, logs,
+     house panels, tumbling and striking). The old sixteen box planks that
+     stood in with TSU_DEBRIS off were deleted 2026-09-28. */
   function tsuFlotsam(dt, ctx, current) {
     const field = tsuDebris(ctx);
-    if (field) {
-      field.step(dt, { dx: ctx.st.dx, dz: ctx.st.dz, flow: current, sediment: ctx.st.sediment || 0 });
-      return;
-    }
-    tsuPlanks(dt, ctx, current);
+    if (!field) return;
+    const st = ctx.st;
+    // the front the churn rides: only while the wall is standing in the sweep
+    const front = (st.phase === "sweep" && st.face && st.faceH && st.faceY != null) ? {
+      x: ctx.cx + st.dx * st.frontS, z: ctx.cz + st.dz * st.frontS, dx: st.dx, dz: st.dz,
+      H: st.faceH, seaY: st.faceY + 1.2, turbid: st.sediment || 0,
+      t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001,
+      v: st.frontV != null ? st.frontV : st.speed,
+      land: Math.max(0, Math.min(1, (st.frontS + ctx.R) / (2 * ctx.R))),
+    } : null;
+    field.step(dt, { dx: st.dx, dz: st.dz, flow: current, sediment: st.sediment || 0, front: front });
   }
 
   /* THE DROWNING ARC, and it has its own words because it is its own death.
@@ -2587,7 +2559,6 @@
          (the face's own GPU spray, below), and nowhere else. */
       st.sediment = 0; st.undertowT = 0; st.carWatch = null;
       st.debris = undefined;                    // built lazily on first contact
-      if (CBZ.CONFIG.TSU_DEBRIS === false || !CBZ.tsuDebrisField) tsuSpawnPlanks(ctx);
       tsuPublish(ctx, 2.2);
       if (CBZ.shake) CBZ.shake(0.5);
       sound("water"); sound("rumble");
@@ -2862,12 +2833,6 @@
          the match. That wreckage IS the aftermath, and deleting it would be
          throwing away the only thing the event leaves behind. */
       if (st.debris) { st.debris.strandAll(); st.carWatch = null; }
-      if (st.planks) {
-        for (let i = 0; i < st.planks.length; i++) root().remove(st.planks[i].m);
-        if (st.plankGeo) st.plankGeo.dispose();
-        if (st.plankMats) { st.plankMats[0].dispose(); st.plankMats[1].dispose(); }
-        st.planks = null;
-      }
       const bots = CBZ.bots;
       for (let i = 0; i < bots.length; i++) bots[i]._survSwim = 0;
     },
@@ -2921,8 +2886,7 @@
      blending cannot be opaque — it only ever ADDS to what is behind it —
      so grass showed through the lava, two crossing streams showed through
      each other, and no amount of colour tuning was ever going to make that
-     read as rock. That material is now the FLAG REVERT and nothing else
-     (SURV_VOLCANO_LAVA_V2 / VOLCANO_V2 = false).
+     read as rock. That material is gone (deleted 2026-09-28).
 
      What replaces it lives in world/volcanofx.js, keyed on a position and
      a height field so a city-side volcano can call exactly the same four
@@ -3009,7 +2973,7 @@
     _ashW.amount = AL ? Math.min(6, AL.peakDepth / ASH_VISUAL_FULL) : 0;
     return _ashW;
   }
-  let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, lavaLegacy = 0, whiteouts = 0;
+  let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, whiteouts = 0;
   /* THE BODY COUNT, because the owner's "kills way too many people" deserves
      a number that a later edit cannot quietly undo. `volcanoDeaths` is the
      drop in the live roster across an eruption — measured off the mode's own
@@ -3091,14 +3055,13 @@
     CBZ.camera.updateProjectionMatrix();
   }
 
-  function vfx() { return (CBZ.CONFIG.VOLCANO_V2 !== false && CBZ.CONFIG.SURV_VOLCANO_LAVA_V2 !== false) ? CBZ.volcanoFx : null; }
+  function vfx() { return CBZ.volcanoFx; }
   // 0 at deep night, 1 at midday — core/daynight.js's own clock, so a disaster
   // tint can DIM the day without ever being able to invent one
-  function dayK() {
-    if (!CBZ.dayPhase) return 1;
-    const t = CBZ.dayPhase();
-    return Math.max(0, Math.min(1, Math.sin((t - 0.22) * Math.PI / 0.56)));
-  }
+  // survEnv is a DAYLIGHT grade: modes/survival.js darkens it for the hour
+  // (one night grade for every disaster), so a def writes its daytime mood
+  // and must not apply the night itself a second time.
+  function dayK() { return 1; }
   function gAt(ctx) { return ctx.arena.groundHeightAt; }
   function vent(h, ang, r) { return { x: h.x + Math.cos(ang) * r, z: h.z + Math.sin(ang) * r }; }
 
@@ -3122,26 +3085,6 @@
     return false;
   }
 
-  // ---- THE FLAG REVERT: the old see-through additive stream, verbatim ----
-  const ERUPT_UP = window.THREE ? new THREE.Vector3(0, 1, 0) : null;
-  const STREAM_BASE_LEN = 1;
-  const STREAM_HALF_W = 2.9;
-  function makeLavaStream(angle) {
-    const geo = new THREE.BoxGeometry(5.2, STREAM_BASE_LEN, 1.1);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff5a18, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending });
-    const m = new THREE.Mesh(geo, mat); m.renderOrder = 6;
-    root().add(m);
-    lavaLegacy++;
-    return { angle, len: 3, maxLen: 0, mesh: m };
-  }
-  function streamHit(ax, az, h, s) {
-    const dx = ax - h.x, dz = az - h.z;
-    const along = dx * Math.cos(s.angle) + dz * Math.sin(s.angle);
-    if (along < 0 || along > s.len) return false;
-    const perp = Math.abs(-dx * Math.sin(s.angle) + dz * Math.cos(s.angle));
-    return perp < STREAM_HALF_W;
-  }
-
   function startEruption(ctx) {
     if (ctx.st.erupting) return; ctx.st.erupting = true;
     const h = ctx.arena.hills[0];
@@ -3158,24 +3101,17 @@
        at a constant speed — orange confetti, and the only thing filling the
        twenty metres between the crater and the column. world/volcanofx.js's
        V.fountain throws incandescent clots on real parabolas out of the vent
-       mouth and lets them fall back onto the cone. The Points cloud survives
-       only as the VOLCANO_V2-off fallback, where there is no volcanofx. */
-    ctx.st.erFountain = (V && V.fountain)
-      ? V.fountain({
-        x: h.x, z: h.z, y: h.peak + 1,
-        r: 1.6 + 2.4 * M, mag: M,
-        groundAt: gAt(ctx), parent: root(),
-      })
-      : CBZ.fx.particleCloud({
-        mode: "rise", color: 0xff6a1a,
-        count: 260, radius: 7, top: 22, size: 0.3,
-        opacity: 0.85, vMin: 8 + 6 * M, vMax: 14 + 12 * M, drift: 3,
-      });
+       mouth and lets them fall back onto the cone. */
+    ctx.st.erFountain = V.fountain({
+      x: h.x, z: h.z, y: h.peak + 1,
+      r: 1.6 + 2.4 * M, mag: M,
+      groundAt: gAt(ctx), parent: root(),
+    });
     ctx.st.erFountain.setActive(0.6 + 0.4 * M);
     /* the towering dark convective column, standing ON the crater — one
        path now, the sprite plume in world/volcanofx.js. V3 only decides
        whether it is exempt from the eruption's own fog wall. */
-    if (V && V.ashColumn) {
+    {
       ctx.st.erColumn = V.ashColumn({
         // one metre over the lip: the plume's foot has to be INSIDE the
         // vent apron's glow, or the column reads as floating
@@ -3189,9 +3125,6 @@
         fogless: V3,
         parent: root(),
       });
-      ctx.st.erSmoke = null;
-    } else {
-      ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
     }
     /* THE COLUMN STANDS ON LIGHT — but that light is now baked into the
        column's own puffs (volcanofx bakes a vent underlight into every puff
@@ -3202,20 +3135,12 @@
        everywhere is just so dumb, idc if it's realistic". The 300 grey motes
        that fell here went the same way as the ground blanket. */
     ctx.st.erAsh = null;
-    /* The crater itself: the V2 path gets the OPAQUE draped spatter apron
-       (world/volcanofx.js ventGlow — the reference photo's white-hot summit).
-       The additive disc survives only as the flag revert's crater, because a
-       glowing translucent coin is both halves of the owner's complaint —
-       see-through AND geometric. */
-    if (V && V.ventGlow) {
-      ctx.st.erVent = V.ventGlow({
-        x: h.x, z: h.z, r: 3.8 + 4.6 * M,
-        groundAt: gAt(ctx), parent: root(), salt: 4747,
-      });
-      ctx.st.erCrater = null;
-    } else {
-      ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);   // 0.3: disc() adds the floor (see warn())
-    }
+    /* The crater itself: the OPAQUE draped spatter apron (world/volcanofx.js
+       ventGlow — the reference photo's white-hot summit). */
+    ctx.st.erVent = V.ventGlow({
+      x: h.x, z: h.z, r: 3.8 + 4.6 * M,
+      groundAt: gAt(ctx), parent: root(), salt: 4747,
+    });
 
     // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
     // and drove it into systems/weather.js, so the ash falls the same way the
@@ -3239,8 +3164,8 @@
       });
     }
 
-    ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
-    if (V) {
+    ctx.st.erLava = null;
+    {
       /* ---- LAVA: braided, branching flow fields down the fall line ----
 
          OWNER, 2026-08-15, sending the two reference photographs that are
@@ -3324,21 +3249,6 @@
       ctx.st.lahar = null;
       ctx.st.laharOn = M > 0.3;
       ctx.st.laharCd = 11 - 5 * M;
-    } else {
-      // ---- FLAG REVERT: the legacy additive streams + pulsing pool discs ----
-      ctx.st.erStreams = [];
-      const base = rnd() * 6.28, n = 5;
-      for (let i = 0; i < n; i++) {
-        const s = makeLavaStream(base + (i / n) * 6.28 + (rnd() - 0.5) * 0.4);
-        s.maxLen = h.r * (0.82 + rnd() * 0.16);
-        ctx.st.erStreams.push(s);
-      }
-      ctx.st.erPools = ctx.st.erStreams.map(function (s) {
-        const pm = disc(h.x + Math.cos(s.angle) * 6, h.z + Math.sin(s.angle) * 6, 0xff4a10, 0.9, 0.12);
-        pm.material.blending = THREE.AdditiveBlending;
-        pm.scale.set(0.6, 0.6, 1);
-        return { s, m: pm, r: 0 };
-      });
     }
     ctx.st.erBombCd = 2.4 - 1.6 * M;
   }
@@ -3382,13 +3292,11 @@
     ctx.env.sunInt = 0.5 * dk * (1 - 0.78 * ashK); ctx.env.sunColor = 0xd9714a;
     ctx.env.hemiInt = (0.14 + 0.42 * dk) * (1 - 0.55 * ashK); ctx.env.hemiColor = 0x9c7461;
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
     // the sprite pillar leans with the same wind the ash falls on
     // ...and it is told the hour, because a night column is a SILHOUETTE
     // with a burning foot, not the pale smudge it used to photograph as
     if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0, { night: 1 - dk });
     if (ctx.st.erVent) ctx.st.erVent.update(dt);
-    if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // the eruption is still weather — a dimmed sun and a downwind haze — but
     // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
     // the ash thickens the air it is falling through (V3: ashK rides the
@@ -3410,29 +3318,6 @@
     // ---------------- LAVA ----------------
     if (ctx.st.erLava) {
       for (let i = 0; i < ctx.st.erLava.length; i++) ctx.st.erLava[i].update(dt);
-    } else if (ctx.st.erStreams) {
-      // legacy revert path: grow + orient each additive stream down the cone
-      for (let i = 0; i < ctx.st.erStreams.length; i++) {
-        const s = ctx.st.erStreams[i];
-        s.len = Math.min(s.maxLen, s.len + (5 + ctx.intensity * 3) * dt);
-        const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
-        const ey = floor(ex, ez);
-        const dv = new THREE.Vector3(ex - h.x, ey - h.peak, ez - h.z);
-        const len3 = dv.length() || 1; dv.multiplyScalar(1 / len3);
-        s.mesh.position.set((h.x + ex) / 2, (h.peak + ey) / 2 + 0.45, (h.z + ez) / 2);
-        s.mesh.quaternion.setFromUnitVectors(ERUPT_UP, dv);
-        s.mesh.scale.set(1, len3 / STREAM_BASE_LEN, 1);
-        s.mesh.material.opacity = 0.8 + 0.18 * Math.sin(CBZ.now * 0.02 + i * 1.3);
-      }
-      if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
-        const P = ctx.st.erPools[i], s = P.s;
-        const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
-        P.m.position.set(ex, floor(ex, ez) + 0.12, ez);
-        if (s.len >= s.maxLen - 0.5) P.r = Math.min(8, P.r + dt * 1.1);
-        else P.r = Math.max(P.r, 1.2);
-        P.m.scale.set(Math.max(0.6, P.r), Math.max(0.6, P.r), 1);
-        P.m.material.opacity = 0.6 + 0.3 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.014 + i * 2.1));
-      }
     }
 
     /* ---------------- INCANDESCENT ROCKFALL ----------------
@@ -3443,8 +3328,8 @@
        by the same doctrine as the melt), and a short linger leaves the
        flank dotted with cooling embers that vanish on their own. Visual
        only — dmg 0 — the bombs below are the ones that hurt, and they
-       telegraph. V2 only: the flag revert keeps its exact old look. */
-    if (V) {
+       telegraph. */
+    {
       ctx.st.erEmberCd = (ctx.st.erEmberCd || 0) - dt;
       if (ctx.st.erEmberCd <= 0) {
         ctx.st.erEmberCd = 0.4;
@@ -3609,12 +3494,6 @@
           surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: t.x, fromZ: t.z });
           return;
         }
-      } else if (ctx.st.erStreams) {
-        for (let i = 0; i < ctx.st.erStreams.length; i++) if (streamHit(ax, az, h, ctx.st.erStreams[i])) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: h.x, fromZ: h.z }); return; }
-        if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
-          const PL = ctx.st.erPools[i];
-          if (PL.r > 0.7 && Math.hypot(ax - PL.m.position.x, az - PL.m.position.z) < PL.r * 0.85) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: PL.m.position.x, fromZ: PL.m.position.z }); return; }
-        }
       }
       // 4) LAHAR — it CARRIES you, and then it sets around you
       if (LH) {
@@ -3736,14 +3615,8 @@
       volAliveAtStart = -1;
     }
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
-    if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
     if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
     if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
-    if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
-    (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
-    ctx.st.erStreams = null;
-    (ctx.st.erPools || []).forEach((P) => rmMesh(P.m));
-    ctx.st.erPools = null;
     /* THE LAVA DOES NOT VANISH — IT DIES WHERE IT STANDS. The old line here
        disposed every flow the frame the eruption ended: a glowing river
        popped off the hillside mid-frame. quench() is the physics (the
@@ -3890,14 +3763,6 @@
     if (ctx.st.erLava) {
       for (let i = 0; i < ctx.st.erLava.length; i++) if (ctx.st.erLava[i].hitTest(x, z)) { t = Math.max(t, 0.97); break; }
     }
-    (ctx.st.erStreams || []).forEach((s) => {
-      const dx = x - h.x, dz = z - h.z;
-      const along = dx * Math.cos(s.angle) + dz * Math.sin(s.angle);
-      if (along >= -1 && along <= s.len + 1) { const perp = Math.abs(-dx * Math.sin(s.angle) + dz * Math.cos(s.angle)); if (perp < STREAM_HALF_W + 2.5) t = Math.max(t, Math.min(0.98, 1 - (perp - STREAM_HALF_W) / 2.5)); }
-    });
-    (ctx.st.erPools || []).forEach((P) => {
-      if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
-    });
     if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
     /* THE ASH IS BACK, SO THE FLEEING READS AGAIN. The 2026-08-16 build cut
        this term because bots emptying a visibly clean half of the island
@@ -4763,74 +4628,58 @@
      the bus must not ALSO sweep a radius, or everyone inside it dies twice and
      the kill feed says the wrong thing about how.
 
-     LIGHTNING_FX_V2=false restores the legacy fireball verbatim, below. ------ */
+     (The old fireball + BoxGeometry fence-post bolt was deleted 2026-09-28.) */
   function strike(x, z, ctx, at) {
-    if (CBZ.CONFIG.LIGHTNING_FX_V2 !== false && CBZ.lightningStrike) {
-      at = at || attachPoint(x, z, ctx);
-      // The bus still owns the draw and this mode still owns the ledger. No
-      // `quiet` flag is needed — the row carries no shake, no rumble and no cue
-      // of its own, so the bus's feel stage is a no-op and the composer owns
-      // the crack and the flicker.
-      /* HOW MUCH OF IT REACHES THE TURF. Open ground: all of it. A tree: the
-         current runs to earth down the trunk and out through the roots, so the
-         base scorches but less. A building: it goes to earth inside the
-         structure and the lawn outside is untouched. */
-      const gScale = at.kind === "tree" ? 0.5 : (at.kind === "ground" || at.kind === "actor" ? 1 : 0);
-      survBlast("lightning", at.x, at.z, {
-        r: 0, ctx: ctx, up: 0.6, y: at.kind === "ground" ? undefined : at.y,
-        struct: 0.06, structR: 4.5, fx: { groundScale: gScale },
-        // and if the bus cannot route it — script order, or IMPACT_BUS off —
-        // draw the bolt directly rather than let it degrade to a fireball
-        draw: function (bx, by, bz) { CBZ.lightningStrike(bx, bz, { y: by, groundScale: gScale }); },
-      });
-      // A TREE THAT IS STRUCK EXPLODES. The sap inside the trunk flashes to
-      // steam and blows the bark off in strips — the one piece of genuine
-      // blunt-trauma debris a strike produces, and nothing like an ejecta cone.
-      // The strips are cut from THIS trunk: a bark-thick slab of its own
-      // surface on the struck side, in its own bark material, split along the
-      // grain by CBZ.debris (wood fractures into long splinters).
-      if (at.kind === "tree") {
-        const t = at.ref, base = floor(at.x, at.z);
-        if (CBZ.debris && t && t.trunk && t.trunk.geometry && t.trunk.material) {
-          const tr = t.trunk;
-          tr.updateWorldMatrix(true, false);
-          if (!tr.geometry.boundingBox) tr.geometry.computeBoundingBox();
-          const bb = tr.geometry.boundingBox.clone().applyMatrix4(tr.matrixWorld);
-          const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
-          const rad = Math.max(0.08, Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2);
-          const y0 = Math.max(bb.min.y, base) + 0.6, y1 = Math.min(bb.max.y, y0 + 2.6);
-          // (a trunk mesh wider than a tree is a merged forest: no strips off that)
-          const strips = (bb.max.x - bb.min.x < 3 && bb.max.z - bb.min.z < 3) ? 2 + ((rnd() * 2) | 0) : 0;
-          for (let i = 0; i < strips && y1 > y0 + 0.4; i++) {
-            const a = rnd() * 6.283, ux = Math.cos(a), uz = Math.sin(a);
-            const sx = cx + ux * rad * 0.9, sz = cz + uz * rad * 0.9;
-            const hw = Math.max(0.05, rad * 0.45), th = Math.min(0.06, rad * 0.35) / 2;
-            CBZ.debris.shatterBox({
-              minX: sx - Math.abs(uz) * hw - Math.abs(ux) * th, maxX: sx + Math.abs(uz) * hw + Math.abs(ux) * th,
-              minY: y0, maxY: y1,
-              minZ: sz - Math.abs(ux) * hw - Math.abs(uz) * th, maxZ: sz + Math.abs(ux) * hw + Math.abs(uz) * th,
-            }, tr.material, { kind: "wood", at: { x: sx, y: (y0 + y1) / 2, z: sz }, dir: { x: ux, y: 0.35, z: uz },
-              power: 1.4, maxPieces: 4, owner: "fx", snap: false });
-          }
-        }
-        if (t && t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x2a1c10);
-      }
-      conduct(at, ctx);
-      return;
-    }
-
-    // ---- LEGACY (LIGHTNING_FX_V2=false): the airstrike-composer fireball ----
-    survBlast("kinetic", x, z, {
-      r: 5, cause: "struck by lightning", ctx: ctx, up: 0.6,
-      mass: 60, speed: 120, struct: 0.18, structR: 9, flash: 0, quiet: true,
-      knockback: 11, fling: 5, color: 0xddeeff, sfx: "thunder",
+    at = at || attachPoint(x, z, ctx);
+    // The bus still owns the draw and this mode still owns the ledger. No
+    // `quiet` flag is needed — the row carries no shake, no rumble and no cue
+    // of its own, so the bus's feel stage is a no-op and the composer owns
+    // the crack and the flicker.
+    /* HOW MUCH OF IT REACHES THE TURF. Open ground: all of it. A tree: the
+       current runs to earth down the trunk and out through the roots, so the
+       base scorches but less. A building: it goes to earth inside the
+       structure and the lawn outside is untouched. */
+    const gScale = at.kind === "tree" ? 0.5 : (at.kind === "ground" || at.kind === "actor" ? 1 : 0);
+    survBlast("lightning", at.x, at.z, {
+      r: 0, ctx: ctx, up: 0.6, y: at.kind === "ground" ? undefined : at.y,
+      struct: 0.06, structR: 4.5, fx: { groundScale: gScale },
+      // and if the bus cannot route it — script order, or IMPACT_BUS off —
+      // draw the bolt directly rather than let it degrade to a fireball
+      draw: function (bx, by, bz) { CBZ.lightningStrike(bx, bz, { y: by, groundScale: gScale }); },
     });
-    CBZ.fx.flash(0.7, 0xddeeff);
-    if (CBZ.shake) CBZ.shake(0.6);
-    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.5, 40, 0.5), new THREE.MeshBasicMaterial({ color: 0xeaf4ff, transparent: true, opacity: 1, depthWrite: false }));
-    bolt.position.set(x, floor(x, z) + 20, z); root().add(bolt);
-    ctx.st.bolts.push({ mesh: bolt, life: 0.16 });
-    sound("thunder");
+    // A TREE THAT IS STRUCK EXPLODES. The sap inside the trunk flashes to
+    // steam and blows the bark off in strips — the one piece of genuine
+    // blunt-trauma debris a strike produces, and nothing like an ejecta cone.
+    // The strips are cut from THIS trunk: a bark-thick slab of its own
+    // surface on the struck side, in its own bark material, split along the
+    // grain by CBZ.debris (wood fractures into long splinters).
+    if (at.kind === "tree") {
+      const t = at.ref, base = floor(at.x, at.z);
+      if (CBZ.debris && t && t.trunk && t.trunk.geometry && t.trunk.material) {
+        const tr = t.trunk;
+        tr.updateWorldMatrix(true, false);
+        if (!tr.geometry.boundingBox) tr.geometry.computeBoundingBox();
+        const bb = tr.geometry.boundingBox.clone().applyMatrix4(tr.matrixWorld);
+        const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+        const rad = Math.max(0.08, Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2);
+        const y0 = Math.max(bb.min.y, base) + 0.6, y1 = Math.min(bb.max.y, y0 + 2.6);
+        // (a trunk mesh wider than a tree is a merged forest: no strips off that)
+        const strips = (bb.max.x - bb.min.x < 3 && bb.max.z - bb.min.z < 3) ? 2 + ((rnd() * 2) | 0) : 0;
+        for (let i = 0; i < strips && y1 > y0 + 0.4; i++) {
+          const a = rnd() * 6.283, ux = Math.cos(a), uz = Math.sin(a);
+          const sx = cx + ux * rad * 0.9, sz = cz + uz * rad * 0.9;
+          const hw = Math.max(0.05, rad * 0.45), th = Math.min(0.06, rad * 0.35) / 2;
+          CBZ.debris.shatterBox({
+            minX: sx - Math.abs(uz) * hw - Math.abs(ux) * th, maxX: sx + Math.abs(uz) * hw + Math.abs(ux) * th,
+            minY: y0, maxY: y1,
+            minZ: sz - Math.abs(ux) * hw - Math.abs(uz) * th, maxZ: sz + Math.abs(ux) * hw + Math.abs(uz) * th,
+          }, tr.material, { kind: "wood", at: { x: sx, y: (y0 + y1) / 2, z: sz }, dir: { x: ux, y: 0.35, z: uz },
+            power: 1.4, maxPieces: 4, owner: "fx", snap: false });
+        }
+      }
+      if (t && t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x2a1c10);
+    }
+    conduct(at, ctx);
   }
 
   /* ============================================================
@@ -5036,9 +4885,9 @@
      THE METEOR SHOWER (METEOR_V2 wave). OWNER'S BRIEF: judge it against
      what a meteor event really is.
 
-     The legacy shower (kept verbatim below as the flag-off path) was streaks
-     on random headings, a brown box teleport-dropping from y=40, an instant
-     bang and a painted decal. The rebuilt event delegates the SKY to
+     The old shower (deleted 2026-09-28) was streaks on random headings, a
+     brown box teleport-dropping from y=40, an instant bang and a painted
+     decal. The event delegates the SKY to
      systems/meteor.js — one RADIANT all rocks share, visible bolides with
      smoke trains, AIRBURSTS carrying most of the energy, the flash arriving
      seconds before the bang (the pressure front expands at the same dramatic
@@ -5055,12 +4904,11 @@
      which is the point of an airburst — it wounds and knocks down rather
      than instakills.
 
-     Degrade-safe: CBZ.meteor absent or METEOR_V2=false → the legacy shower,
-     line for line. Ratchet: CBZ.meteorAudit() (+ the meteor fields in
-     CBZ.disasterAudit()).
+     meteor.js is loaded on every page that loads this file (index.html and
+     the generated disaster.html). Ratchet: CBZ.meteorAudit() (+ the meteor
+     fields in CBZ.disasterAudit()).
      ============================================================ */
   function METEOR_DEF() {
-    const v2 = () => CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false;
     let mCtx = null;   // the live ctx, refreshed every tick, for the callbacks
 
     function beginV2(ctx) {
@@ -5113,7 +4961,7 @@
     }
     function activeV2(dt, ctx) {
       mCtx = ctx;
-      // a thin haze, not the legacy 240 m soup: the flashes need a sky to light
+      // a thin haze, not a 240 m soup: the flashes need a sky to light
       ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 70; ctx.env.fogFar = 480; ctx.env.hemiColor = 0xffb0a0;
       CBZ.meteor.tick(dt);
       lightV2(ctx);
@@ -5172,120 +5020,28 @@
       // STREAKS CROSS THE SKY FIRST. Bolides burn up high and harmlessly for a
       // few seconds before anything reaches the ground — which is exactly the
       // real sequence, and it makes the player look UP, which is where the
-      // warning for the rest of the event will be. V2: they all come from ONE
+      // warning for the rest of the event will be. They all come from ONE
       // RADIANT, because a shower is one debris stream, not fireworks.
       warn(ctx) {
         narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
-        if (v2()) { ctx.st.pending = []; ctx.st.timers = []; beginV2(ctx); return; }
-        ctx.st.streaks = []; ctx.st.streakCd = 0.15;
+        ctx.st.pending = []; ctx.st.timers = []; beginV2(ctx);
       },
-      warnTick(dt, ctx) {
-        if (v2()) { mCtx = ctx; CBZ.meteor.tick(dt); lightV2(ctx); return; }
-        ctx.st.streakCd -= dt;
-        if (ctx.st.streakCd <= 0) {
-          ctx.st.streakCd = 0.18 + rnd() * 0.4;
-          skyStreak(ctx);
-          if (rnd() < 0.35) soundAt("rumble", camPos().x, camPos().z, { volume: 0.4 });
-        }
-        tickStreaks(dt, ctx);
-      },
+      warnTick(dt, ctx) { mCtx = ctx; CBZ.meteor.tick(dt); lightV2(ctx); },
       warnThreat() { return 0.12; },   // nowhere is safe; keep the crowd moving
       start(ctx) {
-        if (v2()) {
-          if (!CBZ.meteor.live()) beginV2(ctx);   // force() can skip warn
-          ctx.st.pending = ctx.st.pending || []; ctx.st.cd = 1.0; ctx.st.clock = 0;
-          ctx.env.sunInt = 0.85; ctx.st.timers = ctx.st.timers || [];
-          return;
-        }
-        ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = [];
+        if (!CBZ.meteor.live()) beginV2(ctx);   // force() can skip warn
+        ctx.st.pending = ctx.st.pending || []; ctx.st.cd = 1.0; ctx.st.clock = 0;
+        ctx.env.sunInt = 0.85; ctx.st.timers = ctx.st.timers || [];
       },
-      active(dt, ctx) {
-        if (v2()) { activeV2(dt, ctx); return; }
-        ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
-        tickStreaks(dt, ctx);
-        ctx.st.cd -= dt;
-        if (ctx.st.cd <= 0) {
-          ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
-          const p = ctx.arena.randomPoint(0, ctx.R);
-          const r = 5 + scale(2, ctx);
-          // the incoming rock is VISIBLE all the way down, not a shadow that
-          // appears on the floor — the marker is the shadow it casts
-          skyStreak(ctx, p.x, p.z);
-          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
-        }
-        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
-          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 1.2);
-          if (p.t <= 0) {
-            p.m.dispose();
-            CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 40, vy: -22, size: 2.4, shape: "rock", color: 0x3a2018, dmg: 0, linger: 4, keep: true, onLand: (x, z) => {
-              // THE BLAST BUS OWNS THE IMPACT. `meteor` is a real ordnance row
-              // (systems/impactbus.js) and it is PURE KINETICS — refE 1.2e8 J,
-              // a 6 t stone at 200 m/s — so passing this rock's mass and speed
-              // makes a late-round meteor genuinely bigger instead of the same
-              // constant fireball with a different number typed beside it.
-              survBlast("meteor", x, z, {
-                r: p.r, cause: "flattened by a meteor", ctx: ctx,
-                mass: 4000 + 4000 * ctx.intensity, speed: 190 + 60 * ctx.intensity,
-                struct: 0.55 + 0.35 * ctx.intensity, structR: p.r * 2.4,
-                fling: 7, knockback: 14, color: 0xffcaa0,
-              });
-              const cr = disc(x, z, 0x201810, 0.9, 0.05); cr.userData.transient = true;
-            } });
-            ctx.st.pending.splice(i, 1);
-          }
-        }
-        tick0(ctx, dt);
-      },
+      active(dt, ctx) { activeV2(dt, ctx); },
       end(ctx) {
-        (ctx.st.pending || []).forEach((p) => p.m.dispose()); clearStreaks(ctx);
-        if (CBZ.meteor && CBZ.meteor.live()) CBZ.meteor.stop();
+        (ctx.st.pending || []).forEach((p) => p.m.dispose());
+        if (CBZ.meteor.live()) CBZ.meteor.stop();
         mCtx = null;
       },
       threat(x, z, ctx) { let t = 0; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 3) t = Math.max(t, 1 - d / (p.r + 3)); }); return t; },
       safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < p.r + 4 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
     };
-  }
-
-  /* ---- SKY STREAKS: the meteor shower's real warning -----------------------
-     A bolide is visible for seconds before anything lands. Each streak is one
-     stretched additive box travelling on a straight line — pooled per event,
-     disposed with it, and drawn high enough that the first few burn out
-     harmlessly and simply make you look up. When a streak is aimed at a real
-     impact point it is the SAME rock the ground marker is tracking. */
-  function skyStreak(ctx, tx, tz) {
-    const st = ctx.st;
-    if (!st.streaks) st.streaks = [];
-    if (st.streaks.length > 14) return;
-    const aimed = tx != null;
-    const gx = aimed ? tx : ctx.cx + (rnd() - 0.5) * ctx.R * 2.4;
-    const gz = aimed ? tz : ctx.cz + (rnd() - 0.5) * ctx.R * 2.4;
-    const a = rnd() * 6.28, D = 210 + rnd() * 90;
-    const sx = gx + Math.cos(a) * D, sz = gz + Math.sin(a) * D;
-    const sy = 150 + rnd() * 80, gy = aimed ? floor(gx, gz) + 3 : 60 + rnd() * 40;
-    const len = 16 + rnd() * 22;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, len),
-      new THREE.MeshBasicMaterial({ color: aimed ? 0xffd08a : 0xfff0d0, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
-    m.renderOrder = 7; root().add(m);
-    const dx = gx - sx, dy = gy - sy, dz = gz - sz;
-    const L = Math.hypot(dx, dy, dz) || 1;
-    const life = aimed ? 1.15 : 1.3 + rnd() * 0.7;
-    st.streaks.push({ m, x: sx, y: sy, z: sz, vx: dx / L, vy: dy / L, vz: dz / L, spd: L / life, t: 0, life });
-  }
-  function tickStreaks(dt, ctx) {
-    const S = ctx.st.streaks; if (!S) return;
-    for (let i = S.length - 1; i >= 0; i--) {
-      const s = S[i]; s.t += dt;
-      s.x += s.vx * s.spd * dt; s.y += s.vy * s.spd * dt; s.z += s.vz * s.spd * dt;
-      s.m.position.set(s.x, s.y, s.z);
-      s.m.lookAt(s.x + s.vx, s.y + s.vy, s.z + s.vz);
-      s.m.material.opacity = 0.9 * Math.max(0, 1 - s.t / s.life);
-      if (s.t >= s.life) { rmMesh(s.m); S.splice(i, 1); }
-    }
-  }
-  function clearStreaks(ctx) {
-    const S = ctx.st.streaks; if (!S) return;
-    for (let i = 0; i < S.length; i++) rmMesh(S[i].m);
-    S.length = 0;
   }
 
   // ============================================================
@@ -5948,15 +5704,9 @@
       /* ---- THE METEOR'S RADIANT AND ITS LATE SOUND (systems/meteor.js).
          `meteor` is that file's whole ratchet (airbursts, craters dug,
          ejecta, flash-to-bang seconds, the live bolide/burst positions the
-         storyboard cameras solve off). `meteorLegacyStreakDirs` publishes
-         the LEGACY streaks' headings while the old shower is live, so a
-         before-side run can measure that its streaks came from everywhere —
-         the exact number the radiant deletes. ---- */
-      meteorV2: !!(CBZ.meteor && CBZ.CONFIG.METEOR_V2 !== false),
+         storyboard cameras solve off). ---- */
+      meteorV2: !!CBZ.meteor,
       meteor: CBZ.meteorAudit ? CBZ.meteorAudit() : null,
-      meteorLegacyStreakDirs: dir.curId === "meteor" && st.streaks
-        ? st.streaks.map(function (s) { return { x: +s.vx.toFixed(2), z: +s.vz.toFixed(2) }; })
-        : null,
       /* ---- THE WILDFIRE — delegated to systems/wildfire.js, whose audit is
          live-measured off the same tree records the legacy path mutates, so
          `wildfire.v2:false` (the revert) still reports honest burn counts and
@@ -6018,16 +5768,13 @@
       /* ---- THE STRATOVOLCANO ----
          `lavaOpaque` is the owner's complaint as a boolean, and it is measured
          off the LIVE materials by world/volcanofx.js (volcanoAudit walks every
-         live lava mesh and counts transparent/additive ones). `lavaLegacy`
-         counts additive stream boxes this run actually built — 0 unless a flag
-         was reverted. `nukeUsedNukefx` is asked of city/nukefx.js's own live
+         live lava mesh and counts transparent/additive ones). `nukeUsedNukefx` is asked of city/nukefx.js's own live
          state, so "the finale drew the real mushroom" is a measurement and not
          a claim about which function got called. */
-      volcanoV2: CBZ.CONFIG.VOLCANO_V2 !== false && !!CBZ.volcanoFx,
+      volcanoV2: !!CBZ.volcanoFx,
       lavaOpaque: volA ? !!volA.lavaOpaque : true,
       lavaTransparent: volA ? volA.lavaTransparent : 0,
       lavaFlows: volA ? volA.lavaFlows : 0,
-      lavaLegacy: lavaLegacy,
       pyroRuns: pyroRuns,
       pyroLive: volA ? volA.pyroLive : 0,
       laharRuns: laharRuns,

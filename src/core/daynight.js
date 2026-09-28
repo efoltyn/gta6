@@ -68,7 +68,9 @@
      whatever the cycle is) — change them together if the city's changes.
      ============================================================ */
   const CYCLE = 150;        // seconds for a full day — every mode but escape
-  const MODE_CYCLE = { escape: 720 };   // THE PRISON DAY: 12 min = 30 s/hour
+  // THE ISLAND DAY: 15 min, so a disaster round keeps the hour it started at
+  // (modes/survival.js picks it per round) and only drifts toward the next
+  const MODE_CYCLE = { escape: 720, survival: 900 };   // THE PRISON DAY: 12 min = 30 s/hour
   CBZ.DAY_SECONDS = MODE_CYCLE;         // the dial, published where it is read
   function cycleSecs() {
     const m = CBZ.game && CBZ.game.mode;

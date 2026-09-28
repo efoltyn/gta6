@@ -294,6 +294,42 @@ export default {
       } catch (_) {}
     };
 
+    // THE GROUND, ALL OF IT: the tallest of every height oracle at (x,z), so a
+    // camera is never tested against one range while standing inside another.
+    const groundAt = (x, z) => {
+      let g = 0;
+      for (const f of [S.gH, S.mH, CBZ.floorAt]) {
+        if (typeof f !== "function") continue;
+        let v = 0;
+        try { v = +f(x, z); } catch (_) { v = 0; }
+        if (Number.isFinite(v) && v > g) g = v;
+      }
+      return g;
+    };
+    const EYE = 1.7;
+    // A camera is usable if its eye is >= EYE over the ground and the ray to
+    // the target clears the terrain (the last 12% is the face being framed).
+    const clearView = (p, t) => {
+      if (!(p.y >= groundAt(p.x, p.z) + EYE)) return false;
+      for (let s = 0.03; s <= 0.88; s += 0.03) {
+        const x = p.x + (t.x - p.x) * s, y = p.y + (t.y - p.y) * s, z = p.z + (t.z - p.z) * s;
+        if (groundAt(x, z) > y - 1) return false;
+      }
+      return true;
+    };
+    // Step back down the face bearing (away from the summit) in 45 m steps,
+    // standing 26 m over the ground, until the view is clear; if nothing on
+    // the bearing clears within ~2.2 km, climb from the last spot instead.
+    const footCam = (t, d0) => {
+      let p = null;
+      for (let k = 0; k <= 40; k++) {
+        const d = d0 + k * 45, x = hero.x + face.bx * d, z = hero.z + face.bz * d;
+        p = { x, y: groundAt(x, z) + 26, z };
+        if (clearView(p, t)) return p;
+      }
+      for (let k = 0; k < 30 && !clearView(p, t); k++) p.y += 20;
+      return p;
+    };
     let camPos = { x: 0, y: 100, z: 0 }, look = { x: hero.x, y: hero.h * 0.5, z: hero.z };
     if (shot === "flank") {
       // 900 m off the chosen face at a third of the summit height: the whole
@@ -308,15 +344,15 @@ export default {
       look = { x: hero.x, y: hero.h - 30, z: hero.z };
       camera.fov = 46;
     } else if (shot === "couloir") {
-      // At the foot of the face, looking up it. The camera sits just outside
-      // the mountain (heights are sampled, never assumed) so the face fills
-      // the frame from below the way a valley floor sees it.
-      const d = 430;
-      let footY = 0;
-      try { footY = S.hero === S.great ? S.gH(hero.x + face.bx * d, hero.z + face.bz * d)
-                                       : S.mH(hero.x + face.bx * d, hero.z + face.bz * d); } catch (_) {}
-      camPos = { x: hero.x + face.bx * d, y: (footY || 0) + 26, z: hero.z + face.bz * d };
+      // At the foot of the face, looking up it, from OPEN GROUND. The old
+      // camera stood a fixed 430 m out at the hero oracle's height + 26 m,
+      // which only asked the hero's own range: the south-facing bearing runs
+      // toward Mount Mercy (and other lobes), and once Mercy became a crest of
+      // aretes that spot could be inside rock. footCam walks back down the
+      // face bearing until the eye is over the ground of EVERY oracle and
+      // nothing stands between it and the face.
       look = { x: hero.x, y: hero.h * 0.92, z: hero.z };
+      camPos = footCam(look, 430);
       camera.fov = 55;
     } else if (shot === "from-water") {
       const W = S.water;
@@ -356,6 +392,13 @@ export default {
       if (ref.stand && Number.isFinite(ref.stand.x)) { standX = ref.stand.x; standZ = ref.stand.z; }
       else if (shot !== "from-water") { standX = camPos.x; standZ = camPos.z; }
       if (ref.fov) camera.fov = ref.fov;
+    }
+    // The before side's camera is reused verbatim only while it still sees:
+    // a wave that reshapes the terrain can put that exact spot inside rock,
+    // and a frame of the inside of a mountain compares nothing.
+    if (shot === "couloir" && !clearView(camPos, look)) {
+      camPos = footCam(look, 430);
+      standX = camPos.x; standZ = camPos.z;
     }
     standAt(standX, standZ, camPos.y);
     for (let i = 0; i < 60; i++) tick();

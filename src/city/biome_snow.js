@@ -12,13 +12,11 @@
    low mountain cabin. A winding causeway connects the
    south edge down toward the speedway island.
 
-   REAL GEOLOGY (MOUNT_EROSION_V4, world/mountain_detail.js): both massifs
-   were hand-placed Gaussian lobes soft-maxed together under a light ridged-fbm
-   "crag" multiplier — no drainage, no bedding, no cirques, no talus. They now
-   run the shared erosion stack (domain-warped ridged multifractal crests,
-   derivative-damped fbm, branching V-valleys, cirque headwalls, warped strata
-   benches, talus aprons) over the SAME authored summits, and are shaded from
-   the same bedding field so the colour bands sit on the geometric risers.
+   REAL GEOLOGY (world/mountain_detail.js): Mount Mercy is a crest of four
+   summits with aretes, cols and couloirs built into its silhouette (see
+   mercyMacroA); the Greater Mercy Range is crest capsules, spurs and saddles.
+   Both are weathered by the shared erosion kit (drainage, damped fbm,
+   cirques, talus) and painted from one bedding field for their rock bands.
    Snow is a real coverage model (slope + sun aspect + noise), not an altitude
    contour. Meshes are denser and ADAPTIVE: a CDF over each mountain's own
    height profile spends the grid lines on summits and cliffs instead of the
@@ -191,10 +189,6 @@
     if (N && N.rangeRidgedFbm) return N.rangeRidgedFbm(x, z);
     return 1 - Math.abs(noiseAt(x, z) * 2 - 1);
   }
-  function gaussian(x, z, cx, cz, sx, sz, amp) {
-    const dx = (x - cx) / sx, dz = (z - cz) / sz;
-    return amp * Math.exp(-0.5 * (dx * dx + dz * dz));
-  }
   function flatCircleFactor(x, z, cx, cz, inner, outer) {
     return smooth01((Math.hypot(x - cx, z - cz) - inner) / Math.max(1, outer - inner));
   }
@@ -216,35 +210,41 @@
   function snowRunXAt(z) { return snowRunXAtA(z - DZ) + DX; }
 
   // =====================================================================
-  //  MOUNT MERCY — from Gaussian blobs to real geology (MOUNT_EROSION_V4).
+  //  MOUNT MERCY: a crest of arêtes, not a dome (2026-09-28).
   // =====================================================================
-  //  The old field was five hand-placed Gaussian lobes soft-maxed together and
-  //  multiplied by a light ridged-fbm "crag" term. It had no drainage, no
-  //  bedding, no cirques and no talus: geologically arbitrary. The V4 field
-  //  keeps the AUTHORED SILHOUETTE (the same five summits, the same shoulder,
-  //  the same footprint — the ski run, lodge pads and lift all still land where
-  //  they were designed) and replaces the crag multiplier with the real erosion
-  //  stack from world/mountain_detail.js:
-  //     1. domain-warped RIDGED MULTIFRACTAL  → sinuous, connected crest lines
-  //     2. DERIVATIVE-DAMPED fbm ("Quilez")   → detail dies on ground that is
-  //        already steep, so faces weather into planes instead of noise mush
-  //     3. DRAINAGE NETWORK                   → branching V-valleys with a flat
-  //        gravel bed, converging downhill
-  //     4. CIRQUE headwalls on each summit's shaded flank
-  //     5. STRATA TERRACING                   → warped, non-parallel bedding
-  //        benches and risers = actual cliff bands, aligned with the colour
-  //        bands the shading pass paints from the SAME field
-  //     6. TALUS aprons building out from the foot of those cliffs
+  //  WHY IT STILL READ AS A DOME. The macro was five round Gaussian lobes
+  //  (sigma 92-165 u) on a 330 x 205 u Gaussian shoulder, unioned by an
+  //  8th-power soft-max. A Gaussian is CONVEX over its whole top sigma, so each
+  //  summit was a bell, and five bells on a sixth is one bigger bell. The
+  //  erosion stack was then applied as a single multiplier clamped to
+  //  [0.36, 0.95] (the old math-gate "LAW 1": terms may only scale down). A
+  //  multiplier can scuff a bell's skin but cannot change its outline, so the
+  //  silhouette stayed a smooth dome however much erosion was stacked on it.
   //
-  //  MATH-GATE SAFETY (see mountain_detail.js's LAW 1). EVERY term above is a
-  //  MULTIPLIER, and the multiplier is clamped so it can never exceed 0.95 —
-  //  exactly the value the old `crag` term took wherever highFace→0. There is
-  //  no additive term anywhere in this field (the talus apron is expressed as
-  //  the carve being filled back in, not as material added). So at any sample
-  //  the old field left at or below ~26u — which is where the gate's 25u
-  //  mountain threshold lives — highFace is ~0 and the new factor is <= 0.95
-  //  <= the old one: the new field is never taller there. The set of cells the
-  //  gate counts as "mountain" can only shrink, never grow.
+  //  WHAT IT IS NOW. The silhouette itself is built mountain-shaped:
+  //    - a CREST LINE of four summits tied by real saddles (cols); the piste
+  //      drops out of the col between the two highest summits;
+  //    - each summit throws 2-4 ARÊTE ARMS, straight ridges whose crest falls
+  //      from the summit on a concave (1-t)^1.5 law (steep first, then a
+  //      shoulder);
+  //    - every crest/arm carries an |x|-type cross-profile: a sharp crest
+  //      (softened over ~4 m) falling off as a DOUBLE EXPONENTIAL, i.e. steep
+  //      under the crest and CONCAVE all the way down, so the massif stands on
+  //      a long shallow apron instead of a convex bell;
+  //    - crests are unioned by a polynomial smooth-max (k 9 u): each arm keeps
+  //      its crest, and where two faces meet the union leaves a V crease, so
+  //      the big gullies between the arêtes fall out of the geometry;
+  //    - COULOIRS: every face is corrugated by noise indexed by distance ALONG
+  //      its own crest, so the cuts run down the fall line; nil on the crest
+  //      and at the foot, deepest mid-face; narrow deep gullies between broad
+  //      ribs, spacing widening downhill (tributaries merge);
+  //    - the shared erosion kit (world/mountain_detail.js: drainage, damped
+  //      fbm hollows, chipped faces, cirques, talus) weathers
+  //      that shape as TEXTURE, no longer as the only source of relief.
+  //  The multiplier-only rule is dropped (no ritual gates). Gameplay is carved
+  //  in after the geology, explicitly: the lift gets a cleared corridor under
+  //  its cable, the piste keeps its authored graded trail, and its flanks are
+  //  slope-limited so no wall can rise beside it.
   const S_RIDGE = 0x4d31, S_ERODE = 0x4d32, S_RIVER = 0x4d33;
   const S_STRATA = 0x4d34, S_TALUS = 0x4d35, S_FINE = 0x4d36, S_SNOW = 0x4d37;
   const S_GRIDGE = 0x6e41, S_GERODE = 0x6e42, S_GRIVER = 0x6e43;
@@ -304,142 +304,189 @@
   const HAS_KIT = !!(CBZ.mtnErode && CBZ.mtnRidgeMF && CBZ.mtnDrainage &&
                      CBZ.mtnTerrace && CBZ.mtnCirque && CBZ.mtnTalus && CBZ.mtnHiGate);
   const EROSION_V4 = function () { return HAS_KIT && CFGS.MOUNT_EROSION_V4 !== false; };
-  // the five authored summits, reused for cirque placement and for the
-  // adaptive mesh's density profile (authored frame)
-  const MERCY_PEAKS = [
-    { x: 315, z: -1720, r0: 26, r1: 172, w: 1.00 },
-    { x: 115, z: -1690, r0: 22, r1: 142, w: 0.86 },
-    { x: 545, z: -1705, r0: 26, r1: 162, w: 0.94 },
-    { x: 700, z: -1645, r0: 20, r1: 130, w: 0.78 },
-    { x: 410, z: -1570, r0: 28, r1: 178, w: 0.70 },
-  ];
-  /* THE GRAIN OF THE RANGE. A mountain range is built by a force acting
-     along a LINE, and its crests and valleys run parallel to that line. Both
-     noise fields below were isotropic, so the flanks between the five
-     authored summits were a field of unrelated humps with no crest connecting
-     them. CBZ.mtnStrikeOf reads the strike off THESE PEAKS' own principal
-     axis — nobody types a bearing, and moving a summit moves the grain with
-     it. `aniso` is how hard the domain is squashed across strike: 1 is the
-     old isotropic field exactly. */
+  // ---- THE MASSIF, AS RIDGES (authored frame) ---------------------------
+  // [ax, az, ha,  bx, bz, hb]: a straight crest whose height falls from the
+  // high end a to the low end b. Summits are the shared `a` ends.
+  //   S1 (118,-1688) 182   west summit
+  //   S0 (315,-1722) 250   Mount Mercy
+  //   S2 (548,-1708) 218   east summit, above the piste
+  //   S3 (705,-1648) 158   far east
+  const MERCY_RIDGES = [
+    // the main crest, west to east, summit -> col on both sides of each col
+    [118, -1688, 182,  212, -1712, 132],
+    [315, -1722, 250,  212, -1712, 132],
+    [315, -1722, 250,  458, -1720, 118],   // the piste-head col
+    [548, -1708, 218,  458, -1720, 118],
+    [548, -1708, 218,  630, -1690, 116],
+    [705, -1648, 158,  630, -1690, 116],
+    // arête arms
+    [118, -1688, 182,  -45, -1712, 36],    // S1 west
+    [118, -1688, 182,   52, -1560, 28],    // S1 south-west
+    [118, -1688, 182,  128, -1836, 66],    // S1 north
+    [315, -1722, 250,  262, -1548, 40],    // S0 south (between lake and lift)
+    [315, -1722, 250,  385, -1640, 96],    // S0 south-east (the lift corridor clips its tail)
+    [315, -1722, 250,  330, -1848, 88],    // S0 north
+    [548, -1708, 218,  575, -1560, 40],    // S2 south
+    [548, -1708, 218,  562, -1850, 84],    // S2 north
+    [705, -1648, 158,  872, -1630, 24],    // S3 east
+    [705, -1648, 158,  680, -1540, 30],    // S3 south-west
+    [705, -1648, 158,  800, -1522, 20],    // S3 south-east
+    [705, -1648, 158,  736, -1838, 62],    // S3 north
+  ].map(function (r) {
+    const dx = r[3] - r[0], dz = r[4] - r[1], len = Math.hypot(dx, dz);
+    return { ax: r[0], az: r[1], ha: r[2], hb: r[5], len: len, ux: dx / len, uz: dz / len };
+  });
+  // summits for the cirques, the strike and the summit guard, read off the
+  // ridge table so the two can never disagree
+  const MERCY_PEAKS = (function () {
+    const seen = {}, out = [];
+    for (let i = 0; i < MERCY_RIDGES.length; i++) {
+      const r = MERCY_RIDGES[i], k = r.ax + ":" + r.az;
+      if (seen[k]) continue;
+      seen[k] = 1;
+      out.push({ x: r.ax, z: r.az, r0: 18 + r.ha * 0.04, r1: 60 + r.ha * 0.45, w: 0.6 + 0.4 * r.ha / 250 });
+    }
+    return out;
+  })();
+  /* THE GRAIN OF THE RANGE: the erosion fbm is squashed across the strike
+     read off these summits' own principal axis (CBZ.mtnStrikeOf), so its
+     hollows run with the crest instead of as isotropic lumps. */
   const MERCY_STRIKE = CBZ.mtnStrikeOf ? CBZ.mtnStrikeOf(MERCY_PEAKS) : 0;
   const MERCY_ANISO = 1.75;
   const _erO = { v: 0, slope: 0, gx: 0, gz: 0 };
   const _drO = { carve: 0, bed: 0, terrace: 0, bank: 0, t: 1 };
   const _tlO = { smooth: 0, fill: 0 };
+  function mNoise(x, z, cell, salt) {
+    return CBZ.mtnNoise ? CBZ.mtnNoise(x, z, cell, salt) : noiseAt(x / cell + salt * 0.013, z / cell - salt * 0.007);
+  }
+  // polynomial smooth-max: max(a,b) plus at most k/4 where they are within k
+  function smax(a, b, k) {
+    const d = a - b, h = k - (d < 0 ? -d : d);
+    return (a > b ? a : b) + (h > 0 ? h * h * 0.25 / k : 0);
+  }
+  // one crest's UNCARVED height at (x,z): crest law x cross-profile. With `o`
+  // it also writes the face coordinates the couloir pass needs (only asked
+  // for the two crests that own the point, so the union loop stays cheap).
+  function mercyRidgeH(r, x, z, o) {
+    const px = x - r.ax, pz = z - r.az;
+    const u = px * r.ux + pz * r.uz;              // along the crest, from the high end
+    const v = -px * r.uz + pz * r.ux;             // across it (signed)
+    const t = u <= 0 ? 0 : (u >= r.len ? 1 : u / r.len);
+    const du = u - t * r.len;
+    const d2 = du * du + v * v;
+    const q = 1 - t, q02 = q > 0 ? Math.pow(q, 0.2) : 0;
+    const hc = r.hb + (r.ha - r.hb) * q * q02;    // (1-t)^1.2
+    const w1 = 12 + 0.32 * hc, w2 = 2.4 * w1;
+    const ds = Math.sqrt(d2 + 16) - 4;            // a ~4 m rounded crest, not a knife
+    if (o) {
+      // THE FALL LINE. On the flank of a DESCENDING arm the water runs down
+      // and outward, not square off the crest: the gradient is (crest descent,
+      // face slope) in (along, across). The coordinate u - |v|*descent/face is
+      // constant along that gradient, so indexing the couloirs by it lays
+      // every cut on the true fall line (a level crest gets square cuts; a
+      // steep arête's flank fans them diagonally, the pyramid-face look).
+      // Indexing by plain `u` cut every arm's flank square across and drew
+      // concentric rings round each summit.
+      const descent = (r.ha - r.hb) * 1.2 * q02 / r.len;
+      const face = hc * (0.72 / w1 + 0.28 / w2);
+      const fall = Math.min(1.5, descent / Math.max(0.2, face));
+      o.along = u - (v < 0 ? -v : v) * fall;
+      o.side = v < 0 ? 0 : 101;                   // each side of the crest its own pattern
+      o.ds = ds; o.rn = ds / (2.3 * w1); o.hc = hc;
+    }
+    return hc * (0.72 * Math.exp(-ds / w1) + 0.28 * Math.exp(-ds / w2));
+  }
+  // COULOIRS: a multiplier for the face of crest i, indexed by the fall-line
+  // coordinate so each cut runs straight down the face; nil on the crest and
+  // at the foot, deepest mid-face; narrow deep gullies between broad rounded
+  // ribs. Low on the face a coarser pattern takes over: the small gullies up
+  // top merge into fewer, bigger ones (tributaries). The noise lattice is
+  // FIXED per face (constant spacing, no rescaling by distance): scaling the
+  // coordinate by distance from the crest turned any offset into rings.
+  const COUL_SP = 28;
+  function mercyCouloir(i, o) {
+    if (!(o.rn < 1) || !(o.hc > 30)) return 1;
+    const env = Math.sin(Math.PI * Math.pow(o.rn, 0.6));
+    const salt = S_RIDGE + 31 + i * 7 + o.side;
+    const aw = o.along + (mNoise(o.along, o.ds, COUL_SP * 3, salt + 3) - 0.5) * COUL_SP * 1.3;
+    const c1 = 2 * mNoise(aw, o.ds * 0.1, COUL_SP, salt) - 1;
+    const c2 = 2 * mNoise(aw, o.ds * 0.1, COUL_SP * 2.3, salt + 5) - 1;
+    let c = (c1 + (c2 - c1) * smooth01(o.rn * 1.5)) * 2.0;
+    c = c < 0 ? -Math.pow(Math.min(1, -c), 1.4) : 0.4 * Math.pow(Math.min(1, c), 0.8);
+    return 1 + 0.5 * env * c;
+  }
+  const _rA = { along: 0, side: 0, ds: 0, rn: 0, hc: 0 }, _rB = { along: 0, side: 0, ds: 0, rn: 0, hc: 0 };
 
   // The EXPENSIVE part: everything that does not depend on build-time state
-  // (no piste, no building pads, no edge feather). Memoised below — the mesh
-  // vertex loop and the registered physics provider both read the memo through
-  // ONE function, so they cannot fork.
+  // (no piste, no lift, no building pads, no edge feather). Memoised below:
+  // the mesh vertex loop and the registered physics provider both read the
+  // memo through ONE function, so they cannot fork.
   function mercyMacroA(x, z) {
-    // Domain-warped ridged lobes form several summits and real saddles.  A
-    // max-composition retains the silhouette of individual peaks; the broad
-    // shoulder underneath makes them one geological mass rather than props.
-    const warpX = (noiseAt(x * 0.0048 + 17, z * 0.0048 - 31) - 0.5) * 58;
-    const warpZ = (noiseAt(x * 0.0041 - 43, z * 0.0041 + 19) - 0.5) * 42;
-    const wx = x + warpX, wz = z + warpZ;
-    const shoulder = gaussian(wx, wz, 365, -1680, 330, 205, 62);
-    // An eighth-power union is visually indistinguishable from the old max
-    // silhouette at distance, but removes the hard mathematical creases where
-    // two lobes meet. That keeps the authored five-peak outline while making
-    // the actual rideable surface read as wind-rounded geology.
-    const p0 = gaussian(wx, wz, 315, -1720, 116, 92, 196);
-    const p1 = gaussian(wx, wz, 115, -1690, 105, 105, 142);
-    const p2 = gaussian(wx, wz, 545, -1705, 126, 98, 174);
-    const p3 = gaussian(wx, wz, 700, -1645, 92, 112, 126);
-    const p4 = gaussian(wx, wz, 410, -1570, 165, 125, 104);
-    const peaks = Math.pow(
-      Math.pow(p0, 8) + Math.pow(p1, 8) + Math.pow(p2, 8) +
-      Math.pow(p3, 8) + Math.pow(p4, 8), 1 / 8
-    );
-    const north = smooth01((-z - 1350) / 285);
-    const mass = shoulder + peaks;
-    const highFace = smooth01((mass - 20) / 105);
-
-    if (!EROSION_V4()) {
-      // ---- LEGACY crag path, byte-identical (one-line revert) ------------
-      const macroRidge = ridgedAt((x + 880) * 0.0062, (z - 420) * 0.0062);
-      const fineRidge = ridgedAt((x - 130) * 0.0175, (z + 760) * 0.0175);
-      const radialPhase = Math.atan2(wz + 1720, wx - 315) * 9 + Math.hypot(wx - 315, wz + 1720) * 0.018;
-      const radial = 0.5 + 0.5 * Math.cos(radialPhase);
-      const crag = mix(0.95, 0.76 + macroRidge * 0.16 + fineRidge * 0.07 + radial * 0.07, highFace);
-      return Math.max(0, mass * crag * north);
+    // the resort valley stays a valley; the north foot runs down into the
+    // trough between this massif and the Greater Mercy Range (and a third of
+    // the rect costs nothing)
+    const fade = smooth01((-z - 1330) / 240) * smooth01((z - A_MINZ - 6) / 120);
+    if (fade <= 0) return 0;
+    // a domain warp so no arm is ruler-straight: arêtes wander and kink
+    const wx = x + (noiseAt(x * 0.0042 + 17, z * 0.0042 - 31) - 0.5) * 46 + (mNoise(x, z, 90, S_RIDGE + 7) - 0.5) * 16;
+    const wz = z + (noiseAt(x * 0.0037 - 43, z * 0.0037 + 19) - 0.5) * 38 + (mNoise(x, z, 90, S_RIDGE + 9) - 0.5) * 14;
+    // union of the crests, remembering the two that own this point: the
+    // couloirs are cut AFTER the union, into the face that is actually on
+    // top (cutting each crest before the union let a neighbour's uncut face
+    // fill every gully back in)
+    let m = 0, hA = -1, hB = -1, iA = 0, iB = 0;
+    for (let i = 0; i < MERCY_RIDGES.length; i++) {
+      const h = mercyRidgeH(MERCY_RIDGES[i], wx, wz, null);
+      m = i ? smax(m, h, 9) : h;
+      if (h > hA) { hB = hA; iB = iA; hA = h; iA = i; }
+      else if (h > hB) { hB = h; iB = i; }
     }
+    // blend the two owners' cuts across the crease so it stays continuous
+    mercyRidgeH(MERCY_RIDGES[iA], wx, wz, _rA);
+    const cA = mercyCouloir(iA, _rA);
+    const wB = hB > 0 ? 0.5 * (1 - smooth01((hA - hB) / 14)) : 0;
+    let cut = cA;
+    if (wB > 0) { mercyRidgeH(MERCY_RIDGES[iB], wx, wz, _rB); cut += (mercyCouloir(iB, _rB) - cA) * wB; }
+    m *= cut * fade;
+    if (!HAS_KIT || m <= 0.01) return Math.max(0, m);
 
-    // 1. sinuous ridgelines — a domain-warped ridged multifractal sharpens the
-    //    crest lines without moving a single authored summit.
-    const ridge = CBZ.mtnRidgeMF(x, z, {
-      oct: 5, cell: 260, lac: 2.07, gain: 0.54, sharp: 1.6,
-      warp: 130, warpCell: 700, salt: S_RIDGE,
-      strike: MERCY_STRIKE, aniso: MERCY_ANISO,
-    });
-    // 2. derivative-damped fbm — er.slope is the bedrock steepness signal the
-    //    talus/terrace/strata terms all key off.
+    const highFace = smooth01((m - 20) / 105);
     const er = CBZ.mtnErode(x, z, {
       oct: 5, cell: 210, lac: 2.03, gain: 0.5, damp: 1.35,
       warp: 90, warpCell: 620, salt: S_ERODE,
-      // the bedrock shares the crest's grain, but more weakly: erosion works
-      // across the strike as well as along it.
       strike: MERCY_STRIKE, aniso: 1 + (MERCY_ANISO - 1) * 0.55,
     }, _erO);
-    // 3. drainage — branching V-valleys, deepest between the crests
     const dr = CBZ.mtnDrainage(x, z, {
       oct: 4, cell: 760, width: 0.34, warp: 190, salt: S_RIVER,
     }, _drO);
-
-    // fine rock-face relief, ~11-27u — the scale the (now 2.2 u/vertex) mesh
-    // resolves and the scale the old field had nothing at. Gated by STEEPNESS:
-    // broken rock on the cliff faces, smooth on the rideable shoulders and the
-    // piste, nothing in the valley. Inside the memo, so it costs nothing extra.
+    // fine rock-face relief, ~11-27u, on steep high ground only
     const chipA = CBZ.mtnNoise(x, z, 27, S_FINE);
     const chipB = CBZ.mtnNoise(x, z, 11, S_FINE + 3);
     const chip = (1 - Math.abs(2 * chipA - 1)) * 0.6 + (1 - Math.abs(2 * chipB - 1)) * 0.4;
     const faceRough = highFace * smooth01((er.slope - 0.08) / 0.32);
-
-    let f = 0.95
-      - 0.30 * highFace * (1 - Math.pow(ridge, 0.60))                      // flanks fall away from the crest
-      - 0.24 * highFace * dr.carve * (1 - 0.42 * dr.bed)                   // valleys, flat-bottomed
-      - 0.09 * highFace * clamp01(-er.v * 2.2)                             // eroded hollows
-      - 0.15 * faceRough * (1 - chip)                                      // chipped rock faces
-      - 0.06 * highFace * (1 - er.slope) * clamp01(0.55 - er.v)            // damped roughness on gentle ground
-      - 0.05 * (1 - highFace) * dr.carve * dr.carve;                       // the valley floor drains too
-    if (f > 0.95) f = 0.95; else if (f < 0.36) f = 0.36;
-    // SUMMIT GUARD — a real peak is the RESISTANT remnant left standing while
-    // everything around it is stripped away; erosion that eats the summit as
-    // hard as the flanks just makes a lower, rounder hill. Holding the five
-    // authored summits at the baseline while the flanks lose up to 60% is what
-    // turns "eroded" into "dramatic".
+    let f = 1
+      - 0.16 * highFace * dr.carve * (1 - 0.42 * dr.bed)       // drainage valleys
+      - 0.07 * highFace * clamp01(-er.v * 2.2)                 // eroded hollows
+      - 0.12 * faceRough * (1 - chip)                          // chipped rock faces
+      - 0.04 * (1 - highFace) * dr.carve * dr.carve;           // the foot drains too
+    // SUMMIT GUARD: the peak is the resistant remnant; erosion eats the flanks
     let guard = 0;
     for (let gi = 0; gi < MERCY_PEAKS.length; gi++) {
       const pk = MERCY_PEAKS[gi];
-      const gd = 1 - smooth01((Math.hypot(x - pk.x, z - pk.z) - 16) / 52);
+      const gd = 1 - smooth01((Math.hypot(wx - pk.x, wz - pk.z) - 14) / 46);
       if (gd > guard) guard = gd;
     }
-    if (guard > 0) f = f + (0.95 - f) * guard;
-    // 4. TALUS — rockfall piles into an apron at the foot of every cliff, so
-    //    the apron is LESS eroded than the face above it: a fuller, smoother
-    //    wedge resting near the angle of repose. Expressed as the carve being
-    //    FILLED BACK IN toward the 0.95 baseline rather than as material being
-    //    added, so it needs no height gate at all — LAW 1 holds unconditionally
-    //    (f can never exceed 0.95, the value the old `crag` took on low ground).
-    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(mass / 240), steep: er.slope, cell: 124, salt: S_TALUS }, _tlO);
-    // mtnHiGate(mass) keeps the apron on ground that is already cliff-height:
-    // it is identically 0 below 45u, so filling the carve back in can never
-    // raise a sample in the 20-26u band above what the old `crag` term gave.
-    f = f + (0.95 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(mass);
-    // 5. cirque headwalls on the shaded (NE) flank of every summit
-    f *= CBZ.mtnCirque(x, z, MERCY_PEAKS, { depth: 0.17, shadeDir: -2.15 });
-
-    let h = Math.max(0, mass * f * north);
-    // 6. STRATA — quantise the steep high faces into warped bedding benches.
-    //    mtnTerrace is <= h by construction, so LAW 1 still holds.
-    h = CBZ.mtnTerrace(h, x, z, {
-      // 0.80 cut every high face into a staircase a kilometre away reads as
-      // a ziggurat; benches are a hint on real rock, not the silhouette
-      amount: 0.42 * highFace * smooth01((er.slope - 0.05) / 0.28),
-      step: 16, dip: 24, dipCell: 560, dipCell2: 155, salt: S_STRATA,
-    });
-    return h;
+    if (guard > 0) f += (1 - f) * guard;
+    // TALUS: rockfall refills the carve at the foot of every cliff
+    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(m / 240), steep: er.slope, cell: 124, salt: S_TALUS }, _tlO);
+    f += (1 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(m);
+    // cirque headwalls on the shaded flank of every summit
+    f *= CBZ.mtnCirque(x, z, MERCY_PEAKS, { depth: 0.12, shadeDir: -2.15 });
+    // No geometric strata benches any more: bedding cut into a pyramid's
+    // faces quantises its CONTOURS, and on these steep faces that read as
+    // concentric rings round every summit (a ziggurat). The skin still paints
+    // the bedding colour bands off the same field (mtnStrataTint).
+    return Math.max(0, m * f);
   }
 
   // Fine rock-face relief, ~9-24u wavelength — the scale a 2.2 u/vertex mesh
@@ -475,6 +522,36 @@
   }
   CBZ.mtnMercyBounds = { minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ };
 
+  // ---- THE PISTE AND THE LIFT, ONE DEFINITION EACH (authored frame) -------
+  // The graded trail: continuous, with broad takeoff/landing knuckles.
+  // Gaussian fronts with a quicker lee-side fall make a lip without a
+  // discontinuity; the snowboard's ground-snap releases at the curvature.
+  const PISTE_Z0 = -1705, PISTE_Z1 = -1275;
+  const PISTE_JUMPS = [
+    { z: -1392, a: 2.8, w: 11 },
+    { z: -1472, a: 4.2, w: 14 },
+    { z: -1553, a: 5.5, w: 16 },
+    { z: -1622, a: 3.7, w: 12 },
+  ];
+  function pisteTrailA(z) {
+    const t = clamp01((-z - 1290) / 400);
+    let trail = 1.4 + 113 * Math.pow(t, 1.28);
+    for (let i = 0; i < PISTE_JUMPS.length; i++) {
+      const j = PISTE_JUMPS[i], dz = (z - j.z) / j.w;
+      trail += j.a * Math.exp(-0.5 * dz * dz) * (dz > 0 ? 0.72 : 1);
+    }
+    return trail;
+  }
+  // The chairlift: base station on the graded lift-base pad, top station on
+  // the piste. baseY/topY are the cable heights over the ground at each
+  // station; `clear` is how far under the cable the lift corridor is cut.
+  // The chairlift builder and the terrain's corridor cut both read this.
+  const LIFT_A = { bx: 300, bz: -1275, tx: 470, tz: -1655, baseY: 12.6, topY: 18.6, clear: 10 };
+  // The hunter's cabin stands on ground level (its building sits at y 0), so
+  // its pad lives at the massif's south-east foot. It used to be (600,-1600),
+  // halfway up the east face, where the pad dug a 100 m deep square shaft.
+  const CABIN_A = { x: 700, z: -1385 };
+
   // AUTHORED-frame field — every constant in the body is stage-1
   // coordinates; the world-facing snowTerrainHeightAt below maps through
   // the dial, so the whole massif translates rigidly with the biome.
@@ -489,25 +566,48 @@
     const polar = Math.pow(noiseAt(x * 0.018 - 8, z * 0.018 + 12), 2) * 1.15 * smooth01((-z - 1180) / 130);
     h += polar;
 
-    // A deliberately graded piste cuts through the mountain shoulder.  Its
-    // height is continuous, includes broad takeoff/landing knuckles, and is
-    // blended into the surrounding geology across a 35m corridor.
-    if (z >= -1705 && z <= -1275) {
-      const t = clamp01((-z - 1290) / 400);
-      let trail = 1.4 + 113 * Math.pow(t, 1.28);
-      const jumps = [
-        { z: -1392, a: 2.8, w: 11 },
-        { z: -1472, a: 4.2, w: 14 },
-        { z: -1553, a: 5.5, w: 16 },
-        { z: -1622, a: 3.7, w: 12 },
-      ];
-      for (let i = 0; i < jumps.length; i++) {
-        const j = jumps[i], dz = (z - j.z) / j.w;
-        // Gaussian front with a quicker lee-side fall produces a lip without
-        // a discontinuity.  Snowboard ground-snap releases at the curvature.
-        trail += j.a * Math.exp(-0.5 * dz * dz) * (dz > 0 ? 0.72 : 1);
+    // THE LIFT CORRIDOR. The cable is a straight span from the base station
+    // (graded flat, ground 0) to the top station on the piste, so any ridge
+    // under that line would swallow it. Within ~40 m of the line the ground
+    // is cut down to LIFT_A.clear below the cable, with the corridor walls
+    // rising away from it: a cleared lift line, the way a real one is cut.
+    {
+      const lx = LIFT_A.tx - LIFT_A.bx, lz = LIFT_A.tz - LIFT_A.bz;
+      const ll = Math.sqrt(lx * lx + lz * lz);
+      const rx = x - LIFT_A.bx, rz = z - LIFT_A.bz;
+      const t = (rx * lx + rz * lz) / (ll * ll);
+      if (t > 0 && t < 1) {
+        const perp = Math.abs(rx * lz - rz * lx) / ll;
+        const w = 1 - smooth01((perp - 12) / 30);
+        if (w > 0) {
+          const cable = LIFT_A.baseY + (pisteTrailA(LIFT_A.tz) + LIFT_A.topY - LIFT_A.baseY) * t;
+          const cap = cable - LIFT_A.clear + perp * 0.35;
+          if (h > cap) h -= (h - cap) * w;
+        }
       }
-      const trailBlend = 1 - smooth01((Math.abs(x - snowRunXAtA(z)) - 11) / 25);
+    }
+
+    // THE PISTE. Its authored graded trail (pisteTrailA) is laid into the
+    // mountain through the col between the two highest summits. Beside it the
+    // ground may neither rise nor fall faster than a fixed slope from the
+    // trail's edge for ~80 m, so no wall can stand beside the run whatever the
+    // massif around it does, then the 11 m trail + 25 m feather blend lays the
+    // groomed surface itself. Both ends fade over 20 m, so the run meets the
+    // col above and the valley below without a step.
+    if (z >= PISTE_Z0 - 20 && z <= PISTE_Z1 + 20) {
+      const trail = pisteTrailA(z);
+      const ends = smooth01((z - (PISTE_Z0 - 20)) / 20) * smooth01((PISTE_Z1 + 20 - z) / 20);
+      const dd = Math.max(0, Math.abs(x - snowRunXAtA(z)) - 11);
+      const hi = trail + 3 + 0.62 * dd;
+      if (h > hi) h -= (h - hi) * (1 - smooth01((dd - 40) / 40)) * ends;
+      // Below the massif's foot the trail runs higher than the valley, and a
+      // steep fill would stand it on a dike. The low side is a BROAD shoulder
+      // instead (0.3 fall, fading out 60-150 m off the edge): the run comes
+      // down the crest of a wide snow spur off the col, the way a real piste
+      // follows a groomed ridge.
+      const lo = trail - 2 - 0.3 * dd;
+      if (h < lo) h += (lo - h) * (1 - smooth01((dd - 60) / 90)) * ends;
+      const trailBlend = (1 - smooth01((dd) / 25)) * ends;
       h = mix(h, trail, trailBlend);
     }
 
@@ -516,7 +616,7 @@
     h *= flatCircleFactor(x, z, 180, -1380, 91, 126);                 // frozen lake
     h *= flatRectFactor(x, z, 360, -1250, 31, 25, 34);               // lodge
     h *= flatRectFactor(x, z, 640, -1230, 122, 92, 46);              // Pinecrest
-    h *= flatRectFactor(x, z, 600, -1600, 18, 15, 24);               // cabin shelf
+    h *= flatRectFactor(x, z, CABIN_A.x, CABIN_A.z, 18, 15, 24);     // hunter's cabin pad
     h *= flatRectFactor(x, z, 300, -1275, 26, 22, 28);               // lift base
     for (let i = 0; i < SNOW_BUILDING_CLEARINGS.length; i++) {
       const c = SNOW_BUILDING_CLEARINGS[i];
@@ -1137,7 +1237,7 @@
       if (HAS_TOWN) layout.reserve("snow:pinecrest", TOWN, { pad: 12 });
       layout.reserveCircle("snow:lake", 180 + DX, -1380 + DZ, 104, { pad: 2 });
       layout.reserve("snow:lodge", { minX: 344 + DX, maxX: 376 + DX, minZ: -1264 + DZ, maxZ: -1236 + DZ }, { pad: 8 });
-      layout.reserve("snow:cabin", { minX: 590 + DX, maxX: 610 + DX, minZ: -1610 + DZ, maxZ: -1590 + DZ }, { pad: 8 });
+      layout.reserve("snow:cabin", { minX: CABIN_A.x - 10 + DX, maxX: CABIN_A.x + 10 + DX, minZ: CABIN_A.z - 10 + DZ, maxZ: CABIN_A.z + 10 + DZ }, { pad: 8 });
       layout.reserve("snow:ski-run", { minX: 448 + DX, maxX: 492 + DX, minZ: -1735 + DZ, maxZ: -1285 + DZ }, { pad: 5 });
       layout.reserve("snow:lift", { minX: 226 + DX, maxX: 484 + DX, minZ: -1734 + DZ, maxZ: -1166 + DZ }, { pad: 5 });
       // north end = the snow shore (rides the dial); south end stays butted
@@ -1271,8 +1371,7 @@
           // across them like the old sin(y*0.19) ripple did.
           const bare = CBZ.mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
             rock: granite, rockDark: graniteDark,
-            // bedding params IDENTICAL to the mtnTerrace call in mercyMacroA,
-            // so the colour bands sit exactly on the geometric risers.
+            // bedding bands as colour only (mercyMacroA cuts no benches now)
             step: 16, dip: 24, dipCell: 560, dipCell2: 155,
             // aspect 0 under the lit skin: sun-facing bleach is the sun's job now
             slope0: 0.05, slope1: 0.30, salt: S_STRATA, aspect: SKIN ? 0 : 1, mixOut: _mixOut,
@@ -1313,13 +1412,18 @@
           // walks, so it is four more reads on the same memo.
           const sHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(mountainHeightAt, wx, wz, 14) : null;
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
-            line: 58, band: 70, aspect: 40, wob: 22, shed0: 0.13, shed1: 0.50, salt: S_SNOW,
-            concave: conc, gully: 34, spine: 0.5, patch: 0.8, patchCell: 95,
+            // Retuned for the arete massif (2026-09-28): its faces are far
+            // steeper than the old dome's, and the old line 58 / shed 0.13-0.50
+            // left it 9% white. Lower line, deeper gully drop, a shed window
+            // that lets a 45-55 degree landform hold some cover: measured on
+            // the field (h > 40) mean cover 0.35 (old dome 0.24), couloirs
+            // 0.73, convex ribs 0.06: white streaks down the gullies, dark rock
+            // on the aretes.
+            line: 34, band: 64, aspect: 40, wob: 22, shed0: 0.24, shed1: 0.70, salt: S_SNOW,
+            concave: conc, gully: 70, spine: 0.5, patch: 0.8, patchCell: 95,
             slopeHold: sHold,
-            // LEDGES: the same bedding field mercyMacroA cut the benches with
-            // and mtnStrataTint painted the bands with, so the white lands on
-            // the tread you can stand on, under its own colour band.
-            ledge: 0.28, bedSalt: S_STRATA, step: 16, dip: 24, dipCell: 560, dipCell2: 155,
+            // no LEDGE snow: mercyMacroA no longer cuts bedding benches, so a
+            // ledge line would be a white contour ring with no tread under it.
           });
           if (SKIN) {
             // the skin paints the snow itself; the vertex just carries the
@@ -2331,13 +2435,13 @@
     })();
 
     // ---- mountain CABIN ---------------------------------------------------
-    // One low hunter's cabin remains tucked into a broad shoulder. The former
+    // One low hunter's cabin at the foot of the east shoulder (CABIN_A). The former
     // frozen outpost and its 12m radio mast were an isolated vertical building
     // carved directly into the hero mountain; remove both the structure and
     // its artificial flat shelf so this face is uninterrupted geology again.
     (function mountainCabin() {
       // ---- a small log cabin tucked near the trees — enterable, one room ----
-      const cx = 600 + DX, cz = -1600 + DZ, cw = 9, cd = 7;
+      const cx = CABIN_A.x + DX, cz = CABIN_A.z + DZ, cw = 9, cd = 7;
       let cb = null;
       if (CBZ.cityMakeBuilding) {
         try {
@@ -2388,13 +2492,13 @@
 
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------
     // WHY: it carries skiers up to the ski run; chairs glide on the cable.
-    const lift = { chairIM: null, baseX: 300 + DX, baseZ: -1275 + DZ, topX: 470 + DX, topZ: -1655 + DZ, towerTopY: 16, chairY: 10, n: 8, t: 0 };
+    const lift = { chairIM: null, baseX: LIFT_A.bx + DX, baseZ: LIFT_A.bz + DZ, topX: LIFT_A.tx + DX, topZ: LIFT_A.tz + DZ, towerTopY: 16, chairY: 10, n: 8, t: 0 };
     (function chairlift() {
       const dx = lift.topX - lift.baseX, dz = lift.topZ - lift.baseZ;
       const span = Math.hypot(dx, dz);
       const ux = dx / span, uz = dz / span;
-      const cableY0 = mountainHeightAt(lift.baseX, lift.baseZ) + 12.6;
-      const cableY1 = mountainHeightAt(lift.topX, lift.topZ) + 18.6;
+      const cableY0 = mountainHeightAt(lift.baseX, lift.baseZ) + LIFT_A.baseY;
+      const cableY1 = mountainHeightAt(lift.topX, lift.topZ) + LIFT_A.topY;
       lift.cableY0 = cableY0; lift.cableY1 = cableY1;
       // Towers start on the same sampled mountain surface used by player
       // physics and reach the cable above it.
@@ -2634,7 +2738,7 @@
         { x: 360 + DX, z: -1232 + DZ, job: "ski instructor" },               // outside the lodge
         { x: 250 + DX, z: -1190 + DZ, job: "lift operator" },                // the chairlift base
         { x: 470 + DX, z: -1320 + DZ, job: "ski patrol" },                   // bottom of the run
-        { x: 590 + DX, z: -1585 + DZ, job: "skier" },                        // up by the cabin
+        { x: CABIN_A.x - 10 + DX, z: CABIN_A.z + 15 + DZ, job: "skier" },       // down by the cabin
         { x: 190 + DX, z: -1430 + DZ, job: "hiker" },                        // by the lake — the one
                                                                              // genuinely off-piste body
       ];

@@ -2912,9 +2912,9 @@
       uLP: { value: new THREE.Vector3() }, uHalfW: { value: 160 },
       uBodySea: { value: new THREE.Color(0.045, 0.085, 0.074) },
       uBodyMud: { value: new THREE.Color(0.072, 0.058, 0.040) },
-      uGlowSea: { value: new THREE.Color(0.07, 0.12, 0.10) },
+      uGlowSea: { value: new THREE.Color(0.045, 0.15, 0.13) },   // green-blue thin water
       uGlowMud: { value: new THREE.Color(0.12, 0.11, 0.07) },
-      uFoamClean: { value: new THREE.Color(0.90, 0.92, 0.92) },
+      uFoamClean: { value: new THREE.Color(0.84, 0.90, 0.90) },  // wet foam, faintly sea-tinted
       uFoamMud: { value: new THREE.Color(0.66, 0.62, 0.55) },
     });
     // the light uniforms are SHARED objects across the face's materials
@@ -2973,7 +2973,10 @@
       "}",
       "float boil( float x, float arcL, float roll ) {",
       "  if ( roll < 0.01 ) return 0.0;",
-      "  vec2 q = vec2( x, arcL - uTime * uRollV ) / uLumpS;",
+      // STRETCHED DOWN THE FLOW (2026-09-28): round isotropic billows lit
+      // Lambert read as boulders; water that is pouring gets combed into
+      // ridges along its own fall line, so the cells are ~2.4x longer in arc
+      "  vec2 q = vec2( x / uLumpS, ( arcL - uTime * uRollV ) / ( uLumpS * 2.4 ) );",
       "  float a = cellB( q, uTime ).x;",
       "  float b = cellB( q * 2.13 + vec2( 5.2 + uTime * 0.25, 1.7 ), uTime * 1.3 ).x;",
       "  return a * 0.68 + b * 0.32;",
@@ -3037,8 +3040,16 @@
       "  float fall = arc - T * uRollV;",
       "  float nA = fbm( vec2( x * 0.045, fall * 0.06 ), fine );",
       "  float nB = fbm( vec2( x * 0.30, fall * 0.34 ), fine );",
-      "  vec3 cA = cellB( vec2( x, fall ) / ( uLumpS * 0.55 ), T * 1.2 );",
-      "  vec3 cB = fine > 0.03 ? cellB( vec2( x, fall * 1.1 ) / ( uLumpS * 0.22 ) + 7.7, T * 1.7 ) : vec3( 0.6, 0.0, 0.0 );",
+      // cells elongated down the fall line (arc), see boil(): flow-combed, not blotches
+      "  vec3 cA = cellB( vec2( x, fall * 0.42 ) / ( uLumpS * 0.55 ), T * 1.2 );",
+      "  vec3 cB = fine > 0.03 ? cellB( vec2( x, fall * 0.38 ) / ( uLumpS * 0.22 ) + 7.7, T * 1.7 ) : vec3( 0.6, 0.0, 0.0 );",
+      /* FLOW STREAKS: fine lines running WITH the water (high frequency
+         across the front, low along the fall, advected by the roll), so the
+         foam reads as sheets of pouring white water tearing into ribbons
+         instead of static clumps of snow on a rock. */
+      "  float stk = fbm( vec2( x * 0.85 + nA * 1.6, fall * 0.055 ), fine );",
+      "  float stk2 = vn( vec2( x * 2.3 - nB * 2.0, fall * 0.14 + 3.1 ) );",
+      "  float streak = smoothstep( 0.30, 0.72, stk * 0.65 + stk2 * 0.35 );",
       // ---- foam coverage (2026-09-27 WATER PASS)
       /* The last pass read as a grey mountain range with snow on it: a matte
          body streaked with vertical gullies (tongues, runs, lace, streaked
@@ -3062,6 +3073,9 @@
          between the boils, most at the ragged margins of each band. */
       "  float hole = 1.0 - smoothstep( 0.20, 0.42, cA.x * 0.55 + nB * 0.45 );",
       "  foam *= 1.0 - hole * mix( 0.8, 0.3, rollF );",
+      // ...and combed into flow streaks everywhere but the very top of the churn
+      "  float core = smoothstep( edge + 0.02, edge + 0.10, up ) * ( 1.0 - sk );",
+      "  foam *= mix( mix( 0.22 + 0.78 * streak, 1.0, core * 0.55 ), 1.0, far );",
       "  foam = clamp( foam * ( 0.85 + 0.30 * uFoam ), 0.0, 1.0 );",
       /* THE WHITE LINE. Far out (or while the face is still low) the churn is
          sub-pixel and what the eye sees is a bright white line on the sea. */
@@ -3112,13 +3126,31 @@
       "  float back = pow( max( dot( -V, uSunDir ), 0.0 ), 3.0 );",
       "  vec3 glow = mix( uGlowSea, uGlowMud, tb ) * ( hemiL * 1.3 + uSunCol * ( 0.35 + 1.4 * back ) );",
       "  bodyLit += glow * band * band * ( 0.75 + 0.5 * r0 ) * 1.1;",
+      /* THE CURL IS THIN WATER, LIT THROUGH (2026-09-28). Under the thrown
+         lip the surface faces DOWN and the water there is a sheet a metre
+         thick: the light comes through it green-blue, not off it grey. The
+         old shading lit that underside with the ground bounce only, so the
+         overhang was a dark ledge under a white cap: a snowy crag. */
+      "  float underC = side * ( 1.0 - sk ) * smoothstep( 0.55, 0.85, up ) * ( 1.0 - smoothstep( -0.55, 0.05, N.y ) );",
+      "  float thinL = max( underC, band * 0.6 );",
+      "  vec3 trans = mix( vec3( 0.035, 0.20, 0.17 ), vec3( 0.10, 0.12, 0.07 ), tb * 0.75 );",
+      "  bodyLit += trans * thinL * ( uSkyCol * 0.9 + uSunCol * ( 0.25 + 1.8 * back ) ) * ( 0.8 + 0.4 * r0 );",
       // ---- the foam: lit boils with dark creases, dirty with sediment
       "  vec3 fc = mix( uFoamClean, uFoamMud, tb * tb * 0.8 + tb * 0.2 );",
       "  fc = mix( fc, uFoamClean, far * 0.6 );",
       "  float ao = mix( 0.80, 1.0, smoothstep( 0.0, 0.75, cA.x ) ) * mix( 0.78, 1.0, smoothstep( 0.2, 0.9, cB.x ) ) * mix( 1.0, mix( 0.82, 1.0, boilV ), roll );",
       "  ao = mix( ao, 1.0, far * 0.75 );",
-      "  vec3 foamLit = fc * ao * ( 0.84 + 0.20 * nA ) * ( hemiL * 1.0 + uSunCol * ( 0.30 + 0.70 * ndlW ) );",
-      "  foamLit += mix( uGlowSea, uGlowMud, tb ) * ( hemiL + uSunCol * 0.3 ) * ( 1.0 - ndlW ) * 1.2;",
+      /* WET FOAM, NOT SNOW (2026-09-28). Aerated water is mostly water: its
+         creases show the green body through instead of going dark grey (a
+         dark crease under a white cap is exactly how rock reads), it is a
+         touch less white than paper, it keeps a sky sheen at grazing angles,
+         and every wet bubble surface catches a sun glint. */
+      "  float fAlb = mix( 0.80, 0.92, streak ) * ( 0.88 + 0.16 * nA );",
+      "  vec3 foamLit = fc * fAlb * ( hemiL * 0.95 + uSunCol * ( 0.30 + 0.62 * ndlW ) );",
+      "  vec3 crease = ( bodyLit * 1.3 + trans * ( uSkyCol * 0.8 + uSunCol * ( 0.2 + back ) ) );",
+      "  foamLit = mix( crease, foamLit, clamp( ao * 1.25 - 0.25, 0.0, 1.0 ) );",
+      "  foamLit = mix( foamLit, skyR, 0.18 * fres );",
+      "  foamLit += uSunCol * ( pow( ndh, 60.0 ) * 0.55 + pow( ndh, 12.0 ) * 0.06 ) * ( 1.0 - far ) * ( 1.0 - 0.4 * tb );",
       // thin foam is aerated water lit through, not paper on top of it
       "  vec3 thinLit = mix( bodyLit * 1.6 + glow * 0.8, foamLit, smoothstep( 0.35, 0.9, foam ) );",
       "  vec3 col = mix( bodyLit, mix( thinLit, foamLit, far ), foam );",

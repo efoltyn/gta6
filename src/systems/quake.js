@@ -323,10 +323,18 @@
   function cover(a) {
     if (!a || !a.pos) return { kind: "open", exposure: 1, anchor: null };
     if (CBZ.CONFIG.QUAKE_COVER === false) return { kind: "open", exposure: 1, anchor: null };
-    if (a._quakeDuck) return { kind: "table", exposure: 0.05, anchor: a._quakeDuck };
+    // a doorframe (the lift's steel frame in a tower too slim for a table)
+    // is the lesser cover: the lintel takes the ceiling, nothing takes the side
+    if (a._quakeDuck) {
+      return a._quakeDuck.kind === "doorframe"
+        ? { kind: "doorframe", exposure: 0.3, anchor: a._quakeDuck }
+        : { kind: "table", exposure: 0.05, anchor: a._quakeDuck };
+    }
     const x = a.pos.x, z = a.pos.z, y = a.pos.y;
     const near = coverNear(x, z, y, 1.5);
-    if (near) return { kind: "beside-table", exposure: 0.5, anchor: near };
+    if (near) return near.kind === "doorframe"
+      ? { kind: "doorframe", exposure: 0.45, anchor: near }
+      : { kind: "beside-table", exposure: 0.5, anchor: near };
     const gap = facadeGap(x, z);
     if (underRoof(x, z, y)) {
       // Indoors. Away from the window wall is the good half of "indoors";
@@ -401,7 +409,8 @@
     // taller than that, so the fold has to be a real fold: hips dropped below
     // the worktop line and the spine nearly horizontal under it. Without the
     // drop the pose reads as somebody kneeling ON the table.
-    if (a.group) a.group.position.y = floorAt(a.pos.x, a.pos.z) - 0.44;
+    // (in a doorframe there is no worktop to get under: crouch, not flatten)
+    if (a.group) a.group.position.y = floorAt(a.pos.x, a.pos.z) - (anchor.kind === "doorframe" ? 0.22 : 0.44);
     return true;
   }
   function standUp(a) {
@@ -1173,7 +1182,7 @@
       // the building's own tables and desks, already standing in its rooms
       const cv = b.interior && b.interior.covers;
       if (cv) for (let k = 0; k < cv.length; k++) {
-        coverAdd(cv[k].x, cv[k].y, cv[k].z, cv[k].r, "table", b);
+        coverAdd(cv[k].x, cv[k].y, cv[k].z, cv[k].r, cv[k].kind || "table", b);
         A.kitTables++;
       }
       // ---- A UTILITY POLE beside roughly a third of buildings -----------

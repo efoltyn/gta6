@@ -36,9 +36,9 @@
    whose subject does not exist on a build says so in the frame instead of
    lying, which is exactly what the before side of `crater` should do.
 
-   FLAG A/B, same checkout: before = cfg_METEOR_V2=0 (the legacy shower,
-   verbatim), after = default. The deployed build is not reachable from the
-   sandbox and is not needed — the flag-off path IS the old behaviour. */
+   A/B: the METEOR_V2 flag and the old shower were deleted 2026-09-28, so the
+   before side is whatever --before ref you pass (a pre-2026-09-28 commit
+   shows the old shower). */
 
 const subjects = [
   { id: "radiant-a", label: "The radiant — frame 1 of 2", pair: "radiant",
@@ -329,8 +329,7 @@ async function stageMeteor(input) {
   // radiant spread: circular dispersion of the live streak headings, in
   // degrees. One shared radiant → a few degrees of scatter; the legacy
   // random-heading streaks → 40-100+. Both builds publish their dirs.
-  const dirs = (M && M.streakDirs && M.streakDirs.length ? M.streakDirs : null) ||
-    (da.meteorLegacyStreakDirs && da.meteorLegacyStreakDirs.length ? da.meteorLegacyStreakDirs : null);
+  const dirs = M && M.streakDirs && M.streakDirs.length ? M.streakDirs : null;
   let spread = null;
   if (dirs && dirs.length >= 2) {
     let sx = 0, sz = 0;
@@ -377,14 +376,12 @@ async function stageMeteor(input) {
 export default {
   id: "meteor-stages",
   title: "The Meteor Event",
-  description: "One seeded survival match per build, the director forced to the meteor shower and stepped through the same simulated seconds. Before (cfg_METEOR_V2=0): streaks on random headings, a brown box dropped from y=40, an instant bang, a painted decal for a crater. After: one radiant every rock shares, visible bolides with smoke trains, an airburst whose flash arrives seconds before its bang, a pressure front that IS the bang, real dug craters and incandescent ejecta. Cameras are solved off the live audit state, so each frame photographs its real subject.",
-  beforeLabel: "BEFORE · METEOR_V2 OFF",
-  afterLabel: "AFTER · METEOR_V2 ON",
+  description: "One seeded survival match per build, the director forced to the meteor shower and stepped through the same simulated seconds. Before (a pre-2026-09-28 ref): streaks on random headings, a brown box dropped from y=40, an instant bang, a painted decal for a crater. After: one radiant every rock shares, visible bolides with smoke trains, an airburst whose flash arrives seconds before its bang, a pressure front that IS the bang, real dug craters and incandescent ejecta. Cameras are solved off the live audit state, so each frame photographs its real subject.",
+  beforeLabel: "BEFORE",
+  afterLabel: "AFTER",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
-  defaultBefore: "local",
-  beforeParams: { cfg_METEOR_V2: 0 },
   stageTimeoutMs: 480000,
   metricsNote: "All counts from CBZ.disasterAudit().meteor (systems/meteor.js's ratchet), measured off live state at the frame. radiantSpreadDeg is the circular dispersion of the live streak headings — a shower has ONE radiant, so lower is more real; the legacy build publishes its streak headings too, so the number is honest on both sides. flashToBangMax is the seconds between a burst's light and its scheduled bang at the listener — the legacy build's is identically 0.",
   metrics: {
