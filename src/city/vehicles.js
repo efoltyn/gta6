@@ -3894,7 +3894,7 @@
     if (CBZ.detonate && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
       CBZ.detonate(x, seatY, z, "carcook", { byPlayer: byPlayer, energy: cookEnergy(car) });
     } else if (CBZ.cityExplosion) {
-      CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: byPlayer });
+      CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: byPlayer, kind: "car" });
     }
     // B7: a wreck the PLAYER caused leaves scrap behind (systems/resources.js's
     // Scrap item) — a real reason to blow cars up beyond the spectacle.

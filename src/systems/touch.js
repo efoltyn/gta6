@@ -225,7 +225,6 @@
     // C4 — bomb body + sparking fuse. The one glyph in the cluster with a
     // spark, because the button is also the DETONATOR (hold): it has to read
     // as "this goes bang", not as another camera or weapon utility.
-    bomb: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="14" r="6.8"/><path d="M15.2 9.1 17.6 6.7"/><path d="M18.6 3.4v1.7M21.9 6.7h-1.7M20.9 4.4l-1.2 1.2"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -265,10 +264,6 @@
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
-      // C4 (city/explosives.js): the same [B] grammar the keyboard owns —
-      // tap plants a charge, hold ~0.5 s detonates everything out. Shown only
-      // while the verb can DO something (bricks carried, or charges planted).
-      btn("tbomb", "tbtn tsm", SVG.bomb, "C4: tap to plant, hold to detonate") +
       // The AIM-UP ghost pad belongs to the legacy slide grammar only: with the
       // latch, nothing is ever held on AIM for it to be a target for.
       (SLIDE ? '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" : "") +
@@ -289,13 +284,6 @@
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
-    // C4 — a HOLD button that speaks the module's own key. explosives.js's [B]
-    // is a tap/hold state machine (tap = plant, held 0.5 s = detonate all) with
-    // its own mode/menu/death/aircraft gates, so the thumb inherits the WHOLE
-    // grammar — including the det-cord clustering and the "receiver only
-    // tracks five" refusal — by holding the logical key down for exactly as
-    // long as the finger is down, never by re-implementing any of it.
-    holdBtn("tbomb", (down) => { if (CBZ.touchKeyHold) CBZ.touchKeyHold("b", down); });
     // AIM (ADS) — the missing iPad right-mouse: it pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
     // gamepad triggers use.
@@ -327,9 +315,6 @@
     // it: a latch you tap between bursts wants to be under the same thumb.
     if (SLIDE || AIMTOG) document.getElementById("tbtns").classList.add("tslide");
     if (FIXED) baseEl.classList.add("tfixed");
-    // C4 starts hidden: most sessions never carry a brick, and a one-frame
-    // flash of a button that then vanishes is worse than never showing it.
-    const bm0 = document.getElementById("tbomb"); if (bm0) bm0.style.display = "none";
   }
 
   // press-and-hold button (jump/fire). It now tracks WHICH fingers are on it
@@ -465,6 +450,8 @@
     // A mounted shark's mouth is its weapon. Consume both press and release so
     // the same iPad FIRE touch can never also punch or discharge a held gun.
     if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(down)) return;
+    // a charge / the detonator / a frag in hand (systems/helditems.js): FIRE is its use
+    if (CBZ.heldItem && CBZ.heldItem.use(down)) return;
     if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
     else if (down) {
       if (CBZ.islandModeOn(CBZ.game.mode)) { if (CBZ.grapple) CBZ.grapple.punch(); }
@@ -1701,24 +1688,6 @@
       if (L.on && L.el.style.display === "none") L.release();
     }
     syncLatches();
-    // C4: the same claim test the keyboard's own [B] keydown runs
-    // (explosives.js) — a brick to plant on foot, or ANY charges out (the
-    // detonator half, which outlives the last brick in the bag). Hidden in an
-    // aircraft because [B] up there is the B-2's bomb bay, exactly as the
-    // keyboard handler yields it; hidden while driving because body.tveh-on
-    // hides this whole cluster and the vehicle layer's DETONATE pill owns the
-    // getaway boom. Red (.tarmed) = charges out: the button is a detonator now.
-    const bm = document.getElementById("tbomb");
-    if (bm) {
-      const P = CBZ.player;
-      const live = CBZ.modeHas ? CBZ.modeHas("blast") : CBZ.game.mode === "city";
-      const bricks = CBZ.cityC4Count ? CBZ.cityC4Count() : 0;
-      const out = CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0;
-      const want = (live && P && !P.dead && !P._aircraft && !P.driving &&
-        (bricks > 0 || out > 0)) ? "" : "none";
-      if (bm.style.display !== want) bm.style.display = want;
-      bm.classList.toggle("tarmed", out > 0);
-    }
     syncTouchFloor();
     syncInteractionDock();
   });
@@ -1802,8 +1771,8 @@
   // your bag was a stat fiction in both the prison and the city. The button
   // synthesizes the module's own key edges (touchKeyHold), so the hooks named
   // here are explosives.js's published handles — present iff the verb is real.
-  CBZ.touchVerb("c4-plant", { ctx: "foot", key: "B tap", hook: "cityC4Plant" });
-  CBZ.touchVerb("c4-detonate", { ctx: "foot/vehicle", key: "B hold", hook: "cityC4Detonate" });
+  CBZ.touchVerb("c4-plant", { ctx: "foot", key: "charge in hand + hold use", hook: "heldItem" });
+  CBZ.touchVerb("c4-detonate", { ctx: "foot", key: "detonator in hand + use", hook: "heldItem" });
   // ELEVATOR CALL — the second one the ledger caught late, and it hid behind
   // the generic "interact" row: city/elevators.js DID route its prompt through
   // the [E] the world tap covers, but the prompt chip itself (#elevChip) was
@@ -1848,7 +1817,7 @@
   CBZ.touchVerbWired("adboard-lease", "#interact zone-adboard");
   CBZ.touchVerbWired("chest-open", "#ci2Chip .tpill");
   CBZ.touchVerbWired("fx-terminal", "#fxPrompt (its own click handler)");
-  CBZ.touchVerbWired("c4-plant", "#tbomb tap");
-  CBZ.touchVerbWired("c4-detonate", "#tbomb hold / #tvBoom");
+  CBZ.touchVerbWired("c4-plant", "hotbar charge cell, then hold #tfire");
+  CBZ.touchVerbWired("c4-detonate", "hotbar detonator cell, then #tfire");
   CBZ.touchVerbWired("cam-zoom", "pinch");
 })();

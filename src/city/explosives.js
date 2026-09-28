@@ -7,32 +7,15 @@
    on a mark's bumper, walking away clean, and sending the whole street
    up when the cops roll past. That's money + spectacle in one key.
 
-   CONTROLS (one key family, [B]):
-     • TAP  [B]  — plant a charge on whatever's in front of you:
-                     a PERSON within reach → rides them out of the room,
-                     a CAR within reach    → sticks to the hull and RIDES it,
-                     a wall ahead          → slaps flat on the facade,
-                     nothing in reach      → THROWN along your look arc (look
-                                             down and it lands at your feet,
-                                             which is the old behaviour).
-     • HOLD [B] ~0.5s — detonate EVERY planted charge (works from a car,
-                     so the drive-away bomb actually plays).
-     • THE PHONE [P] — the real detonator (owner, 2026-08-06: "detonator not
-                     in hand, it should be on your phone — we already have a
-                     phone code and it's good"). city/phone.js's DEMOLITION
-                     card shows pounds out, bricks left, and what the nearest
-                     breachable thing COSTS, with the DETONATE button. The
-                     hold-[B] remote stays as the fast path — and it is the
-                     ONLY one inside the wire, because a man in a prison yard
-                     does not have a phone.
-     • TOUCH — the same grammar, one thumb: systems/touch.js's #tbomb button
-                     (tap = plant, hold = detonate) and the vehicle layer's
-                     DETONATE pill both drive THIS file's own [B] handler by
-                     synthesizing its key edges (touchKeyHold), so the tap/hold
-                     timing, the gates and the refusals here are the single
-                     source of truth on every input. Before 2026-08-16 no touch
-                     control existed at all — a brick on an iPad was a stat
-                     fiction in the prison AND the city.
+   HOW YOU USE IT: it is a HELD OBJECT (systems/helditems.js), not a button.
+     Select the charge on the hotbar (or [B]) and the brick is in your hand.
+     Look at a wall, a door, a car, a person or the ground within reach: a
+     ghost of the brick lies flush on it. HOLD the use input (click / FIRE /
+     the pad trigger) and the hand presses it on. Nothing in reach: a press
+     THROWS it instead (owner: "grabbable and throwable"), and it sticks to
+     whatever it lands on. Once a charge is out the DETONATOR has its own
+     hotbar cell; in your hand, a squeeze of its lever sends every charge.
+     The phone's DEMOLITION card (city/phone.js) keeps its DETONATE too.
 
    THE CHARGE HAS A MASS (systems/breach.js). One brick is 5 lb, which is the
    US Army row for a hole ONE MAN can move through; a charge STUCK to something
@@ -84,7 +67,6 @@
     // it costs to open them.
     lb: 5,
     maxPlanted: 5,      // the remote only tracks five charges
-    holdT: 0.5,         // seconds [B] must be held to send the signal
     carReach: 3.4,      // how close a car must be to take a sticky charge
     wallReach: 2.6,     // forward probe depth for facade plants
     bodyReach: 2.2,     // how close a PERSON must be to take one on the back
@@ -156,15 +138,12 @@
     Object.keys(MAT).forEach((k) => { MAT[k]._shared = true; });
   }
   function buildMesh() {
+    // the real prop (weapons/appearances/c4.js): film-wrapped olive brick,
+    // taped receiver, LED, leads into the cap. Thin axis = local +Y.
+    if (CBZ.buildC4Brick) { try { return CBZ.buildC4Brick(THREE); } catch (e) {} }
     assets();
     const grp = new THREE.Group();
-    const body = new THREE.Mesh(GEO.body, MAT.body);
-    grp.add(body);
-    for (let i = -1; i <= 1; i++) {   // three taped demo sticks across the top
-      const b = new THREE.Mesh(GEO.block, MAT.block);
-      b.position.set(i * 0.1, 0.08, 0);
-      grp.add(b);
-    }
+    grp.add(new THREE.Mesh(GEO.body, MAT.body));
     const led = new THREE.Mesh(GEO.led, MAT.led);
     led.position.set(0.13, 0.07, 0.1);
     grp.add(led);
@@ -195,131 +174,9 @@
   function clearPlanted() { while (planted.length) removeCharge(planted[0]); }
   CBZ.cityClearC4 = clearPlanted;
 
-  // ---- PLANT: car first (the sticky-bomb fantasy), then wall, then ground ----
   function aimFwd() {
     const yaw = (CBZ.cam && CBZ.cam.yaw) || 0;
     return { x: -Math.sin(yaw), z: -Math.cos(yaw) };
-  }
-
-  // forward probe into the building colliders: first AABB the ray enters within
-  // wallReach; the shallowest penetration axis names the face we slapped.
-  function wallProbe(px, py, pz, fx, fz) {
-    const cols = CBZ.colliders || [];
-    for (let t = 0.5; t <= C4.wallReach; t += 0.3) {
-      const x = px + fx * t, z = pz + fz * t;
-      for (let i = 0; i < cols.length; i++) {
-        const c = cols[i];
-        if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
-        if (c.y0 != null && (py < c.y0 || py > c.y1)) continue;
-        const dl = x - c.minX, dr = c.maxX - x, dn = z - c.minZ, df = c.maxZ - z;
-        const m = Math.min(dl, dr, dn, df);
-        let nx = 0, nz = 0, wx = x, wz = z;
-        if (m === dl) { nx = -1; wx = c.minX; }
-        else if (m === dr) { nx = 1; wx = c.maxX; }
-        else if (m === dn) { nz = -1; wz = c.minZ; }
-        else { nz = 1; wz = c.maxZ; }
-        return { x: wx + nx * 0.07, y: py, z: wz + nz * 0.07, nx, nz };
-      }
-    }
-    return null;
-  }
-
-  function tryPlant() {
-    const P = CBZ.player, e = econ();
-    if (!P || !e || P.driving) return;
-    if (count() <= 0) { note("No C4.", 1.6); return; }
-    if (planted.length >= C4.maxPlanted) { note("The receiver only tracks " + C4.maxPlanted + " charges, send what's out there first.", 2); return; }
-    const f = aimFwd();
-    const px = P.pos.x, pz = P.pos.z, py = (P.pos.y || 0) + 1.2;
-    const ch = { mesh: buildMesh(), car: null, body: null, wall: null, fly: null, x: 0, y: 0, z: 0, det: null, blink: rng() };
-
-    // 0) A PERSON in front: it sticks to THEM and they walk away wearing it.
-    //    Owner: "it sticks to… everything, essentially, people included."
-    //    The roster comes from systems/modecaps.js, so this is the prison's
-    //    guards and inmates, Gun Game's bots and the city's pedestrians
-    //    through ONE call — the same switchboard the blast damage uses.
-    if (CBZ.worldActors) {
-      let vic = null, vd = C4.bodyReach;
-      const list = CBZ.worldActors(_actorScratch);
-      for (let i = 0; i < list.length; i++) {
-        const a = list[i];
-        const ap = CBZ.actorPos ? CBZ.actorPos(a) : (a.pos || (a.group && a.group.position));
-        if (!ap || !a.group) continue;
-        const dx = ap.x - px, dz = ap.z - pz, d = Math.hypot(dx, dz);
-        if (d > C4.bodyReach || d >= vd) continue;
-        if (d > 0.01 && ((dx / d) * f.x + (dz / d) * f.z) < 0.35) continue;   // must be AHEAD
-        vd = d; vic = a;
-      }
-      _actorScratch.length = 0;
-      if (vic) {
-        // seat it on the back/side facing you and hand it to their group, so it
-        // rides the walk cycle for free — same trick the car stick already uses
-        const ap = CBZ.actorPos ? CBZ.actorPos(vic) : vic.pos;
-        _n.set(px - ap.x, 0, pz - ap.z);
-        if (_n.lengthSq() < 1e-4) _n.set(-f.x, 0, -f.z);
-        _n.normalize();
-        _v.set(ap.x + _n.x * 0.3, (ap.y || 0) + 1.05, ap.z + _n.z * 0.3);
-        vic.group.updateMatrixWorld(true);
-        vic.group.worldToLocal(_v);
-        ch.mesh.position.copy(_v);
-        ch.mesh.quaternion.setFromUnitVectors(_up, _n.clone());
-        ch.body = vic;
-        vic.group.add(ch.mesh);
-        return finishPlant(ch, "Charge on the mark, walk away.");
-      }
-    }
-
-    // 1) A CAR in front (or right beside you): stick it to the hull — it RIDES.
-    let car = null, bd = C4.carReach;
-    for (const c of (CBZ.cityCars || [])) {
-      if (!c || c.dead || !c.pos || !c.group) continue;
-      const dx = c.pos.x - px, dz = c.pos.z - pz, d = Math.hypot(dx, dz);
-      if (d > C4.carReach) continue;
-      const dot = d > 0.01 ? (dx / d) * f.x + (dz / d) * f.z : 1;
-      if (dot < 0.25 && d > 1.7) continue;   // ahead-ish, unless you're touching it
-      if (d < bd) { bd = d; car = c; }
-    }
-    if (car) {
-      // seat the charge on the hull face nearest you, then hand it to the car's
-      // group so it rides every frame for free (no per-frame tracking of ours)
-      _n.set(px - car.pos.x, 0, pz - car.pos.z);
-      if (_n.lengthSq() < 1e-4) _n.set(f.x, 0, f.z).negate();
-      _n.normalize();
-      _v.set(car.pos.x + _n.x * 1.05, (car.pos.y || 0) + 0.75, car.pos.z + _n.z * 1.05);
-      car.group.updateMatrixWorld(true);
-      car.group.worldToLocal(_v);
-      ch.mesh.position.copy(_v);
-      // world hull normal → car-local so the charge lies flat on the panel
-      const q = car.group.getWorldQuaternion(new THREE.Quaternion()).invert();
-      ch.mesh.quaternion.setFromUnitVectors(_up, _n.applyQuaternion(q).normalize());
-      ch.car = car;
-      car.group.add(ch.mesh);
-    } else {
-      // 2) a WALL ahead: slap it flat on the facade, LED facing the street
-      const w = wallProbe(px, py, pz, f.x, f.z);
-      if (w) {
-        ch.x = w.x; ch.y = w.y; ch.z = w.z;
-        ch.wall = { x: w.nx, y: 0, z: w.nz };
-        ch.mesh.position.set(w.x, w.y, w.z);
-        ch.mesh.quaternion.setFromUnitVectors(_up, _n.set(w.nx, 0, w.nz));
-        if (CBZ.scene) CBZ.scene.add(ch.mesh);
-      } else {
-        // 3) NOTHING IN REACH -> THROW IT. Owner: the charge should be
-        //    "grabbable and throwable". This replaces the old "drop it at your
-        //    feet", and it is a strict superset of that: look down and the arc
-        //    puts the brick on the floor a step ahead exactly as before, look
-        //    across the yard and it goes across the yard. No new button — the
-        //    same tap, resolved by what is actually in front of you.
-        const pitch = (CBZ.cam && CBZ.cam.pitch) || 0;
-        ch.fly = { vx: f.x * C4.throwSpeed, vy: Math.sin(-pitch) * C4.throwSpeed + 2.2,
-                   vz: f.z * C4.throwSpeed, t: 0 };
-        ch.x = px + f.x * 0.6; ch.y = py + 0.25; ch.z = pz + f.z * 0.6;
-        ch.mesh.position.set(ch.x, ch.y, ch.z);
-        if (CBZ.scene) CBZ.scene.add(ch.mesh);
-      }
-    }
-
-    return finishPlant(ch, null);
   }
 
   // shared tail for every plant/throw path: pay for the charge, register it,
@@ -334,13 +191,48 @@
     // kneeling on a bumper wiring a bomb is NOT subtle — witnesses report it
     const wp = chargeWorldPos(ch, _v);
     if (CBZ.cityCrime && g.mode === "city") CBZ.cityCrime(50, { x: wp.x, z: wp.z, type: "planting-explosives" });
-    const line = msg || (ch.car ? "Charge stuck to the car (" + planted.length + " out)."
-      : ch.fly ? "Charge away (" + planted.length + " out)."
-      : "Charge set (" + planted.length + " out).");
-    if (g.mode === "city" && CBZ.city) CBZ.city.note(line, 1.6);
-    else if (CBZ.jailTell) CBZ.jailTell.hint(line, 1.6);
-    else if (CBZ.flashHint) CBZ.flashHint(line, 1.6);
+    // no caption: the brick on the wall with its LED blinking IS the feedback
+    if (CBZ.sfx) { try { CBZ.sfx("switch", { volume: 0.5, pitch: 0.7 }); } catch (err) {} }
   }
+
+  // ---- PLANT AT A SURFACE: the held-charge path (systems/helditems.js). ----
+  // `pl` is systems/helditem_model.js placement(): { stick, kind, ref, normal,
+  // pos } for the surface you are LOOKING at. The brick is laid flush (its
+  // thin +Y axis along the normal) and, on a car or a person, handed to that
+  // object's group so it rides it. Returns true when a charge went on.
+  const _q = new THREE.Quaternion(), _nn = new THREE.Vector3();
+  function plantAt(pl) {
+    const P = CBZ.player, e = econ();
+    if (!pl || !P || !e || !c4Live()) return false;
+    if (count() <= 0 || planted.length >= C4.maxPlanted) return false;
+    const ch = { mesh: buildMesh(), car: null, body: null, wall: null, fly: null, x: 0, y: 0, z: 0, det: null, blink: rng() };
+    _nn.set(pl.normal.x, pl.normal.y, pl.normal.z).normalize();
+    _v.set(pl.pos.x, pl.pos.y, pl.pos.z);
+    // a random turn about the normal so two bricks never look stamped
+    _q.setFromAxisAngle(_nn, rng() * 6.2832);
+    ch.mesh.quaternion.setFromUnitVectors(_up, _nn).premultiply(_q);
+    const host = ((pl.stick === "car" || pl.stick === "body") && pl.ref && pl.ref.group) ? pl.ref : null;
+    if (host) {
+      host.group.updateMatrixWorld(true);
+      host.group.worldToLocal(_v);
+      ch.mesh.position.copy(_v);
+      host.group.getWorldQuaternion(_q).invert();
+      ch.mesh.quaternion.premultiply(_q);
+      host.group.add(ch.mesh);
+      if (pl.stick === "car") ch.car = host; else ch.body = host;
+    } else {
+      ch.x = _v.x; ch.y = _v.y; ch.z = _v.z;
+      ch.mesh.position.copy(_v);
+      // a wall or a door is a CONTACT charge (breach.js opens what it is stuck
+      // to); a brick on the floor is not
+      if (pl.stick === "wall") ch.wall = { x: _nn.x, y: _nn.y, z: _nn.z };
+      if (CBZ.scene) CBZ.scene.add(ch.mesh);
+    }
+    finishPlant(ch, null);
+    return planted.indexOf(ch) >= 0;
+  }
+  CBZ.cityC4PlantAt = plantAt;
+  CBZ.cityC4MaxPlanted = function () { return C4.maxPlanted; };
 
   // ---- THROW: the same brick, given to gravity. It arms on first contact and
   // becomes an ordinary stuck charge — so a charge you cannot reach (across a
@@ -350,16 +242,18 @@
   // distinction between a satchel charge and a bomb lying on the floor.
   function tryThrow() {
     const P = CBZ.player, e = econ();
-    if (!P || !e || !c4Live()) return;
-    if (count() <= 0 || planted.length >= C4.maxPlanted) return;
+    if (!P || !e || !c4Live()) return false;
+    if (count() <= 0 || planted.length >= C4.maxPlanted) return false;
     const f = aimFwd();
-    const pitch = (CBZ.cam && CBZ.cam.pitch) || 0;
+    // DOWN-positive pitch: cam.pitch in third person, -fps.fp in first
+    const pitch = (CBZ.fps && CBZ.fps.active) ? -(CBZ.fps.fp || 0) : ((CBZ.cam && CBZ.cam.pitch) || 0);
     const ch = { mesh: buildMesh(), car: null, body: null, wall: null, x: 0, y: 0, z: 0, det: null, blink: rng(),
                  fly: { vx: f.x * C4.throwSpeed, vy: Math.sin(-pitch) * C4.throwSpeed + 2.2, vz: f.z * C4.throwSpeed, t: 0 } };
     ch.x = P.pos.x + f.x * 0.6; ch.y = (P.pos.y || 0) + 1.45; ch.z = P.pos.z + f.z * 0.6;
     ch.mesh.position.set(ch.x, ch.y, ch.z);
     if (CBZ.scene) CBZ.scene.add(ch.mesh);
     finishPlant(ch, null);
+    return planted.indexOf(ch) >= 0;
   }
   CBZ.cityC4Throw = tryThrow;
 
@@ -476,7 +370,7 @@
     if (CBZ.contactBreach) {
       const res = CBZ.contactBreach(p.x, p.y, p.z, {
         lb: ch.lb || C4.lb, contact: stuck, byPlayer: true,
-        normal: ch.wall || null, cause: "explosion",
+        normal: ch.wall || null, cause: "explosion", kind: "c4", dir: ch.wall || null,
       });
       if (res && res.kind === "undercharged") {
         note("The door held, that needs " + (res.needLb || 0) + " lb on it.", 2);
@@ -519,9 +413,10 @@
       CBZ.detonate(p.x, p.y, p.z, "c4", {
         by: by, byPlayer: true,
         dirx: ch.wall ? -ch.wall.x : 0, dirz: ch.wall ? -ch.wall.z : 0,
+        normal: ch.wall || null,          // the look throws OUT of the wall (crashfx)
       });
     } else if (CBZ.cityExplosion) {
-      const o = { power: C4.power, radius: C4.radius, byPlayer: true };
+      const o = { power: C4.power, radius: C4.radius, byPlayer: true, kind: "c4", normal: ch.wall || null };
       if (p.y > 3) o.y = p.y;                 // a charge up a wall blooms THERE
       CBZ.cityExplosion(p.x, p.z, o);
     }
@@ -534,52 +429,32 @@
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: p.x, z: p.z, panic: 12, damage: 6 }, { silent: true, noWanted: true });
   }
 
-  // ---- [B]: tap = plant, hold ~0.5s = detonate all. CAPTURE phase so the
-  // bomb key wins over any bubble listeners while you're actually carrying;
-  // when you have neither charges nor plants, [B] falls through untouched. ----
-  let holding = false, armT = 0, stashHinted = false;
+  // ---- [B] = TAKE THE CHARGE IN HAND. There is no plant/detonate key any
+  // more: the brick and the detonator are held objects (systems/helditems.js)
+  // and the ONE use input does what the thing in your hand does. [B] is only
+  // the shortcut that puts the brick (or, with none left, the detonator) in
+  // your hand; pressed again it swaps brick <-> detonator. Flying the bomber,
+  // [B] stays the bomb bay (city/strategic.js).
   addEventListener("keydown", function (e) {
-    if (e.repeat || holding) return;
+    if (e.repeat) return;
     if ((e.key || "").toLowerCase() !== "b") return;
-    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;   // Shift+B: wealth.js in city, the stash's fallback in escape
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
     if (!c4Live() || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || CBZ.invOpen || !CBZ.player || CBZ.player.dead) return;
-    // FLYING THE BOMBER OWNS [B]. city/strategic.js's B-2 uses tap=release /
-    // hold=carpet run on this same key; a charge in your pocket must not eat
-    // the bomb-bay key while you are 200 m up (this capture handler would
-    // stopImmediatePropagation it and the drop would silently never happen).
     if (CBZ.player._aircraft) return;
-    // only claim the key when it can DO something: plant (on foot, carrying)
-    // or detonate (charges out — allowed from the driver's seat: the getaway boom)
-    const canPlant = !CBZ.player.driving && count() > 0;
-    if (!canPlant && !planted.length) return;
+    if (!(count() > 0 || planted.length)) return;
+    const H = CBZ.heldItem;
+    if (!H) return;
     e.preventDefault();
     if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    // IN THE PEN, [B] IS ALSO THE STASH KEY (systems/inventory.js). While you
-    // carry charges this capture handler wins, which is correct — a man with
-    // a bomb in his hand is not browsing his bag — but say ONCE where the bag
-    // went: Shift+B reaches inventory.js untouched (wealth.js's chord is
-    // city-gated), so nothing is lost, only moved while the charges last.
-    // …but never on touch: a touchscreen is NEVER shown a keyboard key, and
-    // there is no conflict to explain there — the bomb has its own button and
-    // the stash keeps its own tap.
-    if (g.mode === "escape" && !stashHinted && !CBZ.touchMode) {
-      stashHinted = true;
-      note("[B] is the bomb while you carry charges, the stash answers Shift+B.", 2.6);
-    }
-    holding = true; armT = 0;
-  }, true);
-  addEventListener("keyup", function (e) {
-    if ((e.key || "").toLowerCase() !== "b") return;
-    if (!holding) return;
-    holding = false;
-    if (armT < C4.holdT) tryPlant();   // short press = plant; the hold already detonated
+    const cur = H.current();
+    H.select(cur === "c4" && planted.length ? "detonator" : (count() > 0 ? "c4" : "detonator"));
   }, true);
 
   // headless / phone / harness handles
   CBZ.cityC4Count = count;
   CBZ.cityC4Planted = function () { return planted.length; };
-  CBZ.cityC4Plant = tryPlant;
+
   CBZ.cityC4Detonate = detonateAll;
 
   // ---- per-frame: hold-to-detonate timer, LED blink, ripple countdown, and
@@ -587,14 +462,10 @@
   let _lastElapsed = 0, _blink = 0;
   CBZ.onAlways(53.7, function (dt) {
     const el = g.elapsed || 0;
-    if (el + 0.001 < _lastElapsed) { clearPlanted(); holding = false; g.cityC4 = count(); }
+    if (el + 0.001 < _lastElapsed) { clearPlanted(); g.cityC4 = count(); }
     _lastElapsed = el;
     ensureItem();   // economy may (re)build after us — keep the catalog stocked
-    if (!c4Live()) { if (planted.length) clearPlanted(); holding = false; return; }
-    if (holding) {
-      armT += dt;
-      if (armT >= C4.holdT) { holding = false; detonateAll(); }
-    }
+    if (!c4Live()) { if (planted.length) clearPlanted(); return; }
     if (!planted.length) return;
     // blink every LED in lockstep (armed charges strobe fast — last warning)
     _blink += dt;

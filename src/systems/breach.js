@@ -332,7 +332,7 @@
     if (boom) {
       try {
         boom(x, z, { power: spec.power, radius: spec.radius, byPlayer: !!opts.byPlayer,
-                     y: y, cause: opts.cause || "explosion" });
+                     y: y, cause: opts.cause || "explosion", kind: opts.kind || "c4", normal: opts.normal || null, dir: opts.dir || null });
       } catch (e) {}
     }
 

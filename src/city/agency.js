@@ -834,7 +834,7 @@
     const x = car.pos.x, z = car.pos.z;
     if (victim && !victim.dead) victim.killedBy = { name: "A car fire", isPlayer: false };
     RT.killWatch = { t: now() + 1200, blast: true };
-    try { if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.5, radius: 6, byPlayer: false }); } catch (e) {}
+    try { if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.5, radius: 6, byPlayer: false, kind: "car" }); } catch (e) {}
     try { if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, 9999); } catch (e) {}
     try { if (CBZ.cityCarIgnite) CBZ.cityCarIgnite(car); } catch (e) {}
     car.dead = true;

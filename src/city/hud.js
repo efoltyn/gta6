@@ -765,7 +765,11 @@
             // A grenade / a brick of C4: its drawn object + how many you carry.
             const iname = e.item || e.label;
             const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            html += "<div class='cSlot item' data-bi='" + bi + "'>" + hotbarItemFace(iname, ITEMS[iname]) + cnt + "</div>";
+            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "'>" + hotbarItemFace(iname, ITEMS[iname]) + cnt + "</div>";
+          } else if (e.kind === "detonator") {
+            // the firing device itself, lit while it is the thing in your hand
+            html += "<div class='cSlot item detonator" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              (CBZ.detonatorFaceHtml ? CBZ.detonatorFaceHtml() : "") + "</div>";
           } else if (e.kind === "flashlight") {
             // The torch itself, lit like a held gun while it is on.
             html += "<div class='cSlot flashlight" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
@@ -845,7 +849,7 @@
     for (let i = 0; i < bar.length; i++) {
       const e = bar[i];
       s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
-      if (e.kind === "throwable") s += "#" + (e.count | 0);
+      if (e.kind === "throwable" || e.kind === "detonator") s += "#" + (e.count | 0);
       // the phone chip's LED and buzz are state the bar must repaint on
       if (e.kind === "phone") s += (e.unread ? "u" : "") + (e.buzz ? "z" : "");
       if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {

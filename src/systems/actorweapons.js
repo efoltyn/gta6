@@ -332,6 +332,9 @@
     function stockZ(prop) {
       const ud = prop.userData;
       if (ud._stockZ != null) return ud._stockZ;
+      // a launcher whose tube runs on past the shoulder (the RPG-7's venturi
+      // sits half a metre behind the man) names its own shoulder point
+      if (ud.shoulderZ != null) return (ud._stockZ = ud.shoulderZ / (prop.scale.x || 1));
       prop.updateWorldMatrix(true, true);
       _bbInv.copy(prop.matrixWorld).invert();
       let maxZ = 0;

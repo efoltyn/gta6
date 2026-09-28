@@ -398,13 +398,40 @@
   // burn to different blacks or the whole street ends up the same charcoal
   // prop. Matches city/playeraircraft.js's charAircraftWreck, which already
   // does exactly this to a downed airframe (0.22 colour / 0.08 emissive).
+  // WHAT A BURNT CAR IS (2026-09-28): not the paint at 20% (a red taxi read
+  // as a dark red taxi, still glossy). The paint burns off: what is left is
+  // soot-black sheet steel going to rust-brown where the heat was worst, with
+  // only a trace of the original colour in the black. Matte, no gloss, no
+  // glow. The per-source-material hash picks soot or rust, so a street of
+  // wrecks is mottled instead of one charcoal prop.
+  const SOOT = { r: 0.085, g: 0.078, b: 0.072 }, RUST = { r: 0.21, g: 0.11, b: 0.06 };
+  function burnHash(m) {
+    const s = (m && m.uuid) || "";
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return ((h >>> 0) % 1000) / 1000;
+  }
+  let _rimMat = null;
+  function burntRimMat() {
+    if (!_rimMat) { _rimMat = new THREE.MeshLambertMaterial({ color: 0x3b332d }); _rimMat._shared = true; _rimMat._carCharred = true; }
+    return _rimMat;
+  }
   function charMat(src) {
     let out = charMats.get(src);
     if (out) return out;
     out = src && src.clone ? src.clone() : src;
     if (out && out !== src) {
-      if (out.color && out.color.multiplyScalar) out.color.multiplyScalar(0.2);
-      if (out.emissive && out.emissive.multiplyScalar) out.emissive.multiplyScalar(0.06);
+      if (out.color && out.color.setRGB) {
+        const k = burnHash(src), base = k < 0.35 ? RUST : SOOT, tr = 0.08;
+        out.color.setRGB(base.r + out.color.r * tr, base.g + out.color.g * tr, base.b + out.color.b * tr);
+      }
+      if (out.emissive && out.emissive.setRGB) out.emissive.setRGB(0, 0, 0);
+      if (out.specular && out.specular.setRGB) out.specular.setRGB(0.02, 0.02, 0.02);
+      if (out.shininess != null) out.shininess = 2;
+      if (out.roughness != null) out.roughness = 1;
+      if (out.metalness != null) out.metalness = Math.min(out.metalness, 0.2);
+      if (out.clearcoat != null) out.clearcoat = 0;
+      if (out.envMap) out.envMap = null;
       if (out.map) out.map = null;             // soot covers the livery
       out.transparent = false; out.opacity = 1;
       out.needsUpdate = true;
@@ -445,12 +472,18 @@
       const cm = charMat(m);
       if (cm && cm !== m) { cm._carCharred = true; o.material = cm; }
     });
-    // (2) crazed glass + dead lamps (their swaps run BEFORE the char above
-    //     would have caught them; both caches are keyed on the source mat, so
-    //     a car that had already frosted keeps its frost rather than going
-    //     black-glass — which is the honest read: soot on cracked safety glass)
-    frostGlass(e);
+    // (2) THE GLASS IS GONE. A car fire takes every window out (safety glass
+    //     crazes, sags in the heat and falls into the cabin), so a burnt shell
+    //     has open frames you can see the charred seats through, not frosted
+    //     or blackened panes. Lamps die.
+    if (e.glass) for (let i = 0; i < e.glass.length; i++) { const gm = e.glass[i].mesh; if (gm) gm.visible = false; }
     killHeadlights(e);
+    // (2b) the tyres burnt off: every wheel is bare dull steel now (vehicles.js
+    //      applyFlatVisual already drops it onto the rim)
+    root.traverse(function (o) {
+      if (!o.userData || !o.userData.playerWheel) return;
+      o.traverse(function (w) { if (w.material && !Array.isArray(w.material)) w.material = burntRimMat(); });
+    });
     // (3) the hood is somewhere else now. spawnHood is idempotent per entry
     //     and detachHood hands it to crashfx's debris pool, so it tumbles off
     //     the way any other piece of wreckage does.

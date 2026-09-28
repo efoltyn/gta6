@@ -23,6 +23,9 @@
     const group = CBZ.buildFlashlight ? CBZ.buildFlashlight() : new THREE.Group();
     group.position.set(0.01, -0.025, 0.025);
     group.rotation.x = Math.PI / 2;
+    // the model is life-size now (weapons/flashlight.js); the rig socket draws
+    // at ~0.7x, so undo that or a guard carries a pen light
+    group.scale.setScalar(1 / 0.70);
     const lens = group.userData.lens || null;
     const lensMat = group.userData.lensMat || (lens && lens.material) || CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
     group.visible = false;
