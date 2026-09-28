@@ -178,6 +178,7 @@
   function despawnOwner(co) {
     const owner = co && co.owner; if (!owner) return;
     co.owner = null;
+    if (owner.dead && !owner.collected) return;   // a corpse belongs to the world
     if (CBZ.cityUnpostNpc) { CBZ.cityUnpostNpc(owner); return; }   // the matching half of post()
     const i = CBZ.cityPeds ? CBZ.cityPeds.indexOf(owner) : -1;
     if (i >= 0) CBZ.cityPeds.splice(i, 1);

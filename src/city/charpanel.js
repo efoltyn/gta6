@@ -221,7 +221,6 @@
     if (B) {
       if (kind === "vest") gm = B(1.02, 0.86, 0.62);
       else if (kind === "vestHi") gm = B(1.04, 0.30, 0.64);
-      else if (kind === "helmet") gm = B(0.70, 0.46, 0.70);
     }
     AG[kind] = gm;
     return gm;
@@ -258,6 +257,7 @@
       for (let i = 0; i < rig._cpArmor.length; i++) { const m = rig._cpArmor[i]; if (m && m.parent) m.parent.remove(m); }
       rig._cpArmor = null;
     }
+    if (CBZ.headwear) CBZ.headwear.wear(rig, null, { owner: "armor" });
     const P = CBZ.player, k = P && P._armorKit, KITS = CBZ.ARMOR_KITS;
     if (!k || !KITS) return;                        // no kit worn — fabric only
     const out = [];
@@ -272,7 +272,9 @@
       if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, 1.58, fit ? fit.bandZ : 0.02, out, fit && fit.band);   // raised plate band (SWAT/plate reads heavier)
     }
     const head = k.head && KITS[k.head];
-    if (head) mountArmorMesh("helmet", rig.neck, head.color, 0, 0.40, 0, out);
+    // the helmet is the same fitted ballistic lid armor.js puts on the live
+    // body (entities/headwear.js, "armor" owner over the role cap)
+    if (head && CBZ.headwear) CBZ.headwear.wear(rig, "ballistic", { owner: "armor", variant: "swat", color: head.color });
     if (out.length) rig._cpArmor = out;
   }
 
@@ -408,8 +410,8 @@
   //  calls — it routes composites → cityApplyComposite, painted catalog fits
   //  (tux/cop) → cityApplyClothes, flat fits → flat tint, AND mounts/clears
   //  the gang bandana. We then replay applyPlayer's player-only kit (hide jail
-  //  stripes, paint the belt, show the cop cap/badge, hide the hair under a
-  //  cap) so a uniform/tux portrait reads identically to the in-world body.
+  //  stripes, paint the belt, show the badge; the role hat comes from
+  //  recolorRig itself) so a uniform/tux portrait reads identically to the in-world body.
   //  No parallel wardrobe — we call the engine's own dress functions.
   // ============================================================
   function portraitHasStructuredCollar(w) {
@@ -474,8 +476,8 @@
     setP(s.belt, beltHex, true);
     setP(s.collar, null, structuredCollar);
     setP(s.badge, null, cop);              // the badge rides the uniform
-    setP(s.cap, null, cop);
-    setP(s.hair, null, !cop);
+    // (the role hat was already put on by cityRecolorRig -> outfits.js roleHat,
+    // the same headwear.js call the live body gets; the hair stays under it)
   }
 
   // ============================================================

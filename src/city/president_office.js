@@ -1702,7 +1702,7 @@
     const s = S();
     return offer({
       id: "p:tax:" + day(), via: "phone", topic: "taxup", who: whoOf("treasury"), expires: 150,
-      line: "Sir, the treasury is down to " + money(s.treasury) + ". Every order you give draws on it. I need a tax rise.",
+      line: "Sir, the treasury is down to " + money(s.treasury) + ". I need a tax rise.",
       yes: { label: "Raise them.", order: "taxup", reply: "Thank you. It won't be popular." },
       no: { label: "Find it somewhere else.", reply: "There is nowhere else, sir. But understood." },
       ifIgnored: function () { news("Treasury warns the state is running dry", { cat: "ECONOMY" }); },

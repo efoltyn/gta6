@@ -756,7 +756,7 @@
     if (approved && CBZ.rankCan && CBZ.rankCan(p, ORG, "settle")) {
       return {
         label: "Sign for " + money(approved.amount),
-        run: function () { say(p, "“Sign here. Sorry for the trouble.”"); payClaim(approved); },
+        run: function () { say(p, "Sign here. Sorry for the trouble."); payClaim(approved); },
       };
     }
     const denied = myClaim("denied");
@@ -765,8 +765,8 @@
         label: "Ask about the disputed claim",
         run: function () {
           say(p, officeCan("deny")
-            ? "“The regional director signed that refusal himself. Top floor. Nothing I can do.”"
-            : "“That desk is empty. Come back, it may go through.”");
+            ? "The director signed that one himself. Sorry."
+            : "Nobody's at that desk right now.");
           note(denied.addr + " — " + money(denied.amount) + " disputed by " + branch.name + ".", 3.2);
         },
       };
@@ -798,8 +798,8 @@
       run: function () {
         if (CBZ.cityMeet) { try { CBZ.cityMeet(p); } catch (e) {} }
         const r = reserve();
-        say(p, r > 0 ? "“We are good for about " + money(r) + " if the roof comes in.”"
-                     : "“Reserve is empty. We could not pay out a window right now.”");
+        say(p, r > 0 ? "We're good for about " + money(r) + ". Knock wood."
+                     : "Honestly? We couldn't pay out a window.");
       },
     };
   };

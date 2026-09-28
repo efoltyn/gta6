@@ -515,19 +515,19 @@
     // uniformed officers — plain navy torso color (reads as precinct blue).
     qNPC("KOWALCZYK", { role: "sergeant", name: "Sgt. Kowalczyk", outfit: N, skin: 0xdca87e,
       at: POSTS.KOWALCZYK.slice(0, 2), face: POSTS.KOWALCZYK[2], post: "pinned", pose: "stand",
-      dialogue: ["Visiting hours. Bench is there. Sit or don't.", "Bail window's the glass. Cage is police only."], sayColor: "#dfe7ff" });
+      dialogue: ["Visiting hours. Sit or don't.", "Name? Take a number.", "Third double this week. Don't test me."], sayColor: "#dfe7ff" });
     qNPC("BRISCO", { role: "officer", name: "Ofc. Brisco", outfit: N, skin: 0x9a6a48,
       at: POSTS.BRISCO.slice(0, 2), face: POSTS.BRISCO[2], post: "pinned", pose: "stand",
-      dialogue: ["Move it along, friend.", "That your face on the board?"] });
+      dialogue: ["Move it along, friend.", "That your face on the board?", "Coffee machine ate my dollar again."] });
     qNPC("DASILVA", { role: "clerk", name: "Clerk da Silva", outfit: 0x5a6478, skin: 0xd8a882,
       at: POSTS.DASILVA.slice(0, 2), face: POSTS.DASILVA[2], post: "pinned", pose: "stand",
-      dialogue: ["Bail's posted at the window. Cash only.", "No hoods at my window, sir."] });
+      dialogue: ["Cash only.", "No hoods at my window, sir.", "Next."] });
     qNPC("PYE", { role: "clerk", name: "Ofc. Pye", outfit: N, skin: 0xe8c098,
       at: POSTS.CAGE.slice(0, 2), face: POSTS.CAGE[2], post: "pinned", pose: "stand",
-      dialogue: ["Sign-out needs a case number and a badge, pal.", "Escort detail? Sure, sign here."] });
+      dialogue: ["Rookie on the cage. Lucky me.", "Pal, I just work here.", "Six months in. Still get lost down here."] });
     qNPC("MERCER", { role: "sergeant", name: "Sgt. Mercer", outfit: N, skin: 0xba8a66,
       at: POSTS.MERCER_DESK.slice(0, 2), face: POSTS.MERCER_DESK[2], post: "pinned", pose: "sit",
-      dialogue: ["Twenty-two years. I know a real star from a laminate.", "Escort badge? Walk away, son."] });
+      dialogue: ["Twenty-two years. I know a real star from a laminate.", "Son, I've seen every trick twice.", "Eighteen months to my pension."] });
     // detectives — plain brown/grey (plainclothes, still kind:"staff", not cops).
     qNPC("REYES", { role: "detective", name: "Det. Reyes", outfit: 0x6a5a48, skin: 0xc08a5e,
       at: POSTS.REYES_DESK.slice(0, 2), face: POSTS.REYES_DESK[2], post: "pinned", pose: "sit",
@@ -538,15 +538,14 @@
     // LOU the bondsman — loud shirt, a civilian fixer (never a cop).
     qNPC("LOU", { role: "bondsman", name: "Lou", outfit: 0xa04a68, skin: 0xe0b088,
       at: [18.5, 4.4], face: 0, post: "pinned", pose: "stand",
-      dialogue: ["Everything's for sale in this precinct, friend. Especially mercy.",
-        "The vig is how I stay sentimental."] });
+      dialogue: ["Everything's for sale in here. Especially mercy.",
+        "The vig keeps me sentimental.", "I bonded out his father too."] });
     // THE BOY — Lt. Decker, crew teal, a civilian in custody (driven manually).
     qNPC("DECKER", { role: "detainee", name: "Lt. Decker", outfit: 0x1f6f6a, skin: 0xc89878,
       at: [12, -6], face: -Math.PI / 2, post: "pinned", pose: "sit",
-      dialogue: ["Kid. The sheet's on Reyes' desk, my number's 4471-B.",
-        "Lou next door knows what the sarge drinks. Ask about the word.",
-        "They put the bag in the cage. Rookie runs it till the vet clocks in, read the plate.",
-        "Don't bring metal past that gate."], sayColor: "#ffe9b8" });
+      dialogue: ["Kid. Get me out before they move me downtown.",
+        "I didn't say nothing. Yet.", "Ma thinks I'm at work.",
+        "Voss keeps smiling at me. I hate that."], sayColor: "#ffe9b8" });
   }
   function qNPC(tag, spec) { if (V && V.pending) V.pending.push({ tag, spec }); }
   function arenaLive() { return !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root); }
@@ -645,7 +644,7 @@
     if (!rosterAt(S.t, S.lawyered).bail) return;   // the shade is down; the window shows it
     const q = bailQuote(S.charges);
     if (q == null) { staffSay("DASILVA", "It's above my pay grade now. The DA has the file."); return; }
-    staffSay("DASILVA", S.talking ? "$" + q + ". And it goes up every word he says in that box." : "Bail's $" + q + ".");
+    staffSay("DASILVA", S.talking ? "$" + q + ". Goes up every word he says." : "Bail's $" + q + ".");
     C.hud.panel(
       hHead("BAIL WINDOW", "charges: " + chargeTier(S.charges)) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail <b>$" + q + "</b>. Cash <b>" + fmtCash(C.wallet.cash()) + "</b></div>" +
@@ -756,7 +755,7 @@
   function talkBoy() {
     armStart();
     if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); return; }
-    if (V.decker && V.decker.say) V.decker.say(pick(["The sheet's on Reyes' desk. 4471-B.", "Read the plate at the cage before you sign.", "Don't bring metal past that gate.", "Lou next door sells the word on the sarge."]));
+    if (V.decker && V.decker.say) V.decker.say(pick(["Tell Ma I'm fine. Don't tell her where.", "How long have I been in here?", "They took my shoelaces, man.", "I didn't say nothing. Yet."]));
   }
 
   /* ---- release + endings ---- */

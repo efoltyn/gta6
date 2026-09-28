@@ -12,6 +12,9 @@
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
 
   let guardNo = 0;
+  const CO_NAMES = ["Diaz", "Kowalski", "Brennan", "Okafor", "Reyes", "Haskell", "Morrow", "Pruitt", "Nguyen", "Castellano",
+    "Doyle", "Whitaker", "Boone", "Ferris", "Lindqvist", "Tate", "Mendez", "Harlan", "Sutter", "Greer", "Dunleavy", "Abernathy",
+    "Rourke", "Vasquez", "Bell", "Kincaid", "Oduya", "Marsh", "Tillman", "Soto"];
   function addFlashlight(ch) {
     // ONE MODEL at every scale: weapons/flashlight.js also feeds the physical
     // death drop and the inventory thumbnail.  Its +Z is the light direction;
@@ -36,10 +39,10 @@
     // 0.3 s). They used to be a different navy, so every guard popped colour.
     const ch = makeCharacter(warden ? {
       legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d,
-      skin: 0xdcae84, cap: 0x171d29, shoes: 0x090b0f, belt: 0x111419, badge: true,
+      skin: 0xdcae84, cap: 0x171d29, capKind: "peaked:officer", shoes: 0x090b0f, belt: 0x111419, badge: true,
     } : {
       legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
-      skin: 0xe7b58c, cap: 0x202b3b, shoes: 0x111419, belt: 0x111419, badge: true,
+      skin: 0xe7b58c, cap: 0x202b3b, capKind: "peaked:police", shoes: 0x111419, belt: 0x111419, badge: true,
     });
     ch.group.userData.dynamic = true;
     (CBZ.prisonRoot || CBZ.scene).add(ch.group);
@@ -49,7 +52,8 @@
     ch.group.add(wedge);
     const flashlight = addFlashlight(ch);
 
-    const name = warden ? "the Warden" : "Officer #" + (++guardNo);
+    // a CO has a surname on his shirt; inmates use it ("Officer #3" was a spreadsheet row)
+    const name = warden ? "the Warden" : "Officer " + CO_NAMES[guardNo % CO_NAMES.length] + (guardNo++ >= CO_NAMES.length ? " " + Math.ceil(guardNo / CO_NAMES.length) : "");
     const id = guardNo || 0;
     const g = {
       char: ch, group: ch.group, wedge, flashlight,
@@ -63,8 +67,8 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["What do you want.", "Keep walking.", "Not now."]
-          : ["Keep moving.", "Move along.", "Back to your block."],
+          ? ["What do you want.", "Keep walking.", "Not now.", "My prison runs on time."]
+          : ["Keep moving.", "Move along.", "Back to your block.", "Twelve-hour shift. Don't start.", "Two years to my pension. Two.", "Tuck your shirt in."],
       },
     };
     // a post named by the roster outranks the one systems/economy.js derives
@@ -1669,6 +1673,15 @@
     // running the ladder on the one who started it — break it up, on the
     // ground, cuffs. CBZ.brain.authority decides the phase; this is his body.
     if (g._yardCase && CBZ.prisonBrain && CBZ.prisonBrain.guardLawStep(g, dt)) {
+      noteState(g, "law");
+      updateFlashlight(g, dt);
+      return true;
+    }
+
+    // ---- A DOOR OFF THE CLOCK (systems/prisondoorwatch.js): he saw, heard or
+    // was radioed about a door standing open when the day says shut. He calls
+    // it, walks over, asks the officer, and shuts it himself if nobody does.
+    if (g._doorCase && CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.guardStep(g, dt)) {
       noteState(g, "law");
       updateFlashlight(g, dt);
       return true;

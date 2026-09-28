@@ -1444,9 +1444,9 @@ CBZ.addLandmass(function(city){
 
   // ---- resident fighters + referee ----------------------------------------
   if(typeof CBZ.makeCharacter==="function"){
-    redCh=CBZ.makeCharacter({legs:0xcc2233,torso:0xf0c8a0,collar:0xf0c8a0,arms:0xf0c8a0,skin:0xf0c8a0,hair:0x201810,shoes:0xbb2222,cap:0});
-    blueCh=CBZ.makeCharacter({legs:0x2244cc,torso:0x8a5a3a,collar:0x8a5a3a,arms:0x8a5a3a,skin:0x8a5a3a,hair:0x111111,shoes:0x2233bb,cap:0});
-    refCh=CBZ.makeCharacter({legs:0x16181d,torso:0xe8e8e8,collar:0x16181d,arms:0xe8e8e8,skin:0xe8c8a8,hair:0x555555,shoes:0x111111,cap:0});
+    redCh=CBZ.makeCharacter({legs:0xcc2233,torso:0xf0c8a0,collar:0xf0c8a0,arms:0xf0c8a0,skin:0xf0c8a0,hair:0x201810,shoes:0xbb2222});
+    blueCh=CBZ.makeCharacter({legs:0x2244cc,torso:0x8a5a3a,collar:0x8a5a3a,arms:0x8a5a3a,skin:0x8a5a3a,hair:0x111111,shoes:0x2233bb});
+    refCh=CBZ.makeCharacter({legs:0x16181d,torso:0xe8e8e8,collar:0x16181d,arms:0xe8e8e8,skin:0xe8c8a8,hair:0x555555,shoes:0x111111});
     redCh.group.position.set(RX-1.8,RY,RZ);
     blueCh.group.position.set(RX+1.8,RY,RZ);
     refCh.group.position.set(RX-3.1,RY,RZ+3.1);
@@ -1864,7 +1864,7 @@ function startBout(box){
     if(redCh)redCh.group.visible=false; if(blueCh)blueCh.group.visible=false; if(refCh)refCh.group.visible=false;
   }
   var opp=CBZ.makeCharacter({legs:0x111111,torso:box?0x8a1f1f:0x40342a,collar:box?0x8a1f1f:0x40342a,arms:box?0x8a1f1f:0x40342a,
-    skin:0xc89878,hair:0x0a0a0a,shoes:0x222222,cap:0});
+    skin:0xc89878,hair:0x0a0a0a,shoes:0x222222});
   opp.group.position.set(cx+rad*0.7,cy,cz);
   arenaRoot.add(opp.group);
   // Put the player ON the deck, not through it: the ring canvas and cage mat

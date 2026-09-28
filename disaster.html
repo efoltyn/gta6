@@ -560,7 +560,8 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/systems/fphands.js?v=wrist1"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=feet1"></script>
+  <script src="src/entities/character.js?v=hats2"></script>
+  <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=watch2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
@@ -590,10 +591,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=airblood1"></script>
-<script src="src/systems/bodyfall.js?v=fall2"></script>
+<script src="src/systems/verbs_strike.js?v=airblood2"></script>
+<script src="src/systems/bodyfall.js?v=m0928a"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
-<script src="src/entities/player.js?v=radio1"></script>
+<script src="src/entities/player.js?v=hats1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
      tense and offer "re-add the tag" as a revert, which no longer works).
@@ -726,6 +727,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and state.js, which call CBZ.prisonTier at runtime. -->
 
 <!-- 4b. remaining systems -->
+<script src="src/systems/prisonvoice.js?v=voice1"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=cars1"></script>
@@ -781,6 +783,11 @@ document.body.appendChild(b);}}catch(e){}})();
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=lift1"></script>
+<!-- A door opened off the clock is noticed: the screws who see, hear or get
+     radioed about it, the inmates it was shut on, and the Warden's record of
+     the officer. After interactions.js (the door registry); guards.js,
+     brain_prison.js and prisonwarden.js are all read lazily. -->
+<script src="src/systems/prisondoorwatch.js?v=doors1"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
@@ -847,8 +854,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=fallankle1"></script>
-<script src="src/entities/survivorbot.js?v=armed1"></script>
+<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/entities/survivorbot.js?v=m0928a"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
@@ -1460,7 +1467,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=airblood1"></script>
+<script src="src/systems/gore.js?v=airblood2"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused

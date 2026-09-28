@@ -99,9 +99,11 @@
     const m = mesh && mesh.material;
     return (m && m.color && m.color.getHex) ? m.color.getHex() : dflt;
   }
+  // the role hat this body wears (entities/headwear.js's outfit layer), as
+  // "kind" or "kind:variant", or null — so the photo wears the SAME hat
   function capWorn(ch) {
-    const s = ch && ch.skinSlots;
-    return !!(s && s.cap && s.cap.length && s.cap[0] && s.cap[0].visible);
+    const L = ch && ch._hw && ch._hw.layers && ch._hw.layers.outfit;
+    return L ? (L.variant ? L.kind + ":" + L.variant : L.kind) : null;
   }
   // a short-sleeve body paints its FOREARM with the face's tone — that is the
   // rig's own tell, so the photo doesn't put a sleeve on a bare arm.
@@ -120,9 +122,11 @@
     const rec = spec.outfit !== undefined ? spec.outfit
       : (p && CBZ.cityOutfitOf) ? try_(function () { return CBZ.cityOutfitOf(p); }, null)
       : null;
-    const capHex = (rec && rec.capColor != null) ? rec.capColor : 0x1c1f26;
+    const wornKind = ch ? capWorn(ch) : null;
+    const wornL = wornKind && ch._hw.layers.outfit;
+    const capHex = (rec && rec.capColor != null) ? rec.capColor : (wornL && wornL.color != null ? wornL.color : 0x1c1f26);
     const cap = spec.cap !== undefined ? !!spec.cap
-      : (ch ? capWorn(ch) : !!(rec && (rec.cop || rec.cap)));
+      : (ch ? !!wornKind : !!(rec && (rec.cop || rec.cap)));
     return {
       rec: rec,
       skin: spec.skin != null ? spec.skin : (ch && ch.skinTone != null ? ch.skinTone : 0xcf9a72),
@@ -130,7 +134,7 @@
       hairStyle: spec.hairStyle || (hm && hm.userData ? hm.userData.hairStyle : null) || null,
       build: spec.build || ((p && p.gender === "f") ? "f" : "m"),
       age: spec.age !== undefined ? spec.age : (p ? p.ageYears : null),
-      cap: cap, capColor: capHex,
+      cap: cap, capColor: capHex, capKind: wornKind || (rec && rec.hat) || undefined,
       shortSleeve: spec.shortSleeve !== undefined ? !!spec.shortSleeve : shortSleeveOf(ch),
     };
   }
@@ -141,7 +145,7 @@
   }
   function bodySigOf(L) {
     return [L.build, L.age == null ? "-" : Math.round(L.age), L.skin, L.hair, L.hairStyle || "-",
-      L.cap ? L.capColor : "-", L.shortSleeve ? 1 : 0].join("|");
+      L.cap ? L.capColor + (L.capKind || "") : "-", L.shortSleeve ? 1 : 0].join("|");
   }
   function lookSig(L, w, h) {
     const r = L.rec || {};
@@ -161,9 +165,9 @@
     };
     if (L.age != null) c.age = L.age;
     if (L.hairStyle) c.hairStyle = L.hairStyle;
-    // a rig only grows hair OR a cap at construction — so the cap has to be
-    // decided here, not painted on later (character.js's own rule).
-    if (L.cap) c.cap = L.capColor;
+    // the role hat is decided here too, so a body without an outfit record
+    // (a job hat from peds.js) is photographed in the same hat kind
+    if (L.cap) { c.cap = L.capColor; c.capKind = L.capKind; }
     const rig = CBZ.makeCharacter(c);
     rig.group.position.set(0, 0, 0);
     B.scene.add(rig.group);

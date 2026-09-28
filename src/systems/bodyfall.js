@@ -467,6 +467,104 @@
     return true;
   };
 
+  /* ============================================================
+     THE CORPSE LAW (owner 2026-09-28: "when you shoot someone, they just
+     DISAPPEAR. There's no physics.") One rule every game's corpse cull asks:
+       · a body is NEVER removed while it could be on screen,
+       · NEVER within NEAR (60 m) of the player,
+       · otherwise only when the game is over its CAP (oldest first) or the
+         body is older than AGE (10 minutes).
+     CBZ.corpseLaw.hidden(pos)          off screen AND far from the player
+     CBZ.corpseLaw.mayRemove(a, over)   the whole rule for one body
+   ============================================================ */
+  const LAW = { CAP: 48, AGE: 600, NEAR: 60 };
+  let _fr = null, _pm = null, _sp = null;
+  function onScreen(x, y, z) {
+    const cam = CBZ.camera, THREE = window.THREE;
+    if (!cam || !THREE || !cam.projectionMatrix) return true;       // cannot tell: assume seen
+    if (!_fr) { _fr = new THREE.Frustum(); _pm = new THREE.Matrix4(); _sp = new THREE.Sphere(); }
+    cam.updateMatrixWorld();
+    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _fr.setFromProjectionMatrix(_pm);
+    _sp.center.set(x, (y || 0) + 0.5, z); _sp.radius = 1.4;           // a lying body, padded
+    return _fr.intersectsSphere(_sp);
+  }
+  function hidden(pos) {
+    if (!pos) return false;
+    const P = CBZ.player && CBZ.player.pos;
+    if (P) { const dx = pos.x - P.x, dz = pos.z - P.z; if (dx * dx + dz * dz < LAW.NEAR * LAW.NEAR) return false; }
+    const C = CBZ.camera && CBZ.camera.position;
+    if (C) { const dx = pos.x - C.x, dz = pos.z - C.z; if (dx * dx + dz * dz < LAW.NEAR * LAW.NEAR) return false; }
+    return !onScreen(pos.x, pos.y, pos.z);
+  }
+  CBZ.corpseLaw = {
+    LAW, hidden, onScreen,
+    mayRemove(a, overCap) {
+      if (!a || !a.pos) return false;
+      if (!(overCap || (a.deadT || 0) > LAW.AGE)) return false;
+      return hidden(a.pos);
+    },
+  };
+
+  /* ============================================================
+     THE CORPSE KEEPER: a body a game would otherwise take away with the man
+     (a gun-game bot who respawns, a pooled rig reused) is DETACHED into a
+     record of its own here, left where it fell, finished by the collapse,
+     and removed only under the corpse law.
+       CBZ.corpses.keep(rig, opts) -> record   rig: { char, group }  opts.tag
+       CBZ.corpses.clear(tag)                  a match / mode ends: all of them
+       CBZ.corpses.list
+   ============================================================ */
+  const KEPT = [];
+  function disposeRig(g) {
+    if (g.parent) g.parent.remove(g);
+    g.traverse(function (o) {
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) { /* shared */ } }
+      const m = o.material;
+      if (m) {
+        if (Array.isArray(m)) { for (let i = 0; i < m.length; i++) if (m[i] && !m[i]._shared && m[i].dispose) try { m[i].dispose(); } catch (e) { /* shared */ } }
+        else if (!m._shared && m.dispose) { try { m.dispose(); } catch (e) { /* shared */ } }
+      }
+    });
+  }
+  function keep(src, opts) {
+    opts = opts || {};
+    const ch = rigOf(src), g = grpOf(src);
+    if (!ch || !g) return null;
+    const r = {
+      char: ch, group: g, pos: g.position, dead: true, deadT: src.deadT || 0, _corpse: true,
+      _bf: src._bf || null, _deathSeed: src._deathSeed, tag: opts.tag || "", name: src.name,
+    };
+    src._bf = null;
+    // not started yet (a body that died out of reach of the fall): start it here
+    if (!r._bf || !r._bf.on) start(r, { dirX: opts.dirX, dirZ: opts.dirZ, force: opts.force || 0, dead: true, hold: true });
+    KEPT.push(r);
+    return r;
+  }
+  function clearKept(tag) {
+    for (let i = KEPT.length - 1; i >= 0; i--) {
+      const r = KEPT[i];
+      if (tag != null && r.tag !== tag) continue;
+      KEPT.splice(i, 1);
+      disposeRig(r.group);
+    }
+  }
+  CBZ.corpses = { keep, clear: clearKept, list: KEPT };
+  if (CBZ.onUpdate) CBZ.onUpdate(24.5, function (dt) {
+    if (!KEPT.length) return;
+    let oldest = -1, oAge = -1;
+    for (let i = 0; i < KEPT.length; i++) {
+      const r = KEPT[i];
+      r.deadT += dt;
+      if (r._bf && r._bf.on && !r._bf.asleep) tick(r, dt);
+      if (r.deadT > oAge && hidden(r.pos)) { oAge = r.deadT; oldest = i; }
+    }
+    if (oldest >= 0 && (KEPT.length > LAW.CAP || oAge > LAW.AGE)) {
+      const r = KEPT.splice(oldest, 1)[0];
+      disposeRig(r.group);
+    }
+  });
+
   CBZ.bodyFall = {
     plan, start, tick, getUp, poke, clear, resume, unwall,
     active(a) { return !!(a && a._bf && a._bf.on); },
