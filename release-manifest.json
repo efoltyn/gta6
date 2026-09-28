@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "fc5f16f732125dde1805776fa7489302c67c5a58",
-  "createdAt": "2026-09-28T15:33:40.689Z",
+  "sourceCommit": "7b85fbfd26692bee436b7e4ae00855514137889c",
+  "createdAt": "2026-09-28T15:36:33.539Z",
   "fileCount": 1158,
-  "totalBytes": 47171854,
+  "totalBytes": 47172667,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -18,8 +18,8 @@
     },
     {
       "file": "src/city/adboard.js",
-      "bytes": 6114,
-      "sha256": "d9543f58e0c0274e90eb1500f7b623b0ec3e0204b11b5e1d06eeeb80a9c8f20a"
+      "bytes": 6093,
+      "sha256": "dc346acf8e62b4140ce8f42894b8d5170003ae0ee080de28e89cf1ed12615078"
     },
     {
       "file": "src/city/agency.js",
@@ -438,8 +438,8 @@
     },
     {
       "file": "src/city/crashdeform.js",
-      "bytes": 25220,
-      "sha256": "a2acbe7348f4e8e0d9dd031fa3db197bb2b965b3a45897f969374d870daec6ea"
+      "bytes": 25228,
+      "sha256": "0638627938ca0cbff5111a31f0abd97aaf4711493a7668adc2097d5402f5a611"
     },
     {
       "file": "src/city/crashfx.js",
@@ -1063,8 +1063,8 @@
     },
     {
       "file": "src/city/motorcade.js",
-      "bytes": 62320,
-      "sha256": "9aee86a0a6a3e1643b41a918c799b1ed4e11baeb0699f3afe4a2b31f0ee6b03e"
+      "bytes": 62964,
+      "sha256": "ae125bd148fb8e2500f4922f6c9d57d2048a141e40e86f11d306e9a3527106a3"
     },
     {
       "file": "src/city/mugshot.js",
@@ -1103,8 +1103,8 @@
     },
     {
       "file": "src/city/origins.js",
-      "bytes": 54459,
-      "sha256": "ac35f510b8fd146bcc800f69baef206423cc1dfe5b53595f4679b1a6b0ab8501"
+      "bytes": 54455,
+      "sha256": "3441b8f50b7eda5ab648299a8610e4fbdf88e6ac04c424b9fa6678cb3631fd4e"
     },
     {
       "file": "src/city/outfits.js",
@@ -1208,8 +1208,8 @@
     },
     {
       "file": "src/city/president_public.js",
-      "bytes": 64410,
-      "sha256": "af3813af3a501fdaaac042ae4593e027cd435a6c901c76aef3ba07ed02d58d74"
+      "bytes": 64511,
+      "sha256": "b75efb592471c2fe18f6233e608fd7d2d97bb1c68a08852e79c4c27f57ac4a10"
     },
     {
       "file": "src/city/president_regime.js",
@@ -1488,8 +1488,8 @@
     },
     {
       "file": "src/city/vehicles.js",
-      "bytes": 144350,
-      "sha256": "187c5312a6693ac5e8c06ae7844374506a4917547b7034172e4d363a12492f18"
+      "bytes": 144411,
+      "sha256": "8262dfb6884bed30b71cc806b3012ddc1861e36b6f6dd0e658558aa7b8664b2d"
     },
     {
       "file": "src/city/view.js",
@@ -2368,8 +2368,8 @@
     },
     {
       "file": "src/systems/fullmap.js",
-      "bytes": 82448,
-      "sha256": "914fce178266776f116a72153c8c47cb15775b64ac3395e6cc9fe504febff40a"
+      "bytes": 82472,
+      "sha256": "816c8489d5f77f8cdd57bee0a396e3124fda8d78794ad957417149fb5a750b56"
     },
     {
       "file": "src/systems/fx.js",
