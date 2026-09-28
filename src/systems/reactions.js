@@ -29,10 +29,10 @@
                   through, plus a cock-back off combat.js's _windup
                   telegraph. WHY: a punch with no weight transfer reads
                   as a glitch, not a threat.
-     • GUARD    — _blockT (combat.js) poses forearms up so "jab eaten,
-                  throw the heavy" is taught by the pose, not the toast;
-                  _broken drops the arms slack + a dazed sway so the
-                  finisher window is visibly OPEN.
+     • GUARD    — _blockT keeps the rig's own high guard up (entities/
+                  meleeposes.js — the same forearms verbs_strike.js stops
+                  head shots with); _broken drops the arms slack + a dazed
+                  sway so the finisher window is visibly OPEN.
      • GET-UP   — knockdown recovery picks one of 3 variants (sit-up
                   push / roll to either knee) seeded per person, so two
                   peds dropped by the same sweep don't rise in lockstep.
@@ -105,9 +105,6 @@
   const SWING_LEAN = 0.3;       // forward commit at the moment of impact
   const SWING_TWIST = 0.3;      // shoulder rotation behind the punching arm
   const SWING_ARM = -1.9;       // punching arm extended, snapping back over the swing
-  const BLOCK_ARM = -1.15;      // shoulders raise the arms toward guard height (elbow does the rest)
-  const BLOCK_ELBOW = -1.9;     // ELBOWS fold hard so the forearms actually cross the face (real cover)
-  const BLOCK_HUNCH = 0.12;     // tucked-in crouch behind the guard
   const DAZE_ARM = 0.3;         // guard-broken arms hang slack behind the hips
   const DAZE_SWAY = 0.12;       // slow drunken sway while broken (the foe is OPEN — go)
   const DAZE_HEAD = 0.42;       // head sags when the guard shatters
@@ -131,20 +128,10 @@
   const JAIL_HIT_KNEE = 0.30;
   const JAIL_HIT_FREE_ARM = -0.46;
 
-  // ---- HEAD SNAP (punch reactions, CBZ.reactPunch — jail AND city) ----
-  // Every landed melee blow is read as a shot to the head (this rig has no
-  // separate hit-location model, and in a fistfight that's where punches go).
-  // headAmp is a single decaying magnitude (instant snap on trigger, eased
-  // back to 0 via `damp` — fast-out, slow-return with zero extra state) that
-  // headKind/headLf/headLs (fixed at the moment of impact) project onto the
-  // neck's 3 axes so a jab/cross/hook/upper each read as a DIFFERENT whip.
-  const HEAD_DECAY = 5.5;       // /sec: how fast the snap eases back to neutral
-  const HEAD_HEAVY_MULT = 1.4;  // a heavy/finisher punch snaps the head harder
-  const HEAD_PITCH = 0.65;      // jab/cross: straight back along the punch line
-  const HEAD_HOOK_YAW = 0.6;    // hook: head turns AWAY from the fist
-  const HEAD_HOOK_ROLL = 0.22;  // hook: a touch of tilt riding the same turn
-  const HEAD_UPPER_UP = 0.5;    // uppercut: chin snapped UP first (look-up sign)
-  const HEAD_UPPER_BACK = 0.55; // uppercut: ...then the head continues back (see the amp*(1-amp) hump below)
+  // (The HEAD SNAP of a punch lives on the rig now — entities/meleeposes.js,
+  // driven by CBZ.verbs.react with the zone the fist actually found; the
+  // additive neck whip that used to live here, and read every blow as a head
+  // shot, is gone. CBZ.reactPunch below forwards to it.)
   const AIM_RANGE2 = 60 * 60;   // shooters visibly track a mark inside 60u
   const AIM_HEAD_YAW = 0.75;    // believable neck turn cap
   const AIM_HEAD_PIT = 0.38;
@@ -188,10 +175,6 @@
   //   gbx/gbz           : body pitch/roll we hold DURING a get-up (animChar
   //                       is skipped while the body is flat, so these need
   //                       their own back-out instead of riding its assign)
-  //   headAmp/headKind/headLf/headLs/hsX/hsY/hsZ : HEAD SNAP (CBZ.reactPunch,
-  //                       jail AND city) — headAmp is a decaying magnitude,
-  //                       headKind/Lf/Ls are the direction fixed at impact,
-  //                       hsX/Y/Z are last frame's neck offsets to back out.
   //   stagT/stagX/stagZ/stagAmp : directional stagger timer + world push
   //                       direction + force-scaled amplitude
   //   swingT/swingArm   : NPC punch follow-through timer + which arm (±1)
@@ -213,12 +196,11 @@
         flinT: 0, flinX: 0, flinZ: 1, flinAmp: 0,
         clutchT: 0, clutchSide: 0, clutchAmp: 0,   // wound-clutch (non-fatal): timer / which hand (±1) / caliber weight
         jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
-        headAmp: 0, headKind: "cross", headLf: 1, headLs: 0, hsX: 0, hsY: 0, hsZ: 0,  // HEAD SNAP (CBZ.reactPunch)
         stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
         avSide: 0, avSeed: (R.size % 7) * 0.37,    // AVERT: which way he turns off you (fixed per bout) + glance phase
         pkK: 0, px: null, pz: null,                // POCKET GUARD weight (CBZ.npcGuardPockets) + last ground position (walking gate)
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
-        swingT: 0, swingArm: 1, dazeK: 0, guardK: 0,
+        swingT: 0, swingArm: 1, dazeK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
         // mid-flinch / mid-cooldown doesn't fire a phantom stagger/swing.
         lastFl: a._phys ? (a._phys.fl || 0) : 0,
@@ -245,11 +227,11 @@
     if (a.state === "flee" || a.aiState === "flee") { _qWhy = _qWhy || "flee"; return false; }
     if ((a._blockT || 0) > 0 || (a._broken || 0) > 0) { _qWhy = _qWhy || "block"; return false; }
     if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT || r.swingT ||
-        r.jailHitT || r.headAmp || r.hsX || r.hsY || r.hsZ || r.stK || r.stOff ||
-        r.aimK || r.dazeK || r.guardK || r.pkK || r.cowerLean || r.gbx || r.gbz ||
+        r.jailHitT || r.stK || r.stOff ||
+        r.aimK || r.dazeK || r.pkK || r.cowerLean || r.gbx || r.gbz ||
         r.laOff || r.raOff || r.nkOff || r.byOff || r.hyOff || r.llOff || r.rlOff ||
         r.lowLaOff || r.lowRaOff || r.lowLlOff || r.lowRlOff || r.savedEm !== -1) {
-      _qWhy = _qWhy || ("chan:" + (r.stK ? "stK" : r.savedEm !== -1 ? "savedEm" : r.aimK ? "aimK" : r.dazeK ? "dazeK" : r.headAmp ? "headAmp" : r.hyOff ? "hyOff" : "other"));
+      _qWhy = _qWhy || ("chan:" + (r.stK ? "stK" : r.savedEm !== -1 ? "savedEm" : r.aimK ? "aimK" : r.dazeK ? "dazeK" : r.hyOff ? "hyOff" : "other"));
       return false;
     }
     return true;
@@ -294,8 +276,15 @@
     }
   }
 
+  // a melee blow already has its reaction on the rig (entities/meleeposes.js:
+  // the head snap, the fold, the step, the fall) — do not stack a second one
+  function rigReacting(a) {
+    const ch = a && a.char;
+    return !!(ch && ((ch.hitReact && ch.hitReact.on) || (ch.fall && ch.fall.on) || (ch.footStep && ch.footStep.on)));
+  }
   // fire a fresh recoil + flash for `a`, flinching away from the player.
   function trigger(a, r) {
+    if (rigReacting(a)) { restoreHead(r, a); return; }
     r.recoil = RECOIL_DUR;
 
     // direction: pitch the upper body AWAY from the player. The player
@@ -407,7 +396,6 @@
                 old.lowLaOff = 0; old.lowRaOff = 0; old.lowLlOff = 0; old.lowRlOff = 0;
                 old.gbx = 0; old.gbz = 0; old.stagT = 0; old.swingT = 0; old.dazeK = 0;
                 old.flinT = 0; old.clutchT = 0; old.aimK = 0; old.hyOff = 0;
-                old.headAmp = 0; old.hsX = 0; old.hsY = 0; old.hsZ = 0;
                 // park the edge detectors HIGH so the first frame back in range
                 // can't read a stale value as a fresh hit / fresh swing.
                 old.lastFl = 9; old.atkCd = 1e9;
@@ -475,17 +463,6 @@
           if (parts.ra && r.raOff) parts.ra.rotation.x -= r.raOff;
         }
         r.laOff = 0; r.raOff = 0;
-
-        // HEAD SNAP back-out: neck pitch/yaw/roll is a damped channel (animChar
-        // re-damps it every frame — see the file header), same feedback risk as
-        // the arms, so reveal the clean base before this frame's snap goes back
-        // on. Runs for BOTH jail and city (head snap isn't isCity-gated).
-        if (neck) {
-          if (r.hsX) neck.rotation.x -= r.hsX;
-          if (r.hsY) neck.rotation.y -= r.hsY;
-          if (r.hsZ) neck.rotation.z -= r.hsZ;
-        }
-        r.hsX = 0; r.hsY = 0; r.hsZ = 0;
 
         /* HE LOOKS AT YOU. (CBZ.npcStare — what the floating "!" became.)
 
@@ -959,34 +936,13 @@
             // arms hang slack — visibly OPEN for the finisher
             if (parts.la) { const b0 = parts.la.rotation.x; const w = damp(b0, DAZE_ARM, 10, dt); r.laOff += w - b0; parts.la.rotation.x = w; }
             if (parts.ra && !gunArm) { const b0 = parts.ra.rotation.x; const w = damp(b0, DAZE_ARM * 0.8, 10, dt); r.raOff += w - b0; parts.ra.rotation.x = w; }
-          } else if ((a._blockT || 0) > 0 && live && !aimBack && !handsUp) {
-            // shoulders raise the arms toward guard height, then the ELBOWS fold
-            // hard so the FOREARMS actually cross in front of the face — a real
-            // cover, not the old straight-arm paddle (rig.low is the elbow pivot).
-            // guardK is a CLEAN internal weight, damped independently of the bone
-            // (not read back from parts.la/ra) and then HARD-ASSIGNED onto the
-            // shoulder/elbow — a plain additive offset here decays back to 0
-            // every frame (animChar's own idle arm-swing target IS 0, and it
-            // re-damps toward that from whatever we left, so back-and-forth
-            // subtraction can never actually HOLD a pose against it — only an
-            // outright assign, like animChar's own aimingPose/handsUp branches
-            // use, sticks).
-            r.guardK = damp(r.guardK, 1, 18, dt);
-            const gk = r.guardK;
-            if (parts.la) parts.la.rotation.x = BLOCK_ARM * gk;
-            if (parts.ra && !gunArm) parts.ra.rotation.x = BLOCK_ARM * 0.9 * gk;
-            if (low && low.la) low.la.rotation.x = BLOCK_ELBOW * gk;
-            if (low && low.ra && !gunArm) low.ra.rotation.x = BLOCK_ELBOW * 0.95 * gk;
-            bodyOff += BLOCK_HUNCH * Math.min(1, (a._blockT || 0) / 0.15);  // ease out at expiry
-          } else if (r.guardK > 0.001) {
-            // guard just ended — ease the same hard-assigned pose back to 0
-            // (which IS animChar's own idle/gait target, so the hand-off is seamless).
-            r.guardK = damp(r.guardK, 0, 10, dt);
-            const gk = r.guardK;
-            if (parts.la) parts.la.rotation.x = BLOCK_ARM * gk;
-            if (parts.ra && !gunArm) parts.ra.rotation.x = BLOCK_ARM * 0.9 * gk;
-            if (low && low.la) low.la.rotation.x = BLOCK_ELBOW * gk;
-            if (low && low.ra && !gunArm) low.ra.rotation.x = BLOCK_ELBOW * 0.95 * gk;
+          } else if ((a._blockT || 0) > 0 && live && !aimBack && !handsUp && !gunArm) {
+            // A COVERING MAN IS THE RIG'S OWN HIGH GUARD (entities/meleeposes.js:
+            // forearms up in front of the face, elbows in, chin down — the guard
+            // verbs_strike.js actually stops head shots with). This file used to
+            // hard-assign a second, different guard over it; now the brain's
+            // `_blockT` (combat_iq, city/combat) just keeps that guard raised.
+            ch.blockT = Math.max(ch.blockT || 0, Math.min(0.2, a._blockT));
           }
           // ---- (3b) AIM PRESENCE: an armed shooter visibly TRACKS its mark —
           //      head turned to the target, shoulders opened, and the gun arm's
@@ -1129,38 +1085,6 @@
           if (neck && r.hyOff) neck.rotation.y += r.hyOff;
         }
 
-        // ---- HEAD SNAP (CBZ.reactPunch) — jail AND city, upright only. A single
-        //      decaying magnitude (headAmp) projected onto the neck's 3 axes by
-        //      the direction/kind fixed at the moment of impact:
-        //        jab/cross → straight back along the punch line (pitch)
-        //        hook      → turns AWAY from the fist (yaw + a touch of roll)
-        //        upper     → chin snaps UP first, then the head continues back
-        //                    (the amp*(1-amp) term is 0 at both ends of the decay
-        //                    and peaks mid-decay, so it reads as a SECOND beat
-        //                    after the initial upward snap, with no extra state)
-        //      headAmp itself decays AFTER we read it, so this frame's pose uses
-        //      the value the trigger (or last frame) actually left behind.
-        if (neck && !down && r.headAmp > 0.001) {
-          const amp = r.headAmp;
-          let px, py = 0, pz = 0;
-          if (r.headKind === "hook") {
-            px = HEAD_PITCH * 0.2 * amp * r.headLf;
-            py = HEAD_HOOK_YAW * amp * r.headLs;
-            pz = -HEAD_HOOK_ROLL * amp * r.headLs;
-          } else if (r.headKind === "upper") {
-            // both terms share the jab's "snap back" sign (verified empirically:
-            // positive neck.rotation.x whips the head backward/up) — the uppercut
-            // is an instant up-snap PLUS a second, slightly bigger wave of the
-            // same backward whip that crests mid-decay (the amp*(1-amp) hump).
-            px = HEAD_UPPER_UP * amp + HEAD_UPPER_BACK * amp * (1 - amp) * 4;
-          } else {   // jab / cross
-            px = HEAD_PITCH * amp * r.headLf;
-          }
-          r.hsX = px; r.hsY = py; r.hsZ = pz;
-          neck.rotation.x += px; neck.rotation.y += py; neck.rotation.z += pz;
-        }
-        r.headAmp = damp(r.headAmp, 0, HEAD_DECAY, dt);
-        if (r.headAmp < 0.01) r.headAmp = 0;
 
         // ---- LOW-JOINT (knee/elbow) CONVENTION CLAMP ----
         // Every reaction layer above that touches rig.low (get-up knee-bend,
@@ -1261,47 +1185,37 @@
   }
 
   // ============================================================
-  //  PUBLIC: CBZ.reactPunch(target, opts) — call this the INSTANT a melee
-  //  punch actually connects (city/combat.js land(), city/peds.js hurtActor,
-  //  systems/combat.js landPunch) so the head-snap/clutch reaction is driven
-  //  by the real swing that landed, not guessed a frame later from an hp/fl
-  //  edge. Safe to call for any actor rec() tracks (guards/npcs/cityPeds);
-  //  a target with no .group is ignored.
+  //  PUBLIC: CBZ.reactPunch(target, opts) — a melee blow connected with his
+  //  head. The reaction itself is the rig's (CBZ.verbs.react → entities/
+  //  meleeposes.js: a straight drives the head back along the line, a hook
+  //  turns it away from the fist, an uppercut lifts the chin); this stays as
+  //  the entry point for callers that land a blow without CBZ.verbs.strike.
   //    opts.kind   : "jab" | "cross" | "hook" | "upper" (default "cross")
-  //    opts.heavy  : true for a heavy/finisher/counter blow — snaps harder
-  //                  and, in the city, adds a beat of wound-clutch daze.
-  //    opts.fromX/fromZ : the ATTACKER's world position (so the snap can
-  //                  read "away from the fist" / "along the punch line").
+  //    opts.heavy  : a heavy/finisher/counter blow — snaps harder and, in the
+  //                  city, adds a beat of wound-clutch daze.
+  //    opts.fromX/fromZ : the ATTACKER's world position.
   // ============================================================
+  const _rpDir = { x: 0, z: 1 };
   function reactPunch(target, opts) {
     if (!target || !target.group) return;
     opts = opts || {};
-    const r = rec(target);
-    const kind = opts.kind || "cross";
     const heavy = !!opts.heavy;
-
-    // express the attacker->target push in the target's own local frame
-    // (+z forward, +x right) — same lf/ls convention the city stagger uses,
-    // so a jab (frontal) and a hook (lateral) read as genuinely different hits.
-    let lf = 1, ls = 0;
+    let ls = 0;
     if (opts.fromX != null && opts.fromZ != null) {
       const gx = target.group.position.x, gz = target.group.position.z;
       let dx = gx - opts.fromX, dz = gz - opts.fromZ;
       const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+      _rpDir.x = dx; _rpDir.z = dz;
       const ry = target.group.rotation.y || 0;
-      lf = Math.cos(ry) * dz + Math.sin(ry) * dx;
       ls = Math.cos(ry) * dx - Math.sin(ry) * dz;
+    } else { _rpDir.x = -Math.sin(target.group.rotation.y || 0); _rpDir.z = -Math.cos(target.group.rotation.y || 0); }
+    if (CBZ.verbs && CBZ.verbs.react) {
+      CBZ.verbs.react(target, { zone: "jaw", kind: opts.kind || "cross", dir: _rpDir, power: heavy ? 0.85 : 0.55 });
     }
-
-    r.headKind = kind;
-    r.headLf = lf; r.headLs = ls;
-    r.headAmp = Math.max(r.headAmp, heavy ? HEAD_HEAVY_MULT : 1);
-
     // a heavy punch to the head leaves them clutching it for a beat before
-    // recovering — reuse the wound-clutch pose (already fully general; it
-    // only needs clutchT/clutchSide/clutchAmp, no bullet-specific state).
-    // City-only: jail/survival never read these fields (see the header note).
+    // recovering — the wound-clutch pose (city only, see the header note)
     if (heavy && CBZ.game && CBZ.game.mode === "city" && !target.dead) {
+      const r = rec(target);
       r.clutchSide = ls >= 0 ? -1 : 1;
       r.clutchT = CLUTCH_DUR;
       r.clutchAmp = 0.75;

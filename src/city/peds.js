@@ -2698,7 +2698,9 @@
     return { cash: got, item };
   };
 
-  CBZ.cityKOPed = function (ped, fromX, fromZ) {
+  // opts.rigFall: the blow that did it already put him down in his own rig
+  // (systems/verbs_strike.js knockdown) — do not topple the group on top of it
+  CBZ.cityKOPed = function (ped, fromX, fromZ, opts) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
     leaveSit(ped);                             // a felled desk worker leaves the seat (C3)
@@ -2706,7 +2708,7 @@
     // a plane-seated body's group is PARENT-LOCAL — the knockdown lie-flat
     // writes world coords onto it and teleports the rig (see cityKillPed's
     // seated gate); a tased passenger just slumps unconscious where they sit.
-    if (CBZ.body && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
+    if (CBZ.body && !(opts && opts.rigFall) && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     // laying hands on a boss's wife/kin brings the crew (non-lethal harm).
     if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);

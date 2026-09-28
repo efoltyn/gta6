@@ -1,22 +1,20 @@
 /* ============================================================
-   systems/combat.js — dramatic melee.
+   systems/combat.js — the prison player's fists and shank.
 
-   A punch is anticipation→thrust→recovery (character.js animates the
-   arm; we alternate left/right jabs). On contact we stack the juice
-   the research calls for: HIT-STOP, screen SHAKE, KNOCKBACK, an impact
-   SPARK, a comic POW pop-up, and a punchy sound — all on one frame.
+   CBZ.punch(actor, {blade}) / CBZ.prisonStab(actor) choose WHAT is thrown
+   (the jab-cross-hook rhythm, the shank's deep fourth, stamina, damage) and
+   what it COSTS (the law, the loot, the execution, the bleed). HOW it lands
+   is systems/verbs_strike.js: the swing is a real rig strike, and the blow
+   resolves on the frame your fist reaches his jaw, head, ribs or legs — a
+   man who stepped back is a whiff, a raised guard takes it on the forearms,
+   and the zone it found scales the damage and picks his reaction.
 
-   Chain hits to build a COMBO. When a hit would drop someone, a
-   combo/heavy turns it into a cinematic EXECUTION: slow-motion, a
-   rising UPPERCUT that launches them off their feet, a huge "K.O."
-   and a hard camera shake. Enemies show a floating health bar while
-   you're working them over.
+   Chain hits to build a COMBO. When a hit would drop someone, a combo/heavy
+   finish is an EXECUTION: hitstop, slow motion, the last one bleeds.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
-  const nm = (a) => a.data.name.replace(/^the |^a |^an /, "");
   const maxHpOf = (a) => (a.kind === "guard" || a.kind === "warden" ? 140 : 100);
 
   /* THE IMPACT GLOW: DELETED. (OWNER: "glow on punch impact is super dumb...
@@ -27,30 +25,13 @@
      that it is the same object as the caption: a symbol drawn on top of an
      event to announce that the event happened. Knuckles do not emit light.
 
-     What it was sitting on top of, and hiding, is a full physical impact that
-     this file already fires on the same frame:
-       · CBZ.doHitstop  — the freeze that sells the weight
-       · CBZ.shake      — the camera takes the hit too
-       · CBZ.body.hit   — a real velocity-based knockback (force 4.5 / 8)
-       · CBZ.reactPunch — systems/reactions.js whips his head along the punch
-                          line, jab/cross/hook/upper each a different snap,
-                          plus the directional stagger
-     Taking the flare off is what lets any of that be seen. */
-  /* FLOATING HEALTH BAR OVER PEOPLE: DELETED.
-
-     A green-to-red meter pinned above whoever you were punching, drawn with
-     depthTest:false so it hung through walls, for three seconds after every
-     hit. It is the same object as the emoji this wave just removed and the
-     "love 47%" chip interact.js already deleted with the note "NO METERS ON A
-     PERSON" — a number about somebody printed beside their face.
-
-     A beaten man already reads without it: systems/reactions.js flinches and
-     staggers him, gore.js bleeds him, wound decals accumulate on the body
-     (guard._woundN), the knockback moves him and he goes down when he is
-     done. That IS the health bar, drawn on the person instead of above him.
-
-     showHP() stays as a no-op so the four call sites keep working. */
-  function showHP() {}
+     What it was sitting on top of, and hiding, is a full physical impact on
+     the same frame: both bodies freeze together (hitstop), the camera takes
+     the hit, his head goes the way the fist went, a body shot folds him, a
+     hard one puts him on a step back to keep his feet (systems/verbs_strike.js).
+     Taking the flare off is what lets any of that be seen.
+     (The floating health bar over people went the same way: a beaten man
+     reads on his body — the reactions, the blood, the fall.) */
 
   /* ---------- THE HIT REACTION (what a punch does to YOUR body) ----------
      Three timers on CBZ.player, all read by systems/physics.js:
@@ -76,37 +57,23 @@
     return true;
   };
 
-  /* ---------- launched bodies (uppercut pop-up) ---------- */
-  const flying = [];
-  function launch(actor, vy) { actor._lvy = vy; if (flying.indexOf(actor) < 0) flying.push(actor); }
-  CBZ.onUpdate(33, function (dt) {
-    for (let i = flying.length - 1; i >= 0; i--) {
-      const a = flying[i];
-      a._lvy -= 22 * dt;
-      a.group.position.y += a._lvy * dt;
-      if (a.group.position.y <= 0) { a.group.position.y = 0; a._lvy = 0; flying.splice(i, 1); }
-    }
-  });
+  /* The uppercut "launch" integrator (no caller left), the comic POW pop-up
+     and the showHP meter no-ops are gone: a landed blow reads through the
+     body it lands on (systems/verbs_strike.js + entities/meleeposes.js). */
 
-  /* ---------- comic pop-up ---------- */
-  const hitEl = document.getElementById("hitfx");
-  const WORDS = ["POW!", "BAM!", "SMACK!", "CRUNCH!", "THWACK!"];
-  // comic "POW!/BAM!" pop-ups removed — melee now reads as real impact
-  // (knockback + flinch + blood + hitstop), not a cartoon. Kept as a no-op
-  // so existing call sites stay valid.
-  function popup() {}
-
-  let combo = 0, lastPunch = -1e9, pendingPunch = null, stamina = 1;
+  let combo = 0, lastPunch = -1e9, stamina = 1;
 
   function punchable(actor) {
     return !!(actor && actor.group && !actor.dead && !(actor.ko > 0) && !actor.escaped);
   }
-
-  function facingYawTo(actor) {
-    const dx = actor.group.position.x - CBZ.player.pos.x;
-    const dz = actor.group.position.z - CBZ.player.pos.z;
-    return Math.atan2(dx, dz);
+  // who a swing with no named target may land on — the FIST decides which
+  function candidates(out) {
+    const add = (list) => { if (list) for (let i = 0; i < list.length; i++) if (punchable(list[i])) out.push(list[i]); };
+    add(CBZ.guards); add(CBZ.npcs);
+    return out;
   }
+  const PA = { isPlayer: true, get pos() { return CBZ.player.pos; } };
+  function playerActor() { return CBZ.verbs && CBZ.verbs.playerActor ? CBZ.verbs.playerActor() : PA; }
 
   function cameraFacingYaw() {
     if (!CBZ.cam) return CBZ.playerChar.group.rotation.y;
@@ -124,35 +91,6 @@
     if (CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(actor, {}); // frisk the downed body
   }
 
-  function inPunchArc(actor, attack) {
-    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
-    const dx = actor.group.position.x - px, dz = actor.group.position.z - pz;
-    const d = Math.hypot(dx, dz);
-    if (d > (attack.reach || (attack.heavy ? 3.15 : 2.85)) || d < 0.2) return false;
-    const dot = (Math.sin(attack.yaw) * dx + Math.cos(attack.yaw) * dz) / d;
-    return dot > (attack.arcDot == null ? 0.34 : attack.arcDot);
-  }
-
-  function findPunchTarget(attack) {
-    let best = null;
-    let bestScore = 999;
-    const scan = function (list) {
-      for (let i = 0; i < list.length; i++) {
-        const a = list[i];
-        if (!punchable(a) || !inPunchArc(a, attack)) continue;
-        const dx = a.group.position.x - CBZ.player.pos.x;
-        const dz = a.group.position.z - CBZ.player.pos.z;
-        const score = Math.hypot(dx, dz) + (a.kind === "warden" ? -0.1 : 0);
-        if (score < bestScore) {
-          bestScore = score;
-          best = a;
-        }
-      }
-    };
-    scan(CBZ.guards || []);
-    scan(CBZ.npcs || []);
-    return best;
-  }
 
   /* ============================================================
      THE SHANK (CBZ.CONFIG.PRISON_SHANK — set 0 and every line below falls
@@ -211,187 +149,104 @@
   }
   CBZ.prisonShankInHand = shankInHand;
 
-  // the [3] Fight action routes here; the hit lands on the animation's
-  // drive frame so it feels like a committed swing, not an instant stat tap.
+  // the [3] Fight action, LMB and fpsmode's unarmed click route here. The
+  // swing is a real strike (CBZ.verbs.strike); the blow lands on the frame
+  // the fist reaches him, or it does not.
   // `opts.blade` runs the shank profile — fpsmode's shoot() sets it when the
   // drawn weapon is a melee row, which is the one place LMB is owned while a
   // weapon is out (the mousedown listener at the bottom of this file
   // deliberately stands down whenever playerArmed() is true).
+  const BLADE_W = { kind: "shank", blade: true, mass: 0.2 };
   function punch(actor, opts) {
+    const V = CBZ.verbs;
     const hasTarget = punchable(actor);
     if (actor && !hasTarget) return { ok: false, msg: "" };
-    // NO "Finish the swing." — the arm is mid-arc on screen. A caption telling
-    // you that the punch you are watching has not landed yet is the clearest
-    // case in the game of narrating an animation.
-    if (pendingPunch) return { ok: false, msg: "" };
+    if (!V || !V.strike) return { ok: false, msg: "" };
     if (CBZ.player.dead || (CBZ.player.stun || 0) > 0 || (CBZ.player.hitLock || 0) > 0) return { ok: false, msg: "" };
     // Fists never stop working. Tired means WEAKER, not blocked — the damage
-    // scales off stamina below, and the guard visibly drops (ch.winded). There
-    // is nothing left to explain, so there is no line to print.
+    // scales off stamina below, and the guard visibly drops (ch.winded).
     if (hasTarget && actor.hp == null) actor.hp = maxHpOf(actor);
 
     const blade = !!(opts && opts.blade) && shankOn();
     const spec = blade ? bladeSpec() : null;
 
-    if (CBZ.now - lastPunch < 980) combo++; else combo = 1;
-    lastPunch = CBZ.now;
+    const next = CBZ.now - lastPunch < 980 ? combo + 1 : 1;
     // A fist winds up every third beat into a hook. A shank has no wind-up —
     // its "heavy" is the DEEP one you get for staying on him, every fourth.
-    const heavy = blade ? combo % 4 === 0 : combo % 3 === 0;
-    const kind = blade ? "stab" : (heavy ? "hook" : (combo % 2 ? "jab" : "cross"));
-    const yaw = hasTarget ? facingYawTo(actor) : cameraFacingYaw();
-    // A held point reaches further than a fist and needs a much tighter cone —
-    // you can miss with a shank by being a hand's width off, and you should.
-    const reach = blade ? (spec.range || BLADE_DEF.range) + (heavy ? 0.16 : 0)
-      : (heavy ? 2.25 : (kind === "cross" ? 2.08 : 1.98));
-    const arcDot = blade ? (heavy ? 0.40 : 0.46) : (heavy ? 0.14 : (kind === "cross" ? 0.26 : 0.34));
+    const heavy = blade ? next % 4 === 0 : next % 3 === 0;
+    const kind = blade ? "stab" : (heavy ? "hook" : (next % 2 ? "jab" : "cross"));
+    // no man named: square up to where you are looking; the swing finds
+    // whoever is actually there
+    if (!hasTarget && CBZ.playerChar && CBZ.lerpAngle) {
+      CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, cameraFacingYaw(), 0.85);
+    }
     /* THE BAG BUFF, RETIRED. A shiv in your pocket does not make your KNUCKLES
-       harder — that was the whole of the old model, and it is why the object
-       never needed to exist. Now a shiv in the bag does the one thing a shiv
-       in a bag can do: it lets you DRAW it (systems/inventory.js hands the
-       weapon row over on pickup). Bare fists go back to their honest 11.
-       Flag off → the exact old expression, so nothing about the pre-shank
-       balance moves for anyone who reverts. */
+       harder; a shiv in the bag lets you DRAW it (systems/inventory.js hands
+       the weapon row over on pickup). Bare fists are an honest 11.
+       Flag off → the exact old expression. */
     const baseDmg = blade ? (spec.damage || BLADE_DEF.damage)
       : (shankOn() ? 11 : 11 + (CBZ.econ.hasItem("Shiv") ? 9 : 0));
-    // Stabbing is cheaper than swinging — it is a short movement, and the
-    // exhaustion curve is what makes a cornered man with a blade frightening.
-    stamina = Math.max(0, stamina - (blade ? (heavy ? 0.20 : 0.13) : (heavy ? 0.34 : 0.22)));
-
-    // throw the punch (alternate fists) — but the BLADE hand is the right one,
-    // because that is the socket the shank model actually hangs off. Stabbing
-    // with the empty left fist would animate a man's bare hand into someone
-    // while the weapon hung at his side, which is the bug this whole pass is about.
-    CBZ.playerChar.punchArm = blade ? "r" : (combo % 2 ? "r" : "l");
-    CBZ.playerChar.punchKind = kind;
-    CBZ.playerChar.punchDur = blade ? (heavy ? 0.38 : 0.28) : (heavy ? 0.42 : 0.34);
-    CBZ.playerChar.punchT = CBZ.playerChar.punchDur;
-    CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, yaw, 0.85);
-    CBZ.meleeFocusT = Math.max(CBZ.meleeFocusT || 0, heavy ? 0.85 : 0.62);
-
-    pendingPunch = {
-      actor: hasTarget ? actor : null, heavy, yaw, kind, reach, arcDot, blade,
+    const cost = blade ? (heavy ? 0.20 : 0.13) : (heavy ? 0.34 : 0.22);
+    const stam = Math.max(0, stamina - cost);
+    const attack = {
+      heavy, kind, blade,
       bleed: blade ? (spec.bleed || BLADE_DEF.bleed) * (heavy ? 1.5 : 1) : 0,
-      // gassed punches land soft: 100% fresh down to 35% empty. A blade is
-      // less forgiving of a tired arm than a fist is — steel does the work,
-      // so it only loses a third of its bite instead of two thirds.
+      // gassed punches land soft: 100% fresh down to 35% empty. A blade loses
+      // only a third of its bite to a tired arm — steel does the work.
       dmg: baseDmg * (blade ? (heavy ? 1.55 : 1) : (heavy ? 1.8 : (kind === "cross" ? 1.16 : 1)))
-        * (blade ? (0.66 + 0.34 * stamina) : (0.35 + 0.65 * stamina)),
-      t: blade ? (heavy ? 0.17 : 0.12) : (heavy ? 0.19 : 0.15),
-      max: blade ? (heavy ? 0.38 : 0.28) : (heavy ? 0.42 : 0.34),
+        * (blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam)),
     };
+    // a held point reaches further than a fist: the step in covers the rest
+    const maxLunge = blade ? Math.max(0.75, (spec.range || BLADE_DEF.range) + (heavy ? 0.16 : 0) - 0.95) : 0.75;
+    const S = V.strike(playerActor(), hasTarget ? actor : null, {
+      kind, heavy, arm: blade ? "r" : undefined,
+      weapon: blade ? BLADE_W : null,
+      candidates: hasTarget ? null : candidates,
+      maxLunge,
+      onLand: function (res) { landPunch(res, attack); },
+      onBlocked: function (res) { blockedPunch(res, attack); },
+      onWhiff: whiffPunch,
+    });
+    if (!S) return { ok: false, msg: "" };           // the last swing still owns the fists
+    combo = next; lastPunch = CBZ.now; stamina = stam;
+    CBZ.meleeFocusT = Math.max(CBZ.meleeFocusT || 0, heavy ? 0.85 : 0.62);
+    // HE SEES IT COMING. A man you are squaring up to gets his hands up in
+    // time for some of them — what was a 16% dice roll on the damage (6% for
+    // a point) is now his forearms actually in front of his face: a head shot
+    // lands on them, and a hook to the body or a shank low goes under.
+    const T = S.aimT;
+    if (T && !heavy && CBZ.econ.rng() < (blade ? 0.06 : 0.16)) V.block(T, 0.42);
     // a swing is a swing: systems/capture.js reads it as resisting an order
     CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
-    // NO "Swing..." / "Heavy swing...". Eight lines above, this function set
-    // punchArm, punchKind, punchDur and punchT — entities/character.js:2509
-    // drives a real jab / cross / hook / uppercut off those, with its own
-    // wind-up and follow-through. The popup captioned the animation it had
-    // just triggered. A punch IS a motion; that was the whole point.
     return { ok: true, msg: "" };
   }
 
-  function landPunch(attack) {
-    let actor = attack.actor;
-    if (!punchable(actor) || !inPunchArc(actor, attack)) actor = findPunchTarget(attack);
-    if (!punchable(actor)) {
-      popup("MISS!", 0);
-      combo = 0;
-      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.10);
-      CBZ.sfx("step");
-      CBZ.doHitstop(0.025);
-      return { ok: false, msg: "" };
-    }
+  // WHO YOU HIT, AND WHERE, DECIDES WHAT IT COSTS THEM. `attack.dmg` is the
+  // swing; res.dmgMul is where it landed (jaw 1.3, head 1, liver 1.25, body
+  // 0.8, legs 0.6); systems/bodymass.js turns the two bodies into a ratio
+  // (two adult men = 1.0).
+  function hurtOf(res, attack, actor) {
+    return attack.dmg * res.dmgMul * (CBZ.meleeScale ? CBZ.meleeScale(CBZ.player, actor) : 1);
+  }
+  function landPunch(res, attack) {
+    const actor = res.target;
+    if (!punchable(actor)) { res.reaction = "none"; return; }
     if (actor.hp == null) actor.hp = maxHpOf(actor);
     const heavy = attack.heavy;
     const blade = !!attack.blade;
     const guardish = actor.kind === "guard" || actor.kind === "warden";
-
-    if (!inPunchArc(actor, attack)) {
-      popup("MISS!", 0);
-      combo = 0;
-      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.10);
-      CBZ.sfx("step");
-      CBZ.doHitstop(0.025);
-      return { ok: false, msg: "" };
-    }
-
-    /* WHO YOU HIT DECIDES WHAT IT COSTS THEM. `attack.dmg` is a number off the
-       PLAYER's fist and the tier he threw — it says nothing at all about the
-       body it is landing on, so a jab took the same bite out of every inmate
-       in the yard regardless of what they were built like. systems/bodymass.js
-       turns the pair into a ratio off the anthropometric profile the rig
-       already carries; two adult men come out at exactly 1.0, so the prison's
-       existing fights do not move a point. */
-    const dmg = attack.dmg * (CBZ.meleeScale ? CBZ.meleeScale(CBZ.player, actor) : 1);
+    const dmg = hurtOf(res, attack, actor);
     actor.hp -= dmg;
-    // YOU BEAT HIM TO THE PUNCH. A fist landing on a man mid-wind-up ends the
-    // swing he was throwing (entities/ai.js parks the blow in `_blow` until
-    // the fist's own frame, so cancelling it here really does cancel the
-    // hit), and he needs a beat before the next one. This is the whole of
-    // what makes trading blows a fight instead of two damage timers.
-    if (actor.char && (actor.char.punchT > 0 || actor.char.kickT > 0)) { actor.char.punchT = 0; actor.char.kickT = 0; }
+    // YOU BEAT HIM TO THE PUNCH. entities/ai.js parks his blow in `_blow`
+    // until his fist's own frame; verbs_strike has already cut his swing.
     actor._blow = null;
     actor.hitCD = Math.max(actor.hitCD || 0, heavy ? 0.85 : 0.45);
-    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(attack.kind, heavy);
-    /* punches BRUISE (wounds.js) — the face you beat carries it.
-
-       THIS THREW ON EVERY LANDED PUNCH. `actor.pos` does not exist on a prison
-       actor — they keep their position on `.group.position` (the same trap
-       city/social.js's citySay hit, documented in entities/ai.js). Reading
-       `.pos.x` off undefined raised mid-landPunch, so NOTHING below this line
-       ever ran: no hit-stop, no shake, no knockback, no KO, no
-       downConsequences. Melee had no impact at all, and the "Swing..." popup
-       was the only evidence a punch had happened — which is exactly why the
-       caption felt load-bearing. Fix the body and the caption is redundant;
-       delete the caption first and you have neither. */
-    /* A PUNCH LEAVES NO MARK. (OWNER, 2026-08-15: "i want the mark almost
-       completely gutted from the code i hate the purple mrk and dot from
-       punching... it shows up right away on the body over clothes its just a
-       terrible mark from punching.")
-
-       Every landed punch stamped a wound decal, and the decal it stamped was a
-       gunshot wearing a different colour: systems/wounds.js draws the "bruise"
-       kind with the same pit geometry as a bullet hole — its own comment says
-       so, "a bullet hole, a bite and a bruise all become pits from one change"
-       — so a saturated ink-purple disc with a hard rim and a dark core landed
-       on a man the first time you clipped him, ON HIS CLOTHES, and stayed
-       there for the rest of the run.
-
-       Three separate wrongs and only one of them was frequency, which is why
-       this is a deletion rather than a threshold: the mark appeared instantly
-       when real bruising takes hours, it appeared over fabric where a bruise
-       cannot be seen at all, and it was drawn as a puncture. Tuning how OFTEN
-       a wrong thing appears still leaves a wrong thing.
-
-       A beaten man still reads, and reads better without it: reactions.js
-       flinches and staggers him, the head whips along the punch line,
-       knockback moves him, hit-stop lands the weight, a heavy blow on a man
-       already worn past half draws blood, and he goes down when he is done.
-
-       A BLADE STILL CUTS. `melee:"blade"` is a different wound in wounds.js
-       (the narrow slit at :926, its own gentler limp at :867) and a knife
-       going into someone should absolutely leave something behind. A stab
-       lands low in the body, not at head height where a hook lands.
-
-       LATER, IF IT IS EARNED: the owner's own note is that "a black eye
-       eventually down the line is cool code" — a mark that arrives late, sits
-       on skin rather than cloth, and only after a real beating. That is a
-       different feature with different rules, and it starts from nothing
-       rather than from this. */
-    const wp = actor.pos || (actor.group && actor.group.position) || null;
-    if (blade && CBZ.bodyWound && wp) {
-      CBZ.bodyWound(actor, { x: wp.x, y: (wp.y || 0) + 1.18, z: wp.z },
-        { melee: "blade", cal: 0.7, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
-      bladeWounds++;
-    }
-    if (blade) stabHits++;
-    /* IT KEEPS BLEEDING. The prison had no notion of a wound that goes on
-       working after the hit; the city did (`a._bleed`, drained in
-       city/combat.js's posture maintenance) and it existed precisely for the
-       knife. Same field, same meaning, drained by this file's own tick below,
-       so a man you stick and then break away from can still go down in the
-       yard behind you — which is the entire tactical difference between a
-       blade and a fist, and the reason a shank is worth carrying. */
+    /* A PUNCH LEAVES NO MARK (owner, 2026-08-15: no purple bruise decal over
+       clothes). A BLADE STILL CUTS: verbs_strike opens the wound at the real
+       point the point went in (wounds.js melee:"blade"). */
+    if (blade) { bladeWounds++; stabHits++; }
+    /* IT KEEPS BLEEDING. Same `_bleed` field and drain rate the city uses,
+       drained by this file's own tick below. */
     if (attack.bleed > 0) {
       actor._bleed = (actor._bleed || 0) + dmg * attack.bleed;
       actor._bleedSrcX = CBZ.player.pos.x;
@@ -399,50 +254,49 @@
       markBleeding(actor);
     }
     stamina = Math.min(1, stamina + 0.05);
-    showHP(actor);
-
-    // base juice + a real, velocity-based knockback so the hit reads physical
-    CBZ.doHitstop(blade ? (heavy ? 0.09 : 0.05) : (heavy ? 0.11 : 0.06));
-    CBZ.shake(blade ? (heavy ? 0.38 : 0.22) : (heavy ? 0.55 : 0.3));
-
-    /* BLOOD IS EARNED, AND IT IS NOT A DICE ROLL.
-       OWNER: "blood flying if it's a hard enough punch but no fake shit blood
-       on every punch or on Random punches is just as bad as the glow."
-
-       Both failure modes are the same failure the glow was: an effect that
-       fires because something happened rather than because of WHAT happened.
-       Blood on every punch is wallpaper; blood on a random 20% is a lie about
-       the punch you just threw, because the identical punch bleeds or doesn't
-       depending on a number you cannot see.
-
-       So the rule is a fact about the fight, checked not rolled: it has to be
-       a HEAVY blow (the third of a combo — the hook, the one you wound up for)
-       AND it has to land on a man already worn down past half. A first hook on
-       a fresh man bruises him; the same hook after you have taken him apart
-       opens him up. Both are repeatable — throw the same punches in the same
-       order and you get the same blood, every time.
-
-       A blade is exempt and always bleeds: `melee:"blade"` is a cut, and
-       wounds.js already routes it to the blade wound rather than a bruise. */
-    if (!blade && heavy && actor.hp > 0 && actor.hp < maxHpOf(actor) * 0.5 && CBZ.goreImpact && wp) {
-      const bdx = (wp.x - CBZ.player.pos.x), bdz = (wp.z - CBZ.player.pos.z);
-      const bl = Math.hypot(bdx, bdz) || 1;
-      CBZ.goreImpact(wp.x, (wp.y || 0) + 1.5, wp.z, {
-        amount: 0.45,                                   // a split lip, not a fountain
-        dir: { x: bdx / bl, y: 0.35, z: bdz / bl },     // it flies the way the fist went
-      });
-    }
-    // A shank does not throw men. Almost all of a stab's energy goes IN — the
-    // shove is what your other hand is doing, not what the weapon did.
-    if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: blade ? (heavy ? 3.4 : 2.2) : (heavy ? 8 : 4.5) });
-    if (CBZ.reactPunch) CBZ.reactPunch(actor, { kind: attack.kind, heavy, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
+    /* BLOOD IS EARNED, AND IT IS NOT A DICE ROLL (owner: "blood flying if it's
+       a hard enough punch but no fake shit blood on every punch"). A HEAVY
+       blow on a man already worn past half splits him — at the point the fist
+       actually landed, flying the way it went. Repeatable, never rolled. */
+    if (!blade && heavy && actor.hp > 0 && actor.hp < maxHpOf(actor) * 0.5) res.blood = 0.45;
     CBZ.sfx(blade ? "hit" : "punch");
-    /* THE LAW (systems/prisonlaw.js). Who you hit and who started it decide
-       what it is: a screw is ASSAULT, always on file (he felt it). A man who
-       came for you and gets hit back is self-defence: no heat, no case, and
-       a guard who sees it breaks it up (the 4 Hz poll there). Throwing first
-       where a screw can see it is a FIGHT on file; steel in front of a screw
-       is a serious one. */
+    theLaw(actor, blade, guardish);
+    if (actor.hp <= 0) {
+      // EXECUTION when it's a heavy/combo finish; otherwise a clean KO: he goes
+      // down for real (entities/meleeposes.js falls him; the ko timer holds him
+      // there and he gets up when it runs out)
+      const exec = heavy || combo >= 3 || CBZ.econ.rng() < 0.35;
+      if (exec) { execute(actor, guardish, blade, res); return; }
+      CBZ.sfx("ko"); downConsequences(actor, guardish);
+      res.reaction = "knockdown";
+      combo = 0;
+    }
+  }
+  // his forearms took it: a chip through the guard, and you eat the rebound
+  function blockedPunch(res, attack) {
+    const actor = res.target;
+    if (punchable(actor)) {
+      if (actor.hp == null) actor.hp = maxHpOf(actor);
+      actor.hp = Math.max(1, actor.hp - hurtOf(res, attack, actor));
+      theLaw(actor, !!attack.blade, actor.kind === "guard" || actor.kind === "warden");
+    }
+    CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.30);
+    CBZ.player.hitT = Math.max(CBZ.player.hitT || 0, 0.30);
+    stamina = Math.max(0, stamina - 0.12);
+    combo = 0;
+    CBZ.sfx("hit");
+  }
+  // he was not there: the fist went through air (or he slipped it)
+  function whiffPunch() {
+    combo = 0;
+    CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.10);
+    CBZ.sfx("step");
+  }
+  /* THE LAW (systems/prisonlaw.js). Who you hit and who started it decide what
+     it is: a screw is ASSAULT, always on file. A man who came for you and gets
+     hit back is self-defence. Throwing first where a screw can see it is a
+     FIGHT on file; steel in front of a screw is a serious one. */
+  function theLaw(actor, blade, guardish) {
     const inPen = CBZ.game.mode === "escape" && CBZ.game.role !== "cop";
     const nowT = CBZ.game.elapsed || 0;
     const selfDefense = !guardish && (((actor.huntPlayer || 0) > 0) || (nowT - (actor._lawHitPlayerT || -1e9)) < 10);
@@ -460,83 +314,26 @@
       }
     }
     if (guardish) actor.hunt = 3; else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12);
-
-    // Light jabs can be blocked. A point is a different problem: you can put
-    // a forearm in front of a fist, and men do, but doing it to a shank just
-    // means the forearm is where it goes in. The roll survives so a stab is
-    // not strictly better than a fist in every case — it is much rarer.
-    if (actor.hp > 0 && !heavy && CBZ.econ.rng() < (blade ? 0.06 : 0.16)) {
-      CBZ.player.hitLock = Math.max(CBZ.player.hitLock || 0, 0.30);
-      CBZ.player.hitT = Math.max(CBZ.player.hitT || 0, 0.30);
-      stamina = Math.max(0, stamina - 0.12);
-      combo = 0;
-      CBZ.shake(0.4); popup("BLOCKED!", 0); CBZ.sfx("step");
-      return { ok: false, msg: "" };
-    }
-
-    if (actor.hp <= 0) {
-      // EXECUTION when it's a heavy/combo finish; otherwise a clean KO
-      const exec = heavy || combo >= 3 || CBZ.econ.rng() < 0.35;
-      if (exec) return execute(actor, guardish, blade);
-      popup(heavy ? "WHAM!" : "DOWN!", combo);
-      if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, 1.5);
-      CBZ.sfx("ko"); downConsequences(actor, guardish);
-      combo = 0;
-      // NO LINE. He is on the floor, the ko sound played, the knockback threw
-      // him and showHP drew the hit. The combo count was the only part not on
-      // screen, and you counted it by throwing the punches.
-      return { ok: true, msg: "" };
-    }
-
-    popup(heavy ? "WHAM!" : WORDS[Math.floor(CBZ.econ.rng() * WORDS.length)], combo);
-    return { ok: true, msg: "" };
   }
 
-  // a hard finishing blow — a heavy hook that drops them, not a cartoon
-  // launch. Real impact: hitstop, a brief slow-mo, a strong knockback that
-  // staggers them off their feet, blood, then they go down.
-  function execute(actor, guardish, blade) {
-    // A shank finish is not a launching hook — it is the last one going in,
-    // held there. Same beat, same slow-mo, one hand's worth of travel.
-    CBZ.playerChar.punchKind = blade ? "stab" : "hook";
-    if (blade) { CBZ.playerChar.punchArm = "r"; stabKills++; }
-    CBZ.playerChar.punchDur = blade ? 0.46 : 0.4;
-    CBZ.playerChar.punchT = CBZ.playerChar.punchDur;
+  // THE BLOW THAT ENDS IT. It is the blow that just landed — no second swing
+  // re-played over it — held in a beat of slow motion. The punch that ends it
+  // bleeds (a blade's death spray is the arterial one aiKill routes).
+  function execute(actor, guardish, blade, res) {
+    if (blade) stabKills++;
     CBZ.meleeFocusT = Math.max(CBZ.meleeFocusT || 0, 1.0);
     CBZ.doHitstop(blade ? 0.11 : 0.14);
     CBZ.doSlowmo(0.5);
     CBZ.shake(blade ? 0.55 : 0.85);
     CBZ.sfx("ko");
-    // a real, heavy knockback (velocity-based via the body layer) instead of
-    // flinging them into the air with a spin.
-    if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: blade ? 4.5 : 11 });
-    /* THE PUNCH THAT ENDS IT BLEEDS. Same rule as the one above, at its
-       extreme: this is the blow that takes a man off his feet for good, so it
-       is unambiguously "hard enough" and needs no threshold test. Fists only —
-       a blade's death spray is the arterial one aiKill already routes below. */
-    if (!blade && CBZ.goreImpact && actor.group) {
-      const ep = actor.group.position;
-      const edx = ep.x - CBZ.player.pos.x, edz = ep.z - CBZ.player.pos.z;
-      const el = Math.hypot(edx, edz) || 1;
-      CBZ.goreImpact(ep.x, (ep.y || 0) + 1.5, ep.z,
-        { amount: 1.1, dir: { x: edx / el, y: 0.45, z: edz / el } });
-    }
-    else if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, blade ? 0.7 : 1.6);
-    // `melee:"blade"` is what turns systems/gore.js's generic death spray into
-    // the ARTERIAL one — 2-3 timed arcs off the body (gore.js:32/2028), which
-    // it has been able to draw for months and which no prison kill has ever
-    // asked it for, because no prison kill was ever made with an edge.
+    if (!blade) res.blood = 1.1;
+    res.reaction = "dead";                           // prisoncorpse / aiKill own the body now
+    // `melee:"blade"` turns gore.js's death spray into the ARTERIAL one
     if (CBZ.aiKill) CBZ.aiKill(actor, { group: CBZ.playerChar.group }, { noKnock: true, melee: blade ? "blade" : null });
     else { actor.dead = true; actor.ko = 0; actor.hp = 0; }
     if (CBZ.game.koLog && actor.data) CBZ.game.koLog[actor.data.name] = true;
     if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(actor, "melee");
-    showHP(actor);
     combo = 0;
-    // A DEATH ALREADY HAS ITS SURFACE and it is not a hint line: aiKill above
-    // routes to city/killfeed.js and drops the body's real loadout on the floor
-    // (systems/prisondrops.js). This said the same thing, worse, over the top
-    // of a man falling down.
-    return { ok: true, msg: "" };
   }
 
   /* ---------- BLEEDING OUT ----------
@@ -587,11 +384,6 @@
        already visibly sagging by the time the fists actually refuse. */
     const ch = CBZ.playerChar;
     if (ch) ch.winded = Math.min(1, Math.max(0, 1 - stamina));
-    if (!pendingPunch) return;
-    pendingPunch.t -= dt;
-    if (pendingPunch.t > 0) return;
-    landPunch(pendingPunch);
-    pendingPunch = null;
   });
 
   CBZ.punch = punch;

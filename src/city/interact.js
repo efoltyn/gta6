@@ -175,14 +175,12 @@
   }
 
   // ---- the raw VERBS (unchanged behavior) ---------------------------------
+  // "Swing on" is a PUNCH: the same thrown, contact-resolved blow as a
+  // left-click (city/combat.js → systems/verbs_strike.js), aimed at him. It
+  // used to be a flat 35 HP and a guaranteed knockout with no swing at all.
   function attack(p) {
-    const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     CBZ.player._fighting = 1.5;
-    if (p.kind === "cop") { CBZ.cityHurtCop && CBZ.cityHurtCop(p, 35, { fromX: fx, fromZ: fz }); return; }
-    p.hp -= 35;
-    if (CBZ.sfx) CBZ.sfx("punch");
-    if (p.hp <= 0) CBZ.cityKillPed(p, { fromX: fx, fromZ: fz }, "beaten");
-    else CBZ.cityKOPed(p, fx, fz);
+    if (CBZ.citySwingOn) CBZ.citySwingOn(p);
   }
   function execute(p) {
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;

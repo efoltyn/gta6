@@ -1497,7 +1497,9 @@
       noteState(g, "ko");
       g.ko -= dt;
       g._chase = null;
-      g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
+      // a rig fall (entities/meleeposes.js) is the visible fall; the side roll
+      // is only for a KO without one
+      if (!(g.char && g.char.fall && g.char.fall.on)) g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
       return false;

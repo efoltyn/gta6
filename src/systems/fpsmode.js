@@ -2966,10 +2966,12 @@
     if (shotCD > 0) return;
     shotCD = w.interval || 0.42;
     const hit = aimedActor(w.range || MELEE);
-    triggerFistPunch(true);
     const strike = CBZ.prisonStab || CBZ.punch;
-    if (!strike) { CBZ.sfx && CBZ.sfx("step"); return; }
+    if (!strike) { triggerFistPunch(true); CBZ.sfx && CBZ.sfx("step"); return; }
     const r = strike(hit && hit.actor);
+    // the first-person hand swings AFTER the body has its kind and clock, so
+    // both views run the same stab on the same beat
+    if (r && r.ok) triggerFistPunch(true);
     if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
   }
 
