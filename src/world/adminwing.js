@@ -71,7 +71,7 @@
    between them, the chair, the doors. Each frame it asks CBZ.warden which
    post he belongs on and walks him there.
 
-   Flags PRISON_ADMIN_WING, PRISON_WARDEN_SUIT, PRISON_WARDEN_SEATED.
+   Flags PRISON_ADMIN_WING, PRISON_WARDEN_SEATED.
    Ratchet CBZ.adminWingAudit(): `unreachable` (a locked thing with no route)
    and `keyBothPlaces` (the key on his hip AND in the safe) both pinned at 0.
 ============================================================ */
@@ -85,7 +85,6 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
-  if (CBZ.CONFIG.PRISON_WARDEN_SUIT == null) CBZ.CONFIG.PRISON_WARDEN_SUIT = true;
   /* HE SITS DOWN (owner 2026-08-11: "the warden should be seated at his own
      locked office"). He had the office, the lock and the routine, and then
      PACED it: POST.office was a three-point walking cycle, so the man whose
@@ -638,7 +637,7 @@
   }
 
   const V3 = function (p) { return new THREE.Vector3(p[0], 0, p[1]); };
-  const warden = { g: null, at: null, transit: 0, suited: false, dressT: 0, seat: null, seatTries: 0,
+  const warden = { g: null, at: null, transit: 0, seat: null, seatTries: 0,
     tresT: 0, tresStage: 0 };   // the trespass ladder — see wardenTerritory()
 
   /* ---- HIS CHAIR ---------------------------------------------------------
@@ -790,24 +789,9 @@
     }
   }
 
-  /* ---- THE SUIT. city/clothes.js parses at index.html:821 — 280 tags after
-       entities/guards.js — so this is a deferred first-tick call, the same
-       deferral world/crates.js and world/cellblock.js use for their own
-       cross-block reach. Style 8 is "Charcoal 3-Piece Suit"; the indices are
-       a stable contract (clothes.js:1950). The peaked cap comes OFF with it:
-       a warden in a three-piece and an officer's cap is two uniforms. The
-       badge stays, because the badge is the point. ---- */
-  function dress(g) {
-    if (warden.suited || CBZ.CONFIG.PRISON_WARDEN_SUIT === false) return;
-    if (!CBZ.applyClothes || !g.char || !g.char.skinSlots) return;
-    let ok = null;
-    try { ok = CBZ.applyClothes(g.char, { id: "suit", style: 8 }); } catch (e) { ok = null; }
-    if (!ok) return;
-    warden.suited = true;
-    // the officer's cap is the outfit's headwear layer (entities/headwear.js):
-    // taking it off lets the hair spring back out from under it
-    if (CBZ.headwear) CBZ.headwear.wear(g.char, null, { owner: "outfit" });
-  }
+  /* THE SUIT is no longer applied here: systems/prisonoutfits.js dresses him
+     from city/outfits.js CAT.warden (a pinned charcoal three-piece, no cap,
+     no badge), the one record every other system reads him by. */
 
   /* ==========================================================
      7. THE TICK — doors, the safe, and the day.
@@ -946,7 +930,6 @@
     }
     const w = warden.g;
     if (!w) return;
-    if (!warden.suited) { warden.dressT += dt; if (warden.dressT > 0.4) dress(w); }
     if (w.dead || w.ko > 0) return;
     wardenTerritory(w, dt, P);
     // transit finished → settle into the post cycle
@@ -1080,7 +1063,7 @@
       seated: !!(warden.g && warden.g._propSeat),
       chair: warden.seat ? { x: Math.round(warden.seat.x * 10) / 10, z: Math.round(warden.seat.z * 10) / 10, kind: warden.seat.kind } : null,
       warden: warden.g ? {
-        post: warden.at, transit: warden.transit, suited: warden.suited,
+        post: warden.at, transit: warden.transit, suited: !!(warden.g && warden.g.char && warden.g.char._prisonOutfitKey === "warden"),
         x: Math.round(warden.g.group.position.x * 10) / 10,
         z: Math.round(warden.g.group.position.z * 10) / 10,
       } : null,
