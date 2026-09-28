@@ -129,6 +129,7 @@
   const RAD = [0.30, 0.24, 0.24, 0.26, 0.26, 0.15, 0.15, 0.12, 0.12, 0.16, 0.16, 0.14, 0.14];
   // points that get the wall push (extremities + a hip — limbs out of walls)
   const WALLPTS = [0, 3, 7, 8, 11, 12];
+  const WALL_SLIDE = 0.4;    // share of its slide along (and down) a wall a contact keeps per substep: cloth on plaster grips
 
   // sticks: flat [i, j, rest, minOnly] — minOnly lets the head loll freely but
   // never fold down into the gut (a one-sided spacer, not a rigid spine).
@@ -580,6 +581,59 @@
     if (vz === vz) { const c = p[i + 2] - q[i + 2]; p[i + 2] += (vz * h - c) * gain; }
   }
 
+  /* A KNEE IS A HINGE. Distance sticks let a knee fold either way, and a man
+     launched onto his back with his feet held by the floor folded them
+     BACKWARD: thighs flat on the floor pointing at his head, shins under
+     him, the hips propped 0.45 m up on his own heels (bodyfall-check's
+     intermittent "front m14: rests on the floor"). The body's forward is
+     the torso frame (shoulder line x spine, the same basis writePose draws);
+     a knee may sit anywhere on or in front of its hip-ankle line, never
+     behind it. The fix is a one-sided plane projection shared 2:1:1 between
+     the knee and its two ends, so it moves no centre of mass and, unlike the
+     old angle clamp, has nothing to pump energy into. */
+  function kneeHinge(p) {
+    const rx = p[3] - p[6], ry = p[4] - p[7], rz = p[5] - p[8];
+    const ux = (p[3] + p[6] - p[9] - p[12]) * 0.5, uy = (p[4] + p[7] - p[10] - p[13]) * 0.5, uz = (p[5] + p[8] - p[11] - p[14]) * 0.5;
+    let fx = ry * uz - rz * uy, fy = rz * ux - rx * uz, fz = rx * uy - ry * ux;
+    const fl = Math.sqrt(fx * fx + fy * fy + fz * fz);
+    if (fl < 1e-6) return;
+    fx /= fl; fy /= fl; fz /= fl;
+    for (let n = 0; n < 2; n++) {
+      const H = (3 + n) * 3, K = (9 + n) * 3, A = (11 + n) * 3;
+      const d = (p[K] - (p[H] + p[A]) * 0.5) * fx + (p[K + 1] - (p[H + 1] + p[A + 1]) * 0.5) * fy + (p[K + 2] - (p[H + 2] + p[A + 2]) * 0.5) * fz;
+      if (d >= 0) continue;
+      const c = -d;                        // knee moves 2c/3 forward, each end c/3 back: momentum kept
+      p[K] += fx * c * 2 / 3; p[K + 1] += fy * c * 2 / 3; p[K + 2] += fz * c * 2 / 3;
+      p[H] -= fx * c / 3; p[H + 1] -= fy * c / 3; p[H + 2] -= fz * c / 3;
+      p[A] -= fx * c / 3; p[A + 1] -= fy * c / 3; p[A + 2] -= fz * c / 3;
+    }
+  }
+
+  // walls: extremities get the shared circle-vs-box push (height-gated)
+  function wallPass(p, q, sk) {
+    for (let k = 0; k < WALLPTS.length; k++) {
+      const i = WALLPTS[k] * 3;
+      _c.x = p[i]; _c.y = p[i + 1]; _c.z = p[i + 2];
+      CBZ.collide(_c, 0.16 * sk, p[i + 1] - 0.1, p[i + 1] + 0.1);
+      const ddx = _c.x - p[i], ddz = _c.z - p[i + 2];
+      if (!(ddx || ddz)) continue;
+      /* A WALL IS A CONTACT, NOT A SPRING. Moving p alone leaves q where it
+         was, so verlet reads the push-out as outward velocity and the point
+         rebounds off the wall; one hand or the head bouncing off a wall the
+         body met at an angle is a free yaw torque (a diagonal round into a
+         wall turned the hip line 34 degrees). Carry q with the push, kill the
+         velocity into the wall, and let the wall's friction take some of the
+         slide along it. */
+      const dl = Math.sqrt(ddx * ddx + ddz * ddz), nx = ddx / dl, nz = ddz / dl;
+      let vx = p[i] - q[i], vz = p[i + 2] - q[i + 2];
+      const vn = vx * nx + vz * nz;
+      if (vn < 0) { vx -= nx * vn; vz -= nz * vn; }
+      p[i] = _c.x; p[i + 2] = _c.z;
+      q[i] = p[i] - vx * WALL_SLIDE; q[i + 2] = p[i + 2] - vz * WALL_SLIDE;
+      q[i + 1] = p[i + 1] - (p[i + 1] - q[i + 1]) * WALL_SLIDE;   // and down it: a head on a wall carries weight
+    }
+  }
+
   function solve(s, dt) {
     if (dt <= 0) return;
     const p = s.p, q = s.q, sk = s.k;
@@ -657,6 +711,7 @@
           p[i] -= dx; p[i + 1] -= dy; p[i + 2] -= dz;
           p[j] += dx; p[j + 1] += dy; p[j + 2] += dz;
         }
+        kneeHinge(p);
         // (The per-iteration knee/elbow ANGLE clamp that ran here is gone. It
         // had the knee's sign inverted, so it forbade a knee's natural fold
         // and allowed it to bend backward, and even with the sign right it
@@ -688,18 +743,13 @@
           }
         }
       }
+      // walls, INSIDE the substep: pushed out after the sticks had their say,
+      // so the next substep's sticks relax the rest of the body around the
+      // contact instead of dragging the point back in for a whole frame
+      if (CBZ.collide) wallPass(p, q, sk);
       // the hold gets the LAST word of the substep — after the sticks and
       // after the ground, so nothing can drag the held point off the jaw.
       if (s.pin) applyPin(s);
-    }
-    // walls: extremities get the shared circle-vs-box push (height-gated)
-    if (CBZ.collide) {
-      for (let k = 0; k < WALLPTS.length; k++) {
-        const i = WALLPTS[k] * 3;
-        _c.x = p[i]; _c.y = p[i + 1]; _c.z = p[i + 2];
-        CBZ.collide(_c, 0.16 * sk, p[i + 1] - 0.1, p[i + 1] + 0.1);
-        p[i] = _c.x; p[i + 2] = _c.z;
-      }
     }
     if (s.pin) applyPin(s);          // the wall pusher doesn't get to move the grip either
     // sleep: kinetic energy stayed low → freeze the pose where it lies. Never
