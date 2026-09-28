@@ -5,7 +5,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const { makeCharacter, animChar, lerpAngle, visionWedge, player } = CBZ;
+  const { makeCharacter, animChar, visionWedge, player } = CBZ;
 
   // jail feature flag (self-defaulting — one-line revert via CBZ.CONFIG):
   // guards call out their state changes ("STOP RIGHT THERE!") near the player.
@@ -30,13 +30,16 @@
   function makeGuard(waypoints, speed, viewDist, half, opts) {
     opts = opts || {};
     const warden = opts.kind === "warden";
-    // wardens wear a darker dress uniform with a peaked cap
+    // ONE corrections uniform: these build colours are city/outfits.js's
+    // CAT.warden / CAT.corrections verbatim (that file loads later, and
+    // systems/prisonoutfits.js repaints every guard to the record within
+    // 0.3 s). They used to be a different navy, so every guard popped colour.
     const ch = makeCharacter(warden ? {
-      legs: 0x14182a, torso: 0x1a2138, collar: 0x0e1322, arms: 0x1a2138,
-      skin: 0xdcae84, cap: 0x0e1322, shoes: 0x080808, belt: 0x0a0d18, badge: true,
+      legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d,
+      skin: 0xdcae84, cap: 0x171d29, shoes: 0x090b0f, belt: 0x111419, badge: true,
     } : {
-      legs: 0x232c47, torso: 0x2b3a67, collar: 0x1d2a4d, arms: 0x2b3a67,
-      skin: 0xe7b58c, cap: 0x1d2a4d, shoes: 0x141414, belt: 0x14182a, badge: true,
+      legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
+      skin: 0xe7b58c, cap: 0x202b3b, shoes: 0x111419, belt: 0x111419, badge: true,
     });
     ch.group.userData.dynamic = true;
     (CBZ.prisonRoot || CBZ.scene).add(ch.group);
@@ -957,7 +960,9 @@
     g.questionCD = 2.8 + rng() * 1.4;
     n.questionedT = 7 + rng() * 5;
     n.pause = Math.max(n.pause || 0, 0.75);
-    n.group.rotation.y = lerpAngle(n.group.rotation.y, Math.atan2(g.group.position.x - n.group.position.x, g.group.position.z - n.group.position.z), 0.8);
+    // he turns to the screw at a man's rate (entities/npc.js's mover honours a face order)
+    n._faceYaw = Math.atan2(g.group.position.x - n.group.position.x, g.group.position.z - n.group.position.z);
+    n._faceTTL = 0.9;
 
     const coverScore =
       (sameGang ? 0.34 : 0) +
@@ -1167,10 +1172,7 @@
   // ---- tunables -------------------------------------------------------------
   const SUS_ON = 0.3;          // meter at which he stops and turns (SUSPICIOUS)
   const SUS_OFF = 0.1;         // ... and below which he lets it go
-  const SUS_HOLD = 1.4;        // s the meter holds after sight breaks
-  const SUS_DRAIN = 0.22;      // per second, after the hold
   const SUS_CHECK = 0.5;       // a meter still this high with nothing to see: go and look
-  const CLOSE_SPOT = 2.6;      // m: inside this, sight is instant
   const CAPTURE_R = 1.4;       // m: capture.js's reach (unchanged)
   const ORDER_R = 4.2;         // m: where he gives the order (capture.js ARREST.ORDER_R)
   const RADIO_FIX_EVERY = 3;   // s between a blind pursuer adopting the block's newest fix
@@ -1238,36 +1240,77 @@
     speed: 3, arrive: 0.55, sealedWait: 2.5,
     wait: function (a, s) { a._navWait = Math.max(a._navWait || 0, s); },
   };
-  /* ONE mover for every branch. The navigator rewrites `_navT` into the next
-     waypoint of a walk that exists (round the wall, through the door), or
-     leaves it alone when the straight line is clear. Returns the straight
-     distance still left to (tx, tz). */
-  function walkTo(g, tx, tz, sp, dt, faceK) {
+  /* ONE mover for every branch, and it is CBZ.moves (entities/moves.js).
+     The navigator rewrites `_navT` into the next waypoint of a walk that
+     exists (round the wall, through the door), or leaves it alone when the
+     straight line is clear; the motor walks it. This used to be
+     `p += dir * min(d, sp*dt)` with the yaw lerped at 1 - 0.00005^dt (16%
+     of the angle per frame): full pace from a standstill, a dead stop at the
+     spot, a 180 at the end of a beat inside a quarter of a second, and legs
+     fed the ORDERED pace so a screw held on a doorframe ran on the spot.
+     Now he speeds up and brakes like a man, turns in place at the end of a
+     beat, keeps right of the inmates he passes, and his legs animate the
+     ground he actually covered.
+       stop  arrival radius for this order (he brakes INTO it)
+       leg   a point he walks THROUGH (a patrol corner), no braking
+     Returns the straight distance still left to (tx, tz). */
+  const GMV = { speed: 1.4, stop: 0.3, leg: false, face: null, strafe: false,
+    nbrs: null, nbrN: 0, lod: 0, accel: 0, turnRate: 0 };
+  const _gNbrs = [];
+  function guardLod(g) {
+    const dx = g.group.position.x - player.pos.x, dz = g.group.position.z - player.pos.z;
+    return CBZ.moves.lodFor(dx * dx + dz * dz, g.group.visible);
+  }
+  function walkTo(g, tx, tz, sp, dt, stop, leg) {
     const p = g.group.position;
     const T = g._navT || (g._navT = new THREE.Vector3());
     T.set(tx, 0, tz);
     if (navOn()) { NAV_OPTS.speed = sp; CBZ.navGrid.step(g, p, T, dt, NAV_OPTS); }
     if ((g._navWait || 0) > 0) {                    // a shut door on his route: he stands at it
       g._navWait -= dt;
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       return Math.hypot(tx - p.x, tz - p.z);
     }
-    const dx = T.x - p.x, dz = T.z - p.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 0.04) {
-      const s = Math.min(d, sp * dt);
-      p.x += (dx / d) * s;
-      p.z += (dz / d) * s;
-      g._cmd = (g._cmd || 0) + s;
-      g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(faceK || 0.0001, dt));
-      animChar(g.char, sp, dt);
-    } else animChar(g.char, 0, dt);
+    const M = CBZ.moves, m = M.motor(g), O = GMV;
+    // a navigator waypoint short of its goal is a corner: walked through
+    // (a goal the grid only SNAPPED out of a bench is still a goal: braked into)
+    const S = g._nav;
+    const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3);
+    O.speed = sp; O.stop = routed ? 0.3 : (stop || 0.3); O.leg = routed || !!leg;
+    O.face = null; O.strafe = false; O.turnRate = 0;
+    O.accel = sp > 3 ? 5.2 : 0;
+    O.lod = guardLod(g);
+    O.nbrs = null; O.nbrN = 0;
+    if (O.lod === 0 && CBZ.jailNbrs) { O.nbrN = CBZ.jailNbrs(p, _gNbrs); O.nbrs = _gNbrs; }
+    const x0 = p.x, z0 = p.z;
+    M.step(m, p, g.group.rotation.y, T.x, T.z, O, dt);
+    g.group.rotation.y = m.yaw;
+    g._cmd = (g._cmd || 0) + Math.hypot(p.x - x0, p.z - z0);
+    animChar(g.char, Math.min(m.gs, m.speed + 0.4), dt);
     return Math.hypot(tx - p.x, tz - p.z);
   }
+  /* STAND: brake to a halt where he is (a sprinting screw takes a step or
+     two to do it, never a dead stop inside a frame) and let the legs follow
+     the ground. Every "stop and ..." branch goes through this. */
+  function stand(g, dt) {
+    const M = CBZ.moves, m = M.motor(g), O = GMV, p = g.group.position;
+    O.speed = 0; O.stop = 0.3; O.leg = false; O.face = null; O.strafe = false;
+    O.accel = 0; O.turnRate = 0; O.nbrs = null; O.nbrN = 0; O.lod = 1;
+    M.step(m, p, g.group.rotation.y, p.x, p.z, O, dt);
+    g.group.rotation.y = m.yaw;
+    animChar(g.char, Math.min(m.gs, m.speed + 0.4), dt);
+  }
+  // another system owns the body (a corpse, a bunk, an escort): forget motion
+  function still(g) { CBZ.moves.reset(CBZ.moves.motor(g), g.group.position); }
+  /* Turn the body toward a point at a man's rate. `k` was the old lerp
+     sharpness; the slow ones (a suspicious look that lets the head lead) keep
+     a slower bounded turn, everything else turns at the standing rate. */
   function faceTo(g, x, z, k, dt) {
-    const dx = x - g.group.position.x, dz = z - g.group.position.z;
+    const p = g.group.position;
+    const dx = x - p.x, dz = z - p.z;
     if (dx * dx + dz * dz < 1e-4) return;
-    g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(k, dt));
+    const m = CBZ.moves.motor(g);
+    g.group.rotation.y = CBZ.moves.faceAt(m, g.group.rotation.y, p, x, z, dt, k >= 0.005 ? 2.2 : 0);
   }
   function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
   // the head leads the body: a yaw offset on the neck, ADDITIVE (facial.js and
@@ -1286,30 +1329,46 @@
   }
 
   // ---- perception -------------------------------------------------------------
+  /* THE SPOT METER IS THE BRAIN'S (CBZ.brain.perception.awareness): the one
+     sight test, filling faster close, centre-of-cone, lit and on a man who is
+     moving, holding a beat after sight breaks and then draining. This file
+     used to own the meter and an instant spot inside 2.6 m; the prison now
+     only says WHY a screw would care (`reason`) and how hard he is looking.
+     A man at arm's reach is still instant; one across a cell takes a beat.
+     `g.sus` / `g.susHold` stay the meter's public face: other files write
+     them (a noise turns his head, a warning stands him down), so they are
+     carried into the brain's record before it moves and read back after. */
+  const _aw = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 1.0, light: null, reason: 0, moveMul: 1, mul: 1 };
   function perceive(g, dt) {
-    const sees = !ctx.invuln && guardSees(g);
-    g.seesPlayer = sees;
     const px = player.pos.x, pz = player.pos.z;
-    if (sees) { g.lkX = px; g.lkZ = pz; g.lkVX = ctx.pvx; g.lkVZ = ctx.pvz; g.lkAt = clock(); }
     // a man he is already looking FOR is a reason all by itself
     let reason = ctx.reason;
     const inv = g.investigate;
     if (g.hunt > 0 || (inv && inv.type === "search")) reason = Math.max(reason, 1.3);
     else if (inv && inv.looking) reason = Math.max(reason, 1.1);          // sent by a radio call
     else if (inv && inv.player && Math.hypot(px - inv.x, pz - inv.z) < 7) reason = Math.max(reason, 0.8);   // at the scene of the noise
-    if (sees && reason > 0) {
-      const d = Math.hypot(px - g.group.position.x, pz - g.group.position.z);
-      const prox = clamp(1 - d / Math.max(1, g.viewDist), 0, 1);
-      let rate = (0.3 + 2.4 * prox * prox) * reason * ctx.moveMul * ctx.lightMul * ctx.diffMul;
-      if (g.flashlightOn) rate *= 1.25;
-      if (d < CLOSE_SPOT) rate = 50;
-      g.sus = Math.min(1, (g.sus || 0) + rate * dt);
-      g.susHold = SUS_HOLD;
-      g.susX = px; g.susZ = pz;
-    } else {
-      g.susHold = (g.susHold || 0) - dt;
-      if (g.susHold <= 0 && g.sus > 0) g.sus = Math.max(0, g.sus - SUS_DRAIN * dt);
+    const per = CBZ.brain && CBZ.brain.perception;
+    let sees = false;
+    if (per) {
+      const blindToYou = ctx.invuln || (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0);
+      const mem = CBZ.brain.memory;
+      mem.setAware(g, player, g.sus || 0, g.susHold || 0);
+      _aw.range = blindToYou ? 0 : g.viewDist * ctx.viewMul;
+      _aw.fovHalf = Math.min(1.45, g.half * wardenSharp);
+      _aw.shrink = player.crouch ? 0.55 : 1;
+      _aw.light = CBZ.sightScale ? prisonDark : null;
+      _aw.reason = reason;
+      _aw.moveMul = ctx.moveMul;
+      _aw.mul = ctx.diffMul * (g.flashlightOn ? 1.25 : 1);
+      // reason 0 (seen, nothing to care about) drains inside the brain's meter
+      g.sus = per.awareness(g, player, dt, _aw);
+      const r = mem.aware(g, player);
+      sees = !!r.visible;
+      g.susHold = r.hold;
     }
+    g.seesPlayer = sees;
+    if (sees) { g.lkX = px; g.lkZ = pz; g.lkVX = ctx.pvx; g.lkVZ = ctx.pvz; g.lkAt = clock(); }
+    if (sees && reason > 0) { g.susX = px; g.susZ = pz; }
     // what systems/detection.js acts on: CONFIRMED sight, not a glimpse
     g.spotted = sees && (g.sus >= 1 || g.hunt > 0);
   }
@@ -1365,7 +1424,7 @@
      the points. Returns true while the search still has somewhere to go. */
   function searchStep(g, S, dt, gotoSp, sweepSp, keepWidening) {
     if (S.phase === "goto") {
-      const d = walkTo(g, S.x, S.z, gotoSp, dt);
+      const d = walkTo(g, S.x, S.z, gotoSp, dt, 1.1);
       progress(S, d, dt);
       S.walkT += dt;
       if (d < 1.3 || S.stall > GIVE_UP_STALL || S.walkT > 30) {
@@ -1381,13 +1440,13 @@
       S.scan = (S.scan || 0) + dt;
       g.group.rotation.y += Math.sin(S.scan * 2.1) * dt * 1.5;
       g._lookWant = Math.sin(S.scan * 2.9 + 0.7) * 0.85;
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       if (S.look <= 0) { S.atPt = false; S.best = Infinity; S.stall = 0; }
       return true;
     }
     if (S.pts && S.i < S.pts.length) {
       const q = S.pts[S.i];
-      const d = walkTo(g, q.x, q.z, sweepSp, dt, 0.0003);
+      const d = walkTo(g, q.x, q.z, sweepSp, dt, 0.8);
       progress(S, d, dt);
       if (d < 1.0 || S.stall > GIVE_UP_STALL) {
         S.i++; S.atPt = true; S.look = 1.2 + rng() * 1.3; S.scan = 0;
@@ -1463,6 +1522,7 @@
         g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
         animChar(g.char, 0, dt);
       }
+      still(g);
       updateFlashlight(g, dt);
       return false;
     }
@@ -1476,6 +1536,7 @@
     if (g.asleep) {
       noteState(g, "asleep");
       g.hunt = 0; g.alert = 0; g.investigate = null; g._chase = null; g.sus = 0;
+      still(g);
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
       return false;
@@ -1485,6 +1546,7 @@
     if (g._escort) {
       noteState(g, "escort");
       g.hunt = 0; g.alert = 0; g.investigate = null; g.approach = null; g._chase = null; g.sus = 0;
+      still(g);
       updateFlashlight(g, dt);
       return false;
     }
@@ -1495,6 +1557,7 @@
       g.ko -= dt;
       g._chase = null;
       g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
+      still(g);
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
       return false;
@@ -1507,8 +1570,8 @@
     // the muzzle found him, facing it; guardSeesPoint answers false for him.
     if (g.intimidMode === "scared") {
       noteState(g, "heldup");
-      g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(pdx, pdz), 1 - Math.pow(0.0006, dt));
-      animChar(g.char, 0, dt);
+      faceTo(g, player.pos.x, player.pos.z, 0.0006, dt);
+      stand(g, dt);
       updateFlashlight(g, dt);
       return true;
     }
@@ -1524,10 +1587,10 @@
         updateFlashlight(g, dt);
         return true;
       }
-      if (dist > 2.4) walkTo(g, player.pos.x, player.pos.z, g.speed * 1.18, dt);
+      if (dist > 2.4) walkTo(g, player.pos.x, player.pos.z, g.speed * 1.18, dt, 2.3);
       else {
         faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
-        animChar(g.char, 0, dt);
+        stand(g, dt);
         if (!a.greeted) {
           a.greeted = true;
           // He has walked over to you and the head icon is up (markers.js):
@@ -1559,6 +1622,8 @@
       if (g.hunt <= 0) { g.hunt = 0; g._huntRanOut = true; }
       g.investigate = null;
       g._returning = false;
+      // the player outranks any yard case this screw was running
+      if (g._yardCase && CBZ.prisonBrain) CBZ.prisonBrain.endCase(g);
       if (g.seesPlayer) {
         // eyes on: chase what he sees, and do not give up on a man in front of him
         if (g.hunt < 1.0 && ctx.reason > 0) { g.hunt = 1.0; g._huntRanOut = false; }
@@ -1576,11 +1641,11 @@
         }
         if (dist > hold) {
           noteState(g, "hunt");
-          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt);
+          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt, Math.max(0.3, hold - 0.1));
         } else {
           noteState(g, "capture");
           faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
-          animChar(g.char, 0, dt);
+          stand(g, dt);
         }
       } else {
         // blind: run to where he last had you, then sweep round it. The hunt
@@ -1595,12 +1660,21 @@
       return true;
     }
 
+    // ---- YARD LAW (systems/brain_prison.js): he saw two inmates at it and is
+    // running the ladder on the one who started it — break it up, on the
+    // ground, cuffs. CBZ.brain.authority decides the phase; this is his body.
+    if (g._yardCase && CBZ.prisonBrain && CBZ.prisonBrain.guardLawStep(g, dt)) {
+      noteState(g, "law");
+      updateFlashlight(g, dt);
+      return true;
+    }
+
     // THE PRODUCT PRESET (tools/visual-presets/prison-product.mjs) parks a man
     // with `pause`: he holds his post where he was put, eyes still open.
     if (g.pause > 0) {
       g.pause -= dt;
       noteState(g, "patrol");
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       updateFlashlight(g, dt);
       return true;
     }
@@ -1610,7 +1684,7 @@
       noteState(g, "warn");
       faceTo(g, g.seesPlayer ? player.pos.x : (g.lkX != null ? g.lkX : player.pos.x),
         g.seesPlayer ? player.pos.z : (g.lkZ != null ? g.lkZ : player.pos.z), 0.0002, dt);
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       updateFlashlight(g, dt);
       return true;
     }
@@ -1656,7 +1730,7 @@
         g.sus = Math.min(sus, 0.45);
       }
       noteState(g, "suspicious");
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       updateFlashlight(g, dt);
       return true;
     }
@@ -1667,17 +1741,17 @@
       if (g.seesPlayer) faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
       else if (g.susX != null && (g.susHold || 0) > -4) faceTo(g, g.susX, g.susZ, 0.01, dt);
       g.alert -= dt;
-      animChar(g.char, 0, dt);
+      stand(g, dt);
       updateFlashlight(g, dt);
       return true;
     }
 
     // ---- PATROL / RETURN -----------------------------------------------------
     const wps = g.waypoints;
-    if (!wps || !wps.length) { noteState(g, "patrol"); animChar(g.char, 0, dt); updateFlashlight(g, dt); return true; }
+    if (!wps || !wps.length) { noteState(g, "patrol"); stand(g, dt); updateFlashlight(g, dt); return true; }
     if (g.wi >= wps.length || g.wi < 0) g.wi = 0;
     const wp = wps[g.wi];
-    const d = walkTo(g, wp.x, wp.z, g.speed, dt, 0.00005);
+    const d = walkTo(g, wp.x, wp.z, g.speed, dt, 0.3, !g._returning && patrolCorner(g, wps));
     if (g._returning) {
       noteState(g, "return");
       if (d < 1.0) g._returning = false;
@@ -1694,6 +1768,18 @@
     return true;
   }
 
+  /* Is the patrol point he is walking to a CORNER (walked through at pace) or
+     the end of a beat (he brakes, turns round on the spot, walks back)? The
+     turn the round makes there decides it: under ~100 degrees is a corner. */
+  function patrolCorner(g, wps) {
+    if (wps.length < 2) return false;
+    const a = wps[g.wi], b = wps[(g.wi + 1) % wps.length], p = g.group.position;
+    const ix = a.x - p.x, iz = a.z - p.z, ox = b.x - a.x, oz = b.z - a.z;
+    const il = Math.hypot(ix, iz), ol = Math.hypot(ox, oz);
+    if (il < 1e-3 || ol < 1e-3) return false;
+    return (ix * ox + iz * oz) / (il * ol) > -0.17;
+  }
+
   function updateGuard(g, dt) {
     g._lookWant = 0;
     if (think(g, dt)) neckTurn(g, dt);
@@ -1708,11 +1794,14 @@
     opts = opts || {};
     const G0 = CBZ.game;
     if (!G0 || G0.mode !== "escape" || G0.state !== "playing" || !(radius > 0)) return 0;
+    // every brain in earshot hears it (the yard scatters from a gunshot);
+    // WHICH screws walk over is decided below
+    if (CBZ.prisonBrain && CBZ.prisonBrain.noise) CBZ.prisonBrain.noise(x, z, radius, opts.type, opts.player ? player : null);
     const G = navOn() ? CBZ.navGrid : null;
     const list = [];
     for (const g of CBZ.guards || []) {
       if (!g || !g.group || g.dead || g.ko > 0 || g.asleep || g._escort || g.tied || g.bribed > 0 ||
-          g.intimidMode === "scared" || g.approach) continue;
+          g.intimidMode === "scared" || g.approach || g._yardCase) continue;   // a screw with a man on the ground stays with him
       if (opts.player && g.corrupt && (G0.racketProtectionT || 0) > 0) continue;
       const d = Math.hypot(x - g.group.position.x, z - g.group.position.z);
       if (d > radius) continue;
@@ -1766,7 +1855,7 @@
      under a quarter of his walking pace (grinding / stuck), and frames the
      wall resolver (actorcollide, order 25) had to push him back out. */
   const audit = { t: 0, moving: 0, stalled: 0, pushes: 0, frames: 0, per: new Map() };
-  const MOVING = { patrol: 1, hunt: 1, search: 1, investigate: 1, "return": 1, social: 1 };
+  const MOVING = { patrol: 1, hunt: 1, search: 1, investigate: 1, "return": 1, social: 1, law: 1 };
   function auditPre() {
     for (const g of CBZ.guards) { const p = g.group.position; g._auPX = p.x; g._auPZ = p.z; g._auCmd = g._cmd || 0; }
   }
@@ -1804,34 +1893,26 @@
     return out;
   };
 
-  // ---- line-of-sight test ----
-  const raycaster = new THREE.Raycaster();
-  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
-  // ONE cone test, two questions: can this screw see the PLAYER, and (for an
-  // inmate deciding whether to start something) can he see THAT spot.
+  /* ---- SIGHT: ONE implementation, CBZ.brain.perception -------------------
+     This file used to own the cone + raycast, and three other files kept
+     copies of it (detection.js's witness cone, games/military.js, the county
+     jail's wall-less cone). There is one now, in systems/brain.js. What stays
+     here is what is PRISON about a screw's eyes: his cone numbers, the
+     warden's presence widening it, the prison's dark (CBZ.sightScale), and a
+     bent screw going blind to you while your protection is paid up. Dead, KO,
+     asleep, bribed, tied, held at gunpoint: the brain's own blind list. */
+  const _see = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 1.0, light: null };
+  function prisonDark(o, x, z) { return CBZ.sightScale ? CBZ.sightScale(o, x, z) : 1; }
   function guardSeesPoint(g, x, y, z, shrink) {
-    // dead, down, ASLEEP, bribed, held at gunpoint or tied = blind.
-    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0 || g.intimidMode === "scared" || g.tied) return false;
+    if (!g || !g.group) return false;
     if (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0) return false;
-    const gx = g.group.position.x, gz = g.group.position.z;
-    const dx = x - gx, dz = z - gz;
-    const dist = Math.hypot(dx, dz);
-    let vd = g.viewDist;
-    if (shrink) vd *= shrink;                 // crouching shrinks spot range
-    if (dist > vd || dist < 0.05) return false;
-    const yaw = g.group.rotation.y;
-    const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
-    if (dot < Math.cos(Math.min(1.45, g.half * wardenSharp))) return false; // outside the cone angle
-    // ...AND SO DOES THE DARK (systems/prisonnight.js publishes sightScale off
-    // the prison's own light state; undefined everywhere else). After the
-    // range and angle tests: it can only shrink the cone.
-    if (CBZ.sightScale && dist > vd * CBZ.sightScale(g, x, z)) return false;
-    _ro.set(gx, 1.5, gz);
-    _rd.set(dx, y + 1.0 - 1.5, dz).normalize();
-    raycaster.set(_ro, _rd);
-    raycaster.far = Math.max(0.1, dist - 0.4);
-    if ((CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length > 0) return false; // cover
-    return true;
+    const per = CBZ.brain && CBZ.brain.perception;
+    if (!per) return false;
+    _see.range = g.viewDist;
+    _see.fovHalf = Math.min(1.45, g.half * wardenSharp);
+    _see.shrink = shrink || 1;
+    _see.light = CBZ.sightScale ? prisonDark : null;
+    return per.seesPoint(g, x, y || 0, z, _see);
   }
   function guardSees(g) {
     // crouching shrinks the range; a hot block looks a little harder
@@ -1960,6 +2041,11 @@
   CBZ.guardSeesPoint = guardSeesPoint;
   CBZ.guardWatching = guardWatching;
   CBZ.guardHear = guardHear;
+  // the guard's own body, for systems/brain_prison.js's executor (act.use)
+  CBZ.guardWalkTo = walkTo;
+  CBZ.guardFaceTo = function (g, x, z, k, dt) { faceTo(g, x, z, k, dt); };
+  CBZ.guardIdle = function (g, dt) { animChar(g.char, 0, dt); };
+  CBZ.guardLookAt = lookAtPoint;
   CBZ.spawnGuard = makeGuard;   // systems/reinforcements.js spawns extra patrols
 
   // drive all guards every playing frame

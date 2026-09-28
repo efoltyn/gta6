@@ -707,7 +707,22 @@
     return ch && ch.sockets && (ch.sockets.thirdPersonWeapon || ch.sockets.weapon || ch.sockets.rightHand);
   }
 
+  // THE HAND CLOSES ON WHAT IT HOLDS: every body's hand is the first-person
+  // hand (character.js HANDS block). A gun in the socket = the pistol grip
+  // (index on the trigger), a melee weapon = a closed grip, nothing = relaxed.
+  // setHandPose is a compare when nothing changed, so per-frame calls are free.
+  function gripHand(actor, prop) {
+    const ch = actor && actor.char;
+    if (!ch || !ch.setHandPose) return;
+    ch.setHandPose("r", !prop || !prop.visible ? "relaxed"
+      : (prop.userData && prop.userData.weaponMelee ? "grip" : "pistol"));
+  }
   function syncActorWeapon(actor) {
+    const prop = syncActorWeaponProp(actor);
+    gripHand(actor, prop);
+    return prop;
+  }
+  function syncActorWeaponProp(actor) {
     if (!actor || !actor.char) return null;
     // HOLSTER GATE: armed=false (police.js holsterGun ships exactly this) and
     // the canonical _holstered flag both mean "gun's in the leather" — hide the
@@ -852,6 +867,7 @@
       // its socket) and leave the arms free for the owning system / reactions.
       if (a._holstered || a._gunLowered || a._gunHidden) {
         if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
+        gripHand(a, null);
         continue;
       }
       // Skip ONLY a genuinely ragdolling body (down / airborne / held). Do NOT use

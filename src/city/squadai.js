@@ -224,7 +224,7 @@
     // instead of indefinitely blind-flanking a wall (same escalation cops use).
     let sees = true;
     if (AT) {
-      const losRes = AT.updateLOS(ped, F.x, F.z, dt || 0.016, { range: 44, giveUpT: 3.5, rng });
+      const losRes = AT.updateLOS(ped, F.x, F.z, dt || 0.016, { range: 44, giveUpT: 3.5, rng, target: foe && foe.pos ? foe : null });
       sees = losRes.sees;
       if (losRes.justLost && !(ped.searchT > 0)) AT.searchStart(ped, { x: ped.lkx, z: ped.lkz }, { dur: 4 + rng() * 3, rng });
       if (sees && ped.searchT > 0) { ped.searchT = 0; ped.searchGoal = null; ped._sweepGoal = null; }   // re-acquired

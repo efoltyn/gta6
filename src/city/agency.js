@@ -630,6 +630,57 @@
     return cur;
   }
 
+  // THE ROUTINE LIVES IN THE BRAIN (CBZ.brain.needs): each mark's public
+  // schedule is his own archetype's day plan ("hitman_target:<op>"), read
+  // through a small schedule handle so the city re-registering the body
+  // never loses it. Without the core the table above answers the same.
+  function brainB() { return CBZ.brain || null; }
+  function schedOf(op) {
+    if (op._sched !== undefined) return op._sched;
+    op._sched = null;
+    const B = brainB();
+    if (!B || !B.needs || typeof B.needs.define !== "function" || typeof B.define !== "function" || typeof B.of !== "function") return null;
+    const id = "hitman_target:" + op.id;
+    try {
+      B.define(id, B.archetype ? B.archetype("hitman_target") : {});
+      const S = op.def.sched || [];
+      B.needs.define(id, S.map(function (e) {
+        const L = op.legs[e.leg];
+        return { id: "leg" + e.leg, from: e.h, activity: L ? L.label : "leg", where: { leg: e.leg, x: L ? L.x : 0, z: L ? L.z : 0 } };
+      }));
+      const handle = {};
+      B.of(handle, id);
+      op._sched = handle;
+    } catch (e) { op._sched = null; }
+    return op._sched;
+  }
+  function legNow(op) {
+    const B = brainB(), S = schedOf(op);
+    if (B && S) {
+      try { const c = B.needs.current(S, hour()); if (c && c.where && c.where.leg != null) return c.where.leg; } catch (e) {}
+    }
+    return legAtHour(op.def, hour());
+  }
+  // HOW HE TAKES A THREAT: CBZ.brain.threat.respond, by his personality,
+  // whether he is armed, how close you are and whether you are aiming at him.
+  function respondTo(op, p, why) {
+    const B = brainB(), pl = P(), PA = CBZ.city && CBZ.city.playerActor;
+    if (!B || !B.threat || typeof B.threat.respond !== "function" || !pl || !pl.pos) return "flee";
+    let aimed = false;
+    if (CBZ.isAimingWeapon && CBZ.isAimingWeapon() && typeof CBZ.aimedActor === "function") {
+      try { const a = CBZ.aimedActor(120); aimed = !!(a && a.actor === p); } catch (e) { aimed = false; }
+    }
+    const th = {
+      source: PA || null, x: pl.pos.x, z: pl.pos.z, armed: !!(CBZ.cityHasGun && CBZ.cityHasGun()),
+      aimingAtMe: aimed, distance: d2(p.pos.x, p.pos.z, pl.pos.x, pl.pos.z),
+      kind: why === "heat" ? "sirens" : why === "hurt" ? "gunshot" : "attack",
+    };
+    let r = "flee";
+    try { B.of(p, "hitman_target"); r = B.threat.respond(p, th) || "flee"; } catch (e) { r = "flee"; }
+    if (r === "fight" && !p.armed) r = "flee";            // an unarmed banker does not charge a gun
+    return r;
+  }
+
   function buildOp(id) {
     const def = OPS[id]; if (!def) return null;
     const V = opVenues(def); if (!V) return null;
@@ -684,7 +735,7 @@
       if (op.car) op.car._agencyOp = op.id;
     }
     // he starts where the clock says he is
-    op.leg = legAtHour(def, hour());
+    op.leg = legNow(op);
     const first = op.legs[op.leg] || op.legs[0];
     const p = spawn(def.name, first.x, first.z, { job: def.job, gender: def.gender, archetype: "official", wealth: 0.9, named: true, face: first.face });
     if (!p) return;
@@ -734,7 +785,7 @@
   function tickRoutine(op, dt) {
     const p = op.ped; if (!p || p.dead) return;
     if (op.alarm > 0) return;
-    const want = legAtHour(op.def, hour());
+    const want = legNow(op);
     if (want !== op.leg) {
       op.leg = want; op.phase = "walk"; op.t = 0; op.stuckT = 0; op.lastD = Infinity;
       const N = currentLeg(op);
@@ -807,11 +858,33 @@
     if (why) {
       if (!op.alarm) {
         op.everAlarm = true;
-        addNote(op.id, why === "heat" ? "He heard the sirens and ran." : "His people went for their guns. He ran.");
+        op.resp = respondTo(op, p, why); op.respT = 0;
+        const R = op.resp;
+        addNote(op.id, why === "heat" ? "He heard the sirens and ran."
+          : R === "fight" ? "He pulled a gun of his own."
+          : R === "surrender" || R === "comply" ? "He put his hands up and begged."
+          : R === "freeze" || R === "cover" ? "He froze, then his people went for their guns and he ran."
+          : "His people went for their guns. He ran.");
         for (let i = 0; i < op.sentries.length; i++) hostile(op.sentries[i]);
-        bark(p, "Get me out of here!", 2);
+        bark(p, R === "fight" ? "You picked the wrong man." : R === "surrender" || R === "comply" ? "Don't shoot! Please!" : R === "freeze" || R === "cover" ? "Oh God..." : "Get me out of here!", 2);
       }
-      op.alarm = 40;
+      op.alarm = 40; op.alarmWhy = why;
+      op.respT = (op.respT || 0) + dt;
+      const R = op.resp;
+      if (R === "fight" && p.armed) { if (!p.rage) hostile(p); return; }
+      // a freeze is a beat, not a plan: ducked, then he runs
+      if ((R === "freeze" || R === "cover") && op.respT < 2.2) {
+        if (p.state !== "idle") holdAt(p, null);
+        p.poseCower = Math.max(p.poseCower || 0, 0.6);
+        return;
+      }
+      // hands up while the gun is close; the moment you are not, he runs
+      if ((R === "surrender" || R === "comply") && op.respT < 14 && dp < 15) {
+        if (p.state !== "idle") holdAt(p, null);
+        p.poseHandsUp = true;
+        return;
+      }
+      if (p.poseHandsUp && !p.surrender) p.poseHandsUp = false;
       const home = op.legs[0];
       if (p.controlled || p.state !== "flee") walkTo(p, home.x, home.z, true);
       return;
@@ -2003,16 +2076,17 @@
     const cx = F.site.cx, cz = F.site.cz, y = roofY(F);
     for (let s = -1; s <= 1; s += 2) {
       const x = cx + s * 20, z = cz - 18.2;
-      const q = spawn("Counter-sniper", x, z, { job: "soldier", armed: true, weapon: "Rifle", aggr: 0.85, post: true, face: 0, gender: "m", archetype: "professional" });
+      const q = spawn("Counter-sniper", x, z, { job: "counter-sniper", armed: true, weapon: "Rifle", aggr: 0.85, post: true, face: 0, gender: "m", archetype: "professional" });
       if (!q) continue;
-      q._agencyGuard = true; q._finSniper = { x: x, z: z, y: y };
+      q._agencyGuard = true; q._finSniper = { x: x, z: z, y: y, face: 0 };   // face: the sector centre (the lawn)
       if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, y); } catch (e) {} } else { q.pos.y = y; }
       if (q.group) q.group.position.copy(q.pos);
       F.snipers.push(q);
       F.posts.push({ x: x, z: z, y: y, kind: "roof", ped: q, side: s < 0 ? "left" : "right" });
     }
   }
-  function pinSnipers(F) {
+  function pinSnipers(F, dt) {
+    const DBR = CBZ.detailBrain;
     for (let i = 0; i < F.snipers.length; i++) {
       const q = F.snipers[i]; if (!q || q.dead || !q._finSniper) continue;
       const S = q._finSniper;
@@ -2021,8 +2095,11 @@
       if (q.group) q.group.position.copy(q.pos);
       if (q.target && q.target.set) q.target.set(S.x, 0, S.z);
       if (q.state !== "fight") { q.state = "idle"; q.speed = 0; }
-      const pl = P();
-      if (q.rage && pl && pl.pos && q.group) q.group.rotation.y = Math.atan2(pl.pos.x - S.x, pl.pos.z - S.z);
+      // the counter-sniper brain: a slow sector scan over the lawn with a
+      // long dwell, and onto the mark (a bounded turn, never a snap)
+      const pl = q.rage ? CBZ.city && CBZ.city.playerActor : null;
+      if (DBR) DBR.sniper(q, S, dt || 0.016, pl || null);
+      else if (pl && pl.pos && q.group) q.group.rotation.y = Math.atan2(pl.pos.x - S.x, pl.pos.z - S.z);
     }
   }
   function postAgents(F) {
@@ -2504,6 +2581,22 @@
     F.snipers.length = 0;
   }
 
+  // THE MARK'S BODYGUARDS walk on the same detail brain as the President's
+  // (city/brain_protection.js via CBZ.protection.guardRing): a small knot,
+  // eyes out, shield and evacuate when it goes loud. Hostile only when
+  // somebody actually hurt him or his people (sirens alone just move him).
+  const RING_PS = { posture: "normal", threat: null, hostile: false, at: { x: 0, z: 0 } };
+  function driveMarkDetail(op, dt) {
+    if (!op || !op.ped || op.ped.dead || !CBZ.protection || typeof CBZ.protection.guardRing !== "function") return;
+    const pl = P(), PA = CBZ.city && CBZ.city.playerActor;
+    const hot = op.alarm > 0;
+    RING_PS.posture = hot ? "evac" : "normal";
+    RING_PS.hostile = hot && (op.alarmWhy === "hurt" || op.alarmWhy === "guard");
+    RING_PS.threat = RING_PS.hostile && PA ? PA : null;
+    if (pl && pl.pos) { RING_PS.at.x = pl.pos.x; RING_PS.at.z = pl.pos.z; }
+    try { CBZ.protection.guardRing(op.ped, dt, RING_PS); } catch (e) {}
+  }
+
   let acc = 0, btnT = 0;
   if (CBZ.onUpdate) {
     CBZ.onUpdate(39.5, function (dt) {
@@ -2516,9 +2609,10 @@
     // per frame, after the car loop: the convoy, its riders, the roof rifles
     CBZ.onUpdate(37.3, function (dt) {
       if (!playing()) return;
+      driveMarkDetail(RT.op, dt);
       const F = RT.fin;
       if (!F) return;
-      if (F.snipers && F.snipers.length) pinSnipers(F);
+      if (F.snipers && F.snipers.length) pinSnipers(F, dt);
     });
   }
 

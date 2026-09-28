@@ -136,13 +136,18 @@
   const T_OPEN = [[-0.72, -0.22, -0.66], [-0.58, -0.14, -0.80], [-0.48, -0.08, -0.87]];
   const T_FIST = [[-0.36, -0.62, -0.70], [0.55, -0.50, -0.67], [0.95, -0.15, -0.25]];
   const T_WRAP = [[-0.34, -0.66, -0.67], [-0.12, -0.96, -0.24], [0.18, -0.62, -0.76]];
+  const T_ALONG = [[-0.30, -0.72, -0.62], [-0.10, -0.30, -0.95], [-0.05, -0.16, -0.99]];
   const T_PINCH = [[-0.48, -0.55, -0.68], [-0.10, -0.62, -0.78], [0.10, -0.55, -0.83]];
   const POSES = {
     open:    { flex: [[0.08, 0.10, 0.06], [0.06, 0.08, 0.05], [0.08, 0.10, 0.06], [0.12, 0.12, 0.08]], thumb: T_OPEN, cup: 0.001 },
     relaxed: { flex: [[0.30, 0.42, 0.22], [0.36, 0.50, 0.26], [0.44, 0.58, 0.30], [0.52, 0.66, 0.34]], thumb: T_REST, cup: 0.004 },
     fist:    { flex: [[1.48, 1.80, 0.95], [1.52, 1.84, 0.95], [1.52, 1.84, 0.95], [1.50, 1.80, 0.95]], thumb: T_FIST, cup: 0.006 },
-    // (guns take no table pose: every gun hand is a GRASP solved against the
-    // gun's own grip, handguard or pump — see grasp() below)
+    // BODY gun poses (character.js setHandPose "pistol" / "support" on
+    // third-person rigs). The first-person gun hands take no table pose:
+    // every one is a GRASP solved against the gun's own grip — see grasp().
+    pistol:  { flex: [[0.62, 0.62, 0.30], [0.50, 1.40, 0.90], [0.52, 1.42, 0.90], [0.55, 1.45, 0.92]], thumb: T_ALONG, cup: 0.005 },
+    support: { wrap: 0.030, thumb: T_ALONG, cup: 0.006 },
+    cupover: { wrap: 0.040, thumb: T_ALONG, cup: 0.006 },
     wheel:   { wrap: 0.016, thumb: T_WRAP, cup: 0.005 },
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
     card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004 },
@@ -203,14 +208,18 @@
     g.translate(p[0], p[1], p[2]);
     parts.push(g);
   }
-  function palmGeo(cup) {
-    /* A SUPERELLIPSOID, not a box. The palm used to be a BoxGeometry pushed
-       into a rounded box: a box keeps separate vertices per face, so every
-       rounded edge became a seam with its own normals and up close (the
-       first-person lens IS up close) the heel and the web read as sharp
-       folded flaps. One closed, smooth surface instead, squared off by the
-       exponent, then shaped as before. */
-    const g = new THREE.SphereGeometry(1, 18, 12);
+  /* THE PALM: a SUPERELLIPSOID, not a box. The palm used to be a BoxGeometry
+     pushed into a rounded box: a box keeps separate vertices per face, so
+     every rounded edge became a seam with its own normals and up close (the
+     first-person lens IS up close) the heel and the web read as sharp folded
+     flaps. One closed, smooth surface instead, squared off by the exponent,
+     then shaped. `segs` = [around, down] sphere segments: the first-person
+     hand's default 18x12 (432 tris), the body LODs far fewer (character.js
+     bodies: 6x4 near, 4x3 far, which with a quarter-turn start is a rounded
+     box of 16 triangles). */
+  function palmGeo(cup, segs) {
+    segs = segs || [18, 12];
+    const g = new THREE.SphereGeometry(1, segs[0], segs[1], segs[0] <= 4 ? Math.PI / 4 : 0);
     const pos = g.attributes.position, E = 0.30;
     const hx = PALM.hw, hy = PALM.th / 2, hz = PALM.len / 2;
     const sq = function (v) { return Math.sign(v) * Math.pow(Math.abs(v), E); };
@@ -316,6 +325,165 @@
   function handGeometry(side, pose) {
     const key = (side < 0 ? "L:" : "R:") + poseKey(pose);
     return GEO[key] || (GEO[key] = buildHandGeo(side < 0 ? -1 : 1, pose));
+  }
+
+  /* ---- THE SAME HAND ON EVERY BODY (third person) -----------------------
+     Owner: "The FP hands are really real, but on the third-person models
+     those hands are way different." Every body wore a skin-coloured BOX where
+     its hand should be. These are the SAME hand — PALM / FINGERS / THUMB, the
+     same pose table, the same fingerChain / flexForWrap curl — with fewer
+     triangles, so a man across the street holds his pistol with the hand you
+     see down your own lens.
+       lod 1 (BODY, ~190 tris): the rounded, tapered, cupped palm on a coarse
+         grid; each finger and the thumb ONE continuous 4-sided tube through
+         its real joint chain (mitred at the knuckles, so a curl never opens a
+         gap) with a pointed pad; a 6-sided wrist.
+       lod 2 (FAR, ~50 tris): the palm box; the four fingers merged into one
+         mitten through the averaged chain, as wide as index..little; the
+         thumb a 3-sided tube.
+     Same frame as the FP hand (origin = wrist, fingers -Z, palm -Y, thumb -X
+     on the right; left mirrored), authored in metres. Cached per
+     (side, pose, lod) and shared by every body in the game, so pedinstance
+     pools it by identity; per-body size is mesh.scale. */
+  function tube(parts, pts, radii, sides, phase, tip) {
+    // one continuous tube through pts with a ring per point; radii[i] = [ru, rv]
+    // (ru across the lateral axis, rv across the other). Parallel-transported
+    // frame, mitred rings, smooth radial normals, pointed tip cap.
+    const n = pts.length, rings = [];
+    const dir = function (i) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+      let dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+      const L = Math.hypot(dx, dy, dz) || 1;
+      return [dx / L, dy / L, dz / L];
+    };
+    let lat = null;
+    for (let i = 0; i < n; i++) {
+      const d = dir(i);
+      if (!lat) {
+        // first lateral: the hand's X, made perpendicular to the first segment
+        lat = [1, 0, 0];
+        if (Math.abs(d[0]) > 0.9) lat = [0, 1, 0];
+      }
+      const k = lat[0] * d[0] + lat[1] * d[1] + lat[2] * d[2];
+      let u = [lat[0] - k * d[0], lat[1] - k * d[1], lat[2] - k * d[2]];
+      const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+      u = [u[0] / ul, u[1] / ul, u[2] / ul];
+      lat = u;
+      const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+      // mitre: a ring on the bisector of a bend is stretched by 1/cos(half-angle)
+      let mit = 1;
+      if (i > 0 && i < n - 1) {
+        const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+        const d0 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], d1 = [c[0] - b[0], c[1] - b[1], c[2] - b[2]];
+        const cs = (d0[0] * d1[0] + d0[1] * d1[1] + d0[2] * d1[2]) / ((Math.hypot(d0[0], d0[1], d0[2]) * Math.hypot(d1[0], d1[1], d1[2])) || 1);
+        mit = Math.min(1.35, 1 / Math.max(0.2, Math.sqrt((1 + Math.max(-1, Math.min(1, cs))) / 2)));
+      }
+      const ring = [];
+      for (let s = 0; s < sides; s++) {
+        const t = phase + s / sides * Math.PI * 2, ct = Math.cos(t), st = Math.sin(t);
+        const nx = u[0] * ct + v[0] * st, ny = u[1] * ct + v[1] * st, nz = u[2] * ct + v[2] * st;
+        const ru = radii[i][0] * ct, rv = radii[i][1] * st;
+        ring.push({
+          p: [pts[i][0] + (u[0] * ru + v[0] * rv) * mit, pts[i][1] + (u[1] * ru + v[1] * rv) * mit, pts[i][2] + (u[2] * ru + v[2] * rv) * mit],
+          n: [nx, ny, nz],
+        });
+      }
+      rings.push({ ring, d });
+    }
+    const P = [], N = [];
+    const tri = function (a, b, c) { P.push(a.p[0], a.p[1], a.p[2], b.p[0], b.p[1], b.p[2], c.p[0], c.p[1], c.p[2]); N.push(a.n[0], a.n[1], a.n[2], b.n[0], b.n[1], b.n[2], c.n[0], c.n[1], c.n[2]); };
+    for (let i = 0; i < n - 1; i++) {
+      const A = rings[i].ring, B = rings[i + 1].ring;
+      for (let s = 0; s < sides; s++) {
+        const s1 = (s + 1) % sides;
+        tri(A[s], B[s], B[s1]);
+        tri(A[s], B[s1], A[s1]);
+      }
+    }
+    if (tip) {
+      const last = rings[n - 1], e = pts[n - 1], d = last.d;
+      const T = { p: [e[0] + d[0] * tip, e[1] + d[1] * tip, e[2] + d[2] * tip], n: d };
+      for (let s = 0; s < sides; s++) tri(last.ring[s], T, last.ring[(s + 1) % sides]);
+    }
+    // winding check once: the first quad's face normal must point along its
+    // vertex normal (outward); flip every triangle if the frame came out left-handed
+    if (P.length >= 9) {
+      const ax = P[3] - P[0], ay = P[4] - P[1], az = P[5] - P[2];
+      const bx = P[6] - P[0], by = P[7] - P[1], bz = P[8] - P[2];
+      const fx = ay * bz - az * by, fy = az * bx - ax * bz, fz = ax * by - ay * bx;
+      if (fx * N[0] + fy * N[1] + fz * N[2] < 0) {
+        for (let t = 0; t < P.length; t += 9) for (let k = 0; k < 3; k++) {
+          let tmp = P[t + 3 + k]; P[t + 3 + k] = P[t + 6 + k]; P[t + 6 + k] = tmp;
+          tmp = N[t + 3 + k]; N[t + 3 + k] = N[t + 6 + k]; N[t + 6 + k] = tmp;
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    parts.push(g);
+  }
+  const SQ2 = Math.SQRT2;
+  function buildBodyHandGeo(side, pose, lod) {
+    const p = resolvePose(pose);
+    const far = lod >= 2;
+    const parts = [palmGeo(p.cup || 0.004, far ? [4, 3] : [6, 4])];
+    if (!far) {
+      // the wrist runs 7 cm back up into the sleeve: a body's hand slides down
+      // its wrist when it closes on a held socket (character.js HANDS block)
+      // and this is what keeps the cuff from opening a gap
+      const wr = new THREE.CylinderGeometry(0.027, 0.029, 0.092, 6, 1, true);
+      wr.scale(1.18, 1, 0.78);
+      place(wr, [0, 0, 0.070], [0, 0.001, -0.022], parts);
+    }
+    const chains = p._joints.fingers;
+    if (!far) {
+      FINGERS.forEach(function (f, i) {
+        const pts = chains[i];
+        // start the tube a finger-radius back inside the palm so the knuckle is closed
+        const d0 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
+        const l0 = Math.hypot(d0[0], d0[1], d0[2]) || 1;
+        const root = [pts[0][0] - d0[0] / l0 * f.r * 1.4, pts[0][1] - d0[1] / l0 * f.r * 1.4 + 0.001, pts[0][2] - d0[2] / l0 * f.r * 1.4];
+        const rs = [1.10, 1.04, 0.95, 0.86, 0.78].map(function (k) { const r = f.r * k * SQ2 * 0.92; return [r, r]; });
+        tube(parts, [root].concat(pts), rs, 4, Math.PI / 4, f.r * 0.75);
+      });
+    } else {
+      // THE MITTEN: the averaged chain, index..little wide, a finger thick
+      const pts = [], rs = [];
+      for (let j = 0; j < 4; j++) {
+        let x = 0, y = 0, z = 0;
+        for (let i = 0; i < 4; i++) { x += chains[i][j][0]; y += chains[i][j][1]; z += chains[i][j][2]; }
+        pts.push([x / 4, y / 4, z / 4]);
+        const a = chains[0][j], b = chains[3][j];
+        const w = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 0.5 + 0.009;
+        rs.push([w * (1 - 0.12 * j) * SQ2 * 0.85, 0.0092 * (1 - 0.1 * j) * SQ2 * 0.9]);
+      }
+      tube(parts, pts, rs, 4, Math.PI / 4, 0);
+    }
+    const tpts = p._joints.thumb;
+    const trs = tpts.map(function (_, s) {
+      const r = s === 0 ? THUMB.r[0] * 1.25 : (s < 3 ? THUMB.r[s] : THUMB.r[2] * 0.85);
+      const k = far ? 1.3 : SQ2 * 0.95;
+      return [r * k, r * k];
+    });
+    if (far) tube(parts, [tpts[0], tpts[1], tpts[3]], [trs[0], trs[1], trs[3]], 3, Math.PI / 2, THUMB.r[2] * 0.6);
+    else tube(parts, tpts, trs, 4, Math.PI / 4, THUMB.r[2] * 0.7);
+    const geo = mergeParts(parts);
+    if (side < 0) mirrorX(geo);
+    geo.computeBoundingSphere();
+    geo._shared = true; geo.userData._shared = true;
+    geo.userData.handLod = lod;
+    return geo;
+  }
+  /* bodyHandGeometry(side, pose, lod): side -1 = left, +1 = right; pose a
+     POSES name (or pose object); lod 0 = the full first-person hand, 1 = the
+     body hand (default), 2 = the far-crowd hand. Shared and cached — never
+     dispose it, never mutate it; size it with mesh.scale. */
+  function bodyHandGeometry(side, pose, lod) {
+    lod = lod == null ? 1 : lod | 0;
+    if (lod <= 0) return handGeometry(side, pose);
+    const key = (side < 0 ? "L:" : "R:") + poseKey(pose || "relaxed") + ":" + (lod >= 2 ? 2 : 1);
+    return GEO[key] || (GEO[key] = buildBodyHandGeo(side < 0 ? -1 : 1, pose || "relaxed", lod >= 2 ? 2 : 1));
   }
   // unit forearm: +Z from the wrist (z=0) to the elbow (z=1), elliptical and
   // tapered — flat and narrow at the wrist, full at the muscle belly
@@ -788,7 +956,7 @@
   CBZ.fpHands = {
     version: 2,
     POSES, PALM, FINGERS, THUMB,
-    handGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
+    handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
     grasp, graspHand, prismSdf,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore },

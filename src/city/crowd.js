@@ -378,6 +378,12 @@
   // walls instead of tunnelling. OFF → panicT is never set → the sim() flee branch
   // is dead code → byte-identical to today.
   const panicT = new Float32Array(CAP), fleeHX = new Float32Array(CAP), fleeHZ = new Float32Array(CAP);
+  // REACTION DELAY before the sprint (s). A crowd that bolts on the frame of the
+  // shot is a crowd of switches: the near ones go first, the far ones turn and
+  // look, and a stable per-body offset (hash of the slot) keeps the same person
+  // the slow one every time. The same rule the rigged peds follow through
+  // CBZ.brain (city/brain_city.js reactDelay).
+  const panicDelay = new Float32Array(CAP);
   const PANIC_SPD = 4.2;                          // m/s flat sprint while fleeing (a real run)
   // default ON (validated 2026-06-15: harness testCrowd — 14 bystanders' avg distance
   // from a gunshot rose 28.8→31.0m over 1.5s). Set CBZ.crowdMassFlee=false to revert.
@@ -947,7 +953,8 @@
       // frame while panicked — bounded, since only bodies near a live event are armed
       // — so the scatter reads instantly. Reuses the 2-pass collide so a fleer scrapes
       // along walls, not through them. Off-flag → panicT is always 0 → never taken.
-      if (panicT[i] > 0) {
+      if (panicT[i] > 0 && panicDelay[i] > 0) panicDelay[i] -= dt;   // still registering it: keep strolling
+      else if (panicT[i] > 0) {
         panicT[i] -= dt;
         const fh = Math.atan2(fleeHX[i], fleeHZ[i]);
         heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], fh, 1 - Math.pow(0.02, dt)) : fh;
@@ -1079,6 +1086,7 @@
       const d = Math.sqrt(d2) || 0.001, inv = 1 / d;
       fleeHX[i] = dx * inv; fleeHZ[i] = dz * inv;                 // unit vector AWAY from the threat
       const ttl = (1.4 + 2.6 * (1 - d / r)) * (0.6 + 0.7 * it);   // ~1.4–4.7s, closer + louder = longer
+      if (!(panicT[i] > 0)) panicDelay[i] = 0.08 + Math.min(0.9, d / 55) + (CBZ.hash01 ? CBZ.hash01(i, 5, 0x7EAC) : ((i * 0.6180339887) % 1)) * 0.5;
       if (ttl > panicT[i]) panicT[i] = ttl;                      // refresh, never shorten an active panic
     }
   };
@@ -1437,6 +1445,13 @@
     const AHEAD = 4;
     ped.target.set(px[i] + dirX[i] * AHEAD, 0, pz[i] + dirZ[i] * AHEAD);
     ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0;
+    // ...and hand the walk to the rig's motor already moving (CBZ.moves), so
+    // the real body does not start from rest and accelerate out of the swap.
+    if (CBZ.moves) {
+      const mv = CBZ.moves.motor(ped);
+      CBZ.moves.reset(mv, ped.pos);
+      mv.vx = dirX[i] * spd[i]; mv.vz = dirZ[i] * spd[i]; mv.speed = spd[i]; mv.yaw = heading[i];
+    }
     const shirtHex = SHIRTS[shirt[i]];
     // CLEAN SLATE FIRST: drop the prior occupant's role/outfit and adopt the
     // instanced body's exact shirt, so what walks up matches what you saw.

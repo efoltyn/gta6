@@ -401,6 +401,9 @@
           // which for both racks in this wing is y=0.
           const bnk = j.own.bunk;
           if (j.slot === "bed" && bnk && bnk.rackUnder != null) rec.ceiling = bnk.rackUnder;
+          // The UPPER rack is a raised bed: its floor and its ladder, so
+          // CBZ.moves climbs a sleeper up to it instead of lifting him.
+          if (j.slot === "bedTop" && bnk) { rec.floorY = bnk.floor || 0; if (bnk.ladder) rec.ladder = bnk.ladder; }
         }
       }
       else PP.plain++;
@@ -1080,6 +1083,15 @@
       headroom: dbl ? DECK_Y - LOW_TOP : CH - LOW_TOP,
       headroomTop: dbl ? CH - UP_TOP : null,
       latOut: LAT / 2, lonOut: LON / 2, railTop: dbl ? RAIL_TOP + LIFT : null,
+      // THE BED A BODY LIES IN, for the posture layer (entities/moves_posture.js):
+      // the mattress (not the frame) is what a sleeper is placed on — crown a
+      // pad off its head end — and `rackUnder` is the steel over the lower
+      // berth, which the perch ducks under. It was read by the registration
+      // below for months and never published, so the bottom-bunk perch sat up
+      // straight into the rack. `ladder` is where a top-bunk sleeper climbs.
+      mattLon: MLON, mattLat: MLAT,
+      rackUnder: dbl ? DECK_Y + LIFT : null,
+      ladder: dbl ? { x: x + (AZ ? 0 : LON / 2 + 0.05), z: z + (AZ ? LON / 2 + 0.05 : 0) } : null,
     };
   }
 
@@ -1147,13 +1159,13 @@
     };
     stack.bunk = bunkRig(stack, +spec.x || 0, +spec.z || 0, spec.along === "x" ? "x" : "z",
       spec.double !== false, spec.blanket == null ? 0x5c6470 : spec.blanket);
-    useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, 2.60, stack, "bed", 0);
+    useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, stack.bunk.mattLon, stack, "bed", 0);
     if (stack.bunk.topBunk)
       // The head clearance is MEASURED off the rig that was just drawn
       // (origin/main, "Measure the body before you build the bed") rather
       // than the 1.18 this line used to type — a typed gap and a rig that
       // moves are the same bug twice.
-      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop",
+      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, stack.bunk.mattLon, stack, "bedTop",
         stack.bunk.topBunk - stack.bunk.top);
     (stack._punitive ? punitiveStacks : housingStacks).push(stack);
     return stack;
@@ -1346,9 +1358,9 @@
     // subtracted from the two tops rather than written down as 1.18 — the pitch
     // moved with the rack, and a hardcoded copy of it would have registered
     // every top-bunk sleeper against a floor that no longer exists.
-    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", LIFT);
+    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, c.bunk.mattLon, c, "bed", LIFT);
     if (c.bunk.topBunk)
-      useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", LIFT + c.bunk.topBunk - c.bunk.top);
+      useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, c.bunk.mattLon, c, "bedTop", LIFT + c.bunk.topBunk - c.bunk.top);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -2360,28 +2372,44 @@
     const r = h01(c.x, c.z, 8451);
     return r < 0.40 ? "edge" : (r < 0.74 ? "back" : "brace");
   }
-  /* A BODY THAT IS NOT LYING OR SITTING ON THE BUNK MUST NOT BE INSIDE IT.
-     `unseat` handed the rig back to the walk pose and left it standing exactly
-     where it had been sitting — on the mattress, inside the frame. That was
-     invisible while the bunk was a hologram; with the frame solid it is a body
-     in a collider, and it is the state every cell FIGHT starts from, because
-     aiState "fight" is one of the things that unseats. So stepping clear is
-     part of standing up, not a separate tidy-up somebody has to remember. */
+  /* A BODY THAT IS NOT LYING OR SITTING ON THE BUNK MUST NOT BE INSIDE IT —
+     and it gets out by WALKING. This used to be `stepClearOfBunk`, which wrote
+     `p.x = b.x + side * out`: half a metre in one frame, the teleport at the
+     end of every get-up that the owner saw as "glitchy". Standing up is now
+     CBZ.moves.stand, which leans, rises with the feet planted and walks out to
+     the seat's exit spot (a body's radius clear of the frame). */
   const BODY_R = 0.5;                   // inmate radius (entities/npc.js)
-  function stepClearOfBunk(c, n) {
-    const b = c && c.bunk, p = n && n.group && n.group.position;
-    if (!b || !p) return;
-    const wide = b.along === "z" ? b.latOut : b.lonOut;
-    const deep = b.along === "z" ? b.lonOut : b.latOut;
-    if (Math.abs(p.z - b.z) > deep + BODY_R) return;          // already past the ends
-    const out = wide + BODY_R + 0.02;
-    const side = (p.x - b.x) >= 0 ? 1 : -1;                   // leave the way he faces
-    if (Math.abs(p.x - b.x) < out) {
-      p.x = b.x + side * out;
-      if (n.target) n.target.x = p.x;
-    }
-  }
   const SEAT_KIND = { edge: "bunk", back: "bunk-back", brace: "bunk-brace" };
+  /* THE BUNK AS A SEAT. One record per cell, built once, handed to
+     CBZ.moves.sit: where the hips go (the frame's edge, or for "back" the
+     edge first and then a slide down into the bed), which way the body faces
+     (OUT of the bed, into the room — the old per-frame lerp faced a north/
+     south-row man along the mattress, legs over the side rail), the cushion
+     and the steel over it (the duck solve), and where a body stands to get on
+     and off: a body's radius clear of the frame, on the room side. */
+  function loungeSeat(c) {
+    if (c._lgSeat) return c._lgSeat;
+    const b = c.bunk;
+    const style = bunkStyle(c);
+    const lat = c.dz !== 0 ? 1 : c.dx;
+    const floor = b.floor != null ? b.floor : (c.fy || 0);
+    const wide = b.along === "z" ? b.latOut : b.lonOut;
+    const z = style === "back" ? b.z - 0.72 : b.z;
+    const out = { x: b.x + lat * (wide + BODY_R + 0.08), z: z };
+    const seat = {
+      x: b.x + lat * (b.latOut - 0.01), y: floor, z: z, face: Math.atan2(lat, 0),
+      cushionH: b.top - floor, floorBelow: 0, kind: SEAT_KIND[style] || "bunk",
+      ceiling: b.deckY != null ? b.deckY : null,
+      entry: out, exit: out, _cell: c.i,
+    };
+    if (style === "back") {
+      const s = bunkSpot(c, "back");
+      seat.kind = "bunk";                              // he perches, then slides in
+      seat.scoot = { x: s.x, z: s.z, face: s.face, kind: "bunk-back" };
+    }
+    c._lgSeat = seat;
+    return seat;
+  }
 
   let cast = false;
   function dealCast() {
@@ -2439,15 +2467,16 @@
   const SLIDE_RATE = 4.2;
   let lampHex = -1, lampT = 0, lastElapsed = 0;
 
-  // hand the rig back: the seated pose is HELD, so something has to release it.
-  // `c` is optional only because the dead/escaped branch has no use for the
-  // step-out; every live caller passes its cell, and standing up out of a bunk
-  // means standing up OUT of it.
+  // GET HIM UP OFF HIS BUNK — only his bunk: a man the mess hall seated
+  // (systems/prisonrest.js through propuse) is not this file's to stand up.
+  // CBZ.moves.stand leans, rises and walks him out clear of the frame; a dead
+  // or escaped man is released on the spot (the corpse system owns the body).
   function unseat(n, c) {
-    if (!n || !n.char) return;
-    const was = n.char.sitting;
-    if (was && CBZ.setCharPose) CBZ.setCharPose(n.char, "stand");
-    if (was && c) stepClearOfBunk(c, n);
+    if (!n || !n.char || !c) return;
+    const M = CBZ.moves;
+    if (!M || !M.spotOf) return;
+    if (M.spotOf(n) !== c._lgSeat || !c._lgSeat) return;
+    M.stand(n, (n.dead || n.escaped) ? { instant: true } : null);
   }
 
   /* ==========================================================
@@ -2535,20 +2564,22 @@
      the owner's own words. A man who still makes no progress toward the
      entry (something else in the way) gives the bunk up for a while instead
      of pressing into it for as long as he is calm. */
-  const LOUNGE_ARRIVE = 0.75;   // metres from the entry at which the sit begins (mover stops at 0.3; the frame holds a body 0.08 short)
-  const LOUNGE_HOLD = 1.1;      // a seated man shoved further than this off his seat stands up
+  /* AND THEN THE SIT ITSELF WAS A SNAP (owner, 2026-09-27: "sitting down on
+     the bed in the jail is glitchy"). On arrival this function wrote the
+     root onto the seat (0.6 m in one frame), set the sit pose in the same
+     frame, and turned him with a per-frame lerp; standing up was a +0.5 m
+     teleport out of the frame. Now the wing's mover only walks him to the
+     bunk's entry spot, and CBZ.moves.sit takes the last metre: the turn at a
+     man's rate, a back-step until his calves touch the frame, the hips down
+     onto the mattress with the soles planted (and for "back", the slide down
+     into the bed). CBZ.moves holds him there until the brain wants out, and
+     unseat() is CBZ.moves.stand: lean, rise, walk out. */
+  const LOUNGE_ARRIVE = 0.75;   // metres from the entry at which CBZ.moves takes over the approach
   const LOUNGE_STALL = 1.5;     // seconds of no progress toward the entry before he gives it up
   const LOUNGE_GIVEUP = 25;     // ...and for how long
-  function loungeEntry(c, s) {
-    const b = c.bunk;
-    const lat = c.dz !== 0 ? 1 : c.dx;
-    const wide = b.along === "z" ? b.latOut : b.lonOut;
-    return { x: b.x + lat * (wide + BODY_R + 0.08), z: s.z };
-  }
   function lounge(c, n, dt, pre) {
-    const s = postIn(c, "bunk");
-    const p = n.group.position;
-    const seated = !!(n.char && n.char.sitting);
+    const seat = loungeSeat(c);
+    const M = CBZ.moves;
     // THE BUNK IS HIS ROUTINE while this runs: entities/npc.js's calm routine
     // otherwise parks him mid-walk for a stretch ("stand"/"activity" write
     // `target` back to where he is and hand the mover a speed of zero), and
@@ -2556,19 +2587,18 @@
     // other every frame is a man who does neither. `walk` leaves the target
     // alone.
     if (pre) { n._lifeActivity = "walk"; n._lifeT = Math.max(n._lifeT || 0, 2); }
-    if (seated) {
-      if (Math.hypot(p.x - s.x, p.z - s.z) > LOUNGE_HOLD) { if (pre) unseat(n, c); return; }
-      p.x = s.x; p.z = s.z;
-      if (!pre) return;
-      n.target.set(s.x, 0, s.z);
-      n.pause = Math.max(n.pause || 0, 0.6);
-      loungeFace(c, n, s, dt);
+    if (!M || !M.sit) return;
+    // SEATED STAYS SEATED (the hysteresis): CBZ.moves holds the body on the
+    // mattress every frame; nothing here re-measures a threshold. He gets up
+    // when the leash's callers decide the brain wants out (unseat).
+    if (M.spotOf(n) === seat) {
+      if (pre) n.pause = Math.max(n.pause || 0, 0.6);
       return;
     }
-    const e = loungeEntry(c, s);
+    if (!pre) return;
+    const p = n.group.position, e = seat.entry;
     const d = Math.hypot(p.x - e.x, p.z - e.z);
     if (d > LOUNGE_ARRIVE) {
-      if (!pre) return;
       // no progress counts only while he is actually being walked: a man
       // stood still by his own routine (a stretch, a spell at the wall — the
       // mover's velocity is zero and he is not paused) is not stuck
@@ -2587,28 +2617,13 @@
       n.target.set(e.x, 0, e.z); n.pause = 0;
       return;
     }
-    if (!pre) return;   // no pose to give in the post-pass: a standing body in the frame is a body the wall resolver throws out
     n._lgD = null; n._lgStall = 0;
-    p.x = s.x; p.z = s.z;
-    n.target.set(s.x, 0, s.z);
-    n.pause = Math.max(n.pause || 0, 0.6);
-    loungeFace(c, n, s, dt);
-    if (n.char && CBZ.setCharPose) {
-      // `kind` is not decoration: entities/character.js's SEAT_POSTURE
-      // reads it — edge is the ducked bunk perch, back/brace are the two
-      // relaxed reads of the same mattress. `ceiling` is the upper deck's
-      // underside so the pose ducks this particular body under it.
-      const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
-      n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: c.fy,
-        ceiling: c.bunk.deckY || 0, kind: SEAT_KIND[style] || "bunk" };
-      CBZ.setCharPose(n.char, "sit");
+    n._bunkStyle = n._bunkStyle || bunkStyle(c);
+    // a stall on the last metre (a cellmate standing in it) gives the bunk up
+    // for a while, exactly like one on the walk over
+    if (!M.sit(n, seat, { onAbort: function (a) { a._bunkGiveUp = LOUNGE_GIVEUP; } })) {
+      n.target.set(e.x, 0, e.z);
     }
-  }
-  // FACE OUT OF THE BED for the edge/brace perch; the "back" style publishes
-  // its own yaw (down the mattress, against the pillow wall).
-  function loungeFace(c, n, s, dt) {
-    const face = s.face == null ? Math.atan2(c.dx, c.dz) : s.face;
-    n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
   }
   // the bunk trait, asked once per man per pass: on, and not given up for now
   function wantsBunk(n, dt, pre) {
@@ -2662,13 +2677,18 @@
       }
       const b = paceBox(c, pose === "bunk");
       const p = n.group.position;
-      clampInto(b, p);
-      // an upper resident's feet are on the tier. Nothing else in the game
-      // writes an inmate's y (ai.js's restart reset zeroes it), so the cell
-      // that holds him is what puts him back on his own floor.
-      if (c.fy) p.y = c.fy;
+      // a man ON his bunk is CBZ.moves' to hold — the box does not clamp him
+      // (the "back" perch sits inside the mattress, outside the pacing box)
+      const onBunk = !!(CBZ.moves && CBZ.moves.spotOf && c._lgSeat && CBZ.moves.spotOf(n) === c._lgSeat);
+      if (!onBunk) {
+        clampInto(b, p);
+        // an upper resident's feet are on the tier. Nothing else in the game
+        // writes an inmate's y (ai.js's restart reset zeroes it), so the cell
+        // that holds him is what puts him back on his own floor.
+        if (c.fy) p.y = c.fy;
+      }
       if (n.target) clampInto(b, n.target);
-      if (owned) { if (pre) unseat(n, c); continue; }
+      if (owned || pose !== "bunk") { if (pre) unseat(n, c); if (owned) continue; }
       if (pose === "bunk") {
         lounge(c, n, dt, pre);
       } else if (pose === "bars" && pre) {
@@ -2681,7 +2701,9 @@
         // clears the mover's own stop distance with room to spare.
         if (Math.hypot(p.x - s.x, p.z - s.z) < 0.5) {
           n.pause = Math.max(n.pause || 0, 0.5);
-          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+          // a face ORDER: entities/npc.js's mover turns him to the bars at a
+          // man's rate (it brakes him through the pause too)
+          n._faceYaw = Math.atan2(c.dx, c.dz); n._faceTTL = 0.6;
         }
       }
     }

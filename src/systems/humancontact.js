@@ -82,6 +82,18 @@
     if (level >= 0.88 && !inv.armed && inv.canCarjack && Math.random() < 0.58) {
       if (CBZ.cityNpcCarjack(a, src)) return;
     }
+    // THE VICTIM REMEMBERS IT AND ANSWERS IN HIS OWN TIME. The grudge is brain
+    // memory (decaying, the same record proportional retaliation climbs on);
+    // fight / flee / freeze is his own threat response, which peds.js's think
+    // runs off `mem` + `alarmed` set above after his own reaction delay — a
+    // shove gets a beat of "did that just happen" before the swing or the
+    // backing-off, not a same-frame snap. A ganger's set hears about it too.
+    const CB = CBZ.cityBrain;
+    if (CB && src && src.pos) {
+      CB.grudge(a, src, 0.25 + severity * 0.5);
+      if (a.gang && (a._rallyT || 0) <= 0 && CBZ.cityRallyGang) { CBZ.cityRallyGang(a, src, severity * 0.5); a._rallyT = 6; }
+      return;
+    }
     if (level >= 0.70 || (inv.armed && level >= 0.46)) {
       if (src && src.pos) { a.rage = src; a.state = "fight"; }
     } else {

@@ -4,8 +4,10 @@
    Brings the blocky faces to life with cheap, layered detail:
      • Blinks          — squash face.eyeL/R.scale.y to ~0.1 for a
                           few frames at random intervals (desynced).
-     • Eye darts       — tiny face.eyeL/R.position.x offset that
-                          flicks to a new spot now and then, eased.
+     • Eye darts       — the IRIS (face.irisL/R) slides inside the
+                          still eye white, flicking to a new spot now
+                          and then, eased (whole-eye offset on a rig
+                          built without irises).
      • Talking         — when an actor is socializing (npc.aiState===
                           "socialize") or fighting, the mouth opens /
                           closes (scale.y + a small position.y dip) on
@@ -40,8 +42,8 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  // resting local positions baked into the rig (see character.js):
-  //   eyes  x = ±0.14   eyes y = 0.34   mouth y = 0.16
+  // resting local positions: read per rig from ch.faceRest (character.js);
+  // these are the fallback for a rig that predates it.
   const EYE_X = 0.14;       // rest |x| of each eye
   const EYE_Y = 0.34;       // rest y of each eye
   const MOUTH_Y = 0.16;     // rest y of the mouth
@@ -130,13 +132,19 @@
     }
     fa.dartX = damp(fa.dartX, fa.dartXT, 16, dt);
     fa.dartY = damp(fa.dartY, fa.dartYT, 16, dt);
-    if (face.eyeL) {
-      face.eyeL.position.x = -EYE_X + fa.dartX;
-      face.eyeL.position.y = EYE_Y + fa.dartY;
-    }
-    if (face.eyeR) {
-      face.eyeR.position.x = EYE_X + fa.dartX;
-      face.eyeR.position.y = EYE_Y + fa.dartY;
+    // A rig with irises (entities/character.js) darts the IRIS inside a still
+    // eye white — the eye itself never slides across the face. An older rig
+    // (a single dark eye block) darts the whole eye, as before.
+    const rest = ch.faceRest;
+    const ex = rest ? rest.eyeX : EYE_X, ey = rest ? rest.eyeY : EYE_Y;
+    if (face.irisL || face.irisR) {
+      if (face.eyeL) face.eyeL.position.set(-ex, ey, face.eyeL.position.z);
+      if (face.eyeR) face.eyeR.position.set(ex, ey, face.eyeR.position.z);
+      if (face.irisL) { face.irisL.position.x = fa.dartX; face.irisL.position.y = fa.dartY * 0.2; }
+      if (face.irisR) { face.irisR.position.x = fa.dartX; face.irisR.position.y = fa.dartY * 0.2; }
+    } else {
+      if (face.eyeL) { face.eyeL.position.x = -ex + fa.dartX; face.eyeL.position.y = ey + fa.dartY; }
+      if (face.eyeR) { face.eyeR.position.x = ex + fa.dartX; face.eyeR.position.y = ey + fa.dartY; }
     }
 
     // ---------- MOUTH / TALKING ----------
@@ -152,7 +160,7 @@
     if (face.mouth) {
       // open = taller + dropped a hair so it reads as a moving jaw
       face.mouth.scale.y = 1 + fa.mouth * 1.8;
-      face.mouth.position.y = MOUTH_Y - fa.mouth * 0.05;
+      face.mouth.position.y = (rest ? rest.mouthY : MOUTH_Y) - fa.mouth * 0.05;
     }
 
     // ---------- HEAD TRACKING (neck yaw/pitch toward player) ----------

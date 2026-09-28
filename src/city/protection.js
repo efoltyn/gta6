@@ -64,6 +64,21 @@
      file never adds a second ring, it only moves those officers' slots.
    · decisions run at 4-5 Hz; only walking runs per frame.
 
+   WHO DECIDES WHAT (2026-09-27, "the President's security moves glitchily")
+   · THIS FILE: who is on a detail, the posture (normal/alert/evac) and why,
+     the gate, the counter-snipers' shots, moving the PRINCIPAL (the NPC
+     President's run inside).
+   · city/brain_protection.js (CBZ.detailBrain): every agent's decision —
+     role (CP at his right-rear shoulder, point, flanks, tail, sweep), a
+     stable least-walk slot assignment, smoothed slots and heading, speed
+     matching, arrive-and-hold, bounded turns, sector scans on a human
+     cadence, the staggered panic drill (shout, CP grabs him, body shield on
+     the threat side, one or two engage, evacuate, hold, re-form), and the
+     counter-snipers' slow static scans. Bodies move only through
+     CBZ.brain.act (CBZ.moves when present). The same brain walks the NPC
+     President's power.js ring, officeholders' details, the player's hired
+     security, vips.js's suits and the hitman marks' bodyguards.
+
    THE SEAM FOR HITMAN (stable; other files code against exactly this)
      CBZ.protection.detail(personId) -> {
         principal: { kind: "player"|"npc"|"vacant", name, sid },
@@ -295,19 +310,57 @@
   function get(id) { return (id && state().details[id]) || null; }
 
   // ============================================================
-  //  SHARED FOLLOW PRIMITIVE — officials.js's original moveToward(), verbatim
-  //  (social.js's own companion-follow tick generalized off the player, per
-  //  that file's header — this is the one copy now).
+  //  THE ONE MOVER — ped.moveOrder (the CBZ.moves seam in city/peds.js).
+  //  This file decides WHERE a body goes and which way it looks; peds.js's
+  //  move() steps it there through CBZ.moves (velocity, braking arrival,
+  //  bounded turn, avoidance, the collider). Nothing in here writes a
+  //  position or a yaw on a moving body any more: the old goTo() added its
+  //  own catch-up step on top of the ped mover and flipped walk/idle at
+  //  0.7 m, which is what made the President's detail surge and stop.
+  //  An order is re-issued every frame by whoever owns it and carries the
+  //  frame clock (`t`, CBZ.now ms), so an owner that stops driving a body
+  //  leaves nothing behind once peds.js drops the stale order.
   // ============================================================
+  const WALK_SPEED = 2.4, RUN_SPEED = 5.0;
+  function order(ped, x, z, speed, face, strafe, vx, vz, stop) {
+    let o = ped.moveOrder;
+    if (!o) o = ped.moveOrder = { x: 0, z: 0, speed: 0, stop: 0.25, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+    o.x = x; o.z = z; o.speed = speed; o.stop = stop != null ? stop : 0.25;
+    o.face = face != null ? face : null; o.strafe = !!strafe;
+    o.vffX = vx || 0; o.vffZ = vz || 0; o.leg = false;
+    o.t = CBZ.now || 0;
+    if (ped.target && ped.target.set) ped.target.set(x, 0, z);
+    ped.path = null; ped.pause = 0; ped.finalGoal = null; ped._boardRun = false;
+    const dx = x - ped.pos.x, dz = z - ped.pos.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+  function release(ped) { if (ped && ped.moveOrder) ped.moveOrder = null; }
+  function arrived(ped) { return !!(ped._mv && ped._mv.arrived); }
+  // a body standing where it is (a post, a challenge) turns at the gait's own
+  // rate instead of being snapped: for posted bodies peds.js does not step
+  function turnTo(ped, yaw, dt) {
+    if (!ped.group || yaw == null) return;
+    if (CBZ.moves) ped.group.rotation.y = CBZ.moves.face(CBZ.moves.motor(ped), ped.group.rotation.y, yaw, dt);
+    else ped.group.rotation.y = yaw;
+  }
+  function yawTo(ped, x, z) { return Math.atan2(x - ped.pos.x, z - ped.pos.z); }
+
+  // THE SHARED FOLLOW (officials.js's officeholder, power.js's private ring,
+  // childhood.js's toddlers): one call per frame, the body walks there.
   function moveToward(ped, tx, tz, speed, dt) {
-    const dx = tx - ped.pos.x, dz = tz - ped.pos.z, d = Math.hypot(dx, dz);
-    if (d < 0.6) { ped.state = "idle"; ped.speed = 0; return; }
-    ped.state = "walk"; ped.speed = speed;
-    ped.pos.x += (dx / d) * speed * dt; ped.pos.z += (dz / d) * speed * dt;
-    const yaw = Math.atan2(dx, dz);
-    ped.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ped.group.rotation.y, yaw, 1 - Math.pow(0.001, dt)) : yaw;
+    order(ped, tx, tz, speed, null, false, 0, 0, 0.5);
+    ped.state = arrived(ped) ? "idle" : "walk";
   }
 
+  // ONE FORMATION FRAME PER PRINCIPAL (CBZ.moves.formation): power.js's
+  // ring follow reads it (frameOf) for a ring the detail brain is not
+  // walking. The detail brain (city/brain_protection.js) keeps its own frame
+  // per detail (D.F). Runtime only (never in serialize()).
+  const FRAME_OPTS = { lead: 0.2 };
+  function frameOf(owner) {
+    if (!owner._F && CBZ.moves) owner._F = CBZ.moves.formation(FRAME_OPTS);
+    return owner._F || null;
+  }
 
   // ============================================================
   //  MEMBER LIFECYCLE — spawn/drive/despawn (the refactored officials.js code)
@@ -317,7 +370,6 @@
     if (detail.fundingSource === "gang") return "gang muscle";           // never actually spawned by this path (see detailOf)
     return "hired security";
   }
-  const GUARD_SPEED = 2.1;
 
   // top up memberPedRefs to memberCount, spawning at (x,z) with the detail's
   // current gear loadout. Cheap no-op once the roster is full.
@@ -352,8 +404,12 @@
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
-      // the Secret Service wear dark suits (outfits.js's own two-piece suit)
-      if (detail.fundingSource === "treasury") dressAs(q, "suit");
+      // DRESS: the job IS the uniform. "secret service" / "hired security"
+      // cast city/outfits.js CAT.detail (black suit, white shirt, black tie,
+      // shades, earpiece) through jobFit inside cityPostNpc -> makePed, and
+      // every later re-dress re-reads the same job. The old dressAs(q, "suit")
+      // here painted CAT.suit, whose painter picks a suit style off the rig id:
+      // that was the President's detail in tan / powder-blue / white suits.
       if (CBZ.cityRelShift) CBZ.cityRelShift(q, "recruited", 0.5);   // a fresh hire starts with SOME goodwill, not none
       detail.memberPedRefs.push(q);
     }
@@ -380,23 +436,25 @@
     detail.memberCount = Math.max(0, detail.memberCount - 1);
   }
 
-  // escort formation: members fan out behind the principal and follow. A
-  // suborned member (see suborn()) stands down for its 30s window instead.
-  // escort formation for a PED principal (officials.js's officeholders):
-  // the same diamond the President's detail walks (formationSlot below).
-  const _esc = { x: 0, z: 0, face: 0 };
-  function driveEscort(detail, principal, dt) {
+  // escort formation for a PED principal (officials.js's officeholders): the
+  // same detail brain the President's detail walks. A suborned member (see
+  // suborn()) stands down for its 30 s window instead.
+  const _escList = [];
+  function driveEscort(detail, principal, dt, mode) {
     if (!detail || !principal || principal.dead) return;
+    const B = DB(); if (!B) return;
     const peds = detail.memberPedRefs;
-    const h = principal.group ? principal.group.rotation.y : 0;
-    const n = peds.length;
-    for (let i = 0; i < n; i++) {
+    _escList.length = 0;
+    for (let i = 0; i < peds.length; i++) {
       const gd = peds[i]; if (!gd || gd.dead) continue;
-      if ((gd._subornT || 0) > 0) { gd.state = "idle"; gd.speed = 0; continue; }   // stepped aside
-      slotWorld(principal.pos.x, principal.pos.z, h, i, n, "open", _esc);
-      moveToward(gd, _esc.x, _esc.z, GUARD_SPEED, dt);
-      if (gd.state === "idle" && gd.group) gd.group.rotation.y = _esc.face;
+      if ((gd._subornT || 0) > 0) { release(gd); gd.state = "idle"; gd.speed = 0; continue; }   // stepped aside
+      _escList.push(gd);
     }
+    const ps = escortPosture(detail, principal);
+    const env = envFor(ps, principal, detail.id);
+    env.mode = mode || null;                     // a caller may force the slot table (door / crowd / open)
+    const D = B.escort("det:" + detail.id, principal, _escList, dt, env);
+    detail._F = D ? D.F : null;                  // the CBZ.moves formation frame the brain walks them by
   }
   // "posted" formation (Part IV base/outlet protection — the postings[] array
   // is already carried by the record so a future base-defense wave is a
@@ -407,14 +465,15 @@
     if (!posts.length) return;
     for (let i = 0; i < peds.length; i++) {
       const gd = peds[i]; if (!gd || gd.dead) continue;
-      if ((gd._subornT || 0) > 0) { gd.state = "idle"; gd.speed = 0; continue; }
+      if ((gd._subornT || 0) > 0) { release(gd); gd.state = "idle"; gd.speed = 0; continue; }
       const p = posts[i % posts.length];
-      moveToward(gd, p.x, p.z, GUARD_SPEED, dt);
+      gd.state = "walk";
+      order(gd, p.x, p.z, WALK_SPEED, null, false, 0, 0, 0.4);
     }
   }
-  function driveDetail(detail, principal, dt) {
+  function driveDetail(detail, principal, dt, mode) {
     if (detail.formation === "posted") driveEscortPosted(detail, dt);
-    else driveEscort(detail, principal, dt);
+    else driveEscort(detail, principal, dt, mode);
   }
 
   // suborn/quit timers + the escort/posted branch, shared by every detail
@@ -642,13 +701,10 @@
   const FORCE_SPAWN_T = 2.0;         // seconds a body may wait for the camera to look away
   const CALM_DECAY = 30;             // seconds of quiet before a posture stands down
   const SNIPER_RANGE = 250;
-  const GUNFIRE_R = 60, DRAWN_R = 15, SHIELD_R = 1.15;
-  const LINE_GAP = 3.2;              // seconds between two barked lines from one detail
+  const GUNFIRE_R = 60, DRAWN_R = 15;
 
   let clock = 0;                     // module seconds (sim time, from dt)
-  const _tmpSlot = { f: 0, s: 0, face: 0 };
 
-  function lerpA(a, b, t) { return CBZ.lerpAngle ? CBZ.lerpAngle(a, b, t) : b; }
   function hyp(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return Math.sqrt(dx * dx + dz * dz); }
   function playerActor() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player || null; }
   function isPlayerBody(a) { return !!a && (a === CBZ.player || a === playerActor() || a.isPlayer); }
@@ -729,88 +785,45 @@
   }
 
   // ------------------------------------------------------------
-  //  THE FORMATION — pure geometry, no engine reads (node-tested).
-  //  Slot i in the PRINCIPAL'S frame: f = metres ahead of him, s = metres to
-  //  his side, face = the yaw offset (from his heading) the agent looks along.
-  //    0 shift leader  at his shoulder, half a step back
-  //    1 point         ahead            2/3 flanks        4 tail
-  //    5+ an outer ring, evenly spread
-  //  mode: "open" (3 m diamond), "crowd" (2 m), "door" (single file through
-  //  a doorway), "shield" (a 1.15 m wall of bodies around him).
-  //  Every agent looks OUT along his own slot's bearing.
+  //  THE FORMATION AND EVERY DETAIL DECISION live in city/brain_protection.js
+  //  (CBZ.detailBrain): roles, stable slot assignment, smoothed offsets, speed
+  //  matching, arrive-and-hold, bounded turns, sector scans and the panic
+  //  protocol. This file decides WHO is on the detail and WHAT the posture
+  //  is; the brain decides where each body stands and looks. formationSlot is
+  //  kept as the old public shape (a thin alias).
   // ------------------------------------------------------------
-  function formationSlot(i, n, mode, out) {
-    out = out || { f: 0, s: 0, face: 0 };
-    let f = 0, s = 0;
-    if (mode === "door") {
-      if (i === 0) { f = -0.9; s = 0.55; }
-      else if (i === 1) { f = 1.6; s = 0; }
-      else { f = -1.0 - (i - 1) * 0.95; s = 0; }
-      out.f = f; out.s = s;
-      out.face = i === 1 ? 0 : Math.PI;
-      if (i === 0) out.face = Math.atan2(s, f);
-      return out;
-    }
-    const r = mode === "shield" ? SHIELD_R : mode === "crowd" ? 2.0 : 3.0;
-    if (i === 0) { const k = Math.min(1.0, r * 0.4); f = -k; s = k; }
-    else if (i === 1) { f = r; s = 0; }
-    else if (i === 2) { f = 0.15 * r; s = -r; }
-    else if (i === 3) { f = 0.15 * r; s = r; }
-    else if (i === 4) { f = -r; s = 0; }
-    else {
-      const m = Math.max(1, n - 5), k = i - 5;
-      const a = ((k + 0.5) / m) * Math.PI * 2, R2 = r * 1.45;
-      f = Math.cos(a) * R2; s = Math.sin(a) * R2;
-    }
-    out.f = f; out.s = s; out.face = Math.atan2(s, f);
-    return out;
-  }
-  // slot i of a formation around a principal at (px,pz) heading h -> world
-  function slotWorld(px, pz, h, i, n, mode, out) {
-    const sl = formationSlot(i, n, mode, _tmpSlot);
-    const fx = Math.sin(h), fz = Math.cos(h), sx = Math.cos(h), sz = -Math.sin(h);
-    out.x = px + fx * sl.f + sx * sl.s;
-    out.z = pz + fz * sl.f + sz * sl.s;
-    out.face = h + sl.face;
-    return out;
-  }
+  function DB() { return CBZ.detailBrain || null; }
+  function formationSlot(i, n, mode, out) { const B = DB(); return B ? B.formationSlot(i, n, mode, out) : (out || { f: 0, s: 0, face: 0 }); }
 
   // ------------------------------------------------------------
-  //  LOCOMOTION — through the peds.js mover (target + state), so the shared
-  //  steering, the route planner and the collider all apply. `_boardRun` is
-  //  that mover's documented run multiplier. A body that has fallen well
-  //  behind also gets a direct catch-up step (protection's moveToward
-  //  primitive, the same one officials.js and power.js use).
+  //  LOCOMOTION for the few bodies this file still walks itself (a gate
+  //  officer back to his post, a door post, the NPC President running
+  //  inside): the peds.js mover (target + state; `_boardRun` is its run
+  //  multiplier). Hysteresis: walk past 0.9 m, stop inside 0.6 m. The old
+  //  second direct position step past 3.5 m is gone (it made bodies skate).
   // ------------------------------------------------------------
   function setTarget(ped, x, z) { if (ped.target && ped.target.set) ped.target.set(x, 0, z); }
-  function goTo(ped, x, z, run, dt, face, confront) {
+  function goTo(ped, x, z, run, dt, face, confront, faceAt) {
+    ped.state = confront ? "confront" : "walk";
     const dx = x - ped.pos.x, dz = z - ped.pos.z, d = Math.sqrt(dx * dx + dz * dz);
-    if (d > 0.7) {
-      ped.state = confront ? "confront" : "walk"; ped.path = null; ped.pause = 0; ped.finalGoal = null;
+    if (d > 8 && !faceAt) {
+      // a real walk (to a door, across the grounds): hand it to the routed
+      // mover (target + pedNav round the walls); the order takes over for the
+      // last few metres, where the arrival and the held facing matter
+      release(ped);
       setTarget(ped, x, z);
-      ped._boardRun = !!run || d > 4;
-      if (d > 3.5) {
-        const sp = Math.min(5.4, 1.2 + d * 0.4), step = Math.min(d - 0.5, sp * dt);
-        ped.pos.x += (dx / d) * step; ped.pos.z += (dz / d) * step;
-      }
+      ped.path = null; ped.pause = 0; ped.finalGoal = null; ped._boardRun = !!run;
       return d;
     }
-    ped.state = confront ? "confront" : "idle"; ped.speed = 0; ped._boardRun = false;
-    setTarget(ped, ped.pos.x, ped.pos.z);
-    if (face != null && ped.group) ped.group.rotation.y = lerpA(ped.group.rotation.y, face, 1 - Math.pow(0.004, dt));
-    return d;
-  }
-  function faceToward(ped, x, z, dt) {
-    if (!ped.group) return;
-    const dx = x - ped.pos.x, dz = z - ped.pos.z;
-    if (dx * dx + dz * dz < 0.01) return;
-    ped.group.rotation.y = lerpA(ped.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+    if (faceAt) return order(ped, x, z, run ? RUN_SPEED : WALK_SPEED, yawTo(ped, faceAt.pos.x, faceAt.pos.z), true, 0, 0, 0.3);
+    return order(ped, x, z, run ? RUN_SPEED : WALK_SPEED, arrived(ped) ? face : null, false, 0, 0, 0.3);
   }
   function teleport(ped, x, z, y) {
     ped.pos.x = x; ped.pos.z = z; ped.path = null; ped._boardRun = false;
     setTarget(ped, x, z);
     if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(ped, y || 0); } catch (e) {} }
     else ped.pos.y = y || 0;
+    if (CBZ.moves) CBZ.moves.reset(CBZ.moves.motor(ped), ped.pos);   // a teleport is not a stride
   }
   // catch-up: a body far from where it belongs moves there only when neither
   // end is on screen, or after FORCE_SPAWN_T of trying (a harness cannot
@@ -826,6 +839,7 @@
   }
   function engage(ped, t) {
     if (!t || t.dead) return;
+    release(ped);                     // the fight brain (peds.js + combat_iq) moves him now
     ped.rage = t; ped.state = "fight"; ped.path = null; ped.pause = 0; ped._boardRun = false;
     ped.fear = 0; ped.alarmed = Math.max(ped.alarmed || 0, 8);
     if (ped.armed && ped.ammo != null && ped.ammo < 8) ped.ammo = 60;
@@ -973,14 +987,6 @@
     if (p.dead) return;
     removePed(p);
   }
-  function dressAs(ped, catId) {
-    if (!ped || !ped.char || !CBZ.cityOutfitCatalog || !CBZ.cityRecolorRig) return;
-    try {
-      const cat = CBZ.cityOutfitCatalog();
-      const fit = cat && cat[catId];
-      if (fit && fit.colors) CBZ.cityRecolorRig(ped.char, fit.colors, fit);
-    } catch (e) {}
-  }
   function spawnUnit(u, A) {
     if (!CBZ.cityPostNpc || !A || !A.root) return null;
     const o = { src: "protection:mansion", parent: A.root, face: u.face, controlled: true, wealth: 0.45 };
@@ -999,8 +1005,9 @@
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }
-    if (u.role === "gate") dressAs(q, "police");
-    else if (u.role === "patrol") dressAs(q, "suit");
+    // dress comes from the job (outfits.js jobFit): gate "uniformed division
+    // officer" -> police uniform, "counter-sniper" -> all-black tactical with
+    // gloves, "secret service" (agents + patrol) -> the detail's black suit.
     if (u.role === "gate" && CBZ.cityPostStand) {
       // THE SHARED POST RECORD (garrison.js) — its stationed brain (hold the
       // slot, leash, bolt and come back) runs this officer between challenges;
@@ -1061,16 +1068,15 @@
   // ---- per-frame: the gate officers, the wall walk, the roof ----
   function driveGateUnit(u, dt) {
     const q = u.ped;
-    if ((q._subornT || 0) > 0) { q.state = "idle"; q.speed = 0; disengage(q); return; }
+    if ((q._subornT || 0) > 0) { release(q); q.state = "idle"; q.speed = 0; disengage(q); return; }
     const ch = MS.challenge;
     if (ch && ch.who && !ch.who.dead && !ch.hostile) {
       // THE CHALLENGE: weapons up, eyes on him, nobody walks toward him.
       disengage(q);
-      goTo(q, u.x, u.z, false, dt, null, true);
-      faceToward(q, ch.who.pos.x, ch.who.pos.z, dt);
+      goTo(q, u.x, u.z, false, dt, null, true, ch.who);
       return;
     }
-    if (q._post && CBZ.cityPostTick) { try { CBZ.cityPostTick(q, dt); return; } catch (e) {} }
+    if (q._post && CBZ.cityPostTick) { release(q); try { CBZ.cityPostTick(q, dt); return; } catch (e) {} }
     const t = gateThreatFor(q);
     if (t) { engage(q, t); return; }
     disengage(q);
@@ -1078,24 +1084,32 @@
   }
   function drivePatrolUnit(u, dt) {
     const q = u.ped, w = MS.sec.walk;
-    if ((q._subornT || 0) > 0) { q.state = "idle"; q.speed = 0; disengage(q); return; }
+    if ((q._subornT || 0) > 0) { release(q); q.state = "idle"; q.speed = 0; disengage(q); return; }
     const t = gateThreatFor(q);
     if (t && hyp(t.pos.x, t.pos.z, q.pos.x, q.pos.z) < 35) { engage(q, t); return; }
     disengage(q);
     if (PRES.posture !== "normal" && PRES.threat && !PRES.threat.dead) {
-      // on alert the walk stops and looks where the trouble is
-      q.state = "confront"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z);
-      faceToward(q, PRES.threat.pos.x, PRES.threat.pos.z, dt);
+      // on alert the walk stops where it is and looks where the trouble is
+      if (u.holdX == null) { u.holdX = q.pos.x; u.holdZ = q.pos.z; }
+      goTo(q, u.holdX, u.holdZ, false, dt, null, true, PRES.threat);
       return;
     }
+    u.holdX = null;
     const wp = w[u.wp % w.length];
     if (hyp(q.pos.x, q.pos.z, wp.x, wp.z) < 2.0) u.wp = (u.wp + 1) % w.length;
     const nx = w[u.wp % w.length];
-    q.state = "walk"; q.path = null; q.pause = 0; q._boardRun = false; setTarget(q, nx.x, nx.z);
+    // the wall walk is a waypoint chain: pass through each at pace (leg)
+    q.state = "walk";
+    order(q, nx.x, nx.z, q.baseSpeed || 1.6, null, false, 0, 0, 0.5);
+    q.moveOrder.leg = true;
   }
+  // the roof: static, slow sector scans with a long dwell (the detail brain),
+  // onto a mark the moment the scan below hands one over
   function driveRoofUnit(u, dt) {
-    const q = u.ped;
-    if (u.target && !u.target.dead && (q._subornT || 0) <= 0) faceToward(q, u.target.pos.x, u.target.pos.z, dt * 3);
+    const q = u.ped, B = DB();
+    const t = u.target && !u.target.dead && (q._subornT || 0) <= 0 ? u.target : null;
+    if (B) B.sniper(q, u, dt, t);
+    else if (t) turnTo(q, yawTo(q, t.pos.x, t.pos.z), dt);
   }
 
   // ---- THE COUNTER-SNIPERS (4 Hz) ----
@@ -1322,6 +1336,32 @@
       const hostile = !!(off && (!isPlayerBody(off) || n.loud >= 1.15));
       raise(ps, d < 25 ? 2 : 1, "gunfire", n.x, n.z, off, hostile);
     }
+    // (a2) what his agents themselves heard and saw (CBZ.brain.perception: the
+    //      city's gunshots reach every registered body in earshot, walls
+    //      halve it) and who an agent's awareness meter filled on
+    const Br = CBZ.brain, DBk = ps._dbKey && DB() ? DB().detail(ps._dbKey) : null;
+    if (DBk) {
+      if (Br && Br.memory && typeof Br.memory.heard === "function" && typeof Br.now === "function") {
+        const tn = Br.now();
+        for (let i = 0; i < DBk.roster.length; i++) {
+          let h = null;
+          try { h = Br.memory.heard(DBk.roster[i]); } catch (e) { h = null; }
+          if (!h || tn - h.t > 1.3) continue;
+          if (h.kind !== "gunshot" && h.kind !== "explosion") continue;
+          const d = hyp(h.x, h.z, bx, bz);
+          if (h.kind === "explosion") { if (d < 70) raise(ps, 2, "explosion", h.x, h.z, null, false); continue; }
+          if (d > GUNFIRE_R) continue;
+          const off = h.source || null;
+          if (off && (off === body || friendly(off) || (isPlayerPrincipal && isPlayerBody(off)))) continue;
+          raise(ps, d < 25 ? 2 : 1, "gunfire", h.x, h.z, off, !!off);
+          break;
+        }
+      }
+      const sp = DBk.spotted;
+      if (sp && !sp.dead && sp.pos && !friendly(sp) && !(isPlayerPrincipal && isPlayerBody(sp))) {
+        raise(ps, 1, "drawn weapon", sp.pos.x, sp.pos.z, sp, !!(sp.rage || sp.rampage));
+      }
+    }
     // (b) who is standing near him with what
     const peds = CBZ.cityPeds || [];
     let crowd = 0;
@@ -1370,26 +1410,12 @@
   // ------------------------------------------------------------
   //  THE PANIC PROTOCOL — what a posture change DOES.
   // ------------------------------------------------------------
+  // The words (who shouts "Gun!", the CP's "Sir, with me") are the detail
+  // brain's: one shout per event from the man who saw it, after his own
+  // reaction time, never a chorus. This file only moves the PRINCIPAL.
   const EV = { ped: null, pin: null, phase: null, t: 0 };   // the NPC president's run inside
-  function shoutFor(ps, posture, units, body, isPlayerPrincipal) {
-    if (clock - ps.lineT < LINE_GAP) return;
-    let speaker = null, bd = 1e9;
-    for (let i = 0; i < units.length; i++) {
-      const q = units[i]; if (!q || q.dead) continue;
-      const d = hyp(q.pos.x, q.pos.z, body.pos.x, body.pos.z);
-      const pri = q._protRole === "shift-leader" ? -100 : 0;
-      if (d + pri < bd) { bd = d + pri; speaker = q; }
-    }
-    if (!speaker) return;
-    ps.lineT = clock;
-    if (posture === "evac") say(speaker, isPlayerPrincipal ? "Sir, with me. Inside, now." : "Move, move! Get him inside!", "#ffb0a0");
-    else if (ps.threat && (ps.threat.armed || isPlayerBody(ps.threat))) say(speaker, ps.hostile ? "Gun! Gun! Get down!" : "Gun! Hands! Show me your hands!", "#ffb0a0");
-    else say(speaker, "Heads up. Close in.", "#ffd6a0");
-  }
-  function onPosture(ps, body, isPlayerPrincipal, units) {
+  function onPosture(ps, body, isPlayerPrincipal) {
     emitPres("security", { level: ps.posture, reason: ps.reason || null, at: { x: ps.at.x, z: ps.at.z } });
-    if (ps.posture === "normal") return;
-    shoutFor(ps, ps.posture, units, body, isPlayerPrincipal);
     if (ps.posture !== "evac") return;
     // EVAC: whoever owns his body right now takes him out of here
     const now = publicNow();
@@ -1426,13 +1452,14 @@
         EV.phase = "hold"; EV.t = 0;
       }
     } else if (EV.phase === "hold") {
-      p.state = "idle"; p.speed = 0; setTarget(p, p.pos.x, p.pos.z);
+      release(p); p.state = "idle"; p.speed = 0; setTarget(p, p.pos.x, p.pos.z);
       if (ps.posture === "normal") { EV.phase = "return"; EV.t = 0; }
     } else if (EV.phase === "return") {
       const pin = EV.pin;
       if (!pin) { EV.phase = null; EV.ped = null; return; }
       if (goTo(p, pin.x, pin.z, false, dt, pin.face, false) < 0.8 || EV.t > 40) {
         if (EV.t > 40) teleport(p, pin.x, pin.z, 0);
+        release(p);
         p.staffPost = { x: pin.x, z: pin.z, face: pin.face };
         p.state = "idle"; p.speed = 0;
         EV.phase = null; EV.ped = null; EV.pin = null;
@@ -1440,43 +1467,116 @@
     }
     if (EV.phase && EV.phase !== "hold" && EV.phase !== "return" && ps.posture !== "evac" && ps.posture !== "alert") EV.phase = "return";
   }
-  // power.js's ring around an NPC president: in alert two officers step in
-  // between him and the threat; in evac the whole ring closes to a shield.
-  // We only move their SLOTS (police.js's posted brain walks them there).
-  function shapeRing(ped, ps) {
-    if (!CBZ.powerGuardsOf || ps.posture === "normal") return;
-    let guards = null;
-    try { guards = CBZ.powerGuardsOf(ped); } catch (e) { guards = null; }
-    if (!guards || !guards.length) return;
-    const t = ps.threat && !ps.threat.dead ? ps.threat : null;
-    const tb = t ? Math.atan2(t.pos.x - ped.pos.x, t.pos.z - ped.pos.z) : (ped.group ? ped.group.rotation.y : 0);
-    for (let i = 0; i < guards.length; i++) {
-      const q = guards[i]; if (!q || q.dead || !q._post) continue;
-      let r, a;
-      if (ps.posture === "evac") { r = 1.3; a = tb + (i / guards.length) * Math.PI * 2; }
-      else if (i < 2) { r = 1.1; a = tb + (i === 0 ? -0.35 : 0.35); }
-      else continue;
-      q._post.x = ped.pos.x + Math.sin(a) * r; q._post.z = ped.pos.z + Math.cos(a) * r;
-      q._post.fx = Math.sin(tb); q._post.fz = Math.cos(tb);
+  // ------------------------------------------------------------
+  //  THE DETAIL BRAIN'S INPUTS. One env object per detail key (reused, no
+  //  per-frame allocation): the posture record, the threat, the crowd, and
+  //  the hooks the brain calls back into this file with (engage/disengage
+  //  are the city's own combat fields; busy() keeps it off a body that is
+  //  fighting or held by boarding.js).
+  // ------------------------------------------------------------
+  const ENVS = {};
+  function busyUnit(q) {
+    if (!q || q.dead) return true;
+    if (CBZ.boardingHolds && CBZ.boardingHolds(q)) return true;
+    if (q.state === "fight" && q.rage && !q.rage.dead) return true;
+    if (q.state === "confront" && q._powerOf) return true;          // power.js's drawn stage owns him
+    return false;
+  }
+  function envFor(ps, principal, key) {
+    let e = ENVS[key];
+    if (!e) {
+      e = ENVS[key] = {
+        posture: "normal", threat: null, threatAt: { x: 0, z: 0 }, hostile: false, crowd: 0, door: false, peds: null,
+        friendly: friendly, busy: busyUnit, engage: engage, disengage: disengage,
+      };
+    }
+    if (ps) ps._dbKey = key;                     // scanThreats reads the agents' own ears
+    const t = ps && ps.threat && !ps.threat.dead ? ps.threat : null;
+    const own = isPlayerBody(principal);
+    e.posture = ps ? ps.posture : "normal";
+    // the man being protected is never the target of his own detail
+    e.threat = t && !(own && isPlayerBody(t)) ? t : null;
+    e.hostile = !!(ps && ps.hostile && e.threat);
+    e.threatAt.x = ps ? ps.at.x : 0; e.threatAt.z = ps ? ps.at.z : 0;
+    e.crowd = ps ? (ps._crowd | 0) : 0;
+    e.door = !!(principal && principal.pos && nearDoor(principal.pos.x, principal.pos.z));
+    e.peds = CBZ.cityPeds || null;
+    e.also = own ? null : playerActor();          // they look at YOU too, when you are not the man
+    return e;
+  }
+  // an officeholder's detail (officials.js) gets its own posture record,
+  // scanned at 4 Hz like the President's
+  function escortPosture(detail, principal) {
+    let ps = detail._ps;
+    if (!ps) ps = detail._ps = newPosture("det:" + detail.id);
+    ps._body = principal;
+    return ps;
+  }
+  function scanEscorts(sd) {
+    const S = state();
+    for (const id in S.details) {
+      const d = S.details[id], ps = d._ps;
+      if (!ps || !ps._body || ps._body.dead) continue;
+      scanThreats(ps, ps._body, false, d.id);
+      settle(ps, sd, 0);
     }
   }
 
+  // power.js's ring around an NPC President. Its slots are the detail
+  // brain's now, in EVERY posture (power.js recomputed them each frame off
+  // his raw heading, which swung the whole ring on every turn): a cop in the
+  // ring is walked by police.js's post brain to the smoothed slot the brain
+  // writes into his `_post`; a private guard is walked by the brain itself
+  // (power.js skips any guard stamped `_detailBrain`).
+  const _ring = [];
+  function driveRing(ped, ps, dt) {
+    const B = DB(); if (!B || !CBZ.powerGuardsOf) return;
+    let guards = null;
+    try { guards = CBZ.powerGuardsOf(ped); } catch (e) { guards = null; }
+    _ring.length = 0;
+    if (guards) for (let i = 0; i < guards.length; i++) { const q = guards[i]; if (q && !q.dead && (q._post || !q._powerCop)) _ring.push(q); }
+    B.escort("pres:npc", ped, _ring, dt, envFor(ps, ped, "pres:npc"));
+  }
+  // the SAME brain for any power.js principal's ring (a hitman target's
+  // bodyguards): agency.js calls CBZ.protection.guardRing(principal, dt, ps?)
+  function guardRing(principal, dt, posture) {
+    const B = DB(); if (!B || !principal || principal.dead || !CBZ.powerGuardsOf) return null;
+    let guards = null;
+    try { guards = CBZ.powerGuardsOf(principal); } catch (e) { guards = null; }
+    const L = [];
+    if (guards) for (let i = 0; i < guards.length; i++) { const q = guards[i]; if (q && !q.dead) L.push(q); }
+    const key = "ring:" + (principal._sid || principal.name || "p");
+    let ps = principal._protPs;
+    if (!ps) ps = principal._protPs = newPosture(key);
+    if (posture) {
+      ps.posture = posture.posture || "normal"; ps.threat = posture.threat || null; ps.hostile = !!posture.hostile;
+      if (posture.at) { ps.at.x = posture.at.x; ps.at.z = posture.at.z; }
+    }
+    return B.escort(key, principal, L, dt, envFor(ps, principal, key), { small: true });
+  }
+
   // ------------------------------------------------------------
-  //  THE PLAYER'S DETAIL — follow, indoor posts, alert, shield, evac.
-  //  Drives a protection record's own bodies (the President's off_<seat>,
-  //  or the player's hired detail) around the PLAYER.
+  //  THE PLAYER'S DETAIL — who is on the formation this frame. Drives a
+  //  protection record's own bodies (the President's off_<seat>, or the
+  //  player's hired detail) around the PLAYER. Special cases stay here (he
+  //  is driving, he is indoors at his desk, an agent is on another floor or
+  //  hopelessly far); everyone else is handed to the detail brain.
   // ------------------------------------------------------------
-  const _slot = { x: 0, z: 0, face: 0 };
-  const PSTATE = { px: 0, pz: 0, h: 0, speed: 0, init: false };
+  const PSTATE = { px: 0, pz: 0, speed: 0, init: false };
+  // his speed only (the counter-snipers read it: a running man is a hard shot)
   function trackPlayer(P, dt) {
     if (!PSTATE.init) { PSTATE.px = P.pos.x; PSTATE.pz = P.pos.z; PSTATE.init = true; }
     const dx = P.pos.x - PSTATE.px, dz = P.pos.z - PSTATE.pz;
     const inst = dt > 0 ? Math.sqrt(dx * dx + dz * dz) / dt : 0;
     PSTATE.speed += (Math.min(inst, 20) - PSTATE.speed) * Math.min(1, dt * 6);
-    if (inst > 0.6 && inst < 30) PSTATE.h = lerpA(PSTATE.h, Math.atan2(dx, dz), Math.min(1, dt * 5));
-    else if (inst >= 30) PSTATE.h = Math.atan2(dx, dz);   // a teleport: face where he went
     PSTATE.px = P.pos.x; PSTATE.pz = P.pos.z;
     P._protSpeed = PSTATE.speed;
+  }
+  function playerHeading(P) {
+    const B = DB(), D = B && (B.detail("player:pres") || B.detail("player:hired"));
+    if (D) return D.h;
+    const a = playerActor();
+    return a && a.group ? a.group.rotation.y : 0;
   }
   function inRect(r, x, z, m) { return x > r.minX - m && x < r.maxX + m && z > r.minZ - m && z < r.maxZ + m; }
   function indoorBuilding(P) {
@@ -1499,7 +1599,7 @@
     if (det.memberPedRefs.length >= wantCount(det) || CBZ.citySpawnDraining) { det._spawnWait = 0; return; }
     det._spawnWait = (det._spawnWait || 0) + dt;
     // candidates behind him first, then his flanks
-    const h = PSTATE.h, y = P.pos.y || 0;
+    const h = playerHeading(P), y = P.pos.y || 0;
     let bx = null, bz = null;
     const tries = [[-9, 0], [-7, 5], [-7, -5], [0, 9], [0, -9], [-14, 0]];
     for (let i = 0; i < tries.length; i++) {
@@ -1518,90 +1618,68 @@
     spawnMembers(det, A, bx, bz);
     det._spawnWait = 0;
   }
+  // the shift leader (the CP, the body man) is the first living member and
+  // STAYS the same man until he falls
   function assignRoles(det) {
-    let lead = false;
+    let lead = null;
+    for (let i = 0; i < det.memberPedRefs.length; i++) {
+      const q = det.memberPedRefs[i];
+      if (q && !q.dead && q._protRole === "shift-leader") { lead = q; break; }
+    }
     for (let i = 0; i < det.memberPedRefs.length; i++) {
       const q = det.memberPedRefs[i]; if (!q) continue;
-      if (!lead && !q.dead) { q._protRole = "shift-leader"; lead = true; } else q._protRole = "agent";
+      if (!lead && !q.dead) lead = q;
+      q._protRole = q === lead ? "shift-leader" : "agent";
     }
   }
   function unpostIndoor(q) {
     if (q._protIndoor) { q._protIndoor = null; q.staffPost = null; }
   }
+  const _form = [];
   function driveDetailAroundPlayer(det, ps, dt, isPres) {
     const P = CBZ.player, peds = det.memberPedRefs, n = peds.length;
+    const principal = playerActor();
     const inCar = !!(P.driving || P._vehicle);
     const bld = isPres ? indoorBuilding(P) : null;
     const room = bld ? officeRoom() : null;
-    const threat = ps.threat && !ps.threat.dead ? ps.threat : null;
-    // the man being protected is never the target of his own detail
-    const hostile = !!(ps.hostile && threat && !isPlayerBody(threat));
-    const run = PSTATE.speed > 3.2 || ps.posture === "evac";
-    let mode = "open";
-    if (ps.posture === "evac") mode = "shield";
-    else if (nearDoor(P.pos.x, P.pos.z)) mode = "door";
-    else if ((ps._crowd | 0) >= 3) mode = "crowd";
-    const tb = threat ? Math.atan2(threat.pos.x - P.pos.x, threat.pos.z - P.pos.z) : 0;
-    let shields = 0;
+    const hot = ps.posture !== "normal" && !!(ps.threat && !ps.threat.dead);
+    const y = P.pos.y || 0;
+    _form.length = 0;
+    let k = 0;                                   // non-leader index, by roster order (stable)
     for (let i = 0; i < n; i++) {
       const q = peds[i];
       if (!q || q.dead) continue;
-      if (CBZ.boardingHolds && CBZ.boardingHolds(q)) continue;
-      if ((q._subornT || 0) > 0) { unpostIndoor(q); disengage(q); q.state = "idle"; q.speed = 0; continue; }
       const leader = q._protRole === "shift-leader";
-      // ---- a threat: shields, then shooters ----------------------------
-      if (ps.posture !== "normal" && threat && !inCar) {
-        unpostIndoor(q);
-        if ((q.pos.y || 0) - (P.pos.y || 0) > 1.5 || (P.pos.y || 0) - (q.pos.y || 0) > 1.5) {
-          // on another floor: come to him
-          relocateIfFar(q, P.pos.x - Math.sin(tb) * 1.4, P.pos.z - Math.cos(tb) * 1.4, P.pos.y || 0, 0.5, dt);
-          continue;
-        }
-        // alert: two agents step in between him and the gun. evac: everybody
-        // closes to a wall of bodies, except (with a live shooter) the two
-        // who go after him.
-        const shooter = hostile && !leader && i >= 3;
-        const shieldNow = ps.posture === "evac" ? !shooter : (!leader && shields < 2);
-        if (shieldNow) {
-          // BODY BETWEEN HIM AND THE GUN
-          let a, r;
-          if (ps.posture === "evac") { a = tb + (i / Math.max(1, n)) * Math.PI * 2; r = SHIELD_R; }
-          else { a = tb + (shields === 0 ? -0.32 : 0.32); r = 1.05; shields++; }
-          disengage(q);
-          goTo(q, P.pos.x + Math.sin(a) * r, P.pos.z + Math.cos(a) * r, true, dt, tb, true);
-          faceToward(q, threat.pos.x, threat.pos.z, dt);
-          continue;
-        }
-        if (hostile && !leader && hyp(threat.pos.x, threat.pos.z, P.pos.x, P.pos.z) < 45) { engage(q, threat); continue; }
-        disengage(q);
-        slotWorld(P.pos.x, P.pos.z, PSTATE.h, i, n, ps.posture === "evac" ? "shield" : mode, _slot);
-        goTo(q, _slot.x, _slot.z, true, dt, null, true);
-        faceToward(q, threat.pos.x, threat.pos.z, dt);
-        continue;
-      }
-      disengage(q);
+      const ki = leader ? -1 : k++;
+      if (CBZ.boardingHolds && CBZ.boardingHolds(q)) continue;
+      if ((q._subornT || 0) > 0) { release(q); unpostIndoor(q); disengage(q); q.state = "idle"; q.speed = 0; continue; }
+      if (hot) unpostIndoor(q);
       // ---- he is driving: hold, and catch up when he gets out -----------
-      if (inCar) { if (!q._protIndoor) { q.state = "idle"; q.speed = 0; q._boardRun = false; setTarget(q, q.pos.x, q.pos.z); } continue; }
-      // ---- indoors in the Mansion or the West Wing ----------------------
-      if (bld && ps.posture === "normal") {
-        if ((i === 1 || i === 2) && room && room.landmarks && room.landmarks.arrivalPortal && room.approach) {
+      if (inCar && !hot) { if (!q._protIndoor) { q.state = "idle"; q.speed = 0; q._boardRun = false; setTarget(q, q.pos.x, q.pos.z); } continue; }
+      // ---- indoors in the Mansion or the West Wing, calm: posts -----------
+      if (bld && !hot && ps.posture === "normal") {
+        if ((ki === 0 || ki === 1) && room && room.landmarks && room.landmarks.arrivalPortal && room.approach) {
+          // two stand either side of the office door upstairs
           const ap = room.landmarks.arrivalPortal, A2 = room.approach;
-          const side = i === 1 ? -1 : 1;
+          const side = ki === 0 ? -1 : 1;
           const x = ap.x + A2.tx * 0.9 * side - A2.nx * 0.4, z = ap.z + A2.tz * 0.9 * side - A2.nz * 0.4;
           const face = Math.atan2(-A2.nx, -A2.nz);
-          const dd = hyp(q.pos.x, q.pos.z, x, z) + Math.abs((q.pos.y || 0) - room.floorY) * 4;
-          if (q._protIndoor === "portal" && dd < 1.2) continue;
+          const dy = Math.abs((q.pos.y || 0) - room.floorY);
+          const dd = hyp(q.pos.x, q.pos.z, x, z) + dy * 4;
+          if (q._protIndoor === "portal" && dd < 1.2) { turnTo(q, face, dt); continue; }
           q._protIndoor = null; q.staffPost = null;
-          if (dd < 0.8 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) {
+          if (dd < 0.5 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) {
             if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, room.floorY); } catch (e) {} }
+            release(q);
             q._protIndoor = "portal"; q.staffPost = { x: x, z: z, face: face };
-            q.state = "idle"; q.speed = 0; q._boardRun = false; if (q.group) q.group.rotation.y = face;
-          } else { q.state = "idle"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z); }
+            q.state = "idle"; q.speed = 0; q._boardRun = false;
+          } else if (dy < 1.0) goTo(q, x, z, false, dt, face, false);   // same floor: walk to the post
+          else { release(q); q.state = "idle"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z); }
           continue;
         }
         unpostIndoor(q);
         const other = bld === "mansion" ? "wing" : "mansion";
-        const dp = leader ? doorPost(bld, 0) : doorPost(i === 3 ? other : bld, i);
+        const dp = leader ? doorPost(bld, 0) : doorPost(ki === 2 ? other : bld, ki + 1);
         if (dp) {
           if ((q.pos.y || 0) > 1.0) { relocateIfFar(q, dp.x, dp.z, 0, 0.5, dt); continue; }
           if (!relocateIfFar(q, dp.x, dp.z, 0, 60, dt)) goTo(q, dp.x, dp.z, false, dt, dp.face, false);
@@ -1609,14 +1687,16 @@
         }
       }
       unpostIndoor(q);
-      // ---- THE FORMATION ------------------------------------------------
-      const y = P.pos.y || 0;
-      slotWorld(P.pos.x, P.pos.z, PSTATE.h, i, n, mode, _slot);
-      if (Math.abs((q.pos.y || 0) - y) > 1.5) { relocateIfFar(q, _slot.x, _slot.z, y, 0.5, dt); continue; }
-      if (relocateIfFar(q, _slot.x, _slot.z, y, 28, dt)) continue;
-      const d = goTo(q, _slot.x, _slot.z, run, dt, _slot.face, false);
-      if (d <= 0.7 && q.group) q.group.rotation.y = lerpA(q.group.rotation.y, _slot.face, 1 - Math.pow(0.01, dt));
+      // ---- on another floor, or hopelessly behind: come to him -----------
+      const hb = playerHeading(P), bx = P.pos.x - Math.sin(hb) * 2.2, bz = P.pos.z - Math.cos(hb) * 2.2;   // just behind him
+      if (Math.abs((q.pos.y || 0) - y) > 1.5) { relocateIfFar(q, bx, bz, y, 0.5, dt); continue; }
+      if (relocateIfFar(q, bx, bz, y, 30, dt)) continue;
+      _form.push(q);
     }
+    // ---- THE FORMATION, THE SCAN, THE SHIELD: the detail brain -----------
+    const B = DB(); if (!B || !principal) return;
+    const key = isPres ? "player:pres" : "player:hired";
+    B.escort(key, principal, _form, dt, envFor(ps, principal, key));
   }
 
   // ------------------------------------------------------------
@@ -1659,7 +1739,6 @@
     det.standing = PRES_BASE;
     return det;
   }
-  function unitsFor(det) { return det ? det.memberPedRefs : []; }
 
   CBZ.onUpdate(35.795, function (dt) {
     const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
@@ -1718,16 +1797,15 @@
       }
       if (MS.live) tickSnipers(sd);
       const changed = settle(PRES, sd, floor);
-      if (changed && body) onPosture(PRES, body, playerIsPres, playerIsPres ? unitsFor(pdet) : (CBZ.powerGuardsOf ? CBZ.powerGuardsOf(body) : []));
-      else if (PRES.posture !== "normal" && body && PRES.threat) shoutFor(PRES, PRES.posture, playerIsPres ? unitsFor(pdet) : (CBZ.powerGuardsOf ? CBZ.powerGuardsOf(body) : []), body, playerIsPres);
+      if (changed && body) onPosture(PRES, body, playerIsPres);
       // the hired detail (a player who is NOT the President)
       const hd = playerIsPres ? null : findPlayerDetail();
       if (hd && hd.memberPedRefs.length && !P.dead) {
         scanThreats(HIRED, playerActor(), true, hd.id);
-        if (settle(HIRED, sd, 0)) {
-          if (HIRED.posture !== "normal") shoutFor(HIRED, HIRED.posture, hd.memberPedRefs, playerActor(), true);
-        }
+        settle(HIRED, sd, 0);
       }
+      // the officeholders' details (officials.js drives their bodies)
+      scanEscorts(sd);
     }
 
     // ---- the gate (5 Hz) ----
@@ -1752,7 +1830,7 @@
       const hd = findPlayerDetail();
       if (hd && hd.memberPedRefs.length) driveDetailAroundPlayer(hd, HIRED, dt, false);
     }
-    if (npcBody) { shapeRing(npcBody, PRES); }
+    if (npcBody) driveRing(npcBody, PRES, dt);
     driveNpcEvac(dt, PRES);
   });
 
@@ -1890,12 +1968,16 @@
   CBZ.protection = {
     create, dissolve, details, get,
     spawnMembers, despawnMembers, dropMember, driveEscort: driveDetail, moveToward,
+    // the one-mover seam for anybody walking a body beside a principal
+    order: order, release: release, frameOf: frameOf,
     notePrincipalHp, attemptsOn,
     hire, suborn, detailOf,
     reset, GEAR, HIRE_CAP,
     // THE SEAM (see the header): Hitman and everybody else read these
     detail: detailView, alarm: alarmAt, posture: postureOf,
     formationSlot: formationSlot,
+    // any power.js principal's ring on the detail brain (agency.js's marks)
+    guardRing: guardRing,
     _presidential: presidentialProbe,
     serialize: function () {
       const S = state();

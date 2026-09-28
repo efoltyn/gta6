@@ -86,6 +86,13 @@
   //    safety   — eroded by fear; a scared ped's only goal is to be safe
   //    ambition — gang members' drive to climb; fed by putting in work
   // ============================================================
+  //
+  //  THE DRIVES LIVE IN CBZ.brain (needs.levels / needs.rates on the actor's
+  //  brain record, via city/brain_city.js adopt): ped._needs IS that levels
+  //  object, so brain.needs.top(ped) / level / drive and this file read and
+  //  write ONE set of numbers. The brain's threat response spends `safety`
+  //  (a scare), and a shaken person's top drive sends them HOME (assign()).
+  //  Rates are per second; a negative rate recovers (safety comes back).
   function needs(ped) {
     let N = ped._needs;
     if (!N) {
@@ -103,31 +110,36 @@
         // than money). Looming rent makes earning feel urgent; paying it at the
         // door (LE3) is what tops it back up. Vagrants carry no rent (they're full).
         rent: ped.vagrant ? 1 : (0.6 + rng() * 0.3),
-        // per-ped drain rates (units per second of sim time), personality-shaped
-        kMoney: (0.006 + 0.010 * greed) * (0.7 + rng() * 0.6),
-        kHigh: ped.drugUser ? (0.010 + 0.018 * (ped.erratic || 0.2)) : 0,
-        kSocial: 0.004 + rng() * 0.004,
-        kAmb: ped.gang ? (0.005 + 0.008 * ped.aggr) : 0,
-        kFood: (0.008 + 0.006 * poor) * (0.75 + rng() * 0.5),         // ~0.008..0.014/s
-        kRent: ped.vagrant ? 0 : (0.0006 + rng() * 0.0004),          // ~0.0008/s — bites over minutes
+        // SAFETY — spent by being threatened (brain threat.respond), recovers
+        // on its own; low safety makes going home the most urgent thing.
+        safety: 1,
+      };
+      // per-ped drain rates (units per second of sim time), personality-shaped
+      ped._needsK = {
+        money: (0.006 + 0.010 * greed) * (0.7 + rng() * 0.6),
+        high: ped.drugUser ? (0.010 + 0.018 * (ped.erratic || 0.2)) : 0,
+        social: 0.004 + rng() * 0.004,
+        ambition: ped.gang ? (0.005 + 0.008 * ped.aggr) : 0,
+        food: (0.008 + 0.006 * poor) * (0.75 + rng() * 0.5),         // ~0.008..0.014/s
+        rent: ped.vagrant ? 0 : (0.0006 + rng() * 0.0004),          // ~0.0008/s — bites over minutes
+        safety: -0.006,                                             // a scare takes a minute or two to wear off
         t: now(),
       };
     }
+    // (re)link into the brain record — a re-registered or freshly adopted body
+    // gets the same object, never a copy
+    const b = ped._brain || (CBZ.cityBrain && CBZ.cityBrain.adopt(ped));
+    if (b && (!b.needs || b.needs.levels !== N)) b.needs = { levels: N, rates: ped._needsK || {}, t: now() };
     return N;
   }
   // decay needs by the elapsed sim-time since we last looked at this ped
   function decayNeeds(ped) {
-    const N = needs(ped);
-    const dt = Math.min(20, Math.max(0, (now() - N.t) / 1000)); // ms->s; cap so a long LOD gap doesn't nuke it
-    N.t = now();
+    const N = needs(ped), K = ped._needsK;
+    if (!K) return N;
+    const dt = Math.min(20, Math.max(0, (now() - K.t) / 1000)); // ms->s; cap so a long LOD gap doesn't nuke it
+    K.t = now();
     if (dt <= 0) return N;
-    N.money = clamp01(N.money - N.kMoney * dt);
-    if (ped.drugUser) N.high = clamp01(N.high - N.kHigh * dt);
-    N.social = clamp01(N.social - N.kSocial * dt);
-    if (ped.gang) N.ambition = clamp01(N.ambition - N.kAmb * dt);
-    // hunger always builds; rent always looms (both slow burns vs. money)
-    N.food = clamp01(N.food - (N.kFood || 0) * dt);
-    N.rent = clamp01(N.rent - (N.kRent || 0) * dt);
+    for (const k in N) { const r = K[k]; if (r) N[k] = clamp01(N[k] - r * dt); }
     return N;
   }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -705,11 +717,13 @@
   // a rival shoved them) and is bold enough will go settle it — a real,
   // emergent NPC-vs-NPC feud, not the player ambush (social.js owns that).
   function goFeud(ped) {
-    const foe = ped._grudgeOn;
-    if (!foe || foe.dead || foe.companion || Math.hypot(foe.pos.x - ped.pos.x, foe.pos.z - ped.pos.z) > 30) { ped._grudgeOn = null; return false; }
+    const foe = feudOf(ped);
+    if (!foe || foe.companion || Math.hypot(foe.pos.x - ped.pos.x, foe.pos.z - ped.pos.z) > 30) return false;
     ped.rage = foe; ped.state = "fight";
     ped.target.set(foe.pos.x, 0, foe.pos.z);
     if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "assault");
+    // settling it spends most of it: one feud, not a daily appointment
+    if (CBZ.brain) CBZ.brain.memory.grudge(ped, foe, -0.35);
     ped._goalKind = "feud";
     return true;
   }
@@ -1057,7 +1071,7 @@
     // ---- score each goal: urgency (1-need) shaped by opportunity & personality ----
     // FEUD: a live grudge target overrides almost everything (it's personal)
     let sFeud = 0;
-    if (ped._grudgeOn && !ped._grudgeOn.dead) sFeud = 0.95;
+    if (feudOf(ped)) sFeud = 0.95;
 
     // SCORE (get high): only users; the lower the high-need, the harder the pull
     let sScore = 0;
@@ -1132,6 +1146,10 @@
     // whole evening tide — but a live grudge / provoked crew still outranks it).
     let sHome = 0;
     if (ped._clockedIn && (night >= 0.5 || hour >= 19)) sHome = 1.05;
+    // SHAKEN: someone who just lived through a shooting doesn't go back to
+    // window-shopping — a spent safety drive (the brain's threat response
+    // drains it) makes home the most urgent place in the city for a while.
+    if (N.safety < 0.5 && !ped.gang && !ped.vagrant) sHome = Math.max(sHome, 0.6 + (0.5 - N.safety) * 1.2);
 
     // PAIR CHAT: an acquainted soul passing close (partner/clique/crew). The
     // mate check is direct refs (no scan), capped citywide, long per-ped CD.
@@ -1665,14 +1683,19 @@
   //  (combat, social) can call this when one ped wrongs another; the wronged
   //  ped, if bold, will hunt the offender down later (acted on in goFeud).
   // ============================================================
+  // The grudge itself is CBZ.brain memory (memory.grudge, ~120 s half-life,
+  // bounded per actor) through city/brain_city.js — the same record the
+  // brain's proportional retaliation climbs on. It used to be a private
+  // expiring slot here (_grudgeOn/_grudgeT) that nothing else could read.
   CBZ.cityNpcGrudge = function (victim, offender) {
     if (!victim || !offender || victim === offender || victim.dead || offender.dead) return;
     if (victim.companion || victim.controlled) return;
     // only bold-enough peds carry a grudge into action (the meek just fear it)
     if ((victim.aggr || 0.3) < (A0().bold || 0.5)) return;
-    victim._grudgeOn = offender;
-    victim._grudgeT = now() + (60 + rng() * 60) * 1000; // ms: a 60-120s window to act, then it cools
+    if (CBZ.cityBrain) CBZ.cityBrain.grudge(victim, offender, 0.6);
   };
+  // the NPC this ped is still hot for (null once the grudge cools under 0.25)
+  function feudOf(ped) { return CBZ.cityBrain ? CBZ.cityBrain.feud(ped) : null; }
 
   // DYNAMIC RELATIONSHIPS: when a ped is KILLED, those close to them inherit a
   // fresh grudge against the killer — chained feuds (you down a man, his partner
@@ -1745,8 +1768,6 @@
         ped._joyT -= dt;
         if (ped._joyT <= 0 && ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; ped._joyT = 0; }
       }
-      // expire a stale grudge so feuds cool off if never acted on
-      if (ped._grudgeOn && ped._grudgeT && now() > ped._grudgeT) { ped._grudgeOn = null; }
 
       // RESPAWN HYGIENE: crowd.js recycles a PARKED rig into a fresh person. The
       // frame it returns to play (parked→active), wipe every per-ped DRIVE/state
@@ -1756,7 +1777,7 @@
       if (ped._parked) { ped._wasParked = true; ped._goalCD = 4; continue; }
       if (ped._wasParked) {
         ped._wasParked = false;
-        ped._needs = null; ped._grudgeOn = null; ped._grudgeT = 0;
+        ped._needs = null; ped._needsK = null; ped._feud = null;
         ped._goalKind = null; ped._goalCD = rng() * 3;
         ped._dealTo = null; ped._scoreFrom = null; ped._payAt = null;
         ped._joyT = 0; if (ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; }
@@ -2061,7 +2082,7 @@
     if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
     if (ped._workAnchor && CBZ.cityReleaseWorkAnchor) CBZ.cityReleaseWorkAnchor(ped);
     ped._workAnchor = null; ped._goalKind = null; ped._goalCD = 1 + rng() * 2;
-    if (N) { N.rent = 1; N.kRent = 0; }                   // a vagrant carries no rent
+    if (N) { N.rent = 1; if (ped._needsK) ped._needsK.rent = 0; }   // a vagrant carries no rent
     // drift toward the nearest camp (their new address: bedroll, fire, cart) if
     // props.js seeded any — else they just hold the spot they were put out on.
     const camps = CBZ.cityCamps, A = CBZ.city && CBZ.city.arena;
@@ -2144,7 +2165,7 @@
         if (r && !r.dead) { CBZ.cityNpcOffense(r, 70, "armed-robbery"); if ((r.npcWanted | 0) < 2) r.npcWanted = 2; }
       }
     }
-    if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, sev, "robbery");
+    if (CBZ.cityTagWitnesses && _npcJobCrew[0]) CBZ.cityTagWitnesses(x, z, sev, "robbery", _npcJobCrew[0]);   // THEIR crime: witnesses report the crew, never the player
     if (CBZ.cityPanic) CBZ.cityPanic(x, z, 2.0, _npcJobCrew[0] || null);
     // the city EVENT/feed at the robbery location WITHOUT touching player wanted
     // (silent + noWanted — never report() into g.heat for an NPC's crime).

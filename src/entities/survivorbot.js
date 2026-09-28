@@ -26,7 +26,13 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
-  const { makeCharacter, animChar, lerpAngle, damp } = CBZ;
+  const { makeCharacter, animChar, damp } = CBZ;
+  // THE ONE LOCOMOTION LAYER (entities/moves.js): every survivor on land walks
+  // through it; one options record, mutated per body (no per-frame allocation).
+  const MV = CBZ.moves;
+  const _mo = { speed: 0, stop: 0.5, face: null, nbrs: null, nbrN: 0, lod: 0, radius: 0.42 };
+  const SWIM_TURN = 1.5;          // rad/s a crawling swimmer can come round
+  const SWIM_TURN_PANIC = 2.3;    // rad/s with a fin behind it
 
   const BOT_RADIUS = 0.5;
   const ANIM_DIST2 = 62 * 62;     // beyond this, freeze animation
@@ -74,7 +80,6 @@
   const FLOAT_DEPTH = 1.275;      // swim.js: feet below the surface on a floating body
   const SWIM_SPEED = 1.15;        // m/s — an unhurried survivor's crawl
   const PANIC_SPEED = 2.10;       // m/s — everything they have
-  const WATER_TURN = 0.05;        // per-second retention: a body turns slowly in water
   const PANIC_R = 22;             // m — a predator this close and you stop swimming
   const PANIC_HOLD = 5;           // s — you do not calm down the instant the fin turns
 
@@ -239,6 +244,155 @@
   function brnd() { return botRng ? botRng() : Math.random(); }
   let matchNo = 0;
 
+  /* ============================================================
+     THE CROWD HAS NERVES (CBZ.brain: morale + threat + perception).
+
+     Every survivor is a brain-registered "survivor" in ONE morale group, the
+     crowd. That is the same morale the armies run (systems/brain.js, lifted
+     from warlord/battle.js and games/battle.html), so panic SPREADS the way a
+     rout does:
+       • a death is a jolt to the whole crowd (morale.death: shock ~1.8x the
+         dead man's share, decaying over ~7 s, capped per death) and a harder
+         one to anybody within 7 m (their rattle);
+       • everybody who could SEE it (perception.seesPoint: the survivor's
+         field of view, 24 m, a 6 m "heard it" radius) is rattled by how close
+         it was and answers it through threat.respond — personality decides:
+         the timid FLEE (a 3.5 s sprint away from the body), the ones right on
+         top of it may FREEZE (1.6 s staring at it), the steady ignore it and
+         keep to their plan;
+       • when the crowd's own morale, less his rattle and his wounds, falls
+         under a survivor's nerve (morale.broken: latched, with the rally band
+         and a 6 s no-break-again window, so nobody flickers) he BREAKS: he
+         drops what he was doing and runs down the hazard gradient, or away
+         from the last death he saw. A body already hiding under a slab stays
+         there — breaking is running from the open, not out of the shelter.
+     DETERMINISM: nothing here draws a random number. Personality and the
+     nerve jitter are hashed from the two spawn draws every body already has
+     (hmix(hidOf(b), k), like skillOf), morale ticks on the sim clock, and the
+     sight test is arithmetic on positions and yaw (occlude:false: the crowd's
+     witness test does not cast rays, so a mass-casualty frame costs nothing).
+     ============================================================ */
+  const BR = CBZ.brain || null;
+  const CROWD = "surv-crowd";
+  const WIT = { range: 24, touch: 6, occlude: false };
+  const TH = { kind: "hazard", x: 0, z: 0, distance: 0, armed: false, aimingAtMe: false, source: null };
+  const SCARE_HOLD = { flee: 3.5, freeze: 1.6 };
+  const CROWD_K = { lostK: 0.2, routK: 0.15, shockK: 3, shockCap: 0.12 };
+  /* AND A CIVILIAN'S NERVE IS NOT A SOLDIER'S BREAK POINT. combat_iq's civ row
+     (0.62) is "the hp fraction at which he breaks for cover" in a gunfight;
+     as a crowd's nerve, with the rally band on top (+0.16), the most timid
+     needed a morale of ~0.99 to ever calm down again, and never did. 0.5,
+     pushed +-0.2 by courage, is measured in tools/brain-sim-war.mjs 3: a
+     mass-casualty minute breaks ~a fifth of the crowd (the timid, near the
+     bodies) and a quiet ten seconds brings every one of them back. */
+  if (BR) BR.define("survivor", { nerve: 0.5 });
+  let moraleAcc = 0;
+  function crowdReset() {
+    if (!BR) return;
+    // one crowd per match: the group record is the brain's, emptied here
+    BR.morale.clear(CROWD);
+    /* A CROWD OF STRANGERS IS NOT AN ARMY. An army's morale is mostly what it
+       has LOST (lostK 1.5): the dead were your side's strength. A crowd's is
+       what it just SAW: the recent deaths (shock, ~7 s decay) and the people
+       running past it (routK). With the army's lostK a disaster that took 40%
+       of the lobby left every timid survivor broken for the rest of the match
+       (measured in tools/brain-sim-war.mjs 3), and routK 0.35 turned the
+       first few runners into the whole crowd running with nobody ever calming
+       down (a runner never leaves the field the way a routed soldier does, so
+       the army's contagion term has no drain here). With these numbers a
+       mass-casualty minute breaks the timid, and a quiet ten seconds brings
+       them back. */
+    BR.morale.config(CROWD, CROWD_K);
+    moraleAcc = 0;
+  }
+  function joinBrain(b) {
+    if (!BR) return;
+    const h = hidOf(b), sk = skillOf(b);
+    BR.register(b, "survivor", {
+      game: "survival", group: CROWD,
+      nerveJ: (hmix(h, 43) - 0.5) * 0.12,          // the brain's jitter is id-ordered; this one is the body's
+      personality: {
+        courage: 0.12 + sk * 0.6 + hmix(h, 29) * 0.2,
+        aggression: 0.1 + hmix(h, 31) * 0.35,
+        discipline: 0.15 + sk * 0.7,
+        curiosity: hmix(h, 37),
+        loyalty: 0.3 + hmix(h, 41) * 0.5,
+      },
+    });
+    b._survBrain = true;
+  }
+  const _wit = [];
+  function witnessDeath(d) {
+    if (!BR || !d._survBrain) return;
+    BR.morale.death(CROWD, d);
+    const x = d.pos.x, y = d.pos.y || 0, z = d.pos.z;
+    const list = BR.near(x, z, WIT.range, _wit);
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i].actor;
+      if (o === d || !o._survBrain || o.dead) continue;
+      if (!BR.perception.seesPoint(o, x, y, z, WIT)) continue;
+      const dd = Math.hypot(o.pos.x - x, o.pos.z - z);
+      BR.morale.rattle(o, 0.25 + 0.45 * Math.max(0, 1 - dd / WIT.range));
+      TH.x = x; TH.z = z; TH.distance = dd; TH.sheltered = o.state === "hide";
+      const resp = BR.threat.respond(o, TH);
+      if (resp !== "flee" && resp !== "freeze") continue;         // the steady keep to their plan
+      const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
+      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp]; sc.gun = false;
+    }
+  }
+  /* A GUNSHOT IN THE CROWD (systems/detection.js calls this for the player's
+     shots in survival). CBZ.brain.threat is weapon-aware: nobody without a
+     gun walks toward gunfire. Every survivor in earshot answers it — the
+     crowd scatters AWAY from the shot (not down the hazard gradient: the gun
+     is the nearer danger), a few freeze; a body under a slab stays there. */
+  const GTH = { kind: "gunshot", weapon: "gun", x: 0, z: 0, distance: 0, armed: true, aimingAtMe: false, source: null };
+  function hearShot(x, z, src) {
+    if (!BR || !survOn()) return 0;
+    const list = BR.near(x, z, 45, _wit);
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i].actor;
+      if (o === src || !o._survBrain || o.dead || o.state === "hide") continue;
+      GTH.x = x; GTH.z = z; GTH.source = src || null;
+      GTH.distance = Math.hypot(o.pos.x - x, o.pos.z - z);
+      const resp = BR.threat.respond(o, GTH);
+      if (resp === "fight" || resp === "ignore") continue;
+      const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
+      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp === "freeze" ? "freeze" : "flee";
+      sc.hold = SCARE_HOLD[sc.resp]; sc.gun = true;
+      n++;
+    }
+    return n;
+  }
+  CBZ.survivorsHearShot = hearShot;
+
+  /* one think of the nerves: true = it owns the body this tick */
+  function panicThink(b) {
+    if (!BR || !b._survBrain) return false;
+    const sc = b._scare;
+    const scared = !!(sc && simT - sc.t < sc.hold);
+    const broke = BR.morale.broken(b);
+    if (!scared && !broke) return false;
+    if (b.state === "hide") return false;                          // under the slab: stay under it
+    if (scared && sc.resp === "freeze" && !broke) {
+      b.state = "look"; b._lookX = sc.x; b._lookZ = sc.z;
+      b.urg = 0; b.pause = 0;
+      b.target.set(b.pos.x, 0, b.pos.z);
+      return true;
+    }
+    // RUN: down the hazard gradient if there is one, else away from the body
+    let fx = 0, fz = 0;
+    const fv = CBZ.disasters && CBZ.disasters.fleeVector ? CBZ.disasters.fleeVector(b.pos.x, b.pos.z) : null;
+    if (scared && sc.gun) { fx = b.pos.x - sc.x; fz = b.pos.z - sc.z; }      // away from the shots
+    else if (fv && (fv.x || fv.z)) { fx = fv.x; fz = fv.z; }
+    else if (sc) { fx = b.pos.x - sc.x; fz = b.pos.z - sc.z; }
+    const m = Math.hypot(fx, fz);
+    if (m < 1e-6) return false;
+    b.state = "panic"; b.urg = 1; b.pause = 0;
+    b.target.set(b.pos.x + (fx / m) * 18, 0, b.pos.z + (fz / m) * 18);
+    return true;
+  }
+
   CBZ.spawnSurvivorBots = function (n) {
     CBZ.clearSurvivorBots();
     const arena = CBZ.buildDisasterArena();
@@ -264,6 +418,8 @@
       arena.root.add(b.group);
       CBZ.bots.push(b);
     }
+    crowdReset();
+    for (let i = 0; i < CBZ.bots.length; i++) joinBrain(CBZ.bots[i]);
   };
 
   /* WHAT THE CROWD'S SCHEDULE IS DOING. Both numbers are match state that no
@@ -314,12 +470,14 @@
     const b = makeBot(x, z, brnd);
     arena.root.add(b.group);
     CBZ.bots.push(b);
+    joinBrain(b);
     if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.total++;
     return b;
   };
 
   CBZ.clearSurvivorBots = function () {
     for (const b of CBZ.bots) {
+      if (b._survBrain && BR) { BR.unregister(b); b._survBrain = false; }
       if (b.group) {
         if (b.group.parent) b.group.parent.remove(b.group);
         b.group.traverse(function (o) {
@@ -997,6 +1155,10 @@
       }
     } else if (b.panicT > 0) { b.panicT = 0; b.foe = null; }
 
+    // THE NERVES (see "THE CROWD HAS NERVES"): a body that saw somebody die,
+    // or whose nerve the crowd's losses have broken, runs or freezes first
+    if (panicThink(b)) return;
+
     // the survivor brain goes to the right KIND of place (see above); when it
     // has no plan (a panicker, a tornado, a sinkhole) the gradient below runs
     if (survOn() && CBZ.disasters && survivorThink(b)) return;
@@ -1157,13 +1319,14 @@
   }
 
   // ---- locomotion (every frame; only for living, non-busy bots) ----
-  function move(b, dt, animate) {
+  function move(b, dt, animate, simD2) {
+    const m = MV.motor(b);
     // fleeing reads urgency: a bot brushing a threat jogs (~1.55×), one caught
     // outside the closing zone or under a strike marker SPRINTS (~2.15×). A
     // body with a shark behind it is at the top of that scale by definition.
     const running = b.state === "flee" || b.state === "panic";
     const spd = running ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
-    if (botTraverse(b, dt, spd)) return;
+    if (botTraverse(b, dt, spd)) { MV.reset(m, b.pos); return; }
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
     const dist = Math.hypot(dx, dz);
     if (b.panicT > 0) b.panicT -= dt;
@@ -1185,7 +1348,8 @@
     const wasSwim = !!b.swim;
     if (depth >= SWIM_ENTER) b.swim = true;
     else if (depth <= SWIM_LEAVE) b.swim = false;
-    if (b.swim) { swimStep(b, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
+    if (b.swim) { swimStep(b, m, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
+    if (wasSwim) MV.reset(m, b.pos);    // out of the water: the walk starts from rest
     if (wasSwim && b.char) {
       b.char.swimming = false;
       // the prone stroke turns the head; nothing on land ever resets that axis
@@ -1199,35 +1363,34 @@
     // swim.js's own grading: sub = depth/BODY_H, and control is fully aquatic
     // at SWIM_BLEND (0.5) of a body height.
     const step = depth > 0.02 ? spd * (1 - WADE_SLOW * Math.min(1, depth / (BODY_H * 0.5))) : spd;
+    // CBZ.moves carries the walk: speeds up and brakes into the spot (no
+    // full-speed-then-dead-stop at half a metre), turns at a human rate, keeps
+    // right past the people coming the other way. The rig reads the MEASURED
+    // speed, so a body held on a wall or a boulder stands instead of running.
+    // LOD is by distance to the PLAYER, never the camera: the walk is sim, and
+    // the sim must match on every client (see the think cadence below).
+    const O = _mo;
+    O.speed = step;
+    O.nbrs = CBZ.bots; O.nbrN = CBZ.bots.length;
+    O.lod = MV.lodFor(simD2, true);
+    // the stare: a body waiting to react, at its spot, turns to face the thing coming
+    O.face = (dist <= 0.5 && b.state === "look" && b._lookX != null)
+      ? Math.atan2(b._lookX - b.pos.x, b._lookZ - b.pos.z) : null;
+    MV.step(m, b.pos, b.group.rotation.y, b.target.x, b.target.z, O, dt);
+    b.group.rotation.y = m.yaw;
+    b.speed = m.gs;
     if (dist > 0.5) {
-      b.pos.x += (dx / dist) * step * dt;
-      b.pos.z += (dz / dist) * step * dt;
-      b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-      b.speed = step;
       b._arrived = false;
     } else {
-      b.speed = 0;
       /* YOU ARRIVE ONCE. This clamp ran on EVERY frame the body was within half
          a metre of its target, so `pause` was pinned at 0.4 and could never
          reach zero — and think()'s re-roll is gated on `pause <= 0`. A survivor
          that reached its spot therefore STOOD THERE FOR THE REST OF THE MATCH.
 
-         Measured on HEAD, sixty seconds of a ninety-nine-body crowd: the number
-         of people standing in water deeper than 0.25 m went 16 -> 17, the
-         deepest anyone stood went 0.86 m -> 1.00 m, and the whole population
-         produced TWO new wander decisions. The beach is a diorama, and it is
-         also why the swim band looked broken before it was — a body cannot
-         decide to swim if it has stopped deciding anything.
-
          The intent was obviously a floor applied ON ARRIVAL: stand here a beat
-         before picking somewhere new. Latched, that is what it does. */
-      // The dwell is per-body and costs no new draw: `reactivity` is already
-      // one, so a twitchy survivor moves on in half a second and a placid one
-      // stands in the surf for four.
-      // the stare: a body waiting to react turns to face the thing coming
-      if (b.state === "look" && b._lookX != null) {
-        b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(b._lookX - b.pos.x, b._lookZ - b.pos.z), 1 - Math.pow(0.02, dt));
-      }
+         before picking somewhere new. Latched, that is what it does. The dwell
+         is per-body: `reactivity` is already one, so a twitchy survivor moves
+         on in half a second and a placid one stands in the surf for four. */
       if (b.state === "wander" && !b._arrived) {
         b._arrived = true;
         b.pause = Math.max(b.pause, 0.5 + (+b.reactivity || 0) * 3.5);
@@ -1237,7 +1400,7 @@
     // height-gated upper-floor walls of buildings don't block them at ground level
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
     b.pos.y = CBZ.surv ? standY(b) : 0;
-    if (animate) animChar(b.char, b.speed, dt);
+    if (animate) animChar(b.char, m.gs, dt);
   }
 
   /* ---- IN THE WATER, OFF THE BOTTOM ---------------------------------------
@@ -1253,7 +1416,7 @@
      it keeps the hip-pivot compensation and the head/torso idle alive under the
      stroke, and it is what makes climbing back out of the water a damped blend
      into the walk instead of a snap. */
-  function swimStep(b, dt, dx, dz, dist, depth, animate, entered) {
+  function swimStep(b, m, dt, dx, dz, dist, depth, animate, entered) {
     /* EVERY BODY ON ITS OWN BEAT. Ten states created at zero on the same tick
        advance by the same dt for ever, so a line of survivors strokes in
        PERFECT UNISON — synchronised swimming, which is a very funny thing to
@@ -1279,14 +1442,22 @@
     // HORIZONTAL. A stroke builds and bleeds; it does not start and stop like a
     // footfall, so the speed is eased rather than assigned and a body that
     // arrives keeps gliding for a beat.
-    const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) : 0;
+    // HEADING: a swimmer comes round slowly (bounded rate through CBZ.moves.face,
+    // never a lerp that whips a 180 in a few frames), and the stroke only drives
+    // the body the way it is pointing, so a turning swimmer slows instead of
+    // sliding sideways through the water.
+    let gate = 1;
+    if (dist > 0.8) {
+      const wantYaw = Math.atan2(dx, dz);
+      b.group.rotation.y = MV.face(m, b.group.rotation.y, wantYaw, dt, panic ? SWIM_TURN_PANIC : SWIM_TURN);
+      const c = Math.cos(MV.wrap(wantYaw - b.group.rotation.y));
+      gate = c > 0.9 ? 1 : Math.max(0.2, (c + 0.3) / 1.2);
+    }
+    const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) * gate : 0;
     b.speed = damp(b.speed, want, panic ? 3.4 : 1.9, dt);
     if (dist > 1e-4 && b.speed > 1e-4) {
       b.pos.x += (dx / dist) * b.speed * dt;
       b.pos.z += (dz / dist) * b.speed * dt;
-    }
-    if (dist > 0.8) {
-      b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(WATER_TURN, dt));
     }
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
 
@@ -1298,7 +1469,7 @@
        off the bottom over about half a second. */
     const bedY = surf - depth;
     const floatY = Math.max(bedY + 0.22, surf - FLOAT_DEPTH);
-    if (entered) { b._floatY = b.pos.y; entrySplash(b, surf); }
+    if (entered) { b._floatY = b.pos.y; entrySplash(b, surf); MV.reset(m, b.pos); }
     b._floatY = b._floatY == null ? floatY : b._floatY + (floatY - b._floatY) * (1 - Math.exp(-6 * dt));
 
     // ANIMATION. Panic runs the cycle hot AND layers the thrash on top; both
@@ -1354,9 +1525,14 @@
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
     lingering = 0;                                   // recounted in the pass below
+    // the crowd's morale on the sim clock, 4 Hz (shock decay, recount, latch)
+    if (BR) { moraleAcc += dt; if (moraleAcc >= 0.25) { BR.morale.tick(moraleAcc); moraleAcc = 0; } }
     for (let i = 0; i < bots.length; i++) {
       const b = bots[i];
       if (b.dead) {                                    // corpse: body.js poses the ragdoll; just count + cull
+        // the frame he went down, whoever saw it feels it (any cause: the
+        // disaster, the shark, a thrown car)
+        if (b._survBrain && !b._mourned) { b._mourned = true; witnessDeath(b); }
         if (b.tag) b.tag.visible = false;
         b.deadT = (b.deadT || 0) + dt;
         /* THE BODY DOESN'T VANISH WHILE YOU'RE LOOKING AT IT (SURV_CORPSE_LINGER).
@@ -1392,13 +1568,13 @@
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
       const dist2 = dx * dx + dz * dz;
       if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
-      if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
+      if (CBZ.body && CBZ.body.busy(b)) { if (b._mv) MV.reset(b._mv, b.pos); continue; }   // thrown / knocked down / held → body owns it
       /* ABOARD A BOAT. world/sea_craft.js owns this body's position and pose
          while it is sitting in a hull — a wander leg here walks it off the
          deck and a swim leg drops it over the side, both of which this file
          did to every crewman on its first frame. The craft releases the flag
          when the man goes in the water (or is eaten). */
-      if (b._aboard) continue;
+      if (b._aboard) { if (b._mv) MV.reset(b._mv, b.pos); continue; }
       const near = dist2 < ANIM_DIST2;
       /* HOW OFTEN A BOT THINKS IS A SIM DECISION. HOW OFTEN IT ANIMATES IS NOT.
 
@@ -1413,10 +1589,11 @@
          The stride is measured from the PLAYER now — a body in the world, at
          the same place on every client. `near` (the camera) still decides
          animation, which is a view decision and is allowed to differ. */
+      if (b._survBrain) BR.memory.tick(b, dt);         // the rattle wears off, the rally window runs
       const sdx = b.pos.x - px, sdz = b.pos.z - pz;
       const stride = (sdx * sdx + sdz * sdz) < ANIM_DIST2 ? 3 : 7;
       if ((frame + b.slice) % stride === 0) think(b);
-      move(b, dt, near);
+      move(b, dt, near, sdx * sdx + sdz * sdz);
     }
   });
 

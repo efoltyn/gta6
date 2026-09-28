@@ -752,13 +752,6 @@
     c._motorcade = null;
   }
 
-  function dressCop(p) {
-    if (!p || !p.char || !CBZ.cityOutfitFor || !CBZ.cityRecolorRig) return;
-    try {
-      const fit = CBZ.cityOutfitFor({ kind: "cop", cop: true, job: "police officer", seed: (p.pos.x * 31 + p.pos.z * 17) | 0, sex: p.gender, band: "adult" });
-      if (fit && fit.colors) CBZ.cityRecolorRig(p.char, fit.colors, fit);
-    } catch (e) {}
-  }
   function postPed(x, z, kind, opts) {
     if (!CBZ.cityPostNpc) return null;
     const o = {
@@ -770,7 +763,9 @@
     try { p = CBZ.cityPostNpc(x, z, o); } catch (e) { p = null; }
     if (!p) return null;
     p._motorcade = true; p.maxHp = Math.max(p.maxHp || 0, 140);
-    if (kind === "cop") dressCop(p);
+    // dress comes from the job: outfits.js jobFit casts "police officer" as the
+    // police uniform and "secret service" as the detail's black suit, at spawn
+    // and on every re-dress (the old post-spawn dressCop was a second path).
     return p;
   }
   function unpost(p) {

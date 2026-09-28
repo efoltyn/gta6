@@ -442,6 +442,7 @@
     }
     if (!heldId) {
       if (hand.prop) hand.prop.visible = false;
+      if (ch && ch.setHandPose) ch.setHandPose("r", "relaxed");
       return;
     }
     // one gun never shows twice: fpsmode's legacy TP carriedGun (the parent
@@ -493,6 +494,9 @@
     // this prevents two guns occupying the same hand halfway through a stow.
     const drawingBlocked = !!(transfer && transfer.to && transfer.t < transfer.dur * 0.62);
     hand.prop.visible = !drawingBlocked;
+    // the body's real hand closes on it (character.js HANDS block)
+    if (ch.setHandPose) ch.setHandPose("r", drawingBlocked ? "relaxed"
+      : (hand.prop.userData && hand.prop.userData.weaponMelee ? "grip" : "pistol"));
     hand.prop.position.set(0.02, 0.02, 0.03);
     aimHandProp();
   });

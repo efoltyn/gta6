@@ -514,7 +514,16 @@
 
       // ---- a transition owns the body; a brain state outranks the furniture
       if (inTransition(a)) continue;
-      if (busy(a)) { if (a._propBed || a._propSeat) getUp(a); continue; }
+      /* A MAN WHO GOT UP FOR A REASON DOES NOT SIT STRAIGHT BACK DOWN. The
+         decision half of "sitting on the bed is glitchy": anything that made
+         him busy for a moment (a flinch, a two-second flee) stood him up, and
+         the next 2 Hz sweep sat him straight back down beside the same seat,
+         so a body could go sit-stand-sit for as long as the cause kept
+         flickering. He stays up a while now (systems/brain_prison.js). */
+      if (busy(a)) {
+        if (a._propBed || a._propSeat) { getUp(a); if (CBZ.prisonBrain) CBZ.prisonBrain.stoodUp(a, 20); }
+        continue;
+      }
 
       if (bedTime) {
         if (a._propSeat) { getUp(a); continue; }
@@ -543,7 +552,7 @@
       }
       if (id === "wake" || id === "count") { if (a._propSeat) getUp(a); continue; }
 
-      if ((messTime || sitTime) && !a._propSeat && acted < MAX_ACT) {
+      if ((messTime || sitTime) && !a._propSeat && acted < MAX_ACT && !(CBZ.prisonBrain && !CBZ.prisonBrain.mayRest(a))) {
         // A THIRD of the block sits down, not all of it: a room where every
         // single body is seated at once reads as a screenshot. The share is a
         // hash taken ONCE, off where this body first stood — a hash of the LIVE

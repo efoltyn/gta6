@@ -241,6 +241,11 @@
     if (!ped || ped.dead) return 0;
     const d = REL_EVENTS[kind]; if (!d) return 0;
     const bond = applyDelta(ped, d, amt == null ? 1 : amt);
+    // the HOT half of a harm: relPlayer is the durable opinion; the brain's
+    // decaying grudge is what proportional retaliation and feuds climb on
+    if (d.grudge > 0 && CBZ.cityBrain && CBZ.city && CBZ.city.playerActor) {
+      CBZ.cityBrain.grudge(ped, CBZ.city.playerActor, (d.grudge / 100) * (amt == null ? 1 : amt));
+    }
     driveFlags(ped);
     // ripple to the social circle — hurting/helping one is felt by their people.
     if (RIPPLE[kind]) rippleToCircle(ped, kind, (amt == null ? 1 : amt) * RIPPLE[kind]);
@@ -1450,6 +1455,9 @@
         } else {
           // a coward's revenge: become a committed witness against you
           p.snitch = 1; p.mem = PA || P; p.alarmed = Math.max(p.alarmed || 0, 4);
+          // a witness of ONE: the brain schedules his call like any other
+          // (it can still be stopped), brain_city shows him making it
+          if (CBZ.cityBrain) CBZ.cityBrain.accuse(p, PA || P, "assault", 60);
           if ((p.witnessSev || 0) < 60) { p.witnessSev = 60; p.witnessType = p.witnessType || "the gunman"; }
           r.ambushT = 30 + rng() * 30;
         }
@@ -1486,6 +1494,7 @@
   });
 
   // ---- per-frame: companion/hostage/kidnap movement + the kidnap director ----
+  const _followers = [];            // bodies holding a follow moveOrder from this file
   CBZ.onUpdate(34.6, function (dt) {
     if (g.mode !== "city") return;
     const P = CBZ.player;
@@ -1500,23 +1509,33 @@
          door and seats them; while it owns the body (walking to the door,
          sitting in it, or told to wait) this tick keeps its hands off.
          One line, feature-detected — with boarding.js absent nothing changes. */
-      if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) return;
+      if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) { if (ped.moveOrder && ped.moveOrder._follow) ped.moveOrder = null; return; }
       const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
       const bx = P.pos.x + Math.sin(yaw) * offset, bz = P.pos.z + Math.cos(yaw) * offset;
       ped.target.set(bx, 0, bz); ped.state = "walk";
       const d = Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z);
-      ped.speed = d > 1.6 ? ped.baseSpeed * 1.6 : 0;
-      if (ped.speed > 0) {
-        const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dd = Math.hypot(dx, dz) || 1;
-        ped.pos.x += (dx / dd) * ped.speed * dt; ped.pos.z += (dz / dd) * ped.speed * dt;
-        ped.group.rotation.y = CBZ.lerpAngle(ped.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.001, dt));
-      }
-      if (CBZ.collide) CBZ.collide(ped.pos, 0.5, ped.pos.y, ped.pos.y + 1.7);
-      ped.pos.y = 0;
-      if (CBZ.animChar) CBZ.animChar(ped.char, ped.speed, dt);
+      /* A MOVE ORDER, NOT A SECOND MOVER. This closure used to integrate the
+         body itself, on top of city/peds.js's move() walking the same body to
+         the same `target` in the same frame: two steps a frame, a lerped
+         heading fighting the mover's, and the legs fed the ordered speed.
+         Now it hands the spot to peds.js (ped.moveOrder -> CBZ.moves), which
+         walks, turns, collides and animates it once. */
+      let o = ped.moveOrder;
+      if (!o || !o._follow) { o = ped.moveOrder = { _follow: true, x: bx, z: bz, speed: 0, stop: 0.4 }; _followers.push(ped); }
+      o.x = bx; o.z = bz;
+      o.speed = d > 1.6 ? ped.baseSpeed * 1.6 : 0;
     };
-    if (g.cityPartner && g.cityPartner.companion && !g.cityPartner.kidnapped) follow(g.cityPartner, 2.6);
+    const partner = g.cityPartner && g.cityPartner.companion && !g.cityPartner.kidnapped ? g.cityPartner : null;
+    if (partner) follow(partner, 2.6);
     if (g.cityHostage) follow(g.cityHostage, 1.2);
+    // whoever is no longer being walked at your heel gets his own brain back
+    for (let i = _followers.length - 1; i >= 0; i--) {
+      const f = _followers[i];
+      if (f !== partner && f !== g.cityHostage || f.dead) {
+        if (f.moveOrder && f.moveOrder._follow) f.moveOrder = null;
+        _followers.splice(i, 1);
+      }
+    }
 
     /* YOU DROVE OFF WITHOUT HIM, SO HE IS NOT YOUR HOSTAGE ANY MORE.
        restrain.js already settles this exact question the same way for a
