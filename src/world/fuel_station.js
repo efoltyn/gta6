@@ -342,11 +342,11 @@
   }
 
   /* HOW DARK IS IT, 0..1 — what switches street and forecourt lights on.
-     The city runs the day/night clock (CBZ.nightAmount). The island modes do
-     NOT: survival.js pins a clear-day sun every frame, so the clock's night
-     would light the lamps at noon. There, darkness is measured off the light
-     rig itself (last frame's sun + sky), which also turns the lamps on under
-     a storm, an ash cloud or the nuke's winter. */
+     The city runs the day/night clock (CBZ.nightAmount). On the island the
+     light is the clock's hour graded by the disaster (modes/survival.js), so
+     darkness is measured off the light rig itself (last frame's sun + sky):
+     the lamps come on at dusk and night, and also under a black storm, an
+     ash cloud or the nuke's winter. */
   CBZ.lightsOnAmount = function () {
     const island = CBZ.islandModeOn && CBZ.game && CBZ.islandModeOn(CBZ.game.mode);
     if (!island || !CBZ.sun) return CBZ.nightAmount || 0;
