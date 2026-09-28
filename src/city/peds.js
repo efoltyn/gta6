@@ -219,6 +219,7 @@
   // a few px tall — its shadow is invisible, but it doubled its cost in the
   // shadow pass). Toggled only on threshold crossings, so it's ~free per frame.
   let VIS_D2 = 95 * 95, SHADOW_D2 = 42 * 42;
+  const CORPSE_VIS_D2 = 200 * 200;
   // core/quality.js publishes a tier LOD here; re-derive the squared cutoffs.
   CBZ.refreshPedLOD = function () {
     const lod = CBZ.pedLOD;
@@ -2825,7 +2826,8 @@
        the round and his own run, no spin. The verlet body used to take every
        near kill, and a limp stick figure hit by a pistol is a plank levered
        over its planted feet. */
-    const launches = cause === "explosion" || cause === "run over" || cause === "killed in the crash";
+    const launches = cause === "explosion" || cause === "run over" || cause === "killed in the crash" ||
+      !!(imp && imp.wkey === "shotgun" && (imp.dist || 99) < 7);   // a point-blank 12-gauge really does throw a man
     if (launches && CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar && !seatedCorpse) {
       let mag;
       const f0 = (imp && imp.force) || 0;
@@ -6612,7 +6614,9 @@
         // rig below uses; this is what makes a held corpse past 95 m free.
         {
           const cdx = p.pos.x - camx, cdz = p.pos.z - camz;
-          if (p.group) p.group.visible = cdx * cdx + cdz * cdz < VIS_D2;
+          // a body you shot at range stays on screen where it fell: corpses
+          // draw out to 200 m (they are frozen, so they cost draw calls only)
+          if (p.group) p.group.visible = cdx * cdx + cdz * cdz < Math.max(VIS_D2, CORPSE_VIS_D2);
         }
         // BODIES STAY UNTIL SOMEBODY COMES FOR THEM (city/morgue.js). The old
         // rule was two timers: flag for pickup at 4 s so medics.js could walk a

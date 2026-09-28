@@ -1692,6 +1692,7 @@
   // world off-screen (the matching half of the shared post).
   function dbUnpostCrew(db, p) {
     if (!p) return;
+    if (p.dead && !p.collected) { if (db.gang && db.gang.members) { const i = db.gang.members.indexOf(p); if (i >= 0) db.gang.members.splice(i, 1); } return; }   // the corpse stays where it fell
     p.inCar = null; p.controlled = false;
     if (p._occSeat) { p._occSeat.ped = null; p._occSeat.gone = true; p._occSeat = null; p._occCar = null; }
     if (db.gang && db.gang.members) { const i = db.gang.members.indexOf(p); if (i >= 0) db.gang.members.splice(i, 1); }

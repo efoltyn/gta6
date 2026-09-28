@@ -233,6 +233,108 @@ for (const [side, bx, bz] of SIDES) {
   }
 }
 
+/* ---- BODY PERSISTS (owner: "when you shoot someone, they just DISAPPEAR").
+   Each game's death path, as the game drives it, and then 3 minutes of sim:
+   the body must still be in the scene, drawn, lying where it fell, frozen.
+   Then the corpse law: never removed on screen or within 60 m, oldest first
+   past the cap once hidden. ---- */
+{
+  const world3 = new THREE.Scene();
+  const SIM = 60 * 180;                         // three minutes at 60 fps (bodies sleep, so it is cheap)
+  function persists(tag, a, driver) {
+    const x0 = a.group.position.x, z0 = a.group.position.z;
+    for (let i = 0; i < 90; i++) { v.frame(DT); if (driver) driver(DT); }
+    const lieX = a.group.position.x, lieZ = a.group.position.z, hy0 = hips(a.char).y;
+    for (let i = 0; i < SIM; i++) { CBZ.now += DT * 1000; if (driver) driver(DT); if (i % 60 === 0) v.frame(DT); }
+    const moved = Math.hypot(a.group.position.x - lieX, a.group.position.z - lieZ);
+    const ok = !!a.group.parent && a.group.visible !== false && !a.culled && hips(a.char).y < 0.4 && moved < 0.01;
+    check(`persists: ${tag}`, ok, `in scene ${!!a.group.parent}, visible ${a.group.visible !== false}, hips ${hips(a.char).y.toFixed(2)} m (at fall ${hy0.toFixed(2)}), moved ${(moved * 100).toFixed(1)} cm after 3 min, fell ${Math.hypot(lieX - x0, lieZ - z0).toFixed(2)} m from where he stood`);
+  }
+  const mk = (name, x) => { const a = scene({ name }); a.group.position.x = x; world3.add(a.group); return a; };
+
+  // city ped and a crowd-pool ped: cityKillPed's cheap path is a knockdown into the collapse
+  CBZ.game.mode = "city";
+  CBZ.cityPeds = [];
+  {
+    const a = mk("city ped", 0); CBZ.cityPeds.push(a); CBZ.bots.length = 0;
+    a.dead = true; CBZ.body.knockdown(a, { dir: { x: 0, z: -1 }, force: 7, t: 9999 });
+    persists("city ped (shot)", a);
+  }
+  {
+    const a = mk("crowd ped", 0); a._crowd = true; CBZ.cityPeds.length = 0; CBZ.cityPeds.push(a); CBZ.bots.length = 0;
+    a.dead = true; CBZ.body.knockdown(a, { dir: { x: 1, z: 0 }, force: 7, t: 9999 });
+    persists("crowd-pool ped (shot)", a);
+  }
+  {
+    // a bare `dead = true` (a bleed-out, a fire): nobody told the body; grapple's ensureFall does
+    const a = mk("bled out", 0); CBZ.cityPeds.length = 0; CBZ.cityPeds.push(a); CBZ.bots.length = 0;
+    a.dead = true;
+    persists("city ped (bare dead flag, no fall called)", a);
+  }
+  CBZ.cityPeds.length = 0;
+  CBZ.game.mode = "survival";
+
+  // disaster survivor: a bot that dies without a hit (drowned fields aside)
+  {
+    const a = mk("survivor", 0);
+    a.dead = true;
+    persists("disaster survivor (bare dead flag)", a);
+  }
+
+  // prison inmate and a guard: ai.js kill() -> prisoncorpse.place, the movers tick it
+  vm.runInContext(readFileSync(new URL("../src/systems/prisoncorpse.js", import.meta.url), "utf8"), v.ctx, { filename: "src/systems/prisoncorpse.js" });
+  for (const who of ["prison inmate", "prison guard"]) {
+    v.clearActors();
+    const a = v.actor({ build: "m", x: 0, z: 0, yaw: 0, name: who });   // not a bot: the prison movers own it
+    world3.add(a.group);
+    for (let i = 0; i < 8; i++) v.frame(DT);
+    a.dead = true;
+    CBZ.prisonCorpsePlace(a, { group: { position: { x: 0, z: 3 } } }, { force: 7 });
+    persists(who, a, (dt) => CBZ.prisonCorpseTick(a, dt));
+  }
+
+  // gun-game bot: on respawn the dead rig is handed to the corpse keeper and he
+  // comes back in a fresh body (modes/gungame.js freshBody)
+  {
+    v.clearActors();
+    const b = v.actor({ build: "m", x: 0, z: 0, yaw: 0, bot: true, name: "gg bot" });
+    world3.add(b.group);
+    for (let i = 0; i < 8; i++) v.frame(DT);
+    b.dead = true; CBZ.body.knockdown(b, { fromX: 0, fromZ: 3, force: 7, t: 9999 });
+    for (let i = 0; i < 60 * 3; i++) v.frame(DT);                  // the 3 s respawn timer
+    const rec = CBZ.corpses.keep(b, { tag: "gungame" });
+    CBZ.bots.length = 0;                                            // the live bot is a new rig now
+    const lie = { x: rec.group.position.x, z: rec.group.position.z };
+    for (let i = 0; i < 60 * 180; i++) { CBZ.now += DT * 1000; if (i % 30 === 0) v.frame(DT * 30); }
+    const moved = Math.hypot(rec.group.position.x - lie.x, rec.group.position.z - lie.z);
+    check("persists: gun-game bot (body kept through the respawn)", CBZ.corpses.list.indexOf(rec) >= 0 && !!rec.group.parent && moved < 0.01 && hips(rec.char).y < 0.4,
+      `kept ${CBZ.corpses.list.indexOf(rec) >= 0}, in scene ${!!rec.group.parent}, hips ${hips(rec.char).y.toFixed(2)} m, moved ${(moved * 100).toFixed(1)} cm`);
+    CBZ.corpses.clear("gungame");
+  }
+
+  // THE LAW: 60 bodies at the player's feet stay (over the cap but near and on screen);
+  // once the player is 200 m away and looking elsewhere, the oldest go down to the cap.
+  {
+    v.clearActors();
+    CBZ.player.pos.set(0, 0, 0);
+    CBZ.camera.position.set(0, 3, -8); CBZ.camera.lookAt(0, 0, 0); CBZ.camera.updateMatrixWorld();
+    for (let i = 0; i < 60; i++) {
+      const a = v.actor({ build: "m", x: (i % 10) * 1.5 - 7, z: Math.floor(i / 10) * 2, yaw: 0, name: "c" + i });
+      world3.add(a.group); a.dead = true;
+      CBZ.corpses.keep(a, { tag: "law" });
+    }
+    for (let i = 0; i < 240; i++) v.frame(DT);
+    const nearKept = CBZ.corpses.list.length;
+    CBZ.player.pos.set(400, 0, 400); CBZ.camera.position.set(400, 3, 392); CBZ.camera.lookAt(400, 0, 400); CBZ.camera.updateMatrixWorld();
+    for (let i = 0; i < 240; i++) v.frame(DT);
+    const farKept = CBZ.corpses.list.length;
+    check("law: none removed near the player / on screen, even over the cap", nearKept === 60, `${nearKept} of 60 kept`);
+    check("law: hidden and far, trimmed to the cap oldest first", farKept === CBZ.corpseLaw.LAW.CAP, `${farKept} kept (cap ${CBZ.corpseLaw.LAW.CAP})`);
+    CBZ.corpses.clear("law");
+    CBZ.player.pos.set(0, 0, -30); CBZ.camera.position.set(0, 3, -8);
+  }
+}
+
 /* ---- the plan: pure ---- */
 {
   const P = CBZ.bodyFall.plan;

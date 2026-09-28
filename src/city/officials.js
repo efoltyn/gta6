@@ -657,7 +657,7 @@
   }
 
   function removePed(p) {
-    if (!p) return;
+    if (!p || (p.dead && !p.collected)) return;   // a corpse belongs to the world
     try {
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       if (CBZ.cityPeds) { const i = CBZ.cityPeds.indexOf(p); if (i >= 0) CBZ.cityPeds.splice(i, 1); }

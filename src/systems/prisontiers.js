@@ -256,6 +256,9 @@
   }
   function removePost(gd) {
     if (!gd) return;
+    // a guard somebody KILLED is a body, not a post: it stays where it fell
+    // (systems/prisoncorpse.js), the post simply goes empty
+    if (gd.dead) return;
     gd.hunt = 0; gd.alert = 0; gd.ko = 0; gd.dead = true;
     if (CBZ.jailBoost) { CBZ.jailBoost.restore("difficulty", gd); CBZ.jailBoost.restore("lockdown", gd); }
     if (gd.group) {
