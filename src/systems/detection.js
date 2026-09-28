@@ -187,8 +187,6 @@
   };
   CBZ.addComplaint = function (n) { g.complaints = Math.max(0, Math.min(100, (g.complaints || 0) + n)); };
 
-  const raycaster = new THREE.Raycaster();
-  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
   let litNow = false, litPingT = 0;   // searchlight exposure state (see below)
 
   function metaWithPlayerPos(meta) {
@@ -651,101 +649,43 @@
     return 10.5;
   }
 
-  function hasLineToPlayer(n, dist) {
-    _ro.set(n.group.position.x, 1.35, n.group.position.z);
-    _rd.set(player.pos.x - n.group.position.x, player.pos.y + 1.0 - 1.35, player.pos.z - n.group.position.z).normalize();
-    raycaster.set(_ro, _rd);
-    raycaster.far = Math.max(0.1, dist - 0.4);
-    return (CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length === 0;
-  }
-
-  function npcWitness(n, meta) {
-    if (n.dead || n.ko > 0 || n.escaped) return null;
-    const dx = player.pos.x - n.group.position.x, dz = player.pos.z - n.group.position.z;
-    const dist = Math.hypot(dx, dz);
-    const type = meta && meta.type;
-    const loud = type === "gunfire" || type === "taser";
-    const range = witnessRange(meta);
-    if (dist > range) return null;
-    const los = hasLineToPlayer(n, dist);
-
-    if (!los) {
-      if (loud && dist < range * 0.55) return { dist, heardOnly: true };
-      return null;
-    }
-
-    if (dist <= (loud ? 6.5 : 4.2)) return { dist, heardOnly: false };
-    if (loud) return { dist, heardOnly: false };
-    const yaw = n.group.rotation.y || 0;
-    const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / Math.max(0.001, dist);
-    return dot >= Math.cos(1.35) ? { dist, heardOnly: false } : null;
-  }
-
-  // does any guard have line-of-angle to this point? (cheap cone test)
-  function seesPos(gd, p) {
-    if (gd.dead || gd.ko > 0 || gd.bribed > 0) return false;
-    const dx = p.x - gd.group.position.x, dz = p.z - gd.group.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist > gd.viewDist || dist < 0.05) return false;
-    const yaw = gd.group.rotation.y;
-    return (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist >= Math.cos(gd.half);
-  }
   // is the player's crime witnessed? returns the witnessing guard, or null
   CBZ.witnessGuard = function () {
     for (const gd of CBZ.guards) if (!gd.corrupt && guardSees(gd)) return gd;
     return null;
   };
 
-  // a crime only matters if seen. nearby inmates may SNITCH — run to a
-  // guard and rat you out even if no guard saw it directly.
-  function trySnitch(amount, copCrime, meta) {
-    for (const n of CBZ.npcs) {
-      const witness = npcWitness(n, meta);
-      if (!witness) continue;
-      const d = witness.dist;
+  /* A crime only matters if seen. Nearby inmates may SNITCH: run to a guard
+     and rat you out even if no guard saw it directly.
 
-      const sameGang = CBZ.player.gang != null && n.gang === CBZ.player.gang;
-      const rivalGang = CBZ.player.gang != null && n.gang >= 0 && n.gang !== CBZ.player.gang;
-      const protectedByGang = n.gang >= 0 && CBZ.gangProtection && CBZ.gangProtection(n.gang) > 0;
-      const standing = CBZ.gangStanding ? CBZ.gangStanding(n.gang) : 0;
-      if ((sameGang || protectedByGang) && standing > -20) continue;
-
-      const p = n.personality || {};
-      let chance = copCrime ? 0.34 : 0.23;
-      chance += (p.snitch || 0.5) * 0.22;
-      chance += ((g.detection || 0) / 100) * 0.14;
-      chance += rivalGang ? 0.18 : 0;
-      chance += (n.playerGrudge || 0) * 0.025;
-      chance -= sameGang ? 0.12 : 0;
-      chance -= protectedByGang ? 0.18 : 0;
-      if ((g.racketProtectionT || 0) > 0) chance += rivalGang ? 0.04 : -0.08;
-      if ((g.lowProfileT || 0) > 0) chance -= 0.08;
-      chance -= (n.playerTrust || 0) * 0.02;
-      chance -= (n.playerFear || 0) * 0.018;
-      chance -= Math.max(0, standing) * 0.002;
-      if (witness.heardOnly) chance *= 0.45;
-      if (d > 8) chance *= 0.72;
-
-      if (CBZ.econ.rng() < chance) {
-        const witnessMeta = metaWithPlayerPos(Object.assign({}, meta || {}, { copCrime, heardOnly: witness.heardOnly }));
-        if (CBZ.npcWitnessCrime) {
-          if (!CBZ.npcWitnessCrime(n, amount, witnessMeta)) continue;
-        } else if (CBZ.sendNpcToSnitch && !CBZ.sendNpcToSnitch(n, amount, witnessMeta)) continue;
-        if (!CBZ.sendNpcToSnitch && copCrime) CBZ.addComplaint(amount * 0.28);
-        else if (!CBZ.sendNpcToSnitch) CBZ.addHeat(amount * 0.6);
-        // A WITNESS IS A PERSON REACTING, NOT A LINE OF TEXT. He already
-        // startles, turns and walks off to report; the line said so a second
-        // time on the HUD. It goes over HIS head now, where a thing a person
-        // notices belongs. (The narration "X saw that." is gone; it used to
-        // gate this line INVERTED, so with the jail's show-don't-tell on the
-        // witness said nothing at all.)
-        if (CBZ.citySay) {
-          try { CBZ.citySay(n, witness.heardOnly ? "The hell was that?" : "Hey! HEY!", "#ffd27b", 1.6); } catch (e) {}
-        }
-        return true;
-      }
+     WHO SAW IT is CBZ.brain.social.crime now (systems/brain_prison.js): the
+     one sight + hearing test every game uses, the brain's witness answer per
+     man (look away, clear out, cheer, go and tell), and the yard's code as a
+     veto over who really talks (crew, standing, trust, fear). This file used
+     to carry its own witness cone and raycast for this; both are gone. A man
+     who decides to talk walks to a screw (ai.js's snitch run, which a crew can
+     intercept or a threat can stop) and the report lands through the brain's
+     onReport — the one place a witness report becomes heat. */
+  const CRIME_KIND = { gunfire: "gunshot", melee: "assault", taser: "assault", steal: "theft" };
+  function snitchRun(n, amount, m) {
+    const ok = CBZ.npcWitnessCrime ? CBZ.npcWitnessCrime(n, amount, m)
+      : !!(CBZ.sendNpcToSnitch && CBZ.sendNpcToSnitch(n, amount, m));
+    // A WITNESS IS A PERSON REACTING, NOT A LINE OF TEXT: over HIS head
+    if (ok && CBZ.citySay) {
+      try { CBZ.citySay(n, m && m.heardOnly ? "The hell was that?" : "Hey! HEY!", "#ffd27b", 1.6); } catch (e) {}
     }
-    return false;
+    return ok;
+  }
+  function trySnitch(amount, copCrime, meta) {
+    const PB = CBZ.prisonBrain;
+    if (!PB || !PB.crime) return false;
+    const type = meta && meta.type;
+    const witnessMeta = metaWithPlayerPos(Object.assign({}, meta || {}, { copCrime }));
+    const talkers = PB.crime(CRIME_KIND[type] || "assault", player.pos.x, player.pos.z, player,
+      Math.min(1, (amount || 10) / 30), {
+        amount, meta: witnessMeta, sightRange: witnessRange(meta), maxTalkers: 1, reportSnitch: snitchRun,
+      });
+    return talkers > 0;
   }
 
   CBZ.reportCrime = function (amount, meta) {
@@ -754,6 +694,11 @@
     // escape scenario there is no block to hear about it, so the whole chain
     // (guard witness → case pressure → snitch line → heat) stops here rather
     // than at four call sites that would each have to remember.
+    // a shot in the disaster crowd: the survivors scatter AWAY from it
+    // (entities/survivorbot.js, CBZ.brain.threat — nobody unarmed walks at gunfire)
+    if (g.mode === "survival" && meta && meta.type === "gunfire" && CBZ.survivorsHearShot) {
+      try { CBZ.survivorsHearShot(player.pos.x, player.pos.z, null); } catch (e) {}
+    }
     if (!prisonSim()) return;
     meta = metaWithPlayerPos(meta || {});
     const copCrime = meta.actorRole === "cop" || g.role === "cop";

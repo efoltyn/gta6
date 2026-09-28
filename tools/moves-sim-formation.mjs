@@ -22,6 +22,11 @@ const ctx = { window: { CBZ }, Math, console };
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext(readFileSync(path.join(root, "src/entities/moves.js"), "utf8"), ctx);
+// the detail's DECISIONS (roles, slot table, looks, panic) are CBZ.brain's
+// detail brain; protection.js hands every escort to it (index.html order:
+// brain.js early, brain_protection.js before protection.js)
+vm.runInContext(readFileSync(path.join(root, "src/systems/brain.js"), "utf8"), ctx);
+vm.runInContext(readFileSync(path.join(root, "src/city/brain_protection.js"), "utf8"), ctx);
 vm.runInContext(readFileSync(path.join(root, "src/city/protection.js"), "utf8"), ctx);
 const M = CBZ.moves, PR = CBZ.protection;
 if (!M || !PR || !PR.driveEscort) { console.log("FAIL  could not load moves.js + protection.js"); process.exit(1); }
@@ -95,7 +100,9 @@ function execOrder(q, nbrs, dt) {
         }
         maxErrWalk = Math.max(maxErrWalk, Math.hypot(q.pos.x - q.moveOrder.x, q.pos.z - q.moveOrder.z));
       }
-      if (t > TURN0 + 9) {
+      // (the CP is exempt: the detail brain's shift leader stands at his
+      // shoulder watching the crowd AHEAD of the man, not out behind him)
+      if (t > TURN0 + 9 && !(q._det && q._det.kind === "cp")) {
         const o = q.moveOrder;
         // outward: the agent's facing vs his slot's bearing from the principal
         const bearing = Math.atan2(o.x - P.pos.x, o.z - P.pos.z);
@@ -197,7 +204,7 @@ function execOrder(q, nbrs, dt) {
         }
         maxErrWalk = Math.max(maxErrWalk, Math.hypot(q.pos.x - q.moveOrder.x, q.pos.z - q.moveOrder.z));
       }
-      if (t > STOP + 6) {
+      if (t > STOP + 6 && !(q._det && q._det.kind === "cp")) {   // the CP watches ahead (see above)
         const o = q.moveOrder, bearing = Math.atan2(o.x - P.pos.x, o.z - P.pos.z);
         faceErr.set(q, Math.max(faceErr.get(q) || 0, Math.abs(wrap(q.group.rotation.y - bearing))));
       }

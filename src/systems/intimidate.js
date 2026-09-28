@@ -217,6 +217,30 @@
       }
     }
 
+    /* A MAN WITH NOTHING IN HIS HANDS reads the muzzle through the brain
+       (CBZ.brain.threat.respond: his nerve, his discipline, how close it is,
+       whether it is on him). Most put their hands up; a man with no nerve and
+       room to run, RUNS — the third answer the owner named ("raise your hands
+       or charge at me or run away") that this file never had. Decided once
+       per hold, never re-rolled while the gun stays on him. */
+    if (!n.hasGun && !n._crowd && n.target && CBZ.brain && CBZ.brain.threat) {
+      const d = playerDist(n), pp = CBZ.player.pos;
+      let r = "surrender";
+      try {
+        r = CBZ.brain.threat.respond(n, { source: CBZ.player, x: pp.x, z: pp.z, armed: true, aimingAtMe: true,
+          distance: d, kind: lethal ? "gun" : "taser" }) || r;
+      } catch (e) { r = "surrender"; }
+      if (r === "flee" && d > 5) {
+        n.intimidMode = "run";
+        n.poseHandsUp = false; n.poseAimBack = false;
+        if (n.char) n.char.handsUp = false;
+        const g = n.group.position, ax = g.x - pp.x, az = g.z - pp.z, al = Math.hypot(ax, az) || 1;
+        n.aiState = "flee"; n.fleeT = 3 + rng() * 2; n._fleeX = null;
+        n.target.set(g.x + ax / al * 16, 0, g.z + az / al * 16);
+        return;
+      }
+    }
+
     let draw = 0;
     if (n.hasGun) {
       draw = 0.04 + nerve * 0.26 + fight * 0.15 + guts * 0.12;
@@ -258,15 +282,21 @@
   }
 
   // an armed inmate squeezes off a return shot at the player.
-  function npcFire(n) {
+  // opts (systems/brain_prison.js's engage from range): { hit: false = the
+  // round goes past you, dmg } — the stand-off below is point-blank and always lands
+  function npcFire(n, opts) {
     const g = n.group.position;
     const fy = n.group.rotation.y;
     const from = { x: g.x + Math.sin(fy) * 0.5, y: 1.55, z: g.z + Math.cos(fy) * 0.5 };
     const pp = CBZ.player.pos;
-    const to = { x: pp.x, y: 1.4, z: pp.z };
+    const miss = !!(opts && opts.hit === false);
+    const to = miss ? { x: pp.x + (rng() - 0.5) * 2.4, y: 1.2 + rng() * 1.2, z: pp.z + (rng() - 0.5) * 2.4 } : { x: pp.x, y: 1.4, z: pp.z };
     CBZ.tracer && CBZ.tracer(from, to, { color: 0xffd24a, life: 0.07, muzzleScale: 1.1 });
-    CBZ.sfx && CBZ.sfx("shoot_pistol");
-    if (CBZ.shootPlayer) CBZ.shootPlayer(52, g.x, g.z, {
+    if (CBZ.worldSfx) CBZ.worldSfx("shoot_pistol", g.x, g.z, { ref: 30, volume: 1 });
+    else if (CBZ.sfx) CBZ.sfx("shoot_pistol");
+    if (CBZ.guardHear) { try { CBZ.guardHear(g.x, g.z, 40, { type: "gunfire", player: false }); } catch (e) {} }
+    if (miss) return;
+    if (CBZ.shootPlayer) CBZ.shootPlayer(opts && opts.dmg ? opts.dmg : 52, g.x, g.z, {
       heat: 16, shake: 0.62, stun: 0.22,
       haulMsg: "SHOT DOWN · DRAGGED TO YOUR CELL",
       hint: shortName(n) + " shoots back!",
@@ -411,7 +441,10 @@
         if (!alive(n)) { endIntimid(n); continue; }
         if (n.intimidMode == null) decideReaction(n, lethal);
 
-        if (n.intimidMode === "charge") {
+        if (n.intimidMode === "run") {
+          // still in the sights: he keeps running (ai.js's flee owns the legs)
+          if (aimedHere && alive(n)) { n.aiState = "flee"; n.fleeT = Math.max(n.fleeT || 0, 1.2); }
+        } else if (n.intimidMode === "charge") {
           // Nothing to run here. entities/ai.js's huntPlayer brain is already
           // walking him at you and swinging when he arrives, and
           // systems/prisonshanks.js keeps the blade drawn because it reads the
@@ -548,7 +581,7 @@
     // called by ai.js aiThink: returns a move speed (0 = frozen) while this
     // inmate is reacting to the gun, or null to let the normal brain run.
     think: function (n, dt) {
-      if (!n.intimidMode) return null;
+      if (!n.intimidMode || n.intimidMode === "run") return null;
       const pp = CBZ.player.pos, g = n.group.position;
       const want = Math.atan2(pp.x - g.x, pp.z - g.z);   // turn to face the player
       if (CBZ.lerpAngle) n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, want, 1 - Math.pow(0.0006, dt));
@@ -558,6 +591,7 @@
     target: function () { return currentTarget; },
   };
   CBZ.intimidate = intimidate;
+  CBZ.prisonNpcFire = npcFire;          // systems/brain_prison.js: an armed inmate engaging from range
 
   // The "rob" prompt site is GONE, not muted — the verb moved into the
   // interact panel's own option list (systems/interact.js verbsFor), so there

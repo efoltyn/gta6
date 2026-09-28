@@ -408,16 +408,12 @@
   }
   function curTask() { return prospecting && prospecting.tasks ? prospecting.tasks.list[prospecting.tasks.idx] : null; }
 
-  // EARN-TRUST progress 0..1 from the live standing reading. Prefers the shared
-  // gangs.js standing system; falls back to a locally-tracked accumulator
-  // (prospecting._trust) when that system isn't present, so the path is never
-  // dead-ended while the standing cluster boots.
+  // EARN-TRUST progress 0..1 from the live standing reading — the ONE player
+  // standing per set (gangs.js cityGangStanding = CBZ.brain.rep "gang:<id>").
+  // gangs.js loads before this file, so there is no second accumulator.
   function trustProgress(rec) {
-    if (CBZ.cityGangStanding) {
-      const s = CBZ.cityGangStanding(rec.id) || 0;
-      return Math.max(0, Math.min(1, s / TRUST_THRESHOLD));
-    }
-    return prospecting ? Math.max(0, Math.min(1, (prospecting._trust || 0) / TRUST_THRESHOLD)) : 0;
+    const s = CBZ.cityGangStanding(rec.id) || 0;
+    return Math.max(0, Math.min(1, s / TRUST_THRESHOLD));
   }
 
   // pick + beacon a SPECIFIC civilian mark for T3 (HANDLE BUSINESS). Any
@@ -1292,8 +1288,7 @@
           let nearMember = false;
           for (const m of rec.members) { if (!m.dead && Math.hypot(m.pos.x - P.pos.x, m.pos.z - P.pos.z) < 14) { nearMember = true; break; } }
           if (onTurf && nearMember) {
-            if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(rec.id, dt * 1.1);   // ~32s of hanging to pass
-            else prospecting._trust = (prospecting._trust || 0) + dt * 1.1;           // local fallback
+            CBZ.cityGangAddStanding(rec.id, dt * 1.1);   // ~32s of hanging to pass (brain.rep, via gangs.js)
           }
           if (trustProgress(rec) >= 1) advanceTask(rec, gangShort(rec) + " trust you now.");
         }

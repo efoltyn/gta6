@@ -858,6 +858,14 @@
                Lie there = cuffs.
      Cuffs: only an escape capture goes up a tier (applyStrike); everything
      else is the hole (holeSentence). No one re-grabs you during the grace.
+
+     THE ORDER IS DECIDED BY CBZ.brain.authority (systems/brain.js) — the one
+     orders-before-cuffs ladder every game's law now runs (it was ported from
+     this file's numbers, so the feel is the same): the order line, the comply
+     read (still / crouched for 0.6 s), the resist read (running away, a
+     swing, walking off past 15 m), the patience window. This file keeps what
+     is the PLAYER'S scene: the pat-down, the taser on your body, the tackle,
+     the cuffs and the walk to the hole.
      ============================================================ */
   const ARREST = {
     ORDER_R: 4.2,        // m: where the order is given (guards.js reads it)
@@ -890,9 +898,17 @@
       !gd.tied && gd.intimidMode !== "scared");
   }
   function gdDist(gd) { return Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z); }
+  // the ladder's case on this screw is over (the player's scene carries on here)
+  function endLadder(gd) {
+    if (!gd) return;
+    const au = CBZ.brain && CBZ.brain.authority;
+    if (au) { try { au.cancel(gd); } catch (e) {} }
+    gd._brainNoMove = false;
+  }
   function cancelArrest(chaseOn) {
     if (!arrest) return;
     const gd = arrest.gd;
+    endLadder(gd);
     if (gd) {
       gd._escort = false;
       if (gd.char) gd.char.crouch = false;
@@ -912,10 +928,20 @@
     law("orders");
     // a man who already ran from an order does not get a second one
     if (off && off.resisted) { resist("again"); return; }
-    if (CBZ.guardLine) CBZ.guardLine(gd, "order", { force: true });
+    const au = CBZ.brain && CBZ.brain.authority;
+    if (au) {
+      // guards.js walks him (the hunt branch stands him off at STANDOFF); the
+      // ladder only DECIDES here, so its own steps must not move him too
+      gd._brainNoMove = true;
+      LADDER.orderRange = ARREST.ORDER_R; LADDER.cuffRange = ESC.REACH + 0.4; LADDER.patience = ARREST.WINDOW;
+      au.begin(gd, player, off ? off.kind : "stop", LADDER);   // it says the order itself
+    } else if (CBZ.guardLine) CBZ.guardLine(gd, "order", { force: true });
   }
+  const LADDER = { roe: "nonlethal", skipWarn: true, warnRange: 30, orderRange: 4.2, cuffRange: 1.8, patience: 2.2 };
+  const _sus = { speed: 0, handsUp: false, kneeling: false, prone: false, armed: false, aiming: false, attacking: false, fled: false, seen: true, dist: 0 };
   function complied() {
     const a = arrest, gd = a.gd;
+    endLadder(gd);
     law("complied");
     const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
     if (!off || off.severity <= 1) {
@@ -934,6 +960,7 @@
   }
   function resist(why) {
     const a = arrest, gd = a.gd;
+    endLadder(gd);
     law("resisted");
     let off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
     // running from an order is an offense of its own: serious enough for the hole
@@ -981,6 +1008,7 @@
   }
   function cuffs(rough) {
     const a = arrest, gd = a && a.gd;
+    endLadder(gd);
     const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
     const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
     arrest = null;
@@ -1000,15 +1028,19 @@
     const px = player.pos.x, pz = player.pos.z;
     if (a.phase === "order") {
       gd.hunt = Math.max(gd.hunt || 0, 1.5);
-      if (swungSince(a.t0)) { resist("swing"); return; }
-      const still = pSpd < ARREST.COMPLY_SPD || !!player.crouch;
-      a.comply = still ? a.comply + dt : Math.max(0, a.comply - dt * 0.5);
-      const away = pSpd > ARREST.FLEE_SPD && d > a.lastD - 0.002;
-      a.flee = away ? a.flee + dt : Math.max(0, a.flee - dt * 0.5);
-      a.lastD = d;
-      if (a.comply >= ARREST.COMPLY_HOLD) { complied(); return; }
-      if (a.flee >= ARREST.FLEE_HOLD || d > ARREST.LOSE_R) { resist("run"); return; }
-      if (a.t >= ARREST.WINDOW) { if (pSpd < 1.4) complied(); else resist("ignored"); }
+      const swung = swungSince(a.t0);
+      const au = CBZ.brain && CBZ.brain.authority;
+      if (au && au.caseOf(gd)) {
+        // THE LADDER DECIDES: what the screw sees of you, it reads
+        _sus.speed = pSpd; _sus.kneeling = !!player.crouch; _sus.attacking = swung; _sus.dist = d;
+        const r = au.step(gd, dt, _sus);
+        const ph = r ? r.phase : "done";
+        if (ph === "approach" || ph === "cuff") { complied(); return; }
+        if (ph === "escalate" || ph === "force" || ph === "lethal" || ph === "done") { resist(swung ? "swing" : a.t >= ARREST.WINDOW ? "ignored" : "run"); return; }
+        return;
+      }
+      // no ladder on this screw (no brain loaded): the order stands as given
+      if (a.t >= ARREST.WINDOW) complied();
       return;
     }
     if (a.phase === "tased") {

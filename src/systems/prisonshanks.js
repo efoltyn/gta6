@@ -281,7 +281,7 @@
      most comply, a hard minority comes, a frightened minority disarms. */
   const CHARGE_STEEL = 0.68;   // above this he comes, if he is close enough
   const DROP_STEEL = 0.45;     // below this he lets go of it
-  const CHARGE_R_LETHAL = 4.2; // m — inside this a blade beats a levelled gun
+  const CHARGE_R_LETHAL = 3.5; // m — inside this a blade can beat a gun that is being reloaded (CBZ.brain.threat.RUSH_R)
   const CHARGE_R_TASER = 6.5;  // m — and a taser is a much worse thing to hold
 
   let gpCharge = 0, gpStow = 0, gpDrop = 0;
@@ -353,7 +353,12 @@
     const steel = steelOf(n, lethal);
     n._shankSteel = steel;                     // published for the audit/storyboard
 
-    if (steel >= CHARGE_STEEL && dist <= (lethal ? CHARGE_R_LETHAL : CHARGE_R_TASER)) {
+    // THE KNIFE'S WINDOW (CBZ.brain.threat, owner 2026-09-27): against a real
+    // gun he only comes when he is already close AND the gun is not on him —
+    // at gunpoint that means you are reloading. A taser is one shot and a
+    // long reload: that gate is range alone.
+    const gap = !lethal || !!(CBZ.fps && CBZ.fps.reloading > 0);
+    if (steel >= CHARGE_STEEL && gap && dist <= (lethal ? CHARGE_R_LETHAL : CHARGE_R_TASER)) {
       // He is not putting it away and he is not putting his hands up. The
       // brain already knows how to close on you and swing — entities/ai.js
       // reads huntPlayer — and `committed()` above reads the same field, so

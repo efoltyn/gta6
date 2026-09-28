@@ -949,10 +949,37 @@
       if (m.cheerT > 0) { m.cheerT -= dt; if (m.cheerT <= 0) setPose(m.ped, null); }
     }
   }
+  // A CROWD DOES NOT BOLT ON ONE FRAME. Each person hears it after the sound
+  // reaches him and he makes sense of it (distance + his own beat), flinches
+  // at once, and then does what CBZ.brain.threat.respond says a person like
+  // him does: runs, or freezes / ducks for a second first, then runs.
+  const PANIC = [];
+  function queuePanic(ped, list, x, z) {
+    if (!ped || ped.dead) return;
+    const d = distXZ(ped.pos, x, z);
+    let r = "flee";
+    const B = CBZ.brain;
+    if (B && B.threat && typeof B.threat.respond === "function") {
+      try { if (B.of) B.of(ped); r = B.threat.respond(ped, { x: x, z: z, kind: "gunshot", armed: true, distance: d }) || "flee"; } catch (e) { r = "flee"; }
+    }
+    const still = r === "freeze" || r === "cover" || r === "surrender";
+    ped.poseCower = Math.max(ped.poseCower || 0, still ? 1.6 : 0.5);
+    const beat = 0.12 + Math.min(0.9, d / 45) + h01(ped.id | 0, (d * 10) | 0, 71) * 0.45;
+    PANIC.push({ ped: ped, list: list, x: x, z: z, t: -(beat + (still ? 0.9 + h01(ped.id | 0, 3, 72) * 1.1 : 0)) });
+  }
+  function tickPanic(dt) {
+    for (let i = PANIC.length - 1; i >= 0; i--) {
+      const q = PANIC[i];
+      q.t += dt;
+      if (q.t < 0 && q.ped && !q.ped.dead) continue;
+      PANIC.splice(i, 1);
+      if (q.ped && !q.ped.dead) startDrift(q.ped, q.list, { x: q.x, z: q.z }, true);
+    }
+  }
   function panicAll(x, z) {
-    for (let i = 0; i < CROWD.members.length; i++) startDrift(CROWD.members[i].ped, CROWD.drifting, { x: x, z: z }, true);
+    for (let i = 0; i < CROWD.members.length; i++) queuePanic(CROWD.members[i].ped, CROWD.drifting, x, z);
     CROWD.members.length = 0; CROWD.slots = []; CROWD.stage = null;
-    for (let i = 0; i < PROT.members.length; i++) startDrift(PROT.members[i].ped, PROT.drifting, { x: x, z: z }, true);
+    for (let i = 0; i < PROT.members.length; i++) queuePanic(PROT.members[i].ped, PROT.drifting, x, z);
     PROT.members.length = 0;
     if (CBZ.cityCrowdFlee) { try { CBZ.cityCrowdFlee(x, z, 60, 1); } catch (e) {} }
     if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(x, z, 1.2); } catch (e) {} }
@@ -1926,6 +1953,8 @@
   function resetAll() {
     if (APP.live) { try { endLive("cancel", "reset"); } catch (e) {} }
     crowdRelease(false);
+    for (let i = 0; i < PANIC.length; i++) unpost(PANIC[i].ped);
+    PANIC.length = 0;
     for (let i = 0; i < CROWD.drifting.length; i++) unpost(CROWD.drifting[i].ped);
     CROWD.drifting.length = 0;
     releaseProtestBodies();
@@ -1947,6 +1976,7 @@
     }
     T4 -= dt;
     tickCrowdPoses(dt);
+    if (PANIC.length) tickPanic(dt);
     if (APP.live) tickLive(dt);
     if (T4 > 0) return;
     const step = 0.25 - T4;

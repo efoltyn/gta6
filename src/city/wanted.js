@@ -351,27 +351,26 @@
   };
   CBZ.cityCopKilled = function () { report(9999, { type: "_copkill", x: CBZ.player.pos.x, z: CBZ.player.pos.z }); };
 
-  // does a LIVE cop actually SEE the crime happen? close enough AND a clear line of
-  // sight (no building between them) — a cop behind a wall can't ID you, so no
-  // instant report. This is the only "instant" star path that isn't face-to-face.
-  function copWitness(x, z) {
-    const cops = CBZ.cityCops;
-    for (let i = 0; i < cops.length; i++) {
-      const c = cops[i];
-      if (c.dead) continue;
-      if (Math.hypot(c.pos.x - x, c.pos.z - z) >= 30) continue;
-      // ray from the officer's eyeline to the crime spot; if a wall blocks it, they
-      // didn't see it (cheap — only runs the instant a crime is committed).
-      if (!CBZ.clearLineOfFire || CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.5, c.pos.z, x, 1.0, z)) return true;
-    }
-    return false;
-  }
+  // THE LAW (city/law.js, over CBZ.brain): who saw it, who heard it, and the
+  // witness reports that come back from brain.social all go through there.
+  const LAW = CBZ.cityLaw;
+  LAW.bindWanted({
+    report: function (sev, opts) { report(sev, opts); },
+    npcOffense: function (ped, heat, type) { if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, heat, type); },
+  });
 
   // you committed a crime. This does NOT raise stars by itself — it tags
   // witnesses, who CALL IT IN after a beat of panic (→ report()). A cop who sees
   // it radios immediately; opts.instant reports now (used for face-to-face acts).
   function crime(amount, opts) {
     opts = opts || {};
+    // A GUNSHOT IS HEARD BEFORE IT IS JUDGED: every officer and bystander in
+    // earshot gets it through brain.perception.noise, mask and uniform or not.
+    // (Player gunfire from fpsmode/combat/aircraft all arrives here as
+    // "shots-fired", which makes this the player's one noise door.)
+    if (opts.type === "shots-fired") {
+      CBZ.cityGunshot(opts.x != null ? opts.x : CBZ.player.pos.x, opts.z != null ? opts.z : CBZ.player.pos.z, CBZ.city && CBZ.city.playerActor, 55);
+    }
     // ---- V2 THEFT TIERS: vehicles.js fires every player car entry as a flat
     // cityCrime(60, "gta"). The cityEnterVehicle wrap below stamps _theftCtx
     // with what the door ACTUALLY was — a parked boost stays a witnessed 1★
@@ -431,8 +430,17 @@
     const z = opts.z != null ? opts.z : CBZ.player.pos.z;
     if (CBZ.cityEvent) CBZ.cityEvent("crime", { crime: (CRIME[opts.type] && CRIME[opts.type].label) || opts.type || "crime", severity: amount, x, z, panic: Math.min(5, amount / 40) }, { silent: true, noWanted: true });
     if (opts.instant) { report(amount, opts); return; }
-    if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, amount, opts.type);   // witnesses remember WHAT they saw
-    if (copWitness(x, z)) report(amount, opts);
+    // WITNESSES are brain.social's (cityTagWitnesses is the street's one door
+    // into social.crime, city/brain_city.js): every body that could see or,
+    // for a loud crime, hear it picks flee/film/report/intervene by its own
+    // personality; a reporter's call lands in city/law.js's subscriber once
+    // it's actually made, goes through dispatch, and only then raises stars,
+    // at the witness's LAST SIGHTING of you.
+    if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, amount, opts.type);
+    // an OFFICER who saw it (brain perception: his cone, his light, no wall)
+    // radios it in on the spot and opens the ladder on you himself.
+    const eye = LAW.copWitness(x, z);
+    if (eye) { report(amount, opts); if (CBZ.cityCopSawCrime) CBZ.cityCopSawCrime(eye); }
   }
 
   // ---- V2: see the door for what it is. vehicles.js (loads after us) owns
@@ -1139,6 +1147,14 @@
     busting = false;
   };
 
+  // an officer squares up on you by TURNING, not by snapping 180 degrees in a
+  // frame: CBZ.moves' bounded turn (the one place a standing body faces a point)
+  function turnTo(a, dx, dz, dt) {
+    const grp = a && a.group;
+    if (!grp) return;
+    const want = Math.atan2(dx, dz);
+    grp.rotation.y = CBZ.moves ? CBZ.moves.face(CBZ.moves.motor(a), grp.rotation.y, want, dt) : want;
+  }
   CBZ.onUpdate(32.8, function (dt) {
     const sc = arrestScene;
     if (!sc || sc.finished) return;
@@ -1159,7 +1175,7 @@
       }
       if (c && !c.dead && P) {
         c._arrestingPlayer = true; c.curTarget = null; c.npcTarget = null; c.speed = 0;
-        if (c.group) c.group.rotation.y = Math.atan2(P.pos.x - c.pos.x, P.pos.z - c.pos.z);
+        if (c.group) turnTo(c, P.pos.x - c.pos.x, P.pos.z - c.pos.z, dt);
       }
       if (sc.t >= sc.dur) finishBustScene(sc);
       return;
@@ -1221,7 +1237,7 @@
       }
       if (cop && !cop.dead && P) {
         cop.speed = 0;
-        if (cop.group) cop.group.rotation.y = Math.atan2(P.pos.x - cop.pos.x, P.pos.z - cop.pos.z);
+        if (cop.group) turnTo(cop, P.pos.x - cop.pos.x, P.pos.z - cop.pos.z, dt);
         if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
       }
       if (sc.t >= CUFF_T) {
@@ -1547,7 +1563,7 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene) clearArc(arrestScene); arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; unseenT = 0; evadeState = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene) clearArc(arrestScene); arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; LAW.reset(); unseenT = 0; evadeState = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
 
   // ---- DEATH CONSEQUENCES (wanted side). Called by death.js's cityKillPlayer
   // at the moment you go down. Death closes the manhunt (heat, stars, bounty,

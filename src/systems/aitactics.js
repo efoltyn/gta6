@@ -82,11 +82,39 @@
   }
   CBZ.aiTactics = CBZ.aiTactics || {};
 
+  // THE LOOK IS THE BRAIN'S. When CBZ.brain is loaded (every build that has a
+  // city), the line-of-sight test is brain.perception.sees — its blind states
+  // (a KO'd or cuffed shooter sees nothing), its occlusion (the same
+  // losBlockers ray) — as a TRACKING look: no cone, no light, because a man
+  // already fighting you doesn't lose you by turning his head (noticing you
+  // in the first place is the caller's awareness check). Every confirmed look
+  // is stamped into brain.memory (lastSeen), so the police, the gangs and the
+  // combat_iq positions all share one memory of where the target was. The
+  // private raycast below stays only for pages without the brain
+  // (games/battle.html and friends).
+  const _look = { range: 60, fovHalf: Math.PI, eyeY: 1.4, targetY: 1.4, light: function () { return 1; } };
+  const _pt = { x: 0, y: 0, z: 0 };
+  function losClear(actor, tx, tz, range, opts) {
+    const B = CBZ.brain;
+    if (B && B.perception && B.perception.sees) {
+      _look.range = range;
+      _look.targetY = opts.targetY != null ? opts.targetY - (opts.target && opts.target.pos ? (opts.target.pos.y || 0) : 0) : 1.4;
+      let r;
+      if (opts.target && opts.target.pos) r = B.perception.sees(actor, opts.target, _look);
+      else { _pt.x = tx; _pt.y = 0; _pt.z = tz; r = B.perception.sees(actor, _pt, _look); }
+      if (r && opts.target && B.memory && B.memory.see) B.memory.see(actor, opts.target);
+      return !!r;
+    }
+    return rawLosClear(actor.pos.x, actor.pos.z, tx, tz, opts.far);
+  }
+
   // updateLOS: throttled raycast (re-tested every ~0.22-0.34s, jittered) with a
   // glass-breach re-confirm (sees through a hole the actor itself just shot)
   // and an optional "painted" override (e.g. police's chopper spotlight, or any
   // future spotter feed) that counts as a sighting without a raycast at all.
-  // opts: { range, breachReach, painted, far, giveUpT }
+  // opts: { range, breachReach, painted, far, giveUpT, targetY, target }
+  //   target: the actor being tracked (optional) — lets the brain stamp its
+  //   memory.lastSeen and read the target's real height.
   CBZ.aiTactics.updateLOS = function (actor, tx, tz, dt, opts) {
     if (!actor || !actor.pos) return { sees: false, justLost: false };
     opts = opts || {};
@@ -99,7 +127,7 @@
     actor._losCD -= (dt || 0);
     if (actor._losCD <= 0) {
       actor._losCD = 0.22 + rng() * 0.12;
-      actor._losClear = dist < range && rawLosClear(ax, az, tx, tz, opts.far);
+      actor._losClear = dist < range && losClear(actor, tx, tz, range, opts);
       // GLASS WE JUST SHOT OUT reads as open air to the cheap wall raycast (it
       // still hits the facade box); re-test the glass-aware way so the actor
       // sees through its own hole instead of standing there re-breaking nothing.

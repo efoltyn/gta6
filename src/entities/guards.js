@@ -1172,10 +1172,7 @@
   // ---- tunables -------------------------------------------------------------
   const SUS_ON = 0.3;          // meter at which he stops and turns (SUSPICIOUS)
   const SUS_OFF = 0.1;         // ... and below which he lets it go
-  const SUS_HOLD = 1.4;        // s the meter holds after sight breaks
-  const SUS_DRAIN = 0.22;      // per second, after the hold
   const SUS_CHECK = 0.5;       // a meter still this high with nothing to see: go and look
-  const CLOSE_SPOT = 2.6;      // m: inside this, sight is instant
   const CAPTURE_R = 1.4;       // m: capture.js's reach (unchanged)
   const ORDER_R = 4.2;         // m: where he gives the order (capture.js ARREST.ORDER_R)
   const RADIO_FIX_EVERY = 3;   // s between a blind pursuer adopting the block's newest fix
@@ -1332,30 +1329,46 @@
   }
 
   // ---- perception -------------------------------------------------------------
+  /* THE SPOT METER IS THE BRAIN'S (CBZ.brain.perception.awareness): the one
+     sight test, filling faster close, centre-of-cone, lit and on a man who is
+     moving, holding a beat after sight breaks and then draining. This file
+     used to own the meter and an instant spot inside 2.6 m; the prison now
+     only says WHY a screw would care (`reason`) and how hard he is looking.
+     A man at arm's reach is still instant; one across a cell takes a beat.
+     `g.sus` / `g.susHold` stay the meter's public face: other files write
+     them (a noise turns his head, a warning stands him down), so they are
+     carried into the brain's record before it moves and read back after. */
+  const _aw = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 1.0, light: null, reason: 0, moveMul: 1, mul: 1 };
   function perceive(g, dt) {
-    const sees = !ctx.invuln && guardSees(g);
-    g.seesPlayer = sees;
     const px = player.pos.x, pz = player.pos.z;
-    if (sees) { g.lkX = px; g.lkZ = pz; g.lkVX = ctx.pvx; g.lkVZ = ctx.pvz; g.lkAt = clock(); }
     // a man he is already looking FOR is a reason all by itself
     let reason = ctx.reason;
     const inv = g.investigate;
     if (g.hunt > 0 || (inv && inv.type === "search")) reason = Math.max(reason, 1.3);
     else if (inv && inv.looking) reason = Math.max(reason, 1.1);          // sent by a radio call
     else if (inv && inv.player && Math.hypot(px - inv.x, pz - inv.z) < 7) reason = Math.max(reason, 0.8);   // at the scene of the noise
-    if (sees && reason > 0) {
-      const d = Math.hypot(px - g.group.position.x, pz - g.group.position.z);
-      const prox = clamp(1 - d / Math.max(1, g.viewDist), 0, 1);
-      let rate = (0.3 + 2.4 * prox * prox) * reason * ctx.moveMul * ctx.lightMul * ctx.diffMul;
-      if (g.flashlightOn) rate *= 1.25;
-      if (d < CLOSE_SPOT) rate = 50;
-      g.sus = Math.min(1, (g.sus || 0) + rate * dt);
-      g.susHold = SUS_HOLD;
-      g.susX = px; g.susZ = pz;
-    } else {
-      g.susHold = (g.susHold || 0) - dt;
-      if (g.susHold <= 0 && g.sus > 0) g.sus = Math.max(0, g.sus - SUS_DRAIN * dt);
+    const per = CBZ.brain && CBZ.brain.perception;
+    let sees = false;
+    if (per) {
+      const blindToYou = ctx.invuln || (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0);
+      const mem = CBZ.brain.memory;
+      mem.setAware(g, player, g.sus || 0, g.susHold || 0);
+      _aw.range = blindToYou ? 0 : g.viewDist * ctx.viewMul;
+      _aw.fovHalf = Math.min(1.45, g.half * wardenSharp);
+      _aw.shrink = player.crouch ? 0.55 : 1;
+      _aw.light = CBZ.sightScale ? prisonDark : null;
+      _aw.reason = reason;
+      _aw.moveMul = ctx.moveMul;
+      _aw.mul = ctx.diffMul * (g.flashlightOn ? 1.25 : 1);
+      // reason 0 (seen, nothing to care about) drains inside the brain's meter
+      g.sus = per.awareness(g, player, dt, _aw);
+      const r = mem.aware(g, player);
+      sees = !!r.visible;
+      g.susHold = r.hold;
     }
+    g.seesPlayer = sees;
+    if (sees) { g.lkX = px; g.lkZ = pz; g.lkVX = ctx.pvx; g.lkVZ = ctx.pvz; g.lkAt = clock(); }
+    if (sees && reason > 0) { g.susX = px; g.susZ = pz; }
     // what systems/detection.js acts on: CONFIRMED sight, not a glimpse
     g.spotted = sees && (g.sus >= 1 || g.hunt > 0);
   }
@@ -1609,6 +1622,8 @@
       if (g.hunt <= 0) { g.hunt = 0; g._huntRanOut = true; }
       g.investigate = null;
       g._returning = false;
+      // the player outranks any yard case this screw was running
+      if (g._yardCase && CBZ.prisonBrain) CBZ.prisonBrain.endCase(g);
       if (g.seesPlayer) {
         // eyes on: chase what he sees, and do not give up on a man in front of him
         if (g.hunt < 1.0 && ctx.reason > 0) { g.hunt = 1.0; g._huntRanOut = false; }
@@ -1641,6 +1656,15 @@
         noteState(g, S.phase === "goto" ? "hunt" : "search");
         searchStep(g, S, dt, g.speed * 1.7, g.speed * 1.35, true);
       }
+      updateFlashlight(g, dt);
+      return true;
+    }
+
+    // ---- YARD LAW (systems/brain_prison.js): he saw two inmates at it and is
+    // running the ladder on the one who started it — break it up, on the
+    // ground, cuffs. CBZ.brain.authority decides the phase; this is his body.
+    if (g._yardCase && CBZ.prisonBrain && CBZ.prisonBrain.guardLawStep(g, dt)) {
+      noteState(g, "law");
       updateFlashlight(g, dt);
       return true;
     }
@@ -1770,11 +1794,14 @@
     opts = opts || {};
     const G0 = CBZ.game;
     if (!G0 || G0.mode !== "escape" || G0.state !== "playing" || !(radius > 0)) return 0;
+    // every brain in earshot hears it (the yard scatters from a gunshot);
+    // WHICH screws walk over is decided below
+    if (CBZ.prisonBrain && CBZ.prisonBrain.noise) CBZ.prisonBrain.noise(x, z, radius, opts.type, opts.player ? player : null);
     const G = navOn() ? CBZ.navGrid : null;
     const list = [];
     for (const g of CBZ.guards || []) {
       if (!g || !g.group || g.dead || g.ko > 0 || g.asleep || g._escort || g.tied || g.bribed > 0 ||
-          g.intimidMode === "scared" || g.approach) continue;
+          g.intimidMode === "scared" || g.approach || g._yardCase) continue;   // a screw with a man on the ground stays with him
       if (opts.player && g.corrupt && (G0.racketProtectionT || 0) > 0) continue;
       const d = Math.hypot(x - g.group.position.x, z - g.group.position.z);
       if (d > radius) continue;
@@ -1828,7 +1855,7 @@
      under a quarter of his walking pace (grinding / stuck), and frames the
      wall resolver (actorcollide, order 25) had to push him back out. */
   const audit = { t: 0, moving: 0, stalled: 0, pushes: 0, frames: 0, per: new Map() };
-  const MOVING = { patrol: 1, hunt: 1, search: 1, investigate: 1, "return": 1, social: 1 };
+  const MOVING = { patrol: 1, hunt: 1, search: 1, investigate: 1, "return": 1, social: 1, law: 1 };
   function auditPre() {
     for (const g of CBZ.guards) { const p = g.group.position; g._auPX = p.x; g._auPZ = p.z; g._auCmd = g._cmd || 0; }
   }
@@ -1866,34 +1893,26 @@
     return out;
   };
 
-  // ---- line-of-sight test ----
-  const raycaster = new THREE.Raycaster();
-  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
-  // ONE cone test, two questions: can this screw see the PLAYER, and (for an
-  // inmate deciding whether to start something) can he see THAT spot.
+  /* ---- SIGHT: ONE implementation, CBZ.brain.perception -------------------
+     This file used to own the cone + raycast, and three other files kept
+     copies of it (detection.js's witness cone, games/military.js, the county
+     jail's wall-less cone). There is one now, in systems/brain.js. What stays
+     here is what is PRISON about a screw's eyes: his cone numbers, the
+     warden's presence widening it, the prison's dark (CBZ.sightScale), and a
+     bent screw going blind to you while your protection is paid up. Dead, KO,
+     asleep, bribed, tied, held at gunpoint: the brain's own blind list. */
+  const _see = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 1.0, light: null };
+  function prisonDark(o, x, z) { return CBZ.sightScale ? CBZ.sightScale(o, x, z) : 1; }
   function guardSeesPoint(g, x, y, z, shrink) {
-    // dead, down, ASLEEP, bribed, held at gunpoint or tied = blind.
-    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0 || g.intimidMode === "scared" || g.tied) return false;
+    if (!g || !g.group) return false;
     if (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0) return false;
-    const gx = g.group.position.x, gz = g.group.position.z;
-    const dx = x - gx, dz = z - gz;
-    const dist = Math.hypot(dx, dz);
-    let vd = g.viewDist;
-    if (shrink) vd *= shrink;                 // crouching shrinks spot range
-    if (dist > vd || dist < 0.05) return false;
-    const yaw = g.group.rotation.y;
-    const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
-    if (dot < Math.cos(Math.min(1.45, g.half * wardenSharp))) return false; // outside the cone angle
-    // ...AND SO DOES THE DARK (systems/prisonnight.js publishes sightScale off
-    // the prison's own light state; undefined everywhere else). After the
-    // range and angle tests: it can only shrink the cone.
-    if (CBZ.sightScale && dist > vd * CBZ.sightScale(g, x, z)) return false;
-    _ro.set(gx, 1.5, gz);
-    _rd.set(dx, y + 1.0 - 1.5, dz).normalize();
-    raycaster.set(_ro, _rd);
-    raycaster.far = Math.max(0.1, dist - 0.4);
-    if ((CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length > 0) return false; // cover
-    return true;
+    const per = CBZ.brain && CBZ.brain.perception;
+    if (!per) return false;
+    _see.range = g.viewDist;
+    _see.fovHalf = Math.min(1.45, g.half * wardenSharp);
+    _see.shrink = shrink || 1;
+    _see.light = CBZ.sightScale ? prisonDark : null;
+    return per.seesPoint(g, x, y || 0, z, _see);
   }
   function guardSees(g) {
     // crouching shrinks the range; a hot block looks a little harder
@@ -2022,6 +2041,11 @@
   CBZ.guardSeesPoint = guardSeesPoint;
   CBZ.guardWatching = guardWatching;
   CBZ.guardHear = guardHear;
+  // the guard's own body, for systems/brain_prison.js's executor (act.use)
+  CBZ.guardWalkTo = walkTo;
+  CBZ.guardFaceTo = function (g, x, z, k, dt) { faceTo(g, x, z, k, dt); };
+  CBZ.guardIdle = function (g, dt) { animChar(g.char, 0, dt); };
+  CBZ.guardLookAt = lookAtPoint;
   CBZ.spawnGuard = makeGuard;   // systems/reinforcements.js spawns extra patrols
 
   // drive all guards every playing frame

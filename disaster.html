@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 443
+     Natural Disaster Survival, standing alone: index.html minus the 447
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -583,6 +583,11 @@ document.body.appendChild(b);}}catch(e){}})();
      They inferred blood from `ko`/pooled-rig sentinel state, so clean tackles,
      sprints, tasers and even crowd LOD demotion manufactured pools.
      systems/gore.js + wounds.js own blood from explicit damage events. -->
+<!-- systems/brain.js: CBZ.brain, THE ONE NPC DECISION LAYER (perception,
+     memory, witnesses, morale, the authority ladder). Pure logic with no
+     parse-time dependencies, so it loads before its first consumers
+     (entities/security.js, entities/guards.js). -->
+<script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=m0927p"></script>
@@ -736,6 +741,9 @@ document.body.appendChild(b);}}catch(e){}})();
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonlaw.js?v=law1"></script>
+<!-- the prison as a configuration of CBZ.brain: registration, the executor,
+     yard law (a screw runs the ladder on a fight), witnesses, clique morale
+     and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
@@ -810,7 +818,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=merge0927a"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkfix2"></script>
+<script src="src/entities/survivorbot.js?v=armed1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
@@ -1070,9 +1078,17 @@ document.body.appendChild(b);}}catch(e){}})();
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=posture1"></script>
+<!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
+     ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
+     act executor. Pure logic; wanted.js and police.js bind into it. -->
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
+<!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
+     (social.crime), react on their own delay through threat.respond, gangs
+     retaliate proportionally and rout on brain morale, gang standing is
+     brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
+     drives) and systems/brain.js; nothing here runs at parse. -->
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1396,7 +1412,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/hitman_room.js?v=inworld1"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=inworld1"></script>
-<script src="src/city/agency.js?v=inworld1"></script>
+<script src="src/city/agency.js?v=detail1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
@@ -1578,6 +1594,9 @@ document.body.appendChild(b);}}catch(e){}})();
      every office's guard lifecycle (officials.js's calls are runtime-lazy so
      load order is soft either way, but this keeps "the record before its
      first consumer" honest). -->
+<!-- city/brain_protection.js: CBZ.detailBrain, the close-protection detail's
+     decisions (roles, stable slots, smoothed follow, sector scans, the panic
+     protocol, counter-snipers) for every detail in the city. -->
 
 <!-- X-wave: the world -->
 <!-- X5: the village hut/shack/well/market-stall kit (CBZ.assets.define +
@@ -1765,7 +1784,7 @@ document.body.appendChild(b);}}catch(e){}})();
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres3"></script>
 <script src="src/city/motorcade.js?v=pres3"></script>
-<script src="src/city/president_public.js?v=pres3"></script>
+<script src="src/city/president_public.js?v=detail1"></script>
 <script src="src/city/president_regime.js?v=pres3"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
