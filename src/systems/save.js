@@ -30,5 +30,9 @@
     refreshTitle();
   };
 
+  // the record a run is trying to beat (systems/escapeend.js asks before
+  // recordWin banks the new one)
+  CBZ.bestEscape = function () { return stats.best || 0; };
+
   refreshTitle();
 })();

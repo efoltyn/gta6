@@ -309,8 +309,11 @@
       v = !!v;
       if (v === d.open) return v;
       d.open = v;
+      // SOLID UNTIL IT HAS MOVED: an opening leaf keeps its collider until it
+      // has swung 40% clear (the tick below drops it); a blown one is a hole
+      // now, and a closing one is solid at once.
       const i = CBZ.colliders.indexOf(d.collider);
-      if (v && i >= 0) CBZ.colliders.splice(i, 1);
+      if (v && i >= 0 && d.blown) CBZ.colliders.splice(i, 1);
       else if (!v && i < 0) CBZ.colliders.push(d.collider);
       if (CBZ.losBlockers) for (const sl of d.slabs) {
         const li = CBZ.losBlockers.indexOf(sl);
@@ -337,7 +340,12 @@
         id: d.id, lb: cfg.lb || 5, reach: 2.6,
         at: function () { return { x: d.x, y: 1.4, z: d.z }; },
         done: function () { return d.open; },
-        defeat: function () { d.setOpen(true); d.blown = true; for (const p of d.pivots) p.visible = false; },
+        defeat: function () {
+          d.blown = true; d.setOpen(true);
+          const i = CBZ.colliders.indexOf(d.collider);
+          if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+          for (const p of d.pivots) p.visible = false;
+        },
       });
     }
     /* ---- AND A WAY TO SHUT IT ------------------------------------------
@@ -1131,6 +1139,10 @@
         d.t += (want - d.t) * Math.min(1, dt * 4.4);
         if (Math.abs(want - d.t) < 0.01) d.t = want;
         d.set.set(d.t);
+        if (want === 1 && d.t >= 0.4) {
+          const ci = CBZ.colliders.indexOf(d.collider);
+          if (ci >= 0) { CBZ.colliders.splice(ci, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        }
       }
     }
     if (g.state !== "playing") return;

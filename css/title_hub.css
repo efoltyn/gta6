@@ -388,14 +388,14 @@ body.mode-city #title .new-life-btn{
   font:700 44px/1 "Oswald","Arial Narrow",Arial,sans-serif !important; letter-spacing:.12em; text-indent:.12em;
   color:#fff; text-shadow:none; margin-bottom:10px;
 }
-#pause .btn{
+#pause .btn, #escEnd .btn{
   margin:0; width:100%; border-radius:12px; padding:15px 20px; font:700 20px/1 "Oswald","Arial Narrow",Arial,sans-serif;
   letter-spacing:.16em; background:#f3f5f8; color:#0b0f15; box-shadow:none;
 }
-#pause .btn:hover{transform:none; background:#fff; box-shadow:none;}
-#pause .btn:active{transform:translateY(1px); box-shadow:none;}
-#pause .btn ~ .btn{background:rgba(255,255,255,.08); color:#f3f5f8; border:1px solid rgba(255,255,255,.16);}
-#pause .btn ~ .btn:hover{background:rgba(255,255,255,.14);}
+#pause .btn:hover, #escEnd .btn:hover{transform:none; background:#fff; box-shadow:none;}
+#pause .btn:active, #escEnd .btn:active{transform:translateY(1px); box-shadow:none;}
+#pause .btn ~ .btn, #escEnd .btn ~ .btn{background:rgba(255,255,255,.08); color:#f3f5f8; border:1px solid rgba(255,255,255,.16);}
+#pause .btn ~ .btn:hover, #escEnd .btn ~ .btn:hover{background:rgba(255,255,255,.14);}
 #pause .smallnote{color:rgba(226,232,242,.5); margin-top:6px;}
 /* "Esc resumes" names a key a touchscreen does not have */
 body.touch #pause .smallnote{display:none;}
@@ -417,4 +417,25 @@ body.touch.state-playing #hudPauseBtn{
 body.full-map-open #hudPauseBtn{display:none !important;}
 /* on the light result cards the way out is a quiet grey button */
 .btn.btn-quiet{background:#6b7686; box-shadow:0 6px 0 #4a5562, 0 10px 18px rgba(0,0,0,.25); margin-left:8px;}
-#pause .btn.btn-quiet{margin-left:0;}
+#pause .btn.btn-quiet, #escEnd .btn.btn-quiet{margin-left:0;}
+
+/* ============================================================
+   THE PRISON'S END (systems/escapeend.js). The run out fades the live world
+   through #escFade (opacity driven per frame, under every .screen); #escEnd
+   is black with one quiet line and the pause card's own buttons. A loss
+   arrives without the run out, so #escEnd fades itself in.
+============================================================ */
+#escFade{position:fixed; inset:0; background:#020305; opacity:0; pointer-events:none; z-index:29;}
+body.escape-outro #hud{opacity:0; transition:opacity .6s ease;}
+#escEnd{background:rgba(2,3,5,.94); animation:escEndIn 1.2s ease-out both;}
+#escEnd .card-box{
+  width:min(400px,92vw); padding:26px 28px 22px; border-radius:18px;
+  background:transparent; color:#f3f5f8; border:0; box-shadow:none;
+  display:flex; flex-direction:column; align-items:stretch; gap:10px;
+  animation:escEndIn .9s ease-out .6s both;
+}
+#escEnd .end-line{
+  font:500 18px/1.45 "Oswald","Arial Narrow",Arial,sans-serif; letter-spacing:.12em;
+  color:rgba(232,237,244,.84); margin:0 0 18px; text-align:center;
+}
+@keyframes escEndIn{from{opacity:0;} to{opacity:1;}}

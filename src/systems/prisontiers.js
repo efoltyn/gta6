@@ -643,48 +643,34 @@
     return true;
   }
 
-  /* THE CARD. systems/state.js owns the DOM; this owns the words on it for a
-     transfer, so the between-levels beat lives with the thing it describes. */
+  /* THE CARD. systems/escapeend.js owns the end screen (one line on black);
+     this owns the words for a transfer, so the between-levels beat lives
+     with the thing it describes. */
   function card() {
     if (!on() || !g._tierArrive) return null;
     const t = tier();
     return {
-      logo: "TRANSFERRED",
-      sub: "Reclassified: " + t.arrive,
-      place: String(level() + 1),
-      total: "of 4, " + t.label,
-      button: "REPORT TO " + t.label,
-      kept: (g._tierCarry && g._tierCarry.cigs) | 0,
-      keptLabel: "Cigs kept",
+      line: "Transferred to " + t.name + ".",
+      button: "Report to " + t.short,
     };
   }
 
   /* THE CROWN. Escaping a fortress is not the same result as walking off a
-     county farm, and the shipped win card is where that is said.
+     county farm, and the end line says which one you beat.
 
      AND THE WIN IS WHERE THE LADDER IS BANKED. You beat the classification;
-     the next run opens back on the county farm with the crown already on the
-     card behind you. That clearing happens HERE — synchronously, inside the
-     one call that means "you got out" — and not on a state-change watcher: a
-     state hook fires a frame later, on a dispatcher that has to see the
-     transition, and a run that is over is exactly when frames stop being
-     something to rely on. `beaten` is captured before the clear so winLine()
-     below still names the wing you actually escaped. */
-  let beaten = 0;
-  function crown(box) {
-    if (!on() || !box) return false;
-    beaten = level();
-    const t = TIERS[beaten];
-    const logo = box.querySelector(".logo");
-    if (logo) logo.textContent = beaten === 0 ? "YOU'RE OUT!" : "OUT OF " + t.label;
+     the next run opens back on the county farm. That clearing happens HERE,
+     synchronously, inside the one call that means "you got out", and not on
+     a state-change watcher: a run that is over is exactly when frames stop
+     being something to rely on. Returns the name of the regime you beat, or
+     "" off the county farm (nothing to crow about). */
+  function crown() {
+    if (!on()) return "";
+    const beaten = level();
     g.securityTier = 0;
     g._tierCarry = null;
     g._tierArrive = false;
-    return beaten > 0;
-  }
-  function winLine(sub) {
-    if (!on()) return sub;
-    return beaten === 0 ? sub : sub + ", out of " + TIERS[beaten].short;
+    return beaten > 0 ? TIERS[beaten].name : "";
   }
 
   /* ==========================================================
@@ -796,7 +782,6 @@
     apply: applyRegime,
     card: card,
     crown: crown,
-    winLine: winLine,
     posts: mine,
   };
 

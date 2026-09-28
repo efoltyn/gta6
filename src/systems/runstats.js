@@ -27,11 +27,10 @@
      nothing else keeps (most kills / most K.O.s / most cigs / richest haul).
      `runStatsAudit().parallelBestStores` is pinned at 0 to keep it that way.
 
-   * NO SECOND WIN SCREEN.  We ride #win: two more `.stat` tiles in the grid
-     the card already lays out (so they inherit the paper-card look, the flex
-     wrap and the existing `#againBtn` dismissal — which is what makes this
-     tappable on an iPad without a single touch handler of our own), plus one
-     `.smallnote`-weight personal-bests row.
+   * NO WIN-SCREEN STATS.  The old #win card printed six tiles and a
+     personal-bests footer; the owner called it the old UI and it is gone.
+     The prison now ends on one line (systems/escapeend.js: the time, and
+     "a new best" when it is one). This file still BANKS the records.
 
    WHAT IS ACTUALLY NEW HERE: the KILL count (escape mode never had one —
    `credit(killer,"kills")` in ai.js banks it on the killer object, and every
@@ -81,7 +80,6 @@
   const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
   if (CFG.PRISON_RUNSTATS == null) CFG.PRISON_RUNSTATS = true;
   if (CFG.PRISON_RUNSTATS_HUD == null) CFG.PRISON_RUNSTATS_HUD = true;
-  if (CFG.PRISON_RUNSTATS_CARD == null) CFG.PRISON_RUNSTATS_CARD = true;
 
   const g = CBZ.game;
 
@@ -141,7 +139,6 @@
     base: { kos: 0, caught: 0, cigs: 0, elapsed: 0 },
     was: bests(),
     last: null,          // frozen copy of the finished run (audit / tools)
-    summaries: 0,        // how many win cards this session actually decorated
   };
 
   // The master flag is part of the predicate, not just a guard on the entry
@@ -251,19 +248,6 @@
          alarm, and the killfeed owns the only loud surface in this game. */
       "#runStats .rs-pace{color:#8dff9f;opacity:.9;}",
       "#runStats .rs-pace.rs-over{color:#eaf3ff;opacity:.4;}",
-
-      /* ---- the win card. Paper, not HUD: css/base.css --paper/--ink/--orange. */
-      "#win .stat.rs-hero .v{font-size:44px;}",
-      "#win .stat.rs-record{border-color:#e6ab2e;box-shadow:0 0 0 3px rgba(255,209,102,.22);}",
-      "#win .rs-note{margin:14px auto 0;max-width:460px;font-size:12px;font-weight:600;color:#8a7a66;" +
-        "display:flex;flex-wrap:wrap;gap:7px 14px;justify-content:center;align-items:center;line-height:1.5;}",
-      "#win .rs-note .rs-i{display:inline-flex;align-items:center;gap:5px;}",
-      "#win .rs-note b{color:#3a3026;font-weight:700;font-variant-numeric:tabular-nums;}",
-      /* NEW BEST: gold on cream, with the chunky bottom-heavy border the
-         title-card buttons use. Deliberately NOT the red #toast look. */
-      "#win .rs-new{display:inline-flex;align-items:center;padding:2px 7px 2px;border-radius:7px;" +
-        "font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#6b4a00;" +
-        "background:linear-gradient(180deg,#ffe9a8,#ffd166);border:2px solid #e6ab2e;border-bottom-width:3px;}",
     ].join("\n");
     document.head.appendChild(s);
   }
@@ -285,11 +269,6 @@
   function fmtShort(s) {
     s = Math.max(0, Math.floor(s));
     return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-  }
-  function fmtLong(s) {
-    if (CBZ.fmtTime) return CBZ.fmtTime(s);
-    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-    return String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
   }
 
   // Quiet by default: an empty strip says nothing, so it is not drawn at all
@@ -323,74 +302,6 @@
     const html = '<span class="rs-tag">Run</span>' + bits.join("");
     if (html !== stripTxt) { box.innerHTML = html; stripTxt = html; }
     if (!box.classList.contains("rs-on")) box.classList.add("rs-on");
-  }
-
-  // ---------------------------------------------------------- the summary
-  // Rides #win. Two extra `.stat` tiles go INTO the grid state.js already
-  // fills, so they wrap, scale and dismiss exactly like the four that ship.
-  let tileKills = null, tileLoot = null, note = null;
-  function statTile(id, label) {
-    const d = document.createElement("div");
-    d.className = "stat";
-    d.innerHTML = '<div class="v" id="' + id + '">0</div><div class="l">' + label + "</div>";
-    return d;
-  }
-  function ensureCard() {
-    const win = document.getElementById("win");
-    if (!win) return false;
-    const grid = win.querySelector(".stats");
-    if (!grid) return false;
-    ensureStyle();
-    if (!tileKills || !tileKills.parentNode) { tileKills = statTile("rsKills", "Kills"); grid.appendChild(tileKills); }
-    if (!tileLoot || !tileLoot.parentNode) { tileLoot = statTile("rsLoot", "Loot Value"); grid.appendChild(tileLoot); }
-    if (!note || !note.parentNode) {
-      note = document.createElement("div");
-      note.className = "rs-note";
-      // BEFORE the buttons: state.js's ensureStreetsBtn() slots BACK TO THE
-      // STREETS after #againBtn, and a stats row underneath the buttons reads
-      // like a footer nobody asked for.
-      const btn = document.getElementById("againBtn");
-      if (btn && btn.parentNode === grid.parentNode) grid.parentNode.insertBefore(note, btn);
-      else grid.parentNode.appendChild(note);
-    }
-    return true;
-  }
-
-  function item(label, value, isNew) {
-    return '<span class="rs-i">' + label + " <b>" + value + "</b>" +
-      (isNew ? ' <span class="rs-new">New best</span>' : "") + "</span>";
-  }
-
-  function renderSummary(fin) {
-    if (!CFG.PRISON_RUNSTATS || !CFG.PRISON_RUNSTATS_CARD) return;
-    if (!ensureCard()) return;
-    const was = run.was;
-    const k = document.getElementById("rsKills");
-    const l = document.getElementById("rsLoot");
-    if (k) k.textContent = fin.kills;
-    if (l) l.textContent = fin.loot;
-
-    // TIME IS THE HEADLINE. #wTime is already the card's own escape clock —
-    // we promote the tile it lives in rather than printing the number twice.
-    const tv = document.getElementById("wTime");
-    const tile = tv && tv.parentNode;
-    if (tile && tile.classList) {
-      tile.classList.add("rs-hero");
-      tile.classList.toggle("rs-record", !!fin.newTime);
-    }
-    if (tileKills) tileKills.classList.toggle("rs-record", !!fin.newKills);
-
-    const parts = [];
-    parts.push(item("Fastest escape", was.time ? fmtLong(Math.min(was.time, fin.elapsed)) : fmtLong(fin.elapsed), fin.newTime));
-    parts.push(item("Most kills", Math.max(was.kills, fin.kills), fin.newKills));
-    if (fin.cigsEarned > 0 || fin.cigsSpent > 0) {
-      parts.push('<span class="rs-i">Cigs earned <b>' + fin.cigsEarned + "</b>" +
-        (fin.cigsSpent > 0 ? " · spent <b>" + fin.cigsSpent + "</b>" : "") + "</span>");
-    }
-    const escapes = (was.escapes | 0) + 1;   // save.js banked this win a moment ago
-    parts.push('<span class="rs-i">Escape <b>#' + escapes + "</b></span>");
-    note.innerHTML = parts.join("");
-    run.summaries++;
   }
 
   // ----------------------------------------------------------- run ending
@@ -432,12 +343,6 @@
     // want on the board, and half-runs would poison every record here.
     run.last = fin;
     paint(true);
-    if (!won) return;
-    // Deferred one frame: setState("won") fires FIRST inside winGame(), before
-    // it fills #wReason/#wTime/#wCigs and before CBZ.recordWin() banks the
-    // escape. By the next frame the card is complete and we only decorate it.
-    const draw = function () { try { renderSummary(fin); } catch (e) { console.error("[runstats]", e); } };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(draw); else draw();
   }
 
   // ------------------------------------------------------------- the wrap
@@ -573,9 +478,7 @@
       live: s,
       best: bests(),
       last: run.last,
-      summaries: run.summaries,
       hudMounted: !!(strip && strip.parentNode),
-      cardMounted: !!(tileKills && tileKills.parentNode && note && note.parentNode),
     };
   };
 })();

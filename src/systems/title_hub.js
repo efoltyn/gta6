@@ -8,8 +8,8 @@
       three games that live on their own pages (NPC War, Desert Warlord,
       Bomb Survivor) are recorded when their tile is pressed, and their
       tile wears the LAST PLAYED tag when you come back.
-   2. WAY OUT. #pauseMenuBtn (pause card) and #winMenuBtn (the prison's
-      escape card) return to the menu. Before this the only road from a
+   2. WAY OUT. #pauseMenuBtn (pause card) and #escEndMenu (the prison's
+      end screen) return to the menu. Before this the only road from a
       running game to any other game was reloading the page. PLAY from the
       menu is a normal start (startRunPresented resets the run), exactly
       what the disaster result cards' Main Menu has always done.
@@ -84,7 +84,7 @@
     CBZ.setState("title");
     markLast();
   }
-  ["pauseMenuBtn", "winMenuBtn"].forEach((id) => {
+  ["pauseMenuBtn", "escEndMenu"].forEach((id) => {
     const b = document.getElementById(id);
     if (b) b.addEventListener("click", toMenu);
   });

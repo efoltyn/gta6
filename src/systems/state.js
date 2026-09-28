@@ -12,7 +12,8 @@
   const screens = {
     title: document.getElementById("title"),
     pause: document.getElementById("pause"),
-    win: document.getElementById("win"),
+    // the prison's end (systems/escapeend.js): one line on black
+    end: document.getElementById("escEnd"),
     survwin: document.getElementById("survwin"),
     survlose: document.getElementById("survlose"),
   };
@@ -24,14 +25,15 @@
     g.state = s;
     document.body.classList.toggle("state-playing", s === "playing");
     // the ARENA modes (survival + gungame) share one pair of result cards
-    // (#survwin/#survlose); each fills/relabels them at show time. escape
-    // keeps its own #win card.
+    // (#survwin/#survlose); each fills/relabels them at show time. The
+    // prison ends on #escEnd, won or lost.
     const arena = g.mode === "survival" || g.mode === "sharksim" || g.mode === "gungame";
+    const prisonEnd = (s === "won" && !arena) || (s === "lost" && g.mode === "escape");
     screens.title.classList.toggle("hidden", s !== "title");
     screens.pause.classList.toggle("hidden", s !== "paused");
-    screens.win.classList.toggle("hidden", !(s === "won" && !arena));
+    if (screens.end) screens.end.classList.toggle("hidden", !prisonEnd);
     if (screens.survwin) screens.survwin.classList.toggle("hidden", !(s === "won" && arena));
-    if (screens.survlose) screens.survlose.classList.toggle("hidden", s !== "lost");
+    if (screens.survlose) screens.survlose.classList.toggle("hidden", !(s === "lost" && !prisonEnd));
   }
 
   function setRole(role) {
@@ -237,71 +239,35 @@
     }
   }
 
-  // the #survlose card ships survival-flavored in index.html; each loss
-  // relabels it via JS at show time so JAIL transfers and DISASTER deaths
-  // share one screen without touching the markup. (The stat labels are the
-  // sibling .l divs of the #sl* value nodes.)
-  function styleLossCard(jail, reason) {
+  // the #survlose card is the arena modes' loss card (survival, sharksim,
+  // gungame each relabel it). The prison never shows it: its losses end on
+  // #escEnd (systems/escapeend.js).
+  function styleLossCard() {
     const box = screens.survlose;
     if (!box) return;
     const logo = box.querySelector(".logo");
     const sub = box.querySelector(".sub");
     const timeEl = document.getElementById("slTime");
     const disEl = document.getElementById("slDis");
-    const timeLabel = timeEl && timeEl.nextElementSibling;
-    const disLabel = disEl && disEl.nextElementSibling;
     const againBtn = document.getElementById("loseAgainBtn");
-    if (jail) {
-      /* SECURITY TIERS (systems/prisontiers.js): a third capture is a
-         TRANSFER UP A LEVEL, not the end of the game, and this card is the
-         between-levels beat — a state-transition screen, which is the one
-         place words are legitimate. The tier owns the copy so the regime and
-         the sentence describing it cannot drift apart; when the ladder is
-         off (or this is a plain death) the original lines below still run. */
-      // DEAD is its own card (systems/capture.js: a shank into a downed man, a
-      // second lethal down, the tower on the wire). Never the tier's copy.
-      const dead = reason === "dead";
-      const T = !dead && CBZ.prisonTier && CBZ.prisonTier.card ? CBZ.prisonTier.card() : null;
-      if (logo) logo.textContent = dead ? "DEAD" : T ? T.logo : "TRANSFERRED";
-      if (sub) sub.textContent = dead ? (g._deathLine || "You didn't make it") : T ? T.sub : (reason === "transferred"
-        ? "Strike three, shipped to max security"
-        : "The escape is over");
-      setText("slPlace", T ? T.place : String(dead ? (g.caughtCount || 0) : Math.min(3, g.caughtCount || 3)));
-      setText("slTotal", T ? T.total : dead ? "times caught" : "strikes");
-      setText("slTime", CBZ.fmtTime(g.elapsed));
-      if (timeLabel) timeLabel.textContent = dead ? "Inside" : "On the run";
-      setText("slDis", T ? T.kept : (g.cigs || 0));
-      if (disLabel) disLabel.textContent = T ? T.keptLabel : "Cigs left";
-      // the button is part of the scene: you are not retrying, you are being
-      // walked into the next wing.
-      if (againBtn) againBtn.textContent = T ? T.button : "Try Again";
-      // WHOSE COPY IS ON THIS CARD, recorded as a fact rather than guessed at
-      // by string-matching it below. Same semantics the equality test had —
-      // "is OUR line still the one showing" — but it now covers transfer copy
-      // the tier authored, which a hard-coded pair of strings never could.
-      if (sub) sub.dataset.jailText = sub.textContent;
-    } else {
-      if (againBtn) againBtn.textContent = "Try Again";
-      if (logo) logo.textContent = "ELIMINATED";
-      // survival owns its own .sub line (modes/survival.js finishRound writes
-      // the cause/winner/record flavor BEFORE calling loseGame) — only clear
-      // it if a previous JAIL loss left our transfer copy behind.
-      if (sub && sub.dataset.jailText && sub.textContent === sub.dataset.jailText) {
-        sub.textContent = "The disasters claimed you";
-      }
-      if (sub) delete sub.dataset.jailText;
-      if (timeLabel) timeLabel.textContent = "Survived";
-      if (disLabel) disLabel.textContent = "Disasters";
-    }
+    if (againBtn) againBtn.textContent = "Try Again";
+    if (logo) logo.textContent = "ELIMINATED";
+    if (sub && !sub.textContent) sub.textContent = "The disasters claimed you";
+    if (timeEl && timeEl.nextElementSibling) timeEl.nextElementSibling.textContent = "Survived";
+    if (disEl && disEl.nextElementSibling) disEl.nextElementSibling.textContent = "Disasters";
   }
 
   function loseGame(reason) {
     if (g.state === "won" || g.state === "lost") return;
+    // THE PRISON: a death, a transfer, the cop going down. One line on black
+    // (systems/escapeend.js), no sting on top of the body hitting the floor.
+    if (g.mode === "escape") {
+      setState("lost");
+      ensureStreetsBtn(false);
+      if (CBZ.escapeEnd) CBZ.escapeEnd.show("lost", reason);
+      return;
+    }
     setState("lost"); if (CBZ.sfx) CBZ.sfx("ko");
-    // JAIL (escape): three-strikes transfer to max security — capture.js is
-    // the caller. Survival keeps its placement stats (and relabels the card
-    // back in case a jail loss restyled it earlier in the session).
-    if (g.mode === "escape") { styleLossCard(true, reason); return; }
     // GUN GAME: a bot finished the ladder first — its own fill owns the card
     // (ladder standings, not disaster placement).
     if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(false); return; }
@@ -310,13 +276,15 @@
     // also the ONLY card that mode has: shark sim cannot be won (see winGame).
     if (g.mode === "sharksim" && CBZ.sharkSimFillResult) { CBZ.sharkSimFillResult(); return; }
     fillSurvResult(false);
-    styleLossCard(false);
+    styleLossCard();
   }
   CBZ.loseGame = loseGame;
 
   function winGame(reason, actor) {
     if (g.state === "won") return;
-    setState("won"); CBZ.sfx("win");
+    setState("won");
+    // the prison ends quietly (systems/escapeend.js); the arenas keep their sting
+    if (g.mode !== "escape" && CBZ.sfx) CBZ.sfx("win");
     // SHARK SIM CANNOT BE WON, so it is not handled here. It used to end the
     // run with a victory card the moment the megalodon ate an orca — taking
     // the sea away as the reward for reaching the top of the food chain. The
@@ -332,45 +300,29 @@
     if (g.mode === "escape" && g.cityWorld && CBZ.cityEvent) {
       CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true });
     }
-    const who = actor ? actor.data.name.replace(/^the |^a |^an /, "") : "Someone";
-    let sub = reason === "befriend" ? `${who} walked you out`
-      : reason === "nuke" ? "Tactical nuke ended the run"
-      : reason === "route" ? "Through a hidden escape route"
-      : "Through the gate";
-    // THE CROWN IS THE CLASSIFICATION YOU BEAT (systems/prisontiers.js).
-    // Walking off a county farm and breaking out of segregation were the same
-    // three words on this card; the tier relabels the logo and adds the wing
-    // to the reason. On LOW (or with the ladder off) it is byte-identical.
-    if (CBZ.prisonTier && CBZ.prisonTier.crown) {
-      CBZ.prisonTier.crown(screens.win);
-      sub = CBZ.prisonTier.winLine(sub);
-    }
-    document.getElementById("wReason").textContent = sub;
-    document.getElementById("wTime").textContent = CBZ.fmtTime(g.elapsed);
-    document.getElementById("wCigs").textContent = g.cigs;
-    document.getElementById("wKos").textContent = g.kos || 0;
-    document.getElementById("wCaught").textContent = g.caughtCount;
+    // THE END LINE is written BEFORE the escape is banked, so "a new best"
+    // compares against the record this run was trying to beat.
+    if (CBZ.escapeEnd) CBZ.escapeEnd.show("won", reason, actor);
     // BACK TO THE STREETS: if a city run exists, breaking out of jail can drop you
-    // straight back into the open city as an ESCAPED CONVICT (3★ floor, harder
-    // cops — wanted.js/mode.js read g.escapedConvict). Reuses the same win-screen
-    // card + the bindButton machinery as "Escape Again" — no new DOM framework: the
-    // button is created once, lazily, and slotted next to againBtn.
+    // straight back into the open city as an ESCAPED CONVICT (3 star floor, harder
+    // cops: wanted.js/mode.js read g.escapedConvict).
     ensureStreetsBtn(g.mode === "escape" && !!g.cityWorld);
     if (CBZ.recordWin) CBZ.recordWin();
   }
 
-  // lazily create (once) the "BACK TO THE STREETS" button inside the win card,
-  // right after the existing againBtn, and show/hide it per call. Same look (.btn)
-  // and same debounced wiring (bindButton) as the other win-screen buttons.
+  // lazily create (once) the "BACK TO THE STREETS" button on the prison's end
+  // screen, right after Play Again, and show/hide it per call. Same look
+  // (.btn) and same debounced wiring (bindButton) as the other buttons.
   let streetsBtn = null;
   function ensureStreetsBtn(show) {
     if (!streetsBtn) {
-      const again = document.getElementById("againBtn");
+      const again = document.getElementById("escEndAgain");
       if (!again || !again.parentNode) return;
       streetsBtn = document.createElement("button");
       streetsBtn.id = "backToStreetsBtn";
       streetsBtn.className = again.className || "btn";
-      streetsBtn.textContent = "BACK TO THE STREETS";
+      streetsBtn.type = "button";
+      streetsBtn.textContent = "Back to the Streets";
       again.parentNode.insertBefore(streetsBtn, again.nextSibling);
       bindButton("backToStreetsBtn", function () {
         g.escapedConvict = true;
@@ -705,7 +657,7 @@
 
   bindButton("playBtn", startRunPresented);
   bindButton("resumeBtn", resumeGame);
-  bindButton("againBtn", startRunPresented);
+  bindButton("escEndAgain", startRunPresented);
   // survival result screens
   bindButton("survAgainBtn", startRunPresented);
   bindButton("loseAgainBtn", startRunPresented);

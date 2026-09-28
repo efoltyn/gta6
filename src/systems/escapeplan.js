@@ -19,9 +19,10 @@
                              from the Old Timer (quests.js asks fixerTalk)
                2 Gate Key    the board in the gate booth (a Keycard door)
                              or the gate officer's belt
-               3 The port    walk the sally port without a guard seeing
-                             you. Gate 3 has an officer on the walkway; he
-                             has to be down, bought, or looking away.
+               3 The port    the Gate Key opens the grille (the booth sees
+                             it move: klaxon, heat, screws sent), the out
+                             door releases once the grille is home again,
+                             and the run is won outside, past that door.
      CULVERT   1 A blade     Hacksaw Blade on the workshop bench, or bought
                2 The grate   the yard ditch grate is welded: cut it (a few
                              seconds, loud, nobody may see or hear)
@@ -317,11 +318,12 @@
   function mayWin(kind, zone) {
     if (!escape()) return true;
     if (kind === "culvert") return S.grateCut;
-    // a gate: nobody may have you in sight
-    if (S.portSeenT > 0 || seenBy()) {
-      if (S.refuseT <= 0) { S.refuseT = 2.5; hint("Not while they're watching.", 1.8); }
-      return false;
-    }
+    // A GATE IS WON BY GETTING THROUGH IT. The win point stands outside the
+    // port's out door now (world/corridorkit.js): to reach it you opened the
+    // grille on the Gate Key (which sets the port's klaxon off and sends the
+    // screws to it), waited out the interlock and pushed the door. Being seen
+    // in the port is what brings them running (portTick above); a man who is
+    // already through the door is not refused a win with a caption.
     return true;
   }
 

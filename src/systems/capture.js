@@ -1533,7 +1533,7 @@
       beatLock = false;
       releasePlayerCell(); muster(false);   // nothing of ours stays shut past the gate
       if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
-      if (CBZ.winGame) { try { CBZ.winGame("route"); } catch (e) {} }
+      if (CBZ.winGame) { try { CBZ.winGame("served"); } catch (e) {} }
     }
   }
   CBZ.jailSentenceLeft = function () { return Math.max(0, Math.ceil(+g.jailSentence || 0)); };

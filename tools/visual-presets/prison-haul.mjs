@@ -117,7 +117,7 @@ export default {
 
     const fadeEl = document.getElementById("fade");
     const fade = fadeEl ? Math.round(parseFloat(fadeEl.style.opacity || "0") * 100) / 100 : 0;
-    const card = document.getElementById("survlose");
+    const card = document.getElementById("escEnd");
     const cardShown = !!(card && getComputedStyle(card).display !== "none" && parseFloat(getComputedStyle(card).opacity || "1") > 0.05) ? 1 : 0;
     let near = 0;
     for (const g of CBZ.guards || []) if (!g.dead && g.group && Math.hypot(g.group.position.x - P.pos.x, g.group.position.z - P.pos.z) < 3) near++;

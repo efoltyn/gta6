@@ -172,25 +172,25 @@ const tx = await evl(`
   var gd=(CBZ.guards||[])[0]; if(gd) gd.loyalty=80;
   CBZ.game.caughtCount=2; CBZ.game.invuln=0;
   CBZ.haulToCell('probe');
-  var sub=document.querySelector('#survlose .sub'), logo=document.querySelector('#survlose .logo');
-  var btn=document.getElementById('loseAgainBtn');
+  var line=document.getElementById('escEndLine'), end=document.getElementById('escEnd');
+  var btn=document.getElementById('escEndAgain');
   return { tier:CBZ.game.securityTier, state:CBZ.game.state, arrive:!!CBZ.game._tierArrive,
            carryCigs:CBZ.game._tierCarry?CBZ.game._tierCarry.cigs:-1,
            carryItems:CBZ.game._tierCarry?Object.keys(CBZ.game._tierCarry.items):null,
            carryRep:CBZ.game._tierCarry?CBZ.game._tierCarry.rep.length:-1,
-           logo:logo?logo.textContent:'', sub:sub?sub.textContent:'', btn:btn?btn.textContent:'' };`);
+           shown:!!(end && !end.classList.contains('hidden')), line:line?line.textContent:'', btn:btn?btn.textContent:'' };`);
 if (bad(tx)) { console.error("FAIL transfer: " + why(tx)); done(3); }
 check("third capture TRANSFERS instead of losing", tx.tier === 1, "tier=" + tx.tier);
-check("the between-levels card is shown", tx.state === "lost" && tx.logo === "TRANSFERRED", tx.logo);
-check("the card names the destination regime", /Medium Security/.test(tx.sub), JSON.stringify(tx.sub));
-check("the button walks you into the next wing", /REPORT TO MEDIUM/.test(tx.btn), JSON.stringify(tx.btn));
+check("the between-levels end screen is shown", tx.state === "lost" && tx.shown && /^Transferred/.test(tx.line), tx.line);
+check("the line names the destination regime", /Medium Security/.test(tx.line), JSON.stringify(tx.line));
+check("the button walks you into the next wing", /report to medium/i.test(tx.btn), JSON.stringify(tx.btn));
 check("shakedown keeps half the cigs into MEDIUM", tx.carryCigs === 20, "cigs=" + tx.carryCigs);
 check("shakedown confiscates every key and tool", tx.carryItems && !tx.carryItems.some((k) => /Keycard|Lockpick/.test(k)), JSON.stringify(tx.carryItems));
 check("personal effects survive into MEDIUM", tx.carryItems && tx.carryItems.indexOf("Soap") >= 0 && tx.carryItems.indexOf("Ramen") >= 0, JSON.stringify(tx.carryItems));
 check("respect travels in the transfer file", tx.carryRep >= 1, "reps=" + tx.carryRep);
 
 // --------------------------------------------------------- 4. THE ARRIVAL
-await evl("var b=document.getElementById('loseAgainBtn'); if(b) b.click(); return true;");
+await evl("var b=document.getElementById('escEndAgain'); if(b) b.click(); return true;");
 await sleep(1200);
 const arr = await evl(`
   var cb=CBZ.cellblock, c=cb&&cb.playerCell;
@@ -233,12 +233,11 @@ check("the strike count is held at the final rung", top.caught <= 2 && top.caugh
 const win = await evl(`
   CBZ.prisonTier.set(2); CBZ.game.state='playing';
   CBZ.winGame('route');
-  var logo=document.querySelector('#win .logo'), r=document.getElementById('wReason');
-  var out={ logo:logo?logo.textContent:'', reason:r?r.textContent:'', tier:CBZ.game.securityTier };
+  var l=document.getElementById('escEndLine');
+  var out={ line:l?l.textContent:'', tier:CBZ.game.securityTier };
   return out;`);
 if (bad(win)) { console.error("FAIL win: " + why(win)); done(3); }
-check("escaping HIGH reads as a bigger crown", /OUT OF HIGH/.test(win.logo), JSON.stringify(win.logo));
-check("the reason line names the wing you beat", /High/.test(win.reason), JSON.stringify(win.reason));
+check("escaping HIGH says which wing you beat", /^Out of High Security/.test(win.line), JSON.stringify(win.line));
 await sleep(400);
 const cleared = await evl("return CBZ.game.securityTier;");
 check("a win clears the ladder back to LOW", cleared === 0, "tier=" + cleared);

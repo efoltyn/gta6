@@ -14,9 +14,10 @@
    systems the building does not own:
      CBZ.EXIT           the point systems/interactions.js wins at (3 m),
                         the compass, the minimap and the full map's icon.
-                        It sits INSIDE the vestibule, south of the grille:
-                        a man on the compound side of the bars is 5 m short
-                        of it, a man through them is on top of it.
+                        It sits OUTSIDE, 3.2 m past the out door: through
+                        the grille, through the interlocked door, out.
+                        (world/corridors.js overwrites it with the port's
+                        own number; this is the same point.)
      CBZ.exitSignal     the lamp language every refusal in the prison uses
                         (red denied / gold on pace / green open), written on
                         whatever the building registers — the grille's
@@ -30,7 +31,7 @@
   const { WORLD } = CBZ;
   const EX = WORLD.exit.x, EZ = WORLD.exit.z;
   // the win point: through the grille, at the outer door
-  CBZ.EXIT = new THREE.Vector3(EX, 0, EZ + 5);
+  CBZ.EXIT = new THREE.Vector3(EX, 0, EZ + 10.2);
 
   if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;
   const GLOW = (CBZ.COL && CBZ.COL.GLOW) || 0x39ff88;
