@@ -149,7 +149,12 @@ check(F.s < M.s && K.s < F.s, `hand scale man ${M.s.toFixed(3)} > woman ${F.s.to
   check(h.geometry === H.bodyHandGeometry(1, "pistol", 1), "setHandPose swaps to the cached pistol geometry");
   const holdMiss = gcOf(h).distanceTo(tgt);
   console.log(`pistol grip centre -> weapon socket: ${holdMiss.toFixed(3)} rig units (relaxed ${restMiss.toFixed(3)})`);
-  check(holdMiss < restMiss && holdMiss < 0.06, `pistol grip closes on the weapon socket (miss ${holdMiss.toFixed(3)}, rest ${restMiss.toFixed(3)})`);
+  // The table hold only SLIDES down the forearm's own axis now (a sideways
+  // slide pushed the wrist stub out of the slim lofted wrist and through the
+  // watch); the rest of the way onto a real gun is the arm IK + grip frame in
+  // systems/gunhands.js, measured by tools/gun-hold-check.mjs.
+  check(holdMiss < restMiss && holdMiss < 0.10, `pistol grip closes on the weapon socket (miss ${holdMiss.toFixed(3)}, rest ${restMiss.toFixed(3)})`);
+  check(Math.abs(h.position.x) < 1e-9 && Math.abs(h.position.z) < 1e-9, "a hold pose keeps the hand on the forearm's axis (no sideways slide)");
   check(h.position.y <= restY + 1e-9 && restY - h.position.y <= h.userData.fit.maxDrop + 1e-9, "hand slides down its wrist, no further than the stub covers");
   check(r.skinSlots.hands[0].userData.handPose === "relaxed", "setHandPose('r') leaves the left alone");
   r.setHandPose("both", "fist");

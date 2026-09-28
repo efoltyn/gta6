@@ -367,7 +367,14 @@
      wrist until the closed hand's grip centre sits on that side's socket —
      the thirdPersonWeapon socket on the right, leftHand on the left — so the
      fingers close round the thing held rather than above it. The wrist stub
-     is long enough that the slide never opens a gap at the cuff.
+     is long enough that the slide never opens a gap at the cuff. The slide
+     is ALONG the forearm only (sideways it pushed the stub out through the
+     slim wrist and a watch).
+     A GUN is held properly instead: systems/actorweapons.js CBZ.gunHold puts
+     a hand sized to the part (fphands trigNN / holdNN) at the crease,
+     oriented ON the gun's own grip frame, and solves the arm to it with
+     charArmTo.wrist (below charArmTo) — the hand's local transform is then
+     the hold's, until the next setHandPose change resets it here.
 
      API: rig.setHandPose("l" | "r" | "both", pose)  pose = a fpHands.POSES name
           rig.setHandLod(0 | 1 | 2)                  (default 1)
@@ -409,12 +416,16 @@
       CBZ.fpHands.gripCentre(pose, _hgc);
       if (side < 0) _hgc.x = -_hgc.x;
       _hgc.multiplyScalar(fit.s).applyQuaternion(_hq);
-      // the target: the socket this side holds with (the weapon socket's
-      // offset on the right, the bare wrist socket on the left)
-      const tx = side > 0 ? 0.02 : 0, ty = fit.socketY + (side > 0 ? -0.03 : 0), tz = fit.socketZ + (side > 0 ? 0.06 : 0);
-      const y = Math.max(fit.wristY - fit.maxDrop, Math.min(fit.wristY, ty - _hgc.y));
-      const lim = fit.maxDrop * 0.6;
-      m.position.set(Math.max(-lim, Math.min(lim, tx - _hgc.x)), y, Math.max(-lim, Math.min(lim, tz - _hgc.z)));
+      // the target height: the socket this side holds with (the weapon
+      // socket's drop on the right, the bare wrist socket on the left)
+      const ty = fit.socketY + (side > 0 ? -0.03 : 0);
+      // ALONG THE FOREARM ONLY. The slide used to move the hand sideways too
+      // (up to 0.6 x maxDrop), which parked the wrist stub outside the slim
+      // lofted wrist and pushed it up through a wristwatch. The hand stays on
+      // the forearm's axis; a hold that needs the grip somewhere else moves
+      // the ARM there (charArmTo.wrist) and orients the hand on the thing
+      // held (systems/gunhands.js CBZ.gunHold) instead of shearing the hand.
+      m.position.set(0, Math.max(fit.wristY - fit.maxDrop, Math.min(fit.wristY, ty - _hgc.y)), 0);
     }
   }
   function makeBodyHand(side, fit, color) {
@@ -2207,6 +2218,205 @@
     ch.body.updateWorldMatrix(true, false);
     const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
     return (l1 + l2) * 0.985 * s;
+  };
+  /* ---- charArmTo.wrist — PUT THE WRIST THERE, WITH THE FOREARM THAT WAY ----
+     charArmTo lands the SOCKET (a point out by the fingertips) and fixes the
+     shoulder's twist at zero, so the elbow goes wherever that closed form puts
+     it. A hand that has to actually hold something needs the other two
+     things: the WRIST CREASE on a point (the hand hangs from the crease, so
+     that is the joint a grip is solved to), and the FOREARM arriving from the
+     direction the hand wants it — a wrist only bends so far, and a support
+     hand under a handguard wants its forearm coming up from below-behind,
+     not across at whatever angle the swivel happened to be.
+
+     Two bones, full 3D: the elbow is the point on the reach circle nearest
+     the IDEAL elbow (wrist + fore x forearm length), biased DOWN and OUT on
+     the arm's own side so an elbow never flips up or crosses the midline;
+     then the shoulder takes the whole rotation (swing AND twist, so the
+     bicep faces the bend the way a real one does) and the elbow the hinge.
+     Shoulder protraction for out-of-reach targets as charArmTo.
+
+       charArmTo.wrist(ch, worldPoint, arm, fore, k)
+         fore  world unit vector, wrist -> elbow, or null for "any, elbow down"
+       Returns the residual metres between the crease and the target. */
+  const _awT = new THREE.Vector3(), _awD = new THREE.Vector3(), _awE = new THREE.Vector3();
+  const _awU = new THREE.Vector3(), _awF = new THREE.Vector3(), _awP = new THREE.Vector3();
+  const _awDef = new THREE.Vector3(), _awX = new THREE.Vector3(), _awY = new THREE.Vector3();
+  const _awZ = new THREE.Vector3(), _awM = new THREE.Matrix4(), _awQ = new THREE.Quaternion();
+  const _awPQ = new THREE.Quaternion(), _awW = new THREE.Vector3();
+  function perpNorm(v, axis) {
+    v.addScaledVector(axis, -v.dot(axis));
+    const l = v.length();
+    if (l < 1e-6) return false;
+    v.multiplyScalar(1 / l);
+    return true;
+  }
+  // the chest (+ waist) box in the arms' parent frame, cached per rig
+  function armChestBox(ch) {
+    if (ch._armChest !== undefined) return ch._armChest;
+    const slots = ch.skinSlots && ch.skinSlots.torso;
+    let box = null;
+    if (slots && slots.length && ch.parts && ch.parts.la) {
+      const parent = ch.parts.la.parent;
+      const b = new THREE.Box3(), m = new THREE.Matrix4();
+      box = new THREE.Box3();
+      for (let i = 0; i < slots.length; i++) {
+        const mesh = slots[i];
+        if (!mesh || !mesh.geometry) continue;
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        m.identity();
+        let o = mesh;
+        for (; o && o !== parent; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
+        if (o !== parent) continue;
+        box.union(b.copy(mesh.geometry.boundingBox).applyMatrix4(m));
+      }
+      if (box.isEmpty()) box = null;
+      else box.expandByScalar(0.04);
+    }
+    ch._armChest = box;
+    return box;
+  }
+  const _acE = new THREE.Vector3(), _acX = new THREE.Vector3(), _acP = new THREE.Vector3();
+  // samples of the elbow + forearm inside the box, elbow swung th round its circle
+  function armInChest(box, S, dir, a, h, pole, th, W) {
+    _acX.crossVectors(dir, pole);
+    _acE.copy(S).addScaledVector(dir, a)
+      .addScaledVector(pole, h * Math.cos(th)).addScaledVector(_acX, h * Math.sin(th));
+    let n = 0;
+    for (let i = 0; i <= 5; i++) {
+      _acP.copy(_acE).lerp(W, i / 6);
+      if (box.containsPoint(_acP)) n++;
+    }
+    return n;
+  }
+  charArmTo.wrist = function (ch, worldPoint, arm, fore, k) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const parent = part && part.parent;
+    if (!P || !low || !parent || !worldPoint) return null;
+    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (blend <= 0) return null;
+    const cap = part.userData.cap;
+    const l1 = Math.max(0.12, -low.position.y);
+    const l2 = Math.max(0.10, -((cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo)));
+    parent.updateWorldMatrix(true, false);
+    _awT.copy(worldPoint);
+    parent.worldToLocal(_awT);
+    // protraction, as charArmTo
+    const rest = part.userData._armRestZ != null ? part.userData._armRestZ : 0;
+    let push = Math.hypot(_awT.x - part.position.x, _awT.y - part.position.y, _awT.z - rest) - (l1 + l2) * 0.985;
+    push = Math.max(0, Math.min(0.24, push));
+    part.position.z += (rest + push - part.position.z) * blend;
+    // direction and (reachable) distance shoulder -> wrist
+    _awD.subVectors(_awT, part.position);
+    const d0 = _awD.length();
+    if (d0 < 1e-5) return null;
+    _awD.multiplyScalar(1 / d0);
+    const d = Math.max(Math.abs(l1 - l2) + 0.04, Math.min((l1 + l2) * 0.999, d0));
+    // the pole: toward the ideal elbow, biased down and out on this arm's side
+    const out = part.position.x >= 0 ? 1 : -1;
+    _awDef.set(out * 0.55, -1, -0.25);
+    const defOk = perpNorm(_awDef, _awD);
+    let poleOk = false;
+    if (fore) {
+      parent.getWorldQuaternion(_awPQ);
+      _awP.copy(fore).applyQuaternion(_awPQ.invert()).normalize();
+      _awP.multiplyScalar(l2).add(_awT).sub(part.position);        // ideal elbow, from the shoulder
+      poleOk = perpNorm(_awP, _awD);
+      if (poleOk && defOk) {
+        _awP.addScaledVector(_awDef, 0.35);
+        poleOk = perpNorm(_awP, _awD);
+      }
+    }
+    if (!poleOk) {
+      if (defOk) _awP.copy(_awDef);
+      else { _awP.set(0, 0, -1); if (!perpNorm(_awP, _awD)) _awP.set(1, 0, 0); }
+    }
+    // the elbow on the reach circle, toward the pole
+    const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+    _awW.copy(part.position).addScaledVector(_awD, d);
+    /* NOT THROUGH THE CHEST. A forearm led in along a hand on a gun held at
+       the sternum would have its elbow INSIDE the torso (the ideal elbow is
+       straight back down the bore). Walk the elbow round its circle, the
+       least way from the pole, until neither it nor the forearm is inside
+       the chest/waist box (margin 4 cm). */
+    const box = armChestBox(ch);
+    if (box && h > 1e-4 && armInChest(box, part.position, _awD, a, h, _awP, 0, _awW) > 0) {
+      _awX.crossVectors(_awD, _awP);
+      let best = 0, bestScore = Infinity;
+      for (let i = 1; i <= 12; i++) {
+        for (let s = -1; s <= 1; s += 2) {
+          const th = s * i * Math.PI / 12;
+          const sc = armInChest(box, part.position, _awD, a, h, _awP, th, _awW) * 10 + i;
+          if (sc < bestScore) { bestScore = sc; best = th; }
+        }
+        if (bestScore < 10) break;
+      }
+      // the boundary, not the 15° step: refine between the last blocked and
+      // the first clear angle, so the elbow moves continuously with its input
+      if (bestScore < 10 && best !== 0) {
+        let lo = best - Math.sign(best) * Math.PI / 12, hi = best;
+        for (let k = 0; k < 6; k++) {
+          const mid = (lo + hi) / 2;
+          if (armInChest(box, part.position, _awD, a, h, _awP, mid, _awW) > 0) lo = mid; else hi = mid;
+        }
+        best = hi;
+      }
+      _awP.multiplyScalar(Math.cos(best)).addScaledVector(_awX, Math.sin(best)).normalize();
+    }
+    _awE.copy(part.position).addScaledVector(_awD, a).addScaledVector(_awP, h);
+    _awU.subVectors(_awE, part.position).normalize();                              // upper arm
+    _awW.copy(part.position).addScaledVector(_awD, d);
+    _awF.subVectors(_awW, _awE).normalize();                                       // forearm
+    // shoulder frame: -Y down the upper arm, +Z the side the forearm bends to
+    _awY.copy(_awU).negate();
+    _awZ.copy(_awF);
+    if (!perpNorm(_awZ, _awU)) { _awZ.copy(_awP).negate(); perpNorm(_awZ, _awU); }
+    _awX.crossVectors(_awY, _awZ);
+    _awM.makeBasis(_awX, _awY, _awZ);
+    _awQ.setFromRotationMatrix(_awM);
+    const e = -Math.acos(Math.max(-1, Math.min(1, _awU.dot(_awF))));
+    if (blend >= 1) part.quaternion.copy(_awQ);
+    else part.quaternion.slerp(_awQ, blend);
+    low.rotation.set(low.rotation.x + (e - low.rotation.x) * blend,
+      low.rotation.y * (1 - blend), low.rotation.z * (1 - blend));
+    // residual, measured off the real crease (ancestors only: the arm's own
+    // subtree — hand, socket, a whole gun — is not walked for one point)
+    low.updateWorldMatrix(true, false);
+    _awW.set(0, -l2, 0);
+    low.localToWorld(_awW);
+    return _awW.distanceTo(worldPoint);
+  };
+  // how many samples of this arm's elbow->crease run inside the chest/waist
+  // box itself (no margin) — a solve that has a choice can prefer 0
+  const _icA = new THREE.Vector3(), _icB = new THREE.Vector3();
+  charArmTo.inChest = function (ch, arm) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const mb = low && armChestBox(ch);
+    if (!mb) return 0;
+    const box = ch._armChestRaw || (ch._armChestRaw = mb.clone().expandByScalar(-0.04));
+    const cap = part.userData.cap;
+    const parent = part.parent;
+    low.updateWorldMatrix(true, false);
+    parent.updateWorldMatrix(true, false);
+    _icA.set(0, 0, 0); low.localToWorld(_icA); parent.worldToLocal(_icA);
+    _icB.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : -0.26, 0); low.localToWorld(_icB); parent.worldToLocal(_icB);
+    let n = 0;
+    for (let i = 0; i <= 6; i++) { if (box.containsPoint(_acP.copy(_icA).lerp(_icB, i / 6))) n++; }
+    return n;
+  };
+  // the wrist crease of this arm, world
+  charArmTo.crease = function (ch, arm, out) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    if (!low) return null;
+    const cap = part.userData.cap;
+    const P = ch.profile || {};
+    low.updateWorldMatrix(true, false);
+    return low.localToWorld(out.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo), 0));
   };
   CBZ.charArmTo = charArmTo;
 
