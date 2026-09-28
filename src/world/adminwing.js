@@ -82,6 +82,7 @@
   const { addBox } = CBZ;
   const ROOT = CBZ.prisonRoot || CBZ.scene;
   const PD = CBZ.prisonDress || null;          // world/cafeteria.js; degrade-safe
+  const HALF = Math.PI / 2;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
@@ -331,11 +332,28 @@
 
   // ---- RECORDS: the key board. Every door in this prison hangs here, and
   //      the one empty hook is the wing's own small story.
+  //      It stood 9 cm off the wall with its fourteen "keys" (gold sticks)
+  //      drawn BEHIND it, in the gap. Now it is on the wall: a ply board in a
+  //      steel edge, labelled hook pins, a ring and a key on every hook but
+  //      one, each with its coloured tag.
   (function keyBoard() {
-    addBox(-7.35, 2.0, -55.0, 0.12, 1.5, 3.2, 0x2a2f38, { cast: false });
-    for (let i = 0; i < 14; i++)
-      addBox(-7.24, 2.42 - ((i / 7) | 0) * 0.62, -56.3 + (i % 7) * 0.42, 0.05, 0.22, 0.05,
-        i === 9 ? 0x2a2f38 : 0xd9b64c, { cast: false });
+    if (!PD || !PD.Paint) return;
+    const WX = -7.2, V = new PD.Paint();               // the records side of the partition; front faces -x
+    V.box(-0.03, 0, 0, 0.05, 1.5, 3.2, 0x6a563c);                                     // board
+    for (const s2 of [-1, 1]) {
+      V.box(-0.035, s2 * 0.77, 0, 0.06, 0.04, 3.28, 0x5b6470);                         // steel edge
+      V.box(-0.035, 0, s2 * 1.62, 0.06, 1.58, 0.04, 0x5b6470);
+    }
+    for (let i = 0; i < 14; i++) {
+      const y = 0.42 - ((i / 7) | 0) * 0.62, z = -1.3 + (i % 7) * 0.42;
+      V.box(-0.058, y + 0.08, z, 0.004, 0.04, 0.12, 0xe8e2d2);                           // the hook's label
+      V.cyl(-0.085, y, z, 0.006, 0.006, 0.06, 0x9aa3ad, 6, 0, HALF);                     // pin
+      if (i === 9) continue;                                                               // the empty hook
+      V.add(new THREE.TorusGeometry(0.022, 0.003, 4, 12).rotateY(HALF).translate(-0.1, y - 0.025, z), 0x9aa3ad);
+      V.box(-0.1, y - 0.085, z, 0.004, 0.07, 0.024, 0xc9a44a);                            // key
+      V.box(-0.098, y - 0.065, z + 0.03, 0.004, 0.05, 0.035, [0xc94d3a, 0x3a6ec9, 0xd9d4c8, 0x3aa06a][i % 4]);   // tag
+    }
+    V.mesh(WX, 2.0, -55.0);
   })();
 
   // ---- STAFF ROOM: the muster board, and the schedule as an OBJECT.
@@ -347,7 +365,20 @@
     // the wall clock. A prison runs on it; systems/prisonschedule.js drives
     // the hands below, which is the only place in this build where the time
     // of day is DRAWN rather than merely obeyed.
+    // a ROUND school clock (it was a square white board): white dial,
+    // black bezel, twelve hour marks, the hub the hands turn on
     const face = addBox(-6.75, 2.45, -53.0, 0.09, 0.62, 0.62, 0xf0ece2, { cast: false });
+    if (PD && PD.Paint) {
+      const C = new PD.Paint();
+      C.cyl(0, 0, 0, 0.29, 0.29, 0.06, 0xf0ece2, 32, 0, HALF);
+      C.add(new THREE.TorusGeometry(0.3, 0.028, 6, 32).rotateY(HALF).translate(0.012, 0, 0), 0x1a1d22);
+      for (let i = 0; i < 12; i++) {
+        const a = i * Math.PI / 6, big = i % 3 === 0;
+        C.box(0.032, Math.cos(a) * 0.24, Math.sin(a) * 0.24, 0.004, big ? 0.06 : 0.035, big ? 0.018 : 0.01, 0x1a1d22, 0);
+      }
+      C.cyl(0.05, 0, 0, 0.018, 0.018, 0.04, 0x1a1d22, 10, 0, HALF);
+      face.geometry.dispose(); face.geometry = C.geometry(); face.material = PD.vcMat();
+    }
     const hh = addBox(-6.68, 2.45, -53.0, 0.03, 0.1, 0.34, 0x1a1d22, { cast: false });
     const mh = addBox(-6.68, 2.45, -53.0, 0.03, 0.06, 0.52, 0x1a1d22, { cast: false });
     hh.userData.mover = true; mh.userData.mover = true; face.userData.mover = true;
@@ -379,11 +410,26 @@
     // of every warden's office ever photographed
     addBox(19.66, 1.95, -52.6, 0.03, 1.0, 1.6, 0x2c3f6b, { cast: false });          // flag, framed flat
     addBox(19.64, 1.95, -52.6, 0.012, 0.34, 0.6, 0xd9b64c, { cast: false });
-    addBox(19.66, 1.8, -55.6, 0.04, 0.62, 0.48, 0x6b5636, { cast: false });          // the commission
-    addBox(19.635, 1.8, -55.6, 0.012, 0.5, 0.36, 0xefe8d6, { cast: false });
-    // a decanter set on the sideboard, because he is that kind of warden
-    addBox(9.6, 1.02, -56.4, 0.22, 0.34, 0.22, 0x8a6a2c, { cast: false });
-    addBox(9.95, 0.94, -56.4, 0.12, 0.18, 0.12, 0xc9d6dd, { cast: false });
+    // (the commission hangs in the NEAR third: the planner's sideboard or
+    // locker can take the far third of this wall and would bury it)
+    addBox(19.66, 1.8, -50.7, 0.04, 0.62, 0.48, 0x6b5636, { cast: false });          // the commission
+    addBox(19.635, 1.8, -50.7, 0.012, 0.5, 0.36, 0xefe8d6, { cast: false });
+    /* a decanter set ON the sideboard, because he is that kind of warden. It
+       was two brown/grey boxes at a typed (9.6, -56.4) that is not where the
+       planner puts the sideboard — they hung in the air in the middle of the
+       room. Now they stand on the sideboard's second board, wherever the
+       plan put it, or are not drawn. */
+    const sb = plans.office && plans.office.pieces && plans.office.pieces.filter((p) => p.tag === "sideboard")[0];
+    if (sb && PD && PD.Paint) {
+      const D = new PD.Paint(), top = 0.30 + (2.0 - 0.35) / 4 * 2 + 0.05;   // F.shelf's second board
+      D.cyl(-0.35, 0.09, 0, 0.075, 0.085, 0.18, 0x7a4f1c, 16);                          // the whisky in it
+      D.cyl(-0.35, 0.19, 0, 0.03, 0.075, 0.03, 0xb8c6cc, 16);                           // shoulder
+      D.cyl(-0.35, 0.24, 0, 0.025, 0.025, 0.07, 0xb8c6cc, 12);                          // neck
+      D.add(new THREE.SphereGeometry(0.035, 10, 8).translate(-0.35, 0.3, 0), 0xb8c6cc);  // stopper
+      D.box(-0.1, 0.012, 0, 0.36, 0.024, 0.22, 0x6a563c);                               // silver tray (dark wood)
+      for (const dz of [-0.06, 0.06]) D.cyl(-0.05 + dz, 0.07, dz, 0.035, 0.03, 0.08, 0xc9d6dd, 12, 0, 0, true);   // tumblers
+      D.mesh(sb.x, top, sb.z, sb.yaw);
+    }
   })();
 
   /* ==========================================================
@@ -416,6 +462,8 @@
     }
     const leaf = part(0.12, 1.72, 1.06, 0x39424e, -0.02, 0.95, 0.53);
     const dial = part(0.10, 0.26, 0.26, 0x9aa0a8, -0.10, 1.05, 0.72);
+    dial.geometry.dispose();
+    dial.geometry = new THREE.CylinderGeometry(0.12, 0.125, 0.06, 28).rotateZ(Math.PI / 2);   // a dial is round
     const spoke = part(0.11, 0.05, 0.22, 0x2b3038, -0.11, 1.05, 0.72);  // the dial's index mark
     part(0.09, 0.09, 0.42, 0x6b7480, -0.10, 0.68, 0.80);       // handle
     SAFE.dial = dial; SAFE.spoke = spoke;
@@ -456,9 +504,10 @@
     // hardware: a plate, a handle, and a lamp that is the lock's whole HUD
     const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.05), CBZ.mat(0x21262e, {}));
     plate.position.set(w - 0.26, 1.02, 0.075); pivot.add(plate);
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.06),
+    // the lock's LED: a 7 cm lens set in the plate, not a 12 cm glowing cube
+    const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 16).rotateX(HALF),
       new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-    lamp.position.set(w - 0.26, 1.42, 0.09); pivot.add(lamp);
+    lamp.position.set(w - 0.26, 1.18, 0.105); pivot.add(lamp);
     d.pivot = pivot; d.leaf = leaf; d.lamp = lamp;
     d.collider = { minX: cfg.x0, maxX: cfg.x1, minZ: cfg.z - 0.09, maxZ: cfg.z + 0.09, ref: leaf };
     CBZ.colliders.push(d.collider);

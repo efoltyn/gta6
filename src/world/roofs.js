@@ -66,6 +66,7 @@
   const { addBox } = CBZ;
   const WORLD = CBZ.WORLD || {};
   const PD = CBZ.prisonDress || null;
+  const KIT = CBZ.prisonKit || null;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PRISON_ROOFS_V1 == null) CBZ.CONFIG.PRISON_ROOFS_V1 = true;
@@ -111,32 +112,72 @@
        (core/quality.js) around (0,0,18) and the wing sits wholly inside it. */
     const slab = addBox(cx, top + T / 2, cz, w, T, d,
       cfg.deck != null ? cfg.deck : C_DECK, { solid: false, cast: !!cfg.cast, blockLOS: true });
+    if (KIT) KIT.skinBox(slab, "concrete", cfg.deck != null ? cfg.deck : C_DECK);
     // The underside is what you are standing under, and a roof deck colour
     // read from below is the wrong colour. One thin plate, 4 cm proud.
     // (skipped when the room below has its own finished ceiling: nobody sees it)
-    if (cfg.soffit !== false) addBox(cx, top - 0.02, cz, w - 0.1, 0.06, d - 0.1,
-      cfg.soffit != null ? cfg.soffit : C_SOFFIT, { cast: false, receive: false });
-    // parapet kerb — the silhouette a tower guard sees, and the thing that
-    // stops a flat slab reading as a lid dropped on a box
-    const K = 0.34;
-    addBox(cx, top + T + K / 2, z0 + 0.16, w, K, 0.32, C_KERB, { cast: false });
-    addBox(cx, top + T + K / 2, z1 - 0.16, w, K, 0.32, C_KERB, { cast: false });
-    addBox(x0 + 0.16, top + T + K / 2, cz, 0.32, K, d, C_KERB, { cast: false });
-    addBox(x1 - 0.16, top + T + K / 2, cz, 0.32, K, d, C_KERB, { cast: false });
-    if (cfg.plant !== false) {
-      // extract plant + a vent stack: what is actually on an institutional
-      // roof, and the reason the room below has ductwork in it
-      const px = cx + w * 0.22, pz = cz - d * 0.18;
-      addBox(px, top + T + 0.55, pz, 2.2, 1.1, 1.6, 0x7d8794, { cast: false });
-      addBox(px, top + T + 1.16, pz, 1.9, 0.14, 1.3, 0x5b6470, { cast: false });
-      addBox(cx - w * 0.26, top + T + 0.62, cz + d * 0.24, 0.55, 1.24, 0.55, 0x6b7480, { cast: false });
-      addBox(cx - w * 0.26, top + T + 1.30, cz + d * 0.24, 0.78, 0.14, 0.78, 0x515a66, { cast: false });
+    if (cfg.soffit !== false) {
+      const sof = addBox(cx, top - 0.02, cz, w - 0.1, 0.06, d - 0.1,
+        cfg.soffit != null ? cfg.soffit : C_SOFFIT, { cast: false, receive: false });
+      if (KIT) KIT.skinBox(sof, "concrete", cfg.soffit != null ? cfg.soffit : C_SOFFIT);
     }
+    // parapet kerb with a pressed-steel coping: the silhouette a tower guard
+    // sees, and the thing that stops a flat slab reading as a lid on a box
+    const K = 0.34, ky = top + T + K / 2;
+    if (KIT) {
+      const kerb = KIT.skin("concrete", C_KERB), cope = KIT.skin("galv", 0x9aa1a8);
+      KIT.stat(new THREE.BoxGeometry(w, K, 0.32), kerb, cx, ky, z0 + 0.16, { cast: false, uv: 2 });
+      KIT.stat(new THREE.BoxGeometry(w, K, 0.32), kerb, cx, ky, z1 - 0.16, { cast: false, uv: 2 });
+      KIT.stat(new THREE.BoxGeometry(0.32, K, d - 0.64), kerb, x0 + 0.16, ky, cz, { cast: false, uv: 2 });
+      KIT.stat(new THREE.BoxGeometry(0.32, K, d - 0.64), kerb, x1 - 0.16, ky, cz, { cast: false, uv: 2 });
+      KIT.stat(new THREE.BoxGeometry(w + 0.04, 0.03, 0.38), cope, cx, ky + K / 2 + 0.015, z0 + 0.16, { cast: false });
+      KIT.stat(new THREE.BoxGeometry(w + 0.04, 0.03, 0.38), cope, cx, ky + K / 2 + 0.015, z1 - 0.16, { cast: false });
+      KIT.stat(new THREE.BoxGeometry(0.38, 0.03, d - 0.7), cope, x0 + 0.16, ky + K / 2 + 0.015, cz, { cast: false });
+      KIT.stat(new THREE.BoxGeometry(0.38, 0.03, d - 0.7), cope, x1 - 0.16, ky + K / 2 + 0.015, cz, { cast: false });
+    } else {
+      addBox(cx, ky, z0 + 0.16, w, K, 0.32, C_KERB, { cast: false });
+      addBox(cx, ky, z1 - 0.16, w, K, 0.32, C_KERB, { cast: false });
+      addBox(x0 + 0.16, ky, cz, 0.32, K, d, C_KERB, { cast: false });
+      addBox(x1 - 0.16, ky, cz, 0.32, K, d, C_KERB, { cast: false });
+    }
+    if (cfg.plant !== false && KIT) plant(cx + w * 0.22, cz - d * 0.18, cx - w * 0.26, cz + d * 0.24, top + T);
     const rec = { id: cfg.id || "room", x0: x0, x1: x1, z0: z0, z1: z1, top: top, mesh: slab, lights: 0 };
     laid.push(rec);
     return rec;
   }
   CBZ.prisonRoof = prisonRoof;
+  CBZ.prisonRoofs = laid;       // read-only: where a searchlight pool lands on a roof (entities/searchlight.js)
+  CBZ.prisonRoofT = T;
+
+  /* ROOFTOP PLANT. It was a 2.2 x 1.1 x 1.6 grey box with a lid, and a 55 cm
+     square post with a cap: two boxes, seen from every tower. Now a packaged
+     air handler on its roof curb (a louvred intake face, an access door with
+     two handles, twin condenser fans in guarded shrouds on the top) and a
+     round galvanised extract stack with a conical rain cap on three stays. */
+  function plant(px, pz, sx, sz, deck) {
+    const casing = KIT.skin("steel", 0xb9bec2), dark = KIT.skin("steel", 0x2b2f34, 0.6);
+    const galv = KIT.skin("galv", 0xb4bcc4), curb = KIT.skin("galv", 0x8e959c);
+    const louvre = KIT.skin("roller", 0x9aa0a6), guard = KIT.skin("grating", 0x3a3f45);
+    KIT.stat(new THREE.BoxGeometry(2.3, 0.2, 1.7), curb, px, deck + 0.1, pz, { cast: false });
+    KIT.stat(new THREE.BoxGeometry(2.2, 1.0, 1.6), casing, px, deck + 0.7, pz, {});
+    KIT.stat(new THREE.BoxGeometry(2.24, 0.05, 1.64), dark, px, deck + 1.215, pz, { cast: false });        // drip edge
+    KIT.stat(new THREE.BoxGeometry(0.9, 0.7, 0.01), louvre, px - 0.5, deck + 0.7, pz + 0.805, { cast: false });   // intake
+    KIT.stat(new THREE.BoxGeometry(0.7, 0.8, 0.01), casing, px + 0.55, deck + 0.7, pz + 0.806, { cast: false });  // access door
+    for (const hy of [0.45, 0.95]) KIT.stat(new THREE.BoxGeometry(0.03, 0.1, 0.03), dark, px + 0.82, deck + hy, pz + 0.82, { cast: false });
+    for (const s of [-1, 1]) {
+      KIT.stat(new THREE.CylinderGeometry(0.42, 0.42, 0.14, 20, 1, true), dark, px + s * 0.52, deck + 1.31, pz, { cast: false });
+      KIT.stat(new THREE.CircleGeometry(0.42, 20), guard, px + s * 0.52, deck + 1.37, pz, { rx: -Math.PI / 2, cast: false });
+      KIT.stat(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 10), dark, px + s * 0.52, deck + 1.38, pz, { cast: false });   // fan hub
+    }
+    // extract stack
+    KIT.stat(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 16), curb, sx, deck + 0.06, sz, { cast: false });
+    KIT.stat(new THREE.CylinderGeometry(0.16, 0.16, 1.3, 14), galv, sx, deck + 0.77, sz, {});
+    KIT.stat(new THREE.ConeGeometry(0.3, 0.18, 16), galv, sx, deck + 1.66, sz, { cast: false });
+    for (let i = 0; i < 3; i++) {
+      const a = i * Math.PI * 2 / 3;
+      KIT.tube(sx + Math.cos(a) * 0.15, deck + 1.36, sz + Math.sin(a) * 0.15, sx + Math.cos(a) * 0.2, deck + 1.6, sz + Math.sin(a) * 0.2, 0.008, galv, { cast: false });
+    }
+  }
 
   /* ==========================================================
      2. THE ROOMS. Rect comes from the room's OWN shell record when it

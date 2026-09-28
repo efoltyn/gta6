@@ -29,8 +29,6 @@
     door: { side: "E", center: 14, width: 3.4 },
   });
 
-  // sign over the door
-  addBox(-19, 5.4, 14, 0.2, 0.9, 3.2, 0xc94d3a, { cast: false });
 
   // One-line pipe into city/propuse.js's seat registry, load-order-proof.
   // `cushion` = the seat top ABOVE the floor (propuse's 7th `geom` argument).
@@ -61,7 +59,10 @@
     const S = CBZ.prisonRoot || CBZ.scene;
     const K = {};
     const h01 = CBZ.hash01 || function () { return 0.5; };
+    // a face is "x+" | "x-" | "z+" | "z-", or an {x, z} unit vector for a
+    // wall that is not on the axes (world/corridorkit.js's sally ports)
     function nrm(face) {
+      if (face && typeof face === "object") return [face.x || 0, face.z || 0];
       return face === "x+" ? [1, 0] : face === "x-" ? [-1, 0]
         : face === "z+" ? [0, 1] : [0, -1];
     }
@@ -187,20 +188,109 @@
     // TWO cage bars, not three: this fitting is placed a dozen times across
     // the compound, so one box saved here is a dozen off the frame budget,
     // and at 3.6 m a third bar is a pixel.
+    /* ---- PAINTED MERGE: many small parts in their own colours, ONE mesh on
+       one shared vertex-colour material. For the props that are several
+       colours at once (a mop bucket, a vending machine, a lamp's housing)
+       and would otherwise be a heap of separately coloured boxes. Build in
+       the prop's LOCAL frame, then .mesh(x, y, z, ry) or .geometry() to swap
+       into a mesh something else already owns (a pushable's part). */
+    let VC_MAT = null;
+    function vcMat() {
+      if (!VC_MAT) VC_MAT = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+      return VC_MAT;
+    }
+    function Paint() { this.g = []; }
+    Paint.prototype.add = function (g, color) {
+      if (g.index) { const t = g.toNonIndexed(); g.dispose(); g = t; }
+      for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k);
+      const n = g.attributes.position.count, c = new THREE.Color(color), a = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+      g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+      this.g.push(g); return this;
+    };
+    Paint.prototype.box = function (x, y, z, w, h, d, color, ry) {
+      const g = new THREE.BoxGeometry(w, h, d);
+      if (ry) g.rotateY(ry);
+      g.translate(x, y, z); return this.add(g, color);
+    };
+    Paint.prototype.cyl = function (x, y, z, r0, r1, h, color, seg, rx, rz, open) {
+      const g = new THREE.CylinderGeometry(r0, r1, h, seg || 14, 1, !!open);
+      if (rx) g.rotateX(rx);
+      if (rz) g.rotateZ(rz);
+      g.translate(x, y, z); return this.add(g, color);
+    };
+    Paint.prototype.geometry = function () {
+      const BGU = THREE.BufferGeometryUtils;
+      if (!this.g.length || !BGU || !BGU.mergeBufferGeometries) return null;
+      const geo = this.g.length === 1 ? this.g[0] : BGU.mergeBufferGeometries(this.g, false);
+      if (this.g.length > 1) for (const q of this.g) q.dispose();
+      this.g = [];
+      return geo;
+    };
+    Paint.prototype.mesh = function (x, y, z, ry, o) {
+      const geo = this.geometry();
+      if (!geo) return null;
+      const m = new THREE.Mesh(geo, vcMat());
+      m.position.set(x || 0, y || 0, z || 0);
+      if (ry) m.rotation.y = ry;
+      m.castShadow = !!(o && o.cast); m.receiveShadow = true;
+      S.add(m);
+      return m;
+    };
+    K.Paint = Paint;
+    K.vcMat = vcMat;
+
+    /* THE PRISON WALL LAMP: a cast bulkhead, not a box with a box on it.
+       An oval cast back plate on the wall, the bezel ring, a domed prismatic
+       lens (the one lit part, and the mesh the lights-out schedule drives)
+       and a wire guard of three hoops and a spine over the dome. Two meshes
+       (housing + lens) where it was four boxes, and at night the thing that
+       glows is a lens IN a fitting, not a white block hung off a wall.
+       (x, y, z) is the plate's centre 6 cm off the wall face, as before.
+       o.reach moves the lit record's centre that far out along the face
+       (a flood over a door lights the step, not the wall). */
     K.lamp = function (x, y, z, face, o) {
       o = o || {};
       const n = nrm(face), nx = n[0], nz = n[1];
       const w = o.w || 0.46, hh = o.h || 0.30;
       const tone = o.tone != null ? o.tone : 0xffe9a8;
       const em = o.emissive != null ? o.emissive : 0xffcf66;
-      addBox(x, y, z, nx ? 0.12 : w, hh + 0.18, nx ? w : 0.12, 0x3c424d, { cast: false });
-      const glass = addBox(x + nx * 0.13, y, z + nz * 0.13, nx ? 0.14 : w - 0.1, hh, nx ? w - 0.1 : 0.14,
-        tone, { emissive: em, ei: o.ei != null ? o.ei : 0.85, cast: false });
-      for (const i of [-1, 1])
-        addBox(x + nx * 0.21, y + i * hh * 0.3, z + nz * 0.21,
-          nx ? 0.04 : w - 0.06, 0.035, nx ? w - 0.06 : 0.04, 0x252a32, { cast: false });
+      const ry = Math.atan2(nx, nz);                     // local +z = out of the wall
+      const P = new Paint();
+      const plate = new THREE.CylinderGeometry(0.5, 0.5, 1, 28);
+      plate.rotateX(HALF); plate.scale(w + 0.06, hh + 0.14, 0.05); plate.translate(0, 0, -0.035);
+      P.add(plate, 0x3c424d);
+      const bez = new THREE.TorusGeometry(0.5, 0.06, 6, 28);
+      bez.scale(w - 0.02, hh + 0.02, 0.4); bez.translate(0, 0, -0.004);
+      P.add(bez, 0x30353c);
+      const rx = (w - 0.1) / 2, rv = (hh - 0.04) / 2, dz = 0.125;
+      const wire = function (pts) {
+        return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.0075, 4, false);
+      };
+      for (const f of [-0.55, 0, 0.55]) {                 // three hoops across the dome
+        const k = Math.sqrt(1 - f * f), pts = [];
+        for (let i = 0; i <= 8; i++) {
+          const a = Math.PI * i / 8;
+          pts.push(new THREE.Vector3(Math.cos(a) * (rx * k + 0.014), f * rv, Math.sin(a) * dz * k + 0.012));
+        }
+        P.add(wire(pts), 0x252a32);
+      }
+      const spine = [];                                  // and the spine that ties them
+      for (let i = 0; i <= 8; i++) {
+        const a = Math.PI * i / 8;
+        spine.push(new THREE.Vector3(0, Math.cos(a) * (rv + 0.014), Math.sin(a) * dz + 0.012));
+      }
+      P.add(wire(spine), 0x252a32);
+      P.mesh(x, y, z, ry);
+      const glass = addBox(x, y, z, 0.1, 0.1, 0.1, tone, { emissive: em, ei: o.ei != null ? o.ei : 0.85, cast: false });
+      glass.geometry.dispose();
+      const dome = new THREE.SphereGeometry(0.5, 20, 8, 0, Math.PI * 2, 0, HALF);
+      dome.rotateX(HALF); dome.scale(w - 0.1, hh - 0.04, 0.22);
+      glass.geometry = dome;
+      glass.rotation.y = ry;
       // a wall lamp lights the metre or two around it, not the room
-      return fixture(glass, x, z, tone, em, o.r || 5.5, o.kind || "room");
+      const reach = o.reach || 0;
+      return fixture(glass, x + nx * reach, z + nz * reach, tone, em, o.r || 5.5, o.kind || "room");
     };
 
     // ---- fluorescent strip (2 meshes, 1 emissive) -------------------------
@@ -815,11 +905,27 @@
   const glass = addBox(LX + 0.34, TOP + 0.5, LZ, 0.012, 0.42, LL - 0.4, 0xd8f0f7, { cast: false, receive: false });
   glass.material.transparent = true; glass.material.opacity = 0.22; glass.material.depthWrite = false;
   steelSkin(addBox(LX + 0.18, TOP + 0.76, LZ, 0.36, 0.025, LL - 0.2, 0xd3d8dc, { cast: false }), 0xd3d8dc);
-  addBox(LX + 0.14, TOP + 0.735, LZ, 0.07, 0.02, LL - 0.8, 0xffc98a, { emissive: 0xd8762a, ei: 0.45, cast: false });
+  // the heat lamps under the shelf: on the kitchen's circuit, so the line
+  // does not glow orange all night in an empty hall
+  PD.fixture(addBox(LX + 0.14, TOP + 0.735, LZ, 0.07, 0.02, LL - 0.8, 0xffc98a, { emissive: 0xd8762a, ei: 0.45, cast: false }),
+    LX + 0.14, LZ, 0xffc98a, 0xd8762a, 2.5, "room");
   // head of the line: a tray cart with a stack on it, and the cutlery
-  steelSkin(addBox(LX, 0.45, 9.25, 0.7, 0.8, 0.5, 0xaab1b8, { solid: true }), 0xaab1b8);
-  PD.trayStack(LX, 0.87, 9.25, 6, 0xa8743f);
-  addBox(LX + 0.2, 1.0, 9.05, 0.22, 0.14, 0.14, 0x6b7480, { cast: false });
+  // a stainless tray cabinet on casters (the body is still one solid box, a
+  // cabinet is), its door, handle and plinth; the cutlery in a divided bin
+  // with the handles standing up, not a grey brick
+  steelSkin(addBox(LX, 0.47, 9.25, 0.7, 0.74, 0.5, 0xaab1b8, { solid: true, y0: 0, y1: 0.87 }), 0xaab1b8);
+  {
+    const C = new PD.Paint();
+    C.box(0.352, 0.02, 0, 0.004, 0.6, 0.44, 0x8b939b);                                   // door leaf
+    C.box(0.362, 0.18, 0.16, 0.02, 0.18, 0.025, 0x5a616a);                                // pull
+    C.box(0, -0.38, 0, 0.66, 0.02, 0.46, 0x3a3f44);                                      // base frame
+    for (const a of [-1, 1]) for (const b of [-1, 1]) C.cyl(a * 0.28, -0.415, b * 0.18, 0.04, 0.04, 0.03, 0x222428, 10, 0, HALF);
+    C.box(0.2, 0.43, -0.2, 0.24, 0.1, 0.16, 0x6b7480);                                   // cutlery bin
+    for (let i = 0; i < 9; i++)
+      C.box(0.13 + (i % 3) * 0.07, 0.51, -0.25 + ((i / 3) | 0) * 0.05, 0.012, 0.08, 0.02, 0xc8ced4);
+    C.mesh(LX, 0.47, 9.25);
+  }
+  PD.trayStack(LX - 0.08, 0.87, 9.3, 6, 0xa8743f);
   // the servers' wall: kitchen door, a closed pass-through shutter, a pan shelf
   (function serversWall() {
     const wx = WX0 + 0.02;
@@ -840,13 +946,26 @@
   // ---- 4. DISH RETURN + SERVICE END (north wall) ----------------------------
   steelSkin(addBox(-24.1, 0.45, 21.3, 2.6, 0.9, 0.8, 0xa8afb8, { solid: true }), 0xa8afb8);
   steelSkin(addBox(-24.1, 0.93, 21.3, 2.7, 0.04, 0.9, 0xd3d8dc, { cast: false }), 0xd3d8dc);
-  addBox(-25.1, 1.06, 21.45, 0.6, 0.24, 0.5, 0x2a2f38, { cast: false });              // return window
+  // the return hatch: an opening framed in stainless in the wall behind the
+  // counter, the dark of the scullery beyond it (it was a black box sitting
+  // on the counter top)
+  addBox(-25.1, 1.4, WZ1 - 0.012, 1.3, 0.62, 0.02, 0x15181c, { cast: false });
+  for (const s2 of [-1, 1]) steelSkin(addBox(-25.1 + s2 * 0.68, 1.4, WZ1 - 0.03, 0.06, 0.7, 0.05, 0xc3c9d0, { cast: false }), 0xc3c9d0);
+  steelSkin(addBox(-25.1, 1.73, WZ1 - 0.03, 1.42, 0.06, 0.05, 0xc3c9d0, { cast: false }), 0xc3c9d0);
   PD.trayStack(-23.4, 0.96, 21.3, 3, 0x8a7f6d);                                         // dirty trays
   for (const b of [[-26.0, 20.9, 0x2f6b3a], [-25.0, 20.0, 0x3c424d]]) {                 // waste barrels
     const d = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.32, 0.9, 12), CBZ.cmat(b[2]));
     d.position.set(b[0], 0.45, b[1]); d.castShadow = false; d.receiveShadow = true;
     (CBZ.prisonRoot || CBZ.scene).add(d);
-    const lid = addBox(b[0], 0.93, b[1], 0.78, 0.06, 0.78, 0x232a32, { cast: false });
+    // a round lid with a rolled rim, on a round bin (it was a 0.78 m SQUARE slab)
+    const lid = addBox(b[0], 0.93, b[1], 0.1, 0.1, 0.1, 0x232a32, { cast: false });
+    lid.geometry.dispose();
+    lid.geometry = new PD.Paint()
+      .cyl(0, 0, 0, 0.375, 0.385, 0.05, 0x232a32, 18)
+      .add(new THREE.TorusGeometry(0.38, 0.018, 5, 20).rotateX(HALF).translate(0, -0.02, 0), 0x1b2027)
+      .cyl(0, 0.04, 0, 0.05, 0.06, 0.03, 0x1b2027, 10)
+      .geometry();
+    lid.material = PD.vcMat();
     const bcol = { minX: b[0] - 0.36, maxX: b[0] + 0.36, minZ: b[1] - 0.36, maxZ: b[1] + 0.36, y0: 0, y1: 0.96, ref: d };
     if (CBZ.colliders) CBZ.colliders.push(bcol);
     // a wheelie bin half full of trays is ~22 kg and rolls when you walk into
@@ -857,13 +976,37 @@
     });
   }
   // mop bucket + wringer, parked where the wet floor is
-  const mopB = addBox(-22.6, 0.28, 20.2, 0.5, 0.44, 0.4, 0xe8b93c, { cast: false });
-  const mopW = addBox(-22.6, 0.58, 20.35, 0.44, 0.18, 0.16, 0x9aa3ad, { cast: false });
+  /* A janitor's mop bucket: a tapered yellow tub on four casters with the
+     water in it, the side-press wringer on its rim and the mop standing in
+     it. It was a yellow box with a grey box on it and a stick planted in the
+     floor beside it that stayed behind when the bucket was shoved. Same two
+     parts, footprint and collider; the mop now rides with the bucket. */
+  const mopB = addBox(-22.6, 0.28, 20.2, 0.1, 0.1, 0.1, 0xe8b93c, { cast: false });
+  const mopW = addBox(-22.6, 0.58, 20.35, 0.1, 0.1, 0.1, 0x9aa3ad, { cast: false });
+  mopB.geometry.dispose(); mopW.geometry.dispose();
+  {
+    const B = new PD.Paint(), Y0 = -0.28;                  // local: the tub mesh sits 0.28 up
+    B.cyl(0, Y0 + 0.27, 0, 0.23, 0.19, 0.36, 0xe8b93c, 18, 0, 0, true);                 // tub wall
+    B.cyl(0, Y0 + 0.095, 0, 0.19, 0.19, 0.02, 0xd9aa2e, 18);                             // floor
+    B.add(new THREE.CircleGeometry(0.215, 18).rotateX(-HALF).translate(0, Y0 + 0.36, 0), 0x6a6e5e);   // grey water
+    B.add(new THREE.TorusGeometry(0.23, 0.014, 5, 20).rotateX(HALF).translate(0, Y0 + 0.45, 0), 0xcfa12a);
+    for (const a of [-1, 1]) for (const b of [-1, 1]) {
+      B.cyl(a * 0.15, Y0 + 0.035, b * 0.15, 0.035, 0.035, 0.03, 0x222428, 10, 0, HALF);     // caster
+      B.box(a * 0.15, Y0 + 0.075, b * 0.15, 0.04, 0.04, 0.04, 0x55595e);
+    }
+    B.cyl(0, Y0 + 0.62, -0.09, 0.012, 0.012, 1.2, 0x9a7a4e, 8, 0.18);                    // the mop handle, leaning
+    B.cyl(0, Y0 + 0.2, -0.02, 0.1, 0.12, 0.16, 0xb9b6ad, 10);                            // its head, in the water
+    mopB.geometry = B.geometry(); mopB.material = PD.vcMat();
+    const W = new PD.Paint();                               // local: the wringer mesh sits 0.58 up, 0.15 back
+    W.box(0, -0.06, 0, 0.3, 0.16, 0.14, 0x3a3f44);                                       // press box
+    W.box(0, -0.06, 0.08, 0.26, 0.12, 0.02, 0x2c3035);
+    W.cyl(0.19, 0.12, 0, 0.012, 0.012, 0.5, 0x3a3f44, 6, 0, -0.5);                         // the lever
+    mopW.geometry = W.geometry(); mopW.material = PD.vcMat();
+  }
   if (CBZ.pushProp) CBZ.pushProp({
     parts: [mopB, mopW], x: -22.6, z: 20.2, hx: 0.25, hz: 0.22, y1: 0.68,
     mass: 16, kind: "mopbucket", solid: true, leash: 5.0, mode: "escape",
   });
-  PD.pipe(-22.6, 0.9, 20.1, 1.3, "y", 0.014, 0x9a7a4e);                                 // mop handle
   // the wet-floor A-frame beside it: a 2 kg pushable, not a walk-through
   const wfParts = [];
   for (const s of [-1, 1]) {
@@ -901,8 +1044,10 @@
     addBox(-19.34, 3.5, 16.9, 0.01, 0.11, 0.02, 0x2a2f38, { cast: false });
     addBox(-19.34, 3.45, 16.97, 0.01, 0.02, 0.15, 0x2a2f38, { cast: false });
   })();
-  // a doorway needs a head: roomShell's gap is full height
-  addBox(-19, 3.925, 14, 0.5, 2.05, 3.4, 0x8a929c, { cast: false });
+  // a doorway needs a head: roomShell's gap is full height. The head runs
+  // to the WALL TOP: it stopped at 4.95 and a blank red board 0.2 m thick
+  // (a "sign" with nothing on it) half-filled the 1 m hole left above it.
+  addBox(-19, 4.45, 14, 0.5, 3.1, 3.4, 0x8a929c, { cast: false });
   addBox(-19.3, 2.88, 14, 0.14, 0.16, 3.5, 0x6b7480, { cast: false });   // inside lintel nose
   addBox(-18.7, 2.88, 14, 0.14, 0.16, 3.5, 0x6b7480, { cast: false });   // yard-side nose
   PD.lamp(-18.69, 3.4, 16.9, "x+");                                       // over the door, outside

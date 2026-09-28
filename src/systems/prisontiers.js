@@ -523,8 +523,10 @@
     for (let i = 0; i < paint.length; i++) {
       const m = paint[i].material;
       m.color.setHex(t.color);
-      if (m.emissive) m.emissive.setHex(t.color);
-      m.emissiveIntensity = 0.25;
+      // PAINT DOES NOT GLOW: at 0.25 emissive the 29 m stripe over the tier
+      // read as a floating green bar in the dark cell house at night
+      if (m.emissive) m.emissive.setHex(0x000000);
+      m.emissiveIntensity = 0;
     }
     for (let i = 0; i < barSlots.length; i++) {
       const m = barSlots[i].material;

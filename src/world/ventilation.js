@@ -37,7 +37,7 @@
    where a building's services go: the kitchen extract, the laundry/workshop
    riser, the staff side, and the one maintenance crawl the cell wing already
    has an alcove for (world/cellblock.js's WEST_ROW leaves a utility recess at
-   z = -31 precisely so this route can never be locked away).
+   z[-34.5,-30.9] precisely so this route can never be locked away).
 
      T1  Cell Block utility alcove  <->  Armory duct        (the gun-room spine)
      T2  Kitchen extract            <->  Staff lounge riser
@@ -51,8 +51,12 @@
    junction would have to ask you which way to go — and a menu inside a
    crawlspace is a UI, not a place.
 
-   REVERT: CBZ.CONFIG.PRISON_VENTS_V2 = false restores the original four
-   hard-coded grates, byte for byte, exit-point bug included.
+   THE GRILLE (2026-09-28). The mesh used to stand 16 cm PROUD of the wall
+   (its centre pushed along the INWARD normal, i.e. into the room) with a
+   black "throat" box 30 cm out in front of it: from inside the room it read
+   as a black 1 m cube parked against the wall. Now it is a real return-air
+   grille set in the wall: a 12 mm steel frame, a dark void plane a hair off
+   the masonry, angled louvre blades and four screws, merged by the kit.
    Ratchet: CBZ.ventAudit() — `anchored` (grates solved off a real room rect)
    may only go UP, and `outsideDest` (crawl points that do not land inside the
    room they are named after) is pinned at 0.
@@ -62,51 +66,10 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.scene) return;
   const scene = CBZ.prisonRoot || CBZ.scene;
-  const { addBox } = CBZ;
-
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_VENTS_V2 == null) CBZ.CONFIG.PRISON_VENTS_V2 = true;
 
   CBZ.vents = CBZ.vents || [];   // world/prisonkit.js's tower ladders are vents too, registered before this parses
   const solved = [];        // every grate this file placed, for the audit
-
-  /* ----------------------------------------------------------
-     LEGACY — the original file, kept callable so the flag is a true
-     one-line revert and the before-state stays inspectable.
-     ---------------------------------------------------------- */
-  function buildLegacy() {
-    function makeGrate(x, y, z, ax, name) {
-      const w = ax === "x" ? 0.1 : 1.2;
-      const d = ax === "x" ? 1.2 : 0.1;
-      addBox(x, y, z, w, 1.2, d, 0x515a66, { solid: false, cast: false });
-      for (let i = -2; i <= 2; i++) {
-        const sx = ax === "x" ? x : x + i * 0.22;
-        const sz = ax === "x" ? z + i * 0.22 : z;
-        addBox(sx, y, sz, ax === "x" ? 0.12 : 0.14, 1.0, 0.08, 0x1a1d22, { cast: false });
-      }
-      const vent = {
-        x: x + (ax === "x" ? (x < 0 ? 1.2 : -1.2) : 0),
-        z: z + (ax === "z" ? (z < 0 ? 1.2 : -1.2) : 0),
-        y: 0.1, name: name, dest: null,
-      };
-      CBZ.vents.push(vent);
-      return vent;
-    }
-    const cellVent = makeGrate(-15.4, 0.8, -31, "x", "Cell Block Aisle");
-    const armoryVent = makeGrate(18.6, 0.8, -4.5, "x", "Locked Armory");
-    cellVent.dest = armoryVent; armoryVent.dest = cellVent;
-    const cafeVent = makeGrate(-18.6, 0.8, 8.5, "x", "Mess Hall");
-    const loungeVent = makeGrate(18.6, 0.8, 41.5, "x", "Staff Lounge");
-    cafeVent.dest = loungeVent; loungeVent.dest = cafeVent;
-  }
-
-  if (CBZ.CONFIG.PRISON_VENTS_V2 === false) {
-    buildLegacy();
-    CBZ.ventAudit = function () {
-      return { v2: false, vents: CBZ.vents.length, anchored: 0, outsideDest: 0, hubs: 0, rooms: 0, refused: 0 };
-    };
-    return;
-  }
+  const K = CBZ.prisonKit || null;
 
   /* ==========================================================
      1. THE ROOMS. Shell records first (they carry the door, which is the one
@@ -156,14 +119,12 @@
         S = +z, W = -x, E = +x) and `at` is the coordinate ALONG that wall.
         Everything else — plane, facing, crawl point — is derived.
      ========================================================== */
-  const GH = 1.05;              // grate height (a duct a man crawls, not a door)
+  const GH = 0.90;              // grate height (a duct a man crawls, not a door)
   const GW = 1.20;              // grate width
-  const GY = 0.62;              // centre height: LOW on the wall, where a duct is
+  const GY = 0.66;              // centre: sill clear of the skirting (0.16), head under the dado rail (1.26)
   const IN = 1.35;              // how far inside the room the crawl point lands
-  const WT = 0.16;              // how deep the grate sits into the masonry
 
-  const C_FRAME = 0x515a66, C_SLAT = 0x1a1d22, C_SCREW = 0x8b95a1;
-
+  const C_FRAME = 0x6b737c, C_VOID = 0x0b0d10;
   // the inward normal + the wall plane for one side of a rect
   function wall(room, side) {
     if (side === "W") return { px: +room.x0, pz: null, nx: 1, nz: 0, along: "z", a0: +room.z0, a1: +room.z1 };
@@ -202,26 +163,7 @@
     const gx = horiz ? (w.px + w.nx * ins) : a;
     const gz = horiz ? a : (w.pz + w.nz * ins);
 
-    // ---- the mesh. FLUSH: the frame's centre is pushed HALF ITS DEPTH into the
-    //      masonry along the inward normal, so its outer face is the wall face.
-    const fx = gx + w.nx * (WT / 2), fz = gz + w.nz * (WT / 2);
-    const fw = horiz ? WT : GW, fd = horiz ? GW : WT;
-    addBox(fx, GY, fz, fw, GH, fd, C_FRAME, { solid: false, cast: false });
-    // recessed dark throat behind the slats — what makes it read as a HOLE
-    addBox(gx + w.nx * (WT * 1.4), GY, gz + w.nz * (WT * 1.4),
-      horiz ? WT : GW - 0.16, GH - 0.14, horiz ? GW - 0.16 : WT, 0x0a0d11, { cast: false });
-    // ---- louvred slats, angled-looking (four thin bars) + four corner screws
-    for (let i = -2; i <= 2; i++) {
-      const sy = GY + i * 0.19;
-      if (Math.abs(sy - GY) > GH / 2 - 0.10) continue;
-      addBox(gx + w.nx * 0.03, sy, gz + w.nz * 0.03,
-        horiz ? 0.06 : GW - 0.14, 0.075, horiz ? GW - 0.14 : 0.06, C_SLAT, { cast: false });
-    }
-    for (const sa of [-1, 1]) for (const sb of [-1, 1]) {
-      const oa = sa * (GW / 2 - 0.12), ob = sb * (GH / 2 - 0.11);
-      addBox(gx + w.nx * 0.02 + (horiz ? 0 : oa), GY + ob, gz + w.nz * 0.02 + (horiz ? oa : 0),
-        horiz ? 0.05 : 0.07, 0.07, horiz ? 0.07 : 0.05, C_SCREW, { cast: false });
-    }
+    drawGrille(gx, gz, Math.atan2(w.nx, w.nz));
 
     // ---- THE CRAWL POINT. On the INWARD normal, inside the room. This is the
     //      line the old file got wrong on three grates out of four.
@@ -240,15 +182,50 @@
   }
   let refused = 0;
 
+  /* ONE GRILLE, drawn in a local frame (x along the wall, +z out of it into
+     the room) and turned onto the wall. All of it merged by the kit; nothing
+     here is solid (a grille in a wall is the wall). */
+  function drawGrille(gx, gz, ry) {
+    const frame = K ? K.skin("steel", C_FRAME) : CBZ.cmat(C_FRAME);
+    const voidM = K ? K.skin("steel", C_VOID, 0.95) : CBZ.cmat(C_VOID);
+    const put = (geo, lx, ly, lz, tilt, mat) => {
+      if (tilt) geo.rotateX(tilt);
+      geo.translate(lx, ly, lz);
+      if (K) K.stat(geo, mat, gx, GY, gz, { ry: ry, cast: false });
+      else { const m = new THREE.Mesh(geo, mat); m.position.set(gx, GY, gz); m.rotation.y = ry; scene.add(m); }
+    };
+    const FW = 0.05, FD = 0.02, P = 0.01;     // P: clear of a room dado (8 mm proud)
+    put(new THREE.PlaneGeometry(GW - FW, GH - FW), 0, 0, P + 0.002, 0, voidM);                     // the dark duct behind
+    put(new THREE.BoxGeometry(GW, FW, FD), 0, GH / 2 - FW / 2, P + FD / 2, 0, frame);               // frame: head
+    put(new THREE.BoxGeometry(GW, FW, FD), 0, -GH / 2 + FW / 2, P + FD / 2, 0, frame);              // sill
+    put(new THREE.BoxGeometry(FW, GH - 2 * FW, FD), -GW / 2 + FW / 2, 0, P + FD / 2, 0, frame);     // stiles
+    put(new THREE.BoxGeometry(FW, GH - 2 * FW, FD), GW / 2 - FW / 2, 0, P + FD / 2, 0, frame);
+    // louvre blades, 75 mm pitch, tipped 40 degrees so you see slots, not bars
+    const n = Math.floor((GH - 2 * FW) / 0.075);
+    for (let i = 0; i < n; i++) {
+      const y = -GH / 2 + FW + 0.0375 + i * 0.075;
+      put(new THREE.BoxGeometry(GW - 2 * FW, 0.07, 0.004), 0, y, P + 0.012, -0.7, frame);
+    }
+    // a centre mullion the blades sit in, and the four fixing screws
+    put(new THREE.BoxGeometry(0.02, GH - 2 * FW, 0.02), 0, 0, P + 0.01, 0, frame);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const g = new THREE.CylinderGeometry(0.009, 0.009, 0.006, 8); g.rotateX(Math.PI / 2);
+      put(g, sx * (GW / 2 - FW / 2), sy * (GH / 2 - FW / 2), P + FD + 0.003, 0, frame);
+    }
+  }
+
+
   /* ==========================================================
      3. THE THREE RUNS.
      ========================================================== */
   // T1 — THE SPINE. The cell wing's own utility alcove (cellblock.js WEST_ROW
-  //      leaves the recess at z = -31 for exactly this) into the armory. This
+  //      leaves the recess at z[-34.5,-30.9] for exactly this) into the armory. This
   //      is the keycard/gun-room chain's second door and the reason the owner
   //      ran the jail hundreds of times; it is the one run that must never be
   //      lockable, which is why it starts in an alcove and not in a cell.
-  const cellVent = grate("Cell Block Utility", ROOM.cell, "W", -31);
+  // -32.2: the middle of the alcove (z[-34.5,-30.9]); at -31 the 1.2 m grille
+  // ran into the B-1 partition. Clear of the mop basin at z -33.8.
+  const cellVent = grate("Cell Block Utility", ROOM.cell, "W", -32.2);
   const armoryVent = grate("Armory Duct", ROOM.armory, "W", -3.2);
   if (cellVent && armoryVent) { cellVent.dest = armoryVent; armoryVent.dest = cellVent; }
 
@@ -286,7 +263,6 @@
     let hubs = 0;
     perRoom.forEach(function (n) { if (n > 1) hubs++; });
     return {
-      v2: true,
       vents: solved.length,
       anchored: solved.length,          // every V2 grate is solved off a rect
       outsideDest: outside,             // MUST be 0

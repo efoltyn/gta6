@@ -288,7 +288,18 @@
     stat(new THREE.BoxGeometry(axis === "x" ? len : 0.2, 0.09, axis === "x" ? 0.2 : len), steelDark, x, y, z, { cast: false });
     stat(new THREE.BoxGeometry(axis === "x" ? len - 0.24 : 0.13, 0.05, axis === "x" ? 0.13 : len - 0.24), K.skin("lit"), x, y - 0.07, z, { cast: false });
   }
+  /* An outdoor fitting on the flood circuit. It was a dark box with a second,
+     UNROTATED 0.42 m glowing box stuck through its face (on an x-facing wall
+     it poked 21 cm out sideways): at night, a floating white brick. It is
+     the prison's one wall lamp now, CBZ.prisonDress.lamp — a cast bulkhead
+     with a domed lens and a guard — on the flood schedule, its lit record 3 m
+     out where the light lands. The sally ports are built from
+     world/corridors.js, after world/cafeteria.js has published the kit. */
   function cagedLamp(x, y, z, face) {
+    const PD = CBZ.prisonDress;
+    if (PD && PD.lamp) {
+      return PD.lamp(x, y, z, face, { w: 0.5, h: 0.32, tone: 0xfff4d2, emissive: 0xffd88a, r: 9, kind: "flood", reach: 3 });
+    }
     stat(new THREE.BoxGeometry(0.5, 0.28, 0.16), steelDark, x, y, z, { ry: Math.atan2(face.x, face.z), cast: false });
     const lamp = addBox(x + face.x * 0.05, y, z + face.z * 0.05, 0.42, 0.2, 0.2, 0x2b2b2b, { cast: false });
     lamp.userData.mover = true;
@@ -340,7 +351,7 @@
     }
     const sp = P(0, Z0 - 0.02);
     K.sign(cfg.label || "GATE", sp[0], 3.0, sp[1], 0.9, 0.34, D > 0 ? Math.PI : 0, "#f3f3ef", "#1f3a5f");
-    const lp = P(-2.2, Z0 - 0.1); cagedLamp(lp[0], 3.15, lp[1], faceIn);
+    const lp = P(-2.2, Z0 - 0.06); cagedLamp(lp[0], 3.15, lp[1], faceIn);
     const cp = P(2.4, Z0 - 0.2), cq = P(2.4, Z0 - 0.3);
     stat(new THREE.BoxGeometry(0.18, 0.18, 0.34), steelDark, cp[0], 3.3, cp[1], { ry: -0.5 * D, rx: 0.4, cast: false });
     stat(new THREE.SphereGeometry(0.16, 10, 8), K.skin("glass", 0x202830), cq[0], 3.3, cq[1], { cast: false });
@@ -351,9 +362,11 @@
       lining(r[0], r[1], r[2], r[3], CH);
     const fr = L(-IW, IW, IZ0, IZ1);
     stat(new THREE.BoxGeometry(fr[1] - fr[0], 0.06, fr[3] - fr[2]), K.skin("polished", 0x9a9fa6), (fr[0] + fr[1]) / 2, 0.03, (fr[2] + fr[3]) / 2, { uv: 2, cast: false });
-    addBox((fr[0] + fr[1]) / 2, CH + 0.08, (fr[2] + fr[3]) / 2, fr[1] - fr[0], 0.16, fr[3] - fr[2], 0xdedbd2, { cast: false });
+    K.skinBox(addBox((fr[0] + fr[1]) / 2, CH + 0.08, (fr[2] + fr[3]) / 2, fr[1] - fr[0], 0.16, fr[3] - fr[2], 0xdedbd2, { cast: false }), "concrete", 0xdedbd2);
     for (const lz of [IZ0 + 2.0, IZ0 + 4.6, 2.2, IZ1 - 1.6]) { const p = P(0, lz); strip(p[0], CH - 0.02, p[1], 3.6, "x"); }
-    for (const s of [-1, 1]) { const p = P(s * (IW - 0.3), 0); stat(new THREE.BoxGeometry(0.75, CH, 1.25), steelDark, p[0], CH / 2, p[1], {}); }
+    // the grille's jamb piers: block piers in the vestibule's own two-tone
+    // paint (they were two full-height black steel slabs either side of it)
+    for (const s of [-1, 1]) { const p = P(s * (IW - 0.3), 0); lining(p[0] - 0.375, p[0] + 0.375, p[1] - 0.625, p[1] + 0.625, CH); }
     CBZ.onUpdate(21.38, (function () { let done = false; return function () {
       if (done || !CBZ.prisonLights || !CBZ.prisonLights.rooms) return; done = true;
       CBZ.prisonLights.rooms.push({ id: cfg.id, x0: X - IW, x1: X + IW, z0: wz0, z1: wz1 });
@@ -373,7 +386,7 @@
     door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, h: 2.3, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
     const stp = P(0, Z1 + 0.6);
     const step = addBox(stp[0], 0.08, stp[1], 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
-    const olp = P(0, Z1 + 0.1); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
+    const olp = P(0, Z1 + 0.06); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
     // the booth
     if (cfg.booth !== null) {
       const side = cfg.booth === "W" ? -1 : 1;
@@ -393,8 +406,19 @@
       }
       stat(new THREE.BoxGeometry(0.02, 0.22, 0.34), galv, X + side * (IW - 0.06), 1.35, wc, { cast: false });
       const dx = X + side * (BX + 1.2);
-      addBox(dx, 0.74, wc, 0.7, 0.06, 2.6, 0x8a939d, { solid: true });
-      addBox(dx, 0.36, wc, 0.6, 0.7, 0.5, 0x5b6470, { cast: false });
+      /* the officer's console: a steel counter on two end panels with a
+         modesty panel between them (it was a slab on one grey block), and
+         the chair its seat anchor always promised — the anchor was there
+         with no chair drawn under it, so a body sat on air. */
+      K.skinBox(addBox(dx, 0.74, wc, 0.7, 0.06, 2.6, 0x8a939d, { solid: true, y0: 0, y1: 0.77 }), "steel", 0x8a939d);
+      for (const e of [-1, 1]) stat(new THREE.BoxGeometry(0.62, 0.71, 0.05), steelDark, dx, 0.355, wc + e * 1.22, { cast: false });
+      stat(new THREE.BoxGeometry(0.03, 0.5, 2.4), steelDark, dx - side * 0.28, 0.42, wc, { cast: false });
+      stat(new THREE.BoxGeometry(0.46, 0.02, 0.34), K.skin("steel", 0x24282d), dx + side * 0.08, 0.78, wc - 0.3, { cast: false });   // keyboard
+      stat(new THREE.BoxGeometry(0.05, 0.36, 0.56), K.skin("steel", 0x1d2025), dx - side * 0.2, 1.0, wc - 0.3, { cast: false });    // monitor
+      stat(new THREE.BoxGeometry(0.04, 0.2, 0.04), steelDark, dx - side * 0.2, 0.86, wc - 0.3, { cast: false });
+      if (CBZ.furnish && typeof CBZ.furnish.chair === "function") {
+        try { CBZ.furnish.chair(X + side * (BX + 2.0), 0, wc, side > 0 ? -Math.PI / 2 : Math.PI / 2, { tone: 0x2a2e34 }); } catch (e) {}
+      }
       if (CBZ.roomSeatAnchor) { try { CBZ.roomSeatAnchor(X + side * (BX + 2.0), 0, wc, side > 0 ? -Math.PI / 2 : Math.PI / 2, "chair", null, { cushion: 0.46, floorBelow: 0 }); } catch (e) {} }
       const KBX = X + side * (BX + 2.4), KBZ = D > 0 ? B.z0 + 0.3 : B.z1 - 0.3;
       addBox(KBX, 1.55, KBZ, 0.9, 0.7, 0.06, 0x6a563c, { cast: false });

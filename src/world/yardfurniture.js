@@ -4,13 +4,10 @@
    OWNER'S RULE: a real jail, not a prop dump. No treasure chests, no random
    crates of loot in the yard.
 
-   world/crates.js already killed the container VERB (PRISON_NO_CHESTS): five
-   packing cases stood in the exercise yard with the pry beat, the payout and
-   the chip stripped out, kept purely because they BREAK GUARD LINE OF SIGHT
-   and are the yard's whole stealth layer. That was the right call at the time
-   and it is still half a job. Nothing bolts a packing case to the middle of
-   an exercise yard. Five of them in a row is a prop dump that has been told
-   to stop talking.
+   Five packing cases used to stand in the exercise yard (world/crates.js,
+   deleted 2026-09-28), kept purely because they BREAK GUARD LINE OF SIGHT
+   and are the yard's whole stealth layer. Nothing bolts a packing case to
+   the middle of an exercise yard.
 
    So the COVER SURVIVES AND THE BOXES DO NOT. Every installation below sits
    on a spot a crate used to hold, blocks at least as much sightline as the
@@ -55,10 +52,8 @@
    (13:00) sends the whole population anyway. The prison hands you the tools
    during the hour it makes you walk past them.
 
-   Flag PRISON_YARD_FURNITURE (world/crates.js reads the same flag to stand
-   its five cases down). Ratchet CBZ.yardFurnitureAudit().cover — LOS
-   blockers standing in the north yard — may never fall below the 5 the
-   crates provided.
+   Ratchet CBZ.yardFurnitureAudit().cover — LOS blockers standing in the
+   north yard — may never fall below the 5 the crates provided.
 ============================================================ */
 (function () {
   "use strict";
@@ -68,9 +63,6 @@
   const ROOT = CBZ.prisonRoot || CBZ.scene;
   const PD = CBZ.prisonDress || null;
 
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_YARD_FURNITURE == null) CBZ.CONFIG.PRISON_YARD_FURNITURE = true;
-  if (CBZ.CONFIG.PRISON_YARD_FURNITURE === false) return;
   // the compound's textured kit (world/prisonkit.js): poured concrete,
   // painted and stainless steel, merged per material at load
   const K = CBZ.prisonKit || null;
@@ -82,7 +74,7 @@
   function cyl(x, y, z, r, h, color, axis, seg) {
     const k = r + "|" + h + "|" + (seg || 18);
     const g = _cg[k] || (_cg[k] = new THREE.CylinderGeometry(r, r, h, seg || 18));
-    const m = new THREE.Mesh(g, CBZ.mat(color));
+    const m = new THREE.Mesh(g, K ? K.skin("steel", color, color < 0x303030 ? 0.7 : undefined) : CBZ.mat(color));
     if (axis === "x") m.rotation.z = Math.PI / 2; else if (axis === "z") m.rotation.x = Math.PI / 2;
     m.position.set(x, y, z); m.castShadow = true;
     ROOT.add(m);
@@ -150,30 +142,47 @@
         back plate is what does the sightline work the crate used to.
      ========================================================== */
   (function weights(x, z) {
-    // rubber matting
-    addBox(x, 0.03, z, 4.4, 0.06, 3.6, 0x2f3238, { cast: false });
-    // the rack: two uprights, a back plate, a top bar
-    for (const s of [-1, 1]) addBox(x + s * 0.85, 1.15, z - 0.6, 0.16, 2.3, 0.16, C_STEEL_D, { solid: true });
-    blocker(x, 1.15, z - 0.72, 1.86, 2.3, 0.12, C_STEEL_D, { cast: false });
-    addBox(x, 2.24, z - 0.6, 2.0, 0.12, 0.12, C_STEEL, { cast: false });
-    // J-hooks and the loaded bar sitting in them
-    for (const s of [-1, 1]) addBox(x + s * 0.85, 1.42, z - 0.44, 0.2, 0.1, 0.22, C_STEEL, { cast: false });
-    cyl(x, 1.5, z - 0.44, 0.014, 2.2, 0x9aa0a8, "x", 8);                          // the bar
+    const steel = K ? K.skin("steel", C_STEEL_D) : null, vinyl = K ? K.skin("steel", 0x202328, 0.45) : null;
+    const sk = (m, mat) => { if (mat && m) m.material = mat; return m; };
+    // interlocking rubber tiles, 2 cm, a hair off the yard
+    if (K) K.stat(new THREE.BoxGeometry(4.4, 0.02, 3.6), K.skin("concrete", 0x2f3237, 0.95), x, 0.012, z, { cast: false, uv: 1 });
+    // the rack: two 80 mm uprights on base feet, a crossmember, J-cups with
+    // the loaded bar in them. The back is its plate-storage board (the LOS
+    // blocker), with horns and plates on the side away from the lifter.
     for (const s of [-1, 1]) {
-      cyl(x + s * 1.0, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");                  // 20 kg plates
-      cyl(x + s * 0.94, 1.5, z - 0.44, 0.225, 0.05, 0x1a1d22, "x");
-      cyl(x + s * 1.06, 1.5, z - 0.44, 0.03, 0.08, 0x9aa0a8, "x", 8);               // collar
+      sk(addBox(x + s * 0.85, 1.15, z - 0.6, 0.08, 2.3, 0.08, C_STEEL_D, { solid: true }), steel);
+      sk(addBox(x + s * 0.85, 0.02, z - 0.6, 0.1, 0.04, 0.7, C_STEEL_D, { cast: false }), steel);
+    }
+    sk(blocker(x, 1.15, z - 0.655, 1.62, 2.1, 0.03, C_STEEL_D, { cast: false }), K ? K.skin("steel", 0x4a525c) : null);
+    sk(addBox(x, 2.28, z - 0.6, 1.78, 0.08, 0.08, C_STEEL, { cast: false }), steel);
+    for (const s of [-1, 1]) sk(addBox(x + s * 0.85, 1.45, z - 0.53, 0.09, 0.1, 0.1, C_STEEL, { cast: false }), steel);
+    cyl(x, 1.515, z - 0.53, 0.014, 2.2, 0x9aa0a8, "x", 8);                         // the bar
+    for (const s of [-1, 1]) {
+      cyl(x + s * 1.0, 1.515, z - 0.53, 0.225, 0.05, 0x1a1d22, "x");                 // 20 kg plates
+      cyl(x + s * 0.94, 1.515, z - 0.53, 0.225, 0.05, 0x1a1d22, "x");
+      cyl(x + s * 1.06, 1.515, z - 0.53, 0.03, 0.08, 0x9aa0a8, "x", 8);              // collar
+    }
+    for (const s of [-1, 1]) for (const hy of [0.45, 1.05]) {
+      cyl(x + s * 0.5, hy, z - 0.77, 0.025, 0.2, C_STEEL, "z", 8);                    // storage horn
+      cyl(x + s * 0.5, hy, z - 0.83, hy < 1 ? 0.225 : 0.16, 0.05, 0x1a1d22, "z");      // a plate on it
     }
     // THE THREE LOOSE THINGS IN THE WEIGHT PILE. The rack is bolted through
     // the mat and stays; the bench, the plate tree and the chalk bucket are
     // free-standing kit and every one of them prices its own shove. This is
     // where the differential is easiest to feel: the bucket skitters off your
     // shin, the bench takes a shoulder, and a loaded plate tree barely gives.
-    const wBench = addBox(x, 0.46, z + 0.55, 0.62, 0.16, 1.9, 0x222831, { solid: true });
-    const wFeet = [];
-    for (const s of [-1, 1]) wFeet.push(addBox(x, 0.23, z + 0.55 + s * 0.7, 0.44, 0.46, 0.4, C_STEEL, { cast: false }));
+    // The bench is a real flat bench: a vinyl pad on a board, square-tube
+    // legs on T-feet and a spine (it was a slab on two 46 cm cubes).
+    const bz = z + 0.55;
+    const wBench = sk(addBox(x, 0.48, bz, 0.29, 0.08, 1.2, 0x222831, { solid: true }), vinyl);
+    const wFeet = [sk(addBox(x, 0.43, bz, 0.28, 0.02, 1.2, 0x6f5a3d, { cast: false }), K ? K.skin("concrete", 0x6f5a3d) : null),
+      sk(addBox(x, 0.395, bz, 0.05, 0.05, 0.95, C_STEEL, { cast: false }), steel)];
+    for (const e of [-0.45, 0.45]) {
+      wFeet.push(sk(addBox(x, 0.22, bz + e, 0.05, 0.4, 0.05, C_STEEL, { cast: false }), steel));
+      wFeet.push(sk(addBox(x, 0.02, bz + e, 0.44, 0.04, 0.06, C_STEEL, { cast: false }), steel));
+    }
     if (CBZ.pushProp) CBZ.pushProp({
-      parts: [wBench].concat(wFeet), x: x, z: z + 0.55, hx: 0.31, hz: 0.95, y1: 0.54,
+      parts: [wBench].concat(wFeet), x: x, z: bz, hx: 0.22, hz: 0.62, y1: 0.52,
       mass: 45, kind: "bench", leash: 4.0, stand: true, mode: "escape",
     });
     // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
@@ -210,13 +219,13 @@
     // posts
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       if (sz < 0) continue;                                  // the back wall carries that side
-      addBox(x + sx * (W / 2 - 0.2), HH / 2, z + sz * (D / 2 - 0.2), 0.24, HH, 0.24, C_STEEL_D, { solid: true });
+      skinned(addBox(x + sx * (W / 2 - 0.2), HH / 2, z + sz * (D / 2 - 0.2), 0.2, HH, 0.2, C_STEEL_D, { solid: true }), "steel", C_STEEL_D);
     }
     // the roof. Non-solid + blockLOS, the same contract world/roofs.js uses:
     // a tower cannot see through it, and no body is ever walled out by it.
     skinned(addBox(x, HH + 0.12, z, W, 0.24, D, 0x59616b, { solid: false, cast: false, blockLOS: true }), "steel", 0x59616b);
     skinned(addBox(x, HH + 0.3, z, W + 0.3, 0.12, D + 0.3, 0x4a525c, { cast: false }), "corrugated", 0x7d858e);
-    for (let i = -1; i <= 1; i++) addBox(x + i * 2.0, HH - 0.06, z, 0.14, 0.16, D, C_STEEL_D, { cast: false });
+    for (let i = -1; i <= 1; i++) skinned(addBox(x + i * 2.0, HH - 0.08, z, 0.14, 0.16, D - 0.1, C_STEEL_D, { cast: false }), "steel", C_STEEL_D);
     // the slab and its two bolted tables — the shared kit's, with real seats
     skinned(addBox(x, 0.025, z, W + 0.8, 0.05, D + 0.8, 0x8f8a80, { cast: false }), "concrete", 0x8f8a80);
     if (PD && typeof PD.roundTable === "function") {

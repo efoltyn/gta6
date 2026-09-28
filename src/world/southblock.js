@@ -14,72 +14,21 @@
   const scene = CBZ.prisonRoot || CBZ.scene;
   const S = CBZ.WORLD.southBlock;
 
-  /* ============================================================
-     PRISON_DRESS_V2 — THE FLAG'S HOME. (2026-07-30)
-     ============================================================
-     OWNER: the prison escape game gets the craft bar of gang city's county
-     jail. CLAUDE.md's gun-room grammar says polish spent EVENLY creates no
-     gradient and therefore pulls nobody — so it goes on the rooms the game
-     actually sends you to. systems/capture.js's DAY_BEAT rotates the whole
-     block through four calls (YARD · CHOW · REC · LOCKDOWN, :273-278), which
-     makes the yard, the chow hall and the dayroom load-bearing rooms rather
-     than scenery, and this flag is the one switch over all three plus the
-     south block's institutional texture.
-
-     ON  → serving lines, dayroom fittings, wayfinding paint, wall wear, pipe
-           runs, caged lamps, fire kit, door heads, bolted yard chow tables.
-     OFF → the rooms exactly as they shipped, including the old cafeteria
-           table rows and the lounge TV's original (floating) coordinate.
-
-     DECLARED HERE, READ EVERYWHERE: index.html parses cafeteria (:445) and
-     lounge (:446) BEFORE this file (:450), so all four prison-dress files
-     carry the same `== null` line. The idiom is idempotent — whichever runs
-     first wins and the rest are no-ops — which is exactly why CLAUDE.md
-     prefers it to a src/config.js edit (that file is an Edit-race magnet).
-  ============================================================ */
-  if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
-  const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
+  /* The dressing below (serving lines, wall wear, pipe runs, caged lamps,
+     fire kit, door heads, the chow pad) and the rule it keeps: EVERY PROP IS
+     EITHER USABLE OR IT GOES (owner, 2026-08-15: "just leave an empty room
+     if you want, or find a way to make it used"). Usable = it has a collider,
+     a propuse seat or bed anchor, holds a placed item, is a door or lock, is
+     a pushable, or is a light fitting systems/prisonnight.js drives. The two
+     flags that used to guard this (PRISON_DRESS_V2, PRISON_PROP_USE_V1) are
+     burnt in: the other files that read them still declare them. */
   const PD = CBZ.prisonDress || null;   // world/cafeteria.js; degrade-safe
   // the interior finish layer (floors, trim, ceilings) and its small helpers
   const FIN = PD && PD.finish ? PD : null;
   const K = CBZ.prisonKit || null;
   const PD_M = PD && PD.Merge ? PD.Merge : null;
   const PD_PIPE = function () { if (PD && PD.pipe) return PD.pipe.apply(PD, arguments); };
-
-  /* ============================================================
-     PRISON_PROP_USE_V1 — THE FLAG'S HOME. (2026-08-15)
-     ============================================================
-     OWNER: "there's rooms that have, like, random blocks, just very stupid
-     stuff. I don't like stupid details. Just leave an empty room if you want,
-     or find a way to make it used." The rule that follows from it: EVERY PROP
-     IS EITHER USABLE OR IT GOES. Usable = it has a collider (it stops you, or
-     it is cover), it registers a propuse seat or bed anchor, it holds a placed
-     item, it is a door / lock / breach target, it is a pushable, or it is a
-     light fitting systems/prisonnight.js drives.
-
-     THE MEASUREMENT: tools/visual-presets/prison-rooms.mjs counts, per room,
-     `props / solid / used / dead` and `deadVol` m3. On the 2026-08-15 baseline
-     run this file's LOWER YARD was the only room in the compound with
-     `used: 0` — 58 props, 43 dead, 5.39 m3 — and 5.12 m3 of that was four
-     walk-through 8 m lamp posts.
-
-     WHAT THIS FLAG CHANGES IN THIS FILE
-       · the four floodlight poles are GONE. systems/prisonnight.js:236 already
-         stands eight real flood masts and four of them are over this yard.
-       · the bar stock, both laundry carts and all three bleacher tiers are
-         solid; the carts, the two barbells are pushables.
-       · the weight benches and the bleachers register propuse seat anchors —
-         the exercise yard's own program, which it did not have.
-     OFF → every box back exactly as it shipped, including the four poles and
-     the three concentric bleacher slabs.
-
-     DECLARED HERE, READ IN cafeteria / lounge / yardfurniture / escape_routes.
-     Same `== null` idiom as PRISON_DRESS_V2 above: idempotent, so whichever of
-     the five files index.html parses first wins and the rest are no-ops.
-     Ratchet: lower-yard `used` may never go back to 0.
-  ============================================================ */
-  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
-  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
+  const stat = K ? K.stat : null;
 
   // ---- ground: a poured concrete apron + the walkway leading to the gate ----
   // PRISON_GROUND_V2 (owner: "the checkered ground is dumb" — world/ground.js
@@ -88,10 +37,9 @@
   // tile seam as well as mid-tile, so the place the texture wraps IS a joint.
   // The central path is bitumen and now reads as bitumen. Same planes, same
   // positions, same `tex.repeat.set(rx, rz)` shape — only the canvas changed.
-  const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
   function slab(x, z, w, d, a, b, rx, rz, kind, y) {
     if (y == null) y = 0.012;
-    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
+    const tex = CBZ.prisonGroundTex ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : CBZ.checkerTex(a, b, 2);
     tex.repeat.set(rx, rz);
     const lm = new THREE.MeshLambertMaterial({ map: tex });
@@ -119,55 +67,40 @@
   // proud of the apron AND both carry the prison's one ground-layer polygon
   // offset (world/prisonkit.js CBZ.groundLayer), so the apron is pushed back
   // under the path at every distance. Square 6.3 m tile, like every patch.
-  slab(0, 90, WALK, 76, "#4e5257", "#474b50", GV2 ? WALK / 6.3 : 2, GV2 ? 76 / 6.3 : 16, "asphalt", 0.02); // central path to the gate
+  slab(0, 90, WALK, 76, "#4e5257", "#474b50", WALK / 6.3, 76 / 6.3, "asphalt", 0.02); // central path to the gate
   // (No kerb: world/ground.js dropped the pale 12 cm curb strips that ran
   // both edges; the bitumen against the concrete apron IS the path's edge.)
 
-  // a basketball half-court painted into the apron
-  (function court() {
-    const c = new THREE.Mesh(new THREE.PlaneGeometry(16, 22),
-      CBZ.groundLayer ? CBZ.groundLayer(new THREE.MeshLambertMaterial({ color: 0x8a5a2b }), 0.02) : new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
-    c.rotation.x = -Math.PI / 2; c.position.set(-11, 0.02, 96); scene.add(c);
-    // flush paint on the court plane (top 3 mm proud of it), worn white; the
-    // old middle "line" was a solid 5 x 5 m white square, not a key outline
-    const line = (x, z, w, d) => addBox(x, 0.021, z, w, 0.004, d, 0xc9c5b8, { cast: false });
-    line(-11, 85.2, 16, 0.08); line(-3.2, 96, 0.08, 22);
-    line(-11, 93.5, 5.0, 0.08); line(-11, 98.5, 5.0, 0.08); line(-8.5, 96, 0.08, 5.0); line(-13.5, 96, 0.08, 5.0);
-  })();
+  /* THE HALF-COURT (rebuilt 2026-09-28). It was a flat brown 16 x 22 plane
+     with white box lines, a 0.2 m box for a pole, an orange box and a white
+     box for a board, and bleachers standing ON the court. Now: a sealed
+     acrylic court on its own poured patch at FIBA size (15 m wide, 14 m to
+     the half-court line), flush lines with the lane, free-throw circle,
+     no-charge arc, three-point line and the centre half-circle
+     (world/prisonkit.js courtHalf), a padded gooseneck hoop behind the
+     baseline, and the bleachers off the west sideline facing it.
+     x[-20.1,-5.1] z[84,98]; the 9 m walkway starts at x -4.5. */
+  const CT = { cx: -12.6, bz: 84, w: 15, d: 14 };
+  if (K) {
+    K.ground(CT.cx - 0.05, CT.bz + CT.d / 2 - 0.7, CT.w + 1.0, CT.d + 2.6, "asphalt", { y: 0.03, a: "#3d5a6b", b: "#38535f" });
+    const PY = 0.034, line = (x, z, w, d) => K.paint(x, z, w, d, 0xe9e9e4, PY);
+    line(CT.cx, CT.bz, CT.w, 0.05);
+    for (const s of [-1, 1]) line(CT.cx + s * CT.w / 2, CT.bz + CT.d / 2, 0.05, CT.d);
+    K.courtHalf(CT.cx, CT.bz, 1, { w: CT.w, halfLine: true, keyFill: 0x7a3b30 });
+    const pz = CT.bz - 0.6;
+    K.hoop(CT.cx, pz, 0, 1, { reach: 1.8 });
+    CBZ.colliders.push({ minX: CT.cx - 0.2, maxX: CT.cx + 0.2, minZ: pz - 0.2, maxZ: pz + 0.2, noBreach: true });
+  }
 
   // (The "running track" was 40 white 0.42 m squares dotted in an oval over
-  // the concrete apron: no track surface, no lanes, a ring of floor tiles.
-  // Deleted 2026-09-27.)
-
-  /* ---- floodlight poles: DELETED (PRISON_PROP_USE_V1) -------------------
-     THE YARD ALREADY HAS FLOOD MASTS AND THEY ARE NOT THESE.
-     systems/prisonnight.js:236 stands eight — floodMast(-21,66) (21,66)
-     (-21,110) (21,110) are the four over THIS yard — and each of those is a
-     0.36 x 7 pole drawn `{ solid: true }`, with a bracket, a `mover`-tagged
-     head, a 9 m light pool, a 6.9 m beam cone and a `flood` kind that strikes
-     at dusk and burns till dawn (prisonnight.js:118).
-     The four this file drew stood at (+/-20, 74) and (+/-20, 112) — 8.06 m and
-     2.24 m from the real ones. Two eight-metre masts 2.24 m apart, and the
-     pair this file owned was the fake one: 0.4 x 8 x 0.4 drawn `{}`, so you
-     walked through a lamp post, under a head that was permanently emissive and
-     never once obeyed lights-out.
-     12 boxes. 5.12 m3 of walk-through steel — four of the five largest dead
-     props in lower-yard and the single largest in sally-port. Deleting them
-     costs the yard no light at all, because the light was never theirs. */
-  if (!USE) {
-    const floodPole = function (x, z) {
-      addBox(x, 4.0, z, 0.4, 8, 0.4, 0x3c424d, {});
-      addBox(x, 8.1, z, 1.6, 0.4, 0.7, 0x2a2f38, { cast: false });
-      addBox(x, 7.95, z + 0.3, 1.5, 0.3, 0.18, 0xfff1a8, { emissive: 0xffe066, ei: 0.9, cast: false });
-    };
-    [[-20, 74], [20, 74], [-20, 112], [20, 112]].forEach((p) => floodPole(p[0], p[1]));
-  }
+  // the concrete apron. Deleted 2026-09-27. The four walk-through 8 m
+  // floodlight poles that stood 2-8 m from systems/prisonnight.js's real
+  // yard masts were deleted 2026-08-15; the light was always the masts'.)
 
   // ============================================================
   //  WORKSHOP (south-west) — welding bay
   // ============================================================
   roomShell({ x0: -42, x1: -24, z0: 58, z1: 80, h: 6, wall: 0x7c8590, floor: null, skin: null, door: { side: "E", center: 69, width: 4.2 } });
-  addBox(-24, 5.4, 69, 0.2, 0.9, 4.0, 0xc85c00, { cast: false }); // sign band
   // FINISHES (2026-09-27): sealed slab, block walls with a painted dado, and a
   // hard ceiling at 5.2 m with industrial pendants: a shop keeps its height.
   if (FIN) FIN.finish({ x0: -41.75, x1: -24.25, z0: 58.25, z1: 79.75 }, {
@@ -175,43 +108,60 @@
     doors: [{ side: "E", a0: 66.9, a1: 71.1 }], dado: 0x5f6975, dadoH: 1.4, base: 0x2b2d30,
     ceilingY: 5.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "pendant", nx: 4, nz: 5, drop: 0.8 },
   });
-  // workbenches with vices + scattered parts
-  // NO-DECOY SWEEP (owner: "find things in the game that you can run through").
-  // This file was written with `{ solid: true }` on the things whose author
-  // happened to think about it — the crate, the bus, the jersey barriers, the
-  // dumpster — and a bare `{}` on things of exactly the same size and kind
-  // standing a few metres away. The rule applied below is the one world/
-  // clutter.js already states: anything a body can meaningfully approach is
-  // solid, or it reads as a decoy. What is deliberately NOT collided is named
-  // at each site: overhead slabs, sheets and pillows lying on a solid frame,
-  // and the water tank 8 m up (its LEGS are what you walk into).
-  function bench2(x, z) {
-    addBox(x, 0.8, z, 3.2, 0.18, 1.2, 0x8a939d, { solid: true });    // top — a 3.2m steel workbench
-    addBox(x - 1.4, 0.4, z, 0.2, 0.8, 1.0, 0x5b6470, { cast: false });
-    addBox(x + 1.4, 0.4, z, 0.2, 0.8, 1.0, 0x5b6470, { cast: false });
-    addBox(x + 1.0, 1.0, z, 0.4, 0.3, 0.4, 0x2a2f38, { cast: false }); // vice
-    addBox(x - 0.6, 0.98, z, 0.7, 0.12, 0.5, 0xb07a3c, { cast: false }); // wood block
-  }
-  bench2(-37, 62); bench2(-37, 76);
-  // a glowing forge + sparks
-  addBox(-40, 0.9, 69, 1.6, 1.8, 2.0, 0x2a2f38, { solid: true });    // 1.8m masonry forge
-  addBox(-40, 1.2, 70.2, 1.2, 0.7, 0.3, 0xff6a1a, { emissive: 0xc83000, ei: 0.9, cast: false });
-  // stacked steel stock + a parts crate
-  // PRISON_PROP_USE_V1: the four bars were drawn `{}`+cast:false — 0.816 m3 of
-  // 2.6 m steel a body walked straight through, the largest walk-through
-  // object in the workshop after the forge glow. Bar stock IS the workshop's
-  // raw material and a shin-high stack of it is a real obstacle, so it is
-  // solid, y-gated to the stack's own top (0.64 + 0.14) the way the mess
-  // tables and the round-table stools are — an obstacle, never a pillar.
-  const STOCK = USE ? { cast: false, solid: true, y0: 0, y1: 0.78 } : { cast: false };
-  for (let i = 0; i < 4; i++) addBox(-27 + (i % 2) * 0.4, 0.3 + Math.floor(i / 2) * 0.34, 75 + (i % 2) * 0.5, 2.6, 0.28, 0.28, 0x6b7480, STOCK);
+  /* THE SHOP'S KIT (rebuilt 2026-09-28): each piece was a box standing in for
+     a thing. A 3.2 m workbench is a steel frame on square legs with a lower
+     shelf and a hardwood top, a bench vice bolted at one end; the forge is a
+     firebrick hearth on a steel stand under a sheet-steel hood whose flue
+     goes up through the ceiling (it was a black 1.8 m cube with a glowing
+     orange block stuck to it); the bar stock lies on a floor rack. Colliders
+     keep the same footprints, height-gated to what a body walks into. */
+  const shopFrame = K ? K.skin("steel", 0x4a525c) : null, ironDark = K ? K.skin("steel", 0x2a2f36, 0.6) : null;
+  // the two benches are the kit's (world/prisonkit.js workbench)
+  if (K) { K.workbench(-37, 62, 3.2, 1.0); K.workbench(-37, 76, 3.2, 1.0); }
+  (function forge() {
+    const x = -40, z = 69;
+    CBZ.colliders.push({ minX: x - 0.8, maxX: x + 0.8, minZ: z - 1.0, maxZ: z + 1.0 });
+    if (!K) return;
+    const brick = K.skin("block", 0x8a4b36), hood = K.skin("steel", 0x55606b);
+    // the stand: four angle legs and a steel pan at waist height
+    for (const sx of [-0.7, 0.7]) for (const sz of [-0.9, 0.9]) stat(new THREE.BoxGeometry(0.07, 0.8, 0.07), shopFrame, x + sx, 0.4, z + sz, {});
+    stat(new THREE.BoxGeometry(1.5, 0.06, 1.9), shopFrame, x, 0.8, z, {});
+    // firebrick hearth, the fire pot sunk in it, a low back wall of brick
+    stat(new THREE.BoxGeometry(1.44, 0.22, 1.84), brick, x, 0.94, z, { uv: 1 });
+    stat(new THREE.BoxGeometry(0.3, 0.5, 1.84), brick, x - 0.57, 1.3, z, { uv: 1 });
+    stat(new THREE.BoxGeometry(0.5, 0.02, 0.5), ironDark, x + 0.1, 1.055, z, { cast: false });
+    // the tuyere and the blower on its crank at the front
+    stat(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8), ironDark, x + 0.1, 0.72, z + 0.5, { rx: Math.PI / 2, cast: false });
+    stat(new THREE.CylinderGeometry(0.16, 0.16, 0.12, 14), ironDark, x + 0.1, 0.72, z + 0.82, { rx: Math.PI / 2, cast: false });
+    // the hood on two straps off the back wall, the flue up through the 5.2 m ceiling
+    stat(new THREE.CylinderGeometry(0.16, 0.72, 0.6, 4, 1, true), hood, x + 0.05, 2.25, z, { ry: Math.PI / 4, cast: false });
+    stat(new THREE.CylinderGeometry(0.15, 0.15, 2.7, 12), hood, x + 0.05, 3.85, z, { cast: false });
+    for (const sz of [-0.4, 0.4]) stat(new THREE.BoxGeometry(0.04, 0.45, 0.04), shopFrame, x - 0.45, 1.765, z + sz, { cast: false });
+    // the coke bed: a dull red, the one thing in the room that should glow a little
+    const bed = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.06, 12),
+      new THREE.MeshLambertMaterial({ color: 0x3a1a10, emissive: 0x7a2208, emissiveIntensity: 0.55 }));
+    bed.position.set(x + 0.1, 1.07, z); scene.add(bed);
+  })();
+  // bar stock on a floor rack: two steel stands, round bar and box section.
+  // Solid, y-gated to the stack's own top: an obstacle, never a pillar.
+  (function stock() {
+    const x = -26.8, z = 75.25;
+    CBZ.colliders.push({ minX: x - 1.3, maxX: x + 1.3, minZ: z - 0.45, maxZ: z + 0.45, y0: 0, y1: 0.78 });
+    if (!K) return;
+    const bar = K.skin("steel", 0x6b7480, 0.45), rust = K.skin("steel", 0x6b4a3a, 0.8);
+    for (const sx of [-0.9, 0.9]) {
+      for (const sz of [-0.38, 0.38]) stat(new THREE.BoxGeometry(0.06, 0.56, 0.06), shopFrame, x + sx, 0.28, z + sz, { cast: false });
+      for (const y of [0.2, 0.46]) stat(new THREE.BoxGeometry(0.06, 0.05, 0.82), shopFrame, x + sx, y, z, { cast: false });
+    }
+    for (let i = 0; i < 7; i++) stat(new THREE.CylinderGeometry(0.02, 0.02, 2.6, 8), i % 3 ? bar : rust, x, 0.245 + (i & 1) * 0.03, z - 0.33 + i * 0.11, { rz: Math.PI / 2, cast: false });
+    for (let i = 0; i < 5; i++) stat(new THREE.BoxGeometry(2.6, 0.05, 0.05), bar, x + (i & 1) * 0.08, 0.51, z - 0.3 + i * 0.15, { cast: false });
+  })();
   // (the 1.6 m wooden crate that stood alone in the corner is gone: no reason)
 
   // ============================================================
   //  CHAPEL (south-east) — the quiet wing
   // ============================================================
   roomShell({ x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, wall: 0xbfb6a4, floor: null, skin: null, door: { side: "W", center: 69, width: 4.2 } });
-  addBox(42, 5.8, 69, 0.2, 0.9, 4.0, 0x6d5a8f, { cast: false }); // sign band
   /* THE CHAPEL, REBUILT (2026-09-27). The pews ran EAST-WEST with the altar at
      the east wall — every seat faced the side wall — and they were a plank
      and a board, full-height colliders. The cross was two glowing yellow
@@ -241,7 +191,7 @@
   for (let i = -1; i <= 1; i += 2) {
     const z = 69 + i * 4.2;
     addBox(41.72, 2.6, z, 0.06, 2.6, 0.9, 0x3a3f46, { cast: false });                  // frame
-    addBox(41.68, 2.6, z, 0.02, 2.44, 0.74, 0xbfd6e0, { emissive: 0x5c7a8a, ei: 0.45, cast: false });
+    addBox(41.68, 2.6, z, 0.02, 2.44, 0.74, 0x9fb4be, { cast: false });                // clear glass (it glowed at midnight)
     for (const t of [-0.6, 0, 0.6]) addBox(41.665, 2.6 + t, z, 0.01, 0.02, 0.74, 0x3a3f46, { cast: false });
     addBox(41.665, 2.6, z, 0.01, 2.44, 0.02, 0x3a3f46, { cast: false });
   }
@@ -262,8 +212,6 @@
   //  INFIRMARY (east, lower) — beds + screens
   // ============================================================
   roomShell({ x0: 26, x1: 42, z0: 88, z1: 104, h: 6, wall: 0xd7dde2, floor: null, skin: null, door: { side: "W", center: 96, width: 4.0 } });
-  addBox(42, 5.4, 96, 0.2, 0.9, 3.4, 0x2f9e6a, { cast: false }); // green cross band
-  addBox(42.0, 5.4, 96, 0.22, 0.6, 0.2, 0xffffff, { emissive: 0xbfeada, ei: 0.5, cast: false });
   /* THE INFIRMARY, REBUILT (2026-09-27). Four beds stood in the middle of a
      6 m-high room, each with a grey board beside it as a "privacy screen",
      and a cabinet with a glowing blue rectangle stuck to it. A ward is beds
@@ -367,7 +315,6 @@
   //  LAUNDRY (west, lower) — steam, machines & carts
   // ============================================================
   roomShell({ x0: -42, x1: -26, z0: 88, z1: 104, h: 6, wall: 0x8a929c, floor: null, skin: null, door: { side: "E", center: 96, width: 4.0 } });
-  addBox(-26, 5.4, 96, 0.2, 0.9, 3.4, 0x3a6ea5, { cast: false });
   if (FIN) FIN.finish({ x0: -41.75, x1: -26.25, z0: 88.25, z1: 103.75 }, {
     id: "laundry", floor: "slab", floorTint: 0xa3a8ac,
     doors: [{ side: "E", a0: 94, a1: 98 }], dado: 0x6b7784, dadoH: 1.4, base: 0x2b2d30,
@@ -389,22 +336,56 @@
     addBox(-39.5, 1.62, z + 0.35, 0.02, 0.08, 0.2, 0x1e4a2e, { emissive: 0x1a5a30, ei: 0.5, cast: false });
     addBox(-39.5, 1.3, z - 0.55, 0.05, 0.16, 0.06, 0xc3c9d0, { cast: false });        // door latch
   }
-  // rolling laundry carts (canvas bins on a frame)
-  // PRISON_PROP_USE_V1: both were drawn `{}` — a 1.5 m3 canvas bin you walked
-  // through, and the (-29.5, 99) one was the biggest dead prop in the room.
-  // A cart is SOLID (these two are the only cover on this floor) and the one
-  // that is not holding a tool is a PUSHABLE: a laundry cart on castors is the
-  // most obviously shovable object in the compound, and systems/pushables.js
-  // is already how this compound prices a bench, a barrel and a mop bucket.
-  // The (-31, 92) cart stays bolted because world/yardfurniture.js:231 lays
-  // the LOCKPICK in it at y 1.22 — a route item does not get to roll away.
+  /* ROLLING LAUNDRY CARTS: a canvas bag slung in a galvanised tube frame on
+     four swivel casters, heaped with the day's wash (it was a white box on a
+     grey box). Solid (the only cover on this floor, height-gated to the rim);
+     the (-29.5, 99) cart is a PUSHABLE, the (-31, 92) one stays put because
+     world/yardfurniture.js lays the LOCKPICK on its heap at y 1.22. Each cart
+     builds its own geometry: core/batch.js disposes what it merges, so a
+     static cart must never share a buffer with a moving one. */
+  const BGU = THREE.BufferGeometryUtils;
+  const cartCanvas = new THREE.MeshLambertMaterial({ color: 0xc9c1aa, side: THREE.DoubleSide });
+  const cartWash = new THREE.MeshLambertMaterial({ color: 0xe4e0d6 });
+  const cartFrame = K ? K.skin("galv", 0xb4bcc4) : CBZ.cmat(0xb4bcc4);
+  function mergeParts(list) {
+    const flat = list.map((g) => (g.index ? g.toNonIndexed() : g));
+    for (const g of flat) for (const n of Object.keys(g.attributes)) if (n !== "position" && n !== "normal" && n !== "uv") g.deleteAttribute(n);
+    const out = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(flat, false) : null;
+    return out || flat[0];
+  }
   function cart(x, z, push) {
-    const bin = addBox(x, 0.7, z, 1.2, 0.9, 1.4, 0xe2e2e2, USE ? { solid: true } : {});
-    const base = addBox(x, 0.18, z, 1.3, 0.12, 1.5, 0x3c424d, { cast: false });
-    if (USE && push && CBZ.pushProp) CBZ.pushProp({
-      parts: [bin, base], x: x, z: z, hx: 0.65, hz: 0.75, y1: 1.15,
-      mass: 30, kind: "cart", leash: 5.0, mode: "escape",
-    });
+    const X = 0.6, Z = 0.7, R0 = 0.3, R1 = 1.13;
+    const rod = (ax, ay, az, bx, by, bz, r) => {
+      const d = new THREE.Vector3(bx - ax, by - ay, bz - az), len = d.length();
+      const g = new THREE.CylinderGeometry(r, r, len, 6);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())));
+      g.translate((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      return g;
+    };
+    const fr = [];
+    for (const sx of [-X, X]) for (const sz of [-Z, Z]) {
+      fr.push(rod(sx, 0.16, sz, sx, R1, sz, 0.016));
+      const f = new THREE.BoxGeometry(0.06, 0.05, 0.05); f.translate(sx, 0.11, sz); fr.push(f);              // caster fork
+      const w = new THREE.CylinderGeometry(0.055, 0.055, 0.035, 12); w.rotateZ(Math.PI / 2); w.translate(sx, 0.055, sz); fr.push(w);
+    }
+    for (const y of [0.16, R0, R1]) {
+      fr.push(rod(-X, y, -Z, X, y, -Z, 0.014), rod(-X, y, Z, X, y, Z, 0.014));
+      fr.push(rod(-X, y, -Z, -X, y, Z, 0.014), rod(X, y, -Z, X, y, Z, 0.014));
+    }
+    const bag = [];
+    const side = (w, h, px, py, pz, ry) => { const g = new THREE.PlaneGeometry(w, h); if (ry) g.rotateY(ry); g.translate(px, py, pz); bag.push(g); };
+    const bh = R1 - R0 - 0.02, by = (R0 + R1) / 2;
+    side(2 * X - 0.04, bh, 0, by, -Z + 0.02, 0); side(2 * X - 0.04, bh, 0, by, Z - 0.02, 0);
+    side(2 * Z - 0.04, bh, -X + 0.02, by, 0, Math.PI / 2); side(2 * Z - 0.04, bh, X - 0.02, by, 0, Math.PI / 2);
+    const floor = new THREE.PlaneGeometry(2 * X - 0.04, 2 * Z - 0.04); floor.rotateX(-Math.PI / 2); floor.translate(0, R0 + 0.01, 0); bag.push(floor);
+    const heap = new THREE.SphereGeometry(0.5, 14, 8); heap.scale(1.1, 0.3, 1.3); heap.translate(0, 1.06, 0);
+    const mk = (g, m, cast) => { const me = new THREE.Mesh(g, m); me.position.set(x, 0, z); me.castShadow = cast; me.receiveShadow = true; scene.add(me); return me; };
+    const bagM = mk(mergeParts(bag), cartCanvas, true), frameM = mk(mergeParts(fr), cartFrame, true), heapM = mk(heap, cartWash, false);
+    if (push && CBZ.pushProp) {
+      CBZ.pushProp({ parts: [bagM, frameM, heapM], x: x, z: z, hx: 0.65, hz: 0.75, y1: 1.15, mass: 30, kind: "cart", leash: 5.0, mode: "escape" });
+    } else {
+      CBZ.colliders.push({ minX: x - 0.65, maxX: x + 0.65, minZ: z - 0.75, maxZ: z + 0.75, y0: 0, y1: 1.15 });
+    }
   }
   cart(-31, 92, false); cart(-29.5, 99, true);
 
@@ -440,7 +421,6 @@
   addBox(HD.doorX - 1.78, 1.65, HD.z0 - 0.02, 0.18, 3.3, 0.62, 0x39424e, { cast: false });
   addBox(HD.doorX + 1.78, 1.65, HD.z0 - 0.02, 0.18, 3.3, 0.62, 0x39424e, { cast: false });
   addBox(HD.doorX, 3.28, HD.z0 - 0.02, 3.74, 0.18, 0.62, 0x39424e, { cast: false });
-  addBox(HD.doorX, 5.45, HD.z0 - 0.28, 3.2, 0.52, 0.08, 0x244665, { cast: false });
 
   // Observation opening: real gap in roomShell, rebuilt as wall below/above a
   // clear pane and a security grille. The pane's collider is the wall here;
@@ -477,31 +457,27 @@
     }
   }
 
-  // One bolted day table, offset from the entrance lane. It is a housing-unit
-  // activity, not bedding in a common corridor; four declared cushions make
-  // the furniture usable by the same shared sitting solve as the cell house.
-  addBox(-36.0, 0.74, 116.0, 2.4, 0.10, 1.15, 0x8a939d, { solid: true });
-  addBox(-36.0, 0.37, 116.0, 0.28, 0.74, 0.28, 0x5b6470, { cast: false });
-  for (const p of [[-37.0, 116.0, Math.PI / 2], [-35.0, 116.0, -Math.PI / 2],
-    [-36.0, 114.95, 0], [-36.0, 117.05, Math.PI]]) {
-    addBox(p[0], 0.44, p[1], 0.44, 0.08, 0.44, 0x52606d, { cast: false });
-    addBox(p[0], 0.22, p[1], 0.14, 0.44, 0.14, 0x9aa0a8, { cast: false });
-    if (CBZ.roomSeatAnchor)
-      CBZ.roomSeatAnchor(p[0], 0, p[1], p[2], "stool", null, { cushion: 0.48, floorBelow: 0 });
-  }
+  // One bolted day table, offset from the entrance lane: the prison's own
+  // welded round table with its four stools (world/cafeteria.js roundTable
+  // declares the seats and the colliders). It was a grey slab on a post with
+  // four square pads.
+  if (PD && PD.roundTable) PD.roundTable(-36.0, 116.0, { seatTone: 0x52606d });
 
-  // Sanitation on the back wall, screened from the bunks but open to staff
-  // observation above shoulder height. Each fixture is a combined stainless
-  // toilet/sink, not a decorative bathroom prop.
-  function dormSanitary(x) {
-    addBox(x, 0.30, 122.75, 0.64, 0.60, 0.72, 0xc7ccd2, { cast: false });
-    addBox(x, 0.62, 122.75, 0.60, 0.10, 0.68, 0xe6e9ed, { cast: false });
-    addBox(x, 1.02, 123.02, 0.66, 0.70, 0.16, 0x9aa0a8, { cast: false });
-    addBox(x, 1.18, 122.92, 0.44, 0.10, 0.34, 0xd7dce2, { cast: false });
+  /* Sanitation on the back wall, screened from the bunks but open to staff
+     observation above shoulder height. Each fixture is the stainless combi
+     unit a jail bolts to a wall: a chase with the basin and push-button tap
+     on top, the bowl with its rolled rim cantilevered off the front, no seat
+     (it was four boxes). The two screens are stainless sheet on a top rail. */
+  if (K) {
+    const ss = K.skin("steel", 0xc9ced3, 0.28), ssDark = K.skin("steel", 0x6b7480, 0.4);
+    const WZ = 123.75;                                           // the dorm's back wall, inner face
+    for (const x of [-34.4, -31.6]) K.combi(x, WZ, 0, -1);
+    for (const x of [-35.55, -30.45]) {
+      stat(new THREE.BoxGeometry(0.03, 1.8, 1.9), ss, x, 1.05, WZ - 1.0, {});
+      stat(new THREE.BoxGeometry(0.05, 0.05, 2.0), ssDark, x, 1.97, WZ - 1.0, { cast: false });
+      stat(new THREE.BoxGeometry(0.05, 0.14, 0.05), ssDark, x, 0.07, WZ - 1.9, { cast: false });   // the foot
+    }
   }
-  dormSanitary(-34.4); dormSanitary(-31.6);
-  addBox(-35.55, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
-  addBox(-30.45, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
   if (FIN) FIN.finish({ x0: -41.75, x1: -24.25, z0: 106.25, z1: 123.75 }, {
     id: "south-dorm", floor: "slab", floorTint: 0x9da2a6,
     doors: [{ side: "N", a0: -34.7, a1: -31.3 }, { side: "N", a0: -40, a1: -37 }], dado: 0x5d6873, dadoH: 1.3, base: 0x2b2d30,
@@ -510,64 +486,84 @@
   });
 
   // ============================================================
-  //  LOWER-YARD FITTINGS — hoop, weights, pull-up rig, bleachers
+  //  LOWER-YARD FITTINGS: weights, pull-up rig, bleachers
   // ============================================================
-  // basketball hoop on the painted court
-  addBox(-11, 2.0, 84.4, 0.2, 4.0, 0.2, 0x6b7480, { solid: true }); // 4m pole
-  addBox(-11, 3.6, 85.0, 1.6, 0.12, 0.9, 0xff7a1a, { cast: false });
-  addBox(-11, 3.95, 84.6, 1.4, 0.7, 0.08, 0xffffff, { cast: false });
-  // weight benches + plates
-  // PRISON_PROP_USE_V1: THE EXERCISE YARD HAD NO PROGRAM. The pad was already
-  // solid but nothing could ever be ON it — lower-yard measured `used: 0`, the
-  // only room in the compound that did. A weight bench is a bench: it gets a
-  // propuse seat anchor at the pad's REAL top (centre 0.45 + half of 0.16 =
-  // 0.53), declared, never the kind table's guess. And the loaded bar is 60 kg
-  // of free weight resting in the J-hooks, so it is a pushable rather than
-  // three boxes welded to the sky — the same call world/yardfurniture.js:130
-  // already makes for the north yard's bench, plate tree and chalk bucket.
+  /* WEIGHT BENCHES (rebuilt 2026-09-28). A flat press bench is a padded top
+     on a tube frame with a T-foot, a base bar and two uprights carrying the
+     racked bar on J-hooks; it was a 0.7 x 2.2 slab with a box for a bar and
+     two boxes for plates. The pad's top is 0.53 m, where the propuse seat
+     anchor has always sat. The loaded bar (shaft, sleeves, two plates a side,
+     spring collars) is two meshes and a PUSHABLE, as before: 60 kg of free
+     weight in the hooks, not something welded to the sky. */
+  const benchVinyl = K ? K.skin("steel", 0x1c1e22, 0.7) : CBZ.cmat(0x1c1e22);
+  const benchFrame = K ? K.skin("steel", 0x3a4048) : CBZ.cmat(0x3a4048);
+  const barSteel = K ? K.skin("galv", 0xb4bcc4) : CBZ.cmat(0xb4bcc4);
+  const plateIron = K ? K.skin("steel", 0x1c1e22, 0.7) : CBZ.cmat(0x1c1e22);
+  function barbell(x, y, z) {
+    const bar = [], plates = [];
+    const cyl = (list, r, len, cx, seg) => { const g = new THREE.CylinderGeometry(r, r, len, seg || 12); g.rotateZ(Math.PI / 2); g.translate(cx, 0, 0); list.push(g); };
+    cyl(bar, 0.014, 1.31, 0);
+    for (const s of [-1, 1]) {
+      cyl(bar, 0.032, 0.03, s * 0.67);                 // the inner collar
+      cyl(bar, 0.025, 0.41, s * 0.89);                 // the sleeve
+      cyl(plates, 0.225, 0.05, s * 0.715, 24);         // two 20 kg plates
+      cyl(plates, 0.225, 0.05, s * 0.768, 24);
+      cyl(bar, 0.04, 0.03, s * 0.81);                  // spring collar
+    }
+    const mk = (list, m) => { const me = new THREE.Mesh(mergeParts(list), m); me.position.set(x, y, z); me.castShadow = true; scene.add(me); return me; };
+    return [mk(plates, plateIron), mk(bar, barSteel)];
+  }
   function weightBench(x, z) {
-    addBox(x, 0.45, z, 0.7, 0.16, 2.2, 0x3a3f47, { solid: true });
-    const bar = addBox(x, 1.1, z - 1.3, 1.9, 0.12, 0.12, 0x2a2f38, { cast: false });
-    const pl = [
-      addBox(x - 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false }),
-      addBox(x + 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false }),
-    ];
-    if (!USE) return;
-    // yaw 0 looks +z; the bar is at z-1.3, so PI faces the lifter up the bench.
+    // yaw 0 looks +z; the bar is racked at the -z end, so PI faces the lifter up the bench
+    CBZ.colliders.push({ minX: x - 0.62, maxX: x + 0.62, minZ: z - 0.66, maxZ: z + 0.72 });
+    if (K) {
+      const pad = K.profileGeo([[-0.58, 0.46], [-0.58, 0.51], [0.58, 0.51], [0.58, 0.46]], 0.28, 0.02);
+      stat(pad, benchVinyl, x, 0, z + 0.1, {});
+      stat(new THREE.BoxGeometry(0.24, 0.03, 1.14), benchFrame, x, 0.425, z + 0.1, { cast: false });
+      K.tube(x, 0.38, z - 0.6, x, 0.38, z + 0.66, 0.035, benchFrame, { cast: false });                 // the spine
+      K.tube(x, 0.03, z + 0.66, x, 0.4, z + 0.66, 0.035, benchFrame, { cast: false });                  // front post
+      K.tube(x - 0.25, 0.03, z + 0.66, x + 0.25, 0.03, z + 0.66, 0.03, benchFrame, { cast: false });    // T-foot
+      K.tube(x - 0.6, 0.03, z - 0.6, x + 0.6, 0.03, z - 0.6, 0.03, benchFrame, { cast: false });        // base bar
+      for (const s of [-1, 1]) {
+        K.tube(x + s * 0.55, 0.0, z - 0.6, x + s * 0.55, 1.22, z - 0.6, 0.035, benchFrame, {});        // upright
+        stat(new THREE.BoxGeometry(0.06, 0.12, 0.1), benchFrame, x + s * 0.55, 1.12, z - 0.53, { cast: false });   // J-hook
+      }
+    }
     if (CBZ.roomSeatAnchor)
       CBZ.roomSeatAnchor(x, 0, z + 0.3, Math.PI, "bench", null, { cushion: 0.53, floorBelow: 0 });
+    const parts = barbell(x, 1.2, z - 0.5);
     if (CBZ.pushProp) CBZ.pushProp({
-      parts: [bar].concat(pl), x: x, z: z - 1.3, hx: 1.0, hz: 0.26, y1: 1.35,
+      parts: parts, x: x, z: z - 0.5, hx: 1.1, hz: 0.26, y1: 1.35,
       mass: 60, kind: "barbell", leash: 3.0, mode: "escape",
     });
   }
   weightBench(8, 100); weightBench(11, 106);
-  // pull-up / dip rig. The 9 m crossbar stays non-solid ON PURPOSE: it is the
-  // member the two solid uprights carry, 2.7 m up, and nothing that walks can
-  // reach it — the same exemption this file's NO-DECOY SWEEP note already
-  // names for overhead slabs and for bedding lying on a solid frame.
-  addBox(4, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
-  addBox(13, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
-  addBox(8.5, 2.7, 110, 9.0, 0.16, 0.16, 0x6b7480, { cast: false });
-  // tiered bleachers along the west edge of the infield.
-  // PRISON_PROP_USE_V1: they were three CONCENTRIC slabs on one centreline
-  // (2.2 wide, 14/12/10 deep, all at x=-17) with only the bottom one solid —
-  // a wedding cake you walked into the top two tiers of and could not sit on
-  // any of. Three real STEPPED tiers now, rising away from the half-court,
-  // inside the SAME x[-18.1,-15.9] footprint this file's own institutional
-  // note measures the laundry wayfinding leg against — so that note still
-  // holds. Every tier is solid; every tier seats four, facing +x at the court.
-  if (USE) {
-    for (let i = 0; i < 3; i++) {
-      const bx = -16.27 - i * 0.73, top = 0.45 + i * 0.45;
-      addBox(bx, top / 2, 96, 0.73, top, 14, 0x6e7682, { solid: true });
-      for (const dz of [-5.0, -1.7, 1.7, 5.0])
-        if (CBZ.roomSeatAnchor)
-          CBZ.roomSeatAnchor(bx, 0, 96 + dz, Math.PI / 2, "bench", null, { cushion: top, floorBelow: 0 });
+  /* PULL-UP AND DIP STATION: three posts on base plates carrying two bars at
+     different heights (2.25 and 2.55 m), and a pair of parallel dip bars on
+     their own four posts. It was a 9 m box crossbar on two box sticks. The
+     posts and the dip frame are solid; the bars are overhead. */
+  (function pullups() {
+    const z = 110, posts = [4, 7.5, 11];
+    for (const px of posts) CBZ.colliders.push({ minX: px - 0.12, maxX: px + 0.12, minZ: z - 0.12, maxZ: z + 0.12 });
+    CBZ.colliders.push({ minX: 12.55, maxX: 13.65, minZ: z - 0.36, maxZ: z + 0.36, y0: 0, y1: 1.3 });
+    if (!K) return;
+    const plate = K.skin("galv", 0x9aa1a8);
+    for (const px of posts) {
+      stat(new THREE.BoxGeometry(0.3, 0.02, 0.3), plate, px, 0.01, z, { cast: false });
+      K.tube(px, 0, z, px, 2.7, z, 0.05, benchFrame, { seg: 10 });
+      stat(new THREE.CylinderGeometry(0.058, 0.058, 0.03, 10), benchFrame, px, 2.71, z, { cast: false });
     }
-  } else {
-    for (let i = 0; i < 3; i++) addBox(-17, 0.4 + i * 0.5, 96, 2.2, 0.4, 14 - i * 2, 0x6e7682, { solid: i === 0 });
-  }
+    K.tube(4, 2.25, z, 7.5, 2.25, z, 0.017, barSteel, { cast: false });
+    K.tube(7.5, 2.55, z, 11, 2.55, z, 0.017, barSteel, { cast: false });
+    for (const sz of [-0.28, 0.28]) {
+      for (const px of [12.65, 13.55]) K.tube(px, 0, z + sz, px, 1.25, z + sz, 0.03, benchFrame, { cast: false });
+      K.tube(12.6, 1.25, z + sz, 13.6, 1.25, z + sz, 0.022, barSteel, { cast: false });
+    }
+  })();
+  // BLEACHERS off the half-court's west sideline, facing it: three rows of
+  // aluminium plank on stringers (world/prisonkit.js), four seats a row. The
+  // old three stepped slabs stood on the court itself.
+  if (K) K.bleacher(-21.4, 88.9, 7.5, { rows: 3, seats: 4 });
 
   // ============================================================
   //  SALLY PORT — checkpoint flanking the gate, guard hut, transport
@@ -584,25 +580,49 @@
     doors: [{ side: "E", a0: 118.9, a1: 121.1 }], dado: 0x3f4751, dadoH: 1.1, base: 0x1d1f22,
     ceilingY: 2.8, ceiling: { kind: "acoustic", lights: "troffer", nx: 2, nz: 2 },
   });
-  addBox(-18, 3.4, 120, 8.4, 0.4, 8.4, 0x44505a, { cast: false }); // roof
-  addBox(-18, 1.7, 116.1, 3.0, 0.9, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.4, cast: false });
-  // a parked transport bus (big prop) on the east side
-  (function bus() {
-    const bx = 16, bz = 120;
-    addBox(bx, 1.5, bz, 4.6, 2.2, 9.0, 0x2b3a67, { solid: true });   // body
-    addBox(bx, 2.9, bz, 4.2, 0.6, 8.6, 0x223057, { cast: false });   // roof
-    for (let i = -3; i <= 3; i++) addBox(bx - 2.32, 1.8, bz + i * 1.2, 0.06, 0.7, 0.8, 0x0a0d18, { cast: false }); // windows
-    addBox(bx, 0.45, bz - 3.2, 1.0, 0.9, 0.5, 0x14181f, { cast: false }); // front wheel
-    addBox(bx, 0.45, bz + 3.2, 1.0, 0.9, 0.5, 0x14181f, { cast: false }); // rear wheel
-    addBox(bx - 2.34, 1.4, bz + 4.2, 0.06, 0.5, 0.3, 0xffd451, { emissive: 0x6a5510, ei: 0.5, cast: false }); // headlight
-  })();
-
-  // ---- service waste belongs at the workshop, not across circulation ----
-  function dumpster(x, z) {
-    addBox(x, 0.7, z, 3.0, 1.3, 1.7, 0x2f6b3a, { solid: true });
-    addBox(x, 1.45, z, 3.1, 0.2, 1.8, 0x274f2c, { cast: false });
+  // the hut's roof: a poured slab on its walls with a steel drip fascia
+  // (world/roofs.js knows it is roofed and hangs no second lid)
+  const hutRoof = addBox(-18, 3.4, 120, 8.4, 0.4, 8.4, 0x44505a, { cast: true });
+  if (K) {
+    K.skinBox(hutRoof, "concrete", 0x9ea3a8);
+    const fas = K.skin("steel", 0x3a4048);
+    for (const s of [-1, 1]) {
+      stat(new THREE.BoxGeometry(8.5, 0.22, 0.05), fas, -18, 3.45, 120 + s * 4.225, { cast: false });
+      stat(new THREE.BoxGeometry(0.05, 0.22, 8.5), fas, -18 + s * 4.225, 3.45, 120, { cast: false });
+    }
+    /* the hut's yard window, on its north face: tinted glass in a steel
+       frame over a concrete sill, the same pane on the inside face. It was a
+       glowing blue slab buried in the wall's own thickness. */
+    const gl = K.skin("steel", 0x141b22, 0.12), fr = K.skin("steel", 0x39424e), sill = K.skin("concrete", 0xa0a5aa);
+    for (const f of [-1, 1]) {
+      const zf = f < 0 ? 115.75 - 0.012 : 116.25 + 0.012;
+      stat(new THREE.BoxGeometry(1.6, 0.9, 0.02), gl, -18, 1.75, zf, { cast: false });
+      for (const s of [-1, 1]) {
+        stat(new THREE.BoxGeometry(1.72, 0.06, 0.05), fr, -18, 1.75 + s * 0.48, zf + f * 0.01, { cast: false });
+        stat(new THREE.BoxGeometry(0.06, 1.02, 0.05), fr, -18 + s * 0.83, 1.75, zf + f * 0.01, { cast: false });
+      }
+      stat(new THREE.BoxGeometry(0.04, 0.9, 0.03), fr, -18, 1.75, zf + f * 0.01, { cast: false });
+    }
+    stat(new THREE.BoxGeometry(1.84, 0.06, 0.16), sill, -18, 1.25, 115.7, { cast: false });
   }
-  dumpster(-21, 64);
+  /* THE TRANSPORT BUS (rebuilt 2026-09-28): the kit's prison bus
+     (world/prisonkit.js vehicle: white shell, screened window band, glazed
+     door, lamp clusters that are lenses, not glowing blobs) parked nose
+     north in a painted bay east of the walkway. It was a navy box with a box
+     roof, box wheels and a yellow emissive block for a headlight. The
+     cigarette pack at (16, 120) lies beside its west flank. */
+  if (K) {
+    const bx = 18.2, bz = 119;
+    K.vehicle("bus", bx, bz, 0);
+    for (const s of [-1, 1]) K.paint(bx + s * 2.0, bz, 0.12, 13.2, 0xe1c744);
+    K.paint(bx, bz - 6.6, 4.12, 0.12, 0xe1c744);
+  } else addBox(16, 1.5, 120, 2.6, 2.8, 11, 0xe4e6e2, { solid: true });
+
+  // service waste belongs at the workshop, not across circulation: a
+  // front-load dumpster with its back to the workshop's east wall, clear of
+  // the door lane and of the facade's window (it was a flat green box)
+  if (K) K.dumpster(-22.75, 59.8, -Math.PI / 2);
+  else addBox(-22.75, 0.7, 59.8, 1.7, 1.3, 2.0, 0x2f6b3a, { solid: true });
 
   // ---- a few cigarette packs to reward exploring the new wing ----
   if (CBZ.addPack) {
@@ -627,17 +647,17 @@
   // GEOMETRY IT IS BUILT AGAINST — measured, not guessed:
   //   perimeter inner faces  x = -43.5 / +43.5, south z = 127.5 (gate gap x +/-4)
   //   central path slab      x[-4.5,4.5], z 52..128
-  //   half-court             x[-19,-3]  z[85,107]      bleachers x[-18.1,-15.9] z[89,103]
+  //   half-court             x[-20.1,-5.1] z[84,98]   bleachers x[-23.5,-21] z[85.2,92.7]
   //   workshop  x[-42,-24] z[58,80]  door E z[66.9,71.1]
   //   chapel    x[ 24, 42] z[58,80]  door W z[66.9,71.1]
   //   infirmary x[ 26, 42] z[88,104] door W z[94,98]
   //   laundry   x[-42,-26] z[88,104] door E z[94,98]
-  //   sally port pillars (+/-6.5,118), boom y=3.4, barriers (+/-10,124)
+  //   transport bus bay      x[16.2,20.2] z[112.4,125.6]; dumpster x[-23.6,-21.9] z[58.7,60.9]
   //   guard hut x[-22,-14] z[116,124] door E z[118.9,121.1]
   // ROUTES HELD: the 9 m central path is never built on (only painted), every
   // door lane above stays clear by >= 1.2 m, and the exit gap x[-4,4] at
   // z=128 keeps both its width and its approach.
-  if (DRESS && PD) (function institutional() {
+  if (PD) (function institutional() {
     const WX = 43.5, SZ1 = 127.5;                 // perimeter inner faces
 
     // ---- 1. WAYFINDING PAINT: DELETED (2026-09-27) --------------------------
@@ -665,16 +685,16 @@
     // One table, four rooms. Each row is the shell rect, the wall the yard
     // sees, and where its door lane is — so nothing below is a hand-typed
     // coordinate that can drift away from the shell it belongs to.
-    //   [id, x0,x1,z0,z1, wallTop, doorSide, doorCenter, doorWidth, signY]
+    //   [id, x0,x1,z0,z1, wallTop, doorSide, doorCenter, doorWidth]
     const ROOMS = [
-      ["workshop", -42, -24, 58, 80, 6, "E", 69, 4.2, 5.4],
-      ["chapel", 24, 42, 58, 80, 6.5, "W", 69, 4.2, 5.8],
-      ["infirmary", 26, 42, 88, 104, 6, "W", 96, 4.0, 5.4],
-      ["laundry", -42, -26, 88, 104, 6, "E", 96, 4.0, 5.4],
+      ["workshop", -42, -24, 58, 80, 6, "E", 69, 4.2],
+      ["chapel", 24, 42, 58, 80, 6.5, "W", 69, 4.2],
+      ["infirmary", 26, 42, 88, 104, 6, "W", 96, 4.0],
+      ["laundry", -42, -26, 88, 104, 6, "E", 96, 4.0],
     ];
     for (const R of ROOMS) {
       const x0 = R[1] + 0.25, x1 = R[2] - 0.25, z0 = R[3] + 0.25, z1 = R[4] - 0.25;  // inner faces
-      const h = R[5], side = R[6], dc = R[7], dw = R[8], signY = R[9];
+      const h = R[5], side = R[6], dc = R[7], dw = R[8];
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, dz = z1 - z0;
       const east = side === "E";
       const wallX = east ? R[2] : R[1];                     // the wall the door is in
@@ -683,20 +703,15 @@
       const dirIn = east ? -1 : 1;                          // into the room from that wall
 
       // A DOORWAY NEEDS A HEAD. roomShell splits its wall floor-to-top for the
-      // gap, so every door in this block is a 6 m slot. One box makes it an
-      // opening, with 3.1 m of clearance — nothing that walks is near it.
-      // It stops UNDER the existing sign band (a 0.2 m-deep box at the wall
-      // centreline): run the head to the wall top instead and it swallows the
-      // sign whole, which is how you lose four signs in one line.
-      const headTop = signY - 0.45;
-      addBox(wallX, (3.1 + headTop) / 2, dc, 0.5, headTop - 3.1, dw,
-        R[0] === "chapel" ? 0xbfb6a4 : 0x7c8590, { cast: false });
+      // gap, so every door in this block is a 6 m slot; this box closes it
+      // from 3.1 m to the wall top. Over the door, outside, the prison's caged
+      // wall lamp (world/cafeteria.js PD.lamp) FLUSH on the head: it is on the
+      // lights-out circuit. It was a grey box over a permanently glowing
+      // cream box, which at night was a lit block by the yard's flood masts.
+      addBox(wallX, (3.1 + h) / 2, dc, 0.5, h - 3.1, dw,
+        { workshop: 0x7c8590, chapel: 0xbfb6a4, infirmary: 0xd7dde2, laundry: 0x8a929c }[R[0]], { cast: false });   // the wall's own tone
       addBox(outX + (east ? 0.07 : -0.07), 3.02, dc, 0.14, 0.16, dw + 0.2, 0x5b6470, { cast: false }); // drip nose, tight under the head
-      // a hooded light over the door, outside — 2 meshes, and it is the thing
-      // that makes a doorway read as an entrance at night
-      addBox(outX + (east ? 0.16 : -0.16), 3.25, dc, 0.32, 0.14, 0.7, 0x3c424d, { cast: false });
-      addBox(outX + (east ? 0.16 : -0.16), 3.13, dc, 0.24, 0.1, 0.5, 0xffe9a8,
-        { emissive: 0xffcf66, ei: 0.8, cast: false });
+      if (PD.lamp) PD.lamp(outX + (east ? 0.06 : -0.06), 3.5, dc, east ? "x+" : "x-");
 
       // (the dado plank + scuff stripe, and the caged wall lamp, are gone: each
       // room has its finish layer and ceiling fittings now.) A service run
@@ -724,20 +739,13 @@
     // eats when the hall is full, and it is the one place in 6,700 m2 of apron
     // with a reason to stand still. Seats register with city/propuse.js at
     // their real cushion height, so bodies can be sat here with no new code.
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(9, 6.5),
-      new THREE.MeshLambertMaterial({ color: 0x6a7078 }));
-    pad.rotation.x = -Math.PI / 2; pad.position.set(18, 0.028, 60.6); pad.receiveShadow = true;
-    scene.add(pad);
+    if (K) K.ground(18, 60.6, 9, 6.5, "concrete", { y: 0.028 });
     PD.roundTable(15.6, 59.6, { seatTone: 0x3a6ea5 });
     PD.roundTable(20.4, 59.6, { seatTone: 0x2f6b3a, spin: 1.2 });
-    addBox(15.6, 0.815, 59.6, 0.5, 0.06, 0.36, 0xffd451, { cast: false });   // a left tray
-    // a lidded bin at the pad edge (the yard's only bussing point)
-    (function bin() {
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.34, 1.0, 10), CBZ.cmat(0x2f6b3a));
-      b.position.set(21.8, 0.5, 62.0); b.castShadow = true; b.receiveShadow = true; scene.add(b);
-      addBox(21.8, 1.03, 62.0, 0.82, 0.08, 0.82, 0x274f2c, { cast: false });
-      if (CBZ.colliders) CBZ.colliders.push({ minX: 21.42, maxX: 22.18, minZ: 61.62, maxZ: 62.38, ref: b });
-    })();
+    // the bussing point at the pad edge: a 55 gal drum, which is what a yard
+    // actually uses (it was a green cylinder with a square lid on it)
+    if (K) K.drum(21.8, 62.0, 0x2f5a3a);
+    if (CBZ.colliders) CBZ.colliders.push({ minX: 21.5, maxX: 22.1, minZ: 61.7, maxZ: 62.3, y0: 0, y1: 0.9 });
 
     // ---- 6. THE SALLY PORT ------------------------------------------------
     // The last thing between you and the gate should look like it was built to

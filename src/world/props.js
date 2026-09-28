@@ -1,7 +1,7 @@
 /* ============================================================
-   world/props.js — north-yard kit: the basketball hoop, a picnic table,
+   world/props.js — north-yard kit: a picnic table,
    the bench/bar/dumbbell/pull-up corner, the grounds crew's drums, and the
-   cell block's breaker box.
+   officer post's electrical panel.
 
    2026-09-27 DE-SLOP: every object here is the real thing drawn from
    world/prisonkit.js's yard kit (round plates and rims, a galvanised
@@ -10,14 +10,10 @@
    walkTop (its piece is the invisible top the platform lands on), the
    bench solid, the drum pallets solid + blockLOS with an unseen hull mesh
    as the piece root (LOS rays test the blocker list non-recursively).
-   breakerBox() is SKIPPED on purpose: it exports CBZ.breaker, a live
-   registry read by entities/security.js, systems/interactions.js and
-   systems/state.js. Piece meshRefs are expected to get reaped/replaced
-   later (B-stage instancing, structural collapse...) — until whatever
-   system owns "sabotage-able world objects" is itself piece-aware, this
-   stays on addBox so CBZ.breaker.box/.light keep pointing at stable,
-   never-reaped THREE.Mesh refs, exactly like world/towers.js's own
-   registry-backed props (also left untouched, out of scope for this file).
+   The breaker panel is NOT a piece: it exports CBZ.breaker, a live registry
+   read by entities/security.js, systems/interactions.js, systems/state.js
+   and systems/prisonnight.js, so its box and lamp are plain meshes with
+   stable refs.
 ============================================================ */
 (function () {
   "use strict";
@@ -60,40 +56,45 @@
   })(18, 30);
 
   // ---- outdoor workout area: a flat bench, a loaded bar on its stands, a
-  // dumbbell rack, a pull-up station. Round things are round now (the plates
-  // and dumbbells were black squares), and the bench stands on steel legs,
-  // not two grey cubes. ----
+  // dumbbell rack, a pull-up station. Every piece is the real kit: a vinyl
+  // pad on a square-tube frame with T-feet, round plates, galvanised bars
+  // set in concrete footings. ----
+  const HULL = new THREE.MeshBasicMaterial({ visible: false });
   (function gym(x, z) {
-    const frame = K ? K.skin("steel", 0x3a4048) : null, iron = K ? K.skin("steel", 0x1c1e22, 0.7) : null;
-    const bar = K ? K.skin("galv", 0xb4bcc4) : null;
-    // 1. the bench (F7 piece: solid, no blockLOS)
-    (function weightBench() {
-      const legGeo = new THREE.BoxGeometry(0.05, 0.46, 0.05), footGeo = new THREE.BoxGeometry(0.42, 0.04, 0.06);
-      const def = {
-        footprint: { hx: 0.25, hz: 0.9 },
-        y0: -0.07, y1: 0.07,
-        build: function () {
-          const top = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 1.7), CBZ.mat(0x222831, {}));
-          top.castShadow = true; top.receiveShadow = true;
-          for (const e of [-0.7, 0.7]) {
-            const leg = new THREE.Mesh(legGeo, CBZ.mat(0x4f5663, {})); leg.position.set(0, -0.28, e); top.add(leg);
-            const foot = new THREE.Mesh(footGeo, CBZ.mat(0x4f5663, {})); foot.position.set(0, -0.53, e); top.add(foot);
-          }
-          return top;
-        },
-      };
-      CBZ.spawnPiece(def, { pos: { x: x, y: 0.55, z: z }, solid: true, parent: ROOT });
-    })();
     if (!K) return;
+    const frame = K.skin("steel", 0x3a4048), iron = K.skin("steel", 0x1c1e22, 0.7);
+    const bar = K.skin("galv", 0xb4bcc4), vinyl = K.skin("steel", 0x202328, 0.45);
+    const footing = K.skin("concrete", 0x9ea3a8);
+    // 1. the bench (F7 piece: solid, no blockLOS). The piece root is its
+    // unseen hull; what you see is merged kit: a padded top on a plywood
+    // board, two square-tube legs on T-feet and a spine rail between them.
+    CBZ.spawnPiece({
+      footprint: { hx: 0.25, hz: 0.9 },
+      y0: -0.28, y1: 0.28,
+      build: function () { return new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.56, 1.7), HULL); },
+    }, { pos: { x: x, y: 0.28, z: z }, solid: true, parent: ROOT });
+    K.stat(new THREE.BoxGeometry(0.28, 0.02, 1.2), K.skin("concrete", 0x6f5a3d), x, 0.43, z, { cast: false });
+    K.stat(new THREE.BoxGeometry(0.29, 0.08, 1.2), vinyl, x, 0.48, z, {});
+    for (const e of [-0.45, 0.45]) {
+      K.stat(new THREE.BoxGeometry(0.05, 0.4, 0.05), frame, x, 0.22, z + e, { cast: false });
+      K.stat(new THREE.BoxGeometry(0.44, 0.04, 0.06), frame, x, 0.02, z + e, { cast: false });
+      for (const s of [-1, 1]) K.stat(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 10), iron, x + s * 0.2, 0.004, z + e, { cast: false });
+    }
+    K.stat(new THREE.BoxGeometry(0.05, 0.05, 0.95), frame, x, 0.395, z, { cast: false });
     // the bar on its stands at the head of the bench
-    for (const s of [-1, 1]) { K.tube(x + s * 0.5, 0, z - 0.95, x + s * 0.5, 1.2, z - 0.95, 0.03, frame, { cast: false }); K.stat(new THREE.BoxGeometry(0.1, 0.03, 0.4), frame, x + s * 0.5, 0.015, z - 0.95, { cast: false }); }
-    K.stat(new THREE.CylinderGeometry(0.014, 0.014, 2.0, 8), bar, x, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
     for (const s of [-1, 1]) {
-      K.stat(new THREE.CylinderGeometry(0.225, 0.225, 0.05, 20), iron, x + s * 0.78, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
-      K.stat(new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20), iron, x + s * 0.72, 1.2, z - 0.9, { rz: Math.PI / 2, cast: false });
+      K.tube(x + s * 0.5, 0, z - 0.95, x + s * 0.5, 1.26, z - 0.95, 0.03, frame, { cast: false });
+      K.stat(new THREE.BoxGeometry(0.1, 0.03, 0.4), frame, x + s * 0.5, 0.015, z - 0.95, { cast: false });
+      K.stat(new THREE.BoxGeometry(0.06, 0.1, 0.1), frame, x + s * 0.5, 1.2, z - 0.9, { cast: false });   // J-cup
+    }
+    K.stat(new THREE.CylinderGeometry(0.014, 0.014, 2.0, 8), bar, x, 1.265, z - 0.9, { rz: Math.PI / 2, cast: false });
+    for (const s of [-1, 1]) {
+      K.stat(new THREE.CylinderGeometry(0.225, 0.225, 0.05, 20), iron, x + s * 0.78, 1.265, z - 0.9, { rz: Math.PI / 2, cast: false });
+      K.stat(new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20), iron, x + s * 0.72, 1.265, z - 0.9, { rz: Math.PI / 2, cast: false });
     }
     // 2. the dumbbell rack: an A-frame of tube, two sloped rails, pairs of
-    // round dumbbells heaviest at the bottom. Still solid (an unseen box).
+    // round dumbbells heaviest at the bottom, sitting ON the rails. Still
+    // solid (an unseen box).
     const rx = x + 3.5, rz = z;
     const rack = addBox(rx, 0.4, rz, 1.8, 0.8, 0.6, 0x3c424d, { solid: true });
     rack.visible = false;
@@ -103,44 +104,96 @@
     }
     for (const t of [0, 1]) K.stat(new THREE.BoxGeometry(1.8, 0.04, 0.2), frame, rx, 0.45 + t * 0.3, rz + 0.12 - t * 0.14, { rx: 0.35, cast: false });
     for (let i = -2; i <= 2; i++) for (const t of [0, 1]) {
-      const dx = rx + i * 0.34, dy = 0.52 + t * 0.3, dz = rz + 0.12 - t * 0.14, r = t ? 0.06 : 0.08;
+      const dx = rx + i * 0.34, r = t ? 0.06 : 0.08, dy = 0.47 + t * 0.3 + r, dz = rz + 0.12 - t * 0.14;
       K.stat(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 6), bar, dx, dy, dz, { rz: Math.PI / 2, cast: false });
       for (const s of [-1, 1]) K.stat(new THREE.CylinderGeometry(r, r, 0.07, 14), iron, dx + s * 0.11, dy, dz, { rz: Math.PI / 2, cast: false });
     }
-    // 3. pull-up station: two timber posts set in the ground, a steel bar through them
+    // 3. pull-up station: two galvanised posts in poured footings, the bar
+    // clamped between them. (Was two 3.6 m brown boxes skinned as concrete.)
     const px = x - 3.5, pz = z;
-    skinTimber(addBox(px, 1.8, pz - 0.9, 0.2, 3.6, 0.2, 0x6e4a22, { solid: true }));
-    skinTimber(addBox(px, 1.8, pz + 0.9, 0.2, 3.6, 0.2, 0x6e4a22, { solid: true }));
-    K.stat(new THREE.CylinderGeometry(0.018, 0.018, 2.0, 8), bar, px, 3.3, pz, { rx: Math.PI / 2, cast: false });
+    for (const s of [-1, 1]) {
+      const post = addBox(px, 1.4, pz + s * 0.9, 0.12, 2.8, 0.12, 0x9aa1a8, { solid: true });
+      post.visible = false;
+      K.tube(px, 0, pz + s * 0.9, px, 2.62, pz + s * 0.9, 0.057, bar, { seg: 12 });
+      K.stat(new THREE.CylinderGeometry(0.2, 0.22, 0.06, 14), footing, px, 0.03, pz + s * 0.9, { cast: false });
+      K.stat(new THREE.CylinderGeometry(0.065, 0.065, 0.04, 12), frame, px, 2.64, pz + s * 0.9, { cast: false });   // cap
+      K.stat(new THREE.BoxGeometry(0.13, 0.09, 0.13), frame, px, 2.4, pz + s * 0.9, { cast: false });              // bar clamp
+    }
+    K.stat(new THREE.CylinderGeometry(0.018, 0.018, 1.8, 8), bar, px, 2.4, pz, { rx: Math.PI / 2, cast: false });
   })(-22, 32);
-  function skinTimber(m) { if (K && m) K.skinBox(m, "concrete", 0x7a5530, 1); return m; }
 
-  // ---- electrical breaker box inside the cell block ----
-  // SKIPPED for F7 (see file header): exports CBZ.breaker, a live registry
-  // read by entities/security.js, systems/interactions.js, systems/state.js.
-  // Stays on addBox until whatever owns "interactive sabotage props" is
-  // itself piece-aware.
+  /* ---- THE ELECTRICAL DISTRIBUTION PANEL in the officer's post ----------
+     It was a grey slab with a green glowing square, a yellow box and a latch
+     box, hung at x -3.5: INSIDE the staff doorway to the admin wing
+     (world/cellblock.js's CBZ.cellblockStaffGap, x[-4.2,-2.2]), floating in
+     the opening. Now a real surface-mount board on the duty board panel east
+     of the key cabinet: a steel cabinet with a hinged door (two hinge
+     barrels, a quarter-turn handle), a louvre, the hazard label, a pilot
+     lamp in a bezel, and two conduits running from its top to the tier slab
+     overhead (3.6 m). CBZ.breaker keeps its fields: `box` is the cabinet,
+     `light` the pilot lens with its OWN material (systems/interactions.js
+     and systems/state.js write its color + emissive). */
   (function breakerBox() {
-    const bx = -3.5, by = 1.8, bz = -43.4;
-    // main box container (grey metal box)
-    const box = addBox(bx, by, bz, 0.8, 1.2, 0.16, 0x6b7480, { solid: false, cast: true });
-    // dynamic indicator light
-    const light = addBox(bx - 0.22, by + 0.38, bz + 0.09, 0.1, 0.1, 0.04, 0x39ff88, { emissive: 0x14c258, ei: 1.2, cast: false });
-    // caution stripes / label panel
-    addBox(bx + 0.14, by - 0.22, bz + 0.09, 0.32, 0.42, 0.02, 0xffd451, { cast: false });
-    // door handle latch
-    addBox(bx + 0.32, by, bz + 0.09, 0.04, 0.18, 0.04, 0x2b2b2b, { cast: false });
-
-    // export it so the interaction system can access the breaker box and its light
+    const bx = 3.2, face = -43.14, by = 1.5;        // the duty board's front face (cellblock officerPost)
+    const W = 0.6, H = 0.9, D = 0.2, bz = face + D / 2;
+    const grey = K ? K.skin("steel", 0x9aa0a4) : null, dark = K ? K.skin("steel", 0x2b2f34, 0.6) : null;
+    const galv = K ? K.skin("galv", 0xb4bcc4) : null;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), grey || CBZ.mat(0x9aa0a4));
+    body.position.set(bx, by, bz); body.castShadow = true; body.receiveShadow = true;
+    ROOT.add(body);
+    // pilot lamp: a chrome bezel and a 36 mm lens. Private material.
+    const lampMat = new THREE.MeshLambertMaterial({ color: 0x39ff88, emissive: 0x14c258, emissiveIntensity: 1.0 });
+    const light = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.02, 14), lampMat);
+    light.rotation.x = Math.PI / 2;
+    light.position.set(bx + 0.18, by + 0.34, face + D + 0.028);
+    light.userData.dynamic = true;
+    ROOT.add(light);
+    if (K) {
+      const fz = face + D;                          // cabinet front
+      // the door: a slab 12 mm proud with a dark 4 mm shadow gap round it
+      K.stat(new THREE.BoxGeometry(W - 0.03, H - 0.03, 0.006), dark, bx, by, fz + 0.003, { cast: false });
+      K.stat(new THREE.BoxGeometry(W - 0.04, H - 0.04, 0.014), grey, bx, by, fz + 0.009, { cast: false });
+      for (const hy of [0.3, -0.3]) K.stat(new THREE.CylinderGeometry(0.009, 0.009, 0.08, 8), galv, bx - W / 2 + 0.006, by + hy, fz + 0.01, { cast: false });
+      // quarter-turn handle
+      K.stat(new THREE.CylinderGeometry(0.02, 0.02, 0.02, 12), dark, bx + W / 2 - 0.06, by, fz + 0.026, { rx: Math.PI / 2, cast: false });
+      K.stat(new THREE.BoxGeometry(0.018, 0.09, 0.016), dark, bx + W / 2 - 0.06, by - 0.03, fz + 0.04, { cast: false });
+      // louvre: a dark recess with six angled blades across the lower door
+      K.stat(new THREE.PlaneGeometry(0.34, 0.16), dark, bx - 0.04, by - 0.3, fz + 0.0165, { cast: false });
+      for (let i = 0; i < 6; i++) K.stat(new THREE.BoxGeometry(0.34, 0.024, 0.004), grey, bx - 0.04, by - 0.37 + i * 0.028, fz + 0.02, { rx: -0.6, cast: false });
+      // bezel for the pilot lamp
+      K.stat(new THREE.CylinderGeometry(0.026, 0.026, 0.014, 16), galv, bx + 0.18, by + 0.34, fz + 0.022, { rx: Math.PI / 2, cast: false });
+      // the hazard label: the standard yellow triangle and bolt, no words
+      K.stat(new THREE.PlaneGeometry(0.12, 0.105), hazardMat(), bx - 0.02, by + 0.2, fz + 0.0165, { cast: false });
+      // conduits: two EMT runs from knockouts in the top to the slab, with
+      // their couplings and one-hole straps back to the board
+      for (const cx of [bx - 0.14, bx + 0.1]) {
+        K.stat(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 12), dark, cx, by + H / 2 + 0.02, bz, { cast: false });   // connector
+        K.tube(cx, by + H / 2 + 0.04, bz, cx, 3.6, bz, 0.018, galv, { cast: false, seg: 10 });
+        for (const sy of [2.3, 2.85]) K.stat(new THREE.BoxGeometry(0.05, 0.022, 0.12), galv, cx, sy, bz - 0.04, { cast: false });
+        K.stat(new THREE.CylinderGeometry(0.023, 0.023, 0.04, 10), galv, cx, 3.2, bz, { cast: false });                // coupling
+      }
+    }
     CBZ.breaker = {
-      box,
+      box: body,
       light,
       sabotaged: false,
       timer: 0,
       x: bx,
-      z: bz + 0.7, // interaction trigger spot slightly in front of the box
+      z: face + 0.7, // the spot you stand on to throw it
     };
   })();
+  function hazardMat() {
+    const c = document.createElement("canvas"); c.width = 128; c.height = 112;
+    const g = c.getContext("2d");
+    g.fillStyle = "#9aa0a4"; g.fillRect(0, 0, 128, 112);
+    g.beginPath(); g.moveTo(64, 6); g.lineTo(122, 106); g.lineTo(6, 106); g.closePath();
+    g.fillStyle = "#16181a"; g.fill();
+    g.beginPath(); g.moveTo(64, 20); g.lineTo(110, 99); g.lineTo(18, 99); g.closePath();
+    g.fillStyle = "#e8c02a"; g.fill();
+    g.beginPath(); g.moveTo(70, 38); g.lineTo(52, 72); g.lineTo(64, 72); g.lineTo(56, 94); g.lineTo(78, 62); g.lineTo(66, 62); g.lineTo(74, 38); g.closePath();
+    g.fillStyle = "#16181a"; g.fill();
+    return new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(c) });
+  }
 
   // ---- the grounds crew's drums: two pallets of four 55-gallon drums by the
   // wall (solid, LOS-blocking cover, F7 spawnPiece). They were three 1.1 m
@@ -154,7 +207,6 @@
     board: new THREE.BoxGeometry(0.1, 0.022, 1.2),
     runner: new THREE.BoxGeometry(1.2, 0.1, 0.1),
   };
-  const HULL = new THREE.MeshBasicMaterial({ visible: false });
   function drumPallet(x, z, tones) {
     const def = {
       footprint: { hx: 0.6, hz: 0.6 },
@@ -163,12 +215,12 @@
         // the root is the stack's hull, unseen: guards' LOS rays test the
         // blocker list NON-recursively, so the cover must be a real mesh
         const g = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.02, 1.2), HULL);
-        const wood = CBZ.mat(0x8a6c45, {}), rim = CBZ.mat(0x3a4048, {});
+        const wood = K ? K.skin("concrete", 0x9c7a4e) : CBZ.mat(0x8a6c45), rim = K ? K.skin("steel", 0x3a4048) : CBZ.mat(0x3a4048);
         for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(DRUM.board, wood); b.position.set(-0.48 + i * 0.24, -0.395, 0); g.add(b); }
         for (const lz of [-0.5, 0, 0.5]) { const r = new THREE.Mesh(DRUM.runner, wood); r.position.set(0, -0.46, lz); g.add(r); }
         for (let k = 0; k < 4; k++) {
           const dx = (k % 2 ? 0.3 : -0.3), dz = (k < 2 ? -0.3 : 0.3);
-          const body = new THREE.Mesh(DRUM.body, CBZ.mat(tones[k % tones.length], {}));
+          const body = new THREE.Mesh(DRUM.body, (K ? K.skin("steel", tones[k % tones.length]) : CBZ.mat(tones[k % tones.length])));
           body.position.set(dx, 0.06, dz); body.castShadow = true; body.receiveShadow = true; g.add(body);
           for (const y of [-0.37, -0.09, 0.21, 0.49]) {
             const h = new THREE.Mesh(DRUM.hoop, rim); h.rotation.x = Math.PI / 2; h.position.set(dx, y, dz); g.add(h);

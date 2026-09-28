@@ -140,52 +140,25 @@
     // start/finish
     paint(cx + Ro - lanes * lw / 2, cz - L / 2 + 2, lanes * lw, 0.08, 0xe9e9e4, 0.036);   // on the track, not under it
   })();
-  // two courts on the east side: a painted court surface, lines ON it (they
-  // were laid 7 mm UNDER the court sheet and never showed), a hoop each end
+  // two full courts on the east side: a painted court surface, the
+  // boundary, and both halves' FIBA markings (world/prisonkit.js courtHalf),
+  // a gooseneck hoop behind each baseline
   function court(cx, cz) {
-    const w = 15, d = 28, ln = 0.06, PY = 0.034;
-    ground(cx, cz, w + 1, d + 1, "asphalt", { y: 0.03, a: "#3f5f4f", b: "#3a5849" });
+    const w = 15, d = 28, ln = 0.05, PY = 0.034;
+    ground(cx, cz, w + 2, d + 3, "asphalt", { y: 0.03, a: "#3f5f4f", b: "#3a5849" });
     const line = (x, z, ww, dd) => paint(x, z, ww, dd, 0xe9e9e4, PY);
     line(cx, cz - d / 2, w, ln); line(cx, cz + d / 2, w, ln); line(cx - w / 2, cz, ln, d); line(cx + w / 2, cz, ln, d);
-    line(cx, cz, w, ln);
-    const circ = new THREE.Mesh(new THREE.RingGeometry(1.75, 1.81, 32), CBZ.mat(0xc3c3be));
-    circ.rotation.x = -Math.PI / 2; circ.position.set(cx, PY, cz); ROOT.add(circ);
+    K.courtHalf(cx, cz - d / 2, 1, { halfLine: true, keyFill: 0x6b3a30 });
+    K.courtHalf(cx, cz + d / 2, -1, { keyFill: 0x6b3a30 });
     for (const s of [-1, 1]) {
-      // the key, and the hoop 1.2 m inside the baseline on a gooseneck
-      line(cx - 2.45, cz + s * (d / 2 - 2.9), ln, 5.8); line(cx + 2.45, cz + s * (d / 2 - 2.9), ln, 5.8); line(cx, cz + s * (d / 2 - 5.8), 4.9, ln);
       const pz = cz + s * (d / 2 + 0.6);
       K.hoop(cx, pz, 0, -s, { reach: 1.8 });
-      CBZ.colliders.push({ minX: cx - 0.25, maxX: cx + 0.25, minZ: pz - 0.25, maxZ: pz + 0.25, noBreach: true });
+      CBZ.colliders.push({ minX: cx - 0.2, maxX: cx + 0.2, minZ: pz - 0.2, maxZ: pz + 0.2, noBreach: true });
     }
   }
   court(-58.5, -82); court(-58.5, -48);
-  /* bleachers: four rows of aluminium plank seating on the track's west
-     side, facing east. Each row is two seat planks and a foot plank in front
-     and below it, carried on sloped stringers with a post under every row
-     (they were four stacked sheets on a forest of square sticks). */
-  function bleacher(x, z, len) {
-    const rows = 4, RD = 0.75, RR = 0.4, ys0 = 0.46;
-    const frames = Math.max(2, Math.round(len / 3.5) + 1);
-    const back = x - (rows - 1) * RD - 0.45, topY = ys0 + (rows - 1) * RR;
-    for (let t = 0; t < rows; t++) {
-      const xs = x - t * RD - 0.2, ys = ys0 + t * RR;
-      for (const k of [-0.09, 0.09]) stat(new THREE.BoxGeometry(0.16, 0.04, len), galv, xs + k, ys, z, { cast: k < 0 });
-      stat(new THREE.BoxGeometry(0.24, 0.035, len), galv, xs + 0.4, ys - 0.42 + 0.02, z, { cast: false });   // foot plank
-    }
-    for (let i = 0; i < frames; i++) {
-      const fz = z - len / 2 + 0.25 + (len - 0.5) * i / (frames - 1);
-      K.tube(x + 0.35, 0.0, fz, back, topY - 0.05, fz, 0.045, steelDark, { seg: 6, cast: false });           // stringer
-      for (let t = 0; t < rows; t++) {
-        const xs = x - t * RD - 0.2, ys = ys0 + t * RR;
-        K.tube(xs, 0, fz, xs, ys - 0.02, fz, 0.035, steelDark, { seg: 6, cast: false });                       // post under the row
-        K.tube(xs + 0.4, ys - 0.42, fz, xs - 0.1, ys - 0.02, fz, 0.022, steelDark, { seg: 5, cast: false });   // seat bracket
-      }
-      K.tube(back, 0, fz, back, topY + 1.0, fz, 0.035, galv, { seg: 6, cast: false });                         // rear guard post
-    }
-    for (const y of [topY + 0.5, topY + 1.0]) stat(new THREE.CylinderGeometry(0.025, 0.025, len, 6), galv, back, y, z, { rx: Math.PI / 2, cast: false });
-    CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
-  }
-  bleacher(-107.5, -70, 12); bleacher(-107.5, -46, 12);
+  // bleachers on the track's west side, facing the infield (world/prisonkit.js)
+  K.bleacher(-107.5, -70, 12); K.bleacher(-107.5, -46, 12);
   // the weight pit under a mono-pitch canopy, on a poured pad
   (function weights() {
     const x0 = -66, x1 = -51, z0 = -30, z1 = -16;
@@ -315,39 +288,10 @@
     K.skinBox(lintel, "panel", 0x9aa3ad);
     K.program("sally-port", PEN.x0, PEN.x1, OUT.z0, PEN.z1);
   })();
-  /* ---- LOCAL SOLIDS. A service yard's kit is vans, a bus, dumpsters and
-       pumps, and a box does not read as any of them: they are drawn from a
-       SIDE PROFILE extruded across their width with rounded edges, which is
-       how a body panel, a dumpster or a pump housing is actually shaped.
-       Pieces are built about the object's own origin, then turned by `ry`
-       and merged through the kit. ---- */
-  const glassDark = K.skin("steel", 0x141b22, 0.12), rubber = K.skin("steel", 0x1c1e22, 0.7);
-  const navy = K.skin("steel", 0x1f3a5f), lensWhite = K.skin("steel", 0xe6e7e3), lensRed = K.skin("steel", 0xa3261f);
-  const yellow = K.skin("steel", 0xd9b233);
-  // outline: [[lz, y], ...] around the side; arches: [{c, r, y}] cut out of the sill line at y
-  function profileGeo(outline, width, bevel, arches, sill) {
-    const pts = outline.slice();
-    if (arches && arches.length) {
-      // the sill runs from the last outline point (rear, low) forward to the first (front, low)
-      const sorted = arches.slice().sort((a, b) => b.c - a.c);
-      for (const a of sorted) {
-        pts.push([a.c + a.r, sill]);
-        for (let k = 1; k < 10; k++) { const t = Math.PI * k / 10; pts.push([a.c + a.r * Math.cos(t), sill + a.r * Math.sin(t)]); }
-        pts.push([a.c - a.r, sill]);
-      }
-    }
-    const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p[0], p[1])));
-    const depth = Math.max(0.05, width - 2 * bevel);
-    const g = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6 });
-    g.translate(0, 0, -depth / 2);
-    g.rotateY(-Math.PI / 2);                      // shape x -> local z, extrusion -> local x
-    return g;
-  }
-  function place(g, mat, x, z, ry, o) { return stat(g, mat, x, 0, z, Object.assign({ ry: ry }, o || {})); }
-  function lbox(lx, y, lz, w, h, d, rx) { const g = new THREE.BoxGeometry(w, h, d); if (rx) g.rotateX(rx); g.translate(lx, y, lz); return g; }
-  function lwheel(lx, lz, r, w) {
-    const g = new THREE.CylinderGeometry(r, r, w, 18); g.rotateZ(Math.PI / 2); g.translate(lx, r, lz); return g;
-  }
+  // a profile-extruded solid turned by `ry` (the fuel dispensers); vehicles
+  // and dumpsters are the kit's own (world/prisonkit.js K.vehicle / K.dumpster)
+  const place = (g, mat, x, z, ry, o) => stat(g, mat, x, 0, z, Object.assign({ ry: ry }, o || {}));
+  const rubber = K.skin("steel", 0x1c1e22, 0.7), yellow = K.skin("steel", 0xd9b233);
 
   // the gatehouse beside the pen: a small glazed room with a counter
   (function gatehouse() {
@@ -428,18 +372,8 @@
       if (done || !CBZ.prisonLights || !CBZ.prisonLights.rooms) return; done = true;
       CBZ.prisonLights.rooms.push({ id: "warehouse", x0: x0, x1: x1, z0: z0, z1: z1 });
     }; })());
-    /* dumpsters on the dock apron: front-load bins, the body wider at the top
-       than the base, two lids, fork pockets on the flanks, on casters */
-    const binGreen = K.skin("steel", 0x2f6b3a), lid = K.skin("steel", 0x1c1e22, 0.7);
-    const binGeo = () => profileGeo([[-0.62, 0.14], [-0.82, 1.3], [0.78, 1.36], [0.72, 0.14]], 2.0, 0.03);
-    for (let i = 0; i < 3; i++) {
-      const dx = 62 + i * 3.6, dz = z1 + 8;
-      place(binGeo(), binGreen, dx, dz, Math.PI / 2);
-      for (const s of [-1, 1]) place(lbox(s * 0.5, 1.39, -0.02, 0.98, 0.03, 1.66), lid, dx, dz, Math.PI / 2, { cast: false });
-      for (const s of [-1, 1]) place(lbox(s * 1.03, 0.95, 0, 0.08, 0.16, 1.5), steelDark, dx, dz, Math.PI / 2, { cast: false });
-      for (const s of [-1, 1]) for (const t of [-1, 1]) place(lwheel(s * 0.8, t * 0.5, 0.07, 0.05), rubber, dx, dz, Math.PI / 2, { cast: false });
-      CBZ.colliders.push({ minX: dx - 0.9, maxX: dx + 0.9, minZ: dz - 1.05, maxZ: dz + 1.05, noBreach: true });
-    }
+    // three front-load dumpsters on the dock apron
+    for (let i = 0; i < 3; i++) K.dumpster(62 + i * 3.6, z1 + 8, Math.PI / 2);
   })();
   /* the fuel island: two dispensers under a canopy. A dispenser is a
      plinth, a white cabinet, a head with a display each face, a nozzle
@@ -456,7 +390,7 @@
     for (const s of [-1, 1]) {
       const px = x + s * 1.6;
       stat(new THREE.BoxGeometry(1.0, 0.12, 0.55), steelDark, px, 0.26, z, { cast: false });
-      place(profileGeo([[-0.22, 0.32], [-0.22, 1.35], [-0.26, 1.4], [-0.26, 1.95], [0.26, 1.95], [0.26, 1.4], [0.22, 1.35], [0.22, 0.32]], 0.9, 0.03), cab, px, z, 0);
+      place(K.profileGeo([[-0.22, 0.32], [-0.22, 1.35], [-0.26, 1.4], [-0.26, 1.95], [0.26, 1.95], [0.26, 1.4], [0.22, 1.35], [0.22, 0.32]], 0.9, 0.03), cab, px, z, 0);
       stat(new THREE.BoxGeometry(0.94, 0.12, 0.6), red, px, 1.9, z, { cast: false });
       for (const f of [-1, 1]) {
         stat(new THREE.BoxGeometry(0.42, 0.26, 0.01), screen, px, 1.62, z + f * 0.295, { cast: false });
@@ -480,77 +414,14 @@
     }
     K.sign("NO SMOKING", x, 3.6, z + 3.1, 2.4, 0.6, 0, "#f3f3ef", "#b3261e");
   })();
-  /* the motor pool: painted bays along the east fence, three transport vans
-     and a bus in them. Each body is one rounded shell from its side profile
-     (bonnet, raked screen, roof, wheel arches cut out of the sill), then
-     glass, the stripe, lamps, bumpers, mirrors and tyres with hubs. Front
-     is local -z. */
-  function vehicle(kind, x, z, ry) {
-    const hub = K.skin("galv", 0xb4bcc4);
-    if (kind === "bus") {
-      const L = 5.5, W = 2.5;
-      place(profileGeo([[-L, 0.45], [-L - 0.05, 1.4], [-L + 0.05, 2.75], [-L + 0.3, 3.02], [L - 0.2, 3.02], [L, 2.8], [L, 0.45]], W, 0.06,
-        [{ c: -3.9, r: 0.58 }, { c: 3.4, r: 0.58 }], 0.45), steelWhite, x, z, ry);
-      for (const s of [-1, 1]) {
-        const sx = s * (W / 2 + 0.004);
-        place(lbox(sx, 2.15, 0.2, 0.01, 0.78, 9.6), glassDark, x, z, ry, { cast: false });                // window band
-        for (let k = 0; k <= 10; k++) place(lbox(sx + s * 0.004, 2.15, -4.6 + k * 0.96, 0.012, 0.8, 0.07), steelWhite, x, z, ry, { cast: false });
-        place(lbox(sx, 1.3, 0, 0.01, 0.2, 2 * L - 0.2), navy, x, z, ry, { cast: false });                 // the stripe
-      }
-      place(lbox(W / 2 + 0.006, 1.55, -L + 0.75, 0.01, 2.2, 0.9), glassDark, x, z, ry, { cast: false });     // the door
-      place(lbox(0, 2.1, -L - 0.085, 2.2, 1.1, 0.02, 0.074), glassDark, x, z, ry, { cast: false });                  // windscreen
-      place(lbox(0, 2.25, L + 0.065, 2.0, 0.6, 0.02), glassDark, x, z, ry, { cast: false });                  // rear window
-      place(lbox(0, 0.62, -L - 0.12, 2.5, 0.24, 0.16), steelDark, x, z, ry, { cast: false });                // bumpers
-      place(lbox(0, 0.62, L + 0.1, 2.5, 0.24, 0.16), steelDark, x, z, ry, { cast: false });
-      for (const s of [-1, 1]) {
-        place(lbox(s * 0.9, 1.0, -L - 0.1, 0.32, 0.18, 0.04), lensWhite, x, z, ry, { cast: false });
-        place(lbox(s * 0.95, 1.0, L + 0.07, 0.2, 0.3, 0.04), lensRed, x, z, ry, { cast: false });
-        place(lbox(s * 1.45, 2.3, -L + 0.1, 0.06, 0.4, 0.2), steelDark, x, z, ry, { cast: false });     // mirrors on their arms
-        place(lbox(s * 1.35, 2.55, -L + 0.12, 0.2, 0.04, 0.04), steelDark, x, z, ry, { cast: false });
-        for (const c of [-3.9, 3.4]) {
-          place(lwheel(s * 1.05, c, 0.5, 0.3), rubber, x, z, ry);
-          place(lwheelHub(s * 1.21, c, 0.5), hub, x, z, ry, { cast: false });
-        }
-      }
-    } else {
-      const W = 2.0;
-      place(profileGeo([[-2.75, 0.4], [-2.82, 0.78], [-2.72, 1.05], [-2.25, 1.2], [-1.6, 2.15], [-1.35, 2.4], [2.68, 2.44], [2.78, 2.34], [2.78, 0.45]], W, 0.06,
-        [{ c: 1.85, r: 0.46 }, { c: -1.85, r: 0.46 }], 0.4), steelWhite, x, z, ry);
-      // windscreen on the rake, cab side windows, the rear door glass
-      place(lbox(0, 1.715, -1.98, 1.8, 1.1, 0.02, Math.atan2(2.25 - 1.6, 2.15 - 1.2)), glassDark, x, z, ry, { cast: false });
-      for (const s of [-1, 1]) {
-        const sx = s * (W / 2 + 0.004);
-        place(lbox(sx, 1.72, -1.2, 0.01, 0.62, 0.8), glassDark, x, z, ry, { cast: false });
-        place(lbox(sx, 1.05, 0.2, 0.01, 0.18, 4.8), navy, x, z, ry, { cast: false });                     // the stripe
-        place(lbox(s * 0.45, 1.85, 2.85, 0.62, 0.5, 0.01), glassDark, x, z, ry, { cast: false });
-        place(lbox(s * 0.68, 0.95, -2.83, 0.34, 0.16, 0.04), lensWhite, x, z, ry, { cast: false });
-        place(lbox(s * 0.9, 1.1, 2.84, 0.12, 0.34, 0.03), lensRed, x, z, ry, { cast: false });
-        place(lbox(s * 1.12, 1.6, -1.72, 0.05, 0.26, 0.16), steelDark, x, z, ry, { cast: false });       // mirrors
-        for (const c of [-1.85, 1.85]) {
-          place(lwheel(s * 0.84, c, 0.37, 0.24), rubber, x, z, ry);
-          place(lwheelHub(s * 0.97, c, 0.37), hub, x, z, ry, { cast: false });
-        }
-      }
-      place(lbox(0, 0.85, -2.84, 1.3, 0.3, 0.03), steelDark, x, z, ry, { cast: false });                    // grille
-      place(lbox(0, 0.5, -2.87, 2.0, 0.2, 0.14), steelDark, x, z, ry, { cast: false });                     // bumpers
-      place(lbox(0, 0.5, 2.85, 2.0, 0.2, 0.12), steelDark, x, z, ry, { cast: false });
-      place(lbox(0, 1.6, 2.85, 0.02, 1.9, 0.015), steelDark, x, z, ry, { cast: false });                    // the rear door split
-    }
-    const hw = kind === "bus" ? 1.4 : 1.2, hd = kind === "bus" ? 5.6 : 3.1;
-    const c = Math.cos(ry), s = Math.sin(ry);
-    const P = (ox, oz) => [x + ox * c + oz * s, z - ox * s + oz * c];
-    const c0 = P(-hw, -hd), c1 = P(hw, hd), c2 = P(-hw, hd), c3 = P(hw, -hd);
-    CBZ.colliders.push({ minX: Math.min(c0[0], c1[0], c2[0], c3[0]), maxX: Math.max(c0[0], c1[0], c2[0], c3[0]), minZ: Math.min(c0[1], c1[1], c2[1], c3[1]), maxZ: Math.max(c0[1], c1[1], c2[1], c3[1]), noBreach: true });
-  }
-  function lwheelHub(lx, lz, r) {
-    const g = new THREE.CylinderGeometry(r * 0.55, r * 0.6, 0.03, 14); g.rotateZ(Math.PI / 2); g.translate(lx, r, lz); return g;
-  }
+  // the motor pool: painted bays along the east fence, three transport vans
+  // and the bus in them (world/prisonkit.js K.vehicle)
   for (let i = 0; i < 7; i++) paint(SY.x1 - 4.5, -60 + i * 3.6, 9, 0.12, 0xe9e9e4);
   paint(SY.x1 - 9, -60 + 3 * 3.6, 0.12, 6 * 3.6, 0xe9e9e4);
-  vehicle("van", SY.x1 - 4.5, -58.2, Math.PI / 2);
-  vehicle("van", SY.x1 - 4.5, -51.0, Math.PI / 2);
-  vehicle("van", SY.x1 - 4.5, -43.8, Math.PI / 2);
-  vehicle("bus", 96, -30, Math.PI / 2);
+  K.vehicle("van", SY.x1 - 4.5, -58.2, Math.PI / 2);
+  K.vehicle("van", SY.x1 - 4.5, -51.0, Math.PI / 2);
+  K.vehicle("van", SY.x1 - 4.5, -43.8, Math.PI / 2);
+  K.vehicle("bus", 96, -30, Math.PI / 2);
   paint(96, -30, 13, 0.12, 0xe9e9e4); paint(96, -26.5, 13, 0.12, 0xe9e9e4); paint(96, -33.5, 13, 0.12, 0xe9e9e4);
   // masts
   mast(56, SY.z0 + 4, 18, { x: 0.7, z: 0.7 }); mast(56, SY.z1 - 4, 18, { x: 0.7, z: -0.7 }); mast(SY.x1 - 3, -50, 18, { x: -1, z: 0 });

@@ -21,7 +21,26 @@
   const VG = CBZ.prisonVehicleGate || { x0: 92, x1: 112 };
   const wire = K.skin("galv", 0xdfe4e9);
 
-  const run = (x0, z0, x1, z1, r) => K.coilRun(x0, z0, x1, z1, YH + 0.55, r || 0.36, wire);
+  /* A coil is carried by the wall under it, so it stops where a gate is cut
+     (world/yard.js CBZ.prisonWallGaps): it ran straight over the z 22 and
+     z 84 gateways, a helix hanging in the air over the opening. */
+  const GAPS = CBZ.prisonWallGaps || [];
+  const run = (x0, z0, x1, z1, r) => {
+    if (x0 === x1) {
+      let a = Math.min(z0, z1);
+      const b = Math.max(z0, z1);
+      const cuts = GAPS.filter((g) => g.axis === "z" && Math.abs(g.x - x0) < 0.6 && g.z + g.w / 2 > a && g.z - g.w / 2 < b)
+        .sort((p, q) => p.z - q.z);
+      for (const g of cuts) {
+        const e = g.z - g.w / 2 - 0.3;
+        if (e - a > 0.5) K.coilRun(x0, a, x0, e, YH + 0.55, r || 0.36, wire);
+        a = g.z + g.w / 2 + 0.3;
+      }
+      if (b - a > 0.5) K.coilRun(x0, a, x0, b, YH + 0.55, r || 0.36, wire);
+      return;
+    }
+    K.coilRun(x0, z0, x1, z1, YH + 0.55, r || 0.36, wire);
+  };
 
   // ---- the old compound's own walls (now internal division fences)
   run(N.x0, N.z0 + 1, N.x0, N.z1 - 1);

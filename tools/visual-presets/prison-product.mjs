@@ -340,22 +340,16 @@ async function stageProduct(input) {
     if (PC) { PC.handsUp = true; }
     try { if (CBZ.animChar && PC) for (let i = 0; i < 40; i++) CBZ.animChar(PC, 0, 1 / 60); } catch (_) {}
     if (sl) {
-      const HY = sl.head.position.y;
+      // entities/searchlight.js aims its own lamp, beam and pool: pin the aim and tick it
       const tx = spot.x, tz = spot.z - 0.6;
-      sl.target.set(tx, 0, tz); sl.tgt.position.copy(sl.target);
-      sl.pool.position.x = tx; sl.pool.position.z = tz;
-      const dir = sl.target.clone().sub(new T.Vector3(sl.gx, HY, sl.gz));
-      const len = dir.length();
-      sl.cone.scale.y = len / 14;
-      sl.cone.scale.x = sl.cone.scale.z = sub.coneWidth || 0.55;      // a tighter beam than the sweep's 6 m base
-      sl.cone.position.set((sl.gx + tx) / 2, HY / 2, (sl.gz + tz) / 2);
-      sl.cone.lookAt(sl.target); sl.cone.rotateX(Math.PI / 2);
-      sl.spot.distance = len + 30; sl.spot.intensity = sub.beam || 9; sl.spot.angle = sub.beamAngle || 0.065; sl.spot.penumbra = 0.5;
-      sl.cone.material.opacity = sub.coneAlpha || 0.4; sl.pool.material.opacity = 0.34;
-      sl.cone.material.color.setHex(0xfff3c0); sl.pool.material.color.setHex(0xfff3c0);
+      sl.aimAt = { x: tx, z: tz };
       sl.disabled = 0;
+      if (sub.poolR) sl.poolRadius = sub.poolR;
+      if (CBZ.searchlightTick) CBZ.searchlightTick(0);
+      sl.spot.distance = 120; sl.spot.intensity = sub.beam || 9; sl.spot.angle = sub.beamAngle || 0.065; sl.spot.penumbra = 0.5;
+      const HY = sl.spot.position.y, len = Math.hypot(sl.gx - tx, HY, sl.gz - tz);
       // core/matrixskip.js gates updateMatrixWorld; updateWorldMatrix is the ungated path (the batch.js trap)
-      for (const o of [sl.tgt, sl.cone, sl.pool, sl.spot]) { try { o.updateWorldMatrix(true, true); } catch (_) { o.updateMatrixWorld(true); } }
+      for (const o of [sl.tgt, sl.cone, sl.pool, sl.spot, sl.head]) { try { o.updateWorldMatrix(true, true); } catch (_) { o.updateMatrixWorld(true); } }
       note.beamFrom = { x: sl.gx, z: sl.gz, y: HY, len: Math.round(len) };
     }
     if (PC && PC.group) PC.group.visible = true;

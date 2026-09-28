@@ -104,13 +104,6 @@
   // world/yard.js parses BEFORE this file and reads the same flag for its gate
   // gaps, so whichever runs first sets it and the other no-ops.
   if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
-  /* PRISON_PROP_HONESTY_V1 (declared world/cellblock.js, which parses first)
-     is the one-line revert for the 2026-08-15 prop pass in this file: the
-     three cage racks, segregation's registered bunks, the powerhouse plant
-     and central control's video wall all fall back to the geometry they
-     shipped with. Read `!== false` so this file still degrades on its own if
-     the cell house is absent. */
-  const HONEST = CBZ.CONFIG.PRISON_PROP_HONESTY_V1 !== false;
   if (!CBZ.CONFIG.PRISON_WINGS_V1) return;
 
   const OUT = CBZ.WORLD.wings || { x0: -124, x1: 124, z0: -116, z1: 128 };
@@ -173,14 +166,13 @@
        poured, and world/ground.js's own texture verb keeps the two halves of
        the compound reading as one surface. Four slabs, laid AROUND the old
        compound so nothing is drawn twice over authored paving. ---- */
-  const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
   // OUTDOOR hardstanding: sRGB-tagged with real poured-concrete tones, the
   // same path world/southblock.js's apron and prisonkit's ground() take (it
   // was untagged #5b636c, which the sRGB output lifted to a pale blue sheet).
   // Tiles stay SQUARE (6.3 m, two pours per tile) and the slab is the lowest
   // layer, pushed back in depth so every patch laid on it wins at distance.
   function slab(x, z, w, d, a, b, kind) {
-    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
+    const tex = CBZ.prisonGroundTex ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : (CBZ.checkerTex ? CBZ.checkerTex(a, b, 2) : null);
     if (!tex) return null;
     tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));
@@ -501,9 +493,6 @@
     pane(xf, (z0 + z1) / 2, 0.12, z1 - z0);
     for (let i = 0; i * 0.44 < z1 - z0 - 0.2; i++) addBox(xf, ch / 2, z0 + 0.2 + i * 0.44, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
     addBox(xf, ch + 0.02, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
-    // the three room-sized "shelves" this used to end with — see cageRack below
-    if (!HONEST) for (let s2 = 0; s2 < 3; s2++)
-      addBox((x0 + x1) / 2, 0.62 + s2 * 0.72, (z0 + z1) / 2, (x1 - x0) - 1.6, 0.07, (z1 - z0) - 1.6, 0xb9a184, { cast: false });
     return cfg;
   }
 
@@ -537,7 +526,6 @@
      reason the 3.2-5.6 s pick is worth starting.                            */
   const RACK_D = 0.55, RACK_DECKS = [0.40, 0.80, 1.24, 1.70], RACK_H = 1.86;
   function cageRack(cfg) {
-    if (!HONEST) return cfg;
     const L = cfg.len, F = cfg.face || 1;        // F: which way the back sheet faces
     for (const y of RACK_DECKS)
       addBox(cfg.x, y - 0.025, cfg.z, L - 0.16, 0.05, RACK_D - 0.08, 0x9aa2aa, { cast: false });
@@ -575,19 +563,13 @@
     wall: 0x7c8590, floor: 0x69707a, side: "E", dc: 20, dw: 6,
     fin: { floor: "slab", floorTint: 0x9ea2a5, dado: 0x5f6975, dadoH: 1.4,
       ceilingY: 6.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "pendant", nx: 7, nz: 7, drop: 1.0 } } });
-  addBox(-66, 6.6, 20, 0.2, 0.9, 5.0, 0xc85c00, { cast: false });        // sign band
   // shop floor: benches down the middle, stock racks on the back wall. Solid,
   // because world/clutter.js's rule is that anything a body can approach is
   // solid or it reads as a decoy.
+  // (world/prisonkit.js workbench: hardwood top, steel frame, a vice)
   for (let i = 0; i < 5; i++) {
     const z = 2 + i * 9;
-    addBox(-100, 0.8, z, 5.0, 0.18, 1.4, 0x8a939d, { solid: true });
-    addBox(-102.2, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
-    addBox(-97.8, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
-    addBox(-99.0, 1.02, z, 0.42, 0.32, 0.42, 0x2a2f38, { cast: false });   // vice
-    addBox(-84, 0.8, z, 5.0, 0.18, 1.4, 0x8a939d, { solid: true });
-    addBox(-86.2, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
-    addBox(-81.8, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
+    if (K) { K.workbench(-100, z, 5.0, 1.4, { vice: 1 }); K.workbench(-84, z, 5.0, 1.4, { vice: i & 1 ? -1 : 0, clutter: !!(i & 1) }); }
   }
   /* STOCK RACKS (2026-09-27): six solid 2.6 m grey cubes became pallet racks
      — orange beams on blue uprights, three levels, cartons and banded stock on
@@ -625,9 +607,7 @@
   // the rack stands on the crib's back wall (z=44, the shop's own), facing the
   // door: the three tools are the first thing you see through the bars.
   cageRack({ x: -110, z: 43.35, len: 5.0, face: 1 });
-  stockCage(HONEST
-    ? [["Hacksaw Blade", -110, 0.80, 43.23], ["Lockpick", -108, 0.80, 43.23], ["Pickaxe", -112, 0.80, 43.23]]
-    : [["Hacksaw Blade", -110, 0.80, 36], ["Lockpick", -108.4, 0.80, 34.6], ["Pickaxe", -111.6, 0.80, 34.6]]);
+  stockCage([["Hacksaw Blade", -110, 0.80, 43.23], ["Lockpick", -108, 0.80, 43.23], ["Pickaxe", -112, 0.80, 43.23]]);
   const cribDoor = makeDoor({
     id: "prison-tool-crib", label: "The tool crib", pick: 3.2, bars: true, lb: 5,
     axis: "x", a0: CRIB_DOOR.a0, a1: CRIB_DOOR.a1, fixed: CRIB_DOOR.fixed, color: 0x39424e,
@@ -655,46 +635,84 @@
      of it solid, the banks LOS-blocking, and laid so that straight line from
      the door to the far wall no longer exists. Still unlocked, still
      empty-handed: an authored outcome, now with authored geometry. */
-  if (!HONEST) {                                     // the shipped powerhouse, byte for byte
-    for (let i = 0; i < 3; i++) {
-      addBox(-104 + i * 8, 2.0, 70, 4.0, 4.0, 4.0, 0x7d8794, { solid: true });
-      addBox(-104 + i * 8, 4.6, 70, 1.1, 1.2, 1.1, 0x5b6470, { cast: false });
-      addBox(-104 + i * 8, 5.9, 70, 0.7, 1.4, 0.7, 0x4a525c, { cast: false });
-    }
-    for (let i = 0; i < 5; i++) addBox(-98, 6.4, 76 + i * 3.4, 24, 0.34, 0.34, 0x66717c, { cast: false });
-    addBox(-88, 1.1, 88, 2.4, 2.2, 1.2, 0x515a66, { solid: true });
-    addBox(-88, 1.7, 87.35, 1.8, 0.9, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });
-  }
-  for (let i = 0; HONEST && i < 3; i++) {
-    const bx = -104 + i * 8;
-    addBox(bx, 2.0, 70, 4.0, 4.0, 4.0, 0x7d8794, { solid: true });                    // boiler
-    addBox(bx, 4.6, 70, 1.1, 1.2, 1.1, 0x5b6470, { cast: false });                    // header drum, on the boiler's own footprint
-    // the uptake: a full-height duct off the boiler's west shoulder. It used
-    // to be a 0.7 x 1.4 box floating at 5.9 m with four metres of air under it.
-    addBox(bx - 2.6, 4.0, 70, 0.8, 8.0, 0.8, 0x4a525c, { solid: true, blockLOS: true });
+  /* THE PLANT, BUILT AS PLANT (2026-09-28). The three boilers were 4 m grey
+     cubes with a smaller cube on top, the pipe banks were square boxes and
+     the switchgear a grey box with a glowing blue slab on its face. Same
+     footprints, same colliders, same sightline blockers (the uptakes and the
+     middle run of each bank), now the real things: a horizontal fire-tube
+     boiler in aluminium-clad insulation on concrete saddles, its burner on
+     the east end and the flue breeching off the west end into a round stack
+     that goes up through the ceiling; insulated pipe runs in three colours
+     on stanchions with flanges; a switchboard of steel sections with doors,
+     handles, a meter window and pilot lamps. */
+  const clad = K.skin("galv", 0xc9ced3), plantDark = K.skin("steel", 0x4a525c), plantRed = K.skin("steel", 0x8a2b22, 0.5);
+  const plantGreen = K.skin("steel", 0x3f5a46, 0.5), plantConc = K.skin("concrete", 0xa0a5aa), gauge = K.skin("steel", 0xe6e7e3, 0.3);
+  const stat = K.stat;
+  for (let i = 0; i < 3; i++) {
+    const bx = -104 + i * 8, bz = 70;
+    CBZ.colliders.push({ minX: bx - 2.0, maxX: bx + 2.3, minZ: bz - 2.0, maxZ: bz + 2.0 });
+    for (const sx of [-1.1, 1.1]) stat(new THREE.BoxGeometry(0.4, 0.75, 2.4), plantConc, bx + sx, 0.375, bz, { uv: 1 });     // saddles
+    stat(new THREE.CylinderGeometry(1.4, 1.4, 3.6, 28), clad, bx, 2.05, bz, { rz: Math.PI / 2 });                          // the shell
+    for (let k = 0; k < 5; k++) stat(new THREE.TorusGeometry(1.41, 0.022, 4, 28), plantDark, bx - 1.6 + k * 0.8, 2.05, bz, { ry: Math.PI / 2, cast: false });
+    for (const ex of [-1, 1]) stat(new THREE.CylinderGeometry(1.36, 1.36, 0.1, 28), plantDark, bx + ex * 1.83, 2.05, bz, { rz: Math.PI / 2, cast: false });   // end plates
+    // the burner on the east door, its fan housing and the gas train under it
+    stat(new THREE.BoxGeometry(0.4, 0.8, 0.8), plantRed, bx + 2.08, 1.9, bz, {});
+    stat(new THREE.CylinderGeometry(0.28, 0.28, 0.3, 16), plantRed, bx + 2.08, 1.9, bz + 0.55, { rx: Math.PI / 2, cast: false });
+    K.tube(bx + 2.1, 0.0, bz - 0.5, bx + 2.1, 1.5, bz - 0.5, 0.05, K.skin("steel", 0xd9b233), { cast: false });
+    // the header: a steam drum on two risers, a stop valve with its wheel, a gauge
+    for (const hx of [-0.6, 0.6]) K.tube(bx + hx, 3.4, bz, bx + hx, 3.75, bz, 0.09, plantDark, { cast: false });
+    stat(new THREE.CylinderGeometry(0.34, 0.34, 1.6, 18), clad, bx, 4.05, bz, { rz: Math.PI / 2, cast: false });
+    K.tube(bx, 4.35, bz, bx, 4.75, bz, 0.08, plantDark, { cast: false });
+    stat(new THREE.TorusGeometry(0.2, 0.02, 5, 16), plantRed, bx, 4.8, bz, { rx: Math.PI / 2, cast: false });
+    stat(new THREE.CylinderGeometry(0.12, 0.12, 0.05, 16), gauge, bx + 1.2, 2.9, bz - 1.2, { rx: Math.PI / 2, cast: false });
+    // the flue breeching off the west end into the stack, up through the 6.6 m ceiling
+    K.tube(bx - 1.85, 2.6, bz, bx - 2.3, 2.6, bz, 0.3, plantDark, { cast: false });
+    const up = addBox(bx - 2.6, 4.0, bz, 0.8, 8.0, 0.8, 0x4a525c, { solid: true, blockLOS: true, cast: false });
+    up.visible = false;                                 // the sightline blocker and collider; the stack is drawn round
+    stat(new THREE.CylinderGeometry(0.38, 0.38, 6.6, 18), clad, bx - 2.6, 3.3, bz, {});
+    for (const y of [1.2, 3.0, 4.8]) stat(new THREE.TorusGeometry(0.39, 0.025, 4, 18), plantDark, bx - 2.6, y, bz, { rx: Math.PI / 2, cast: false });
   }
   /* A PIPE BANK IS PIPES. Three runs stacked to 1.6 m on stanchions every
-     3.5 m, each run its own collider — cover you crouch behind and a wall you
-     cannot walk through, which is what the five overhead lines were pretending
-     to be. blockLOS only on the middle run: one blocker per bank is what a
-     guard's sight line needs, three would be two wasted rays per bank. */
+     3.5 m, cover you crouch behind and a wall you cannot walk through. The
+     collider is the bank's footprint; the sightline blocker is its middle run. */
   function pipeBank(bx0, bx1, z) {
     const len = bx1 - bx0, cx = (bx0 + bx1) / 2;
-    const ys = [0.62, 1.02, 1.42];
-    for (let i = 0; i < ys.length; i++)
-      addBox(cx, ys[i], z, len, 0.34, 0.34, i === 1 ? 0x5b6470 : 0x66717c,
-        { solid: true, blockLOS: i === 1 });
-    for (let s = 0; s * 3.5 <= len; s++)
-      addBox(bx0 + Math.min(s * 3.5, len), 0.80, z, 0.16, 1.60, 0.52, 0x515a66, { solid: true });
+    const ys = [0.62, 1.02, 1.42], mats = [clad, plantRed, plantGreen];
+    CBZ.colliders.push({ minX: bx0, maxX: bx1, minZ: z - 0.26, maxZ: z + 0.26 });
+    const los = addBox(cx, ys[1], z, len, 0.34, 0.34, 0x5b6470, { blockLOS: true, cast: false });
+    los.visible = false;
+    for (let i = 0; i < ys.length; i++) {
+      stat(new THREE.CylinderGeometry(0.16, 0.16, len, 16), mats[i], cx, ys[i], z, { rz: Math.PI / 2 });
+      for (let f = 0; f * 3.5 + 1.75 < len; f++)
+        stat(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16), plantDark, bx0 + 1.75 + f * 3.5, ys[i], z, { rz: Math.PI / 2, cast: false });   // flanges
+    }
+    for (let s = 0; s * 3.5 <= len; s++) {
+      const px = bx0 + Math.min(s * 3.5, len);
+      stat(new THREE.BoxGeometry(0.12, 1.66, 0.12), plantDark, px, 0.83, z, { cast: false });
+      stat(new THREE.BoxGeometry(0.3, 0.02, 0.5), plantDark, px, 0.01, z, { cast: false });                         // base plate
+      for (const y of ys) stat(new THREE.BoxGeometry(0.1, 0.04, 0.46), plantDark, px, y - 0.18, z, { cast: false });   // pipe shoe
+    }
   }
-  if (HONEST) { pipeBank(-110, -98, 76); pipeBank(-96, -85, 83); pipeBank(-110, -99, 89); }
-  // switchgear: a row, not a lone cabinet. Each carries its own live panel.
-  for (let i = 0; HONEST && i < 3; i++) {
-    const sx = -88 - i * 6;
-    addBox(sx, 1.1, 92, 2.4, 2.2, 1.1, 0x515a66, { solid: true });
-    // the live panel: 5 cm of emissive skin on the cabinet's own face, inside
-    // the cabinet's collider rect. A facing, like a sign band — not a prop.
-    addBox(sx, 1.7, 91.42, 1.8, 0.9, 0.05, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });
+  pipeBank(-110, -98, 76); pipeBank(-96, -85, 83); pipeBank(-110, -99, 89);
+  // switchgear: a row of sections, not a lone cabinet
+  const panelGrey = K.skin("steel", 0x8a939d, 0.5), meterGlass = K.skin("steel", 0x141b22, 0.12);
+  const pilot = [0xc0392b, 0x2e9e4f, 0xd9a21b].map((c) => new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.5 }));
+  for (let i = 0; i < 3; i++) {
+    const sx = -88 - i * 6, sz = 92, fz = sz - 0.55;
+    CBZ.colliders.push({ minX: sx - 1.2, maxX: sx + 1.2, minZ: sz - 0.55, maxZ: sz + 0.55 });
+    stat(new THREE.BoxGeometry(2.4, 0.1, 1.1), plantDark, sx, 0.05, sz, { cast: false });                        // plinth
+    stat(new THREE.BoxGeometry(2.4, 2.1, 1.1), panelGrey, sx, 1.15, sz, { uv: 1 });
+    for (let d = 0; d < 3; d++) {
+      const dx = sx - 0.8 + d * 0.8;
+      stat(new THREE.BoxGeometry(0.02, 2.0, 0.012), plantDark, dx + 0.4, 1.15, fz - 0.006, { cast: false });   // door seam
+      stat(new THREE.BoxGeometry(0.03, 0.18, 0.04), plantDark, dx + 0.28, 1.2, fz - 0.02, { cast: false });   // handle
+      stat(new THREE.BoxGeometry(0.34, 0.22, 0.012), meterGlass, dx, 1.75, fz - 0.006, { cast: false });      // meter window
+      for (let k = 0; k < 3; k++) {
+        const g = new THREE.CylinderGeometry(0.018, 0.018, 0.02, 8); g.rotateX(Math.PI / 2);
+        stat(g, pilot[k], dx - 0.1 + k * 0.1, 1.5, fz - 0.01, { cast: false });
+      }
+      stat(new THREE.BoxGeometry(0.5, 0.3, 0.01), plantDark, dx, 0.45, fz - 0.005, { cast: false });         // louvre plate
+    }
   }
 
   // ---------------------------------------------------------------- EAST WING
@@ -706,19 +724,34 @@
     wall: 0x848d98, floor: 0x646b74, side: "W", dc: 20, dw: 5,
     fin: { floor: "slab", floorTint: 0x969b9f, dado: 0x5d6873, dadoH: 1.3,
       ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "vapor", nx: 8, nz: 5 } } });
-  addBox(58, 6.1, 20, 0.2, 0.9, 4.2, 0x9a3b3b, { cast: false });
   // sixteen singles in two facing rows off a central corridor. Partitions are
   // real colliders and deliberately NOT noBreach: blowing through a seg wall
   // is precisely the route the charge table exists for.
+  const segPane = new THREE.MeshLambertMaterial({ color: 0x39424e, transparent: true, opacity: 0.05, depthWrite: false });
+  const segBar = K.skin("steel", 0x2a2f38, 0.5);
   for (let r = 0; r < 2; r++) {
     const zf = r ? 34 : 6;                                  // the cell-front plane
     for (let i = 0; i < 8; i++) {
       const cx = 62 + i * 6.2;
-      addBox(cx - 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true });
-      // the barred front: a welded grille you can see the bunk through
-      for (let b = 0; b < 6; b++) addBox(cx - 2.6 + b * 1.0, 1.6, zf, 0.09, 3.2, 0.09, 0x2a2f38, { cast: false });
-      addBox(cx, 3.24, zf, 6.0, 0.14, 0.14, 0x2a2f38, { cast: false });
-      addBox(cx, 1.75, zf, 6.0, 3.5, 0.16, 0x39424e, { solid: true, blockLOS: false });
+      const part = addBox(cx - 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true });
+      K.skinBox(part, "block", 0x7d8691);
+      /* the barred front: a real welded grille, 22 mm round bar on 180 mm
+         centres between flat-bar rails, a door leaf framed in heavier section
+         with its food slot. It was six square sticks a metre apart in front of
+         an OPAQUE dark slab, so nobody could see the bunk it was "showing".
+         The slab is still the collider (addBox keeps its hooks) but it is a
+         clear pane now, like the cages'. */
+      const pane = addBox(cx, 1.75, zf, 6.0, 3.5, 0.16, 0x39424e, { solid: true, blockLOS: false });
+      pane.material = segPane; pane.castShadow = false; pane.receiveShadow = false;
+      for (let b = 0; cx - 2.9 + b * 0.18 < cx + 2.95; b++) {
+        const bx = cx - 2.9 + b * 0.18;
+        if (bx > cx + 1.0 && bx < cx + 1.18) continue;                  // the door's hinge stile goes here
+        stat(new THREE.CylinderGeometry(0.011, 0.011, 3.3, 6, 1, true), segBar, bx, 1.65, zf, { cast: false });
+      }
+      for (const y of [0.06, 1.15, 2.25, 3.28]) stat(new THREE.BoxGeometry(6.0, 0.08, 0.02), segBar, cx, y, zf, { cast: false });
+      for (const dx of [0.1, 1.09]) stat(new THREE.BoxGeometry(0.07, 3.3, 0.07), segBar, cx + dx, 1.65, zf, { cast: false });   // the door's stiles
+      stat(new THREE.BoxGeometry(0.4, 0.14, 0.05), segBar, cx + 0.6, 1.1, zf, { cast: false });                                  // food slot
+      stat(new THREE.BoxGeometry(0.06, 0.16, 0.08), segBar, cx + 0.2, 1.3, zf, { cast: false });                                 // lock box
       /* and what is inside it: a bunk, a stainless combo, nothing else.
 
          THE BUNK IS A BED NOW. It was two raw addBox slabs — a 1.9 x 0.2
@@ -738,17 +771,16 @@
          They stay singles, which is what a segregation cell is.
          Degrade (no cellblock.js) redraws the two slabs it always was. */
       const bz = zf + (r ? 6.4 : -6.4);
-      if (HONEST && CBZ.prisonBunk) CBZ.prisonBunk({ id: "seg-" + r + "-" + i, x: cx - 1.5, z: bz, along: "x", double: false, blanket: 0x4a5b46, punitive: true });
-      else {
-        addBox(cx - 1.5, 0.44, bz, 1.9, 0.2, 0.86, 0x8a939d, { solid: true });
-        addBox(cx - 1.5, 0.60, bz, 1.75, 0.14, 0.78, 0x4a5b46, { cast: false });
-      }
-      // the combo is SOLID here where it is not in the cell house: a seg cell
-      // is 6.2 x 8 m against the cell house's 3.8 m, so there is floor to
-      // spare and no reason a man should walk through the toilet.
-      addBox(cx + 2.0, 0.36, zf + (r ? 7.2 : -7.2), 0.62, 0.72, 0.64, 0xc7ccd2, { solid: HONEST });
+      if (CBZ.prisonBunk) CBZ.prisonBunk({ id: "seg-" + r + "-" + i, x: cx - 1.5, z: bz, along: "x", double: false, blanket: 0x4a5b46, punitive: true });
+      // the stainless combi against the cell's back wall (world/prisonkit.js).
+      // SOLID here where it is not in the cell house: a seg cell is 6.2 x 8 m,
+      // so there is floor to spare and no reason a man walks through the toilet.
+      const wf = zf + (r ? 7.85 : -7.85), inn = r ? -1 : 1;
+      if (K) K.combi(cx + 2.0, wf, 0, inn);
+      CBZ.colliders.push({ minX: cx + 1.7, maxX: cx + 2.3, minZ: Math.min(wf, wf + inn * 0.66), maxZ: Math.max(wf, wf + inn * 0.66), y0: 0, y1: 0.8 });
     }
-    addBox(87, 1.75, zf + (r ? 8 : -8), 54, 3.5, 0.3, 0x6f7883, { solid: true, blockLOS: true });  // back wall
+    const back = addBox(87, 1.75, zf + (r ? 8 : -8), 54, 3.5, 0.3, 0x6f7883, { solid: true, blockLOS: true });  // back wall
+    if (K) K.skinBox(back, "block", 0x7d8691);
   }
   stockCage([["Contraband Map", 104.5, 0.62, 41.0]]);
   const segDoor = makeDoor({
@@ -763,7 +795,6 @@
     wall: 0xb6bcc2, floor: 0x9aa2aa, side: "W", dc: 78, dw: 5,
     fin: { floor: "quarry", floorTint: 0xffffff, dado: 0xffffff, tile: 0xf1f0ea, dadoH: 2.0, rail: 0x9aa3ad,
       ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xdfe1e0, lights: "vapor", nx: 10, nz: 7 } } });
-  addBox(58, 6.1, 78, 0.2, 0.9, 4.2, 0x2f9e6a, { cast: false });
   /* THE COOK LINE (rebuilt 2026-09-27). It was four 4.4 x 1.0 x 2.2 grey
      blocks with a darker slab on top and five pale blocks for prep tables.
      Now: one back-to-back island of heavy-duty ranges (oven doors both
@@ -805,6 +836,8 @@
     for (const kx of [90.2, 92.2]) {
       const k = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.42, 0.7, 16), CBZ.cmat(0xb9c0c7));
       k.position.set(kx, 0.75, IZ); ROOT.add(k);
+      // the trunnion the pan tilts on, into both pedestals (it hung in the gap between them)
+      if (K) K.stat(new THREE.CylinderGeometry(0.045, 0.045, 1.5, 10), K.skin("steel", 0x8a939d), kx, 0.82, IZ, { rx: Math.PI / 2, cast: false });
       addBox(kx, 0.45, IZ - 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
       addBox(kx, 0.45, IZ + 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
       CBZ.colliders.push({ minX: kx - 0.6, maxX: kx + 0.6, minZ: IZ - 0.8, maxZ: IZ + 0.8, y0: 0, y1: 1.1 });
@@ -824,16 +857,14 @@
   })();
   // WALK-IN COOLER: a room inside a room, and the only place in the compound
   // out of every sightline in it. Not a locked prize — a hiding place.
-  addBox(64, 1.55, 92.2, 12, 3.1, 0.3, 0x9aa2aa, { solid: true, blockLOS: true });
-  addBox(58.15, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true });
-  addBox(70, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true });
-  addBox(64, 3.2, 90.4, 12, 0.2, 7.4, 0x8892a0, { cast: false, blockLOS: true });
+  for (const w of [addBox(64, 1.55, 92.2, 12, 3.1, 0.3, 0x9aa2aa, { solid: true, blockLOS: true }),
+    addBox(58.15, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true }),
+    addBox(70, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true }),
+    addBox(64, 3.2, 90.4, 12, 0.2, 7.4, 0x8892a0, { cast: false, blockLOS: true })]) if (K) K.skinBox(w, "corrugated", 0xc9ced3);
   const KNIFE_DOOR = { a0: 102.2, a1: 105.2, fixed: 84 };
   cage({ x0: 98, x1: 110, z0: 84, z1: 96, side: "W", open: "N", h: 2.9, gap: KNIFE_DOOR });
   cageRack({ x: 104, z: 95.35, len: 5.0, face: 1 });
-  stockCage(HONEST
-    ? [["Shiv", 104, 0.80, 95.23], ["Razor Blade", 105.6, 0.80, 95.23], ["Hatchet", 102.4, 0.80, 95.23]]
-    : [["Shiv", 104, 0.80, 90], ["Razor Blade", 105.6, 0.80, 91.4], ["Hatchet", 102.4, 0.80, 91.4]]);
+  stockCage([["Shiv", 104, 0.80, 95.23], ["Razor Blade", 105.6, 0.80, 95.23], ["Hatchet", 102.4, 0.80, 95.23]]);
   const knifeDoor = makeDoor({
     id: "prison-knife-cage", label: "The knife cage", pick: 4.4, bars: true, lb: 5,
     axis: "x", a0: KNIFE_DOOR.a0, a1: KNIFE_DOOR.a1, fixed: KNIFE_DOOR.fixed, color: 0x39424e,
@@ -846,28 +877,49 @@
     wall: 0xc0b8a6, floor: 0x7d7466, side: "W", dc: 115, dw: 4,
     fin: { floor: "vct", floorTint: 0xc4bcaa, dado: 0x8f8574, dadoH: 1.1,
       ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", nx: 12, nz: 5 } } });
-  addBox(62, 5.2, 115, 0.2, 0.9, 3.4, 0x3a6ea5, { cast: false });
-  for (let i = 0; i < 6; i++) {                            // visit booths: a counter and a screen
-    const x = 66 + i * 5;
-    addBox(x, 0.55, 110, 3.4, 1.1, 0.9, 0xa9a294, { solid: true });
-    addBox(x, 1.7, 110, 3.2, 1.2, 0.1, 0xa9d9ea, { cast: false });
+  /* VISIT BOOTHS (rebuilt 2026-09-28): six stalls across the room, each a
+     laminate counter on a steel base, a glazed partition in a steel frame
+     from the counter to head height, side screens between the stalls, a
+     handset on each side, and a bolted pedestal stool each side. The
+     "screen" was an opaque pale-blue slab. */
+  const boothBase = K.skin("steel", 0x8f8574, 0.6), boothTop = K.skin("steel", 0xa9a294, 0.45);
+  const boothFrame = K.skin("steel", 0x39424e), boothGlass = K.skin("glass"), phone = K.skin("steel", 0x1c1e22, 0.6);
+  const stoolSeat = K.skin("steel", 0x52606d, 0.5), stoolPost = K.skin("galv", 0x9aa0a8);
+  for (let i = 0; i < 6; i++) {
+    const x = 66 + i * 5, z = 110;
+    CBZ.colliders.push({ minX: x - 1.7, maxX: x + 1.7, minZ: z - 0.45, maxZ: z + 0.45 });
+    stat(new THREE.BoxGeometry(3.4, 0.72, 0.5), boothBase, x, 0.36, z, { uv: 1 });
+    stat(new THREE.BoxGeometry(3.5, 0.04, 0.9), boothTop, x, 0.74, z, { uv: 1 });
+    // the glazing: a pane in a frame from the counter to 2.3 m
+    const pg = new THREE.PlaneGeometry(3.2, 1.5); stat(pg, boothGlass, x, 1.51, z, { cast: false });
+    stat(new THREE.BoxGeometry(3.3, 0.06, 0.08), boothFrame, x, 2.29, z, { cast: false });
+    stat(new THREE.BoxGeometry(3.3, 0.05, 0.08), boothFrame, x, 0.78, z, { cast: false });
+    // side screens between the stalls, both sides of the glass
+    for (const s of [-1, 1]) {
+      stat(new THREE.BoxGeometry(0.05, 1.55, 0.9), boothFrame, x + s * 1.66, 1.535, z, { cast: false });
+      // the handsets, on the side screens at ear height, one each side of the glass
+      for (const f of [-1, 1]) stat(new THREE.BoxGeometry(0.05, 0.2, 0.07), phone, x + s * 1.6, 1.35, z + f * 0.3, { cast: false });
+    }
+    // bolted pedestal stools, one each side
+    for (const f of [-1, 1]) {
+      const sz = z + f * 1.6;
+      stat(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 16), stoolSeat, x, 0.43, sz, {});
+      stat(new THREE.CylinderGeometry(0.035, 0.05, 0.4, 8), stoolPost, x, 0.2, sz, { cast: false });
+      stat(new THREE.CylinderGeometry(0.16, 0.18, 0.02, 12), stoolPost, x, 0.01, sz, { cast: false });
+    }
     if (CBZ.roomSeatAnchor) {
       try {
         CBZ.roomSeatAnchor(x, 0, 108.4, Math.PI, "stool", null, { cushion: 0.46, floorBelow: 0 });
         CBZ.roomSeatAnchor(x, 0, 111.6, 0, "stool", null, { cushion: 0.46, floorBelow: 0 });
       } catch (e) {}
     }
-    for (const s of [-1, 1]) { addBox(x, 0.42, 110 + s * 1.6, 0.44, 0.08, 0.44, 0x52606d, { cast: false }); addBox(x, 0.21, 110 + s * 1.6, 0.14, 0.42, 0.14, 0x9aa0a8, { cast: false }); }
   }
   const PROP_DOOR = { a0: 101.5, a1: 104.5, fixed: 116 };
   cage({ x0: 96, x1: 110, z0: 104, z1: 116, side: "W", open: "S", h: 2.9, gap: PROP_DOOR });
   // this cage opens SOUTH, so its back wall is z=104 and the rack faces -z.
   cageRack({ x: 103, z: 104.65, len: 6.0, face: -1 });
-  stockCage(HONEST
-    ? [["Stolen Wallet", 102, 0.80, 104.77], ["Cash Roll", 104, 0.80, 104.77],
-      ["Luxury Watch", 100.4, 0.80, 104.77], ["Burner Phone", 105.6, 0.80, 104.77]]
-    : [["Stolen Wallet", 102, 0.80, 110], ["Cash Roll", 104, 0.80, 111.4],
-      ["Luxury Watch", 100.4, 0.80, 108.6], ["Burner Phone", 105.6, 0.80, 109.2]]);
+  stockCage([["Stolen Wallet", 102, 0.80, 104.77], ["Cash Roll", 104, 0.80, 104.77],
+      ["Luxury Watch", 100.4, 0.80, 104.77], ["Burner Phone", 105.6, 0.80, 104.77]]);
   const propDoor = makeDoor({
     id: "prison-property", label: "The property cage", pick: 5.6, bars: true, lb: 5,
     axis: "x", a0: PROP_DOOR.a0, a1: PROP_DOOR.a1, fixed: PROP_DOOR.fixed, color: 0x39424e,
@@ -887,39 +939,69 @@
     id: "prison-control", label: "Central control", keys: ["Gun-Room Key"], lb: 7,
     axis: "x", a0: -2, a1: 2, fixed: -78, color: 0x5c4326,
   });
-  // the console: a desk of panels facing a bank of monitors. The BUTTON is the
-  // one thing in this room that is not scenery.
-  addBox(0, 0.62, -96, 16, 1.24, 2.0, 0x39424e, { solid: true });
-  addBox(0, 1.28, -96, 15.4, 0.12, 1.8, 0x2a2f38, { cast: false });
-  for (let i = 0; i < 12; i++)
-    addBox(-7.0 + i * 1.27, 1.36, -96.5, 0.55, 0.06, 0.34, [0x6fb7ff, 0x39ff88, 0xffb347][i % 3],
-      { emissive: [0x2a5e85, 0x14c258, 0x7a4f18][i % 3], ei: 0.7, cast: false });
-  /* THE VIDEO WALL. What was here: eight 3.0 x 1.0 x 0.1 black slabs (0x0d1117)
-     with an emissive face on each, hung at y 2.5 and y 3.9 on the north wall
-     with nothing behind them and nothing under them — sixteen boxes a body
-     walks straight through, and the upper row was four screens at 3.9 m that
-     nobody standing in the room can read.
-     The relay gear that throws every lock in the compound has to be somewhere,
-     and this is the room that claims to do it: it is a 2 m equipment run along
-     the north wall now, solid, four cabinets with a metre of service gap
-     between them, and ONE row of screens skinned onto their faces at 1.45 m —
-     the height a duty officer actually reads. The bezel is gone; a screen is
-     the lit face, the same way a sign band is a lit face. */
-  for (let i = 0; !HONEST && i < 8; i++) {          // the shipped monitor wall, byte for byte
-    const x = -12.5 + (i % 4) * 8.4, y = i < 4 ? 3.9 : 2.5;
-    addBox(x, y, -107.5, 3.0, 1.0, 0.1, 0x0d1117, { cast: false });
-    addBox(x, y, -107.42, 2.7, 0.82, 0.05, 0x2f6b8f, { emissive: 0x1b4c6b, ei: 0.6, cast: false });
+  /* THE CONSOLE (rebuilt 2026-09-28): one 16 m operator desk drawn from its
+     side profile (a toe kick, the writing ledge on the officer's side, the
+     sloped panel rising to a monitor shelf), with twelve switch panels on
+     the slope, their pilot lamps, a row of monitors on the shelf and, at the
+     officer's edge, THE BUTTON: a red mushroom in a yellow guard collar. It
+     was a grey 16 m box with twelve glowing coloured tiles. The BUTTON is
+     the one thing in this room that is not scenery. */
+  const deskMat = K.skin("steel", 0x39424e, 0.55), deskTop = K.skin("steel", 0x5d636c, 0.4), inset = K.skin("steel", 0x1c1f23, 0.6);
+  const bezel = K.skin("steel", 0x14171b, 0.5);
+  const screen = new THREE.MeshLambertMaterial({ color: 0x1d3f55, emissive: 0x1b4c6b, emissiveIntensity: 0.45 });
+  const leds = [0x2e9e4f, 0xd9a21b, 0xc0392b].map((c) => new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.6 }));
+  CBZ.colliders.push({ minX: -8, maxX: 8, minZ: -97, maxZ: -95 });
+  const desk = K.profileGeo([[0.92, 0], [0.92, 0.1], [1.0, 0.1], [1.0, 0.9], [1.06, 0.93], [1.06, 0.97], [0.45, 0.97], [-0.45, 1.3], [-1.0, 1.3], [-1.0, 0]], 16, 0.02);
+  stat(desk, deskMat, 0, 0, -96, {});
+  const slope = Math.atan2(0.33, 0.9);
+  for (let i = 0; i < 12; i++) {
+    const px = -7.0 + i * 1.27;
+    const g = new THREE.BoxGeometry(0.9, 0.012, 0.8); g.rotateX(slope); stat(g, inset, px, 1.16, -96.0, { cast: false });
+    for (let k = 0; k < 6; k++) {
+      const lg = new THREE.BoxGeometry(0.04, 0.02, 0.03); lg.rotateX(slope);
+      const t = (k % 3) / 2 - 0.5, row = k < 3 ? 0.2 : -0.1;
+      stat(lg, leds[(i + k) % 3], px + t * 0.6, 1.175 + row * Math.sin(slope), -96.0 - row * Math.cos(slope), { cast: false });
+    }
   }
-  for (let i = 0; HONEST && i < 4; i++) {
+  stat(new THREE.BoxGeometry(16.1, 0.03, 0.62), deskTop, 0, 1.0, -95.3, { cast: false });                    // the writing ledge
+  for (let i = 0; i < 8; i++) {
+    const mx = -7.0 + i * 2.0;
+    stat(new THREE.BoxGeometry(0.62, 0.4, 0.05), bezel, mx, 1.62, -96.72, {});
+    stat(new THREE.BoxGeometry(0.57, 0.35, 0.01), screen, mx, 1.62, -96.69, { cast: false });
+    stat(new THREE.BoxGeometry(0.06, 0.14, 0.06), bezel, mx, 1.37, -96.75, { cast: false });
+  }
+  /* THE EQUIPMENT RUN: four relay cabinets along the north wall, solid, a
+     metre of service gap between them, vented doors, and the duty screens on
+     their tops at reading height. (Where eight 3 m black slabs used to hang
+     with nothing behind them.) */
+  const cab = K.skin("steel", 0x2a2f38, 0.5), vent = K.skin("steel", 0x1a1d22, 0.7);
+  for (let i = 0; i < 4; i++) {
     const x = -12.6 + i * 8.4;
-    addBox(x, 1.0, -107.2, 7.4, 2.0, 1.0, 0x2a2f38, { solid: true });                // relay cabinet
-    addBox(x, 1.45, -106.68, 5.6, 1.05, 0.05, 0x2f6b8f, { emissive: 0x1b4c6b, ei: 0.6, cast: false });
+    const c = addBox(x, 1.0, -107.2, 7.4, 2.0, 1.0, 0x2a2f38, { solid: true });
+    K.skinBox(c, "steel", 0x2a2f38);
+    for (let d = 0; d < 6; d++) {
+      const dx = x - 3.08 + d * 1.233;
+      stat(new THREE.BoxGeometry(0.015, 1.9, 0.01), vent, dx + 0.616, 1.0, -106.695, { cast: false });   // door seams
+      stat(new THREE.BoxGeometry(0.7, 0.25, 0.01), vent, dx, 1.65, -106.695, { cast: false });             // vent grille
+      stat(new THREE.BoxGeometry(0.03, 0.2, 0.04), vent, dx + 0.5, 1.1, -106.68, { cast: false });         // handle
+    }
+    for (let m = 0; m < 3; m++) {
+      const mx = x - 2.4 + m * 2.4;
+      stat(new THREE.BoxGeometry(1.1, 0.66, 0.06), bezel, mx, 2.45, -107.25, {});
+      stat(new THREE.BoxGeometry(1.03, 0.59, 0.01), screen, mx, 2.45, -107.215, { cast: false });
+      stat(new THREE.BoxGeometry(0.1, 0.12, 0.1), bezel, mx, 2.06, -107.3, { cast: false });
+    }
   }
   const RELEASE = { x: 0, z: -95.0, thrown: false };
-  const releaseLamp = addBox(0, 1.44, -95.0, 0.4, 0.16, 0.4, 0xff3b3b,
-    { emissive: 0xff0000, ei: 1.0, cast: false });
-  releaseLamp.userData.dynamic = true;
-  addBox(0, 1.30, -95.0, 0.7, 0.22, 0.7, 0x21262e, { cast: false });
+  // the guard collar and the mushroom (the lamp is the button's own cap, and
+  // the tick recolours it: red armed, green thrown)
+  stat(new THREE.CylinderGeometry(0.16, 0.18, 0.05, 20), K.skin("steel", 0xd9b233), 0, 1.04, -95.25, { cast: false });
+  stat(new THREE.CylinderGeometry(0.05, 0.05, 0.08, 12), deskMat, 0, 1.08, -95.25, { cast: false });
+  const releaseLamp = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+  releaseLamp.scale.y = 0.55; releaseLamp.position.set(0, 1.12, -95.25);
+  releaseLamp.userData.dynamic = true; releaseLamp.userData.mover = true;
+  ROOT.add(releaseLamp);
 
   /* ==========================================================
      5. THE TICK. Leaves swing, cards read, picks turn, and the console

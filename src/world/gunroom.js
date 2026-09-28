@@ -234,10 +234,8 @@
       { id: "armory", kind: "slab", tint: 0xc4c7c9, lights: "vapor", nx: 2, nz: 3, along: "z" });
   }
 
-  // red "ARMORY" band. It used to sit at x=19 with a 0.2 depth, which put it
-  // fully INSIDE the gate slab (18.7..19.3) — visible only once the gate had
-  // already opened, i.e. never when it mattered. Now on the outside face.
-  addBox(SPINE ? 18.62 : 19, 5.4, 1, SPINE ? 0.16 : 0.2, 0.8, 2.8, 0xc94d3a, { cast: false });
+  // (the blank red "ARMORY" band at 5.4 m is gone: a sign with nothing on
+  // it. The word is stencilled on the wall beside the reader, below.)
 
   // ------------------------------------------------------------------
   //  THE GATE — the locked door you can SEE THROUGH
@@ -281,12 +279,21 @@
     ? addBox(18.60, 3.34, 2.86, 0.18, 0.18, 0.18, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false })
     : addBox(20, 4.4, 1, 0.18, 0.18, 0.18, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
   lamp.userData.mover = true;
+  if (SPINE) {
+    // a domed indicator on a round base, not an 18 cm glowing cube
+    lamp.geometry.dispose();
+    lamp.geometry = new THREE.SphereGeometry(0.065, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateZ(Math.PI / 2);
+    lamp.position.x = 18.69;
+  }
 
   if (SPINE) {
     // the card reader the keycard actually answers to, and the painted sign
     addBox(18.62, 2.34, 2.86, 0.14, 0.42, 0.30, 0x21262e, { cast: false });
     addBox(18.52, 2.40, 2.86, 0.04, 0.10, 0.20, 0x39ffd0, { emissive: 0x12b89a, ei: 0.9, cast: false });
-    addBox(18.72, 3.34, 2.86, 0.06, 0.34, 0.30, 0x21262e, { cast: false });   // lamp backplate
+    {                                                                          // lamp base, round
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 20).rotateZ(Math.PI / 2), CBZ.mat(0x21262e));
+      b.position.set(18.72, 3.34, 2.86); b.castShadow = false; ROOT.add(b);
+    }
     stencil("ARMORY", 18.71, 4.05, 3.50, 0.115, 0xd9dee5);
     addBox(18.70, 3.36, 4.80, 0.04, 0.06, 2.64, 0xd9dee5, { cast: false });   // underline
   }
@@ -301,7 +308,26 @@
   //  backboard and two-row inventory, but give every slot one slotted upright
   //  and one measured shelf whose top is used to seat that model's own bounds.
   // ------------------------------------------------------------------
-  addBox(27.8, 1.75, 1, 0.55, 2.7, 11.6, 0x3c2f22, {});
+  /* THE BACKBOARD is a slatwall rack built out to the wall. It was a plain
+     0.55 m brown block standing 0.67 m off the east wall (a void behind the
+     guns); now the carcass runs back to the wall face (28.75) and its front
+     is a slatwall in a steel frame: grooves every 15 cm, end stiles, a
+     cornice and a plinth. Front face unchanged at x = 27.525. */
+  {
+    const bb = addBox(28.1375, 1.75, 1, 1.225, 2.7, 11.6, 0x3c2f22, {});
+    if (CBZ.prisonKit) CBZ.prisonKit.skinBox(bb, "concrete", 0x4a3a28);
+    // the carcass is furniture to the wall now: nobody walks in behind it
+    if (CBZ.colliders) CBZ.colliders.push({ minX: 27.525, maxX: 28.75, minZ: -4.8, maxZ: 6.8, ref: bb, rack: true, noBreach: true });
+    if (CBZ.prisonDress && CBZ.prisonDress.Paint) {
+      const R = new CBZ.prisonDress.Paint(), FX = 27.525, STEEL = 0x2b313a;
+      for (let y = 0.55; y < 3.05; y += 0.15) R.box(FX - 0.002, y, 1, 0.006, 0.018, 11.5, 0x1f1811);   // slat grooves
+      for (const e of [-1, 1]) R.box(FX - 0.02, 1.75, 1 + e * 5.78, 0.05, 2.7, 0.06, STEEL);          // end stiles
+      R.box(FX - 0.03, 3.13, 1, 0.08, 0.08, 11.72, STEEL);                                             // cornice
+      R.box(FX - 0.02, 0.45, 1, 0.05, 0.1, 11.62, STEEL);                                              // plinth rail
+      R.box(FX + 0.3, 0.2, 1, 0.66, 0.4, 11.6, 0x1d2126);                                              // the base under it
+      R.mesh(0, 0, 0);
+    }
+  }
   for (let i = -2; i <= 2; i++)
     addBox(27.44, 1.75, 1 + i * 2.0, 0.09, 2.30, 0.08, 0x11161c, { cast: false });
 
@@ -554,8 +580,11 @@
     // painted pool of light on the floor — are gone: the room has a ceiling
     // and real fittings now, and a visible light cone indoors is a stage prop)
     // task strip washing the rack backboard from just above it
-    addBox(27.50, 3.34, 1, 0.26, 0.10, 11.2, 0x2b313a, { cast: false });
-    addBox(27.42, 3.22, 1, 0.10, 0.07, 11.0, 0xffe6b0, { emissive: 0xffb347, ei: 0.9, cast: false });
+    // (fixed to the 3.6 m ceiling — it hung 21 cm under it on nothing — and
+    // on the lights-out circuit, like every other lamp in the building)
+    addBox(27.50, 3.55, 1, 0.26, 0.10, 11.2, 0x2b313a, { cast: false });
+    const taskLens = addBox(27.42, 3.475, 1, 0.10, 0.05, 11.0, 0xffe6b0, { emissive: 0xffb347, ei: 0.9, cast: false });
+    if (CBZ.prisonDress && CBZ.prisonDress.fixture) CBZ.prisonDress.fixture(taskLens, 27.42, 1, 0xffe6b0, 0xffb347, 6, "room");
 
     // ---- rubber matting: a runner down the rack lane, a pad at the bench
     addBox(26.5, 0.075, 1, 2.0, 0.03, 11.4, 0x1b1e23, { cast: false });
@@ -564,14 +593,39 @@
     // ---- pegboard + hung tools, south wall over the bench
     addBox(23.5, 2.30, 7.66, 3.2, 1.70, 0.06, 0x2f3742, { cast: false });
     for (let i = 0; i < 9; i++) addBox(22.1 + i * 0.36, 1.62, 7.60, 0.05, 0.05, 0.10, 0x8b95a1, { cast: false });
-    addBox(22.30, 2.62, 7.58, 0.09, 0.62, 0.09, 0x8b95a1, { cast: false });   // wrench
-    addBox(22.30, 2.92, 7.58, 0.22, 0.10, 0.09, 0x8b95a1, { cast: false });
-    addBox(22.95, 2.66, 7.58, 0.08, 0.54, 0.08, 0x747f8c, { cast: false });   // pliers
-    addBox(22.95, 2.94, 7.58, 0.18, 0.09, 0.08, 0x747f8c, { cast: false });
-    addBox(23.60, 2.70, 7.58, 0.07, 0.50, 0.07, 0x6e4a22, { cast: false });   // hammer
-    addBox(23.60, 2.96, 7.58, 0.24, 0.12, 0.10, 0x39424e, { cast: false });
-    addBox(24.30, 2.72, 7.58, 0.30, 0.30, 0.06, 0x8b95a1, { cast: false });   // clamp
-    addBox(24.95, 2.66, 7.58, 0.06, 0.56, 0.06, 0x8b95a1, { cast: false });   // rod
+    /* the tools on it, drawn as tools (they were nine boxes: a "wrench" was
+       a 9 cm square stick with a bar on top, a "clamp" a 30 cm tile). Each
+       hangs flat on the board off its peg, at its real size. */
+    if (CBZ.prisonDress && CBZ.prisonDress.Paint) {
+      const T = new CBZ.prisonDress.Paint(), FZ = 7.625, STEEL = 0x9aa3ad, DARK = 0x39424e;
+      const flat = (x, y, w, h, col, rz, dz) => { const g = new THREE.BoxGeometry(w, h, 0.012); if (rz) g.rotateZ(rz); g.translate(x, y, FZ - 0.012 - (dz || 0)); T.add(g, col); };
+      const ring = (x, y, r, t, col, arc) => T.add(new THREE.TorusGeometry(r, t, 5, 14, arc || Math.PI * 2).translate(x, y, FZ - 0.014), col);
+      for (const k of [0, 1]) {                                                 // two combination wrenches
+        const x = 22.2 + k * 0.12, L = 0.24 - k * 0.04;
+        flat(x, 2.62, 0.024, L, STEEL);
+        ring(x, 2.62 + L / 2 + 0.018, 0.02, 0.007, STEEL);
+        ring(x, 2.62 - L / 2 - 0.016, 0.022, 0.007, STEEL, Math.PI * 1.4);
+      }
+      for (const s2 of [-1, 1]) {                                               // pliers: two red-gripped handles
+        flat(22.95 + s2 * 0.022, 2.6, 0.022, 0.16, 0xa8322a, s2 * 0.12);
+        flat(22.95 - s2 * 0.006, 2.745, 0.018, 0.08, 0x5a616a, -s2 * 0.1);
+      }
+      ring(22.95, 2.69, 0.012, 0.006, 0x5a616a);
+      const hh = new THREE.CylinderGeometry(0.014, 0.017, 0.3, 10); hh.translate(23.6, 2.6, FZ - 0.03); T.add(hh, 0x8a6a45);   // hammer
+      flat(23.6, 2.765, 0.13, 0.034, DARK, 0, 0.016);
+      flat(23.66, 2.775, 0.03, 0.03, DARK, 0.5, 0.016);
+      flat(24.3, 2.72, 0.022, 0.3, STEEL);                                      // F-clamp bar
+      flat(24.36, 2.86, 0.12, 0.025, DARK); flat(24.36, 2.62, 0.12, 0.025, DARK);
+      const sc = new THREE.CylinderGeometry(0.007, 0.007, 0.1, 6); sc.translate(24.41, 2.575, FZ - 0.02); T.add(sc, STEEL);
+      const hd = new THREE.CylinderGeometry(0.014, 0.014, 0.07, 8); hd.translate(24.41, 2.51, FZ - 0.02); T.add(hd, 0x6e4a22);
+      for (let i = 0; i < 3; i++) {                                             // screwdrivers on a rack
+        const x = 24.85 + i * 0.07;
+        const gr = new THREE.CylinderGeometry(0.014, 0.012, 0.1, 8); gr.translate(x, 2.84, FZ - 0.03); T.add(gr, [0xc9a227, 0xa8322a, 0x2f5d8a][i]);
+        const sh = new THREE.CylinderGeometry(0.004, 0.004, 0.14, 6); sh.translate(x, 2.72, FZ - 0.03); T.add(sh, STEEL);
+      }
+      flat(24.92, 2.9, 0.24, 0.02, DARK, 0, 0.01);
+      T.mesh(0, 0, 0);
+    }
 
     // ---- the workbench, with a gun stripped down on it. A room reads as a
     // WORKED room when something on the table is mid-job, not when the table
@@ -610,12 +664,27 @@
     }
 
     // ---- kevlar on a rail, west wall south of the door
-    for (let i = 0; i < 3; i++) {
-      const z = -1.30 - i * 1.15;
-      addBox(19.44, 2.28, z, 0.20, 0.62, 0.66, 0x2b3a2c, {});                 // plate carrier body
-      addBox(19.44, 2.66, z - 0.24, 0.18, 0.20, 0.16, 0x2b3a2c, { cast: false }); // shoulder straps
-      addBox(19.44, 2.66, z + 0.24, 0.18, 0.20, 0.16, 0x2b3a2c, { cast: false });
-      addBox(19.42, 2.10, z, 0.14, 0.12, 0.34, 0x3f4a33, { cast: false });    // pouch row
+    /* three plate carriers hung by their drag handles on hooks off the rail:
+       front and back plate bags, shoulder straps over the top, the elastic
+       cummerbund at the sides, a triple mag pouch and an admin pouch on the
+       front. They were a green box each with two box "straps" and a box "row". */
+    if (CBZ.prisonDress && CBZ.prisonDress.Paint) {
+      const V = new CBZ.prisonDress.Paint(), OD = 0x3b4a33, OD2 = 0x2f3b29, WEB = 0x232a20;
+      for (let i = 0; i < 3; i++) {
+        const z = -1.30 - i * 1.15, x = 19.44;
+        V.box(x + 0.05, 2.28, z, 0.06, 0.58, 0.56, OD);                               // front plate bag
+        V.box(x - 0.05, 2.30, z, 0.06, 0.6, 0.56, OD2);                               // back plate bag
+        for (const e of [-1, 1]) {
+          V.box(x, 2.6, z + e * 0.2, 0.16, 0.035, 0.1, WEB);                           // shoulder strap over the top
+          V.box(x + 0.0, 2.2, z + e * 0.29, 0.1, 0.16, 0.02, WEB);                     // cummerbund
+        }
+        for (let k = -1; k <= 1; k++) V.box(x + 0.1, 2.1, z + k * 0.13, 0.05, 0.17, 0.11, OD2);   // mag pouches
+        V.box(x + 0.095, 2.34, z, 0.035, 0.14, 0.2, OD2);                               // admin pouch
+        V.box(x - 0.07, 2.63, z, 0.03, 0.06, 0.14, WEB);                                // drag handle
+        V.add(new THREE.TorusGeometry(0.045, 0.006, 4, 10, Math.PI).rotateY(Math.PI / 2).translate(19.36, 2.87, z), 0x8b95a1);  // hook
+        V.cyl(19.36, 2.76, z, 0.005, 0.005, 0.2, 0x8b95a1, 6);                         // hook stem to the handle
+      }
+      V.mesh(0, 0, 0);
     }
     addBox(19.36, 2.92, -2.45, 0.08, 0.08, 3.20, 0x8b95a1, { cast: false });  // the rail itself
 
@@ -784,8 +853,11 @@
       pad: c4Pad, model: c4Disp, taken: false, cool: 0, x: 22.15, z: -2.80, gated: true,
     });
     // a warm shrine light so the prize reads from outside two sets of bars
-    addBox(23.40, 2.86, -4.50, 0.34, 0.14, 0.90, 0x2b313a, { cast: false });
-    addBox(23.40, 2.75, -4.50, 0.28, 0.07, 0.76, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
+    // (bolted up under the cage's roof bars — it floated 9 cm below them —
+    // and on the lights-out circuit)
+    addBox(23.40, 2.93, -4.50, 0.34, 0.14, 0.90, 0x2b313a, { cast: false });
+    const shrine = addBox(23.40, 2.835, -4.50, 0.28, 0.05, 0.76, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
+    if (CBZ.prisonDress && CBZ.prisonDress.fixture) CBZ.prisonDress.fixture(shrine, 23.40, -4.50, 0xffe6b0, 0xffb347, 3.5, "room");
     // a painted caution line across the cage mouth, flush on the slab
     addBox(23.40, 0.062, -1.55, 3.60, 0.006, 0.1, 0xb89a2a, { cast: false });
   }
