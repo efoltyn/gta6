@@ -2006,13 +2006,13 @@
       reapers: "steel never sleeps",
       saints: "pray we don't find you",
       // 2nd-wave crews
-      lords:    "almighty, all is well",
-      surenos:  "sur side till we die",
-      nortenos: "puro norte, XIV up",
+      lords:    "gold in the hand, iron in the fist",
+      surenos:  "bahia sur, from the docks up",
+      nortenos: "north of the canyon, nobody passes",
       cartel:   "the plug. everybody eats here",
       cosa:     "this block pays rent to us",
       angels:   "ride or get run over",
-      brand:    "blood in, blood out",
+      brand:    "one wood, one blood",
     };
     return [d.name.toUpperCase(), slogans[d.id] || "this block is ours", darken(d.color, 0.16), hex(d.color), { kind: "gang", tag: "TURF" }];
   }

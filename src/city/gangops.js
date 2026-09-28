@@ -295,7 +295,7 @@
   }
 
   // ---- THE SUPPLIER (WHY: a street corner deal has a SOURCE) ----------------
-  // The Sinaloa Cartel (config flag `supplier:true`) is the wholesale PLUG every
+  // The Arenal Cartel (config flag `supplier:true`) is the wholesale PLUG every
   // street crew sources product from. So a slice of each street deal-in kicks UP
   // to the cartel's treasury — the cartel earns off the WHOLE street economy
   // without lifting a finger, which is exactly why it sits rich + rifle-heavy and
@@ -349,7 +349,7 @@
   const EXTORT_BARK = ["This block's ours, pay up.", "Protection ain't free.", "You owe rent on this corner.", "Hand it over, we'll keep you safe."];
 
   // is a ped a BUSINESS FRONT — a shopkeeper/vendor or a well-off operator
-  // (tycoon/billionaire/socialite/business identity)? La Cosa Nostra's whole WHY
+  // (tycoon/billionaire/socialite/business identity)? the Carrozza Family's whole WHY
   // is the protection racket on legit business, so it shakes these down first.
   function isBizFront(p) {
     if (!p) return false;
@@ -360,7 +360,7 @@
     return false;
   }
 
-  // find a civilian standing on the gang's turf to shake down. For La Cosa Nostra
+  // find a civilian standing on the gang's turf to shake down. For the Carrozza Family
   // (config flag `extortsBiz:true`) the racket leans on BUSINESS FRONTS — vendors,
   // shopkeepers, the well-dressed operators of the commercial blocks — so those
   // marks are strongly preferred (a plain civilian is only a fallback for them).

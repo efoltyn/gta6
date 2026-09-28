@@ -202,7 +202,7 @@ async function stageCityProduct(input) {
     parkAway();
     const gangs = CBZ.CITY && CBZ.CITY.gangs ? CBZ.CITY.gangs : [];
     const gA = gangs.find((g) => g.id === "saints") || gangs[0] || { id: "a", color: 0xc0392b };
-    // NOT the Crips: a blue shirt under a blue cap photographs as a patrolman
+    // NOT the blue street crew: a blue shirt under a blue cap photographs as a patrolman
     const gB = gangs.find((g) => g.id === "kings") || gangs[2] || { id: "b", color: 0xe0b020 };
     const crews = [];
     const weapons = ["AK-47", "Pistol", "SMG", "Pistol", "AK-47"];
