@@ -1,0 +1,80 @@
+<!doctype html>
+<!-- tools/headwear-portraits.html — every hat on a real head, one frame.
+     Open over any static server (or file://) from the repo root:
+       tools/headwear-portraits.html            the whole wardrobe, 3/4 front
+       tools/headwear-portraits.html?view=side  the same from the side
+       tools/headwear-portraits.html?view=back  from behind
+       tools/headwear-portraits.html?only=ballcap,peaked  a subset
+     Headless: chrome-headless-shell --screenshot=out.png --window-size=1600,1000
+       --virtual-time-budget=4000 file:///.../tools/headwear-portraits.html -->
+<html><head><meta charset="utf-8"><title>Headwear portraits</title>
+<style>html,body{margin:0;background:#8a929c;overflow:hidden}canvas{display:block}</style></head>
+<body>
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+  window.CBZ = { CONFIG: {} };
+  (function () {
+    const gc = new Map(), mc = new Map();
+    CBZ.mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+    CBZ.cmat = (c, o) => { const k = c + "|" + JSON.stringify(o || {}); let m = mc.get(k); if (!m) { m = new THREE.MeshLambertMaterial({ color: c, emissive: (o && o.emissive) || 0, emissiveIntensity: o && o.ei != null ? o.ei : 1 }); m._shared = true; mc.set(k, m); } return m; };
+    CBZ.pbrMat = (c, o) => { const k = "p" + c + JSON.stringify(o || {}); let m = mc.get(k); if (!m) { m = new THREE.MeshStandardMaterial({ color: c, roughness: o && o.roughness != null ? o.roughness : 0.8, metalness: o && o.metalness || 0 }); m._shared = true; mc.set(k, m); } return m; };
+    CBZ.boxGeom = (w, h, d) => { const k = w + "," + h + "," + d; let g = gc.get(k); if (!g) { g = new THREE.BoxGeometry(w, h, d); gc.set(k, g); } return g; };
+  })();
+</script>
+<script src="../src/systems/fphands.js"></script>
+<script src="../src/entities/character.js"></script>
+<script src="../src/entities/heritage.js"></script>
+<script src="../src/entities/headwear.js"></script>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const view = q.get("view") || "front";
+  const W = innerWidth, H = innerHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H); document.body.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x8a929c);
+  scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x4a4036, 0.75));
+  const sun = new THREE.DirectionalLight(0xfff2de, 0.85); sun.position.set(3, 6, 5); scene.add(sun);
+  const LIST = [
+    ["ballcap", "", 0x1f3a6b, "m", "short"], ["ballcap", "back", 0xb8322e, "f", "pony"], ["peaked", "police", 0x1b2233, "m", "short"],
+    ["peaked", "captain", 0xf0f1ed, "m", "crop"], ["peaked", "officer", 0x171d29, "f", "bun"], ["milcap", "", 0x44503a, "m", "buzz"],
+    ["campaign", "sheriff", 0x8a7752, "m", "short"], ["hardhat", "", 0xe8c020, "m", "short"], ["beanie", "", 0x2a2d33, "f", "long"],
+    ["fedora", "", 0x3b3a38, "m", "short"], ["trilby", "", 0x5a5550, "m", "crop"], ["cowboy", "", 0x8a6a44, "m", "short"],
+    ["bucket", "", 0x6b7152, "f", "bob"], ["sun", "", 0xe6d3a3, "f", "long"], ["beret", "", 0x6a1a1e, "m", "buzz"],
+    ["durag", "", 0x121316, "m", "buzz"], ["bandana", "", 0xa0282a, "m", "short"], ["headband", "", 0xa0282a, "f", "afro"],
+    ["turban", "", 0x1f3a6b, "m", "short"], ["shemagh", "agal", 0xd9d2c0, "m", "short"], ["hijab", "", 0x2b2d3a, "f", "long"],
+    ["ballistic", "swat", 0x3a4034, "m", "crop"], ["pasgt", "", 0x4c5236, "m", "short"], ["riot", "", 0x14161b, "m", "short"],
+    ["moto", "", 0x121417, "m", "short"], ["race", "", 0xe8e8e8, "f", "long"], [null, "", 0, "f", "long"], [null, "", 0, "m", "short"],
+  ];
+  const only = q.get("only");
+  const items = only ? LIST.filter((r) => only.split(",").indexOf(r[0] + (r[1] ? ":" + r[1] : "")) >= 0 || only.split(",").indexOf(r[0]) >= 0) : LIST;
+  const SP = 0.78;
+  const cols = Math.min(7, items.length), rows = Math.ceil(items.length / cols);
+  const SK = [0xe7b58c, 0x8d5a3b, 0xc89070, 0x5a3a26, 0xf0c39a];
+  const HR = [0x2a1c12, 0x4a3526, 0x111111, 0x6b4a2a, 0x2a1c12];
+  items.forEach(function (it, i) {
+    const rig = CBZ.makeCharacter({ build: it[3], hairStyle: it[4], skin: SK[i % 5], hair: HR[i % 5], torso: 0x3a4a5a, collar: 0x3a4a5a, arms: 0x3a4a5a, legs: 0x2a2f38, shoes: 0x111111 });
+    if (it[0]) CBZ.headwear.wear(rig, it[0], { owner: "outfit", variant: it[1], color: it[2], metal: it[1] === "police" ? "silver" : undefined });
+    const c = i % cols, r = (i / cols) | 0;
+    // heads only: everything that is not the neck's subtree is hidden
+    rig.group.updateMatrixWorld(true);
+    rig.group.traverse(function (o) { if (!o.isMesh) return; let n = o; while (n && n !== rig.neck) n = n.parent; if (!n) o.visible = false; });
+    rig.group.position.set((c - (cols - 1) / 2) * SP, -r * SP, 0);
+    rig.group.rotation.y = view === "side" ? Math.PI / 2 : view === "back" ? Math.PI * 0.85 : (view === "top" ? -0.5 : -0.5);
+    if (view === "top") rig.group.rotation.x = 0.6;
+    scene.add(rig.group);
+    rig.group.updateMatrixWorld(true);
+  });
+  // frame the heads: the head sits ~1.6 m up the rig
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 50);
+  const hw = cols * SP / 2 + 0.05, hh = rows * SP / 2 + 0.05, asp = W / H;
+  const half = Math.max(hw, hh * asp);
+  cam.left = -half; cam.right = half; cam.top = half / asp; cam.bottom = -half / asp;
+  const yMid = 1.62 - (rows - 1) * SP / 2;
+  cam.position.set(0, yMid + 0.12, 8); cam.lookAt(0, yMid, 0); cam.updateProjectionMatrix();
+  renderer.render(scene, cam);
+  document.title = "done";
+})();
+</script>
+</body></html>

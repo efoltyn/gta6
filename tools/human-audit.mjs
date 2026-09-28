@@ -65,7 +65,7 @@ ctx.CBZ = {
   CONFIG: {}, game: { mode: "city" }, npcs: [],
   onUpdate() {}, onAlways(p, f) { always.push([p, f]); }, onReset() {}, onModeEnter() {},
 };
-for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js",
+for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js",
   "src/entities/heritage.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/pedinstance.js",
   "src/city/armor.js", "src/systems/prisonoutfits.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });

@@ -85,7 +85,7 @@
     // said navy — so the flat fallback described a different uniform and the
     // shoulder yoke stamped a navy band across a white shirt. Same class as the
     // suit collar, one row up the file.
-    pilot:     { id: "pilot",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2, cap: true, capColor: 0x151c2e,
+    pilot:     { id: "pilot", hat: "peaked:captain",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2, cap: true, capColor: 0x151c2e,
                  colors: { legs: 0x1a1c24, torso: 0xeef0f2, collar: 0xd6d9dd, arms: 0xeef0f2, shoes: 0x101216 } },
     janitor:   { id: "janitor",   name: "Custodian Greys",  tier: "work",   who: "custodians",       price: 0,    drip: 0,
                  colors: { legs: 0x3a3f46, torso: 0x4a5560, collar: 0x363b42, arms: 0x4a5560, shoes: 0x2b2b2b } },
@@ -98,9 +98,9 @@
     // ---- PLACE-SPECIFIC WORK: small, recognizable additions for jobs that
     //      already exist in the world but previously fell through to a tee.
     //      These stay in the one catalog/caster/painter path used by every ped.
-    hunter:   { id: "hunter",    name: "Hunter Field Gear", tier: "work", who: "hunters", price: 0, drip: 0, cap: true, capColor: 0xe86d16,
+    hunter:   { id: "hunter", hat: "ballcap",    name: "Hunter Field Gear", tier: "work", who: "hunters", price: 0, drip: 0, cap: true, capColor: 0xe86d16,
                  colors: { legs: 0x4a4d32, torso: 0x465038, collar: 0xe86d16, arms: 0x465038, shoes: 0x2b241c } },
-    ranger:   { id: "ranger",    name: "Park Ranger Uniform", tier: "law", who: "park rangers", price: 0, drip: 0, cap: true, capColor: 0x3f4b2e,
+    ranger:   { id: "ranger", hat: "campaign",    name: "Park Ranger Uniform", tier: "law", who: "park rangers", price: 0, drip: 0, cap: true, capColor: 0x3f4b2e,
                  colors: { legs: 0x3f4b2e, torso: 0xb19a6a, collar: 0x4a5835, arms: 0xb19a6a, shoes: 0x352a1d } },
     hiker:    { id: "hiker",     name: "Trail Layers", tier: "work", who: "hikers", price: 0, drip: 0,
                  colors: { legs: 0x3d4650, torso: 0xb94f2f, collar: 0x27313a, arms: 0xb94f2f, shoes: 0x3a2e20 } },
@@ -108,29 +108,29 @@
                  colors: { legs: 0x3d5872, torso: 0x76543a, collar: 0xd2b58b, arms: 0x76543a, shoes: 0x3b2c1d } },
     fisherman:{ id: "fisherman", name: "Fisherman's Oilskins", tier: "work", who: "fishing crews", price: 0, drip: 0,
                  colors: { legs: 0xc99928, torso: 0x283d50, collar: 0xe1bd45, arms: 0x283d50, shoes: 0x1d2924 } },
-    mariner:  { id: "mariner",   name: "Mariner Whites", tier: "work", who: "captains and harbour crews", price: 0, drip: 1, cap: true, capColor: 0xf0f1ed,
+    mariner:  { id: "mariner", hat: "peaked:captain",   name: "Mariner Whites", tier: "work", who: "captains and harbour crews", price: 0, drip: 1, cap: true, capColor: 0xf0f1ed,
                  colors: { legs: 0x19283d, torso: 0xf0f1ed, collar: 0x213a5a, arms: 0xf0f1ed, shoes: 0x10151d } },
-    lifeguard:{ id: "lifeguard", name: "Lifeguard Reds", tier: "work", who: "lifeguards", price: 0, drip: 0, cap: true, capColor: 0xc8342f,
+    lifeguard:{ id: "lifeguard", hat: "bucket", name: "Lifeguard Reds", tier: "work", who: "lifeguards", price: 0, drip: 0, cap: true, capColor: 0xc8342f,
                  colors: { legs: 0xc8342f, torso: 0xf1eee7, collar: 0xc8342f, arms: 0xf1eee7, shoes: 0xe8e8e2 } },
     ski:      { id: "ski",       name: "Ski Instructor Jacket", tier: "work", who: "ski crews", price: 0, drip: 1,
                  colors: { legs: 0x202936, torso: 0x286ba6, collar: 0xe67925, arms: 0x286ba6, shoes: 0x171b22 } },
     ski_patrol:{ id: "ski_patrol", name: "Ski Patrol Shell", tier: "law", who: "ski patrol", price: 0, drip: 0,
                  colors: { legs: 0x202936, torso: 0xc83232, collar: 0xf2f0e8, arms: 0xc83232, shoes: 0x171b22 } },
-    groundcrew:{ id: "groundcrew", name: "Airside Hi-Vis", tier: "work", who: "airport ground crews", price: 0, drip: 0, cap: true, capColor: 0xe2cf31,
+    groundcrew:{ id: "groundcrew", hat: "ballcap", name: "Airside Hi-Vis", tier: "work", who: "airport ground crews", price: 0, drip: 0, cap: true, capColor: 0xe2cf31,
                  colors: { legs: 0x24344d, torso: 0xd8ca2f, collar: 0x24344d, arms: 0x24344d, shoes: 0x171b22 } },
     cabincrew:{ id: "cabincrew", name: "Cabin Crew Tailoring", tier: "work", who: "flight attendants", price: 0, drip: 2,
                  colors: { legs: 0x18243a, torso: 0x223552, collar: 0xb52d3c, arms: 0x223552, shoes: 0x10151d } },
     bartender:{ id: "bartender", name: "Bartender Blacks", tier: "work", who: "bartenders", price: 0, drip: 1,
                  colors: { legs: 0x15181d, torso: 0x24282d, collar: 0xd9d7cf, arms: 0x24282d, shoes: 0x101216 } },
-    driver:   { id: "driver",    name: "Professional Driver", tier: "work", who: "drivers and chauffeurs", price: 0, drip: 1, cap: true, capColor: 0x202733,
+    driver:   { id: "driver", hat: "peaked:chauffeur",    name: "Professional Driver", tier: "work", who: "drivers and chauffeurs", price: 0, drip: 1, cap: true, capColor: 0x202733,
                  colors: { legs: 0x202733, torso: 0xc9d3dc, collar: 0x27354a, arms: 0xc9d3dc, shoes: 0x101216 } },
     housekeeping:{ id: "housekeeping", name: "Housekeeping Tunic", tier: "work", who: "household staff", price: 0, drip: 0,
                  colors: { legs: 0x34434b, torso: 0x71939a, collar: 0xe5e2d9, arms: 0x71939a, shoes: 0x20262a } },
     athletic: { id: "athletic",  name: "Trainer Warm-Up Kit", tier: "work", who: "trainers and fighters", price: 0, drip: 1,
                  colors: { legs: 0x1f2936, torso: 0x315f9b, collar: 0xe6e7e3, arms: 0x315f9b, shoes: 0xe8e8e3 } },
-    pitcrew:  { id: "pitcrew",   name: "Pit Crew Coveralls", tier: "work", who: "pit crews", price: 0, drip: 1, cap: true, capColor: 0x17253a,
+    pitcrew:  { id: "pitcrew", hat: "ballcap",   name: "Pit Crew Coveralls", tier: "work", who: "pit crews", price: 0, drip: 1, cap: true, capColor: 0x17253a,
                  colors: { legs: 0x17253a, torso: 0x17253a, collar: 0xc93632, arms: 0x17253a, shoes: 0x11151b } },
-    marshal:  { id: "marshal",   name: "Track Marshal Hi-Vis", tier: "work", who: "track marshals", price: 0, drip: 0, cap: true, capColor: 0xe36f22,
+    marshal:  { id: "marshal", hat: "ballcap",   name: "Track Marshal Hi-Vis", tier: "work", who: "track marshals", price: 0, drip: 0, cap: true, capColor: 0xe36f22,
                  colors: { legs: 0x26313e, torso: 0xe36f22, collar: 0xf0e44c, arms: 0x26313e, shoes: 0x151a20 } },
     racer:    { id: "racer",     name: "Racing Suit", tier: "work", who: "professional racers", price: 0, drip: 3,
                  colors: { legs: 0xb52d32, torso: 0xb52d32, collar: 0xf1eee7, arms: 0xb52d32, shoes: 0x15171b } },
@@ -186,7 +186,7 @@
     //      yellow trim, county khaki-over-brown. sheriff carries NO cop
     //      flag on purpose: the trust/impersonation machinery stays city
     //      PD's — khaki off a corpse is a look, not a skeleton key. ----
-    construction: { id: "construction", name: "Site Hi-Vis", tier: "work",  who: "construction crews", price: 0, drip: 0, cap: true, capColor: 0xf0c51b,
+    construction: { id: "construction", hat: "hardhat", name: "Site Hi-Vis", tier: "work",  who: "construction crews", price: 0, drip: 0, cap: true, capColor: 0xf0c51b,
                  colors: { legs: 0x2e4a6b, torso: 0xff5f08, collar: 0xbfc6c5, arms: 0x1d3352, shoes: 0x4a3a26 } },
     scrubs:    { id: "scrubs",    name: "Hospital Scrubs",  tier: "work",   who: "nurses",           price: 0,    drip: 0,
                  colors: { legs: 0x3d8a86, torso: 0x3d8a86, collar: 0x2e6b68, arms: 0x3d8a86, shoes: 0xd8d8d8 } },
@@ -204,7 +204,7 @@
     // cityRecolorRig -> cityApplyClothes seam used by Gang City's police/SWAT.
     inmate:    { id: "inmate", name: "DOC Orange Jumpsuit", tier: "institution", who: "general-population inmates", price: 0, drip: 0,
                  colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
-    inmate_cap: { id: "inmate_cap", name: "DOC Jumpsuit and Yard Cap", tier: "institution", who: "yard inmates with issued caps", price: 0, drip: 0,
+    inmate_cap: { id: "inmate_cap", hat: "ballcap", name: "DOC Jumpsuit and Yard Cap", tier: "institution", who: "yard inmates with issued caps", price: 0, drip: 0,
                  cap: true, capColor: 0x22252b,
                  colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
     inmate_tank: { id: "inmate_tank", name: "DOC Jumpsuit Tied at the Waist", tier: "institution", who: "yard inmates, top off, tank under", price: 0, drip: 0,
@@ -213,24 +213,24 @@
                  colors: { legs: 0xe76518, torso: 0xe7edf0, collar: 0xf27a1f, arms: 0xe7edf0, shoes: 0x30363d, belt: 0x5b351f } },
     inmate_chapel: { id: "inmate_chapel", name: "Chapel Trustee Greys", tier: "institution", who: "chapel trustees", price: 0, drip: 0,
                  colors: { legs: 0x414a57, torso: 0x505c6b, collar: 0xe8e3d8, arms: 0x505c6b, shoes: 0x25282d, belt: 0x252b33 } },
-    corrections: { id: "corrections", name: "Correctional Officer Uniform", tier: "law", who: "prison officers", price: 0, drip: 0,
+    corrections: { id: "corrections", hat: "peaked:police", name: "Correctional Officer Uniform", tier: "law", who: "prison officers", price: 0, drip: 0,
                  cap: true, capColor: 0x202b3b, badge: true,
                  colors: { legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d, shoes: 0x111419, belt: 0x111419 } },
-    warden:    { id: "warden", name: "Warden Dress Uniform", tier: "law", who: "the prison warden", price: 0, drip: 1,
+    warden:    { id: "warden", hat: "peaked:officer", name: "Warden Dress Uniform", tier: "law", who: "the prison warden", price: 0, drip: 1,
                  cap: true, capColor: 0x171d29, badge: true,
                  colors: { legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d, shoes: 0x090b0f, belt: 0x111419 } },
-    sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
+    sheriff:   { id: "sheriff", hat: "campaign:sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
-    soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
+    soldier:   { id: "soldier", hat: "milcap",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
                  colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22, gloves: 0x3a3a2c } },
     office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
                  colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
     // ---- the LAW (never sold — taken off a body; the street reads the badge) ----
-    police:    { id: "police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true,
+    police:    { id: "police", hat: "peaked:police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true,
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
     // SWAT redesign: dark-olive carrier over graphite-olive fatigues (torso
     // drives the CARRIER, legs the fatigues — clothes.js PAINT.swat reads both).
-    swat:      { id: "swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true,
+    swat:      { id: "swat", hat: "ballistic:swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true,
                  colors: { legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e, shoes: 0x101216, belt: 0x0d111c, gloves: 0x17191c } },
     // ---- money fits (boutique racks → the apex tuxedo) ----
     leather:   { id: "leather",   name: "Leather Jacket",   tier: "fit",    who: "the night crowd",  price: 520,  drip: 6,
@@ -658,6 +658,10 @@
   function recolorRig(ch, c, rec, opts) {
     if (!ch || !ch.skinSlots || !c) return false;
     const s = ch.skinSlots;
+    // THE RIGHT SHOES FOR THE JOB (entities/footwear.js): boots on officers,
+    // slip-ons on inmates, oxfords on suits. Same slot mesh, so the paint
+    // below lands on the new shoe.
+    if (CBZ.footwear) CBZ.footwear.restyle(ch, rec || null, c);
     // COMPOSITE (business fits): a composed blazer + collared shirt + tie layered
     // on the PLAIN base. cityApplyComposite is idempotent (strips any painted
     // look, flat-tints the base, then layers), so a re-dress never accumulates.
@@ -743,14 +747,37 @@
     // Role headwear is still the rig's existing cap slot: cheap silhouette,
     // no parallel prop system. Every following outfit explicitly clears it.
     if (rec) {
-      const cap = !!(rec.cop || rec.cap);
-      paint(s.cap, rec.capColor != null ? rec.capColor : null, cap);
-      paint(s.hair, null, !cap);
+      roleHat(ch, rec);
       paint(s.badge, null, !!(rec.cop || rec.badge));
     }
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
+
+  /* ---- ROLE HEADWEAR: every record that wears a hat names its KIND (rec.hat,
+     entities/headwear.js draws it): a patrol cop the peaked police cap, a
+     deputy the campaign hat with a star, construction a hard hat, a soldier
+     the patrol cap, a pilot or skipper the captain's cap. The hat is fitted
+     on the real head and the hair stays, compressed under the crown. A
+     record without a hat takes the role hat off (a helmet from armor.js is
+     a separate owner and outranks it). Colour: the record's capColor, else
+     the colour the rig was built with (police.js builds its own navy). */
+  function roleHat(ch, rec) {
+    const s = ch && ch.skinSlots;
+    if (!s) return;
+    const want = !!(rec && (rec.cop || rec.cap));
+    const HW = CBZ.headwear;
+    if (!HW) {                                    // a page without headwear.js: the old slot toggle
+      paint(s.cap, rec && rec.capColor != null ? rec.capColor : null, want);
+      return;
+    }
+    if (!want) { HW.wear(ch, null, { owner: "outfit" }); return; }
+    const cur = ch._hw && ch._hw.layers && ch._hw.layers.outfit;
+    const kind = rec.hat || HW.kindFor((rec.id || "") + " " + (rec.who || "")) || "peaked:police";
+    HW.wear(ch, kind, { owner: "outfit", color: rec.capColor != null ? rec.capColor : (cur ? cur.color : undefined),
+      accent: rec.capAccent, metal: /police|corrections/.test(kind) ? "silver" : undefined });
+  }
+  CBZ.cityRoleHat = roleHat;
 
   // ---- GLOVES: a gloved uniform (SWAT, soldier, all-black tactical) paints
   //      the hand caps its `gloves` colour. Only a rig that WAS gloved is
@@ -1046,9 +1073,10 @@
     paint(s.stripes, null, false);                                   // no city fit has jail stripes
     paint(s.belt, w.colors.belt != null ? w.colors.belt : 0x17191f, true);
     paint(s.badge, null, !!w.cop);                                   // the badge rides the uniform
-    const cap = !!(w.cop || w.cap);
-    paint(s.cap, w.capColor != null ? w.capColor : null, cap);
-    paint(s.hair, null, !cap);
+    roleHat(ch, w);
+    // the city look owns the rig now: the jail role's cap (player.js, the
+    // "player" owner, same rank as "outfit") comes off with the jumpsuit
+    if (CBZ.headwear) CBZ.headwear.wear(ch, null, { owner: "player" });
     _appliedId = w.id;
     if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();        // chains re-seat over the new fit
   }

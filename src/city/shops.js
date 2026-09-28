@@ -1845,7 +1845,7 @@
     // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
     // stays shut to YOU until the heat of it fades.
     const _v = lot && lot.building && lot.building.vendor;
-    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { if (CBZ.citySay) CBZ.citySay(_v, "“We're closed. To YOU. Get out.”", null, { secs: 2.2, force: true }); return; }
+    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { if (CBZ.citySay) CBZ.citySay(_v, "Not you. Get out.", null, { secs: 2.2, force: true }); return; }
     openLot = lot; CBZ.cityMenuOpen = true;
     qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
     el().style.display = "block";
@@ -2060,9 +2060,9 @@
     const it = cabDest(); if (!it) return;
     const P = CBZ.player;
     const dist = Math.hypot(it.x - P.pos.x, it.z - P.pos.z);
-    if (dist < 40) { if (CBZ.citySay) CBZ.citySay(p, "“That's a walk, not a fare.”", "#cfe6ff", 2); return; }
+    if (dist < 40) { if (CBZ.citySay) CBZ.citySay(p, "That's a walk, not a fare.", "#cfe6ff", 2); return; }
     const fare = Math.max(30, Math.round(dist * 0.5));
-    if (!CBZ.city.spend(fare)) { if (CBZ.citySay) CBZ.citySay(p, "“No cash, no cab.”", "#cfe6ff", 2); return; }
+    if (!CBZ.city.spend(fare)) { if (CBZ.citySay) CBZ.citySay(p, "No cash, no cab.", "#cfe6ff", 2); return; }
     p.cash = (p.cash | 0) + fare;
     P.pos.x = it.x + 2; P.pos.z = it.z + 2;
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
@@ -2148,7 +2148,7 @@
       canShow: (v) => !!v.vendor && shopShut(v.vendor),
       label: (v) => "Locked up for the night, knock anyway",
       onSelect: (v) => {
-        if (CBZ.citySay) CBZ.citySay(v, "“We're closed. Sunup.”", "#cfe6ff", 2.2);
+        if (CBZ.citySay) CBZ.citySay(v, "We're closed. Sunup.", "#cfe6ff", 2.2);
       },
     });
 
@@ -2225,13 +2225,13 @@
       onSelect: (v) => {
         const paid = CBZ.cityTill.take(v.vendor, { point: "register", max: RETAINER, by: "player" });
         if (!(paid.taken > 0)) {
-          if (CBZ.citySay) CBZ.citySay(v, "“Drawer's light. Come back when we've traded.”", "#cfe6ff", 2.4);
+          if (CBZ.citySay) CBZ.citySay(v, "Slow day. Drawer's light.", "#cfe6ff", 2.4);
           return;
         }
         v._retainerT = _sNow() + 600;              // seconds — one collection per keeper per 10 min
         CBZ.city.addCash(paid.taken);
         if (CBZ.sfx) CBZ.sfx("coin");
-        if (CBZ.citySay) CBZ.citySay(v, "“Keep the block quiet, yeah?”", "#cfe6ff", 2.2);
+        if (CBZ.citySay) CBZ.citySay(v, "Keep the block quiet, yeah?", "#cfe6ff", 2.2);
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       },
     });
@@ -2249,7 +2249,7 @@
         c.engineHp = 100; c._smoking = false;
         p.cash = (p.cash | 0) + price;
         if (CBZ.sfx) CBZ.sfx("coin");
-        if (CBZ.citySay) CBZ.citySay(p, "“Runs better than it looks. We're square.”", "#cfe6ff", 2.2);
+        if (CBZ.citySay) CBZ.citySay(p, "Runs better than it looks. We're square.", "#cfe6ff", 2.2);
         CBZ.city.note("Engine patched, she'll run.", 1.8);
       },
     });
@@ -2272,7 +2272,7 @@
         if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 8);
         p.cash = (p.cash | 0) + 8;
         if (CBZ.sfx) CBZ.sfx("coin");
-        if (CBZ.citySay) CBZ.citySay(p, "“Hot and fresh. Next!”", "#cfe6ff", 2);
+        if (CBZ.citySay) CBZ.citySay(p, "Hot and fresh. Next!", "#cfe6ff", 2);
       },
     });
     // a posted guard can be GREASED — fifty bucks buys you blind eyes a while
@@ -2284,7 +2284,7 @@
         if (!CBZ.city.spend(50)) { CBZ.city.note("You need a whole fifty to grease anyone.", 1.4); return; }
         p.snitch = 0; p.reactCD = Math.max(p.reactCD || 0, 90);
         p.cash = (p.cash | 0) + 50;
-        if (CBZ.citySay) CBZ.citySay(p, "“Didn't see a thing.”", "#cfe6ff", 2.2);
+        if (CBZ.citySay) CBZ.citySay(p, "Didn't see a thing.", "#cfe6ff", 2.2);
       },
     });
   });

@@ -991,9 +991,7 @@
                   // instruction, exactly as crates.js/prisondrops.js do.
                   // The instruction is on the padlock now (the prompt above);
                   // the sentence keeps only the fact.
-                  tellHint(saw
-                    ? "Padlocked. That blade will go through it."
-                    : "Padlocked, the Warden has that key. Or find something that cuts.", 1.5);
+                  tellHint("Padlocked.", 1.5);
                 }
               }
             }

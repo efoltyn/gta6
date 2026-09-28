@@ -669,16 +669,17 @@
   // Reactions are deeper now: your reputation (respect) and how RICH you look
   // sway someone, a jealous existing partner of theirs may step in, and a happy
   // date makes them love you faster. Affection bands give flirty banter.
-  const FLIRT_LINES = ["“You're funny ”", "“I like you.”", "“Buy me dinner first ”",
-    "“…maybe.”", "“Tell me more ”", "“You're sweet.”"];
+  const FLIRT_LINES = ["You're funny.", "I like you.", "Buy me dinner first.",
+    "Maybe.", "You're sweet.", "My sister's gonna kill me.", "Walk me to the corner.",
+    "Is that your real laugh?", "Don't make me late for work."];
   CBZ.cityFlirt = function (ped) {
     if (!ped || ped.dead) return;
-    if (ped === g.cityPartner) { CBZ.city.note("“I love you too ”", 1.8); say(ped, "♥", "#ff8bd0", 1.6); ped.mood = 1; return; }
+    if (ped === g.cityPartner) { say(ped, "Love you too.", "#ff8bd0", 1.8); ped.mood = 1; return; }
     // someone who already has a partner can be flirted with, but it stings them
     if (ped.partner && !ped.dead) {
       const jealous = ped.partner;
       if (!jealous.dead && Math.hypot(jealous.pos.x - ped.pos.x, jealous.pos.z - ped.pos.z) < 8) {
-        say(jealous, "“HEY! Back off!”", "#ff7b6b", 2.2);
+        say(jealous, "HEY! Back off!", "#ff7b6b", 2.2);
         jealous.mood = -1; jealous.alarmed = Math.max(jealous.alarmed || 0, 4);
         CBZ.city.note(ped.name + " is taken · " + jealous.name + " is not happy.", 2);
         return;
@@ -750,13 +751,13 @@
   // favor). Lands a 'ranWork' shift on the ped (which ripples to their nearby
   // crew), nudges your faction STANDING up, and seeds a 'gangFavor' rumor so
   // your name spreads through their clique. Returns the new signed bond.
-  const FAVOR_LINES = ["“You came through. ”", "“Aight, you're solid.”",
-    "“We see you out here.”", "“That's what I'm talking about.”", "“Respect.”"];
+  const FAVOR_LINES = ["You came through.", "Aight, you're solid.",
+    "We see you out here.", "Respect.", "I won't forget that.", "I owe you one."];
   CBZ.cityDoFavor = function (ped) {
     if (g.mode !== "city") return 0;
     if (!CBZ.cityCanBefriend(ped)) {
       if (CBZ.city) CBZ.city.note((ped && ped.name || "They") + " won't take a favor from you.", 1.6);
-      if (ped) say(ped, "“Get out of here.”", "#ff9b8b", 1.6);
+      if (ped) say(ped, "Get out of here.", "#ff9b8b", 1.6);
       return 0;
     }
     const r = CBZ.cityRel(ped);
@@ -934,16 +935,16 @@
   let gossipT = 2;
   const RUMORS = [];      // queued rumors: {ped, topic, weight, hops}
   const TOPIC = {
-    datedHero:  { op: +0.30, mood: +0.4, say: ["“Did you hear about us? ”", "“They're seeing someone new.”"] },
-    heroRich:   { op: +0.15, mood: +0.2, say: ["“That one's LOADED.”", "“New money walking around ”"] },
-    heroKilled: { op: -0.55, mood: -0.8, say: ["“Someone got shot!”", "“They KILLED them!”", "“Stay away from that one.”"] },
-    heroHero:   { op: +0.40, mood: +0.5, say: ["“They saved somebody.”", "“A real one out here.”"] },
-    breakup:    { op: 0,     mood: -0.5, say: ["“They broke up ”", "“It's over between them.”"] },
-    proposal:   { op: 0,     mood: +0.6, say: ["“They got engaged! ”", "“Did you see the ring?!”"] },
-    sale:       { op: +0.05, mood: +0.2, say: ["“Big sale at the shop.”", "“Whole block's busy today.”"] },
+    datedHero:  { op: +0.30, mood: +0.4, say: ["They're seeing someone new.", "Saw them holding hands.", "Somebody's in love."] },
+    heroRich:   { op: +0.15, mood: +0.2, say: ["That one's LOADED.", "New money walking around.", "Where's that money from, though?", "Heard they paid cash for a car."] },
+    heroKilled: { op: -0.55, mood: -0.8, say: ["Someone got shot!", "They KILLED them!", "Stay away from that one.", "Heard it was over a girl.", "I didn't see nothing."] },
+    heroHero:   { op: +0.40, mood: +0.5, say: ["They saved somebody.", "A real one out here.", "Cops sure didn't."] },
+    breakup:    { op: 0,     mood: -0.5, say: ["They broke up.", "It's over between them.", "Heard the ring's in the river."] },
+    proposal:   { op: 0,     mood: +0.6, say: ["They got engaged!", "Did you see the ring?!", "Give it a year."] },
+    sale:       { op: +0.05, mood: +0.2, say: ["Whole block's busy today.", "Line's out the door.", "Everybody got paid Friday."] },
     // a favor done for the crew — spreads your name (and goodwill) through the
     // gang's clique via the same 3-hop gossip the other topics ride.
-    gangFavor:  { op: +0.35, mood: +0.4, say: ["“That one's putting in work.”", "“They're with us now.”", "“Solid people. ”"] },
+    gangFavor:  { op: +0.35, mood: +0.4, say: ["That one's putting in work.", "They're with us now.", "Solid people."] },
   };
 
   // seed a rumor at one ped; it will propagate to their friends/partner over time.
@@ -1028,7 +1029,7 @@
         const r = CBZ.cityRel(m);
         // grief turns to either rage (bold) or flight (meek); a big grudge will
         // also keep them hunting you long after they've calmed from this moment.
-        if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "“YOU KILLED THEM!”", "#ff6b6b", 2.6); }
+        if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "YOU KILLED THEM!", "#ff6b6b", 2.6); }
         else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "“Oh god, oh god…”", "#9bb0ff", 2.6); }
       } else {
         m.fear = Math.max(m.fear || 0, 6); say(m, "“…what did you do?”", "#9bb0ff", 2.2);
@@ -1067,7 +1068,7 @@
         shown = true;
         q.path = null; q.pause = 3; q._notedT = 6; q.state = "walk";
         q.target.set(ped.target.x + (rng() - 0.5) * 2.5, 0, ped.target.z + (rng() - 0.5) * 2.5);
-        say(q, ["“Don't look. Walk.”", "“Come on. Other side.”", "“Eyes down, keep moving.”"][(rng() * 3) | 0], "#cfd6e6", 2.2);
+        say(q, ["Don't look. Walk.", "Come on. Other side.", "Eyes down, keep moving."][(rng() * 3) | 0], "#cfd6e6", 2.2);
         const arm = (q.partner && !q.partner.dead && q.partner !== ped) ? q.partner
           : (q.friends || []).find((f) => f && !f.dead && f !== ped && !f.controlled && !f.companion
               && Math.hypot(f.pos.x - q.pos.x, f.pos.z - q.pos.z) < 5);
@@ -1090,7 +1091,7 @@
     if (!v || v.dead) return;
     v._refuseUntil = _clock + REFUSE_SECS;
     try { applyDelta(v, REL_EVENTS.robbed, 1); driveFlags(v); } catch (e) {}
-    say(v, "“Get OUT. And don't come back.”", "#ff9b8b", 2.4);
+    say(v, "Get OUT. And don't come back.", "#ff9b8b", 2.4);
   }
   CBZ.cityVendorRefuses = function (ped) {
     return !!(ped && !ped.dead && (ped._refuseUntil || 0) > _clock);
@@ -1168,7 +1169,7 @@
       for (const lot of bars) {
         // only animate the venue the player can actually see (cheap LOD)
         if (P && Math.hypot(lot.cx - P.pos.x, lot.cz - P.pos.z) > 90) continue;
-        gatherAt(lot, 7, 10, rng() < 0.3 ? "“Let's get in! ”" : null);
+        gatherAt(lot, 7, 10, rng() < 0.3 ? "Let's get in." : null);
         // an occasional bouncer-line shout / neon energy
         clubT -= routineT;
         if (clubT <= 0) { clubT = 3 + rng() * 4; }
@@ -1182,7 +1183,7 @@
         if (shops.length) {
           const lot = shops[(Math.floor(hour)) % shops.length];
           if (!(P && Math.hypot(lot.cx - P.pos.x, lot.cz - P.pos.z) > 90)) {
-            gatherAt(lot, 5, 6, rng() < 0.2 ? "“Long line today.”" : null);
+            gatherAt(lot, 5, 6, rng() < 0.2 ? "Long line today." : null);
             queueT -= routineT;
             if (queueT <= 0) { queueT = 6 + rng() * 6; CBZ.cityGossip(lot.cx, lot.cz, "sale", 0.4); }
           }
@@ -1274,14 +1275,14 @@
       const r = cand.relPlayer; if (!r || !r.seen) continue;
       if (rng() > 0.35) continue;                       // don't have everyone pipe up at once
       const b = bondOf(cand);
-      if (r.grudge > 55) { say(cand, ["I see you.", "You'll get yours."][(rng() * 2) | 0], "#ff6b6b", 2.2); cand.mood = -1; }
+      if (r.grudge > 55) { say(cand, ["I see you.", "You'll get yours.", "Keep walking."][(rng() * 2) | 0], "#ff6b6b", 2.2); cand.mood = -1; }
       else if (b > 0.9) {
         // they know you by the name the street gave you
         const ttl = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "friend";
         say(cand, ["Yo, " + ttl + "!", "My friend!", "Good to see you."][(rng() * 3) | 0], "#7ed957", 2.2); cand.mood = 1;
       }
-      else if (b > 0.35) { say(cand, ["'Sup.", "Respect.", "Lookin' good."][(rng() * 3) | 0], "#bfe0ff", 2); }
-      else if (r.fear > 55) { say(cand, ["Please, I don't want trouble.", "Just leave me be."][(rng() * 2) | 0], "#cfd6e6", 2.2); cand.fear = Math.max(cand.fear || 0, 4); }
+      else if (b > 0.35) { say(cand, ["'Sup.", "Respect.", "Lookin' good.", "How's your mom?"][(rng() * 3) | 0], "#bfe0ff", 2); }
+      else if (r.fear > 55) { say(cand, ["I don't want trouble.", "Just leave me be.", "I got kids, man."][(rng() * 2) | 0], "#cfd6e6", 2.2); cand.fear = Math.max(cand.fear || 0, 4); }
       break;                                            // one reaction per vignette pass
     }
     // if the player is famous/rich and near, an onlooker may recognize them
@@ -1332,7 +1333,7 @@
       const w = function (ped) {
         if (ped && !ped.dead && CBZ.cityRelWillRecruit(ped) <= 0.05) {
           CBZ.city && CBZ.city.note((ped.name || "They") + " won't run with you, too much bad blood.", 2);
-          say(ped, "“After what you did? Never.”", "#ff9b8b", 2.2);
+          say(ped, "After what you did? Never.", "#ff9b8b", 2.2);
           return;
         }
         const ret = orec.apply(this, arguments);
@@ -1375,7 +1376,7 @@
               if (seen) {
                 CBZ.cityRelShift(foe, "defendedGang", 1);
                 if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(foe.gang, 4);
-                say(foe, "“Good lookin' out! ”", "#7ed957", 2);
+                say(foe, "Good lookin' out.", "#7ed957", 2);
               }
             }
           }
@@ -1459,7 +1460,7 @@
         if (!aggressor) aggressor = findPlayerAttacker(P, PA);
         if (aggressor && aggressor !== p && !aggressor.dead) {
           p.rage = aggressor; p.state = "fight"; r.t = 0;
-          if (rng() < 0.5) say(p, ["“Leave them ALONE!”", "“I got your back!”", "“Back OFF!”"][(rng() * 3) | 0], "#7ed957", 2.2);
+          if (rng() < 0.5) say(p, ["Leave them ALONE!", "I got your back!", "Back OFF!"][(rng() * 3) | 0], "#7ed957", 2.2);
         }
       }
       // ---- GRUDGE AMBUSH: timer elapsed + they can see you → payback ----
@@ -1468,7 +1469,7 @@
         if ((p.aggr || 0.3) > 0.45 && (r.grudge > 60 || (p.aggr || 0.3) > 0.6)) {
           p.rage = PA || P; p.state = "fight"; p.mem = PA || P;
           p.alarmed = Math.max(p.alarmed || 0, 6);
-          say(p, ["“Remember ME?!”", "“This is for them!”", "“You're DEAD.”"][(rng() * 3) | 0], "#ff6b6b", 2.4);
+          say(p, ["Remember ME?!", "This is for them!", "You're DEAD."][(rng() * 3) | 0], "#ff6b6b", 2.4);
           r.ambushT = 45 + rng() * 40;   // if they survive, they'll try again later
         } else {
           // a coward's revenge: become a committed witness against you
@@ -1626,7 +1627,7 @@
     clearBeacon();
     CBZ.city.big("Rescued " + ped.name + "!");
     CBZ.city.addRespect(6);
-    say(ped, "“You came for me! ”", "#ff8bd0", 2.6);
+    say(ped, "You came for me.", "#ff8bd0", 2.6);
     // heroics travel: the block hears you saved someone
     if (ped.pos) CBZ.cityGossip(ped.pos.x, ped.pos.z, "heroHero", 0.6);
   }

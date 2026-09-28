@@ -703,7 +703,7 @@
       if (nearDoor && g.hasKey && !CBZ.prisonDoorLatched("prison-yard-door")) {
         CBZ.openDoor();
         readerK = ""; readerRung = false;
-        CBZ.setObjective("Cross the yard, dodge the searchlights, reach the glowing exit.");
+        CBZ.setObjective("");
       } else if (nearDoor) {
         readerLamp("deny", 0.013);
         if (!readerRung) {

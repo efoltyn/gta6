@@ -427,7 +427,7 @@
       // landing (see step()). Dead bodies keep the legacy deathPose + flail.
       grp.rotation.x += p.spin * dt;
       grp.rotation.z += p.spinZ * dt;
-      if (intact) { bracePose(a); return; }
+      if (intact) { bracePose(a); if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true); return; }
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
       applyRag(a, p, dt);
       return;
@@ -465,9 +465,13 @@
         // (animChar is skipped while owned, so the additive write had no base
         // and accumulated — the wind-up half of the mangled-bodies bug).
         integRag(a, p, dt); writeRag(a, p, true);
+        // animChar is skipped while owned: the feet fall slack here instead of
+        // standing straight up off the end of the legs (character.js ANKLE SOLVE)
+        if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
         return;
       }
       applyRag(a, p, dt);     // limbs jiggle as the body lands & settles, then still
+      if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
       return;
     }
     // getting up: ease back upright
@@ -740,6 +744,28 @@
     return owns;
   }
 
+  /* NO DEATH WITHOUT A FALL. Plenty of code kills a man with a bare
+     `dead = true` (a fire, a drowning, a bleed-out, a scripted death) and
+     never tells the body. Such a rig used to stand there dead, or be culled.
+     The first frame we see a dead man that nothing is laying down (no fall,
+     no verlet body, not in the air, not held, not seated or in a car), he
+     collapses where he stands through the one fall. Once per death. */
+  function ensureFall(a) {
+    if (!a) return;
+    if (!a.dead) { if (a._fallSeen) a._fallSeen = false; return; }
+    if (a._fallSeen || a.culled || a.isPlayer) return;
+    a._fallSeen = true;
+    if (!CBZ.bodyFall || !a.char || !a.char.parts || !a.group || !a.group.parent) return;
+    if (a.inCar || a._npcAttached || a._parked || a._morgueClaimed || a._propSeat || a._propLie) return;
+    if (a._bf && a._bf.on) return;
+    if (a._ragSlot != null) return;
+    const p = a._phys;
+    if (p && (p.air || p.heldBy || p.down > 0)) return;
+    const gp = a.group.position;
+    if (CBZ.waterSubmergence && CBZ.waterSubmergence(gp.x, gp.y + 0.9, gp.z) > 0) return;   // the sea has him (water_float)
+    const yw = a.group.rotation.y || 0;
+    hit(a, { dir: { x: -Math.sin(yw), z: -Math.cos(yw) }, force: 1, knockdown: 9999 });
+  }
   function lerpA(a, b, t) { let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
   function near(pos, r) {
     const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z;
@@ -895,9 +921,9 @@
     if (CBZ.game.mode === "escape") return;
     physFrame++;
 
-    for (const b of CBZ.bots) step(b, dt);
-    if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) step(CBZ.cityPeds[i], dt);
-    if (CBZ.cityCops) for (let i = 0; i < CBZ.cityCops.length; i++) step(CBZ.cityCops[i], dt);
+    for (const b of CBZ.bots) { ensureFall(b); step(b, dt); }
+    if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) { ensureFall(CBZ.cityPeds[i]); step(CBZ.cityPeds[i], dt); }
+    if (CBZ.cityCops) for (let i = 0; i < CBZ.cityCops.length; i++) { ensureFall(CBZ.cityCops[i]); step(CBZ.cityCops[i], dt); }
 
     // the player's own knockback slide (knockdown/thrown handled in physics.js)
     const P = CBZ.player;

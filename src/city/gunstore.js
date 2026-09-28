@@ -733,7 +733,7 @@
     try {
       rig = CBZ.makeCharacter({
         legs: FORM_SKIN, torso: FORM_SKIN, collar: FORM_SKIN, arms: FORM_SKIN,
-        skin: FORM_SKIN, hair: FORM_SKIN, shoes: FORM_DARK, cap: 0,
+        skin: FORM_SKIN, hair: FORM_SKIN, shoes: FORM_DARK,
       });
     } catch (e) { rig = null; }
     if (!rig || !rig.group) return null;

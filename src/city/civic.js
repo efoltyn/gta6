@@ -255,11 +255,11 @@
     const s = stars();
     if (s <= 0) { say("Nothing outstanding against you. Have a good day.", 2); return; }
     if (s >= 4) {
-      say("That's a warrant, not a fine. I can't take your money for that, turn yourself in or run.", 3);
+      say("That's a warrant. I can't take money for that.", 3);
       return;
     }
     if (copsClose() && s >= 1) {
-      say("There are officers in this building looking for you. Step away from my window.", 3);
+      say("Just a moment. Stay right there, please.", 3);
       return;
     }
     const cost = fineCost();
@@ -287,7 +287,7 @@
   }
   function pullRecord() {
     const rec = recordTarget();
-    if (!rec) { say("No jurisdiction on file for this address.", 2.2); return; }
+    if (!rec) { say("That address isn't in our system.", 2.2); return; }
     if (!CBZ.city.spend(RECORD_FEE)) { note("Copies run " + fmt$(RECORD_FEE) + ".", 2); return; }
     coin();
     st().recIdx = (st().recIdx + 1) % Math.max(1, chain().length);
@@ -391,13 +391,13 @@
   function registerCar() {
     if (!qGate()) return;
     const car = targetCar();
-    if (!car) { say("Bring the vehicle to the window, or park it out front.", 2.4); return; }
+    if (!car) { say("Where's the car? I need to see it.", 2.4); return; }
     const nm = (car.model && car.model.name) || "Vehicle";
     if (car.owned) { say("That one's already titled to you.", 2); return; }
     if (car.dead || car._exploded) { say("I can't title a wreck.", 2); return; }
     // hot with cops ON it: the clerk runs the plate and it comes back flagged.
     if (stars() >= 1 || (car.npcWanted || 0) > 0 || (car.pullover || 0) > 0) {
-      say("The plate comes back flagged and there are units on it. Not today.", 3);
+      say("This plate's flagged. I can't touch it.", 3);
       return;
     }
     const fee = titleFee(car);
@@ -481,7 +481,7 @@
   function startRead() {
     if (st().read) { note("You're already reading. Sit still.", 1.8); return; }
     const rec = readTarget();
-    if (!rec) { say("Nothing filed for this jurisdiction, I'm afraid.", 2.2); return; }
+    if (!rec) { say("Nothing on file.", 2.2); return; }
     const lot = civicLots().library;
     st().read = { id: rec.id, sid: rec.office.holder, t: 0, need: READ_SECS, lot: lot };
     note("Boxes on the table. This takes a while, and you have to stay with it.", 2.6,
@@ -522,7 +522,7 @@
   function readRolls() {
     const rec = hereRec();
     const b = blocsHere();
-    if (!b || !b.length) { say("The rolls for this jurisdiction aren't held at this branch.", 2.4); return; }
+    if (!b || !b.length) { say("Wrong branch for that.", 2.4); return; }
     let tot = 0; for (let i = 0; i < b.length; i++) tot += b[i].pop || 0;
     note((rec ? rec.name : "This city") + " — " + b.length + " blocs, " + tot + " on the rolls.", 3,
       { from: "Public Library", app: "messages" });
@@ -679,7 +679,7 @@
     const lot = civicLots()[kind];
     if (!lot) return true;
     if (barred(lot)) {
-      say("You were carrying. Desk is closed to you, come back later.", 2.6);
+      say("You walked in here armed. Not today.", 2.6);
       return false;
     }
     if (armed()) { tripDetector(lot); return false; }

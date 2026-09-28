@@ -50,7 +50,7 @@ vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" }
 const GEO = {}, MAT = {};
 ctx.CBZ.boxGeom = (w, h, d) => GEO[w + "," + h + "," + d] || (GEO[w + "," + h + "," + d] = new ctx.THREE.BoxGeometry(w, h, d));
 ctx.CBZ.cmat = (hex) => MAT[hex] || (MAT[hex] = Object.assign(new ctx.THREE.MeshLambertMaterial({ color: hex }), { _shared: true }));
-for (const f of ["src/city/clothes.js", "src/city/outfits.js"]) {
+for (const f of ["src/entities/headwear.js", "src/city/clothes.js", "src/city/outfits.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { console.log("load " + f + " threw: " + e.message); process.exit(2); }
 }
@@ -133,11 +133,30 @@ check(last2.length === 2 && keyOf(last2[0]) === keyOf(last2[1]) && last2[0].styl
 check(a._detailKit && a._detailKit.children.length === 7 && a._detailKit.parent === a.neck, "kit mounted on the neck (7 parts)");
 check(a._detailKit.children[0].geometry === b._detailKit.children[0].geometry && a._detailKit.children[0].material === b._detailKit.children[0].material, "kit geometry/material shared between wearers");
 CBZ.cityRecolorRig(a, cat.swat.colors, cat.swat);
-check(!a._detailKit && a.neck.children.length === 0, "re-dress into SWAT strips the kit");
+// the neck now also carries the role hat (entities/headwear.js), so "stripped"
+// means nothing on it but headwear groups
+const nonHat = (r) => r.neck.children.filter((o) => !/^headwear-/.test(o.name)).length;
+check(!a._detailKit && nonHat(a) === 0, "re-dress into SWAT strips the kit");
+check(CBZ.headwear.worn(a) === "ballistic", "SWAT wears the ballistic helmet (got " + CBZ.headwear.worn(a) + ")");
 const hexOf = (m) => (m.material.color.getHex ? m.material.color.getHex() : m.material.color.h);
 check(a.skinSlots.hands.every((m) => hexOf(m) === cat.swat.colors.gloves && m.material === ctx.CBZ.cmat(cat.swat.colors.gloves)), "SWAT paints gloves (the shared glove cmat)");
 CBZ.cityRecolorRig(a, cat.street.colors, cat.street);
 check(a.skinSlots.hands.every((m) => hexOf(m) === a.skinTone), "back to street: hands are skin again");
+check(CBZ.headwear.worn(a) === null && a.neck.children.length === 0, "back to street: the helmet comes off");
+// ---- 4b: role hats by kind, and ONE gang headwear (clothes.js cityAttachBandana)
+const HATS = { police: "peaked", sheriff: "campaign", construction: "hardhat", soldier: "milcap", pilot: "peaked", corrections: "peaked", warden: "peaked" };
+for (const id in HATS) {
+  const h = rig();
+  CBZ.cityRecolorRig(h, cat[id].colors, cat[id]);
+  check(CBZ.headwear.worn(h) === HATS[id], `CAT.${id} wears ${HATS[id]} (got ${CBZ.headwear.worn(h)})`);
+  check(h.skinSlots.cap.length > 0 && h.skinSlots.cap.every((m) => /^hat-/.test(m.name)), `CAT.${id}: skinSlots.cap holds the hat's meshes`);
+}
+const gm = rig();
+CBZ.cityRecolorRig(gm, cat["gang:reds"].colors, cat["gang:reds"]);
+check(CBZ.headwear.worn(gm) === "bandana" && !!gm._bandana, "a gang fit ties the crew bandana");
+check(gm.neck.children.filter((o) => /^headwear-/.test(o.name)).length === 1 && !gm.neck.children.some((o) => o.isMesh), "the bandana is ONE headwear group, no box ring");
+CBZ.cityRecolorRig(gm, cat.police.colors, cat.police);
+check(!gm._bandana && CBZ.headwear.worn(gm) === "peaked", "out of gang colours: the bandana is off, the uniform cap on");
 const c = rig();
 CBZ.cityRecolorRig(c, cat.street.colors, cat.street);
 check(c.skinSlots.hands.every((m) => m.material.color.h === null), "a never-gloved body's hands are never touched");

@@ -141,7 +141,7 @@
     },
     deal: ["Good. That stays in this room.", "Noted. Get out."],
     dealNone: ["Nobody out there worth a name? Get out."],
-    favorAsk: ["There's a blade in the yard, by the far fence. Bring it here."],
+    favorAsk: ["Somebody buried a blade in my yard. Find it."],
     handOver: ["Good. We're square."],
     threatWin: ["...Get out of my office."],
     threatLose: ["Officer. Take him down."],

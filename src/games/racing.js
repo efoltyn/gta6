@@ -634,10 +634,10 @@
     venue._cast = [];
     const marshalAt = localPt(0, -(TRACK_W / 2 + 3.0));
     venue._cast.push({ role: "marshal", outfit: 0xe8b64c, name: "Race Marshal", at: [marshalAt.x, marshalAt.z], face: HEAD + Math.PI, post: "pinned", pose: "stand",
-      dialogue: ["Green means go, jump it and the stewards add five.", "Checkered's mine to wave. Earn it.", "Grid up on my mark."] });
+      dialogue: ["Checkered's mine to wave. Earn it.", "Grid up on my mark.", "Thirty years flagging. Lost half my hearing."] });
     const bmAt = localPt(-26, 20.9);
     venue._cast.push({ role: "bookmaker", outfit: "banker", name: "The Bookmaker", at: [bmAt.x, bmAt.z], face: HEAD, post: "pinned", pose: "stand",
-      dialogue: ["Back yourself, the worse your grid, the fatter the odds.", "Only a win pays here. Second's a coaster.", "Stake's down the moment the lights go."] });
+      dialogue: ["Only a win pays here. Second's a coaster.", "Stake's down the moment the lights go.", "Kid in the blue car owes me four grand."] });
     [localPt(-20, 27), localPt(-30, 18.5)].forEach((p, i) => venue._cast.push({ role: "patron", at: [p.x, p.z], face: HEAD + (i ? 1 : -1), post: "ambient" }));
     venue._pendingCast = true;
     tryDrainCast(ctx, venue);
@@ -768,7 +768,7 @@
     if (!C) return;
     // standalone = opened from the bookmaker stand outside qualifying flow
     if (standalone && (!NIGHT.active || NIGHT.phase !== "bet" && NIGHT.grid == null)) {
-      castSay("bookmaker", "Qualify first. Your grid sets the odds.");
+      castSay("bookmaker", "No grid, no odds.");
       return;
     }
     NIGHT.phase = "bet";

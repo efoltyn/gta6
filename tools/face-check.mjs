@@ -40,7 +40,7 @@ vm.runInContext(`
     CBZ.cmat = (c) => { let m = mc.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); m._shared = true; mc.set(c, m); } return m; };
     CBZ.boxGeom = (w, h, d) => { const k = w + "," + h + "," + d; let g = gc.get(k); if (!g) { g = new THREE.BoxGeometry(w, h, d); g._shared = true; gc.set(k, g); } return g; };
   })();`, ctx);
-for (const f of ["src/systems/fphands.js", "src/entities/character.js", "src/entities/heritage.js"]) {
+for (const f of ["src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/heritage.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { if (!f.includes("fphands")) throw e; }
 }

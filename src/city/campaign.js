@@ -802,7 +802,7 @@
       if (thresholds) g.heat = Math.max(g.heat || 0, (thresholds[4] || 3200) + 5);
       g.wanted = Math.max(g.wanted || 0, 4);
     }
-    say("SWAT COMMANDER", "On your knees. The roof was the trap.", 3.2, R.swat[0]);
+    say("SWAT COMMANDER", "On your knees! Hands where I see them!", 3.2, R.swat[0]);
     notify("news", "VERIDIA LIVE", "Tactical units have sealed the Spire after an unidentified helicopter landing.");
     setMission({
       id: "drop-point",
@@ -1741,7 +1741,7 @@
       con.dressed = dressed;
       setMission(missionForContract(con));
       if (dressed && con.point && distTo(con.point.x, con.point.z) < 30) {
-        say("DOOR CREW", "Staff comes through the side. Go on.", 2.4, con.guards[0]);
+        say("DOOR CREW", "Late again? Go on.", 2.4, con.guards[0]);
       }
     }
     if (!con.blown) {
@@ -2071,7 +2071,7 @@
       setMission({
         id: "break-out",
         title: "BREAK OUT",
-        briefing: "You refused the warden. Find a keycard, a tunnel, a friend, or a weakness in the gate. Any real escape advances the story.",
+        briefing: "You refused the warden. Get out on your own.",
         location: "Cell Block Z",
         status: "active",
         objectives: [{ id: "escape", text: "Escape the prison", done: false }],

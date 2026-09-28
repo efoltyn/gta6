@@ -36,10 +36,16 @@
 
    WHERE IT SITS. Nothing is typed against one body: the forearm's real cross
    section is MEASURED at the watch line (whatever mesh character.js draws
-   there — box or tube), the strap is swept round it with 1.5 mm of clearance,
-   and the head is scaled to that wrist (a 40 mm case on a 60 mm wrist). The
-   head sits on the BACK of the wrist (outboard on a hanging arm), crown to
-   the hand, and above the wrist crease so no hand pose ever reaches it.
+   there — box or tube), the strap is swept round it with 1.5 mm of clearance.
+   The HEAD is sized by the HAND, not by the arm (a 40 mm case is 40 mm at
+   the scale the hand beside it is drawn): sized off the measured section it
+   grew with every chunky forearm and every sleeve, to a dial as wide as the
+   forearm. The head sits on the BACK of the wrist (outboard on a hanging
+   arm), crown to the hand, and above the wrist crease so no hand pose ever
+   reaches it. UNDER A SLEEVE the watch is worn on the wrist, not over the
+   cloth: the strap wraps the real wrist inside the sleeve (hidden), and the
+   head sits at the hem, sunk under the fabric's surface, so the lower part
+   of the dial peeks out past the cuff and nothing floats over the fabric.
    First person: fpHands.poseArm is wrapped, so every FP arm in the game (the
    fists, the gun arms, the car cabin, the pickup lens) carries the PLAYER's
    watch on its left forearm, riding the pose it was just given.
@@ -770,11 +776,18 @@
     return { hu: mix(lo.hu, hi.hu), hw: mix(lo.hw, hi.hw), cu: mix(lo.cu, hi.cu), cw: mix(lo.cw, hi.cw), sq: Math.max(lo.sq, hi.sq), min: good[0].at, max: good[good.length - 1].at };
   }
   // a fit record from a section: a = across (wrist X), b = depth (wrist Z)
-  function makeFit(a, b, square) {
-    const s = a / REF_HALF_WRIST;
+  // a, b: the wrist's half-extents the strap wraps; hs: the head's scale (the
+  // hand's: rig units per real metre) — omitted, the old wrist-derived guess
+  function makeFit(a, b, square, hs) {
+    const s = hs > 0 ? hs : a / REF_HALF_WRIST;
     const rc = square > 0.9 ? Math.min(a, b) * 0.18 : Math.min(a, b) * 0.92;
-    return { a: a, b: b, rc: rc, s: s, key: q4(a) + "|" + q4(b) + "|" + q4(rc) };
+    return { a: a, b: b, rc: rc, s: s, key: q4(a) + "|" + q4(b) + "|" + q4(rc) + "|" + q4(s) };
   }
+  // the head's resting place on its instance: `drop` toward the hand, `sink` into the wrist
+  function seatHead(inst, fit, drop, sink) {
+    inst.userData.ww.head.position.set(0, -(drop || 0), fit.b + CLEAR * fit.s - (sink || 0));
+  }
+  function caseHeight(style) { const S = STYLES[style]; return S ? S.hc + S.hb : 0.01; }
 
   /* ------------------------------------------------------------ third person */
   const _m4 = new THREE.Matrix4();
@@ -796,29 +809,84 @@
   }
   /* Where the watch sits on this rig's LEFT forearm, in the elbow group's
      frame: the forearm mesh is sliced at the watch line and the head is
-     lifted clear of the wrist crease by its own radius. */
+     lifted clear of the wrist crease by its own radius. Measured with the
+     forearm UNtwisted (character.js wristTwist turns it with a gun hand;
+     sync() turns the watch with it). Sleeved: see WHERE IT SITS. */
   function rigPlacement(rig) {
     const anchor = anchorOf(rig);
     const fore = rig && rig.skinSlots && rig.skinSlots.armsLower && rig.skinSlots.armsLower[0];
     if (!anchor || !fore || !fore.geometry) return null;
-    const M = matrixTo(fore, anchor);
-    if (!M) return null;
-    const lm = CBZ.charArmLandmarks ? CBZ.charArmLandmarks(rig) : null;
-    // the crease: the landmark, else the forearm mesh's own bottom
-    let crease = lm && isFinite(lm.handTop) ? lm.handTop : null;
-    const probe = sliceSection(fore.geometry, M, 1, crease != null ? crease + 0.05 : -1e9);
-    if (!probe) return null;
-    if (crease == null) crease = probe.min;
-    const sec0 = sliceSection(fore.geometry, M, 1, crease + 0.05);
-    const s0 = sec0.hu / REF_HALF_WRIST;                  // u = Z (across), w = X (depth)
-    const y = Math.min(probe.max - 0.02, crease + (0.0215 + 0.0045) * s0);
-    const sec = sliceSection(fore.geometry, M, 1, y);
-    const fit = makeFit(sec.hu, sec.hw, sec.sq);
-    const side = sideOf(anchor);
-    // wrist frame: X = 12 o'clock, Y = toward the elbow, Z = dorsal (outboard)
-    const q = new THREE.Quaternion().setFromRotationMatrix(_m4.makeBasis(
-      new THREE.Vector3(0, 0, -side), new THREE.Vector3(0, 1, 0), new THREE.Vector3(side, 0, 0)));
-    return { anchor: anchor, fit: fit, pos: new THREE.Vector3(sec.cw, y, sec.cu), quat: q, sig: fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z) };
+    const tw = fore.rotation.y;
+    fore.rotation.y = 0;
+    try {
+      const M = matrixTo(fore, anchor);
+      if (!M) return null;
+      const lm = CBZ.charArmLandmarks ? CBZ.charArmLandmarks(rig) : null;
+      // the crease: the landmark, else the forearm mesh's own bottom
+      let crease = lm && isFinite(lm.handTop) ? lm.handTop : null;
+      const probe = sliceSection(fore.geometry, M, 1, crease != null ? crease + 0.05 : -1e9);
+      if (!probe) return null;
+      if (crease == null) crease = probe.min;
+      // the head's scale: the hand's (rig units per metre, as drawn)
+      const hand = rig.parts && rig.parts.la && rig.parts.la.userData && rig.parts.la.userData.cap;
+      const sec0 = sliceSection(fore.geometry, M, 1, crease + 0.05);
+      const hs = hand && hand.scale && hand.scale.x > 0 ? hand.scale.x : sec0.hu / REF_HALF_WRIST;
+      const side = sideOf(anchor);
+      // wrist frame: X = 12 o'clock, Y = toward the elbow, Z = dorsal (outboard)
+      const q = new THREE.Quaternion().setFromRotationMatrix(_m4.makeBasis(
+        new THREE.Vector3(0, 0, -side), new THREE.Vector3(0, 1, 0), new THREE.Vector3(side, 0, 0)));
+      const sig = fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z);
+      const spec = fore.userData && fore.userData.limb;
+      if (spec && spec.variant === "cloth") {
+        // UNDER THE SLEEVE: the real wrist (the hand's own, a little up the
+        // arm) inside the cloth, the strap 2-4 cm (hand) above the hem,
+        // the head dropped to the hem and sunk under the fabric (sync)
+        const WR = CBZ.fpHands && CBZ.fpHands.WRIST;
+        const y = crease + 0.030 * hs;
+        // the cloth's narrowest inside over the strap's width, less the strap's own build
+        let cu = Infinity, cw = Infinity;
+        for (let dy = -0.012; dy <= 0.0121; dy += 0.004) {
+          const c = sliceSection(fore.geometry, M, 1, y + dy * hs);
+          cu = Math.min(cu, c.hu); cw = Math.min(cw, c.hw);
+        }
+        const room = (CLEAR + 0.0090) * hs;               // clearance + strap + buckle
+        const a0 = WR ? WR.hw * 0.9 * hs : sec0.hu * 0.6, b0 = WR ? WR.ht * 0.95 * hs : sec0.hw * 0.6;   // a strap cinches the wrist a little
+        const a = Math.max(a0, Math.min(a0 * 1.15, cu * 0.96 - room)), b = Math.max(b0, Math.min(b0 * 1.2, cw * 0.96 - room));
+        const at = sliceSection(fore.geometry, M, 1, y);
+        return { anchor: anchor, fit: makeFit(a, b, 0.7, hs), pos: new THREE.Vector3(at.cw, y, at.cu), quat: q, sig: sig,
+          sleeve: true, drop: 0.030 * hs, crease: crease, foreGeo: fore.geometry, foreInv: M.clone().invert() };
+      }
+      const y = Math.min(probe.max - 0.02, crease + (0.0215 + 0.0045) * hs);
+      const sec = sliceSection(fore.geometry, M, 1, y);
+      return { anchor: anchor, fit: makeFit(sec.hu, sec.hw, sec.sq, hs), pos: new THREE.Vector3(sec.cw, y, sec.cu), quat: q, sig: sig, sleeve: false, drop: 0, crease: crease };
+    } finally {
+      fore.rotation.y = tw;
+      fore.updateMatrix();
+    }
+  }
+  /* How far a head sinks toward the arm so nothing of it above the hem is
+     outside the sleeve: measured against the cloth loft itself
+     (CBZ.humanLimbHalfAt, flats 3.4% in), by bisection, once per mount. */
+  const _sv = new THREE.Vector3(), _sq = new THREE.Quaternion();
+  function sleeveSink(place, style) {
+    if (!place.sleeve || !CBZ.humanLimbHalfAt) return 0;
+    const f = place.fit, pos = headGeometry(style).attributes.position;
+    const out = function (sink) {
+      for (let i = 0; i < pos.count; i++) {
+        _sv.fromBufferAttribute(pos, i).multiplyScalar(f.s);
+        _sv.y -= place.drop; _sv.z += f.b + CLEAR * f.s - sink;
+        _sv.applyQuaternion(place.quat).add(place.pos);
+        if (_sv.y <= place.crease + 0.001) continue;
+        _sv.applyMatrix4(place.foreInv);
+        const h = CBZ.humanLimbHalfAt(place.foreGeo, _sv.y);
+        if (h && Math.hypot(_sv.x / (h.hx * 0.96), (_sv.z - h.cz) / (h.hz * 0.96)) > 1) return true;
+      }
+      return false;
+    };
+    if (!out(0)) return 0;
+    let lo = 0, hi = 0.04 * f.s;
+    for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (out(m)) lo = m; else hi = m; }
+    return hi;
   }
 
   /* ------------------------------------------------------------ roles */
@@ -909,6 +977,7 @@
     }
     mounted.delete(r);
   }
+  const _twq = new THREE.Quaternion(), _twY = new THREE.Vector3(0, 1, 0);
   function sync(r, cam) {
     const rig = r.rig;
     if (r.overMark && r.overMark.parent !== r.place_anchor) { r.over = null; r.overMark = null; }
@@ -939,9 +1008,17 @@
     if (r.inst && (r.inst.userData.ww.style !== style || r.inst.parent !== r.place.anchor)) unmount(r);
     if (!r.inst) {
       r.inst = buildInstance(style, r.place.fit, false);
-      r.inst.position.copy(r.place.pos);
-      r.inst.quaternion.copy(r.place.quat);
+      seatHead(r.inst, r.place.fit, r.place.drop, sleeveSink(r.place, style));
       r.place.anchor.add(r.inst);
+      r.tw = null;
+    }
+    // the forearm pronates with a gun hand (character.js wristTwist): so does the watch on it
+    const tw = fore ? fore.rotation.y : 0;
+    if (r.tw !== tw) {
+      r.tw = tw;
+      _twq.setFromAxisAngle(_twY, tw);
+      r.inst.position.copy(r.place.pos).applyQuaternion(_twq);
+      r.inst.quaternion.copy(r.place.quat).premultiply(_twq);
     }
     r.place_anchor = r.place.anchor;
     setNear(r.inst, near);
@@ -982,6 +1059,37 @@
   const FP_BASIS = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
     new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)));
   const _fq = new THREE.Quaternion(), _fp = new THREE.Vector3();
+  /* The FP head under a sleeve: sunk until nothing of it up the arm from the
+     cuff's lip stands outside the cuff's outer band (fphands foreHalf + the
+     band's 3.5 mm), by bisection; cached per shape. Inst frame -> fore frame:
+     x = -xf, y = zf, z = yf (FP_BASIS). */
+  const _fpSink = new Map();
+  function fpCuffSink(style, sec, kk, lf, zAlong, cx, cy, drop) {
+    const H = CBZ.fpHands;
+    if (!H || !H.math || !H.math.foreHalf) return 0;
+    const key = style + "|" + q4(kk) + "|" + q4(lf / kk) + "|" + q4(sec.hw);
+    if (_fpSink.has(key)) return _fpSink.get(key);
+    const pos = headGeometry(style).attributes.position, band = 0.0035;
+    const b = sec.hw * kk;
+    const out = function (sink) {
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i) * kk, y = pos.getY(i) * kk - drop, z = pos.getZ(i) * kk + b + CLEAR * kk - sink;
+        const xf = cx - x, zf = zAlong + y, yf = cy + z;
+        if (zf <= 0.003 * kk) continue;
+        const s = H.math.foreHalf(zf / lf);
+        if (Math.hypot(xf / ((s.rx + band) * kk), yf / ((s.ry + band) * kk)) > 1) return true;
+      }
+      return false;
+    };
+    let sink = 0;
+    if (out(0)) {
+      let lo = 0, hi = 0.04 * kk;
+      for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (out(m)) lo = m; else hi = m; }
+      sink = hi;
+    }
+    _fpSink.set(key, sink);
+    return sink;
+  }
   function fpPlace(arm, wrist, elbow, shoulder, handQ, k, sleeved) {
     const P = arm && arm.userData && arm.userData.parts;
     if (!P || !P.fore) return;
@@ -992,20 +1100,24 @@
     if (!st) st = arm.userData.ww = { inst: null, key: "" };
     const lf = Math.max(1e-4, P.fore.scale.z);
     const kk = k || 1;
-    let a, b, zAlong, cx = 0, cy = 0;
+    let a, b, zAlong, cx = 0, cy = 0, drop = 0, sink = 0;
     const R0 = 0.0215 + 0.0045;
-    if (sleeved && P.cuff && P.cuff.geometry) {
-      const sec = sliceSection(P.cuff.geometry, null, 2, 0.045);
-      a = sec.hu * kk; b = sec.hw * kk; cx = sec.cu * kk; cy = sec.cw * kk;
-      zAlong = Math.max(0.045 * kk, R0 * (a / REF_HALF_WRIST));
-    } else {
-      const s0 = sliceSection(P.fore.geometry, null, 2, 0.03 * kk / lf);
-      const sG = (s0.hu * kk) / REF_HALF_WRIST;
-      zAlong = R0 * sG;
+    if (sleeved) {
+      // under the cuff: the strap on the forearm's skin 3 cm up (inside the
+      // sleeve cuff, which covers 0..5.9 cm), the head dropped to the cuff's
+      // lip and sunk under its surface, so the dial peeks out past the cuff
+      zAlong = 0.030 * kk;
       const sec = sliceSection(P.fore.geometry, null, 2, zAlong / lf);
       a = sec.hu * kk; b = sec.hw * kk; cx = sec.cu * kk; cy = sec.cw * kk;
+      drop = 0.030 * kk;
+      sink = fpCuffSink(style, sec, kk, lf, zAlong, cx, cy, drop);
+    } else {
+      zAlong = R0;
+      const sec = sliceSection(P.fore.geometry, null, 2, zAlong * kk / lf);
+      a = sec.hu * kk; b = sec.hw * kk; cx = sec.cu * kk; cy = sec.cw * kk;
+      zAlong *= kk;
     }
-    const fitR = makeFit(a, b, 0.7);
+    const fitR = makeFit(a, b, 0.7, kk);          // the head at the hand's scale
     const key = style + "|" + fitR.key;
     if (!st.inst || st.key !== key) {
       if (st.inst) { if (st.inst.userData.ww.near) setNear(st.inst, false); arm.remove(st.inst); }
@@ -1019,6 +1131,7 @@
     }
     const inst = st.inst;
     inst.visible = true;
+    seatHead(inst, fitR, drop, sink);
     // fore frame: x across, y dorsal, z along; the section centre is (cx, cy)
     _fp.set(-0 + cx, cy, zAlong).applyQuaternion(P.fore.quaternion).add(P.fore.position);
     inst.position.copy(_fp);

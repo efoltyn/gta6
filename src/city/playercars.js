@@ -2584,7 +2584,20 @@
       const arm = addBox(r, 0.09, 0.09, 0.46, x, axleY + 0.72, 0.30, rider);
       arm.rotation.x = 0.30;
     });
-    addSphere(r, 0.15, 0, axleY + 1.02, 0.34, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }), 1, 0.92, 1.1);
+    // the helmet is a real full-face moto lid (entities/headwear.js, built in
+    // the adult 0.60 head frame: skull centre (0, 0.30, 0), face +z = the
+    // bike's forward) shrunk to this dummy's 0.15 head and centred where the
+    // head is. A page without headwear.js keeps the dark ball.
+    const lid = CBZ.headwear && CBZ.headwear.build("moto", { color: 0x0d0f12 });
+    if (lid) {
+      const k = 0.15 / 0.33;
+      lid.scale.setScalar(k);
+      lid.position.set(0, axleY + 1.02 - 0.30 * k, 0.34);
+      lid.traverse(function (o) { if (o.isMesh) o.castShadow = false; });
+      r.add(lid);
+    } else {
+      addSphere(r, 0.15, 0, axleY + 1.02, 0.34, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }), 1, 0.92, 1.1);
+    }
     [0.17, -0.17].forEach(function (x) {
       const shin = addBox(r, 0.09, 0.34, 0.10, x, axleY + 0.22, -0.30, rider);  // boots on the rearsets
       shin.rotation.x = -0.5;

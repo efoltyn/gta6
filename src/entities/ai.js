@@ -1021,7 +1021,7 @@
     // THE PAYER IS A PERSON. `job.actor` is whoever handed the job over
     // (startGangJob records it) — they pay you, out loud, in front of you.
     { const jv = jobVoice(job); if (jv) say(jv, `${job.reward || 4}. Good work.`, null, 2.0); }
-    CBZ.setObjective && CBZ.setObjective("Job done. Keycard checkpoints or tunnels can still get you out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -1031,7 +1031,7 @@
     addGangDebt(job.gang, 3);
     const jv = jobVoice(job);
     if (jv) say(jv, "You blew it.", null, 2.0);
-    CBZ.setObjective && CBZ.setObjective("Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
+    CBZ.setObjective && CBZ.setObjective("");
     CBZ.game.gangJob = null;
   }
 
@@ -2273,6 +2273,61 @@
     return fallback || "guard chatter";
   }
 
+  /* HEARSAY. What a yard actually trades in: names, grudges, who is soft and
+     who is bent. Built off the live roster, and only SOMETIMES true, because
+     a rumor you can act on blind is a walkthrough, and nobody in here knows
+     anything for sure (owner, 2026-09-28: "rumors that are sometimes true and
+     sometimes false"; never a route, a room, a key or the gun room).
+       bent screw   true when he is corrupt, told about a clean man a third
+                    of the time
+       snitch       true when the man's snitch trait is high, else gossip
+       holding      true when his pockets are actually heavy
+       the rest     flavour nobody can check */
+  function hearsay(n) {
+    const pickOf = (a) => a[(rng() * a.length) | 0];
+    const co = (gd) => actorName(gd).replace(/^Officer /, "");
+    const guards = (CBZ.guards || []).filter((gd) => gd && gd.data && !gd.dead && gd.kind !== "warden");
+    const cons = (CBZ.npcs || []).filter((m) => m !== n && alive(m) && m.data && !m._crowd &&
+      m.data.name && !/^(a|an) /.test(m.data.name));
+    const r = rng();
+    if (r < 0.28 && guards.length) {
+      const bent = guards.filter((gd) => gd.corrupt);
+      const liar = !bent.length || rng() < 0.33;
+      const gd = liar ? pickOf(guards) : pickOf(bent);
+      return pickOf([`${co(gd)} takes money. Heard it.`, `${co(gd)}'s bent. Maybe.`,
+        `Heard ${co(gd)} sleeps on nights.`]);
+    }
+    if (r < 0.46 && guards.length) {
+      const gd = pickOf(guards);
+      return pickOf([`${co(gd)} did two tours. Don't swing on him.`,
+        `${co(gd)}'s wife left him. He's mean this week.`,
+        `${co(gd)} writes everybody up. Everybody.`,
+        `${co(gd)} used to box. Watch the left.`]);
+    }
+    if (r < 0.62 && cons.length) {
+      const m = pickOf(cons);
+      const snitchy = ((m.personality && m.personality.snitch) || 0) > 0.3;
+      return snitchy || rng() < 0.4
+        ? pickOf([`${actorName(m)} talks to the COs.`, `Watch what you say around ${actorName(m)}.`])
+        : pickOf([`${actorName(m)}'s alright. Solid.`, `${actorName(m)} owes half the yard.`]);
+    }
+    if (r < 0.74 && cons.length) {
+      const m = pickOf(cons);
+      const load = CBZ.econ && CBZ.econ.rollLoadout ? CBZ.econ.rollLoadout(m) : null;
+      const heavy = load && (load.cigs || 0) >= 8;
+      return heavy || rng() < 0.35 ? `${actorName(m)}'s holding. Heard it.` : `${actorName(m)}'s broke. Don't bother.`;
+    }
+    return pickOf([
+      "Heard they're shipping ten guys out Friday.",
+      "Somebody got cut in the laundry last week.",
+      "New warden's worse. Wait and see.",
+      "Kitchen's watering the milk again.",
+      "They're gonna toss the whole tier. Soon.",
+      "Guy in seven hung up. Nobody talks about it.",
+      "Parole board's denying everybody this year.",
+    ]);
+  }
+
   /* WHAT A MAN TELLS YOU WHEN HE TELLS YOU SOMETHING. One fact, the way a
      man in a yard says it: a name, a place, a number. No advice, no system
      explained (owner: "no mechanics in dialogue"). */
@@ -2284,10 +2339,10 @@
     const knownReporter = (CBZ.npcs || []).find((m) => alive(m) && (m.reportedPlayerT || 0) > 0);
     if (knownReporter) return `${actorName(knownReporter)} talked. About you.`;
     if (g.lastKnown && g.lastKnown.t > 0) return `They're looking for you. ${g.lastKnown.source ? g.lastKnown.source + " pointed." : ""}`.trim();
-    const bent = (CBZ.guards || []).filter((gd) => gd && gd.corrupt && !gd.dead && !(gd.ko > 0));
-    if (bent.length && rng() < 0.4) return `${actorName(bent[Math.floor(rng() * bent.length)])} takes money.`;
+
     if (n.gang >= 0 && debt > 0) return `You owe us ${debt}. Don't forget.`;
     if ((g.cigs || 0) >= 18) return "People see you carrying.";
+    if (rng() < 0.7) return hearsay(n);
     return n.data.tip || (n.data.talk && n.data.talk[(rng() * n.data.talk.length) | 0]) || "Keep your head down.";
   }
 
@@ -3881,7 +3936,7 @@
     if (where === "cell block") return "He's on the tier most days.";
     if (where === "staff lounge") return "He works up by the staff lounge.";
     if (where === "exit corridor") return "He hangs down the exit corridor.";
-    if (where === "armory door") return "He's always near the armory door.";
+    if (where === "armory door") return "He's always on the staff side.";
     if (where === "yard gate") return "He stands at the yard gate.";
     if (where === "Reds' corner") return "He posts up at the Reds' corner.";
     if (where === "Blues' corner") return "He posts up at the Blues' corner.";

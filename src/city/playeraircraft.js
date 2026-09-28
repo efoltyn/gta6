@@ -1227,13 +1227,18 @@
   CBZ.airPilotNode = pilotNode;
 
   // A FLIGHT SUIT IS A COSTUME (Rome test). Colours only — the rig underneath
-  // is the game's one human.
+  // is the game's one human. The headgear is entities/headwear.js's (capKind):
+  // a jet or bomber crew's closed shell with a dark visor (the full-face
+  // "moto" lid, stripes toned down, is the closest cut in the library — no
+  // flight helmet with an oxygen mask exists yet), the helicopter crew's aircrew helmet
+  // (the ballistic shell), an airline captain's peaked cap. A light-aircraft
+  // pilot flies bareheaded (the old `cap: 0` meant exactly that).
   const SUIT = {
-    fighter:  { legs: 0x3c4436, torso: 0x46503c, collar: 0x323a2c, arms: 0x46503c, skin: 0xe8c39a, hair: 0x2a2018, shoes: 0x22242a, cap: 0x1b2028 },
-    heli:     { legs: 0x33383f, torso: 0x3c434c, collar: 0x2a2f36, arms: 0x3c434c, skin: 0xd9a877, hair: 0x1d1a16, shoes: 0x22242a, cap: 0x1b2028 },
-    airliner: { legs: 0x1b2130, torso: 0xe9edf2, collar: 0x1b2130, arms: 0xe9edf2, skin: 0xe8c39a, hair: 0x33291f, shoes: 0x14161a, cap: 0x151c2e },
-    bomber:   { legs: 0x2c3128, torso: 0x343a2e, collar: 0x22261e, arms: 0x343a2e, skin: 0xc99a6d, hair: 0x201a14, shoes: 0x22242a, cap: 0x1b2028 },
-    prop:     { legs: 0x3a4152, torso: 0xd8d3c4, collar: 0x3a4152, arms: 0xd8d3c4, skin: 0xe8c39a, hair: 0x54402a, shoes: 0x2b2b2b, cap: 0 },
+    fighter:  { legs: 0x3c4436, torso: 0x46503c, collar: 0x323a2c, arms: 0x46503c, skin: 0xe8c39a, hair: 0x2a2018, shoes: 0x22242a, cap: 0x1b2028, capKind: "moto", capAccent: 0x2a3038 },
+    heli:     { legs: 0x33383f, torso: 0x3c434c, collar: 0x2a2f36, arms: 0x3c434c, skin: 0xd9a877, hair: 0x1d1a16, shoes: 0x22242a, cap: 0x1b2028, capKind: "ballistic" },
+    airliner: { legs: 0x1b2130, torso: 0xe9edf2, collar: 0x1b2130, arms: 0xe9edf2, skin: 0xe8c39a, hair: 0x33291f, shoes: 0x14161a, cap: 0x151c2e, capKind: "peaked:captain" },
+    bomber:   { legs: 0x2c3128, torso: 0x343a2e, collar: 0x22261e, arms: 0x343a2e, skin: 0xc99a6d, hair: 0x201a14, shoes: 0x22242a, cap: 0x1b2028, capKind: "moto", capAccent: 0x2a3038 },
+    prop:     { legs: 0x3a4152, torso: 0xd8d3c4, collar: 0x3a4152, arms: 0xd8d3c4, skin: 0xe8c39a, hair: 0x54402a, shoes: 0x2b2b2b },
   };
 
   // SETTLE THE POSE NOW, NOT OVER THE NEXT THIRD OF A SECOND. character.js's

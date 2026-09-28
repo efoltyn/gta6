@@ -7,24 +7,13 @@
 
    This routes the menu's [1] Talk action through onTalk().
 
-   SPINE EMPHASIS (PRISON_ARMORY_SPINE, declared in world/gunroom.js). OWNER,
-   verbatim: "it's not about getting cigarettes and opening the dumb chests —
-   it's getting a keycard which already gets you into a very cool armory room."
-   Two of the three favors this file could hand out were beat-somebody-up and
-   pull-a-heist; the third was TRIBUTE IN CIGARETTES, i.e. the block's people
-   were themselves pointing the player at the noise. Surgical answer, and the
-   quest engine below is untouched:
-     · a FOURTH favor, "armory", asks for the thing the whole game is about —
-       and it obeys contracts.js's binding rule that the generator picks the
-       VERB while the WORLD supplies the specifics: it is only ever offered
-       when CBZ.armory actually exists and the chain is not already finished,
-       so nobody can ask you for something the world cannot answer;
-     · the idle-chat slot (the ~40% of talks that produced generic filler)
-       becomes STREET INTEL naming the keycard→armory chain, chosen by a stable
-       hash of the speaker so the same person always says the same thing — a
-       character trait, not a re-rolled die;
-     · the tribute favor's own text said "Bring me 8 as tribute." — eight of
-       WHAT. That noun has been missing since the file shipped; it is a cig.
+   NOBODY POINTS YOU AT THE GUN ROOM (owner, 2026-09-28: "Nobody should ever
+   tell you to go in the gun room. That should be something you figure out
+   on your own. Nothing should tell you that."). This file used to fill
+   55-80% of idle talks with a "street intel" line naming the keycard and
+   armory chain, and one favour in five was "get past the gun-room gate".
+   Both are deleted. The favours left are things a man in a yard actually
+   wants done for himself: somebody hurt, something lifted, smokes paid.
 ============================================================ */
 (function () {
   "use strict";
@@ -32,35 +21,6 @@
   const econ = CBZ.econ;
   const g = CBZ.game;
   const FRIEND = 100; // rep needed for a freedom favor
-  // gunroom.js owns the default (it loads first); undefined reads as ON.
-  const SPINE = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_ARMORY_SPINE === false);
-
-  // ---- the chain, asked of the live world and never cached ----------------
-  function armoryOpen() { return !!(CBZ.armory && CBZ.armory.open); }
-  function armed() {
-    return !!(CBZ.hasAnyWeapon ? CBZ.hasAnyWeapon()
-      : (CBZ.weaponInventory && CBZ.weaponInventory.length));
-  }
-  // never offer a favor the world cannot supply, and never one already served
-  function armoryFavorLive() { return SPINE && !!CBZ.armory && !(armoryOpen() && armed()); }
-
-  // stable per-speaker pick — the same inmate always tells you the same thing
-  function nameHash(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
-    return h;
-  }
-  const CHAIN_TALK = [
-    "Guns are behind the red door. You need a card.",
-    "The armory. That's the door that matters.",
-    "The CO in the cage carries the only key.",
-  ];
-  function chainLine(actor) {
-    if (actor.kind === "warden") return "The gun room stays locked.";
-    const nm = (actor.data && actor.data.name) || "someone";
-    return CHAIN_TALK[nameHash(nm) % CHAIN_TALK.length];
-  }
-
   function allNames() {
     const list = [];
     for (const n of CBZ.npcs) list.push(n.data.name);
@@ -85,19 +45,23 @@
        carrying (economy.js's loadouts), and what a friend hands you
        (onTalk below). Same magnitudes — a favour still costs less than a
        Gun-Room Key and more than a bribe — so nothing in the price list moves. */
-    if (roll < 0.40) {
-      return { type: "beat", target: victim, text: `Put ${victim} on the floor.`, reward: 12 };
-    } else if (roll < 0.68) {
+    // Every ask carries its reason, the way a man says it. The reason is
+    // flavour only; the job is the same.
+    const why = (list) => list[Math.floor(econ.rng() * list.length)];
+    if (roll < 0.45) {
+      const t = why([
+        `${victim} owes me. Put him on the floor.`,
+        `${victim} ran his mouth about my mother. Handle it.`,
+        `Put ${victim} on the floor. He knows why.`,
+        `${victim} took my spot at chow. Twice.`,
+      ]);
+      return { type: "beat", target: victim, text: t, reward: 12 };
+    } else if (roll < 0.75) {
       const need = 1 + Math.floor(econ.rng() * 2);
-      return { type: "steal", need, start: g.stealsDone || 0, text: need > 1 ? `Lift ${need} things. Don't get caught.` : "Lift something. Don't get caught.", reward: 15 };
-    } else if (roll < 0.90 && armoryFavorLive()) {
-      // THE STAR. Not "fetch me N of something" — the one errand in the block
-      // that ends with you holding a gun, which is a change of CATEGORY and
-      // the only reward CLAUDE.md's gun-room grammar counts.
-      return { type: "armory", text: "Get past the gun-room gate and come back with a piece.", reward: 22 };
+      return { type: "steal", need, start: g.stealsDone || 0, text: need > 1 ? `Lift ${need} things. Don't get caught.` : why(["Lift something. Don't get caught.", "Bring me something off somebody. Anybody."]), reward: 15 };
     }
     const need = 6 + Math.floor(econ.rng() * 8);
-    return { type: "gift", need, text: `Bring me ${need} smokes.`, reward: 0 };
+    return { type: "gift", need, text: why([`Bring me ${need} smokes.`, `I'm short ${need} smokes. You're not.`]), reward: 0 };
   }
 
   function questDone(actor) {
@@ -106,7 +70,6 @@
     if (q.type === "beat") return !!g.koLog[q.target];
     if (q.type === "steal") return (g.stealsDone || 0) - q.start >= q.need;
     if (q.type === "gift") return g.cigs >= q.need;
-    if (q.type === "armory") return armoryOpen() && armed();
     return false;
   }
 
@@ -142,7 +105,6 @@
     actor.quest = null;
     CBZ.sfx("key");
     if (actor.rep >= FRIEND) return "You're alright. Come find me. I'll get you out of here.";
-    if (q.type === "armory") return "You actually did it.";
     if (q.type === "gift") return "That'll do.";
     return "Good. I won't forget it.";
   }
@@ -255,36 +217,8 @@
       }
     }
 
-    /* THE TEACHING LINE, and it deliberately lives in the FALLBACK slot. Put
-       ahead of the favor roll it would have halved quest assignment; here it
-       only ever replaces generic filler, so the block's idle chatter is what
-       tells you the game has a spine — and it goes quiet the moment you are
-       actually holding the card, because a hint you have already acted on is
-       nagging. AT NIGHT IT COMES OUT MORE READILY: the tier is dark, the
-       screws are on the far side of a locked grille, and this is the hour men
-       in a prison actually say what they are thinking. */
-    const nightWhisper = !!(S && S.enabled() && S.is("night"));
-    if (SPINE && !g.hasKey && !armoryOpen() && econ.rng() < (nightWhisper ? 0.8 : 0.55)) {
-      return { ok: true, msg: chainLine(actor) };
-    }
     return econ.talk(actor);
   }
-
-  /* Ratchet: `spineFavors` counts favors that point at the keycard→armory
-     chain (may only go UP) and `cigFavors` counts the ones that ask for
-     cigarettes (may only go DOWN). `chainLines` is the intel pool — printed
-     beside them so "fixing" the ratio by deleting content cannot pass. */
-  CBZ.questSpineAudit = function () {
-    return {
-      spine: SPINE,
-      favorTypes: 4,
-      spineFavors: armoryFavorLive() ? 1 : 0,
-      cigFavors: 1,
-      chainLines: CHAIN_TALK.length,
-      chainLive: SPINE && !g.hasKey && !armoryOpen(),
-      armoryReachable: !!CBZ.armory,
-    };
-  };
 
   CBZ.quests = { onTalk, FRIEND };
 })();

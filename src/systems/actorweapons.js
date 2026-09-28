@@ -307,6 +307,7 @@
       last.fireBend = bend;
       // the hand: at the crease, on the frame
       hand.quaternion.copy(_lq).invert().multiply(_hq);
+      if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "r");          // the forearm pronates with the hand
       hand.position.set(0, fit.wristY, 0);
       // the gun: its grip centre in the fist's
       hand.updateMatrixWorld(true);
@@ -652,6 +653,7 @@
       bend = frameSupport(spec, low);
       if (bend > BEND_MAX) bend = clampBend(_hq, _f, BEND_MAX, _dq);
       hand.quaternion.copy(_lq).invert().multiply(_hq);
+      if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "l");          // the forearm pronates with the hand
       hand.position.set(0, fit.wristY, 0);
       hand.updateMatrixWorld(true);
       _gcw.copy(_gc);
@@ -691,6 +693,7 @@
       if (bend > BEND_MAX) clampBend(_hq, _f, BEND_MAX, _dq);
       hand.quaternion.copy(_lq).invert().multiply(_hq);
       if (w > 0) hand.quaternion.slerp(REST_L, Math.min(1, w));
+      if (CBZ.charWristTwist) CBZ.charWristTwist(ch, "l");          // the forearm pronates with the hand
       hand.position.set(0, fit.wristY, 0);
     }
     // where the support hand's grip is on this gun, world (for reach tests / floors)

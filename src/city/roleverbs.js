@@ -124,9 +124,9 @@
      the trade IS, and it is the moment the verb matters most.
      ========================================================================== */
   const MEDIC = {
-    "doctor":    { rate: 1.40, frac: 1.00, line: "“Hold still. This is going to sting.”" },
-    "nurse":     { rate: 1.00, frac: 0.70, line: "“I can close that. See a doctor about the rest.”" },
-    "paramedic": { rate: 0.90, frac: 0.85, line: "“Sit down. Let me look at it.”" },
+    "doctor":    { rate: 1.40, frac: 1.00, line: "Hold still. This is going to sting." },
+    "nurse":     { rate: 1.00, frac: 0.70, line: "I can close that. Keep it dry." },
+    "paramedic": { rate: 0.90, frac: 0.85, line: "Sit down. Let me look at it." },
   };
   function medicQuote(p) {
     const mx = maxHp(), missing = Math.max(0, mx - hpNow());
@@ -175,7 +175,7 @@
       P().hp = Math.min(maxHp(), hpNow() + 8);
       if (CBZ.cityDrink) CBZ.cityDrink(1);
       paid(p, 12);
-      say(p, "“One more and you're walking home.”");
+      say(p, "One more and you're walking home.");
       note("A round, loosened up.", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
@@ -199,7 +199,7 @@
       econ().add(PLATE, 1);
       CBZ.cityEat(PLATE);                                // the ONE eat path
       paid(p, price);
-      say(p, "“Eat it while it's hot.”");
+      say(p, "Eat it while it's hot.");
     },
   };
 
@@ -225,7 +225,7 @@
       pl.hp = Math.min(pl.maxHp, hpNow() + 2);
       paid(p, TRAIN_COST);
       if (CBZ.city.addRespect) CBZ.city.addRespect(1);
-      coin(); say(p, "“Again. Last two are the only ones that count.”");
+      coin(); say(p, "Again. Last two are the ones that count.");
       note("Trained. Max HP " + Math.round(pl.maxHp) + ".", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
@@ -250,7 +250,7 @@
       L.swagger = Math.max(L.swagger || 0, 2);
       paid(p, 30);
       if (CBZ.city.addRespect) CBZ.city.addRespect(2);
-      coin(); say(p, "“Chair's the kerb today. Hold still.”");
+      coin(); say(p, "Chair's the kerb today. Hold still.");
       note("Fresh lineup, you look like somebody.", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
@@ -285,7 +285,7 @@
       CBZ.city.addCash(amt);
       if (CBZ.city.addRespect) CBZ.city.addRespect(1);
       coin();
-      say(p, "“Grab the other end. Cash at the end of it.”");
+      say(p, "Grab the other end. On three.");
       note("Worked the shift · " + money(amt) + " in hand.", 2);
     },
   };
@@ -323,13 +323,13 @@
     id: "rv-produce",
     can: function () { return ensureGood("Fresh Produce"); },
     label: function () { return "Buy fresh produce · " + money(goodPrice("Fresh Produce")); },
-    run: function (p) { buyGood(p, "Fresh Produce", "“Picked this morning. Straight off the field.”"); },
+    run: function (p) { buyGood(p, "Fresh Produce", "Picked this morning. Straight off the field."); },
   };
   const ROW_MEAT = {
     id: "rv-meat",
     can: function () { return ensureGood("Fresh Cut"); },
     label: function () { return "Buy a fresh cut · " + money(goodPrice("Fresh Cut")); },
-    run: function (p) { buyGood(p, "Fresh Cut", "“Off the herd this week. You won't do better.”"); },
+    run: function (p) { buyGood(p, "Fresh Cut", "Off the herd this week."); },
   };
   // THE CATCH is not a new item at all: wildlife.js already registers
   // "Fresh Fish" into the catalog off aquatic.js's species record, which is why
@@ -348,7 +348,7 @@
       if (!CBZ.city.spend(price)) { note("The catch runs " + money(price) + ".", 1.4); return; }
       e.add("Fresh Fish", 1);
       paid(p, price);
-      coin(); say(p, "“Still wet. Take it before the gulls do.”");
+      coin(); say(p, "Still wet. Take it before the gulls do.");
       note("Bought Fresh Fish · " + money(price) + ".", 1.8);
     },
   };
@@ -408,7 +408,7 @@
         reward: d.reward,
         onComplete: function () {
           if (CBZ.city.addRespect) CBZ.city.addRespect(1);
-          say(p, "“Signed for. There's more where that came from.”");
+          say(p, "Signed for. Nice work.");
         },
       });
       if (!m || m.inert) { note("No runs going out right now.", 1.6); return; }
@@ -445,7 +445,7 @@
       const nm = (lot.building && lot.building.name) || "the casino";
       CBZ.fullMap.setWaypoint(lot.cx, lot.cz, nm);
       if (CBZ.cityMeet) CBZ.cityMeet(p);
-      say(p, "“Floor's open. Cage is by the door, don't embarrass me.”");
+      say(p, "Dress nice. They throw people out.");
       note("Marked " + nm + " on your map.", 2.2);
     },
   };
@@ -539,7 +539,7 @@
     const J = jobRec(jobOf(p));
     if (J && J.anchor) return "“I'm out at the " + J.anchor + " most of the week.”";
     if (J && J.lots && J.lots.length) return "“You'll find me at the " + J.lots[0] + ".”";
-    return "“Work's work. You get used to it.”";
+    return "Work's work. You get used to it.";
   }
   // MEETING SOMEBODY IS A REAL CHANGE. cityMeet flips nameKnown — the card
   // stops calling them "A stranger" forever after — and the relationship shift
@@ -562,7 +562,7 @@
     run: function (p) {
       greet(p);
       const stars = g.wanted | 0;
-      say(p, stars >= 1 ? "“You want to be somewhere else. They're asking after you.”" : workLine(p));
+      say(p, stars >= 1 ? "Cops were asking about you." : workLine(p));
     },
   };
   // A trade with no named verb still has hands, and a medic with no named verb
@@ -659,11 +659,11 @@
     onSelect: function (p) {
       const e = econ(), d = dealerDrug(p), price = scorePrice(p);
       if (!e || !d || !price) return;
-      if (!CBZ.city.spend(price)) { say(p, "“Come back with the money.”"); return; }
+      if (!CBZ.city.spend(price)) { say(p, "Come back with the money."); return; }
       e.add(d, 1);
       if (e.recordBuy) e.recordBuy(d, 1);
       paid(p, price);
-      coin(); say(p, "“Don't stand here with it.”");
+      coin(); say(p, "Don't stand here with it.");
       note("Scored " + d + " — " + money(price) + ".", 1.8);
     },
   });
