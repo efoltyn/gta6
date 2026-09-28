@@ -530,6 +530,21 @@ scenario(9, "core follow-up: idempotent morale, clear/recycle, per-game walls, n
   B.authority.begin(c2, w2, "theft", { skipWarn: true, patience: 0.5 });
   for (let i = 0; i < 60; i++) { r = B.authority.step(c2, 0.05, { speed: 1.8, armed: false }); advance(0.05); if (verbs.some((v) => v.name === "tackle")) break; }
   check(verbs.some((v) => v.name === "tase") && verbs.some((v) => v.name === "tackle"), "taser answered false -> tackle; a walking (not running) non-complier in reach is tackled");
+  // police.js's gun-stop exactly as it begins it: hold + silent + complyHold 0
+  fresh(100);
+  const beat = actor(0, 0, 0), carrier = actor(0, 3, Math.PI);
+  B.register(beat, "cop", { game: "sim" });
+  const GS = { comply: "disarm", outcome: "release", rechallenge: true, patience: 14, hold: true, silent: true, skipWarn: true, warnRange: 16, complyHold: 0, roe: "nonlethal" };
+  const K1 = B.authority.begin(beat, carrier, "open carry", GS);
+  const gst = { speed: 0, armed: true, dist: 3 };
+  for (let i = 0; i < 20; i++) { B.authority.step(beat, 0.05, gst); advance(0.05); }
+  gst.armed = false;
+  B.authority.step(beat, 0.05, gst);
+  check(K1.outcome === "released" && said.length === 0 && beat._goal == null, "gun-stop: the frame he holsters, released; silent, never walked");
+  const K2 = B.authority.begin(beat, carrier, "open carry", GS);
+  gst.armed = true; let last = null;
+  for (let i = 0; i < 400 && K2.active; i++) { last = B.authority.step(beat, 0.05, gst); advance(0.05); if (last.phase === "escalate") break; }
+  check(last && last.phase === "escalate" && K2.t < 7.2 && K2.t > 6.8, "gun-stop re-challenge: patience 7 s, then escalate (" + K2.t.toFixed(2) + " s)");
 });
 
 // =========================================================================

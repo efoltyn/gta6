@@ -632,7 +632,7 @@
         else if (pl) {
           // the player's crime: he WALKS to a screw (ai.js's snitch run,
           // which a crew can intercept); the report is held until he gets there
-          w.reportAt = Infinity;
+          b.social.holdReport(n);
           const ok = info.reportSnitch ? !!info.reportSnitch(n, w.amount, Object.assign({ heardOnly: !w.saw }, w.meta || {})) : false;
           if (!ok) b.social.silence(n, "code");
           else {
@@ -666,23 +666,25 @@
     const b = BR();
     if (b && b.social && b.social.silence) b.social.silence(n, how || "stopped");
   };
-  /* He got to a screw: the held report lands now (the brain fires onReport on
-     its next pump). */
+  /* He got to a screw: the held report lands now, through the brain. */
   PB.fileReport = function (n, guard) {
     const w = n && n._brain && n._brain.witness;
-    if (!w || w.reported || w.cancelled || w.reportAt == null) return false;
-    if (w.reportAt !== Infinity) return false;      // only a report held for THIS walk
+    const b = BR();
+    if (!w || w.reportAt !== Infinity || !b || !b.social) return false;   // only a report held for THIS walk
     w.guard = guard || null;
-    w.reportAt = now();
-    return true;
+    return !!b.social.fileNow(n);
   };
   /* A snitch run the brain was not holding (a tail that turned into a
-     report, a huddle, an extortion that went bad): it lands through the same
-     door, onReport, so there is ONE place a report becomes heat. */
+     report, a huddle, an extortion that went bad): the brain's lone accuser,
+     so it lands through the same door, onReport — ONE place a report becomes
+     heat. Its facts ride on rep.opts ({ accused, amount, meta, guard }). */
   PB.reportNow = function (n, guard, amount, meta) {
+    const b = BR();
     const lk = (meta && meta.lastKnown) || (CBZ.player ? CBZ.player.pos : { x: 0, z: 0 });
-    onReport({ kind: (meta && meta.type) || "crime", x: lk.x, z: lk.z, perp: CBZ.player, severity: clamp((amount || 12) / 40, 0, 1),
-      witness: n, t: now(), amount: amount, meta: meta || null, guard: guard || null });
+    const opts = { game: GAME, accused: true, x: lk.x, z: lk.z, amount: amount, meta: meta || null, guard: guard || null };
+    const sev = clamp((amount || 12) / 40, 0, 1), kind = (meta && meta.type) || "crime";
+    if (b && b.social && b.social.accuse) { b.social.accuse(n, CBZ.player, kind, sev, opts); return; }
+    onReport({ kind: kind, x: lk.x, z: lk.z, perp: CBZ.player, severity: sev, witness: n, t: now(), opts: opts });
   };
 
   /* THE REPORT LANDS — the ONE place a witness report becomes heat. */
@@ -690,9 +692,10 @@
     if (!inPrison() || !rep) return;
     const n = rep.witness;
     if (!n || isStaff(n)) return;
-    // a synthesized report (reportNow) carries its own facts; a brain one
-    // carries them on the witness record PB.crime filled in
-    const w = rep.amount != null ? null : (n._brain && n._brain.witness);
+    // an accusation (reportNow) carries its own facts on rep.opts; a crime
+    // report carries them on the witness record PB.crime filled in
+    const A = rep.opts && rep.opts.accused ? rep.opts : null;
+    const w = A ? null : (n._brain && n._brain.witness);
     const perp = (w && w.prisonPerp) || rep.perp;
     // last chance to be scared off on the way (the perp's people on him)
     if (scaredOff(n, perp)) {
@@ -701,10 +704,10 @@
       return;
     }
     if (isPlayer(perp)) {
-      const amount = rep.amount != null ? rep.amount : (w && w.amount) || Math.round(8 + (rep.severity || 0.5) * 16);
-      const meta = Object.assign({}, rep.meta || (w && w.meta) || {});
+      const amount = A && A.amount != null ? A.amount : (w && w.amount) || Math.round(8 + (rep.severity || 0.5) * 16);
+      const meta = Object.assign({}, (A && A.meta) || (w && w.meta) || {});
       if (!meta.lastKnown) meta.lastKnown = { x: rep.x, z: rep.z, type: rep.kind, heardOnly: !(w && w.saw) };
-      const gd = rep.guard || (w && w.guard) || null;
+      const gd = (A && A.guard) || (w && w.guard) || null;
       // entities/ai.js's playerReported: the line he says to the screw, the
       // case file, the gossip — the prison's own consequences of a report
       const hook = PB.onPlayerReported || CBZ.prisonPlayerReported;
@@ -954,8 +957,8 @@
     // clock() also pumps the witness reports that have come due
     if (b.clock) { try { b.clock(+G().elapsed || 0); } catch (e) {} }
     syncCast(dt, false);
-    // HARNESS TRAP: nothing in the core ticks morale unless a game calls
-    // update(dt) or morale.tick(dt); the prison ticks its own groups at 4 Hz
+    // the prison ticks its groups at 4 Hz (morale.tick is idempotent per
+    // clock stamp, so another game ticking the same frame cannot double it)
     moraleAcc += dt;
     if (moraleAcc >= 0.25 && b.morale && b.morale.tick) { try { b.morale.tick(moraleAcc); } catch (e) {} moraleAcc = 0; }
     if (G().state !== "playing") return;

@@ -1293,12 +1293,6 @@
      them (a noise turns his head, a warning stands him down), so they are
      carried into the brain's record before it moves and read back after. */
   const _aw = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 1.0, light: null, reason: 0, moveMul: 1, mul: 1 };
-  function awRec(g) {
-    const b = g._brain;
-    if (!b || !b.seenT) return null;
-    const i = b.seenT.indexOf(player);
-    return i >= 0 ? b.seenR[i] : null;
-  }
   function perceive(g, dt) {
     const px = player.pos.x, pz = player.pos.z;
     // a man he is already looking FOR is a reason all by itself
@@ -1311,9 +1305,8 @@
     let sees = false;
     if (per) {
       const blindToYou = ctx.invuln || (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0);
-      const prevHold = g.susHold || 0;
-      const r0 = awRec(g);
-      if (r0) { r0.aware = g.sus || 0; r0.hold = prevHold; }
+      const mem = CBZ.brain.memory;
+      mem.setAware(g, player, g.sus || 0, g.susHold || 0);
       _aw.range = blindToYou ? 0 : g.viewDist * ctx.viewMul;
       _aw.fovHalf = Math.min(1.45, g.half * wardenSharp);
       _aw.shrink = player.crouch ? 0.55 : 1;
@@ -1321,21 +1314,11 @@
       _aw.reason = reason;
       _aw.moveMul = ctx.moveMul;
       _aw.mul = ctx.diffMul * (g.flashlightOn ? 1.25 : 1);
-      let aware = per.awareness(g, player, dt, _aw);
-      const r = awRec(g);
-      // HARNESS TRAP: the meter's record (actor._brain.seenR) is read for the
-      // frame's visibility; if the core ever stores it elsewhere, ask directly
-      sees = r ? !!r.visible : per.sees(g, player, _aw);
-      if (r) {
-        // seen, but with no reason to care about him: the meter lets go
-        if (sees && !(reason > 0)) {
-          r.hold = prevHold - dt;
-          if (r.hold <= 0 && r.aware > 0) r.aware = Math.max(0, r.aware - 0.22 * dt);
-          aware = r.aware;
-        }
-        g.susHold = r.hold;
-      }
-      g.sus = aware;
+      // reason 0 (seen, nothing to care about) drains inside the brain's meter
+      g.sus = per.awareness(g, player, dt, _aw);
+      const r = mem.aware(g, player);
+      sees = !!r.visible;
+      g.susHold = r.hold;
     }
     g.seesPlayer = sees;
     if (sees) { g.lkX = px; g.lkZ = pz; g.lkVX = ctx.pvx; g.lkVZ = ctx.pvz; g.lkAt = clock(); }

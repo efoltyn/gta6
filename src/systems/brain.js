@@ -82,6 +82,8 @@
        case.outcome: cuffed | warned | released | complied | lost | dead | cancelled
        + opts.hold (challenge in place)  + opts.comply "disarm" + opts.outcome "release"
        + opts.rechallenge (true | window s: patience / n for the same man again)
+       + opts.tackleRange (m, default 3.2)  + opts.tackles (attempts per case, default 2)
+       + opts.silent (the game speaks the lines)  + opts.complyHold (s, default 0.6)
 
      act.moveTo(a, x, z, opts)  act.stop(a)  act.face(a, x, z)  act.posture(a, p)
      act.say(a, line, opts)  act.verb(name, a, b, opts)  act.use(game, executor)
@@ -116,12 +118,18 @@
 
   /* ---------------------------------------------------------------- clock
      clock(t) once per frame (game seconds). Without it the brain reads
-     CBZ.game.elapsed, and without THAT, whatever update(dt) accumulated. */
-  let T = 0, clockSet = false, frame = 0;
+     CBZ.game.elapsed, and without THAT, whatever update(dt) accumulated.
+     A clock() LAPSES: if nobody has called it for 0.5 s of wall time (the
+     prison drove it, then the page moved to a game that doesn't), the brain
+     goes back to CBZ.game.elapsed instead of freezing on the old stamp —
+     a frozen stamp would stall every idempotent morale.tick for good. */
+  let T = 0, clockSet = false, frame = 0, clockWall = 0;
+  const wallNow = typeof performance !== "undefined" && performance.now ? function () { return performance.now(); } : function () { return Date.now(); };
   function now() {
-    if (clockSet) return T;
     const g = CBZ.game;
-    if (g && typeof g.elapsed === "number") return g.elapsed;
+    const ge = g && typeof g.elapsed === "number";
+    if (clockSet && (!ge || wallNow() - clockWall < 500)) return T;
+    if (ge) return g.elapsed;
     return T;
   }
 
@@ -1523,6 +1531,8 @@
     // hold: challenge IN PLACE (a protection detail never leaves the principal
     // to walk a man down): no approach, no chase, force only inside reach
     c.hold = !!opts.hold;
+    c.silent = !!opts.silent;                 // + the game voices this case itself (out.say still reported)
+    c.complyHold = opts.complyHold != null ? opts.complyHold : ARREST.COMPLY_HOLD;   // + s of compliance that counts
     // THE GUN-STOP (police.js challengeCall, absorbed): comply "disarm" means
     // compliance is the weapon going away (holstered / dropped), and outcome
     // "release" ends a complied case with him let go instead of cuffed
@@ -1539,7 +1549,10 @@
       c.challengeN = ch.n;
     } else c.challengeN = 1;
     c.phase = "observe"; c.t = 0; c.phaseT = 0; c.comply = 0; c.flee = 0; c.lastD = -1;
-    c.tased = false; c.noTaser = false; c.tackleN = 0; c.tackleCD = 0; c.forceN = 0; c.cuffed = false; c.verbResult = null; c.outcome = null;
+    c.tased = false; c.noTaser = false; c.tackleN = 0; c.tackleCD = 0;
+    c.tackleR = opts.tackleRange != null ? opts.tackleRange : ARREST.TACKLE_R;   // + reach of the takedown
+    c.tackles = opts.tackles != null ? opts.tackles : 2;                        // + attempts per case
+    c.forceN = 0; c.cuffed = false; c.verbResult = null; c.outcome = null;
     c.n = (c.n || 0) + 1; c.saidPhase = null; c.active = true;
     c.out = c.out || { phase: null, say: null, act: null, verb: null, x: 0, z: 0 };
     return c;
@@ -1598,7 +1611,7 @@
         c.comply = complying ? c.comply + dt : Math.max(0, c.comply - dt * 0.5);
         c.flee = running ? c.flee + dt : Math.max(0, c.flee - dt * 0.5);
         const lateOk = c.complyMode === "disarm" ? complying : (s.speed || 0) < 1.4 && !s.armed;
-        if (c.comply >= ARREST.COMPLY_HOLD || (c.phaseT >= c.patience && lateOk)) {
+        if ((c.comply > 0 && c.comply >= c.complyHold) || (c.phaseT >= c.patience && lateOk)) {
           if (c.onComply === "release") {
             out.say = line(b, "released"); c.outcome = "released"; c.active = false; setPhase(c, "done"); ph = "done";
           } else if (hold && d > c.cuffRange) {
@@ -1659,10 +1672,10 @@
         if (r) { c.verbResult = r; out.verb = "tase"; c.tased = true; c.forceN++; c.afterT = 0; }
         else c.noTaser = true;                                   // no taser here: the tackle is next
       }
-      if (!out.verb && (c.tased || c.noTaser) && d <= ARREST.TACKLE_R && resisting && c.tackleN < 2 && c.tackleCD <= 0) {
+      if (!out.verb && (c.tased || c.noTaser) && d <= c.tackleR && resisting && c.tackleN < c.tackles && c.tackleCD <= 0) {
         c.verbResult = verb("tackle", officer, sus, _vOpts(c)); out.verb = "tackle";
         c.tackleN++; c.tackleCD = 1.5; c.forceN++; c.afterT = 0;
-      } else if (!out.verb && !hold && d > (c.tased || c.noTaser ? ARREST.TACKLE_R * 0.8 : ARREST.TASE_R)) {
+      } else if (!out.verb && !hold && d > (c.tased || c.noTaser ? c.tackleR * 0.8 : ARREST.TASE_R)) {
         moveTo(officer, sx, sz, _mRun);
       }
       if (d > (hold ? ARREST.LOSE_R : ARREST.LOSE_R * 1.6)) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
@@ -1679,7 +1692,7 @@
       posture(officer, "aim");
       if (!threatening && c.phaseT > 0.5) { setPhase(c, "order"); ph = c.phase; out.act = "hold"; }
     }
-    if (out.say) say(officer, out.say, _sayForce);
+    if (out.say && !c.silent) say(officer, out.say, _sayForce);
     out.phase = c.phase;
     return out;
   }
@@ -1830,7 +1843,7 @@
 
   /* ================================================================ LIFECYCLE */
   function clock(t) {
-    if (typeof t === "number") { T = t; clockSet = true; }
+    if (typeof t === "number") { T = t; clockSet = true; clockWall = wallNow(); }
     frame++;
     pumpReports();
     return T;

@@ -285,10 +285,7 @@
   function crowdReset() {
     if (!BR) return;
     // one crowd per match: the group record is the brain's, emptied here
-    // (HARNESS TRAP / contract gap: brain.morale has no clear(id) yet)
-    const G = BR.morale.group(CROWD);
-    G.members.length = 0; G.men0 = 0; G.p0 = 0; G.pNow = 0; G.dead = 0;
-    G.shock = 0; G.morale = 1; G.alive = 0; G.routing = 0; G.broken = false; G.leaderDown = false;
+    BR.morale.clear(CROWD);
     /* A CROWD OF STRANGERS IS NOT AN ARMY. An army's morale is mostly what it
        has LOST (lostK 1.5): the dead were your side's strength. A crowd's is
        what it just SAW: the recent deaths (shock, ~7 s decay) and the people
@@ -306,8 +303,9 @@
   function joinBrain(b) {
     if (!BR) return;
     const h = hidOf(b), sk = skillOf(b);
-    const rec = BR.register(b, "survivor", {
+    BR.register(b, "survivor", {
       game: "survival", group: CROWD,
+      nerveJ: (hmix(h, 43) - 0.5) * 0.12,          // the brain's jitter is id-ordered; this one is the body's
       personality: {
         courage: 0.12 + sk * 0.6 + hmix(h, 29) * 0.2,
         aggression: 0.1 + hmix(h, 31) * 0.35,
@@ -316,7 +314,6 @@
         loyalty: 0.3 + hmix(h, 41) * 0.5,
       },
     });
-    rec.nerveJ = (hmix(h, 43) - 0.5) * 0.12;       // the brain's jitter is id-ordered; this one is the body's
     b._survBrain = true;
   }
   const _wit = [];

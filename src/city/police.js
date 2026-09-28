@@ -578,7 +578,7 @@
   //  do is done with the world, not with a button: walk off (the refusal, see
   //  stopWalkOff), stand there and let him lose patience, or shoot him.
   // ============================================================
-  const STOP = { cop: null, t: 0, susp: 0, asked: 0, panel: null, name: null, note: null, opts: null, optList: null, key: "" };
+  const STOP = { cop: null, case: null, susp: 0, asked: 0, panel: null, name: null, note: null, opts: null, optList: null, key: "" };
 
   function stopDom() {
     if (STOP.panel !== null) return STOP.panel;
@@ -614,9 +614,13 @@
   // ("Open carry, he wants it away", "Officer is losing patience", a countdown).
   // He says it himself now, over his own head (copSay + STOP_WARN), and his
   // gun coming up is the clock. The card is the one HOLSTER button.
-  // THE CLOCK: ignoring a gun-stop runs out STOP_LIMIT seconds in, and the
-  // honest charge is brandishing, 1 star.
+  // THE CLOCK IS THE BRAIN'S. The stop is a CBZ.brain.authority case in
+  // gun-stop mode (comply "disarm", outcome "release"): STOP_LIMIT is its
+  // patience, a re-challenge of the same man inside a minute is shorter, and
+  // running out of it armed is the brain's escalate — here, the honest charge,
+  // brandishing, 1 star. The officer still voices it himself (silent case).
   const STOP_LIMIT = 14;
+  const _stopSt = { speed: 0, armed: true, aiming: false, attacking: false, fled: false, seen: true, dist: 0 };
   const STOP_WARN = [
     { t: 5, line: "Put it away. Now." },
     { t: 9.5, line: "Last warning! Holster that weapon!" },
@@ -658,7 +662,20 @@
   }
 
   function beginStop(cop) {
-    STOP.cop = cop; STOP.t = 0; STOP.asked = 1; STOP.key = ""; STOP.warnI = 0;
+    STOP.cop = cop; STOP.asked = 1; STOP.key = ""; STOP.warnI = 0; STOP.case = null;
+    if (cop._law && cop._law.suspect) LAW.release(cop);     // one case per officer: the stop is it
+    const BA = CBZ.brain && CBZ.brain.authority;
+    if (BA) {
+      // hold: this file walks him in (stepTo / holdFace below); the brain only
+      // keeps the clock and decides. complyHold 0: the holster IS compliance.
+      try {
+        STOP.case = BA.begin(cop, CBZ.city.playerActor, "open carry", {
+          comply: "disarm", outcome: "release", rechallenge: true, patience: STOP_LIMIT,
+          hold: true, silent: true, skipWarn: true, warnRange: 16, complyHold: 0, roe: "nonlethal",
+        });
+      } catch (e) { STOP.case = null; }
+      STOP.caseN = STOP.case ? STOP.case.n : 0;       // the record is the officer's and reused: n says it is still OURS
+    }
     // THE OFFICER REMEMBERS. The REFUSE row's real weight was that it could be
     // pressed twice and the third one got you arrested. With refusal moved onto
     // walking away, that repetition lives ACROSS stops instead of inside one:
@@ -687,8 +704,10 @@
       c.gunstop = false; c._gunLowered = false;   // free the gun rig for normal hunt/patrol logic
       if (c.state === "gunstop") c.state = "patrol";
       c.arrestT = 0; c.retarget = calm ? 2.5 : 0;
+      const BA = CBZ.brain && CBZ.brain.authority;
+      if (BA && STOP.case && BA.caseOf(c) === STOP.case && STOP.case.n === STOP.caseN) BA.cancel(c);
     }
-    STOP.cop = null; STOP.t = 0; STOP.susp = 0; STOP.asked = 0;
+    STOP.cop = null; STOP.case = null; STOP.susp = 0; STOP.asked = 0;
     stopHide();
   }
 
@@ -700,7 +719,7 @@
   // count on the OFFICER (`_stopRefused`, seeded back into STOP.susp by
   // beginStop), so the ladder is walk off → he shouts → walk off → he shouts
   // harder → walk off → HANDS. Standing there instead is a different ending:
-  // STOP.t > 16 below already has him force it. Before this, walking off was
+  // the brain case running out of patience already has him force it. Before this, walking off was
   // FREE, which is the other half of why the row existed at all.
   function stopWalkOff() {
     const c = STOP.cop;
@@ -820,13 +839,29 @@
       // the stop dies if you get wanted some OTHER way, holster, drive off, die, or
       // simply walk away far enough that he gives up the contact.
       const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z, d = Math.hypot(dx, dz);
-      if ((g.wanted | 0) >= 1 || !openCarry() || P.driving || P.dead || c.dead) { endStop((g.wanted | 0) >= 1 ? false : true); return; }
+      if ((g.wanted | 0) >= 1 || P.driving || P.dead || c.dead) { endStop((g.wanted | 0) >= 1 ? false : true); return; }
+      // THE BRAIN'S LADDER: holstered = released; patience out while still
+      // armed = escalate, which in a gun-stop is the brandishing call-in.
+      // Distance is capped for it: breaking contact is this file's refusal
+      // (stopWalkOff at 16 m), not the brain's lost-contact.
+      const BA = CBZ.brain && CBZ.brain.authority;
+      const K = STOP.case && BA && BA.caseOf(c) === STOP.case && STOP.case.n === STOP.caseN ? STOP.case : null;
+      if (K) {
+        _stopSt.armed = openCarry(); _stopSt.dist = Math.min(d, 14);
+        const r = BA.step(c, dt, _stopSt);
+        if (K.outcome === "released") { endStop(true); return; }
+        if (r && (r.phase === "escalate" || r.phase === "force" || r.phase === "lethal")) {
+          copSay(c, "That's it. Suspect refusing to disarm!", 2.0);
+          if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
+          c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
+          return;
+        }
+      } else if (STOP.case || !openCarry()) { endStop(true); return; }   // the case ended some other way (he went down, got pulled off it)
       // BREAKING CONTACT IS THE REFUSAL — the only one the card offers now.
       // It lands after the checks above on purpose: holstering, dying or
       // getting wanted some other way are their own endings, not a snub.
       if (d > 16) { stopWalkOff(); return; }
       // approach to challenge distance and square up on you (gun lowered, not aimed)
-      STOP.t += dt;
       c._gunLowered = true;                     // muzzle DOWN — he's challenging, not firing
       if (d > 3.0) stepTo(c, -dx, -dz, c.baseSpeed * 0.85, dt, true);
       else holdFace(c, -dx, -dz, dt, true);
@@ -834,16 +869,10 @@
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
       const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
       if (wantKey !== STOP.key) stopRefreshPanel();
-      // he SAYS it, louder each time, over his head: that is the only clock.
+      // he SAYS it, louder each time, over his head, on the case's clock
+      // (scaled to its patience, so a shorter re-challenge warns sooner)
       const w = STOP_WARN[STOP.warnI | 0];
-      if (w && STOP.t >= w.t) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, w.line, 2.4); }
-      // ignore him to the end of the count and he calls it in: brandishing,
-      // ONE star. Nobody fired anything, so nobody is charged with firing.
-      if (STOP.t > STOP_LIMIT) {
-        copSay(c, "That's it. Suspect refusing to disarm!", 2.0);
-        if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
-        c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
-      }
+      if (w && K && K.t >= w.t * (K.patience / STOP_LIMIT)) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, w.line, 2.4); }
       return;
     }
 

@@ -69,7 +69,8 @@
   L.time = function () { return T; };
   // did the brain already move or stop this body this frame? (authority.step
   // walks the primary officer itself; police.js must not walk him twice)
-  L.acted = function (c) { return !!c && c._lawActF === F; };
+  // (the brain stamps every body act.moveTo / act.stop moved: movedThisFrame)
+  L.acted = function (c) { const b = B(); return !!c && !!(b && b.act && b.act.movedThisFrame && b.act.movedThisFrame(c)); };
 
   // ---- per-officer stable traits: reaction delay (no squad-wide same-frame flips)
   let _seq = 0;
@@ -134,12 +135,11 @@
       if (!actor || !actor.pos || !H.step) return false;
       const dx = x - actor.pos.x, dz = z - actor.pos.z;
       const arrive = opts && opts.arrive != null ? opts.arrive : 0;
-      actor._lawActF = F;
       if (arrive > 0 && dx * dx + dz * dz <= arrive * arrive) { if (H.hold) H.hold(actor); return true; }
       H.step(actor, dx, dz, speedOf(actor, opts && opts.speed));
       return true;
     },
-    stop: function (actor) { if (actor && H.hold) { actor._lawActF = F; H.hold(actor); } return true; },
+    stop: function (actor) { if (!actor || !H.hold) return false; H.hold(actor); return true; },
     face: function (actor, x, z) { if (actor && H.face) H.face(actor, x, z); return true; },
     posture: function (actor, p) {
       if (!actor) return false;
@@ -172,7 +172,7 @@
       return false;
     }
     if (name === "tackle") {
-      if (L.tackleCD > 0) return false;
+      if (L.tackleCD > 0 || a._seizing) return false;
       if (isPlayerActor(b)) {
         if (!H.tackle || !H.tackle(a)) return false;
       } else {
@@ -539,6 +539,9 @@
           auth.begin(c, suspect, opts.reason || (isPlayer ? "wanted" : "offender"), {
             roe: roe, warnRange: WARN_R, orderRange: ORDER_R, cuffRange: CUFF_R,
             patience: c.swat ? 1.5 : (roe === "lethal" ? 4 : 6),
+            // the same man challenged again inside a minute gets less patience;
+            // the takedown is arm's reach, as often as the force-wide cooldown allows
+            rechallenge: true, tackleRange: TACKLE_R, tackles: Infinity,
           });
         } catch (e) {}
       }
@@ -610,18 +613,10 @@
       case "done": DEC.mode = "none"; L.release(c); break;
       case "escalate": DEC.mode = "chase"; break;
       case "force":
+        // the takedown is the brain's force rung: this city's executor answers
+        // verb("tase") false, so the brain goes straight to verb("tackle")
+        // (lawVerb) on any non-complier inside TACKLE_R
         DEC.mode = "chase";
-        // within arm's reach of a man who is still not complying (moving,
-        // hands down, on his feet) or swinging: the takedown. The brain's
-        // force rung asks for the taser first and tackles only a RUNNER; this
-        // city has no taser, and a suspect who just keeps walking away would
-        // otherwise be followed at arm's length forever.
-        const resisting = st.attacking || ((st.speed || 0) >= 0.6 && !st.handsUp && !st.prone && !st.kneeling);
-        if ((opts.dist || 1e9) < TACKLE_R && resisting && L.tackleCD <= 0 && !c._seizing) {
-          let ok = false;
-          if (b && b.act && b.act.verb) { try { ok = !!b.act.verb("tackle", c, suspect, {}); } catch (e) { ok = false; } }
-          if (!ok) lawVerb("tackle", c, suspect, {});
-        }
         break;
       case "lethal":
         if (roe === "nonlethal") { DEC.mode = "chase"; break; }   // never a bullet under nonlethal ROE

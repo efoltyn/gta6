@@ -481,7 +481,10 @@
       p.state = "walk";
       if (p.target && p.target.set) p.target.set(c.pos.x, 0, c.pos.z);
       p.speed = (p.baseSpeed || 1.5) * 2.0;
-      if (Math.hypot(c.pos.x - p.pos.x, c.pos.z - p.pos.z) < 3.2) w.reportAt = Math.min(w.reportAt, t);   // told him in person
+      if (Math.hypot(c.pos.x - p.pos.x, c.pos.z - p.pos.z) < 3.2) {       // told him in person: it lands now
+        const b = BR();
+        if (b && b.social && b.social.fileNow) b.social.fileNow(p); else w.reportAt = Math.min(w.reportAt, t);
+      }
       return true;
     }
     return false;
