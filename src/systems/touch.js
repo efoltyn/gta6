@@ -100,8 +100,7 @@
      TOUCH_TP_CAMERA_V2 — the third-person-on-iPad pass (owner 2026-07-28,
                           "iPad needs third person improved"). Master flag
                           for the three below plus systems/camera.js's
-                          CAM_TP_TOUCH_ZOOM / CAM_TOUCH_RECENTER /
-                          CAM_TOUCH_PITCH_FULL.
+                          CAM_TP_TOUCH_ZOOM / CAM_TOUCH_PITCH_FULL.
      TOUCH_LOOK_ACCEL   — pointer acceleration on the LOOK drag only. A
                           thumb has ~1/3 of a mouse's usable travel, so a
                           flat px→radians ramp has to choose between fine
@@ -113,17 +112,6 @@
      TOUCH_LOOK_GLIDE   — a flick keeps turning for ~0.35 s and decays.
                           Third person only, never while aiming, and any
                           new touch kills it dead.
-     TOUCH_RECENTER     — the level-the-view button (on foot in the icon
-                          cluster; a RECENTER pill in the vehicle layer).
-                          On foot it SHOWS ITSELF only when the view is
-                          actually off-level, so the cluster stays calm.
-                          DEFAULT OFF as of 2026-08-04: the owner asked for
-                          the button off the iPad glass. A thumb still
-                          levels the view by dragging, and the vehicle's
-                          own auto-recenter (camRecenterSuspended, a
-                          different writer) is untouched — what goes away
-                          is only the manual shortcut. Restore the pair
-                          with ?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1.
 ============================================================ */
 (function () {
   "use strict";
@@ -146,7 +134,6 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_ACCEL == null) CBZ.CONFIG.TOUCH_LOOK_ACCEL = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_GLIDE == null) CBZ.CONFIG.TOUCH_LOOK_GLIDE = true;
-  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER == null) CBZ.CONFIG.TOUCH_RECENTER = false;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const TPV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
@@ -200,13 +187,6 @@
   // whole coast is spent inside ~0.35 s. Deliberately short — this is follow-
   // through, not a spinning chair.
   const GLIDE_MIN = 900, GLIDE_CAP = 2800, GLIDE_K = 8.0;
-  // TOUCH_RECENTER — the on-foot button appears past OFF_SHOW radians away from
-  // the resting pitch and hides again under OFF_HIDE. Hysteresis, so a thumb
-  // resting near the boundary can never make it blink. 0.34 rad is ~19.5°:
-  // wide enough that ordinary "look a bit down the street" browsing never
-  // summons it, tight enough that a view genuinely stuck at the sky or the
-  // pavement always offers the way back.
-  const REC_OFF_SHOW = 0.34, REC_OFF_HIDE = 0.14;
 
   let built = false, enabled = false;
   // GAIT/STANCE state: sprint lives in the stick (rim deflection = shift) and
@@ -214,7 +194,6 @@
   // hysteresis so nothing flaps at a boundary. Desktop never runs any of this.
   let stamOk = true, shiftOwned = false, sprintBand = false, stickMag = 0;
   let crouchLatch = false, crouchOwned = false;
-  let recenShown = false;      // TOUCH_RECENTER visibility latch (hysteresis)
   const stick = { id: null, cx: 0, cy: 0, sx: 0, sy: 0, t0: 0, moved: 0 };
   const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0, free: false, seen: 0 };
   const walk = { on: false, kind: null, rec: null, t: 0 };
@@ -243,15 +222,10 @@
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
     scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
     aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8"/><path d="M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8"/><path d="M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
-    homing: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M12 4v-2.5M12 22.5V20M4 12H1.5M22.5 12H20"/></svg>',
     // C4 — bomb body + sparking fuse. The one glyph in the cluster with a
     // spark, because the button is also the DETONATOR (hold): it has to read
     // as "this goes bang", not as another camera or weapon utility.
     bomb: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="14" r="6.8"/><path d="M15.2 9.1 17.6 6.7"/><path d="M18.6 3.4v1.7M21.9 6.7h-1.7M20.9 4.4l-1.2 1.2"/></svg>',
-    // RECENTER — two chevrons collapsing onto a horizon line: "bring the view
-    // back to level". Deliberately unlike every other glyph in this cluster
-    // (reticle / arc / eye / brackets / rings) so it reads at a glance.
-    level: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12h19"/><path d="M8 6.6 12 10.4 16 6.6"/><path d="M8 17.4 12 13.6 16 17.4"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -291,16 +265,10 @@
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
-      btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
       // C4 (city/explosives.js): the same [B] grammar the keyboard owns —
       // tap plants a charge, hold ~0.5 s detonates everything out. Shown only
       // while the verb can DO something (bricks carried, or charges planted).
       btn("tbomb", "tbtn tsm", SVG.bomb, "C4: tap to plant, hold to detonate") +
-      // Not built at all when TOUCH_RECENTER is off (default), rather than
-      // built and permanently hidden: a node nobody can see is still a tap
-      // target the moment some other rule un-hides it.
-      ((!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false)
-        ? btn("trecen", "tbtn tsm", SVG.level, "Recenter the view") : "") +
       // The AIM-UP ghost pad belongs to the legacy slide grammar only: with the
       // latch, nothing is ever held on AIM for it to be a target for.
       (SLIDE ? '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" : "") +
@@ -320,12 +288,6 @@
     holdBtn("tfire", fireHold, { drag: FIREPAD });
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
-    // homing on/off (owner: toggleable "even on the iPad"). State reads as
-    // lit vs dim + the lock squares standing down — no words, no popup.
-    tapBtn(document.getElementById("thoming"), () => {
-      if (CBZ.lockonHomingSet) CBZ.lockonHomingSet(!CBZ.lockonHomingOn());
-      if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? 1.25 : 0.8 });
-    });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
     // C4 — a HOLD button that speaks the module's own key. explosives.js's [B]
     // is a tap/hold state machine (tap = plant, held 0.5 s = detonate all) with
@@ -334,17 +296,6 @@
     // tracks five" refusal — by holding the logical key down for exactly as
     // long as the finger is down, never by re-implementing any of it.
     holdBtn("tbomb", (down) => { if (CBZ.touchKeyHold) CBZ.touchKeyHold("b", down); });
-    // RECENTER (TOUCH_RECENTER) — a mouse levels the view in one flick; a thumb
-    // has to drag back across the whole screen, which is why every console
-    // third-person game binds this to a stick click. Camera-owned verb, so it
-    // calls the camera agent's hook and this file writes no pitch of its own.
-    // Wired only when it was BUILT (TOUCH_RECENTER, default off) — the two
-    // gates must read the same flag or one of them is wiring a ghost.
-    if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) tapBtn(document.getElementById("trecen"), () => {
-      if (CBZ.camRecenter) CBZ.camRecenter();
-      glide.vx = glide.vy = 0;
-      if (CBZ.sfx) CBZ.sfx("key", { volume: 0.22, pitch: 1.1 });
-    });
     // AIM (ADS) — the missing iPad right-mouse: it pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
     // gamepad triggers use.
@@ -376,11 +327,8 @@
     // it: a latch you tap between bursts wants to be under the same thumb.
     if (SLIDE || AIMTOG) document.getElementById("tbtns").classList.add("tslide");
     if (FIXED) baseEl.classList.add("tfixed");
-    // RECENTER starts hidden: it is a self-summoning control (see the visibility
-    // rule in the onAlways below) and a one-frame flash of a button that then
-    // vanishes is worse than never showing it.
-    const rc0 = document.getElementById("trecen"); if (rc0) rc0.style.display = "none";
-    // C4 starts hidden for the same reason — most sessions never carry a brick.
+    // C4 starts hidden: most sessions never carry a brick, and a one-frame
+    // flash of a button that then vanishes is worse than never showing it.
     const bm0 = document.getElementById("tbomb"); if (bm0) bm0.style.display = "none";
   }
 
@@ -499,15 +447,12 @@
   // tap button (toggle/one-shot). The .on flash is not decoration: these fire on
   // touchSTART with no hold state, so without it a tap that DID work is
   // indistinguishable from a tap that missed the 52 px circle — and on a
-  // stateless verb (swap / reload / recenter) there is no other confirmation.
+  // stateless verb (swap / reload / view) there is no other confirmation.
   // The vehicle layer's tapBtn has always flashed; this is the cluster catching up.
   function tapBtn(b, fn) {
-    // A MISSING BUTTON MUST NOT COST THE ONES AFTER IT. Every control in
-    // enable() is wired in one straight line, so a null element here threw
-    // and abandoned the REST of the wiring — measured 2026-08-04, when
-    // TOUCH_RECENTER's button stopped being built and #trecen's tapBtn took
-    // aim, scope and fire down with it. Any flag that can remove a control is
-    // a flag that can silently unbind the whole cluster below it.
+    // A MISSING BUTTON MUST NOT COST THE ONES AFTER IT: every control in
+    // enable() is wired in one straight line, so a null element here would
+    // throw and abandon the rest of the wiring (aim, scope and fire).
     if (!b) return;
     const flash = () => { b.classList.add("on"); setTimeout(() => b.classList.remove("on"), 110); };
     b.addEventListener("touchstart", (e) => { e.preventDefault(); flash(); fn(); }, { passive: false });
@@ -900,7 +845,6 @@
   // coast both pass false, because a curve applied to a curve compounds and
   // fine aim must stay linear by definition.
   function applyLookDelta(dx, dy, accel) {
-    if (CBZ.camRecenterCancel) CBZ.camRecenterCancel();   // the hand outranks the ease
     if (accel !== false) { const gAcc = accelGain(dx, dy); dx *= gAcc; dy *= gAcc; }
     const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     // TOUCH_AIM_ASSIST — reticle FRICTION: ease look sensitivity down while the
@@ -1702,15 +1646,6 @@
       if (L.on && L.el.style.display === "none") L.release();
     }
     syncLatches();
-    // HOMING pill: only while the lock-on system has a live missile platform
-    // (RPG in hand, armed aircraft, tank...). Lit = homing on, dim = dumb-fire.
-    const hm = document.getElementById("thoming");
-    if (hm) {
-      // active reads the live platform (platKey), which lockTick still sets
-      // in dumb-fire mode — so the pill stays visible to toggle back ON.
-      hm.style.display = (CBZ.lockonState && CBZ.lockonState().active) ? "" : "none";
-      hm.style.opacity = (CBZ.lockonHomingOn && CBZ.lockonHomingOn()) ? "" : "0.38";
-    }
     // C4: the same claim test the keyboard's own [B] keydown runs
     // (explosives.js) — a brick to plant on foot, or ANY charges out (the
     // detonator half, which outlives the last brick in the bag). Hidden in an
@@ -1730,21 +1665,6 @@
       bm.classList.toggle("tarmed", out > 0);
     }
     syncInteractionDock();
-    // RECENTER: THIRD PERSON ONLY, and only while it would actually do
-    // something. In first person cam.pitch IS your aim, so levelling it is a
-    // hostile act, not a convenience; and a button that is always lit but
-    // usually a no-op is exactly the HUD clutter this file exists to avoid.
-    // Hysteresis (SHOW 0.20 rad ≈ 11.5°, HIDE 0.075) so a thumb parked near the
-    // boundary can never make it blink.
-    const rc = document.getElementById("trecen");
-    if (rc) {
-      const tpNow = !(CBZ.fps && CBZ.fps.active) && !(CBZ.cityArmorActive && CBZ.cityArmorActive());
-      const off = (TPV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) &&
-        tpNow && CBZ.camRecenter && CBZ.camRecenterOff) ? CBZ.camRecenterOff() : 0;
-      recenShown = recenShown ? off > REC_OFF_HIDE : off > REC_OFF_SHOW;
-      const want = recenShown ? "" : "none";
-      if (rc.style.display !== want) rc.style.display = want;
-    }
   });
 
   /* ==========================================================================
@@ -1820,7 +1740,6 @@
   CBZ.touchVerb("reload", { ctx: "foot", key: "R", hook: "fpsReload" });
   CBZ.touchVerb("weapon-next", { ctx: "foot", key: "Q/wheel", hook: "fpsNextWeapon" });
   CBZ.touchVerb("view-toggle", { ctx: "foot", key: "V", hook: "toggleFPS" });
-  CBZ.touchVerb("homing", { ctx: "foot", key: "H", hook: "lockonHomingSet" });
   CBZ.touchVerb("interact", { ctx: "foot", key: "E", hook: null });
   // C4 — the exact "keyboard verb with no thumb" this ledger was built to
   // catch: plant AND detonate lived on [B] alone, so on an iPad the charge in
@@ -1846,16 +1765,10 @@
   CBZ.touchVerb("adboard-lease", { ctx: "foot", key: "E", hook: null });
   CBZ.touchVerb("chest-open", { ctx: "foot", key: "E", hook: null });
   CBZ.touchVerb("fx-terminal", { ctx: "foot", key: "E", hook: null });
-  // cam-recenter is DRAWN ONLY WHEN ITS FLAG IS ON (default off since
-  // 2026-08-04). A skipped row carries its reason and cannot hide inside the
-  // covered count; a wired row would be a lie once the button is not built.
-  if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false)
-    CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", hook: "camRecenter" });
-  else
-    CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
   CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
   // Declared and NOT drawn, each with the reason, so the count cannot launder them:
   CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check, the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
+  CBZ.touchVerb("homing", { ctx: "foot/air", key: "H", skip: "homing is on by default; a dumb-fire toggle is a keyboard nicety, not worth a button on the glass" });
   CBZ.touchVerb("shoulder-swap", { ctx: "foot", key: "MMB", skip: "CBZ.camSetShoulder is one call away, but a 6th icon for a mirrored 0.68 m offset is not worth the corner" });
 
   CBZ.touchVerbWired("move", "#tstick");
@@ -1869,14 +1782,11 @@
   CBZ.touchVerbWired("reload", "#treload");
   CBZ.touchVerbWired("weapon-next", "#tswap");
   CBZ.touchVerbWired("view-toggle", "#tview");
-  CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
-  // The four walk-up verbs below ride the interaction card (#interact), which
-  // is tappable on touch and carries the [E] badge on desktop. Each used to be
-  // wired to its own chip pill AS WELL — two buttons on the glass for one verb
-  // (an ELEVATOR UP pill beside a CALL THE LIFT card); the pills are deleted
-  // and the registry zone is the one control on every input.
-  CBZ.touchVerbWired("elevator-call", "#interact zone-lift");
+  // The lift's Call (and its in-car floor buttons) is a pinned .tpill on the
+  // call panel itself (city/elevators.js + systems/liftcore.js), one control
+  // on every input. The three walk-up verbs below ride the #interact card.
+  CBZ.touchVerbWired("elevator-call", "pinned .tpill on the call panel");
   CBZ.touchVerbWired("roof-stash", "#interact zone-roofstash");
   CBZ.touchVerbWired("beach-loot", "#interact zone-beachbag");
   CBZ.touchVerbWired("adboard-lease", "#interact zone-adboard");
@@ -1884,6 +1794,5 @@
   CBZ.touchVerbWired("fx-terminal", "#fxPrompt (its own click handler)");
   CBZ.touchVerbWired("c4-plant", "#tbomb tap");
   CBZ.touchVerbWired("c4-detonate", "#tbomb hold / #tvBoom");
-  if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");
   CBZ.touchVerbWired("cam-zoom", "pinch");
 })();

@@ -520,7 +520,6 @@ body.campaign-active #streakMeter,
 body.campaign-active #compass,
 body.campaign-active #minimap,
 body.campaign-active #simHud,
-body.campaign-active #dashBtn,
 body.campaign-active #dashboard,
 body.campaign-active #weaponStrip {
   display: none !important;

@@ -277,7 +277,7 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
      iPad and this same phone in portrait keep the column they have) lifts
      RELOAD to third from the thumb, where it is inside the corner column on
      every landscape phone; what spills is the situational half — AIM, SCOPE,
-     HOMING, RECENTER — which is what should be a reach. */
+     C4 — which is what should be a reach. */
   #tbtns #tfire   { order: 1; }
   #tbtns #tjump   { order: 2; }
   #tbtns #treload { order: 3; }
@@ -285,9 +285,7 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   #tbtns #tview   { order: 5; }
   #tbtns #taim    { order: 6; }
   #tbtns #tscope  { order: 7; }
-  #tbtns #thoming { order: 8; }
-  #tbtns #tbomb   { order: 9; }
-  #tbtns #trecen  { order: 10; }
+  #tbtns #tbomb   { order: 8; }
   /* AIM PRINTED ON TOP OF SWAP (owner screenshot, iPhone landscape,
      2026-08-16). The .tslide seat parks AIM/SCOPE absolutely at
      right:calc(100% + 12px) — just left of the #tbtns box. In THIS wrap
@@ -805,3 +803,25 @@ body.touch #cCluster.handoff {
   #cCluster #cFuel { width: 92px; }
   #cCluster #cSpeed { font-size: 34px; }
 }
+
+/* ============================================================
+   THE WAY OUT (#tExit, systems/seat_exit.js). ONE button, ONE place, in
+   every seat in every game: car, passenger seat, boat, cockpit, tank,
+   saddle, chair, bed. Top centre: clear of the radar (top-left), the money
+   and minimap stack (top-right), the left stick and the right thumb column.
+   It wears the verb the tap will do (GET OUT, JUMP, STAND UP, GET UP).
+   Only ever built on touch; hidden whenever you are not seated.
+============================================================ */
+#tExit {
+  position: fixed; z-index: 26; left: 50%; transform: translateX(-50%);
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  min-width: 132px; min-height: 52px; padding: 8px 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 16px; border: 2px solid rgba(255,255,255,.55);
+  background: rgba(20,30,46,.72); color: #fff;
+  font: 800 17px/1 Fredoka, system-ui, sans-serif; letter-spacing: 1.2px;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  box-shadow: 0 5px 0 rgba(0,0,0,.35);
+  pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+#tExit.on { transform: translateX(-50%) translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }

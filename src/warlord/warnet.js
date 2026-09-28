@@ -100,8 +100,8 @@
    src/net/rooms.js turns into another player's browser tab running
    server.js's room protocol over WebRTC. Two phones and a four-character
    code, no server, no account. server/server.js still works and is still
-   better when you have one — it is the ADVANCED line in the lobby now
-   instead of the only path.
+   better when you have one — reach it with ?relay=ws://… instead of it
+   being the only path.
 
    ── EVENTS ─────────────────────────────────────────────────────────────
    warnet:on warnet:off warnet:peer warnet:join warnet:leave warnet:host
@@ -239,28 +239,8 @@
      link was a button that could not work, and nobody had ever played it.
 
      Now the default url is `room:host` / `room:CODE` and src/net/rooms.js
-     turns that into another player's browser. defaultUrl() survives for the
-     ADVANCED line only: if you are actually served BY server/server.js — a
-     LAN box, a cloudflared tunnel — that relay is better than a room (real
-     persistence, no broker) and the field is pre-filled with it. */
-  function defaultUrl() {
-    try {
-      if (G.location && /^https?:$/.test(G.location.protocol) && G.location.host) {
-        return (G.location.protocol === "https:" ? "wss://" : "ws://") + G.location.host + "/ws";
-      }
-    } catch (e) {}
-    return "ws://localhost:8000/ws";
-  }
-  /* IS A RELAY EVEN PLAUSIBLE HERE? A page served off localhost or a LAN
-     address is very likely served by server/server.js; a page served off
-     github.io certainly is not. This only decides whether the advanced line
-     is pre-filled or blank — it never blocks anything. */
-  function relayPlausible() {
-    try {
-      const h = G.location && G.location.hostname || "";
-      return /^(localhost|127\.|0\.0\.0\.0|\[?::1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
-    } catch (e) { return false; }
-  }
+     turns that into another player's browser; a server/server.js relay is
+     reached by link (?relay=ws://…, below). */
 
   let ROOMCODE = "";                 // the code of the room we are in, if any
   function roomCode() { return ROOMCODE; }
@@ -601,8 +581,8 @@
                      people who arrive appear under it while you wait.
        JOIN A ROOM   type the four characters.
 
-     and an ADVANCED line for the one case rooms are the wrong answer: you
-     are already served by server/server.js and would rather use it.
+     A relay server (server/server.js) is reached by link only: ?relay=ws://…
+     — never a button on the card.
 
      THE ROOM LIVES IN A TAB, and the card says so in one line rather than
      letting somebody discover it when the host locks their phone. */
@@ -643,9 +623,7 @@
   /* ONE LINE OF TRUTH, not a paragraph of explanation: where the room lives,
      because that is a fact about the world (it can die) and not a note about
      the interface. */
-  .wl-net-note{font-size:11px;letter-spacing:.05em;opacity:.45;line-height:1.6;padding-top:6px}
-  .wl-adv{background:none;border:0;color:inherit;font:inherit;font-size:10.5px;
-    letter-spacing:.2em;opacity:.45;padding:12px 0 0;cursor:pointer;text-decoration:underline}`;
+  .wl-net-note{font-size:11px;letter-spacing:.05em;opacity:.45;line-height:1.6;padding-top:6px}`;
   function styleOnce() {
     if (G.document && !G.document.getElementById("wl-net-css")) {
       const s = G.document.createElement("style");
@@ -655,7 +633,6 @@
   }
 
   let CARD = "";                   // which card is up, so a join can repaint it
-  let ADVANCED = false;
 
   function savedName() {
     let nm = "";
@@ -688,9 +665,6 @@
     if (ACTIVE) { warRoom(); return; }
     CARD = "menu";
     const nm = MYNAME || savedName();
-    let url = "";
-    try { url = localStorage.getItem("cbz-warlord-url") || ""; } catch (e) {}
-    if (!url && relayPlausible()) url = defaultUrl();
     const node = ctx.screen(
       '<h1 class="wl-h">ONE ISLAND, <em>MANY WARLORDS</em></h1>' +
       errBlock() +
@@ -701,12 +675,6 @@
         '<button class="wl-btn hot" id="nHost">HOST A ROOM</button>' +
         '<button class="wl-btn" id="nJoin">JOIN A ROOM</button>' +
       '</div>' +
-      (ADVANCED
-        ? '<div class="wl-card">' +
-            '<div class="wl-net-f"><label>RELAY URL</label><input id="nUrl" placeholder="ws://localhost:8000/ws" value="' + esc(url) + '"></div>' +
-          '</div>' +
-          '<div class="wl-btns"><button class="wl-btn" id="nRelay">USE THAT RELAY</button></div>'
-        : '<button class="wl-adv" id="nAdv">I RUN MY OWN RELAY</button>') +
       '<div class="wl-btns"><button class="wl-btn" id="nBack">BACK</button></div>'
     );
     node.onclick = function (e) {
@@ -718,14 +686,6 @@
         connect({ name: name, url: "room:host", seed: seedFromQuery() });
       } else if (t.id === "nJoin") {
         MYNAME = readName(nm); joinCard();
-      } else if (t.id === "nAdv") {
-        MYNAME = readName(nm); ADVANCED = true; menuCard();
-      } else if (t.id === "nRelay") {
-        const name = readName(nm);
-        const u = (ctx.el("nUrl") && ctx.el("nUrl").value) || defaultUrl();
-        try { localStorage.setItem("cbz-warlord-url", u); } catch (e2) {}
-        waiting("OPENING THE LINE");
-        connect({ name: name, url: u, seed: seedFromQuery() });
       } else if (t.id === "nBack") {
         LOBBYERR = ""; W.emit("mainmenu");
       }
@@ -1089,7 +1049,7 @@
         W.setPhase("menu");
         if (Q.get("name")) { MYNAME = Q.get("name").slice(0, 18); keepName(MYNAME); }
         if (relay) {
-          /* ?relay=ws://…  the ADVANCED line as a link. A LAN box or a
+          /* ?relay=ws://…  the relay, as a link. A LAN box or a
              cloudflared tunnel running server/server.js is a better host
              than a room when you have one, and this is how you hand it to
              somebody (and how tools/warlord-net-check.mjs proves the seam

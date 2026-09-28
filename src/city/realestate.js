@@ -153,7 +153,11 @@
       actions.push({ label: "Store car", fn: storeCar });
       if ((g.cityGarage || []).length) actions.push({ label: "Pull car " + g.cityGarage.length + "/" + home.garage, fn: retrieveCar });
     }
-    if (home.elevator) actions.push({ label: "Penthouse", fn: elevatorUp });
+    // ONE WAY UP. A home whose tower has a real walk-in lift serving its floor
+    // (city/elevators.js: the Spire's loft is a stop, every other penthouse
+    // lives on the roof the lift already reaches) is reached by riding it; the
+    // menu shortcut below is only for a tower that never got its lift built.
+    if (home.elevator && !liftServesHome(g.cityHome.lot)) actions.push({ label: "Penthouse", fn: elevatorUp });
     // ---- AIRBASE: the penthouse's rooftop helipad + deck hangar (the WHY behind
     // the apex price). The helicopter comes WITH the home (g.cityOwnsHeli); the
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
@@ -353,6 +357,11 @@
     if (car && CBZ.cityRestoreCarMods) { try { CBZ.cityRestoreCarMods(car, rec); } catch (e) {} }
     CBZ.city.note("Your " + rec.name + " is out front.", 2);
     close();
+  }
+  function liftServesHome(lot) {
+    const b = lot && lot.building, home = b && b.home;
+    if (!home || !CBZ.cityLiftServes) return false;
+    return CBZ.cityLiftServes(b, home.loftY != null ? home.loftY : b.h);
   }
   function elevatorUp() {
     const lot = g.cityHome.lot, home = lot.building.home;

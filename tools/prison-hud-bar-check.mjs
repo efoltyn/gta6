@@ -143,7 +143,7 @@ await sleep(800);
   `);
   await sleep(700);   // two onAlways(98) passes so visibility settles
   const c = await evl(`
-    var ids = ["tfire","tjump","tview","tswap","treload","taim","tscope","thoming","trecen"];
+    var ids = ["tfire","tjump","tview","tswap","treload","taim","tscope","tbomb"];
     var vis = [], hid = [];
     ids.forEach(function(i){ var el = document.getElementById(i); if (!el) { hid.push(i); return; }
       var cs = getComputedStyle(el);
