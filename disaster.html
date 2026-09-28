@@ -435,7 +435,7 @@ document.body.appendChild(b);}}catch(e){}})();
   window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=inworld1"></script>
+<script src="src/config.js?v=me6f1ee"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -549,7 +549,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/systems/fphands.js?v=boom2"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=hats2"></script>
+  <script src="src/entities/character.js?v=me6f1ee"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=watch2"></script>
@@ -736,7 +736,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=voice1"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
-<script src="src/systems/camera.js?v=cars1"></script>
+<script src="src/systems/camera.js?v=me6f1ee"></script>
 <script src="src/systems/physics.js?v=vit3"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -836,7 +836,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
-<script src="src/systems/touch.js?v=boom2"></script>
+<script src="src/systems/touch.js?v=me6f1ee"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
@@ -1259,13 +1259,13 @@ document.body.appendChild(b);}}catch(e){}})();
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=tornado1"></script>
-<!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
-     gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
-<!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
-     scope. After fpsmode/weapons (whose fire paths it feeds) and after
-     scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
-     always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
-     CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
+<!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
+     gunsmith bench in the gun store (sights.js reads a fitted optic) -->
+<!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
+     person, reticles at infinity on red-dot glass, a real scope (magnified
+     second camera in the ocular), sway + breath, the 3P cheek weld. -->
+<!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
+     fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/city/interactions.js?v=name1"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
