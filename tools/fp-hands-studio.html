@@ -1,0 +1,141 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>FP Hands Studio</title>
+<style>html,body{margin:0;background:#8e9aa3;overflow:hidden}canvas{display:block}</style>
+</head><body>
+<!--
+  tools/fp-hands-studio.html — the first-person viewmodel on its own, lit like
+  the street, with NO world to boot. It runs fpsmode.js's REAL off-hand fitting
+  and arm solver (cut out of the file by their markers, like
+  tools/fp-hands-check.mjs does) against the REAL gun appearances, so a frame
+  here is the frame the player sees minus the city behind it.
+
+    ?w=carbine&pose=hip|ads|reload&p=0.5&fov=75&bg=street
+
+  Shoot it with: node tools/fp-hands-shot.mjs carbine:hip sidearm:ads ...
+-->
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>window.CBZ = { CONFIG: {}, weaponAppearance: {} };</script>
+<script src="../src/systems/fphands.js"></script>
+<script src="../src/weapons/appearances/sidearm.js"></script>
+<script src="../src/weapons/appearances/shotgun.js"></script>
+<script src="../src/weapons/appearances/carbine.js"></script>
+<script src="../src/weapons/appearances/smg.js"></script>
+<script src="../src/weapons/appearances/revolver.js"></script>
+<script src="../src/weapons/appearances/deagle.js"></script>
+<script src="../src/weapons/appearances/ak47.js"></script>
+<script src="../src/weapons/appearances/uzi.js"></script>
+<script src="../src/weapons/appearances/sniper.js"></script>
+<script src="../src/weapons/appearances/lmg.js"></script>
+<script src="../src/weapons/appearances/bazooka.js"></script>
+<script src="../src/weapons/appearances/taser.js"></script>
+<script src="../src/weapons/appearances/glauncher.js"></script>
+<script src="../src/weapons/appearances/shank.js"></script>
+<script>
+(async function () {
+  const Q = new URLSearchParams(location.search);
+  const wid = Q.get("w") || "carbine", poseName = Q.get("pose") || "hip";
+  const rp = parseFloat(Q.get("p") || "0.5");
+  const THREE = window.THREE, CBZ = window.CBZ;
+  const W = innerWidth, H = innerHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  document.body.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fb0bd);
+  const camera = new THREE.PerspectiveCamera(parseFloat(Q.get("fov") || (poseName === "ads" ? "55" : "75")), W / H, 0.05, 100);
+  scene.add(camera);
+  // street light: sky hemisphere + a warm sun from the upper right behind
+  // core/lights.js's day rig: sky/ground hemisphere + the sun high ahead-right
+  scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x6f7a55, 0.85));
+  const sun = new THREE.DirectionalLight(0xfff4e0, 1.05); sun.position.set(48, 90, -10); scene.add(sun);
+  // a ground plane and a wall so the frame has a horizon to judge angles by
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ color: 0x6f6a62 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -1.65; scene.add(ground);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 12), new THREE.MeshLambertMaterial({ color: 0x9a8676 }));
+  wall.position.set(0, 3, -14); scene.add(wall);
+
+  const src = await (await fetch("../src/systems/fpsmode.js")).text();
+  const gh = await (await fetch("../src/systems/gunhands.js")).text();
+  const block = (s, a, b) => { const i = s.indexOf(a), j = s.indexOf(b, i + 1); if (i < 0 || j < 0) throw new Error("marker " + a); return s.slice(i, j); };
+  const choreo = new Function(block(gh, "  const CHOREO = {", "  // the same choreography") + "; return CHOREO;")();
+  CBZ.gunReloadChoreo = (st) => choreo[st] || choreo.mag;
+  CBZ.gunReloadPose = () => poseName === "reload" ? { active: true, p: rp, style: CBZ._style || "mag" } : { active: false };
+
+  const body = `
+    const THREE = window.THREE; const CBZ = window.CBZ;
+    CBZ.now = 0;
+    const mat = {
+      dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }), black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
+      bore: new THREE.MeshLambertMaterial({ color: 0x010203 }), steel: new THREE.MeshLambertMaterial({ color: 0x48515c }),
+      worn: new THREE.MeshLambertMaterial({ color: 0x747f8c }), tan: new THREE.MeshLambertMaterial({ color: 0x8b6a42 }),
+      polymer: new THREE.MeshLambertMaterial({ color: 0x232a24 }), brass: new THREE.MeshLambertMaterial({ color: 0xd6a33b }),
+      redShell: new THREE.MeshLambertMaterial({ color: 0x9d2523 }), skin: new THREE.MeshLambertMaterial({ color: 0xf0c39a }),
+    };
+    function box(parent, sx, sy, sz, m, x, y, z, rx, ry, rz) { const o = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m); o.position.set(x||0,y||0,z||0); o.rotation.set(rx||0,ry||0,rz||0); parent.add(o); return o; }
+    function cyl(parent, r, len, m, x, y, z, rx, ry, rz) { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), m); o.position.set(x||0,y||0,z||0); o.rotation.set(rx||0,ry||0,rz||0); parent.add(o); return o; }
+    const appearanceCtx = { THREE, box, cyl, mat };
+    const vm = new THREE.Group(); CBZ.camera.add(vm);
+    const gun = new THREE.Group();
+    const weaponModels = [];
+    let ddT = -1; const fps = { weapon: 0 };
+    let punchT = 0, vmPunch = 0, guardK = 0;
+    const fistT = [{ vis: false }, { vis: false }];
+  ` + block(src, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+    + block(src, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
+    + `  vm.add(gun, fists, fpArms); fists.visible = false;`
+    + block(src, "  /* ---- THE ARMS, SOLVED EVERY FRAME", "  let aimHeld = false;")
+    + `
+    return { vm, gun, weaponModels, mat, fitOffHand, poseFpArms, appearanceCtx };`;
+  const R = new Function(body.replace("const THREE = window.THREE; const CBZ = window.CBZ;", "const THREE = window.THREE; const CBZ = window.CBZ; CBZ.camera = arguments[0];"))(camera);
+
+  const model = CBZ.weaponAppearance[wid](R.appearanceCtx);
+  if (!model.userData.muzzle) model.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
+  model.scale.setScalar(1.28);
+  R.fitOffHand(model, { melee: wid === "shank" });
+  CBZ._style = (model.userData.grips && model.userData.grips.style) || "mag";
+  R.weaponModels.push(model); R.gun.add(model);
+  const ads = poseName === "ads" ? 1 : 0;
+  const dip = poseName === "reload" ? 0.13 : 0;
+  R.vm.position.set(0.36 * (1 - ads), -0.34 + 0.12 * ads - dip, -0.72);
+  R.vm.rotation.x = -0.10 + dip * 0.8;
+  R.vm.visible = true; R.gun.visible = true;
+  R.poseFpArms();
+  // ?only=fire (just the firing hand) | hands (no arms)
+  const only = Q.get("only");
+  if (only) {
+    R.vm.traverse((o) => { if (o.name === "fp_arms") o.visible = false; });
+    if (only === "fire" && model.userData.fpSupport) model.userData.fpSupport.visible = false;
+  }
+  scene.updateMatrixWorld(true);
+  // ?view=side|top|left|front: a diagnostic orbit round the gun (eye = the player's frame)
+  const view = Q.get("view") || "eye";
+  let shotCam = camera;
+  if (view === "eyez" || view === "eyes") {
+    // the player's own eye, zoomed onto the grip hand / the support hand (what the lens sees, closer)
+    const f = (view === "eyes" ? R.weaponModels[0].userData.fpSupport : R.weaponModels[0].userData.fpFire) || R.vm;
+    const c = new THREE.Vector3(); f.getWorldPosition(c);
+    shotCam = new THREE.PerspectiveCamera(30, W / H, 0.01, 100);
+    camera.add(shotCam); shotCam.lookAt(c); shotCam.updateMatrixWorld(true);
+  } else if (view !== "eye") {
+    // ?focus=fire|sup: orbit that hand close up instead of the whole viewmodel
+    const fo = Q.get("focus");
+    const fobj = fo === "sup" ? model.userData.fpSupport : fo === "fire" ? model.userData.fpFire : null;
+    const bb = new THREE.Box3().setFromObject(fobj || R.vm), c = bb.getCenter(new THREE.Vector3());
+    const r = bb.getSize(new THREE.Vector3()).length() * (fobj ? 0.9 : 0.62);
+    shotCam = new THREE.PerspectiveCamera(35, W / H, 0.01, 100);
+    // gun-relative orbits: side = from the gun's right, left, top, front (muzzle), back (shooter)
+    const gq = new THREE.Quaternion(); model.getWorldQuaternion(gq);
+    const d0 = { side: [1, 0.15, 0], left: [-1, 0.15, 0], top: [0.05, 1, 0.02], front: [0.1, 0.15, -1], back: [0.2, 0.3, 1], under: [0.05, -1, 0.1], ql: [-0.8, 0.3, -0.6], qr: [0.8, 0.3, -0.6] }[view] || [1, 0, 0];
+    const d = new THREE.Vector3(...d0).applyQuaternion(gq).toArray();
+    shotCam.position.copy(c).add(new THREE.Vector3(...d).normalize().multiplyScalar(r / Math.tan(17.5 * Math.PI / 180)));
+    shotCam.lookAt(c);
+    if (Q.get("nohideworld") == null) { ground.visible = false; wall.visible = false; }
+  }
+  renderer.render(scene, shotCam);
+  window.__done = true;
+  document.title = "READY";
+})().catch((e) => { document.title = "ERR " + e.message; console.error(e); });
+</script>
+</body></html>

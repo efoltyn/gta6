@@ -15,7 +15,15 @@
         right one,
      3. the two forearms never pass through each other (closest approach of
         the two forearm capsules > the sum of their radii),
-     4. every hand geometry is finite and inside its triangle budget.
+     4. every hand geometry is finite and inside its triangle budget,
+     5-8. (armed, run through fpsmode's REAL poseFpArms) every gun hand is a
+        grasp that ends ON the gun: fingertips within 1 cm of the grip /
+        handguard / pump surface, nothing buried, the index pad on the
+        trigger face, the thumb resting on the part; one hand size on every
+        gun; each forearm leaves the frame down and to its own side; the
+        wrist never bends past its limit.
+   Its eyes: tools/fp-hands-studio.html + tools/fp-hands-shot.mjs render the
+   same viewmodel headless (node tools/fp-hands-shot.mjs carbine:hip sidearm:ads).
 
    It also prints the OLD rig's numbers (rigid forearm boxes on hand-typed
    Eulers) so the cause stays on record.
@@ -49,7 +57,9 @@ function check(ok, msg) { checks++; if (!ok) { fails++; console.log("  FAIL " + 
 for (const p of Object.keys(H.POSES)) for (const s of [1, -1]) {
   const g = H.handGeometry(s, p), a = g.attributes.position.array;
   check(a.every(Number.isFinite), `hand ${p} ${s} finite`);
-  check(a.length / 9 <= 2400, `hand ${p} under 2.4k tris (${a.length / 9})`);
+  // 3k: the palm is a smooth closed superellipsoid now (the box palm's seams
+  // read as folded flaps up close); two hands on screen, still nothing
+  check(a.length / 9 <= 3000, `hand ${p} under 3k tris (${a.length / 9})`);
 }
 // the mirror is a true left hand: thumb on +X, winding fixed (outward normals)
 {
@@ -89,13 +99,11 @@ const stub = `
 const fistSrc = stub
   + block(FPS, "  const HAND_REST = {", "  // THE FIST WEARS WHAT YOU WEAR")
   + block(FPS, "  // ---- the fight state of the two hands ----", "  /* ---- THE ARMS, SOLVED EVERY FRAME")
-  + block(FPS, "  const SHOULDER_CAM =", "  const ARM_GUN =")
+  + block(FPS, "  const SHOULDER_CAM =", "  const _vmInv =")
   + block(FPS, "  function defaultPole(", "  // position + orientation of a descendant of vm")
-  + block(FPS, "  const ARM_GUN =", "  const _vmInv =")
-  + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
   + `
   return {
-    fistT, animFists, triggerFistPunch, defaultPole, SHOULDER_CAM, ARM_FIST, ARM_GUN, fitOffHand, mat,
+    fistT, animFists, triggerFistPunch, defaultPole, SHOULDER_CAM, ARM_FIST, mat,
     get guardK() { return guardK; }, setGuardHold(v) { guardHold = v; },
   };`;
 const F = vm.runInContext("(function(){" + fistSrc + "})()", ctx);
@@ -117,7 +125,11 @@ function assertPair(tag, R, L, o) {
     check(L.E[0] < -0.04, `${tag}: left elbow stays left (${L.E[0].toFixed(3)})`);
   } else check(R.E[0] > L.E[0], `${tag}: left elbow left of right elbow`);
   const kR = (o && o.kR) || K_FIST, kL = (o && o.kL) || K_FIST;
-  const d = M.segDist(R.W, R.E, L.W, L.E);
+  // (o.fromT: measure from that far up the forearm — a reload puts one hand ON
+  // the other's gun, and hands may touch; forearms still may not cross)
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const ft = (o && o.fromT) || 0;
+  const d = M.segDist(lerp(R.W, R.E, ft), R.E, lerp(L.W, L.E, ft), L.E);
   const need = (RAD_WRIST * kR + RAD_WRIST * kL);
   check(d > need, `${tag}: forearms clear each other (${d.toFixed(3)} > ${need.toFixed(3)})`);
   // an out-of-reach arm draws its upper arm too: it must not pass through the other forearm
@@ -165,43 +177,129 @@ for (const kind of ["jab", "cross", "hook", "upper", "stab"]) {
 for (const r of rows) if (r[3] != null) console.log(`  ${r[0].padEnd(9)} closest forearm approach ${r[3].toFixed(3)} m`);
 
 // ---------------------------------------------------------------- ARMED
-console.log("ARMED (every weapon, hip and sights)");
+/* The REAL arm solver: fpsmode.js's fitOffHand + fist/arm construction +
+   poseFpArms, cut out by their markers and run against stubs (the same cut
+   tools/fp-hands-studio.html renders), at the hip, down the sights and
+   through a reload. Then, per weapon:
+     5. every wrapped fingertip ends ON the part it holds (within 1 cm of its
+        surface, real scale), no finger segment buried in it (> 3 mm), the
+        index pad on the trigger's face (within 1 cm), the thumb resting on
+        the part (within 2.5 cm, not buried);
+     6. one hand size on every gun (the old kit sized it per weapon, 0.78x
+        to 1.2x, so the hand shrank when you swapped guns);
+     7. each forearm leaves the frame: its elbow projects outside the hip
+        (75 deg) lens, below or beside it, and the forearm heads down and
+        toward its own side, never at the eye;
+     8. the wrist never bends past its limit off the hand's natural line. */
+console.log("ARMED (every weapon: hip, sights, reload; the real poseFpArms)");
 const box = (parent, sx, sy, sz, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.BoxGeometry(sx, sy, sz), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
 const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.CylinderGeometry(r, r, len, 8), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
-const mats = {};
-for (const k of ["dark", "black", "bore", "steel", "worn", "tan", "polymer", "brass", "redShell", "wood"]) mats[k] = new T.MeshLambertMaterial();
-mats.skin = F.mat.skin;
-const actx = { THREE: T, box, cyl, mat: mats };
-function toCam(obj, vmNode) {
-  const p = new T.Vector3(), q = new T.Quaternion();
-  let o = obj; let k = 1;
-  while (o && o !== vmNode) { o.updateMatrix(); p.applyMatrix4(o.matrix); q.premultiply(o.quaternion); k *= o.scale.x; o = o.parent; }
-  vmNode.updateMatrix();
-  p.applyMatrix4(vmNode.matrix);
-  return { p, k };
-}
-const guns = ["sidearm", "revolver", "deagle", "shotgun", "carbine", "ak47", "smg", "uzi", "sniper", "lmg", "bazooka", "glauncher", "taser", "shank"];
-for (const id of guns) {
-  const model = CBZ.weaponAppearance[id](actx);
-  model.scale.setScalar(1.28);
-  F.fitOffHand(model, { melee: id === "shank" });
-  const fire = model.userData.fpFire, sup = model.userData.fpSupport;
-  check(!!fire, `${id}: has a firing hand`);
-  const vmNode = new T.Group(); const gunG = new T.Group();
-  vmNode.add(gunG); gunG.add(model);
-  for (const pose of [["hip", [0.36, -0.34, -0.72], -0.10], ["sights", [0.0, -0.22, -0.72], -0.10]]) {
-    vmNode.position.set(...pose[1]); vmNode.rotation.set(pose[2], 0, 0);
-    const fr = toCam(fire, vmNode);
-    const R = { W: arr(fr.p), S: F.SHOULDER_CAM[0] };
-    R.E = M.solveElbow(F.SHOULDER_CAM[0], R.W, F.defaultPole(1, 0, [0, 0, 0]), F.ARM_GUN[0], F.ARM_GUN[1]);
-    check(R.E[0] > R.W[0] - 0.05 && R.E[1] < R.W[1], `${id} ${pose[0]}: firing elbow below and outboard of the wrist`);
-    if (!sup) { console.log(`  ${id.padEnd(9)} ${pose[0].padEnd(6)} one-handed`); continue; }
-    const sp = toCam(sup, vmNode);
-    const L = { W: arr(sp.p), S: F.SHOULDER_CAM[1] };
-    L.E = M.solveElbow(F.SHOULDER_CAM[1], L.W, F.defaultPole(-1, 0, [0, 0, 0]), F.ARM_GUN[0], F.ARM_GUN[1]);
-    const d = assertPair(`${id} ${pose[0]}`, R, L, { allowCross: true, kR: fr.k, kL: sp.k });
-    console.log(`  ${id.padEnd(9)} ${pose[0].padEnd(6)} R wrist ${R.W.map((v) => v.toFixed(2)).join(",")}  L wrist ${L.W.map((v) => v.toFixed(2)).join(",")}  forearms ${d.toFixed(3)} m apart`);
+{
+  const GH = read("src/systems/gunhands.js");
+  const choreo = vm.runInContext("(function(){" + block(GH, "  const CHOREO = {", "  // the same choreography") + "; return CHOREO;})()", ctx);
+  let reloadP = -1;
+  CBZ.gunReloadChoreo = (st) => choreo[st] || choreo.mag;
+  CBZ.gunReloadPose = () => reloadP >= 0 ? { active: true, p: reloadP, style: CBZ._style || "mag" } : { active: false };
+  const armSrc = `
+    const THREE = window.THREE; const CBZ = window.CBZ;
+    const mat = { skin: new THREE.MeshLambertMaterial() };
+    const camera = new THREE.Group(); CBZ.camera = camera;
+    const vm = new THREE.Group(); camera.add(vm);
+    const gun = new THREE.Group();
+    const weaponModels = [];
+    let ddT = -1; const fps = { weapon: 0 };
+    let punchT = 0, vmPunch = 0, guardK = 0;
+    const fistT = [{ vis: false }, { vis: false }];
+  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+    + block(FPS, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
+    + `  vm.add(gun, fists, fpArms); fists.visible = false;`
+    + block(FPS, "  /* ---- THE ARMS, SOLVED EVERY FRAME", "  let aimHeld = false;")
+    + `
+    return { vm, gun, weaponModels, mat, fitOffHand, poseFpArms, armR, armL, WRIST_DEV, box: null };`;
+  const A = vm.runInContext("(function(){" + armSrc + "})()", ctx);
+  const mats = {};
+  for (const k of ["dark", "black", "bore", "steel", "worn", "tan", "polymer", "brass", "redShell", "wood"]) mats[k] = new T.MeshLambertMaterial();
+  mats.skin = A.mat.skin;
+  const actx = { THREE: T, box, cyl, mat: mats };
+  const guns = ["sidearm", "revolver", "deagle", "shotgun", "carbine", "ak47", "smg", "uzi", "sniper", "lmg", "bazooka", "glauncher", "taser", "shank"];
+  const camOf = (v) => { A.vm.updateMatrix(); return v.clone().applyMatrix4(A.vm.matrix); };
+  // the hip lens is 75 deg; down the sights it is at most 63 (irons, weaponAdsFov)
+  const ASPECT = 16 / 10;
+  const outOfLens = (c, fov) => { const t = Math.tan(fov * Math.PI / 360); return c.z > -0.05 || Math.abs(c.y / -c.z) > t || Math.abs(c.x / -c.z) > t * ASPECT; };
+  const handK = [];
+  for (const id of guns) {
+    const model = CBZ.weaponAppearance[id](actx);
+    model.scale.setScalar(1.28);
+    A.fitOffHand(model, { melee: id === "shank" });
+    CBZ._style = (model.userData.grips && model.userData.grips.style) || "mag";
+    const fire = model.userData.fpFire, sup = model.userData.fpSupport;
+    check(!!fire, `${id}: has a firing hand`);
+    A.weaponModels.length = 0; A.weaponModels.push(model);
+    A.gun.children.slice().forEach((c) => A.gun.remove(c)); A.gun.add(model);
+    A.vm.visible = true; A.gun.visible = true;
+    // 5. the grasp, at real scale
+    for (const [nm, h] of [["firing", fire], ["support", sup]]) {
+      const G = h && h.userData.grasp;
+      if (!G) continue;
+      const c = G.contacts, P = G.prism;
+      c.tips.forEach((t, i) => {
+        if (t == null) return;
+        check(t <= 0.010, `${id} ${nm}: ${["index", "middle", "ring", "little"][i]} fingertip on the part (${(t * 1000).toFixed(1)} mm off)`);
+      });
+      let buried = 0;
+      G.pose.joints.fingers.forEach((pts) => {
+        for (let s = 0; s < 3; s++) for (let u = 0.25; u <= 1.0001; u += 0.25) {
+          const q = G.toM([pts[s][0] + (pts[s + 1][0] - pts[s][0]) * u, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * u, pts[s][2] + (pts[s + 1][2] - pts[s][2]) * u]);
+          buried = Math.min(buried, H.prismSdf(P, q.x, q.y, q.z) / G.k - 0.0095 * 0.85);
+        }
+      });
+      check(buried > -0.003, `${id} ${nm}: no finger buried in the part (${(buried * 1000).toFixed(1)} mm)`);
+      if (nm === "firing" && id !== "shank") check(c.trigger != null && c.trigger <= 0.010, `${id}: index pad on the trigger (${c.trigger == null ? "none" : (c.trigger * 1000).toFixed(1) + " mm"})`);
+      check(c.thumb <= 0.025 && c.thumb > -0.004, `${id} ${nm}: thumb resting on the part (${(c.thumb * 1000).toFixed(1)} mm)`);
+      if (nm === "firing") handK.push([id, (function () { let k = 1, o = h; while (o && o !== A.vm) { k *= o.scale.x; o = o.parent; } return k; })()]);
+    }
+    const poses = [["hip", [0.36, -0.34, -0.72], -0.10, -1], ["sights", [0.0, -0.22, -0.72], -0.10, -1]];
+    if (sup) for (const p of [0.08, 0.30, 0.50, 0.70, 0.90]) poses.push(["reload" + p, [0.36, -0.34 - 0.13, -0.72], -0.10 + 0.13 * 0.8, p]);
+    for (const pose of poses) {
+      A.vm.position.set(...pose[1]); A.vm.rotation.set(pose[2], 0, 0);
+      reloadP = pose[3];
+      A.poseFpArms();
+      const arm = (a) => {
+        const P = a.userData.parts;
+        return { W: camOf(P.fore.position), E: camOf(P.elbow.position), S: camOf(P.upper.position.clone().add(new T.Vector3(0, 0, 1).applyQuaternion(P.upper.quaternion).multiplyScalar(P.upper.scale.z))) };
+      };
+      const R = arm(A.armR), tag = `${id} ${pose[0]}`;
+      const Ra = { W: arr(R.W), E: arr(R.E), S: arr(R.S) };
+      // 7. the forearm leaves the frame, down and to its own side
+      // (a reload reaches: a rocket goes in the FRONT of the tube, and an arm
+      // stretched down the gun shows its elbow; the lens law is for the hold)
+      const lensFov = pose[0] === "hip" ? 75 : pose[0] === "sights" ? 63 : 0;
+      if (lensFov) check(outOfLens(R.E, lensFov), `${tag}: firing elbow out of the lens (${arr(R.E).map((v) => v.toFixed(2))})`);
+      check(R.E.y < R.W.y && R.E.x > R.W.x - 0.05, `${tag}: firing forearm heads down and out`);
+      // 8. the wrist limit (angle off the hand's natural line)
+      const wristAngle = (h, a) => {
+        const q = new T.Quaternion(); let o = h;
+        const chain = []; while (o && o !== A.vm) { chain.push(o); o = o.parent; }
+        for (let i = chain.length - 1; i >= 0; i--) q.multiply(chain[i].quaternion);
+        const want = h.userData.foreLocal.clone().applyQuaternion(q).applyQuaternion(A.vm.quaternion);
+        return want.angleTo(a.E.clone().sub(a.W));
+      };
+      check(wristAngle(fire, R) <= A.WRIST_DEV[0] + 1e-3, `${tag}: firing wrist within its limit (${(wristAngle(fire, R) * 57.3).toFixed(0)} deg)`);
+      if (!sup) { if (pose[0] === "hip") console.log(`  ${id.padEnd(9)} one-handed`); continue; }
+      const L = arm(A.armL);
+      const La = { W: arr(L.W), E: arr(L.E), S: arr(L.S) };
+      if (lensFov) check(outOfLens(L.E, lensFov), `${tag}: support elbow out of the lens (${arr(L.E).map((v) => v.toFixed(2))})`);
+      check(L.E.y < L.W.y && L.E.x < L.W.x + 0.05, `${tag}: support forearm heads down and out`);
+      check(wristAngle(sup, L) <= A.WRIST_DEV[1] + 1e-3, `${tag}: support wrist within its limit (${(wristAngle(sup, L) * 57.3).toFixed(0)} deg)`);
+      const k = handK[handK.length - 1][1];
+      const d = assertPair(tag, Ra, La, { allowCross: true, kR: k, kL: k, fromT: lensFov ? 0 : 0.3 });
+      if (pose[0] === "hip" || pose[0] === "sights") console.log(`  ${id.padEnd(9)} ${pose[0].padEnd(6)} R wrist ${Ra.W.map((v) => v.toFixed(2)).join(",")}  L wrist ${La.W.map((v) => v.toFixed(2)).join(",")}  forearms ${d.toFixed(3)} m apart`);
+    }
+    reloadP = -1;
   }
+  // 6. one hand size
+  const k0 = handK[0][1];
+  for (const [id, k] of handK) check(Math.abs(k / k0 - 1) < 0.01, `${id}: the same hand size as every other gun (${k.toFixed(3)} vs ${k0.toFixed(3)})`);
 }
 
 // ---------------------------------------------------------------- DRIVING

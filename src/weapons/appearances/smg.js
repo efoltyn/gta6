@@ -95,12 +95,14 @@
     box(g, 0.060, 0.186, 0.018, K.fin("rubber"), 0, -0.010, 0.321);
 
     // the firing hand on the grip
-    K.hand(g, { at: [-0.040, -0.050], rake: R, gripW: 0.054, gripD: 0.076, size: 0.86, trigger: [-0.058, -0.140] });
+    K.hand(g, { at: [-0.040, -0.050], rake: R, gripW: 0.054, gripD: 0.076, trigger: [-0.058, -0.140] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -0.783);
     // WHERE THE HANDS GO — see systems/gunhands.js for the contract.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.030, -0.510),   // under the slim handguard
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: 0.025, z: -0.510, w: 0.070, h: 0.082, rc: 0.022, len: 0.20 },
       mag: new THREE.Vector3(0, -0.200, -0.330),
       charge: new THREE.Vector3(-0.055, 0.100, -0.500),// cocking lever, LEFT side (MP5 pattern)
       style: "mag",

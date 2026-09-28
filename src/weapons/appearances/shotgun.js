@@ -70,7 +70,7 @@
 
     // the firing hand around the wrist
     const R = 52 * Math.PI / 180;
-    K.hand(g, { at: [0.016, 0.060], rake: R, gripW: 0.062, gripD: 0.085, size: 0.78, trigger: [-0.056, -0.084] });
+    K.hand(g, { at: [0.060, 0.005], rake: R, gripW: 0.062, gripD: 0.085, trigger: [-0.056, -0.084], heading: [0, -0.45, -1] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.106);
     g.userData.pump = pump;
@@ -80,6 +80,8 @@
     // through the loading port under the receiver.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.040, -0.660),
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: 0.025, z: -0.660, w: 0.066, h: 0.078, rc: 0.022, len: 0.284 },   // the pump (the hand rides it)
       mag: new THREE.Vector3(0, -0.050, -0.170),
       charge: new THREE.Vector3(0, -0.040, -0.660),    // racking IS the pump
       style: "shell",

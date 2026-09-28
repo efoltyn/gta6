@@ -79,9 +79,9 @@
     return out;
   }
   // joint positions of one finger for flexion [mcp, pip, dip] (right-hand frame)
-  function fingerChain(f, flex) {
-    const curl = Math.min(1, flex[0] / 1.5);
-    const sp = f.splay * (1 - 0.6 * curl);                  // fingers gather as they close
+  function fingerChain(f, flex, splay) {
+    const curl = Math.min(1, Math.max(0, flex[0]) / 1.5);
+    const sp = splay != null ? splay : f.splay * (1 - 0.6 * curl);   // fingers gather as they close
     const dx = Math.sin(sp), dz = -Math.cos(sp);
     const pts = [[f.x, 0, f.z]];
     let a = 0, p = pts[0];
@@ -136,31 +136,41 @@
   const T_OPEN = [[-0.72, -0.22, -0.66], [-0.58, -0.14, -0.80], [-0.48, -0.08, -0.87]];
   const T_FIST = [[-0.36, -0.62, -0.70], [0.55, -0.50, -0.67], [0.95, -0.15, -0.25]];
   const T_WRAP = [[-0.34, -0.66, -0.67], [-0.12, -0.96, -0.24], [0.18, -0.62, -0.76]];
-  const T_ALONG = [[-0.30, -0.72, -0.62], [-0.10, -0.30, -0.95], [-0.05, -0.16, -0.99]];
   const T_PINCH = [[-0.48, -0.55, -0.68], [-0.10, -0.62, -0.78], [0.10, -0.55, -0.83]];
   const POSES = {
     open:    { flex: [[0.08, 0.10, 0.06], [0.06, 0.08, 0.05], [0.08, 0.10, 0.06], [0.12, 0.12, 0.08]], thumb: T_OPEN, cup: 0.001 },
     relaxed: { flex: [[0.30, 0.42, 0.22], [0.36, 0.50, 0.26], [0.44, 0.58, 0.30], [0.52, 0.66, 0.34]], thumb: T_REST, cup: 0.004 },
     fist:    { flex: [[1.48, 1.80, 0.95], [1.52, 1.84, 0.95], [1.52, 1.84, 0.95], [1.50, 1.80, 0.95]], thumb: T_FIST, cup: 0.006 },
-    // pistol: three fingers round a flat-sided grip, the index on the trigger,
-    // the thumb high along the far flank
-    pistol:  { flex: [[0.62, 0.62, 0.30], [0.50, 1.40, 0.90], [0.52, 1.42, 0.90], [0.55, 1.45, 0.92]], thumb: T_ALONG, cup: 0.005 },
-    // the hand cupped under a handguard: fingers up the far side, thumb along it
-    support: { wrap: 0.030, thumb: T_ALONG, cup: 0.006 },
-    // the off hand wrapped over the firing fist on a two-hand pistol hold
-    cupover: { wrap: 0.040, thumb: T_ALONG, cup: 0.006 },
+    // (guns take no table pose: every gun hand is a GRASP solved against the
+    // gun's own grip, handguard or pump — see grasp() below)
     wheel:   { wrap: 0.016, thumb: T_WRAP, cup: 0.005 },
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
     card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004 },
   };
+  function thumbChain(dirs) {
+    let tp = THUMB.base.slice();
+    const pts = [tp];
+    for (let s = 0; s < 3; s++) {
+      const d = dirs[s], dl = Math.hypot(d[0], d[1], d[2]) || 1, L = THUMB.seg[s];
+      tp = [tp[0] + d[0] / dl * L, tp[1] + d[1] / dl * L, tp[2] + d[2] / dl * L];
+      pts.push(tp);
+    }
+    return pts;
+  }
+  /* Every pose resolves to JOINT POINTS (right-hand frame): four finger
+     chains and the thumb chain. Table poses get them from flexion angles; a
+     grasp (below) solves them against the real thing held and hands them in
+     directly, so the geometry builder never has to know which it was. */
   function resolvePose(p) {
     const pose = typeof p === "string" ? (POSES[p] || POSES.relaxed) : (p || POSES.relaxed);
-    if (pose._flex) return pose;
+    if (pose._joints) return pose;
+    if (pose.joints) { pose._joints = pose.joints; return pose; }
     const flex = FINGERS.map(function (f, i) {
       if (pose.flex && pose.flex[i]) return pose.flex[i];
       return flexForWrap(pose.wrap, f);
     });
     pose._flex = flex;
+    pose._joints = { fingers: FINGERS.map(function (f, i) { return fingerChain(f, flex[i]); }), thumb: thumbChain(pose.thumb) };
     return pose;
   }
   // centre of the cylinder a wrap pose closes round, hand frame (right hand)
@@ -188,26 +198,24 @@
     place(new THREE.CylinderGeometry(r1, r0, L, 8, 1, true), a, b, parts);
   }
   function ball(parts, p, r, sx, sy, sz) {
-    const g = new THREE.SphereGeometry(r, 8, 6);
+    const g = new THREE.SphereGeometry(r, sx ? 12 : 8, sx ? 8 : 6);
     if (sx) g.scale(sx, sy, sz);
     g.translate(p[0], p[1], p[2]);
     parts.push(g);
   }
   function palmGeo(cup) {
-    const g = new THREE.BoxGeometry(PALM.hw * 2, PALM.th, PALM.len, 5, 2, 6);
-    const pos = g.attributes.position, rr = 0.011;
+    /* A SUPERELLIPSOID, not a box. The palm used to be a BoxGeometry pushed
+       into a rounded box: a box keeps separate vertices per face, so every
+       rounded edge became a seam with its own normals and up close (the
+       first-person lens IS up close) the heel and the web read as sharp
+       folded flaps. One closed, smooth surface instead, squared off by the
+       exponent, then shaped as before. */
+    const g = new THREE.SphereGeometry(1, 18, 12);
+    const pos = g.attributes.position, E = 0.30;
     const hx = PALM.hw, hy = PALM.th / 2, hz = PALM.len / 2;
+    const sq = function (v) { return Math.sign(v) * Math.pow(Math.abs(v), E); };
     for (let i = 0; i < pos.count; i++) {
-      let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      // round every edge (a rounded box, not a brick)
-      const cx = Math.max(-hx + rr, Math.min(hx - rr, x));
-      const cy = Math.max(-hy + rr * 0.9, Math.min(hy - rr * 0.9, y));
-      const cz = Math.max(-hz + rr, Math.min(hz - rr, z));
-      let ox = x - cx, oy = y - cy, oz = z - cz;
-      const ol = Math.hypot(ox, oy, oz);
-      if (ol > 1e-9) { const k = rr / ol; ox *= k; oy *= k; oz *= k; }
-      x = cx + ox; y = cy + oy; z = cz + oz;
-      if (Math.abs(y) > hy) y = Math.sign(y) * hy;
+      let x = sq(pos.getX(i)) * hx, y = sq(pos.getY(i)) * hy, z = sq(pos.getZ(i)) * hz;
       const zn = (z + hz) / PALM.len;                  // 0 at knuckles .. 1 at wrist (before translate)
       const u = 1 - zn;                                  // 1 at knuckles
       const xn = x / hx;
@@ -266,11 +274,11 @@
     const p = resolvePose(pose);
     const parts = [palmGeo(p.cup || 0.004)];
     // wrist stub: the hand's own skin, elliptical, sitting into the forearm
-    const wr = new THREE.CylinderGeometry(0.027, 0.029, 0.06, 10, 1, true);
-    wr.scale(1.18, 1, 0.78);
-    place(wr, [0, 0, 0.034], [0, 0.001, -0.022], parts);
+    // (a closed ellipsoid: the old open tube showed its hollow end whenever
+    // the wrist bent off the forearm's line)
+    ball(parts, [0, 0.0005, 0.004], 1, 0.031, 0.0205, 0.040);
     FINGERS.forEach(function (f, i) {
-      const pts = fingerChain(f, p._flex[i]);
+      const pts = p._joints.fingers[i];
       const rs = [f.r * 1.04, f.r * 0.95, f.r * 0.86, f.r * 0.78];
       // knuckle (a touch proud on the back of the hand), the two finger joints, the pad of the tip
       ball(parts, [pts[0][0], pts[0][1] + 0.002, pts[0][2]], f.r * 1.12, 1, 0.95, 1);
@@ -285,13 +293,7 @@
       }
     });
     // thumb: CMC on the heel's thumb side, three segments along authored directions
-    let tp = THUMB.base.slice();
-    const tpts = [tp];
-    for (let s = 0; s < 3; s++) {
-      const d = p.thumb[s], dl = Math.hypot(d[0], d[1], d[2]) || 1, L = THUMB.seg[s];
-      tp = [tp[0] + d[0] / dl * L, tp[1] + d[1] / dl * L, tp[2] + d[2] / dl * L];
-      tpts.push(tp);
-    }
+    const tpts = p._joints.thumb;
     for (let s = 0; s < 3; s++) {
       const r0 = THUMB.r[s] * (s === 0 ? 1.25 : 1), r1 = s < 2 ? THUMB.r[s + 1] : THUMB.r[2] * 0.85;
       seg(parts, tpts[s], tpts[s + 1], r0, r1);
@@ -489,6 +491,266 @@
     } else P.upper.visible = false;
   }
 
+  // ------------------------------------------------------------ GRASP
+  /* THE HAND CLOSES ON THE REAL THING. A table pose ("pistol": fixed flexion
+     angles) cannot fit fourteen guns: on a 5 cm Glock grip and a 3.7 cm A2
+     grip the same angles either bury the fingers in the frame or leave them
+     hanging in the air beside it, which is what the owner saw ("the real
+     hands, when they hold a gun, look weird"). A grasp is SOLVED against the
+     held part instead:
+
+       prism  the part, in the caller's (model) space: a rounded box with its
+              long axis `axis`, cross-section half-extents hw (along u) and hh
+              (along axis x u), corner radius rc, half-length hl (Infinity =
+              endless). A pistol grip, a handguard, a pump, a foregrip and a
+              two-hand cup over the firing fist are all this shape.
+       n      the side of the part the BACK of the hand faces (the palm lies
+              on the surface opposite it, flush).
+       heading  where the straight fingers would point (orthogonalised to n).
+       at     the point on the axis level with the palm's contact point.
+       k      model units per real metre (the hand is built in metres).
+
+     Then, all in real metres:
+       · the palm is laid flush on the surface at `at`;
+       · every finger closes joint by joint (knuckle, middle, tip) until that
+         segment touches the surface: the classic curl-until-contact grasp,
+         so a finger wraps a thin grip tight and a fat one loose, and the
+         pads end ON the surface (tools/fp-hands-check.mjs holds every tip
+         within 1 cm of it);
+       · `trigger` (a point) takes the index finger instead: it is splayed
+         into the plane of the trigger and its two joints solved so the pad
+         of the last segment sits on the trigger face;
+       · the thumb bends segment by segment toward the part's axis from an
+         aimed start direction until it touches: round the back strap and
+         forward along the far flank on a firing grip, forward along the
+         near side on a handguard.
+     A left hand is solved as the mirror of a right one, so one solver serves
+     both. Returns { q, p, pose, contacts } — the hand's rotation/position in
+     the caller's space (origin = the wrist) and the solved pose. */
+  const _gq = new THREE.Quaternion(), _gqi = new THREE.Quaternion(), _gp = new THREE.Vector3();
+  const _gv = new THREE.Vector3(), _gw = new THREE.Vector3();
+  const _gX = new THREE.Vector3(), _gY = new THREE.Vector3(), _gZ = new THREE.Vector3(), _gM = new THREE.Matrix4();
+  function prismSdf(P, x, y, z) {
+    const dx = x - P.o.x, dy = y - P.o.y, dz = z - P.o.z;
+    const a = dx * P.u.x + dy * P.u.y + dz * P.u.z;
+    const b = dx * P.v.x + dy * P.v.y + dz * P.v.z;
+    const c = dx * P.axis.x + dy * P.axis.y + dz * P.axis.z;
+    const qx = Math.abs(a) - (P.hw - P.rc), qy = Math.abs(b) - (P.hh - P.rc);
+    const qz = P.hl === Infinity ? -1e9 : Math.abs(c) - Math.max(0, P.hl - P.rc);
+    const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
+    return Math.hypot(ox, oy, oz) + Math.min(Math.max(qx, qy, qz), 0) - P.rc;
+  }
+  function makePrism(pr) {
+    const axis = pr.axis.clone().normalize();
+    const u = pr.u.clone().addScaledVector(axis, -pr.u.dot(axis)).normalize();
+    const v = new THREE.Vector3().crossVectors(axis, u);
+    const hw = pr.hw, hh = pr.hh;
+    return { o: pr.o.clone(), axis, u, v, hw, hh, rc: Math.min(pr.rc == null ? Math.min(hw, hh) * 0.35 : pr.rc, hw, hh), hl: pr.hl == null ? Infinity : pr.hl };
+  }
+  function prismSupport(P, n) {
+    const nu = n.dot(P.u), nv = n.dot(P.v);
+    return (P.hw - P.rc) * Math.abs(nu) + (P.hh - P.rc) * Math.abs(nv) + P.rc;
+  }
+  function grasp(spec) {
+    const side = spec.side < 0 ? -1 : 1, k = spec.k;
+    const P = makePrism(spec.prism);
+    // basis: Y = n (back of the hand), Z = -heading, X = Y x Z
+    _gY.copy(spec.n).addScaledVector(P.axis, -spec.n.dot(P.axis) * (spec.nFree ? 0 : 1)).normalize();
+    _gZ.copy(spec.heading).addScaledVector(_gY, -spec.heading.dot(_gY)).normalize().negate();
+    _gX.crossVectors(_gY, _gZ);
+    _gM.makeBasis(_gX, _gY, _gZ);
+    const q = new THREE.Quaternion().setFromRotationMatrix(_gM);
+    _gqi.copy(q).invert();
+    // flush: the palm's contact point on the part's surface on the n side
+    // (the hand is outside the part, the back of the hand facing n, the palm
+    // facing the axis)
+    const palm = spec.palm || [0, -PALM.th * 0.5, -0.062];
+    const S = new THREE.Vector3().copy(spec.at).addScaledVector(_gY, prismSupport(P, _gY));
+    const p = S.clone().sub(_gv.set(side * palm[0], palm[1], palm[2]).multiplyScalar(k).applyQuaternion(q));
+    // canonical (right-hand, metres) <-> caller space
+    const toM = function (h, out) {
+      return (out || _gw).set(side * h[0], h[1], h[2]).multiplyScalar(k).applyQuaternion(q).add(p);
+    };
+    const toH = function (v) {
+      _gv.copy(v).sub(p).applyQuaternion(_gqi).multiplyScalar(1 / k);
+      return [side * _gv.x, _gv.y, _gv.z];
+    };
+    const dirH = function (v) {
+      _gv.copy(v).applyQuaternion(_gqi);
+      const l = _gv.length() || 1;
+      return [side * _gv.x / l, _gv.y / l, _gv.z / l];
+    };
+    const sdfH = function (h) { const m = toM(h); return prismSdf(P, m.x, m.y, m.z) / k; };
+    // clearance of the segment a->b (radii ra->rb) from the surface; < 0 = inside
+    const segGap = function (a, b, ra, rb, from) {
+      let g = Infinity;
+      for (let t = from == null ? 0.25 : from; t <= 1.0001; t += 0.25) {
+        const h = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+        g = Math.min(g, sdfH(h) - (ra + (rb - ra) * t));
+      }
+      return g;
+    };
+    const CONTACT = 0.0012;                      // a pad pressed within 1.2 mm is ON the surface
+    const SOFT_MAX = [1.45, 1.75, 1.15];
+    const fingers = [], contacts = { tips: [], trigger: null, thumb: null };
+    FINGERS.forEach(function (f, i) {
+      const rs = [f.r * 1.04, f.r * 0.95, f.r * 0.86, f.r * 0.78];
+      if (i === 0 && spec.trigger) {
+        // the index finger to the trigger: splayed into the trigger's plane, the
+        // pad of its last segment on the face
+        const T = toH(spec.trigger);
+        const M = [f.x, 0, f.z];
+        const sp = Math.max(-0.45, Math.min(0.45, Math.atan2(T[0] - M[0], -(T[2] - M[2]))));
+        const ds = [Math.sin(sp), -Math.cos(sp)];
+        const st = (T[0] - M[0]) * ds[0] + (T[2] - M[2]) * ds[1], yt = T[1];
+        let best = null;
+        for (let a = -0.3; a <= 1.4; a += 0.025) {
+          for (let b = 0; b <= 1.75; b += 0.025) {
+            const c = b * 0.55;
+            let s = 0, y = 0, ang = 0;
+            ang += a; s += Math.cos(ang) * f.seg[0]; y -= Math.sin(ang) * f.seg[0];
+            ang += b; s += Math.cos(ang) * f.seg[1]; y -= Math.sin(ang) * f.seg[1];
+            ang += c;
+            const ms = s + Math.cos(ang) * f.seg[2] * 0.55, my = y - Math.sin(ang) * f.seg[2] * 0.55;
+            const r = rs[2] * 0.95;
+            const ps = ms - Math.sin(ang) * r, py = my - Math.cos(ang) * r;      // the pad, palm side
+            const err = (ps - st) * (ps - st) + (py - yt) * (py - yt) + 0.00002 * (a * a + b * b);
+            if (!best || err < best.err) best = { err: err, flex: [a, b, c] };
+          }
+        }
+        const pts = fingerChain(f, best.flex, sp);
+        fingers.push(pts);
+        contacts.trigger = Math.sqrt(best.err);
+        contacts.tips.push(null);
+        return;
+      }
+      const flex = [0.04, 0.05, 0.04];
+      const sp = spec.splay ? spec.splay[i] : null;
+      for (let j = 0; j < 3; j++) {
+        // a segment that STARTS inside (the one before it closed so far that
+        // this one points into the part) opens back out until it is clear
+        {
+          const pts = fingerChain(f, flex, sp);
+          if (segGap(pts[j], pts[j + 1], rs[j], rs[j + 1]) < 0) {
+            let a = flex[j];
+            for (; a > -0.35; a -= 0.02) {
+              flex[j] = a;
+              const q = fingerChain(f, flex, sp);
+              if (segGap(q[j], q[j + 1], rs[j], rs[j + 1]) >= 0) break;
+            }
+            continue;
+          }
+        }
+        let a = flex[j], hit = false;
+        for (; a <= JOINT_MAX[j] + 1e-6; a += 0.02) {
+          flex[j] = a;
+          const pts = fingerChain(f, flex, sp);
+          // the middle joint also stops when the tip segment would dig in
+          // (else a finger that never touched with its middle segment hooks
+          // round and drives its tip into the part)
+          let gap = segGap(pts[j], pts[j + 1], rs[j], rs[j + 1]);
+          if (j === 1) gap = Math.min(gap, segGap(pts[2], pts[3], rs[2], rs[3]));
+          if (gap < CONTACT) { hit = true; break; }
+        }
+        flex[j] = hit ? Math.max(0, a - 0.02) : Math.min(a, SOFT_MAX[j]);
+        if (hit && j === 0) {
+          // the proximal segment is ON the part: bisect onto the surface
+          let lo = flex[0], hi = flex[0] + 0.02;
+          for (let it = 0; it < 6; it++) {
+            const mid = (lo + hi) / 2; flex[0] = mid;
+            const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
+            if (segGap(pts[0], pts[1], rs[0], rs[1]) < CONTACT) hi = mid; else lo = mid;
+          }
+          flex[0] = lo;
+        }
+      }
+      const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
+      fingers.push(pts);
+      contacts.tips.push(sdfH(pts[3]) - rs[3]);
+    });
+    // THE THUMB: segment by segment toward the axis from an aimed start
+    const th = [THUMB.base.slice()];
+    const d0 = spec.thumbAim ? dirH(spec.thumbAim) : [-0.3, -0.7, -0.6];
+    let d = d0.slice();
+    const axH = dirH(P.axis), oH = toH(P.o);
+    for (let s = 0; s < 3; s++) {
+      // past the first joint the thumb may take a second aim (forward along a
+      // frame, not on round the grip) and settles onto the surface from there
+      if (s === 1 && spec.thumbAim2) d = dirH(spec.thumbAim2);
+      const a0 = th[s], L = THUMB.seg[s];
+      const r0 = THUMB.r[s] * (s === 0 ? 1.1 : 1), r1 = s < 2 ? THUMB.r[s + 1] : THUMB.r[2] * 0.85;
+      // closest axis point to the segment start -> the bending axis
+      const w = [a0[0] - oH[0], a0[1] - oH[1], a0[2] - oH[2]];
+      const t = w[0] * axH[0] + w[1] * axH[1] + w[2] * axH[2];
+      const to = [oH[0] + axH[0] * t - a0[0], oH[1] + axH[1] * t - a0[1], oH[2] + axH[2] * t - a0[2]];
+      let ra = [d[1] * to[2] - d[2] * to[1], d[2] * to[0] - d[0] * to[2], d[0] * to[1] - d[1] * to[0]];
+      const rl = Math.hypot(ra[0], ra[1], ra[2]);
+      const rot = function (th) {
+        if (rl < 1e-9) return d.slice();
+        const kx = ra[0] / rl, ky = ra[1] / rl, kz = ra[2] / rl, c = Math.cos(th), sn = Math.sin(th);
+        const dot = kx * d[0] + ky * d[1] + kz * d[2];
+        return [
+          d[0] * c + (ky * d[2] - kz * d[1]) * sn + kx * dot * (1 - c),
+          d[1] * c + (kz * d[0] - kx * d[2]) * sn + ky * dot * (1 - c),
+          d[2] * c + (kx * d[1] - ky * d[0]) * sn + kz * dot * (1 - c),
+        ];
+      };
+      const end = function (dd) { return [a0[0] + dd[0] * L, a0[1] + dd[1] * L, a0[2] + dd[2] * L]; };
+      let ang = 0, dd = rot(0);
+      // already in the part (a thumb aimed into it): swing out first
+      if (segGap(a0, end(dd), r0, r1, s === 0 ? 0.5 : 0.25) < 0) {
+        for (ang = 0; ang > -1.6; ang -= 0.03) { dd = rot(ang); if (segGap(a0, end(dd), r0, r1, s === 0 ? 0.5 : 0.25) >= CONTACT) break; }
+      } else {
+        const cap = spec.thumbBend ? spec.thumbBend[s] : [0.9, 1.1, 0.9][s];
+        for (ang = 0; ang <= cap; ang += 0.02) {
+          const nd = rot(ang);
+          if (segGap(a0, end(nd), r0, r1, s === 0 ? 0.5 : 0.25) < CONTACT) break;
+          dd = nd;
+        }
+      }
+      d = dd;
+      th.push(end(dd));
+    }
+    contacts.thumb = sdfH(th[3]) - THUMB.r[2] * 0.85;
+    const pose = { name: "g:" + (spec.name || Math.random().toString(36).slice(2)), cup: spec.cup || 0.006, joints: { fingers: fingers, thumb: th } };
+    // where the forearm WANTS to go (a straight wrist), caller space
+    const fore = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    return { q: q, p: p, pose: pose, contacts: contacts, prism: P, k: k, side: side, fore: fore, toM: toM };
+  }
+  /* A hand placed by a grasp: mesh at its wrist, pose attached. */
+  function graspHand(parent, spec, material) {
+    const G = grasp(spec);
+    const h = makeHand(G.side, G.pose, material);
+    h.quaternion.copy(G.q);
+    h.position.copy(G.p);
+    h.scale.setScalar(G.k);
+    h.userData.grasp = G;
+    if (parent) parent.add(h);
+    return h;
+  }
+
+  /* THE WRIST HAS LIMITS. The shoulder IK puts the elbow where the arm can
+     reach; a real wrist then only bends so far off the line of the forearm.
+     Pull the forearm direction (wrist -> elbow) to within `maxDev` radians of
+     `want` (the grasp's straight-wrist line, or a held part's natural carry),
+     keeping its length. Pure maths on arrays. */
+  function clampFore(W, E, want, maxDev, L2) {
+    let dx = E[0] - W[0], dy = E[1] - W[1], dz = E[2] - W[2];
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    dx /= dl; dy /= dl; dz /= dl;
+    const wl = Math.hypot(want[0], want[1], want[2]) || 1;
+    const wx = want[0] / wl, wy = want[1] / wl, wz = want[2] / wl;
+    const cos = Math.max(-1, Math.min(1, dx * wx + dy * wy + dz * wz));
+    const ang = Math.acos(cos);
+    if (ang <= maxDev) return [W[0] + dx * L2, W[1] + dy * L2, W[2] + dz * L2];
+    // slerp from want toward the solved direction by maxDev
+    let px = dx - wx * cos, py = dy - wy * cos, pz = dz - wz * cos;
+    const pl = Math.hypot(px, py, pz);
+    if (pl < 1e-6) { px = 0; py = -1; pz = 0; } else { px /= pl; py /= pl; pz /= pl; }
+    const c = Math.cos(maxDev), s = Math.sin(maxDev);
+    return [W[0] + (wx * c + px * s) * L2, W[1] + (wy * c + py * s) * L2, W[2] + (wz * c + pz * s) * L2];
+  }
+
   // ------------------------------------------------------------ dress
   function readHex(list) {
     if (!list) return null;
@@ -524,10 +786,11 @@
   }
 
   CBZ.fpHands = {
-    version: 1,
+    version: 2,
     POSES, PALM, FINGERS, THUMB,
     handGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    math: { solveElbow, flexForWrap, fingerChain, segDist },
+    grasp, graspHand, prismSdf,
+    math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore },
   };
 })();

@@ -69,12 +69,14 @@
 
     // the firing hand on the grip
     const R = 14 * Math.PI / 180;
-    K.hand(g, { at: [-0.060, 0.022], rake: R, gripW: 0.074, gripD: 0.080, size: 0.86, trigger: [-0.074, -0.074] });
+    K.hand(g, { at: [-0.060, 0.022], rake: R, gripW: 0.074, gripD: 0.080, trigger: [-0.074, -0.074] });
 
     g.userData.muzzle = new THREE.Vector3(0, BORE, -1.323);
     // WHERE THE HANDS GO — see systems/gunhands.js.
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.070, -0.520),   // under the beavertail fore-end
+      // the part the first-person off hand closes on (fpsmode.js fitOffHand)
+      hold: { kind: "guard", y: 0.000, z: -0.520, w: 0.074, h: 0.080, rc: 0.024, len: 0.40 },
       mag: new THREE.Vector3(0, -0.060, -0.200),       // hinged floorplate
       charge: new THREE.Vector3(0.110, 0.020, 0.030),  // the BOLT knob — this gun is worked by hand
       style: "mag",
