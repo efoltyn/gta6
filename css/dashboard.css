@@ -82,8 +82,6 @@
   font-size:10px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
   text-align:center; padding:3px 0; border-radius:8px;
 }
-#dashboard .f-red{ background:rgba(255,80,80,.18); color:#ff9a9a; }
-#dashboard .f-blue{ background:rgba(90,140,255,.18); color:#9fc3ff; }
 #dashboard .f-loner{ background:rgba(220,220,220,.1); color:#cfd6dc; }
 #dashboard .f-staff{ background:rgba(255,212,81,.16); color:#ffd451; }
 #dashboard .f-bent{ background:rgba(176,122,255,.18); color:#cda6ff; }

@@ -510,7 +510,7 @@
       ctx.fillRect(p.x(c.minX), p.z(c.minZ), Math.max(1, (c.maxX - c.minX) * p.sc), Math.max(1, (c.maxZ - c.minZ) * p.sc));
     }
     for (const n of CBZ.npcs || []) {
-      if (!n.escaped) dot(n.group.position.x, n.group.position.z, p, n.dead ? "rgba(145,145,145,.48)" : (n.gang === 0 ? "#ff6b6b" : (n.gang === 1 ? "#6b98ff" : "#d9d2c4")), 2.4);
+      if (!n.escaped) dot(n.group.position.x, n.group.position.z, p, n.dead ? "rgba(145,145,145,.48)" : "#d9d2c4", 2.4);
     }
     const ambient = CBZ.ambient;
     const step = ambient ? Math.max(1, Math.ceil(ambient.total / 420)) : 1;

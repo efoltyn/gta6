@@ -148,6 +148,8 @@
   const beds = [];          // every authored rack: cell house, then south dorm
   const messSeats = [];     // chow-hall benches
   const yardSeats = [];     // yard tables + benches
+  // systems/prisoncars.js partitions both pools by car (seat._car)
+  CBZ.prisonRestSeats = { mess: messSeats, yard: yardSeats };
   let built = false, wardenBed = null;
 
   /* ==========================================================
@@ -560,9 +562,10 @@
         // man who sits" flicker instead of being a trait.
         if (a._restSitter == null) {
           const h = CBZ.hash01 ? CBZ.hash01(a.group.position.x, a.group.position.z, 771) : 0.5;
-          a._restSitter = h < 0.34;
+          a._restSitter = h;
         }
-        if (!a._restSitter) continue;
+        // at chow most men sit (at their own car's table); on the yard a third
+        if (!(a._restSitter < (messTime ? 0.85 : 0.34))) continue;
         // SIT WHERE HE ALREADY IS. Walking him to a chair would mean writing
         // `target` at a body whose own brain rewrites it every think-tick, and
         // two movers on one Vector3 is a man vibrating in the aisle. So a seat
@@ -571,9 +574,12 @@
         const pool = messTime ? messSeats : yardSeats;
         const gp = a.group.position;
         let best = null, bd = 3.4 * 3.4;
+        const PC = CBZ.prisonCars;
         for (let k = 0; k < pool.length; k++) {
           const s = pool[k];
           if (s.occupant) continue;
+          // THE CARS: a man sits only in his own car's seats (or nobody's)
+          if (PC && !PC.maySit(a, s)) continue;
           const d = (s.x - gp.x) * (s.x - gp.x) + (s.z - gp.z) * (s.z - gp.z);
           if (d < bd) { bd = d; best = s; }
         }

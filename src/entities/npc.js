@@ -532,30 +532,45 @@
     })
   );
 
-  // Named gang crews. These give the social AI enough bodies to make
-  // respect, debt, lookout cover, and retaliation feel like a block system.
+  // THE CARS' KEY HOLDERS AND THEIR MEN (systems/prisoncars.js). A yard sorts
+  // itself by race: each car has a shot-caller and a few men active in its
+  // business. `car` is the car index; the heritage is who the man is, and
+  // ai.js deals him into the car his heritage says, never by this list.
+  // No colours anywhere: the same prison orange on everybody.
+  const C = CBZ.prisonCars ? CBZ.prisonCars.IDX : { south: 0, black: 1, white: 2, paisa: 3, asian: 4, others: 5 };
   [
-    { name: "Red Hook", tag: "Reds · shotcaller", gang: 0, crewRole: "shotcaller", pos: [-24, 28], region: [-30, -17, 22, 37], skin: 0xb84a36, speed: 2.0, personality: { greed: 0.42, nerve: 0.78, loyalty: 0.86, snitch: 0.18 },
+    // Southsiders: the old west corner (-22, 30)
+    { name: "Chato", heritage: "latino", car: C.south, crewRole: "shotcaller", pos: [-24, 28], region: [-30, -17, 22, 37], speed: 2.0, personality: { greed: 0.42, nerve: 0.78, loyalty: 0.86, snitch: 0.18 },
       talk: ["I remember who pays and who bleeds.", "You don't speak for my people. Ever.", "My brother's in the other yard. Six years."] },
-    { name: "Mack", tag: "Reds · collector", gang: 0, crewRole: "collector", pos: [-19, 34], region: [-28, -12, 24, 43], skin: 0xc85c00, speed: 2.35, personality: { greed: 0.78, nerve: 0.64, loyalty: 0.62, snitch: 0.24 },
+    { name: "Mack", heritage: "latino", car: C.south, crewRole: "collector", pos: [-19, 34], region: [-28, -12, 24, 43], speed: 2.35, personality: { greed: 0.78, nerve: 0.64, loyalty: 0.62, snitch: 0.24 },
       talk: ["Tabs are not suggestions.", "You walk loud, you pay loud.", "Friday. Every Friday."] },
-    { name: "Peep", tag: "Reds · lookout", gang: 0, crewRole: "lookout", pos: [-13, 23], region: [-24, -8, 18, 34], skin: 0xff7a1a, speed: 2.55, personality: { greed: 0.32, nerve: 0.48, loyalty: 0.78, snitch: 0.36 },
+    { name: "Peep", heritage: "centralam", car: C.south, crewRole: "lookout", pos: [-13, 23], region: [-24, -8, 18, 34], speed: 2.55, personality: { greed: 0.32, nerve: 0.48, loyalty: 0.78, snitch: 0.36 },
       talk: ["I see screws before screws see me.", "Don't stand next to me. You're hot."] },
-    { name: "Blue Ace", tag: "Blues · shotcaller", gang: 1, crewRole: "shotcaller", pos: [22, 17], region: [15, 30, 10, 27], skin: 0x3b7bff, speed: 2.05, personality: { greed: 0.48, nerve: 0.76, loyalty: 0.82, snitch: 0.22 },
+    // Black car: the old east corner (22, 16)
+    { name: "Ace", heritage: "black", car: C.black, crewRole: "shotcaller", pos: [22, 17], region: [15, 30, 10, 27], speed: 2.05, personality: { greed: 0.48, nerve: 0.76, loyalty: 0.82, snitch: 0.22 },
       talk: ["We trade clean. We fight dirty.", "Twelve years on a plea. Should've gone to trial."] },
-    { name: "Dice", tag: "Blues · runner", gang: 1, crewRole: "runner", pos: [16, 25], region: [9, 27, 15, 34], skin: 0x2f65d9, speed: 2.75, personality: { greed: 0.68, nerve: 0.52, loyalty: 0.58, snitch: 0.28 },
+    { name: "Dice", heritage: "black", car: C.black, crewRole: "runner", pos: [16, 25], region: [9, 27, 15, 34], speed: 2.75, personality: { greed: 0.68, nerve: 0.52, loyalty: 0.58, snitch: 0.28 },
       talk: ["I can move anything small enough to hide.", "My kid thinks I'm in the Army."] },
-    { name: "Stone", tag: "Blues · enforcer", gang: 1, crewRole: "enforcer", pos: [27, 13], region: [18, 32, 6, 24], skin: 0x254a9f, speed: 2.25, personality: { greed: 0.35, nerve: 0.86, loyalty: 0.74, snitch: 0.14 },
+    { name: "Stone", heritage: "caribbean", car: C.black, crewRole: "enforcer", pos: [27, 13], region: [18, 32, 6, 24], speed: 2.25, personality: { greed: 0.35, nerve: 0.86, loyalty: 0.74, snitch: 0.14 },
       talk: ["Disrespect travels. So do I.", "Don't look at me like we're friends."] },
+    // White car: by the weight pile (7, 32)
+    { name: "Dutch", heritage: "white", car: C.white, crewRole: "shotcaller", pos: [6, 33], region: [1, 13, 27, 38], speed: 1.95, personality: { greed: 0.40, nerve: 0.80, loyalty: 0.84, snitch: 0.16 },
+      talk: ["Keep your business with your own.", "You got a problem, it comes through me."] },
+    { name: "Wick", heritage: "easteuro", car: C.white, crewRole: "enforcer", pos: [9, 30], region: [3, 14, 26, 37], speed: 2.2, personality: { greed: 0.36, nerve: 0.84, loyalty: 0.78, snitch: 0.12 },
+      talk: ["I don't talk twice.", "Stay on your side of the yard."] },
+    // Paisas: under the pavilion (-12, 39)
+    { name: "Don Beto", heritage: "mexican", car: C.paisa, crewRole: "shotcaller", pos: [-12, 40], region: [-18, -6, 35, 45], speed: 1.8, personality: { greed: 0.52, nerve: 0.66, loyalty: 0.88, snitch: 0.10 },
+      talk: ["We work, we eat, we go home. Nobody bothers us.", "Pay what you owe and we are friends."] },
+    // Asian car (-3, 46)
+    { name: "Sonny Tran", heritage: "seasian", car: C.asian, crewRole: "shotcaller", pos: [-3, 46], region: [-8, 2, 42, 50], speed: 2.0, personality: { greed: 0.46, nerve: 0.72, loyalty: 0.90, snitch: 0.08 },
+      talk: ["Small car. Long memory.", "We don't want your trouble. Don't bring it."] },
+    // Others (11, 45)
+    { name: "Tavita", heritage: "islander", car: C.others, crewRole: "shotcaller", pos: [11, 45], region: [6, 16, 41, 50], speed: 1.7, personality: { greed: 0.34, nerve: 0.82, loyalty: 0.86, snitch: 0.10 },
+      talk: ["Everybody nobody wants ends up with us. Then they're ours.", "Respect goes both ways."] },
   ].forEach((m) => makeNpc({
     pos: m.pos, region: m.region, role: m.crewRole === "runner" ? "thief" : "inmate", speed: m.speed,
-    gang: m.gang, crewRole: m.crewRole, personality: m.personality,
-    tagText: m.tag, tagColor: m.gang === 0 ? "#ff7979" : "#7aa6ff",
-    // Everyone wears the SAME prison orange — you can't tell a gang by their
-    // jumpsuit, only by who they run with (name tag / radar). Realistic.
-    // The cars sort the way real yards do: the Reds run Latino, the Blues run
-    // Black. Each man's own look (ink, beard, tank) is rolled off his name.
-    skin: jump(m.gang === 0 ? "latino" : "black", m.name),
+    gang: m.car, crewRole: m.crewRole, personality: m.personality,
+    skin: jump(m.heritage, m.name),
     data: {
       name: m.name, pool: m.crewRole === "runner" ? "fenced" : "goods", offer: econ.pickOffer(m.crewRole === "runner" ? "fenced" : "goods"),
       crewRole: m.crewRole,

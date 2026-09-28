@@ -639,7 +639,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=m0927p"></script>
 <script src="src/systems/hud.js?v=m0927p"></script>
-<script src="src/systems/economy.js?v=cop1"></script>
+<script src="src/systems/economy.js?v=cars1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=nodash1"></script>
@@ -703,9 +703,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=face1"></script>
-<script src="src/entities/npc.js?v=hats2"></script>
-<script src="src/entities/ai.js?v=fallreal1"></script>
+<script src="src/entities/heritage.js?v=cars1"></script>
+<!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
+     Before npc.js (its key holders are indexed by car) and ai.js. -->
+<script src="src/systems/prisoncars.js?v=cars1"></script>
+<script src="src/entities/npc.js?v=carsm1"></script>
+<script src="src/entities/ai.js?v=carsm1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -787,7 +790,7 @@ document.body.appendChild(b);}}catch(e){}})();
      AFTER prisonschedule.js (it reads that clock and never its own) and after
      cellblock/guards/npc; propuse.js is in the CITY block far below, so every
      call into it happens inside the per-frame sweep, never at parse. -->
-<script src="src/systems/prisonrest.js?v=rest1"></script>
+<script src="src/systems/prisonrest.js?v=cars1"></script>
 
 <!-- FOUR SECURITY LEVELS OVER ONE COMPOUND. Getting caught escaping used to
      end the run on a card that said TRANSFERRED and then handed you the same
@@ -859,23 +862,23 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=armed1"></script>
+<script src="src/systems/brain_prison.js?v=cars1"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
 <script src="src/systems/lockdown.js?v=warden1"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=warden1"></script>
+<script src="src/systems/prisonwarden.js?v=cars1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
 <script src="src/systems/reactions.js?v=fallreal1"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
-<script src="src/systems/dashboard.js?v=nodash1"></script>
+<script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=sharkmode1"></script>
 <script src="src/systems/killstreaks.js?v=flick1"></script>
-<script src="src/systems/interact.js?v=cop1"></script>
+<script src="src/systems/interact.js?v=cars1"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
      called TALK now, which is what it does). This owns the real thing: an NPC
@@ -885,7 +888,7 @@ document.body.appendChild(b);}}catch(e){}})();
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=crew1"></script>
+<script src="src/systems/prisonfriends.js?v=cars1"></script>
 <script src="src/systems/interactions.js?v=lift1"></script>
 <!-- A door opened off the clock is noticed: the screws who see, hear or get
      radioed about it, the inmates it was shut on, and the Warden's record of
@@ -1806,7 +1809,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=cpd1"></script>
+<script src="src/systems/fullmap.js?v=cars1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
