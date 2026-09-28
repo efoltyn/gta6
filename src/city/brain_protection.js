@@ -25,38 +25,36 @@
 
    What replaces it (one brain, every detail in the game: the President's
    own detail, the NPC President's ring, officeholders' details, the player's
-   hired security, VIP suits, the hitman targets' bodyguards):
+   hired security, VIP suits, the hitman targets' bodyguards). The split with
+   CBZ.moves (entities/moves.js) is: THIS FILE DECIDES, MOVES EXECUTES.
 
-   · THE PRINCIPAL IS FILTERED, NOT READ. Velocity is an exponential
-     average; the formation heading follows it only while he is really
-     moving (hysteresis on "moving"), slews at a bounded rate, and holds
-     when he stops. Looking round does not rotate the detail.
+   FROM CBZ.moves (execution, never duplicated here)
+   · THE FRAME. One CBZ.moves.formation() per detail (D.F): the principal's
+     smoothed velocity, a travel heading that turns at a bounded rate and
+     eases to his facing at rest, slots predicted a short beat ahead, and his
+     velocity handed to every member as FEED-FORWARD (they walk WITH him).
+   · STABLE ASSIGNMENT. F.assign: member -> slot solved on a roster change,
+     otherwise re-solved only when a swap is a real gain (no reshuffle, no
+     two agents trading places). The CP is pinned to his shoulder slot.
+   · THE IDLE SCAN. F.scan: a member at rest looks out with slow held
+     glances (left / centre / right of his sector every 2.5-4.5 s).
+   · THE WALK. Every order is a ped.moveOrder (CBZ.protection.order): the
+     motor's velocity, braking arrival, arrival latch, bounded turn,
+     turn-in-place and avoidance. Nothing here writes a position.
+
+   HERE (decisions)
    · ROLES. agent_cp (the shift leader, the "body man") at his right rear
      shoulder, always the same person; agent_lead on point choosing the line;
      flanks, tail; with six or more an agent_sweep walks ahead to the next
      door or turn. Counter-snipers are a separate, static brain.
-   · STABLE ASSIGNMENT. Slots are assigned by least total walking distance,
-     and re-assigned ONLY when a different assignment is much cheaper AND has
-     stayed cheaper for a moment (or the roster changed). A U-turn relabels
-     the diamond (the tail becomes the point) instead of making them cross.
-   · SMOOTHED OFFSETS. Each agent's offset from the principal is a critically
-     damped spring toward its slot offset: rotation, crowd tightening, door
-     single-file and re-assignment all glide. Translation is NOT smoothed:
-     when he walks the whole knot walks with him, no lag.
-   · SPEED MATCHING. Moving agents walk at his speed plus a correction on
-     the along-track error (continuous, not walk/run), toward a carrot a
-     little ahead so the mover never hits its own arrival stop mid-walk.
-   · ARRIVE AND HOLD. When he stands still an agent arrives (0.4 m) and
-     HOLDS until the slot is more than 1.1 m away. No re-issue of a moveTo
-     for sub-30 cm deltas.
-   · TURN, DON'T SNAP. Facing is bounded (about 150 deg/s calm, faster when
-     hot) and eases in.
-   · SCANNING. Each agent owns a sector facing OUT (point: ahead; flanks:
-     their side; tail: behind; CP: the crowd in front of the man). Every
-     1.5-4 s he picks a new place to look: someone in his sector whose hands
-     he can see and who is armed, running toward the man, or close; else a
-     new bearing inside the sector. A human cadence, not a spinning turret.
-     Perception runs through CBZ.brain.perception when it is loaded.
+   · WHICH SLOT TABLE. open (3 m), crowd (tight, with hysteresis + dwell),
+     door (single file), hold (tight, after trouble), shield. The table is
+     laid out in the frame and BLENDED (each slot eases to the new table's
+     offset over ~0.6 s, never faster than 5 m/s), so a mode change glides.
+   · WHAT IS WORTH LOOKING AT. Every 1.5-4 s an agent checks his sector
+     (CBZ.brain.perception when loaded): an armed man, somebody running at
+     the principal, somebody close. A target found OVERRIDES the idle scan;
+     an armed man he keeps looking at fills his awareness meter.
    · THE PANIC PROTOCOL (the drill, as details train it):
        ALERT  (a weapon seen, nobody firing): the two agents nearest the
               threat step in between; the rest KEEP THEIR SECTORS (a
@@ -72,16 +70,18 @@
        EVAC   the knot moves with him, shield arc still on the threat side,
               toward the car / safe room (the caller moves the principal).
        HOLD   the threat is gone: stay tight, guns up, short scans, then
-              re-form (the radius springs back out).
+              re-form.
+     In a hot phase the brain supplies the target points (the shield arc,
+     the screen), still walked by moves with his velocity fed forward.
      Counter-snipers never move: long, slow sector scans (3-6.5 s dwell),
      and they turn onto a target when the caller hands them one.
 
-   MOVEMENT goes ONLY through CBZ.brain.act (moveTo/stop/face/posture/say/
-   verb), which prefers CBZ.moves / CBZ.verbs when present. The fallback
-   executor registered here as game "protection" is a thin adapter over the
-   fields the city mover already walks by (peds.js: target/state/baseSpeed;
-   police.js: _post for a posted officer). If CBZ.brain is not loaded at all
-   the same executor is called directly.
+   Bodies move ONLY through CBZ.brain.act (moveTo/stop/face/posture/say/
+   verb). The executor registered here as game "protection" turns a moveTo
+   into a ped.moveOrder (CBZ.protection.order; the same record shape when
+   protection.js is absent) and a face into the motor's bounded turn;
+   police.js's posted officers get their `_post` written instead (his post
+   brain walks him). If CBZ.brain is not loaded the executor is called directly.
 
    PUBLIC: CBZ.detailBrain = { create, step, escort(key, principal, members,
    dt, env), release(ped), sniper(ped, post, dt, target), slotLocal,
@@ -100,22 +100,17 @@
   const TUNE = {
     R_OPEN: 3.0, R_CROWD: 2.0, R_HOLD: 1.7, R_SHIELD: 1.05,
     CROWD_IN: 4, CROWD_OUT: 1, CROWD_DWELL: 2.0,      // people within 5 m; hysteresis + dwell
-    DOOR_DWELL: 0.6,
-    MOVE_IN: 0.55, MOVE_OUT: 0.3,                      // m/s: principal "moving" hysteresis
-    VEL_TAU: 0.35,                                     // s: principal velocity filter
-    HEAD_RATE: 2.4,                                    // rad/s: formation heading slew
-    OFFSET_W: 4.2, OFFSET_W_HOT: 9.0,                  // spring stiffness (critically damped)
-    RADIUS_W: 2.2,
-    LEAD_T: 0.7,                                       // s: carrot ahead of a moving slot
-    HOLD_IN: 0.65, HOLD_OUT: 1.2,                      // m: arrive / resume (the city mover stops inside 0.5)
-    SPEED_MIN: 0.9, SPEED_MAX: 6.8, SPEED_K: 1.5,
-    REISSUE_D: 0.3, REISSUE_T: 0.5,
-    TURN: 2.6, TURN_HOT: 7.0, TURN_SNIPER: 1.1,        // rad/s
+    DOOR_DWELL: 0.6, DOOR_GAP: 1.15,                   // single file: a stride and a half apart
+    FRAME_LEAD: 0.2,                                   // s: the frame's slot prediction (moves)
+    BLEND_RATE: 5, BLEND_CAP: 5,                       // slot-table blend: 1/s, m/s
+    WALK: 2.4, RUN: 5.0,                               // m/s ordered paces (the motor ramps)
+    RUN_IN: 4, RUN_OUT: 1.5,                           // m behind the slot: catch-up gait hysteresis
+    REST_D: 0.6, STOP: 0.25,                           // m: "at the slot" for the rest pose; arrival
+    TURN: 2.6, TURN_HOT: 7.0, TURN_SNIPER: 1.1,        // rad/s (face requests on a standing body)
     DWELL_MIN: 1.5, DWELL_MAX: 4.0, DWELL_HOT: 1.1,
     SNIPER_DWELL_MIN: 3.0, SNIPER_DWELL_MAX: 6.5,
     SECTOR: 0.95, SNIPER_SECTOR: 0.7,
     SCAN_R: 26,
-    REASSIGN_EVERY: 0.25, REASSIGN_PERSIST: 0.6, REASSIGN_GAIN: 0.3, REASSIGN_MIN: 1.5,
     REACT_MIN: 0.12, REACT_MAX: 0.55,
     COVER_T: 1.2, HOLD_T: 5.0,
     ENGAGE_R: 45,
@@ -139,38 +134,53 @@
   function alive(a) { return !!(a && !a.dead && P(a)); }
 
   // ------------------------------------------------------------
-  //  THE FALLBACK EXECUTOR — a thin adapter over the city mover's fields.
-  //  peds.js move() walks any `controlled` ped toward `target` at
-  //  `baseSpeed` (state "walk") and stands still in "idle"; police.js walks
-  //  a posted officer to `_post.x/_post.z` and faces `_post.fx/_post.fz`.
-  //  Numeric speed is honoured by writing baseSpeed while the body is in the
-  //  detail (restored on stop/release): that is what turns the old walk/run
-  //  bang-bang into a continuous speed match.
+  //  THE EXECUTOR ("protection") — decisions in, CBZ.moves out.
+  //  moveTo  -> a ped.moveOrder (CBZ.protection.order when it is loaded; the
+  //             same record otherwise) that peds.js's move() steps through
+  //             CBZ.moves. opts: speed (m/s), arrive (stop radius), face (a
+  //             yaw to hold), strafe, vffX/vffZ (feed-forward velocity).
+  //  stop    -> the order is dropped; the motor brakes him where he stands.
+  //  face    -> the motor's bounded turn (CBZ.moves.face) at a._detTurn.
+  //  police.js's posted officers (power.js's ring cops) are walked by their
+  //  own post brain: moveTo/face write his `_post` instead.
   // ------------------------------------------------------------
   const EXEC = { dt: 1 / 60 };
   function speedOf(o) {
-    const s = o && o.speed;
+    const s = o && (o.speedMps != null ? o.speedMps : o.speed);
     if (typeof s === "number") return s;
-    return s === "run" ? 4.6 : s === "jog" ? 3.1 : 1.6;
+    return s === "run" ? TUNE.RUN : s === "jog" ? 3.1 : TUNE.WALK;
+  }
+  function writeOrder(a, x, z, sp, face, strafe, vx, vz, stop) {
+    const PR = CBZ.protection;
+    if (PR && typeof PR.order === "function") { PR.order(a, x, z, sp, face, strafe, vx, vz, stop); return; }
+    let o = a.moveOrder;
+    if (!o) o = a.moveOrder = { x: 0, z: 0, speed: 0, stop: 0.25, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+    o.x = x; o.z = z; o.speed = sp; o.stop = stop != null ? stop : 0.25;
+    o.face = face != null ? face : null; o.strafe = !!strafe;
+    o.vffX = vx || 0; o.vffZ = vz || 0; o.leg = false; o.t = CBZ.now || 0;
+    if (a.target && a.target.set) a.target.set(x, 0, z);
+    a.path = null; a.pause = 0; a.finalGoal = null; a._boardRun = false;
   }
   EXEC.moveTo = function (a, x, z, o) {
     if (!a) return false;
-    if (a._powerCop && a._post) { a._post.x = x; a._post.z = z; a._post.mountT = 0; a._post.mount = null; return true; }
-    if (a._detBase0 == null) a._detBase0 = a.baseSpeed != null ? a.baseSpeed : 1.6;
-    a.baseSpeed = Math.max(0.4, speedOf(o));
-    a._boardRun = false;
-    a.state = "walk"; a.path = null; a.finalGoal = null; a.pause = 0;
-    if (a.target && a.target.set) a.target.set(x, 0, z);
-    else a.target = { x: x, y: 0, z: z, set: function (X, Y, Z) { this.x = X; this.y = Y; this.z = Z; } };
+    if (a._powerCop && a._post) {
+      a._post.x = x; a._post.z = z; a._post.mountT = 0; a._post.mount = null;
+      if (o && o.face != null) { a._post.fx = Math.sin(o.face); a._post.fz = Math.cos(o.face); }
+      return true;
+    }
+    writeOrder(a, x, z, Math.max(0.4, speedOf(o)), o && o.face != null ? o.face : null, !!(o && o.strafe),
+      o && o.vffX, o && o.vffZ, o && o.arrive != null ? o.arrive : TUNE.STOP);
+    if (a.state !== "fight" && a.state !== "confront") a.state = "walk";
     return true;
   };
   EXEC.stop = function (a) {
     if (!a) return false;
     if (a._powerCop && a._post) return true;            // his post brain holds him on the slot we wrote
+    const PR = CBZ.protection;
+    if (PR && PR.release) PR.release(a); else a.moveOrder = null;
     const p = P(a);
     a.state = "idle"; a.speed = 0; a._boardRun = false; a.path = null;
     if (a.target && a.target.set && p) a.target.set(p.x, 0, p.z);
-    if (a._detBase0 != null) { a.baseSpeed = a._detBase0; a._detBase0 = null; }
     return true;
   };
   EXEC.face = function (a, x, z) {
@@ -179,12 +189,10 @@
     const dx = x - p.x, dz = z - p.z;
     if (dx * dx + dz * dz < 1e-4) return true;
     if (a._powerCop && a._post) { const l = Math.sqrt(dx * dx + dz * dz); a._post.fx = dx / l; a._post.fz = dz / l; return true; }
-    const want = Math.atan2(dx, dz), cur = yawOf(a), d = wrap(want - cur);
-    const rate = a._detTurn || TUNE.TURN, max = rate * EXEC.dt;
-    // bounded turn that eases in over the last ~15 degrees
-    const ad = Math.abs(d);
-    const step = (d > 0 ? 1 : -1) * Math.min(ad < 0.26 ? ad * Math.min(1, EXEC.dt * 9) : ad, max);
-    setYaw(a, cur + step);
+    const want = Math.atan2(dx, dz), rate = a._detTurn || TUNE.TURN;
+    const M = CBZ.moves;
+    if (M && M.face && M.motor) setYaw(a, M.face(M.motor(a), yawOf(a), want, EXEC.dt, rate));
+    else { const cur = yawOf(a), d = wrap(want - cur), mx = rate * EXEC.dt; setYaw(a, cur + (Math.abs(d) <= mx ? d : (d > 0 ? mx : -mx))); }
     return true;
   };
   EXEC.posture = function (a, p) {
@@ -255,16 +263,16 @@
     if (mode === "door") {
       if (kind === "cp") { f = -0.9; r = 0.45; look = 0.3; }
       else if (kind === "point") { f = 1.8; r = 0; look = 0; }
-      else { f = -1.9 - Math.max(0, (si || 1) - 1) * 1.0; r = 0; look = PI; }
-    } else if (kind === "cp") { const s = Math.min(0.85, 0.35 + R * 0.17); f = -s; r = s; look = 0.35; }
+      else { f = -1.9 - Math.max(0, (si || 1) - 1) * TUNE.DOOR_GAP; r = 0; look = PI; }
+    } else if (kind === "cp") { const s = Math.min(0.85, 0.35 + R * 0.17); f = -s; r = s; look = -0.35; }   // over his right shoulder, at the crowd ahead
     else if (kind === "point") { f = R; look = 0; }
-    else if (kind === "left") { f = 0.2 * R; r = -R; look = -PI / 2; }
-    else if (kind === "right") { f = 0.2 * R; r = R; look = PI / 2; }
+    else if (kind === "left") { f = 0.2 * R; r = -R; look = Math.atan2(R, 0.2 * R); }   // out, to his left
+    else if (kind === "right") { f = 0.2 * R; r = R; look = -Math.atan2(R, 0.2 * R); }  // out, to his right
     else if (kind === "tail") { f = -R; look = PI; }
     else if (kind === "sweep") { f = mode === "crowd" ? R * 2.2 : R * 3.3; look = 0; }
-    else {                                              // outer ring, evenly spread
+    else {                                              // outer ring, evenly spread, looking out
       const a = ((k + 0.5) / Math.max(1, nRing)) * TAU, R2 = R * 1.5;
-      f = Math.cos(a) * R2; r = Math.sin(a) * R2; look = a;
+      f = Math.cos(a) * R2; r = Math.sin(a) * R2; look = Math.atan2(-r, f);
     }
     out.f = f; out.r = r; out.look = look;
     return out;
@@ -277,12 +285,9 @@
     for (let i = 0; i < nOthers; i++) out.push(i < ORDER.length ? ORDER[i] : "ring");
     return out;
   }
-  // world offset of a local (f, r) under heading h
-  function rot(f, r, h, out) {
-    const fx = Math.sin(h), fz = Math.cos(h), rx = -Math.cos(h), rz = Math.sin(h);
-    out.x = fx * f + rx * r; out.z = fz * f + rz * r;
-    return out;
-  }
+  // YAW CONVENTION: forward = (sin h, cos h); `look` is a yaw offset from
+  // the frame heading. r = metres to his RIGHT; CBZ.moves' F.slot takes
+  // s = metres to his LEFT (s = -r).
   // the OLD protection.js shape (s = metres to his LEFT), kept for callers
   function formationSlot(i, n, mode, out) {
     out = out || { f: 0, s: 0, face: 0 };
@@ -300,12 +305,13 @@
   function create(key, opts) {
     opts = opts || {};
     return {
-      key: key, t: 0, init: false,
-      px: 0, pz: 0, vx: 0, vz: 0, spd: 0, moving: false, h: 0, hWant: 0, hAtAssign: 0,
+      key: key, t: 0, F: null,
+      // read-only mirrors of the moves frame (callers and the sims read these)
+      px: 0, pz: 0, vx: 0, vz: 0, spd: 0, moving: false, h: 0,
       mode: "open", modeWant: "open", modeT: 0, crowdHigh: false, crowdT: 0,
-      R: TUNE.R_OPEN, Rv: 0,
-      roster: [], active: [], cp: null,
-      assignT: 0, betterT: 0, rosterDirty: true,
+      R: TUNE.R_OPEN,
+      roster: [], active: [], cp: null, rosterDirty: true,
+      slots: [], blend: [], world: [], others: [], nRing: 0,
       phase: "normal", phaseT: 0, epoch: 0, threat: null, tx: 0, tz: 0, hasT: false, hostile: false,
       shouted: false, cpSaid: false, engagers: [], screen: [], lastPosture: "normal",
       form: opts.form || null, sweep: opts.sweep !== false, small: !!opts.small,
@@ -320,8 +326,8 @@
     if (!m || m.D !== D) {
       const id = idOf(q);
       m = q._det = {
-        D: D, id: id, kind: null, k: 0, ox: 0, oz: 0, ovx: 0, ovz: 0, init: false,
-        hold: false, gx: 1e9, gz: 1e9, gs: -1, issueT: -9,
+        D: D, id: id, kind: null, k: 0, si: -1, j: -1, init: false,
+        hold: false, run: false,
         lookYaw: null, lookT: 0, lookAt: null, react: 0, epoch: -1, said: false,
         seed: h01(id * 7.13),
       };
@@ -330,33 +336,17 @@
   }
   function release(q) {
     if (!q) return;
-    if (q._detBase0 != null) { q.baseSpeed = q._detBase0; q._detBase0 = null; }
+    const PR = CBZ.protection;
+    if (q.moveOrder && !(q._powerCop && q._post)) { if (PR && PR.release) PR.release(q); else q.moveOrder = null; }
     q._det = null; q._detailBrain = null; q._detTurn = null;
   }
 
-  // ---- 1. the principal, filtered -------------------------------------
+  // ---- 1. the principal, through the CBZ.moves formation frame ----------
   function track(D, pp, principal, dt) {
-    if (!D.init) {
-      D.px = pp.x; D.pz = pp.z; D.init = true;
-      D.h = D.hWant = D.hAtAssign = yawOf(principal);
-      return;
-    }
-    const dx = pp.x - D.px, dz = pp.z - D.pz;
+    const F = D.F;
+    F.update(pp.x, pp.z, principal.group || principal.yaw != null ? yawOf(principal) : null, dt);
     D.px = pp.x; D.pz = pp.z;
-    if (dt <= 0) return;
-    const ivx = dx / dt, ivz = dz / dt, inst = Math.sqrt(ivx * ivx + ivz * ivz);
-    if (inst > 25) {                                     // a teleport / a car exit: re-seat, don't sprint
-      D.vx = D.vz = 0; D.spd = 0; D.moving = false;
-      return;
-    }
-    const k = 1 - Math.exp(-dt / TUNE.VEL_TAU);
-    D.vx += (ivx - D.vx) * k; D.vz += (ivz - D.vz) * k;
-    D.spd = Math.sqrt(D.vx * D.vx + D.vz * D.vz);
-    if (!D.moving && D.spd > TUNE.MOVE_IN) D.moving = true;
-    else if (D.moving && D.spd < TUNE.MOVE_OUT) D.moving = false;
-    if (D.moving) D.hWant = Math.atan2(D.vx, D.vz);
-    const d = wrap(D.hWant - D.h), max = TUNE.HEAD_RATE * dt;
-    D.h = wrap(D.h + (Math.abs(d) <= max ? d : (d > 0 ? max : -max)));
+    D.vx = F.vx; D.vz = F.vz; D.spd = F.speed; D.moving = F.moving; D.h = F.h || 0;
   }
 
   // ---- 2. roster -------------------------------------------------------
@@ -397,6 +387,7 @@
     let want = "open";
     if (D.phase === "cover" || D.phase === "evac") want = "shield";
     else if (D.phase === "hold" || D.phase === "alert") want = "hold";
+    else if (env.mode === "door" || env.mode === "crowd" || env.mode === "open") want = env.mode;   // the caller's table
     else if (env.door) want = "door";
     else if (D.crowdHigh) want = "crowd";
     if (want !== D.modeWant) { D.modeWant = want; D.modeT = 0; }
@@ -405,23 +396,26 @@
     if (D.mode !== D.modeWant && (D.modeWant === "shield" || D.modeWant === "door" || D.modeT > TUNE.DOOR_DWELL)) {
       D.mode = D.modeWant; D.rosterDirty = true;
     }
-    const Rw = D.mode === "shield" ? TUNE.R_SHIELD : D.mode === "hold" ? TUNE.R_HOLD : D.mode === "crowd" ? TUNE.R_CROWD : TUNE.R_OPEN;
-    // critically damped radius
-    const w = TUNE.RADIUS_W, a = w * w * (Rw - D.R) - 2 * w * D.Rv;
-    D.Rv += a * dt; D.R += D.Rv * dt;
+    // the table's radius; the per-slot blend (layout below) is what glides
+    D.R = D.mode === "shield" ? TUNE.R_SHIELD : D.mode === "hold" ? TUNE.R_HOLD : D.mode === "crowd" ? TUNE.R_CROWD : TUNE.R_OPEN;
   }
 
-  // ---- 4. assignment (least walking, with hysteresis) --------------------
-  const _kinds = [], _slotX = [], _slotZ = [], _pairs = [], _useQ = [], _useS = [], _best = [];
-  const _o = { x: 0, z: 0 }, _sl = { f: 0, r: 0, look: 0 };
-  function slotWorldOffset(D, kind, k, nRing, out, si) {
+  // ---- 4. THE SLOT TABLE (a decision) laid out in the moves frame -----------
+  //  Slot 0 is the CP's; 1..n the others' kinds (point, flanks, tail, sweep,
+  //  ring, or a caller's authored `form`). Each slot's local (f, s, look)
+  //  BLENDS toward the table (TUNE.BLEND_RATE, never faster than BLEND_CAP),
+  //  then F.slot puts it in the world with the principal's velocity.
+  const _kinds = [], _sl = { f: 0, r: 0, look: 0 };
+  function localSlot(D, kind, k, nRing, si, out) {
     if (D.form && kind.indexOf("form") === 0 && D.mode !== "door") {
       const f = D.form[k] || { f: -2, s: 0 };
       const sc = D.R / TUNE.R_OPEN;                       // an authored shape tightens in a crowd too
-      return rot(f.f * sc, -(f.s || 0) * sc, D.h, out);
+      out.f = f.f * sc; out.s = (f.s || 0) * sc; out.look = Math.atan2(out.s, out.f);
+      return out;
     }
     slotLocal(kind, k, nRing, D.R, D.mode, _sl, si);
-    return rot(_sl.f, _sl.r, D.h, out);
+    out.f = _sl.f; out.s = -_sl.r; out.look = _sl.look;
+    return out;
   }
   function slotKinds(D, nOthers) {
     if (D.form && D.form.length) {
@@ -440,84 +434,56 @@
     let k = 0; for (let j = 0; j < i; j++) if (kinds[j] === "ring") k++;
     return k;
   }
-  const _others = [], _pairPool = [];
-  function assign(D, dt, force) {
-    const others = _others; others.length = 0;
+  const _tgt = { f: 0, s: 0, look: 0 };
+  function layout(D, dt) {
+    const F = D.F, others = D.others;
+    others.length = 0;
     for (let i = 0; i < D.active.length; i++) if (D.active[i] !== D.cp) others.push(D.active[i]);
     const n = others.length;
     const kinds = slotKinds(D, n);
     let nRing = 0; for (let i = 0; i < n; i++) if (kinds[i] === "ring") nRing++;
-    _slotX.length = _slotZ.length = 0;
-    for (let i = 0; i < n; i++) {
-      slotWorldOffset(D, kinds[i], kIndex(kinds, i), nRing, _o, i);
-      _slotX.push(D.px + _o.x); _slotZ.push(D.pz + _o.z);
-    }
-    // current assignment cost (a member whose kind is gone counts as unassigned)
-    let curCost = 0, valid = true;
-    for (let i = 0; i < n; i++) {
-      const m = memberOf(D, others[i]);
-      const si = m.kind != null ? kinds.indexOf(m.kind) : -1;
-      if (si < 0 || m.kind === "cp") { valid = false; break; }
-      if (m.kind === "ring" || m.kind.indexOf("form") === 0) { if (m.k >= n) { valid = false; break; } }
-      const p = P(others[i]);
-      const sidx = m.kind === "ring" ? ringSlotIndex(kinds, m.k) : si;
-      if (sidx < 0) { valid = false; break; }
-      curCost += hyp(p.x, p.z, _slotX[sidx], _slotZ[sidx]);
-    }
-    // distinct kinds check (two members on one slot = invalid)
-    if (valid) {
-      for (let i = 0; i < n && valid; i++) for (let j = i + 1; j < n; j++) {
-        const a = others[i]._det, b = others[j]._det;
-        if (a.kind === b.kind && (a.kind !== "ring" || a.k === b.k)) { valid = false; break; }
-      }
-    }
-    // greedy least-distance assignment
-    _pairs.length = 0;
-    let pi = 0;
-    for (let i = 0; i < n; i++) {
-      const p = P(others[i]);
-      for (let s = 0; s < n; s++) {
-        const pr = _pairPool[pi] || (_pairPool[pi] = { q: 0, s: 0, d: 0 });
-        pr.q = i; pr.s = s; pr.d = hyp(p.x, p.z, _slotX[s], _slotZ[s]);
-        _pairs.push(pr); pi++;
-      }
-    }
-    _pairs.sort(function (a, b) { return a.d - b.d; });
-    _useQ.length = _useS.length = 0; _best.length = n;
-    for (let i = 0; i < n; i++) { _useQ.push(false); _useS.push(false); }
-    let bestCost = 0;
-    for (let i = 0; i < _pairs.length; i++) {
-      const pr = _pairs[i];
-      if (_useQ[pr.q] || _useS[pr.s]) continue;
-      _useQ[pr.q] = _useS[pr.s] = true; _best[pr.q] = pr.s; bestCost += pr.d;
-    }
-    let take = force || !valid;
-    if (!take) {
-      const better = curCost - bestCost > Math.max(TUNE.REASSIGN_MIN, curCost * TUNE.REASSIGN_GAIN);
-      if (better) {
-        D.betterT += dt;
-        // a real turn (the heading moved a lot since the last assignment) re-labels at once
-        const turned = Math.abs(wrap(D.hWant - D.hAtAssign)) > 0.9;
-        if (turned || D.betterT >= TUNE.REASSIGN_PERSIST) take = true;
-      } else D.betterT = 0;
-    }
-    if (take) {
-      for (let i = 0; i < n; i++) {
-        const m = memberOf(D, others[i]);
-        const s = _best[i];
-        const kind = kinds[s];
-        m.kind = kind; m.k = kIndex(kinds, s); m.si = s;
-        roleNote(others[i], kind);
-      }
-      D.betterT = 0; D.hAtAssign = D.hWant;
-    }
-    if (D.cp) { const m = memberOf(D, D.cp); if (m.kind !== "cp") { m.kind = "cp"; m.k = 0; roleNote(D.cp, "cp"); } }
     D.nRing = nRing;
+    const S = D.slots, Bl = D.blend, Wd = D.world;
+    const k = 1 - Math.exp(-dt * TUNE.BLEND_RATE), cap = TUNE.BLEND_CAP * dt;
+    for (let j = 0; j <= n; j++) {
+      const kind = j === 0 ? "cp" : kinds[j - 1];
+      if (j === 0) { slotLocal("cp", 0, 1, D.R, D.mode === "door" ? "door" : D.mode, _sl); _tgt.f = _sl.f; _tgt.s = -_sl.r; _tgt.look = _sl.look; }
+      else localSlot(D, kind, kIndex(kinds, j - 1), nRing, j - 1, _tgt);
+      const sl = S[j] || (S[j] = { kind: "", k: 0, f: 0, s: 0, look: 0 });
+      sl.kind = kind; sl.k = j === 0 ? 0 : kIndex(kinds, j - 1); sl.f = _tgt.f; sl.s = _tgt.s; sl.look = _tgt.look;
+      let b = Bl[j];
+      if (!b) b = Bl[j] = { f: _tgt.f, s: _tgt.s, look: _tgt.look };
+      let df = (_tgt.f - b.f) * k, ds = (_tgt.s - b.s) * k;
+      const dl = Math.sqrt(df * df + ds * ds);
+      if (dl > cap) { df *= cap / dl; ds *= cap / dl; }
+      b.f += df; b.s += ds;
+      b.look += wrap(_tgt.look - b.look) * k;
+      const w = Wd[j] || (Wd[j] = { x: 0, z: 0, vx: 0, vz: 0, face: 0 });
+      F.slot(b.f, b.s, w);
+      w.face = (F.h || 0) + b.look;
+    }
+    S.length = n + 1;
+    return n;
   }
-  function ringSlotIndex(kinds, k) {
-    let c = 0;
-    for (let i = 0; i < kinds.length; i++) if (kinds[i] === "ring") { if (c === k) return i; c++; }
-    return -1;
+  // STABLE ASSIGNMENT is CBZ.moves' (F.assign): the CP keeps slot 0, the
+  // others are solved on the frame's slots 1..n
+  const _asgS = [];
+  function assign(D, n) {
+    const others = D.others, M = CBZ.moves;
+    for (let i = 0; i < n; i++) M.motor(others[i]);       // F.assign keys on the motor id
+    _asgS.length = 0;
+    for (let j = 1; j <= n; j++) _asgS.push(D.world[j]);
+    const asg = D.F.assign(others, _asgS);
+    for (let i = 0; i < n; i++) {
+      const m = memberOf(D, others[i]), a = asg[i];
+      const j = a < 0 ? -1 : a + 1;
+      m.j = j;
+      if (j < 0) continue;
+      const sl = D.slots[j];
+      if (m.kind !== sl.kind || m.k !== sl.k) { m.kind = sl.kind; m.k = sl.k; roleNote(others[i], sl.kind); }
+      m.si = j - 1;
+    }
+    if (D.cp) { const m = memberOf(D, D.cp); m.j = 0; m.si = -1; if (m.kind !== "cp") { m.kind = "cp"; m.k = 0; roleNote(D.cp, "cp"); } }
   }
   function roleNote(q, kind) {
     const role = kind === "cp" ? "cp" : kind === "point" ? "point" : kind === "sweep" ? "sweep" : "flank";
@@ -669,88 +635,72 @@
       try { aw = per.awareness(q, best, Math.max(0.25, m.dwell || 0.5)) || 0; } catch (e) { aw = 0; }
       if (aw >= 1) { D.spotted = best; D.spottedT = D.t; }
     } else if (best && best.armed && (best.state === "fight" || best.rage)) { D.spotted = best; D.spottedT = D.t; }
+    // a target worth looking at OVERRIDES the idle scan (CBZ.moves' F.scan)
     m.lookAt = best && bs > 0.9 ? best : null;
-    if (!m.lookAt) m.lookYaw = sectorYaw + (h01(m.id * 5.7 + D.t * 0.37) * 2 - 1) * half;
     const lo = hot ? TUNE.DWELL_HOT * 0.7 : TUNE.DWELL_MIN, hi = hot ? TUNE.DWELL_HOT * 1.5 : TUNE.DWELL_MAX;
     m.lookT = m.dwell = lo + (hi - lo) * h01(m.id * 2.9 + D.t * 1.13);
   }
 
-  // ---- 7. drive one member ----------------------------------------------
+  // ---- 7. drive one member: DECIDE the goal, the pace and the look; the
+  //         order goes out through act.moveTo (-> ped.moveOrder -> moves) ----
   const _off = { x: 0, z: 0, look: 0 };
+  const _mo = { speed: 0, arrive: TUNE.STOP, face: null, strafe: false, vffX: 0, vffZ: 0 };
   function driveMember(D, q, m, idx, count, dt, env) {
-    const A = act();
+    const A = act(), F = D.F;
     const qp = P(q);
     const hot = D.phase === "cover" || D.phase === "evac";
     const reacting = m.epoch === D.epoch && D.phaseT < m.react && (hot || D.phase === "alert");
     // A MAN STILL REACTING has not decided anything yet: whatever he was
-    // doing a moment ago simply carries on (the last order stands).
-    if (reacting && m.init) return;
-    // --- goal offset ---
-    let lookYaw = null;
-    if (hot) {
-      shieldOffset(D, q, idx, count, _off);
-      lookYaw = _off.look;
-    } else if (D.phase === "alert" && !reacting && D.screen.indexOf(q) >= 0 && D.hasT) {
-      const tb = Math.atan2(D.tx - D.px, D.tz - D.pz);
-      const a = tb + (D.screen[0] === q ? -0.35 : 0.35);
-      _off.x = Math.sin(a) * 1.2; _off.z = Math.cos(a) * 1.2; lookYaw = tb;
-    } else {
-      if (m.kind === "cp") { slotLocal("cp", 0, 1, D.R, D.mode === "door" ? "door" : D.mode, _sl); rot(_sl.f, _sl.r, D.h, _off); _off.look = D.h + _sl.look; }
-      else {
-        slotWorldOffset(D, m.kind || "ring", m.k, D.nRing || 1, _off, m.si);
-        if (m.kind && m.kind.indexOf("form") === 0 && D.mode !== "door") _off.look = Math.atan2(_off.x, _off.z);
-        else { slotLocal(m.kind || "ring", m.k, D.nRing || 1, D.R, D.mode, _sl, m.si); _off.look = D.h + _sl.look; }
-      }
-    }
-    const sector = _off.look;
-    // --- the offset spring (critically damped) ---
-    if (!m.init) {
-      m.ox = qp.x - D.px; m.oz = qp.z - D.pz; m.ovx = m.ovz = 0; m.init = true;
-    }
-    const w = hot ? TUNE.OFFSET_W_HOT : TUNE.OFFSET_W;
-    const ax = w * w * (_off.x - m.ox) - 2 * w * m.ovx, az = w * w * (_off.z - m.oz) - 2 * w * m.ovz;
-    m.ovx += ax * dt; m.ovz += az * dt; m.ox += m.ovx * dt; m.oz += m.ovz * dt;
-    // --- where the body should be, and how fast ---
-    const sx = D.px + m.ox, sz = D.pz + m.oz;
-    const ex = sx - qp.x, ez = sz - qp.z, d = Math.sqrt(ex * ex + ez * ez);
-    const moving = D.moving && D.spd > TUNE.MOVE_OUT;
-    let gx, gz, sp;
-    if (moving) {
-      m.hold = false;
-      const ux = D.vx / (D.spd || 1), uz = D.vz / (D.spd || 1);
-      const along = ex * ux + ez * uz, lat = Math.abs(ex * -uz + ez * ux);
-      sp = D.spd + TUNE.SPEED_K * along + 0.8 * lat;
-      sp = Math.max(Math.max(0.35 * D.spd, 0.5), Math.min(TUNE.SPEED_MAX, sp));
-      gx = sx + D.vx * TUNE.LEAD_T; gz = sz + D.vz * TUNE.LEAD_T;
-    } else {
-      if (m.hold) { if (d > (hot ? 0.8 : TUNE.HOLD_OUT)) m.hold = false; }
-      else if (d < TUNE.HOLD_IN) m.hold = true;
-      gx = sx; gz = sz;
-      sp = Math.max(TUNE.SPEED_MIN, Math.min(TUNE.SPEED_MAX, 0.8 + TUNE.SPEED_K * d));
-    }
-    if (hot) sp = Math.max(sp, Math.min(TUNE.SPEED_MAX, 2.2 + 1.5 * d));
+    // doing a moment ago simply carries on (the last order stands, re-stamped
+    // so peds.js does not drop it as stale).
+    if (reacting && m.init) { if (q.moveOrder) q.moveOrder.t = CBZ.now || 0; return; }
+    m.init = true;
+    const screen = D.phase === "alert" && D.screen.indexOf(q) >= 0 && D.hasT;
     q._detTurn = hot || D.phase === "alert" ? TUNE.TURN_HOT : TUNE.TURN;
-    // --- issue (never every frame for tiny deltas) ---
-    if (m.hold) {
-      if (m.gs !== 0) { A.stop(q); m.gs = 0; m.gx = m.gz = 1e9; }
-    } else {
-      const moved = hyp(gx, gz, m.gx, m.gz);
-      if (moved > TUNE.REISSUE_D || Math.abs(sp - m.gs) > 0.35 || D.t - m.issueT > TUNE.REISSUE_T || m.gs === 0) {
-        A.moveTo(q, gx, gz, { speed: sp, arrive: TUNE.HOLD_IN });
-        m.gx = gx; m.gz = gz; m.gs = sp; m.issueT = D.t;
+    _mo.arrive = TUNE.STOP;
+    if (hot || screen) {
+      // BRAIN-SUPPLIED TARGET POINTS round the man: the shield arc on the
+      // threat side (cover/evac) or the two stepping in between (alert).
+      // Squared up to the threat the whole way, side-stepping in.
+      let lookYaw;
+      if (hot) { shieldOffset(D, q, idx, count, _off); lookYaw = _off.look; }
+      else {
+        const tb = Math.atan2(D.tx - D.px, D.tz - D.pz);
+        const a = tb + (D.screen[0] === q ? -0.35 : 0.35);
+        _off.x = Math.sin(a) * 1.2; _off.z = Math.cos(a) * 1.2; lookYaw = tb;
       }
-    }
-    // --- facing: ONLY while standing. A walking body faces where it walks
-    //     (the mover's job); turning him toward a threat at the same time is
-    //     the tug-of-war that made bodies twitch. ---
-    const standing = m.hold || !!(q._powerCop && q._post);
-    if (lookYaw == null) {
+      if (D.hasT) lookYaw = Math.atan2(D.tx - qp.x, D.tz - qp.z);
+      const gx = D.px + _off.x, gz = D.pz + _off.z, d = hyp(gx, gz, qp.x, qp.z);
+      _mo.speed = hot || d > TUNE.RUN_OUT ? TUNE.RUN : TUNE.WALK;
+      _mo.face = lookYaw; _mo.strafe = true;
+      _mo.vffX = F.moving ? F.vx : 0; _mo.vffZ = F.moving ? F.vz : 0;
+      A.moveTo(q, gx, gz, _mo);
+      m.hold = !F.moving && d < TUNE.REST_D;
+      m.lookAt = null; m.lookYaw = lookYaw;
+    } else {
+      // THE FORMATION: his slot in the frame, his pace fed forward
+      const j = m.j;
+      if (j < 0 || !D.world[j]) return;
+      const w = D.world[j], sl = D.slots[j];
+      const d = hyp(w.x, w.z, qp.x, qp.z);
+      if (d > TUNE.RUN_IN) m.run = true; else if (d < TUNE.RUN_OUT) m.run = false;   // catch-up gait, hysteresis
+      const rest = !F.moving && (!!(q._mv && q._mv.arrived) || d < TUNE.REST_D);
+      m.hold = rest;
+      // WHERE HE LOOKS AT REST: a target worth looking at (perception, on a
+      // human cadence) wins; otherwise moves' held outward glances
       m.lookT -= dt;
-      if (m.lookT <= 0) pickLook(D, q, m, sector, q === D.cp ? 1.2 : TUNE.SECTOR, env, D.phase !== "normal");
-      if (m.lookAt && !m.lookAt.dead) { const lp = P(m.lookAt); lookYaw = Math.atan2(lp.x - qp.x, lp.z - qp.z); }
-      else lookYaw = m.lookYaw != null ? m.lookYaw : sector;
-    } else if (hot && D.hasT) lookYaw = Math.atan2(D.tx - qp.x, D.tz - qp.z);
-    if (standing) A.face(q, qp.x + Math.sin(lookYaw) * 10, qp.z + Math.cos(lookYaw) * 10);
+      if (m.lookT <= 0) pickLook(D, q, m, w.face, q === D.cp ? 1.2 : TUNE.SECTOR, env, D.phase !== "normal");
+      let face = null;
+      if (rest) {
+        if (m.lookAt && !m.lookAt.dead) { const lp = P(m.lookAt); face = Math.atan2(lp.x - qp.x, lp.z - qp.z); }
+        else face = F.scan(j, (F.h || 0) + sl.look, dt);
+        m.lookYaw = face;
+      }
+      _mo.speed = m.run ? TUNE.RUN : TUNE.WALK;
+      _mo.face = face; _mo.strafe = rest;
+      _mo.vffX = w.vx; _mo.vffZ = w.vz;
+      A.moveTo(q, w.x, w.z, _mo);
+    }
     if ((hot || D.phase === "alert" || D.phase === "hold") && !reacting && (m.postureT = (m.postureT || 0) - dt) <= 0) {
       m.postureT = 0.5; A.posture(q, "aim");
     }
@@ -829,8 +779,7 @@
     };
     let r = null;
     try { r = Au.step(q, 0.25, st); } catch (e) { r = null; }
-    // his own slot wins this frame (see above)
-    const m = q._det; if (m) { m.issueT = -9; if (m.gs === 0) m.gs = -1; }
+    // his own slot wins this frame: driveMember re-issues his order after this
     if (r && r.phase === "lethal" && env.engage && D.engagers.indexOf(q) < 0) {
       D.engagers.push(q);
       try { env.engage(q, t); } catch (e) {}
@@ -855,6 +804,9 @@
     D.t += dt;
     const pp = P(principal);
     if (!pp) return D;
+    const M = CBZ.moves;
+    if (!M || !M.formation) return D;                       // no locomotion layer: nothing to walk them with
+    if (!D.F) D.F = M.formation({ lead: TUNE.FRAME_LEAD });
     env.principal = principal;
     track(D, pp, principal, dt);
     syncRoster(D, members, env);
@@ -872,12 +824,8 @@
     }
     if (D.phase !== "normal") hotRoles(D, env);
     challenge(D, env, dt);                     // before the bodies: their own slots win
-    D.assignT -= dt;
-    if (D.rosterDirty || D.assignT <= 0) {
-      D.assignT = TUNE.REASSIGN_EVERY;
-      assign(D, D.rosterDirty ? 0 : TUNE.REASSIGN_EVERY, D.rosterDirty);
-      D.rosterDirty = false;
-    }
+    assign(D, layout(D, dt));
+    D.rosterDirty = false;
     // shield indices: non-CP, non-engaging members in a stable order
     let count = 0;
     for (let i = 0; i < D.active.length; i++) { const q = D.active[i]; if (q !== D.cp && D.engagers.indexOf(q) < 0) count++; }

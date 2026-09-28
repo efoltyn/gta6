@@ -173,40 +173,56 @@
   }
 
   // ============================================================
-  //  THE EXECUTOR — the brain's hands on a city body. Thin on purpose: every
-  //  line writes a field peds.js's move()/think() already honours.
+  //  THE EXECUTOR — the brain's hands on a city body. It DECIDES nothing and
+  //  EXECUTES nothing itself: a move is a ped.moveOrder (the CBZ.moves seam in
+  //  peds.js move(): velocity, braking arrival, bounded turn, avoidance) and a
+  //  facing is peds.js's held face request (turned at the motor's bounded rate).
   // ============================================================
-  function setGoal(a, x, z) {
-    a.path = null; a.finalGoal = { x: x, z: z };
-    if (a.target && a.target.set) a.target.set(x, 0, z);
-    a.pause = 0;
+  // a held facing through peds.js (cityPedFaceYaw -> move()'s motor turn);
+  // the node sims have no peds.js, so there a partial lerp stands in
+  function faceYaw(a, yaw, hold) {
+    if (CBZ.cityPedFaceYaw) { CBZ.cityPedFaceYaw(a, yaw, hold || 0.6); return; }
+    if (a.group) a.group.rotation.y = lerpAngle(a.group.rotation.y, yaw, 0.45);
   }
+  function faceAt(a, x, z, hold) {
+    const ap = posOf(a); if (!ap) return;
+    const dx = x - ap.x, dz = z - ap.z;
+    if (dx * dx + dz * dz < 0.01) return;
+    faceYaw(a, Math.atan2(dx, dz), hold);
+  }
+  // the brain's move order: re-stamped every call; peds.js drops an order its
+  // owner stopped re-issuing after 0.5 s, so a forgotten body never walks on
+  function order(a, x, z, speed, stop) {
+    let o = a.moveOrder;
+    if (!o || !o._cb) o = a.moveOrder = { _cb: true, x: 0, z: 0, speed: 0, stop: 0.4, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+    o.x = x; o.z = z; o.speed = speed; o.stop = stop; o.t = CBZ.now || 0;
+    return o;
+  }
+  function dropOrder(a) { if (a && a.moveOrder && a.moveOrder._cb) a.moveOrder = null; }
   const EXEC = {
     moveTo: function (a, x, z, opts) {
       if (!a || a.dead) return false;
-      const sp = opts && (opts.speedMps != null ? opts.speedMps : opts.speed);
-      setGoal(a, x, z);
-      // move() derives pace from STATE (flee 2.2x, confront 1.7x, walk 1x) —
-      // the executor picks the state that carries the asked pace.
-      const fast = sp === "run" || sp === "sprint" || sp === "jog" || (typeof sp === "number" && sp > 2.5);
-      a.state = fast ? (opts && opts.flee ? "flee" : "confront") : "walk";
+      let sp = opts && (opts.speedMps != null ? opts.speedMps : opts.speed);
+      const base = a.baseSpeed || 1.5;
+      if (typeof sp !== "number") sp = sp === "sprint" ? base * 2.4 : sp === "run" ? base * 2.2 : sp === "jog" ? base * 1.6 : base;
+      order(a, x, z, sp, opts && opts.arrive != null ? Math.max(0.2, opts.arrive) : 0.4);
+      if (opts && opts.flee) a.state = "flee";
+      else if (a.state === "idle" || a.state === "sit") a.state = "walk";
+      a.pause = 0;
       return true;
     },
     stop: function (a) {
       if (!a) return false;
+      dropOrder(a);
       a.speed = 0; a.path = null; a.finalGoal = null;
       if (a.target && a.target.set && a.pos) a.target.set(a.pos.x, 0, a.pos.z);
       if (a.state !== "surrender" && a.state !== "sit") a.state = "idle";
       return true;
     },
-    // NO 180° SNAPS: a face request turns part of the way per call; the witness
-    // driver re-asserts it every think (~15 Hz when near), so a turn takes a few
-    // tenths of a second the way a head-then-shoulders turn does.
+    // NO 180-degree SNAPS: a held face request the motor turns at its bounded rate
     face: function (a, x, z) {
-      if (!a || !a.group || !a.pos) return false;
-      const dx = x - a.pos.x, dz = z - a.pos.z;
-      if (dx * dx + dz * dz < 0.01) return true;
-      a.group.rotation.y = lerpAngle(a.group.rotation.y, Math.atan2(dx, dz), 0.45);
+      if (!a || !a.pos) return false;
+      faceAt(a, x, z, 0.6);
       return true;
     },
     posture: function (a, p) {
@@ -433,7 +449,7 @@
       if (p._vendetta) {
         p.posePoint = 1.4;
         const P = CBZ.player;
-        if (P && !P.dead && p.group) p.group.rotation.y = Math.atan2(P.pos.x - p.pos.x, P.pos.z - p.pos.z);
+        if (P && !P.dead) faceAt(p, P.pos.x, P.pos.z, 1.5);
         say(p, "“Right there. That's the one.”", 2.4, "#ffd27b");
         if (CBZ.city && CBZ.city.note) CBZ.city.note("" + p.name + " pointed you out to the law!", 1.8);
       } else if (CBZ.city && CBZ.city.note) CBZ.city.note("" + p.name + " reported you!", 1.5);
@@ -468,7 +484,7 @@
       if (P && p.group) {
         const face = Math.atan2(P.pos.x - p.pos.x, P.pos.z - p.pos.z);
         if (p._snitchTurn == null) p._snitchTurn = (hash01(p, 0x5117) < 0.5 ? -1 : 1) * (0.80 + hash01(p, 0x5118) * 0.34);
-        p.group.rotation.y = lerpAngle(p.group.rotation.y, face + p._snitchTurn, 0.5);
+        faceYaw(p, face + p._snitchTurn, 0.5);
       }
       return true;
     }

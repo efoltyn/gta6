@@ -748,6 +748,9 @@
       m.outfit = toGang.color; m.homeGuard = toGang.center ? { x: toGang.center.x, z: toGang.center.z } : m.homeGuard;
       m.guard = m.homeGuard; toGang.members.push(m);
       applyRankGear(m, toGang); tagWithRank(m, toGang.color);
+      // CHANGE COLOURS. m.gang moved but the body kept the OLD crew's shirt
+      // and bandana until some unrelated re-dress happened to reach him.
+      if (CBZ.cityRedressPed) { try { CBZ.cityRedressPed(m); } catch (e) {} }
     }
     const s = memStats(m); s.loyalty = 0.5; s.joined = "defect"; s.bodies = 0; s.contrib = 0;
     if (nearPlayer(m.pos.x, m.pos.z, 90)) {
@@ -2626,7 +2629,8 @@
     if (m.target) m.target.set(px, 0, pz);
     m.fear = Math.max(m.fear || 0, 5); m.alarmed = Math.max(m.alarmed || 0, 4);
     // one last look at the threat as they peel off (flee owns the legs after)
-    if (m.group) m.group.rotation.y = Math.atan2(E.x - m.pos.x, E.z - m.pos.z);
+    // (a held facing: peds.js turns him through CBZ.moves, never a one-frame snap)
+    if (CBZ.cityPedFaceTo) CBZ.cityPedFaceTo(m, E.x, E.z, 0.5);
   }
 
   // nearest live member of the engaged ENEMY gang (or the player) near a fighter

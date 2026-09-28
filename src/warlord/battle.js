@@ -2240,6 +2240,63 @@
   }
 
   const _sqPos = { x: 0, y: 0, z: 0 };
+  const _sq = { speed: 0, stop: 0.3, accel: 6.5, decel: 6, lod: 0, face: null, strafe: false, vffX: 0, vffZ: 0 };
+  // how fast a section may wheel: its farthest file may not outrun a man (5 m/s)
+  /* HOW FAST A SECTION MAY WHEEL. A line wheels on its INNER flank (the man
+     on the inside of the turn marks time, the outside file swings round
+     him), so the outside man covers the whole width: the rate is bounded so
+     he never has to go faster than 7 m/s. _wheelR = that width (the outside
+     man's radius), _wheelHW = the half width (where the pivot sits). */
+  const _wheel = Object.create(null), _wheelR = Object.create(null), _wheelHW = Object.create(null);
+  function wheelRate(form) {
+    let r = _wheel[form];
+    if (r != null) return r;
+    // a column is not a rigid body (trailAt): only its head file swings, and
+    // the head carves a running man's curve (0.8 rad/s = 7.7 m at a charge)
+    if (form === "column") { _wheelR[form] = 1 + FILE_W * 0.55; _wheelHW[form] = 0; return (_wheel[form] = 0.8); }
+    let hw = 1;
+    for (let k = 0; k < SQUAD_N; k++) hw = Math.max(hw, Math.abs(slotOf(form, k).v));
+    _wheelHW[form] = hw; _wheelR[form] = 2 * hw;
+    r = _wheel[form] = Math.max(0.1, Math.min(1.6, 7.0 / (2 * hw)));
+    return r;
+  }
+  /* A COLUMN FOLLOWS ITS HEAD, IT DOES NOT PIVOT ON IT. Rigid slots are
+     right for a line (a line wheels) and wrong for a file: turned as one
+     body, the tail of a 12 m column swings sideways through the ground
+     beside it. So a column keeps a short breadcrumb of where its head has
+     been, and every man stands on it at his own distance back — the same
+     answer campaign.js's column gives on the map. Crumbs are pushed per
+     0.5 m of march, not per frame. */
+  const CRUMB = 0.5, CRUMB_MAX = 96;
+  function trailPush(u) {
+    let T = u.trail;
+    if (!T) T = u.trail = [];
+    const L = T.length ? T[T.length - 1] : null;
+    if (!L) { T.push({ x: u.x, z: u.z }); return; }
+    if (Math.hypot(u.x - L.x, u.z - L.z) < CRUMB) return;
+    const p = T.length >= CRUMB_MAX ? T.shift() : {};
+    p.x = u.x; p.z = u.z;
+    T.push(p);
+  }
+  // the point `back` metres behind the head along the trail, with its
+  // forward tangent (tx, tz); past the oldest crumb it runs straight on back
+  const _tr = { x: 0, z: 0, tx: 0, tz: 1 };
+  function trailAt(u, back) {
+    const T = u.trail || [];
+    let hx = u.x, hz = u.z, tx = Math.sin(u.yaw), tz = Math.cos(u.yaw);
+    for (let i = T.length - 1; i >= 0; i--) {
+      const p = T[i], dx = hx - p.x, dz = hz - p.z, L = Math.hypot(dx, dz);
+      if (L < 1e-4) continue;
+      if (back <= L) {
+        const k = back / L;
+        _tr.x = hx - dx * k; _tr.z = hz - dz * k; _tr.tx = dx / L; _tr.tz = dz / L;
+        return _tr;
+      }
+      back -= L; hx = p.x; hz = p.z; tx = dx / L; tz = dz / L;
+    }
+    _tr.x = hx - tx * back; _tr.z = hz - tz * back; _tr.tx = tx; _tr.tz = tz;
+    return _tr;
+  }
   function stepSquad(u, sdt) {
     if (simT >= u.thinkAt) squadThink(u);
     if (!u.formed || !u.live) return;
@@ -2254,10 +2311,58 @@
        ten charging men crossed it at. Not a second movement model. */
     let spd = ord === "fallback" ? 5.2 : 6.2;
     if (d < 2) spd = 0;
-    if (spd > 0) {
-      const nx = dx / d, nz = dz / d;
+    const ox = u.x, oz = u.z, oyaw = u.yaw;
+    if (spd > 0 || (u.v || 0) > 0) {
+      const y0 = u.yaw;
+      if (spd > 0) {
+      const wantYaw = Math.atan2(dx / d, dz / d);
+      /* THE FIRST HEADING IS SNAPPED, EVERY ONE AFTER IT IS TURNED. A unit is
+         created with yaw 0 (facing +Z) and a battle is fought along X, so
+         without this every section on the field spends its first half second
+         swinging ninety degrees while its men rally into a line that is
+         rotating under them — which photographs, on frame one of any capture,
+         as an army standing sideways. */
+      if (!u.turned) { u.yaw = wantYaw; u.turned = 1; }
+      /* A LINE WHEELS, IT DOES NOT SPIN, AND IT MARCHES THE WAY IT FACES. The
+         old turn was an exponential at 3.2/s (ninety degrees began at 5 rad/s,
+         so the man at the end of a 22 m line had to cover 50 m/s) and the
+         section slid straight at its goal whatever way it faced, so a new
+         order made every file crab sideways. Now the heading turns at a rate
+         bounded by the section's own reach (the outside file never has to
+         outrun a man), the march goes along the heading, and a big wheel is
+         done mostly on the spot before the line steps off. */
+      // (and the wheel waits for the march to slow: outside file = march + wheel)
+      if (u.form === "column") {
+        // a column's head CARVES (its files follow the path, trailAt): a
+        // running man's curve, slowing only for an order behind it
+        u.yaw = CBZ.moves.turnToward(u.yaw, wantYaw, wheelRate(u.form) * sdt);
+        if (Math.abs(CBZ.moves.wrap(wantYaw - u.yaw)) > 1.6) spd *= 0.3;
+      } else {
+        const wr0 = wheelRate(u.form), rate = Math.max(0.05, Math.min(wr0, (7.0 - (u.v || 0)) / _wheelR[u.form]));
+        u.yaw = CBZ.moves.turnToward(u.yaw, wantYaw, rate * sdt);
+        const off = Math.abs(CBZ.moves.wrap(wantYaw - u.yaw));
+        // the outside file's speed is the march PLUS the wheel: keep it a run
+        const wheelV = sdt > 0 ? Math.abs(CBZ.moves.wrap(u.yaw - y0)) / sdt * _wheelR[u.form] : 0;
+        spd = Math.min(spd * clamp(Math.cos(off), 0.15, 1), Math.max(spd * 0.15, 7.0 - wheelV));
+      }
+      }
+      // a section gets going (4 m/s²) and pulls up (6 m/s²) the way its men
+      // can, never in one substep: the old instant 6.2 m/s start left the
+      // front file three metres behind its own slot, and the instant stop
+      // threw every man past his
+      const cur = u.v || 0;
+      u.v = spd > cur ? Math.min(spd, cur + 4 * sdt) : Math.max(spd, cur - 6 * sdt);
+      spd = u.v;
+      const nx = Math.sin(u.yaw), nz = Math.cos(u.yaw);
       const step = spd * sdt;
-      _sqPos.x = u.x + nx * step; _sqPos.z = u.z + nz * step;
+      // the wheel's pivot is the inner flank: hold it where it was
+      const dyw = CBZ.moves.wrap(u.yaw - y0), hw = _wheelHW[u.form] || 0;
+      let pvx = 0, pvz = 0;
+      if (dyw !== 0 && hw > 0) {
+        const pv = dyw > 0 ? -hw : hw;                   // +v is left; turning right pivots on the right
+        pvx = (-Math.cos(y0) + Math.cos(u.yaw)) * pv; pvz = (Math.sin(y0) - Math.sin(u.yaw)) * pv;
+      }
+      _sqPos.x = u.x + pvx + nx * step; _sqPos.z = u.z + pvz + nz * step;
       _sqPos.y = MAP.groundAt(_sqPos.x, _sqPos.z);
       /* ONE COLLIDER PROBE FOR THE SECTION, and the radius is NOT the section's
          width — that was the first version and it is wrong in a way worth
@@ -2273,20 +2378,16 @@
          re-formed. */
       micro.resolveCircle(_sqPos, 0.45 + FILE_W * 0.9, _sqPos.y, 1.8);
       u.x = _sqPos.x; u.z = _sqPos.z;
-      const wantYaw = Math.atan2(nx, nz);
-      /* THE FIRST HEADING IS SNAPPED, EVERY ONE AFTER IT IS TURNED. A unit is
-         created with yaw 0 (facing +Z) and a battle is fought along X, so
-         without this every section on the field spends its first half second
-         swinging ninety degrees while its men rally into a line that is
-         rotating under them — which photographs, on frame one of any capture,
-         as an army standing sideways. */
-      if (!u.turned) { u.yaw = wantYaw; u.turned = 1; }
-      let dy = wantYaw - u.yaw;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      u.yaw += dy * Math.min(1, sdt * 3.2);      // a formation turns slower than a man
     }
     u.spd = spd;
+    if (u.form === "column") trailPush(u); else if (u.trail) u.trail.length = 0;
+    // the section's own velocity (march + wheel) is every man's feed-forward
+    // (clamped: the first-heading snap and a collider shove are not a pace)
+    let svx = sdt > 0 ? (u.x - ox) / sdt : 0, svz = sdt > 0 ? (u.z - oz) / sdt : 0;
+    const wr = wheelRate(u.form);
+    const om = sdt > 0 ? clamp(CBZ.moves.wrap(u.yaw - oyaw) / sdt, -wr, wr) : 0;
+    const sv = Math.hypot(svx, svz), svMax = (spd + Math.abs(om) * (_wheelHW[u.form] || 0)) * 1.1;
+    if (sv > svMax) { const k = sv > 1e-6 ? svMax / sv : 0; svx *= k; svz *= k; }
 
     // ---- and the men are their slots -----------------------------------
     const cs = Math.cos(u.yaw), sn = Math.sin(u.yaw);
@@ -2296,26 +2397,40 @@
        the single most obviously fake thing this could do. They walk in at
        their own pace; the squad only counts as SEATED once the worst man is
        inside a stride of his place, and until then this is a RALLY — which is
-       a real behaviour the game did not have and got for free. */
+       a real behaviour the game did not have and got for free.
+       Each man is stepped by CBZ.moves toward his slot with the section's
+       velocity as feed-forward (he marches WITH it instead of chasing it): a
+       man rallying from a scatter faces where he runs, a man in his file
+       keeps the section's heading and side-steps to hold his place. */
+    const MV = CBZ.moves;
     let worst = 0;
-    const rally = Math.max(spd, 4.2) * sdt;
     for (let i = 0; i < M.length; i++) {
       const m = M[i];
       if (m.dead || m.fled) { m.formed = false; continue; }
       m.formed = true;
       const s = slotOf(u.form, m.sqSlot);
       // squad frame -> world: +u is the heading, +v is 90 degrees to its left
-      const wx = u.x + sn * s.u - cs * s.v;
-      const wz = u.z + cs * s.u + sn * s.v;
-      const ex = wx - m.pos.x, ez = wz - m.pos.z;
-      const e = Math.hypot(ex, ez);
+      let rx = sn * s.u - cs * s.v, rz = cs * s.u + sn * s.v, fy = u.yaw;
+      let wx = u.x + rx, wz = u.z + rz, fvx = svx + om * rz, fvz = svz - om * rx;
+      if (u.form === "column") {
+        // on the head's own path, s.v to its left, walking its tangent
+        const q = trailAt(u, -s.u), vv = Math.hypot(svx, svz);
+        wx = q.x - q.tz * s.v; wz = q.z + q.tx * s.v;
+        fvx = q.tx * vv; fvz = q.tz * vv; fy = Math.atan2(q.tx, q.tz);
+      }
+      const e = Math.hypot(wx - m.pos.x, wz - m.pos.z);
       if (e > worst) worst = e;
-      let nx = wx, nz = wz;
-      if (e > rally) { nx = m.pos.x + (ex / e) * rally; nz = m.pos.z + (ez / e) * rally; }
-      m.speed = e > rally ? Math.max(spd, 4.2) : spd;
-      m.yaw = u.yaw;
+      if (e > 3) m._rally = true; else if (e < 1.2) m._rally = false;
+      const c2 = camDist2(m.pos);
+      _sq.lod = c2 < 30 * 30 ? 0 : c2 < 90 * 90 ? 1 : 2;
+      _sq.speed = m._rally ? Math.max(spd, 4.2) : 3.0;
+      _sq.vffX = fvx; _sq.vffZ = fvz;
+      _sq.face = m._rally ? null : fy; _sq.strafe = !m._rally;
+      const mv = MV.motor(m);
+      MV.step(mv, m.pos, m.yaw, wx, wz, _sq, sdt);
+      m.yaw = mv.yaw;
+      m.speed = mv.gs;
       m.slot = spd > 0 ? "march" : "hold";
-      m.pos.x = nx; m.pos.z = nz;
       seatMan(m, sdt);
     }
     u.err = worst;
@@ -2713,6 +2828,8 @@
   }
 
   /* ============================================================ SIM STEP */
+  // one reused option block for CBZ.moves.step (no allocation per man per step)
+  const _mo = { speed: 0, stop: 1.1, accel: 6.5, decel: 6, lod: 0, face: null, strafe: false };
   function stepMan(m, sdt) {
     if (m.isYou) return;              // a thumb drives him, not this
     if (m.fled) return;
@@ -2749,32 +2866,33 @@
       // ARMOUR COSTS YOU A STEP. core states `slow` per row and nothing was
       // spending it; a heavy kit that only ever helps is not a decision.
       spd *= (1 - (m.slow || 0));
-      let nx = dx / d, nz = dz / d;
-      if (m.detourT > 0) {
-        m.detourT -= sdt;
-        const sw = m.detourDir || 1;
-        const tx = nz * sw, tz = -nx * sw;
-        nx = tx; nz = tz;
-      }
-      const ox = m.pos.x, oz = m.pos.z;
-      m.pos.x += nx * spd * sdt;
-      m.pos.z += nz * spd * sdt;
-      micro.resolveCircle(m.pos, m.rad, m.pos.y, 1.8);
-      const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
-      const want = spd * sdt;
-      if (want > 0.001 && got < want * 0.25) {
-        m.stuckT = (m.stuckT || 0) + sdt;
-        if (m.stuckT > 0.8) {
-          m.stuckT = 0;
-          m.detourT = 1.5 + ((m.i % 5) * 0.35);
-          m.detourDir = (m.i & 1) ? 1 : -1;
-        }
-      } else if (got > want * 0.6 && m.stuckT) m.stuckT = Math.max(0, m.stuckT - sdt * 2);
-    } else {
+    }
+    /* ONE MOVER (entities/moves.js). The old integrator here set full speed
+       the frame a man decided to go and zero the frame he arrived, lerped the
+       yaw at 7/s whatever he was doing, and ran its own stuck detour. The
+       motor gives him a velocity, a braking arrival at his spot, a bounded
+       turn (a runner carves, he does not pivot at a sprint) and its own
+       committed detour off a rock. A man with a mark in sight keeps his
+       chest on it and side-steps (strafe) into his next position. */
+    const MV = CBZ.moves, mv = MV.motor(m);
+    const engaged0 = tgt0 && !tgt0.dead && m.sees && !m.routed;
+    const c2 = camDist2(m.pos);
+    _mo.speed = spd; _mo.lod = c2 < 30 * 30 ? 0 : c2 < 90 * 90 ? 1 : 2;
+    _mo.face = engaged0 && tdist < 1e9 ? Math.atan2(tgt0.pos.x - m.pos.x, tgt0.pos.z - m.pos.z) : null;
+    _mo.strafe = _mo.face != null;
+    MV.step(mv, m.pos, m.yaw, m.target.x, m.target.z, _mo, sdt);
+    if (spd > 0 || mv.speed > 0.05) micro.resolveCircle(m.pos, m.rad, m.pos.y, 1.8);
+    else {
       m.resT = (m.resT || 0) - sdt;
       if (m.resT <= 0) { m.resT = 0.25; micro.resolveCircle(m.pos, m.rad, m.pos.y, 1.8); }
     }
-    m.speed = spd;
+    m.yaw = mv.yaw;
+    /* THE YAW IS NOT WRITTEN TO THE GROUP when sand.js is planting him:
+       plant() sets a full orientation (yaw plus the lean into the slope) from
+       m.yaw, and a bare rotation.y assignment after it would clobber the lean. */
+    if (!(W.sand && W.sand.plant)) m.group.rotation.y = m.yaw;
+    // the legs animate what he DID (measured), so a man held by a wall stands
+    m.speed = mv.gs;
     /* WHERE HIS BOOTS MEET THE SAND — see THE BOOTS. sand.plant seats him on
        the drawn surface and leans him into the slope; it also stamps the
        print, which is what turns a charge across a dune into a road you can
@@ -2801,19 +2919,6 @@
     if (m.hull && m.slot === "hull" && !m.routed) m.up = workHull(m, sdt);
 
     const tgt = m.tgt;
-    const engaged = tgt && !tgt.dead && m.sees;
-    if (!engaged && spd > 0.1) {
-      const want = Math.atan2(dx, dz);
-      let dy = want - m.yaw;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      m.yaw += dy * Math.min(1, sdt * 7);
-      /* THE YAW IS NOT WRITTEN HERE ANY MORE when sand.js is planting him:
-         plant() sets a full orientation (yaw plus the lean into the slope)
-         and a bare rotation.y assignment after it clobbers the lean on
-         exactly the men who are moving — which is every man who matters. */
-      if (!(W.sand && W.sand.plant)) m.group.rotation.y = m.yaw;
-    }
 
     // ---- the trigger ----
     if (m.routed) return;             // a broken man is not fighting

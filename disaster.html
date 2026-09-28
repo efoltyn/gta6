@@ -559,7 +559,10 @@ document.body.appendChild(b);}}catch(e){}})();
      before any entity that registers a prop type, e.g. coins.js below -->
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=sharkfix2"></script>
+  <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
+       every body's hand (character.js builds it) — so it loads before bodies -->
+  <script src="src/systems/fphands.js?v=hands2"></script>
+  <script src="src/entities/character.js?v=human1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -568,6 +571,11 @@ document.body.appendChild(b);}}catch(e){}})();
        profile character.js already builds and the species row's own scale —
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
+<!-- CBZ.moves: THE ONE locomotion layer (velocity, arrival, turn rate,
+     avoidance, stuck recovery, foot-matched stride, formations). Pure math;
+     every AI mover in every game steps through it. Before poses.js so the
+     rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
+<script src="src/entities/moves.js?v=moves1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -586,8 +594,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<!-- the ONE first-person hand + arm (gun kit hands, fists, car wheel, bailout) -->
-<script src="src/systems/fphands.js?v=hands1"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -613,7 +619,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=races1"></script>
+<script src="src/entities/heritage.js?v=human1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -1068,6 +1074,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/street_hardware.js?v=hw1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
+<!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
+     climb sequencer for every game (propuse's verbs and the cell bunks call it).
+     Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
+<script src="src/entities/moves_posture.js?v=posture1"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->

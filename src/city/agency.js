@@ -2076,7 +2076,7 @@
     const cx = F.site.cx, cz = F.site.cz, y = roofY(F);
     for (let s = -1; s <= 1; s += 2) {
       const x = cx + s * 20, z = cz - 18.2;
-      const q = spawn("Counter-sniper", x, z, { job: "soldier", armed: true, weapon: "Rifle", aggr: 0.85, post: true, face: 0, gender: "m", archetype: "professional" });
+      const q = spawn("Counter-sniper", x, z, { job: "counter-sniper", armed: true, weapon: "Rifle", aggr: 0.85, post: true, face: 0, gender: "m", archetype: "professional" });
       if (!q) continue;
       q._agencyGuard = true; q._finSniper = { x: x, z: z, y: y, face: 0 };   // face: the sector centre (the lawn)
       if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, y); } catch (e) {} } else { q.pos.y = y; }

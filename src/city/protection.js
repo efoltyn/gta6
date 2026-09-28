@@ -310,19 +310,57 @@
   function get(id) { return (id && state().details[id]) || null; }
 
   // ============================================================
-  //  SHARED FOLLOW PRIMITIVE — officials.js's original moveToward(), verbatim
-  //  (social.js's own companion-follow tick generalized off the player, per
-  //  that file's header — this is the one copy now).
+  //  THE ONE MOVER — ped.moveOrder (the CBZ.moves seam in city/peds.js).
+  //  This file decides WHERE a body goes and which way it looks; peds.js's
+  //  move() steps it there through CBZ.moves (velocity, braking arrival,
+  //  bounded turn, avoidance, the collider). Nothing in here writes a
+  //  position or a yaw on a moving body any more: the old goTo() added its
+  //  own catch-up step on top of the ped mover and flipped walk/idle at
+  //  0.7 m, which is what made the President's detail surge and stop.
+  //  An order is re-issued every frame by whoever owns it and carries the
+  //  frame clock (`t`, CBZ.now ms), so an owner that stops driving a body
+  //  leaves nothing behind once peds.js drops the stale order.
   // ============================================================
+  const WALK_SPEED = 2.4, RUN_SPEED = 5.0;
+  function order(ped, x, z, speed, face, strafe, vx, vz, stop) {
+    let o = ped.moveOrder;
+    if (!o) o = ped.moveOrder = { x: 0, z: 0, speed: 0, stop: 0.25, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+    o.x = x; o.z = z; o.speed = speed; o.stop = stop != null ? stop : 0.25;
+    o.face = face != null ? face : null; o.strafe = !!strafe;
+    o.vffX = vx || 0; o.vffZ = vz || 0; o.leg = false;
+    o.t = CBZ.now || 0;
+    if (ped.target && ped.target.set) ped.target.set(x, 0, z);
+    ped.path = null; ped.pause = 0; ped.finalGoal = null; ped._boardRun = false;
+    const dx = x - ped.pos.x, dz = z - ped.pos.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+  function release(ped) { if (ped && ped.moveOrder) ped.moveOrder = null; }
+  function arrived(ped) { return !!(ped._mv && ped._mv.arrived); }
+  // a body standing where it is (a post, a challenge) turns at the gait's own
+  // rate instead of being snapped: for posted bodies peds.js does not step
+  function turnTo(ped, yaw, dt) {
+    if (!ped.group || yaw == null) return;
+    if (CBZ.moves) ped.group.rotation.y = CBZ.moves.face(CBZ.moves.motor(ped), ped.group.rotation.y, yaw, dt);
+    else ped.group.rotation.y = yaw;
+  }
+  function yawTo(ped, x, z) { return Math.atan2(x - ped.pos.x, z - ped.pos.z); }
+
+  // THE SHARED FOLLOW (officials.js's officeholder, power.js's private ring,
+  // childhood.js's toddlers): one call per frame, the body walks there.
   function moveToward(ped, tx, tz, speed, dt) {
-    const dx = tx - ped.pos.x, dz = tz - ped.pos.z, d = Math.hypot(dx, dz);
-    if (d < 0.6) { ped.state = "idle"; ped.speed = 0; return; }
-    ped.state = "walk"; ped.speed = speed;
-    ped.pos.x += (dx / d) * speed * dt; ped.pos.z += (dz / d) * speed * dt;
-    const yaw = Math.atan2(dx, dz);
-    ped.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ped.group.rotation.y, yaw, 1 - Math.pow(0.001, dt)) : yaw;
+    order(ped, tx, tz, speed, null, false, 0, 0, 0.5);
+    ped.state = arrived(ped) ? "idle" : "walk";
   }
 
+  // ONE FORMATION FRAME PER PRINCIPAL (CBZ.moves.formation): power.js's
+  // ring follow reads it (frameOf) for a ring the detail brain is not
+  // walking. The detail brain (city/brain_protection.js) keeps its own frame
+  // per detail (D.F). Runtime only (never in serialize()).
+  const FRAME_OPTS = { lead: 0.2 };
+  function frameOf(owner) {
+    if (!owner._F && CBZ.moves) owner._F = CBZ.moves.formation(FRAME_OPTS);
+    return owner._F || null;
+  }
 
   // ============================================================
   //  MEMBER LIFECYCLE — spawn/drive/despawn (the refactored officials.js code)
@@ -332,7 +370,6 @@
     if (detail.fundingSource === "gang") return "gang muscle";           // never actually spawned by this path (see detailOf)
     return "hired security";
   }
-  const GUARD_SPEED = 2.1;
 
   // top up memberPedRefs to memberCount, spawning at (x,z) with the detail's
   // current gear loadout. Cheap no-op once the roster is full.
@@ -367,8 +404,12 @@
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
-      // the Secret Service wear dark suits (outfits.js's own two-piece suit)
-      if (detail.fundingSource === "treasury") dressAs(q, "suit");
+      // DRESS: the job IS the uniform. "secret service" / "hired security"
+      // cast city/outfits.js CAT.detail (black suit, white shirt, black tie,
+      // shades, earpiece) through jobFit inside cityPostNpc -> makePed, and
+      // every later re-dress re-reads the same job. The old dressAs(q, "suit")
+      // here painted CAT.suit, whose painter picks a suit style off the rig id:
+      // that was the President's detail in tan / powder-blue / white suits.
       if (CBZ.cityRelShift) CBZ.cityRelShift(q, "recruited", 0.5);   // a fresh hire starts with SOME goodwill, not none
       detail.memberPedRefs.push(q);
     }
@@ -399,18 +440,21 @@
   // same detail brain the President's detail walks. A suborned member (see
   // suborn()) stands down for its 30 s window instead.
   const _escList = [];
-  function driveEscort(detail, principal, dt) {
+  function driveEscort(detail, principal, dt, mode) {
     if (!detail || !principal || principal.dead) return;
     const B = DB(); if (!B) return;
     const peds = detail.memberPedRefs;
     _escList.length = 0;
     for (let i = 0; i < peds.length; i++) {
       const gd = peds[i]; if (!gd || gd.dead) continue;
-      if ((gd._subornT || 0) > 0) { gd.state = "idle"; gd.speed = 0; continue; }   // stepped aside
+      if ((gd._subornT || 0) > 0) { release(gd); gd.state = "idle"; gd.speed = 0; continue; }   // stepped aside
       _escList.push(gd);
     }
     const ps = escortPosture(detail, principal);
-    B.escort("det:" + detail.id, principal, _escList, dt, envFor(ps, principal, detail.id));
+    const env = envFor(ps, principal, detail.id);
+    env.mode = mode || null;                     // a caller may force the slot table (door / crowd / open)
+    const D = B.escort("det:" + detail.id, principal, _escList, dt, env);
+    detail._F = D ? D.F : null;                  // the CBZ.moves formation frame the brain walks them by
   }
   // "posted" formation (Part IV base/outlet protection — the postings[] array
   // is already carried by the record so a future base-defense wave is a
@@ -421,14 +465,15 @@
     if (!posts.length) return;
     for (let i = 0; i < peds.length; i++) {
       const gd = peds[i]; if (!gd || gd.dead) continue;
-      if ((gd._subornT || 0) > 0) { gd.state = "idle"; gd.speed = 0; continue; }
+      if ((gd._subornT || 0) > 0) { release(gd); gd.state = "idle"; gd.speed = 0; continue; }
       const p = posts[i % posts.length];
-      moveToward(gd, p.x, p.z, GUARD_SPEED, dt);
+      gd.state = "walk";
+      order(gd, p.x, p.z, WALK_SPEED, null, false, 0, 0, 0.4);
     }
   }
-  function driveDetail(detail, principal, dt) {
+  function driveDetail(detail, principal, dt, mode) {
     if (detail.formation === "posted") driveEscortPosted(detail, dt);
-    else driveEscort(detail, principal, dt);
+    else driveEscort(detail, principal, dt, mode);
   }
 
   // suborn/quit timers + the escort/posted branch, shared by every detail
@@ -758,38 +803,27 @@
   //  second direct position step past 3.5 m is gone (it made bodies skate).
   // ------------------------------------------------------------
   function setTarget(ped, x, z) { if (ped.target && ped.target.set) ped.target.set(x, 0, z); }
-  function goTo(ped, x, z, run, dt, face, confront) {
+  function goTo(ped, x, z, run, dt, face, confront, faceAt) {
+    ped.state = confront ? "confront" : "walk";
     const dx = x - ped.pos.x, dz = z - ped.pos.z, d = Math.sqrt(dx * dx + dz * dz);
-    if (d > (ped._goHeld ? 0.9 : 0.6)) {
-      ped._goHeld = false;
-      ped.state = confront ? "confront" : "walk"; ped.path = null; ped.pause = 0; ped.finalGoal = null;
+    if (d > 8 && !faceAt) {
+      // a real walk (to a door, across the grounds): hand it to the routed
+      // mover (target + pedNav round the walls); the order takes over for the
+      // last few metres, where the arrival and the held facing matter
+      release(ped);
       setTarget(ped, x, z);
-      ped._boardRun = !!run || d > 4;
+      ped.path = null; ped.pause = 0; ped.finalGoal = null; ped._boardRun = !!run;
       return d;
     }
-    if (!ped._goHeld) { ped._goHeld = true; setTarget(ped, ped.pos.x, ped.pos.z); }
-    ped.state = confront ? "confront" : "idle"; ped.speed = 0; ped._boardRun = false;
-    if (face != null && ped.group) turnToward(ped, face, dt, 2.4);
-    return d;
-  }
-  // a bounded turn (rad/s), easing in: never a snap
-  function turnToward(ped, yaw, dt, rate) {
-    const cur = ped.group.rotation.y;
-    let d = yaw - cur; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
-    const ad = Math.abs(d), max = rate * dt;
-    ped.group.rotation.y = cur + (d > 0 ? 1 : -1) * Math.min(ad < 0.26 ? ad * Math.min(1, dt * 9) : ad, max);
-  }
-  function faceToward(ped, x, z, dt) {
-    if (!ped.group) return;
-    const dx = x - ped.pos.x, dz = z - ped.pos.z;
-    if (dx * dx + dz * dz < 0.01) return;
-    turnToward(ped, Math.atan2(dx, dz), dt, 4.5);
+    if (faceAt) return order(ped, x, z, run ? RUN_SPEED : WALK_SPEED, yawTo(ped, faceAt.pos.x, faceAt.pos.z), true, 0, 0, 0.3);
+    return order(ped, x, z, run ? RUN_SPEED : WALK_SPEED, arrived(ped) ? face : null, false, 0, 0, 0.3);
   }
   function teleport(ped, x, z, y) {
     ped.pos.x = x; ped.pos.z = z; ped.path = null; ped._boardRun = false;
     setTarget(ped, x, z);
     if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(ped, y || 0); } catch (e) {} }
     else ped.pos.y = y || 0;
+    if (CBZ.moves) CBZ.moves.reset(CBZ.moves.motor(ped), ped.pos);   // a teleport is not a stride
   }
   // catch-up: a body far from where it belongs moves there only when neither
   // end is on screen, or after FORCE_SPAWN_T of trying (a harness cannot
@@ -805,6 +839,7 @@
   }
   function engage(ped, t) {
     if (!t || t.dead) return;
+    release(ped);                     // the fight brain (peds.js + combat_iq) moves him now
     ped.rage = t; ped.state = "fight"; ped.path = null; ped.pause = 0; ped._boardRun = false;
     ped.fear = 0; ped.alarmed = Math.max(ped.alarmed || 0, 8);
     if (ped.armed && ped.ammo != null && ped.ammo < 8) ped.ammo = 60;
@@ -952,14 +987,6 @@
     if (p.dead) return;
     removePed(p);
   }
-  function dressAs(ped, catId) {
-    if (!ped || !ped.char || !CBZ.cityOutfitCatalog || !CBZ.cityRecolorRig) return;
-    try {
-      const cat = CBZ.cityOutfitCatalog();
-      const fit = cat && cat[catId];
-      if (fit && fit.colors) CBZ.cityRecolorRig(ped.char, fit.colors, fit);
-    } catch (e) {}
-  }
   function spawnUnit(u, A) {
     if (!CBZ.cityPostNpc || !A || !A.root) return null;
     const o = { src: "protection:mansion", parent: A.root, face: u.face, controlled: true, wealth: 0.45 };
@@ -978,8 +1005,9 @@
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }
-    if (u.role === "gate") dressAs(q, "police");
-    else if (u.role === "patrol") dressAs(q, "suit");
+    // dress comes from the job (outfits.js jobFit): gate "uniformed division
+    // officer" -> police uniform, "counter-sniper" -> all-black tactical with
+    // gloves, "secret service" (agents + patrol) -> the detail's black suit.
     if (u.role === "gate" && CBZ.cityPostStand) {
       // THE SHARED POST RECORD (garrison.js) — its stationed brain (hold the
       // slot, leash, bolt and come back) runs this officer between challenges;
@@ -1040,16 +1068,15 @@
   // ---- per-frame: the gate officers, the wall walk, the roof ----
   function driveGateUnit(u, dt) {
     const q = u.ped;
-    if ((q._subornT || 0) > 0) { q.state = "idle"; q.speed = 0; disengage(q); return; }
+    if ((q._subornT || 0) > 0) { release(q); q.state = "idle"; q.speed = 0; disengage(q); return; }
     const ch = MS.challenge;
     if (ch && ch.who && !ch.who.dead && !ch.hostile) {
       // THE CHALLENGE: weapons up, eyes on him, nobody walks toward him.
       disengage(q);
-      goTo(q, u.x, u.z, false, dt, null, true);
-      faceToward(q, ch.who.pos.x, ch.who.pos.z, dt);
+      goTo(q, u.x, u.z, false, dt, null, true, ch.who);
       return;
     }
-    if (q._post && CBZ.cityPostTick) { try { CBZ.cityPostTick(q, dt); return; } catch (e) {} }
+    if (q._post && CBZ.cityPostTick) { release(q); try { CBZ.cityPostTick(q, dt); return; } catch (e) {} }
     const t = gateThreatFor(q);
     if (t) { engage(q, t); return; }
     disengage(q);
@@ -1057,20 +1084,24 @@
   }
   function drivePatrolUnit(u, dt) {
     const q = u.ped, w = MS.sec.walk;
-    if ((q._subornT || 0) > 0) { q.state = "idle"; q.speed = 0; disengage(q); return; }
+    if ((q._subornT || 0) > 0) { release(q); q.state = "idle"; q.speed = 0; disengage(q); return; }
     const t = gateThreatFor(q);
     if (t && hyp(t.pos.x, t.pos.z, q.pos.x, q.pos.z) < 35) { engage(q, t); return; }
     disengage(q);
     if (PRES.posture !== "normal" && PRES.threat && !PRES.threat.dead) {
-      // on alert the walk stops and looks where the trouble is
-      q.state = "confront"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z);
-      faceToward(q, PRES.threat.pos.x, PRES.threat.pos.z, dt);
+      // on alert the walk stops where it is and looks where the trouble is
+      if (u.holdX == null) { u.holdX = q.pos.x; u.holdZ = q.pos.z; }
+      goTo(q, u.holdX, u.holdZ, false, dt, null, true, PRES.threat);
       return;
     }
+    u.holdX = null;
     const wp = w[u.wp % w.length];
     if (hyp(q.pos.x, q.pos.z, wp.x, wp.z) < 2.0) u.wp = (u.wp + 1) % w.length;
     const nx = w[u.wp % w.length];
-    q.state = "walk"; q.path = null; q.pause = 0; q._boardRun = false; setTarget(q, nx.x, nx.z);
+    // the wall walk is a waypoint chain: pass through each at pace (leg)
+    q.state = "walk";
+    order(q, nx.x, nx.z, q.baseSpeed || 1.6, null, false, 0, 0, 0.5);
+    q.moveOrder.leg = true;
   }
   // the roof: static, slow sector scans with a long dwell (the detail brain),
   // onto a mark the moment the scan below hands one over
@@ -1078,7 +1109,7 @@
     const q = u.ped, B = DB();
     const t = u.target && !u.target.dead && (q._subornT || 0) <= 0 ? u.target : null;
     if (B) B.sniper(q, u, dt, t);
-    else if (t) faceToward(q, t.pos.x, t.pos.z, dt);
+    else if (t) turnTo(q, yawTo(q, t.pos.x, t.pos.z), dt);
   }
 
   // ---- THE COUNTER-SNIPERS (4 Hz) ----
@@ -1421,13 +1452,14 @@
         EV.phase = "hold"; EV.t = 0;
       }
     } else if (EV.phase === "hold") {
-      p.state = "idle"; p.speed = 0; setTarget(p, p.pos.x, p.pos.z);
+      release(p); p.state = "idle"; p.speed = 0; setTarget(p, p.pos.x, p.pos.z);
       if (ps.posture === "normal") { EV.phase = "return"; EV.t = 0; }
     } else if (EV.phase === "return") {
       const pin = EV.pin;
       if (!pin) { EV.phase = null; EV.ped = null; return; }
       if (goTo(p, pin.x, pin.z, false, dt, pin.face, false) < 0.8 || EV.t > 40) {
         if (EV.t > 40) teleport(p, pin.x, pin.z, 0);
+        release(p);
         p.staffPost = { x: pin.x, z: pin.z, face: pin.face };
         p.state = "idle"; p.speed = 0;
         EV.phase = null; EV.ped = null; EV.pin = null;
@@ -1620,7 +1652,7 @@
       const leader = q._protRole === "shift-leader";
       const ki = leader ? -1 : k++;
       if (CBZ.boardingHolds && CBZ.boardingHolds(q)) continue;
-      if ((q._subornT || 0) > 0) { unpostIndoor(q); disengage(q); q.state = "idle"; q.speed = 0; continue; }
+      if ((q._subornT || 0) > 0) { release(q); unpostIndoor(q); disengage(q); q.state = "idle"; q.speed = 0; continue; }
       if (hot) unpostIndoor(q);
       // ---- he is driving: hold, and catch up when he gets out -----------
       if (inCar && !hot) { if (!q._protIndoor) { q.state = "idle"; q.speed = 0; q._boardRun = false; setTarget(q, q.pos.x, q.pos.z); } continue; }
@@ -1632,14 +1664,17 @@
           const side = ki === 0 ? -1 : 1;
           const x = ap.x + A2.tx * 0.9 * side - A2.nx * 0.4, z = ap.z + A2.tz * 0.9 * side - A2.nz * 0.4;
           const face = Math.atan2(-A2.nx, -A2.nz);
-          const dd = hyp(q.pos.x, q.pos.z, x, z) + Math.abs((q.pos.y || 0) - room.floorY) * 4;
-          if (q._protIndoor === "portal" && dd < 1.2) { if (q.group) turnToward(q, face, dt, 2.4); continue; }
+          const dy = Math.abs((q.pos.y || 0) - room.floorY);
+          const dd = hyp(q.pos.x, q.pos.z, x, z) + dy * 4;
+          if (q._protIndoor === "portal" && dd < 1.2) { turnTo(q, face, dt); continue; }
           q._protIndoor = null; q.staffPost = null;
-          if (dd < 0.8 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) {
+          if (dd < 0.5 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) {
             if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, room.floorY); } catch (e) {} }
+            release(q);
             q._protIndoor = "portal"; q.staffPost = { x: x, z: z, face: face };
             q.state = "idle"; q.speed = 0; q._boardRun = false;
-          } else { q.state = "idle"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z); }
+          } else if (dy < 1.0) goTo(q, x, z, false, dt, face, false);   // same floor: walk to the post
+          else { release(q); q.state = "idle"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z); }
           continue;
         }
         unpostIndoor(q);
@@ -1933,6 +1968,8 @@
   CBZ.protection = {
     create, dissolve, details, get,
     spawnMembers, despawnMembers, dropMember, driveEscort: driveDetail, moveToward,
+    // the one-mover seam for anybody walking a body beside a principal
+    order: order, release: release, frameOf: frameOf,
     notePrincipalHp, attemptsOn,
     hire, suborn, detailOf,
     reset, GEAR, HIRE_CAP,

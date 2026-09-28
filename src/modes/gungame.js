@@ -708,6 +708,11 @@
 
   // ---- bots ---------------------------------------------------------------------------
   const ANIM_DIST2 = 70 * 70;
+  // THE ONE LOCOMOTION LAYER (entities/moves.js) walks every bot; one options
+  // record, mutated per bot per frame (no allocation). Combat footwork is
+  // sharper than a pedestrian's: quicker to speed up and to stop.
+  const MV = CBZ.moves;
+  const _mo = { speed: 0, stop: 0.55, leg: false, accel: 6.5, decel: 5.5, face: null, strafe: false, nbrs: null, nbrN: 0, lod: 0, radius: 0.42 };
   const PLAYER_TGT = {
     isPlayer: true, name: "You",
     get pos() { return CBZ.player.pos; },
@@ -819,6 +824,7 @@
     b.pos.set(p.x, mapFloor(p.x, p.z), p.z);
     b.lastX = p.x; b.lastZ = p.z;
     b.group.rotation.set(0, rand() * 6.28, 0);
+    MV.reset(MV.motor(b), b.pos);
     if (b._phys) { b._phys.down = 0; b._phys.air = false; b._phys.kx = 0; b._phys.kz = 0; b._phys.heldBy = null; }
     b._lvy = 0;
     b.fireCD = 0.6 + rand() * 0.6;
@@ -1281,18 +1287,18 @@
     }
   }
 
-  /* MOVEMENT GOES THROUGH CBZ.brain.act. This file's own mover (A* on the walk
-     grid, the vault, the stall sidestep, all in the frame loop below) is
-     registered as the gungame executor: act.moveTo writes b.goal + b.moveKind
-     and the loop walks it. CBZ.moves, when it exists, is tried first by the
-     brain. HARNESS TRAP: a generic CBZ.moves.moveTo knows nothing of this
-     map's nav grid; if it lands without it, give this executor prefer: true. */
+  /* DECISIONS GO THROUGH CBZ.brain.act, EXECUTION THROUGH CBZ.moves. The
+     "gungame" executor only writes the goal (b.goal + b.moveKind); the frame
+     loop below plans the path on this map's walk grid (steer / ggTraverse)
+     and CBZ.moves.step walks it. prefer: true so a future generic
+     CBZ.moves.moveTo (which knows nothing of this nav grid) never bypasses it. */
   function gait(b, kind) {
     const r = rungAt(b.rung);
     return kind === "strafe" ? 2.3 : kind === "back" ? 2.6 : b.mode === "retreat" ? 4.6
       : (r.melee && b.foeSeen) ? 5.4 : b.foeSeen ? 3.6 : 4.2;
   }
   BR.act.use("gungame", {
+    prefer: true,
     moveTo: function (a, x, z, o) {
       const G = a.goal || (a.goal = { x: 0, z: 0 });
       G.x = x; G.z = z;
@@ -1300,9 +1306,9 @@
       return true;
     },
     stop: function (a) { a.goal = null; a.moveKind = "hold"; return true; },
+    // one frame's bounded turn through the motor (called per frame while it matters)
     face: function (a, x, z) {
-      const dx = x - a.pos.x, dz = z - a.pos.z;
-      if (dx * dx + dz * dz > 0.01) a.group.rotation.y = Math.atan2(dx, dz);
+      a.group.rotation.y = MV.faceAt(MV.motor(a), a.group.rotation.y, a.pos, x, z, 1 / 60);
       return true;
     },
   });
@@ -1450,7 +1456,6 @@
     if ((r.melee || (dh < 1.7 && rand() < 0.5)) && dh < 2.0 && Math.abs((foe.pos.y || 0) - (b.pos.y || 0)) < 1.5) {
       if (b.meleeCD > 0) return;
       b.meleeCD = r.melee ? 0.62 + rand() * 0.25 : 0.9;
-      b.group.rotation.y = Math.atan2(dx, dz);
       if (b.char) { b.char.punchT = 0.4; b.char.punchKind = rand() < 0.5 ? "jab" : "hook"; }
       if (CBZ.body && !foe.isPlayer) CBZ.body.hit(foe, { fromX: b.pos.x, fromZ: b.pos.z, force: 5 });
       if (CBZ.sfx) CBZ.sfx("punch");
@@ -1587,11 +1592,14 @@
       b.huntT = (b.huntT || 0) - dt;
       b.strafeT -= dt;
       if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = 0.6 + rand() * 1.3; }
-      if (gg.match.over) { b.speed = 0; continue; }
-      if (CBZ.body && CBZ.body.busy(b)) continue;
+      const m = MV.motor(b);
+      if (gg.match.over) { b.speed = 0; MV.reset(m, b.pos); continue; }
+      // a grab / knockdown owns the body: the motor starts from rest after it
+      if (CBZ.body && CBZ.body.busy(b)) { MV.reset(m, b.pos); continue; }
 
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
-      const near = dx * dx + dz * dz < ANIM_DIST2;
+      const d2cam = dx * dx + dz * dz;
+      const near = d2cam < ANIM_DIST2;
       b.thinkT -= dt;
       if (b.thinkT <= 0) {
         b.thinkT = near ? 0.12 + rand() * 0.06 : 0.3 + rand() * 0.1;
@@ -1599,38 +1607,44 @@
         decide(b);
       }
 
-      // locomotion
+      // locomotion: the brain picked a goal and a pace (the "gungame" act
+      // executor writes b.goal / b.moveKind; gait() prices the pace); CBZ.moves
+      // walks it. In a fight the torso holds the foe and the legs go wherever
+      // the goal is (strafe / back-pedal / close), at a bounded turn rate.
       const st = steer(b, dt);
+      const fighting = !!(b.foe && b.foeSeen && !b.foe.dead);
       let spd = 0;
       if (st) {
         spd = gait(b, b.moveKind);
-        if (ggTraverse(b, dt, st.x, st.z, spd)) continue;
-        const tx = st.x - b.pos.x, tz = st.z - b.pos.z, dist = Math.hypot(tx, tz);
-        if (dist > 0.05) {
-          const step = Math.min(dist, spd * dt);
-          b.pos.x += tx / dist * step; b.pos.z += tz / dist * step;
-        }
-        if (!(b.foe && b.foeSeen) && CBZ.lerpAngle) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(tx, tz), 1 - Math.pow(0.002, dt));
+        if (ggTraverse(b, dt, st.x, st.z, spd)) { MV.reset(m, b.pos); continue; }
       }
-      b.speed = spd;
+      const O = _mo;
+      O.speed = spd;
+      O.leg = !!(st && b.goal && (st.x !== b.goal.x || st.z !== b.goal.z));   // a path waypoint: pass through
+      O.face = fighting ? Math.atan2(b.foe.pos.x - b.pos.x, b.foe.pos.z - b.pos.z) : null;
+      O.strafe = fighting;
+      O.nbrs = gg.bots; O.nbrN = gg.bots.length;
+      O.lod = MV.lodFor(d2cam, near);
+      // no goal: brake where we stand (the target rides the body, so it slows, never reverses)
+      MV.step(m, b.pos, b.group.rotation.y, st ? st.x : b.pos.x, st ? st.z : b.pos.z, O, dt);
+      b.group.rotation.y = m.yaw;
       if (CBZ.collide) CBZ.collide(b.pos, 0.5, b.pos.y, b.pos.y + 1.7);
       clampZone(b.pos, 0.6);
       b.pos.y = mapFloor(b.pos.x, b.pos.z);
-      // stall detection: wanted to move, didn't -> replan / sidestep
-      if (spd > 0) {
+      b.speed = m.gs;   // MEASURED: the rig, the hit model and foes' aim all read what it really did
+      // stall detection: carrying speed but not getting anywhere -> replan / flip the strafe side
+      if (spd > 0 && m.speed > spd * 0.5) {
         const moved = Math.hypot(b.pos.x - b.lastX, b.pos.z - b.lastZ);
         if (moved < spd * dt * 0.25) b.stuckT += dt; else b.stuckT = Math.max(0, b.stuckT - dt * 2);
         if (b.stuckT > 0.8) { b.stuckT = 0; b.path = null; b.repathT = 0; b.strafe = -b.strafe; b.huntT = 0; }
       }
       b.lastX = b.pos.x; b.lastZ = b.pos.z;
-      if (near && CBZ.animChar) CBZ.animChar(b.char, b.speed, dt);
-      // hold the gun on the foe every animated frame (animChar just wrote walk-swing over the arms)
-      if (b.foe && b.foeSeen && !b.foe.dead) {
-        if (b.armed && CBZ.actorAimAt) { if (near) CBZ.actorAimAt(b, b.foe, dt); else b.group.rotation.y = Math.atan2(b.foe.pos.x - b.pos.x, b.foe.pos.z - b.pos.z); }
-        else if (CBZ.lerpAngle) {
-          const fx = b.foe.pos.x - b.pos.x, fz = b.foe.pos.z - b.pos.z;
-          if (fx * fx + fz * fz > 0.01) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(fx, fz), 1 - Math.pow(0.0005, dt));
-        }
+      if (near && CBZ.animChar) CBZ.animChar(b.char, m.gs, dt);
+      // hold the gun on the foe every animated frame (animChar just wrote walk-swing over the
+      // arms). actorAimAt owns the ready pose; the motor owns the yaw, so put it back after.
+      if (fighting && near && b.armed && CBZ.actorAimAt) {
+        CBZ.actorAimAt(b, b.foe, dt);
+        b.group.rotation.y = m.yaw;
       }
       botFire(b, dt);
     }

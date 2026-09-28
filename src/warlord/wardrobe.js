@@ -174,11 +174,10 @@
      so a new row at the end is a new atlas and cannot disturb an existing
      one. Nothing else in this game reads those indices by number. */
   const WL_STYLES = [
-    /* THE ONE THE OWNER ASKED FOR. The city's "Black Suit" ships a light-grey
-       tie (0x9a9da3) — that is a banker at a funeral. A detail wears a black
-       tie on a white shirt, and the body is lifted off true black by the same
-       0x06 the tuxedo's own comment argues for, so shading reads at all. */
-    { name: "Detail Black",        body: 0x121318, tie: 0x08090c, pattern: "solid", legs: 0x101115 },
+    /* "Detail Black" (the one the owner asked for: near-black, white shirt,
+       BLACK tie) lives in city/clothes.js SUIT_STYLES now, because the city's
+       Secret Service wears it too. It is resolved by name like every city
+       suit (SUIT_LOOKS), so there is one row, not two. */
     { name: "Detail Charcoal",     body: 0x262a31, tie: 0x101216, pattern: "solid", legs: 0x22252b },
     { name: "Detail Midnight",     body: 0x151b2c, tie: 0x0b0e18, pattern: "solid", legs: 0x131826 },
     /* SERVICE DRESS. A tunic is a suit with a military palette: the shirt and
@@ -201,7 +200,7 @@
      the table (an older engine build) simply produces no tile — never a
      wrong suit, and never a crash. */
   const SUIT_LOOKS = [
-    "Charcoal Suit", "Navy Suit", "Mid-Grey Suit", "Black Suit",
+    "Charcoal Suit", "Navy Suit", "Mid-Grey Suit", "Black Suit", "Detail Black",
     "Navy Pinstripe Suit", "Charcoal Pinstripe Suit",
     "Navy Double-Breasted Suit", "Charcoal Double-Breasted Suit",
     "Charcoal 3-Piece Suit", "Burgundy 3-Piece Suit",

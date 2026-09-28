@@ -1,9 +1,11 @@
 // === PROTECTION ROUTER SCENARIOS ===
 // Plain node, no browser. The President's detail brain (src/city/brain_protection.js)
-// driven against a tiny stand-in for the city mover (peds.js move(): walk to
-// `target` at `baseSpeed` while state === "walk", stop inside 0.5 m, face the
-// way you walk). Loads src/systems/brain.js first when it exists, so the same
-// scenarios run through CBZ.brain.act once the core has landed.
+// DECIDES; CBZ.moves (src/entities/moves.js) EXECUTES. The stand-in for the
+// city mover is peds.js's side of the moveOrder seam: a body with a
+// ped.moveOrder is stepped through CBZ.moves.step toward it with its options
+// (speed, stop, face, strafe, feed-forward); without one the motor brakes.
+// Loads src/systems/brain.js first when it exists, so the same scenarios run
+// through CBZ.brain.act once the core has landed.
 //
 //   node tools/brain-sim-protection.mjs
 import { createRequire } from "module";
@@ -21,6 +23,8 @@ let withBrain = false;
 if (fs.existsSync(brainPath) && !process.env.PROT_NO_BRAIN) {
   try { require(brainPath); withBrain = !!CBZ.brain; } catch (e) { console.log("brain.js failed to load:", e.message); }
 }
+require(path.join(ROOT, "src/entities/moves.js"));
+const M = CBZ.moves;
 const DB0 = require(path.join(ROOT, "src/city/brain_protection.js"));
 // the game calls CBZ.brain.clock(t) once per frame; so does the sim
 let simT = 0;
@@ -47,17 +51,18 @@ function body(x, z, yaw, extra) {
   b.group.position = b.pos;
   return Object.assign(b, extra || {});
 }
-// the stand-in for peds.js move()
+// the stand-in for peds.js move(): the moveOrder seam through CBZ.moves
+const _o = {}, _brake = { speed: 0, stop: 0.3 };
 function mover(b, dt) {
   if (b.dead) return;
-  if (b.state !== "walk") { b.speed = 0; return; }
-  const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z, d = Math.hypot(dx, dz);
-  if (d <= 0.5) { b.speed = 0; return; }
-  const sp = b.baseSpeed, st = Math.min(d, sp * dt);
-  b.pos.x += dx / d * st; b.pos.z += dz / d * st; b.speed = sp;
-  const want = Math.atan2(dx, dz), cur = b.group.rotation.y;
-  b.group.rotation.y = cur + wrap(want - cur) * (1 - Math.pow(0.0009, dt));
+  const m = M.motor(b), o = b.moveOrder;
+  if (o) { Object.assign(_o, o); M.step(m, b.pos, b.group.rotation.y, o.x, o.z, _o, dt); }
+  else M.step(m, b.pos, b.group.rotation.y, b.pos.x + m.vx, b.pos.z + m.vz, _brake, dt);
+  b.group.rotation.y = m.yaw;
+  b.speed = m.gs;
 }
+// holding his spot: the brain says so AND the motor is actually still
+function holding(a) { return !!(a._det && a._det.hold) && a._mv && a._mv.speed < 0.05; }
 
 // ------------------------------------------------------------------
 // 1. A formation follows a turning protectee: no slot swaps on a curve,
@@ -85,10 +90,11 @@ function mover(b, dt) {
         if (phaseName === "curve" && t > 3 && lastKind.has(a) && lastKind.get(a) !== k) swaps++;
         lastKind.set(a, k);
         const y = a.group.rotation.y;
-        if (lastYaw.has(a) && a.state !== "walk") maxStandYawRate = Math.max(maxStandYawRate, Math.abs(wrap(y - lastYaw.get(a))) / dt);
+        if (lastYaw.has(a) && holding(a)) maxStandYawRate = Math.max(maxStandYawRate, Math.abs(wrap(y - lastYaw.get(a))) / dt);
         lastYaw.set(a, y);
-        if (phaseName === "curve" && t > 3 && lastState.has(a) && lastState.get(a) !== a.state) flaps++;
-        lastState.set(a, a.state);
+        const hs = !!(a._det && a._det.hold);
+        if (phaseName === "curve" && t > 3 && lastState.has(a) && lastState.get(a) !== hs) flaps++;
+        lastState.set(a, hs);
         const d = Math.hypot(a.pos.x - pr.pos.x, a.pos.z - pr.pos.z);
         if (t > 3) { minD = Math.min(minD, d); maxD = Math.max(maxD, d); }
         if (phaseName === "uturn" && d < 0.45) crossings++;
@@ -108,7 +114,7 @@ function mover(b, dt) {
   check("formation: after the U-turn someone is on point, ahead of him", fwd > 1.5, "kinds=" + kinds.join(",") + " ahead=" + fwd.toFixed(2));
   run(5, 0, 0, "stop");
   check("formation: turn rate while standing is bounded", maxStandYawRate <= DB.TUNE.TURN_HOT + 0.5, "max=" + maxStandYawRate.toFixed(2) + " rad/s");
-  const idle = agents.filter((a) => a.state === "idle").length;
+  const idle = agents.filter(holding).length;
   check("formation: they arrive and HOLD when he stops", idle === agents.length, idle + "/" + agents.length + " holding");
   check("formation: the knot stays a knot (0.8-7 m)", minD > 0.6 && maxD < 7, "min=" + minD.toFixed(2) + " max=" + maxD.toFixed(2));
   // scanning: while he stands, each agent changes where he looks on a human cadence
@@ -138,7 +144,8 @@ function mover(b, dt) {
   const dt = 1 / 60;
   const env = { posture: "normal", crowd: 0, peds: [shooter] };
   for (let i = 0; i < 420; i++) { DB.step(D, pr, agents, dt, env); for (const a of agents) mover(a, dt); }
-  check("gunshot: before it, the detail is standing still", agents.every((a) => a.state === "idle"), agents.map((a) => a.state).join(","));
+  check("gunshot: before it, the detail is standing still", agents.every(holding), agents.map((a) => holding(a)).join(","));
+  const pre = new Map(agents.map((a) => [a, a.moveOrder ? { x: a.moveOrder.x, z: a.moveOrder.z } : { x: a.pos.x, z: a.pos.z }]));
   const engaged = [];
   const shouts = [];
   const firstIssue = new Map();
@@ -152,7 +159,9 @@ function mover(b, dt) {
     DB.step(D, pr, agents, dt, env);
     for (const a of agents) {
       if (a.state !== "fight") mover(a, dt);
-      if (!firstIssue.has(a) && a.state === "walk") firstIssue.set(a, D.t - t0);
+      // his first own move: the order he walks by leaves where it stood
+      const o = a.moveOrder, p0 = pre.get(a);
+      if (!firstIssue.has(a) && o && Math.hypot(o.x - p0.x, o.z - p0.z) > 0.3) firstIssue.set(a, D.t - t0);
     }
   }
   check("gunshot: somebody shouts it", shouts.length === 1 && /Gun/.test(shouts[0].line), shouts.map((s) => s.line).join(" | "));

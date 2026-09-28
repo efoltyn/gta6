@@ -11,7 +11,7 @@
   "use strict";
   const CBZ = window.CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
-  const { makeCharacter, animChar, lerpAngle, econ } = CBZ;
+  const { makeCharacter, animChar, econ } = CBZ;
 
   // ---- build & register one NPC ----
   function makeNpc(opts) {
@@ -95,51 +95,68 @@
       s === "pressurePlayer" || s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
   }
 
-  const ACCEL = 11;                      // m/s² to turn or stop: never a flip inside a frame
-  const ACCEL_UP = 26;                   // m/s² along the way he is already facing: off in ~0.07 s
-  /* What the body gained over the last frame once the wall resolver had
-     spoken, in metres per second, smoothed. `_acX/_acZ` is the settled
-     position systems/actorcollide.js stamps at the end of each frame; the
-     difference between two of those is the achieved step, not the ordered
-     one. The knockback slide (`_phys.kx/kz`, integrated by reactions.js) is
-     ground moving under a body without its legs and is taken back out. */
-  function groundSpeed(n, dt) {
-    const ax = n._acX, az = n._acZ;
-    let gs = n._gs || 0;
-    if (ax != null && n._gsX != null && dt > 1e-4) {
-      const ph = n._phys;
-      const mx = (ax - n._gsX) / dt - (ph ? ph.kx || 0 : 0);
-      const mz = (az - n._gsZ) / dt - (ph ? ph.kz || 0 : 0);
-      gs = CBZ.damp(gs, Math.hypot(mx, mz), 14, dt);
-    }
-    n._gsX = ax; n._gsZ = az;
-    n._gs = gs;
-    return gs;
-  }
+  /* ---- THE STEP: CBZ.moves (entities/moves.js) -----------------------------
+     This file used to carry its own mover — a velocity with ACCEL 11/26, an
+     ease over the last metre, a `groundSpeed` probe, a `recoverStuck` jiggle —
+     and a yaw that went through lerpAngle(…, 1 - 0.0001^dt), which is 14%
+     of the remaining angle PER FRAME: a 180 in about a quarter of a second
+     with the first frame alone turning 25 degrees. Every AI body in every
+     game now walks through CBZ.moves; what is left here is the prison's
+     glue: which orders are route LEGS (walked through at pace), who the
+     neighbours are, the LOD, and the brain's face orders.
 
-  function recoverStuck(n, dt, speed, gp, routed) {
-    /* NOT WHILE A ROUTE OWNS HIM. `pickTarget` samples his `region`, and at
-       lights-out systems/prisonschedule.js pins that region to a 2.2 m box
-       around the mattress — which is on the far side of a cell wall from a man
-       still in the corridor, so the "recovery" aims him through it and undoes
-       the leg he is walking. A man who is genuinely stuck on a route is caught
-       by that file's own stall detector, which gives his rack away rather than
-       jiggling him at a wall. */
-    if (routed) { n._lastX = gp.x; n._lastZ = gp.z; n._stuckT = 0; return; }
-    if (n._lastX != null) {
-      const dx = gp.x - n._lastX, dz = gp.z - n._lastZ;
-      const tx = n.target.x - gp.x, tz = n.target.z - gp.z;
-      const trying = speed > 0.25 && tx * tx + tz * tz > 1;
-      const roam = !n.aiState || n.aiState === "wander" || n.aiState === "socialize";
-      if (trying && roam && dx * dx + dz * dz < 0.0009) n._stuckT = (n._stuckT || 0) + dt;
-      else n._stuckT = Math.max(0, (n._stuckT || 0) - dt * 2);
-      if (n._stuckT > 0.7) {
-        pickTarget(n);
-        n.pause = 0.05;
-        n._stuckT = 0;
-      }
+     FACE ORDERS. A brain state that wants a body looking somewhere (a man
+     ringing you at 4.6 m, a huddle, a guard questioning him) writes
+     `n._faceYaw` + `n._faceTTL` (seconds) instead of turning the group
+     itself. The mover holds that facing at a bounded rate and, while an
+     order stands, the legs go wherever the target is (strafe). Two systems
+     turning one body in one frame was the other half of the "twitch". */
+  const MV_OPTS = { speed: 1.4, stop: 0.3, leg: false, face: null, strafe: false,
+    nbrs: null, nbrN: 0, lod: 0, accel: 0 };
+  const _nbrs = [];
+  // inmates (the shared npcgrid index) plus the screws inside 4 m — a guard's
+  // `_mv` carries his velocity, so a man passing one in a doorway keeps right
+  function jailNbrs(p, out) {
+    if (CBZ.queryNpcsNear) CBZ.queryNpcsNear(p.x, p.z, 4, out); else out.length = 0;
+    // not the dead (crowd.js parks its free rigs as `dead` at their last x/z),
+    // not the escaped, not a man lying in his rack
+    let k = 0;
+    for (let i = 0; i < out.length; i++) {
+      const o = out[i];
+      if (o.dead || o.escaped || o._propLie) continue;
+      out[k++] = o;
     }
-    n._lastX = gp.x; n._lastZ = gp.z;
+    out.length = k;
+    const G = CBZ.guards;
+    if (G) for (let i = 0; i < G.length; i++) {
+      const g = G[i];
+      if (!g || g.dead || !g.group) continue;
+      const q = g.group.position, dx = q.x - p.x, dz = q.z - p.z;
+      if (dx * dx + dz * dz < 16) out.push(g);
+    }
+    return out.length;
+  }
+  CBZ.jailNbrs = jailNbrs;
+  // a body another system owns this frame: seated, lying, mid-transition
+  function heldByPosture(n) {
+    return !!(n._propLie || n._propBed || n._propSeat
+      || (n.char && (n.char.sitting || n.char.lying))
+      || (CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(n))
+      || (CBZ.propArcActive && CBZ.propArcActive(n)));
+  }
+  // is the order a WAYPOINT (walked through) rather than a goal (braked into)?
+  function onLeg(n) {
+    const t = n.target;
+    const mu = n._muster;
+    if (mu && mu.way && mu.way.length && (n._wayI | 0) < mu.way.length - 1) {
+      const w = mu.way[n._wayI | 0];
+      if (w && Math.abs(w.x - t.x) < 1e-3 && Math.abs(w.z - t.z) < 1e-3) return true;
+    }
+    const S = n._nav;
+    if (S && S.pts && S.gx != null && CBZ.prisonNav && CBZ.prisonNav.owns(n)) {
+      return Math.hypot(t.x - S.gx, t.z - S.gz) > 0.3;
+    }
+    return false;
   }
 
   // Purposeful calm-time routine for named/full-rig inmates. The combat brain
@@ -194,7 +211,7 @@
     n.activityState = n._lifeActivity;
     if (n._lifeActivity === "stand" || n._lifeActivity === "activity") {
       n.target.set(n._lifeX, 0, n._lifeZ);
-      n.group.rotation.y = lerpAngle(n.group.rotation.y, n._lifeHeading, 1 - Math.pow(0.001, dt));
+      n._faceYaw = n._lifeHeading; n._faceTTL = 0.25;    // the mover turns him, at a man's rate
       return 0;
     }
     return speed * 0.78;                   // calm transit, not perpetual sprinting
@@ -369,10 +386,6 @@
     }
 
     speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
-    // the stall recovery jiggles a man toward a fresh random spot; a body the
-    // navigator is walking round a corner is not stuck, he is going the long way
-    recoverStuck(n, dt, speed, gp, (curfew && V2 && !!(n._muster && n._muster.way))
-      || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n)));
 
     /* HOW TO GET THERE, asked once everybody has finished saying WHERE.
        The brain (order 18), the cell leash (21.9), the night muster and the bed
@@ -389,58 +402,62 @@
     if (CBZ.npcConfine) CBZ.npcConfine(n);
     if (CBZ.prisonNav) CBZ.prisonNav.step(n, dt);
 
-    /* THE STEP. Two things this used to get wrong every frame, and both read
-       as "glitchy" from the player's cell (owner, 2026-09-04: "fix glitchiness,
-       there's a lot of glitchiness, getting stuck in cell"):
-
-       · THE BODY HAD NO VELOCITY. Position moved `speed * dt` along whatever
-         `target` said THIS frame, so a re-rolled target, a new waypoint or a
-         pal's next step flipped a walking man's heading inside one frame and
-         a body arriving at its goal went from full pace to a dead stop in
-         one. Now the mover carries a velocity and turns it toward what the
-         brain wants at a bounded rate (walking pace in about a quarter of a
-         second), and a goal in plain sight is eased into over its last metre.
-       · THE LEGS WERE FED THE ORDER, NOT THE GROUND. animChar got the speed
-         the brain ASKED for, so a man held on a bunk frame, a jamb or another
-         body by systems/actorcollide.js ran on the spot — the treadmill,
-         wherever it happens. The walk cycle is now driven by what the body
-         actually gained last frame after the wall resolver had its say
-         (`_acX/_acZ`, stamped at order 25), less any knockback slide, so a
-         body that is not going anywhere STANDS. */
-    if (n.pause > 0) {
-      n.pause -= dt;
+    /* THE STEP (CBZ.moves). Velocity with acceleration limits, a braking
+       arrival that latches (no overshoot, no hunting a goal that jitters), a
+       yaw that turns at a man's rate and turns IN PLACE before stepping off
+       the other way, keep-right avoidance of the men around him, and a
+       committed side-step when he is genuinely stuck. The legs are fed the
+       ground he actually covered (m.gs), so a body held by the bars or a
+       jamb stands instead of running on the spot. */
+    const M = CBZ.moves;
+    const m = M.motor(n);
+    let faceY = null;
+    if (n._faceTTL > 0) { n._faceTTL -= dt; faceY = n._faceYaw; }
+    if (heldByPosture(n)) {
+      // the seat, the bunk or a transition owns this transform
+      M.reset(m, gp);
       n._vx = n._vz = 0;
-      if (near) animChar(n.char, 0, dt);
+      if (n.pause > 0) n.pause -= dt;
+      // mid-sequence the posture layer animates the rig itself; a HELD seat or
+      // bed (no sequence) is still ours to tick so the sit/lie pose runs
+      if (near && !(M.busy && M.busy(n))) animChar(n.char, 0, dt);
     } else {
-      const dx = n.target.x - gp.x;
-      const dz = n.target.z - gp.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 0.3) {
-        if (!CBZ.aiThink) { n.pause = 0.8 + econ.rng() * 2.4; pickTarget(n); }
-        else n.pause = 0.15;
-        n._vx = n._vz = 0;
-        if (near) animChar(n.char, 0, dt);
+      const O = MV_OPTS;
+      const paused = n.pause > 0;
+      if (paused) n.pause -= dt;
+      const pdx = gp.x - CBZ.player.pos.x, pdz = gp.z - CBZ.player.pos.z;
+      O.lod = M.lodFor(pdx * pdx + pdz * pdz, n.group.visible);
+      O.face = faceY; O.strafe = faceY != null;
+      O.nbrs = null; O.nbrN = 0;
+      if (paused) {
+        // told to stand: brake to a stop where he is (a runner takes a step or
+        // two to do it), still turning to any face order
+        O.speed = 0; O.stop = 0.3; O.leg = false; O.accel = 0;
+        M.step(m, gp, n.group.rotation.y, gp.x, gp.z, O, dt);
       } else {
-        // a route leg or a muster leg is walked at full pace (the corner is
-        // not the goal); a goal in plain sight is eased into over its last metre
-        const leg = (n._muster && n._muster.way) || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n));
-        const want = (!leg && dist < 1.0) ? speed * Math.max(0.6, dist) : speed;
-        const wx = (dx / dist) * want, wz = (dz / dist) * want;
-        let vx = n._vx || 0, vz = n._vz || 0;
-        let ex = wx - vx, ez = wz - vz;
-        // getting going is quick (a man steps off in a tenth of a second);
-        // turning and stopping are what the bound is for
-        const along = (vx * wx + vz * wz) >= 0.6 * Math.hypot(vx, vz) * want;
-        const el = Math.hypot(ex, ez), cap = (along ? ACCEL_UP : ACCEL) * dt;
-        if (el > cap) { ex *= cap / el; ez *= cap / el; }
-        vx += ex; vz += ez;
-        n._vx = vx; n._vz = vz;
-        gp.x += vx * dt;
-        gp.z += vz * dt;
-        const vl = Math.hypot(vx, vz);
-        if (vl > 0.05) n.group.rotation.y = lerpAngle(n.group.rotation.y, Math.atan2(vx, vz), 1 - Math.pow(0.0001, dt));
-        if (near) animChar(n.char, Math.min(vl, groundSpeed(n, dt) * 1.3 + 0.05), dt);
+        O.speed = speed > 0 ? speed : 0;
+        O.stop = 0.3;
+        O.leg = onLeg(n);
+        O.accel = O.speed > 3 ? 5.2 : 0;           // a man breaking into a run gets going harder
+        if (O.lod === 0 && O.speed > 0) { O.nbrN = jailNbrs(gp, _nbrs); O.nbrs = _nbrs; }
+        M.step(m, gp, n.group.rotation.y, n.target.x, n.target.z, O, dt);
+        if (m.arrived && !CBZ.aiThink) { n.pause = 0.8 + econ.rng() * 2.4; pickTarget(n); }
+        /* A WANDERER THAT IS STILL STUCK after the motor's own detours (three
+           committed side-steps) gives the spot up and picks another. Never a
+           routed man: the navigator is walking him the long way round, and
+           systems/prisonschedule.js's own stall detector gives a muster rack
+           away rather than jiggling him at a wall. */
+        if (m.stuckN >= 3) {
+          const roam = !n.aiState || n.aiState === "wander" || n.aiState === "socialize";
+          const routed = !!(n._muster && n._muster.way) || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n));
+          if (roam && !routed) { pickTarget(n); m.stuckN = 0; }
+        }
       }
+      n.group.rotation.y = m.yaw;
+      n._vx = m.vx; n._vz = m.vz;                  // world/cellblock.js's lounge reads these
+      // legs: the ground covered, never faster than the body is being driven
+      // (a knockback shove is ground moving under him, not strides)
+      if (near) animChar(n.char, Math.min(m.gs, m.speed + 0.4), dt);
     }
     if (near) poseRoutine(n, dt);
 

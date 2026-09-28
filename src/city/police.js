@@ -500,8 +500,26 @@
     if (low) low.rotation.set(-1.9, 0, 0);
   }
 
+  /* AN OFFICER STOPS AND TURNS LIKE A MAN (CBZ.moves). standIdle brakes
+     whatever walk he had through the motor (a few tenths of a second, never a
+     freeze inside a frame) and turns him to `faceY` at the motor's bounded
+     rate; stepTo (below) gives the walk a velocity and a turn-in-place. The
+     rig is fed the MEASURED ground speed, so a cop pinned on a wall stands. */
+  const _copIdle = { speed: 0, stop: 0.3, face: null, lod: 1 };
+  // the police's own "stand here facing faceY": a decision, so it goes through
+  // holdFace (CBZ.brain.act -> the "city-law" executor -> motorIdle below)
   function standIdle(c, faceY, dt, near) {
     holdFace(c, Math.sin(faceY), Math.cos(faceY), dt, near);
+  }
+  // THE EXECUTION: brake through the motor and hold faceY at its bounded turn
+  function motorIdle(c, faceY, dt, near) {
+    const Mv = CBZ.moves, m = Mv.motor(c);
+    _copIdle.face = faceY;
+    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + m.vx, c.pos.z + m.vz, _copIdle, dt);
+    c.group.rotation.y = m.yaw;
+    c.speed = m.speed;
+    finalizeMove(c);
+    if (near) animChar(c.char, m.gs, dt);
   }
 
   // beats walk in TWOS: a mate-less ambient cop claims the nearest free single.
@@ -3789,6 +3807,10 @@
   let _dt = 0.016, _near = false;
   const _mv = { speed: 0, arrive: 0.05 };
   function brainAct() { const b = CBZ.brain; return b && b.act && b.act.moveTo ? b.act : null; }
+  // (dx, dz) is a DIRECTION to walk at `spd` (callers pass a full delta, a
+  // navigator's next step or a flight vector alike), so it is a waypoint leg:
+  // the motor carries the speed, and motorIdle is where he brakes.
+  const _copStep = { speed: 0, leg: true, stop: 0.3, accel: 3.6, face: null, lod: 1 };
   function stepTo(c, dx, dz, spd, dt, near) {
     _dt = dt; _near = near;
     const A = c._lawReg ? brainAct() : null;
@@ -3804,23 +3826,26 @@
   }
   function rawStep(c, dx, dz, spd, dt, near) {
     const gd = Math.hypot(dx, dz) || 1;
-    c.pos.x += (dx / gd) * spd * dt;
-    c.pos.z += (dz / gd) * spd * dt;
-    c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-    c.speed = spd;
+    const Mv = CBZ.moves, m = Mv.motor(c);
+    _copStep.speed = spd; _copStep.accel = spd > 3 ? 5.5 : 3.6;
+    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + (dx / gd) * 4, c.pos.z + (dz / gd) * 4, _copStep, dt);
+    c.group.rotation.y = m.yaw;
+    c.speed = m.speed;
     finalizeMove(c);
-    if (near) animChar(c.char, c.speed, dt);
+    if (near) animChar(c.char, m.gs, dt);
   }
+  // stop: the motor brakes him (a few tenths of a second, never a freeze in a
+  // frame) holding the heading rawFace has been turning him to
   function rawHold(c) {
-    c.speed = 0;
-    finalizeMove(c);
-    if (_near && c.char) animChar(c.char, 0, _dt);
+    if (!c.group) { c.speed = 0; finalizeMove(c); return; }
+    motorIdle(c, c.group.rotation.y, _dt, _near);
   }
-  // a smooth turn, never a snap: ~0.35 s to come round 90 degrees
+  // face: the motor's bounded turn (CBZ.moves.face), never a snap
   function rawFace(c, x, z) {
     const dx = x - c.pos.x, dz = z - c.pos.z;
     if (dx * dx + dz * dz < 1e-6 || !c.group) return;
-    c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, _dt));
+    const Mv = CBZ.moves;
+    c.group.rotation.y = Mv.face(Mv.motor(c), c.group.rotation.y, Math.atan2(dx, dz), _dt);
   }
   // THE LAW'S FOOTWORK for one ladder mode (city/law.js decide()). Every
   // move/stop decision has a start/stop BAND so an officer on the edge of a

@@ -91,9 +91,9 @@
      inside police.js's own loop over `CBZ.cityCops`, so a non-cop body
      stamped with `_post` is inert. Private details therefore write the SAME
      `_post` record (one field shape citywide, so the future shared tick finds
-     them) and are stepped by `CBZ.protection.moveToward` — protection.js's
-     own exported follow primitive, which its header already calls "the one
-     copy now" of officials.js's moveToward and social.js's companion follow.
+     them) and are walked by `CBZ.protection.order` — a ped.moveOrder that
+     peds.js's one mover (CBZ.moves) steps, with the principal's formation
+     frame (protection.frameOf) giving the slot, his pace and the at-rest scan.
      See §THE ONE EDIT OWED at the foot of this file.
    · occupy.js — THE floor ladder, whole. `cityOccupyBuilding` already builds
      the staircase (cityStairCore), carves the floors, runs the interior
@@ -468,15 +468,23 @@
   // spread, phased off the principal's heading — so for n=4 it is a diamond
   // (point, two flanks, tail), which is what close protection actually is —
   // and they face OUTWARD, away from the man they are covering.
+  /* THE RING TURNS WITH HIS WALK, NOT WITH HIS HEAD. The bearing used to be
+     read straight off the principal's rotation.y, so every glance he threw
+     swung the whole ring round him and six guards ran a lap. It now reads
+     the formation frame (CBZ.moves.formation via protection.frameOf, updated
+     once per frame in driveRing): travel heading at a bounded turn rate, the
+     anchor predicted a beat ahead, and his velocity handed out as feed-forward. */
   function slotFor(rec, i, n) {
-    const a = rec.actor;
-    const h = (a.group ? a.group.rotation.y : 0);
+    const a = rec.actor, F = rec._F;
+    const h = F && F.h != null ? F.h : (a.group ? a.group.rotation.y : 0);
     const bear = h + rec.phase + (i / Math.max(1, n)) * Math.PI * 2;
     const sx = Math.sin(bear), sz = Math.cos(bear);
+    const ax = F && F.px != null ? F.ax : a.pos.x, az = F && F.px != null ? F.az : a.pos.z;
     return {
-      x: a.pos.x + sx * rec.kit.reach,
-      z: a.pos.z + sz * rec.kit.reach,
+      x: ax + sx * rec.kit.reach,
+      z: az + sz * rec.kit.reach,
       fx: sx, fz: sz,
+      vx: F && F.moving ? F.vx : 0, vz: F && F.moving ? F.vz : 0,
     };
   }
 
@@ -654,6 +662,9 @@
     if (!rec.guards.length) return;
 
     // ---- MOVE THE SLOT, NOT THE GUARD -----------------------------------
+    const PR = CBZ.protection;
+    const F = PR && PR.frameOf ? PR.frameOf(rec) : null;
+    if (F) F.update(a.pos.x, a.pos.z, a.group ? a.group.rotation.y : null, dt);
     const n = rec.guards.length;
     const me = playerActor();
     const stage = Math.floor(rec.stage);
@@ -679,9 +690,10 @@
       q.surrender = false; q.surrenderT = 0; q.poseHandsUp = false;
 
       if (threat && !threat.dead) {
-        // OPEN FIRE — the exact field quartet rallyGang and occupy.js's wake()
-        // write. peds.js's move() does the chasing and the shooting; not one
-        // line of combat lives in this file.
+        // OPEN FIRE — the exact field quartet rallyGang and occupy.js's
+        // wake() write. peds.js's move() does the chasing and the shooting;
+        // not one line of combat lives in this file.
+        if (PR && PR.release) PR.release(q);
         q.rage = threat; q.state = "fight";
         q.guard = { x: slot.x, z: slot.z }; q.homeGuard = q.guard;
         if (q.target) q.target.set(threat.pos.x, 0, threat.pos.z);
@@ -689,49 +701,37 @@
         continue;
       }
       if (q.rage) q.rage = null;
+      if (!PR || !PR.order) continue;
+      // THE DETAIL BRAIN (city/brain_protection.js) walks this guard: its
+      // slot table, looks and panic drill, executed through the same
+      // moveOrder. Everything below is only for a ring nobody handed to it.
+      if (q._detailBrain) continue;
 
       if (stage >= STAGE_DRAW && me) {
-        // DRAWN, NOT FIRING — peds.js's own "confront" state, which that file
-        // documents verbatim as "close in, threaten". Hold ground, square up.
-        q.state = "confront"; q.speed = 0; q.path = null;
-        if (q.target) q.target.set(me.pos.x, 0, me.pos.z);
-        if (q.group) q.group.rotation.y = Math.atan2(me.pos.x - q.pos.x, me.pos.z - q.pos.z);
+        // DRAWN, NOT FIRING — peds.js's own "confront" state ("close in,
+        // threaten"): hold the slot, squared up to him, side-stepping.
+        q.state = "confront";
+        PR.order(q, slot.x, slot.z, 2.4, Math.atan2(me.pos.x - q.pos.x, me.pos.z - q.pos.z), true, slot.vx, slot.vz, 0.3);
         continue;
       }
 
-      // THE DETAIL BRAIN (city/brain_protection.js) walks this guard: smoothed
-      // slots, speed matching, bounded turns, sector scans. The follow below
-      // is only for a ring nobody has handed to it.
-      if (q._detailBrain) continue;
       const dd = hyp(slot.x - q.pos.x, slot.z - q.pos.z);
-      if (dd > 40) {
+      if (dd > 40 && d > CFG.POWER_GUARD_NEAR * 0.6) {
         // hopelessly dropped (a lift ride, a teardown) — fall back in, but
         // never where the player can watch it happen.
-        if (d > CFG.POWER_GUARD_NEAR * 0.6) { q.pos.set(slot.x, 0, slot.z); q.path = null; }
-      } else if (dd > 0.7) {
-        // THE SLOT IS THE DESTINATION, and it is written into BOTH the field
-        // peds.js's own move() walks toward (`target`) and the shared follow
-        // primitive — so the two agree instead of fighting. protection.js's
-        // moveToward is officials.js's original follow, which its own header
-        // calls "the one copy now"; we add no locomotion of our own.
-        q.state = "walk"; q.path = null; q.pause = 0;
-        if (q.target) q.target.set(slot.x, 0, slot.z);
-        if (CBZ.protection && CBZ.protection.moveToward) {
-          CBZ.protection.moveToward(q, slot.x, slot.z, 2.2, dt);
-        } else if (q.pos) {
-          // degrade-safe inline (protection.js absent): the same two lines
-          q.speed = 2.2;
-          q.pos.x += ((slot.x - q.pos.x) / dd) * 2.2 * dt;
-          q.pos.z += ((slot.z - q.pos.z) / dd) * 2.2 * dt;
-          if (q.group) q.group.rotation.y = Math.atan2(slot.x - q.pos.x, slot.z - q.pos.z);
-        }
-      } else {
-        q.state = "idle"; q.speed = 0;
-        if (q.target) q.target.set(q.pos.x, 0, q.pos.z);
-        // eyes OUT, away from the man they are covering — the read that says
-        // "these people are working" rather than "these people are chatting".
-        if (q.group) q.group.rotation.y = Math.atan2(slot.fx, slot.fz);
+        q.pos.set(slot.x, 0, slot.z); q.path = null;
+        if (CBZ.moves) CBZ.moves.reset(CBZ.moves.motor(q), q.pos);
       }
+      // THE SLOT IS THE DESTINATION, walked by peds.js's one mover (the
+      // moveOrder seam): his pace as feed-forward, a catch-up jog when well
+      // behind, and at rest eyes OUT, away from the man they are covering,
+      // with held glances: "these people are working", not a statue ring.
+      if (dd > 4) q._protRun = true; else if (dd < 1.5) q._protRun = false;
+      const rest = !(F && F.moving) && ((q._mv && q._mv.arrived) || dd < 0.6);
+      const out = Math.atan2(slot.fx, slot.fz);
+      q.state = "walk";
+      PR.order(q, slot.x, slot.z, q._protRun ? 4.6 : 2.2,
+        rest ? (F ? F.scan(i, out, dt) : out) : null, rest, slot.vx, slot.vz, 0.3);
     }
   }
 
