@@ -102,8 +102,8 @@
    boxGeom caches on the exact string "w,h,d", and this rig varies every
    dimension by body profile (charProfile: build "m"/"f", the GROWTH age
    table, statureMul) — so an adult male's chest and a 40-year-old woman's
-   chest are two cache entries, and most entries end up shared by fewer than
-   MIN_SHARE rigs. Pooling per-entry can only ever produce a long tail.
+   chest are two cache entries, and most entries end up shared by a handful
+   of rigs. Pooling per-entry can only ever produce a long tail.
    A box does not need its own geometry: ONE unit BoxGeometry(1,1,1) maps
    exactly onto any axis-aligned box under an affine local matrix
        L = translate(bbox.centre) * scale(bbox.size)
@@ -136,9 +136,12 @@
    than for this file to start lying about `visible`.
 
    WHAT STAYS A REAL MESH (the fallback path, counted by the audit):
-     • any part whose (geometry, material-class, shadow-flags) combo is
-       used by fewer than MIN_SHARE=4 rigs — rare gear, one-off props, a
-       uniquely-painted garment. Instancing a pool of two is a loss.
+     • a WHOLE BODY, never part of one: if any poolable part of a rig cannot
+       get a pool slot (table or capacity full), the entire rig draws itself
+       that frame (placeRig — the owner's "hands but no shirt or pants" was a
+       body split between the two mechanisms). There is no share threshold any
+       more: a pool of one costs the one draw call the real mesh would have,
+       and a threshold is what split rare-outfit bodies in the first place.
      • transparent / multi-material / invisible-material parts (sorting).
      • held weapons and hand/weapon sockets — they hang off socket GROUPS,
        are per-weapon unique, and are not part of the 22-mesh body.
@@ -195,9 +198,11 @@
   const HIDE_MASK = 1 << HIDE_LAYER;
   CBZ.PED_INST_LAYER = HIDE_LAYER;
 
-  const MIN_SHARE = 4;      // a combo must be shared by >= 4 rigs to be worth a pool
-  const MAX_POOLS = 160;    // blast-radius cap; past it, parts stay real meshes
-  const START_CAP = 64;     // initial instance capacity (doubles on demand)
+  // Live-combo cap; past it a body that needs a new pool draws itself WHOLE
+  // (see placeRig). 700 posted peds in every wardrobe want ~440 live pools
+  // (tools/human-audit.mjs) — each is one draw call, against ~22 per real rig.
+  const MAX_POOLS = 1024;
+  const START_CAP = 16;     // initial instance capacity (doubles on demand); most combos hold a few bodies
   // Per-pool ceiling. With the unit-box remap a single pool legitimately
   // holds one skin-coloured box for every head/arm/hand/face box on ~600
   // rigs, so the old 8192 was inside the working set, not outside it.
@@ -408,7 +413,7 @@
       key: key, geo: tintGeo(L ? unitBox() : o.geometry), mat: mat, box: !!L,
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
-      recs: [], active: false, mDirty: false, cDirty: false, live: 0,
+      recs: [], mDirty: false, cDirty: false, live: 0,
     };
     pools.set(key, p);
     return p;
@@ -522,7 +527,7 @@
     if (rec.rig && rec.rig.parked) return true;     // whole body parked on purpose
     if (rec.parked || rec.slot < 0) return false;
     const p = rec.pool;
-    if (!p || !p.active || !p.mesh || rec.slot >= p.mesh.count) return false;
+    if (!p || !p.mesh || rec.slot >= p.mesh.count) return false;
     return true;
   };
   CBZ.pedInstanceRelease = function (mesh) {
@@ -559,16 +564,7 @@
     o._pinst = rec;
     p.recs.push(rec);
     rig.recs.push(rec);
-    /* MIN_SHARE gate: a pool only switches on once enough rigs share the
-       combo to be worth one draw call plus the per-frame matrix upload.
-       Once ON it stays on (hysteresis — a pool flickering across the
-       threshold would strobe bodies), and every later member joins live. */
-    if (!p.active) {
-      if (p.recs.length >= MIN_SHARE) {
-        p.active = true;
-        for (let i = 0; i < p.recs.length; i++) acquire(p.recs[i]);
-      }
-    } else acquire(rec);
+    acquire(rec);
     return rec;
   }
 
@@ -623,9 +619,11 @@
      stop drawing — their `visible` flag is untouched by this file, so the
      instanced copy disappears for exactly the same reason the real mesh
      used to. */
+  const _parts = [];                // this rig's visible meshes, filled by walk()
   function walk(rig, g) {
     const st = _stack;
     st.length = 0;
+    _parts.length = 0;
     const c0 = g.children;
     for (let i = 0; i < c0.length; i++) st.push(c0[i]);
     while (st.length) {
@@ -637,16 +635,47 @@
       // all if something skips updateMatrixWorld for non-rendering trees).
       o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
       o.matrixWorldNeedsUpdate = false;
-      if (o.isMesh) part(rig, o);
+      if (o.isMesh) _parts.push(o);
       const ch = o.children;
       for (let i = 0; i < ch.length; i++) st.push(ch[i]);
     }
+    placeRig(rig);
   }
 
-  function part(rig, o) {
+  /* ---- A BODY IS DRAWN WHOLE, BY ONE MECHANISM, OR NOT BY THIS FILE ------
+     Owner (2026-09-27): "some female characters (female security) have an
+     INVISIBLE BODY: hands but no shirt or pants."
+
+     This pass used to decide PART BY PART. A part whose combo had a live pool
+     went to the hide layer and was drawn by the pool; a part whose combo did
+     not (below MIN_SHARE, or the pool table already full) stayed a real mesh.
+     So a person could be — and in a live city MOST people were — drawn by two
+     unrelated mechanisms at once: head, hands and shoes (a handful of combos
+     every body in the city shares, pooled on the first frames of the session)
+     by InstancedMeshes under the scene root, and the garments (one combo per
+     outfit atlas x body shape, hundreds of them) by the rig's own meshes.
+     Measured headless (tools/human-audit.mjs's live stage, 700 posted peds,
+     2026-09-27): the 160-pool table was full within the first frame, every
+     head / hand / shoe was pooled and ~40-50% of all torso, sleeve and
+     trouser meshes were real. A body split like that is one render-time
+     disagreement away from exactly the owner's picture — anything that stops
+     the rig's own subtree drawing after this pass ran (a group hidden later in
+     the frame, a culled or stale mesh) leaves the pooled hands, head and
+     shoes standing in the street with nothing between them. It skewed to
+     women because a woman is a second set of box shapes: every painted outfit
+     on her is a combo of its own, so more of her garments than a man's landed
+     past the full table (the audit's 540-body crowd before this change: all
+     270 women split, 239 of 270 men).
+
+     So the rule is now per BODY: every poolable part of the rig is carried by
+     a live pool slot this frame, or the rig draws itself — all of it, the
+     pre-instancing renderer, which cannot split. Parts that are not poolable
+     at all (a transparent prop, a multi-material gun) are attachments that
+     always drew themselves and still do. */
+  function claim(rig, o) {
     let rec = o._pinst;
     if (rec && rec.dead) { o._pinst = null; rec = null; }
-    if (!poolable(o)) { if (rec) release(rec); fallbackMeshes++; return; }
+    if (!poolable(o)) { if (rec) release(rec); return null; }
     const m = o.material;
     if (rec) {
       // Cheap identity/emissive drift check — a garment swap (clothes.js),
@@ -661,31 +690,56 @@
       }
     }
     if (!rec) {
-      if (o._pinstSkip > stamp) { fallbackMeshes++; return; }
+      if (o._pinstSkip > stamp) return false;
       rec = bind(rig, o);
-      if (!rec) { fallbackMeshes++; return; }
+      if (!rec) return false;
     }
     rec.stamp = stamp;
-    const p = rec.pool;
-    // Below MIN_SHARE (or out of capacity) the part keeps drawing itself —
-    // the fallback IS the old behaviour, so a refusal can never look wrong.
-    if (!p.active || rec.slot < 0) { fallbackMeshes++; return; }
-    /* The instance matrix is world * L — L reshapes the shared unit cube
-       into THIS part's box. o.matrixWorld itself is left as the TRUE part
-       transform (walk() wrote it a moment ago), because gore.js decomposes
-       it for the flying limb and getWorldPosition callers read it; folding L
-       into it would hand them a body-sized object at a corner offset. */
-    p.mesh.setMatrixAt(rec.slot, rec.L ? _inst.multiplyMatrices(o.matrixWorld, rec.L) : o.matrixWorld);
-    p.mDirty = true;
-    rec.parked = false;
-    p.live++;
-    if (!rec.hidden) hide(rec);       // the instance now carries this pose
-    const c = m.color;
-    if (c && (c.r !== rec.cr || c.g !== rec.cg || c.b !== rec.cb)) {
-      rec.cr = c.r; rec.cg = c.g; rec.cb = c.b;
-      _col.setRGB(c.r, c.g, c.b);
-      p.mesh.setColorAt(rec.slot, _col);
-      p.cDirty = true;
+    return rec;
+  }
+  function placeRig(rig) {
+    let whole = true;
+    for (let i = 0; i < _parts.length; i++) {
+      const rec = claim(rig, _parts[i]);
+      _parts[i] = rec;                                    // the mesh is rec.mesh from here on
+      if (rec === false) whole = false;                   // poolable, but no pool would take it
+      else if (rec && rec.slot < 0) whole = false;
+    }
+    if (!whole) {
+      // The whole body draws itself this frame: nothing on the hide layer,
+      // no instance left holding a pose. It re-checks every frame, so the
+      // moment its last combo gets a live pool the body moves over in one go.
+      for (let i = 0; i < _parts.length; i++) {
+        const rec = _parts[i];
+        if (!rec) continue;
+        park(rec); show(rec);
+      }
+      fallbackMeshes += _parts.length;
+      rig.selfDrawn = true;
+      return;
+    }
+    rig.selfDrawn = false;
+    for (let i = 0; i < _parts.length; i++) {
+      const rec = _parts[i];
+      if (!rec) { fallbackMeshes++; continue; }           // an attachment that was never poolable
+      const o = rec.mesh, p = rec.pool, m = o.material;
+      /* The instance matrix is world * L — L reshapes the shared unit cube
+         into THIS part's box. o.matrixWorld itself is left as the TRUE part
+         transform (walk() wrote it a moment ago), because gore.js decomposes
+         it for the flying limb and getWorldPosition callers read it; folding L
+         into it would hand them a body-sized object at a corner offset. */
+      p.mesh.setMatrixAt(rec.slot, rec.L ? _inst.multiplyMatrices(o.matrixWorld, rec.L) : o.matrixWorld);
+      p.mDirty = true;
+      rec.parked = false;
+      p.live++;
+      if (!rec.hidden) hide(rec);       // the instance now carries this pose
+      const c = m.color;
+      if (c && (c.r !== rec.cr || c.g !== rec.cg || c.b !== rec.cb)) {
+        rec.cr = c.r; rec.cg = c.g; rec.cb = c.b;
+        _col.setRGB(c.r, c.g, c.b);
+        p.mesh.setColorAt(rec.slot, _col);
+        p.cDirty = true;
+      }
     }
   }
 
@@ -813,11 +867,27 @@
       else park(rec);
     }
   }
+  function uploadOrRetire(p, key) {
+    if (!p.recs.length) { killPool(p); pools.delete(key); return; }
+    uploadPool(p);
+  }
   function uploadPool(p) {
     if (!p.mesh) return;
     if (p.mesh.count !== p.next) p.mesh.count = p.next;   // never draw beyond high water
-    if (p.mDirty) { p.mesh.instanceMatrix.needsUpdate = true; p.mDirty = false; }
-    if (p.cDirty && p.mesh.instanceColor) { p.mesh.instanceColor.needsUpdate = true; p.cDirty = false; }
+    // Upload only the slots in use: a pool's capacity is a power of two past
+    // its high water, and with one pool per live combo (hundreds of them, many
+    // holding a single body) whole-capacity uploads were mostly empty slots.
+    // Every slot ever written is < p.next, so [0, next) is the whole truth.
+    if (p.mDirty) {
+      const a = p.mesh.instanceMatrix;
+      a.updateRange.offset = 0; a.updateRange.count = p.next * 16;
+      a.needsUpdate = true; p.mDirty = false;
+    }
+    if (p.cDirty && p.mesh.instanceColor) {
+      const c = p.mesh.instanceColor;
+      c.updateRange.offset = 0; c.updateRange.count = p.next * 3;
+      c.needsUpdate = true; p.cDirty = false;
+    }
   }
 
   function tick() {
@@ -842,8 +912,12 @@
     _gone.length = 0;
     rigs.forEach(sweepRig);
     for (let i = 0; i < _gone.length; i++) dropRig(_gone[i]);
-    // One upload per dirty buffer per frame — never per instance.
-    pools.forEach(uploadPool);
+    // One upload per dirty buffer per frame — never per instance. A pool
+    // nobody belongs to any more is RETIRED here: the table is a cap on the
+    // combos alive now, not on every combo the session has ever seen (it used
+    // to fill with the dead keys of every re-dress and never empty, which is
+    // what left every body spawned later half-pooled).
+    pools.forEach(uploadOrRetire);
   }
 
   // LATE, just before core/loop.js:107 renders: every pose/animation/
@@ -875,7 +949,7 @@
       // THE BLACK-BODY GUARD: vertexColors with no `color` attribute paints
       // the whole pool black (see tintGeo). Must stay 0, forever.
       if (p.mat && p.mat.vertexColors && p.geo && p.geo.attributes && !p.geo.attributes.color) blackPools++;
-      if (p.active && p.mesh && p.next > 0) {
+      if (p.mesh && p.next > 0) {
         active++; live += p.live;
         if (p.box) boxPools++;          // drawing the shared unit cube
       }
@@ -897,8 +971,29 @@
       rigsTracked: rigs.size,
       fallbackMeshes: fallbackMeshes,
       capacity: capacity,
-      minShare: MIN_SHARE,
       maxPools: MAX_POOLS,
+      // RATCHET: tracked rigs being drawn part-pooled, part-real. placeRig
+      // makes this 0 by construction; it is counted so nobody can quietly
+      // bring the per-part decision back. Pin at 0.
+      splitRigs: countSplit(),
+      // bodies drawing themselves whole because a pool could not take them
+      // (table or capacity full). Evidence, not an invariant — expect 0.
+      selfDrawnRigs: countSelfDrawn(),
     };
   };
+  function countSplit() {
+    let n = 0;
+    rigs.forEach(function (r) {
+      if (r.parked) return;                       // not being drawn by anyone
+      let pooled = 0, real = 0;
+      for (let i = 0; i < r.recs.length; i++) {
+        const rec = r.recs[i];
+        if (rec.dead) continue;
+        if (rec.hidden) pooled++; else real++;
+      }
+      if (pooled && real) n++;
+    });
+    return n;
+  }
+  function countSelfDrawn() { let n = 0; rigs.forEach(function (r) { if (r.selfDrawn && !r.parked) n++; }); return n; }
 })();
