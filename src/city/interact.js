@@ -778,6 +778,9 @@
   });
   I.registerZone({
     id: "zone-stash", kind: "stash", prio: 10, driving: false,
+    // only a stash with NO count table: a fitted hideout's stash is the count
+    // table itself and is taken there (zone-interior-loot "Take the count");
+    // cityNearestStash skips those, so one table never carries two verbs
     find: function (px, pz) { return CBZ.cityNearestStash ? CBZ.cityNearestStash(px, pz, REACH) : null; },
     // the hand goes into their duffel (systems/verbs_pickup.js); robbed on the grab frame
     options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) {
