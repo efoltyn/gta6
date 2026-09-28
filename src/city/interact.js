@@ -116,8 +116,6 @@
   // ---- gang membership / relationship helpers (all feature-detected) ----
   // your CURRENT membership in an NPC crew (you as a member, not the boss), or null.
   function myMemb() { return (CBZ.cityMembership && CBZ.cityMembership()) || null; }
-  // the human rank label for your membership (Prospect / Soldier / …).
-  function myRankName() { const m = myMemb(); if (!m) return ""; return CBZ.cityRankName ? CBZ.cityRankName(m.rank) : m.rank; }
   // a gang record by id (feature-detected).
   function gangRec(id) { return (id && CBZ.cityGangById) ? CBZ.cityGangById(id) : null; }
   // are you a PROSPECT for any crew right now? returns its standing 0..1 (or -1).
@@ -145,33 +143,6 @@
     if (!rec.boss || rec.boss.dead) return null;               // leaderless crew can't patch you in
     if (CBZ.cityAtWar && CBZ.cityAtWar("player", rec.id)) return null;  // at war → no welcome
     return rec;
-  }
-  // You can't see the exact $ on someone until you ROB them — only a vibe that
-  // hints whether they're worth it (a rare whale "looks loaded").
-  function pedVibe(p) {
-    if (p.robbed) return "robbed";
-    const w = p.wealth || 0;
-    return w >= 0.985 ? "looks loaded" : w >= 0.85 ? "flashing money" : w >= 0.55 ? "well-dressed" : w < 0.18 ? "looks broke" : "";
-  }
-  function ped$(p) {
-    const flavor = p.archetype === "tweaker" ? "tweaking"
-      : p.archetype === "volatile" ? "on edge"
-      : p.archetype === "dealer" ? "street dealer"
-      : p.archetype === "hustler" ? "hustler"
-      : "";
-    // CONTEXTUAL standing line — only shown when it actually means something:
-    //   • crew-mate (you're patched in together): "your crew · YOU: <rank>"
-    //   • a crew you could prospect: "courting (NN%)" or "prospect this crew"
-    //   • otherwise how THEY feel toward you (loves/respects/hates), if non-neutral
-    let standing = "";
-    const memb = myMemb();
-    if (memb && p.gang && p.gang === memb.gangId) standing = "your crew · you're a " + myRankName();
-    else if (joinableGangOf(p)) {
-      const ps = myProspectStanding();   // 0 when not yet courting (public read can't say -1)
-      standing = ps > 0 ? "they're warming to you" : "prospect this crew";
-    } else if (CBZ.cityRelLabel) { const lbl = CBZ.cityRelLabel(p); if (lbl && lbl !== "neutral") standing = lbl; }
-    const bits = [pedVibe(p), p.job || "", flavor, p.gang || "", p.recruited ? p.kind : "", p === g.cityPartner ? "partner" : "", standing].filter(Boolean);
-    return bits.length ? bits.join(" · ") : "—";
   }
 
   // ---- the raw VERBS (unchanged behavior) ---------------------------------
@@ -1247,13 +1218,8 @@
   // (CITY_SEAT_SILENT), so on a desktop nothing ever told you the key.
 
   // ================== DESCRIBERS: the card header per kind ==================
-  I.describe("ped", function (p) {
-    return {
-      label: ((p.nameKnown || p.recruited || p.companion || p === g.cityPartner) ? p.name : "A stranger") + (p.gang ? " (" + p.gang + ")" : ""),
-      note: ped$(p),
-    };
-  });
-  I.describe("ped:gunpoint", function (p) { return { label: "" + p.name, note: "Hands up · make your demand" }; });
+  // "ped" is described by city/street_talk.js (name + muted role).
+  I.describe("ped:gunpoint", function (p) { return { label: "" + p.name, role: CBZ.cityPedRole ? CBZ.cityPedRole(p) : "", note: "" }; });
   I.describe("vendor", function (v) {
     const name = (v.vendor && v.vendor.building && v.vendor.building.name) || "Counter";
     // the card subtitle = the contextual reason for THIS trade (VERB[kind].sub),

@@ -719,7 +719,7 @@
 
     const desc = (descs[pick.kind] && descs[pick.kind](t, ctx)) || { label: "", note: "" };
     // fingerprint = target + the resolved rows; rebuild DOM only on a real change
-    let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|" +
+    let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "/" + (desc.label || "") + "/" + (desc.role || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
     for (const r of rows) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
     current = pick; currentRows = rows; currentScore = pick.score;
@@ -735,9 +735,19 @@
       fingerprint = fp; dirty = false;
       // The verb card drops describe()'s "— HIJACKABLE" advertisement suffix:
       // the HIJACK row already says it, and the suffix broke the fourth wall.
-      if (nameEl) nameEl.textContent = rows.dualRide
-        ? String(desc.label || "").replace(/\s*, \s*HIJACKABLE\s*$/i, "")
-        : desc.label;
+      // The header is WHO or WHAT you are facing: a person's name, then in
+      // muted type what he is (desc.role: a gang, "Officer", "Security").
+      if (nameEl) {
+        nameEl.textContent = rows.dualRide
+          ? String(desc.label || "").replace(/\s*, \s*HIJACKABLE\s*$/i, "")
+          : (desc.label || "");
+        if (desc.role && nameEl.textContent) {
+          const rs = document.createElement("span");
+          rs.className = "iname-role";
+          rs.textContent = String(desc.role);
+          nameEl.appendChild(rs);
+        }
+      }
       // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
       // two-ACTION exception — never a YES/NO). The proposition lives ON the
       // row; these rows never mutate into a hidden action wheel.

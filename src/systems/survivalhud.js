@@ -62,7 +62,7 @@
     st.id = "survHudStyle";
     st.textContent =
       SV + " #topright #timer," + SV + " #cityKillFeed," + SV + " #minimap," +
-      SV + " #interactName," + SV + " #interactNote{display:none!important}" +
+      SV + " #interactNote{display:none!important}" +
       SV + " #topright #survTop{opacity:0;transition:opacity .6s ease}" +
       SV + " #topright #survTop.sv-on{opacity:1}" +
       SV + " #survBars{width:min(220px,46vw);bottom:calc(20px + env(safe-area-inset-bottom,0px))}" +

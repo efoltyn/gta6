@@ -224,16 +224,40 @@
   /* THE CARD CARRIES VERBS, NOT A DOSSIER (owner, 2026-09-27: "all the
      text... there's just too much bullshit in the way").
 
-     The card used to print the man's NAME in caps, a "read" line assembled
-     from the social ledger ("loyal | holds grudge | Reds hostile"), the
-     snitch report as prose, "waiting on you: ...", "his offer stands: ..."
-     and his pitch AGAIN under the line he had just said out loud. All of it
-     is still true and still drives the AI; none of it is on screen. You know
-     who he is because he is standing in front of you, and you learn what he
-     thinks of you from how he acts and what he says.
+     The card used to print a "read" line assembled from the social ledger
+     ("loyal | holds grudge | Reds hostile"), the snitch report as prose,
+     "waiting on you: ...", "his offer stands: ..." and his pitch AGAIN under
+     the line he had just said out loud. All of it is still true and still
+     drives the AI; none of it is on screen. You learn what he thinks of you
+     from how he acts and what he says.
 
-     The one thing that stays is the NOUN on a stall: a Trade button with a
+     WHO HE IS stays (owner, 2026-09-28: "I just see buttons to interact, but
+     I don't see the name of the person above it. That's dumb."). The Sept 27
+     purge (b47be119) took the name plate out along with the dossier; it is
+     back as ONE line over the buttons: his name, then in muted type what he
+     is (Guard, Warden, Trader, or his clique). Identity, not dialogue: no
+     quotes, no read, no narration.
+
+     The other thing that stays is the NOUN on a stall: a Trade button with a
      price chip and no item name is a button you cannot decide on. */
+  function whoFor(a) {
+    let name = cleanName(a);
+    name = name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
+    let role = "";
+    if (a && a.kind === "warden") role = "Warden";
+    else if (a && a.kind === "guard") role = "Guard";
+    else if (a && a.data && a.data.offer) role = "Trader";
+    else role = gangShort(a);
+    if (role && role.toLowerCase() === name.toLowerCase()) role = "";
+    return { name: shortText(name, 22), role: role };
+  }
+  // name + muted role, the markup #interactName and the touch plate share
+  function whoHTML(a) {
+    const w = whoFor(a);
+    if (!w.name) return "";
+    return esc(w.name) + (w.role ? '<span class="iname-role">' + esc(w.role) + "</span>" : "");
+  }
+  CBZ.prisonWhoFor = whoFor;
   function panelNote(a) {
     const o = a && a.data && a.data.offer;
     if (!o || !o.item) return "";
@@ -596,7 +620,7 @@
   //  is build and fill the DOM; where it lands is one CSS decision. The row is
   //  the verbs; the only line above it is a stall's item and price.
   // ===========================================================================
-  let piRoot = null, piNote = null;
+  let piRoot = null, piName = null, piNote = null;
   let piVerbs = null, piOpts = null, piSig = "", piShown = false, piQuiet = null;
 
   function buildTouchUI() {
@@ -604,9 +628,10 @@
     piRoot = document.createElement("div");
     piRoot.id = "pinteract";
     piRoot.innerHTML =
-      '<div id="pinteractWho"><span class="piw-note"></span></div>' +
+      '<div id="pinteractWho"><span class="piw-name"></span><span class="piw-note"></span></div>' +
       '<div class="pi-row"><div id="pverbs"></div><div id="poptions"></div></div>';
     document.body.appendChild(piRoot);
+    piName = piRoot.querySelector(".piw-name");
     piNote = piRoot.querySelector(".piw-note");
     piVerbs = piRoot.querySelector("#pverbs");
     piOpts = piRoot.querySelector("#poptions");
@@ -658,9 +683,12 @@
     for (let i = 0; i < verbs.length; i++) btns += docked ? optChoice(i, a, verbs[i]) : optButton("svbtn", i, a, verbs[i], 12);
     // renderPanel runs EVERY frame while somebody is in range; only touch the
     // DOM when what it would say actually changed.
-    const sig = note + "\u0001" + btns;
+    const who = whoHTML(a);
+    const sig = who + "\u0001" + note + "\u0001" + btns;
     if (sig === piSig) return;
     piSig = sig;
+    piName.innerHTML = who;
+    piName.style.display = who ? "" : "none";
     piNote.textContent = note;
     piNote.style.display = note ? "" : "none";
     piVerbs.innerHTML = btns;
@@ -728,8 +756,9 @@
     const verbs = capVerbs(verbsFor(a));
     a._verbs = verbs;
     if (touchUI()) { renderTouch(a, verbs, note); return; }
-    // DESKTOP: key rows, the verb and its chip. No name plate, no read line.
-    if (el.interactName.textContent) el.interactName.textContent = "";
+    // DESKTOP: his name over the key rows, then each verb and its chip.
+    const who = whoHTML(a);
+    if (el.interactName.innerHTML !== who) el.interactName.innerHTML = who;
     if (el.interactNote.textContent !== note) el.interactNote.textContent = note;
     const dockedTouch = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
     const html = verbs.map((v, i) => {

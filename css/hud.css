@@ -74,6 +74,9 @@
 }
 #interact.show{opacity:1; transform:translateX(0) scale(1);}
 #interactName{font-weight:700; font-size:18px; letter-spacing:1.5px;}
+#interactName:empty{display:none;}
+/* what the person is (Guard, Warden, Trader, a clique), muted, after the name */
+.iname-role{margin-left:.5em; font-size:.72em; font-weight:600; letter-spacing:.6px; opacity:.62;}
 #interactNote{font-size:11px; font-weight:600; color:#ffd451; margin:1px 0 8px; min-height:13px; max-height:30px; overflow:hidden; line-height:1.18; opacity:.95;}
 .iopt{display:flex; align-items:center; gap:11px; padding:5px 2px;}
 .iopt + .iopt{margin-top:1px;}
@@ -705,8 +708,8 @@ body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-colo
 
    Default is REMOVE. What stays on screen in the prison:
      - the verb pinned over the thing (#prisonPrompts, interactions.js)
-     - the people card's VERBS (desktop key rows / touch rail); no name plate,
-       no read line, only a stall's item + price above them
+     - the people card's VERBS (desktop key rows / touch rail) under the
+       person's NAME (+ muted role), and a stall's item + price; no read line
      - speech over the speaker's head (#speech, systems/speech.js)
      - the hotbar (it is how you pick an item), the crosshair, #ammo while armed
      - the hurt/heat vignette, the lockdown edge
@@ -731,7 +734,7 @@ body.prison-bare #streakHud,
 body.prison-bare #streakMeter,
 body.prison-bare #toast,
 body.prison-bare #hitfx,
-body.prison-bare #interactName,
+body.prison-bare #interactName:empty,
 body.prison-bare #interactNote:empty{
   display:none !important;
 }
@@ -741,6 +744,11 @@ body.prison-bare #interact{
   background:rgba(8,11,17,.38); box-shadow:none;
 }
 body.prison-bare #interactNote{ margin:0 0 4px; max-height:15px; }
+/* the person's name over his buttons (owner 2026-09-28), sized to the rows */
+body.prison-bare #interactName{
+  font-size:15.5px; letter-spacing:.4px; margin:0 0 3px 2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
 
 /* ============================================================
    SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)

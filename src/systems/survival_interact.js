@@ -104,8 +104,13 @@
     ensureDock();
     if (dockMode !== key) {
       dockMode = key;
+      // column-reverse: the last child sits on top, so the name rides above
+      // the buttons (none in the water: the swim verb has no person)
+      const nm = key.indexOf("swim:") === 0 ? "" : nameOf(tgt);
       dock.innerHTML = set.map((v, i) =>
-        '<button class="svbtn" type="button" data-i="' + i + '">' + v.label + "</button>").join("");
+        '<button class="svbtn" type="button" data-i="' + i + '">' + v.label + "</button>").join("") +
+        (nm ? '<div class="sv-who"></div>' : "");
+      if (nm) dock.querySelector(".sv-who").textContent = nm;
       dock.classList.toggle("swim", key.indexOf("swim:") === 0);
     }
     dock.classList.add("show");
@@ -152,17 +157,25 @@
     return null;
   }
 
-  // The desktop card is the verbs and their keys, nothing else: the old
-  // "SURVIVOR / in reach" header and the one-word subtitles under each verb
-  // ("fling", "hold", "hit") labelled what the verb already says.
+  // The desktop card is the person's NAME over the verbs and their keys. The
+  // old "SURVIVOR / in reach" header and the one-word subtitles under each
+  // verb ("fling", "hold", "hit") labelled what the verb already says; the
+  // name does not (owner 2026-09-28: the name always sits above the buttons).
   let cardKey = "";
-  function keyOf(set) { let k = ""; for (let i = 0; i < set.length; i++) k += set[i].label + "|"; return k; }
+  function nameOf(t) {
+    if (!t) return "";
+    const n = t.name || (t.data && t.data.name) || (t.actor && t.actor.name) || "";
+    return typeof n === "string" ? n.replace(/^the |^a |^an /, "") : "";
+  }
+  CBZ.survivalWhoOf = nameOf;
+  function keyOf(set) { let k = nameOf(tgt) + "#"; for (let i = 0; i < set.length; i++) k += set[i].label + "|"; return k; }
   function render(set) {
     verbs = set;
     const key = keyOf(set);
     if (key === cardKey) return;              // same card: leave the DOM alone
     cardKey = key;
-    if (el.name.textContent) el.name.textContent = "";
+    const nm = nameOf(tgt);
+    if (el.name.textContent !== nm) el.name.textContent = nm;
     if (el.note.textContent) el.note.textContent = "";
     el.opts.innerHTML = verbs.map((v, i) =>
       `<div class="iopt" data-i="${i}"><span class="ikey">${OPT_KEYS[i].toUpperCase()}</span>` +
