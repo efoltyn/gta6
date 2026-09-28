@@ -1035,7 +1035,9 @@
       if (ph === "align") return 0.06;
       if (ph === "contact") return 0.12;
       if (ph === "drive") return 0.45;
-      if (ph === "outcome") return S.result && S.result.outcome === "open" ? 0.9 : 0.2;
+      // on the player it is a PIN: he is on top of you for a beat and you can
+      // buck him (the struggle runs through it at the pinned odds)
+      if (ph === "outcome") return S.result && S.result.outcome === "open" ? (S.T.isPlayer ? 1.35 : 0.9) : 0.2;
       if (ph === "release") return 0.5;
       return 0;
     },
@@ -1101,10 +1103,18 @@
     },
   };
 
+  /* THE CUFFS TAKE TIME. align: he turns you and takes your arm (hands on:
+     from here it is a struggle); contact: the first wrist behind your back;
+     drive: the first cuff ratchets on (the click at a third of the way), the
+     second wrist is brought round to it and closes at the end. ~2.5 s, and
+     a man fighting it holds the drive up (the struggle rewinds it). */
   DEF.cuff = {
     face: "same", hold: false, speed: 2.4, close: 1.0,
     work: (S) => S.A.depth + S.T.depth + 0.27 * S.A.arm,
-    dur(S, ph) { return ph === "align" ? 0.45 : ph === "contact" ? 0.32 : ph === "drive" ? 0.6 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0; },
+    dur(S, ph) {
+      if (S.verb === "uncuff") return ph === "align" ? 0.45 : ph === "contact" ? 0.32 : ph === "drive" ? 0.6 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
+      return ph === "align" ? 0.45 : ph === "contact" ? 0.5 : ph === "drive" ? 1.45 : ph === "outcome" ? 0.12 : ph === "release" ? 0.35 : 0;
+    },
     poseA: (S) => S.phase === "approach" || S.phase === "align" ? "a.reach" : "a.cuff",
     poseT: () => "t.cuffed",
     selfT(S) {       // his arms come behind his back as he is turned
@@ -1114,6 +1124,11 @@
     hands(S) {
       S.handsA[0] = "cuffGripL"; S.handsA[1] = "wristR"; S.gA[0] = "support";
       S.kA[0] = S.kA[1] = kIn(S);
+      // the first ratchet: one wrist is in, the other is still coming round
+      if (S.verb === "cuff" && S.phase === "drive" && S.k >= 0.34 && !S._click1) {
+        S._click1 = true;
+        if (CBZ.sfx) CBZ.sfx("reload");
+      }
     },
     place(S, o) { o.lz = S.work; o.lx = 0; o.relYaw = 0; },
     outcome(S) {
@@ -1373,20 +1388,21 @@
   }
 
   /* ============================================================
-     THE STRUGGLE: a held man can fight his way out.
-     Owner: getting caught was "way too easy". Whoever has his hands on you
-     re-sets his grip in a rhythm you can SEE (his brace tightens, then eases);
-     a press in the ease tears at it, a press into the brace barely does, and
-     the grip he lost comes back if you stop. Nothing on screen names it: the
-     meter is his body. How hard he holds is who he is: his mass against yours
-     (CBZ.meleeScale) and his trade (a guard or a cop holds harder than a man
-     off the yard). Breaking free: he staggers a step, you are loose. Cuffs,
-     once they are on, do not come off this way.
-       player  Space / W, or a click / tap while held (predator.js's escape keys)
-       NPC     opts.struggle 0..1: how well he picks his moment (a verb opts in)
+     THE STRUGGLE: a held man can fight his way out, and it is a CONTEST.
+     Owner: "I'm getting handcuffed too easily" — the old struggle was a
+     timed press against a grip that lost by default. Now every frame your
+     PULL goes against his HOLD (systems/arrest.js A.contest): your wind and
+     your strength against his size, his trade, how many hands are on you,
+     whether you are pinned or cuffed, and how tired holding you has made him.
+     His brace tightens and eases on a beat you can SEE; a wrench in the ease
+     is worth four in the brace. Nothing on screen names it: the bodies do.
+       player  hold a direction (away from him pulls hardest) = a steady pull;
+               Space / W / a click / a tap = a wrench; crouch = dead weight
+       NPC     opts.struggle 0..1: how hard and how well he fights (opt-in)
+     Breaking free: he staggers a step, you are loose. Cuffs, once on, only
+     let you tear away from the man walking you (you are still in them).
      ============================================================ */
   const STRUGGLE_VERBS = { grab: 1, tackle: 1, choke: 1, shield: 1, escort: 1, cuff: 1, carry: 1, drag: 1, mug: 1 };
-  const BEAT = 1.55;                       // grip re-sets a second, roughly
   let pressAt = -1, pressSeen = -1, clockS = 0;
   function markPress() { pressAt = clockS; }
   function playerHeld() {
@@ -1417,49 +1433,100 @@
   }
   function canStruggle(S) {
     if (!STRUGGLE_VERBS[S.verb] || S.tFree || S.opts.noStruggle) return false;
-    if (S.T.ch && S.T.ch.cuffed) return false;                 // the cuffs hold, not the man
-    if (S.verb === "cuff" && S.phase !== "contact" && S.phase !== "drive") return false;   // before they close
-    if (S.phase !== "contact" && S.phase !== "drive" && S.phase !== "hold" && S.phase !== "outcome") return false;
+    const AR = CBZ.arrest;
+    if (!AR || !AR.contest) return false;
+    // the cuffs hold, not the man: in cuffs you can only tear away from the
+    // one walking you (and you are still in them)
+    if (S.T.ch && S.T.ch.cuffed && S.verb !== "escort") return false;
+    if (S.verb === "cuff" && S.phase !== "align" && S.phase !== "contact" && S.phase !== "drive") return false;   // before they close
+    if (S.phase !== "align" && S.phase !== "contact" && S.phase !== "drive" && S.phase !== "hold" && S.phase !== "outcome") return false;
     if (S.sag > 0.7) return false;                             // a choke that far in has him
     return S.T.isPlayer || S.opts.struggle > 0;
   }
+  // the held player's side of it, off the same keys the controller reads
+  // (touch sticks and pads write CBZ.keys too)
+  function playerInput(S, inp) {
+    const keys = CBZ.keys || {};
+    const yaw = CBZ.cam && typeof CBZ.cam.yaw === "number" ? CBZ.cam.yaw : 0;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    let mx = 0, mz = 0;
+    if (keys.w) { mx += fx; mz += fz; }
+    if (keys.s) { mx -= fx; mz -= fz; }
+    if (keys.d) { mx += rx; mz += rz; }
+    if (keys.a) { mx -= rx; mz -= rz; }
+    const len = Math.hypot(mx, mz);
+    let effort = 0;
+    if (len > 0.01) {
+      // straight away from the hands on you pulls hardest
+      let ax = S.T.pos.x - S.A.pos.x, az = S.T.pos.z - S.A.pos.z;
+      const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+      effort = 0.55 + 0.45 * Math.max(0, (mx * ax + mz * az) / len);
+    }
+    if (keys.c || keys.control) effort = Math.max(effort, 0.35);   // dead weight
+    let wrench = false;
+    if (pressAt > pressSeen && pressAt >= S.age0) wrench = true;
+    pressSeen = pressAt;
+    inp.effort = effort; inp.wrench = wrench;
+  }
+  // an NPC who opted in fights as hard and as well as opts.struggle says
+  function npcInput(S, inp, dt) {
+    const k = S.opts.struggle;
+    const AR = CBZ.arrest;
+    S._npcT = (S._npcT || 0) - dt;
+    let wrench = false;
+    if (S._npcT <= 0) {
+      S._npcT = 0.22 + Math.random() * 0.5;
+      const good = AR.contest.inEase(S.cst);
+      wrench = good ? Math.random() < 0.3 + 0.7 * k : Math.random() < 0.15;
+    }
+    inp.effort = 0.35 + 0.55 * k;
+    inp.wrench = wrench;
+  }
   function struggle(S, dt) {
     S.writhe = Math.max(0, (S.writhe || 0) - dt * 3.2);
-    const b = (S.beat || 0) + dt * BEAT;
-    if (b >= 1) S.cycle = (S.cycle || 0) + 1;
-    S.beat = b % 1;
-    // his brace: tight on the first half of the beat, easing on the second
-    const brace = S.beat < 0.5 ? Math.sin(S.beat * 2 * PI) : 0;
-    S.strain = Math.max(brace * 0.6, S.strain > 0 ? S.strain - dt * 2.5 : 0);
-    if (!canStruggle(S)) return;
-    if (S.grip == null) { S.grip = gripOf(S); S.grip0 = S.grip; }
-    let pressed = false;
-    if (S.T.isPlayer) {
-      if (pressAt > pressSeen && pressAt >= S.age0) pressed = true;
-      pressSeen = pressAt;
-    } else if (S.opts.struggle > 0) {
-      // an NPC picks his moments as well as he fights
-      S._npcT = (S._npcT || 0) - dt;
-      if (S._npcT <= 0) {
-        S._npcT = 0.22 + Math.random() * 0.5;
-        const good = S.beat >= 0.5 && S.beat < 0.95;
-        pressed = good ? Math.random() < 0.3 + 0.7 * S.opts.struggle : Math.random() < 0.15;
-      }
+    const AR = CBZ.arrest;
+    const st = S.cst || (AR && AR.contest ? (S.cst = AR.contest.begin(S.opts.seed)) : null);
+    if (!st) return;
+    if (!canStruggle(S)) {
+      // his brace still shows (a man re-setting his grip), nothing is fought
+      st.beat = (st.beat + dt * AR.CONTEST.BEAT) % 1;
+      const brace = st.beat < 0.5 ? Math.sin(st.beat * 2 * PI) : 0;
+      S.strain = Math.max(brace * 0.6, S.strain > 0 ? S.strain - dt * 2.5 : 0);
+      return;
     }
-    // what he let go of comes back while you are not fighting it
-    S.grip = Math.min(S.grip0, S.grip + dt * 0.18);
-    if (!pressed) return;
-    // one good wrench per ease: mashing inside it is only the first press
-    const good = S.beat >= 0.5 && S.beat < 0.95 && S.goodCycle !== (S.cycle || 0);
-    if (good) S.goodCycle = S.cycle || 0;
-    S.grip -= good ? 0.26 : 0.05;
+    if (S.grip0 == null) { S.grip0 = gripOf(S); S.grip = S.grip0; }
+    const inp = S._inp || (S._inp = { effort: 0, wrench: false, hold: 1, pullMul: 1, strength: 1 });
+    if (S.T.isPlayer) playerInput(S, inp); else npcInput(S, inp, dt);
+    // what state HE is in: tased is jelly, winded is winded (arrest.js)
+    const pm = S.opts.pullMulFn ? S.opts.pullMulFn() : 1;
+    inp.pullMul = (pm > 0 ? pm : 1) * (S.opts.pullMul > 0 ? S.opts.pullMul : 1);
+    inp.strength = 1;
+    const cuffedT = !!(S.T.ch && S.T.ch.cuffed);
+    inp.hold = AR.holdOf(S.grip0, {
+      tierHold: S.opts.tierHold,
+      backup: S.opts.backupN | 0,
+      pinned: !!S.opts.pinned || (S.verb === "tackle" && S.phase === "outcome"),
+      cuffed: cuffedT,
+      behind: S.def.face === "same",
+      hpRatio: S.A.hpRatio ? S.A.hpRatio() : 1,
+    });
+    const r = AR.contest.step(st, dt, inp, S.T.isPlayer ? AR.wind : null);
+    S.grip = S.grip0 * (1 - st.prog);
+    S.beat = st.beat; S.cycle = st.cycle;
+    // what you see: his brace tightening on the beat, clamping when you fight
+    const brace = AR.contest.brace(st);
+    S.strain = Math.max(brace * 0.6, S.strain > 0 ? S.strain - dt * 2.5 : 0);
+    if (inp.effort > 0.01) { S.writhe = Math.max(S.writhe, 0.4 + 0.6 * inp.effort); S.strain = Math.max(S.strain, 0.8); }
+    if (inp.wrench) {
+      S.writhe = 1; S.strain = 1;
+      if (S.T.isPlayer && CBZ.shake) CBZ.shake(st.lastGood ? 0.16 : 0.07);
+    }
     // A MAN FIGHTING IT HOLDS THE VERB UP: the second cuff will not close,
-    // the mount will not settle, while he is wrenching at the hands on him
-    if (good && S.phase !== "hold" && isFinite(S.dur)) S.pt = Math.max(0, S.pt - 0.32);
-    S.writhe = 1;
-    S.strain = 1;                                             // he clamps down on it
-    if (S.T.isPlayer && CBZ.shake) CBZ.shake(good ? 0.16 : 0.07);
-    if (S.grip <= 0) escape(S);
+    // the mount will not settle, while he is out-pulling the hands on him
+    if (S.phase !== "hold" && isFinite(S.dur) && (st.pullNow > AR.CONTEST.HOLD_K * st.holdNow || (inp.wrench && st.lastGood))) {
+      S.pt = Math.max(0, S.pt - dt * (inp.wrench && st.lastGood ? 6 : 1));
+    }
+    if (r === "escaped") escape(S);
   }
   // BROKE FREE: he staggers back a step, you are loose
   function escape(S) {
@@ -1473,6 +1540,86 @@
     else setPos(A, A.pos.x + dx / d * 0.3, A.pos.y, A.pos.z + dz / d * 0.3);
     if (CBZ.sfx) CBZ.sfx("punch");
     if (CBZ.shake && T.isPlayer) CBZ.shake(0.3);
+  }
+  /* HANDS KNOCKED OFF YOU. The man holding you is hit, dropped or jumped:
+     a blow on him loosens his grip, a real one (or him going down) ends it.
+     Returns true when the session is over. */
+  function grabberHit(S) {
+    const A = S.A;
+    if (S.phase === "approach" || S.tFree) return false;
+    const down = S.verb !== "tackle" && A.down();
+    const hp = A.isPlayer ? (CBZ.player && CBZ.player.hp) : S.a.hp;
+    let drop = 0;
+    if (typeof hp === "number") {
+      if (S._ahp != null && hp < S._ahp) drop = S._ahp - hp;
+      S._ahp = hp;
+    }
+    if (!down && drop < 22) {
+      if (drop >= 5 && S.cst) S.cst.prog = Math.min(0.97, S.cst.prog + 0.3 + drop * 0.02);
+      return false;
+    }
+    S.result = S.result || {}; S.result.outcome = "interrupted";
+    finish(S, false);
+    return true;
+  }
+
+  /* THE LUNGE (a tackle on the player). He commits to where he reads you'll
+     be (arrest.js A.lungeAim) and goes, flat out, along that line: no
+     homing. You within reach of his arms before the lunge is spent = caught;
+     not = he goes full length on the floor (STRIKE's knockdown), and that is
+     your head start. Caught while braced and fresh, you can keep your feet. */
+  function lungeBegin(S) {
+    const AR = CBZ.arrest, A = S.A, T = S.T;
+    const t = AR.tier ? AR.tier(S.a) : { lungeSkill: 0.5 };
+    const pv = V._pv;
+    const aim = AR.lungeAim(A.pos.x, A.pos.z, T.pos.x, T.pos.z, pv.x, pv.z, S.opts.skill != null ? S.opts.skill : t.lungeSkill, S.opts.rng ? S.opts.rng() : Math.random());
+    S.lunge = { dx: aim.dx, dz: aim.dz, t: 0, travel: 0, reach: aim.reach };
+    S.dir.x = aim.dx; S.dir.z = aim.dz;
+  }
+  function lungeStep(S, dt) {
+    const AR = CBZ.arrest, LU = AR.LUNGE, L = S.lunge, A = S.A, T = S.T;
+    const step = Math.min(LU.SPEED * dt, Math.max(0, L.reach - L.travel));
+    _R.set(A.pos.x + L.dx * step, A.pos.y, A.pos.z + L.dz * step);
+    if (CBZ.collide) CBZ.collide(_R, A.radius * 0.9, A.pos.y + 0.2, A.pos.y + 1.7);
+    const moved = Math.hypot(_R.x - A.pos.x, _R.z - A.pos.z);
+    setPos(A, _R.x, groundY(_R.x, _R.z, A.pos.y + 0.45), _R.z);
+    A.face(Math.atan2(L.dx, L.dz), 1 - Math.exp(-20 * dt));
+    L.t += dt; L.travel += step;
+    S.aSpeed = moved / Math.max(dt, 1e-4);
+    const dx = T.pos.x - A.pos.x, dz = T.pos.z - A.pos.z;
+    const d = Math.hypot(dx, dz);
+    // his arms close on what is in front of him, not behind his shoulder
+    const ahead = (dx * L.dx + dz * L.dz) / (d || 1);
+    if (d <= S.work + LU.CATCH && ahead > -0.2) {
+      // CONTACT. A braced, fresh man can keep his feet (the stumble clear)
+      const P = CBZ.player, keys = CBZ.keys || {};
+      const braced = (keys.w || keys.a || keys.s || keys.d || clockS - pressAt < 0.35) ? 1 : 0.4;
+      const wind = AR.wind ? AR.wind.get() : 1;
+      const backup = AR.backup ? AR.backup(S.a, 2.6) : 0;
+      const keep = Math.max(0, Math.min(0.42, (0.06 + 0.32 * wind * braced) * (P && P.speed > 3 ? 0.8 : 1) - 0.12 * backup));
+      if ((S.opts.rng ? S.opts.rng() : Math.random()) < keep) {
+        S.result = { outcome: "shrugged" };
+        finish(S, false);
+        lungeSprawl(S, 0.9);
+        if (V.react) { try { V.react(S.t, { reaction: "stagger", zone: "body", power: 0.6, stagger: true, dir: { x: L.dx, z: L.dz } }); } catch (e) {} }
+        return false;
+      }
+      return true;
+    }
+    if (L.t >= LU.TIME + 0.14 || L.travel >= L.reach - 1e-3 || moved < step * 0.3) {
+      S.result = { outcome: "missed" };
+      finish(S, false);
+      lungeSprawl(S, 1.25);
+      return false;
+    }
+    return false;
+  }
+  // he goes full length where the lunge ran out
+  function lungeSprawl(S, dur) {
+    if (typeof V.knockdown === "function") {
+      try { V.knockdown(S.a, { dir: { x: S.lunge.dx, z: S.lunge.dz }, variant: "face", dur: dur, ko: false, power: 0.8 }); return; } catch (e) {}
+    }
+    S.a.ko = Math.max(S.a.ko || 0, dur + 1);
   }
 
   /* ---- START ------------------------------------------------------------ */
@@ -1540,8 +1687,13 @@
     else { S.dir.x = fwdX(A.yaw()); S.dir.z = fwdZ(A.yaw()); }
     // reach: the verb only closes the last step itself; the caller walks
     // (opts.far: a menu verb picked a few steps away; the grabber walks it)
-    const reachMax = def.pull ? (def.pullReach || 8) : S.work + (def.close || 1.0) + (def.needDown ? 1.8 : 0) + (opts.far ? 2.6 : 0);
+    // A TACKLE ON THE PLAYER IS A LUNGE (arrest.js): committed, from arm's
+    // reach plus one dive, never a homing run from across the street
+    const lunge = verb === "tackle" && T.isPlayer && !from && !opts.homing && !!(CBZ.arrest && CBZ.arrest.lungeAim);
+    const reachMax = lunge ? S.work + CBZ.arrest.LUNGE.REACH
+      : def.pull ? (def.pullReach || 8) : S.work + (def.close || 1.0) + (def.needDown ? 1.8 : 0) + (opts.far ? (opts.far > 1 ? +opts.far : 2.6) : 0);
     if (!from && ll > reachMax) return null;
+    if (lunge) lungeBegin(S);
     if (from) {
       // straight into the drive from the hold that was already there
       S.phase = "drive";
@@ -1681,6 +1833,7 @@
     if (S.done) return;
     S.k = S.dur > 0 && isFinite(S.dur) ? clamp01(S.pt / S.dur) : 1;
     if (S.phase === "approach") return;
+    if (grabberHit(S)) return;
     struggle(S, dt);
     if (S.done) return;
 
@@ -1836,6 +1989,7 @@
   }
   function approach(S, dt) {
     if (S.opts.noMove) return true;
+    if (S.lunge) return lungeStep(S, dt);
     const A = S.A, T = S.T, def = S.def;
     let gx, gz, face = null;
     if (def.needDown) {
@@ -1862,7 +2016,7 @@
     const rem = Math.hypot(gx - A.pos.x, gz - A.pos.z);
     const turned = face == null || Math.abs(angDiff(A.yaw(), face)) < 0.3;
     if (rem <= 0.04 && turned) { S.aSpeed = 0; return true; }
-    if (S.age > (S.opts.far ? 2.6 : 1.6)) {
+    if (S.age > (S.opts.far ? (S.opts.far > 1 ? 1.6 + S.opts.far / 2.2 : 2.6) : 1.6)) {
       // could not get there (blocked, or he backed off faster than we walk)
       if (rem > 0.35) { S.result = { outcome: "missed" }; finish(S, false); return false; }
       return true;
@@ -2112,6 +2266,7 @@
     const vp = VP();
     if (vp) vp.tick();
     cuffFrame++;
+    trackPlayer(dt);
     stepFlights(dt);
     for (let i = sessions.length - 1; i >= 0; i--) {
       const S = sessions[i];
@@ -2122,6 +2277,20 @@
     poseCuffs(dt);
   }
   if (CBZ.onUpdate) CBZ.onUpdate(91, update);
+  // the player's measured ground velocity (what a man lunging at him reads)
+  V._pv = { x: 0, z: 0, lx: null, lz: null };
+  function trackPlayer(dt) {
+    const P = CBZ.player, pv = V._pv;
+    if (!P || !P.pos) return;
+    if (pv.lx != null && dt > 0) {
+      let vx = (P.pos.x - pv.lx) / dt, vz = (P.pos.z - pv.lz) / dt;
+      const sp = Math.hypot(vx, vz);
+      if (sp > 14) { vx = vz = 0; }                    // a teleport, not a run
+      const k = Math.min(1, dt * 12);
+      pv.x += (vx - pv.x) * k; pv.z += (vz - pv.z) * k;
+    }
+    pv.lx = P.pos.x; pv.lz = P.pos.z;
+  }
 
   /* ============================================================
      QUERIES + RELEASE
@@ -2274,6 +2443,7 @@
   V.endFall = endFall;
   // the struggle input (tools/verbs-check.mjs presses it by hand); gripOf(S) for a read
   V.press = markPress;
+  V.playerHeld = playerHeld;
   V.grip = function (S) { return S && S.grip != null ? S.grip : null; };
   V.busy = busy;
   V.setCuffs = setCuffs;

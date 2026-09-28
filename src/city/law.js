@@ -152,14 +152,28 @@
       return !!H.say(actor, line, (opts && opts.secs) || 2.2);
     },
     verb: function (name, a, b, opts) { return lawVerb(name, a, b, opts); },
+    // THE LAW'S HANDS GO THROUGH THE LAW: without this the brain found
+    // CBZ.verbs.cuff / .tackle first and put hands on the player with no
+    // arrest behind them (no take, no stakes, a second bust a beat later)
+    prefer: true,
   };
-  // restrain/cuff/arrest -> the EXISTING arrest flows; tackle -> the predator
-  // seize (player) or a knockdown (NPC). Anything else is not ours.
+  // restrain/cuff/arrest -> the player: CBZ.arrest's take (hands on, both
+  // wrists, the escort; wanted.js's CBZ.cityArrestTake owns the city side of
+  // it), an NPC: cityNpcArrest. tase -> the player: the officer's taser
+  // (arrest.js: it can miss). tackle -> the committed lunge (player) or a
+  // takedown (NPC). Anything else is not ours.
   function lawVerb(name, a, b, opts) {
     if (!a || !b) return false;
     if (name === "restrain" || name === "cuff" || name === "arrest") {
       if (isPlayerActor(b)) {
         if (g.busted) return true;
+        const AR = CBZ.arrest;
+        // the arrest already under way is THE arrest (one pair of hands at a time)
+        if (AR && AR.active && AR.active()) return AR.active();
+        if (typeof CBZ.cityArrestTake === "function") {
+          const h = CBZ.cityArrestTake(a, { grab: !!(opts && opts.grab), violent: !!(opts && (opts.violent || opts.tased)) });
+          return h || false;
+        }
         if (typeof CBZ.cityBust !== "function") return false;
         CBZ.cityBust({ cop: a, peaceful: !(opts && opts.violent) });
         return true;
@@ -188,7 +202,16 @@
       L.tackleCD = TACKLE_CD;
       return true;
     }
-    return false;                             // no taser in this city; the brain takes the next rung
+    if (name === "tase" || name === "taser") {
+      // every officer carries one; it is the player's rung (an NPC brawler is
+      // taken down by hand: false sends the brain to the tackle)
+      if (!isPlayerActor(b) || a._airPilot || a._swatPassenger) return false;
+      const AR = CBZ.arrest;
+      if (!AR || !AR.tase) return false;
+      if (H.say) { try { H.say(a, "Taser! Taser!", 1.2); } catch (e) {} }
+      return AR.tase(a);
+    }
+    return false;
   }
   L.verb = lawVerb;
   L.tackleCD = 0;
@@ -373,7 +396,7 @@
   //  the weapon put away for COMPLY_STILL seconds (hands shown). interact.js's
   //  "Surrender" row is the instant voluntary version (g._citySurrender).
   // ============================================================
-  const PS = { speed: 0, handsUp: false, kneeling: false, prone: false, armed: false, aiming: false, attacking: false, stillT: 0, aimAny: false, aimAt: null, aimT: 0 };
+  const PS = { speed: 0, handsUp: false, kneeling: false, prone: false, subdued: false, cuffed: false, armed: false, aiming: false, attacking: false, stillT: 0, aimAny: false, aimAt: null, aimT: 0 };
   L.player = PS;
   function samplePlayer(dt) {
     const P = CBZ.player;
@@ -384,8 +407,10 @@
     PS.armed = !!(H.openCarry && H.openCarry());
     PS.stillT = (!driving && !P.dead && sp < 0.6) ? PS.stillT + dt : 0;
     PS.handsUp = !!g._citySurrender || (!PS.armed && PS.stillT >= COMPLY_STILL);
-    PS.kneeling = false;
-    PS.prone = false;
+    PS.kneeling = !!P.crouch && !P.prone;
+    PS.prone = !!P.prone || (P.ko || 0) > 0;
+    PS.subdued = !!(CBZ.arrest && CBZ.arrest.subdued && CBZ.arrest.subdued());
+    PS.cuffed = !!(CBZ.playerChar && CBZ.playerChar.cuffed);
     const nowMs = CBZ.now || 0;
     PS.attacking = (P._fighting || 0) > 0 || (nowMs - (g._copsFiredUponT || -1e9)) < 2500;
     PS.aimAny = PS.armed && !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
@@ -398,7 +423,7 @@
       }
     } else { PS.aimAt = null; PS.aimT = 0; }
   }
-  const _SS = { speed: 0, handsUp: false, kneeling: false, prone: false, armed: false, aiming: false, attacking: false, fled: false, dist: 0, seen: true };
+  const _SS = { speed: 0, handsUp: false, kneeling: false, prone: false, subdued: false, cuffed: false, behind: false, backup: 0, armed: false, aiming: false, attacking: false, fled: false, dist: 0, seen: true };
   // is the player pointing the gun at THIS officer? (raycast target, or the body
   // squared up on him inside ~20 degrees)
   function aimingAt(c) {
@@ -415,6 +440,10 @@
   L.playerState = function (c, fled) {
     _SS.speed = PS.speed; _SS.handsUp = PS.handsUp; _SS.kneeling = PS.kneeling; _SS.prone = PS.prone;
     _SS.armed = PS.armed; _SS.aiming = aimingAt(c); _SS.attacking = PS.attacking; _SS.fled = !!fled;
+    _SS.subdued = PS.subdued; _SS.cuffed = PS.cuffed;
+    const AR = CBZ.arrest;
+    _SS.behind = !!(AR && AR.behind && AR.behind(c));
+    _SS.backup = AR && AR.backup ? AR.backup(c, 3.2) : 0;
     return _SS;
   };
   L.pedState = function (p, c, fled) {
@@ -423,6 +452,7 @@
     _SS.kneeling = false;
     _SS.prone = (p.ko || 0) > 0;
     _SS.armed = !!p.armed;
+    _SS.subdued = (p.ko || 0) > 0; _SS.cuffed = !!(p.char && p.char.cuffed); _SS.behind = false; _SS.backup = 0;
     _SS.aiming = !!(p.armed && p.rage === c);
     _SS.attacking = !!(p.rage && (p.rage === c || p.rage.kind === "cop" || p.state === "fight"));
     _SS.fled = !!fled;
@@ -497,16 +527,11 @@
     if (b && b.act && b.act.say) { try { return !!b.act.say(c, line, { secs: 2.4 }); } catch (e) { return false; } }
     return EXEC.say(c, line, { secs: 2.4 });
   }
-  let _hintT = -1e9;
   function onPhase(c, suspect, ph, isPlayer, hasAuth) {
     const K = lawOf(c);
     if (!hasAuth) sayNow(c, fallbackLine(c, ph));
     if (isPlayer && ph === "order") {
       if (!K.stakesSaid) K.stakeAt = T + 1.4;
-      if (T - _hintT > 30 && CBZ.city && CBZ.city.note) {
-        _hintT = T;
-        CBZ.city.note("Stand still with your gun away to be cuffed. Run and he takes you down. Point it at him and he shoots.", 3.2);
-      }
     }
   }
 

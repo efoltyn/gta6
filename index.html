@@ -607,7 +607,12 @@ document.body.appendChild(b);}}catch(e){}})();
      while they do it (verbposes.js), and the strikes and hit reactions
      (meleeposes.js + verbs_strike.js). Everything else is feature-detected at
      call time; the late pass runs at CBZ.onUpdate(91). -->
-<script src="src/systems/verbs.js?v=verbs1"></script>
+<script src="src/systems/verbs.js?v=arrest1"></script>
+<!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
+     (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
+     committed tackle lunge, the taser, and the one physical take of the
+     player (hands on, two wrists, the escort) every game's law calls. -->
+<script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=verbs1"></script>
 <script src="src/systems/verbs_strike.js?v=verbs1"></script>

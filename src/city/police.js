@@ -308,11 +308,12 @@
   //  would be a bug the day somebody tuned a number; this one cannot, by
   //  construction rather than by tuning.
   //
-  //  The counterplay is a VERB, not a stat: ONE telegraphed window (qteMax 1,
-  //  escape 0 — the probability roll is switched OFF so nothing but your own
-  //  press can save you). Beat it and predator.js's own escaped branch flings
-  //  you clear and forces the officer to disengage; you are loose, and charged
-  //  with resisting. Miss it and you are booked the hard way.
+  //  2026-09-28: the tackle on the player is a COMMITTED LUNGE (verbs.js +
+  //  systems/arrest.js): he only goes from arm's reach, he picks where you'll
+  //  be and dives, and a cut, a stop or simply more pace than the gap makes
+  //  him MISS — he goes full length on the pavement and that is your head
+  //  start. Landed: you are pinned under him (you can still buck him), then
+  //  hauled up for the cuffs, which are a struggle of their own.
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE == null) CBZ.CONFIG.ARREST_TACKLE = true;
   function tackleOn() {
@@ -340,8 +341,19 @@
         c._seizing = null;
         const k = S.result && S.result.outcome;
         if (k === "open" || k === "wall") {
-          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }   // up onto your knees for the cuffs
-          if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
+          // PINNED: he is on you. Up onto your feet with his hands on you, and
+          // the cuffs (CBZ.arrest.take: you can still fight them, winded)
+          const AR = CBZ.arrest;
+          if (AR && AR.subdue) AR.subdue(2.2, "pinned");
+          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }
+          if (CBZ.cityArrestTake) { try { CBZ.cityArrestTake(c, { pinned: true, violent: true }); } catch (e) {} }
+          else if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
+          return;
+        }
+        if (k === "missed" || k === "shrugged") {
+          // he dove and got pavement (STRIKE's knockdown has him for a beat):
+          // running from him was already resisting, the ladder carries on
+          c.arrestT = 0;
           return;
         }
         // anything but a takedown (you broke his grip, or he never got his arms
@@ -3290,6 +3302,12 @@
       // for the length of the hold (it drives the pose and anchors the victim to
       // him). Patrol logic must not walk him out from under his own tackle.
       if (c._seizing) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- HANDS ON THE PLAYER (systems/arrest.js's take: the cuffs, the
+      // escort): the verb has his body; the beat must not walk him off it
+      if (c._arresting) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- ON THE PAVEMENT (a lunge that missed, a blow that dropped him):
+      // STRIKE's fall has the rig and gets him up in its own time
+      if (c.ko > 0) { c.speed = 0; if (_near) animChar(c.char, 0, dt); continue; }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.

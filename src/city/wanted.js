@@ -766,6 +766,67 @@
     lastCrimeT = CBZ.now;   // the grid tracks you — no heat decay inside the wire
   }
 
+  // ============================================================
+  //  THE TAKE — the city side of CBZ.arrest.take (systems/arrest.js).
+  //  Owner: "when I get handcuffed it's almost like a cutscene... I'm
+  //  getting handcuffed too easily." An arrest the world makes is now HANDS
+  //  ON YOU: the officer walks up and takes your arm (your controls are yours
+  //  until he does: walk off and he missed), the cuffs go on one wrist then
+  //  the other while you can still fight them, and only a closed pair of
+  //  cuffs starts the arc (bust with opts.take). The escort to the car is
+  //  the same take: pull away, drop your weight, a crewmate can jump him.
+  //  Tear out of it and you are loose IN CUFFS, with a resisting charge.
+  // ============================================================
+  function nearestCop(r) {
+    const P = CBZ.player;
+    if (!P) return null;
+    let best = null, bd = r || 14;
+    for (const c of CBZ.cityCops || []) {
+      if (!c || c.dead || c.ko > 0 || c._airPilot || c._swatPassenger) continue;
+      const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  function resisting(x, z, heat) {
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(heat || 60, { instant: true, x: x, z: z, type: "resisting" }); } catch (e) {} }
+  }
+  CBZ.cityArrestTake = function (cop, opts) {
+    opts = opts || {};
+    const AR = CBZ.arrest;
+    if (!AR || !AR.take || !cop || cop.dead) { bust({ cop: cop, peaceful: !opts.violent, arc: opts.arc }); return true; }
+    const live = AR.active();
+    if (live) return live;
+    if ((busting || g.busted) && !opts.arcWalk) return true;   // the arc has you (its own walk-in asks with arcWalk)
+    const P = CBZ.player;
+    if (P && P.driving) return false;               // a driver is pursued, not cuffed through the glass
+    const h = AR.take(cop, {
+      behind: !!opts.grab, pinned: !!opts.pinned,
+      walk: WALK_SPD,
+      crew: function () { return CBZ.cityPlayerGangMembers ? CBZ.cityPlayerGangMembers() : []; },
+      // where the escort walks you: the arc sets it (the cruiser door, the gate, the desk)
+      to: function () { return arrestScene && arrestScene._goal ? arrestScene._goal : null; },
+      onCuffed: function (hh) {
+        if (opts.arcWalk || (arrestScene && arrestScene.take === hh)) return;    // the arc's own walk-in
+        if (CBZ.playerChar) CBZ.playerChar.handsUp = false;
+        bust({ cop: hh.officer, peaceful: !opts.violent, take: hh, arc: opts.arc });
+      },
+      onEscaped: function (hh) {
+        // tore out of his hands before the second cuff closed
+        if (CBZ.citySay) { try { CBZ.citySay(hh.officer, "He's resisting!", "#9fc3ff", { secs: 1.8, force: true }); } catch (e) {} }
+        resisting(P ? P.pos.x : 0, P ? P.pos.z : 0, 60);
+      },
+      onBroke: function (hh) {
+        // out of the escort, still in cuffs: the arc is off, the charge is on
+        const sc = arrestScene;
+        if (sc && (sc.take === hh || !sc.take)) abortArc("broke");
+        resisting(P ? P.pos.x : 0, P ? P.pos.z : 0, 90);
+      },
+    });
+    if (h && opts.surrender && CBZ.playerChar) CBZ.playerChar.handsUp = true;
+    return h || false;
+  };
+
   // ---- BUST: cuffed by police → off to the jail (escape) game ----
   // opts.bigLabel / opts.note (city/origins.js, the EXEC fraud arrest): an
   // optional custom big-text + overlay sub-line for a scripted bust that
@@ -775,11 +836,21 @@
   function bust(opts) {
     if (busting || g.busted) return;
     opts = opts || {};
+    // AN ARREST THE WORLD MADE IS HANDS ON YOU: with an officer near and no
+    // cuffs on yet, this is a take (he walks up and cuffs you; the arc starts
+    // when the cuffs close and comes back through here with opts.take)
+    const scripted0 = opts.arc === false || !!opts.bigLabel || !!opts.note
+      || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    if (!opts.take && !scripted0 && arcOn() && CBZ.arrest && CBZ.arrest.take && !(CBZ.player && CBZ.player.driving)) {
+      if (CBZ.arrest.active()) return;
+      const near = opts.cop && !opts.cop.dead ? opts.cop : nearestCop(6);
+      if (near && CBZ.cityArrestTake(near, { violent: !opts.peaceful, surrender: !!opts.peaceful })) return;
+    }
     busting = true; g.busted = true;
     const P = CBZ.player;
     if (P && P.driving && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
     if (P) { P._cityArrested = true; P.speed = 0; }
-    if (CBZ.playerChar) { CBZ.playerChar.handsUp = true; CBZ.playerChar.cuffed = false; }
+    if (CBZ.playerChar && !opts.take) { CBZ.playerChar.handsUp = true; CBZ.playerChar.cuffed = false; }
     // Prefer the officer who made contact; cooperative/scripted arrests still
     // pick the nearest real officer instead of inventing an invisible captor.
     let cop = opts.cop || null;
@@ -811,14 +882,15 @@
     const stars0 = Math.max(1, g.wanted | 0);
     const petty = !scripted && arcOn() && stars0 <= 2 && !g.escapedConvict && pettyBustsRecent() < 2;
     arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false,
-      phase: (arcOn() && !scripted) ? "hands" : "legacy", total: 0, car: null, ourCar: false,
+      phase: opts.take ? "cuffed" : (arcOn() && !scripted) ? "hands" : "legacy", total: 0, car: null, ourCar: false,
+      take: opts.take || null, _goal: null,
       cine: false, legB: false, gate: null, lost: 0, charged: false, seat: null,
       stars0: stars0, petty: petty,
       // what was IN YOUR HAND when the collar landed (the hands phase holsters
       // you, so this has to be read now, not at the desk)
       gunId: (CBZ.cityHasGun && CBZ.cityHasGun()) ? CBZ.currentWeaponId : null,
       gunName: (CBZ.cityHasGun && CBZ.cityHasGun() && CBZ.cityCurrentWeaponName) ? CBZ.cityCurrentWeaponName() : null };
-    if (arrestScene.phase === "hands") TALLY.arcs++;   // tackles are counted where they happen (police.js)
+    if (arrestScene.phase === "hands" || arrestScene.phase === "cuffed") TALLY.arcs++;   // tackles are counted where they happen (police.js)
   }
 
   // ============================================================
@@ -937,15 +1009,17 @@
     if (sc.escS && !sc.escS.done) sc.escS.cancel();
     sc.cuffS = sc.escS = null;
   }
-  function clearArc(sc) {
+  function clearArc(sc, keepCuffs) {
     dropHolds(sc);
+    if (sc && sc.take && !sc.take.done) { try { sc.take.cancel(); } catch (e) {} }
+    if (sc) sc.take = null;
     if (sc && sc.cop) sc.cop._arrestingPlayer = false;
     if (sc && sc.car) { sc.car._arrestRide = false; sc.car.ai = !!sc.car.road; }
     if (sc && sc.cine && CBZ.cineBusy && CBZ.cineBusy() && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
     if (sc) sc.cine = false;
-    if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
+    if (!keepCuffs && CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
     if (CBZ.player) CBZ.player._cityArrested = false;
-    if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; }
+    if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; if (!keepCuffs) CBZ.playerChar.cuffed = false; }
   }
   // the arc dies mid-beat (you were shot, the world changed under it): give
   // everything back. It NEVER re-arms itself — an abort that re-installed the
@@ -954,8 +1028,11 @@
   function abortArc(reason) {
     const sc = arrestScene;
     if (!sc) return;
-    clearArc(sc);
+    // BROKE LOOSE: out of his hands, still in the cuffs (arrest.js frees them
+    // once no officer is near for a while); the collar is off, not the charge
+    clearArc(sc, reason === "broke");
     arrestScene = null; busting = false;
+    if (reason === "broke" || reason === "escaped") g.busted = false;
     if (reason === "dead") return;                   // death.js owns the slate
   }
   CBZ.cityArrestAbort = function () { abortArc("cancel"); };
@@ -1052,7 +1129,9 @@
     if (!sc || sc.finished) return;
     sc.finished = true;
     const opts = sc.opts || {};
-    CBZ.city && CBZ.city.big(opts.bigLabel || (opts.peaceful ? "SURRENDERED" : "BUSTED"));
+    // no "BUSTED" card: the cuffs on your wrists said it. A scripted beat that
+    // authored its own line still gets it.
+    if (opts.bigLabel && CBZ.city && CBZ.city.big) CBZ.city.big(opts.bigLabel);
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     const lost = forfeit(sc);
     if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: opts.note });
@@ -1171,7 +1250,11 @@
     const P = CBZ.player, ch = CBZ.playerChar, c = sc.cop;
     if (P && P.dead) { abortArc("dead"); return; }
     sc.t += dt; sc.total += dt;
-    if (P) { P._cityArrested = true; P.speed = 0; }
+    // YOUR CONTROLS ARE YOURS while an officer's hands are the only thing
+    // walking you (the take: your input is the struggle); they are the
+    // scene's only once you are shut in the car or at the desk
+    const locked = !(sc.take && !sc.take.done) && sc.phase !== "cuffed";
+    if (P) { P._cityArrested = locked; if (locked) P.speed = 0; }
     if (sc.stars0 == null) sc.stars0 = Math.max(1, g.wanted | 0);
 
     // ---- LEGACY (flag off, or an arc that gave up): the original pose. ----
@@ -1205,6 +1288,22 @@
     }
     const cop = sc.cop;
     if (cop && !cop.dead) { cop._arrestingPlayer = true; cop.curTarget = null; cop.npcTarget = null; cop.rage = null; }
+
+    // ---------- 0. CUFFED BY THE TAKE: he tells you, and the walk starts ----------
+    if (sc.phase === "cuffed") {
+      if (!sc._told) {
+        sc._told = true; sc._tied = true;
+        g.cityHolstered = true;
+        const line = sc.petty ? "You're under arrest. Pay the fine and you walk out today."
+          : "You're under arrest. You're going to County.";
+        if (cop && CBZ.citySay) CBZ.citySay(cop, line, "#9fc3ff", { secs: 3.0, force: true });
+      }
+      const found = P ? findCruiser(P, cop) : null;
+      if (!found && sc.petty) { if (sc.take) sc.take.finish(); bookIn(sc); return; }       // processed on the kerb
+      if (!found) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) { if (sc.take) sc.take.finish(); bookIn(sc); } return; }
+      sc.car = found.car; sc.ourCar = found.ours; sc.car.ai = false; sc.car._arrestRide = true; sc.car.v = 0; sc.phase = "walk"; sc.t = 0;
+      return;
+    }
 
     // ---------- 1. HANDS UP: the last metre, and a squared-up officer ----------
     if (sc.phase === "hands") {
@@ -1275,9 +1374,19 @@
     // ---------- 3. THE PERP WALK: marched to the car, one pace ahead ----------
     if (sc.phase === "walk") {
       const car = sc.car;
-      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) bookIn(sc); return; }
+      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) { if (sc.take) sc.take.finish(); bookIn(sc); } return; }
       // the kerb-side rear door, in the car's own frame
       const door = seatAt(car, { x: seatOf("rear").x - 1.35, z: seatOf("rear").z });
+      if (sc.take) {
+        // THE TAKE WALKS YOU (arrest.js): his hand on your arm, the other on
+        // the cuffs. Dead weight slows him; pulling away is a fight.
+        sc._goal = door;
+        if (sc.take.phase === "arrived" || sc.t >= MARCH_MAX * 2.2) {
+          sc.take.finish(); sc.take = null; sc._goal = null;
+          sc.phase = "door"; sc.t = 0;
+        }
+        return;
+      }
       const moved = marchTo(P, ch, cop, door.x, door.z, dt);
       if (moved <= 0.0001 || sc.t >= MARCH_MAX) { sc.phase = "door"; sc.t = 0; }
       return;
@@ -1334,8 +1443,26 @@
     // ---------- 7. THROUGH THE GATE TO THE DESK ----------
     if (sc.phase === "walkin") {
       const gate = sc.gate || (sc.gate = gateFor(sc));
-      if (!gate) { bookIn(sc); return; }
+      if (!gate) { if (sc.take) sc.take.finish(); bookIn(sc); return; }
       const target = (!sc._atGate && gate.gate) ? gate.gate : (gate.desk || gate);
+      // cuffed and walked in by the take (a fresh one after the ride)
+      const AR = CBZ.arrest;
+      if (!sc.take && !sc._walkTake && AR && AR.take && cop && !cop.dead) {
+        sc._walkTake = true;
+        sc.take = CBZ.cityArrestTake(cop, { arc: sc.opts && sc.opts.arc, arcWalk: true }) || null;
+        if (sc.take === true) sc.take = null;
+      }
+      if (sc.take) {
+        sc._goal = target;
+        if (sc.take.phase === "arrived") {
+          if (!sc._atGate && gate.gate) { sc._atGate = true; sc.t = 0; if (sc.take.resume) sc.take.resume(); return; }
+          sc.take.finish(); sc.take = null;
+          sc.atDesk = true;                 // you WALKED in — no teleport happened
+          bookIn(sc); return;
+        }
+        if (sc.t >= MARCH_MAX * 2.2) { sc.take.finish(); sc.take = null; bookIn(sc); }
+        return;
+      }
       const moved = marchTo(P, ch, cop, target.x, target.z, dt);
       if (moved <= 0.0001) {
         if (!sc._atGate && gate.gate) { sc._atGate = true; sc.t = 0; return; }

@@ -11,8 +11,11 @@
      ARREST   a hunting guard inside ~4 m ORDERS you ("On the ground!").
               ~2.2 s to comply (stop, or crouch). No offense on file or a
               minor one: comply = a pat-down and a warning, no cuffs. A real
-              offense + comply = calm cuffs. Resist (run, swing) = taser, and
-              resisting after the taser = tackle, then cuffs.
+              offense + comply = he walks up and cuffs you. Resist (run,
+              swing) = the taser (it can miss), then the lunge (it can miss).
+              2026-09-28: the cuffs and the walk are systems/arrest.js's
+              contest (CBZ.arrest.take): no camera, no forced fall, your
+              controls live until his hands land, a struggle you can win.
      CUFFS    only an ESCAPE capture (offense "escape", out of bounds, the
               sterile zone, a hot exit run) goes up a tier. Every other
               cuffing is THE HOLE: walked to your cell, door sealed 25-40 s,
@@ -151,6 +154,10 @@
     const cell = playerCell();
     if (!cell) return false;
     if (!inCellBox(cell, player.pos.x, player.pos.z, BODY_R)) return false;
+    // ...and never on the screw who walked you in: he steps out first
+    for (const gd of CBZ.guards || []) {
+      if (gd && gd.group && !gd.dead && inCellBox(cell, gd.group.position.x, gd.group.position.z, -0.1)) return false;
+    }
     const i = cellIndex(cell);
     if (i < 0 || !doorSet(i, true)) return false;
     heldDoor = i;
@@ -407,6 +414,7 @@
   function goDown(weapon, opts) {
     law("downs");
     cancelArrest();
+    haulEnd(true);
     if (CBZ.killstreakBreak) CBZ.killstreakBreak("Down");
     down = { t: 0, weapon, by: opts.by || null, wakeHp: weapon === "fist" ? 55 : 30 };
     player.stun = Math.max(player.stun || 0, 1);
@@ -929,25 +937,34 @@
      screw has eyes on you inside ORDER_R, and walks him to the stand-off
      distance it returns.
 
+     Owner, 2026-09-28: "when I get handcuffed it's almost like a cutscene...
+     I'm getting handcuffed too easily." The haul used to take the camera,
+     throw you on the floor and tase you AFTER you had complied, and the
+     tackle always landed. Now it is systems/arrest.js's contest, the same as
+     the city's, and nothing takes your controls until hands are on you:
+
        ORDER   he stops ~2 m off and says it once ("On the ground! Now!").
                You have WINDOW seconds. Stop moving (under COMPLY_SPD) or
                crouch = comply. Keep running away fast, or swing = resist.
-       comply  no offense on file, or a minor one: a pat-down and a warning,
-               the hunt is called off, heat drops, he walks away. NO cuffs.
-               A real offense: he cuffs you calm, no taser.
-       resist  the TASER (range TASE_R). Get up and resist again = the
-               TACKLE (the shared pin grab with its one break-free press).
-               Lie there = cuffs.
-     Cuffs: only an escape capture goes up a tier (applyStrike); everything
-     else is the hole (holeSentence). No one re-grabs you during the grace.
+       comply  no offense on file, or a minor one: a PAT-DOWN (his hands on
+               you, CBZ.verbs.frisk) and a warning. NO cuffs. A real offense:
+               he walks up and CUFFS you (CBZ.arrest.take): one wrist, then
+               the other, and you can still fight it.
+       resist  the TASER (arrest.js: it can MISS, and he has to reload). A hit
+               drops you and he cuffs you while you are jelly. A miss, or up
+               and running again: the TACKLE, a committed lunge from arm's
+               reach that can miss and put HIM on the floor. A man swinging is
+               tased, never tackled.
+       cuffed  the ESCORT: his hand on your arm, walked to your cell door and
+               in. Drop your weight, pull away (a lone screw can lose you: you
+               are loose in cuffs and it is a real offense), a crewmate can
+               jump him. Inside: uncuffed, the door racks shut, the hole.
+     Only an escape capture goes up a tier (applyStrike); every other cuffing
+     is the hole (holeSentence). No one re-grabs you during the grace.
+     A wing backs its screw up: every other guard in reach of you is another
+     pair of hands on the struggle (arrest.js backup).
 
-     THE ORDER IS DECIDED BY CBZ.brain.authority (systems/brain.js) — the one
-     orders-before-cuffs ladder every game's law now runs (it was ported from
-     this file's numbers, so the feel is the same): the order line, the comply
-     read (still / crouched for 0.6 s), the resist read (running away, a
-     swing, walking off past 15 m), the patience window. This file keeps what
-     is the PLAYER'S scene: the pat-down, the taser on your body, the tackle,
-     the cuffs and the walk to the hole.
+     THE ORDER IS DECIDED BY CBZ.brain.authority (systems/brain.js).
      ============================================================ */
   const ARREST = {
     ORDER_R: 4.2,        // m: where the order is given (guards.js reads it)
@@ -958,8 +975,10 @@
     FLEE_SPD: 2.2,       // m/s: over this, moving away, is running
     FLEE_HOLD: 0.55,     // s of running that reads as "resisting"
     TASE_R: 5.5,         // m: the taser's reach
+    LUNGE_R: 2.5,        // m: the tackle is a dive from here, not a sprint from across the yard
     AFTER_TASE: 3.0,     // s after the probes wear off to see what you do
     LOSE_R: 15,          // m: the order is void, it is a chase again
+    WALK_MAX: 28,        // s: a walk to a cell that long is finished off-screen (the elevator law)
   };
   let arrest = null;
   let seizedBy = null;
@@ -980,6 +999,7 @@
       !gd.tied && gd.intimidMode !== "scared");
   }
   function gdDist(gd) { return Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z); }
+  const AR = () => CBZ.arrest || null;
   // the ladder's case on this screw is over (the player's scene carries on here)
   function endLadder(gd) {
     if (!gd) return;
@@ -991,6 +1011,7 @@
     if (!arrest) return;
     const gd = arrest.gd;
     endLadder(gd);
+    if (arrest.take && !arrest.take.done) { try { arrest.take.cancel(); } catch (e) {} }
     if (gd) {
       gd._escort = false;
       if (gd.char) gd.char.crouch = false;
@@ -1004,7 +1025,7 @@
 
   function startArrest(gd) {
     const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
-    arrest = { gd, phase: "order", t: 0, t0: clock(), comply: 0, flee: 0, lastD: gdDist(gd), after: 0 };
+    arrest = { gd, phase: "order", t: 0, t0: clock(), comply: 0, flee: 0, lastD: gdDist(gd), after: 0, taseCD: 0, tackles: 0 };
     gd.hunt = Math.max(gd.hunt || 0, 4);
     gd.capCD = 0;
     law("orders");
@@ -1027,11 +1048,13 @@
     law("complied");
     const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
     if (!off || off.severity <= 1) {
-      // THE PAT-DOWN: hands on the wall for a beat, a word, and he walks off
+      // THE PAT-DOWN: his hands on you (CBZ.verbs.frisk), a word, he walks off
       law("warnings");
       arrest = null;
-      player.stun = Math.max(player.stun || 0, 1.1);
-      if (CBZ.sfx) { try { CBZ.sfx("step"); } catch (e) {} }
+      const V = VB();
+      const S = V && V.frisk ? V.frisk(gd, pa(), { far: true, onEnd: function () { gd._escort = false; } }) : null;
+      if (S) gd._escort = true;          // the verb walks him to you and puts his hands on you
+      else player.stun = Math.max(player.stun || 0, 1.1);
       if (CBZ.guardLine) CBZ.guardLine(gd, "warned", { force: true });
       lawGrace(60);
       gd.capCD = 60;
@@ -1040,6 +1063,7 @@
     }
     cuffs(false);
   }
+  // RESISTING: the record says so, then the taser (it can miss)
   function resist(why) {
     const a = arrest, gd = a.gd;
     endLadder(gd);
@@ -1049,29 +1073,34 @@
     if (!off && CBZ.prisonOffense) off = CBZ.prisonOffense("minor", { severity: 2, seenBy: gd });
     if (off) { off.resisted = true; off.severity = Math.max(off.severity, 2); }
     if (gdDist(gd) > ARREST.TASE_R) { cancelArrest(true); return; }
-    // THE TASER: probes, the body pose, you hit the floor
-    law("tases");
-    a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
-    player.stun = 1.85; setCaptureState("tased", 1.35);
-    if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(gd); } catch (e) {} }
-    if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (e) {} }
-    if (CBZ.shake) CBZ.shake(0.55);
-    flash();
-    gd._escort = true;                 // this file walks him in to the body now
+    a.phase = "chase"; a.t = 0; a.after = 0;
+    gd._escort = false;
+    tase();
   }
+  function tase() {
+    const a = arrest, gd = a.gd;
+    law("tases");
+    const r = AR() && AR().tase ? AR().tase(gd) : { hit: true };
+    flash();
+    if (!AR()) { player.stun = 1.85; }
+    if (r.hit) {
+      a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
+      // (the rig's own knockdown is the fall; "subdued" keeps the yard off you)
+      setCaptureState(AR() ? "subdued" : "tased", 1.35);
+      gd._escort = true;                 // this file walks him in to the body now
+    } else {
+      // the probes went wide: he reloads, and it is a chase
+      a.phase = "chase"; a.taseCD = AR() ? AR().TASE.RELOAD : 2.6;
+      gd._escort = false;
+    }
+  }
+  // THE TACKLE: the committed lunge (verbs.js + arrest.js). Pinned = the cuffs,
+  // missed = he is on the floor and you have a head start, broke it = loose.
   function tackle() {
     const a = arrest, gd = a.gd;
     law("tackles");
-    a.phase = "tackle"; a.t = 0;
-    player.stun = 2.05; setCaptureState("tackled", 1.55);
-    if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
-    if (CBZ.shake) CBZ.shake(0.7);
-    spray(1.1);
-    gd._escort = false;
-    // THE TACKLE (CBZ.verbs.tackle): he runs in low, shoulder at your waist,
-    // arms round your thighs, drives you down and ends kneeling on you. Down
-    // (or pinned to a wall) = the cuffs. The session ending any other way (he
-    // was hit off you, it never connected) = you are loose.
+    a.phase = "tackle"; a.t = 0; a.tackles++;
+    gd._escort = true;                   // the verb has his body
     const V = VB();
     if (V && V.tackle && !seizedBy) {
       const S = V.tackle(gd, pa(), {
@@ -1079,34 +1108,190 @@
         onEnd: function (S) {
           seizedBy = null;
           const k = S.result && S.result.outcome;
-          if (k === "open" || k === "wall") { if (!arrest) arrest = { gd, phase: "tackle" }; cuffs(true); return; }
-          if (arrest && arrest.gd === gd) arrest = null;
-          gd.capCD = 3.2;
+          if (k === "open" || k === "wall") {
+            if (!arrest) arrest = { gd, phase: "tackle", t: 0, taseCD: 0, tackles: 1 };
+            if (CBZ.sfx) { try { CBZ.sfx("punch"); } catch (e) {} }
+            if (CBZ.shake) CBZ.shake(0.7);
+            if (AR()) AR().subdue(2.2, "pinned");
+            if (V.getUp) { try { V.getUp(pa()); } catch (e) {} }
+            cuffs(true, { pinned: true });
+            return;
+          }
+          // missed (he is on the floor), shrugged off, torn loose: a chase
+          if (arrest && arrest.gd === gd) { gd._escort = false; arrest.phase = "chase"; arrest.t = 0; arrest.taseCD = Math.max(arrest.taseCD || 0, 0.8); }
+          if (k === "missed" || k === "shrugged") { if (arrest && arrest.gd === gd) cancelArrest(true); }
           setCaptureState("normal", 0);
         },
       });
-      if (S) { seizedBy = S; setCaptureState("tackled", 2.4); return; }
+      if (S) { seizedBy = S; return; }
     }
-    cuffs(true);
+    // no lunge from here (out of reach): keep after him
+    a.phase = "chase"; gd._escort = false;
   }
-  function cuffs(rough) {
+
+  // ---- THE CUFFS AND THE WALK (CBZ.arrest.take) ----------------------------
+  // haul = the take and where it walks you: your door mouth, then your bunk.
+  let haul = null;
+  function cellGoals() {
+    const goals = [];
+    const c = beatOn() ? playerCell() : null;
+    if (c && isFinite(+c.doorX) && isFinite(+c.doorZ)) goals.push({ x: +c.doorX, z: +c.doorZ, door: true });
+    const cb = CBZ.cellblock;
+    let inside = null;
+    if (c && cb && typeof cb.playerSpawn === "function") { try { inside = cb.playerSpawn(); } catch (e) { inside = null; } }
+    if (inside && isFinite(+inside.x) && isFinite(+inside.z)) goals.push({ x: +inside.x, z: +inside.z, inside: true });
+    else if (c && isFinite(+c.x) && isFinite(+c.z)) goals.push({ x: +c.x, z: +c.z, inside: true });
+    if (!goals.length && CBZ.SPAWN) goals.push({ x: CBZ.SPAWN.x, z: CBZ.SPAWN.z, inside: true });
+    return goals;
+  }
+  function crewOf() {
+    const out = [];
+    const mine = player.gang;
+    if (mine == null) return out;
+    for (const n of CBZ.npcs || []) if (n && !n.dead && n.gang === mine) out.push(n);
+    return out;
+  }
+  function cuffs(rough, o) {
+    o = o || {};
     const a = arrest, gd = a && a.gd;
     endLadder(gd);
     const off = CBZ.prisonOffenseNow ? CBZ.prisonOffenseNow() : null;
     const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
-    arrest = null;
-    if (gd) gd._escort = false;
-    law("cuffs");
-    startEscort(null, {
-      kind: escapeCap ? "transfer" : "hole",
-      severity: Math.max(2, (off && off.severity) || 2) + (rough ? 0.5 : 0),
-      lead: gd, tased: true,
+    const kind = escapeCap ? "transfer" : "hole";
+    const severity = Math.max(2, (off && off.severity) || 2) + (rough ? 0.5 : 0);
+    const A = AR();
+    if (!A || !A.take || !gd) {
+      // no arrest library: the old haul scene
+      arrest = null;
+      if (gd) gd._escort = false;
+      law("cuffs");
+      startEscort(null, { kind, severity, lead: gd, tased: true });
+      return;
+    }
+    if (a) { a.phase = "take"; a.t = 0; }
+    gd._escort = true;                   // guards.js leaves him to the verbs
+    if (o.subdued && A.subdue) A.subdue(2.6, "tased");   // he keeps the trigger down while he cuffs you
+    const h = A.take(gd, {
+      pinned: !!o.pinned, walk: ESC.WALK_SPD,
+      crew: crewOf,
+      to: function () { return haul && haul.goals.length ? haul.goals[0] : null; },
+      arrive: 0.55,
+      onCuffed: function () {
+        law("cuffs");
+        if (CBZ.guardLine) { try { CBZ.guardLine(gd, "cuff", { force: true }); } catch (e) {} }
+        if (CBZ.killstreakBreak) CBZ.killstreakBreak("Cuffed");
+        haul = { h: h, gd: gd, kind: kind, severity: severity, goals: cellGoals(), t: 0, fade: -1 };
+        arrest = null;
+        g.detection = Math.min(g.detection || 0, 40);
+        for (const other of CBZ.guards || []) { if (other !== gd) { other.hunt = 0; other._chase = null; } }
+      },
+      onEscaped: function () {
+        // tore out of his hands before the cuffs closed: resisting, and he goes for the taser
+        if (CBZ.prisonOffense) { try { const of = CBZ.prisonOffense("assault", { severity: 3, seenBy: gd }); if (of) of.resisted = true; } catch (e) {} }
+        if (CBZ.addHeat) CBZ.addHeat(18);
+        if (arrest && arrest.gd === gd) { gd._escort = false; arrest.phase = "chase"; arrest.t = 0; arrest.taseCD = 0.9; }
+        setCaptureState("normal", 0);
+      },
+      onMissed: function () {
+        // you walked off while he reached: that is not complying
+        if (arrest && arrest.gd === gd) { gd._escort = false; resist("walked"); }
+      },
+      onArrived: function (hh) { haulArrived(hh); },
+      onStall: function () { if (haul) haul.stall = (haul.stall || 0) + 1; },
+      onBroke: function (hh, why) {
+        // OUT OF HIS HANDS, STILL IN CUFFS: a real offense, the block comes down
+        haulEnd(false);
+        gd._escort = false; gd.capCD = 0; gd.hunt = Math.max(gd.hunt || 0, 8);
+        if (CBZ.prisonOffense) { try { const of = CBZ.prisonOffense(escapeCap ? "escape" : "assault", { severity: escapeCap ? 4 : 3, seenBy: gd }); if (of) of.resisted = true; } catch (e) {} }
+        if (CBZ.addHeat) CBZ.addHeat(30);
+        for (const other of CBZ.guards || []) {
+          if (!arrestGuardOk(other)) continue;
+          const d = Math.hypot(player.pos.x - other.group.position.x, player.pos.z - other.group.position.z);
+          if (d < 30) { other.hunt = Math.max(other.hunt || 0, 6); other.capCD = 0; }
+        }
+      },
     });
+    if (!h) {
+      arrest = null; gd._escort = false;
+      law("cuffs");
+      startEscort(null, { kind, severity, lead: gd, tased: true });
+      return;
+    }
+    if (a) a.take = h;
+    setCaptureState("normal", 0);
   }
+  // reached a mark: the door mouth, then inside. Inside: the cuffs come off
+  // and the door racks shut behind him.
+  function haulArrived(hh) {
+    const H = haul;
+    if (!H || H.h !== hh) return;
+    const at = H.goals.shift();
+    if (H.goals.length && !(at && at.inside)) { hh.resume(); return; }
+    haulLand(true);
+  }
+  // the end of the walk. walked = he got you all the way in (no cut)
+  function haulLand(walked) {
+    const H = haul;
+    if (!H) return;
+    const gd = H.gd;
+    if (H.h && !H.h.done) H.h.finish();
+    if (!walked) {
+      if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; CBZ.playerChar.group.position.copy(player.pos); }
+    }
+    g.detection = 0; g.invuln = Math.max(g.invuln || 0, 1.5);
+    haul = null;
+    setCaptureState("normal", 0);
+    if (gd) { gd._escort = false; gd.capCD = 3.0; gd.hunt = 0; gd._chase = null; }
+    if (H.kind === "transfer") {
+      g.caughtCount++;
+      applyStrike();                            // a transfer ends the scene (and the run) in here
+      return;
+    }
+    // out of the cuffs, and the door
+    tiesOn(false);
+    if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }
+    holeSentence(H.severity);
+    holeRelease = true;
+    if (confineT > 0) sealPlayerCell();
+  }
+  // tear the haul down without landing it (you broke loose, a new run)
+  function haulEnd(dropTake) {
+    const H = haul;
+    haul = null;
+    if (H) setCaptureState("normal", 0);
+    if (fadeEl && H && H.fade >= 0) fadeEl.style.opacity = "0";
+    if (H && H.gd) H.gd._escort = false;
+    if (dropTake && H && H.h && !H.h.done) H.h.cancel();
+  }
+  function haulTick(dt) {
+    const H = haul;
+    if (!H) return;
+    H.t += dt;
+    if (!H.gd || H.gd.dead) { if (H.h && H.h.done) haulEnd(false); return; }
+    // in custody: the yard's detectors and the schedule leave you alone
+    // ("escorted" is not a prone state: your body is the verb's)
+    player.captureState = "escorted"; player.captureT = 0.5;
+    // A WALK THAT WILL NOT END (a far cell, a door he cannot open, a man who
+    // has made himself dead weight for a long time) is finished off-screen:
+    // the only cut in the whole arrest, a second of black at the end of it
+    if (H.fade < 0 && (H.t > ARREST.WALK_MAX || (H.stall | 0) >= 1)) H.fade = 0;
+    if (H.fade >= 0) {
+      H.fade += dt;
+      if (fadeEl) fadeEl.style.opacity = Math.min(1, H.fade / ESC.FADE).toFixed(2);
+      if (H.fade >= ESC.FADE) {
+        haulLand(false);
+        if (fadeEl) fadeEl.style.opacity = "0";
+      }
+    }
+  }
+  CBZ.prisonHaul = function () { return haul ? { phase: haul.h ? haul.h.phase : null, goals: haul.goals.length, t: haul.t } : null; };
+
   function arrestTick(dt) {
     const a = arrest, gd = a.gd;
-    if (!arrestGuardOk(gd)) { cancelArrest(false); return; }
+    if (a.phase === "take") return;                      // arrest.js has the hands; its callbacks move us on
+    if (!arrestGuardOk(gd)) { cancelArrest(a.phase !== "order"); return; }
     a.t += dt;
+    if (a.taseCD > 0) a.taseCD -= dt;
     const d = gdDist(gd);
     const px = player.pos.x, pz = player.pos.z;
     if (a.phase === "order") {
@@ -1129,32 +1314,58 @@
     if (a.phase === "tased") {
       // he walks in to the body while the probes hold you
       screwStep(gd, px, pz, ESC.REACH, px, pz, d > 2.5, dt);
-      if ((player.stun || 0) > 0.05) return;
-      a.after += dt;
-      if (swungSince(a.tasedAt + 0.05) || (pSpd > ARREST.FLEE_SPD && a.after > 0.25)) {
-        if (d <= 3.2) { tackle(); return; }
-        cancelArrest(true); return;
+      const subdued = AR() ? AR().subdued() : (player.stun || 0) > 0.05;
+      if (subdued && d <= ESC.REACH + 0.5) {
+        // on you while you are jelly: up by the arm and into the cuffs
+        const V = VB();
+        if (V && V.getUp) { try { V.getUp(pa()); } catch (e) {} }
+        cuffs(false, { subdued: true });
+        return;
       }
+      if (subdued) return;
+      a.after += dt;
+      if (swungSince(a.tasedAt + 0.05) || (pSpd > ARREST.FLEE_SPD && a.after > 0.25)) { a.phase = "chase"; a.t = 0; gd._escort = false; return; }
       if ((d <= ESC.REACH + 0.4 && a.after > 0.5) || a.after > ARREST.AFTER_TASE) {
         if (d <= 3.2) { cuffs(false); return; }
         cancelArrest(true);
       }
       return;
     }
-    // "tackle": predator.js owns the hold until its onEnd
+    if (a.phase === "chase") {
+      // after the probes missed, or you got up and went again: the reload,
+      // the lunge from arm's reach, and nothing on a man squared up swinging
+      gd.hunt = Math.max(gd.hunt || 0, 3);
+      const swinging = swungSince(clock() - 1.2);
+      if (d > ARREST.LOSE_R) { cancelArrest(true); return; }
+      if (a.taseCD <= 0 && d <= ARREST.TASE_R && (swinging || pSpd > 0.8)) { tase(); return; }
+      if (!swinging && d <= ARREST.LUNGE_R && pSpd > 0.8 && a.tackles < 3 && !seizedBy) { tackle(); return; }
+      // he stopped and stood for it: that is compliance after all
+      if (!swinging && pSpd < ARREST.COMPLY_SPD && d <= ESC.REACH + 0.6 && a.t > 0.6) { cuffs(false); return; }
+      return;
+    }
+    // "tackle": the lunge owns the hold until its onEnd
   }
 
   // called from guards.js when a hunting guard has eyes on you inside
   // ORDER_R. Returns how close he should stand (null = his own reach).
   CBZ.tryCapture = function (gd, dt) {
     if (player.dead || g.role === "cop") return null;
-    if (esc || down) return null;
-    if (arrest) return arrest.gd === gd ? (arrest.phase === "order" ? ARREST.STANDOFF : ESC.REACH) : ARREST.STANDOFF + 1.2;
+    if (esc || down || haul) return null;
+    if (arrest) {
+      if (arrest.gd !== gd) return ARREST.STANDOFF + 1.2;
+      return arrest.phase === "order" ? ARREST.STANDOFF : arrest.phase === "chase" ? 1.2 : ESC.REACH;
+    }
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return null;
     if (gd._seizing || (gd.capCD || 0) > 0) return ARREST.STANDOFF;
     if ((g.invuln || 0) > 0) return ARREST.STANDOFF;
     // the grace after a release: only a NEW offense brings the order back
     if (lawGraceT > 0 && !(CBZ.prisonOffenseFresh && CBZ.prisonOffenseFresh())) return ARREST.STANDOFF;
+    // cuffed and loose: nothing to order, a hand on your arm
+    if (CBZ.playerChar && CBZ.playerChar.cuffed && gdDist(gd) <= ESC.REACH + 1.2) {
+      arrest = { gd, phase: "order", t: 0, t0: clock(), taseCD: 0, tackles: 0 };
+      cuffs(false);
+      return ESC.REACH;
+    }
     startArrest(gd);
     return arrest ? (arrest.phase === "order" ? ARREST.STANDOFF : ESC.REACH) : null;
   };
@@ -1202,6 +1413,7 @@
     // not on PAUSE: a pause mid-haul used to end the scene and set you loose
     CBZ.jailBoost.onStateExit(function () {
       endEscort(); releasePlayerCell(); confineT = 0; confineShown = -1;
+      cancelArrest(false); haulEnd(true);
       arrest = null; down = null; deathT = 0; holeRelease = false;
     }, ["title", "won", "lost"]);
   }
@@ -1401,6 +1613,7 @@
     // new run? clear every leftover before anything else ticks
     if (pollStrikeRun && pollStrikeRun()) {
       endEscort(); releasePlayerCell(); muster(false);
+      cancelArrest(false); haulEnd(true);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
       beatLock = false; intakeDone = false; lastServed = -1;
       arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false; lethalDowns.length = 0;
@@ -1463,6 +1676,7 @@
 
     if (player.dead) {
       if (esc) { camDrop(); releaseScrews(); esc = null; tiesOn(false); }
+      if (haul) haulEnd(true);
       if (arrest) cancelArrest(false);
       down = null;
       player.captureState = "dead";
@@ -1485,11 +1699,14 @@
 
     // the haul owns the body, the screws and the lens until it is done
     if (esc) { escortTick(dt); return; }
+    // cuffed and walked (CBZ.arrest.take has the bodies; this is the walk's clock)
+    if (haul) haulTick(dt);
     // on the floor: the screws are coming, and steel can still finish you
     if (down) { downTick(dt); return; }
     if (arrest) {
       arrestTick(dt);
-      if (arrest && arrest.phase === "tackle" && arrest.t > 6 && !seizedBy) cuffs(true);
+      // a lunge that never resolved (he was knocked off it): it is a chase again
+      if (arrest && arrest.phase === "tackle" && arrest.t > 6 && !seizedBy) { arrest.phase = "chase"; arrest.gd._escort = false; }
     }
     healTick(dt);
 

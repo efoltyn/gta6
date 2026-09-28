@@ -84,6 +84,7 @@ export function loadVerbsVM(opts = {}) {
   const loaded = { physics: !!CBZ.groundAt, moves: !!(CBZ.moves && CBZ.moves.step), grapple: false, strike: false, meleePoses: false };
   if (opts.grapple !== false) { run("src/systems/grapple.js"); loaded.grapple = !!CBZ.body; }
   run("src/systems/verbs.js");
+  if (has("src/systems/arrest.js")) run("src/systems/arrest.js");
   run("src/entities/verbposes.js");
   const errors = [];
   for (const f of ["src/entities/meleeposes.js", "src/systems/verbs_strike.js"]) {
