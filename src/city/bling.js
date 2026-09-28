@@ -389,13 +389,13 @@
       // inside them, heavy arms. The cheap rung, and it looks like a different
       // decade rather than a cheaper version of the same pair.
       shadesRetro: [
-        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.325 },
-        { kind: "rimThick", mat: M.frameTort, x: 0.145, y: 0.345, z: 0.325 },
+        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.332 },   // rims off the face plane (overlap-audit z-fight)
+        { kind: "rimThick", mat: M.frameTort, x: 0.145, y: 0.345, z: 0.332 },
         { kind: "lensRound", mat: M.lensAmber, x: -0.145, y: 0.345, z: 0.345 },
         { kind: "lensRound", mat: M.lensAmber, x: 0.145, y: 0.345, z: 0.345 },
         { kind: "bridge", mat: M.frameTort, x: 0.0, y: 0.345, z: 0.335 },
-        { kind: "templeThick", mat: M.frameTort, x: -0.275, y: 0.345, z: 0.17 },
-        { kind: "templeThick", mat: M.frameTort, x: 0.275, y: 0.345, z: 0.17 },
+        { kind: "templeThick", mat: M.frameTort, x: -0.284, y: 0.345, z: 0.17 },   // outer face OFF the skull side (it lay on it: z-fight)
+        { kind: "templeThick", mat: M.frameTort, x: 0.284, y: 0.345, z: 0.17 },
       ],
       // designer shades — same frame, mirrored lens + gold hardware (the pricier read)
       shadesDesigner: [
@@ -977,6 +977,7 @@
     return cl ? lookParts(cl.look) : null;
   };
   CBZ.cityBlingGeo = geoFor;                           // shared geometry per part kind
+  CBZ.cityBlingLookParts = lookParts;                  // look key -> parts list | null (tools/overlap-audit.mjs)
   // Mount a parts list on a rig OUTSIDE the pooled street path (the portrait's
   // offscreen rig). FRESH meshes on purpose: the pool belongs to the dressed
   // roster, and a caller that removes its meshes without releasing them would

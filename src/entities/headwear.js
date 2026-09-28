@@ -87,6 +87,8 @@
   // where the compressed hair is allowed to reach under a hat: well inside the
   // crown's inner face, so tessellation and oblique rays never let it through
   const HA_HAIR = 0.0025;
+  // hair stays this far inside a hat's real inner surface (2.5 mm at HUMAN_SCALE)
+  const HAIR_M = 0.0035;
 
   function boxSdf(qx, qy, qz, bx, by, bz, r) {
     const dx = Math.abs(qx) - bx, dy = Math.abs(qy) - by, dz = Math.abs(qz) - bz;
@@ -183,7 +185,7 @@
       const n = normal(p);
       return { p: [p[0] + n[0] * off, p[1] + n[1] * off, p[2] + n[2] * off], n: n };
     }
-    return { F, sdf, normal, cast, dirAE, hitAE, hitDir, bandE, ring, project };
+    return { F, form, sdf, normal, cast, dirAE, hitAE, hitDir, bandE, ring, project };
   }
 
   /* A band line: keys [[a, y], ...] for a in [0, PI] (front to back),
@@ -220,7 +222,410 @@
   function Part() { return { p: [], uv: [], ix: [] }; }
   function parts() {
     const P = {};
-    return function (role) { return P[role] || (P[role] = Part()); };
+    const fn = function (role) { return P[role] || (P[role] = Part()); };
+    fn.map = P;
+    return fn;
+  }
+
+  /* ---- THE REAL HEAD, AS A SPHERICAL DEPTH MAP -------------------------
+     Owner 2026-09-28: "the helmet overlaps with the head weirdly". The hats
+     were fitted to skullSdf, an analytic copy of the head sculpt, and only
+     their VERTICES were kept off it. Three things got through that:
+       - the triangles BETWEEN those vertices: a far-LOD crown (20-24 columns,
+         4-5 rows) chords up to 12 mm into the skull between its vertices;
+       - the face: the brows stand proud of the forehead (and rise 13 mm in a
+         fear face) right under every peak and bill, and they are not in
+         skullSdf at all;
+       - the hair: compressHair squeezed it under a BAND LINE, so anything the
+         hat covers below that line (a bill's drooping sides over the temple
+         hair, a reversed bill over long hair, a riot helmet's neck curtain
+         over a ponytail) went straight through.
+     The fix measures instead of guessing. From the skull centre HC, a grid of
+     directions (azimuth x elevation) stores:
+       BODY map  the FARTHEST point of the real head along each direction: the
+                 near AND far head meshes (every nose), both ears, the neck,
+                 the brows at rest and fully raised, the lips — whatever
+                 character.js builds today, read through CBZ.human.geometry.
+       SHELL map the NEAREST hat surface along each direction (per hat).
+     Every hat is pushed out until each of its triangles (sampled inside, not
+     just at the corners) clears the BODY map, and every hair vertex is pulled
+     in until it is under the SHELL map. One measurement, both directions. */
+  const SA = 256, SE = 128;                  // 1.4 degrees a cell
+  const SDIR = new Float32Array(SA * SE * 3);
+  for (let j = 0; j < SE; j++) for (let i = 0; i < SA; i++) {
+    const a = (i + 0.5) / SA * TAU - PI, e = (j + 0.5) / SE * PI - PI / 2, ce = Math.cos(e), k = (j * SA + i) * 3;
+    SDIR[k] = Math.sin(a) * ce; SDIR[k + 1] = Math.sin(e); SDIR[k + 2] = Math.cos(a) * ce;
+  }
+  // ray from HC along cell direction (dx,dy,dz) against triangle abc: t or -1
+  function rayTri(dx, dy, dz, a, b, c) {
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (det > -1e-12 && det < 1e-12) return -1;
+    const inv = 1 / det;
+    const tx = HC[0] - a[0], ty = HC[1] - a[1], tz = HC[2] - a[2];
+    const u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < -1e-6 || u > 1 + 1e-6) return -1;
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * inv;
+    if (v < -1e-6 || u + v > 1 + 1e-6) return -1;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    return t > 1e-6 ? t : -1;
+  }
+  function cellOf(x, y, z) {
+    const dx = x - HC[0], dy = y - HC[1], dz = z - HC[2], r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
+    const a = Math.atan2(dx, dz), e = Math.asin(Math.max(-1, Math.min(1, dy / r)));
+    return [(a + PI) / TAU * SA, (e + PI / 2) / PI * SE, r];
+  }
+  /* Rasterize triangles (flat xyz array + index) into map M: max (body) or
+     min (shell) hit distance per cell. Vertices are splatted too, so a sliver
+     thinner than a cell still counts. */
+  function sphRaster(M, pos, ix, isMax, ox, oy, oz) {
+    ox = ox || 0; oy = oy || 0; oz = oz || 0;
+    const put = (k, t) => { if (isMax ? t > M[k] : t < M[k]) M[k] = t; };
+    const n = ix ? ix.length : pos.length / 3;
+    const A = [0, 0, 0], B = [0, 0, 0], C = [0, 0, 0], T3 = [A, B, C];
+    for (let f = 0; f < n; f += 3) {
+      const cs = [];
+      for (let q = 0; q < 3; q++) {
+        const vi = ix ? ix[f + q] : f + q, P3 = T3[q];
+        P3[0] = pos[vi * 3] + ox; P3[1] = pos[vi * 3 + 1] + oy; P3[2] = pos[vi * 3 + 2] + oz;
+        const c = cellOf(P3[0], P3[1], P3[2]);
+        cs.push(c);
+        const ia = Math.min(SA - 1, c[0] | 0), ie = Math.min(SE - 1, Math.max(0, c[1] | 0));
+        put(ie * SA + ia, c[2]);
+      }
+      if (!isMax) {
+        // a SHELL seen edge-on from HC (a helmet's under-lip at eye height is a
+        // sliver thinner than a cell): splat points along its edges too, so a
+        // ray that crosses it still finds it
+        for (let q = 0; q < 3; q++) {
+          const P0 = T3[q], P1 = T3[(q + 1) % 3];
+          const len = Math.hypot(P1[0] - P0[0], P1[1] - P0[1], P1[2] - P0[2]), ns = Math.min(16, Math.ceil(len / 0.007));
+          for (let s = 1; s < ns; s++) {
+            const t = s / ns, c = cellOf(P0[0] + (P1[0] - P0[0]) * t, P0[1] + (P1[1] - P0[1]) * t, P0[2] + (P1[2] - P0[2]) * t);
+            put(Math.min(SE - 1, Math.max(0, c[1] | 0)) * SA + Math.min(SA - 1, c[0] | 0), c[2]);
+          }
+        }
+      }
+      let a0 = Math.min(cs[0][0], cs[1][0], cs[2][0]), a1 = Math.max(cs[0][0], cs[1][0], cs[2][0]);
+      if (a1 - a0 > SA / 2) {                        // straddles the back seam
+        const u = cs.map((c) => (c[0] < SA / 2 ? c[0] + SA : c[0]));
+        a0 = Math.min(u[0], u[1], u[2]); a1 = Math.max(u[0], u[1], u[2]);
+      }
+      let e0 = Math.min(cs[0][1], cs[1][1], cs[2][1]), e1 = Math.max(cs[0][1], cs[1][1], cs[2][1]);
+      if (a1 - a0 > SA / 2) {                        // it goes round a pole
+        a0 = 0; a1 = SA - 1;
+        if (e0 + e1 > SE) e1 = SE - 1; else e0 = 0;
+      }
+      const i0 = Math.floor(a0) - 1, i1 = Math.floor(a1) + 1;
+      const j0 = Math.max(0, Math.floor(e0) - 1), j1 = Math.min(SE - 1, Math.floor(e1) + 1);
+      for (let j = j0; j <= j1; j++) for (let ii = i0; ii <= i1; ii++) {
+        const i = ((ii % SA) + SA) % SA, k = j * SA + i, d = k * 3;
+        const t = rayTri(SDIR[d], SDIR[d + 1], SDIR[d + 2], A, B, C);
+        if (t > 0) put(k, t);
+      }
+    }
+  }
+  // the map at a direction: the worst of the 2 x 2 cells round it
+  function sphGet(M, x, y, z, isMax) {
+    const dx = x - HC[0], dy = y - HC[1], dz = z - HC[2], r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
+    const q = dy / r;
+    const u = (Math.atan2(dx, dz) + PI) * (SA / TAU) - 0.5, v = (Math.asin(q < -1 ? -1 : q > 1 ? 1 : q) + PI / 2) * (SE / PI) - 0.5;
+    const i0 = Math.floor(u), j0 = Math.floor(v);
+    let best = isMax ? 0 : Infinity;
+    for (let dj = 0; dj < 2; dj++) {
+      const j = Math.max(0, Math.min(SE - 1, j0 + dj));
+      for (let di = 0; di < 2; di++) {
+        const i = (((i0 + di) % SA) + SA) % SA, t = M[j * SA + i];
+        if (isMax ? t > best : t < best) best = t;
+      }
+    }
+    return best;
+  }
+  // the one cell a direction falls in (no neighbours: at a silhouette — the
+  // top edge of a brow seen from HC — the 2 x 2 worst case would read the
+  // brow's FRONT and throw a brim centimetres off it)
+  function sphCell(M, x, y, z) {
+    const dx = x - HC[0], dy = y - HC[1], dz = z - HC[2], r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
+    const q = dy / r;
+    const i = Math.min(SA - 1, ((Math.atan2(dx, dz) + PI) * (SA / TAU)) | 0);
+    const j = Math.max(0, Math.min(SE - 1, ((Math.asin(q < -1 ? -1 : q > 1 ? 1 : q) + PI / 2) * (SE / PI)) | 0));
+    return M[j * SA + i];
+  }
+  function geoArrays(g) {
+    const p = g.attributes.position.array;
+    return { pos: p, ix: g.index ? g.index.array : null };
+  }
+  const BODY = Object.create(null);
+  /* The BODY map for a head form. Built from character.js's own geometry
+     (CBZ.human.geometry) laid out exactly as makeCharacter lays it out in the
+     neck frame (head at +0.30, brow at y 0.448 z 0.303 hanging below its
+     origin, lips at y 0.16), falling back to the analytic head when the body
+     file is not loaded (a props-only page). */
+  const BROW_Y = 0.448, BROW_Z = 0.303, BROW_RAISE = 0.013, LIP_Y = 0.16;
+  // BODY_PTS: the same body as points (xyz, hat frame) for the exact pass below
+  const BODY_PTS = new WeakMap(), BODY_RAW = new WeakMap();
+  function bodyMap(form, beardGeo) {
+    const bkey = form + (beardGeo ? "|" + beardGeo.uuid : "");
+    if (BODY[bkey]) return BODY[bkey];
+    const pts = [];
+    const ras = (M, pos, ix, ox, oy, oz) => {
+      sphRaster(M, pos, ix, true, ox, oy, oz);
+      for (let i = 0; i < pos.length; i += 3) pts.push(pos[i] + (ox || 0), pos[i + 1] + (oy || 0), pos[i + 2] + (oz || 0));
+    };
+    if (beardGeo) {
+      // the wearer's beard on top of the bare head: a chin cup rides ON it
+      const base = bodyMap(form), M = Float32Array.from(base), a = geoArrays(beardGeo);
+      const bp = BODY_RAW.get(base);
+      if (bp) for (let i = 0; i < bp.length; i++) pts.push(bp[i]);
+      ras(M, a.pos, a.ix);
+      BODY_RAW.set(M, pts); BODY_PTS.set(M, outerPts(M, pts));
+      return (BODY[bkey] = M);
+    }
+    const M = new Float32Array(SA * SE);
+    const G = CBZ.human && CBZ.human.geometry;
+    if (G && G.head) {
+      for (const far of [false, true]) for (let n = 0; n < 3; n++) {
+        const a = geoArrays(G.head(form, n, far));
+        ras(M, a.pos, a.ix, 0, 0.30, 0);
+      }
+      if (G.brow) for (const ex of ["n", "a", "f"]) for (const dy of [0, BROW_RAISE]) {
+        try { const a = geoArrays(G.brow(form, ex)); ras(M, a.pos, a.ix, 0, BROW_Y + dy, BROW_Z); } catch (e) { /* older body file */ }
+      }
+      if (G.lip) for (const w of ["U", "L"]) {
+        try {
+          const g = G.lip(w, "n"), p = g.attributes.position.array, q = new Float32Array(p.length);
+          // the fullest lips any face wears (f form x heritage 'lips')
+          for (let i = 0; i < p.length; i += 3) { q[i] = p[i]; q[i + 1] = p[i + 1] * 1.4; q[i + 2] = p[i + 2]; }
+          ras(M, q, g.index ? g.index.array : null, 0, LIP_Y, 0);
+        } catch (e) { /* older body file */ }
+      }
+    }
+    else {
+      // no body file on this page (props only): the analytic head the hats were built on
+      const H = Head(form, { ears: true, neck: true, nose: true });
+      for (let k = 0; k < SA * SE; k++) M[k] = H.cast(HC, [SDIR[k * 3], SDIR[k * 3 + 1], SDIR[k * 3 + 2]], 0.9);
+    }
+    BODY_RAW.set(M, pts); BODY_PTS.set(M, outerPts(M, pts));
+    return (BODY[bkey] = M);
+  }
+  /* THE EXACT PASS, after the map passes: every real body VERTEX (an ear's
+     corner, a brow's tip, the nose) against the hat's actual triangles, binned
+     by direction. Any triangle that crosses the ray from HC to a body vertex
+     short of it (+ margin) is pushed out by the difference. The map passes do
+     the bulk; this catches what falls between their cells. */
+  const XA = 128, XE = 64;                   // the exact pass's direction bins
+  /* The body points worth testing: only the OUTERMOST along their direction
+     (a far-LOD skull vertex inside the near skull, an eye socket's floor can
+     never touch a hat), deduplicated, with their direction and bin. */
+  function outerPts(M, pts) {
+    const seen = new Set(), out = [];
+    for (let i = 0; i < pts.length; i += 3) {
+      const x = pts[i], y = pts[i + 1], z = pts[i + 2];
+      const kk = Math.round(x * 5e3) + "," + Math.round(y * 5e3) + "," + Math.round(z * 5e3);
+      if (seen.has(kk)) continue;
+      seen.add(kk);
+      const c = cellOf(x, y, z), r = c[2];
+      if (r < sphCell(M, x, y, z) - 0.006) continue;
+      const k = Math.min(XE - 1, Math.max(0, (c[1] / SE * XE) | 0)) * XA + Math.min(XA - 1, (c[0] / SA * XA) | 0);
+      out.push((x - HC[0]) / r, (y - HC[1]) / r, (z - HC[2]) / r, r, k);
+    }
+    return Float32Array.from(out);
+  }
+  function exactPass(P, form, margin, beardGeo) {
+    const M = bodyMap(form, beardGeo), pts = BODY_PTS.get(M), C0 = coarseOf(M);
+    if (!pts || !pts.length) return;
+    const roles = Object.keys(P.map);
+    const key = (x, y, z) => (Math.round(x * 2e4) + 50000) * 1e10 + (Math.round(y * 2e4) + 50000) * 1e5 + (Math.round(z * 2e4) + 50000);
+    const BA = XA, BE = XE;
+    for (let pass = 0; pass < 3; pass++) {
+      // bin every hat triangle that could reach the head by the directions it spans
+      const bins = new Map(), tris = [];
+      for (const role of roles) {
+        const part = P.map[role], p = part.p, ix = part.ix, nv = p.length / 3;
+        const U = new Float32Array(nv), W = new Float32Array(nv), R = new Float32Array(nv), CB = new Float32Array(nv);
+        for (let v = 0; v < nv; v++) {
+          const c = cellOf(p[v * 3], p[v * 3 + 1], p[v * 3 + 2]);
+          U[v] = c[0] / SA * BA; W[v] = c[1] / SE * BE; R[v] = c[2];
+          CB[v] = C0[Math.min(CE - 1, Math.max(0, (c[1] / SE * CE) | 0)) * CA + Math.min(CA - 1, (c[0] / SA * CA) | 0)];
+        }
+        for (let f = 0; f < ix.length; f += 3) {
+          const va = ix[f], vb = ix[f + 1], vc = ix[f + 2];
+          const r0 = Math.min(R[va], R[vb], R[vc]);
+          const ed = Math.max(Math.abs(R[va] - R[vb]), Math.abs(R[vb] - R[vc]), Math.abs(R[vc] - R[va]),
+            Math.hypot(p[va * 3] - p[vb * 3], p[va * 3 + 1] - p[vb * 3 + 1], p[va * 3 + 2] - p[vb * 3 + 2]));
+          if (ed < 0.06 && r0 - ed * ed / (4 * Math.max(0.1, r0)) > Math.max(CB[va], CB[vb], CB[vc]) + margin) continue;
+          const id = tris.length;
+          tris.push(part, va * 3, vb * 3, vc * 3);
+          const us = [U[va], U[vb], U[vc]];
+          let e0 = Math.min(W[va], W[vb], W[vc]), e1 = Math.max(W[va], W[vb], W[vc]);
+          let a0 = Math.min(us[0], us[1], us[2]), a1 = Math.max(us[0], us[1], us[2]);
+          if (a1 - a0 > BA / 2) { const w = us.map((u) => (u < BA / 2 ? u + BA : u)); a0 = Math.min(w[0], w[1], w[2]); a1 = Math.max(w[0], w[1], w[2]); }
+          if (a1 - a0 > BA / 2) { a0 = 0; a1 = BA - 1; if (e0 + e1 > BE) e1 = BE - 1; else e0 = 0; }
+          for (let j = Math.max(0, Math.floor(e0) - 1); j <= Math.min(BE - 1, Math.floor(e1) + 1); j++)
+            for (let ii = Math.floor(a0) - 1; ii <= Math.floor(a1) + 1; ii++) {
+              const k = j * BA + ((ii % BA) + BA) % BA;
+              let L = bins.get(k); if (!L) bins.set(k, L = []);
+              L.push(id);
+            }
+        }
+      }
+      if (!tris.length) break;
+      const push = new Map();
+      const A = [0, 0, 0], B = [0, 0, 0], C = [0, 0, 0];
+      for (let i = 0; i < pts.length; i += 5) {
+        const L = bins.get(pts[i + 4]);
+        if (!L) continue;
+        const dx = pts[i], dy = pts[i + 1], dz = pts[i + 2], r = pts[i + 3];
+        for (const id of L) {
+          const part = tris[id], p = part.p, ia = tris[id + 1], ib = tris[id + 2], ic = tris[id + 3];
+          A[0] = p[ia]; A[1] = p[ia + 1]; A[2] = p[ia + 2]; B[0] = p[ib]; B[1] = p[ib + 1]; B[2] = p[ib + 2]; C[0] = p[ic]; C[1] = p[ic + 1]; C[2] = p[ic + 2];
+          const t = rayTri(dx, dy, dz, A, B, C);
+          if (t <= 0 || t >= r + margin) continue;
+          const need = r + margin - t;
+          for (const i3 of [ia, ib, ic]) {
+            const kk = key(p[i3], p[i3 + 1], p[i3 + 2]);
+            if (!(push.get(kk) >= need)) push.set(kk, need);
+          }
+        }
+      }
+      if (!push.size) break;
+      for (const role of roles) {
+        const p = P.map[role].p;
+        for (let i = 0; i < p.length; i += 3) {
+          const D = push.get(key(p[i], p[i + 1], p[i + 2]));
+          if (!D) continue;
+          const dx = p[i] - HC[0], dy = p[i + 1] - HC[1], dz = p[i + 2] - HC[2], r = Math.hypot(dx, dy, dz) || 1;
+          const s = (r + D * 1.1) / r;
+          p[i] = HC[0] + dx * s; p[i + 1] = HC[1] + dy * s; p[i + 2] = HC[2] + dz * s;
+        }
+      }
+    }
+  }
+  // a coarse, dilated copy of a BODY map (11 degree cells, each the max of
+  // itself and its neighbours): a cheap upper bound, so the hat triangles
+  // nowhere near the head (a brim's rim, a helmet's crown) cost nothing
+  const CA = 32, CE = 16, COARSE = new WeakMap();
+  function coarseOf(M) {
+    let C = COARSE.get(M);
+    if (C) return C;
+    const raw = new Float32Array(CA * CE);
+    for (let j = 0; j < SE; j++) for (let i = 0; i < SA; i++) {
+      const k = ((j * CE / SE) | 0) * CA + ((i * CA / SA) | 0);
+      if (M[j * SA + i] > raw[k]) raw[k] = M[j * SA + i];
+    }
+    C = new Float32Array(CA * CE);
+    for (let j = 0; j < CE; j++) for (let i = 0; i < CA; i++) {
+      let m = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const jj = Math.max(0, Math.min(CE - 1, j + dj)), ii = (i + di + CA) % CA;
+        if (raw[jj * CA + ii] > m) m = raw[jj * CA + ii];
+      }
+      // a cell touching a pole sees every azimuth round it
+      if (j <= 1 || j >= CE - 2) for (let ii = 0; ii < CA; ii++) {
+        const jj = j <= 1 ? 0 : CE - 1;
+        if (raw[jj * CA + ii] > m) m = raw[jj * CA + ii];
+      }
+      C[j * CA + i] = m;
+    }
+    COARSE.set(M, C);
+    return C;
+  }
+  /* PUSH THE HAT OFF THE HEAD: every triangle of every role is sampled on a
+     barycentric grid (denser on big triangles: an ear's corner can poke
+     between the corners of a drape triangle 4 cm across); wherever a sample
+     sits inside the body map (+ margin) all three corners move out along their
+     own rays from HC by the deficit. Vertices at the same spot in different
+     grids (a crown and its lip, a brim and its edge roll) get the same push,
+     so no seam opens. A few passes, re-checking only what moved. */
+  function clearHead(P, form, margin, beardGeo) {
+    const M = bodyMap(form, beardGeo), C = coarseOf(M);
+    const roles = Object.keys(P.map);
+    const key = (x, y, z) => (Math.round(x * 2e4) + 50000) * 1e10 + (Math.round(y * 2e4) + 50000) * 1e5 + (Math.round(z * 2e4) + 50000);
+    const coarseAt = (x, y, z) => {
+      const dx = x - HC[0], dy = y - HC[1], dz = z - HC[2], r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
+      const i = Math.min(CA - 1, ((Math.atan2(dx, dz) + PI) / TAU * CA) | 0);
+      const j = Math.max(0, Math.min(CE - 1, ((Math.asin(Math.max(-1, Math.min(1, dy / r))) + PI / 2) / PI * CE) | 0));
+      return C[j * CA + i];
+    };
+    let moved = null;                          // the spots pushed last pass
+    for (let pass = 0; pass < 6; pass++) {
+      const push = new Map();
+      for (const role of roles) {
+        const part = P.map[role], p = part.p, ix = part.ix, nv = p.length / 3;
+        const m = role === "strap" ? margin + 0.001 : margin;
+        // per vertex, once a pass: its distance, the body under it, the coarse bound
+        const Rv = new Float32Array(nv), Bv = new Float32Array(nv), Cv = new Float32Array(nv);
+        for (let v = 0; v < nv; v++) {
+          const x = p[v * 3], y = p[v * 3 + 1], z = p[v * 3 + 2];
+          Rv[v] = Math.hypot(x - HC[0], y - HC[1], z - HC[2]);
+          Cv[v] = coarseAt(x, y, z);
+          Bv[v] = -1;                                  // looked up lazily
+        }
+        const bAt = (v) => (Bv[v] >= 0 ? Bv[v] : (Bv[v] = sphCell(M, p[v * 3], p[v * 3 + 1], p[v * 3 + 2])));
+        for (let f = 0; f < ix.length; f += 3) {
+          const va = ix[f], vb = ix[f + 1], vc = ix[f + 2], ia = va * 3, ib = vb * 3, ic = vc * 3;
+          if (moved && !moved.has(key(p[ia], p[ia + 1], p[ia + 2])) && !moved.has(key(p[ib], p[ib + 1], p[ib + 2])) && !moved.has(key(p[ic], p[ic + 1], p[ic + 2]))) continue;
+          const ed = Math.max(Math.hypot(p[ia] - p[ib], p[ia + 1] - p[ib + 1], p[ia + 2] - p[ib + 2]),
+            Math.hypot(p[ib] - p[ic], p[ib + 1] - p[ic + 1], p[ib + 2] - p[ic + 2]),
+            Math.hypot(p[ic] - p[ia], p[ic + 1] - p[ia + 1], p[ic + 2] - p[ia + 2]));
+          // cheap reject: a small triangle whose corners are all well clear of the coarse bound
+          const r0 = Math.min(Rv[va], Rv[vb], Rv[vc]);
+          if (ed < 0.06 && r0 - ed * ed / (4 * Math.max(0.1, r0)) > Math.max(Cv[va], Cv[vb], Cv[vc]) + m) continue;
+          // the corners (cached), then the inside on a barycentric grid (the
+          // cell itself: the exact pass after this one catches an ear corner
+          // between cells; a 2 x 2 worst case here would throw a brim off a
+          // brow's front and a liner off the skull it should touch)
+          let need = Math.max(bAt(va) + m - Rv[va], bAt(vb) + m - Rv[vb], bAt(vc) + m - Rv[vc], 0);
+          const n = Math.min(8, Math.ceil(ed / 0.016));
+          if (n >= 2) for (let si = 0; si <= n; si++) for (let sj = 0; si + sj <= n; sj++) {
+            if (si === n || sj === n || si + sj === 0) continue;       // a corner
+            const w0 = si / n, w1 = sj / n, w2 = 1 - w0 - w1;
+            const x = p[ia] * w0 + p[ib] * w1 + p[ic] * w2;
+            const y = p[ia + 1] * w0 + p[ib + 1] * w1 + p[ic + 1] * w2;
+            const z = p[ia + 2] * w0 + p[ib + 2] * w1 + p[ic + 2] * w2;
+            const r = Math.hypot(x - HC[0], y - HC[1], z - HC[2]);
+            const b = sphCell(M, x, y, z);
+            if (b > 0 && b + m - r > need) need = b + m - r;
+          }
+          if (need > 1e-5) {
+            for (const i3 of [ia, ib, ic]) {
+              const kk = key(p[i3], p[i3 + 1], p[i3 + 2]);
+              if (!(push.get(kk) >= need)) push.set(kk, need);
+            }
+          }
+        }
+      }
+      if (!push.size) break;
+      moved = new Set();
+      for (const role of roles) {
+        const p = P.map[role].p;
+        for (let i = 0; i < p.length; i += 3) {
+          const D = push.get(key(p[i], p[i + 1], p[i + 2]));
+          if (!D) continue;
+          const dx = p[i] - HC[0], dy = p[i + 1] - HC[1], dz = p[i + 2] - HC[2], r = Math.hypot(dx, dy, dz) || 1;
+          // a touch over, so the next pass converges instead of creeping
+          const s = (r + D * 1.15) / r;
+          p[i] = HC[0] + dx * s; p[i + 1] = HC[1] + dy * s; p[i + 2] = HC[2] + dz * s;
+          moved.add(key(p[i], p[i + 1], p[i + 2]));
+        }
+      }
+    }
+  }
+  // the SHELL map of a built hat: nearest surface per direction. Straps (they
+  // lie on the skin by design), the riot's clear visor and hanging tails (they
+  // hang BEHIND long hair, see fitHair) do not cover anything.
+  const NO_COVER = { strap: 1, clear: 1 };
+  function shellMap(geos, tails) {
+    const M = new Float32Array(SA * SE).fill(Infinity);
+    for (const role in geos) {
+      if (NO_COVER[role] || (role === "tail" && !tails)) continue;
+      const a = geoArrays(geos[role]);
+      sphRaster(M, a.pos, a.ix, false);
+    }
+    return M;
   }
   /* G[j][i] (rows j, cols i). closedU wraps i. hint(i, j, p) -> the way the
      face should look; checked on a middle quad and the grid flipped to it. */
@@ -455,9 +860,16 @@
   // the rim under a crown: from its band row in to the scalp (+ inset)
   function lipUnder(part, H, G, inset) {
     const row0 = G[0], inner = [];
+    const M = H.form && CBZ.human && CBZ.human.geometry ? bodyMap(H.form) : null;
     for (let i = 0; i < row0.length; i++) {
-      const pr = H.project(row0[i], inset);
-      inner.push(pr.p);
+      // the inner edge lands on the REAL head (character.js's skull and ears,
+      // via the body map), not the analytic one: the analytic ear is a
+      // smoothed box 8 mm proud of the real one, and a helmet skirt closed
+      // onto it stood off the real ear
+      const q = row0[i], dx = q[0] - HC[0], dy = q[1] - HC[1], dz = q[2] - HC[2], r = Math.hypot(dx, dy, dz) || 1;
+      const b = M ? sphCell(M, q[0], q[1], q[2]) : 0;
+      if (b > 0 && b + inset < r) inner.push([HC[0] + dx / r * (b + inset), HC[1] + dy / r * (b + inset), HC[2] + dz / r * (b + inset)]);
+      else inner.push(H.project(q, inset).p);
     }
     addGrid(part, [row0, inner], true, () => [0, -1, 0]);
   }
@@ -552,7 +964,8 @@
       return [x, 0, z];
     }, Q(lod, 5, 3), false, 0.011, { top: "main", bottom: "under", edge: "main" }, function (i, vv, pi) {
       const u = i / (cols - 1) * 2 - 1;
-      const yo = yC - (rot ? -0.012 : 0.042) - 0.085 * u * u;
+      // worn backward the bill rides up off the nape and the hair, its sides barely curled
+      const yo = yC - (rot ? -0.02 : 0.042) - (rot ? 0.03 : 0.085) * u * u;
       return lerp(pi[1], yo, vv) - 0.006 * Math.sin(PI * vv) * (1 - u * u);
     });
     if (!lod) {
@@ -912,10 +1325,10 @@
         const r = Math.max(Hn.ring(a, y), 0.14) + 0.03 + 0.01 * v;
         tp.push([Math.sin(a) * r, y, Math.cos(a) * r]); tn.push([Math.sin(a), 0, Math.cos(a)]);
       }
-      tube(P("main"), tp, tn, 0.032, 0.004, false, 4);
+      tube(P("tail"), tp, tn, 0.032, 0.004, false, 4);
     }
     // a durag is worn over short hair, waves or braids: it takes all of it
-    return { P, cover: { band: (a) => B(a) - 0.3, rim: B, room: () => HA_HAIR } };
+    return { P, cover: { band: (a) => B(a) - 0.3, rim: B, room: () => HA_HAIR, hideLong: true } };
   }
 
   function buildBandana(lod, form) {
@@ -938,7 +1351,7 @@
         const r = Math.max(Hn.ring(a, y), 0.15) + 0.03 + 0.012 * v;
         tp.push([Math.sin(a) * r, y, Math.cos(a) * r]); tn.push([Math.sin(a), 0, Math.cos(a)]);
       }
-      tube(P("main"), tp, tn, (u) => lerp(0.05, 0.03, u), 0.005, false, 4);
+      tube(P("tail"), tp, tn, (u) => lerp(0.05, 0.03, u), 0.005, false, 4);
     }
     return { P, cover: { band: B, room: () => HA_HAIR } };
   }
@@ -963,7 +1376,7 @@
         const r = Math.max(Hn.ring(a, y), 0.15) + 0.04 + 0.01 * v;
         tp.push([Math.sin(a) * r, y, Math.cos(a) * r]); tn.push([Math.sin(a), 0, Math.cos(a)]);
       }
-      tube(P("main"), tp, tn, (u) => lerp(0.04, 0.026, u), 0.005, false, 4);
+      tube(P("tail"), tp, tn, (u) => lerp(0.04, 0.026, u), 0.005, false, 4);
     }
     return { P, cover: { slice: [(a) => B(a) - 0.03, (a) => B(a) + 0.03], room: () => HA + 0.004 } };
   }
@@ -1046,7 +1459,7 @@
       slab(P, F, false, 0.007, (i, j, p) => [p[0], 0, p[2]], { top: "under", bottom: "under", edge: "under" });
     }
     // the drape hangs over the sides and the nape: the hair there goes under it
-    return { P, cover: { band: band([[0, 0.492], [0.95, 0.44], [1.2, 0.12], [PI, -0.02]]), rim: B, room: () => HA_HAIR + 0.004 } };
+    return { P, cover: { band: band([[0, 0.492], [0.95, 0.44], [1.2, 0.12], [PI, -0.02]]), rim: B, room: () => HA_HAIR + 0.004, hideBeard: v === "veil" } };
   }
 
   function buildHijab(lod, form) {
@@ -1090,7 +1503,7 @@
     // the tucked edge round the face
     const H = Head(form, { ears: true, neck: true });
     addGrid(P("under"), [G[0], G[0].map((p) => H.project(p, 0.002).p)], true, () => [0, 0, 1]);
-    return { P, cover: { hide: true } };
+    return { P, cover: { hide: true, hideBeard: true } };
   }
 
   /* ---- HELMETS --------------------------------------------------------- */
@@ -1177,7 +1590,7 @@
     // the older full-cut "K-pot": low over the ears, a brow lip, a flared skirt
     const H = Head(form, { ears: true }), P = parts(), seg = Q(lod, 48, 24);
     H.form = form;
-    const RIM = band([[0, 0.468], [0.9, 0.44], [1.57, 0.27], [2.3, 0.22], [PI, 0.2]]);
+    const RIM = band([[0, 0.482], [0.55, 0.479], [0.95, 0.446], [1.57, 0.27], [2.3, 0.22], [PI, 0.2]]);
     const G = crownGrid(H, {
       seg, rowsT: Q(lod, [0, 0.05, 0.12, 0.24, 0.38, 0.52, 0.66, 0.8, 1], [0, 0.12, 0.45, 1]), band: RIM,
       off(a, t) {
@@ -1337,14 +1750,20 @@
 
   // every geometry, cached: kind|form|variant|lod -> { geos: {role: geo}, cover }
   const CACHE = Object.create(null);
-  function geometry(kind, form, variant, lod) {
+  // the kinds whose chinstrap runs under the jaw: built per beard, so the cup sits on it
+  const STRAPPED = { ballistic: 1, pasgt: 1 };
+  function geometry(kind, form, variant, lod, beardGeo) {
     const k = canon(kind);
     if (!k) return null;
     const f = form === "f" || form === "c" ? form : "m";
-    const key = k + "|" + f + "|" + (variant || "") + "|" + (lod ? 1 : 0);
+    const bg = STRAPPED[k] && beardGeo && beardGeo.attributes ? beardGeo : null;
+    const key = k + "|" + f + "|" + (variant || "") + "|" + (lod ? 1 : 0) + (bg ? "|" + bg.uuid : "");
     let c = CACHE[key];
     if (c) return c;
     const out = BUILDERS[k](lod ? 1 : 0, f, variant || "");
+    // off the REAL head: skull, ears, nose, neck, brows (raised too), lips
+    clearHead(out.P, f, CLEAR_M, bg);
+    exactPass(out.P, f, CLEAR_M * 0.5, bg);
     const geos = {};
     // a stable role order so a hat's meshes always come out the same way round
     const P = out.P;
@@ -1353,9 +1772,17 @@
       if (part.p.length) geos[role] = toGeometry(part);
     }
     c = CACHE[key] = { kind: k, geos: geos, cover: out.cover };
+    // the hair under it is pulled in under THIS geometry (lazily: a prop hat never needs it)
+    // (tails: whether hanging tails show, i.e. over short hair; see fitHair)
+    out.cover.shell = function (tails) {
+      tails = !!(tails && geos.tail);
+      return tails ? (c.shellT || (c.shellT = shellMap(geos, true))) : (c.shell || (c.shell = shellMap(geos, false)));
+    };
     return c;
   }
-  const ROLE_ORDER = ["main", "under", "accent", "accent2", "trim", "hard", "strap", "metal", "peak", "smoke", "clear"];
+  // how far every hat surface stays off the head (1 mm at HUMAN_SCALE)
+  const CLEAR_M = 0.0015;
+  const ROLE_ORDER = ["main", "under", "accent", "accent2", "trim", "hard", "strap", "metal", "peak", "smoke", "clear", "tail"];
 
   /* ---- MATERIALS: the shared caches, nothing per wearer ------------------ */
   function shade(hex, k) {
@@ -1387,6 +1814,7 @@
       case "peak": return pm(0x0b0c0f, { roughness: 0.18, metalness: 0.1 });
       case "smoke": return pm(0x14171b, { roughness: 0.08, metalness: 0.35 });
       case "clear": return clearMat();
+      case "tail": return cm(main);
     }
     return cm(main);
   }
@@ -1394,16 +1822,20 @@
 
   /* ---- HAIR UNDER THE HAT ---------------------------------------------- */
   const HAIR_CACHE = new WeakMap();
-  function compressHair(geo, cover, form, k) {
+  function compressHair(geo, cover, form, k, tails) {
     if (!geo || !cover) return geo;
     let byCover = HAIR_CACHE.get(geo);
     if (!byCover) HAIR_CACHE.set(geo, byCover = new Map());
-    const ck = form + "|" + k.toFixed(4);
+    const ck = form + "|" + k.toFixed(4) + (tails ? "|t" : "");
     let perForm = byCover.get(cover);
     if (!perForm) byCover.set(cover, perForm = Object.create(null));
     if (perForm[ck]) return perForm[ck];
     const H = Head(form);
+    const shell = cover.shell ? cover.shell(tails) : null, body = shell ? bodyMap(form) : null;
     const out = geo.clone();
+    // a hat holds the hair still: no follow morphs on the compressed copy
+    // (character.js hairFollowSync then keeps every influence at 0)
+    out.morphAttributes = {}; out.morphTargetsRelative = false;
     const pos = out.attributes.position;
     const BL = 0.045;
     for (let i = 0; i < pos.count; i++) {
@@ -1417,22 +1849,37 @@
         const yb = cover.band(a);
         w = sm01((y - (yb - BL)) / BL);
       }
-      if (w <= 0) continue;
       const dx = x - HC[0], dy = y - HC[1], dz = z - HC[2], r = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (r < 1e-6) continue;
-      const d = [dx / r, dy / r, dz / r], R = H.hitDir(d);
-      let room = cover.room ? cover.room(a, y) : HA_HAIR;
-      let allowed = R + room + (1 - w) * (1 - w) * 0.6;
-      if (r <= allowed) continue;
-      // pulled in along the ray the vertex drops: the room where it LANDS
-      // may be tighter (a strap under a cap's opening), so take the smaller
-      if (cover.room) {
-        const y1 = HC[1] + d[1] * allowed;
-        const room1 = cover.room(a, y1);
-        if (room1 < room) { room = room1; allowed = R + room + (1 - w) * (1 - w) * 0.6; }
+      const d = [dx / r, dy / r, dz / r];
+      let nr = r;
+      if (w > 0) {
+        // 1. the smooth squeeze under the band (the shape of hair under a hat)
+        const R = H.hitDir(d);
+        let room = cover.room ? cover.room(a, y) : HA_HAIR;
+        let allowed = R + room + (1 - w) * (1 - w) * 0.6;
+        if (r > allowed) {
+          // pulled in along the ray the vertex drops: the room where it LANDS
+          // may be tighter (a strap under a cap's opening), so take the smaller
+          if (cover.room) {
+            const y1 = HC[1] + d[1] * allowed;
+            const room1 = cover.room(a, y1);
+            if (room1 < room) { room = room1; allowed = R + room + (1 - w) * (1 - w) * 0.6; }
+          }
+          nr = Math.max(R + 0.001, allowed);
+        }
       }
-      const nr = Math.max(R + 0.001, allowed);
-      pos.setXYZ(i, (HC[0] + d[0] * nr) * k, (HC[1] + d[1] * nr) * k, (HC[2] + d[2] * nr) * k);
+      if (shell) {
+        // 2. the guarantee: whatever the band says, no hair beyond the hat's
+        // own inner surface (a bill's sides over the temples, a reversed
+        // bill over long hair, a neck curtain over a ponytail)
+        const s = sphGet(shell, x, y, z, false);
+        if (s < Infinity && nr > s - HAIR_M) {
+          const b = sphGet(body, x, y, z, true);
+          nr = Math.max(Math.min(nr, s - HAIR_M), Math.min(b + 0.0005, (s + b) * 0.5));
+        }
+      }
+      if (nr !== r) pos.setXYZ(i, (HC[0] + d[0] * nr) * k, (HC[1] + d[1] * nr) * k, (HC[2] + d[2] * nr) * k);
     }
     pos.needsUpdate = true;
     out.computeVertexNormals();
@@ -1451,32 +1898,63 @@
     if (!ud.hairLods0) ud.hairLods0 = ud.hairLods || { near: m.geometry, far: m.geometry };
     const hairFn = CBZ.human && CBZ.human.geometry && CBZ.human.geometry.hair;
     if (styleOverride && hairFn && ud.hairS > 0) {
-      try { return { near: hairFn(styleOverride, ud.hairS, false), far: hairFn(styleOverride, ud.hairS, true) }; } catch (e) { /* fall through */ }
+      try { return { near: hairFn(styleOverride, ud.hairS, false, ud.hairYoke), far: hairFn(styleOverride, ud.hairS, true, ud.hairYoke) }; } catch (e) { /* fall through */ }
     }
     return ud.hairLods0;
   }
+  // styles that hang or stand off the scalp: a durag goes over short hair
+  // only (long hair is tied away under it), and hanging tails go behind them
+  const LONG_HAIR = { bob: 1, long: 1, pony: 1, bun: 1, pigtail: 1, locs: 1, afro: 1 };
+  // hide / show a mesh for the hat without fighting the NPC detail LOD, which
+  // re-shows its members unless they carry _cbzDetailSuppressed
+  function hwHide(m, on) {
+    const ud = m.userData;
+    if (on) { if (!ud._hwHid) { ud._hwHid = true; ud._hwSup = !!ud._cbzDetailSuppressed; } ud._cbzDetailSuppressed = true; m.visible = false; }
+    else if (ud._hwHid) { ud._hwHid = false; ud._cbzDetailSuppressed = ud._hwSup; delete ud._hwSup; m.visible = true; }
+  }
+  /* Everything on the head that a hat changes: the hair (compressed under the
+     crown and clamped under the hat's real inner surface at BOTH LODs, or
+     hidden), the beard under a face veil, and the hanging tails of a bandana
+     or headband (they fall behind long hair, not through it). */
   function fitHair(rig) {
-    const st = rig._hw, hair = rig.skinSlots && rig.skinSlots.hair;
-    if (!hair || !hair.length) return;
+    const st = rig._hw, S = rig.skinSlots || {}, hair = S.hair || [];
     const act = st && st.active, hidden = st && st.hidden && Object.keys(st.hidden).length;
     const cover = act && !hidden ? act.cover : null;
     const form = rig.headForm || "m";
     const k = ((rig.profile && rig.profile.headSize) || 0.6) / 0.6;
     const far = !!(st && st.lod);
+    // the cover of each LOD's own geometry: near hair under the near hat, far under far
+    const hides = (ud) => !!(cover && (cover.hide || (cover.hideLong && LONG_HAIR[ud.hairStyle])));
+    let longShown = false;
+    for (let i = 0; i < hair.length; i++) { const m = hair[i]; if (m && m.isMesh && !hides(m.userData) && LONG_HAIR[m.userData.hairStyle]) longShown = true; }
     for (let i = 0; i < hair.length; i++) {
       const m = hair[i];
       if (!m || !m.isMesh) continue;
       const ud = m.userData;
-      if (cover && cover.hide) { ud._hwHid = true; m.visible = false; continue; }
-      if (ud._hwHid) { ud._hwHid = false; m.visible = true; }
+      const hide = hides(ud);
+      hwHide(m, hide);
+      if (hide) continue;
       if (!cover && !ud.hairLods0) continue;                 // never touched, nothing to undo
       // an afro stands through any crown: under a hat the base is the curly cut
       const base = hairPair(m, cover && ud.hairStyle === "afro" && !cover.slice ? "curly" : null);
-      const pair = cover ? { near: compressHair(base.near, cover, form, k), far: compressHair(base.far, cover, form, k) } : base;
+      // Only the LOD on screen is compressed: character.js's setHairLod always
+      // goes through headwear.setLod -> fitHair first, which fills the other
+      // slot for real before it is ever shown (the hat's far geometry is not
+      // even built for a body that never leaves the near tier).
+      let pair = base;
+      if (cover) {
+        const cv = (geometry(act.kind, form, act.variant, far ? 1 : 0, act.beard) || {}).cover || cover;
+        const g = compressHair(far ? base.far : base.near, cv, form, k, !longShown);
+        pair = far ? { near: base.near, far: g } : { near: g, far: base.far };
+      }
       ud.hairLods = pair;
       m.geometry = far ? pair.far : pair.near;
     }
+    const beard = S.beard || [];
+    for (let i = 0; i < beard.length; i++) if (beard[i] && beard[i].isMesh) hwHide(beard[i], !!(cover && cover.hideBeard));
+    if (act) for (const m of act.meshes) if (m.userData.hatRole === "tail") m.visible = !longShown;
   }
+
 
   /* ---- WEARING --------------------------------------------------------- */
   let SEQ = 0;
@@ -1531,6 +2009,11 @@
     }
     return meshes;
   }
+  // the beard a rig wears (character.js skinSlots.beard: one merged mesh)
+  function beardOf(rig) {
+    const b = rig && rig.skinSlots && rig.skinSlots.beard;
+    return b && b[0] && b[0].geometry && b[0].geometry.attributes ? b[0].geometry : null;
+  }
   function wear(rig, kind, opts) {
     if (!rig) return null;
     opts = opts || {};
@@ -1561,7 +2044,8 @@
     }
     if (prev) detachLayer(prev);
     const form = rig.headForm || "m";
-    const entry = geometry(k, form, variant, st.lod);
+    const beardGeo = beardOf(rig);
+    const entry = geometry(k, form, variant, st.lod, beardGeo);
     if (!entry) return null;
     const hs = (rig.profile && rig.profile.headSize) || 0.6;
     const group = new THREE.Group();
@@ -1570,7 +2054,7 @@
     group.userData.headwear = k;
     const meshes = makeMeshes(group, entry, k, opts);
     host.add(group);
-    st.layers[owner] = { owner, kind: k, variant, key, group, meshes, cover: entry.cover, prio: PRIO[owner] != null ? PRIO[owner] : 2,
+    st.layers[owner] = { owner, kind: k, variant, key, group, meshes, cover: entry.cover, beard: beardGeo, prio: PRIO[owner] != null ? PRIO[owner] : 2,
       color: opts.color, accent: opts.accent, metal: opts.metal, seq: ++SEQ };
     syncCapSlot(rig);
     resolve(rig);
@@ -1590,7 +2074,7 @@
     st.lod = lod;
     const form = rig.headForm || "m";
     for (const o in st.layers) {
-      const L = st.layers[o], entry = geometry(L.kind, form, L.variant, lod);
+      const L = st.layers[o], entry = geometry(L.kind, form, L.variant, lod, L.beard);
       if (!entry) continue;
       for (const m of L.meshes) { const g = entry.geos[m.userData.hatRole]; if (g) { m.geometry = g; m.visible = true; } else m.visible = false; }
     }

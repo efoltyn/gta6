@@ -752,6 +752,10 @@
      building interior hiding its occupants) must park the bodies inside it
      — the rig's own group.visible is only half the story. Four or five
      links, once per rig, once per frame. */
+  function underRoot(o, root) {
+    for (let n = o; n; n = n.parent) if (n === root) return true;
+    return false;
+  }
   function chainVisible(o) {
     let n = o;
     while (n) { if (n.visible === false) return false; n = n.parent; }
@@ -1002,7 +1006,10 @@
         // only parts that DRAW count: a parked record (a part taken off the
         // body, hidden by its owner, or waiting out STALE) draws nothing by
         // either mechanism, so it cannot split a body
-        if (rec.parked && (rec.hidden || !chainVisible(rec.mesh) || !rec.mesh.parent)) continue;
+        // …and a part taken off WITH its holder (a hat group removed from the
+        // head: the mesh still has a parent, the group has none) is not on
+        // this body at all, so it draws nothing either
+        if (rec.parked && (rec.hidden || !chainVisible(rec.mesh) || !rec.mesh.parent || !underRoot(rec.mesh, r.group))) continue;
         if (rec.hidden) pooled++; else real++;
       }
       if (pooled && real) n++;

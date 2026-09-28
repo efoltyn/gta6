@@ -2428,19 +2428,170 @@
   // a hanging bundle's section faces away from the head's back
   function tubeUp(p) { return hairUnit(p[0], 0, p[2]); }
 
-  /* hairGeometry(styleId, S, far) — the public builder. The unit hair is built
-     once per (style, tier) and scaled per head size. */
-  function hairGeometry(styleId, S, far) {
+  /* hairGeometry(styleId, S, far, yoke) — the public builder. The unit hair is
+     built once per (style, tier) and scaled per head size. `yoke` (optional,
+     makeCharacter passes it; rig hair meshes carry it as userData.hairYoke) is
+     the shoulder yoke MEASURED on the rig, in the unit head frame — see
+     hairChildFit. */
+  function hairGeometry(styleId, S, far, yoke) {
     const id = HAIR_STYLES[styleId] ? styleId : "short";
     const unit = shared("hairU|" + id + (far ? "|far" : ""), function () { return hairBuild(id, !!far); });
-    return shared("hair|" + id + "|" + S.toFixed(3) + (far ? "|far" : ""), function () {
+    const yk = S < 0.53 && yoke ? "|" + [yoke.top, yoke.back, yoke.half, yoke.armX || 0, yoke.armY || 0, yoke.armR || 0].map((v) => v.toFixed(3)).join(",") : "";
+    return shared("hair|" + id + "|" + S.toFixed(3) + (far ? "|far" : "") + yk, function () {
       const g = unit.clone(), k = S / 0.60;
-      if (S < 0.53) hairChildFit(g, S);
+      if (S < 0.53) hairChildFit(g, S, yk ? yoke : null);
       g.scale(k, k, k);
+      if (!far) hairFollowMorph(g, k, yk ? yoke : null);
       g.computeBoundingBox(); g.computeBoundingSphere();
       return g;
     });
   }
+
+  /* ==== HAIR FOLLOW — the hanging length stays on the back ==================
+     OWNER: long hair passed into the shoulders at ~45 degree head turns. The
+     hair is one mesh on the NECK pivot, so a head yaw swung the whole hanging
+     length with it — at 0.85 rad a shoulder-length curtain went 6-8 cm into
+     the trapezius and upper arm (tools/overlap-audit.mjs, before this).
+     Real hair below the nape lies on the back and stays there while the head
+     turns. That is a DEFORMATION, not a second rigid piece: cutting the
+     length off and counter-rotating it opens a crack r*theta wide at the cut
+     (~19 cm at 45 degrees for a curtain 0.35 behind the neck axis).
+
+     So the near hair carries SIX MORPH TARGETS (relative position deltas):
+     the lower-back hair counter-rotated about the neck's own yaw axis by
+     +-HAIR_FOLLOW.max/2 and +-max, and about its pitch axis for the head
+     tipped BACK by pitch/2 and pitch (tipped forward the length lifts off the
+     back by itself). No normal targets: r128 draws 8 position targets but
+     only 4 with normals, and a turn about the vertical keeps a normal's y,
+     which is what the overhead sun reads. Weighted by a smooth field (below)
+     — 1 on the length hanging behind the nape and on everything down at the
+     shoulders, 0 on the scalp, the ears and the face-framing locks above the
+     shoulders, so those follow the face and nothing tears. hairFollowSync
+     reads the neck's actual yaw and pitch right before the mesh draws
+     (onBeforeRender — facial.js, reactions.js and the aim head-track all add
+     yaw AFTER animChar) and sets the influences (at most four non-zero); a
+     yaw past `max` just turns the rest. A forward-nod pair was tried and
+     REMOVED: the rig nods about the BODY's x axis after the yaw (Euler XYZ),
+     so a nod target built in the head frame swings a turned head's curtains
+     sideways into the shoulder (the audit measured it worse, not better).
+     Cost: six numbers per long-haired rig per frame, zero geometry work.
+     Only styles whose hair actually hangs behind the nape get targets (long,
+     locs, bob, pony, pigtail, afro...: measured by hairFollowMorph, not
+     listed), the FAR tier never does, and pedinstance.js refuses a morph
+     geometry, so a near long-haired rig draws its own hair (one call) and a
+     far one pools as before. headwear.js swaps in its own (morph-free)
+     compressed geometry under a hat: hairFollowSync sees no targets and holds
+     the influences at 0 (a stale influence on a morph-free geometry would
+     SHRINK it — r128 scales the base by 1 - sum for absolute morphs). */
+  /* THE FIELD: w = 1 on hair that has LEFT THE SKULL (further than `d1` off
+     the analytic skull every style is fitted to, hairSkullSdf), 0 on the scalp
+     layer (nearer than `d0`) — scalp hair sits on the head and must turn with
+     it — and only below the skull's equator (y) and behind the ears (z), so
+     face-framing locks, fringes and every short cut follow the face exactly.
+     Distance, not height, is what separates "on the head" from "hanging":
+     the nape of a crop is low but on the skin; a curtain at jaw height is
+     centimetres off the skull. `hangs` (a vertex with w > 0.5) decides
+     whether a style gets targets at all, so short cuts stay poolable. */
+  const HAIR_FOLLOW = { d0: 0.015, d1: 0.04, full: 0.05, fade: 0.20, scalp: 0.18, zFront: -0.06, zBack: -0.22, max: 0.90, pitch: 0.50 };
+  // the yoke top in the unit head frame: 0.05 over the neck pivot on an adult,
+  // higher on a young body whose head sinks into the shoulders (the measured
+  // line hairChildFit uses: 0.137 -> 0.085 as the head grows 0.37 -> 0.47)
+  function hairYokeTop(S) { return S >= 0.53 ? 0.05 : Math.max(0.05, 0.137 - Math.max(0, S - 0.368) * 0.53); }
+  function hairFollowW(x, y, z, S, yoke) {    // unit head frame (neck pivot origin, skull centre y 0.30)
+    const F = HAIR_FOLLOW, yT = yoke ? yoke.top : hairYokeTop(S);
+    // at and below the yoke top ALL of it stays with the body, in front as
+    // well as behind (a lock lying on the chest stays on the chest) — and so
+    // does whatever lies near a SHOULDER: on a small body the arm tops sit up
+    // beside the jaw (the measured yoke carries the arm pivots)
+    let below = sm01((yT + 0.05 - y) / 0.06);
+    if (yoke && yoke.armR > 0) {
+      const d = Math.hypot(Math.abs(x) - yoke.armX, y - yoke.armY, z);
+      below = Math.max(below, sm01((yoke.armR + 0.10 - d) / 0.06));
+    }
+    // BEHIND the ears the hanging length stays with the body from a lock
+    // segment above the shoulders down (a 13 cm lock segment interpolated
+    // across a partial weight would chord into the yoke), fading out up the
+    // back of the skull — where only hair standing OFF the scalp moves
+    const wz = sm01((F.zFront - z) / (F.zFront - F.zBack));
+    if (!(wz > 0)) return below;
+    const wy = sm01((yT + F.full + F.fade - y) / F.fade);
+    if (!(wy > 0)) return below;
+    const off = Math.max(sm01((yT + F.scalp - y) / 0.08), sm01((hairHeadDist(x, y, z) - F.d0) / (F.d1 - F.d0)));
+    return Math.max(below, wy * wz * off);
+  }
+  // distance off the head (skull + neck column): hairSkullSdf answers a flat
+  // 0.05 under the lifted skull base, so below it the skull's own base line
+  // (0.12 b^2, the lift headGeometry applies) stands in, and the neck column
+  // (the head mesh's neck, ~0.16 round the pivot) keeps nape hair on the skin
+  function hairHeadDist(x, y, z) {
+    const b = cl01(-z / 0.30), base = 0.12 * b * b;
+    const skull = y < base ? base - y + 0.02 : hairSkullSdf(x, y, z);
+    const neck = Math.hypot(x, z + 0.025) - 0.16;
+    return Math.min(skull, y < 0.20 ? neck : 1);
+  }
+  function hairFollowMorph(g, k, yoke) {
+    const pos = g.attributes.position, n = pos.count;
+    const W = new Float32Array(n);
+    let hangs = false;
+    for (let i = 0; i < n; i++) {
+      const x = pos.getX(i) / k, y = pos.getY(i) / k, z = pos.getZ(i) / k;
+      W[i] = hairFollowW(x, y, z, k * 0.60, yoke);
+      if (W[i] > 0.5) hangs = true;
+    }
+    if (!hangs) return;
+    const tp = [];
+    const F = HAIR_FOLLOW;
+    // yaw targets: a neck yaw of +a is undone by R_y(-a * w)
+    for (const a of [F.max / 2, F.max, -F.max / 2, -F.max]) {
+      const dp = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const w = W[i]; if (!w) continue;
+        const c = Math.cos(-a * w), s = Math.sin(-a * w), x = pos.getX(i), z = pos.getZ(i);
+        dp[i * 3] = c * x + s * z - x; dp[i * 3 + 2] = -s * x + c * z - z;
+      }
+      tp.push(new THREE.BufferAttribute(dp, 3));
+    }
+    // pitch targets: the head tipped BACK (neck x < 0) is undone by R_x(+b * w)
+    for (const b of [F.pitch / 2, F.pitch]) {
+      const dp = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const w = W[i]; if (!w) continue;
+        const c = Math.cos(b * w), s = Math.sin(b * w), y = pos.getY(i), z = pos.getZ(i);
+        dp[i * 3 + 1] = c * y - s * z - y; dp[i * 3 + 2] = s * y + c * z - z;
+      }
+      tp.push(new THREE.BufferAttribute(dp, 3));
+    }
+    g.morphAttributes.position = tp;
+    g.morphTargetsRelative = true;
+    g.userData.hairFollow = true;
+  }
+  // piecewise-linear pair of influences for |v| / max through the half and full targets
+  function hairPair(v, max, out, i0) {
+    const a = Math.min(1, Math.abs(v) / max);
+    out[i0] = a <= 0.5 ? 2 * a : 2 - 2 * a; out[i0 + 1] = a <= 0.5 ? 0 : 2 * a - 1;
+  }
+  // the influences for a neck pose: [yaw +half, +full, -half, -full, back half, back full]
+  function hairFollowInfluences(yaw, pitch, out) {
+    const F = HAIR_FOLLOW;
+    for (let i = 0; i < 6; i++) out[i] = 0;
+    if (yaw > 0) hairPair(yaw, F.max, out, 0); else if (yaw < 0) hairPair(yaw, F.max, out, 2);
+    if (pitch < 0) hairPair(pitch, F.pitch, out, 4);
+    return out;
+  }
+  // per hair mesh, right before it draws (and callable by tools): neck pose -> influences
+  function hairFollowSync(mesh) {
+    const inf = mesh.morphTargetInfluences;
+    if (!inf || inf.length < 6) return;
+    const g = mesh.geometry, on = g && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length >= 6;
+    const neck = mesh.parent;
+    if (!on || !neck) { for (let i = 0; i < inf.length; i++) inf[i] = 0; return; }
+    hairFollowInfluences(neck.rotation.y, neck.rotation.x, inf);
+    // a painter that swapped the material in (crowd.js paint, heritage) must
+    // still read the targets; the flag is harmless on any mesh without them
+    const m = mesh.material;
+    if (m && !Array.isArray(m) && !m.morphTargets) { m.morphTargets = true; m.needsUpdate = true; }
+  }
+  function hairFollowRender() { hairFollowSync(this); }
   /* A CHILD'S HEAD SITS DOWN IN THE SHOULDERS (charProfile's neckDrop) and the
      yoke is deeper than the head, so hair hung for an adult would sit inside a
      small child's back. Measured off the profiles (unit-head frame): the yoke
@@ -2448,9 +2599,12 @@
      0.37 -> 0.47. Whatever HANGS (not what hugs the skull) behind the neck is
      eased back behind that yoke — one smooth displacement field, so nothing
      tears. Adults (S >= 0.53) are never touched. */
-  function hairChildFit(g, S) {
+  function hairChildFit(g, S, yoke) {
+    // the yoke top / back face: MEASURED on the rig when it is known (it is
+    // whatever the torso build says it is), else the profile fit above
     const t = Math.max(0, S - 0.368) * 0.53;
-    const yTop = 0.137 - t + 0.03, zBack = -0.322 + t - 0.016;
+    const top = yoke ? yoke.top : 0.137 - t, back = yoke ? yoke.back : -0.322 + t;
+    const yTop = top + 0.03, zBack = back - 0.016;
     const pos = g.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
@@ -2458,6 +2612,37 @@
       const hang = sm01((hairSkullSdf(x, y, z) - 0.012) / 0.03) * sm01((yTop + 0.06 - y) / 0.06);
       const zt = Math.min(z, zBack - 0.06 * cl01((yTop - y) / 0.3));
       if (hang > 0 && zt < z) pos.setZ(i, lerpN(z, zt, hang));
+    }
+    /* THE NAPE SITS ON THE YOKE, NOT IN IT (tools/overlap-audit.mjs: a
+       toddler's buzz cut went 13 mm into the yoke standing still). The
+       displacement above only moves hair that stands OFF the skull; a young
+       head is sunk so deep in the shoulders that the scalp layer at the nape
+       is already below the yoke top. Whatever is left inside the yoke's
+       measured footprint is lifted onto a ledge just above it — the hairline
+       reads as sitting on the collar, which is what a small child's does. */
+    if (yoke) {
+      const ledge = yoke.top + 0.02;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (y >= ledge || Math.abs(x) > yoke.half + 0.004 || z > 0.05) continue;   // (the chin is the jaw's business)
+        // just behind the back face: stand off it, so an edge from the ledge
+        // down the back cannot cut the yoke's top-back corner
+        if (z < yoke.back - 0.004) { if (z > yoke.back - 0.06) pos.setZ(i, yoke.back - 0.06); continue; }
+        pos.setY(i, lerpN(y, ledge, sm01((ledge - y) / 0.02 + 0.5)));
+      }
+      // …and off the SHOULDERS: a small body's side hair falls onto arm tops
+      // that sit right under the jaw. Anything inside the ball round either
+      // arm pivot (+ a clearance) is pushed out along its radius.
+      if (yoke.armR > 0) {
+        const R = yoke.armR + 0.02;
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          const dx = x - Math.sign(x) * yoke.armX, dy = y - yoke.armY, d = Math.hypot(dx, dy, z);
+          if (d >= R || d < 1e-6) continue;
+          const s = R / d;
+          pos.setXYZ(i, Math.sign(x) * yoke.armX + dx * s, yoke.armY + dy * s, z * s);
+        }
+      }
     }
     pos.needsUpdate = true;
   }
@@ -2471,7 +2656,7 @@
       const m = hs[i], L = m && m.userData.hairLods;
       if (!L) continue;
       const g = lod >= 2 ? L.far : L.near;
-      if (g && m.geometry !== g) m.geometry = g;
+      if (g && m.geometry !== g) { m.geometry = g; hairFollowSync(m); }   // a morph-free tier holds 0 influence
     }
   }
 
@@ -3426,12 +3611,35 @@
       // cannot exist (there is no seam) and a long-haired woman now costs ONE
       // draw call where she used to cost two.
       let styleId = hairStyleFor(c, P);
-      const hairMesh = new THREE.Mesh(hairGeometry(styleId, headSize), cmat(c.hair || 0x4a3526));
+      // the shoulder yoke as THIS rig built it, in the unit head frame (the
+      // neck pivot, scaled by the head): a young body's hair is fitted to it
+      const hairYoke = {
+        // (the torso merge: the collar is now a band round the neck base, so the
+        // yoke's reach is the profile's shoulder yoke, its top the band's top)
+        top: Math.round((collar.position.y + collarBox.h / 2 - neck.position.y) / hk * 200) / 200,
+        back: Math.round(-P.collarD / 2 / hk * 200) / 200,
+        half: Math.round(P.collarW / 2 / hk * 200) / 200,
+        // the shoulder: each upper arm's top dome is centred ON its pivot, so a
+        // ball there is the shoulder in every arm pose
+        armX: Math.round(P.armX / hk * 200) / 200,
+        armY: Math.round((shoulderY - neck.position.y) / hk * 200) / 200,
+        armR: Math.round(P.armW / 2 / hk * 200) / 200,
+      };
+      const hairMesh = new THREE.Mesh(hairGeometry(styleId, headSize, false, hairYoke), cmat(c.hair || 0x4a3526));
+      hairMesh.userData.hairYoke = hairYoke;    // headwear.js: pass it as hairGeometry's 4th argument
       hairMesh.castShadow = true;
       hairMesh.userData.hairStyle = styleId;
       hairMesh.userData.hairS = headSize;       // headwear.js rebuilds the style (afro -> curly) under a crown
       // the near/far pair setHairLod swaps between (headwear may replace both)
-      hairMesh.userData.hairLods = { near: hairMesh.geometry, far: hairGeometry(styleId, headSize, true) };
+      hairMesh.userData.hairLods = { near: hairMesh.geometry, far: hairGeometry(styleId, headSize, true, hairYoke) };
+      // HAIR FOLLOW (above): a style that hangs behind the nape keeps its
+      // length on the back while the head turns
+      if (hairMesh.geometry.userData.hairFollow) {
+        hairMesh.material.morphTargets = true;
+        hairMesh.updateMorphTargets();
+        hairMesh.userData.hairFollow = true;
+        hairMesh.onBeforeRender = hairFollowRender;
+      }
       neck.add(hairMesh); hairParts.push(hairMesh);
     }
 
@@ -5256,8 +5464,8 @@
         // posture that is not "drive", so those are byte-identical.
         const stw = (post === "drive" && ch.driveSteer)
           ? Math.max(-1, Math.min(1, +ch.driveSteer || 0)) : 0;
-        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX - stw * 0.18, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ + stw * 0.10, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX + stw * 0.18, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ + stw * 0.10, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX - stw * 0.18, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ + (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX + stw * 0.18, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ - (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
         setElbow(J.la, elb - stw * 0.10, sr); setElbow(J.ra, elb + stw * 0.10, sr);
         if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, neckX, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
         lockCharacterHips(ch);
@@ -6502,6 +6710,15 @@
      scale spans (-0.33,1.22)→(0.55,2.26) on `back` — clear of the head box
      (y 1.88..2.48, |x|≤0.3, z≥-0.3), inside the shoulder line (0.62),
      behind the torso back plane (z=-0.25). */
+  /* OVERLAP AUDIT (tools/overlap-audit.mjs): the holster's |x| 0.46 was the
+     adult male chest's own side plane, so the holstered pistol's flat lay ON
+     it (a z-fight). Held a clearance outside whichever is widest at the hip on
+     THIS rig — the lowest torso box (chest or waist), the pelvis — measured. */
+  function hipOut(rig, authored) {
+    const s = rig.skinSlots || {}, t = s.torso || [], low = t[t.length - 1], pel = s.pelvis && s.pelvis[0];
+    const wOf = (m) => { const f = m && m.userData && m.userData._cbzFlat && m.userData._cbzFlat.g, g = f || (m && m.geometry); return (g && g.parameters && g.parameters.width) || 0; };
+    return Math.max(authored, Math.max(wOf(low), wOf(pel)) / 2 + 0.04);
+  }
   function charMounts(rig) {
     if (!rig || !rig.body) return null;
     if (rig._mounts) return rig._mounts;
@@ -6525,7 +6742,7 @@
       // The shoulder roots were corrected to semantic right = local -X in
       // makeCharacter. Keep the holster on that SAME side so a right-hand
       // stow does not cross the pelvis toward the obsolete +X hip.
-      hip:   mk(-0.46 * s, 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
+      hip:   mk(-hipOut(rig, 0.46 * s), 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
     };
     return rig._mounts;
   }
@@ -7040,6 +7257,10 @@
     regions: humanRegions,
     headAtlas: HEAD_ATLAS,
     hairStyles: function () { return Object.keys(HAIR_STYLES); },
+    // HAIR FOLLOW: sync one hair mesh's morph influences to its neck's yaw now
+    // (the renderer does it in onBeforeRender; tools call it after posing)
+    hairFollow: hairFollowSync,
+    hairFollowSpec: HAIR_FOLLOW,
     // the skull entities/headwear.js fits every hat to (read live, not copied)
     headForms: HEAD_FORMS,
     jawMul: jawMul,

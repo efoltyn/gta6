@@ -827,8 +827,23 @@
     // earpiece: the bud in the right ear and the clear coiled lead running
     // down behind the jaw into the collar (the lead is the recognisable part)
     { k: "earpiece", w: 0.045, h: 0.06, d: 0.05, x: 0.315, y: 0.3, z: 0.02, hex: 0xdcd8cf },
-    { k: "earpiece", w: 0.02, h: 0.36, d: 0.02, x: 0.3, y: 0.1, z: -0.07, hex: 0xd2cec5, rz: 0.1 },
+    { k: "earpiece", w: 0.02, h: 0.36, d: 0.02, x: 0.3, y: 0.1, z: -0.07, hex: 0xd2cec5, rz: 0.1, lead: true },
   ];
+  /* THE LEAD STOPS AT THE COLLAR (tools/overlap-audit.mjs: it ran 0.36 down
+     from the bud, 13 cm past the yoke top and 7.6 cm into the chest, and it
+     rides the NECK, so every head turn swept it through the torso). It now
+     runs from under the bud to the yoke top as THIS rig built it (measured
+     off skinSlots.collar at attach time, in the face frame), where it
+     disappears under the collar line instead of through the body. */
+  function earLead(ch, k) {
+    const col = ch.skinSlots && ch.skinSlots.collar && ch.skinSlots.collar[0];
+    const g = col && col.geometry, p = g && ((col.userData._cbzFlat && col.userData._cbzFlat.g && col.userData._cbzFlat.g.parameters) || g.parameters);
+    if (!p || !(p.height > 0) || !ch.neck || col.parent !== ch.neck.parent) return null;
+    const top = (col.position.y + p.height / 2 - ch.neck.position.y) / k;   // yoke top, face frame
+    const hi = 0.27, lo = top + 0.015;                                       // under the bud .. just over the collar (a nod rides it)
+    if (!(hi - lo > 0.04)) return null;
+    return { h: (hi - lo) / Math.cos(0.1), y: (hi + lo) / 2 };
+  }
   function kitMask(kit) { return kit ? ((kit.shades ? 1 : 0) | (kit.earpiece ? 2 : 0)) : 0; }
   function detailKit(ch, kit) {
     if (!ch) return;
@@ -843,9 +858,11 @@
     node.userData.mask = want;
     const hs = (ch.profile && ch.profile.headSize) || 0.6;
     node.scale.setScalar(hs / 0.6);
+    const lead = earLead(ch, hs / 0.6);
     for (let i = 0; i < KIT_PARTS.length; i++) {
-      const q = KIT_PARTS[i];
-      if (!((q.k === "shades" ? 1 : 2) & want)) continue;
+      const q0 = KIT_PARTS[i];
+      if (!((q0.k === "shades" ? 1 : 2) & want)) continue;
+      const q = (q0.lead && lead) ? Object.assign({}, q0, lead) : q0;
       const geo = CBZ.boxGeom ? CBZ.boxGeom(q.w, q.h, q.d) : new THREE.BoxGeometry(q.w, q.h, q.d);
       const mat = CBZ.cmat ? CBZ.cmat(q.hex) : new THREE.MeshLambertMaterial({ color: q.hex });
       const m = new THREE.Mesh(geo, mat);
