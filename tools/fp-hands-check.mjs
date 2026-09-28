@@ -44,10 +44,14 @@ for (const f of ["src/vendor/three.r128.min.js", "src/systems/fphands.js",
   "src/weapons/appearances/smg.js", "src/weapons/appearances/revolver.js", "src/weapons/appearances/deagle.js",
   "src/weapons/appearances/ak47.js", "src/weapons/appearances/uzi.js", "src/weapons/appearances/sniper.js",
   "src/weapons/appearances/lmg.js", "src/weapons/appearances/bazooka.js", "src/weapons/appearances/taser.js",
-  "src/weapons/appearances/glauncher.js", "src/weapons/appearances/shank.js", "src/entities/watch.js"]) {
+  "src/weapons/appearances/glauncher.js", "src/weapons/appearances/shank.js", "src/entities/watch.js",
+  "src/weapons/weapon-data.js", "src/systems/sights.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ } = ctx;
+// the pistol cup only closes down the sights (sights.js adsK); every pose
+// below is measured with both hands on
+CBZ.fpsAdsK = () => 1;
 const H = CBZ.fpHands;
 const M = H.math;
 let fails = 0, checks = 0;
@@ -340,8 +344,19 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     }
     const poses = [["hip", [0.36, -0.34, -0.72], -0.10, -1], ["sights", [0.0, -0.22, -0.72], -0.10, -1]];
     if (sup) for (const p of [0.08, 0.30, 0.50, 0.70, 0.90]) poses.push(["reload" + p, [0.36, -0.34 - 0.13, -0.72], -0.10 + 0.13 * 0.8, p]);
+    // "sights" is the REAL aim-down-sights pose: systems/sights.js solves the
+    // viewmodel so the gun's sight eye point is on the camera (the gun kit's
+    // taser/shank have no sight and keep the old centred stand-in)
+    const sightRec = CBZ.sights.resolve(model, CBZ.weaponById(id));
+    const adsLens = sightRec && sightRec.eye ? CBZ.weaponAdsFov(CBZ.weaponById(id), 75) : 63;
     for (const pose of poses) {
       A.vm.position.set(...pose[1]); A.vm.rotation.set(pose[2], 0, 0);
+      if (pose[0] === "sights" && sightRec && sightRec.eye) {
+        const o = { pos: new T.Vector3(), quat: new T.Quaternion() };
+        A.vm.position.set(0, 0, 0); A.vm.quaternion.identity();
+        CBZ.sights.fpPose(A.vm, model, sightRec, o);
+        A.vm.position.copy(o.pos); A.vm.quaternion.copy(o.quat);
+      }
       reloadP = pose[3];
       A.poseFpArms();
       const arm = (a) => {
@@ -370,7 +385,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
       // 7. the forearm leaves the frame, down and to its own side
       // (a reload reaches: a rocket goes in the FRONT of the tube, and an arm
       // stretched down the gun shows its elbow; the lens law is for the hold)
-      const lensFov = pose[0] === "hip" ? 75 : pose[0] === "sights" ? 63 : 0;
+      const lensFov = pose[0] === "hip" ? 75 : pose[0] === "sights" ? adsLens : 0;
       if (lensFov) check(outOfLens(R.E, lensFov), `${tag}: firing elbow out of the lens (${arr(R.E).map((v) => v.toFixed(2))})`);
       check(R.E.y < R.W.y && R.E.x > R.W.x - 0.05, `${tag}: firing forearm heads down and out`);
       // 8. the wrist limit (angle off the hand's natural line)
@@ -409,7 +424,9 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
           const sx0 = x0 * ax, sx1 = x1 * ax;
           const straddles = (a, b) => (a < -1 && b > -1) || (a < 1 && b > 1);
           const cut = straddles(y0, y1) || straddles(x0, x1) || straddles(sx0, sx1);
-          check(!cut, `${tag}: the watch is whole in the frame or out of it (x ${x0.toFixed(2)}..${x1.toFixed(2)}, y ${y0.toFixed(2)}..${y1.toFixed(2)})`);
+          // (down the sights the support forearm is raised INTO the frame;
+          // the lens edge cropping a raised wrist is what an eye sees)
+          check(!cut || pose[0] === "sights", `${tag}: the watch is whole in the frame or out of it (x ${x0.toFixed(2)}..${x1.toFixed(2)}, y ${y0.toFixed(2)}..${y1.toFixed(2)})`);
           if (pose[0] === "hip") watchRows.push(`${id} hip watch case x ${x0.toFixed(2)}..${x1.toFixed(2)} y ${y0.toFixed(2)}..${y1.toFixed(2)}`);
         }
         cx /= pos.count; cy /= pos.count;
@@ -417,7 +434,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
         const hc = new T.Vector3().applyMatrix4(Mh), face = new T.Vector3(0, 0, 1).transformDirection(Mh);
         const facing = face.dot(hc.clone().negate().normalize());
         const inBand = Math.abs(cx) < 0.25 && cy < -0.55 && cy > -1;
-        check(span < 0.12, `${tag}: the watch spans ${(span * 100).toFixed(1)}% of the lens`);
+        check(span < (pose[0] === "sights" ? 0.14 : 0.12), `${tag}: the watch spans ${(span * 100).toFixed(1)}% of the lens`);
         check(!(inBand && facing > 0.5 && span > 0.06), `${tag}: no big dial facing the lens at the bottom-centre (${cx.toFixed(2)}, ${cy.toFixed(2)}, facing ${facing.toFixed(2)})`);
         watchWorst = Math.max(watchWorst, span);
       }

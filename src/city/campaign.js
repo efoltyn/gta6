@@ -1453,7 +1453,7 @@
   //    classic   — the original close hit (castExisting street mark)
   //    sniper    — the mark holds a forecourt position behind watchers; a kill
   //                from beyond SNIPER_RANGE pays a fieldcraft bonus
-  //                (scopeview.js/gunmods optics make the distance practical)
+  //                (sights.js/gunmods optics make the distance practical)
   //    disguise  — a door crew guards the venue; the outfits.js uniform on a
   //                spawned steward (interact.js corpse swap) walks you past them
   //    vehicle   — the mark drives live traffic (vehicles.js npcDriver seat);

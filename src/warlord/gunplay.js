@@ -62,7 +62,6 @@
      CBZ.aiKill              battle.js's killMan                ONE death path
      CBZ.knockback           battle.js's hit funnel             armour + morale
      CBZ.keys.q              microboot's key state              the weapon swap
-     CBZ.CONFIG.FPS_ADS_SIGHTS  config.js's own shipped true    the ADS pose
      #crosshair / #ammo      two divs this file makes           the repo's own
 
    Everything else fpsmode wants is either already on the page (CBZ.camera,
@@ -139,7 +138,8 @@
                              // prop the city player carries (the fist closed on its
                              // grip, CBZ.gunHold), his other guns slung on the back
     "systems/gunhands.js",   // the off hand actually holds the gun, and reloads it
-    "systems/lockon.js",     // soft aim-lock while ADS + the real sniper scope
+    "systems/lockon.js",     // soft aim-lock while ADS + missile lock
+    "systems/sights.js",     // aiming down the sights: the gun to the eye, real glass
   ];
 
   let loading = null, loaded = false;
@@ -199,16 +199,6 @@
     if (!CBZ.cityPeds) CBZ.cityPeds = [];
     if (!CBZ.cityCops) CBZ.cityCops = [];
 
-    /* THE ONE CONFIG SEED THIS PAGE IS MISSING. src/config.js sets
-       FPS_ADS_SIGHTS = true and is a CITY file, so on a slice page fpsmode's
-       centred down-the-sights viewmodel pose is gated off by a `=== true` test
-       that reads undefined — MEASURED: holding aim punched the FOV from 75 to
-       50 and left the rifle sitting in the bottom-right corner, which is a
-       zoom, not aiming. Seeded with config.js's own shipped value and its own
-       `== null` guard, so a ?cfg_ override still wins. Every other gate
-       fpsmode reads it seeds itself. */
-    CBZ.CONFIG = CBZ.CONFIG || {};
-    if (CBZ.CONFIG.FPS_ADS_SIGHTS == null) CBZ.CONFIG.FPS_ADS_SIGHTS = true;
 
     ensureHudDom();
   }

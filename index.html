@@ -1496,16 +1496,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=onebet1"></script>
 <script src="src/city/gunstore.js?v=boom2"></script>
-<!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
-     gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
+<!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
+     gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=nodash1"></script>
-<script src="src/city/scopeview.js?v=mods1"></script>
-<!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
-     scope. After fpsmode/weapons (whose fire paths it feeds) and after
-     scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
-     always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
-     CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
-<script src="src/systems/lockon.js?v=cars1"></script>
+<!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
+     person, reticles at infinity on red-dot glass, a real scope (magnified
+     second camera in the ocular), sway + breath, the 3P cheek weld. -->
+<script src="src/systems/sights.js?v=ads1"></script>
+<!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
+     fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
+<script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=deslop1"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=onebet1"></script>
