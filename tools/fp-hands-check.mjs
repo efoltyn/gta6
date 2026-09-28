@@ -226,7 +226,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
   // the hip lens is 75 deg; down the sights it is at most 63 (irons, weaponAdsFov)
   const ASPECT = 16 / 10;
   const outOfLens = (c, fov) => { const t = Math.tan(fov * Math.PI / 360); return c.z > -0.05 || Math.abs(c.y / -c.z) > t || Math.abs(c.x / -c.z) > t * ASPECT; };
-  const handK = [];
+  const handK = [], thumbRows = [], watchRows = [];
   let watchWorst = 0;
   CBZ.playerChar = { _ww: { role: "diver", over: null } };        // the player's watch (entities/watch.js styleOf)
   for (const id of guns) {
@@ -239,19 +239,97 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     A.weaponModels.length = 0; A.weaponModels.push(model);
     A.gun.children.slice().forEach((c) => A.gun.remove(c)); A.gun.add(model);
     A.vm.visible = true; A.gun.visible = true;
+    // THE REAL GUN, not the grasp's prism: every triangle of the model (hands
+    // excluded) in model space, so a thumb or finger is measured against what
+    // is drawn (the prism is endless: a pinky past the end of the grip or a
+    // thumb out past the front strap touches it and nothing on screen)
+    // (per mesh, so a point INSIDE a solid part reads negative: a ray-parity
+    // test per closed mesh, the union of the gun's parts is the gun)
+    const gunParts = [];
+    {
+      const toModel = (o) => { const m = new T.Matrix4(); for (let p = o; p && p !== model; p = p.parent) { p.updateMatrix(); m.premultiply(p.matrix); } return m; };
+      const skip = (o) => { for (let p = o; p && p !== model; p = p.parent) if (/^fp_hand/.test(p.name)) return true; return false; };
+      model.traverse((o) => {
+        if (!o.isMesh || skip(o) || !o.geometry || !o.geometry.attributes.position) return;
+        const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry, p = g.attributes.position, Mo = toModel(o);
+        const tris = [];
+        for (let i = 0; i + 2 < p.count; i += 3) tris.push(new T.Triangle(
+          new T.Vector3().fromBufferAttribute(p, i).applyMatrix4(Mo), new T.Vector3().fromBufferAttribute(p, i + 1).applyMatrix4(Mo), new T.Vector3().fromBufferAttribute(p, i + 2).applyMatrix4(Mo)));
+        gunParts.push(tris);
+      });
+    }
+    const _cp = new T.Vector3(), _ray = new T.Ray(), _hit = new T.Vector3(), _rd = new T.Vector3(1, 0.0123, 0.0071).normalize();
+    const gunDist = (m) => {
+      let d = Infinity, inside = false;
+      for (const tris of gunParts) {
+        let n = 0;
+        _ray.set(m, _rd);
+        for (const t of tris) {
+          t.closestPointToPoint(m, _cp); const e = _cp.distanceTo(m); if (e < d) d = e;
+          if (_ray.intersectTriangle(t.a, t.b, t.c, false, _hit)) n++;
+        }
+        if (n & 1) inside = true;
+      }
+      return inside ? -d : d;
+    };
+    // a hand-frame point (right-hand canonical, real metres) -> model space; and the hand's model units per metre
+    const handToModel = (h, pt) => { const v = new T.Vector3(h.userData.side * pt[0], pt[1], pt[2]); for (let p = h; p && p !== model; p = p.parent) { p.updateMatrix(); v.applyMatrix4(p.matrix); } return v; };
+    const handKM = (h) => { let k = 1; for (let p = h; p && p !== model; p = p.parent) k *= p.scale.x; return k; };
     // 5. the grasp, at real scale
     for (const [nm, h] of [["firing", fire], ["support", sup]]) {
       const G = h && h.userData.grasp;
       if (!G) continue;
       const c = G.contacts, P = G.prism;
+      // 5b. THE THUMB ON THE REAL GUN (owner: the Uzi / SMG thumbs "sit
+      // 1.5-2 cm off the gun, floating off or sunk in"): the pad within 6 mm
+      // of a drawn surface, the middle joint within 20 mm (a thumb laid along
+      // a frame bridges its hollows), neither sunk more than 4 mm; the root
+      // joint lives in the web of the hand, which wraps the tang / a stock's
+      // wrist, so it may press up to 9 mm (the M24: the web on the one-piece stock). A pistol's support thumb lies on
+      // the FIRING hand (thumbs forward), so that hand counts as surface.
+      {
+        const kM = handKM(h), TR = [0.0112, 0.0100, 0.0085];
+        const th = G.pose.joints.thumb;
+        let handTris = null;
+        if (nm === "support" && !(model.userData.grips && model.userData.grips.hold)) {
+          handTris = [];
+          const Mf = new T.Matrix4(); for (let p = fire; p && p !== model; p = p.parent) { p.updateMatrix(); Mf.premultiply(p.matrix); }
+          const pa = fire.geometry.attributes.position;
+          for (let i = 0; i + 2 < pa.count; i += 3) handTris.push(new T.Triangle(new T.Vector3().fromBufferAttribute(pa, i).applyMatrix4(Mf), new T.Vector3().fromBufferAttribute(pa, i + 1).applyMatrix4(Mf), new T.Vector3().fromBufferAttribute(pa, i + 2).applyMatrix4(Mf)));
+        }
+        const surf = (m) => {
+          let d = gunDist(m);
+          if (handTris) for (const t of handTris) { t.closestPointToPoint(m, _cp); d = Math.min(d, _cp.distanceTo(m)); }
+          return d;
+        };
+        const gaps = [1, 2, 3].map((j) => surf(handToModel(h, th[j])) / kM - TR[j - 1]);
+        const ok = gaps[2] <= 0.006 && gaps[2] > -0.004 && gaps[1] <= 0.020 && gaps[1] > -0.004 && gaps[0] > -0.009;
+        if (id !== "shank") check(ok, `${id} ${nm}: thumb lies on the drawn gun, not in it (${gaps.map((g) => (g * 1000).toFixed(1)).join(" / ")} mm, joint 1 / 2 / pad)`);
+        thumbRows.push(`${id} ${nm} thumb ${gaps.map((g) => (g * 1000).toFixed(1)).join("/")} mm`);
+      }
+      // 5c. THE LITTLE FINGER (firing hand): on the drawn grip, or — past
+      // the end of the grip — curled into the palm like a fist, never
+      // reaching forward into the air (owner, M4 at the hip)
+      if (nm === "firing" && id !== "shank") {
+        const kM = handKM(h), f3 = G.pose.joints.fingers[3];
+        const tip = gunDist(handToModel(h, f3[3])) / kM - 0.0078;
+        const curl = Math.atan2(-(f3[3][1] - f3[0][1]), -(f3[3][2] - f3[0][2]));   // the tip's angle round from straight ahead
+        check(tip <= 0.008 || curl > 2.0, `${id}: little finger on the grip or curled (tip ${(tip * 1000).toFixed(1)} mm off, curl ${(curl * 57.3).toFixed(0)} deg)`);
+        thumbRows.push(`${id} little finger tip ${(tip * 1000).toFixed(1)} mm, curl ${(curl * 57.3).toFixed(0)} deg`);
+      }
       c.tips.forEach((t, i) => {
         if (t == null) return;
         check(t <= 0.010, `${id} ${nm}: ${["index", "middle", "ring", "little"][i]} fingertip on the part (${(t * 1000).toFixed(1)} mm off)`);
       });
       let buried = 0;
-      G.pose.joints.fingers.forEach((pts) => {
+      G.pose.joints.fingers.forEach((pts, fi) => {
+        // a finger past the end of the drawn grip (its tip null: it closed
+        // into the palm) is measured against the drawn gun, not the endless prism
+        const free = c.tips[fi] === null && !(fi === 0 && c.trigger != null);
         for (let s = 0; s < 3; s++) for (let u = 0.25; u <= 1.0001; u += 0.25) {
-          const q = G.toM([pts[s][0] + (pts[s + 1][0] - pts[s][0]) * u, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * u, pts[s][2] + (pts[s + 1][2] - pts[s][2]) * u]);
+          const hp = [pts[s][0] + (pts[s + 1][0] - pts[s][0]) * u, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * u, pts[s][2] + (pts[s + 1][2] - pts[s][2]) * u];
+          if (free) { buried = Math.min(buried, gunDist(handToModel(h, hp)) / handKM(h) - 0.0095 * 0.85); continue; }
+          const q = G.toM(hp);
           buried = Math.min(buried, H.prismSdf(P, q.x, q.y, q.z) / G.k - 0.0095 * 0.85);
         }
       });
@@ -272,6 +350,23 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
       };
       const R = arm(A.armR), tag = `${id} ${pose[0]}`;
       const Ra = { W: arr(R.W), E: arr(R.E), S: arr(R.S) };
+      // 7b. THE FIRING FOREARM CLEARS THE GUN: from a third of the way up to
+      // the elbow, its skin never passes through the drawn gun (owner: the M4
+      // at the hip had its right forearm running UNDER the stock). Measured in
+      // model space against every triangle, in real metres.
+      if (pose[0] === "hip" || pose[0] === "sights") {
+        const P = A.armR.userData.parts, kv = P.fore.scale.x;
+        const toM = new T.Matrix4(); for (let p = model; p && p !== A.vm; p = p.parent) { p.updateMatrix(); toM.premultiply(p.matrix); }
+        const inv = toM.clone().invert(), sM = 1 / (model.scale.x * A.gun.scale.x), kReal = handKM(fire);
+        const w = P.fore.position.clone().applyMatrix4(inv), e = P.elbow.position.clone().applyMatrix4(inv);
+        let clear = Infinity;
+        for (let u = 0.33; u <= 1.0001; u += 0.067) {
+          const s = H.math.foreHalf(u), r = Math.max(s.rx, s.ry) * kv * sM;
+          clear = Math.min(clear, (gunDist(w.clone().lerp(e, u)) - r) / kReal);
+        }
+        check(clear > -0.002, `${tag}: firing forearm clear of the gun (${(clear * 1000).toFixed(1)} mm)`);
+        if (pose[0] === "hip") thumbRows.push(`${id} hip firing forearm clearance ${(clear * 1000).toFixed(1)} mm`);
+      }
       // 7. the forearm leaves the frame, down and to its own side
       // (a reload reaches: a rocket goes in the FRONT of the tube, and an arm
       // stretched down the gun shows its elbow; the lens law is for the hold)
@@ -299,11 +394,23 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
         ww.updateMatrix(); head.updateMatrix();
         const Mh = ww.matrix.clone().multiply(head.matrix).premultiply(A.vm.matrix), pos = head.geometry.attributes.position, v = new T.Vector3();
         const tanH = Math.tan(lensFov * Math.PI / 360);
-        let x0 = Infinity, x1 = -Infinity, cx = 0, cy = 0;
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, cx = 0, cy = 0;
         for (let i = 0; i < pos.count; i++) {
           v.fromBufferAttribute(pos, i).applyMatrix4(Mh);
           const nx = v.x / (-v.z * tanH * ASPECT), ny = v.y / (-v.z * tanH);
-          x0 = Math.min(x0, nx); x1 = Math.max(x1, nx); cx += nx; cy += ny;
+          x0 = Math.min(x0, nx); x1 = Math.max(x1, nx); y0 = Math.min(y0, ny); y1 = Math.max(y1, ny); cx += nx; cy += ny;
+        }
+        // THE WATCH READS CLEANLY OR IS GONE: its case never straddles an
+        // edge of the frame (owner: the pistol cup at the hip put the watch
+        // at the very bottom edge, half cut off). 16:9 is the widest common
+        // screen; the vertical lens is the FOV at any aspect.
+        {
+          const ax = ASPECT / (16 / 9);
+          const sx0 = x0 * ax, sx1 = x1 * ax;
+          const straddles = (a, b) => (a < -1 && b > -1) || (a < 1 && b > 1);
+          const cut = straddles(y0, y1) || straddles(x0, x1) || straddles(sx0, sx1);
+          check(!cut, `${tag}: the watch is whole in the frame or out of it (x ${x0.toFixed(2)}..${x1.toFixed(2)}, y ${y0.toFixed(2)}..${y1.toFixed(2)})`);
+          if (pose[0] === "hip") watchRows.push(`${id} hip watch case x ${x0.toFixed(2)}..${x1.toFixed(2)} y ${y0.toFixed(2)}..${y1.toFixed(2)}`);
         }
         cx /= pos.count; cy /= pos.count;
         const span = (x1 - x0) / 2;
@@ -323,10 +430,92 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     }
     reloadP = -1;
   }
+  for (const r of thumbRows.concat(watchRows)) console.log("  " + r);
   console.log(`  the player's watch on the support arm: widest ${(watchWorst * 100).toFixed(1)}% of the lens`);
   // 6. one hand size
   const k0 = handK[0][1];
   for (const [id, k] of handK) check(Math.abs(k / k0 - 1) < 0.01, `${id}: the same hand size as every other gun (${k.toFixed(3)} vs ${k0.toFixed(3)})`);
+}
+
+// ---------------------------------------------------------------- COCKPIT
+/* The pilot's hands (city/cockpit.js buildHands/poseHands) on every costume's
+   real controls (city/cockpit_shapes.js parts.handGrips), built off the same
+   synthetic probes cockpitAudit uses, then swept through full stick / wheel /
+   power travel:
+     · two hands on every costume, each a grasp ON its grip (fingertips within
+       1 cm, nothing buried, the thumb on the part), parented to the moving
+       part so it rides the travel;
+     · the arm grows out of the hand (forearm wrist == the hand's wrist) and
+       the forearms never cross: the left elbow stays on the left (+X is the
+       pilot's left), the two forearms clear of each other;
+     · the watch (entities/watch.js) goes on the LEFT arm. */
+console.log("COCKPIT (the pilot's hands on stick / yoke / throttle)");
+{
+  const updates = [];
+  CBZ.onUpdate = (p, f) => updates.push(f);
+  CBZ.PRIO = { VEHICLES: 40 };
+  for (const f of ["src/city/cockpit_shapes.js", "src/city/cockpit.js"]) vm.runInContext(read(f), ctx, { filename: f });
+  const PROBES = [
+    { airClass: "jet", displayName: "PROBE JET" },
+    { airClass: "heli", displayName: "PROBE HELI" },
+    { airClass: "airliner", displayName: "PROBE LINER", modelYawOffset: -Math.PI / 2 },
+    { airClass: "jet", displayName: "B-2 SPIRIT" },
+    { airClass: "prop", displayName: "PROBE PROP" },
+  ];
+  CBZ.playerChar = { _ww: { role: "diver", over: null } };
+  for (const pr of PROBES) {
+    const spec = CBZ.cockpitSpec(pr);
+    const built = CBZ.cockpitShapes.build(spec, {});
+    const rec = { spec, root: built.root, parts: built.parts };
+    CBZ.cockpitHands.build(rec);
+    const tag = `cockpit ${spec.id}`;
+    const hands = rec.hands || [];
+    check(hands.length === 2, `${tag}: two hands on the controls (${hands.length})`);
+    const where = hands.map((h) => `${h.side > 0 ? "R" : "L"}:${h.hand.parent && h.hand.parent.name}`).join(" ");
+    for (const h of hands) {
+      const G = h.hand.userData.grasp, c = G.contacts;
+      c.tips.forEach((t, i) => { if (t != null) check(t <= 0.010, `${tag} ${h.side > 0 ? "right" : "left"}: ${["index", "middle", "ring", "little"][i]} fingertip on the grip (${(t * 1000).toFixed(1)} mm)`); });
+      let buried = 0;
+      G.pose.joints.fingers.forEach((pts) => {
+        for (let s = 0; s < 3; s++) for (let u = 0.25; u <= 1.0001; u += 0.25) {
+          const q = G.toM([pts[s][0] + (pts[s + 1][0] - pts[s][0]) * u, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * u, pts[s][2] + (pts[s + 1][2] - pts[s][2]) * u]);
+          buried = Math.min(buried, H.prismSdf(G.prism, q.x, q.y, q.z) / G.k - 0.0095 * 0.85);
+        }
+      });
+      check(buried > -0.003, `${tag} ${h.side > 0 ? "right" : "left"}: no finger buried in the grip (${(buried * 1000).toFixed(1)} mm)`);
+      check(c.thumb <= 0.025 && c.thumb > -0.004, `${tag} ${h.side > 0 ? "right" : "left"}: thumb on the grip (${(c.thumb * 1000).toFixed(1)} mm)`);
+      check(h.hand.parent === rec.parts.stick || h.hand.parent === rec.parts.yoke || h.hand.parent === rec.parts.lever, `${tag}: the hand rides a moving control`);
+      check(h.hand.geometry.attributes.position.array.every(Number.isFinite), `${tag}: hand geometry finite`);
+    }
+    let minD = 9, worst = "";
+    for (const st of [-1, 0, 1]) for (const rl of [-1, 0, 1]) for (const pw of [0, 1]) {
+      // the animator's own rotations (cockpit.js animate)
+      const th = (spec.stick.throwDeg || 14) * Math.PI / 180, isYoke = spec.stick.type === "yoke";
+      if (rec.parts.stick) { rec.parts.stick.rotation.x = -st * th; rec.parts.stick.rotation.z = isYoke ? 0 : -rl * th; }
+      if (rec.parts.yoke) rec.parts.yoke.rotation.z = -rl * (spec.stick.throwDeg || 22) * Math.PI / 180 * 2.4;
+      if (rec.parts.lever && spec.lever) rec.parts.lever.rotation.x = -pw * (spec.lever.throwDeg || 36) * Math.PI / 180;
+      CBZ.cockpitHands.pose(rec);
+      const seg = (h) => { const P = h.arm.userData.parts; return { W: arr(P.fore.position), E: arr(P.elbow.position), k: P.fore.scale.x }; };
+      const segs = hands.map(seg);
+      hands.forEach((h, i) => {
+        const w = new T.Vector3(); for (let o = h.hand; o && o !== rec.root; o = o.parent) { o.updateMatrix(); w.applyMatrix4(o.matrix); }
+        check(w.distanceTo(V(segs[i].W)) < 1e-6, `${tag}: the forearm grows out of the ${h.side > 0 ? "right" : "left"} wrist`);
+        check(segs[i].W.concat(segs[i].E).every(Number.isFinite), `${tag}: arm finite`);
+      });
+      if (hands.length === 2) {
+        const L = hands[0].side < 0 ? segs[0] : segs[1], R = hands[0].side < 0 ? segs[1] : segs[0];
+        check(L.E[0] > R.E[0], `${tag} stick ${st} roll ${rl} power ${pw}: left elbow on the left (+X) of the right`);
+        const d = M.segDist(L.W, L.E, R.W, R.E), need = RAD_BELLY * (L.k + R.k);
+        check(d > need, `${tag} stick ${st} roll ${rl} power ${pw}: forearms clear (${d.toFixed(3)} > ${need.toFixed(3)})`);
+        if (d < minD) { minD = d; worst = `stick ${st} roll ${rl} power ${pw}`; }
+      }
+    }
+    // the watch rides the LEFT arm only
+    const onLeft = hands.filter((h) => h.arm.userData.ww && h.arm.userData.ww.inst && h.arm.userData.ww.inst.visible).map((h) => h.side);
+    check(onLeft.length === 1 && onLeft[0] < 0, `${tag}: the watch is on the left wrist (${onLeft.join(",") || "none"})`);
+    console.log(`  ${spec.id.padEnd(9)} ${where}  closest forearm approach ${minD.toFixed(3)} m (${worst})`);
+    CBZ.cockpitShapes.dispose(built.root);
+  }
 }
 
 // ---------------------------------------------------------------- DRIVING

@@ -416,7 +416,7 @@
     dir.lerp(_rlDir, rl.weight).normalize();
   }
 
-  if (CBZ.onAlways) CBZ.onAlways(54, function () {
+  if (CBZ.onAlways) CBZ.onAlways(54, function (dt) {
     const hand = mounts.hand;
     if (CBZ.CONFIG.CHAR_TP_HAND_GUN === false) {
       if (hand.prop) hand.prop.visible = false;
@@ -426,7 +426,9 @@
     const g = CBZ.game;
     const inTP = !(CBZ.fps && CBZ.fps.active);
     const show = ch && ch.sockets && inTP &&
-      g && (g.mode === "city" || g.mode === "escape") &&
+      // (the warlord's battle is a "slice" page that mounts fpsmode for its
+      // one armed man: his third-person gun is this held prop too)
+      g && (g.mode === "city" || g.mode === "escape" || (g.mode === "slice" && CBZ.warlord && CBZ.warlord.gunplay)) &&
       CBZ.player && !CBZ.player.dead && !CBZ.player.driving && !CBZ.player._swim &&
       CBZ.playerArmed && CBZ.playerArmed();
     // heldId: currentWeaponId is the canonical drawn id, but fpsmode's
@@ -501,6 +503,12 @@
       ch.setHandPose("r", drawingBlocked ? "relaxed" : melee ? "grip" : "pistol");
     }
     hand.prop.position.set(0.02, 0.02, 0.03);
+    // A BIPOD'D GUN UNFOLDS ITS LEGS when fpsmode's bipodActive() says the
+    // body is braced on them (prone, or crouched + shouldered + still) — the
+    // same bit the ground rest pulls the gun onto the deck by, so the legs
+    // and the rest solve never disagree (weapons/appearances/lmg.js drive()).
+    const bipod = hand.prop.userData.bipod;
+    if (bipod && bipod.drive) bipod.drive(!!(CBZ.fpsBipodActive && CBZ.fpsBipodActive()), dt);
     aimHandProp();
   });
 

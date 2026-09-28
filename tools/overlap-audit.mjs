@@ -49,7 +49,8 @@
    itself clear of the other part — hair is judged the same way against the
    skull, and hair within HAIR_HUG of the scalp is the scalp layer.
    REPORTED, NEVER FAILED (printed as `known`, see each block): prone /
-   lying / riding (folding poses: the body presses into itself), arm-vs-kit
+   lying / riding (folding poses: the body presses into itself; NOT for a
+   slung gun, which is measured and failed in every pose), arm-vs-kit
    and the held gun in the gun-hold poses (the solved hold puts the arms
    inside the chest), a toddler's head turned AND nodded, and the jacket
    shell (`fenced`: the torso reshape owns it).
@@ -61,7 +62,7 @@
 
      node tools/overlap-audit.mjs            summary table + PASS/FAIL
      node tools/overlap-audit.mjs --verbose  every attachment, not just the worst
-     node tools/overlap-audit.mjs --only=hair|outfit|kit
+     node tools/overlap-audit.mjs --only=hair|outfit|kit|stow
    Exit 0 = nothing passes through anybody. */
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -600,13 +601,13 @@ function measure(ch, labels, tag, pose, opts) {
         if (mm > r.sink) { r.sink = mm; r.sinkWhere = where; }
         if (zf > r.zf) { r.zf = zf; r.zfWhere = tag + " / " + pose + " on " + P.region; }
       } else {
-        /* THE GUN HOLD IS NOT AN ATTACHMENT'S TO DODGE. In the ready poses
-           (CBZ.gunHold.ready) the solved arms lay the forearms ON / INTO the
-           chest (measured: the solved upper arms and forearms run up to ~14 cm
-           inside the chest box itself), so anything worn on the chest front or on
-           the arms is squeezed between: an arm-vs-kit contact there, and the
-           held gun itself (tools/gun-hold-check.mjs owns it), is REPORTED
-           under known:, never failed — see the report's gun-hold note. */
+        /* THE GUN HOLD. The ready solve (CBZ.gunHold.ready) now keeps the
+           arms and the gun out of the body AS WORN (entities/character.js
+           charArmTo.bodyPen: the shaped chest and every piece of kit on it;
+           tools/gun-hold-check.mjs measures it, incl. a plate carrier), which
+           took the worst arm-vs-kit contact here from 45 mm to ~19 mm. What
+           is left (a sash strap and shoulder pads worn ON the moving upper
+           arm, which no hold can dodge) is still REPORTED under known:. */
         const army = /^arm/.test(P.region) || /^(la|ra)/.test(frameName(fr, ch));
         const r2 = (!opts.known && ((AIMS[pose] && (army || /^held:/.test(A.label))))) ? rec("known:" + A.label) : r;
         if (r2 !== r) { if (mm > r2.worst) { r2.worst = mm; r2.where = where; } r2.n++; continue; }
@@ -701,12 +702,16 @@ process.on("exit", () => { if (process.env.OA_TIME) console.log("TIME pose " + (
    rigid attachment cannot dodge. They are measured and REPORTED (known:)
    — they never fail the run; everything upright does. */
 const FOLDING = { prone: 1, lie: 1, ride: 1 };    // (astride a saddle: legs spread, both hands meet at the reins)
+/* …EXCEPT A SLUNG GUN. It is not worn ON the folding body, it hangs from a
+   sling, and a sling gives: prone the rifle rides flat and low across the
+   back (entities/character.js slingPose), so there is nothing a stowed gun
+   cannot dodge. opts.fold === "measured" fails those rows like any other. */
 const AIMS = { aim: 1, aimPistol: 1 };
 function run(ch, tag, labels, poses, opts) {
   if (process.env.OA_ARMS && ch.armOutZ !== ch.profile.armOutZ) console.log("ARMS", tag, "armOutZ", (+ch.armOutZ).toFixed(3), "base", ch.profile.armOutZ);
   for (const pz of poses) {
     const a = performance.now(); POSES[pz](ch);
-    const b = performance.now(); measure(ch, labels, tag, pz, FOLDING[pz] ? Object.assign({}, opts, { known: true }) : opts);
+    const b = performance.now(); measure(ch, labels, tag, pz, FOLDING[pz] && opts.fold !== "measured" ? Object.assign({}, opts, { known: true }) : opts);
     TIMES.pose += b - a; TIMES.measure += performance.now() - b; evals++;
   }
   reset(ch); settle(ch, 0, 2);
@@ -762,14 +767,16 @@ if (!ONLY || ONLY === "outfit") {
 }
 
 // ================================================================ 3. KIT
-if (!ONLY || ONLY === "kit") {
+if (!ONLY || ONLY === "kit" || ONLY === "stow") {
   const CAT = CBZ.cityOutfitCatalog();
   const noHair = { filter: (a) => !/^hair:/.test(a.label) };
   const KP = ["stand", "walkA", "walkB", "run", "sit", "aim", "aimPistol", "prone", "lie"];
   // a warlord rig never takes a chair (nothing in src/warlord sets .sitting): it rides
   const WP = ["stand", "walkA", "walkB", "run", "ride", "aim", "aimPistol", "prone", "lie"];
+  const STOW_ONLY = ONLY === "stow";
   for (const B of BODIES.slice(0, 2)) {
     // ---- city armour, bare and over the police uniform (jacket shell)
+    if (!STOW_ONLY) {
     for (const under of ["plain", "police"]) for (const kitId of ["softVest", "plateCarrier", "swatVest"]) {
       const ch = makeBody(B, { hairStyle: "short" });
       if (under === "police" && CAT.police) CBZ.cityRecolorRig(ch, CAT.police.colors, CAT.police);
@@ -813,7 +820,9 @@ if (!ONLY || ONLY === "kit") {
       labelNew(ch, before, labels, "bling:" + look);
       run(ch, B.key + " " + under + "+" + look, labels, ["stand", "walkA", "sit", "aim", "turnL"], noHair);
     }
-    // ---- stowed weapons on the body mounts (holsterprops' placement)
+    }
+    // ---- stowed weapons on the body mounts (holsterprops' placement).
+    // Measured in EVERY pose, prone and lying included (see FOLDING).
     for (const [slot, id] of [["hip", "sidearm"], ["hip", "taser"], ["back", "carbine"], ["back", "shotgun"], ["back2", "ak47"], ["back", "sniper"]]) {
       const ch = makeBody(B, { hairStyle: "short" });
       const labels = new Map();
@@ -823,8 +832,9 @@ if (!ONLY || ONLY === "kit") {
       prop.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) || 0.92);
       mnt.add(prop);
       prop.traverse((o) => { if (o.isMesh) labels.set(o, "stow:" + slot + ":" + id); });
-      run(ch, B.key + " stow " + slot + " " + id, labels, KP, noHair);
+      run(ch, B.key + " stow " + slot + " " + id, labels, KP.concat(["lookUp", "turnUp"]), Object.assign({ fold: "measured" }, noHair));
     }
+    if (STOW_ONLY) continue;
     // ---- warlord: every armour rung with webbing + pouches
     if (W.outfits && W.outfits.apply) for (const armour of ["vest", "plate", "heavy"]) {
       const ch = makeBody(B, { hairStyle: "short" });

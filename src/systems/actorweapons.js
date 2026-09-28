@@ -381,32 +381,94 @@
       prop.position.copy(worldPos);
       prop.parent.worldToLocal(prop.position);
     }
-    function solveReady(ch, prop, spec, C, pitch) {
-      const elev = -(pitch || 0);                                // combat's convention: negative pitch = barrel up
+    /* the shoulder pocket's depth at body-frame (x, y): the front of the body
+       as WORN (entities/character.js charArmTo.bodyFront: the shaped chest,
+       and a plate carrier or webbing over it), never inside it */
+    function pocketZ(ch, x, y) {
+      const f = CBZ.charArmTo && CBZ.charArmTo.bodyFront ? CBZ.charArmTo.bodyFront(ch, x, y) : null;
+      const box = ((ch.profile && ch.profile.torsoD) || 0.5) * 0.5;
+      return f == null ? box : f + 0.012;
+    }
+    /* how deep the drawn gun sits inside the body as worn (body units): its
+       own vertices, thinned to a 2 cm lattice once per prop, against
+       charArmTo.bodyPen — a stock pitched down into the chest, a launcher
+       tube laid through the shoulder */
+    const _gbM = new THREE.Matrix4(), _gbP = new THREE.Vector3(), _ros = new THREE.Vector3();
+    function gunSamples(prop) {
+      const ud = prop.userData;
+      if (ud._bodySamples) return ud._bodySamples;
+      const seen = new Set(), pts = [];
+      prop.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(prop.matrixWorld).invert(), m = new THREE.Matrix4(), v = new THREE.Vector3();
+      prop.traverse(function (o) {
+        const pos = o.isMesh && o.geometry && o.geometry.attributes && o.geometry.attributes.position;
+        if (!pos || o.visible === false) return;
+        m.multiplyMatrices(inv, o.matrixWorld);
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).applyMatrix4(m);
+          const k = Math.round(v.x / 0.002) + "," + Math.round(v.y / 0.002) + "," + Math.round(v.z / 0.002);
+          if (seen.has(k)) continue;
+          seen.add(k); pts.push(v.x, v.y, v.z);
+        }
+      });
+      ud._bodySamples = new Float32Array(pts);
+      return ud._bodySamples;
+    }
+    function gunInBody(ch, prop) {
+      if (!CBZ.charArmTo || !CBZ.charArmTo.bodyPen || !ch.body) return 0;
+      const S = gunSamples(prop);
+      ch.body.updateWorldMatrix(true, false);
+      prop.updateWorldMatrix(true, false);
+      _gbM.copy(ch.body.matrixWorld).invert().multiply(prop.matrixWorld);
+      let pen = 0;
+      const V = CBZ.charArmTo.bodyVolume(ch);
+      for (let i = 0; i < S.length; i += 3) {
+        _gbP.set(S[i], S[i + 1], S[i + 2]).applyMatrix4(_gbM);
+        const q = CBZ.charArmTo.bodyPen(ch, _gbP, 0, V);
+        if (q > pen) pen = q;
+      }
+      return pen;
+    }
+    /* LOW READY (the player's carry, systems/gunhands.js): the same hold, the
+       stock still in the shoulder pocket and both hands on the gun, the muzzle
+       dropped ~37 degrees and turned a touch across the body, the torso only
+       lightly bladed so a walk still reads as a walk. A pistol keeps its one-
+       hand carry beside the thigh (the arm hangs; nothing to solve). */
+    const LOW = { pitch: 0.45, yaw: 0.30, blade: 0.26 };
+    function solveReady(ch, prop, spec, C, pitch, mode) {
+      const low0 = mode === "low";
+      const elev = -(low0 ? LOW.pitch : (pitch || 0));          // combat's convention: negative pitch = barrel up
       const body = ch.body, ra = ch.parts.ra, la = ch.parts.la;
       const hr = handOf(ch, 1), fit = hr.userData.fit;
       const z = sized(spec, fit.s / (prop.scale.x || 1));
       const stock = stockZ(prop) * (prop.scale.x || 1);        // rig (body) units
       const long = stock > 0.26;
-      const blade = long ? BLADE : 0;
+      const blade = long ? (low0 ? LOW.blade : BLADE) : 0;
+      // a one-handed gun leaves the off arm to whoever had it: put it back after
+      const laKeep = [la.quaternion.clone(), la.position.z, la.userData.low.rotation.clone(), la.userData._armRestZ];
       ra.position.z = 0; la.position.z = 0;
       if (CBZ.charArmTo.rest) { CBZ.charArmTo.rest(ch, "r", 0); CBZ.charArmTo.rest(ch, "l", 0); }
       // the gun in the BODY frame: down-range once the body is bladed
-      _rd.set(Math.sin(blade) * Math.cos(elev), Math.sin(elev), Math.cos(blade) * Math.cos(elev));
+      const yaw = blade + (low0 ? LOW.yaw : 0);
+      _rd.set(Math.sin(yaw) * Math.cos(elev), Math.sin(elev), Math.cos(yaw) * Math.cos(elev));
       _rm.lookAt(_r0, _rd, _rUp);
       _rbq.setFromRotationMatrix(_rm);
       let fireBend = 0;
       const low = hr.parent;
-      const attempt = function (pull, inb) {
+      const attempt = function (pull, inb, fwd, prot, lift) {
         // every attempt starts from the same hanging arms, so the answer is a
-        // function of the body and the gun alone
+        // function of the body and the gun alone. `prot` rolls both shoulders
+        // forward (scapular protraction: what a man in a plate carrier spends
+        // to get his arms round it and onto the gun)
         ra.position.z = 0; la.position.z = 0;
+        if (CBZ.charArmTo.rest) { CBZ.charArmTo.rest(ch, "r", prot || 0); CBZ.charArmTo.rest(ch, "l", prot || 0); }
         ra.quaternion.identity(); la.quaternion.identity();
         ra.userData.low.rotation.set(-0.2, 0, 0); la.userData.low.rotation.set(-0.2, 0, 0);
-        _ro.lerpVectors(ra.position, la.position, long ? 0.38 : inb);
-        // the butt sits IN the shoulder pocket — on the chest's front surface,
-        // not at the shoulder joint's centre inside the torso
-        if (long) { _ro.y -= 0.07; _ro.z = ((ch.profile && ch.profile.torsoD) || 0.5) * 0.5; _ro.addScaledVector(_rd, stock); }
+        _ro.lerpVectors(ra.position, la.position, inb);
+        // the butt sits IN the shoulder pocket: on the FRONT of the body as
+        // worn (the shaped chest, or the plate carrier strapped over it), not
+        // at the shoulder joint's centre inside the torso
+        if (long) { _ro.y -= 0.07; _ro.z = pocketZ(ch, _ro.x, _ro.y); _ro.addScaledVector(_rd, stock + (fwd || 0)); }
         else {
           // the arms swing up/down from the shoulders — but a pistol lowered
           // stays out in FRONT (the shoulders protract), or both straight arms
@@ -418,11 +480,30 @@
           // the gun comes back toward the chest by that much
           const ahead = spec.sup ? -z.sc.z * (prop.scale.x || 1) : 0;
           if (ahead > 0.09) _ro.addScaledVector(_rd, -(ahead - 0.09) * pull);
+          _ro.z += fwd || 0;
+          _ro.y += lift || 0;                                     // up toward the eyes: arms over the kit
         }
         body.updateWorldMatrix(true, false);
         body.getWorldQuaternion(_rwq);
         _rwq.multiply(_rbq);                                      // gun, world
         _gq.copy(_rwq);
+        // THE GUN IS NEVER INSIDE THE BODY: a stock pitched down pivots its
+        // toe back into the chest (or the plate carrier on it), a launcher
+        // tube lies through the shoulder. Stand it off the body by exactly
+        // what it is inside (a launcher UP onto the shoulder it rests on,
+        // anything else out along the body's facing) before an arm reaches
+        // for it.
+        _ros.copy(_ro);
+        body.localToWorld(_ro);
+        seatProp(prop, _ro, _rwq);
+        for (let i = 0; i < 3; i++) {
+          const gp = gunInBody(ch, prop);
+          if (gp < 0.003) break;
+          if (prop.userData.shoulderZ != null) _ros.y += gp + 0.008; else _ros.z += gp + 0.008;
+          _ro.copy(_ros); body.localToWorld(_ro);
+          seatProp(prop, _ro, _rwq);
+        }
+        _ro.copy(_ros);
         _rc.copy(z.fc).multiplyScalar(prop.scale.x || 1).applyQuaternion(_rbq).add(_ro);
         body.localToWorld(_rc);                                   // the grip centre, world
         body.localToWorld(_ro);
@@ -442,25 +523,83 @@
         }
         seatProp(prop, _ro, _rwq);
         fire(ch, prop, true, 0);                                  // fist on the grip, gun in the fist, still down-range
+        // the fist can draw the gun back into the body seating it: out again
+        for (let i = 0; i < 4; i++) {
+          const gp = gunInBody(ch, prop);
+          if (gp < 0.002) break;
+          CBZ.charArmTo.crease(ch, "r", _w);
+          _s.set(0, 0, 0); body.localToWorld(_s);
+          if (prop.userData.shoulderZ != null) _rpa.set(0, gp + 0.008, 0); else _rpa.set(0, 0, gp + 0.008);
+          body.localToWorld(_rpa).sub(_s);
+          _w.add(_rpa);
+          hr.getWorldQuaternion(_pq);
+          CBZ.charArmTo.wrist(ch, _w, "r", _c.set(0, 0, 1).applyQuaternion(_pq), 1);
+          prop.getWorldPosition(_ro);
+          seatProp(prop, _ro, _rwq);                              // still down-range
+          fire(ch, prop, true, 0);
+        }
         fireBend = last.fireBend;
         return supportLand(ch, prop, 1, 0.03, 4, null);
       };
-      // a two-hand pistol / compact whose support grip is hard to reach: try
-      // the gun a little further inboard and (a compact) back toward the
-      // chest, and keep the best hold the firing wrist can live with
-      let gap = attempt(0.25, 0.42);
-      if (!long && spec.sup && gap != null && gap > 0.015) {
-        let best = { gap: gap, pull: 0.25, inb: 0.42 };
-        const ahead = -z.sc.z * (prop.scale.x || 1) > 0.09;
-        for (const inb of [0.42, 0.5, 0.56, 0.62]) {
-          for (const pull of ahead ? [0.25, 0.5, 0.75, 1, 1.25, 1.5] : [0]) {
-            if (inb === 0.42 && pull === 0.25) continue;
-            const g = attempt(pull, inb);
-            const chest = CBZ.charArmTo.inChest ? CBZ.charArmTo.inChest(ch, "l") + CBZ.charArmTo.inChest(ch, "r") : 0;
-            if (g != null && fireBend <= BEND_MAX + 0.005 && !chest && g < best.gap - 0.002) best = { gap: g, pull: pull, inb: inb };
+      /* THE BEST HOLD THIS BODY CAN MAKE, AS WORN. The first attempt is the
+         textbook one (the butt in the pocket / the pistol at the chest); if
+         the arms then run into the body or its kit, or a two-hand pistol's
+         cup can't be reached, the gun is tried further out from the chest
+         (fwd), further inboard (inb) and, for a compact, back toward it
+         (pull), and the attempt that leaves the least arm inside the body
+         and the support hand on the gun wins. Solved once per body + gun +
+         pitch level, so the search costs nothing per frame. */
+      const inb0 = long ? 0.38 : 0.42;
+      const inBody = function () {
+        // (a one-handed gun's off arm is not this solve's: it goes back after)
+        const ar = CBZ.charArmTo.armPen ? Math.max(spec.sup ? CBZ.charArmTo.armPen(ch, "l") : 0, CBZ.charArmTo.armPen(ch, "r")) : 0;
+        return Math.max(ar, gunInBody(ch, prop));
+      };
+      // the support hand ON the gun is not negotiable (a miss costs more than
+      // any amount of arm in the body); then the least arm/gun inside the
+      // body; then the textbook placement
+      const score = function (g, pen, fwd, inb, pull, prot, lift) {
+        return (g != null && spec.sup && g > 0.02 ? 10 + g * 20 : 0) + (fireBend > BEND_MAX + 0.005 ? 5 : 0) +
+          pen * 12 + fwd * 0.08 + Math.abs(inb - inb0) * 0.05 + Math.abs(pull - 0.25) * 0.004 + prot * 0.10 + lift * 0.06;
+      };
+      const place = { pull: 0.25, inb: inb0, fwd: 0, prot: 0, lift: 0 };
+      let gap = attempt(0.25, inb0, 0, 0, 0);
+      const PEN_OK = 0.004;
+      let best = { s: score(gap, inBody(), 0, inb0, 0.25, 0, 0), pull: 0.25, inb: inb0, fwd: 0, prot: 0, lift: 0 };
+      const GOOD = PEN_OK * 12 + 0.03;
+      if (best.s > GOOD) {
+        /* COORDINATE DESCENT, cheapest change first (a full grid is hundreds of
+           arm solves: a hitch the first time a squad draws): how far out from
+           the chest; how far inboard; (a compact) how far back; (a pistol) up
+           toward the eyes so the arms run over the kit; and last the shoulders
+           rolled forward. Each axis is swept holding the best of the others,
+           twice round. */
+        const ahead = !long && -z.sc.z * (prop.scale.x || 1) > 0.09;
+        const AX = [
+          ["fwd", [0, 0.04, 0.08, 0.13, 0.19, 0.26]],
+          ["inb", long ? [0.38, 0.30, 0.46, 0.22, 0.14] : [0.42, 0.5, 0.56, 0.62, 0.34]],
+        ];
+        if (ahead) AX.push(["pull", [0.25, 0.5, 0.75, 1, 1.25, 1.5]]);
+        if (!long) AX.push(["lift", [0, 0.08, 0.15]]);
+        AX.push(["prot", [0, 0.05, 0.10]]);
+        const tried = new Set([[best.fwd, best.inb, best.pull, best.lift, best.prot].join()]);
+        for (let round = 0; round < 2 && best.s > GOOD; round++) {
+          for (const [k, vals] of AX) {
+            for (const v of vals) {
+              const c = Object.assign({}, best);
+              c[k] = v;
+              const id = [c.fwd, c.inb, c.pull, c.lift, c.prot].join();
+              if (tried.has(id)) continue;
+              tried.add(id);
+              const g = attempt(c.pull, c.inb, c.fwd, c.prot, c.lift);
+              c.s = score(g, inBody(), c.fwd, c.inb, c.pull, c.prot, c.lift);
+              if (c.s < best.s - 1e-4) best = c;
+            }
+            if (best.s <= GOOD) break;
           }
         }
-        gap = attempt(best.pull, best.inb);
+        gap = attempt(best.pull, best.inb, best.fwd, best.prot, best.lift);
+        place.pull = best.pull; place.inb = best.inb; place.fwd = best.fwd; place.prot = best.prot; place.lift = best.lift;
       }
       C = C || { raQ: new THREE.Quaternion(), laQ: new THREE.Quaternion(), raL: new THREE.Vector3(), laL: new THREE.Vector3(),
         hrQ: new THREE.Quaternion(), hrP: new THREE.Vector3(), hlQ: new THREE.Quaternion(), hlP: new THREE.Vector3(),
@@ -474,6 +613,11 @@
       C.gQ.copy(prop.quaternion); C.gP.copy(prop.position);
       C.fireBend = fireBend; C.supBend = last.supBend; C.supGap = gap; C.slide = last.slide;
       C.hasSupport = !!(spec.sup && hl && gap != null);
+      C.inb = place.inb; C.fwd = place.fwd; C.pull = place.pull; C.prot = place.prot;
+      if (!C.hasSupport) {
+        la.quaternion.copy(laKeep[0]); la.position.z = laKeep[1]; la.userData.low.rotation.copy(laKeep[2]);
+        la.userData._armRestZ = laKeep[3];
+      }
       return C;
     }
     // the neck counter-turn of a bladed body: a baked offset, backed out when
@@ -509,18 +653,20 @@
       return [prop.userData.weaponId, r4(prop.scale.x), r4(fit.s), r4(fit.wristY), r4(ra.userData.low.position.y),
         r4(la.userData.low.position.y), r4(ra.position.x), r4(ra.position.y), r4(la.position.x), r4(la.position.y),
         r4(P.torsoD || 0), r4(P.torsoW || 0), r4(P.waistD || 0),
-        rh ? r4(rh.position.y) + ":" + r4(rh.position.z) : "", tw ? r4(tw.position.x) + ":" + r4(tw.position.y) + ":" + r4(tw.position.z) : ""].join("|");
+        rh ? r4(rh.position.y) + ":" + r4(rh.position.z) : "", tw ? r4(tw.position.x) + ":" + r4(tw.position.y) + ":" + r4(tw.position.z) : "",
+        // the body AS WORN: a plate carrier changes the answer
+        CBZ.charArmTo && CBZ.charArmTo.bodyVolume ? (CBZ.charArmTo.bodyVolume(ch) || {}).id : ""].join("|");
     }
     // the cached solve for this body + gun at one pitch level (0.05 rad steps)
     const PITCH_STEP = 0.05;
-    function getReady(ch, prop, spec, hr, level, arms) {
-      const key = readyKey(ch, prop, hr) + "|" + level;
+    function getReady(ch, prop, spec, hr, level, arms, mode) {
+      const key = readyKey(ch, prop, hr) + "|" + level + (mode ? "|" + mode : "");
       let C = READY.get(key);
       if (C) return C;
       // the solve poses the arms; a seat-only caller gets them back
       const keep = arms ? null : [ch.parts.ra.quaternion.clone(), ch.parts.ra.position.z, ch.parts.ra.userData.low.rotation.clone(),
         ch.parts.la.quaternion.clone(), ch.parts.la.position.z, ch.parts.la.userData.low.rotation.clone()];
-      C = solveReady(ch, prop, spec, null, level * PITCH_STEP);
+      C = solveReady(ch, prop, spec, null, level * PITCH_STEP, mode);
       if (keep) {
         ch.parts.ra.quaternion.copy(keep[0]); ch.parts.ra.position.z = keep[1]; ch.parts.ra.userData.low.rotation.copy(keep[2]);
         ch.parts.la.quaternion.copy(keep[3]); ch.parts.la.position.z = keep[4]; ch.parts.la.userData.low.rotation.copy(keep[5]);
@@ -556,8 +702,10 @@
         hl.position.copy(A.hlP); if (k) hl.position.lerp(B.hlP, k);
         last.supBend = A.supBend; last.supGap = A.supGap; last.slide = A.slide;
       } else if (ch.setHandPose) ch.setHandPose("l", "relaxed");     // one-handed: the off hand is free
-      if (A.blade) ch.body.rotation.y = -A.blade;
-      bakeNeck(ch, A.blade * BLADE_NECK);
+      // the solve's body yaw is part of the answer (0 for a pistol): a gait's
+      // counter-rotation left in would turn the chest under solved arms
+      ch.body.rotation.y = -(A.blade || 0);
+      bakeNeck(ch, (A.blade || 0) * BLADE_NECK);
     }
     function readyOk(ch, prop) {
       return !!(specOf(prop) && handOf(ch, 1) && prop.parent && ch.parts && ch.parts.ra && ch.parts.la && ch.body &&
@@ -567,7 +715,9 @@
       if (!readyOk(ch, prop)) return false;
       const hr = handOf(ch, 1);
       let C = prop.userData._ready;
-      if (!C || prop.userData._readyCh !== ch || C.s !== hr.userData.fit.s) {
+      const vid = CBZ.charArmTo && CBZ.charArmTo.bodyVolume ? (CBZ.charArmTo.bodyVolume(ch) || {}).id : 0;
+      if (!C || prop.userData._readyCh !== ch || C.s !== hr.userData.fit.s || prop.userData._readyVol !== vid) {
+        prop.userData._readyVol = vid;
         // The answer depends on the body's arm geometry and the gun, not on
         // who the body is: every cop of one build with one pistol shares it,
         // so a squad spawning at once solves once.
@@ -586,6 +736,23 @@
        stay out of the chest, the off hand re-lands — cached like the level
        pose and blended between neighbouring levels, so a tracking NPC's
        hands never leave the gun. */
+    /* the player's LOW READY with a long gun: both hands on it (LOW above),
+       solved once per body + gun like the NPC ready pose and copied */
+    function lowReady(ch, prop) {
+      if (!readyOk(ch, prop)) return false;
+      const hr = handOf(ch, 1);
+      let C = prop.userData._low;
+      const vid = CBZ.charArmTo && CBZ.charArmTo.bodyVolume ? (CBZ.charArmTo.bodyVolume(ch) || {}).id : 0;
+      if (!C || prop.userData._lowCh !== ch || C.s !== hr.userData.fit.s || prop.userData._lowVol !== vid) {
+        prop.userData._lowVol = vid;
+        C = getReady(ch, prop, specOf(prop), hr, 0, true, "low");
+        prop.userData._low = C; prop.userData._lowCh = ch;
+      }
+      applyReady(ch, prop, C, null, 0, true);
+      return !!C.hasSupport;
+    }
+    // is this a long gun (a stock to shoulder), in the body's own units
+    function isLong(prop) { return stockZ(prop) * (prop.scale.x || 1) > 0.26; }
     function pitchNpc(ch, prop, pitch) {
       if (!ready(ch, prop, true)) return false;
       if (!(Math.abs(pitch) > 1e-4)) return true;
@@ -705,7 +872,7 @@
       return prop.localToWorld(out.copy(z.sc));
     }
     return {
-      fire, ready, pitchNpc, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,
+      fire, ready, pitchNpc, lowReady, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,
       BEND_MAX, TILT, ROLL, BLADE, BLADE_NECK,
       math: { solveFrame, clampBend, sized, gripCentreOf },
     };
@@ -1540,7 +1707,7 @@
   // to carry it in the ready pose so it never droops to the hip while standing
   // or walking. "Out" respects intent: holstered/lowered/hidden actors are
   // skipped (and kept stowed) so escalation cues and wall-stows actually read.
-  function poseList(list) {
+  function poseList(list, dt) {
     if (!list) return;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
@@ -1580,12 +1747,25 @@
       const prop = syncActorWeapon(a);
       if (!prop) continue;
       setReadyPose(a.char, prop);
+      bipodFromPosture(a, prop, dt);
     }
   }
-  if (CBZ.onUpdate) CBZ.onUpdate(36, function () {
+  if (CBZ.onUpdate) CBZ.onUpdate(36, function (dt) {
     if (!CBZ.game || CBZ.game.mode !== "city") return;
-    poseList(CBZ.cityPeds); poseList(CBZ.cityCops);
+    poseList(CBZ.cityPeds, dt); poseList(CBZ.cityCops, dt);
   });
+  /* ---- BIPOD FROM POSTURE (the one line of bipod logic an NPC needs) -------
+     A bipod'd gun (weapons/appearances/lmg.js userData.bipod) in an actor's
+     hands unfolds its legs when the body is PRONE and still — the NPC half of
+     fpsmode's bipodActive() (the player's own guns are driven there and in
+     holsterprops.js). Folds again the moment he rises or crawls. */
+  function bipodFromPosture(actor, prop, dt) {
+    const b = prop && prop.userData && prop.userData.bipod;
+    if (!b || !b.drive) return;
+    const ch = actor.char;
+    b.drive(!!(ch && ch.pronePose) && !(Math.abs(actor.speed || 0) >= 0.8), dt == null ? 1 / 30 : dt);
+  }
+  CBZ.actorBipodFromPosture = bipodFromPosture;
   // every mode: a body no longer asked for its bladed ready pose turns its
   // head back (the neck counter-turn is a baked offset, see GH.ready)
   if (CBZ.onUpdate) CBZ.onUpdate(36.5, function (dt) { GH.readyDecay(dt); });
@@ -1615,9 +1795,9 @@
   CBZ.actorHolster = actorHolster;
   CBZ.actorMuzzle = actorMuzzle;
   CBZ.actorAimAt = actorAimAt;
-  CBZ.actorReadyPose = function (actor) {
+  CBZ.actorReadyPose = function (actor, dt) {
     const prop = syncActorWeapon(actor);
-    if (prop && actor && actor.char) setReadyPose(actor.char, prop);
+    if (prop && actor && actor.char) { setReadyPose(actor.char, prop); bipodFromPosture(actor, prop, dt); }
     return prop;
   };
 })();

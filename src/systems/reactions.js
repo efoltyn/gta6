@@ -639,8 +639,15 @@
           // only do the tense fear face below. An armed ped WITHOUT a built prop, or
           // a fearless-but-unarmed bruiser squaring up, still gets the arm pose from
           // this path. Gated to city; jail aim-back (guards/npcs) is UNCHANGED.
-          const weaponOwnsArm = isCity && a.armed && a._weaponProp && a._weaponProp.visible;
-          if (!weaponOwnsArm) {
+          const heldGun = a._weaponProp && a._weaponProp.visible && !a._weaponProp.userData.weaponMelee ? a._weaponProp : null;
+          const weaponOwnsArm = isCity && a.armed && heldGun;
+          /* A GUN IN THE HAND IS HELD WITH BOTH HANDS (every mode, not just the
+             city's armed-ped pass): the stand-off is CBZ.gunHold's ready pose,
+             the same solve every armed NPC uses — firing fist on the grip, the
+             off hand cupping it or on the handguard. The additive right-arm-only
+             raise below let the off hand hang off a pistol it was meant to hold. */
+          const heldBoth = !weaponOwnsArm && heldGun && CBZ.gunHold && CBZ.gunHold.ready(a.char, heldGun, true);
+          if (!weaponOwnsArm && !heldBoth) {
             if (parts.ra) {
               const before = parts.ra.rotation.x;
               const want = damp(before, AIM_ARM, 14, dt);

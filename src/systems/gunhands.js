@@ -455,6 +455,71 @@
     }
     showCarried(ch, R.style, false);
 
+    /* ---- THE ONE HOLD: THE SAME SOLVE EVERY ARMED NPC USES ----------------
+       Standing, crouched or walking (the torso upright), the player's hold IS
+       CBZ.gunHold's ready pose, the one solved once per body + gun against
+       the body as worn (the shaped chest and any plate carrier on it: arms
+       and gun kept out of both) and copied:
+         · presenting: pitched onto the aim (gunHold.pitchNpc), then the
+           barrel is locked exactly onto the crosshair and the fist re-seated
+           (holsterprops), and the support hand re-landed on the gun;
+         · LOW READY with a long gun: the stock stays in the shoulder pocket
+           and BOTH hands stay on the gun, muzzle down and a touch across the
+           body (gunHold.lowReady). A pistol keeps its one-hand carry.
+       A pitched torso (prone) keeps the placement below. */
+    const upright = Math.abs(ch.body.rotation.x || 0) < 0.8 && !ch.pronePose;
+    if (upright && (ch.aimingPose || GH.isLong(prop))) {
+      const aimed = !!ch.aimingPose;
+      if (aimed) {
+        if (CBZ.playerAimDir) CBZ.playerAimDir(_fwd); else _fwd.set(0, 0, 1);
+        GH.pitchNpc(ch, prop, -Math.asin(Math.max(-1, Math.min(1, _fwd.y))));
+      } else {
+        GH.lowReady(ch, prop);
+        seen.why = "low ready";
+      }
+      // where the solve put the gun (the support hand is on it there)
+      prop.updateWorldMatrix(true, false);
+      _m0.copy(prop.matrixWorld);
+      // presenting, exactly onto the crosshair: the last half-degree the
+      // pitch table leaves, turned into the gun and the fist together
+      if (aimed) aimTrim(ch, prop);
+      /* AT LOW READY the cached solve can leave a pitched-down stock's toe in
+         the chest (or its plate carrier): carry the fist, and the gun in it,
+         out by exactly what is inside. (Presenting, the solve's own stand-off
+         holds: the fist's aim-locked wrist would only walk it back.) */
+      for (let i = 0; i < (aimed ? 0 : 6); i++) {
+        const gp = GH.gunInBody(ch, prop);
+        if (gp < 0.003) break;
+        CBZ.charArmTo.crease(ch, "r", _a);
+        ch.body.getWorldQuaternion(_bodyQ);
+        const bs = ch.body.matrixWorld.getMaxScaleOnAxis() || 0.7;
+        if (prop.userData.shoulderZ != null) _b.set(0, (gp + 0.008) * bs, 0);
+        else _b.set(0, 0, (gp + 0.008) * bs).applyQuaternion(_bodyQ);
+        _a.add(_b);
+        const hr = ch.parts.ra.userData.cap;
+        if (hr) { hr.getWorldQuaternion(_eq); _t.set(0, 0, 1).applyQuaternion(_eq); }
+        CBZ.charArmTo.wrist(ch, _a, "r", hr ? _t : null, 1);
+        GH.fire(ch, prop, aimed, 0);
+        if (aimed) aimTrim(ch, prop);
+      }
+      /* THE SUPPORT HAND STAYS WHERE THE SOLVE PUT IT unless the gun really
+         moved (the trim is a fraction of a degree: the hand is still on the
+         gun). Only a stand-off off the chest re-lands it: a fresh solve from
+         here finds a worse local answer than the cached one. */
+      prop.updateWorldMatrix(true, false);
+      _tp.setFromMatrixPosition(prop.matrixWorld);
+      _t.setFromMatrixPosition(_m0);
+      if (_tp.distanceTo(_t) > 0.012 && GH.specOf(prop) && GH.specOf(prop).sup) {
+        GH.supportPoint(ch, prop, _sp);
+        const floorY = floorUnder(_sp);
+        const gap = GH.support(ch, prop, 1, 0, 3, floorY);
+        if (gap != null && gap > LANDED) { GH.supportLand(ch, prop, 1, LANDED, 4, floorY); seen.slid = 1; }
+      }
+      seen.residual = GH.last.supGap; seen.placed = aimed ? 2 : 3;
+      easeArms(ch, blend);
+      return;
+    }
+
     /* ---- ONE-HAND PORT CARRY (CHAR_PORT_ARMS_CARRY) ----------------------
        At the port-arms carry the handguard rides up the diagonal, and for the
        longer guns it is genuinely outside the off arm's ellipsoid. Both ways
@@ -595,6 +660,49 @@
     seen.residual = gap;
   }
 
+  /* The hold is laid over the animated arms: while it is coming in (blend
+     rising from 0 as the gun comes up) the arms travel there from where the
+     animation had them this frame, instead of snapping. */
+  const _eq = new THREE.Quaternion(), _m0 = new THREE.Matrix4();
+  /* THE BARREL ON THE CROSSHAIR, WITHOUT RE-SOLVING THE ARM. The pitch table
+     (gunHold.pitchNpc, 0.05 rad levels blended) and the camera's parallax
+     leave the barrel a fraction of a degree off the aim; turn the gun about
+     its grip, and the fist round it, by exactly that (holsterprops' relock
+     re-solves the whole firing arm, which from an already-solved hold walks
+     the wrist centimetres every frame). */
+  const _tp = new THREE.Vector3(), _td = new THREE.Vector3(), _tb = new THREE.Vector3();
+  const _tqa = new THREE.Quaternion(), _tqg = new THREE.Quaternion(), _tqp = new THREE.Quaternion();
+  function aimTrim(ch, prop) {
+    if (!CBZ.camera || !prop.parent) return;
+    prop.updateWorldMatrix(true, false);
+    prop.getWorldPosition(_tp);
+    prop.getWorldQuaternion(_tqg);
+    if (CBZ.playerAimDir) CBZ.playerAimDir(_td); else _td.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
+    _td.multiplyScalar(120).add(CBZ.camera.position).sub(_tp).normalize();
+    _tb.set(0, 0, -1).applyQuaternion(_tqg);
+    _tqa.setFromUnitVectors(_tb, _td);
+    _tqg.premultiply(_tqa);
+    prop.parent.getWorldQuaternion(_tqp);
+    prop.quaternion.copy(_tqp.invert()).multiply(_tqg);
+    const hr = ch.parts.ra.userData.cap;
+    if (hr) {
+      hr.getWorldQuaternion(_tqg);
+      _tqg.premultiply(_tqa);
+      hr.parent.getWorldQuaternion(_tqp);
+      hr.quaternion.copy(_tqp.invert()).multiply(_tqg);
+    }
+  }
+  function easeArms(ch, k) {
+    if (k >= 0.995 || snap.ch !== ch) return;
+    for (const side of ["r", "l"]) {
+      const part = side === "l" ? ch.parts.la : ch.parts.ra;
+      _eq.copy(part.quaternion);
+      part.quaternion.copy(side === "l" ? snap.laQ : snap.raQ).slerp(_eq, k);
+      const p0 = side === "l" ? snap.laP : snap.raP;
+      part.position.lerp(p0, 1 - k);
+    }
+  }
+
   /* GRIP-TO-BUTT, in world metres: the gun's own +Z extent (CBZ.gunHold.
      stockZ, measured off its model) through the prop's scale and the rig's
      metre conversion. A pistol measures near zero. */
@@ -715,7 +823,7 @@
     const on = !!(prop && ch.parts && ch.aimingPose && !R.active && !ch.slidePose && !ch.cuffed &&
       !ch.surrender && !ch.handsUp && !ch.verbHold && !(CBZ.player && CBZ.player.dead) &&
       !(CBZ.fps && CBZ.fps.active) && Math.abs(ch.body.rotation.x) < 0.8 &&
-      buttLen(prop) > 0.18 && GH.specOf(prop) && GH.specOf(prop).sup);
+      GH.isLong(prop) && GH.specOf(prop) && GH.specOf(prop).sup);   // the ready solve's own test: its blade and this one agree
     bladeK += ((on ? 1 : 0) - bladeK) * Math.min(1, 8 * (dt || 0.016));
     if (bladeK < 1e-3) bladeK = 0;
     const a = -BLADE * bladeK;                  // negative yaw: the left (+X) shoulder comes forward
