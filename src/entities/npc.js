@@ -152,6 +152,8 @@
       const w = mu.way[n._wayI | 0];
       if (w && Math.abs(w.x - t.x) < 1e-3 && Math.abs(w.z - t.z) < 1e-3) return true;
     }
+    const L = n._lvl;                  // a stair route's corner (systems/navgrid.js)
+    if (L && L.pts && L.i < L.pts.length - 1) return true;
     const S = n._nav;
     if (S && S.pts && S.gx != null && CBZ.prisonNav && CBZ.prisonNav.owns(n)) {
       return Math.hypot(t.x - S.gx, t.z - S.gz) > 0.3;

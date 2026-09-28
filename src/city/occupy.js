@@ -276,16 +276,41 @@
   function unlift(p) { const i = LIFTED.indexOf(p); if (i >= 0) LIFTED.splice(i, 1); }
   CBZ.cityFloorPed = function (ped, y) {          // public: anyone can stand a ped up a building
     if (!ped || !ped.pos) return false;
+    ped._floorReal = false; ped._occChk = 0;       // the sweep re-reads the floor under him
     if (y == null || y <= 0.2) { ped._occupyY = 0; unlift(ped); return true; }
     ped._occupyY = y; ped.pos.y = y; lift(ped);
     return true;
   };
-  // 34.9: peds.js's own updater is 34 and npclife's attach-sync is 33.8, so we
-  // are the last word on Y in the same frame the brain wrote it.
+  /* 34.9: peds.js's own updater is 34 and npclife's attach-sync is 33.8, so we
+     are the last word on Y in the same frame the brain wrote it.
+
+     A FLOOR THAT IS THERE HOLDS HIM ITSELF. This sweep was written when
+     peds.js ended every move with pos.y = 0; it has since learned feet
+     (groundAt from the body's own height), and a storey's slab is a platform.
+     Holding every lifted body at a fixed Y after that made each of them a
+     statue of height: a guard on floor four could never take the stairs down
+     (the sweep put him back at floor four every frame, mid-flight), and a
+     woken crew could never chase you up a floor. So, every CHECK_T seconds,
+     the sweep asks the ground under him FROM HIS OWN HEIGHT: a real floor
+     there (`_floorReal`) and his feet are peds.js's — he is a resident of
+     that floor who walks, climbs and falls like anybody — and `_occupyY`
+     follows the level he is standing on (it is what power.js and the rest
+     read as "which storey is he on"). Only a body with nothing under him (a
+     deck nobody registered as a platform, a floor the fitout has not built
+     yet) is still held at the height he was posted at. Back on the street,
+     he leaves the sweep. */
+  const CHECK_T = 0.8, REAL_TOL = 0.35;
+  function groundY(x, z, fromY) {
+    const M = CBZ.moves;
+    if (M && M.ground) return M.ground(x, z, fromY);
+    if (!CBZ.groundAt) return null;
+    try { const g = CBZ.groundAt(x, z, fromY); return Number.isFinite(g) ? g : null; } catch (e) { return null; }
+  }
   const LIFT_ORDER = (CBZ.PRIO && CBZ.PRIO.after && CBZ.PRIO.PED_BRAIN != null)
     ? CBZ.PRIO.after(CBZ.PRIO.PED_BRAIN, 90) : 34.9;
-  if (CBZ.onUpdate) CBZ.onUpdate(LIFT_ORDER, function () {
+  if (CBZ.onUpdate) CBZ.onUpdate(LIFT_ORDER, function (dt) {
     if (!CFG.OCCUPY_V1) return;
+    dt = dt > 0 ? dt : 0.016;
     for (let i = LIFTED.length - 1; i >= 0; i--) {
       const p = LIFTED[i];
       // a corpse leaves the sweep: holding a dead body at storey height means
@@ -293,7 +318,20 @@
       if (!p || p.culled || p.dead || p._npcAttached || !p.pos) { LIFTED.splice(i, 1); continue; }
       const y = p._occupyY;
       if (!(y > 0.2)) { LIFTED.splice(i, 1); continue; }
-      if (p.pos.y !== y) p.pos.y = y;              // the whole mechanism
+      p._occChk = (p._occChk || 0) - dt;
+      if (p._occChk <= 0) {
+        p._occChk = CHECK_T + (i % 8) * 0.03;      // staggered: never the whole tower in one frame
+        const g = groundY(p.pos.x, p.pos.z, p.pos.y);
+        p._floorReal = g != null && Math.abs(g - p.pos.y) < REAL_TOL;
+      }
+      if (p._floorReal) {
+        // a resident: his feet are peds.js's; the storey is the one he is on
+        if (!(p.pos.y > 0.2)) { p._occupyY = 0; p._floorReal = false; LIFTED.splice(i, 1); continue; }
+        const onFlight = CBZ.stairs && CBZ.stairs.flightAt && CBZ.stairs.flightAt(p.pos.x, p.pos.z, p.pos.y);
+        if (!onFlight && Math.abs(p.pos.y - y) > 0.9) p._occupyY = p.pos.y;
+        continue;
+      }
+      if (p.pos.y !== y) p.pos.y = y;              // nothing under him: held where he was posted
     }
   });
 

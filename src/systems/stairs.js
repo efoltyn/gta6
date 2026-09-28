@@ -210,13 +210,17 @@
      of links joins the two levels. Dijkstra over link ends; small graph
      (only links within QUERY_R of either end), no allocation worth caching. */
   function sameLevel(a, b) { return Math.abs(a.y - b.y) < LEVEL_DY; }
-  function route(from, to) {
+  // opts.ladders: include kind "ladder" links (a near-vertical climb no
+  // walking AI can do on its ramp-less feet); off by default
+  function route(from, to, opts) {
     if (!from || !to) return null;
     if (sameLevel(from, to)) return [];
+    const ladders = !!(opts && opts.ladders);
     const R2 = QUERY_R * QUERY_R, S2 = SAME_FLOOR_REACH * SAME_FLOOR_REACH;
     const cand = [];
     for (let i = 0; i < links.length; i++) {
       const L = links[i];
+      if (!ladders && L.kind === "ladder") continue;
       const near = dist2(L.a.x, L.a.z, from.x, from.z) < R2 || dist2(L.a.x, L.a.z, to.x, to.z) < R2 ||
                    dist2(L.b.x, L.b.z, from.x, from.z) < R2 || dist2(L.b.x, L.b.z, to.x, to.z) < R2;
       if (near) cand.push(L);

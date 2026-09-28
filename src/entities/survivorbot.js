@@ -97,12 +97,19 @@
     // groundAt only knows the terrain the mode registered, not the sinkholes
     // surv.floorAt cuts into it: take its answer only when it is a PLATFORM
     // (above the bare terrain), otherwise the hole-aware bed stands
-    const g = CBZ.groundAt(b.pos.x, b.pos.z, b.pos.y);
+    const g = (CBZ.walkGroundAt || CBZ.groundAt)(b.pos.x, b.pos.z, b.pos.y);
     const A = CBZ.surv.arena;
     const terr = A && A.groundHeightAt ? A.groundHeightAt(b.pos.x, b.pos.z) : bed;
     const y = g > terr + 0.02 && g > bed ? g : bed;
     b._lift = y - bed;
     return y;
+  }
+  // a stair ramp re-sampled every frame is walked, not hopped: inside a step
+  // the feet ease onto the new height; anything bigger (a fall, a respawn) is
+  // placed as before
+  function easeFeet(y0, y1, dt) {
+    const d = y1 - y0;
+    return (Math.abs(d) < 0.45 && dt > 0) ? y0 + d * Math.min(1, dt * 18) : y1;
   }
   // Metres of water over the bed here, measured against MEAN sea level.
   function waterDepth(x, z) {
@@ -1396,10 +1403,10 @@
         b.pause = Math.max(b.pause, 0.5 + (+b.reactivity || 0) * 3.5);
       }
     }
-    // bots walk the terrain only (they don't climb); pass their body span so the
-    // height-gated upper-floor walls of buildings don't block them at ground level
-    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
-    b.pos.y = CBZ.surv ? standY(b) : 0;
+    // the player's band (feet + 0.42): a riser is stood on, and the
+    // height-gated upper-floor walls of buildings do not block them at ground level
+    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y + 0.42, b.pos.y + 1.7);
+    b.pos.y = CBZ.surv ? easeFeet(b.pos.y, standY(b), dt) : 0;
     if (animate) animChar(b.char, m.gs, dt);
   }
 
@@ -1459,7 +1466,7 @@
       b.pos.x += (dx / dist) * b.speed * dt;
       b.pos.z += (dz / dist) * b.speed * dt;
     }
-    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
+    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y + 0.42, b.pos.y + 1.7);
 
     /* VERTICAL. The float line is the same one the player settles on —
        FLOAT_DEPTH below the LIVE surface, so the body rides the swell instead
@@ -1658,8 +1665,8 @@
            back down to the bottom every frame by the collision pass and the
            swim looked like it did nothing at all. */
         clamp(a) {
-          if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y, a.pos.y + 1.7);
-          if (!a._p && !a.swim) a.pos.y = CBZ.surv ? standY(a) : 0;
+          if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y + 0.42, a.pos.y + 1.7);
+          if (!a._p && !a.swim) a.pos.y = CBZ.surv ? easeFeet(a.pos.y, standY(a), 1 / 60) : 0;
         },
       });
       return;

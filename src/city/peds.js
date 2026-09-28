@@ -219,6 +219,10 @@
   // array we hand it (ped owns ped.path; move() shifts it as the ped advances).
 
   const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, FAR_D2 = 110 * 110;
+  // collide() feet clearance: the player's (physics.js). A riser or a kerb box
+  // under 0.42 m is stood on (walkGroundAt), never pushed back from, and a
+  // stair's soffit band under a climber is never a wall across his flight.
+  const PED_FOOT = 0.42;
   // Full-rig render distance. The instanced ambient crowd covers everything past
   // this, so drawing 16-mesh rigs out to 150u was pure waste — tightened to 95u.
   // Adaptive quality (core/quality.js -> CBZ.pedLOD) scales it down further on
@@ -1776,7 +1780,7 @@
     Mv.step(m, p.pos, p.group.rotation.y, p.pos.x + hx * 4, p.pos.z + hz * 4, _bumMo, dt);
     p.group.rotation.y = m.yaw;
     if (m.speed > 0.01) {
-      if (CBZ.collide) CBZ.collide(p.pos, PED_R, p.pos.y, p.pos.y + 1.7);
+      if (CBZ.collide) CBZ.collide(p.pos, PED_R, p.pos.y + PED_FOOT, p.pos.y + 1.7);
       const A = CBZ.city && CBZ.city.arena;
       if (A && A.clampToCity) A.clampToCity(p.pos, PED_R);
       settleFeet(p, dt);
@@ -5325,7 +5329,7 @@
   // 2 collide() calls; the goal pickers use it to choose a reachable errand.
   function probeBlocked(x, z, y) {
     tmp.set(x, y, z);
-    if (CBZ.collide) { const bx = tmp.x, bz = tmp.z; CBZ.collide(tmp, PED_R, y, y + 1.7); if (Math.abs(tmp.x - bx) > 0.05 || Math.abs(tmp.z - bz) > 0.05) return true; }
+    if (CBZ.collide) { const bx = tmp.x, bz = tmp.z; CBZ.collide(tmp, PED_R, y + PED_FOOT, y + 1.7); if (Math.abs(tmp.x - bx) > 0.05 || Math.abs(tmp.z - bz) > 0.05) return true; }
     if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) { const cx = tmp.x, cz = tmp.z; CBZ.city.arena.clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return true; }
     return false;
   }
@@ -5910,17 +5914,21 @@
      graded relief — stood in it to the shins while the player beside him read
      CBZ.groundAt and stood on top. One law for both now: physics.js's
      groundAt (floorAt + the platform grid + moving decks). One exception the
-     world already owns: a body occupy.js lifted to a storey keeps that storey
-     (its sweep is the last word on Y and runs after this file).
+     world already owns: a body occupy.js lifted to a storey with NO floor
+     under him (a deck nobody registered as a platform) is held there by its
+     sweep; a lifted body standing on a real floor (`_floorReal`, set by that
+     sweep) is an ordinary resident of the floor and his feet are ours, so he
+     can take the stairs.
      Sampled every frame on camera (a body on a stair must not step in 4 Hz),
-     every FEET_FAR_T beyond FEET_NEAR, eased when the change is under a step
-     so a re-sample never pops. Flag PED_FEET_V1 (off → y = 0, as shipped). */
-  const FEET_NEAR2 = 90 * 90, FEET_FAR_T = 0.4, FEET_STEP = 0.45;
+     every FEET_FAR_T beyond FEET_NEAR. The step itself is CBZ.moves.feet —
+     the one rule every AI body's height obeys (eased inside a step, a real
+     fall off an edge). Flag PED_FEET_V1 (off → y = 0, as shipped). */
+  const FEET_NEAR2 = 90 * 90, FEET_FAR_T = 0.4;
   if (CBZ.CONFIG.PED_FEET_V1 == null) CBZ.CONFIG.PED_FEET_V1 = true;
   function settleFeet(ped, dt) {
     const pos = ped.pos;
     if (CBZ.CONFIG.PED_FEET_V1 === false || !CBZ.groundAt) { pos.y = 0; return; }
-    if (ped._occupyY > 0.2) return;
+    if (ped._occupyY > 0.2 && !ped._floorReal) return;
     const P = CBZ.player && CBZ.player.pos;
     const near = !P || ((pos.x - P.x) * (pos.x - P.x) + (pos.z - P.z) * (pos.z - P.z)) < FEET_NEAR2;
     // a body that is far, or standing still, reuses its last sample for a while
@@ -5929,12 +5937,18 @@
       if (ped._feetT > 0 && ped._feetY != null) { if (!near) pos.y = ped._feetY; return; }
       ped._feetT = near ? 0.25 : FEET_FAR_T;
     }
-    let g = 0;
-    try { g = CBZ.groundAt(pos.x, pos.z, pos.y); } catch (e) { g = 0; }
+    const M = CBZ.moves;
+    if (near && M && M.feet) {
+      const g = M.feet(ped, pos, dt);
+      ped._feetY = g != null ? g : pos.y;
+      return;
+    }
+    // far: a coarse sample, placed (nobody sees a far body ease)
+    let g = M && M.ground ? M.ground(pos.x, pos.z, pos.y) : null;
+    if (g == null) { try { g = CBZ.groundAt(pos.x, pos.z, pos.y); } catch (e) { g = 0; } }
     if (!Number.isFinite(g)) g = 0;
     ped._feetY = g;
-    const d = g - pos.y;
-    pos.y = (near && Math.abs(d) < FEET_STEP && dt > 0) ? pos.y + d * Math.min(1, dt * 14) : g;
+    pos.y = g;
   }
   CBZ.cityPedSettleFeet = settleFeet;
 
@@ -5969,7 +5983,7 @@
       _mvStop.face = held;
       Mv.step(m, ped.pos, ped.group.rotation.y, ped.pos.x + m.vx, ped.pos.z + m.vz, _mvStop, dt);
       ped.group.rotation.y = m.yaw;
-      if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7);
+      if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
       return;
     }
     if (m.vx || m.vz || m.gs) Mv.reset(m, ped.pos);
@@ -6012,7 +6026,7 @@
         standStill(ped, dt, !ped.vendor);
         ped.speed = 0; ped.pause = Math.max(ped.pause, 0.3);
         if (animate) animChar(ped.char, ped._mv ? ped._mv.gs : 0, dt);
-        if (!ped.vendor) { if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7); settleFeet(ped, dt); }
+        if (!ped.vendor) { if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7); settleFeet(ped, dt); }
         return;
       }
     }
@@ -6428,7 +6442,7 @@
     if (CBZ.collide) {
       for (let pass = 0; pass < 3; pass++) {
         const bx = ped.pos.x, bz = ped.pos.z;
-        CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7);
+        CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
         if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(ped.pos, PED_R);
         // converged: the last pass didn't push us anywhere → no overlap left
         if (Math.abs(ped.pos.x - bx) < 0.002 && Math.abs(ped.pos.z - bz) < 0.002) break;
