@@ -540,11 +540,20 @@
     if (low) low.rotation.set(-1.9, 0, 0);
   }
 
+  /* AN OFFICER STOPS AND TURNS LIKE A MAN (CBZ.moves). standIdle brakes
+     whatever walk he had through the motor (a few tenths of a second, never a
+     freeze inside a frame) and turns him to `faceY` at the motor's bounded
+     rate; stepTo (below) gives the walk a velocity and a turn-in-place. The
+     rig is fed the MEASURED ground speed, so a cop pinned on a wall stands. */
+  const _copIdle = { speed: 0, stop: 0.3, face: null, lod: 1 };
   function standIdle(c, faceY, dt, near) {
-    c.speed = 0;
-    c.group.rotation.y = lerpAngle(c.group.rotation.y, faceY, 1 - Math.pow(0.01, dt));
+    const Mv = CBZ.moves, m = Mv.motor(c);
+    _copIdle.face = faceY;
+    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + m.vx, c.pos.z + m.vz, _copIdle, dt);
+    c.group.rotation.y = m.yaw;
+    c.speed = m.speed;
     finalizeMove(c);
-    if (near) animChar(c.char, 0, dt);
+    if (near) animChar(c.char, m.gs, dt);
   }
 
   // beats walk in TWOS: a mate-less ambient cop claims the nearest free single.
@@ -872,7 +881,7 @@
       STOP.t += dt;
       c._gunLowered = true;                     // muzzle DOWN — he's challenging, not firing
       if (d > 3.0) stepTo(c, -dx, -dz, c.baseSpeed * 0.85, dt, true);
-      else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(-dx, -dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (CBZ.animChar) CBZ.animChar(c.char, 0, dt); }
+      else standIdle(c, Math.atan2(-dx, -dz), dt, true);
       // suspicion creeps up the longer you stand there openly armed and ignore him
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
       const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
@@ -3507,7 +3516,7 @@
               if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
               // close the last stretch slowly, cuffs out; square up on top
               if (dist > 2.0) stepTo(c, dx, dz, c.baseSpeed * 0.62, dt, near);
-              else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (near) animChar(c.char, 0, dt); }
+              else { standIdle(c, Math.atan2(dx, dz), dt, near); }
               continue;
             } else c.arrestT = 0;
           } else c.arrestT = 0;
@@ -3515,9 +3524,9 @@
           if (isPlayer) {
             if (P.speed < 2.4 && !P._fighting) {
               if (c.arrestT === 0) copSay(c, "FREEZE! Hands where I can see them!", 1.4);
-              c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
+              c.arrestT += dt; c.speed = 0; if (c._mv) CBZ.moves.reset(c._mv, c.pos); if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
             } else c.arrestT = 0;
-          } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
+          } else { c.arrestT += dt; c.speed = 0; if (c._mv) CBZ.moves.reset(c._mv, c.pos); if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
         } else c.arrestT = 0;
 
         // ---- SHOOT (only with a REAL line of fire) — and DUCK FOR COVER between
@@ -3580,10 +3589,7 @@
             !(c.hp != null && c.maxHp && c.hp < c.maxHp * 0.34)) {
           const mg = M.moveGate(c, tgt, dist, mayShoot ? "fire" : (c._iqSlot || ""));
           if (mg && mg.halt) {
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c);
-            if (near) animChar(c.char, 0, dt);
+            standIdle(c, Math.atan2(dx, dz), dt, near);
             continue;
           }
         }
@@ -3600,9 +3606,7 @@
           if (cv) {
             const cdx = cv.x - c.pos.x, cdz = cv.z - c.pos.z;
             if (Math.hypot(cdx, cdz) > 1.1) { stepTo(c, cdx, cdz, c.baseSpeed * 1.15, dt, near); continue; }
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c); if (near) animChar(c.char, 0, dt);
+            standIdle(c, Math.atan2(dx, dz), dt, near);
             continue;
           }
         }
@@ -3710,10 +3714,7 @@
           const gd2 = Math.hypot(gx2, gz2);
           const mg2 = M.moveGate ? M.moveGate(c, tgt, dist, pSlot) : null;
           if ((mg2 && mg2.halt) || gd2 < 0.9) {
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c);
-            if (near) animChar(c.char, 0, dt);
+            standIdle(c, Math.atan2(dx, dz), dt, near);
           } else {
             stepTo(c, gx2, gz2, c.baseSpeed * (c.sees ? 1 : 1.12), dt, near);
           }
@@ -3730,7 +3731,7 @@
         const stop = (wantShoot && dist < (isPlayer ? (stars >= 3 ? 9 : 4) : 8)) ? (isPlayer && stars >= 3 ? 8 : 5) : 1.5;
         const spd = c.baseSpeed * (c.sees ? 1 : 1.12);     // sprint a touch when chasing blind
         if (dist > stop) stepTo(c, appr.x, appr.z, spd, dt, near);
-        else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); if (near) animChar(c.char, 0, dt); finalizeMove(c); }
+        else { standIdle(c, Math.atan2(dx, dz), dt, near); }
         continue;
       }
 
@@ -3885,14 +3886,19 @@
     return best;
   }
 
+  // (dx, dz) is a DIRECTION to walk at `spd` (callers pass a full delta, a
+  // navigator's next step or a flight vector alike), so it is a waypoint leg:
+  // the motor carries the speed, and standIdle is where he brakes.
+  const _copStep = { speed: 0, leg: true, stop: 0.3, accel: 3.6, face: null, lod: 1 };
   function stepTo(c, dx, dz, spd, dt, near) {
     const gd = Math.hypot(dx, dz) || 1;
-    c.pos.x += (dx / gd) * spd * dt;
-    c.pos.z += (dz / gd) * spd * dt;
-    c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-    c.speed = spd;
+    const Mv = CBZ.moves, m = Mv.motor(c);
+    _copStep.speed = spd; _copStep.accel = spd > 3 ? 5.5 : 3.6;
+    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + (dx / gd) * 4, c.pos.z + (dz / gd) * 4, _copStep, dt);
+    c.group.rotation.y = m.yaw;
+    c.speed = m.speed;
     finalizeMove(c);
-    if (near) animChar(c.char, c.speed, dt);
+    if (near) animChar(c.char, m.gs, dt);
   }
   function finalizeMove(c) {
     if (CBZ.collide) CBZ.collide(c.pos, COP_R, c.pos.y, c.pos.y + 1.7);

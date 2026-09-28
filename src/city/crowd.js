@@ -1437,6 +1437,13 @@
     const AHEAD = 4;
     ped.target.set(px[i] + dirX[i] * AHEAD, 0, pz[i] + dirZ[i] * AHEAD);
     ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0;
+    // ...and hand the walk to the rig's motor already moving (CBZ.moves), so
+    // the real body does not start from rest and accelerate out of the swap.
+    if (CBZ.moves) {
+      const mv = CBZ.moves.motor(ped);
+      CBZ.moves.reset(mv, ped.pos);
+      mv.vx = dirX[i] * spd[i]; mv.vz = dirZ[i] * spd[i]; mv.speed = spd[i]; mv.yaw = heading[i];
+    }
     const shirtHex = SHIRTS[shirt[i]];
     // CLEAN SLATE FIRST: drop the prior occupant's role/outfit and adopt the
     // instanced body's exact shirt, so what walks up matches what you saw.

@@ -248,8 +248,8 @@
       needs: ["look"],
       // fphands.js first: every body's hand IS the first-person hand (body LOD),
       // built inside makeCharacter
-      files: ["systems/fphands.js", "entities/character.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
-      publishes: ["human", "makeCharacter", "heritageRoll", "animChar", "charPoses", "bodyMass", "meleeScale"],
+      files: ["systems/fphands.js", "entities/character.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
+      publishes: ["human", "makeCharacter", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
     ragdoll: {

@@ -1351,7 +1351,9 @@
       m.z = w.z0 + (w.z1 - w.z0) * e;
       m.y = groundY(m.x, m.z);
       if (k > 0 && k < 1) {
-        m.yaw = Math.atan2(w.x1 - w.x0, w.z1 - w.z0);
+        // he TURNS to his walk (CBZ.moves' standing turn rate), not snaps to it
+        const want = Math.atan2(w.x1 - w.x0, w.z1 - w.z0);
+        m.yaw = CBZ.moves ? CBZ.moves.turnToward(m.yaw, want, 5.6 * dt) : want;
         m.dy = Math.abs(Math.sin(w.t * 8 + m.ph)) * 0.045;
         if (W.sand && W.sand.puff && ((w.t * 8 + m.ph) % 6.28) < dt * 8)
           W.sand.puff(m.x, m.y, m.z, { amt: 0.22 });
