@@ -107,7 +107,11 @@ function handReport(r, tag) {
   for (const [k, h] of [["la", l], ["ra", rr]]) {
     const fore = r.parts[k].userData.lower;
     const fb = bb(fore.geometry.clone());
-    const foreBottom = fore.position.y + fb.min.y;       // in the elbow frame
+    // a lofted forearm (character.js LIMBS) ends its last SECTION at the crease
+    // and closes with a shallow dome that tucks into the hand's wrist stub
+    const lf = fore.geometry.userData && fore.geometry.userData.limb;
+    const foreBottom = fore.position.y + (lf ? lf.y0 - lf.sy : fb.min.y);       // in the elbow frame
+    if (lf) check(fb.min.y > lf.y0 - lf.sy - 0.04, `${tag} ${k} wrist dome is shallow (${(lf.y0 - lf.sy - fb.min.y).toFixed(3)})`);
     check(Math.abs(h.position.y - foreBottom) < 0.005, `${tag} ${k} wrist at the forearm's end (${h.position.y.toFixed(3)} vs ${foreBottom.toFixed(3)})`);
     check(Math.abs(foreBottom - (P.handH - P.armLo)) < 0.005, `${tag} ${k} forearm ends at the crease`);
     // fingers point DOWN the arm, palm faces the body, thumb forward
@@ -145,7 +149,12 @@ check(F.s < M.s && K.s < F.s, `hand scale man ${M.s.toFixed(3)} > woman ${F.s.to
   check(h.geometry === H.bodyHandGeometry(1, "pistol", 1), "setHandPose swaps to the cached pistol geometry");
   const holdMiss = gcOf(h).distanceTo(tgt);
   console.log(`pistol grip centre -> weapon socket: ${holdMiss.toFixed(3)} rig units (relaxed ${restMiss.toFixed(3)})`);
-  check(holdMiss < restMiss && holdMiss < 0.06, `pistol grip closes on the weapon socket (miss ${holdMiss.toFixed(3)}, rest ${restMiss.toFixed(3)})`);
+  // The table hold only SLIDES down the forearm's own axis now (a sideways
+  // slide pushed the wrist stub out of the slim lofted wrist and through the
+  // watch); the rest of the way onto a real gun is the arm IK + grip frame in
+  // systems/gunhands.js, measured by tools/gun-hold-check.mjs.
+  check(holdMiss < restMiss && holdMiss < 0.10, `pistol grip closes on the weapon socket (miss ${holdMiss.toFixed(3)}, rest ${restMiss.toFixed(3)})`);
+  check(Math.abs(h.position.x) < 1e-9 && Math.abs(h.position.z) < 1e-9, "a hold pose keeps the hand on the forearm's axis (no sideways slide)");
   check(h.position.y <= restY + 1e-9 && restY - h.position.y <= h.userData.fit.maxDrop + 1e-9, "hand slides down its wrist, no further than the stub covers");
   check(r.skinSlots.hands[0].userData.handPose === "relaxed", "setHandPose('r') leaves the left alone");
   r.setHandPose("both", "fist");

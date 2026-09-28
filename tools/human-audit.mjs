@@ -422,7 +422,11 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
             if (!rec || !pool || !pool.mesh || rec.slot < 0) { failures.push({ label: "live " + p.char._auditLabel, region: name, problem: "hidden, no pool slot" }); continue; }
             pool.mesh.getMatrixAt(rec.slot, _im);
             if (Math.abs(_im.determinant()) < 1e-12) { failures.push({ label: "live " + p.char._auditLabel, region: name, problem: "hidden, pool slot parked while the body draws" }); continue; }
-            got = pool.box ? new THREE.Vector3().applyMatrix4(_im) : _c.clone().applyMatrix4(_im);
+            // a box pool draws the unit cube (centre = origin); a loft pool draws the
+            // canonical limb (its own bbox centre); anything else the mesh's geometry
+            if (pool.box) got = new THREE.Vector3().applyMatrix4(_im);
+            else if (pool.unit) { pool.geo.computeBoundingBox(); got = pool.geo.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(_im); }
+            else got = _c.clone().applyMatrix4(_im);
           } else got = _c.clone().applyMatrix4(m.matrixWorld);
           const err = got.distanceTo(want);
           if (!(err < 1.0)) failures.push({ label: "live " + p.char._auditLabel + " -> " + (p.char._clothesKey || "flat"), region: name, problem: "drawn off the body (" + (Number.isFinite(err) ? err.toFixed(2) + " u" : "NaN") + (m.layers.mask === (1 << 30) ? ", pooled" : ", real mesh") + ")" });
@@ -433,7 +437,7 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
     const fin = CBZ.pedInstanceAudit ? CBZ.pedInstanceAudit() : null;
     if (fin && fin.splitRigs) failures.push({ label: "pedinstance", region: "body", problem: "pedInstanceAudit().splitRigs = " + fin.splitRigs });
     if (fin) console.log(`pedinstance after live frames: pools ${fin.poolsTotal}, split ${fin.splitRigs}, self-drawn ${fin.selfDrawnRigs}`);
-    if (audit) console.log(`pedinstance: pools ${audit.pools} (box ${audit.boxPools}) live ${audit.instancesLive} hidden ${hidden} fallback ${audit.fallbackMeshes}`);
+    if (audit) console.log(`pedinstance: pools ${audit.pools} (box ${audit.boxPools}, loft ${audit.unitPools}) live ${audit.instancesLive} hidden ${hidden} fallback ${audit.fallbackMeshes}`);
   }
 }
 

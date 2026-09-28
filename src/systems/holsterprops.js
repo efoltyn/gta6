@@ -494,9 +494,12 @@
     // this prevents two guns occupying the same hand halfway through a stow.
     const drawingBlocked = !!(transfer && transfer.to && transfer.t < transfer.dur * 0.62);
     hand.prop.visible = !drawingBlocked;
-    // the body's real hand closes on it (character.js HANDS block)
-    if (ch.setHandPose) ch.setHandPose("r", drawingBlocked ? "relaxed"
-      : (hand.prop.userData && hand.prop.userData.weaponMelee ? "grip" : "pistol"));
+    // the body's real hand closes on it: a blade in a fist; a gun's own grip
+    // in a hand sized and oriented on it (aimHandProp -> CBZ.gunHold.fire)
+    const melee = !!(hand.prop.userData && hand.prop.userData.weaponMelee);
+    if (ch.setHandPose && (drawingBlocked || melee || !CBZ.gunHold)) {
+      ch.setHandPose("r", drawingBlocked ? "relaxed" : melee ? "grip" : "pistol");
+    }
     hand.prop.position.set(0.02, 0.02, 0.03);
     aimHandProp();
   });
@@ -597,6 +600,16 @@
       _hgWorldQ.setFromRotationMatrix(_hgMat);
       socket.getWorldQuaternion(_hgParentQ);
       hand.prop.quaternion.copy(_hgParentQ.invert()).multiply(_hgWorldQ);
+    }
+    /* THE FIST ON THE GRIP (systems/gunhands.js CBZ.gunHold.fire): the body's
+       right hand closes on this gun's own grip where the arm has it, and the
+       gun is seated in that fist. Presenting, the barrel lock above is law and
+       only the arm may give; at low ready the gun turns with the fist when the
+       wrist would otherwise bend past what a wrist does. The ground-rest lift
+       (character.js gunGroundRest) rides the arm, so the hand comes up with
+       the gun instead of the gun leaving the hand. */
+    if (CBZ.gunHold && !hand.prop.userData.weaponMelee && hand.prop.visible) {
+      CBZ.gunHold.fire(ch, hand.prop, presenting, ch._gunRestY || 0);
     }
   }
   CBZ.tpHandWeaponRelock = aimHandProp;

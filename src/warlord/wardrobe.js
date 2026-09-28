@@ -536,14 +536,18 @@
             const a = low[i];
             if (!a) continue;
             const gp = (a.geometry && a.geometry.parameters) || {};
-            const aw = (gp.width || 0.3) * 1.06, ad = (gp.depth || 0.3) * 1.06;
             const ah = gp.height || 0.46;
-            const ring = box(aw, 0.038, ad, gold);
-            ring.position.set(0, -ah * 0.5 + 0.075, 0);
-            add(a, ring);
-            const ring2 = box(aw, 0.026, ad, gold);
-            ring2.position.set(0, -ah * 0.5 + 0.135, 0);
-            add(a, ring2);
+            // the forearm is a tapered loft now (entities/character.js LIMBS):
+            // each ring is sized to the sleeve's REAL section at its own height
+            // (a box ring sized off the old forearm box stood 4 cm off the cuff)
+            for (const [y, h] of [[-ah * 0.5 + 0.075, 0.038], [-ah * 0.5 + 0.135, 0.026]]) {
+              const lh = CBZ.humanLimbHalfAt ? CBZ.humanLimbHalfAt(a.geometry, y) : null;
+              const aw = lh ? lh.hx * 2 + 0.018 : (gp.width || 0.3) * 1.06;
+              const ad = lh ? lh.hz * 2 + 0.018 : (gp.depth || 0.3) * 1.06;
+              const ring = box(aw, h, ad, gold);
+              ring.position.set(0, y, lh ? lh.cz : 0);
+              add(a, ring);
+            }
           }
         }
         if (yoke) {

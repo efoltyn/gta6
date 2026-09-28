@@ -28,6 +28,14 @@
    hand lands on the gun for every weapon, every stance and every aim angle,
    including guns added tomorrow, because nothing here knows a weapon's name.
 
+   …and a POINT was still not a hold: the socket landed near the handguard
+   with the hand hanging off the forearm at whatever angle, walked half a
+   metre back along every long gun when out of reach. Now the hand is put ON
+   the part — a grip frame, a hand sized to it, the wrist where that hand's
+   wrist has to be (CBZ.gunHold, systems/actorweapons.js) — and the body
+   blades and shoulders the gun so the handguard is in reach at all
+   (bladeTick; measured by tools/gun-hold-check.mjs).
+
    ---- AND THE RELOAD ----------------------------------------------------
    There was no reload animation at all: `fps.reloading` counted down, the HUD
    drew a "↻", the first-person viewmodel dipped, and in third person the
@@ -48,13 +56,20 @@
      CHAR_RELOAD_ANIM      false → reload is invisible again, hold IK stays.
      CHAR_SHOULDER_LONGGUN false → long guns go back to arm's length (and
                                    their handguards back out of reach).
-     NPC_SUPPORT_HAND_IK   false → player only; the street keeps the old pose.
+     (NPC hands: systems/actorweapons.js CBZ.gunHold.ready — solved once per
+      body and gun, both hands, no budget.)
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
+
+  /* The grip frames, the hand-on-grip solve and the NPC ready pose live in
+     systems/actorweapons.js (CBZ.gunHold), beside the gun models they read. */
+  const GH = CBZ.gunHold;
+  if (!GH) return;
+
   if (!CBZ.onAlways) return;
   if (CBZ.CONFIG.CHAR_SUPPORT_HAND_IK == null) CBZ.CONFIG.CHAR_SUPPORT_HAND_IK = true;
   if (CBZ.CONFIG.CHAR_RELOAD_ANIM == null) CBZ.CONFIG.CHAR_RELOAD_ANIM = true;
@@ -307,28 +322,49 @@
     carried.visible = true;
   }
 
-  /* ---- the pass: put the off hand where the gun is ---------------------- */
-  let blend = 0;
+  /* ---- the pass: put the off hand where the gun is ----------------------
+     The FIRING hand is already on the grip when this runs: holsterprops'
+     aimHandProp (54) ends in CBZ.gunHold.fire, which closes the body's right
+     hand on the gun's own grip and seats the gun in it. This pass owns the
+     OFF hand: CBZ.gunHold.support orients it on the handguard / foregrip /
+     firing fist and solves the arm so its wrist is where that hand has to
+     be, and everything below is about when that is and is not reachable. */
+  let blend = 0, drove = false;
   const seen = { pass: 0, drive: 0, why: "never ran" };
+  const LANDED = 0.03;                     // 3 cm — a fist's worth of slop
+  const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
+  const _rt = new THREE.Vector3(), _ext = new THREE.Vector3(), _sp = new THREE.Vector3();
+  function release(ch) {
+    blend = 0;
+    if (carried) carried.visible = false;
+    // hand the off hand back ONCE: a per-frame "relaxed" here fought every
+    // other owner of that hand (the flashlight's torch grip, a verb) each frame
+    if (drove && ch && ch.setHandPose) ch.setHandPose("l", "relaxed");
+    drove = false;
+  }
+  function floorUnder(p) {
+    return CBZ.floorAt ? CBZ.floorAt(p.x, p.z) + 0.05 : null;
+  }
   function poseHands(dt) {
     seen.pass++;
     const ch = CBZ.playerChar;
     const prop = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
+    // holsterprops' firing fist (54) may have moved the arm this frame too
+    if (prop && ch === snap.ch) snap.live = true;
     const own = !!(prop && ch && ch.parts && ch.parts.la && ch.body && ch.sockets &&
-      CBZ.CONFIG.CHAR_SUPPORT_HAND_IK !== false && CBZ.charArmTo &&
+      CBZ.CONFIG.CHAR_SUPPORT_HAND_IK !== false && CBZ.charArmTo && CBZ.charArmTo.wrist &&
       !ch.slidePose && !ch.cuffed && !ch.surrender && !ch.handsUp && !ch.verbHold &&
       !(CBZ.player && CBZ.player.dead) &&
       !(CBZ.weaponTransferState && CBZ.weaponTransferState().active));
     // A one-handed weapon (the taser) publishes no support grip and keeps its
     // off arm free — that is a fact about the weapon, not a missing anchor.
     const grips = own ? gripsOf(prop) : null;
-    if (!grips || !grips.support) {
+    const spec = own ? GH.specOf(prop) : null;
+    if (!grips || !grips.support || !spec || !spec.sup) {
       // Hand the arm back. Nothing to unwind: every channel this pass writes
       // is one that animChar damps home on its own the next frame — the same
       // contract entities/poses.js and the reach layer rely on.
-      blend = 0;
-      if (carried) carried.visible = false;
-      if (ch && ch.setHandPose) ch.setHandPose("l", "relaxed");
+      release(ch);
       seen.why = !prop ? "no drawn weapon"
         : !ch ? "no player rig"
         : ch.slidePose ? "slide pose owns the rig"
@@ -339,18 +375,14 @@
       return;
     }
     seen.drive++; seen.why = "";
+    drove = true;
     blend += (1 - blend) * Math.min(1, 9 * (dt || 0.016));
-    // the body's real off hand cups the handguard (character.js HANDS block)
-    if (ch.setHandPose) ch.setHandPose("l", "support");
 
     R.style = grips.style || "mag";
     prop.updateWorldMatrix(true, false);
     ch.body.updateWorldMatrix(true, false);
 
-    // ---- target: the handguard, or wherever the reload is up to ----------
-    // A closure, because the shoulder solve below MOVES the gun and every one
-    // of these anchors is measured off it: the target has to be re-derived
-    // afterwards, not carried over from before the weapon moved.
+    // ---- a reload carries the hand OFF the gun, through its anchors ------
     const reloadSeg = (R.active && R.w > 0)
       ? (function () {
           const table = CHOREO[R.style] || CHOREO.mag;
@@ -358,9 +390,9 @@
           return table[table.length - 1];
         })()
       : null;
-    function computeTarget() {
-      let t = anchorWorld("support", ch, prop, grips, _t);
-      if (reloadSeg) {
+    if (reloadSeg) {
+      const computeTarget = function () {
+        let t = anchorWorld("support", ch, prop, grips, _t);
         const span = Math.max(1e-4, reloadSeg[1] - reloadSeg[0]);
         const u = smooth(clamp01((R.p - reloadSeg[0]) / span));
         const from = anchorWorld(reloadSeg[2], ch, prop, grips, _a);
@@ -375,18 +407,12 @@
           }
           t = _t.lerpVectors(t, _tmp, R.w);
         }
-      }
-      // A HAND MAY NOT GO THROUGH THE FLOOR. Prone puts the whole rig at
-      // ankle height and the ground-rest pass then lifts the GUN, so a solve
-      // that trusted the anchor blindly would drive the elbow into the road.
-      if (CBZ.floorAt) {
-        const fl = CBZ.floorAt(t.x, t.z) + 0.05;
-        if (t.y < fl) t.y = fl;
-      }
-      return t;
-    }
-    let target = computeTarget();
-    if (reloadSeg) {
+        // A HAND MAY NOT GO THROUGH THE FLOOR (prone: the rig is at ankle height)
+        const fl = floorUnder(t);
+        if (fl != null && t.y < fl) t.y = fl;
+        return t;
+      };
+      let target = computeTarget();
       if (!R.ejected && EJECT_AT[R.style] != null && R.p >= EJECT_AT[R.style]) {
         R.ejected = true;
         const mp = anchorWorld("mag", ch, prop, grips, _a);
@@ -399,59 +425,18 @@
       // from its own state the moment the reload is done.
       ch.aimingPose = true;
       ch.carryPose = false;
-    } else {
-      showCarried(ch, R.style, false);
+      // The reload owns the hand, and its waypoints are deliberately OFF the
+      // weapon (the belt pouch most of all) — never walked back onto the gun.
+      CBZ.charArmTo.rest(ch, "l", 0);
+      seen.resid0 = seen.residual = CBZ.charArmTo(ch, target, "l", blend);
+      seen.slid = 0; seen.placed = 0;
+      // the hand leaves its grip frame for its own rest frame as the reload
+      // takes it, and comes back the same way — no snap at either end
+      GH.supportOrient(ch, prop, R.w);
+      return;
     }
+    showCarried(ch, R.style, false);
 
-    /* ---- PUT THE STOCK IN THE SHOULDER -------------------------------
-       MEASURED, and it is the real reason the off hand could never be on a
-       long gun: the present-weapon pose holds the firing arm nearly STRAIGHT
-       (character.js: shoulder -1.571, elbow -0.10, plus 0.14 of shoulder
-       protraction), which puts the grip ~0.55 m in front of the chest. An M4
-       drawn at its researched world length carries its handguard another
-       0.46 m past that. The off arm's whole span is 0.80 m. The handguard sat
-       1.02 m from the off shoulder — a fifth of a metre beyond anything that
-       arm could touch. No support pose, hand-tuned or solved, could ever have
-       reached it, which is why three earlier rounds of re-tuning the angles
-       never fixed the owner's complaint. The gun has to come back.
-
-       PLACED, NOT NUDGED. The first attempt pulled the firing hand back by
-       the shortfall each frame and expected the loop to settle. It cannot:
-       animChar re-writes that arm every frame with a damp, so a relative
-       nudge is a spring fighting a spring, and the measured result was 42 cm
-       of requested pull buying 10 cm of movement. So compute the answer
-       instead of approaching it — a shouldered rifle's geometry is not a
-       matter of opinion:
-
-           the BUTT sits in the shoulder pocket
-           the grip is one buttstock-length forward of it, down the barrel
-           => wrist = pocket + barrelForward x (grip-to-butt length)
-
-       The stock length is measured off the weapon's own model (its +Z
-       extent, cached per prop), so this is one line of geometry that works
-       for a carbine, an AK, a belt-fed M249 and a gun added tomorrow, and it
-       lands in ONE pass with nothing to converge to.
-
-       Only for weapons whose support hand is out of reach at arm's length —
-       which is exactly the set of guns you shoulder. A pistol's support
-       anchor is beside its own grip, so `over` is negative, and nothing
-       about sidearms moves. */
-    /* ---- LAND IT ON THE GUN, measured rather than modelled -------------
-       DON'T MODEL THE REACH. Two rounds of this pass tested "is the anchor
-       within span?" against a scalar, and both were wrong by the same
-       0.17 m — the protraction. The solve can push the shoulder FORWARD and
-       only forward, so the reachable set is an ELLIPSOID, and a support hand
-       crossing to the far side of the body is asking almost entirely for its
-       MINOR axis. On this rig that matters more than it sounds: the logged
-       body-space shoulders are 0.62 and -0.62, i.e. 1.24 units apart — about
-       0.87 m of world shoulder width against an 0.63 m arm — so the off hand
-       spends nearly its whole span just crossing the chest.
-
-       So ask instead of predicting. charArmTo returns the metres it actually
-       missed by, so: solve, read, and if the hand did not land, act on that.
-       No reach model can be wrong because there isn't one. */
-    const reloadOwnsTheHand = !!reloadSeg;
-    const LANDED = 0.03;                     // 3 cm — a fist's worth of slop
     /* ---- ONE-HAND PORT CARRY (CHAR_PORT_ARMS_CARRY) ----------------------
        At the port-arms carry the handguard rides up the diagonal, and for the
        longer guns it is genuinely outside the off arm's ellipsoid. Both ways
@@ -464,22 +449,41 @@
            23% (tp-gun-view-check, carry).
        A rifle ported in one hand is a real carry and reads clean, so when the
        handguard is out of reach the off arm is RELEASED to animChar's own
-       carry swing rather than left stretching at it. Presenting or reloading
-       brings the gun to the hands again and the IK below resumes. span() is
-       the conservative reach; the margin is the protraction it excludes. */
-    if (!ch.aimingPose && !reloadOwnsTheHand && buttLen(prop) > 0.18 &&
+       carry swing rather than left stretching at it. span() is the
+       conservative reach; the margin is the protraction it excludes. */
+    if (!ch.aimingPose && buttLen(prop) > 0.18 &&
         CBZ.CONFIG.CHAR_PORT_ARMS_CARRY !== false && CBZ.charArmTo.span) {
       shoulderWorld(ch, "l", _sh);
-      if (_sh.distanceTo(target) > CBZ.charArmTo.span(ch, "l") + 0.10) {
-        blend = 0;
+      GH.supportPoint(ch, prop, _sp);
+      if (_sh.distanceTo(_sp) > CBZ.charArmTo.span(ch, "l") + 0.10) {
+        release(ch);
         seen.why = "port carry: handguard out of reach — off hand at rest";
         return;
       }
     }
     CBZ.charArmTo.rest(ch, "l", 0);
-    let resid = CBZ.charArmTo(ch, target, "l", blend);
-    seen.resid0 = resid;
+    GH.supportPoint(ch, prop, _sp);
+    let floorY = floorUnder(_sp);
+    let gap = GH.support(ch, prop, blend, 0, 3, floorY);
+    seen.resid0 = gap;
     seen.slid = 0; seen.placed = 0;
+    /* AT LOW READY the gun is where the CARRY pose hangs it — a pistol
+       beside the thigh, a long gun ported up the diagonal — and nothing here
+       moves it: if the off hand can land on it (walked back along a
+       handguard if need be) it does, and if it cannot it is a one-hand carry
+       and the off arm goes back to the walk. (The old answer, tucking a
+       hanging pistol inboard for the other hand, parked the gun and both
+       forearms inside the belly — tools/gun-hold-check.mjs.) */
+    if (!ch.aimingPose && gap != null && gap > LANDED) {
+      if (blend > 0.9) { gap = GH.supportLand(ch, prop, blend, LANDED, 4, floorY); seen.slid = 1; }
+      if (gap > LANDED) {
+        snapRestoreArm("l");
+        release(ch);
+        seen.why = "carry: support grip out of reach — off hand at rest";
+        seen.residual = gap;
+        return;
+      }
+    }
 
     /* PUT THE STOCK IN THE SHOULDER. The present-weapon pose holds the firing
        arm nearly straight, which puts the grip ~0.55 m in front of the chest
@@ -491,218 +495,217 @@
        measured off the weapon's own model. PLACED, not nudged — an earlier
        pass moved the hand by the shortfall each frame and animChar's damp
        simply ate it (42 cm requested bought 10 cm). Only fires when the hand
-       actually missed, so pistols — whose support anchor is beside their own
-       grip — never move. */
+       actually missed, so a pistol whose cup is already in reach never moves.
+       At the port-arms CARRY "down the barrel's own axis" is the up-across
+       diagonal (it would drive the wrist into the neck), so that case is the
+       release above instead; the pistol inboard tuck below stays at carry — it
+       is what makes a two-hand low ready reachable at all. */
     const stock = buttLen(prop);
-    if (resid != null && resid > LANDED && !reloadOwnsTheHand &&
-        CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && blend > 0.9) {
-      shoulderWorld(ch, "l", _sh);
+    // Presenting, the gun is ALWAYS placed (a placement gated on "did the
+    // hand miss" switches on and off as the miss hovers at the threshold,
+    // and the gun jumps with it)
+    if (ch.aimingPose && gap != null && CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && blend > 0.9) {
+      shoulderWorld(ch, "l", _sh, true);
       prop.getWorldQuaternion(_bodyQ);
       _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
-      shoulderWorld(ch, "r", _rt);                          // the firing shoulder
-      // WHICH placement depends on what the body is DOING, not just on the
-      // weapon. The stock-in-the-pocket geometry below is the truth of a rifle
-      // being AIMED — wrist one stock-length down the barrel's own axis. Run
-      // it at the port-arms CARRY (CHAR_PORT_ARMS_CARRY, entities/character.js)
-      // and "down the barrel's own axis" is the up-across diagonal, so it
-      // computed wrist = shoulder + stock-length toward the NECK and fought
-      // the carry pose every frame: measured, the off hand went from 2 cm off
-      // the bore to 50 (gunhands-check, carry column). A ported long gun the
-      // off hand cannot reach RELEASES the arm instead (the block above) —
-      // relocating the gun was measured and it hides the weapon behind the
-      // torso. The pistol inboard tuck below is different and stays: it was
-      // load-bearing at carry for sidearms all along (gating it away pushed
-      // their carry gap from 10 cm to 49).
-      if (stock <= 0.18) {
-        /* NO STOCK TO SHOULDER — a pistol. It was being held at full arm's
-           length out to the firing side, which put its grip 81 cm from the
-           off shoulder: unreachable, for the same shoulder-width reason a
-           rifle's handguard is. The cure is the same and it is also the real
-           stance: both arms come to the CENTRELINE and meet there. Nothing is
-           pulled back, because there is nothing behind the grip to tuck —
-           keep the extension exactly as the aim pose set it and only move it
-           inboard. */
-        ch.sockets.rightHand.updateWorldMatrix(true, false);
-        ch.sockets.rightHand.getWorldPosition(_ext).sub(_rt);   // arm's own reach
-        _rt.lerp(_sh, 0.42).add(_ext);
+      shoulderWorld(ch, "r", _rt, true);                    // the firing shoulder
+      prop.getWorldPosition(_ext);                          // where the gun is now
+      if (stock <= 0.18 && ch.aimingPose) {
+        /* NO STOCK TO SHOULDER — a pistol, held at full arm's length out to
+           the firing side, 81 cm from the off shoulder: unreachable for the
+           same shoulder-width reason a rifle's handguard is. Both arms come
+           to the CENTRELINE and meet there; keep the extension exactly as the
+           aim pose set it and only move it inboard. */
+        _tmp.copy(_ext).sub(_rt);                               // the arm's own reach
+        _rt.lerp(_sh, 0.42).add(_tmp);
+        // a compact with its support grip AHEAD of the fist (the Uzi's
+        // receiver) comes back toward the chest by that much, elbows bending
+        GH.supportPoint(ch, prop, _sp);
+        const ahead = _sp.sub(_ext).dot(_fwd);
+        if (ahead > 0.06) _rt.addScaledVector(_fwd, -(ahead - 0.06));
+        seen.butt = 0;
+      } else if (stock <= 0.18) {
+        /* A PISTOL AT LOW READY, two hands: in front of the belly, arms angled
+           down and forward. (The old tuck took the hanging arm's own
+           extension inboard, which parked the gun and both forearms INSIDE
+           the belly — tools/gun-hold-check.mjs, chest box.) */
+        ch.body.getWorldQuaternion(_bodyQ);
+        _rt.lerp(_sh, 0.42).add(_tmp.set(0, -0.40, 0.34).applyQuaternion(_bodyQ));
         seen.butt = 0;
       } else {
-      /* TOWARD THE CENTRELINE, not into the firing shoulder pocket — because
-         on this rig a gun parked in that pocket is unreachable by the other
-         hand BY CONSTRUCTION. The logged shoulders sit 1.24 body units apart
-         (~0.87 m of world shoulder width) and the arm is 0.63 m: a hand at
-         one shoulder cannot cross to the other, let alone to a handguard
-         0.46 m further down the barrel. Measured proof — parking the stock in
-         the pocket put the grip 87-89 cm from the off shoulder and made the
-         miss WORSE. So the weapon comes to the chest, which is where a
-         third-person rifle reads from anyway, and the fallback below walks
-         the hand back along it to whatever it can actually hold. */
+        /* TOWARD THE CENTRELINE, not into the firing shoulder pocket: the
+           shoulders sit ~0.87 m apart and the arm is 0.63 m, so a gun parked
+           in one pocket is unreachable by the other hand by construction.
+           The weapon comes to the chest (and the body blades, bladeTick),
+           which is where a third-person rifle reads from anyway. */
         _rt.lerp(_sh, 0.38);
         _rt.y -= 0.05;
+        // the pocket is the chest's FRONT surface, not the shoulder joint's
+        // centre inside the torso (that put the firing wrist in the chest)
+        ch.body.getWorldQuaternion(_bodyQ);
+        _rt.add(_tmp.set(0, 0, ((ch.profile && ch.profile.torsoD) || 0.5) * 0.5 *
+          ((ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70)).applyQuaternion(_bodyQ));
         seen.butt = stock;
         _rt.addScaledVector(_fwd, stock);
       }
+      // _rt is where the GUN goes: carry the fist with it rigidly and solve
+      // the arm to that wrist, the forearm led in along the hand
+      CBZ.charArmTo.crease(ch, "r", _a);
+      _a.add(_rt).sub(_ext);
+      const hr = ch.parts.ra.userData.cap;
+      if (hr) { hr.getWorldQuaternion(_bodyQ); _b.set(0, 0, 1).applyQuaternion(_bodyQ); }
       CBZ.charArmTo.rest(ch, "r", 0);
-      CBZ.charArmTo(ch, _rt, "r", blend);
+      CBZ.charArmTo.wrist(ch, _a, "r", hr ? _b : null, blend);
       seen.placed = 1;
-      // The gun rode the wrist back, so its world aim is stale in both inputs
-      // the lock uses (socket orientation, and the parallax origin).
+      // The gun rode the wrist back: re-aim it (parallax from its new
+      // position) and re-seat it in the fist — both in holsterprops.
       if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
       prop.updateWorldMatrix(true, false);
-      target = computeTarget();
-      resid = CBZ.charArmTo(ch, target, "l", blend);
+      GH.supportPoint(ch, prop, _sp);
+      floorY = floorUnder(_sp);
+      gap = GH.support(ch, prop, blend, 0, 3, floorY);
     }
-
-    /* Still short — a bipod-legged M249, or a rig whose shoulders are simply
-       too far apart for the handguard to be crossable. Then the honest answer
-       is that the hand holds the weapon FURTHER BACK rather than floating off
-       the end of it: walk the anchor along the gun toward the grip until the
-       solver says it landed. Bisection on the MEASURED residual, so it needs
-       no notion of reach at all, and the hand ends up on the weapon. */
-    // …but NEVER during a reload. The reload owns the hand, and its waypoints
-    // are deliberately OFF the weapon — the belt pouch most of all. Walking
-    // those back onto the gun is not a fallback, it is deleting the animation:
-    // it is what collapsed the sniper's reload to 5 cm of travel while its
-    // siblings moved metres. A hand reaching for the belt and not quite
-    // arriving still reads as a reload; a hand snapped back onto the gun does
-    // not read as anything.
-    if (blend > 0.9 && !reloadOwnsTheHand) {
-      resid = landOnWeapon(ch, prop, target, resid, 4, LANDED);
+    /* Still short — a bipod-legged M249, or shoulders too far apart for the
+       handguard to be crossable. Then the honest answer is that the hand holds
+       the weapon FURTHER BACK rather than floating off the end of it: walk the
+       grip along the gun toward the receiver until the hand lands (bisection
+       on the MEASURED gap, so it needs no notion of reach at all). */
+    if (blend > 0.9 && gap != null && gap > LANDED) {
+      gap = GH.supportLand(ch, prop, blend, LANDED, 4, floorY);
       seen.slid = 1;
     }
-    seen.residual = resid;
+    seen.residual = gap;
   }
 
-  /* Walk the off hand back along the weapon until the solver says it landed.
-     Bisection on the MEASURED residual — no reach model, so it cannot be
-     wrong about a lateral target the way a scalar span is. Used for NPCs,
-     whose weapon this pass may not move (their barrel is aimed by their own
-     forearm), and shared with the player's fallback above. */
-  const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
-  const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
-  const _ext = new THREE.Vector3();
-  function landOnWeapon(ch, prop, target, resid, steps, tol) {
-    if (resid == null || resid <= tol) return resid;
-    prop.updateWorldMatrix(true, false);
-    _grip.set(0, 0, 0);
-    prop.localToWorld(_grip);
-    let lo = 0, hi = 1;
-    for (let i = 0; i < steps; i++) {
-      const mid = (lo + hi) / 2;
-      _tmp.lerpVectors(target, _grip, mid);
-      const r = CBZ.charArmTo(ch, _tmp, "l", 1);
-      if (r != null && r > tol) lo = mid; else hi = mid;
-    }
-    target.lerp(_grip, hi);
-    return CBZ.charArmTo(ch, target, "l", 1);
-  }
-  /* GRIP-TO-BUTT, in world metres, measured off the weapon's own geometry —
-     the shared model convention runs the barrel down -Z from a grip at the
-     origin, so the +Z extent IS the buttpad. Measured once per prop from its
-     LOCAL bounds and cached: a Box3 over a socketed prop would be its world
-     box, which rotates with the aim and would make the stock change length
-     every time the player looked up. A weapon with no stock behind the grip
-     (a pistol) measures near zero and is placed at the grip, which is where a
-     pistol is held anyway. */
-  const _bb = new THREE.Box3(), _bbInv = new THREE.Matrix4(), _bbM = new THREE.Matrix4();
+  /* GRIP-TO-BUTT, in world metres: the gun's own +Z extent (CBZ.gunHold.
+     stockZ, measured off its model) through the prop's scale and the rig's
+     metre conversion. A pistol measures near zero. */
   function buttLen(prop) {
     if (prop.userData._buttLen != null) return prop.userData._buttLen;
-    prop.updateWorldMatrix(true, true);
-    _bbInv.copy(prop.matrixWorld).invert();
-    let maxZ = 0;
-    prop.traverse((o) => {
-      if (!o.isMesh || !o.geometry) return;
-      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-      _bb.copy(o.geometry.boundingBox);
-      _bbM.multiplyMatrices(_bbInv, o.matrixWorld);   // this mesh, in PROP space
-      _bb.applyMatrix4(_bbM);
-      if (_bb.max.z > maxZ) maxZ = _bb.max.z;
-    });
-    // Prop space is pre-scale, so convert: the prop's own scale, then the
-    // rig's metre conversion which the socket chain applies above it.
     const rig = (CBZ.playerChar && CBZ.playerChar.group && CBZ.playerChar.group.userData
       && CBZ.playerChar.group.userData.humanScale) || 0.70;
-    const len = maxZ * (prop.scale.x || 1) * rig;
+    const len = GH.stockZ(prop) * (prop.scale.x || 1) * rig;
     prop.userData._buttLen = len;
     return len;
   }
-  function shoulderWorld(ch, arm, out) {
+  function shoulderWorld(ch, arm, out, atRest) {
     const part = arm === "l" ? ch.parts.la : ch.parts.ra;
     out.copy(part.position);
+    if (atRest) out.z = 0;                    // the joint itself, not the pose's protraction
     ch.body.updateWorldMatrix(true, false);
     return ch.body.localToWorld(out);
   }
 
-  /* ---- EVERY OTHER ARMED BODY IN THE CITY -------------------------------
-     systems/actorweapons.js's setReadyPose carries the same fixed-angle
-     support pose the player's did, for the same reason (it predates any way
-     to ask a weapon where its handguard is) — so a street full of cops and
-     gangbangers has the bug the owner reported, N times over, and the player
-     sees THEIR hands far more often than his own.
-
-     The same solve fixes them, and it is nearly free: setReadyPose has
-     already put the arm within a few degrees, so this is a correction rather
-     than a pose. Budgeted anyway — nearest first, capped, on-foot armed
-     actors only — because "cheap per actor" is not a licence to run it on a
-     crowd of two hundred. Reload choreography is deliberately NOT extended
-     here: NPCs have no reload clock to drive it from, and inventing one would
-     be a second source of truth for something fpsmode owns. */
-  if (CBZ.CONFIG.NPC_SUPPORT_HAND_IK == null) CBZ.CONFIG.NPC_SUPPORT_HAND_IK = true;
-  const NPC_RANGE2 = 34 * 34, NPC_BUDGET = 14;
-  const _npcT = new THREE.Vector3();
-  function npcArmed(a) {
-    return a && a.armed && !a.dead && !a._parked && !(a.ko > 0) && !a._traversal &&
-      !a._holstered && !a._gunLowered && !a._gunHidden && !a.surrender &&
-      a.char && a.char.parts && a.char.parts.la && a.char.body && a.char.sockets &&
-      !a.char.traversePose && !a.char.surrender && !a.char.handsUp &&
-      !a.char.slidePose && !a.char.cuffed && !a.char.verbHold &&
-      a._weaponProp && a._weaponProp.visible;
-  }
-  function poseNpcList(list, origin, out) {
-    if (!list) return;
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i];
-      if (!npcArmed(a)) continue;
-      const p = a.pos || (a.char.group && a.char.group.position);
-      if (!p) continue;
-      const dx = p.x - origin.x, dz = p.z - origin.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > NPC_RANGE2) continue;
-      out.push({ a, d2 });
+  /* ---- THE BLADED STANCE -------------------------------------------------
+     A shouldered long gun is held with the body TURNED: support shoulder
+     forward, firing shoulder back, head turned onto the sights. This rig's
+     shoulders sit ~0.87 m apart against a 0.49 m arm to the wrist, and its
+     rifles are drawn 1.45x real (weapons/weapon-scale.js READ), so square to
+     the target the handguard is 0.8 m from the off shoulder: out of reach for
+     every long gun in the game (measured, tools/gun-hold-check.mjs). Blading
+     the torso is the joint a real shooter spends on exactly this — it carries
+     the off shoulder ~0.2 m toward the handguard — so it is spent here.
+     body.rotation.y is written ABSOLUTE while it is up (the gait's shoulder
+     counter-swing has no business in a shouldered aim); the neck counter-turns
+     as a baked offset that is backed out before the next one is added, the
+     same own-channel pattern systems/reactions.js uses for its head track.
+     Runs before holsterprops (54) so the gun is aimed and seated off the
+     turned body in the same frame. */
+  const BLADE = GH.BLADE, BLADE_NECK = GH.BLADE_NECK;   // the NPC ready pose blades the same
+  let bladeK = 0, bladeRig = null;
+  /* ---- THE HOLD IS AN OVERLAY ON THE ANIMATION, NOT AN INPUT TO IT --------
+     animChar damps every arm channel FROM its current value. Every pass here
+     (the blade, holsterprops' firing fist, the support hand, the reload) IK-
+     solves the arms and writes full 3D shoulder rotations — swing AND twist —
+     which read back as large, oddly-branched Euler angles. Left in place,
+     next frame's damp starts from them and walks the Euler components toward
+     its own targets on their own: the arm swung through the body and back
+     (measured: the pistol low-ready's gun jumped 7-15 cm a frame). And any
+     solve made relative to where the arm IS (the inboard pistol tuck, the
+     ground-rest lift) compounded frame on frame.
+     So the arms animChar produced are SNAPSHOTTED before the first of these
+     passes and put back just before the player's animChar runs next frame
+     (physics.js updatePlayer, onUpdate 10): animChar only ever sees its own
+     pose, and the hold is laid over it fresh every frame. A frame with the
+     game paused (updaters skipped, these passes still running) restores
+     here instead, so a paused hold cannot compound either. Only restored
+     after a frame these passes were live, so every other writer of the arms
+     keeps its own dynamics. */
+  const snap = { ch: null, live: false,
+    raQ: new THREE.Quaternion(), laQ: new THREE.Quaternion(), raP: new THREE.Vector3(), laP: new THREE.Vector3(),
+    raL: new THREE.Euler(), laL: new THREE.Euler(), by: 0 };
+  let ranUpdate = false;
+  const _pw = new THREE.Matrix4(), _pl = new THREE.Matrix4(), _ps = new THREE.Vector3();
+  function snapRestore() {
+    const ch = snap.ch;
+    snap.live = false;
+    if (!ch || ch !== CBZ.playerChar || !ch.parts || !ch.parts.la || !ch.parts.ra || !ch.body) return;
+    // the drawn gun stays where it was SEEN while the arm under it goes back:
+    // the ground-rest pass inside animChar measures the gun, and it must
+    // measure the one on screen, not the one the un-held arm would carry
+    const prop = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
+    if (prop && prop.parent) { prop.updateWorldMatrix(true, false); _pw.copy(prop.matrixWorld); }
+    ch.parts.ra.quaternion.copy(snap.raQ); ch.parts.ra.position.copy(snap.raP); ch.parts.ra.userData.low.rotation.copy(snap.raL);
+    ch.parts.la.quaternion.copy(snap.laQ); ch.parts.la.position.copy(snap.laP); ch.parts.la.userData.low.rotation.copy(snap.laL);
+    ch.body.rotation.y = snap.by;
+    if (prop && prop.parent) {
+      prop.parent.updateWorldMatrix(true, false);
+      _pl.copy(prop.parent.matrixWorld).invert().multiply(_pw);
+      _pl.decompose(prop.position, prop.quaternion, _ps);          // (its own scale is left exact)
     }
   }
-  const _npcPicks = [];
-  function poseNpcHands() {
-    if (CBZ.CONFIG.NPC_SUPPORT_HAND_IK === false ||
-        CBZ.CONFIG.CHAR_SUPPORT_HAND_IK === false || !CBZ.charArmTo) return;
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
-    const cam = CBZ.camera;
-    if (!cam) return;
-    _npcPicks.length = 0;
-    poseNpcList(CBZ.cityPeds, cam.position, _npcPicks);
-    poseNpcList(CBZ.cityCops, cam.position, _npcPicks);
-    if (!_npcPicks.length) return;
-    _npcPicks.sort((x, y) => x.d2 - y.d2);
-    const n = Math.min(NPC_BUDGET, _npcPicks.length);
-    for (let i = 0; i < n; i++) {
-      const a = _npcPicks[i].a, ch = a.char, prop = a._weaponProp;
-      const grips = gripsOf(prop);
-      if (!grips.support) continue;
-      prop.updateWorldMatrix(true, false);
-      _npcT.copy(grips.support);
-      prop.localToWorld(_npcT);
-      if (CBZ.floorAt) {
-        const fl = CBZ.floorAt(_npcT.x, _npcT.z) + 0.05;
-        if (_npcT.y < fl) _npcT.y = fl;
-      }
-      // NPCs never get the stock placement: their weapon's orientation comes
-      // from the forearm itself (actorweapons.js mounts the prop at a fixed
-      // local rotation), so moving that arm would swing the barrel off
-      // whatever combat.js is aiming it at. Sliding the off hand back along
-      // the gun puts it on the weapon and touches nothing else. Two probes,
-      // not four — a street of these runs every frame.
-      CBZ.charArmTo.rest(ch, "l", 0);
-      landOnWeapon(ch, prop, _npcT, CBZ.charArmTo(ch, _npcT, "l", 1), 2, 0.05);
+  // put one arm back to this frame's animated pose (a hold that was tried
+  // and given up must not leave the arm where the attempt left it)
+  function snapRestoreArm(side) {
+    const ch = snap.ch;
+    if (!ch || ch !== CBZ.playerChar || !ch.parts) return;
+    const part = side === "l" ? ch.parts.la : ch.parts.ra;
+    if (!part || !part.userData.low) return;
+    part.quaternion.copy(side === "l" ? snap.laQ : snap.raQ);
+    part.position.copy(side === "l" ? snap.laP : snap.raP);
+    part.userData.low.rotation.copy(side === "l" ? snap.laL : snap.raL);
+  }
+  function snapTake(ch) {
+    snap.ch = ch;
+    if (!ch || !ch.parts || !ch.parts.la || !ch.parts.ra || !ch.body || !ch.parts.ra.userData.low) return false;
+    snap.raQ.copy(ch.parts.ra.quaternion); snap.raP.copy(ch.parts.ra.position); snap.raL.copy(ch.parts.ra.userData.low.rotation);
+    snap.laQ.copy(ch.parts.la.quaternion); snap.laP.copy(ch.parts.la.position); snap.laL.copy(ch.parts.la.userData.low.rotation);
+    snap.by = ch.body.rotation.y;
+    return true;
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(9.99, function () {
+    if (snap.live) snapRestore();
+    ranUpdate = true;
+  });
+
+  function bladeTick(dt) {
+    const ch = CBZ.playerChar;
+    // the base pose for this frame's hold (see the overlay note above)
+    if (!ranUpdate && snap.live) snapRestore();
+    ranUpdate = false;
+    snap.live = !!(snapTake(ch) && CBZ.tpHandWeapon && CBZ.tpHandWeapon());
+    if (bladeRig && bladeRig !== ch) {        // a rig swap: back the neck out of the old one
+      if (bladeRig.neck && bladeRig._bladeNeck) bladeRig.neck.rotation.y -= bladeRig._bladeNeck;
+      if (bladeRig) bladeRig._bladeNeck = 0;
+      bladeK = 0;
+    }
+    bladeRig = ch || null;
+    if (!ch || !ch.body) return;
+    const prop = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
+    // presenting only: a reload squares the body up to its own work position
+    // (holsterprops RELOAD_WORK is body-relative), so the blade eases out
+    const on = !!(prop && ch.parts && ch.aimingPose && !R.active && !ch.slidePose && !ch.cuffed &&
+      !ch.surrender && !ch.handsUp && !ch.verbHold && !(CBZ.player && CBZ.player.dead) &&
+      !(CBZ.fps && CBZ.fps.active) && Math.abs(ch.body.rotation.x) < 0.8 &&
+      buttLen(prop) > 0.18 && GH.specOf(prop) && GH.specOf(prop).sup);
+    bladeK += ((on ? 1 : 0) - bladeK) * Math.min(1, 8 * (dt || 0.016));
+    if (bladeK < 1e-3) bladeK = 0;
+    const a = -BLADE * bladeK;                  // negative yaw: the left (+X) shoulder comes forward
+    if (bladeK > 0) ch.body.rotation.y = a;
+    if (ch.neck) {
+      const want = -a * BLADE_NECK;
+      ch.neck.rotation.y += want - (ch._bladeNeck || 0);
+      ch._bladeNeck = want;
     }
   }
 
@@ -710,10 +713,13 @@
   // BEFORE holsterprops (54) so the gun it draws is already canted for the
   // reload rather than a frame behind it.
   CBZ.onAlways(53.9, reloadTick);
+  // 53.95: the blade, after the reload clock (a reload squares up too) and
+  // before holsterprops aims and seats the gun off this body
+  CBZ.onAlways(53.95, bladeTick);
   // 54.6: after holsterprops has finished placing and aiming the gun — the
   // support hand is solved to where the weapon ACTUALLY ended up this frame,
   // which is the whole point.
-  CBZ.onAlways(54.6, function (dt) { poseHands(dt); poseNpcHands(); });
+  CBZ.onAlways(54.6, poseHands);
 
   /* Test/measurement surface — tools/visual-presets/gun-hold-reload.mjs
      reports the residual in centimetres, so "the hand is on the gun" is a
@@ -742,6 +748,10 @@
       // whether the stock was re-placed, and what it missed by in the end
       resid0: seen.resid0, placed: seen.placed, butt: seen.butt,
       slid: seen.slid, residual: seen.residual,
+      // the grip frames (CBZ.gunHold): support grip-centre gap and how far
+      // it walked back, wrist bends (rad) on both hands
+      holdGap: GH.last.supGap, holdSlide: seen.slid ? GH.last.slide : 0,
+      supportBend: GH.last.supBend, fireBend: GH.last.fireBend,
       reloading: R.active,
       reloadP: R.p,
     };

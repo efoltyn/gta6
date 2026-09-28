@@ -152,6 +152,30 @@
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
     card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004 },
   };
+  /* BODY GUN HOLDS, SIZED TO WHAT IS HELD (systems/gunhands.js CBZ.gunHold).
+     A body hand closes round a gun drawn at 1.45-1.75x real size (weapon-
+     scale.js READ) with a hand drawn at 1.1x, so the part it wraps is, in the
+     hand's own metres, anything from a 2.2 cm AK grip to a 6 cm two-hand cup
+     over a Desert Eagle — one fixed "pistol" curl either buries the fingers
+     or leaves them in the air. So the body holds come in a small family of
+     wrap radii (6 mm apart, the nearest is never more than 3 mm off) and the
+     hold picks the nearest: `trigNN` = the firing hand (index laid along the
+     frame to the trigger, the other three wrapped), `holdNN` = a support hand
+     (all four wrapped, thumb forward). Each is an ordinary POSES entry, so
+     every body with the same hold shares one cached geometry per LOD and
+     pedinstance pools them by identity. */
+  const HOLD_RADII = [0.022, 0.028, 0.034, 0.040, 0.046, 0.052, 0.058];
+  HOLD_RADII.forEach(function (R) {
+    const n = Math.round(R * 1000);
+    POSES["trig" + n] = { wrap: R, flex: [[0.62, 0.62, 0.30]], thumb: T_ALONG, cup: 0.005, stub: 0.030 };
+    POSES["hold" + n] = { wrap: R, thumb: T_ALONG, cup: 0.006, stub: 0.030 };
+  });
+  // the hold pose of `kind` ("trig" | "hold") whose wrap radius is nearest R (hand metres)
+  function holdPose(kind, R) {
+    let best = HOLD_RADII[0];
+    for (let i = 1; i < HOLD_RADII.length; i++) if (Math.abs(HOLD_RADII[i] - R) < Math.abs(best - R)) best = HOLD_RADII[i];
+    return (kind === "trig" ? "trig" : "hold") + Math.round(best * 1000);
+  }
   function thumbChain(dirs) {
     let tp = THUMB.base.slice();
     const pts = [tp];
@@ -432,9 +456,13 @@
       // the wrist runs 7 cm back up into the sleeve: a body's hand slides down
       // its wrist when it closes on a held socket (character.js HANDS block)
       // and this is what keeps the cuff from opening a gap
-      const wr = new THREE.CylinderGeometry(0.027, 0.029, 0.092, 6, 1, true);
+      // A gun hold (trigNN / holdNN) hangs AT the crease with no slide but
+      // bends the wrist onto the grip; its stub is short (p.stub) so the bend
+      // cannot swing 7 cm of wrist out through the side of the forearm.
+      const back = p.stub != null ? p.stub : 0.070;
+      const wr = new THREE.CylinderGeometry(0.027, 0.029, back + 0.022, 6, 1, true);
       wr.scale(1.18, 1, 0.78);
-      place(wr, [0, 0, 0.070], [0, 0.001, -0.022], parts);
+      place(wr, [0, 0, back], [0, 0.001, -0.022], parts);
     }
     const chains = p._joints.fingers;
     if (!far) {
@@ -958,7 +986,7 @@
     POSES, PALM, FINGERS, THUMB,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    grasp, graspHand, prismSdf,
+    grasp, graspHand, prismSdf, holdPose, HOLD_RADII,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore },
   };
 })();

@@ -1,6 +1,7 @@
 /* ============================================================
-   entities/character.js — blocky avatar + a layered PROCEDURAL
-   animation rig, now with TWO-SEGMENT LIMBS (real elbows + knees).
+   entities/character.js — the human body + a layered PROCEDURAL
+   animation rig: TWO-SEGMENT LOFTED LIMBS (tapered, rounded, a ball at
+   every elbow and knee — see the LIMBS block) with real hands.
 
      root (g)            ← world transform (position / facing / KO)
       ├─ ll, rl          ← leg pivots at the HIPS
@@ -62,49 +63,279 @@
   if (CBZ.CONFIG.CHAR_GUN_GROUND_REST == null) CBZ.CONFIG.CHAR_GUN_GROUND_REST = true;
   if (CBZ.CONFIG.CHAR_HEAVY_CARRY == null) CBZ.CONFIG.CHAR_HEAVY_CARRY = true;
 
-  /* Two-segment limb. Pivot group at the hip/shoulder; upper box hangs to the
-     joint; a `low` pivot group sits AT the joint with the lower box + cap
-     inside it. The lower box's top is tucked 0.06 UP into the (wider) upper
-     box so bending the joint never opens a gap — the overlap sweeps through
-     the elbow/knee like a rounded joint filler.
-       w,d      upper segment cross-section
-       upperH   shoulder/hip → joint
-       lowerH   joint → wrist/ankle
-       capColor/capH: hand or shoe cap, strictly enclosing the lower end. */
-  function limb(w, upperH, lowerH, d, color, capColor, capH, lowerColor) {
+  /* ==== LIMBS — TAPERED, ROUNDED, JOINTED ==================================
+     Owner, 2026-09-28: "make the arms and legs much more realistic." Every
+     limb segment was a plain box (boxGeom), kept that way for two reasons the
+     human lead wrote down: the painted-clothes atlas mapped a box's six faces,
+     and pedinstance.js drew every box from one shared unit cube. Both are
+     answered here instead of by keeping the box:
+
+     SHAPE. Each segment is a lofted tube through a short table of cross
+     sections (LIMB_SHAPES): a deltoid that caps the shoulder, a bicep that
+     bulges forward, an elbow that narrows, a forearm whose belly sits high and
+     whose wrist is wider front-to-back than side-to-side (the hand's own wrist
+     stub fits inside it); a full upper thigh, a quad that bulges forward, a
+     knee, a calf whose belly sits BEHIND the shin, an ankle that disappears
+     into the shoe collar. A clothed segment is its own, smoother section
+     (fabric does not show a bicep): a sleeve with a cuff lip at the wrist, a
+     trouser leg that falls straight and breaks over the shoe.
+
+     JOINTS. Each segment is closed by a dome centred ON its joint pivot, and
+     the upper segment's section at the joint is at least as wide as the lower
+     one's. So the upper segment alone holds a whole ball round the elbow /
+     knee, and the lower segment rotates inside that ball: a bend can never
+     open a gap, and because nothing is skinned there is no vertex blending to
+     collapse into a candy wrapper. tools/limb-check.mjs sweeps the pose range
+     and measures it.
+
+     PAINT. The tube's circumference is split into four quadrants at 45°
+     (front / side / back / side, the same order and u direction as a
+     BoxGeometry's faces), with duplicated seam vertices, so city/clothes.js
+     hands its sleeve / trouser atlas rows to CBZ.humanLimbGeometry and the
+     garment lands where it did on the box — v runs along the segment's old
+     box span, so a cuff painted low in the row is still at the wrist.
+
+     INSTANCING. Every segment is baked from a CANONICAL shape (per segment,
+     variant, LOD and width:length aspect) scaled by one affine matrix L. A
+     flat-coloured segment carries `_cbzUnit = {geo: canonical, L}`, which
+     pedinstance.js pools exactly like the unit box: shape by instance matrix,
+     so a child's arm and a guard's arm share one pool. Painted segments pool
+     by geometry, as the painted boxes always did.
+
+     COMPAT. geometry.parameters still reports the old box (width/height/
+     depth) so everything that sizes itself off a limb box (wounds.js decals,
+     warlord pads, clothes.js geomOk) keeps working; the mesh sits where the
+     box sat. CBZ.humanLimbHalfAt(geometry, y) answers the real half-extent
+     at a height for anything that must sit ON the surface.
+
+     LOD. rig.setHandLod(2) (peds.js, past ~30 m) also swaps the limbs to the
+     8-sided far loft (~90 tris a segment vs ~230 near). */
+  const LIMB_TUCK = 0.02;       // the joint pivot sits this far above the upper segment's box end
+  const LIMB_OVERLAP = 0.06;    // the lower segment's box reaches this far above its joint
+  // rows: [t, rx, rz, cz] — t 0 = the segment's top joint .. 1 = its bottom end;
+  // rx / rz = half-extent across / front-back as a share of the box's half
+  // width / depth; cz = the section centre's forward shift (share of half depth).
+  // top / bot = end-dome height as a share of that end's radius.
+  const LIMB_SHAPES = {
+    armUp: {
+      bare: { top: 0.85, bot: 1, rows: [
+        [0.00, 0.90, 0.92, 0.00], [0.13, 0.97, 0.98, 0.02], [0.33, 0.84, 0.90, 0.05],
+        [0.56, 0.80, 0.90, 0.09], [0.80, 0.73, 0.78, 0.03], [1.00, 0.72, 0.72, 0.00]] },
+      cloth: { top: 0.85, bot: 1, rows: [
+        [0.00, 0.94, 0.95, 0.00], [0.15, 0.99, 0.99, 0.01], [0.45, 0.88, 0.93, 0.04],
+        [0.80, 0.80, 0.83, 0.02], [1.00, 0.78, 0.78, 0.00]] },
+    },
+    armLo: {   // the elbow (t 0) .. the wrist crease (t 1), where the hand's stub enters
+      bare: { top: 1, bot: 0.35, rows: [
+        [0.00, 0.80, 0.76, 0.00], [0.17, 0.88, 0.85, 0.02], [0.45, 0.71, 0.73, 0.02],
+        [0.76, 0.52, 0.60, 0.00], [1.00, 0.40, 0.51, 0.00]] },
+      cloth: { top: 1, bot: 0.30, rows: [
+        [0.00, 0.84, 0.80, 0.00], [0.20, 0.88, 0.86, 0.01], [0.60, 0.72, 0.76, 0.00],
+        [0.90, 0.60, 0.66, 0.00], [0.96, 0.64, 0.70, 0.00], [1.00, 0.57, 0.63, 0.00]] },
+    },
+    legUp: {
+      bare: { top: 0.85, bot: 1, rows: [
+        [0.00, 0.94, 0.96, 0.00], [0.12, 1.00, 1.00, 0.02], [0.45, 0.87, 0.92, 0.06],
+        [0.80, 0.70, 0.75, 0.03], [1.00, 0.66, 0.68, 0.01]] },
+      cloth: { top: 0.85, bot: 1, rows: [
+        [0.00, 0.96, 0.98, 0.00], [0.14, 1.00, 1.00, 0.01], [0.55, 0.88, 0.90, 0.02],
+        [1.00, 0.75, 0.77, 0.00]] },
+    },
+    legLo: {   // the knee (t 0) .. the sole line inside the shoe (t 1)
+      bare: { top: 1, bot: 0.4, rows: [
+        [0.00, 0.72, 0.74, 0.05], [0.10, 0.74, 0.80, 0.00], [0.28, 0.80, 0.88, -0.10],
+        [0.56, 0.60, 0.64, -0.06], [0.82, 0.42, 0.46, -0.05], [1.00, 0.44, 0.50, 0.02]] },
+      cloth: { top: 1, bot: 0.3, rows: [
+        [0.00, 0.80, 0.82, 0.02], [0.30, 0.82, 0.86, -0.03], [0.72, 0.74, 0.78, -0.02],
+        [1.00, 0.77, 0.80, 0.00]] },
+    },
+  };
+  const LIMB_FACE = ["front", "side", "back", "side"];     // quadrant -> clothes atlas column
+  const LIMB_GEO = Object.create(null);
+  function limbRows(sh, lod) {
+    const r = sh.rows;
+    if (lod < 2 || r.length <= 3) return r;
+    let bi = 1, bw = -1;                         // far: top, the fullest section, bottom
+    for (let i = 1; i < r.length - 1; i++) { const w = r[i][1] + r[i][2]; if (w > bw) { bw = w; bi = i; } }
+    return [r[0], r[bi], r[r.length - 1]];
+  }
+  /* The canonical loft, in (half-width, length, half-depth) units: x = rx·sinα,
+     z = cz + rz·cosα, y = −t (top joint at 0, bottom end at −1). `aq` is the
+     aspect (half width / length) x100, which is all the domes need to come out
+     round in real space. */
+  function limbCanon(kind, variant, lod, aq) {
+    const key = "C|" + kind + "|" + variant + "|" + lod + "|" + aq;
+    let g = LIMB_GEO[key];
+    if (g) return g;
+    const sh = LIMB_SHAPES[kind][variant];
+    const rows = limbRows(sh, lod);
+    const n = lod >= 2 ? 2 : 3;                 // segments per quadrant (8 / 12 around)
+    const nd = lod >= 2 ? 1 : 2;                // dome rings between the end section and the apex
+    const a = aq / 100;
+    const rings = [];
+    const domeH = (row, k) => k * Math.max(row[1], row[2]) * a;
+    const r0 = rows[0], rN = rows[rows.length - 1];
+    for (let k = nd + 1; k >= 1; k--) {         // top dome: apex first
+      const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
+      rings.push([domeH(r0, sh.top) * Math.sin(th), r0[1] * c, r0[2] * c, r0[3]]);
+    }
+    for (let i = 0; i < rows.length; i++) rings.push([-rows[i][0], rows[i][1], rows[i][2], rows[i][3]]);
+    for (let k = 1; k <= nd + 1; k++) {         // bottom dome: apex last
+      const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
+      rings.push([-1 - domeH(rN, sh.bot) * Math.sin(th), rN[1] * c, rN[2] * c, rN[3]]);
+    }
+    const RV = 4 * (n + 1), nv = rings.length * RV;
+    const P = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
+    const F = new Uint8Array(nv), Q = new Float32Array(nv);
+    let o = 0;
+    for (let i = 0; i < rings.length; i++) {
+      const R = rings[i], v = Math.min(1, Math.max(0, 1 + R[0]));
+      for (let f = 0; f < 4; f++) for (let k = 0; k <= n; k++) {
+        const al = -Math.PI / 4 + f * Math.PI / 2 + (k / n) * Math.PI / 2;
+        P[o * 3] = R[1] * Math.sin(al); P[o * 3 + 1] = R[0]; P[o * 3 + 2] = R[3] + R[2] * Math.cos(al);
+        const u = k / n;
+        U[o * 2] = (f + u) / 4; U[o * 2 + 1] = v;
+        F[o] = f; Q[o] = u;
+        o++;
+      }
+    }
+    const idx = [];
+    for (let i = 0; i < rings.length - 1; i++) for (let f = 0; f < 4; f++) for (let k = 0; k < n; k++) {
+      const c = i * RV + f * (n + 1) + k, b = c + RV;
+      // (bottom-left, bottom-right, top-left), (bottom-right, top-right, top-left): outward.
+      // The first and last ring are apexes (radius 0), so one half of each of
+      // their quads is degenerate and is not emitted.
+      if (i < rings.length - 2) idx.push(b, b + 1, c);
+      if (i > 0) idx.push(b + 1, c + 1, c);
+    }
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    g.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+    finishGeo(g);                                // smooth normals welded across the uv seams
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.userData.limbFace = F; g.userData.limbU = Q; g.userData.limbRows = rows;
+    g.name = "limb~" + key;
+    g._shared = true;
+    return (LIMB_GEO[key] = g);
+  }
+  /* spec = {kind, variant, w, d, len, y0, boxH}: w/d the old box's width and
+     depth, len the pivot-to-end length, y0 the top pivot's mesh-local height,
+     boxH the old box's height (the painted v span). paint = {key, fn(face,u,v)
+     -> [U,V]} from city/clothes.js, or null for a flat-coloured segment. */
+  function limbBake(spec, lod, paint) {
+    lod = lod >= 2 ? 2 : 1;
+    const aq = Math.round(Math.min(0.8, Math.max(0.05, spec.w / 2 / spec.len)) * 100);
+    const key = "B|" + spec.kind + "|" + spec.variant + "|" + lod + "|" + aq + "|" +
+      [spec.w, spec.d, spec.len, spec.y0, spec.boxH].map((x) => x.toFixed(4)).join(",") + "|" + (paint ? paint.key : "-");
+    let g = LIMB_GEO[key];
+    if (g) return g;
+    const C = limbCanon(spec.kind, spec.variant, lod, aq);
+    const sx = spec.w / 2, sy = spec.len, sz = spec.d / 2, y0 = spec.y0;
+    const cp = C.attributes.position.array, cn = C.attributes.normal.array, nv = cp.length / 3;
+    const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3);
+    for (let i = 0; i < nv; i++) {
+      P[i * 3] = cp[i * 3] * sx; P[i * 3 + 1] = cp[i * 3 + 1] * sy + y0; P[i * 3 + 2] = cp[i * 3 + 2] * sz;
+      const nx = cn[i * 3] / sx, ny = cn[i * 3 + 1] / sy, nz = cn[i * 3 + 2] / sz;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      N[i * 3] = nx / l; N[i * 3 + 1] = ny / l; N[i * 3 + 2] = nz / l;
+    }
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    if (paint) {
+      const U = new Float32Array(nv * 2), F = C.userData.limbFace, Q = C.userData.limbU, hb = spec.boxH / 2;
+      for (let i = 0; i < nv; i++) {
+        const v = Math.min(1, Math.max(0, (P[i * 3 + 1] + hb) / spec.boxH));
+        const uv = paint.fn(LIMB_FACE[F[i]], Q[i], v);
+        U[i * 2] = uv[0]; U[i * 2 + 1] = uv[1];
+      }
+      g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    } else {
+      g.setAttribute("uv", C.attributes.uv);     // the canonical's own: pedinstance's pool samples the same
+      g._cbzUnit = { geo: C, L: new THREE.Matrix4().makeScale(sx, sy, sz).setPosition(0, y0, 0) };
+    }
+    g.setIndex(C.index);
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    // the box this segment replaced, for everything that sizes itself off one
+    g.parameters = { width: spec.w, height: spec.boxH, depth: spec.d };
+    g.userData.limb = { rows: C.userData.limbRows, sx, sy, sz, y0 };
+    g.name = "limb~" + spec.kind + "~" + spec.variant + "~" + lod;
+    g._shared = true;
+    return (LIMB_GEO[key] = g);
+  }
+  // Real half-extents of a limb geometry at mesh-local height y: {hx, hz, cz}
+  // (null for anything that is not a limb loft — callers keep their box maths).
+  function limbHalfAt(g, y) {
+    const L = g && g.userData && g.userData.limb;
+    if (!L) return null;
+    const rows = L.rows, t = Math.min(1, Math.max(0, (L.y0 - y) / L.sy));
+    let i = 0;
+    while (i < rows.length - 2 && rows[i + 1][0] < t) i++;
+    const a = rows[i], b = rows[i + 1] || a, s = b[0] > a[0] ? (t - a[0]) / (b[0] - a[0]) : 0;
+    return { hx: lerpN(a[1], b[1], s) * L.sx, hz: lerpN(a[2], b[2], s) * L.sz, cz: lerpN(a[3], b[3], s) * L.sz };
+  }
+  function limbMesh(spec, color) {
+    spec.lod = 1;
+    const m = new THREE.Mesh(limbBake(spec, 1, null), cmat(color));
+    m.userData.limb = spec;
+    m.castShadow = m.receiveShadow = true;
+    return m;
+  }
+  // the segment's geometry for its current LOD and paint (clothes.js calls this
+  // on dress with a painter, on strip with null; omitted = keep the paint)
+  function limbGeometry(mesh, paint) {
+    const spec = mesh && mesh.userData && mesh.userData.limb;
+    if (!spec) return null;
+    if (paint !== undefined) mesh.userData.limbPaint = paint || null;
+    return limbBake(spec, spec.lod, mesh.userData.limbPaint || null);
+  }
+  function setLimbLod(rig, lod) {
+    lod = lod >= 2 ? 2 : 1;
+    const s = rig && rig.skinSlots;
+    if (!s) return;
+    const lists = [s.arms, s.armsLower, s.legs, s.legsLower];
+    for (let j = 0; j < lists.length; j++) {
+      const list = lists[j];
+      if (!list) continue;
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i], spec = m && m.userData.limb;
+        if (!spec || spec.lod === lod) continue;
+        spec.lod = lod;
+        const flat = m.userData._cbzFlat;
+        if (flat && flat.g && flat.g.userData && flat.g.userData.limb) flat.g = limbBake(spec, lod, null);
+        // swap only a geometry this file baked (a synthesised repair box is left alone)
+        if (m.geometry && m.geometry.userData && m.geometry.userData.limb) m.geometry = limbGeometry(m);
+      }
+    }
+  }
+  /* Two-segment limb. Pivot group at the hip/shoulder; the upper loft hangs to
+     the joint; a `low` pivot group sits AT the joint with the lower loft
+     inside it. `kind` "arm" | "leg"; vUp / vLo "bare" | "cloth". The boxes
+     these replaced are still the spec (w x upperH, 0.9w x lowerH+0.06). */
+  function limb(kind, w, upperH, lowerH, d, color, lowerColor, vUp, vLo) {
     const grp = new THREE.Group();
-    const upper = new THREE.Mesh(boxGeom(w, upperH, d), cmat(color));
+    const upper = limbMesh({ kind: kind + "Up", variant: vUp, w, d, len: upperH - LIMB_TUCK, y0: upperH / 2, boxH: upperH }, color);
     upper.position.y = -upperH / 2;
-    upper.castShadow = upper.receiveShadow = true;
     grp.add(upper);
     grp.userData.main = upper;
 
     const low = new THREE.Group();
-    low.position.y = -(upperH - 0.02);          // joint pivot, tucked 2cm up
+    low.position.y = -(upperH - LIMB_TUCK);     // the joint pivot
     grp.add(low);
     grp.userData.low = low;
 
-    const lw = w * 0.9, ld = d * 0.9;           // lower tapers, nests in upper
-    const overlap = 0.06;
-    const lower = new THREE.Mesh(boxGeom(lw, lowerH + overlap, ld), cmat(lowerColor != null ? lowerColor : color));
-    lower.position.y = (overlap - lowerH) / 2;  // top at +overlap, bottom at -lowerH
-    lower.castShadow = lower.receiveShadow = true;
+    const lw = w * 0.9, ld = d * 0.9;
+    const lower = limbMesh({ kind: kind + "Lo", variant: vLo, w: lw, d: ld, len: lowerH, y0: (lowerH - LIMB_OVERLAP) / 2, boxH: lowerH + LIMB_OVERLAP },
+      lowerColor != null ? lowerColor : color);
+    lower.position.y = (LIMB_OVERLAP - lowerH) / 2;
     low.add(lower);
     grp.userData.lower = lower;
-
-    if (capColor != null) {
-      // cap strictly encloses the lower end (see z-fight note in git history:
-      // no co-planar faces with the trouser/sleeve box).
-      const ch = capH || 0.22;
-      const cap = new THREE.Mesh(boxGeom(lw * 1.06, ch + 0.03, ld * 1.38), cmat(capColor));
-      cap.position.y = -lowerH - 0.03 + (ch + 0.03) / 2;
-      cap.position.z = ld * 0.1;
-      cap.castShadow = true;
-      low.add(cap);
-      grp.userData.cap = cap;
-    }
     return grp;
   }
+  CBZ.humanLimbGeometry = limbGeometry;
+  CBZ.humanLimbHalfAt = limbHalfAt;
 
   // Whole-limb lengths preserved: arm 0.92 (+0.2 hand), leg 0.95 (+0.2 shoe).
   const ARM_UP = 0.46, ARM_LO = 0.46;
@@ -136,7 +367,14 @@
      wrist until the closed hand's grip centre sits on that side's socket —
      the thirdPersonWeapon socket on the right, leftHand on the left — so the
      fingers close round the thing held rather than above it. The wrist stub
-     is long enough that the slide never opens a gap at the cuff.
+     is long enough that the slide never opens a gap at the cuff. The slide
+     is ALONG the forearm only (sideways it pushed the stub out through the
+     slim wrist and a watch).
+     A GUN is held properly instead: systems/actorweapons.js CBZ.gunHold puts
+     a hand sized to the part (fphands trigNN / holdNN) at the crease,
+     oriented ON the gun's own grip frame, and solves the arm to it with
+     charArmTo.wrist (below charArmTo) — the hand's local transform is then
+     the hold's, until the next setHandPose change resets it here.
 
      API: rig.setHandPose("l" | "r" | "both", pose)  pose = a fpHands.POSES name
           rig.setHandLod(0 | 1 | 2)                  (default 1)
@@ -178,12 +416,16 @@
       CBZ.fpHands.gripCentre(pose, _hgc);
       if (side < 0) _hgc.x = -_hgc.x;
       _hgc.multiplyScalar(fit.s).applyQuaternion(_hq);
-      // the target: the socket this side holds with (the weapon socket's
-      // offset on the right, the bare wrist socket on the left)
-      const tx = side > 0 ? 0.02 : 0, ty = fit.socketY + (side > 0 ? -0.03 : 0), tz = fit.socketZ + (side > 0 ? 0.06 : 0);
-      const y = Math.max(fit.wristY - fit.maxDrop, Math.min(fit.wristY, ty - _hgc.y));
-      const lim = fit.maxDrop * 0.6;
-      m.position.set(Math.max(-lim, Math.min(lim, tx - _hgc.x)), y, Math.max(-lim, Math.min(lim, tz - _hgc.z)));
+      // the target height: the socket this side holds with (the weapon
+      // socket's drop on the right, the bare wrist socket on the left)
+      const ty = fit.socketY + (side > 0 ? -0.03 : 0);
+      // ALONG THE FOREARM ONLY. The slide used to move the hand sideways too
+      // (up to 0.6 x maxDrop), which parked the wrist stub outside the slim
+      // lofted wrist and pushed it up through a wristwatch. The hand stays on
+      // the forearm's axis; a hold that needs the grip somewhere else moves
+      // the ARM there (charArmTo.wrist) and orients the hand on the thing
+      // held (systems/gunhands.js CBZ.gunHold) instead of shearing the hand.
+      m.position.set(0, Math.max(fit.wristY - fit.maxDrop, Math.min(fit.wristY, ty - _hgc.y)), 0);
     }
   }
   function makeBodyHand(side, fit, color) {
@@ -1445,31 +1687,52 @@
      toe), scaled per body: a full-height heel/ankle, an instep that falls to
      a low rounded toe, a sole lip. The ankle zone is full width and full
      height exactly where the shin box ends, so no trouser corner pokes out. */
-  function shoeGeometry() {
-    return shared("shoe", function () {
+  function shoeGeometry(kind) {
+    const foot = kind === "foot";
+    return shared(foot ? "foot" : "shoe", function () {
       const shape = function (v) {
         const t = cl01(v.z + 0.5);                                           // 0 heel .. 1 toe
-        const top = t < 0.45 ? 1 : lerpN(1, 0.40, sm01((t - 0.45) / 0.45));
+        const top = t < 0.45 ? 1 : lerpN(1, foot ? 0.30 : 0.40, sm01((t - 0.45) / 0.45));
         v.y *= top;
         v.x *= t > 0.66 ? lerpN(1, 0.70, sm01((t - 0.66) / 0.34)) : (t < 0.08 ? lerpN(0.93, 1, t / 0.08) : 1);
         if (v.z > 0.36) v.z -= 0.12 * Math.pow(Math.min(1, Math.abs(v.x) * 2 / 0.70), 2);
         if (v.z < -0.42) v.z += 0.04 * Math.pow(Math.min(1, Math.abs(v.x) * 2), 2);
       };
-      const upper = rbox(1, 1, 1, 0.16, [2, 2, 4]);
+      /* THE COLLAR HUGS THE ANKLE. The shoe used to be full width and full
+         height all the way up, so a leg ended in a brick with a flat lid. Now
+         the upper draws in round the ankle (the leg's axis sits at unit z
+         SHOE_ANKLE_Z) over its top half, so the tapered shin goes INTO a
+         collar that fits it and a trouser hem, wider than the collar, breaks
+         over it. A bare foot draws in harder and its instep sits lower. */
+      const cx = foot ? 0.52 : 0.60, cz = foot ? 0.50 : 0.62;
+      const collar = function (v) {
+        const k = sm01((v.y - 0.45) / 0.55);
+        if (k <= 0) return;
+        v.x *= lerpN(1, cx, k);
+        v.z = SHOE_ANKLE_Z + (v.z - SHOE_ANKLE_Z) * lerpN(1, cz, k);
+      };
+      const upper = rbox(1, 1, 1, 0.16, [2, 4, 4]);
       upper.translate(0, 0.5, 0);
-      sculpt(upper, function (v) { shape(v); v.y = 0.02 + v.y * 0.98; });   // its sole face sits inside the sole's
+      sculpt(upper, function (v) { shape(v); collar(v); v.y = 0.02 + v.y * 0.98; });   // its sole face sits inside the sole's
+      if (foot) return mergeGeos([flatUV(finishGeo(upper), 0.5, 0.5)]);
       const sole = rbox(1.05, 0.13, 1.04, 0.05, [2, 1, 4]);
       sole.translate(0, 0.065, 0.004);
       sculpt(sole, function (v) { const y = v.y; shape(v); v.y = y; });
       return mergeGeos([flatUV(finishGeo(upper), 0.5, 0.5), flatUV(finishGeo(sole), 0.5, 0.5)]);
     });
   }
+  // where the leg's axis (leg-frame z 0) lands in the unit shoe, for the
+  // adult proportions below: (lw/2 + 0.035) / (1.62 lw) - 0.5
+  const SHOE_ANKLE_Z = -0.12;
   // The shoe on a leg: the slot contract (leg.userData.cap, skinSlots.shoes)
-  // is unchanged — only the shape is.
-  function addShoe(leg, P, color) {
+  // is unchanged — only the shape is. A "shoe" the colour of the skin is a
+  // BARE FOOT (city/beach.js swimmers): a lower, closer-fitting foot, no sole.
+  // Height: a 0.16 m boot was every shoe in the game; a sneaker's collar is
+  // ~0.13 m, which is what the leg's ankle is shaped to meet.
+  function addShoe(leg, P, color, bare) {
     const lw = P.legW * 0.9, lowerH = P.legLo;
-    const W = lw * 1.06, H = P.shoeH + 0.03, D = lw * 1.62;
-    const shoe = new THREE.Mesh(shoeGeometry(), cmat(color));
+    const W = lw * 1.06, H = bare ? P.shoeH * 0.62 + 0.03 : P.shoeH * 0.8 + 0.03, D = lw * 1.62;
+    const shoe = new THREE.Mesh(shoeGeometry(bare ? "foot" : "shoe"), cmat(color));
     shoe.scale.set(W, H, D);
     shoe.position.set(0, -lowerH - 0.03, -lw / 2 - 0.035 + D / 2);   // the sole plane never moved
     shoe.castShadow = true;
@@ -1766,9 +2029,15 @@
     // swimsuit). Absent = the whole leg is c.legs, exactly as before.
     // The shoe is built here, not by limb(): a shaped shared shoe (see
     // SHAPED PARTS), same slot (leg.userData.cap), same planted sole.
-    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, null, P.shoeH, c.shins);
-    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, null, P.shoeH, c.shins);
-    if (c.shoes != null) { addShoe(ll, P, c.shoes); addShoe(rl, P, c.shoes); }
+    // BARE OR CLOTHED picks the loft (LIMBS block): a segment the colour of
+    // the skin is a bare limb (muscle, knee, calf, ankle); anything else is
+    // cloth over it (a trouser leg that falls straight and breaks on the shoe).
+    const skinC = c.skin != null ? c.skin : 0xcf9a72;
+    const vOf = (hex) => (hex != null && hex === skinC ? "bare" : "cloth");
+    const shinC = c.shins != null ? c.shins : c.legs;
+    const ll = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
+    const rl = limb("leg", P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shins, vOf(c.legs), vOf(shinC));
+    if (c.shoes != null) { const bf = c.shoes === skinC; addShoe(ll, P, c.shoes, bf); addShoe(rl, P, c.shoes, bf); }
     ll.position.set(-P.hipX, hipY, 0); rl.position.set(P.hipX, hipY, 0);
     // STEP WIDTH, from frame zero. animChar damps this channel toward the same
     // value every frame, but a rig that never animates (the charpanel portrait,
@@ -1879,8 +2148,10 @@
     // line, exactly where the box hand used to start), and the real hand
     // hangs from there — see the HANDS block (bodyHandFit / makeBodyHand).
     const foreH = P.armLo - P.handH;
-    const la = limb(P.armW, P.armUp, foreH, P.armW, c.arms, null, 0, c.shortSleeve ? c.skin : null);
-    const ra = limb(P.armW, P.armUp, foreH, P.armW, c.arms, null, 0, c.shortSleeve ? c.skin : null);
+    const foreC = c.shortSleeve ? c.skin : null;
+    const vFore = vOf(foreC != null ? foreC : c.arms);
+    const la = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore);
+    const ra = limb("arm", P.armW, P.armUp, foreH, P.armW, c.arms, foreC, vOf(c.arms), vFore);
     // The chase camera sees the old +X "right" socket on the player's visible
     // left flank. Mirror the arm roots so the semantic right hand — and every
     // weapon attached to it — is actually on the player's right in third person.
@@ -2180,7 +2451,24 @@
     // HANDS: rig.setHandPose / rig.setHandLod (HANDS block above makeCharacter)
     rig.handFit = handFit;
     rig.setHandPose = function (side, pose) { setBodyHandPose(rig, side, pose); };
-    rig.setHandLod = function (lod) { setBodyHandLod(rig, lod); };
+    // one distance LOD for the whole body: the hands (fphands body LODs) and
+    // the limb lofts (LIMBS block) swap together
+    rig.setHandLod = function (lod) { rig._lodExt = true; setBodyHandLod(rig, lod); setLimbLod(rig, lod); };
+    /* A rig no system LODs (every mode but the city crowd) checks its own
+       distance to the camera every 24th animChar and takes the far hands and
+       limbs past ~30 m, with the same 26/30 m hysteresis as peds.js. The
+       player's own rig stays near. */
+    let lodTick = (Math.random() * 24) | 0, lodNow = 1;
+    rig._autoLod = function () {
+      if (++lodTick < 24) return;
+      lodTick = 0;
+      const cam = CBZ.camera;
+      if (!cam || rig === CBZ.playerChar) return;
+      const e = g.matrixWorld.elements, c = cam.matrixWorld.elements, dx = e[12] - c[12], dy = e[13] - c[13], dz = e[14] - c[14];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const want = lodNow === 2 ? (d2 < 26 * 26 ? 1 : 2) : (d2 > 30 * 30 ? 2 : 1);
+      if (want !== lodNow) { lodNow = want; setBodyHandLod(rig, want); setLimbLod(rig, want); }
+    };
     // A c.hat comes off in the water: every swimmer's pose (poseSwimmer) sets
     // rig.swimming true and the caller clears it on landing, so the hat rides
     // that one flag — no caller has to remember it, and it costs a compare.
@@ -2446,6 +2734,205 @@
     ch.body.updateWorldMatrix(true, false);
     const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
     return (l1 + l2) * 0.985 * s;
+  };
+  /* ---- charArmTo.wrist — PUT THE WRIST THERE, WITH THE FOREARM THAT WAY ----
+     charArmTo lands the SOCKET (a point out by the fingertips) and fixes the
+     shoulder's twist at zero, so the elbow goes wherever that closed form puts
+     it. A hand that has to actually hold something needs the other two
+     things: the WRIST CREASE on a point (the hand hangs from the crease, so
+     that is the joint a grip is solved to), and the FOREARM arriving from the
+     direction the hand wants it — a wrist only bends so far, and a support
+     hand under a handguard wants its forearm coming up from below-behind,
+     not across at whatever angle the swivel happened to be.
+
+     Two bones, full 3D: the elbow is the point on the reach circle nearest
+     the IDEAL elbow (wrist + fore x forearm length), biased DOWN and OUT on
+     the arm's own side so an elbow never flips up or crosses the midline;
+     then the shoulder takes the whole rotation (swing AND twist, so the
+     bicep faces the bend the way a real one does) and the elbow the hinge.
+     Shoulder protraction for out-of-reach targets as charArmTo.
+
+       charArmTo.wrist(ch, worldPoint, arm, fore, k)
+         fore  world unit vector, wrist -> elbow, or null for "any, elbow down"
+       Returns the residual metres between the crease and the target. */
+  const _awT = new THREE.Vector3(), _awD = new THREE.Vector3(), _awE = new THREE.Vector3();
+  const _awU = new THREE.Vector3(), _awF = new THREE.Vector3(), _awP = new THREE.Vector3();
+  const _awDef = new THREE.Vector3(), _awX = new THREE.Vector3(), _awY = new THREE.Vector3();
+  const _awZ = new THREE.Vector3(), _awM = new THREE.Matrix4(), _awQ = new THREE.Quaternion();
+  const _awPQ = new THREE.Quaternion(), _awW = new THREE.Vector3();
+  function perpNorm(v, axis) {
+    v.addScaledVector(axis, -v.dot(axis));
+    const l = v.length();
+    if (l < 1e-6) return false;
+    v.multiplyScalar(1 / l);
+    return true;
+  }
+  // the chest (+ waist) box in the arms' parent frame, cached per rig
+  function armChestBox(ch) {
+    if (ch._armChest !== undefined) return ch._armChest;
+    const slots = ch.skinSlots && ch.skinSlots.torso;
+    let box = null;
+    if (slots && slots.length && ch.parts && ch.parts.la) {
+      const parent = ch.parts.la.parent;
+      const b = new THREE.Box3(), m = new THREE.Matrix4();
+      box = new THREE.Box3();
+      for (let i = 0; i < slots.length; i++) {
+        const mesh = slots[i];
+        if (!mesh || !mesh.geometry) continue;
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        m.identity();
+        let o = mesh;
+        for (; o && o !== parent; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
+        if (o !== parent) continue;
+        box.union(b.copy(mesh.geometry.boundingBox).applyMatrix4(m));
+      }
+      if (box.isEmpty()) box = null;
+      else box.expandByScalar(0.04);
+    }
+    ch._armChest = box;
+    return box;
+  }
+  const _acE = new THREE.Vector3(), _acX = new THREE.Vector3(), _acP = new THREE.Vector3();
+  // samples of the elbow + forearm inside the box, elbow swung th round its circle
+  function armInChest(box, S, dir, a, h, pole, th, W) {
+    _acX.crossVectors(dir, pole);
+    _acE.copy(S).addScaledVector(dir, a)
+      .addScaledVector(pole, h * Math.cos(th)).addScaledVector(_acX, h * Math.sin(th));
+    let n = 0;
+    for (let i = 0; i <= 5; i++) {
+      _acP.copy(_acE).lerp(W, i / 6);
+      if (box.containsPoint(_acP)) n++;
+    }
+    return n;
+  }
+  charArmTo.wrist = function (ch, worldPoint, arm, fore, k) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const parent = part && part.parent;
+    if (!P || !low || !parent || !worldPoint) return null;
+    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (blend <= 0) return null;
+    const cap = part.userData.cap;
+    const l1 = Math.max(0.12, -low.position.y);
+    const l2 = Math.max(0.10, -((cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo)));
+    parent.updateWorldMatrix(true, false);
+    _awT.copy(worldPoint);
+    parent.worldToLocal(_awT);
+    // protraction, as charArmTo
+    const rest = part.userData._armRestZ != null ? part.userData._armRestZ : 0;
+    let push = Math.hypot(_awT.x - part.position.x, _awT.y - part.position.y, _awT.z - rest) - (l1 + l2) * 0.985;
+    push = Math.max(0, Math.min(0.24, push));
+    part.position.z += (rest + push - part.position.z) * blend;
+    // direction and (reachable) distance shoulder -> wrist
+    _awD.subVectors(_awT, part.position);
+    const d0 = _awD.length();
+    if (d0 < 1e-5) return null;
+    _awD.multiplyScalar(1 / d0);
+    const d = Math.max(Math.abs(l1 - l2) + 0.04, Math.min((l1 + l2) * 0.999, d0));
+    // the pole: toward the ideal elbow, biased down and out on this arm's side
+    const out = part.position.x >= 0 ? 1 : -1;
+    _awDef.set(out * 0.55, -1, -0.25);
+    const defOk = perpNorm(_awDef, _awD);
+    let poleOk = false;
+    if (fore) {
+      parent.getWorldQuaternion(_awPQ);
+      _awP.copy(fore).applyQuaternion(_awPQ.invert()).normalize();
+      _awP.multiplyScalar(l2).add(_awT).sub(part.position);        // ideal elbow, from the shoulder
+      poleOk = perpNorm(_awP, _awD);
+      if (poleOk && defOk) {
+        _awP.addScaledVector(_awDef, 0.35);
+        poleOk = perpNorm(_awP, _awD);
+      }
+    }
+    if (!poleOk) {
+      if (defOk) _awP.copy(_awDef);
+      else { _awP.set(0, 0, -1); if (!perpNorm(_awP, _awD)) _awP.set(1, 0, 0); }
+    }
+    // the elbow on the reach circle, toward the pole
+    const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+    _awW.copy(part.position).addScaledVector(_awD, d);
+    /* NOT THROUGH THE CHEST. A forearm led in along a hand on a gun held at
+       the sternum would have its elbow INSIDE the torso (the ideal elbow is
+       straight back down the bore). Walk the elbow round its circle, the
+       least way from the pole, until neither it nor the forearm is inside
+       the chest/waist box (margin 4 cm). */
+    const box = armChestBox(ch);
+    if (box && h > 1e-4 && armInChest(box, part.position, _awD, a, h, _awP, 0, _awW) > 0) {
+      _awX.crossVectors(_awD, _awP);
+      let best = 0, bestScore = Infinity;
+      for (let i = 1; i <= 12; i++) {
+        for (let s = -1; s <= 1; s += 2) {
+          const th = s * i * Math.PI / 12;
+          const sc = armInChest(box, part.position, _awD, a, h, _awP, th, _awW) * 10 + i;
+          if (sc < bestScore) { bestScore = sc; best = th; }
+        }
+        if (bestScore < 10) break;
+      }
+      // the boundary, not the 15° step: refine between the last blocked and
+      // the first clear angle, so the elbow moves continuously with its input
+      if (bestScore < 10 && best !== 0) {
+        let lo = best - Math.sign(best) * Math.PI / 12, hi = best;
+        for (let k = 0; k < 6; k++) {
+          const mid = (lo + hi) / 2;
+          if (armInChest(box, part.position, _awD, a, h, _awP, mid, _awW) > 0) lo = mid; else hi = mid;
+        }
+        best = hi;
+      }
+      _awP.multiplyScalar(Math.cos(best)).addScaledVector(_awX, Math.sin(best)).normalize();
+    }
+    _awE.copy(part.position).addScaledVector(_awD, a).addScaledVector(_awP, h);
+    _awU.subVectors(_awE, part.position).normalize();                              // upper arm
+    _awW.copy(part.position).addScaledVector(_awD, d);
+    _awF.subVectors(_awW, _awE).normalize();                                       // forearm
+    // shoulder frame: -Y down the upper arm, +Z the side the forearm bends to
+    _awY.copy(_awU).negate();
+    _awZ.copy(_awF);
+    if (!perpNorm(_awZ, _awU)) { _awZ.copy(_awP).negate(); perpNorm(_awZ, _awU); }
+    _awX.crossVectors(_awY, _awZ);
+    _awM.makeBasis(_awX, _awY, _awZ);
+    _awQ.setFromRotationMatrix(_awM);
+    const e = -Math.acos(Math.max(-1, Math.min(1, _awU.dot(_awF))));
+    if (blend >= 1) part.quaternion.copy(_awQ);
+    else part.quaternion.slerp(_awQ, blend);
+    low.rotation.set(low.rotation.x + (e - low.rotation.x) * blend,
+      low.rotation.y * (1 - blend), low.rotation.z * (1 - blend));
+    // residual, measured off the real crease (ancestors only: the arm's own
+    // subtree — hand, socket, a whole gun — is not walked for one point)
+    low.updateWorldMatrix(true, false);
+    _awW.set(0, -l2, 0);
+    low.localToWorld(_awW);
+    return _awW.distanceTo(worldPoint);
+  };
+  // how many samples of this arm's elbow->crease run inside the chest/waist
+  // box itself (no margin) — a solve that has a choice can prefer 0
+  const _icA = new THREE.Vector3(), _icB = new THREE.Vector3();
+  charArmTo.inChest = function (ch, arm) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const mb = low && armChestBox(ch);
+    if (!mb) return 0;
+    const box = ch._armChestRaw || (ch._armChestRaw = mb.clone().expandByScalar(-0.04));
+    const cap = part.userData.cap;
+    const parent = part.parent;
+    low.updateWorldMatrix(true, false);
+    parent.updateWorldMatrix(true, false);
+    _icA.set(0, 0, 0); low.localToWorld(_icA); parent.worldToLocal(_icA);
+    _icB.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : -0.26, 0); low.localToWorld(_icB); parent.worldToLocal(_icB);
+    let n = 0;
+    for (let i = 0; i <= 6; i++) { if (box.containsPoint(_acP.copy(_icA).lerp(_icB, i / 6))) n++; }
+    return n;
+  };
+  // the wrist crease of this arm, world
+  charArmTo.crease = function (ch, arm, out) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    if (!low) return null;
+    const cap = part.userData.cap;
+    const P = ch.profile || {};
+    low.updateWorldMatrix(true, false);
+    return low.localToWorld(out.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo), 0));
   };
   CBZ.charArmTo = charArmTo;
 
@@ -3059,6 +3546,9 @@
        Arms counter-swing the legs; elbows carry a base bend that deepens
        with speed (jogger's ~90° pump at sprint) and on the forward swing. */
   function animChar(ch, speed, dt) {
+    // BODY LOD for every rig nobody manages (prison, warlord, disasters...):
+    // city/peds.js drives its crowd through rig.setHandLod itself.
+    if (!ch._lodExt && ch._autoLod) ch._autoLod();
     /* THE HELD GUN'S GROUND CONTACT — the FIRST thing this function does, and
        the position is load-bearing in both directions.
        ABOVE beginCharacterHipFrame: that call strips the hip-pivot

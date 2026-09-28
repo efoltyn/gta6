@@ -95,7 +95,13 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
   check(rig.head.material && !rig.head.material._shared, `${id}/${b.tag} head material is its own`);
   check(rig.skinSlots.shoes.length === 2 && rig.skinSlots.torso[0] && rig.skinSlots.arms.length === 2 && rig.skinSlots.legs.length === 2, `${id}/${b.tag} slot shapes`);
   // box parts that clothes.js paints stay true boxes with their tags
-  for (const m of [].concat(rig.skinSlots.torso, rig.skinSlots.arms, rig.skinSlots.armsLower, rig.skinSlots.legs, rig.skinSlots.legsLower, rig.skinSlots.collar, rig.skinSlots.pelvis)) {
+  // (limb segments are LOFTS now — entities/character.js LIMBS; tools/limb-check.mjs
+  // owns them — and still report the box they replaced through .parameters)
+  for (const m of [].concat(rig.skinSlots.arms, rig.skinSlots.armsLower, rig.skinSlots.legs, rig.skinSlots.legsLower)) {
+    const p = m.geometry.parameters || {};
+    check(!!(m.userData.limb && m.geometry.userData.limb && p.width > 0 && p.height > 0 && p.depth > 0), `${id}/${b.tag} limb part is a loft reporting its box`);
+  }
+  for (const m of [].concat(rig.skinSlots.torso, rig.skinSlots.collar, rig.skinSlots.pelvis)) {
     check(isTrueBox(m.geometry), `${id}/${b.tag} cloth part is a 1-seg box`);
   }
   // sharing: collect every non-box geometry per form key

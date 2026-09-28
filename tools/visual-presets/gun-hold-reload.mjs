@@ -131,7 +131,6 @@ async function stage(input) {
       CBZ.CONFIG.CHAR_SUPPORT_HAND_IK = false;
       CBZ.CONFIG.CHAR_RELOAD_ANIM = false;
       CBZ.CONFIG.CHAR_SHOULDER_LONGGUN = false;
-      CBZ.CONFIG.NPC_SUPPORT_HAND_IK = false;
     }
     const playing = await until(() => {
       if (CBZ.game.state === "playing") return true;

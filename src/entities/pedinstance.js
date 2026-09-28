@@ -318,6 +318,10 @@
      correctly. */
   const EPS = 1e-6;
   function boxLocal(g) {
+    // A LOFTED LIMB (entities/character.js LIMBS) is the same trick with a
+    // different unit shape: its geometry is a canonical loft baked through one
+    // affine L, and it says so. The canonical is drawn, L rides the instance.
+    if (g._cbzUnit && g._cbzUnit.L && g._cbzUnit.geo) return g._cbzUnit.L;
     if (g._cbzPinL !== undefined) return g._cbzPinL;
     let L = null;
     const par = g.parameters, at = g.attributes;
@@ -361,7 +365,7 @@
      Everything else keeps the exact-geometry bucket ("G" + uuid). */
   function keyOf(o, L) {
     const g = o.geometry, m = o.material;
-    return (L ? "B" : "G" + g.uuid) + "|" + m.type +
+    return (L ? (g._cbzUnit ? "U" + g._cbzUnit.geo.uuid : "B") : "G" + g.uuid) + "|" + m.type +
       "|" + (m.map ? m.map.uuid : "-") +
       "|" + (m.emissive ? m.emissive.getHex() : 0) +
       "|" + Math.round((m.emissiveIntensity != null ? m.emissiveIntensity : 1) * 10) +
@@ -410,7 +414,8 @@
       // A box pool draws the SHARED unit cube; every other pool draws the
       // exact geometry its members carry. Both go through tintGeo so the
       // instance tint has a white attribute to multiply (see above).
-      key: key, geo: tintGeo(L ? unitBox() : o.geometry), mat: mat, box: !!L,
+      key: key, geo: tintGeo(L ? (o.geometry._cbzUnit ? o.geometry._cbzUnit.geo : unitBox()) : o.geometry), mat: mat,
+      box: !!L && !o.geometry._cbzUnit, unit: !!(L && o.geometry._cbzUnit),
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
       recs: [], mDirty: false, cDirty: false, live: 0,
@@ -943,7 +948,7 @@
      remap has stopped matching and every part is falling into its own
      exact-geometry pool again. */
   CBZ.pedInstanceAudit = function () {
-    let active = 0, capacity = 0, live = 0, boxPools = 0, blackPools = 0;
+    let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0;
     pools.forEach(function (p) {
       capacity += p.cap;
       // THE BLACK-BODY GUARD: vertexColors with no `color` attribute paints
@@ -952,6 +957,7 @@
       if (p.mesh && p.next > 0) {
         active++; live += p.live;
         if (p.box) boxPools++;          // drawing the shared unit cube
+        if (p.unit) unitPools++;        // drawing a shared canonical limb loft
       }
     });
     return {
@@ -959,6 +965,7 @@
       layer: HIDE_LAYER,
       pools: active,
       boxPools: boxPools,               // active pools drawing the shared unit cube
+      unitPools: unitPools,             // active pools drawing a canonical limb loft (character.js LIMBS)
       blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.
       poolsTotal: pools.size,
       instancesLive: live,

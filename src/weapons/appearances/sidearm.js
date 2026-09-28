@@ -189,6 +189,10 @@
      line) so fpsmode grows a forearm out of it that cannot kink the wrist. */
   const GUN_K = 2.0;
   function hand(ctx, parent, h) {
+    // THE GRIP IS PART OF THE GUN even when no hand is drawn on it: a body
+    // that holds this prop in third person (systems/gunhands.js CBZ.gunHold)
+    // closes its OWN hand on exactly this grip, so the spec rides the model.
+    if (parent && parent.userData) parent.userData.fireGrip = h;
     // a rack/shop display has no hand; a caller whose rig draws its own
     // hands (NPC props) passes ctx.noHand
     if (ctx.display || ctx.noHand || !ctx.mat.skin) return null;
