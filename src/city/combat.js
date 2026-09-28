@@ -1230,7 +1230,9 @@
   // ---- input: LMB = light combo, RMB = heavy / hold-guard --------------
   //      Only when unarmed / holding a melee weapon. With a firearm out,
   //      fpsmode.js owns LMB (fire) and RMB (aim). ----
-  function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving; }
+  // cuffed: no hands to swing with; held: the click is a wrench against his grip (verbs.js)
+  function handsFree() { const pc = CBZ.playerChar; return !(pc && pc.cuffed) && !(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()); }
+  function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving && handsFree(); }
 
   document.addEventListener("mousedown", function (e) {
     if (!active()) return;

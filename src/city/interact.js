@@ -544,10 +544,14 @@
     if (stars >= 1) return "On alert · " + "★".repeat(stars);
     return "Keeping the peace";
   }
+  // hands up, in front of him: he comes and cuffs you (CBZ.arrest's take via
+  // wanted.js; cooperative = the lighter collar). Your hands going up is the
+  // whole of the feedback: no narration line.
   function copSurrender(c) {
-    CBZ.city && CBZ.city.note("You raise your hands and give yourself up…", 1.4);
+    if (CBZ.playerChar) CBZ.playerChar.handsUp = true;
+    g._citySurrender = true;
     if (c) { c.curTarget = CBZ.city.playerActor; c.sees = true; }
-    CBZ.cityBust && CBZ.cityBust({ peaceful: true });   // cooperative → lighter than a violent bust
+    CBZ.cityBust && CBZ.cityBust({ peaceful: true, cop: c || null });   // cooperative → lighter than a violent bust
   }
   function copAlibi(c) {
     const stars = g.wanted | 0;

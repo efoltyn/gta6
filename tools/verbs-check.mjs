@@ -319,7 +319,8 @@ function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], o
   v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
   for (let i = 0; i < 6; i++) v.frame(DT);
   const row = prisonRow("arrest (player)");
-  let S = V.tackle(gd, V.playerActor(), { far: true });
+  // (rng: the braced-and-fresh "keep your feet" roll is arrest-check.mjs's; here he goes down)
+  let S = V.tackle(gd, V.playerActor(), { far: true, rng: () => 0.99 });
   const seq = [];
   const run = (S, max, fn) => { for (let i = 0; i < max && S && !S.done; i++) { v.frame(DT); if (seq[seq.length - 1] !== S.verb + ":" + S.phase) seq.push(S.verb + ":" + S.phase); measureHands(v, S, row); if (fn) fn(S); } };
   run(S, 400);
@@ -387,7 +388,8 @@ for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name ===
   const r = runVerb(vE, s); r.mode = "esc"; results.push(r);
 }
 
-// ---- THE STRUGGLE: well-timed presses break a weak grip; a guard's needs more
+// ---- THE STRUGGLE (systems/arrest.js's contest): timed wrenches break a weak
+// grip in a few; a guard's takes more; tools/arrest-check.mjs has the odds
 {
   const v = vE, { CBZ } = v, V = CBZ.verbs;
   function tryBreak(grabberOpts, presses) {
@@ -408,11 +410,11 @@ for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name ===
       if (S.phase === "hold" && n >= presses && S.pt > 12) V.release(S, "set");
     }
     const out = { escaped: !!(S.result && S.result.outcome === "escaped"), grip0: S.grip0, presses: n };
+    CBZ.player._wind = 1; CBZ.player._grappleT = 0;
     v.actors.length = 0;
     return out;
   }
-  const weak = tryBreak({ build: "f", age: 13 }, 6);
-  const strongSame = tryBreak({ kind: "guard" }, 6);
+  const weak = tryBreak({ build: "f", age: 13 }, 14);
   const strongMore = tryBreak({ kind: "guard" }, 14);
   // cuffs, once closed, hold whatever he does; an NPC that opts in fights a weak grip off
   v.clearActors();
@@ -421,7 +423,8 @@ for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name ===
   v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
   V.setCuffs(V.playerActor(), true);
   const E = V.escort(cop, V.playerActor(), {});
-  for (let i = 0; i < 400 && !E.done; i++) { v.frame(DT); if (E.phase === "hold" && i % 20 === 0) V.press(); if (E.phase === "hold" && E.pt > 5) V.release(E, "set"); }
+  // a press now and then (no pulling) does not tear a man in cuffs off his escort
+  for (let i = 0; i < 400 && !E.done; i++) { v.frame(DT); if (E.phase === "hold" && i % 45 === 0) V.press(); if (E.phase === "hold" && E.pt > 5) V.release(E, "set"); }
   const cuffHeld = !(E.result && E.result.outcome === "escaped");
   V.setCuffs(V.playerActor(), false); v.actors.length = 0;
   v.clearActors();
@@ -431,15 +434,16 @@ for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name ===
   for (let i = 0; i < 900 && !N.done; i++) v.frame(DT);
   const npcBroke = !!(N.result && N.result.outcome === "escaped");
   const row = prisonRow("struggle");
-  if (!cuffHeld) row.notes.push("struggled out of an escort in cuffs");
+  if (!cuffHeld) row.notes.push("a few idle presses tore a cuffed man off his escort");
   if (!npcBroke) row.notes.push("an opted-in NPC never broke a weak grab");
   row.outcome = weak.escaped ? "escaped" : "-";
   if (!weak.escaped) row.notes.push(`a weak grip (${weak.grip0.toFixed(2)}) held through ${weak.presses} timed presses`);
-  if (strongSame.escaped) row.notes.push(`a guard's grip (${strongSame.grip0.toFixed(2)}) broke on ${strongSame.presses} presses`);
   if (!strongMore.escaped) row.notes.push(`a guard's grip never broke (${strongMore.presses} presses)`);
+  if (weak.escaped && strongMore.escaped && !(weak.presses < strongMore.presses)) row.notes.push(`a guard's grip broke as fast as a child's (${strongMore.presses} vs ${weak.presses})`);
+  if (strongMore.escaped && strongMore.presses < 4) row.notes.push(`a guard's grip broke on ${strongMore.presses} presses`);
   const errs = v.errors.splice(0); if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
   row.ok = !row.notes.length;
-  row.phases = [`grip ${weak.grip0.toFixed(2)}/guard ${strongSame.grip0.toFixed(2)} 6:brk/hold 14:brk cuffs hold npc brk`];
+  row.phases = [`grip ${weak.grip0.toFixed(2)} in ${weak.presses} / guard ${strongMore.grip0.toFixed(2)} in ${strongMore.presses}, cuffs hold, npc brk`];
   results.push(row);
 }
 

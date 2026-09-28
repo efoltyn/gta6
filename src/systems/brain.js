@@ -1722,7 +1722,16 @@
     frisk: ["Hands on the wall.", "Arms out."],
     warned: ["Move along.", "Don't let me see it again.", "Walk away."],
   };
-  const ARREST = { COMPLY_SPD: 0.6, COMPLY_HOLD: 0.6, FLEE_SPD: 2.2, FLEE_HOLD: 0.55, TASE_R: 5.5, TACKLE_R: 3.2, AFTER_TASE: 3.0, LOSE_R: 15, CUFF_T: 1.5, FRISK_T: 1.1, ESC_T: 0.4 };
+  /* THE RULE (systems/arrest.js): cuffs go on a man who is compliant,
+     subdued (tased / down / pinned) or outnumbered and taken from behind.
+     A runner has to be CAUGHT: the tackle is a committed lunge from arm's
+     reach (TACKLE_R) that can miss. A man squared up and swinging is tased
+     (or beaten) first, never tackled or grabbed. A taser can miss and has to
+     be reloaded (TASE_RELOAD). An officer can run flat out for RUN_FOR s,
+     then he is blown and jogs until he has his breath back. The cuff rung
+     waits on the REAL verb (a session or an arrest take: done + outcome):
+     cuffs that were fought off are an escalation, not a "cuffed". */
+  const ARREST = { COMPLY_SPD: 0.6, COMPLY_HOLD: 0.6, FLEE_SPD: 2.2, FLEE_HOLD: 0.55, TASE_R: 5.5, TACKLE_R: 2.6, GRAB_R: 1.5, AFTER_TASE: 3.0, LOSE_R: 15, CUFF_T: 1.5, CUFF_MAX: 14, FRISK_T: 1.1, ESC_T: 0.4, TASE_RELOAD: 2.6, RUN_FOR: 9 };
   function line(b, key) {
     const L = (b.arch.lines && b.arch.lines[key]) || LINES[key];
     return L && L.length ? L[(b.id + (b.case ? b.case.n : 0)) % L.length] : null;
@@ -1761,7 +1770,9 @@
       c.challengeN = ch.n;
     } else c.challengeN = 1;
     c.phase = "observe"; c.t = 0; c.phaseT = 0; c.comply = 0; c.flee = 0; c.lastD = -1;
-    c.tased = false; c.noTaser = false; c.tackleN = 0; c.tackleCD = 0;
+    c.tased = false; c.noTaser = false; c.tackleN = 0; c.tackleCD = 0; c.taseCD = 0; c.grabbed = false;
+    c.runT = 0; c.blown = false; c.ranAt = -1;
+    c.runFor = opts.runFor != null ? opts.runFor : (ao.runFor || (officer && officer.swat ? 13 : ARREST.RUN_FOR));   // + s of flat-out running he has in him
     c.tackleR = opts.tackleRange != null ? opts.tackleRange : ARREST.TACKLE_R;   // + reach of the takedown
     c.tackles = opts.tackles != null ? opts.tackles : 2;                        // + attempts per case
     c.forceN = 0; c.cuffed = false; c.verbResult = null; c.outcome = null;
@@ -1788,6 +1799,11 @@
     const still = (s.speed || 0) < ARREST.COMPLY_SPD || s.handsUp || s.kneeling || s.prone;
     const running = (s.speed || 0) > ARREST.FLEE_SPD && opening;
     const threatening = s.armed && (s.aiming || s.attacking);
+    // on the floor after a taser, a takedown or a beating: a man who can be cuffed
+    const down = !!(s.subdued || s.prone);
+    // his breath: a blown officer jogs until he has it back
+    if (c.ranAt !== now()) c.runT = Math.max(0, c.runT - dt * 0.3);
+    if (c.runT >= c.runFor) c.blown = true; else if (c.runT < c.runFor * 0.3) c.blown = false;
     // what compliance IS for this case: a gun-stop only wants the gun away
     const complying = c.complyMode === "disarm" ? !s.armed && !s.aiming && !s.attacking : still && !s.armed;
     const hold = c.hold;
@@ -1847,7 +1863,7 @@
     }
     if (ph === "cuff") {
       out.act = "cuff";
-      stop(officer); face(officer, sx, sz);
+      if (!c.grabbed) { stop(officer); face(officer, sx, sz); }
       // capture.js's rule: a minor matter that complied is a PAT-DOWN and a
       // warning, not cuffs (begin opts.minor). A real one is cuffs, calm,
       // because he complied — the force verbs are only ever for resisting.
@@ -1857,7 +1873,19 @@
         c.verbResult = verb(vn, officer, sus, _vOpts(c));
         out.verb = vn;
       }
-      if (running || s.attacking) { setPhase(c, "escalate"); ph = c.phase; }
+      const vr = c.verbResult;
+      if (!c.minor && vr && typeof vr === "object" && "done" in vr) {
+        // THE REAL VERB DECIDES: hands on, the struggle, both wrists. His
+        // walking off before the hands landed, or tearing out of them, is an
+        // escalation; only a closed pair of cuffs is "cuffed".
+        const k = vr.result && vr.result.outcome;
+        if (k === "cuffed" || k === "arrived") { c.cuffed = true; c.outcome = "cuffed"; c.active = false; setPhase(c, "done"); ph = "done"; }
+        else if (vr.done || c.phaseT > ARREST.CUFF_MAX) {
+          if (!vr.done && vr.cancel) { try { vr.cancel(); } catch (err) {} }
+          c.grabbed = false;
+          setPhase(c, "escalate"); ph = c.phase;
+        }
+      } else if (running || s.attacking) { setPhase(c, "escalate"); ph = c.phase; }
       else if (c.phaseT >= (c.minor ? ARREST.FRISK_T : ARREST.CUFF_T)) {
         if (c.minor) { c.outcome = "warned"; out.say = line(b, "warned"); }
         else { c.cuffed = true; c.outcome = "cuffed"; }
@@ -1867,33 +1895,50 @@
     if (ph === "escalate") {
       out.act = "chase";
       if (c.saidPhase !== "escalate") { out.say = line(b, "escalate"); c.saidPhase = "escalate"; }
-      if (hold) { out.act = "hold"; face(officer, sx, sz); } else moveTo(officer, sx, sz, _mRun);
+      if (hold) { out.act = "hold"; face(officer, sx, sz); } else runMove(officer, c, sx, sz, dt);
       if (c.phaseT >= ARREST.ESC_T) { setPhase(c, "force"); ph = c.phase; }
     }
     if (ph === "force") {
-      // capture.js's ladder: the taser from range, then the TACKLE on any man
-      // in reach who is still not complying (walking off counts, not only a
-      // sprint). A game with no taser (the verb answers false) goes straight
-      // to the tackle instead of stalling; lie still after either = cuffs.
+      // THE FORCE RUNG (systems/arrest.js is the rule). The taser from range
+      // at a man running or fighting; hands on from behind when he is
+      // outnumbered; the TACKLE, a committed lunge from arm's reach, at a
+      // runner or a man walking off. Never a tackle or a grab on a man squared
+      // up and swinging: he is tased (or beaten) first. On the floor after
+      // any of it = the cuffs.
       out.act = "force";
       if (c.tackleCD > 0) c.tackleCD -= dt;
-      const resisting = s.attacking || !(still && !s.armed);
-      if (!c.tased && !c.noTaser && d <= ARREST.TASE_R && c.saidPhase !== "force") {
-        out.say = line(b, "force"); c.saidPhase = "force";
+      if (c.taseCD > 0) c.taseCD -= dt;
+      const fighting = !!s.attacking;
+      const resisting = fighting || !(still && !s.armed);
+      if (!down && !c.noTaser && c.taseCD <= 0 && d <= ARREST.TASE_R && resisting) {
+        if (c.saidPhase !== "force") { out.say = line(b, "force"); c.saidPhase = "force"; }
         const r = verb("tase", officer, sus, _vOpts(c));
-        if (r) { c.verbResult = r; out.verb = "tase"; c.tased = true; c.forceN++; c.afterT = 0; }
-        else c.noTaser = true;                                   // no taser here: the tackle is next
+        if (!r) c.noTaser = true;                                // no taser here: the tackle is next
+        else {
+          c.verbResult = r; out.verb = "tase"; c.forceN++; c.afterT = 0;
+          if (r.hit === false) c.taseCD = ARREST.TASE_RELOAD;    // the probes missed: reload
+          else { c.tased = true; c.taseCD = ARREST.TASE_RELOAD * 1.6; }
+        }
       }
-      if (!out.verb && (c.tased || c.noTaser) && d <= c.tackleR && resisting && c.tackleN < c.tackles && c.tackleCD <= 0) {
+      if (!out.verb && !fighting && !down && !s.armed && d <= ARREST.GRAB_R && (s.cuffed || (s.behind && (s.backup | 0) >= 1))) {
+        // outnumbered, his back to you, in reach: hands on (the cuff rung runs
+        // it). A man already in cuffs just gets a hand on his arm.
+        c.grabbed = true; c.forceN++;
+        setPhase(c, "cuff"); ph = c.phase;
+      } else if (!out.verb && !fighting && !down && d <= c.tackleR && resisting && c.tackleN < c.tackles && c.tackleCD <= 0 &&
+        (c.tased || c.noTaser || c.taseCD > 0 || running)) {
         c.verbResult = verb("tackle", officer, sus, _vOpts(c)); out.verb = "tackle";
         c.tackleN++; c.tackleCD = 1.5; c.forceN++; c.afterT = 0;
-      } else if (!out.verb && !hold && d > (c.tased || c.noTaser ? c.tackleR * 0.8 : ARREST.TASE_R)) {
-        moveTo(officer, sx, sz, _mRun);
+      } else if (!out.verb && !hold) {
+        // a man swinging is not walked into: he is held off at taser range
+        if (fighting && d < 2.2) { stop(officer); face(officer, sx, sz); }
+        else if (d > (c.tased || c.noTaser || c.taseCD > 0 ? c.tackleR * 0.8 : ARREST.TASE_R)) runMove(officer, c, sx, sz, dt);
+        else if (!fighting) runMove(officer, c, sx, sz, dt);
       }
-      if (d > (hold ? ARREST.LOSE_R : ARREST.LOSE_R * 1.6)) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
-      if (ph === "force" && c.forceN > 0) {
+      if (ph === "force" && d > (hold ? ARREST.LOSE_R : ARREST.LOSE_R * 1.6)) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
+      if (ph === "force" && (c.forceN > 0 || down)) {
         c.afterT = (c.afterT || 0) + dt;
-        if (!running && !s.attacking && (s.prone || still) && c.afterT > 0.5) { setPhase(c, "approach"); ph = c.phase; c.saidPhase = "approach"; }
+        if (!running && !fighting && (down || still) && c.afterT > 0.5) { setPhase(c, "approach"); ph = c.phase; c.saidPhase = "approach"; }
         else if (c.afterT > ARREST.AFTER_TASE && running) { c.forceN = Math.max(c.forceN, 1); }
       }
     }
@@ -1911,8 +1956,13 @@
   const _mJog = { speed: "jog", arrive: 1.5, face: true }, _mWalk = { speed: "walk", arrive: 1, face: true };
   const _mRun = { speed: "run", arrive: 1, face: true }, _mWalkArrive = { speed: "walk", arrive: 1.0, face: true };
   const _sayForce = { force: true };
-  const _vo = { reason: null, roe: null, phase: null };
-  function _vOpts(c) { _vo.reason = c.reason; _vo.roe = c.roe; _vo.phase = c.phase; return _vo; }
+  const _vo = { reason: null, roe: null, phase: null, grab: false, subdued: false };
+  function _vOpts(c) { _vo.reason = c.reason; _vo.roe = c.roe; _vo.phase = c.phase; _vo.grab = !!c.grabbed; _vo.tased = !!c.tased; return _vo; }
+  // flat out while he has the breath for it, a jog once he is blown
+  function runMove(officer, c, x, z, dt) {
+    moveTo(officer, x, z, c.blown ? _mJog : _mRun);
+    if (!c.blown) { c.runT += dt; c.ranAt = now(); }
+  }
   const authority = {
     begin: begin, step: step, LINES: LINES, ARREST: ARREST,
     cancel: function (officer) { const b = officer && officer._brain; if (b && b.case) { b.case.active = false; b.case.outcome = "cancelled"; b.case.phase = "done"; } },

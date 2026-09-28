@@ -467,6 +467,9 @@
     if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
     if (CBZ.fps && CBZ.fps.active) return;
     if (CBZ.playerArmed && CBZ.playerArmed()) return;
+    // cuffed: no hands; held: the click is a wrench against his grip (verbs.js)
+    if (CBZ.playerChar && CBZ.playerChar.cuffed) return;
+    if (CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()) return;
     punch();   // the swing is the feedback; there is no line left to print
   });
 })();
