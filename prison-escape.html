@@ -11,15 +11,15 @@
 
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=flick1">
-<link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=boom2">
+<link rel="stylesheet" href="css/screens.css?v=pause1">
+<link rel="stylesheet" href="css/shark_title.css?v=pause1">
+<link rel="stylesheet" href="css/mobile.css?v=pause1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
-<link rel="stylesheet" href="css/title_hub.css?v=hub1">
+<link rel="stylesheet" href="css/title_hub.css?v=pause1">
 <meta name="description" content="Inmate or cop in a working prison: cells, yard, corridors, contraband, guards with tasers. Escape, or keep them in.">
 <script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:"escape"});</script>
 </head>
@@ -251,7 +251,6 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">Punch, start a fight</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map, waypoint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
           <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
         </div>
         <div class="controls-note">Everything else is on the card in front of you. Walk up and it shows the buttons.</div>
@@ -368,13 +367,6 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 
-
-<script>
-  try {
-    var _popOverride = parseInt(localStorage.getItem("CBZ_POP_OVERRIDE_V1"), 10);
-    if (_popOverride > 0) window.CBZ = Object.assign(window.CBZ || {}, { MASS_CROWD: _popOverride });
-  } catch (e) {}
-</script>
 
 <script src="src/config.js?v=inworld1"></script>
 <script src="src/core/seed.js"></script>
@@ -614,7 +606,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 
 <script src="src/systems/liftcore.js?v=lift1"></script>
-<script src="src/systems/escapeplan.js?v=cop1"></script>
+<script src="src/systems/escapeplan.js?v=pause1"></script>
 
 <script src="src/city/itemassets.js?v=deslop1"></script>
 
@@ -652,10 +644,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/grapple.js?v=m0928a"></script>
 <script src="src/entities/survivorbot.js?v=m0928a"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
-<script src="src/modes/shark_sim.js?v=uicut1"></script>
+<script src="src/modes/shark_sim.js?v=pause1"></script>
 
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=hub1"></script>
+<script src="src/systems/title_hub.js?v=pause1"></script>
 
 <script src="src/modes/gungame.js?v=fallstay1"></script>
 
@@ -791,7 +783,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/towngen.js?v=flick1"></script>
 
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=flick1"></script>
+
+<script src="src/city/betslip.js?v=onebet1"></script>
+<script src="src/city/island_speedway.js?v=onebet1"></script>
 <script src="src/city/island_airport.js?v=deslop1"></script>
 
 <script src="src/city/airport_kit.js?v=deslop1"></script>
@@ -832,7 +826,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/companions.js?v=allmain1"></script>
 
 <script src="src/city/arena_venue.js?v=ironjaw1yz"></script>
-<script src="src/city/arena_fights.js?v=hats1"></script>
+<script src="src/city/arena_fights.js?v=onebet1"></script>
 
 <script src="src/city/street_hardware.js?v=hw1"></script>
 <script src="src/city/props.js?v=flick1"></script>
@@ -855,7 +849,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=nodash1"></script>
 <script src="src/city/gangs.js?v=fallstay1"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
-<script src="src/city/realestate.js?v=lift1"></script>
+<script src="src/city/realestate.js?v=onebet1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -925,7 +919,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/tornado.js?v=tornado1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
-<script src="src/city/shops.js?v=nodash1"></script>
+<script src="src/city/shops.js?v=onebet1"></script>
 <script src="src/city/gunstore.js?v=boom2"></script>
 
 <script src="src/city/gunmods.js?v=nodash1"></script>
@@ -934,7 +928,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/lockon.js?v=cars1"></script>
 <script src="src/city/jewelry.js?v=deslop1"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
-<script src="src/city/activities.js?v=nodash1"></script>
+<script src="src/city/activities.js?v=onebet1"></script>
 <script src="src/city/heists.js?v=nodash1"></script>
 <script src="src/city/interactions.js?v=name1"></script>
 
@@ -952,7 +946,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/checkpoints.js?v=seawave1"></script>
 
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=name1"></script>
+<script src="src/city/interact.js?v=onebet1"></script>
 
 <script src="src/city/roleverbs.js?v=nodash1"></script>
 <script src="src/city/restrain.js?v=nodash1"></script>
@@ -966,7 +960,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=fallreal1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
-<script src="src/city/zillow.js?v=cpd1"></script>
+<script src="src/city/zillow.js?v=onebet1"></script>
 
 <script src="src/city/bank.js?v=deslop1"></script>
 <script src="src/city/pawnshop.js?v=deslop1"></script>
@@ -978,7 +972,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_plans.js?v=deslop1"></script>
 <script src="src/city/fitout_work.js?v=deslop1"></script>
 <script src="src/city/fitout_gang.js?v=deslop1"></script>
-<script src="src/city/realtyoffice.js?v=nodash1"></script>
 <script src="src/city/family.js?v=nodash1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 
@@ -1011,9 +1004,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=nodash1"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
-<script src="src/city/racing.js?v=racerstory1"></script>
+<script src="src/city/racing.js?v=onebet1"></script>
 
-<script src="src/city/racedrivers.js?v=racerstory1"></script>
+<script src="src/city/racedrivers.js?v=onebet1"></script>
 <script src="src/city/racehud.js?v=nodash1"></script>
 <script src="src/city/racecareer.js?v=nodash1"></script>
 
@@ -1174,7 +1167,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/villagekit.js?v=world1"></script>
 <script src="src/city/countries.js?v=world2"></script>
 
-<script src="src/city/casino.js?v=deslop1"></script>
+<script src="src/city/casino.js?v=onebet1"></script>
 
 <script src="src/city/river.js?v=river2bank"></script>
 
@@ -1232,7 +1225,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/city/propertyvault.js?v=deslop1"></script>
 
-<script src="src/city/plots.js?v=plots1"></script>
+<script src="src/city/plots.js?v=onebet1"></script>
 <script src="src/city/compoundcrew.js?v=boom2"></script>
 
 
@@ -1240,11 +1233,11 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 <script src="src/core/packages.js?v=pkg8"></script>
-<script src="src/games/casino.js?v=nodash1"></script>
+<script src="src/games/casino.js?v=onebet1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
-<script src="src/games/racing.js?v=racerstory1"></script>
+<script src="src/games/racing.js?v=onebet1"></script>
 
-<script src="src/games/boxing.js?v=nodash1"></script>
+<script src="src/games/boxing.js?v=onebet1"></script>
 <script src="src/games/airport.js?v=nodash1"></script>
 <script src="src/games/military.js?v=nodash1"></script>
 <script src="src/games/government.js?v=nodash1"></script>
