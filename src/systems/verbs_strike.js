@@ -419,6 +419,7 @@
     applyReaction(S, c, Bt);
   }
   function applyReaction(S, c, Bt) {
+    if (!S.Ba || !Bt) return;   // the strike was torn down in onLand (attacker gone mid-swing)
     const res = S.res, tch = Bt.ch;
     const bothP = S.Ba.isPlayer || Bt.isPlayer;
     const stop = res.blocked ? 0.035 : 0.045 + 0.065 * res.power;
