@@ -36,6 +36,39 @@
     return { x: (W.minX + W.maxX) / 2, z: (W.minZ + W.maxZ) / 2 };
   }
 
+  // one options record for the whole cast (it was a fresh object + closure per
+  // body per frame)
+  const NAV_O = {
+    speed: 1.8,
+    // a cell door is 1.6 m clear and the grid grows its jambs by a body
+    // radius: the lane through it is ONE 0.4 m square. A waypoint counted
+    // "reached" from 0.85 m away is a body cutting the jamb; 0.55 keeps
+    // him on the lane through the leaf.
+    arrive: 0.55,
+    // a sealed door is retried every 3.5 s; a shorter wait had him pushing
+    // at the leaf for the other two seconds of every cycle
+    sealedWait: 3.4,
+    wait: function (a, s) { a.pause = Math.max(a.pause || 0, s); },
+    goalY: undefined,
+  };
+
+  /* THE TIER. A resident of an upper cell (world/cellblock.js, c.tier) whose
+     errand is his own cell — home at the count, his bed at night — is going
+     UP: the goal carries the tier's floor height, so systems/navgrid.js walks
+     him to the stair and up it instead of to the cell under his. A chase has
+     its level from the mark (navgrid's markY: the player's standing height). */
+  function tierGoalY(n) {
+    const CB = CBZ.cellblock;
+    if (!CB || !CB.cells || !(n._cellIdx >= 0)) return undefined;
+    const c = CB.cells[n._cellIdx];
+    if (!c || !c.tier || !(c.fy > 0)) return undefined;
+    const t = n.target;
+    // his cell, or the deck in front of it (npcConfine stages a way home
+    // through the door mouth, ~1.3 m out)
+    if (Math.abs(t.x - c.x) <= c.hx + 1.6 && Math.abs(t.z - c.z) <= c.hz + 1.6) return c.fy;
+    return undefined;
+  }
+
   // ready() is what entities/npc.js's mover asks before handing a body over
   CBZ.prisonNav = {
     ready: function () {
@@ -50,18 +83,9 @@
       if (n._propLie || n._propBed || n._propSeat) return false;
       if (CBZ.propArcActive && CBZ.propArcActive(n)) return false;
       if (n.char && (n.char.sitting || n.char.lying)) return false;
-      return G.step(n, n.group.position, n.target, dt, {
-        speed: n._spd != null ? n._spd : (n.speed || 1.8),
-        // a cell door is 1.6 m clear and the grid grows its jambs by a body
-        // radius: the lane through it is ONE 0.4 m square. A waypoint counted
-        // "reached" from 0.85 m away is a body cutting the jamb; 0.55 keeps
-        // him on the lane through the leaf.
-        arrive: 0.55,
-        // a sealed door is retried every 3.5 s; a shorter wait had him pushing
-        // at the leaf for the other two seconds of every cycle
-        sealedWait: 3.4,
-        wait: function (a, s) { a.pause = Math.max(a.pause || 0, s); },
-      });
+      NAV_O.speed = n._spd != null ? n._spd : (n.speed || 1.8);
+      NAV_O.goalY = tierGoalY(n);
+      return G.step(n, n.group.position, n.target, dt, NAV_O);
     },
     owns: function (n) { return !!(CBZ.navGrid && CBZ.navGrid.owns(n)); },
     plan: function (from, to, opts) { return CBZ.navGrid ? CBZ.navGrid.plan(from, to, opts) : null; },

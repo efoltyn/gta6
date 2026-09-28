@@ -439,6 +439,11 @@
   function groundSupport(x, z, gr) {
     return CBZ.findSupport ? CBZ.findSupport(x, z, gr.oy - 0.5, gr.oy + 0.5) : null;
   }
+  function kindAt(gx, gy, gz, slot, gr) {
+    const id = occupancy.get(occKey(gx, gy, gz, slot, gr));
+    const p = id != null && CBZ.pieces ? CBZ.pieces.get(id) : null;
+    return p && p.alive !== false ? p.kind : null;
+  }
   function checkSupport(kind, def, gx, gy, gz, cx, cz, rot, gr, pos) {
     if (kind === "foundation") {
       // ground-only, ground floor only: findSupport must land within 0.5m of
@@ -455,6 +460,10 @@
       return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
     if (kind === "floor" || kind === "roof") {
+      // not over a stair: the slab would be a platform over the stairwell
+      // (you walk on air and can never go down) and its collider a ceiling
+      // across the climb (nobody gets up)
+      if (gy > 0 && kindAt(gx, gy - 1, gz, "fill", gr) === "stairs") return { ok: false };
       if (gy === 0) {
         const s = groundSupport(cx, cz, gr);
         if (!s) return { ok: false };
@@ -476,7 +485,10 @@
     }
     if (kind === "stairs") {
       // stairs occupy their own cell's fill slot, so they rest on a fill piece
-      // one level down, or bare ground at gy 0.
+      // one level down, or bare ground at gy 0. And never under a floor/roof
+      // (the same rule as above, from the other side).
+      const over = kindAt(gx, gy + 1, gz, "fill", gr);
+      if (over === "floor" || over === "roof") return { ok: false };
       if (gy === 0) {
         const s = groundSupport(cx, cz, gr);
         if (!s) return { ok: false };
@@ -730,22 +742,23 @@
     }
 
     if (kind === "stairs") {
-      // Custom RAMP platform (physics.js groundAt ramp handling). rot0/rot2
-      // climb along z, rot1/rot3 along x; dir = which way is uphill.
-      const onXAxis = (rot === 1 || rot === 3);
-      const dir = (rot === 0 || rot === 1) ? 1 : -1;
-      const rampShape = onXAxis
-        ? { axis: "x", x0: dir > 0 ? pos.x - CELL / 2 : pos.x + CELL / 2, x1: dir > 0 ? pos.x + CELL / 2 : pos.x - CELL / 2, y0: pos.y, y1: pos.y + WALL_H }
-        : { z0: dir > 0 ? pos.z - CELL / 2 : pos.z + CELL / 2, z1: dir > 0 ? pos.z + CELL / 2 : pos.z - CELL / 2, y0: pos.y, y1: pos.y + WALL_H };
-      const ramp = {
-        minX: pos.x - fp.hx, maxX: pos.x + fp.hx,
-        minZ: pos.z - fp.hz, maxZ: pos.z + fp.hz,
-        top: pos.y + WALL_H,
-        ramp: rampShape,
-        pieceId: piece.id,
-      };
-      CBZ.platforms.push(ramp);
-      piece.platforms.push(ramp);
+      // THE WALK SURFACE IS A CBZ.stairs FLIGHT (systems/stairs.js), and its
+      // direction is read off the MESH, not re-derived from `rot`. It used to
+      // be re-derived: rot0/rot2 along z, rot1/rot3 along x with uphill
+      // "+ for rot 0/1". That matches the wood stair (spawnPiece turns it by
+      // +rot*90deg) but the concrete kit stair is turned by -rot*90deg (see
+      // def.kit above), so a concrete stair placed at rot 1 or 3 climbed one
+      // way on screen and the other way underfoot — you walked up into the
+      // back of the treads. The mesh's +z is uphill for both kinds.
+      const ry = piece.meshRef ? piece.meshRef.rotation.y : rot * (Math.PI / 2);
+      const ux = Math.sin(ry), uz = Math.cos(ry);
+      const f = CBZ.stairs && CBZ.stairs.flight({
+        bottom: { x: pos.x - ux * CELL / 2, y: pos.y, z: pos.z - uz * CELL / 2 },
+        top: { x: pos.x + ux * CELL / 2, y: pos.y + WALL_H, z: pos.z + uz * CELL / 2 },
+        width: CELL * 0.9, overlap: 0.3, kind: "stair", owner: "piece:" + piece.id,
+        plats: piece.platforms,
+      });
+      if (f && f.plat) f.plat.pieceId = piece.id;
     }
 
     // Extension points: the global B6 hook (baseclaim.js), then the def's own

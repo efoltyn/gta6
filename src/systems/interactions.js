@@ -667,8 +667,7 @@
         comes out of the far grille head first, pushes its panel off, and
         gets up. A floor hatch is climbed down into and up out of. No black
         card, no teleport you can see.
-     Tower ladders (world/prisonkit.js, ladder:true) are not vents and keep
-     their climb exactly as it was (climbLadder).
+     The tower ladders are not vents: they are climbed (systems/climb.js).
      ============================================================ */
   const BLADES = ["Shiv", "Shank", "Razor Blade", "Hacksaw Blade", "Lockpick", "Hatchet", "Pickaxe"];
   const VENT_REACH2 = 1.6;
@@ -744,18 +743,16 @@
     ventRunE = e;
   }
 
-  // ---- 2. the tower ladders: unchanged (a fade up or down the rungs) -------
-  function climbLadder(vent) {
+  // ---- 2. a HIDDEN hatch (world/escape_routes.js opts.hidden) has no mouth
+  //      to crawl through: the dark of the shaft is the cut
+  function ventFade(vent) {
     if (!vent || !vent.dest || CBZ.crawling) return;
     CBZ.crawling = true;
     if (fadeEl) fadeEl.style.opacity = "1";
     setTimeout(() => {
       player.pos.set(vent.dest.x, vent.dest.y, vent.dest.z);
       if (CBZ.playerChar) CBZ.playerChar.group.position.copy(player.pos);
-      setTimeout(() => {
-        if (fadeEl) fadeEl.style.opacity = "0";
-        CBZ.crawling = false;
-      }, 300);
+      setTimeout(() => { if (fadeEl) fadeEl.style.opacity = "0"; CBZ.crawling = false; }, 300);
     }, 200);
   }
 
@@ -792,12 +789,11 @@
 
   function crawlVent(vent) {
     if (!vent || !vent.dest || CBZ.crawling || CR.on) return;
-    if (vent.ladder) { climbLadder(vent); return; }
     if (vent.cover && !vent.cover.open) return;          // screwed on: take it off first
     // the culvert only goes when nobody is watching the ditch
     if (CBZ.escapePlan && !CBZ.escapePlan.mayCrawl(vent)) return;
     const a = vent.mouth, b = vent.dest.mouth;
-    if (!a || !b) { climbLadder(vent); return; }         // an unauthored pair: never strand the body
+    if (!a || !b) { ventFade(vent); return; }            // a hidden hatch has no mouth to crawl out of
     CR.on = true; CR.from = vent; CR.to = vent.dest;
     CR.ph = "down"; CR.t = 0; CR.e0 = g.elapsed || 0;
     CR.sx = player.pos.x; CR.sz = player.pos.z;
@@ -1233,12 +1229,7 @@
         if (CBZ.escapePlan && !CBZ.escapePlan.ventOpen(vent)) continue;
         armedVent = vent;                       // what a pill tap acts on
         armedVentT = 0.25;
-        if (vent.ladder) {
-          // the tower ladders: the climb they always had
-          CBZ.prisonPrompt("vent", "@prisonVentCrawl", vent.verb || "Climb",
-            { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
-          if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
-        } else if (vent.cover && !vent.cover.open) {
+        if (vent.cover && !vent.cover.open) {
           // screwed on. The verb is what your hands can do to it.
           const working = VW.vent === vent;
           const tool = working ? VW.tool : ventTool();

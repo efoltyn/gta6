@@ -1270,8 +1270,20 @@
     const dx = g.group.position.x - player.pos.x, dz = g.group.position.z - player.pos.z;
     return CBZ.moves.lodFor(dx * dx + dz * dz, g.group.visible);
   }
-  function walkTo(g, tx, tz, sp, dt, stop, leg) {
+  function walkTo(g, tx, tz, sp, dt, stop, leg, ty) {
     const p = g.group.position;
+    /* ANOTHER LEVEL (systems/climb.js, the nav link): a man on a tower deck
+       walking to the yard walks to the hatch and climbs down; a man in the
+       yard going for someone up a tower walks to its foot and climbs up.
+       `ty` is the target's height (undefined = the floor under it). */
+    if (CBZ.climb && CBZ.climb.list.length) {
+      const D = CBZ.climb.detour(g, tx, ty, tz);
+      if (D) {
+        if (D.climbing) return Math.hypot(tx - p.x, tz - p.z);
+        tx = D.x; tz = D.z; stop = D.wait ? 0.5 : 0.25; leg = false;
+        if (D.wait && Math.hypot(tx - p.x, tz - p.z) < 0.7) { stand(g, dt); return Math.hypot(tx - p.x, tz - p.z); }
+      }
+    }
     const T = g._navT || (g._navT = new THREE.Vector3());
     T.set(tx, 0, tz);
     // CBZ.vitals: a screw wrapping his own wound stands to do it; a groggy,
@@ -1281,7 +1293,8 @@
       if (VT.busy(g)) { stand(g, dt); return Math.hypot(tx - p.x, tz - p.z); }
       sp *= VT.speedMul(g);
     }
-    if (navOn()) { NAV_OPTS.speed = sp; CBZ.navGrid.step(g, p, T, dt, NAV_OPTS); }
+    // the ground's navigator knows nothing above it: up a tower he walks straight
+    if (navOn() && !(p.y > 1.2)) { NAV_OPTS.speed = sp; CBZ.navGrid.step(g, p, T, dt, NAV_OPTS); }
     if ((g._navWait || 0) > 0) {                    // a shut door on his route: he stands at it
       g._navWait -= dt;
       stand(g, dt);
@@ -1291,7 +1304,9 @@
     // a navigator waypoint short of its goal is a corner: walked through
     // (a goal the grid only SNAPPED out of a bench is still a goal: braked into)
     const S = g._nav;
-    const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3);
+    // (a stair route's waypoints — navgrid's level layer — are corners too)
+    const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3)
+      || !!(g._lvl && g._lvl.pts);
     O.speed = sp; O.stop = routed ? 0.3 : (stop || 0.3); O.leg = routed || !!leg;
     O.face = null; O.strafe = false; O.turnRate = 0;
     O.accel = sp > 3 ? 5.2 : 0;
@@ -1661,7 +1676,9 @@
         const S = g._chase || (g._chase = primeSearch({ x: player.pos.x, z: player.pos.z }, 3));
         recentre(S, player.pos.x, player.pos.z, ctx.pvx, ctx.pvz);
         S.fixAt = clock();
-        const dist = Math.hypot(pdx, pdz);
+        // a man up a tower (or on its ladder) above him is not in arm's reach
+        // however close he stands under it: the height counts
+        const dist = Math.hypot(pdx, pdz, Math.max(0, Math.abs(player.pos.y - (g.group.position.y || 0)) - 0.8) * 3);
         lookAtPoint(g, player.pos.x, player.pos.z);
         // THE ORDER (systems/capture.js): inside ORDER_R he tells you, then
         // stands off at the distance the arrest asks for while you decide.
@@ -1672,7 +1689,7 @@
         }
         if (dist > hold) {
           noteState(g, "hunt");
-          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt, Math.max(0.3, hold - 0.1));
+          walkTo(g, player.pos.x, player.pos.z, g.speed * (hold > CAPTURE_R && dist < ORDER_R ? 1.0 : 1.7), dt, Math.max(0.3, hold - 0.1), false, player.pos.y);
         } else {
           noteState(g, "capture");
           faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
@@ -2112,7 +2129,12 @@
     // gives the roster its own two plans; prisonnav re-opens it for the cast.
     if (navOn()) CBZ.navGrid.frame(2, 1.5);
     auditPre();
-    for (const g of CBZ.guards) { if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(g)) continue; updateGuard(g, dt); }   // a body a verb holds is the verb's
+    for (const g of CBZ.guards) {
+      if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(g)) continue;   // a body a verb holds is the verb's
+      if (CBZ.climb && CBZ.climb.owns(g)) continue;                     // a body on a ladder is the ladder's (systems/climb.js)
+      if (CBZ.towerWatch && CBZ.towerWatch.owns(g, dt)) continue;      // an officer on his tower post (entities/towerwatch.js)
+      updateGuard(g, dt);
+    }
   });
   CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });
 })();

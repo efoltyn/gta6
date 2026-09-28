@@ -11,7 +11,10 @@
      • held on a slot by CBZ.cityPostStand (garrison.js), whose shared brain
        walks him back, holds the bearing, fights without chasing and bolts
        like anyone else would. We hand it a `threat` read and nothing more.
-     • raised onto a tower deck by CBZ.cityFloorPed
+     • up and down a tower's ladder: a tower slot is a post with a `y`, and
+       garrison.js walks every post through systems/climb.js's nav link, so a
+       tower guard climbs to his deck, comes down it to go home, and goes back
+       up after a fight — never lifted or dropped
      • dealing through gangops.js's own buyer staging (CBZ.cityDealStageBuyer)
      • driving through boarding.js's chauffeur verb (CBZ.followerOrder "drive")
      • a raid squad is fresh gang bodies driven through the same ped fields
@@ -364,10 +367,12 @@
       aggr: role === "guard" ? 0.93 : 0.8, name: entry.name, cash: entry.cash || 15,
       face: face,
     };
-    if (y > 0.2) opts.floorY = y;
     let ped = null;
     try { ped = CBZ.cityPostNpc(x, z, opts); } catch (e) { ped = null; }
     if (!ped) return null;
+    // minted ON a tower deck: stood on it (the deck is a platform, the feet
+    // follow it), not pinned to it — he leaves it by the ladder
+    if (y > 0.2 && ped.pos) ped.pos.y = y;
     dressBody(ped, plot, entry);
     if (entry.hp > 0) ped.hp = Math.min(ped.maxHp, entry.hp);
     ped._ccHp = ped.hp;
@@ -389,13 +394,14 @@
       radius: slot.tower ? 0.6 : (guard ? 0.8 : 2.0),
       minStars: 99,                // your own crew never draws on YOU
       threat: threatFn,
+      // a tower slot is a post UP the tower: garrison.js walks him there by
+      // its ladder (systems/climb.js), and down it when he leaves
+      y: slot.tower ? slot.y : undefined,
     });
   }
-  function unfloor(ped) { if (ped && ped._occupyY > 0.2 && CBZ.cityFloorPed) CBZ.cityFloorPed(ped, 0); }
   function releaseBody(ped) {
     if (!ped) return;
     if (CBZ.cityPostRelease) CBZ.cityPostRelease(ped, "compoundcrew");
-    unfloor(ped);
     ped._ccWalk = null; ped._ccWork = null; ped._ccTask = null; ped._ccSlot = null;
   }
   function despawnBody(plot, rt, entry, ped) {
@@ -441,7 +447,6 @@
   function settleOnSlot(ped, plot, slot) {
     ped._ccWalk = null; ped._ccSlot = slot;
     standAt(ped, plot, slot);
-    if (slot.tower && slot.y > 0.2 && CBZ.cityFloorPed) CBZ.cityFloorPed(ped, slot.y);
   }
 
   // ---- HIRE / STATION / PULL BACK -----------------------------------------------
@@ -847,13 +852,8 @@
         continue;
       }
       if (!ped._post && !ped._ccTask) { settleOnSlot(ped, plot, slotFor(plot, rt, e)); continue; }
-      // tower guard pulled off his deck by a fight: bring him to ground, re-lift at the slot
-      const sl = ped._ccSlot;
-      if (sl && sl.tower) {
-        const off = d2(ped.pos.x, ped.pos.z, sl.x, sl.z);
-        if (off > 3.5 * 3.5 && ped._occupyY > 0.2) unfloor(ped);
-        else if (off < 1.2 * 1.2 && !(ped._occupyY > 0.2) && CBZ.cityFloorPed) CBZ.cityFloorPed(ped, sl.y);
-      }
+      // (a tower guard off his deck walks back to its ladder and climbs it:
+      // his post carries the deck's `y` and garrison.js's walk does the rest)
       if (e.role === "worker") tickWorker(plot, rt, e, ped, dt);
     }
     if (rt.lastHitAlert > 0) rt.lastHitAlert -= dt;

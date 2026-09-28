@@ -486,6 +486,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
+<!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
+<script src="src/systems/stairs.js?v=stairs1"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=crater1"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
@@ -503,8 +505,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=dsl3"></script>
-<script src="src/world/corridorkit.js?v=gate1"></script>
+<script src="src/world/prisonkit.js?v=m489457-st1"></script>
+<!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
+     off the same numbers systems/climb.js climbs, + railed landings. Every
+     tower ladder in every game is made here and registered with climb.js. -->
+<script src="src/world/ladderkit.js?v=lad1"></script>
+<script src="src/world/corridorkit.js?v=gate1-st1"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -529,7 +535,7 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/world/cellblock.js?v=dsl3"></script>
+<script src="src/world/cellblock.js?v=dsl3-st1"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
@@ -565,7 +571,7 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=moves1"></script>
+<script src="src/entities/moves.js?v=moves1-st1"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -576,7 +582,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=cuffs1"></script>
-<script src="src/systems/verbs.js?v=bodyphys1"></script>
+<script src="src/systems/verbs.js?v=bodyphys1-st1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -614,7 +620,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/appearances/c4.js?v=boom2"></script>
+<script src="src/weapons/appearances/c4.js?v=anchor1"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -665,8 +671,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisongrounds.js?v=dsl3"></script>
-<script src="src/world/corridors.js?v=dsl3"></script>
+<script src="src/world/prisongrounds.js?v=lad1-st1"></script>
+<script src="src/world/corridors.js?v=m489457"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -737,7 +743,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=vit3"></script>
+<script src="src/systems/physics.js?v=m489457-st1"></script>
+<!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
+<script src="src/systems/climb.js?v=lad1"></script>
+<!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
+<script src="src/entities/towerwatch.js?v=lad1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -749,7 +759,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/actorcollide.js?v=bodyphys1"></script>
+<script src="src/systems/actorcollide.js?v=bodyphys1-st1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -790,7 +800,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=gate1"></script>
+<script src="src/systems/interactions.js?v=m489457"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -859,10 +869,10 @@ document.body.appendChild(b);}}catch(e){}})();
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=lift1"></script>
+<script src="src/world/disaster_arena.js?v=lift1-st1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=vit3"></script>
-<script src="src/entities/survivorbot.js?v=m0928a"></script>
+<script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
@@ -1058,7 +1068,7 @@ document.body.appendChild(b);}}catch(e){}})();
      guard towers, floodlights, cameras, garage, helipad, stash, bunks, registered
      into systems/building.js's CATALOG. City-only; everything city-side is looked
      up lazily. -->
-<script src="src/city/compoundkit.js?v=cpd1"></script>
+<script src="src/city/compoundkit.js?v=lad1-st1"></script>
 <!-- F7 — world/props.js migrated onto CBZ.spawnPiece (moved from the
      "2. world geometry" wave above, right after towers.js): it needs
      spawnPiece to exist at parse time. (world/crates.js, the five yard
@@ -1354,10 +1364,10 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=deslop1"></script>
+<script src="src/city/fitout.js?v=deslop1-st1"></script>
 <script src="src/city/fitout_plans.js?v=deslop1"></script>
-<script src="src/city/fitout_work.js?v=deslop1"></script>
-<script src="src/city/fitout_gang.js?v=deslop1"></script>
+<script src="src/city/fitout_work.js?v=deslop1-st1"></script>
+<script src="src/city/fitout_gang.js?v=deslop1-st1"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
@@ -1837,7 +1847,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/president_office.js?v=pres3"></script>
 <script src="src/city/motorcade.js?v=pres3"></script>
 <script src="src/city/president_public.js?v=detail1"></script>
-<script src="src/city/president_regime.js?v=pres3"></script>
+<script src="src/city/president_regime.js?v=pres3-st1"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
@@ -1859,7 +1869,7 @@ document.body.appendChild(b);}}catch(e){}})();
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
 <script src="src/city/plots.js?v=onebet1"></script>
-<script src="src/city/compoundcrew.js?v=boom2"></script>
+<script src="src/city/compoundcrew.js?v=lad1"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker

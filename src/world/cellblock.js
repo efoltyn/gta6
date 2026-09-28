@@ -314,9 +314,14 @@
   const GW = 1.35;                      // gallery deck, out from the cell fronts
   const GDECK = 0.14;                   // gallery deck thickness
   const RAIL_H = 1.05;                  // rail over the deck
-  const STAIR_W = 1.20;
+  // The flights run along the south wall, whose inner face is z = -8.5. They
+  // were 1.20 wide with a 16 cm rail collider on the open side: 0.3 m of
+  // centre-line for the player and none at all for a 0.5 m inmate. Now 1.50
+  // wide, 5 cm off the wall, the rail collider the rail's own 6 cm: 1.49 m
+  // clear, so a 0.5 m body has 0.49 m of lane and a 0.38 m player 0.73 m.
+  const STAIR_W = 1.50;
   const STAIR_X0 = 4.0;                 // |x| where each flight leaves the floor (door gap is |x| < 3)
-  const SZ0 = -9.95, SZ1 = -8.75;       // the flights' z band, along the south wall
+  const SZ1 = -8.55, SZ0 = SZ1 - STAIR_W; // the flights' z band, along the south wall
 
   // palette
   const C_PART = 0x8f98a3;   // cell partition concrete
@@ -1464,8 +1469,10 @@
        edge costs a rejected sample, never a body in a wall. */
     c.room = [c.x - c.hx + 0.85, c.x + c.hx - 0.85, c.z - c.hz + 0.85, c.z + c.hz - 0.85];
     if (c.dz !== 0) c.aisle = [-11, 11, NFACE + 0.6, NFACE + 2.5];
-    else if (Math.abs(c.faceX) > 8) c.aisle = c.dx > 0 ? [c.faceX + 0.6, c.faceX + 2.9, -37.4, -9.8]
-      : [c.faceX - 2.9, c.faceX - 0.6, -37.4, -9.8];
+    // (side lanes stop a body-width short of the stair flights' rail: the
+    // gallery end at z > SZ0 is under the climbing flight)
+    else if (Math.abs(c.faceX) > 8) c.aisle = c.dx > 0 ? [c.faceX + 0.6, c.faceX + 2.9, -37.4, SZ0 - 0.6]
+      : [c.faceX - 2.9, c.faceX - 0.6, -37.4, SZ0 - 0.6];
     else c.aisle = [-3.3, 3.3, -37.4, -9.8];
     // an upper resident's "aisle" is his room: the tier is locked (header)
     if (c.tier) c.aisle = c.room;
@@ -1626,19 +1633,27 @@
   for (const seg of EAST_ROW) if (seg.kind === "wall") bracket(EFACE, (seg.a + seg.b) / 2, -1, 0);
 
   // ---- the stairs: one open flight per side along the south wall, from
-  //      |x| = STAIR_X0 on the floor up to the gallery's end. A ramp record
-  //      for the physics (systems/physics.js groundAt interpolates it), the
-  //      treads and stringers for the eye, a handrail on the open side, and a
-  //      band under the low end so nobody walks into the underside. -------
+  //      |x| = STAIR_X0 on the floor up to the gallery's end, landing on the
+  //      side gallery deck (x EFACE-GW..EFACE, which the gallery platform
+  //      below covers out to SZ1; the gallery rail stops at SZ0, so nothing
+  //      crosses the arrival). The walk surface, the soffit under it and the
+  //      AI link are CBZ.stairs.flight's — this file draws the steel.
+  //      It used to hand-roll a ramp and put "a band under the low end so
+  //      nobody walks into the underside": a full-width [0, 1.9 m] box over
+  //      the flight's OWN first 3.1 m of run. Feet on the lower treads were
+  //      inside the band, so the flight was a wall from the floor and nobody,
+  //      player or inmate, could ever get on it. -------------------------
+  const stairLinks = [];
   function stair(side) {
     const xB = side * STAIR_X0, xT = side * (Math.abs(WFACE) - GW);   // bottom, top
+    const zc = (SZ0 + SZ1) / 2;
     const run = Math.abs(xT - xB);
     const N = Math.round(FY / 0.19);                                // risers
     const tread = run / N, rise = FY / N;
     for (let i = 1; i <= N; i++) {
       const x = xB + side * (tread * (i - 0.5)), y = rise * i;
-      pushBox(gal, x, y - 0.03, (SZ0 + SZ1) / 2, tread + 0.02, 0.06, STAIR_W);   // tread
-      pushBox(gal, x - side * (tread * 0.5 - 0.02), y - rise / 2 - 0.03, (SZ0 + SZ1) / 2, 0.04, rise, STAIR_W); // riser
+      pushBox(gal, x, y - 0.03, zc, tread + 0.02, 0.06, STAIR_W);   // tread
+      pushBox(gal, x - side * (tread * 0.5 - 0.02), y - rise / 2 - 0.03, zc, 0.04, rise, STAIR_W); // riser
     }
     // stringers: two sloped plates, drawn as rotated meshes (addBox has no yaw)
     for (const z of [SZ0 + 0.05, SZ1 - 0.05]) {
@@ -1652,27 +1667,27 @@
     const NP = 5;
     for (let i = 0; i <= NP; i++) {
       const t = i / NP, x = xB + side * run * t, y = FY * t;
-      pushBox(gal, x, y + 0.5, SZ0 + 0.05, 0.05, 1.0, 0.05);
+      pushBox(gal, x, y + 0.5, SZ0 + 0.03, 0.05, 1.0, 0.05);
     }
     const hr = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, FY), 0.05, 0.05), CBZ.cmat(C_DARK));
-    hr.position.set((xB + xT) / 2, FY / 2 + 1.0, SZ0 + 0.05);
+    hr.position.set((xB + xT) / 2, FY / 2 + 1.0, SZ0 + 0.03);
     hr.rotation.z = side * Math.atan2(FY, run);
     hr.castShadow = false; root.add(hr);
-    // colliders: the handrail as a stepped band, and the underside
+    // the handrail's collider: a stepped band the rail's own 6 cm thick, on
+    // the flight's north edge (outside the walk lane, never across it)
     for (let i = 0; i < NP; i++) {
       const xa = xB + side * run * (i / NP), xb = xB + side * run * ((i + 1) / NP);
       const y = FY * (i / NP);
-      solid(Math.min(xa, xb), SZ0 - 0.03, Math.max(xa, xb), SZ0 + 0.13, y, y + FY / NP + 1.0);
+      solid(Math.min(xa, xb), SZ0, Math.max(xa, xb), SZ0 + 0.06, y, y + FY / NP + 1.0);
     }
-    // the low end: headroom under a tread is less than a body until the flight
-    // has climbed ~1.9 m, so that stretch is a wall to the floor
-    const xLow = xB + side * run * (1.9 / FY);
-    solid(Math.min(xB, xLow), SZ0, Math.max(xB, xLow), SZ1, 0, 1.9);
-    // the physics: a ramp from the floor at xB to FY at xT
-    (CBZ.platforms || (CBZ.platforms = [])).push({
-      minX: Math.min(xB, xT), maxX: Math.max(xB, xT), minZ: SZ0, maxZ: SZ1, top: FY,
-      ramp: { axis: "x", x0: xB, x1: xT, y0: 0, y1: FY },
-    });
+    // the walk surface + soffit + AI link: the one stair system
+    if (CBZ.stairs) {
+      const f = CBZ.stairs.flight({
+        bottom: { x: xB, y: LIFT, z: zc }, top: { x: xT, y: FY + LIFT, z: zc },
+        width: STAIR_W, underside: true, owner: "cellblock", kind: "stair",
+      });
+      if (f) { for (const c of f.cols) mine.push(c); if (f.link) stairLinks.push(f.link); }
+    }
   }
   stair(-1); stair(1);
   mergedMesh(gal, C_DARK, false);
@@ -1681,10 +1696,13 @@
   // ---- what a body stands on up there: the walkway and every upper floor.
   //      A record per band; groundAt only offers it within a step of the
   //      body's own height, so a man in a ground cell never sees it. -------
-  (CBZ.platforms || (CBZ.platforms = [])).push(
+  // (kept: CBZ.cellblock.tierWalk publishes the three deck rects so an AI
+  // with a target up here knows it is a tier-2 place and asks CBZ.stairs.route)
+  const tierWalk = [
     { minX: IX0, maxX: WFACE + GW, minZ: NFACE, maxZ: SZ1, top: FY },
     { minX: EFACE - GW, maxX: IX1, minZ: NFACE, maxZ: SZ1, top: FY },
-    { minX: IX0, maxX: IX1, minZ: IZN, maxZ: NG1, top: FY });
+    { minX: IX0, maxX: IX1, minZ: IZN, maxZ: NG1, top: FY }];
+  (CBZ.platforms || (CBZ.platforms = [])).push(tierWalk[0], tierWalk[1], tierWalk[2]);
   if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
   /* ==========================================================
@@ -2933,6 +2951,11 @@
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
     // the tier, for anything that wants to know there is one
     tiers: 2, tierFloor: FY, galleryWidth: GW,
+    // the walkable tier (platform records at FY) and the two flights up to it
+    // (CBZ.stairs links, bottom on the hall floor at |x| = STAIR_X0, top on
+    // the side gallery deck). A guard chasing a man onto the gallery routes
+    // with CBZ.stairs.route(from, {x, y: FY, z}) — this is just the index.
+    tierWalk: tierWalk, stairLinks: stairLinks,
   };
 
   /* IS THE MAN ON HIS BUNK ACTUALLY ON IT — measured, not eyeballed.

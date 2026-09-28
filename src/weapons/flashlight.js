@@ -88,6 +88,33 @@
   const HANDLE_C = -0.036;          // where the fist sits: its tail edge just past the index knuckle
   const HALF = Math.PI / 2;
 
+  /* THE ANCHORS (contract: weapons/appearances/sidearm.js, "ANCHOR
+     CONTRACT"), written inline in plain THREE because disaster.html loads
+     this file without the appearances index. Metres, so k = 1.
+     A torch is a gun that points +Z, so every frame here is the gun frame
+     turned half round Y: -Z runs tail -> lens (the beam's way), +Y stays up.
+       grip     the handle centre (== userData.handle.center). Its quat keeps
+                +Y UP (the contract's grip +Y is "up the grip" and a fist on
+                a level torch closes round a horizontal tube, so up is the
+                hand's up); the tube's own axis rides along as `axis`
+                (handle axis, pointing toward the lens: +Z).
+       trigger  the tail switch face the thumb presses.
+       muzzle   the lens centre / beam origin; -Z of its quat is the beam. */
+  const TURN = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+  function stampAnchors(model) {
+    const u = model.userData;
+    const at = function (p, extra) { return Object.assign({ pos: p.clone(), quat: TURN.clone() }, extra || {}); };
+    u.anchors = {
+      k: 1,
+      grip: at(u.handle.center, { axis: u.handle.axis.clone(), rake: 0 }),
+      trigger: at(u.tailSwitch),
+      support: null,
+      muzzle: at(u.beamOrigin),
+      mag: null, stock: null, bolt: null, charge: null, sight: null, lens: null,
+      optic: { type: "none", mag: 1 },
+    };
+  }
+
   CBZ.buildFlashlight = function (opts) {
     opts = opts || {};
     const m = opts.private ? {
@@ -132,6 +159,7 @@
     model.userData.forward = new THREE.Vector3(0, 0, 1);
     model.userData.length = Z_LENS + 0.001 - Z_TAIL;
     model.userData.headRadius = 0.0215;
+    stampAnchors(model);
     return model;
   };
 

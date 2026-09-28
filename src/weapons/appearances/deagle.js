@@ -25,8 +25,8 @@
 
     // SLIDE (rear) and fixed BARREL (front): both the tapering triangle-ish
     // section, split by a dark seam; the full-length rail on top
-    K.tag(K.prof(g, "de.slide", [[-0.041, 0], [0.041, 0], [0.022, 0.088], [-0.022, 0.088]], 0.312, ss,
-      { axis: "z", bevel: 0.004, z: -0.126 }), "part_slide");
+    K.prof(g, "de.slide", [[-0.041, 0], [0.041, 0], [0.022, 0.088], [-0.022, 0.088]], 0.312, ss,
+      { axis: "z", bevel: 0.004, z: -0.126 });
     K.prof(g, "de.barrel", [[-0.039, 0], [0.039, 0], [0.016, 0.088], [-0.016, 0.088]], 0.322, ss,
       { axis: "z", bevel: 0.004, z: -0.446 });
     box(g, 0.080, 0.098, 0.004, mat.black, 0, 0.044, -0.296, 0.42);    // slide/barrel seam, raked
@@ -39,15 +39,17 @@
       ribs.push([[f, 0.010], [f + 0.006, 0.010], [f + 0.006, 0.066], [f, 0.066]]);
     }
     const lean = Math.atan2(0.019, 0.088);
-    K.tag(K.prof(g, "de.serr", ribs, 0.006, mat.black, { bevel: 0, x: 0.0425, rz: lean }), "part_slide");
-    K.tag(K.prof(g, "de.serr", ribs, 0.006, mat.black, { bevel: 0, x: -0.0425, rz: -lean }), "part_slide");
+    K.prof(g, "de.serr", ribs, 0.006, mat.black, { bevel: 0, x: 0.0425, rz: lean });
+    K.prof(g, "de.serr", ribs, 0.006, mat.black, { bevel: 0, x: -0.0425, rz: -lean });
     // exposed HAMMER, safety lever, sights
     K.prof(g, "de.hammer", [[-0.030, 0.030], [-0.052, 0.050], [-0.058, 0.082], [-0.046, 0.090], [-0.032, 0.072]],
       0.022, mat.black, { bevel: 0.003 });
     box(g, 0.012, 0.018, 0.040, mat.black, -0.042, 0.062, 0.010);
-    K.tag(K.prof(g, "de.rear", [[-0.024, 0], [0.024, 0], [0.024, 0.020], [0.007, 0.020], [0.005, 0.009],
-      [-0.005, 0.009], [-0.007, 0.020], [-0.024, 0.020]], 0.022, mat.black, { axis: "z", bevel: 0.002, y: 0.100, z: 0.004 }), "part_slide");
-    box(g, 0.010, 0.024, 0.030, mat.black, 0, 0.110, -0.580);
+    K.prof(g, "de.rear", [[-0.024, 0], [0.024, 0], [0.024, 0.020], [0.007, 0.020], [0.005, 0.009],
+      [-0.005, 0.009], [-0.007, 0.020], [-0.024, 0.020]], 0.022, mat.black, { axis: "z", bevel: 0.002, y: 0.100, z: 0.004 });
+    // front post on the rail's nose: square rear face to the eye, ramped front
+    K.prof(g, "de.front", [[0.568, 0.096], [0.596, 0.096], [0.582, 0.122], [0.568, 0.122]],
+      0.010, mat.black, { bevel: 0.0015 });
     // the .50 BORE, low in the barrel's wide base
     const bore = cyl(g, 0.017, 0.006, mat.bore || mat.black, 0, BORE, -0.606, Math.PI / 2);
     bore.userData.weaponBore = true;
@@ -65,7 +67,7 @@
     const gp = K.grip(0.084, -0.070, 0.142, 0.250, R, { grooves: 3, swellB: 0.008 });
     K.prof(g, "de.grip", gp, 0.086, rubber, { bevel: 0.006 });
     const b0 = gp[8], b1 = gp[9];
-    K.tag(box(g, 0.090, 0.018, 0.150, ss, 0, (b0[1] + b1[1]) / 2 - 0.006, -(b0[0] + b1[0]) / 2, -R), "part_mag");
+    box(g, 0.090, 0.018, 0.150, ss, 0, (b0[1] + b1[1]) / 2 - 0.006, -(b0[0] + b1[0]) / 2, -R);
 
     // the firing hand on the grip
     K.hand(g, { at: [-0.062, -0.012], rake: R, gripW: 0.086, gripD: 0.142, trigger: [-0.096, -0.126] });
@@ -78,6 +80,22 @@
       charge: new THREE.Vector3(0, 0.050, -0.040),     // rear slide serrations
       style: "mag",
     };
+    // THE ANCHORS (contract: sidearm.js). The grip's top centre (z -0.016,
+    // y -0.048) run down the raked axis: a palm down = the hand's centre; the
+    // 7-round mag rides that axis inside the grip, its well at the foot.
+    const down = (t) => [0, -0.048 - Math.cos(R) * t, -0.016 + Math.sin(R) * t];
+    K.anchors(g, {
+      k: 2.4,
+      grip: { pos: down(0.100), rake: R },
+      trigger: [0, -0.098, -0.136],
+      support: { pos: [-0.043, down(0.100)[1], down(0.100)[2]], kind: "cup", len: 0 },
+      mag: { pos: down(0.140), well: down(0.236), rake: R },
+      stock: null,
+      charge: [0, 0.050, -0.040],
+      // rear notch (ears' top line) -> front post top
+      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.42, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 })();

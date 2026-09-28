@@ -32,9 +32,17 @@
     // rounded DUST COVER, its rear button proud of the receiver
     K.prof(g, "ak.cover", [[-0.040, 0.040], [0.300, 0.040], [0.300, 0.078], [0.020, 0.086], [-0.030, 0.080], [-0.040, 0.068]],
       0.060, blued, { bevel: 0.009 });
-    // rear sight block + tangent leaf
+    // rear sight block (the ramp base), then the TANGENT LEAF hinged at its
+    // front and lying back up the ramp, its range slider, and the notch plate
+    // standing at the leaf's rear end: the U the eye lays the post in
     K.prof(g, "ak.rsight", [[0.296, 0.040], [0.430, 0.040], [0.430, 0.064], [0.330, 0.094], [0.296, 0.094]],
       0.050, steel, { bevel: 0.004 });
+    K.prof(g, "ak.leaf", [[0.300, 0.094], [0.300, 0.110], [0.330, 0.106], [0.420, 0.072], [0.420, 0.064]],
+      0.030, blued, { bevel: 0.002 });
+    K.prof(g, "ak.slider", [[0.352, 0.086], [0.380, 0.076], [0.380, 0.094], [0.352, 0.104]],
+      0.040, steel, { bevel: 0.002 });
+    K.prof(g, "ak.notch", [[-0.018, 0], [0.018, 0], [0.018, 0.030], [0.005, 0.030], [0.003, 0.024],
+      [-0.003, 0.024], [-0.005, 0.030], [-0.018, 0.030]], 0.008, blued, { axis: "z", bevel: 0.001, y: 0.096, z: -0.304 });
     // SELECTOR lever down the right flank + charging handle on the carrier
     box(g, 0.005, 0.020, 0.150, K.fin("edge"), 0.036, 0.020, -0.135, -0.06);
     K.tag(cyl(g, 0.011, 0.050, blued, 0.050, 0.050, -0.285, 0, 0, Math.PI / 2), "part_charge");
@@ -58,7 +66,8 @@
     ], 0.040, steel, { bevel: 0.004 });
     K.prof(g, "ak.fsbWings", [[-0.028, 0], [0.028, 0], [0.028, 0.060], [0.016, 0.060], [0.010, 0.016],
       [-0.010, 0.016], [-0.016, 0.060], [-0.028, 0.060]], 0.022, steel, { axis: "z", bevel: 0.003, y: 0.090, z: -1.102 });
-    box(g, 0.006, 0.040, 0.006, mat.black, 0, 0.128, -1.102);             // the post
+    // the post: round stem, its tip level with the rear notch's floor
+    K.lathe(g, "ak.post", [[0.0035, 0], [0.0035, 0.018], [0.0028, 0.020], [0, 0.020]], 8, mat.black, 0, 0.100, -1.102, { axis: "y" });
     K.prof(g, "ak.brake", [[1.150, 0.012], [1.246, 0.012], [1.246, 0.042], [1.214, 0.060], [1.150, 0.060]],
       0.046, mat.black, { bevel: 0.006 });
     const bore = cyl(g, 0.011, 0.006, mat.bore || mat.black, 0, BORE, -1.249, Math.PI / 2);
@@ -100,6 +109,24 @@
       charge: new THREE.Vector3(0.060, 0.050, -0.285), // AK charging handle: RIGHT side of the carrier
       style: "mag",
     };
+    /* THE ANCHORS (contract: sidearm.js). 1.738 model units over the real
+       880 mm: k 1.975. Eye relief to the AK's notch is long: the rear sight
+       sits ahead of the receiver, so a cheek on the low comb puts the eye
+       ~30 cm behind it. */
+    const down = (t) => [0, -0.027 - Math.cos(R) * t, -0.060 + Math.sin(R) * t];
+    const mid = 0.28, MAG = [0, -0.030 - Math.sin(mid) * Rc, -(C[0] - Math.cos(mid) * Rc)], WELL = [0, -0.042, -0.300];
+    K.anchors(g, {
+      k: 1.975,
+      grip: { pos: down(0.078), rake: R },
+      trigger: [0, -0.064, -0.154],
+      support: { pos: [0, -0.046, -0.580], kind: "guard", len: 0.27 },
+      mag: { pos: MAG, well: WELL, quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(WELL[0] - MAG[0], WELL[1] - MAG[1], WELL[2] - MAG[2]).normalize()) },
+      stock: [0, -0.095, 0.489],
+      charge: [0.060, 0.050, -0.285],
+      sight: { rear: [0, 0.120, -0.304], front: [0, 0.120, -1.102], eyeRelief: 0.30, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 })();

@@ -1928,9 +1928,25 @@
     const b = rec.b, H = p._hideHome, ox = b.ox || 0, oz = b.oz || 0;
     const pts = [];
     const kNow = floorAt(b, p.pos.y || 0), core = coreOf(b);
-    if (kNow !== H.k && core && core.route) {
-      const r = core.route(kNow, H.k);
-      for (let i = 0; i < r.length; i++) pts.push({ x: r[i].x, z: r[i].z, stair: true });
+    if (kNow !== H.k) {
+      // THE ONE STAIR GRAPH (systems/stairs.js): every flight is a link, so
+      // the way between his floor and his post's is whatever stairs the
+      // building really has. The core's own walk is the fallback for a core
+      // that predates the links.
+      let r = null;
+      if (CBZ.stairs && CBZ.stairs.route) {
+        try {
+          r = CBZ.stairs.route({ x: p.pos.x, y: p.pos.y || 0, z: p.pos.z },
+            { x: H.x, y: H.y > 0.2 ? H.y : 0, z: H.z });
+        } catch (e) { r = null; }
+      }
+      if (r && r.length) {
+        // its last point is the post itself, which the walk below appends
+        for (let i = 0; i < r.length - 1; i++) pts.push({ x: r[i].x, z: r[i].z, stair: true });
+      } else if (core && core.route) {
+        const c = core.route(kNow, H.k);
+        for (let i = 0; i < c.length; i++) pts.push({ x: c[i].x, z: c[i].z, stair: true });
+      }
     }
     const g = rec.g;
     if (H.k === 0 && g && g.wall) {

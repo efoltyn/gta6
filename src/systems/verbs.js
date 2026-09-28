@@ -213,6 +213,21 @@
     if (CBZ.floorAt) { const g = CBZ.floorAt(x, z, fromY); if (isFinite(g)) return g; }
     return fromY != null ? fromY : 0;
   }
+  /* THE HELD MAN'S FLOOR ON A STAIR. A body held, walked or dragged by A sits
+     up to a metre ahead of or behind him; on a flight that is up to 0.7 m of
+     rise, past groundAt's 0.45 step from A's feet — so the ramp under him
+     read as "too high", groundAt answered the landing below, and he dropped
+     through the treads going up (and hung in the air going down). On a
+     flight the reach grows with the offset (a stair is never steeper than
+     ~40°); off one it stays a step, so he never pops onto a table top. */
+  function heldGround(x, z, A) {
+    let reach = 0.45;
+    const ST = CBZ.stairs;
+    if (ST && ST.flightAt && (ST.flightAt(x, z, A.pos.y) || ST.flightAt(A.pos.x, A.pos.z, A.pos.y))) {
+      reach += Math.min(1.0, Math.hypot(x - A.pos.x, z - A.pos.z) * 0.9);
+    }
+    return groundY(x, z, A.pos.y + reach);
+  }
 
   /* ============================================================
      CONTACT POINTS — world space, off the live joint matrices
@@ -1885,7 +1900,7 @@
     const AR = CBZ.arrest, LU = AR.LUNGE, L = S.lunge, A = S.A, T = S.T;
     const step = Math.min(LU.SPEED * dt, Math.max(0, L.reach - L.travel));
     _R.set(A.pos.x + L.dx * step, A.pos.y, A.pos.z + L.dz * step);
-    if (CBZ.collide) CBZ.collide(_R, A.radius * 0.9, A.pos.y + 0.2, A.pos.y + 1.7);
+    if (CBZ.collide) CBZ.collide(_R, A.radius * 0.9, A.pos.y + 0.42, A.pos.y + 1.7);
     const moved = Math.hypot(_R.x - A.pos.x, _R.z - A.pos.z);
     setPos(A, _R.x, groundY(_R.x, _R.z, A.pos.y + 0.45), _R.z);
     A.face(Math.atan2(L.dx, L.dz), 1 - Math.exp(-20 * dt));
@@ -2355,7 +2370,7 @@
     if (d < 1e-4) return 0;
     const st = Math.min(d, speed * dt);
     _R.set(B.pos.x + dx / d * st, B.pos.y, B.pos.z + dz / d * st);
-    if (CBZ.collide) CBZ.collide(_R, B.isPlayer ? 0.38 : B.radius * 0.9, B.pos.y + 0.2, B.pos.y + 1.7);
+    if (CBZ.collide) CBZ.collide(_R, B.isPlayer ? 0.38 : B.radius * 0.9, B.pos.y + 0.42, B.pos.y + 1.7);
     setPos(B, _R.x, groundY(_R.x, _R.z, B.pos.y + 0.45), _R.z);
     B.face(face != null ? face : Math.atan2(dx, dz), 1 - Math.exp(-12 * dt));
     return st / Math.max(dt, 1e-4);
@@ -2437,7 +2452,7 @@
     const rx = Math.cos(yawA), rz = -Math.sin(yawA);
     let x = A.pos.x + rx * o.lx + fx * o.lz;
     let z = A.pos.z + rz * o.lx + fz * o.lz;
-    let y = groundY(x, z, A.pos.y + 0.45) + o.dy;
+    let y = heldGround(x, z, A) + o.dy;
     let yaw = yawA + o.relYaw, pitch = o.pitch;
 
     // the grabber's own pitch (the tackle drive / mount)
@@ -2486,7 +2501,7 @@
       // collar rides that much further off his back)
       const off = A.depth + 0.2 + A.widthX + A.backX + Math.max(T.frontX, T.backX);
       _W.set(A.pos.x - fx * off - Math.cos(yawA) * 0.12, A.pos.y + A.hipY * 1.3, A.pos.z - fz * off + Math.sin(yawA) * 0.12);
-      const gy = groundY(_W.x - fx * 1.0, _W.z - fz * 1.0, A.pos.y + 0.45);
+      const gy = heldGround(_W.x - fx * 1.0, _W.z - fz * 1.0, A);
       const T0 = localTable(T.ch), j = CPI.backCollar * 4;
       const L = Math.max(0.5, T0[j + 2] * T.scale);                 // feet -> collar, standing
       const h = Math.min(L * 0.98, Math.max(0.1, _W.y - gy));
@@ -2562,7 +2577,7 @@
     // bodies do not go through walls: he is stopped, and the pair moves as one
     if (CBZ.collide && !o.anchor && !o.ground) {
       _R.set(x, y, z);
-      CBZ.collide(_R, T.radius * 0.85, y + 0.25, y + 1.7);
+      CBZ.collide(_R, T.radius * 0.85, y + 0.42, y + 1.7);
       const ddx = _R.x - x, ddz = _R.z - z;
       if (Math.abs(ddx) + Math.abs(ddz) > 1e-4) {
         x = _R.x; z = _R.z;

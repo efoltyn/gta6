@@ -325,7 +325,7 @@
     return {
       segments: SEG.length, corridorM: Math.round(corridorM), grilles: grilles, wallRuns: wallRuns,
       doors: specs.length, ports: 1 + ((CBZ.altExitZones || []).length), unitBeds: unitBeds,
-      ladders: (CBZ.vents || []).filter((v) => v.ladder).length / 2,
+      ladders: (CBZ.prisonTowers || []).filter((t) => t.ladder || t.foot).length,
       segmentsList: SEG.map((s) => ({ id: s.id, r: s.r })),
     };
   };

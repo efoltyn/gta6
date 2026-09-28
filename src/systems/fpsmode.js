@@ -1208,13 +1208,17 @@
   let _fpList = [];
   function fpPlants() {
     fistT[0].plantW = 0; fistT[1].plantW = 0;
-    const rig = CBZ.playerChar, tp = rig && rig.traversePose, trav = tp && tp._plants;
+    // a vault's plants, or (systems/climb.js) the rungs your hands are on;
+    // failing both, the touches (a vault or a climb owns the hands)
+    const rig = CBZ.playerChar, tp0 = rig && rig.traversePose;
+    const tp = (tp0 && tp0._plants) ? tp0 : (CBZ.climb && CBZ.climb.fpSource ? CBZ.climb.fpSource() : null);
+    const trav = tp && tp._plants;
     const touch = CBZ.verbs && CBZ.verbs.touchPlants ? CBZ.verbs.touchPlants() : null;
     if ((!trav || !trav.length) && (!touch || !touch.length)) return false;
     if (!CBZ.camera || !FPH || !FPH.PLANT_CONTACT) return false;
     _fpList.length = 0;
-    if (trav) for (let k = 0; k < trav.length; k++) _fpList.push(trav[k]);
-    else if (touch) for (let k = 0; k < touch.length; k++) _fpList.push(touch[k]);   // a vault owns the hands
+    if (trav && trav.length) for (let k = 0; k < trav.length; k++) _fpList.push(trav[k]);
+    else for (let k = 0; k < touch.length; k++) _fpList.push(touch[k]);
     const plants = _fpList;
     const cam = CBZ.camera;
     cam.updateMatrixWorld(true);
@@ -1240,7 +1244,7 @@
       // the hand's frame: +Y the back of the hand, fingers (-Z); a vault's
       // palm is flat on the top with the fingers along the move; world -> camera -> vm
       if (pl.bk && pl.fg) { _fpY.copy(pl.bk); _fpZ.copy(pl.fg).negate(); }
-      else { _fpY.set(0, 1, 0); _fpZ.set(-tp.dirX, 0, -tp.dirZ); }
+      else { _fpY.set(0, 1, 0); _fpZ.set(-(tp ? tp.dirX : 0), 0, -(tp ? tp.dirZ : 1)); }
       _fpZ.addScaledVector(_fpY, -_fpZ.dot(_fpY)).normalize();
       _fpX.crossVectors(_fpY, _fpZ);
       _fpM.makeBasis(_fpX, _fpY, _fpZ);
@@ -1254,7 +1258,7 @@
       T.x += (_fpG.x - T.x) * w; T.y += (_fpG.y - T.y) * w; T.z += (_fpG.z - T.z) * w;
       T.vis = true;
       T.hook = 0;
-      if (w > 0.3) T.curl = pose;
+      if (w > 0.3) T.curl = pl.pose || (tp && tp.curl) || "plant";
       T.plantW = w;
       any = true;
     }
@@ -3582,8 +3586,25 @@
     // (e) same shared per-class falloff evaluator as cityGunHit above.
     const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
       : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
-    const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
-    const lethalHeadshot = hit.head && !w.nonlethal;
+    let dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
+    let lethalHeadshot = hit.head && !w.nonlethal;
+    /* WORN ARMOUR (city/armor.js's kit, dressed on a prison body: the tower
+       posts wear a plate carrier and a helmet). The plate eats most of a
+       body round while it lasts; the helmet turns a head shot from the end
+       into a hard knock. Both wear down, the same pool the city drains. */
+    const kit = a._armorKitMap;
+    if (kit && (a._armor || 0) > 0 && !w.nonlethal) {
+      const K = CBZ.ARMOR_KITS || {};
+      if (hit.head && kit.head) {
+        lethalHeadshot = false;
+        const eat = Math.round(dmg * (1 - ((K[kit.head] && K[kit.head].headFrac) || 0.25)));
+        a._armor = Math.max(0, a._armor - eat); dmg = Math.max(1, dmg - eat);
+      } else if (!hit.head && kit.chest) {
+        const eat = Math.round(dmg * ((K[kit.chest] && K[kit.chest].absorb) || 0.7));
+        a._armor = Math.max(0, a._armor - eat); dmg = Math.max(1, dmg - eat);
+      }
+      if (CBZ.sfx) { try { CBZ.sfx("hit", { dist: hit.dist, volume: 0.5, ghost: true }); } catch (e) {} }
+    }
     if (lethalHeadshot) a.hp = 0;
     else a.hp -= dmg;
 

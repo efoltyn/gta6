@@ -484,22 +484,31 @@
       const hb = S.supHB[k], z0 = S.supZ0[k], z1 = S.supZ1[k];
       // A real shell with windows and an aft doorway. This replaces the old
       // closed prism whose paint sat directly behind every pane of glass.
+      const ownWell = k < S.tiers ? tierStair(S, k).well : null;
+      const wellBelow = k > 0 ? tierStair(S, k - 1).well : null;
+      const slab = K.addSlab || function (r, w2, h2, d2, x2, y2, z2, m2) { return K.addBox(r, w2, h2, d2, x2, y2, z2, m2); };
       K.addCabinShell(b, { width: hb * 2, z0: z0, z1: z1, y0: y0, y1: y1,
-        doorW: Math.min(1.9, hb * 0.58), body: cream, liner: liner, glass: glass });
+        doorW: Math.min(1.9, hb * 0.58), body: cream, liner: liner, glass: glass, roofHole: ownWell });
       // Each tier is a real room, not just an opaque wedding-cake block. The
       // same tier index names the room, furnishes it and feeds the visual census.
       const roomId = k === 0 ? "super-saloon" : (k === bTier ? "super-bridge" : "super-tier-" + k);
       const roomLabel = k === 0 ? "Main saloon" : (k === bTier ? "Bridge" : (k === S.tiers ? "Observation lounge" : "Upper lounge " + k));
       const span = Math.abs(z1 - z0), midZ = (z0 + z1) * 0.5;
       K.declareRoom(b, roomId, roomLabel);
-      K.addBox(b, hb * 1.90, 0.10, span * 0.985, 0, y0 + 0.10, midZ, wood);
-      K.addBox(b, hb * 1.86, 0.06, span * 0.98, 0, y1 - 0.20, midZ, liner);
+      slab(b, hb * 1.90, 0.10, span * 0.985, 0, y0 + 0.10, midZ, wood, wellBelow);
+      slab(b, hb * 1.86, 0.06, span * 0.98, 0, y1 - 0.20, midZ, liner, ownWell);
       if (k !== bTier) {
-        const loungeZ = z0 + Math.min(4.4, span * 0.24);
         const setteeD = Math.min(5.2, span * 0.28);
-        K.addFixtureBox(b, "settee", 0.72, 0.50, setteeD, hb * 0.63, y0 + 0.36, loungeZ, pad);
-        K.addFixtureBox(b, "settee-back", 0.14, 0.78, setteeD, hb * 0.86, y0 + 0.72, loungeZ, pad);
-        K.addTable(b, hb * 0.18, y0 + 0.10, loungeZ, Math.min(2.1, hb * 0.55), 1.25, wood, chrome);
+        // clear of the stairwell coming up from the tier below (same side)
+        const wellEnd = k > 0 ? tierStair(S, k - 1).zTop - z0 : 0;
+        const loungeZ = z0 + Math.max(Math.min(4.4, span * 0.24), wellEnd + 0.3 + setteeD / 2);
+        // the lounge takes the side of the room the tier's stair is NOT on
+        // (tierStair alternates sides tier by tier; this is the side the well
+        // from the tier below comes up on)
+        const ls = (k % 2) ? 1 : -1;
+        K.addFixtureBox(b, "settee", 0.72, 0.50, setteeD, ls * hb * 0.63, y0 + 0.36, loungeZ, pad);
+        K.addFixtureBox(b, "settee-back", 0.14, 0.78, setteeD, ls * hb * 0.86, y0 + 0.72, loungeZ, pad);
+        K.addTable(b, ls * hb * 0.18, y0 + 0.10, loungeZ, Math.min(2.1, hb * 0.55), 1.25, wood, chrome);
         const diningZ = z0 + span * 0.62;
         K.addTable(b, 0, y0 + 0.10, diningZ, Math.min(3.0, hb * 0.92), 1.35, wood, chrome);
         [-1, 1].forEach(function (side) {
@@ -508,7 +517,7 @@
         });
         K.addCabinet(b, -hb * 0.78, y0 + 0.10, z0 + span * 0.40, Math.min(0.72, hb * 0.18), 0.96, Math.min(3.8, span * 0.20), liner);
         K.addFixtureBox(b, "bar-counter", Math.min(0.82, hb * 0.20), 0.10, Math.min(3.8, span * 0.20), -hb * 0.76, y0 + 1.12, z0 + span * 0.40, wood);
-        K.addScreen(b, -hb + 0.14, y0 + 1.48, loungeZ, Math.min(1.8, span * 0.12), 0.82, Math.PI / 2, screen);
+        K.addScreen(b, -ls * (hb - 0.14), y0 + 1.48, loungeZ, Math.min(1.8, span * 0.12), 0.82, ls * Math.PI / 2, screen);
         K.addFixtureBox(b, "ceiling-light", Math.min(1.4, hb * 0.35), 0.04, 0.32, 0, y1 - 0.25, loungeZ, warm);
         // Long ships need room rhythm, not a single sofa stranded in an 80 m
         // corridor. Repeat human-scale seating bays and open bulkhead frames;
@@ -534,10 +543,10 @@
       // block above it, plus a rail all round
       if (k < S.tiers) {
         const hbUp = S.supHB[k + 1], z0Up = S.supZ0[k + 1], z1Up = S.supZ1[k + 1];
-        K.addBox(b, hb * 2, 0.14, Math.abs(z0Up - z0), 0, S.deckY[k + 1], (z0 + z0Up) * 0.5, teak);
+        slab(b, hb * 2, 0.14, Math.abs(z0Up - z0), 0, S.deckY[k + 1], (z0 + z0Up) * 0.5, teak, ownWell);
         K.addBox(b, hb * 2, 0.14, Math.abs(z1 - z1Up), 0, S.deckY[k + 1], (z1 + z1Up) * 0.5, teak);
         [1, -1].forEach(function (side) {
-          K.addBox(b, hb - hbUp, 0.14, Math.abs(z1Up - z0Up), side * (hb + hbUp) * 0.5, S.deckY[k + 1], (z0Up + z1Up) * 0.5, teak);
+          slab(b, hb - hbUp, 0.14, Math.abs(z1Up - z0Up), side * (hb + hbUp) * 0.5, S.deckY[k + 1], (z0Up + z1Up) * 0.5, teak, ownWell);
           K.addRail(b, side * (hb - 0.14), z0 + 0.3, z1 - 0.3, S.deckY[k + 1] + 0.07, chrome, 2.2);
         });
       } else {
@@ -553,12 +562,10 @@
     // every deck above the main one is unreachable: a 3.5 m deck height is
     // eight times physics.js's 0.45 m STEP_UP.
     for (let k = 0; k < S.tiers; k++) {
-      const y0 = S.deckY[k] + 0.10, y1 = S.deckY[k + 1] + 0.08;
-      const n = Math.max(6, Math.round((y1 - y0) / 0.32));
-      const stairX = Math.max(1.05, S.supHB[k] * 0.56);
-      K.addStairs(b, stairX, 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n, teak);
+      const T = tierStair(S, k), y0 = T.y0, y1 = T.y1, n = T.n, stairX = T.x;
+      K.addStairs(b, stairX, T.w, T.zBase, 1, y0, y1, n, teak);
       [1, -1].forEach(function (side) {
-        K.addBox(b, 0.07, 1.00, n * 0.36, stairX + side * 0.80, y0 + (y1 - y0) * 0.5 + 0.5, S.supZ0[k] + 0.6 + n * 0.18, chrome);
+        K.addBox(b, 0.07, 1.00, n * 0.36, stairX + side * 0.80, y0 + (y1 - y0) * 0.5 + 0.5, T.zBase + n * 0.18, chrome);
       });
     }
 
@@ -805,8 +812,10 @@
     const platW = HB * 2 * beamFrac(-0.985) * 0.74;
     decks.push({ x: 0, z: S.sternZ - L * 0.018, w: platW, d: L * 0.045, top: S.platY + 0.10 });
     decks.push({
-      x: 0, z: (S.supZ0[0] + S.sternZ) * 0.5 + L * 0.012,
-      w: HB * 1.72, d: Math.abs(S.supZ0[0] - S.sternZ) - L * 0.03, top: FB + 0.08,
+      // runs right up to the saloon's aft wall (it stopped 0.003 L short: a
+      // 10-50 cm crack with no floor across the main door)
+      x: 0, z: (S.supZ0[0] + S.sternZ + L * 0.027) * 0.5,
+      w: HB * 1.72, d: Math.abs(S.supZ0[0] - S.sternZ) - L * 0.027, top: FB + 0.08,
     });
     // side decks
     [1, -1].forEach(function (side) {
@@ -825,12 +834,20 @@
       const hb = S.supHB[k], z0 = S.supZ0[k], z1 = S.supZ1[k];
       const span = Math.abs(z1 - z0), y0 = S.deckY[k] + 0.10, y1 = S.deckY[k] + S.deckH - 0.22;
       const doorW = Math.min(1.9, hb * 0.58), sideW = Math.max(0.25, hb - doorW * 0.5);
-      decks.push({ x: 0, z: (z0 + z1) * 0.5, w: hb * 1.86, d: span * 0.94, top: y0 + 0.05 });
-      walls.push({ x: hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: y0, y1: y1 });
-      walls.push({ x: -hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: y0, y1: y1 });
-      walls.push({ x: doorW * 0.5 + sideW * 0.5, z: z0, w: sideW, d: 0.14, y0: y0, y1: y1 });
-      walls.push({ x: -(doorW * 0.5 + sideW * 0.5), z: z0, w: sideW, d: 0.14, y0: y0, y1: y1 });
-      walls.push({ x: 0, z: z1, w: hb * 2, d: 0.14, y0: y0, y1: y1 });
+      // wall to wall: at span*0.94 the sole stopped 3% short of the aft wall,
+      // a 0.5-1.4 m slot with no floor just inside every tier's door (and
+      // under the foot of its stair)
+      decks.push({ x: 0, z: (z0 + z1) * 0.5, w: hb * 1.86, d: span, top: y0 + 0.05 });
+      // Walls start 0.35 over the sole, not 0.10: the flight from the tier
+      // below climbs UNDER this tier's aft wall (it rises through a well in
+      // this tier's floor), and at 0.10 a climber's head met the wall's foot
+      // 0.1 m before the top. Anyone standing on this sole still hits it.
+      const wy0 = y0 + 0.25;
+      walls.push({ x: hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: wy0, y1: y1 });
+      walls.push({ x: -hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: wy0, y1: y1 });
+      walls.push({ x: doorW * 0.5 + sideW * 0.5, z: z0, w: sideW, d: 0.14, y0: wy0, y1: y1 });
+      walls.push({ x: -(doorW * 0.5 + sideW * 0.5), z: z0, w: sideW, d: 0.14, y0: wy0, y1: y1 });
+      walls.push({ x: 0, z: z1, w: hb * 2, d: 0.14, y0: wy0, y1: y1 });
       if (k < S.tiers) {
         const y = S.deckY[k + 1] + 0.08;
         decks.push({ x: 0, z: (S.supZ0[k] + S.supZ0[k + 1]) * 0.5, w: S.supHB[k] * 2, d: Math.abs(S.supZ0[k + 1] - S.supZ0[k]), top: y });
@@ -869,14 +886,36 @@
     K_stairDecks(decks, platW * 0.38, Math.min(1.5, platW * 0.20), S.sternZ + L * 0.004, 1, S.platY + 0.10, FB + 0.07, nStep);
     K_stairDecks(decks, -platW * 0.38, Math.min(1.5, platW * 0.20), S.sternZ + L * 0.004, 1, S.platY + 0.10, FB + 0.07, nStep);
     for (let k = 0; k < S.tiers; k++) {
-      const y0 = S.deckY[k] + 0.10, y1 = S.deckY[k + 1] + 0.08;
-      const n = Math.max(6, Math.round((y1 - y0) / 0.32));
-      K_stairDecks(decks, Math.max(1.05, S.supHB[k] * 0.56), 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n);
+      const T = tierStair(S, k);
+      K_stairDecks(decks, T.x, T.w, T.zBase, 1, T.y0, T.y1, T.n);
     }
     return {
-      decks: decks, walls: walls,
+      decks: K_cutWells(decks), walls: walls,
       riders: true, yaw: true, camYaw: false, bodyYaw: true, tilt: true,
       onLeave: "upward", id: "yacht-decks-" + Math.round(S.loa),
+    };
+  }
+  // THE TIER STAIR — one solve for the drawn flight, its deck records, its
+  // stairwell and the furniture that must keep off it. What it replaced:
+  //   · every flight on +x, so each started straight over the well of the one
+  //     below (its foot hung in that hole) — now the side ALTERNATES per tier;
+  //   · a foot pinned at supZ0+0.6, so on most hulls the last 1.8 m of climb
+  //     (where a head is above the next floor) ran under the next tier's aft
+  //     wall: the climber's head met it 0.1-0.6 m short of the top. The flight
+  //     now ENDS 2.6 m inside the next tier, so the part of the climb that is
+  //     above its floor is clear of its wall (and its wall starts 0.35 up);
+  //   · a centre 0.56*hb out, which on narrow tiers put the flight's head under
+  //     the next tier's SIDE wall — clamped inboard of it now.
+  function tierStair(S, k) {
+    const y0 = S.deckY[k] + 0.10, y1 = S.deckY[k + 1] + 0.08;
+    const n = Math.max(6, Math.round((y1 - y0) / 0.32));
+    const hbUp = S.supHB[Math.min(k + 1, S.tiers)];
+    const ax = Math.max(0.9, Math.min(Math.max(1.05, S.supHB[k] * 0.56), hbUp - 0.55));
+    const x = (k % 2 ? -1 : 1) * ax;
+    const zBase = Math.max(S.supZ0[k] + 0.6, S.supZ0[Math.min(k + 1, S.tiers)] + 2.6 - n * 0.36);
+    return {
+      x: x, w: 1.5, zBase: zBase, n: n, y0: y0, y1: y1, zTop: zBase + n * 0.36,
+      well: { x0: x - 0.8, x1: x + 0.8, z0: zBase, z1: zBase + (n - 1) * 0.36 },
     };
   }
   // A local copy of the KIT's stairDecks so the deck spec can be solved BEFORE
@@ -885,8 +924,39 @@
   function K_stairDecks(out, x, w, zBase, dir, y0, y1, steps) {
     const rise = (y1 - y0) / steps, run = 0.36;
     for (let i = 0; i < steps; i++) {
-      out.push({ x: x, z: zBase + dir * (run * (i + 0.5)), w: w, d: run, top: y0 + rise * (i + 1) });
+      out.push({ x: x, z: zBase + dir * (run * (i + 0.5)), w: w, d: run, top: y0 + rise * (i + 1), tread: true });
     }
+    // the stairwell this flight needs in whatever deck it climbs up through:
+    // everything but its top tread, which is at the arrival deck's height
+    const zA = zBase, zB = zBase + dir * run * (steps - 1);
+    (out.wells || (out.wells = [])).push({
+      x0: x - w / 2 - 0.05, x1: x + w / 2 + 0.05, z0: Math.min(zA, zB), z1: Math.max(zA, zB),
+      yLo: Math.min(y0, y1), yHi: Math.max(y0, y1),
+    });
+  }
+  // CUT THE STAIRWELLS. A deck record over a flight is a floor you walk on in
+  // mid-air: from the deck above you could never walk down (groundAt keeps the
+  // highest surface in step reach), and a climber's head went through it. Every
+  // non-tread deck that stands over a flight, above its foot and no higher
+  // than its arrival (+0.2), is split around the flight's footprint.
+  function K_cutWells(decks) {
+    const wells = decks.wells;
+    if (!wells || !wells.length) return decks;
+    let cur = decks.slice();
+    for (const h of wells) {
+      const next = [];
+      for (const dk of cur) {
+        const X0 = dk.x - dk.w / 2, X1 = dk.x + dk.w / 2, Z0 = dk.z - dk.d / 2, Z1 = dk.z + dk.d / 2;
+        const hz0 = Math.max(Z0, h.z0), hz1 = Math.min(Z1, h.z1), hx0 = Math.max(X0, h.x0), hx1 = Math.min(X1, h.x1);
+        if (dk.tread || hz1 <= hz0 || hx1 <= hx0 || dk.top <= h.yLo + 0.45 || dk.top > h.yHi + 0.2) { next.push(dk); continue; }
+        const put = function (a0, a1, b0, b1) {
+          if (a1 - a0 > 0.02 && b1 - b0 > 0.02) next.push({ x: (a0 + a1) / 2, z: (b0 + b1) / 2, w: a1 - a0, d: b1 - b0, top: dk.top });
+        };
+        put(X0, X1, Z0, hz0); put(X0, X1, hz1, Z1); put(X0, hx0, hz0, hz1); put(hx1, X1, hz0, hz1);
+      }
+      cur = next;
+    }
+    return cur;
   }
   /* ==========================================================================
      5. CBZ.yachtBuild(spec) — THE ENTRY. A register-shaped record.
@@ -1421,8 +1491,12 @@
     K.addScreen(b, -0.38, SHEER + 1.08, 2.02, 0.54, 0.30, 0, screen);
     K.addFixtureBox(b, "saloon-light", 0.72, 0.04, 0.25, 0, SHEER + 1.79, 0.35, warm);
     // FLYBRIDGE helm + the TUNA TOWER above it
-    K.addStairs(b, 1.45, 0.7, -1.5, 1, SHEER + 0.14, SHEER + 2.20, 6, chrome);
-    K.addBox(b, W * 0.62, 0.12, 3.2, 0, SHEER + 2.20, 0.6, teak);
+    // The ladder used to climb from z -1.5 along the saloon's own side wall to
+    // a landing behind the flybridge rail (a dead end). It rises from the
+    // cockpit sole now, aft of the saloon, onto a flybridge sole that reaches
+    // back to the saloon's aft face.
+    K.addStairs(b, 1.45, 0.7, -3.76, 1, SHEER + 0.06, SHEER + 2.20, 6, chrome);
+    K.addBox(b, W * 0.62, 0.12, 3.8, 0, SHEER + 2.20, 0.3, teak);
     K.addPrism(b, 1.7, [[1.5, SHEER + 2.20], [1.6, SHEER + 3.05], [2.3, SHEER + 3.08], [2.4, SHEER + 2.20]], 0, dark);
     K.addScreen(b, 0, SHEER + 2.98, 1.72, 0.62, 0.30, 0, screen);
     [0.55, -0.55].forEach(function (x) { K.addBox(b, 0.48, 0.16, 0.48, x, SHEER + 2.40, -0.4, pad); });
@@ -1459,10 +1533,10 @@
       { x: 1.55, z: 0.6, w: 0.60, d: 3.8, top: SHEER + 0.08 },
       { x: -1.55, z: 0.6, w: 0.60, d: 3.8, top: SHEER + 0.08 },
       { x: 0, z: 0.42, w: 2.68, d: 3.82, top: SHEER + 0.12 },
-      { x: 0, z: 0.6, w: 2.67, d: 3.2, top: SHEER + 2.26 },
+      { x: 0, z: 0.3, w: 2.67, d: 3.8, top: SHEER + 2.26 },
     ];
     K_stairDecks(decks, 1.15, 0.7, -6.15, 1, 0.35, SHEER + 0.06, 4);
-    K_stairDecks(decks, 1.45, 0.7, -1.5, 1, SHEER + 0.14, SHEER + 2.20, 6);
+    K_stairDecks(decks, 1.45, 0.7, -3.76, 1, SHEER + 0.06, SHEER + 2.20, 6);
     return {
       decks: decks,
       walls: [

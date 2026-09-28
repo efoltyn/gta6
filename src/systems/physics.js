@@ -407,7 +407,7 @@
   //  city/peds.js uses it only for a genuinely running chase/flee body. Once
   //  started, this state owns that actor's transform for less than ~1.2 s.
   // ============================================================
-  const TRAV_MIN_RISE = 0.36;       // curbs/normal stair risers stay ordinary step-up
+  const TRAV_MIN_RISE = 0.42;       // == STEP_SOLID below: anything you can STEP onto is a step, not a vault
   const TRAV_VAULT_RISE = 1.34;     // waist/chest-high: clear in one flowing vault
   const TRAV_VAULT_SPAN = 3.25;     // enough to cross a car SIDE, not its full length
   const TRAV_MANTLE_SPAN = 2.45;    // a thin wall/van side can be hauled over
@@ -1665,6 +1665,13 @@
       for (let i = 0; i < cand.length; i++) {
         const p = cand[i];
         if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+        // a DIAGONAL flight (systems/stairs.js) carries an oriented footprint:
+        // its AABB is only the broadphase, the stair is the rectangle inside it
+        if (p.obb) {
+          const o = p.obb, rx = x - o.cx, rz = z - o.cz;
+          const a = rx * o.ux + rz * o.uz, c = rx * o.uz - rz * o.ux;
+          if (a < -o.hl || a > o.hl || c < -o.hw || c > o.hw) continue;
+        }
         // stairs are stored as a sloped ramp so you glide up smoothly instead
         // of hopping tread to tread; flat floors/roofs just use their top.
         let top = p.top;
@@ -1675,7 +1682,8 @@
         // included) takes the untouched z-branch below, byte-identical math.
         if (p.ramp) {
           const r = p.ramp;
-          let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+          let t = r.dir ? ((x - r.ox) * r.dx + (z - r.oz) * r.dz) / r.len
+            : (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
           if (t < 0) t = 0; else if (t > 1) t = 1;
           top = r.y0 + t * (r.y1 - r.y0);
         }
@@ -1701,7 +1709,50 @@
     if (player.crouch && CBZ.game.mode !== "escape") return CROUCH_BODY_H;
     return BODY_H;
   }
-  function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + 0.25, player.pos.y + playerBodyH()); }
+  /* ---- REAL STEP-UP ONTO SOLID STEPS --------------------------------------
+     The resolver used to hand collide() feet at pos.y + 0.25, and nothing
+     ever stood you ON a collider: only CBZ.platforms are ground. So any
+     solid thing between 0.25 m and 0.45 m tall — a built step, a stage riser,
+     a loading-dock lip, a sill remnant, a kerb box — was a wall a man could
+     not step onto, although STEP_UP (0.45) says he can climb exactly that.
+     Two halves of one rule now:
+       · collide() gets feet at pos.y + STEP_SOLID, so a banded box whose top
+         is within a step of the feet no longer pushes you back, and
+       · stepTopAt() makes that same box's top a surface you stand on, the
+         moment your centre is over it.
+     A box that is floating (its bottom above your ankles) is never a step,
+     and a full-height collider (no y0) never is either: it is a wall. */
+  const STEP_SOLID = 0.42;
+  function stepTopAt(x, z, feetY) {
+    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    const b = colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL)));
+    if (!b) return -Infinity;
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const lo = feetY + 0.02, hi = feetY + STEP_UP, base = feetY + 0.1;
+    let best = -Infinity;
+    for (let i = 0; i < b.length; i++) {
+      const c = b[i];
+      if (c.y0 == null || c.y1 <= lo || c.y1 > hi || c.y0 > base || c.noStep) continue;
+      if (c._city && !cityOn) continue;
+      if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
+      if (c.yaw) {
+        const co = Math.cos(c.yaw), si = Math.sin(c.yaw), rx = x - c.cx, rz = z - c.cz;
+        const lx = rx * co - rz * si, lz = rx * si + rz * co;
+        if (lx < -c.hw || lx > c.hw || lz < -c.hd || lz > c.hd) continue;
+      }
+      if (c.y1 > best) best = c.y1;
+    }
+    return best;
+  }
+  // the one ground a WALKING body reads: platforms + terrain + solid steps
+  function walkGroundAt(x, z, fromY) {
+    const g = groundAt(x, z, fromY);
+    if (fromY == null) return g;
+    const s = stepTopAt(x, z, fromY);
+    return s > g ? s : g;
+  }
+  CBZ.walkGroundAt = walkGroundAt;
+  function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + STEP_SOLID, player.pos.y + playerBodyH()); }
 
   // ---- FEEL: local wall-clock player motion (slow-mo-under-load fix) --------
   // loop.js clamps the WORLD dt to ~0.05s so the 27ms sim can't spiral on the
@@ -2029,6 +2080,13 @@
       return;
     }
 
+    // ON A LADDER (systems/climb.js): the climb owns the transform and the pose.
+    if (CBZ.climb && CBZ.climb.playerStep(dt)) {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
+      if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
+      return;
+    }
+
     // A strapped-in snowboard owns the player transform just like a vehicle.
     // The controller is installed by city/snowboard.js after this module.
     if (CBZ.citySnowboardStep && CBZ.citySnowboardStep(dt)) return;
@@ -2051,7 +2109,7 @@
         if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
         ph.vy -= T.gravity * dt;
         player.pos.x += ph.vx * dt; player.pos.z += ph.vz * dt; player.pos.y += ph.vy * dt;
-        const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
+        const fl = walkGroundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fl && ph.vy <= 0) { player.pos.y = fl; ph.air = false; ph.vx = ph.vz = 0; ph.vy = 0; ph.down = Math.max(ph.down, 1.3); if (CBZ.shake) CBZ.shake(0.5); }
         resolveCollisions();
         playerChar.group.position.copy(player.pos);
@@ -2065,7 +2123,7 @@
         ph.down -= dt;
         player.speed = 0; player.crouch = false; stanceReset();
         player.vy -= T.gravity * dt; player.pos.y += player.vy * dt; clampCeiling(player);
-        const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
+        const fl = walkGroundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fl) { player.pos.y = fl; player.vy = 0; }
         if (Math.abs(ph.kx) > 0.02 || Math.abs(ph.kz) > 0.02) { player.pos.x += ph.kx * dt; player.pos.z += ph.kz * dt; const d = Math.pow(0.0009, dt); ph.kx *= d; ph.kz *= d; }
         resolveCollisions();
@@ -2081,13 +2139,13 @@
     if (D && CBZ.game.mode !== "escape") {
       if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
       player.speed = 0; player.crouch = false; stanceReset();
-      const floorY = groundAt(player.pos.x, player.pos.z, player.pos.y);
+      const floorY = walkGroundAt(player.pos.x, player.pos.z, player.pos.y);
       if (!D.landed) {
         D.vy -= T.gravity * dt;
         player.pos.x += D.vx * dt; player.pos.z += D.vz * dt; player.pos.y += D.vy * dt;
         const dec = Math.pow(0.05, dt); D.vx *= dec; D.vz *= dec;
         resolveCollisions();
-        const fy = groundAt(player.pos.x, player.pos.z, player.pos.y);
+        const fy = walkGroundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fy && D.vy <= 0) { player.pos.y = fy; D.landed = true; if (CBZ.shake) CBZ.shake(0.45); }
         playerChar.group.position.copy(player.pos);
         playerChar.group.rotation.x += D.spin * dt;
@@ -2116,7 +2174,7 @@
       player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
       player.pos.y += player.vy * dt; clampCeiling(player, 0.6);
-      const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
+      const floorD = walkGroundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
       playerChar.group.rotation.z = CBZ.damp(playerChar.group.rotation.z, Math.PI / 2, 11, dt);
@@ -2312,7 +2370,7 @@
       // gravity + ground following (terrain, stairs, floors, roofs)
       let support = traversalSurfaceY(
         player, player.pos.x, player.pos.z,
-        groundAt(player.pos.x, player.pos.z, player.pos.y));
+        walkGroundAt(player.pos.x, player.pos.z, player.pos.y));
       // ANTI-FALL-THROUGH (belt-and-braces): with the CONTINUOUS ramp collider
       // (buildings.js) groundAt can no longer hit a seam, so the seam-bridge is
       // now redundant — but we keep a GUARDED version so nothing regresses if a
@@ -2334,6 +2392,14 @@
           // all without a hover or a bounce. (SNAP_DOWN is the tight band that
           // makes the continuous ramp un-fall-through-able; STEP_DOWN extends it
           // for forgiving curb/landing step-downs.)
+          // A STEP IS NOT A TELEPORT. A snap up that is steeper than any ramp
+          // (a solid step, a kerb, a riser without a ramp under it) is paid
+          // out visually over ~0.1 s: the body keeps its old height and eases
+          // up (the rig reads _stepLag below), the camera follows the rig.
+          const dUp = support - player.pos.y;
+          if (dUp > 0.06 && dUp > Math.hypot(desX, desZ) * subDt * 1.2) {
+            player._stepLag = Math.min(0.5, (player._stepLag || 0) + dUp);
+          }
           player.pos.y = support; player.vy = 0; player._fallPeak = 0;
         } else {
           // walked off an edge taller than a stair (a roof rim, a balcony) —
@@ -2435,7 +2501,14 @@
     // that puts the lowest surface exactly ON the floor, per body. The literal
     // stays as the degrade path for a rig that cannot be measured.
     const sink = (CBZ.charProneSink && CBZ.charProneSink(playerChar)) || PRONE_SINK;
-    playerChar.group.position.set(player.pos.x, player.pos.y - sink * proneB, player.pos.z);
+    // the step-up ease (see the ground snap): pay the lag out over ~0.1 s
+    let stepLag = player._stepLag || 0;
+    if (stepLag > 0) {
+      stepLag *= Math.exp(-fdt * 18);
+      if (stepLag < 0.004 || !player.grounded) stepLag = 0;
+      player._stepLag = stepLag;
+    }
+    playerChar.group.position.set(player.pos.x, player.pos.y - sink * proneB - stepLag, player.pos.z);
     if (len > 0 || sliding) {
       // mid-slide the body faces the LOCKED slide heading, not the stick — the
       // feet-first pose must travel feet-first even while you pre-steer the exit.

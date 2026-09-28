@@ -102,7 +102,6 @@
   // NOT ride FH. 2.25m clears the 1.82m body and matches common real doors.
   const DOORH = 2.25;
   const WT = 0.4;      // wall thickness
-  const SW = 4.2;      // two generous stair lanes for a 0.76m-wide actor
   const DOORW = 1.6;   // generous double-clear pedestrian door; garages use GW
   const GLASS = 0x9fd8ee;
   // Physical air behind display glass. Screen faces used to touch/intersect
@@ -3283,8 +3282,6 @@
     const cols = [], plats = [], windows = [], losMeshes = [], doorRecs = [];
     const ixMin = -w / 2 + WT, ixMax = w / 2 - WT;
     const izMin = -d / 2 + WT, izMax = d / 2 - WT;
-    const stairW = Math.min(SW, Math.max(0, ixMax - ixMin - 4.2));
-    const hasStairs = opts.stairs !== false && storeys > 1 && stairW >= 4.4 && (izMax - izMin) >= 8.5;
     const localDoor = doorInfo(0, 0, w, d, doorSide);
     // DISTRICT MATERIAL KIT (opts.district — threaded in by cityBuildings via
     // districtKind(lot)): wall hue-lock, glass-tint bias, facade terminal
@@ -3474,18 +3471,26 @@
     // by CBZ.cityCarveShaft); furnishing/props gate off these too. Declared up
     // here so clearFloorPoint closes over the SAME array the return object exposes.
     const shaftRects = [];
+    // keepRects: floor you WALK through but nothing may stand on — the landing
+    // in front of the stair core's door on every floor (see cityStairPlan).
+    // Unlike a shaft it is floored, so fit-out floor planes still cover it.
+    const keepRects = [];
     function clearFloorPoint(lx, lz, pad) {
       pad = pad == null ? 0.8 : pad;
       const dx = lx - localDoor.x, dz = lz - localDoor.z;
       const inward = dx * localDoor.nx + dz * localDoor.nz;
       const cross = Math.abs(dx * localDoor.nz - dz * localDoor.nx);
       if (inward > -0.8 && inward < 4.8 && cross < DOORW / 2 + pad) return false;
-      if (hasStairs && lx < ixMin + stairW + pad && lx > ixMin - pad && lz > izMin - pad && lz < izMax + pad) return false;
-      // RESERVED ELEVATOR-SHAFT footprints (building-local rects, stamped by
-      // CBZ.cityCarveShaft once the lift picks its lobby column): keep later
-      // furniture / props off the vertical chase the cab travels.
+      // RESERVED footprints (building-local rects): the lift chase stamped by
+      // CBZ.cityCarveShaft, and the stair core + its landing, reserved the
+      // moment the shell is made (cityStairPlan, bottom of makeBuilding) so
+      // every eager furnisher and the lift's lobby pick already stay out of it.
       for (let i = 0; i < shaftRects.length; i++) {
         const r = shaftRects[i];
+        if (lx > r.x0 - pad && lx < r.x1 + pad && lz > r.z0 - pad && lz < r.z1 + pad) return false;
+      }
+      for (let i = 0; i < keepRects.length; i++) {
+        const r = keepRects[i];
         if (lx > r.x0 - pad && lx < r.x1 + pad && lz > r.z0 - pad && lz < r.z1 + pad) return false;
       }
       return lx > ixMin + pad && lx < ixMax - pad && lz > izMin + pad && lz < izMax - pad;
@@ -4271,16 +4276,16 @@
       }
     }
 
-    // Single-storey shops do not need a giant customer-facing rooftop stair
-    // rig. Climbable buildings reserve a dedicated open strip on the -x side.
-    const slabMinX = hasStairs ? ixMin + stairW : ixMin;
+    const slabMinX = ixMin;
     const slabW = ixMax - slabMinX, slabCx = (slabMinX + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
-    // INTERMEDIATE floor slabs are tracked (mesh + plat record + colour) so a
-    // later elevator shaft can be carved through them — the lift cab travels a
-    // continuous vertical chase, so the floors it passes need a hole at the
-    // shaft column. The ROOF slab (top) is never carved (the headhouse sits on
-    // it) and the ground plane is terrain, so only L=1..storeys-1 are tracked.
+    // EVERY slab above the foundation is a CARVABLE record (see
+    // CBZ.cityCarveShaft): a lift chase and a stair core each open their own
+    // hole, in any order, any number of times. floorSlabs = the intermediate
+    // floors L=1..storeys-1; roofSlab = the roof (carved only by a stair core
+    // that surfaces in a bulkhead, never by the lift, whose headhouse stands
+    // on it). The foundation is ground and is never carved.
     const floorSlabs = [];
+    let roofSlab = null;
     // THE ROOF is a granulated bitumen membrane (world/building_dress.js
     // roofDeckMaterial: real-scale rolls, laps, patches, ponding, parapet
     // dirt), not the old flat 0x9fa6ad slab that read near-white from above.
@@ -4289,7 +4294,8 @@
       const isRoof = L === storeys;
       const sm = lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x6f6c66 : 0xb9bec6,
         { plat: true, los: true, cast: isRoof, mat: isRoof ? roofMat : null });
-      if (!isRoof) floorSlabs.push({ mesh: sm, y: L * FH - 0.1, plat: plats[plats.length - 1], col: 0xb9bec6 });
+      const rec = slabRecord(sm, plats[plats.length - 1], L * FH - 0.1, isRoof);
+      if (isRoof) roofSlab = rec; else floorSlabs.push(rec);
     }
     const rTop = storeys * FH;
     // FACADE MASSING: parapet height varies per building (0.55..1.05, was a
@@ -4319,9 +4325,7 @@
     dbox(w / 2 - WT / 2, rTop + pp + 0.05, brk === 1 ? pxC : slabCz, WT + 0.16, 0.1, (brk === 1 ? pxD : slabD) + 0.1, TRIM);
     dbox(0, rTop + pp + 0.05, -d / 2 + WT / 2, w + 0.16, 0.1, WT + 0.16, TRIM);
     dbox(-w / 2 + WT / 2, rTop + pp + 0.05, brk === -1 ? pxC : slabCz, WT + 0.16, 0.1, (brk === -1 ? pxD : slabD) + 0.1, TRIM);
-    // base flashing + termination bar on the three (or four) inner faces that
-    // actually meet the membrane; the -x face of a stair building meets the
-    // open stairwell, not the roof, so it gets none
+    // base flashing + termination bar on the four inner faces that meet the membrane
     {
       const FH_UP = 0.3, T = 0.025;
       const iz = d / 2 - WT - T / 2, ix = w / 2 - WT - T / 2;
@@ -4332,136 +4336,9 @@
       const sxD = brk === 1 ? pxD : slabD, sxC = brk === 1 ? pxC : slabCz;
       dbox(ix, rTop + FH_UP / 2, sxC, T, FH_UP, sxD, FLASHC);
       dbox(ix - 0.012, rTop + FH_UP + 0.02, sxC, 0.02, 0.04, sxD, TBAR);
-      if (!hasStairs) {
-        const nxD = brk === -1 ? pxD : slabD, nxC = brk === -1 ? pxC : slabCz;
-        dbox(-ix, rTop + FH_UP / 2, nxC, T, FH_UP, nxD, FLASHC);
-        dbox(-ix + 0.012, rTop + FH_UP + 0.02, nxC, 0.02, 0.04, nxD, TBAR);
-      }
-    }
-
-    // ============================================================
-    //  SWITCHBACK STAIRS — CONTINUOUS RAMP COLLISION + DECO TREADS
-    // ============================================================
-    // OWNER ("stairs suck — you fall through them down many floors"). ROOT CAUSE
-    // (verified): the walk surface was a STACK of per-flight ramp AABBs into
-    // CBZ.platforms; physics.groundAt() point-samples the highest plat whose
-    // XZ-AABB contains the query, so a fast player landing a substep in a
-    // hairline SEAM between two ramp/landing AABBs (or a sliver outside one) read
-    // the terrain far below → "walked off a ledge" → fell through floors.
-    //
-    // THE FIX (every shipped game): a CONTINUOUS, gap-free, MONOTONIC invisible
-    // ramp collider from ground to roof, under purely DECORATIVE step geometry
-    // (collision-OFF), backed by a physics ground-snap + sane step height.
-    //   • ONE ramp plat record per flight whose footprint EXACTLY covers the
-    //     flight, abutting at the shared lane edge (no double-height seam) and
-    //     OVERHANGING outward to the stair walls (no wall-side sliver).
-    //   • ONE flat landing plat record at each turn, deep enough to OVERLAP both
-    //     the end of this flight's ramp and the start of the next — so every XZ
-    //     point on the climb sits inside some plat box, and consecutive flights'
-    //     footprints overlap (the ramp's flat Z-extension, t clamped to [0,1],
-    //     reaches into the landings). Coverage is continuous; groundAt can never
-    //     hit a seam, and physics.js ground-snap glues you across nosings.
-    //   • Treads/risers/stringers/railings are DECO (dbox → flushDeco merged: ~1
-    //     mesh per colour, cast:false, NOT solid/los/plat) — they read as real
-    //     built stairs but never touch collision/raycast. Draw-call neutral.
-    //
-    // Step proportions are realistic: rise ~0.18m, run ~0.29m, EQUAL risers; the
-    // count derives from FH at that rise (taller floor → more steps, same rise).
-    const STAIR_RISE = 0.185;                                  // target riser ~0.18-0.2m
-    const nSteps = Math.max(2, Math.round(FH / STAIR_RISE));   // equal risers, count from FH
-    const rise = FH / nSteps;                                  // exact equal rise
-    const LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
-    const OUT_OVL = 0.22;    // X overhang OUTWARD only (toward the stair walls)
-    const Z_OVL = 0.9;       // Z extension so each ramp AABB overlaps its landings
-    // DECO colours (shared materials → batch-foldable; no new draw calls).
-    const STEP_COL = 0xa7adb5, STRINGER_COL = shadeHex(color, 0.6), RAIL_COL = 0x3a3f47;
-    for (let k = 0; hasStairs && k < storeys; k++) {
-      const dir = (k % 2 === 0) ? 1 : -1;
-      const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
-      const rampEndZ = endZ - dir * LD;
-      const leftLane = (k % 2 === 0);
-      const lx0 = leftLane ? ixMin : ixMin + laneW, lxc = lx0 + laneW / 2;
-      // ---- CONTINUOUS RAMP COLLIDER (the ONLY collision for this flight) ----
-      // FULL-LANE X footprint. The two lanes are at DIFFERENT heights over the
-      // same z-band (a switchback), so they must NOT overlap in X or the resolver
-      // (keeps the higher top) would snap a climber up a whole floor at the seam.
-      // They ABUT exactly at the shared centre edge (ixMin+laneW) and overhang
-      // only OUTWARD toward the stair wall — continuous X coverage, no levitation
-      // strip. The Z AABB runs the slope plus an overlap margin into BOTH
-      // landings; t is clamped in physics.js so the extension is FLAT at the
-      // floor top. Clamped to interior z so no phantom shelf pokes through a wall.
-      const ax0 = ox + lx0 - (leftLane ? OUT_OVL : 0);
-      const ax1 = ox + lx0 + laneW + (leftLane ? 0 : OUT_OVL);
-      const az0 = Math.max(oz + izMin, oz + Math.min(startZ, rampEndZ) - Z_OVL);
-      const az1 = Math.min(oz + izMax, oz + Math.max(startZ, rampEndZ) + Z_OVL);
-      const ramp = {
-        minX: ax0, maxX: ax1,
-        minZ: az0, maxZ: az1,
-        top: (k + 1) * FH,
-        ramp: { z0: oz + startZ, z1: oz + rampEndZ, y0: k * FH, y1: (k + 1) * FH },
-      };
-      CBZ.platforms.push(ramp); plats.push(ramp);
-      const runLen = Math.abs(rampEndZ - startZ), runDepth = runLen / nSteps;
-      // ---- DECORATIVE TREADS + RISERS (collision-off; merged via dbox) ----
-      // Each step: a flat tread box at its top, a thin riser box at its face.
-      // Sits ON the ramp surface so the visible step matches where you stand.
-      for (let i = 1; i <= nSteps; i++) {
-        const vtop = k * FH + i * rise;                          // this step's top
-        const cz2 = startZ + dir * (i - 0.5) * runDepth;         // tread centre Z
-        dbox(lxc, vtop - 0.03, cz2, laneW - 0.12, 0.06, runDepth + 0.03, STEP_COL);   // tread slab
-        const riserZ = startZ + dir * (i - 1) * runDepth + dir * 0.02;                 // riser face Z
-        dbox(lxc, vtop - rise / 2, riserZ, laneW - 0.18, rise, 0.05, STRINGER_COL);    // riser
-      }
-      // ---- STRINGERS: two thin sloped boxes per flight (collision-off). A box
-      // can't shear, so we approximate the slope with a thin diagonal box rotated
-      // is overkill for a deco batch; instead lay one slim box per few treads is
-      // costly — use one centred sloped "skirt" via per-step thin edge segments
-      // folded into the deco batch (cheap, reads as a built stringer edge). ----
-      for (const sx of [-1, 1]) {
-        const ex = lxc + sx * (laneW / 2 - 0.04);
-        for (let i = 1; i <= nSteps; i++) {
-          const vtop = k * FH + i * rise, cz2 = startZ + dir * (i - 0.5) * runDepth;
-          dbox(ex, vtop - rise * 0.5 - 0.02, cz2, 0.05, rise + 0.06, runDepth + 0.03, STRINGER_COL);
-        }
-      }
-      // ---- LANDING: full stair width, deep enough to bridge the switchback turn
-      // (overlaps the END of this flight's ramp AND the START of the next, which
-      // begins at endZ on the opposite lane). Clamped to interior z so it sits
-      // flush with the turn wall. THE flat collider at the turn. ----
-      const lz0 = Math.max(izMin, Math.min(rampEndZ, endZ) - 0.6);
-      const lz1 = Math.min(izMax, Math.max(rampEndZ, endZ) + 0.6);
-      const lzc = (lz0 + lz1) / 2, landD = lz1 - lz0;
-      // (the TOP landing is open sky at roof level, so it is roof membrane,
-      // not a light-grey interior floor seen from every window above it)
-      lbox(ixMin + stairW / 2, (k + 1) * FH - 0.08, lzc, stairW + 2 * OUT_OVL, 0.2, landD, 0xb4b9c1,
-        { plat: true, los: true, cast: false, mat: (k === storeys - 1) ? roofMat : null });
-      // ---- PREMIUM RAILINGS (deco, merged): a sloped handrail per flight on the
-      // OPEN (centre) edge, balusters every ~2 treads, and newel posts at each
-      // flight end. Single shared material → folds into the deco batch. ----
-      const railX = leftLane ? (lx0 + laneW - 0.06) : (lx0 + 0.06);   // open (centre) edge
-      const railH = 0.95;                                              // handrail height above tread
-      // balusters (one thin vertical box every other step)
-      for (let i = 0; i <= nSteps; i += 2) {
-        const bz = startZ + dir * i * runDepth;
-        const by = k * FH + i * rise;
-        dbox(railX, by + railH / 2, bz, 0.05, railH, 0.05, RAIL_COL);
-      }
-      // sloped top handrail: one slim box laid along the flight at stair pitch.
-      // (Axis-aligned thin box spanning the run; sits at handrail height. A box
-      // can't tilt without rotation, so we step it: a short box per ~3 treads
-      // following the slope reads as a continuous rail and stays in the batch.)
-      for (let i = 0; i < nSteps; i += 3) {
-        const seg = Math.min(3, nSteps - i);
-        const z0r = startZ + dir * i * runDepth, z1r = startZ + dir * (i + seg) * runDepth;
-        const zc = (z0r + z1r) / 2, segD = Math.abs(z1r - z0r) + 0.05;
-        const yc = k * FH + (i + seg / 2) * rise + railH;
-        dbox(railX, yc, zc, 0.07, 0.08, segD, RAIL_COL);
-      }
-      // newel posts at both ends of the flight
-      for (const nz of [startZ, rampEndZ]) {
-        const ny = k * FH + (nz === startZ ? 0 : (Math.abs(rampEndZ - startZ) / runDepth) * rise);
-        dbox(railX, ny + (railH + 0.12) / 2, nz, 0.09, railH + 0.12, 0.09, RAIL_COL);
-      }
+      const nxD = brk === -1 ? pxD : slabD, nxC = brk === -1 ? pxC : slabCz;
+      dbox(-ix, rTop + FH_UP / 2, nxC, T, FH_UP, nxD, FLASHC);
+      dbox(-ix + 0.012, rTop + FH_UP + 0.02, nxC, 0.02, 0.04, nxD, TBAR);
     }
 
     // ---- FACADE MASSING (all flat opaque deco boxes; merged by flushDeco) --
@@ -4830,17 +4707,34 @@
       wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,
       skin,                                          // the visible wall skin per face (CBZ.citySkin)   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
       boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
-      hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
+      clearFloorPoint, wt: WT,                      // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
-      floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
+      floorSlabs,                                   // intermediate floor slabs, each a carvable list of pieces (CBZ.cityCarveShaft)
+      roofSlab,                                     // the roof slab, same record (carved only for a stair bulkhead)
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
+      keepRects,                                    // reserved walk-through floor (the stair core's landing mouth)
+      stairPlan: null,                              // where this shell's stair core goes (cityStairPlan), built lazily by elevators.js
       dress: opts.dress === false ? false : (opts.dress || null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
     // A swinging entrance only speaks when this player caused its cycle or is
     // physically inside THIS shell. Keep the ownership link on the mechanism,
     // not on a global "indoors" flag that could bless a different building.
     for (const dr of doorRecs) dr.building = built;
+    // THE STAIR CORE IS RESERVED NOW, built later. Every multi-storey shell
+    // gets a switchback core (elevators.js CBZ.cityStairCore builds it the
+    // first time somebody walks up to the building). Its footprint and the
+    // landing in front of its door are reserved HERE, before any furnisher,
+    // the lift's lobby pick or the roof dresser runs, so all of them already
+    // keep out of it. (The parking-deck flagship has its own lift + exec core.)
+    if (storeys >= 2 && opts.stairs !== false && !opts.garageGround) {
+      const plan = CBZ.cityStairPlan(built);
+      if (plan) {
+        built.stairPlan = plan;
+        shaftRects.push(plan.rect);
+        keepRects.push(plan.mouth);
+      }
+    }
     // THE SHELL A WALL BELONGS TO, reachable from any collider in one hop
     // (collider.ref.parent.userData.bld). carveHole needs it to answer "what
     // STOREY is this 0.55 m spandrel a course of" — see A CURTAIN WALL IS AN
@@ -4875,60 +4769,211 @@
   // minting a lookalike — one material, one batch bucket, zero extra state.
   CBZ.cityGlassMat = glassMat;
 
-  // ---- ELEVATOR-SHAFT CARVE ----------------------------------------------
-  // city/elevators.js owns the lift cab + the visible enclosed shaft column,
-  // but the per-floor SLABS belong to the building, so the building carves the
-  // chase. Given a world-space column (centre wx/wz, half-extents hw/hd), this:
-  //   1) reserves the column (building-local) in b.shaftRects so any LATER
-  //      furniture/prop gates off it via clearFloorPoint (the chase stays empty);
-  //   2) CARVES a clean rectangular hole through every INTERMEDIATE floor slab
-  //      it crosses — the original slab mesh + its walk platform are replaced by
-  //      up to four rim pieces (a picture-frame) around the hole, so the floor is
-  //      visually + walkably intact everywhere EXCEPT the column the cab travels.
-  // The roof slab (the headhouse stands on it) and the ground plane are never
-  // touched. Idempotent enough for one call per shaft; cheap (a few thin boxes
-  // per crossed floor, all on the shared cached material via mat()).
-  CBZ.cityCarveShaft = function (b, wx, wz, hw, hd) {
-    if (!b || !b.floorSlabs) return;
-    // reserve the footprint (building-local) so furnishing/props avoid the chase
-    if (b.shaftRects) b.shaftRects.push({ x0: wx - b.ox - hw, x1: wx - b.ox + hw, z0: wz - b.oz - hd, z1: wz - b.oz + hd });
-    const hx0 = wx - hw, hx1 = wx + hw, hz0 = wz - hd, hz1 = wz + hd;
-    const slabCol = 0xb9bec6;
-    for (const fs of b.floorSlabs) {
-      if (fs.carved) continue;
-      const p = fs.plat;
-      // slab world bounds come straight off its walk-platform record
-      if (!p || hx1 <= p.minX || hx0 >= p.maxX || hz1 <= p.minZ || hz0 >= p.maxZ) continue; // column misses this slab
-      fs.carved = true;
-      // drop the solid slab: its mesh + its walk platform (both lists)
-      if (fs.mesh && fs.mesh.parent) fs.mesh.parent.remove(fs.mesh);
-      if (fs.mesh && CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(fs.mesh); if (li >= 0) CBZ.losBlockers.splice(li, 1); }
-      for (const list of [CBZ.platforms, b.platforms]) { const i = list ? list.indexOf(p) : -1; if (i >= 0) list.splice(i, 1); }
-      // clamp the hole to the slab and rebuild the four rim pieces (skip empties)
+  // ---- THE SLAB CARVE ----------------------------------------------------
+  // A floor slab is a LIST OF PIECES ({mesh, plat}), not one box. Every hole
+  // cut through it (a lift chase, a stair core) splits EVERY piece it touches
+  // into up to four rim pieces, so any number of holes land in any order.
+  //
+  // WHY (measured, stairs wave 2026-09-28): the old carve marked a slab
+  // `carved` after its first hole and skipped it forever after. Every
+  // building whose lift carved first kept its WHOLE slab over the stairwell
+  // the stair core carved later: the floor platform stayed across the flight
+  // (descending walked out onto it and never went down; climbing put the head
+  // through it). The lead measured it in the live city: route(2,0) from 6.4 m
+  // ended at 6.4 m. elevators.js called the skip "harmless". It was the bug.
+  //
+  // A carve that happens AFTER core/batch.js merged the shell (a stair core
+  // built the first time you walk up) must also take the slab out of the
+  // merged buffer: CBZ.batchWallHide zeroes its vertex slice (the same seam
+  // cityFracture punches walls with); unmerged pieces are simply detached.
+  function slabRecord(mesh, plat, y, isRoof) {
+    return { y: y, roof: !!isRoof, mat: mesh.material, cast: !!mesh.castShadow,
+             pieces: [{ mesh: mesh, plat: plat }], holes: [], carved: false };
+  }
+  let _slabGeo = null;
+  function slabPiece(b, fs, x0, x1, z0, z1) {
+    if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return null;
+    if (!_slabGeo) _slabGeo = unitBoxGeo(true, false);
+    const m = new THREE.Mesh(_slabGeo, fs.mat);
+    m.position.set((x0 + x1) / 2 - b.ox, fs.y, (z0 + z1) / 2 - b.oz);
+    m.scale.set(x1 - x0, 0.2, z1 - z0);
+    m.castShadow = fs.cast; m.receiveShadow = true;
+    b.group.add(m);
+    if (CBZ.losBlockers) CBZ.losBlockers.push(m);
+    if (b.losMeshes) b.losMeshes.push(m);
+    const pl = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: fs.y + 0.1 };
+    if (CBZ.platforms) CBZ.platforms.push(pl);
+    if (b.platforms) b.platforms.push(pl);
+    return { mesh: m, plat: pl };
+  }
+  function dropPiece(b, pc) {
+    const m = pc.mesh;
+    if (m) {
+      if (CBZ.batchWallHide) CBZ.batchWallHide(m);     // merged into the shell's buffer: zero its slice
+      if (m.parent) m.parent.remove(m);
+      for (const list of [CBZ.losBlockers, b.losMeshes]) { const i = list ? list.indexOf(m) : -1; if (i >= 0) list.splice(i, 1); }
+    }
+    for (const list of [CBZ.platforms, b.platforms]) { const i = list ? list.indexOf(pc.plat) : -1; if (i >= 0) list.splice(i, 1); }
+  }
+  // cut the world rect [hx0,hx1]x[hz0,hz1] out of one slab record; true if it touched
+  function carveSlab(b, fs, hx0, hx1, hz0, hz1) {
+    if (!fs || !fs.pieces) return false;
+    let hit = false;
+    const next = [];
+    for (const pc of fs.pieces) {
+      const p = pc.plat;
+      if (!p || hx1 <= p.minX || hx0 >= p.maxX || hz1 <= p.minZ || hz0 >= p.maxZ) { next.push(pc); continue; }
+      hit = true;
+      dropPiece(b, pc);
       const cx0 = Math.max(hx0, p.minX), cx1 = Math.min(hx1, p.maxX);
       const cz0 = Math.max(hz0, p.minZ), cz1 = Math.min(hz1, p.maxZ);
-      const top = p.top, y = fs.y, th = 0.2;
-      const piece = (x0, x1, z0, z1) => {
-        if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
-        const bw = x1 - x0, bd = z1 - z0;
-        const g = new THREE.BoxGeometry(bw, th, bd);
-        const mm = mat(slabCol); shadeGeo(g, false); mm.vertexColors = true;
-        const m = new THREE.Mesh(g, mm);
-        m.position.set((x0 + x1) / 2 - b.ox, y, (z0 + z1) / 2 - b.oz);
-        m.castShadow = false; m.receiveShadow = true;
-        b.group.add(m);
-        if (CBZ.losBlockers) CBZ.losBlockers.push(m);
-        const pl = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top };
-        if (CBZ.platforms) CBZ.platforms.push(pl);
-        if (b.platforms) b.platforms.push(pl);
-      };
-      piece(p.minX, p.maxX, p.minZ, cz0);          // -z band (full width)
-      piece(p.minX, p.maxX, cz1, p.maxZ);          // +z band (full width)
-      piece(p.minX, cx0, cz0, cz1);                // -x band (between the z bands)
-      piece(cx1, p.maxX, cz0, cz1);                // +x band (between the z bands)
+      for (const r of [[p.minX, p.maxX, p.minZ, cz0], [p.minX, p.maxX, cz1, p.maxZ],
+                       [p.minX, cx0, cz0, cz1], [cx1, p.maxX, cz0, cz1]]) {
+        const q = slabPiece(b, fs, r[0], r[1], r[2], r[3]);
+        if (q) next.push(q);
+      }
     }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    fs.pieces = next;
+    if (hit) { fs.holes.push({ minX: hx0, maxX: hx1, minZ: hz0, maxZ: hz1 }); fs.carved = true; }
+    return hit;
+  }
+  // PUBLIC. Given a world-space column (centre wx/wz, half-extents hw/hd):
+  //   1) reserves it (building-local) in b.shaftRects — unless the same rect is
+  //      already reserved (the stair core reserved itself at shell creation) —
+  //      so any LATER furniture/prop gates off it via clearFloorPoint;
+  //   2) cuts it out of every intermediate floor slab (and, with opts.roof,
+  //      the roof slab too — a stair core surfacing in a bulkhead).
+  // Returns the number of slabs it opened.
+  CBZ.cityCarveShaft = function (b, wx, wz, hw, hd, opts) {
+    if (!b || !b.floorSlabs) return 0;
+    opts = opts || {};
+    if (b.shaftRects && opts.reserve !== false) {
+      const r = { x0: wx - b.ox - hw, x1: wx - b.ox + hw, z0: wz - b.oz - hd, z1: wz - b.oz + hd };
+      const dup = b.shaftRects.some((q) => Math.abs(q.x0 - r.x0) < 1e-3 && Math.abs(q.x1 - r.x1) < 1e-3
+        && Math.abs(q.z0 - r.z0) < 1e-3 && Math.abs(q.z1 - r.z1) < 1e-3);
+      if (!dup) b.shaftRects.push(r);
+    }
+    const hx0 = wx - hw, hx1 = wx + hw, hz0 = wz - hd, hz1 = wz + hd;
+    let n = 0;
+    for (const fs of b.floorSlabs) if (carveSlab(b, fs, hx0, hx1, hz0, hz1)) n++;
+    if (opts.roof && b.roofSlab && carveSlab(b, b.roofSlab, hx0, hx1, hz0, hz1)) n++;
+    if (n && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    return n;
   };
+
+  // ---- WHERE THE STAIR CORE GOES -------------------------------------------
+  // CBZ.cityStairPlan(b, side?) — pure geometry, no meshes. A switchback core
+  // two lanes wide, flush into a back corner (the far wall from the street
+  // door + one side wall), its door facing back into the room. makeBuilding
+  // reserves plan.rect (the core and its walls) and plan.mouth (the landing
+  // outside its door) the moment the shell exists; elevators.js
+  // CBZ.cityStairCore builds the flights, walls and carves from the SAME plan.
+  //
+  // Frame: `dep` = metres from the DOOR wall's inner face toward the far wall,
+  // `lat` = metres across, from the centreline (tx,tz = the lateral unit).
+  // Sizes: CW 4.4 = two 2.2 m lanes (a 0.38 m body + rails, and two people
+  // pass); CD 5.6 = a 1.3 m landing at each end and a 3.0 m run, which for a
+  // 1.6 m half-storey rise (FH 3.2) is a 28 degree stair of 9 x 0.178 m risers
+  // on 0.33 m goings. A tight plan shrinks to CW 3.0 / CD 4.4 (a 1.8 m run,
+  // 42 degrees: steep, still under STEP_UP per 0.29 m substep) and below that
+  // there is no core rather than an unwalkable one.
+  const CORE_W = 4.4, CORE_WMIN = 3.0, CORE_D = 5.6, CORE_DMIN = 4.4, MOUTH_D = 1.6, MOUTH_HW = 1.2;
+  function stairPlanFor(b, side) {
+    const wt = b.wt != null ? b.wt : WT;
+    const ixMin = -b.w / 2 + wt, ixMax = b.w / 2 - wt, izMin = -b.d / 2 + wt, izMax = b.d / 2 - wt;
+    const dn = b.localDoor || { x: 0, z: -b.d / 2, nx: 0, nz: 1 };
+    const nx = dn.nx, nz = dn.nz, along = Math.abs(nx) > 0.5;
+    const tx = -nz, tz = nx;
+    const base = along ? { x: nx > 0 ? ixMin : ixMax, z: (izMin + izMax) / 2 }
+                       : { x: (ixMin + ixMax) / 2, z: nz > 0 ? izMin : izMax };
+    const depthSpan = along ? ixMax - ixMin : izMax - izMin;
+    const latSpan = along ? izMax - izMin : ixMax - ixMin;
+    const CW = Math.min(CORE_W, latSpan - 2.2);
+    const CD = Math.min(CORE_D, depthSpan - MOUTH_D - 3.0);   // leave the room a floor between door and core
+    if (CW < CORE_WMIN || CD < CORE_DMIN) return null;
+    const pt = function (dep, lat) { return { x: base.x + nx * dep + tx * lat, z: base.z + nz * dep + tz * lat }; };
+    const rect = function (d0, d1, l0, l1) {
+      const p = pt(d0, l0), q = pt(d1, l1);
+      return { x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x), z0: Math.min(p.z, q.z), z1: Math.max(p.z, q.z) };
+    };
+    const D1 = depthSpan, D0 = D1 - CD;
+    const L1 = side * (latSpan / 2), L0 = L1 - side * CW, latMid = (L0 + L1) / 2;
+    return {
+      side: side, along: along, nx: nx, nz: nz, tx: tx, tz: tz, base: base, pt: pt, rect2: rect,
+      D0: D0, D1: D1, L0: L0, L1: L1, latMid: latMid, CW: CW, CD: CD,
+      hole: rect(D0, D1, L0, L1),                                     // what the slabs lose
+      rect: rect(D0 - 0.12, D1, L0 - side * 0.12, L1),               // + its shaft wall and door stubs
+      mouth: rect(D0 - MOUTH_D, D0 - 0.12, latMid - MOUTH_HW, latMid + MOUTH_HW),
+    };
+  }
+  function rectsHit(a, b2, pad) {
+    return a.x0 < b2.x1 + pad && a.x1 > b2.x0 - pad && a.z0 < b2.z1 + pad && a.z1 > b2.z0 - pad;
+  }
+  CBZ.cityStairPlan = function (b, side) {
+    if (!b || b.w == null || b.d == null) return null;
+    const dn = b.localDoor || { nx: 0, nz: 1 };
+    const pref = side === 1 || side === -1 ? side
+      : (Math.abs(dn.nx) > 0.5 ? (dn.nx > 0 ? -1 : 1) : (CBZ.hash01(b.ox || 0, b.oz || 0, 0x57a1) < 0.5 ? -1 : 1));
+    const wt = b.wt != null ? b.wt : WT;
+    const door = b.localDoor ? { x0: b.localDoor.x - 1.3, x1: b.localDoor.x + 1.3, z0: b.localDoor.z - 1.3, z1: b.localDoor.z + 1.3 } : null;
+    for (const s2 of [pref, -pref]) {
+      const P = stairPlanFor(b, s2);
+      if (!P) return null;
+      let bad = false;
+      // never over a reserved chase that is not this core's own (a lift built
+      // before the plan existed), nor over the street door's threshold
+      for (const r of (b.shaftRects || [])) if (r !== (b.stairPlan && b.stairPlan.rect) && (rectsHit(P.rect, r, 0.9) || rectsHit(P.mouth, r, 0.3))) bad = true;
+      if (door && (rectsHit(P.rect, door, 0) || rectsHit(P.mouth, door, 0))) bad = true;
+      if (!bad) return P;
+    }
+    return null;
+  };
+
+  // THE LONGEST CLEAR RUN for a wall-hugging fixture (a shop counter): a
+  // segment along x (alongX) or z centred `c` with half-length `half`, whose
+  // cross band is [c0, c1], slid and if need be shortened so it misses every
+  // reserved rect (stair core + its landing, lift chase) by 0.3 m. Returns
+  // {c, half} (unchanged when already clear) or null when nothing fits 1.8 m.
+  function freeRun(b, alongX, c0, c1, c, half, lo, hi) {
+    const R = (b.shaftRects || []).concat(b.keepRects || []);
+    const cuts = [];
+    for (const r of R) {
+      const b0 = alongX ? r.z0 : r.x0, b1 = alongX ? r.z1 : r.x1;
+      if (b1 <= c0 || b0 >= c1) continue;
+      cuts.push([(alongX ? r.x0 : r.z0) - 0.3, (alongX ? r.x1 : r.z1) + 0.3]);
+    }
+    if (!cuts.length) return { c: c, half: half };
+    cuts.sort((p, q) => p[0] - q[0]);
+    const runs = [];
+    let a = lo;
+    for (const k of cuts) { if (k[0] > a) runs.push([a, Math.min(k[0], hi)]); a = Math.max(a, k[1]); }
+    if (a < hi) runs.push([a, hi]);
+    let best = null;
+    for (const r of runs) {
+      const len = r[1] - r[0];
+      if (len < 1.8) continue;
+      const hh = Math.min(half, len / 2);
+      const cc = Math.max(r[0] + hh, Math.min(r[1] - hh, c));
+      const score = hh * 10 - Math.abs(cc - c);
+      if (!best || score > best.score) best = { c: cc, half: hh, score: score };
+    }
+    return best;
+  }
+
+  // a back-wall shop counter (centre ccx/ccz, size cw x cd, building-local)
+  // slid / narrowed along its wall onto the run clear of the reserved stair
+  // core and lift chase. doorNx: the door's inward x normal (0 = door on a
+  // ±z wall, so the counter runs along x). Shared by city + town shops.
+  function fitCounter(b, doorNx, ccx, ccz, cw, cd) {
+    const alongX = !doorNx, wt = b.wt != null ? b.wt : WT;
+    const c0 = alongX ? ccz - cd / 2 - 1.4 : ccx - cw / 2 - 1.4;     // its band + the clerk behind it
+    const c1 = alongX ? ccz + cd / 2 + 1.4 : ccx + cw / 2 + 1.4;
+    const fit = freeRun(b, alongX, c0, c1, alongX ? ccx : ccz, (alongX ? cw : cd) / 2,
+      alongX ? -b.w / 2 + wt + 0.3 : -b.d / 2 + wt + 0.3, alongX ? b.w / 2 - wt - 0.3 : b.d / 2 - wt - 0.3);
+    if (fit) { if (alongX) { ccx = fit.c; cw = Math.max(0.8, fit.half * 2); } else { ccz = fit.c; cd = Math.max(0.8, fit.half * 2); } }
+    return { ccx, ccz, cw, cd };
+  }
+  CBZ.cityFitCounter = fitCounter;
 
   // doorway world position + the inward normal, given the door side
   function doorInfo(ox, oz, w, d, side) {
@@ -4993,8 +5038,8 @@
   function roomKit(b, baseY) {
     const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
     const WALLH = FHl - 0.05;
-    // usable band, clear of the -x stair strip + facade walls
-    const xLo = (b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 0.4) : (-W / 2 + (b.wt || WT) + 0.4));
+    // usable band, clear of the facade walls
+    const xLo = -W / 2 + (b.wt || WT) + 0.4;
     const xHi = W / 2 - (b.wt || WT) - 0.4;
     const zLo = -D / 2 + (b.wt || WT) + 0.4;
     const zHi = D / 2 - (b.wt || WT) - 0.4;
@@ -5009,6 +5054,25 @@
       b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
       return true;
     }
+    // a partition never crosses a reserved stair core / lift chase / stair
+    // landing: its runs are cut where one lies across its line (the core's own
+    // wall closes the end)
+    function clipRuns(segs, alongX, at) {
+      const R = (b.shaftRects || []).concat(b.keepRects || []);
+      let out = segs;
+      for (const r of R) {
+        const c0 = alongX ? r.z0 : r.x0, c1 = alongX ? r.z1 : r.x1;
+        if (at + PWT / 2 <= c0 || at - PWT / 2 >= c1) continue;
+        const r0 = alongX ? r.x0 : r.z0, r1 = alongX ? r.x1 : r.z1, nx = [];
+        for (const sg of out) {
+          if (sg[1] <= r0 || sg[0] >= r1) { nx.push(sg); continue; }
+          if (sg[0] < r0) nx.push([sg[0], r0]);
+          if (sg[1] > r1) nx.push([r1, sg[1]]);
+        }
+        out = nx;
+      }
+      return out;
+    }
     // a full-height SOLID partition running along X at fixed z (x0..x1), split
     // into ≤2 spans around a doorway centred at gapX (width gapW) with a lintel
     // over it. Collider-backed: you walk around it or through the doorway.
@@ -5016,7 +5080,7 @@
       gapW = gapW || 1.6;
       const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
       const g0 = gapX != null ? gapX - gapW / 2 : hi + 1, g1 = gapX != null ? gapX + gapW / 2 : hi + 1;
-      const segs = gapX != null && gapX > lo && gapX < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
+      const segs = clipRuns(gapX != null && gapX > lo && gapX < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]], true, z);
       for (let i = 0; i < segs.length; i++) {
         const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
         b.lbox((s0 + s1) / 2, Y + WALLH / 2, z, s1 - s0, WALLH, PWT, PCOL, KITWALL);
@@ -5029,7 +5093,7 @@
       gapW = gapW || 1.6;
       const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
       const g0 = gapZ != null ? gapZ - gapW / 2 : hi + 1, g1 = gapZ != null ? gapZ + gapW / 2 : hi + 1;
-      const segs = gapZ != null && gapZ > lo && gapZ < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
+      const segs = clipRuns(gapZ != null && gapZ > lo && gapZ < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]], false, x);
       for (let i = 0; i < segs.length; i++) {
         const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
         b.lbox(x, Y + WALLH / 2, (s0 + s1) / 2, PWT, WALLH, s1 - s0, PCOL, KITWALL);
@@ -6305,7 +6369,7 @@
     // -x stair strip is an open shaft up there (only the ground floor has a
     // full foundation slab to cover).
     const FLOORHEX = [0x3a322a, 0x3a322a, 0x33373f, 0x2e2f36, 0x2a2c34][Math.min(4, t)];
-    const fx0 = (Y > 0 && b.hasStairs) ? (-W / 2 + (b.wt || WT) + b.stairW + 0.1) : (-W / 2 + 0.7);
+    const fx0 = -W / 2 + 0.7;
     const fx1 = W / 2 - 0.7;
     b.lbox((fx0 + fx1) / 2, Y + 0.02, 0, Math.max(1, fx1 - fx0), 0.04, D - 1.4, FLOORHEX, { cast: false });
 
@@ -6863,7 +6927,7 @@
     // silently drops any station landing in the stair strip or entrance aisle, so
     // the spread can run the full width without ever blocking the climb/door.
     const xHi = W / 2 - 2.0;                                  // first column off the +x wall
-    const xLo = (b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 1.6) : (-W / 2 + 2.0));  // stop clear of the stairwell
+    const xLo = -W / 2 + 2.0;
     const cols = Math.max(1, Math.min(4, Math.floor((xHi - xLo) / 3.0) + 1));
     const dxc = cols > 1 ? (xHi - xLo) / (cols - 1) : 0;
     // grid runs from the front (just inside the reception/door zone) to bullZ1
@@ -7093,7 +7157,7 @@
     const gate = (x, z) => !b.clearFloorPoint || b.clearFloorPoint(x, z, 1.2);
     const STONE = 0xcfd4dc, GOLD = 0xcaa64a;
     // tinted travertine DECK slab, clamped off the -x stair strip (furnishHome idiom)
-    const dx0 = b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 0.2) : (-W / 2 + 0.7);
+    const dx0 = -W / 2 + 0.7;
     const dx1 = W / 2 - 0.7;
     lb((dx0 + dx1) / 2, 0.02, 0, Math.max(1, dx1 - dx0), 0.04, D - 1.4, STONE);
     const deckCx = (dx0 + dx1) / 2;
@@ -7192,7 +7256,7 @@
     const inx = door.nx, inz = door.nz;
     const yaw = Math.atan2(-inx, -inz);             // "face the glass front" base yaw
     // grid bounds: keep clear of the -x stairwell strip and the door aisle.
-    const xLo = b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 1.8) : (-W / 2 + 2.4);
+    const xLo = -W / 2 + 2.4;
     const xHi = W / 2 - 2.4;
     const zLo = -D / 2 + 2.6, zHi = D / 2 - 2.6;
     // each display bay ≈ a car footprint + a walk-around aisle (~4u square).
@@ -7362,7 +7426,7 @@
     // elevator lands beside — a real shut/open threshold into the living space.
     // It is an interior door (no exterior wall to pierce), so we hand it a short
     // partition wall + the standard hinged leaf, framed and flush like every door.
-    const phDoorLocal = { x: -(w / 2) + WT + b.stairW + 1.0, z: 0, nx: 1, nz: 0 };  // faces into the room (+x)
+    const phDoorLocal = { x: -(w / 2) + WT + 5.2, z: 0, nx: 1, nz: 0 };  // faces into the room (+x), 5.2 m off the -x wall
     // a short solid partition flanking the door so the leaf has a wall to seat into
     const partW = 0.4, gap = DOORW;
     for (const s of [-1, 1]) {
@@ -7869,7 +7933,8 @@
         // shops rise with their district: core trades get storeys of homes
         // over the storefront (city blocks read dense downtown), commercial a
         // floor or two; everywhere else keeps the catalogue height. Interior
-        // stamps (counter/rack/cases) are hasStairs-aware, so taller is safe.
+        // stamps (counter/rack/cases) gate through clearFloorPoint, which keeps
+        // them off the stair core every multi-storey shell reserves.
         const dk = districtKind(lot);
         const shopStoreys = dk === "core" ? Math.max(shop.storeys, 3 + ((rng() * 3) | 0))
           : dk === "commercial" ? Math.max(shop.storeys, 2 + ((rng() * 2) | 0))
@@ -7898,25 +7963,13 @@
         const porticoLive = !!(civicSpec && civicSpec.civic && CBZ.bldCivicOrder
           && !(CBZ.CONFIG && (CBZ.CONFIG.BLD_CIVIC_PODIUM === false || CBZ.CONFIG.BLD_MASONRY_V1 === false)));
         if (!porticoLive) signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
-        // Counter toward the back, vendor behind it. On climbable buildings the
-        // counter is shifted onto the solid side of the room so it never crosses
-        // the dedicated stair strip.
+        // Counter toward the back, vendor behind it. The back wall is also
+        // where the shell reserved its stair core (a back corner), so the
+        // counter is slid/narrowed along the wall onto the free run beside it.
         let ccx = door.nx * (w / 2 - 2.8), ccz = door.nz * (d / 2 - 2.8);
         let cw = door.nx ? 0.8 : Math.min(w - 2, 4.5);
-        const cd = door.nz ? 0.8 : Math.min(d - 2, 4.5);
-        if (b.hasStairs) {
-          const stairRight = -w / 2 + WT + b.stairW;
-          if (cw > 1) {
-            const roomRight = w / 2 - WT;
-            cw = Math.min(cw, Math.max(1.8, roomRight - stairRight - 1.0));
-            ccx = (stairRight + roomRight) / 2;
-          } else if (ccx - cw / 2 < stairRight + 0.5) {
-            ccx = stairRight + 0.5 + cw / 2;
-          }
-          // Side-door layouts can point the behind-counter spot back toward the
-          // stair strip. Keep the clerk on the solid floor too.
-          ccx = Math.max(ccx, stairRight + 0.4 - door.nx * 1.2);
-        }
+        let cd = door.nz ? 0.8 : Math.min(d - 2, 4.5);
+        ({ ccx, ccz, cw, cd } = fitCounter(b, door.nx, ccx, ccz, cw, cd));
         b.lbox(ccx, 0.6, ccz, cw, 1.2, cd, 0x6b4a2a, { solid: true });
         const vsx = lot.cx + ccx + door.nx * 1.2, vsz = lot.cz + ccz + door.nz * 1.2;
         lot.kind = shop.kind;
@@ -8024,11 +8077,10 @@
           const inx = door.nx, inz = door.nz, tgx = -inz, tgz = inx;   // inward + wall-tangent units
           const halfIn = (inx !== 0 ? w : d) / 2;
           const halfTan = (inx !== 0 ? d : w) / 2;
-          const stairRight = b.hasStairs ? (-w / 2 + WT + b.stairW) : -1e9;
           // door-relative depth + tangent → a world point clamped onto open floor
           const caseAt = function (depth, lat, extra) {
             let lx = inx * (depth - halfIn) + tgx * lat, lz = inz * (depth - halfIn) + tgz * lat;
-            lx = Math.min(w / 2 - WT - 0.9, Math.max(Math.max(-w / 2 + WT + 0.9, stairRight + 0.9), lx));
+            lx = Math.min(w / 2 - WT - 0.9, Math.max(-w / 2 + WT + 0.9, lx));
             lz = Math.min(d / 2 - WT - 0.9, Math.max(-d / 2 + WT + 0.9, lz));
             const c = { x: lot.cx + lx, z: lot.cz + lz };
             if (extra) for (const k in extra) c[k] = extra[k];
@@ -8278,7 +8330,9 @@
     // mid-rises get exterior FIRE-ESCAPE stairs — the loud chase route up.
     // elevators.js consumes these lists and owns the meshes/colliders/platforms.
     {
-      const rigged = placed.filter((l) => l.building && l.building.group && l.building.hasStairs && !l.building.park);
+      // (this list was filtered on the dead `hasStairs` gate, so it was always
+      // empty and not one fire escape was ever built in the city)
+      const rigged = placed.filter((l) => l.building && l.building.group && !l.building.park);
       // ===== ELEVATORS — OWNER: "elevator only works on the massive building." =
       // The old policy capped lifts at the few TALLEST towers (and required
       // interior stairs), so the city felt like only the mega-tower had one. The
@@ -8319,12 +8373,9 @@
       // full storey count to the roof — the stubby read came from picking the
       // wrong (door) face and from no clean face being stamped.
       //
-      // The rig can only hang on a ±x face (its ramps interpolate along z), and
-      // never the -x face of a building WITH interior stairs (that face is the
-      // open stair shaft — a bridge there drops you down it). So the eligible
-      // escape face is:
+      // The rig hangs on a ±x face, never the door face:
       //   door side 2 (-x door) → +x face  (m = +1)
-      //   door side 3 (+x door) → -x face, only if NO interior stairs (m = -1)
+      //   door side 3 (+x door) → -x face  (m = -1)
       //   door side 0/1 (±z door) → +x face (m = +1)  [rear/side, off the front]
       // We STAMP lot.building.feSide = m on the chosen lots so elevators.js
       // builds to exactly that face (CONTRACT: buildings.js stamps the host
@@ -8332,7 +8383,7 @@
       // face go unserved — a clean doorway beats a ladder across the front.
       function escapeFaceFor(b) {
         const ds = b.side;
-        if (ds === 3) return b.hasStairs ? 0 : -1;   // +x door: only -x face, and only if no stair shaft there
+        if (ds === 3) return -1;                     // +x door: the -x face
         // door on -x, -z, or +z → the +x face is clear of the front display
         return 1;                                    // m = +1 (+x face)
       }

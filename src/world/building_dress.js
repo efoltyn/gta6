@@ -395,7 +395,9 @@
     circ.push({ x: rcx, z: rcz, r: 2.8 });                              // spawn point / slab centre
     if (b.helipad) circ.push({ x: b.helipad.x, z: b.helipad.z, r: (b.helipad.r || 6) + 1.6 });
     if (b.lift && b.lift.roof) circ.push({ x: b.lift.roof.x, z: b.lift.roof.z, r: 3.4 });
-    const sr = b.shaftRects || [];
+    // lift chases, the stair core (its bulkhead stands on the roof) and the
+    // landing outside the bulkhead door
+    const sr = (b.shaftRects || []).concat(b.keepRects || []);
     for (const r of sr) {
       if (!r || !Number.isFinite(r.x0)) continue;
       rect.push({ x0: b.ox + r.x0 - 1.6, x1: b.ox + r.x1 + 1.6, z0: b.oz + r.z0 - 1.6, z1: b.oz + r.z1 + 1.6 });
@@ -439,7 +441,7 @@
       if (b.roofCrowned) continue;                    // dome / mansard / civic crown owns the roof
       seen.add(b);
       const wt = b.wt != null ? b.wt : 0.4;
-      const slabMinX = b.hasStairs ? (-b.w / 2 + wt + (b.stairW || 0)) : (-b.w / 2 + wt);
+      const slabMinX = -b.w / 2 + wt;
       const gy = b.group.position ? b.group.position.y : 0;
       const S = {
         x0: b.ox + slabMinX, x1: b.ox + b.w / 2 - wt,
@@ -514,8 +516,9 @@
       }
       if (derelict) continue;                          // a dead building keeps its drains and stacks, nothing live
 
-      // ---- ROOF HATCH where no stair reaches the roof ----------------------
-      if (!b.hasStairs && sw * sd > 30 && count.hatch < MAX.hatch) {
+      // ---- ROOF HATCH where no stair reaches the roof (a shell with a stair
+      // plan comes up through its bulkhead) ----------------------------------
+      if (!b.stairPlan && sw * sd > 30 && count.hatch < MAX.hatch) {
         const hs = spot(0x5d30, 0.55, 0.6, 1.2, 20);
         if (hs) { pools.hatch.add(hs.x, Y, hs.z, longX ? 0 : Math.PI / 2, 1, G); claim(hs.x, hs.z, 0.9, 1.2); count.hatch++; }
       }

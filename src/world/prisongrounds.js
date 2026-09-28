@@ -318,8 +318,19 @@
       stat(new THREE.BoxGeometry(4.6, 0.5, 0.55), steelDark, dx, 1.2 + 4.65, z1 + 0.5, { cast: false });
       for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.12, 4.4, 0.14), steelDark, dx + s * 2.16, 1.2 + 2.2, z1 + 0.32, { cast: false });
     }
-    // the dock: 1.2 m high, 4 m deep, rubber bumpers, a grounded stair with a rail at its east end
-    const dock = addBox(85, 0.6, z1 + 2.2, 26, 1.2, 4.0, 0x8f959c, { solid: true });
+    // the dock: 1.2 m high, 4 m deep, rubber bumpers, a grounded stair with a rail at its east end.
+    // Its collider was full height and nothing was ever registered on top,
+    // so the dock was a 1.2 m wall and its six-step stair pure paint. Now the
+    // collider is banded to the dock's own 1.2 m (a body on top is above it),
+    // the deck is a platform, and the stair is a CBZ.stairs flight (6 x 0.20
+    // rise over 3.0 m) landing on its own top step beside the deck.
+    const dock = addBox(85, 0.6, z1 + 2.2, 26, 1.2, 4.0, 0x8f959c, { solid: true, y0: 0, y1: 1.2 });
+    (CBZ.platforms || (CBZ.platforms = [])).push({ minX: 72, maxX: 98, minZ: z1 + 0.2, maxZ: z1 + 4.2, top: 1.2 });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    if (CBZ.stairs) CBZ.stairs.flight({
+      bottom: { x: 98.6, y: 0, z: z1 + 4.0 }, top: { x: 98.6, y: 1.2, z: z1 + 1.0 },
+      width: 1.2, overlap: 0.3, underside: false, owner: "warehouse-dock",
+    });
     K.skinBox(dock, "concrete", 0xa0a5aa);
     stat(new THREE.BoxGeometry(26.05, 0.1, 0.1), steelDark, 85, 1.17, z1 + 4.18, { cast: false });   // the nosing angle
     for (const dx of [76, 84, 92]) for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.25, 0.45, 0.12), rubber, dx + s * 1.6, 0.8, z1 + 4.26, { cast: false });
@@ -474,13 +485,57 @@
       stat(dome, tankMat, x, H + 1.6, z, {});
       stat(new THREE.ConeGeometry(R + 0.2, 1.6, 24), tankMat, x, H + 2.1 + 3.2 + 0.8, z, {});
       stat(new THREE.CylinderGeometry(R + 0.25, R + 0.25, 0.12, 24), steelDark, x, H + 1.65, z, { cast: false });
-      // a catwalk ring under the tank and a ladder cage up a leg
-      K.octRing(R + 0.6, H + 1.0, 0.05, 0.05, galv, x, z, { cast: false });
-      K.octRing(R + 0.6, H + 0.5, 0.04, 0.04, galv, x, z, { cast: false });
-      for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; stat(new THREE.BoxGeometry(0.05, 1.0, 0.05), galv, x + Math.cos(a) * (R + 0.6), H + 0.55, z + Math.sin(a) * (R + 0.6), { cast: false }); }
-      for (let y = 0.4; y < H; y += 0.3) stat(new THREE.CylinderGeometry(0.014, 0.014, 0.44, 5), galv, x + 3.2 + 0.4, y, z - 3.2, { rx: Math.PI / 2, cast: false });
-      for (let y = 2.4; y < H - 1; y += 1.0) stat(new THREE.TorusGeometry(0.38, 0.015, 5, 9, Math.PI), galv, x + 3.2 + 0.45, y, z - 3.2, { rx: Math.PI / 2, ry: Math.PI / 2, cast: false });
-      CBZ.colliders.push({ minX: x - 3.9, maxX: x + 3.9, minZ: z - 3.9, maxZ: z + 3.9, noBreach: true });
+      /* THE CATWALK AND THE WAY UP. A railed octagonal catwalk round the
+         foot of the tank, a grated floor you stand on, and a caged ladder up
+         the outside of the south-east leg that comes up through a hatch in
+         it (world/ladderkit.js draws it off the numbers systems/climb.js
+         climbs). It used to be rails with no floor, 0.4 m of room between the
+         rail and the tank, rungs with no stiles, and one solid 7.8 m column
+         from the ground to the sky — nobody could stand under it, and nobody
+         could get up it. Now the legs are the columns and the tank is solid
+         only where the tank is. */
+      const CW = R + 1.6;                           // catwalk rail, circumradius
+      K.octRing(CW, H + 1.0, 0.05, 0.05, galv, x, z, { cast: false });
+      K.octRing(CW, H + 0.5, 0.04, 0.04, galv, x, z, { cast: false });
+      for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; stat(new THREE.BoxGeometry(0.05, 1.0, 0.05), galv, x + Math.cos(a) * CW, H + 0.55, z + Math.sin(a) * CW, { cast: false }); }
+      for (const up of [1, -1]) {                   // the grating, both faces
+        const deckG = new THREE.RingGeometry(R - 0.3, CW, 8, 1, Math.PI / 8, Math.PI * 2);
+        deckG.rotateX(up > 0 ? -Math.PI / 2 : Math.PI / 2);
+        stat(deckG, galv, x, H + (up > 0 ? 0.001 : -0.04), z, { cast: false });
+      }
+      if (CBZ.platforms) CBZ.platforms.push({ minX: x - CW, maxX: x + CW, minZ: z - CW, maxZ: z + CW, top: H });
+      // the rail, as colliders: short boxes along each of the eight sides,
+      // height-gated to the catwalk so they never stand in the yard
+      for (let i = 0; i < 8; i++) {
+        const a0 = Math.PI / 8 + i * Math.PI / 4, a1 = a0 + Math.PI / 4;
+        const ax = x + Math.cos(a0) * CW, az = z + Math.sin(a0) * CW, bx = x + Math.cos(a1) * CW, bz = z + Math.sin(a1) * CW;
+        const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.45);
+        for (let k = 0; k <= n; k++) {
+          const px = ax + (bx - ax) * k / n, pz = az + (bz - az) * k / n;
+          CBZ.colliders.push({ minX: px - 0.14, maxX: px + 0.14, minZ: pz - 0.14, maxZ: pz + 0.14, y0: H, y1: H + 1.1, rail: true, noBreach: true });
+        }
+      }
+      // the tank and its dome, from the dome's belly up: a plus of boxes
+      // round the tank's 4.6 m wall (a head on the catwalk is at its height)
+      const T0 = H - 3, T1 = H + 7.5;
+      CBZ.colliders.push({ minX: x - 3.3, maxX: x + 3.3, minZ: z - 3.3, maxZ: z + 3.3, y0: T0, y1: T1, noBreach: true });
+      CBZ.colliders.push({ minX: x - R, maxX: x + R, minZ: z - 2.0, maxZ: z + 2.0, y0: T0, y1: T1, noBreach: true });
+      CBZ.colliders.push({ minX: x - 2.0, maxX: x + 2.0, minZ: z - R, maxZ: z + R, y0: T0, y1: T1, noBreach: true });
+      // the legs and the riser, full height
+      for (const l of legs) CBZ.colliders.push({ minX: x + l[0] - 0.3, maxX: x + l[0] + 0.3, minZ: z + l[1] - 0.3, maxZ: z + l[1] + 0.3, y0: 0, y1: H, noBreach: true });
+      CBZ.colliders.push({ minX: x - 0.4, maxX: x + 0.4, minZ: z - 0.4, maxZ: z + 0.4, y0: 0, y1: H, noBreach: true });
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      // the ladder: on the outside of the south-east leg, clear of its
+      // footing, up through a hatch in the grating; the stiles and rungs run
+      // on a metre past the floor, so the hands have something to come off by
+      if (CBZ.ladderKit) {
+        CBZ.ladderKit.build(CBZ.prisonRoot || CBZ.scene, {
+          x: x + 3.85, z: z - 3.2, nx: 1, nz: 0, y0: 0, y1: H, rungTop: H + 1.0, ext: 0.15,
+          standoff: 0.45, top: { x: x + 5.05, z: z - 2.25 },
+          name: "water tower", tag: "prison:watertower", mode: "escape",
+        }, galv);
+      }
     })();
     // two horizontal tanks on saddles, a bunded pad, a generator container
     for (const tz of [104, 110]) {

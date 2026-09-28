@@ -205,6 +205,9 @@
       // ---- the shape police.js has always read. Do not reorder, do not rename.
       x: +spec.x, z: +spec.z, fx: fx, fz: fz,
       mount: spec.mount || null, mountT: spec.mountT || 0,
+      // ---- additive: a post UP something (a tower deck). The floor he
+      // stands his post on; the walk reaches it by a ladder (systems/climb.js)
+      y: spec.y != null && isFinite(+spec.y) && +spec.y > 0.2 ? +spec.y : null,
       relaxed: !!spec.relaxed,
       // ---- additive: police.js's branch never looks at any of these ---------
       id: spec.id || ("post:" + (++_postSeq)),
@@ -380,14 +383,31 @@
      ========================================================================= */
   function distXZ(a, x, z) { const dx = a.pos.x - x, dz = a.pos.z - z; return Math.sqrt(dx * dx + dz * dz); }
 
+  /* THE WALK GOES THROUGH THE LADDERS. systems/climb.js's nav link: a
+     target on another level — his post up a tower from the ground, the
+     ground (home, a route) from the deck — sends him to that ladder's foot or
+     head instead, and standing there starts the climb. The post's own floor
+     is the target level only when he is walking to the post itself; every
+     other point is the ground under it. */
   function walkTo(actor, rec, x, z) {
     if (rec.drive) { try { rec.drive(actor, x - actor.pos.x, z - actor.pos.z); return; } catch (e) {} }
+    const CL = CBZ.climb;
+    // (a body occupy.js pinned to a storey is on a floor, not a deck: never
+    // hand him a ladder)
+    if (CL && CL.list && CL.list.length && !actor._climb && !(actor._occupyY > 0.2)) {
+      const ty = (rec.y != null && Math.abs(x - rec.x) < 0.05 && Math.abs(z - rec.z) < 0.05) ? rec.y : undefined;
+      const d = CL.detour(actor, x, ty, z, { arrive: 1.0 });
+      if (d && d.climbing) return;
+      if (d) { x = d.x; z = d.z; }
+    }
     actor.path = null; actor.finalGoal = null;
     if (actor.target && actor.target.set) actor.target.set(x, 0, z);
     actor.state = "walk"; actor.pause = 0;
   }
 
   function standIdle(actor, rec, dt) {
+    // a post up a tower, and he is standing under it: up the ladder first
+    if (rec.y != null && actor.pos.y < rec.y - 1.2 && CBZ.climb) { walkTo(actor, rec, rec.x, rec.z); return; }
     if (rec.hold) { try { rec.hold(actor, Math.atan2(rec.fx, rec.fz), dt); return; } catch (e) {} }
     actor.path = null; actor.finalGoal = null;
     actor.state = "idle"; actor.speed = 0;
@@ -464,6 +484,7 @@
     if (!rec || rec.actor !== actor) return "gone";
     if (actor.dead || (actor.ko || 0) > 0 || actor.inCar || actor._npcAttached) return "gone";
     if (CBZ.body && CBZ.body.busy && CBZ.body.busy(actor)) return "gone";
+    if (actor._climb) return "gone";          // on a ladder: systems/climb.js has the body
     dt = dt || 0.016;
     rec.ticks++;
     if (rec.alertT > 0) rec.alertT -= dt;
@@ -536,7 +557,8 @@
         const IQ = CBZ.combatIQ;
         if (IQ && IQ.posture) { try { IQ.posture(actor, threat, dt); } catch (e) {} }
         const off = distXZ(actor, rec.x, rec.z);
-        if (off > rec.leash) {
+        // a post up a tower fights FROM the tower: under it is off the post
+        if (off > rec.leash || (rec.y != null && actor.pos.y < rec.y - 1.2)) {
           // THE LEASH. Past it the post wins over the fight: he breaks contact
           // toward his slot. A perimeter that empties itself down the first
           // alley is not a perimeter.
@@ -683,7 +705,7 @@
         if (s.rank) ped[spec.rankField || "milRank"] = s.rank;
         if (s.name) ped.name = s.name;
         CBZ.cityPostStand(ped, {
-          x: s.x, z: s.z, face: face, kind: kind,
+          x: s.x, z: s.z, y: s.y, face: face, kind: kind,
           relaxed: s.relaxed !== false,
           job: job, tag: "garrison:" + gar.id + ":" + (s.id || i),
           org: spec.org || null,
@@ -809,11 +831,29 @@
       { x: minX + 16, z: minZ + 16 }, { x: maxX - 16, z: minZ + 16 },
       { x: minX + 16, z: maxZ - 16 }, { x: maxX - 16, z: maxZ - 16 },
     ];
+    // Where the base built a WATCHTOWER at a corner, the corner sentry stands
+    // his post on its deck — he climbs its ladder to get there, comes down it
+    // to go home, and a short leash keeps the fight on the deck.
+    const towers = B.towers || [];
     for (let i = 0; i < corners.length; i++) {
       const c = corners[i];
+      let tw = null;
+      for (let k = 0; k < towers.length; k++) {
+        const t = towers[k];
+        if (Math.abs(t.x - c.x) < 6 && Math.abs(t.z - c.z) < 6) { tw = t; break; }
+      }
+      const face = Math.atan2(c.x - cx, c.z - cz);
+      if (tw) {
+        posts.push({
+          id: "wire" + i, x: tw.x + Math.sin(face) * 0.7, z: tw.z + Math.cos(face) * 0.7, y: tw.y,
+          kind: "watch", face: face, leash: 2, radius: 0.8,
+          verb: "post", alertVerb: "standto",
+        });
+        continue;
+      }
       posts.push({
         id: "wire" + i, x: c.x, z: c.z, kind: "sentry",
-        face: Math.atan2(c.x - cx, c.z - cz),
+        face: face,
         verb: "post", alertVerb: "standto",
       });
     }
