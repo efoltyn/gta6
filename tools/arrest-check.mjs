@@ -26,7 +26,7 @@
                     every pair of hands (lone cop > two > a SWAT stack), pinned
                     or in cuffs is harder than on your feet
 
-     node tools/arrest-check.mjs [--n 40] [--verbose]      exit 0 = ok */
+     node tools/arrest-check.mjs [--n 40] [--verbose] [--vitals]   exit 0 = ok */
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { loadVerbsVM } from "./lib/verbs-vm.mjs";
@@ -38,7 +38,8 @@ const DT = 1 / 60;
 const t0 = Date.now();
 const ROOT = new URL("../", import.meta.url);
 
-const v = loadVerbsVM({ mode: "city" });
+// --vitals: the same contest with systems/vitals.js owning the taser clock
+const v = loadVerbsVM({ mode: "city", vitals: argv.includes("--vitals") });
 const { CBZ, THREE } = v;
 vm.runInContext(readFileSync(new URL("src/systems/brain.js", ROOT), "utf8"), v.ctx, { filename: "src/systems/brain.js" });
 const V = CBZ.verbs, A = CBZ.arrest, B = CBZ.brain;
@@ -237,8 +238,9 @@ function suspect(c) {
       if (r && r.verb === "tase") tased = true;
       moveCop(c, DT);
       frame();
-      const held = V.playerHeld();
-      if (held && handsOnDown == null) handsOnDown = !!A.downState(V.playerActor());
+      // the CUFF's hands (a tackle's hands are a takedown, not the cuffs)
+      const cs = V.sessions.find((x) => !x.done && x.T && x.T.isPlayer && x.verb === "cuff" && x.phase !== "approach");
+      if (cs && handsOnDown == null) handsOnDown = !!A.downState(V.playerActor());
       if (PC.cuffed) break;
     }
     if (PC.cuffed) {

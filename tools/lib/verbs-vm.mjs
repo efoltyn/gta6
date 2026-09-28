@@ -103,6 +103,8 @@ export function loadVerbsVM(opts = {}) {
   run("src/systems/physics.js");
   const loaded = { physics: !!CBZ.groundAt, moves: !!(CBZ.moves && CBZ.moves.step), grapple: false, strike: false, meleePoses: false };
   if (opts.grapple !== false) { run("src/systems/grapple.js"); loaded.grapple = !!CBZ.body; }
+  // the one body-state truth (down / ko / tased), when a check asks for it
+  if (opts.vitals && has("src/systems/vitals.js")) run("src/systems/vitals.js");
   if (has("src/entities/handcuffs.js")) run("src/entities/handcuffs.js");
   run("src/systems/verbs.js");
   if (has("src/systems/arrest.js")) run("src/systems/arrest.js");

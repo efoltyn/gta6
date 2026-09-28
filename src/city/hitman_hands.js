@@ -34,6 +34,8 @@
   function playing() { return g.mode === "city" && g.state === "playing"; }
   function touch() { return !!CBZ.touchMode; }
   function P() { return CBZ.player || null; }
+  // hands cuffed behind your back: no paper held up, no glasses, no hand verbs
+  function cuffed() { return !!(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed()); }
   function now() { return (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000; }
   function clean(s) { return String(s == null ? "" : s).replace(/[—–]/g, ", ").replace(/[·•]/g, ","); }
 
@@ -104,7 +106,7 @@
   }
   function hold(canvas, opts) {
     opts = opts || {};
-    if (!canvas || !CBZ.camera) return false;
+    if (!canvas || !CBZ.camera || cuffed()) return false;
     const cam = CBZ.camera;
     if (!cam.parent && CBZ.scene) CBZ.scene.add(cam);
     const m = ensureMesh();
@@ -157,6 +159,7 @@
   function tickHold(dt) {
     if (!H.mesh || !H.mesh.visible) return;
     if (!playing() || (P() && P().dead)) { holdFinish(); return; }
+    if (cuffed() && !H.out) { H.out = true; H.t = 0; }       // the cuffs take the paper out of your hands
     H.t += dt;
     if (H.out) {
       const k = 1 - Math.min(1, H.t / 0.22);
@@ -199,7 +202,7 @@
   function evalVerbs() {
     const pl = P();
     let best = null, bestTok = null, bestScore = -Infinity;
-    const blocked = !playing() || !pl || !pl.pos || pl.dead || pl.driving || CBZ.cityMenuOpen ||
+    const blocked = !playing() || !pl || !pl.pos || pl.dead || pl.driving || cuffed() || CBZ.cityMenuOpen ||
       (CBZ.fullMap && CBZ.fullMap.active) || CBZ.hmHold.isOpen() || I.active || bino.on || (CBZ.cineBusy && CBZ.cineBusy());
     if (!blocked) {
       for (let i = 0; i < V.list.length; i++) {
@@ -386,12 +389,12 @@
     const pl = P();
     let held = aim.rmb;
     if (!held && CBZ.fpsAimHeld) { try { held = !!CBZ.fpsAimHeld(); } catch (e) { held = false; } }
-    if (held && !aim.was && !bino.on && emptyHanded()) { bino.toggle(true); aim.byAim = bino.on; }
+    if (held && !aim.was && !bino.on && emptyHanded() && !cuffed()) { bino.toggle(true); aim.byAim = bino.on; }
     if (!held && aim.was && aim.byAim) bino.toggle(false);
     if (!bino.on) aim.byAim = false;
     aim.was = held;
     if (!bino.on) return;
-    if (!playing() || !pl || pl.dead || pl.driving) bino.toggle(false);
+    if (!playing() || !pl || pl.dead || pl.driving || cuffed()) bino.toggle(false);
   }
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 2 || !playing() || CBZ.cityMenuOpen) return;
