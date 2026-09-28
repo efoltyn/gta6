@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "b721cfb87314d2cbbcd70289d62505e06109f330",
-  "createdAt": "2026-09-28T22:22:24.412Z",
+  "sourceCommit": "aa18b830b9eaec609cdcd11bc1d265fbb69d5089",
+  "createdAt": "2026-09-28T22:43:29.328Z",
   "fileCount": 1158,
-  "totalBytes": 47186148,
+  "totalBytes": 47189134,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1833,8 +1833,8 @@
     },
     {
       "file": "src/entities/keycard.js",
-      "bytes": 6902,
-      "sha256": "404d2640cc8f7c132a45694e1bb81c0d230a6668bd7b94758184187a40396a20"
+      "bytes": 7154,
+      "sha256": "d783317d7351d03d89ae22c95fa070ed0c060b2784a9740e6ed6fc03cfb93fda"
     },
     {
       "file": "src/entities/meleeposes.js",
@@ -2323,8 +2323,8 @@
     },
     {
       "file": "src/systems/economy.js",
-      "bytes": 40600,
-      "sha256": "2e2c254f46d7972aeaac191203d2168bf335b61655c3b1659b28bcbb2b681f4f"
+      "bytes": 42176,
+      "sha256": "bbd7b122bf37a33ae763988edf5acd61b9e1fec29e9a49ed651113a852f42588"
     },
     {
       "file": "src/systems/escapeend.js",
@@ -2658,8 +2658,8 @@
     },
     {
       "file": "src/systems/prisonwarden.js",
-      "bytes": 33768,
-      "sha256": "1beb5857194aa6da531b7aaa0cedc44fbd61b088fcb900025620820931f9d352"
+      "bytes": 33807,
+      "sha256": "31e7b0726f819d9cc244baadf933f2874e599dfa419d712ce75457cbe7407673"
     },
     {
       "file": "src/systems/proptypes.js",
@@ -3253,8 +3253,8 @@
     },
     {
       "file": "src/world/adminwing.js",
-      "bytes": 46526,
-      "sha256": "76f42afaff460ccb4fa2db37157acd84d51fb846c76d36d23ced320040c90137"
+      "bytes": 47026,
+      "sha256": "64698ca5f48f5844a0a2cb2a39adc21bdbf643a62d638da2a409abe78341eefc"
     },
     {
       "file": "src/world/airbase.js",
@@ -3353,8 +3353,8 @@
     },
     {
       "file": "src/world/gunroom.js",
-      "bytes": 24116,
-      "sha256": "1fc98534e6f4b06a59d2269a643a47df094797397a04045537135c23d6acf35a"
+      "bytes": 24735,
+      "sha256": "ab86c7b74afaa56a0a5cb3cb5b1fefc3d79ac7e49e24784e278899eba4fac410"
     },
     {
       "file": "src/world/hull_loft.js",
