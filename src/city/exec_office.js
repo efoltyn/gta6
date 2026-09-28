@@ -1252,9 +1252,36 @@
     K.torus(M.satin, 0.595, 0.05, 0.3, 0.022, 0.006, Math.PI, C.ceramic, 0, 0, -Math.PI / 2);
     K.rbox(M.satin, -0.95, 0.03, 0.08, 0.2, 0.05, 0.2, 0.012, C.black, 0.2, 0.25);
     K.rbox(M.satin, -0.99, 0.065, 0.06, 0.05, 0.035, 0.21, 0.015, C.black, 0, 0.25);
-    K.box(M.paint, -0.72, 0.006, 0.18, 0.21, 0.012, 0.297, C.paper, 0, 0.06);
-    K.box(M.paint, -0.52, 0.0065, 0.26, 0.21, 0.004, 0.297, C.paper, 0, -0.28);
-    K.cyl(M.chrome, -0.7, 0.017, 0.16, 0.005, 0.005, 0.14, 8, C.brass, 0, 0.9, Math.PI / 2);
+    K.box(M.paint, 0.86, 0.006, 0.12, 0.21, 0.012, 0.297, C.paper, 0, 0.06);
+    K.box(M.paint, 0.98, 0.0065, 0.2, 0.21, 0.004, 0.297, C.paper, 0, -0.28);
+    K.cyl(M.chrome, 0.88, 0.017, 0.1, 0.005, 0.005, 0.14, 8, C.brass, 0, 0.9, Math.PI / 2);
+    // HIS LAPTOP, open on the left of the pad and turned to the chair. A real
+    // object: machined aluminium base, the keyboard well and trackpad, a lid
+    // on its hinge tilted back 17 degrees, a black bezel and a screen. The
+    // Executive's opening is read off THIS screen (origins.js lays a live
+    // canvas over the quad using b.execOffice.laptop), never an HTML card.
+    const lapL = { x: -0.56, z: 0.1 };                         // desk-frame (yaw PI/2): world = (z, -x)
+    const lapX = dsk.x + lapL.z, lapZ = dsk.z - lapL.x;
+    const lapYaw = Math.atan2(chr.x - lapX, chr.z - lapZ);
+    const TILT = -0.3, LW = 0.32, LH = 0.21, HZ = -0.11, HY = 0.018;
+    const lidY = HY + (LH / 2) * Math.cos(TILT), lidZ = HZ + (LH / 2) * Math.sin(TILT);
+    const nY = -Math.sin(TILT), nZ = Math.cos(TILT);           // the lid's front normal
+    K.at(lapX, lapZ, lapYaw, 0.75);
+    K.rbox(M.satin, 0, 0.009, 0, LW, 0.018, 0.22, 0.006, 0xa9aeb4);          // base
+    K.box(M.satin, 0, 0.0183, -0.03, 0.28, 0.0012, 0.105, 0x17181a);         // keyboard well
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 13; k++)                 // keycaps
+      K.box(M.satin, -0.126 + k * 0.021, 0.0192, -0.074 + r * 0.021, 0.017, 0.0012, 0.017, 0x232427);
+    K.box(M.satin, 0, 0.0186, 0.068, 0.11, 0.0008, 0.066, 0x9aa0a6);         // trackpad
+    K.rbox(M.satin, 0, lidY, lidZ, LW, LH, 0.007, 0.004, 0xa9aeb4, TILT);    // lid
+    K.box(M.satin, 0, lidY + nY * 0.0037, lidZ + nZ * 0.0037, LW - 0.008, LH - 0.008, 0.0008, 0x0a0b0c, TILT);   // bezel
+    K.screen(3, 0, lidY + nY * 0.0043 + 0.004, lidZ + nZ * 0.0043, 0.288, 0.18, TILT);
+    const lapScreen = {
+      // world centre of the screen quad, 1.5 mm proud of the atlas screen
+      x: ox + lapX + Math.sin(lapYaw) * (lidZ + nZ * 0.006),
+      y: Y + 0.75 + lidY + nY * 0.006 + 0.004,
+      z: oz + lapZ + Math.cos(lapYaw) * (lidZ + nZ * 0.006),
+      yaw: lapYaw, tilt: TILT, w: 0.288, h: 0.18,
+    };
     // task lamp: weighted disc, stem, a raked arm and a head lit underneath
     K.at(dsk.x - 0.3, dsk.z + 1.1, Math.PI / 2 + 0.5, 0.75);
     K.cyl(M.satin, 0, 0.01, 0, 0.085, 0.09, 0.02, 24, C.black);
@@ -1444,6 +1471,7 @@
       spawn: { x: ox + chr.x + 0.15, z: oz + chr.z + 0.85 },
       face: { x: ox + offX0, z: oz + offDoorZ },
       desk: { x: ox + dsk.x, z: oz + dsk.z },
+      laptop: lapScreen,
       // the walnut core as a stop of the tower's lift (city/elevators.js)
       liftLanding: liftLanding,
       keepClear: keep,

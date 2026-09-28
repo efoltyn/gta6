@@ -858,70 +858,88 @@
     } catch (err) {}
   }
 
-  // Laptop HUD: a diegetic "office terminal" showing the portfolio die.
-  let laptopEl = null;
-  function ensureLaptop() {
-    if (laptopEl) return laptopEl;
-    laptopEl = document.createElement("div");
-    laptopEl.id = "originLaptop";
-    laptopEl.style.cssText =
-      "position:fixed;left:50%;top:46%;transform:translate(-50%,-50%) scale(.96);z-index:55;display:none;" +
-      "width:min(520px,92vw);background:linear-gradient(180deg,#0d1118 0%,#151b24 100%);border:1px solid #2a3342;" +
-      "border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.65),0 0 0 1px rgba(255,90,90,.08);" +
-      "color:#e8edf4;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:0;overflow:hidden;" +
-      "opacity:0;transition:opacity .35s ease,transform .35s ease;pointer-events:none;";
-    laptopEl.innerHTML =
-      "<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#0a0d12;border-bottom:1px solid #232a36'>" +
-      "<span style='width:10px;height:10px;border-radius:50%;background:#ff5b5b'></span>" +
-      "<span style='width:10px;height:10px;border-radius:50%;background:#ffd451'></span>" +
-      "<span style='width:10px;height:10px;border-radius:50%;background:#7ed957'></span>" +
-      "<span style='margin-left:8px;color:#8a93a3;font-size:11px;letter-spacing:.4px'>STERLING · MARGIN TERMINAL</span></div>" +
-      "<div style='padding:16px 18px 18px'>" +
-      "<div style='color:#8a93a3;font-size:11px;margin-bottom:6px'>PORTFOLIO · LIVE</div>" +
-      "<div id='olNet' style='font-size:28px;font-weight:800;color:#7ed957;letter-spacing:.5px'>$10,000,000</div>" +
-      "<div id='olDelta' style='margin-top:4px;font-size:13px;color:#7ed957'>+0.00%  pre-market</div>" +
-      "<div style='margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px'>" +
-      "<div style='background:#0a0d12;border:1px solid #232a36;border-radius:8px;padding:8px 10px'><div style='color:#8a93a3'>Cash</div><div id='olCash'>$2,000,000</div></div>" +
-      "<div style='background:#0a0d12;border:1px solid #232a36;border-radius:8px;padding:8px 10px'><div style='color:#8a93a3'>Brokerage</div><div id='olBank'>$8,000,000</div></div>" +
-      "</div>" +
-      "<div id='olAlert' style='margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(255,91,91,.08);border:1px solid rgba(255,91,91,.25);color:#ff9e9e;font-size:12px;display:none'>" +
-      "MARGIN CALL · positions liquidated · accounts frozen</div>" +
-      "<div style='margin-top:10px;color:#5c6573;font-size:10px'>Not financial advice. Definitely financial ruin.</div>" +
-      "</div>";
-    document.body.appendChild(laptopEl);
-    return laptopEl;
+  /* HIS LAPTOP IS ON HIS DESK. It used to be an HTML card faded over the
+     middle of the screen (traffic-light dots, "MARGIN TERMINAL", a joke line
+     at the bottom): a popup, the fourth wall. Now the screen is a canvas on
+     the real laptop exec_office.js builds on the walnut desk
+     (b.execOffice.laptop is its pose), the opening camera looks down at it,
+     and the numbers die on it in the room. It stays on the desk afterwards,
+     still showing the wreck, for anyone who walks back up to it. */
+  const LAP_W = 512, LAP_H = 320;
+  let lap = null;           // { canvas, ctx, tex, mesh, pose }
+  function laptopMount(pose) {
+    if (lap && lap.pose === pose) return lap;
+    laptopUnmount();
+    const THREE = window.THREE;
+    if (!pose || !THREE || typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = LAP_W; canvas.height = LAP_H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (!root) return null;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: 0xdadada, toneMapped: false });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(pose.w, pose.h), mat);
+    mesh.position.set(pose.x, pose.y, pose.z);
+    mesh.rotation.set(pose.tilt || 0, pose.yaw || 0, 0, "YXZ");
+    mesh.name = "exec-laptop-screen";
+    mesh.userData.keep = true;
+    root.add(mesh);
+    lap = { canvas: canvas, ctx: ctx, tex: tex, mesh: mesh, pose: pose };
+    return lap;
   }
-  function showLaptop(show) {
-    const el = ensureLaptop();
-    if (show) {
-      el.style.display = "block";
-      requestAnimationFrame(function () {
-        el.style.opacity = "1";
-        el.style.transform = "translate(-50%,-50%) scale(1)";
-      });
-    } else {
-      el.style.opacity = "0";
-      el.style.transform = "translate(-50%,-50%) scale(.96)";
-      setTimeout(function () { if (el) el.style.display = "none"; }, 380);
-    }
+  function laptopUnmount() {
+    if (!lap) return;
+    if (lap.mesh.parent) lap.mesh.parent.remove(lap.mesh);
+    lap.mesh.geometry.dispose(); lap.mesh.material.dispose(); lap.tex.dispose();
+    lap = null;
   }
+  // the brokerage window as it looks on his screen; crashed = the margin call
   function paintLaptop(cash, bank, crashed) {
-    ensureLaptop();
-    const net = (cash | 0) + (bank | 0);
-    const netEl = document.getElementById("olNet");
-    const dEl = document.getElementById("olDelta");
-    const cEl = document.getElementById("olCash");
-    const bEl = document.getElementById("olBank");
-    const aEl = document.getElementById("olAlert");
-    const fmt = function (n) { return "$" + Math.round(n || 0).toLocaleString(); };
-    if (netEl) { netEl.textContent = fmt(net); netEl.style.color = crashed ? "#ff5b5b" : "#7ed957"; }
-    if (dEl) {
-      dEl.textContent = crashed ? "−100.00%  LIQUIDATED" : "−0.4%  pre-market wobble";
-      dEl.style.color = crashed ? "#ff5b5b" : "#ffd451";
+    if (!lap) return;
+    const x = lap.ctx, W = LAP_W;
+    const fmt = function (n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); };
+    const GRN = "#57c878", RED = "#ff5b5b", AMB = "#ffd451", DIM = "#7d8796";
+    x.fillStyle = "#0d1118"; x.fillRect(0, 0, W, LAP_H);
+    // window chrome: title bar with the firm's terminal name
+    x.fillStyle = "#070a0e"; x.fillRect(0, 0, W, 30);
+    x.fillStyle = "#1c2330"; x.fillRect(0, 30, W, 1);
+    x.fillStyle = "#8a93a3"; x.font = "bold 13px Arial"; x.fillText("Sterling Margin Terminal", 14, 20);
+    x.fillStyle = DIM; x.font = "12px Arial"; x.fillText("Portfolio, live", W - 116, 20);
+    // the headline number
+    x.fillStyle = DIM; x.font = "bold 12px Arial"; x.fillText("NET POSITION", 18, 58);
+    x.fillStyle = crashed ? RED : GRN; x.font = "bold 44px Arial";
+    x.fillText(fmt((cash | 0) + (bank | 0)), 16, 104);
+    x.fillStyle = crashed ? RED : AMB; x.font = "bold 15px Arial";
+    x.fillText(crashed ? "-100.00%   LIQUIDATED" : "-0.4%   pre-market", 18, 128);
+    // two cells
+    const cell = function (cx, label, val) {
+      x.fillStyle = "#0a0d12"; x.fillRect(cx, 146, 230, 56);
+      x.strokeStyle = "#232a36"; x.lineWidth = 1; x.strokeRect(cx + 0.5, 146.5, 229, 55);
+      x.fillStyle = DIM; x.font = "12px Arial"; x.fillText(label, cx + 12, 166);
+      x.fillStyle = "#e8edf4"; x.font = "bold 18px Arial"; x.fillText(val, cx + 12, 191);
+    };
+    cell(18, "Cash", fmt(cash));
+    cell(264, "Brokerage", fmt(bank));
+    // the day's line: a gentle wobble, or the cliff
+    x.strokeStyle = crashed ? RED : GRN; x.lineWidth = 2; x.beginPath();
+    for (let i = 0; i <= 60; i++) {
+      const px = 18 + i * (476 / 60);
+      let py = 250 + Math.sin(i * 0.7) * 4 + Math.sin(i * 0.23) * 6;
+      if (crashed && i > 44) py = Math.min(276, 250 + (i - 44) * (i - 44) * 0.2);
+      if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
     }
-    if (cEl) cEl.textContent = fmt(cash);
-    if (bEl) bEl.textContent = fmt(bank);
-    if (aEl) aEl.style.display = crashed ? "block" : "none";
+    x.stroke();
+    if (crashed) {
+      x.fillStyle = "rgba(255,91,91,0.12)"; x.fillRect(18, 282, 476, 28);
+      x.strokeStyle = "rgba(255,91,91,0.5)"; x.strokeRect(18.5, 282.5, 475, 27);
+      x.fillStyle = "#ff9e9e"; x.font = "bold 13px Arial";
+      x.fillText("MARGIN CALL. Positions liquidated. Accounts frozen.", 30, 301);
+    }
+    lap.tex.needsUpdate = true;
   }
 
   function fireExecCrash() {
@@ -973,9 +991,8 @@
         });
       } catch (e) {}
     }
-    if (CBZ.city) {
-      CBZ.city.big("−" + fmt$(lost));
-    }
+    // no "-$10,000,000" banner: the screen in front of him and the buzz of
+    // the phone in his pocket are the news
     if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
   }
 
@@ -1004,9 +1021,13 @@
 
     const P = CBZ.player;
     P.pos.set(spot.x, floorY, spot.z); P.vy = 0; P.grounded = true;
-    const facing = Math.atan2(entry.x - spot.x, entry.z - spot.z);
+    // he opens looking DOWN AT HIS LAPTOP (the desk's real one), not at the
+    // door: the first thing the player reads is his screen
+    const lapPose = eo && eo.laptop ? eo.laptop : null;
+    const look = lapPose || entry;
+    const facing = Math.atan2(look.x - spot.x, look.z - spot.z);
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
-    if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.32; }
+    if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = lapPose ? 0.5 : 0.32; }
 
     // Home spawn = this tower's door so dying later doesn't yeet you to the airport.
     try {
@@ -1017,8 +1038,8 @@
     // (no narrator card: the suite, the suit and the laptop say who he is)
 
     const T = ORIGIN_TUNING.exec;
+    laptopMount(lapPose);
     paintLaptop(g.cash != null ? g.cash : T.startCash, execBrokerage() || T.startBank, false);
-    showLaptop(true);
 
     scene = {
       kind: "exec", t: 0, phase: "laptop", crashed: false, hinted: false,
@@ -1028,7 +1049,7 @@
       // laptop/phone beat must not depend on accumulated game dt alone.
       wall0: (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(),
       cleanup: function () {
-        showLaptop(false);
+        // the laptop stays on the desk, still showing whatever it showed last
         for (const c of this.cops) despawnActor(c);
         this.cops.length = 0;
       },
@@ -1061,15 +1082,10 @@
         paintLaptop(Math.round(g.cash || 0), Math.round(execBrokerage() * flut), false);
       }
       if (wt >= T.laptopSec) {
-        showLaptop(false);
+        // no "GROUND FLOOR" banner, no pin on the door: he is broke on the
+        // fiftieth floor and the lift is across the room
         s.phase = "descend"; s.t = 0;
         s.wall0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-        if (CBZ.city) {
-          if (CBZ.city.big) CBZ.city.big("↓ GROUND FLOOR");
-        }
-        // The door waypoint, the objective line and the payout for reaching
-        // the street belong to the onboarding chain below (step "street"),
-        // which clears its own pin on arrival. This beat only narrates.
       }
       return;
     }
@@ -1083,9 +1099,6 @@
       const leftTop = P.pos.y < (s.floorY - 3.5);
       if (nearGround || leftTop) {
         s.phase = "street"; s.t = 0;
-        if (CBZ.city) {
-          CBZ.city.big("LEVEL 1");
-        }
         // (A 35% coin-flip 1-star "margin inquiry" used to fire here: the
         // reward for finishing the opening objective was a random police
         // chase you did nothing to cause. Heat is earned by what you do.)
@@ -1496,13 +1509,14 @@
     // ---- VERB: the opening objective, through core/mission.js. -----------
     // No new objective UI: CLAUDE.md's mission block already owns the HUD
     // line, the waypoint, the beacon, the phone card and the payout.
-    // `onboard: true` verbs are the FIRST steps of the onboarding chain below
-    // ("get to the street", "make your first $500"). They used to start a
+    // `onboard: true` verbs start NOTHING: "get to the street" and "make your
+    // first $500" are what a broke man in a strange city does anyway, and no
+    // line on the screen tells him to. They used to start a
     // core/mission.js job of their own: `descend` pointed at A.spawn (the
     // AIRPORT apron, not the street) and `earn`/`settle`/`landit` were
     // goal:"custom" with no completion test, so they could never finish, sat
     // on the HUD forever and made CBZ.mission.busy() refuse every other job.
-    // The chain owns the first two; the other two now carry a real `done`.
+    // The other two now carry a real `done`.
     verb: {
       descend: { id: "origin_descend", title: "Get to the street", onboard: true },
       survive: { id: "origin_survive", title: "Stay alive",        goal: "survive", reward: 5000, seconds: 180 },
@@ -1854,7 +1868,6 @@
     });
     if (!craft) return false;
     pendingAir = null;
-    if (CBZ.city) CBZ.city.note(choice.name + " · airborne, inbound on the city.", 3.4);
     try { startVerb(comp); } catch (e) {}
     return true;
   }
@@ -1865,7 +1878,6 @@
     if (tryAirborne()) return;
     if (pendingAir.t > PENDING_AIR_SEC) {
       pendingAir = null;
-      if (CBZ.city) CBZ.city.note((AXES.where.airborne.feed) || "You start on the apron.", 3.4);
     }
   }
 
@@ -1921,7 +1933,6 @@
     if (!car) return false;
     pendingRace = null; raceDbg.started++;
     if (CBZ.cityRacerStory && CBZ.cityRacerStory.open) CBZ.cityRacerStory.open();
-    else if (CBZ.city) CBZ.city.note("A loaner, the back of the grid, and the championship in front of you.", 3.4);
     return true;
   }
 
@@ -1946,7 +1957,6 @@
         if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, site.heading || 0, 0); }
         if (CBZ.cam) { CBZ.cam.yaw = site.heading || 0; CBZ.cam.pitch = 0.3; }
       }
-      if (CBZ.city) CBZ.city.note((AXES.where.speedway.feed) || "You wait at the Speedway gate.", 3.4);
     }
   }
 
@@ -2034,7 +2044,7 @@
      spawns a mark. */
   function startVerb(comp) {
     const V = AXES.verb[comp.verb];
-    if (!V || V.onboard) return;            // the onboarding chain owns it
+    if (!V || V.onboard) return;            // no objective: the situation is the objective
     if (typeof V.start === "function") { try { return V.start(comp); } catch (e) { return null; } }
     if (!CBZ.mission || !CBZ.mission.start) return;
     const A = arena();
@@ -2202,7 +2212,6 @@
     try { opts = o.scene(game); } catch (e) { try { console.error("[city origin] scene failed:", id, e); } catch (e2) {} opts = null; }
     if (!opts) {
       genericSafeSpawn();
-      if (CBZ.city) CBZ.city.note(o.tuning.missedLotFeed || "You get out just ahead of trouble.", 3);
       opts = { compact: true };
     }
     return opts;
@@ -2219,12 +2228,11 @@
   CBZ.cityOriginWhy = function () { return applyLog.slice(-6); };
 
   // The public entry wraps the branch logic below so EVERY exit (resume,
-  // adopt, switch, play) also re-arms the onboarding chain from the ledger
-  // and the one-shot third-person handoff for a cinematic intro.
+  // adopt, switch, play) also arms the one-shot third-person handoff for a
+  // cinematic intro.
   CBZ.cityOriginApply = function (game) {
     const r = applyOriginCore(game);
     lastBranch = applyLog.length ? applyLog[applyLog.length - 1].branch : "";
-    try { onboardBegin(game, lastBranch !== "play"); } catch (e) { try { console.error("[onboard] begin", e); } catch (e2) {} }
     pendingTP = !!(r && r.introActive);
     return r;
   };
@@ -2498,439 +2506,13 @@
     if (wheelOpen() && (e.key === "Escape")) { e.preventDefault(); closeWheel(); }
   });
 
-  /* ======================================================================
-     THE FIRST TEN MINUTES: the onboarding chain.
-
-     OWNER: "the game idea is smart but the logic is dumb and it isn't fun."
-     The sandbox opened on a staged beat and then said nothing: the exec got a
-     stale STREET pin and a coin-flip police star, the barfly and the tenant
-     got nothing at all. This is the ONE next-step line every sandbox
-     character follows until they have a job:
-
-       1 street  get out of the building you woke up in       +$50
-       2 earn    make your first $500 (mug, pawn, sell, work)  +$150
-       3 arm     buy a gun at the gun store, or boost a car    +$200
-       4 job     take a contract off the motel wall, or ask a
-                 gang for work                                  +$300
-       then the job systems (core/mission.js, contracts.js on the phone,
-       hitman.js, playergang.js prospecting) own the screen.
-
-     Every step completes off REAL state, never a timer: where your feet are
-     (citynav's building footprints + the ground oracle), cash that actually
-     arrived in the wallet, the weapon inventory / the driver's seat, and
-     "is the player carrying a job" (CBZ.mission.busy, the prospect record,
-     gang membership). Each step pins ONE waypoint on the real target and
-     clears it on completion (only if the pin is still ours: a waypoint the
-     player placed is never touched), pays through the one wallet
-     (CBZ.city.addCash, so the HUD's +$ delta fires), and flashes a payoff
-     line in the objective slot. Progress is persisted on the character's
-     ledger (w.onboard = {step, earned}), so a returning player resumes at the
-     right step and a switched-to character keeps their own.
-
-     It is NOT a core/mission.js job, deliberately: a live mission makes
-     CBZ.mission.busy() true, and busy() is what gigs, the hitman wall, the
-     recruiters and dialogue offers all check before handing out work. A
-     tutorial registered as a job would refuse the very jobs step 4 asks you
-     to take. It yields instead: while a real job with a destination owns the
-     HUD/waypoint, the chain goes quiet and only keeps score.
-     ====================================================================== */
-  const OB_EARN = 500;
-  const OB_STEPS = [
-    { id: "street", title: "Get out to the street", pay: { cash: 50 },               doneLine: "On the street" },
-    { id: "earn",   title: "Make your first $" + OB_EARN, pay: { cash: 150, respect: 3 }, doneLine: "First $" + OB_EARN + " made" },
-    { id: "arm",    title: "Get a gun or a car",    pay: { cash: 200, respect: 3 },  doneLine: "Tooled up" },
-    { id: "job",    title: "Take a job",            pay: { cash: 300, respect: 5 },  doneLine: "Hired" },
-  ];
-  // Stories whose opening IS a career of their own (the grid, the Oval
-  // Office, the wheelhouse) do not get told to mug a stranger.
-  const OB_SKIP = { president: 1, captain: 1, racer: 1, contract: 1, hitman: 1 };   // the Hitman's opening is the burner on the bed
-  let ob = null;            // live chain state, or null (done / skipped / campaign)
-  let obSig = "";
-  let pendingTP = false;    // one-shot: disarm fpsmode's FP-after-intro on the first frame
-
-  function obVeteran(game) {
-    return (game.respect || 0) >= 25 || !!game.cityMembership || !!game.playerGang ||
-      ((game.cash || 0) + (game.cityBank || 0)) >= 25000 || (game.kills || 0) >= 10;
-  }
-  function onboardBegin(game, resumed) {
-    ob = null; obSig = "";
-    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
-    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
-    if (!w) return;
-    const who = (w.origin === "random" && w.originRoll) ? w.originRoll.who : w.origin;
-    if (OB_SKIP[who]) return;
-    let rec = w.onboard;
-    if (!rec || typeof rec !== "object") {
-      // A character who plainly already knows the city (real standing, a
-      // crew, money, a body count) is not walked through it again.
-      if (resumed && obVeteran(game)) { w.onboard = { step: OB_STEPS.length, earned: 0 }; return; }
-      rec = w.onboard = { step: 0, earned: 0 };
-    }
-    if ((rec.step | 0) >= OB_STEPS.length) return;
-    ob = {
-      rec: rec, lastCash: null, entered: false, wpWant: true, wp: null,
-      flash: null, flashT: 0, finale: 0, evalT: 0, quiet: false,
-      mark: null, markT: 0, guns0: 0, jobVia: null,
-    };
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
-
-  // ---- waypoint ownership: we only ever clear a pin WE set ----------------
-  function obCurWp() { return (CBZ.fullMap && CBZ.fullMap.waypoint) ? CBZ.fullMap.waypoint("city") : null; }
-  // identity, not coordinates: fullmap re-snaps a pin's x/z to the nav
-  // route's goal whenever it reroutes, but the record object stays the same
-  function obWpMine() {
-    const cur = obCurWp();
-    return !!(cur && ob && ob.wp && cur === ob.wp);
-  }
-  function obSetWp(x, z, label) {
-    if (!ob || !CBZ.fullMap || !CBZ.fullMap.setWaypoint) return;
-    let wp = null;
-    try { wp = CBZ.fullMap.setWaypoint(x, z, label); } catch (e) { wp = null; }
-    ob.wp = wp || null;
-  }
-  function obClearWp() {
-    if (ob && obWpMine() && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
-    if (ob) ob.wp = null;
-  }
-
-  // ---- real-state predicates ---------------------------------------------
-  function obOnStreet(P) {
-    if (P.driving) return true;
-    const A = arena();
-    const gy = (A && A.groundHeightAt) ? A.groundHeightAt(P.pos.x, P.pos.z) : 0;
-    if (P.pos.y > gy + 2.5) return false;                 // a roof, a balcony, an upper floor
-    const nav = CBZ.cityNav;
-    return !(nav && nav.indoorLotAt && nav.indoorLotAt(P.pos.x, P.pos.z));
-  }
-  function obHasJob() {
-    const M = CBZ.mission;
-    if (M && M.busy && M.busy()) return true;
-    if (g.cityJob) return true;
-    if (CBZ.cityProspectGangId && CBZ.cityProspectGangId() != null) return true;
-    return !!(g.cityMembership || (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()));
-  }
-  // a real job with a PLACE owns the HUD line and the waypoint; the chain yields
-  function obJobOwnsScreen() {
-    const M = CBZ.mission;
-    const m = M && M.focus ? M.focus() : null;
-    if (m && m.target && m.target()) return true;
-    const j = g.cityJob;
-    return !!(j && !j._mission && (j.dest || j.target));
-  }
-  function obStepDone(st, P) {
-    if (st.id === "street") return obOnStreet(P);
-    if (st.id === "earn") return (ob.rec.earned | 0) >= OB_EARN;
-    if (st.id === "arm") {
-      if ((CBZ.weaponInventory || []).length > ob.guns0) return true;
-      return !!(P.driving && (P._vehicle || P.car));
-    }
-    if (st.id === "job") return obHasJob();
-    return false;
-  }
-
-  // ---- targets -----------------------------------------------------------
-  // the stranger worth mugging: a civilian with real cash on him, near enough
-  // to walk to, richer-and-closer first. Never a cop, a gang member, a vendor,
-  // family, or anybody a script is driving.
-  function obPickMark(P) {
-    const peds = CBZ.cityPeds || [];
-    let best = null, bs = 0;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
-      if (!p || p.dead || p.robbed || p.vendor || p.isFamily || p.gang || p.controlled || p._scripted || p._campaignTarget || !p.pos) continue;
-      if (p.kind && p.kind !== "civilian") continue;
-      const cash = p.cash || 0;
-      if (cash < 15) continue;
-      const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
-      if (d < 6 || d > 110) continue;
-      const s = Math.min(cash, 1500) / (d + 20);
-      if (s > bs) { bs = s; best = p; }
-    }
-    return best;
-  }
-  function obDoorPoint(lot) {
-    const d = lot && lot.building && lot.building.door;
-    if (!d || d.x == null) return null;
-    const nx = d.nx || 0, nz = d.nz != null ? d.nz : 1, nl = Math.hypot(nx, nz) || 1;
-    return { x: d.x + (nx / nl) * 1.6, z: d.z + (nz / nl) * 1.6 };
-  }
-  function obNearestGangId(P) {
-    const gs = CBZ.cityGangs;
-    if (!Array.isArray(gs) || !CBZ.cityGangHQ) return null;
-    let best = null, bd = Infinity;
-    for (let i = 0; i < gs.length; i++) {
-      const r = gs[i];
-      if (!r || r.isPlayer || r.absorbed || r.id === "player") continue;
-      if (CBZ.cityAtWar && CBZ.cityAtWar("player", r.id)) continue;
-      let h = null; try { h = CBZ.cityGangHQ(r.id); } catch (e) { h = null; }
-      if (!h || (!h.x && !h.z)) continue;
-      const d = Math.hypot(h.x - P.pos.x, h.z - P.pos.z);
-      if (d < bd) { bd = d; best = r.id; }
-    }
-    return best;
-  }
-  function obGuide(st, P) {
-    if (st.id === "street") {
-      if (!ob.wpWant) return;
-      ob.wpWant = false;
-      const out = frontStepOf(P.pos.x, P.pos.z);
-      if (out) obSetWp(out.x, out.z, "STREET");
-      return;
-    }
-    if (st.id === "earn") {
-      ob.markT -= 0.25;
-      const mk = ob.mark;
-      const stale = !mk || mk.dead || mk.robbed || !((mk.cash || 0) > 0) ||
-        Math.hypot(mk.pos.x - P.pos.x, mk.pos.z - P.pos.z) > 130;
-      if (!stale && !ob.wpWant && ob.markT > 0) return;
-      ob.markT = 4;
-      const best = stale ? obPickMark(P) : mk;
-      const changed = best !== ob.mark;
-      ob.mark = best;
-      if (best && (changed || ob.wpWant) && (obWpMine() || !obCurWp())) obSetWp(best.pos.x, best.pos.z, "MARK");
-      else if (!best && obWpMine()) obClearWp();
-      ob.wpWant = false;
-      return;
-    }
-    if (st.id === "arm") {
-      if (!ob.wpWant) return;
-      ob.wpWant = false;
-      const A = arena();
-      const lot = (A && A.gunShopLot) || (CBZ.cityGunstoreLot && CBZ.cityGunstoreLot()) || null;
-      const t = obDoorPoint(lot);
-      if (t) obSetWp(t.x, t.z, "GUN STORE");
-      return;
-    }
-    if (st.id === "job") {
-      if (!ob.wpWant) return;
-      ob.wpWant = false;
-      let room = null;
-      try { room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null; } catch (e) { room = null; }
-      if (room && room.board) {
-        ob.jobVia = "wall"; ob.jobPlace = String(room.name || "the motel room").toLowerCase();
-        obSetWp(room.board.x, room.board.z, "MOTEL");
-        return;
-      }
-      const gid = obNearestGangId(P);
-      if (gid != null && CBZ.fullMap && CBZ.fullMap.setGangWaypoint) {
-        ob.jobVia = "gang";
-        let wp = null; try { wp = CBZ.fullMap.setGangWaypoint(gid); } catch (e) { wp = null; }
-        ob.wp = wp || null;
-      }
-    }
-  }
-
-  function obComplete(st) {
-    const pay = st.pay || {};
-    if (pay.cash && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay.cash);
-    if (pay.respect && CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(pay.respect);
-    ob.lastCash = g.cash || 0;                         // our own pay never counts as "earned"
-    if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
-    obClearWp();
-    ob.flash = (pay.cash ? "+$" + pay.cash + "  " : "") + st.doneLine;
-    ob.flashT = 3.2;
-    ob.rec.step = (ob.rec.step | 0) + 1;
-    ob.entered = false; ob.mark = null; ob.wpWant = true;
-    if (ob.rec.step >= OB_STEPS.length) ob.finale = 3.2 + 9;
-    if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }
-  }
-
-  function obTick(dt) {
-    if (!ob) return;
-    const P = CBZ.player;
-    if (!P || !P.pos) return;
-    const rec = ob.rec;
-    const st = OB_STEPS[rec.step | 0] || null;
-    // the wallet, every frame: only money that ARRIVED counts toward step 2
-    const c = g.cash || 0;
-    if (ob.lastCash == null) ob.lastCash = c;
-    const d = c - ob.lastCash;
-    ob.lastCash = c;
-    if (st && st.id === "earn" && d > 0 && !P.dead) rec.earned = Math.min(OB_EARN, (rec.earned | 0) + Math.round(d));
-    if (ob.flashT > 0) { ob.flashT -= dt; if (ob.flashT <= 0) ob.flash = null; }
-    if (!st) {
-      ob.finale -= dt;
-      if (ob.finale <= 0) { ob = null; obSig = ""; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return; }
-      obRepaint();
-      return;
-    }
-    ob.evalT -= dt;
-    if (ob.evalT > 0) { if (ob.flash) obRepaint(); return; }
-    ob.evalT = 0.25;
-    if (P.dead || g.busted) return;
-    // a staged beat (the exec's laptop, the barfly's toss) owns the screen
-    const beat = !!(scene && (scene.phase === "laptop" || scene.kind === "barfly"));
-    const quiet = beat || obJobOwnsScreen();
-    if (quiet !== ob.quiet) { ob.quiet = quiet; if (!quiet) ob.wpWant = true; }
-    if (!beat) {
-      if (!ob.entered) {
-        ob.entered = true; ob.wpWant = true; ob.mark = null; ob.markT = 0;
-        ob.guns0 = (CBZ.weaponInventory || []).length;
-      }
-      if (obStepDone(st, P)) obComplete(st);
-      else if (!quiet) obGuide(st, P);
-    }
-    obRepaint();
-  }
-
-  // ---- the ONE compact next-step line (city/hud.js renders it) -----------
-  function obLine() {
-    if (g.mode !== "city") return null;
-    if (!ob) return nmLine();
-    if (ob.flash) return { title: ob.flash, flash: true };
-    const st = OB_STEPS[ob.rec.step | 0];
-    if (!st) return ob.finale > 0 ? { title: "You're in business", hint: "Finish the job. New work comes to your phone." } : null;
-    if (ob.quiet) return null;
-    const keys = !CBZ.touchMode;
-    if (st.id === "street") return { title: st.title, hint: "Find your way down and out the front door" };
-    if (st.id === "earn") {
-      const e = ob.rec.earned | 0;
-      return {
-        title: st.title,
-        hint: "$" + e + " so far. Walk up to a stranger and mug them" + (keys ? " (I)" : "") + ", or sell loot at a pawn shop",
-        progress: Math.min(1, e / OB_EARN),
-      };
-    }
-    if (st.id === "arm") return { title: st.title, hint: "Buy a pistol ($350) at the gun store, or boost a parked car" + (keys ? " (E)" : "") };
-    if (st.id === "job") {
-      return {
-        title: st.title,
-        hint: ob.jobVia === "gang"
-          ? "Talk to a gang member on their turf and ask to join"
-          : "Read the wall in " + (ob.jobPlace || "the motel room") + " for a contract, or ask a gang for work",
-      };
-    }
-    return null;
-  }
-  function obRepaint() {
-    const L = obLine();
-    const sig = L ? (L.title + "|" + (L.hint || "") + "|" + (L.progress != null ? Math.round(L.progress * 100) : "")) : "";
-    if (sig !== obSig) { obSig = sig; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-  }
-  /* ======================================================================
-     AFTER THE CHAIN: THE NEXT MOVE.
-
-     The chain ends at "Take a job", and then the city went silent again: the
-     heists, the hitman wall, the street races and the gang ladders are all
-     real and deep, but every one of them is a door you had to already know
-     about ([H] inside a shop, [K] on a racer). A player with nothing on for a
-     while was a player wandering. So when you have been idle for ~40 s (no
-     job, no heat, not mid-heist, not in a menu), the objective slot offers
-     ONE real opportunity near you, pins it if you have no pin of your own,
-     and gets out of the way the moment you are busy. It rotates so it never
-     nags with the same thing twice, and it only ever points at something the
-     live world actually has (a real shop lot, the real wall, a real HQ).
-     ====================================================================== */
-  const NM_IDLE = 40, NM_SHOW = 30, NM_REST = 50;
-  const NM_STORE = { food: 1, gas: 1, barber: 1, gym: 1, hardware: 1 };
-  const NM_SMASH = { bar: 1, pawn: 1, drugs: 1, clothing: 1, electronics: 1 };
-  const nm = { idle: 0, pick: null, showT: 0, last: "", wp: null, evalT: 0 };
-  function nmBusy(P) {
-    if (P.dead || g.busted || (g.wanted | 0) > 0) return true;
-    if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return true;
-    const M = CBZ.mission;
-    if ((M && M.busy && M.busy()) || g.cityJob) return true;
-    let h = null; try { h = CBZ.cityHeistState ? CBZ.cityHeistState() : null; } catch (e) { h = null; }
-    if (h && h.phase && h.phase !== "idle") return true;
-    let sr = null; try { sr = CBZ.cityStreetRacing ? CBZ.cityStreetRacing.state() : null; } catch (e) { sr = null; }
-    return !!(sr && sr.active);
-  }
-  function nmNearestShop(P, kinds) {
-    const A = arena(); const ls = A && A.shopLots;
-    if (!ls) return null;
-    let best = null, bd = 260;
-    for (let i = 0; i < ls.length; i++) {
-      const l = ls[i];
-      if (!l || l.demolished || !kinds[l.kind]) continue;
-      const d = Math.hypot(l.cx - P.pos.x, l.cz - P.pos.z);
-      if (d < bd) { bd = d; best = l; }
-    }
-    return best;
-  }
-  function nmCandidates(P) {
-    const out = [];
-    const armed = (CBZ.weaponInventory || []).length > 0;
-    const cash = g.cash || 0;
-    if (!armed) {
-      const A = arena();
-      const lot = (A && A.gunShopLot) || (CBZ.cityGunstoreLot && CBZ.cityGunstoreLot()) || null;
-      const t = obDoorPoint(lot);
-      if (t && cash >= 350) out.push({ id: "gun", title: "You're walking around unarmed", hint: "The gun store sells a pistol for $350", x: t.x, z: t.z, label: "GUN STORE" });
-    }
-    if (armed) {
-      const s = nmNearestShop(P, NM_STORE);
-      if (s) out.push({ id: "store", title: "Stick up a store", hint: "Walk into the " + s.kind + " shop and press H to case it, then grab the till and run", x: s.cx, z: s.cz, label: "SCORE" });
-      const s2 = nmNearestShop(P, NM_SMASH);
-      if (s2) out.push({ id: "smash", title: "Smash and grab", hint: "The " + s2.kind + " place pays better than a corner store. Press H inside to case it", x: s2.cx, z: s2.cz, label: "SCORE" });
-    }
-    const inCrew = !!(g.cityMembership || (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()));
-    const prospect = CBZ.cityProspectGangId && CBZ.cityProspectGangId() != null;
-    if (!inCrew && !prospect) {
-      const gid = obNearestGangId(P);
-      if (gid != null) {
-        const gr = (CBZ.cityGangs || []).find(function (r) { return r && r.id === gid; });
-        out.push({ id: "gang", title: "Get put on", hint: "Talk to " + ((gr && gr.name) ? "the " + gr.name : "a gang") + " on their turf and ask for work", gang: gid });
-      }
-    }
-    if (P.driving) out.push({ id: "race", title: "Race for money", hint: "Pull up next to a street racer and press K. Winner takes the pot" });
-    return out;
-  }
-  function nmClearWp() {
-    const cur = obCurWp();
-    if (nm.wp && cur === nm.wp && CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
-    nm.wp = null;
-  }
-  function nmDrop() {
-    if (!nm.pick) return;
-    nm.pick = null; nmClearWp();
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
-  function nmTick(dt) {
-    if (ob) { nm.idle = 0; return; }                 // the chain still owns the slot
-    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
-    if (!w || !w.onboard || (w.onboard.step | 0) < OB_STEPS.length) return;   // skipped stories keep their own openings
-    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
-    const P = CBZ.player; if (!P || !P.pos) return;
-    nm.evalT -= dt;
-    if (nm.evalT > 0) return;
-    const step = 0.5 - nm.evalT; nm.evalT = 0.5;
-    if (nmBusy(P)) { nm.idle = Math.min(nm.idle, 0); nmDrop(); return; }
-    if (nm.pick) {
-      nm.showT -= step;
-      const d = nm.pick.x != null ? Math.hypot(nm.pick.x - P.pos.x, nm.pick.z - P.pos.z) : 1e9;
-      // arrived: the pin has done its job, the instruction stays a while
-      if (d < 8 && nm.wp) { nmClearWp(); nm.showT = Math.max(nm.showT, 14); }
-      if (nm.showT <= 0) { nmDrop(); nm.idle = -NM_REST; }
-      return;
-    }
-    nm.idle += step;
-    if (nm.idle < NM_IDLE) return;
-    const c = nmCandidates(P).filter(function (o) { return o.id !== nm.last; });
-    if (!c.length) { nm.idle = -NM_REST; return; }
-    const pick = c[(Math.random() * c.length) | 0];
-    nm.pick = pick; nm.last = pick.id; nm.showT = NM_SHOW; nm.idle = 0;
-    if (!obCurWp() && CBZ.fullMap) {
-      let wp = null;
-      try {
-        if (pick.gang != null && CBZ.fullMap.setGangWaypoint) wp = CBZ.fullMap.setGangWaypoint(pick.gang);
-        else if (pick.x != null && CBZ.fullMap.setWaypoint) wp = CBZ.fullMap.setWaypoint(pick.x, pick.z, pick.label);
-      } catch (e) { wp = null; }
-      nm.wp = wp || null;
-    }
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
-  function nmLine() {
-    if (!nm.pick) return null;
-    return { title: nm.pick.title, hint: nm.pick.hint };
-  }
-
-  CBZ.cityOnboardLine = obLine;
-  CBZ.cityNextMove = function () { return nm.pick ? { id: nm.pick.id, title: nm.pick.title } : null; };
-  // probe/harness read: where the chain is (null when finished or not running)
-  CBZ.cityOnboardState = function () {
-    return ob ? { step: ob.rec.step | 0, id: (OB_STEPS[ob.rec.step | 0] || {}).id || "done", earned: ob.rec.earned | 0, quiet: ob.quiet } : null;
-  };
+  /* THE FIRST TEN MINUTES used to be an onboarding chain: a HUD next-step
+     line ("Make your first $500 ... mug them (I)"), a map pin on a MARK, the
+     GUN STORE and the MOTEL, a cash bonus per step, and after it an idle nag
+     that pinned a "SCORE" and said "press H to case it". All of it was the
+     game narrating itself over the world, and all of it is gone. What a new
+     character knows is what the opening scene puts in front of him: the
+     room, the street outside, the people on it. */
 
   // ---- per-frame scripted-scene tick (priority 37: after the wanted decay
   //      tick @33 and scenedirector @36.2, before police maintain/move @35/40
@@ -2943,8 +2525,6 @@
     if (g.mode === "city" && g.state === "playing") {
       if (pendingTP) { pendingTP = false; if (CBZ.disarmFPSAfterIntro) { try { CBZ.disarmFPSAfterIntro(); } catch (e) {} } }
       tickHeat(dt); tickAirborne(dt); tickRace(dt);
-      obTick(dt);
-      nmTick(dt);
     }
     if (!scene) return;
     if (g.mode !== "city") { clearScene(); return; }
