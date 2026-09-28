@@ -198,6 +198,7 @@ const cuff = await ev(`(function(){
   // surrender a drawn weapon gets out of him) and Cuff is there.
   var standingVerbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
   best.intimidMode = 'scared'; best.poseHandsUp = true; if (best.char) best.char.handsUp = true;
+  best._verbs = null; CBZ.stepSim(1/60);
   var verbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
   var idx = verbs ? verbs.indexOf('detain') : -1;
   var r = 'no detain on the card';

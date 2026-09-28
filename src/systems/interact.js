@@ -792,7 +792,9 @@
     let best = null, bd = RANGE * RANGE;
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
     for (const a of candidates()) {
-      if (a.ko > 0 || a.dead || a.escaped) continue;
+      // a man on the floor is still somebody an OFFICER can cuff (knee on
+      // his back): the badge's card stays on him
+      if ((a.ko > 0 && CBZ.game.role !== "cop") || a.dead || a.escaped) continue;
       const dx = px - a.group.position.x, dz = pz - a.group.position.z;
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = a; }
