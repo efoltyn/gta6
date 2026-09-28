@@ -659,11 +659,20 @@
       });
   }
 
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the badge leaves the podium
+  // in the hand. (It used to stay on the podium after you had it.)
+  function handTake(obj, key, then) {
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, obj || null, { pose: "card", key: key, onTaken: then });
+    else then();
+  }
   function liftBadge() {
     armStart(); if (S.inv.badge) return;
     const w = observed();
     if (w) { S.heat += 25; toast("HEY!"); w.say("Hands off the podium."); return; }
-    S.inv.badge = true; toast("BADGE LIFTED");
+    handTake(V && V.badgeMesh, "police-badge", function () {
+      if (S.inv.badge) return;
+      S.inv.badge = true; toast("BADGE LIFTED");
+    });
   }
   function stealCase() {
     armStart(); if (S.inv.caseNo) return;
@@ -721,8 +730,11 @@
   }
   function grabDuffel() {
     armStart(); if (!S.cageOpen || S.stashLoc !== "cage") return;
-    S.inv.duffel = true; S.stashLoc = "hand"; if (V.duffel) V.duffel.visible = false;
-    toast("THE STASH");
+    handTake(V && V.duffel, "police-duffel", function () {
+      if (S.stashLoc !== "cage") return;
+      S.inv.duffel = true; S.stashLoc = "hand"; if (V.duffel) V.duffel.visible = false;
+      toast("THE STASH");
+    });
   }
 
   function slideLawyer() {

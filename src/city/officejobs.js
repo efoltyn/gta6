@@ -534,10 +534,18 @@
     if (!cashMesh && cashT > 3 && list.length) { cashT = 0; placeCash(); }
     if (cashMesh && cashAnchor && !playerDead) {
       const dx = px - cashAnchor.x, dz = pz - cashAnchor.z, dy = py - (cashAnchor.y || 0);
-      if (dx * dx + dz * dz < 1.6 * 1.6 && Math.abs(dy) < FLOOR_BAND) {
-        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(cashAmt);
-        if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("Grabbed $" + cashAmt + " off the desk", 1.6); } catch (e) {} }
-        dropCash();                       // taken — it won't respawn until next placement window
+      if (dx * dx + dz * dz < 1.6 * 1.6 && Math.abs(dy) < FLOOR_BAND && !cashMesh.userData._taking) {
+        // TAKEN WITH A HAND (systems/verbs_pickup.js): the stack leaves the
+        // desk in the hand; the money is yours on the grab frame
+        const mesh = cashMesh, amt = cashAmt;
+        mesh.userData._taking = true;
+        const took = function () {
+          if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt);
+          if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("Grabbed $" + amt + " off the desk", 1.6); } catch (e) {} }
+          if (cashMesh === mesh) dropCash();   // taken — it won't respawn until next placement window
+        };
+        if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, mesh, { pose: "card", onTaken: took });
+        else took();
       }
     }
   });

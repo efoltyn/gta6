@@ -625,17 +625,25 @@
       const P = CBZ.player;
       if (P && P.pos) {
         const dx = P.pos.x - cashX, dz = P.pos.z - cashZ, dy = (P.pos.y || 0) - cashY;
-        if (dx * dx + dz * dz < 1.7 * 1.7 && Math.abs(dy) < 3.5) {
-          const amt = cashAmt, gang = cashGang;
-          if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt);
-          if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("Snatched $" + amt + " off the corner", 1.6); } catch (e) {} }
-          if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);
-          // robbing a dealer in the open: the crew knows + a little heat
-          if (gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(gang.id, 0.6);
-          if (gang && CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(gang.id, -6);
-          if (CBZ.cityAlarm) CBZ.cityAlarm(cashX, cashZ, 18, 1.1, CBZ.city && CBZ.city.playerActor);
-          if (CBZ.cityCrime) CBZ.cityCrime(45, { x: cashX, z: cashZ, type: "robbery" });
-          dropCash();
+        if (dx * dx + dz * dz < 1.7 * 1.7 && Math.abs(dy) < 3.5 && !cashMesh.userData._taking) {
+          // TAKEN WITH A HAND (systems/verbs_pickup.js): the stack leaves the
+          // pavement in the hand; the money and the crew's anger land on the
+          // grab frame
+          const amt = cashAmt, gang = cashGang, mesh = cashMesh, x0 = cashX, z0 = cashZ;
+          mesh.userData._taking = true;
+          const took = function () {
+            if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt);
+            if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("Snatched $" + amt + " off the corner", 1.6); } catch (e) {} }
+            if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);
+            // robbing a dealer in the open: the crew knows + a little heat
+            if (gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(gang.id, 0.6);
+            if (gang && CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(gang.id, -6);
+            if (CBZ.cityAlarm) CBZ.cityAlarm(x0, z0, 18, 1.1, CBZ.city && CBZ.city.playerActor);
+            if (CBZ.cityCrime) CBZ.cityCrime(45, { x: x0, z: z0, type: "robbery" });
+            if (cashMesh === mesh) dropCash();
+          };
+          if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(P, mesh, { pose: "card", onTaken: took });
+          else took();
         }
       }
     }

@@ -63,6 +63,7 @@
     lost: "", lostT: 0,
     had: {},                    // item -> bool, for the "you got it" beat
     deskTaken: false,
+    deskTaking: false,          // the hand is on its way to the desk card
     refuseT: 0, pitchT: -1e9,
     lastEl: 0,
   };
@@ -163,19 +164,29 @@
     const officer = nearestUpright(p.x, p.z, DESK_ATTEND_R);
     return { at: { x: p.x, y: p.y + 0.3, z: p.z }, officer: officer, d2: d2(player.pos.x, player.pos.z, p.x, p.z) };
   }
+  // The card is TAKEN WITH A HAND (systems/verbs_pickup.js): the hand goes to
+  // the desk, closes on the card, and the card leaves the desk in it. The
+  // take lands on the grab frame, which is also when a screw sees it or not.
   function deskTake() {
     const d = deskState();
-    if (!d || d.d2 > DESK_REACH2) return;
+    if (!d || d.d2 > DESK_REACH2 || S.deskTaking) return;
     if (d.officer) return;               // he is standing at it; you can see him
-    const who = seenBy();
-    S.deskTaken = true;
-    deskCardShown(false);
-    grantKeycard();                      // the "Keycard" beat fires from the bag watcher
-    sfx("pickup", { volume: 0.6 });
-    if (who) {                           // lifted in plain sight: he comes for you
-      if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "steal" }); } catch (e) {} }
-      if (CBZ.addHeat) CBZ.addHeat(30);
-    }
+    S.deskTaking = true;
+    const taken = function () {
+      if (!S.deskTaking) return;         // a reset got here first
+      S.deskTaking = false;
+      if (S.deskTaken || !escape()) return;
+      S.deskTaken = true;
+      deskCardShown(false);
+      grantKeycard();                    // the "Keycard" beat fires from the bag watcher
+      sfx("pickup", { volume: 0.6 });
+      if (seenBy()) {                    // lifted in plain sight: he comes for you
+        if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "steal" }); } catch (e) {} }
+        if (CBZ.addHeat) CBZ.addHeat(30);
+      }
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(player, CBZ.keycard.group, { pose: "card", onTaken: taken });
+    else taken();
   }
   function grateCut() {
     const v = CBZ.culvertGrate;
@@ -222,7 +233,7 @@
   function promptTick() {
     if (!CBZ.prisonPrompt) return;
     const d = deskState();
-    if (d && d.d2 < DESK_REACH2 && !d.officer) {
+    if (d && d.d2 < DESK_REACH2 && !d.officer && !S.deskTaking) {
       CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2 });
       if (CBZ.keys && CBZ.keys.e) deskTake();
     }
@@ -398,7 +409,8 @@
      ============================================================ */
   function reset() {
     S.grateCut = false; S.work = null; S.portSeenT = 0; S.portSeenBy = "";
-    S.lost = ""; S.lostT = 0; S.deskTaken = false; S.refuseT = 0; S.pitchT = -1e9;
+    if (S.deskTaking && CBZ.verbs && CBZ.verbs.pickupOf) { const pk = CBZ.verbs.pickupOf(player); if (pk && pk.abort) pk.abort(); }
+    S.lost = ""; S.lostT = 0; S.deskTaken = false; S.deskTaking = false; S.refuseT = 0; S.pitchT = -1e9;
     S.had = {};
     if (CBZ.culvertGrate && CBZ.culvertGrate.grate) CBZ.culvertGrate.grate.set(false);
     if (g._planLostIn) { const t = g._planLostIn; g._planLostIn = ""; setTimeout(function () { showLost(t); }, 1500); }

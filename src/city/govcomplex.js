@@ -3230,13 +3230,20 @@
           if (!t) return;
           const v = t.v;
           if (t.what === "key") {
-            v.key = true;
-            if (v.keyMesh) v.keyMesh.visible = false;
-            // the reader goes green. Wrapped because a THROW out of onSelect
-            // lands in the interaction registry's own dispatch and would eat
-            // every verb on the card, not just this one.
-            try { v.lampMat.color.setHex(SRM.lockGrn); v.lampMat.emissive.setHex(SRM.lockGrn); } catch (e) {}
-            srNote("A brass key on a tagged fob. It opens one door in this building.", 2.8);
+            if (v.key) return;
+            // TAKEN WITH A HAND (systems/verbs_pickup.js): the fob leaves the
+            // hook in the hand; the key is yours on the grab frame
+            const took = function () {
+              v.key = true;
+              if (v.keyMesh) v.keyMesh.visible = false;
+              // the reader goes green. Wrapped because a THROW out of onSelect
+              // lands in the interaction registry's own dispatch and would eat
+              // every verb on the card, not just this one.
+              try { v.lampMat.color.setHex(SRM.lockGrn); v.lampMat.emissive.setHex(SRM.lockGrn); } catch (e) {}
+              srNote("A brass key on a tagged fob. It opens one door in this building.", 2.8);
+            };
+            if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, v.keyMesh || null, { pose: "card", key: v, onTaken: took });
+            else took();
             return;
           }
           if (t.what === "door") {
@@ -3287,7 +3294,16 @@
      so granting once here would silently cover only what happens to be live).
      That is the whole reward and it is a CATEGORY: the trespass sweep stops
      seeing you, and the men on the mayor's floor stop being a problem. */
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the seal leaves the desk in
+  // the hand; the writ lands on the grab frame
   function srTakeSeal(v) {
+    if (v._sealTaking) return;
+    v._sealTaking = true;
+    const took = function () { v._sealTaking = false; srTakeSealNow(v); };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, v.sealMesh || null, { pose: "grip", onTaken: took });
+    else took();
+  }
+  function srTakeSealNow(v) {
     if (v.sealMesh) v.sealMesh.visible = false;
     if (CBZ.game) CBZ.game.cityGovWrit = true;
     // THE SEAL IS AN OBJECT, not only a boolean: it goes in the bag as a real

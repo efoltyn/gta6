@@ -1076,13 +1076,24 @@
     }
     return null;
   }
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the book leaves the desk in
+  // the hand (it is yours on the grab frame), and you open it once it is up.
   function takeBook() {
-    const op = RT.op; const a = arc(); if (!op || !a || op.bookTaken) return;
-    op.bookTaken = true; a.book = true;
-    if (op.book) { killGroup(op.book); op.book = null; }
-    commit();
-    addNote("book", "The black book. The President's week, in Varga's hand.");
-    addNote("book", "A loose page in the back. A Bureau cable with my file number on it.");
+    const op = RT.op; const a = arc(); if (!op || !a || op.bookTaken || op._bookTaking) return;
+    op._bookTaking = true;
+    const took = function () {
+      op._bookTaking = false;
+      if (op.bookTaken) return;
+      op.bookTaken = true; a.book = true;
+      if (op.book) { killGroup(op.book); op.book = null; }
+      commit();
+      addNote("book", "The black book. The President's week, in Varga's hand.");
+      addNote("book", "A loose page in the back. A Bureau cable with my file number on it.");
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, op.book || null, { pose: "grip", keep: true, onTaken: took, onDone: readBook });
+    else { took(); readBook(); }
+  }
+  function readBook() {
     // you read it where you stand: his week, then the page at the back
     const K = paper(), H = hold();
     if (K && H && K.bookPage && H.open) {

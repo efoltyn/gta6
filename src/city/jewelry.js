@@ -587,7 +587,19 @@
   }
 
   // ---- LOUD: scoop a smashed case ---------------------------------------------
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the hand goes into the
+  // broken case and comes out with the ice; the haul lands on the grab frame
   function scoop(cs) {
+    const e = econ();
+    if (!e || piecesLeft(cs) === 0 || cs._taking) return;
+    let first = null;
+    for (const p of cs.pieces) if (!p.taken && p.model) { first = p; break; }
+    cs._taking = true;
+    const took = function () { cs._taking = false; scoopNow(cs); };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, first ? first.model : null, { pose: "grip", onTaken: took });
+    else took();
+  }
+  function scoopNow(cs) {
     const e = econ();
     if (!e || piecesLeft(cs) === 0) return;
     // grabbing from someone ELSE's broken case is still theft if you weren't
@@ -626,6 +638,16 @@
     let best = null;                       // you came for the priciest piece
     for (const p of cs.pieces) if (!p.taken && (!best || p.value > best.value)) best = p;
     if (!best) return;
+    // TAKEN WITH A HAND (systems/verbs_pickup.js): the piece comes out of the
+    // case in the hand; it is yours (and the clerk's chance to turn) on the
+    // grab frame
+    if (CBZ.verbs && CBZ.verbs.pickup && best.model) {
+      CBZ.verbs.pickup(CBZ.player, best.model, { pose: "card", onTaken: function () { pryTaken(cs, best); } });
+    } else pryTaken(cs, best);
+  }
+  function pryTaken(cs, best) {
+    const e = econ();
+    if (!e || best.taken) return;
     setTaken(best, true);
     e.add(best.name, 1);
     if (CBZ.sfx) CBZ.sfx("coin");
@@ -634,7 +656,7 @@
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // every pull risks the clerk turning around mid-lift
-    const v = S.lot.building && S.lot.building.vendor;
+    const v = S.lot && S.lot.building && S.lot.building.vendor;
     if (v && !v.dead && Math.random() < PRY_RISK) {
       note("The " + (v.name || "Jeweler") + " spun around, you're MADE!", 2.2);
       startAlarm(cs);

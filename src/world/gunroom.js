@@ -1027,10 +1027,16 @@
         const d2 = dx * dx + dz * dz;
         if (d2 < bestD && slot.cool <= 0) { best = slot; bestD = d2; }
       }
-      if (best && armory._pickCD <= 0) {
+      if (best && armory._pickCD <= 0 && !best._taking) {
         best.cool = 1.2;
         armory._pickCD = 0.35;
-        pickupSlot(best);
+        // TAKEN WITH A HAND (systems/verbs_pickup.js): the gun comes off the
+        // bracket in the hand; it is yours on the grab frame
+        const slot = best;
+        slot._taking = true;
+        const took = function () { slot._taking = false; pickupSlot(slot); };
+        if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, slot.model, { pose: "grip", keep: !slot.item, onTaken: took });
+        else took();
       }
     }
   });

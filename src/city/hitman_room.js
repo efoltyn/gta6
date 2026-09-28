@@ -1899,15 +1899,25 @@
     d.g.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
     delete B.deliveries[kind];
   }
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the paper comes up off the
+  // mat in the hand (it is picked up on the grab frame), and you read it once
+  // it is up.
   function pickDelivery(kind) {
     if (!B) return;
-    const d = B.deliveries[kind]; if (!d) return;
+    const d = B.deliveries[kind]; if (!d || d._taking) return;
+    d._taking = true;
     const cb = d.onPick, canvas = d.canvas;
-    clearDelivery(kind);
-    if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} }
-    emit("pick", { kind: kind, canvas: canvas });
-    if (cb) { try { cb(canvas); } catch (e) { if (window.console) console.error("[hmRoom] onPick", e); } }
-    else if (CBZ.hmHold && CBZ.hmHold.open) { try { CBZ.hmHold.open(canvas, { kind: kind === "paper" ? "news" : "paper" }); } catch (e) {} }
+    const took = function () {
+      if (B && B.deliveries[kind] === d) clearDelivery(kind);
+      if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} }
+      emit("pick", { kind: kind, canvas: canvas });
+    };
+    const read = function () {
+      if (cb) { try { cb(canvas); } catch (e) { if (window.console) console.error("[hmRoom] onPick", e); } }
+      else if (CBZ.hmHold && CBZ.hmHold.open) { try { CBZ.hmHold.open(canvas, { kind: kind === "paper" ? "news" : "paper" }); } catch (e) {} }
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, d.g || null, { pose: "card", onTaken: took, onDone: read });
+    else { took(); read(); }
   }
 
   /* ================================================================

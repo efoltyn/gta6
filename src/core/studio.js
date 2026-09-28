@@ -261,7 +261,7 @@
              "over a rail, off a ledge, into water), plus strike / knockdown / " +
              "getUp and the fighter's timing. CBZ.verbs.grab(a, b) and it plays",
       needs: ["people"],
-      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js"],
+      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/verbs_pickup.js"],
       publishes: ["verbs", "verbPoses", "meleePoses"],
     },
 

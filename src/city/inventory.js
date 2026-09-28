@@ -580,10 +580,22 @@
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.t += dt;
+      if (d._taking) continue;           // a hand is already on it
       if (P && !P.dead && !P.driving && Math.abs(P.pos.y - d.y0) < 2.5 &&
           Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
-        pickupItemDrop(d);
-        removeItemDrop(i);
+        // TAKEN WITH A HAND (systems/verbs_pickup.js): it leaves the ground in
+        // the hand and is yours on the grab frame
+        d._taking = true;
+        const took = function () {
+          pickupItemDrop(d);
+          const j = CBZ.cityItemDrops.indexOf(d);
+          if (j >= 0) removeItemDrop(j);
+        };
+        const kind = d.cash > 0 ? "cash" : (d.weaponId ? "gun" : "box");
+        if (CBZ.verbs && CBZ.verbs.pickup) {
+          CBZ.verbs.pickup(P, d.mesh || { x: d.x, y: d.y0, z: d.z, kind: kind },
+            { pose: kind === "cash" ? "card" : "grip", keep: !!(d.weaponId || d.melee), onTaken: took });
+        } else took();
         continue;
       }
       if (d.t > d.ttl) removeItemDrop(i);
@@ -1887,6 +1899,11 @@
     return best;
   }
 
+  // a hand still on its way to this bag lets go (the take never happens)
+  function abortReach(bag) {
+    const V = CBZ.verbs, pk = V && V.pickupOf ? V.pickupOf(CBZ.player) : null;
+    if (pk && bag && pk.obj === bag.mesh && pk.abort) pk.abort();
+  }
   function bagPickup(bag) {
     if (!bagsOn() || !bag || bag.carried) return false;
     if (_carried) { note("You've already got a bag on your shoulder, put it down first.", 1.8); return false; }
@@ -1894,20 +1911,33 @@
     // A MAN CANNOT SHOULDER A RIFLE AND A DUFFEL. Lower the gun first — an
     // action you can take, never a wall (see the header's soft-lock note).
     if (CBZ.isAimingWeapon && CBZ.isAimingWeapon()) { note("Both hands. Lower the gun first.", 1.9); return false; }
-    if (bag.mesh && bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
+    // The bag is claimed now (nobody else can take it, the hand is going for
+    // it); it is TAKEN WITH A HAND (systems/verbs_pickup.js): the hand closes
+    // on the handles and lifts it, the haul is yours on the grab frame, and it
+    // goes up onto the shoulder when the lift ends.
     bag.carried = true; bag.held = true; bag.air = false;
     _carried = bag;
-    if (!mountOnBody(bag)) {
-      // no rig up (first person before the char exists): keep the record and
-      // re-mount on the next tick rather than dropping the money on the floor.
-      bag._needMount = true;
-    }
-    ensureHaulPose();
-    if (CBZ.setCharPose && CBZ.playerChar) { try { CBZ.setCharPose(CBZ.playerChar, "haul"); _bagPose = true; } catch (e) {} }
-    BAG_TALLY.picked++;
-    sfx("coin");
-    note("Hauling " + fmtB(bag.amount) + ". You can't sprint or shoot with this.", 2.2);
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    const took = function () {
+      BAG_TALLY.picked++;
+      sfx("coin");
+      note("Hauling " + fmtB(bag.amount) + ". You can't sprint or shoot with this.", 2.2);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    };
+    const shoulder = function () {
+      if (_carried !== bag || !bag.mesh) return;        // set down or spent before the lift ended
+      if (bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
+      bag.mesh.visible = true;
+      if (!mountOnBody(bag)) {
+        // no rig up (first person before the char exists): keep the record and
+        // re-mount on the next tick rather than dropping the money on the floor.
+        bag._needMount = true;
+      }
+      ensureHaulPose();
+      if (CBZ.setCharPose && CBZ.playerChar) { try { CBZ.setCharPose(CBZ.playerChar, "haul"); _bagPose = true; } catch (e) {} }
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup && bag.mesh) {
+      CBZ.verbs.pickup(P, bag.mesh, { pose: "grip", keep: true, onTaken: took, onDone: shoulder });
+    } else { shoulder(); took(); }
     return true;
   }
 
@@ -1926,9 +1956,11 @@
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     const px = P ? P.pos.x : bag.x, pz = P ? P.pos.z : bag.z;
     const py = P ? (P.pos.y || 0) : bag.y;
+    abortReach(bag);
     _carried = null;
     bag.carried = false;
     if (bag.mesh && bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
+    if (bag.mesh) bag.mesh.visible = true;              // a take still reaching for it hid it
     const root = arenaRoot() || CBZ.scene;
     if (root && bag.mesh) root.add(bag.mesh);
     releasePose();
@@ -1956,6 +1988,7 @@
   function bagTake(bag) {
     if (!bag) return 0;
     const amt = bag.amount | 0;
+    abortReach(bag);
     if (bag === _carried) { _carried = null; releasePose(); }
     disposeBagMesh(bag.mesh);
     bag.mesh = null; bag.amount = 0; bag.dead = true;
