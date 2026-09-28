@@ -795,6 +795,27 @@
       return;
     }
 
+    /* ---- THE COLLAPSE (systems/bodyfall.js), the one fall every human in
+       every game uses: the knees give, the hips drop under him, and he goes
+       over backward or onto his face along the round, turning at most ~29
+       degrees about his hips, then lies ON the dune (tilted to it) and
+       freezes. What was below it (and still is, for a page without the
+       verbs pack) is a plank tipped about the FEET, which is exactly the
+       pivot-on-a-planted-foot the owner reported. */
+    if (CBZ.bodyFall && m.char && m.char.parts && CBZ.meleePoses) {
+      if (!f.bf) {
+        f.bf = true;
+        safe(function () { CBZ.bodyFall.start(m, { dirX: f.dx, dirZ: f.dz, force: f.energy, dead: true, hold: true }); });
+      }
+      if (CBZ.bodyFall.active(m)) {
+        safe(function () { CBZ.bodyFall.tick(m, sdt); });
+        const gp = m.group.position;
+        if (m.pos !== gp) { m.pos.x = gp.x; m.pos.y = gp.y; m.pos.z = gp.z; }
+        if (CBZ.bodyFall.asleep(m)) f.done = true;   // settled: nothing writes him again
+        return;
+      }
+    }
+
     /* ---- BUCKLE: the pose arrives the frame his legs stop holding him. */
     if (!f.posed) {
       f.posed = true;

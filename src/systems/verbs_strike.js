@@ -50,7 +50,10 @@
        (res is reused per strike: read it inside the callback)
      kick(att, tgt, opts) — strike with the leg ("kick" | "roundKick" | "lowKick" | "knee")
      guard(a, on) · block(a, dur) · slip(a, dir, kind) · react(t, o)
-     knockdown(t, {dir, dur, ko, variant, side}) · getUp(t) · hitstop(att, tgt, secs)
+     knockdown(t, {dir, dur, ko, variant, side, noKo}) · getUp(t) · hitstop(att, tgt, secs)
+     shot(t, {point, dir, fromX, fromZ, cal, wkey, dist, share, head, power}) -> bool
+                — a round that hit a LIVING man (see SHOT below); false = no
+                  rig to react with, the caller falls back to CBZ.body.hit
      step(a, dx, dz, dist) — a footwork step with root motion
      fighter(a, opts) -> F:  F.tick(dt, target, opts) -> action|null, F.telegraph()
      strikeOf(a) · cancelStrike(a) · reachOf(kind, a)
@@ -308,7 +311,17 @@
             const m = moves[i];
             if (m.a === T) pend += m.D * (1 - m.last) * ((m.dx * dx + m.dz * dz) / d);
           }
-          const need = d + Math.max(0, pend) - V.reachOf(kind, att) * 0.92;
+          // the reach table is measured against a man in his stance, chin
+          // out over the lead foot; one standing square carries his head a
+          // hand further back, and the step has to cover that too
+          let chin = 0;
+          const tch0 = Bt.ch;
+          if (tch0 && tch0.parts && S.level !== "legs") {
+            const Z = zonesOf(tch0);
+            const fwd = -((Z.jaw.c.x - tp.x) * dx + (Z.jaw.c.z - tp.z) * dz) / d;
+            chin = Math.max(0, 0.20 * (scaleOf(tch0) / 0.7) - fwd);
+          }
+          const need = d + Math.max(0, pend) + chin - V.reachOf(kind, att) * 0.92;
           const maxL = opts.maxLunge != null ? opts.maxLunge : (Ba.isPlayer ? 0.75 : 0.45);
           const D = Math.max(0, Math.min(maxL, need));
           if (D > 0.03 && !walled(ap.x, (ap.y || 0) + 1.2, ap.z, tp.x, (tp.y || 0) + 1.2, tp.z)) {
@@ -413,13 +426,17 @@
     if (bothP && CBZ.shake) CBZ.shake(res.blocked ? 0.15 : 0.16 + 0.42 * res.power);
     if (S.Ba.isPlayer && CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(S.kind, S.heavy || res.power > 0.8);
     const r = res.reaction;
+    // the heavier man puts more of himself through the other
+    const mass = massRatio(S.att, c);
     if (r === "dead" || r === "none") { /* the caller owns it */ }
     else if (r === "block") {
       if (tch) { tch.blockT = Math.max(tch.blockT || 0, 0.3); tch.blockHitT = 0.2; }
+      // the forearms took it, the feet pay for it: a short step back along the blow
+      if (Bt.pos && !Bt.isPlayer) stepAlong(c, Bt, tch, res.dir.x, res.dir.z, (0.05 + 0.13 * res.power) * mass, 0.26);
     } else if (r === "knockdown") {
       V.knockdown(c, { dir: res.dir, ko: true, power: res.power });
     } else {
-      V.react(c, { zone: res.zone, kind: S.kind, arm: S.arm, dir: res.dir, power: res.power, stagger: res.stagger || r === "stagger", reaction: r, legSide: _legSide });
+      V.react(c, { zone: res.zone, kind: S.kind, arm: S.arm, dir: res.dir, power: res.power, stagger: res.stagger || r === "stagger", reaction: r, legSide: _legSide, mass: mass, heavy: S.heavy });
     }
     if (!res.blocked) {
       // the ledger (island modes) and the blade
@@ -458,11 +475,16 @@
      grapple's late write (90) and CORE's holds (91).
      ============================================================ */
   const moves = [];     // root motion riding a rig's footStep: { a, B, ch, D, dx, dz, last, on }
+  let clock = 0;        // this pass's own seconds (the shot load bleeds on it)
   const falls = [];     // fallen actors whose ko timer the rig's get-up follows
   function update(dt) {
     frameN++;
+    clock += dt;
     const MP = MPf();
     if (!MP) return;
+    for (let i = 0; i < shotQ.length; i++) resolveShot(shotQ[i], MP);
+    shotQ.length = 0;
+    stepReels();
     for (let i = live.length - 1; i >= 0; i--) {
       const S = live[i];
       if (!S.on) { live.splice(i, 1); continue; }
@@ -486,7 +508,7 @@
         if (F.counted && !F.a.dead && F.a.ko > 0 && F.a.ko === F.lastKo) F.a.ko = 0;
         falls.splice(i, 1); continue;
       }
-      if (F.B.isPlayer) continue;
+      if (F.B.isPlayer || F.noKo) continue;
       // the brain is off while he is down (a.ko); the rig stands up in time
       // for it to come back on. A body whose ko nobody counts down (a mode
       // without a ko brain) gets it counted here.
@@ -640,22 +662,66 @@
   };
   // a footwork step: the feet move and the root follows on the same curve
   V.step = function (a, dx, dz, dist, dur) {
-    const B = bod(a), ch = B && B.ch, MP = MPf();
+    const B = bod(a);
     if (!B || !B.pos || B.down()) return false;
+    return stepAlong(a, B, B.ch, dx, dz, dist == null ? 0.35 : dist, dur || 0.34);
+  };
+  function stepAlong(a, B, ch, dx, dz, D, dur) {
+    const MP = MPf();
     const l = Math.hypot(dx, dz) || 1;
     dx /= l; dz /= l;
-    const D = dist == null ? 0.35 : dist;
     if (!ch || !MP) { moveBy(B, dx * D, dz * D); return true; }
     const yaw = B.yaw(), c = Math.cos(yaw), s = Math.sin(yaw);
     const lx = dx * c - dz * s, lz = dx * s + dz * c;          // world → his frame
     const sc = scaleOf(ch);
     // the foot on the side of travel moves first
     const lead = Math.abs(lx) > Math.abs(lz) ? (lx > 0 ? "L" : "R") : (lz > 0 ? (MP.leadSide(ch) === "l" ? "L" : "R") : (MP.leadSide(ch) === "l" ? "R" : "L"));
-    const fs = MP.startStep(ch, lx * D / sc, lz * D / sc, dur || 0.34, lead);
+    const fs = MP.startStep(ch, lx * D / sc, lz * D / sc, dur, lead);
     fs.gen = (fs.gen || 0) + 1;
     pushMove(a, B, ch, D, dx, dz, fs.gen);
     return true;
-  };
+  }
+  /* MASS: how much of the attacker goes through the target. bodymass.js
+     knows what a body weighs; without it the rig scale cubed stands in. */
+  function massOf(a) {
+    if (CBZ.bodyMass) { try { const m = CBZ.bodyMass(a); if (m > 0) return m; } catch (e) { /* no profile */ } }
+    const B = bod(a), s = B && B.ch ? scaleOf(B.ch) / 0.7 : 1;
+    return 80 * s * s * s;
+  }
+  function massRatio(att, tgt) {
+    const r = massOf(att) / massOf(tgt);
+    return r < 0.5 ? 0.5 : r > 2 ? 2 : r;
+  }
+  /* REELING: steps still to take after a blow or a round (one footStep per
+     step, the root on the same curve). A second hit ADDS steps to the ones
+     he has not taken yet; it never cuts the reel short. */
+  const reels = [];
+  function reel(a, B, ch, dx, dz, n, D, dur) {
+    if (!(n > 0) || !B || !B.pos) return;
+    const l = Math.hypot(dx, dz) || 1;
+    dx /= l; dz /= l;
+    for (let i = 0; i < reels.length; i++) {
+      const r = reels[i];
+      if (r.a !== a) continue;
+      r.n = Math.min(4, r.n + n);
+      const bx = r.dx + dx, bz = r.dz + dz, bl = Math.hypot(bx, bz);
+      if (bl > 1e-3) { r.dx = bx / bl; r.dz = bz / bl; }
+      if (D > r.D) r.D = D;
+      return;
+    }
+    reels.push({ a, B, ch, n: Math.min(4, n), dx, dz, D, dur });
+  }
+  function stepReels() {
+    for (let i = reels.length - 1; i >= 0; i--) {
+      const r = reels[i];
+      if (r.B.dead() || r.B.down() || r.n <= 0) { reels.splice(i, 1); continue; }
+      const fs = r.ch && r.ch.footStep;
+      if (fs && fs.on) continue;                          // this step is not done
+      stepAlong(r.a, r.B, r.ch, r.dx, r.dz, r.D, r.dur);
+      r.n--;
+    }
+  }
+  function dropReel(a) { for (let i = reels.length - 1; i >= 0; i--) if (reels[i].a === a) reels.splice(i, 1); }
   function pushMove(a, B, ch, D, dx, dz, gen) {
     for (let i = moves.length - 1; i >= 0; i--) if (moves[i].a === a) moves.splice(i, 1);
     moves.push({ a, B, ch, D, dx, dz, last: 0, fs: gen });
@@ -692,14 +758,23 @@
     } else if (zone === "body") { hr.kind = "fold"; hr.dur = 0.8; }
     else if (zone === "legs") { hr.kind = "buckle"; hr.dur = 0.7; hr.side = o.legSide === "R" ? "R" : "L"; }
     else { hr.kind = "stagger"; hr.dur = 0.7; }
-    // a real step to catch the weight: the foot on the side it is thrown to
+    hr.shot = false;
+    // a real step to catch the weight: the foot on the side it is thrown to.
+    // The heavier the man behind the blow, the further it carries; a heavy
+    // shot that staggers him keeps him going for a second step.
+    const mass = o.mass > 0 ? o.mass : 1;
     if (o.stagger && B.pos) {
-      const D = 0.16 + 0.34 * power;
+      const D = (0.16 + 0.34 * power) * mass;
       const sc = scaleOf(ch);
       const lead = Math.abs(hr.lx) > Math.abs(hr.lz) ? (hr.lx > 0 ? "L" : "R") : (MP.leadSide(ch) === "l" ? "R" : "L");
       const fs = MP.startStep(ch, hr.lx * D / sc, hr.lz * D / sc, 0.38 + 0.12 * power, lead);
       fs.gen = (fs.gen || 0) + 1;
       pushMove(t, B, ch, D, dx, dz, fs.gen);
+      if ((o.heavy || power >= 0.9) && !B.isPlayer) reel(t, B, ch, dx, dz, 1, D * 0.55, 0.32);
+    } else if (B.pos && !B.isPlayer && power > 0.3 && !(ch.footStep && ch.footStep.on)) {
+      // a clean one that does not stagger him still moves his weight: a short
+      // give along the blow, the feet going with it
+      stepAlong(t, B, ch, dx, dz, (0.03 + 0.10 * power) * mass, 0.24);
     }
     return true;
   };
@@ -720,13 +795,17 @@
     const side = o.side || (lx >= 0 ? 1 : -1);
     const dur = o.dur != null ? o.dur : 2.0;
     MP.startFall(ch, { variant, side, ko: o.ko !== false, dur });
+    dropReel(t);
     const times = MP.fallTimes(variant);
-    if (!B.isPlayer) t.ko = Math.max(t.ko || 0, times.fall + (variant === "liver" ? 0.22 : 0) + dur + times.getup);
+    // noKo: a mode whose brain reads a.ko as something else (gun game: a KO
+    // is a kill; warlord and survival have no ko brain) — the rig's own fall
+    // clock holds him down instead
+    if (!B.isPlayer && !o.noKo) t.ko = Math.max(t.ko || 0, times.fall + (times.delay || 0) + dur + times.getup);
     for (let i = falls.length - 1; i >= 0; i--) if (falls[i].a === t) falls.splice(i, 1);
-    falls.push({ a: t, B, gt: times.getup });
+    falls.push({ a: t, B, gt: times.getup, noKo: !!o.noKo });
     // the body goes down along the BLOW (a strike passes its power; a body
     // set down or dropped by another verb falls where it is)
-    if (variant !== "liver" && B.pos && o.power != null) {
+    if (variant !== "liver" && variant !== "kneel" && B.pos && o.power != null) {
       const D = 0.15 + 0.25 * (o.power == null ? 0.7 : o.power);
       const fs = MP.startStep(ch, 0, 0, 0.45, "L");
       fs.gen = (fs.gen || 0) + 1;
@@ -744,6 +823,195 @@
     }
     return MP.getUp(ch);
   };
+
+  /* ============================================================
+     SHOT: what a round does to a man it did not kill.
+
+     Before this a surviving hit was CBZ.body.hit: a knockback SLIDE of the
+     root (the feet skated), a random spring kick into every limb (legs
+     splayed sideways, the torso rolled), a shoulder twist from reactions.js
+     of up to 45 degrees on a torso that pivots at the feet, and in the
+     prison a CBZ.knockback that teleported him a metre. Together that was
+     the "one foot stuck, spinning round it" the owner filmed. A bullet is
+     a push along its line and a hurt body part, and the man keeps his feet
+     under him with real steps:
+
+       · WHERE: the zone comes off his live rig at the hit point (head,
+         torso, either arm, either leg).
+       · HOW HARD: caliber (a 9 mm small, a rifle bigger), a shotgun's
+         pellets share one blast that is big up close and falls off with
+         range. Every round landed on one frame is summed and resolved once.
+       · WHAT: head = the head snaps along the line; torso = he folds over it
+         and reels 1-3 steps along the line (more for bigger rounds); leg =
+         that knee gives and he drops onto it for about a second, then rises
+         (a heavy round, or a leg shot at a run, takes him down); arm = it
+         hangs dead and the other hand clamps it (an armed city man shot in
+         the gun arm may drop the gun, through the same pickup a cuffed man's
+         gun becomes).
+       · STACKING: a second round adds to the reaction and the steps still
+         to take, never restarts it weaker; about three torso rounds inside a
+         second put him down (SHOT_KD).
+       · MOMENTUM: a man shot at a run stumbles on along it.
+       · Never a turn of the whole body: his group yaw is not touched here;
+         the root only ever travels along the round (plus his run).
+     ============================================================ */
+  const SHOT_KD = 2.0;          // stacked load (torso rounds, caliber-weighted) that puts him down
+  const SHOT_DECAY = 0.5;       // load bled per second
+  const SHOT_LEG_DOWN = 1.45;   // one round this heavy through a leg drops him outright
+  const shotQ = [];
+  const _sa = new THREE.Vector3(), _sb = new THREE.Vector3(), _sc = new THREE.Vector3(), _sd = new THREE.Vector3(), _sP = new THREE.Vector3();
+  const ZN = ["head", "torso", "armL", "armR", "legL", "legR"];
+  function koMode() { const m = CBZ.game && CBZ.game.mode; return m === "city" || m === "escape"; }
+  function shotRec(ch) {
+    return ch._shotR || (ch._shotR = { a: null, B: null, queued: false, e: 0, dx: 0, dz: 0,
+      head: 0, torso: 0, armL: 0, armR: 0, legL: 0, legR: 0, load: 0, loadT: 0 });
+  }
+  // which part of him the round found: nearest capsule surface on the live rig
+  function shotZone(ch, P) {
+    const Z = zonesOf(ch);
+    const dH = Math.sqrt(P.distanceToSquared(Z.head.c)) - Z.head.r;
+    const dT = Math.sqrt(Math.min(segDist2(P, Z.cA, Z.cB), segDist2(P, Z.dA, Z.dB))) - Z.chestR - 0.03;
+    ch.parts.la.getWorldPosition(_sa); ch.parts.ra.getWorldPosition(_sb);
+    const dAL = Math.sqrt(Math.min(segDist2(P, _sa, Z.fL), segDist2(P, Z.fL, Z.wL))) - Z.armR;
+    const dAR = Math.sqrt(Math.min(segDist2(P, _sb, Z.fR), segDist2(P, Z.fR, Z.wR))) - Z.armR;
+    const gy = ch.group.position.y;
+    _sc.set(Z.lB.x, gy, Z.lB.z); _sd.set(Z.rB.x, gy, Z.rB.z);
+    let dLL = Math.sqrt(Math.min(segDist2(P, Z.lA, Z.lB), segDist2(P, Z.lB, _sc))) - Z.legR;
+    let dLR = Math.sqrt(Math.min(segDist2(P, Z.rA, Z.rB), segDist2(P, Z.rB, _sd))) - Z.legR;
+    // below the hip joints nothing but a leg is there
+    if (P.y < Math.min(Z.lA.y, Z.rA.y)) { if (dLL < dLR) return "legL"; return "legR"; }
+    let z = "torso", d = dT;
+    if (dH < d) { z = "head"; d = dH; }
+    if (dAL < d) { z = "armL"; d = dAL; }
+    if (dAR < d) { z = "armR"; d = dAR; }
+    if (dLL < d) { z = "legL"; d = dLL; }
+    if (dLR < d) { z = "legR"; d = dLR; }
+    return z;
+  }
+  V.shotZone = function (t, P) { const B = bod(t), ch = B && B.ch; return ch && MPf() && P ? shotZone(ch, P) : null; };
+  V.shot = function (t, o) {
+    o = o || EMPTY;
+    if (!t || isPlayer(t)) return false;
+    const B = bod(t), ch = B && B.ch, MP = MPf();
+    if (!ch || !MP || !B.pos || B.dead() || !ch.parts || !ch.parts.la) return false;
+    // a seated / carried / held body is somebody else's to move
+    if (t._npcAttached || ch.sitting || (typeof V.held === "function" && V.held(t))) return false;
+    // knocked flat by something that is not the rig's own fall: grapple's body
+    if (!(ch.fall && ch.fall.on) && B.down()) return false;
+    let dx = 0, dz = 0;
+    if (o.dir) { dx = o.dir.x || 0; dz = o.dir.z || 0; }
+    if (dx * dx + dz * dz < 1e-8 && o.fromX != null) { dx = B.pos.x - o.fromX; dz = B.pos.z - o.fromZ; }
+    if (dx * dx + dz * dz < 1e-8) { const y = B.yaw(); dx = -Math.sin(y); dz = -Math.cos(y); }
+    const l = Math.hypot(dx, dz); dx /= l; dz /= l;
+    let e = (o.cal > 0 ? o.cal : 1) * (o.share > 0 ? o.share : 1) * (o.power != null ? o.power : 1);
+    if (o.wkey === "shotgun") { const d = o.dist != null ? o.dist : 6; e *= d < 3 ? 1.4 : d > 16 ? 0.3 : 1.4 - (d - 3) * 0.085; }
+    let zone = "torso";
+    if (o.head) zone = "head";
+    else if (o.point && o.point.x != null) {
+      _sP.set(o.point.x, o.point.y, o.point.z);
+      zone = shotZone(ch, _sP);
+    }
+    const R = shotRec(ch);
+    R.e += e; R.dx += dx * e; R.dz += dz * e; R[zone] += e;
+    if (!R.queued) { R.queued = true; R.a = t; R.B = B; shotQ.push(R); }
+    return true;
+  };
+  // the reaction on the rig: a bigger hit takes it over, a smaller one feeds
+  // it, the same kind again holds it at its peak and grows it
+  function shotReact(ch, B, kind, px, pz, amt, dur, side) {
+    let hr = ch.hitReact;
+    if (!hr) hr = ch.hitReact = { on: false, kind: "snap", t: 0, dur: 0.5, lx: 0, lz: -1, side: "L", amt: 1, blow: "straight" };
+    const yaw = B.yaw(), c = Math.cos(yaw), s = Math.sin(yaw);
+    const lx = px * c - pz * s, lz = px * s + pz * c;
+    const left = hr.on ? (hr.amt || 1) * Math.max(0, 1 - hr.t / Math.max(0.05, hr.dur)) : 0;
+    if (hr.on && hr.kind === kind) {
+      hr.amt = Math.min(1.6, Math.max(hr.amt || 0, amt) + amt * 0.35);
+      hr.t = Math.min(hr.t, 0.06); hr.dur = Math.max(hr.dur, dur);
+      hr.lx = (hr.lx + lx) * 0.5; hr.lz = (hr.lz + lz) * 0.5;
+      if (side) hr.side = side;
+    } else if (!hr.on || amt >= left) {
+      hr.on = true; hr.kind = kind; hr.t = 0; hr.amt = amt; hr.dur = dur; hr.lx = lx; hr.lz = lz;
+      hr.blow = "straight"; if (side) hr.side = side;
+    } else {
+      hr.amt = Math.min(1.6, hr.amt + amt * 0.3);
+      hr.t = Math.min(hr.t, 0.06);
+    }
+    hr.shot = true;
+  }
+  function resolveShot(R, MP) {
+    const t = R.a, B = R.B, ch = B && B.ch;
+    const E = R.e;
+    let dx = R.dx, dz = R.dz;
+    let zone = "torso", ze = -1;
+    for (let i = 0; i < ZN.length; i++) if (R[ZN[i]] > ze) { ze = R[ZN[i]]; zone = ZN[i]; }
+    const body = R.torso + R.legL + R.legR + 0.5 * (R.armL + R.armR);
+    R.queued = false; R.a = null; R.B = null; R.e = 0; R.dx = 0; R.dz = 0;
+    for (let i = 0; i < ZN.length; i++) R[ZN[i]] = 0;
+    if (!ch || !(E > 0) || B.dead()) return;
+    const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    R.load = Math.max(0, R.load - (clock - R.loadT) * SHOT_DECAY) + body;
+    R.loadT = clock;
+    const noKo = !koMode();
+    const f = ch.fall;
+    if (f && f.on) {
+      // already on the knee: enough more and he goes all the way down
+      if (f.variant === "kneel" && R.load >= SHOT_KD) {
+        R.load = 0;
+        V.knockdown(t, { dir: { x: dx, z: dz }, power: Math.min(1, 0.45 + 0.3 * E), ko: false, dur: 1.2, noKo });
+      }
+      return;
+    }
+    // whatever he was throwing is gone
+    const his = strikeOf(t);
+    if (his) finish(his, true);
+    ch.punchT = 0; ch.kickT = 0;
+    // MOMENTUM: a man shot at a run carries on along it
+    const mv = ch._mMv || 0;
+    let px = dx, pz = dz;
+    if (mv > 0.5) {
+      const yaw = B.yaw();
+      px = dx * E + Math.sin(yaw) * 1.2 * mv; pz = dz * E + Math.cos(yaw) * 1.2 * mv;
+      const pl = Math.hypot(px, pz) || 1; px /= pl; pz /= pl;
+    }
+    const legHit = zone === "legL" || zone === "legR";
+    if (R.load >= SHOT_KD || (legHit && (E >= SHOT_LEG_DOWN || mv > 0.5))) {
+      R.load = 0;
+      V.knockdown(t, { dir: { x: px, z: pz }, power: Math.min(1, 0.45 + 0.3 * E), ko: false, dur: 1.2, noKo });
+      return;
+    }
+    const k = E > 1.6 ? 1.6 : E;
+    if (legHit) {
+      // that knee gives: down onto it, held about a second, then up
+      V.knockdown(t, { variant: "kneel", side: zone === "legR" ? 1 : -1, dir: { x: dx, z: dz }, ko: false, dur: 0.8 + 0.3 * Math.min(1, E), noKo });
+      return;
+    }
+    if (zone === "head") {
+      shotReact(ch, B, "snap", dx, dz, 0.6 + 0.5 * k, 0.55 + 0.2 * Math.min(1, k), null);
+      if (E > 1) reel(t, B, ch, px, pz, 1, 0.12 + 0.08 * k, 0.28);
+    } else if (zone === "armL" || zone === "armR") {
+      shotReact(ch, B, "arm", dx, dz, 0.6 + 0.4 * k, 1.1, zone === "armL" ? "L" : "R");
+      reel(t, B, ch, px, pz, 1, 0.08 + 0.08 * k, 0.26);
+      // the gun hand: the city's own drop (the pickup a cuffed man's gun becomes)
+      if (zone === "armR" && t.armed && t.weapon && t.kind !== "cop" && CBZ.cityDropWeapon &&
+          CBZ.game && CBZ.game.mode === "city" && Math.random() < Math.min(0.85, 0.3 + 0.35 * E)) {
+        const hp = ch.sockets && ch.sockets.rightHand ? ch.sockets.rightHand.getWorldPosition(_sa) : B.pos;
+        try {
+          CBZ.cityDropWeapon(hp.x, hp.z, t.weapon, t.ammo || 12, { y: B.pos.y || 0 });
+          t.armed = false; t.weapon = null;
+          if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(t);
+        } catch (e) { /* city drops not built */ }
+      }
+    } else if (mv > 0.5) {
+      // hit at a run: he pitches forward along it and stumbles on
+      shotReact(ch, B, "stagger", px, pz, 0.6 + 0.4 * k, 0.6, null);
+      reel(t, B, ch, px, pz, 1, 0.22 + 0.12 * k, 0.26);
+    } else {
+      // the torso: folds over it and reels back along the line, 1-3 steps
+      shotReact(ch, B, "fold", dx, dz, 0.35 + 0.4 * k, 0.75, null);
+      const n = E < 0.9 ? 1 : E < 1.45 ? 2 : 3;
+      reel(t, B, ch, dx, dz, n, Math.min(0.38, 0.14 + 0.12 * E), 0.28);
+    }
+  }
 
   /* HITSTOP: both bodies freeze together on contact (ch.freezeT, wall time);
      the whole world only stops when the player is one of them. */

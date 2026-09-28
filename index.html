@@ -609,8 +609,9 @@ document.body.appendChild(b);}}catch(e){}})();
      call time; the late pass runs at CBZ.onUpdate(91). -->
 <script src="src/systems/verbs.js?v=verbs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
-<script src="src/entities/meleeposes.js?v=verbs1"></script>
-<script src="src/systems/verbs_strike.js?v=verbs1"></script>
+<script src="src/entities/meleeposes.js?v=fallreal1"></script>
+<script src="src/systems/verbs_strike.js?v=fallreal1"></script>
+<script src="src/systems/bodyfall.js?v=fall1"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <script src="src/entities/coins.js"></script>
@@ -684,7 +685,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=nodash1"></script>
+<script src="src/entities/guards.js?v=fallreal1"></script>
 <script src="src/entities/searchlight.js"></script>
 <script src="src/entities/keycard.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -694,8 +695,8 @@ document.body.appendChild(b);}}catch(e){}})();
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
 <script src="src/entities/heritage.js?v=face1"></script>
-<script src="src/entities/npc.js?v=races1"></script>
-<script src="src/entities/ai.js?v=armed1"></script>
+<script src="src/entities/npc.js?v=fallreal1"></script>
+<script src="src/entities/ai.js?v=fallreal1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -819,7 +820,7 @@ document.body.appendChild(b);}}catch(e){}})();
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
      from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
      restores the legacy feet-pivot flop. -->
-<script src="src/systems/prisoncorpse.js?v=deadreal1"></script>
+<script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
@@ -856,7 +857,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=face1"></script>
+<script src="src/systems/reactions.js?v=fallreal1"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
@@ -930,7 +931,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=flick1"></script>
+<script src="src/systems/fpsmode.js?v=fallreal1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -952,7 +953,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=nohint1"></script>
+<script src="src/systems/grapple.js?v=fallreal1"></script>
 <script src="src/entities/survivorbot.js?v=armed1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=uicut1"></script>
@@ -962,7 +963,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=armed1"></script>
+<script src="src/modes/gungame.js?v=fallreal1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1304,7 +1305,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=armed1"></script>
+<script src="src/city/peds.js?v=fallreal1"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1342,7 +1343,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=moves1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=brainmoves1"></script>
-<script src="src/city/police.js?v=brainmoves1"></script>
+<script src="src/city/police.js?v=fallreal1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=nodash1"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -1574,7 +1575,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=nodash1"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
-<script src="src/city/ragdoll.js?v=fall1"></script>
+<script src="src/city/ragdoll.js?v=fallreal1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=cpd1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
@@ -1998,7 +1999,7 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=brainmoves1"></script>
-<script src="src/city/protection.js?v=brainmoves1"></script>
+<script src="src/city/protection.js?v=fallreal1"></script>
 <script src="src/city/officials.js?v=seawave1"></script>
 <script src="src/city/approval.js?v=pres3"></script>
 <script src="src/city/elections.js?v=nodash1"></script>
