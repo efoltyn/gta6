@@ -14,7 +14,10 @@
      2026-09-27 HUD purge; its portrait renderer survives for the [I]
      screen and mugshot.js.)
 
-   • [I] INVENTORY OVERLAY — the Minecraft E-screen, done the city way
+   • (2026-09-28: no key opens this any more — the city bar IS the
+     inventory. The overlay below survives only as a harness seam
+     (CBZ.cityCharPanel.open) and for its portrait renderer.)
+     INVENTORY OVERLAY — the Minecraft E-screen, done the city way
      so it can never misfire: on open CBZ.cityMenuOpen=true +
      document.exitPointerLock(); on close CBZ.cityMenuOpen=false +
      CBZ.requestLock(). A bigger portrait (same rig), the 9 ACCESSORY
@@ -796,8 +799,8 @@
     for (let i = 0; i < bar.length; i++) {
       const e = bar[i];
       const short = e.short || e.label || "?";
-      const sub = e.kind === "holster" ? "fists"
-        : e.kind === "item" ? "use"
+      const sub = e.kind === "throwable" ? "throw"
+        : e.kind === "flashlight" ? "light"
         : e.kind === "phone" ? "phone" : "gun";
       html += "<div class='cpHs" + (e.active ? " active" : "") + "' data-bar='" + i + "'>" +
         (e.count != null && e.count > 1 ? "<div class='ct'>" + (e.count | 0) + "</div>" : "") +
@@ -902,11 +905,17 @@
   // ============================================================
   //  KEY HANDLER — guarded like every city panel so it can't misfire
   // ============================================================
+  // [I] NO LONGER OPENS ANYTHING. OWNER: "Inventory: only guns are cool...
+  // All other inventory is dumb af. The button to open the inventory is dumb."
+  // The city bar (city/hud.js #cSlots) is the inventory now; food and meds use
+  // themselves (city/hunger.js), drugs are product the dealers read from
+  // g.cityInv, clothes are worn at the clothing store's mirror. So the key is
+  // gone rather than left opening a screen of things you can't do anything
+  // with. open()/close() stay as harness seams; Esc still shuts it if one ran.
   window.addEventListener("keydown", function (e) {
     const k = (e.key || "").toLowerCase();
-    // while the inventory overlay is up, it owns I / Esc
     if (invOpen) {
-      if (k === "i" || e.code === "KeyI" || k === "escape") {
+      if (k === "escape") {
         e.preventDefault();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         e.stopPropagation();
@@ -914,34 +923,12 @@
       }
       return;
     }
-    // strict city-only / playing-only gate; never steal a key from a menu/map
     if (!cityNow() || g.state !== "playing") return;
     if (CBZ.cityMenuOpen) return;
     if (CBZ.fullMap && CBZ.fullMap.active) return;
-    if (CBZ.player && (CBZ.player.dead || CBZ.player.driving)) {
-      // [O] hide-HUD always works here; [I] stays available while DRIVING
-      // (owner's rule: I must always open the inventory — only death, a menu,
-      // or a live "i" world-interaction may claim the key).
-      const isI = (k === "i" || e.code === "KeyI") && !CBZ.player.dead;
-      if (!(k === "o" && e.shiftKey) && !isI) return;
-    }
-    if (k === "i" || e.code === "KeyI") {
-      // CONTEXT PRIORITY: if a world interaction is currently offered on the
-      // "i" slot (aiming at / next to a ped/corpse/vendor/stash with an "i"
-      // action — take-clothes, mug, rob-stash, surrender…), [I] runs THAT and
-      // does NOT open the inventory. We let the event fall through untouched so
-      // interactions.js's own keydown handler fires it. Only when no "i"
-      // interaction is live does [I] open the inventory. Exactly one action per
-      // press, no double-fire.
-      if (CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("i")) return;
-      e.preventDefault();
-      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      e.stopPropagation();
-      openInv();
-    } else if (k === "o" && e.shiftKey) {
-      // [Shift+O] HIDE-HUD. Plain [O] used to be swallowed here in the
-      // capture phase, so playergang.js's crew/orders menu (also [O]) could
-      // never open. Plain O now falls through to the crew menu.
+    if (CBZ.player && CBZ.player.dead) return;
+    if (k === "o" && e.shiftKey) {
+      // [Shift+O] HIDE-HUD. Plain [O] falls through to playergang.js's crew menu.
       e.preventDefault();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       e.stopPropagation();

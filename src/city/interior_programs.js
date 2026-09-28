@@ -2020,7 +2020,7 @@
     desk:       ["Wallet", "Phone", "Burner Phone", "Laptop"],
     reception:  ["Wallet", "Phone", "Laptop", "Cash Stack"],
     kitchen:    ["Hotdog", "Soda", "Coffee", "Wallet"],
-    rack:       ["Crowbar", "Lockpick", "Laptop", "Ammo Box"],
+    rack:       ["Crowbar", "Lockpick", "Flashlight", "Laptop", "Ammo Box"],
     crate:      ["Ammo Box", "Crowbar", "Body Armor"],
     footlocker: ["Wallet", "Ammo Box", "Knife", "Body Armor"],
     weapons:    ["Ammo Box", "Body Armor", "Knife"],
@@ -2030,7 +2030,7 @@
     closet:     ["Body Armor", "Knife", "Wallet", "Sunglasses"],
     medicine:   ["Painkillers", "Medkit", "Bandage"],
     register:   ["Cash Stack"],
-    stockroom:  ["Soda", "Hotdog", "Crowbar", "Phone"],
+    stockroom:  ["Soda", "Hotdog", "Crowbar", "Flashlight", "Phone"],
     countroom:  ["Cash Stack", "Briefcase of Cash"],
     lab:        ["Meth", "Coke", "Weed"],
   };

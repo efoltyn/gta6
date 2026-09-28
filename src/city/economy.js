@@ -167,6 +167,8 @@
     "City Seal":   { value: 1500, tag: "key" },
     Lockpick:      { value: 90,   tag: "tool" },
     Crowbar:       { value: 70,   tag: "tool" },
+    // a hand torch: its use is LIGHT (systems/playerflashlight.js), never a swing
+    Flashlight:    { value: 25,   tag: "tool" },
     "Burner Phone":{ value: 60,   tag: "tool" },
     Medkit:        { value: 150,  tag: "tool", medkit: 40 },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
@@ -341,7 +343,7 @@
     food:        ["Burger", "Hotdog", "Pizza Slice", "Bread", "Apple", "Canned Beans", "Fries", "Soda", "Energy Drink"],
     gas:         ["Soda", "Coffee", "Water", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone"],
     drugs:       ["Weed", "Pills"],
-    hardware:    ["Crowbar", "Lockpick", "Bat", "Medkit"],
+    hardware:    ["Crowbar", "Lockpick", "Flashlight", "Bat", "Medkit"],
     electronics: ["Phone", "Laptop", "Burner Phone"],
     gym:         ["Energy Drink", "Medkit"],
     barber:      ["Sunglasses", "Earrings", "Snapback", "Beanie", "Fedora", "Designer Shades"],
