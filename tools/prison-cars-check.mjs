@@ -221,6 +221,45 @@ const j = cl ? CBZ.joinGang(cl) : { ok: false };
 check(j.ok && CBZ.player.gang === mine && CBZ.player.yardCar === mine, "your own car takes you in (gang = your car)");
 check(CBZ.player.car === undefined, "the player's `car` (a VEHICLE in the city) is never written by the yard");
 
+// ------------------------------------------------------------ 6. the outcast
+// A car can put a man OUT (systems/prisonsnitch.js expels a known rat via
+// prisonCars.leave). From then on he is nobody's: his own car's seat, phone
+// and shower turn are somebody else's, his OLD car answers at its own table,
+// and no car takes him back.
+{
+  for (const n of CBZ.npcs) { n.approach = null; n.aiState = "wander"; n.huntPlayer = 0; }
+  const ownSeat = seats.find((s) => s._car === mine);
+  CBZ.player.pos.set(ownSeat.x, 0, ownSeat.z);
+  CBZ.player._propSeat = ownSeat;
+  check(PC.playerViolation() === null, "a member at his own car's table breaks no rule");
+  check(PC.leave("outcast") === true && PC.isOut() && PC.status() === "outcast", "prisonCars.leave(): the player is out");
+  check(PC.playerCar() === -1 && PC.bloodCar() === mine, "out: playerCar() is nobody's, bloodCar() still says where he came from");
+  check(CBZ.player._carOutcast === true && CBZ.player.gang == null, "the old _carOutcast flag mirrors it and the gang comes off");
+  const v = PC.playerViolation();
+  check(!!v && v.kind === "seat" && v.yardCar === mine, "an outcast at his OLD car's table is breaking its rule (" + JSON.stringify(v) + ")");
+  for (const n of CBZ.npcs) { n.approach = null; n.group.position.set(ownSeat.x + (rr() - 0.5) * 10, 0, ownSeat.z + (rr() - 0.5) * 10); }
+  said.length = 0;
+  let by = null;
+  for (let t = 0; t < 4 && !by; t += DT) { PC.tick(DT); by = CBZ.npcs.find((n) => n.approach && n.approach.carRule === "seat") || null; }
+  check(!!by && by.yardCar === mine, "...and his old car is the one that walks up (" + (by ? PC.label(by.yardCar) : "-") + ")");
+  CBZ.player._propSeat = null;
+  const ph = PC.PHONES[PC.CARS[mine].phone];
+  CBZ.player.pos.set(ph.x, 0, ph.z);
+  const pv = PC.playerViolation();
+  check(!!pv && pv.kind === "phone", "an outcast on his old car's phone is on somebody else's phone");
+  CBZ.prisonSchedule = { enabled: () => true, id: () => "wake", hour: () => 5 + (["white", "black", "south", "paisa", "asian", "others"].indexOf(PC.CARS[mine].id) + 0.5) * 2 / 6, inBlock: () => false };
+  check(PC.showerTurn() === mine, "(the shower turn is his old car's)");
+  CBZ.player.pos.set(-14.4, 0, -40.9);
+  const sv = PC.playerViolation();
+  check(!!sv && sv.kind === "shower", "an outcast in his old car's shower turn is out of turn");
+  const back = CBZ.npcs.find((n) => n.yardCar === mine);
+  if (back && back.gang < 0) back.gang = back.yardCar;
+  check(!CBZ.joinGang(back).ok && CBZ.player.gang == null, "no car takes an outcast back in");
+  PC.reset();
+  check(!PC.isOut() && PC.playerCar() === mine && CBZ.player._carOutcast === false, "a new run: he is his car's again");
+  CBZ.prisonSchedule = { enabled: () => true, id: () => "yard", hour: () => 9, inBlock: () => false };
+}
+
 rows.push("mess stools by car: " + PC.CARS.map((c, i) => c.label + " " + counts[i]).join(", "));
 for (const r of rows) console.log("  " + r);
 if (W.errors.length) console.log("  vm errors: " + W.errors.slice(0, 3).join(" | "));

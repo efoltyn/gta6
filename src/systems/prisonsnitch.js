@@ -239,10 +239,13 @@
     return Y ? { x: Y.x, z: Y.z } : null;
   }
   function expelPlayer() {
-    // no door out of a car in prisoncars.js: this file holds the fact
-    // (carOf(player) is null from here), and the old clique band comes off
-    CBZ.player._carOutcast = true;
+    // the door out is prisoncars.js's leave(): from here playerCar() is -1
+    // for every system (seats, phones, showers, recruits, the claim). The
+    // gang standing hit stays here, it is this file's consequence.
     const gid = CBZ.player.gang;
+    const C = cars();
+    if (C && C.leave) { try { C.leave("outcast"); } catch (e) {} }
+    CBZ.player._carOutcast = true;
     if (gid != null && gid >= 0) {
       CBZ.player.gang = null;
       if (CBZ.player._bandMesh) CBZ.player._bandMesh.visible = false;
@@ -1006,6 +1009,7 @@
     S.facts.length = 0; S.tasks.length = 0; S.seg.length = 0; S.knowers.clear();
     S.mode = null; S.carTurned = false; S.plan = null; S.now = 0; S.planT = 0;
     if (CBZ.player) CBZ.player._carOutcast = false;
+    if (cars() && cars().rejoin) { try { cars().rejoin(); } catch (e) {} }
     for (const k in S.log) S.log[k] = 0;
     g.snitchRep = 0; g.snitchPass = 0;
   }

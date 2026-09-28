@@ -7715,6 +7715,8 @@
   // the player is taken in by HIS car (called from the interact menu / claim)
   function joinGang(actor) {
     if (!actor || actor.gang == null) return { ok: false, msg: "" };
+    // a man his car cast out (systems/prisoncars.js leave) is nobody's: no car takes him back this run
+    if (PCARS() && PCARS().isOut && PCARS().isOut()) return { ok: false, msg: "" };
     const car = actor.yardCar != null && actor.yardCar >= 0 ? actor.yardCar : actor.gang;
     if (car < 0) return { ok: false, msg: "" };
     const mine = playerCar();

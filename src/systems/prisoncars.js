@@ -134,9 +134,55 @@
     }
     return best;
   }
+  /* LEAVING A CAR. Membership used to be pure heritage, so nothing could
+     take a man OUT of his car: systems/prisonsnitch.js cast the player out for
+     talking and could only park a private flag on him (`_carOutcast`) that
+     the seat, phone and shower rules here never read, so a known rat still
+     sat at his car's table, used its phone and showered in its turn.
+     The state lives HERE now. `leave(why)` puts the player out ("outcast":
+     his car turned on him); `rejoin()` is the new-run reset. While he is out:
+       playerCar()   -1. Every consumer that asks "which car is he" (the
+                     rules below, ai.js's recruit/claim/hostility, interact.js's
+                     offer) gets NOBODY'S, which is what a cast-out man is.
+       bloodCar()    the car his heritage puts him in, for the few callers that
+                     need where he CAME from (the old car's grudge).
+       the rules     every car's seat is somebody else's seat, every phone is
+                     somebody else's phone, every shower turn is somebody
+                     else's turn, and his OLD car is the one that answers first
+                     at its own table. */
+  const member = { out: false, why: "", t: 0, from: -1 };
+  function isOut() { return !!(member.out || (CBZ.player && CBZ.player._carOutcast)); }
+  function bloodCar() {
+    const p = CBZ.player;
+    if (!p) return -1;
+    if (typeof p.yardCar === "number" && p.yardCar >= 0) return p.yardCar;
+    const ch = CBZ.playerChar;
+    let h = ch && ch.heritage;
+    if (!h && ch) h = heritageBySkin(ch.skinTone);
+    const c = h ? carOfHeritage(h) : -1;
+    return c >= 0 ? c : IDX.white;
+  }
+  function leave(why) {
+    const P = CBZ.player;
+    if (member.out) return false;
+    member.from = bloodCar();
+    member.out = true; member.why = why || "outcast"; member.t = now();
+    if (P) {
+      P._carOutcast = true;                      // the old flag, kept as the mirror other code may read
+      if (P.gang != null && P.gang >= 0) P.gang = null;
+    }
+    if (CBZ.game) CBZ.game.carClaim = "outcast";
+    return true;
+  }
+  function rejoin() {
+    member.out = false; member.why = ""; member.t = 0; member.from = -1;
+    if (CBZ.player) CBZ.player._carOutcast = false;
+  }
+  function status() { return isOut() ? (member.why || "outcast") : "member"; }
   function playerCar() {
     const p = CBZ.player;
     if (!p) return -1;
+    if (isOut()) return -1;
     if (typeof p.yardCar === "number" && p.yardCar >= 0) return p.yardCar;
     const ch = CBZ.playerChar;
     let h = ch && ch.heritage;
@@ -452,6 +498,12 @@
     phone: ["That's our phone.", "Your phone's down there.", "Hang it up."],
     shower: ["Not your turn.", "Wait for your people's turn.", "Out. We're up."],
   };
+  // what his OLD car says to a man it put out, at its own table / phone / slot
+  const OUTCAST_LINE = {
+    seat: ["You don't sit with us no more.", "Get up. You know why.", "Nah. Not here. Not ever."],
+    phone: ["You don't touch our phone.", "Put it down. You're done here."],
+    shower: ["You shower when we're gone.", "Not with us. Out."],
+  };
   const OWN_LINE = {
     seat: "Get up from there. You embarrass all of us.",
     phone: "Use our phone. Don't make me say it twice.",
@@ -484,6 +536,8 @@
   function playerViolation() {
     const P = CBZ.player, g = CBZ.game;
     if (!P || !g || g.mode !== "escape" || g.role === "cop" || P.dead) return null;
+    // an outcast is nobody's (mine = -1): every owned seat, phone and shower
+    // turn below belongs to somebody else, his old car's included
     const mine = playerCar();
     // 1. sitting in another car's seat
     const seat = P._propSeat;
@@ -518,12 +572,16 @@
     if (!viol.warned && viol.t > 2.5) {
       const m = enforcerOf(v.yardCar, 16);
       if (m && CBZ.prisonStartApproach) {
-        const ok = CBZ.prisonStartApproach(m, "turfWarning", 0, { forced: true, shove: true, carRule: v.kind, msg: pick(RULE_LINE[v.kind]), motive: "car rules" });
+        const exiled = isOut() && v.yardCar === member.from;
+        const ok = CBZ.prisonStartApproach(m, "turfWarning", 0, { forced: true, shove: true, carRule: v.kind,
+          msg: pick((exiled ? OUTCAST_LINE : RULE_LINE)[v.kind]), motive: exiled ? "outcast" : "car rules" });
         if (ok) { viol.warned = 1; viol.warnAt = viol.t; viol.by = m; }
       } else if (viol.t > 6) { viol.warned = 1; viol.warnAt = viol.t; }
     }
-    // still there: hands, and it goes on both cars' books
-    if (viol.warned && !viol.hands && viol.t - viol.warnAt > 7) {
+    // still there: hands, and it goes on both cars' books. His OLD car gives
+    // a man it put out half the patience: he knows why.
+    const patience = isOut() && v.yardCar === member.from ? 3.5 : 7;
+    if (viol.warned && !viol.hands && viol.t - viol.warnAt > patience) {
       viol.hands = true;
       strikes.rules++;
       addTension(mine, v.yardCar, 6);
@@ -601,6 +659,7 @@
 
   function reset() {
     resetPolitics();
+    rejoin();
     holders.phone.fill(null); holders.shower.fill(null);
     viol.kind = ""; viol.t = 0; viol.warned = 0; viol.by = null; viol.hands = false;
     strikes.share = 0; strikes.rules = 0;
@@ -626,7 +685,8 @@
 
   CBZ.prisonCars = {
     CARS, N, IDX,
-    carOf, carOfHeritage, heritageOf, playerCar, heritageBySkin,
+    carOf, carOfHeritage, heritageOf, playerCar, bloodCar, heritageBySkin,
+    leave, rejoin, isOut, status,
     label, phrase,
     tension, addTension, atOdds, rivalOf, incident,
     allotMess, allotYard, seatOwner, maySit, messSpot,
