@@ -252,7 +252,7 @@ card, payout), determinism (`hash01`/`seedStream`), touch controls, save.
 textures — 19 MB of audio alone.
 
 **Six finished short books already written.** `games/casino.html` ·
-`ocean.html` · `police.html` · `airport.html` · `racing.html` · `boxing.html`
+`ocean.html` · `police.html` · `airport.html` · `boxing.html`
 (casino/police/airport drafts deleted 2026-09-27; their logic lives in src/games/),
 790–2,171 lines each, complete arcs, self-contained. `GAMES-FIRST.md:88-90`
 demoted them to "design references" and `index.html` links to none of them.
