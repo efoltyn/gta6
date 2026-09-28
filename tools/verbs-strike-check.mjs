@@ -96,6 +96,39 @@ function footMinY(ch) {
   ch.low.ll.localToWorld(out.set(0, -P.legLo, 0)); return Math.min(a, out.y);
 }
 
+/* the lowest point of what you SEE of him: every VISIBLE mesh's own vertices
+   (with its live morph targets), in world space. Box3.setFromObject is not
+   that in r128: it unions each geometry's bounding box turned into the world
+   (a lying torso's rotated box pokes a corner 30 cm lower than any vertex),
+   the hair's box includes every morph target's extent, and hidden meshes
+   count (the closed mouth cavity inside the head). That is what read as the
+   face-down knockout "sinking 0.23 m": vertex by vertex he lay on the floor. */
+const _lv = new THREE.Vector3(), _lm = new THREE.Vector3();
+function lowestSkin(ch) {
+  ch.group.updateMatrixWorld(true);
+  let lo = 9;
+  (function walk(o) {
+    if (!o.visible) return;
+    if (o.isMesh && o.geometry && o.geometry.attributes.position) {
+      const p = o.geometry.attributes.position, g = o.geometry;
+      const mp = g.morphAttributes && g.morphAttributes.position, inf = o.morphTargetInfluences;
+      const useM = mp && inf && inf.some((w) => w);
+      for (let i = 0; i < p.count; i++) {
+        _lv.fromBufferAttribute(p, i);
+        if (useM) for (let m = 0; m < mp.length; m++) if (inf[m]) {
+          _lm.fromBufferAttribute(mp[m], i);
+          if (g.morphTargetsRelative) _lv.addScaledVector(_lm, inf[m]);
+          else _lv.addScaledVector(_lm.sub(_lv), inf[m]);
+        }
+        _lv.applyMatrix4(o.matrixWorld);
+        if (_lv.y < lo) lo = _lv.y;
+      }
+    }
+    for (const c of o.children) walk(c);
+  })(ch.body);
+  return lo;
+}
+
 // ================================================================ STRIKES
 const HEAD = ["jab", "cross", "hook", "upper", "overhand", "elbow", "headbutt"];
 const BODY = ["body", "bodyStraight", "stab", "knee", "kick", "roundKick", "lowKick"];
@@ -240,7 +273,6 @@ for (const variant of ["back", "face"]) for (const ko of [true, false]) {
   const hipStand = ch.parts.rl.getWorldPosition(v3()).y;     // his own stance height (soft knees)
   V.knockdown(B, { dir: { x: 0, z: variant === "back" ? 1 : -1 }, ko, dur: 0.6 });
   let downSeen = false, hipDown = 9, minBody = 9, feetMin = 9;
-  const box = new THREE.Box3();
   for (let i = 0; i < 60 * 8 && ch.fall.on; i++) {
     W.frame(DT);
     if ((B.ko || 0) > 0) B.ko = Math.max(0, B.ko - DT);     // the game's own ko clock (the brain's)
@@ -248,7 +280,7 @@ for (const variant of ["back", "face"]) for (const ko of [true, false]) {
       downSeen = true;
       ch.group.updateMatrixWorld(true);
       hipDown = Math.min(hipDown, ch.parts.rl.getWorldPosition(v3()).y);
-      box.setFromObject(ch.body); minBody = Math.min(minBody, box.min.y);
+      minBody = Math.min(minBody, lowestSkin(ch));
     }
   }
   const stood = !ch.fall.on;

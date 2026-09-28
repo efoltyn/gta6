@@ -397,14 +397,14 @@ for (const bodies of PAIRS) for (const s of specs.filter((s) => /^(shove|throw)@
 // grip in a few; a guard's takes more; tools/arrest-check.mjs has the odds
 {
   const v = vE, { CBZ } = v, V = CBZ.verbs;
-  function tryBreak(grabberOpts, presses) {
+  function tryBreak(grabberOpts, presses, seed) {
     v.clearActors(); v.world({});
     CBZ.player.pos.set(0, 0, 0.9); CBZ.playerChar.group.position.set(0, 0, 0.9); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
     const a = v.actor(Object.assign({ x: 0, z: 0, yaw: 0, name: "grabber" }, grabberOpts));
     if (grabberOpts.kind) a.kind = grabberOpts.kind;
     v.actors.push({ char: CBZ.playerChar, pos: CBZ.player.pos, dead: false, name: "player" });
     for (let i = 0; i < 6; i++) v.frame(DT);
-    const S = V.grab(a, V.playerActor(), {});
+    const S = V.grab(a, V.playerActor(), { seed });
     let n = 0, lastPressBeat = -1;
     for (let i = 0; i < 900 && !S.done; i++) {
       v.frame(DT);
@@ -419,8 +419,19 @@ for (const bodies of PAIRS) for (const s of specs.filter((s) => /^(shove|throw)@
     v.actors.length = 0;
     return out;
   }
-  const weak = tryBreak({ build: "f", age: 13 }, 14);
-  const strongMore = tryBreak({ kind: "guard" }, 14);
+  /* THE FLAKE THIS HAD: one bout each, on an unseeded contest. The grabber's
+     brace varies +-50% per beat (arrest.js CONTEST.NOISE — it is what lets a
+     cuffed man tear free of a lone escort, rarely), so now and then a run of
+     soft beats let a guard's grip go on 3-4 presses while the child's took 4,
+     and "a guard's grip broke as fast as a child's" failed about one run in
+     a few dozen. A grip is judged over five seeded bouts, by the median. */
+  const bouts = (o) => {
+    const r = [1, 2, 3, 4, 5].map((k) => tryBreak(o, 14, 7919 * k));
+    const esc = r.filter((x) => x.escaped).map((x) => x.presses).sort((x, y) => x - y);
+    return { escaped: esc.length >= 3, presses: esc.length >= 3 ? esc[esc.length >> 1] : 99, grip0: r[0].grip0, all: r.map((x) => (x.escaped ? x.presses : "-")).join(",") };
+  };
+  const weak = bouts({ build: "f", age: 13 });
+  const strongMore = bouts({ kind: "guard" });
   // cuffs, once closed, hold whatever he does; an NPC that opts in fights a weak grip off
   v.clearActors();
   CBZ.player.pos.set(0, 0, 0.9); CBZ.playerChar.group.position.set(0, 0, 0.9); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
@@ -448,7 +459,7 @@ for (const bodies of PAIRS) for (const s of specs.filter((s) => /^(shove|throw)@
   if (strongMore.escaped && strongMore.presses < 4) row.notes.push(`a guard's grip broke on ${strongMore.presses} presses`);
   const errs = v.errors.splice(0); if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
   row.ok = !row.notes.length;
-  row.phases = [`grip ${weak.grip0.toFixed(2)} in ${weak.presses} / guard ${strongMore.grip0.toFixed(2)} in ${strongMore.presses}, cuffs hold, npc brk`];
+  row.phases = [`grip ${weak.grip0.toFixed(2)} in ${weak.all} / guard ${strongMore.grip0.toFixed(2)} in ${strongMore.all}, cuffs hold, npc brk`];
   results.push(row);
 }
 

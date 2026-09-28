@@ -2842,18 +2842,66 @@
     return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
-  // ---- ray vs the DOWNED (CITY-ONLY) -----------------------------------------
+  // ---- ray vs the DOWNED (every game) ----------------------------------------
   // OWNER: you must be able to keep shooting a corpse — more holes, it reacts.
   // findActorHit deliberately skips dead actors (so a live target isn't blocked
   // by a body in front of it); this is its dead-only twin. A corpse lies PRONE,
   // so the standing head/torso/leg spheres don't fit — instead we test a couple
   // of low, fat spheres around the body's settled root (group.position tracks the
   // ragdoll). Returns the nearest dead actor + whether the hit landed up near the
-  // head end (for the decap read). City-only; never runs in jail/survival.
+  // head end (for the decap read). The other games test the lying rig itself.
   const CORPSE_R = 0.62;        // prone body is a low fat sausage
+  /* EVERY OTHER GAME: the body lies where its collapse put it
+     (systems/bodyfall.js), and the rig knows where its head and hips are, so
+     the round is tested against the body itself: five spheres from the head
+     through the hips and on down the legs. Returns the entry distance, and
+     sets _corpseHead when the nearest sphere was the head. */
+  const _cH = new THREE.Vector3(), _cP = new THREE.Vector3();
+  let _corpseHead = false;
+  function lyingBodyEntry(origin, dir, a, maxT) {
+    const ch = a.char;
+    if (!ch || !ch.head || !ch.parts || !ch.parts.ll || !ch.parts.rl) return -1;
+    const gp = a.group.position;
+    // cheap reject: nothing of a lying man is 1.6 m from his root
+    if (sphereEntry(origin, dir, gp.x, (gp.y || 0) + 0.4, gp.z, 1.6, maxT) < 0) return -1;
+    ch.head.getWorldPosition(_cH);
+    ch.parts.ll.getWorldPosition(_cP);
+    const hx = _cP.x, hy = _cP.y, hz = _cP.z;
+    ch.parts.rl.getWorldPosition(_cP);
+    _cP.set((hx + _cP.x) / 2, (hy + _cP.y) / 2, (hz + _cP.z) / 2);   // the pelvis
+    let bd = -1;
+    _corpseHead = false;
+    for (let i = 0; i < 5; i++) {
+      // 0 = the head, 2 = the hips, 4 = the knees/shins
+      const t = i / 2;
+      const x = _cH.x + (_cP.x - _cH.x) * t, y = _cH.y + (_cP.y - _cH.y) * t, z = _cH.z + (_cP.z - _cH.z) * t;
+      const d = sphereEntry(origin, dir, x, y, z, i === 0 ? 0.2 : i < 3 ? 0.3 : 0.2, maxT);
+      if (d >= 0 && (bd < 0 || d < bd)) { bd = d; _corpseHead = i === 0; }
+    }
+    return bd;
+  }
   function findCorpseHit(origin, dir, maxT) {
-    if (CBZ.game.mode !== "city") return null;
     let best = null, bestDist = maxT, bestHead = false;
+    if (CBZ.game.mode !== "city") {
+      const seen = new Set();
+      const scanBody = function (list) {
+        if (!list) return;
+        for (let i = 0; i < list.length; i++) {
+          const a = list[i];
+          if (!a || !a.dead || a.escaped || !a.group || a.group.visible === false || seen.has(a)) continue;
+          seen.add(a);
+          const d = lyingBodyEntry(origin, dir, a, bestDist);
+          if (d >= 0 && d < bestDist) { best = a; bestDist = d; bestHead = _corpseHead; }
+        }
+      };
+      scanBody(CBZ.guards); scanBody(CBZ.npcs);
+      // bodies a game keeps past the man (systems/bodyfall.js CBZ.corpses) and
+      // the dead a game lists for its guns (warlord: its own men list)
+      if (CBZ.corpses) scanBody(CBZ.corpses.list);
+      scanBody(CBZ.corpseTargets);
+      if (!best) return null;
+      return { corpse: best, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
+    }
     const scan = function (list) {
       if (!list) return;
       for (let i = 0; i < list.length; i++) {
@@ -3457,15 +3505,16 @@
         // did pass a direction) got exits.
         if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal, dir: shotDir });
       } else if (hit.corpse) {
-        // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
-        // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
-        // banks the impulse so it reacts, and STAMPS the wound itself — so we do
-        // NOT call bodyWound here (that would double-stamp). Force scales with
-        // caliber on the same scale cityRagdoll uses (~6 pistol .. ~14 shotgun).
+        // DOWNED BODY (every game): keep shooting it — it accumulates holes AND
+        // jerks. CBZ.corpseHit (systems/bodyfall.js) re-kicks a verlet slot
+        // (city/ragdoll.js) or shoves and jolts a body lying in its collapse,
+        // and STAMPS the wound itself — so we do NOT call bodyWound here (that
+        // would double-stamp). Force scales with caliber on the same scale
+        // cityRagdoll uses (~6 pistol .. ~14 shotgun).
         acc.hitSomething = true;
         const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
-        if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
-        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
+        const took = CBZ.corpseHit ? CBZ.corpseHit(hit.corpse, hit.point, shotDir, force) : false;
+        if (!took && CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
         spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir, goreOpts(hit, w, cal));
         // Only a muzzle-close shotgun headshot can sever even post-mortem
