@@ -16,10 +16,10 @@
    records are unchanged in number and position, so capture.js fires from
    exactly where it did.
 
-   The ladder is still a registered z/x-axis ramp in CBZ.platforms;
-   systems/physics.js skips platforms in escape mode, so it is honest
-   geometry and a record, not a climb — the day that gate lifts, the deck
-   is standable with no change here.
+   The deck is a CBZ.platforms record (standable: physics.js reads platforms
+   in escape mode now). The ladder is NOT a ramp — 12 m over 0.8 m is a wall
+   — it is the Climb verb (a vent pair) plus a CBZ.stairs link of kind
+   "ladder" so the AI knows the tower connects to the ground.
 ============================================================ */
 (function () {
   "use strict";

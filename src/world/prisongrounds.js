@@ -318,8 +318,19 @@
       stat(new THREE.BoxGeometry(4.6, 0.5, 0.55), steelDark, dx, 1.2 + 4.65, z1 + 0.5, { cast: false });
       for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.12, 4.4, 0.14), steelDark, dx + s * 2.16, 1.2 + 2.2, z1 + 0.32, { cast: false });
     }
-    // the dock: 1.2 m high, 4 m deep, rubber bumpers, a grounded stair with a rail at its east end
-    const dock = addBox(85, 0.6, z1 + 2.2, 26, 1.2, 4.0, 0x8f959c, { solid: true });
+    // the dock: 1.2 m high, 4 m deep, rubber bumpers, a grounded stair with a rail at its east end.
+    // Its collider was full height and nothing was ever registered on top,
+    // so the dock was a 1.2 m wall and its six-step stair pure paint. Now the
+    // collider is banded to the dock's own 1.2 m (a body on top is above it),
+    // the deck is a platform, and the stair is a CBZ.stairs flight (6 x 0.20
+    // rise over 3.0 m) landing on its own top step beside the deck.
+    const dock = addBox(85, 0.6, z1 + 2.2, 26, 1.2, 4.0, 0x8f959c, { solid: true, y0: 0, y1: 1.2 });
+    (CBZ.platforms || (CBZ.platforms = [])).push({ minX: 72, maxX: 98, minZ: z1 + 0.2, maxZ: z1 + 4.2, top: 1.2 });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    if (CBZ.stairs) CBZ.stairs.flight({
+      bottom: { x: 98.6, y: 0, z: z1 + 4.0 }, top: { x: 98.6, y: 1.2, z: z1 + 1.0 },
+      width: 1.2, overlap: 0.3, underside: false, owner: "warehouse-dock",
+    });
     K.skinBox(dock, "concrete", 0xa0a5aa);
     stat(new THREE.BoxGeometry(26.05, 0.1, 0.1), steelDark, 85, 1.17, z1 + 4.18, { cast: false });   // the nosing angle
     for (const dx of [76, 84, 92]) for (const s of [-1, 1]) stat(new THREE.BoxGeometry(0.25, 0.45, 0.12), rubber, dx + s * 1.6, 0.8, z1 + 4.26, { cast: false });

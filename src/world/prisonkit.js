@@ -535,10 +535,8 @@
     }
 
     // the way up: a caged rung ladder on the `face` side, ground to deck,
-    // with a hatch cut in the deck plate at its head. Registered as the
-    // z-axis ramp world/towers.js always used; systems/physics.js skips
-    // CBZ.platforms in escape mode, so this is honest geometry and a record
-    // that becomes a climb the day that gate lifts.
+    // with a hatch cut in the deck plate at its head. Drawn here; climbed by
+    // the verb below; known to the AI as a CBZ.stairs ladder link.
     const lx = x + face.x * (S / 2 + 0.36), lz = z + face.z * (S / 2 + 0.36);
     const px = -face.z, pz = face.x;                  // across the ladder
     for (let i = 0; i < 2; i++) {
@@ -574,15 +572,28 @@
       CBZ.colliders.push({ minX: x - R, maxX: x + R, minZ: z + s * (R - 0.1) - 0.1, maxZ: z + s * (R - 0.1) + 0.1, y0: H + 0.2, y1: H + 1.5, rail: true, noBreach: true });
       CBZ.colliders.push({ minX: x + s * (R - 0.1) - 0.1, maxX: x + s * (R - 0.1) + 0.1, minZ: z - R, maxZ: z + R, y0: H + 0.2, y1: H + 1.5, rail: true, noBreach: true });
     }
-    if (CBZ.platforms) {
-      const l0 = { x: lx, z: lz }, along = Math.abs(face.z) >= Math.abs(face.x);
-      CBZ.platforms.push({
-        minX: l0.x - 0.45, maxX: l0.x + 0.45, minZ: l0.z - 0.45, maxZ: l0.z + 0.45, top: H + 0.25,
-        ramp: along ? { z0: l0.z + face.z * 0.4, z1: l0.z - face.z * 0.4, y0: 0, y1: H + 0.25 }
-          : { x0: l0.x + face.x * 0.4, x1: l0.x - face.x * 0.4, y0: 0, y1: H + 0.25 },
-      });
-      CBZ.platforms.push({ minX: x - R, maxX: x + R, minZ: z - R, maxZ: z + R, top: H + 0.25 });
-    }
+    /* THE DECK IS A PLATFORM; THE LADDER IS NOT A RAMP. The ladder used to
+       be a ramp record too: 12.25 m of rise over 0.8 m of run (86 deg), in a
+       0.9 m square half inside the shaft's own collider — and for the four
+       diagonal towers typed as a z-axis ramp, x-branch without `axis:"x"`
+       (NaN heights). Harmless only while physics.js ignored platforms in
+       escape; now that it reads them, a ramp that steep is a wall with a
+       glitch in it (a body shoved into it creeps up 0.75 m per 5 cm). A man
+       does not walk up a ladder: the climb is the verb above, and the AI
+       learns the connection from a CBZ.stairs link of kind "ladder" (foot on
+       the ground -> up the rungs -> the hatch on the deck), which a follower
+       must traverse as a climb, not a walk. */
+    if (CBZ.platforms) CBZ.platforms.push({ minX: x - R, maxX: x + R, minZ: z - R, maxZ: z + R, top: H + 0.25 });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    if (CBZ.stairs) CBZ.stairs.link({
+      path: [
+        { x: foot.x, y: 0, z: foot.z },
+        { x: lx, y: 0, z: lz },
+        { x: lx, y: H + 0.25, z: lz },
+        { x: hatch.x, y: H + 0.25, z: hatch.z },
+      ],
+      width: 0.6, kind: "ladder", owner: "tower", climb: { foot: foot, top: hatch },
+    });
     return { x: x, z: z, deck: H, headY: eave + 1.15 + 0.5 };
   }
   // where entities/searchlight.js mounts its lamp: on the finial, over the roof
@@ -1087,7 +1098,31 @@
       tube(back, 0, fz, back, topY + 1.0, fz, 0.035, galv, { seg: 6, cast: false });                     // rear guard post
     }
     for (const y of [topY + 0.5, topY + 1.0]) stat(new THREE.CylinderGeometry(0.025, 0.025, len, 6), galv, back, y, z, { rx: Math.PI / 2, cast: false });
-    CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
+    /* WALKABLE, NOT A BLOCK. The whole unit used to be one full-height
+       collider: a 2-3 m steel cube with seats drawn on it. A bleacher is
+       climbed row to row (each row's foot plank is 0.40 over the last, the
+       seats 0.02 under the next foot plank), so its walk surface is one
+       CBZ.stairs flight from the front foot plank up to the back row, the
+       soffit under it keeps bodies from walking into the frame from behind
+       or the ends, and the rear guard rail is a rail. */
+    if (CBZ.stairs) {
+      const xb = x + 0.4, xt = x - (rows - 1) * RD - 0.2;
+      CBZ.stairs.flight({
+        bottom: { x: xb, y: 0, z: z }, top: { x: xt, y: topY, z: z },
+        width: len, overlap: 0.12, underside: true, link: false,
+      });
+      // the AI link ends where a body can STAND at the top: just clear of the
+      // rear rail (flight()'s own link would end 0.45 past the back row, i.e.
+      // behind the rail)
+      const xs = back + 0.1 + 0.45, ys = topY * Math.min(1, (xb - xs) / (xb - xt));
+      CBZ.stairs.link({
+        path: [{ x: xb + 0.45, y: 0, z: z }, { x: xb, y: 0, z: z }, { x: xs, y: ys, z: z }],
+        width: len, kind: "bleacher", owner: "bleacher",
+      });
+      CBZ.colliders.push({ minX: back - 0.1, maxX: back + 0.1, minZ: z - len / 2, maxZ: z + len / 2, y0: 0, y1: topY + 1.05, rail: true, noBreach: true });
+    } else {
+      CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
+    }
     if (o.seats > 0 && CBZ.roomSeatAnchor) {
       for (let t = 0; t < rows; t++) for (let k = 0; k < o.seats; k++) {
         try {
