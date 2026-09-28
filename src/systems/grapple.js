@@ -844,7 +844,18 @@
     // A BEATING ADDS UP. The ledger (systems/trauma.js) turns repeated blows
     // into bruises, then split skin; this only reports the blow.
     if (CBZ.trauma) CBZ.trauma.strike(t, PUNCH_FORCE * mul, { dir: { x: d.x, y: 0.35, z: d.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
-    if (CBZ.surv) CBZ.surv.hurt(t, 18 * mul, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
+    // A FIST KNOCKS A MAN OUT; it does not empty a health bar (systems/
+    // vitals.js). Only a long beating of a man already out kills him.
+    const VT = CBZ.vitals;
+    if (VT) {
+      const out = VT.blunt(t, {
+        zone: res.zone || "head", power: (res.power != null ? res.power : 0.6) * (res.blocked ? 0.25 : 1),
+        weapon: res.kind === "kick" || res.kind === "roundKick" || res.kind === "lowKick" ? "kick" : res.kind === "knee" ? "knee" : "fist",
+        heavy: !!res.heavy, by: CBZ.player, dirX: d.x, dirZ: d.z, fromX: P.x, fromZ: P.z,
+      });
+      if (out === "ko" || out === "dead") res.reaction = "none";      // vitals laid him down already
+      else if (out === "knockdown") res.reaction = "knockdown";
+    } else if (CBZ.surv) CBZ.surv.hurt(t, 18 * mul, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
     CBZ.sfx && CBZ.sfx("punch");
     CBZ.shake && CBZ.shake(0.18);
   }

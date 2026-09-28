@@ -305,8 +305,17 @@
       if (CBZ.cityKOPed) CBZ.cityKOPed(a, fx, fz);
     } else {
       if (a.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(a.gang, 0.4);
-      a.hp -= m.dmg;
-      if (a.hp <= 0) {
+      if (m.melee && CBZ.vitals) {
+        // a guest's fist is a daze like anybody's (systems/vitals.js): it can
+        // knock him out, and only a long beating of a man already out kills
+        a.hp = Math.max(1, a.hp - m.dmg);
+        const r = CBZ.vitals.blunt(a, { zone: m.head ? "jaw" : "head", power: 0.7, weapon: "fist", by: R || null,
+          dirX: a.pos.x - fx, dirZ: a.pos.z - fz, fromX: fx, fromZ: fz });
+        if (!a.dead && r !== "ko" && r !== "dead") {
+          if (r === "knockdown" && CBZ.body && CBZ.body.hit) CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: 5, knockdown: 1 });
+          if (!a.rage && R) { a.rage = R; a.state = "fight"; a.alarmed = Math.max(a.alarmed || 0, 6); }
+        }
+      } else if ((a.hp -= m.dmg) <= 0) {
         CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: m.melee ? 7 : 6, fling: m.melee ? 4 : 3 }, m.melee ? "beaten to death" : (m.head ? "headshot" : "shot"));
       } else {
         CBZ.body && CBZ.body.hit && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: m.melee ? 5 : (m.head ? 6.5 : 4.5), knockdown: m.melee && Math.random() < 0.3 ? 1 : 0 });

@@ -13,6 +13,9 @@
      throwable   a grenade / a demolition charge: selecting one puts it IN
                  YOUR HAND (systems/helditems.js), the use input uses it
      detonator   appears once a charge is out; in hand, squeeze = boom
+     bandage     a roll of gauze, while you carry one (systems/vitals.js):
+                 selecting it puts it in your hand, HOLDING the use input
+                 wraps your worst open wound; letting go early stops
      flashlight  the light (systems/playerflashlight.js); lit = emphasized
      phone       the city campaign handset
      keycard     the staff card (prison); passive, it opens doors by itself
@@ -28,15 +31,16 @@
 (function (root) {
   "use strict";
 
-  const KINDS = ["gun", "throwable", "detonator", "flashlight", "phone", "keycard", "key"];
+  const KINDS = ["gun", "throwable", "detonator", "bandage", "flashlight", "phone", "keycard", "key"];
   // selectable cells answer a digit / a tap; passive cells only show.
-  const SELECTABLE = { gun: 1, throwable: 1, detonator: 1, flashlight: 1, phone: 1 };
+  const SELECTABLE = { gun: 1, throwable: 1, detonator: 1, bandage: 1, flashlight: 1, phone: 1 };
   const DOOR_KEYS = ["Gun-Room Key", "Gate Key", "Corridor Key", "Cell Key"];
 
   /* s = {
        mode, guns:[id...], held:id|null, holstered:bool,
        hasKeycard:bool, keys:[name...],
        flashlight:{owned,on}|null,
+       bandage:{count, active}|null   (rolls carried; active = in your hand)
        items:[{kind:"throwable"|"detonator", item, held, count, active}]
          (systems/helditem_model.js cells(): the held things you carry)
      }  ->  [{kind, id?, name?, active, selectable}] in draw order:
@@ -60,6 +64,8 @@
       seen["i" + it.item] = 1;
       out.push({ kind: it.kind, name: it.item, held: it.held || null, count: it.count | 0, active: !!it.active, selectable: true });
     }
+    const bd = s.bandage;
+    if (bd && (bd.count | 0) > 0) out.push({ kind: "bandage", count: bd.count | 0, active: !!bd.active, selectable: true });
     const fl = s.flashlight;
     if (fl && fl.owned) out.push({ kind: "flashlight", active: !!fl.on, selectable: true });
     if (s.mode === "escape") {

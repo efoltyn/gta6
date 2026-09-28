@@ -447,7 +447,9 @@
         } catch (e) { /* trauma off in this mode */ }
       }
       if (S.weapon && S.weapon.blade && CBZ.bodyWound) {
-        try { CBZ.bodyWound(c, res.point, { melee: "blade", cal: 0.7, fromX: S.Ba.pos.x, fromZ: S.Ba.pos.z }); } catch (e) { /* wounds off */ }
+        // at the point the blade went in (no fromX: that bias drags a real
+        // contact point 45 cm toward the attacker and scatters it)
+        try { CBZ.bodyWound(c, res.point, { melee: "blade", cal: 0.7, dir: { x: res.dir.x, y: 0, z: res.dir.z } }); } catch (e) { /* wounds off */ }
       }
       // a blade that lands CUTS, and a cut bleeds into the air (gore.js: heavy
       // drops + a short stream); a fist bleeds only when combat says it split

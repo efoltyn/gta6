@@ -308,7 +308,7 @@
     P.stamina = P.maxStamina || 100;
     g.hunger = 100;
     g.tired = 0;
-    P._legWound = false; P._bleeding = false; P._bleedT = 0;      // wounds dressed overnight
+    if (CBZ.cityHealWounds) CBZ.cityHealWounds();                 // wounds dressed overnight (systems/vitals.js)
     g.citySpawnPoint = { x: g.cityHome.lot.building.door.x, z: g.cityHome.lot.building.door.z };
     // LAY LOW: heat bleeds hard while you're off the streets. A light record
     // (≤2★) goes fully cold; a serious one drops a couple stars but the manhunt

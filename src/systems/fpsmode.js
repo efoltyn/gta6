@@ -845,7 +845,7 @@
      so irons lean in 12 degrees, a red dot 17, and the M24's 10x M3A takes the
      lens to 8.8 degrees because that is what ten power actually is. */
   const PUNCH_DUR = 0.26;
-  let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
+  let shotCD = 0, dryCD = 0, punchCD = 0, triggerHeld = false, reloadWeapon = 0;
   // reusable per-shot sfx options (no per-shot allocation at auto-fire rates):
   // heavy guns (AK) re-pitch a shared sample DOWN for a deeper bark — same
   // audio file, different character, zero new assets.
@@ -2741,7 +2741,16 @@
     const scan = function (list) {
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
-        if (!a || a.dead || a.ko > 0 || a.escaped || !a.group) continue;
+        if (!a || a.dead || a.escaped || !a.group) continue;
+        // A LIVING MAN ON THE FLOOR (knocked out, shot down, tased) is a body
+        // lying there, not a standing silhouette: the round is tested against
+        // the rig itself, the same way a corpse is (lyingBodyEntry below)
+        if (lyingLiving(a)) {
+          if (a.group.visible === false) continue;
+          const ld0 = lyingBodyEntry(origin, dir, a, bestDist);
+          if (ld0 >= 0 && ld0 < bestDist) { bestActor = a; bestDist = ld0; bestHead = _corpseHead; bestOcc = false; }
+          continue;
+        }
         // per-actor radii: a protected actor gets the bare silhouette, so only
         // a literal ray through the real body registers. (See the block above.)
         // PERF (exact, and the predicate is still never cached): the bare radii
@@ -2851,6 +2860,15 @@
   // ragdoll). Returns the nearest dead actor + whether the hit landed up near the
   // head end (for the decap read). The other games test the lying rig itself.
   const CORPSE_R = 0.62;        // prone body is a low fat sausage
+  // a living man lying on the floor: knocked out / down (a.ko, the prison and
+  // city brains), in the keyed fall (meleeposes), or in his collapse (bodyfall)
+  function lyingLiving(a) {
+    if (!a || a.dead) return false;
+    if (a.ko > 0) return true;
+    const f = a.char && a.char.fall;
+    if (f && f.on && f.phase !== "getup") return true;
+    return !!(a._bf && a._bf.on);
+  }
   /* EVERY OTHER GAME: the body lies where its collapse put it
      (systems/bodyfall.js), and the rig knows where its head and hips are, so
      the round is tested against the body itself: five spheres from the head
@@ -3171,9 +3189,31 @@
     _goreO.cal = cal; _goreO.head = !!hit.head;
     return _goreO;
   }
+  /* THE ROUND GOES INTO HIS BODY (systems/vitals.js): a bleed where it went
+     in, and the one answer to "is he dead": the head, the heart or a body
+     riddled with rounds kills; anything else whose hp ran out puts him DOWN,
+     awake and bleeding (he bleeds out unless someone wraps it). noKill: the
+     caller keeps the death (gun game / warlord keep their hp deaths and only
+     want the bleed). Returns vitals' { outcome, zone } or null. */
+  const _vwO = { kind: "bullet", point: null, head: false, zone: null, cal: 1, by: null, fromX: 0, fromZ: 0, critical: false, noKill: true };
+  function vitalsRound(a, hit, w, cal, critical) {
+    const VT = CBZ.vitals;
+    if (!VT || !VT.wound || w.nonlethal || !a || a.dead || a.animal || a.netKind) return null;
+    const VB = CBZ.verbs;
+    _vwO.point = hit.point || null; _vwO.head = !!hit.head; _vwO.cal = cal;
+    _vwO.zone = hit.head ? "head" : (VB && VB.shotZone && hit.point && !hit.occupant ? VB.shotZone(a, hit.point) : null);
+    _vwO.by = CBZ.player; _vwO.fromX = CBZ.player.pos.x; _vwO.fromZ = CBZ.player.pos.z;
+    _vwO.critical = !!critical; _vwO.noKill = true;
+    try { return VT.wound(a, _vwO); } catch (e) { return null; }
+  }
   function shotLiving(a, hit, w, shotDir, cal) {
     const V = CBZ.verbs;
     if (!V || !V.shot || w.nonlethal || !a || a.dead || a.animal || a.netKind) return false;
+    // a man already on the floor does not stagger: the round shoves him where he lies
+    if (lyingLiving(a)) {
+      if (a._bf && a._bf.on && CBZ.bodyFall && shotDir) CBZ.bodyFall.poke(a, shotDir.x, shotDir.z, 3 + 2 * cal, hit.point);
+      return true;
+    }
     _shotO.point = hit.point || null; _shotO.dir = shotDir || null; _shotO.cal = cal;
     _shotO.wkey = w.key || ""; _shotO.dist = hit.dist || 0;
     _shotO.share = w.pellets > 1 ? 1 / w.pellets : 1; _shotO.head = !!hit.head;
@@ -3217,15 +3257,28 @@
       headshot: !!hit.head, byPlayer: true,
     };
     if (a.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(a.gang, 0.4);
-    let down = false;
+    let down = false, dropped = false;
     if (a.kind === "cop") {
       CBZ.cityHurtCop && CBZ.cityHurtCop(a, lethalHead ? 9999 : dmg, imp);
       down = !!a.dead;
+      if (!down) vitalsRound(a, hit, w, cal, false);                 // he bleeds from it
     } else if (w.nonlethal) {
       CBZ.cityKOPed && CBZ.cityKOPed(a, fx, fz); down = true;       // taser → KO
     } else {
       if (lethalHead) a.hp = 0; else a.hp -= dmg;
-      if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, imp, hit.head ? "headshot" : "shot"); down = true; }
+      // THE BODY DECIDES (systems/vitals.js): the head, the heart, a riddled
+      // chest kill here; a man whose hp ran out otherwise goes DOWN, awake,
+      // bleeding hard, and dies of it only if nobody wraps it in time
+      const vr = vitalsRound(a, hit, w, cal, a.hp <= 0);
+      const dies = vr ? vr.outcome === "dead" : a.hp <= 0;
+      if (dies) { CBZ.cityKillPed && CBZ.cityKillPed(a, imp, hit.head ? "headshot" : "shot"); down = true; }
+      else if (vr && vr.outcome === "down") {
+        a.hp = Math.max(1, a.hp);            // alive: vitals holds him on the floor
+        dropped = true;
+        const supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId));
+        CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, supp ? 6 : 16, 1, CBZ.city.playerActor);
+        a.rage = null; a.state = "flee";
+      }
       else {
         // a suppressed round barely carries — far fewer bystanders snap to it
         const supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId));
@@ -3249,7 +3302,7 @@
     if (CBZ.doHitstop) CBZ.doHitstop(hit.head ? 0.085 : 0.05);
     if (lethalHead && down && CBZ.doSlowmo) CBZ.doSlowmo(0.18);
     else if (hit.head && CBZ.doSlowmo) CBZ.doSlowmo(0.1);   // reward a non-fatal headshot too
-    return { head: hit.head, down, dmg };
+    return { head: hit.head, down, dropped, dmg };
   }
 
   function gunHit(hit, w, shotDir) {
@@ -3287,6 +3340,8 @@
 
     if (w.nonlethal) {
       a.hp = Math.max(a.hp, 28);
+      // the taser: the legs go, the muscles lock, he is conscious and cuffable
+      if (CBZ.vitals && CBZ.vitals.tase) { try { CBZ.vitals.tase(a, 6, { by: CBZ.player }); } catch (e) { /* vitals off */ } }
       a.ko = Math.max(a.ko || 0, guardish ? 4.5 : 5.5);
       a.aiState = a.aiState === "fight" ? "flee" : a.aiState;
       CBZ.game.kos = (CBZ.game.kos || 0) + 1;
@@ -3298,8 +3353,16 @@
       return { head: false, down: true, dmg };
     }
 
-    let down = false;
-    if ((lethalHeadshot || a.hp <= 0) && !(a.ko > 0) && !a.dead) {
+    // THE BODY DECIDES in the prison (systems/vitals.js): the head, the heart
+    // or a riddled chest kill; hp run out otherwise = DOWN, awake, bleeding.
+    // The gun game and warlord keep their fast hp deaths; the round still
+    // opens a bleed in every survivor (drips, a trail, a slower man).
+    const vitalsDecides = CBZ.game.mode === "escape";
+    const vr = vitalsRound(a, hit, w, caliber(w), vitalsDecides && a.hp <= 0);
+    const dies = vitalsDecides && vr ? vr.outcome === "dead" : (lethalHeadshot || a.hp <= 0);
+    let down = false, dropped = false;
+    if (!dies && vr && vitalsDecides && vr.outcome === "down") { a.hp = Math.max(1, a.hp); dropped = true; }
+    if (dies && !a.dead) {
       down = true;
       if (CBZ.aiKill) CBZ.aiKill(a, { group: CBZ.playerChar.group }, { noKnock: true, exit: goreOpts(hit, w, caliber(w)).exit });
       else { a.dead = true; a.ko = 0; a.hp = 0; }
@@ -3308,7 +3371,7 @@
       CBZ.doHitstop && CBZ.doHitstop(hit.head ? 0.085 : 0.055);
       if (hit.head && CBZ.doSlowmo) CBZ.doSlowmo(0.18);
     }
-    return { head: hit.head, down, dmg: lethalHeadshot ? maxHpOf(a) : dmg };
+    return { head: hit.head, down, dropped, dmg: lethalHeadshot ? maxHpOf(a) : dmg };
   }
 
   // ---- firing and reload control ----
@@ -3383,10 +3446,36 @@
      from the weapon row so the shank's speed is tuning data and not a constant
      buried in a shooter. The first-person hand swings silently: the stab's
      audio is the hit, and `triggerFistPunch`'s whoosh is a bare-knuckle cue. */
+  /* THE DEAD ARE STILL THERE. aimedActor() looks for the living; with nobody
+     standing in reach, a body on the floor in front of you is what the blade
+     or the fist goes into. A ray at the lying rig (findCorpseHit), no further
+     than a arm's reach along the floor. */
+  function aimedCorpse(reach) {
+    aimForward(fwd);
+    const p = CBZ.player;
+    if (shoulderActive()) eye.copy(CBZ.camera.position);
+    else eye.set(p.pos.x, p.pos.y + (p.prone ? 0.55 : p.crouch ? 1.18 : 1.65), p.pos.z);
+    const far = (shoulderActive() ? eye.distanceTo(p.pos) : 0) + 2.6;
+    const wall = wallDistance(eye, fwd, far);
+    const hit = findCorpseHit(eye, fwd, wall ? Math.max(0.1, wall.distance - 0.04) : far);
+    if (!hit || Math.hypot(hit.point.x - p.pos.x, hit.point.z - p.pos.z) > reach) return null;
+    return hit;
+  }
+  function strikeCorpse(blade) {
+    const c = aimedCorpse(1.6);
+    if (!c) return false;
+    const dir = { x: fwd.x, y: fwd.y, z: fwd.z };
+    if (blade && CBZ.corpseStab) CBZ.corpseStab(c.corpse, c.point, dir, { by: CBZ.player });
+    else if (CBZ.bodyFall && CBZ.bodyFall.poke) CBZ.bodyFall.poke(c.corpse, dir.x, dir.z, 2.4, c.point);   // a fist or a boot: a shove, no mark
+    triggerFistPunch(true);
+    CBZ.sfx && CBZ.sfx(blade ? "hit" : "punch");
+    return true;
+  }
   function meleeStrike(w) {
     if (shotCD > 0) return;
     shotCD = w.interval || 0.42;
     const hit = aimedActor(w.range || MELEE);
+    if (!(hit && hit.actor) && strikeCorpse(true)) return;
     const strike = CBZ.prisonStab || CBZ.punch;
     if (!strike) { triggerFistPunch(true); CBZ.sfx && CBZ.sfx("step"); return; }
     const r = strike(hit && hit.actor);
@@ -3513,8 +3602,11 @@
         // cityRagdoll uses (~6 pistol .. ~14 shotgun).
         acc.hitSomething = true;
         const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
-        const took = CBZ.corpseHit ? CBZ.corpseHit(hit.corpse, hit.point, shotDir, force) : false;
-        if (!took && CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
+        const took = CBZ.corpseHit ? CBZ.corpseHit(hit.corpse, hit.point, shotDir, force, { cal, head: hit.head, by: CBZ.player }) : false;
+        if (!took && !w.nonlethal) {
+          if (CBZ.bodyWound) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
+          if (CBZ.vitals) CBZ.vitals.wound(hit.corpse, { kind: "bullet", point: hit.point, head: hit.head, cal });   // the pool grows
+        }
         spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir, goreOpts(hit, w, cal));
         // Only a muzzle-close shotgun headshot can sever even post-mortem
@@ -3803,6 +3895,7 @@
     if (!armed()) {
       if (CBZ.game.mode === "city") return;   // city/combat.js owns unarmed melee in the city
       const hit = aimedActor(MELEE);
+      if (!(hit && hit.actor) && punchCD <= 0 && strikeCorpse(false)) { punchCD = 0.38; return; }
       // A PUNCH IS A PUNCH. The swing animates, the body reacts, the health
       // moves; the returned sentence describing all three was the caption.
       // The hand swings AFTER combat.js has agreed to the punch (it is the one
@@ -4532,6 +4625,10 @@
     if ((s.planted | 0) > 0) {
       bar.push({ kind: "detonator", item: "Detonator", label: "Detonator", short: "DET", held: "detonator", count: s.planted | 0, active: s.held === "detonator" });
     }
+    // a gauze roll while you carry one (systems/vitals.js): in your hand, held use = wrap
+    if (s.bandage && (s.bandage.count | 0) > 0) {
+      bar.push({ kind: "bandage", item: "Bandage", label: "Bandage", short: "", count: s.bandage.count | 0, held: "bandage", active: !!s.bandage.active });
+    }
     if (s.flashlight && s.flashlight.owned) {
       bar.push({ kind: "flashlight", item: "Flashlight", label: "Flashlight", short: "LIGHT", active: !!s.flashlight.on });
     }
@@ -4574,6 +4671,7 @@
     try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
     const H = CBZ.heldItem;
     return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph,
+      bandage: CBZ.hotbarBandage ? CBZ.hotbarBandage() : null,
       held: H ? H.current() : null, planted: CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0 });
   }
   CBZ.cityHotbar = cityHotbar;
@@ -4595,7 +4693,7 @@
     // a charge, a frag, the detonator: it goes IN YOUR HAND (systems/
     // helditems.js); the use input does the rest. Anything else throwable
     // with no held form still leaves on the tap.
-    if ((e.kind === "throwable" || e.kind === "detonator") && e.held && CBZ.heldItem) {
+    if ((e.kind === "throwable" || e.kind === "detonator" || e.kind === "bandage") && e.held && CBZ.heldItem) {
       return !!CBZ.heldItem.select(e.held);
     }
     if (e.kind === "throwable") {
@@ -4619,7 +4717,11 @@
     if (e.repeat || CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
     if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
     const n = "123456789".indexOf(e.key);
-    if (n >= 0) { if (cityHotbarSelect(n)) e.preventDefault(); }
+    if (n < 0) return;
+    // the roll's digit, held, is the use input held (systems/helditems.js)
+    const be = cityHotbar()[n];
+    if (be && be.kind === "bandage" && CBZ.heldItem && CBZ.heldItem.keyHold) { if (CBZ.heldItem.keyHold("bandage", e.code || e.key)) e.preventDefault(); return; }
+    if (cityHotbarSelect(n)) e.preventDefault();
   });
 
   function setActive(on) {
@@ -4988,6 +5090,7 @@
 
     if (shotCD > 0) shotCD = Math.max(0, shotCD - dt);
     if (dryCD > 0) dryCD = Math.max(0, dryCD - dt);
+    if (punchCD > 0) punchCD = Math.max(0, punchCD - dt);
     if (switchCD > 0) switchCD = Math.max(0, switchCD - dt);
     if (fpSwapT > 0) {
       fpSwapT = Math.max(0, fpSwapT - dt);

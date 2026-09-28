@@ -3722,7 +3722,12 @@
     // melee kills read by their weapon: blunt knocks teeth loose then bleeds
     // out slow; a blade opens an artery. Run-overs drag a smear down the road.
     const blade = opts.melee === "blade" || cause === "stabbed" || cause === "executed";
-    const blunt = opts.melee === "blunt" || cause === "beaten" || cause === "finished off";
+    // "beaten to death" (systems/vitals.js: a long beating of a man already out) is a
+    // blunt kill too; the exact-match test used to hand it a bullet hole
+    const blunt = opts.melee === "blunt" || cause === "beaten" || cause.indexOf("beaten to") === 0 || cause === "finished off";
+    // a man who BLED OUT already carries the holes that did it (and a punch
+    // left none): the death itself opens no new one
+    const bledOut = cause === "bled out";
     const ranOver = !!opts.smear || cause === "run over";
     // BITTEN: a predator kill is neither a blade nor a blunt hit — it is two
     // opposing rows of torn punctures, which systems/wounds.js models properly
@@ -3741,7 +3746,7 @@
     // already knows WHO died and HOW, so kills arriving from ANY pipeline
     // (player, ped-vs-ped, cops) stamp an entry wound + clothing soak with
     // zero changes at the kill sites. Guarded + self-gating (distance/caps).
-    if (ctx && ctx.ped && CBZ.bodyWound) {
+    if (ctx && ctx.ped && CBZ.bodyWound && !bledOut) {
       // ANCHOR AT THE REAL IMPACT POINT: the kill impulse carries the actual ray
       // hit point (fpsmode threads imp.point) and caliber, so seat the wound THERE
       // on the struck body part — not at the generic gore centre (ped.pos + 1.0)

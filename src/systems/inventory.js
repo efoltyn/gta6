@@ -39,6 +39,17 @@
   if (!M) return;
 
   /* ---------------- faces: a cell shows the THING ---------------- */
+  // the gauze roll, drawn: the wound spiral on its end face, the woven body,
+  // a loose tail of gauze off the side
+  const BANDAGE_FACE =
+    "<svg viewBox='0 0 40 40' aria-hidden='true' style='width:72%;height:72%'>" +
+    "<path d='M24 22 q6 2 9 8 q1 3 -2 3 q-3 -4 -8 -6z' fill='#e9e4d6' stroke='#a39c8a' stroke-width='.8'/>" +
+    "<path d='M9 13 h16 v14 h-16z' fill='#ece7da'/>" +
+    "<path d='M11 15 v10 M14 15 v10 M17 15 v10 M20 15 v10 M23 15 v10' stroke='#d4cebf' stroke-width='.7'/>" +
+    "<ellipse cx='25' cy='20' rx='4.2' ry='7' fill='#f4f0e6' stroke='#a39c8a' stroke-width='.9'/>" +
+    "<path d='M25 17.5 a1.4 2.4 0 1 1 -.1 5 a2.6 4.3 0 1 0 .1 -8.6' fill='none' stroke='#b9b2a0' stroke-width='.8'/>" +
+    "<ellipse cx='9' cy='20' rx='4.2' ry='7' fill='#dcd6c6' stroke='#a39c8a' stroke-width='.9'/>" +
+    "<path d='M9 13 h16 M9 27 h16' stroke='#a39c8a' stroke-width='.9'/></svg>";
   function img(src) { return src ? "<img src='" + src + "' alt=''>" : ""; }
   function tryCall(fn, a, b) { try { return fn ? (fn(a, b) || "") : ""; } catch (e) { return ""; } }
   // The one face resolver, shared with city/hud.js. Every branch is a real
@@ -61,6 +72,8 @@
         return tryCall(CBZ.detonatorFaceHtml);
       case "phone":
         return img(tryCall(CBZ.itemIcon, "Phone", {}));
+      case "bandage":
+        return BANDAGE_FACE;
       default:
         return "";
     }
@@ -118,6 +131,15 @@
       held: H.current(),
     });
   }
+  // the gauze rolls you carry (systems/vitals.js owns the count)
+  function bandageState() {
+    const VT = CBZ.vitals, H = CBZ.heldItem;
+    if (!VT || !VT.bandages) return null;
+    let n = 0;
+    try { n = VT.bandages() | 0; } catch (e) { n = 0; }
+    return { count: n, active: !!(H && H.current() === "bandage") };
+  }
+  CBZ.hotbarBandage = bandageState;
   function entries() {
     const g = CBZ.game || {};
     const inv = g.inventory || {};
@@ -132,6 +154,7 @@
       hasKeycard: !!(g.hasKey || inv["Keycard"] > 0 || (mode() === "escape" && g.role === "cop" && !g.copKeysPulled)),
       keys: keys,
       flashlight: flashlightState(),
+      bandage: bandageState(),
       items: heldCells(),
     });
     for (let i = 0; i < list.length; i++) if (list[i].kind === "gun" && !list[i].active) list[i].dry = isDry(list[i].id);
@@ -185,6 +208,7 @@
       if (F && F.toggle) { F.toggle(); return true; }
     }
     if ((e.kind === "throwable" || e.kind === "detonator") && e.held && CBZ.heldItem) return !!CBZ.heldItem.select(e.held);
+    if (e.kind === "bandage" && CBZ.heldItem) return !!CBZ.heldItem.select("bandage");
     return false;
   }
   function stepGun(dir) {
@@ -226,6 +250,8 @@
     const n = "123456789".indexOf(ev.key);
     if (n < 0) return;
     const e = M.selectableAt(shown, n);
+    // the roll's digit, held, is the use input held (systems/helditems.js)
+    if (e && e.kind === "bandage" && CBZ.heldItem && CBZ.heldItem.keyHold) { if (CBZ.heldItem.keyHold("bandage", ev.code || ev.key)) ev.preventDefault(); return; }
     if (e && pick(e)) ev.preventDefault();
   });
 

@@ -6,7 +6,9 @@
        part at the exact hit point (world hit → part-local, snapped to the
        face the bullet came through, sitting slightly proud). ONE shared
        CircleGeometry + 3 shared unlit materials (fresh dark red → drying
-       brown after ~12s; blunt hits leave a bruise-dark patch, no hole).
+       brown after ~12s). A fist, a boot or a baton stamps NOTHING (owner:
+       "there's a hole in his back as if he got shot" from a punch): blunt
+       trauma is systems/vitals.js's daze, never a decal.
        Per-wound scale jitter so no two holes are identical.
      • LOCAL SOAK PATCH: an irregular dark stain SPREADS AROUND each entry
        wound over a few seconds — anchored to the wound, riding the same
@@ -17,15 +19,15 @@
      • SEVERITY READS: headshot = wound at the head + a HEAVY insta-spread
        splatter on the head that runs down onto the collar (a second stain
        seated at the top of the shirt); a shotgun blast scatters 2-3 wounds
-       (per-pellet calls collapse into one ≤3-wound burst); melee blunt =
-       bigger bruise patch, no hole, no blood.
+       (per-pellet calls collapse into one ≤3-wound burst).
 
    Budget discipline (the game is draw-call bound):
-     • hard caps: CITY 22 meshes per actor (a hit = wound + its soak stain,
-       so ~11 readable hits — a riddled body reads genuinely shot up) / 320
-       global; JAIL+SURVIVAL keep 10 per actor / 200 global byte-identical.
-       Both recycle oldest-first (wounds keep ACCUMULATING — shooting a
-       corpse adds holes — but stay bounded); a free-mesh pool so churn
+     • caps: a LIVING man carries CITY 22 / elsewhere 10 meshes (a hit =
+       wound + its soak stain). A DEAD body has no low cap: 96 meshes (48
+       holes with their stains) before his own oldest recycles, so a corpse
+       you keep shooting or stabbing keeps collecting holes (owner: "you
+       should be able to add unlimited bullet holes or stab holes"). Global
+       cap rides the quality tier, oldest-first; a free-mesh pool so churn
        never reallocates (geometry/material reassigned on reuse — both
        shared, nothing cloned or disposed).
      • wounds are CHILDREN of the rig's part meshes → they animate, fall
@@ -39,7 +41,8 @@
    Public API:
      CBZ.bodyWound(actor, worldPoint, opts) — opts:
         { head:bool, cal|caliber:0.7..1.6, mm:<bore in millimetres>,
-          melee:"blunt"|"blade"|true, dir:{x,y,z} through-direction,
+          melee:"blade" (a cut) | "blunt"|true (stamps nothing),
+          dir:{x,y,z} through-direction,
           fromX, fromZ }  (fromX/Z bias a synthetic centre-point toward
           the attacker so the wound lands on the facing surface, AND are
           the fallback source of the through-direction)
@@ -62,13 +65,19 @@
   function cityWounds() { return !!(CBZ.game && CBZ.game.mode === "city"); }
   // global live-mesh cap (each is 1 tiny draw call) — now rides the quality tier,
   // read LIVE per check (the slider can move mid-run); fallback = old constants.
-  function capBase() { return (CBZ.qScale ? CBZ.qScale(100, 400) : 200) | 0; }
-  function capCity() { return (CBZ.qScale ? CBZ.qScale(160, 640) : 320) | 0; }
+  function capBase() { return (CBZ.qScale ? CBZ.qScale(160, 520) : 300) | 0; }
+  function capCity() { return (CBZ.qScale ? CBZ.qScale(220, 760) : 420) | 0; }
   // wound+stain pairs per body — also rides the quality tier
   function perActorBase() { return (CBZ.qScale ? CBZ.qScale(5, 20) : 10) | 0; }
   function perActorCity() { return (CBZ.qScale ? CBZ.qScale(11, 44) : 22) | 0; }
   function capGlobal() { return cityWounds() ? capCity() : capBase(); }
-  function perActor() { return cityWounds() ? perActorCity() : perActorBase(); }
+  // A DEAD BODY IS NOT CAPPED LOW: 48 hole+stain pairs before his own oldest
+  // recycles. Living men keep the tier caps (a fight never piles 96 on one).
+  const PER_CORPSE = 96;
+  function perActor(actor) {
+    if (actor && actor.dead) return PER_CORPSE;
+    return cityWounds() ? perActorCity() : perActorBase();
+  }
   const SPAWN_D2 = 45 * 45; // matches gore.js's "only where it can be seen" band
   const DRY_T = 12;         // seconds until a fresh wound dries brown
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)
@@ -415,7 +424,6 @@
   const RO_SOAK = 0.1, RO_WOUND = 0.2;   // see the renderOrder note in unlit()
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
-  const MAT_BRUISE = unlit(0x3a2334);  // blunt trauma: purple-dark, no hole
   const MAT_SOAK = unlit(0x310609, -1); // wet cloth around the hole: near-black
   // TORN flesh (a bite) is WETTER and brighter than a bullet's cauterised-looking
   // entry hole — a tooth tears the skin open rather than punching through it.
@@ -652,13 +660,13 @@
     r.gone = true;                               // growing[] skips stale refs
     if (r.m.parent) r.m.parent.remove(r.m);
     if (r.actor) r.actor._woundN = Math.max(0, (r.actor._woundN || 1) - 1);
-    if (!reuse && free.length < 36) free.push(r.m);  // reuse = caller takes the mesh
+    if (!reuse && free.length < 64) free.push(r.m);  // reuse = caller takes the mesh
     return r.m;
   }
   function meshFor(actor) {
     // per-actor cap: recycle THIS body's oldest hit first (keeps wounds
     // ACCUMULATING — shooting a corpse keeps adding holes — but bounded).
-    if ((actor._woundN || 0) >= perActor()) {
+    if ((actor._woundN || 0) >= perActor(actor)) {
       for (let i = 0; i < wounds.length; i++) {
         if (wounds[i].actor === actor) return dropWound(i, true);
       }
@@ -902,7 +910,7 @@
     // half-print. (Bites at 12-14 meshes clear the CITY cap at every tier, but
     // jail/survival at tiers 0-1 cap at 5/9.) Thin the tooth row instead — a
     // sparser jaw still reads as a jaw; a half-erased one reads as a bug.
-    const budget = perActor() - 2;                          // reserve the 2 soak stains
+    const budget = perActor(actor) - 2;                          // reserve the 2 soak stains
     if (rows * n > budget) n = Math.max(2, Math.floor(budget / rows));
 
     for (let r = 0; r < rows; r++) {
@@ -1030,6 +1038,9 @@
     if (opts.melee === "bite" && !opts._fromBite && typeof CBZ.bodyBite === "function") {
       return CBZ.bodyBite(actor, wp, opts);
     }
+    // A PUNCH LEAVES NO MARK. Blunt trauma is a daze (systems/vitals.js), not
+    // a decal: every "bruise" this used to stamp read as a bullet hole.
+    if (opts.melee === "blunt" || opts.melee === true) { refuse("wound:blunt"); return; }
     let px = wp.x, py = wp.y, pz = wp.z;
     if (px == null || py == null || pz == null) { refuse("wound:null-coord"); return; }
     if (dist2Cam(px, pz) > SPAWN_D2) { refuse("wound:too-far"); return; }   // only where it can be seen
@@ -1063,8 +1074,7 @@
       }
     }
 
-    const melee = opts.melee === true ? "blunt" : opts.melee;
-    const kind = melee === "blunt" ? "bruise" : (melee === "blade" ? "blade" : "shot");
+    const kind = opts.melee === "blade" ? "blade" : "shot";
     const cal = opts.cal != null ? opts.cal : (opts.caliber != null ? opts.caliber : 1);
 
     const pick = pickPart(actor, px, py, pz, !!opts.head);
@@ -1080,7 +1090,7 @@
     // off over ~20s; heavy ones persist until death. We DON'T touch the player
     // here — death.js owns the player's own probabilistic leg-wound/limp model
     // (P._legWound); see report. A leg already GONE (severed) stays gone.
-    if ((pick.region === "legL" || pick.region === "legR") && kind !== "bruise" &&
+    if ((pick.region === "legL" || pick.region === "legR") &&
         !actor.isPlayer && !ch.legGone) {
       const side = pick.region === "legL" ? -1 : 1;
       const add = (kind === "blade" ? 0.28 : 0.34) + cal * 0.34;   // caliber widens the limp
@@ -1104,7 +1114,7 @@
     const shotV2 = v2on && kind === "shot";
 
     let geo = G_WOUND;
-    let mat = kind === "bruise" ? MAT_BRUISE : MAT_FRESH;
+    let mat = MAT_FRESH;
     let sx, sy, s0 = 0;
     if (shotV2) {
       // ---- THE ROUND SIZES THE HOLE, AND THE PART CAPS IT ------------------
@@ -1135,27 +1145,11 @@
       sy = Math.min(want * (0.90 + Math.random() * 0.20), cap);
     } else {
       // severity → size: caliber widens the hole; the head wound reads a touch
-      // bigger (it's the kill tell); a bruise is a broad flat patch; a blade
+      // bigger (it's the kill tell); a blade
       // leaves a thin slash. Every wound carries its own jitter — no two match.
       s0 = 0.045 + 0.032 * cal;
       if (pick.region === "head") s0 *= 1.15;
-      if (kind === "bruise") {
-        /* A BRUISE WAS FOUR TIMES WIDER THAN A BULLET HOLE. (OWNER: "the
-           bruise is way too big too.")
-
-           Measured on the 0.60-unit adult head this file already sizes
-           everything against: `s0 * 2.2` with cal 1 gives a 0.169 patch, which
-           is 28% of the head — while the bullet path a few lines up was
-           deliberately tuned DOWN to 0.043 across, "1 face in 14", i.e. 7%.
-           A fist left a mark four times the width of a gunshot.
-
-           A contusion IS broader than a puncture, so this stays the widest
-           wound in the file — just not by a factor of four. 0.95 puts it near
-           0.073, about 1 face in 8: plainly bigger than a bullet hole, plainly
-           a mark rather than a splodge. The jitter is kept so no two match. */
-        const b = s0 * 0.95;
-        sx = b * (0.85 + Math.random() * 0.3); sy = b * (0.7 + Math.random() * 0.3);
-      } else if (kind === "blade") {
+      if (kind === "blade") {
         sx = s0 * (0.45 + Math.random() * 0.2); sy = s0 * (1.7 + Math.random() * 0.4);
       } else {
         sx = s0 * (0.85 + Math.random() * 0.3); sy = s0 * (0.85 + Math.random() * 0.3);
@@ -1163,9 +1157,8 @@
     }
 
     // ---- ONE CLAMP, AND IT IS THE LAST WORD ---------------------------------
-    // Every kind runs through it, including the bruise and the slash: a blunt
-    // patch wider than the forearm it sits on reads exactly as fake as an
-    // oversized bullet hole did. It measures the decal's TRUE outer radius (its
+    // Every kind runs through it, including the slash: a cut wider than the
+    // forearm it sits on reads exactly as fake as an oversized bullet hole did. It measures the decal's TRUE outer radius (its
     // scale times its own geometry's rim wobble) against the half-span of the
     // face, so its diameter can never reach that face's width — which is the
     // single invariant CBZ.woundDecalAudit().oversized pins at zero.
@@ -1222,11 +1215,11 @@
       }
     }
 
-    // ---- LOCAL SOAK STAIN (a bruise doesn't bleed) ----
+    // ---- LOCAL SOAK STAIN ----
     // the cloth around the hole goes dark and keeps spreading for a few
     // seconds — local, irregular, anchored to THIS wound. Headshot = heavy
     // fast splatter on the head PLUS a run-down stain seated at the collar.
-    if (kind !== "bruise") {
+    {
       if (shotV2) {
         // THE STAIN IS NOW THE VISIBLE WOUND, so it is sized off the ENERGY and
         // the PART rather than off the (correctly tiny) hole — otherwise

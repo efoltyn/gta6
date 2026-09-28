@@ -584,9 +584,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=airblood2"></script>
-<script src="src/systems/bodyfall.js?v=m0928a"></script>
-<script src="src/systems/vitals.js?v=vit1"></script>
+<script src="src/systems/verbs_strike.js?v=vit3"></script>
+<script src="src/systems/bodyfall.js?v=vit3"></script>
+<script src="src/systems/vitals.js?v=vit3"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -729,7 +729,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=cars1"></script>
-<script src="src/systems/physics.js?v=sharkmode1"></script>
+<script src="src/systems/physics.js?v=vit3"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -800,8 +800,8 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/systems/hotbar_model.js?v=boom2"></script>
-<script src="src/systems/helditem_model.js?v=boom2"></script>
+<script src="src/systems/hotbar_model.js?v=vit3"></script>
+<script src="src/systems/helditem_model.js?v=vit3"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -851,9 +851,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a"></script>
-<script src="src/modes/survival.js?v=sharkmode1"></script>
+<script src="src/modes/survival.js?v=vit3"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
@@ -1326,7 +1326,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/helditems.js?v=boom2"></script>
+<script src="src/systems/helditems.js?v=vit3"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1468,7 +1468,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=exit1"></script>
+<script src="src/systems/gore.js?v=vit3"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1477,7 +1477,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=sharkmode1"></script>
+<script src="src/systems/trauma.js?v=vit3"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the

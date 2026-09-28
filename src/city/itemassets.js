@@ -512,6 +512,15 @@
     },
 
     // ---- kit -------------------------------------------------------------
+    // A ROLL OF GAUZE lying on its side: the wound cloth, the cardboard core
+    // showing at both ends, and the loose end unrolled across the table.
+    bandage: function (g, C) {
+      cy(g, C.mA, 0.046, 0.046, 0.072, 0, 0.046, 0, 0, 0, LZ * -1, 20);   // the roll
+      cy(g, C.mD, 0.048, 0.048, 0.010, 0.018, 0.046, 0, 0, 0, LZ * -1, 20); // an outer turn, a shade darker
+      cy(g, C.mF, 0.017, 0.017, 0.074, 0, 0.046, 0, 0, 0, LZ * -1, 12);   // the core
+      bx(g, C.mA, 0.068, 0.003, 0.098, 0, 0.0015, 0.070);                // the loose end, flat on the table
+      bx(g, C.mD, 0.068, 0.004, 0.012, 0, 0.003, 0.118);                 // its frayed edge
+    },
     medkit: function (g, C) {
       bx(g, C.mA, 0.150, 0.096, 0.110, 0, 0.048, 0);
       bx(g, C.mS, 0.153, 0.008, 0.113, 0, 0.070, 0);          // clamshell seam

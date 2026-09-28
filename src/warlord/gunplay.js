@@ -1606,6 +1606,9 @@
       stats.damage += Math.max(0, hp0 - best.hp);
       if (best.dead) { stats.kills++; stats.lastKillT = stats.t; }
       if (CBZ.bodyWound) safe(function () { CBZ.bodyWound(best, hitPoint, {}); });
+      // a man the round did not drop bleeds from it (systems/vitals.js); the
+      // battle keeps its own hp death, so vitals never kills here outright
+      if (!best.dead && CBZ.vitals) safe(function () { CBZ.vitals.wound(best, { kind: "bullet", point: hitPoint, by: CBZ.player, noKill: true, cal: w.pellets > 1 ? 1.5 : ((w.damage || 24) >= 30 ? 1.2 : 0.85) }); });
       // a man the round did not drop takes it on his rig (CBZ.verbs.shot)
       if (!best.dead && CBZ.verbs && CBZ.verbs.shot) {
         safe(function () { CBZ.verbs.shot(best, { point: hitPoint, dir: L.ray.d, cal: w.pellets > 1 ? 1.5 : ((w.damage || 24) >= 30 ? 1.2 : 0.85) }); });

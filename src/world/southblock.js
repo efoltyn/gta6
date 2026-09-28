@@ -307,6 +307,18 @@
   addBox(34.0, 1.2, 103.19, 1.1, 1.3, 0.012, 0xbfd6dc, { cast: false });
   for (let i = 0; i < 3; i++) addBox(34.0, 0.75 + i * 0.42, 103.3, 1.1, 0.02, 0.4, 0xc9ccd0, { cast: false });
   for (let i = 0; i < 6; i++) addBox(33.6 + (i % 3) * 0.35, 0.83 + ((i / 3) | 0) * 0.42, 103.32, 0.24, 0.14, 0.2, [0xeef0f2, 0x7aa6c2, 0xe0d6c0][i % 3], { cast: false });
+  // GAUZE ON THE COUNTER: real rolls (systems/prisondrops.js "gauze", the
+  // economy's "Bandage") by the sink, where a nurse leaves them out. Walk
+  // over one and it is in your pocket; it wraps a bleed (systems/vitals.js).
+  // Laid on the first escape tick (prisondrops parses after the world).
+  {
+    let laidGauze = false;
+    CBZ.onUpdate(41.43, function () {
+      if (laidGauze || !CBZ.prisonPlaceItem || !CBZ.game || CBZ.game.mode !== "escape") return;
+      laidGauze = true;
+      for (const z of [101.25, 101.5, 99.45]) { try { CBZ.prisonPlaceItem("Bandage", 41.22, 0.937, z); } catch (e) {} }
+    });
+  }
   // the nurse's desk by the door, facing into the ward
   if (CBZ.furnish && CBZ.furnish.desk) { try { CBZ.furnish.desk(28.0, 0, 101.9, 0, { len: 1.6 }); } catch (e) {} }
   if (CBZ.furnish && CBZ.furnish.chair) { try { CBZ.furnish.chair(28.0, 0, 102.9, Math.PI, {}); } catch (e) {} }

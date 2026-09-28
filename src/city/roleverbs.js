@@ -150,7 +150,7 @@
       if (!CBZ.city.spend(q.price)) { note("A patch-up runs " + money(q.price) + " · you're short.", 1.8); return; }
       const pl = P();
       pl.hp = Math.min(q.mx, hpNow() + q.heal);
-      if (pl._bleeding) pl._bleeding = 0;                // a dressed wound stops bleeding
+      if (CBZ.cityHealWounds) CBZ.cityHealWounds();      // a dressed wound stops bleeding (systems/vitals.js)
       paid(p, q.price);
       coin(); say(p, q.line);
       note("Patched up · " + Math.round(pl.hp) + "/" + Math.round(q.mx) + " for " + money(q.price) + ".", 2);

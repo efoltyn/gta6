@@ -58,7 +58,7 @@
      giveBandage(n)  / bandages() — the player's rolls
      kill(a, cause, o) — the one death this file hands out (routes per game)
      on(mode, hooks) — a game plugs in: { kill(a,cause,o), playerKill(cause,o),
-                        playerDown(on, o), safe(a), hold(a, secs, o),
+                        playerDown(on, o), safe(a), hold(a, secs, o), rise(a),
                         rolls() -> n, useRoll(n) }
      reset(a) · peek(a) · of(a) · list
 ============================================================ */
@@ -131,6 +131,9 @@
     a = real(a);
     if (!a) return null;
     let R = a._vt;
+    // a respawned / reused man still carrying his corpse record (it went quiet
+    // and left the tick before he came back): a fresh body, not a dead one
+    if (R && R.dead && !deadOf(a)) { reset(a); R = null; }
     if (!R) {
       R = a._vt = {
         a, blood: 1, bleeds: [], daze: 0, brain: 0, koT: 0, koN: 0, groggyT: 0, stumbleT: 0,
@@ -256,11 +259,11 @@
     if (!ok && koMode()) a.ko = Math.max(a.ko || 0, secs);
   }
   function getUp(a) {
-    if (isPlayer(a)) {
-      const h = hook("playerDown");
-      if (h) { try { h(false, {}); } catch (e) { /* game hook */ } }
-      return;
-    }
+    // the player comes round through the tick's one playerDown(false) call
+    if (isPlayer(a)) return;
+    // the game that laid him down through hold() lets him up the same way
+    const hr = hook("rise");
+    if (hr) { try { if (hr(a) !== false) return; } catch (e) { /* game hook */ } }
     const V = CBZ.verbs;
     if (V && V.getUp) { try { V.getUp(a); } catch (e) { /* no rig */ } }
   }
@@ -605,6 +608,31 @@
     if (R.critical && rateOf(R) < 0.004) { R.critical = false; R.riseT = 6; }
   }
 
+  /* A FULL DRESSING (a medkit, a hospital, a night in bed): every open hole
+     wrapped at once, and some of the blood made back. No hands-on time: the
+     caller already spent it (the kit is used, the night slept). */
+  VT.dress = function (a, o) {
+    a = real(a);
+    const R = peek(a);
+    if (!R || R.dead || deadOf(a)) return 0;
+    o = o || _bo;
+    if (R.band) cancel(R);
+    let n = 0;
+    for (let i = 0; i < R.bleeds.length; i++) {
+      const b = R.bleeds[i];
+      if (b.band >= 0.9 || b.rate < 0.0004) continue;
+      const limb = b.zone === "armL" || b.zone === "armR" || b.zone === "legL" || b.zone === "legR";
+      b.band = limb ? 0.97 : b.zone === "neck" ? 0.8 : 0.9;
+      b.tau = Math.min(b.tau, 60);
+      addWrap(R, b, false);
+      n++;
+    }
+    if (o.blood) R.blood = Math.min(1, R.blood + o.blood);
+    if (R.critical && rateOf(R) < 0.004) { R.critical = false; R.riseT = isPlayer(a) ? 1.5 : 6; }
+    wake(R);
+    return n;
+  };
+
   /* ---- the wrap: a gauze band around the limb, over the hole ---- */
   let WRAP_G = null, WRAP_M = null, WRAP_MS = null, WRAP_MC = null;
   function wrapAssets() {
@@ -854,6 +882,10 @@
         }
       }
     }
+    // critical but the bleeding has stopped on its own (clotted, or every hole
+    // too small to wrap): nothing left to bandage, so nothing would ever lift
+    // the flag. He gets himself up in a while, the same as a wrapped man.
+    if (R.critical && !R.band && r < 0.0012 && !R.collapsed && !(R.koT > 0)) { R.critical = false; R.riseT = 6; }
     // critical and wrapped: he gets himself up after a while
     if (R.riseT > 0) { R.riseT -= dt; if (R.riseT <= 0 && !R.collapsed && !(R.koT > 0) && !R.critical) { getUp(a); R.groggyT = K.GROGGY; } }
     // groggy: a stumble now and then

@@ -71,6 +71,9 @@
     Powder:            { value: 22, tag: "drugs",     rarity: "rare" },
     "Pruno Hooch":     { value: 9,  tag: "drugs",     rarity: "common" },
     Painkillers:       { value: 12, tag: "drugs",     rarity: "uncommon" },
+    // --- medical: a gauze roll wraps a bleed (systems/vitals.js). The
+    // infirmary's supply cabinet has them; Doc Mercer sells them. ---
+    Bandage:           { value: 6,  tag: "med",       rarity: "common" },
     // --- tools (escape / utility loot) ---
     Lockpick:          { value: 15, tag: "tools",     rarity: "uncommon" },
     "Handcuff Key":    { value: 20, tag: "tools",     rarity: "uncommon" },
@@ -127,12 +130,15 @@
   const DRUGS = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "drugs");
   const VALUABLES = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "valuables");
   const SERVICES = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "service");
+  // the infirmary's shelf: what Doc Mercer sells (pool "med")
+  const MED = ["Bandage", "Bandage", "Painkillers"];
   function isService(name) { return !!(ITEMS[name] && ITEMS[name].service); }
 
   // pick a fresh offer from a given stock pool ("goods" | "drugs" | "fenced")
   function pickOffer(pool) {
     let list = SELLABLE;
     if (pool === "drugs") list = DRUGS;
+    else if (pool === "med") list = MED;
     /* THE TWO MEN WITH AN OUTSIDE LINE SELL MINUTES ON IT. A dealer's whole
        trade already runs through a phone and a fence's does too — they are the
        people a yard rents a handset from. The old-timer's goods stall does
@@ -1466,7 +1472,7 @@
       // arms you; the lighter and the smokes are why a screw is worth a lift
       // even when he is holding no keys at all.
       add("Baton"); add("Guard Torch"); maybe("Lighter", 0.7);
-      maybe("Handcuff Key", 0.6); maybe("Cash Roll", 0.35); maybe("Burner Phone", 0.3); maybe("Painkillers", 0.3);
+      maybe("Handcuff Key", 0.6); maybe("Cash Roll", 0.35); maybe("Burner Phone", 0.3); maybe("Painkillers", 0.3); maybe("Bandage", 0.3);
       /* KEYS BY POST, AND KEYS BY CLASSIFICATION (systems/prisontiers.js).
          The man whose whole job is the door is the man with the card for it,
          so the yard door has a second answer that is a PERSON. The tier's
@@ -1495,7 +1501,9 @@
       maybe("Luxury Watch", 0.12); maybe("Gold Chain", 0.12); maybe("Cash Roll", 0.2);
     } else if (role === "merchant") {
       cigs += 4 + Math.floor(rng() * 10);
-      maybe("Ramen", 0.5); maybe("Cigarette Carton", 0.5); maybe("Energy Bar", 0.5); maybe("Lighter", 0.5); maybe("Cash Roll", 0.3);
+      if (actor.data && actor.data.pool === "med") { add("Bandage"); maybe("Bandage", 0.5); maybe("Painkillers", 0.6); }
+      else { maybe("Ramen", 0.5); maybe("Cigarette Carton", 0.5); maybe("Energy Bar", 0.5); maybe("Lighter", 0.5); }
+      maybe("Cash Roll", 0.3);
     } else { // generic inmate — flavoured by how hard they are
       if (fight > 72) { maybe("Shiv", 0.6); maybe("Brass Knuckles", 0.4); }
       else if (fight > 50) maybe("Shiv", 0.3);

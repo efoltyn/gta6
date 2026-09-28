@@ -2701,17 +2701,89 @@
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
     leaveSit(ped);                             // a felled desk worker leaves the seat (C3)
-    ped.ko = 8; ped.alarmed = 6;
-    // a plane-seated body's group is PARENT-LOCAL — the knockdown lie-flat
-    // writes world coords onto it and teleports the rig (see cityKillPed's
-    // seated gate); a tased passenger just slumps unconscious where they sit.
-    if (CBZ.body && !(opts && opts.rigFall) && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
+    ped.alarmed = 6;
+    const seated = !!(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false);
+    if (!(opts && opts.rigFall) && CBZ.vitals && !seated) {
+      // THE TASER (every caller without rigFall is a nonlethal round): the
+      // legs go and the muscles lock for a few seconds; he is awake, on the
+      // floor, and cuffable (systems/vitals.js tase lays him down in his rig)
+      CBZ.vitals.tase(ped, 6, { dirX: ped.pos.x - fromX, dirZ: ped.pos.z - fromZ, power: 0.6 });
+      ped.ko = Math.max(ped.ko || 0, 6.5);
+    } else {
+      ped.ko = Math.max(ped.ko || 0, 8);
+      // a plane-seated body's group is PARENT-LOCAL — the knockdown lie-flat
+      // writes world coords onto it and teleports the rig (see cityKillPed's
+      // seated gate); a tased passenger just slumps unconscious where they sit.
+      if (CBZ.body && !(opts && opts.rigFall) && !seated) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
+    }
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     // laying hands on a boss's wife/kin brings the crew (non-lethal harm).
     if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 14, 0.8, CBZ.city.playerActor);
     CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
   };
+
+  /* ---- THE CITY PLUGS ITS STREET INTO VITALS (systems/vitals.js) ----
+     kill: the one death vitals hands out (bled out, a blade in the heart, a
+     beating of a man already out) goes through the street's own death, with
+     the man who did it as the offender, and an officer through cityHurtCop.
+     safe: a man bandages himself only once nobody is after him. */
+  function vitBy(a, o) { return (o && o.by) || (a && a._vt && a._vt.by) || null; }
+  function isPlayerish(by) { return !!by && (by === CBZ.player || by.isPlayer === true || by === (CBZ.city && CBZ.city.playerActor)); }
+  if (CBZ.vitals && CBZ.vitals.on) {
+    CBZ.vitals.on("city", {
+      kill: function (a, cause, o) {
+        o = o || {};
+        const by = vitBy(a, o), byPlayer = isPlayerish(by);
+        const att = by && !byPlayer && by.pos ? by : null;
+        let fx = o.fromX, fz = o.fromZ;
+        if (fx == null && by && by.pos) { fx = by.pos.x; fz = by.pos.z; }
+        if (a.kind === "cop") {
+          // (no fromX: combat.js's LOS gate drops a cop hit whose shooter is walled off
+          // right now, and a man bleeding out is not being shot this frame)
+          if (CBZ.cityHurtCop) CBZ.cityHurtCop(a, 1e6, { attacker: att || (byPlayer ? CBZ.city.playerActor : null), byPlayer: byPlayer, force: 2 });
+          return !!a.dead;
+        }
+        if (!CBZ.cityKillPed) return false;
+        CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, attacker: att, byPlayer: byPlayer, force: o.force != null ? o.force : 2 }, cause || "bled out");
+        return !!a.dead;
+      },
+      safe: function (p) {
+        if (p.alarmed > 3 || p.restraint || p.surrender) return false;
+        if (p.kind === "cop") return !(p.curTarget || p.npcTarget || p.rage);   // an officer on a suspect finishes that first
+        const V = CBZ.vitals, st = V ? V.state(p) : "ok";
+        if (st === "down") return true;              // on the floor: the alarm is the only question
+        return !(p.rage || p.fleeing || p.state === "flee" || p.state === "fight" || p.state === "confront");
+      },
+    });
+  }
+  // THE AID SCAN (1 Hz): a man down and bleeding, and a gang-mate or his
+  // partner close by with nothing better to do, is sent over (think() walks
+  // him there and vitals does the wrap). Walks vitals' short live list only.
+  let _aidT = 0;
+  CBZ.onUpdate(58, function (dt) {
+    if (g.mode !== "city" || !CBZ.vitals) return;
+    _aidT -= dt; if (_aidT > 0) return; _aidT = 1;
+    const V = CBZ.vitals, L = V.list, peds = CBZ.cityPeds;
+    if (!L || !L.length || !peds) return;
+    for (let i = 0; i < L.length; i++) {
+      const R = L[i], pt = R && R.a;
+      if (!pt || pt === CBZ.player || R.dead || pt.dead || pt.isPlayer || pt.kind === "cop" || R.band || !pt.pos) continue;
+      if (!(R.critical || R.collapsed)) continue;
+      if (!(V.bleedRate(pt) > 0.0006)) continue;
+      if (pt._aidBy && !pt._aidBy.dead && pt._aidBy._aidTo === pt) continue;
+      let best = null, bd = 16 * 16;
+      for (let j = 0; j < peds.length; j++) {
+        const h = peds[j];
+        if (!h || h === pt || h.dead || h._parked || h.inCar || h.vendor || h.staffPost || h.controlled || h.restraint || h._aidTo) continue;
+        if (!((pt.gang && h.gang === pt.gang) || h.partner === pt || pt.partner === h)) continue;
+        if (h.rage || h.ko > 0 || h.alarmed > 3 || h.state === "flee" || h.state === "fight" || V.state(h) !== "ok") continue;
+        const dx = h.pos.x - pt.pos.x, dz = h.pos.z - pt.pos.z, dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; best = h; }
+      }
+      if (best) { best._aidTo = pt; pt._aidBy = best; }
+    }
+  });
 
   // SIT-INTERRUPT helper (C3): a seated desk worker that just got KO'd / killed /
   // hit must LEAVE the seat — clear the seated pose flag, free its claimed desk
@@ -3068,7 +3140,11 @@
     return tgt.isPlayer ? (g.wanted | 0) >= 1 : (tgt.npcWanted | 0) >= 1;
   }
 
-  const _hurtWP = { x: 0, y: 0, z: 0 }, _hurtWO = { fromX: 0, fromZ: 0 };
+  const _hurtWP = { x: 0, y: 0, z: 0 }, _hurtWO = { fromX: 0, fromZ: 0, melee: undefined };
+  // a man swinging a blade (nobody on the street carries one yet; the field
+  // is read so the day one does, his swing cuts instead of punching)
+  const _plHit = { kind: "", zone: null, point: null, power: 0.6, blocked: false, heavy: false, cal: 0.9 };
+  function npcBlade(a) { return !!(a && (a.blade || (!a.armed && /knife|machete|shiv|blade/i.test(a.weapon || "")))); }
   // `res` is the landed strike when this is a fist (CBZ.verbs.strike): the
   // verbs play the reaction on the body, and this may overrule it
   // (res.reaction = "dead" | "knockdown" | "none")
@@ -3085,42 +3161,79 @@
       }
       // pass the ATTACKER ACTOR (not just its name) so city/death.js can SPECTATE
       // your killer after WASTED; cityHurtPlayer derives the display name from it.
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, att);
-      // a melee beatdown can knock you off your feet (physics.js owns the
-      // player's down and get-up); a blow you took on the guard does not
-      if (melee && !(res && res.blocked) && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor &&
-          !((CBZ.game.invuln || 0) > 0) && !CBZ.body.busy(CBZ.city.playerActor) && rng() < 0.33) {
-        CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
-        if (res) res.reaction = "none";
-      }
+      // WHAT hit you rides along (city/death.js hands it to systems/vitals.js):
+      // a fist dazes and can knock you out, a blade or a round opens a bleed.
+      // Whether the blow put you on the floor is vitals' call, not a dice roll.
+      _plHit.kind = melee ? (npcBlade(att) ? "blade" : "fist") : "bullet";
+      _plHit.zone = melee && res ? res.zone : null;
+      _plHit.point = melee && res && res.point ? res.point : null;
+      _plHit.power = melee && res ? res.power : 0.6;
+      _plHit.blocked = !!(res && res.blocked);
+      _plHit.heavy = !!(res && res.heavy);
+      _plHit.cal = att.swat ? 1.1 : 0.9;
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : (melee ? "beaten in the street" : "killed in the street"), false, att, false, _plHit);
+      if (melee && res && (CBZ.player.dead || (CBZ.vitals && CBZ.vitals.cuffable(CBZ.player)))) res.reaction = "none";
       if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 22 : 40, melee ? "assault" : "shots-fired");
       return;
     }
     if (tgt.kind === "cop") {
-      if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz, shot: !melee, point: melee ? null : shotPoint(tgt), cal: att.swat ? 1.1 : 0.9 });
+      if (melee && CBZ.vitals) {
+        // a fist on an officer is a daze, the same as on anybody (vitals):
+        // it can put him out, it never runs his number to zero
+        if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, Math.max(0, Math.min(dmg, (tgt.hp || 0) - 1)), { fromX: fx, fromZ: fz, attacker: att, byPlayer: false });
+        const r = CBZ.vitals.blunt(tgt, { zone: (res && res.zone) || "head", power: res && res.power != null ? res.power : 0.6, weapon: "fist",
+          by: att, dirX: tgt.pos.x - fx, dirZ: tgt.pos.z - fz, fromX: fx, fromZ: fz });
+        if (res) res.reaction = tgt.dead ? "dead" : r === "ko" ? "none" : r === "knockdown" && !res.blocked ? "knockdown" : res.reaction;
+      } else if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz, shot: !melee, point: melee ? null : shotPoint(tgt), cal: att.swat ? 1.1 : 0.9, attacker: att, byPlayer: false });
       if (res && tgt.dead) res.reaction = "dead";
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 60 : 110, "attacked-officer");
       return;
     }
-    // ped vs ped
-    tgt.hp -= dmg;
+    // ped vs ped. WHAT THE BLOW DID TO HIS BODY is systems/vitals.js's: a
+    // fist dazes and knocks out (never kills a man on his feet), a blade or a
+    // round opens a bleed, and a hole that runs his hp out puts him on the
+    // floor bleeding hard instead of killing him, unless it found the head,
+    // the heart or a body already riddled. hp stays the brain's number.
+    const V = CBZ.vitals;
+    const blade = melee && npcBlade(att);
+    const lethal = (tgt.hp || 0) - dmg <= 0;
+    tgt.hp = V ? Math.max(1, tgt.hp - dmg) : tgt.hp - dmg;
     // the body CARRIES a ROUND (wounds.js): entry wound + blood soak. A punch
-    // leaves no decal: wounds.js draws "blunt" as the same pit as a bullet hole
-    // and the owner had it gutted from the player's fists (systems/combat.js);
-    // NPC-on-NPC punches were still stamping it on every street brawl.
-    if (!melee && CBZ.bodyWound) { _hurtWP.x = tgt.pos.x; _hurtWP.y = (tgt.pos.y || 0) + 1.05 + rng() * 0.55; _hurtWP.z = tgt.pos.z; _hurtWO.fromX = fx; _hurtWO.fromZ = fz; CBZ.bodyWound(tgt, _hurtWP, _hurtWO); }
-    tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
-    if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
-    // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
-    // (hands up / run), and returns whether this person DARES to fight back.
-    const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
-    if (!tgt.rage && dare && !tgt.restraint && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
-    if (tgt.hp <= 0) {
-      CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
-      if (res) res.reaction = "dead";
-    } else if (res) {
-      // a clean one can put him down: he falls in his own rig (CBZ.verbs.knockdown)
-      if (!res.blocked && rng() < 0.3) res.reaction = "knockdown";
+    // leaves no decal (wounds.js stamps nothing for blunt).
+    if (!melee || blade) {
+      if (blade && res && res.point) { _hurtWP.x = res.point.x; _hurtWP.y = res.point.y; _hurtWP.z = res.point.z; }
+      else { _hurtWP.x = tgt.pos.x; _hurtWP.y = (tgt.pos.y || 0) + 1.05 + rng() * 0.55; _hurtWP.z = tgt.pos.z; }
+      if (CBZ.bodyWound) { _hurtWO.fromX = fx; _hurtWO.fromZ = fz; _hurtWO.melee = blade ? "blade" : undefined; CBZ.bodyWound(tgt, _hurtWP, _hurtWO); }
+    }
+    let out = null;
+    if (V) {
+      if (melee && !blade) {
+        out = V.blunt(tgt, { zone: (res && res.zone) || "head", power: res && res.power != null ? res.power : 0.6, weapon: "fist",
+          heavy: !!(res && res.heavy), by: att, dirX: tgt.pos.x - fx, dirZ: tgt.pos.z - fz, fromX: fx, fromZ: fz });
+      } else {
+        out = V.wound(tgt, { kind: blade ? "stab" : "bullet", zone: blade && res ? res.zone : "", point: _hurtWP, by: att,
+          critical: lethal, cal: att.swat ? 1.1 : 0.9, fromX: fx, fromZ: fz }).outcome;
+      }
+    }
+    const down = tgt.dead || out === "ko" || out === "down" || (V && V.cuffable(tgt));
+    if (!down) {
+      tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
+      if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
+      // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
+      // (hands up / run), and returns whether this person DARES to fight back.
+      const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
+      if (!tgt.rage && dare && !tgt.restraint && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
+    } else if (!tgt.dead) {
+      if (tgt.char && tgt.char.sitting) leaveSit(tgt);
+      tgt.rage = null;                                    // a man on the floor is out of the fight
+    }
+    if (!V && tgt.hp <= 0) {
+      CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 }, melee ? (blade ? "stabbed" : "beaten") : "shot");
+    }
+    if (tgt.dead) { if (res) res.reaction = "dead"; }
+    else if (out === "ko" || out === "down") { if (res) res.reaction = "none"; }            // vitals laid him down in his own rig
+    else if (res) {
+      if (!res.blocked && (out === "knockdown" || (!V && rng() < 0.3))) res.reaction = "knockdown";
     } else if (melee || !streetShot(tgt, fx, fz, _hurtWP, 0.9)) { if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: 3 }); }
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
@@ -5060,6 +5173,33 @@
       // A violent gangster can still freelance crime when no intruder.
     }
 
+    // ---- A MATE ON THE FLOOR, BLEEDING: walk over and wrap it (systems/vitals.js).
+    //      Assigned by the aid scan below; everything urgent above already
+    //      returned, so a man only goes to help once his own street is quiet.
+    if (ped._aidTo) {
+      const pt = ped._aidTo, V = CBZ.vitals;
+      if (!V || pt.dead || !pt._vt || !(V.bleedRate(pt) > 0.0006) || ped.rage || ped.restraint || ped.inCar || ped.controlled ||
+          ped.state === "flee" || ped.state === "fight" || V.state(ped) !== "ok") {
+        if (V && V.bandaging(ped) >= 0) V.cancelBandage(ped);
+        if (pt._aidBy === ped) pt._aidBy = null;
+        ped._aidTo = null;
+      } else {
+        const d = Math.hypot(pt.pos.x - ped.pos.x, pt.pos.z - ped.pos.z);
+        if (d < 1.4) {
+          ped.path = null; ped.finalGoal = null; ped.speed = 0; ped.state = "idle"; ped.pause = Math.max(ped.pause, 0.6);
+          faceTo(ped, pt.pos.x, pt.pos.z, 0.6);
+          if (V.bandaging(ped) < 0 && !V.bandage(ped, pt, { roll: !!ped.medic })) {
+            if (pt._aidBy === ped) pt._aidBy = null;
+            ped._aidTo = null;
+          }
+          return;
+        }
+        ped.path = null; ped.finalGoal = { x: pt.pos.x, z: pt.pos.z };
+        ped.target.set(pt.pos.x, 0, pt.pos.z); ped.state = "walk"; ped.pause = 0;
+        return;
+      }
+    }
+
     // ---- tweakers: cheap but visible behavioral variety ----
     // They keep the same combat and inventory rules as everyone else; this only
     // changes routine choices and movement rhythm.
@@ -5960,6 +6100,8 @@
     // a jogger keeps a brisk clip on its normal walk (derived from the role, so it
     // costs nothing to clean up — never persisted onto baseSpeed).
     if (spd > 0 && (st === "walk" || st === "wander") && ped._role === "jogger") spd *= 1.5;
+    // a shot leg, blood gone, still groggy from a knockout (systems/vitals.js)
+    if (spd > 0 && ped._vt && CBZ.vitals) spd *= CBZ.vitals.speedMul(ped);
     // SOMEBODY CALLED YOU AND YOU ARE ACROSS THE STREET. city/boarding.js sets
     // this while a body is walking to a vehicle door (or to a dropped bag) far
     // enough away that a stroll would be absurd. It is a MULTIPLIER on the
@@ -6717,6 +6859,9 @@
       if (p.tag) p.tag.visible = false;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
       if (p.ko > 0) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
+      // wrapping his own wound (systems/vitals.js): he stands where he is,
+      // hands on it, until it is done or somebody hits him
+      if (p._vt && CBZ.vitals && CBZ.vitals.busy(p)) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       const near = d2 < ANIM_D2;
       // `important` is a SIMULATION policy, not permission to draw forever.
       // Passive guards and anybody who happens to own a gun must keep thinking

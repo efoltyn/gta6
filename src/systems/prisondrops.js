@@ -154,6 +154,7 @@
     "Cash Roll": "roll", "Gold Chain": "chain", "Gold Tooth": "trinket",
     "Luxury Watch": "trinket", "Stolen Wallet": "carton",
     "Bedsheet Rope": "roll", "Lockpick": "blade",
+    "Bandage": "gauze",
   };
   const SHAPE_BY_TAG = {
     key: "card", valuables: "trinket", drugs: "vial",
@@ -255,6 +256,19 @@
       put(g, cgeo(0.055, 0.15), cmat(0x4d6b45), 0, 0, 0, Math.PI / 2);       // rolled notes
       put(g, tgeo(0.058, 0.012), cmat(0xb03a3a), 0, 0, 0, 0);                // rubber band
       hh = 0.055; r = 0.09;
+    } else if (shape === "gauze") {
+      // A GAUZE ROLL (systems/vitals.js wraps a bleed with one): a short
+      // white roll on its side, the wound layers showing as rings on both
+      // ends, the loose end unrolled flat along the surface in front of it.
+      const white = cmat(0xf1eee5), layer = cmat(0xd8d2c3), core = cmat(0xb9b09c);
+      put(g, cgeo(0.036, 0.07), white, 0, 0, 0, 0, 0, Math.PI / 2);           // the roll
+      put(g, cgeo(0.008, 0.072), core, 0, 0, 0, 0, 0, Math.PI / 2);          // the wound centre
+      for (const sx of [-0.0355, 0.0355]) {
+        put(g, tgeo(0.024, 0.0022), layer, sx, 0, 0, 0, Math.PI / 2, 0);    // layer lines on the end
+        put(g, tgeo(0.015, 0.002), layer, sx, 0, 0, 0, Math.PI / 2, 0);
+      }
+      put(g, bgeo(0.068, 0.003, 0.09), white, 0, -0.0345, 0.05);            // the loose end, laid out flat
+      hh = 0.036; r = 0.07;
     } else if (shape === "chain") {
       put(g, tgeo(0.10, 0.018), cmat(tint), 0, 0, 0, Math.PI / 2);           // laid flat
       hh = 0.018; r = 0.12;

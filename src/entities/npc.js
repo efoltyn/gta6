@@ -441,8 +441,13 @@
       if (near && !(M.busy && M.busy(n))) animChar(n.char, 0, dt);
     } else {
       const O = MV_OPTS;
-      const paused = n.pause > 0;
-      if (paused) n.pause -= dt;
+      // CBZ.vitals: a man wrapping his own wound stands still to do it; a
+      // groggy, bled-white or leg-shot man walks slower
+      const VT = CBZ.vitals;
+      const busy = !!(VT && VT.busy(n));
+      if (VT && speed > 0) speed *= VT.speedMul(n);
+      const paused = n.pause > 0 || busy;
+      if (n.pause > 0) n.pause -= dt;
       const pdx = gp.x - CBZ.player.pos.x, pdz = gp.z - CBZ.player.pos.z;
       O.lod = M.lodFor(pdx * pdx + pdz * pdz, n.group.visible);
       O.face = faceY; O.strafe = faceY != null;
@@ -661,7 +666,7 @@
     // ===== INFIRMARY (east) — the doc + the sick =====
     { name: "Doc Mercer", tag: "Infirmary · meds", outfit: "orderly", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump("white", "Doc Mercer", { hair: 0xcfcfcf, bald: false, ink: "", tank: false, torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0x000000 }),
-      data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've patched worse for less.",
+      data: { name: "Doc Mercer", pool: "med", tip: "Bad cut? I've patched worse for less.",
         talk: ["I keep folks breathing in here.", "Painkillers for cigs. Don't tell the Warden.", "Lost my license. Not my hands."] } },
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
       behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump("white", "Patient Zero", { skin: 0xfae0c8, hair: 0x6a6a6a, beard: "stubble", tank: false }),

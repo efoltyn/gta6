@@ -367,6 +367,35 @@
   };
   CBZ.surv = surv;
 
+  /* ---- THE BODY'S SEAM (systems/vitals.js) on the island ----
+     A fist knocks a man out here; it does not kill him. vitals lays him down
+     through the shared collapse (CBZ.body.knockdown -> bodyfall, the fall
+     every body on the island takes) for as long as he is out, lets him up
+     when he comes round, and the one death it can hand out (beaten while
+     out cold, bled out) is this mode's own killBot / killPlayer. */
+  if (CBZ.vitals) CBZ.vitals.on("survival", {
+    hold(a, secs, o) {
+      if (!CBZ.body || !a || a.isPlayer) return false;
+      const dir = o && (o.dirX || o.dirZ) ? { x: o.dirX || 0, z: o.dirZ || 0 } : null;
+      CBZ.body.knockdown(a, { fromX: o && o.fromX, fromZ: o && o.fromZ, dir, force: 2.5, t: secs });
+      return true;
+    },
+    rise(a) { const p = a && a._phys; if (p && p.down > 0.05 && !a.dead) p.down = 0.05; return true; },
+    kill(a, cause, o) {
+      if (!a || a.isPlayer) return false;
+      surv.killBot(a, { fromX: o && o.fromX, fromZ: o && o.fromZ, cause }, cause || "beaten to death");
+      return true;
+    },
+    playerKill(cause) { killPlayer(cause || "beaten to death"); },
+    playerDown(on, o) {
+      const P = CBZ.player;
+      if (!P || !CBZ.body) return;
+      const ph = CBZ.body.phys(playerActor);
+      if (on) { ph.down = Math.max(ph.down, (o && o.secs) || 3); P.stun = Math.max(P.stun || 0, Math.min((o && o.secs) || 3, 30)); }
+      else { if (ph.down > 0.3) ph.down = 0.3; if (P.stun > 0.3) P.stun = 0.3; }
+    },
+  });
+
   // ---- persistent survival record (mirrors systems/save.js's localStorage
   //      pattern, own key). state.js's winGame() calls CBZ.recordSurvWin();
   //      the death path calls recordSurvRun(placement) via finishRound().
@@ -610,6 +639,7 @@
       // never bleeds again" seal) must not follow you into this one. Bots are
       // built fresh by spawnSurvivorBots, so only the player carries state over.
       if (CBZ.trauma) CBZ.trauma.reset(playerActor);
+      if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
       if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
       surv.spectating = false; if (CBZ.clearSpectate) CBZ.clearSpectate();
       CBZ.playerChar.group.rotation.x = 0; CBZ.playerChar.group.rotation.z = 0;

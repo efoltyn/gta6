@@ -436,6 +436,20 @@
       "............",
     ],
     // ---- kit --------------------------------------------------------------
+    bandage: [
+      "............",
+      "............",
+      "...OOOOOO...",
+      "..OCAAAAAO..",
+      ".OCAAOOAAAO.",
+      ".OCAO..OABO.",
+      ".OCAO..OABO.",
+      ".OCAAOOAABOO",
+      "..OAAAABBOAO",
+      "...OOOOOOAAO",
+      "..........OO",
+      "............",
+    ],
     medkit: [
       "............",
       "....OOOO....",
@@ -902,6 +916,7 @@
     grenade:   [0x4f5c3f, 0x2a2f22, 0x2a3024],
     bomb:      [0x3a4048, 0xc8b46a, 0x20242a],
     medkit:    [0xd8d3c8, 0xd23a34, 0x6f6b62],
+    bandage:   [0xeeeae0, 0xd8d1c1, 0x8f8878],   // gauze / its shadowed turns / the core
     armor:     [0x3d4552, 0x8e99a6, 0x22272f],
     tool:      [0xa9b3bd, 0x59616b, 0x40464e],
     crowbar:   [0xb0362f, 0x6d2019, 0x4a1611],
@@ -1177,6 +1192,7 @@
       if (row.missiles || row.airmunition) return "bomb";
       if (row.gun) return "gun";
       if (row.melee) return "melee";
+      if (row.bandage) return "bandage";
       if (row.medkit) return "medkit";
       if (row.armor) return "armor";
       if (row.rounds) return "ammo";
@@ -1353,6 +1369,7 @@
     if (row.melee) return { id: "equip", label: "Equip", hint: "melee" };
     if (row.throwable || row.c4 || row.tag === "throwable") return { id: "throw", label: "Throw", hint: "[T]" };
     if (row.place) return { id: "place", label: "Place", hint: "set it down here" };
+    if (row.bandage) return { id: "bandage", label: "Bandage", hint: "wrap a bleeding wound" };
     if (row.medkit) return { id: "heal", label: "Patch up", hint: "+" + row.medkit + " hp" };
     if (row.armor) return { id: "armor", label: "Strap on", hint: "+" + row.armor + " armor" };
     if (row.rounds) return { id: "ammo", label: "Load", hint: "+" + row.rounds + " rounds" };
@@ -1414,9 +1431,19 @@
       case "throw":
         if (CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
         return false;
+      case "bandage": {
+        // hands on the hole for a few seconds (systems/vitals.js): the roll is
+        // spent when the wrap is finished, not when it is started. Nothing
+        // open: nothing happens (the roll stays in your pocket).
+        const P = CBZ.player, V = CBZ.vitals;
+        if (!P || !V || P.dead) return false;
+        if (V.bandaging(P) >= 0) return false;
+        return !!V.bandage(P);
+      }
       case "heal": {
         const P = CBZ.player; if (!P) return false;
-        if ((P.hp || 0) >= (P.maxHp || 100) && !P._bleeding) { note("Nothing to patch up."); return false; }
+        const V = CBZ.vitals;
+        if ((P.hp || 0) >= (P.maxHp || 100) && !(V && (V.bleeding(P) || V.blood(P) < 0.95))) return false;
         if (!E.take(name, 1)) return false;
         P.hp = Math.min(P.maxHp || 100, (P.hp || 0) + (row.medkit || 40));
         if (CBZ.cityHealWounds) { try { CBZ.cityHealWounds(); } catch (e) {} }

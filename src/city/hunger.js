@@ -160,7 +160,8 @@
     return fix || big;
   }
   // PURE: which carried medicine to use (any row with a `medkit` heal): the
-  // smallest that covers the wound, else the biggest.
+  // smallest that covers the wound, else the biggest. A roll of gauze is
+  // never picked (no `medkit`): wrapping a wound is yours to do, by hand.
   function pickMed(inv, ITEMS, missing) {
     let fix = null, fixH = Infinity, big = null, bigH = -1;
     for (const name in inv) {
