@@ -933,14 +933,25 @@
     }
   }
 
+  // THE OBSERVATION GATE: an on-post officer who can actually SEE you. It
+  // used to be "anyone on duty within 7 m", eyes or no eyes, so lifting a case
+  // file behind a clerk's back was exactly as risky as doing it in his face.
+  // Now it is CBZ.brain.perception: his cone (the archetype's), the walls and
+  // the cage between you, and the dark of the flickering tube (the brain's
+  // light hook). Returns the WATCHER's handle (truthy) so he is the one who
+  // shouts. No brain loaded: the old 7 m disc.
+  const OBS_R = 7;
+  const _obsOpts = { range: OBS_R, eyeY: 1.5, targetY: 1.2 };
   function observed() {
-    // a simple observation gate: an on-post officer within ~7u of the player.
-    // (uses staff ped positions; enough to make lifting risky without a full LOS.)
-    // Returns the WATCHER's handle (truthy) so he is the one who shouts.
     if (!V || !CBZ.player) return null;
-    const P = CBZ.player;
+    const P = CBZ.player, B = CBZ.brain;
+    const pa = (CBZ.city && CBZ.city.playerActor) || P;
     for (const name in V.staff) { const h = V.staff[name]; if (!h || !h.ped) continue;
-      if (Math.hypot(h.ped.pos.x - P.pos.x, h.ped.pos.z - P.pos.z) < 7 && !awayAt(name, S.t)) return h; }
+      if (awayAt(name, S.t)) continue;
+      if (Math.hypot(h.ped.pos.x - P.pos.x, h.ped.pos.z - P.pos.z) >= OBS_R) continue;
+      if (B && B.perception && B.perception.sees) { if (B.perception.sees(h.ped, pa, _obsOpts)) return h; }
+      else return h;
+    }
     return null;
   }
 

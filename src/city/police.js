@@ -45,11 +45,16 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   // SHARED TACTICAL PRIMITIVES (systems/aitactics.js): LOS-memory/search-sweep,
   // flank-lane assignment, cover-peek cycling, glass-breach/door-routing-when-
-  // blind. Extracted out of this file's hunting branch so other armed-NPC
-  // systems (squadai.js) get the same depth. Feature-detected — if the module
-  // didn't load (stripped/old build), AT is null and every call site below
-  // falls back to skipping that tactic (cop still functions, just dumber).
-  const AT = CBZ.aiTactics || null;
+  // blind. Loaded ahead of this file in every build (index.html and the
+  // disaster slice); the hand-copied "no AT" fallbacks that used to sit beside
+  // every call were a second copy of the same maths and are deleted.
+  const AT = CBZ.aiTactics;
+  // THE LAW (city/law.js): perception, hearing, the authority ladder, witness
+  // reports and the "city-law" executor all live there, over CBZ.brain. This
+  // file keeps the police's BODIES (spawn, dispatch, cars, the chopper, the
+  // tactical movement math) and asks law.js every question about what an
+  // officer SEES or DECIDES. law.js loads before this file (index.html).
+  const LAW = CBZ.cityLaw;
   // COMPETENCE (systems/combat_iq.js): reaction time, aim settle, burst rhythm,
   // accuracy and the DERIVED per-hit damage that holds a shooter's output on the
   // one DPS ladder every armed NPC in the game is now measured against. A cop
@@ -313,15 +318,16 @@
   function tackleOn() {
     return !!(CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE) && typeof CBZ.predatorSeize === "function";
   }
-  const TACKLE_R = 2.6;       // arm's reach — nobody tackles you from across the street
-  let tackleCD = 0;           // one attempt at a time, force-wide (never a squad pile-on)
   // this file adopts the shared seize; police.js loads BEFORE predator.js, so
   // use the documented pre-load buffer rather than the (absent) direct call.
   if (CBZ.predatorAdopt) CBZ.predatorAdopt("police:arrest-tackle");
   else (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("police:arrest-tackle");
 
+  // THE TACKLE IS A VERB NOW: brain.authority's "force" rung asks for
+  // act.verb("tackle"); city/law.js's executor lands here (reach + the
+  // force-wide cooldown are law.js's). Nothing in this file triggers it.
   function startTackle(c) {
-    if (!c || c.dead || !c.group) return false;
+    if (!tackleOn() || !c || c.dead || !c.group || c._seizing) return false;
     const victim = (CBZ.city && CBZ.city.playerActor) || CBZ.player;
     if (!victim) return false;
     const h = CBZ.predatorSeize(c, victim, {
@@ -354,7 +360,7 @@
           // world already has for it — never a bespoke penalty.
           copSay(c, "SUSPECT IS RESISTING!", 2.0);
           if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: c.pos.x, z: c.pos.z, type: "resisting" }); } catch (e) {} }
-          c._challenged = false; c._patience = 0; c.arrestT = 0;
+          LAW.release(c); c.arrestT = 0;
           c.curTarget = (CBZ.city && CBZ.city.playerActor) || null; c.sees = true; c.retarget = 0.6;
         }
       },
@@ -414,23 +420,6 @@
   // expose for empire.js RAID / debug: did the player wipe the force?
   CBZ.cityPoliceWiped = function () { return forcePool <= 0 && deployedCops() <= 0; };
 
-  // ---- line-of-sight: do buildings block this cop's view? (GTA cops lose you
-  //      behind cover and switch to SEARCH). One shared ray, throttled per-cop. --
-  const _ray = new THREE.Raycaster();
-  _ray.far = 60;
-  const _o = new THREE.Vector3(), _d = new THREE.Vector3();
-  function losClear(ax, az, bx, bz) {
-    const blk = CBZ.losBlockers;
-    if (!blk || !blk.length) return true;
-    _o.set(ax, 1.4, az);
-    _d.set(bx - ax, 0, bz - az);
-    const len = _d.length(); if (len < 0.5) return true;
-    _d.multiplyScalar(1 / len);
-    _ray.set(_o, _d); _ray.far = len;
-    const hits = CBZ.losRaycast ? CBZ.losRaycast(_ray, blk) : _ray.intersectObjects(blk, false);
-    return hits.length === 0;
-  }
-
   function playerArmed() {
     return !!(CBZ.cityHasGun && CBZ.cityHasGun());
   }
@@ -475,35 +464,6 @@
   CBZ.cityPoliceGrace = function (sec) { copGraceT = Math.max(copGraceT, +sec || 0); };
   CBZ.cityPoliceGraceLeft = function () { return copGraceT; };
 
-  // ---- ARREST-FIRST CHALLENGE (city-arrest-first) ---------------------------
-  // A cop who gets eyes on a wanted suspect inside barking range CHALLENGES
-  // before anything else: weapon out at the ready, "FREEZE", a patience timer.
-  // Re-challenges after losing you come with LESS patience each time. One
-  // global text cooldown keeps a whole squad from stacking ten FREEZE lines,
-  // and the "you can surrender" hint prints at most every ~30s (the interact.js
-  // surrender option is live whenever a cop is challenging).
-  let challengeNoteCD = 0, surrenderHintT = -1e9;
-  function copPatience(c) { return c.swat ? 1.5 : 6.0; }
-  function challengeCall(c) {
-    c._chalN = (c._chalN || 0) + 1;
-    c._challenged = true;
-    c._patience = Math.max(0.8, copPatience(c) / c._chalN);   // escalating: each re-challenge is shorter
-    if (challengeNoteCD > 0) return;
-    challengeNoteCD = 4.5;
-    // THE STAKES ARE SAID OUT LOUD. What getting caught costs is decided by the
-    // stars (wanted.js: 1-2 stars is a fine and a release at the precinct, 3+
-    // is County), so the officer's first line tells you which one this is.
-    const st = g.wanted | 0;
-    const line = c.swat ? "POLICE! DOWN! HANDS BEHIND YOUR HEAD!"
-      : st >= 3 ? "FREEZE! You're going to County for this!"
-        : "FREEZE! Hands up. Make it easy, it's just a fine.";
-    copSay(c, line, 2.6);
-    if (CBZ.now - surrenderHintT > 30000) {
-      surrenderHintT = CBZ.now;
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Stand still to be cuffed, or walk up and surrender. Fighting back gets you shot.", 3.2);
-    }
-  }
-
   // ---- HOLSTER / DRAW -------------------------------------------------------
   // WHY: a beat cop with the pistol perpetually out reads as a drone — the belt
   // is the 0★ baseline, so the DRAW itself becomes the escalation cue. actor
@@ -541,10 +501,7 @@
   }
 
   function standIdle(c, faceY, dt, near) {
-    c.speed = 0;
-    c.group.rotation.y = lerpAngle(c.group.rotation.y, faceY, 1 - Math.pow(0.01, dt));
-    finalizeMove(c);
-    if (near) animChar(c.char, 0, dt);
+    holdFace(c, Math.sin(faceY), Math.cos(faceY), dt, near);
   }
 
   // beats walk in TWOS: a mate-less ambient cop claims the nearest free single.
@@ -872,7 +829,7 @@
       STOP.t += dt;
       c._gunLowered = true;                     // muzzle DOWN — he's challenging, not firing
       if (d > 3.0) stepTo(c, -dx, -dz, c.baseSpeed * 0.85, dt, true);
-      else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(-dx, -dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (CBZ.animChar) CBZ.animChar(c.char, 0, dt); }
+      else holdFace(c, -dx, -dz, dt, true);
       // suspicion creeps up the longer you stand there openly armed and ignore him
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
       const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
@@ -912,7 +869,7 @@
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;
       const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
       if (d > bd) continue;
-      if (!losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z)) continue;   // can't see the gun through a wall
+      if (!LAW.sight(c, CBZ.city.playerActor, 13, false)) continue;   // he has to be LOOKING, and no wall between
       if (trusted) {
         // inside arm's reach the costume fails the face check — otherwise waved past
         if (d < 3.2 && CBZ.cityOutfitBlow) CBZ.cityOutfitBlow(c);
@@ -982,6 +939,8 @@
     // ORG WITH RUNGS. A SWAT operator gets a rung too (a tactical team has
     // NCOs); his TITLE still reads "SWAT", because that is the louder read on
     // the street and level.js resolves it first.
+    // no squad-wide same-frame retarget: each officer's first look is his own
+    cop.retarget = LAW.jitter(cop, 1) * 0.6;
     if (ranksOn()) { const rk = rosterRank(); if (rk) cop.copRank = rk; }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
     // BODY ARMOR (armor.js, feature-detected): SWAT wear a full plate carrier +
@@ -1128,6 +1087,8 @@
         if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
       });
     }
+    for (const c of CBZ.cityCops) LAW.discharge(c);
+    LAW.reset();
     CBZ.cityCops.length = 0;
     carSuspects.length = 0;
     for (const c of pursuers) if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; }
@@ -2133,6 +2094,7 @@
     if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * spread, y: 1.5, z: P.pos.z + (rng() - 0.5) * spread }, { muzzleScale: 1.2 });
     if (CBZ.gunVoice) CBZ.gunVoice("carbine", Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.z - P.pos.z));
     else if (CBZ.sfx) CBZ.sfx("report");
+    CBZ.cityGunshot(chopper.pos.x, chopper.pos.z, chopper, 70);
     const hitP = Math.max(0.08, Math.min(0.45, 0.45 * (60 / Math.max(60, rng3))));
     if (rng() < hitP && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
   }
@@ -2877,7 +2839,7 @@
       c.state = "patrol"; c.giveUp = false; c.searchT = 0; c.curTarget = null; c.npcTarget = null;
       c.arrestT = 0; c._radioT = 0; c._duty = null; c.sees = false; c.retarget = 0; c.lostT = 0;
       c._gunLowered = false; c._gunHidden = false; c.chaseCar = null; c._coverT = 0;
-      c._challenged = false; c._patience = 0; c._chalN = 0; c._firedUponT = null;   // fresh arrest-first slate
+      LAW.release(c); c._firedUponT = null;   // fresh arrest slate
       // re-issue armor on a recycled officer (refills the soak pool, re-mounts the
       // vest/helmet if the kill stripped them, clears the prior corpse loot stamp)
       c._armorLoot = null;
@@ -2907,6 +2869,7 @@
   function rbDetachCop(c) {
     c._post = null; c.sees = false; c.curTarget = null;
     if (c.dead || (CBZ.body && CBZ.body.busy && CBZ.body.busy(c))) { c.retarget = 0.5; return; }
+    LAW.discharge(c);                        // pooled off the street = out of the brain
     const i = CBZ.cityCops.indexOf(c); if (i >= 0) CBZ.cityCops.splice(i, 1);
     if (c.group.parent) c.group.parent.remove(c.group);
     if (RB.copPool.length < 4) RB.copPool.push(c);
@@ -3153,27 +3116,31 @@
   // retype the literal to get the same vehicle.
   CBZ.cityCruiserModel = function () { return CRUISER_MODEL; };
 
-  // pick the best target for a cop: the player (if wanted) or an NPC offender
+  // pick the best target for a cop: the player (if wanted) or an NPC offender.
+  //
+  // NO OMNISCIENT COPS, AND NOW NO PRIVATE EYES EITHER. An officer only hunts
+  // somebody he KNOWS about: he is already on him, the brain's perception says
+  // he noticed him (city/law.js: a sight cone + occlusion + light + the
+  // awareness meter, so a cop looking the other way down a lit street does not
+  // clock you at 40 m through the back of his head), the chopper beam has him,
+  // or a witness's call about him has come over the radio. Otherwise he works
+  // the last place anyone SAW you (g.cityLastKnown, stamped by sightings and by
+  // dispatched witness reports at the witness's last sighting) — the caller
+  // turns _blindToPlayer into a search of that spot. Ambient beat cops far
+  // from that spot at low heat keep their beat.
+  //
+  // STICKY: the target he already has scores a bonus, so two offenders of
+  // equal weight can never make him flip between them every retarget beat.
+  const STICKY = 14;
   function chooseTarget(cop) {
     let best = null, bestScore = -1, bestPed = null;
-    const cp = cop.pos;
+    const cp = cop.pos, pa = CBZ.city.playerActor, cur = cop.curTarget;
     cop._blindToPlayer = false;
-    // NO OMNISCIENT COPS. This used to hand every officer on the map your LIVE
-    // position the moment you had a star, from any distance, through any
-    // number of buildings: a search ended, the next retarget re-locked the
-    // real you, and the chase could never actually be lost. An officer now
-    // only hunts YOU when he has you (eyes on, inside earshot, or the chopper
-    // beam on you). Otherwise he works the last place anyone SAW you
-    // (g.cityLastKnown, stamped by sightings and fresh reports) — the caller
-    // turns _blindToPlayer into a search of that spot. Ambient beat cops far
-    // from that spot at low heat keep their beat instead of the whole city
-    // converging on a jaywalker.
     let playerKnown = false;
     if ((g.wanted | 0) >= 1 && !CBZ.player.dead) {
-      const d = Math.hypot(cp.x - CBZ.player.pos.x, cp.z - CBZ.player.pos.z);
-      playerKnown = d < 12 || (cop.sees && cop.curTarget === CBZ.city.playerActor) ||
-        (d < 48 && losClear(cp.x, cp.z, CBZ.player.pos.x, CBZ.player.pos.z)) ||
-        !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints());
+      playerKnown = (cop.sees && cur === pa) ||
+        !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints()) ||
+        LAW.acquire(cop, pa, 48);
       if (!playerKnown) {
         const lk = g.cityLastKnown, stars = g.wanted | 0;
         const reach = cop.ambient && stars < 3 ? (stars <= 1 ? 110 : 170) : 1e9;
@@ -3185,8 +3152,8 @@
       // ESCAPED CONVICT: the manhunt is personal — a fleeing felon outranks a
       // random armed NPC offender, so cops lock onto YOU over an equal-stars ped.
       const convictBias = g.escapedConvict ? 40 + d * 0.4 : 0;   // also blunts the distance falloff
-      const sc = (g.wanted | 0) * 30 - d * 0.5 + convictBias;
-      if (sc > bestScore) { bestScore = sc; best = CBZ.city.playerActor; bestPed = null; }
+      const sc = (g.wanted | 0) * 30 - d * 0.5 + convictBias + (cur === pa ? STICKY : 0);
+      if (sc > bestScore) { bestScore = sc; best = pa; bestPed = null; }
     }
     for (const p of CBZ.cityPeds) {
       // already in restraints (the player's collar) = already in custody — a cop
@@ -3194,7 +3161,10 @@
       if (p.dead || p.restraint || (p.npcWanted | 0) < 1) continue;
       const d = Math.hypot(cp.x - p.pos.x, cp.z - p.pos.z);
       if (d > 60) continue;
-      const sc = (p.npcWanted | 0) * 24 + (p.armed ? 12 : 0) - d * 0.6;
+      // he has to KNOW about this one: already on him, a witness called it in,
+      // or he sees him himself.
+      if (p !== cur && !LAW.reportedRecently(p, 30) && !LAW.sight(cop, p, 45, false)) continue;
+      const sc = (p.npcWanted | 0) * 24 + (p.armed ? 12 : 0) - d * 0.6 + (p === cur ? STICKY : 0);
       if (sc > bestScore) { bestScore = sc; best = p; bestPed = p; }
     }
     // multiplayer (sim host): remote players are chaseable/shootable too —
@@ -3203,13 +3173,23 @@
       for (const r of CBZ.net.aiTargets()) {
         if (r.dead) continue;
         const d = Math.hypot(cp.x - r.pos.x, cp.z - r.pos.z);
-        const sc = (g.wanted | 0) * 30 - d * 0.5;
+        const sc = (g.wanted | 0) * 30 - d * 0.5 + (r === cur ? STICKY : 0);
         if (sc > bestScore) { bestScore = sc; best = r; bestPed = null; }
       }
     }
     cop.npcTarget = bestPed;
     return best;
   }
+
+  // A CRIME AN OFFICER SAW WITH HIS OWN EYES (wanted.js crime() -> law.js
+  // copWitness): he doesn't wait for the retarget beat or the heat maths —
+  // he's on you now, and the authority ladder opens with his warning.
+  CBZ.cityCopSawCrime = function (c) {
+    if (!c || c.dead || c._post || c.gunstop || c._airPilot || c._swatPassenger) return;
+    c.curTarget = CBZ.city.playerActor; c.sees = true; c.lostT = 0;
+    c.searchT = 0; c.searchGoal = null; c._duty = null; c.giveUp = false;
+    c.retarget = 1.2 + LAW.jitter(c, 2) * 0.4;
+  };
 
   // ---- per-frame update --------------------------------------------------
   CBZ.onUpdate(35, function (dt) {
@@ -3227,6 +3207,7 @@
     for (let i = cops.length - 1; i >= 0; i--) {
       const c = cops[i];
       if (c.dead) {
+        if (c._lawReg) LAW.discharge(c);
         if (c.tag) c.tag.visible = false;
         c.deadT += dt;
         // A DEAD OFFICER USED TO LAST EIGHT SECONDS. That number is the owner's
@@ -3253,6 +3234,8 @@
       // The helicopter's pilot is still this exact roster NPC, seated in Air-1.
       // Keep the hidden foot rig out of patrol/targeting until the aircraft has
       // physically landed and releaseChopperPilot returns them to the precinct.
+      if (!c._lawReg) LAW.enlist(c);
+      _dt = dt; _near = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
       if (c._airPilot) { c.sees = false; c.curTarget = null; c.speed = 0; continue; }
       // Same contract for the SWAT van: these are real, named roster actors,
       // but the van owns their transform until its rear doors open.
@@ -3317,7 +3300,7 @@
         const pdx = P.pos.x - c.pos.x, pdz = P.pos.z - c.pos.z, pd = Math.hypot(pdx, pdz);
         if (c._losCD == null) c._losCD = rng() * 0.25;
         c._losCD -= dt;
-        if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = pd < 40 && !P.dead && losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z); }
+        if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = pd < 40 && !P.dead && LAW.sight(c, CBZ.city.playerActor, 40, !!c.sees); }
         c.sees = pd < 40 && !P.dead && stars >= 1 && !!c._losClear;
         c.curTarget = c.sees ? CBZ.city.playerActor : null;    // feeds the aim pose + gun visibility
         // arrest-first: the wall is PRESSURE, not an execution squad — posted
@@ -3356,6 +3339,16 @@
         const cs = nearestCarSuspect(c.pos);
         if (cs) c.chaseCar = cs; else c.chaseCar = null;
       } else c.chaseCar = null;
+      // HEARD IT (brain.perception.noise, fed by CBZ.cityGunshot): a free
+      // officer who hears gunfire goes to LOOK, after his own reaction beat —
+      // never the whole precinct on the same frame, never omniscient homing.
+      if (!tgt && !c.chaseCar && !(c.searchT > 0) && !c.giveUp && !c._duty) {
+        const h = LAW.heard(c);
+        if (h) {
+          goSearch(c, h);
+          copBark(c, h.kind === "gunshot" ? ["Shots fired! Moving.", "That was gunfire."] : ["What was that?"]);
+        }
+      }
 
       const near = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
 
@@ -3372,7 +3365,7 @@
         // chase left a conga line of cops trudging across the whole city.
         c._leaveT = (c._leaveT || 0) + dt;
         const lcx = c.pos.x - camx, lcz = c.pos.z - camz;
-        if (c._leaveT > 25 || lcx * lcx + lcz * lcz > 70 * 70) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } cops.splice(i, 1); continue; }
+        if (c._leaveT > 25 || lcx * lcx + lcz * lcz > 70 * 70) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } LAW.discharge(c); cops.splice(i, 1); continue; }
         const home = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
         let gx, gz;
         if (home && Math.hypot(home.x - c.pos.x, home.z - c.pos.z) > 6) { gx = home.x - c.pos.x; gz = home.z - c.pos.z; }
@@ -3393,132 +3386,71 @@
       if (tgt && !tgt.dead) {
         const isPlayer = tgt === CBZ.city.playerActor;
         const tx = tgt.pos.x, tz = tgt.pos.z;
-        const dx = tx - c.pos.x, dz = tz - c.pos.z, dist = Math.hypot(dx, dz);
+        let dx = tx - c.pos.x, dz = tz - c.pos.z, dist = Math.hypot(dx, dz);
 
-        // real LINE OF SIGHT + lost-sight memory, via the shared tactics module
-        // (systems/aitactics.js): within range AND not blocked by a building,
-        // re-tested on a throttled per-cop cadence, with a glass-breach re-confirm
-        // (sees through a hole it just shot) and the chopper spotlight counting as
-        // an extra "painted" sighting. No AT loaded (stripped build) → fall back
-        // to the bare losClear probe so a cop still functions, just without memory.
+        // LINE OF SIGHT + lost-sight memory through the shared tactics module
+        // (systems/aitactics.js), whose raycast is the brain's perception
+        // occlusion: re-tested on a throttled per-cop cadence, glass-breach
+        // re-confirm, the chopper beam as a "painted" sighting, and the brain's
+        // memory.see() stamped on every confirmed look.
         const painted = isPlayer && CBZ.cityChopperPaints && CBZ.cityChopperPaints();
-        if (AT) {
-          const ty2 = isPlayer ? 1.55 : 1.3;
-          const losRes = AT.updateLOS(c, tx, tz, dt, {
-            range: 48, breachReach: BREACH_REACH, painted, targetY: (tgt.pos.y || 0) + ty2, rng,
-          });
-          if (isPlayer && losRes.sees) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
-          if (losRes.justLost) {
-            c.curTarget = null; c.retarget = 0.4;
-            goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz });
-            continue;
-          }
-        } else {
-          if (c._losCD == null) c._losCD = rng() * 0.25;
-          c._losCD -= dt;
-          if (c._losCD <= 0) {
-            c._losCD = 0.22 + rng() * 0.12;
-            c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz);
-            if (!c._losClear && (c._breachedT || 0) > 0 && dist < BREACH_REACH && CBZ.clearLineOfFire) {
-              const ty2 = isPlayer ? 1.55 : 1.3;
-              c._losClear = CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tx, (tgt.pos.y || 0) + ty2, tz);
-            }
-          }
-          c.sees = dist < 48 && (c._losClear || painted || dist < 4);
-          if (c.sees) {
-            c.lostT = 0; c.lkx = tx; c.lkz = tz;
-            if (isPlayer) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
-          } else {
-            c.lostT = (c.lostT || 0) + dt;
-            if (c.lostT > (stars >= 4 ? 6 : 4)) { c.curTarget = null; c.retarget = 0.4; goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz }); continue; }
-          }
+        const losRes = AT.updateLOS(c, tx, tz, dt, {
+          range: 48, breachReach: BREACH_REACH, painted, targetY: (tgt.pos.y || 0) + (isPlayer ? 1.55 : 1.3), rng, target: tgt,
+        });
+        if (isPlayer && losRes.sees) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+        if (losRes.justLost) {
+          c.curTarget = null; c.retarget = 0.4;
+          LAW.release(c);
+          goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz });
+          continue;
         }
+        // BLIND, HE WORKS WHERE HE LAST SAW YOU. Between losing the line and
+        // the search kicking in, every step below (flank, approach, corner
+        // work) aims at his last sighting (updateLOS's lkx/lkz), never at your
+        // live position through the wall.
+        if (!c.sees && c.lkx != null) { dx = c.lkx - c.pos.x; dz = c.lkz - c.pos.z; dist = Math.hypot(dx, dz); }
 
-        const npcThreat = !isPlayer && (tgt.armed || tgt.aggr >= 0.85 || (tgt.npcWanted | 0) >= 2);
-        let wantArrest = isPlayer ? (stars <= 2 && !P.driving) : !npcThreat;
-        let wantShoot = isPlayer ? stars >= 2 : npcThreat;
-        // ---- ARREST-FIRST (city-arrest-first, player only — the NPC branch
-        // above already arrests non-threats): the default posture is TAKE THEM
-        // IN, weapon at the ready, holding fire. Lethal force needs a REASON:
-        //   (a) FIRED UPON — the player shot/struck an officer (cityHurtCop
-        //       stamps both a 15s force-wide window and a per-cop memory);
-        //   (b) deep heat (4★+);
-        //   (c) SWAT whose challenge went ignored at 3★+ (patience is ~1.5s).
-        // A DRIVING suspect is pursued at any stars (the cuff itself only
-        // lands on foot). Flag false = the legacy shoot-from-2★ lines above.
-        if (isPlayer && arrestFirst()) {
-          const firedUpon = (CBZ.now - (g._copsFiredUponT || -1e9)) < 15000 ||
-            (c._firedUponT != null && (copClock - c._firedUponT) < 25);
-          const lethal = stars >= 4 || firedUpon ||
-            (c.swat && stars >= 3 && c._challenged && (c._patience || 0) <= 0);
-          wantShoot = lethal;
-          wantArrest = !lethal;
+        // ---- THE AUTHORITY LADDER (city/law.js over CBZ.brain.authority) ----
+        // warn -> order -> (comply) approach -> cuff, running escalates to a
+        // takedown, a gun out and aimed escalates to lethal when the ROE says
+        // so. The wanted level sets the ROE; being FIRED UPON (cityHurtCop
+        // stamps a 15 s force-wide window and a per-cop memory) or 4+ stars
+        // skip the ladder. The Chief holding the stand-down order is still the
+        // gate: arrestFirst() false = the department goes hard from 2 stars.
+        const firedUpon = isPlayer && ((CBZ.now - (g._copsFiredUponT || -1e9)) < 15000 ||
+          (c._firedUponT != null && (copClock - c._firedUponT) < 25));
+        const roe = LAW.roe(c, tgt, isPlayer, stars, firedUpon, arrestFirst());
+        let wantShoot = false, law = null;
+        if (isPlayer && g.busted) {
+          // A COLLAR IN PROGRESS IS NOT A FIREFIGHT: the arrest arc (wanted.js)
+          // owns the scene and every other unit stands down.
+          LAW.release(c); c.arrestT = 0;
+        } else if (isPlayer && P.driving) {
+          // a driving suspect is pursued; the cuffs only go on a man on foot
+          wantShoot = roe === "shoot"; LAW.release(c);
+        } else if (c.sees || (c.lostT || 0) < 1.5) {
+          // (losing him is the LOS/search code's call, never "fled" into the ladder)
+          const st = isPlayer ? LAW.playerState(c, false) : LAW.pedState(tgt, c, false);
+          law = LAW.decide(c, tgt, dt, st, { roe, dist, sees: c.sees, reason: isPlayer ? (g.cityCrimeLabel || "wanted") : "offender" });
+          wantShoot = law.lethal;
         }
-        // ---- A COLLAR IN PROGRESS IS NOT A FIREFIGHT. The arrest arc
-        // (city/wanted.js) now marches, drives and books you over ~25 s instead
-        // of the old 3 s pose, and for that whole time the player is cuffed,
-        // input-locked and defenceless. Every OTHER unit stands down: nobody
-        // executes a man already in handcuffs, and without this the arc is a
-        // firing squad. `_arrestingPlayer` (the arc's own officer) keeps working.
-        if (isPlayer && g.busted) { wantShoot = false; wantArrest = false; c.arrestT = 0; }
-        // PROCEDURE: the gun leaves the belt only when the stop calls for it —
-        // an armed suspect (or gunfire-grade heat nearby) gets drawn on; a plain
-        // 0★ collar of an unarmed brawler stays hands-on, holster snapped. A
-        // CHALLENGING arrest-first cop draws too, but holds it LOWERED (the
-        // gun-stop stance) — fireAt clears the lowering the moment it's live.
-        if (wantShoot || tgt.armed) drawGun(c);
-        else if (isPlayer && c._challenged) { drawGun(c); c._gunLowered = true; }
+        // PROCEDURE: the gun leaves the belt when the stop calls for it — an
+        // armed suspect, lethal authority, or the player under challenge (drawn
+        // but LOWERED: the challenge stance; fireAt clears it when it's live).
+        // A plain collar of an unarmed NPC brawler stays hands-on.
+        if (wantShoot || tgt.armed || (isPlayer && law)) drawGun(c);
+        c._gunLowered = !!(law && !wantShoot && c.armed);
         c._calmT = 0;
 
         // assign each cop a FLANK lane so they don't bunch up — left/right/center
         // by index so a squad surrounds you instead of conga-lining single file.
-        if (AT) AT.flankLane(c, i, 3); else if (c._flank == null) c._flank = ((i % 3) - 1);   // -1 left, 0 center, +1 right
+        AT.flankLane(c, i, 3);
 
-        // ---- ARREST ----
-        // arrest-first (player): a SEQUENCE, not a point-blank tag — CHALLENGE
-        // at ~10u with eyes on, close in, and CUFF a slow suspect who holds
-        // still ~2.5s inside 3.2u (interact.js "surrender" stays the instant
-        // voluntary version, and is offered whenever a cop is challenging).
-        // Fleeing burns the challenge patience (SWAT lethality above) and
-        // re-challenges come shorter. Legacy flag-off path + the NPC collar
-        // keep the old point-blank window below, byte-for-byte.
-        if (isPlayer && arrestFirst()) {
-          if (wantArrest) {
-            if (c.sees && dist < 10 && !c._challenged) challengeCall(c);
-            if (c._challenged) {
-              if (!c.sees || P.speed > 3 || P.driving) c._patience = (c._patience || 0) - dt;   // ignoring the order
-              if (!c.sees && (c.lostT || 0) > 8) c._challenged = false;   // long blind spell → fresh challenge on re-contact
-              // ---- THE TACKLE. You were told to hold still and you RAN, and he
-              // is close enough to put a hand on you. This is not a new combat
-              // path: it is systems/predator.js's seize — the same
-              // wind→strike→hold→resolve FSM a big cat runs — with the
-              // `nonLethal` flag, so its worst outcome is TAKEN, never killed.
-              // ONE fair telegraphed window decides it, and both answers cost
-              // something: beat it and you are loose but charged with resisting;
-              // miss it and you go in the hard way (the violent 50% forfeit).
-              if (tackleOn() && c.sees && !P.driving && !P.dead && P.speed > 3
-                  && dist < TACKLE_R && !g.busted && tackleCD <= 0 && !c._seizing) {
-                if (startTackle(c)) { tackleCD = 6; continue; }
-              }
-            }
-            if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
-              if (c.arrestT === 0 && challengeNoteCD <= 0) { challengeNoteCD = 2.5; copSay(c, "Easy now, hold still.", 1.4); }
-              c.arrestT += dt;
-              if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
-              // close the last stretch slowly, cuffs out; square up on top
-              if (dist > 2.0) stepTo(c, dx, dz, c.baseSpeed * 0.62, dt, near);
-              else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (near) animChar(c.char, 0, dt); }
-              continue;
-            } else c.arrestT = 0;
-          } else c.arrestT = 0;
-        } else if (wantArrest && c.sees && dist < 1.9) {
-          if (isPlayer) {
-            if (P.speed < 2.4 && !P._fighting) {
-              if (c.arrestT === 0) copSay(c, "FREEZE! Hands where I can see them!", 1.4);
-              c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
-            } else c.arrestT = 0;
-          } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
-        } else c.arrestT = 0;
+        // the ladder's footwork: brain.authority already walked/stopped the
+        // primary this frame when it had something to do; everything else
+        // (the cover ring, the chase beyond taser range, holding a stance)
+        // is police.js's.
+        if (law && !wantShoot) { if (!LAW.acted(c)) lawMove(c, law.mode, dx, dz, dist, dt, near); continue; }
 
         // ---- SHOOT (only with a REAL line of fire) — and DUCK FOR COVER between
         //      bursts. The c.sees flag already proves a torso-height sightline; here
@@ -3556,10 +3488,7 @@
             c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;   // fireAt overwrites this when the tier layer is live
             fireAt(c, tgt, dist, dt);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
-            if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) {
-              if (AT) AT.coverArm(c, { dur: 1.0 + rng(), rng });
-              else { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
-            }
+            if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) AT.coverArm(c, { dur: 1.0 + rng(), rng });
           } else if (c.shootCD <= 0) {
             c._holdFireT = (c._holdFireT || 0) + dt;           // withholding on the move
           }
@@ -3579,13 +3508,7 @@
         if (M && M.moveGate && wantShoot && c.sees && dist > 2.6 && !(c._coverT > 0) &&
             !(c.hp != null && c.maxHp && c.hp < c.maxHp * 0.34)) {
           const mg = M.moveGate(c, tgt, dist, mayShoot ? "fire" : (c._iqSlot || ""));
-          if (mg && mg.halt) {
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c);
-            if (near) animChar(c.char, 0, dt);
-            continue;
-          }
+          if (mg && mg.halt) { holdFace(c, dx, dz, dt, near); continue; }
         }
 
         // ---- HOLD A POSITION SOMEBODY IS PAID TO HOLD. An officer without the
@@ -3600,9 +3523,7 @@
           if (cv) {
             const cdx = cv.x - c.pos.x, cdz = cv.z - c.pos.z;
             if (Math.hypot(cdx, cdz) > 1.1) { stepTo(c, cdx, cdz, c.baseSpeed * 1.15, dt, near); continue; }
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c); if (near) animChar(c.char, 0, dt);
+            holdFace(c, dx, dz, dt, near);
             continue;
           }
         }
@@ -3610,14 +3531,8 @@
         // taking cover: sidestep perpendicular to the target, then peek back out
         // (shared cover-peek cycle — systems/aitactics.js)
         if (c._coverT > 0) {
-          const step = AT ? AT.coverPeek(c, dx, dz, dist, dt, { sideAmt: 4, peek: 0.15 }) : null;
+          const step = AT.coverPeek(c, dx, dz, dist, dt, { sideAmt: 4, peek: 0.15 });
           if (step) { stepTo(c, step.x, step.z, c.baseSpeed * 1.1, dt, near); continue; }
-          if (!AT) {
-            c._coverT -= dt;
-            const px = -dz / (dist || 1), pz = dx / (dist || 1);   // perpendicular
-            stepTo(c, px * c._coverDir * 4 + dx * 0.15, pz * c._coverDir * 4 + dz * 0.15, c.baseSpeed * 1.1, dt, near);
-            continue;
-          }
         }
 
         // ---- NO LINE OF FIRE → BREACH THE GLASS, else ROUTE TO THE DOOR, else
@@ -3634,7 +3549,7 @@
         //      into BOTH capabilities (canBreach + canRouteDoors) — other armed
         //      NPCs via squadai.js currently opt into neither (street fighters,
         //      not building-clearing officers).
-        if (wantShoot && AT) {
+        if (wantShoot) {
           const detour = AT.breachOrRoute(c, tgt, tx, tz, dist, dt, {
             canBreach: true, canRouteDoors: true, breachReach: BREACH_REACH, doorRange: 34, rng,
           });
@@ -3644,41 +3559,12 @@
             stepTo(c, detour.x, detour.z, spd, dt, near);
             continue;
           }
-        } else if (wantShoot && !AT) {
-          if (!c.sees && dist < BREACH_REACH && c._losClear === false) {
-            if (CBZ.cityNpcBreachGlass && CBZ.cityNpcBreachGlass(c, tgt, BREACH_REACH)) {
-              c.shootCD = Math.max(c.shootCD, 0.18);
-              c._losCD = 0;
-              stepTo(c, dx, dz, c.baseSpeed, dt, near);
-              continue;
-            }
-          }
-          if (c._losClear === false && !c.sees && dist < 34 && CBZ.cityNav && CBZ.cityNav.indoorLotAt) {
-            c._doorCD = (c._doorCD || 0) - dt;
-            if (c._doorCD <= 0) {
-              c._doorCD = 0.5 + rng() * 0.3;
-              const lot = CBZ.cityNav.indoorLotAt(tx, tz);
-              const door = lot && lot.building && lot.building.door;
-              c._doorGoal = (door && Math.hypot(door.x - c.pos.x, door.z - c.pos.z) > 2.4) ? { x: door.x, z: door.z } : null;
-            }
-            if (c._doorGoal) {
-              const ddx = c._doorGoal.x - c.pos.x, ddz = c._doorGoal.z - c.pos.z;
-              if (Math.hypot(ddx, ddz) < 2.2 || c.sees) { c._doorGoal = null; }
-              else { stepTo(c, ddx, ddz, c.baseSpeed * 1.05, dt, near); continue; }
-            }
-          } else { c._doorGoal = null; }
         }
 
         // BLIND FLANK: "can't see them, work the corner" perpendicular dodge
         // (shared — systems/aitactics.js), flipping side every ~1.2-2.0s.
         if (wantShoot && !c.sees && dist < 42) {
-          const step = AT ? AT.blindFlank(c, dx, dz, dist, dt, { period: 1.2, periodJitter: 0.8, sideAmt: 5, closeBias: 0.35, rng })
-            : (function () {
-              c._flankT = (c._flankT || 0) - dt;
-              if (c._flankT <= 0 || c._flankSide == null) { c._flankT = 1.2 + rng() * 0.8; c._flankSide = (c._flankSide === 1) ? -1 : 1; }
-              const px = -dz / (dist || 1), pz = dx / (dist || 1);
-              return { x: px * c._flankSide * 5 + dx * 0.35, z: pz * c._flankSide * 5 + dz * 0.35 };
-            })();
+          const step = AT.blindFlank(c, dx, dz, dist, dt, { period: 1.2, periodJitter: 0.8, sideAmt: 5, closeBias: 0.35, rng });
           stepTo(c, step.x, step.z, c.baseSpeed * 1.05, dt, near);
           continue;
         }
@@ -3710,10 +3596,7 @@
           const gd2 = Math.hypot(gx2, gz2);
           const mg2 = M.moveGate ? M.moveGate(c, tgt, dist, pSlot) : null;
           if ((mg2 && mg2.halt) || gd2 < 0.9) {
-            c.speed = 0;
-            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
-            finalizeMove(c);
-            if (near) animChar(c.char, 0, dt);
+            holdFace(c, dx, dz, dt, near);
           } else {
             stepTo(c, gx2, gz2, c.baseSpeed * (c.sees ? 1 : 1.12), dt, near);
           }
@@ -3723,14 +3606,11 @@
         // approach with a FLANK offset so the squad encircles, and hold a
         // firing-line distance once we're a threat-range shooter.
         const flankAmt = isPlayer && stars >= 3 ? 7 : 4;
-        const appr = AT ? AT.flankApproach(c, dx, dz, dist, flankAmt) : (function () {
-          const px = -dz / (dist || 1), pz = dx / (dist || 1);
-          return { x: dx + px * c._flank * flankAmt, z: dz + pz * c._flank * flankAmt };
-        })();
+        const appr = AT.flankApproach(c, dx, dz, dist, flankAmt);
         const stop = (wantShoot && dist < (isPlayer ? (stars >= 3 ? 9 : 4) : 8)) ? (isPlayer && stars >= 3 ? 8 : 5) : 1.5;
         const spd = c.baseSpeed * (c.sees ? 1 : 1.12);     // sprint a touch when chasing blind
         if (dist > stop) stepTo(c, appr.x, appr.z, spd, dt, near);
-        else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); if (near) animChar(c.char, 0, dt); finalizeMove(c); }
+        else holdFace(c, dx, dz, dt, near);
         continue;
       }
 
@@ -3741,34 +3621,22 @@
         // RE-ACQUIRE: if we catch sight of the wanted player again mid-sweep, drop
         // the search and resume the hunt (GTA: spotted you again → back to chase).
         if (stars >= 1 && !CBZ.player.dead) {
-          const pdx = CBZ.player.pos.x - c.pos.x, pdz = CBZ.player.pos.z - c.pos.z, pd = Math.hypot(pdx, pdz);
+          c._reacqCD = (c._reacqCD || 0) - dt;
           const painted = CBZ.cityChopperPaints && CBZ.cityChopperPaints();
-          if (pd < 30 && (painted || losClear(c.pos.x, c.pos.z, CBZ.player.pos.x, CBZ.player.pos.z))) {
-            c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
-            // a SHOUT, not radio-speak — he's within 30u, you'd genuinely hear it
-            if (rng() < 0.5) copSay(c, "There he is!", 1.2);
-            continue;
+          if (painted || c._reacqCD <= 0) {
+            c._reacqCD = 0.18 + LAW.jitter(c, 3) * 0.1;
+            if (painted || LAW.sight(c, CBZ.city.playerActor, 30, false)) {
+              c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
+              // a SHOUT, not radio-speak — he's within 30u, you'd genuinely hear it
+              if (rng() < 0.5) copSay(c, "There he is!", 1.2);
+              continue;
+            }
           }
         }
         c.sees = false;
-        if (AT) {
-          if (!c.searchGoal && g.cityLastKnown) c.searchGoal = { x: g.cityLastKnown.x, z: g.cityLastKnown.z };
-          const step = AT.searchTick(c, dt, { sweepRadMin: 6, sweepRadMax: 16, reachR: 3, rng });
-          if (step) stepTo(c, step.x, step.z, c.baseSpeed * (step.sweeping ? 0.7 : 1), dt, near);
-        } else {
-          c.searchT -= dt;
-          const sg = c.searchGoal || g.cityLastKnown;
-          if (sg) {
-            const sdx = sg.x - c.pos.x, sdz = sg.z - c.pos.z, sd = Math.hypot(sdx, sdz);
-            if (sd < 3) {
-              if (!c._sweepGoal || Math.hypot(c.pos.x - c._sweepGoal.x, c.pos.z - c._sweepGoal.z) < 2.5) {
-                const ang = rng() * 6.28, rad = 6 + rng() * 10;
-                c._sweepGoal = { x: sg.x + Math.cos(ang) * rad, z: sg.z + Math.sin(ang) * rad };
-              }
-              stepTo(c, c._sweepGoal.x - c.pos.x, c._sweepGoal.z - c.pos.z, c.baseSpeed * 0.7, dt, near);
-            } else stepTo(c, sdx, sdz, c.baseSpeed, dt, near);
-          }
-        }
+        if (!c.searchGoal && g.cityLastKnown && !c.npcSearch) c.searchGoal = { x: g.cityLastKnown.x, z: g.cityLastKnown.z };
+        const step = AT.searchTick(c, dt, { sweepRadMin: 6, sweepRadMax: 16, reachR: 3, rng });
+        if (step) stepTo(c, step.x, step.z, c.baseSpeed * (step.sweeping ? 0.7 : 1), dt, near);
         if (c.searchT <= 0) { c.searchGoal = null; c._sweepGoal = null; c.npcSearch = false; if (stars === 0 && !c.ambient) c.giveUp = true; }
         continue;
       }
@@ -3777,7 +3645,7 @@
       c.sees = false; c.npcTarget = null;
       // de-escalation: back on the beat the challenge state clears (a future
       // hunt starts with a fresh FREEZE and full patience, gun un-lowered)
-      if (c._challenged) { c._challenged = false; c._patience = 0; c._chalN = 0; c._gunLowered = false; }
+      if (c._challenged || (c._law && c._law.suspect)) { LAW.release(c); c._gunLowered = false; }
       // calm streets: after a few quiet seconds the sidearm goes back on the belt
       if (stars === 0 && !c.swat && c.armed) { c._calmT = (c._calmT || 0) + dt; if (c._calmT > 2.5) holsterGun(c); }
 
@@ -3864,8 +3732,6 @@
     hideOccludedGuns(dt);
     copClock += dt;
     if (barkCD > 0) barkCD -= dt;
-    if (challengeNoteCD > 0) challengeNoteCD -= dt;
-    if (tackleCD > 0) tackleCD -= dt;
     scanDuty(dt);
   });
 
@@ -3874,8 +3740,7 @@
   // module didn't load so a cop can still search, just without sharing it.)
   function goSearch(c, last) {
     if (!last || last.x == null) { c.giveUp = (g.wanted | 0) === 0 && !c.ambient; return; }
-    if (AT) AT.searchStart(c, last, { dur: 6 + rng() * 4, rng });
-    else { c.searchT = 6 + rng() * 4; c.searchGoal = { x: last.x, z: last.z }; c._sweepGoal = null; }
+    AT.searchStart(c, last, { dur: 6 + rng() * 4, rng });
     c.npcSearch = !((g.wanted | 0) >= 1);   // searching for an NPC offender, not you
   }
 
@@ -3885,7 +3750,30 @@
     return best;
   }
 
+  // EVERY COP STEP GOES THROUGH CBZ.brain.act. The brain tries CBZ.moves
+  // (the MOVES lead's one locomotion layer) first and falls back to the
+  // "city-law" executor city/law.js registered over rawStep/rawHold/rawFace
+  // below — i.e. exactly this file's old movement, until moves exists.
+  // _dt/_near are set per officer at the top of the behaviour loop so the
+  // executor (which the brain may also call from inside authority.step)
+  // animates with the right frame.
+  let _dt = 0.016, _near = false;
+  const _mv = { speed: 0, arrive: 0.05 };
+  function brainAct() { const b = CBZ.brain; return b && b.act && b.act.moveTo ? b.act : null; }
   function stepTo(c, dx, dz, spd, dt, near) {
+    _dt = dt; _near = near;
+    const A = c._lawReg ? brainAct() : null;
+    if (A) { _mv.speed = spd; if (A.moveTo(c, c.pos.x + dx, c.pos.z + dz, _mv)) return; }
+    rawStep(c, dx, dz, spd, dt, near);
+  }
+  // stand still, squared up on (dx,dz)
+  function holdFace(c, dx, dz, dt, near) {
+    _dt = dt; _near = near;
+    const A = c._lawReg ? brainAct() : null;
+    if (A && A.stop && A.face) { A.face(c, c.pos.x + dx, c.pos.z + dz); A.stop(c); return; }
+    rawFace(c, c.pos.x + dx, c.pos.z + dz); rawHold(c);
+  }
+  function rawStep(c, dx, dz, spd, dt, near) {
     const gd = Math.hypot(dx, dz) || 1;
     c.pos.x += (dx / gd) * spd * dt;
     c.pos.z += (dz / gd) * spd * dt;
@@ -3894,6 +3782,59 @@
     finalizeMove(c);
     if (near) animChar(c.char, c.speed, dt);
   }
+  function rawHold(c) {
+    c.speed = 0;
+    finalizeMove(c);
+    if (_near && c.char) animChar(c.char, 0, _dt);
+  }
+  // a smooth turn, never a snap: ~0.35 s to come round 90 degrees
+  function rawFace(c, x, z) {
+    const dx = x - c.pos.x, dz = z - c.pos.z;
+    if (dx * dx + dz * dz < 1e-6 || !c.group) return;
+    c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, _dt));
+  }
+  // THE LAW'S FOOTWORK for one ladder mode (city/law.js decide()). Every
+  // move/stop decision has a start/stop BAND so an officer on the edge of a
+  // radius doesn't step-stop-step every other frame while you shuffle.
+  function band(c, dist, startR, stopR) {
+    if (c._lawMv) { if (dist < stopR) c._lawMv = false; }
+    else if (dist > startR) c._lawMv = true;
+    return c._lawMv;
+  }
+  function lawMove(c, mode, dx, dz, dist, dt, near) {
+    const sp = c.baseSpeed;
+    switch (mode) {
+      case "chase":                                       // he ran: close hard
+        c._lawMv = true;
+        if (dist > 1.1) stepTo(c, dx, dz, sp * 1.05, dt, near); else holdFace(c, dx, dz, dt, near);
+        return;
+      case "approach":                                    // hands shown: walk up, cuffs out
+        if (band(c, dist, 1.9, 1.35)) stepTo(c, dx, dz, sp * 0.42, dt, near); else holdFace(c, dx, dz, dt, near);
+        return;
+      case "cover": {                                     // partner holds the ring, gun lowered
+        if (band(c, dist, 11, 8.5)) {
+          const a = AT.flankApproach(c, dx, dz, dist, 5);
+          stepTo(c, a.x, a.z, sp * 0.8, dt, near);
+        } else holdFace(c, dx, dz, dt, near);
+        return;
+      }
+      case "hold":                                        // orders are given from ~9 m, squared up
+        if (band(c, dist, 10.5, 8.0)) stepTo(c, dx, dz, sp * 0.75, dt, near); else holdFace(c, dx, dz, dt, near);
+        return;
+      default:
+        c._lawMv = false; holdFace(c, dx, dz, dt, near);
+    }
+  }
+  // bind this file's bodies into the law's executor (act.use "city-law")
+  LAW.bindPolice({
+    step: function (c, dx, dz, spd) { rawStep(c, dx, dz, spd, _dt, _near); },
+    hold: function (c) { rawHold(c); },
+    face: function (c, x, z) { rawFace(c, x, z); },
+    say: function (c, line, secs) { return copSay(c, line, secs); },
+    drawGun: drawGun,
+    tackle: startTackle,
+    openCarry: openCarry,
+  });
   function finalizeMove(c) {
     if (CBZ.collide) CBZ.collide(c.pos, COP_R, c.pos.y, c.pos.y + 1.7);
     if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, COP_R);
@@ -3975,6 +3916,7 @@
     // distance to the LISTENER (the player), not to the cop's target
     if (CBZ.gunVoice) CBZ.gunVoice(c.weapon || (c.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
     else if (CBZ.sfx) CBZ.sfx("report");
+    CBZ.cityGunshot(c.pos.x, c.pos.z, c, 48);
     // the burst rhythm is the shooter's, not this call site's
     if (_shot) c.shootCD = _shot.cd;
     // A ROUND THAT GOES PAST YOUR EAR MAKES YOU SHOOT WORSE. One line, and it
