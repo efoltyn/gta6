@@ -673,7 +673,7 @@
       const q = rec.guards[i];
       if (!q || q.dead) continue;
       const slot = slotFor(rec, i, n);
-      if (q._post) {
+      if (q._post && !q._detailBrain) {             // a detail-brain guard's post is the brain's
         q._post.x = slot.x; q._post.z = slot.z;
         q._post.fx = slot.fx; q._post.fz = slot.fz;
         // police.js's teardown branch counts up mountT to 2.2s before it
@@ -702,6 +702,10 @@
       }
       if (q.rage) q.rage = null;
       if (!PR || !PR.order) continue;
+      // THE DETAIL BRAIN (city/brain_protection.js) walks this guard: its
+      // slot table, looks and panic drill, executed through the same
+      // moveOrder. Everything below is only for a ring nobody handed to it.
+      if (q._detailBrain) continue;
 
       if (stage >= STAGE_DRAW && me) {
         // DRAWN, NOT FIRING — peds.js's own "confront" state ("close in,

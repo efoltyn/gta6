@@ -116,6 +116,10 @@
 
   let THREE = null, ctx = null, Q = null;
   const clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
+  // ONE MORALE: systems/brain.js CBZ.brain.morale holds the formula, the break
+  // rule and the rally band this file used to own (read lazily: warlord.html
+  // loads its scripts in order and brain.js comes first).
+  function MO() { return CBZ.brain.morale; }
 
   /* ============================================================ BUDGETS
      THE CAP EXISTS AND IT IS STATED ON SCREEN. battle.html has no cap because
@@ -802,8 +806,19 @@
     gridAt = simT;
     purgeCells();
   }
+  /* ONLY MEN HE COULD HAVE NOTICED — games/battle.html's rule, the same call:
+     a candidate must pass CBZ.brain.perception.sees (range, a ~200 degree
+     field off m.yaw, a 10 m touch radius; occlude:false because eyeLos below
+     casts the ray). The old fallback "nobody visible: take the nearest" was
+     radar on every bearing; now it is the nearest he could have seen go behind
+     cover, and nobody in his field is no mark (marchGoal carries him to the
+     order, and the man who shoots him is his mark anyway). A FLANK order is
+     worth giving now: the line does not turn as one on the wing coming round
+     behind it. Pure arithmetic: the seeded replay is unchanged. */
+  const SPOT = { range: 0, fovHalf: 1.75, touch: 10, occlude: false };
   const _cand = [];
   function pickTarget(m, range) {
+    SPOT.range = range;
     const cx = Math.floor(m.pos.x / GRID_CELL), cz = Math.floor(m.pos.z / GRID_CELL);
     const maxR = Math.ceil(range / GRID_CELL);
     _cand.length = 0;
@@ -816,7 +831,7 @@
           const o = a[i];
           if (o.team === m.team || o.dead || o.fled) continue;
           const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
-          if (d2 < range * range) _cand.push(o, d2);
+          if (d2 < range * range && CBZ.brain.perception.sees(m, o, SPOT)) _cand.push(o, d2);
         }
       }
       if (_cand.length >= 12 && r > 1) break;
@@ -1221,7 +1236,6 @@
      end condition — which is battle.html's behaviour exactly, and is the
      honest before side for photographing what it buys. */
   const MORALE_OFF = function () { return Q && Q.get("morale") === "old"; };
-  const NERVE_FALLBACK = { civ: 0.62, thug: 0.42, guard: 0.30, soldier: 0.20 };
   function nerveOf(m) { return nerveFor(m.s ? W.tier(m.s.tier).cq : "soldier"); }
   function standing(side) {
     const out = [];
@@ -1289,24 +1303,18 @@
   }
   function stepRout(m) {
     if (MORALE_OFF() || m.isYou || (m.side && m.side.noRout)) return false;
-    const nerve = nerveOf(m);
-    if (!m.routed) {
-      if (m.side.morale < nerve) {
-        m.routed = true;
-        m.side.brokeN = (m.side.brokeN || 0) + 1;
-        /* "HAKIM BREAKS" was the same mistake as "HAKIM DOWN": a name you have
-           not learned, and no answer to the only question that matters, which
-           is which part of your line is coming apart. An AMBER tick on the rim
-           at his bearing — thinner than a death's red one, because a man
-           running is not a man dead and the two must not read alike. This also
-           fires battle:break, which warlord/feel.js has had a listener for
-           since the day it was written and has never once received. */
-        const D = DTH(); if (D) D.broke(m);
-      }
-    } else if (m.side.morale > nerve + 0.14) {
-      // RALLY, with hysteresis: an army that steadies gets its men back, and
-      // without the band the whole line would flicker at the threshold.
-      m.routed = false;
+    // the break, and the rally with its 0.14 hysteresis band (without it the
+    // whole line flickers at the threshold), are brain.morale.stepRout's
+    const was = m.routed;
+    if (MO().stepRout(m, m.side.morale, nerveOf(m)) && !was) {
+      m.side.brokeN = (m.side.brokeN || 0) + 1;
+      /* "HAKIM BREAKS" was the same mistake as "HAKIM DOWN": a name you have
+         not learned, and no answer to the only question that matters, which
+         is which part of your line is coming apart. An AMBER tick on the rim
+         at his bearing — thinner than a death's red one, because a man
+         running is not a man dead and the two must not read alike. This also
+         fires battle:break, which warlord/feel.js listens for. */
+      const D = DTH(); if (D) D.broke(m);
     }
     return m.routed;
   }
@@ -1410,13 +1418,9 @@
   /* THE PURE MORALE FUNCTION. Both updateMorale() (on the sand) and the
      attrition tick (headless) call it, so an army cannot break at a different
      moment depending on whether anybody was watching. */
-  function moraleFrom(o) {
-    let mo = 1 - o.lost * 1.6 + o.theirLost * 0.55;
-    if (o.leader) mo += o.leaderDown ? -0.30 : (o.leaderNear ? 0.16 : 0);
-    mo -= o.malus || 0;
-    mo -= clamp(o.routingFrac, 0, 1) * 0.25;   // men watch men run
-    return clamp(mo, 0, 1);
-  }
+  // (1 - lost*1.6 + theirLost*0.55, the warlord's +0.16 / -0.30, the malus,
+  // routingFrac*0.25 — now brain.morale.fromLosses, the one copy)
+  function moraleFrom(o) { return MO().fromLosses(o); }
 
   /* THE TICK. One second of battle, no rendering, no geometry. It mutates the
      unit records in place — which is why the 3D battle can hand it its OWN
@@ -1604,9 +1608,8 @@
       if (u.dead || u.fled || u.isYou) continue;
       const s = sides[u.team];
       if (!MORALE_OFF()) {
-        const nerve = u.nerve;
-        if (!u.routed && s.morale < nerve) { u.routed = true; s.brokeN = (s.brokeN || 0) + 1; }
-        else if (u.routed && s.morale > nerve + 0.14) u.routed = false;
+        const was = u.routed;
+        if (MO().stepRout(u, s.morale, u.nerve) && !was) s.brokeN = (s.brokeN || 0) + 1;
       }
       if (u.routed) {
         u.runT = (u.runT || 0) + dt;
@@ -1703,19 +1706,14 @@
     return { key: key, dir: dir, alive: 0, routing: 0, deadN: 0, brokeN: 0,
       morale: 1, power0: 1, powerNow: 1, moraleMalus: 0, men0: [], standing: [] };
   }
-  function nerveFor(cq) {
-    const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[cq];
-    return (R && R.nerve != null) ? R.nerve : (NERVE_FALLBACK[cq] || 0.4);
-  }
+  // combat_iq's ROLE[cq].nerve column (fallback civ .62 .. soldier .20)
+  function nerveFor(cq) { return MO().nerveOf(cq); }
   // the break rule, on a side record rather than on the live SIDES — the same
   // arithmetic checkEnd() runs, so a battle cannot end at two different moments
-  // depending on which path is running it
+  // depending on which path is running it (<= 10% still fighting AND >= 30%
+  // gone: brain.morale.brokenSide)
   function brokenSide(side, fled) {
-    if (MORALE_OFF() || side.men0.length <= 2) return false;
-    const fighting = side.alive - side.routing;
-    const gone = side.deadN + side.routing + fled;
-    return fighting <= Math.max(1, Math.floor(side.men0.length * 0.1)) &&
-           gone >= side.men0.length * 0.3;
+    return !MORALE_OFF() && MO().brokenSide(side, fled);
   }
 
   /* ============================================================ THE CLOCK

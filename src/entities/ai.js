@@ -167,6 +167,15 @@
     if (!n || !alive(n) || !n.group || n.role === "merchant") return false;
     if ((n._brokenUpT || 0) > 0 || (playerDownedNow() && !lethalGrudge(n))) { _huntRefused++; return false; }
     if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged") return false;
+    // A GUN IS OUT. Nobody walks at a muzzle because his feelings are hurt:
+    // CBZ.brain.threat decides (systems/brain_prison.js 5c) — a blade inside
+    // its window may rush, everyone else runs, hides, gets down or puts his
+    // hands up, and keeps the grudge for later.
+    if (CBZ.prisonBrain && CBZ.prisonBrain.gunRefuses && CBZ.prisonBrain.gunRefuses(n)) {
+      _huntRefused++;
+      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1.5);
+      return false;
+    }
     if (!((n.huntPlayer || 0) > 0)) _huntStarts++;
     n.huntPlayer = Math.max(n.huntPlayer || 0, secs || 6);
     n._huntWhy = why || n._huntWhy || "";
@@ -4384,6 +4393,9 @@
   // How badly this man wants to swing at that man, 0..1. Beef is the reason;
   // temperament decides what weight of reason is enough.
   function wantsToSwing(n, other) {
+    // cuffed and let up, running home, or his clique's nerve has gone
+    if ((n._lawHeldT || 0) > 0 || (n._routT || 0) > 0 || n.cuffed) return 0;
+    if (CBZ.prisonBrain && CBZ.prisonBrain.broken(n)) return 0;
     const b = behaviorOf(n);
     const odds = fightOdds(n, other);                      // 0..1 he wins this
     const risk = watched(n) * (1 - b.guts) * 1.2;          // a screw is watching
@@ -4462,6 +4474,16 @@
 
   function startFight(n, foe) {
     n.aiState = "fight"; n.foe = foe; n.hitCD = 0;
+    // WHO THREW FIRST is what a screw acts on (systems/brain_prison.js)
+    n._fightStarter = n;
+    if (foe && foe.group) foe._fightStarter = n;
+    // AND THE YARD SEES IT: everyone who could see or hear it is a witness —
+    // a screw in view takes it at once, the rest cheer, look away, clear
+    // out, or (rarely, never on their own set) go and tell
+    if (CBZ.prisonBrain && foe && foe.group && foe.kind !== "guard" && foe.kind !== "warden") {
+      const p = n.group.position;
+      CBZ.prisonBrain.crime("fight", p.x, p.z, n, 0.3, { victim: foe });
+    }
     // THE REASON IS NOW SPENT. Without this the same grievance re-fires the
     // same fight on every wander tick for as long as it takes to decay, which
     // is the shape the old dice roll had and the whole point of removing it.
@@ -4625,6 +4647,7 @@
     snitch.snitchHeat = 0;
     snitch.snitchT = 0;
     snitch.snitchMeta = null;
+    if (CBZ.prisonBrain) CBZ.prisonBrain.dropReport(snitch, "crew");
     addGangStanding(gang, -3);
 
     if ((p.nerve || 0) > ((snitch.personality && snitch.personality.nerve) || 0.4) + 0.18) {
@@ -5040,15 +5063,22 @@
     const playerKill = killer && CBZ.playerChar && killer.group === CBZ.playerChar.group;
     if (playerKill && CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(victim, {});
     else if (!opts.noDrop && CBZ.addPack) CBZ.addPack(victim.group.position.x, victim.group.position.z, 6);
-    // leadership passes to a surviving gang-mate — and the crew's morale
-    // breaks: they scatter in panic for a few seconds
+    // THE CLIQUE'S NERVE (CBZ.brain.morale). This used to send EVERY living
+    // member of a dead shotcaller's set, anywhere in the compound, into a
+    // 3.5 s flee on the same frame — a man across the yard who never saw it
+    // bolted with the rest. Now the death is a hit on the clique's morale (the
+    // leader's the heaviest), and the men who were IN it and whose own nerve
+    // breaks run for their houses; the steady ones hold.
+    if (CBZ.prisonBrain) {
+      CBZ.prisonBrain.memberDown(victim, killer, true);
+      const byInmate = killer && killer.group && !(CBZ.playerChar && killer.group === CBZ.playerChar.group);
+      if (byInmate && victim.gang >= 0 && killer.gang !== victim.gang && CBZ.npcs.indexOf(killer) >= 0) answerFor(victim, killer, 1);
+    }
+    // leadership passes to a surviving gang-mate
     if (victim.isLeader && victim.gang >= 0) {
       victim.isLeader = false;
       const heir = CBZ.npcs.find((m) => m.gang === victim.gang && alive(m) && m !== victim);
       if (heir) { heir.isLeader = true; leaders[victim.gang] = heir; }
-      for (const m of CBZ.npcs) {
-        if (m.gang === victim.gang && alive(m)) { m.aiState = "flee"; m.fleeT = 3.5; m.foe = null; }
-      }
     }
     // A DEATH HAS A SURFACE ALREADY, AND IT IS NOT A HINT LINE. city/killfeed.js
     // owns the ONE sanctioned popup in this game (engine-systems.md), and every
@@ -5078,7 +5108,7 @@
   function down(actor, by, dir) {
     const tough = actor.ratings ? actor.ratings.toughness : 50;
     // fists rarely kill a grown man (3%); steel is what puts one in the ground
-    const lethal = by && by._shankOut ? 0.22 : 0.03;
+    const lethal = by && (by._shankOut || ((by._steelT || 0) > 0 && carriesShank(by))) ? 0.22 : 0.03;
     if (rng() < lethal * (1.2 - tough / 200)) { kill(actor, by); return; }
     credit(by, "knockdowns");
     credit(actor, "downs");
@@ -5098,15 +5128,15 @@
     // a yard with a memory feels like from the inside.
     if (by && by !== CBZ.player) {
       addBeef(actor, by, 14);
-      // the two of his own standing closest saw it; the rest of the yard did not
-      if (actor.gang >= 0) {
-        let told = 0;
-        for (const m of nearbyNpcs(actor, 8, _crewNear)) {
-          if (told >= 2) break;
-          if (m !== actor && alive(m) && m.gang === actor.gang && m.gang !== by.gang && dist(m, actor) < 8) { addBeef(m, by, 5); told++; }
-        }
-      }
+      // HIS PEOPLE ANSWER, AND HOW HARD IS PROPORTIONAL (CBZ.brain.social.
+      // retaliate): a man put down by fists gets his crew squaring up; a man
+      // put down by steel can get steel back. It used to book the same +5 beef
+      // on the nearest two whatever had happened.
+      // (a screw's baton is the law's business, not a crew's: no riot over it)
+      if (actor.gang >= 0 && by.gang !== actor.gang && by.kind !== "guard" && by.kind !== "warden") answerFor(actor, by, by._shankOut || (by._steelT || 0) > 0 ? 0.85 : 0.5);
     }
+    // his clique's nerve takes it (the shotcaller down is the big one)
+    if (CBZ.prisonBrain) CBZ.prisonBrain.memberDown(actor, by, false);
     if (actor.gang >= 0 && by === CBZ.player) addGangStanding(actor.gang, -14);
     if (by === CBZ.player) addBuzz("fear", 12, actorName(actor));
   }
@@ -5146,7 +5176,17 @@
     if (f.hp == null) f.hp = f.maxHp || 100;
     if (n._boxFoe !== f) { n._boxFoe = f; credit(n, "fights"); }
     // damage = base swing × attacker's fighting edge × defender's toughness × where it landed
-    f.hp -= ((guardN ? 7 : 4) + rng() * (guardN ? 4 : 5)) * (0.55 + nf / 80) * (1 - ft / 320) * res.dmgMul;
+    // STEEL: a man who came for this answer with a blade in his pocket uses it
+    const steel = (n._steelT || 0) > 0 && carriesShank(n) ? 2.4 : 1;
+    f.hp -= ((guardN ? 7 : 4) + rng() * (guardN ? 4 : 5)) * (0.55 + nf / 80) * (1 - ft / 320) * res.dmgMul * steel;
+    // every blow shakes the man who takes it (his nerve, not his hp)
+    if (CBZ.brain && CBZ.brain.morale && f._brain) CBZ.brain.morale.rattle(f, steel > 1 ? 0.35 : 0.12);
+    // THE FIRST BLOW of a beef is when his people notice: a glare, a shove
+    // (proportional: a punch never brings a blade)
+    if (!guardF && f.gang >= 0 && (CBZ.game.elapsed || 0) - (f._retAt || -1e9) > 6) {
+      f._retAt = CBZ.game.elapsed || 0;
+      answerFor(f, n, steel > 1 ? 0.7 : 0.2);
+    }
     if (guardF) f.alert = 2.5;
     // BEING HIT IS A REASON. This is where most of the yard's beef is booked,
     // and it is why violence here comes back around: the man on the receiving
@@ -5192,9 +5232,11 @@
     if ((n.reportedPlayerT || 0) > 0) {
       n.reportedPlayerT = Math.max(0, n.reportedPlayerT - dt);
       if (n.reportedPlayerT <= 0) clearKnownReport(n);
-      else if (n.aiState === "wander" && playerDist(n) < 7 && rng() < 0.012) {
+      else if (n.aiState === "wander" && !n._propSeat && playerDist(n) < 7 &&
+          (CBZ.game.elapsed || 0) > (n._nervT || 0) && rng() < 0.012) {
         n.aiState = "flee";
         n.fleeT = 1.6 + rng() * 1.8;
+        n._nervT = (CBZ.game.elapsed || 0) + 8;          // one bolt, then he holds his nerve a while
         emote(n, "!");
       }
     }
@@ -5211,6 +5253,20 @@
       const is = CBZ.intimidate.think(n, dt);
       if (is != null) return is;
     }
+    // CUFFED, ROUTING, OR ANSWERING A SCREW'S ORDER (systems/brain_prison.js):
+    // the brain's answer — comply / flee / keep swinging, held for a dwell —
+    // owns him until it is over
+    if (CBZ.prisonBrain) {
+      const lw = CBZ.prisonBrain.inmateThink(n, dt);
+      if (lw != null) return lw;
+      // A GUN IS OUT (brain_prison.js 5c): whoever is set on the player —
+      // however he got set, including files that write huntPlayer directly —
+      // answers the gun through the brain before the hunt below may walk him
+      // at it. Only a blade in its window comes through (returns null).
+      const gw = CBZ.prisonBrain.gunThink ? CBZ.prisonBrain.gunThink(n, dt) : null;
+      if (gw != null) return gw;
+    }
+    if ((n._steelT || 0) > 0) n._steelT -= dt;
 
     // GANG RETALIATION: hunting the player down (set by provokeGang).
     //
@@ -5336,7 +5392,8 @@
         const blows = n.jumpBlows;
         const r = rng();
         let kind = "", kick = null;
-        if (stabbing) kind = "stab";
+        if (n._huntStyle === "shove") { kind = "shove"; n.huntPlayer = Math.min(n.huntPlayer, 0.5); n._huntStyle = null; }
+        else if (stabbing) kind = "stab";
         else if (closed && r < 0.22) kind = "headbutt";
         else if (closed && r < 0.46) kind = "elbow";
         else if (closed && r < 0.60) kick = "knee";
@@ -5373,6 +5430,7 @@
     // he broke off (or the hunt timed out): the blow count and his one
     // takedown both reset, so "once" means once per fight and not once ever
     if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; cutSwing(n); if (n.char) n.char.fightStance = false; }
+    n._huntStyle = null;
 
     // DEFEND: once you've joined a gang, your crew jumps whoever's hunting you
     if (CBZ.player.gang != null && n.gang === CBZ.player.gang && n.aiState !== "fight") {
@@ -5394,8 +5452,14 @@
     }
 
     if (n.aiState === "wander" && n.role !== "merchant" && n.role !== "dealer" && CBZ.playerArmed && CBZ.playerArmed()) {
+      // A GUN IN THE YARD. This rolled 2.8% PER THINK for every man within
+      // 8 m, so a crowd near an armed player flickered wander/flee/wander and
+      // a man on a bench stood, ran, came back and sat, over and over. Each
+      // man now reads the threat through the brain (his nerve, his crew, his
+      // wounds) and holds what he decided for a couple of seconds; a seated
+      // man only gets up for a gun that is close.
       const d = Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z);
-      if (d < 8 && rng() < 0.028) { n.aiState = "flee"; n.fleeT = 2.4 + rng() * 2; emote(n, "!"); }
+      if (d < (n._propSeat ? 4 : 8) && CBZ.prisonBrain) CBZ.prisonBrain.armedNear(n, d);
     }
     considerPlayerApproach(n, dt);
 
@@ -5632,6 +5696,7 @@
           if (mode === "snitch") {
             target.memory = null;
             target.snitchHeat = 0; target.snitchT = 0; target.snitchMeta = null;
+            if (CBZ.prisonBrain) CBZ.prisonBrain.dropReport(target, "crew");
             if ((p.nerve || 0.5) + (p.loyalty || 0.5) * 0.35 > ((target.personality && target.personality.nerve) || 0.45) + 0.12 || rng() < 0.45) {
               target.aiState = "flee"; target.fleeT = 2.4 + rng() * 2.2; target.foe = null;
               emote(n, ""); emote(target, "!");
@@ -5679,30 +5744,14 @@
         if (g) n.target.set(g.group.position.x, 0, g.group.position.z);
         if (!g || dist(n, g) < 2.5 || n.snitchT <= 0) {
           const amount = n.snitchHeat || 12;
-          const reportMeta = n.snitchMeta || { copCrime: n.snitchCop };
-          let lead = null;
-          // WHAT A RAT ACTUALLY SAYS TO A SCREW. This is the beat the whole
-          // snitch system turns on and it had no output at all: a dropped
-          // caption. Overhearing it IS how you find out who did it
-          // (markPlayerReported -> sawItHappen -> learnSnitch), so the line and
-          // the knowledge are the same event rather than a chip and a number.
-          const spot = n.reportedPlayerLastKnown || (reportMeta && reportMeta.lastKnown) || null;
-          const where = spot ? nearestLandmark(spot.x, spot.z) : null;
-          if (CBZ.recordWitnessReport) {
-            lead = CBZ.recordWitnessReport(amount, reportMeta, n, g);
-            markPlayerReported(n, amount, reportMeta, g, lead);
-            say(n, n.snitchCop ? "I want to make a complaint." : (where ? `He was by the ${where}.` : "It was him. I saw it."), null, 1.8);
-          } else if (n.snitchCop) {
-            CBZ.addComplaint && CBZ.addComplaint(amount * 0.55);
-            markPlayerReported(n, amount, reportMeta, g, null);
-            say(n, "I want to make a complaint.", null, 1.8);
-          } else {
-            CBZ.addHeat && CBZ.addHeat(amount * 0.78);
-            CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 12);
-            CBZ.game.snitchReports = (CBZ.game.snitchReports || 0) + 1;
-            markPlayerReported(n, amount, reportMeta, g, null);
-            if (g) { g.alert = 1.4; g.hunt = 2.2; }
-            say(n, where ? `Try the ${where}.` : "That way. He went that way.", null, 1.8);
+          const reportMeta = Object.assign({}, n.snitchMeta || {}, { copCrime: !!n.snitchCop || !!(n.snitchMeta && n.snitchMeta.copCrime) });
+          // THE REPORT LANDS THROUGH THE BRAIN (systems/brain_prison.js
+          // onReport -> playerReported below): a report the brain was holding
+          // for this walk is filed now; any other snitch run lands the same way.
+          const PBr = CBZ.prisonBrain;
+          if (!(PBr && PBr.fileReport(n, g))) {
+            if (PBr) PBr.reportNow(n, g, amount, reportMeta);
+            else playerReported(n, amount, reportMeta, g);
           }
           n.aiState = "flee"; n.fleeT = 2.0 + rng() * 2; n.snitchHeat = 0; n.snitchCop = false; n.snitchMeta = null;
         }
@@ -5716,6 +5765,7 @@
           if (other === n || !alive(other)) continue;
           if (other.aiState === "snitch" && dist(n, other) < 9 && other.gang !== n.gang) {
             other.aiState = "flee"; other.fleeT = 2.8; other.snitchT = 0; other.snitchHeat = 0;
+            if (CBZ.prisonBrain) CBZ.prisonBrain.dropReport(other, "crew");
             other.snitchMeta = null;
             emote(n, ""); emote(other, "!");
             addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
@@ -5823,10 +5873,37 @@
       }
       case "flee": {
         n.fleeT -= dt;
-        // sprint to a random far corner of the (now much bigger) compound
-        if (n.aiTimer <= 0) { n.aiTimer = 0.6; n.target.set((rng() - 0.5) * 84, 0, 6 + rng() * 110); }
-        if (n.fleeT <= 0) n.aiState = "wander";
+        // ONE PLACE TO RUN TO, PICKED ONCE. This re-rolled a random far corner
+        // every 0.6 s, so a fleeing man zig-zagged across the yard. Whatever
+        // aimed him (away from a screw, away from a gun) is kept if it is a
+        // real distance off; otherwise one far corner, held until he is there.
+        const gp = n.group.position;
+        if (n._fleeX == null) {
+          const tx = n.target.x, tz = n.target.z;
+          if (Math.hypot(tx - gp.x, tz - gp.z) > 4) { n._fleeX = tx; n._fleeZ = tz; }
+          else { n._fleeX = (rng() - 0.5) * 84; n._fleeZ = 6 + rng() * 110; }
+        } else if (Math.hypot(n._fleeX - gp.x, n._fleeZ - gp.z) < 1.5) {
+          n._fleeX = (rng() - 0.5) * 84; n._fleeZ = 6 + rng() * 110;
+        }
+        n.target.set(n._fleeX, 0, n._fleeZ);
+        if (n.fleeT <= 0) { n.aiState = "wander"; n._fleeX = n._fleeZ = null; }
         return n.baseSpeed * 1.7;
+      }
+      case "shoveAt": {
+        // HIS CREW'S HAND IN YOUR CHEST: walk up to the man who put one of
+        // ours down, shove him (act.verb "shove"), walk off
+        const t = n._shoveAt;
+        n._shoveT = (n._shoveT || 0) - dt;
+        if (!alive(t) || n._shoveT <= 0) { n.aiState = "wander"; n._shoveAt = null; n.aiTimer = 0.5 + rng(); break; }
+        n.target.set(t.group.position.x, 0, t.group.position.z);
+        if (dist(n, t) < 1.3) {
+          const B = CBZ.brain;
+          if (!(B && B.act && B.act.verb("shove", n, t)) && CBZ.prisonBrain) CBZ.prisonBrain.shove(t, n);
+          if (CBZ.npcStare) CBZ.npcStare(n, 2.5, t.group.position);
+          n.aiState = "wander"; n._shoveAt = null; n.aiTimer = 1.2 + rng();
+          return 0;
+        }
+        return n.baseSpeed * 1.1;
       }
       case "escape": {
         const ez = (CBZ.WORLD && CBZ.WORLD.exit.z) || 52;
@@ -5915,6 +5992,7 @@
       n.isLeader = false; initActor(n);
     }
     _hunters.length = 0; _maxHuntersSeen = 0; _huntStarts = 0; _huntRefused = 0;
+    if (CBZ.prisonBrain) CBZ.prisonBrain.reset();
     // every run is an arrival; prisontiers.js re-stamps this (and carries the
     // yard's memory of you) when the run is a transfer
     CBZ.game.newFish = freshNewFish();
@@ -5973,22 +6051,67 @@
       noteGangIncident(victim, "attack", Math.max(3, Math.min(8, dur * 0.42)), { skipStanding: true, skipDebt: true, source: "fight", noResponders: true });
       const want = opts.crew != null ? opts.crew : 2;
       if (want > 0 && victim.group) {
-        const near = [];
-        for (const m of nearbyNpcs(victim, 12, _crewNear)) {
-          if (m === victim || !alive(m) || m.gang !== victim.gang || m.role === "merchant" || m.role === "dealer") continue;
-          if (m.aiState === "fight" || m.aiState === "snitch") continue;
-          const dv = dist(m, victim);
-          if (dv > 12 || playerDist(m) > 16) continue;
-          if (heldInCell(m)) continue;     // behind his own grille: he heard it, he can't reach it
-          near.push({ m, d: dv });
-        }
-        near.sort((a, b) => a.d - b.d);
-        for (let i = 0; i < near.length && i < want; i++) {
-          if (requestHunt(near[i].m, dur * 0.75, "crew")) started++;
-        }
+        // HOW BAD WAS IT: what came off him (or his life), or the words that
+        // started it. The brain turns that into who of his answers and how —
+        // a shove gets glares and a shove back, a stabbing gets men coming.
+        const drop = Math.max(0, hpWas - hpNow) / (victim.maxHp || 100);
+        const harm = victim.dead ? 1 : struck ? Math.min(1, 0.18 + drop * 2.6) : 0.22;
+        started += answerFor(victim, CBZ.player, harm, want, dur);
       }
     }
     return started;
+  }
+
+  /* HIS CLIQUE ANSWERS — CBZ.brain.social.retaliate picks who and how hard
+     (glare | shove | fight | weapon); this plays it in the yard. At most
+     `max` men actually come (fight/weapon), the rest look or step in with a
+     hand. Returns how many came at the aggressor. */
+  function carriesShank(n) {
+    const items = n && n.loadout && n.loadout.items;
+    return !!(items && (items.indexOf("Shiv") >= 0 || items.indexOf("Shank") >= 0));
+  }
+  function answerFor(victim, aggressor, harm, max, dur) {
+    const PBr = CBZ.prisonBrain;
+    if (!PBr || !victim || !aggressor || victim.gang < 0) return 0;
+    const isP = aggressor === CBZ.player;
+    const list = PBr.retaliate(victim, aggressor, harm);
+    const cap = max != null ? max : 2;
+    const ap = isP ? CBZ.player.pos : aggressor.group.position;
+    let came = 0, shoved = 0;
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i].actor, lvl = list[i].level;
+      if (!alive(m) || m.cuffed || (m._routT || 0) > 0 || m._lawBy || m.role === "merchant" || m.role === "dealer") continue;
+      if (m.aiState === "fight" || m.aiState === "snitch" || heldInCell(m)) continue;
+      const d = Math.hypot(ap.x - m.group.position.x, ap.z - m.group.position.z);
+      if (d > 16) continue;
+      if (lvl === "avoid") {
+        // he would have come — at a GUN he does not (CBZ.brain.social.
+        // retaliate): out of its line, the grudge kept for another day
+        if (isP) {
+          m.playerGrudge = Math.min(14, (m.playerGrudge || 0) + 2);
+          if (CBZ.prisonBrain && CBZ.prisonBrain.gunDecide) CBZ.prisonBrain.gunDecide(m, true);
+        } else addBeef(m, aggressor, 4);
+        continue;
+      }
+      if (lvl === "glare") {
+        if (CBZ.npcStare) CBZ.npcStare(m, 2.2 + rng() * 1.5, isP ? null : ap);
+        if (isP) m.playerGrudge = Math.min(14, (m.playerGrudge || 0) + 1); else addBeef(m, aggressor, 2);
+      } else if (lvl === "shove" || came >= cap) {
+        if (shoved >= 1) { if (CBZ.npcStare) CBZ.npcStare(m, 2.5, isP ? null : ap); continue; }
+        shoved++;
+        if (isP) { if (requestHunt(m, 2.5, "crew")) m._huntStyle = "shove"; }
+        else { m.aiState = "shoveAt"; m._shoveAt = aggressor; m._shoveT = 5; addBeef(m, aggressor, 4); }
+      } else {
+        came++;
+        if (lvl === "weapon") m._steelT = 25;
+        if (isP) {
+          if (requestHunt(m, (dur || 12) * (lvl === "weapon" ? 1 : 0.75), "crew")) {
+            if (lvl === "weapon") m.playerGrudge = Math.max(m.playerGrudge || 0, 6);
+          } else came--;
+        } else startFight(m, aggressor);
+      }
+    }
+    return came;
   }
 
   /* A GUARD SAW YOU THROW THE FIRST PUNCH. LAW owns what happens next
@@ -6035,6 +6158,34 @@
     n._snubs = 0;
     return requestHunt(n, secs || 6, "snub");
   }
+
+  /* WHAT A RAT ACTUALLY SAYS TO A SCREW, and what it costs you. This is the
+     beat the whole snitch system turns on. Overhearing it IS how you find out
+     who did it (markPlayerReported -> sawItHappen -> learnSnitch), so the line
+     and the knowledge are the same event. Called from the brain's onReport
+     (systems/brain_prison.js), the one place a witness report becomes heat. */
+  function playerReported(n, amount, reportMeta, g) {
+    reportMeta = reportMeta || {};
+    const spot = n.reportedPlayerLastKnown || reportMeta.lastKnown || null;
+    const where = spot ? nearestLandmark(spot.x, spot.z) : null;
+    if (CBZ.recordWitnessReport) {
+      const lead = CBZ.recordWitnessReport(amount, reportMeta, n, g);
+      markPlayerReported(n, amount, reportMeta, g, lead);
+      say(n, reportMeta.copCrime ? "I want to make a complaint." : (where ? `He was by the ${where}.` : "It was him. I saw it."), null, 1.8);
+    } else if (reportMeta.copCrime) {
+      CBZ.addComplaint && CBZ.addComplaint(amount * 0.55);
+      markPlayerReported(n, amount, reportMeta, g, null);
+      say(n, "I want to make a complaint.", null, 1.8);
+    } else {
+      CBZ.addHeat && CBZ.addHeat(amount * 0.78);
+      CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 12);
+      CBZ.game.snitchReports = (CBZ.game.snitchReports || 0) + 1;
+      markPlayerReported(n, amount, reportMeta, g, null);
+      if (g) { g.alert = 1.4; g.hunt = 2.2; }
+      say(n, where ? `Try the ${where}.` : "That way. He went that way.", null, 1.8);
+    }
+  }
+  CBZ.prisonPlayerReported = playerReported;   // systems/brain_prison.js's onReport calls it
 
   function sendNpcToSnitch(n, amount, meta) {
     if (!alive(n) || n.role === "merchant" || n.role === "dealer") return false;

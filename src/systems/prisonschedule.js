@@ -147,6 +147,12 @@
        systems/prisontiers.js mutates `from`/`cells`/`home`/`pa` in place per
        regime, and the plan reads the new numbers on the next question. ---- */
   const PLAN = CBZ.dayPlan.define("prison", BLOCKS, { enabled: on });
+  /* ...AND THE SAME TABLE IS EVERY INMATE'S ROUTINE IN CBZ.brain.needs, so
+     brain.needs.current(inmate) (and brain.tick's routine) answers with the
+     prison's own block — `activity` is the block id. Handed over by
+     reference like the plan, so prisontiers' regime edits land in both. */
+  for (let i = 0; i < BLOCKS.length; i++) if (BLOCKS[i].activity == null) BLOCKS[i].activity = BLOCKS[i].id;
+  if (CBZ.brain && CBZ.brain.needs) CBZ.brain.needs.define("inmate", BLOCKS);
   function hourNow() { return PLAN.hour(); }
   function daySecs() { return PLAN.dayLength(); }
   function secsPerHour() { return PLAN.hourLength(); }

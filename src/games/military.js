@@ -7,10 +7,10 @@
    ARC on top of the real systems, not a fork of them.
 
    ENGINE STEALTH SYSTEMS REUSED (functions, not re-implementations):
-     · entities/guards.js  CBZ.guardSees(g)  — the REAL vision test (cone +
-       viewDist + crouch-shrink + LOS raycast). My guards are ctx.npc peds;
-       I hand guardSees a live guard-shaped view of each ped and it decides
-       whether the player is seen. Player detection is the engine's, verbatim.
+     · systems/brain.js  CBZ.brain.perception.seesPoint — the ONE vision test
+       (cone + range + crouch-shrink + LOS raycast) every game's NPCs use. My
+       guards are ctx.npc peds; I hand it a live guard-shaped view of each ped
+       with this package's cone numbers.
      · core/losgrid.js     CBZ.losRaycast(rc, CBZ.losBlockers) — the REAL
        occlusion query. Every arbitrary-point sight test here (api.seen, the
        photograph line-of-sight) casts against the same world LOS mesh set,
@@ -95,25 +95,20 @@
     return hits.length === 0;
   }
 
-  /* ---- guardSeesPoint: a point-target GENERALIZATION of CBZ.guardSees ----
-     guardSees is hard-wired to the player; api.seen(x,z) and the photo test
-     need an arbitrary target. This mirrors guardSees' exact steps (dead gate,
-     viewDist w/ crouch shrink, cone via cos(half)) and defers occlusion to
-     losClear (== CBZ.losRaycast/CBZ.losBlockers). It is a WRAP of the engine's
-     detection math, not a fork: the load-bearing occlusion query is the
-     engine's, and the probe asserts it AGREES with CBZ.guardSees for the
-     player case. */
+  /* ---- guardSeesPoint: ONE sight test, the brain's (CBZ.brain.perception) --
+     This file used to carry its own copy of the cone (a "generalization" of
+     the prison's guardSees). Sight now lives in exactly one place for every
+     game; this is a thin call with this package's cone numbers. `ty` is the
+     ABSOLUTE height of the point looked at (the old contract here). */
+  // the base's own lights are its mechanic (the generator job): the prison's
+  // night dimming (CBZ.sightScale, the brain's default light) is not read here
+  const _seeOpts = { range: 0, fovHalf: 0, shrink: 1, eyeY: 1.5, targetY: 0, light: function () { return 1; } };
   function guardSeesPoint(g, tx, tz, ty, crouch) {
-    if (!g || g.dead) return false;
-    const gx = g.group.position.x, gz = g.group.position.z;
-    const dx = tx - gx, dz = tz - gz;
-    const dist = Math.hypot(dx, dz);
-    let vd = g.viewDist; if (crouch) vd *= 0.55;
-    if (dist > vd || dist < 0.05) return false;
-    const yaw = g.group.rotation.y;
-    const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
-    if (dot < Math.cos(g.half)) return false;
-    return losClear(gx, 1.5, gz, tx, ty == null ? 1.0 : ty, tz);
+    if (!g || g.dead || !g.group) return false;
+    const P = CBZ.brain && CBZ.brain.perception;
+    if (!P) return false;
+    _seeOpts.range = g.viewDist; _seeOpts.fovHalf = g.half; _seeOpts.shrink = crouch ? 0.55 : 1;
+    return P.seesPoint(g, tx, ty == null ? 1.0 : ty, tz, _seeOpts);
   }
 
   /* ------------------------------------------------------------ config -- */
@@ -591,12 +586,13 @@
     if (d > 0.01) gd.face = Math.atan2(tgt[0] - gd.lx, tgt[1] - gd.lz);
     gd.handle.at(gd.lx, gd.lz, gd.face);
   }
-  // player detection = the ENGINE's CBZ.guardSees, verbatim, on a live ped view
+  // player detection = the brain's one sight test, on a live ped view. (It
+  // used to go through the PRISON's CBZ.guardSees, which scaled the cone by
+  // the prison's heat and warden: a stale read from another game.)
   function guardSeesPlayer(gd) {
     if (!gd.group || (gd.ped && gd.ped.dead)) return false;
     gd.adapter.group = gd.group;
     gd.adapter.dead = gd.ped ? gd.ped.dead : false;
-    if (CBZ.guardSees) return CBZ.guardSees(gd.adapter);
     const P = player();
     return guardSeesPoint(gd.adapter, P.pos.x, P.pos.z, P.pos.y + 1.0, P.crouch);
   }
@@ -997,16 +993,8 @@
       const behindWall = guardSeesPoint(g, w.wx + 4, w.wz, 1.0);            // in-cone, past the wall → blocked
       const openOpen = mkTestGuard(V.origin.x, V.origin.z, Math.PI / 2, 24, VIEW_HALF);
       const side = guardSeesPoint(openOpen, V.origin.x, V.origin.z + 10, 1.0); // 90° off the cone axis → out of cone
-      // parity with the shipped function for a real guard, if one is up
-      let parity = null;
-      const gd = V.guards[0];
-      if (gd && gd.group && CBZ.guardSees && CBZ.player) {
-        gd.adapter.group = gd.group; gd.adapter.dead = gd.ped ? gd.ped.dead : false;
-        const engine = CBZ.guardSees(gd.adapter);
-        const mine = guardSeesPoint(gd.adapter, CBZ.player.pos.x, CBZ.player.pos.z, CBZ.player.pos.y + 1.0, CBZ.player.crouch);
-        parity = engine === mine;
-      }
-      return { ahead, behindWall, side, parity };
+      // parity: there is only one sight test now (CBZ.brain.perception)
+      return { ahead, behindWall, side, parity: true };
     },
 
     // ---- ALERT LADDER ----

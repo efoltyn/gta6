@@ -1065,7 +1065,7 @@
     const AT = CBZ.aiTactics;
     let sees = true;
     if (AT) {
-      const los = AT.updateLOS(a, tx, tz, dt, { range: Math.max(30, p.hi + 8), giveUpT: 3.5, rng: rng });
+      const los = AT.updateLOS(a, tx, tz, dt, { range: Math.max(30, p.hi + 8), giveUpT: 3.5, rng: rng, target: tgt });
       sees = los.sees;
       if (los.justLost && !(a.searchT > 0)) AT.searchStart(a, { x: a.lkx, z: a.lkz }, { dur: 4 + rng() * 3, rng: rng });
       if (sees && a.searchT > 0) { a.searchT = 0; a.searchGoal = null; a._sweepGoal = null; }

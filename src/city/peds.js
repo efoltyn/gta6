@@ -805,7 +805,7 @@
     if (ped._joyT > 0 && ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; ped._joyT = 0; }
     if (ped.baseSpeed) ped.baseSpeed = Math.max(0.45, ped.baseSpeed * 0.6);
     ped._digs = null; ped._unit = null; ped._jobLot = null; ped._clockedIn = false;
-    if (ped._needs) { ped._needs.rent = 1; ped._needs.kRent = 0; }   // a vagrant carries no rent
+    if (ped._needs) { ped._needs.rent = 1; if (ped._needsK) ped._needsK.rent = 0; }   // a vagrant carries no rent
     redressWhenUnseen(ped);
     return true;
   }
@@ -2388,6 +2388,9 @@
     // disposing the roster. The shared NPC-life layer drops its cabin/actor
     // references here so a rebuilt city never points at disposed character rigs.
     if (CBZ.npcLife && CBZ.npcLife.resetCity) CBZ.npcLife.resetCity();
+    // the street's brain registrations go with the roster (no dangling actors
+    // in the brain's spatial hash / morale groups after a rebuild)
+    if (CBZ.cityBrain) CBZ.cityBrain.reset();
     for (const p of CBZ.cityPeds) {
       // HOME-BOND release (H2): a recycled/wiped body must let go of its leased
       // unit so the next city's tenants aren't blocked. Prefer the housing.js
@@ -2550,32 +2553,25 @@
     }
   };
 
-  // ---- CROWD PANIC: a loud, scary event (gunfire, explosion, a body dropping)
-  //      sends a shockwave of fear through the nearby crowd — people scatter,
-  //      scream, and the panic ripples outward as fleeing peds alarm the next
-  //      ring out. Cheaper + punchier than cityAlarm: it forces a FLEE state and
-  //      a clear escape heading away from the blast so the street empties fast,
-  //      GTA-style. `power` scales radius + how hard they bolt. ----
+  // ---- CROWD PANIC: a loud, scary event (gunfire, explosion, a body dropping).
+  //      Everyone in range gets the fear/alarm the rest of the city reads, and
+  //      the event becomes a NOISE through CBZ.brain (city/brain_city.js
+  //      hearBang): each body that hears it reacts when ITS OWN reaction delay
+  //      runs out (distance + nerve + a stable per-person offset), through
+  //      threat.respond — bolt, cower, freeze, film from a distance, square up.
+  //      That is the difference between a street that ripples outward from a
+  //      gunshot and one that flips every body on the same frame (the old loop
+  //      here called fleeFrom on the whole radius at once). A blast SEAT is the
+  //      one reflex: inside it even the fearless back off, with a 50-200 ms
+  //      startle, never a charge into a fresh fireball. `power` scales radius.
+  //      O(crowd) once per event, not per frame. ----
   let _lastPanicFrame = -1;
-  // `blast` (4th arg) marks an actual EXPLOSION (vs a body-drop). On a blast even
-  // the violent/raging back off the blast SEAT for a beat — nobody, however
-  // fearless, walks INTO a fresh fireball — so a bazooka never gets a suicidal
-  // charge. Without it the old behaviour stands (bold peds just get jumpy).
-  // STAYS LINEAR ON PURPOSE (PED_SCAN_GRID wave). Three independent reasons, any
-  // one of which is decisive: (1) the radius reaches 32m, and a 9-cells-a-side
-  // query touches more cells than the city has bodies; (2) it bolts people, and
-  // fleeFrom draws on the SEEDED rng — visiting the crowd in bucket order instead
-  // of roster order would reorder that stream, and determinism is doctrine;
-  // (3) it deliberately reaches bodies the steering index used to exclude. The
-  // scan is O(crowd) once per gunshot/blast, not per frame, so it is not the cost.
   CBZ.cityPanic = function (x, z, power, offender, blast) {
     power = power || 1;
     _audit.linearFallbackCalls++;
     _audit.linearVisited += CBZ.cityPeds.length;
     const radius = 16 + power * 10, r2 = radius * radius;
-    // close-in "blast danger" ring: inside this even the fearless retreat
-    const dangerR = blast ? (8 + power * 4) : 0, dangerR2 = dangerR * dangerR;
-    let scattered = 0;
+    let reached = 0;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited || p.staffPost) continue;
       const dx = p.pos.x - x, dz = p.pos.z - z, dd = dx * dx + dz * dz;
@@ -2584,51 +2580,45 @@
       p.alarmed = Math.max(p.alarmed, 5 + power * 3 * close);
       p.fear = Math.min(10, p.fear + (4 + power * 4) * close);
       if (offender && offender !== p && offender.pos) p.mem = p.mem || offender;
-      // a brief CRINGE: throw arms up / hunch away from the blast for a beat, like
-      // the jail crowd flinching at gunfire. reactions.js reads poseCower to drive
-      // it; even peds too bold to bolt visibly recoil. Scaled by proximity.
-      p.poseCower = Math.max(p.poseCower || 0, 0.5 + 0.8 * close);
-      // BLAST SEAT: anyone (even a violent ped or one raging at the player) bolts
-      // away from a fresh fireball they're standing on top of — never charge it.
-      if (blast && dd < dangerR2) {
-        p.rage = null;
-        fleeFrom(p, x, z);            // vetted away-heading (won't bolt through a wall)
-        p.fear = 10; scattered++;
-        continue;
-      }
-      // the meek & wary in range bolt right now; the bold just get jumpy
-      if (p.aggr < (A0().crook || 0.72) && !p.rage && p.state !== "fight") {
-        fleeFrom(p, x, z);            // vetted away-heading
-        scattered++;
+      if (blast && close > 0.55) p.rage = null;             // the blast SEAT: nobody charges a fireball
+      reached++;
+    }
+    // what was it? a blast; a gun going off (the offender holds one); or a body
+    // dropping / a scream — which startles, while the WITNESS path (cityCrime →
+    // cityTagWitnesses) carries the crowd's real answer to a killing.
+    const offArmed = offender && (offender.isPlayer || offender === CBZ.city.playerActor ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!offender.armed);
+    const kind = blast ? "explosion" : offArmed ? "gunshot" : "scream";
+    const heard = CBZ.cityBrain ? CBZ.cityBrain.hearBang(x, z, radius, kind, offender) : -1;
+    if (heard < 0) {
+      // no brain loaded (a stripped slice): the meek in range simply run
+      for (const p of CBZ.cityPeds) {
+        if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited || p.staffPost) continue;
+        const dx = p.pos.x - x, dz = p.pos.z - z;
+        if (dx * dx + dz * dz < r2 && p.aggr < (A0().crook || 0.72) && !p.rage) fleeFrom(p, x, z);
       }
     }
-    // a SINGLE punctuating scream on a genuinely scary event (gunfire / explosion
-    // / a body dropping caused this panic). Small chance even then, and the
-    // scream() helper enforces the hard city-wide cooldown — so a big panic is one
-    // scream, not a wall of noise. Only worth it when real fear actually landed.
-    if (scattered >= 2 && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.18) scream(); }
-    return scattered;
+    // a SINGLE punctuating scream on a genuinely scary event, small chance, and
+    // the scream() helper enforces the hard city-wide cooldown.
+    if (reached >= 2 && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.18) scream(); }
+    return reached;
   };
 
-  // tag everyone in sight of a crime as a witness who can phone it in (the
-  // ONLY way the player gets stars — RDR2 style). `sev` = crime weight.
-  // Also STAYS LINEAR: 30m is 8 cells a side (289 buckets) against a crowd of
-  // ~560, so the index would cost more than it saved — and a witness in a car or
-  // in a doorway is exactly the witness that matters. Per crime, not per frame.
-  CBZ.cityTagWitnesses = function (x, z, sev, type) {
-    _audit.linearFallbackCalls++;
-    _audit.linearVisited += CBZ.cityPeds.length;
+  // WITNESSES: a crime at (x,z) → CBZ.brain.social.crime (city/brain_city.js).
+  // The bodies that could SEE it (cone, range, walls) or HEAR it become
+  // witnesses and choose flee / film / report / intervene / cower by who they
+  // are; the calls that survive the street's omerta land as reports the CITY
+  // LAW router turns into stars (the ONLY way the player gets them). `perp`
+  // defaults to the player — an NPC's crime (a rampage, an NPC heist) MUST
+  // pass its NPC: the old tagger pinned every crime in earshot on the player.
+  CBZ.cityTagWitnesses = function (x, z, sev, type, perp) {
+    const who = perp || CBZ.city.playerActor;
+    if (CBZ.cityBrain && CBZ.cityBrain.crime(type, x, z, who, sev) >= 0) return;
+    // no brain loaded (a stripped slice): remember and fear, nobody calls
     const r2 = 30 * 30;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.vendor) continue;
       const dx = p.pos.x - x, dz = p.pos.z - z;
-      if (dx * dx + dz * dz < r2) {
-        p.mem = CBZ.city.playerActor;
-        if ((sev || 0) >= (p.witnessSev || 0)) p.witnessType = type;   // remember the WORST thing they saw, by name
-        p.witnessSev = Math.max(p.witnessSev || 0, sev);
-        p.alarmed = Math.max(p.alarmed, 5);
-        p.fear = Math.min(10, p.fear + 1.5);
-      }
+      if (dx * dx + dz * dz < r2) { p.mem = who; p.alarmed = Math.max(p.alarmed, 5); p.fear = Math.min(10, p.fear + 1.5); }
     }
   };
 
@@ -2760,6 +2750,10 @@
     }
     const wasArmed = !!ped.armed;
     ped.dead = true; ped.deadT = 0; ped.hp = 0;
+    // ONE BODY OF NERVE: the set / unit / crew / friend clique this person
+    // belonged to takes the loss (brain morale: shock, the leader term, the man
+    // beside him rattled). gangs.js reads morale.broken for the rout.
+    if (CBZ.cityBrain) CBZ.cityBrain.memberDown(ped);
     // FINITE POPULATION: a named rig just died → tick the city headcount DOWN.
     // Promoted crowd rigs (ped._crowd) die through HERE (they're real peds);
     // un-promoted ambient agents die through cityCrowdKill (crowd.js) — the two
@@ -3436,6 +3430,19 @@
       if (att && att !== ped && !att.dead) {
         const dk = Math.hypot(kin.pos.x - ped.pos.x, kin.pos.z - ped.pos.z);
         if (dk < 26) {
+          // the brain answers: a grudge is born (memory, decaying), and fight /
+          // flee / freeze is THIS person's own threat response to the attacker
+          const CB = CBZ.cityBrain;
+          if (CB && CB.adopt(ped)) {
+            CB.grudge(ped, att, 0.5);
+            const attArmed = att.isPlayer ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!att.armed;
+            if (CB.threat(ped, att, att.pos.x, att.pos.z, attArmed, false, "kin")) {
+              if (ped.rage === att && att.isPlayer && ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.15);
+              return true;
+            }
+            ped.fear = Math.min(10, ped.fear + 3); ped.alarmed = Math.max(ped.alarmed, 4);
+            return false;
+          }
           if (ped.aggr >= (B.bold || 0.5)) {
             ped.rage = att; ped.state = "fight"; ped.target.set(att.pos.x, 0, att.pos.z);
             if (att.isPlayer && ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.15);
@@ -3977,6 +3984,18 @@
     if (ped.ammo < 6) ped.ammo = 999;                          // crew never runs dry (they're on payroll)
     if (!P || P.dead) { ped.state = "walk"; ped.target.set(ped.pos.x, 0, ped.pos.z); ped.path = null; return; }
     const threat = companionThreat(ped);
+    // THE CREW HAS NERVE TOO (brain morale, group "crew:player"): lose enough
+    // of your people and a shaky one stops trading shots and falls back
+    // behind you, out of the line — until the fight turns (the brain's rally
+    // band) or it ends. Payroll buys loyalty, not immortality.
+    if (threat && !threat.dead && CBZ.cityBrain && CBZ.cityBrain.broken(ped)) {
+      const ax = P.pos.x - threat.pos.x, az = P.pos.z - threat.pos.z, al = Math.hypot(ax, az) || 1;
+      ped.state = "flee"; ped.path = null;
+      ped.target.set(P.pos.x + (ax / al) * 7, 0, P.pos.z + (az / al) * 7);
+      if (!ped._routSaid) { ped._routSaid = true; if (CBZ.citySay) CBZ.citySay(ped, "“Too many of them, falling back!”", null, 2.2); }
+      return;
+    }
+    ped._routSaid = false;
     if (threat && !threat.dead) {
       ped.state = "walk";
       faceTo(ped, threat.pos.x, threat.pos.z, 1.5);
@@ -4157,146 +4176,26 @@
     return best;
   }
 
-  // how willing is THIS witness to call it in, given WHERE the crime happened?
-  // 0..~1.2 propensity. Driven by: neighborhood (gang turf / "the hood" → omerta,
-  // people hate the cops), the ped's hardwired snitch trait, and personality.
-  function snitchPropensity(ped, x, z) {
-    let p = 0.45;
-    // base personality: the meek call cops (it's their only defence); brave/violent
-    // people handle it themselves or don't care. Snitch trait shifts hard.
-    p += (0.55 - ped.aggr) * 0.5;          // meek → more likely to phone it in
-    p += (ped.snitch - 0.3) * 0.9;         // dedicated snitch rats anywhere
-    p += Math.min(ped.fear, 8) * 0.04;     // scared people want the law NOW
-    // NEIGHBORHOOD: on gang turf almost nobody calls — no-snitch code, and they
-    // hate the police as much as the robber. A gang member NEVER rats their own.
-    const hoodGang = CBZ.cityGangOf ? CBZ.cityGangOf(x, z) : null;
-    if (hoodGang) {
-      p -= 0.55;                            // the hood doesn't call 911
-      if (ped.gang && ped.gang === hoodGang.id) p -= 1;   // omerta on home turf
-    }
-    // a gang member rats only a RIVAL, never the player/their own unless a true snitch
-    if (ped.gang && !(ped.snitch > 0.85)) p -= 0.35;
-    // wealthy / clean-area residents call fast (no hood gang nearby + money around)
-    if (!hoodGang && ped.wealth > 0.65) p += 0.2;
-    return p;
-  }
-
-  // BEGIN a report: the ped commits to phoning OR running to a cop. Sets the
-  // state-machine fields; the actual landing happens in tickReport().
-  function beginReport(ped, x, z) {
-    // SNITCH MOMENT (the street remembers): a witness nursing a real grudge
-    // against the player doesn't hide behind a phone — if a cop is on the block
-    // (~40u) they MARCH straight to them and point you out in person. Revenge
-    // beats the no-snitch code. (relPlayer is written by city/social.js.)
-    const rel = ped.relPlayer;
-    const vendetta = !!(rel && rel.grudge > 40 && ped.mem === CBZ.city.playerActor);
-    const cop = nearestCop(ped.pos.x, ped.pos.z, 90);
-    const dCop = cop ? Math.hypot(cop.pos.x - ped.pos.x, cop.pos.z - ped.pos.z) : 1e9;
-    // a cop close by → run and tell them in person (faster, dramatic); otherwise
-    // pull out a phone and dial 911 (a few seconds, interruptible).
-    if (cop && (vendetta ? dCop < 40 : (dCop < 45 && rng() < 0.7))) {
-      ped.reportState = "run"; ped.reportTarget = cop; ped.reportT = 16;   // hard cap
-      ped._vendetta = vendetta;                                            // lands as a point-out
-      showTell(ped, "");
-      if (vendetta && CBZ.citySay) CBZ.citySay(ped, "“Officer! OFFICER!”", "#ffd27b", 2.2);
-    } else {
-      ped.reportState = "phone"; ped.reportTarget = null;
-      ped.reportT = 2.6 + rng() * 2.2;                                     // dialing time
-      showTell(ped, "");
-      ped.speed = 0;   // stand and dial
-    }
-    // (no "👀 … saw that" narration toast — an ambient caption over the world
-    //  broke the fourth wall; the ped visibly bolting for a cop / dialing tells it)
-  }
-
-  // land the report: convert the witness's tag into actual stars (or punish an
-  // NPC offender). Clears the witness so they don't double-report.
-  function landReport(ped) {
-    const off = ped.mem;
-    const sev = ped.witnessSev || 8, type = ped.witnessType;
-    if (off === CBZ.city.playerActor) {
-      if (CBZ.cityReport) CBZ.cityReport(sev, { x: ped.pos.x, z: ped.pos.z, type: type });
-      if (ped._vendetta) {
-        // a grudge witness reached the officer: they stop, turn, and POINT you
-        // out in person. `posePoint` is the GESTURE WINDOW, and the rig hook it
-        // was written for is live: the per-frame tell block at the bottom of
-        // this file raises the arm for as long as the timer runs (move() ticks
-        // it down). With CITY_GESTURE_LEGIBILITY the body also HOLDS this
-        // facing for the whole window instead of turning once and walking off
-        // — the turn below is where the aim starts, not where it ends.
-        ped.posePoint = 1.4;
-        const P = CBZ.player;
-        if (P && !P.dead) faceTo(ped, P.pos.x, P.pos.z, 1.5);
-        if (CBZ.citySay) CBZ.citySay(ped, "“Right there. That's the one.”", "#ffd27b", 2.4);
-        CBZ.city && CBZ.city.note("" + ped.name + " pointed you out to the law!", 1.8);
-      } else {
-        CBZ.city && CBZ.city.note("" + ped.name + " reported you!", 1.5);
-      }
-    } else if (off && CBZ.cityNpcOffense) {
-      CBZ.cityNpcOffense(off, 14, "reported");
-    }
-    ped._vendetta = false;
-    ped.witnessSev = 0; ped.witnessType = null;
-    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
-    ped.callT = 8;            // won't immediately re-report
+  // THE WITNESS PIPELINE IS CBZ.brain's (city/brain_city.js). Who saw it, who
+  // calls, when the call lands and whether the player can still stop it are
+  // decided there: social.crime picks the witnesses by sight and hearing, the
+  // city's omerta thins the callers, brain_city shows the call (phone at the
+  // ear, shoulder turned / a run to the nearest cop) and the brain's onReport
+  // is the landing the CITY LAW router turns into stars. What stays HERE is
+  // the body: the gesture teardown every stopped or landed call runs.
+  function endReportVisual(ped) {
+    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0; ped._vendetta = false;
     clearTell(ped);
     glanceAt(ped, 0);         // give the head back (booked additive channel)
   }
-
-  // abort an in-progress report (scared off, hurt, lost the cop, fled too far)
+  CBZ.cityEndReportVisual = endReportVisual;
+  // stop a call: scared off, knocked out, killed, grabbed. Silences the brain's
+  // witness too, so a stopped call can never land later.
   function cancelReport(ped) {
-    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0; ped._vendetta = false;
-    clearTell(ped);
-    glanceAt(ped, 0);
+    if (CBZ.cityBrain) CBZ.cityBrain.cancelWitness(ped, "stopped");
+    if (ped.reportState) endReportVisual(ped);
   }
   CBZ.cityCancelReport = cancelReport;   // combat.js can stop a snitch by force
-
-  // advance an in-progress report each frame. Returns true if the ped is BUSY
-  // reporting (think() should let move() carry the run/dial out).
-  function tickReport(ped, dt) {
-    if (!ped.reportState) return false;
-    // if the witness no longer remembers a crime (scared into forgetting), drop it
-    if (!ped.mem || !(ped.witnessSev > 0)) { cancelReport(ped); return false; }
-    ped.reportT -= dt;
-    if (ped.reportState === "phone") {
-      ped.state = "film"; ped.speed = 0;               // frozen, phone up (reuse film pose)
-      // face roughly where the crime was (the player) for the tell to read
-      const P = CBZ.player;
-      if (P) {
-        const face = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
-        // SNITCH BODY LANGUAGE: nobody phones the police while staring the man
-        // down. They give you the SHOULDER — half turned away, talking low,
-        // checking back over it (the check is the per-frame glance in the tell
-        // block; this is the stance it glances FROM). Which shoulder is the
-        // body's own, not a coin flip: roleHash off the spawn point, so two
-        // clients turn the same man the same way with nothing sent between
-        // them, and he turns the same way every time he calls.
-        if (legible()) {
-          if (ped._snitchTurn == null) {
-            ped._snitchTurn = (roleHash(ped, 0x5117) < 0.5 ? -1 : 1) * (0.80 + roleHash(ped, 0x5118) * 0.34);
-          }
-          faceYaw(ped, face + ped._snitchTurn, 0.5);
-        } else faceYaw(ped, face, 0.5);
-      }
-      if (ped.reportT <= 0) { landReport(ped); return false; }
-      return true;
-    }
-    if (ped.reportState === "run") {
-      const cop = ped.reportTarget;
-      if (!cop || cop.dead) {                           // cop gone — find another or give up
-        const nc = nearestCop(ped.pos.x, ped.pos.z, 70);
-        if (nc) { ped.reportTarget = nc; } else { cancelReport(ped); return false; }
-      }
-      const c = ped.reportTarget;
-      ped.state = "walk";
-      ped.target.set(c.pos.x, 0, c.pos.z);
-      ped.speed = ped.baseSpeed * 2.0;
-      const d = Math.hypot(c.pos.x - ped.pos.x, c.pos.z - ped.pos.z);
-      if (d < 3.2 || ped.reportT <= 0) { landReport(ped); return false; }
-      return true;
-    }
-    return false;
-  }
 
   // ============================================================
   //  UNIVERSAL REACTIVITY — a believable, emergent reaction to the PLAYER, so the
@@ -4421,6 +4320,12 @@
     if (!ped._windup) return false;
     const P = CBZ.player;
     if (P.dead || !ped.target) { ped._windup = null; ped.poseAimBack = false; return false; }
+    // you drew while he was squaring up to beat you: fists do not walk at a gun
+    if (ped._windup === "beat" && !(ped.armed || ped._holster) && CBZ.cityHasGun && CBZ.cityHasGun()) {
+      ped._windup = null; ped.poseAimBack = false; ped.reactCD = 8;
+      ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z);
+      return true;
+    }
     ped.target.set(P.pos.x, 0, P.pos.z);
     faceTo(ped, P.pos.x, P.pos.z, 1.5);
     const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
@@ -4447,7 +4352,9 @@
     if (ped.approach) {
       if (dpl > 16) { ped.approach = null; return false; }   // you walked off — drop it
       // a timid approacher (not here to BEAT you) bails if you suddenly draw a gun
-      if (playerArmed && ped.approach !== "beat" && ped.aggr < (B.crook || 0.72)) {
+      // and a man walking up to BEAT you with his fists does not keep walking
+      // at a gun (CBZ.brain.threat: against a gun only a gun fights)
+      if (playerArmed && (ped.approach === "beat" ? !(ped.armed || ped._holster) : ped.aggr < (B.crook || 0.72))) {
         ped.approach = null; ped.reactCD = 6; ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); return true;
       }
       ped.path = null; ped.pause = 0;
@@ -4754,7 +4661,7 @@
       if (active && (ped._rampPanicT || 0) <= 0) {
         ped._rampPanicT = 1.2;
         if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.4, ped);
-        if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(ped.pos.x, ped.pos.z, 80, "active-shooter");
+        if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(ped.pos.x, ped.pos.z, 80, "active-shooter", ped);   // HIS crime, not the player's
       } else if (ped._rampPanicT > 0) ped._rampPanicT -= dt;
     } else {
       // nobody in reach — prowl toward the densest part of the map (the centre) to
@@ -4833,6 +4740,8 @@
   }
 
   // ---- the brain (time-sliced) ----
+  const _thinkCtx = { playerArmed: false, dpl: 0 };
+  const _panicAt = { x: 0, z: 0 };
   function think(ped, dt, active) {
     // a zip-tied companion is restrain.js's body, not the crew's: companionThink
     // would re-arm him and wipe the surrender/rage fields every tick, which is
@@ -4873,16 +4782,15 @@
     //      (or stands down if the target's gone) exactly once.
     if (ped._windup) { if (tickViolentWindup(ped, dt)) return; }
 
-    // ---- IN-PROGRESS WITNESS REPORT: a committed snitch is busy dialing / running
-    //      to a cop. The player can STOP it: get close with a gun out and a timid
-    //      witness panics, drops the phone and bolts (report dies). Otherwise the
-    //      report ticks toward landing. (tickReport returns true while still busy.)
-    if (ped.reportState) {
-      if (ped.reportState === "phone" && playerArmed && dpl < 6 && rng() < 0.5) {
-        cancelReport(ped); ped.fear = 10; ped.alarmed = Math.max(ped.alarmed, 5);
-        ped.state = "flee"; fleeFrom(ped, px, pz); return;       // scared off the call
-      }
-      if (tickReport(ped, dt)) return;
+    // ---- THE STREET BRAIN (city/brain_city.js → CBZ.brain): a bang this body
+    //      heard, a crime it witnessed, a call it is making, a reaction it is
+    //      still playing out. Each lands after THIS body's own reaction delay and
+    //      dwells before anything but a more urgent answer may replace it — the
+    //      crowd ripples instead of flipping on one frame. Returns true while it
+    //      owns the tick; a rage, a gunpoint or a rout below still outranks it.
+    if (CBZ.cityBrain) {
+      _thinkCtx.playerArmed = playerArmed; _thinkCtx.dpl = dpl;
+      if (CBZ.cityBrain.think(ped, dt, _thinkCtx)) return;
     }
 
     // ---- POINT-OUT HOLD: "Right there. That's the one." A point is a LINE,
@@ -4917,6 +4825,10 @@
     // ---- if currently raging at someone, keep engaging until they're gone ----
     if (ped.rage) {
       if (ped.rage.dead || (ped.rage.isPlayer && P.dead)) { ped.rage = null; }
+      // NOBODY WITHOUT A GUN WALKS AT A GUN (city/brain_city.js gunGate ->
+      // CBZ.brain.threat): whatever set him raging, the brain decides whether
+      // he may — a blade only close, while the gun reloads or points away.
+      else if (CBZ.cityBrain && CBZ.cityBrain.gunGate && CBZ.cityBrain.gunGate(ped)) return;
       else {
         ped.state = "fight";
         ped.target.set(ped.rage.pos.x, 0, ped.rage.pos.z);
@@ -5068,92 +4980,29 @@
     }
 
     // ---- being threatened (player aiming / hot / a witnessed crime nearby) ----
-    const threatened = ped.alarmed > 0 || (playerThreat && dpl < 14);
+    // ONE RUNNER SETS OTHERS RUNNING: a bystander with no threat of his own
+    // still reads the street — enough people bolting past him (the decaying
+    // panic field every flee raises) IS the threat, from where they came from.
+    const panicHere = (!ped.gang && !ped.guard && CBZ.cityPanicAt) ? CBZ.cityPanicAt(ped.pos.x, ped.pos.z) : 0;
+    const threatened = ped.alarmed > 0 || (playerThreat && dpl < 14) || panicHere > 0.9;
     if (ped._reactHold > 0) ped._reactHold -= dt;
-    if (ped._cowerT > 0) ped._cowerT -= dt;
-    if (ped._cowerCD > 0) ped._cowerCD -= dt;
-    if (threatened) {
-      // origin of the threat: a remembered offender if we have one, else the player
+    if (threatened && CBZ.cityBrain) {
+      // origin of the threat: a remembered offender if we have one, else the
+      // player if he's the hot one close by, else the panic's own centre.
       const memT = (ped.mem && !ped.mem.dead && ped.mem.pos) ? ped.mem : null;
-      const thx = memT ? memT.pos.x : px;
-      const thz = memT ? memT.pos.z : pz;
-      const dThreat = Math.hypot(ped.pos.x - thx, ped.pos.z - thz);
-      // OUTGUNNED. A bold man with empty hands does not walk up to somebody who
-      // is holding a gun. This branch used to send every bold/crook civilian
-      // who heard a shot straight at the shooter ("confront": walk to him at
-      // 1.7x) and every crook into a fistfight with a rifle. Only the truly
-      // violent, or someone holding a gun themselves, squares up to a gun.
-      const foeIsPlayer = !memT || memT === CBZ.city.playerActor || memT.isPlayer;
-      const foeArmed = foeIsPlayer ? playerArmed : !!memT.armed;
-      const outgunned = foeArmed && !ped.armed && ped.kind !== "security" && ped.aggr < (B.violent || 0.88);
-      if (bnd === "meek" || bnd === "wary" || outgunned) {
-        // COMMIT to a reaction. This used to re-roll film-vs-flee and re-route
-        // the escape on EVERY think (15 Hz): a wary ped flickered between a
-        // frozen phone pose and a sprint, and every flee re-ran the exit
-        // scorer's LOS raycasts, so people ran in little circles instead of
-        // away. A chosen reaction now plays out for a beat; only a watcher the
-        // threat is walking INTO is allowed to change its mind early.
-        const holding = ped._reactHold > 0 && (ped.state === "flee" || ped.state === "film" || ped._cowerT > 0);
-        const closing = ped.state === "film" && dThreat < 7;
-        if (!holding || closing) {
-          ped._cowerT = 0;
-          // COWER: right on top of the danger with the fear maxed, the first
-          // instinct is to drop and cover, not to sprint past the gun. A beat of
-          // hunched arms-over-head (reactions.js reads poseCower), then they run.
-          if (ped.fear >= 8 && dThreat < 5.5 && (ped._cowerCD || 0) <= 0 && rng() < 0.5) {
-            const hold = 1.3 + rng() * 1.1;
-            ped.state = "idle"; ped.speed = 0; ped.path = null;
-            ped.target.set(ped.pos.x, 0, ped.pos.z);
-            ped.pause = Math.max(ped.pause, hold);
-            ped.poseCower = Math.max(ped.poseCower || 0, hold);
-            ped._cowerT = hold; ped._reactHold = hold; ped._cowerCD = 10;
-          } else if ((bnd === "wary" || outgunned) && ped.fear < 7 && dThreat > (outgunned ? 15 : 9) && rng() < 0.5) {
-            // GAWK from a safe distance: phone up at it, and stay put a while
-            ped.state = "film"; ped.speed = 0;
-            faceTo(ped, thx, thz, 1.5);
-            ped._reactHold = 2.5 + rng() * 2.5;
-          } else {
-            // FLEE, and commit to the route for a couple of seconds
-            ped.state = "flee";
-            fleeFrom(ped, thx, thz);
-            ped._reactHold = 1.8 + rng() * 1.4;
-          }
-        } else if (ped.state === "film") {
-          ped.speed = 0;
-          faceTo(ped, thx, thz, 1.5);   // keep the phone on it
-        }
-        // DECIDE whether to snitch — only if this ped actually WITNESSED a crime
-        // (carries a witnessSev). They report once they've put some DISTANCE between
-        // them and the danger (nobody calls 911 point-blank) OR while filming from
-        // afar. The decision is scaled by neighborhood + snitch trait + nerve; a
-        // ped that commits then PHONES or RUNS to a cop (see beginReport), and only
-        // THEN does it land — the player can still stop it before it does.
-        // …UNLESS this witness carries a real grudge against the player (the
-        // street remembers): a vendetta witness needs no distance and no nerve
-        // roll — seeing you commit a NEW crime IS their moment (beginReport then
-        // marches them to a cop in person when one's within ~40u).
-        const relW = ped.relPlayer;
-        const vendetta = !!(relW && relW.grudge > 40 && ped.mem === CBZ.city.playerActor);
-        if (!ped.reportState && ped.callT <= 0 && (ped.witnessSev || 0) > 0 &&
-            ped.alarmed > 1.5 && (dThreat > 11 || ped.state === "film" || vendetta)) {
-          const prop = snitchPropensity(ped, thx, thz);
-          // a dedicated snitch reports fast even close; everyone else needs distance + nerve
-          if (vendetta || rng() < Math.max(0, Math.min(0.95, prop))) {
-            beginReport(ped, thx, thz);
-          } else {
-            ped.callT = 4 + rng() * 4;     // decided NOT to call (omerta / minding own business) — don't re-roll constantly
-            // on gang turf, a hostile local might instead just flip you off and leave; nothing happens
-          }
-        }
-        return;
+      let src = memT, thx, thz;
+      if (memT) { thx = memT.pos.x; thz = memT.pos.z; }
+      else if (ped.alarmed > 0 || (playerThreat && dpl < 14)) { src = CBZ.city.playerActor; thx = px; thz = pz; }
+      else if (CBZ.cityPanicFrom && CBZ.cityPanicFrom(ped.pos.x, ped.pos.z, _panicAt)) { thx = _panicAt.x; thz = _panicAt.z; }
+      else { thx = px; thz = pz; }
+      const foeIsPlayer = !!src && (src === CBZ.city.playerActor || src.isPlayer);
+      const foeArmed = src ? (foeIsPlayer ? playerArmed : !!src.armed) : true;
+      let aiming = false;
+      if (foeIsPlayer && playerArmed && dpl < 12) {
+        const cy = CBZ.cam ? CBZ.cam.yaw : 0, m = dpl || 1;
+        aiming = (((ped.pos.x - px) / m) * -Math.sin(cy) + ((ped.pos.z - pz) / m) * -Math.cos(cy)) > 0.62;
       }
-      // bold+ : confront / fight the threat (the player, or a remembered offender)
-      const foe = (ped.mem && !ped.mem.dead && ped.mem.pos) ? ped.mem : (dpl < 14 ? CBZ.city.playerActor : null);
-      if (foe && ped.aggr >= (B.bold || 0.5)) {
-        if (ped.kind === "security") { ped.rage = foe; ped.state = "fight"; return; }
-        if (ped.aggr >= (B.crook || 0.72)) { ped.rage = foe; ped.state = "fight"; return; }
-        ped.state = "confront"; ped.target.set(foe.pos.x, 0, foe.pos.z); return;   // close in, threaten
-      }
+      if (CBZ.cityBrain.threat(ped, src, thx, thz, foeArmed, aiming, src ? null : "panic")) return;
     }
 
     // ---- posted guards: gangs hold turf; private security protects businesses ----
@@ -5470,32 +5319,17 @@
     return n;
   }
 
-  // RALLY: a gangster who spots an intruder calls in nearby SAME-GANG members so
-  // the whole block converges on the threat (GTA-style turf swarm). Bounded scan
-  // (~25m, n-capped); only flips calm members so we never stomp a busy brain. The
-  // response is louder when the gangs are at open war (more bodies, even the wary).
-  /* YOU NEVER JUMP ONE OF THEM — YOU JUMP THE BLOCK, OR THE UNIT.
-
-     This rallied a GANG and only a gang (`o.gang !== ped.gang`), which meant
-     the one primitive in the repo that actually makes bystanders run TOWARD a
-     fight was blind to every organised body that is not a street set. Measured
-     consequence, and it is the owner's 2026-08-09 complaint about Fort Brandt
-     in one line: shooting a soldier standing in a formation of thirty-two
-     rallied nobody, because a soldier carries `organization:"military"` (the
-     field `factions.of()` has read since factions.js:968) and no `gang` at all.
-
-     An ORGANISATION rallies on two changes and no new bookkeeping:
-
-       · the side test asks for the same SIDE, not the same gang. `gang` still
-         wins where it exists, so every street set behaves byte-identically.
-       · the nerve test asks whether he is ARMED. The gang thresholds are
-         written for civilians who happen to run with a crew — `crook` is 0.72
-         — and a rifleman is cast at aggr 0.35-0.5, so an org rally gated on
-         aggr would have been code that could never once fire. A man with a
-         rifle whose mate has just been shot comes. That is the whole rule.
-
-     Flag CITY_ORG_RALLY (declared here, in the owning file). Off → the exact
-     gang-only behaviour above. */
+  // RALLY — YOU NEVER JUMP ONE OF THEM, YOU JUMP THE BLOCK (OR THE UNIT).
+  // A hit on a ganger, or a soldier in a formation, asks CBZ.brain who of his
+  // side is close enough to see it and HOW HARD each one answers
+  // (social.retaliate via city/brain_city.js): the harm sets the ceiling — a
+  // shove gets glares and shoves, a beating gets fists, a gun gets guns — and
+  // each man's grudge, aggression, loyalty and courage climb toward it. The
+  // old rally sent every bold member at the intruder at full rage whatever
+  // was done; a slap on a corner brought four men and their pistols.
+  // `harm` (0..1) is optional; brain_city derives it from the aggressor's gun,
+  // the victim's wounds and open war. The side is the gang, or (flag
+  // CITY_ORG_RALLY) the organisation — a rifleman whose mate was shot comes.
   function rallySideOf(a) {
     if (!a) return null;
     if (a.gang) return "gang:" + a.gang;
@@ -5505,33 +5339,9 @@
   }
   if (CBZ.CONFIG.CITY_ORG_RALLY == null) CBZ.CONFIG.CITY_ORG_RALLY = true;
 
-  function rallyGang(ped, intruder) {
-    if (!intruder || intruder.dead) return;
-    const side = rallySideOf(ped);
-    if (!side) return;
-    const org = !ped.gang;                                        // an ORGANISATION, not a street set
-    const peds = CBZ.cityPeds, R2 = 25 * 25;
-    // is the intruder's gang at war with ours? → a bigger, angrier turnout
-    const iGang = intruder.gang || (intruder.isPlayer ? playerGangId() : null);
-    const war = !!(iGang && !org && CBZ.cityAtWar && CBZ.cityAtWar(ped.gang, iGang));
-    const cap = war ? 6 : org ? 6 : 4;
-    let called = 0;
-    for (let i = 0; i < peds.length && called < cap; i++) {
-      const o = peds[i];
-      if (o === ped || o.dead || o.vendor || o.ko > 0 || o.controlled || o.companion) continue;
-      if (rallySideOf(o) !== side) continue;                      // only our own people
-      if (o.rage || o.state === "fight" || o.surrender) continue; // already busy
-      // war pulls the wary too; a normal incursion only rouses the bold+.
-      // A UNIFORM AND A RIFLE ARE THE NERVE — see the note above.
-      if (org) { if (!o.armed && o.aggr < (A0().bold || 0.5)) continue; }
-      else if (o.aggr < (war ? (A0().bold || 0.5) : (A0().crook || 0.72))) continue;
-      const dx = o.pos.x - ped.pos.x, dz = o.pos.z - ped.pos.z;
-      if (dx * dx + dz * dz >= R2) continue;
-      o.rage = intruder; o.state = "fight";
-      o.alarmed = Math.max(o.alarmed, 6);
-      o.target.set(intruder.pos.x, 0, intruder.pos.z);
-      called++;
-    }
+  function rallyGang(ped, intruder, harm) {
+    if (!intruder || intruder.dead || !rallySideOf(ped) || !CBZ.cityBrain) return;
+    CBZ.cityBrain.retaliate(ped, intruder, harm);
   }
 
   // is there an intruder in this gangster's turf they should attack?
@@ -5541,7 +5351,7 @@
     const dP = (px - G.x) * (px - G.x) + (pz - G.z) * (pz - G.z);
     const prov = CBZ.cityGangProvoked ? CBZ.cityGangProvoked(ped.gang) : 0;
     if (!CBZ.player.dead && dP < R2 && (prov > 0.4 || (playerArmed && (CBZ.game.wanted | 0) >= 1))) {
-      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor); ped._rallyT = 6; }
+      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor, 0.35 + prov * 0.5); ped._rallyT = 6; }
       return CBZ.city.playerActor;
     }
     // a rival gangster in turf
@@ -5615,7 +5425,7 @@
       if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
       standDown(ped);
       ped.rage = CBZ.city.playerActor; ped.state = "fight";
-      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor); ped._rallyT = 6; }
+      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor, 0.7); ped._rallyT = 6; }   // "Light him up!"
     }
     return true;
   }
@@ -5703,6 +5513,21 @@
     }
     return Math.min(2.5, s);
   };
+  // where is it COMING FROM? the panic-weighted centre of the field around
+  // (x,z) — a bystander who only saw people running runs the way they ran.
+  CBZ.cityPanicFrom = function (x, z, out) {
+    let s = 0, sx = 0, sz = 0;
+    for (let i = 0; i < PANIC.length; i++) {
+      const p = PANIC[i];
+      const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > PANIC_R * PANIC_R) continue;
+      const w = p.a * (1 - Math.sqrt(d2) / PANIC_R) * Math.max(0, 1 - p.t / PANIC_LIFE);
+      s += w; sx += p.x * w; sz += p.z * w;
+    }
+    if (!(s > 0)) return false;
+    out.x = sx / s; out.z = sz / s;
+    return true;
+  };
   function panicDecay(dt) {
     for (let i = PANIC.length - 1; i >= 0; i--) {
       PANIC[i].t += dt;
@@ -5724,16 +5549,20 @@
     a._scareUntil = now + 3400;
     const attArmed = threat && (threat.isPlayer
       ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!threat.armed);
-    const panic = CBZ.cityPanicAt(a.pos.x, a.pos.z);
-    // Odds of BOLTING rather than freezing. Distance and the panic around you
-    // push up; a gun at point-blank pushes hard down; the meek run sooner.
-    let bolt = 0.16 + panic * 0.34 + Math.min(0.44, dist * 0.028);
-    if ((a.aggr || 0.4) < 0.35) bolt += 0.14;
-    if (a.child) bolt += 0.26;
-    if (attArmed && dist < 5.5) bolt -= 0.38;
-    if (opts.seat) bolt += 0.10;              // a seat is a trap and they know it
-    if (opts.bias) bolt += opts.bias;
-    const runs = roleHash(a, 0x5CA7) < bolt;
+    // THE ANSWER IS THE BRAIN'S (threat.respond): distance, the gun, this
+    // person's own nerve, and the panic around them (fed in as morale rattle
+    // by brain_city — every bolt raises the field, so a stand empties as a
+    // WAVE). A seat is a trap and they know it: sitting is extra rattle.
+    let runs;
+    const CB = CBZ.cityBrain;
+    if (CB && CB.adopt(a)) {
+      if (opts.seat && CBZ.brain.morale) CBZ.brain.morale.rattle(a, 0.12);
+      if (opts.bias && CBZ.brain.morale) CBZ.brain.morale.rattle(a, Math.max(0, opts.bias));
+      const r = CB.respond(a, threat || null, tp ? tp.x : a.pos.x, tp ? tp.z : a.pos.z, attArmed, attArmed && dist < 12, null);
+      runs = r === "flee" || r === "cover";
+    } else {
+      runs = roleHash(a, 0x5CA7) < 0.16 + CBZ.cityPanicAt(a.pos.x, a.pos.z) * 0.34 + Math.min(0.44, dist * 0.028) - (attArmed && dist < 5.5 ? 0.38 : 0);
+    }
     if (!runs && attArmed && markGunpoint(a, 2.4)) {
       a._scareChoice = "freeze";
       return "freeze";
@@ -5784,10 +5613,13 @@
       // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
       // never throws his hands up. A fearless unarmed bruiser also stands his
       // ground. Everyone else (unarmed, not fearless) throws their hands up.
-      const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
+      // (an unarmed bruiser used to "stand his ground" here, squared up to a
+      // muzzle with empty hands; against a gun only a gun fights — the brain
+      // reads him through cityScare: bolt, or hands up)
+      const drawsBack = ped.armed || !!ped._holster;
       if (drawsBack) {
         if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
-      } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit") {
+      } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit" || ped.aggr >= (B.violent || 0.88)) {
         // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
         // to land on markGunpoint alone, which is why a stadium, a gate lounge
         // and an office floor all reacted to a levelled gun by sitting
@@ -5942,6 +5774,7 @@
     faceYaw(ped, Math.atan2(dx, dz), hold);
   }
   CBZ.cityPedFaceTo = faceTo;
+  CBZ.cityPedFaceYaw = faceYaw;   // city/brain_city.js's executor faces through here
   /* A body that stops for something (a chat, a look at you, a stall, a post)
      stops its MOTOR as well: `brake` bleeds the walk off through the motor
      (a few tenths of a second, no pop); without it the motor is simply

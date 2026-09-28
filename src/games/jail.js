@@ -1432,18 +1432,20 @@
       }
     }
   }
-  // is the player inside any guard's see-radius AND gaze cone? Returns
-  // { ped, name } of the spotter (recapture cause + the one who barks).
+  // does any guard SEE the player? Returns { ped, name } of the spotter
+  // (recapture cause + the one who barks). The ONE sight test every game uses
+  // (CBZ.brain.perception): the old bare cone here saw through the cell
+  // block's walls and did not care whether you were crouched in the dark.
+  const _spotOpts = { range: GUARD_SEE_R, fovHalf: GUARD_CONE, shrink: 1, light: function () { return 1; } };
   function guardSpots(P) {
-    if (!P || !P.pos) return null;
+    if (!P || !P.pos || !V) return null;
+    const per = CBZ.brain && CBZ.brain.perception;
+    if (!per) return null;
+    _spotOpts.range = V.seeR || GUARD_SEE_R;
+    _spotOpts.shrink = P.crouch ? 0.7 : 1;
     for (let i = 0; i < V.guards.length; i++) {
       const h = V.guards[i], ped = h && h.ped; if (!ped || ped.dead) continue;
-      const dx = P.pos.x - ped.pos.x, dz = P.pos.z - ped.pos.z, d = Math.hypot(dx, dz);
-      if (d > ((V && V.seeR) || GUARD_SEE_R) || d < 0.01) continue;
-      const facing = ped.group ? ped.group.rotation.y : 0;
-      let da = Math.atan2(dx, dz) - facing;
-      while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
-      if (Math.abs(da) <= GUARD_CONE) return { ped, name: (ped.data && ped.data.name) || ped.name || "A guard" };
+      if (per.seesPoint(ped, P.pos.x, P.pos.y || 0, P.pos.z, _spotOpts)) return { ped, name: (ped.data && ped.data.name) || ped.name || "A guard" };
     }
     return null;
   }
