@@ -209,6 +209,61 @@
     arm(T, -1, -0.7 - (fwd || 0), 0.12, -0.9);
   }
 
+  /* ONE KNEE ON A MAN'S BACK (a.kneelCuff). p.knee = where the knee goes, in
+     the officer's GROUP frame (metres: x his left, y up from his feet, z
+     ahead); p.kneeSide which leg (+1 anatomical left). The hip height is the
+     one that lets THIS thigh just reach that knee from straight behind it;
+     the shin goes back and down off the knee to the floor; the other foot
+     is planted beside and back (a lunge, clear of his flank). Both legs are this body's own
+     two-bone solve (legSolve), so a child's and a heavy man's knees land. */
+  const _kn = new Float32Array(NCH);
+  // (swept in plain node against the shaped torso of every physique pair:
+  // hands on the wrists within 1.2 cm, no leg or torso inside him)
+  const KNEEL = { reach: 0.96, bend: 1.25, head: 0.30, plantOut: 0.05, plantFwd: -0.25, shin: 0.2 };
+  function kneelOnBack(ch, T, p) {
+    const P = ch.profile || {}, s = scaleOf(ch);
+    const hipY = ch.hipY || ((P.legUp || 0.48) + (P.legLo || 0.47));
+    const hx = P.hipX || 0.2;
+    const L1 = Math.max(0.12, (P.legUp || 0.48) - 0.02) * s, L2 = Math.max(0.12, P.legLo || 0.47) * s;
+    const side = p.kneeSide >= 0 ? 1 : -1;
+    const K = p.knee;
+    const hipXm = hx * s * side;
+    const dx = K.x - hipXm, dz = K.z;
+    const reach = L1 * KNEEL.reach;
+    let H = K.y + Math.sqrt(Math.max(0.0025, reach * reach - dx * dx - dz * dz));
+    H = Math.max(0.30, Math.min(hipY * s - 0.04, H));
+    const drop = hipY * s - H;
+    /* the knee leg, AIMED (a two-bone foot solve goes unstable this folded):
+       the thigh straight from the hip at the knee point, and the shin laid
+       back along his back off that knee, KNEEL.shin radians below level. The
+       rig's thigh hangs along -Y and turns Rx(rx)·Rz(rz) (three's XYZ order):
+       (0,-1,0) -> (sin rz, -cos rz cos rx, -cos rz sin rx). The knee folds
+       the shin back (-Z in the thigh's frame) by its flex. */
+    const vx = K.x - hipXm, vy = K.y - H, vz = K.z, vl = Math.hypot(vx, vy, vz) || 1;
+    const dx0 = vx / vl, dy0 = vy / vl, dz0 = vz / vl;
+    const kz = Math.asin(Math.max(-0.99, Math.min(0.99, dx0)));
+    const kx = Math.atan2(-dz0, -dy0);
+    const sa = KNEEL.shin;
+    const kk = Math.acos(Math.max(-1, Math.min(1, -dy0 * Math.sin(sa) - dz0 * Math.cos(sa))));
+    let r;
+    // the planted foot: out and back of its hip (a lunge), flat on the floor
+    const fyP = -(hipY - 0.02) + drop / s;
+    r = legSolve(ch, -side * KNEEL.plantOut / s, fyP, KNEEL.plantFwd / s);
+    if (side > 0) {
+      T[RL_RX] = kx; T[RL_RY] = 0; T[RL_RZ] = kz; T[RL_K] = kk;
+      T[LL_RX] = r.rx; T[LL_RY] = 0; T[LL_RZ] = r.rz; T[LL_K] = r.k;
+    } else {
+      T[LL_RX] = kx; T[LL_RY] = 0; T[LL_RZ] = kz; T[LL_K] = kk;
+      T[RL_RX] = r.rx; T[RL_RY] = 0; T[RL_RZ] = r.rz; T[RL_K] = r.k;
+    }
+    T[DROP] = drop;
+    const tw = p.twist || 0;
+    const jerk = p.phase === "drive" ? Math.max(0, Math.sin(clamp01(p.k) * Math.PI * 3)) * 0.03 : 0;
+    torso(T, KNEEL.bend + jerk, tw, 0);
+    head(T, KNEEL.head, -0.4 * tw);
+    armsReady(T, 0.3);
+  }
+
   /* ============================================================
      THE POSES. Each fills T and returns the channel groups it owns.
      p (one reused object from verbs.js):
@@ -302,6 +357,27 @@
       torso(T, 0.20 + 0.10 * k + jerk, 0, 0);
       head(T, 0.40 * k);
       armsReady(T, 0);
+      return G_ALL;
+    },
+    /* CUFFING A MAN ON THE FLOOR (verbs.js ground cuff): down beside him,
+       facing across his back, the knee on his head side up ON his shoulder
+       blade, the other foot planted, bent over the wrists at the small of his
+       back. verbs.js hands in where that knee goes (p.knee, the officer's
+       group frame, metres), which leg it is (p.kneeSide: +1 = anatomical
+       left) and a twist toward the wrists; this solves the hip height and
+       both legs off this body's own leg lengths. Blends in from standing over
+       the align beat (the knee going down) and back out over the release. */
+    "a.kneelCuff": function (ch, T, p) {
+      const kk = p.phase === "align" ? smooth(p.k) : p.phase === "release" ? 1 - smooth(p.k) : p.phase === "approach" ? 0 : 1;
+      // standing, stepping in (what the blend starts from)
+      stance(ch, T, 0.05, 0.12, 0.13, -0.10, 0.13);
+      torso(T, 0.14, 0, 0);
+      head(T, 0.1);
+      armsReady(T, 0);
+      if (kk <= 0 || !p.knee) return G_ALL;
+      for (let i = 0; i < NCH; i++) _kn[i] = T[i];
+      kneelOnBack(ch, T, p);
+      for (let i = 0; i < NCH; i++) T[i] = _kn[i] + (T[i] - _kn[i]) * kk;
       return G_ALL;
     },
     "a.escort": function (ch, T, p) {
@@ -533,7 +609,7 @@
   };
 
   /* ============================================================
-     THE CUFFED ARMS: hands behind the back, wrists touching.
+     THE CUFFED ARMS: hands behind the back, the cuffs side by side.
      Solved every frame for every cuffed rig (systems/verbs.js calls it) so the
      gait can never pull the hands apart. The WRIST landmark (where the tie
      sits, CBZ.charArmLandmarks) is what meets, not the fist: charArmTo places
@@ -545,6 +621,12 @@
     const P = ch.profile;
     return lm ? lm.wrist : ((P ? 0.20 - P.armLo : -0.26) + 0.04);
   }
+  // where the cuff closes (elbow frame y): the ring line verbs.js measured on
+  // this wrist (ch._cuffFit, the waist just above the hand), else the landmark
+  function cuffY(ch) {
+    const f = ch._cuffFit;
+    return f && isFinite(f.y) ? f.y : wristLocalY(ch);
+  }
   /* WHERE CUFFED WRISTS CAN MEET, on THIS body. The voxel rig's shoulders sit
      far out (armX 0.62 against a shoulder-to-wrist reach of ~0.66), so the
      belt line is simply out of reach of wrists that must touch at the spine:
@@ -554,19 +636,56 @@
      way they do in real cuffs), the wrists sit just off the back surface, as
      low as a nearly straight arm allows. Body-local, model units. */
   const CUFF_IN = 0.10, CUFF_BACK = 0.08;   // scapular retraction (model units)
+  /* THE CUFFS SIT SIDE BY SIDE. The two rings are steel: the wrists cannot be
+     closer than one ring's outside diameter plus a finger of air, and the
+     chain (entities/handcuffs.js, 5.5 cm) spans the rest. verbs.js measures
+     the ring for THIS wrist (ch._cuffFit.rOut, rig units); before that the
+     real cuff on this hand's scale stands in. The old stacked layout (2.4 cm
+     between the wrist centres) put one forearm through the other. */
+  function cuffHalfGap(ch) {
+    const f = ch._cuffFit;
+    if (f && f.rOut > 0) return f.rOut + 0.006;
+    const P = ch.profile || {};
+    return 0.064 * Math.sqrt((P.armW || 0.3) / 0.30);
+  }
+  /* The back he is tied against, at height y (body frame, model units): the
+     SHAPED torso's back surface (entities/character.js TORSO block: a heavy
+     or muscular back stands proud of the profile box), never shallower than
+     the pelvis box, which carries the seat below the torso loft. */
+  function backAt(ch, x, y) {
+    const P = ch.profile || {};
+    let b = Math.max(P.torsoD || 0.5, P.pelvisD || 0.48, P.waistD || 0) / 2;
+    const TS = ch.torsoShape;
+    if (TS && typeof ch.torsoBackZ === "function") {
+      const yy = Math.max(TS.base, Math.min(TS.yN, y));
+      let z = 0;
+      for (let i = -1; i <= 1; i++) { const v = -ch.torsoBackZ(x * (1 + 0.5 * i), yy); if (v > z && isFinite(v)) z = v; }
+      if (z > 0) b = Math.max(z, (P.pelvisD || 0.48) / 2);
+    }
+    return b;
+  }
   function cuffLocal(ch, side, out) {
     const P = ch.profile || {};
-    const back = Math.max(P.torsoD || 0.5, P.pelvisD || 0.48, P.waistD || 0) / 2;
     const armW = P.armW || 0.3, armX = P.armX || 0.62;
     const sy = ch.parts && ch.parts.la ? ch.parts.la.position.y : 1.84;
-    const R = 0.965 * (((P.armUp || 0.46) - 0.02) + Math.abs(wristLocalY(ch)));
-    const wx = 0.017;
-    const wz = -(back + armW * 0.42);
+    const R = 0.965 * (((P.armUp || 0.46) - 0.02) + Math.abs(cuffY(ch)));
+    const wx = cuffHalfGap(ch);
+    // what is round the wrist there — the steel ring, else the forearm's own
+    // half depth (the lofted limb, character.js LIMB_SHAPES armLo) — and a
+    // centimetre of air: the cuffs lie ON his back, not in it
+    const fit = ch._cuffFit;
+    const fore = (fit && fit.rOut > 0 ? fit.rOut : 0.245 * armW) + 0.012;
     const rk = armW / 0.30;                    // a smaller shoulder retracts less (the deltoid still covers it)
-    const dx = armX - CUFF_IN * rk - wx, dz = Math.abs(wz + CUFF_BACK * rk);
-    const dy = Math.sqrt(Math.max(0.0025, R * R - dx * dx - dz * dz));
-    // stacked, not side by side: the left wrist rides a hair behind the right
-    return out.set(side * wx, sy - dy, wz - (side > 0 ? 0.024 : 0));
+    const dx = armX - CUFF_IN * rk - wx;
+    // the height and the back's depth there depend on each other: settle it
+    let y = sy - 0.35, wz = 0;
+    for (let i = 0; i < 3; i++) {
+      wz = -(backAt(ch, wx, y) + fore);
+      const dz = Math.abs(wz + CUFF_BACK * rk);
+      const dy = Math.sqrt(Math.max(0.0025, R * R - dx * dx - dz * dz));
+      y = sy - dy;
+    }
+    return out.set(side * wx, y, wz);
   }
   function cuffTarget(ch, side, out) {
     cuffLocal(ch, side, out);
@@ -575,12 +694,14 @@
   }
   // the shoulders pinch back while the wrists are tied (k 0..1), exactly
   // refunded at 0 (animChar never writes the arm root's x)
-  function retract(ch, k) {
+  function retract(ch, k, kR) {
     const P = ch.profile || {}, armX = P.armX || 0.62;
     const la = ch.parts.la, ra = ch.parts.ra;
-    const kk = Math.max(0, Math.min(1, k)) * (P.armW || 0.3) / 0.30;   // scaled to the shoulder (see cuffLocal)
-    if (la) { la.position.x = armX - CUFF_IN * kk; la.position.z = -CUFF_BACK * kk; la.userData._armRestZ = -CUFF_BACK * kk; }
-    if (ra) { ra.position.x = -(armX - CUFF_IN * kk); ra.position.z = -CUFF_BACK * kk; ra.userData._armRestZ = -CUFF_BACK * kk; }
+    const rk = (P.armW || 0.3) / 0.30;                                  // scaled to the shoulder (see cuffLocal)
+    const kl = Math.max(0, Math.min(1, k)) * rk;
+    const kr = Math.max(0, Math.min(1, kR == null ? k : kR)) * rk;
+    if (la) { la.position.x = armX - CUFF_IN * kl; la.position.z = -CUFF_BACK * kl; la.userData._armRestZ = -CUFF_BACK * kl; }
+    if (ra) { ra.position.x = -(armX - CUFF_IN * kr); ra.position.z = -CUFF_BACK * kr; ra.userData._armRestZ = -CUFF_BACK * kr; }
   }
   function unretract(ch) {
     const P = ch && ch.profile || {}, armX = P.armX || 0.62;
@@ -588,15 +709,17 @@
     if (ch.parts.la) { ch.parts.la.position.x = armX; ch.parts.la.userData._armRestZ = undefined; }
     if (ch.parts.ra) { ch.parts.ra.position.x = -armX; ch.parts.ra.userData._armRestZ = undefined; }
   }
-  function wristWorld(ch, side, out) {
+  // the wrist landmark of `side` in world space (y: another elbow-frame height)
+  function wristWorld(ch, side, out, y) {
     const low = ch.low && (side > 0 ? ch.low.la : ch.low.ra);
     if (!low) return null;
-    out.set(0, wristLocalY(ch), 0);
+    out.set(0, y != null ? y : wristLocalY(ch), 0);
     low.updateWorldMatrix(true, false);
     return low.localToWorld(out);
   }
-  // put the WRIST landmark of `side` on world point `tgt` (iterating the socket)
-  function wristTo(ch, side, tgt, k) {
+  // put the WRIST landmark of `side` on world point `tgt` (iterating the
+  // socket); y: solve another point of the forearm there instead (the cuff line)
+  function wristTo(ch, side, tgt, k, y) {
     const arm = side > 0 ? "l" : "r";
     const sock = ch.sockets && (side > 0 ? ch.sockets.leftHand : ch.sockets.rightHand);
     if (!CBZ.charArmTo || !sock) return null;
@@ -606,7 +729,7 @@
     const n = k >= 0.999 ? 4 : 1;
     for (let i = 0; i < n; i++) {
       CBZ.charArmTo(ch, _st, arm, k);
-      if (!wristWorld(ch, side, _wp)) return null;
+      if (!wristWorld(ch, side, _wp, y)) return null;
       _wp.sub(tgt);                                  // wrist error
       res = _wp.length();
       if (res < 0.003) break;
@@ -614,12 +737,17 @@
     }
     return res;
   }
-  function cuffArms(ch, k) {
+  /* cuffArms(ch, k[, kR]): both wrists to the cuff line by k — or, with kR,
+     the LEFT by k and the RIGHT by kR (a ground cuff takes one wrist, then
+     brings the other round to it). Body-local, so it holds on a man lying on
+     his face exactly as on one standing. An arm at 0 is left to the pose. */
+  function cuffArms(ch, k, kR) {
     if (!ch || !ch.parts || !ch.body) return null;
-    const kk = k == null ? 1 : k;
-    retract(ch, kk);
-    const rL = wristTo(ch, 1, cuffTarget(ch, 1, _wt), kk);
-    const rR = wristTo(ch, -1, cuffTarget(ch, -1, _wt), kk);
+    const kl = k == null ? 1 : k, kr = kR == null ? kl : kR;
+    retract(ch, kl, kr);
+    const cy = cuffY(ch);
+    const rL = kl > 0.001 ? wristTo(ch, 1, cuffTarget(ch, 1, _wt), kl, cy) : 0;
+    const rR = kr > 0.001 ? wristTo(ch, -1, cuffTarget(ch, -1, _wt), kr, cy) : 0;
     return rL == null || rR == null ? null : Math.max(rL, rR);
   }
 
@@ -719,7 +847,7 @@
 
   CBZ.verbPoses = {
     POSES, set, write, clear, kill, fade, tick, weight,
-    cuffArms, cuffTarget, cuffLocal, unretract, wristWorld, wristTo, wristLocalY, legSolve, stance,
+    cuffArms, cuffTarget, cuffLocal, cuffHalfGap, cuffY, backAt, unretract, wristWorld, wristTo, wristLocalY, legSolve, stance, KNEEL,
     CH: { DROP, B_RX, B_RY, B_RZ, B_PY, N_RX, N_RY, N_RZ, NCH }, MOUNT, CARRY,
     liveCount: function () { return live.length; },
     _frame: function () { return frame; },

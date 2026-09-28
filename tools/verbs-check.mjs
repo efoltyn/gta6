@@ -17,9 +17,10 @@
      4. context() names the right feature for a wall, a waist-high rail with a
         drop behind it, a ledge, water, a bed, a table and open ground, and a
         shove / throw into each lands where that feature sends a body;
-     5. cuffed wrists: behind the back, the wrist creases within 5 cm of each
-        other, each tie ring ON its wrist (< 3 cm) and the link between them
-        within 3 cm of each wrist.
+     5. cuffed wrists: behind the back, side by side (the two steel rings
+        clear of each other, never more than a ring and a chain apart), each
+        cuff closed ON its wrist (< 1 cm) and the chain between the two
+        swivels at its own length (never stretched past 1.2x).
 
      node tools/verbs-check.mjs          exit 0 = ok      --verbose  per-frame */
 import { loadVerbsVM } from "./lib/verbs-vm.mjs";
@@ -197,7 +198,10 @@ specs.push({ name: "escort+walk", verb: "escort", need: ["contact", "hold", "rel
 specs.push({ name: "shield", verb: "shield", need: ["contact", "hold", "release"], releaseAt: 1.0, t: { z: 3.0 } });
 specs.push({ name: "choke", verb: "choke", need: ["contact", "drive", "hold", "release"], opts: { ko: 2.0 }, expect: "ko" });
 specs.push({ name: "frisk", verb: "frisk", need: ["contact", "drive", "release"] });
+// (the rule, systems/arrest.js cuffable: a man on his feet is cuffed only
+// once he has given up — hands up)
 specs.push({ name: "cuff", verb: "cuff", need: ["contact", "drive", "outcome", "release"], expect: "cuffed",
+  pre(v, a, t) { t.surrender = true; },
   after(v, S, a, t) { return cuffCheck(v, t); } });
 specs.push({ name: "uncuff", verb: "uncuff", need: ["contact", "drive", "outcome", "release"], expect: "uncuffed",
   pre(v, a, t) { v.CBZ.verbs.setCuffs(t, true); for (let i = 0; i < 20; i++) v.frame(DT); },
@@ -230,17 +234,25 @@ function cuffCheck(v, t) {
   // behind the back: in the body's own frame, past the back surface
   const P = ch.profile, back = Math.max(P.torsoD, P.pelvisD, P.waistD || 0) / 2;
   const lL = ch.body.worldToLocal(L.clone()), lR = ch.body.worldToLocal(R.clone());
-  const rings = [], link = [];
-  ch.group.traverse((o) => { if (o.name === "cuff-ring") rings.push(o); if (o.name === "cuff-link") link.push(o); });
-  const rc = rings.map((r) => r.getWorldPosition(new THREE.Vector3()));
-  const ringOff = Math.max(Math.min(rc[0].distanceTo(L), rc[0].distanceTo(R)), Math.min(rc[1].distanceTo(L), rc[1].distanceTo(R)));
-  const lc = link[0] ? link[0].getWorldPosition(new THREE.Vector3()) : null;
-  const linkOff = lc ? Math.max(lc.distanceTo(L), lc.distanceTo(R)) : 9;
-  cuffStats = { gap, zL: lL.z, zR: lR.z, back, ringOff, linkOff };
-  if (gap > 0.05) return `wrists ${(gap * 100).toFixed(1)} cm apart`;
+  // the cuffs: each closed round its own wrist, at the ring line the fit chose
+  const H = CBZ.handcuffs, fit = CBZ.verbs.cuffFit(t), hs = ch.group.userData.humanScale || 0.7;
+  const cuffs = [];
+  ch.group.traverse((o) => { if (o.name === "handcuff-A" || o.name === "handcuff-B") cuffs.push(o); });
+  const ringAt = (low) => new THREE.Vector3(0, fit.y, 0).applyMatrix4(low.matrixWorld);
+  const wl = ringAt(ch.low.la), wr = ringAt(ch.low.ra);
+  const cc = cuffs.map((c) => c.getWorldPosition(new THREE.Vector3()));
+  const ringOff = cc.length === 2 ? Math.max(Math.min(cc[0].distanceTo(wl), cc[0].distanceTo(wr)), Math.min(cc[1].distanceTo(wl), cc[1].distanceTo(wr))) : 9;
+  // the chain: swivel to swivel against its own length
+  const sw = cuffs.map((c) => H.swivel(c, new THREE.Vector3()));
+  const L0 = H.CHAIN_LEN * fit.k * hs;
+  const stretch = sw.length === 2 ? sw[0].distanceTo(sw[1]) / L0 : 9;
+  const rOutW = fit.rOut * hs, ringGap = wl.distanceTo(wr) - 2 * rOutW;
+  cuffStats = { gap, zL: lL.z, zR: lR.z, back, ringOff, stretch, ringGap, rInCm: fit.rIn * hs * 100 };
+  if (gap > 2 * rOutW + L0 + 0.04) return `wrists ${(gap * 100).toFixed(1)} cm apart`;
+  if (ringGap < -0.004) return `the two rings run through each other (${(ringGap * 100).toFixed(1)} cm)`;
   if (lL.z > -back || lR.z > -back) return "wrists not behind the back";
-  if (rings.length !== 2 || ringOff > 0.03) return `ties not on the wrists (${(ringOff * 100).toFixed(1)} cm)`;
-  if (linkOff > 0.03) return `tie link ${(linkOff * 100).toFixed(1)} cm off a wrist`;
+  if (cuffs.length !== 2 || ringOff > 0.01) return `cuffs not on the wrists (${(ringOff * 100).toFixed(1)} cm)`;
+  if (stretch > 1.2) return `chain stretched ${stretch.toFixed(2)}x`;
   return null;
 }
 let cuffStats = null;
@@ -314,8 +326,11 @@ function measureHands(v, S, row) {
 }
 function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], okOrder: true, onFrames: 0, maxA: 0, maxT: 0, pen: -1, outcome: "", ok: true, notes: [] }; }
 {
-  // THE ARREST, as capture.js runs it: tackle the man, he goes down, he gets
-  // up, turned and cuffed standing, then marched (the guard walks, V.walk).
+  // THE ARREST, as capture.js runs it: tackle the man, he goes down, he is
+  // cuffed WHERE HE LIES (the ground cuff: the guard kneels on him), hauled
+  // up in the cuffs (V.getUp), then marched (the guard walks, V.walk).
+  // (It used to stand him up first and cuff him on his feet: the owner's
+  // "I need to get knocked down ... to get handcuffed" made that the rule.)
   const v = vE, { CBZ } = v, V = CBZ.verbs;
   v.clearActors(); v.world({});
   CBZ.player.pos.set(0, 0, 2.4); CBZ.playerChar.group.position.set(0, 0, 2.4); CBZ.playerChar.group.rotation.set(0, Math.PI, 0);
@@ -331,11 +346,13 @@ function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], o
   run(S, 400);
   const tk = S ? S.result && S.result.outcome : "none";
   const fellDown = !!(CBZ.playerChar.fall && CBZ.playerChar.fall.on);
-  if (V.getUp) V.getUp(V.playerActor());
-  for (let i = 0; i < 180 && CBZ.playerChar.fall && CBZ.playerChar.fall.on; i++) v.frame(DT);
   S = V.cuff(gd, V.playerActor(), { far: true });
-  run(S, 400);
+  let downAtCuffs = null;
+  run(S, 400, (S) => { if (S.phase === "drive" && downAtCuffs == null) downAtCuffs = !!(CBZ.playerChar.fall && CBZ.playerChar.fall.on); });
   const cuffed = !!CBZ.playerChar.cuffed;
+  const lying = !!(CBZ.playerChar.fall && CBZ.playerChar.fall.on);
+  if (V.getUp) V.getUp(V.playerActor());
+  for (let i = 0; i < 240 && CBZ.playerChar.fall && CBZ.playerChar.fall.on; i++) v.frame(DT);
   S = V.escort(gd, V.playerActor(), { far: true });
   const z0 = CBZ.player.pos.z;
   run(S, 360, (S) => { if (S.phase === "hold") { if (V.walk(S, S, 0, 12, 1.35, DT) < 0.1) V.release(S, "set"); if (S.pt > 3) V.release(S, "set"); } });
@@ -346,11 +363,13 @@ function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], o
   if (tk !== "open") row.notes.push("tackle outcome " + tk);
   if (!fellDown) row.notes.push("no fall after the tackle");
   if (!cuffed) row.notes.push("not cuffed");
+  if (V.cuffDown && downAtCuffs !== true) row.notes.push("not cuffed on the floor");
+  if (V.cuffDown && cuffed && !lying) row.notes.push("stood up by the cuff verb itself");
   if (!(marched > 1.5)) row.notes.push(`not marched (${marched.toFixed(2)} m)`);
   if (row.maxA > TOL_HAND) row.notes.push(`guard hand ${row.maxA.toFixed(3)} m off`);
   if (errs.length) row.notes.push("threw: " + errs[0].split("\n")[0]);
   row.ok = !row.notes.length;
-  row.phases = ["tackle>fall>getup>cuff>escort " + marched.toFixed(1) + "m"];
+  row.phases = ["tackle>fall>cuff down>getup>escort " + marched.toFixed(1) + "m"];
   results.push(row);
   V.setCuffs(V.playerActor(), false);
   CBZ.guards = []; v.actors.length = 0;
@@ -474,6 +493,6 @@ for (const r of results) {
     pad(r.pen > 0 ? (r.pen * 100).toFixed(1) : "-", 8) + pad(r.outcome || "-", 10) + (r.ok ? "ok" : "FAIL  " + r.notes.join("; ")));
 }
 console.log("context: " + ctxRows.map((c) => `${c.want}->${c.got}`).join("  "));
-if (cuffStats) console.log(`cuffs: wrists ${(cuffStats.gap * 100).toFixed(1)} cm apart, z ${cuffStats.zL.toFixed(2)}/${cuffStats.zR.toFixed(2)} (back ${(-cuffStats.back).toFixed(2)}), ring on wrist ${(cuffStats.ringOff * 100).toFixed(1)} cm, link ${(cuffStats.linkOff * 100).toFixed(1)} cm`);
+if (cuffStats) console.log(`cuffs: wrists ${(cuffStats.gap * 100).toFixed(1)} cm apart (rings ${(cuffStats.ringGap * 100).toFixed(1)} cm clear, ${(cuffStats.rInCm * 2).toFixed(1)} cm inside), z ${cuffStats.zL.toFixed(2)}/${cuffStats.zR.toFixed(2)} (back ${(-cuffStats.back).toFixed(2)}), cuff on wrist ${(cuffStats.ringOff * 100).toFixed(1)} cm, chain ${cuffStats.stretch.toFixed(2)}x`);
 console.log(`loaded: ${JSON.stringify(vS.loaded)}  ${results.length} runs, ${fails} failing, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 process.exit(fails ? 1 : 0);
