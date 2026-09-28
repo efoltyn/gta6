@@ -487,36 +487,32 @@
     }
 
     // -- SILOS (cylinders, solid colliders) --
-    // NO-DECOY FIX: a silo can't take cityMakeBuilding's box shell (wrong
-    // footprint entirely), but a real grain silo DOES have a real exterior
-    // ladder to a roof hatch — so instead of a sealed doorless cylinder we
-    // give each one a climbable rung ladder (CBZ.platforms ramp, the same
-    // z-axis-interpolated rig the fire lookout tower / building stairs use)
-    // up to a small standable cap platform, plus a work-anchor so a farmhand
-    // is actually seen tending the silo line, not just walking past it.
-    const siloH = 21, siloR = 3.7, siloTop = siloH + 0.2;
+    // A real grain silo has a caged ladder up its side to a railed landing
+    // at the eave. That is what each one gets: world/ladderkit.js draws the
+    // ladder off the same numbers systems/climb.js climbs, and the landing is
+    // a platform with rails you cannot walk off. (It used to be a 0.4 m
+    // "ramp" record rising 21 m — a vertical slope nobody could walk — plus a
+    // "cap platform" INSIDE the silo's own collider and under its cone roof:
+    // unreachable, and nothing to stand on if you had.)
+    const siloH = 21, siloR = 3.7;
+    const LK = CBZ.ladderKit;
     for (let i = 0; i < 4; i++) {
       const sx = HX - 4 + i * 9.5, sz = HZ - 34, sr = siloR;
       cyl(sx, siloH / 2, sz, sr, sr, siloH, M.silo, true);
       cyl(sx, siloH + 1.7, sz, 0.2, sr + 0.1, 3.4, M.siloCap, false);
-      // exterior rung ladder up the +z face (clear of the silo's own AABB, a
-      // thin z-aligned ramp so groundAt sees a real climbable surface)
-      const lz0 = sz + sr + 0.02, lz1 = sz + sr + 0.9;
-      CBZ.platforms.push({
-        minX: sx - 0.5, maxX: sx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
-        top: siloTop, ramp: { z0: sz + sr + 0.35, z1: sz + sr + 0.75, y0: 0, y1: siloTop },
+      if (!LK) continue;
+      // the ladder up the +z face, 0.25 m off the wall (clear of the silo's
+      // AABB at sz + sr), and the landing beside its head on the +x side
+      const lz = sz + sr + 0.25;
+      LK.build(root, {
+        x: sx, z: lz, nx: 0, nz: 1, y0: 0, y1: siloH, standoff: 0.25,
+        top: { x: sx + 1.0, z: lz + 0.4 }, name: "silo", tag: "farm:silo", mode: "city",
+      }, M.metal);
+      LK.deck({
+        minX: sx + 0.3, maxX: sx + 1.75, minZ: sz + sr + 0.05, maxZ: lz + 1.0, top: siloH,
+        skip: ["minZ"], gaps: [{ x: sx + 0.3, z: lz + 0.42, w: 0.45 }],
+        floor: true, root: root, mat: M.metal,
       });
-      // small round cap platform (stand on the roof hatch)
-      CBZ.platforms.push({ minX: sx - 1.6, maxX: sx + 1.6, minZ: sz - 1.6, maxZ: sz + 1.6, top: siloTop });
-      // rung visuals (instanced-free — only 3 silos, cheap as plain meshes)
-      for (let r = 0; r < 15; r++) {
-        const ry = 0.8 + r * 1.32;
-        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
-        rung.position.set(sx, ry, sz + sr + 0.35); root.add(rung);
-      }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, siloH, 0.06), M.metal);
-      rail.position.set(sx - 0.32, siloH / 2, sz + sr + 0.35); root.add(rail);
-      const rail2 = rail.clone(); rail2.position.x = sx + 0.32; root.add(rail2);
     }
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
@@ -548,37 +544,37 @@
     }
 
     // -- WATER TOWER / WINDMILL (tank on legs + spinning blades) --
-    // NO-DECOY FIX: same treatment as the silos — a real exterior ladder up
-    // one leg to a small catwalk ring platform under the tank, registered as
-    // a real climbable/standable surface (CBZ.platforms), not just a solid
-    // collider you bump into.
-    const wtx = HX + 5, wtz = HZ + 38;
+    // A railed catwalk round the foot of the tank and a caged ladder up the
+    // +z face to it (world/ladderkit.js + systems/climb.js). The old one was a
+    // 0.4 m "ramp" rising 9.5 m with seven rungs 1.25 m apart, to a catwalk
+    // that sat INSIDE the tank's own full-height collider — nobody ever stood
+    // on it. The tank collider now starts at the catwalk, so the ground under
+    // the tower is ground again, and the catwalk round it is real.
+    const wtx = HX + 5, wtz = HZ + 38, catY = 9.5;
     for (const lx of [-3, 3]) for (const lz of [-3, 3]) {
       // VEH_COLLIDE_FIX: legs are solid steel — the tank above was already a
       // collider but a car could drive clean through its supports.
       const legSolid = !CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false;
       const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, legSolid);
-      leg.rotation.z = -lx * 0.04; leg.rotation.x = lz * 0.04;
+      // splayed OUT at the foot, in under the tank at the head (the signs
+      // were the other way round: the legs flared up and out past the tank)
+      leg.rotation.z = lx * 0.04; leg.rotation.x = -lz * 0.04;
     }
-    cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, true);
+    cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, false);
     cyl(wtx, 14.5, wtz, 0.1, 3, 2, M.metal, false);
-    (function waterTowerLadder() {
-      const catwalkY = 9.5;                  // just under the tank
-      const lz0 = wtz + 3 + 0.02, lz1 = wtz + 3 + 0.85;
-      CBZ.platforms.push({
-        minX: wtx - 0.5, maxX: wtx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
-        top: catwalkY, ramp: { z0: wtz + 3.3, z1: wtz + 3.7, y0: 0, y1: catwalkY },
+    cols.push({ minX: wtx - 3, maxX: wtx + 3, minZ: wtz - 3, maxZ: wtz + 3, y0: catY, y1: 15.5 });
+    if (LK) {
+      LK.deck({
+        minX: wtx - 3.9, maxX: wtx + 3.9, minZ: wtz - 3.9, maxZ: wtz + 3.9, top: catY,
+        gaps: [{ x: wtx, z: wtz + 3.9, w: 0.42 }],
+        floor: true, hole: { minX: wtx - 3, maxX: wtx + 3, minZ: wtz - 3, maxZ: wtz + 3 },
+        root: root, mat: M.metal,
       });
-      CBZ.platforms.push({ minX: wtx - 2.4, maxX: wtx + 2.4, minZ: wtz - 2.4, maxZ: wtz + 2.4, top: catwalkY });
-      for (let r = 0; r < 7; r++) {
-        const ry = 0.8 + r * 1.25;
-        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
-        rung.position.set(wtx, ry, wtz + 3.3); root.add(rung);
-      }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 9.5, 0.06), M.metal);
-      rail.position.set(wtx - 0.32, 4.75, wtz + 3.3); root.add(rail);
-      const rail2 = rail.clone(); rail2.position.x = wtx + 0.32; root.add(rail2);
-    })();
+      LK.build(root, {
+        x: wtx, z: wtz + 3.95, nx: 0, nz: 1, y0: 0, y1: catY,
+        name: "water tower", tag: "farm:watertower", mode: "city",
+      }, M.metal);
+    }
     // windmill blades (animated)
     const millHub = new THREE.Group();
     millHub.position.set(wtx, 15.5, wtz - 3.2);

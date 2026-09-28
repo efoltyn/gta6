@@ -621,7 +621,7 @@
       } else if (Math.abs(ay - L.y1) < 1.2 && (onL || ty < L.y1 - LEVEL)) {
         // down: the only way off the landing he is standing on
         const onDeck = Math.hypot(p.x - L.top.x, p.z - L.top.z);
-        if (onDeck > 10) continue;
+        if (onDeck > 14) continue;
         dir = -1; ex = L.top.x; ez = L.top.z;
         cost = onDeck + Math.hypot(tx - L.bottom.x, tz - L.bottom.z) * 0.2;
       } else continue;
