@@ -4293,57 +4293,263 @@
     v = clamp01(v);
     return v * v * v * (v * (v * 6 - 15) + 10);
   };
-  const _mantleGrip = new THREE.Vector3();
+  /* ---- HANDS ON THE OBSTACLE (vault / mantle) ------------------------------
+     OWNER: "vaulting things, just like use of hands in physical world and
+     code behind that." The vault poses were Euler tables: a shoulder swung to
+     -1.8 rad and an elbow to -0.5 whatever the wall was, so the "planted"
+     hand hung in the air half a metre over a waist-high wall (and a metre
+     over a car roof), and the mantle's own solve was sagittal-only. A hand
+     that carries the body over something is ON it: the palm flat on the top,
+     at a real point a hand's width in from the near edge, fingers pointing
+     the way the body goes, held there in the WORLD while the body swings over
+     it, and let go when the shoulder has passed out of the arm's reach.
 
-  // Aim one shoulder/elbow chain at a fixed world-space ledge point. Limbs are
-  // authored down -Y; negative shoulder X swings forward and a negative elbow
-  // folds the forearm farther forward. Solving in the body's current local
-  // frame keeps the wrists on the lip even while the torso leans and rises.
-  function mantleArmSolve(ch, tp, side) {
-    const P = ch && ch.profile;
-    const part = ch && ch.parts && (side > 0 ? ch.parts.la : ch.parts.ra);
-    if (!P || !part || tp.ledgeX == null || tp.rootY == null ||
-        !ch.body || !ch.group || typeof ch.body.worldToLocal !== "function") return null;
-    // Hands land roughly under their own shoulders. A narrow centre grip made
-    // the elbows flare sideways even when the Y/Z solve was correct.
-    const gripHalf = Math.min(0.43, ((ch.metric && ch.metric.width) || 0.9) * 0.40);
-    // local +X in world space for a root facing (dirX,dirZ) is (dirZ,-dirX).
-    _mantleGrip.set(
-      tp.ledgeX + tp.dirZ * gripHalf * side,
-      tp.top + 0.018,
-      tp.ledgeZ - tp.dirX * gripHalf * side
-    );
-    ch.group.updateMatrixWorld(true);
-    ch.body.worldToLocal(_mantleGrip);
-
-    const dx = _mantleGrip.x - part.position.x;
-    let dy = _mantleGrip.y - part.position.y;
-    let dz = _mantleGrip.z - part.position.z;
-    const l1 = Math.max(0.12, P.armUp - 0.02);
-    const l2 = Math.max(0.12, P.armLo + 0.01);
-    // Rotation.z handles the modest inward hand spacing. Solve the remaining
-    // sagittal reach in Y/Z, clamped just inside full extension so the elbow
-    // always retains a visible, load-bearing bend.
-    let reach = Math.hypot(dy, dz);
-    const maxReach = (l1 + l2) * 0.965;
-    const minReach = Math.abs(l1 - l2) + 0.035;
-    if (reach > maxReach) {
-      const k = maxReach / reach;
-      dy *= k; dz *= k; reach = maxReach;
-    } else if (reach < minReach) {
-      const k = minReach / Math.max(0.001, reach);
-      dy *= k; dz *= k; reach = minReach;
+     Two things make that true instead of a pose:
+       · the palm is solved onto the point every frame (charArmTo.plant: the
+         exact arm IK plus the palm laid on the surface);
+       · the body COMES DOWN TO its hands. The trajectory (physics.js) carries
+         the feet over the top; a real vaulter's hips skim the obstacle with
+         the legs tucked or swung aside, which puts the shoulders an arm's
+         length over the plant. The rig is lowered (ch.model, the node the
+         legs and torso hang from) by exactly what the planted arm needs,
+         never so far that the pelvis or a foot goes into the obstacle or the
+         ground under it. What cannot be reached stays reached-for, measured
+         (tp._plantRes), never faked.
+     Plants per move: mantle both hands at the lip; kong both hands out on the
+     top; speed and spin one hand (the left, the side the legs swing past). */
+  const _tpP = new THREE.Vector3(), _tpS = new THREE.Vector3(), _tpUp = new THREE.Vector3(0, 1, 0);
+  const _tpDir = new THREE.Vector3(), _tpA = new THREE.Vector3();
+  const _plantW = { l: 0, r: 0 }, _spinP = new THREE.Vector3();
+  const TRAV_PLANTS = {
+    // [arm, lateral share of the shoulder half-width (+ = the body's left), inset m past the near edge]
+    mantle: [["l", 0.85, 0.06], ["r", 0.85, 0.06]],
+    kong: [["l", 0.55, 0.12], ["r", 0.55, 0.12]],
+    speed: [["l", 0.80, 0.07]],
+    spin: [["l", 0.40, 0.07]],
+  };
+  function travPlantPoints(ch, tp) {
+    const key = tp.kind === "mantle" ? "mantle" : tp.style;
+    const spec = TRAV_PLANTS[key];
+    if (!spec || tp.ledgeX == null || tp.top == null) return null;
+    if (tp._plants && tp._plantsCh === ch) return tp._plants;
+    const halfW = Math.min(0.24, ((ch.metric && ch.metric.width) || 0.9) * 0.28);
+    // a car's roof starts a hand in from its flank; a thin wall's top is only so deep
+    const deep = Math.max(0.03, (tp.span || 0.3) * 0.5);
+    const out = [];
+    for (let i = 0; i < spec.length; i++) {
+      const sd = spec[i], side = sd[0] === "l" ? 1 : -1;
+      const inset = Math.min(deep, tp.car ? Math.max(sd[2], 0.30) : sd[2]);
+      const lat = halfW * sd[1] * side;
+      out.push({
+        arm: sd[0],
+        // local +X (the body's left) in world is (dirZ, 0, -dirX)
+        p: new THREE.Vector3(tp.ledgeX + tp.dirX * inset + tp.dirZ * lat, tp.top, tp.ledgeZ + tp.dirZ * inset - tp.dirX * lat),
+        res: 0,
+      });
     }
-    const elbow = Math.acos(Math.max(-1, Math.min(1,
-      (reach * reach - l1 * l1 - l2 * l2) / (2 * l1 * l2))));
-    const fromDown = Math.atan2(dz, -dy);
-    const shoulder = fromDown - Math.atan2(l2 * Math.sin(elbow), l1 + l2 * Math.cos(elbow));
-    const inward = Math.atan2(dx, Math.max(0.16, reach));
-    return {
-      shoulder: -shoulder,
-      elbow: -elbow,
-      roll: Math.max(-0.48, Math.min(0.48, inward)),
-    };
+    tp._plants = out; tp._plantsCh = ch;
+    return out;
+  }
+  // what is under a world point during the move: the obstacle's top inside
+  // its footprint (along the move line), the ground either side of it
+  // (ramped over the last 15 cm either side: a foot about to cross the face
+  // has to be over the top already, or the body would pop up the frame it did)
+  function travSupportY(tp, x, z) {
+    const t = (x - tp.ledgeX) * tp.dirX + (z - tp.ledgeZ) * tp.dirZ, span = tp.span || 0;
+    if (t >= -0.02 && t <= span + 0.02) return tp.top;
+    const ground = t < 0 ? (tp.startY != null ? tp.startY : 0) : (tp.endY != null ? tp.endY : 0);
+    const out = t < 0 ? -t : t - span;
+    return ground + (tp.top - ground) * (1 - smooth01((out - 0.02) / 0.14));
+  }
+  const _ttS = new THREE.Vector3(), _ttD = new THREE.Vector3(), _ttH = new THREE.Vector3();
+  function travTorso(ch, tp, plants, weights) {
+    const CA = CBZ.charArmTo;
+    // a mantle hangs on the face first: the chest may only go over the top
+    // once the hips have come up to the lip (before that it would go INTO it)
+    let gate = 1;
+    const hy = hipYOf(ch);
+    if (tp.kind === "mantle") {
+      _ttH.set(0, hy, 0);
+      ch.model.localToWorld(_ttH);
+      gate = smooth01((_ttH.y - (tp.top - 0.35)) / 0.30);
+      if (gate <= 0) return;
+    }
+    const scale = ch.model.matrixWorld.getMaxScaleOnAxis() || 0.7;
+    const sm = scale / (ch.model.scale.y || 1);          // world per model unit... (group)
+    const toRig = (ch.model.scale.y || 1) / scale;       // world metres -> model units
+    // every loaded hand: its plant (model frame) and its shoulder (body frame, unrotated)
+    const L = [];
+    let wMax = 0;
+    for (let i = 0; i < plants.length; i++) {
+      const w = weights[plants[i].arm] || 0;
+      if (w <= 0.01) continue;
+      const part = plants[i].arm === "l" ? ch.parts.la : ch.parts.ra;
+      const P = ch.model.worldToLocal(_ttD.copy(plants[i].p)).clone();
+      L.push({ P: P, v: part.position, reach: CA.palmSpan(ch, plants[i].arm) * 0.90 * toRig, w: w });
+      if (w > wMax) wMax = w;
+    }
+    if (!L.length) return;
+    const w = wMax * gate;
+    /* Search the chest's pitch (and, on one hand, its roll onto that arm) for
+       the pose closest to the authored one that puts every loaded shoulder
+       within an arm's reach of its plant. The shoulders ride a sphere about
+       the hip pivot, so "aim the chest at the ideal point" overshoots whenever
+       the hip is nearer the hand than the torso is long; a direct search over
+       the joint does not. Analytic per candidate (Euler XYZ: Rx(p)Rz(r) about
+       the hip pivot), ~800 evaluations, only while a hand is loaded. */
+    const p0 = ch.body.rotation.x, r0 = ch.body.rotation.z;
+    const bob = ch.body.position.y - (ch._hipCompY || 0);
+    const oneHand = L.length === 1;
+    // a one-hand vault tips SIDEWAYS onto its arm (the legs are going past on
+    // the other side); a kong and a mantle pitch over their hands
+    const pitchCost = oneHand && tp.kind === "vault" ? 0.35 : 0.05;
+    let bestP = p0, bestR = r0, best = Infinity;
+    for (let ri = 0; ri <= (oneHand ? 19 : 0); ri++) {
+      const r = oneHand ? -0.95 + ri * 0.1 : r0;
+      const cr = Math.cos(r), sr = Math.sin(r);
+      for (let pi = 0; pi <= 40; pi++) {
+        const p = -0.55 + pi * 0.05;
+        const cp = Math.cos(p), sp = Math.sin(p);
+        let cost = Math.abs(p - p0) * pitchCost + Math.abs(r - r0) * 0.05;
+        for (let k = 0; k < L.length; k++) {
+          const v = L[k].v, P = L[k].P;
+          // Rz(r) then Rx(p) on (vx, vy - hy, vz)
+          const x1 = v.x * cr - (v.y - hy) * sr, y1 = v.x * sr + (v.y - hy) * cr, z1 = v.z;
+          const x = x1, y = y1 * cp - z1 * sp + hy + bob, z = y1 * sp + z1 * cp;
+          const d = Math.hypot(x - P.x, y - P.y, z - P.z);
+          // out of reach costs; so does a shoulder that dropped BELOW its hand
+          cost += Math.max(0, d - L[k].reach) * 4 + Math.max(0, P.y + 0.10 / toRig * 0 - y) * 2;
+        }
+        if (cost < best) { best = cost; bestP = p; bestR = r; }
+      }
+    }
+    ch.body.rotation.x = p0 + (bestP - p0) * w;
+    ch.body.rotation.z = r0 + (bestR - r0) * w;
+    lockCharacterHips(ch);
+    ch.group.updateMatrixWorld(true);
+  }
+  /* weight = how much this plant carries the arm this frame (the move's own
+     envelope). Lowers the rig, solves the planted arms, returns true if any
+     hand is on the obstacle. */
+  function traversePlants(ch, tp, weights, lower, pivotY) {
+    const plants = travPlantPoints(ch, tp);
+    const CA = CBZ.charArmTo;
+    if (!plants || !CA || !CA.plant || !ch.model || !ch.group) return false;
+    ch.group.updateMatrixWorld(true);
+    const scale = ch.model.matrixWorld.getMaxScaleOnAxis() || 0.7;
+    pivotY = pivotY || 0;
+    // ---- how far the body must come down for the planted arms to reach
+    //      (absolute: measured with this frame's drop in place, then added back)
+    const gs = scale / (ch.model.scale.y || 1);               // the group's own scale
+    // measure with last frame's drop in place (the pose above is this frame's)
+    const cur = lower ? (tp._drop || 0) : 0;
+    if (!ch._seatSunk) { ch.model.position.y = pivotY - cur / gs; ch.group.updateMatrixWorld(true); }
+    /* THE TORSO GOES WHERE THE HANDS ARE. At a run the root crosses a waist-
+       high wall in a third of a second; a torso held at an authored pitch
+       carries the shoulders straight past the plant in two frames. A vaulter
+       pivots OVER the hands instead: the chest dives toward them, stays over
+       them while the hips swing through, and comes up behind. So while a hand
+       is loaded, the chest's pitch (and on a one-hand vault its roll onto the
+       loaded arm) is solved to put that shoulder an arm's length straight
+       above its plant, blended over the authored pose by the plant weight. */
+    if (lower) travTorso(ch, tp, plants, weights);
+    let need = 0, any = false;
+    for (let i = 0; i < plants.length; i++) {
+      const w = weights[plants[i].arm] || 0;
+      if (w <= 0.01) continue;
+      any = true;
+      const part = plants[i].arm === "l" ? ch.parts.la : ch.parts.ra;
+      part.getWorldPosition(_tpS);
+      const reach = CA.palmSpan(ch, plants[i].arm) * 0.93;
+      const P = plants[i].p;
+      // coming down only helps a hand whose shoulder is already over its
+      // plant: a plant still a stride ahead is reached by running to it
+      const h = Math.hypot(_tpS.x - P.x, _tpS.z - P.z);
+      if (h >= reach * 0.97) continue;
+      const want = Math.sqrt(Math.max(0, reach * reach - h * h));
+      need = Math.max(need, (cur + (_tpS.y - P.y) - want) * w);
+    }
+    // ---- a VAULT's hips skim the top: that, not the arms, is what brings a
+    //      vaulter down onto his hands (the feet's arc is only the clearance)
+    const hy = hipYOf(ch);
+    _tpP.set(0, hy, 0);
+    ch.model.localToWorld(_tpP);
+    if (tp.kind === "vault") {
+      let wMax = 0;
+      for (let i = 0; i < plants.length; i++) wMax = Math.max(wMax, weights[plants[i].arm] || 0);
+      const skim = tp.style === "kong" ? 0.26 : 0.16;
+      need = Math.max(need, (cur + _tpP.y - (tp.top + skim)) * wMax);
+    }
+    // ---- how far it MAY come down: the pelvis stays out of what is under it
+    const allow = cur + _tpP.y - (travSupportY(tp, _tpP.x, _tpP.z) + 0.12);
+    let total = lower ? Math.max(-0.35, Math.min(Math.max(0, need), allow, 1.1)) : 0;
+    if (!ch._seatSunk) { ch.model.position.y = pivotY - total / gs; ch.group.updateMatrixWorld(true); }
+    /* ---- THE LEGS GO OVER IT. A foot the body's line would drag through the
+       obstacle (or into the lip on a mantle) is lifted by folding THAT leg —
+       more hip flexion, the knee straightened or folded, whichever raises the
+       foot — not by hoisting the whole body off its hands. Only what folding
+       cannot fix lifts the body (last resort, measured). */
+    let lift = 0;
+    const feet = ch.feet, knees = ch.low;
+    if (feet && knees) {
+      for (let li = 0; li < 2; li++) {
+        const side = li ? "rl" : "ll";
+        const leg = ch.parts[side], knee = knees[side], foot = feet[side];
+        if (!leg || !knee || !foot) continue;
+        const shortOf = function () {
+          leg.updateMatrixWorld(true);
+          foot.getWorldPosition(_tpA);
+          return travSupportY(tp, _tpA.x, _tpA.z) + 0.09 - _tpA.y;
+        };
+        let sh = shortOf();
+        for (let it = 0; it < 8 && sh > 0.005; it++) {
+          const hx = leg.rotation.x, kx = knee.rotation.x;
+          let best = sh, bh = hx, bk = kx;
+          const tries = [[-0.22, 0], [0, -0.30], [0, 0.30], [-0.22, 0.30]];
+          for (let t = 0; t < tries.length; t++) {
+            leg.rotation.x = Math.max(-2.2, hx + tries[t][0]);
+            knee.rotation.x = Math.max(0, Math.min(2.4, kx + tries[t][1]));
+            const v = shortOf();
+            if (v < best - 1e-4) { best = v; bh = leg.rotation.x; bk = knee.rotation.x; }
+          }
+          leg.rotation.x = bh; knee.rotation.x = bk;
+          if (best >= sh - 1e-4) { sh = shortOf(); break; }
+          sh = best;
+        }
+        if (sh > lift) lift = sh;
+      }
+    }
+    if (lower && lift > 0.005) {
+      total = Math.max(-0.35, total - lift);
+      if (!ch._seatSunk) { ch.model.position.y = pivotY - total / gs; ch.group.updateMatrixWorld(true); }
+    }
+    tp._dropNeed = need; tp._dropAllow = allow; tp._drop = total;
+    if (!any) return false;
+    ch.group.updateMatrixWorld(true);
+    // ---- the palms, on the obstacle, fingers along the move
+    _tpDir.set(tp.dirX, 0, tp.dirZ);
+    let on = false;
+    for (let i = 0; i < plants.length; i++) {
+      const pl = plants[i];
+      // a palm lets go when its shoulder has swung out of reach of it (the
+      // body has gone past, or up over it) — the envelope says WHEN it may
+      // be on, the arm's length says whether it CAN be
+      _tpDir.set(tp.dirX, 0, tp.dirZ);
+      const share = CA.plantShare(ch, pl.p, pl.arm, _tpUp, _tpDir);
+      // (past 1.0 the shoulder PROTRACTS toward it, charArmTo.wrist: a loaded
+      // arm at full stretch still has the shoulder blade to give)
+      // A contact is on or off: the envelope only says when the hand WANTS
+      // down, so the solve comes in fast (a partly-blended IK is a hand
+      // hovering beside the point, not a hand on it)
+      const w = smooth01(((weights[pl.arm] || 0) - 0.12) / 0.30) * (1 - smooth01((share - 1.0) / 0.08));
+      pl.w = w;
+      if (w <= 0.01) { if (CA.plantRelease) CA.plantRelease(ch, pl.arm); pl.res = null; continue; }
+      // the hand turns in a little on a two-hand plant (fingers slightly toward
+      // each other), out on a one-hand plant (the arm comes from the side)
+      pl.res = CA.plant(ch, pl.p, pl.arm, _tpUp, _tpDir, w);
+      if (pl.res != null && pl.res < 0.03 && w > 0.5) on = true;
+    }
+    return on;
   }
   const _reachMountGrip = new THREE.Vector3();
   // The holster target already exists as a live rig mount. Solve the same
@@ -4903,6 +5109,124 @@
     const P = ch.profile || {};
     low.updateWorldMatrix(true, false);
     return low.localToWorld(out.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo), 0));
+  };
+  /* ---- charArmTo.plant — A PALM ON THE WORLD -------------------------------
+     A hand that pushes on something is not a hand that points at it. Vault
+     over a wall, haul up onto a ledge, shove a door, brace on a car roof: the
+     PALM goes flat on the surface at the contact point, the fingers lie along
+     the way the body is going, and the arm is solved so the wrist sits where
+     that hand's wrist has to be. Everything is measured off the live rig, so
+     a child's short arm and a man's long one both land on the same spot, and
+     the answer is exact (charArmTo.wrist) rather than an Euler guess.
+
+       charArmTo.plant(ch, point, arm, normal, along, k)
+         point   world contact point (on the surface)
+         normal  world surface normal (the palm faces against it)
+         along   world direction the fingers lie along (orthogonalised)
+         k       0..1 weight: the arm and the hand blend from the pose already
+                 there, so a reach comes in and lets go without a snap
+       Returns the metres between the palm's contact point and `point` (0 =
+       planted; more = out of reach), or null if the rig can't be solved.
+     The hand wears fphands' "plant" pose (fingers flat, pads and heel on one
+     plane); charArmTo.plantRelease(ch, arm) hands it back. */
+  const _plN = new THREE.Vector3(), _plF = new THREE.Vector3(), _plX = new THREE.Vector3(), _plZ = new THREE.Vector3();
+  const _plW = new THREE.Vector3(), _plC = new THREE.Vector3(), _plS = new THREE.Vector3(), _plT = new THREE.Vector3();
+  const _plM = new THREE.Matrix4(), _plQ = new THREE.Quaternion(), _plLQ = new THREE.Quaternion(), _plR = new THREE.Quaternion();
+  // the planted palm's world frame (+Y = the back of the hand = the surface
+  // normal, -Z = the fingers, X = Y x Z) into _plQ, and the wrist crease that
+  // puts its contact point on `point` into _plW
+  function plantFrame(hand, low, point, normal, along) {
+    _plN.copy(normal).normalize();
+    _plF.copy(along).addScaledVector(_plN, -along.dot(_plN));
+    if (_plF.lengthSq() < 1e-8) { _plF.set(1, 0, 0).addScaledVector(_plN, -_plN.x); }
+    _plF.normalize();
+    _plZ.copy(_plF).negate();
+    _plX.crossVectors(_plN, _plZ);
+    _plM.makeBasis(_plX, _plN, _plZ);
+    _plQ.setFromRotationMatrix(_plM);
+    low.updateWorldMatrix(true, false);
+    _plS.setFromMatrixScale(low.matrixWorld);
+    const hs = hand.userData.fit.s * _plS.x;
+    const side = hand.userData.side < 0 ? -1 : 1;
+    const pc = CBZ.fpHands.PLANT_CONTACT;
+    _plC.set(pc[0] * side, pc[1], pc[2]).multiplyScalar(hs).applyQuaternion(_plQ);
+    return _plW.copy(point).sub(_plC);
+  }
+  /* How far that crease is from its shoulder as a share of the arm's two
+     bones (1 = at full stretch; the plant lands exactly below 1). */
+  charArmTo.plantShare = function (ch, point, arm, normal, along) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const hand = part && part.userData && part.userData.cap;
+    if (!low || !hand || !hand.userData.fit || !CBZ.fpHands || !CBZ.fpHands.PLANT_CONTACT) return Infinity;
+    plantFrame(hand, low, point, normal, along);
+    part.getWorldPosition(_plT);
+    const L = (-low.position.y - hand.userData.fit.wristY) * _plS.x;
+    return L > 0 ? _plT.distanceTo(_plW) / L : Infinity;
+  };
+  charArmTo.plant = function (ch, point, arm, normal, along, k) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const hand = part && part.userData && part.userData.cap;
+    const H = CBZ.fpHands;
+    if (!low || !hand || !hand.userData.fit || !H || !H.PLANT_CONTACT || !point || !normal || !along) return null;
+    const w = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (w <= 0) return null;
+    plantFrame(hand, low, point, normal, along);       // _plQ: the palm; _plW: the crease
+    if (ch.setHandPose) ch.setHandPose(arm, "plant");
+    const side = hand.userData.side < 0 ? -1 : 1;
+    const pc = H.PLANT_CONTACT;
+    // the forearm arrives from the shoulder's side of the hand: a support arm
+    // is loaded along its length, not folded across it
+    part.getWorldPosition(_plT);
+    _plT.sub(_plW).normalize();
+    charArmTo.wrist(ch, _plW, arm, _plT, w);
+    // the hand, on the surface (in the elbow frame), blended from its rest
+    low.updateWorldMatrix(true, false);
+    low.getWorldQuaternion(_plLQ);
+    _plR.copy(_plLQ).invert().multiply(_plQ);
+    placeBodyHand(hand);                               // the rest frame (and the crease position)
+    if (w >= 1) hand.quaternion.copy(_plR); else hand.quaternion.slerp(_plR, w);
+    wristTwist(ch, arm);
+    // residual: the palm's contact point where it actually is
+    hand.updateMatrixWorld(true);
+    _plT.set(pc[0] * side, pc[1], pc[2]);
+    hand.localToWorld(_plT);
+    return _plT.distanceTo(point);
+  };
+  charArmTo.plantRelease = function (ch, arm) {
+    const hs = handsOf(ch, arm || "both");
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i];
+      if (m && m.userData.handPose === "plant") {
+        setBodyHandPose(ch, m.userData.side < 0 ? "l" : "r", "relaxed");
+      }
+    }
+  };
+  /* How far a PALM can get from its shoulder, world metres: the two bones to
+     the wrist crease (what charArmTo.wrist solves) plus the crease-to-palm
+     offset of a planted hand. charArmTo.span is the socket's reach, which
+     runs a hand's length past the crease, so it over-promises a planted palm
+     by ~6 cm — enough to call a hand "on" a wall it is 10 cm short of. */
+  charArmTo.palmSpan = function (ch, arm) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    const hand = part && part.userData && part.userData.cap;
+    if (!low || !hand || !hand.userData.fit) return charArmTo.span(ch, arm);
+    low.updateWorldMatrix(true, false);
+    _plS.setFromMatrixScale(low.matrixWorld);
+    const l1 = -low.position.y, l2 = -hand.userData.fit.wristY;
+    const pc = (CBZ.fpHands && CBZ.fpHands.PLANT_CONTACT) || [0, -0.02, -0.05];
+    return ((l1 + l2) * 0.999 + Math.hypot(pc[1], pc[2]) * hand.userData.fit.s) * _plS.x;
+  };
+  /* How far a shoulder is from a point, as a share of what that arm's planted
+     palm can reach (palmSpan). 1 = at full stretch. */
+  charArmTo.reachShare = function (ch, point, arm) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (!part || !point) return Infinity;
+    part.getWorldPosition(_plT);
+    const sp = charArmTo.palmSpan(ch, arm);
+    return sp > 0 ? _plT.distanceTo(point) / sp : Infinity;
   };
   CBZ.charArmTo = charArmTo;
 
@@ -6186,6 +6510,9 @@
     if (ch.traversePose) {
       const tp = ch.traversePose;
       const u = clamp01(tp.t || 0);
+      // how much each hand is ON the obstacle this frame (traversePlants)
+      const plantW = _plantW; plantW.l = 0; plantW.r = 0;
+      let travPivotY = 0;              // the spin's hip pivot (model.position.y before any drop)
       const air = Math.sin(Math.PI * u);
       const sr = 18;
       const limb = (part, x, y, z, pz) => {
@@ -6336,23 +6663,18 @@
         // hands instead of hanging back while the arms point skyward.
         ch.body.rotation.x = damp(ch.body.rotation.x, 0.10 * hold + 0.12 * pull, sr, dt);
         ch.body.rotation.z = damp(ch.body.rotation.z, 0.06 * Math.sin(u * Math.PI * 2) * pull, sr, dt);
-        // lockCharacterHips changes the body's translation after a pitch. Apply
-        // it before the world→body conversion so the wrist target includes the
-        // exact compensated shoulder position used for rendering.
-        lockCharacterHips(ch);
-        const leftGrip = mantleArmSolve(ch, tp, 1);
-        const rightGrip = mantleArmSolve(ch, tp, -1);
+        // The arms reach UP for the lip (the authored beat), then the plant
+        // solve at the end of this branch takes each hand onto it for real.
         const press = smoother01((u - 0.48) / 0.28) *
           (1 - smoother01((u - 0.80) / 0.18));
         const armRest = -0.20 - 0.32 * press;
-        const leftX = leftGrip ? armRest + (leftGrip.shoulder - armRest) * hold : -0.20 - 1.18 * hold;
-        const rightX = rightGrip ? armRest + (rightGrip.shoulder - armRest) * hold : -0.20 - 1.18 * hold;
-        const leftZ = leftGrip ? -0.10 + (leftGrip.roll + 0.10) * hold : -0.18 * hold;
-        const rightZ = rightGrip ? 0.10 + (rightGrip.roll - 0.10) * hold : 0.18 * hold;
-        limb(ch.parts.la, leftX, 0.05, leftZ, 0.04 * hold);
-        limb(ch.parts.ra, rightX, -0.05, rightZ, 0.04 * hold);
-        setElbow(J.la, leftGrip ? -0.18 + (leftGrip.elbow + 0.18) * hold : -0.20 - hold * 0.82, sr);
-        setElbow(J.ra, rightGrip ? -0.18 + (rightGrip.elbow + 0.18) * hold : -0.20 - hold * 0.82, sr);
+        limb(ch.parts.la, armRest - 1.60 * reach * release, 0.05, -0.10, 0.04 * hold);
+        limb(ch.parts.ra, armRest - 1.60 * reach * release, -0.05, 0.10, 0.04 * hold);
+        setElbow(J.la, -0.18 - 0.60 * hold, sr);
+        setElbow(J.ra, -0.18 - 0.60 * hold, sr);
+        // the hands stay on the top through the pull AND the press-out, for as
+        // long as the arms can reach it (traversePlants gates on reach)
+        plantW.l = plantW.r = smoother01(u / 0.20) * (1 - smoother01((u - 0.70) / 0.16));
         // One knee drives high first, the other leg trails and then switches —
         // the asymmetry is the difference between hauling a body up and levitating.
         const switchLeg = smooth01((u - 0.52) / 0.34);
@@ -6377,17 +6699,27 @@
         const plant = Math.sin(Math.PI * clamp01((u - 0.03) / 0.88));
         const tuck = Math.sin(Math.PI * clamp01((u - 0.12) / 0.82));
         if (tp.style === "kong") {
-          ch.body.position.y = damp(ch.body.position.y, -0.16 * plant, sr, dt);
-          ch.body.rotation.x = damp(ch.body.rotation.x, -0.50 * plant, sr, dt);
+          // a kong DIVES at its hands: chest down over them (positive pitch is
+          // toward the move — the old -0.50 threw the chest BACK off the plant)
+          // The torso goes nearly flat over the hands (a real kong has the
+          // shoulders over the plant and the hips high behind them) and the
+          // knees come right up to the chest so the feet pass between the hands.
+          ch.body.position.y = damp(ch.body.position.y, -0.10 * plant, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 1.10 * plant, sr, dt);
+          plantW.l = plantW.r = plant;
           ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
-          limb(ch.parts.la, -0.18 - 1.62 * plant, 0.08, -0.16, 0.16 * plant);
-          limb(ch.parts.ra, -0.18 - 1.62 * plant, -0.08, 0.16, 0.16 * plant);
+          limb(ch.parts.la, -0.18 - 1.20 * plant, 0.08, -0.16, 0.16 * plant);
+          limb(ch.parts.ra, -0.18 - 1.20 * plant, -0.08, 0.16, 0.16 * plant);
           setElbow(J.la, -0.18 - plant * 0.34, sr);
           setElbow(J.ra, -0.18 - plant * 0.34, sr);
-          limb(ch.parts.ll, -0.12 - tuck * 1.18, 0, 0.11, 0);
-          limb(ch.parts.rl, -0.12 - tuck * 1.18, 0, -0.11, 0);
-          setKnee(J.ll, 0.08 + tuck * 1.48, sr);
-          setKnee(J.rl, 0.08 + tuck * 1.48, sr);
+          // legs TRAIL while the hands take the weight (a dive: hips high,
+          // feet behind), then the knees snap through between the hands
+          const trail = Math.sin(Math.PI * clamp01((u - 0.08) / 0.46));
+          const thru = Math.sin(Math.PI * clamp01((u - 0.36) / 0.56));
+          limb(ch.parts.ll, 0.45 * trail - 0.12 - thru * 1.85, 0, 0.11, 0);
+          limb(ch.parts.rl, 0.40 * trail - 0.12 - thru * 1.85, 0, -0.11, 0);
+          setKnee(J.ll, 0.08 + 0.55 * trail + thru * 2.20, sr);
+          setKnee(J.rl, 0.08 + 0.65 * trail + thru * 2.20, sr);
         } else if (tp.style === "spin") {
           // Sprint-only spy vault: spend the opening beat reaching/planting,
           // ease through one full revolution, then leave a recovery beat before
@@ -6402,6 +6734,7 @@
           ch.body.rotation.x = damp(ch.body.rotation.x, -0.16 * air, sr, dt);
           ch.body.rotation.z = damp(ch.body.rotation.z, -0.12 * air, sr, dt);
           limb(ch.parts.la, -0.22 - 1.38 * handPlant, 0.18, -0.34 - 0.46 * air, 0.12 * handPlant);
+          plantW.l = handPlant;
           limb(ch.parts.ra, -0.24 - 0.56 * air, -0.18, 0.66 + 0.24 * air, 0.04);
           setElbow(J.la, -0.24 - handPlant * 0.48, sr);
           setElbow(J.ra, -0.32 - air * 0.42, sr);
@@ -6413,29 +6746,47 @@
             ch.model.rotation.x = -0.08 * air * commit;
             ch.model.rotation.y = 0.08 * air * commit;
             ch.model.rotation.z = -Math.PI * 2 * spinPhase;
+            /* ABOUT THE HIPS. `model`'s origin is at the FEET, so a roll of it
+               alone swung the whole body round the soles — the head went
+               through the obstacle and the ground on the way round (pelvis
+               52 cm inside the wall: tools/traverse-hands-check.mjs). Rotating
+               about P is R plus P - R*P; P is the hip socket. */
+            const hs = hipYOf(ch) * (ch.model.scale.y || 1);
+            _spinP.set(0, hs, 0).applyEuler(ch.model.rotation);
+            ch.model.position.x = -_spinP.x;
+            ch.model.position.z = -_spinP.z;
+            travPivotY = hs - _spinP.y;
           }
         } else {
           // One-hand speed vault: plant left, throw the opposite arm back, split
           // the legs sideways and let the hips skim the obstacle.
+          // The torso tips onto the planted (left) arm — that arm is what the
+          // body pivots over — and leans back a little as the legs go through.
           ch.body.position.y = damp(ch.body.position.y, -0.12 * plant, sr, dt);
-          ch.body.rotation.x = damp(ch.body.rotation.x, -0.34 * plant, sr, dt);
-          ch.body.rotation.z = damp(ch.body.rotation.z, -0.34 * air, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.30 * plant, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, -0.72 * plant, sr, dt);
           limb(ch.parts.la, -0.18 - 1.66 * plant, 0.10, -0.42, 0.16 * plant);
+          plantW.l = plant;
           limb(ch.parts.ra, 0.36 * air, -0.16, 0.72 * air, 0);
           setElbow(J.la, -0.16 - plant * 0.26, sr);
           setElbow(J.ra, -0.38 - air * 0.18, sr);
-          limb(ch.parts.ll, -0.18 - tuck * 0.48, 0.18, 0.58 * air, 0);
-          limb(ch.parts.rl, -0.14 - tuck * 0.92, -0.12, -0.24 * air, 0);
-          setKnee(J.ll, 0.08 + tuck * 0.62, sr);
-          setKnee(J.rl, 0.08 + tuck * 1.18, sr);
+          // the legs come UP to hip height and swing across the top beside
+          // the planted hand (lead leg long, trail leg folded under it)
+          limb(ch.parts.ll, -0.18 - tuck * 1.30, 0.18, 0.58 * air, 0);
+          limb(ch.parts.rl, -0.14 - tuck * 1.45, -0.12, -0.24 * air, 0);
+          setKnee(J.ll, 0.08 + tuck * 0.55, sr);
+          setKnee(J.rl, 0.08 + tuck * 1.35, sr);
         }
         if (tp.style !== "spin" && ch.model) {
           ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
           ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
           ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+          ch.model.position.x = damp(ch.model.position.x, 0, sr, dt);
+          ch.model.position.z = damp(ch.model.position.z, 0, sr, dt);
         }
         if (ch.neck) {
-          ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.16 * air, sr, dt);
+          // eyes on the landing: a chest pitched flat over a kong lifts the chin
+          ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.16 * air - (tp.style === "kong" ? 0.70 * plant : 0), sr, dt);
           ch.neck.rotation.z = damp(ch.neck.rotation.z, tp.style === "spin" ? 0.12 * air : 0, sr, dt);
         }
       }
@@ -6445,7 +6796,14 @@
       ch._stanceNk = 1;                 // reuse the proven full-pose neck recovery
       ch._traverseRecover = 1;
       lockCharacterHips(ch);
+      // THE HANDS GO ON THE OBSTACLE (after the hip lock: the shoulders are final)
+      if (tp.kind !== "through") { traversePlants(ch, tp, plantW, true, travPivotY); ch._planted = 1; }
       return;
+    }
+    if (ch._planted) {
+      // the move is over: the palms come off whatever they were on
+      ch._planted = 0;
+      if (CBZ.charArmTo && CBZ.charArmTo.plantRelease) CBZ.charArmTo.plantRelease(ch, "both");
     }
     // The model node is normally scale-only. A spy vault temporarily rolls it
     // and a landing roll pitches AND offsets it (see the pivot note below);
@@ -7664,21 +8022,23 @@
     want = Math.max(-GUN_REST_MAX_DOWN, Math.min(GUN_REST_MAX_UP, want));
     // rise fast (a gun in the dirt is a bug the eye catches), settle slower
     ch._gunRestY = damp(prevLift, want, want > prevLift ? 18 : 9, dt);
-    if (Math.abs(ch._gunRestY) < 1e-4) {
-      ch._gunRestY = 0;
-      if (socket.position.x !== base.x || socket.position.y !== base.y || socket.position.z !== base.z) {
-        socket.position.copy(base);
-      }
-      return;
+    if (Math.abs(ch._gunRestY) < 1e-4) ch._gunRestY = 0;
+    /* THE LIFT RIDES THE ARM, NEVER THE SOCKET. This pass used to translate
+       the weapon socket inside the hand by the lift, and every hold that
+       seats the gun off its OWN cached solve (systems/actorweapons.js
+       CBZ.gunHold: the low-ready and ready poses the player copies each frame)
+       then wrote the gun's local transform back relative to that displaced
+       socket: the rifle left the fist by the whole lift. A teen crouched at
+       low ready with a long gun had the stock on the ground, the lift wound up
+       to 0.5 m and the gun floated 60 cm out of both hands
+       (tools/gun-hold-check.mjs, carry-crouch). The hands are what hold the
+       gun up off the ground, so the lift is published here and spent on the
+       WRIST (CBZ.gunHold.fire's `lift`, and gunhands.js after the cached
+       hold): the fist comes up and the gun comes up in it. The socket stays
+       where the rig built it. */
+    if (socket.position.x !== base.x || socket.position.y !== base.y || socket.position.z !== base.z) {
+      socket.position.copy(base);
     }
-    // The lift is a WORLD +Y translation; the socket lives in the rotated,
-    // rig-scaled hand frame, so take it back through both.
-    const parent = socket.parent || socket;
-    parent.updateWorldMatrix(true, false);
-    parent.matrixWorld.decompose(_grPos, _grHandQ, _grScale);
-    const s = Math.abs(_grScale.y) > 1e-5 ? _grScale.y : 1;
-    _grDelta.set(0, ch._gunRestY / s, 0).applyQuaternion(_grHandQ.invert());
-    socket.position.set(base.x + _grDelta.x, base.y + _grDelta.y, base.z + _grDelta.z);
   }
   /* Ratchet: `sunk` counts frames the drawn weapon's lowest vertex was still
      below the ground BEFORE this pass corrected it — it is the raw fault rate

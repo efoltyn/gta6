@@ -151,7 +151,18 @@
     wheel:   { wrap: 0.016, thumb: T_WRAP, cup: 0.005 },
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
     card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004, stub: 0 },
+    /* A PALM PLANTED ON A SURFACE (a vault, a mantle, a hand on a door): the
+       fingers lie flat and spread with just enough flexion that their pads
+       and the heel of the palm meet ONE plane (PLANT_Y below the palm's
+       centre), the thumb out to the side for the base of support. The
+       character's charArmTo.plant lays this hand on the real contact point;
+       stub 0 like a gun hold: the hand bends at the crease, it does not slide. */
+    plant:   { flex: [[0.10, 0.12, 0.08], [0.09, 0.11, 0.07], [0.10, 0.12, 0.08], [0.12, 0.14, 0.09]], splay: 1.6,
+               thumb: [[-0.85, 0.00, -0.52], [-0.72, 0.03, -0.69], [-0.58, 0.03, -0.81]], cup: 0.0015, stub: 0 },
   };
+  // the plane a planted palm rests on: under the heel and the finger pads
+  // (hand metres, right-hand frame: y below the palm centre, z = the palm's middle)
+  const PLANT_CONTACT = [0, -0.0224, -0.050];
   /* BODY GUN HOLDS, SIZED TO WHAT IS HELD (systems/gunhands.js CBZ.gunHold).
      A body hand closes round a gun drawn at 1.45-1.75x real size (weapon-
      scale.js READ) with a hand drawn at 1.1x, so the part it wraps is, in the
@@ -199,7 +210,8 @@
       return flexForWrap(pose.wrap, f);
     });
     pose._flex = flex;
-    pose._joints = { fingers: FINGERS.map(function (f, i) { return fingerChain(f, flex[i]); }), thumb: thumbChain(pose.thumb) };
+    const spk = pose.splay || 1;
+    pose._joints = { fingers: FINGERS.map(function (f, i) { return fingerChain(f, flex[i], spk !== 1 ? f.splay * spk : null); }), thumb: thumbChain(pose.thumb) };
     return pose;
   }
   // centre of the cylinder a wrap pose closes round, hand frame (right hand)
@@ -1411,7 +1423,7 @@
 
   CBZ.fpHands = {
     version: 2,
-    POSES, PALM, FINGERS, THUMB,
+    POSES, PALM, FINGERS, THUMB, PLANT_CONTACT,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
     grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,

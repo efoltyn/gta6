@@ -472,7 +472,20 @@
       const aimed = !!ch.aimingPose;
       if (aimed) {
         if (CBZ.playerAimDir) CBZ.playerAimDir(_fwd); else _fwd.set(0, 0, 1);
-        GH.pitchNpc(ch, prop, -Math.asin(Math.max(-1, Math.min(1, _fwd.y))));
+        /* THE PITCH IS THE AIM IN THE CHEST'S OWN FRAME. The cached solves
+           are body-relative (arms, gun and hands all hang off ch.body), so a
+           torso that leans — the crouch hunches 0.16 rad forward, a walk or a
+           run leans into its pace — tips the solved gun down by exactly that
+           much. Reading the level off the WORLD aim left aimTrim to turn the
+           gun back up by several degrees about its own origin, which carried
+           the grip out of the fist (2.3 cm) and the handguard off the support
+           hand (5 cm) in every crouch (tools/gun-hold-check.mjs, crouch/walk
+           stances). Express the aim in the body frame and the table answers
+           the lean itself; standing upright this is the old number exactly. */
+        ch.body.getWorldQuaternion(_bodyQ);
+        _tmp.copy(_fwd).applyQuaternion(_bodyQ.invert());
+        const pitch = -Math.asin(Math.max(-1, Math.min(1, _tmp.y / (_tmp.length() || 1))));
+        GH.pitchNpc(ch, prop, pitch);
       } else {
         GH.lowReady(ch, prop);
         seen.why = "low ready";
@@ -480,6 +493,13 @@
       // where the solve put the gun (the support hand is on it there)
       prop.updateWorldMatrix(true, false);
       _m0.copy(prop.matrixWorld);
+      /* OFF THE GROUND WITH THE HANDS. The cached hold knows nothing about
+         the floor; entities/character.js gunGroundRest measures how far the
+         drawn gun must come up to clear it and publishes the lift. Spend it
+         on the firing wrist (the gun is seated in that fist): the support
+         hand re-lands below because the gun has moved. */
+      const lift = ch._gunRestY || 0;
+      if (lift > 0.002) GH.fire(ch, prop, aimed, lift);
       // presenting, exactly onto the crosshair: the last half-degree the
       // pitch table leaves, turned into the gun and the fist together
       if (aimed) aimTrim(ch, prop);
@@ -600,12 +620,24 @@
            to the CENTRELINE and meet there; keep the extension exactly as the
            aim pose set it and only move it inboard. */
         _tmp.copy(_ext).sub(_rt);                               // the arm's own reach
-        _rt.lerp(_sh, 0.42).add(_tmp);
+        _rt.lerp(_sh, ch.pronePose ? 0.5 : 0.42).add(_tmp);          // prone: both elbows on the deck, hands meet on the centreline
         // a compact with its support grip AHEAD of the fist (the Uzi's
         // receiver) comes back toward the chest by that much, elbows bending
         GH.supportPoint(ch, prop, _sp);
         const ahead = _sp.sub(_ext).dot(_fwd);
         if (ahead > 0.06) _rt.addScaledVector(_fwd, -(ahead - 0.06));
+        /* …and within the off arm's reach. Standing, the aim pose's own
+           extension already is; prone, the elbows-on-the-deck pose pushes the
+           pistol 0.46 m out ahead of a chest lying on the ground and the off
+           shoulder is 0.69 m from the cup against a 0.63 m arm (gun-hold-check,
+           aim-prone: 8.5 cm short). Bring the gun back toward the face by what
+           is missing — a prone pistol is held with the elbows bent, close in. */
+        if (CBZ.charArmTo.span) {
+          const reach = CBZ.charArmTo.span(ch, "l") * 0.95;
+          _sp.add(_rt).sub(_sh);                 // (_sp held the grip's offset from the gun)
+          const d = _sp.length();
+          if (d > reach) _rt.addScaledVector(_fwd, -Math.min(0.30, (d - reach) * 1.2));
+        }
         seen.butt = 0;
       } else if (stock <= 0.18) {
         /* A PISTOL AT LOW READY, two hands: in front of the belly, arms angled
@@ -738,7 +770,8 @@
      Runs before holsterprops (54) so the gun is aimed and seated off the
      turned body in the same frame. */
   const BLADE = GH.BLADE, BLADE_NECK = GH.BLADE_NECK;   // the NPC ready pose blades the same
-  let bladeK = 0, bladeRig = null;
+  let bladeK = 0, bladeRig = null, proneK = 0;
+  const PRONE_BLADE = 0.44;
   /* ---- THE HOLD IS AN OVERLAY ON THE ANIMATION, NOT AN INPUT TO IT --------
      animChar damps every arm channel FROM its current value. Every pass here
      (the blade, holsterprops' firing fist, the support hand, the reload) IK-
@@ -828,6 +861,20 @@
     if (bladeK < 1e-3) bladeK = 0;
     const a = -BLADE * bladeK;                  // negative yaw: the left (+X) shoulder comes forward
     if (bladeK > 0) ch.body.rotation.y = a;
+    /* PRONE HAS A BLADE TOO. A prone shooter does not lie square to the
+       target: the body angles off the gun line (~20 deg) so the support
+       elbow lands UNDER the handguard. Square, this rig's off shoulder is
+       0.78 m from a carbine's handguard against a 0.63 m arm, and the
+       support hand hung 7-14 cm off every two-hand gun (gun-hold-check,
+       aim-prone). The chest is hinged face-down (PRONE_PITCH), so its own
+       Z axis points at the deck: a turn about it is a turn about the world
+       vertical, and +Z brings the left (+X) shoulder forward. Written over
+       the prone pose's own crawl sway, which damps back from it. */
+    const proneOn = !!(prop && ch.parts && ch.pronePose && !R.active && !(CBZ.player && CBZ.player.dead) &&
+      !(CBZ.fps && CBZ.fps.active) && GH.isLong(prop) && GH.specOf(prop) && GH.specOf(prop).sup);
+    proneK += ((proneOn ? 1 : 0) - proneK) * Math.min(1, 6 * (dt || 0.016));
+    if (proneK < 1e-3) proneK = 0;
+    if (proneK > 0) ch.body.rotation.z += (PRONE_BLADE * proneK - ch.body.rotation.z) * Math.min(1, proneK);
     if (ch.neck) {
       const want = -a * BLADE_NECK;
       ch.neck.rotation.y += want - (ch._bladeNeck || 0);
