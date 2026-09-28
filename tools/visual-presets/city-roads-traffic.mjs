@@ -140,9 +140,10 @@ async function stageCityRoadsTraffic(input) {
   try { if (CBZ.dayPhase) CBZ.dayPhase(subject.phase); } catch (_) {}
   const roadY = A.vehicleSurfaceY ? A.vehicleSurfaceY(S.aveX, S.crossZ) : 0.065;
   const cams = {
-    // a driver's eye in the avenue's inner lane south of the junction, looking north up it
-    eye: { x: S.aveX + 2.2, y: roadY + 1.5, z: S.crossZ - ROAD / 2 - 14,
-           ax: S.aveX + 1.5, ay: roadY + 0.9, az: S.crossZ + 60, fov: 52 },
+    // a driver's eye in the avenue's inner lane south of the junction, looking
+    // north up it (northbound keeps right: its lanes are at -x, config.js)
+    eye: { x: S.aveX - 2.2, y: roadY + 1.5, z: S.crossZ - ROAD / 2 - 14,
+           ax: S.aveX - 1.5, ay: roadY + 0.9, az: S.crossZ + 60, fov: 52 },
     // over the avenue, looking down onto the junction box
     junction: { x: S.aveX + 3, y: roadY + 14, z: S.crossZ - 44,
                 ax: S.aveX, ay: roadY, az: S.crossZ + 2, fov: 46 },

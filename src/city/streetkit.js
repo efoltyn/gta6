@@ -879,18 +879,21 @@
       frameRect(yellow, F, -yo - LW, -yo, y0, y1, wornTone(F.ox, F.oz, 4));
       const edgeU = base + G.nL * G.laneW;
       for (let s = -1; s <= 1; s += 2) {
-        // side s travels +forward when s > 0 (the lane contract in config.js)
-        const barNear = s > 0 ? len - G.stop0 : G.stop0, barFar = s > 0 ? len - G.stop1 : G.stop1;
+        // side s travels +forward when fw > 0. Keep right (config.js
+        // roadLaneSide): on a horizontal strip lateral +z carries +x traffic;
+        // on a vertical strip lateral +x carries -z traffic.
+        const fw = vertical ? -s : s;
+        const barNear = fw > 0 ? len - G.stop0 : G.stop0, barFar = fw > 0 ? len - G.stop1 : G.stop1;
         // lane lines
         for (let k = 1; k < G.nL; k++) {
           const u = s * (base + k * G.laneW);
-          const solidA = s > 0 ? barFar - SOLID : barFar, solidB = s > 0 ? barFar : barFar + SOLID;
+          const solidA = fw > 0 ? barFar - SOLID : barFar, solidB = fw > 0 ? barFar : barFar + SOLID;
           frameRect(white, F, u - LW / 2, u + LW / 2, Math.min(solidA, solidB), Math.max(solidA, solidB), wornTone(F.ox + u, F.oz, 5));
           // dashes from the departure end: 3 m on, 9 m off
-          const dep = s > 0 ? DEP0 : len - DEP0;
+          const dep = fw > 0 ? DEP0 : len - DEP0;
           for (let q = 0; q < 8; q++) {
-            const a = s > 0 ? dep + q * 12 : dep - q * 12 - 3, b = a + 3;
-            if (s > 0 ? b > solidA - 1 : a < solidB + 1) break;
+            const a = fw > 0 ? dep + q * 12 : dep - q * 12 - 3, b = a + 3;
+            if (fw > 0 ? b > solidA - 1 : a < solidB + 1) break;
             frameRect(white, F, u - LW / 2, u + LW / 2, a, b, wornTone(F.ox + u + a, F.oz + a, 6));
           }
         }
@@ -958,8 +961,9 @@
         if (midtown(i, j)) {
           const aBase = G.stop1 + 3.0;
           if (G.legA(j, sg)) {
-            // approaching from leg sg travelling -sg: lanes on side s = -sg (u sign)
-            const s = -sg, ave = G.isAve(i), base = ave ? G.medHalf : 0;
+            // approaching from leg sg travelling -sg along z: keep right puts
+            // those lanes on side s = +sg in x (heading -z, the driver's right is +x)
+            const s = sg, ave = G.isAve(i), base = ave ? G.medHalf : 0;
             for (let idx = 0; idx < G.nL; idx++) {
               const u = s * (base + (idx + 0.5) * G.laneW);
               const F = { ox: X[i] + u, oz: Z[j] + sg * (aBase + 3.0), rx: s, rz: 0, fx: 0, fz: -sg };
@@ -1042,7 +1046,7 @@
     for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
       for (const sg of [-1, 1]) for (const axisA of [true, false]) {
         if (axisA ? !G.legA(j, sg) : !G.legB(i, sg)) continue;
-        const s = -sg;
+        const s = axisA ? sg : -sg;              // the approach lanes' side (keep right)
         for (let idx = 0; idx < G.nL; idx++) {
           const hk = hsh(X[i] * 3 + idx, Z[j] * 3 + sg, axisA ? 61 : 62);
           const base = axisA && G.isAve(i) ? G.medHalf : 0;

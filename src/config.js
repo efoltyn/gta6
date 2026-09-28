@@ -589,20 +589,29 @@
   };
 
   // ---- CBZ.roadLaneCenter(r, dir, idx) / CBZ.roadLanesPerDir(r) ----------------
-  // Convenience wrappers over roadLanes() for the NPC-car lane-keepers. Every
-  // driver system (vehicles/traffic/police/armored/gigfleet) historically owned
-  // an identical `laneOffset(dir,idx)=dir*laneW*(idx+0.5)` closure that read only
-  // the GLOBAL 2-lane traffic contract — so cars hugged the centreline on 3+3
-  // highways and kissed the median. These read the road's REAL cross-section:
-  //   center = dir * (medianHalf + (idx+0.5)*laneW)   [idx 0 = innermost lane]
-  // and fall back to the global contract for roads with no per-road data (that
-  // fallback lives inside roadLanes()). Lane-TARGET geometry only — physics and
-  // collision are untouched.
+  // THE ONE lane contract every driver steers by (vehicles/traffic/police/
+  // armored/gigfleet/motorcade/highways/interchange/roadrules). Returns the
+  // signed lateral offset of lane `idx` (0 = innermost) for traffic moving in
+  // `dir` (+1 = +x on a horizontal road, +z on a vertical one), measured along
+  // +z on a horizontal road and +x on a vertical one.
+  //
+  // EVERYONE DRIVES ON THE RIGHT. The old formula was `dir * offset` on both
+  // axes, which is right-hand on east-west roads (heading +x, the driver's
+  // right is +z) but LEFT-hand on north-south roads (heading +z, the driver's
+  // right is -x: right = forward x up = (0,0,1) x (0,1,0) = (-1,0,0)). Half
+  // the grid drove British. The side a direction's lanes sit on is now
+  // CBZ.roadLaneSide(r, dir): +dir on a horizontal road, -dir on a vertical one.
+  CBZ.roadLaneSide = function (r, dir) {
+    const d = dir < 0 ? -1 : 1;
+    return r && r.vertical ? -d : d;
+  };
+  // the same rule for callers holding only the axis (paint, parking, arrows)
+  CBZ.roadLaneSideAxis = function (vertical, dir) { return (vertical ? -1 : 1) * (dir < 0 ? -1 : 1); };
   CBZ.roadLaneCenter = function (r, dir, idx) {
     const L = CBZ.roadLanes(r);
     const per = Math.max(1, L.lanesPerDir | 0);
     const i = Math.min(Math.max((idx | 0), 0), per - 1);
-    return (dir < 0 ? -1 : 1) * (L.medianHalf + (i + 0.5) * L.laneW);
+    return CBZ.roadLaneSide(r, dir) * (L.medianHalf + (i + 0.5) * L.laneW);
   };
   CBZ.roadLanesPerDir = function (r) { return Math.max(1, CBZ.roadLanes(r).lanesPerDir | 0); };
 

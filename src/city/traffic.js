@@ -150,7 +150,7 @@
   // proximity threshold for "car ahead in my lane" gates, not a lane target.
   const lanesPerDir = (r) => (CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0));
   const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
-  const laneOffset = (r, dir, idx) => (CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidth() * (idx + 0.5));
+  const laneOffset = (r, dir, idx) => CBZ.roadLaneCenter(r, dir, idx);   // config.js: keep right on every axis
 
   // ---- driver personalities ---------------------------------------------
   // A car's aggression stat already lives on c.driver.aggr (0..1) and c.reckless.

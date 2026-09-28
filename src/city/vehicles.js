@@ -481,8 +481,7 @@
   // of the median, instead of the old global-2-lane guess that hugged the centre-
   // line. Guard-called so a missing helper falls back to the old global math.
   const lanesPerDir = (r) => (CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0));
-  const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
-  const laneOffset = (r, dir, idx) => (CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidth() * (idx + 0.5));
+  const laneOffset = (r, dir, idx) => CBZ.roadLaneCenter(r, dir, idx);   // config.js: keep right on every axis
 
   /* ======================================================================
      THE INTELLIGENT DRIVER MODEL (Treiber, Hennecke & Helbing 2000)
@@ -560,6 +559,12 @@
     return Math.max(-IDM.bMax, Math.min(a, acc));
   }
   CBZ.cityTrafficIDM = idmAccel;      // exported so the airside/service AI can share it
+  // Where a car's CENTRE stops for a red, measured back from the junction
+  // centre: throat half-width h, + 0.6 m to the crosswalk, + its width xw,
+  // + the 1.2 m MUTCD setback to the stop bar, + the bar's 0.6 m depth, +
+  // a 0.2 m margin, + half the car. Pure, so a node check can prove the
+  // front bumper lands behind the bar (see the stop-bar check in the wave).
+  CBZ.cityStopPoint = function (h, xw, halfLen) { return h + 0.6 + xw + 1.2 + 0.6 + 0.2 + halfLen; };
   let brakeAt = 1e9;                  // per-car scratch: distance to a body in lane
 
   // ---- ambient car MODEL builder ----------------------------------------
@@ -2328,10 +2333,13 @@
      traffic dropped in. A street is defined by the cars nobody is driving.
      This parks a deterministic (position-hashed, no rng draws) ~40% of the
      bays along the Midtown block faces and a thinner ~18% elsewhere on the
-     grid, in the shoulder outboard of the outer travel lane (centre 8.15 m
-     off the road axis on an 18 m street: the body sits between the fog line
-     and the kerb, 0.75 m clear of the outer lane's cars, and carAhead's
-     2.3 m lateral window never mistakes it for the car in front). Bays keep
+     grid, in the shoulder outboard of the outer travel lane (centre ROAD/2
+     - 1.0 = 8.0 m off the road axis on an 18 m street. It was ROAD/2 - 0.85,
+     which on a ~1.9 m wide car put the kerb-side tyres' outer walls at 9.1 m,
+     past the kerb face at 9.0: the wheels stood on the kerb line. At 1.0 the
+     tyre wall sits ~0.05 m off the kerb face in the gutter, which is how a
+     car parallel-parks, and carAhead's 2.3 m lateral window still never
+     mistakes it for the car in front in the outer lane at 5.4 m). Bays keep
      clear of the junction box, the crosswalk and stop bar (ROAD/2 + 6.5) and
      of the lot's own driveway. Capped at KERB_CAP cars: parked fixtures are
      matrix-held and frustum-culled, so the price is draw calls, not sim. */
@@ -2340,7 +2348,7 @@
     if (!CBZ.cityAddParkedCar || !A.roads || !A.xLines || !A.zLines) return;
     if (CBZ.CONFIG && CBZ.CONFIG.KERB_PARKING === false) return;
     for (const c of CBZ.cityCars) if (c._kerbParked && c._arenaRoot === A.root) return;   // already dressed
-    const ROAD = A.ROAD, BAY = 6.4, SIDE = ROAD / 2 - 0.85;
+    const ROAD = A.ROAD, BAY = 6.4, SIDE = ROAD / 2 - 1.0;
     const mid = (A.xLines.length - 1) / 2;
     const bays = [];
     for (const r of A.roads) {
@@ -2366,8 +2374,10 @@
             if (ap && Math.abs((r.vertical ? ap.z : ap.x) - along) < ap.half + 4) continue;
             const h = carHash(x, z, 91);
             if (h > (core ? 0.4 : 0.18)) continue;
-            // parked WITH the flow of its side of the street (dirSign ↔ lateral sign)
-            const heading = r.vertical ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
+            // parked WITH the flow of its side of the street: the traffic
+            // direction whose lanes sit on `side` (keep right, config.js)
+            const flow = CBZ.roadLaneSideAxis(!!r.vertical, side);   // side ±1 → travel ±1 (the map is its own inverse)
+            const heading = r.vertical ? (flow > 0 ? 0 : Math.PI) : (flow > 0 ? Math.PI / 2 : -Math.PI / 2);
             bays.push({ x, z, heading, pri: core ? h : 1 + h });
           }
         }
@@ -6124,7 +6134,7 @@
 
       // ---- mid-turn: arc smoothly through the intersection (no snap) ----
       if (c.turning) {
-        let tv = Math.min(c.baseV, c.reckless ? 11 : 8);   // ease off to corner
+        let tv = Math.min(c.baseV, c.turning.vMax || (c.reckless ? 11 : 8));   // ease off to corner (a slip ramp carries its own)
         // yield mid-arc: don't sweep the turn into a car crossing the box
         const blk = carAhead(c);
         if (blk && blk.gap < 5) tv = Math.min(tv, Math.max(0.8, blk.v * 0.5));
@@ -6193,7 +6203,6 @@
       const distToInt = !it ? 1e9 : (r.vertical ? (it.z - c.pos.z) * c.dirSign : (it.x - c.pos.x) * c.dirSign);
       const red = CBZ.cityIsRed(r.vertical);
       const stopGap = TR().stopGap || 6.5;
-      const redLookahead = stopGap + 5 + Math.min(11, c.v * 0.75);
       // calm drivers ANTICIPATE the red — ease to a smooth stop at the line from
       // further out (reads clearly as obeying the signal). Reckless ones gamble.
       // WHERE THE STOP LINE ACTUALLY IS. `distToInt` is measured to the
@@ -6206,18 +6215,37 @@
       // is right on an 18 m street and a 12 m town lane without a second
       // number. Degrade-safe: no junction record, or the street work reverted,
       // and it falls back to the old 1.6.
-      let stopBack = 1.6;
-      if (CBZ.roadJunctionAt) {
+      //
+      // AND THE BUMPER, NOT THE CENTRE, GOES TO THE LINE. `distToInt` is the
+      // car's CENTRE, and the stop point used to be the bar itself, so a
+      // stopped car's bonnet (half a car, ~2.3 m) hung over the bar and into
+      // the crosswalk. The stop point is now the bar's APPROACH edge (the
+      // painted bar is 0.6 m deep on the grid, 0.45 m where props.js paints
+      // it: 0.6 covers both) plus half this car's length plus a 0.2 m margin,
+      // so the front bumper stops just behind the paint whatever the body.
+      // The IDM term below settles at its jam gap s0 short of whatever point
+      // it is given, so it is handed that point pushed s0 forward.
+      const halfLen = ((c.dims && c.dims.length > 0) ? c.dims.length : 4.6) / 2;
+      let stopBack = CBZ.cityStopPoint(A.ROAD / 2, Math.max(1.8, Math.min(3.0, 0.16 * A.ROAD)), halfLen);
+      if (CBZ.roadJunctionAt && it) {
         try {
           const J = CBZ.roadJunctionAt(it.x, it.z);
           if (J) {
             const h = r.vertical ? J.hb : J.ha;
             const xw = Math.max(1.8, Math.min(3.0, 0.16 * 2 * (r.vertical ? J.ha : J.hb)));
-            stopBack = h + 0.6 + xw + 1.2;
+            stopBack = CBZ.cityStopPoint(h, xw, halfLen);
           }
         } catch (e) {}
       }
-      if (red && !panicking && distToInt > 1.2 && distToInt < redLookahead) {   // nobody waits for a light under fire
+      // the look-ahead is measured from the STOP POINT, not the junction
+      // centre. It used to be stopGap + 5 + ... = 11.5 m at a standstill,
+      // SHORTER than the old 13.7 m stop point: a car waiting at the line fell
+      // out of the red branch, crept forward until it was back inside 11.5 m
+      // and braked there, bonnet in the crosswalk. A car already past the bar
+      // (distToInt below the stop point by more than a metre) clears the box
+      // instead of stopping in it.
+      const redLookahead = Math.max(stopGap, stopBack) + 5 + Math.min(11, c.v * 0.75);
+      if (red && !panicking && distToInt > Math.max(1.2, stopBack - 1.0) && distToInt < redLookahead) {   // nobody waits for a light under fire
         if (!c.reckless || c.driver.aggr < 0.8) {
           target = Math.min(target, Math.max(0, (distToInt - stopBack) * 1.25));
           // IDM_V2: a red light is a STATIONARY VIRTUAL LEADER parked on the
@@ -6227,7 +6255,7 @@
           // makes it ARRIVE smoothly — decelerating hard while far and fast,
           // easing off as it settles, instead of tracking a ruler-straight
           // ramp down to the line.
-          if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - stopBack), c.v, c));
+          if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - stopBack + IDM.s0), c.v, c));
         }
       }
 
@@ -6428,6 +6456,12 @@
         }
       } else if (!insideInt && c._intActive) c._intActive = false;
 
+      // an interchange slip ramp starting here (highways only; cheap reject)
+      if (r.district === "highway" && !c.turning && !c.pullover && !c.roadRageTarget && trySlip(c, r, moveAxisZ)) {
+        seatCar(c, dt);
+        continue;
+      }
+
       // approaching the end of the road: commit to turning off at the next
       // intersection; if there is none left, U-TURN at the dead end (swing into
       // the opposite lane and head back) — never teleport-wrap across the map.
@@ -6597,7 +6631,21 @@
     if (T.t >= 1) {                                   // arrived — commit to the new road
       c.pos.x = T.P2.x; c.pos.z = T.P2.z;
       c.road = T.road; c.vertical = T.vertical; c.dirSign = T.dirSign; c.lane = T.lane;
+      if (T.laneIdx != null) c.laneIdx = T.laneIdx;
       c.heading = T.endH; c.turning = null;
+      return;
+    }
+    if (T.poly) {                                     // a slip ramp: walk the polyline by arc length
+      const d = T.t * T.len, P = T.poly, C = T.cum;
+      while (T.seg < P.length - 2 && C[T.seg + 1] < d) T.seg++;
+      const a = P[T.seg], b = P[T.seg + 1], L = Math.max(1e-6, C[T.seg + 1] - C[T.seg]);
+      const u = Math.min(1, Math.max(0, (d - C[T.seg]) / L));
+      c.pos.x = a.x + (b.x - a.x) * u; c.pos.z = a.z + (b.z - a.z) * u;
+      // nose eases toward the segment heading (2 m stations on a 30 m radius
+      // are 3.8 degrees apart: a raw per-segment heading would tick)
+      const want = Math.atan2(b.x - a.x, b.z - a.z);
+      let dh = want - c.heading; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
+      c.heading += dh * Math.min(1, dt * 8);
       return;
     }
     const t = T.t, u = 1 - t;
@@ -6607,6 +6655,96 @@
     const dz = 2 * u * (T.P1.z - T.P0.z) + 2 * t * (T.P2.z - T.P1.z);
     c.heading = Math.atan2(dx, dz);                   // nose follows the arc tangent
   }
+  /* ---- INTERCHANGE SLIP RAMPS (city/interchange.js) -----------------------
+     The interchange builds two at-grade slips at the Route 5 / Route 1 T, but
+     no AI car ever drove one: traffic kept to its axis-aligned records and
+     U-turned at the T. Under the old mixed lane contract a slip could not be
+     driven the right way at both ends (it hugs the stem's lanes on one side
+     and the through route's lanes on the other, and north-south roads ran
+     left-hand). With everyone keeping right, each slip is a right-turn slip:
+     forward from the stem's inbound lanes onto the through route, or in
+     reverse from the through route onto the stem's outbound lanes. Which one
+     is proven here from CBZ.roadLaneCenter, per slip, per end, so a slip that
+     does not match the lanes is simply never offered.
+     An offered slip is driven as a `c.turning` polyline: the car eases off
+     its outer lane over the ramp's own taper, follows the ramp stations, and
+     joins the other road's outer lane past the gore. */
+  let _slipEntries = null, _slipSrc = null;
+  function slipEntries() {
+    const plans = CBZ.cityInterchanges ? CBZ.cityInterchanges() : null;
+    if (!plans || !plans.length) return null;
+    if (_slipSrc === plans && _slipEntries && _slipEntries._n === plans.length) return _slipEntries;
+    _slipSrc = plans; _slipEntries = CBZ.citySlipEntries(plans); _slipEntries._n = plans.length;
+    return _slipEntries;
+  }
+  // PURE over the plan records (a node check drives it): every drivable
+  // slip movement as {road, dir, along, poly, exit:{road,dir,laneIdx,lane}}.
+  CBZ.citySlipEntries = function (plans) {
+    const out = [];
+    const sgnf = function (v) { return v < 0 ? -1 : 1; };
+    const onRoad = function (r, along) { return r && Math.abs(along - (r.vertical ? r.z : r.x)) < r.len / 2 - 20; };
+    const sideOK = function (r, dir, pt) {
+      const off = CBZ.roadLaneCenter(r, dir, 0), lat = r.vertical ? pt.wx - r.x : pt.wz - r.z;
+      return sgnf(off) === sgnf(lat);
+    };
+    for (const G of plans) {
+      if (!G || !G.slips || !G.stemRec || !G.thrRec) continue;
+      const stem = G.stemRec, thr = G.thrRec;
+      for (let k = 0; k < G.slips.length; k++) {
+        const SL = G.slips[k], S = SL.S;
+        if (!S || S.length < 8 || S[0].wx == null) continue;
+        const A0 = S[0], B0 = S[S.length - 1], sEnd = B0.s;
+        const mids = [];
+        for (const p of S) if (p.s >= 45 && p.s <= sEnd - 45) mids.push({ x: p.wx, z: p.wz });   // 45 m easing legs: a 3.7 m lane shift at under 5 degrees
+        if (mids.length < 4) continue;
+        const mk = function (inRoad, inPt, inDir, outRoad, outPt, outDir, pts) {
+          if (!sideOK(inRoad, inDir, inPt) || !sideOK(outRoad, outDir, outPt)) return;
+          const inAlong = inRoad.vertical ? inPt.wz : inPt.wx;
+          const outAlong = (outRoad.vertical ? outPt.wz : outPt.wx) + outDir * 5;
+          if (!onRoad(inRoad, inAlong) || !onRoad(outRoad, outAlong)) return;
+          const oi = CBZ.roadLanesPerDir(outRoad) - 1, oLane = CBZ.roadLaneCenter(outRoad, outDir, oi);
+          const endP = outRoad.vertical ? { x: outRoad.x + oLane, z: outAlong } : { x: outAlong, z: outRoad.z + oLane };
+          out.push({ key: (G.stemId || "") + ":" + k + ":" + (pts === mids ? "f" : "r"), road: inRoad, dir: inDir, along: inAlong,
+            pts: pts, exit: { road: outRoad, dir: outDir, laneIdx: oi, lane: oLane, P: endP } });
+        };
+        // forward: the stem's inbound lanes onto the through route
+        mk(stem, A0, sgnf(A0.whx), thr, B0, sgnf(B0.whz), mids);
+        // reverse: the through route onto the stem's outbound lanes
+        mk(thr, B0, -sgnf(B0.whz), stem, A0, -sgnf(A0.whx), mids.slice().reverse());
+      }
+    }
+    return out;
+  };
+  function trySlip(c, r, moveAxisZ) {
+    const E = slipEntries();
+    if (!E || !E.length) return false;
+    const carAlong = moveAxisZ ? c.pos.z : c.pos.x;
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i];
+      if (e.road !== r || e.dir !== c.dirSign) continue;
+      const d = (e.along - carAlong) * e.dir;            // metres until the ramp's taper starts
+      if (d > 3 + c.v * 0.1 || d < -3) continue;
+      if (c._slipKey === e.key) return false;             // already decided at this ramp
+      c._slipKey = e.key;
+      // the outer-lane car that is going this way takes it about half the
+      // time; a car about to run out of road always does
+      const per = CBZ.roadLanesPerDir(r);
+      const outer = c.laneIdx == null || c.laneIdx >= per - 1;
+      if (!c._mustTurn && !(outer && rng() < 0.5)) return false;
+      const poly = [{ x: c.pos.x, z: c.pos.z }].concat(e.pts, [e.exit.P]);
+      const cum = [0];
+      for (let k = 1; k < poly.length; k++) cum.push(cum[k - 1] + Math.hypot(poly[k].x - poly[k - 1].x, poly[k].z - poly[k - 1].z));
+      const X = e.exit, vert = !!X.road.vertical;
+      c.turning = { poly: poly, cum: cum, seg: 0, len: cum[cum.length - 1], t: 0, P2: X.P,
+        road: X.road, vertical: vert, dirSign: X.dir, lane: X.lane, laneIdx: X.laneIdx,
+        endH: vert ? (X.dir > 0 ? 0 : Math.PI) : (X.dir > 0 ? Math.PI / 2 : -Math.PI / 2),
+        vMax: 13 };                                       // 13 m/s on a 30 m radius = 0.57 g, a brisk ramp
+      c._mustTurn = false;
+      return true;
+    }
+    return false;
+  }
+
   // Nearest perpendicular road at a junction. THE BUG THIS CARRIED FOR ITS
   // WHOLE LIFE: it matched purely on the cross coordinate and never checked
   // the junction actually lies ON the segment — so a downtown intersection at

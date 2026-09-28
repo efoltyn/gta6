@@ -2511,11 +2511,14 @@
             if (leg.ax === 0) paintRect(J.x + lat, J.z + leg.s * (near + xw / 2), 0.6, xw, PY);
             else paintRect(J.x + leg.s * (near + xw / 2), J.z + lat, xw, 0.6, PY);
           }
-          // stop bar — the DRIVER'S half only (right-hand traffic: the lane
-          // group approaching this leg is the one on the driver's right)
+          // stop bar — the approach half only. Keep right (config.js
+          // roadLaneSide): traffic arriving on leg s travels -s, so on a
+          // north-south leg its lanes sit on +s in x (heading -z, the driver's
+          // right is +x) and on an east-west leg on -s in z. The old signs
+          // were mirrored on both axes: the bar sat across the EXIT lanes.
           const barC = halfRoad / 2, barW = halfRoad - 0.6;
-          if (leg.ax === 0) paintRect(J.x + (leg.s > 0 ? -barC : barC), J.z + leg.s * stopAt, barW, 0.45, PY);
-          else paintRect(J.x + leg.s * stopAt, J.z + (leg.s > 0 ? barC : -barC), 0.45, barW, PY);
+          if (leg.ax === 0) paintRect(J.x + (leg.s > 0 ? barC : -barC), J.z + leg.s * stopAt, barW, 0.45, PY);
+          else paintRect(J.x + leg.s * stopAt, J.z + (leg.s > 0 ? -barC : barC), 0.45, barW, PY);
           J._marked = (J._marked || 0) + 1;
         }
       }
@@ -2647,12 +2650,13 @@
     //   • plus a POLE-MOUNTED head on its far-left corner;
     //   • pedestrian heads (hand over walking person) face across every
     //     crosswalk from both ends, with a push button below each one.
-    // The lane geometry here is not mirror-symmetric (northbound runs at +x,
-    // eastbound at +z), so the four approaches are a literal table, checked
-    // against traffic.js's laneOffset(), not a rotated formula.
-    // Mast poles therefore stand on the NE and SW corners (two arms each, at
-    // right angles, plus a cobra luminaire on top); the NW and SE corners carry
-    // the slimmer pedestal poles.
+    // Everyone keeps right (config.js roadLaneSide): northbound (+z) runs at
+    // -x, southbound at +x, eastbound (+x) at +z, westbound at -z. The four
+    // approaches are a literal table checked against CBZ.roadLaneCenter.
+    // Each approach's far-right corner is a different corner, so every corner
+    // carries one mast arm plus the pedestal head for the approach it is
+    // far-left of. The cobra luminaires stay on the NE and SW masts only (the
+    // junction's light budget is unchanged).
     // Every piece is one InstancedMesh prototype from city/street_hardware.js
     // (a draw call per prototype for the whole city); the lenses are the
     // three instanced colour pools traffic.js already drives through
@@ -2720,8 +2724,8 @@
     // (x, z); arm = the arm's direction from its pole; face = rotY that turns a
     // head's +Z face back at the arriving driver.
     const APPROACHES = [
-      { leg: "S", axis: "ns", vert: true,  mast: [1, 1],   far: [-1, 1], arm: [-1, 0], face: Math.PI },       // northbound, lanes at +x
-      { leg: "N", axis: "ns", vert: true,  mast: [-1, -1], far: [1, -1], arm: [1, 0],  face: 0 },             // southbound, lanes at -x
+      { leg: "S", axis: "ns", vert: true,  mast: [-1, 1],  far: [1, 1],   arm: [1, 0],  face: Math.PI },       // northbound, lanes at -x
+      { leg: "N", axis: "ns", vert: true,  mast: [1, -1],  far: [-1, -1], arm: [-1, 0], face: 0 },             // southbound, lanes at +x
       { leg: "W", axis: "ew", vert: false, mast: [1, 1],   far: [1, -1], arm: [0, -1], face: -Math.PI / 2 },  // eastbound, lanes at +z
       { leg: "E", axis: "ew", vert: false, mast: [-1, -1], far: [-1, 1], arm: [0, 1],  face: Math.PI / 2 },   // westbound, lanes at -z
     ];
@@ -2848,9 +2852,11 @@
         if (c.kind === "mast") {
           own(c, "mast", { x: c.x, y: c.y, z: c.z, ry: ry });
           // the junction is the best-lit spot on a real street: a cobra head
-          // on every mast top, aimed diagonally into the box
-          const lum = { x: c.x, y: c.y, z: c.z, ang: Math.atan2(-c.sx, -c.sz), i: mastLums.length, rec: null };
-          mastLums.push(lum); c.lums.push(lum);
+          // on the NE and SW mast tops, aimed diagonally into the box
+          if (c.sx === c.sz) {
+            const lum = { x: c.x, y: c.y, z: c.z, ang: Math.atan2(-c.sx, -c.sz), i: mastLums.length, rec: null };
+            mastLums.push(lum); c.lums.push(lum);
+          }
           c.col = solidCollider(c.x, c.z, 0.23, null);
         } else {
           own(c, "ped", { x: c.x, y: c.y, z: c.z, ry: ry });
