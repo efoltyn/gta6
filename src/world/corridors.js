@@ -249,6 +249,10 @@
         the new capacity and its zones are the ring's rooms.
      ========================================================== */
   const UB = { x0: -44, x1: -27, z0: -108, z1: -76.5, h: 5.2 };
+  // published so systems/prisonrest.js can roster Unit B's racks as a POCKET:
+  // offered only to men already inside it (they spawn there, entities/npc.js),
+  // never to a man in the yard with corridor grilles between him and them
+  CBZ.prisonUnitB = UB;
   CBZ.roomShell({ x0: UB.x0, x1: UB.x1, z0: UB.z0, z1: UB.z1, h: UB.h, wall: WALL, floor: null, skin: "panel",
     doors: [{ side: "S", center: -35.5, width: 3.0 }] });
   // a sealed concrete floor at real joint scale (it was one flat grey slab)

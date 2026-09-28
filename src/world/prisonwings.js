@@ -87,8 +87,8 @@
 
    Ratchet: CBZ.prisonWingsAudit() — `unreachable` (a locked thing with no
    route in the build) and `orphanGates` (a gap cut in a wall with no gate
-   in it, i.e. a hole in the perimeter) both pinned at 0, and `doorsInWalls`
-   (a leaf that swings inside somebody else's collider) pinned at 1.
+   in it, i.e. a hole in the perimeter) and `doorsInWalls` (a leaf that
+   swings inside somebody else's collider) all pinned at 0.
 ============================================================ */
 (function () {
   "use strict";
@@ -545,23 +545,17 @@
   }
 
   /* ---- THE RACK THE CAGE IS ACTUALLY HOLDING SOMETHING ON ---------------
-     WHAT WAS HERE, and it was the worst thing in the compound. `cage()` ended
-     with three "shelves" sized to the WHOLE cage:
-         addBox(cx, 0.62 + s*0.72, cz, (x1-x0)-1.6, 0.07, (z1-z0)-1.6, 0xb9a184)
-     In the tool crib that is a 10.4 x 14.4 m cream plane, 7 cm thick, three of
-     them stacked, and it was the entire visible content of the room. Measured
-     by tools/visual-presets/prison-rooms.mjs against the baseline in
-     artifacts/visual-comparisons/prison-rooms-audit: deadPropVolume 10.48 m3
-     in the tool crib, 7.57 in the knife cage, 9.03 in the property cage —
-     27.08 m3 of "shelf" a body walked straight through, in three rooms that
-     exist to hold three or four placed items each.
+     Sized to the ITEMS, not to the room (it replaced three 10 x 14 m "shelf"
+     planes a body walked through). Bolted slotted-angle shelving (rebuilt
+     2026-09-28 from four slabs, four square sticks and a back sheet): 40 x 40
+     x 4 mm angle posts with their slot rows, one post per bay line (bays set
+     so no post stands at an x a placed item lies at), pressed shelves with
+     folded lips bolted inside the angles, an X of flat strap across the back
+     of each bay, a foot plate under every post, and ONE collider over the
+     footprint, so a body is stopped by it and it is cover.
 
-     What replaces it is sized to the ITEMS, not to the room. One steel rack
-     on the cage's back wall: four decks, four uprights, a back sheet, and ONE
-     collider over its own footprint, so a body is stopped by it and it is
-     cover. The deck at 0.80 m is the surface the cage's placed items lie on —
-     the same 0.80 m every stockCage() row below already declared, which is
-     what "standing where they lie" means here.
+     The 0.80 m shelf's top face is the surface the cage's placed items lie
+     on, the same 0.80 every stockCage() row declares.
 
      0.55 m DEEP IS THE LOAD-BEARING NUMBER. systems/prisondrops.js:78 picks a
      floor item up inside AUTO_R = 1.15 m; with a 0.55 m rack and the items set
@@ -570,22 +564,74 @@
      lock the cage's own contents away behind it.
 
      NOT blockLOS, deliberately: gun-room grammar rule (a) is that you can SEE
-     what the lock is holding, and a rack that occludes it removes the only
-     reason the 3.2-5.6 s pick is worth starting.                            */
+     what the lock is holding, and the open X back keeps it that way. */
+  const FL = 0.06;                                  // finished floor top (PD.finish lays an 80 mm slab to 0.06)
+  const NC = { cast: false };
+  function kb(mat, x, y, z, w, h, d, o) { return K.stat(new THREE.BoxGeometry(w, h, d), mat, x, y, z, o || NC); }
+  function kc(mat, x, y, z, r0, r1, h, seg, o) { return K.stat(new THREE.CylinderGeometry(r0, r1, h, seg || 10), mat, x, y, z, o || NC); }
+  // a seeded 0..1 (so dressing varies bay to bay and is the same every build)
+  function hh(a, b, c) { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); }
+  // one corrugated carton, its tape seam along the long side and down both
+  // ends; `taped` puts the strip over the top (a carton with one on it has none)
+  function carton(x, y, z, w, h, d, kraft, taped) {
+    const tape = K.skin("steel", 0xa88a5c, 0.3);
+    kb(kraft, x, y + h / 2, z, w, h, d, { uv: 1, cast: false });
+    const alongX = w >= d, L = alongX ? w : d;
+    if (taped) kb(tape, x, y + h + 0.001, z, alongX ? L + 0.002 : 0.048, 0.002, alongX ? 0.048 : L + 0.002);
+    for (const s of [-1, 1]) {
+      if (alongX) kb(tape, x + s * (w / 2 + 0.001), y + h - 0.035, z, 0.002, 0.07, 0.048);
+      else kb(tape, x, y + h - 0.035, z + s * (d / 2 + 0.001), 0.048, 0.07, 0.002);
+    }
+  }
   const RACK_D = 0.55, RACK_DECKS = [0.40, 0.80, 1.24, 1.70], RACK_H = 1.86;
   function cageRack(cfg) {
-    const L = cfg.len, F = cfg.face || 1;        // F: which way the back sheet faces
-    for (const y of RACK_DECKS)
-      addBox(cfg.x, y - 0.025, cfg.z, L - 0.16, 0.05, RACK_D - 0.08, 0x9aa2aa, { cast: false });
-    for (const s of [-1, 1]) for (const t of [-1, 1])
-      addBox(cfg.x + s * (L / 2 - 0.05), RACK_H / 2, cfg.z + t * (RACK_D / 2 - 0.05),
-        0.08, RACK_H, 0.08, 0x5b6470, { cast: false });
-    addBox(cfg.x, RACK_H / 2, cfg.z + F * (RACK_D / 2 - 0.025), L, RACK_H, 0.05, 0x6f7883, { cast: false });
-    // ONE collider for the unit. addBox's own `solid:` would give each deck a
-    // rect of its own and the frame none: a rack is one piece of furniture and
-    // is stopped against as one.
-    const col = { minX: cfg.x - L / 2, maxX: cfg.x + L / 2,
-      minZ: cfg.z - RACK_D / 2, maxZ: cfg.z + RACK_D / 2, y0: 0, y1: RACK_H };
+    const L = cfg.len, F = cfg.face || 1, cx = cfg.x, cz = cfg.z;   // F: which way the back faces
+    const post = K.skin("steel", 0x5b6470, 0.5), shelfM = K.skin("steel", 0x9aa2aa, 0.45);
+    const slot = K.skin("steel", 0x1b1f24, 0.8), strap = K.skin("steel", 0x4a525c, 0.5);
+    const hl = L / 2, hd = RACK_D / 2, A = 0.04, T = 0.004, LIP = 0.035;
+    const bays = Math.max(1, Math.round(L / 1.7));
+    const px = []; for (let b = 0; b <= bays; b++) px.push(-hl + b * L / bays);
+    const y0 = FL + 0.004, hU = RACK_H - y0, yU = (y0 + RACK_H) / 2;
+    for (let b = 0; b <= bays; b++) {
+      const end = b === 0 || b === bays;
+      const dx = b === bays ? -1 : 1;                         // which way the angle's face leg runs
+      const x = cx + px[b];
+      for (const sz of [-1, 1]) {
+        const zc = cz + sz * hd;                              // the angle's heel line, on the face
+        kb(post, x + dx * A / 2, yU, zc - sz * T / 2, A, hU, T);                  // face leg
+        kb(post, x + dx * T / 2, yU, zc - sz * A / 2, T, hU, A);                  // side leg
+        kb(post, x + dx * 0.035, FL + 0.002, zc - sz * 0.035, 0.07, 0.004, 0.07); // foot plate
+        // the slot row punched in the face leg (and in the side leg on the end posts)
+        for (let y = y0 + 0.06; y < RACK_H - 0.04; y += 0.075) {
+          kb(slot, x + dx * 0.02, y, zc + sz * 0.001, 0.012, 0.032, 0.002);
+          if (end) kb(slot, x - dx * 0.001, y, zc - sz * 0.02, 0.002, 0.032, 0.012);
+        }
+        for (const y of RACK_DECKS) {                          // shelf bolt heads through the face leg
+          const g = new THREE.CylinderGeometry(0.007, 0.007, 0.006, 6); g.rotateX(Math.PI / 2);
+          K.stat(g, slot, x + dx * 0.02, y - LIP / 2, zc + sz * 0.003, NC);
+        }
+      }
+    }
+    for (let b = 0; b < bays; b++) {
+      // a shelf spans between the side legs of its two posts (every side leg
+      // runs +x from its heel except the last post's, which runs -x)
+      const a0 = cx + px[b] + T, a1 = cx + px[b + 1] - (b + 1 === bays ? T : 0);
+      const w = a1 - a0, mx = (a0 + a1) / 2, dd = RACK_D - 2 * T;
+      for (const y of RACK_DECKS) {
+        kb(shelfM, mx, y - 0.0015, cz, w, 0.003, dd, { uv: 1, cast: false });   // top face exactly at y
+        for (const sz of [-1, 1]) kb(shelfM, mx, y - LIP / 2, cz + sz * (dd / 2 - 0.0015), w, LIP, 0.003);   // folded lips
+        for (const e of [a0 + 0.0015, a1 - 0.0015]) kb(shelfM, e, y - LIP / 2, cz, 0.003, LIP, dd - 0.006);
+      }
+      // the back X: two flat straps, one proud of the other so they cross clear
+      const hb = RACK_H - y0 - 0.1, len = Math.hypot(w, hb), ang = Math.atan2(hb, w);
+      for (const k of [0, 1]) {
+        K.stat(new THREE.BoxGeometry(len, 0.025, 0.003), strap, mx, yU, cz + F * (hd + 0.0035 + k * 0.004),
+          { rz: k ? -ang : ang, cast: false });
+      }
+    }
+    // ONE collider for the unit. A rack is one piece of furniture and is
+    // stopped against as one.
+    const col = { minX: cx - hl, maxX: cx + hl, minZ: cz - hd, maxZ: cz + hd, y0: 0, y1: RACK_H };
     CBZ.colliders.push(col);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return cfg;
@@ -619,30 +665,139 @@
     const z = 2 + i * 9;
     if (K) { K.workbench(-100, z, 5.0, 1.4, { vice: 1 }); K.workbench(-84, z, 5.0, 1.4, { vice: i & 1 ? -1 : 0, clutter: !!(i & 1) }); }
   }
-  /* STOCK RACKS (2026-09-27): six solid 2.6 m grey cubes became pallet racks
-     — orange beams on blue uprights, three levels, cartons and banded stock on
-     pallets — with the same footprint and the same full-height collider. */
+  /* STOCK RACKS (rebuilt 2026-09-28; each bay's load was one plain box on a
+     plain box pallet). Six back-to-back runs of selective pallet racking on
+     the same 2.2 x 2.4 m footprints and the same full-height colliders: two
+     0.9 m frames of blue uprights with their slot rows, zig-zag braced and
+     standing on anchored foot plates, tied across the 0.24 m flue by row
+     spacers; orange beams on hooked connector plates at 1.35 and 2.6 m with
+     wire decks on them; and on every face and level either two block
+     pallets (bottom boards, nine blocks, stringer boards, seven deck boards)
+     carrying a real load (taped cartons in three sizes, a shrink-wrapped
+     stack under a cap sheet, four drums) or a banded bundle of steel bar
+     stock on timber bearers. Seeded, so the runs differ and every build is
+     the same. All kit-merged: a handful of draw calls for the lot. */
   (function racks() {
-    const M = PD && PD.Merge ? PD.Merge : null;
-    if (!M) { for (let i = 0; i < 6; i++) addBox(-70, 1.3, -1 + i * 7.6, 2.2, 2.6, 2.4, 0x6b7480, { solid: true }); return; }
-    const up = new M(), beam = new M(), pal = new M(), box = new M(), deck = new M();
+    const blue = K.skin("steel", 0x2f4f7a, 0.5), orange = K.skin("steel", 0xd9772a, 0.45);
+    const dark = K.skin("steel", 0x1b1f24, 0.8), zinc = K.skin("galv", 0xb3bac1);
+    const woods = [K.skin("concrete", 0x9c7a4e), K.skin("concrete", 0x857055)];
+    const krafts = [K.skin("concrete", 0xc2a274, 0.9), K.skin("concrete", 0xab8b60, 0.9)];
+    const barM =K.skin("steel", 0x6d737a, 0.35), band = K.skin("steel", 0x30353b, 0.5);
+    const drumM = [0x2f5e8a, 0x2a2d31, 0x8a2b22, 0x3f5a46].map((c) => K.skin("steel", c, 0.5));
+    const film = new THREE.MeshStandardMaterial({ color: 0xdde3e6, roughness: 0.16, metalness: 0.0, envMap: CBZ.ENV || null, envMapIntensity: 0.9 });
+    film.name = "prison-shrinkwrap";
+    const UX = [-1.06, -0.16, 0.16, 1.06];              // upright centres across the run (x)
+    const UY1 = 3.7, BEAMS = [1.35, 2.6], DECK = 0.04, MAXH = 0.82;
+    const up0 = FL + 0.01;
+    const U = { cast: true, uv: 1 };
+
+    // a 1.0 x 1.0 block pallet; returns its deck top
+    function pallet(xc, y, zc, wood) {
+      for (const k of [-0.45, 0, 0.45]) kb(wood, xc, y + 0.011, zc + k, 1.0, 0.022, 0.1);              // bottom boards
+      for (const i of [-0.45, 0, 0.45]) for (const j of [-0.45, 0, 0.45]) kb(wood, xc + i, y + 0.061, zc + j, 0.1, 0.078, 0.1);
+      for (const k of [-0.45, 0, 0.45]) kb(wood, xc + k, y + 0.111, zc, 0.1, 0.022, 1.0);              // stringer boards
+      for (let t = 0; t < 7; t++) kb(wood, xc, y + 0.133, zc - 0.45 + t * 0.15, 1.0, 0.022, 0.1);     // deck boards
+      return y + 0.144;
+    }
+    const CARTONS = [{ nx: 2, nz: 2, h: 0.30 }, { nx: 3, nz: 2, h: 0.28 }, { nx: 3, nz: 3, h: 0.24 }];
+    function cartons(xc, y, zc, seed) {
+      const c = CARTONS[Math.floor(hh(seed, 1, 3) * 3) % 3], kraft = krafts[hh(seed, 2, 5) < 0.5 ? 0 : 1];
+      const cw = 1.0 / c.nx, cd = 1.0 / c.nz;
+      const layers = Math.max(1, Math.floor(MAXH / c.h) - (hh(seed, 3, 7) < 0.35 ? 1 : 0));
+      const top = layers - 1;
+      for (let a = 0; a < c.nx; a++) for (let b = 0; b < c.nz; b++) {
+        const gone = hh(seed + a, b, 11) < 0.28;          // a carton already picked off the top layer
+        const n = gone ? top : layers;
+        for (let l = 0; l < n; l++)
+          carton(xc - 0.5 + (a + 0.5) * cw, y + l * c.h, zc - 0.5 + (b + 0.5) * cd, cw - 0.006, c.h, cd - 0.006, kraft, l === n - 1);
+      }
+    }
+    function wrapped(xc, y, zc, seed) {
+      const h = MAXH * (0.78 + hh(seed, 4, 13) * 0.2);
+      K.stat(new THREE.BoxGeometry(1.004, h + 0.05, 1.004), film, xc, y + h / 2 - 0.025, zc, NC);   // hugs the deck boards
+      for (const t of [0.12, 0.6]) K.stat(new THREE.BoxGeometry(1.01, 0.16, 1.01), film, xc, y + h * t + 0.08, zc, NC);   // overlapping turns
+      kb(krafts[0], xc, y + h + 0.003, zc, 0.98, 0.006, 0.98);                                            // cap sheet
+    }
+    function drums(xc, y, zc, seed) {
+      const m = drumM[Math.floor(hh(seed, 5, 17) * drumM.length) % drumM.length];
+      for (const dx of [-0.25, 0.25]) for (const dz of [-0.25, 0.25]) {
+        const x = xc + dx, z = zc + dz;
+        kc(m, x, y + 0.37, z, 0.225, 0.225, 0.74, 16, { cast: true });
+        for (const t of [0.01, 0.73]) K.stat(new THREE.TorusGeometry(0.225, 0.012, 4, 16), dark, x, y + t, z, { rx: Math.PI / 2, cast: false });   // chimes
+        for (const t of [0.25, 0.49]) K.stat(new THREE.TorusGeometry(0.228, 0.009, 4, 16), m, x, y + t, z, { rx: Math.PI / 2, cast: false });     // rolling hoops
+        kc(dark, x + 0.12, y + 0.746, z + 0.05, 0.03, 0.03, 0.012, 8);                                                                            // bung
+      }
+    }
+    // two banded bundles of 44 mm bar across the whole bay, on three bearers
+    function barStock(xc, y, z, wood) {
+      for (const k of [-0.85, 0, 0.85]) kb(wood, xc, y + 0.04, z + k, 0.95, 0.08, 0.08);
+      for (const bx of [xc - 0.22, xc + 0.22]) {
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++)
+          K.stat(new THREE.CylinderGeometry(0.022, 0.022, 2.15, 8), barM, bx - 0.092 + c * 0.046, y + 0.102 + r * 0.044, z, { rx: Math.PI / 2, cast: false });
+        const yb = y + 0.08, yt = y + 0.212, hw = 0.1165;
+        for (const zb of [z - 0.45, z + 0.45]) {
+          kb(band, bx, yt + 0.0015, zb, hw * 2 + 0.006, 0.003, 0.032);
+          kb(band, bx, yb - 0.0015, zb, hw * 2 + 0.006, 0.003, 0.032);
+          for (const s of [-1, 1]) kb(band, bx + s * (hw + 0.0015), (yb + yt) / 2, zb, 0.003, yt - yb, 0.032);
+        }
+      }
+    }
+
     for (let i = 0; i < 6; i++) {
       const x = -70, z = -1 + i * 7.6;
-      for (const sx of [-1.05, 1.05]) for (const sz of [-1.15, 1.15]) up.box(x + sx, 1.3, z + sz, 0.08, 2.6, 0.08);
-      for (const sx of [-1.05, 1.05]) for (const y of [0.9, 1.8]) up.box(x + sx, y - 0.45, z, 0.03, 0.03, 2.3);   // side bracing
-      for (const y of [0.12, 1.2, 2.3]) {
-        for (const sx of [-1.02, 1.02]) beam.box(x + sx, y, z, 0.05, 0.1, 2.3);
-        deck.box(x, y + 0.06, z, 2.0, 0.02, 2.3);
-        if (y > 2) continue;
-        // a pallet with a load on it, a different load per bay
-        pal.box(x, y + 0.14, z, 1.0, 0.14, 1.2);
-        const hgt = 0.5 + PD.h01(i, y * 10, 0x71) * 0.4;
-        box.box(x + (PD.h01(i, y, 0x72) - 0.5) * 0.2, y + 0.21 + hgt / 2, z, 0.95, hgt, 1.12);
+      for (const ze of [z - 1.15, z + 1.15]) {
+        for (const ux of UX) {
+          kb(blue, x + ux, (up0 + UY1) / 2, ze, 0.08, UY1 - up0, 0.07, U);
+          kb(zinc, x + ux, FL + 0.005, ze, 0.12, 0.01, 0.1);                            // foot plate
+          for (const s of [-1, 1]) kc(dark, x + ux + s * 0.05, FL + 0.018, ze, 0.009, 0.009, 0.016, 6);   // anchors
+        }
+        // the slot rows on the aisle face of each front upright
+        for (const s of [-1, 1]) for (let y = 0.2; y < UY1 - 0.1; y += 0.1)
+          for (const dz of [-0.018, 0.018]) kb(dark, x + s * 1.101, y, ze + dz, 0.002, 0.035, 0.012);
+        // each 0.9 m frame: a bottom and top horizontal and a zig-zag between
+        for (const fr of [[UX[0], UX[1]], [UX[2], UX[3]]]) {
+          const xa = x + fr[0] + 0.04, xb = x + fr[1] - 0.04;
+          for (const y of [0.25, 3.55]) K.tube(xa, y, ze, xb, y, ze, 0.016, blue, NC);
+          for (let k = 0; k < 5; k++) {
+            const ya = 0.25 + k * 0.66, yb = ya + 0.66;
+            if (k & 1) K.tube(xb, ya, ze, xa, yb, ze, 0.014, blue, NC);
+            else K.tube(xa, ya, ze, xb, yb, ze, 0.014, blue, NC);
+          }
+        }
+        for (const y of [1.0, 2.3, 3.4]) kb(blue, x, y, ze, 0.24, 0.05, 0.04);          // row spacers across the flue
+      }
+      for (const Y of BEAMS) {
+        for (const ux of UX) {
+          kb(orange, x + ux, Y - 0.055, z, 0.05, 0.11, 2.23, { cast: true });
+          for (const s of [-1, 1]) kb(orange, x + ux, Y - 0.09, z + s * 1.111, 0.07, 0.18, 0.008);   // connector plates
+        }
+        for (const xc of [x - 0.61, x + 0.61]) {                                           // wire decks
+          for (const k of [-0.8, 0, 0.8]) kb(zinc, xc, Y + 0.015, z + k, 0.95, 0.03, 0.03);
+          for (let t = 0; t < 10; t++) kb(zinc, xc - 0.45 + (t + 0.5) * 0.09, Y + 0.0325, z, 0.005, 0.005, 2.2);
+          for (let t = 0; t <= 10; t++) kb(zinc, xc, Y + 0.0375, z - 1.0 + t * 0.2, 0.95, 0.005, 0.005);
+        }
+      }
+      // the loads: per face (the two frames) and level (floor, beam 1, beam 2)
+      for (let f = 0; f < 2; f++) {
+        const xc = x + (f ? 0.61 : -0.61);
+        for (let lv = 0; lv < 3; lv++) {
+          const base = lv ? BEAMS[lv - 1] + DECK : FL;
+          const wood = woods[hh(i, f, lv) < 0.6 ? 0 : 1];
+          if (lv && hh(i, f + 3, lv * 3 + 9) < 0.2) { barStock(xc, base, z, wood); continue; }
+          for (const zc of [z - 0.55, z + 0.55]) {
+            const seed = i * 97 + f * 31 + lv * 7 + (zc > z ? 3 : 0);
+            const r = hh(seed, 7, 19);
+            if (r < 0.08) continue;                                                            // an empty slot
+            const top = pallet(xc, base, zc, hh(seed, 8, 23) < 0.7 ? wood : woods[1]);
+            if (r < 0.5) cartons(xc, top, zc, seed);
+            else if (r < 0.7) wrapped(xc, top, zc, seed);
+            else if (r < 0.86) drums(xc, top, zc, seed);
+            else cartons(xc, top, zc, seed + 5);
+          }
+        }
       }
       CBZ.colliders.push({ minX: x - 1.1, maxX: x + 1.1, minZ: z - 1.2, maxZ: z + 1.2 });
     }
-    up.mesh(CBZ.cmat(0x2f4f7a)); beam.mesh(CBZ.cmat(0xd9772a)); deck.mesh(CBZ.cmat(0x8a939d));
-    pal.mesh(CBZ.cmat(0x9a7a50)); box.mesh(CBZ.cmat(0xb79b72));
   })();
   /* The crib sits in the shop's SOUTH-WEST corner, so its host walls are the
      room's own x=-116 and z=44 and the faces that look INTO the shop are
@@ -768,8 +923,17 @@
      nobody in the corridor — which is exactly why the map is in it. Its
      control door takes the Keycard, so the card that gets you out of the
      housing unit is also the card that gets you into the one nobody walks. */
+  /* THE CONTROL GATE IS THE UNIT'S ONE DOOR (2026-09-28). The Keycard gate
+     used to stand at x 99..102.6 in the unit's SOUTH exterior wall (z=44),
+     behind the cell backs: roomShell's wall ran solid right through its
+     opening, so it opened onto concrete and gated nothing, while the real
+     doorway (west, z 17.5..22.5) stood open and a metre off the corridor
+     that feeds it (world/corridors.js wing-seg, z 19.25..23.75). The doorway
+     now matches the corridor exactly and the gate hangs IN it, so the route
+     is: corridor key at the unit-mouth grille, then the card at this gate. */
+  const SEG_DOOR = { c: 21.5, w: 4.5 };
   room({ id: "segregation", x0: 58, x1: 112, z0: -4, z1: 44, h: 7,
-    wall: 0x848d98, floor: 0x646b74, side: "W", dc: 20, dw: 5,
+    wall: 0x848d98, floor: 0x646b74, side: "W", dc: SEG_DOOR.c, dw: SEG_DOOR.w,
     fin: { floor: "slab", floorTint: 0x969b9f, dado: 0x5d6873, dadoH: 1.3,
       ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xc9ccce, lights: "vapor", nx: 8, nz: 5 } } });
   // sixteen singles in two facing rows off a central corridor. Partitions are
@@ -777,12 +941,17 @@
   // is precisely the route the charge table exists for.
   const segPane = new THREE.MeshLambertMaterial({ color: 0x39424e, transparent: true, opacity: 0.05, depthWrite: false });
   const segBar = K.skin("steel", 0x2a2f38, 0.5);
+  const MAP_CELL = 7;                                      // south row, east end: the open cell (below)
   for (let r = 0; r < 2; r++) {
     const zf = r ? 34 : 6;                                  // the cell-front plane
     for (let i = 0; i < 8; i++) {
       const cx = 62 + i * 6.2;
+      const openCell = r === 1 && i === MAP_CELL;
       const part = addBox(cx - 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true });
       K.skinBox(part, "block", 0x7d8691);
+      // the end cell's east side: it had no partition, so the last cell of
+      // each row stood open to the 3.5 m strip against the unit's east wall
+      if (i === 7) K.skinBox(addBox(cx + 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true }), "block", 0x7d8691);
       /* the barred front: a real welded grille, 22 mm round bar on 180 mm
          centres between flat-bar rails, a door leaf framed in heavier section
          with its food slot. It was six square sticks a metre apart in front of
@@ -794,12 +963,20 @@
       for (let b = 0; cx - 2.9 + b * 0.18 < cx + 2.95; b++) {
         const bx = cx - 2.9 + b * 0.18;
         if (bx > cx + 1.0 && bx < cx + 1.18) continue;                  // the door's hinge stile goes here
+        if (openCell && bx > cx + 0.1 && bx < cx + 1.1) continue;       // the leaf is swung back
         stat(new THREE.CylinderGeometry(0.011, 0.011, 3.3, 6, 1, true), segBar, bx, 1.65, zf, { cast: false });
       }
-      for (const y of [0.06, 1.15, 2.25, 3.28]) stat(new THREE.BoxGeometry(6.0, 0.08, 0.02), segBar, cx, y, zf, { cast: false });
+      for (const y of [0.06, 1.15, 2.25, 3.28]) {
+        if (!openCell || y > 3) { stat(new THREE.BoxGeometry(6.0, 0.08, 0.02), segBar, cx, y, zf, { cast: false }); continue; }
+        // the open cell's rails stop at the jambs (the head rail still spans)
+        stat(new THREE.BoxGeometry(3.1 - 0.035, 0.08, 0.02), segBar, cx - 3.0 + (3.1 - 0.035) / 2, y, zf, { cast: false });
+        stat(new THREE.BoxGeometry(1.91 - 0.035, 0.08, 0.02), segBar, cx + 1.09 + 0.035 + (1.91 - 0.035) / 2, y, zf, { cast: false });
+      }
       for (const dx of [0.1, 1.09]) stat(new THREE.BoxGeometry(0.07, 3.3, 0.07), segBar, cx + dx, 1.65, zf, { cast: false });   // the door's stiles
-      stat(new THREE.BoxGeometry(0.4, 0.14, 0.05), segBar, cx + 0.6, 1.1, zf, { cast: false });                                  // food slot
-      stat(new THREE.BoxGeometry(0.06, 0.16, 0.08), segBar, cx + 0.2, 1.3, zf, { cast: false });                                 // lock box
+      if (!openCell) {
+        stat(new THREE.BoxGeometry(0.4, 0.14, 0.05), segBar, cx + 0.6, 1.1, zf, { cast: false });                                // food slot
+        stat(new THREE.BoxGeometry(0.06, 0.16, 0.08), segBar, cx + 0.2, 1.3, zf, { cast: false });                               // lock box
+      }
       /* and what is inside it: a bunk, a stainless combo, nothing else.
 
          THE BUNK IS A BED NOW. It was two raw addBox slabs — a 1.9 x 0.2
@@ -830,10 +1007,36 @@
     const back = addBox(87, 1.75, zf + (r ? 8 : -8), 54, 3.5, 0.3, 0x6f7883, { solid: true, blockLOS: true });  // back wall
     if (K) K.skinBox(back, "block", 0x7d8691);
   }
-  stockCage([["Contraband Map", 104.5, 0.62, 41.0]]);
+  /* THE MAP LIES ON THE BUNK IN THE LAST CELL, AND THAT CELL STANDS OPEN.
+     Every seg front above is one solid pane, so the map (which lay at z 41,
+     a hand off the bunk's edge, inside a sealed cell) had no route to it by
+     any means but a charge. The last cell on the south row is being turned
+     over: its leaf is swung back against the corridor side of the grille,
+     its pane is cut round the doorway, and the map is on the mattress. */
+  const mcx = 62 + MAP_CELL * 6.2, mzf = 34;
+  (function openCell() {
+    // re-cut the one cell front: a pane either side of the leaf's opening
+    const d0 = mcx + 0.14, d1 = mcx + 1.05;
+    for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
+      const c = CBZ.colliders[i];
+      if (c && Math.abs((c.minX + c.maxX) / 2 - mcx) < 0.01 && Math.abs((c.minZ + c.maxZ) / 2 - mzf) < 0.01 && c.maxX - c.minX > 5.9) {
+        CBZ.colliders.splice(i, 1, Object.assign({}, c, { maxX: d0 }), Object.assign({}, c, { minX: d1 }));
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        break;
+      }
+    }
+    // the leaf itself, swung 90 degrees on its hinge stile (mcx + 1.09) into the corridor
+    const lw = 0.95, hx = mcx + 1.09, lz = mzf - lw / 2 - 0.05;
+    for (const dz of [-lw / 2 + 0.035, lw / 2 - 0.035]) stat(new THREE.BoxGeometry(0.07, 3.3, 0.07), segBar, hx, 1.65, lz + dz, { cast: false });
+    for (const y of [0.06, 1.15, 2.25, 3.28]) stat(new THREE.BoxGeometry(0.02, 0.08, lw), segBar, hx, y, lz, { cast: false });
+    for (let b = 1; b < 5; b++) stat(new THREE.CylinderGeometry(0.011, 0.011, 3.2, 6, 1, true), segBar, hx, 1.65, lz - lw / 2 + b * lw / 5, { cast: false });
+    stat(new THREE.BoxGeometry(0.05, 0.14, 0.4), segBar, hx, 1.1, lz, { cast: false });   // food slot
+  })();
+  // the bunk of that cell is at (mcx - 1.5, 40.4), along x, mattress top at 0.62
+  stockCage([["Contraband Map", mcx - 1.1, 0.64, 40.4]]);
   const segDoor = makeDoor({
     id: "prison-segregation", label: "The segregation gate", keys: ["Keycard"], bars: true, lb: 5,
-    axis: "x", a0: 99, a1: 102.6, fixed: 44,
+    axis: "z", a0: SEG_DOOR.c - SEG_DOOR.w / 2 + 0.1, a1: SEG_DOOR.c + SEG_DOOR.w / 2 - 0.1, fixed: 58, t: 0.5,
   });
 
   /* KITCHEN. A prison this size feeds nine hundred men from one room, and
@@ -843,72 +1046,444 @@
     wall: 0xb6bcc2, floor: 0x9aa2aa, side: "W", dc: 78, dw: 5,
     fin: { floor: "quarry", floorTint: 0xffffff, dado: 0xffffff, tile: 0xf1f0ea, dadoH: 2.0, rail: 0x9aa3ad,
       ceilingY: 4.2, ceiling: { kind: "slab", tint: 0xdfe1e0, lights: "vapor", nx: 10, nz: 7 } } });
-  /* THE COOK LINE (rebuilt 2026-09-27). It was four 4.4 x 1.0 x 2.2 grey
-     blocks with a darker slab on top and five pale blocks for prep tables.
-     Now: one back-to-back island of heavy-duty ranges (oven doors both
-     sides, burner grates, a flue riser down the middle) under ONE canopy
-     hood hung from the ceiling on rods, two tilting steam kettles at the
-     end, and stainless prep tables on legs with an undershelf. */
-  (function cookLine() {
-    const M = PD && PD.Merge ? PD.Merge : null;
-    const steel = (m, t) => { if (K && m) K.skinBox(m, "steel", t); return m; };
-    const IZ = 66, IX0 = 62, IX1 = 88;                    // island centreline, extent
-    steel(addBox((IX0 + IX1) / 2, 0.47, IZ, IX1 - IX0, 0.82, 2.0, 0x9aa3ad, { solid: true, y0: 0, y1: 0.95 }), 0x9aa3ad);
-    steel(addBox((IX0 + IX1) / 2, 0.9, IZ, IX1 - IX0 + 0.04, 0.05, 2.04, 0x5b636c, { cast: false }), 0x5b636c);
-    addBox((IX0 + IX1) / 2, 1.1, IZ, IX1 - IX0, 0.36, 0.1, 0x8a939d, { cast: false });   // flue riser
-    if (M) {
-      const doors = new M(), grates = new M(), knobs = new M();
-      const n = Math.round((IX1 - IX0) / 1.0);
-      for (let i = 0; i < n; i++) {
-        const x = IX0 + 0.5 + i * (IX1 - IX0) / n;
-        for (const s of [-1, 1]) {
-          doors.box(x, 0.46, IZ + s * 1.005, 0.86, 0.54, 0.02);                          // oven door
-          knobs.box(x, 0.76, IZ + s * 1.03, 0.7, 0.03, 0.03);                            // door bar
-          for (let k = 0; k < 4; k++) knobs.box(x - 0.3 + k * 0.2, 0.84, IZ + s * 1.02, 0.04, 0.04, 0.03);
-          for (const gz of [0.3, 0.7]) grates.box(x, 0.94, IZ + s * gz, 0.4, 0.03, 0.34);   // burner grates
+  /* THE KITCHEN FLOOR (rebuilt 2026-09-28; every piece of it was a steel-
+     skinned box: box ovens with box knobs, a box hood, cylinders on sticks
+     for kettles, slab tables, and a cooler that was three corrugated slabs
+     open along one whole side). Now, all kit-merged:
+       THE COOK LINE  one back-to-back island (x 62-88, z 65-67) of 28 heavy-
+         duty units a side on a shared backguard and high shelf. Ranges:
+         recessed plinth, oven door with a window and a pull bar on
+         standoffs, a sloped control rail with knobs and a pilot, six burner
+         heads under three cast-iron bar grates. Every fourth is a griddle.
+       THE CANOPY     a hollow double-island hood (skirts, sloped sides, end
+         plates) with a V bank of baffle filters over a grease trough, hung
+         on threaded rods, two ducts up through the ceiling.
+       TWO TILTING KETTLES  a jacketed round pan with a rolled rim and a
+         pour lip on trunnions between two pedestals, the tilt handwheel on
+         its gear housing, a floor drain under each lip.
+       FIVE PREP TABLES  turned-edge top with a splash, six tube legs on
+         bullet feet, an undershelf on collars; a board, two hotel pans and a
+         lidded stock pot on top. No knives anywhere: they live in the cage.
+       A POT SINK on the north wall, WIRE SHELVING in the dry-store aisle
+         behind the cooler and inside it, and
+       THE WALK-IN COOLER (the hiding place, same footprint, still solid and
+         sightline-blocking): an insulated panel box with seams, corner and
+         top trims and a kick plate, a real doorway in its east wall with the
+         door standing open on strap hinges (latch, pull, vision window,
+         inside release), a threshold plate, an evaporator inside and the
+         condensing unit on the roof with its line set.
+     Island, kettle, table and cooler colliders are the old rects; the sink,
+     the shelving runs and the open cooler door have their own. */
+  (function kitchen() {
+    const ss = K.skin("steel", 0xc3c9cf, 0.32), ssDk = K.skin("steel", 0x8f979f, 0.4);
+    const iron = K.skin("steel", 0x1c1f23, 0.8), knobM = K.skin("steel", 0x202328, 0.5);
+    const glassDk = K.skin("steel", 0x141b22, 0.12), plinthM = K.skin("steel", 0x2a2f36, 0.6);
+    const galv = K.skin("galv", 0xaab2ba), rodM = K.skin("steel", 0x4a525c, 0.5), pvc = K.skin("steel", 0x9aa0a6, 0.6);
+    const chrome = K.skin("galv", 0xc9ced3);
+    const pilotM = new THREE.MeshLambertMaterial({ color: 0xffb347, emissive: 0xff9a1a, emissiveIntensity: 0.6 });
+    const UVC = { uv: 1, cast: true }, UVN = { uv: 1, cast: false };
+    const zRod = (g, m, x, y, z) => K.stat(g, m, x, y, z, { rx: Math.PI / 2, cast: false });   // a cylinder lying along z
+
+    /* ---- THE COOK LINE ------------------------------------------------ */
+    const IZ = 66, IX0 = 62, IX1 = 88, NU = 28, W = (IX1 - IX0) / NU;
+    CBZ.colliders.push({ minX: IX0, maxX: IX1, minZ: IZ - 1, maxZ: IZ + 1, y0: 0, y1: 0.95 });
+    // the units stand back to back on a 20 mm backguard sheet, fronts at IZ +/-0.91
+    // so the rail, knobs and pull bars all stay inside the island's collider
+    kb(ss, (IX0 + IX1) / 2, (FL + 1.30) / 2, IZ, IX1 - IX0, 1.30 - FL, 0.02, UVC);    // backguard
+    kb(ss, (IX0 + IX1) / 2, 1.315, IZ, IX1 - IX0, 0.03, 0.56, UVC);                    // high shelf
+    for (let gx = IX0 + 0.6; gx < IX1; gx += 2.6) for (const s of [-1, 1])
+      K.tube(gx, 1.10, IZ + s * 0.01, gx, 1.30, IZ + s * 0.25, 0.012, ss, NC);        // shelf stays
+    for (const hx of [64.5, 71.5, 78.5, 85.5]) {                                        // nested hotel pans up there
+      kb(ss, hx, 1.33 + 0.04, IZ, 0.53, 0.08, 0.325, NC);
+      for (let k = 0; k < 3; k++) kb(ss, hx, 1.352 + k * 0.024, IZ, 0.55, 0.004, 0.345);
+    }
+    // the control rail's section: lz is outward from the body face, y is height
+    const RAIL = [[0, 0.66], [0.085, 0.66], [0.085, 0.70], [0.02, 0.84], [0, 0.84]];
+    const TILT = Math.atan2(0.065, 0.14);                 // the rail face leans back 25 deg
+    const nL = Math.cos(TILT), nY = Math.sin(TILT);       // its outward normal (lz, y)
+    for (const s of [-1, 1]) {
+      const zF = IZ + s * 0.91, ry = s > 0 ? 0 : Math.PI;
+      const Z = (lz) => zF + s * lz;
+      for (let u = 0; u < NU; u++) {
+        const ux = IX0 + (u + 0.5) * W, bw = W - 0.004;
+        const griddle = (u + (s > 0 ? 2 : 0)) % 4 === 2;
+        kb(plinthM, ux, FL + 0.05, Z(-0.485), bw, 0.10, 0.83);                          // recessed kick
+        kb(ss, ux, 0.50, Z(-0.45), bw, 0.68, 0.9, UVC);                                  // body
+        kb(ss, ux, 0.85, Z(-0.44), bw, 0.02, 0.92, UVN);                                 // top plate
+        K.stat(K.profileGeo(RAIL, bw, 0), ss, ux, 0, zF, { ry: ry, uv: 1, cast: false });   // control rail
+        // oven door: panel, window, a vent under it, the pull bar on standoffs
+        kb(ss, ux, 0.43, Z(0.015), bw - 0.1, 0.42, 0.03, UVN);
+        kb(glassDk, ux, 0.45, Z(0.031), 0.44, 0.16, 0.002);
+        kb(iron, ux, 0.19, Z(0.002), bw - 0.12, 0.025, 0.004);
+        K.stat(new THREE.CylinderGeometry(0.012, 0.012, bw - 0.24, 10), ssDk, ux, 0.585, Z(0.075), { rz: Math.PI / 2, cast: false });
+        for (const sx of [-1, 1]) zRod(new THREE.CylinderGeometry(0.008, 0.008, 0.045, 8), ssDk, ux + sx * (bw / 2 - 0.16), 0.585, Z(0.0525));
+        // knobs stand square off the sloped rail face, and one pilot lamp
+        const kn = griddle ? [-0.3, -0.1, 0.1, 0.3] : [-0.33, -0.22, -0.11, 0, 0.11, 0.22, 0.33];
+        const fL = 0.0525, fY = 0.77;                     // mid-point of the rail face
+        for (const lx of kn)
+          K.stat(new THREE.CylinderGeometry(0.019, 0.019, 0.032, 8), knobM, ux + lx, fY + nY * 0.016, Z(fL + nL * 0.016),
+            { rx: Math.PI / 2 - TILT, ry: ry, cast: false });
+        K.stat(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 8), pilotM, ux + 0.41, fY + nY * 0.005, Z(fL + nL * 0.005),
+          { rx: Math.PI / 2 - TILT, ry: ry, cast: false });
+        if (griddle) {
+          kb(iron, ux, 0.875, Z(-0.47), bw - 0.1, 0.03, 0.74, UVN);                    // the plate
+          kb(plinthM, ux, 0.87, Z(-0.06), bw - 0.1, 0.02, 0.06);                         // grease trough
+          kb(ss, ux, 0.94, Z(-0.845), bw - 0.08, 0.1, 0.01);                             // splash, back
+          for (const sx of [-1, 1]) kb(ss, ux + sx * (bw / 2 - 0.045), 0.94, Z(-0.47), 0.01, 0.1, 0.74);
+        } else {
+          for (const lx of [-0.305, 0, 0.305]) {
+            const gx = ux + lx;
+            for (const lz of [-0.25, -0.64]) kc(iron, gx, 0.875, Z(lz), 0.075, 0.08, 0.03, 10);   // burner heads
+            // one cast-iron grate over the pair: two rails, three bars, fingers, feet
+            for (const rx of [-0.13, 0.13]) {
+              kb(iron, gx + rx, 0.9125, Z(-0.45), 0.02, 0.025, 0.84);
+              for (const fz of [-0.05, -0.85]) kb(iron, gx + rx, 0.88, Z(fz), 0.02, 0.04, 0.02);
+            }
+            for (const cz of [-0.04, -0.445, -0.86]) kb(iron, gx, 0.9125, Z(cz), 0.24, 0.025, 0.02);
+            for (const seg of [[-0.05, -0.435], [-0.455, -0.85]])
+              for (const fx of [-0.035, 0.035]) kb(iron, gx + fx, 0.9125, Z((seg[0] + seg[1]) / 2), 0.016, 0.025, seg[0] - seg[1]);
+          }
         }
       }
-      doors.mesh(CBZ.cmat(0x7d868f)); grates.mesh(CBZ.cmat(0x1c1f23)); knobs.mesh(CBZ.cmat(0x2a2f36));
-      // the canopy hood: one box, its filter band, and four rods to the ceiling
-      const hood = new M(), rods = new M();
-      hood.box((IX0 + IX1) / 2, 2.35, IZ, IX1 - IX0 + 0.6, 0.6, 3.0);
-      rods.box((IX0 + IX1) / 2, 2.07, IZ, IX1 - IX0 + 0.4, 0.06, 2.8);                  // filter band
-      for (const rx of [IX0 + 1, (IX0 + IX1) / 2 - 6, (IX0 + IX1) / 2 + 6, IX1 - 1])
-        for (const s of [-1, 1]) rods.box(rx, 3.4, IZ + s * 1.3, 0.04, 1.6, 0.04);
-      rods.box((IX0 + IX1) / 2, 3.4, IZ, 1.2, 1.0, 0.8);                                   // exhaust duct stub
-      const hm = hood.mesh(K ? K.skin("steel", 0xb9c0c7) : CBZ.cmat(0xb9c0c7));
-      if (hm && K) { K.worldUV(hm.geometry, 1, null); hm.userData.prisonSkin = "steel"; }
-      rods.mesh(CBZ.cmat(0x8a939d));
     }
-    // two tilting steam kettles at the east end of the line
-    for (const kx of [90.2, 92.2]) {
-      const k = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.42, 0.7, 16), CBZ.cmat(0xb9c0c7));
-      k.position.set(kx, 0.75, IZ); ROOT.add(k);
-      // the trunnion the pan tilts on, into both pedestals (it hung in the gap between them)
-      if (K) K.stat(new THREE.CylinderGeometry(0.045, 0.045, 1.5, 10), K.skin("steel", 0x8a939d), kx, 0.82, IZ, { rx: Math.PI / 2, cast: false });
-      addBox(kx, 0.45, IZ - 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
-      addBox(kx, 0.45, IZ + 0.7, 0.14, 0.9, 0.14, 0x8a939d, { cast: false });
+
+    /* ---- THE CANOPY ---------------------------------------------------- */
+    const HX0 = IX0 - 0.3, HX1 = IX1 + 0.3, HL = HX1 - HX0, HC = (HX0 + HX1) / 2;
+    const hoodM = K.skin("steel", 0xc0c6cc, 0.35);
+    // one long side as a bent 15 mm sheet: skirt from 2.05 to 2.35, then in to the top
+    const SIDE = [[1.6, 2.05], [1.6, 2.35], [1.1, 2.75], [1.0906, 2.7383], [1.585, 2.3428], [1.585, 2.05]];
+    for (const s of [-1, 1]) K.stat(K.profileGeo(SIDE.map((p) => [p[0] * s, p[1]]), HL - 0.04, 0), hoodM, HC, 0, IZ, UVC);
+    const END = [[-1.6, 2.05], [1.6, 2.05], [1.6, 2.35], [1.1, 2.75], [-1.1, 2.75], [-1.6, 2.35]];
+    for (const ex of [HX0 + 0.01, HX1 - 0.01]) K.stat(K.profileGeo(END, 0.02, 0), hoodM, ex, 0, IZ, UVN);
+    kb(hoodM, HC, 2.7425, IZ, HL - 0.04, 0.015, 2.2, UVN);                               // top
+    // the V bank: baffle filters from the top (lz 0.6) down to a trough at the middle
+    const FA = Math.atan2(0.435, 0.52), fsin = Math.sin(FA), fcos = Math.cos(FA);
+    const nF = Math.floor((HL - 0.04) / 0.5), f0 = HC - (nF - 1) * 0.25;
+    for (const s of [-1, 1]) {
+      const cz = IZ + s * 0.34, cy = 2.5175, th = -s * FA;
+      const oz = s * fsin * 0.0275, oy = -fcos * 0.0275;  // out along the visible face's normal
+      for (let k = 0; k < nF; k++) {
+        const fx = f0 + k * 0.5;
+        K.stat(new THREE.BoxGeometry(0.49, 0.03, 0.66), galv, fx, cy, cz, { rx: th, cast: false });
+        for (const bx of [-0.18, -0.06, 0.06, 0.18])
+          K.stat(new THREE.BoxGeometry(0.01, 0.025, 0.62), galv, fx + bx, cy + oy, cz + oz, { rx: th, cast: false });
+      }
+    }
+    kb(galv, HC, 2.28, IZ, HL - 0.04, 0.04, 0.2);                                         // grease trough
+    for (const rx of [IX0 + 0.5, 70.3, 79.7, IX1 - 0.5]) for (const s of [-1, 1])
+      K.tube(rx, 2.75, IZ + s * 0.9, rx, 4.2, IZ + s * 0.9, 0.009, rodM, NC);            // hanger rods
+    for (const dx of [68.5, 81.5]) {
+      kb(galv, dx, (2.75 + 4.2) / 2, IZ, 1.0, 4.2 - 2.75, 0.6, UVC);                      // exhaust duct
+      for (const y of [2.79, 3.45]) kb(galv, dx, y, IZ, 1.04, 0.04, 0.64);                // collar, joint
+    }
+
+    /* ---- THE KETTLES --------------------------------------------------- */
+    const KP = 0.80;                                      // trunnion height
+    const PAN = [[0.001, -0.40], [0.18, -0.385], [0.31, -0.32], [0.40, -0.22], [0.45, -0.10], [0.46, 0.02], [0.46, 0.28],
+      [0.445, 0.30], [0.425, 0.28], [0.425, 0.02], [0.415, -0.08], [0.37, -0.18], [0.28, -0.27], [0.16, -0.325], [0.001, -0.34]]
+      .map((p) => new THREE.Vector2(p[0], p[1]));          // jacket out and up, the pan's bowl back down inside
+    for (const kd of [[90.2, -1], [92.2, 1]]) {           // each pours away from the other
+      const kx = kd[0], dir = kd[1];
       CBZ.colliders.push({ minX: kx - 0.6, maxX: kx + 0.6, minZ: IZ - 0.8, maxZ: IZ + 0.8, y0: 0, y1: 1.1 });
+      K.stat(new THREE.LatheGeometry(PAN, 28), ss, kx, KP, IZ, UVC);
+      K.stat(new THREE.TorusGeometry(0.445, 0.015, 6, 28), ss, kx, KP + 0.292, IZ, { rx: Math.PI / 2, cast: false });    // rolled rim
+      K.stat(new THREE.TorusGeometry(0.462, 0.008, 4, 28), ssDk, kx, KP + 0.02, IZ, { rx: Math.PI / 2, cast: false });   // jacket seam
+      K.stat(new THREE.BoxGeometry(0.07, 0.015, 0.18), ss, kx + dir * 0.475, KP + 0.29, IZ, { rz: -0.25 * dir, cast: false });   // pour lip
+      for (const sz of [-1, 1]) {
+        const pz = IZ + sz * 0.58;
+        zRod(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 14), ssDk, kx, KP, IZ + sz * 0.48);        // trunnion boss
+        zRod(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10), ssDk, kx, KP, IZ + sz * 0.515);     // stub axle
+        kb(ss, kx, (FL + 0.92) / 2, pz, 0.28, 0.92 - FL, 0.12, UVC);                                 // pedestal
+        K.stat(new THREE.CylinderGeometry(0.14, 0.14, 0.12, 16), ss, kx, 0.92, pz, { rx: Math.PI / 2, uv: 1, cast: true });
+        kb(ssDk, kx, FL + 0.0075, pz, 0.36, 0.015, 0.2);                                            // foot flange
+      }
+      // the tilt: gear housing, shaft, handwheel with three spokes and a spinner
+      kb(ssDk, kx, KP, IZ + 0.67, 0.2, 0.22, 0.06);
+      zRod(new THREE.CylinderGeometry(0.012, 0.012, 0.06, 8), ssDk, kx, KP, IZ + 0.73);
+      K.stat(new THREE.TorusGeometry(0.13, 0.012, 6, 24), ssDk, kx, KP, IZ + 0.765, NC);
+      zRod(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 10), ssDk, kx, KP, IZ + 0.765);
+      for (let k = 0; k < 3; k++) {
+        const a = k * Math.PI * 2 / 3 + 0.3;
+        K.stat(new THREE.BoxGeometry(0.13, 0.012, 0.012), ssDk, kx + Math.cos(a) * 0.065, KP + Math.sin(a) * 0.065, IZ + 0.765, { rz: a, cast: false });
+      }
+      zRod(new THREE.CylinderGeometry(0.013, 0.013, 0.035, 8), knobM, kx + Math.cos(0.3) * 0.13, KP + Math.sin(0.3) * 0.13, IZ + 0.7875);
+      // steam in through the far pedestal, and the floor drain under the lip
+      K.tube(kx, FL, IZ - 0.70, kx, 0.5, IZ - 0.70, 0.02, ssDk, NC);
+      K.tube(kx, 0.5, IZ - 0.70, kx, 0.5, IZ - 0.64, 0.02, ssDk, NC);
+      kb(iron, kx + dir * 0.9, FL + 0.002, IZ, 0.4, 0.004, 0.6);
     }
-    // stainless prep tables: top, undershelf, four legs with feet
+
+    /* ---- PREP TABLES --------------------------------------------------- */
+    const boards = [K.skin("concrete", 0xe9e6dc, 0.8), K.skin("concrete", 0x6f9a6a, 0.8)];
+    const alu = K.skin("galv", 0xc9ced3), binM = K.skin("concrete", 0xeceae4, 0.6);
+    function hotelPan(x, y, z, w, d, h) {                 // open, 6 mm walls, a 20 mm flange
+      const t = 0.006;
+      kb(ss, x, y + t / 2, z, w - 2 * t, t, d - 2 * t);
+      for (const s of [-1, 1]) {
+        kb(ss, x, y + h / 2, z + s * (d / 2 - t / 2), w, h, t);
+        kb(ss, x + s * (w / 2 - t / 2), y + h / 2, z, t, h, d - 2 * t);
+        kb(ss, x, y + h - 0.003, z + s * (d / 2 + 0.01), w + 0.04, 0.006, 0.02);
+        kb(ss, x + s * (w / 2 + 0.01), y + h - 0.003, z, 0.02, 0.006, d);
+      }
+    }
     for (let i = 0; i < 5; i++) {
-      const x = 66 + i * 8, z = 80;
-      steel(addBox(x, 0.89, z, 3.0, 0.04, 0.9, 0xc7ccd2, { solid: true, y0: 0, y1: 0.95 }), 0xc7ccd2);
-      steel(addBox(x, 0.25, z, 2.9, 0.03, 0.8, 0xb9c0c7, { cast: false }), 0xb9c0c7);
-      for (const sx of [-1.42, 1.42]) for (const sz of [-0.4, 0.4])
-        addBox(x + sx, 0.47, z + sz, 0.04, 0.84, 0.04, 0xa8b0b8, { cast: false });
-      // what is on them: a cutting board and a stock pot
-      addBox(x - 0.7, 0.925, z, 0.6, 0.03, 0.4, 0xe8e4d6, { cast: false });
-      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.34, 14), CBZ.cmat(0xaab1b8));
-      pot.position.set(x + 0.8, 1.08, z); ROOT.add(pot);
+      const x = 66 + i * 8, z = 80, TY = 0.91, m = i & 1 ? -1 : 1;
+      CBZ.colliders.push({ minX: x - 1.5, maxX: x + 1.5, minZ: z - 0.45, maxZ: z + 0.45, y0: 0, y1: 0.95 });
+      kb(ss, x, TY - 0.006, z, 3.0, 0.012, 0.9, UVC);                                      // top
+      for (const sz of [-1, 1]) kb(ss, x, TY - 0.032, z + sz * 0.444, 3.0, 0.04, 0.012);   // turned edges
+      for (const sx of [-1, 1]) kb(ss, x + sx * 1.494, TY - 0.032, z, 0.012, 0.04, 0.876);
+      kb(ss, x, TY + 0.06, z + 0.444, 3.0, 0.12, 0.012, UVN);                               // splash
+      for (const lx of [-1.42, 0, 1.42]) for (const lz of [-0.38, 0.38]) {
+        kc(ssDk, x + lx, FL + 0.02, z + lz, 0.02, 0.013, 0.04, 10);                         // bullet foot
+        kc(ss, x + lx, (0.10 + 0.848) / 2, z + lz, 0.0205, 0.0205, 0.748, 10);              // leg
+        kc(ss, x + lx, 0.873, z + lz, 0.03, 0.03, 0.05, 10);                                // gusset socket
+        kc(ss, x + lx, 0.25, z + lz, 0.026, 0.026, 0.04, 10);                               // shelf collar
+      }
+      kb(ss, x, 0.25, z, 2.8, 0.012, 0.72, UVN);                                            // undershelf
+      // on top: a board, two hotel pans, a lidded stock pot with loop handles
+      kb(boards[i % 3 === 1 ? 1 : 0], x - 0.9 * m, TY + 0.0125, z - 0.05, 0.6, 0.025, 0.45, UVN);
+      hotelPan(x - 0.22 * m, TY, z - 0.05, 0.325, 0.53, 0.1);
+      hotelPan(x + 0.16 * m, TY, z - 0.05, 0.325, 0.53, 0.1);
+      const px = x + 0.85 * m, pz = z - 0.02;
+      kc(ss, px, TY + 0.16, pz, 0.2, 0.2, 0.32, 20, UVC);
+      kc(ss, px, TY + 0.326, pz, 0.206, 0.206, 0.012, 20);
+      kc(knobM, px, TY + 0.347, pz, 0.018, 0.022, 0.03, 10);
+      for (const s of [-1, 1])
+        K.stat(new THREE.TorusGeometry(0.045, 0.008, 5, 10, Math.PI), ssDk, px + s * 0.195, TY + 0.27, pz, { rz: -s * Math.PI / 2, rx: Math.PI / 2, cast: false });
+      // underneath: a stack of sheet pans, or two lidded ingredient bins
+      if (!(i & 1)) for (let k = 0; k < 8; k++) kb(alu, x - 0.6 * m, 0.256 + 0.0125 + k * 0.028, z, 0.66, 0.025, 0.46);
+      else for (const bx of [-0.5, 0.1]) {
+        kb(binM, x + bx * m, 0.256 + 0.2, z, 0.4, 0.4, 0.6, UVN);
+        kb(ssDk, x + bx * m, 0.666, z, 0.42, 0.02, 0.62);
+      }
     }
+
+    /* ---- THE POT SINK (north wall, x 95-98) ---------------------------- */
+    CBZ.colliders.push({ minX: 95.0, maxX: 98.0, minZ: 60.25, maxZ: 61.05, y0: 0, y1: 1.0 });
+    kb(ss, 96.5, 1.06, 60.2875, 3.0, 0.30, 0.015, UVN);                                    // splash
+    kb(ss, 96.5, 0.895, 60.35, 3.0, 0.03, 0.11, UVN);                                       // back deck
+    kb(ss, 96.5, 0.555, 60.6825, 1.8, 0.01, 0.555);                                         // bowl bottoms
+    for (const wz of [60.41, 60.955]) kb(ss, 96.5, 0.73, wz, 1.8, 0.36, 0.01);             // bowl back, front
+    for (const wx of [95.605, 96.2, 96.8, 97.395]) kb(ss, wx, 0.73, 60.6825, 0.01, 0.36, 0.535);   // ends, dividers
+    kb(ss, 96.5, 0.89, 60.995, 3.0, 0.04, 0.07);                                            // front rail
+    K.stat(new THREE.CylinderGeometry(0.02, 0.02, 3.0, 10), ss, 96.5, 0.89, 61.03, { rz: Math.PI / 2, cast: false });   // its bull nose
+    for (const e of [[95.3, 95.006], [97.7, 97.994]]) {                                     // drainboards with a raised edge
+      kb(ss, e[0], 0.904, 60.6825, 0.6, 0.012, 0.555, UVN);
+      kb(ss, e[1], 0.93, 60.6825, 0.012, 0.04, 0.555);
+    }
+    for (const lx of [95.03, 96.5, 97.97]) for (const lz of [60.45, 60.93]) {
+      kc(ss, lx, FL + 0.02, lz, 0.02, 0.013, 0.04, 10);
+      const top = lx === 96.5 ? 0.55 : 0.898;
+      kc(ss, lx, (0.10 + top) / 2, lz, 0.02, 0.02, top - 0.10, 10);
+    }
+    for (const lz of [60.45, 60.93]) K.tube(95.05, 0.2, lz, 97.95, 0.2, lz, 0.014, ss, NC);  // stretchers
+    for (const bx of [95.9, 96.5, 97.1]) {
+      kc(iron, bx, 0.5615, 60.68, 0.04, 0.04, 0.003, 12);                                   // strainer
+      K.tube(bx, 0.55, 60.68, bx, 0.36, 60.68, 0.022, pvc, NC);                              // tailpiece
+      // a wall faucet: body out of the splash, swing spout, tip, two levers
+      K.tube(bx, 1.12, 60.295, bx, 1.12, 60.40, 0.018, ss, NC);
+      K.tube(bx, 1.12, 60.40, bx, 1.16, 60.62, 0.012, ss, NC);
+      K.tube(bx, 1.16, 60.62, bx, 1.10, 60.66, 0.012, ss, NC);
+      K.tube(bx - 0.08, 1.12, 60.32, bx + 0.08, 1.12, 60.32, 0.01, ss, NC);
+      for (const s of [-1, 1]) kb(knobM, bx + s * 0.08, 1.155, 60.32, 0.015, 0.06, 0.015);
+    }
+    K.tube(95.9, 0.36, 60.68, 97.1, 0.36, 60.68, 0.025, pvc, NC);                           // waste manifold
+    K.tube(97.1, 0.36, 60.68, 97.1, 0.36, 60.25, 0.025, pvc, NC);                           // into the wall
+    kb(ss, 96.5, 1.62, 60.43, 3.0, 0.025, 0.3, UVN);                                        // wall shelf over it
+    for (const bx of [95.2, 96.5, 97.8]) {
+      kb(ssDk, bx, 1.5, 60.29, 0.02, 0.22, 0.02);
+      K.tube(bx, 1.40, 60.30, bx, 1.605, 60.55, 0.008, ssDk, NC);
+    }
+    for (const hx of [95.6, 96.3]) {
+      kb(ss, hx, 1.6325 + 0.04, 60.43, 0.53, 0.08, 0.26, NC);
+      for (let k = 0; k < 3; k++) kb(ss, hx, 1.655 + k * 0.024, 60.43, 0.55, 0.004, 0.28);
+    }
+
+    /* ---- WIRE SHELVING (dry store, and inside the cooler) --------------
+       1.22 m units, chrome posts on levellers, four wire shelves each with
+       a frame, a truss chord, the deck wires and split collars on the posts.
+       `fill` puts what is on each shelf; `zb` is the wall side. */
+    const SH = [0.20, 0.66, 1.14, 1.62], UW = 1.22, PH = 1.86;
+    function wireRun(x0, n, zb, zf, fill, seed) {
+      const D = Math.abs(zf - zb), zc = (zb + zf) / 2, hx = UW / 2 - 0.02, hz = D / 2 - 0.015;
+      CBZ.colliders.push({ minX: x0, maxX: x0 + n * UW, minZ: Math.min(zb, zf), maxZ: Math.max(zb, zf), y0: 0, y1: 1.9 });
+      for (let u = 0; u < n; u++) {
+        const ux = x0 + (u + 0.5) * UW;
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          kc(chrome, ux + sx * hx, FL + 0.015, zc + sz * hz, 0.016, 0.016, 0.03, 8);
+          kc(chrome, ux + sx * hx, (FL + 0.03 + PH) / 2, zc + sz * hz, 0.0125, 0.0125, PH - FL - 0.03, 8);
+        }
+        for (let k = 0; k < SH.length; k++) {
+          const y = SH[k];
+          for (const sz of [-1, 1]) {
+            kb(chrome, ux, y - 0.006, zc + sz * hz, 2 * hx - 0.025, 0.012, 0.006);
+            kb(chrome, ux, y - 0.036, zc + sz * hz, 2 * hx - 0.025, 0.006, 0.006);
+          }
+          for (const sx of [-1, 1]) kb(chrome, ux + sx * hx, y - 0.006, zc, 0.006, 0.012, 2 * hz - 0.025);
+          for (let t = 1; t < 12; t++) kb(chrome, ux - hx + t * (2 * hx / 12), y - 0.003, zc, 0.004, 0.004, 2 * hz - 0.02);
+          for (const f of [-0.5, 0.5]) kb(chrome, ux, y - 0.008, zc + f * hz, 2 * hx - 0.02, 0.004, 0.004);
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) kb(chrome, ux + sx * hx, y - 0.02, zc + sz * hz, 0.034, 0.04, 0.034);   // split collars
+          fill(ux, y, zc, k, seed + u * 13 + k);
+        }
+      }
+    }
+    const krafts = [K.skin("concrete", 0xc2a274, 0.9), K.skin("concrete", 0xab8b60, 0.9)];
+    const tin = K.skin("galv", 0xc9ced3), labels = [0xb8332a, 0x3f7a3a, 0xd9a21b, 0x2f5e8a].map((c) => K.skin("steel", c, 0.6));
+    const sacks = [K.skin("concrete", 0xe6dfcc, 0.95), K.skin("concrete", 0xcdbb95, 0.95)];
+    function cartonRow(ux, y, zc, seed) {
+      const kr = krafts[hh(seed, 1, 2) < 0.5 ? 0 : 1];
+      for (const cx of [-0.38, 0, 0.38]) if (hh(seed, cx, 3) > 0.15) carton(ux + cx, y, zc, 0.36, 0.3, 0.38, kr, true);
+    }
+    function dryFill(ux, y, zc, k, seed) {
+      const r = hh(seed, k, 5);
+      if (r < 0.35) {                                     // #10 cans, two deep, stacked on the lower shelves
+        const lab = labels[Math.floor(hh(seed, 2, 7) * 4) % 4], layers = k < 3 ? 2 : 1;
+        for (let l = 0; l < layers; l++) for (let c = 0; c < 6; c++) for (const dz of [-0.1, 0.1]) {
+          const cy = y + l * 0.178 + 0.089;
+          kc(tin, ux - 0.45 + c * 0.18, cy, zc + dz, 0.078, 0.078, 0.176, 10);
+          kc(lab, ux - 0.45 + c * 0.18, cy, zc + dz, 0.0795, 0.0795, 0.12, 10);
+        }
+      } else if (r < 0.7) {                               // 25 kg sacks laid flat, two high
+        for (const sx of [-0.3, 0.3]) for (let l = 0; l < (k < 3 ? 2 : 1); l++) {
+          const sm = sacks[hh(seed, sx, l) < 0.5 ? 0 : 1], by = y + l * 0.14;
+          kb(sm, ux + sx, by + 0.055, zc, 0.56, 0.11, 0.40, UVN);
+          kb(sm, ux + sx, by + 0.125, zc, 0.46, 0.03, 0.30, UVN);                          // the fill's crown
+        }
+      } else cartonRow(ux, y, zc, seed);
+    }
+    const crateM = [0x2f6e3a, 0x2a2d31, 0x2f5e8a].map((c) => K.skin("steel", c, 0.7));
+    const produce = [[0xb8332a, 0.036], [0xc9a25a, 0.04], [0x5f9a3a, 0.07], [0x8a6a44, 0.045]]
+      .map((p) => ({ m: K.skin("concrete", p[0], 0.8), r: p[1] }));
+    const cambroM = K.skin("concrete", 0xe8ecee, 0.4);
+    function coldFill(ux, y, zc, k, seed) {
+      const r = hh(seed, k, 9);
+      if (r < 0.5) {                                      // two lug crates of produce
+        for (const cx of [-0.285, 0.285]) {
+          const x = ux + cx, w = 0.52, h = 0.26, d = 0.38, t = 0.012;
+          const cm = crateM[Math.floor(hh(seed, cx, 1) * 3) % 3], pr = produce[Math.floor(hh(seed, cx, 2) * 4) % 4];
+          kb(cm, x, y + t / 2, zc, w, t, d);
+          for (const s of [-1, 1]) {
+            kb(cm, x, y + h / 2, zc + s * (d / 2 - t / 2), w, h, t);
+            kb(cm, x + s * (w / 2 - t / 2), y + h / 2, zc, t, h, d - 2 * t);
+            kb(iron, x + s * (w / 2 + 0.001), y + h - 0.05, zc, 0.002, 0.03, 0.1);          // hand hole
+          }
+          const fy = y + h * 0.55;
+          kb(pr.m, x, fy - 0.005, zc, w - 2 * t, 0.01, d - 2 * t);
+          const nx = Math.floor((w - 2 * t) / (pr.r * 2)), nz = Math.floor((d - 2 * t) / (pr.r * 2));
+          for (let a = 0; a < nx; a++) for (let b = 0; b < nz; b++)
+            K.stat(new THREE.SphereGeometry(pr.r, 6, 3), pr.m, x - (nx - 1) * pr.r + a * pr.r * 2, fy + pr.r * 0.8,
+              zc - (nz - 1) * pr.r + b * pr.r * 2, NC);
+        }
+      } else if (r < 0.75) {                              // three lidded food-storage tubs
+        for (const cx of [-0.38, 0, 0.38]) {
+          kc(cambroM, ux + cx, y + 0.15, zc, 0.16, 0.15, 0.3, 16);
+          kc(ssDk, ux + cx, y + 0.31, zc, 0.168, 0.168, 0.02, 16);
+        }
+      } else cartonRow(ux, y, zc, seed);
+    }
+    // the dry store: the aisle behind the cooler, shelving on the south wall
+    wireRun(58.6, 9, 95.72, 95.26, dryFill, 0x51);
+
+    /* ---- THE WALK-IN COOLER -------------------------------------------- */
+    const CX0 = 58.25, CX1 = 70.15, CZ0 = 85.0, CZ1 = 92.35, CT = 0.12, CH = 3.0;
+    const CD0 = 86.3, CD1 = 87.7, CDH = 2.1;             // its doorway in the east wall (1.4 m clear)
+    const PANEL = 0xd3d8dc;
+    const cw = (x, y, z, w, h, d, solid) => {
+      const m = addBox(x, y, z, w, h, d, PANEL, solid ? { solid: true, blockLOS: true } : { blockLOS: true, cast: false });
+      K.skinBox(m, "steel", PANEL);
+      return m;
+    };
+    cw((CX0 + CX1) / 2, CH / 2, CZ0 + CT / 2, CX1 - CX0, CH, CT, true);                  // north
+    cw((CX0 + CX1) / 2, CH / 2, CZ1 - CT / 2, CX1 - CX0, CH, CT, true);                  // south
+    cw(CX1 - CT / 2, CH / 2, (CZ0 + CT + CD0) / 2, CT, CH, CD0 - CZ0 - CT, true);        // east, north of the door
+    cw(CX1 - CT / 2, CH / 2, (CD1 + CZ1 - CT) / 2, CT, CH, CZ1 - CT - CD1, true);        // east, south of it
+    // over the door: sightline only (a y-gated solid head seals a doorway for every actor)
+    cw(CX1 - CT / 2, (CDH + CH) / 2, (CD0 + CD1) / 2, CT, CH - CDH, CD1 - CD0, false);
+    cw((CX0 + CX1) / 2, CH + 0.06, (CZ0 + CZ1) / 2, CX1 - CX0, 0.12, CZ1 - CZ0, false);  // roof panels
+    const liner = K.skin("steel", PANEL, 0.5), seam = K.skin("steel", 0x6b7480, 0.6);
+    const trimM = K.skin("galv", 0xb9c0c7), kick = K.skin("steel", 0x8f979f, 0.45);
+    kb(liner, 58.2875, (FL + CH) / 2, (CZ0 + CZ1) / 2, 0.025, CH - FL, CZ1 - CZ0 - 2 * CT, UVN);   // on the room wall inside
+    const hS = CH - FL - 0.02, yS = (FL + CH) / 2;
+    for (let x = CX0 + 1.15; x < CX1 - 0.1; x += 1.15) {                                   // panel joints
+      kb(seam, x, yS, CZ0 - 0.001, 0.008, hS, 0.002);
+      kb(seam, x, yS, CZ1 + 0.001, 0.008, hS, 0.002);
+    }
+    for (let z = CZ0 + 1.15; z < CZ1 - 0.1; z += 1.15)
+      if (z < CD0 - 0.08 || z > CD1 + 0.08) kb(seam, CX1 + 0.001, yS, z, 0.002, hS, 0.008);
+    for (const zc of [CZ0, CZ1]) {                                                          // corner angles
+      const o = zc === CZ0 ? -1 : 1;
+      kb(trimM, CX1 - 0.025, yS, zc + o * 0.002, 0.05, CH - FL, 0.004);
+      kb(trimM, CX1 + 0.002, yS, zc - o * 0.025, 0.004, CH - FL, 0.05);
+      kb(trimM, (CX0 + CX1) / 2, CH + 0.06, zc + o * 0.003, CX1 - CX0, 0.14, 0.004);       // roof-edge flashing
+      kb(kick, (CX0 + CX1) / 2 - 0.025, FL + 0.15, zc + o * 0.0025, CX1 - CX0 - 0.05, 0.3, 0.003);
+    }
+    kb(trimM, CX1 + 0.003, CH + 0.06, (CZ0 + CZ1) / 2, 0.004, 0.14, CZ1 - CZ0 + 0.006);
+    for (const r of [[CZ0 + 0.05, CD0 - 0.06], [CD1 + 0.06, CZ1 - 0.05]])
+      kb(kick, CX1 + 0.0025, FL + 0.15, (r[0] + r[1]) / 2, 0.003, 0.3, r[1] - r[0]);
+    // the door set: jambs and head proud of the face, a tread plate on the sill
+    for (const jz of [CD0 - 0.03, CD1 + 0.03]) kb(trimM, CX1 + 0.01, (FL + CDH) / 2, jz, 0.02, CDH - FL, 0.06);
+    kb(trimM, CX1 + 0.01, CDH + 0.03, (CD0 + CD1) / 2, 0.02, 0.06, CD1 - CD0 + 0.12);
+    kb(kick, CX1 - CT / 2, FL + 0.006, (CD0 + CD1) / 2, 0.34, 0.012, CD1 - CD0);
+    kb(trimM, CX1 + 0.015, 1.05, CD1 + 0.09, 0.03, 0.2, 0.05);                            // the latch keeper
+    /* the leaf, hooked open flat to the room at 90 degrees on its north
+       jamb: 100 mm insulated, exterior face north */
+    const LX0 = CX1 + 0.09, LX1 = LX0 + 1.4, LZ = CD0 - 0.08, LF = LZ - 0.05;
+    const leafM = K.skin("steel", PANEL, 0.4), hw = K.skin("steel", 0x7d868f, 0.35);
+    CBZ.colliders.push({ minX: CX1, maxX: LX1 + 0.02, minZ: LZ - 0.23, maxZ: LZ + 0.075, y0: 0, y1: CDH });
+    kb(leafM, (LX0 + LX1) / 2, (FL + 0.02 + CDH - 0.02) / 2, LZ, 1.4, CDH - 0.04 - FL, 0.1, UVC);
+    for (const y of [0.46, 1.1, 1.8]) {                   // strap hinges: frame leaf, knuckle, strap (clear of the kick plate)
+      kb(hw, CX1 + 0.025, y, LZ - 0.035, 0.05, 0.14, 0.012);
+      kc(hw, CX1 + 0.05, y, LZ - 0.035, 0.02, 0.02, 0.14, 10);
+      kb(hw, CX1 + 0.28, y, LF - 0.003, 0.46, 0.05, 0.006);
+    }
+    kb(hw, LX1 - 0.1, 1.05, LF - 0.02, 0.07, 0.3, 0.04);                                   // latch body
+    K.tube(LX1 - 0.2, 0.93, LF - 0.08, LX1 - 0.2, 1.17, LF - 0.08, 0.014, hw, NC);         // pull
+    for (const y of [0.96, 1.14]) K.tube(LX1 - 0.2, y, LF, LX1 - 0.2, y, LF - 0.08, 0.009, hw, NC);
+    zRod(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 12), K.skin("steel", 0xa3261c, 0.5), LX1 - 0.1, 1.05, LZ + 0.07);   // inside release
+    kb(glassDk, LX0 + 0.85, 1.55, LZ, 0.36, 0.36, 0.104);                                  // vision window
+    for (const s of [-1, 1]) {
+      kb(trimM, LX0 + 0.85, 1.55 + s * 0.19, LF - 0.003, 0.4, 0.02, 0.006);
+      kb(trimM, LX0 + 0.85 + s * 0.19, 1.55, LF - 0.003, 0.02, 0.36, 0.006);
+    }
+    kb(kick, (LX0 + LX1) / 2, FL + 0.17, LF - 0.0015, 1.3, 0.3, 0.003);                     // kick plate
+    // inside: the evaporator hung off the ceiling on the back wall, its drain and line set
+    const evap = K.skin("steel", 0xe4e7e9, 0.5), insul = K.skin("steel", 0x1e2124, 0.9), copper = K.skin("steel", 0xb87333, 0.35);
+    kb(evap, 58.6, 2.725, 88.6, 0.5, 0.35, 1.4, UVN);
+    for (const rz of [88.05, 89.15]) K.tube(58.6, 2.9, rz, 58.6, CH, rz, 0.008, rodM, NC);
+    for (const fz of [88.25, 88.95]) {
+      for (const rr of [0.15, 0.09]) K.stat(new THREE.TorusGeometry(rr, 0.008, 4, 20), iron, 58.856, 2.725, fz, { ry: Math.PI / 2, cast: false });
+      kb(iron, 58.856, 2.725, fz, 0.006, 0.3, 0.006);
+      kb(iron, 58.856, 2.725, fz, 0.006, 0.006, 0.3);
+    }
+    // the condensate drain: out of the pan, back to the wall, down it to a floor drain
+    K.tube(58.4, 2.55, 89.2, 58.4, 2.52, 89.2, 0.012, pvc, NC);
+    K.tube(58.4, 2.52, 89.2, 58.315, 2.52, 89.2, 0.012, pvc, NC);
+    K.tube(58.315, 2.52, 89.2, 58.315, FL + 0.03, 89.2, 0.012, pvc, NC);
+    kc(iron, 58.36, FL + 0.002, 89.2, 0.05, 0.05, 0.004, 12);
+    K.tube(59.2, CH, 88.55, 59.2, 2.72, 88.55, 0.022, insul, NC);
+    K.tube(59.2, 2.72, 88.55, 58.85, 2.72, 88.55, 0.022, insul, NC);
+    K.tube(59.25, CH, 88.65, 59.25, 2.68, 88.65, 0.006, copper, NC);
+    K.tube(59.25, 2.68, 88.65, 58.85, 2.68, 88.65, 0.006, copper, NC);
+    // on the roof: the condensing unit on its rails, the line set across to a boot over the evaporator
+    const RT = CH + 0.12, cu = K.skin("steel", 0xb9bec2, 0.5);
+    for (const rx of [67.9, 68.7]) kb(rodM, rx, RT + 0.03, 88.6, 0.06, 0.06, 0.8);
+    kb(cu, 68.3, RT + 0.06 + 0.3, 88.6, 1.0, 0.6, 0.55, UVC);
+    const cuY = RT + 0.36;
+    for (const rr of [0.22, 0.14, 0.06]) K.stat(new THREE.TorusGeometry(rr, 0.008, 4, 24), iron, 68.3, cuY, 88.885, NC);   // fan guard
+    kb(iron, 68.3, cuY, 88.885, 0.44, 0.008, 0.008);
+    kb(iron, 68.3, cuY, 88.885, 0.008, 0.44, 0.008);
+    for (let k = 0; k < 6; k++) kb(cu, 68.3, RT + 0.13 + k * 0.08, 88.318, 0.9, 0.012, 0.014);   // coil louvres
+    K.tube(67.8, RT + 0.2, 88.55, 67.6, RT + 0.2, 88.55, 0.022, insul, NC);
+    K.tube(67.6, RT + 0.2, 88.55, 67.6, RT + 0.022, 88.55, 0.022, insul, NC);
+    K.tube(67.6, RT + 0.022, 88.55, 59.2, RT + 0.022, 88.55, 0.022, insul, NC);
+    K.tube(67.8, RT + 0.15, 88.65, 67.65, RT + 0.15, 88.65, 0.006, copper, NC);
+    K.tube(67.65, RT + 0.15, 88.65, 67.65, RT + 0.006, 88.65, 0.006, copper, NC);
+    K.tube(67.65, RT + 0.006, 88.65, 59.25, RT + 0.006, 88.65, 0.006, copper, NC);
+    kb(insul, 59.22, RT + 0.05, 88.6, 0.14, 0.1, 0.22);                                     // roof boot
+    // shelving along both long walls inside (the middle stays open floor to hide on)
+    wireRun(58.35, 7, CZ0 + CT, CZ0 + CT + 0.46, coldFill, 0x77);
+    wireRun(58.35, 9, CZ1 - CT, CZ1 - CT - 0.46, coldFill, 0x99);
   })();
-  // WALK-IN COOLER: a room inside a room, and the only place in the compound
-  // out of every sightline in it. Not a locked prize — a hiding place.
-  for (const w of [addBox(64, 1.55, 92.2, 12, 3.1, 0.3, 0x9aa2aa, { solid: true, blockLOS: true }),
-    addBox(58.15, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true }),
-    addBox(70, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true }),
-    addBox(64, 3.2, 90.4, 12, 0.2, 7.4, 0x8892a0, { cast: false, blockLOS: true })]) if (K) K.skinBox(w, "corrugated", 0xc9ced3);
   const KNIFE_DOOR = { a0: 102.2, a1: 105.2, fixed: 84 };
   cage({ x0: 98, x1: 110, z0: 84, z1: 96, side: "W", open: "N", h: 2.9, gap: KNIFE_DOOR });
   cageRack({ x: 104, z: 95.35, len: 5.0, face: 1 });
@@ -1232,13 +1807,10 @@
                          while the knife cage and the property cage had no
                          route in by any means and the tool crib had no wall
                          at all. This counts leaves whose own opening is still
-                         occupied by somebody else's collider. It is REPORTED,
-                         not thrown: `prison-segregation` is a known standing
-                         instance (its leaf sits in the seg block's south
-                         exterior wall, behind the cell backs — the room is
-                         entered by its west doorway and the gate gates
-                         nothing), so the honest pin today is 1, and a 2 means
-                         a new one was just built.
+                         occupied by somebody else's collider. PIN AT 0: the
+                         one standing instance (the segregation gate in the
+                         unit's solid south wall) moved into the unit's west
+                         doorway on 2026-09-28, so any count now is a new one.
      ========================================================== */
   CBZ.prisonWingsAudit = function () {
     const econ = CBZ.econ;
@@ -1291,7 +1863,7 @@
       wallGapsCut: cut.length,
       unreachable: unreachable,                   // MUST be 0
       orphanGates: orphan,                        // MUST be 0
-      doorsInWalls: inWall.length,                // pinned at 1 (see the header)
+      doorsInWalls: inWall.length,                // MUST be 0
       doorsInWallsIds: inWall,
       stocked: stock.length, laid: laid,
       consoleThrown: RELEASE.thrown,

@@ -235,6 +235,24 @@
       if (stack.bed) beds.push(stack.bed);
       if (stack.bedTop) beds.push(stack.bedTop);
     }
+    /* EVERY HOUSING STACK, NOT ONLY THE DORM'S. world/corridors.js's Unit B
+       draws 24 double stacks through the same canonical bunk (48 racks, counted
+       in CBZ.prisonBeds() and so in the population), and this roster only read
+       the dorm: 120 racks built, 72 on offer, and the men npc.js spawns in Unit
+       B had no bed of their own. A stack outside the dorm is rostered as a
+       POCKET (`_pocket` = its building's rect): shut() offers it only to a man
+       already standing inside, since the corridor grilles sit between it and
+       the rest of the compound. */
+    const all = CBZ.prisonHousingStacks, UB = CBZ.prisonUnitB || null;
+    if (all) for (let i = 0; i < all.length; i++) {
+      const stack = all[i];
+      if (!stack || (housing && housing.beds && housing.beds.indexOf(stack) >= 0)) continue;
+      for (const b of [stack.bed, stack.bedTop]) {
+        if (!b || beds.indexOf(b) >= 0) continue;
+        if (UB && b.x > UB.x0 && b.x < UB.x1 && b.z > UB.z0 && b.z < UB.z1) b._pocket = UB;
+        beds.push(b);
+      }
+    }
     CBZ.rest.seatsIn(-28.8, -19.2, 6.2, 21.8, 0, messSeats);         // chow hall
     CBZ.rest.seatsIn(-30, 30, -8, 52, 0, yardSeats);                 // the north yard
     if (CFG.PRISON_REST_WARDEN) {
@@ -323,6 +341,8 @@
      a locked door all night. systems/prisonschedule.js owns the geometry (it
      drives both the block gate and the cell leaves), so it is asked. */
   function shut(b, a) {
+    const P = b._pocket, ap = a && a.group && a.group.position;
+    if (P && ap && !(ap.x > P.x0 && ap.x < P.x1 && ap.z > P.z0 && ap.z < P.z1)) return true;
     if (!v2()) return false;
     const S = sched();
     if (!S || !S.canReach) return false;
