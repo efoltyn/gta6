@@ -298,7 +298,9 @@
       // The tube rides the SHOULDER, so the support hand stays close to the
       // body: heavy, but with almost none of the LMG's forward reach.
       hold: { heavy: 0.8, support: 0.10, stance: "shoulder" },
-      optic: "iron",
+      // the PGO-7 the model carries on its left bracket IS the sight you
+      // shoot an RPG-7 through (systems/sights.js puts the eye at its cup)
+      optic: "pgo7",
     },
     {
       id: "taser", key: "taser", holdClass: "handgun", label: "X26 TASER", short: "TASER", slot: "utility",
@@ -439,9 +441,10 @@
      4-mrad hold already LOOKS ten times bigger, because that is what an optic
      does. Multiplying it again would be counting the magnification twice.
 
-     `tube` decides which sight picture is drawn: a real occluded eyepiece with
-     mil ticks (lockon.js) for a magnified optic, a floating dot for a reflex,
-     nothing at all for irons — the weapon's own front post is the sight. */
+     `tube` marks a magnified optic. systems/sights.js draws every sight
+     picture on the gun itself: the eye at the ocular and the magnified world
+     in the glass for a tube, a reticle at infinity on the glass for a dot,
+     and the gun's own rear notch and front post for irons. */
   CBZ.WEAPON_OPTICS = {
     // no sight at all: a taser, a shank. Aiming does nothing optical.
     none: { id: "none", label: "", mag: 1, lean: 0, ads: 0.14, swayMul: 1.0, tube: false, dot: false },
@@ -464,6 +467,8 @@
     // weapon row already cites for its length. The brief said "8x"; the real
     // sight on the real rifle is 10x and costs nothing to be honest about.
     m3a: { id: "m3a", label: "10x M3A", mag: 10.0, ads: 0.55, swayMul: 0.9, tube: true, dot: false, ticksMil: 1 },
+    // PGO-7, the 2.7x optical sight issued on the RPG-7, on its left bracket.
+    pgo7: { id: "pgo7", label: "2.7x PGO-7", mag: 2.7, ads: 0.50, swayMul: 1.05, tube: true, dot: false, ticksMil: 1 },
   };
   // the optic row for a weapon record (or a weapon id). Never null: an
   // un-tagged weapon reads as irons, which is what an un-tagged gun has.
@@ -480,10 +485,11 @@
   CBZ.weaponAdsFov = function (w, hipFov) {
     const o = CBZ.weaponOptic(w);
     const hip = hipFov > 1 ? hipFov : 75;
-    if (o.mag > 1.02) {
-      const t = Math.tan(hip * Math.PI / 360) / o.mag;
-      return Math.atan(t) * 360 / Math.PI;
-    }
+    /* A MAGNIFIED OPTIC NO LONGER ZOOMS THE WHOLE SCREEN. The magnification
+       lives in the glass now (systems/sights.js renders the ocular through a
+       second camera at the optic's own power), so the world AROUND the scope
+       stays 1x, the way it does to a shooter. The main lens only leans in. */
+    if (o.mag > 1.02) return Math.max(20, hip - (o.lean || 22));
     return Math.max(20, hip - (o.lean || 0));
   };
   // the look-sensitivity multiplier that keeps a mouse flick covering the same

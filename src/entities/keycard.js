@@ -201,36 +201,52 @@
   // ==================================================================
   // The second rung of the spine has to be visible on a MAN, not discovered by
   // accident, or the inner cage is a door nobody knows exists.
-  let fob = null, fobHost = null;
-  (function belt() {
-    const list = CBZ.guards;
-    if (!list || !list.length) return;
-    let w = null;
-    for (let i = 0; i < list.length; i++) if (list[i].kind === "warden") { w = list[i]; break; }
-    if (!w || !w.char || !w.char.body) return;
-    // Derive the body scale from the SHARED mount table rather than re-typing
-    // character.js's torso formula — one number read from the owning file.
-    const M = CBZ.charMounts ? CBZ.charMounts(w.char) : null;
+  // The cage key is now worn by TWO men every run: the warden, and the armory
+  // sergeant carrying the duplicate (systems/economy.js armorySergeant). The
+  // fob hangs off whoever's pockets actually hold one, and only while they do:
+  // lifted, looted, or hung in the safe for the night, and the belt is bare.
+  const brass = mat(0xd6a33b, { emissive: 0x4a3308, ei: 0.45 });
+  const fobRingMat = mat(0x8b95a1);
+  const tagMat = mat(0xc94d3a, { emissive: 0x4a0f0c, ei: 0.5 });
+  function makeFob(man) {
+    const M = CBZ.charMounts ? CBZ.charMounts(man.char) : null;
     const s = (M && M.hip) ? (M.hip.position.y / 1.05) : 1;
-    fob = new THREE.Group();
-    fob.position.set(-0.30 * s, 1.02 * s, 0.15 * s);   // left hip, forward of the seam
-    fob.rotation.set(0, 0, 0.18);
-    fob.userData.mover = true;                          // keep the batcher out of it
-    const brass = mat(0xd6a33b, { emissive: 0x4a3308, ei: 0.45 });
-    const ringM = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.012), mat(0x8b95a1));
+    const f = new THREE.Group();
+    f.position.set(-0.30 * s, 1.02 * s, 0.15 * s);   // left hip, forward of the seam
+    f.rotation.set(0, 0, 0.18);
+    f.userData.mover = true;                          // keep the batcher out of it
+    const ringM = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.012), fobRingMat);
     ringM.position.set(0, 0.075, 0);
     const shank = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.13, 0.011), brass);
     const bow = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.011), brass);
     bow.position.y = 0.04;
     const bit = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.028, 0.011), brass);
     bit.position.set(0.015, -0.055, 0);
-    const tag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.085, 0.010), mat(0xc94d3a, { emissive: 0x4a0f0c, ei: 0.5 }));
+    const tag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.085, 0.010), tagMat);
     tag.position.set(0.055, -0.01, 0.004);
-    fob.add(ringM, shank, bow, bit, tag);
-    fob.traverse(function (o) { o.castShadow = false; });
-    w.char.body.add(fob);
-    fobHost = w;
-  })();
+    f.add(ringM, shank, bow, bit, tag);
+    f.traverse(function (o) { o.castShadow = false; });
+    man.char.body.add(f);
+    return f;
+  }
+  function wearsKey(man) {
+    const L = man && man.loadout;
+    return !!(L && !man.dead && L.items && L.items.indexOf("Gun-Room Key") >= 0);
+  }
+  let fobHosts = 0, fobT = 0;
+  function driveFobs(dt) {
+    fobT -= dt || 0;
+    if (fobT > 0) return;
+    fobT = 0.25;                                       // a belt is not a per-frame question
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const man = list[i];
+      if (!man || !man.char || !man.char.body) continue;
+      const on = wearsKey(man);
+      if (on && !man._cageFob) { man._cageFob = makeFob(man); fobHosts++; }
+      if (man._cageFob && man._cageFob.visible !== on) man._cageFob.visible = on;
+    }
+  }
 
   // ==================================================================
   //  IDLE — it breathes, it does not spin
@@ -245,10 +261,9 @@
     // A uniform is a claim about the man wearing it (CLAUDE.md). The Warden's
     // key is only on his belt while he still has it — the moment you bribe,
     // pick or loot it off him the world stops advertising it.
-    if (fob) {
-      const held = !!(CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Gun-Room Key"));
-      if (fob.visible === held) fob.visible = !held;
-    }
+  });
+  CBZ.onUpdate(40.61, function (dt) {
+    if (CBZ.game && CBZ.game.mode === "escape") driveFobs(dt);
   });
 
   /* Ratchet for the spine: `floatingPickups` is pinned at 0 — a reward that
@@ -260,9 +275,8 @@
     return {
       spine: true,
       floatingPickups: 0,
-      visiblePromises: 1 + (fob ? 1 : 0),
-      wardenFob: !!fob,
-      wardenFound: !!fobHost,
+      visiblePromises: 1 + (fobHosts ? 1 : 0),
+      cageKeyFobs: fobHosts,
       restY: REST_Y,
       collected: !!CBZ.keycard.collected,
     };

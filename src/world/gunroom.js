@@ -921,7 +921,7 @@
     // a.resetSlots() at the end of its armory block), so the inner cage rides
     // the existing seam and systems/state.js needs no edit at all.
     inner.setOpen(false, true);
-    inner.sawMsg = 0;
+    inner.sawMsg = 0; inner.heard = false;
   };
 
   // the incidental contraband. It used to sit at (24,1) — dead centre of the
@@ -1037,6 +1037,29 @@
               if (saw && pressing) {
                 inner.saw += dt;
                 if (CBZ.shake && inner.saw % 0.5 < dt) CBZ.shake(0.03);
+                // SIX LOUD SECONDS, AND THE WING HEARS THEM. Steel on steel
+                // carries out of the gun room: every stroke rings from the
+                // padlock, and any officer in earshot comes to look. The
+                // first one to hear it makes it a crime.
+                if (inner.saw % 0.8 < dt) {
+                  if (CBZ.worldSfx) { try { CBZ.worldSfx("shell", 23.40, -1.55, { y: 1.5, ref: 9, volume: 0.6, gap: 0.3 }); } catch (e) {} }
+                  const gl = CBZ.guards || [];
+                  let heard = false;
+                  for (let k = 0; k < gl.length; k++) {
+                    const q = gl[k];
+                    if (!q || !q.group || q.dead || q.ko > 0 || q.asleep || q.tied) continue;
+                    const hx = q.group.position.x - 23.40, hz = q.group.position.z + 1.55;
+                    if (hx * hx + hz * hz > 18 * 18) continue;
+                    q.investigate = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: 14, scan: 0, type: "noise" };
+                    q.alert = Math.max(q.alert || 0, 0.7);
+                    heard = true;
+                  }
+                  if (heard && !inner.heard) {
+                    inner.heard = true;
+                    if (CBZ.reportCrime) { try { CBZ.reportCrime(30, { type: "steal" }); } catch (e) {} }
+                    if (CBZ.addHeat) { try { CBZ.addHeat(15); } catch (e) {} }
+                  }
+                }
                 if (inner.saw >= 6) {
                   if (econ && econ.takeItem) econ.takeItem("Hacksaw Blade");   // the blade snaps
                   // THE BLADE IS GONE BUT THE PADLOCK IS TOO. Remembered

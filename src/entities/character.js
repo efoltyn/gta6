@@ -7269,17 +7269,26 @@
       // term below is + 0 at hv = 0 — so nothing that ships today moves.
       const hv = heavyHold(ch), hsup = heavySupport(ch);
       /* HOW MANY HANDS is the hold engine's (systems/actorweapons.js
-         CBZ.holds, published by fpsmode as aimHands): a handgun is ONE hand
-         in third person. The two-hand pistol crossed both short arms into
-         the chest and hid the gun between the fists; one hand is the arm
-         out from its own shoulder down the aim (a touch inboard, sights
-         under the eye), the off arm down at the side, free for a torch, a
-         door, a radio. A long gun keeps the support arm on the handguard. */
+         CBZ.holds, published by systems/gunhands.js as aimHands): a handgun
+         is ONE hand in third person. The two-hand pistol crossed both short
+         arms into the chest and hid the gun between the fists; one hand is
+         the arm out from its own shoulder down the aim (a touch inboard,
+         sights under the eye), the off arm down at the side, free for a
+         torch, a door, a radio. A long gun keeps the support arm on the
+         handguard.
+         DOWN THE SIGHTS (systems/sights.js publishes adsK 0..1): a long gun
+         comes UP into the face (the firing shoulder lifts and pulls the
+         stock into the pocket, the support arm rides up with it, the head
+         goes down and over onto the comb: the cheek weld; +z on the neck
+         tips it toward the right shoulder); a handgun's one arm comes up to
+         eye height and locks. Every ADS term is 0 at adsK 0. */
       const oneHand = ch.aimHands === 1;
-      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 + 0.12 * hv - pitch * 0.8 - recoil * 0.16, ar, dt);
+      const adsK = Math.max(0, Math.min(1, ch.adsK || 0));
+      const adsL = oneHand ? 0 : adsK, adsP = oneHand ? adsK : 0;
+      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 + 0.12 * hv - pitch * 0.8 - recoil * 0.16 - 0.12 * adsL - 0.10 * adsP, ar, dt);
       ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, (oneHand ? 0.06 : 0.18) - recoilSide * 0.22, ar, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, oneHand ? 0.12 : 0.34, ar, dt);
-      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, oneHand ? 0.06 : 0.14, ar, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, oneHand ? 0.12 - 0.06 * adsP : 0.34, ar, dt);
+      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, oneHand ? 0.06 : 0.14 - 0.05 * adsL, ar, dt);
       if (oneHand) {
         // the off arm hangs relaxed beside the body, clear of the hip and of
         // anything worn over the ribs (the same clearance the walk uses)
@@ -7289,15 +7298,20 @@
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, ar - 4, dt);
         setElbow(J.la, -0.22, ar - 4);
       } else {
-        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -1.55 - 0.14 * hv - pitch * 0.8, ar - 1, dt);
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -1.55 - 0.14 * hv - pitch * 0.8 - 0.08 * adsL, ar - 1, dt);
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.34 - 0.10 * hv, ar - 1, dt);
         ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.42, ar - 1, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.24 + hsup * 0.5, ar - 1, dt);
         setElbow(J.la, -0.72 - 0.26 * hv, ar - 1);
       }
-      // gun arm nearly locked (one hand: a soft elbow); recoil folds the
-      // elbow a touch — the arm absorbs the kick.
-      setElbow(J.ra, (oneHand ? -0.16 : -0.10) - recoil * 0.25, ar);
+      // gun arm nearly locked (one hand: a soft elbow, straight down the
+      // sights); recoil folds the elbow a touch — the arm absorbs the kick.
+      setElbow(J.ra, ((oneHand ? -0.16 : -0.10) - recoil * 0.25) * (1 - 0.8 * adsP), ar);
+      if (ch.neck && (adsK > 0.001 || ch._adsNeck)) {
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.20 * adsL + 0.06 * adsP, ar, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, 0.24 * adsL, ar, dt);
+        ch._adsNeck = adsK > 0.001 || Math.abs(ch.neck.rotation.z) > 0.005 || Math.abs(ch.neck.rotation.x) > 0.005;
+      }
     } else if (ch.cuffed) {
       // CUFFED ARMS BELONG TO systems/verbs.js: its late pass (order 91)
       // solves the wrists together behind the back for every cuffed rig,

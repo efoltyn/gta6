@@ -5323,6 +5323,7 @@
     if (!isHull) bodyAttitude(car, sp.p, sp.r, sp.h, car._steerAngle || 0);
     else bodyAttitude(car, 0, 0, 0, 0);
     if (vmag > 6) runOver(car, vmag);
+    else if (vmag > 0.6) creepInto(car, vmag);
     P.pos.set(car.pos.x, rideY, car.pos.z);
     // THE DRIVER. CAR_DRIVER_VISIBLE seats the player's real, dressed rig at
     // the wheel of his own car (see the block above); the `else` arm is the
@@ -5581,6 +5582,42 @@
   }
   // run after the player (order 11) and the AI traffic (order 37) have moved
   CBZ.onUpdate(37.6, function (dt) { if (g.mode === "city") resolveCars(dt); });
+
+  /* A CAR AT WALKING PACE IS STILL 1.4 TONNES (systems/humancontact.js,
+     CBZ.bodyImpact.car: the same impulse law every body-to-body contact
+     uses, the car's mass against his, the bumper taking the legs). Below
+     runOver's speeds nothing touched anybody: you could nose a car into a
+     queue and the people stood in the bonnet. Now a creep pushes them out
+     of the way (they step), ~5 km/h staggers them, ~10 km/h puts them down. */
+  function creepInto(car, vmag) {
+    const BI = CBZ.bodyImpact;
+    if (!BI || !car.player) return;
+    const hx = Math.sin(car.heading || 0), hz = Math.cos(car.heading || 0);
+    const fwd = (car.v || 0) >= 0 ? 1 : -1;
+    for (const p of CBZ.cityPeds) {
+      if (p.dead || p.inCar || p.culled) continue;
+      const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
+      if (dx * dx + dz * dz > 7.5) continue;
+      // in the path of the car's travel, within the bumper's width
+      const along = (dx * hx + dz * hz) * fwd, side = Math.abs(dx * hz - dz * hx);
+      if (along < 0.6 || along > 2.9 || side > 1.25) continue;
+      if ((p._carHitUntil || 0) > (CBZ.now || 0)) continue;
+      p._carHitUntil = (CBZ.now || 0) + 700;
+      const imp = BI.car(p, car, vmag, hx * fwd, hz * fwd);
+      if (imp.tier <= BI.NONE) continue;
+      // the push goes along the car and off to the side he was already on
+      const sgn = (dx * hz - dz * hx) >= 0 ? 1 : -1;
+      let nx = hx * fwd + hz * sgn * 0.5, nz = hz * fwd - hx * sgn * 0.5;
+      const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+      BI.apply(p, Math.max(BI.BRUSH, imp.tier), { nx, nz, dv: imp.dv, e: imp.e, mode: "city", side: sgn });
+      if (imp.tier >= BI.SHOVE) {
+        p.alarmed = Math.max(p.alarmed || 0, 4);
+        if (CBZ.humanContact && CBZ.city) CBZ.humanContact.react(p, { mode: "city", source: CBZ.city.playerActor, kind: imp.tier >= BI.DOWN ? "run-over" : "shoved", severity: imp.tier >= BI.DOWN ? 0.8 : 0.5 });
+        if (imp.tier >= BI.DOWN && CBZ.cityCrime) CBZ.cityCrime(15, { x: p.pos.x, z: p.pos.z, type: "reckless" });
+        car.v *= 0.85;
+      }
+    }
+  }
 
   function runOver(car, vmag) {
     const P = CBZ.player;
