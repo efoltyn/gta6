@@ -170,46 +170,9 @@
     sfx("blip");
   }
 
-  // ---- ASK FOR DIRECTIONS (slot K, prio just under talk so it shows for a
-  //      stranger). A local points you at the nearest useful counter and drops
-  //      a WAYPOINT — a genuine service. Asking politely warms them a touch.
-  function shopLots() {
-    const A = CBZ.city && CBZ.city.arena;
-    return (A && (A.shopLots || A.lots)) || [];
-  }
-  // pick a nearby storefront the player might actually want, with its verb-name.
-  function nearestUsefulLot(px, pz) {
-    const lots = shopLots();
-    let best = null, bd = Infinity;
-    for (const l of lots) {
-      const b = l && l.building; if (!b || !b.door) continue;
-      const kind = l.kind || b.kind || "";
-      if (!kind) continue;
-      const cx = l.cx != null ? l.cx : b.door.x, cz = l.cz != null ? l.cz : b.door.z;
-      const d = Math.hypot(px - cx, pz - cz);
-      if (d < 8) continue;                 // don't point at the one you're standing on
-      if (d < bd) { bd = d; best = { lot: l, kind, x: b.door.x, z: b.door.z, d }; }
-    }
-    return best;
-  }
-  function shopLabel(kind) {
-    const v = CBZ.cityShopVerb ? CBZ.cityShopVerb(kind) : null;
-    if (v && v.sub) return kind + " (" + v.sub.split("·")[0].trim() + ")";
-    return kind;
-  }
-  function askDirections(p) {
-    meet(p);
-    const P = CBZ.player;
-    const tgt = nearestUsefulLot(P.pos.x, P.pos.z);
-    if (!tgt) { say(p, "Couldn't tell you. I'm new here.", "#dfe7ff", 2.4); relShift(p, "greeted", 0.4); return; }
-    const dir = compassFrom(P.pos.x, P.pos.z, tgt.x, tgt.z);
-    const label = shopLabel(tgt.kind);
-    say(p, cap(label) + "? " + dir + ", not far.", "#dfe7ff", 3);
-    if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(tgt.x, tgt.z, cap(tgt.kind));
-    relShift(p, "greeted", 0.6);          // a helpful exchange = a little warmth
-    if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.2);
-    sfx("blip");
-  }
+  // (ASK DIRECTIONS is gone: a local who pointed you at the nearest counter
+  // and dropped a map waypoint was the game holding your hand. You find the
+  // shops by walking past their windows and reading their signs.)
   function cap(s) { s = String(s || ""); return s ? s[0].toUpperCase() + s.slice(1) : s; }
   function compassFrom(px, pz, tx, tz) {
     const dx = tx - px, dz = tz - pz;
@@ -243,17 +206,20 @@
     // 1) ARMORED TRUCK on the move = the headline score. If one's live, tip it.
     const truck = (CBZ.cityArmored && CBZ.cityArmored.active && CBZ.cityArmored.active() && CBZ.cityArmored.truck) ? CBZ.cityArmored.truck() : null;
     if (truck && truck.pos && Math.random() < 0.85) {
-      say(p, "Armored truck's out today. You didn't hear it from me.", "#bfe0ff", 3);
-      if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(truck.pos.x, truck.pos.z, "ARMORED TRUCK");
+      // words, not a map pin: a heading, and it is only as good as the
+      // moment he said it, because the truck keeps driving
+      say(p, "Armored truck's out today, " + compassFrom(p.pos.x, p.pos.z, truck.pos.x, truck.pos.z).toLowerCase() + " of here. You didn't hear it from me.", "#bfe0ff", 3.4);
       sfx("blip");
       return;
     }
     // 2) a VIP/celebrity nearby = a name to find (photo, or a fat mark).
     const vip = nearestVipOther(p);
     if (vip && vip.pos) {
-      say(p, "See that one? That's " + (vip.name || vipTitle(vip)) + ".", "#bfe0ff", 3);
-      if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(vip.pos.x, vip.pos.z, vipTitle(vip));
-      if (CBZ.cityMarkTarget) try { CBZ.cityMarkTarget(vip); } catch (e) {}
+      const vd = Math.hypot(vip.pos.x - p.pos.x, vip.pos.z - p.pos.z);
+      const who = vip.name || "Somebody with real money";
+      say(p, vd < 40 ? (vip.name ? "See that one? That's " + vip.name + "." : "See that one? That's real money.")
+                     : who + " has been around, " + compassFrom(p.pos.x, p.pos.z, vip.pos.x, vip.pos.z).toLowerCase() + " of here.",
+          "#bfe0ff", 3);
       sfx("blip");
       return;
     }
@@ -356,20 +322,13 @@
     onSelect: (p) => compliment(p),
   });
 
-  // SLOT K — ask for information: a lead (gated on the bond) outranks plain
-  // directions, both above interact.js's bare "Talk" (prio 5) so a stranger's
-  // K becomes useful instead of a dead line.
+  // SLOT K: ask around (gated on the bond), above interact.js's bare "Talk"
+  // (prio 5). What you get is a line in their own words, never a map pin.
   I.register("ped:civ", {
     id: "rich-k-lead", slot: "k", prio: 8,
     canShow: (p) => isStrangerish(p) && !isYours(p) && canTip(p),
     label: "Ask around",
     onSelect: (p) => askLead(p),
-  });
-  I.register("ped:civ", {
-    id: "rich-k-directions", slot: "k", prio: 7,
-    canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p),
-    label: "Ask directions",
-    onSelect: (p) => askDirections(p),
   });
 
   // SLOT J — bum a light (always, the cheap icebreaker) vs intimidate (only when

@@ -131,7 +131,7 @@ await shot("raceway-interior2.png");
 // the race book overlay
 await evl("CBZ.cityOpenRaceBook && CBZ.cityOpenRaceBook(true)");
 await sleep(800);
-const book = await evl("(() => { const el = document.getElementById('speedwayBook'); return el && el.style.display === 'block' ? el.textContent.slice(0, 80) : null; })()");
+const book = await evl("(() => { const el = document.getElementById('betSlip'); return el && el.style.display === 'block' ? el.textContent.slice(0, 80) : null; })()");
 console.log("book overlay:", JSON.stringify(book));
 await shot("raceway-book.png");
 

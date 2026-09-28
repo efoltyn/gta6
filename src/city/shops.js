@@ -463,6 +463,12 @@
     return out;
   }
 
+  // the fight card is fought at Ironjaw Arena: the clerk points you there
+  function fightCard() {
+    const site = CBZ.arenaFightSite;
+    if (site && CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(site.x, site.z, site.name);
+    CBZ.city.note("Fight nights run at " + ((site && site.name) || "Ironjaw Arena") + ", out on its island. Bets are taken ringside.", 3.2);
+  }
   function services(kind) {
     const s = [];
     if (kind === "hospital") s.push({ key: "h", label: "Heal $200", fn: healFull });
@@ -484,10 +490,17 @@
     // [K] is free at the bar: 'j'/'b' are taken, and the closet's [K] only ever
     // arms in a boutique (bar isn't one), so it can't collide.
     if (kind === "bar") s.push({ key: "k", label: "Round $12", fn: buyDrink });
-    if (kind === "casino") s.push({ key: "g", label: "Bet", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Betting") });
-    if (kind === "raceway") s.push({ key: "r", label: "Race", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
-    if (kind === "racepark") s.push({ key: "r", label: "Bet", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
-    if (kind === "arena" || kind === "gym") s.push({ key: "f", label: "Fight", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
+    // The casino, the tracks and the fight card are VENUES: the counter hands
+    // you to the one game that lives there (games/casino.js, the racepark
+    // windows on city/betslip.js, the speedway book in island_speedway.js,
+    // the Ironjaw Arena card), never to a menu copy of it.
+    if (kind === "casino") s.push({ key: "g", label: "Tables", fn: () => { close(); if (CBZ.cityOpenCasino) CBZ.cityOpenCasino(); } });
+    if (kind === "raceway") s.push({ key: "r", label: "Race book", fn: () => CBZ.cityOpenRaceBook && CBZ.cityOpenRaceBook() });
+    if (kind === "racepark") {
+      s.push({ key: "r", label: "Horse window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("horses") });
+      s.push({ key: "g", label: "Dog window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("dogs") });
+    }
+    if (kind === "arena" || kind === "gym") s.push({ key: "f", label: "Fight card", fn: fightCard });
     if (kind === "paintball") s.push({ key: "p", label: "Paintball", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
     if (kind === "transit") s.push({ key: "t", label: "Routes", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Transit") });
     if (kind === "cityhall") s.push({ key: "p", label: "Civic", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Civic") });

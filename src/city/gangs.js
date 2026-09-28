@@ -2942,30 +2942,38 @@
     for (const m of R.empty) m.visible = !!looted;
   }
 
-  // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
-  CBZ.cityRobStash = function (lot) {
+  // ---- rob a gang's stash: THE one robbery. Two hands reach it: the count
+  // table's take in a fitted hideout (interior_programs.js "countroom", which
+  // passes the table's loose count as opts.extra and its own line as
+  // opts.note), and interact.js's bare grab for a stash with no count room.
+  CBZ.cityRobStash = function (lot, opts) {
     const st = lot && !lot.demolished && lot.building && lot.building.stash;
-    if (!st || st.looted) { CBZ.city && CBZ.city.note("Nothing left here.", 1.4); return; }
+    if (!st || st.looted) { CBZ.city && CBZ.city.note("Nothing left here.", 1.4); return 0; }
     st.looted = true;
     const econ = CBZ.cityEcon;
-    if (st.cash > 0) CBZ.city.addCash(st.cash);
+    const take = Math.max(0, (st.cash | 0) + ((opts && opts.extra) | 0));
+    if (take > 0) CBZ.city.addCash(take);
     if (econ && st.drugs > 0) econ.add(rng() < 0.5 ? "Coke" : "Meth", st.drugs);
     if (st.weapon && econ) econ.add(st.weapon, 1);
     setStashLook(st, true);
     CBZ.city.addRespect(8);
-    CBZ.city.note("Their stash. $" + st.cash + ". They will know by morning.", 2.6);
+    CBZ.city.note(opts && opts.note ? opts.note(take) : "Their stash. $" + take + ". They will know by morning.", 2.6);
     if (CBZ.sfx) CBZ.sfx("coin");
     // the whole gang knows + the cops get a tip
     if (st.gang) CBZ.cityGangProvoke(st.gang, 1);
     CBZ.cityAlarm && CBZ.cityAlarm(lot.cx, lot.cz, 28, 1.6);
     CBZ.cityCrime && CBZ.cityCrime(70, { x: lot.cx, z: lot.cz, type: "burglary" });
+    return take;
   };
 
+  // the nearest stash robbed with a bare grab. A stash that sits on a count
+  // table (fitout_gang.js stamps countRoom) is taken at the table and never
+  // offered here, so exactly one verb ever shows over it.
   CBZ.cityNearestStash = function (x, z, maxd) {
     let best = null, bd = (maxd || 4) * (maxd || 4);
     for (const gang of CBZ.cityGangs) for (const lot of gang.turf) {
       if (lot.demolished) continue;
-      const st = lot.building.stash; if (!st || st.looted) continue;
+      const st = lot.building.stash; if (!st || st.looted || st.countRoom) continue;
       const dd = (st.x - x) * (st.x - x) + (st.z - z) * (st.z - z);
       if (dd < bd) { bd = dd; best = lot; }
     }

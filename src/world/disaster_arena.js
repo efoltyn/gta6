@@ -496,7 +496,7 @@
     // the glass still bounds the opening; the glass box itself is taken out
     // of the opening in the cut below and the real window goes in.
     function coveredFn(f) {
-      const list = [];
+      const list = [], deep = [];
       for (const b of o.recs) {
         if (isGlassHex(b[6])) continue;
         const nC = f.horiz ? b[2] : b[0], nH = (f.horiz ? b[5] : b[3]) / 2;
@@ -504,16 +504,25 @@
         const inner = f.out > 0 ? (nC - nH) - f.halfN : -f.halfN - (nC + nH);
         if (outer < 0.026 || inner > 0.12) continue;
         const tC = (f.horiz ? b[0] : b[2]) * (f.horiz ? f.tx : f.tz), tH = (f.horiz ? b[3] : b[5]) / 2;
-        list.push([tC - tH, tC + tH, b[1] - b[4] / 2, b[1] + b[4] / 2]);
+        const q = [tC - tH, tC + tH, b[1] - b[4] / 2, b[1] + b[4] / 2];
+        list.push(q);
+        // a mass standing well proud of the wall (a column, a porch, a pier,
+        // an eave): a forced window never goes through one of these
+        if (outer > DEEP_CLAD) deep.push(q);
       }
-      return function (t, y) {
-        for (let i = 0; i < list.length; i++) {
-          const q = list[i];
+      const hit = function (L, t, y) {
+        for (let i = 0; i < L.length; i++) {
+          const q = L[i];
           if (t > q[0] && t < q[1] && y > q[2] && y < q[3]) return true;
         }
         return false;
       };
+      const cov = function (t, y) { return hit(list, t, y); };
+      cov.deep = function (t, y) { return hit(deep, t, y); };
+      return cov;
     }
+    const DEEP_CLAD = 0.34;               // proud cladding thicker than this is architecture, not skin
+    const FORCE_REACH = 0.3;              // how far out a forced opening cuts through the cladding
 
     const STEP = 0.06, VSTEP = 0.05;
     for (const f of faces) {
@@ -547,6 +556,9 @@
         };
         const runs = [];
         for (const frac of [0.55, 0.3, 0.8]) for (const r of runsAt(b0 + (b1 - b0) * frac)) runs.push(r);
+        const overlapsMade = function (u0, u1, v0, v1) {
+          return made.some(function (m) { return u1 > m[0] + 0.02 && u0 < m[1] - 0.02 && v1 > m[2] + 0.02 && v0 < m[3] - 0.02; });
+        };
         for (const run of runs) {
           const tm = (run[0] + run[1]) / 2, yS = run[2];
           let v0 = yS, v1 = yS;
@@ -554,9 +566,50 @@
           while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
           if (v1 - v0 < 0.35) continue;
           const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
-          if (made.some(function (m) { return u1 > m[0] + 0.02 && u0 < m[1] - 0.02 && v1 > m[2] + 0.02 && v0 < m[3] - 0.02; })) continue;
+          if (overlapsMade(u0, u1, v0, v1)) continue;
+          placeWindow(f, k, shop, cov, u0, u1, v0, v1, false);
+        }
+        /* EVERY STOREY GETS ITS WINDOWS. Reading the openings off what the
+           grammar left open fails wherever a grammar clads the whole wall:
+           the stone house's ashlar skin, the pagoda's timber screens, the
+           faceted and postmodern towers' panel grids, the ziggurat's stepped
+           cladding. Those storeys came out with one slit or none, a solid box
+           you could not see out of while a tsunami came at it. So after the
+           scan, a storey still short of glass gets real openings on a regular
+           rhythm, sized like the building type (a house: ~1.1 x 1.25 m sash at
+           sill 0.9 m; a tower: a 1.5 m bay from 0.8 m to the ceiling line),
+           cut through the skin cladding (FORCE_REACH) but never through a
+           column, pier, porch or eave (cov.deep), never over the door. */
+        if (!shop) {
+          const span = 2 * half;
+          const winW = o.tower ? 1.5 : 1.1, pitch = o.tower ? 2.3 : 3.1;
+          const want = Math.max(1, Math.floor((span + pitch - winW) / pitch));
+          let have = 0;
+          for (const m of made) have += m[1] - m[0];
+          if (span > winW + 0.3 && have < want * winW * 0.55) {
+            const s0 = k * o.fh;
+            const fv0 = Math.max(b0, s0 + (o.tower ? 0.8 : 0.9));
+            const fv1 = Math.min(b1, o.tower ? b1 : s0 + 2.15);
+            if (fv1 - fv0 >= 0.6) {
+              for (let i = 0; i < want; i++) {
+                const tc = -half + (i + 0.5) * (span / want);
+                const u0 = tc - winW / 2, u1 = tc + winW / 2;
+                if (f.s === 0 && k === 0 && u1 > -o.doorHalf && u0 < o.doorHalf) continue;
+                if (overlapsMade(u0 - 0.25, u1 + 0.25, fv0, fv1)) continue;
+                let blocked = false;
+                for (let q = 0; q <= 4 && !blocked; q++) for (let r = 0; r <= 3 && !blocked; r++) {
+                  blocked = cov.deep(u0 + (u1 - u0) * q / 4, fv0 + (fv1 - fv0) * r / 3);
+                }
+                if (blocked) continue;
+                placeWindow(f, k, false, cov, u0, u1, fv0, fv1, true);
+              }
+            }
+          }
+        }
+        function placeWindow(f, k, shop, cov, u0, u1, v0, v1, forced) {
+          const tm = (u0 + u1) / 2;
           made.push([u0, u1, v0, v1]);
-          const bare = !cov(tm, v0 - 0.12);
+          const bare = forced || !cov(tm, v0 - 0.12);
           const nMod = Math.max(1, Math.round((u1 - u0) / 1.45));
           const mw = (u1 - u0) / nMod;
           const tall = (v1 - v0) > 1.75;
@@ -575,7 +628,7 @@
           if (o.list) o.list.push(rec);
           // the hole, in the wall's own axis (local x on faces 0/1, z on 2/3)
           const ta = u0 * (f.horiz ? f.tx : f.tz), tb = u1 * (f.horiz ? f.tx : f.tz);
-          holes.push({ s: f.s, a0: Math.min(ta, tb), a1: Math.max(ta, tb), y0: v0, y1: v1 });
+          holes.push({ s: f.s, a0: Math.min(ta, tb), a1: Math.max(ta, tb), y0: v0, y1: v1, forced: !!forced });
           // ---- the frame, laid through the deco merge after the cut ------
           const fb = function (t, y, len, hh, proj, col) {
             const n = f.halfN + proj / 2;
@@ -614,7 +667,7 @@
           ? { x0: h.a0, x1: h.a1, z0: lo, z1: hi, y0: h.y0, y1: h.y1 }
           : { x0: lo, x1: hi, z0: h.a0, z1: h.a1, y0: h.y0, y1: h.y1 };
       };
-      const vol = holes.map(function (h) { return volOf(h, 0); });
+      const vol = holes.map(function (h) { return volOf(h, h.forced ? FORCE_REACH : 0); });
       const volGlass = holes.map(function (h) { return volOf(h, 1.2); });
       const kept = [];
       const queue = o.recs.slice();
@@ -3551,13 +3604,22 @@
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
         const blocks = [liftZone, apron, doorWalk];
         // a table to wait at (and to get under)
-        const TIERS = [{ len: 1.2, deep: 0.8, seats: 2 }, { len: 0.9, deep: 0.7, seats: 0 }];
+        /* THE SMALLEST TOWERS STILL GET ONE. On a slim tower the lift zone,
+           its apron and the walk from the street door leave only strips, and
+           neither of the first two tables fits with a 0.3 m walk round it:
+           the lobby had nothing to get under. The last tier is a compact
+           solid side table (0.8 x 0.6, a person curls under it the same way)
+           that only asks for a 0.12 m gap, and if even that has no floor the
+           lift's steel-framed opening is registered as the cover instead (a
+           doorframe crouch: better than the open lobby, worse than a table). */
+        const TIERS = [{ len: 1.2, deep: 0.8, seats: 2, gap: 0.3 }, { len: 0.9, deep: 0.7, seats: 0, gap: 0.3 },
+          { len: 0.8, deep: 0.6, seats: 0, gap: 0.12 }];
         let done = false;
         for (const T2 of TIERS) {
           if (done) break;
           for (let yi = 0; yi < 2 && !done; yi++) {
             const hx0 = T2.len / 2 + 0.05, hz0 = T2.deep / 2 + (T2.seats ? 0.7 : 0.05);
-            const hx = (yi ? hz0 : hx0) + 0.3, hz = (yi ? hx0 : hz0) + 0.3;
+            const hx = (yi ? hz0 : hx0) + T2.gap, hz = (yi ? hx0 : hz0) + T2.gap;
             let best = null;
             for (let x = R.x0 + hx + 0.1; x <= R.x1 - hx - 0.1 + 1e-6; x += 0.2) {
               for (let z = R.z0 + hz + 0.1; z <= R.z1 - hz - 0.1 + 1e-6; z += 0.2) {
@@ -3575,6 +3637,7 @@
             }
           }
         }
+        if (!done) covers.push({ x: ox, y: gy + fy, z: oz - so - 0.3, r: 0.6, kind: "doorframe" });
         const sofa = placeOnWalls(R, blocks, ["x0", "x1", "z1"], 1.8, 0.87, 0.8, holes, null, 0.5);
         if (sofa) { furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: 1.8, tone: tone }); blocks.push(sofa.use); }
       }

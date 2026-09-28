@@ -29,8 +29,8 @@
          tempers and beef — instead of that cast plus 140 anonymous bodies.
        · nobody can quietly type the number back up. Adding cells raises it
          everywhere at once; that is the only lever, and it is a real one.
-     An EXPLICIT CBZ.MASS_CROWD (the Settings "Total Population" slider, or the
-     localStorage override index.html applies before config.js) still wins —
+     An EXPLICIT CBZ.MASS_CROWD (a tool presetting window.CBZ before config.js)
+     still wins —
      an owner overruling the derivation is a decision, not a drift. */
   const explicitPop = !!CBZ.MASS_CROWD_EXPLICIT;   // stamped by config.js
   const wing = CBZ.prisonBeds ? CBZ.prisonBeds() : null;

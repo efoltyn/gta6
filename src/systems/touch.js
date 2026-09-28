@@ -673,7 +673,7 @@
   // by id: on touch they carry tappable verb pills (several were click-wired
   // all along), and #cRadar / #minimap taps open the full map (fullmap.js).
   const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
-    "#raceBoard, #speedwayStandings, #speedwayBook, " +
+    "#raceBoard, #speedwayStandings, #betSlip, " +
     // #hotbar (systems/inventory.js) is a div bar of divs — no <button> in it —
     // so it was never covered by the `button` selector, and on a phone the
     // joystick's corner anchor now sits over its left-hand cells. A slot tap

@@ -2154,7 +2154,6 @@
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
               spawnBandNear({ size: owners, faction: "company", name: "THE OWNERS", hunt: true, r: 1100, cooldown: 30, hidden: true });
               W.log("dug up a cache of " + n + " guns. Someone is coming for them.", "");
-              W.toast("+" + n + " GUNS", "good");
             } },
           { key: "wait", label: "SIT ON IT AND WAIT FOR THEM", show: size() >= 8,
             hint: "+" + n + " GUNS · THEY COME TO YOU",
@@ -2316,7 +2315,6 @@
               // a drink puts the wounded back on their feet — core's own flag
               let healed = 0;
               for (let i = 0; i < S.army.length; i++) if (S.army[i].wounded && W.chance(0.5)) { S.army[i].wounded = false; healed++; }
-              if (healed) W.toast(healed + " WOUNDED BACK ON THEIR FEET", "good");
             } },
           { key: "take", label: "TAKE THE SKINS", cls: "bad", show: size() >= 6,
             hint: "FREE · FAME DOWN · LOYALTY DOWN",
@@ -2480,7 +2478,6 @@
               if (!W.pay(ask)) return;
               W.stash(id, n);
               W.log("bought " + n + "× " + W.gunLabel(id) + " off a runner for $" + ask + ".", "good");
-              W.toast("+" + n + "× " + W.gunLabel(id), "good");
               if (b) { b.gold += ask; rideOff(b); }
             } },
           { key: "rob", label: "TAKE THE CRATE", cls: "bad", show: size() >= 5,
@@ -2529,7 +2526,6 @@
               const s = b ? b.men[0] : join("veteran", wid, BASE_HIRED, { battles: 8 });
               if (b) absorb(b, BASE_HIRED);
               W.log("hired " + s.name + ", veteran, for $" + price + ".", "good");
-              W.toast("+1 VETERAN", "good");
               reconcile();
             } },
           { key: "share", label: "OFFER HIM A SHARE", cls: "",
@@ -2684,7 +2680,6 @@
               for (let i = 0; i < guns.length; i++) W.stash(guns[i], 1);
               S.hour += 2;
               if (S.hour >= 24) { S.hour -= 24; W.dawn(); }
-              W.toast("+" + n + " GUNS", "good");
               W.log("dug " + n + " working rifles out of an old field.", "");
             } },
           { key: "bury", label: "BURY WHAT IS LEFT OF THEM", cls: "",
@@ -3372,7 +3367,6 @@
       W.log(fellNow.name + " is finished. " + live + " rivals left.", "good");
       S.fame += 40;
       loyMove(+12, "they broke a warlord and they know it");
-      W.toast(fellNow.name + " IS FINISHED", "good");
     }
     /* THE LAST WAR, POINTED AT THE LEADERBOARD'S TOP NAME. Everyone else is
        out and the survivor stops being a party on a map: he takes in what is
@@ -3395,7 +3389,6 @@
         b.goal = { x: S.you.x, z: S.you.z };
         b.cooldown = 0;
         W.log(b.name + " has taken in everything that is left. He is coming.", "bad");
-        W.toast("THE LAST WAR", "bad");
         // only take the screen if nobody else has it — this can land inside an
         // aftermath, and stamping over army.js's casualty list is the exact
         // two-modules-drawing bug the contract exists to prevent
@@ -3935,7 +3928,6 @@
       } else if (left === 0) {
         end = ["killed", "You went down at " + place() + " and there was nobody left standing to pick you up."];
       } else {
-        W.toast(left + " MEN CARRIED YOU OFF", "bad");
         W.log("you went down. " + left + " men carried you out of it.", "bad");
       }
     }

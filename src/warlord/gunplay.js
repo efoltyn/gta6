@@ -299,6 +299,7 @@
   let alwaysFn = null, ledgerFn = null;
   let touchBtns = [];
   let enemies = [];          // the array CBZ.npcs / CBZ.cityPeds point at
+  let corpses = [];          // CBZ.corpseTargets: the dead, so a round into a body moves it (fpsmode)
   let enemyT = 0;
   let wasDead = false;
   let baseFov = 0;
@@ -415,6 +416,7 @@
        brief is "ultra simple". Rocks still stop the round; men on your side
        do not. */
     CBZ.npcs = enemies; CBZ.cityPeds = enemies; CBZ.guards.length = 0; CBZ.cityCops.length = 0;
+    CBZ.corpseTargets = corpses;
     refreshEnemies(true);
     /* ---- WHAT A ROUND STOPS ON. Two things, and neither is the terrain
        MESH. The rocks go in as themselves; the SAND goes in as an analytic
@@ -771,11 +773,14 @@
     if (!A) return;
     if (!force && (enemyT -= 1) > 0) return;
     enemyT = 12;
-    enemies.length = 0;
+    enemies.length = 0; corpses.length = 0;
     const men = A.men();
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
-      if (!m || m.isYou || m.team === "mine" || m.dead || m.fled || !m.group) continue;
+      if (!m || m.isYou || m.fled || m.retired || !m.group) continue;
+      // any body on the sand takes a round, whichever side he died for
+      if (m.dead) { if (m.char && m.group.parent) corpses.push(m); continue; }
+      if (m.team === "mine") continue;
       enemies.push(m);
     }
   }
@@ -1198,7 +1203,8 @@
     if (CBZ._wlPrevAiKill !== undefined) { CBZ.aiKill = CBZ._wlPrevAiKill || undefined; CBZ._wlPrevAiKill = undefined; }
     if (CBZ._wlPrevKnockback !== undefined) { CBZ.knockback = CBZ._wlPrevKnockback || undefined; CBZ._wlPrevKnockback = undefined; }
     if (CBZ._wlPrevHasWeapon !== undefined) { CBZ.hasWeapon = CBZ._wlPrevHasWeapon || undefined; CBZ._wlPrevHasWeapon = undefined; }
-    enemies.length = 0;
+    enemies.length = 0; corpses.length = 0;
+    if (CBZ.corpseTargets === corpses) CBZ.corpseTargets = null;
     lastRounds = -1;
     stats.shots = stats.hits = stats.kills = stats.heads = stats.damage = 0;
     stats.firstShotT = stats.lastKillT = -1; stats.t = 0;

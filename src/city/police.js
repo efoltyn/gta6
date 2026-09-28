@@ -2464,8 +2464,7 @@
   // the old global-2-lane math for roads with no per-road data.
   function TRP() { return (CBZ.CITY && CBZ.CITY.traf) || {}; }
   function lanesPerDirP(r) { return CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TRP().lanesPerDir != null ? TRP().lanesPerDir : 2) | 0); }
-  function laneWidthP() { return TRP().laneW != null ? TRP().laneW : 3.6; }
-  function laneCenterP(r, dir, idx) { return CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidthP() * (idx + 0.5); }
+  function laneCenterP(r, dir, idx) { return CBZ.roadLaneCenter(r, dir, idx); }
   // reset hook: clear the registry on a fresh run (the cars themselves are
   // disposed by vehicles.js clearCars). Called from clearCityCops.
   function patrolCarsReset() { for (const c of _patrolCars) if (c) c._patrolCar = false; _patrolCars.length = 0; }

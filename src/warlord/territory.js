@@ -1690,7 +1690,7 @@
       const n = garrisonMen(r.id);
       opts.push({ label: "RAISE THE LEVY", kind: "hot", note: n ? n + " MEN" : "none",
         disabled: !n,
-        on: function () { const got = raiseLevy(r); if (got) W.toast(got + " MEN FALL IN", "good"); } });
+        on: function () { raiseLevy(r); } });
       sub = "YOURS, " + n + " IN GARRISON, +$" + T.regionIncome(r) + "/DAY";
     } else if (o) {
       const held = columnOn(r, o);
@@ -2713,7 +2713,7 @@
       close();
     };
     const lv = document.getElementById("wlTerrLevy");
-    if (lv) lv.onclick = function () { const n = raiseLevy(r); if (n) W.toast(n + " MEN FALL IN", "good"); };
+    if (lv) lv.onclick = function () { raiseLevy(r); };
     const sb = document.getElementById("wlTerrStorm");
     if (sb) sb.onclick = function () { close(); storm(r); };
     const gm = document.getElementById("wlTerrGarM");
@@ -2755,10 +2755,8 @@
         const s = W.removeSoldier(pool[i].id, false);
         if (s) { list.push(s); moved++; }
       }
-      if (moved) W.toast(moved + " MEN HOLD " + r.name);
     } else {
       while (list.length && moved < -n) { W.addSoldier(list.pop()); moved++; }
-      if (moved) W.toast(moved + " MEN BACK IN THE COLUMN");
     }
     if (!list.length) delete t.gar[r.id];
     delete t.gp[r.id];

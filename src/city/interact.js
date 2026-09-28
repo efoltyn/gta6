@@ -778,6 +778,9 @@
   });
   I.registerZone({
     id: "zone-stash", kind: "stash", prio: 10, driving: false,
+    // only a stash with NO count table: a fitted hideout's stash is the count
+    // table itself and is taken there (zone-interior-loot "Take the count");
+    // cityNearestStash skips those, so one table never carries two verbs
     find: function (px, pz) { return CBZ.cityNearestStash ? CBZ.cityNearestStash(px, pz, REACH) : null; },
     // the hand goes into their duffel (systems/verbs_pickup.js); robbed on the grab frame
     options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) {
@@ -1411,7 +1414,7 @@
     pawn:        { verb: "Step up to the pawn window",  sub: "cash for your haul · loans on collateral", rich: true },
     bank:        { verb: "Step to the teller",          sub: "deposit · withdraw · wire",                rich: true },
     clothing:    { verb: "Browse the racks",            sub: "fits · drip · change in back",             rich: true },
-    realtor:     { verb: "Talk to the realtor",         sub: "buy property · listings book",             rich: true },
+    realtor:     { verb: "Talk to the realtor",         sub: "buy or rent a home",                       rich: false },
 
     gas:         { verb: "Pay at the pump",             sub: "snacks · top off the tank",                rich: false },
     drugs:       { verb: "Cop from the trap",           sub: "product · turn dealer",                    rich: false },
@@ -1426,14 +1429,14 @@
     carlot:      { verb: "Talk to the car salesman",    sub: "buy a ride · open a resale yard",          rich: false },
     chop:        { verb: "See the chop shop man",       sub: "drive a hot car into the bay",             rich: false },
     modshop:     { verb: "Pull into the mod garage",     sub: "respray · armor · booster · turret · rockets", rich: false },
-    casino:      { verb: "Hit the cage",                sub: "tables · sportsbook · betting",            rich: false },
-    raceway:     { verb: "Check the race board",        sub: "legal · street · drag",                    rich: false },
-    arena:       { verb: "Sign the fight card",         sub: "boxing · MMA",                             rich: false },
+    casino:      { verb: "Hit the cage",                sub: "blackjack, roulette, slots",               rich: false },
+    raceway:     { verb: "Check the race book",         sub: "back a driver at Diamond Speedway",        rich: false },
+    arena:       { verb: "Ask about the fight card",    sub: "fights run at Ironjaw Arena",              rich: false },
     paintball:   { verb: "Book a paintball match",      sub: "team match board",                         rich: false },
     transit:     { verb: "Buy a ticket",                sub: "bus · train routes",                       rich: false },
     cityhall:    { verb: "See the clerk",               sub: "permits · politics · civic contracts",     rich: false },
     airfield:    { verb: "See the dispatcher",          sub: "air support · emergency contracts",        rich: false },
-    racepark:    { verb: "Place a wager",               sub: "horse · greyhound betting",                rich: false },
+    racepark:    { verb: "Place a wager",               sub: "horse and dog windows",                    rich: false },
   };
   // is this kind's dedicated self-prompting module live? (mirrors the gun-wall
   // feature-detect). When live, the counter verb steps aside for that module.
@@ -1445,7 +1448,6 @@
       case "pawn":     return !!(CBZ.cityPawnLive     && CBZ.cityPawnLive(lot));
       case "bank":     return !!(CBZ.cityBankLive     && CBZ.cityBankLive(lot));
       case "clothing": return !!(CBZ.cityClothingLive && CBZ.cityClothingLive(lot));
-      case "realtor":  return !!(CBZ.cityRealtyLive   && CBZ.cityRealtyLive(lot));
       default:         return false;
     }
   }

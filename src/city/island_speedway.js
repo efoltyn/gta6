@@ -3432,7 +3432,6 @@
     addEventListener("keydown", function (e) {
       if (g.mode !== "city") return;
       if (e.key === "Escape" && standOpen) { e.preventDefault(); toggleStandings(false); }
-      if (e.key === "Escape" && bookOpen) { e.preventDefault(); toggleBook(false); }
     });
   }
 
@@ -3443,7 +3442,9 @@
   //  to WIN the next speedway round; the ticket settles when that round's   //
   //  checkered flag falls (both race engines call settleBook).              //
   // ====================================================================== //
-  const BOOK = { bet: null, stake: 500 };
+  // The ticket is written on THE one bet slip (city/betslip.js); this book
+  // only knows the field, the odds and when the flag falls.
+  const BOOK = { bet: null };
   CBZ.cityRaceBook = BOOK;                    // read-only peek for other UIs
   const STAKES = [200, 500, 1000, 2000];
 
@@ -3457,81 +3458,32 @@
     if (!bet) return;
     BOOK.bet = null;
     const won = bet.number === "you" ? playerWon : !!(winnerRacer && winnerRacer.number === bet.number);
-    if (won) {
-      const pay = Math.round(bet.stake * bet.odds);
-      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
-      note("RACE BOOK: " + bet.label + " WINS, ticket pays $" + fmt(pay) + "!", 3.6);
-    } else {
-      note("RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (−$" + fmt(bet.stake) + ").", 3.0);
-    }
+    const pay = CBZ.betSlip ? CBZ.betSlip.settle(bet, won) : 0;
+    if (won) note("RACE BOOK: " + bet.label + " WINS, ticket pays $" + fmt(pay) + "!", 3.6);
+    else note("RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (-$" + fmt(bet.stake) + ").", 3.0);
   }
 
-  let bookEl = null, bookOpen = false;
-  function bookOverlay() {
-    if (bookEl) return bookEl;
-    bookEl = document.createElement("div");
-    bookEl.id = "speedwayBook";
-    bookEl.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;width:min(540px,92vw);max-height:84vh;overflow:auto;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:12px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.6)";
-    bookEl.addEventListener("click", function (e) {
-      const t = e.target.closest && e.target.closest("[data-act]");
-      if (!t) return;
-      const act = t.dataset.act;
-      if (act === "stake") {
-        const i = STAKES.indexOf(BOOK.stake);
-        BOOK.stake = STAKES[(i + 1) % STAKES.length];
-        renderBook();
-      } else if (act === "bet") {
-        if (BOOK.bet) { note("One ticket at a time, yours rides on " + BOOK.bet.label + ".", 2.2); return; }
-        if ((g.cash || 0) < BOOK.stake) { note("Not enough cash for that stake.", 1.8); return; }
-        const num = t.dataset.num === "you" ? "you" : (t.dataset.num | 0);
-        const odds = parseFloat(t.dataset.odds);
-        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(-BOOK.stake);
-        BOOK.bet = { number: num, label: t.dataset.name, stake: BOOK.stake, odds: odds };
-        note("Ticket placed: $" + fmt(BOOK.stake) + " on " + t.dataset.name + " @ " + odds + "x. Settles at the next checkered flag.", 3.2);
-        renderBook();
-      } else if (act === "close") toggleBook(false);
-    });
-    document.body.appendChild(bookEl);
-    return bookEl;
-  }
-  function renderBook() {
-    const el = bookOverlay();
+  function openBook() {
+    if (!CBZ.betSlip) return;
     const RC = CBZ.cityRacing;
     const rows = RC && RC.standings ? RC.standings().slice(0, 8) : [];
-    let h = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px'>" +
-      "<div style='font-size:18px;font-weight:700'>Speedway Race Book</div>" +
-      "<div style='font-size:12px;color:#8a93a3'>" + (RC ? "Season " + RC.season + " · next: Round " + (RC.round + 1) + "/" + RC.ROUNDS : "next race") + "</div></div>";
-    h += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:8px'>Back a driver to WIN the next race at Diamond Speedway. Ticket settles at the flag.</div>";
-    h += "<div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>" +
-      "<span style='font-size:12px;color:#8a93a3'>Stake</span>" +
-      "<button data-act='stake' style='cursor:pointer;background:#1d2430;border:1px solid #2c3140;border-radius:8px;color:#ffd166;font-weight:700;font-size:14px;padding:4px 14px;font-family:inherit'>$" + BOOK.stake + " ⟳</button>" +
-      (BOOK.bet ? "<span style='font-size:12px;color:#7ed957'>ticket live: $" + fmt(BOOK.bet.stake) + " on " + esc(BOOK.bet.label) + " @ " + BOOK.bet.odds + "x</span>" : "") +
-      "</div>";
-    const btn = (num, name, odds) =>
-      "<button data-act='bet' data-num='" + num + "' data-name='" + esc(name) + "' data-odds='" + odds + "' " +
-      "style='cursor:pointer;background:#16301f;border:1px solid #2c5c3a;border-radius:8px;color:#7ed957;font-weight:700;font-size:12px;padding:3px 10px;font-family:inherit'>" + odds + "x</button>";
-    h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'><span>Car</span><span>Driver</span><span style='text-align:right'>Points</span><span style='text-align:right'>Win</span></div>";
-    rows.forEach(function (r, i) {
-      h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;align-items:center;font-size:13px;padding:2px 4px'>" +
-        "<span style='font-weight:700;color:" + hex6(r.teamColor) + "'>" + r.number + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + esc(r.name) + "</span>" +
-        "<span style='text-align:right;color:#9fe6c8'>" + r.points + "</span>" +
-        "<span style='text-align:right'>" + btn(r.number, r.name + " #" + r.number, oddsFor(i + 1, rows.length)) + "</span></div>";
+    const picks = rows.map(function (r, i) {
+      return { id: String(r.number), label: r.name + " #" + r.number, odds: oddsFor(i + 1, rows.length), color: hex6(r.teamColor), sub: r.points + " pts" };
     });
-    h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;align-items:center;font-size:13px;padding:4px;margin-top:4px;border-top:1px solid #2c3140'>" +
-      "<span style='color:#7de7ff;font-weight:700'>—</span><span style='color:#7de7ff'>YOURSELF (drive the race and win it)</span><span></span>" +
-      "<span style='text-align:right'>" + btn("you", "YOU", PLAYER_ODDS) + "</span></div>";
-    h += "<div style='display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px'>" +
-      "<span>Races run at Diamond Speedway, take the causeway north.</span>" +
-      "<button data-act='close' style='cursor:pointer;background:#1d2430;border:1px solid #2c3140;border-radius:8px;color:#e8eef7;font-size:12px;padding:3px 12px;font-family:inherit'>Close</button></div>";
-    el.innerHTML = h;
+    picks.push({ id: "you", label: "Yourself", odds: PLAYER_ODDS, color: "#7de7ff", sub: "drive the race and win it" });
+    CBZ.betSlip.open({
+      key: "speedway", title: "Speedway Race Book",
+      sub: (RC ? "Season " + RC.season + ", next: Round " + (RC.round + 1) + "/" + RC.ROUNDS : "Next race") + ". Races run at Diamond Speedway, take the causeway north.",
+      picks: picks, stakes: STAKES,
+      ticket: BOOK.bet ? "Ticket live: $" + fmt(BOOK.bet.stake) + " on " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x" : "",
+      locked: BOOK.bet ? "One ticket at a time, yours rides on " + BOOK.bet.label + "." : "",
+      onPlace: function (p, stake, odds) {
+        BOOK.bet = { number: p.id === "you" ? "you" : (+p.id | 0), label: p.id === "you" ? "YOU" : p.label, stake: stake, odds: odds };
+        note("Ticket placed: $" + fmt(stake) + " on " + BOOK.bet.label + " @ " + odds + "x. Settles at the next checkered flag.", 3.2);
+      },
+    });
   }
-  function toggleBook(force) {
-    bookOpen = force != null ? force : !bookOpen;
-    if (bookOpen) { renderBook(); bookOverlay().style.display = "block"; }
-    else if (bookEl) bookEl.style.display = "none";
-  }
-  CBZ.cityOpenRaceBook = toggleBook;
+  CBZ.cityOpenRaceBook = openBook;
 
   // the CITY-side ticket office: an interaction zone over the "City Speedway"
   // lot (kind "raceway") — the betting parlor buildings.js dresses.
@@ -3601,7 +3553,7 @@
         label: function () {
           return BOOK.bet ? ("Ticket live: " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x") : "Bet on the next speedway race";
         },
-        onSelect: function () { toggleBook(true); },
+        onSelect: function () { openBook(); },
       }, {
         id: "raceway-standings", slot: "e",
         label: function () { return "Championship standings"; },

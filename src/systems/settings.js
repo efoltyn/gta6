@@ -33,19 +33,14 @@
         leaves it alone. The max selectable tier is capped at the LIVE
         host-aware ceiling (CBZ.qualityTopTier()) so a host can never pick a
         tier the sampler would silently revert.
-     2) CROWD DENSITY (live). CBZ.crowdRenderBudget is the close-rig render
-        cap already wired through applyQuality()/refreshCrowdBudget() — this
-        slider writes it directly and calls refreshCrowdBudget(), no reload.
-     3) TOTAL POPULATION (next-boot only, clearly labelled). CBZ.MASS_CROWD /
-        CBZ.CROWD_RIG_CAP (src/config.js) are read ONCE at module load into
-        fixed-size typed arrays (src/entities/ambientstate.js) with no
-        resize/rebuild API — this is NOT a live knob. The slider writes a
-        persisted override to localStorage that a future boot can pick up;
-        it does not pretend to apply instantly.
+     Crowd density and total population USED to be sliders here. They were
+     developer knobs (render caps and a boot-time headcount), not choices a
+     player should make, and a stale total-population override silently beat
+     the prison's bed-derived headcount forever. Removed; any value an older
+     build saved is wiped on boot (see clearDevOverrides below).
 
    PERSISTENCE: a dedicated small localStorage key (CBZ_SETTINGS_V1), kept
-   separate from the heavy per-world save blob (city/worldstate.js) and from
-   the population override key (CBZ_POP_OVERRIDE_V1, read at next boot).
+   separate from the heavy per-world save blob (city/worldstate.js).
 
    KEY BINDING: [Escape] closes the panel. It is opened through the
    "Settings" button injected into #pause (Escape on the pause card resumes
@@ -61,8 +56,7 @@
   const g = CBZ.game;
 
   // ---- persistence ----------------------------------------------------------
-  const PREF_KEY = "CBZ_SETTINGS_V1";       // quality/crowd-density/auto choices
-  const POP_KEY = "CBZ_POP_OVERRIDE_V1";    // total-population override, read at next boot
+  const PREF_KEY = "CBZ_SETTINGS_V1";       // quality tier + auto choice
 
   function loadPrefs() {
     try {
@@ -77,20 +71,12 @@
   }
   let prefs = loadPrefs();
 
-  function loadPopOverride() {
-    try {
-      const raw = localStorage.getItem(POP_KEY);
-      if (!raw) return null;
-      const n = parseInt(raw, 10);
-      return (isFinite(n) && n > 0) ? n : null;
-    } catch (e) { return null; }
-  }
-  function savePopOverride(n) {
-    try {
-      if (n == null) localStorage.removeItem(POP_KEY);
-      else localStorage.setItem(POP_KEY, String(n | 0));
-    } catch (e) {}
-  }
+  // The old crowd-density / total-population sliders are gone; wipe what they
+  // persisted so a player who once dragged them isn't stuck with the value.
+  (function clearDevOverrides() {
+    try { localStorage.removeItem("CBZ_POP_OVERRIDE_V1"); } catch (e) {}
+    if ("crowdBudget" in prefs) { delete prefs.crowdBudget; savePrefs(prefs); }
+  })();
 
   // ---- apply persisted prefs on THIS boot (the live-applicable ones only) --
   // The newest explicit surface wins. A title preset already loaded by
@@ -116,10 +102,6 @@
     } else if (prefs.auto === false && typeof prefs.qLevel === "number" && CBZ.setQualityLevel) {
       CBZ.qualityLocked = true;
       CBZ.setQualityLevel(prefs.qLevel);
-    }
-    if (typeof prefs.crowdBudget === "number") {
-      CBZ.crowdRenderBudget = Math.max(0, prefs.crowdBudget | 0);
-      if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
     }
   }
   // A title click happens after this module has loaded. Mirror it into the
@@ -175,13 +157,6 @@
         rangeRow("stgQuality", "Quality tier", 0, 4, 1, 4, false) +
         "<div class='stg-note' id='stgQualityNote'></div>" +
       "</div>" +
-      "<div class='stg-section'>" +
-        "<h4>NPC POPULATION</h4>" +
-        rangeRow("stgCrowdDensity", "Crowd density (visible nearby)", 0, 1600, 20, 720, false) +
-        "<div class='stg-note'>Live, applies immediately.</div>" +
-        rangeRow("stgTotalPop", "Total population", 60, 900, 20, 140, false) +
-        "<div class='stg-note warn'>Applies next time you load in, not instant (total population is fixed at boot).</div>" +
-      "</div>" +
       "<button class='stg-close' id='stgCloseBtn'>Done</button>";
 
     document.body.appendChild(panel);
@@ -191,10 +166,6 @@
     const elQ = panel.querySelector("#stgQuality");
     const elQVal = panel.querySelector("#stgQualityVal");
     const elQNote = panel.querySelector("#stgQualityNote");
-    const elDensity = panel.querySelector("#stgCrowdDensity");
-    const elDensityVal = panel.querySelector("#stgCrowdDensityVal");
-    const elPop = panel.querySelector("#stgTotalPop");
-    const elPopVal = panel.querySelector("#stgTotalPopVal");
 
     function refreshQualityUI() {
       const tierCount = CBZ.qualityTierCount || 5;
@@ -210,19 +181,6 @@
         ? "Hosting multiplayer caps the top tier at " + tierLabel(top) + " right now."
         : "";
     }
-    function refreshDensityUI() {
-      const v = (typeof CBZ.crowdRenderBudget === "number") ? CBZ.crowdRenderBudget : 720;
-      elDensity.value = String(v);
-      elDensityVal.textContent = String(v | 0);
-    }
-    function refreshPopUI() {
-      const override = loadPopOverride();
-      const current = (typeof CBZ.MASS_CROWD === "number") ? CBZ.MASS_CROWD : 140;
-      const v = override != null ? override : current;
-      elPop.value = String(Math.max(60, Math.min(900, v)));
-      elPopVal.textContent = elPop.value + (override != null && override !== current ? " (pending reload)" : "");
-    }
-
     elAuto.addEventListener("change", function () {
       const auto = elAuto.checked;
       CBZ.qualityLocked = !auto;
@@ -256,23 +214,9 @@
       savePrefs(prefs);
       refreshQualityUI();
     });
-    elDensity.addEventListener("input", function () {
-      const v = parseInt(elDensity.value, 10) || 0;
-      CBZ.crowdRenderBudget = v;
-      if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
-      prefs.crowdBudget = v;
-      savePrefs(prefs);
-      elDensityVal.textContent = String(v);
-    });
-    elPop.addEventListener("input", function () {
-      const v = parseInt(elPop.value, 10) || 140;
-      savePopOverride(v);
-      refreshPopUI();
-    });
-
     panel.querySelector("#stgCloseBtn").addEventListener("click", close);
 
-    panel._refresh = function () { refreshQualityUI(); refreshDensityUI(); refreshPopUI(); };
+    panel._refresh = function () { refreshQualityUI(); };
     return panel;
   }
 

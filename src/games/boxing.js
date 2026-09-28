@@ -515,8 +515,9 @@
       save();
     } else if (LIVE.role === "ai" && LIVE.bet) {   // settle the bettor's stake
       const won = LIVE.bet.side === bout.winner;
-      if (won) { const pay = payout(LIVE.bet.stake, LIVE.bet.odds); C.wallet.give(pay, "Bet cashed"); sayBy(V.bookie, "Winner. Come collect."); }
-      else sayBy(V.bookie, "House thanks you, friend.");
+      if (CBZ.betSlip) CBZ.betSlip.settle(LIVE.bet, won, { pay: (n) => C.wallet.give(n, "Bet cashed") });
+      else if (won) C.wallet.give(payout(LIVE.bet.stake, LIVE.bet.odds), "Bet cashed");
+      sayBy(V.bookie, won ? "Winner. Come collect." : "House thanks you, friend.");
       LIVE.bet = null;
     }
     if (LIVE.role === "player") { panelMode = "result"; openResult(bout); }
@@ -888,34 +889,28 @@
     return h;
   }
 
+  // the window takes the ticket on THE one bet slip (city/betslip.js); the
+  // bookie keeps the odds, the undercard and the words.
   function openBet() {
     panelMode = "bet";
     if (!LIVE || LIVE.role !== "ai") { if (LIVE && LIVE.role === "player") return; startAIBout(); }
     if (!LIVE || LIVE.bout.over) startAIBout();
-    const bt = LIVE.bout, aD = DEFS[LIVE.aKey], bD = DEFS[LIVE.bKey];
-    const already = LIVE.bet ? "<div style='color:#ffd166;font-size:13px'>Your bet: " + fmt(LIVE.bet.stake) + " on " + (LIVE.bet.side === "A" ? aD.short : bD.short) + " @ " + LIVE.bet.odds.toFixed(2) + "</div>" : "";
-    betStake = betStake || 50;
-    C.hud.panel(
-      head("BETTING WINDOW", "Round " + bt.round + ", live undercard") +
-      "<div style='font-size:13px;margin:4px 0'><b style='color:#ff9a9a'>" + aD.name + "</b> @ " + LIVE.oddsA.toFixed(2) + "  vs  <b style='color:#9ad0ff'>" + bD.name + "</b> @ " + LIVE.oddsB.toFixed(2) + "</div>" +
-      already +
-      "<div style='margin:8px 0'>Stake: <b id='bx_stake'>" + fmt(betStake) + "</b>, cash " + fmt(C.wallet.cash()) + "<br>" +
-        btn("m25", "-$25", "#26343c") + btn("p25", "+$25", "#26343c") + "</div>" +
-      btn("backA", "BACK " + aD.short, "#8a1f1f") + btn("backB", "BACK " + bD.short, "#1f4e8a") +
-      "<div style='margin-top:6px'>" + btn("watch", "Just watch", "#26343c") + "</div>",
-      { m25: () => { betStake = Math.max(25, betStake - 25); pokeStake(); }, p25: () => { betStake = Math.min(5000, betStake + 25); pokeStake(); },
-        backA: () => placeBet("A"), backB: () => placeBet("B"), watch: () => C.hud.closePanel(),
-        close: () => C.hud.closePanel() });
-  }
-  let betStake = 50;
-  function pokeStake() { const e = document.getElementById("bx_stake"); if (e) e.textContent = fmt(betStake); }
-  function placeBet(side) {
-    if (!LIVE || LIVE.role !== "ai" || LIVE.bout.over) { sayBy(V.bookie, "Too late. Book's closed on that one."); return; }
-    if (LIVE.bet) { sayBy(V.bookie, "You're already down on this one."); return; }
-    if (!C.wallet.spend(betStake, "Bet placed")) return;
-    LIVE.bet = { side: side, stake: betStake, odds: side === "A" ? LIVE.oddsA : LIVE.oddsB };
-    sayBy(V.bookie, "You're on. " + (side === "A" ? DEFS[LIVE.aKey].short : DEFS[LIVE.bKey].short) + " it is.");
-    openBet();
+    if (!CBZ.betSlip) return;
+    C.hud.closePanel();
+    const bt = LIVE.bout, aD = DEFS[LIVE.aKey], bD = DEFS[LIVE.bKey], card = LIVE;
+    CBZ.betSlip.open({
+      key: "southpaw", title: "Betting window", sub: "Round " + bt.round + ", live undercard",
+      min: 25, max: 5000, step: 25, stake: 50,
+      ticket: LIVE.bet ? "Your bet: " + fmt(LIVE.bet.stake) + " on " + (LIVE.bet.side === "A" ? aD.short : bD.short) + " @ " + LIVE.bet.odds.toFixed(2) : "",
+      locked: LIVE.bet ? "You're already down on this one." : "",
+      picks: [{ id: "A", label: aD.name, odds: LIVE.oddsA, color: "#ff9a9a" }, { id: "B", label: bD.name, odds: LIVE.oddsB, color: "#9ad0ff" }],
+      spend: (n) => C.wallet.spend(n, "Bet placed"),
+      onPlace: function (p, stake, odds) {
+        if (LIVE !== card || LIVE.bout.over) { C.wallet.give(stake, "Stake returned"); sayBy(V.bookie, "Too late. Book's closed on that one."); return; }
+        LIVE.bet = { side: p.id, stake: stake, odds: odds };
+        sayBy(V.bookie, "You're on. " + (p.id === "A" ? aD.short : bD.short) + " it is.");
+      },
+    });
   }
 
   function openResult(bout) {

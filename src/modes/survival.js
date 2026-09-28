@@ -423,19 +423,82 @@
     if (sun.shadow.camera.updateProjectionMatrix) sun.shadow.camera.updateProjectionMatrix();
   }
 
+  /* THE ISLAND HAS A NIGHT. This override used to pin the sun 70/140/-50
+     over the island at the clear-day colour every frame, so the island was
+     noon forever while core/daynight.js's sky clock quietly ran through dusk
+     and night behind it (the sky dome went dark, the lights did not). Now
+     the clock is the island's clock too: every round starts at its own hour
+     (ROUND_HOURS, rotating per match), core/daynight.js runs a 15-minute
+     island day from there, and the disaster's mood in CBZ.survEnv is treated
+     as what it is, a DAYLIGHT grade (storm grey, ash brown, blizzard white),
+     that the hour then darkens:
+       - the key light is the sun while it is up, the MOON when it is down
+         (same arc mirrored, held above 16 degrees so shadows stay sane),
+         at moonlight strength scaled by the disaster's own dimming;
+       - the sky fill and fog darken to night blue, but lightning (e.flash)
+         still adds on top at full strength: a night storm is lit by it;
+       - street lamps, forecourt canopies and lanterns already switch on off
+         the rig's measured darkness (fuel_station.js CBZ.lightsOnAmount), so
+         they come on by themselves at dusk and under a black storm.
+     Lava, fire and the nuke are emissive/additive and read brighter against
+     the dark. Shark Sim shares the island sky but keeps its own daylight. */
+  const ROUND_HOURS = [0.14, 0.46, 0.64, 0.30, 0.49, 0.82, 0.41, 0.99];   // morning, golden, night, noon, sunset into night, midnight, afternoon, dawn
+  function islandDayF(up) { const k = Math.max(0, Math.min(1, (up + 0.1) / 0.42)); return k * k * (3 - 2 * k); }
+  CBZ.survIslandDayF = islandDayF;
+  const _gA = new THREE.Color(), _gB = new THREE.Color();
+  const MOON = 0x8fa7dc, NIGHT_SKY = 0x2a3a60, NIGHT_FOG = 0x0c1422, DUSK_FOG = 0xd98a62, DUSK_SUN = 0xff9a52;
   CBZ.onAlways(93, function () {
     const isSurv = CBZ.islandModeOn(g.mode);   // sharksim shares the island's sky
     setShadow(isSurv ? "survival" : "escape");
     if (!isSurv) { if (CBZ.sunTarget) CBZ.sunTarget.position.set(0, 0, 18); return; }
     const A = surv.arena; if (!A) return;
     const e = CBZ.survEnv;
-    if (CBZ.sun) { CBZ.sun.position.set(A.center.x + 70, 140, A.center.z - 50); CBZ.sun.color.setHex(e.sunColor); CBZ.sun.intensity = e.sunInt; }
+    const graded = g.mode === "survival";
+    const ang = graded && Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 0.95;
+    const up = Math.sin(ang);
+    const dayF = graded ? islandDayF(up) : 1;
+    const dusk = graded ? Math.max(0, 1 - Math.abs(up) * 3) : 0;
+    const clear = CBZ.SURV_CLEAR_SKY;
+    const mood = Math.max(0.25, Math.min(1.2, e.sunInt / clear.sunInt));   // the disaster's own dimming
+    if (CBZ.sun) {
+      if (graded) {
+        // sun while it is up, the moon (the mirrored arc) once it is down
+        let dx = Math.cos(ang), dy = up;
+        if (up < -0.04) { dx = -dx; dy = -dy; }
+        dy = Math.max(0.28, dy);
+        const L = 170 / Math.hypot(dx, dy, 0.35);
+        CBZ.sun.position.set(A.center.x + dx * L, dy * L, A.center.z - 0.35 * L);
+        _gA.setHex(e.sunColor);
+        if (dusk > 0) _gA.lerp(_gB.setHex(DUSK_SUN), dusk * 0.55 * dayF);
+        CBZ.sun.color.copy(_gA.lerp(_gB.setHex(MOON), 1 - dayF));
+        CBZ.sun.intensity = e.sunInt * dayF + (1 - dayF) * 0.30 * mood;
+      } else {
+        CBZ.sun.position.set(A.center.x + 70, 140, A.center.z - 50);
+        CBZ.sun.color.setHex(e.sunColor); CBZ.sun.intensity = e.sunInt;
+      }
+    }
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(A.center.x, 6, A.center.z);
-    if (CBZ.hemi) { CBZ.hemi.color.setHex(e.hemiColor); CBZ.hemi.intensity = e.hemiInt + e.flash * 4; }
-    if (CBZ.scene.fog) { CBZ.scene.fog.color.setHex(e.fog); CBZ.scene.fog.near = e.fogNear; CBZ.scene.fog.far = e.fogFar; }
+    if (CBZ.hemi) {
+      CBZ.hemi.color.setHex(e.hemiColor);
+      if (graded) CBZ.hemi.color.lerp(_gB.setHex(NIGHT_SKY), (1 - dayF) * 0.85);
+      CBZ.hemi.intensity = e.hemiInt * (0.30 + 0.70 * dayF) + e.flash * 4;
+    }
+    if (CBZ.scene.fog) {
+      const fc = CBZ.scene.fog.color.setHex(e.fog);
+      if (graded) {
+        if (dusk > 0) fc.lerp(_gB.setHex(DUSK_FOG), dusk * 0.45 * dayF);
+        _gA.copy(fc).multiplyScalar(0.16).lerp(_gB.setHex(NIGHT_FOG), 0.5);
+        fc.lerp(_gA, 1 - dayF);
+      }
+      CBZ.scene.fog.near = e.fogNear; CBZ.scene.fog.far = e.fogFar;
+    }
     // tint the sky dome to the disaster mood so the whole sky reads cohesively
-    // (clear blue → storm grey → volcanic red → blizzard white → nuke orange)
-    if (CBZ.skyDome && CBZ.skyDome.material) CBZ.skyDome.material.color.setHex(e.fog);
+    // (clear blue → storm grey → volcanic red → blizzard white → nuke orange);
+    // after dark the tint eases off so sky.js's own night palette shows
+    if (CBZ.skyDome && CBZ.skyDome.material) {
+      const dc = CBZ.skyDome.material.color.setHex(e.fog);
+      if (graded) dc.lerp(_gB.setRGB(1, 1, 1), (1 - dayF) * 0.6);
+    }
   });
 
   // ---- stamina + spectate watcher + last-one-standing check ----
@@ -561,6 +624,9 @@
 
       // neutral daytime baseline (disasters take over from here)
       Object.assign(CBZ.survEnv, CBZ.SURV_CLEAR_SKY, { flash: 0, flashColor: 0xffffff });
+      // ...and the hour this round starts at: the first match of a session
+      // is morning, later ones rotate through golden hour, dusk, night, dawn
+      if (CBZ.dayPhase) CBZ.dayPhase(ROUND_HOURS[(matchNo - 1) % ROUND_HOURS.length]);
 
       // PHYSICAL SHELTER: the hazards themselves are the whole pressure, and
       // the right TYPE of place (altitude for water, indoors for ash/cold,

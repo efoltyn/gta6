@@ -112,8 +112,7 @@
    same vent carves the same channel on every client. Per-frame flicker
    is runtime-only FX and uses Math.random, which the doctrine allows.
 
-   Flags: VOLCANO_V2 (the opaque crust+channel lava; false = the caller
-   keeps its legacy visual) · VOLCANO_PYRO · VOLCANO_LAHAR ·
+   Flags: VOLCANO_PYRO · VOLCANO_LAHAR ·
    VOLCANO_ASH_LOAD. Ratchet: CBZ.volcanoAudit().
 ============================================================ */
 (function () {
@@ -124,7 +123,6 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
 
   // Each is a genuine one-line revert of one hazard.
-  if (CBZ.CONFIG.VOLCANO_V2 == null) CBZ.CONFIG.VOLCANO_V2 = true;
   if (CBZ.CONFIG.VOLCANO_PYRO == null) CBZ.CONFIG.VOLCANO_PYRO = true;
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
   /* VOLCANO_V3 (2026-08-23): the eruption gets its SKY back. One flag, three
@@ -896,7 +894,7 @@
     // ---- POOLED LIGHT: budget-conscious, and the reason a night eruption
     //      paints the hillside instead of floating on it ----
     let light = null;
-    if (o.light !== false && CBZ.CONFIG.VOLCANO_V2 !== false) {
+    if (o.light !== false) {
       light = new THREE.PointLight(0xff6a1e, 0, Math.max(24, width * 6), 2);
       light.castShadow = false;
       parent.add(light);
@@ -3087,7 +3085,7 @@
       ashCells += LIVE.ash[i].cellCount;
     }
     return {
-      v2: CBZ.CONFIG.VOLCANO_V2 !== false,
+      v2: true,
       // live rivers only; the kept black flows are lavaScars, so the two
       // numbers stay comparable with builds that deleted flows at the end
       lavaFlows: LIVE.lava.length - lavaScars,

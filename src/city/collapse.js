@@ -294,6 +294,12 @@
     const ox = desc.ox, oy = desc.gy || 0, oz = desc.oz;
     const hw = Math.max(1, desc.w || 10) / 2, hd = Math.max(1, desc.d || 10) / 2;
     const out = [];
+    // THE SKIN, not the shell: a perimeter wall under a facade skin is read in
+    // the skin's material (buildings.js CBZ.citySkin, per face), so the shell
+    // that falls and every piece cut from it wear the brick / ashlar / stucco
+    // that was on screen, not the shell's hidden base tint.
+    const bld = (grp.userData && grp.userData.bld) || null;
+    const skinnable = !!(bld && CBZ.citySkin && CBZ.cityIsShellMat);
     try { grp.updateWorldMatrix(true, true); } catch (e) { return null; }
     grp.traverse(function (o) {
       if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
@@ -316,9 +322,16 @@
       if (!slab && _bb.min.x - ox > -hw + IN && _bb.max.x - ox < hw - IN
           && _bb.min.z - oz > -hd + IN && _bb.max.z - oz < hd - IN) return;   // interior
       const m = new THREE.Matrix4().makeTranslation(-ox, -oy, -oz).multiply(o.matrixWorld);
-      out.push({ geo: geo, mat: o.material, m: m, cx: cx, cy: cy, cz: cz,
+      const glass = isGlass(mats[0]);
+      let mat = o.material;
+      if (skinnable && !slab && !glass && CBZ.cityIsShellMat(bld, mat)) {
+        let sk = null;
+        try { sk = CBZ.citySkin(bld, cx + ox, cz + oz); } catch (e) { sk = null; }
+        if (sk) mat = sk;
+      }
+      out.push({ geo: geo, mat: mat, m: m, cx: cx, cy: cy, cz: cz,
         sx: _sz.x, sy: _sz.y, sz: _sz.z,
-        vol: Math.max(1e-4, _sz.x * _sz.y * _sz.z), slab: slab, glass: isGlass(mats[0]) });
+        vol: Math.max(1e-4, _sz.x * _sz.y * _sz.z), slab: slab, glass: glass });
     });
     for (const gp of desc.panes || []) {
       if (!gp || gp.shattered || gp.mesh || !(gp.hw > 0) || !(gp.hh > 0)) continue;

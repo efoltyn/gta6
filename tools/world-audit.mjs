@@ -750,7 +750,7 @@ const COLLECT = String.raw`(() => {
       unprogrammed: programmedLots.filter((o) => !o.purpose).map((o) => o.name || o.id),
       enclosedWithoutDoor: builtLots.filter((o) => o.enclosed && !o.hasDoor).map((o) => o.name || o.id),
       casinoLots: programmedLots.filter((o) => o.purpose === "casino").length,
-      casinoGames: typeof CBZ.cityOpenActivities === "function",
+      casinoGames: typeof CBZ.cityOpenCasino === "function",
     },
     spawn: {
       noSpawn: (A.noSpawn || []).map((z) => ({ label: z.label || null, minX: z.minX, maxX: z.maxX, minZ: z.minZ, maxZ: z.maxZ })),

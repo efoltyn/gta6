@@ -18,9 +18,8 @@
    streak. Decor with no job: none.
    Interiors: order-88 claim marks the flagship casino lot; the
    city/casino.js dresser keeps the exterior and skips the interior.
-   Every town casino's tables also route here: CBZ.cityOpenCasino is
-   wrapped (marker: _pkgWrapped) so the old menu casino is retired.
-   Revert: CBZ.CONFIG.PKG_CASINO = false.
+   Every town casino's tables also route here: CBZ.cityOpenCasino opens
+   this hub (the old activities.js menu casino is deleted).
 ============================================================ */
 (function () {
   "use strict";
@@ -789,8 +788,6 @@
   }
 
   /* ======================= REGISTER ======================================= */
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PKG_CASINO == null) CBZ.CONFIG.PKG_CASINO = true;
   CBZ.games.register({
     id: "casino", title: "THE GOLDEN ACE",
     venue: { lotKind: "casino" },
@@ -809,21 +806,11 @@
     },
   });
 
-  /* every OTHER casino's tables (city/casino.js zone -> cityOpenCasino) now
-     open the package hub instead of the old activities.js menu casino. */
-  const prevOpen = CBZ.cityOpenCasino || null;
-  function wrapOpen() {
-    if (!CBZ.cityOpenCasino || CBZ.cityOpenCasino._pkgWrapped) return;
-    const inner = CBZ.cityOpenCasino;
-    const wrapped = function () {
-      if (CBZ.CONFIG.PKG_CASINO === false) { if (inner) inner.apply(this, arguments); return; }
-      C = C || CBZ.games.hubCtx("casino");
-      openHub();
-    };
-    wrapped._pkgWrapped = true;
-    CBZ.cityOpenCasino = wrapped;
-  }
-  if (prevOpen) wrapOpen();
-  // activities.js may define cityOpenCasino after us — cheap per-frame retry until wrapped
-  if (CBZ.onUpdate && CBZ.PRIO) CBZ.onUpdate(CBZ.PRIO.after(CBZ.PRIO.LATE, 5), wrapOpen);
+  /* every OTHER casino's tables (city/casino.js zone -> cityOpenCasino) open
+     this same hub: the one casino game. (The old activities.js menu casino it
+     used to wrap is deleted.) */
+  CBZ.cityOpenCasino = function () {
+    C = C || CBZ.games.hubCtx("casino");
+    openHub();
+  };
 })();

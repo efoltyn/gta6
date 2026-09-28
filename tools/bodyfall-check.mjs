@@ -335,6 +335,50 @@ for (const [side, bx, bz] of SIDES) {
   }
 }
 
+/* ---- SHOT AGAIN (owner: corpses outside the city did not react to a round).
+   Each game's settled body, as that game ticks it, takes a pistol round in
+   the left hand and one in the chest through CBZ.corpseHit (what fpsmode's
+   corpse ray calls in every mode): it must take it, the struck part must
+   visibly jolt, the body must shove a few cm along the round, still lie ON
+   the floor, and settle asleep again. ---- */
+{
+  const setMode = (m) => { CBZ.game.mode = m; };
+  const cases = [
+    ["survival body (grapple ticks it)", "survival", (a) => { a.dead = true; CBZ.body.hit(a, { dir: { x: 0, z: -1 }, force: 6, knockdown: 9999 }); }, null],
+    ["prison inmate (prisoncorpse ticks it)", "escape", (a) => { a.dead = true; CBZ.prisonCorpsePlace(a, { group: { position: { x: 0, z: 3 } } }, { force: 7 }); }, (a, dt) => CBZ.prisonCorpseTick(a, dt)],
+    ["warlord man (his own stepFall ticks the collapse)", "slice", (a) => { a.dead = true; CBZ.bodyFall.start(a, { dirX: 0, dirZ: -1, force: 7, dead: true, hold: true }); }, (a, dt) => { if (CBZ.bodyFall.active(a) && !CBZ.bodyFall.asleep(a)) CBZ.bodyFall.tick(a, dt); }],
+  ];
+  for (const [tag, mode, kill, driver] of cases) {
+    setMode(mode);
+    v.clearActors();
+    const bot = mode === "survival";
+    const a = v.actor({ build: "m", x: 0, z: 0, yaw: 0, bot, name: tag });
+    for (let i = 0; i < 8; i++) v.frame(DT);
+    kill(a);
+    for (let i = 0; i < 240; i++) { v.frame(DT); if (driver) driver(a, DT); }
+    const slept0 = CBZ.bodyFall.asleep(a);
+    for (const [where, part] of [["hand", "hand"], ["chest", "chest"]]) {
+      const ch = a.char, g = a.group;
+      g.updateMatrixWorld(true);
+      const pt = new THREE.Vector3();
+      if (part === "hand") ch.sockets.leftHand.getWorldPosition(pt); else ch.neck.getWorldPosition(pt);
+      const x0 = g.position.x, z0 = g.position.z, s0 = snapshot(g);
+      const took = CBZ.corpseHit(a, { x: pt.x, y: pt.y, z: pt.z }, { x: 1, y: 0, z: 0 }, 6);
+      let jolt = 0, low = 9, sleptAt = -1;
+      for (let i = 0; i < 180; i++) {
+        v.frame(DT); if (driver) driver(a, DT);
+        if (i < 40) { const s = snapshot(g); for (let k = 0; k < s.length; k += 3) jolt = Math.max(jolt, Math.hypot(s[k] - s0[k] - (g.position.x - x0), s[k + 2] - s0[k + 2] - (g.position.z - z0))); }
+        low = Math.min(low, lowest(g));
+        if (sleptAt < 0 && i > 5 && CBZ.bodyFall.asleep(a)) sleptAt = i * DT;
+      }
+      const shove = g.position.x - x0, side = Math.abs(g.position.z - z0);
+      check(`shot again: ${tag}, ${where}`, slept0 && took && jolt > 0.05 && shove > 0.02 && shove < 0.2 && side < 0.05 && low >= -0.06 && sleptAt > 0,
+        `settled first ${slept0}, took ${took}, part jolt ${(jolt * 100).toFixed(1)} cm, shoved ${(shove * 100).toFixed(1)} cm along the round, lowest ${(low * 100).toFixed(1)} cm, asleep again at ${sleptAt.toFixed(2)} s`);
+    }
+  }
+  setMode("survival");
+}
+
 /* ---- the plan: pure ---- */
 {
   const P = CBZ.bodyFall.plan;

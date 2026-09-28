@@ -52,8 +52,7 @@
    and what a passing pressure front does to its own actor roster, via the
    `damage` callbacks it hands to begin().
 
-   Flag: CBZ.CONFIG.METEOR_V2 (declared HERE, default on). Off, the def
-   never calls this file and plays the legacy shower verbatim.
+   No flag: the old shower was deleted 2026-09-28, the def always calls here.
    Ratchet: CBZ.meteorAudit().
 ============================================================ */
 (function () {
@@ -61,7 +60,6 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
-  if (CBZ.CONFIG.METEOR_V2 == null) CBZ.CONFIG.METEOR_V2 = true;
 
   // the dramatic speed of sound (see header) — every bang and every front
   const SOUND_SPEED = 65;
@@ -486,7 +484,7 @@
 
   CBZ.meteorAudit = function () {
     const a = {
-      on: CBZ.CONFIG.METEOR_V2 !== false, live: !!ev,
+      on: true, live: !!ev,
       events: stats.events,
       streaksLive: ev ? ev.streaks.length : 0, streaksSpawned: stats.streaksSpawned,
       airbursts: stats.airbursts, bigBursts: stats.bigBursts,

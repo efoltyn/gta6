@@ -71,9 +71,8 @@
      CBZ.lightningFxReset() — drop every live bolt, every leader and every scar.
      CBZ.lightningFxAudit() — { strikes, live, scars, strokes, boltMeshes }.
 
-   FLAG: CBZ.CONFIG.LIGHTNING_FX_V2 (default true). False makes
-   CBZ.lightningStrike a no-op and sends systems/disasters.js back to the old
-   kinetic blast — a genuine one-line revert to the fireball.
+   No flag: the old kinetic-blast fallback in systems/disasters.js was
+   deleted 2026-09-28; this file is the only lightning renderer.
 
    BUDGETS. Every buffer is preallocated and every mesh is pooled: 5 concurrent
    bolts, 18 scars, ~1150 verts per channel, no allocation in the frame loop.
@@ -87,7 +86,6 @@
   const THREE = window.THREE;
   if (!CBZ || !THREE || !CBZ.scene) return;
   const scene = CBZ.scene;
-  if (CBZ.CONFIG.LIGHTNING_FX_V2 == null) CBZ.CONFIG.LIGHTNING_FX_V2 = true;
 
   // ---- budgets -----------------------------------------------------------
   const MAX_BOLTS = 5;          // concurrent strikes; oldest is recycled
@@ -479,7 +477,6 @@
   // THE STRIKE
   // ============================================================
   function strike(x, z, o) {
-    if (CBZ.CONFIG.LIGHTNING_FX_V2 === false) return null;
     o = o || {};
     const r = boltSlot();
     const rnd = lcg(o.seed != null ? (o.seed | 0) : posSeed(x, z));
@@ -768,7 +765,6 @@
   let flashNext = 0;
 
   function flashArc(ax, ay, az, bx, by, bz, o) {
-    if (CBZ.CONFIG.LIGHTNING_FX_V2 === false) return null;
     o = o || {};
     let r = null;
     for (let i = 0; i < flashes.length; i++) if (!flashes[i].live) { r = flashes[i]; break; }
@@ -983,7 +979,7 @@
     for (let i = 0; i < bolts.length; i++) if (bolts[i].live) live++;
     for (let i = 0; i < scars.length; i++) if (scars[i].fade > 0) litScars++;
     return {
-      on: CBZ.CONFIG.LIGHTNING_FX_V2 !== false,
+      on: true,
       strikes: audit.strikes, strokes: audit.strokes, scarsCut: audit.scars,
       live: live, scars: litScars, boltPool: bolts.length,
       leaders: leaders.length, flashes: audit.flashes, wired: wired,

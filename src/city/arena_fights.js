@@ -1578,63 +1578,21 @@ if(CBZ.venueSite&&CBZ.venueSite.census){
   });
 }
 
-// ============================================================ BET OVERLAY UI
-var overlayEl=null;
-function closeOverlay(){
-  if(overlayEl&&overlayEl.parentNode)overlayEl.parentNode.removeChild(overlayEl);
-  overlayEl=null;
-}
+// ============================================================ BET SLIP
+// The ring and the pit write their tickets on THE one slip (city/betslip.js);
+// this venue only knows the two sides, their odds and when it is over.
 // cfg={title, aLabel,bLabel, aOdds,bOdds, onPlace(side,stake,odds)} side="a"|"b"
 function openBetOverlay(cfg){
-  closeOverlay();
-  if(typeof document==="undefined"||!document.body)return;
-  var stake=50, side="a";
-  var el=document.createElement("div");
-  el.style.cssText="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99999;"+
-    "background:#12151b;color:#e8eef7;border:1px solid #2c3648;border-radius:12px;"+
-    "padding:16px 20px;min-width:330px;font:14px/1.5 system-ui,Arial,sans-serif;"+
-    "box-shadow:0 12px 40px rgba(0,0,0,.65);text-align:center;";
-  function div(txt,css){var d=document.createElement("div");d.textContent=txt;if(css)d.style.cssText=css;el.appendChild(d);return d;}
-  function btn(txt,fn){var b=document.createElement("button");b.textContent=txt;
-    b.style.cssText="background:#1d2431;color:#e8eef7;border:1px solid #34405a;border-radius:8px;"+
-      "padding:6px 14px;margin:4px;cursor:pointer;font:inherit;";
-    b.onclick=fn;return b;}
-  div(cfg.title,"font-weight:700;font-size:16px;margin-bottom:2px;color:#ffd24a;");
-  div(cfg.aLabel+"  @ "+cfg.aOdds.toFixed(2)+"    vs    "+cfg.bLabel+"  @ "+cfg.bOdds.toFixed(2),
-      "margin:6px 0 10px;color:#aeb8c8;white-space:pre;");
-  var aB=btn("Back "+cfg.aLabel,function(){side="a";paint();});
-  var bB=btn("Back "+cfg.bLabel,function(){side="b";paint();});
-  function paint(){
-    aB.style.background=(side==="a")?"#7a1f2b":"#1d2431";
-    bB.style.background=(side==="b")?"#1f3a7a":"#1d2431";
-  }
-  var rowS=document.createElement("div"); rowS.appendChild(aB); rowS.appendChild(bB); el.appendChild(rowS);
-  var stakeLbl=document.createElement("span");
-  stakeLbl.style.cssText="display:inline-block;min-width:80px;font-weight:700;font-size:16px;";
-  function paintStake(){stakeLbl.textContent=money(stake);}
-  var rowK=document.createElement("div"); rowK.style.margin="8px 0";
-  rowK.appendChild(btn("- $25",function(){stake=Math.max(25,stake-25);paintStake();}));
-  rowK.appendChild(stakeLbl);
-  rowK.appendChild(btn("+ $25",function(){stake=Math.min(2500,stake+25);paintStake();}));
-  el.appendChild(rowK);
-  div("Cash: "+((g&&g.cash!=null)?money(g.cash):"?"),"color:#7d8898;font-size:12px;margin-bottom:6px;");
-  var rowA=document.createElement("div");
-  var place=btn("Place bet",function(){
-    if(!CBZ.city||typeof CBZ.city.spend!=="function"||!CBZ.city.spend(stake)){
-      note("You can't cover that stake.",3,{urgent:true}); return;
-    }
-    var odds=(side==="a")?cfg.aOdds:cfg.bOdds;
-    cfg.onPlace(side,stake,odds);
-    closeOverlay();
+  if(!CBZ.betSlip)return;
+  CBZ.betSlip.open({
+    key:"ironjaw", title:cfg.title, sub:"Ironjaw Arena, ringside window",
+    min:25, max:2500, step:25, stake:50,
+    picks:[{id:"a",label:cfg.aLabel,odds:cfg.aOdds,color:"#ff9a9a"},
+           {id:"b",label:cfg.bLabel,odds:cfg.bOdds,color:"#9ad0ff"}],
+    onPlace:function(p,stake,odds){ cfg.onPlace(p.id,stake,odds); }
   });
-  place.style.background="#245a2c";
-  rowA.appendChild(place);
-  rowA.appendChild(btn("Close",closeOverlay));
-  el.appendChild(rowA);
-  paint(); paintStake();
-  document.body.appendChild(el);
-  overlayEl=el;
 }
+function settleTicket(t,won){ return CBZ.betSlip?CBZ.betSlip.settle(t,won):0; }
 
 // ============================================================ RING NPC BOUT
 var NAMES=["Rico \"Hammer\" Vega","Sonny Malone","Dee \"Cobra\" Kane","Marek Stone",
@@ -1781,13 +1739,9 @@ var RING_O={perform:true,onLand:ringLanded};
 function settleRingBet(b){
   if(!ringBet)return;
   if(ringBet.boutId!==b.id){ ringBet=null; return; }
-  if(ringBet.side===b.winner){
-    var pay=Math.round(ringBet.stake*ringBet.odds);
-    if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(pay);
-    note("Bet cashed: +"+money(pay),4,{urgent:true});
-  }else{
-    note("Bet lost · "+money(ringBet.stake)+" gone to the house.",4);
-  }
+  var won=ringBet.side===b.winner, pay=settleTicket(ringBet,won);
+  if(won)note("Bet cashed: +"+money(pay),4,{urgent:true});
+  else note("Bet lost, "+money(ringBet.stake)+" gone to the house.",4);
   ringBet=null;
 }
 function tickRing(dt){
@@ -1907,6 +1861,7 @@ function clampCage(p){
   p.y=cy;
 }
 var cageTargets=[];
+CBZ.arenaFightSite={x:CX,z:CZ,name:"Ironjaw Arena"};  // shop counters point here (shops.js fightCard)
 CBZ.cityMeleeTargets=cageTargets;       // city/combat.js swings can land on these
 // the cage and the ring as a probe drives them (tools/verbs-route-check.mjs)
 CBZ.arenaFightProbe={
@@ -2079,13 +2034,9 @@ function finishPit(w,l){
   }
   if(pitBet){
     var winSide=(w===P.a)?"a":"b";
-    if(pitBet.side===winSide){
-      var pay=Math.round(pitBet.stake*pitBet.odds);
-      if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(pay);
-      note("Pit bet cashed: +"+money(pay),4,{urgent:true});
-    }else{
-      note("Pit bet lost · "+money(pitBet.stake)+" gone.",4);
-    }
+    var pwon=pitBet.side===winSide, ppay=settleTicket(pitBet,pwon);
+    if(pwon)note("Pit bet cashed: +"+money(ppay),4,{urgent:true});
+    else note("Pit bet lost, "+money(pitBet.stake)+" gone.",4);
     pitBet=null;
   }
 }
