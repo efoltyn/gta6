@@ -19,6 +19,11 @@
   const CBZ = window.CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { mat, addBox, checkerTex, concreteTex } = CBZ;
+  // Every flat patch below overlaps another (base under yard, walkway on
+  // yard) a centimetre or two apart, which a 0.1..1000 depth range cannot
+  // separate past ~50 m: the dark walkway's edges shimmered and stair-stepped
+  // through the yard. world/prisonkit.js owns the one layer rule.
+  const layer = (m, y) => (CBZ.groundLayer ? CBZ.groundLayer(m, y) : m);
   CBZ.CONFIG = CBZ.CONFIG || {};
 
   // On  -> institutional ground (worn turf / asphalt / painted court).
@@ -45,7 +50,7 @@
   } else {
     baseMat = mat(0x4ea84e);
   }
-  const base = new THREE.Mesh(new THREE.PlaneGeometry(420, 520), baseMat);
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(420, 520), layer(baseMat, -0.02));
   base.rotation.x = -Math.PI / 2;
   base.position.set(0, -0.02, 40);
   base.receiveShadow = true;
@@ -61,7 +66,7 @@
   if (V2) grass.repeat.set(5, 5); else grass.repeat.set(15, 15);
   const yard = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 60),
-    new THREE.MeshLambertMaterial({ map: grass })
+    layer(new THREE.MeshLambertMaterial({ map: grass }), 0)
   );
   yard.rotation.x = -Math.PI / 2;
   yard.position.set(0, 0, 22);
@@ -107,14 +112,16 @@
     : checkerTex(CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, 2);
   // the tile stays SQUARE as the path narrows — the repeat is derived from the
   // width rather than retyped, so a future width change cannot stretch it.
-  if (V2) asphalt.repeat.set(1, Math.max(1, Math.round(56 / WALK_W) / 1)); else asphalt.repeat.set(2, 12);
-  if (V2 && ROADFIX) asphalt.repeat.set(1, 20);
+  // A 6.3 m square tile, the same as every other paving patch (prisonkit's
+  // ground()); the old 1 x 20 on a 2.8 m path was a 2.8 x 2.8 tile, the
+  // bitumen grain repeated twenty times down the path you walk.
+  if (V2) asphalt.repeat.set(WALK_W / 6.3, 56 / 6.3); else asphalt.repeat.set(2, 12);
   const path = new THREE.Mesh(
     new THREE.PlaneGeometry(WALK_W, 56),
-    new THREE.MeshLambertMaterial({ map: asphalt })
+    layer(new THREE.MeshLambertMaterial({ map: asphalt }), 0.02)
   );
   path.rotation.x = -Math.PI / 2;
-  path.position.set(0, 0.01, 24);
+  path.position.set(0, 0.02, 24);
   path.receiveShadow = true;
   scene.add(path);
   // NO KERB (2026-09-27). The 0.18 x 0.12 pale boxes down both edges read,

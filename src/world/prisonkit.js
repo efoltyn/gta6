@@ -734,6 +734,18 @@
         `program` names what the patch is for; the audit sums it.
      ========================================================== */
   const programs = [];
+  // THE ONE GROUND-LAYER RULE, shared by every flat patch in the prison
+  // (world/ground.js's base/yard/walkway, world/southblock.js's apron, path
+  // and court, and ground() below). Lower patch => pushed further back, so
+  // two patches that overlap never fight for a pixel at any distance, and
+  // nothing ever gets pulled FORWARD over the paint and props standing on it.
+  // y 0.03 -> 5, 0.02 -> 7, 0.012 -> 9, 0 -> 11, -0.02 -> 15.
+  function groundLayer(mat, y) {
+    const back = Math.max(1, 9 - Math.round((y - 0.011) / 0.005));
+    mat.polygonOffset = true; mat.polygonOffsetFactor = back; mat.polygonOffsetUnits = 2 * back;
+    return mat;
+  }
+  CBZ.groundLayer = groundLayer;
   function ground(x, z, w, d, kind, o) {
     o = o || {};
     let tex = null;
@@ -745,7 +757,11 @@
     if (CBZ.prisonGroundTex) tex = CBZ.prisonGroundTex(gk, { a: o.a || ab[0], b: o.b || ab[1], srgb: kind !== "turf" });
     else if (CBZ.checkerTex) tex = CBZ.checkerTex(ab[0], ab[1], 2);
     if (!tex) return null;
-    tex.repeat.set(Math.max(1, Math.round(w / 6.3)), Math.max(1, Math.round(d / 6.3)));
+    // A 6.3 m tile. A side SHORTER than one tile takes a fraction of it
+    // (a 2.8 m path shows 0.44 of a tile across, not a whole tile squeezed
+    // into it), so a narrow strip is never stretched along its length.
+    const rep = (s) => (s < 6.3 ? s / 6.3 : Math.round(s / 6.3));
+    tex.repeat.set(rep(w), rep(d));
     /* LAYERS. Patches lie on patches (a court on the turf, a pad on the
        yard, all on the wing slab) a centimetre apart, which the depth
        buffer cannot separate at 100 m: they shimmered through each other.
@@ -754,9 +770,7 @@
        pushes BACK (lower patches further), so paint and props standing on
        a patch are never overdrawn by it. */
     const y = o.y != null ? o.y : 0.02;
-    const back = Math.max(1, 9 - Math.round((y - 0.011) / 0.005));
-    const mat = new THREE.MeshLambertMaterial({ map: tex });
-    mat.polygonOffset = true; mat.polygonOffsetFactor = back; mat.polygonOffsetUnits = 2 * back;
+    const mat = groundLayer(new THREE.MeshLambertMaterial({ map: tex }), y);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x, y, z);
     m.receiveShadow = true;

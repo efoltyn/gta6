@@ -89,12 +89,15 @@
   // The central path is bitumen and now reads as bitumen. Same planes, same
   // positions, same `tex.repeat.set(rx, rz)` shape — only the canvas changed.
   const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
-  function slab(x, z, w, d, a, b, rx, rz, kind) {
+  function slab(x, z, w, d, a, b, rx, rz, kind, y) {
+    if (y == null) y = 0.012;
     const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b, srgb: true })
       : CBZ.checkerTex(a, b, 2);
     tex.repeat.set(rx, rz);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ map: tex }));
-    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.012, z); m.receiveShadow = true; scene.add(m);
+    const lm = new THREE.MeshLambertMaterial({ map: tex });
+    if (CBZ.groundLayer) CBZ.groundLayer(lm, y);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lm);
+    m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; scene.add(m);
     return m;
   }
   // apron: repeat UNCHANGED at 14x12 on purpose — that is a 6.3 m tile, and at
@@ -109,14 +112,21 @@
   // to type "9" independently, which is exactly how a 132 m two-lane band ended
   // up running the length of the compound. One number, read, never retyped.
   const WALK = (CBZ.prisonWalkway && CBZ.prisonWalkway.w) || 9;
-  slab(0, 90, WALK, 76, "#4e5257", "#474b50", GV2 ? 1 : 2, GV2 ? Math.max(1, Math.round(76 / WALK)) : 16, "asphalt"); // square tile: 1 x 8 on a 2.8 m path stretched it 3.4x along the walk // central path to the gate
+  // THE FLICKER (owner, phone screenshot 2026-09-28: "this path flickers").
+  // The path and the apron were BOTH laid at y = 0.012: two coplanar planes,
+  // so the depth test flipped a coin per pixel and the bitumen's edge came
+  // and went in stair-stepped teeth as you walked. The path now sits 8 mm
+  // proud of the apron AND both carry the prison's one ground-layer polygon
+  // offset (world/prisonkit.js CBZ.groundLayer), so the apron is pushed back
+  // under the path at every distance. Square 6.3 m tile, like every patch.
+  slab(0, 90, WALK, 76, "#4e5257", "#474b50", GV2 ? WALK / 6.3 : 2, GV2 ? 76 / 6.3 : 16, "asphalt", 0.02); // central path to the gate
   // (No kerb: world/ground.js dropped the pale 12 cm curb strips that ran
   // both edges; the bitumen against the concrete apron IS the path's edge.)
 
   // a basketball half-court painted into the apron
   (function court() {
     const c = new THREE.Mesh(new THREE.PlaneGeometry(16, 22),
-      new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
+      CBZ.groundLayer ? CBZ.groundLayer(new THREE.MeshLambertMaterial({ color: 0x8a5a2b }), 0.02) : new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
     c.rotation.x = -Math.PI / 2; c.position.set(-11, 0.02, 96); scene.add(c);
     // flush paint on the court plane (top 3 mm proud of it), worn white; the
     // old middle "line" was a solid 5 x 5 m white square, not a key outline
