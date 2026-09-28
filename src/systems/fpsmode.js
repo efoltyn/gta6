@@ -2759,6 +2759,7 @@
           if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS === false) continue;
           const car = a.inCar;
           if (!car || typeof car !== "object" || !car.pos || car.dead) continue;
+          if (car.bulletproof) continue;               // armoured glass: the panel takes it (city/los.js)
           // an invisible ped is USUALLY just culled, so the protection question
           // is asked only after the occupant checks prove there is a target here
           bare = childUnaided(a);
@@ -2784,6 +2785,7 @@
         // the rig. (CHAR_SEATED_HITTABLE)
         if (a._npcAttached) {
           if (CBZ.CONFIG.CHAR_SEATED_HITTABLE === false) continue;
+          if (a.inCar && a.inCar.bulletproof && !a.inCar.dead) continue;   // armoured glass (city/los.js)
           const ap = a.pos;
           if (!ap) continue;
           bare = childUnaided(a);
@@ -2986,6 +2988,7 @@
     if (w.pellets) return;                       // shotgun: no penetration/ricochet rolls
     const wallHit = hit.wallHit;
     if (!wallHit) return;
+    if (wallHit.object && wallHit.object.userData && wallHit.object.userData.bulletproof) return;   // armoured glass stops it cold
     const faceN = wallHit.face && wallHit.face.normal;
     const fnx = faceN ? faceN.x : wnx, fnz = faceN ? faceN.z : wnz;
     const graze = Math.abs(shotDir.x * fnx + shotDir.z * fnz);   // ~0 = parallel to the TRUE wall face, ~1 = square hit

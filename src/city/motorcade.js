@@ -42,7 +42,8 @@
    walks back, rides home and walks inside. He stays the same ped the whole
    time, so a Hitman who shoots him through the glass, or blows up the car,
    has killed the President: a destroyed state car takes everyone in it with
-   it through CBZ.cityKillPed(ped, imp, "explosion").
+   it through CBZ.cityKillPed(ped, imp, "explosion"). Bullets do not: the
+   state car's glass is bulletproof (below), so it takes a bomb or a rocket.
 
    ARMOUR (the numbers). vehicles.js's damageEngine subtracts from
    `engineHp` (100 on a normal car; 0 = gutted/cook-off) after multiplying by
@@ -51,8 +52,12 @@
    engineHp 420 and armor 0.35: gunfire and blasts do x0.5625 of a normal
    car's damage against 4.2x the pool, so roughly 7.5x tougher than a normal
    car to guns and RPGs (about seven rockets instead of one). Escort SUVs get
-   engineHp 170 and armor 0.25 (roughly 2.4x). Glass is NOT bulletproof: a
-   seated body is a raycast target like any other (CARS SEAM below).
+   engineHp 170 and armor 0.25 (roughly 2.4x). THE GLASS IS BULLETPROOF:
+   the state car is registered with CBZ.bulletproofCar (city/los.js), so no
+   line of fire from outside reaches anyone seated in it (every NPC shooter
+   asks clearLineOfFire first) and the player's rounds stop on the panel
+   (fpsmode's findActorHit skips a rider of a bulletproof car; findCarHit
+   already clamps the ray at the body). Blast and fire still kill.
 
    PANIC. Shots or an explosion within 45 m of the column, the state car
    taking damage, a car sitting in the road ahead for more than 3 s, or the
@@ -73,12 +78,14 @@
    came, the path begins with the formation's own stretch of the old path and
    a U-turn off the lead car, so no car ever jumps.
 
+   SEATS: city/carseats.js's one seat model, by its own ids. The agent
+   driver sits in "driver", the door agent up front in "shotgun", the
+   President (player or NPC) in the back on the kerb side, "rearR", which is
+   where the right-hand door the detail opens actually is. seatIn() claims
+   each chair in the car's occupancy map, so the player's seat shift and
+   anybody else's boarding see the seat is taken.
+
    CARS SEAM (gaps in vehicles.js this file works around, not edits):
-     - The player has exactly two seats: driver (+seatX) and the front
-       passenger (-seatX, passengerseat.js). There is no rear seat for the
-       player rig, so the President rides in the FRONT PASSENGER seat and an
-       agent takes the rear. A rear player seat would need a seatSideX/row in
-       vehicles.js's seat solve.
      - Riding works through passengerseat.js's chauffeur path: the state
        car's `npcDriver` carries `_cbzDriving`, so cityPaxChauffeured() is
        true, vehicles.js's player loop stands down and passengerseat.js seats
@@ -87,13 +94,6 @@
      - cityEnterVehicle files a car theft for any car that is neither
        `stolen` nor `owned`; boarding your own state car flips `stolen` for
        the length of that one synchronous call.
-     - vehicles.js's OCC_SLOTS and the player's seat disagree about which
-       side the driver is on (boarding.js's header). We follow the player:
-       the NPC driver sits in the OCC "shotgun" anchor (+X), the front agent
-       in the OCC "driver" anchor (-X).
-     - No bulletproof glass: a seated principal can be shot through the
-       windows. An armoured cabin would be a per-car hit filter in the shot
-       resolver.
      - No yield-to-convoy in the traffic AI: ambient cars ahead get
        `pullover = 2` (stop, no flee branch) and are slid sideways out of the
        column's lane, and cruisers park across the side streets.
@@ -682,9 +682,9 @@
   /* ============================================================
      §5  CARS AND PEOPLE — the engine's own car factory and ped post.
      ============================================================ */
-  // Seat anchors are named by vehicles.js's OCC_SLOTS, whose sides are the
-  // mirror of the player's (see the CARS SEAM note in the header).
-  const SEAT_DRIVER = "shotgun", SEAT_FRONT = "driver", SEAT_REAR_R = "rearL", SEAT_REAR_L = "rearR";
+  // city/carseats.js seat ids (+X is the car's left, the driver's side).
+  // The principal rides rear right, behind the door agent.
+  const SEAT_DRIVER = "driver", SEAT_FRONT = "shotgun", SEAT_PRINCIPAL = "rearR", SEAT_REAR = "rearL";
 
   function addFlags(c) {
     if (!THREE || !c || !c.group || !CBZ.boxGeom || !CBZ.cmat) return;
@@ -733,6 +733,7 @@
     c._motorcade = role;
     if (role === "state") {
       c.name = "State Car"; c.engineHp = STATE_HP; c.armor = STATE_ARMOR;
+      if (CBZ.bulletproofCar) CBZ.bulletproofCar(c, true);
       addFlags(c);
     } else if (role !== "police") {
       c.engineHp = SUV_HP; c.armor = SUV_ARMOR;
@@ -749,6 +750,7 @@
     const L = CBZ.cityCars;
     if (Array.isArray(L)) { const i = L.indexOf(c); if (i >= 0) L.splice(i, 1); }
     if (c.group && c.group.parent) c.group.parent.remove(c.group);
+    if (CBZ.bulletproofCar) CBZ.bulletproofCar(c, false);
     c._motorcade = null;
   }
 
@@ -770,6 +772,7 @@
   }
   function unpost(p) {
     if (!p) return;
+    if (p._mcCar && CBZ.carSeats) { try { CBZ.carSeats.releaseRef(p._mcCar, p); } catch (e) {} }
     if (p.dead) { p._motorcade = false; return; }        // a body stays where it fell
     if (p._cbzDriving && p._cbzDriving.motorcade) p._cbzDriving = null;
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} }
@@ -780,17 +783,26 @@
     let a = null;
     if (CBZ.carOccupancySeatAnchor) { try { a = CBZ.carOccupancySeatAnchor(c, slot); } catch (e) { a = null; } }
     if (!a) {
-      const side = (slot === SEAT_DRIVER || slot === SEAT_REAR_L) ? 1 : -1, rear = slot === SEAT_REAR_R || slot === SEAT_REAR_L;
+      const side = (slot === SEAT_DRIVER || slot === SEAT_REAR) ? 1 : -1, rear = slot === SEAT_PRINCIPAL || slot === SEAT_REAR;
       a = { x: side * 0.42, y: 0.32, z: rear ? -0.85 : 0.15, pose: "sit", state: "sit" };
     }
     let ok = false;
     try { ok = !!CBZ.npcLife.attach(p, c.group, a); } catch (e) { ok = false; }
     if (!ok) return false;
-    p.inCar = c; p.controlled = true; p._mcCar = c; p.staffPost = null;
+    p.inCar = c; p.controlled = true; p._mcCar = c; p._mcSlot = slot; p.staffPost = null;
+    claimSeat(p, c, slot);
     return true;
+  }
+  // the one occupancy map (city/carseats.js): a body in a chair holds it
+  function claimSeat(p, c, slot) {
+    const S = CBZ.carSeats;
+    if (S && c && slot) { try { S.claim(c, slot, { kind: "npc", ref: p }); } catch (e) {} }
   }
   function unseat(p, x, z) {
     if (!p) return;
+    const S = CBZ.carSeats;
+    if (S && p._mcCar) { try { S.releaseRef(p._mcCar, p); } catch (e) {} }
+    p._mcSlot = null;
     if (CBZ.cityUnseat) { try { CBZ.cityUnseat(p, { x: x, z: z, state: p.dead ? "dead" : "walk" }); } catch (e) {} }
     else if (CBZ.npcLife && CBZ.npcLife.detach) {
       try { CBZ.npcLife.detach(p, { parent: arenaRoot(), state: "walk" }); } catch (e) {}
@@ -975,12 +987,11 @@
       if (f.role === "follow" && !f.crew.length) {
         const p = carPoint(c, 2.2, 0);
         const a = postPed(p.x, p.z, "agent", { controlled: true, weapon: "SMG" });
-        if (a && seatIn(a, c, SEAT_REAR_R)) f.crew.push(a); else if (a) unpost(a);
+        if (a && seatIn(a, c, SEAT_PRINCIPAL)) f.crew.push(a); else if (a) unpost(a);
       }
       if (f.role === "state") {
-        // the door agent rides with the principal: the front seat when an NPC
-        // rides in the back, the rear seat when the President is up front
-        const slot = R && R.npc ? SEAT_FRONT : SEAT_REAR_L;
+        // the door agent rides up front; the President has the back
+        const slot = SEAT_FRONT;
         let a = MC.doorAgent && !MC.doorAgent.dead ? MC.doorAgent : null;
         if (!f.crew.length) {
           if (!a) { const p = carPoint(c, 2.2, -0.8); a = postPed(p.x, p.z, "agent", { controlled: true }); }
@@ -1247,7 +1258,7 @@
   function principalIn(R) {
     const c = stateCar(), p = R.p && R.p.ped;
     if (!c || !p || p.dead) return false;
-    if (!seatIn(p, c, SEAT_REAR_R)) {           // no seat anchor: ride hidden, pinned to the car
+    if (!seatIn(p, c, SEAT_PRINCIPAL)) {           // no seat anchor: ride hidden, pinned to the car
       p.controlled = true; p.staffPost = null; p._mcHidden = true;
       if (p.group) p.group.visible = false;
     }
@@ -1725,7 +1736,17 @@
     const a = (MC.doorAgent && !MC.doorAgent.dead) ? MC.doorAgent : (f && f.crew[0] && !f.crew[0].dead ? f.crew[0] : null);
     return a;
   }
-  function doorStand(c) { return carPoint(c, 1.75, 0.2); }       // the front passenger door
+  // the kerb-side rear door, where the President gets in: the seat model's
+  // own stand-off point (boarding.js), else the NPC principal's mark
+  function doorStand(c) {
+    const B = CBZ.boarding;
+    const s = B && B.seatById ? (function () { try { return B.seatById(c, SEAT_PRINCIPAL); } catch (e) { return null; } })() : null;
+    if (s && isFinite(s.outX) && isFinite(s.outZ)) {
+      const h = c.heading || 0;
+      return { x: c.pos.x + s.outX * Math.cos(h) + s.outZ * Math.sin(h), z: c.pos.z - s.outX * Math.sin(h) + s.outZ * Math.cos(h) };
+    }
+    return carPoint(c, 1.9, -0.9);
+  }
   const DLG = { open: false, asked: false, token: 0 };
   function askWhere() {
     const UI = CBZ.campaignUI;
@@ -1777,7 +1798,7 @@
   }
   function poseDoor(c, t) {
     const B = CBZ.boarding;
-    if (B && B.door) { try { B.door(c, "shotgun", t); } catch (e) {} }
+    if (B && B.door) { try { B.door(c, SEAT_PRINCIPAL, t); } catch (e) {} }
   }
   function tickBoard(dt) {
     const B = BOARD, P = CBZ.player, sc = stateCar();
@@ -1813,8 +1834,11 @@
     }
   }
 
-  /* Seat the President in the state car's front passenger seat, chauffeured.
-     This is the same seat the in-fiction walk ends in and the harness hook. */
+  /* Seat the President in the state car's back seat (rearR), chauffeured.
+     This is the same seat the in-fiction walk ends in and the harness hook.
+     cityEnterVehicle takes the wheel (and clears the driver's chair in the
+     seat map), citySeatShift moves him into the back, then the agent driver
+     is (re)seated and every crew chair is claimed again. */
   function boardPlayer() {
     if (!playing()) return false;
     ensureStaged(true);
@@ -1832,17 +1856,34 @@
     try { ok = CBZ.cityEnterVehicle(sc, { instant: true }) !== false; } catch (e) { ok = false; }
     sc.stolen = false; void wasStolen;
     if (!ok || P._vehicle !== sc) { sc.npcDriver = drv; return false; }
-    if (CBZ.citySeatShift) { try { CBZ.citySeatShift({ to: "shotgun", quiet: true }); } catch (e) {} }
+    // the back seat: free it of whoever sat there (an agent from an older
+    // trip plan), then move across; "passenger" is the fallback for a body
+    // with no rear row
+    const S = CBZ.carSeats;
+    if (S) {
+      const o = S.occupant(sc, SEAT_PRINCIPAL);
+      if (o && o.ref && o.ref !== P && o.ref._mcCar === sc) {
+        const q = carPoint(sc, 2.2, -0.9);
+        unseat(o.ref, q.x, q.z);
+        if (f) { const k = f.crew.indexOf(o.ref); if (k >= 0) f.crew.splice(k, 1); }
+        unpost(o.ref);
+      }
+    }
+    let seated = false;
+    if (CBZ.citySeatShift) {
+      try { seated = !!CBZ.citySeatShift({ to: SEAT_PRINCIPAL, quiet: true }); } catch (e) { seated = false; }
+      if (!seated) { try { CBZ.citySeatShift({ to: "passenger", quiet: true }); } catch (e) {} }
+    }
     // a driver at the wheel so the chauffeur path owns the car
     if (f) {
       if (!f.driver || f.driver.dead) {
         const p = carPoint(sc, -2.2, 0);
         const d = postPed(p.x, p.z, "agent", { controlled: true });
         if (d && seatIn(d, sc, SEAT_DRIVER)) f.driver = d; else if (d) unpost(d);
-      }
+      } else claimSeat(f.driver, sc, f.driver._mcSlot || SEAT_DRIVER);   // cityEnterVehicle cleared the chair
       if (f.driver) { sc.npcDriver = f.driver; f.driver._cbzDriving = { car: sc, motorcade: true }; }
       if (!f.crew.length && MC.doorAgent && !MC.doorAgent.dead) {
-        if (seatIn(MC.doorAgent, sc, SEAT_REAR_L)) { f.crew.push(MC.doorAgent); MC.doorAgent = null; }
+        if (seatIn(MC.doorAgent, sc, SEAT_FRONT)) { f.crew.push(MC.doorAgent); MC.doorAgent = null; }
       }
     }
     closeAsk(); DLG.asked = true;

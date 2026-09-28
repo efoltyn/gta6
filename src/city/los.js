@@ -102,10 +102,63 @@
     return false;
   }
 
+  /* BULLETPROOF CARS. A car body is not a losBlocker (it moves, and a car is
+     cover you can see over), so an NPC's line of fire used to pass straight
+     through an armoured cabin to whoever sat in it. A car registered here
+     (the state car, motorcade.js) is a closed box to gunfire: a lane that
+     crosses its body is blocked, unless the muzzle is INSIDE it (the people
+     in the car can still shoot out of a window they opened, as before).
+     The player's own rounds already stop at every car body (fpsmode.js
+     findCarHit); fpsmode's findActorHit reads `car.bulletproof` so the aim
+     spheres of a rider cannot bulge out through the glass either. */
+  const ARMORED = [];
+  CBZ.bulletproofCar = function (car, on) {
+    if (!car) return false;
+    const i = ARMORED.indexOf(car);
+    if (on === false) { if (i >= 0) ARMORED.splice(i, 1); car.bulletproof = false; return false; }
+    if (i < 0) ARMORED.push(car);
+    car.bulletproof = true;
+    return true;
+  };
+  // segment A->B (t in [0,1]) against the car's yawed body box
+  function cabinBlocks(ax, ay, az, bx, by, bz) {
+    for (let i = ARMORED.length - 1; i >= 0; i--) {
+      const c = ARMORED[i];
+      if (!c || !c.bulletproof || !c.pos) { ARMORED.splice(i, 1); continue; }
+      if (c.dead) continue;                            // a wreck has no glass left
+      const d = c.dims || (c.group && c.group.userData && c.group.userData.vehicleDims) || null;
+      const hx = (d && d.width ? d.width : 2.0) * 0.5 + 0.05;
+      const hz = (d && d.length ? d.length : 4.8) * 0.5 + 0.05;
+      const y0 = (c.pos.y || 0), y1 = y0 + (d && d.height ? d.height : 1.5) + 0.05;
+      const h = c.heading || 0, ch = Math.cos(h), sh = Math.sin(h);
+      // into the car frame: local +X = (cos h, -sin h), local +Z = (sin h, cos h)
+      const lax = (ax - c.pos.x) * ch - (az - c.pos.z) * sh, laz = (ax - c.pos.x) * sh + (az - c.pos.z) * ch;
+      const lbx = (bx - c.pos.x) * ch - (bz - c.pos.z) * sh, lbz = (bx - c.pos.x) * sh + (bz - c.pos.z) * ch;
+      if (Math.abs(lax) < hx && Math.abs(laz) < hz && ay > y0 && ay < y1) continue;   // shooting from inside
+      // aimed at somebody IN the car (an aim point is a head height, which on
+      // a seated rider can sit a hair over the roof line): the glass takes it
+      if (Math.abs(lbx) < hx && Math.abs(lbz) < hz && by > y0 && by < y1 + 0.6) return true;
+      _t0 = 0; _t1 = 1;
+      if (slab(lax, lbx - lax, -hx, hx) && slab(ay, by - ay, y0, y1) && slab(laz, lbz - laz, -hz, hz)) return true;
+    }
+    return false;
+  }
+  let _t0 = 0, _t1 = 1;
+  function slab(o, dd, lo, hi) {
+    if (Math.abs(dd) < 1e-9) return o >= lo && o <= hi;
+    let u = (lo - o) / dd, v = (hi - o) / dd;
+    if (u > v) { const s = u; u = v; v = s; }
+    if (u > _t0) _t0 = u;
+    if (v < _t1) _t1 = v;
+    return _t0 <= _t1;
+  }
+  CBZ.bulletproofBlocks = cabinBlocks;
+
   const _target = new THREE.Vector3();
   // true  = clear shot (nothing solid between the muzzle and the target)
   // false = a wall/building is in the way → don't fire, reposition instead
   CBZ.clearLineOfFire = function (ax, ay, az, bx, by, bz) {
+    if (ARMORED.length && cabinBlocks(ax, ay, az, bx, by, bz)) return false;
     const blk = CBZ.losBlockers;
     if (!blk || !blk.length) return true;
     o.set(ax, ay, az);

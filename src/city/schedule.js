@@ -21,8 +21,8 @@
      the same entries, so the man you robbed still crosses the street.
 
    CLOCK: keyed ONLY to the canonical sun (CBZ.sunAngle/nightAmount from
-   core/daynight.js). The peds.js cityHour loop is desynced by design and
-   is NEVER read here (unification deliberately deferred).
+   core/daynight.js). CBZ.cityHour is a view of the same sky now (peds.js
+   no longer runs a second loop), so the two can never disagree.
 
    COST/LOD (KCD ran 300 schedules in ~1.7ms; we budget far under that):
    near peds are scheduled through aigoals' existing slice + goal-cooldown

@@ -12,7 +12,7 @@
    pills (.tpill, and the #interact card's .tverb rows).
 
    SCREEN ZONES (landscape iPad, the anti-overlap contract):
-     top-left      #cRadar minimap
+     top-left      #hudPauseBtn (every game), #cRadar minimap under it
      top-center    objective / job lines
      top-right     #cTopRight cash, only when it changes (jail: #minimap)
      mid-bottom    walk-up prompt band (bottom:158) → #interact card (224)
@@ -446,13 +446,21 @@ body.touch .haspill {
 body.touch #compass { display: none; }
 /* jail minimap: top-right chip, tappable (tap opens the full map) */
 body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; pointer-events: auto; cursor: pointer; }
-/* city radar: moves out of the left-thumb arc to the TOP-LEFT corner and
-   becomes the tap-to-open-map surface. */
+/* city radar: moves out of the left-thumb arc to the TOP-LEFT column and
+   becomes the tap-to-open-map surface. It hangs at top:64, under the shared
+   pause button that owns the corner itself in every game
+   (systems/title_hub.js #hudPauseBtn, 8..56 px down), level with the jail
+   minimap above. */
 body.touch #cRadar {
   left: calc(10px + env(safe-area-inset-left, 0px)) !important;
-  top: calc(10px + env(safe-area-inset-top, 0px)) !important; bottom: auto !important;
+  top: calc(64px + env(safe-area-inset-top, 0px)) !important; bottom: auto !important;
   width: 128px !important; height: 128px !important;
   pointer-events: auto !important; cursor: pointer;
+}
+/* a landscape phone is ~375 px tall and the stick's ring tops out at ~190:
+   the radar steps down a size so the two never meet */
+@media (max-height: 480px) {
+  body.touch #cRadar { width: 108px !important; height: 108px !important; }
 }
 /* full map zoom chips: touch is the only surface without a wheel/F key, so
    the +/− stack (hud.css styles it) exists only under body.touch. */

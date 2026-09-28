@@ -7,7 +7,8 @@
      presidency.js   status()/site()/events — the spine every other organ reads
      president_hud   is the strip on screen while I hold the seat
      president_agenda after a new day, did the Chief of Staff hand me work
-     motorcade       is the car in the court; does go() actually move me
+     motorcade       is the car in the court; does go() seat me in the back,
+                     drive me there, and let me out the rear door
      presidency.js   arm an attack: does it come to MY gate as bodies
      president_regime declare a dictatorship: does the house change
      interior_programs the audited rooms did not regress
@@ -150,25 +151,77 @@ else {
 }
 
 // ---- 4. the motorcade -------------------------------------------------------
+// A REAL RIDE, not the old teleport: go() seats the President in the state
+// car's BACK seat (city/carseats.js "rearR") with an agent at the wheel, the
+// column drives the road route (motorcade.js tickDrive, one arc-length for the
+// whole formation), pulls up at the venue, and the President gets out of the
+// rear door through the one exit verb (systems/seat_exit.js).
 const mc = await evl("return CBZ.motorcadeAudit ? CBZ.motorcadeAudit() : null;");
 if (!mc) skip("motorcade", "no motorcadeAudit");
 else {
   check("the state car is parked in the motor court", mc.car === true, JSON.stringify(mc));
-  const ride = await evl(`
-    if (!CBZ.motorcade || !CBZ.motorcade.go) return null;
-    var dests = (CBZ.motorcadeAudit().destinations||[]).filter(function(d){return !/mansion|home/i.test(d);});
-    if (!dests.length) return { noDest: true };
-    var p0 = { x: CBZ.player.pos.x, z: CBZ.player.pos.z };
-    var r = CBZ.motorcade.go(dests[0]);
-    for (var k=0;k<180;k++) CBZ.stepSim(1/60);
-    var p1 = { x: CBZ.player.pos.x, z: CBZ.player.pos.z };
-    var L = CBZ.govComplexes||[], near = null;
-    for (var i=0;i<L.length;i++){ var s=L[i]; if(!s||!s.rect) continue; var g=s.gate||{x:s.cx,z:s.cz}; var dd=Math.hypot(g.x-p1.x,g.z-p1.z); if(near==null||dd<near.d) near={id:s.id,d:Math.round(dd)}; }
-    return { dest: dests[0], r: r, moved: Math.round(Math.hypot(p1.x-p0.x,p1.z-p0.z)), near: near };`);
-  if (!ride || ride.noDest) skip("motorcade.go()", "no destinations");
-  else check("go() moves the president to another seat of power", ride.moved > 500 && ride.near && ride.near.d < 80, JSON.stringify(ride));
-  // home again for the rest of the checks
-  await evl("if (CBZ.motorcade && CBZ.motorcade.go) { var h=(CBZ.motorcadeAudit().destinations||[]).filter(function(d){return /mansion|home/i.test(d);})[0]; if (h) CBZ.motorcade.go(h); } for (var k=0;k<120;k++) CBZ.stepSim(1/60); return true;");
+  const b = await evl(`
+    if (!CBZ.motorcade || !CBZ.motorcade.go || !CBZ.motorcade.destinations) return null;
+    var sc = CBZ.motorcade.car(); if (!sc) return { noCar: true };
+    var ds = CBZ.motorcade.destinations().filter(function (d) { return !/mansion|home/i.test(d.id + " " + d.name); });
+    if (!ds.length) return { noDest: true };
+    ds.sort(function (a, b) { return Math.hypot(a.x - sc.pos.x, a.z - sc.pos.z) - Math.hypot(b.x - sc.pos.x, b.z - sc.pos.z); });
+    var d = ds[0], P = CBZ.player, S = CBZ.carSeats;
+    var arr0 = CBZ.motorcadeAudit().arrivals | 0;
+    var r = CBZ.motorcade.go(d.id);
+    var act = CBZ.motorcade.active();
+    window.__mcRide = { dest: d, arr0: arr0, c0: { x: sc.pos.x, z: sc.pos.z }, last: { x: sc.pos.x, z: sc.pos.z }, path: 0, offSeat: 0, apart: 0, samples: 0 };
+    var drv = S ? S.occupant(sc, "driver") : null;
+    return { r: r, dest: d.id, straight: Math.round(Math.hypot(d.x - sc.pos.x, d.z - sc.pos.z)),
+      route: act && act.route ? act.route.length : 0,
+      inCar: P._vehicle === sc, seat: S ? S.seatOf(sc, P) : null,
+      riding: CBZ.cityPaxRiding ? CBZ.cityPaxRiding() === sc : null,
+      chauffeured: CBZ.cityPaxChauffeured ? CBZ.cityPaxChauffeured(sc) : null,
+      driver: drv ? drv.kind : null, bulletproof: !!sc.bulletproof };`);
+  if (!b || b.noDest || b.noCar) skip("motorcade ride", b ? JSON.stringify(b) : "no motorcade.go");
+  else {
+    check("go() boards the President (a ride, not a teleport)", !!(b.r && b.r.ok) && b.route >= 2, JSON.stringify({ r: b.r, route: b.route, dest: b.dest, straight: b.straight }));
+    check("…in the BACK seat, chauffeured, an agent at the wheel", b.inCar && b.seat === "rearR" && b.riding === true && b.chauffeured === true && b.driver === "npc",
+      JSON.stringify({ inCar: b.inCar, seat: b.seat, riding: b.riding, chauffeured: b.chauffeured, driver: b.driver }));
+    check("the state car is bulletproof", b.bulletproof === true);
+    // drive: 10 s of sim per evaluate, up to 6 sim-minutes
+    let arrived = null;
+    for (let chunk = 0; chunk < 36 && !arrived; chunk++) {
+      arrived = await evl(`
+        var M = window.__mcRide, sc = CBZ.motorcade.car(), P = CBZ.player, S = CBZ.carSeats;
+        for (var k = 0; k < 600; k++) {
+          CBZ.stepSim(1/60);
+          if (k % 30 !== 0 || !sc) continue;
+          M.path += Math.hypot(sc.pos.x - M.last.x, sc.pos.z - M.last.z); M.last = { x: sc.pos.x, z: sc.pos.z };
+          M.samples++;
+          if (!S || S.seatOf(sc, P) !== "rearR") M.offSeat++;
+          if (Math.hypot(P.pos.x - sc.pos.x, P.pos.z - sc.pos.z) > 2.5) M.apart++;
+        }
+        var a = CBZ.motorcadeAudit();
+        if ((a.arrivals | 0) > M.arr0 || a.phase === "halted" || a.phase === "done") return { phase: a.phase, arrivals: a.arrivals };
+        return null;`);
+    }
+    const drive = await evl(`
+      var M = window.__mcRide, sc = CBZ.motorcade.car(), a = CBZ.motorcadeAudit();
+      return { phase: a.phase, arrivals: a.arrivals, arr0: M.arr0, path: Math.round(M.path),
+        fromCourt: sc ? Math.round(Math.hypot(sc.pos.x - M.c0.x, sc.pos.z - M.c0.z)) : null,
+        toDest: sc ? Math.round(Math.hypot(sc.pos.x - M.dest.x, sc.pos.z - M.dest.z)) : null,
+        samples: M.samples, offSeat: M.offSeat, apart: M.apart };`);
+    check("the column drives the route (the car itself moves, step by step)", !!(drive && drive.path > 150 && drive.fromCourt > 100), JSON.stringify(drive));
+    check("…with the President in the back seat the whole way", !!(drive && drive.samples > 0 && drive.offSeat === 0 && drive.apart === 0), drive && `offSeat=${drive.offSeat} apart=${drive.apart} of ${drive.samples}`);
+    check("…and arrives at the venue", !!(arrived && drive && drive.arrivals > drive.arr0 && drive.phase === "venue" && drive.toDest < 120), JSON.stringify(arrived));
+    const out = await evl(`
+      var sc = CBZ.motorcade.car(), P = CBZ.player;
+      var st = CBZ.seatState ? CBZ.seatState() : null;
+      var verb = st ? st.verb : null, kind = st ? st.kind : null;
+      if (st && st.exit) st.exit(); else if (CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut();
+      for (var k = 0; k < 30; k++) CBZ.stepSim(1/60);
+      var h = sc.heading || 0, dx = P.pos.x - sc.pos.x, dz = P.pos.z - sc.pos.z;
+      var lx = dx * Math.cos(h) - dz * Math.sin(h), lz = dx * Math.sin(h) + dz * Math.cos(h);
+      return { kind: kind, verb: verb, driving: !!P.driving, vehicle: !!P._vehicle, localX: +lx.toFixed(2), localZ: +lz.toFixed(2),
+        seatFree: CBZ.carSeats ? !CBZ.carSeats.occupant(sc, "rearR") : null };`);
+    check("the exit verb gets him out of the back seat, by the rear right door", !!(out && out.kind === "vehicle" && out.verb === "Get out" && !out.driving && !out.vehicle && out.localX < -0.8 && out.localZ < 0.2 && out.seatFree === true), JSON.stringify(out));
+  }
 }
 
 // ---- 5. the threat comes to the gate ----------------------------------------

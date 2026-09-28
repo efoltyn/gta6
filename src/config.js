@@ -277,16 +277,14 @@
   // MASS_CROWD was 900, which read as a wall-to-wall mosh pit across the yard
   // zones (the owner's "way too crowded" report). 140 is a packed-but-navigable
   // yard: roughly 1 body per ~30m² across the ~4600m² of yard zones, layered
-  // on top of the ~54 named/procedural rigs + 11 guards. Raise it live via the
-  // Settings panel "Total Population" slider, or set CBZ_POP_OVERRIDE_V1 in
-  // localStorage (applied by index.html's pre-config shim before this file runs).
+  // on top of the ~54 named/procedural rigs + 11 guards. A tool can pin it by
+  // setting window.CBZ.MASS_CROWD before this file runs.
   // 140 IS NO LONGER THE ANSWER — IT IS THE FALLBACK. The prison's population
   // is now derived from what the building can sleep (world/cellblock.js's
   // prisonBeds -> entities/ambientstate.js), because a typed headcount could
   // never see that the wing has twenty-five cells. This number is only reached
   // when there is no wing at all. MASS_CROWD_EXPLICIT records that a HUMAN set
-  // the count before us — the Settings "Total Population" slider or the
-  // localStorage override index.html applies above — and that always wins over
+  // the count before us (a tool presetting window.CBZ.MASS_CROWD), and that always wins over
   // the derivation, because an owner overruling it is a decision, not a drift.
   CBZ.JAIL_CROWD_EXPLICIT = typeof CBZ.JAIL_CROWD === "number";
   CBZ.JAIL_CROWD = CBZ.JAIL_CROWD_EXPLICIT ? CBZ.JAIL_CROWD : 14;

@@ -1034,6 +1034,10 @@
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.RACE_STREET == null) CBZ.CONFIG.RACE_STREET = true;
 
+  // the street race consumes a raceKit path course (racedrivers.js audits the
+  // declared consumers; this is the city's ONE street race since the
+  // activities.js checkpoint copy was deleted)
+  (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))["street-run"] = true;
   const SR = {
     active: false, phase: "idle", kind: "sprint",
     course: null, cps: [], cpTotal: 0, cpPassed: 0, startPt: null,

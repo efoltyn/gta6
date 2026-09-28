@@ -3565,26 +3565,23 @@
     return (ped.gang && CBZ.cityGangStanding) ? CBZ.cityGangStanding(ped.gang) : 0;
   }
 
-  // ---- a cheap internal day clock so the crowd has a believable RHYTHM.
-  //      No real sun system exists, so peds run their own loose 24h loop
-  //      (~6 real-min day). It only nudges WHICH routine destinations they
-  //      favour — work in the day, home/leisure at night — it never forces a
-  //      ped anywhere, so it coexists with aigoals.js' EARN/DRUGS/etc. layer.
-  let _dayClock = 9.5;                 // start mid-morning
-  const DAY_LEN = 360;                 // seconds per in-city day
-  // 0..24, for other modules. Passing a number SETS it — the sky clock
-  // (core/daynight.js CBZ.dayPhase) has always been settable and this one was
-  // not, so anything that moved the world to dusk moved the LIGHT but left
-  // every ped still running its 10am errands. The two clocks are independent
-  // by design (this one is loose and only biases routine destinations), but a
-  // caller that wants the whole world at an hour must be able to say so once —
-  // see ctx.time.set() in core/packages.js, the only sanctioned mover.
+  // ---- the crowd's HOUR is the sky's hour. There is ONE city clock:
+  //      core/daynight.js (CBZ.dayPhase 0..1, sunrise at 0, CBZ.dayCount the
+  //      calendar). This file used to run its own 360 s loop next to the sky's
+  //      150 s one, so the peds' "10am errands", the hitman's watch and the
+  //      broker's schedule (all cityHour) drifted off the sun and the morning
+  //      paper (dayCount). cityHour is now a VIEW of the sky: hour = phase*24+6.
+  //      Passing a number moves the sky itself, so there is nothing to sync.
+  function skyHour() {
+    const t = CBZ.dayPhase ? CBZ.dayPhase() : 0.14;           // 0.14 ~ 9:22 if the sky is absent
+    return ((t * 24 + 6) % 24 + 24) % 24;
+  }
   CBZ.cityHour = function (v) {
-    if (v != null && isFinite(v)) _dayClock = (((+v) % 24) + 24) % 24;
-    return _dayClock;
+    if (v != null && isFinite(v) && CBZ.dayPhase) CBZ.dayPhase((((+v - 6) / 24) % 1 + 1) % 1);
+    return skyHour();
   };
   function dayPhase() {                                       // coarse phase of life
-    const h = _dayClock;
+    const h = skyHour();
     if (h < 6 || h >= 22) return "night";    // sparse, head home
     if (h < 9) return "morning";             // commute to work/shops
     if (h < 12) return "work";
@@ -6497,8 +6494,6 @@
       catch (e) {}
     }
     frame++;
-    // advance the cheap internal day clock (loops 0..24); drives loose schedules
-    _dayClock = (_dayClock + (dt * 24 / DAY_LEN)) % 24;
     // SCAN INDEX first (see the block at the top of the file). It has to lead the
     // frame because gunpointSweep is the first thing that asks it a question, and
     // nothing has moved yet at this point — so the index holds the same positions

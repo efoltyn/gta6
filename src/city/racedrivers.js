@@ -105,7 +105,7 @@
   // ============================================================
   const COURSES = Object.create(null);
   const COURSE_ADOPT = Object.create(null);
-  const COURSE_REQUIRED = ["speedway-weekend", "apex-night", "street-race"];
+  const COURSE_REQUIRED = ["speedway-weekend", "apex-night", "street-run"];
 
   function courseNumber(c, key, fallback) {
     if (!c) return fallback;

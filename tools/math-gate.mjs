@@ -521,7 +521,8 @@ const PASS = `(() => {
       if (oa.stories < 10) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 10)");
     }
     // RACE AUTHORING TOOL: Diamond's legal weekend, APEX Night and the street
-    // activity must all consume a course instead of copying track/path math.
+    // race (city/racing.js) must all consume a course instead of copying
+    // track/path math.
     // legacy is the missing-adopter count, so zero is a structural pin.
     if (CBZ.raceToolAudit) {
       const ra = CBZ.raceToolAudit();

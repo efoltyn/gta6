@@ -475,7 +475,6 @@
   // ---- the single global casino-table interaction zone ----------------------
   function openTable() {
     if (CBZ.cityOpenCasino) CBZ.cityOpenCasino();
-    else if (CBZ.cityOpenActivities) CBZ.cityOpenActivities("Betting");
   }
   if (CBZ.interactions && CBZ.interactions.registerZone && !CBZ._casinoZoneReg) {
     CBZ._casinoZoneReg = true;

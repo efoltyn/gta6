@@ -41,8 +41,7 @@
    passing close stop for a 4-8s face-to-face, capped at ~4 pairs), and
    rare STREET MOMENTS (a busker's ring, a paced-out phone call, a smoke by
    the bar door). Day/night gates read CBZ.nightAmount (the canonical sun);
-   within-day scheduling reads CBZ.cityHour (peds.js' own loop — the two
-   are desynced, so they are never mixed for the same decision).
+   within-day scheduling reads CBZ.cityHour (the same sky's hour of day).
 
    Runs at onUpdate order 33 — one tick BEFORE peds @34 — so a freshly
    chosen goal is acted on the same frame. City-mode only. It defers to the
@@ -199,17 +198,14 @@
   // ------------------------------------------------------------
 
   // day/night signals. CBZ.nightAmount is the canonical sun (0 day..1 deep
-  // night) — use it for day/night GATES. CBZ.cityHour is peds.js' own loose
-  // 24h loop (desynced from the sun) — use it only for WITHIN-day schedules.
+  // night) — use it for day/night GATES. CBZ.cityHour is the same sky's hour
+  // of day (peds.js reads it off CBZ.dayPhase) — use it for WITHIN-day schedules.
   function nightAmt() { return CBZ.nightAmount == null ? 0 : CBZ.nightAmount; }
   function hourNow() { return CBZ.cityHour ? CBZ.cityHour() : 12; }
-  // a MONOTONIC city-DAY index — increments once per in-city day (peds.js runs a
-  // 360s day on the same CBZ.now wall-clock _dayClock advances on). Used purely
-  // as a once-per-day STAMP for rent (so a tenant pays on their FIRST home
-  // arrival each day, never every dusk loop). Never mixed with the nightAmount
-  // sun for the same decision — it's a counter, not a phase.
-  const CITY_DAY_LEN = 360;   // matches peds.js DAY_LEN (seconds per in-city day)
-  function dayIndex() { return Math.floor((CBZ.now || 0) / (CITY_DAY_LEN * 1000)); }
+  // a MONOTONIC city-DAY index: the sky's calendar (CBZ.dayCount, one per
+  // sunrise). Used purely as a once-per-day STAMP for rent (so a tenant pays on
+  // their FIRST home arrival each day, never every dusk loop).
+  function dayIndex() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : Math.floor((CBZ.now || 0) / 150000); }
 
   // nearest shop lot of the given kinds WITH a usable door (bounded scan)
   function lotNear(A, x, z, kinds, maxd) {

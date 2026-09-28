@@ -335,7 +335,7 @@ body.mode-gungame.state-playing #ggHud{ display:block; }
 
 /* ---- 4. HEALTH PLATE (the shared #survBars, restyled for this mode) --
    One slim bar, bottom-left on desktop (the bottom centre is the gun chip),
-   top-left on touch (the bottom-left is the joystick). Invisible at full
+   top-left beside the pause button on touch (the bottom-left is the joystick). Invisible at full
    health; gungamehud.js adds .gg-show for a few seconds after a hit and
    while you are hurt. No digit, no captions, no stamina hairline. */
 .gg-hpghost{ display:none; }
@@ -367,8 +367,10 @@ body.mode-gungame #hpBar{
 body.mode-gungame #survBars.gg-amber #hpBar{ background:linear-gradient(180deg,#ffc15a,#e9942c) !important; }
 body.mode-gungame #survBars.gg-red #hpBar{ background:linear-gradient(180deg,#ff6a55,#d8352a) !important; }
 body.mode-gungame #survBars.gg-red{ border-color:rgba(255,90,70,.35); }
+/* on touch it is top-left, right of the shared pause button
+   (systems/title_hub.js #hudPauseBtn, 10..58 px in) */
 body.touch.mode-gungame #survBars{
-  top:var(--gg-top); bottom:auto; left:calc(14px + env(safe-area-inset-left,0px));
+  top:var(--gg-top); bottom:auto; left:calc(70px + env(safe-area-inset-left,0px));
 }
 
 /* ---- 5. DEATH CARD + RESPAWN RING ------------------------------------ */
