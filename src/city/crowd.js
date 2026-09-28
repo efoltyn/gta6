@@ -1803,7 +1803,6 @@
   // bystanders fight you for a collision you never caused. One reused object; its
   // pos is repointed to the mover each resolve (alloc-free).
   const _npcSrc = { isPlayer: false, _crowdBump: true, pos: { x: 0, z: 0 } };
-  const _victims = [];                       // near, slow, upright rigs (reused)
   // NPC<->NPC chain reactions can knock over MANY bodies in one frame (a sprinter
   // ploughs a line, the fallers ploughs the next), and each real-rig promotion is
   // a ragdoll + humancontact brain + draw calls. Cap NEW promotions per frame so a
@@ -1811,19 +1810,40 @@
   // skid below (zero allocation), so the chain keeps propagating — just cheaper.
   const PROMO_CAP_FRAME = 4;
   let _promoBudget = PROMO_CAP_FRAME;        // remaining rig promotions THIS frame (reset in bumpPass)
-  // FRAIL/ELDERLY slice (owner's on-foot rule): a hash-stable ~8% of the crowd
-  // can still be bowled over by a hard sprint — the comedy exception. Everyone
-  // else takes a stagger/shove from foot contact, never a ragdoll (cars keep
-  // their own, unchanged lethality path in vehicles.js).
+  // FRAIL/ELDERLY slice: a hash-stable ~8% of the crowd stands less steady
+  // (x1.4 in the shared momentum model), so a charge bowls them sooner.
   function frailAgent(i) { return CBZ.hash01(i, 3, 0xF7A1) < 0.08; }
+  /* THE SAME MOMENTUM AS EVERY OTHER BODY (systems/humancontact.js,
+     CBZ.bodyImpact): the mover's mass and speed into this agent's own mass,
+     walking velocity and facing. Whether he goes down is the model's call:
+     a sprint into his back floors him, into his chest mostly staggers him,
+     a walk is a shoulder. Null when the model is not loaded (legacy gate). */
+  const _bq = {}, _bo = {};
+  function crowdImpact(i, nx, nz, sp, ref) {
+    const BI = CBZ.bodyImpact;
+    if (!BI) return null;
+    let src = null;
+    if (!ref) { _bumpSrc.pos = CBZ.player.pos; src = _bumpSrc; }
+    else if (!ref._crowdBump) src = ref;
+    _bq.mA = src ? BI.massOf(src) : 74; _bq.mB = 74;
+    _bq.vAx = nx * sp; _bq.vAz = nz * sp;
+    _bq.vBx = dirX[i] * spd[i]; _bq.vBz = dirZ[i] * spd[i];
+    _bq.nx = nx; _bq.nz = nz;
+    _bq.fAx = nx; _bq.fAz = nz;                     // a mover faces where he runs
+    _bq.fBx = dirX[i]; _bq.fBz = dirZ[i];
+    _bq.stabA = 0.85; _bq.stabB = frailAgent(i) ? 1.4 : 1;
+    _bq.rollA = 1; _bq.rollB = Math.random();
+    return BI.solve(_bq, _bo);
+  }
   function bumpAgent(i, nx, nz, sp, kd, ref) {
-    // ON-FOOT GATE (owner: "when I just run through someone they fall over —
-    // walking it's dumb"): a PLAYER-sourced foot charge (ref == null — rig
-    // movers pass their actor, instanced movers pass _npcSrc) only ragdolls
-    // the frail slice; everyone else downgrades to the hard stumble below.
-    // NPC chain-reaction shoves are untouched (they self-limit and only ever
-    // start from an already-violent event).
-    if (kd && !ref && !frailAgent(i)) kd = false;
+    const imp = crowdImpact(i, nx, nz, sp, ref);
+    let tier;
+    if (imp) { tier = imp.tierB; kd = tier === 4; }
+    else {
+      if (kd && !ref && !frailAgent(i)) kd = false;
+      tier = kd ? 4 : sp >= STUMBLE_SPD ? 3 : 1;
+    }
+    if (tier === 0) { px[i] += nx * 0.12; pz[i] += nz * 0.12; return; }   // leaning: just room
     const guest = CBZ.net && CBZ.net.noSim();          // guests never spawn real peds
     if (kd && !guest && _promoBudget > 0) {
       // promote → real rig → real knockdown physics (the comedy payoff)
@@ -1852,9 +1872,11 @@
       // no free rig slot (or guest): a violent instanced skid still sells it
       stagT[i] = 1.0 + Math.random() * 0.3;
       stagX[i] = nx * (3.5 + sp * 0.5); stagZ[i] = nz * (3.5 + sp * 0.5);
-    } else if (sp >= STUMBLE_SPD) {
-      stagT[i] = 0.45 + Math.random() * 0.25;
-      stagX[i] = nx * (1.6 + sp * 0.35); stagZ[i] = nz * (1.6 + sp * 0.35);
+    } else if (tier >= 2) {
+      // a shove / a stumble: a skid along the push, as far as the push carries
+      const dv = imp ? imp.dvB : 1.6 + sp * 0.35;
+      stagT[i] = (tier === 3 ? 0.5 : 0.32) + Math.random() * 0.2;
+      stagX[i] = nx * (1.2 + dv * 1.1); stagZ[i] = nz * (1.2 + dv * 1.1);
     } else {
       // a walking-pace shoulder: they just get shifted aside, no drama
       px[i] += nx * 0.35; pz[i] += nz * 0.35;
@@ -1868,17 +1890,14 @@
     // 1) gather movers: the player on foot + any fast rig near the camera
     let nm = 0;
     if (!P.dead && !P.driving && (P.speed || 0) > 1.5) {
-      // WALKING IS NOT A TACKLE (owner): base WASD speed is 7.0 — over the
-      // 3.0 stumble threshold — so plain walking used to skid every body it
-      // touched. Un-sprinted contact now registers below the stumble line
-      // (a polite sidestep nudge in bumpAgent); sprinting keeps the stagger,
-      // and the ragdoll is gated to the frail slice inside bumpAgent.
-      const pSpeed = P.sprint ? (P.speed || 0) : Math.min(P.speed || 0, 2.4);
+      // the measured speed (humancontact.js tracks it every frame): the
+      // momentum model decides what that speed does to whoever it meets
+      const PVv = CBZ.bodyImpact && CBZ.bodyImpact.playerVel;
+      const pSpeed = PVv ? Math.hypot(PVv.x, PVv.z) : (P.sprint ? (P.speed || 0) : Math.min(P.speed || 0, 2.4));
       _mvX[nm] = ppx; _mvZ[nm] = ppz; _mvS[nm] = pSpeed;
       _mvKD[nm] = (P.sprint && (P.speed || 0) >= 6.2) ? 1 : 0;   // same charge gate as humancontact
       _mvRef[nm] = null; _mvAgent[nm] = -1; nm++;
     }
-    _victims.length = 0;
     const peds = CBZ.cityPeds;
     if (peds) for (let k = 0; k < peds.length && nm < MOVERS; k++) {
       const p = peds[k];
@@ -1890,7 +1909,7 @@
       if (sp >= STUMBLE_SPD) {                          // a runner — a mover
         _mvX[nm] = p.pos.x; _mvZ[nm] = p.pos.z; _mvS[nm] = sp;
         _mvKD[nm] = sp >= RIG_KD_SPD ? 1 : 0; _mvRef[nm] = p; _mvAgent[nm] = -1; nm++;
-      } else _victims.push(p);                          // upright bystander rig
+      }
     }
     // 1b) hash the LIVE instanced agents into the 2m grid (the exact set the
     //     resolve below is allowed to bump). Reuses _gridIdx + the persistent grid
@@ -1968,21 +1987,8 @@
         }
       }
     }
-    // 3) RIG movers vs bystander RIGS: a fleeing ped flattens whoever's in the
-    //    way (player-vs-rig charges are humancontact.js's job — not repeated here)
-    for (let m = 0; m < nm; m++) {
-      if (!_mvKD[m] || !_mvRef[m]) continue;
-      const src = _mvRef[m];
-      for (let v = 0; v < _victims.length; v++) {
-        const t = _victims[v];
-        if (t === src) continue;
-        const dx = t.pos.x - _mvX[m], dz = t.pos.z - _mvZ[m];
-        if (dx * dx + dz * dz >= 1.21) continue;
-        if (CBZ.body && CBZ.body.knockdown) CBZ.body.knockdown(t, { fromX: _mvX[m], fromZ: _mvZ[m], force: 6 + _mvS[m] * 0.5, t: 1.1 + Math.random() * 0.6 });
-        if (CBZ.humanContact) CBZ.humanContact.react(t, { mode: "city", source: src, kind: "run-over", severity: 0.8 });
-        if (CBZ.sfx) CBZ.sfx("ko");
-      }
-    }
+    // rig-vs-rig contact (a fleeing ped into a bystander, you into either) is
+    // systems/humancontact.js's momentum pass over CBZ.cityPeds, not repeated here
   }
 
   // ---- PERSONAL SPACE: keep the mass from standing INSIDE each other ----
