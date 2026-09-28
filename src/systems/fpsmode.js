@@ -3004,7 +3004,7 @@
         const penW = Object.create(w); penW.damage = w.damage * PEN_DMG_MUL;   // cheap prototype override — never mutates the shared weapon table
         gunHit(exitHit, penW, shotDir);
         spawnImpact(beyondActor.point, true, false, cal * 0.75);
-        if (CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(beyondActor.point, 0.4, shotDir);
+        if (CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(beyondActor.point, 0.4, shotDir, goreOpts(beyondActor, w, cal, true));
         fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
       } else {
         // nothing behind it: still show the round carrying through the cover —
@@ -3109,6 +3109,17 @@
      and answers with a snap / fold and steps / a knee / a dead arm. False =
      no rig to answer with; the caller keeps its old body impulse. */
   const _shotO = { point: null, dir: null, cal: 1, wkey: "", dist: 0, share: 1, head: false };
+  /* did this round go through him (systems/verbs_strike.js V.roundExits, the
+     one rule): handed to the blood as opts.exit so an exit wound sprays out of
+     the far side and a round that stays in bleeds from the entry alone */
+  const _goreO = { exit: false, cal: 1, head: false };
+  function goreOpts(hit, w, cal, spent) {
+    const V = CBZ.verbs, a = hit.actor || hit.corpse || null;
+    const zone = a && V && V.shotZone && hit.point ? V.shotZone(a, hit.point) : null;
+    _goreO.exit = V && V.roundExits ? V.roundExits({ cal, wkey: w.key, pellets: w.pellets, head: !!hit.head, zone, dist: hit.dist, spent: !!spent, nonlethal: !!w.nonlethal }) : !w.pellets;
+    _goreO.cal = cal; _goreO.head = !!hit.head;
+    return _goreO;
+  }
   function shotLiving(a, hit, w, shotDir, cal) {
     const V = CBZ.verbs;
     if (!V || !V.shot || w.nonlethal || !a || a.dead || a.animal || a.netKind) return false;
@@ -3239,7 +3250,7 @@
     let down = false;
     if ((lethalHeadshot || a.hp <= 0) && !(a.ko > 0) && !a.dead) {
       down = true;
-      if (CBZ.aiKill) CBZ.aiKill(a, { group: CBZ.playerChar.group }, { noKnock: true });
+      if (CBZ.aiKill) CBZ.aiKill(a, { group: CBZ.playerChar.group }, { noKnock: true, exit: goreOpts(hit, w, caliber(w)).exit });
       else { a.dead = true; a.ko = 0; a.hp = 0; }
       if (CBZ.game.koLog) CBZ.game.koLog[a.data.name] = true;
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, w.key);
@@ -3431,7 +3442,7 @@
         // pool-sized explosion for every pellet in a shotgun blast.
         if (!w.nonlethal && !hit.actor.animal && CBZ.gore && CBZ.gore.spray) {
           const wet = w.pellets ? 0.34 : (r.head ? 0.95 : 0.58) * Math.max(0.7, cal);
-          CBZ.gore.spray(hit.point, wet, shotDir);
+          CBZ.gore.spray(hit.point, wet, shotDir, goreOpts(hit, w, cal));
         }
         // the body CARRIES the hit: a dark entry wound stamped on the struck
         // part + blood soaking into the clothing (systems/wounds.js). Per
@@ -3453,7 +3464,7 @@
         if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
         else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
         spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir, goreOpts(hit, w, cal));
         // Only a muzzle-close shotgun headshot can sever even post-mortem
         // (gore.js's decap read), guarded so one head only severs once. Live kills
         // route this through cityKillPed's killCtx; a corpse has no kill ctx, so we
@@ -3468,7 +3479,7 @@
         if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); acc.down = true; }
         acc.head = acc.head || hit.head;
         spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
       } else if (hit.aircraft) {
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         acc.hitSomething = true;

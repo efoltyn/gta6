@@ -314,7 +314,35 @@
     if (!e) return;
     if (e.kind === "phone" && holders.phone[e.slot] === n) holders.phone[e.slot] = null;
     if (e.kind === "shower" && holders.shower[e.slot] === n) holders.shower[e.slot] = null;
+    if (e.seat && e.seat._carFor === n) e.seat._carFor = null;
     n._carErrand = null;
+  }
+  /* HIS STOOL AT HIS CAR'S TABLE. Chow used to send a man at the middle of
+     his car's run give or take two metres, and he sat only if a free stool of
+     his car happened to be within reach when the 2 Hz sweep looked: measured,
+     one man seated in forty seconds of chow and half the room circling. Now
+     he is handed one free stool of his car's run (reserved for him, so two men
+     never walk at the same one) and walks to IT; systems/prisonrest.js sits
+     him on it when he gets there. A man who cannot reach the hall from where
+     he stands (another yard, a racked gate: the nav grid has no route) is not
+     sent at all. */
+  function mealSeat(n, car) {
+    if (!messPool) return null;
+    const gp = n.group.position;
+    let best = null, bd = Infinity;
+    for (const s of messPool) {
+      if (s._car !== car || (s.occupant && s.occupant !== n)) continue;
+      const f = s._carFor;
+      if (f && f !== n && live(f) && f._carErrand && f._carErrand.seat === s) continue;
+      const d = (s.x - gp.x) * (s.x - gp.x) + (s.z - gp.z) * (s.z - gp.z);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+  function reachable(n, x, z) {
+    const N = CBZ.prisonNav;
+    if (!N || !N.ready || !N.ready() || !N.plan) return true;     // no grid: let the mover try
+    return !!N.plan(n.group.position, { x, z });
   }
   function rnd() { return CBZ.econ && CBZ.econ.rng ? CBZ.econ.rng() : Math.random(); }
   function setTarget(n, x, z) { if (n.target && n.target.set) n.target.set(x, 0, z); }
@@ -345,10 +373,24 @@
     const cell = !!(n.data && n.data.cell);
     if (chow) {
       // most of the yard goes to chow, and every man to his own car's run
-      if (hash01(n, 51) > 0.78) return false;
+      if (hash01(n, 51) > 0.85) return false;
+      // a man behind his own bars, or kept at his bunk by the wing's cast
+      // (world/cellblock.js), is not walking anywhere: sending him would only
+      // hold a stool nobody else may take
+      if (n._cellPose || (CBZ.cellblock && CBZ.cellblock.held && CBZ.cellblock.held(n))) return false;
+      if (n._chowNo === blk + "|" + Math.floor(t / 60)) return false;   // no route this minute
+      const seat = mealSeat(n, car);
+      if (seat) {
+        if (!reachable(n, seat.x, seat.z)) { n._chowNo = blk + "|" + Math.floor(t / 60); return false; }
+        seat._carFor = n;
+        n._carErrand = { kind: "mess", block: blk, until: t + 900, seat, x: seat.x, z: seat.z, yaw: null };
+        setTarget(n, seat.x, seat.z);
+        return true;
+      }
+      // his car's run is full: he stands with his people at their end
       const spot = messSpot(car);
-      if (!spot) return false;
-      const a = rnd() * Math.PI * 2, r = 0.6 + rnd() * 1.4;
+      if (!spot || !reachable(n, spot.x, spot.z)) return false;
+      const a = rnd() * Math.PI * 2, r = 0.8 + rnd() * 1.2;
       n._carErrand = { kind: "mess", block: blk, until: t + 40, x: spot.x + Math.cos(a) * r, z: spot.z + Math.sin(a) * r * 0.6, yaw: null };
       setTarget(n, n._carErrand.x, n._carErrand.z);
       return true;
@@ -521,6 +563,22 @@
     return enforcerOf(mine, 16);
   }
 
+  /* THE HORN CALLS CHOW. The errand used to be offered only on a man's own
+     wander re-think, so a man mid-conversation (a third of the yard at any
+     moment) never heard it and chow filled one stool at a time. On the block
+     change every free inmate is handed his stool now; a chat breaks up for it
+     (a fight, a run or a man on the phone does not). */
+  function callChow() {
+    for (const n of CBZ.npcs || []) {
+      if (!live(n) || n._crowd || !(n.kind === "inmate" || n.role === "inmate")) continue;
+      const s = n.aiState;
+      if (s && s !== "wander" && s !== "socialize") continue;
+      if (n._propBed || n._propLie || (n.char && n.char.lying)) continue;
+      release(n);
+      if (errand(n) && s === "socialize") { n.aiState = "wander"; n.social = null; n.aiTimer = 3 + rnd() * 3; }
+    }
+  }
+
   // ---- 8. TICK + AUDIT --------------------------------------------------------
   let lastBlock = "";
   function tick(dt) {
@@ -530,7 +588,10 @@
     const R = CBZ.prisonRestSeats;
     if (R) {
       const blk = blockId();
-      if (blk !== lastBlock) { lastBlock = blk; if (blk === "mess" || blk === "supper") allotMess(R.mess, true); }
+      if (blk !== lastBlock) {
+        lastBlock = blk;
+        if (blk === "mess" || blk === "supper") { allotMess(R.mess, true); callChow(); }
+      }
       allotMess(R.mess, false);
       allotYard(R.yard);
     }

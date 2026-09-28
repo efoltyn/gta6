@@ -154,7 +154,8 @@
     question: { label: "Question",        fn: (a) => CBZ.econ.talk(a) },
     warn:     { label: "Warn",            fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
     detain:   { label: "Cuff",            fn: (a) => {
-      if (a.approach) return approachAction(a, "detain");
+      if (a.approach && /^cop[A-Z]/.test(a.approach.kind || "")) return approachAction(a, "detain");
+      dropPitch(a);
       const surrendered = a.intimidMode === "scared";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
       const justified = CBZ.game.role === "cop" && (surrendered || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
@@ -175,6 +176,7 @@
       return { ok: true, msg: "" };   // he goes down; that is the receipt
     } },
     search:   { label: "Search",          fn: (a) => {
+      dropPitch(a);
       const justified = a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
@@ -280,6 +282,12 @@
     return `${shortText(o.item, 22)}, ${p ? p.price : o.price} cigs`;
   }
 
+  // an offer he walked up with is over the moment the badge acts on him
+  function dropPitch(a) {
+    if (!a || !a.approach || /^cop[A-Z]/.test(a.approach.kind || "")) return;
+    a.approach = null;
+    if (a.aiState === "approachPlayer") a.aiState = "wander";
+  }
   function verbsFor(a) {
     // Authored prison beats can temporarily replace the warden's generic
     // bribe/loot menu without teaching this legacy interaction system about
@@ -303,7 +311,11 @@
     // YOU ARE TELLING HIM SOMETHING: the card is what you know (prisonsnitch.js)
     const telling = CBZ.prisonSnitch && CBZ.prisonSnitch.menu ? CBZ.prisonSnitch.menu(a) : null;
     if (telling) return telling;
-    if (a.approach && a.approach.t > 0) {
+    // THE BADGE OUTRANKS A SALES PITCH: an officer's card is the cop's own
+    // verbs over any inmate's offer, except the four pitches made TO a cop
+    const copPitch = !!(a.approach && /^cop[A-Z]/.test(a.approach.kind || ""));
+    const badge = CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden") && !copPitch;
+    if (a.approach && a.approach.t > 0 && !badge) {
       /* THREE BUTTONS, AND "LISTEN" IS NOT ONE OF THEM (owner, 2026-08-21: "I
          like 3 interaction buttons max at a time... more than 3 interaction
          buttons showing at once looks bad").

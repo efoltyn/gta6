@@ -200,6 +200,17 @@
       n.activityState = n.aiState || "idle";
       return speed;
     }
+    /* HIS CAR SENT HIM SOMEWHERE (systems/prisoncars.js: his stool at chow,
+       his car's phone, its shower turn). The errand owns `target` until it
+       ends; a stand-here / walk-round-my-patch roll on top of it rewrote the
+       target every frame, so a man sent to chow never left his patch
+       (measured: one inmate of seventy seated in forty seconds). */
+    const er = n._carErrand;
+    if (er && !(er.until < ((CBZ.game && CBZ.game.elapsed) || 0))) {
+      n._lifeActivity = null; n._lifeT = 0;
+      n.activityState = "errand";
+      return speed * 0.85;
+    }
     n._lifeT = Math.max(0, (n._lifeT || 0) - dt);
     // A ROUTE IS NOT AN ARRIVAL. systems/prisonnav.js hands this mover one
     // WAYPOINT at a time while it walks a man round a wall; reading a reached

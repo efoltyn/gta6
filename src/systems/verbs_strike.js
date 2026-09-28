@@ -892,6 +892,24 @@
     return z;
   }
   V.shotZone = function (t, P) { const B = bod(t), ch = B && B.ch; return ch && MPf() && P ? shotZone(ch, P) : null; };
+  /* DID THE ROUND GO THROUGH HIM? One rule for every gun path, handed to the
+     blood as opts.exit (an exit wound sprays out of the far side; a round that
+     stays in bleeds from the entry alone). A full-bore round through a body
+     exits from ~0.78 calibre up (gore.js's own through-rule: a service
+     pistol and up go through a chest, a pocket SMG round stays in); through
+     a skull from ~0.5, a limb from ~0.55; buckshot pellets stay in unless the
+     muzzle was touching (under 2 m); a round already spent on cover (spent)
+     and a less-lethal never exit. o = { cal, wkey, pellets, head, zone, dist,
+     spent, nonlethal } */
+  V.roundExits = function (o) {
+    if (!o || o.nonlethal || o.spent) return false;
+    const cal = o.cal > 0 ? o.cal : 1;
+    const pellets = o.pellets > 1 || (o.wkey === "shotgun" && !(o.pellets === 1));
+    if (pellets) return (o.dist != null ? o.dist : 6) < 2;
+    const limb = o.zone === "armL" || o.zone === "armR" || o.zone === "legL" || o.zone === "legR";
+    if (o.head || o.zone === "head") return cal >= 0.5;
+    return cal >= (limb ? 0.55 : 0.78);
+  };
   V.shot = function (t, o) {
     o = o || EMPTY;
     if (!t || isPlayer(t)) return false;
@@ -914,6 +932,8 @@
       _sP.set(o.point.x, o.point.y, o.point.z);
       zone = shotZone(ch, _sP);
     }
+    // the caller's blood reads this back (o is the caller's own record)
+    if (o !== EMPTY && typeof o === "object") o.exit = V.roundExits({ cal: o.cal, wkey: o.wkey, pellets: o.share > 0 && o.share < 1 ? 2 : 1, head: o.head, zone, dist: o.dist, spent: o.spent });
     const R = shotRec(ch);
     R.e += e; R.dx += dx * e; R.dz += dz * e; R[zone] += e;
     if (!R.queued) { R.queued = true; R.a = t; R.B = B; shotQ.push(R); }

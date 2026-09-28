@@ -153,16 +153,26 @@ const blackSeat = seats.find((s) => s._car === PC.IDX.black), whiteSeat = seats.
 check(PC.maySit(aBlack, blackSeat) && !PC.maySit(aBlack, whiteSeat), "a man sits at his own car's stools, never another car's");
 // chow: his errand walks him to his car's run
 CBZ.prisonSchedule = { enabled: () => true, id: () => "mess", hour: () => 12, inBlock: () => false };
-let walked = 0, tried = 0;
+// (he is handed one free stool of his car's run and walks to IT; once his
+// car's stools are all spoken for he stands with his people at their end)
+let walked = 0, tried = 0, onStool = 0, doubled = 0;
+const taken = new Set();
+for (const s of seats) s._carFor = null;
 for (const n of CBZ.npcs) {
   n._carErrand = null;
   if (!PC.errand(n)) continue;
   tried++;
-  const spot = PC.messSpot(n.yardCar);
-  if (spot && Math.hypot(n.target.x - spot.x, n.target.z - spot.z) < 2.6) walked++;
+  const e = n._carErrand, spot = PC.messSpot(n.yardCar);
+  if (e && e.seat) {
+    onStool++;
+    if (taken.has(e.seat)) doubled++;
+    taken.add(e.seat);
+    if (e.seat._car === n.yardCar && n.target.x === e.seat.x && n.target.z === e.seat.z) walked++;
+  } else if (spot && Math.hypot(n.target.x - spot.x, n.target.z - spot.z) < 2.6) walked++;
 }
 check(tried > CBZ.npcs.length * 0.5, "most of the yard goes to chow (" + tried + "/" + CBZ.npcs.length + ")");
-check(walked === tried, "every man at chow walks to HIS car's run of stools (" + walked + "/" + tried + ")");
+check(walked === tried, "every man at chow walks to HIS car's stools (" + walked + "/" + tried + ")");
+check(onStool > 0 && doubled === 0, "each is handed his own stool, never one another man is walking to (" + onStool + " stools, " + doubled + " doubled)");
 for (const n of CBZ.npcs) n._carErrand = null;
 
 // --------------------------------------------------------------- 4. the rules

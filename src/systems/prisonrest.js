@@ -565,7 +565,8 @@
           a._restSitter = h;
         }
         // at chow most men sit (at their own car's table); on the yard a third
-        if (!(a._restSitter < (messTime ? 0.85 : 0.34))) continue;
+        // (a man his car walked to his own stool at chow sits on it, whatever his roll)
+        if (!(a._restSitter < (messTime ? 0.85 : 0.34)) && !(messTime && a._carErrand && a._carErrand.seat)) continue;
         // SIT WHERE HE ALREADY IS. Walking him to a chair would mean writing
         // `target` at a body whose own brain rewrites it every think-tick, and
         // two movers on one Vector3 is a man vibrating in the aisle. So a seat
@@ -575,11 +576,16 @@
         const gp = a.group.position;
         let best = null, bd = 3.4 * 3.4;
         const PC = CBZ.prisonCars;
-        for (let k = 0; k < pool.length; k++) {
+        // the stool his car handed him at chow (systems/prisoncars.js) first
+        const mine = (messTime && a._carErrand && a._carErrand.seat) || null;
+        if (mine && !mine.occupant && (mine.x - gp.x) * (mine.x - gp.x) + (mine.z - gp.z) * (mine.z - gp.z) < bd) best = mine;
+        for (let k = 0; k < pool.length && !(mine && best === mine); k++) {
           const s = pool[k];
           if (s.occupant) continue;
           // THE CARS: a man sits only in his own car's seats (or nobody's)
           if (PC && !PC.maySit(a, s)) continue;
+          // nor on the stool his car saved for another man walking to it
+          if (s._carFor && s._carFor !== a && !s._carFor.dead && s._carFor._carErrand && s._carFor._carErrand.seat === s) continue;
           const d = (s.x - gp.x) * (s.x - gp.x) + (s.z - gp.z) * (s.z - gp.z);
           if (d < bd) { bd = d; best = s; }
         }

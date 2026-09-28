@@ -1706,7 +1706,15 @@
     return true;
   }
 
+  const COP_PITCHES = { copBribe: 1, copTip: 1, copPlea: 1, copTaunt: 1 };
   function startApproach(n, kind, cost, extra) {
+    /* NOBODY SELLS TO THE BADGE. An inmate walks up to an officer to buy him,
+       tip him, beg him or mouth off at him (the cop* pitches); he does not
+       offer a guard with a gun on his hip a deal, a tax, a job or a stick-up. */
+    if (CBZ.game && CBZ.game.role === "cop" && !COP_PITCHES[kind]) {
+      n.approachCD = Math.max(n.approachCD || 0, 20 + rng() * 20);
+      return false;
+    }
     /* TWO MEN AT YOUR SHOULDER CHANGE THE MATH. A tax or a stick-up is a
        bet about being the stronger party; a flanked player visibly isn't
        the weaker one, so the man rolls his approach and thinks better of
@@ -5072,6 +5080,12 @@
         // this choke point simply never passed it, so every death in the
         // prison — shanking included — sprayed like a gunshot.
         melee: opts.melee || null,
+        // WHO: the body the blood belongs to, so a blade kill's arterial
+        // pulse rides the falling body instead of the spot he stood on
+        actor: victim,
+        // a round through him sprays out of the far side (the gun paths say
+        // so, V.roundExits); a blade or a fist never exits
+        exit: opts.melee ? false : (opts.exit != null ? !!opts.exit : undefined),
       });
     }
     victim.aiState = "dead";
