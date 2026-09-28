@@ -1167,7 +1167,31 @@
       tube(back, 0, fz, back, topY + 1.0, fz, 0.035, galv, { seg: 6, cast: false });                     // rear guard post
     }
     for (const y of [topY + 0.5, topY + 1.0]) stat(new THREE.CylinderGeometry(0.025, 0.025, len, 6), galv, back, y, z, { rx: Math.PI / 2, cast: false });
-    CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
+    /* WALKABLE, NOT A BLOCK. The whole unit used to be one full-height
+       collider: a 2-3 m steel cube with seats drawn on it. A bleacher is
+       climbed row to row (each row's foot plank is 0.40 over the last, the
+       seats 0.02 under the next foot plank), so its walk surface is one
+       CBZ.stairs flight from the front foot plank up to the back row, the
+       soffit under it keeps bodies from walking into the frame from behind
+       or the ends, and the rear guard rail is a rail. */
+    if (CBZ.stairs) {
+      const xb = x + 0.4, xt = x - (rows - 1) * RD - 0.2;
+      CBZ.stairs.flight({
+        bottom: { x: xb, y: 0, z: z }, top: { x: xt, y: topY, z: z },
+        width: len, overlap: 0.12, underside: true, link: false,
+      });
+      // the AI link ends where a body can STAND at the top: just clear of the
+      // rear rail (flight()'s own link would end 0.45 past the back row, i.e.
+      // behind the rail)
+      const xs = back + 0.1 + 0.45, ys = topY * Math.min(1, (xb - xs) / (xb - xt));
+      CBZ.stairs.link({
+        path: [{ x: xb + 0.45, y: 0, z: z }, { x: xb, y: 0, z: z }, { x: xs, y: ys, z: z }],
+        width: len, kind: "bleacher", owner: "bleacher",
+      });
+      CBZ.colliders.push({ minX: back - 0.1, maxX: back + 0.1, minZ: z - len / 2, maxZ: z + len / 2, y0: 0, y1: topY + 1.05, rail: true, noBreach: true });
+    } else {
+      CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
+    }
     if (o.seats > 0 && CBZ.roomSeatAnchor) {
       for (let t = 0; t < rows; t++) for (let k = 0; k < o.seats; k++) {
         try {

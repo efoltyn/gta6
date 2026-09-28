@@ -651,8 +651,21 @@
       lv.rotateY(Math.PI / 8); lv.translate(0, H - 1.1, 0);
       dark.push(lv);
     }
-    // cab floor slab + sill band
-    conc.push(put(boxM(CHF * 2 + 0.4, 0.45, CHF * 2 + 0.4, 1), 0, H - 0.2, 0));
+    // cab floor slab + sill band — cut round a stair well when the caller
+    // brings one up through it (o.floorHole, local x/z)
+    {
+      const FH = CHF + 0.2, hl = o.floorHole;
+      const rects = [];
+      if (!hl) rects.push([-FH, FH, -FH, FH]);
+      else {
+        const hx0 = Math.max(-FH, hl.x0), hx1 = Math.min(FH, hl.x1), hz0 = Math.max(-FH, hl.z0), hz1 = Math.min(FH, hl.z1);
+        rects.push([-FH, FH, -FH, hz0], [-FH, FH, hz1, FH], [-FH, hx0, hz0, hz1], [hx1, FH, hz0, hz1]);
+      }
+      for (const r of rects) {
+        if (r[1] - r[0] < 0.02 || r[3] - r[2] < 0.02) continue;
+        conc.push(put(boxM(r[1] - r[0], 0.45, r[3] - r[2], 1), (r[0] + r[1]) / 2, H - 0.2, (r[2] + r[3]) / 2));
+      }
+    }
     // the sill: four upstand walls (seen from inside the cab too)
     for (const sg of [-1, 1]) {
       steel.push(put(boxM(CHF * 2, 0.9, 0.12, 1), 0, H + 0.45, sg * (CHF - 0.06)));

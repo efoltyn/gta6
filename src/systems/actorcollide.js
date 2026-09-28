@@ -87,7 +87,24 @@
      Same numbers physics.js uses for the player it owns: feet+0.25 (so a kerb
      is stepped, not walled) up to a 1.7 m body. Escape-mode only — the updater
      below returns for every other mode — so nothing outside the prison moves. */
-  const BODY_H = 1.7, FOOT_CLEAR = 0.25;
+  /* FOOT_CLEAR 0.25 → 0.42 (stairs wave): the player's own clearance
+     (physics.js), so a riser box is stood on rather than walked into, and a
+     flight's stepped soffit (systems/stairs.js) under a climber's feet is
+     never a wall in front of him. */
+  const BODY_H = 1.7, FOOT_CLEAR = 0.42;
+  /* THE FEET. "Nothing else in the game writes an inmate's y" — the cell
+     leash put an upper resident back on his tier while he was IN his cell,
+     and that was the whole of the prison's height logic: a screw who took the
+     stairs walked up them at y 0, inside the flight; a tier man let out of
+     his cell walked the deck at FY and then the yard at FY. Every standing
+     body now stands on CBZ.moves.feet — the ground under him asked from his
+     own height, the player's rule — before he is clamped out of walls at
+     that height. */
+  function settleFeet(a, dt) {
+    const M = CBZ.moves;
+    if (!M || !M.feet || !a.group) return;
+    M.feet(a, a.group.position, dt);
+  }
   function clampOut(a) {
     const p = posOf(a);
     const feet = (p.y || 0) + FOOT_CLEAR;
@@ -173,6 +190,23 @@
       if (furnitureHeld(n)) { stampRest(n); continue; }
       if (vaultOn && !inVerb(n) && traverse(n, dt)) continue;
       list.push(n);
+    }
+    for (let i = 0; i < list.length; i++) settleFeet(list[i], dt);
+    // a man with his hands on somebody (an escort, a drag, a carry) is left
+    // out of the push/clamp — CBZ.verbs places the pair — but his OWN feet
+    // are still his: he walks the prisoner up the stairs, and CBZ.verbs
+    // hangs the held body off the height he is at
+    const VB = CBZ.verbs;
+    if (VB && VB.sessionOf) {
+      for (let k = 0; k < 2; k++) {
+        const arr = k ? CBZ.npcs : CBZ.guards;
+        for (let i = 0; i < arr.length; i++) {
+          const a = arr[i];
+          if (a.dead || (a.ko > 0) || a.escaped || a._traversal) continue;
+          const S = VB.sessionOf(a);
+          if (S && S.a === a && S.phase !== "approach" && !furnitureHeld(a)) settleFeet(a, dt);
+        }
+      }
     }
     if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
 

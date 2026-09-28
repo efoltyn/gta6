@@ -852,36 +852,78 @@ CBZ.arenaVenue = {
     // enough to vault nothing and is height-gated so it never affects anybody
     // on the deck below it.
     (function () {
-      function railRing(d, baseY, h, guard) {
-        walkRing(d, 2.6, function (s) {
-          if (aisleGap(s)) return;
-          if (isStraight(s.side) && (vomGap(s, VOM_HW + 0.4) || gateGap(s, GATE_HW + 0.6))) return;
-          put("rail", { x: s.x, y: baseY + h, z: s.z, sx: s.len + 0.05, sy: 0.09, sz: 0.09, ry: s.yaw });
-          put("steel", { x: s.x, y: baseY + h / 2, z: s.z, sx: 0.08, sy: h, sz: 0.08, ry: s.yaw });
-        });
-        if (!guard || !SOLID_STAND) return;
-        // one coarse solid ring behind the visual bar (pitch 5, not 2.6): the
-        // barrier only has to stop a body, not trace the balusters. Height
-        // gated to the rail band, so a body on the deck BELOW it is untouched.
+      // THE RAIL MUST STOP AT THE AISLE, NOT AT THE NEAREST CHORD CENTRE.
+      // This used to be ringSolid at a 5 m pitch that skipped a chord only
+      // when its CENTRE fell inside an aisle (|key - aisle| < 0.95). The
+      // chord centres on the +-x straights sit 1.2 m off every aisle, so each
+      // 4.8 m chord ran straight ACROSS its aisle: every cross-aisle rail was
+      // a wall at the head of every radial aisle, and the bowl could not be
+      // climbed past a cross-aisle anywhere (it also clipped 1 m into the
+      // mouth of each vomitory). Now the straights are cut into exact spans
+      // between the openings, and a corner chord is skipped whenever any
+      // part of it reaches the aisle (pad = half its own length).
+      function railGap(s, pad, aisles) {
+        if (aisles === "none") return false;
+        if (aisles && aisleGap(s, pad)) return true;
+        if (!isStraight(s.side)) return false;
+        return vomGap(s, VOM_HW + 0.4 + pad) || gateGap(s, GATE_HW + 0.6 + pad);
+      }
+      function railRing(d, baseY, h, guard, aisles) {
+        var sides = ["xp", "zp", "xn", "zn"];
+        var spans = [];
+        for (var si = 0; si < sides.length; si++) {
+          var cur = null;
+          runStraight(sides[si], d, 0.25, function (s) {
+            if (railGap(s, 0, aisles)) { cur = null; return; }
+            var lo = s.key - s.len / 2, hi = s.key + s.len / 2;
+            if (!cur) { cur = { side: s.side, lo: lo, hi: hi, s: s }; spans.push(cur); }
+            else { cur.lo = Math.min(cur.lo, lo); cur.hi = Math.max(cur.hi, hi); }
+          });
+        }
+        for (var ci = 0; ci < 4; ci++) {
+          runCorner(ci, d, 2.6, function (s) {
+            if (railGap(s, s.len / 2, aisles)) return;
+            spans.push({ chord: s });
+          });
+        }
         var before = colliders.length;
-        ringSolid(d, 0.24, baseY, baseY + h + 0.5, {
-          pitch: 5.0, mesh: false,
-          skip: function (s) {
-            return aisleGap(s) || (isStraight(s.side) && (vomGap(s, VOM_HW + 0.4) || gateGap(s, GATE_HW + 0.6)));
+        for (var i = 0; i < spans.length; i++) {
+          var sp = spans[i], cx, cz, len, yaw;
+          if (sp.chord) { cx = sp.chord.x; cz = sp.chord.z; len = sp.chord.len; yaw = sp.chord.yaw; }
+          else {
+            var mid = (sp.lo + sp.hi) / 2; len = sp.hi - sp.lo; yaw = sp.s.yaw;
+            var ss = sp.side;
+            cx = (ss === "xp" || ss === "xn") ? sp.s.x : mid;
+            cz = (ss === "xp" || ss === "xn") ? mid : sp.s.z;
           }
-        });
+          if (len < 0.2) continue;
+          put("rail", { x: cx, y: baseY + h, z: cz, sx: len + 0.05, sy: 0.09, sz: 0.09, ry: yaw });
+          var posts = Math.max(1, Math.round(len / 2.6));
+          for (var pi = 0; pi <= posts; pi++) {
+            var f = pi / posts - 0.5;
+            var tx = Math.cos(yaw) * f * len, tz = -Math.sin(yaw) * f * len;
+            put("steel", { x: cx + tx, y: baseY + h / 2, z: cz + tz, sx: 0.08, sy: h, sz: 0.08, ry: yaw });
+          }
+          // Height gated to the rail band, so a body on the deck BELOW it is
+          // untouched; one box per span, not one per baluster.
+          if (guard && SOLID_STAND) solidBox(cx, cz, len / 2, 0.12, yaw, baseY, baseY + h + 0.5);
+        }
         standColliders += colliders.length - before;
       }
       // the front of row 0 — a 4.2 m drop onto the arena floor without it
-      railRing(deckFront(0) - 0.14, rowY(0), 1.06, true);
-      // one at EVERY cross-aisle, not just the single old XROW
+      // No gaps at all here: no aisle or vomitory reaches down past row 0,
+      // and the old aisle/vomitory skips opened 2-5 m holes in the only
+      // thing between row 0 and a 4.2 m drop onto the arena floor.
+      railRing(deckFront(0) - 0.14, rowY(0), 1.06, true, "none");
+      // one at EVERY cross-aisle, not just the single old XROW — open at
+      // every radial aisle, which is how you climb on past it
       for (var r2 = 1; r2 < ROWS; r2++) {
-        if (crossRow(r2)) railRing(deckFront(r2) - 0.12, rowY(r2), 0.98, true);
+        if (crossRow(r2)) railRing(deckFront(r2) - 0.12, rowY(r2), 0.98, true, true);
       }
       // The guard stands ON the final deck. At D_TOP + 0.25 its feet were
       // already beyond that deck's rear edge, leaving seven floating rail
       // components around the bowl.
-      railRing(D_TOP - 0.08, TOP_Y, 1.04, false);
+      railRing(D_TOP - 0.08, TOP_Y, 1.04, false, true);
       // Solid back wall behind the top row — you cannot step off the bowl.
       // IT USED TO BE DRAWN AS NOTHING AT ALL. `mesh: false` on a ring that
       // has no other geometry standing in it is the literal definition of an
@@ -927,6 +969,55 @@ CBZ.arenaVenue = {
       for (i = 0; i < AIS_Z.length; i++) { aisleSteps("zp", CX + AIS_Z[i]); aisleSteps("zn", CX + AIS_Z[i]); }
     })();
 
+    // ---------------- aisle LINKS (CBZ.stairs) --------------------------------
+    // The rows are 0.42 apart, so a body already walks an aisle deck to deck;
+    // what nobody could do was PLAN it — navgrid is 2-D, and a steward sent
+    // from the vomitory landing to row 30 stood under it. Each radial aisle is
+    // registered as one link per band between walkable levels (row 0, every
+    // cross-aisle, the top row), so CBZ.stairs.route chains vomitory ->
+    // landing -> aisle -> cross-aisle -> aisle. An aisle that carries a
+    // vomitory is skipped through its notch band (rows XROW+1..XROW+2 are
+    // cut there; that stretch is the tunnel mouth, not an aisle).
+    (function () {
+      if (!CBZ.stairs) return;
+      var stops = [0];
+      for (var r3 = 1; r3 < ROWS - 1; r3++) if (crossRow(r3)) stops.push(r3);
+      stops.push(ROWS - 1);
+      function aisleLinks(ptAt, hasVom) {
+        for (var b = 0; b + 1 < stops.length; b++) {
+          var r0 = stops[b], r1 = stops[b + 1];
+          if (hasVom && r0 === XROW) continue;
+          var path = [];
+          for (var r4 = r0; r4 <= r1; r4++) {
+            var p = ptAt(deckFront(r4) + deckDepth(r4) * (r4 === r0 ? 0.5 : 0.35));
+            path.push({ x: p.x, y: rowY(r4), z: p.z });
+          }
+          CBZ.stairs.link({ path: path, width: AISLE_H * 2, kind: "aisle", owner: V });
+        }
+      }
+      function vomOn(side, key) {
+        for (var vi = 0; vi < VOMS.length; vi++) {
+          var base = (side === "xp" || side === "xn") ? CZ : CX;
+          if (VOMS[vi].side === side && Math.abs(key - (base + VOMS[vi].k)) < VOM_HW) return true;
+        }
+        return false;
+      }
+      [["xp", AIS_X, CZ], ["xn", AIS_X, CZ], ["zp", AIS_Z, CX], ["zn", AIS_Z, CX]].forEach(function (sd) {
+        sd[1].forEach(function (off) {
+          var key = sd[2] + off;
+          aisleLinks(function (d) { return straightPoint(sd[0], d, key); }, vomOn(sd[0], key));
+        });
+      });
+      for (var ci = 0; ci < 4; ci++) {
+        var ox = (ci === 0 || ci === 3) ? CX + A : CX - A;
+        var oz = (ci === 0 || ci === 1) ? CZ + B : CZ - B;
+        var am = ci * Math.PI / 2 + Math.PI / 4;
+        (function (ox, oz, c, s) {
+          aisleLinks(function (d) { return { x: ox + c * d, z: oz + s * d }; }, false);
+        })(ox, oz, Math.cos(am), Math.sin(am));
+      }
+    })();
+
     // =========================================================== UNDER-STAND
     // Rear skirt wall closing the under-stand volume, with vomitory + main-gate
     // openings. Everything behind the bowl front is sealed except those tunnels.
@@ -937,6 +1028,22 @@ CBZ.arenaVenue = {
 
     // ------------------------------------------------ vomitory ramps + walls
     (function () {
+      function vomFlight(a, ya, b, yb) {
+        var f = CBZ.stairs && CBZ.stairs.flight({
+          bottom: { x: a.x, y: ya, z: a.z }, top: { x: b.x, y: yb, z: b.z },
+          width: VOM_HW * 2, overlap: 0.3, owner: V, plats: platforms, kind: "ramp"
+        });
+        if (f && f.plat) f.plat.ref = V;
+        // the floor you walk on, drawn: yaw to the down-slope direction, then
+        // pitch about the tunnel's own side-to-side axis (eo "YXZ")
+        var run = Math.hypot(b.x - a.x, b.z - a.z), len = Math.hypot(run, yb - ya);
+        put("concrete", {
+          x: (a.x + b.x) / 2, y: (ya + yb) / 2 - 0.12, z: (a.z + b.z) / 2,
+          sx: VOM_HW * 2, sy: 0.24, sz: len,
+          ry: yawOf((a.x - b.x) / run, (a.z - b.z) / run),
+          rx: Math.atan2(yb - ya, run), eo: "YXZ"
+        });
+      }
       for (var i = 0; i < VOMS.length; i++) {
         var v = VOMS[i], side = v.side;
         var base = (side === "xp" || side === "xn") ? CZ : CX;
@@ -960,14 +1067,25 @@ CBZ.arenaVenue = {
         } else {
           plat(k - VOM_HW, Math.min(pIn.z, pLand.z), k + VOM_HW, Math.max(pIn.z, pLand.z), CROSS_Y);
         }
+        // THE WALK-UP. The old ramp record ran from the concourse all the way
+        // to the FRONT of the cross-aisle (VOM_D_IN), i.e. its last 2.8 m lay
+        // UNDER the landing above: at the landing's back edge the ramp was
+        // 0.61 m below it (> STEP_UP 0.45), so you walked on under the
+        // cross-aisle deck and popped up mid-landing, and on the way down you
+        // dropped 0.61 off its back edge. It was also drawn as NOTHING (no
+        // mesh: an invisible floor). Now flight 1 keeps the old line from the
+        // concourse to the tunnel mouth (VOM_D_COVER, where 2.09 m under the
+        // deck above is the tightest headroom), flight 2 climbs the open notch
+        // to the landing's BACK edge at CROSS_Y, so ramp and landing meet at
+        // one height. Both are CBZ.stairs flights (AI links included).
+        var yCov = PY + (CROSS_Y - PY) * (VOM_D_OUT - VOM_D_COVER) / (VOM_D_OUT - VOM_D_IN);
+        var pTop = straightPoint(side, deckFront(XROW) + deckDepth(XROW), k);
+        vomFlight(pOut, PY, pCov, yCov);
+        vomFlight(pCov, yCov, pTop, CROSS_Y);
         if (side === "xp" || side === "xn") {
-          plat(pOut.x, k - VOM_HW, pIn.x, k + VOM_HW, CROSS_Y,
-               { axis: "x", x0: pOut.x, x1: pIn.x, y0: PY, y1: CROSS_Y });
           solid(pCov.x, k - VOM_HW - 0.55, pIn.x, k - VOM_HW, PY, yNotch);
           solid(pCov.x, k + VOM_HW, pIn.x, k + VOM_HW + 0.55, PY, yNotch);
         } else {
-          plat(k - VOM_HW, pOut.z, k + VOM_HW, pIn.z, CROSS_Y,
-               { z0: pOut.z, z1: pIn.z, y0: PY, y1: CROSS_Y });
           solid(k - VOM_HW - 0.55, pCov.z, k - VOM_HW, pIn.z, PY, yNotch);
           solid(k + VOM_HW, pCov.z, k + VOM_HW + 0.55, pIn.z, PY, yNotch);
         }

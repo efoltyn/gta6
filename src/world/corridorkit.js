@@ -692,6 +692,9 @@
     outDoor.interlock = gate;
     const stp = P(0, Z1 + 0.6);
     const step = addBox(stp[0], 0.08, stp[1], 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
+    // the step is a thing you stand on, not a slab your shins pass through
+    (CBZ.platforms || (CBZ.platforms = [])).push({ minX: stp[0] - 1.2, maxX: stp[0] + 1.2, minZ: stp[1] - 0.6, maxZ: stp[1] + 0.6, top: 0.16 });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     const olp = P(0, Z1 + 0.06); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
     // the booth
     if (cfg.booth !== null) {

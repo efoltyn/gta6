@@ -468,6 +468,10 @@
     const z = F.cz - 4;
     box(F.cx, 0.21, z, 6.4, 0.42, 4.0, R.band);
     box(F.cx, 0.63, z, 4.8, 0.42, 2.8, R.cloth);
+    // BOTH risers are platforms. Only the top one was: from the ground the
+    // speaking deck was a 0.84 m step (over STEP_UP) and the lower riser a
+    // drawn box you could not stand on, so the podium could not be mounted.
+    plat(F.cx, z, 6.4, 4.0, 0.42);
     plat(F.cx, z, 4.8, 2.8, 0.84);
     // The lectern faces the MOTOR COURT (+z), because that is where the crowd
     // and the arrival axis are; the standards stand behind the speaker, on the

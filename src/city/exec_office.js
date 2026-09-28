@@ -824,8 +824,8 @@
 
     // ---- the plate ---------------------------------------------------------
     const iX0 = -W / 2 + wt, iX1 = W / 2 - wt, iZ0 = -D / 2 + wt, iZ1 = D / 2 - wt;
-    const xS = b.hasStairs ? iX0 + b.stairW : iX0;          // the stair strip stays open
-    const xLo = (b.hasStairs ? (-W / 2 + wt + b.stairW + 0.4) : (-W / 2 + wt + 0.35));
+    const xS = iX0;
+    const xLo = -W / 2 + wt + 0.35;
     const xHi = W / 2 - wt - 0.35;
     const zLo = -D / 2 + wt + 0.35;
     const zHi = D / 2 - wt - 0.35;
@@ -836,8 +836,8 @@
       { axis: "z", at: iZ1, s: 1, lo: xS, hi: iX1 },
       { axis: "z", at: iZ0, s: -1, lo: xS, hi: iX1 },
       { axis: "x", at: iX1, s: 1, lo: iZ0, hi: iZ1 },
+      { axis: "x", at: iX0, s: -1, lo: iZ0, hi: iZ1 },
     ];
-    if (!b.hasStairs) faces.push({ axis: "x", at: iX0, s: -1, lo: iZ0, hi: iZ1 });
 
     // THE VIEW. The curtain wall on this storey goes low-iron (buildings.js
     // pools kind "view" on CBZ.cityViewGlassMat), and the fake-room glow
@@ -889,8 +889,7 @@
       else solid(sm, SILL / 2, (f.lo + f.hi) / 2, SILLD, SILL, sillLen);
     }
     // corner columns: plaster cladding over the curtain wall's dark end piers
-    const corners = [[iX1, iZ1], [iX1, iZ0]];
-    if (!b.hasStairs) corners.push([iX0, iZ1], [iX0, iZ0]);
+    const corners = [[iX1, iZ1], [iX1, iZ0], [iX0, iZ1], [iX0, iZ0]];
     for (const c of corners) {
       const sx = Math.sign(c[0]), sz = Math.sign(c[1]);
       const cx = c[0] - sx * 0.31, cz = c[1] - sz * 0.31;
@@ -905,7 +904,6 @@
       for (const r of b.windows) {
         if (!r || r.external || r.y < Y + 0.2 || r.y > Y + FH - 0.2) continue;
         const lx = r.x - ox, lz = r.z - oz, faceZ = r.hd < r.hw;
-        if (!faceZ && lx < 0 && b.hasStairs) continue;               // the stairwell's own glass
         for (const e of [-1, 1]) {
           if (faceZ) {
             const ex = lx + e * r.hw; if (ex < xS + 0.05 || ex > iX1 - 0.65 || ex < iX0 + 0.65) continue;

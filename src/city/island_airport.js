@@ -2495,6 +2495,38 @@
     (function controlTower() {
       const cxp = -180 + ADX, czp = 30 + ADZ, base = 4.5, H = 34;
       const V2 = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false;
+      /* THE STAIR, SOLVED ONCE (see THE CLIMB below for why these numbers).
+         Solved up here because the cab floor needs a WELL where the top of the
+         flight comes up through it: the whole helix runs under the 8.5 m cab
+         floor, and that floor was one platform + one slab straight across it.
+         From the cab you could never go down (groundAt keeps the highest
+         surface in step reach, so you walked on the floor over the stair and
+         the only way off was the 34 m edge), and on the way up the climber's
+         head went through the slab for the last five treads. */
+      const RISE = 0.42, WR = base / 2 + 0.85, PER_LEG = 8, CAB_Y = H + 0.05;
+      const stairs = [];
+      for (let s = 0; s < Math.ceil(H / RISE); s++) {
+        const y = (s + 1) * RISE;
+        if (y > H + 1.2) break;
+        const leg = (s / PER_LEG | 0) % 4;
+        const off = ((s % PER_LEG) / PER_LEG - 0.5) * 2 * WR;
+        let sx = cxp, sz = czp;
+        if (leg === 0) { sx = cxp + off; sz = czp - WR; }
+        else if (leg === 1) { sx = cxp + WR; sz = czp + off; }
+        else if (leg === 2) { sx = cxp - off; sz = czp + WR; }
+        else { sx = cxp - WR; sz = czp - off; }
+        stairs.push([sx, y, sz]);
+      }
+      // the well: every tread a head would put into the cab slab (a body is
+      // 1.7 m; the slab's underside is 0.45 under the floor), minus the last
+      // tread, which IS at floor height
+      let well = null;
+      for (const st of stairs) {
+        if (!(st[1] > CAB_Y - 2.3 && st[1] < CAB_Y - 0.2)) continue;
+        if (!well) well = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+        well.x0 = Math.min(well.x0, st[0] - 0.7); well.x1 = Math.max(well.x1, st[0] + 0.7);
+        well.z0 = Math.min(well.z0, st[2] - 0.7); well.z1 = Math.max(well.z1, st[2] + 0.7);
+      }
       /* THE BUILDING (de-slop 2026-09-27): it was a grey box shaft, a
          see-through box for a cab, a slab for a roof and a glowing red stick
          for a beacon, with "TWR" on a board hung in the air in front of the
@@ -2505,7 +2537,8 @@
          4.5 m collider and inside the stair's 2.4 m inner edge; its cab is
          the same 8.5 m square the cab-floor platform already is. */
       if (PARTS) {
-        PARTS.tower(root, cxp, czp, { H: H, apothem: 2.2, cabHalf: (base + 4) / 2, cabH: 3.2, plinth: false }, root);
+        PARTS.tower(root, cxp, czp, { H: H, apothem: 2.2, cabHalf: (base + 4) / 2, cabH: 3.2, plinth: false,
+          floorHole: (V2 && well) ? { x0: well.x0 - cxp, x1: well.x1 - cxp, z0: well.z0 - czp, z1: well.z1 - czp } : null }, root);
       } else {
         box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
       }
@@ -2518,7 +2551,18 @@
            which is where anybody walking here comes from). */
         const DW = 1.6, DH = 2.5;                       // clear opening
         const jamb = (base - DW) / 2;
-        solid(cxp, czp, base, base, DH, H + 6);         // everything above the head
+        // everything above the head — up to the cab floor, not through it:
+        // the shaft ran on to H+6, a 4.5 m solid pillar in the middle of the
+        // cab, with the console and the controller's post inside it
+        solid(cxp, czp, base, base, DH, H - 0.45);
+        // the cab: raked glass on four sides (it had no walls at all — the
+        // glass was a picture, and the floor ended at a 34 m drop) and a roof
+        const CHF = (base + 4) / 2;
+        for (const sg of [-1, 1]) {
+          solid(cxp, czp + sg * (CHF - 0.06), CHF * 2, 0.14, H, H + 3.2);
+          solid(cxp + sg * (CHF - 0.06), czp, 0.14, CHF * 2, H, H + 3.2);
+        }
+        solid(cxp, czp, CHF * 2 + 1.4, CHF * 2 + 1.4, H + 3.2, H + 3.8);
         solid(cxp - (DW + jamb) / 2, czp, jamb, base, 0, DH);   // west jamb
         solid(cxp + (DW + jamb) / 2, czp, jamb, base, 0, DH);   // east jamb
         solid(cxp, czp - base / 2 + 0.15, DW, 0.3, 0, DH);      // …and the back wall behind it
@@ -2561,27 +2605,26 @@
          plus a body's shoulder — and the treads (1.4 m wide) clear the
          collider face by 0.15 m while still landing under the cab's own
          overhang (half of base+4 = 4.25) so the top step is on the floor. */
-      const RISE = 0.42;
-      const WR = base / 2 + 0.85;                       // 3.10 — outside the shaft
-      const PER_LEG = 8;
-      const steps = Math.ceil(H / RISE);
-      const stairs = [];
-      for (let s = 0; s < steps; s++) {
-        const y = (s + 1) * RISE;
-        if (y > H + 1.2) break;
-        // four legs round the shaft, turning the corner at each landing
-        const leg = (s / PER_LEG | 0) % 4;
-        const off = ((s % PER_LEG) / PER_LEG - 0.5) * 2 * WR;
-        let sx = cxp, sz = czp;
-        if (leg === 0) { sx = cxp + off; sz = czp - WR; }
-        else if (leg === 1) { sx = cxp + WR; sz = czp + off; }
-        else if (leg === 2) { sx = cxp - off; sz = czp + WR; }
-        else { sx = cxp - WR; sz = czp - off; }
-        stairs.push([sx, y, sz]);
-        if (CBZ.platforms) {
-          const pr = { minX: sx - 0.7, maxX: sx + 0.7, minZ: sz - 0.7, maxZ: sz + 0.7, top: y };
-          CBZ.platforms.push(pr); towerPlats.push(pr);
+      // (the stair itself is solved at the top of controlTower: RISE, WR,
+      // PER_LEG, `stairs`, and the cab-floor `well`)
+      if (CBZ.platforms) for (const st of stairs) {
+        const pr = { minX: st[0] - 0.7, maxX: st[0] + 0.7, minZ: st[2] - 0.7, maxZ: st[2] + 0.7, top: st[1] };
+        CBZ.platforms.push(pr); towerPlats.push(pr);
+      }
+      // the planner's view of it: ground -> each corner -> the cab
+      if (CBZ.stairs && stairs.length > 1) {
+        if (CBZ.stairs.removeOwner) CBZ.stairs.removeOwner("airport-tower");
+        const a0 = stairs[0], a1 = stairs[1];
+        const path = [{ x: a0[0] - (a1[0] - a0[0]) * 1.2, y: 0, z: a0[2] - (a1[2] - a0[2]) * 1.2 }];
+        for (let i = 0; i < stairs.length; i++) {
+          const st = stairs[i];
+          if (i === 0 || i === stairs.length - 1 || (i % PER_LEG) === PER_LEG - 1 || (i % PER_LEG) === 0) {
+            path.push({ x: st[0], y: st[1], z: st[2] });
+          }
         }
+        const zl = stairs[stairs.length - 1];
+        path.push({ x: zl[0] - (zl[0] - cxp) * 0.35, y: CAB_Y, z: zl[2] - (zl[2] - czp) * 0.35 });
+        CBZ.stairs.link({ path: path, width: 1.3, kind: "stair", owner: "airport-tower" });
       }
       /* THE STAIR AS STEEL. It was 81 loose 1.4 m plates floating round
          the shaft. A real external tower stair is grating treads carried on
@@ -2618,13 +2661,20 @@
       }
       // the cab FLOOR — the top landing, and the deck the controller's chair
       // and console stand on.
-      const CAB_Y = H + 0.05;
       if (CBZ.platforms) {
-        const cf = {
-          minX: cxp - (base + 4) / 2, maxX: cxp + (base + 4) / 2,
-          minZ: czp - (base + 4) / 2, maxZ: czp + (base + 4) / 2, top: CAB_Y,
-        };
-        CBZ.platforms.push(cf); towerPlats.push(cf);
+        // the cab floor, around its stair well
+        const X0 = cxp - (base + 4) / 2, X1 = cxp + (base + 4) / 2, Z0 = czp - (base + 4) / 2, Z1 = czp + (base + 4) / 2;
+        const rects = [];
+        if (!well) rects.push([X0, X1, Z0, Z1]);
+        else {
+          const hx0 = Math.max(X0, well.x0), hx1 = Math.min(X1, well.x1), hz0 = Math.max(Z0, well.z0), hz1 = Math.min(Z1, well.z1);
+          rects.push([X0, X1, Z0, hz0], [X0, X1, hz1, Z1], [X0, hx0, hz0, hz1], [hx1, X1, hz0, hz1]);
+        }
+        for (const r of rects) {
+          if (r[1] - r[0] < 0.02 || r[3] - r[2] < 0.02) continue;
+          const cf = { minX: r[0], maxX: r[1], minZ: r[2], maxZ: r[3], top: CAB_Y };
+          CBZ.platforms.push(cf); towerPlats.push(cf);
+        }
       }
       if (!PARTS) box(cxp, CAB_Y - 0.06, czp, base + 4, 0.12, base + 4, 0x4a5158, { cast: false });
 

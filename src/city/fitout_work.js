@@ -108,11 +108,10 @@
   // stops 0.4 m short of them; architecture and wall-hung pieces use these).
   function shellOf(B) {
     const b = B.b, wt = b.wt != null ? b.wt : 0.4;
-    const stairEdge = b.hasStairs ? -b.w / 2 + wt + (b.stairW || 0) : null;
-    return {
-      x0: b.hasStairs ? stairEdge : -b.w / 2 + wt, x1: b.w / 2 - wt,
-      z0: -b.d / 2 + wt, z1: b.d / 2 - wt, open: !!b.hasStairs, wt: wt,
-    };
+    // (the stair core is a reserved rect inside this, handled by the builder's
+    // core guard + holes, not by moving a face: the old -x "open stair strip"
+    // side was keyed on buildings.js's dead hasStairs gate and never existed)
+    return { x0: -b.w / 2 + wt, x1: b.w / 2 - wt, z0: -b.d / 2 + wt, z1: b.d / 2 - wt, wt: wt };
   }
   function holesOf(B) { return (B.holes && B.holes()) || []; }
   function inHole(B, x, z, pad) {
@@ -146,23 +145,13 @@
     return true;
   }
 
-  // the stair foot / landing on this storey (switchback: the ground floor
-  // and every even floor land at the -z end, odd floors at the +z end) —
-  // reserved so a partition can never wall the way up off.
-  function landingRect(B, S) {
-    if (!S.open) return null;
-    const odd = (B.k % 2) === 1;
-    return odd ? { x0: S.x0 - 0.1, x1: S.x0 + 2.2, z0: S.z1 - 3.4, z1: S.z1 + 0.1 }
-               : { x0: S.x0 - 0.1, x1: S.x0 + 2.2, z0: S.z0 - 0.1, z1: S.z0 + 3.4 };
-  }
-
   // the four inside faces as frames: u along the wall, v into the room
   function sidesOf(S) {
     return {
-      x0: { F: Frame(S.x0, S.z0, 0, 1, 1, 0), len: S.z1 - S.z0, open: S.open, openA: false, openB: false },
-      z1: { F: Frame(S.x0, S.z1, 1, 0, 0, -1), len: S.x1 - S.x0, open: false, openA: S.open, openB: false },
+      x0: { F: Frame(S.x0, S.z0, 0, 1, 1, 0), len: S.z1 - S.z0, open: false, openA: false, openB: false },
+      z1: { F: Frame(S.x0, S.z1, 1, 0, 0, -1), len: S.x1 - S.x0, open: false, openA: false, openB: false },
       x1: { F: Frame(S.x1, S.z1, 0, -1, -1, 0), len: S.z1 - S.z0, open: false, openA: false, openB: false },
-      z0: { F: Frame(S.x1, S.z0, -1, 0, 0, 1), len: S.x1 - S.x0, open: false, openA: false, openB: S.open },
+      z0: { F: Frame(S.x1, S.z0, -1, 0, 0, 1), len: S.x1 - S.x0, open: false, openA: false, openB: false },
     };
   }
   // does any facade window on the wall behind frame P overlap u0..u1, yb..yt?
@@ -493,15 +482,10 @@
   function restroomOrder(B, S) {
     const b = B.b, d = b.localDoor || null;
     const out = [];
-    if (S.open) {
-      // against the stair core, at the end away from the landing
-      out.push({ side: "x0", ends: (B.k % 2) === 1 ? [0, 1] : [1, 0] });
-    }
     let away = "z1";
     if (d) { if (Math.abs(d.nx) > 0.5) away = d.nx > 0 ? "x1" : "x0"; else away = d.nz > 0 ? "z1" : "z0"; }
     const all = [away, "x0", "z1", "x1", "z0"];
     for (let i = 0; i < all.length; i++) {
-      if (all[i] === "x0" && S.open) continue;
       if (!out.some(function (o) { return o.side === all[i]; })) out.push({ side: all[i] });
     }
     return out;
@@ -531,9 +515,9 @@
     return S;
   }
   function baseOcc(B, S) {
+    // the stair core's landing mouth stays clear of every planner's ledger
     const occ = Occ();
-    const L = landingRect(B, S);
-    if (L) occ.add(L);
+    for (const r of (B.b.keepRects || [])) occ.add(grow(r, 0.1));
     return occ;
   }
   function officeExtras(B, S, occ, o) {
@@ -859,12 +843,11 @@
       const farV = Math.abs(along ? (nx > 0 ? S.x1 : S.x0) - ax : (nz > 0 ? S.z1 : S.z0) - az);
       const negX = Math.abs(tx) > 0.5;
       const negFace = negX ? (-tx > 0 ? S.x1 : S.x0) : (-tz > 0 ? S.z1 : S.z0);
-      const negOpen = negX && -tx < 0 && S.open;
       const latNeg = Math.abs(negFace - (negX ? ax : az));
       // the kitchen's own frame: origin in that corner on the far wall, u
       // running along +t toward the counter, v back into the room
       const K = Frame(A.x(-latNeg, farV), A.z(-latNeg, farV), tx, tz, -nx, -nz);
-      const kStart = negOpen ? 0.15 : 0;
+      const kStart = 0;
       const Lk = (latNeg - 1.75) - kStart;
       if (Lk >= 1.55) {
         const u0 = kStart;
@@ -1145,7 +1128,6 @@
     const backWalled = !!BACK_OF_HOUSE[kind] && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
     const occ = baseOcc(B, S);
     const y = B.fy;
-    // the stair strip, in lateral terms (hasStairs puts it on the building's -x side)
     const latOf = function (x, z) { return x * tx + z * tz; };
     const inOf = function (x, z) { return x * inx + z * inz + halfIn; };
 
@@ -1574,7 +1556,7 @@
       // otherwise laid across the rails
       const S = shellOf(B);
       const cands = [
-        { d: x - S.x0, ok: !S.open, wx: S.x0, axis: "x", s: 1 }, { d: S.x1 - x, ok: true, wx: S.x1, axis: "x", s: -1 },
+        { d: x - S.x0, ok: true, wx: S.x0, axis: "x", s: 1 }, { d: S.x1 - x, ok: true, wx: S.x1, axis: "x", s: -1 },
         { d: z - S.z0, ok: true, wz: S.z0, axis: "z", s: 1 }, { d: S.z1 - z, ok: true, wz: S.z1, axis: "z", s: -1 },
       ].filter(function (c) { return c.ok && c.d > 0.9 && c.d < 2.8; }).sort(function (a, b) { return a.d - b.d; });
       if (cands.length) {

@@ -1304,7 +1304,9 @@
     // a navigator waypoint short of its goal is a corner: walked through
     // (a goal the grid only SNAPPED out of a bench is still a goal: braked into)
     const S = g._nav;
-    const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3);
+    // (a stair route's waypoints — navgrid's level layer — are corners too)
+    const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3)
+      || !!(g._lvl && g._lvl.pts);
     O.speed = sp; O.stop = routed ? 0.3 : (stop || 0.3); O.leg = routed || !!leg;
     O.face = null; O.strafe = false; O.turnRate = 0;
     O.accel = sp > 3 ? 5.2 : 0;

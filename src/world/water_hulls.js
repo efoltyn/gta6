@@ -164,6 +164,43 @@
     root.add(m);
     return m;
   }
+  // A slab with a STAIRWELL cut out of it (hole = {x0,x1,z0,z1}, local). A
+  // staircase that climbs through a solid slab is a head in the floor above.
+  function addSlab(root, w, h, d, x, y, z, material, hole) {
+    if (!hole) return addBox(root, w, h, d, x, y, z, material);
+    const X0 = x - w / 2, X1 = x + w / 2, Z0 = z - d / 2, Z1 = z + d / 2;
+    const hz0 = Math.max(Z0, hole.z0), hz1 = Math.min(Z1, hole.z1);
+    const hx0 = Math.max(X0, hole.x0), hx1 = Math.min(X1, hole.x1);
+    if (hz1 <= hz0 || hx1 <= hx0) return addBox(root, w, h, d, x, y, z, material);
+    const put = function (a0, a1, b0, b1) {
+      if (a1 - a0 > 0.01 && b1 - b0 > 0.01) addBox(root, a1 - a0, h, b1 - b0, (a0 + a1) / 2, y, (b0 + b1) / 2, material);
+    };
+    put(X0, X1, Z0, hz0);
+    put(X0, X1, hz1, Z1);
+    put(X0, hx0, hz0, hz1);
+    put(hx1, X1, hz0, hz1);
+    return null;
+  }
+  // the same cut on a moving-platform deck record {x,z,w,d,top}
+  function deckWithHole(out, dk, hole) {
+    const X0 = dk.x - dk.w / 2, X1 = dk.x + dk.w / 2, Z0 = dk.z - dk.d / 2, Z1 = dk.z + dk.d / 2;
+    const hz0 = Math.max(Z0, hole.z0), hz1 = Math.min(Z1, hole.z1);
+    const hx0 = Math.max(X0, hole.x0), hx1 = Math.min(X1, hole.x1);
+    const put = function (a0, a1, b0, b1) {
+      if (a1 - a0 > 0.01 && b1 - b0 > 0.01) out.push({ x: (a0 + a1) / 2, z: (b0 + b1) / 2, w: a1 - a0, d: b1 - b0, top: dk.top });
+    };
+    if (hz1 <= hz0 || hx1 <= hx0) { out.push(dk); return; }
+    put(X0, X1, Z0, hz0); put(X0, X1, hz1, Z1); put(X0, hx0, hz0, hz1); put(hx1, X1, hz0, hz1);
+  }
+  // THE MEGA YACHT'S TWO STAIRWELLS (local x/z). Main -> upper climbs +z from
+  // z -9.3 to -6.42 at x 0 (1.40 wide); upper -> sun from -6.4 to -3.52
+  // (1.30 wide). The upper deck, the sun deck, both cabin roofs and both
+  // ceiling liners used to be solid slabs straight across them — and so were
+  // the deck RECORDS: standing on the upper deck over the stair you walked on
+  // air and could never go down it (groundAt keeps the highest surface in
+  // reach), and a climber's head went through the slab above.
+  const YACHT_WELL_1 = { x0: -0.75, x1: 0.75, z0: -8.75, z1: -6.42 };
+  const YACHT_WELL_2 = { x0: -0.70, x1: 0.70, z0: -6.75, z1: -3.52 };
   function addPrism(root, width, profile, y, material) {
     const m = new THREE.Mesh(prismGeo(width, profile), material);
     m.position.y = y || 0;
@@ -251,7 +288,7 @@
     const doorW = Math.min(o.doorW || 1.10, w * 0.48);
     const lowerH = h * 0.30, upperH = h * 0.18, winH = h * 0.42;
     const winY = y0 + h * 0.57;
-    addBox(root, w, 0.16, span, 0, y1 - 0.08, mid, body);            // landed roof
+    addSlab(root, w, 0.16, span, 0, y1 - 0.08, mid, body, o.roofHole);   // landed roof
     [1, -1].forEach(function (side) {
       addBox(root, 0.14, lowerH, span, side * hb, y0 + lowerH * 0.5, mid, liner);
       addBox(root, 0.14, upperH, span, side * hb, y1 - upperH * 0.5, mid, liner);
@@ -1406,7 +1443,7 @@
     addFixtureBox: addFixtureBox, addFixtureCyl: addFixtureCyl,
     addSeat: addSeat, addTable: addTable, addCabinet: addCabinet, addScreen: addScreen,
     addCabinShell: addCabinShell,
-    addRail: addRail, addStairs: addStairs, stairDecks: stairDecks,
+    addRail: addRail, addStairs: addStairs, stairDecks: stairDecks, addSlab: addSlab,
     mergeByMaterial: mergeByMaterial, finish: finish,
     M: M, propGroup: propGroup, navLights: navLights,
     // THE LOFT. Every hull author reaches the surface primitive through here
@@ -2456,9 +2493,12 @@
     addBox(b, 1.9, 0.16, 1.7, 0, sheerAt(4.4) + 0.16, 4.4, pad);            // sunpad
     addBox(b, 0.40, 0.24, 0.40, 0, sheerAt(6.1) + 0.20, 6.1, chrome);       // windlass
     // EXTERNAL LADDER to the flybridge, on the starboard side aft of the saloon
-    addStairs(b, 1.55, 0.75, -2.05, 1, SHEER + 0.15, 3.75, 6, chrome);
+    // (it was drawn at z -2.05..0.11 — BESIDE the saloon, through its side
+    // wall, climbing to a spot behind the flybridge's own rail: a dead end.
+    // Now it rises from the cockpit sole to the flybridge's aft edge.)
+    addStairs(b, 1.55, 0.75, -4.21, 1, SHEER + 0.05, 3.75, 6, chrome);
     // FLYBRIDGE: sole, helm console, twin seats, radar arch.
-    addBox(b, 3.0, 0.12, 4.2, 0, 3.75, 0.5, teak);
+    addBox(b, 3.0, 0.12, 4.8, 0, 3.75, 0.2, teak);   // sole reaches the saloon aft face (the ladder head)
     addPrism(b, 2.0, [[1.6, 0], [1.7, 0.95], [2.4, 1.0], [2.5, 0]], 3.81, dark);   // helm console
     const fbGlass = addBox(b, 2.3, 0.60, 0.06, 0, 4.95, 2.55, glass);
     fbGlass.rotation.x = -0.45;
@@ -2468,7 +2508,7 @@
       addBox(b, 0.52, 0.42, 0.12, x, 4.26, 0.90, pad);
     });
     addBox(b, 2.6, 0.14, 1.4, 0, 3.90, -1.1, pad);                          // aft sunpad
-    addRail(b, 1.48, -1.5, 2.4, 3.81, chrome, 1.4);
+    addRail(b, 1.48, -1.1, 2.4, 3.81, chrome, 1.4);    // opens at the ladder head
     addRail(b, -1.48, -1.5, 2.4, 3.81, chrome, 1.4);
     // radar arch over the flybridge aft edge, solved from deck sockets to the
     // cross member so neither leg can float after a proportion change.
@@ -2650,9 +2690,10 @@
     // glass. Superstructure half-width 2.60 so the side decks (2.60..3.50,
     // 0.90m wide) run clear the full length. That is the critical loop.
     addBox(b, 6.4, 0.14, 3.0, 0, Y.MAIN, -10.0, teak);               // cockpit sole
-    addBox(b, 2.6, 0.10, 1.6, 0, Y.MAIN + 0.72, -10.0, teak);        // dining table
+    // dining table 0.3 m further aft, clear of the foot of the main stair
+    addBox(b, 2.6, 0.10, 1.6, 0, Y.MAIN + 0.72, -10.3, teak);        // dining table
     addCabinShell(b, { width: 5.20, z0: -8.60, z1: 9.40, y0: Y.MAIN, y1: Y.SUP1,
-      doorW: 1.65, body: hull, liner: liner, glass: glass });
+      doorW: 1.65, body: hull, liner: liner, glass: glass, roofHole: YACHT_WELL_1 });
     [1, -1].forEach(function (side) {
       // SIDE DECKS both sides, railed — as a ribbon on the deck EDGE. The
       // 20 m box they used to be ran at a constant 3.50 m half-width through a
@@ -2675,7 +2716,7 @@
     // centre aisle. The long lounge, dining zone and galley each occupy a side
     // instead of being one giant console-shaped obstruction.
     addBox(b, 4.96, 0.08, 17.0, 0, Y.MAIN + 0.08, 0.35, wood);
-    addBox(b, 4.84, 0.06, 16.3, 0, Y.SUP1 - 0.20, 0.15, liner);
+    addSlab(b, 4.84, 0.06, 16.3, 0, Y.SUP1 - 0.20, 0.15, liner, YACHT_WELL_1);
     addFixtureBox(b, "saloon-settee", 0.68, 0.50, 4.1, 1.88, Y.MAIN + 0.35, -4.4, pad);
     addFixtureBox(b, "saloon-settee-back", 0.14, 0.78, 4.1, 2.18, Y.MAIN + 0.72, -4.4, pad);
     addTable(b, 0.72, Y.MAIN + 0.08, -4.4, 1.35, 1.25, wood, chrome);
@@ -2716,9 +2757,9 @@
 
     // ---- UPPER DECK: skylounge aft, WHEELHOUSE FORWARD ON THIS DECK (§F: not
     // at the very top on a hull this size).
-    addBox(b, 5.6, 0.16, 17.6, 0, Y.UPPER, 0.2, teak);
+    addSlab(b, 5.6, 0.16, 17.6, 0, Y.UPPER, 0.2, teak, YACHT_WELL_1);
     addCabinShell(b, { width: 4.60, z0: -6.60, z1: 7.40, y0: Y.UPPER, y1: Y.SUP2,
-      doorW: 1.45, body: hull, liner: liner, glass: glass });
+      doorW: 1.45, body: hull, liner: liner, glass: glass, roofHole: YACHT_WELL_2 });
     [1, -1].forEach(function (side) {
       // upper side decks
       addBox(b, 0.80, 0.12, 12.0, side * 2.65, Y.UPPER + 0.16, 1.0, teak);
@@ -2726,10 +2767,15 @@
     });
     // Skylounge aft of the bridge, distinct in palette and arrangement from
     // the main saloon below.
-    addBox(b, 4.30, 0.06, 12.8, 0, Y.SUP2 - 0.20, 0.15, liner);
-    addFixtureBox(b, "skylounge-settee", 3.45, 0.48, 0.72, 0, Y.UPPER + 0.34, -4.95, pad);
-    addFixtureBox(b, "skylounge-settee-back", 3.45, 0.78, 0.14, 0, Y.UPPER + 0.72, -5.26, pad);
-    addTable(b, 0, Y.UPPER + 0.08, -3.25, 1.45, 1.1, wood, chrome);
+    addSlab(b, 4.30, 0.06, 12.8, 0, Y.SUP2 - 0.20, 0.15, liner, YACHT_WELL_2);
+    // the upper -> sun stair rises up the middle of the lounge, so the aft
+    // settee is TWO settees flanking it (it used to be one 3.45 m bench drawn
+    // straight across the flight) and the table sits forward of its head
+    [1, -1].forEach(function (side) {
+      addFixtureBox(b, "skylounge-settee", 0.95, 0.48, 0.72, side * 1.25, Y.UPPER + 0.34, -4.95, pad);
+      addFixtureBox(b, "skylounge-settee-back", 0.95, 0.78, 0.14, side * 1.25, Y.UPPER + 0.72, -5.26, pad);
+    });
+    addTable(b, 0, Y.UPPER + 0.08, -2.55, 1.45, 1.1, wood, chrome);
     addCabinet(b, 1.88, Y.UPPER + 0.08, -1.8, 0.54, 0.92, 2.6, liner);
     addFixtureBox(b, "skylounge-bar", 0.65, 0.10, 2.6, 1.85, Y.UPPER + 1.08, -1.8, wood);
     // wheelhouse: raked screen, console, two helm chairs
@@ -2752,8 +2798,10 @@
 
     // ---- SUN DECK (top): sunpads, jacuzzi, bar, davit. No helipad — research
     // §F is explicit that nothing under ~65m carries one.
-    addBox(b, 4.8, 0.16, 11.0, 0, Y.SUN, -0.6, teak);
-    addBox(b, 3.6, 0.22, 2.8, 0, Y.SUN + 0.19, -4.0, pad);           // sunpads
+    addSlab(b, 4.8, 0.16, 11.0, 0, Y.SUN, -0.6, teak, YACHT_WELL_2);
+    [1, -1].forEach(function (side) {                                 // sunpads, either side of the stair head
+      addBox(b, 1.05, 0.22, 2.8, side * 1.275, Y.SUN + 0.19, -4.0, pad);
+    });
     addBox(b, 2.4, 0.70, 2.4, 0, Y.SUN + 0.35, 1.2, M.grey());       // jacuzzi shell
     addBox(b, 2.0, 0.10, 2.0, 0, Y.SUN + 0.62, 1.2, glass);          // the water in it
     addBox(b, 2.6, 0.95, 0.60, 0, Y.SUN + 0.48, 3.6, dark);          // bar
@@ -2794,10 +2842,10 @@
       { x: -1.70, z: 1.4, w: 0.66, d: 7.2, top: SHEER + 0.09 },   // side deck stbd
       { x: 0, z: 0.2, w: 2.58, d: 4.72, top: SHEER + 0.12 },      // enterable saloon sole
       { x: 0, z: 4.6, w: 2.0, d: 2.8, top: SHEER + 0.29 },        // foredeck
-      { x: 0, z: 0.5, w: 3.0, d: 4.2, top: 3.81 },                // flybridge
+      { x: 0, z: 0.2, w: 3.0, d: 4.8, top: 3.81 },                // flybridge (aft edge -2.2: the ladder head)
     ];
     stairDecks(decks, 1.20, 0.70, -7.0, 1, 0.31, 1.35, 3);        // transom -> cockpit
-    stairDecks(decks, 1.55, 0.75, -2.05, 1, SHEER + 0.15, 3.75, 6);
+    stairDecks(decks, 1.55, 0.75, -4.21, 1, SHEER + 0.05, 3.75, 6);   // cockpit -> flybridge
     return {
       decks: decks,
       walls: [
@@ -2810,7 +2858,9 @@
         { x: 0, z: 2.82, w: 2.70, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
         { x: 2.03, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.09, y1: SHEER + 1.10 },
         { x: -2.03, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.09, y1: SHEER + 1.10 },
-        { x: 1.48, z: 0.45, w: 0.08, d: 3.9, y0: 3.81, y1: 4.75 },  // flybridge rails
+        // starboard rail starts 0.4 m further forward: the ladder lands at
+        // the flybridge's aft starboard corner and you step on past it
+        { x: 1.48, z: 0.65, w: 0.08, d: 3.5, y0: 3.81, y1: 4.75 },  // flybridge rails
         { x: -1.48, z: 0.45, w: 0.08, d: 3.9, y0: 3.81, y1: 4.75 },
       ],
       riders: true, yaw: true, camYaw: false, bodyYaw: true, tilt: true,
@@ -2830,11 +2880,12 @@
       { x: -3.02, z: -1.6, w: 0.86, d: 16.0, top: Y.MAIN + 0.14 },  // side deck stbd
       { x: 0, z: 0.35, w: 4.96, d: 17.0, top: Y.MAIN + 0.12 },      // enterable main saloon
       { x: 0, z: 11.6, w: 3.6, d: 3.6, top: Y.MAIN + 0.42 },        // foredeck
-      { x: 0, z: 0.2, w: 5.6, d: 17.6, top: Y.UPPER + 0.08 },       // upper deck
       { x: 2.65, z: 1.0, w: 0.80, d: 12.0, top: Y.UPPER + 0.22 },   // upper side deck
       { x: -2.65, z: 1.0, w: 0.80, d: 12.0, top: Y.UPPER + 0.22 },
-      { x: 0, z: -0.6, w: 4.8, d: 11.0, top: Y.SUN + 0.08 },        // sun deck
     ];
+    // upper deck and sun deck, each with its stairwell cut out
+    deckWithHole(decks, { x: 0, z: 0.2, w: 5.6, d: 17.6, top: Y.UPPER + 0.08 }, YACHT_WELL_1);
+    deckWithHole(decks, { x: 0, z: -0.6, w: 4.8, d: 11.0, top: Y.SUN + 0.08 }, YACHT_WELL_2);
     // transom -> beach club, both sides (the boarding route off the platform)
     stairDecks(decks, 2.55, 0.80, -16.5, 1, Y.PLAT + 0.09, Y.MAIN + 0.07, 6);
     stairDecks(decks, -2.55, 0.80, -16.5, 1, Y.PLAT + 0.09, Y.MAIN + 0.07, 6);

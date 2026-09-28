@@ -570,8 +570,44 @@
     return F;
   }
 
+  /* THE FEET — one rule for every AI body's height, the player's rule.
+     `ground(x, z, fromY)` is the surface under a point as the player sees it
+     (physics.js walkGroundAt when present: groundAt plus the tops of low
+     solid steps; else groundAt), asked FROM the body's own height so a man on
+     storey two stands on storey two and a man in the street never pops onto
+     a roof. `feet(a, pos, dt)` walks pos.y onto it: eased inside a step
+     (a stair ramp, a kerb: no pop), a real fall with gravity when the ground
+     drops more than a step away (the gallery edge), never a teleport.
+     Returns the ground it used (null when the world has no ground query). */
+  const FEET_STEP = 0.45, FEET_EASE = 18, FALL_G = 19.6;
+  function ground(x, z, fromY) {
+    const f = CBZ.walkGroundAt || CBZ.groundAt;
+    if (!f) return null;
+    let g;
+    try { g = f(x, z, fromY); } catch (e) { return null; }
+    return Number.isFinite(g) ? g : null;
+  }
+  function feet(a, pos, dt) {
+    const g = ground(pos.x, pos.z, pos.y);
+    if (g == null) return null;
+    const d = g - pos.y;
+    if (d >= -FEET_STEP) {
+      if (a) a._fallV = 0;
+      pos.y = (d < FEET_STEP && dt > 0) ? pos.y + d * Math.min(1, dt * FEET_EASE) : g;
+    } else {
+      const v = (a && a._fallV ? a._fallV : 0) + FALL_G * (dt > 0 ? dt : 0.016);
+      if (a) a._fallV = v;
+      pos.y = Math.max(g, pos.y - v * (dt > 0 ? dt : 0.016));
+      if (pos.y <= g && a) a._fallV = 0;
+    }
+    return g;
+  }
+
   CBZ.moves = Object.assign(CBZ.moves || {}, {
     GAIT, gaitOf, turnRate, motor, reset, step, face, faceAt, lodFor,
-    phaseDelta, legWorld, formation, wrap, turnToward,
+    phaseDelta, legWorld, formation, wrap, turnToward, ground, feet,
+    // collide() band for an AI body: the player's own feet clearance, so a
+    // stair's soffit under a climber and a riser box are stood on, not walls
+    FEET_CLEAR: 0.42, BODY_H: 1.7,
   });
 })();

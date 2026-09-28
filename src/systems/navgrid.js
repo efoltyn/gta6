@@ -562,7 +562,7 @@
   // running their own stuck-recovery: a body walking the long way is not stuck)
   function owns(a) {
     const S = a && a._nav;
-    return !!(S && (S.pts || S.slide > 0));
+    return !!((S && (S.pts || S.slide > 0)) || (a && a._lvl && a._lvl.pts));
   }
 
   /* frame(plansPerFrame) — called once per frame by whichever mode is using
@@ -777,16 +777,177 @@
      the same breath: anything decided before that call is overwritten by it.
      So the navigator is not a pass over the cast; it is a step the mover takes.
 
-     opts: {speed, slack, nearGoal, arrive, sealedWait, wait(actor, seconds)} */
+     opts: {speed, slack, nearGoal, arrive, sealedWait, wait(actor, seconds),
+            goalY — the goal's floor height, when the caller knows it} */
   const NO_OPTS = {};
   function step(a, p, t, dt, opts) {
-    if (!blocked || budget < 0 || !a || !p || !t) return false;
+    if (!a || !p || !t) return false;
+    const o = opts || NO_OPTS;
+    if (levelStep(a, p, t, dt, o)) return true;   // walking a route between floors
+    if (!blocked || budget < 0) return false;
     if (!inWindow(p.x, p.z)) return false;      // outside the built window: not ours
-    follow(a, p, t, dt, opts || NO_OPTS);
+    if (aboveGrid(p)) {                         // up a storey: not this grid's floor
+      const S = a._nav;
+      if (S && S.wx != null) {
+        if (Math.abs(t.x - S.wx) < 1e-4 && Math.abs(t.z - S.wz) < 1e-4) setT(t, S.gx, S.gz);
+        S.pts = null; S.wx = S.wz = null;
+      }
+      return false;
+    }
+    follow(a, p, t, dt, o);
     return owns(a);
   }
 
-  // ---- 5. PUBLIC ---------------------------------------------------------
+  /* ---- 5. LEVELS: THE STAIR LAYER ---------------------------------------
+     The grid above is flat. A guard whose man is a storey up walked to the
+     square under him and stood there looking at the ceiling, because nothing
+     said one floor joins another. CBZ.stairs (systems/stairs.js) now does:
+     every flight a builder makes is a LINK, and route(from, to) chains them
+     into waypoints. This layer is the one place a mover meets it, in front of
+     the grid follower every mover already calls (city peds via pedNav, the
+     prison's inmates via prisonNav, the screws' walkTo):
+       · the goal's LEVEL comes from opts.goalY, or — for a chase, which is
+         most of what crosses floors — from the mark the target is on: the
+         player (his last STANDING height, never the top of a jump) or the
+         body's own `rage` target. No level → exactly the old behaviour.
+       · a goal on another level asks route() once and caches the answer on
+         the body (`_lvl`); it asks again only when the goal changes level, or
+         after LV_REPLAN s of a floor leg once the goal has walked LV_MOVED m.
+         Never mid-flight, never per frame, LV_ASKS a frame for the cast.
+       · floor legs go through the grid when the leg is on the ground floor
+         the grid describes; stair legs are point to point (the grid reads a
+         flight as a wall or as the floor under it). groundAt carries the Y.
+       · no route (floors with no stairs registered between them) → the old
+         behaviour: hold under the mark, not grind at the ceiling. */
+  const LV_REPLAN = 1.5;       // s of a floor leg before a moved goal is re-routed
+  const LV_POP_H = 0.5;        // a waypoint is reached inside this, horizontally...
+  const LV_POP_V = 0.6;        // ...and this, vertically
+  const LV_NEAR_POP = 0.8;     // s stood on a waypoint whose height he can't match: go on
+  const LV_GIVEUP = 8;         // s on one waypoint: the route is wrong, drop it
+  const LV_RETRY = 2.5;        // s before a body whose route() said "none" asks again
+  const LV_ASKS = 6;           // route() calls per frame, the whole cast
+  const LV_MOVED = 3.0;        // m the goal must walk before a floor-leg re-plan
+  const MARK_ON2 = 0.6 * 0.6;  // a target this close to the player is aimed AT him
+  const MARK_R2 = 3.0 * 3.0;   // ...and this close, for a body that is about him
+  const ABOVE_GRID = 1.2;      // m over the ground the grid was built for
+  let lvAsks = 0, lvClock = NaN, lvRoutes = 0, lvNone = 0, lvWalking = 0;
+  let playerFloorY = null;
+  const _lvFrom = { x: 0, y: 0, z: 0 }, _lvTo = { x: 0, y: 0, z: 0 };
+
+  // the grid is the GROUND floor's (FOOT..HEAD are absolute heights): a body
+  // on a storey above it is among other walls entirely, and routing him round
+  // the partitions of the floor below him is worse than walking straight
+  function aboveGrid(p) {
+    if (!(p.y > ABOVE_GRID)) return false;
+    let base = 0;
+    if (CBZ.floorAt) { try { base = +CBZ.floorAt(p.x, p.z) || 0; } catch (e) { base = 0; } }
+    return p.y - base > ABOVE_GRID;
+  }
+  function markY(a, t, o) {
+    if (o.goalY != null && Number.isFinite(o.goalY)) return o.goalY;
+    const P = CBZ.player;
+    if (P && P.pos && !P.dead) {
+      if (P.grounded !== false || playerFloorY == null) playerFloorY = P.pos.y;
+      const dx = t.x - P.pos.x, dz = t.z - P.pos.z, d2 = dx * dx + dz * dz;
+      // ON him (a chase aims at his feet), or near him for a body that is
+      // about him (his mark, his crew, a hunt) — never a patrol corner that
+      // happens to sit under the gallery he is standing on
+      if (d2 < MARK_ON2) return playerFloorY;
+      if (d2 < MARK_R2 && (a.rage === P || a.companion || a.recruited || a.huntPlayer > 0)) return playerFloorY;
+    }
+    const r = a.rage;
+    if (r && r !== P && r.pos && Number.isFinite(r.pos.y)) {
+      const dx = t.x - r.pos.x, dz = t.z - r.pos.z;
+      if (dx * dx + dz * dz < MARK_R2) return r.pos.y;
+    }
+    return null;
+  }
+  function lvDrop(L, t, restore) {
+    if (restore) setT(t, L.gx, L.gz);
+    L.pts = null; L.wx = L.wz = null;
+  }
+  function levelStep(a, p, t, dt, o) {
+    const STR = CBZ.stairs;
+    if (!STR || !STR.route) return false;
+    const clock = CBZ.game ? +CBZ.game.elapsed : NaN;
+    if (clock !== lvClock) { lvClock = clock; lvAsks = 0; lvWalking = 0; }
+    let L = a._lvl;
+    // `t` still reads back what this layer wrote: nobody changed the errand
+    const readBack = !!(L && L.wx != null && Math.abs(t.x - L.wx) < 1e-4 && Math.abs(t.z - L.wz) < 1e-4);
+    let gx, gz, gy;
+    if (readBack) {
+      gx = L.gx; gz = L.gz;
+      gy = (o.goalY != null && Number.isFinite(o.goalY)) ? o.goalY : L.gy;
+    } else {
+      gx = t.x; gz = t.z; gy = markY(a, t, o);
+    }
+    const DY = STR.LEVEL_DY || 0.9;
+    const active = !!(L && L.pts);
+    if (gy == null || (!active && Math.abs(gy - p.y) < DY)) {
+      if (L) lvDrop(L, t, readBack);
+      return false;
+    }
+    if (!L) L = a._lvl = { pts: null, i: 0, gx: gx, gz: gz, gy: gy, wx: null, wz: null, age: 0, cool: 0, near: 0, onWp: 0 };
+    L.cool -= dt; L.age += dt;
+    const onFlight = active && L.i < L.pts.length && !!L.pts[L.i].stair;
+    // on the goal's floor and off the flight: the plain follower has it from here
+    if (active && !onFlight && Math.abs(gy - p.y) < DY) { L.gx = gx; L.gz = gz; lvDrop(L, t, readBack); return false; }
+    const levelMoved = active && Math.abs(gy - L.gy) >= DY;
+    const walked = active && L.age > LV_REPLAN && Math.hypot(gx - L.gx, gz - L.gz) > LV_MOVED;
+    if (!active || ((levelMoved || walked) && !onFlight)) {
+      if (L.cool > 0 || lvAsks >= LV_ASKS) {
+        if (!active) { L.gx = gx; L.gz = gz; lvDrop(L, t, readBack); return false; }
+        // (a live route keeps being walked until the asking is free again)
+      } else {
+        lvAsks++;
+        _lvFrom.x = p.x; _lvFrom.y = p.y; _lvFrom.z = p.z;
+        _lvTo.x = gx; _lvTo.y = gy; _lvTo.z = gz;
+        let r = null;
+        try { r = STR.route(_lvFrom, _lvTo); } catch (e) { r = null; }
+        L.age = 0; L.gx = gx; L.gz = gz; L.gy = gy;
+        if (!r || !r.length) {
+          if (!r) lvNone++;
+          L.cool = LV_RETRY;
+          lvDrop(L, t, readBack);
+          return false;
+        }
+        lvRoutes++;
+        L.pts = r; L.i = 0; L.near = 0; L.onWp = 0;
+      }
+    }
+    const pts = L.pts;
+    // the mark moves; the stairs do not — the last leg follows him
+    const end = pts[pts.length - 1];
+    if (!end.stair) { end.x = gx; end.z = gz; end.y = gy; }
+    L.gx = gx; L.gz = gz;
+    L.onWp += dt;
+    while (L.i < pts.length) {
+      const w = pts[L.i];
+      const dh = Math.hypot(w.x - p.x, w.z - p.z);
+      L.near = dh < LV_POP_H ? L.near + dt : 0;
+      // a mover whose feet cannot match the waypoint's height is let through
+      // after a beat rather than left standing on it
+      if (dh < LV_POP_H && (Math.abs(w.y - p.y) < LV_POP_V || L.near > LV_NEAR_POP)) {
+        L.i++; L.near = 0; L.onWp = 0; continue;
+      }
+      break;
+    }
+    if (L.i >= pts.length || L.onWp > LV_GIVEUP) {
+      if (L.i < pts.length) L.cool = LV_RETRY;         // gave up: not straight back in
+      lvDrop(L, t, true);
+      return false;
+    }
+    const w = pts[L.i];
+    setT(t, w.x, w.z);
+    if (!w.stair && blocked && budget >= 0 && inWindow(p.x, p.z) && !aboveGrid(p) && Math.abs(w.y - p.y) < DY) {
+      follow(a, p, t, dt, o);           // a floor leg on the ground floor: doors, not walls
+    }
+    L.wx = t.x; L.wz = t.z;
+    lvWalking++;
+    return true;
+  }
+
+  // ---- 6. PUBLIC ---------------------------------------------------------
   CBZ.navGrid = {
     focus: focus,
     ready: () => !!blocked,
@@ -815,6 +976,7 @@
       plans: plans, partials: partials, planFails: planFails,
       lastPlanMs: Math.round(lastPlanMs * 100) / 100, lastNodes: lastNodes,
       followers: followers, slides: slides,
+      stairRoutes: lvRoutes, stairNone: lvNone, stairWalking: lvWalking,
     };
   };
 })();
