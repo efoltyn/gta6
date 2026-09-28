@@ -392,19 +392,19 @@
       const p = V.posts[i];
       queue({ role: "guard", name: "Officer " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
-        dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out here after lights-out.", "Wall's electrified. Don't be stupid."] }, "guard");
+        dialogue: ["Keep moving.", "Hands out of your pockets.", "Back on the line.", "I don't care. Walk."] }, "guard");
     }
     // the corrupt guard behind the gate desk (the bribe man / sign-on)
     queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [0, 6.0], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
     // inmate peds in the two flanking cells — seeded civvies in jail orange.
-    // Their mouths carry the escape hint (dialogue is the sanctioned teacher).
+    // They talk about themselves, never about the way out.
     for (let i = 0; i < 2; i++) {
       const ci = i === 0 ? 0 : 2, cz = cellZ[ci];
       queue({ role: "inmate", name: inmateName(ctx, i), outfit: MAT.orange,
         at: [-8.6, cz], face: Math.PI / 2, post: "pinned", pose: "stand",
-        dialogue: ["I been in here longer than the walls.", "That door plate's been loose since the riot. Work it when their backs are turned.", "The Sarge takes cash. Everybody knows."] }, "inmate:" + ci);
+        dialogue: ["I been in here longer than the walls.", "Ninety days for a bike. A bike.", "My lawyer don't call back.", "You got a smoke?", "Don't touch my bunk."] }, "inmate:" + ci);
     }
   }
 
@@ -613,19 +613,19 @@
       const p = V.posts[i];
       queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
-        dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out in that yard after lights-out.", "Wall's forty feet of nothing. Don't be stupid."] }, "guard");
+        dialogue: ["Keep moving.", "Hands out of your pockets.", "Back on the line.", "I don't care. Walk."] }, "guard");
     }
     const sr = bl(3.9, z1 - 7.8);
     queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [sr.x, sr.z], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
-    // an inmate in every cell but yours. Their mouths carry the escape hint.
+    // an inmate in every cell but yours.
     for (let i = 0, k = 0; i < V.cells.length; i++) {
       if (i === 1) continue;
       const cell = V.cells[i];
       queue({ role: "inmate", name: inmateName(ctx, k++), outfit: MAT.orange,
         at: [cell.lx, cell.lz], face: Math.PI / 2, post: "pinned", pose: "stand",
-        dialogue: ["I been in here longer than the walls.", "That door plate's been loose since the riot. Work it when their backs are turned.", "Service gate on the east wall hasn't latched in years. Mind their eyes."] }, "inmate:" + i);
+        dialogue: ["I been in here longer than the walls.", "Ninety days for a bike. A bike.", "My lawyer don't call back.", "You got a smoke?", "Don't touch my bunk."] }, "inmate:" + i);
     }
     return true;
   }
@@ -1074,10 +1074,10 @@
     const s = bag();
     setDoor(V.cells[1], false);                          // door swings open
     holdPlayer(false);
-    if (reason === "served") { s.served++; respect(2); say(anyGuard(), "\u201cTime served. Out you go.\u201d", "#cfe8b0", 2.4); }
+    if (reason === "served") { s.served++; respect(2); say(anyGuard(), "Time served. Out you go.", "#cfe8b0", 2.4); }
     else if (reason === "bailed" || reason === "bribed") {
       s.bribed++;
-      say(V && V.sarge, "\u201cBond's posted. Door's that way.\u201d", "#ffd166", 2.4);
+      say(V && V.sarge, "Bond's posted. Get your stuff.", "#ffd166", 2.4);
       // BAIL BUYS YOUR PROPERTY BACK TOO. Escaping does not — the locker keeps it.
       if (CBZ.cityEvidenceReturn) CBZ.cityEvidenceReturn();
       if (CBZ.arrestCount) CBZ.arrestCount("releases");
@@ -1174,7 +1174,7 @@
   function caughtPrying(spot) {
     if (!INM) return;
     INM.phase = "held"; INM.prison += RECAP_PENALTY * PRISON_SCALE; INM.pry *= 0.5; INM._pryMark = 0;
-    if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "“Step AWAY from the door!”", "#ffd27b", 2.2); } catch (e) {} }
+    if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "Step AWAY from the door!", "#ffd27b", 2.2); } catch (e) {} }
   }
   function popDoor(how) {
     if (!INM) return;
@@ -1237,7 +1237,7 @@
     if (INM) return;
     JOB = { active: true, caught: 0, wage: 0, escape: null, breakT: 14 + rng() * 10, t: 0 };
     const s = bag(); s.shifts++; save();
-    say(V && V.sarge, "\u201cThey run for the back corner. Cuff 'em before the wall.\u201d", "#cfe8b0", 3.0);
+    say(V && V.sarge, "You're on. Nobody leaves.", "#cfe8b0", 3.0);
   }
 
   // a seeded inmate makes a break: un-pin one and march it to the gap.
@@ -1249,7 +1249,7 @@
     // open its cell, flag it wanted (so a cuff is a clean collar, no crime), run it.
     const cell = V.cells[runner._cellIdx]; if (cell) setDoor(cell, false);
     if (runner.ped) { runner.ped.staffPost = null; runner.ped.npcWanted = Math.max(1, runner.ped.npcWanted | 0); }
-    if (runner.ped && CBZ.citySay) { try { CBZ.citySay(runner.ped, "“See you around, screw!”", "#ff9a9a", 2.0); } catch (e) {} }
+    if (runner.ped && CBZ.citySay) { try { CBZ.citySay(runner.ped, "See you around, screw!", "#ff9a9a", 2.0); } catch (e) {} }
     JOB.escape = { h: runner, t: 0 };
     // the man is RUNNING, in front of you, and he already shouted on his way
     // past (citySay, above). That is the alarm.

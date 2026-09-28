@@ -311,7 +311,7 @@
     letGo(ped, "drop");
     release(ped, { silent: true });
     ped.rage = pa(); ped.state = "fight";
-    if (CBZ.citySay) CBZ.citySay(ped, "“Get OFF me!”", "#ff9a9a", 1.8);
+    if (CBZ.citySay) CBZ.citySay(ped, "Get OFF me!", "#ff9a9a", 1.8);
     if (CBZ.shake) CBZ.shake(0.3);
     I.refresh();
   }
@@ -392,7 +392,7 @@
         const d2 = (c.pos.x - P0.x) * (c.pos.x - P0.x) + (c.pos.z - P0.z) * (c.pos.z - P0.z);
         if (d2 < bd) { bd = d2; desk = c; }
       }
-      if (desk && CBZ.citySay) CBZ.citySay(desk, "This one's clean. Cuffing citizens off the street, that's a snatch job.", null, { secs: 2.8, force: true });
+      if (desk && CBZ.citySay) CBZ.citySay(desk, "That man did nothing. Hands on your head!", null, { secs: 2.8, force: true });
       CBZ.cityCrime && CBZ.cityCrime(120, { instant: true, x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "kidnapping" });
     }
     I.refresh();
@@ -407,10 +407,12 @@
   // ============================================================
   let pleadCD = 0, copSuspectCD = 0;
   const PLEADS = [
-    "“Come on, man. These are too tight.”",
-    "“I got kids. Don't do this.”",
-    "“You ain't even wearing a badge…”",
-    "“Where are you taking me?!”",
+    "Come on, man. These are too tight.",
+    "I got kids. Don't do this.",
+    "You ain't even wearing a badge.",
+    "Where are you taking me?!",
+    "Somebody call my sister.",
+    "I can't feel my hands.",
   ];
   CBZ.onUpdate(38.5, function (dt) {
     // Outside the city the NPC restraints die with the mode. The PLAYER's ties
@@ -517,7 +519,7 @@
           if (c.dead) continue;
           if (Math.hypot(c.pos.x - ped.pos.x, c.pos.z - ped.pos.z) < 16) {
             r._copSeen = true;
-            if (CBZ.citySay) CBZ.citySay(c, "“Hey! Step away from him. NOW.”", "#ffd27b", 2.2);
+            if (CBZ.citySay) CBZ.citySay(c, "Hey! Step away from him. NOW.", "#ffd27b", 2.2);
             CBZ.cityCrime && CBZ.cityCrime(70, { instant: true, x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
             break;
           }

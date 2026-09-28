@@ -704,7 +704,7 @@
     for (let i = 0; i < bodies.length; i++) {
       const p = bodies[i];
       if (p._raceCrew === "chief") {
-        if (CBZ.citySay) CBZ.citySay(p, sayLine || "“On it. Wheels off!”", "#ffe9a8", 2.4);
+        if (CBZ.citySay) CBZ.citySay(p, sayLine || "On it. Wheels off!", "#ffe9a8", 2.4);
         continue;
       }
       // face the car and get the hands in it — the existing pose row, never
@@ -743,7 +743,7 @@
           car.engineHp = 100; car._smoking = false;
           if (car.hp != null && car.maxHp != null) car.hp = car.maxHp;
           chiefSay("She'll run like the day she was built.", 2.6);
-        }, "“Full service. Fuel, rubber, the lot.”");
+        }, "Full service. Fuel, rubber, the lot.");
       },
     });
     I.register("ped:civ", {
@@ -790,7 +790,7 @@
             } catch (e) {}
           }
           note("Your number is on the doors. The street knows who's driving.", 2.6);
-        }, "“Number 99 on the doors. Make it mean something.”");
+        }, "Number 99 on the doors. Make it mean something.");
       },
     });
   }
@@ -826,7 +826,7 @@
     const car = P && P.driving ? P._vehicle : null;
     if (!car || car.dead) { note("Pink slips means YOUR car on the line. Drive one you own to him.", 2.6); return; }
     if (!car.owned || car._loaner) {
-      if (ped && CBZ.citySay) CBZ.citySay(ped, "That's not yours to stake. Bring a car you OWN.", null, { secs: 2.8, force: true });
+      if (ped && CBZ.citySay) CBZ.citySay(ped, "That's not your car.", null, { secs: 2.8, force: true });
       return;
     }
     // grid the two of you

@@ -2239,7 +2239,7 @@
   const TALK = [
     ["Bunk's mine. Floor's yours.", "Lights out at nine. Don't be loud."],
     ["I been in this cell longer than that paint.", "Count comes twice. Be in here for it."],
-    ["You hear the pipes at night? That's the whole block talking.", "Keep your door open, keep your friends closer."],
+    ["Snore and I'll smother you. Kidding. Mostly.", "Pictures on the wall are my girls. Don't look."],
     ["Third time in this same box. Feels like home now.", "Don't touch my shelf."],
     ["They move you when they feel like it. Not before.", "Sleep light."],
   ];

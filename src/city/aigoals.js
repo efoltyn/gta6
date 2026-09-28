@@ -2287,7 +2287,7 @@
             r._npcJobT = now() + 2200 + rng() * 1800;     // a stick-up beat at the door
             r.path = null; r.target.set(door.x, 0, door.z); face(r, door.x, door.z);
             r.pause = Math.max(r.pause, 1.4);
-            if (rng() < 0.4) bark(r, "“EVERYBODY DOWN! Hands where I can see ‘em!”", "#ff8a5a", 2.4);
+            if (rng() < 0.4) bark(r, "EVERYBODY DOWN! Hands where I can see 'em!", "#ff8a5a", 2.4);
           } else { r._goalCD = Math.max(r._goalCD || 0, 1.5); }
         } else if (r._npcJobPhase === "stickup") {
           r.path = null; r.pause = Math.max(r.pause, 1.0);
@@ -2306,7 +2306,7 @@
             const fx = r.pos.x + Math.cos(ang) * 40, fz = r.pos.z + Math.sin(ang) * 40;
             routeTo(r, A, { x: fx, z: fz });
             r.state = "flee"; r.fear = Math.max(r.fear || 0, 3);
-            if (rng() < 0.5) bark(r, "“GO GO GO!”", "#ff8a5a", 1.8);
+            if (rng() < 0.5) bark(r, "GO GO GO!", "#ff8a5a", 1.8);
             releaseNpcJob(r);                             // off the job — now just a fleeing wanted man
           }
         }
@@ -2333,7 +2333,7 @@
             // RAGE at the truck: peds.js drives the shooting; the truck's wrap
             // sees damage → its guard crew bails and engages → a real firefight.
             r.rage = truck; r.state = "fight"; r.target.set(tx, 0, tz);
-            if (rng() < 0.4) bark(r, "“Stop the truck! Out of the cab. NOW!”", "#ff8a5a", 2.4);
+            if (rng() < 0.4) bark(r, "Stop the truck! Out of the cab. NOW!", "#ff8a5a", 2.4);
           } else {
             r.target.set(tx, 0, tz); r.path = null; r._goalCD = Math.max(r._goalCD || 0, 1.0);
           }

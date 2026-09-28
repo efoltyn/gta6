@@ -3240,7 +3240,7 @@
               // lands in the interaction registry's own dispatch and would eat
               // every verb on the card, not just this one.
               try { v.lampMat.color.setHex(SRM.lockGrn); v.lampMat.emissive.setHex(SRM.lockGrn); } catch (e) {}
-              srNote("A brass key on a tagged fob. It opens one door in this building.", 2.8);
+              srNote("A brass key on a tagged fob.", 2.8);
             };
             if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, v.keyMesh || null, { pose: "card", key: v, onTaken: took });
             else took();
@@ -3248,7 +3248,7 @@
           }
           if (t.what === "door") {
             if (!v.key) {
-              srNote("Steel, and the reader wants a card. The key is upstairs.", 2.6);
+              srNote("Steel. The reader wants a card.", 2.6);
               return;
             }
             srOpen(v);
@@ -3323,7 +3323,7 @@
       return;
     }
     if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL");
-    srNote("The seal is in your pocket. No government door in this state is closed to you, and the wall will take the office job now.", 3.4);
+    srNote("The city seal.", 3.4);
   }
   // idempotent, one line per complex — occupy.js stores the pass on the actor,
   // never a mirror here (the parallel-bookkeeping trap).
