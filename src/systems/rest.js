@@ -361,6 +361,9 @@
          "travelled" 293 m in a minute (measured, 2026-09-05, six of them in
          lockstep). Bodies the furniture holds are skipped the way a sleeper is. */
       if (a._propSeat || a._propBed || (a.char && (a.char.sitting || a.char.lying))) continue;
+      // …and a body mid-transition (CBZ.moves walking him out of a bunk he
+      // just got up from) is on its way out: a shove now is a teleport
+      if (inTransition(a)) continue;
       if (opts.eligible && !opts.eligible(a)) continue;
       const g = a.group.position;
       for (let k = 0; k < (list || []).length; k++) {

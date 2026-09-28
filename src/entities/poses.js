@@ -97,7 +97,13 @@
 
   // THE ONE ENTRY POINT both peds.js and packages.js use to set a rig's held
   // pose. Translates the verb vocabulary onto the rig flags animChar reads:
-  //   "sit"           -> ch.sitting (animChar's native seated pose)
+  //   "sit"           -> ch.sitting (animChar's native seated pose). An INSTANT
+  //                      flag flip: right for a body placed seated at spawn,
+  //                      wrong for a body anyone can watch. A person sitting
+  //                      DOWN (or lying down, kneeling, getting up) in front
+  //                      of the camera goes through CBZ.moves.sit / lie /
+  //                      kneel / stand (entities/moves_posture.js), which walk,
+  //                      turn and lower the body instead of popping the pose.
   //   "stand"/null    -> clears the pose (idle gait owns the arms)
   //   anything else   -> ch.pose = verb (looked up in CBZ.charPoses by animChar)
   CBZ.setCharPose = function (ch, verb) {

@@ -55,9 +55,10 @@
    member at rest scans outward with slow, held glances.
 
    POSTURE (sit / lie / stand / kneel / crouch / climb a bunk) is the second
-   half of this layer and lives with its registry in city/propuse.js; its
-   entry points are published here as CBZ.moves.sit / lie / stand / ... by
-   that file (see the bottom of propuse.js).
+   half of this layer: entities/moves_posture.js publishes CBZ.moves.sit /
+   lie / stand / kneel / crouch / climb / posture / busy / seatLegs. The seat
+   and bed ANCHOR registry stays in city/propuse.js, whose propSit/propSleep/
+   propWake/propStand are thin front ends to it.
 
    Pure math on {x, z} objects: no THREE, no allocation on the hot path, so
    tools/moves-sim.mjs runs it in plain node.

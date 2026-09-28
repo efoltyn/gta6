@@ -2721,6 +2721,25 @@
   // char.sitting whenever the state drifts off "sit", but the KO/kill paths skip
   // move() entirely (the main loop `continue`s on dead/ko bodies), so an explicit
   // clear here is what keeps a felled worker from carrying a stale sit pose.
+  // the desk sit's bookkeeping, once CBZ.moves has the hips on the chair
+  function deskSeated(ped, spot) {
+    if (!ped || ped.dead) return;
+    // his brain turned urgent while he sat down: straight back up
+    if (ped.rage || ped.surrender || ped.state === "flee" || ped.state === "fight") {
+      if (CBZ.moves && CBZ.moves.stand) CBZ.moves.stand(ped);
+      return;
+    }
+    ped._deskAnchor = { x: spot.x, y: spot.y || 0, z: spot.z, face: spot.face, lot: spot.lot, kind: spot.kind || "office",
+      cushionH: spot.cushionH, floorBelow: spot.floorBelow };
+    if (ped._mv && CBZ.moves) CBZ.moves.reset(ped._mv, ped.pos);
+    ped.path = null; ped.speed = 0; ped.pause = 0;
+    ped.state = "sit";
+    if (ped.char) {
+      ped.char.sitting = true;
+      if (CBZ.propSeatRef) ped.char.seatRef = CBZ.propSeatRef(ped._deskAnchor) || ped.char.seatRef;
+      ped.char.typing = CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 !== false;
+    }
+  }
   function leaveSit(ped) {
     if (!ped) return;
     if (ped.char && ped.char.sitting) { ped.char.sitting = false; ped.char.seatRef = null; }
@@ -5955,6 +5974,11 @@
       ped.surrender = true;
     }
 
+    // A POSTURE TRANSITION OWNS THE BODY (CBZ.moves: sitting down, getting up,
+    // lying down, climbing into a bunk). The sequencer writes the transform and
+    // animates the rig after this mover; stepping, re-posing or "interrupt-
+    // clearing" its half-folded sit here would fight it every frame.
+    if (CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(ped)) return;
     const st = ped.state;
     // SIT INTERRUPT (C3): a seated desk worker stays in state "sit" only while
     // nothing pulled it out. think() runs before move() and flips the state to
@@ -6157,6 +6181,15 @@
       const anc = ped.finalGoal.anchor || ped.finalGoal;     // {x,z,face} (C2 anchor / finalGoal carry it)
       const adx = anc.x - ped.pos.x, adz = anc.z - ped.pos.z;
       if (adx * adx + adz * adz <= 1.3 * 1.3) {
+        // THE LAST METRE IS A SIT, NOT A SNAP (CBZ.moves, entities/moves_posture.js):
+        // turn to the desk, back onto the chair, hips down with the soles
+        // planted. deskSeated() does the bookkeeping below when the hips land;
+        // the snap stays only for a body the sequencer refuses.
+        if (CBZ.moves && CBZ.moves.sit) {
+          const spot = { x: anc.x, y: anc.y || 0, z: anc.z, face: anc.face != null ? anc.face : ped.group.rotation.y,
+            lot: anc.lot, kind: anc.kind || "office", cushionH: anc.cushionH, floorBelow: anc.floorBelow };
+          if (CBZ.moves.sit(ped, spot, { onDone: deskSeated })) { ped.path = null; ped.speed = 0; ped.pause = 0; return; }
+        }
         // SEAT FLOOR FIX: the anchor carries its own floor height (a desk on
         // storey 5 is not at y=0). The old hard-coded 0 sank every upper-floor
         // worker to street level; anchors that don't declare a y still read 0.
@@ -6779,6 +6812,13 @@
       // the sun shadow pass at all (the pass was the draw-call bottleneck).
       const wantShadow = false;
       if (p._shadowOn !== wantShadow) { setRigShadow(p.char, wantShadow); p._shadowOn = wantShadow; }
+      // HAND LOD (CBZ.human): past ~30 m the hand is a few pixels, so the rig
+      // swaps to the 51-triangle far hand; back to the default inside 26 m
+      // (hysteresis, so a body on the line never flips geometry each frame).
+      if (vis && p.char && p.char.setHandLod) {
+        const hl = p._handLod === 2 ? (d2 < 26 * 26 ? 1 : 2) : (d2 > 30 * 30 ? 2 : 1);
+        if (hl !== p._handLod) { p.char.setHandLod(hl); p._handLod = hl; }
+      }
       const far = d2 > FAR_D2;
       const stride = active ? 4 : (far ? 20 : 10);
       // ---- THE BUDGETED WORK, AND THE ONLY BUDGETED WORK ----------------------

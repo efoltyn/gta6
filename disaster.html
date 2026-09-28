@@ -1065,6 +1065,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/street_hardware.js?v=hw1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
+<!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
+     climb sequencer for every game (propuse's verbs and the cell bunks call it).
+     Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
+<script src="src/entities/moves_posture.js?v=posture1"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->

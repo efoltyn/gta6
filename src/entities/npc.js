@@ -418,7 +418,9 @@
       M.reset(m, gp);
       n._vx = n._vz = 0;
       if (n.pause > 0) n.pause -= dt;
-      if (near) animChar(n.char, 0, dt);
+      // mid-sequence the posture layer animates the rig itself; a HELD seat or
+      // bed (no sequence) is still ours to tick so the sit/lie pose runs
+      if (near && !(M.busy && M.busy(n))) animChar(n.char, 0, dt);
     } else {
       const O = MV_OPTS;
       const paused = n.pause > 0;
