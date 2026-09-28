@@ -800,6 +800,9 @@
     if ((busting || g.busted) && !opts.arcWalk) return true;   // the arc has you (its own walk-in asks with arcWalk)
     const P = CBZ.player;
     if (P && P.driving) return false;               // a driver is pursued, not cuffed through the glass
+    // a man giving himself up puts his hands up BEFORE the hands come (the
+    // take refuses a man on his feet who has not given up)
+    if (opts.surrender && CBZ.playerChar) CBZ.playerChar.handsUp = true;
     const h = AR.take(cop, {
       behind: !!opts.grab, pinned: !!opts.pinned,
       walk: WALK_SPD,

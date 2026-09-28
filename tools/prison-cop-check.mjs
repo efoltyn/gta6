@@ -14,8 +14,8 @@
      · role is cop and the player spawned at the officer post (COP_SPAWN),
        alive, not captured, not cuffed, dressed as corrections
      · the cop loadout is real items (sidearm + taser on the weapon list)
-     · the interact card on an inmate offers the cop's verbs
-       (question / search / detain) and CUFF on him lands: he ends cuffed/down
+     · the interact card on a standing inmate has no CUFF (arrest.js's rule:
+       down or surrendered only); hands up it does, and CUFF lands
      · no guard is hunting / arresting the player officer
 
      node tools/prison-cop-check.mjs [--port 9812] [--steps 3600]
@@ -193,20 +193,26 @@ const cuff = await ev(`(function(){
     CBZ.stepSim(1/60);
     on = CBZ.prisonInteractTarget ? CBZ.prisonInteractTarget() : null;
   }
+  // THE RULE (systems/arrest.js): a man on his feet who has not given up is
+  // not cuffed. Standing: no Cuff on his card. Then he puts his hands up (the
+  // surrender a drawn weapon gets out of him) and Cuff is there.
+  var standingVerbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+  best.intimidMode = 'scared'; best.poseHandsUp = true; if (best.char) best.char.handsUp = true;
   var verbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
   var idx = verbs ? verbs.indexOf('detain') : -1;
   var r = 'no detain on the card';
   if (on !== best) r = 'card is on ' + (on ? (on.kind || '') + ' ' + (on.data && on.data.name) : 'nobody');
   else if (idx >= 0) { try { CBZ.doInteract(idx); r = 'pressed'; } catch (e) { return { err: 'detain threw: ' + e.message, verbs: verbs }; } }
   window.__copTarget = best;
-  return { name: best.data && best.data.name, dist: +bd.toFixed(1), verbs: verbs, result: r };
+  return { name: best.data && best.data.name, dist: +bd.toFixed(1), standingVerbs: standingVerbs, verbs: verbs, result: r };
 })()`);
 log("  cuff: " + JSON.stringify(cuff));
 for (let i = 0; i < 6; i++) await ev(`(function(){ for (var i=0;i<60;i++) CBZ.stepSim(1/60); return true; })()`);
 const after = await ev(`(function(){ var a = window.__copTarget; if (!a) return null; var V = CBZ.verbs;
   return { ko: +(a.ko||0).toFixed(1), cuffed: !!(V && V.cuffed && V.cuffed(a)), ai: a.aiState }; })()`);
 log("  target after 6s: " + JSON.stringify(after));
-check("the card offers the cop's verbs", cuff && Array.isArray(cuff.verbs) && cuff.verbs.includes("detain"), cuff && cuff.verbs);
+check("a standing inmate who has not given up offers no Cuff", cuff && Array.isArray(cuff.standingVerbs) && !cuff.standingVerbs.includes("detain"), cuff && cuff.standingVerbs);
+check("hands up, the card offers Cuff", cuff && Array.isArray(cuff.verbs) && cuff.verbs.includes("detain"), cuff && cuff.verbs);
 check("CUFF lands on an inmate", !cuff.err && after && (after.cuffed || after.ko > 0), after);
 
 // ---- THE KEYS, AND A DOOR OFF THE CLOCK (systems/prisondoorwatch.js) --------

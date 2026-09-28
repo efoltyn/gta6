@@ -14,9 +14,10 @@
    Now the PLAYER'S arrest is one thing, here, for every game:
 
      THE RULE      a cop can only put cuffs on a man who is
-                     compliant  (stopped, hands up, on the ground after an order)
-                     subdued    (tased and down, pinned under a tackle, knocked down)
-                     outnumbered and grabbed from behind
+                     surrendered (hands up, on his knees; never merely stopped)
+                     down        (tased, pinned under a tackle, knocked down, KO'd)
+                   and a man on the ground is cuffed ON the ground: the
+                   officer kneels on him, the wrists go behind, then up.
                    A running man has to be CAUGHT (A.lungeAim: a tackle is a
                    committed lunge that can miss and leaves the cop on the
                    ground), a fighting man has to be tased or beaten first.
@@ -89,15 +90,102 @@
        fighting   swinging at somebody right now
      Returns the reason cuffs may go on, or null.
      ============================================================ */
+  /* Owner, 2026-09-28: "it's too easy to get handcuffed. I need to get
+     knocked down or knocked out or tased and knocked unconscious to get
+     handcuffed." So a man on his feet who has not given up is NEVER cuffed:
+     not for standing still, not from behind with two cops on him. The
+     cuffs go on a man who is DOWN (tased, knocked down, pinned under a
+     tackle, knocked out) or who SURRENDERED (hands up, on his knees). Every
+     other man has to be taken down first. `compliant` means surrendered:
+     hands up or kneeling, never merely stopped. */
   A.canCuff = function (ctx) {
     if (!ctx) return null;
     if (ctx.cuffed) return "cuffed";
+    if (ctx.ko) return "ko";
     if (ctx.subdued) return "subdued";
     if (ctx.pinned) return "pinned";
+    if (ctx.down) return "down";
     if (ctx.fighting) return null;                         // beaten or tased first
     if (ctx.compliant) return "compliant";
-    if (ctx.behind && (ctx.backup | 0) >= 1) return "outnumbered";
     return null;
+  };
+
+  /* THE SAME RULE READ OFF A LIVE BODY (anyone: the player, an inmate, a
+     ped). CBZ.vitals (systems/vitals.js) is the one truth about down / out
+     when it is loaded; before it, the flags every game already keeps. */
+  function vitalsOf(a) {
+    const Vt = CBZ.vitals;
+    if (!Vt || typeof Vt.state !== "function" || !a) return null;
+    try { return Vt.state(a) || null; } catch (e) { return null; }
+  }
+  function isPlayerA(a) {
+    const P = CBZ.player;
+    if (!a || !P) return false;
+    if (a === P || a === CBZ.playerChar) return true;
+    const Vb = V();
+    if (Vb && Vb.playerActor) { try { if (a === Vb.playerActor()) return true; } catch (e) {} }
+    return !!(CBZ.city && a === CBZ.city.playerActor) || a.pos === P.pos;
+  }
+  A.isPlayer = isPlayerA;
+  function rigOfA(a) {
+    if (!a) return null;
+    if (isPlayerA(a)) return CBZ.playerChar || null;
+    return a.char || a.ch || (a.group && a.parts ? a : null);
+  }
+  // "ko" | "tased" | "down" | null: how far off his feet he is
+  A.downState = function (a) {
+    if (!a) return null;
+    const vs = vitalsOf(a);
+    if (vs === "dead") return null;
+    if (vs === "ko") return "ko";
+    const Vt = CBZ.vitals;
+    if (Vt && typeof Vt.tased === "function") { try { if (Vt.tased(a)) return "tased"; } catch (e) {} }
+    if (vs === "down") return "down";
+    const pl = isPlayerA(a);
+    if (pl) {
+      const P = CBZ.player;
+      const why = A.subduedWhy();
+      if (why === "tased") return "tased";
+      if (why) return "down";
+      if (P && ((P.ko || 0) > 0 || P.prone || P.captureState === "downed")) return "down";
+    } else {
+      if ((a.ko || 0) > 0 || a.asleep) return "ko";
+      if (a.tased > 0 || a._tasedT > 0) return "tased";
+      if (a.prone || a.stateDown) return "down";
+    }
+    const ch = rigOfA(a);
+    if (ch && (ch.koPose || ch.pronePose || (ch.fall && ch.fall.on))) return "down";
+    const Vb = V();
+    if (Vb && Vb.body) { try { const B = Vb.body(pl ? Vb.playerActor() : a); if (B && B.down && B.down()) return "down"; } catch (e) {} }
+    return null;
+  };
+  // hands up or on his knees: he gave up
+  A.surrendered = function (a) {
+    if (!a) return false;
+    const ch = rigOfA(a);
+    if (ch && (ch.handsUp || ch.surrender || ch.kneel)) return true;
+    if (isPlayerA(a)) {
+      // the player kneels by crouching where he stands
+      const P = CBZ.player;
+      return !!(g._citySurrender || (P && P.crouch && !(+P.speed > 0.8)));
+    }
+    if (a.surrender || a.poseHandsUp || a.intimidMode === "scared") return true;
+    const b = a._brain;
+    const r = b && b.response;
+    return r === "surrender" || r === "comply";
+  };
+  // the reason cuffs may go on this body now, or null
+  A.cuffable = function (a) {
+    if (!a || a.dead) return null;
+    const ch = rigOfA(a);
+    const ds = A.downState(a);
+    return A.canCuff({
+      cuffed: !!(ch && ch.cuffed),
+      ko: ds === "ko",
+      subdued: ds === "tased",
+      down: ds === "down",
+      compliant: A.surrendered(a),
+    });
   };
 
   /* ============================================================
@@ -201,7 +289,9 @@
     h *= 1 + HOLD.BACKUP * Math.min(HOLD.BACKUP_MAX, Math.max(0, o.backup | 0));
     if (o.pinned) h *= HOLD.PIN;
     if (o.cuffed) h *= HOLD.CUFFED;
-    if (o.behind) h *= HOLD.BEHIND;
+    // an escort's hand on the cuffs IS the grip from behind: counting both
+    // made a lone escort unbreakable (the lone-escort escape must stay real)
+    else if (o.behind) h *= HOLD.BEHIND;
     if (o.hpRatio != null) h *= 0.55 + 0.45 * clamp01(o.hpRatio);
     return h;
   };
@@ -350,7 +440,9 @@
      cycle, and he is subdued long enough to be reached and cuffed.
        returns { hit, d } (never throws)
      ============================================================ */
-  const TASE = { RANGE: 6.5, STUN: 2.8, DOWN: 1.8, RELOAD: 2.6 };
+  // a taser rides for its whole five-second cycle: he is on the floor for
+  // most of it, long enough for the officer to walk in and kneel on him
+  const TASE = { RANGE: 6.5, STUN: 4.2, DOWN: 3.6, RELOAD: 2.6 };
   A.TASE = TASE;
   A.taseChance = function (d, targetSpeed, tierHit) {
     if (!(d <= TASE.RANGE)) return 0;
@@ -465,16 +557,39 @@
       if (!h.done) startEscort(h);
       return h;
     }
+    // THE RULE, at the hands: a man on his feet who has not given up is not
+    // cuffed. He is taken down first (the taser, the lunge, a beating).
+    if (!opts.force && !A.cuffable(Vb.playerActor())) {
+      end(h, "refused", "on his feet");
+      return null;
+    }
     startCuff(h);
     return h;
   };
+  function playerDown() {
+    const Vb = V();
+    try { return !!Vb.body(Vb.playerActor()).down(); } catch (e) { return false; }
+  }
   function startCuff(h) {
     const Vb = V();
-    // on the floor (tased, knocked down, a tackle): he hauls you up by the arm
-    // for the cuffs; you are still subdued while the get-up plays
+    // ON THE FLOOR (tased, knocked down, pinned under a tackle): he kneels on
+    // you and cuffs you where you lie (verbs.js's ground cuff); up by the arm
+    // only once both wrists are closed. A verbs.js without the ground cuff
+    // falls back to hauling you up first.
     const pa = Vb.playerActor();
-    let down = false;
-    try { down = Vb.body(pa).down(); } catch (e) { down = false; }
+    const down = playerDown();
+    if (down && Vb.cuffDown) {
+      const o = sessOpts(h);
+      o.far = 6;
+      o.onOutcome = function (S, k) { if (k === "cuffed") h._tied = true; };
+      const S = Vb.cuff(h.officer, pa, o);
+      h.cuffS = S || null;
+      h.phase = "reach";
+      h.onGround = !!S;
+      h.officer._arresting = !!S;
+      if (A.subdued()) A.subdue(0.4);
+      return;
+    }
     if (down) {
       if (!h._hauled && Vb.getUp) { h._hauled = true; try { Vb.getUp(pa); } catch (e) {} }
       if (A.subdued()) A.subdue(0.4);
@@ -540,7 +655,7 @@
       if (S.phase !== "approach" && h.phase === "reach") {
         h.phase = "cuffing"; h.t0 = clock;
         if (CBZ.playerChar) CBZ.playerChar.handsUp = false;       // his hands take yours down behind you
-        if (!h.said.hands) { h.said.hands = true; say(off, h.pinned ? "Stay down! Hands behind your back!" : "Hands behind your back!"); }
+        if (!h.said.hands) { h.said.hands = true; say(off, h.pinned || h.onGround ? "Stay down! Hands behind your back!" : "Hands behind your back!"); }
       }
       if (h.phase === "cuffing" && S.cst && S.cst.prog > 0.35 && !h.said.resist) { h.said.resist = true; say(off, "Stop resisting!"); }
       if (S.done) {
@@ -551,6 +666,13 @@
           cb(h, "onCuffed");
           if (h.done) return;
           if (h.opts.noEscort) { end(h, "cuffed"); return; }
+          if (playerDown()) {
+            // cuffed where he lay: up by the arm, then the walk
+            h.phase = "rising"; h.t = 0;
+            if (Vb.getUp) { try { Vb.getUp(Vb.playerActor()); } catch (e) {} }
+            if (!h.said.up) { h.said.up = true; say(off, "Up. Get up."); }
+            return;
+          }
           startEscort(h);
           return;
         }
@@ -558,6 +680,11 @@
         end(h, "missed", k || "cancelled"); cb(h, "onMissed");
         return;
       }
+      return;
+    }
+    if (h.phase === "rising") {
+      // on his feet in cuffs, then walked (a get-up that stalls is hurried)
+      if (!playerDown() || h.t > 3.5) startEscort(h);
       return;
     }
     if (h.phase === "escort") {
@@ -712,6 +839,9 @@
   A.tick = tick;
   A.clock = function () { return clock; };
   if (typeof CBZ.onUpdate === "function") CBZ.onUpdate(89.5, tick);
+
+  // THE question every hand-gate in every game asks: is the player in cuffs?
+  A.playerCuffed = function () { const pc = CBZ.playerChar; return !!(pc && pc.cuffed); };
 
   if (typeof module !== "undefined" && module.exports) module.exports = A;
 })();

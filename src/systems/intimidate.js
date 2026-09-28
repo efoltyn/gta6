@@ -395,7 +395,7 @@
     // he is down for the run, tied.
     const V = CBZ.verbs;
     const done = function () { t.ko = Math.max(t.ko || 0, 9999); };
-    const S = V && V.cuff && !down ? V.cuff(V.playerActor(), t, { far: true, onEnd: done }) : null;
+    const S = V && V.cuff && (!down || V.cuffDown) ? V.cuff(V.playerActor(), t, { far: true, onEnd: done }) : null;
     if (!S) { if (V && V.setCuffs) V.setCuffs(t, true); done(); }
     CBZ.sfx && CBZ.sfx("switch", { volume: 0.4, pitch: 0.85 });
     return "tied";

@@ -210,16 +210,23 @@
       // CBZ.verbs (the VERBS lead's one library) animates it when it can; the
       // prison's own state for the act is set either way
       const V = CBZ.verbs;
+      const cuffing = name === "restrain" || name === "cuff";
+      // THE RULE (systems/arrest.js): hands up, on his knees, down or out.
+      // A man on his feet who has not given up is taken down first.
+      const AR = CBZ.arrest;
+      if (cuffing && !isPlayer(b) && AR && AR.cuffable && !AR.cuffable(b)) return false;
       const f = V && (typeof V[name] === "function" ? V[name] : typeof V[VALIAS[name]] === "function" ? V[VALIAS[name]] : null);
       if (f) {
         let r = false;
-        try { r = f.call(V, a, b, opts); } catch (e) { r = false; }
-        if (r) {
-          if ((name === "restrain" || name === "cuff") && !isPlayer(b)) cuffInmate(b, a, true);
-          return r;
-        }
+        // the prison's cuffed hold starts when the cuffs CLOSE, not when the
+        // screw sets off towards him
+        const o = cuffing && !isPlayer(b)
+          ? Object.assign({}, opts, { far: true, onOutcome: function (S, k) { if (k === "cuffed") cuffInmate(b, a, true); } })
+          : opts;
+        try { r = f.call(V, a, b, o); } catch (e) { r = false; }
+        if (r) return r;
       }
-      if (name === "restrain" || name === "cuff") return cuffInmate(b, a);
+      if (cuffing) return cuffInmate(b, a);
       if (name === "tase" || name === "taser") return taseInmate(b, a);
       if (name === "baton" || name === "strike" || name === "punch") return batonInmate(b, a, name);
       if (name === "tackle" || name === "grab") return tackleInmate(b, a);

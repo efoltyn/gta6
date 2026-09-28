@@ -155,6 +155,7 @@
     warn:     { label: "Warn",            fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
     detain:   { label: "Cuff",            fn: (a) => {
       if (a.approach && /^cop[A-Z]/.test(a.approach.kind || "")) return approachAction(a, "detain");
+      if (!cuffOk(a)) return { ok: false, msg: "" };
       dropPitch(a);
       const surrendered = a.intimidMode === "scared";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
@@ -168,7 +169,8 @@
         a.ko = Math.max(a.ko || 0, 5.5);
         if (V && V.setCuffs) V.setCuffs(a, true, { whileKo: true });   // off again when he is let up
       };
-      const S = V && V.cuff && !(a.ko > 0) ? V.cuff(V.playerActor(), a, { far: true, onEnd: land }) : null;
+      // a man already on the floor is cuffed where he lies (knee on his back)
+      const S = V && V.cuff && (!(a.ko > 0) || V.cuffDown) ? V.cuff(V.playerActor(), a, { far: true, onEnd: land }) : null;
       if (!S) { land(); CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.45); }
       CBZ.game.kos = (CBZ.game.kos || 0) + 1;
       if (CBZ.game.role === "cop" && CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 5);
@@ -283,6 +285,11 @@
   }
 
   // an offer he walked up with is over the moment the badge acts on him
+  // THE RULE (systems/arrest.js): hands up / on his knees / down / out
+  function cuffOk(a) {
+    const AR = CBZ.arrest;
+    return !(AR && AR.cuffable) || !!AR.cuffable(a);
+  }
   function dropPitch(a) {
     if (!a || !a.approach || /^cop[A-Z]/.test(a.approach.kind || "")) return;
     a.approach = null;
@@ -387,7 +394,9 @@
     // It stays live on the copTaunt approach, where scattering somebody IS the
     // decision.
     if (CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden")) {
-      return ["question", "search", "detain"];
+      // the cuffs only on a man who gave up or is down (systems/arrest.js):
+      // a man on his feet is taken down first (the taser, your fists)
+      return cuffOk(a) ? ["question", "search", "detain"] : ["question", "search"];
     }
     /* THE WARDEN DOES NOT CHAT. In his office on his summons the card is
        his: TELL, FAVOR (or PROTECTION), THREATEN (systems/prisonwarden.js).

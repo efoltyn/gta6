@@ -53,7 +53,6 @@
   L.GAME = GAME;
 
   // ---- tuning ---------------------------------------------------------------
-  const COMPLY_STILL = 1.5;      // s standing still, weapon away = hands shown (no surrender input exists)
   const WARN_R = 14;            // m: "Police! Stop right there!" carries this far
   const ORDER_R = 6;             // m: orders are given from here, not from your shoulder
   const CUFF_R = 1.5;            // m: hands-on range
@@ -392,9 +391,9 @@
 
   // ============================================================
   //  THE SUSPECT'S STATE — what the officer can read off the body.
-  //  There is no surrender key in the city, so COMPLIANCE = standing still with
-  //  the weapon put away for COMPLY_STILL seconds (hands shown). interact.js's
-  //  "Surrender" row is the instant voluntary version (g._citySurrender).
+  //  COMPLIANCE = giving up: interact.js's "Surrender" row on the officer
+  //  (hands up, g._citySurrender) or down on your knees (crouch). Standing
+  //  still with your hands down is not compliance (systems/arrest.js rule).
   // ============================================================
   const PS = { speed: 0, handsUp: false, kneeling: false, prone: false, subdued: false, cuffed: false, armed: false, aiming: false, attacking: false, stillT: 0, aimAny: false, aimAt: null, aimT: 0 };
   L.player = PS;
@@ -406,7 +405,10 @@
     PS.speed = sp;
     PS.armed = !!(H.openCarry && H.openCarry());
     PS.stillT = (!driving && !P.dead && sp < 0.6) ? PS.stillT + dt : 0;
-    PS.handsUp = !!g._citySurrender || (!PS.armed && PS.stillT >= COMPLY_STILL);
+    // HANDS UP IS A CHOICE (the Surrender row on the officer, or down on your
+    // knees): standing still with your hands at your sides is not giving up,
+    // and the officer takes that man down before he cuffs him
+    PS.handsUp = !!g._citySurrender || !!(CBZ.playerChar && CBZ.playerChar.handsUp);
     PS.kneeling = !!P.crouch && !P.prone;
     PS.prone = !!P.prone || (P.ko || 0) > 0;
     PS.subdued = !!(CBZ.arrest && CBZ.arrest.subdued && CBZ.arrest.subdued());

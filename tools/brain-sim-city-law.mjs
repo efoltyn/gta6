@@ -76,7 +76,7 @@ function fresh() {
   CBZ.cityCops.length = 0;
   said.length = busts.length = tackles.length = reports.length = npcArrests.length = offenses.length = 0;
   player.pos.x = 0; player.pos.z = 0; player.speed = 0; player.dead = false; player.driving = false;
-  g.busted = false; g.wanted = 1; g._copsFiredUponT = undefined; armedOut = false;
+  g.busted = false; g.wanted = 1; g._copsFiredUponT = undefined; armedOut = false; g._citySurrender = false;
   CBZ.isAimingWeapon = null; CBZ.aimedActor = null;
   T = 0; g.elapsed = 0; B.clock(0);
 }
@@ -119,7 +119,10 @@ scenario(1, "cop spots a crime -> warn -> order -> comply -> cuff", function () 
   fresh();
   const c = cop(0, 18, 0, 0);                     // 18 m out, looking straight at you
   check(!!(c._brain && c._brain.game === "city-law"), "officer registered with brain.game = city-law");
-  const seq = phasesOf(c, null, 20);             // the player just stands there, gun away
+  // he gives up: the Surrender row on the officer (hands up). Standing there
+  // with his hands down is NOT compliance any more (systems/arrest.js rule)
+  g._citySurrender = true;
+  const seq = phasesOf(c, null, 20);
   console.log("    phases: " + seq.join(" > "));
   check(inOrder(seq, ["warn", "order", "approach", "cuff"]), "the ladder ran warn > order > approach > cuff");
   check(busts.length === 1 && busts[0].cop === c && busts[0].peaceful === true, "cuffed through act.verb(restrain) -> the existing cityBust, peaceful, by THIS officer");
@@ -127,7 +130,16 @@ scenario(1, "cop spots a crime -> warn -> order -> comply -> cuff", function () 
   const lines = said.map((s) => s.line);
   console.log("    said: " + lines.join(" | "));
   check(lines.length >= 3 && lines.some((l) => /fine/i.test(l)), "he spoke the ladder, and said the stakes (a fine at 1 star)");
-  check(L.player.stillT >= 1.5 && L.player.handsUp, "standing still with the gun away for 1.5 s reads as hands shown");
+  check(L.player.handsUp, "surrendering reads as hands up");
+  // and a man who only stands there, hands down, is NOT hands shown: the
+  // officer takes him down (the taser) before any cuffs
+  fresh();
+  g._citySurrender = false;
+  const c2 = cop(0, 18, 0, 0);
+  const seq2 = phasesOf(c2, null, 20);
+  console.log("    hands down: " + seq2.join(" > "));
+  check(!L.player.handsUp, "standing still with the gun away is not hands shown");
+  check(seq2.includes("force") && seq2.indexOf("force") < (seq2.indexOf("cuff") < 0 ? 1e9 : seq2.indexOf("cuff")), "hands down: forced (tased) before any cuffs");
 });
 
 scenario(2, "suspect flees -> escalate -> force (tackle), never lethal under nonlethal ROE", function () {

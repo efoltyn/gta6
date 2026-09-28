@@ -1704,13 +1704,13 @@
        -> approach (only while complying) -> cuff (act.verb "restrain") -> done
        non-compliance -> escalate -> force (taser at <= 5.5 m, then tackle)
        -> lethal (roe lethal/protect, suspect armed AND aiming/attacking).
-     Timing is capture.js's: comply = still (< 0.6 m/s) or hands up / kneeling
-     / prone for 0.6 s; resist = running away (> 2.2 m/s, opening) for 0.55 s,
+     Timing is capture.js's: comply = hands up / kneeling / prone and still
+     for 0.6 s (standing still with the hands down is NOT compliance); resist = running away (> 2.2 m/s, opening) for 0.55 s,
      or a swing; the order window is the officer's patience (prison 2.2 s,
      beat cop 6 s, SWAT 1.5 s); an order past 15 m is void. */
   const LINES = {
     warn: ["Stop right there!", "Hey! Stop!", "Police! Hold it!"],
-    order: ["On the ground! Now!", "Hands where I can see them!", "Down! Get down!", "Hands up!"],
+    order: ["On the ground! Now!", "Get on your knees!", "Down! Get down!", "Hands up!"],
     orderArmed: ["Drop it! Drop the weapon!", "Gun! Drop it!"],
     approach: ["Easy now, hold still.", "Don't move."],
     cuff: ["Hands behind your back.", "Don't move."],
@@ -1722,8 +1722,9 @@
     frisk: ["Hands on the wall.", "Arms out."],
     warned: ["Move along.", "Don't let me see it again.", "Walk away."],
   };
-  /* THE RULE (systems/arrest.js): cuffs go on a man who is compliant,
-     subdued (tased / down / pinned) or outnumbered and taken from behind.
+  /* THE RULE (systems/arrest.js): cuffs go on a man who SURRENDERED (hands
+     up, on his knees) or is DOWN (tased, knocked down, pinned, knocked out).
+     A man on his feet who has not given up is taken down first.
      A runner has to be CAUGHT: the tackle is a committed lunge from arm's
      reach (TACKLE_R) that can miss. A man squared up and swinging is tased
      (or beaten) first, never tackled or grabbed. A taser can miss and has to
@@ -1801,11 +1802,16 @@
     const threatening = s.armed && (s.aiming || s.attacking);
     // on the floor after a taser, a takedown or a beating: a man who can be cuffed
     const down = !!(s.subdued || s.prone);
+    // HE GAVE UP: hands up or on his knees (or his own brain chose to). A man
+    // who merely stopped has not complied with "on the ground": the owner's
+    // rule (systems/arrest.js canCuff) is down or surrendered, never standing.
+    const sb = sus && sus._brain;
+    const gaveUp = !!(s.handsUp || s.kneeling || s.cuffed || (sb && (sb.response === "comply" || sb.response === "surrender")));
     // his breath: a blown officer jogs until he has it back
     if (c.ranAt !== now()) c.runT = Math.max(0, c.runT - dt * 0.3);
     if (c.runT >= c.runFor) c.blown = true; else if (c.runT < c.runFor * 0.3) c.blown = false;
     // what compliance IS for this case: a gun-stop only wants the gun away
-    const complying = c.complyMode === "disarm" ? !s.armed && !s.aiming && !s.attacking : still && !s.armed;
+    const complying = c.complyMode === "disarm" ? !s.armed && !s.aiming && !s.attacking : still && !s.armed && (gaveUp || down);
     const hold = c.hold;
     const lethalOk = c.roe === "lethal" || c.roe === "protect";
     const seen = s.seen !== false;
@@ -1838,7 +1844,7 @@
       else {
         c.comply = complying ? c.comply + dt : Math.max(0, c.comply - dt * 0.5);
         c.flee = running ? c.flee + dt : Math.max(0, c.flee - dt * 0.5);
-        const lateOk = c.complyMode === "disarm" ? complying : (s.speed || 0) < 1.4 && !s.armed;
+        const lateOk = c.complyMode === "disarm" ? complying : (s.speed || 0) < 1.4 && !s.armed && (gaveUp || down || c.onComply === "release" || c.minor);
         if ((c.comply > 0 && c.comply >= c.complyHold) || (c.phaseT >= c.patience && lateOk)) {
           if (c.onComply === "release") {
             out.say = line(b, "released"); c.outcome = "released"; c.active = false; setPhase(c, "done"); ph = "done";
@@ -1856,7 +1862,9 @@
     if (ph === "approach") {
       out.act = "approach";
       if (c.saidPhase !== "approach") { out.say = line(b, "approach"); c.saidPhase = "approach"; }
-      if (s.attacking || running || s.armed) { setPhase(c, "escalate"); ph = c.phase; }
+      // his hands came down and he is on his feet: that is not giving up
+      c.dropT = !c.minor && !gaveUp && !down ? (c.dropT || 0) + dt : 0;
+      if (s.attacking || running || s.armed || c.dropT > 0.8) { c.dropT = 0; setPhase(c, "escalate"); ph = c.phase; }
       else if (d <= c.cuffRange) { setPhase(c, "cuff"); ph = c.phase; }
       else if (hold) { c.outcome = "complied"; c.active = false; setPhase(c, "done"); ph = "done"; }
       else moveTo(officer, sx, sz, _mWalkArrive);
@@ -1885,6 +1893,11 @@
           c.grabbed = false;
           setPhase(c, "escalate"); ph = c.phase;
         }
+      } else if (!c.minor && !vr) {
+        // the hands were refused (he is on his feet and has not given up:
+        // arrest.js's rule): he is taken down first
+        c.grabbed = false;
+        setPhase(c, "escalate"); ph = c.phase;
       } else if (running || s.attacking) { setPhase(c, "escalate"); ph = c.phase; }
       else if (c.phaseT >= (c.minor ? ARREST.FRISK_T : ARREST.CUFF_T)) {
         if (c.minor) { c.outcome = "warned"; out.say = line(b, "warned"); }
@@ -1900,8 +1913,7 @@
     }
     if (ph === "force") {
       // THE FORCE RUNG (systems/arrest.js is the rule). The taser from range
-      // at a man running or fighting; hands on from behind when he is
-      // outnumbered; the TACKLE, a committed lunge from arm's reach, at a
+      // at a man running, fighting or standing there with his hands down; the TACKLE, a committed lunge from arm's reach, at a
       // runner or a man walking off. Never a tackle or a grab on a man squared
       // up and swinging: he is tased (or beaten) first. On the floor after
       // any of it = the cuffs.
@@ -1909,7 +1921,8 @@
       if (c.tackleCD > 0) c.tackleCD -= dt;
       if (c.taseCD > 0) c.taseCD -= dt;
       const fighting = !!s.attacking;
-      const resisting = fighting || !(still && !s.armed);
+      // standing there with his hands down after the order IS resisting
+      const resisting = fighting || !(still && !s.armed && (gaveUp || down));
       if (!down && !c.noTaser && c.taseCD <= 0 && d <= ARREST.TASE_R && resisting) {
         if (c.saidPhase !== "force") { out.say = line(b, "force"); c.saidPhase = "force"; }
         const r = verb("tase", officer, sus, _vOpts(c));
@@ -1920,9 +1933,9 @@
           else { c.tased = true; c.taseCD = ARREST.TASE_RELOAD * 1.6; }
         }
       }
-      if (!out.verb && !fighting && !down && !s.armed && d <= ARREST.GRAB_R && (s.cuffed || (s.behind && (s.backup | 0) >= 1))) {
-        // outnumbered, his back to you, in reach: hands on (the cuff rung runs
-        // it). A man already in cuffs just gets a hand on his arm.
+      if (!out.verb && !fighting && !down && !s.armed && d <= ARREST.GRAB_R && s.cuffed) {
+        // a man already in cuffs just gets a hand on his arm (a man on his
+        // feet with free hands is never grabbed into cuffs: taken down first)
         c.grabbed = true; c.forceN++;
         setPhase(c, "cuff"); ph = c.phase;
       } else if (!out.verb && !fighting && !down && d <= c.tackleR && resisting && c.tackleN < c.tackles && c.tackleCD <= 0 &&
@@ -1938,7 +1951,7 @@
       if (ph === "force" && d > (hold ? ARREST.LOSE_R : ARREST.LOSE_R * 1.6)) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
       if (ph === "force" && (c.forceN > 0 || down)) {
         c.afterT = (c.afterT || 0) + dt;
-        if (!running && !fighting && (down || still) && c.afterT > 0.5) { setPhase(c, "approach"); ph = c.phase; c.saidPhase = "approach"; }
+        if (!running && !fighting && (down || (still && gaveUp)) && c.afterT > 0.5) { setPhase(c, "approach"); ph = c.phase; c.saidPhase = "approach"; }
         else if (c.afterT > ARREST.AFTER_TASE && running) { c.forceN = Math.max(c.forceN, 1); }
       }
     }

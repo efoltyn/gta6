@@ -106,10 +106,13 @@
   }
   // a body that's stopped resisting: hands already up, knocked down, stunned,
   // guard broken, or your gunpoint hostage. Earned — never free on a walker.
+  // systems/arrest.js's rule when it is loaded: hands up, on his knees, down
+  // or out. A staggered man is still on his feet (take him down first).
   function subdued(p) {
-    return p.surrender || p.poseHandsUp || (p.char && p.char.handsUp)
-      || (p.ko || 0) > 0 || (p.stun || 0) > 0 || (p._broken || 0) > 0
-      || p === g.cityHostage;
+    if (p === g.cityHostage) return true;
+    const AR = CBZ.arrest;
+    if (AR && AR.cuffable) return !!AR.cuffable(p);
+    return p.surrender || p.poseHandsUp || (p.char && p.char.handsUp) || (p.ko || 0) > 0;
   }
   function cuffablePed(p) {
     return p && !p.dead && !p.vendor && p.kind !== "cop" && !p.restraint;
