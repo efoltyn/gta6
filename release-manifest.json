@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "71f47f22ff9ebb8fdacf879131ca65ee8309e3f7",
-  "createdAt": "2026-09-28T14:02:27.036Z",
+  "sourceCommit": "27f6103d84c9950efdf72010ac398fe5272545d0",
+  "createdAt": "2026-09-28T14:31:57.309Z",
   "fileCount": 1154,
-  "totalBytes": 47001355,
+  "totalBytes": 47018333,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -158,8 +158,8 @@
     },
     {
       "file": "src/city/bling.js",
-      "bytes": 20935,
-      "sha256": "c43c19800fa9e32b94dff7cb8c64683f7360e1bcc7e58d7b47bdb26f0c110237"
+      "bytes": 21644,
+      "sha256": "80edef8f8baf562e4d19aec6270612d87f7522e62b33a10c49b9f1d2ca79639a"
     },
     {
       "file": "src/city/blobshadows.js",
@@ -353,8 +353,8 @@
     },
     {
       "file": "src/city/clothes.js",
-      "bytes": 91119,
-      "sha256": "d0598608e2316b42ecc33cef7431fb73411a2a4af3d3eeb1d9513d85807b4999"
+      "bytes": 91498,
+      "sha256": "b73bf081edcd7b070ea702dcd0d052942b2cbc94c21321e57b681c9d17305a34"
     },
     {
       "file": "src/city/clothingstore.js",
@@ -498,8 +498,8 @@
     },
     {
       "file": "src/city/economy.js",
-      "bytes": 39346,
-      "sha256": "4adb47ed08749c3243c21afcf4e5c1dbb58a28f31780970436df3aa0a330f822"
+      "bytes": 39556,
+      "sha256": "2a3d6e3441826268d8b03f0703282463ad4ecc9b7a33da5252fd3171ee8f244b"
     },
     {
       "file": "src/city/elections.js",
@@ -1793,8 +1793,8 @@
     },
     {
       "file": "src/entities/character.js",
-      "bytes": 169833,
-      "sha256": "e040152d5c98fa144cecc2ae7ef6e253158c189fb2df5e5b69142c1a8ed3172d"
+      "bytes": 182924,
+      "sha256": "c7bc8a193d88807c8d94289aa9f6e1c31c7dcde2564555f7f09446ef5c77df4b"
     },
     {
       "file": "src/entities/coins.js",
@@ -1818,8 +1818,8 @@
     },
     {
       "file": "src/entities/headwear.js",
-      "bytes": 60936,
-      "sha256": "64533320c310e03c4f75a12757317c54cce77dfdeedde42d56f84e417f2cdb1e"
+      "bytes": 63467,
+      "sha256": "3b49e64b8813433675ed0ba1c3661e279a871ff472257e1ce1130d94aa073786"
     },
     {
       "file": "src/entities/heritage.js",
@@ -2323,8 +2323,8 @@
     },
     {
       "file": "src/systems/facial.js",
-      "bytes": 10537,
-      "sha256": "852bef084d7586613bc8c66d6794ef1b14907c95ec0d915859321b062f321a85"
+      "bytes": 10393,
+      "sha256": "110da85d6101a93fe41f9fdd67bea9cab9689dfaabc8ce9605a45cfb3cf79d30"
     },
     {
       "file": "src/systems/fixedstep.js",
@@ -2343,8 +2343,8 @@
     },
     {
       "file": "src/systems/fphands.js",
-      "bytes": 27720,
-      "sha256": "a1aa77f76c63bcf3a5d8895dbe3dec149d431840247e5dec2b15cbb2a6d5d8a3"
+      "bytes": 27922,
+      "sha256": "9fa4c554262d80133eb4add1abcf667478c892ce731e651a680441eb8491f235"
     },
     {
       "file": "src/systems/fpsmode.js",
