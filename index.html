@@ -615,7 +615,7 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=brain1"></script>
+<script src="src/systems/brain.js?v=armed1"></script>
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -686,7 +686,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/clothes.js and the head atlas below. -->
 <script src="src/entities/heritage.js?v=human1"></script>
 <script src="src/entities/npc.js?v=races1"></script>
-<script src="src/entities/ai.js?v=nodash1"></script>
+<script src="src/entities/ai.js?v=armed1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -809,7 +809,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
-<script src="src/systems/detection.js?v=sharkmode1"></script>
+<script src="src/systems/detection.js?v=armed1"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
@@ -828,13 +828,13 @@ document.body.appendChild(b);}}catch(e){}})();
      what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
-<script src="src/systems/prisonshanks.js"></script>
+<script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
 <script src="src/systems/capture.js?v=nodash1"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=brain1"></script>
+<script src="src/systems/brain_prison.js?v=armed1"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
@@ -910,7 +910,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/gamepad.js?v=nodash1"></script>
 <script src="src/systems/fpsmode.js?v=hands1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
-<script src="src/systems/intimidate.js?v=nodash1"></script>
+<script src="src/systems/intimidate.js?v=armed1"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -931,7 +931,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=merge0927a"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=sharkfix2"></script>
+<script src="src/entities/survivorbot.js?v=armed1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=uicut1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
@@ -940,7 +940,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=brainmoves1"></script>
+<script src="src/modes/gungame.js?v=armed1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1282,13 +1282,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=brainmoves1"></script>
+<script src="src/city/peds.js?v=armed1"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
-<script src="src/city/brain_city.js?v=brainmoves1"></script>
+<script src="src/city/brain_city.js?v=armed1"></script>
 <script src="src/entities/pedinstance.js?v=pedinst2"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and

@@ -228,5 +228,51 @@ console.log("\n[4] gang standing is brain.rep");
   check("a loaded gang.standing folds back into rep", CB.standing("s1") === 40 && gang.standing === 40);
 }
 
+// ============================================================
+// ARMED-SHOOTER WAVE (owner 2026-09-27: "EVERYBODY charges me while I'm
+// shooting... unless they had a gun"). The city's rage gate + retaliation.
+console.log("\n[5] the rage gate: nobody without a gun walks at the player's gun");
+{
+  B.reset(); CBZ.game.elapsed = 900;
+  CBZ.cityHasGun = () => true;
+  CBZ.fps = { reloading: 0 };
+  const gang = { id: "gz", members: [], boss: null, standing: 0 };
+  CBZ.cityGangs = [gang];
+  CBZ.cityGangById = (id) => (id === "gz" ? gang : null);
+  const fists = [], shooters = [];
+  for (let i = 0; i < 6; i++) {
+    const p = mkPed("Z" + i + "_" + ["Ace", "Bo", "Cy", "Di", "Ed", "Fy"][i], 3 + i, 4, { gang: "gz", kind: "gang", aggr: 0.95, behavior: "hothead" });
+    fists.push(p);
+  }
+  for (let i = 0; i < 2; i++) shooters.push(mkPed("G" + i + "_" + ["Hal", "Ivo"][i], -5 - i, 6, { gang: "gz", kind: "gang", aggr: 0.9, armed: true, weapon: "Pistol", ammo: 30 }));
+  const all = fists.concat(shooters);
+  gang.members = all; CBZ.cityPeds = all;
+  for (const p of all) CB.adopt(p);
+  // everybody set on the player (a mob call, a retaliation, a stick-up gone wrong)
+  for (const p of all) { p.rage = player; p.state = "fight"; }
+  const d0 = fists.map((p) => Math.hypot(p.pos.x, p.pos.z));
+  const gated = all.map((p) => CB.gunGate(p));
+  check("unarmed men raging at a gunman are stopped by the gate", fists.every((p, i) => gated[i] && !p.rage), fists.map((p) => p.state).join(","));
+  check("…they run or get down, they do not stand and fight", fists.every((p) => p.state === "flee" || p._cbResp === "cover" || p._cbResp === "cower" || p._cbResp === "surrender" || p.state === "surrender"), fists.map((p) => p._cbResp).join(","));
+  check("…and keep the grudge", fists.every((p) => B.memory.grudge(p, player) > 0.2));
+  check("men with guns are left to fight (combat_iq's cover + fire)", shooters.every((p, i) => !gated[fists.length + i] && p.rage === player));
+  for (let k = 0; k < 40; k++) step(all, 0.05, {});
+  const d1 = fists.map((p) => Math.hypot(p.pos.x, p.pos.z));
+  check("no unarmed man got closer to the gun", d1.every((d, i) => d >= d0[i] - 0.05), d1.map((d) => d.toFixed(1)).join(" "));
+  // retaliation: shooting one of the set gets guns from the gunmen, AVOID from the rest
+  B.reset(); for (const p of all) { p.rage = null; p.state = "walk"; p.pos.x = 3 + all.indexOf(p); p.pos.z = 4; CB.adopt(p); }
+  for (const p of all) B.memory.grudge(p, player, 0.6);
+  const lv = CB.retaliate(fists[0], player, 0.95) || [];
+  const lvOf = (p) => (lv.find((e) => e.actor === p) || {}).level;
+  check("shot one of theirs: the unarmed AVOID", fists.slice(1).every((p) => !lvOf(p) || lvOf(p) === "avoid"), fists.slice(1).map(lvOf).join(","));
+  check("…the gunmen answer with guns", shooters.some((p) => lvOf(p) === "weapon"), shooters.map(lvOf).join(","));
+  check("…nobody unarmed was sent at you", fists.every((p) => p.rage !== player));
+  // the gun goes away: fists answer fists again
+  CBZ.cityHasGun = () => false;
+  for (const p of fists) { p.rage = player; p.state = "fight"; }
+  check("no gun out: the gate stays out of a fist fight", fists.every((p) => !CB.gunGate(p) && p.rage === player));
+  CBZ.cityHasGun = () => true;
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall city street scenarios pass");
 process.exit(fails ? 1 : 0);

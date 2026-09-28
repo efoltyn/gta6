@@ -1330,13 +1330,33 @@
         const hide = findCover(b, foe);
         if (hide) { b.mode = "retreat"; b.coverAt = hide; b.path = null; go(b, hide.x, hide.z, "run"); return; }
       }
-      if (b.mode === "retreat" && b.coverAt && Math.hypot(b.coverAt.x - b.pos.x, b.coverAt.z - b.pos.z) > 1.2 && b.hp < 60) return;
-      b.mode = "engage"; b.coverAt = null;
+      if (b.mode === "retreat" && b.coverAt && Math.hypot(b.coverAt.x - b.pos.x, b.coverAt.z - b.pos.z) > 1.2 && (b.hp < 60 || (r.melee && foeHasGun(foe)))) return;   // fists hold the cover they ran for
+      b.mode = "engage"; if (!(r.melee && foeHasGun(foe))) b.coverAt = null;
       const lo = P.band[0], hi = P.band[1];
       let gx, gz, kind;
       if (d > hi) { gx = foe.pos.x - ux * (hi * 0.8); gz = foe.pos.z - uz * (hi * 0.8); kind = "close"; }
       else if (d < lo && !r.melee) { gx = b.pos.x - ux * (lo - d + 2); gz = b.pos.z - uz * (lo - d + 2); kind = "back"; }
       else if (P.still && b.track > 0.4) { BR.act.stop(b); return; }
+      else if (r.melee && foeHasGun(foe)) {
+        /* FISTS AGAINST A GUN (CBZ.brain.threat's knife window): he goes flat
+           out only when he is already inside RUSH_R and the gun is being
+           reloaded or pointed away; with its back turned he closes quietly;
+           with the muzzle on him he breaks the line and waits. It used to be
+           a straight sprint at a levelled gun from anywhere on the map. */
+        _gth.x = foe.pos.x; _gth.z = foe.pos.z; _gth.distance = d;
+        _gth.reloading = foeReloading(foe); _gth.yaw = foeYaw(foe); _gth.facingAway = null;
+        const gap = _gth.reloading || BR.threat.facingAway(b, _gth);
+        if (gap) b.coverAt = null;
+        if (gap && d <= BR.threat.RUSH_R) { gx = foe.pos.x; gz = foe.pos.z; kind = "close"; }
+        else if (gap) { gx = foe.pos.x; gz = foe.pos.z; kind = "strafe"; }          // closing on his back, not running
+        else {
+          // already in the cover he ran for: hold it and wait for the gap
+          if (b.coverAt && Math.hypot(b.coverAt.x - b.pos.x, b.coverAt.z - b.pos.z) <= 1.2) { b.mode = "retreat"; BR.act.stop(b); return; }
+          const hide = findCover(b, foe);
+          if (hide) { b.mode = "retreat"; b.coverAt = hide; b.path = null; go(b, hide.x, hide.z, "run"); return; }
+          gx = b.pos.x - ux * 4; gz = b.pos.z - uz * 4; kind = "back";
+        }
+      }
       else if (r.melee) { gx = foe.pos.x; gz = foe.pos.z; kind = "close"; }
       else {
         // strafe across the line, swapping sides on a human rhythm
@@ -1386,6 +1406,23 @@
     if (b.huntGoal) go(b, b.huntGoal.x, b.huntGoal.z, "run");
   }
 
+  // the foe as a shooter, for the fists rung's window (CBZ.brain.threat)
+  const _gth = { x: 0, z: 0, distance: 0, reloading: false, yaw: null, facingAway: null, source: null };
+  let _aimV = null;
+  function foeHasGun(foe) { return !rungAt(foe.isPlayer ? gg.playerRung : foe.rung).melee; }
+  function foeReloading(foe) { return !!(foe.isPlayer && CBZ.fps && CBZ.fps.reloading > 0); }
+  function foeYaw(foe) {
+    if (foe.isPlayer) {
+      try {
+        if (CBZ.playerAimDir && typeof THREE !== "undefined") {
+          _aimV = _aimV || new THREE.Vector3();
+          CBZ.playerAimDir(_aimV);
+          if (_aimV.x || _aimV.z) return Math.atan2(_aimV.x, _aimV.z);
+        }
+      } catch (e) {}
+    }
+    return foe.group ? foe.group.rotation.y : null;
+  }
   // a nearby walkable spot the foe cannot see from where it stands
   function findCover(b, foe) {
     const N = gg.nav; if (!N) return null;

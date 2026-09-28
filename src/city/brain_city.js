@@ -268,6 +268,7 @@
     const b = BR();
     if (!b || _execFor === b || !b.act || !b.act.use) return;
     try { b.act.use(GAME, EXEC); _execFor = b; } catch (e) {}
+    try { if (b.threat && b.threat.setCapability) b.threat.setCapability(capabilityOf, GAME); } catch (e) {}
   }
   function say(a, line, secs, color) {
     const b = BR();
@@ -617,12 +618,51 @@
   // ============================================================
   //  THREAT → RESPONSE through the brain, with the panic field as morale.
   // ============================================================
-  const _th = { source: null, x: 0, z: 0, armed: false, aimingAtMe: false, distance: 0, kind: "", authority: false };
+  const _th = { source: null, x: 0, z: 0, armed: false, aimingAtMe: false, distance: 0, kind: "", authority: false,
+    weapon: null, reloading: false, yaw: null };
+  /* THE PLAYER AS A SHOOTER (CBZ.brain.threat is weapon-aware: against a gun
+     only a gun fights; a blade only inside 3.5 m while the gun reloads or
+     points away). What the player holds, whether he is reloading, where the
+     gun points. */
+  let _aimV = null;
+  function playerAimYaw() {
+    try {
+      if (CBZ.playerAimDir && typeof THREE !== "undefined") {
+        _aimV = _aimV || new THREE.Vector3();
+        CBZ.playerAimDir(_aimV);
+        if (_aimV.x || _aimV.z) return Math.atan2(_aimV.x, _aimV.z);
+      }
+    } catch (e) {}
+    const P = CBZ.player;
+    return P && P.yaw != null ? P.yaw : null;
+  }
+  function playerWeapon() {
+    if (playerArmed()) return "gun";
+    return g.cityMeleeWeapon ? "melee" : "none";
+  }
+  // for CBZ.brain.threat.capability: the city answers for the player; a ped's
+  // own fields (armed / weapon / a holstered gun) the core reads itself
+  function capabilityOf(a) {
+    if (!a || g.mode !== "city") return null;
+    return isPlayerActor(a) ? playerWeapon() : null;
+  }
+  function fillShooter(th, src) {
+    th.weapon = null; th.reloading = false; th.yaw = null;
+    if (src && isPlayerActor(src)) {
+      th.weapon = playerWeapon();
+      th.reloading = !!(CBZ.fps && CBZ.fps.reloading > 0);
+      th.yaw = playerAimYaw();
+    }
+    return th;
+  }
   function respond(p, src, x, z, armed, aiming, kind) {
     const b = BR();
     if (!b || !b.threat || !b.threat.respond) return null;
     _th.source = src || null; _th.x = x; _th.z = z; _th.armed = !!armed; _th.aimingAtMe = !!aiming;
     _th.distance = Math.hypot(p.pos.x - x, p.pos.z - z); _th.kind = kind || (armed ? "armed" : "unarmed");
+    fillShooter(_th, src);
+    // a threat flagged armed with no source to read is a gun (a shot, a muzzle)
+    if (!_th.weapon && armed && !src) _th.weapon = "gun";
     // ONE RUNNER SETS OTHERS RUNNING: the local panic field (every bolt raises
     // it, it forgets in ~7 s) is suppression on this body's nerve.
     // Raised TOWARD a level set by the field, never stacked per call: think()
@@ -817,7 +857,10 @@
     }
     if (harm == null) harm = harmOf(victim, aggressor);
     let list = null;
-    try { list = b.social.retaliate(victim, aggressor, harm); } catch (e) { return null; }
+    // the gun's state rides along: against a gunman the core lets only a gun
+    // answer, a blade only in its window; everyone else AVOIDS
+    const ro = fillShooter(_retOpts, aggressor);
+    try { list = b.social.retaliate(victim, aggressor, harm, ro.weapon ? ro : null); } catch (e) { return null; }
     if (!list) return null;
     const ap = posOf(aggressor);
     let barked = false;
@@ -826,6 +869,12 @@
       if (!m || m === victim || m.dead || m.controlled || m.companion || m.surrender || m.restraint || m.vendor || (m.ko || 0) > 0) continue;
       if (m.rage && !m.rage.dead && m.rage !== aggressor) continue;    // already in somebody else's fight
       m.alarmed = Math.max(m.alarmed || 0, 4);
+      if (lvl === "avoid") {
+        // he would have come; at a gun he does not. Out of its line, and the
+        // grudge (booked by the core) keeps for another day.
+        if (ap) perform(m, "flee", setTh(_pth, ap.x, ap.z, aggressor, true));
+        continue;
+      }
       if (lvl === "glare") {
         if (!m.rage && ap) {
           EXEC.face(m, ap.x, ap.z); m.pause = Math.max(m.pause || 0, 1.5); m.state = "idle"; m.speed = 0;
@@ -850,6 +899,40 @@
     }
     return list;
   }
+  /* THE RAGE GATE (peds.js's rage branch calls this every think). A body set
+     on someone — by a retaliation, a mob, a gang call, a shove, a stick-up —
+     who has NO GUN of his own does not walk at a GUN: CBZ.brain.threat
+     decides. A blade may come inside its window; everyone else runs, gets
+     down or puts his hands up, and keeps the grudge. A man with a gun (a
+     holstered one too) is left to combat_iq, which fights from cover.
+     true = the brain took this think (the rage is dropped). */
+  const _gth = { source: null, x: 0, z: 0, armed: true, aimingAtMe: false, distance: 0, kind: "armed", authority: false,
+    weapon: "gun", reloading: false, yaw: null };
+  function gunGate(p) {
+    const r = p && p.rage;
+    if (!r || r.dead || p.dead) return false;
+    const b = BR();
+    if (!b || !b.threat || !b.threat.capability || !adopt(p)) return false;
+    if (b.threat.capability(r) !== "gun") return false;
+    if (b.threat.capability(p) === "gun") return false;
+    const rp = posOf(r);
+    if (!rp) return false;
+    _gth.source = r; _gth.x = rp.x; _gth.z = rp.z;
+    _gth.distance = Math.hypot(p.pos.x - rp.x, p.pos.z - rp.z);
+    fillShooter(_gth, r);
+    _gth.weapon = "gun";
+    _gth.aimingAtMe = !!p._covered;
+    let resp = null;
+    try { resp = b.threat.respond(p, _gth); } catch (e) { resp = null; }
+    if (!resp || resp === "fight") return false;
+    p.rage = null;
+    if (p.state === "fight" || p.state === "confront") p.state = "idle";
+    try { b.memory.grudge(p, r, 0.25); } catch (e) {}
+    perform(p, resp === "ignore" ? "flee" : resp, setTh(_pth, rp.x, rp.z, r, true));
+    return true;
+  }
+  const _retOpts = { weapon: null, reloading: false, yaw: null };
+
   // the man told "fists" draws the moment it stops being a fist fight
   function tickHolster(p) {
     const r = p.rage;
@@ -1008,7 +1091,7 @@
   CBZ.cityBrain = {
     adopt: adopt, release: release, reset: reset, update: update,
     exec: EXEC, crime: crime, hearBang: hearBang, think: think, threat: threat, perform: perform, respond: respond,
-    retaliate: retaliate, harmOf: harmOf, holster: holster, unholster: unholster,
+    retaliate: retaliate, harmOf: harmOf, holster: holster, unholster: unholster, gunGate: gunGate,
     grudge: grudge, feud: feud,
     memberDown: memberDown, broken: broken, moraleOf: moraleOf,
     standing: repStanding, addStanding: repAddStanding, syncFactions: syncFactions,

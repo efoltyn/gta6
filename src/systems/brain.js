@@ -61,7 +61,20 @@
 
      threat.assess(actor, threat)  threat.respond(actor, threat)
        responses: fight | flee | freeze | cover | surrender | comply | ignore | + hold
-       threat: { source, x, z, armed, aimingAtMe, distance, kind, + authority, + sheltered }
+       threat: { source, x, z, armed, aimingAtMe, distance, kind, + authority, + sheltered,
+                 + weapon ("gun"|"melee"|"none"|"hazard"), + reloading, + facingAway | + yaw,
+                 + cornered, + hide (a door to get behind exists), + coverNear, + inCover, + rushRange }
+       WEAPON-AWARE: against a gun only a gun fights (cover first, then from
+       range); a blade rushes only inside RUSH_R while the gunman reloads or
+       looks away; the rest flee / hide / cover / go prone / surrender, freeze
+       when cornered. fight<->flight is held DWELL s for the same threat.
+     + threat.how(a) -> "flee"|"hide"|"cover"|"prone"|"stalk"|"engage"|"rush"|...
+     + threat.capability(a) -> "gun"|"melee"|"none"   + threat.setCapability(fn, game?)
+     + threat.canRush(a, th)  + threat.facingAway(a, th)  + threat.weaponOf(th)
+     social.retaliate(victim, aggressor, harm, + opts{weapon,reloading,facingAway,yaw})
+       vs a gunman: gun -> "weapon"|"glare", blade in its window -> as rolled,
+       everyone else -> "avoid" (social.AVOID); the grudge is kept
+     tick intents + hide | prone | stalk | avoid ; ctx.hide(actor, tx, tz) -> {x,z}
      morale.group(id)  .hit(id, amt)  .death(id, actor)  .rattle(actor, amt)
      morale.of(actor)  .broken(actor)  .tick(dt)
        + morale.config(id, k)  + morale.nerve(actor)  + morale.clear(id)  + tick(dt, groupId)
@@ -205,7 +218,7 @@
     threat: { fight: 0.1 },
     needs: { hunger: 0.006, rest: 0.004, social: 0.005, money: 0.004, safety: 0.002 },
   });
-  define("guard", {
+  define("guard", { weapon: "gun",
     viewDist: 14, fovHalf: 0.6, hearMul: 1.1, faction: "guards", cq: "pro",
     personality: P5([0.5, 0.9], [0.3, 0.6], [0.6, 0.9], [0.4, 0.8], [0.5, 0.9]),
     witness: { flee: 0, film: 0, report: 0.4, intervene: 0.6, cower: 0, ignore: 0, cheer: 0 },
@@ -220,7 +233,7 @@
     authority: "nonlethal",
     authorityOpts: { warnRange: 9, orderRange: 4.2, cuffRange: 1.4, patience: 2.2 },
   });
-  define("cop", {
+  define("cop", { weapon: "gun",
     viewDist: 48, fovHalf: 1.1, faction: "police", cq: "pro",
     personality: P5([0.5, 0.9], [0.3, 0.6], [0.6, 0.9], [0.5, 0.8], [0.5, 0.9]),
     witness: { flee: 0, film: 0, report: 0.3, intervene: 0.7, cower: 0, ignore: 0, cheer: 0 },
@@ -228,7 +241,7 @@
     authority: "nonlethal",
     authorityOpts: { warnRange: 10, orderRange: 6, cuffRange: 1.6, patience: 6.0 },
   });
-  define("swat", {
+  define("swat", { weapon: "gun",
     viewDist: 55, fovHalf: 1.0, faction: "police", cq: "swat",
     personality: P5([0.7, 1], [0.4, 0.7], [0.85, 1], [0.4, 0.7], [0.7, 1]),
     witness: { report: 0.2, intervene: 0.8, flee: 0, film: 0, cower: 0, ignore: 0, cheer: 0 },
@@ -250,7 +263,7 @@
   });
   // THE PRESIDENT'S DETAIL. protection.js builds the formation; the brain only
   // answers who sees, who hears, and what each role does on the first shot.
-  define("agent_lead", {
+  define("agent_lead", { weapon: "gun",
     viewDist: 60, fovHalf: 1.2, hearMul: 1.2, faction: "detail", cq: "elite",
     personality: P5([0.8, 1], [0.3, 0.6], [0.9, 1], [0.5, 0.8], [0.9, 1]),
     witness: { intervene: 0.6, report: 0.4, flee: 0, film: 0, cower: 0, ignore: 0, cheer: 0 },
@@ -258,7 +271,7 @@
     authority: "protect",
     authorityOpts: { warnRange: 14, orderRange: 8, cuffRange: 1.6, patience: 1.8 },
   });
-  define("agent_cp", {
+  define("agent_cp", { weapon: "gun",
     viewDist: 45, fovHalf: 1.3, hearMul: 1.2, faction: "detail", cq: "elite",
     personality: P5([0.75, 1], [0.3, 0.6], [0.85, 1], [0.4, 0.7], [0.9, 1]),
     witness: { intervene: 0.7, report: 0.3, flee: 0, film: 0, cower: 0, ignore: 0, cheer: 0 },
@@ -266,14 +279,14 @@
     authority: "protect",
     authorityOpts: { warnRange: 12, orderRange: 6, cuffRange: 1.6, patience: 1.8 },
   });
-  define("agent_sweep", {
+  define("agent_sweep", { weapon: "gun",
     viewDist: 50, fovHalf: 1.0, hearMul: 1.2, faction: "detail", cq: "elite",
     personality: P5([0.7, 1], [0.3, 0.6], [0.8, 1], [0.7, 1], [0.8, 1]),
     witness: { intervene: 0.7, report: 0.3, flee: 0, film: 0, cower: 0, ignore: 0, cheer: 0 },
     threat: { fight: 0.2, cover: 0.2 },
     authority: "protect",
   });
-  define("countersniper", {
+  define("countersniper", { weapon: "gun",
     viewDist: 250, fovHalf: 0.35, hearMul: 1.4, faction: "detail", cq: "elite", touch: 0,
     personality: P5([0.8, 1], [0.3, 0.5], [0.95, 1], [0.3, 0.5], [0.9, 1]),
     witness: { report: 1, intervene: 0, flee: 0, film: 0, cower: 0, ignore: 0, cheer: 0 },
@@ -300,13 +313,13 @@
     threat: { flee: 0.2 },
     needs: { rest: 0.003, safety: 0.004, hunger: 0.004 },
   });
-  define("gg_bot", {
+  define("gg_bot", { weapon: "gun",
     viewDist: 70, fovHalf: 1.77, touch: 5, faction: "ffa", cq: "pro", memSec: 8,
     personality: P5([0.5, 1], [0.6, 1], [0.3, 0.7], [0.5, 0.9], [0, 0.2]),
     witness: { ignore: 1, flee: 0, film: 0, report: 0, intervene: 0, cower: 0, cheer: 0 },
     threat: { fight: 0.4 },
   });
-  define("soldier", {
+  define("soldier", { weapon: "gun",
     viewDist: 120, fovHalf: 1.2, hearMul: 1.2, faction: "army", cq: "pro",
     personality: P5([0.4, 0.9], [0.4, 0.8], [0.5, 0.9], [0.3, 0.6], [0.5, 0.9]),
     witness: { intervene: 0.5, ignore: 0.5, flee: 0, film: 0, report: 0, cower: 0, cheer: 0 },
@@ -369,6 +382,9 @@
       threatR: { source: null, x: 0, z: 0, armed: false, aimingAtMe: false, distance: 0, kind: null },
       assessR: { level: 0, kind: null },
       response: "ignore", responseT: -1e9,
+      // threat.respond's held decision (settle) + how it is carried out
+      tResp: null, tRespT: -1e9, tSrc: null, tX: 0, tZ: 0, threatHow: null,
+      engSrc: null, engT: -1e9, engLast: -1e9, weapon: null,
       intent: { kind: "none", x: 0, z: 0, speed: 0, posture: "stand", target: null, say: null, response: null, phase: null },
     };
     if (A.needs) {
@@ -1057,9 +1073,16 @@
      sets the CEILING (a slap never gets a shank), grudge + aggression +
      loyalty climb toward it, courage decides whether a man joins at all. */
   const LEVELS = ["glare", "shove", "fight", "weapon"];
+  /* AGAINST A GUNMAN the ladder is capped by what each man HOLDS (threat.
+     capability): a man with a gun answers with it ("weapon") or watches
+     ("glare"); a blade answers only inside its window (close, and the gun is
+     being reloaded or pointed elsewhere); everyone else AVOIDS — out of his
+     line, watching from cover. The grudge is booked either way: it keeps. */
+  const AVOID = "avoid";
   const _ret = [];
   const _retPool = [];
-  function retaliate(victim, aggressor, harm) {
+  const _rth = { source: null, x: 0, z: 0, distance: null, reloading: false, facingAway: null, yaw: null, rushRange: 0, armed: true, kind: "armed" };
+  function retaliate(victim, aggressor, harm, opts) {
     for (let i = 0; i < _ret.length; i++) _retPool.push(_ret[i]);
     _ret.length = 0;
     harm = clamp01(harm == null ? 0.3 : harm);
@@ -1067,6 +1090,14 @@
     const vb = victim && victim._brain;
     if (!vb || vb.clique == null) return _ret;
     const ceil = harm < 0.3 ? 1 : harm < 0.6 ? 2 : 3;     // index into LEVELS
+    const aw = (opts && opts.weapon) || capability(aggressor);
+    if (aw === "gun") {
+      _rth.source = aggressor; _rth.x = ax(aggressor); _rth.z = az(aggressor); _rth.distance = null;
+      _rth.reloading = !!(opts && opts.reloading);
+      _rth.facingAway = opts && opts.facingAway != null ? !!opts.facingAway : null;
+      _rth.yaw = opts && opts.yaw != null ? opts.yaw : null;
+      _rth.rushRange = (opts && opts.rushRange) || 0;
+    }
     const mates = cliqueMates(victim, 18);
     for (let i = 0; i < mates.length; i++) {
       const m = mates[i], b = m._brain;
@@ -1077,12 +1108,19 @@
       const score = harm * 0.8 + g * 0.35 + p.aggression * 0.3 + p.loyalty * 0.2 - (1 - p.courage) * 0.15;
       let lvl = score < 0.35 ? 0 : score < 0.6 ? 1 : score < 0.85 ? 2 : 3;
       if (lvl > ceil) lvl = ceil;
+      let level = LEVELS[lvl];
+      if (aw === "gun") {
+        const my = capability(m);
+        if (my === "gun") level = lvl >= 2 ? "weapon" : "glare";
+        else if (!(my === "melee" && lvl >= 2 && canRush(m, _rth))) level = AVOID;
+      }
       const r = b.retaliation || (b.retaliation = { target: null, level: null, t: 0, victim: null });
-      r.target = aggressor; r.level = LEVELS[lvl]; r.t = now(); r.victim = victim;
+      r.target = aggressor; r.level = level; r.t = now(); r.victim = victim;
       const e = _retPool.pop() || { actor: null, level: null };
-      e.actor = m; e.level = LEVELS[lvl];
+      e.actor = m; e.level = level;
       _ret.push(e);
     }
+    _rth.source = null;
     return _ret;
   }
 
@@ -1094,7 +1132,7 @@
     silence: silence, cancelReport: silence, fileNow: fileNow, holdReport: holdReport, accuse: accuse,
     setReportBias: setReportBias, setLeader: setLeader, leader: function (c) { return LEADERS[c] || null; },
     pending: function () { return pending.length; },
-    LEVELS: LEVELS, LOUD: LOUD,
+    LEVELS: LEVELS, LOUD: LOUD, AVOID: AVOID,
   };
 
   /* ================================================================ MORALE
@@ -1350,10 +1388,169 @@
     for (let i = 0; i < list.length; i++) { const o = list[i]; if (o !== b && o.faction === b.faction && !blind(o.actor)) n++; }
     return n;
   }
+  /* ---------------------------------------------------------------- CAPABILITY
+     OWNER, 2026-09-27: "I get a keycard, go into the jail room, get guns, and
+     EVERYBODY charges me while I'm shooting. Not everybody should be charging
+     at me. That's stupid logic... unless they had a gun. Or short range, if
+     they have a knife, maybe they'll come at me if they're already close."
+
+     What a man is HOLDING decides whether fighting a gunman is even on his
+     menu — not his grudge, not his clique, not his temperament:
+       "gun"    engages from range, and gets into cover first
+       "melee"  (knife, shank, bat) rushes a gunman ONLY when already inside
+                RUSH_R and the gunman is reloading or looking away (>90 deg);
+                otherwise he is as unarmed as the rest
+       "none"   never closes on a gun: flees (away, out of his sight), takes
+                cover, hides, goes flat, puts his hands up; freezes when he is
+                cornered. His grudge is kept for later.
+     capability(actor) reads the fields every game already has (hasGun,
+     armed + weapon, a holstered gun, _shankOut, loadout items); a game adds
+     what the core cannot see (the PLAYER's weapon) with setCapability(fn). */
+  const RUSH_R = 3.5;          // m: a blade inside this is a real bet against a gun
+  const DWELL = 3;             // s: a yield (flee/freeze/surrender) or a fight is held this long
+  const COVER_FIRST = 1.2;     // s: an armed man gets into cover before he fires
+  const MELEE_RE = /knife|shank|shiv|blade|bat\b|machete|club|baton|pipe|crowbar|axe|hammer|brass|melee|sword|bottle/i;
+  const capFns = [];
+  function setCapability(fn, game) {
+    for (let i = 0; i < capFns.length; i++) if (capFns[i].game === (game || "*")) { capFns[i].fn = fn; return; }
+    if (fn) capFns.push({ fn: fn, game: game || "*" });
+  }
+  function weaponWord(w) {
+    if (!w) return null;
+    if (typeof w === "object") return w.melee ? (w.id === "fists" || w.key === "fists" ? "none" : "melee") : "gun";
+    const s = String(w);
+    if (/^fists?$/i.test(s)) return "none";
+    return MELEE_RE.test(s) ? "melee" : "gun";
+  }
+  const MELEE_ITEMS = ["Shiv", "Shank", "Knife", "Brass Knuckles", "Baton", "Bat", "Machete"];
+  function capability(a) {
+    if (!a || typeof a !== "object") return "none";
+    const b = a._brain;
+    for (let i = 0; i < capFns.length; i++) {
+      const c = capFns[i];
+      // a game's reader answers for its own brains and for bodies with no
+      // brain at all (the player); it returns null for anything not its own
+      if (c.game !== "*" && b && b.game !== c.game) continue;
+      let r = null;
+      try { r = c.fn(a); } catch (e) { r = null; }
+      if (r) return r;
+    }
+    if (b && b.weapon) return b.weapon;
+    if (a.hasGun) return "gun";
+    if (a._holster && a._holster.weapon) return weaponWord(a._holster.weapon) || "gun";   // a holstered gun is still a gun
+    if (a.armed) return weaponWord(a.weapon) || "gun";
+    const ww = weaponWord(a.weapon);
+    if (ww) return ww;
+    if (a._shankOut || a.shank || a.knife) return "melee";
+    const it = a.loadout && a.loadout.items;
+    if (it) for (let i = 0; i < MELEE_ITEMS.length; i++) if (it.indexOf(MELEE_ITEMS[i]) >= 0) return "melee";
+    // a body that exposes no weapon fields at all takes its kind's default
+    // (a screw, a cop, an agent, a soldier carries); one that does is empty
+    if (b && b.arch.weapon && !("armed" in a) && !("hasGun" in a) && !("weapon" in a)) return b.arch.weapon;
+    return "none";
+  }
+  // what the THREAT carries: th.weapon when the game says, a gunshot is a gun,
+  // else the source's own capability, else the legacy th.armed (= a gun)
+  function threatWeapon(th) {
+    if (th.weapon) return th.weapon;
+    if (th.kind === "gunshot") return "gun";
+    if (th.kind === "explosion" || th.kind === "hazard") return "hazard";
+    if (th.source && typeof th.source === "object") {
+      const c = capability(th.source);
+      if (c !== "none") return c;
+    }
+    return th.armed ? "gun" : "none";
+  }
+  // is the shooter looking AWAY from this man (more than 90 degrees off)?
+  function facingAway(actor, th) {
+    if (th.facingAway != null) return !!th.facingAway;
+    let yaw = th.yaw;
+    const s = th.source;
+    if (yaw == null && s && typeof s === "object" && (s.yaw != null || s.group)) yaw = yawOf(s);
+    if (yaw == null) return false;
+    const sx = th.x != null ? th.x : ax(s), sz = th.z != null ? th.z : az(s);
+    const dx = ax(actor) - sx, dz = az(actor) - sz;
+    return Math.sin(yaw) * dx + Math.cos(yaw) * dz < 0;
+  }
+  function distTo(actor, th) {
+    if (th.distance != null) return th.distance;
+    const sx = th.x != null ? th.x : (th.source ? ax(th.source) : ax(actor));
+    const sz = th.z != null ? th.z : (th.source ? az(th.source) : az(actor));
+    return Math.hypot(sx - ax(actor), sz - az(actor));
+  }
+  // THE KNIFE'S WINDOW. Close, and the gun is not on him right now.
+  function canRush(actor, th) {
+    if (capability(actor) !== "melee") return false;
+    const b = of(actor), p = b.personality;
+    if (hpFrac(actor) < 0.3) return false;
+    if (distTo(actor, th) > (th.rushRange || RUSH_R)) return false;
+    if (!(th.reloading || facingAway(actor, th))) return false;
+    return p.aggression * 0.55 + p.courage * 0.45 >= 0.42;
+  }
+
   // the scorer lives at module scope: respond() runs per frame under fire,
   // and a closure per call is an allocation per call
-  let rBest = "ignore", rScore = -1e9, rBias = null;
-  function score(k, v) { v += (rBias && rBias[k]) || 0; if (v > rScore) { rScore = v; rBest = k; } }
+  let rBest = "ignore", rScore = -1e9, rBias = null, rHowBest = null;
+  function score(k, v, how) { v += (rBias && rBias[k]) || 0; if (v > rScore) { rScore = v; rBest = k; rHowBest = how || k; } }
+  function isYield(r) { return r === "flee" || r === "freeze" || r === "surrender"; }
+  /* HELD. A man who decided to run keeps running for DWELL seconds, and a man
+     who committed to a rush does not turn tail mid-stride: the same threat
+     cannot flip him between fight and flight inside the dwell. (A morale
+     break still routs him — that is a latch with its own hysteresis.) */
+  function settle(b, th, best, how) {
+    const t = now();
+    const src = th.source || null;
+    const same = b.tSrc === src && (src || (Math.abs((th.x || 0) - b.tX) + Math.abs((th.z || 0) - b.tZ) < 8));
+    const prev = b.tResp;
+    if (prev && same && t - b.tRespT < DWELL && ((prev === "fight" && isYield(best)) || (isYield(prev) && best === "fight"))) {
+      b.response = prev; b.responseT = t;
+      return prev;
+    }
+    if (best !== prev || !same) { b.tResp = best; b.tRespT = t; }
+    b.tSrc = src; b.tX = th.x || 0; b.tZ = th.z || 0;
+    b.threatHow = how || best;
+    b.response = best; b.responseT = t;
+    return best;
+  }
+
+  /* ONE MAN AGAINST A GUN (tw === "gun", not an order from authority). */
+  function vsGun(actor, b, th, lvl) {
+    const p = b.personality, bias = b.arch.threat || {};
+    const my = capability(actor), d = distTo(actor, th), hf = hpFrac(actor), t = now();
+    if (my === "gun") {
+      // he has one too: into cover first, then he fires from it. Only the
+      // nearly dead run (a morale break is handled by the caller).
+      if (hf < 0.2 && p.courage < 0.7 && !b.protect) return settle(b, th, "flee", "flee");
+      const src = th.source || null;
+      if (b.engSrc !== src || t - (b.engLast || -1e9) > 6) { b.engSrc = src; b.engT = t; }
+      b.engLast = t;
+      // a bodyguard's job is the body: he covers, he does not go hunting
+      if (b.protect || (bias.cover || 0) >= 0.5) return settle(b, th, "cover", "cover");
+      if (th.inCover || th.sheltered || t - b.engT >= COVER_FIRST * (1.3 - p.discipline * 0.6)) return settle(b, th, "fight", "engage");
+      return settle(b, th, "cover", "cover");
+    }
+    if (my === "melee" && canRush(actor, th)) return settle(b, th, "fight", "rush");
+    // A BLADE WAITING FOR ITS GAP: a hard man already close holds low and
+    // watches for the reload or the turned back — he does not walk in on it
+    if (my === "melee" && d <= RUSH_R + 2.5 && hf > 0.4 && p.aggression * 0.55 + p.courage * 0.45 >= 0.55 && !th.aimingAtMe) {
+      return settle(b, th, "cover", "stalk");
+    }
+    // EVERYONE ELSE YIELDS — which way is personality and what is around him
+    if (th.cornered) return settle(b, th, th.aimingAtMe ? "surrender" : "freeze", th.aimingAtMe ? "surrender" : "freeze");
+    rBest = "flee"; rScore = -1e9; rBias = bias; rHowBest = "flee";
+    const muzzle = th.aimingAtMe && d < 9;
+    score("flee", 0.55 + (1 - p.courage) * 0.35 + lvl * 0.2 - (muzzle ? 0.45 : 0), "flee");
+    // a door he can get behind (a cell, a room): breaks the line for good
+    if (th.hide) score("flee", 0.62 + p.discipline * 0.35 + (d > 6 ? 0.1 : -0.25) - (muzzle ? 0.4 : 0), "hide");
+    score("cover", (th.coverNear ? 0.45 : 0.1) + p.discipline * 0.4 + (d < 10 ? 0.05 : 0), "cover");
+    // flat on the floor in the open, close to it, when there is nowhere to go
+    score("cover", d < 14 && lvl > 0.5 ? 0.3 + p.discipline * 0.15 + (1 - p.courage) * 0.25 - (th.hide ? 0.3 : 0) - (th.coverNear ? 0.2 : 0) : -1, "prone");
+    score("surrender", th.aimingAtMe && d < 12 ? 0.5 + (1 - p.aggression) * 0.45 + (1 - p.courage) * 0.2 : -1, "surrender");
+    score("freeze", lvl > 0.75 ? (1 - p.courage) * 0.5 - 0.15 : -1, "freeze");
+    const best = rBest, how = rHowBest; rBias = null;
+    return settle(b, th, best, how);
+  }
+
   function respond(actor, th) {
     const b = of(actor);
     if (isDead(actor)) return "ignore";
@@ -1361,16 +1558,21 @@
     if (actor.ko > 0 || actor.asleep) return "ignore";
     if (!th) return "ignore";
     const lvl = assess(actor, th).level;
-    if (lvl < 0.12) return (b.response = "ignore");
+    if (lvl < 0.12) { b.threatHow = "ignore"; return (b.response = "ignore"); }
     const p = b.personality, bias = b.arch.threat || {};
-    const armed = !!(actor.armed || actor.weapon);
+    const my = capability(actor);
+    const armed = my === "gun" || (my === "melee" && !th.armed);
     const hf = hpFrac(actor);
-    const allies = Math.min(4, alliesNear(actor, 12));
     const brk = b.registered && groupIdOf(b) != null ? broken(actor) : false;
-    if (brk) return (b.response = "flee");
+    if (brk) { b.threatHow = "flee"; b.tResp = "flee"; b.tRespT = now(); b.tSrc = th.source || null; return (b.response = "flee"); }
     // THE POST IS THE JOB: a countersniper holds his roof whatever happens
-    if (b.arch.hold) return (b.response = "hold");
-    rBest = "ignore"; rScore = -1e9; rBias = bias;
+    if (b.arch.hold) { b.threatHow = "hold"; return (b.response = "hold"); }
+    const tw = threatWeapon(th);
+    // being threatened spends the safety drive
+    if (b.needs && b.needs.levels.safety != null) b.needs.levels.safety = clamp01(b.needs.levels.safety - lvl * 0.2);
+    if (tw === "gun" && !th.authority) return vsGun(actor, b, th, lvl);
+    const allies = Math.min(4, alliesNear(actor, 12));
+    rBest = "ignore"; rScore = -1e9; rBias = bias; rHowBest = null;
     score("fight", p.aggression * 0.6 + p.courage * 0.4 + (armed ? 0.45 : 0) + allies * 0.06 - lvl * (1 - p.courage) * 0.6 - (1 - hf) * 0.5 - (th.armed && !armed ? 0.5 : 0));
     score("flee", (1 - p.courage) * 0.7 + lvl * 0.5 + (1 - hf) * 0.4 - p.discipline * 0.35 - (armed ? 0.2 : 0));
     score("freeze", lvl > 0.6 ? (1 - p.courage) * 0.45 + (1 - p.discipline) * 0.1 - 0.1 : -1);
@@ -1378,13 +1580,19 @@
     score("cover", p.discipline * 0.55 + (th.armed || th.kind === "gunshot" ? 0.35 : -0.3) + lvl * 0.2 + (th.sheltered ? 1.2 : 0));
     score("surrender", th.aimingAtMe && !armed && (th.distance == null || th.distance < 12) ? (1 - p.aggression) * 0.8 + (1 - p.courage) * 0.3 : -1);
     score("comply", th.authority ? p.discipline * 0.5 + (1 - p.aggression) * 0.5 : -1);
-    const best = rBest; rBias = null;
-    b.response = best; b.responseT = now();
-    // being threatened spends the safety drive
-    if (b.needs && b.needs.levels.safety != null) b.needs.levels.safety = clamp01(b.needs.levels.safety - lvl * 0.2);
-    return best;
+    const best = rBest, how = rHowBest; rBias = null;
+    return settle(b, th, best, how);
   }
-  const threat = { assess: assess, respond: respond };
+  // HOW he does what respond() said: flee -> "flee" | "hide"; cover ->
+  // "cover" | "prone" | "stalk" (a blade holding low) ; fight -> "engage"
+  // (from range) | "rush" (a blade in its window) | "fight"
+  function how(actor) { const b = actor && actor._brain; return (b && b.threatHow) || null; }
+  const threat = {
+    assess: assess, respond: respond, how: how,
+    capability: capability, setCapability: setCapability, weaponOf: threatWeapon,
+    canRush: canRush, facingAway: facingAway,
+    RUSH_R: RUSH_R, DWELL: DWELL,
+  };
 
   /* ================================================================ ACT
      The ONLY way the brain touches a body. Each call tries the NINTH WAVE
@@ -1397,17 +1605,21 @@
   }
   const SPEEDS = { walk: 1.4, jog: 3.2, run: 5.5, sprint: 7 };
   function speedNum(s) { return typeof s === "number" ? s : SPEEDS[s] || SPEEDS.walk; }
-  // HARNESS TRAP: CBZ.moves' command API was unknown when this was written
-  // (the MOVES lead built it in parallel). What exists (entities/moves.js) is
-  // a per-frame INTEGRATOR the game calls itself: step(m, pos, yaw, tx, tz,
-  // o, dt), face(m, yaw, want, dt) — NOT command calls. Calling that face()
-  // as face(actor, x, z) would write a coordinate into actor.yaw, so the root
-  // object is only asked for COMMAND-style names that cannot collide:
-  //   moveTo | go | steerTo ; stop | halt ; turnTo | faceTo ; posture | setPosture
-  // A `CBZ.moves.brain` adapter object, if the MOVES lead publishes one, is
-  // preferred and may also use plain `face`. Until then the game's executor
-  // (act.use) is what moves bodies, which is the normal path: the game owns
-  // the per-frame moves.step() call and reads the target the executor set.
+  // THE SPLIT WITH CBZ.moves (entities/moves.js + moves_posture.js, merged):
+  // the brain DECIDES, moves EXECUTES. CBZ.moves is a per-frame INTEGRATOR
+  // each game's mover calls itself — step(m, pos, yaw, tx, tz, o, dt),
+  // face(m, yaw, want, dt), formation() — plus a posture SEQUENCER
+  // (sit/lie/kneel/crouch/stand need a spot). It has no command API, so the
+  // normal path is the game's executor (act.use): it writes the goal its
+  // CBZ.moves-driven mover reads (city: ped.moveOrder; prison: target;
+  // gungame: b.goal; protection: ped.moveOrder via CBZ.protection.order).
+  // The root object is still asked for COMMAND-style names that cannot
+  // collide with the integrator (moveTo | go | steerTo ; stop | halt ;
+  // turnTo | faceTo ; setPosture). NOT `posture`: CBZ.moves.posture(actor)
+  // is moves_posture.js's GETTER (returns "stand"/"sit"...), and asking it
+  // would swallow every posture request. NOT `face`/`stop`: integrator names.
+  // A `CBZ.moves.brain` adapter object, if ever published, is preferred and
+  // may also use plain `face`.
   let _mThis = null;
   function movesFn(names, adapterExtra) {
     const M = CBZ.moves;
@@ -1420,7 +1632,7 @@
     for (let i = 0; i < names.length; i++) if (typeof M[names[i]] === "function") { _mThis = M; return M[names[i]]; }
     return null;
   }
-  const N_MOVE = ["moveTo", "go", "steerTo"], N_STOP = ["stop", "halt"], N_FACE = ["turnTo", "faceTo"], N_POST = ["posture", "setPosture"];
+  const N_MOVE = ["moveTo", "go", "steerTo"], N_STOP = ["stop", "halt"], N_FACE = ["turnTo", "faceTo"], N_POST = ["setPosture"];
   function via(names, execName, a, x, y, z) {
     const e = execOf(a);
     if (e && e.prefer && typeof e[execName] === "function") return e[execName](a, x, y, z);
@@ -1777,8 +1989,15 @@
         }
         setIntent(I, brk ? "rout" : "flee", px, pz, SPEEDS.run, "stand", th.source || null);
         awayFrom(actor, tx, tz, 25, I);
+        // HIDE: a door he can get behind (ctx.hide(actor, tx, tz) -> {x,z})
+        if (b.threatHow === "hide" && ctx && typeof ctx.hide === "function") {
+          const hv = ctx.hide(actor, tx, tz);
+          if (hv) { I.kind = "hide"; I.x = hv.x; I.z = hv.z; }
+        }
         return I;
       }
+      if (resp === "cover" && b.threatHow === "prone") return setIntent(I, "prone", px, pz, 0, "prone", th.source || null);
+      if (resp === "cover" && b.threatHow === "stalk") return setIntent(I, "stalk", px, pz, 0, "crouch", th.source || null);
       if (resp === "cover") {
         // close protection covers the PRINCIPAL: body between him and the threat
         const P = b.protect;
@@ -1791,7 +2010,19 @@
         return I;
       }
       if (resp === "hold") return setIntent(I, "hold", px, pz, 0, "aim", th.source || null);
-      if (resp === "fight") return setIntent(I, "fight", tx, tz, SPEEDS.jog, "aim", th.source || null);
+      if (resp === "fight") {
+        // a gun fights from where it is (in cover, in range); a blade in its
+        // window goes flat out; the rest walk into it the old way
+        const hw = b.threatHow;
+        if (hw === "engage") {
+          const d = Math.hypot(tx - px, tz - pz);
+          if (d <= 30) return setIntent(I, "fight", px, pz, 0, "aim", th.source || null);
+          setIntent(I, "fight", px, pz, SPEEDS.jog, "aim", th.source || null);
+          const k = (d - 25) / d; I.x = px + (tx - px) * k; I.z = pz + (tz - pz) * k;
+          return I;
+        }
+        return setIntent(I, "fight", tx, tz, hw === "rush" ? SPEEDS.sprint : SPEEDS.jog, hw === "rush" ? "stand" : "aim", th.source || null);
+      }
       if (resp === "freeze") return setIntent(I, "freeze", px, pz, 0, "cower", th.source || null);
       if (resp === "surrender") return setIntent(I, "surrender", px, pz, 0, "handsUp", th.source || null);
       if (resp === "comply") return setIntent(I, "comply", px, pz, 0, "kneel", th.source || null);
@@ -1823,11 +2054,20 @@
     if (rt && now() - rt.t < 8 && rt.target && !isDead(rt.target)) {
       const tx = ax(rt.target), tz = az(rt.target);
       I.response = rt.level;
+      if (rt.level === AVOID) {
+        // he wanted to, and the gun said no: out of its line, watching
+        setIntent(I, "avoid", px, pz, SPEEDS.jog, "crouch", rt.target);
+        if (Math.hypot(tx - px, tz - pz) < 14) awayFrom(actor, tx, tz, 12, I);
+        else { I.speed = 0; I.x = px; I.z = pz; }
+        return I;
+      }
       return setIntent(I, "retaliate", tx, tz, rt.level === "glare" ? 0 : SPEEDS.jog, "stand", rt.target);
     }
-    // --- something heard: the curious go and look
+    // --- something heard: the curious go and look. NOT at gunfire or a blast
+    // unless he carries a gun himself: an unarmed man walks away from shots.
     const h = b.heardR;
-    if (h.valid && now() - h.t < b.arch.memSec && b.personality.curiosity > 0.45) {
+    const loud = h.kind === "gunshot" || h.kind === "explosion";
+    if (h.valid && now() - h.t < b.arch.memSec && b.personality.curiosity > 0.45 && (!loud || capability(actor) === "gun")) {
       return setIntent(I, "investigate", h.x, h.z, SPEEDS.walk, "stand", h.source);
     }
     // --- the routine

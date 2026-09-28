@@ -282,15 +282,21 @@
   }
 
   // an armed inmate squeezes off a return shot at the player.
-  function npcFire(n) {
+  // opts (systems/brain_prison.js's engage from range): { hit: false = the
+  // round goes past you, dmg } — the stand-off below is point-blank and always lands
+  function npcFire(n, opts) {
     const g = n.group.position;
     const fy = n.group.rotation.y;
     const from = { x: g.x + Math.sin(fy) * 0.5, y: 1.55, z: g.z + Math.cos(fy) * 0.5 };
     const pp = CBZ.player.pos;
-    const to = { x: pp.x, y: 1.4, z: pp.z };
+    const miss = !!(opts && opts.hit === false);
+    const to = miss ? { x: pp.x + (rng() - 0.5) * 2.4, y: 1.2 + rng() * 1.2, z: pp.z + (rng() - 0.5) * 2.4 } : { x: pp.x, y: 1.4, z: pp.z };
     CBZ.tracer && CBZ.tracer(from, to, { color: 0xffd24a, life: 0.07, muzzleScale: 1.1 });
-    CBZ.sfx && CBZ.sfx("shoot_pistol");
-    if (CBZ.shootPlayer) CBZ.shootPlayer(52, g.x, g.z, {
+    if (CBZ.worldSfx) CBZ.worldSfx("shoot_pistol", g.x, g.z, { ref: 30, volume: 1 });
+    else if (CBZ.sfx) CBZ.sfx("shoot_pistol");
+    if (CBZ.guardHear) { try { CBZ.guardHear(g.x, g.z, 40, { type: "gunfire", player: false }); } catch (e) {} }
+    if (miss) return;
+    if (CBZ.shootPlayer) CBZ.shootPlayer(opts && opts.dmg ? opts.dmg : 52, g.x, g.z, {
       heat: 16, shake: 0.62, stun: 0.22,
       haulMsg: "SHOT DOWN · DRAGGED TO YOUR CELL",
       hint: shortName(n) + " shoots back!",
@@ -585,6 +591,7 @@
     target: function () { return currentTarget; },
   };
   CBZ.intimidate = intimidate;
+  CBZ.prisonNpcFire = npcFire;          // systems/brain_prison.js: an armed inmate engaging from range
 
   // The "rob" prompt site is GONE, not muted — the verb moved into the
   // interact panel's own option list (systems/interact.js verbsFor), so there

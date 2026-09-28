@@ -694,6 +694,11 @@
     // escape scenario there is no block to hear about it, so the whole chain
     // (guard witness → case pressure → snitch line → heat) stops here rather
     // than at four call sites that would each have to remember.
+    // a shot in the disaster crowd: the survivors scatter AWAY from it
+    // (entities/survivorbot.js, CBZ.brain.threat — nobody unarmed walks at gunfire)
+    if (g.mode === "survival" && meta && meta.type === "gunfire" && CBZ.survivorsHearShot) {
+      try { CBZ.survivorsHearShot(player.pos.x, player.pos.z, null); } catch (e) {}
+    }
     if (!prisonSim()) return;
     meta = metaWithPlayerPos(meta || {});
     const copCrime = meta.actorRole === "cop" || g.role === "cop";

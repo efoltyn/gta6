@@ -337,9 +337,35 @@
       const resp = BR.threat.respond(o, TH);
       if (resp !== "flee" && resp !== "freeze") continue;         // the steady keep to their plan
       const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
-      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp];
+      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp]; sc.gun = false;
     }
   }
+  /* A GUNSHOT IN THE CROWD (systems/detection.js calls this for the player's
+     shots in survival). CBZ.brain.threat is weapon-aware: nobody without a
+     gun walks toward gunfire. Every survivor in earshot answers it — the
+     crowd scatters AWAY from the shot (not down the hazard gradient: the gun
+     is the nearer danger), a few freeze; a body under a slab stays there. */
+  const GTH = { kind: "gunshot", weapon: "gun", x: 0, z: 0, distance: 0, armed: true, aimingAtMe: false, source: null };
+  function hearShot(x, z, src) {
+    if (!BR || !survOn()) return 0;
+    const list = BR.near(x, z, 45, _wit);
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i].actor;
+      if (o === src || !o._survBrain || o.dead || o.state === "hide") continue;
+      GTH.x = x; GTH.z = z; GTH.source = src || null;
+      GTH.distance = Math.hypot(o.pos.x - x, o.pos.z - z);
+      const resp = BR.threat.respond(o, GTH);
+      if (resp === "fight" || resp === "ignore") continue;
+      const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
+      sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp === "freeze" ? "freeze" : "flee";
+      sc.hold = SCARE_HOLD[sc.resp]; sc.gun = true;
+      n++;
+    }
+    return n;
+  }
+  CBZ.survivorsHearShot = hearShot;
+
   /* one think of the nerves: true = it owns the body this tick */
   function panicThink(b) {
     if (!BR || !b._survBrain) return false;
@@ -357,7 +383,8 @@
     // RUN: down the hazard gradient if there is one, else away from the body
     let fx = 0, fz = 0;
     const fv = CBZ.disasters && CBZ.disasters.fleeVector ? CBZ.disasters.fleeVector(b.pos.x, b.pos.z) : null;
-    if (fv && (fv.x || fv.z)) { fx = fv.x; fz = fv.z; }
+    if (scared && sc.gun) { fx = b.pos.x - sc.x; fz = b.pos.z - sc.z; }      // away from the shots
+    else if (fv && (fv.x || fv.z)) { fx = fv.x; fz = fv.z; }
     else if (sc) { fx = b.pos.x - sc.x; fz = b.pos.z - sc.z; }
     const m = Math.hypot(fx, fz);
     if (m < 1e-6) return false;

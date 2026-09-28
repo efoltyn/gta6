@@ -182,9 +182,10 @@
     face(a, x, z) {
       if (!a || !a.group || a._brainNoMove) return;
       if (isStaff(a) && CBZ.guardFaceTo) { CBZ.guardFaceTo(a, x, z, 0.002, frameDt); return; }
-      const want = Math.atan2(x - a.group.position.x, z - a.group.position.z);
-      const lerp = CBZ.lerpAngle || function (p, q, t) { return p + (q - p) * t; };
-      a.group.rotation.y = lerp(a.group.rotation.y, want, 1 - Math.pow(0.002, frameDt));
+      // the motor's bounded turn (CBZ.moves.faceAt), the same one npc.js walks with
+      const M = CBZ.moves;
+      if (M && M.faceAt) { a.group.rotation.y = M.faceAt(M.motor(a), a.group.rotation.y, a.group.position, x, z, frameDt); return; }
+      a.group.rotation.y = Math.atan2(x - a.group.position.x, z - a.group.position.z);
     },
     posture(a, p) {
       const ch = a && a.char;
@@ -581,7 +582,9 @@
     const r = w.response;
     if (r === "flee") {
       if (n.aiState === "wander" || n.aiState === "socialize") {
-        n.aiState = "flee"; n.fleeT = 2.2 + rng() * 2;
+        // AWAY from it (a flee with no heading picked a random corner — often
+        // the one past the crime)
+        fleeFromPoint(n, w.x, w.z, 14, 2.2 + rng() * 2);
         n.pause = Math.max(n.pause || 0, rng() * 0.5);     // not the whole yard on one frame
       }
     } else if (r === "cower") {
@@ -747,51 +750,320 @@
     syncCast(0, false);
     try { b.perception.noise(x, z, radius, kind, source || null); } catch (e) { return; }
     if (kind !== "gunshot" && kind !== "explosion" && kind !== "scream") return;
-    // the loud ones scatter the yard — each man by his own nerve, not all on one frame
     const t = now();
+    if (kind === "gunshot" && isPlayer(source)) lastShotT = t;
+    // the loud ones scatter the yard — each man by his own nerve, AWAY from
+    // the sound (this used to set "flee" with no heading, and a flee with no
+    // heading picked a random corner of the yard: half of it ran AT the shots)
     const npcs = CBZ.npcs || [];
     for (let i = 0; i < npcs.length; i++) {
       const n = npcs[i];
-      if (!alive(n) || n.cuffed || n._lawBy || n.aiState !== "wander" && n.aiState !== "socialize") continue;
+      if (!alive(n) || n.cuffed || n._lawBy || (n._routT || 0) > 0) continue;
       const h = b.memory && b.memory.heard ? b.memory.heard(n) : null;
       if (!h || Math.abs((h.t || 0) - t) > 0.05) continue;
+      if (kind === "gunshot") {
+        // a gunshot is a GUN: the one weapon-aware decision (5c), held
+        if (isPlayer(source)) { gunDecide(n, true); continue; }
+        if ((n._threatT || 0) > t) continue;
+        n._threatT = t + 2.5;
+        let r = "ignore";
+        try { r = b.threat.respond(n, fillTh(n, x, z, source || null, "gun", false, null)) || "ignore"; } catch (e) { r = "ignore"; }
+        if (r !== "fight") playGun(n, r, b.threat.how ? b.threat.how(n) : r, x, z);
+        continue;
+      }
+      if (n.aiState !== "wander" && n.aiState !== "socialize") continue;
       if ((n._threatT || 0) > t) continue;                       // decided recently: hold it
       let r = "ignore";
       try {
-        r = b.threat.respond(n, { source: source || null, x, z, armed: kind === "gunshot", aimingAtMe: false, distance: Math.hypot(n.group.position.x - x, n.group.position.z - z), kind }) || "ignore";
+        r = b.threat.respond(n, { source: source || null, x, z, armed: false, aimingAtMe: false, distance: Math.hypot(n.group.position.x - x, n.group.position.z - z), kind }) || "ignore";
       } catch (e) { r = "ignore"; }
       n._threatT = t + 2.5;
-      if (r === "flee" || r === "cover") { n.aiState = "flee"; n.fleeT = 2.5 + rng() * 2.5; n.pause = Math.max(n.pause || 0, rng() * 0.45); }
+      if (r === "flee" || r === "cover") fleeFromPoint(n, x, z, 14, 2.5 + rng() * 2.5);
       else if (r === "freeze" || r === "cower" || r === "surrender") { n.pause = Math.max(n.pause || 0, 0.8 + rng() * 1.2); if (CBZ.npcStare) CBZ.npcStare(n, 1.8); }
       else if (CBZ.npcStare && rng() < 0.5) CBZ.npcStare(n, 1.2 + rng());
     }
   };
 
-  /* A GUN IN THE YARD, per man (entities/ai.js asks while he wanders within
-     8 m of an armed player). The brain reads it off his own nerve, crew and
-     wounds; what he decided holds ~2 s, so a crowd does not flicker and a
-     man on a bench does not stand-sit-stand. Not everyone on one frame. */
-  PB.armedNear = function (n, d) {
-    const b = BR();
+  /* ==========================================================
+     5c. A GUN IN THE ROOM — the owner's bug, fixed at its root.
+         "I get a keycard, go into the jail room, get guns, and EVERYBODY
+         charges me while I'm shooting." Every path that set a man on the
+         player (the shot man's provokeGang, his clique's answerFor, the
+         witnesses' noteGangIncident responder, a bump, a snub, a shank at
+         gunpoint, the hunt governor's ring at 4-6 m) ended in the same
+         huntPlayer, and the hunt walked him at the muzzle. Now, while the
+         player holds a GUN, a man only comes at him if CBZ.brain.threat
+         says fight:
+           a gun of his own -> cover, then he shoots back from range
+           a blade          -> only inside 3.5 m, only while you reload or
+                               look away
+           nothing          -> runs (away, out of the line), hides in the
+                               nearest open cell, gets down, puts his hands
+                               up, freezes when there is nowhere to go
+         Decided once and HELD (DWELL in the core + a re-read every 0.5 s),
+         so nobody flips between running and charging. His grudge is kept.
+     ========================================================== */
+  let lastShotT = -1e9;
+  const SH = { weapon: "none", lethal: true, reloading: false, yaw: 0, x: 0, z: 0, stamp: -1 };
+  let _aimV = null;
+  function playerYaw() {
+    try {
+      if (CBZ.playerAimDir && typeof THREE !== "undefined") {
+        _aimV = _aimV || new THREE.Vector3();
+        CBZ.playerAimDir(_aimV);
+        if (_aimV.x || _aimV.z) return Math.atan2(_aimV.x, _aimV.z);
+      }
+    } catch (e) {}
+    const pc = CBZ.playerChar;
+    return pc && pc.group ? pc.group.rotation.y : 0;
+  }
+  // the player as a shooter, read once per clock stamp
+  function shooter() {
     const t = now();
-    if (!b || !b.threat || (n._threatT || 0) > t) return;
-    n._threatT = t + 1.6 + rng() * 1.2;
-    const P = CBZ.player && CBZ.player.pos;
-    if (!P) return;
+    if (SH.stamp === t) return SH;
+    SH.stamp = t;
+    const P = CBZ.player;
+    SH.x = P && P.pos ? P.pos.x : 0; SH.z = P && P.pos ? P.pos.z : 0;
+    let gun = null;
+    try { gun = CBZ.currentGun ? CBZ.currentGun() : null; } catch (e) { gun = null; }
+    SH.weapon = gun ? (gun.melee ? "melee" : "gun") : "none";
+    // he just fired and put it away: the yard still knows he has one
+    if (SH.weapon === "none" && t - lastShotT < 8 && CBZ.fpsHasWeapon && CBZ.fpsHasWeapon()) SH.weapon = "gun";
+    SH.lethal = !(gun && gun.nonlethal);
+    SH.reloading = !!(CBZ.fps && CBZ.fps.reloading > 0);
+    SH.yaw = playerYaw();
+    return SH;
+  }
+  PB.shooter = shooter;
+  PB.shotFired = function () { lastShotT = now(); SH.stamp = -1; };
+  function carriesBlade(n) {
+    const it = n && n.loadout && n.loadout.items;
+    return !!(n && (n._shankOut || (it && (it.indexOf("Shiv") >= 0 || it.indexOf("Shank") >= 0))));
+  }
+  // what a body in the prison is holding, for CBZ.brain.threat.capability
+  function capabilityOf(a) {
+    if (!inPrison() || !a) return null;
+    if (isPlayer(a)) return shooter().weapon;
+    if (isStaff(a)) return null;                      // the archetype's: a screw carries
+    if (a.hasGun || (a.armed && a.weapon)) return "gun";
+    if (carriesBlade(a)) return "melee";
+    if (a.group && a.gang !== undefined) return "none";
+    return null;
+  }
+  PB.capability = capabilityOf;
+
+  // THE NEAREST OPEN CELL he can get into without passing the gun
+  function hideSpot(n, sx, sz) {
+    const CB = CBZ.cellblock;
+    const cells = CB && CB.cells;
+    if (!cells || !cells.length) return null;
+    const p = n.group.position;
+    const ox = p.x - sx, oz = p.z - sz;
+    let best = null, bd = 22 * 22;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (c.tier || c.player || c.locked) continue;
+      const dx = c.x - p.x, dz = c.z - p.z, d2 = dx * dx + dz * dz;
+      if (d2 >= bd) continue;
+      // the way in must lead AWAY from the muzzle (never nearer it than he
+      // is now, on the straight line), and not be a door the gun stands at
+      if (dx * ox + dz * oz < 0) continue;
+      if (Math.hypot(c.x - sx, c.z - sz) < 4) continue;
+      bd = d2; best = c;
+    }
+    return best;
+  }
+  // nowhere to run: the way away and both sides of it are walled
+  function cornered(n, sx, sz) {
+    const G = CBZ.navGrid;
+    if (!G || !G.lineBlocked) return false;
+    const p = n.group.position;
+    const ax = p.x - sx, az = p.z - sz, al = Math.hypot(ax, az) || 1, ux = ax / al, uz = az / al;
+    const R = 4;
+    try {
+      return G.lineBlocked(p.x, p.z, p.x + ux * R, p.z + uz * R, 0.4) &&
+        G.lineBlocked(p.x, p.z, p.x - uz * R, p.z + ux * R, 0.4) &&
+        G.lineBlocked(p.x, p.z, p.x + uz * R, p.z - ux * R, 0.4);
+    } catch (e) { return false; }
+  }
+  const _gth = { source: null, x: 0, z: 0, weapon: "gun", reloading: false, facingAway: null, yaw: null,
+    aimingAtMe: false, distance: 0, kind: "armed", armed: true, hide: false, coverNear: false, cornered: false, rushRange: 0 };
+  function fillTh(n, x, z, src, weapon, aiming, S) {
+    const p = n.group.position;
+    _gth.source = src; _gth.x = x; _gth.z = z; _gth.weapon = weapon;
+    _gth.reloading = !!(S && S.reloading);
+    _gth.yaw = S ? S.yaw : null; _gth.facingAway = S ? null : false;
+    _gth.aimingAtMe = !!aiming;
+    _gth.distance = Math.hypot(p.x - x, p.z - z);
+    n._hideCell = hideSpot(n, x, z);
+    _gth.hide = !!n._hideCell;
+    _gth.cornered = !n._hideCell && _gth.distance < 12 && cornered(n, x, z);
+    _gth.rushRange = S && !S.lethal ? 5.5 : 0;           // a taser is one shot and a long reload
+    return _gth;
+  }
+  // is the player's gun on THIS man (the aim cone), not merely out
+  function aimedAt(n, S) {
+    if (!(CBZ.isAimingWeapon && CBZ.isAimingWeapon())) return false;
+    const p = n.group.position;
+    const dx = p.x - S.x, dz = p.z - S.z, d = Math.hypot(dx, dz) || 1;
+    return d < 20 && (Math.sin(S.yaw) * dx + Math.cos(S.yaw) * dz) / d > 0.94;
+  }
+
+  function fleeFromPoint(n, x, z, far, secs) {
+    if (!n.target || !n.target.set) return;
+    if (n._propSeat && CBZ.rest && CBZ.rest.up) { try { CBZ.rest.up(n); } catch (e) {} PB.stoodUp(n, 25); }
+    const p = n.group.position;
+    const ax = p.x - x, az = p.z - z, al = Math.hypot(ax, az) || 1;
+    n.aiState = "flee"; n.fleeT = Math.max(n.fleeT || 0, secs || 3);
+    n._fleeX = p.x + ax / al * far; n._fleeZ = p.z + az / al * far;
+    n.target.set(n._fleeX, 0, n._fleeZ);
+    n.pause = 0;
+  }
+  function stopHunt(n) {
+    if ((n.huntPlayer || 0) > 0) {
+      // he wanted to; the gun said no. The grudge is kept for later.
+      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1.5);
+      n.huntPlayer = 0;
+    }
+    n._blow = null; n._huntStyle = null;
+    if (n.char) n.char.fightStance = false;
+    if (n.aiState === "shoveAt" && isPlayer(n._shoveAt)) n.aiState = "wander";
+  }
+  function setPose(n, kind) {
+    const ch = n.char;
+    n._gunPose = kind;
+    n.poseAimBack = kind === "aim";
+    if (!ch) return;
+    ch.handsUp = kind === "handsUp";
+    ch.surrender = kind === "down";
+  }
+  function clearPose(n) {
+    if (!n._gunPose) return;
+    const ch = n.char;
+    if (ch && !n.cuffed && !n.intimidMode && !n._lawBy) { ch.handsUp = false; ch.surrender = false; }
+    if (!n.intimidMode) n.poseAimBack = false;
+    n._gunPose = null;
+  }
+  /* PLAY an answer to a gun on the body. Returns a move speed (0 = still),
+     or null when the answer is his normal movement (a rush: the hunt). */
+  function playGun(n, r, how, sx, sz) {
+    if (r === "fight" && how === "rush") {
+      // the gap opened: the blade goes, and the hunt (ai.js) is his legs and his arm
+      clearPose(n);
+      n.huntPlayer = Math.max(n.huntPlayer || 0, 3);
+      n._steelT = Math.max(n._steelT || 0, 6);
+      return null;
+    }
+    stopHunt(n);
+    if (r === "fight") {
+      // ENGAGE: a man with a gun of his own stands and shoots back from where
+      // he is — he does not walk up to you
+      setPose(n, "aim");
+      exec.stop(n);
+      exec.face(n, sx, sz);
+      engageFire(n, sx, sz);
+      return 0;
+    }
+    if (r === "flee") {
+      clearPose(n);
+      const c = how === "hide" ? n._hideCell : null;
+      if (c && n.target && n.target.set) {
+        if (n._propSeat && CBZ.rest && CBZ.rest.up) { try { CBZ.rest.up(n); } catch (e) {} PB.stoodUp(n, 25); }
+        n.aiState = "flee"; n.fleeT = Math.max(n.fleeT || 0, 4);
+        n._fleeX = c.x; n._fleeZ = c.z; n.target.set(c.x, 0, c.z); n.pause = 0;
+      } else fleeFromPoint(n, sx, sz, 16, 3.5 + rng() * 1.5);
+      return (n.baseSpeed || 2) * 1.7;
+    }
+    if (r === "cover") {
+      // down where he is (flat in the open, behind whatever is there), a
+      // blade holding low for its gap, or a gun getting set before it fires
+      setPose(n, capabilityOf(n) === "gun" ? "aim" : "down");
+      exec.stop(n);
+      exec.face(n, sx, sz);
+      return 0;
+    }
+    if (r === "surrender") { setPose(n, "handsUp"); exec.stop(n); exec.face(n, sx, sz); return 0; }
+    if (r === "freeze") { clearPose(n); exec.stop(n); n.pause = Math.max(n.pause || 0, 0.6); if (CBZ.npcStare) CBZ.npcStare(n, 1.5); return 0; }
+    clearPose(n);
+    return null;
+  }
+  // a man with a gun fires from where he stands on a cadence, when he can see you
+  function engageFire(n, sx, sz) {
+    const t = now();
+    if (n._engFireT == null || n._engFireT < t - 5) n._engFireT = t + 0.6 + rng() * 0.6;
+    if (t < n._engFireT) return;
+    n._engFireT = t + 1.5 + rng() * 0.9;
+    const b = BR();
+    let sees = true;
+    try { if (b && b.perception) sees = b.perception.seesPoint(n, sx, 1.2, sz, { fovHalf: 1.4, range: 40 }); } catch (e) { sees = true; }
+    if (!sees || !CBZ.prisonNpcFire) return;
+    const d = Math.hypot(n.group.position.x - sx, n.group.position.z - sz);
+    const hitP = clamp(0.62 - d * 0.02, 0.15, 0.6);
+    try { CBZ.prisonNpcFire(n, { hit: rng() < hitP, dmg: 22 }); } catch (e) {}
+  }
+
+  const GUN_HOLD = 4;          // s a man stays "in it" after the last reason
+  // decide (through the brain), remember it; force = a fresh event (a shot)
+  function gunDecide(n, force) {
+    const b = BR();
+    if (!b || !b.threat || !n || !n.group || !alive(n) || n.cuffed) return null;
+    const S = shooter();
+    if (S.weapon !== "gun") return null;
+    const t = now();
+    if (!force && n._gunResp && t < (n._gunReT || 0)) return n._gunResp;
     syncCast(0, false);
-    const aiming = !!(n.intimidMode || (CBZ.fps && CBZ.fps.active && d < 6));
     let r = "ignore";
-    try { r = b.threat.respond(n, { source: CBZ.player, x: P.x, z: P.z, armed: true, aimingAtMe: aiming, distance: d, kind: "armed" }) || "ignore"; } catch (e) { r = "ignore"; }
-    if (r === "flee" || r === "cover") {
-      if (n._propSeat && CBZ.rest && CBZ.rest.up) { CBZ.rest.up(n); PB.stoodUp(n, 25); }
-      n.aiState = "flee"; n.fleeT = 2.4 + rng() * 2;
-      const ax = n.group.position.x - P.x, az = n.group.position.z - P.z, al = Math.hypot(ax, az) || 1;
-      n.target.set(n.group.position.x + ax / al * 14, 0, n.group.position.z + az / al * 14);
-      n._fleeX = null;
-    } else if (r === "freeze" || r === "surrender" || r === "comply") {
-      n.pause = Math.max(n.pause || 0, 1.0 + rng());
-      if (CBZ.npcStare) CBZ.npcStare(n, 2);
-    } else if (CBZ.npcStare && rng() < 0.4) CBZ.npcStare(n, 1.4 + rng());
+    try { r = b.threat.respond(n, fillTh(n, S.x, S.z, CBZ.player, "gun", aimedAt(n, S), S)) || "ignore"; } catch (e) { r = "ignore"; }
+    n._gunResp = r;
+    n._gunHow = b.threat.how ? b.threat.how(n) : r;
+    n._gunReT = t + 0.5;
+    if (r !== "ignore") n._gunUntil = t + GUN_HOLD;
+    return r;
+  }
+  PB.gunDecide = gunDecide;
+  /* the hunt gate (ai.js requestHunt): may this man start on the player now? */
+  PB.gunRefuses = function (n) {
+    if (!inPrison() || shooter().weapon !== "gun") return false;
+    const r = gunDecide(n, false);
+    if (!r || r === "ignore") return false;
+    return !(r === "fight" && n._gunHow === "rush");
+  };
+  /* aiThink calls this after the law's hold: while the player has a gun out,
+     a man who is set on him (or already reacting to it) is played here.
+     Returns a move speed while it owns him, else null. */
+  PB.gunThink = function (n, dt) {
+    if (!inPrison() || !n || !n.group) return null;
+    const S = shooter();
+    const t = now();
+    if (S.weapon !== "gun") {
+      if (n._gunResp) { n._gunResp = null; n._gunUntil = 0; clearPose(n); }
+      return null;
+    }
+    const d = Math.hypot(n.group.position.x - S.x, n.group.position.z - S.z);
+    const hunting = (n.huntPlayer || 0) > 0 || (n.aiState === "shoveAt" && isPlayer(n._shoveAt));
+    if (!((n._gunUntil || 0) > t) && !hunting) { if (n._gunPose) clearPose(n); n._gunResp = null; return null; }
+    // still a reason to be in it: he wants you, the gun is close, or shots are fresh
+    if ((hunting || d < 10 || t - lastShotT < 3) && d < 35) gunDecide(n, false);
+    if (!((n._gunUntil || 0) > t) && !hunting) { clearPose(n); n._gunResp = null; return null; }
+    const r = n._gunResp;
+    if (!r || r === "ignore") return null;
+    // a man already running keeps his line (the flee state carries him) until
+    // he gets there; then the next leg is AWAY again, never ai.js's random corner
+    if (r === "flee" && n.aiState === "flee" && n._fleeX != null && !hunting &&
+        Math.hypot(n._fleeX - n.group.position.x, n._fleeZ - n.group.position.z) > 1.5) return null;
+    return playGun(n, r, n._gunHow, S.x, S.z);
+  };
+
+  /* A GUN IN THE YARD, per man (entities/ai.js asks while he wanders within
+     8 m of an armed player): the same decision as everything above. */
+  PB.armedNear = function (n, d) {
+    const t = now();
+    if ((n._threatT || 0) > t) return;
+    n._threatT = t + 1.6 + rng() * 1.2;
+    const r = gunDecide(n, false);
+    if (!r || r === "ignore") { if (CBZ.npcStare && rng() < 0.4) CBZ.npcStare(n, 1.4 + rng()); return; }
+    const S = shooter();
+    playGun(n, r, n._gunHow, S.x, S.z);
   };
 
   /* ==========================================================
@@ -860,12 +1132,20 @@
      "glare" | "shove" | "fight" | "weapon" (a copy: the core's buffer is
      reused on its next call). */
   const _ret = [];
+  const _retOpts = { weapon: null, reloading: false, yaw: null, rushRange: 0 };
   PB.retaliate = function (victim, aggressor, harm) {
     _ret.length = 0;
     const b = BR();
     if (!b || !b.social || !b.social.retaliate || !victim || !aggressor) return _ret;
     let list = null;
-    try { list = b.social.retaliate(victim, aggressor, clamp(harm, 0, 1)); } catch (e) { list = null; }
+    // against the player the core needs the gun's state (reloading, where it
+    // points): a blade only answers inside its window
+    let o = null;
+    if (isPlayer(aggressor) && inPrison()) {
+      const S = shooter();
+      o = _retOpts; o.weapon = S.weapon; o.reloading = S.reloading; o.yaw = S.yaw; o.rushRange = S.lethal ? 0 : 5.5;
+    }
+    try { list = b.social.retaliate(victim, aggressor, clamp(harm, 0, 1), o); } catch (e) { list = null; }
     if (!list || !list.length) return _ret;
     for (let i = 0; i < list.length; i++) {
       const it = list[i];
@@ -922,6 +1202,8 @@
     wired = true;
     try { if (b.act && b.act.use) b.act.use(GAME, exec); } catch (e) {}
     try { if (b.social && b.social.onReport) b.social.onReport(GAME, onReport); } catch (e) {}
+    // what each body holds (the player's gun included) decides who may fight a gunman
+    try { if (b.threat && b.threat.setCapability) b.threat.setCapability(capabilityOf, GAME); } catch (e) {}
     /* NO INSTANT SPOT. The core's closeSpot (2.6 m) filled a screw's meter in
        one frame; a man that close still takes a real beat to read now, it is
        only arm's reach that is instant. */
@@ -980,10 +1262,12 @@
 
   // a new run: every case, cuff and rout is gone
   PB.reset = function () {
+    lastShotT = -1e9; SH.stamp = -1;
     for (const gd of CBZ.guards || []) { gd._yardCase = null; gd._yardHold = false; gd._yardPhase = null; }
     for (const n of CBZ.npcs || []) {
       if (n.cuffed) { n.cuffed = false; if (n.char) { n.char.cuffed = false; n.char.surrender = false; } }
       n._cuffT = 0; n._lawBy = null; n._lawAns = null; n._routT = 0; n._lawHeldT = 0; n._restCD = 0;
+      n._gunResp = null; n._gunUntil = 0; n._gunPose = null; n._hideCell = null;
     }
   };
 

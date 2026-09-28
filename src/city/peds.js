@@ -4258,6 +4258,12 @@
     if (!ped._windup) return false;
     const P = CBZ.player;
     if (P.dead || !ped.target) { ped._windup = null; ped.poseAimBack = false; return false; }
+    // you drew while he was squaring up to beat you: fists do not walk at a gun
+    if (ped._windup === "beat" && !(ped.armed || ped._holster) && CBZ.cityHasGun && CBZ.cityHasGun()) {
+      ped._windup = null; ped.poseAimBack = false; ped.reactCD = 8;
+      ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z);
+      return true;
+    }
     ped.target.set(P.pos.x, 0, P.pos.z);
     faceTo(ped, P.pos.x, P.pos.z, 1.5);
     const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
@@ -4284,7 +4290,9 @@
     if (ped.approach) {
       if (dpl > 16) { ped.approach = null; return false; }   // you walked off — drop it
       // a timid approacher (not here to BEAT you) bails if you suddenly draw a gun
-      if (playerArmed && ped.approach !== "beat" && ped.aggr < (B.crook || 0.72)) {
+      // and a man walking up to BEAT you with his fists does not keep walking
+      // at a gun (CBZ.brain.threat: against a gun only a gun fights)
+      if (playerArmed && (ped.approach === "beat" ? !(ped.armed || ped._holster) : ped.aggr < (B.crook || 0.72))) {
         ped.approach = null; ped.reactCD = 6; ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); return true;
       }
       ped.path = null; ped.pause = 0;
@@ -4754,6 +4762,10 @@
     // ---- if currently raging at someone, keep engaging until they're gone ----
     if (ped.rage) {
       if (ped.rage.dead || (ped.rage.isPlayer && P.dead)) { ped.rage = null; }
+      // NOBODY WITHOUT A GUN WALKS AT A GUN (city/brain_city.js gunGate ->
+      // CBZ.brain.threat): whatever set him raging, the brain decides whether
+      // he may — a blade only close, while the gun reloads or points away.
+      else if (CBZ.cityBrain && CBZ.cityBrain.gunGate && CBZ.cityBrain.gunGate(ped)) return;
       else {
         ped.state = "fight";
         ped.target.set(ped.rage.pos.x, 0, ped.rage.pos.z);
@@ -5538,10 +5550,13 @@
       // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
       // never throws his hands up. A fearless unarmed bruiser also stands his
       // ground. Everyone else (unarmed, not fearless) throws their hands up.
-      const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
+      // (an unarmed bruiser used to "stand his ground" here, squared up to a
+      // muzzle with empty hands; against a gun only a gun fights — the brain
+      // reads him through cityScare: bolt, or hands up)
+      const drawsBack = ped.armed || !!ped._holster;
       if (drawsBack) {
         if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
-      } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit") {
+      } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit" || ped.aggr >= (B.violent || 0.88)) {
         // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
         // to land on markGunpoint alone, which is why a stadium, a gate lounge
         // and an office floor all reacted to a levelled gun by sitting

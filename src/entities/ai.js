@@ -165,6 +165,15 @@
     if (!n || !alive(n) || !n.group || n.role === "merchant") return false;
     if ((n._brokenUpT || 0) > 0 || (playerDownedNow() && !lethalGrudge(n))) { _huntRefused++; return false; }
     if (CBZ.player && CBZ.player.gang != null && n.gang === CBZ.player.gang && why !== "wronged") return false;
+    // A GUN IS OUT. Nobody walks at a muzzle because his feelings are hurt:
+    // CBZ.brain.threat decides (systems/brain_prison.js 5c) — a blade inside
+    // its window may rush, everyone else runs, hides, gets down or puts his
+    // hands up, and keeps the grudge for later.
+    if (CBZ.prisonBrain && CBZ.prisonBrain.gunRefuses && CBZ.prisonBrain.gunRefuses(n)) {
+      _huntRefused++;
+      n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1.5);
+      return false;
+    }
     if (!((n.huntPlayer || 0) > 0)) _huntStarts++;
     n.huntPlayer = Math.max(n.huntPlayer || 0, secs || 6);
     n._huntWhy = why || n._huntWhy || "";
@@ -5213,6 +5222,12 @@
     if (CBZ.prisonBrain) {
       const lw = CBZ.prisonBrain.inmateThink(n, dt);
       if (lw != null) return lw;
+      // A GUN IS OUT (brain_prison.js 5c): whoever is set on the player —
+      // however he got set, including files that write huntPlayer directly —
+      // answers the gun through the brain before the hunt below may walk him
+      // at it. Only a blade in its window comes through (returns null).
+      const gw = CBZ.prisonBrain.gunThink ? CBZ.prisonBrain.gunThink(n, dt) : null;
+      if (gw != null) return gw;
     }
     if ((n._steelT || 0) > 0) n._steelT -= dt;
 
@@ -6045,6 +6060,15 @@
       if (m.aiState === "fight" || m.aiState === "snitch" || heldInCell(m)) continue;
       const d = Math.hypot(ap.x - m.group.position.x, ap.z - m.group.position.z);
       if (d > 16) continue;
+      if (lvl === "avoid") {
+        // he would have come — at a GUN he does not (CBZ.brain.social.
+        // retaliate): out of its line, the grudge kept for another day
+        if (isP) {
+          m.playerGrudge = Math.min(14, (m.playerGrudge || 0) + 2);
+          if (CBZ.prisonBrain && CBZ.prisonBrain.gunDecide) CBZ.prisonBrain.gunDecide(m, true);
+        } else addBeef(m, aggressor, 4);
+        continue;
+      }
       if (lvl === "glare") {
         if (CBZ.npcStare) CBZ.npcStare(m, 2.2 + rng() * 1.5, isP ? null : ap);
         if (isP) m.playerGrudge = Math.min(14, (m.playerGrudge || 0) + 1); else addBeef(m, aggressor, 2);
