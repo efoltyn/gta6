@@ -164,6 +164,49 @@
     return { post: 1.3, kb: 1.2, bleed: 0.1, reach: 0.4, name: "melee" };
   }
 
+  /* ---- ONE BLOW INTO ONE BODY (systems/vitals.js owns what it does).
+     hp stays the brain's "how hurt is he" number, but a melee blow never
+     takes it to zero here: a fist or a bat is a daze (a knockout past the
+     line), a blade is a bleed (a hole that was going to kill him puts him on
+     the floor bleeding hard instead, `critical`). Death comes out of vitals
+     alone: a blade in the neck or heart, a man bled out, or a long beating
+     of a man already out cold.
+     -> "dead" | "ko" | "down" | "knockdown" | "stagger" | "none" | "cut" */
+  function bluntName(feel, kind) {
+    if (feel.name === "blunt") return "bat";
+    if (feel.name === "melee") return "blunt";
+    return kind === "low" || kind === "front" || kind === "round" ? "kick" : "fist";
+  }
+  function meleeHurt(t, dmg, res, heavy, feel, o) {
+    const V = CBZ.vitals;
+    const fx = P.pos.x, fz = P.pos.z;
+    const blade = feel.name === "blade";
+    const lethal = (t.hp || 0) - dmg <= 0;
+    const clip = Math.max(0, Math.min(dmg, (t.hp || 0) - 1));
+    if (t.kind === "cop") CBZ.cityHurtCop(t, clip, { fromX: fx, fromZ: fz, melee: blade ? "blade" : "blunt" });   // armour, heat, "fired upon"
+    else t.hp -= clip;
+    if (!V) {
+      // no vitals in this build: the old sum (a blade kills, a fist knocks out)
+      if (lethal && blade) { if (t.kind === "cop") CBZ.cityHurtCop(t, 9999, { fromX: fx, fromZ: fz }); else CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: 6 }, "stabbed"); return "dead"; }
+      if (lethal && t.kind !== "cop") { CBZ.cityKOPed(t, fx, fz, { rigFall: true }); return "knockdown"; }
+      return "none";
+    }
+    const dir = res && res.dir ? res.dir : null;
+    if (blade) {
+      const w = V.wound(t, { kind: heavy || (o && o.stab) ? "stab" : "slash", zone: (o && o.zone) || (res && res.zone) || "",
+        point: res && res.landed !== false && res.point ? res.point : null, by: CBZ.player, critical: lethal || !!(o && o.critical), fromX: fx, fromZ: fz });
+      if (t.dead) return "dead";
+      return w.outcome === "down" ? "down" : "cut";
+    }
+    const r = V.blunt(t, { zone: (o && o.zone) || (res && res.zone) || "head", power: res && res.power != null ? res.power : 0.7,
+      weapon: bluntName(feel, res && res.kind), heavy, by: CBZ.player, dirX: dir ? dir.x : fx - t.pos.x, dirZ: dir ? dir.z : fz - t.pos.z,
+      mul: o && o.mul, fromX: fx, fromZ: fz });
+    return t.dead ? "dead" : r;
+  }
+  // he went out cold: the street's side of it (the report dies, the desk is
+  // left, the block is alarmed) without a second fall on top of vitals' one
+  function knockedOut(t) { if (CBZ.cityKOPed) CBZ.cityKOPed(t, P.pos.x, P.pos.z, { rigFall: true }); }
+
   // ---- weapon-acquisition bridge to the engine gun system ----
   function currentGunName() {
     if (g.cityMeleeWeapon) return null;
@@ -240,7 +283,7 @@
     ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.7) : yaw;
   }
   const BLADE_W = { kind: "knife", blade: true, mass: 0.3 };
-  function swing(kind, tier, dmg, extra) {
+  function swing(kind, tier, dmg) {
     const V = CBZ.verbs, pa = playerActor();
     if (!V || !V.strike || !pa) return null;
     const feel = weaponFeel();
@@ -252,7 +295,7 @@
       kind, heavy,
       weapon: feel.name === "blade" ? BLADE_W : null,
       candidates: special ? null : cityCandidates,
-      onLand: function (res) { landCity(res, dmg, tier, kind, extra); },
+      onLand: function (res) { landCity(res, dmg, tier, kind); },
       onBlocked: function (res) { blockedCity(res, dmg, kind); },
       onBeat: special ? function () { landSpecial(special, dmg, tier); } : null,
     });
@@ -371,7 +414,7 @@
 
   // ---- the connect: damage and consequences for a blow that met a body ----
   // tier: "light" | "heavy" | "finisher".
-  function landCity(res, dmg, tier, kind, extra) {
+  function landCity(res, dmg, tier, kind) {
     const t = res.target;
     if (!t || t.dead || P.dead || g.mode !== "city") { res.reaction = "none"; return; }
     if (t.meleeHit) {
@@ -405,34 +448,24 @@
     }
     if (finisher && CBZ.doHitstop) CBZ.doHitstop(0.14);
     if (CBZ.shake) CBZ.shake(finisher ? 0.7 : (heavy ? 0.5 : 0.22 + combo * 0.04));
-    // --- damage through the city's own damage paths ---
-    if (t.kind === "cop") {
-      CBZ.cityHurtCop(t, dmg, { fromX: fx, fromZ: fz });
-      if (!t.dead && CBZ.body && (finisher || counter || broken || (heavy && Math.random() < 0.5))) {
-        // a cop has no knocked-out state of his own: the body layer owns his fall
-        CBZ.body.hit(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6.5) * feel.kb, knockdown: finisher || counter || broken ? 1.1 : 1.0 });
-        res.reaction = "none";
-      }
-      if (t.dead) res.reaction = "dead";
-    } else {
-      t.hp -= dmg;
-      if (t.hp <= 0) {
-        // a heavy/finisher kills outright; a light blow that drops them = a clean KO
-        if (heavy || finisher || broken || (extra && extra.lethalIntent)) {
-          CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6) * feel.kb, fling: finisher ? 4 : 3 }, feel.name === "blade" ? "stabbed" : "beaten");
-          res.reaction = "dead";
+    // --- what the blow did to his BODY (systems/vitals.js): a fist or a bat
+    //     dazes and knocks out, a blade opens a bleed. No fist kills a man on
+    //     his feet; beating a man who is already out is the only way it does.
+    const out = meleeHurt(t, dmg, res, heavy, feel);
+    if (out === "dead") res.reaction = "dead";
+    else if (out === "ko" || out === "down") res.reaction = "none";          // vitals put him down in his own rig
+    else {
+      if (out === "knockdown" || finisher || counter || broken) {
+        if (t.kind === "cop" && CBZ.body) {
+          // a cop has no count of his own: the body layer owns his fall
+          CBZ.body.hit(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6.5) * feel.kb, knockdown: 1.1 });
+          res.reaction = "none";
         } else {
-          t.hp = 1;
-          CBZ.cityKOPed(t, fx, fz, { rigFall: true });   // out cold: he falls in his own body
-          res.reaction = "knockdown";
-        }
-      } else {
-        if (finisher || counter || broken || (heavy && Math.random() < 0.45)) {
           t.ko = Math.max(t.ko || 0, 5); t.alarmed = 6;
           res.reaction = "knockdown";
         }
-        // a blade leaves a BLEED — damage-over-time ticked in the combat loop
-        if (feel.bleed > 0) { t._bleed = (t._bleed || 0) + dmg * feel.bleed; t._bleedSrcX = fx; t._bleedSrcZ = fz; }
+      }
+      if (t.kind !== "cop") {
         // provoke / alarm so the world reacts to a non-lethal beating
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
@@ -441,6 +474,7 @@
         if (CBZ.citySizeUpHit && CBZ.city && CBZ.city.playerActor) CBZ.citySizeUpHit(t, CBZ.city.playerActor);
       }
     }
+    if (out === "ko" && t.kind !== "cop" && !t.dead) knockedOut(t);
     if (CBZ.sfx) CBZ.sfx("punch");
     const downed = (t.dead || t.ko > 0);
     // THE SAME CONFIRMATION A BULLET GETS: the hit marker (red on a kill);
@@ -460,7 +494,7 @@
   function finisherTarget() {
     const t = aimTarget(1.82, 0.1);
     if (!t) return null;
-    const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) ||
+    const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) || (CBZ.vitals && CBZ.vitals.cuffable(t)) ||
                  (CBZ.body && CBZ.body.busy && CBZ.body.busy(t) && t.hp <= (t.maxHp || 100) * 0.45);
     return open ? t : null;
   }
@@ -475,35 +509,118 @@
     combo = 0; comboT = 0;
     spend(7);
     const feel = weaponFeel();
-    const down = t.ko > 0 || (CBZ.body && CBZ.body.busy && CBZ.body.busy(t));
+    const down = t.ko > 0 || (CBZ.body && CBZ.body.busy && CBZ.body.busy(t)) || (CBZ.vitals && CBZ.vitals.cuffable(t));
     faceLook();
     const S = V && V.strike && pa ? V.strike(pa, down ? null : t, {
       kind: feel.name === "blade" ? "stab" : (down ? "overhand" : "upper"), heavy: true,
       lunge: !down, weapon: feel.name === "blade" ? BLADE_W : null,
-      onLand: function (res) { if (res.target === t) { finishOff(t, feel); res.reaction = "dead"; } },
-      onBeat: down ? function () { finishOff(t, feel); } : null,
+      onLand: function (res) { if (res.target === t) { finishOff(t, feel, res); res.reaction = t.dead ? "dead" : "none"; } },
+      onBeat: down ? function () { finishOff(t, feel, null); } : null,
     }) : null;
-    if (!S) finishOff(t, feel);                  // no rig to swing: the old instant finish
+    if (!S) finishOff(t, feel, null);            // no rig to swing: resolve it now
     else if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
     fireCD = 0.55; heavyCD = 0.3;
   }
-  function finishOff(t, feel) {
+  /* THE FINISHER IS A BLOW, NOT A DEATH SENTENCE. With fists (or a bat) it is
+     the biggest blunt blow you can throw: a man on his feet with his guard
+     broken goes out cold; a man already out takes it as one more blow to a
+     head that cannot defend itself (vitals counts those, and enough of them
+     kill). With a blade it is a real stab, down into the neck or the chest:
+     it opens a bad bleed and may find the artery or the heart. */
+  const _finRes = { zone: "head", point: null, power: 1, kind: "overhand", dir: { x: 0, z: 0 }, landed: false };
+  function finishOff(t, feel, res) {
     if (!t || t.dead || g.mode !== "city") return;
     const dx = t.pos.x - P.pos.x, dz = t.pos.z - P.pos.z;
     if (dx * dx + dz * dz > 2.4 * 2.4) return;
-    const fx = P.pos.x, fz = P.pos.z;
-    if (CBZ.doSlowmo) CBZ.doSlowmo(0.55);
+    const blade = feel.name === "blade";
+    const d = Math.hypot(dx, dz) || 1;
+    const r = res || _finRes;
+    if (!res) { _finRes.dir.x = dx / d; _finRes.dir.z = dz / d; _finRes.landed = false; }
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.4);
     if (CBZ.doHitstop) CBZ.doHitstop(0.16);
     if (CBZ.shake) CBZ.shake(0.8);
-    if (t.kind === "cop") {
-      CBZ.cityHurtCop(t, 9999, { fromX: fx, fromZ: fz });
-      if (!t.dead && CBZ.body) CBZ.body.hit(t, { fromX: fx, fromZ: fz, force: 11 * feel.kb, knockdown: 1.3 });
-    } else {
-      CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: 11 * feel.kb, fling: 5 }, feel.name === "blade" ? "executed" : "finished off");
+    const base = (it() && it().dmg) || 16;
+    const wasDown = CBZ.vitals ? CBZ.vitals.cuffable(t) : t.ko > 0;
+    const out = blade
+      ? meleeHurt(t, base * 2.6, r, true, feel, { stab: true, zone: Math.random() < 0.4 ? "neck" : "chest", critical: wasDown })
+      : meleeHurt(t, base * 1.9, r, true, feel, { zone: wasDown ? "head" : (r.zone === "jaw" ? "jaw" : "head"), mul: wasDown ? 1.6 : 1.5 });
+    if (out === "ko" && !wasDown && t.kind !== "cop") knockedOut(t);
+    if (!t.dead && !wasDown && out !== "ko" && out !== "down" && CBZ.body) {
+      CBZ.body.hit(t, { fromX: P.pos.x, fromZ: P.pos.z, force: 9 * feel.kb, knockdown: 1.3 });
     }
     if (CBZ.sfx) CBZ.sfx("ko");
-    if (CBZ.city) CBZ.city.addRespect && CBZ.city.addRespect(2);   // a brutal finish earns respect
-    lastTarget = null;
+    if (t.dead && CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);   // a brutal finish earns respect
+    lastTarget = t.dead ? null : t;
+  }
+
+  /* ---- A BODY ON THE GROUND STILL TAKES IT. The street's melee only ever
+     looked at the living, so a knife into a corpse was a whiff. Now a swing
+     with nobody standing in front of you finds the dead man at your feet:
+     a blade puts another hole in him (CBZ.corpseStab: the cut, a spatter,
+     another ooze into his pool), a fist or a boot just shoves him where he
+     lies, with no mark. */
+  function corpseTarget(range) {
+    const Pp = P.pos, L = lookDir();
+    let best = null, bd = range * range;
+    const consider = (a) => {
+      if (!a || !a.dead || !a.pos || !a.group || a.inCar || a._parked) return;
+      if (Math.abs((a.pos.y || 0) - (Pp.y || 0)) > 1.6) return;
+      const dx = a.pos.x - Pp.x, dz = a.pos.z - Pp.z, dd = dx * dx + dz * dz;
+      if (dd > bd || dd < 0.0001) return;
+      const dl = Math.sqrt(dd);
+      if ((dx / dl) * L.x + (dz / dl) * L.z < 0.35) return;
+      bd = dd; best = a;
+    };
+    const peds = CBZ.cityPeds, cops = CBZ.cityCops;
+    if (peds) for (let i = 0; i < peds.length; i++) consider(peds[i]);
+    if (cops) for (let i = 0; i < cops.length; i++) consider(cops[i]);
+    return best;
+  }
+  const _cpP = { x: 0, y: 0, z: 0 }, _cpD = { x: 0, y: 0, z: 0 };
+  function hitCorpse(c, blade) {
+    if (!c || !c.dead || !c.group) return;
+    const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z;
+    if (dx * dx + dz * dz > 2.4 * 2.4) return;          // it is not where you swung
+    const d = Math.hypot(dx, dz) || 1;
+    _cpD.x = dx / d; _cpD.y = -0.4; _cpD.z = dz / d;
+    // where the blow goes in: the part of him nearest the swing, on the ground
+    const gp = c.group.position;
+    _cpP.x = gp.x - _cpD.x * 0.12 + (Math.random() - 0.5) * 0.3;
+    _cpP.y = (gp.y || 0) + 0.2 + Math.random() * 0.12;
+    _cpP.z = gp.z - _cpD.z * 0.12 + (Math.random() - 0.5) * 0.3;
+    if (blade) {
+      let took = false;
+      if (CBZ.corpseStab) { try { took = !!CBZ.corpseStab(c, _cpP, _cpD, { by: CBZ.player }); } catch (e) { took = false; } }
+      if (!took) {
+        if (CBZ.cityCorpseHit) { try { CBZ.cityCorpseHit(c, _cpP, _cpD, 2, { wound: false }); } catch (e) { /* ragdoll off */ } }
+        if (CBZ.bodyWound) { try { CBZ.bodyWound(c, _cpP, { melee: "blade", dir: _cpD }); } catch (e) { /* wounds off */ } }
+        if (CBZ.vitals) CBZ.vitals.wound(c, { kind: "stab", point: _cpP, by: CBZ.player });
+      }
+      if (CBZ.sfx) CBZ.sfx("hit");
+    } else {
+      // a boot into a body: it moves, nothing else
+      let moved = false;
+      if (c._bf && c._bf.on && CBZ.bodyFall && CBZ.bodyFall.poke) moved = CBZ.bodyFall.poke(c, _cpD.x, _cpD.z, 6, _cpP);
+      if (!moved && CBZ.cityCorpseHit) { try { CBZ.cityCorpseHit(c, _cpP, _cpD, 5, { wound: false }); } catch (e) { /* ragdoll off */ } }
+      if (CBZ.sfx) CBZ.sfx("punch");
+    }
+    if (CBZ.shake) CBZ.shake(0.18);
+  }
+  function corpseSwing(c, heavy) {
+    const V = CBZ.verbs, pa = playerActor();
+    const blade = weaponFeel().name === "blade";
+    markFighting();
+    combo = 0; comboT = 0;
+    faceLook();
+    const S = V && V.strike && pa ? V.strike(pa, null, {
+      kind: blade ? "stab" : "low", heavy: !!heavy, weapon: blade ? BLADE_W : null,
+      onBeat: function () { hitCorpse(c, blade); },
+    }) : null;
+    if (!S) return false;
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+    spend(heavy ? 8 : 4);
+    fireCD = heavy ? 0.5 : 0.32;
+    return true;
   }
 
   // a swing that finds nobody can still find the world: a harvest node, a window
@@ -523,6 +640,7 @@
     // an open foe in front → DEATHBLOW instead of a jab
     const fin = finisherTarget();
     if (fin) { doFinisher(fin); return; }
+    if (!aimTarget(2.1, 0.3)) { const c = corpseTarget(1.9); if (c) { corpseSwing(c, false); return; } }
     markFighting();
     const next = (comboT > 0 && combo < 3) ? combo + 1 : 1;
     const finisher = next >= 3;
@@ -545,6 +663,7 @@
     if (tired()) return;
     const fin = finisherTarget();
     if (fin) { doFinisher(fin); return; }
+    if (!aimTarget(2.1, 0.3)) { const c = corpseTarget(1.9); if (c) { corpseSwing(c, true); heavyCD = 0.5; return; } }
     markFighting();
     combo = 0; comboT = 0;
     const base = it() ? it().dmg : 16;
@@ -586,7 +705,7 @@
   // ============================================================
   const _origHurt = CBZ.cityHurtPlayer;
   if (typeof _origHurt === "function") {
-    CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal) {
+    CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal, hit) {
       // NPC-fire LOS gate: an armed NPC whose muzzle was walled off this shot
       // can't land a round on you through the building. Their gun got lowered in
       // the actorMuzzle wrap; here we make the damage agree with the visual.
@@ -615,7 +734,7 @@
             const V = CBZ.verbs, pa = playerActor();
             if (V && V.strike && pa) {
               V.strike(pa, attacker, { kind: "hook", heavy: true,
-                onLand: function (res) { landCity(res, rdmg, "heavy", "hook", { lethalIntent: true }); },
+                onLand: function (res) { landCity(res, rdmg, "heavy", "hook"); },
                 onBlocked: function (res) { blockedCity(res, rdmg, "hook"); } });
               if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
             }
@@ -626,6 +745,7 @@
         // it builds YOUR posture (a held guard erodes — you must parry, not turtle).
         if (CBZ.playerChar) CBZ.playerChar.blockHitT = 0.2;     // the forearms give with it
         dmg *= 0.3; spend(10);
+        if (hit) hit.power = (hit.power != null ? hit.power : 0.6) * 0.3;   // the forearms took the daze too
         addSelfPosture(16 + dmg * 0.25);
         if (CBZ.shake) CBZ.shake(0.2);
         if (CBZ.sfx) CBZ.sfx("hit");
@@ -637,7 +757,7 @@
       }
       // taking damage while guard-broken stings extra (you're reeling, exposed)
       if (pBrokenT > 0 && meleeRange && !headshot) dmg *= 1.35;
-      return _origHurt.call(this, dmg, fromX, fromZ, reason, headshot, attacker, nonlethal);
+      return _origHurt.call(this, dmg, fromX, fromZ, reason, headshot, attacker, nonlethal, hit);
     };
   }
 
@@ -1083,15 +1203,14 @@
     }
   });
 
-  // ---- NPC posture/bleed/break maintenance (time-sliced across the crowd) --
+  // ---- NPC posture/break maintenance (time-sliced across the crowd) --------
   // Only actors that have actually been hit carry these fields, so the common
-  // case is a couple of cheap field checks. We slice the ped list so a packed
-  // city stays smooth on phones.
-  let _pSlice = 0;
+  // case is a couple of cheap field checks. (Bleeding is systems/vitals.js's:
+  // the blade's private hp drain that used to live here is gone.)
   CBZ.onUpdate(14, function (dt) {
     if (g.mode !== "city") return;
     const peds = CBZ.cityPeds, cops = CBZ.cityCops;
-    const tickActor = function (a, full) {
+    const tickActor = function (a) {
       if (!a || a.dead) return;
       // guard-break stun winds down → posture resets, brain resumes
       if (a._broken > 0) {
@@ -1103,34 +1222,9 @@
           a._posture = Math.max(0, a._posture - POSTURE_REGEN * 0.9 * dt);
         }
       }
-      // BLEED damage-over-time from a blade (drains slowly, can finish them off)
-      if (a._bleed > 0) {
-        const tick = Math.min(a._bleed, 6 * dt);
-        a._bleed -= tick;
-        if (full) {
-          a.hp -= tick;
-          if (a.hp <= 0 && !a.dead) {
-            if (a.kind === "cop") CBZ.cityHurtCop && CBZ.cityHurtCop(a, 9999, { fromX: a._bleedSrcX, fromZ: a._bleedSrcZ });
-            else CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: a._bleedSrcX, fromZ: a._bleedSrcZ, force: 2 }, "bled out");
-            a._bleed = 0;
-          } else if (CBZ.gore && a.pos && Math.random() < 0.3) {
-            CBZ.gore(a.pos.x, a.pos.y + 0.9, a.pos.z, { amount: 0.15, skin: a.skin, cloth: a.outfit });
-          }
-        }
-      }
     };
-    // cops: small list, do all every frame (posture matters most for them)
-    if (cops) for (let i = 0; i < cops.length; i++) tickActor(cops[i], true);
-    // peds: full bleed/posture only on this slice, light decay otherwise
-    if (peds && peds.length) {
-      const N = peds.length, SLICES = 4;
-      for (let i = 0; i < N; i++) {
-        const a = peds[i];
-        const full = (i % SLICES) === (_pSlice % SLICES);
-        if (a && (a._broken > 0 || a._posture > 0 || a._bleed > 0)) tickActor(a, full);
-      }
-      _pSlice++;
-    }
+    if (cops) for (let i = 0; i < cops.length; i++) tickActor(cops[i]);
+    if (peds) for (let i = 0; i < peds.length; i++) { const a = peds[i]; if (a && (a._broken > 0 || a._posture > 0)) tickActor(a); }
   });
 
   // ---- INCOMING-MELEE TELEGRAPH (so the parry is a SKILL, not a guess) -----

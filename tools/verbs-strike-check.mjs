@@ -400,6 +400,9 @@ if (W.ctx && CBZ.playerChar) {
   CBZ.reportCrime = () => {}; CBZ.game.koLog = {}; CBZ.game.kos = 0; CBZ.game.elapsed = 0;
   CBZ.lerpAngle = CBZ.lerpAngle || ((a, b, t) => a + (b - a) * t);
   CBZ.sfx = () => {}; CBZ.doSlowmo = () => {};
+  // the body the fists land on: CBZ.vitals decides the knockout
+  try { if (!CBZ.vitals || !CBZ.vitals.blunt) vmMod.runInContext(read("src/systems/vitals.js"), W.ctx, { filename: "src/systems/vitals.js" }); }
+  catch (e) { check(false, "systems/vitals.js loads: " + e.message); }
   try { vmMod.runInContext(read("src/systems/combat.js"), W.ctx, { filename: "src/systems/combat.js" }); }
   catch (e) { check(false, "systems/combat.js loads: " + e.message); }
   if (CBZ.punch) {
@@ -429,7 +432,8 @@ if (W.ctx && CBZ.playerChar) {
     // the one that drops him: a clean KO, and he goes down in his own rig
     B.group.position.set(0, 0, CBZ.player.pos.z + 1.2);
     tick(90);
-    B.hp = 4;
+    // a man already rocked (vitals' daze at the edge): the next one puts him out
+    if (CBZ.vitals && CBZ.vitals.of) CBZ.vitals.of(B).daze = 0.98;
     CBZ.punch(B);
     let fell = false;
     for (let i = 0; i < 60; i++) { tick(1); if (B.char.fall && B.char.fall.on) fell = true; }

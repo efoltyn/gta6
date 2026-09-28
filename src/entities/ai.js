@@ -105,7 +105,7 @@
   function throwBlow(n, kind, arm, M, swing, stabbing) {
     const V = CBZ.verbs;
     if (!V || !V.strike) return null;
-    const blow = { M, swing, stabbing };
+    const blow = { M, swing, stabbing, kind };
     return V.strike(n, playerA(), {
       kind, arm, weapon: stabbing ? SHANK_W : null, maxLunge: 0.6,
       heavy: kind === "headbutt" || kind === "upper",
@@ -115,7 +115,9 @@
       onOutcome: function () { landBlow(n, blow, null); },
     });
   }
-  // the fist found you: what it costs (res.dmgMul is where it landed)
+  // the fist found you: what it costs (res.dmgMul is where it landed; the
+  // zone and the power go on to CBZ.vitals through capture.js's hurtPlayer)
+  const BLOW_WEAPON = { elbow: "elbow", headbutt: "headbutt", knee: "knee", shove: "fist" };
   function landBlow(n, B, res) {
     if (CBZ.player.dead) return false;
     // he stops when you are down, unless he came with a blade and a reason
@@ -124,7 +126,11 @@
     if (CBZ.hurtPlayer) {
       CBZ.hurtPlayer(B.swing * (res ? res.dmgMul : 1), n.group.position.x, n.group.position.z,
         { melee: true, stun: B.M.stun * (blocked ? 0.4 : 1), heat: B.stabbing ? 4 : 2, shake: B.M.shake,
-          sfx: B.stabbing ? "hit" : "punch", by: n, weapon: B.stabbing ? "shank" : "fist", reacted: true });
+          sfx: B.stabbing ? "hit" : "punch", by: n, weapon: B.stabbing ? "shank" : "fist", reacted: true,
+          blunt: BLOW_WEAPON[B.kind] || "fist", blocked,
+          zone: res ? (blocked ? "armL" : res.zone) : "body",
+          power: res ? res.power * (blocked ? 0.25 : 1) : (B.kind === "shove" ? 0.15 : 0.4),
+          point: res ? res.point : null, dirX: res ? res.dir.x : 0, dirZ: res ? res.dir.z : 0 });
     }
     return true;
   }
@@ -5068,7 +5074,7 @@
     victim.hp = 0;
     // CINEMATIC death — blood + flying gibs at the body. Player kills get a
     // beefier burst + a hit cue; NPC-vs-NPC brawls just spray (no sound spam).
-    if (CBZ.gore && victim.group) {
+    if (CBZ.gore && victim.group && !opts.noGore) {
       const vp = victim.group.position;
       const kg = killer && killer.group;
       const playerKill = !!(kg && CBZ.playerChar && kg === CBZ.playerChar.group);
@@ -5164,15 +5170,12 @@
     by.record[field] = (by.record[field] || 0) + 1;
   }
 
-  // most beatdowns are survivable knockdowns; death is the exception —
-  // and a tougher target is harder to put in the ground for good.
+  /* A MAN PUT ON THE FLOOR BY ANOTHER MAN. There is no death dice here any
+     more (it used to be a 3% roll on a fist and 22% on steel): fists knock
+     men out and steel opens bleeds, and CBZ.vitals decides who dies of what.
+     down(actor, by, dir) plays a short knockdown and books the consequences;
+     downed(actor, by) books them for a man vitals already put down. */
   function down(actor, by, dir) {
-    const tough = actor.ratings ? actor.ratings.toughness : 50;
-    // fists rarely kill a grown man (3%); steel is what puts one in the ground
-    const lethal = by && (by._shankOut || ((by._steelT || 0) > 0 && carriesShank(by))) ? 0.22 : 0.03;
-    if (rng() < lethal * (1.2 - tough / 200)) { kill(actor, by); return; }
-    credit(by, "knockdowns");
-    credit(actor, "downs");
     // he goes down in his own rig along the blow (entities/meleeposes.js:
     // knees, hips, back; the ko timer holds him there, then the get-up)
     const V = CBZ.verbs;
@@ -5181,8 +5184,13 @@
       const dx = actor.group.position.x - by.group.position.x, dz = actor.group.position.z - by.group.position.z, l = Math.hypot(dx, dz) || 1;
       kd = { x: dx / l, z: dz / l };
     }
-    if (!(V && V.knockdown && V.knockdown(actor, { dir: kd, ko: true, dur: 3.5 + rng() * 4, power: 0.8 }))) actor.ko = 6 + rng() * 4;
-    actor.hp = Math.round((actor.maxHp || 100) * 0.5); actor.aiState = "wander"; actor.foe = null;
+    if (!(V && V.knockdown && V.knockdown(actor, { dir: kd, ko: true, dur: 2 + rng() * 2.5, power: 0.8 }))) actor.ko = Math.max(actor.ko || 0, 3 + rng() * 2);
+    downed(actor, by);
+  }
+  function downed(actor, by) {
+    credit(by, "knockdowns");
+    credit(actor, "downs");
+    actor.hp = Math.max(actor.hp || 0, Math.round((actor.maxHp || 100) * 0.5)); actor.aiState = "wander"; actor.foe = null;
     if (actor.char) actor.char.fightStance = false;
     // PUT A MAN DOWN AND YOU HAVE MADE AN ENEMY — his, and his crew's. This is
     // the retaliation loop: today's beating is tomorrow's reason, which is what
@@ -5236,10 +5244,12 @@
     const ft = (f.ratings && f.ratings.toughness) || (guardF ? 78 : 50);
     if (f.hp == null) f.hp = f.maxHp || 100;
     if (n._boxFoe !== f) { n._boxFoe = f; credit(n, "fights"); }
-    // damage = base swing × attacker's fighting edge × defender's toughness × where it landed
+    // hp = how much more he takes on his feet: base swing × attacker's
+    // fighting edge × defender's toughness × where it landed. It is a gauge,
+    // never a death: what the blow does to his BODY is CBZ.vitals' call.
     // STEEL: a man who came for this answer with a blade in his pocket uses it
-    const steel = (n._steelT || 0) > 0 && carriesShank(n) ? 2.4 : 1;
-    f.hp -= ((guardN ? 7 : 4) + rng() * (guardN ? 4 : 5)) * (0.55 + nf / 80) * (1 - ft / 320) * res.dmgMul * steel;
+    const steel = ((n._steelT || 0) > 0 && carriesShank(n)) || n._shankOut ? 2.4 : 1;
+    f.hp -= ((guardN ? 7 : 4) + rng() * (guardN ? 4 : 5)) * (0.55 + nf / 80) * (1 - ft / 320) * (res.dmgMul || 1) * steel;
     // every blow shakes the man who takes it (his nerve, not his hp)
     if (CBZ.brain && CBZ.brain.morale && f._brain) CBZ.brain.morale.rattle(f, steel > 1 ? 0.35 : 0.12);
     // THE FIRST BLOW of a beef is when his people notice: a glare, a shove
@@ -5257,12 +5267,35 @@
     // attenuates by range, is silent past 42 m and gives the whole yard one
     // voice that the NEAREST fight owns (tools/sound-census.mjs).
     if (CBZ.worldSfx) CBZ.worldSfx("punch", f.group.position.x, f.group.position.z, { y: f.group.position.y });
-    if (f.hp <= 0) {
-      // the knockdown (or the kill) is his fall now, not the reaction's
-      res.reaction = "none";
-      down(f, n, res.dir);
+    const VT = CBZ.vitals;
+    if (!VT) {
+      if (f.hp <= 0) { res.reaction = "none"; f.hp = 1; down(f, n, res.dir); }
+      return;
     }
+    if (res.blocked) { if (f.hp < 1) f.hp = 1; return; }
+    if (steel > 1) {
+      // THE POINT GOES IN: a bleed where it went in; out of hp he goes down
+      // bleeding, and he dies only of what it hit or of the blood
+      if (CBZ.bodyWound) { try { CBZ.bodyWound(f, res.point, { melee: "blade", cal: 0.7, fromX: n.group.position.x, fromZ: n.group.position.z }); } catch (e) {} }
+      if (CBZ.goreImpact) CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: 0.7, blade: true, dir: { x: res.dir.x, y: 0.35, z: res.dir.z } });
+      const W = VT.wound(f, { kind: "stab", zone: res.zone, point: res.point, by: n,
+        dirX: res.dir.x, dirZ: res.dir.z, fromX: n.group.position.x, fromZ: n.group.position.z, critical: f.hp <= 0 });
+      if (f.hp <= 0) f.hp = 1;
+      if (f.dead || W.outcome === "dead") { res.reaction = "dead"; return; }
+      if (W.outcome === "down") { res.reaction = "none"; downed(f, n); }
+      return;
+    }
+    if (f.hp < 1) f.hp = 1;
+    // A FIST: daze, and the jaw is where knockouts live
+    const out = VT.blunt(f, { zone: res.zone || "head", power: res.power, weapon: BOX_WEAPON[res.kind] || "fist",
+      heavy: !!res.heavy, by: n, dirX: res.dir.x, dirZ: res.dir.z, mul: (0.55 + nf / 80) / 1.175 * (guardN ? 1.15 : 1),
+      fromX: n.group.position.x, fromZ: n.group.position.z });
+    if (out === "ko") { res.reaction = "none"; downed(f, n); }
+    else if (out === "knockdown") { res.reaction = "none"; down(f, n, res.dir); }
+    else if (out === "stagger") res.stagger = true;
+    else if (out === "dead") res.reaction = "dead";
   }
+  const BOX_WEAPON = { elbow: "elbow", headbutt: "headbutt", knee: "knee", kick: "kick", roundKick: "kick", lowKick: "kick" };
 
   // ---- the per-NPC think, returns desired move speed ----
   function aiThink(n, dt) {
@@ -7761,6 +7794,44 @@
   CBZ.aiThink = aiThink;
   CBZ.prisonStartApproach = startApproach;
   CBZ.aiKill = kill;
+
+  /* THE PRISON'S BODY (systems/vitals.js). Every injury in the yard is
+     vitals': a fist dazes and knocks out, a blade or a round opens a bleed,
+     a man dies of the hit that was truly lethal, of the blood, or of a long
+     beating while he was out. Its one death comes back here, to the same
+     choke point every other prison death uses, carrying HOW he died so the
+     body reads right: a beaten man has no hole in his back. */
+  let bledOutByPlayer = 0;
+  CBZ.prisonBledOut = function () { return bledOutByPlayer; };
+  if (CBZ.vitals && CBZ.vitals.on) {
+    CBZ.vitals.on("escape", {
+      kill(a, cause, o) {
+        if (!a || a.isPlayer || !a.group) return false;
+        o = o || {};
+        const R = a._vt;
+        let by = o.by || (R && R.by) || null;
+        const byPlayer = !!by && (by === CBZ.player || by.isPlayer === true);
+        if (byPlayer) by = CBZ.playerChar ? { group: CBZ.playerChar.group } : null;
+        const bled = cause === "bled out";
+        if (bled && byPlayer) bledOutByPlayer++;
+        const melee = o.melee || (cause === "beaten to death" || cause === "beaten" ? "blunt" : cause === "stabbed" ? "blade" : null);
+        kill(a, by, {
+          noKnock: true, cause, melee, quiet: !!o.quiet,
+          // he bled out lying in it: no fresh spray, the pool is already there
+          noGore: bled,
+          dirX: o.dirX, dirZ: o.dirZ,
+        });
+        return true;
+      },
+      // an NPC wraps his own wound only once nothing is coming at him
+      safe(a) {
+        if (!a) return false;
+        if (a.aiState === "fight" || a.foe || (a.huntPlayer || 0) > 0 || (a.hunt || 0) > 0) return false;
+        if ((a.fleeT || 0) > 0 || a._lawBy || a.cuffed || (a._routT || 0) > 0) return false;
+        return true;
+      },
+    });
+  }
   CBZ.aiReset = aiReset;
   CBZ.provokeGang = provokeGang;
   CBZ.noteGangIncident = noteGangIncident;

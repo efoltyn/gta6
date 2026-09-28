@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
-<link rel="stylesheet" href="css/title_hub.css?v=pause1">
+<link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
 <body class="campaign-build">
 <script>
@@ -345,19 +345,16 @@ document.body.appendChild(b);}}catch(e){}})();
   </div>
 </div>
 
-<!-- Win -->
-<div id="win" class="screen hidden">
+<!-- THE PRISON'S END (systems/escapeend.js). Out of the gate the world keeps
+     running for a few seconds, then #escFade takes it quietly to black and
+     #escEnd says one line with the way on. The same black ends a death or a
+     transfer. No logo, no stat tiles. -->
+<div id="escFade" aria-hidden="true"></div>
+<div id="escEnd" class="screen hidden">
   <div class="card-box">
-    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">YOU'RE OUT!</div>
-    <div class="sub" id="wReason" style="color:#3c7a52">Freedom</div>
-    <div class="stats">
-      <div class="stat"><div class="v" id="wTime">--</div><div class="l">Escape Time</div></div>
-      <div class="stat"><div class="v" id="wCigs">0</div><div class="l">Cigarettes</div></div>
-      <div class="stat"><div class="v" id="wKos">0</div><div class="l">Knockouts</div></div>
-      <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
-    </div>
-    <button class="btn" id="againBtn">Escape Again</button>
-    <button class="btn btn-quiet" id="winMenuBtn" type="button">Main Menu</button>
+    <div class="end-line" id="escEndLine"></div>
+    <button class="btn" id="escEndAgain" type="button">Play Again</button>
+    <button class="btn btn-quiet" id="escEndMenu" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -507,7 +504,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=dsl3"></script>
-<script src="src/world/corridorkit.js?v=dsl3"></script>
+<script src="src/world/corridorkit.js?v=gate1"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -583,8 +580,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=airblood2"></script>
-<script src="src/systems/bodyfall.js?v=m0928a"></script>
+<script src="src/systems/verbs_strike.js?v=vit3"></script>
+<script src="src/systems/bodyfall.js?v=vit3"></script>
+<!-- CBZ.vitals: ONE body that can be hurt, in every game. Blunt trauma knocks a
+     man out (and he comes to, groggy); a bullet or a blade opens a bleed that
+     drains his blood until someone wraps it or he bleeds out; state(a) is what
+     cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
+<script src="src/systems/vitals.js?v=vit3"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -727,7 +729,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=cars1"></script>
-<script src="src/systems/physics.js?v=sharkmode1"></script>
+<script src="src/systems/physics.js?v=vit3"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -780,14 +782,14 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=m0928s"></script>
+<script src="src/systems/interactions.js?v=gate1"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
 <script src="src/systems/liftcore.js?v=lift1"></script>
-<script src="src/systems/escapeplan.js?v=pause1"></script>
+<script src="src/systems/escapeplan.js?v=gate1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all
@@ -798,14 +800,14 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/systems/hotbar_model.js?v=boom2"></script>
-<script src="src/systems/helditem_model.js?v=boom2"></script>
+<script src="src/systems/hotbar_model.js?v=vit3"></script>
+<script src="src/systems/helditem_model.js?v=vit3"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=cop1"></script>
+<script src="src/systems/state.js?v=end1"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -824,6 +826,8 @@ document.body.appendChild(b);}}catch(e){}})();
      core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
      puts survival back on the variable step, live. -->
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
+<!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
+<script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/touch.js?v=boom2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -849,13 +853,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a"></script>
-<script src="src/modes/survival.js?v=sharkmode1"></script>
+<script src="src/modes/survival.js?v=vit3"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=pause1"></script>
+<script src="src/systems/title_hub.js?v=end1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
@@ -1328,7 +1332,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/helditems.js?v=boom2"></script>
+<script src="src/systems/helditems.js?v=vit3"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1470,7 +1474,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=exit1"></script>
+<script src="src/systems/gore.js?v=vit3"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1479,7 +1483,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=sharkmode1"></script>
+<script src="src/systems/trauma.js?v=vit3"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the

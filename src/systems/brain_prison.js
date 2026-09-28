@@ -257,20 +257,38 @@
   PB.uncuff = uncuffInmate;
   function taseInmate(n, gd) {
     if (!n || n.dead || isPlayer(n)) return false;
-    n.ko = Math.max(n.ko || 0, 2.4);
+    // the legs go and the muscles lock (CBZ.vitals: conscious, cuffable, down)
+    if (CBZ.vitals && CBZ.vitals.tase) CBZ.vitals.tase(n, 2.4 + rng() * 1.2, { by: gd || null });
+    else n.ko = Math.max(n.ko || 0, 2.4);
     n.aiState = "wander"; n.foe = null; n._blow = null;
     if (CBZ.taserFx && CBZ.taserFx.actorTaseActor) { try { CBZ.taserFx.actorTaseActor(gd, n); } catch (e) {} }
     if (CBZ.worldSfx && n.group) { try { CBZ.worldSfx("tase", n.group.position.x, n.group.position.z, {}); } catch (e) {} }
     if (CBZ.prisonLawCount) CBZ.prisonLawCount("tases");
     return true;
   }
+  // the stick: blunt trauma (CBZ.vitals.blunt). A screw aims at the arms and
+  // the legs (it is a compliance tool); now and then one catches the head.
+  const BATON_ZONES = ["armL", "armR", "legs", "body", "legs", "head"];
   function batonInmate(n, gd, kind) {
     if (!n || n.dead || isPlayer(n)) return false;
-    n.hp = (n.hp != null ? n.hp : 100) - (9 + rng() * 5);
+    n.hp = Math.max(1, (n.hp != null ? n.hp : 100) - (9 + rng() * 5));
     if (gd && gd.char) { gd.char.punchKind = "hook"; gd.char.punchDur = 0.3; gd.char.punchT = 0.3; }
-    if (CBZ.knockback && gd && gd.group) CBZ.knockback(n, gd.group.position.x, gd.group.position.z, 0.7);
+    let dx = 0, dz = 0;
+    if (gd && gd.group && n.group) {
+      dx = n.group.position.x - gd.group.position.x; dz = n.group.position.z - gd.group.position.z;
+      const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    }
+    const baton = kind === "baton" || kind === "strike";
+    const out = CBZ.vitals && CBZ.vitals.blunt ? CBZ.vitals.blunt(n, {
+      zone: BATON_ZONES[(rng() * BATON_ZONES.length) | 0], power: 0.55 + rng() * 0.3,
+      weapon: baton ? "baton" : "fist", by: gd || null, dirX: dx, dirZ: dz,
+    }) : "none";
+    if (out === "none" || out === "stagger") {
+      if (CBZ.knockback && gd && gd.group) CBZ.knockback(n, gd.group.position.x, gd.group.position.z, 0.7);
+    } else if (out === "knockdown" && CBZ.verbs && CBZ.verbs.knockdown) {
+      CBZ.verbs.knockdown(n, { dir: { x: dx, z: dz }, ko: true, dur: 2 + rng() * 2, power: 0.7 });
+    }
     if (CBZ.worldSfx && n.group) { try { CBZ.worldSfx("punch", n.group.position.x, n.group.position.z, {}); } catch (e) {} }
-    if (n.hp <= 0) { n.hp = 1; n.ko = Math.max(n.ko || 0, 3); }
     return true;
   }
   function tackleInmate(n, gd) {
@@ -441,6 +459,93 @@
   }
 
   /* ==========================================================
+     3b. A MAN DOWN BLEEDING GETS HELP (CBZ.vitals). His own people — the
+         men of his car within ~12 m who are not in a fight — walk over,
+         kneel and wrap it; Doc Mercer and the orderly do it for anyone in
+         reach of the infirmary. A man on his feet and safe wraps himself
+         (vitals does that on its own, slower, with his shirt).
+     ========================================================== */
+  const MEDICS = { "Doc Mercer": 1, "Orderly Pratt": 1 };
+  const TEND_R = 12, MEDIC_R = 15, TEND_SECS = 30;
+  function isMedic(m) { return !!(m && m.data && MEDICS[m.data.name]); }
+  function needsCare(x) {
+    const V = CBZ.vitals;
+    if (!V || !x || x.dead || !x.group || x.escaped || isPlayer(x)) return false;
+    if (!(V.unbandaged(x) > 0)) return false;
+    const st = V.state(x);
+    return st === "down" || st === "ko" || st === "tased" || (st === "ok" && V.bleeding(x));
+  }
+  function canTend(m) {
+    const V = CBZ.vitals;
+    return !!(m && m.group && !m.dead && !(m.ko > 0) && !m.escaped && !isStaff(m) && !m._medicFor &&
+      m.aiState !== "fight" && !m.foe && !((m.huntPlayer || 0) > 0) && !m.cuffed && !m._lawBy &&
+      !((m._routT || 0) > 0) && !m.approach && !m._propSeat && !m._propLie && V.state(m) === "ok" && !V.bleeding(m));
+  }
+  function carriesRoll(m) {
+    if (isMedic(m)) return true;
+    const E = CBZ.econ, ld = E && E.rollLoadout ? E.rollLoadout(m) : null;
+    return !!(ld && ld.items && ld.items.indexOf("Bandage") >= 0);
+  }
+  function medicPoll() {
+    const V = CBZ.vitals, npcs = CBZ.npcs || [];
+    if (!V) return;
+    const pats = (CBZ.guards || []).concat(npcs);
+    for (let i = 0; i < pats.length; i++) {
+      const p = pats[i];
+      if (!needsCare(p)) continue;
+      if (p._medicBy && p._medicBy._medicFor === p && !p._medicBy.dead) continue;
+      const pc = carKey(p), staff = isStaff(p);
+      let best = null, bd = 1e9;
+      for (let j = 0; j < npcs.length; j++) {
+        const m = npcs[j];
+        if (m === p) continue;
+        const medic = isMedic(m);
+        if (!medic && (staff || pc < 0 || carKey(m) !== pc)) continue;
+        const d = dist(m, p);
+        if (d > (medic ? MEDIC_R : TEND_R) || d >= bd || !canTend(m)) continue;
+        best = m; bd = d;
+      }
+      if (!best) continue;
+      best._medicFor = p; best._medicT = TEND_SECS; p._medicBy = best;
+    }
+  }
+  function endTend(n) {
+    const p = n._medicFor;
+    if (p && p._medicBy === n) p._medicBy = null;
+    n._medicFor = null; n._medicT = 0;
+    if (n._medicCrouch) { n._medicCrouch = false; if (CBZ.moves && CBZ.moves.crouch) { try { CBZ.moves.crouch(n, false); } catch (e) {} } }
+  }
+  // his think while he is tending a man: walk over, get down, wrap it
+  function medicThink(n, dt) {
+    const p = n._medicFor;
+    if (!p) return null;
+    const V = CBZ.vitals;
+    n._medicT = (n._medicT || 0) - dt;
+    const quit = !V || !p.group || p.dead || p.escaped || n._medicT <= 0 || n.aiState === "fight" || n.foe ||
+      (n.huntPlayer || 0) > 0 || n._lawBy || n.cuffed || n.ko > 0 || V.state(n) !== "ok";
+    if (quit || (!(V.unbandaged(p) > 0) && V.bandaging(p) < 0)) { endTend(n); return null; }
+    const pp = p.group.position, np = n.group.position;
+    const d = Math.hypot(pp.x - np.x, pp.z - np.z);
+    if (d > 1.25) {
+      if (n._medicCrouch) { n._medicCrouch = false; if (CBZ.moves && CBZ.moves.crouch) { try { CBZ.moves.crouch(n, false); } catch (e) {} } }
+      const k = (d - 0.85) / d;
+      n.target.set(np.x + (pp.x - np.x) * k, 0, np.z + (pp.z - np.z) * k);
+      n.pause = 0;
+      return (n.baseSpeed || n.speed || 2) * (d > 5 ? 1.5 : 1.05);
+    }
+    exec.stop(n);
+    exec.face(n, pp.x, pp.z);
+    if (V.bandaging(p) < 0) {
+      if (V.state(p) !== "ok" && !n._medicCrouch && CBZ.moves && CBZ.moves.crouch) {
+        try { n._medicCrouch = !!CBZ.moves.crouch(n, true); } catch (e) {}
+      }
+      V.bandage(n, p, { roll: carriesRoll(n) });
+    }
+    return 0;
+  }
+  PB.medicThink = medicThink;
+
+  /* ==========================================================
      4. THE ORDER, from the inmate's side — called at the top of aiThink.
         Returns a move speed while the law owns him, else null.
      ========================================================== */
@@ -474,6 +579,11 @@
         return null;
       }
       return (n.baseSpeed || 2) * 1.6;
+    }
+    // TENDING A MAN (3b): the law comes first, anything else waits
+    if (n._medicFor) {
+      if (n._lawBy) endTend(n);
+      else { const mt = medicThink(n, dt); if (mt != null) return mt; }
     }
     const gd = n._lawBy;
     if (!gd) return null;
@@ -1245,7 +1355,7 @@
   PB.wire = wire;
 
   // one tick for the prison's brains: after the guards (20) and inmates (22)
-  let moraleAcc = 0, routAcc = 0;
+  let moraleAcc = 0, routAcc = 0, medAcc = 0;
   function tick(dt) {
     if (!inPrison() || !(dt > 0)) return;
     if (!wire()) return;
@@ -1260,6 +1370,9 @@
     if (moraleAcc >= 0.25 && b.morale && b.morale.tick) { try { b.morale.tick(moraleAcc); } catch (e) {} moraleAcc = 0; }
     if (G().state !== "playing") return;
     yardLawPoll(dt);
+    // a man down bleeding gets somebody (3b)
+    medAcc += dt;
+    if (medAcc >= 1) { medAcc = 0; try { medicPoll(); } catch (e) {} }
     // a man IN a clique fight whose nerve has gone breaks off and runs home
     routAcc += dt;
     if (routAcc >= 1) {
@@ -1283,6 +1396,7 @@
       if (n.cuffed) { n.cuffed = false; if (n.char) { n.char.cuffed = false; n.char.surrender = false; } }
       n._cuffT = 0; n._lawBy = null; n._lawAns = null; n._routT = 0; n._lawHeldT = 0; n._restCD = 0;
       n._gunResp = null; n._gunUntil = 0; n._gunPose = null; n._hideCell = null;
+      n._medicFor = null; n._medicBy = null; n._medicT = 0; n._medicCrouch = false;
     }
   };
 

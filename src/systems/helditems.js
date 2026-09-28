@@ -20,6 +20,11 @@
      select the GRENADE cell -> the frag is in your hand. HOLD use: the ring
        comes out and the arm winds back. RELEASE: the throw, harder the
        longer you held.
+     select the GAUZE cell (a roll you carry) -> the roll is in your hand.
+       HOLD use (or keep the cell's digit held): you wrap your worst open
+       wound, both hands low, one circling the other (systems/vitals.js runs
+       the clock, ~4 s, and stops it if you are hit or walk off). LET GO
+       early: you stop, the roll stays in your hand.
    Drawing a gun puts the item away; selecting the item holsters the gun.
 
    Seams: CBZ.heldItem = { current(), select(kind), clear(), use(down),
@@ -34,7 +39,7 @@
   if (!CBZ || !THREE || !CBZ.heldItemModel) return;
   const M = CBZ.heldItemModel;
 
-  let held = null;          // "c4" | "detonator" | "grenade" | null
+  let held = null;          // "c4" | "detonator" | "grenade" | "bandage" | null
   let down = false, downT = 0;
   let pressedT = 0;         // the push-and-return after a brick goes on
   let squeezeT = -1, squeezeFired = false;
@@ -48,9 +53,11 @@
   function c4Count() { try { return CBZ.cityC4Count ? CBZ.cityC4Count() | 0 : 0; } catch (e) { return 0; } }
   function planted() { try { return CBZ.cityC4Planted ? CBZ.cityC4Planted() | 0 : 0; } catch (e) { return 0; } }
   function grenades() { try { return mode() === "city" && CBZ.cityGrenadeCount ? CBZ.cityGrenadeCount() | 0 : 0; } catch (e) { return 0; } }
+  function rolls() { try { return CBZ.vitals && CBZ.vitals.bandages ? CBZ.vitals.bandages() | 0 : 0; } catch (e) { return 0; } }
+  function wrapping() { try { return !!(CBZ.vitals && CBZ.player && CBZ.vitals.bandaging(CBZ.player) >= 0); } catch (e) { return false; } }
   function state() {
     const live = blastLive();
-    return { c4: live ? c4Count() : 0, planted: live ? planted() : 0, grenades: grenades(), held: held };
+    return { c4: live ? c4Count() : 0, planted: live ? planted() : 0, grenades: grenades(), bandages: rolls(), wrapping: wrapping(), held: held };
   }
   function gunDrawn() { try { return !!(CBZ.fpsArmed && CBZ.fpsArmed()); } catch (e) { return false; } }
   function holsterGun() {
@@ -62,6 +69,8 @@
 
   function setHeld(k) {
     if (k === held) return;
+    // the roll leaves your hand: whatever wrap was going stops there
+    if (held === "bandage" && wrapping() && CBZ.vitals) CBZ.vitals.cancelBandage(CBZ.player);
     held = k;
     down = false; downT = 0; squeezeT = -1; squeezeFired = false; throwGone = 0; pressedT = 0;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -85,6 +94,16 @@
     if (CBZ.cityMenuOpen) return false;
     if (held === "detonator") {
       if (isDown && squeezeT < 0) { squeezeT = 0; squeezeFired = false; }
+      return true;
+    }
+    if (held === "bandage") {
+      // hold = wrap the worst open wound (vitals keeps the clock and finishes
+      // it); let go before it is done = stop. Nothing open: nothing happens.
+      const VT = CBZ.vitals;
+      if (!VT) return true;
+      down = !!isDown;
+      if (isDown) { if (VT.bandaging(P) < 0) VT.bandage(P); }
+      else if (VT.bandaging(P) >= 0) VT.cancelBandage(P);
       return true;
     }
     if (P.driving) return false;           // the brick and the frag want both feet on the ground
@@ -116,10 +135,31 @@
 
   // ---- the props ------------------------------------------------------------
   const PROPS = { fp: {}, tp: {} };
+  /* THE GAUZE ROLL: a real one is 5 cm across and 5-7 cm wide, woven, the
+     end face showing the wound spiral. A short open tube for the body, two
+     end discs, and a tail of gauze hanging off it. Local +X is its axle. */
+  function buildRoll() {
+    const g = new THREE.Group();
+    const cloth = new THREE.MeshLambertMaterial({ color: 0xebe6d8 });
+    const end = new THREE.MeshLambertMaterial({ color: 0xd9d3c3 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.055, 16, 1, true), cloth);
+    body.rotation.z = Math.PI / 2;
+    g.add(body);
+    for (let s = -1; s <= 1; s += 2) {
+      const d = new THREE.Mesh(new THREE.RingGeometry(0.006, 0.026, 16), end);
+      d.position.x = s * 0.0275; d.rotation.y = s * Math.PI / 2;
+      g.add(d);
+    }
+    const tail = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.07), new THREE.MeshLambertMaterial({ color: 0xebe6d8, side: THREE.DoubleSide }));
+    tail.position.set(0, -0.045, 0.024); tail.rotation.x = 0.25;
+    g.add(tail);
+    return g;
+  }
   function buildProp(kind) {
     let m = null;
     if (kind === "c4" && CBZ.buildC4Brick) m = CBZ.buildC4Brick(THREE);
     else if (kind === "detonator" && CBZ.buildC4Detonator) m = CBZ.buildC4Detonator(THREE);
+    else if (kind === "bandage") m = buildRoll();
     else if (kind === "grenade" && CBZ.grenadeMesh) {
       m = CBZ.grenadeMesh(THREE);
       if (m) {
@@ -159,6 +199,8 @@
     // the detonator's body runs along the grip axis, its lever (-Z face) in the fingers
     detonator: { pose: "hold022", basis: [[0, 0, 1], [1, 0, 0], [0, 1, 0]], off: [0, 0, 0] },
     grenade: { pose: "hold034", basis: [[0, 0, 1], [1, 0, 0], [0, 1, 0]], off: [0, 0, 0] },
+    // the roll's axle along the grip axis, held in the fingers
+    bandage: { pose: "hold034", basis: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], off: [0, 0, 0] },
   };
   const _gc = new THREE.Vector3(), _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
   const _mb = new THREE.Matrix4();
@@ -188,7 +230,7 @@
      arm IK, the hand and the thing in it are one object. */
   const PRESENT = { x: 0.15, y: -0.13, z: 0.02, roll: 0.55, bend: 0.12 };
   function fpHold(vm, fistT, handR) {
-    const kinds = ["c4", "detonator", "grenade"];
+    const kinds = ["c4", "detonator", "grenade", "bandage"];
     for (let i = 0; i < kinds.length; i++) {
       const p = PROPS.fp[kinds[i]];
       if (p && kinds[i] !== held) p.visible = false;
@@ -216,9 +258,33 @@
     } else if (held === "detonator") {
       T.y += 0.03; T.roll += 0.25;
       if (squeezeT >= 0 && squeezeT < 0.3) T.z += 0.015 * Math.sin(Math.min(1, squeezeT / 0.1) * Math.PI);
+    } else if (held === "bandage") {
+      // WRAPPING: both hands come down and in, the left forearm held across,
+      // the right hand with the roll circling round it. One motion, no text.
+      const VT = CBZ.vitals;
+      const p = VT && CBZ.player ? VT.bandaging(CBZ.player) : -1;
+      if (p >= 0) {
+        wrapK = Math.min(1, wrapK + 0.08);
+        wrapA += 0.16;
+      } else wrapK = Math.max(0, wrapK - 0.08);
+      if (wrapK > 0) {
+        const k = wrapK * wrapK * (3 - 2 * wrapK);
+        const cx = 0.01, cy = -0.17, cz = 0.06, r = 0.05;
+        T.x += (cx + r * Math.cos(wrapA) - T.x) * k;
+        T.y += (cy + r * 0.8 * Math.sin(wrapA) - T.y) * k;
+        T.z += (cz + 0.02 * Math.sin(wrapA) - T.z) * k;
+        T.roll += (0.9 + 0.5 * Math.sin(wrapA) - T.roll) * k;
+        T.bend += (0.25 - T.bend) * k;
+        const L = fistT[1];
+        if (L) {
+          L.vis = true; L.curl = "relaxed"; L.hook = 0;
+          L.x = -0.11; L.y = -0.19; L.z = 0.09; L.roll = 0.55; L.bend = 0.05;
+        }
+      }
     }
     return true;
   }
+  let wrapK = 0, wrapA = 0;
 
   // THIRD PERSON: the same prop in the body's right hand, the arm brought up
   // in front of the chest while presenting it.
@@ -411,7 +477,25 @@
       "<path d='M20 32 v3 q0 3 -4 3 h-6' fill='none' stroke='#39402c' stroke-width='1.6'/></svg>";
   };
 
+  /* A HOTBAR KEY HELD IS THE USE INPUT HELD, for the roll: the bar's digit
+     puts it in your hand and, still held, wraps; the key coming up is the
+     release. (inventory.js / fpsmode's city bar call this on the digit.) */
+  let keyDown = null;
+  function keyHold(kind, code) {
+    if (kind !== "bandage") return false;
+    if (held !== "bandage" && !select("bandage")) return false;
+    keyDown = code || "?";
+    use(true);
+    return true;
+  }
+  addEventListener("keyup", function (e) {
+    if (!keyDown || (e.code || e.key) !== keyDown) return;
+    keyDown = null;
+    if (held === "bandage") use(false);
+  });
+
   CBZ.heldItem = {
+    keyHold: keyHold,
     current: function () { return held; },
     select: select,
     clear: function () { setHeld(null); },

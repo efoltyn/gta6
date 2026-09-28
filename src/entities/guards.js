@@ -1274,6 +1274,13 @@
     const p = g.group.position;
     const T = g._navT || (g._navT = new THREE.Vector3());
     T.set(tx, 0, tz);
+    // CBZ.vitals: a screw wrapping his own wound stands to do it; a groggy,
+    // bled-white or leg-shot one walks slower
+    const VT = CBZ.vitals;
+    if (VT) {
+      if (VT.busy(g)) { stand(g, dt); return Math.hypot(tx - p.x, tz - p.z); }
+      sp *= VT.speedMul(g);
+    }
     if (navOn()) { NAV_OPTS.speed = sp; CBZ.navGrid.step(g, p, T, dt, NAV_OPTS); }
     if ((g._navWait || 0) > 0) {                    // a shut door on his route: he stands at it
       g._navWait -= dt;

@@ -21,12 +21,15 @@
               cuffing is THE HOLE: walked to your cell, door sealed 25-40 s,
               contraband gone, a small cigarette cut, then released with a
               grace window. No strike.
-     DOWNED   0 hp from fists = down, not dead and not captured: guards break
-              it up and carry you to the infirmary. A shank or a bullet downs
-              you too, but a second lethal down inside 3 min, being stabbed
-              while down, or tower fire in the sterile zone is DEATH.
+     DOWNED   your body is CBZ.vitals (systems/vitals.js): a clean fist KNOCKS
+              YOU OUT, a blade or a round that takes you past what you can
+              stand puts you down BLEEDING. Either way the screws break it up
+              and carry you to the infirmary. You DIE of a truly lethal hit
+              (the neck, the heart, the head), of the blood running out before
+              they get to you, of a long beating while you were out, or of
+              tower fire on the sterile strip.
      REGEN    out of a fight for 8 s you heal slowly to 70; Doc Mercer in the
-              infirmary heals you to full.
+              infirmary closes what is open and heals you to full.
 ============================================================ */
 (function () {
   "use strict";
@@ -349,32 +352,42 @@
   // ============================================================
   //  THE ONE WAY THE PLAYER IS HURT IN THIS MODE (CBZ.hurtPlayer).
   //  opts: melee, by (actor), weapon "fist"|"shank"|"gun"|"blast", stun,
-  //  shake, sfx, tower. Being hurt is NOT heat: a man getting beaten is not
-  //  a crime he committed (the old default poured 4-10 heat per blow YOU took).
-  //  At 0 hp: DOWNED (fists), DOWNED or DEAD (steel, bullets), never cuffed.
+  //  shake, sfx, tower; zone/power/point/blunt/dirX/dirZ from a real strike.
+  //  Being hurt is NOT heat: a man getting beaten is not a crime he committed.
+  //
+  //  WHAT IT DOES TO YOUR BODY IS CBZ.vitals (systems/vitals.js), as it is for
+  //  every man in the yard: a fist dazes you and a clean one knocks you OUT
+  //  (the screws carry you to the infirmary and you wake there); a blade or a
+  //  round opens a BLEED, and when you can take no more you go down bleeding.
+  //  You die of a truly lethal hit, of the blood, or of a long beating while
+  //  you were out. hp is the gauge on the HUD, never the death.
   // ============================================================
   let playerHits = 0;
   let lastHurtT = -1e9;
   let down = null;                 // { t, weapon, by, wakeHp } while on the floor
   let deathT = 0;                  // seconds to the loss card once dead
-  const lethalDowns = [];          // clock() of each shank/gun down (3 min memory)
   const DOWN_BEAT = 3.2;           // s on the floor before the screws carry you
-  const LETHAL_MEMORY = 180;
   function weaponOf(opts) {
     if (opts.weapon) return opts.weapon;
     if (opts.melee) return opts.sfx === "hit" ? "shank" : "fist";
     return "gun";
   }
   CBZ.playerDowned = function () { return !!down || !!(esc && esc.kind === "medical"); };
+  const VIT = () => CBZ.vitals || null;
   CBZ.hurtPlayer = function (dmg, fromX, fromZ, opts) {
     opts = opts || {};
     if (player.dead) return false;
     const weapon = weaponOf(opts);
-    const lethal = weapon !== "fist";
-    // ON THE FLOOR: fists stop (SOCIAL honours playerDowned), steel does not.
-    // A blade or a bullet into a downed man is the lethal mistake.
+    const steel = weapon !== "fist";
+    const V = VIT();
+    // ON THE FLOOR: fists stop (SOCIAL honours playerDowned); steel into a
+    // man on the floor is another hole, and he is already bleeding hard
     if (down) {
-      if (lethal && !((g.invuln || 0) > 0)) { die(weapon === "shank" ? "Stabbed on the floor" : "Shot on the floor", opts); return true; }
+      if (steel && !((g.invuln || 0) > 0)) {
+        if (V) V.wound(player, { kind: weapon === "shank" ? "stab" : "bullet", zone: opts.zone, point: opts.point, by: opts.by || null, critical: true, cal: opts.cal });
+        else die(weapon === "shank" ? "Stabbed on the floor" : "Shot on the floor", opts);
+        return true;
+      }
       return false;
     }
     if ((g.invuln || 0) > 0) return false;
@@ -396,21 +409,67 @@
       CBZ.verbs.react(CBZ.verbs.playerActor ? CBZ.verbs.playerActor() : { isPlayer: true, pos: player.pos },
         { zone: "head", kind: weapon === "shank" ? "stab" : "cross", dir: { x: dx / l, z: dz / l }, power: Math.min(1, 0.35 + (dmg || 10) / 30) });
     }
-    if (player.hp > 0) return false;
-    player.hp = 0;
-    const t = clock();
-    for (let i = lethalDowns.length - 1; i >= 0; i--) if (t - lethalDowns[i] > LETHAL_MEMORY) lethalDowns.splice(i, 1);
-    const sterile = !!opts.tower && CBZ.prisonSterileAt && CBZ.prisonSterileAt(player.pos.x, player.pos.z);
-    if (sterile) { die("Shot on the wire", opts); return true; }
-    if (lethal && lethalDowns.length > 0) { die(weapon === "shank" ? "Stabbed" : "Shot", opts); return true; }
-    if (lethal) lethalDowns.push(t);
-    goDown(weapon, opts);
-    return true;
+    // THE WIRE: tower fire on the sterile strip is not a wound, it is the end
+    if (opts.tower && player.hp <= 0 && CBZ.prisonSterileAt && CBZ.prisonSterileAt(player.pos.x, player.pos.z)) {
+      player.hp = 0; die("Shot on the wire", opts); return true;
+    }
+    if (!V) {
+      // no body model loaded: the old gauge decides
+      if (player.hp > 0) return false;
+      player.hp = 0;
+      goDown(weapon, opts);
+      return true;
+    }
+    let dx = opts.dirX || 0, dz = opts.dirZ || 0;
+    if (!dx && !dz && fromX != null && isFinite(fromX)) {
+      dx = player.pos.x - fromX; dz = player.pos.z - (fromZ || 0);
+      const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    }
+    if (!steel) {
+      // A FIST: the gauge never runs out on its own; the jaw decides
+      if (player.hp < 1) player.hp = 1;
+      const out = V.blunt(player, { zone: opts.zone || "head", power: opts.power != null ? opts.power : Math.min(1, (dmg || 10) / 25),
+        weapon: opts.blunt || "fist", heavy: !!opts.heavy, by: opts.by || null, dirX: dx, dirZ: dz, fromX, fromZ });
+      return out === "ko" || out === "dead";
+    }
+    // STEEL OR A ROUND: a hole that bleeds; out of hp, down bleeding
+    const crit = player.hp <= 0;
+    if (player.hp < 1) player.hp = crit ? 0 : 1;
+    const W = V.wound(player, { kind: weapon === "shank" ? "stab" : weapon === "blast" ? "blast" : "bullet",
+      zone: opts.zone, point: opts.point, head: !!opts.head, cal: opts.cal, by: opts.by || null,
+      dirX: dx, dirZ: dz, fromX, fromZ, critical: crit });
+    return !!W && (W.outcome === "down" || W.outcome === "dead");
   };
   CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
     return CBZ.hurtPlayer(dmg, fromX, fromZ, Object.assign({ weapon: "gun" }, opts || {}));
   };
 
+  /* CBZ.vitals' seam for the player in the pen: it says when you go down
+     (out cold, down bleeding, blood collapse) and when you die; this file
+     owns what that LOOKS like here (the floor, the carry, the loss card). */
+  const CAUSE_LINE = { "bled out": "Bled out", stabbed: "Stabbed", shot: "Shot", headshot: "Shot",
+    "beaten to death": "Beaten to death", beaten: "Beaten to death" };
+  if (CBZ.vitals && CBZ.vitals.on) {
+    CBZ.vitals.on("escape", {
+      playerDown(on, o) {
+        if (!on || player.dead || down || esc) return;          // the carry stands you up, not the clock
+        o = o || {};
+        const by = o.by && o.by !== player ? o.by : null;
+        if (player.hp == null || player.hp > 0) player.hp = Math.min(player.hp == null ? 100 : player.hp, 1);
+        goDown(o.conscious ? "shank" : "fist", { by });
+      },
+      playerKill(cause, o) {
+        die(CAUSE_LINE[cause] || "Dead", o || {});
+      },
+      // the pocket roll: a real Bandage from the infirmary / Doc Mercer
+      rolls() { return (g.inventory && g.inventory.Bandage) | 0; },
+      useRoll(n) {
+        if (!CBZ.econ) return;
+        if (n > 0) CBZ.econ.addItem("Bandage", n);
+        else for (let i = 0; i < -n; i++) CBZ.econ.takeItem("Bandage");
+      },
+    });
+  }
   function goDown(weapon, opts) {
     law("downs");
     cancelArrest();
@@ -439,6 +498,9 @@
     // hauled off the floor: to the infirmary, or in cuffs if this was an escape
     const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
     const wake = d.wakeHp;
+    // the screws have hands on you: pressure on the wound, and whatever kept
+    // you on the floor (out cold, the blood) is theirs to carry now
+    if (CBZ.vitals) CBZ.vitals.reset(player);
     down = null;
     if (escapeCap) { player.hp = wake; law("cuffs"); startEscort(null, { kind: "transfer", tased: true }); }
     else startEscort(null, { kind: "medical", wakeHp: wake, tased: true });
@@ -1590,13 +1652,22 @@
   function healTick(dt) {
     if (player.dead || down || esc) return;
     const hp = player.hp == null ? 100 : player.hp;
-    if (hp >= 100) return;
     const px = player.pos.x, pz = player.pos.z;
+    const V = VIT();
+    const hurt = !!V && (V.bleeding(player) || V.blood(player) < 0.98);
+    if (hp >= 100 && !hurt) return;
     if (inInfirmary(px, pz)) {
       const d = doc();
       const dx = d ? d.group.position.x : INFIRMARY.docX, dz = d ? d.group.position.z : INFIRMARY.docZ;
-      if ((!d || !(d.ko > 0)) && Math.hypot(px - dx, pz - dz) < DOC_R) { player.hp = Math.min(100, hp + DOC_RATE * dt); return; }
+      if ((!d || !(d.ko > 0)) && Math.hypot(px - dx, pz - dz) < DOC_R) {
+        // Doc Mercer wraps what is open (real gauze on you) and the blood
+        // comes back while you sit with him
+        if (hurt) { if (V.dress) V.dress(player, { blood: 0.04 * dt }); else V.reset(player); }
+        player.hp = Math.min(100, hp + DOC_RATE * dt);
+        return;
+      }
     }
+    if (hp >= 100) return;
     if (clock() - lastHurtT < REGEN_WAIT || hp >= REGEN_CAP) return;
     player.hp = Math.min(REGEN_CAP, hp + REGEN_RATE * dt);
   }
@@ -1617,7 +1688,8 @@
       cancelArrest(false); haulEnd(true);
       confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = "";
       beatLock = false; intakeDone = false; lastServed = -1;
-      arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false; lethalDowns.length = 0;
+      arrest = null; down = null; deathT = 0; lawGraceT = 0; holeRelease = false;
+      if (CBZ.vitals) CBZ.vitals.reset(player);
       lastHurtT = -1e9; spdPX = null; pSpd = 0;
     }
     // ...and if you were SENT here, you wake in the cell with the door shut.

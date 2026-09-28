@@ -173,6 +173,10 @@
     Flashlight:    { value: 25,   tag: "tool" },
     "Burner Phone":{ value: 60,   tag: "tool" },
     Medkit:        { value: 150,  tag: "tool", medkit: 40 },
+    // a roll of gauze: one wrap over one open wound (systems/vitals.js). You
+    // do it yourself, hands on the hole for a few seconds; it does not heal
+    // anything, it stops the bleeding. Cheap, and on every first-aid shelf.
+    Bandage:       { value: 12,   tag: "tool", bandage: true },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
     // --- B7: RESOURCES (harvested from city nodes — trees/rocks/scrap piles;
     // see systems/resources.js) + the two gathering TOOLS (bought/looted —
@@ -343,24 +347,24 @@
                   "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
     // exactly nine — the menu draws stock.slice(0, 9) and the keys are 1-9
     food:        ["Burger", "Hotdog", "Pizza Slice", "Bread", "Apple", "Canned Beans", "Fries", "Soda", "Energy Drink"],
-    gas:         ["Soda", "Coffee", "Water", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone"],
+    gas:         ["Soda", "Coffee", "Water", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone", "Bandage"],
     drugs:       ["Weed", "Pills"],
-    hardware:    ["Crowbar", "Lockpick", "Flashlight", "Bat", "Medkit"],
+    hardware:    ["Crowbar", "Lockpick", "Flashlight", "Bat", "Medkit", "Bandage"],
     electronics: ["Phone", "Laptop", "Burner Phone"],
-    gym:         ["Energy Drink", "Medkit"],
+    gym:         ["Energy Drink", "Bandage", "Medkit"],
     barber:      ["Sunglasses", "Earrings", "Snapback", "Beanie", "Fedora", "Designer Shades"],
     // SHADES — the sunglass store. Everything it sells is a real pair of
     // glasses that goes on your face (slot "glasses"), cheapest first.
     eyewear:     ["Retro Frames", "Sunglasses", "Sport Wraps", "Aviators", "Designer Shades"],
-    security:    ["Body Armor", "Ammo Box", "Pistol"],
+    security:    ["Body Armor", "Ammo Box", "Pistol", "Bandage"],
     bank:        [],
-    hospital:    ["Medkit", "Body Armor"],
+    hospital:    ["Bandage", "Medkit", "Body Armor"],
     realtor:     [],
     chop:        [],
     casino:      [],
-    raceway:     ["Energy Drink", "Medkit"],
-    arena:       ["Energy Drink", "Medkit", "Body Armor"],
-    paintball:   ["Energy Drink", "Medkit"],
+    raceway:     ["Energy Drink", "Bandage", "Medkit"],
+    arena:       ["Energy Drink", "Bandage", "Medkit", "Body Armor"],
+    paintball:   ["Energy Drink", "Bandage", "Medkit"],
     transit:     ["Soda", "Hotdog", "Burner Phone"],
     cityhall:    [],
     airfield:    ["Body Armor", "Medkit", "Air-to-Ground Missile"],
@@ -476,6 +480,15 @@
   function has(name) { return ((g.cityInv && g.cityInv[name]) || 0) > 0; }
   function count(name) { return (g.cityInv && g.cityInv[name]) || 0; }
   function take(name, n) { n = n || 1; if (count(name) < n) return false; g.cityInv[name] -= n; if (g.cityInv[name] <= 0) delete g.cityInv[name]; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return true; }
+
+  // THE PLAYER'S ROLLS OF GAUZE are the "Bandage" rows in the city bag: vitals
+  // spends one per finished wrap (and a pickup/buy is just the bag count).
+  if (CBZ.vitals && CBZ.vitals.on) {
+    CBZ.vitals.on("city", {
+      rolls: function () { return count("Bandage"); },
+      useRoll: function (n) { if (n < 0) take("Bandage", -n); else if (n > 0) add("Bandage", n); },
+    });
+  }
 
   // LEGACY whole-inventory drip: sums drip across everything you OWN. Kept so any
   // older caller keeps working — but the PLAYER's club status now comes from the

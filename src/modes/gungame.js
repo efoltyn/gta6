@@ -843,6 +843,7 @@
     const p = spawnPoint(b);
     freshBody(b);
     b.dead = false; b.hp = 100; b._hpSeen = 100; b.ko = 0; b.respawnT = 0;
+    if (CBZ.vitals) CBZ.vitals.reset(b);          // a fresh body: no bleeds, no daze
     b.pos.set(p.x, mapFloor(p.x, p.z), p.z);
     b.lastX = p.x; b.lastZ = p.z;
     b.group.rotation.set(0, rand() * 6.28, 0);
@@ -946,6 +947,8 @@
     CBZ.player.vy = 0; CBZ.player.grounded = true;
     CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
     CBZ.player._death = null;
+    if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
+    koFp = null;
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     CBZ.player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
     CBZ.playerChar.group.position.copy(CBZ.player.pos);
@@ -1063,6 +1066,20 @@
     imp = imp || {};
     if (actor === PLAYER_TGT || actor === CBZ.player || actor.isPlayer) {
       if (CBZ.player.dead || g.invuln > 0 || gg.spawnProtectT > 0) return;
+      const VT = CBZ.vitals;
+      if (imp.cause === "melee" && VT) {
+        // A FIST DOES NOT EMPTY A HEALTH BAR: it rocks you, and enough of them
+        // put you on the floor (systems/vitals.js). Out cold, the next blow
+        // is the finish.
+        const by = imp.by;
+        const st = VT.state(CBZ.player);
+        if (st === "ko" || st === "down") { playerDeath(by, "melee"); return; }
+        VT.blunt(CBZ.player, { zone: imp.zone || "head", power: imp.power != null ? imp.power : 0.7, weapon: imp.weapon || "fist",
+          heavy: !!imp.heavy, by: by || null, dirX: by ? CBZ.player.pos.x - by.pos.x : 0, dirZ: by ? CBZ.player.pos.z - by.pos.z : 0 });
+        if (CBZ.shake) CBZ.shake(0.25);
+        emit("hurt", { dmg: 0, fromX: by ? by.pos.x : CBZ.player.pos.x, fromZ: by ? by.pos.z : CBZ.player.pos.z, by: by ? by.name : "" });
+        return;
+      }
       CBZ.player.hp -= dmg;
       if (CBZ.shake) CBZ.shake(Math.min(0.5, 0.08 + dmg * 0.006));
       const by = imp.by;
@@ -1139,15 +1156,79 @@
     if (fists && !fromClick && CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
     return true;
   }
-  // two clean hits drop a man; a melee kill humiliates him down a rung
+  /* A FIST KNOCKS A MAN OUT, IT DOES NOT EMPTY HIM (systems/vitals.js): a
+     few clean ones to the jaw put him on the floor, out cold; a man lying
+     there is finished by the next blow (and humiliated down a rung). The
+     gun butt is a club, so it gets there faster. */
+  const STRIKE_WEAPON = { kick: "kick", roundKick: "kick", lowKick: "kick", knee: "knee", elbow: "elbow", headbutt: "headbutt" };
   function landMelee(res, fists) {
     const best = res.target;
     if (!best || best.dead || gg.bots.indexOf(best) < 0) { res.reaction = "none"; return; }
     if (CBZ.sfx) CBZ.sfx("punch");
     best.hurtBy = PLAYER_TGT; best.hurtT = 0;
-    best.hp -= (fists ? 52 : 58) * Math.min(1, res.dmgMul + 0.2); best._hpSeen = best.hp;
-    if (best.hp <= 0) { res.reaction = "dead"; botDeath(best, "player", "melee"); }
+    const VT = CBZ.vitals;
+    if (!VT) {
+      best.hp -= (fists ? 52 : 58) * Math.min(1, res.dmgMul + 0.2); best._hpSeen = best.hp;
+      if (best.hp <= 0) { res.reaction = "dead"; botDeath(best, "player", "melee"); }
+      return;
+    }
+    if (floored(best)) { res.reaction = "dead"; botDeath(best, "player", "melee"); return; }
+    const out = VT.blunt(best, {
+      zone: res.zone || "head", power: (res.power != null ? res.power : 0.7) * (res.blocked ? 0.3 : 1),
+      weapon: fists ? (STRIKE_WEAPON[res.kind] || "fist") : "blunt", heavy: !fists || !!res.heavy,
+      by: CBZ.player, dirX: res.dir ? res.dir.x : 0, dirZ: res.dir ? res.dir.z : 0,
+    });
+    if (out === "ko") res.reaction = "none";              // vitals already laid him down
+    else if (out === "dead") res.reaction = "dead";
+    else if (out === "knockdown") res.reaction = "knockdown";
   }
+  // on the floor and no threat: knocked out, down bleeding, tased
+  function floored(b) {
+    const VT = CBZ.vitals;
+    if (!VT || b.dead) return false;
+    const st = VT.state(b);
+    return st === "ko" || st === "tased" || (st === "down" && !!(VT.peek(b) && VT.peek(b).critical));
+  }
+
+  /* ---- THE BODY'S SEAM (systems/vitals.js) in this mode ----
+     A man vitals puts on the floor goes down in the shared collapse
+     (CBZ.body.knockdown -> bodyfall, the same fall a dead bot takes) for as
+     long as vitals says, and gets up when it lets him. A death vitals hands
+     out (bled out, a round to the head it decided) is a gun-game death with
+     the player's credit when he did it. You, knocked out: flat on your back
+     for the count, third person, and the next bot to reach you finishes it. */
+  let koFp = null;
+  if (CBZ.vitals) CBZ.vitals.on("gungame", {
+    hold(a, secs, o) {
+      if (!CBZ.body || !a || !a._ggBot) return false;
+      CBZ.body.knockdown(a, { fromX: o && o.fromX, fromZ: o && o.fromZ, dir: o && (o.dirX || o.dirZ) ? { x: o.dirX || 0, z: o.dirZ || 0 } : null, force: 2.5, t: secs });
+      return true;
+    },
+    rise(a) { const p = a && a._phys; if (p && p.down > 0.05 && !a.dead) p.down = 0.05; return true; },
+    kill(a, cause, o) {
+      if (!a || !a._ggBot) return false;
+      const melee = cause === "beaten to death" || cause === "beaten";
+      botDeath(a, (o && o.by) || (a._vt && a._vt.by) || null, melee ? "melee" : cause, cause === "headshot");
+      return true;
+    },
+    playerKill(cause, o) { playerDeath(o && o.by && o.by._ggBot ? o.by : null, cause === "beaten to death" ? "melee" : cause); },
+    playerDown(on, o) {
+      const P = CBZ.player;
+      if (!P || !CBZ.body) return;
+      const ph = CBZ.body.phys({ isPlayer: true });
+      if (on) {
+        ph.down = Math.max(ph.down, (o && o.secs) || 3);
+        P.stun = Math.max(P.stun || 0, (o && o.secs) || 3);        // no trigger, no legs
+        if (koFp == null) koFp = !!(CBZ.fps && CBZ.fps.active);
+        if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);
+      } else {
+        if (ph.down > 0.3) ph.down = 0.3;
+        if (P.stun > 0.3) P.stun = 0.3;
+        if (koFp && CBZ.fpsSetActive && !P.dead) CBZ.fpsSetActive(true);
+        koFp = null;
+      }
+    },
+  });
   function meleeTick(dt) {
     meleeCD = Math.max(0, meleeCD - dt);
   }
@@ -1522,7 +1603,7 @@
           onLand: function (res) {
             if (b.dead || foe.dead) { res.reaction = "none"; return; }
             if (CBZ.sfx) CBZ.sfx("punch");
-            hurt(foe, dmg * Math.min(1, res.dmgMul + 0.2), { by: b, cause: "melee" });
+            hurt(foe, dmg * Math.min(1, res.dmgMul + 0.2), { by: b, cause: "melee", zone: res.zone, power: res.power, weapon: r.melee ? "fist" : "blunt", heavy: !r.melee });
             if (foe.dead || (foe.isPlayer && CBZ.player.dead)) res.reaction = "dead";
           },
         });
@@ -1649,8 +1730,14 @@
         if (!gg.match.over) { b.respawnT -= dt; if (b.respawnT <= 0) respawnBot(b); }
         continue;
       }
-      // a KO in this mode is a finish (combat.js's melee can KO instead of kill)
-      if (b.ko > 0) { botDeath(b, "player", "melee"); continue; }
+      // OUT COLD / DOWN / TASED (systems/vitals.js): he lies there, no gun,
+      // no brain, until he comes to or somebody finishes him
+      if (floored(b) || b.ko > 0) {
+        if (b.ko > 0) b.ko = Math.max(0, b.ko - dt);
+        b.speed = 0; b.track = 0;
+        if (!(CBZ.body && CBZ.body.busy(b)) && CBZ.animChar) CBZ.animChar(b.char, 0, dt);
+        continue;
+      }
       // shot by the player through fpsmode (hp moved without passing hurt())
       if (b.hp < b._hpSeen - 0.5) { b.hurtBy = PLAYER_TGT; b.hurtT = 0; b.react = Math.min(b.react, 0.15); }
       b._hpSeen = b.hp;
@@ -1863,6 +1950,8 @@
     CBZ.player.vy = 0; CBZ.player.grounded = true;
     CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
     CBZ.player._death = null;
+    if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
+    koFp = null;
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     CBZ.player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
     CBZ.player.sprint = false; CBZ.player.crouch = false;

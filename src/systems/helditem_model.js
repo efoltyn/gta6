@@ -41,7 +41,8 @@
   }
 
   /* The cells a carrier of these things gets on the bar, in order.
-     s = { c4: count, planted: count, grenades: count, held: "c4"|"detonator"|"grenade"|null }
+     s = { c4: count, planted: count, grenades: count, bandages: count,
+           held: "c4"|"detonator"|"grenade"|"bandage"|null }
      A charge cell exists while you carry bricks; the Detonator cell exists
      while any charge is out (it outlives the last brick in the bag). */
   function cells(s) {
@@ -57,6 +58,8 @@
   // with no bricks left but charges out falls through to the detonator)
   function resolveHeld(held, s) {
     s = s || {};
+    // the gauze roll stays in your hand while you have one (or are mid-wrap)
+    if (held === "bandage") return (s.bandages | 0) > 0 || s.wrapping ? "bandage" : null;
     if (held === "c4" && !((s.c4 | 0) > 0)) return (s.planted | 0) > 0 ? "detonator" : null;
     if (held === "detonator" && !((s.planted | 0) > 0)) return null;
     if (held === "grenade" && !((s.grenades | 0) > 0)) return null;

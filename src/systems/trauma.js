@@ -235,17 +235,11 @@
         sfx: sev > 0.7 ? "hit" : false,
       });
     }
-    // THE BODY CARRIES IT (systems/wounds.js). Under the bar this never runs;
-    // at the bar a blunt impact stops being a bruise and becomes a split.
-    if (CBZ.bodyWound) {
-      try {
-        CBZ.bodyWound(a, { x: p.x, y: y, z: p.z }, {
-          melee: sev > 0.5 ? "blade" : "blunt",
-          cal: 0.7 + Math.min(0.7, sev * 0.4),
-          dir: o.dir, fromX: o.fromX, fromZ: o.fromZ,
-        });
-      } catch (e) {}
-    }
+    // NO DECAL. A beating used to stamp a "split" (a blade wound) at the
+    // body's centre, biased toward the attacker, once the ledger crossed the
+    // bar: that is the owner's "hole in his back as if he got shot" from a
+    // punch. Blunt trauma is a daze and a knockout (systems/vitals.js) and
+    // the blood thrown above; it never cuts a hole in anybody.
     if (a.isPlayer && CBZ.shake) CBZ.shake(Math.min(0.9, 0.2 + sev * 0.4));
   }
 
@@ -259,11 +253,7 @@
     r.hits++;
     const crossed = r.v >= FIRST_BLOOD || lone >= LONE_HIT;
     if (!crossed) {
-      // UNDER THE BAR: a bruise, and nothing else. No spray, no pool, no stain
-      // on the world. This branch is the entire complaint being answered.
-      if (CBZ.bodyWound && a.pos && lone > 0.12) {
-        try { CBZ.bodyWound(a, { x: a.pos.x, y: a.pos.y + (o && o.y != null ? o.y : 1.0), z: a.pos.z }, { melee: "blunt", fromX: o && o.fromX, fromZ: o && o.fromZ }); } catch (e) {}
-      }
+      // UNDER THE BAR: nothing at all. No spray, no pool, no mark.
       return 0;
     }
     if (r.cd > clock) return 0;                 // one emission per impact, not per frame

@@ -2184,14 +2184,16 @@
       player.prone = st.mode === "prone" && !sliding;
     } else if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch && hitSlow === 1 &&
-      !!keys["shift"] && len > 0 && staminaReady;
+      !!keys["shift"] && len > 0 && staminaReady &&
+      !(CBZ.vitals && CBZ.vitals.weak(player) > 0.5);            // too much blood gone to run
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
     // the mount's gait). It COMPOSES with the limp — a wounded rider still rides.
     // running in cuffs (you tore out of an escort): hands behind you, no arms to run with
-    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * (playerChar.cuffed ? 0.7 : 1);
+    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * (playerChar.cuffed ? 0.7 : 1) *
+      (CBZ.vitals ? CBZ.vitals.speedMul(player) : 1);            // groggy, bled, a shot leg, wrapping a wound (systems/vitals.js)
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
       : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale * hitSlow;

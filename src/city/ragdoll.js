@@ -1096,7 +1096,8 @@
   //  impulse magnitude (same scale as cityRagdoll's imp: ~6 pistol, ~14 shotgun,
   //  ~20+ blast). Returns true if a reactive body took the hit.
   // ============================================================
-  CBZ.cityCorpseHit = function (target, point, dir, force) {
+  // o.wound === false: a boot or a fist into the body — it moves, no mark
+  CBZ.cityCorpseHit = function (target, point, dir, force, o) {
     if (!allowed()) return false;          // the city, or any page that opted into real bodies (warlord)
     if (!target) return false;
     // accept an actor (has .group) or a bare char → climb back to its actor
@@ -1110,21 +1111,21 @@
       kick(s, point, dir, imp);
       s.asleep = false; s.still = 0; s.life = 0; s.age = ++seq;   // freshen LRU so the jolt isn't instantly re-frozen
       bumpPhys(target);
-      stampWound(target, point, dir);
+      if (!o || o.wound !== false) stampWound(target, point, dir);
       return true;
     }
     // a body lying in its collapse (systems/bodyfall.js) takes the round as a
     // nudge where it lies; it does not get stood back up into a new skeleton
     if (target._bf && target._bf.on && CBZ.bodyFall && imp < 14) {
       CBZ.bodyFall.poke(target, dir ? dir.x : 0, dir ? dir.z : 0, imp);
-      stampWound(target, point, dir);
+      if (!o || o.wound !== false) stampWound(target, point, dir);
       return true;
     }
     // no live slot (cheap far-kill, picked-up-then-reshot, or never ragdolled) →
     // spin a reactive body up. start() re-uses an existing slot if present and
     // honours range / MAX_ACTIVE / LRU, so this stays perf-bounded.
     const ok = start(target, point, dir, imp, false);
-    if (ok) stampWound(target, point, dir);
+    if (ok && (!o || o.wound !== false)) stampWound(target, point, dir);
     return ok;
   };
   /* ============================================================

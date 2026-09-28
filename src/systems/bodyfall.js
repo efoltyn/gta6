@@ -638,25 +638,67 @@
   });
 
   /* ============================================================
-     CBZ.corpseHit(target, point, dir, force) -> bool: A ROUND INTO A BODY,
+     CBZ.corpseHit(target, point, dir, force, o) -> bool: A ROUND INTO A BODY,
      IN EVERY GAME. Every gun asks this one question about a dead man it hit:
        - a body in a verlet ragdoll slot (the city, warlord's solver) re-kicks
          there (city/ragdoll.js cityCorpseHit, which also stamps the wound);
        - a body lying in its collapse (this file: prison, survival, gun game,
          warlord, the city's cheap path) takes it as a shove and a jolt
          (poke) and wears the wound (systems/wounds.js).
+     And every one of them is another hole that lets out what is in him:
+     CBZ.vitals.wound on a dead man grows the pool under him (to its cap).
      dir is the round's travel ({x,z}, y ignored), force on the ragdoll's
-     scale (~6 pistol, ~14 shotgun). False = nothing here could take it.
+     scale (~6 pistol, ~14 shotgun). o = { cal, head, by } (optional).
+     False = nothing here could take it.
    ============================================================ */
-  CBZ.corpseHit = function (target, point, dir, force) {
+  function ooze(target, kind, point, o) {
+    if (!CBZ.vitals || !target || !target.dead) return;
+    try {
+      CBZ.vitals.wound(target, { kind, point: point || null, head: !!(o && o.head), cal: o && o.cal, by: (o && o.by) || null });
+    } catch (e) { /* vitals off */ }
+  }
+  CBZ.corpseHit = function (target, point, dir, force, o) {
     if (!target) return false;
     if (!target.group && target.actor) target = target.actor;
-    if (CBZ.cityCorpseHit) { try { if (CBZ.cityCorpseHit(target, point, dir, force)) return true; } catch (e) { /* ragdoll off */ } }
-    if (!target.dead || !target._bf || !target._bf.on) return false;
-    if (!poke(target, dir ? dir.x : 0, dir ? dir.z : 0, Math.max(1, force || 6), point)) return false;
-    if (CBZ.bodyWound && point) {
-      try { CBZ.bodyWound(target, point, { dir: dir || null }); } catch (e) { /* wounds off */ }
+    let took = false;
+    if (CBZ.cityCorpseHit) { try { took = !!CBZ.cityCorpseHit(target, point, dir, force); } catch (e) { /* ragdoll off */ } }
+    if (!took) {
+      if (!target.dead || !target._bf || !target._bf.on) return false;
+      if (!poke(target, dir ? dir.x : 0, dir ? dir.z : 0, Math.max(1, force || 6), point)) return false;
+      if (CBZ.bodyWound && point) {
+        try { CBZ.bodyWound(target, point, { dir: dir || null, head: !!(o && o.head), cal: o && o.cal }); } catch (e) { /* wounds off */ }
+      }
+      took = true;
     }
+    ooze(target, "bullet", point, o);
+    return took;
+  };
+
+  /* ============================================================
+     CBZ.corpseStab(target, point, dir, o) -> bool: A BLADE INTO A BODY.
+     The knife does not stop working because he stopped breathing: a small
+     push where it went in, a cut on the part it went into (wounds.js blade
+     mark), a little blood out of it, and another ooze into the pool
+     (vitals). A fist or a boot into a corpse is CBZ.bodyFall.poke alone:
+     no mark. o = { by, force } (optional).
+   ============================================================ */
+  CBZ.corpseStab = function (target, point, dir, o) {
+    if (!target) return false;
+    if (!target.group && target.actor) target = target.actor;
+    if (!target.dead || !target.group) return false;
+    o = o || {};
+    const dx = dir ? dir.x || 0 : 0, dz = dir ? dir.z || 0 : 0;
+    if (target._bf && target._bf.on) poke(target, dx, dz, o.force != null ? o.force : 1.6, point);
+    if (!point) {
+      const gp = target.group.position;
+      point = { x: gp.x, y: (gp.y || 0) + 0.3, z: gp.z };
+    }
+    if (CBZ.bodyWound) { try { CBZ.bodyWound(target, point, { melee: "blade", dir: dir || null }); } catch (e) { /* wounds off */ } }
+    // what comes out of the cut: a short wet spatter along the blade, then
+    // the drip where it lands (gore.js's own drops, never a painted blob)
+    if (CBZ.gore && CBZ.gore.spray) { try { CBZ.gore.spray(point, 0.3, dir || null, { exit: false }); } catch (e) { /* gore off */ } }
+    else if (CBZ.goreDrip) { try { CBZ.goreDrip(point.x, point.z, 0.25); } catch (e) { /* gore off */ } }
+    ooze(target, "stab", point, o);
     return true;
   };
 

@@ -3335,6 +3335,8 @@
       // ---- ON THE PAVEMENT (a lunge that missed, a blow that dropped him):
       // STRIKE's fall has the rig and gets him up in its own time
       if (c.ko > 0) { c.speed = 0; if (_near) animChar(c.char, 0, dt); continue; }
+      // wrapping his own wound once it is quiet (systems/vitals.js)
+      if (c._vt && CBZ.vitals && CBZ.vitals.busy(c)) { c.speed = 0; c.sees = false; if (_near) animChar(c.char, 0, dt); continue; }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.

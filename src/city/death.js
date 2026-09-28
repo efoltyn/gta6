@@ -97,7 +97,7 @@
 
   // corpse-hit scratch (zero per-call allocation) for the wake-on-hit route below
   const _crpP = { x: 0, y: 0, z: 0 }, _crpD = { x: 0, y: 0, z: 0 };
-  CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal) {
+  CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal, hit) {
     const P = CBZ.player;
     // YOU DON'T LOSE PHYSICS WHEN YOU DIE: while dead (the WASTED / spectate
     // window) a round from an NPC no longer just vanishes — your corpse stays a
@@ -146,9 +146,14 @@
     P._hurtT = 3.5;                     // pause regen briefly, then it ramps back
     if (CBZ.hitFlash) CBZ.hitFlash();
     if (CBZ.shake) CBZ.shake(Math.min(0.4, 0.12 + dmg * 0.01));
-    // INJURY: a surviving flesh hit can leave a lasting wound (limp / bleeding /
-    // shaky aim) so a firefight has consequences beyond a number ticking down.
-    if (dmg > 0 && P.hp > 0) applyWound(dmg, reason, headshot, fromX, fromZ);
+    // THE BODY (systems/vitals.js): a fist dazes and can knock you out, a
+    // round or a blade opens a bleed where it went in. A hit that runs the
+    // number out puts you on the floor bleeding instead of killing you, unless
+    // you were already down there. bodyHit true = vitals owns the outcome.
+    if (dmg > 0 && CBZ.vitals && bodyHit(hitKind(hit, reason, fromX, fromZ, attacker), dmg, hit, headshot, fromX, fromZ, attacker)) {
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      return;
+    }
     // the FINAL damage of the killing blow rides the impact: cityKillPlayer
     // scales the ragdoll fling from it (a close shotgun blast hurls you, a
     // pistol tap just drops you) and the headshot flag drives the head-pop gore.
@@ -166,110 +171,125 @@
   };
 
   // ============================================================
-  //  PLAYER INJURY MODEL — getting shot LEAVES A MARK.
-  //  WHY: damage that's just an HP number has no texture; a leg shot that makes
-  //  you limp (slower, can't sprint away), an arm shot that shakes your aim, and
-  //  bleeding that ticks you down until you find cover/heal turns every wound
-  //  into a tactical decision. Wounds are probabilistic per hit (the engine
-  //  doesn't track which limb of YOU got hit), decay over time, and clear on a
-  //  hospital respawn. Bullets/blades wound; explosions/falls/cars don't (those
-  //  have their own brutal feedback). Read by physics (limp), fpsmode (sway),
-  //  the minimap/phone (status), and the bleed-out tick below.
+  //  THE PLAYER'S BODY — systems/vitals.js, the same one every man in the
+  //  street has. The old private model here (a random-roll leg/arm wound, a
+  //  "bleed" that was just hp ticking down, a limp scale written for physics)
+  //  is gone: the round goes in WHERE it went in, bleeds at the rate that
+  //  place bleeds, and you wrap it with a real roll of gauze or a medkit, or
+  //  you bleed out. Speed (a shot leg, blood loss, groggy) and the grey
+  //  closing sight are vitals' own; nothing here writes them.
   // ============================================================
-  function isFleshHit(reason) {
-    if (isExplosionCause(reason) || isImpactCause(reason)) return false;
-    const r = ("" + (reason || "")).toLowerCase();
-    if (r.indexOf("car") >= 0 || r.indexOf("traffic") >= 0 || r.indexOf("crash") >= 0 ||
-        r.indexOf("run over") >= 0 || r.indexOf("drown") >= 0 || r.indexOf("starv") >= 0) return false;
-    return true;   // gunfire, stabs, beatings → a wound is plausible
-  }
-  function applyWound(dmg, reason, headshot, fromX, fromZ) {
-    const P = CBZ.player;
-    if (headshot || !isFleshHit(reason)) { bleedFrom(dmg * 0.5, fromX, fromZ); return; }
-    const maxHp = P.maxHp || 200;
-    const sev = Math.min(1, dmg / (maxHp * 0.5));        // 0..1 by how hard the hit was
-    // roll a hit location: legs are a big target (limp), arms next (aim sway),
-    // the rest is body (just bleeding + stagger).
-    const roll = Math.random();
-    if (roll < 0.34) {
-      P._legSide = Math.random() < 0.5 ? 1 : -1;
-      P._legWound = Math.min(1, (P._legWound || 0) + 0.35 + sev * 0.55);
-      // NO POPUP. The caption on the camera cone (owner, 2026-08-11: "I like
-      // that my leg can get hit and I can limp, but I want to SEE the limp as I
-      // walk, not as a popup"). It is already four carriers deep, ~50 lines
-      // below: _moveScale slows you, sprint is locked out above 0.4, the leg
-      // goes stiff and dragging, and the body dips onto the good side in sync
-      // with the walk phase. A line of text announcing your own gait is the
-      // "pure duplicate" case guards.js:346 already deleted once.
-    } else if (roll < 0.55) {
-      P._armWound = Math.min(1, (P._armWound || 0) + 0.3 + sev * 0.5);
-    } else {
-      P.stun = Math.max(P.stun || 0, 0.08 + sev * 0.12);   // a body shot staggers you a beat
+  // what hit you: the caller says (peds.js, net), else the words and the reach
+  function hitKind(hit, reason, fromX, fromZ, attacker) {
+    if (hit && hit.kind) {
+      const k = hit.kind;
+      return k === "fist" || k === "blunt" || k === "kick" ? "fist" : k === "blade" || k === "stab" || k === "slash" ? "blade" : k === "bite" ? "bite" : k === "bullet" ? "bullet" : "other";
     }
-    bleedFrom(dmg, fromX, fromZ);
-    if (CBZ.gore && P.pos) CBZ.gore(P.pos.x, P.pos.y + 1.1, P.pos.z, { amount: 0.5 + sev * 0.6, player: true, dir: (fromX != null ? { x: P.pos.x - fromX, z: P.pos.z - fromZ } : null) });
+    if (isExplosionCause(reason) || isImpactCause(reason)) return "other";
+    const r = ("" + (reason || "")).toLowerCase();
+    if (/car|traffic|crash|run over|drown|starv|burn|fire|electr|shock|lava|tsunami|quake|tornado|debris|crush/.test(r)) return "other";
+    if (/stab|knife|blade|slash|shiv|machete/.test(r)) return "blade";
+    if (/maul|bitten|\bbit\b|dog|shark|animal|gored|savag/.test(r)) return "bite";
+    if (/beat|punch|cage|brawl|fist|jumped|from behind|stomp|kick/.test(r)) return "fist";
+    if (/shot|gun|drive-by|sniper|chopper|bullet|headshot|killed in the street|sprayed|ambush/.test(r)) return "bullet";
+    if (attacker && typeof attacker === "object" && attacker.pos && fromX != null) {
+      const P = CBZ.player;
+      if (Math.hypot(fromX - P.pos.x, fromZ - P.pos.z) < 2.3) return "fist";
+    }
+    return "other";
   }
-  function bleedFrom(dmg, fromX, fromZ) {
-    const P = CBZ.player, maxHp = P.maxHp || 200;
-    P._bleeding = Math.min(1, (P._bleeding || 0) + Math.min(0.6, dmg / maxHp));   // a bleed RATE that clots over time
-    if (fromX != null) { P._bleedX = fromX; P._bleedZ = fromZ; }
+  const _bh = { zone: "", power: 0.6, weapon: "fist", heavy: false, by: null, dirX: 0, dirZ: 0, fromX: 0, fromZ: 0, point: null, kind: "", head: false, cal: 1, critical: false, noKill: true };
+  function bodyHit(kind, dmg, hit, headshot, fromX, fromZ, attacker) {
+    if (kind === "other") return false;
+    const P = CBZ.player, V = CBZ.vitals;
+    const wasDown = V.cuffable(P);
+    const by = attacker && typeof attacker === "object" ? attacker : null;
+    let dx = 0, dz = 0;
+    if (fromX != null) { dx = P.pos.x - fromX; dz = P.pos.z - fromZ; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+    _bh.by = by; _bh.dirX = dx; _bh.dirZ = dz; _bh.fromX = fromX; _bh.fromZ = fromZ;
+    _bh.point = hit && hit.point ? hit.point : null;
+    if (kind === "fist") {
+      // a fist never runs the number out: it knocks you out, and only a long
+      // beating of you lying there kills (vitals counts those blows)
+      if (P.hp < 1) P.hp = 1;
+      _bh.zone = (hit && hit.zone) || (Math.random() < 0.55 ? "head" : "body");
+      _bh.power = hit && hit.power != null ? hit.power : Math.min(1, 0.3 + dmg / 45);
+      _bh.weapon = hit && hit.kind === "kick" ? "kick" : "fist";
+      _bh.heavy = !!(hit && hit.heavy);
+      const r = V.blunt(P, _bh);
+      if (r === "knockdown" && !P.dead && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && !CBZ.body.busy(CBZ.city.playerActor)) {
+        CBZ.body.knockdown(CBZ.city.playerActor, { dir: { x: dx, z: dz }, force: 6, t: 1.0 });
+      } else if (r === "stagger") P.stun = Math.max(P.stun || 0, 0.18);
+      return true;
+    }
+    // a round, a blade, teeth: a hole where it went in
+    const runOut = P.hp <= 0;
+    if (runOut && wasDown) return false;              // already on the floor: this one kills (the caller's WASTED)
+    _bh.kind = kind === "blade" ? "stab" : kind;
+    _bh.head = !!headshot;
+    _bh.zone = (hit && hit.zone) || (headshot ? "head" : (() => { const u = Math.random(); return u < 0.3 ? "legs" : u < 0.5 ? "arms" : ""; })());
+    _bh.cal = hit && hit.cal ? hit.cal : 1;
+    _bh.critical = runOut;
+    V.wound(P, _bh);
+    if (P.dead) return true;
+    if (runOut) P.hp = 1;                              // down, awake, bleeding: vitals holds you on the floor
+    else if (!headshot && !V.cuffable(P)) P.stun = Math.max(P.stun || 0, 0.08 + Math.min(0.12, dmg / 400));   // the round rocks you a beat
+    const sev = Math.min(1, dmg / ((P.maxHp || 200) * 0.5));
+    if (CBZ.gore && P.pos) CBZ.gore(P.pos.x, P.pos.y + 1.1, P.pos.z, { amount: 0.5 + sev * 0.6, player: true, dir: (fromX != null ? { x: dx, z: dz } : null) });
+    return true;
   }
-  CBZ.cityApplyWound = applyWound;
-  // healing & reset hooks
-  CBZ.cityHealWounds = function () { const P = CBZ.player; P._legWound = 0; P._armWound = 0; P._bleeding = 0; P._moveScale = 1; };
+  // a full dressing (a medkit, a medic, a night's sleep): every open hole
+  // wrapped, some blood made back, and up off the floor if the bleeding was
+  // what held you there
+  CBZ.cityHealWounds = function () {
+    const V = CBZ.vitals, P = CBZ.player;
+    if (V && P) V.dress(P, { blood: 0.25 });
+  };
   const _injReset = CBZ.cityDeathReset;
   CBZ.cityDeathReset = function () {
-    if (_injReset) _injReset(); CBZ.cityHealWounds();
+    if (_injReset) _injReset();
+    if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
     hospitalT = 0; deathStars = 0;
     if (CBZ.cityPoliceGrace) CBZ.cityPoliceGrace(20);   // a fresh life is not greeted by a gun-stop
     // mode swap / hard reset: never carry a missing head/limb into the next life
     if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
   };
 
-  // ---- the injury TICK: clot bleeding (DOT), decay wounds, publish the limp
-  //      move-scale, and drive a limp hitch on the model on top of the walk. ----
-  let _bleedSpray = 0;
-  CBZ.onUpdate(10.6, function (dt) {
-    if (g.mode !== "city") return;
-    const P = CBZ.player; if (!P) return;
-    if (P.dead) { P._moveScale = 1; return; }
-    const maxHp = P.maxHp || 200;
-    // BLEEDING: drains HP while it lasts, then clots. Standing still clots faster
-    // (you're applying pressure); sprinting keeps it open. A red vignette pulses.
-    if ((P._bleeding || 0) > 0.01) {
-      const rate = P._bleeding;
-      P.hp -= rate * 3.4 * dt;                       // ~lethal only if you ignore it
-      P._hurtT = Math.max(P._hurtT || 0, 0.5);       // bleeding suppresses regen
-      const moving = (P.speed || 0) > 1;
-      P._bleeding = Math.max(0, P._bleeding - dt * (moving ? 0.045 : 0.11));   // clot
-      _bleedSpray -= dt;
-      if (_bleedSpray <= 0 && CBZ.gore && P.pos) { _bleedSpray = 0.5 + Math.random() * 0.6; CBZ.gore(P.pos.x, P.pos.y + 0.4, P.pos.z, { amount: 0.3 * rate, player: true }); }
-      if (CBZ.hitFlash && Math.random() < rate * dt * 4) CBZ.hitFlash();
-      if (P.hp <= 0) { CBZ.cityKillPlayer("bled out", { fromX: P._bleedX, fromZ: P._bleedZ, dmg: 8 }); return; }   // tiny dmg → a weak slump, not a launch
-    }
-    // WOUNDS decay (the body recovers); faster while you're resting (not moving,
-    // not in combat). Full leg wound ~ 22s to walk off, quicker if you hole up.
-    const resting = (P.speed || 0) < 0.6 && (P._hurtT || 0) <= 0;
-    const heal = dt * (resting ? 0.09 : 0.045);
-    if (P._legWound > 0) P._legWound = Math.max(0, P._legWound - heal);
-    if (P._armWound > 0) P._armWound = Math.max(0, P._armWound - heal);
-    // publish the limp move-scale for physics (a bad leg = you can't run).
-    const lw = P._legWound || 0;
-    P._moveScale = 1 - lw * 0.5;
-    if (lw > 0.4) P.sprint = false;                  // can't sprint on a blown leg
-    // LIMP HITCH on the model, layered over the walk anim (which already ran at
-    // order 10). Only when actually moving so the idle pose stays clean.
-    const ch = CBZ.playerChar;
-    if (lw > 0.06 && ch && ch.parts && (P.speed || 0) > 0.4 && ch.group) {
-      const ph = ch.phase || 0, side = P._legSide || 1;
-      const leg = side > 0 ? ch.parts.rl : ch.parts.ll;
-      if (leg) leg.rotation.x = leg.rotation.x * (1 - lw * 0.55) - lw * 0.2;   // stiff, dragging leg
-      if (ch.body) {
-        // favour the good side + dip when the bad leg takes the weight
-        ch.body.rotation.z = (ch.body.rotation.z || 0) + Math.sin(ph) * side * lw * 0.14;
-        ch.body.position.y -= Math.max(0, Math.sin(ph) * side) * lw * 0.07;
-      }
-    }
+  /* ---- THE CITY PLUGS ITS PLAYER INTO VITALS. Going down (knocked out,
+     bled to collapse, or run out and bleeding) is the same knockdown the
+     street already uses on you (physics.js lies you on your back while
+     P._phys.down runs); the tick below holds you there for as long as vitals
+     says you are down, and lets you up the moment it says you are not. */
+  let vDown = false;
+  if (CBZ.vitals && CBZ.vitals.on) {
+    CBZ.vitals.on("city", {
+      playerDown: function (on, o) {
+        const P = CBZ.player;
+        vDown = !!on;
+        if (!on) { if (P._phys && P._phys.down > 0.4) P._phys.down = 0.4; return; }
+        if (P.dead) return;
+        const pa = CBZ.city && CBZ.city.playerActor;
+        if (pa && CBZ.body && CBZ.body.knockdown) {
+          let dir = null;
+          const by = o && o.by;
+          if (by && by.pos) { const dx = P.pos.x - by.pos.x, dz = P.pos.z - by.pos.z, l = Math.hypot(dx, dz) || 1; dir = { x: dx / l, z: dz / l }; }
+          CBZ.body.knockdown(pa, { dir, force: 2, t: 2 });
+        }
+        if (CBZ.shake) CBZ.shake(0.35);
+      },
+      playerKill: function (cause, o) {
+        o = o || {};
+        CBZ.cityKillPlayer(cause || "bled out", { fromX: o.fromX, fromZ: o.fromZ, dmg: 8 });   // a weak slump, not a launch
+      },
+    });
+  }
+  CBZ.onUpdate(10.6, function () {
+    if (g.mode !== "city" || !vDown) return;
+    const P = CBZ.player; if (!P || P.dead) { vDown = false; return; }
+    const V = CBZ.vitals;
+    if (V && V.state(P) === "ok") { vDown = false; return; }
+    if (P._phys) P._phys.down = Math.max(P._phys.down || 0, 0.5);   // held on the floor
+    P.sprint = false;
   });
 
   // ---- did an EXPLOSION kill us? (car blast / airstrike / missile) ----
@@ -785,6 +805,8 @@
     if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
     P.pos.set(spot.x, 0, spot.z);
     P.vy = 0; P.grounded = true; P.dead = false; P.maxHp = P.maxHp || 200; P.hp = P.maxHp; P.ko = 0; P.stun = 0; P._hurtT = 0;
+    if (CBZ.vitals) CBZ.vitals.reset(P);         // the ER sent you out whole: no bleeds, full blood, no wraps
+    vDown = false;
     // ARMOR drops with the body: respawn bare. cityArmorResetPlayer clears the
     // pool + kit + unmounts the vest/helmet prop (armor.js). Fallback zeroes the
     // pool if armor.js is absent so the legacy absorb path stays sane.
@@ -859,7 +881,10 @@
       if (P._hurtT > 0) P._hurtT -= dt;
       // X2: systems/hunger.js sets _hungryNoRegen while hunger<30 — a hungry
       // body doesn't patch itself up for free.
-      else if (!P._hungryNoRegen && P.hp < (P.maxHp || 200)) { P.hp = Math.min(P.maxHp || 200, P.hp + 16 * dt); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+      // an open bleed is what hurts now (systems/vitals.js): nothing knits
+      // while it runs, or while you are lying on the floor
+      else if (!P._hungryNoRegen && P.hp < (P.maxHp || 200) &&
+               !(CBZ.vitals && (CBZ.vitals.bleeding(P) || CBZ.vitals.state(P) !== "ok"))) { P.hp = Math.min(P.maxHp || 200, P.hp + 16 * dt); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
     }
   });
 

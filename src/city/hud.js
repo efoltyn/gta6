@@ -774,6 +774,12 @@
             // The torch itself, lit like a held gun while it is on.
             html += "<div class='cSlot flashlight" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
               flashlightFace(held) + "</div>";
+          } else if (e.kind === "bandage") {
+            // The roll of gauze itself (systems/vitals.js spends one per wrap)
+            // and how many you carry.
+            const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
+            html += "<div class='cSlot item bandage" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              (hotbarFace(e) || hotbarItemFace("Bandage", ITEMS.Bandage)) + cnt + "</div>";
           } else if (e.kind === "phone") {
             // The handset as a carried thing, never the word PHONE.
             html += "<div class='cSlot item phone" + (held ? " held" : "") +
