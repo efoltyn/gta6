@@ -46,7 +46,7 @@
 
   // ---- THE CROSS-SECTION (metres). One table; everything reads it. ----
   const P = {
-    yRoad: 0.05,        // carriageway top (carlamps.js decals at 0.08 stay above it)
+    yRoad: 0.05,        // carriageway top (carlamps.js pools seat on groundDecalY, road or footway)
     yWalk: 0.18,        // footway / kerb top: a 13 cm kerb face over the gutter
     yLot: 0.125,        // lot pad: under buildings.js's 0.14 foundation slab top
     kerbTop: 0.30,      // granite kerb top band

@@ -300,6 +300,8 @@
     for (let i = 0; i < list.length; i++) {
       const mesh = list[i];
       let orig = null, geo = mesh.geometry;
+      // a far car wearing its simplified twin (carlod.js) dents its REAL body
+      if (geo._carLodSrc) { geo = geo._carLodSrc; mesh.geometry = geo; }
       if (geo._shared) {                      // box rig / [C]-cycle template cache
         orig = geo;
         geo = geo.clone();

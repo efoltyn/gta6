@@ -2046,6 +2046,7 @@
     grp.userData.bodyKind = bt;
     grp.userData.designStyle = (model && model.designStyle) || bt;
     grp.userData.vehicleDims = dims;
+    if (CBZ.carLodPrepare) CBZ.carLodPrepare(grp);   // city/carlod.js: queue this style's far-LOD twins (built over frames, once per style)
     return grp;
   }
 
