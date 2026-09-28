@@ -1719,6 +1719,10 @@
     // haul-to-your-cell. The non-city rosters were handled above.
     const cityRoster = !CBZ.game || CBZ.game.mode === "city";
     if (cityRoster) {
+      // THE DEAD FIRST: every body already lying within R is thrown by the
+      // ragdoll (city/ragdoll.js), falling off with distance. Before the kill
+      // sweep, so the men this blast kills are launched once, by their kill.
+      if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
       if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: false, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer, byPlayer: byPlayer, cause: cause });
       for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
       for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }

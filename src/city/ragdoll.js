@@ -125,8 +125,12 @@
     -0.23, 0.475, 0, 0.23, 0.475, 0,     // 9,10 knees
     -0.23, 0.02, 0, 0.23, 0.02, 0,       // 11,12 feet
   ];
-  // per-point ground radius (half-thickness of the box that point carries)
-  const RAD = [0.30, 0.24, 0.24, 0.26, 0.26, 0.15, 0.15, 0.12, 0.12, 0.16, 0.16, 0.14, 0.14];
+  // per-point ground radius (half-thickness of the box that point carries).
+  // Head and torso measured off the drawn rig lying flat (the back of the
+  // skull reaches 0.39, the chest and seat 0.31-0.32, in 2.60 u rig units):
+  // at 0.30/0.24/0.26 every frozen body sank its skull and chest 6 cm into
+  // the street and restFit lifted the whole man clear, so corpses floated.
+  const RAD = [0.39, 0.31, 0.31, 0.32, 0.32, 0.15, 0.15, 0.12, 0.12, 0.16, 0.16, 0.14, 0.14];
   // points that get the wall push (extremities + a hip — limbs out of walls)
   const WALLPTS = [0, 3, 7, 8, 11, 12];
   const WALL_SLIDE = 0.4;    // share of its slide along (and down) a wall a contact keeps per substep: cloth on plaster grips
@@ -189,6 +193,7 @@
       // ---- held by something (see applyPin) and the water column this body
       //      is in (see waterProbe). wet=false is the land path, byte-identical.
       pin: null, wet: false, seaY: 0, seaDy: 0,
+      down: false, wallT: 0,                 // chest on the floor (see solve) / a wall touched lately
     };
   }
   const slots = [];
@@ -234,6 +239,7 @@
     s.kicked = false; s.kv.fill(0);
     s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false;
     s.pin = null; s.wet = false; s.seaY = 0; s.seaDy = 0;
+    s.down = false; s.wallT = 0;
   }
 
   // grounded-corpse contract: down=9999 keeps CBZ.body.busy true forever (peds.js
@@ -364,18 +370,23 @@
       bumpPhys(target);
       return true;
     }
-    // LRU: over the solve budget → freeze the oldest SETTLING body. Never a
-    // just-seeded one: an RPG into a crowd kills 9+ in a single call stack
-    // before any solve runs, and freezing those locks corpses bolt upright.
+    /* OVER THE SOLVE BUDGET → freeze the oldest body that is already DOWN
+       (its chest on the floor, see solve), fitted like any other rest. What
+       was here froze the oldest body past half a second of life wherever it
+       was: in the air, or halfway through sitting up off a car bonnet, and
+       it stayed there. When nobody is down yet, the budget stretches (a
+       13-point body is cheap; a corpse frozen sitting in mid-air is not) up
+       to twice the ceiling, and only then does a kill keep the legacy
+       fling. */
     let active = 0, oldest = null;
     const N = slots.length;
     for (let i = 0; i < N; i++) {
       const t = slots[i];
-      if (t.used && !t.asleep) { active++; if (t.life > 0.5 && (!oldest || t.age < oldest.age)) oldest = t; }
+      if (t.used && !t.asleep) { active++; if (t.down && !t.pin && t.life > 0.5 && (!oldest || t.age < oldest.age)) oldest = t; }
     }
     if (active >= MAX_ACTIVE()) {
-      if (oldest) oldest.asleep = true;
-      else return false;                 // everyone's still flying: this kill keeps the legacy fling
+      if (oldest) { oldest.asleep = true; restFit(oldest); }
+      else if (active >= 2 * MAX_ACTIVE()) return false;   // everyone's still flying: this kill keeps the legacy fling
     }
     // a free slot, else retire the stalest frozen corpse back to the stock sprawl
     s = null; let stale = null;
@@ -540,19 +551,50 @@
      extremities (systems/bodyfall.js's resolver), by moving the POINTS, so
      the frozen pose keeps the fix. */
   const _fv = new THREE.Vector3(), _fp = { x: 0, y: 0, z: 0 };
+  function lowestUnder(root, stop, skip) {
+    let low = Infinity;
+    root.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+      for (let q = o; q && q !== stop; q = q.parent) { if (q.visible === false) return; if (skip && (q === skip[0] || q === skip[1])) return; }
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) { _fv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); if (_fv.y < low) low = _fv.y; }
+    });
+    return low;
+  }
+  const _feet = [null, null];
   function restFit(s) {
     const ch = s.ch, g = s.ped && s.ped.group;
     if (!ch || !g) return;
     writePose(s);
     g.updateMatrixWorld(true);
-    let low = Infinity;
-    g.traverse((o) => {
-      if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
-      for (let q = o; q && q !== g; q = q.parent) if (q.visible === false) return;
-      const pos = o.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i++) { _fv.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); if (_fv.y < low) low = _fv.y; }
-    });
+    if (CBZ.charAnkleSolve) { CBZ.charAnkleSolve(ch, 0, false); g.updateMatrixWorld(true); }
+    const p = s.p, q = s.q;
     const floor = groundUnder(s.cx, s.cz, s.cy + 0.5);
+    /* A SHOE IN THE STREET LIFTS THAT LEG, NOT THE MAN. A stiff shoe can
+       barely point (its flex range), so a body lying on its face has the
+       toe caps under its shins. That is real: the shins rest propped on the
+       toes. What was here lifted the WHOLE body by its lowest vertex, the
+       toe, so most thrown corpses froze floating 5-14 cm over the street,
+       chest and all. The feet are fitted first, each ankle point raised by
+       its own shoe's depth (the knee stays, the shin tilts up onto the toe),
+       then the rest of the body is fitted without them. */
+    const P = ch.parts;
+    _feet[0] = P.ll && P.ll.userData && P.ll.userData.foot || null;
+    _feet[1] = P.rl && P.rl.userData && P.rl.userData.foot || null;
+    let footMoved = false;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let n = 0; n < 2; n++) {
+        const f = _feet[n];
+        if (!f) continue;
+        const lo = lowestUnder(f, g, null);
+        const d = Number.isFinite(lo) ? floor - lo : 0;
+        if (d > 0.005) { const i = (11 + n) * 3 + 1; const u = Math.min(0.25, d); p[i] += u; q[i] += u; footMoved = true; }
+      }
+      if (!footMoved) break;
+      writePose(s);
+      g.updateMatrixWorld(true);
+    }
+    const low = lowestUnder(g, g, _feet);
     let dy = Number.isFinite(low) ? floor - low : 0;
     dy = dy > 0 ? Math.min(0.35, dy) : 0;
     _fp.x = g.position.x; _fp.y = g.position.y; _fp.z = g.position.z;
@@ -566,7 +608,6 @@
     }
     const dx = _fp.x - g.position.x, dz = _fp.z - g.position.z;
     if (!dy && !dx && !dz) return;
-    const p = s.p, q = s.q;
     for (let i = 0; i < 39; i += 3) {
       p[i] += dx; q[i] += dx; p[i + 1] += dy; q[i + 1] += dy; p[i + 2] += dz; q[i + 2] += dz;
     }
@@ -609,14 +650,64 @@
     }
   }
 
+  /* A NECK IS NOT A STRUT. The head hung off both shoulders on rigid sticks
+     is a plate hinged along the shoulder line, and the only thing limiting
+     that hinge was the head-to-hip spacer, which allows about 86 degrees
+     either way. A body landing on its back threw its head over past the
+     shoulder plane, the head planted on the floor as a prop, and the torso
+     came to rest as an arch: hips on the ground, shoulders held 0.2 m up by
+     the skull, a man sitting up against nothing (tools/ragdoll-settle-check
+     .mjs). A real neck extends about 35 degrees off the spine line before
+     the back of the skull meets the upper back (tighter, and a body face
+     down with its knees tucked could not let its hips down: the head became
+     the brace instead), flexes about 40, and tilts about 25 to the side. So the neck is a cone about the spine: the head is
+     projected back inside it, the correction shared 2:1:1 with the two
+     shoulders so it moves no centre of mass. */
+  const NECK_EXT = Math.tan(0.6), NECK_FLEX = Math.tan(0.7), NECK_LAT = Math.tan(0.45);
+  function neckCone(p) {
+    const msx = (p[3] + p[6]) * 0.5, msy = (p[4] + p[7]) * 0.5, msz = (p[5] + p[8]) * 0.5;
+    let ux = msx - (p[9] + p[12]) * 0.5, uy = msy - (p[10] + p[13]) * 0.5, uz = msz - (p[11] + p[14]) * 0.5;
+    const ul = Math.sqrt(ux * ux + uy * uy + uz * uz);
+    if (ul < 1e-6) return;
+    ux /= ul; uy /= ul; uz /= ul;
+    let rx = p[3] - p[6], ry = p[4] - p[7], rz = p[5] - p[8];
+    const ru = rx * ux + ry * uy + rz * uz;
+    rx -= ux * ru; ry -= uy * ru; rz -= uz * ru;
+    const rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
+    if (rl < 1e-6) return;
+    rx /= rl; ry /= rl; rz /= rl;
+    const fx = ry * uz - rz * uy, fy = rz * ux - rx * uz, fz = rx * uy - ry * ux;   // the chest's forward (as kneeHinge / writePose)
+    const nx = p[0] - msx, ny = p[1] - msy, nz = p[2] - msz;
+    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const a = nx * ux + ny * uy + nz * uz;           // along the spine
+    const b = nx * fx + ny * fy + nz * fz;           // forward (+ = chin to chest)
+    const c = nx * rx + ny * ry + nz * rz;           // sideways
+    if (a > 0.05 * nl) {
+      const tb = b / a, tc = c / a;
+      if (tb <= NECK_FLEX && tb >= -NECK_EXT && tc <= NECK_LAT && tc >= -NECK_LAT) return;
+    }
+    // back inside the cone, same length
+    const aa = Math.max(a, 0.05 * nl) || 1e-3;
+    const tb = Math.max(-NECK_EXT, Math.min(NECK_FLEX, b / aa)), tc = Math.max(-NECK_LAT, Math.min(NECK_LAT, c / aa));
+    let tx = ux + fx * tb + rx * tc, ty = uy + fy * tb + ry * tc, tz = uz + fz * tb + rz * tc;
+    const tl = nl / Math.sqrt(tx * tx + ty * ty + tz * tz);
+    tx *= tl; ty *= tl; tz *= tl;
+    const dx = tx - nx, dy = ty - ny, dz = tz - nz;
+    p[0] += dx * 2 / 3; p[1] += dy * 2 / 3; p[2] += dz * 2 / 3;
+    p[3] -= dx / 3; p[4] -= dy / 3; p[5] -= dz / 3;
+    p[6] -= dx / 3; p[7] -= dy / 3; p[8] -= dz / 3;
+  }
+
   // walls: extremities get the shared circle-vs-box push (height-gated)
   function wallPass(p, q, sk) {
+    let hit = false;
     for (let k = 0; k < WALLPTS.length; k++) {
       const i = WALLPTS[k] * 3;
       _c.x = p[i]; _c.y = p[i + 1]; _c.z = p[i + 2];
       CBZ.collide(_c, 0.16 * sk, p[i + 1] - 0.1, p[i + 1] + 0.1);
       const ddx = _c.x - p[i], ddz = _c.z - p[i + 2];
       if (!(ddx || ddz)) continue;
+      hit = true;
       /* A WALL IS A CONTACT, NOT A SPRING. Moving p alone leaves q where it
          was, so verlet reads the push-out as outward velocity and the point
          rebounds off the wall; one hand or the head bouncing off a wall the
@@ -632,6 +723,7 @@
       q[i] = p[i] - vx * WALL_SLIDE; q[i + 2] = p[i + 2] - vz * WALL_SLIDE;
       q[i + 1] = p[i + 1] - (p[i + 1] - q[i + 1]) * WALL_SLIDE;   // and down it: a head on a wall carries weight
     }
+    return hit;
   }
 
   function solve(s, dt) {
@@ -670,12 +762,21 @@
       }
     }
     const gh2 = GRAV() * h * h;
+    /* DRAG AND FRICTION PER SECOND, NOT PER SUBSTEP. Both were fixed
+       fractions of the velocity kept per substep, tuned at 60 fps (h = 1/120),
+       so a 120 Hz display took twice as many bites of each: the air got
+       thick, the floor got grippy, and a body collapsing slowly (a torso
+       rolling off a propped arm or head) crept slowly enough that the sleep
+       test froze it mid-collapse, sitting up. Same feel at 60 fps as before,
+       the same physics at any frame rate. */
+    const hs = h * 120;
+    const drag = Math.pow(0.992, hs), fric = Math.pow(0.42, hs);
     const wet = s.wet, seaTop = s.seaY;
     let maxd2 = 0;
     for (let sub = 0; sub < 2; sub++) {
       for (let i = 0; i < 13; i++) {
         const ix = i * 3, iy = ix + 1, iz = ix + 2;
-        let vx = (p[ix] - q[ix]) * 0.992, vy = (p[iy] - q[iy]) * 0.992, vz = (p[iz] - q[iz]) * 0.992;
+        let vx = (p[ix] - q[ix]) * drag, vy = (p[iy] - q[iy]) * drag, vz = (p[iz] - q[iz]) * drag;
         const sp2 = vx * vx + vy * vy + vz * vz;
         if (sp2 > 0.2025) { const k = 0.45 / Math.sqrt(sp2); vx *= k; vy *= k; vz *= k; } // anti-tunnel step cap
         if (sp2 > maxd2) maxd2 = sp2;
@@ -712,6 +813,7 @@
           p[j] += dx; p[j + 1] += dy; p[j + 2] += dz;
         }
         kneeHinge(p);
+        neckCone(p);
         // (The per-iteration knee/elbow ANGLE clamp that ran here is gone. It
         // had the knee's sign inverted, so it forbade a knee's natural fold
         // and allowed it to bend backward, and even with the sign right it
@@ -731,8 +833,8 @@
           const vy = p[iy] - q[iy];
           p[iy] = fl;
           q[iy] = fl + vy * 0.22;                                // restitution
-          q[ix] = p[ix] - (p[ix] - q[ix]) * 0.42;                // friction
-          q[iz] = p[iz] - (p[iz] - q[iz]) * 0.42;
+          q[ix] = p[ix] - (p[ix] - q[ix]) * fric;                // friction
+          q[iz] = p[iz] - (p[iz] - q[iz]) * fric;
           if (!s.thud && vy < -0.07) {                           // first hard landing smacks
             s.thud = true;
             const cm = CBZ.camera && CBZ.camera.position;
@@ -746,7 +848,7 @@
       // walls, INSIDE the substep: pushed out after the sticks had their say,
       // so the next substep's sticks relax the rest of the body around the
       // contact instead of dragging the point back in for a whole frame
-      if (CBZ.collide) wallPass(p, q, sk);
+      if (CBZ.collide && wallPass(p, q, sk)) s.wallT = 0.5;
       // the hold gets the LAST word of the substep — after the sticks and
       // after the ground, so nothing can drag the held point off the jaw.
       if (s.pin) applyPin(s);
@@ -755,7 +857,22 @@
     // sleep: kinetic energy stayed low → freeze the pose where it lies. Never
     // let the body sleep mid dying-beat (a near-vertical headshot collapse moves
     // slowly but must NOT freeze upright before it folds to the ground).
-    if (s.dyt <= 0 && Math.sqrt(maxd2) / h < SLEEP_V) s.still += dt; else s.still = 0;
+    /* SITTING UP IS NOT A REST, IN THE OPEN. A limp body has nothing to
+       hold its chest up but something it leans on. The chest's clearance
+       over the floor under it (past the shoulders' own radius) says whether
+       the body is DOWN; a chest held up with no wall touched in the last
+       half second is a body still toppling, however slowly, so its
+       stillness does not count and it cannot freeze there (MAX_LIFE still
+       bounds it). A body slumped against a wall, a car or a step keeps
+       its lean: the wall contact or the raised floor under it is its
+       support. The same flag tells the solve budget which bodies are safe
+       to freeze early. */
+    if (s.wallT > 0) s.wallT -= dt;
+    { const cx = (p[3] + p[6]) * 0.5, cz = (p[5] + p[8]) * 0.5;
+      const chest = (p[4] + p[7]) * 0.5 - groundUnder(cx, cz, (p[4] + p[7]) * 0.5 + 0.3) - RAD[1] * sk;
+      const pel = (p[10] + p[13]) * 0.5 - g1 - RAD[3] * sk;
+      s.down = s.wet || (chest < 0.25 * sk && pel < 0.35 * sk); }   // afloat, the sea holds it
+    if (s.dyt <= 0 && (s.down || s.wallT > 0) && Math.sqrt(maxd2) / h < SLEEP_V) s.still += dt; else s.still = 0;
     s.life += dt;
     // a held body never freezes — but the pin's own `until` (hard-capped at
     // PIN_MAX) is what bounds that, so a pin can never keep a body awake
@@ -806,6 +923,15 @@
     // shows bent joints instead of plank limbs.
     limb(P.la, p, 3, 15, 21); limb(P.ra, p, 6, 18, 24);   // shoulder → elbow → hand
     limb(P.ll, p, 9, 27, 33); limb(P.rl, p, 12, 30, 36);  // hip → knee → foot
+    /* THE FEET GO SLACK THE RIGHT WAY UP. grapple's corpse pose (order 24)
+       runs the ankle solve with forceLying, which skips its own face-down
+       test, so a body on its face kept its toes square to the shin and drove
+       them 14 cm into the street; restFit then lifted the WHOLE body clear
+       by its toes, and most ragdoll corpses floated 5-14 cm up. The solve
+       reads the shin in the world and points the instep flat on the floor
+       when the toes would go in. Snapped (dt 0), against last frame's
+       matrices, which for a settling or frozen body is this frame's. */
+    if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, 0, false);
   }
   function limb(part, p, si, mi, ei) {
     if (!part) return;
@@ -893,6 +1019,13 @@
   };
 
   CBZ.cityRagdoll = function (target, point, dir, imp) { return start(target, point, dir, imp, false); };
+  // the 13 solver points of a body this file owns (head, shoulders, hips,
+  // elbows, hands, knees, feet; x,y,z each), or null. A live view, not a
+  // copy: probes read it, nothing should write it.
+  CBZ.ragdollPoints = function (target) {
+    const s = target && target._ragSlot != null ? slots[target._ragSlot] : null;
+    return s && s.used && s.ped === target ? s.p : null;
+  };
 
   // ============================================================
   //  PUBLIC PIN API — "something else owns this point of the body now".
@@ -964,7 +1097,7 @@
   //  ~20+ blast). Returns true if a reactive body took the hit.
   // ============================================================
   CBZ.cityCorpseHit = function (target, point, dir, force) {
-    if (!CBZ.game || CBZ.game.mode !== "city") return false;
+    if (!allowed()) return false;          // the city, or any page that opted into real bodies (warlord)
     if (!target) return false;
     // accept an actor (has .group) or a bare char → climb back to its actor
     if (!target.group && target.actor) target = target.actor;
@@ -994,6 +1127,67 @@
     if (ok) stampWound(target, point, dir);
     return ok;
   };
+  /* ============================================================
+     A BLAST THROWS THE DEAD TOO. CBZ.ragdollBlast(x, z, R, power) -> count
+     The one explosion (city/crashfx.js applyBlastDamage) only ever swept the
+     LIVING: its kill loops `continue` past anyone already dead, and the one
+     way a corpse could take a blast (cityCorpseHit) turned anything lying in
+     its collapse into a nudge. So an RPG into a street full of bodies moved
+     none of them. Now every body already dead within R (the city rosters,
+     the bodies the corpse keeper holds, and anything already in a slot) is
+     thrown by the same verlet body a fresh blast kill gets: out of its
+     bodyfall collapse (start() clears it and seeds the points from the pose
+     it lies in), radially away from the seat, harder near it (m 14 at the
+     rim, a full lift inside ~70% of R), and it lands, settles and freezes
+     lying like any other. It stays dead: start() only takes the dead,
+     bumpPhys pins the grounded-corpse contract, and a cleared bodyfall
+     record has nothing to stand up. Call it BEFORE the kill sweep so a body
+     this blast killed is not thrown twice. A corpse past the ragdoll's
+     camera range keeps the old nudge in its collapse. */
+  let blastSeq = 0;
+  const _bd = { x: 0, y: 0, z: 0 };
+  function blastOne(t, x, z, R, power) {
+    if (!t || t._blastSeq === blastSeq) return 0;
+    t._blastSeq = blastSeq;
+    if (!t.dead || t.isPlayer || t.culled || t.collected || t.inCar || !t.group || !t.group.parent) return 0;
+    if (t._npcAttached || t._propSeat) return 0;
+    const own = t._ragSlot != null ? slots[t._ragSlot] : null;
+    const s = own && own.used && own.ped === t ? own : null;
+    if (s && s.pin) return 0;                               // carried (a medic, a jaw): the holder has it
+    if (t._phys && t._phys.heldBy) return 0;
+    const bx = s ? s.cx : t.group.position.x, bz = s ? s.cz : t.group.position.z;
+    let dx = bx - x, dz = bz - z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d >= R) return 0;
+    if (d > 1e-3) { dx /= d; dz /= d; } else { const a = Math.random() * 6.283; dx = Math.cos(a); dz = Math.sin(a); }
+    const f = 1 - d / R;
+    const imp = Math.min(34, 14 + 20 * f * Math.min(1.5, Math.sqrt(Math.max(0.25, power || 1))));
+    _bd.x = dx; _bd.y = 0.3; _bd.z = dz;
+    if (s) {
+      kick(s, null, _bd, imp);
+      s.asleep = false; s.still = 0; s.life = 0; s.age = ++seq;
+      bumpPhys(t);
+      return 1;
+    }
+    if (start(t, null, _bd, imp, false)) return 1;
+    // out of the solver's reach: the collapse takes it as a shove where it lies
+    if (t._bf && t._bf.on && CBZ.bodyFall) { CBZ.bodyFall.poke(t, dx, dz, imp); return 1; }
+    return 0;
+  }
+  CBZ.ragdollBlast = function (x, z, R, power) {
+    if (!allowed() || !(R > 0)) return 0;
+    blastSeq++;
+    let n = 0;
+    for (let i = 0; i < slots.length; i++) { const s = slots[i]; if (s.used) n += blastOne(s.ped, x, z, R, power); }
+    const lists = [CBZ.cityPeds, CBZ.cityCops, CBZ.cityMedics, CBZ.corpses && CBZ.corpses.list];
+    for (let l = 0; l < lists.length; l++) {
+      const L = lists[l];
+      if (!L) continue;
+      for (let i = 0; i < L.length; i++) { const t = L[i]; if (t && t.dead) n += blastOne(t, x, z, R, power); }
+    }
+    return n;
+  };
+
   // accumulate a wound disc on the downed body where the round struck (wounds.js
   // is universal but gated city-only here; it self-caps the same-frame burst and
   // only draws within camera range, so this is cheap).
