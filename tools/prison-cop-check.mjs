@@ -175,10 +175,12 @@ check("hotbar shows the belt: 2 guns, torch, keycard", hb.audit && hb.audit.allo
 check("still playing, alive, not captured after ~" + Math.round(STEPS / 60) + "s", s.state === "playing" && !s.dead && s.capture === "normal" && !s.cuffed, { state: s.state, dead: s.dead, capture: s.capture, cuffed: s.cuffed });
 check("guards are not after the officer", s.hunted.length === 0 && (s.detection || 0) < 1, { hunted: s.hunted, detection: s.detection });
 
-// CUFF: walk up to the nearest free inmate and run the card's verb.
+// CUFF: walk up to the nearest plain inmate and run the card's verb.
 const cuff = await ev(`(function(){
   var p = CBZ.player, best = null, bd = 1e9;
+  // a PLAIN inmate: not the dealer or a merchant with a stall, nobody walking up with an offer
   (CBZ.npcs||[]).forEach(function(n){ if (n.dead || n.ko > 0 || n.escaped || !n.group || n.kind !== 'inmate') return;
+    if (n.role === 'dealer' || n.role === 'merchant' || (n.approach && n.approach.t > 0) || n.aiState === 'approachPlayer') return;
     var d = Math.hypot(n.group.position.x - p.pos.x, n.group.position.z - p.pos.z); if (d < bd) { bd = d; best = n; } });
   if (!best) return { err: 'no inmate' };
   // stand him in front of the officer
