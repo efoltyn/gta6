@@ -514,7 +514,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=dsl3"></script>
+<script src="src/world/prisonkit.js?v=m489457"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -552,7 +552,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/cellblock.js?v=dsl3"></script>
 <script src="src/world/yard.js"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
-<script src="src/world/towers.js"></script>
+<script src="src/world/towers.js?v=m489457"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
@@ -642,7 +642,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=m0927p"></script>
 <script src="src/systems/hud.js?v=m0927p"></script>
-<script src="src/systems/economy.js?v=armory1"></script>
+<script src="src/systems/economy.js?v=m489457"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=me6f1ee"></script>
@@ -676,14 +676,14 @@ document.body.appendChild(b);}}catch(e){}})();
      know which gun was out) and choreographs the reload the same way.
      After holsterprops — it reads the gun that module just placed. -->
 <script src="src/systems/gunhands.js?v=boom2"></script>
-<script src="src/systems/prisondrops.js?v=vit3"></script>
+<script src="src/systems/prisondrops.js?v=m489457"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js?v=m0928s"></script>
 <script src="src/world/lounge.js?v=m0928s"></script>
 <script src="src/world/gunroom.js?v=armory1"></script>
-<script src="src/world/ventilation.js?v=m0928s"></script>
+<script src="src/world/ventilation.js?v=m489457"></script>
 <script src="src/world/escape_routes.js?v=m0928s"></script>
 <script src="src/world/southblock.js?v=vit3"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
@@ -697,7 +697,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=vit3"></script>
+<script src="src/entities/guards.js?v=m489457"></script>
 <script src="src/entities/searchlight.js?v=m0928s"></script>
 <script src="src/entities/keycard.js?v=armory1"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -710,7 +710,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=cars1"></script>
-<script src="src/entities/npc.js?v=vit3"></script>
+<script src="src/entities/npc.js?v=m489457"></script>
 <script src="src/entities/ai.js?v=vit3"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
@@ -736,7 +736,7 @@ document.body.appendChild(b);}}catch(e){}})();
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
 <script src="src/world/prisonwings.js?v=dsl3"></script>
 <script src="src/world/prisongrounds.js?v=lad1"></script>
-<script src="src/world/corridors.js?v=dsl3"></script>
+<script src="src/world/corridors.js?v=m489457"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -817,7 +817,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=vit3"></script>
+<script src="src/systems/physics.js?v=m489457"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -865,7 +865,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=end1vit3"></script>
+<script src="src/systems/capture.js?v=m489457"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -898,7 +898,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=gate1"></script>
+<script src="src/systems/interactions.js?v=m489457"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -958,7 +958,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=me6f1ee"></script>
+<script src="src/systems/fpsmode.js?v=m489457"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
