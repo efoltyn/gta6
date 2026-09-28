@@ -1,129 +1,113 @@
 /* ============================================================
-   weapons/appearances/taser.js — clean yellow conducted-energy device.
+   weapons/appearances/taser.js — the TASER X26 with its cartridge.
 
-   The silhouette follows the player's supplied reference: one continuous
-   yellow polymer shell, a blunt black cartridge, one open trigger window and
-   a rear-swept grip. Detail stays subordinate to those four shapes so the
-   device reads instantly in first person instead of becoming a stack of rails,
-   panels, lights and finger blocks. The shared builder still serves player,
-   NPC, armory, thumbnail and dropped-weapon consumers.
+   THE DEVICE: what makes it read as an X26 and not a yellow toy pistol:
+   the one-piece safety-yellow polymer body with the rear housing humped
+   over the web of the hand and the grip swept back under it, the long
+   closed trigger guard, the deep lower frame in front of it carrying the
+   LASER and LED windows, the REPLACEABLE CARTRIDGE — a separate grey block
+   in the front bay with ribbed release tabs and a black blast-door face
+   with its two stacked probe doors (the upper and lower probe) — the
+   ambidextrous SAFETY switch at the top rear, the CID display on the back
+   face, and the black battery pack (DPM) forming the base of the grip.
+   Drawn one-handed: the other hand stays free for cuffs and radio.
+
+   Authored in real millimetres (185 mm long with the cartridge, 33 mm wide;
+   f forward from the rear of the body, y up from its top) at k 2.25 (the
+   Glock's) through P(). Built on CBZ.gunKit (sidearm.js).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ = window.CBZ || {};
   CBZ.weaponAppearance = CBZ.weaponAppearance || {};
 
+  const K_REAL = 2.25;
+  const S = K_REAL / 1000;
+  const F0 = 28, Y0 = 0.0465;          // grip top centre at z 0, y -0.03
+  const P = (f, y) => [(f - F0) * S, y * S + Y0];
+  const PS = (a) => a.map((p) => P(p[0], p[1]));
+  const Z = (f) => -(f - F0) * S;
+  const Yb = (y) => y * S + Y0;
+  const MM = (a) => a.map((p) => [p[0] * S, p[1] * S]);
+  function circ(cx, cy, r, n) {
+    const out = [];
+    for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); }
+    return out;
+  }
+
   CBZ.weaponAppearance.taser = function (ctx) {
-    const { THREE, box, cyl, mat } = ctx;
+    const { THREE, mat } = ctx;
+    const K = CBZ.gunKit(ctx);
+    const yellow = K.fin("taserYellow"), grey = K.fin("cartGrey"), rubber = K.fin("rubber"), black = mat.black;
     const g = new THREE.Group();
-    const visual = new THREE.Group();
-    visual.position.y = 0.050;
-    visual.position.z = -0.120;
-    visual.rotation.y = 0.120;
-    visual.scale.setScalar(0.82);
-    g.add(visual);
-    const yellow = new THREE.MeshLambertMaterial({
-      color: 0xffd21c,
-      emissive: 0x3d2a00,
-      emissiveIntensity: 0.10,
-    });
 
-    // Extrude a side profile across the device width. One profile with one
-    // trigger-window hole gives the body and swept grip a continuous molded
-    // silhouette instead of assembling them from visible cuboids.
-    function profile(points, width, material, holes, bevel) {
-      const shape = new THREE.Shape();
-      points.forEach(function (point, index) {
-        if (index === 0) shape.moveTo(point[0], point[1]);
-        else shape.lineTo(point[0], point[1]);
-      });
-      shape.closePath();
-      (holes || []).forEach(function (pointsForHole) {
-        const hole = new THREE.Path();
-        pointsForHole.forEach(function (point, index) {
-          if (index === 0) hole.moveTo(point[0], point[1]);
-          else hole.lineTo(point[0], point[1]);
-        });
-        hole.closePath();
-        shape.holes.push(hole);
-      });
-      const edge = bevel || 0;
-      const geometry = new THREE.ExtrudeGeometry(shape, {
-        depth: width,
-        steps: 1,
-        bevelEnabled: edge > 0,
-        bevelSegments: 1,
-        bevelSize: edge,
-        bevelThickness: edge,
-      });
-      geometry.translate(0, 0, -width * 0.5);
-      geometry.rotateY(Math.PI * 0.5);
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.castShadow = true;
-      visual.add(mesh);
-      return mesh;
-    }
+    // BODY: rear housing, cartridge bay wall, the laser housing under the
+    // bay, the long closed trigger guard (a real hole) and the swept grip
+    K.prof(g, "x26.body", PS([
+      [6, 0], [143, 0], [143, -33], [178, -33], [180, -37], [179, -45], [172, -49], [140, -50], [132, -58],
+      [124, -65], [116, -67], [58, -67], [46, -64], [40, -60], [36, -68], [35, -71], [-2, -56], [8, -30],
+      [6, -24], [0, -14], [0, -6],
+    ]), 33 * S, yellow, { bevel: 2.5 * S, holes: [
+      PS([[58, -38], [118, -38], [126, -46], [120, -58], [112, -61], [62, -61], [53, -57], [50, -46]]),
+    ] });
+    // grip panels (rubberised, both sides) and the battery pack at the base
+    K.prof(g, "x26.panel", PS([[44, -38], [37.5, -62], [20, -60], [4, -52], [8, -33]]), 34.2 * S, rubber, { bevel: 0 });
+    K.prof(g, "x26.dpm", PS([[36, -69.5], [-3, -54], [-7.5, -65], [-4, -68.5], [29, -82], [33, -81]]), 34 * S, rubber, { bevel: 1.5 * S });
+    // TRIGGER, its face forward
+    K.prof(g, "x26.trig", PS([[88, -37], [94, -37], [93, -46], [90, -53], [86, -57], [87, -51], [88.5, -45]]), 7 * S, black, { bevel: 0.6 * S });
+    // ambidextrous SAFETY switch, top rear, proud of both flanks
+    K.prof(g, "x26.safety", PS([[20, -6], [34, -6], [35, -11], [21, -12]]), 35.4 * S, black, { bevel: 0.4 * S });
+    // CID display on the back face of the rear housing
+    K.prof(g, "x26.cid", MM([[-9, -6.5], [9, -6.5], [9, -13.5], [-9, -13.5]]), 1 * S, K.fin("lens"), { axis: "z", bevel: 0, y: Y0, z: Z(-2.8) });
+    // LASER + LED windows on the front of the lower frame
+    K.prof(g, "x26.laser", MM(circ(-5.5, 0, 3, 12)), 1 * S, K.fin("redDot"), { axis: "z", bevel: 0, y: Yb(-41), z: Z(180.4) });
+    K.prof(g, "x26.led", MM(circ(6, 0, 3.6, 12)), 1 * S, K.fin("lens"), { axis: "z", bevel: 0, y: Yb(-41), z: Z(180.4) });
 
-    profile([
-      [0.405, 0.105],  // blunt nose / top
-      [-0.060, 0.105], // uninterrupted upper shell
-      [-0.125, 0.060],
-      [-0.145, -0.020],
-      [-0.040, -0.335], // rear edge of the forward-swept grip
-      [0.080, -0.345],
-      [0.140, -0.285],
-      [0.125, -0.120],
-      [0.290, -0.120], // lower trigger bridge
-      [0.405, -0.040],
-    ], 0.148, yellow, [[
-      [0.105, 0.030],
-      [0.275, 0.030],
-      [0.265, -0.078],
-      [0.130, -0.078],
-    ]], 0.008);
+    // THE CARTRIDGE: a separate grey block in the bay, ribbed release tabs
+    // on both sides, a black blast-door face with two stacked probe doors
+    K.prof(g, "x26.cart", PS([[143.5, -2.5], [183, -2.5], [185, -5], [185, -31], [183, -33], [143.5, -33]]), 30 * S, grey, { bevel: 1 * S });
+    const tabs = [];
+    for (let i = 0; i < 5; i++) { const f = 150 + i * 3.4; tabs.push(PS([[f, -11], [f + 1.6, -11], [f + 1.6, -25], [f, -25]])); }
+    K.prof(g, "x26.tabs", tabs, 33 * S, black, { bevel: 0 });
+    K.prof(g, "x26.face", MM([[-12, -4.5], [12, -4.5], [12, -31], [-12, -31]]), 1 * S, black, { axis: "z", bevel: 0, y: Y0, z: Z(185.6) });
+    K.prof(g, "x26.doors", [MM([[-8, -6.5], [8, -6.5], [8, -14.5], [-8, -14.5]]), MM([[-8, -20.5], [8, -20.5], [8, -28.5], [-8, -28.5]])],
+      0.8 * S, grey, { axis: "z", bevel: 0, y: Y0, z: Z(186.2) });
 
-    // BLUNT BLACK CARTRIDGE — a single compact front module with a broad metal
-    // face. Tiny contacts remain only where the two real probe wires originate.
-    box(visual, 0.180, 0.142, 0.145, mat.black, 0, 0.028, -0.460);
-    box(visual, 0.148, 0.098, 0.014, mat.worn, 0, 0.028, -0.540);
-    cyl(visual, 0.012, 0.018, mat.steel, -0.046, 0.028, -0.553, Math.PI / 2);
-    cyl(visual, 0.012, 0.018, mat.steel, 0.046, 0.028, -0.553, Math.PI / 2);
+    // the firing hand closed on the swept grip
+    const R = 0.384, gTop = P(28, -34), trig = P(93.4, -44);
+    K.hand(g, { at: [gTop[1], -gTop[0]], rake: R, gripW: 33 * S, gripD: 40 * S, trigger: [trig[1], -trig[0]] });
 
-    // The reference has one strong side release, one recessed grip control and
-    // a black heel. They are accents, not a second layer of surface machinery.
-    cyl(visual, 0.026, 0.012, mat.dark, -0.091, 0.018, -0.402, 0, 0, Math.PI / 2);
-    box(visual, 0.012, 0.082, 0.052, mat.dark, -0.086, -0.095, 0.025, -0.42);
-    profile([
-      [-0.040, -0.335],
-      [0.080, -0.345],
-      [0.140, -0.285],
-      [-0.020, -0.278],
-    ], 0.152, mat.black, null, 0.003);
-
-    // One trigger blade and one low top control complete the functional read.
-    box(visual, 0.025, 0.074, 0.018, mat.black, 0, -0.020, -0.180, -0.28);
-    box(visual, 0.052, 0.018, 0.048, mat.black, 0, 0.116, -0.050);
-
-    // The firing hand closed on the swept grip (systems/fphands.js's one hand).
-    if (CBZ.gunKit) CBZ.gunKit(ctx).hand(visual, { at: [-0.06, 0.03], rake: -0.15, gripW: 0.148, gripD: 0.20, trigger: [-0.03, -0.17] });
-
-    visual.updateMatrix();
-    g.userData.muzzle = new THREE.Vector3(0, 0.028, -0.553).applyMatrix4(visual.matrix);
+    const muzzle = [0, Yb(-18), Z(186.6)];
+    g.userData.muzzle = new THREE.Vector3(muzzle[0], muzzle[1], muzzle[2]);
+    const cart = [0, Yb(-18), Z(164)];
     // WHERE THE HANDS GO — see systems/gunhands.js. A taser is the one
     // firearm-shaped thing in the game that is drawn ONE-HANDED (the other
     // hand stays free for cuffs/radio), so it publishes no support grip and
     // the off arm keeps its ordinary swing.
     g.userData.grips = {
       support: null,
-      mag: new THREE.Vector3(0, 0.028, -0.460).applyMatrix4(visual.matrix),  // spent cartridge
+      mag: new THREE.Vector3(cart[0], cart[1], cart[2]),       // spent cartridge
       charge: null,
       style: "mag",
     };
+    // the two probe doors (upper and lower probe) on the blast-door face
     g.userData.taserContacts = [
-      new THREE.Vector3(-0.046, 0.028, -0.553).applyMatrix4(visual.matrix),
-      new THREE.Vector3(0.046, 0.028, -0.553).applyMatrix4(visual.matrix),
+      new THREE.Vector3(0, Yb(-10.5), Z(186.6)),
+      new THREE.Vector3(0, Yb(-24.5), Z(186.6)),
     ];
+    const gc = P(28 - 18 * Math.sin(R), -34 - 18 * Math.cos(R));
+    K.anchors(g, {
+      k: K_REAL,
+      grip: { pos: [0, gc[1], -gc[0]], rake: R },
+      trigger: [0, trig[1], -trig[0]],
+      support: { pos: [-16.8 * S, gc[1], -gc[0]], kind: "cup", len: 40 * S },
+      muzzle: muzzle,
+      mag: { pos: cart, well: [0, Yb(-18), Z(143.5)],
+        quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)) },
+      stock: null, bolt: null,
+      charge: [16.9 * S, Yb(-9), Z(27)],
+      optic: { type: "none", mag: 1 },
+    });
     return g;
   };
 })();

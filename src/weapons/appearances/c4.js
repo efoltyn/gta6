@@ -87,6 +87,22 @@
     return A;
   }
 
+  /* THE ANCHORS (contract: weapons/appearances/sidearm.js, "ANCHOR
+     CONTRACT"), written inline in plain THREE: disaster.html loads this file
+     without the appearances index. Metres, so k = 1. Every point is
+     { pos, quat } in the prop's own frame; an absent part is null. */
+  function stampAnchors(THREE, g, s) {
+    const pt = function (p, q) {
+      return p ? { pos: new THREE.Vector3(p[0], p[1], p[2]), quat: q ? q.clone() : new THREE.Quaternion() } : null;
+    };
+    g.userData.anchors = {
+      k: 1,
+      grip: pt(s.grip), trigger: pt(s.trigger), support: null, muzzle: null,
+      mag: null, stock: null, bolt: null, charge: pt(s.charge),
+      sight: null, lens: null, optic: { type: "none", mag: 1 },
+    };
+  }
+
   function mesh(THREE, g, m, parent, x, y, z) {
     const o = new THREE.Mesh(g, m); o.position.set(x || 0, y || 0, z || 0); parent.add(o); return o;
   }
@@ -130,6 +146,8 @@
     wire(THREE, g, G.wire, M.blk, [ex + 0.006, B.thick / 2 + 0.026, 0.02], [0.125, B.thick / 2 + 0.018, 0.02]);
     g.userData.led = led;
     g.userData.thick = B.thick;
+    // held across the palm by its middle; +Y (the face) outward
+    stampAnchors(THREE, g, { grip: [0, 0, 0] });
     return g;
   };
 
@@ -158,6 +176,12 @@
     g.userData.lever = pivot;
     g.userData.leverOpen = 0.42;
     g.userData.leverShut = 0.02;
+    // the fist closes on the body's middle; the fingers press the lever's
+    // outer (-Z) face, measured where the sprung-open lever actually is;
+    // the safety bail's crown is what the thumb flips first
+    g.updateMatrixWorld(true);
+    const face = lever.localToWorld(new THREE.Vector3(0, -0.01, -0.004));
+    stampAnchors(THREE, g, { grip: [0, 0, 0], trigger: [face.x, face.y, face.z], charge: [0, 0.069, -0.022] });
     return g;
   };
 
