@@ -1183,6 +1183,85 @@
     return (r << 16) | (g << 8) | b;
   }
 
+  /* ---- THE SKIN: what each wall of a building LOOKS like ------------------
+     The shell walls (lbox, the colliders, the carve targets, b.losMeshes) are
+     painted in the shell's base tint. On a facade-kit building nobody sees
+     that tint: the grammar lays its brick piers / ashlar / stucco over every
+     face as dbox trim, and core/batch.js then merges that trim away into
+     city-wide buckets. So everything that broke a wall used to break the
+     SHELL and threw pieces in a colour that was never on screen (the pink
+     brick debris). makeBuilding records, while the kit paints, the skin
+     colour of each face (area-weighted, the dark glazing/iron left out) and
+     what the grammar says it is made of; CBZ.citySkin hands any breaker a
+     shared skin material for the face a point is on (CBZ.debris.skinMat: a
+     flat colour for a falling shell, a coursed textured sibling for pieces).
+     Faces: 0 = -z, 1 = +z, 2 = -x, 3 = +x (the veneerBand convention). */
+  function skinLum(c) { return (((c >> 16) & 255) * 0.299 + ((c >> 8) & 255) * 0.587 + (c & 255) * 0.114) / 255; }
+  function skinNote(acc, W, D, x, y, z, bw, bh, bd, col) {
+    if (!(bh > 0.3) || typeof col !== "number" || !isFinite(col)) return;
+    const hw = W / 2, hd = D / 2;
+    const x0 = x - bw / 2, x1 = x + bw / 2, z0 = z - bd / 2, z1 = z + bd / 2;
+    const add = (f, a) => { const m = acc[f]; m.set(col, (m.get(col) || 0) + a); };
+    // on a face = reaches the wall plane from outside, stands no more than a
+    // couple of metres proud, and does not run back into the building
+    if (bw > 0.3) {
+      if (z0 < -hd + 0.05 && z0 > -hd - 2.5 && z1 < -hd + 1.2) add(0, bw * bh);
+      if (z1 > hd - 0.05 && z1 < hd + 2.5 && z0 > hd - 1.2) add(1, bw * bh);
+    }
+    if (bd > 0.3) {
+      if (x0 < -hw + 0.05 && x0 > -hw - 2.5 && x1 < -hw + 1.2) add(2, bd * bh);
+      if (x1 > hw - 0.05 && x1 < hw + 2.5 && x0 > hw - 1.2) add(3, bd * bh);
+    }
+  }
+  // per face: the dominant opaque skin colour, or null where the kit left the
+  // shell showing (under 30% of the face clad) — the shell IS the skin there
+  function skinPick(acc, W, D, H) {
+    const faces = [null, null, null, null], all = new Map();
+    for (let f = 0; f < 4; f++) {
+      const area = (f < 2 ? W : D) * H;
+      let clad = 0, best = null, bestA = 0;
+      acc[f].forEach(function (a, col) {
+        if (skinLum(col) < 0.1) return;              // glazing, iron, voids
+        clad += a;
+        if (a > bestA) { bestA = a; best = col; }
+      });
+      if (best != null && clad >= area * 0.3) {
+        faces[f] = best;
+        all.set(best, (all.get(best) || 0) + bestA);
+      }
+    }
+    let hex = null, top = 0;
+    all.forEach(function (a, col) { if (a > top) { top = a; hex = col; } });
+    return hex == null ? null : { faces, hex };
+  }
+  const SKIN_OF_STRUCTURE = {
+    brick: ["brick", "brick"], masonry: ["brick", "brick"], stone: ["ashlar", "rock"],
+    adobe: [null, "dirt"], timber: [null, "wood"],
+  };
+  /* The skin material of building b at world (wx, wz) — the face nearest the
+     point — or its dominant skin with no point. null = no skin recorded (the
+     shell is what shows): keep the caller's own material. */
+  CBZ.citySkin = function (b, wx, wz) {
+    const s = b && b.skin;
+    if (!s || !CBZ.debris || !CBZ.debris.skinMat) return null;
+    let hex = s.hex;
+    if (wx != null && wz != null && isFinite(wx) && isFinite(wz)) {
+      const lx = wx - b.ox, lz = wz - b.oz;
+      const e = [Math.abs(lz + b.d / 2), Math.abs(lz - b.d / 2), Math.abs(lx + b.w / 2), Math.abs(lx - b.w / 2)];
+      let f = 0;
+      for (let i = 1; i < 4; i++) if (e[i] < e[f]) f = i;
+      hex = s.faces[f];
+    }
+    if (hex == null) return null;
+    const tex = s.masonry && CBZ.masonryMat ? CBZ.masonryMat(s.masonry) : null;
+    return CBZ.debris.skinMat(hex, s.pattern, s.kind, tex);
+  };
+  // Is this the building's shell-wall paint (the tint the skin covers)?
+  CBZ.cityIsShellMat = function (b, m) {
+    if (Array.isArray(m)) m = m[0];
+    return !!(b && m && m.color && !m.map && !m.transparent && b.wallColor != null && m.color.getHex() === b.wallColor);
+  };
+
   // ---- BUILDING DAMAGE: bullet holes and knocked-off chunks ---------------
   // A fixed POOL of bullet-hole quads reuses the oldest slot once the cap is
   // hit (FPS-style decal budget); physical chunks share box geometry.
@@ -2113,20 +2192,19 @@
         const v = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
         const share = vol > 0 ? v / vol : 0;
         const budget = Math.max(2, Math.round(TOTAL * share));
-        // the face the player SEES: a shell under a facade-kit skin is
-        // painted by the skin, so pieces wear the building's visible wall
-        // material (collapse.js's materialsOf), not the hidden core course
+        // the face the player SEES: a shell course under a facade skin is
+        // painted by that skin, so its pieces wear the skin of THIS face
+        // (brick coursing, ashlar, stucco), never the shell's hidden tint
         let skinMat = null;
-        if (!b.glass && shedBld && CBZ.collapse && CBZ.collapse.materialsOf) {
-          try { const mo = CBZ.collapse.materialsOf(shedBld); skinMat = mo && mo.wall; } catch (e) { skinMat = null; }
-          if (Array.isArray(skinMat)) skinMat = skinMat[0];
-          if (skinMat && (skinMat.transparent || !skinMat.color)) skinMat = null;
+        if (!b.glass && shedBld && CBZ.cityIsShellMat(shedBld, b.mat)) {
+          try { skinMat = CBZ.citySkin(shedBld, (b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2); } catch (e) { skinMat = null; }
         }
         CBZ.debris.shatterBox(b, skinMat || b.mat, {
           at: { x, y, z }, dir: outN, power: P,
           // what the wall is MADE of: a brick building sheds brick; civic /
           // fortified shells are stone and concrete; glass is glass
-          kind: b.glass ? "glass" : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
+          // (a skin says what it is itself: brick, ashlar, stucco, adobe)
+          kind: b.glass ? "glass" : skinMat ? undefined : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
           // the rim of surviving wall stays welded: a broken edge, not a saw cut
           keepEdge: b.glass ? 0 : 0.35,
           maxPieces: b.glass ? Math.min(budget, 14) : budget,
@@ -4530,6 +4608,14 @@
     // plumbing — a small ctx of closures + the building's real dimensions, so
     // buildings_civic.js never touches the scene graph, colliders or rng.
     let roofCrowned = false;
+    // the visible wall skin (see THE SKIN). A masonry shell with its textured
+    // veneer: every face is that brick/ashlar; the facade kit overrides below.
+    let skin = null;
+    if (MPAL) {
+      const mk = MPAL.kind === "ashlar" ? "ashlar" : "brick";
+      skin = { faces: [MPAL.wall, MPAL.wall, MPAL.wall, MPAL.wall], hex: MPAL.wall, pattern: mk,
+        kind: mk === "ashlar" ? "rock" : "brick", masonry: VENEER_ON ? MPAL.id : null };
+    }
     {
       const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
       const addMesh = (geo, col, lx, ly, lz, emissive) => {
@@ -4662,7 +4748,27 @@
       // dimension from w, d, storeys, FH and rTop. Emitted here so it lands in
       // the merged deco buckets below — a dressed building is draw-call equal
       // to a bare one. Returns the def so we can tell whether it took the roof.
+      // THE SKIN is recorded as the kit paints (see skinNote): every box a
+      // grammar lays on a face, by colour and area.
+      const skinAcc = [new Map(), new Map(), new Map(), new Map()];
+      const hostDbox = ctxC.dbox, hostLbox = ctxC.lbox;
+      ctxC.dbox = function (x, y, z, bw, bh, bd, col) {
+        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
+        return hostDbox.apply(this, arguments);
+      };
+      ctxC.lbox = function (x, y, z, bw, bh, bd, col) {
+        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
+        return hostLbox.apply(this, arguments);
+      };
       const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
+      ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
+      if (dressed) {
+        const pk = skinPick(skinAcc, w, d, storeys * FH);
+        if (pk) {
+          const sm = SKIN_OF_STRUCTURE[dressed.structure] || [null, "concrete"];
+          skin = { faces: pk.faces, hex: pk.hex, pattern: sm[0], kind: sm[1], masonry: null };
+        }
+      }
       // ROOF CLUTTER on every real building (not just masonry) — flat empty
       // roofs are the second-biggest "this is a box" tell after flat facades.
       // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
@@ -4686,7 +4792,8 @@
     for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
 
     const built = { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
-      wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
+      wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,
+      skin,                                          // the visible wall skin per face (CBZ.citySkin)   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
       boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
@@ -4836,6 +4943,15 @@
   // wall face. It covers this file's boxes, the interior programs' boxes,
   // roombuild.js's planner and furniture.js's kit, because all four draw
   // through the SAME `b.lbox`. Degrade-safe: no kit, no clamp, no change.
+  /* THE GROUND FLOOR IS THE SLAB TOP, NOT 0. Every shell pours a foundation
+     slab whose top is floorTops[0] (0.14). Anything a dresser lays "on the
+     ground floor" at y = 0 is INSIDE that slab: floor tints, mats and bay
+     stripes vanish and furniture stands sunk in the concrete. One answer for
+     every caller, instead of a copy of this ternary per file. */
+  function groundTop(b) {
+    return (b && Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
+  }
+  CBZ.cityGroundTop = groundTop;
   function bounded(b, site, fn) {
     return CBZ.interiorBounded ? CBZ.interiorBounded(b, fn, site) : fn();
   }
@@ -5234,7 +5350,7 @@
     // floor (a booth "cushion at 0.44" sat 24 cm off the tiles). box() and the
     // kit bridge now stand everything on GF; the few direct b.lbox calls below
     // that are floor-relative add it themselves.
-    const GF = ((Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14) + 0.06;
+    const GF = groundTop(b) + 0.06;
     // a box whose footprint we orient with the tangent (w = across-aisle span)
     function box(p, y, across, h, deep, col, o) {
       const bw = along ? deep : across, bd = along ? across : deep;
@@ -5362,7 +5478,7 @@
       // BACK-OFFICE fill behind the wall (setBackroom: one desk + one shelf). The
       // back band runs from the partition (backDepth) to the back wall, across the
       // tangent — convert those IN-frame corners to a building-local axis rect.
-      const k = roomKit(b, 0);
+      const k = roomKit(b, groundTop(b));
       const cA = [inx * (-halfIn + backDepth) + tx * (-(halfTan - 0.5)), inz * (-halfIn + backDepth) + tz * (-(halfTan - 0.5))];
       const cB = [inx * (-halfIn + (2 * halfIn - 0.8)) + tx * (halfTan - 0.5), inz * (-halfIn + (2 * halfIn - 0.8)) + tz * (halfTan - 0.5)];
       setBackroom(k, { x0: Math.min(cA[0], cB[0]), x1: Math.max(cA[0], cB[0]), z0: Math.min(cA[1], cB[1]), z1: Math.max(cA[1], cB[1]) });
@@ -5618,10 +5734,13 @@
         // the four things every fire house in the world actually has.
         const bay = pt(halfIn * 0.8, 0, 1.6);
         if (bay) {
-          b.lbox(bay.x, 0.03, bay.z, along ? Math.min(2 * halfIn - 2, 12) : 4.2, 0.05,
+          // laid on the slab (they used to sit at 0.03 / 0.05, inside it): the
+          // bay paint tops out 5 mm under the fit-out's finished floor (GF),
+          // which covers it with its own paint once you walk in
+          b.lbox(bay.x, GF - 0.03, bay.z, along ? Math.min(2 * halfIn - 2, 12) : 4.2, 0.05,
             along ? 4.2 : Math.min(2 * halfIn - 2, 12), 0x39424c, { cast: false });
           for (let i = -1; i <= 1; i += 2)
-            b.lbox(bay.x + tx * i * 2.1, 0.05, bay.z + tz * i * 2.1,
+            b.lbox(bay.x + tx * i * 2.1, GF - 0.022, bay.z + tz * i * 2.1,
               along ? Math.min(2 * halfIn - 2, 12) : 0.16, 0.05, along ? 0.16 : Math.min(2 * halfIn - 2, 12),
               0xd8c05a, { cast: false });                                  // bay edge stripes
         }
@@ -7161,13 +7280,20 @@
     // within 0.35 m of the wall may cross its window band. The spandrel
     // lines at the slab edges and the outer faces of any brace or column
     // stay, so from the street the structure still reads continuous.
+    // EVERY STOREY, not only 50: the same brace and megacolumn blocks poke a
+    // metre into the flats, the pool floor and the penthouse on every other
+    // storey. So the whole footprint, garage deck to roof slab, is keep-clear:
+    // anything a grammar lays inside the wall plane is carved away and only
+    // the parts standing outside the building survive. The executive storey
+    // additionally keeps its window band clear so the suite sees out.
+    const bodyClear = { x0: -w / 2, x1: w / 2, z0: -d / 2, z1: d / 2, y0: 0.01, y1: STOREYS * FH - 0.01 };
     const execClear = EXECF ? [
-      { x0: -w / 2, x1: w / 2, z0: -d / 2, z1: d / 2, y0: execY + 0.01, y1: execY + FH - 0.01 },
+      bodyClear,
       { x0: -w / 2 - 0.35, x1: w / 2 + 0.35, z0: -d / 2 - 0.35, z1: d / 2 + 0.35, y0: execY + 0.5, y1: execY + FH - 0.4 },
-    ] : null;
+    ] : [bodyClear];
     const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
       EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear }
-            : { garageGround: true, district: "core" });
+            : { garageGround: true, district: "core", keepClear: execClear });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
     furnishPenthouse(b, topY);
@@ -7977,8 +8103,8 @@
           // shell — an intentionally empty tower gets nothing, that's the point.
           let reception = null;
           if (v2 && officeArchetype(b) !== "empty") {
-            const kg = roomKit(b, 0);
-            const lr = CBZ.interiorProgram("lobby", { x0: kg.xLo, x1: kg.xHi, z0: kg.zLo, z1: kg.zHi, y: 0 },
+            const kg = roomKit(b, groundTop(b));
+            const lr = CBZ.interiorProgram("lobby", { x0: kg.xLo, x1: kg.xHi, z0: kg.zLo, z1: kg.zHi, y: groundTop(b) },
               { b: b, opts: { door: b.localDoor || { x: door.x - b.ox, z: door.z - b.oz, nx: door.nx, nz: door.nz } } });
             if (lr && lr.anchors && lr.anchors.length) reception = lr.anchors[0];
           }

@@ -105,14 +105,14 @@
      how much the inside ignores the paint, dust/grit colours, drag = air. */
   const KINDS = {
     concrete: { density: 2400, size: 0.62, e: 0.16, mu: 0.8, core: 0x9d998f, coreMix: 0.7, dust: 0xb3ada2, grit: 0x8c877e, drag: 0.02, gritN: 16 },
-    brick:    { density: 1900, size: 0.42, e: 0.14, mu: 0.85, core: 0xa35a3c, coreMix: 0.45, dust: 0xb88467, grit: 0x93503a, drag: 0.02, gritN: 20, flat: 2.1 },
+    brick:    { density: 1900, size: 0.42, e: 0.14, mu: 0.85, core: 0xa35a3c, coreMix: 0.45, coreShade: 0.78, dust: 0xb88467, grit: 0x93503a, drag: 0.02, gritN: 20, flat: 2.1 },
     glass:    { density: 2500, size: 0.26, e: 0.12, mu: 0.35, core: 0xbfe0dc, coreMix: 0.0, dust: 0xdfe8ea, grit: 0xcfe6ea, drag: 0.35, gritN: 26, glass: true },
     wood:     { density: 650,  size: 0.5,  e: 0.3,  mu: 0.6, core: 0xd2ad74, coreMix: 0.65, dust: 0xbfa17a, grit: 0xb08a58, drag: 0.08, gritN: 14, grain: 0.28 },
     metal:    { density: 2700, size: 1.1,  e: 0.28, mu: 0.45, core: 0x8e9196, coreMix: 0.35, dust: 0x8a847a, grit: 0x5d6066, drag: 0.03, gritN: 6, bend: true },
     foliage:  { density: 380,  size: 0.7,  e: 0.08, mu: 0.9, core: 0x4f6a2e, coreMix: 0.3, dust: 0x6f8048, grit: 0x5d7a31, drag: 0.9, gritN: 30, leaves: true },
     plastic:  { density: 1100, size: 0.5,  e: 0.35, mu: 0.5, core: null, coreMix: 0.1, dust: 0xa8a8a0, grit: null, drag: 0.1, gritN: 6 },
     rubber:   { density: 1200, size: 9,    e: 0.45, mu: 0.9, core: 0x222222, coreMix: 0.2, dust: 0x77726a, grit: 0x2a2a2a, drag: 0.03, gritN: 0 },
-    rock:     { density: 2600, size: 0.7,  e: 0.18, mu: 0.8, core: 0x8b8378, coreMix: 0.5, dust: 0xa39684, grit: 0x7d7568, drag: 0.02, gritN: 14 },
+    rock:     { density: 2600, size: 0.7,  e: 0.18, mu: 0.8, core: 0x8b8378, coreMix: 0.5, coreShade: 0.88, dust: 0xa39684, grit: 0x7d7568, drag: 0.02, gritN: 14 },
     dirt:     { density: 1500, size: 0.35, e: 0.05, mu: 0.95, core: 0x6f5a41, coreMix: 0.5, dust: 0x8c7658, grit: 0x5e4a35, drag: 0.05, gritN: 22 },
     asphalt:  { density: 2300, size: 0.45, e: 0.14, mu: 0.85, core: 0x3b3b3b, coreMix: 0.5, dust: 0x7c776e, grit: 0x2f2f30, drag: 0.02, gritN: 18 },
   };
@@ -121,7 +121,11 @@
   const _c = new THREE.Color(), _c2 = new THREE.Color();
   function matColor(mat, out) {
     out = out || _c;
-    if (mat && mat.color) out.copy(mat.color); else out.setRGB(0.6, 0.6, 0.6);
+    // a textured skin (or a white-coloured veneer) is painted by its map: the
+    // colour it reads as is the skin colour it was made for
+    const tone = mat ? _skinTone.get(mat) : undefined;
+    if (tone != null) out.setHex(tone);
+    else if (mat && mat.color) out.copy(mat.color); else out.setRGB(0.6, 0.6, 0.6);
     return out;
   }
   /* What is this material made of? An explicit tag wins; then names; then the
@@ -186,6 +190,89 @@
     return m;
   }
 
+  /* ---- SKINS: the face the player SAW -------------------------------------
+     A building wall is two things: the structural shell box (collider, LOS,
+     carve target — painted in the shell's base tint, which on a facade-kit
+     building nobody ever sees) and the facade skin laid over it (the brick
+     piers, the ashlar, the stucco). Anything that breaks a wall must throw the
+     SKIN. buildings.js records each face's skin colour and what it is made of
+     (b.skin) and hands the pieces a skin material from here:
+
+       skinMat(hex, pattern, kind, texMat)
+         -> ONE shared flat Lambert in the skin colour (safe to draw on a whole
+            falling shell: no texture to stretch). Its userData.debrisSkin is
+            the TEXTURED sibling the pieces wear: a coursed brick / ashlar
+            pattern tinted by the colour (pattern "brick" | "ashlar"), or the
+            building's own veneer material (texMat, e.g. CBZ.masonryMat).
+     shatter()/pile() swap any material carrying debrisSkin for its sibling and
+     lay world-metre UVs on it, so the coursing runs at real brick scale across
+     every piece, and the fracture faces get the kind's darker core. Cached per
+     (colour, pattern): a city of skins is a few dozen materials. */
+  const _skinCache = new Map(), _skinTone = new WeakMap(), _patTex = {};
+  function patternTex(pattern) {
+    if (_patTex[pattern] !== undefined) return _patTex[pattern];
+    let t = null;
+    try {
+      // one tile = 1.6 m x 0.8 m (CBZ.masonryTile's module): brick is 7
+      // stretchers x 10 courses in running bond, ashlar 3 blocks x 4 courses.
+      // Neutral grey around 1.0 so the material colour IS the skin colour;
+      // the joints drop to ~0.7 and read as recessed mortar.
+      const W = 256, H = 128, cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const x = cv.getContext("2d");
+      const ash = pattern === "ashlar";
+      const ROWS = ash ? 4 : 10, COLS = ash ? 3 : 7, jt = ash ? 3 : 2;
+      x.fillStyle = "rgb(178,178,178)"; x.fillRect(0, 0, W, H);
+      const rh = H / ROWS;
+      let q = 7;
+      for (let r = 0; r < ROWS; r++) {
+        const n = (!ash && r % 5 === 4) ? COLS * 2 : COLS, cw = W / n, off = (r % 2) ? cw / 2 : 0;
+        for (let i = -1; i <= n; i++) {
+          q = (q * 1103515245 + 12345) & 0x7fffffff;
+          const v = Math.round(236 + (q % 20) - 6);
+          x.fillStyle = "rgb(" + v + "," + v + "," + v + ")";
+          x.fillRect(i * cw + off + jt / 2, r * rh + jt / 2, cw - jt, rh - jt);
+        }
+      }
+      t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    } catch (e) { t = null; }
+    _patTex[pattern] = t;
+    return t;
+  }
+  function skinMat(hex, pattern, kind, texMat) {
+    if (hex == null || !isFinite(hex)) return null;
+    if (pattern !== "brick" && pattern !== "ashlar") pattern = null;
+    kind = kind || (pattern === "brick" ? "brick" : pattern === "ashlar" ? "rock" : "concrete");
+    const key = hex + "|" + (pattern || "") + "|" + kind + "|" + (texMat ? texMat.uuid : "");
+    let m = _skinCache.get(key);
+    if (m) return m;
+    m = new THREE.MeshLambertMaterial({ color: hex });
+    m.name = "debrisSkin"; m._shared = true;
+    m.userData.debrisKind = kind;
+    let tm = texMat || null;
+    if (!tm && pattern) {
+      const map = patternTex(pattern);
+      if (map) {
+        tm = new THREE.MeshLambertMaterial({ color: hex, map });
+        tm.name = "debrisSkinTex"; tm._shared = true;
+        tm.userData.debrisKind = kind;
+      }
+    }
+    if (tm) { m.userData.debrisSkin = tm; _skinTone.set(tm, hex); }
+    _skinCache.set(key, m);
+    return m;
+  }
+  // the material a piece actually wears for this source material
+  function skinOf(m) { return (m && m.userData && m.userData.debrisSkin) || m; }
+  // world-metre tile for a textured material (null = keep the source UVs)
+  function tileOf(m) {
+    if (!m || !m.map) return null;
+    if (m.userData && m.userData.tile) return m.userData.tile;
+    const T = CBZ.masonryTile;
+    return { u: (T && (T.w || T.x)) || 1.6, v: (T && (T.h || T.y)) || 0.8 };
+  }
+
   /* ================= 1. GATHER ============================================ */
   // Triangle soup, stride S: px py pz | nx ny nz | u v | r g b | slot
   const S = 12;
@@ -201,8 +288,13 @@
     const count = idx ? idx.count : pos.count;
     const groups = geo.groups && geo.groups.length ? geo.groups : [{ start: 0, count, materialIndex: 0 }];
     for (const g of groups) {
-      const mat = Array.isArray(mats) ? mats[g.materialIndex || 0] : mats;
-      if (!mat || mat.visible === false) continue;
+      const mat0 = Array.isArray(mats) ? mats[g.materialIndex || 0] : mats;
+      if (!mat0 || mat0.visible === false) continue;
+      // a skinned wall wears its textured skin, UV'd in world metres (the
+      // shell box's own 0..1-per-face UVs would stretch one brick tile over
+      // the whole wall)
+      const mat = skinOf(mat0);
+      const wt = mat !== mat0 ? tileOf(mat) : null;
       const slot = slotOf(mat);
       const end = Math.min(count, g.start + g.count);
       for (let k = g.start; k + 2 < end + 0 && k + 2 < count; k += 3) {
@@ -211,8 +303,13 @@
           _v.fromBufferAttribute(pos, i).applyMatrix4(matrix);
           out.push(_v.x, _v.y, _v.z);
           if (nrm) { _v2.fromBufferAttribute(nrm, i).applyMatrix3(_n3).normalize(); out.push(_v2.x, _v2.y, _v2.z); }
-          else out.push(0, 1, 0);
-          if (uv) out.push(uv.getX(i), uv.getY(i)); else out.push(0, 0);
+          else { _v2.set(0, 1, 0); out.push(0, 1, 0); }
+          if (wt) {
+            const ax = Math.abs(_v2.x), ay = Math.abs(_v2.y), az = Math.abs(_v2.z);
+            if (ax >= ay && ax >= az) out.push(_v.z / wt.u, _v.y / wt.v);
+            else if (az >= ay) out.push(_v.x / wt.u, _v.y / wt.v);
+            else out.push(_v.x / wt.u, _v.z / wt.u);
+          } else if (uv) out.push(uv.getX(i), uv.getY(i)); else out.push(0, 0);
           if (col) out.push(col.getX(i), col.getY(i), col.getZ(i)); else out.push(1, 1, 1);
           out.push(slot);
         }
@@ -1107,9 +1204,10 @@
         });
       } else if (source.box) {
         const tris = [];
-        const tile = source.tile || (source.material && source.material.map && CBZ.masonryTile
-          ? { u: CBZ.masonryTile.w || CBZ.masonryTile.x || 1.6, v: CBZ.masonryTile.h || CBZ.masonryTile.y || 0.8 } : null);
-        boxTris(source.box, slotOf(source.material), tris, tile);
+        const wear = skinOf(source.material);
+        const tile = source.tile || tileOf(wear);
+        boxTris(source.box, slotOf(wear), tris, tile);
+        // (the kind is read off the source: a flat skin carries it)
         pushComps(tris, null, source.material, true);
       } else if (source.geometry) {
         const tris = [];
@@ -1146,8 +1244,11 @@
         const mat = mats[slot0];
         const pc = sourceColor(mat, c.t, 0, c.t.length);
         const cr = k.core != null ? _c2.set(k.core) : _c2.copy(pc);
+        // the broken face is the wall's inside: the kind's core mixed into
+        // the paint and, for masonry, darkened (mortar, damp, shadowed voids)
+        const cs = k.coreShade || 1;
         const cap = {
-          r: pc.r + (cr.r - pc.r) * k.coreMix, g: pc.g + (cr.g - pc.g) * k.coreMix, b: pc.b + (cr.b - pc.b) * k.coreMix,
+          r: (pc.r + (cr.r - pc.r) * k.coreMix) * cs, g: (pc.g + (cr.g - pc.g) * k.coreMix) * cs, b: (pc.b + (cr.b - pc.b) * k.coreMix) * cs,
           slot: k.glass ? slot0 : coreSlot, jitter: 0.16,
         };
         c.cap = cap; c.gritCol = new THREE.Color(k.grit != null ? k.grit : 0x888888).lerp(new THREE.Color(cap.r, cap.g, cap.b), 0.5);
@@ -1292,10 +1393,11 @@
         const k = K(kind);
         const want = Math.max(1, Math.round(total * (m.weight || 1) / wsum));
         const size = (o.size || k.size) * (0.8 + Math.min(1.2, H * 0.25));
-        const mats = [m.material], coreSlot = 1;
+        const mats = [skinOf(m.material)], coreSlot = 1;
         const pc = matColor(m.material, _c).clone();
         const cr = k.core != null ? new THREE.Color(k.core) : pc;
-        const capC = { r: pc.r + (cr.r - pc.r) * k.coreMix, g: pc.g + (cr.g - pc.g) * k.coreMix, b: pc.b + (cr.b - pc.b) * k.coreMix, slot: k.glass ? 0 : coreSlot, jitter: 0.2 };
+        const cs = k.coreShade || 1;
+        const capC = { r: (pc.r + (cr.r - pc.r) * k.coreMix) * cs, g: (pc.g + (cr.g - pc.g) * k.coreMix) * cs, b: (pc.b + (cr.b - pc.b) * k.coreMix) * cs, slot: k.glass ? 0 : coreSlot, jitter: 0.2 };
         let made = 0, guard = 0;
         while (made < want && guard++ < 40) {
           const bs = size * rr(1.8, 3.0), th = k.glass ? 0.012 : bs * rr(0.35, 0.8);
@@ -1517,6 +1619,8 @@
   CBZ.debris = {
     shatter,
     shatterBox: (box, material, o) => shatter({ box, material }, o),
+    // the visible facade skin of a wall, as a shared material (see SKINS)
+    skinMat,
     // hand an existing part (a door, a bumper, a lamp head) to the rigid-body
     // sim whole: its own geometry becomes the body, the original is hidden
     adopt: (obj, o) => shatter(obj, Object.assign({ whole: "one", launch: false, grit: false, dust: false }, o || {})),

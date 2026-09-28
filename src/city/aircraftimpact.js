@@ -915,8 +915,15 @@
   function shedHighDebris(s, x, y, z, dx, dz, scale) {
     if (!CBZ.debris) return;
     const c = wallNear(x, y, z);
-    const mat = c && c.ref && c.ref.material;
+    let mat = c && c.ref && c.ref.material;
     if (!mat) return;
+    // the shell course under a facade skin is never seen: the pieces wear the
+    // skin of the struck face (buildings.js CBZ.citySkin)
+    const bld = c.ref.parent && c.ref.parent.userData && c.ref.parent.userData.bld;
+    if (bld && CBZ.cityIsShellMat && CBZ.cityIsShellMat(bld, mat)) {
+      const sk = CBZ.citySkin(bld, x, z);
+      if (sk) mat = sk;
+    }
     // a band of that floor, standing just proud of the face it came out of
     const along = 1.6 + Math.min(2.6, scale * 1.4);
     const tx = Math.abs(dz), tz = Math.abs(dx);          // horizontal, across the travel
