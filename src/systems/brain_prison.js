@@ -1251,6 +1251,98 @@
   }
   PB.wire = wire;
 
+  /* ==========================================================
+     THE YARD SEES YOU IN CUFFS (systems/cuffedplayer.js pickTreatment).
+
+     A cuffed man is not a threat (systems/brain.js: capability "none", a
+     threat he is the source of reads as nothing), so nobody squares up to
+     him. What the yard does instead is what a yard does: a man near you
+     might say something (one line over his head, never more than one every
+     ~8 s); a rival with a temper, and no screw within 6 m, might take ONE
+     cheap shot (a shove or a single blow — entities/ai.js's own hunt, cut
+     after the first blow); a rival right on you might lift a smoke
+     (economy.js thiefTick, the one pickpocket the prison already has). All
+     rare: one die per man per second, most of it "nothing".
+     ========================================================== */
+  const CUF = { acc: 0, lineT: -1e9, cheapT: -1e9, stealT: -1e9, onT: -1 };
+  function playerRival(n) {
+    if ((n.playerGrudge || 0) >= 3) return true;
+    const PC = CBZ.prisonCars;
+    if (PC && PC.atOdds && PC.carOf) { try { if (PC.atOdds(PC.carOf(n), PC.carOf(CBZ.player))) return true; } catch (e) {} }
+    if (n.gang != null && n.gang >= 0 && CBZ.gangStanding) { try { if (CBZ.gangStanding(n.gang) < -15) return true; } catch (e) {} }
+    return false;
+  }
+  function screwWithin(x, z, r) {
+    const gs = CBZ.guards || [];
+    for (let i = 0; i < gs.length; i++) {
+      const gd = gs[i];
+      if (!gd || gd.dead || gd.ko > 0 || !gd.group) continue;
+      const q = gd.group.position;
+      if ((q.x - x) * (q.x - x) + (q.z - z) * (q.z - z) < r * r) return true;
+    }
+    return false;
+  }
+  const _cufO = { dist: 0, rival: false, aggression: 0, guardNear: false, sinceLine: 0, sinceCheap: 0, sinceSteal: 0, roll: 1, canSteal: false };
+  function cuffedPoll(dt) {
+    const C = CBZ.cuffedPlayer;
+    if (!C || !C.on() || !CBZ.player || CBZ.player.dead) { CUF.acc = 0; CUF.onT = -1; return; }
+    const t = now(), pp = CBZ.player.pos;
+    // a new run rewinds the clock: stamps from the last one mean nothing
+    if (t < CUF.lineT || t < CUF.cheapT || t < CUF.stealT || t < CUF.onT) { CUF.lineT = CUF.cheapT = CUF.stealT = -1e9; CUF.onT = -1; }
+    if (CUF.onT < 0) CUF.onT = t;
+    CUF.acc += dt;
+    if (CUF.acc < 1) return;
+    CUF.acc = 0;
+    const fade = C.novelty(t - CUF.onT);
+    const guardNear = screwWithin(pp.x, pp.z, C.GUARD_R);
+    const npcs = CBZ.npcs || [];
+    const econ = CBZ.econ;
+    for (let i = 0; i < npcs.length; i++) {
+      const n = npcs[i];
+      if (!alive(n) || !n.group || n.cuffed || n._lawBy || n.aiState === "fight" || (n.huntPlayer || 0) > 0 || n.role === "merchant") continue;
+      const q = n.group.position;
+      const d = Math.hypot(q.x - pp.x, q.z - pp.z);
+      if (d > 7) continue;
+      const b = n._brain, pers = b && b.personality;
+      _cufO.dist = d; _cufO.rival = playerRival(n);
+      _cufO.aggression = pers ? pers.aggression : 0.3;
+      _cufO.guardNear = guardNear;
+      _cufO.sinceLine = t - CUF.lineT; _cufO.sinceCheap = t - CUF.cheapT; _cufO.sinceSteal = t - CUF.stealT;
+      _cufO.canSteal = !!(econ && econ.thiefTick && (G().cigs || 0) > 0);
+      // a man who has had his say does not keep saying it
+      if (n._cufSaidT != null && t >= n._cufSaidT && t - n._cufSaidT < C.MAN_GAP) _cufO.sinceLine = 0;
+      _cufO.fade = fade;
+      _cufO.roll = rng();
+      const what = C.pickTreatment(_cufO);
+      if (!what) continue;
+      if (what === "cheap") {
+        // his own hunt, one blow long: ai.js stands him down after it lands
+        n._cheapShot = (n.jumpBlows || 0);
+        if (rng() < 0.6) n._huntStyle = "shove";
+        if (CBZ.requestInmateHunt && CBZ.requestInmateHunt(n, 2.5, "cheap")) {
+          CUF.cheapT = t;
+          if (t - CUF.lineT >= C.LINE_GAP) { CUF.lineT = t; n._cufSaidT = t; exec.say(n, C.pick(C.LINES.cheap, rng()), { secs: 1.6 }); }
+          return;
+        }
+        n._cheapShot = null; n._huntStyle = null;
+        continue;
+      }
+      if (what === "steal") {
+        n._cd = 0;
+        let took = false;
+        try { took = econ.thiefTick(n, 0, d) != null; } catch (e) { took = false; }
+        if (took) { CUF.stealT = t; return; }
+        continue;
+      }
+      // "jeer": he looks at you and says it
+      CUF.lineT = t; n._cufSaidT = t;
+      n._faceYaw = Math.atan2(pp.x - q.x, pp.z - q.z); n._faceTTL = 1.6;   // the mover turns him to look
+      exec.say(n, C.pick(C.LINES.jeer, rng()), { secs: 1.8 });
+      return;
+    }
+  }
+  PB.cuffedPoll = cuffedPoll;
+
   // one tick for the prison's brains: after the guards (20) and inmates (22)
   let moraleAcc = 0, routAcc = 0;
   function tick(dt) {
@@ -1267,6 +1359,7 @@
     if (moraleAcc >= 0.25 && b.morale && b.morale.tick) { try { b.morale.tick(moraleAcc); } catch (e) {} moraleAcc = 0; }
     if (G().state !== "playing") return;
     yardLawPoll(dt);
+    cuffedPoll(dt);
     // a man IN a clique fight whose nerve has gone breaks off and runs home
     routAcc += dt;
     if (routAcc >= 1) {
@@ -1285,6 +1378,7 @@
   // a new run: every case, cuff and rout is gone
   PB.reset = function () {
     lastShotT = -1e9; SH.stamp = -1;
+    CUF.acc = 0; CUF.lineT = CUF.cheapT = CUF.stealT = -1e9; CUF.onT = -1;
     for (const gd of CBZ.guards || []) { gd._yardCase = null; gd._yardHold = false; gd._yardPhase = null; }
     for (const n of CBZ.npcs || []) {
       if (n.cuffed) { n.cuffed = false; if (n.char) { n.char.cuffed = false; n.char.surrender = false; } }

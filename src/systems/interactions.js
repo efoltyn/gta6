@@ -80,7 +80,12 @@
     return promptLayer;
   }
 
+  // CUFFED (CBZ.arrest.playerCuffed): every verb pinned on a thing is a hand
+  // verb (a door handle, a lift button, a grille, a car door), so none of
+  // them is offered and none fires. The pills simply are not there.
+  function cuffedNow() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
   function fireAct(act) {
+    if (cuffedNow()) return;
     if (String(act).charAt(0) === "@") {
       const fn = String(act).slice(1);
       if (typeof CBZ[fn] === "function") CBZ[fn]();
@@ -123,6 +128,7 @@
 
   function prisonPrompt(id, act, verb, opts) {
     if (!act || !verb) return false;
+    if (cuffedNow()) return false;
     opts = opts || {};
     const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "");
     let p = pills.get(id);
@@ -1057,11 +1063,11 @@
       // LAW 3: a door you shut yourself stays shut while you stand in the
       // radius that would otherwise re-open it. CBZ.prisonDoorLatched is the
       // shared registry above; the credential test below is untouched.
-      if (nearDoor && g.hasKey && !CBZ.prisonDoorLatched("prison-yard-door")) {
+      if (nearDoor && g.hasKey && !cuffedNow() && !CBZ.prisonDoorLatched("prison-yard-door")) {
         CBZ.openDoor();
         readerK = ""; readerRung = false;
         CBZ.setObjective("");
-      } else if (nearDoor) {
+      } else if (nearDoor && !cuffedNow()) {
         readerLamp("deny", 0.013);
         if (!readerRung) {
           readerRung = true;

@@ -52,6 +52,7 @@ function extract(name, startsWith) {
 const sandbox = { CBZ: { game: { role: "inmate", heat: 0 }, player: { gang: null } }, console };
 vm.createContext(sandbox);
 vm.runInContext(
+  extract("cuffOk", "function cuffOk(a)") + "\n" +
   extract("verbsFor", "function verbsFor(a)") + "\n" +
   extract("pressureVerb", "function pressureVerb(a)") + "\n" +
   extract("guardPayoffWorthIt", "function guardPayoffWorthIt(a)") + "\n" +

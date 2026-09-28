@@ -221,6 +221,9 @@
       gun: drawn ? it : null, gunDrawn: drawn,
       items: g.cityInv || {}, role: g.career || "", wanted: g.wanted | 0,
       cash: g.cash | 0, local: true,
+      // hands behind the back (CBZ.arrest.playerCuffed): only a cuffOk option
+      // (the booking desk you are walked to) survives the gate below
+      cuffed: !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()),
     };
   }
   function hasItem(ctx, need) {
@@ -266,6 +269,7 @@
   // ---- option gating ---------------------------------------------------------
   // gunpoint=true → ONLY needsGunDrawn options (the demands replace street verbs)
   function passes(o, t, ctx, gunpoint, d, cand) {
+    if (ctx.cuffed && !o.cuffOk) return false;
     if (!campaignAllows(o, t, cand)) return false;
     if (gunpoint !== !!o.needsGunDrawn) return false;
     if (o.needsGunDrawn && !ctx.gunDrawn) return false;
@@ -793,6 +797,7 @@
     // The card only exists on foot beside a parked civil airliner, so no exit
     // or other-ride press can be shadowed by this yield.
     if (k === "e" && !(currentRows && currentRows.dualRide) &&
+        !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) &&
         CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) {
       e.preventDefault();
       holdKey = ""; holdT = 0; holdFired = false;

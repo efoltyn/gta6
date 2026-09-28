@@ -3982,6 +3982,10 @@
   // fireAt(c, tgt, dist, dt) — dt is optional and only used by the competence
   // layer (systems/combat_iq.js). Returns true if a round actually left the gun.
   function fireAt(c, tgt, dist, dt) {
+    // A MAN IN CUFFS IS NOT SHOT (systems/cuffedplayer.js): his hands are
+    // behind his back. Officers hold fire and walk him; if he runs, the lone
+    // escort's chase (systems/arrest.js) takes him down, not a round.
+    if (tgt && tgt.isPlayer && CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) { c.shootCD = Math.max(c.shootCD || 0, 0.5); return false; }
     // COMPETENCE FIRST, before any of the visual commitment below: a shooter who
     // has just swung onto a new mark has not finished REACTING yet, and a cop
     // who fires on the frame he sees you is the "they're really bad at shooting"

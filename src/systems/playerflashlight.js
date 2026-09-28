@@ -90,8 +90,13 @@
     publish();
     click();
   }
+  // cuffed (CBZ.arrest.playerCuffed): the torch is in a pocket, not a hand.
+  // It goes out when the cuffs go on and comes back on when they come off.
+  function cuffed() { const C = CBZ.cuffedPlayer; return !!(C && C.on && C.on()); }
+  let cuffLit = false;
   function toggle() {
     if (!owned()) { if (lit) set(false); return false; }
+    if (cuffed()) return false;
     set(!lit);
     return lit;
   }
@@ -482,6 +487,9 @@
     const has = (m === "escape" || m === "city") && owned();
     // LOSING IT PUTS IT OUT: sold, frisked, dropped on death, a new run.
     if (!has && lit) { lit = false; publish(); }
+    const cuffs = has && cuffed();
+    if (cuffs && lit) { cuffLit = true; set(false); }
+    else if (!cuffs && cuffLit) { cuffLit = false; if (has) set(true); }
     if (has && !R.built) build();
     const fpSeen = R.fpSeen;
     R.fpSeen = false;

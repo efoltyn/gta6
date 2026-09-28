@@ -853,6 +853,11 @@
     rob: 96, restrain: 95, release: 94,
   };
   function capVerbs(v) {
+    // CUFFED (CBZ.arrest.playerCuffed): the card keeps what a mouth can do
+    // (talk, listen, refuse, tell); anything that hands something over or
+    // takes something (trade, pay, bribe, steal, search, cuff, tie) is gone.
+    const C = CBZ.cuffedPlayer;
+    if (C && C.on()) v = v.filter(C.verbAllowed);
     if (v.length <= MAX_VERBS) return v;
     const score = (x) => (VERB_PRIORITY[x] != null ? VERB_PRIORITY[x] : 55);
     const keep = v.slice().sort((a, b) => score(b) - score(a)).slice(0, MAX_VERBS);

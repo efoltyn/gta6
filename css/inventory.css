@@ -47,6 +47,15 @@
 #hotbar .hb.fresh{ animation:hbIn .5s ease-out; }
 @keyframes hbIn{ 0%{ transform:translateY(10px) scale(.7); opacity:0; } 100%{} }
 
+/* CUFFED (systems/cuffedplayer.js stamps body.cuffed): hands behind your back,
+   so the bar goes grey and dead to the touch. No word, no lock icon. The city
+   draws its own bar (#cSlots), same treatment. */
+body.cuffed #hotbar, body.cuffed #cHud .cSlots, body.cuffed #weaponStrip{
+  opacity:.34 !important; filter:grayscale(1) brightness(.8); pointer-events:none !important;
+  transition:opacity .25s, filter .25s;
+}
+body.cuffed #hotbar .hb.on{ transform:none; }
+
 /* legacy surfaces the bar replaced: the text stash strip and the keycard chip */
 #inventory, #keycard{ display:none !important; }
 /* fpsmode's floating weapon strip is never shown next to this bar */

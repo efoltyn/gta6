@@ -654,6 +654,10 @@
        key-gated (the prison armory) must fall back LOCKED or flipping the flag
        hands out the armory for free. `wasOpen` is the caller stating which it
        was, and it is the only honest way to answer both. */
+    // CUFFED (CBZ.arrest.playerCuffed): a card reader, a key, a keypad all
+    // want a hand in front of you. Nothing speaks; the door just stays shut.
+    // (A screw walking you through opens his own door — staff tailgating.)
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return { open: false, line: "", route: null };
     const degrade = { open: !!spec.have || !!spec.wasOpen, line: spec.have ? "" : (label + " is locked."), route: spec.have ? "key" : null };
     if (CFG.LOYALTY_LOCKS === false) return degrade;
     if (spec.have) return { open: true, line: "", route: "key" };

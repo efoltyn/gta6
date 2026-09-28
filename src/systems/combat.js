@@ -167,14 +167,20 @@
     // scales off stamina below, and the guard visibly drops (ch.winded).
     if (hasTarget && actor.hp == null) actor.hp = maxHpOf(actor);
 
-    const blade = !!(opts && opts.blade) && shankOn();
+    /* CUFFED (CBZ.arrest.playerCuffed): the hands are behind your back, so
+       what leaves you is a FOOT. One front kick, no combo, no hook, no blade,
+       off-balance: it lands softer than a fresh cross, costs more wind, and
+       you cannot throw them back to back. */
+    const cuffs = !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on());
+    if (cuffs && CBZ.now - lastPunch < 900) return { ok: false, msg: "" };
+    const blade = !cuffs && !!(opts && opts.blade) && shankOn();
     const spec = blade ? bladeSpec() : null;
 
-    const next = CBZ.now - lastPunch < 980 ? combo + 1 : 1;
+    const next = cuffs ? 1 : CBZ.now - lastPunch < 980 ? combo + 1 : 1;
     // A fist winds up every third beat into a hook. A shank has no wind-up —
     // its "heavy" is the DEEP one you get for staying on him, every fourth.
-    const heavy = blade ? next % 4 === 0 : next % 3 === 0;
-    const kind = blade ? "stab" : (heavy ? "hook" : (next % 2 ? "jab" : "cross"));
+    const heavy = !cuffs && (blade ? next % 4 === 0 : next % 3 === 0);
+    const kind = cuffs ? "kick" : blade ? "stab" : (heavy ? "hook" : (next % 2 ? "jab" : "cross"));
     // no man named: square up to where you are looking; the swing finds
     // whoever is actually there
     if (!hasTarget && CBZ.playerChar && CBZ.lerpAngle) {
@@ -186,7 +192,7 @@
        Flag off → the exact old expression. */
     const baseDmg = blade ? (spec.damage || BLADE_DEF.damage)
       : (shankOn() ? 11 : 11 + (CBZ.econ.hasItem("Shiv") ? 9 : 0));
-    const cost = blade ? (heavy ? 0.20 : 0.13) : (heavy ? 0.34 : 0.22);
+    const cost = cuffs ? 0.30 : blade ? (heavy ? 0.20 : 0.13) : (heavy ? 0.34 : 0.22);
     const stam = Math.max(0, stamina - cost);
     const attack = {
       heavy, kind, blade,
@@ -194,12 +200,12 @@
       // gassed punches land soft: 100% fresh down to 35% empty. A blade loses
       // only a third of its bite to a tired arm — steel does the work.
       dmg: baseDmg * (blade ? (heavy ? 1.55 : 1) : (heavy ? 1.8 : (kind === "cross" ? 1.16 : 1)))
-        * (blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam)),
+        * (blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam)) * (cuffs ? 0.9 : 1),
     };
     // a held point reaches further than a fist: the step in covers the rest
     const maxLunge = blade ? Math.max(0.75, (spec.range || BLADE_DEF.range) + (heavy ? 0.16 : 0) - 0.95) : 0.75;
     const S = V.strike(playerActor(), hasTarget ? actor : null, {
-      kind, heavy, arm: blade ? "r" : undefined,
+      kind, heavy, arm: blade ? "r" : undefined, speed: cuffs ? 0.8 : undefined,
       weapon: blade ? BLADE_W : null,
       candidates: hasTarget ? null : candidates,
       maxLunge,
@@ -467,8 +473,8 @@
     if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
     if (CBZ.fps && CBZ.fps.active) return;
     if (CBZ.playerArmed && CBZ.playerArmed()) return;
-    // cuffed: no hands; held: the click is a wrench against his grip (verbs.js)
-    if (CBZ.playerChar && CBZ.playerChar.cuffed) return;
+    // cuffed: the click is a kick (punch() above); held: the click is a
+    // wrench against his grip (verbs.js)
     if (CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()) return;
     punch();   // the swing is the feedback; there is no line left to print
   });

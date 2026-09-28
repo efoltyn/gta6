@@ -455,7 +455,8 @@
       // it spawns and the whole toss is swallowed — which is the invisible
       // frisk again, wearing a mesh.
       if (!d.rest) return;
-      if (d2 <= AUTO_R * AUTO_R) { takeDrop(inst); return; }
+      // cuffed (CBZ.arrest.playerCuffed): hands behind your back pick nothing up
+      if (d2 <= AUTO_R * AUTO_R && !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on())) { takeDrop(inst); return; }
 
       // A WEAPON ON THE FLOOR IS A WEAPON ANYONE CAN REACH.
       npcTakeWeapon(inst, d);

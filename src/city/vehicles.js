@@ -4302,9 +4302,13 @@
   }
 
   // ---- enter / exit ----
-  CBZ.cityEnterVehicle = function (car) {
+  CBZ.cityEnterVehicle = function (car, opts) {
     wakeCar(car);
     if (!car || car.player) return false;
+    // CUFFED (CBZ.arrest.playerCuffed): no hand for the handle, none for the
+    // wheel. A scripted seat (opts.instant: a mission or a transport puts you
+    // there) is the only way in.
+    if (!(opts && opts.instant) && CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return false;
     /* TAKING THE WHEEL UNCHAINS IT. vehicle_hold.js's law is that a latched
        machine is released the instant somebody claims its controls — that is
        what makes driving one back OUT of a trailer possible at all, and

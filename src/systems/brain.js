@@ -1365,11 +1365,30 @@
   };
 
   /* ================================================================ THREAT */
+  /* A MAN IN CUFFS IS NOT A THREAT. Owner: "fix ... how people treat me when
+     I have handcuffs on." His hands are behind his back: he holds nothing
+     (capability "none"), and a threat he is the source of reads as nothing
+     at all — nobody charges him, aims at him or runs from him as an attacker.
+     (An explosion or a hazard near him is still an explosion.) The player's
+     cuffs are CBZ.arrest.playerCuffed; an NPC's are his own fields. */
+  function restrained(a) {
+    if (!a || typeof a !== "object") return false;
+    if (a.cuffed || a.tied || (a.char && a.char.cuffed)) return true;
+    const r = a.restraint;
+    if (r && (r === "cuffed" || r.state === "cuffed" || r.state === "escorted" || r.state === "in_vehicle")) return true;
+    if (a === CBZ.player || a.isPlayer) {
+      const A = CBZ.arrest;
+      if (A && typeof A.playerCuffed === "function") { try { return !!A.playerCuffed(); } catch (e) { return false; } }
+      return !!(CBZ.playerChar && CBZ.playerChar.cuffed);
+    }
+    return false;
+  }
   function assess(actor, th) {
     const b = of(actor), out = b.assessR;
     if (!th) { out.level = 0; out.kind = null; return out; }
     const d = th.distance != null ? th.distance : Math.hypot(th.x - ax(actor), th.z - az(actor));
     const kind = th.kind || (th.armed ? "armed" : "unarmed");
+    if (kind !== "explosion" && kind !== "hazard" && restrained(th.source)) { out.level = 0; out.kind = kind; return out; }
     const reach = th.armed ? 35 : kind === "explosion" ? 60 : kind === "gunshot" ? 48 : 7;
     let lv = clamp01(1 - d / reach);
     if (kind === "gunshot") lv = Math.max(lv, 0.45);
@@ -1425,6 +1444,7 @@
   const MELEE_ITEMS = ["Shiv", "Shank", "Knife", "Brass Knuckles", "Baton", "Bat", "Machete"];
   function capability(a) {
     if (!a || typeof a !== "object") return "none";
+    if (restrained(a)) return "none";                  // hands behind his back hold nothing
     const b = a._brain;
     for (let i = 0; i < capFns.length; i++) {
       const c = capFns[i];
@@ -1452,6 +1472,7 @@
   // what the THREAT carries: th.weapon when the game says, a gunshot is a gun,
   // else the source's own capability, else the legacy th.armed (= a gun)
   function threatWeapon(th) {
+    if (th.source && restrained(th.source) && th.kind !== "explosion" && th.kind !== "hazard") return "none";
     if (th.weapon) return th.weapon;
     if (th.kind === "gunshot") return "gun";
     if (th.kind === "explosion" || th.kind === "hazard") return "hazard";
@@ -1589,7 +1610,7 @@
   function how(actor) { const b = actor && actor._brain; return (b && b.threatHow) || null; }
   const threat = {
     assess: assess, respond: respond, how: how,
-    capability: capability, setCapability: setCapability, weaponOf: threatWeapon,
+    capability: capability, setCapability: setCapability, weaponOf: threatWeapon, restrained: restrained,
     canRush: canRush, facingAway: facingAway,
     RUSH_R: RUSH_R, DWELL: DWELL,
   };

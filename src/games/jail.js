@@ -715,7 +715,7 @@
      names, no sentences. The card title comes from the venue (packages.js
      describe). Every position is an anchor out of V, never a literal. ---- */
   function zones(ctx) {
-    ctx.zone({ id: "gate", pos: [V.gateZone.x, V.gateZone.z], r: V.onPlot ? 3.2 : 2.6,
+    ctx.zone({ id: "gate", pos: [V.gateZone.x, V.gateZone.z], r: V.onPlot ? 3.2 : 2.6, cuffOk: true,
       label: () => {
         if (INM) return "Booking";
         if (JOB && JOB.active) return "Clock off";
@@ -727,12 +727,12 @@
         startShift();
       } });
     // the CELL: re-open the sentence options if you wandered the panel closed.
-    ctx.zone({ id: "cell", pos: [V.cells[1].lx, V.cells[1].lz], r: 2.2,
+    ctx.zone({ id: "cell", pos: [V.cells[1].lx, V.cells[1].lz], r: 2.2, cuffOk: true,
       canShow: () => !!INM && INM.phase === "booking",
       label: () => "Read sheet",
       onUse: () => { if (INM) openBooking(); } });
     // the DESK is where a booking is answered — same point the sarge stands at.
-    ctx.zone({ id: "desk", pos: [V.desk.x, V.desk.z], r: 2.8,
+    ctx.zone({ id: "desk", pos: [V.desk.x, V.desk.z], r: 2.8, cuffOk: true,
       canShow: () => !!INM && INM.phase === "booking",
       label: () => "Booking",
       onUse: () => { if (INM) openBooking(); } });

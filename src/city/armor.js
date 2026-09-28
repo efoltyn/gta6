@@ -715,6 +715,7 @@
   CBZ.onUpdate(38.5, function () {
     if (!g || g.mode !== "city" || g.state !== "playing") return;
     const P = CBZ.player; if (!P || P.dead || !P.pos) return;
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return;     // cuffed: nobody strips a vest with his hands behind him
     const px = P.pos.x, pz = P.pos.z;
     function trySrc(list) {
       if (!list) return false;
