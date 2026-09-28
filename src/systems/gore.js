@@ -7,11 +7,12 @@
      • a fine high-velocity MIST puff (rifle/headshot/explosion feel) that
        hangs, drifts, and fades — the subtle aerosol that reads as "real"
      • chunky flying GIBS (limbs/torso, gravity + tumble + settle as debris)
-     • lingering ground POOLS that spread, darken and only slowly fade —
-       irregular blob outlines (jittered geometry + random spin/stretch),
-       never a perfect circle
+     • lingering ground POOLS that spread from the body and stop, then dry
+       from deep glossy red to matte red-brown, soaked into the floor — every
+       land mark is a stain FILTERING the drawn floor, one instanced draw
+       call (see BLOOD ON THE GROUND IS A STAIN IN THE FLOOR)
      • WALL SPLATTER: if a surface sits just behind the victim along the shot
-       line, a vertical blood decal is stamped on it (GTA-style)
+       line, an impact splat with drips running down is stamped on it
    plus a short red jolt + shake (+ optional slow-mo). Headshots and explosions
    get a bigger mist + spray + pool. Self-contained: shared geometry/materials,
    pooled, hard-capped, distance-LOD'd, driven by one always-updater so prison
@@ -129,19 +130,12 @@
   const MIST_K = 2.4, MIST_A = 0.24;
   function survMode() { return !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode)); }
   const GRAV = 24;
-  // DECALS ARE UNLIT, AND THE PRISON FLOOR IS WHITE. A pool/wall/streak decal
-  // is MeshBasicMaterial: no light touches it, and the renderer's sRGB output
-  // lifts a dark hex a long way (0x5e070b measured out at (208,41,78) on the
-  // yard — cherry, with a pink cast, because that hex's BLUE outranks its
-  // green). Blood on a pale floor is a dark red-brown, so the decal palette
-  // gets its own darker, blue-suppressed rungs. Flying droplets are NOT in
-  // here: those are lit meshes seen against sky and wall, and they should stay
-  // bright — arterial blood in the air really is.
+  // The three blood rungs, for what flies (droplets, mist, gibs). Land marks
+  // do not take a colour from a caller at all — they filter the floor they lie
+  // on, and their shade is their age and depth (see the STAIN IN THE FLOOR
+  // block). The old DECAL_C palette that re-darkened these for an unlit decal
+  // went with the unlit decal.
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
-  // see the DECAL note above: same three rungs, re-authored for an unlit decal
-  // lying on a bright floor. Unknown colours pass through untouched.
-  const DECAL_C = { 0x5e070b: 0x300203, 0x8a0b10: 0x420305, 0xb01218: 0x550408 };
-  function decalCol(c) { return realism() ? (DECAL_C[c] != null ? DECAL_C[c] : c) : c; }
   // Droplets stay LIT and stay bright — they have to be findable at 20 m — but
   // the old rungs came out of the sRGB pass as pillar-box red. One stop down is
   // still legible against sky and concrete and stops reading as cherry candy.
@@ -215,7 +209,7 @@
   const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // legacy aerosol lump (realism OFF)
   const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // legacy chunk (realism OFF) only — the stump
                                                       // is its own torn geometry now, see stumpGeo()
-  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears, drip streaks, aerosol billboards
+  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // aerosol billboards
   // TORN FLESH, NOT DICE: three irregular chunk silhouettes baked ONCE at
   // startup and picked at random per piece, so no two chunks share an outline
   // and none of them has a flat square face to catch the light like a box.
@@ -255,7 +249,7 @@
     _aim.multiplyScalar(1 / l);
     m.quaternion.setFromUnitVectors(_UP, _aim);
   }
-  // ground pools + wall splats: IRREGULAR blob outlines — a circle with
+  // the WATER slick's outline (land marks use the atlas): a circle with
   // per-vertex radial jitter (sum of randomly-phased sines) baked ONCE at
   // startup. 3 shared geometries, randomly picked + spun + stretched per
   // decal, so no two pools share a silhouette and none is a perfect circle.
@@ -302,8 +296,8 @@
     return (r << 16) | (g << 8) | b;
   }
 
-  // a soft radial blood texture, generated once, used by pools + wall splats so
-  // edges feather instead of showing a hard polygon rim (much more convincing).
+  // a soft radial blood texture, generated once. The WATER slick and the air
+  // mist use it; land decals have their own hard-edged atlas (landAtlas below).
   let bloodTex = null;
   function bloodTexture() {
     if (bloodTex) return bloodTex;
@@ -327,6 +321,402 @@
     bloodTex = new THREE.CanvasTexture(c);
     bloodTex.wrapS = bloodTex.wrapT = THREE.ClampToEdgeWrapping;
     return bloodTex;
+  }
+
+  /* ============================================================
+     BLOOD ON THE GROUND IS A STAIN IN THE FLOOR, NOT A STICKER ON IT.
+
+     OWNER, on the prison fight, 2026-09-27: "blood in the jail game, gum".
+     He was reading it exactly. Every pool, landing mark, smear and wall
+     splat used to be its own MeshBasicMaterial disc: one flat colour, unlit,
+     lifted 4-6 cm off the floor, feathered by a soft radial texture, drawn at
+     opacity 0.88 (0.7 on walls). Pushed through core/renderer.js's ACES +
+     saturation grade at the prison's exposure (~1.1-1.4) the "dark" decal hex
+     0x300203 came out (134-189, 0, 17-24): a raspberry crimson with more blue
+     than green, the SAME brightness in a dark cell as under a lamp. Its
+     feathered rim then alpha-blended that over pale concrete: 45% coverage is
+     (165-190, 105, 112-115), 20% is (180, 152, 155). A smooth round blob,
+     glowing an even raspberry, with a bubble-gum pink halo, hovering over the
+     floor, and ~25 identical 16-42 cm copies of it around every kill: gum.
+
+     WHAT IT IS NOW. One InstancedMesh draws every land decal in the game
+     (floor pools, droplet marks, impact splats, smears, wall splats, drips) in
+     ONE draw call, off ONE baked atlas, with ONE shader. The decal does not
+     paint a colour; it FILTERS the floor that is already drawn (a 2x multiply
+     blend: screen = floor x factor). So:
+       * the concrete's own texture, grime and lighting come through, a pool
+         in a dark cell is dark and one under a lamp is lit;
+       * the hue is set by the filter, not by the tone map, so it cannot be
+         graded into raspberry: fresh blood keeps green and blue at a few % of
+         red (hue 0-2 deg, pure red), dried blood lets a little more green
+         than blue through (hue 5-8 deg, dark red-brown);
+       * the 2x headroom is what lets fresh blood carry a GLINT: a thin wet
+         highlight off the meniscus at the pool's edge, gone once it dries.
+     Every shape is a noise-edged field in the atlas and the edge is a hard
+     threshold on it, so there is no feathered rim to go pink. A pool GROWS
+     by lowering that threshold (the edge advances into the lowest ground
+     first, fingers and all), spreads for ~6-14 s and STOPS. Over tens of
+     seconds it dries from the thin edge inward: deep glossy red -> matte dark
+     red-brown with a darker coffee ring, soaked patchily into the pores.
+     Spatter lands the size of the drop that made it, stretched along its
+     flight by the impact angle (length = width / sin(angle), the forensic
+     rule), tail pointing away from the wound. A kill throws one or two big
+     impact splats, a pool, and a scatter of small marks, not two dozen equal
+     discs. Everything sits 1.5 cm off the surface with polygonOffset.
+
+     COST: one draw call, one 512x256 texture baked once at load, a fixed
+     pool of instance slots (hard cap, recycled far-first), no per-decal
+     material, no per-frame allocation. Growth and drying run on the GPU from
+     one clock; the CPU writes a slot's matrix once at spawn and its alpha only
+     when a fade actually changes it.
+
+     The WATER blood (plume / slick / kill cloud) is untouched: slicks keep
+     their own pooled meshes + bloodTexture(), and every water branch below
+     runs exactly as before.
+  ============================================================ */
+  const LD_CAP = 400;                       // slots: 300 ground max + walls, with room
+  const LD_CELL_W = 0.25, LD_CELL_H = 0.5;  // 4 x 2 atlas cells
+  // atlas cells: [col,row] — row 0 is the TOP of the canvas (uv.y 1)
+  const CELL_POOL = [[0, 0], [1, 0]], CELL_SPLAT = [[2, 0], [3, 0]];
+  const CELL_DROP = [0, 1], CELL_DOT = [1, 1], CELL_DRIP = [2, 1], CELL_SMEAR = [3, 1];
+
+  // ---- the atlas: R = arrival/thickness field, G = pore noise ---------------
+  // R is 1 where the blood arrives first (the thick middle) falling to 0 where
+  // it never reaches. The shader shows R > threshold, so dropping the
+  // threshold over time IS the spread, and (R - threshold) IS the depth.
+  function ldHash(ix, iy, s) {
+    let h = (ix * 374761393 + iy * 668265263 + s * 1442695041) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function ldNoise(x, y, s) {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    const a = ldHash(ix, iy, s), b = ldHash(ix + 1, iy, s), c = ldHash(ix, iy + 1, s), d = ldHash(ix + 1, iy + 1, s);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  }
+  function ldFbm(x, y, s, oct) {
+    let v = 0, a = 0.5, f = 1, n = 0;
+    for (let i = 0; i < oct; i++) { v += a * ldNoise(x * f, y * f, s + i * 31); n += a; f *= 2.07; a *= 0.5; }
+    return v / n;
+  }
+  const clamp01 = (v) => (v < 0 ? 0 : (v > 1 ? 1 : v));
+  // a filled dot whose field peaks at `top` in the middle
+  function ldDot(u, v, cx, cy, r, top) {
+    const d = Math.hypot(u - cx, v - cy);
+    return d < r ? top * (1 - d / r) : 0;
+  }
+  // distance from p to segment a->b, and the parameter along it
+  function ldSeg(u, v, ax, ay, bx, by, out) {
+    const ex = bx - ax, ey = by - ay, l2 = ex * ex + ey * ey || 1;
+    const t = clamp01(((u - ax) * ex + (v - ay) * ey) / l2);
+    out.t = t; out.d = Math.hypot(u - (ax + ex * t), v - (ay + ey * t));
+    return out;
+  }
+  function ldRand(seed) { let s = seed >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+
+  // POOL: a domain-warped radial field. The warp gives it fingers and bays
+  // (liquid follows the floor), a handful of late satellites ring the edge.
+  function fieldPool(seed) {
+    const R = ldRand(seed), ph1 = R() * 6.28, ph2 = R() * 6.28, sats = [];
+    for (let i = 0; i < 6; i++) {
+      const a = R() * 6.28, r = 0.62 + R() * 0.24;
+      sats.push([Math.cos(a) * r, Math.sin(a) * r, 0.025 + R() * 0.05]);
+    }
+    return function (u, v) {
+      const wx = (ldFbm(u * 1.9 + 7.1, v * 1.9, seed, 3) - 0.5) * 0.5;
+      const wy = (ldFbm(u * 1.9, v * 1.9 + 3.3, seed + 5, 3) - 0.5) * 0.5;
+      const px = u + wx, py = v + wy, r = Math.hypot(px, py), th = Math.atan2(py, px);
+      const edge = 0.6 + 0.07 * Math.sin(th * 2 + ph1) + 0.05 * Math.sin(th * 3 + ph2)
+        + (ldFbm(Math.cos(th) * 2.2 + 11, Math.sin(th) * 2.2, seed + 9, 3) - 0.5) * 0.34;
+      let f = Math.pow(clamp01(1 - r / edge), 0.8);
+      for (let i = 0; i < sats.length; i++) f = Math.max(f, ldDot(u, v, sats[i][0], sats[i][1], sats[i][2], 0.16));
+      return f;
+    };
+  }
+  // SPLAT: an impact: a torn core, rays thrown out of it with a bead at the
+  // tip, and fine satellite spatter. `dir` biases the rays toward +v (the way
+  // the blood was travelling); without it they go all round (a wall hit).
+  function fieldSplat(seed, dir) {
+    const R = ldRand(seed), rays = [], sats = [], _s = { t: 0, d: 0 };
+    const nr = 9 + ((R() * 6) | 0);
+    for (let i = 0; i < nr; i++) {
+      const a = dir ? Math.PI / 2 + (R() + R() + R() - 1.5) * 1.3 : R() * 6.28;
+      const L = 0.34 + R() * (dir ? 0.5 : 0.4);
+      rays.push([Math.cos(a) * L, Math.sin(a) * L, 0.028 + R() * 0.045, Math.cos(a) * (L + 0.06 + R() * 0.07), Math.sin(a) * (L + 0.06 + R() * 0.07)]);
+    }
+    for (let i = 0; i < 26; i++) {
+      const a = dir ? Math.PI / 2 + (R() - 0.5) * 3.4 : R() * 6.28, r = 0.3 + R() * 0.6;
+      sats.push([Math.cos(a) * r, Math.sin(a) * r, 0.01 + R() * R() * 0.035]);
+    }
+    return function (u, v) {
+      const r = Math.hypot(u, v), th = Math.atan2(v, u);
+      const rc = 0.24 + (ldFbm(Math.cos(th) * 3 + 5, Math.sin(th) * 3, seed, 3) - 0.5) * 0.16;
+      let f = clamp01(1 - r / rc);
+      for (let i = 0; i < rays.length; i++) {
+        const q = ldSeg(u, v, 0, 0, rays[i][0], rays[i][1], _s);
+        const w = rays[i][2] * (1 - q.t * 0.72);
+        if (q.d < w) f = Math.max(f, (1 - q.d / w) * (0.62 - q.t * 0.36));
+        f = Math.max(f, ldDot(u, v, rays[i][3], rays[i][4], rays[i][2] * 0.9, 0.3));
+      }
+      for (let i = 0; i < sats.length; i++) f = Math.max(f, ldDot(u, v, sats[i][0], sats[i][1], sats[i][2], 0.28));
+      return f;
+    };
+  }
+  // DROP: an oblique landing — a body, a tail narrowing toward +v (the flight
+  // direction), a bead thrown off the tail's end, a couple of satellites.
+  function fieldDrop(seed) {
+    const R = ldRand(seed), bx = (R() - 0.5) * 0.12;
+    return function (u, v) {
+      const th = Math.atan2(v + 0.3, u);
+      const e = Math.hypot(u / 0.3, (v + 0.3) / 0.33) * (1 + (ldFbm(Math.cos(th) * 3, Math.sin(th) * 3, seed, 2) - 0.5) * 0.25);
+      let f = clamp01(1 - e);
+      if (v > -0.3 && v < 0.58) {
+        const k = (v + 0.3) / 0.88, w = 0.21 * Math.pow(1 - k, 1.25);
+        if (Math.abs(u) < w) f = Math.max(f, (1 - Math.abs(u) / w) * (0.62 - k * 0.3));
+      }
+      f = Math.max(f, ldDot(u, v, bx, 0.72, 0.075, 0.45));
+      f = Math.max(f, ldDot(u, v, 0.36, -0.38, 0.04, 0.4), ldDot(u, v, -0.33, -0.12, 0.03, 0.4));
+      return f;
+    };
+  }
+  // DOT: a drop that fell straight down — round with a scalloped crown edge.
+  function fieldDot(seed) {
+    const R = ldRand(seed), ph = R() * 6.28, sats = [];
+    for (let i = 0; i < 5; i++) { const a = R() * 6.28, r = 0.62 + R() * 0.2; sats.push([Math.cos(a) * r, Math.sin(a) * r, 0.03 + R() * 0.04]); }
+    return function (u, v) {
+      const r = Math.hypot(u, v), th = Math.atan2(v, u);
+      const edge = 0.46 * (1 + 0.09 * Math.sin(th * 11 + ph) + (ldFbm(Math.cos(th) * 3, Math.sin(th) * 3, seed, 2) - 0.5) * 0.3);
+      let f = clamp01(1 - r / edge);
+      for (let i = 0; i < sats.length; i++) f = Math.max(f, ldDot(u, v, sats[i][0], sats[i][1], sats[i][2], 0.4));
+      return f;
+    };
+  }
+  // DRIP: a run down a wall. Arrives top (+v) first, ends in a heavier bead.
+  // The quad is thin, so the bead is authored squashed in v.
+  function fieldDrip(seed) {
+    return function (u, v) {
+      if (v < -0.95 || v > 0.97) return 0;
+      const xc = 0.1 * Math.sin(v * 2.6 + seed);
+      const w = 0.42 + (ldFbm(0, v * 3.5, seed, 2) - 0.5) * 0.3;
+      let m = 1 - Math.abs(u - xc) / w;
+      const bead = 1 - Math.hypot((u - xc) / 0.7, (v + 0.82) / 0.1);
+      m = Math.max(m, bead);
+      if (m <= 0) return 0;
+      const arr = 0.1 + 0.9 * (v + 1) / 2;
+      return arr * Math.min(1, m * 3);
+    };
+  }
+  // SMEAR: a drag. Arrives at the START (-v, under the body) first, tapers and
+  // breaks into striations toward the end, the way a dragged pool thins out.
+  function fieldSmear(seed) {
+    return function (u, v) {
+      if (v < -0.96 || v > 0.96) return 0;
+      const k = (1 - v) / 2;                              // 1 at the start, 0 at the end
+      const w = 0.3 + 0.55 * Math.pow(k, 0.6);
+      const m = 1 - Math.abs(u + (ldFbm(v * 2, 0, seed, 2) - 0.5) * 0.2) / w;
+      if (m <= 0) return 0;
+      const stria = 0.45 + 0.55 * ldFbm(u * 8.5, v * 0.7, seed + 3, 3);
+      return (0.1 + 0.9 * k) * Math.min(1, m * 2.6) * (k > 0.55 ? 1 : stria + (1 - stria) * (k / 0.55));
+    };
+  }
+
+  let ldTex = null;
+  function landAtlas() {
+    if (ldTex) return ldTex;
+    const W = 512, H = 256, C = 128;
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    const img = g.createImageData(W, H), px = img.data;
+    const cells = [
+      [CELL_POOL[0], fieldPool(11)], [CELL_POOL[1], fieldPool(29)],
+      [CELL_SPLAT[0], fieldSplat(41, true)], [CELL_SPLAT[1], fieldSplat(57, false)],
+      [CELL_DROP, fieldDrop(71)], [CELL_DOT, fieldDot(83)],
+      [CELL_DRIP, fieldDrip(97)], [CELL_SMEAR, fieldSmear(101)],
+    ];
+    for (let k = 0; k < cells.length; k++) {
+      const col = cells[k][0][0], row = cells[k][0][1], fn = cells[k][1];
+      for (let y = 0; y < C; y++) {
+        const v = 1 - (y + 0.5) / C * 2;                   // +1 at the cell's top
+        for (let x = 0; x < C; x++) {
+          const u = (x + 0.5) / C * 2 - 1;
+          // hard zero on a 3-texel border so bilinear + mips never bleed cells
+          const edge = Math.min(x, y, C - 1 - x, C - 1 - y) < 3 ? 0 : 1;
+          const f = edge ? clamp01(fn(u, v)) : 0;
+          const i = ((row * C + y) * W + col * C + x) * 4;
+          px[i] = Math.round(f * 255);
+          // pores: a fine, contrasty noise (world-scale grit, not a blob)
+          px[i + 1] = Math.round(clamp01((ldFbm((col * C + x) * 0.11, (row * C + y) * 0.11, 3, 3) - 0.5) * 2.2 + 0.5) * 255);
+          px[i + 2] = 0; px[i + 3] = 255;
+        }
+      }
+    }
+    g.putImageData(img, 0, 0);
+    ldTex = new THREE.CanvasTexture(c);
+    ldTex.wrapS = ldTex.wrapT = THREE.ClampToEdgeWrapping;
+    return ldTex;
+  }
+
+  // ---- the filter colours, in SCREEN terms (multiplied onto the drawn floor) --
+  // Tuned against a pale concrete floor at (190,188,182) on screen:
+  //   fresh core (103,5,4)  fresh rim (144,22,18)   hue 0-2 deg — RED
+  //   dried core (51,11,7)  dried ring (62,18,12)   hue 5-8 deg — dark red-brown
+  // Partial coverage keeps green/blue falling faster than red (pow 0.3), so an
+  // antialiased edge or a fading mark goes (167,53,49) salmon-red, never pink.
+  const LD_VS = [
+    "attribute vec4 aCell;",   // xy atlas offset, z unused, w 1 = wall
+    "attribute vec4 aTime;",   // birth, grow seconds, dry seconds, revealed at birth
+    "attribute vec4 aFx;",     // alpha, thickness, edge shrink, final threshold
+    "uniform float uTime;",
+    "varying vec2 vUv;",
+    "varying vec4 vS;",        // threshold, dry, alpha, thickness
+    "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "void main() {",
+    "  vUv = aCell.xy + vec2(" + LD_CELL_W.toFixed(4) + ", " + LD_CELL_H.toFixed(4) + ") * uv;",
+    "  float age = max(0.0, uTime - aTime.x);",
+    "  float g = aTime.y > 0.0 ? clamp(age / aTime.y, 0.0, 1.0) : 1.0;",
+    "  g = aTime.w + (1.0 - aTime.w) * (1.0 - pow(1.0 - g, 2.2));",   // gush, then a slow creep, then stop
+    "  vS = vec4(mix(1.0, aFx.w, g) + aFx.z, clamp(age / aTime.z, 0.0, 1.0), aFx.x, aFx.y);",
+    "  mat3 m3 = mat3(modelMatrix) * mat3(instanceMatrix);",
+    "  vN = normalize(m3 * vec3(0.0, 0.0, 1.0));",
+    "  vTx = normalize(m3 * vec3(1.0, 0.0, 0.0));",
+    "  vTy = normalize(m3 * vec3(0.0, 1.0, 0.0));",
+    "  vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);",
+    "  vView = cameraPosition - wp.xyz;",
+    "  gl_Position = projectionMatrix * viewMatrix * wp;",
+    "}",
+  ].join("\n");
+  const LD_FS = [
+    "uniform sampler2D uMap;",
+    "varying vec2 vUv; varying vec4 vS;",
+    "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "void main() {",
+    "  vec4 t = texture2D(uMap, vUv);",
+    // every lookup before the discard/branches: implicit-lod reads want uniform flow
+    "  float gx = texture2D(uMap, vUv + vec2(1.0 / 512.0, 0.0)).r - t.r;",
+    "  float gy = texture2D(uMap, vUv + vec2(0.0, 1.0 / 256.0)).r - t.r;",
+    "  float thr = vS.x;",
+    "  float cov = smoothstep(thr, thr + 0.02, t.r);",
+    "  float c = cov * vS.z;",
+    "  float dist = length(vView);",
+    "  c *= 1.0 - smoothstep(48.0, 72.0, dist);",
+    "  if (c < 0.004) discard;",
+    // how far inside the live edge this texel is: thin rim -> thick middle
+    "  float depth = clamp((t.r - thr) / 0.32, 0.0, 1.0);",
+    "  float body = clamp(depth * vS.w * (0.72 + 0.56 * t.g), 0.0, 1.0);",
+    // thin blood dries first; the middle of a pool stays wet longest
+    "  float dry = clamp(vS.y * (1.55 - depth * vS.w * 0.75), 0.0, 1.0);",
+    "  dry = dry * dry * (3.0 - 2.0 * dry);",
+    "  vec3 fresh = mix(vec3(0.76, 0.115, 0.100), vec3(0.54, 0.028, 0.022), body);",
+    "  vec3 dried = mix(vec3(0.42, 0.125, 0.085), vec3(0.27, 0.058, 0.036), body);",
+    "  vec3 F = mix(fresh, dried, dry);",
+    // coffee ring: a dried edge is darker than just inside it
+    "  F *= 1.0 - dry * (1.0 - clamp(depth / 0.25, 0.0, 1.0)) * 0.22;",
+    // WET GLINT: the meniscus tilts the surface at the edge; a fixed overhead
+    // key light catches it. Gone as it dries.
+    "  float wet = (1.0 - dry) * (1.0 - dry);",
+    "  if (wet > 0.02) {",
+    "    vec3 V = normalize(vView);",
+    "    vec3 N0 = dot(vN, V) < 0.0 ? -vN : vN;",
+    "    float mb = (1.0 - depth) * (1.0 - depth) * 26.0 + 3.0;",
+    "    vec3 N = normalize(N0 - (vTx * gx + vTy * gy) * mb);",
+    "    vec3 L = normalize(vec3(0.3, 1.0, 0.22));",
+    // a GLINT is crisp — on or off, a few texels wide. A soft half-strength
+    // white over red is exactly pink, so there is no soft half-strength.
+    "    float spec = smoothstep(0.35, 0.6, pow(max(dot(N, normalize(L + V)), 0.0), 40.0));",
+    "    float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);",
+    "    F = mix(F, vec3(1.25, 1.22, 1.2), clamp(wet * (spec * 0.8 + fres * 0.2), 0.0, 0.8));",
+    "  }",
+    "  vec3 k = vec3(1.0 + (F.r - 1.0) * c, vec2(1.0) + (F.gb - vec2(1.0)) * pow(c, 0.3));",
+    // 2x multiply: blend is src*dst + dst*src, so 0.5 = leave the floor alone
+    "  gl_FragColor = vec4(clamp(k * 0.5, 0.0, 1.0), 1.0);",
+    "}",
+  ].join("\n");
+
+  let ldMesh = null, ldGeo = null, ldMat = null, ldCell = null, ldTime = null, ldFx = null;
+  let ldClock = 0, ldMatDirty = false, ldFxDirty = false;
+  const ldFree = [];                       // free slot indices
+  const ldProxies = [];                    // pooled Object3D transforms (records' `m`)
+  const _ldZero = new THREE.Matrix4().makeScale(0, 0, 0);
+  function landLayer() {
+    if (!ldMesh) {
+      ldGeo = new THREE.PlaneGeometry(1, 1);
+      ldCell = new THREE.InstancedBufferAttribute(new Float32Array(LD_CAP * 4), 4);
+      ldTime = new THREE.InstancedBufferAttribute(new Float32Array(LD_CAP * 4), 4);
+      ldFx = new THREE.InstancedBufferAttribute(new Float32Array(LD_CAP * 4), 4);
+      ldCell.setUsage(THREE.DynamicDrawUsage); ldTime.setUsage(THREE.DynamicDrawUsage); ldFx.setUsage(THREE.DynamicDrawUsage);
+      ldGeo.setAttribute("aCell", ldCell); ldGeo.setAttribute("aTime", ldTime); ldGeo.setAttribute("aFx", ldFx);
+      ldMat = new THREE.ShaderMaterial({
+        uniforms: { uMap: { value: landAtlas() }, uTime: { value: 0 } },
+        vertexShader: LD_VS, fragmentShader: LD_FS,
+        transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+        blendSrc: THREE.DstColorFactor, blendDst: THREE.SrcColorFactor,
+        blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+        fog: false, lights: false,
+      });
+      ldMat._shared = true;
+      ldMesh = new THREE.InstancedMesh(ldGeo, ldMat, LD_CAP);
+      ldMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      ldMesh.frustumCulled = false;        // instances span the map; the unit quad's bounds say nothing
+      ldMesh.raycast = function () {};     // a stain is never a surface: bullets, lenses, feet go through
+      ldMesh.castShadow = ldMesh.receiveShadow = false;
+      // under every other transparent layer (mist, glass, the sea), so what is
+      // drawn over a stain is drawn over the stained floor
+      ldMesh.renderOrder = -4;
+      ldMesh.name = "gore-land-decals";
+      for (let i = 0; i < LD_CAP; i++) { ldMesh.setMatrixAt(i, _ldZero); ldFree.push(LD_CAP - 1 - i); }
+      ldMesh.instanceMatrix.needsUpdate = true;
+    }
+    const sc = scene();
+    if (sc && ldMesh.parent !== sc) sc.add(ldMesh);
+    return ldMesh;
+  }
+  // claim a slot + a transform proxy. null when the pool is full (the caller
+  // recycles the oldest far mark and asks again).
+  function ldAlloc() {
+    landLayer();
+    if (!ldFree.length) return null;
+    const slot = ldFree.pop();
+    const m = ldProxies.pop() || new THREE.Object3D();
+    m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
+    return { slot, m };
+  }
+  // write a slot's shape + clocks once, at spawn
+  function ldWrite(slot, m, cell, kind, growT, dryT, grow0, thick, thrEnd, alpha, delay) {
+    m.updateMatrix();
+    ldMesh.setMatrixAt(slot, m.matrix);
+    const i = slot * 4;
+    ldCell.array[i] = cell[0] * LD_CELL_W; ldCell.array[i + 1] = 1 - (cell[1] + 1) * LD_CELL_H;
+    ldCell.array[i + 2] = 0; ldCell.array[i + 3] = kind;
+    ldTime.array[i] = ldClock + (delay || 0); ldTime.array[i + 1] = growT; ldTime.array[i + 2] = Math.max(0.5, dryT); ldTime.array[i + 3] = grow0;
+    ldFx.array[i] = alpha; ldFx.array[i + 1] = thick; ldFx.array[i + 2] = 0; ldFx.array[i + 3] = thrEnd;
+    ldMatDirty = true; ldCell.needsUpdate = true; ldTime.needsUpdate = true; ldFxDirty = true;
+  }
+  // per-frame: only when a mark's fade/burial/wash actually moved it
+  function ldSetFx(slot, alpha, shrink) {
+    const i = slot * 4, a = ldFx.array;
+    if (Math.abs(a[i] - alpha) > 0.004 || Math.abs(a[i + 2] - shrink) > 0.004) { a[i] = alpha; a[i + 2] = shrink; ldFxDirty = true; }
+  }
+  function ldRelease(rec) {
+    if (!rec || rec.slot == null || rec.slot < 0) return;
+    if (ldMesh) {
+      ldMesh.setMatrixAt(rec.slot, _ldZero);
+      ldFx.array[rec.slot * 4] = 0;
+      ldMatDirty = true; ldFxDirty = true;
+    }
+    ldFree.push(rec.slot);
+    if (rec.m && ldProxies.length < LD_CAP) ldProxies.push(rec.m);
+    rec.slot = -1;
+  }
+  // end of the gore frame: push what changed (one upload each, at most)
+  function ldFlush(dt) {
+    ldClock += dt;
+    if (!ldMesh) return;
+    ldMat.uniforms.uTime.value = ldClock;
+    if (ldMatDirty) { ldMesh.instanceMatrix.needsUpdate = true; ldMatDirty = false; }
+    if (ldFxDirty) { ldFx.needsUpdate = true; ldFxDirty = false; }
   }
 
   function dist2Cam(x, z) {
@@ -898,6 +1288,7 @@
   // path goes through this, which is also what keeps slickN honest.
   function freeSlick(s) {
     if (!s) return;
+    if (s.slot != null) { ldRelease(s); return; }   // a land mark: slot + transform back to the pool
     if (s.water) {
       slickN--;
       if (slickN < 0) slickN = 0;
@@ -1041,8 +1432,7 @@
     if (b.wet) CBZ.goreBloom(m.position.x, m.position.y, m.position.z, { amount: 0.4 });
     // a chunk bleeds where it stops, but `grow` is a RADIUS: the authored
     // 0.4-0.8 was a 1.6 m pool under a piece of forearm.
-    else spawnSplat(m.position.x, m.position.z,
-      realism() ? 0.16 + Math.random() * 0.16 : 0.4 + Math.random() * 0.4, BLOOD_D, false);
+    else spawnSplat(m.position.x, m.position.z, 0.16 + Math.random() * 0.16, BLOOD_D, false, _poolO);
   }
 
   // ---- CHUM: a sustained bleed source, and the seam the shark AI reads ------
@@ -1340,69 +1730,126 @@
     return floorAt(x, z);
   }
 
-  function spawnSplat(x, z, grow, color, linger) {
-    // splat cap rides the quality tier (read live; fallback = old 170)
-    if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
+  // the land decal budget (read live; the quality tier can move mid-run)
+  function landCap() { return CBZ.qScale ? CBZ.qScale(85, 300) : 170; }
+  // out of instance slots (walls + ground together): give up the oldest mark,
+  // far ones first, and take its slot. Water slicks never hold a slot.
+  function claimLand() {
+    let c = ldAlloc();
+    if (c) return c;
+    let pick = -1;
+    for (let i = 0; i < splats.length; i++) {
+      const s = splats[i];
+      if (s.slot == null || s.slot < 0) continue;
+      if (pick < 0) pick = i;
+      if (dist2Cam(s.m.position.x, s.m.position.z) > 50 * 50) { pick = i; break; }
+    }
+    if (pick >= 0) freeSlick(splats.splice(pick, 1)[0]);
+    else if (walls.length) ldRelease(walls.shift());
+    return ldAlloc();
+  }
+  // a mark's seat height: flush on a flat floor (polygonOffset does the rest);
+  // on terrain a flat quad spans a curved hill, so it keeps the old clearance.
+  function landLift(s) { return s && s.grade >= FLATISH ? 0.05 : 0.015; }
+
+  /* spawnSplat(x, z, grow, color, linger, o) — one ground mark.
+     `grow` is the mark's final RADIUS in metres (unchanged contract), `linger`
+     a body's pool. o.kind picks the shape:
+       "pool"  spreads from its middle over seconds and stops (default when linger)
+       "splat" an impact splat, rays thrown toward o.dir (or all round, o.radial)
+       "drop"  a droplet that landed at an angle: tail toward o.dir, stretched
+               by o.elong (= 1 / sin(impact angle))
+       "dot"   a droplet that fell straight down (default otherwise)
+     `color` is ignored: the shade is the blood's age and depth, not the caller's. */
+  function spawnSplat(x, z, grow, color, linger, o) {
+    if (splats.length > landCap()) recycleFarSplat();
+    o = o || NO_OPTS;
+    const kind = o.kind || (linger ? "pool" : "dot");
     const s = slopeOn() ? groundGrad(x, z) : null;
     // a slope cannot hold a pool — the steeper it is, the less stays put (and
     // the rest leaves as the trickle below).
     const steep = !!(s && s.grade > STEEP);
     const g = steep ? grow * (0.42 + 0.28 * (STEEP / s.grade)) : grow;
-    const m = new THREE.Mesh(blob(),
-      new THREE.MeshBasicMaterial({ color: decalCol(color || BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
-    seatDecal(m, x, z, Math.random() * 6.28, 0.04 + Math.random() * 0.02, s);
-    m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
-    scene().add(m);
-    // pools GROW over a few seconds (a body keeps draining) and the ones near
-    // the PLAYER linger far longer — that's the evidence you walk back past.
-    // Far pools keep the short clock so the cap budget stays where it matters.
+    const c = claimLand();
+    if (!c) return null;
+    const m = c.m;
     const near = dist2Cam(x, z) < 24 * 24;
-    splats.push({
-      m, t: 0, grow: g, max: g, growT: linger ? 3.4 : 0.5,
-      hold: linger ? (near ? 75 : 26) : (near ? 16 : 10), fade: linger ? 16 : 8,
-      ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,  // per-pool stretch
+    const hasDir = o.dirX != null && (o.dirX || o.dirZ);
+    let cell, sx, sy, spin = Math.random() * 6.28, growT, grow0, dryT, thick, thrEnd, hold, fade, rim;
+    if (kind === "pool") {
+      // the field's edge sits at ~0.58 of the half-quad, so the quad is 3.45x
+      // the radius; satellites reach a little past it
+      cell = CELL_POOL[(Math.random() * 2) | 0];
+      sy = g * 3.45; sx = sy * (0.82 + Math.random() * 0.36);
+      growT = linger ? 5 + g * 6 + Math.random() * 3 : 1.2 + g * 2;
+      grow0 = linger ? 0.28 : 0.4;
+      dryT = linger ? 26 + g * 26 : 14 + g * 20;
+      thick = linger ? 1 : 0.8; thrEnd = 0.06 + Math.random() * 0.04;
+      hold = linger ? (near ? 90 : 30) : (near ? 45 : 16); fade = linger ? 16 : 10; rim = 0.29;
+    } else if (kind === "splat") {
+      cell = o.radial || !hasDir ? CELL_SPLAT[1] : CELL_SPLAT[0];
+      sx = sy = g * 4;
+      if (hasDir) spin = Math.atan2(-o.dirX, -o.dirZ);   // rays run away from the wound
+      growT = 0.16; grow0 = 0.25; dryT = 12 + g * 30; thick = 0.8; thrEnd = 0.07;
+      hold = near ? 70 : 24; fade = 12; rim = 0.25;
+    } else {
+      // a droplet's mark, `2g` across; an angled one is longer than it is wide
+      // by 1/sin(angle) and throws its tail the way it was going
+      const drop = kind === "drop" && hasDir;
+      cell = drop ? CELL_DROP : CELL_DOT;
+      sx = (g * 2) / (drop ? 0.6 : 0.92);
+      sy = sx * (drop ? Math.max(1, Math.min(3.4, o.elong || 1)) : 1);
+      if (drop) spin = Math.atan2(-o.dirX, -o.dirZ);
+      if (Math.random() < 0.5) sx = -sx;                   // mirror: satellites either side
+      growT = 0.08; grow0 = 0.35; dryT = 5 + Math.random() * 5; thick = 0.55; thrEnd = 0.1;
+      hold = near ? 40 : 14; fade = 8; rim = 0.2;
+    }
+    seatDecal(m, x, z, spin, landLift(s), s);
+    m.scale.set(sx, sy, 1);
+    ldWrite(c.slot, m, cell, 0, growT, dryT, grow0, thick, thrEnd, 1, 0);
+    const rec = {
+      m, slot: c.slot, land: kind, t: 0, grow: g, max: g, hold, fade, rim,
       // snow that falls FROM NOW buries it; a big pool takes more of it than a
       // droplet mark, and the jitter is what makes a field go under raggedly.
       snow0: snowCover(), snowNeed: 0.22 + Math.min(0.30, g * 0.12) + Math.random() * 0.22,
-    });
+    };
+    splats.push(rec);
     // THE RUN-OFF: what the hillside wouldn't hold leaves down the fall line.
-    // The threshold is above every droplet mark (the landing splats top out at
-    // 0.8) and below every real pool (a kill pool starts at 2.0), so a body
-    // bleeding on a slope trails ONE streak instead of twenty — the difference
-    // between a run-off and a red spiderweb, and ~20 draw calls per kill.
+    // The threshold is above every droplet mark and below every real pool, so
+    // a body bleeding on a slope trails ONE streak instead of twenty.
     if (steep && grow > 0.9) {
       const dl = Math.hypot(s.gx, s.gz) || 1;
       spawnStreak(x, z, -s.gx / dl, -s.gz / dl, Math.min(5.5, grow * (0.9 + s.grade * 1.9)));
     }
+    return rec;
   }
+  // reused option records (no allocation per mark)
+  const NO_OPTS = {}, _poolO = { kind: "pool" }, _dotO = { kind: "dot" };
+  const _dropO = { kind: "drop", dirX: 0, dirZ: 0, elong: 1 };
+  const _splatO = { kind: "splat", dirX: null, dirZ: null, radial: false };
 
-  // a long, thin blood smear dragged along a travel line (run-over kills, and
-  // the downhill run-off above): the wheel pulls the pool with it, so the decal
-  // stretches out over ~half a second along the direction given instead of
-  // blooming in place. On terrain it re-seats as it draws (see the record
-  // below), so a smear across a hillside follows the hillside.
+  // a long blood smear dragged along a travel line (run-over kills, and the
+  // downhill run-off above). It is laid at its final length and DRAWN by the
+  // shader from the start (under the body) to the end over ~half a second,
+  // thinning into striations the way a dragged pool does.
   function spawnStreak(x0, z0, dx, dz, len) {
-    // splat cap rides the quality tier (read live; fallback = old 170)
-    if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
-    const s = slopeOn() ? groundGrad(x0, z0) : null;
-    const m = new THREE.Mesh(G_PLANE,
-      new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
-    seatDecal(m, x0, z0, Math.atan2(-dx, -dz), 0.045, s);   // local +y axis → world (dx,dz)
-    m.renderOrder = 3; m.scale.set(0.55, 0.1, 1);
-    scene().add(m);
+    if (splats.length > landCap()) recycleFarSplat();
+    const c = claimLand();
+    if (!c) return null;
+    const cx = x0 + dx * len * 0.5, cz = z0 + dz * len * 0.5;
+    const s = slopeOn() ? groundGrad(cx, cz) : null;
+    const w = 0.55 + Math.random() * 0.25;
+    seatDecal(c.m, cx, cz, Math.atan2(-dx, -dz), landLift(s), s);   // local +y axis → world (dx,dz)
+    c.m.scale.set(w / 0.85, len / 1.92, 1);
+    ldWrite(c.slot, c.m, CELL_SMEAR, 0, 0.45, 30, 0, 0.85, 0.06, 1, 0);
     const near = dist2Cam(x0, z0) < 24 * 24;
-    splats.push({
-      m, streak: true, x0, z0, dx, dz, t: 0, grow: len, max: len,
-      // A STREAK IS DRAWN, NOT STAMPED: its centre slides metres down-range as
-      // it grows, so on terrain the seat it was born on is wrong by the time it
-      // finishes. Any streak on a real gradient re-seats per frame while it
-      // draws (the updater stops the moment it reaches full length) — a tire
-      // smear down a hill needs this every bit as much as a downhill trickle
-      // does, so it keys off the GROUND, not off which caller asked.
-      slope: !!(s && s.grade >= FLATISH), spin: Math.atan2(-dx, -dz),
-      w: 0.55 + Math.random() * 0.25, hold: near ? 60 : 28, fade: 14,
+    const rec = {
+      m: c.m, slot: c.slot, land: "smear", streak: true, x0, z0, dx, dz, t: 0, grow: len, max: len,
+      hold: near ? 60 : 28, fade: 14, rim: 0.45,
       snow0: snowCover(), snowNeed: 0.24 + Math.random() * 0.22,
-    });
+    };
+    splats.push(rec);
+    return rec;
   }
 
   // is this collider's struck face SEE-THROUGH (intact glass pane / door vision
@@ -1550,34 +1997,44 @@
       bestT = t0; best = { c, t: t0, face };
     }
     if (!best) return;
+    const c = claimLand();
+    if (!c) return;
     const hx = x + dx * best.t, hz = z + dz * best.t;
-    const m = new THREE.Mesh(blob(),
-      new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-    let nx = 0, nz = 0, off = 0.03;
+    let nx = 0, nz = 0;
     if (best.face === "xmin") { nx = -1; } else if (best.face === "xmax") { nx = 1; }
     else if (best.face === "zmin") { nz = -1; } else { nz = 1; }
-    m.position.set(hx + nx * off, y + 0.1 + Math.random() * 0.3, hz + nz * off);
-    if (nx) m.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
-    m.rotation.z = Math.random() * 6.28;
-    m.renderOrder = 4;
-    const sz = (0.7 + amt * 0.7) * 0.55;   // blob radius spans 2x a unit plane
-    m.scale.set(0.1, 0.1, 1);
-    scene().add(m);
-    walls.push({
-      m, t: instant ? 0.4 : 0, grow: sz, hold: 26, fade: 12,
-      wx: 0.85 + Math.random() * 0.3, wy: 0.85 + Math.random() * 0.3,  // per-splat stretch
-    });
-    // a couple of drip streaks running down from the splat
+    // 2 cm off the struck face: the collider box IS the drawn wall in the
+    // prison (addBox registers both), polygonOffset wins the rest
+    const off = 0.02, ry = nx ? (nx > 0 ? Math.PI / 2 : -Math.PI / 2) : (nz > 0 ? 0 : Math.PI);
+    const m = c.m;
+    const cy = y + 0.1 + Math.random() * 0.3;
+    m.position.set(hx + nx * off, cy, hz + nz * off);
+    m.rotation.set(0, ry, Math.random() * 6.28);
+    // a wall is hit square-on, so the splat throws rays all round: a torn core
+    // ~40 cm across for an ordinary kill, spatter out to a metre and more
+    const g = (0.7 + amt * 0.7) * 0.55 * 0.55 * (0.85 + Math.random() * 0.3);
+    const S = g * 4;
+    m.scale.set(Math.random() < 0.5 ? -S : S, S, 1);
+    ldWrite(c.slot, m, CELL_SPLAT[1], 1, instant ? 0.05 : 0.12, 20 + Math.random() * 15, instant ? 1 : 0.3, 0.85, 0.07, 1, 0);
+    const near = dist2Cam(hx, hz) < 24 * 24;
+    walls.push({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 });
+    // the heavy part runs: 1-3 drips out of the core, each crawling down at a
+    // few cm a second and stopping where the blood runs out
     const drips = Math.min(3, 1 + Math.round(amt));
+    const core = S * 0.18;
     for (let d = 0; d < drips; d++) {
-      const dm = new THREE.Mesh(G_PLANE,
-        new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-      dm.position.copy(m.position); dm.rotation.copy(m.rotation);
-      dm.position.x += nx ? 0 : (Math.random() - 0.5) * sz * 1.3;
-      dm.position.z += nx ? (Math.random() - 0.5) * sz * 1.3 : 0;
-      dm.scale.set(0.04, 0.1, 1);
-      scene().add(dm);
-      walls.push({ m: dm, t: 0, grow: 0, hold: 26, fade: 12, drip: 0.3 + Math.random() * 0.7, dripY: m.position.y });
+      const dc = claimLand();
+      if (!dc) break;
+      const dm = dc.m;
+      const L = 0.2 + Math.random() * 0.6, wd = 0.03 + Math.random() * 0.03;
+      const along = (Math.random() - 0.5) * core * 2;
+      const top = cy - Math.random() * core * 0.6;
+      dm.position.set(hx + nx * (off + 0.002) + (nx ? 0 : along), top - L * 0.5, hz + nz * (off + 0.002) + (nx ? along : 0));
+      dm.rotation.set(0, ry, 0);                          // local +y is world up: it runs DOWN
+      dm.scale.set(wd / 0.42, L / 1.92, 1);
+      ldWrite(dc.slot, dm, CELL_DRIP, 1, L / (0.06 + Math.random() * 0.1), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
+        (instant ? 0.1 : 0.25) + Math.random() * 0.5);
+      walls.push({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 });
     }
   }
 
@@ -2141,7 +2598,8 @@
   CBZ.goreDrip = function (x, z, size) {
     if (!CBZ.scene) return;
     if (dist2Cam(x, z) > 55 * 55) return;
-    spawnSplat(x, z, Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)), BLOOD_D, false);
+    // `size` keeps its old scale (0.1-0.5); a walking drip lands 2-6 cm across
+    spawnSplat(x, z, Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)) * 0.12, BLOOD_D, false, _dotO);
   };
 
   // ============================================================
@@ -2985,6 +3443,17 @@
     const pk = realism() ? POOL_K : 1;
     spawnSplat(pgx, pgz, (blunt ? 0.45 : (1.1 + amt * 0.9 + (big ? 0.6 : 0))) * pk, BLOOD_D, true);
     if (big) spawnSplat(x - dx * 0.5, z - dz * 0.5, (0.6 + amt * 0.4) * pk, BLOOD, true);
+    // A FEW BIG SPLATS, not two dozen equal blobs: the heavy slugs of blood
+    // that leave the wound first land as one or two torn impact splats down
+    // the shot line; the fine spray (LAYER 1) lands as small marks around them.
+    if (!blunt) {
+      const nbig = (head || big) ? 2 : 1;
+      for (let i = 0; i < nbig; i++) {
+        const r = hasDir ? 0.5 + Math.random() * 1.2 : Math.random() * 0.6, sd = (Math.random() - 0.5) * 0.6;
+        _splatO.dirX = hasDir ? dx : null; _splatO.dirZ = hasDir ? dz : null; _splatO.radial = !hasDir;
+        spawnSplat(x + dx * r + px * sd, z + dz * r + pz * sd, (0.1 + Math.random() * 0.1) * (0.7 + amt * 0.4), BLOOD, false, _splatO);
+      }
+    }
     if (!blunt) restingPool(pgx, pgz, amt);   // blunt already drains in waves below
 
     // --- LAYER 5: WALL SPLATTER — vertical decal on a surface behind the body -
@@ -3149,6 +3618,9 @@
     if (slopeMemo.size) slopeMemo.clear();
     _msX = 1e9;                          // and the aerosol-over-sea cell memo (see mistOverSea)
     if (!killTapped) installKillTap();   // peds.js loads after us — tap once it exists
+    // the land-decal layer lives in the scene from the first frame, so its one
+    // program compiles at load and not in the frame of the first kill
+    if (CBZ.scene && (!ldMesh || ldMesh.parent !== CBZ.scene)) landLayer();
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
 
@@ -3309,8 +3781,17 @@
           // 0.3-0.8 stamped a 60-160 cm blot for every single drop — two dozen
           // of them per kill, overlapping into one red carpet. Hand-sized marks
           // let the SPRAY PATTERN read: you can see which way the round went.
-          const g = realism() ? 0.08 + Math.random() * 0.13 : 0.3 + Math.random() * 0.5;
-          spawnSplat(m.position.x, m.position.z, g, BLOOD_D, false);
+          // And the mark is the size of the DROP (a few cm, most of them
+          // small, the odd big one), stretched by how flat it came in: a drop
+          // landing at angle A is 1/sin(A) times longer than it is wide, tail
+          // pointing the way it was going. That is what makes a spray pattern
+          // readable as a direction instead of as scattered dots.
+          const hs = Math.hypot(b.vx, b.vz), sinA = Math.abs(b.vy) / (Math.hypot(hs, b.vy) || 1);
+          const g = (b.rad || 0.03) * (0.55 + Math.random() * Math.random() * 1.6);
+          _dropO.kind = sinA > 0.9 || hs < 0.3 ? "dot" : "drop";
+          _dropO.dirX = hs > 0 ? b.vx / hs : 0; _dropO.dirZ = hs > 0 ? b.vz / hs : 0;
+          _dropO.elong = 1 / Math.max(0.3, sinA);
+          spawnSplat(m.position.x, m.position.z, g, BLOOD_D, false, _dropO);
           rm(m); bits.splice(i, 1); continue;
         }
         if (gibCity) {
@@ -3428,29 +3909,12 @@
         const kw = Math.min(1, s.t / s.growT);
         const scw = s.grow * (0.28 + 0.72 * Math.sqrt(kw));
         s.m.scale.set(Math.max(0.1, scw * s.ax), Math.max(0.1, scw * s.az), 1);
-      } else if (s.streak) {
-        // tire smear: stretches down the travel line over ~half a second,
-        // its centre sliding forward so the streak is DRAWN, not stamped.
-        const k = Math.min(1, s.t / 0.45);
-        const L = Math.max(0.2, s.grow * k);
-        s.m.scale.set(s.w, L, 1);
-        const cx = s.x0 + s.dx * L * 0.5, cz = s.z0 + s.dz * L * 0.5;
-        // a smear crossing TERRAIN re-seats on the surface as its centre slides
-        // (only while it is still growing — once drawn it never moves again).
-        if (s.slope && k < 1) seatDecal(s.m, cx, cz, s.spin, 0.045, groundGrad(cx, cz));
-        else { s.m.position.x = cx; s.m.position.z = cz; }
-      } else {
-        // pools GROW over seconds: a fast initial blot, then a slow creep out
-        // to full size as the body drains (growT: ~3.4s for kill pools).
-        const k = Math.min(1, s.t / (s.growT || 0.5));
-        const sc = s.grow * (0.34 + 0.66 * Math.sqrt(k));
-        s.m.scale.set(Math.max(0.1, sc * (s.ax || 1)), Math.max(0.1, sc * (s.az || 1)), 1);
       }
+      // (land marks spread, draw and dry on the GPU off one clock — see the
+      // STAIN IN THE FLOOR block; nothing to move here)
       const fadeIn = Math.min(1, s.t * 4);
       const fadeOut = s.t > s.hold ? Math.max(0, 1 - (s.t - s.hold) / s.fade) : 1;
-      // a slick is a film, not a pool. And a pool is nearly OPAQUE: at 0.66 the
-      // white prison concrete came through it and the blood rendered as bright
-      // paint-pink; blood sitting on a light floor reads dark.
+      // a slick is a film, not a pool.
       // GOING UNDER: a surface slick is ON the water and is never snowed on.
       const under = s.water ? 0 : buriedBy(s, snowCoverNow);
       // DILUTION: what the sea has already carried off is not on the sand any
@@ -3471,26 +3935,22 @@
         const el = (cp.y - mp.y) / (Math.sqrt(hx * hx + hz * hz) + 0.5);
         seen = (el - 0.01) / 0.07; seen = seen < 0 ? 0 : (seen > 1 ? 1 : seen);
       }
-      s.m.material.opacity = (s.water ? 0.55 * seen : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under) * (1 - dil);
+      if (s.water) s.m.material.opacity = 0.55 * seen * fadeIn * fadeOut * (1 - under) * (1 - dil);
+      // a land mark fades by RECEDING as well as thinning (a translucent red
+      // over pale concrete is pink), and what the swash ate comes off its edge
+      else if (s.slot >= 0) ldSetFx(s.slot, fadeOut * (1 - under) * (1 - dil),
+        (1 - Math.min(1, s.grow / (s.max || s.grow || 1))) * 0.6 + (1 - fadeOut) * 0.3);
       if (under >= 1 || dil >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
     }
 
     for (let i = walls.length - 1; i >= 0; i--) {
       const w = walls[i]; w.t += dt;
-      if (w.drip) {
-        // drip streak crawls downward then halts, growing its length
-        const len = Math.min(0.9, w.t * w.drip);
-        w.m.scale.set(0.04 + w.t * 0.01, len, 1);
-        w.m.position.y = w.dripY - len * 0.5;
-      } else {
-        const sc = Math.min(w.grow, w.t * 6 * w.grow);
-        w.m.scale.set(Math.max(0.1, sc * (w.wx || 1)), Math.max(0.1, sc * (w.wy || 1)), 1);
-      }
-      const fadeIn = Math.min(1, w.t * 5);
+      // splats and drips grow on the GPU; only the end of their life is ours
       const fadeOut = w.t > w.hold ? Math.max(0, 1 - (w.t - w.hold) / w.fade) : 1;
-      w.m.material.opacity = 0.7 * fadeIn * fadeOut;
-      if (w.t > w.hold + w.fade) { rm(w.m); walls.splice(i, 1); }
+      if (w.slot >= 0) ldSetFx(w.slot, fadeOut, (1 - fadeOut) * 0.3);
+      if (w.t > w.hold + w.fade) { ldRelease(w); walls.splice(i, 1); }
     }
+    ldFlush(dt);
   });
 
   /* ---- CBZ.goreAudit() — THE RATCHET FOR "FLATS THAT FLOAT" -----------------
@@ -3515,7 +3975,10 @@
         // a blob's geometry is a unit circle, so local (±1,0)/(0,±1) IS the rim;
         // the plane used by streaks is a unit quad, so ±0.5 — near enough for a
         // conformance probe, and deliberately the same four samples for both.
-        _rv.set(_RIM[k][0], _RIM[k][1], 0).applyMatrix4(m.matrixWorld);
+        // every land mark is a unit quad now; `rim` is where its visible edge
+        // sits inside it, so this samples the mark and not the empty corners
+        const rr = s.rim || 0.5;
+        _rv.set(_RIM[k][0] * rr, _RIM[k][1] * rr, 0).applyMatrix4(m.matrixWorld);
         // measured against the DRAWN ground (decalFloorAt), which is what the
         // eye compares the pool to — outside the city it IS floorAt, so the
         // island's ratcheted numbers are unchanged.
@@ -3598,7 +4061,8 @@
     for (const r of severed) restoreRecord(r); severed.length = 0;   // every rig leaves whole
     for (const b of bits) rm(b.m); bits.length = 0;
     for (const s of splats) freeSlick(s); splats.length = 0; slickN = 0;
-    for (const w of walls) rm(w.m); walls.length = 0;
+    for (const w of walls) ldRelease(w); walls.length = 0;
+    if (ldMesh && ldMesh.parent) ldMesh.parent.remove(ldMesh);          // re-added on the next mark
     // water medium: drop the plume + every bleed source. The pooled sprites go
     // too — a scene swap orphans them, so they must be re-added, not reused.
     puffs.length = 0;
@@ -3614,4 +4078,5 @@
   // first gore, and this canvas rasterisation used to land in that same
   // already-overloaded impact frame (see crashfx.js's first-blast block).
   bloodTexture();
+  landAtlas();
 })();
