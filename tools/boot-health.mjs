@@ -184,6 +184,33 @@ if (!entry || errors.some((e) => /SyntaxError|is not defined|Unexpected token/i.
    two and names the phase. */
 errors.length = 0;
 log(`  pressing PLAY (build budget ${WAIT}s)…`);
+/* THE BUILD IS TIMED INSIDE THE PAGE, NOT BY THIS POLL. 2026-09-27: this
+   tool printed "COMPLETE in 16s" for b85aaa77 and "~250s" for main two merges
+   later, and it was read as a 15x build regression. It was not one: re-run,
+   b85aaa77, the CBZ.human merge and main all built in 15-19 s. The poll below
+   is a CDP Runtime.evaluate, answered only BETWEEN main-thread tasks. The
+   moment the build finishes the first game frame runs (fxwarm's whole-scene
+   renderer.compile plus the first draw: 40-80 s of shader linking on
+   SwiftShader), and whether the queued poll is answered before that frame or
+   after one or several of them is a race. So the old number was "build + zero
+   to N software-rendered frames", and N changed from run to run on the SAME
+   sha (16.7 s, 17.9 s and a 403 s DID NOT FINISH on one commit).
+   The honest clock: a MutationObserver on <body>'s class. state.js's setState
+   toggles "state-playing" synchronously at the end of startRun(); the
+   observer's callback runs as a microtask at the end of that same task, before
+   any frame can, and stamps performance.now(). A rAF pair chained off it
+   stamps the end of the FIRST frame, reported on its own line because it is
+   the renderer's cost, not the build's. The poll still decides "did it finish
+   at all"; a page that never toggles the class falls back to poll wall time. */
+await ev(`(function(){
+  window.__bhT0 = performance.now(); window.__bhT1 = 0; window.__bhF1 = 0;
+  var done = function(){
+    if (window.__bhT1 || !document.body.classList.contains('state-playing')) return;
+    window.__bhT1 = performance.now();
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ window.__bhF1 = performance.now(); }); });
+  };
+  try { new MutationObserver(done).observe(document.body, { attributes: true, attributeFilter: ['class'] }); } catch (e) {}
+})()`);
 const t0 = Date.now();
 await ev(`document.querySelector(${entrySel}).click()`);
 let booted = false;
@@ -193,8 +220,21 @@ for (let i = 0; i < Math.ceil(WAIT / 2); i++) {
     if (await ev("!!(window.CBZ && CBZ.game && CBZ.game.state === 'playing')")) { booted = true; break; }
   } catch (_) { /* the main thread is frozen mid-build; that is expected */ }
 }
-const secs = ((Date.now() - t0) / 1000).toFixed(1);
-log(`  world build: ${booted ? "COMPLETE" : "DID NOT FINISH"} in ${secs}s (CPU build only — frames come after)`);
+const polled = ((Date.now() - t0) / 1000).toFixed(1);
+let inPage = null;
+if (booted) { try { inPage = await ev("window.__bhT1 ? (window.__bhT1 - window.__bhT0) / 1000 : null"); } catch (_) {} }
+const secs = inPage != null ? inPage.toFixed(1) : polled;
+log(`  world build: ${booted ? "COMPLETE" : "DID NOT FINISH"} in ${secs}s (CPU build only, ${inPage != null ? "timed in-page; the poll saw it at " + polled + "s" : "poll wall time"})`);
+if (booted && inPage != null && !argv.includes("--no-frame")) {
+  // The first frame after the build: fxwarm's whole-scene compile + the first
+  // draw. SwiftShader can take minutes here; it is reported, never failed on.
+  let f1 = 0;
+  for (let i = 0; i < Math.ceil(WAIT / 2) && !f1; i++) {
+    try { f1 = await ev("window.__bhF1 ? (window.__bhF1 - window.__bhT1) / 1000 : 0"); } catch (_) {}
+    if (!f1) await sleep(2000);
+  }
+  log(`  first frame after the build: ${f1 ? f1.toFixed(1) + "s" : "not drawn within budget"} (shader compile + first draw: renderer, not build; --no-frame skips)`);
+}
 
 if (booted) {
   const species = await ev("window.CBZ && CBZ.WILDLIFE_SPECIES ? Object.keys(CBZ.WILDLIFE_SPECIES).length : -1");
