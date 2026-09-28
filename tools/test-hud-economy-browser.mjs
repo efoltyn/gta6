@@ -222,7 +222,7 @@ try {
       "hint", "toast", "interact", "cityStoragePrompt", "roofStashChip", "beachLootChip",
       "clothingPrompt", "gunstorePrompt", "elevChip", "adChip", "realtyPrompt", "pawnPrompt",
       "jewelryPrompt", "ci2Chip", "fxPrompt", "modshopHud", "cityOrders", "cityHeistHud",
-      "invHotbar", "cFeed", "cKill", "cKillFeed", "cRel", "cMemb", "cTurfMeta",
+      "cFeed", "cKill", "cKillFeed", "cRel", "cMemb", "cTurfMeta",
       "streakHud", "streakMeter"
     ];
     const injected = [];

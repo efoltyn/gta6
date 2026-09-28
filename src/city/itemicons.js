@@ -1265,6 +1265,13 @@
 
   CBZ.itemIcon = function (name, row) {
     if (!on()) return "";
+    // THE FLASHLIGHT IS ITS OWN MODEL (weapons/flashlight.js), photographed by
+    // weapon_thumbnails: the same torch the guards hold, in every bag and shelf.
+    if (/^(flashlight|guard torch)$/i.test(String(name || "")) && CBZ.flashlightThumbnail) {
+      let s = "";
+      try { s = CBZ.flashlightThumbnail(); } catch (e) { s = ""; }
+      if (s) return s;
+    }
     row = rowFor(name, row);
     const kind = kindOf(name, row);
     if (rendersOn()) {
@@ -1414,7 +1421,6 @@
         P.hp = Math.min(P.maxHp || 100, (P.hp || 0) + (row.medkit || 40));
         if (CBZ.cityHealWounds) { try { CBZ.cityHealWounds(); } catch (e) {} }
         if (CBZ.sfx) CBZ.sfx("pickup");
-        note("Patched up (+" + (row.medkit || 40) + " hp).");
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
         return true;
       }

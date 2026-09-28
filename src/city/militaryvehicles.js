@@ -595,18 +595,16 @@
   CBZ.cityTryNearestRide = function () {
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || !activeCtx()) return false;
-    if (P._aircraft && CBZ.cityPlayerAircraftExit) { CBZ.cityPlayerAircraftExit(); return true; }
-    /* THE PLAYER'S OWN "GET OUT", AND ONLY HIS. city/passengerseat.js turns
-       this press into a JUMP when the car is doing more than walking pace —
-       which is the whole point of an exit key on a moving vehicle. It is routed
-       through the INPUT path rather than by wrapping cityExitVehicle, because
-       that verb is also how a mission, a chop shop, a sold car and a flooded
-       engine put you on the pavement, and none of those is you deciding to
-       throw yourself out of a door. */
-    if (P._vehicle && CBZ.cityVehicleGetOut && CBZ.cityVehicleGetOut()) return true;
-    if (P._vehicle && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); return true; }
-    if (armor) { exitArmor(); return true; }
-    if (P.driving) return false; // boats/animals keep their owning controller
+    /* SEATED FIRST: the way out of whatever you are in (cockpit, hull, car,
+       saddle, chair, bed) is systems/seat_exit.js's, the ONE exit dispatcher
+       the keyboard, the touch EXIT button and the gamepad all share. On a
+       keyboard its capture-phase listener already consumed the press before
+       this router runs; this line is for programmatic callers. It used to be
+       four exit branches here plus a second [E] listener for armor below,
+       and nothing for a chair: standing up off a bench with E went straight
+       on to board the nearest parked car. */
+    if (CBZ.seatExit && CBZ.seatExit()) return true;
+    if (P.driving || P._aircraft || armor) return false;
 
     const aimed = aimedVehicle(P, 24, 10.5);
     if (aimed) {
@@ -625,14 +623,8 @@
     return false;
   };
 
-  // [E] steps OUT of armor (the interaction registry owns boarding; this is the
-  // single dedicated exit key, mirroring the aircraft [F] eject). Only acts while
-  // armor is set, so it never shadows the on-foot E-verb panel.
-  addEventListener("keydown", function (e) {
-    if (!armor || e.repeat) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "e") { e.preventDefault(); exitArmor(); }
-  });
+  // [E] out of armor is systems/seat_exit.js's (CBZ.seatState "armor" reads
+  // cityArmorActive/cityArmorRec and calls cityExitArmor). No second listener.
 
   // Declared at LOAD so the ordnance census counts a wired launcher, not a used
   // one (see aircraft.js's ordnance law).

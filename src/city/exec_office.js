@@ -43,20 +43,20 @@
    opacity) and the fake-room glow panels (interiorlight.js) are cleared off
    this storey, so from anywhere on the floor you SEE the city 160 m below.
 
-   THE EXPRESS LIFT: interior floors have no stair run in the current shells
-   and the walk-in cab (city/elevators.js) physically serves ground↔roof
-   only, so the suite gets the same diegetic ride the Spire loft uses
-   (realestate.js's elevatorUp): a solid lift core on the floor + an [E]
-   call panel that fades to black and relocates you to the street outside
-   the tower door — and a matching panel at the door to ride back up.
+   THE EXPRESS LIFT: the walnut core is a real, hollow lift car, a STOP of
+   the tower's own lift (city/elevators.js). Call on its button opens the
+   doors; the car's floor panel rides you to the lobby (or the penthouse,
+   or the roof), and the lobby cab's panel rides you back up. It used to be
+   a solid box with painted doors and a card that faded you to the street.
 
    CONTRACTS:
      CBZ.cityFurnishExecOffice(b, baseY, lot) — called by makeMegaTower
        (buildings.js) BEFORE it spreads b into lot.building. Stamps
-       b.execOffice = { floorY, spawn, face, desk, lift, name, keepClear }
+       b.execOffice = { floorY, spawn, face, desk, liftLanding, name, keepClear }
        (world coords):
          spawn/face — where the Executive origin stands + looks (origins.js)
-         lift       — the express-lift boarding point on the suite floor
+         liftLanding — the walnut core as a lift stop: its doors (rig),
+                      button, pad, cab frame (see elevators.js THE STOPS)
          keepClear  — keep-clear anchors; elevators.js's interiorAvoids
                       folds them in so the carved full-height shaft column
                       steers into the suite's furniture-free wall slots
@@ -1040,12 +1040,30 @@
     // ========================================================================
     //  THE EXPRESS-LIFT CORE — walnut-clad on three faces, brushed steel doors
     //  on the -z face with a floor indicator above and a call panel beside.
+    //  A REAL LIFT, NOT A PICTURE OF ONE (owner: "fix the elevator button
+    //  opening the elevator"). The core used to be one solid box with a door
+    //  pair painted on its face and an [E] card that faded you to the street:
+    //  nothing ever opened. It is a hollow car now: three walls and a front
+    //  with a doorway, a lit cab inside, two steel leafs that slide into the
+    //  cheeks over one y-gated collider, and a call button that lights. It is
+    //  a STOP of the tower's own lift (city/elevators.js reads
+    //  b.execOffice.liftLanding): Call opens it, the car's floor panel takes
+    //  you to the lobby, the penthouse or the roof, and the lobby cab's panel
+    //  brings you back up here.
     // ========================================================================
     const core = anchor(CX - W * 0.085, (zLo + zHi) / 2 + 0.8, 1.6);
-    const CORE = 2.5, CH = CORE / 2;
-    solid(core.x, FH / 2, core.z, CORE, FH, CORE);
+    const CORE = 2.5, CH = CORE / 2, CW = 0.12;               // CW: the core's wall
+    const DW = 1.1, DH = 2.2;
+    const fz = core.z - CH;                                    // the door face
+    const cheek = CH - DW / 2;                                 // wall either side of the doorway
+    solid(core.x, FH / 2, core.z + CH - CW / 2, CORE, FH, CW);          // back
+    solid(core.x - CH + CW / 2, FH / 2, core.z, CW, FH, CORE);          // sides
+    solid(core.x + CH - CW / 2, FH / 2, core.z, CW, FH, CORE);
+    for (const e of [-1, 1]) solid(core.x + e * (DW / 2 + cheek / 2), FH / 2, fz + CW / 2, cheek, FH, CW);
+    solid(core.x, (DH + FH) / 2, fz + CW / 2, DW, FH - DH, CW);           // over the doorway
     K.world();
-    K.box(M.satin, core.x, CEIL / 2, core.z, CORE - 0.04, CEIL, CORE - 0.04, 0x1a1715);
+    // the core's mass above the cab ceiling, and its walls' dark cores
+    K.box(M.satin, core.x, (DH + 0.32 + CEIL) / 2, core.z, CORE - 0.04, CEIL - DH - 0.32, CORE - 0.04, 0x1a1715);
     // walnut panels with shadow reveals on +z, -x, +x
     const PN = 4, pw = (CORE - (PN - 1) * 0.012) / PN;
     for (let i = 0; i < PN; i++) {
@@ -1057,16 +1075,30 @@
     K.box(M.satin, core.x, 0.05, core.z + CH + 0.005, CORE, 0.1, 0.02, C.base);
     K.box(M.satin, core.x - CH - 0.005, 0.05, core.z, 0.02, 0.1, CORE, C.base);
     K.box(M.satin, core.x + CH + 0.005, 0.05, core.z, 0.02, 0.1, CORE, C.base);
-    // the lift face: stainless cladding, a door pair with a centre seam, a
-    // proud frame, the floor indicator, the call panel, a steel threshold
-    const fz = core.z - CH;
-    K.box(M.steel, core.x, CEIL / 2, fz - 0.005, CORE, CEIL, 0.03, C.steelDark);
-    const DW = 1.1, DH = 2.2;
-    for (const e of [-1, 1]) K.box(M.steel, core.x + e * (DW / 4 + 0.002), DH / 2, fz - 0.024, DW / 2 - 0.004, DH, 0.012, C.steel);
-    K.box(M.satin, core.x, DH / 2, fz - 0.03, 0.004, DH, 0.002, C.black);
+    // THE CAB: brushed steel on the inside of every wall (the leaf pockets
+    // behind the cheeks included), a dark floor, a handrail, a lit ceiling
+    const IN = CORE - 2 * CW;                                  // cab interior span
+    const icz = (fz + CW + core.z + CH - CW) / 2, icd = (core.z + CH - CW) - (fz + CW);
+    K.box(M.steel, core.x, 0.1 + DH / 2, core.z + CH - CW - 0.006, IN, DH + 0.2, 0.012, C.steel);
+    K.box(M.steel, core.x - CH + CW + 0.006, 0.1 + DH / 2, icz, 0.012, DH + 0.2, icd, C.steel);
+    K.box(M.steel, core.x + CH - CW - 0.006, 0.1 + DH / 2, icz, 0.012, DH + 0.2, icd, C.steel);
+    for (const e of [-1, 1]) K.box(M.steel, core.x + e * (DW / 2 + cheek / 2), 0.1 + DH / 2, fz + CW + 0.006, cheek, DH + 0.2, 0.012, C.steelDark);
+    K.box(M.satin, core.x, DH + 0.1, fz + CW / 2, DW, 0.2, CW - 0.03, C.steelDark);        // the head's soffit
+    K.box(M.satin, core.x, 0.016, icz, IN, 0.008, icd, 0x2a2622);
+    K.box(M.satin, core.x, DH + 0.3, icz, IN, 0.04, icd, 0x1a1715);
+    K.box(M.emit, core.x, DH + 0.277, icz, 0.9, 0.006, 0.9, C.lampWarm);
+    K.box(M.chrome, core.x, 0.92, core.z + CH - CW - 0.06, IN - 0.3, 0.035, 0.035, C.chrome);
+    // the car's floor panel, inside by the door (the floor buttons sit here)
+    const ipx = core.x + DW / 2 + cheek / 2;
+    K.rbox(M.steel, ipx, 1.2, fz + CW + 0.016, 0.12, 0.34, 0.012, 0.004, 0xe2e4e6);
+    // the lift face: stainless cladding round the doorway, a proud frame,
+    // the floor indicator, the call panel, a steel threshold
+    for (const e of [-1, 1]) K.box(M.steel, core.x + e * (DW / 2 + cheek / 2), CEIL / 2, fz - 0.005, cheek, CEIL, 0.03, C.steelDark);
+    K.box(M.steel, core.x, (DH + CEIL) / 2, fz - 0.005, DW, CEIL - DH, 0.03, C.steelDark);
     for (const e of [-1, 1]) K.box(M.steel, core.x + e * (DW / 2 + 0.04), DH / 2 + 0.02, fz - 0.035, 0.08, DH + 0.04, 0.03, 0xe2e4e6);
     K.box(M.steel, core.x, DH + 0.06, fz - 0.035, DW + 0.16, 0.08, 0.03, 0xe2e4e6);
     K.box(M.steel, core.x, 0.002, fz - 0.07, DW + 0.1, 0.004, 0.14, 0xe2e4e6);
+    K.box(M.steel, core.x, 0.004, fz + CW / 2, DW, 0.008, CW, 0xe2e4e6);                    // the sill track
     K.box(M.satin, core.x, DH + 0.26, fz - 0.025, 0.36, 0.13, 0.012, C.black);
     K.at(core.x, fz - 0.032, Math.PI);
     K.screen(5, 0, DH + 0.26, 0, 0.176, 0.11);
@@ -1075,8 +1107,45 @@
     K.rbox(M.steel, cpx, 1.12, fz - 0.028, 0.1, 0.26, 0.012, 0.004, 0xe2e4e6);
     K.cyl(M.chrome, cpx, 1.17, fz - 0.036, 0.019, 0.019, 0.01, 16, C.chrome, Math.PI / 2);
     K.cyl(M.chrome, cpx, 1.07, fz - 0.036, 0.019, 0.019, 0.01, 16, C.chrome, Math.PI / 2);
-    K.cyl(M.emit, cpx, 1.07, fz - 0.042, 0.021, 0.021, 0.004, 16, C.amber, Math.PI / 2);
-    const liftPt = { x: core.x, z: core.z - CH - 1.35 };      // boarding point
+    // THE MOVING PARTS are real meshes (the kit merges everything else):
+    // the two leafs, and the call button's lamp, which the lift lights.
+    const leafMat = new THREE.MeshPhongMaterial({ color: 0xcfd3d8, shininess: 70, specular: 0x6a6a6a });
+    const leafGeo = new THREE.BoxGeometry(DW / 2 - 0.004, DH, 0.03);
+    const liftRig = { leaves: [], open: 0, target: 0, autoClose: null, autoCloseAudible: false, trav: DW / 2 - 0.03 };
+    for (const e of [-1, 1]) {
+      const m = new THREE.Mesh(leafGeo, leafMat);
+      m.position.set(core.x + e * (DW / 4 + 0.002), Y + DH / 2, fz + 0.035);
+      m.castShadow = true; m.receiveShadow = true;
+      m.name = "exec-lift-leaf";
+      m.userData.mover = true;          // batch.js must not bake it, staticfreeze.js must not freeze it: it slides
+      b.group.add(m);
+      liftRig.leaves.push({ m: m, baseX: m.position.x, baseZ: m.position.z, sx: e, sz: 0 });
+    }
+    {
+      const c = solid(core.x, DH / 2, fz + CW / 2, DW, DH, CW);          // the closed leafs
+      liftRig.col = c; liftRig.cy0 = c.y0; liftRig.cy1 = c.y1; liftRig.solid = true;
+    }
+    const btnIdle = new THREE.MeshBasicMaterial({ color: 0x8a5a16 });
+    const btnLit = new THREE.MeshBasicMaterial({ color: 0xffc56a });
+    const liftBtn = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.006, 16), btnIdle);
+    liftBtn.rotation.x = Math.PI / 2;
+    liftBtn.position.set(cpx, Y + 1.07, fz - 0.043);
+    liftBtn.name = "exec-lift-button";
+    liftBtn.userData.mover = true;      // its material swaps; keep it out of the static batch
+    b.group.add(liftBtn);
+    const backZ = core.z + CH - CW;                           // the cab's back wall (dep 0)
+    const liftLanding = {
+      name: "Floor " + Math.round(Y / FH),
+      base: Y, floor: Y + 0.02,
+      rig: liftRig, btn: liftBtn, lamp: null, btnIdle: btnIdle, btnLit: btnLit,
+      pad: { x: ox + core.x, z: oz + fz - 0.9 },
+      btnAt: { x: ox + cpx, y: Y + 1.07, z: oz + fz - 0.05 },
+      panelAt: { x: ox + ipx, y: Y + 1.25, z: oz + fz + CW + 0.03 },
+      // cab-local frame: lat across the door, dep from the back wall to the leaf line
+      loc: function (x, z) { return { lat: x - (ox + core.x), dep: (oz + backZ) - z }; },
+      pt: function (lat, dep) { return { x: ox + core.x + lat, z: oz + backZ - dep }; },
+      door: backZ - (fz + CW / 2), half: CH - CW - 0.15, fwd: { x: 0, z: -1 },
+    };
 
     // ========================================================================
     //  RECEPTION — one desk facing the lift, one bench, two planters. Space.
@@ -1375,104 +1444,10 @@
       spawn: { x: ox + chr.x + 0.15, z: oz + chr.z + 0.85 },
       face: { x: ox + offX0, z: oz + offDoorZ },
       desk: { x: ox + dsk.x, z: oz + dsk.z },
-      lift: { x: ox + liftPt.x, z: oz + liftPt.z },
+      // the walnut core as a stop of the tower's lift (city/elevators.js)
+      liftLanding: liftLanding,
       keepClear: keep,
     };
-    registerLiftZones();
     return b.execOffice;
   };
-
-  // ------------------------------------------------------------------------
-  //  THE EXPRESS RIDE — the Spire-loft teleport convention (realestate.js's
-  //  elevatorUp), dressed with a fade + a ding. Suite panel rides you DOWN to
-  //  the street outside the tower door; the street panel rides you back UP.
-  // ------------------------------------------------------------------------
-  let fadeEl = null, rideBusyUntil = 0;
-  function fade(cb) {
-    if (!fadeEl) {
-      fadeEl = document.createElement("div");
-      fadeEl.style.cssText = "position:fixed;inset:0;z-index:65;background:#000;opacity:0;pointer-events:none;transition:opacity .28s ease;";
-      document.body.appendChild(fadeEl);
-    }
-    fadeEl.style.opacity = "1";
-    setTimeout(function () {
-      try { cb(); } catch (e) {}
-      setTimeout(function () { fadeEl.style.opacity = "0"; }, 240);
-    }, 320);
-  }
-  function nowMs() { return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(); }
-  function eo() {
-    const mt = CBZ.cityMegaTower && CBZ.cityMegaTower();
-    const bb = mt && mt.lot && mt.lot.building;
-    return (bb && bb.execOffice && bb.execOffice.lift) ? { b: bb, e: bb.execOffice } : null;
-  }
-  function towerDoor(bb) {
-    const door = bb.door || null;
-    if (door && door.x != null) return { x: door.x + (door.nx || 0) * 2.4, z: door.z + (door.nz || 0) * 2.4 };
-    return { x: bb.ox != null ? bb.ox : 0, z: (bb.oz != null ? bb.oz : 0) + (bb.d || 20) / 2 + 2.0 };
-  }
-  // THE SHARED LIFT RIDE (city/occupy.js). The census found this exact
-  // fade+reposition+sfx+note hand-rolled THREE times (here, realestate.js's
-  // elevatorUp, and elevators.js's cab machine). This is now the one copy;
-  // the local `fade` path below stays only as the degrade-safe fallback.
-  function relocate(x, y, z, note) {
-    const P = CBZ.player; if (!P || !P.pos) return;
-    if (CBZ.cityLiftRide && CBZ.cityLiftRide(x, y, z, { note: note, force: true })) return;
-    fade(function () {
-      P.pos.set(x, y, z); P.vy = 0; P.grounded = true;
-      if (P._phys) { P._phys.air = false; P._phys.vx = P._phys.vz = P._phys.vy = 0; }
-      if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);
-      if (CBZ.city && note) CBZ.city.note(note, 2.2);
-    });
-  }
-
-  let zonesDone = false;
-  function registerLiftZones() {
-    if (zonesDone || !CBZ.interactions || !CBZ.interactions.registerZone) return;
-    zonesDone = true;
-    // SUITE panel → street. Y-gated: the registry scores in 2D, and 160m of
-    // tower stand between the two panels at the same x/z.
-    CBZ.interactions.registerZone({
-      id: "exec-lift-down", kind: "exec-lift", radius: 2.7,
-      find: function (px, pz) {
-        const r = eo(); if (!r) return null;
-        const P = CBZ.player; if (!P || Math.abs(P.pos.y - r.e.floorY) > 2.2) return null;
-        if (nowMs() < rideBusyUntil) return null;
-        const dx = r.e.lift.x - px, dz = r.e.lift.z - pz;
-        return (dx * dx + dz * dz) < 2.7 * 2.7 ? { x: r.e.lift.x, z: r.e.lift.z } : null;
-      },
-      options: [{
-        id: "exec-lift-ride-down", slot: "e",
-        label: "Lift to the ground",
-        onSelect: function () {
-          const r = eo(); if (!r) return;
-          rideBusyUntil = nowMs() + 1800;
-          const d = towerDoor(r.b);
-          const gy = CBZ.floorAt ? CBZ.floorAt(d.x, d.z) : 0.14;
-          relocate(d.x, gy, d.z, "Fifty floors in nine seconds. Street level.");
-        },
-      }],
-    });
-    // STREET panel (at the tower door) → the suite.
-    CBZ.interactions.registerZone({
-      id: "exec-lift-up", kind: "exec-lift", radius: 3.2,
-      find: function (px, pz) {
-        const r = eo(); if (!r) return null;
-        const P = CBZ.player; if (!P || P.pos.y > 4.0) return null;
-        if (nowMs() < rideBusyUntil) return null;
-        const d = towerDoor(r.b);
-        const dx = d.x - px, dz = d.z - pz;
-        return (dx * dx + dz * dz) < 3.2 * 3.2 ? { x: d.x, z: d.z } : null;
-      },
-      options: [{
-        id: "exec-lift-ride-up", slot: "e",
-        label: "Lift to floor 50",
-        onSelect: function () {
-          const r = eo(); if (!r) return;
-          rideBusyUntil = nowMs() + 1800;
-          relocate(r.e.lift.x, r.e.floorY, r.e.lift.z, FIRM + ", the 50th floor.");
-        },
-      }],
-    });
-  }
 })();

@@ -44,6 +44,11 @@
                       Never a percentage: nobody reads a number off a saw.
                 sub   a small second line ("to Cell Block Aisle")
                 d2    squared metres to the thing, for ONE PILL below
+                bind  the desktop key (opts.key, dflt E) fires the @fn act
+                      while the pill is shown; no polling in the owner
+                group a panel id: pills sharing the shown pill's group
+                      show together (a lift car's floor buttons)
+                row   0.. the pill's line within its group, stacked down
 
      A prompt lives exactly as long as its owner keeps arming it: the sweep
      below retires any slot not re-armed within the last two frames. There is
@@ -119,7 +124,7 @@
   function prisonPrompt(id, act, verb, opts) {
     if (!act || !verb) return false;
     opts = opts || {};
-    const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0);
+    const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "");
     let p = pills.get(id);
     if (!p || p.sig !== sig) {
       if (p && p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
@@ -130,6 +135,16 @@
     p.at = opts.at || null;
     setProg(p, opts.prog);
     p.city = !!opts.city;          // a CITY verb on a thing (boarding.js car doors) survives the city gate below
+    // PANEL GROUPS + BOUND KEYS (city/elevators.js, the island tower lifts).
+    // `group`: a panel with several buttons (a lift car's floor buttons) is ONE
+    // thing, so every pill sharing the nearest pill's group shows with it,
+    // stacked `row` lines down. `bind`: the pill's own key fires its @fn act on
+    // a keyboard while the pill is SHOWN (capture phase, below), so an owner
+    // does not have to poll a key and every other [E] listener stands aside.
+    p.group = opts.group || null;
+    p.row = opts.row | 0;
+    p.act = act;
+    p.bind = opts.bind ? String(opts.key || "e").toLowerCase() : "";
     p.frame = frameNo;
     // Unranked callers sit at 2 m — the range nearly every prison prompt arms
     // itself at — so a site that never learns about d2 still competes fairly.
@@ -174,11 +189,28 @@
       if (!best || p.d2 < best.d2 - 1e-6 || (p.d2 <= best.d2 + 1e-6 && p.seq > best.seq)) best = p;
     });
     pills.forEach(function (p) {
-      const show = p === best;
+      const show = p === best || !!(best && best.group && p.group === best.group);
       if (p.shown !== show) { p.shown = show; p.wrap.style.display = show ? "" : "none"; }
     });
     return best;
   }
+
+  // A BOUND pill's key, on a keyboard. Capture phase on window, so it runs
+  // before the city's [E] ride router and survival's [E] grab: the verb pinned
+  // over the thing you are standing at is what the key does, and nothing
+  // else also fires on the same press.
+  addEventListener("keydown", function (e) {
+    if (!pills.size || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    const gm = CBZ.game;
+    if (!gm || gm.state !== "playing") return;
+    const k = String(e.key || "").toLowerCase();
+    let hit = null;
+    pills.forEach(function (p) { if (!hit && p.shown && p.bind && p.bind === k && frameNo - p.frame <= 2) hit = p; });
+    if (!hit) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    fireAct(hit.act);
+  }, true);
 
   /* Pin the shown prompt over its thing: project the world point through the
      LIVE camera (camera.js updates it at always-order 50; this runs at 96).
@@ -205,7 +237,7 @@
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
     const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
-    const sx = Math.round((nx * 0.5 + 0.5) * w), sy = Math.round((-ny * 0.5 + 0.5) * h);
+    const sx = Math.round((nx * 0.5 + 0.5) * w), sy = Math.round((-ny * 0.5 + 0.5) * h) + (p.row || 0) * 40;
     if (p._sx !== sx || p._sy !== sy) {
       p._sx = sx; p._sy = sy;
       p.wrap.style.left = sx + "px";
@@ -231,7 +263,7 @@
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
     if (!pills.size) return;
     const best = arbitrate();
-    if (best) placePrompt(best);
+    if (best) pills.forEach(function (p) { if (p.shown) placePrompt(p); });
   });
 
   CBZ.prisonPrompt = prisonPrompt;

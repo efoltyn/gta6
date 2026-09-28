@@ -133,8 +133,8 @@
      directly rather than synthesising an e — so every route out is unchanged.
 
      GROUND VEHICLES ARE UNTOUCHED. `ctx.driving` is true for both a car and an
-     aircraft, so the gate is the aircraft handle itself — a car keeps its E
-     step-out (interact.js "car-out") exactly as before. */
+     aircraft, so the gate is the aircraft handle itself. Every seat's own exit
+     key (F here, E in a car) is systems/seat_exit.js's, not this panel's. */
   function pilotingAircraft() {
     if (CBZ.CONFIG.FLIGHT_KEYS_OWNED === false) return false;
     const P = CBZ.player;
@@ -689,7 +689,7 @@
     // the VISUAL card on DESKTOP: walk up, press E, you sit, no popup. On TOUCH
     // the pill IS the control, so it stays. Only the single-verb case goes
     // silent (_pass holds exactly one option); a second seat verb brings the
-    // card back. Standing up rides a separate 'propself' kind and is untouched.
+    // card back. Standing up is systems/seat_exit.js's, not a card.
     // ...AND ON TOUCH TOO, now that a seat IS tappable. The `!CBZ.touchMode`
     // that used to be on this line was load-bearing for a real reason — the
     // comment above it said "a seat has no tappable mesh", so on touch the pill
@@ -706,18 +706,8 @@
       return;
     }
 
-    // STANDING UP is the same story. Once you are seated the ONLY thing you
-    // want is out, so a card offering you that single verb is telling you
-    // something you already know. Desktop presses E; touch taps anywhere (the
-    // tapWorld stand path). Suppressed on exactly the same terms as sitting:
-    // single-verb only, so if a seat ever gains a second verb the card returns.
-    if (pick.kind === "propself" && rows._pass && rows._pass.length === 1 &&
-        CBZ.CONFIG.CITY_SEAT_SILENT !== false) {
-      current = pick; currentRows = rows; currentScore = pick.score;
-      fingerprint = "propself-silent";
-      dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); }
-      return;
-    }
+    // STANDING UP has no card at all: it is systems/seat_exit.js's verb,
+    // pinned on the chair (desktop) or the one EXIT button (touch).
 
     // whoever the panel is offering interactions on turns to LOOK at you
     const t = pick.t;

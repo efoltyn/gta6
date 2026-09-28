@@ -96,20 +96,11 @@
   // and never applied while ADS (the ADS punch-in is a fixed target by design —
   // a trimmed one would be a different bug of the same family).
   //   CAM_TP_TOUCH_ZOOM    — the pinch trim itself
-  //   CAM_TOUCH_RECENTER   — CBZ.camRecenter(): level the view / hand the yaw
-  //                          back to the vehicle's own auto-recenter
   //   CAM_TOUCH_PITCH_FULL — the touch TP pitch envelope opens to the desktop
   //                          range now that touch HAS an escape hatch (see
   //                          camTouchPitchRange for the whole argument)
   if (CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
   if (CBZ.CONFIG.CAM_TP_TOUCH_ZOOM == null) CBZ.CONFIG.CAM_TP_TOUCH_ZOOM = true;
-  // DEFAULT OFF as of 2026-08-04 (owner: take the recenter button off the
-  // iPad). This flag owns the MANUAL action and its two buttons only; the
-  // vehicle's automatic recenter is a different writer (camRecenterSuspended,
-  // in vehicles/playeraircraft/water_helm) and still runs. camRecenter() is
-  // called from nowhere but #trecen and #tvRecen, so off = the buttons are
-  // gone and the seam refuses, rather than a live control that no-ops.
-  if (CBZ.CONFIG.CAM_TOUCH_RECENTER == null) CBZ.CONFIG.CAM_TOUCH_RECENTER = false;
   if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL == null) CBZ.CONFIG.CAM_TOUCH_PITCH_FULL = true;
   const tpTouch = () => CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false && !!CBZ.touchMode;
 
@@ -473,46 +464,10 @@
     // CAM_TOUCH_PITCH_FULL: the remaining gap to desktop existed for ONE stated
     // reason — this file's own comment: "the touch boom at extreme up-pitch near
     // walls is less recoverable WITHOUT A SCROLL-WHEEL ESCAPE HATCH". Touch now
-    // has two (the pinch trim above actually reaches the city boom, and
-    // CBZ.camRecenter levels the view in one tap), so the reason is spent and
+    // has one (the pinch trim above actually reaches the city boom), so the reason is spent and
     // an iPad gets the same envelope a mouse does. Flag off = the old stop-short.
     if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL !== false && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false) return pitchLimits();
     return [-0.85, 0.75];
-  };
-  // ---- RECENTER (CAM_TOUCH_RECENTER) — the one control a thumb-driven third
-  // person needs that a mouse never does: a mouse levels the view in a flick,
-  // a thumb has to drag back across the whole screen. Two jobs, and neither is
-  // a teleport: the orbit PITCH eases to the context's own resting angle
-  // (CITY_TP.PITCH on foot, a mild down-gaze behind a vehicle), and any live
-  // free-look suspension is DROPPED so the vehicle's own auto-recenter — which
-  // has always honoured camRecenterSuspended — takes the yaw back itself. It
-  // therefore adds no second yaw writer: the car/plane/boat still owns its yaw.
-  let recT = 0, recFrom = 0, recTo = 0;
-  const REC_T = 0.32;
-  function recenterPitchTarget() {
-    const P = CBZ.player;
-    if (P && (P.driving || P._aircraft)) return 0.16;
-    if (CBZ.game && CBZ.game.mode === "city" && CBZ.CITY_TP && CBZ.CITY_TP.PITCH != null) return CBZ.CITY_TP.PITCH;
-    return DEFAULT_PITCH;
-  }
-  CBZ.camRecenter = function () {
-    if (CBZ.CONFIG.CAM_TOUCH_RECENTER === false) return false;
-    recFrom = cam.pitch; recTo = recenterPitchTarget(); recT = REC_T;
-    // Drop the LATCHED free-look and its decay so the vehicle's own recenter
-    // takes the yaw back. lookBackHeld is deliberately NOT cleared: that is a
-    // live button somebody's other thumb is still holding, and a recenter must
-    // not steal a control that is currently pressed.
-    flHold = false; flT = 0;
-    return true;
-  };
-  // ANY deliberate look input outranks a running recenter — otherwise the ease
-  // would fight the finger for a third of a second after you touched the screen.
-  CBZ.camRecenterCancel = function () { recT = 0; };
-  // Would a recenter DO anything right now? The touch layer shows its button
-  // only when the answer is yes, with hysteresis in the caller, so the control
-  // appears exactly when it is worth a thumb and the screen stays calm.
-  CBZ.camRecenterOff = function () {
-    return Math.abs(cam.pitch - recenterPitchTarget());
   };
   // Vehicle free-look (suspends the behind-the-car auto-recenter) + look-back.
   let flHold = false, flT = 0, lookBackHeld = false, lookBackK = 0, bankK = 0;
@@ -662,7 +617,6 @@
   });
   document.addEventListener("mousemove", (e) => {
     if (!cam.locked) return;
-    if (recT > 0 && (e.movementX || e.movementY)) recT = 0;   // the hand outranks the ease
     // scoped look is proportionally finer (systems/lockon.js real sniper scope)
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     cam.yaw -= e.movementX * SENS * sensMul;
@@ -1215,14 +1169,6 @@
     _camFrame++;                 // senseRoom answers once per frame (see it)
     // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
     if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
-    // RECENTER ease (CAM_TOUCH_RECENTER). Runs on the wall-clock feel-dt like
-    // every other polish term, writes ONLY cam.pitch, and is cancelled outright
-    // by any look input — so it can never wrestle a finger or a mouse.
-    if (recT > 0) {
-      recT = Math.max(0, recT - fdt);
-      const p = 1 - recT / REC_T, k = p * p * (3 - 2 * p);
-      cam.pitch = recFrom + (recTo - recFrom) * k;
-    }
     lookBackK += ((lookBackHeld ? 1 : 0) - lookBackK) * (1 - Math.exp(-11 * fdt));
     if (lookBackK < 0.001) lookBackK = 0;
     shoulderK += ((CBZ.CONFIG.CAM_SHOULDER_SWAP === false ? 1 : shoulderSign) - shoulderK) * (1 - Math.exp(-9 * fdt));
@@ -1392,7 +1338,7 @@
         }
       }
       // LOOK-BACK (CAM_VEHICLE_FREELOOK): lookBackK eases 0↔1 and swings the
-      // whole chase 180° — hold MMB (or the touch LOOK BACK pill) to check your
+      // whole chase 180° — hold MMB to check your
       // six, release to whip forward again.
       const vyaw = cam.yaw + Math.PI * lookBackK;
       const cfx = -Math.sin(vyaw), cfz = -Math.cos(vyaw);   // = the chase forward

@@ -354,7 +354,7 @@
     ride = { veh: car, seatId: seat.id, npc: true, t: 0, lastSpeed: speedOf(car), lastSteer: 0, stopAsked: false };
     TALLY.ridesStarted++; TALLY.npcRides++;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
-    const keys = CBZ.touchMode ? "" : "  [G] seat  [E] out";
+    const keys = CBZ.touchMode ? "" : "  [G] seat";   // the way out is pinned on the door (systems/seat_exit.js)
     if (gunOut()) {
       // a gun in the back of the car: the driver does what he is told, fast
       car.reckless = true;
@@ -389,15 +389,35 @@
     if (ride && ride.npc && ride.veh === car && speed > STEP_OUT_MS && !ride.stopAsked) {
       ride.stopAsked = true;
       if (CBZ.cityCarPullover) CBZ.cityCarPullover(car);
-      note("You tell the driver to pull over." + (CBZ.touchMode ? "" : " [E] again to jump."), 2.0);
+      note("You tell the driver to pull over.", 2.0);   // the door label now says Jump
       return true;
     }
     if (!bailOn() || speed <= STEP_OUT_MS) {
       TALLY.stepOuts++;
+      /* A HULL IS LEFT ONTO ITS OWN DECK. The plain step-out stands you
+         "beside the hull at y=0", which on a boat is the sea: the exit key on
+         a moored cruiser used to drop you in the harbour. boatStandUp is the
+         same exit plus the deck placement (city/boatwalk.js); an open hull
+         with no deck still goes over the side, exactly as before. */
+      if (marine(car) && CBZ.boatStandUp && CBZ.boatStandUp(car)) return true;
       if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
       return true;
     }
     return bail(car, speed);
+  };
+  /* The word for what the exit press will do RIGHT NOW, read by
+     systems/seat_exit.js for the pinned label and the touch EXIT button. It
+     walks the same branches as cityVehicleGetOut above, in the same order, so
+     the button can never say one thing and do another. */
+  CBZ.cityVehicleGetOutVerb = function () {
+    const P = CBZ.player;
+    if (!P || !P.driving || !P._vehicle) return null;
+    const car = P._vehicle;
+    const speed = speedOf(car);
+    if (ride && ride.npc && ride.veh === car && speed > STEP_OUT_MS && !ride.stopAsked) return "Pull over";
+    if (bailOn() && speed > STEP_OUT_MS) return "Jump";
+    if (marine(car) && CBZ.boatStandUp && CF.BOAT_WALK !== false) return "Get up";
+    return "Get out";
   };
 
   function bail(car, speed) {

@@ -13,13 +13,8 @@
               existing car model (BRAKE slows first, then reverses at rest).
               The on-foot joystick stands down only for road cars.
               TILT is an optional, calibrated low-sensitivity analog steer.
-              EXIT   = tap   → CBZ.cityExitVehicle() (the same path the
-                       interact registry's "Step out" verb calls)
-              LOOK BACK = hold → CBZ.camLookBack(down) (camera agent's
-                       feature-detected hook; button hides if absent)
      BOAT     stick = steer/throttle (unchanged). ASTERN = hold → Ctrl
-              (water_helm's crash-stop; Space is the get-up now). GET UP =
-              tap → CBZ.boatStandUp (out of the seat, onto the deck).
+              (water_helm's crash-stop; Space is the get-up now).
               VIEW = the [V] wheel view, same handler as the car's.
      HELI     stick = yaw/thrust (unchanged).
               UP     = hold  → CBZ.keys[" "]        (collective up)
@@ -27,7 +22,6 @@
                        "control" on purpose: it never collides with the
                        on-foot sprint logic that owns "shift")
               FIRE   = tap   → CBZ.cityAircraftFireMissile() (armed craft)
-              EXIT   = tap   → CBZ.cityPlayerAircraftExit() (the [F] path)
      WING     stick = a REAL joystick now (FLIGHT_CONTROLS_V2): left/right =
               roll (a/d), up/down = PITCH (w/s — the stick writes WASD and the
               flight model maps W/S to pitch), so the left thumb finally flies
@@ -35,7 +29,7 @@
               Space/Ctrl power grammar:
               THR+   = hold  → CBZ.keys[" "]        (throttle up)
               THR−   = hold  → CBZ.keys["control"]  (throttle down / wheel brakes)
-              FIRE / EXIT as heli. (QE rudder is a desktop fine-tune; touch turns
+              FIRE as heli. (QE rudder is a desktop fine-tune; touch turns
               by banking, the natural mobile-flight feel — no extra pills.)
 
      ARMOR    the tank / armoured truck (city/militaryvehicles.js). It sets
@@ -46,7 +40,11 @@
               whole time. Now a real context.
               FIRE  = tap → CBZ.cityArmorFire() (tank or map-targeted Patriot;
                       an unarmed truck has no dead button)
-              EXIT  = tap → CBZ.cityExitArmor()
+     NO EXIT PILL IN ANY CONTEXT. The way out of every seat (car, passenger
+              seat, boat, cockpit, armor, saddle, chair, bed) is ONE button,
+              #tExit, in ONE place, owned by systems/seat_exit.js. This layer
+              used to draw its own EXIT / JUMP OUT / GET UP / DISMOUNT pill in
+              a different spot per context.
      AUX RAIL (#tvAux) — a SECOND column standing directly above the dial, in
               the dial's own footprint, so weapon/ordnance controls never grow
               the primary thumb column past a thumb's reach. It carries the
@@ -66,17 +64,10 @@
                         body.tveh-on, so the strip that teaches the payload on
                         desktop is invisible on touch — the switch had no label
                         AND no state.
-              BOMB CAM= hold → CBZ.strategicBombCameraHold(down)
-     HOMING   = tap → CBZ.lockonHomingSet(). The on-foot cluster has had this
-              pill for a while and body.tveh-on hides that cluster, so the one
-              place homing matters most — an armed aircraft with missiles on
-              the rail — was the one place a thumb could not reach it.
-     TRIM     = hold pair on the "q"/"e" keys the flight model already reads:
-              a helicopter's LATERAL CYCLIC (a real translation axis — it is
-              how you slide onto a pad) and a fixed wing's RUDDER.
-     RECENTER = tap → CBZ.camRecenter(): levels the view and hands the yaw back
-              to the vehicle's own auto-recenter (which has always honoured
-              camRecenterSuspended, so this adds no second yaw writer).
+     Deliberately NOT on the glass: HOMING (lockon defaults to homing; the
+              toggle stays on [H]), BOMB CAM (a cinematic, [C] hold), the Q/E
+              trim pair (bank covers the turn), LOOK BACK (the look drag already
+              swings the chase camera) and RECENTER (dead since 2026-08-04).
 
    Held buttons RE-ASSERT their key every frame from onUpdate(10) —
    just before vehicles (11) and aircraft (12) consume them — so a
@@ -93,17 +84,11 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_VEHICLE == null) CBZ.CONFIG.TOUCH_VEHICLE = true;
   // TOUCH_AIRCRAFT_V2 — the ordnance/armor pass (owner 2026-07-28: "the B-2
   // bomber and many other things that have new controls need new iPad
-  // controls"). Master flag for the aux rail, the armor context and the trim
-  // pair; off = this file behaves exactly as it did before the pass.
+  // controls"). Master flag for the aux rail and the armor context;
+  // off = this file behaves exactly as it did before the pass.
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIRCRAFT_V2 == null) CBZ.CONFIG.TOUCH_AIRCRAFT_V2 = true;
-  // TOUCH_TRIM_PAIR — the SLIDE/RUDDER hold pair. Separately revertible because
-  // it is the one addition that is a taste call rather than a missing verb:
-  // you CAN fly without it (bank and yaw cover the ground), you just cannot
-  // slide sideways onto a rooftop, which is what a helicopter is for.
-  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_TRIM_PAIR == null) CBZ.CONFIG.TOUCH_TRIM_PAIR = true;
   const on = () => !!(CBZ.touchMode) && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VEHICLE !== false);
   const airV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIRCRAFT_V2 !== false;
-  const trimOn = () => airV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_TRIM_PAIR !== false);
 
   let root = null, dial = null, dialCtx = null, btnWrap = null, auxWrap = null, ammoEl = null;
   let mode = "";               // "" | "drive" | "boat" | "armor" | "heli" | "wing" | "chute" | "swim" | "mount"
@@ -216,9 +201,7 @@
     s.textContent =
       "#tveh #tvAux{position:absolute;right:140px;bottom:142px;display:flex;" +
       "flex-direction:column-reverse;align-items:flex-end;gap:8px;}" +
-      "#tveh #tvAux .tvrow{display:flex;flex-direction:row;gap:8px;}" +
       "#tveh #tvAux .tvbtn{min-width:96px;}" +
-      "#tveh #tvAux .tvrow .tvbtn{min-width:60px;padding:8px 10px;}" +
       /* SHARK SIM (.tv-shark on #tveh, see layout()): FIRE and JUMP are off
          the glass in this mode (systems/touch.js), so their corner thumb
          spots are empty — and that corner is exactly where the owner wants
@@ -359,7 +342,6 @@
     // #tvBtns is column-REVERSE: the FIRST button here sits at the BOTTOM,
     // nearest the resting thumb — so the big primary hold goes first.
     const FIRE_BTN = '<button type="button" id="tvFire" class="tvbtn tv-fire" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>';
-    const LOOK_BTN = pill("tvLook", "LOOK BACK", "tv-sm");   // camera-agent hook; hidden unless CBZ.camLookBack exists
     // VIEW swaps the cockpit/chase camera. Feature-detected the same way LOOK
     // BACK is, so a build without the cockpit files simply never shows it.
     // VIEW swaps the seated/chase camera. It is the SAME pill for a cockpit
@@ -373,11 +355,8 @@
     const SEAT_BTN = paxOn() ? pill("tvSeat", "SEAT", "tv-sm") : "";
     let html = "";
     if (next === "pax") {
-      // EXIT here is the door: at speed cityVehicleGetOut turns it into a jump,
-      // which is why the pill wears the verb the speed will actually produce
-      // (repainted per frame by the watcher below).
-      html = pill("tvSeat", "TAKE THE WHEEL", "tv-big tv-go") +
-        pill("tvExit", "JUMP OUT", "tv-big tv-warn") + LOOK_BTN + VIEW_BTN;
+      // The door is systems/seat_exit.js's #tExit (it wears Jump at speed).
+      html = pill("tvSeat", "TAKE THE WHEEL", "tv-big tv-go") + VIEW_BTN;
     } else if (next === "drive") {
       html =
         '<div class="tv-car-steer">' +
@@ -387,7 +366,7 @@
           pill("tvCarBrake", "BRAKE", "tv-big tv-warn") + pill("tvGas", "GAS", "tv-big tv-go") +
         "</div>" +
         '<div class="tv-car-utils">' +
-          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + SEAT_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm") +
+          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + SEAT_BTN + VIEW_BTN +
         "</div>" +
         // THE WINDOW: shown by the watcher only in the seat view with a gun in
         // hand (city/view.js CAR_FP_LEAN). Hold = lean out and fire.
@@ -397,21 +376,20 @@
       // Boats keep the exact joystick helm the owner likes. ASTERN is the
       // water_helm crash-stop (it rides CTRL now — Space became the jump-key
       // get-up, and a hold pill on Space would stand a thumb up mid-stop).
-      // GET UP is that jump verb: out of the seat, onto your own deck
-      // (city/boatwalk.js). VIEW joined the row when hulls learned first
-      // person ([V] — city/view.js helm eye).
-      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + pill("tvGetUp", "GET UP", "tv-sm") +
-        LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
+      // Getting up onto your own deck is the one #tExit (systems/seat_exit.js,
+      // city/boatwalk.js's boatStandUp). VIEW joined the row when hulls learned
+      // first person ([V] — city/view.js helm eye).
+      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + VIEW_BTN;
     } else if (next === "armor") {
       // Only an actually armed hull gets FIRE. Tanks aim through the look drag;
       // Patriots use the shared full-map target and launch through the same verb.
-      html = (isArmedArmor() ? FIRE_BTN : "") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      html = isArmedArmor() ? FIRE_BTN : "";
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
-        FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
+        FIRE_BTN + VIEW_BTN;
     } else if (next === "wing") {
       html = pill("tvThrUp", "THR +", "tv-big tv-go") + pill("tvThrDn", "THR −", "tv-big") +
-        FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
+        FIRE_BTN + VIEW_BTN;
     } else if (next === "chute") {
       // Falling out of an aircraft is a CONTEXT, not a vehicle, but it is the
       // same problem this layer exists to solve: a keyboard verb the thumb
@@ -432,17 +410,9 @@
     }
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
-    if (q("tvExit")) tapBtn(q("tvExit"), doExit);
     // the boat's astern pill — CTRL, the same key water_helm's crash-stop
     // polls on a keyboard (never Space: that key stands the driver up now)
     if (q("tvBrake")) holdBtn(q("tvBrake"), "control");
-    // GET UP calls the verb directly rather than synthesising a Space tap —
-    // water_helm's stand-up latch is polled off CBZ.keys, and a same-tick
-    // keydown+keyup (touchKeyTap's shape) is exactly what a poll misses.
-    if (q("tvGetUp")) tapBtn(q("tvGetUp"), () => {
-      const P = CBZ.player;
-      if (P && P.driving && P._vehicle && CBZ.boatStandUp) CBZ.boatStandUp(P._vehicle);
-    });
     if (q("tvSeat")) tapBtn(q("tvSeat"), () => { if (CBZ.citySeatShift) CBZ.citySeatShift(); });
     if (q("tvLeft")) holdBtn(q("tvLeft"), "a");
     if (q("tvRight")) holdBtn(q("tvRight"), "d");
@@ -462,9 +432,6 @@
       });
       else tapBtn(q("tvFire"), doFire);
     }
-    // LOOK BACK: hold pins the chase cam over the shoulder (camera agent's
-    // feature-detected API — the button only shows once that API exists).
-    if (q("tvLook")) holdFn(q("tvLook"), (down) => { if (CBZ.camLookBack) CBZ.camLookBack(down); });
     // ONE VERB, TWO SEATS. An aircraft's inside view is cockpit_view.js's; a
     // car's is city/view.js's. The pill asks the aircraft owner first (it is
     // the one that refuses unless P._aircraft is set, exactly as the [V] key
@@ -512,9 +479,9 @@
     // jump, aim, FIRE) is still the on-foot layer's job and stays on screen.
     if (next === "mount") {
       // Order matters in a column-reverse rail: DIVE sits nearest the thumb,
-      // RISE directly above it (the swim context's own pairing), DISMOUNT last
-      // and small, because the one button you must not fat-finger while three
-      // metres under is the one that gives the shark back.
+      // RISE directly above it (the swim context's own pairing). Getting off
+      // is the one #tExit (systems/seat_exit.js), top centre, well away from
+      // the thumb that is diving three metres under.
       if (mountDive()) {
         h += pill("tvMDive", "DIVE", "tv-big");
         h += pill("tvMRise", "RISE", "tv-big tv-go");
@@ -522,26 +489,12 @@
       // In Shark Sim there is no rider to dismount — you ARE the shark, the
       // human is hidden, and shark_sim.js force-remounts every frame, so the
       // pill was a button that did nothing but flicker. No pill, no lie.
-      if (CBZ.game.mode !== "sharksim") h += pill("tvDismount", "DISMOUNT", "tv-sm");
     }
     if (air) {
       // Bottom-up (column-reverse): the release sits nearest the thumb, its own
-      // readout directly above it, and the occasional taps PAIR OFF into rows.
-      // The rows are a height budget, not a style choice — stacking all six
-      // singly runs the column past 500 px up a 768 px landscape iPad and into
-      // the top-right money/wanted stack. Rows keep the whole rail under ~290.
+      // readout directly above it.
       h += pill("tvBomb", "BOMB", "tv-big tv-warn");
       h += pill("tvPay", "PAYLOAD", "tv-sm");
-      h += '<div class="tvrow" id="tvWepRow">' + pill("tvBombCam", "BOMB CAM", "tv-sm") +
-        pill("tvHoming", "HOMING", "tv-sm") + "</div>";
-      if (trimOn()) {
-        // A PAIR READS AS A PAIR: left and right side by side in one row, never
-        // stacked — a stacked left/right is the classic touch-layout lie.
-        const tw = next === "heli" ? "SLIDE" : "RUD";
-        h += '<div class="tvrow" id="tvTrimRow">' +
-          pill("tvTrimL", "◀ " + tw, "tv-sm") +
-          pill("tvTrimR", tw + " ▶", "tv-sm") + "</div>";
-      }
     }
     // THE GETAWAY BOOM. explosives.js is explicit that hold-[B] detonates
     // "from a car, so the drive-away bomb actually plays" — and body.tveh-on
@@ -550,9 +503,6 @@
     // Worded, not a glyph: this rail is the verb-pill vocabulary, and DETONATE
     // is the word. Hidden until charges are actually out (refreshAux).
     if (drv || boat) h += pill("tvBoom", "DETONATE", "tv-sm tv-warn");
-    // Same rule as the on-foot #trecen: when the flag is off the pill is not
-    // built, not merely hidden by the show() sweep below.
-    if (!boat && (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false)) h += pill("tvRecen", "RECENTER", "tv-sm");
     auxWrap.innerHTML = h;
     const q = (id) => auxWrap.querySelector("#" + id);
     // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
@@ -573,23 +523,10 @@
       if (CBZ.cityAquaticMountVertical) CBZ.cityAquaticMountVertical(down ? 1 : 0);
     });
     if (q("tvBomb")) holdFn(q("tvBomb"), (down) => { if (CBZ.strategicBombHold) CBZ.strategicBombHold(down); });
-    if (q("tvBombCam")) holdFn(q("tvBombCam"), (down) => { if (CBZ.strategicBombCameraHold) CBZ.strategicBombCameraHold(down); });
     if (q("tvPay")) tapBtn(q("tvPay"), () => {
       if (CBZ.strategicPayloadCycle) CBZ.strategicPayloadCycle();
       lastPay = "";                      // repaint the label on the next tick
     });
-    if (q("tvHoming")) tapBtn(q("tvHoming"), () => {
-      if (!CBZ.lockonHomingSet) return;
-      CBZ.lockonHomingSet(!CBZ.lockonHomingOn());
-      if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn() ? 1.25 : 0.8 });
-    });
-    // The trim pair writes the SAME q/e the flight model already reads (heli
-    // lateral cyclic, wing rudder) — no new API, no new axis, and the layer's
-    // own key pump + stale-hold sweeper cover it for free.
-    if (q("tvTrimL")) holdBtn(q("tvTrimL"), "q");
-    if (q("tvTrimR")) holdBtn(q("tvTrimR"), "e");
-    if (q("tvDismount")) tapBtn(q("tvDismount"), () => { if (CBZ.cityDismount) CBZ.cityDismount(); });
-    if (q("tvRecen")) tapBtn(q("tvRecen"), () => { if (CBZ.camRecenter) CBZ.camRecenter(); });
     // DETONATE — a HOLD on the module's own logical key (touch.js's
     // touchKeyHold), because [B] in a seat is already exactly this verb:
     // explosives.js refuses the plant half while driving and detonates past
@@ -665,7 +602,7 @@
   const armorOn = () => !!(airV2() && CBZ.cityArmorActive && CBZ.cityArmorActive());
   /* AN AQUATIC MOUNT IS A THIRD KIND OF SWIMMER. The "swim" context above gives
      the human swimmer DIVE/RISE (city/swim.js's Space/Ctrl grammar on two
-     pills); the "mount" context gives a saddle a DISMOUNT pill. Ride a SHARK
+     pills); the "mount" context gives a saddle its aux rail. Ride a SHARK
      and you are in the water with a vertical axis and neither of those covered
      it — owner, 2026-08-25: "in nat disaster world on touch when in the water
      you get rise and dive … in shark sim there's just water surface and you
@@ -673,7 +610,7 @@
      land in the AUX RAIL rather than the thumb column because a mount keeps the
      on-foot cluster (FIRE is the mounted bite — systems/touch.js routes it to
      CBZ.cityMountedAnimalAttack) and must not have it covered up.
-     TOUCH_MOUNT_DIVE=0 → the saddle gets DISMOUNT and nothing else, as before. */
+     TOUCH_MOUNT_DIVE=0 → the saddle gets no rail (getting off is #tExit). */
   const mountDive = () => !!(airV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_MOUNT_DIVE !== false) &&
     CBZ.cityAquaticMountRiding && CBZ.cityAquaticMountRiding());
   function armorRec() { return CBZ.cityArmorRec ? CBZ.cityArmorRec() : null; }
@@ -682,20 +619,6 @@
     const r = armorRec(); return !!(r && (r.kind === "tank" || r.kind === "patriot") && CBZ.cityArmorFire);
   }
 
-  function doExit() {
-    const P = CBZ.player; if (!P) return;
-    if (P._aircraft && CBZ.cityPlayerAircraftExit) CBZ.cityPlayerAircraftExit();
-    // ARMOR BEFORE THE CAR CHECK: the tank sim sets P.driving with no
-    // P._vehicle, so cityExitVehicle has nothing to step out of — it was the
-    // one seat in the game a thumb could enter and not leave.
-    else if (armorOn() && CBZ.cityExitArmor) CBZ.cityExitArmor();
-    // THE DOOR, NOT THE HANDBRAKE. Above walking pace this is a jump — the
-    // same split [E]/[F] gets on a keyboard, because a thumb should never be
-    // offered a different physics from a finger. Falls back to the plain exit
-    // when city/passengerseat.js is absent.
-    else if (P.driving && CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut();
-    else if (P.driving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
-  }
   function doFire() {
     if (mode === "armor") { if (CBZ.cityArmorFire) CBZ.cityArmorFire(); return; }
     if (CBZ.cityAircraftFireMissile) CBZ.cityAircraftFireMissile();
@@ -767,7 +690,7 @@
   // Show/hide by what the world can actually DO right now, and let each label
   // carry its own state. Nothing here is a second source of truth: the payload
   // name and count come from strategic.js's own readout (the exact function its
-  // desktop strip reads), homing from lockon.js's own getter.
+  // desktop strip reads).
   function show(el, want) {
     if (!el) return;
     const v = want ? "" : "none";
@@ -791,8 +714,6 @@
     const b2 = !!(pay && pay.b2);
     show(auxWrap.querySelector("#tvBomb"), b2 && !!CBZ.strategicBombHold);
     show(auxWrap.querySelector("#tvPay"), b2 && !!CBZ.strategicPayloadCycle);
-    show(auxWrap.querySelector("#tvBombCam"), b2 && !!CBZ.strategicBombCameraHold &&
-      CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false);
     const pb = auxWrap.querySelector("#tvPay");
     if (pb && b2) {
       // The pill IS the payload strip on touch: mobile.css hides
@@ -812,29 +733,6 @@
       if (lab !== lastPay) { lastPay = lab; pb.textContent = lab; }
       pb.classList.toggle("tv-warn", !!flash || (pay.count | 0) <= 0);
     }
-    // HOMING: the on-foot cluster owns this pill, and body.tveh-on hides that
-    // cluster — so on an armed aircraft, where a red lock matters most, a thumb
-    // had no way to reach it at all. Lit = homing, dim = dumb-fire; same read,
-    // same setter, no second state.
-    const hm = auxWrap.querySelector("#tvHoming");
-    let homLive = false;
-    if (hm) {
-      homLive = !!(air && CBZ.lockonState && CBZ.lockonState().active && CBZ.lockonHomingSet);
-      show(hm, homLive);
-      if (homLive) hm.style.opacity = CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? "" : "0.42";
-    }
-    // A row whose every child is hidden is still a flex item and still eats its
-    // share of the column gap, so the row itself stands down with its contents.
-    const wr = auxWrap.querySelector("#tvWepRow");
-    if (wr) show(wr, homLive || (b2 && !!CBZ.strategicBombCameraHold &&
-      CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false));
-    // TRIM pair — only where the axis exists: FLIGHT_CONTROLS_V2 is what maps
-    // q/e to lateral cyclic / rudder, so with it off the buttons would write
-    // keys nothing reads, which is a stat fiction in button form.
-    const tr = auxWrap.querySelector("#tvTrimRow");
-    if (tr) show(tr, air && (!CBZ.CONFIG || CBZ.CONFIG.FLIGHT_CONTROLS_V2 !== false));
-    const rc = auxWrap.querySelector("#tvRecen");
-    if (rc) show(rc, !!CBZ.camRecenter && (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false));
     // DETONATE: only while charges are actually out there. cityC4Planted is
     // the module's own count — when a mode without the blast capability clears
     // the field, or the last charge fires, the count hits zero and the pill
@@ -893,26 +791,9 @@
     }
     if (!next) return;
 
-    // THE EXIT PILL WEARS THE VERB IT WILL ACTUALLY PRODUCE. Standing still it
-    // is a step out; at speed the same tap throws you through the door, and a
-    // button that does not say which of those is about to happen is the pill
-    // version of an unlabelled key.
-    const xb = btnWrap.querySelector("#tvExit");
-    if (xb && paxOn() && (mode === "drive" || mode === "boat" || mode === "pax")) {
-      const v = Math.abs((P._vehicle && P._vehicle.v) || 0);
-      const want = (v > 2.4 && CBZ.CONFIG.VEHICLE_BAIL !== false) ? "JUMP OUT" : "EXIT";
-      if (xb.textContent !== want) xb.textContent = want;
-      xb.classList.toggle("tv-warn", want === "JUMP OUT");
-    }
-    // LOOK BACK appears only once the camera agent's API exists (merge-order safe)
-    const lb = btnWrap.querySelector("#tvLook");
-    if (lb) {
-      const want = CBZ.camLookBack ? "" : "none";
-      if (lb.style.display !== want) lb.style.display = want;
-    }
     refreshAux();
     // VIEW appears only once the file that owns THIS context's inside view is
-    // present (same merge-order safety as LOOK BACK — neither button may
+    // present (merge-order safety — the button may
     // assume its API exists). In a car the pill also stands down when the car
     // has no cabin to sit in: a bike or a boat gets no button rather than a
     // button that refuses.
@@ -1084,8 +965,7 @@
     V("drive-throttle", { ctx: "drive", key: "W", hook: null }); W("drive-throttle", "#tvGas");
     V("drive-brake", { ctx: "drive", key: "S", hook: null }); W("drive-brake", "#tvCarBrake");
     V("boat-astern", { ctx: "boat", key: "Space", hook: null }); W("boat-astern", "#tvBrake");
-    V("vehicle-exit", { ctx: "drive/air", key: "F/E", hook: null }); W("vehicle-exit", "#tvExit");
-    V("look-back", { ctx: "drive/air", key: "MMB", hook: "camLookBack" }); W("look-back", "#tvLook");
+    V("vehicle-exit", { ctx: "drive/air/boat/pax", key: "F/E", hook: "seatExit" }); W("vehicle-exit", "#tExit");
     V("cockpit-view", { ctx: "air", key: "V", hook: "cockpitToggleView" }); W("cockpit-view", "#tvView");
     V("driver-seat", { ctx: "drive", key: "V", hook: "carFpToggle" }); W("driver-seat", "#tvView");
     V("heli-collective", { ctx: "heli", key: "Space/Ctrl", hook: null }); W("heli-collective", "#tvUp/#tvDown");
@@ -1098,25 +978,17 @@
     V("bomb-carpet", { ctx: "b2", key: "B hold", hook: "strategicBombHold" }); W("bomb-carpet", "#tvBomb");
     V("payload-cycle", { ctx: "b2", key: "X", hook: "strategicPayloadCycle" }); W("payload-cycle", "#tvPay");
     V("payload-readout", { ctx: "b2", key: "#cityFlightHud", hook: "strategicPayloadReadout" }); W("payload-readout", "#tvPay label");
-    V("bomb-camera", { ctx: "b2", key: "C hold", hook: "strategicBombCameraHold" }); W("bomb-camera", "#tvBombCam");
-    V("air-homing", { ctx: "air", key: "H", hook: "lockonHomingSet" }); W("air-homing", "#tvHoming");
-    V("heli-lateral", { ctx: "heli", key: "Q/E", hook: null }); W("heli-lateral", "#tvTrimL/#tvTrimR");
-    V("wing-rudder", { ctx: "wing", key: "Q/E", hook: null }); W("wing-rudder", "#tvTrimL/#tvTrimR");
-    V("armor-exit", { ctx: "armor", key: "E", hook: "cityExitArmor" }); W("armor-exit", "#tvExit");
+    V("armor-exit", { ctx: "armor", key: "E", hook: "seatExit" }); W("armor-exit", "#tExit");
     V("armor-fire", { ctx: "armor", key: "LMB", hook: "cityArmorFire" }); W("armor-fire", "#tvFire");
     V("mount", { ctx: "foot", key: "I / panel", hook: "cityMountAnimal" }); W("mount", "world tap");
-    V("dismount", { ctx: "mount", key: "E", hook: "cityDismount" }); W("dismount", "#tvDismount");
-    // The RECENTER pill follows its own flag (default off since 2026-08-04,
-    // owner's call) — declared as skipped rather than wired when it is not
-    // drawn, so the ledger reports the glass as it actually is.
-    if (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false) {
-      V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", hook: "camRecenter" }); W("vehicle-recenter", "#tvRecen");
-    } else {
-      V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", skip: "owner asked the recenter button off the iPad glass (CAM_TOUCH_RECENTER=0); the vehicle's own auto-recenter still takes the yaw back on its own" });
-    }
+    V("dismount", { ctx: "mount", key: "E", hook: "seatExit" }); W("dismount", "#tExit");
     // Declared and deliberately NOT drawn — the reason travels with the row so
     // the skipped list can never quietly absorb a real gap:
     V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });
+    V("bomb-camera", { ctx: "b2", key: "C hold", skip: "a cinematic, not a control; [C] keeps it" });
+    V("air-homing", { ctx: "air", key: "H", skip: "homing is the default; the dumb-fire toggle stays on [H]" });
+    V("heli-lateral", { ctx: "heli", key: "Q/E", skip: "bank covers the turn; two more pills were clutter" });
+    V("wing-rudder", { ctx: "wing", key: "Q/E", skip: "bank covers the turn; two more pills were clutter" });
     V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag, aiming the gun is aiming the camera, so a control would be a duplicate axis" });
   }
 })();

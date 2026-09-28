@@ -2198,6 +2198,7 @@
       });
     }
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
+    if (CBZ.wristwatch) CBZ.wristwatch.fit(rig, c);   // entities/watch.js: the watch on the left wrist, by role
     // every face on the page lives (blinks, looks, talks, LODs) through
     // systems/facial.js; a page without it keeps a still, near-tier face
     if (typeof CBZ.faceRegister === "function") CBZ.faceRegister(rig);

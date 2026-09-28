@@ -1240,29 +1240,11 @@
     });
   }
 
-  // seated/asleep: the "get up" verb rides its own zero-distance source so it
-  // always wins the panel while the pose holds (physics stun hides nothing here).
-  I.registerSource({
-    id: "src-propself", kind: "propself", layers: ["propself"], prio: 40, driving: false,
-    find: function (px, pz, ctx, push) {
-      // silent while a sit/stand/lie transition owns the body — offering no
-      // verb is right, but the candidate must not surface at all or the panel
-      // renders a card whose every option is hidden.
-      if (CBZ.propArcActive && CBZ.propArcActive(CBZ.player)) return;
-      const s = CBZ.player._propSeat, b = CBZ.player._propBed;
-      if (s || b) push(s || b, 0);
-    },
-  });
-  I.register("propself", {
-    id: "propself-stand", slot: "e", prio: 100,
-    canShow: function () { return !!CBZ.player._propSeat && !(CBZ.propArcActive && CBZ.propArcActive(CBZ.player)); },
-    label: "Stand up", onSelect: function () { CBZ.propStand(CBZ.player); },
-  });
-  I.register("propself", {
-    id: "propself-wake", slot: "e", prio: 100,
-    canShow: function () { return !!CBZ.player._propBed && !(CBZ.propArcActive && CBZ.propArcActive(CBZ.player)); },
-    label: "Wake up", onSelect: function () { CBZ.propWake(CBZ.player); },
-  });
+  // SEATED / ASLEEP: no card and no row. Standing up (and getting out of a
+  // bed) is systems/seat_exit.js's: the verb pinned on the chair on a
+  // keyboard, the one EXIT button on touch. The zero-distance "propself"
+  // source that used to live here fed a card that was never shown
+  // (CITY_SEAT_SILENT), so on a desktop nothing ever told you the key.
 
   // ================== DESCRIBERS: the card header per kind ==================
   I.describe("ped", function (p) {
@@ -1328,7 +1310,6 @@
     const tier = Math.max(0, Math.min(LOOT_NOTES.length - 1, (rec && rec.tier) | 0));
     return { label: (rec && LOOT_NAMES[rec.kind]) || "Container", note: LOOT_NOTES[tier] };
   });
-  I.describe("propself", function () { return { label: CBZ.player._propBed ? "Lying down" : "Seated", note: "take a load off" }; });
 
   // ================== OPTIONS ==================
   const nm = (p) => p.name || "them";
@@ -1584,15 +1565,11 @@
     label: (car) => aboard(car) > 1 ? "Drag them out (" + aboard(car) + " aboard)" : "Drag the driver out",
     onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
-  // Above walking pace this is a JUMP, and the label says so before you press
-  // it (city/passengerseat.js owns the split; feature-detected both ways).
-  const rideSpeed = (car) => Math.abs((car && car.v) || 0);
-  I.register("vehicle:inside", {
-    id: "car-out", slot: "e",
-    canShow: (car, ctx) => ctx.driving && ctx.vehicle === car,
-    label: (car) => (CBZ.cityVehicleGetOut && rideSpeed(car) > 2.4) ? "Jump out" : "Step out",
-    onSelect: () => { if (CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut(); else CBZ.cityExitVehicle(); },
-  });
+  // NO "car-out" ROW. Getting out is systems/seat_exit.js's: [E] pinned on
+  // your door on a keyboard, the one EXIT button on touch. The row that lived
+  // here could never be pressed (the "vehicle:inside" card is silent and the
+  // E press is consumed before this panel sees it) and said "Step out" while
+  // the real verb said something else.
   /* NO SEAT-SWAP ROW LIVES HERE, ON PURPOSE. This is where a verb belongs,
      but read interactions.js's SILENT_RIDE fold first: "vehicle:inside" is in
      that set, so while you are driving the whole card is hidden and NONE of

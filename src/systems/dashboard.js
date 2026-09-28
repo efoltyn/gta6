@@ -192,10 +192,8 @@
 
   /* NO KEYBOARD ⇒ NO KEY LEGEND (owner, 2026-08-09, iPad/prison). This header
      read "Tab / L — cycle · Esc — close", and on a tablet that was worse than
-     noise: #dashBtn ("Ranks") is a tap target and css/city.css only hides it in
-     the CITY, so the panel opens with a finger in the prison — and then Esc,
-     the sole close it named, does not exist. Closing meant cycling #dashBtn
-     through every view. Touch gets the ✕ the sentence was standing in for.
+     noise: the panel opens with a finger in the prison (the escape plan's
+     Ranks), and then Esc, the sole close it named, does not exist. Touch gets the ✕ the sentence was standing in for.
      Same CBZ.touchMode latch as fullmap.js's keycaps(); read at render time so
      a first finger mid-session flips it. CBZ.CONFIG.MAP_TOUCH_LABELS reverts. */
   function hintHtml() {
@@ -306,9 +304,9 @@
     }
   });
 
-  // a HUD button so touch / mouse users can open it too
-  const btn = document.getElementById("dashBtn");
-  if (btn) btn.addEventListener("click", (e) => { e.preventDefault(); cycle(); });
+  // The old always-on "Ranks" HUD chip (#dashBtn) was hidden by CSS in every
+  // mode and deleted; touch reaches the panel through the escape plan.
+  CBZ.dashboardCycle = cycle;
 
   // close it whenever we leave play (win / title)
   CBZ.onAlways(90, function () {

@@ -116,14 +116,6 @@
 #dashboard .s-dead{ background:rgba(0,0,0,.3); color:#ff7a7a; }
 #dashboard .s-esc{ background:rgba(57,255,136,.16); color:#7dffb0; }
 
-/* HUD open button */
-#dashBtn{
-  position:absolute; right:18px; top:18px; transform:translateY(120px);
-  pointer-events:auto; cursor:pointer; display:flex; align-items:center; gap:7px;
-  padding:8px 12px; font-family:Fredoka,sans-serif; font-weight:700; font-size:12px;
-  letter-spacing:1px; text-transform:uppercase; color:#eaf3ff;
-}
-#dashBtn .rk{ font-size:14px; }
 
 /* tighten on small screens: drop the toughness/speed bars + record column
    (hidden in BOTH header and rows so the 7 remaining cells stay aligned) */
