@@ -4539,7 +4539,7 @@
   const _awU = new THREE.Vector3(), _awF = new THREE.Vector3(), _awP = new THREE.Vector3();
   const _awDef = new THREE.Vector3(), _awX = new THREE.Vector3(), _awY = new THREE.Vector3();
   const _awZ = new THREE.Vector3(), _awM = new THREE.Matrix4(), _awQ = new THREE.Quaternion();
-  const _awPQ = new THREE.Quaternion(), _awW = new THREE.Vector3();
+  const _awPQ = new THREE.Quaternion(), _awW = new THREE.Vector3(), _awFL = new THREE.Vector3(), _awFE = new THREE.Vector3();
   function perpNorm(v, axis) {
     v.addScaledVector(axis, -v.dot(axis));
     const l = v.length();
@@ -4547,48 +4547,213 @@
     v.multiplyScalar(1 / l);
     return true;
   }
-  // the chest (+ waist) box in the arms' parent frame, cached per rig
-  function armChestBox(ch) {
-    if (ch._armChest !== undefined) return ch._armChest;
-    const slots = ch.skinSlots && ch.skinSlots.torso;
-    let box = null;
-    if (slots && slots.length && ch.parts && ch.parts.la) {
-      const parent = ch.parts.la.parent;
-      const b = new THREE.Box3(), m = new THREE.Matrix4();
-      box = new THREE.Box3();
-      for (let i = 0; i < slots.length; i++) {
-        const mesh = slots[i];
-        if (!mesh || !mesh.geometry) continue;
-        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-        m.identity();
-        let o = mesh;
-        for (; o && o !== parent; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
-        if (o !== parent) continue;
-        // a shaped torso part's bounds include its SHOULDERS, which the upper
-        // arm always overlaps — test against the ribcage box it replaced
-        const tp = mesh.geometry.userData && mesh.geometry.userData.torso, pr = mesh.geometry.parameters;
-        if (tp && pr) b.set(new THREE.Vector3(-pr.width / 2, -pr.height / 2, -pr.depth / 2), new THREE.Vector3(pr.width / 2, pr.height / 2, pr.depth / 2));
-        else b.copy(mesh.geometry.boundingBox);
-        box.union(b.applyMatrix4(m));
-      }
-      if (box.isEmpty()) box = null;
-      else box.expandByScalar(0.04);
+  /* ---- THE BODY AS WORN: WHAT AN ARM MAY NOT PASS THROUGH -----------------
+     The arm solves used to keep the elbow and forearm out of the RIBCAGE BOX
+     the chest part was lofted from (geometry.parameters, + 4 cm). The shaped
+     torso is not that box: a man's pecs and a heavy man's belly stand 3-5 cm
+     proud of it, a woman's bust more, and everything strapped on the front
+     (a plate carrier, warlord webbing and pouches, a heavy vest) stands
+     further out again. Measured (tools/overlap-audit.mjs, the gun-hold
+     poses): the solved forearms ran up to 4.5 cm INTO the kit and the
+     shouldered carbine's butt 3 cm into the chest.
+     So the body REPORTS its extents as drawn: every mesh hanging off the body
+     except the arms and the head — the shaped torso and pelvis, clothing
+     shells, and whatever kit is worn — is rasterised once into a grid of
+     columns in the body frame (x 3 cm, y 2.5 cm): each column holds the front
+     and back of what is drawn there and the x/y extent it covers. Rebuilt only
+     when what hangs off the body changes (dressing, kit, torso LOD).
+       charArmTo.bodyPen(ch, p, r)  how deep a ball of radius r at body-frame
+                                    point p sits inside the worn body (0 clear)
+       charArmTo.bodyFront(ch, x, y) the front of the worn body at (x, y) —
+                                    the shoulder pocket a butt rests on
+       charArmTo.armPen(ch, arm)    the deepest arm sample (elbow half of the
+                                    upper arm, the whole forearm) inside it */
+  const BV_X = 0.03, BV_Y = 0.025;
+  const _bvA = new THREE.Vector3(), _bvB = new THREE.Vector3(), _bvC = new THREE.Vector3(), _bvP = new THREE.Vector3();
+  const _bvM = new THREE.Matrix4();
+  function bodyVolSig(ch) {
+    const kids = ch.body.children;
+    let sig = kids.length;
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      sig = (sig * 31 + k.id * 3 + (k.visible ? 1 : 2) + (k.geometry ? k.geometry.id * 7 : 0)) % 1000000007;
     }
-    ch._armChest = box;
-    return box;
+    return sig;
   }
-  const _acE = new THREE.Vector3(), _acX = new THREE.Vector3(), _acP = new THREE.Vector3();
-  // samples of the elbow + forearm inside the box, elbow swung th round its circle
-  function armInChest(box, S, dir, a, h, pole, th, W) {
+  /* The grid is a function of WHAT is drawn and WHERE (geometry + its matrix
+     into the body), not of who wears it: every cop of one build in one plate
+     carrier shares one. Keyed on exactly that, LRU-capped. */
+  const BODY_VOLS = new Map();
+  let bodyVolIds = 0;                          // one id per distinct worn body (cache keys read it)
+  function bodyVolume(ch) {
+    if (!ch || !ch.body) return null;
+    const sig = bodyVolSig(ch);
+    const V0 = ch._bodyVol;
+    if (V0 && V0.sig === sig) return V0;
+    const body = ch.body;
+    const skip = new Set();
+    if (ch.parts) { if (ch.parts.la) skip.add(ch.parts.la); if (ch.parts.ra) skip.add(ch.parts.ra); }
+    if (ch.neck) skip.add(ch.neck);
+    if (ch.head) skip.add(ch.head);
+    const meshes = [], mats = [], kitOf = [];
+    // the body's own skin (chest, collar, pelvis) vs what is worn over it: the
+    // shoulder end of the upper arm always sits in the torso's own shoulder,
+    // but must still clear a vest's armhole
+    const own = new Set([].concat((ch.skinSlots && ch.skinSlots.torso) || [], (ch.skinSlots && ch.skinSlots.collar) || [], (ch.skinSlots && ch.skinSlots.pelvis) || []));
+    let key = "";
+    const stack = body.children.slice();
+    while (stack.length) {
+      const o = stack.pop();
+      if (!o || skip.has(o) || o.visible === false || (o.userData && o.userData.noBodyVolume)) continue;
+      for (let i = 0; i < o.children.length; i++) stack.push(o.children[i]);
+      const g = o.isMesh && o.geometry, pos = g && g.attributes && g.attributes.position;
+      if (!pos || (o.material && o.material.visible === false)) continue;
+      const M = new THREE.Matrix4();
+      let q = o;
+      for (; q && q !== body; q = q.parent) { q.updateMatrix(); M.premultiply(q.matrix); }
+      if (q !== body) continue;
+      meshes.push(o); mats.push(M); kitOf.push(!own.has(o));
+      key += g.id + ":" + g.uuid.slice(0, 8);
+      const e = M.elements;
+      for (let i = 0; i < 16; i++) key += "," + Math.round(e[i] * 2000);
+      key += ";";
+    }
+    let V = BODY_VOLS.get(key);
+    if (V) { BODY_VOLS.delete(key); BODY_VOLS.set(key, V); }
+    else {
+      const cells = new Map(), kit = new Map();
+      const addTo = function (map, x, y, z) {
+        const ck = Math.floor(y / BV_Y) * 8192 + Math.floor(x / BV_X) + 4096;
+        const c = map.get(ck);
+        if (!c) map.set(ck, [z, z, x, x, y, y]);
+        else {
+          if (z > c[0]) c[0] = z; if (z < c[1]) c[1] = z;
+          if (x < c[2]) c[2] = x; if (x > c[3]) c[3] = x;
+          if (y < c[4]) c[4] = y; if (y > c[5]) c[5] = y;
+        }
+      };
+      for (let k = 0; k < meshes.length; k++) {
+        const g = meshes[k].geometry, pos = g.attributes.position, idx = g.index, M = mats[k], isKit = kitOf[k];
+        const n = idx ? idx.count : pos.count;
+        for (let t = 0; t + 2 < n; t += 3) {
+          _bvA.fromBufferAttribute(pos, idx ? idx.getX(t) : t).applyMatrix4(M);
+          _bvB.fromBufferAttribute(pos, idx ? idx.getX(t + 1) : t + 1).applyMatrix4(M);
+          _bvC.fromBufferAttribute(pos, idx ? idx.getX(t + 2) : t + 2).applyMatrix4(M);
+          const L = Math.max(_bvA.distanceTo(_bvB), _bvB.distanceTo(_bvC), _bvC.distanceTo(_bvA));
+          const m = Math.max(1, Math.min(20, Math.ceil(L / 0.03)));
+          const bx = _bvB.x - _bvA.x, by = _bvB.y - _bvA.y, bz = _bvB.z - _bvA.z;
+          const cx = _bvC.x - _bvA.x, cy = _bvC.y - _bvA.y, cz = _bvC.z - _bvA.z;
+          for (let i = 0; i <= m; i++) {
+            const u = i / m;
+            for (let j = 0; j <= m - i; j++) {
+              const v = j / m;
+              const x = _bvA.x + bx * u + cx * v, y = _bvA.y + by * u + cy * v, z = _bvA.z + bz * u + cz * v;
+              addTo(cells, x, y, z);
+              if (isKit) addTo(kit, x, y, z);
+            }
+          }
+        }
+      }
+      // packed dense for the queries (a solve asks thousands of them)
+      const pack = function (cells) {
+        let xa = Infinity, xb = -Infinity, ya = Infinity, yb = -Infinity;
+        cells.forEach(function (c, ck) {
+          const yi = Math.floor(ck / 8192), xx = ck - yi * 8192 - 4096;
+          if (xx < xa) xa = xx; if (xx > xb) xb = xx; if (yi < ya) ya = yi; if (yi > yb) yb = yi;
+        });
+        const nx = cells.size ? xb - xa + 1 : 0, ny = cells.size ? yb - ya + 1 : 0;
+        const D = new Float32Array(Math.max(1, nx * ny * 6)).fill(NaN);
+        cells.forEach(function (c, ck) {
+          const yi = Math.floor(ck / 8192), xx = ck - yi * 8192 - 4096;
+          const o = ((yi - ya) * nx + (xx - xa)) * 6;
+          for (let k = 0; k < 6; k++) D[o + k] = c[k];
+        });
+        return { D: D, x0: xa, y0: ya, nx: nx, ny: ny };
+      };
+      const all = pack(cells);
+      V = { D: all.D, x0: all.x0, y0: all.y0, nx: all.nx, ny: all.ny, id: ++bodyVolIds, kit: kit.size ? pack(kit) : null };
+
+      BODY_VOLS.set(key, V);
+      if (BODY_VOLS.size > 48) BODY_VOLS.delete(BODY_VOLS.keys().next().value);
+    }
+    ch._bodyVol = { sig: sig, D: V.D, x0: V.x0, y0: V.y0, nx: V.nx, ny: V.ny, id: V.id, kit: V.kit };
+    return ch._bodyVol;
+  }
+  function bodyPen(ch, p, r, Vin) {
+    const V = Vin || bodyVolume(ch);
+    if (!V || !V.nx) return 0;
+    const x = p.x, y = p.y, z = p.z, D = V.D, nx = V.nx;
+    const xi0 = Math.max(0, Math.floor((x - r) / BV_X) - 1 - V.x0), xi1 = Math.min(nx - 1, Math.floor((x + r) / BV_X) + 1 - V.x0);
+    const yi0 = Math.max(0, Math.floor((y - r) / BV_Y) - 1 - V.y0), yi1 = Math.min(V.ny - 1, Math.floor((y + r) / BV_Y) + 1 - V.y0);
+    let pen = 0;
+    for (let yi = yi0; yi <= yi1; yi++) {
+      for (let xi = xi0; xi <= xi1; xi++) {
+        const o = (yi * nx + xi) * 6;
+        const f = D[o];
+        if (f !== f) continue;                                     // empty column
+        const b = D[o + 1];
+        const dx = x < D[o + 2] ? D[o + 2] - x : x > D[o + 3] ? x - D[o + 3] : 0;
+        const dy = y < D[o + 4] ? D[o + 4] - y : y > D[o + 5] ? y - D[o + 5] : 0;
+        let d;
+        if (z > f) d = Math.sqrt(dx * dx + dy * dy + (z - f) * (z - f));
+        else if (z < b) d = Math.sqrt(dx * dx + dy * dy + (b - z) * (b - z));
+        else if (dx > 0 || dy > 0) d = Math.sqrt(dx * dx + dy * dy);
+        else d = -Math.min(f - z, z - b);
+        const q = r - d;
+        if (q > pen) pen = q;
+      }
+    }
+    return pen;
+  }
+  // the front of the worn body at (x, y): the furthest-forward column within
+  // a hand's width, or null where nothing is drawn
+  function bodyFront(ch, x, y) {
+    const V = bodyVolume(ch);
+    if (!V || !V.nx) return null;
+    let f = null;
+    const xi0 = Math.max(0, Math.floor((x - 0.04) / BV_X) - V.x0), xi1 = Math.min(V.nx - 1, Math.floor((x + 0.04) / BV_X) - V.x0);
+    const yi0 = Math.max(0, Math.floor((y - 0.04) / BV_Y) - V.y0), yi1 = Math.min(V.ny - 1, Math.floor((y + 0.04) / BV_Y) - V.y0);
+    for (let yi = yi0; yi <= yi1; yi++) for (let xi = xi0; xi <= xi1; xi++) {
+      const c = V.D[(yi * V.nx + xi) * 6];
+      if (c === c && (f == null || c > f)) f = c;
+    }
+    return f;
+  }
+  // the limb radii an arm is tested with: its lofts' thinner half-extent at
+  // mid-segment (the deltoid ball at the top of the upper arm is not the arm)
+  function armRadii(ch, part) {
+    const ud = part.userData;
+    if (ud._armR && ud._armRk === ch.profile) return ud._armR;
+    const half = function (m, dflt) {
+      const g = m && m.geometry;
+      const h = g && limbHalfAt(g, -(m.position.y || 0) * 0 + ((g.userData.limb && g.userData.limb.y0) || 0) - 0.5 * ((g.userData.limb && g.userData.limb.sy) || 0));
+      return h ? Math.max(0.02, Math.min(h.hx, h.hz)) : dflt;
+    };
+    const P = ch.profile || {};
+    ud._armR = [half(ud.main, (P.armW || 0.3) * 0.30), half(ud.lower, (P.armW || 0.3) * 0.26)];
+    ud._armRk = ch.profile;
+    return ud._armR;
+  }
+  // sample points of an arm in the body frame, given shoulder S, elbow E, wrist W
+  const ARM_T_KIT = [0.3, 0.45, 0.6], ARM_T_UP = [0.7, 0.85, 1], ARM_T_LO = [0, 0.17, 0.33, 0.5, 0.67, 0.83, 1];
+  const _apS = new THREE.Vector3();
+  function armSegPen(ch, S, E, W, rU, rL) {
+    let pen = 0;
+    const V = bodyVolume(ch);
+    // the shoulder half of the upper arm, against what is WORN only
+    if (V && V.kit) for (let i = 0; i < ARM_T_KIT.length; i++) { _apS.lerpVectors(S, E, ARM_T_KIT[i]); const q = bodyPen(ch, _apS, rU, V.kit); if (q > pen) pen = q; }
+    for (let i = 0; i < ARM_T_UP.length; i++) { _apS.lerpVectors(S, E, ARM_T_UP[i]); const q = bodyPen(ch, _apS, rU, V); if (q > pen) pen = q; }
+    for (let i = 0; i < ARM_T_LO.length; i++) { _apS.lerpVectors(E, W, ARM_T_LO[i]); const q = bodyPen(ch, _apS, rL, V); if (q > pen) pen = q; }
+    return pen;
+  }
+  const _acE = new THREE.Vector3(), _acX = new THREE.Vector3();
+  // how deep this arm runs into the worn body with its elbow swung th round
+  // its circle (S shoulder, W wrist: the arms' parent IS the body frame)
+  function armInBody(ch, rU, rL, S, dir, a, h, pole, th, W) {
     _acX.crossVectors(dir, pole);
     _acE.copy(S).addScaledVector(dir, a)
       .addScaledVector(pole, h * Math.cos(th)).addScaledVector(_acX, h * Math.sin(th));
-    let n = 0;
-    for (let i = 0; i <= 5; i++) {
-      _acP.copy(_acE).lerp(W, i / 6);
-      if (box.containsPoint(_acP)) n++;
-    }
-    return n;
+    return armSegPen(ch, S, _acE, W, rU, rL);
   }
   charArmTo.wrist = function (ch, worldPoint, arm, fore, k) {
     const P = ch && ch.profile;
@@ -4638,30 +4803,49 @@
     const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
     const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
     _awW.copy(part.position).addScaledVector(_awD, d);
-    /* NOT THROUGH THE CHEST. A forearm led in along a hand on a gun held at
+    /* NOT THROUGH THE BODY. A forearm led in along a hand on a gun held at
        the sternum would have its elbow INSIDE the torso (the ideal elbow is
-       straight back down the bore). Walk the elbow round its circle, the
-       least way from the pole, until neither it nor the forearm is inside
-       the chest/waist box (margin 4 cm). */
-    const box = armChestBox(ch);
-    if (box && h > 1e-4 && armInChest(box, part.position, _awD, a, h, _awP, 0, _awW) > 0) {
+       straight back down the bore), and a support forearm crossing to a
+       handguard lies across the chest and whatever is strapped to it. Walk
+       the elbow round its circle, the least way from the pole, until neither
+       the elbow half of the upper arm nor the forearm is inside the body AS
+       WORN (bodyPen: the shaped torso + its kit); if no angle clears it, the
+       angle that leaves the least of the arm inside. A hand that is holding
+       something wants its forearm along `fore`: swinging the elbow away from
+       that bends the wrist, and past what a wrist gives (~36 degrees) that
+       costs like being inside the body — a wrist folded at 70 degrees to keep
+       a forearm off the chest is not a better hold. */
+    const onBody = parent === ch.body && ch.body;
+    const armR = onBody ? armRadii(ch, part) : null;
+    const PEN_OK = 0.002;
+    const hasFore = !!(fore && poleOk);
+    if (hasFore) { parent.getWorldQuaternion(_awPQ); _awFL.copy(fore).applyQuaternion(_awPQ.invert()).normalize(); }
+    const elbowCost = function (th) {
+      const pn = armInBody(ch, armR[0], armR[1], part.position, _awD, a, h, _awP, th, _awW);
+      if (!hasFore) return pn;
+      _awFE.subVectors(_acE, _awW).normalize();
+      const bend = Math.acos(Math.max(-1, Math.min(1, _awFE.dot(_awFL))));
+      return pn + Math.max(0, bend - 0.62) * 0.08;
+    };
+    const pen0 = onBody && h > 1e-4 ? elbowCost(0) : 0;
+    if (pen0 > PEN_OK) {
       _awX.crossVectors(_awD, _awP);
-      let best = 0, bestScore = Infinity;
-      for (let i = 1; i <= 12; i++) {
+      let best = 0, bestPen = pen0, bestI = 0;
+      for (let i = 1; i <= 6; i++) {
         for (let s = -1; s <= 1; s += 2) {
-          const th = s * i * Math.PI / 12;
-          const sc = armInChest(box, part.position, _awD, a, h, _awP, th, _awW) * 10 + i;
-          if (sc < bestScore) { bestScore = sc; best = th; }
+          const th = s * i * Math.PI / 6;
+          const pn = elbowCost(th);
+          if (pn < bestPen - 1e-4) { bestPen = pn; best = th; bestI = i; }
         }
-        if (bestScore < 10) break;
+        if (bestPen <= PEN_OK) break;
       }
-      // the boundary, not the 15° step: refine between the last blocked and
-      // the first clear angle, so the elbow moves continuously with its input
-      if (bestScore < 10 && best !== 0) {
-        let lo = best - Math.sign(best) * Math.PI / 12, hi = best;
-        for (let k = 0; k < 6; k++) {
+      // the boundary, not the 15 degree step: refine between the last blocked
+      // and the first clear angle, so the elbow moves continuously with its input
+      if (bestPen <= PEN_OK && best !== 0) {
+        let lo = best - Math.sign(best) * Math.PI / 6, hi = best;
+        for (let k = 0; k < 5; k++) {
           const mid = (lo + hi) / 2;
-          if (armInChest(box, part.position, _awD, a, h, _awP, mid, _awW) > 0) lo = mid; else hi = mid;
+          if (elbowCost(mid) > PEN_OK) lo = mid; else hi = mid;
         }
         best = hi;
       }
@@ -4690,25 +4874,26 @@
     low.localToWorld(_awW);
     return _awW.distanceTo(worldPoint);
   };
-  // how many samples of this arm's elbow->crease run inside the chest/waist
-  // box itself (no margin) — a solve that has a choice can prefer 0
-  const _icA = new THREE.Vector3(), _icB = new THREE.Vector3();
-  charArmTo.inChest = function (ch, arm) {
+  /* How deep this arm (the elbow half of the upper arm and the forearm) runs
+     into the body as worn, in body units (0 = clear) — a solve that has a
+     choice prefers 0; tools measure it. */
+  const _icS = new THREE.Vector3(), _icA = new THREE.Vector3(), _icB = new THREE.Vector3();
+  charArmTo.armPen = function (ch, arm) {
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     const low = part && part.userData && part.userData.low;
-    const mb = low && armChestBox(ch);
-    if (!mb) return 0;
-    const box = ch._armChestRaw || (ch._armChestRaw = mb.clone().expandByScalar(-0.04));
+    if (!low || part.parent !== ch.body) return 0;
     const cap = part.userData.cap;
-    const parent = part.parent;
-    low.updateWorldMatrix(true, false);
-    parent.updateWorldMatrix(true, false);
-    _icA.set(0, 0, 0); low.localToWorld(_icA); parent.worldToLocal(_icA);
-    _icB.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : -0.26, 0); low.localToWorld(_icB); parent.worldToLocal(_icB);
-    let n = 0;
-    for (let i = 0; i <= 6; i++) { if (box.containsPoint(_acP.copy(_icA).lerp(_icB, i / 6))) n++; }
-    return n;
+    const r = armRadii(ch, part);
+    part.updateMatrix(); low.updateMatrix();
+    _icS.copy(part.position);
+    _icA.set(0, 0, 0).applyMatrix4(low.matrix).applyMatrix4(part.matrix);
+    _icB.set(0, (cap && cap.userData.fit) ? cap.userData.fit.wristY : -0.26, 0).applyMatrix4(low.matrix).applyMatrix4(part.matrix);
+    return armSegPen(ch, _icS, _icA, _icB, r[0], r[1]);
   };
+  charArmTo.inChest = function (ch, arm) { return charArmTo.armPen(ch, arm) > 0.004 ? 1 : 0; };
+  charArmTo.bodyPen = function (ch, p, r, V) { return bodyPen(ch, p, r, V); };
+  charArmTo.bodyFront = function (ch, x, y) { return bodyFront(ch, x, y); };
+  charArmTo.bodyVolume = bodyVolume;
   // the wrist crease of this arm, world
   charArmTo.crease = function (ch, arm, out) {
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
@@ -5393,6 +5578,7 @@
   function animChar(ch, speed, dt) {
     animCharBody(ch, speed, dt);
     ankleSolve(ch, dt, false);
+    if (ch._mounts) slingPose(ch);     // after every pose branch: see "A SLING GIVES"
   }
   function animCharBody(ch, speed, dt) {
     // BODY LOD for every rig nobody manages (prison, warlord, disasters...):
@@ -6731,7 +6917,8 @@
         // straight, hand pushed just clear of the leg so the gun silhouettes
         // against the ground from behind (GTA/Fortnite pistol walk).
         ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.18 + carryBob * 0.5, cr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.16, cr, dt);  // out from the actual right thigh
+        // out from the actual right thigh, and round anything worn over the ribs
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, Math.min(-0.16, -(ch.armOutZ != null ? ch.armOutZ : 0) - 0.04), cr, dt);
         setElbow(J.ra, -0.12, cr);
       } else {
         // LONG-GUN carry. Two generations of this pose, and the second exists
@@ -6794,7 +6981,8 @@
         const armAmp = hipAmp * (0.95 + 0.25 * run2);
         const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
         ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
-        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.08, 6, dt);
+        // the off arm hangs like the idle one: wide of the ribs and of any vest
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, ch.armOutZ != null ? ch.armOutZ : -0.08, 6, dt);
         const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
         const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
         setElbow(J.la, -(elbBase + foldL), armRate - 2);
@@ -7227,7 +7415,45 @@
       // stow does not cross the pelvis toward the obsolete +X hip.
       hip:   mk(-hipOut(rig, 0.46 * s), 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
     };
+    for (const k in SLING) {
+      const m = rig._mounts[k], d = SLING[k];
+      m.userData.slingRest = { p: m.position.clone(), q: m.quaternion.clone() };
+      m.userData.slingFlat = {
+        p: m.position.clone().add(new THREE.Vector3(d.dx * s, d.dy * s, d.dz * s)),
+        q: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), d.rz).multiply(m.quaternion),
+      };
+      m.userData.slingK = 0;
+    }
     return rig._mounts;
+  }
+  /* ---- A SLING GIVES --------------------------------------------------------
+     The back mounts above are a rifle hanging from a sling on a STANDING body:
+     muzzle up past the shoulder. Go prone and the head tips ~1.4 rad back over
+     those shoulders to look down-range (PRONE_NECK_ARMED), straight into the
+     muzzle end — measured 14.8 mm of sniper through the back of the skull. A
+     real slung rifle does not stay stood up on a man lying flat: it slides
+     down and rolls to lie ACROSS the shoulder blades, muzzle out past the
+     shoulder instead of over it. So both long-gun mounts swing toward
+     horizontal about the back's own normal (body Z) and slide toward the
+     hips, blended by how far the body is down (_proneB, damped above every
+     early return in animCharBody). A STANDING head tipped back (the audit's
+     lookUp / turnUp) was measured clear with the upright sling, so it does not
+     move it. The hip holster is a belt, not a sling, and does not move. */
+  const SLING = {
+    back:  { rz: -0.62, dx: 0.02, dy: -0.10, dz: -0.02 },
+    back2: { rz:  0.62, dx: -0.02, dy: -0.10, dz: -0.02 },
+  };
+  function slingPose(rig) {
+    const M = rig._mounts;
+    let k = rig._proneB || 0;
+    if (k < 1e-3) k = 0;
+    for (const key in SLING) {
+      const m = M[key], u = m.userData;
+      if (!u.slingRest || Math.abs(u.slingK - k) < 1e-4) continue;
+      u.slingK = k;
+      m.position.lerpVectors(u.slingRest.p, u.slingFlat.p, k);
+      m.quaternion.copy(u.slingRest.q).slerp(u.slingFlat.q, k);
+    }
   }
 
   /* ---- A HELD GUN RESTS ON THE GROUND, IT DOES NOT SINK INTO IT ----------
@@ -7271,6 +7497,8 @@
      per-frame work is one quaternion, nine multiplies and five floor samples
      (CBZ.floorAt is ~0.14 µs since the terrain match landed), for ONE rig. */
   const GUN_REST_CLEAR = 0.025;    // m of air under the lowest vertex
+  const GUN_REST_FEET = 0.002;     // …but a deployed bipod's feet are ON the ground
+  const GUN_FOOT_PAD = 0.010;      // model units from a bipod foot point to its sole (lmg.js foot box)
   const GUN_REST_MAX_UP = 0.60;    // never levitate a gun further than this
   // …nor bury the hand chasing a bipod. Measured: a 34% grade drops the ground
   // 0.28 m across a prone shooter's forward reach, so the cap has to clear that
@@ -7392,17 +7620,32 @@
                    Math.abs(_grAxis.set(0, 1, 0).applyQuaternion(_grQ).z) * hy +
                    Math.abs(_grAxis.set(0, 0, 1).applyQuaternion(_grQ).z) * hz;
         const cxW = _grPos.x + _grCentre.x, czW = _grPos.z + _grCentre.z;
-        const bottom = _grPos.y + _grCentre.y - eY;
+        let bottom = _grPos.y + _grCentre.y - eY;
         const from = _grPos.y + _grCentre.y + eY + 0.4;
         let floor = gunFloorAt(cxW, czW, from);
         floor = Math.max(floor, gunFloorAt(cxW + eX, czW + eZ, from));
         floor = Math.max(floor, gunFloorAt(cxW - eX, czW - eZ, from));
         floor = Math.max(floor, gunFloorAt(cxW + eX, czW - eZ, from));
         floor = Math.max(floor, gunFloorAt(cxW - eX, czW + eZ, from));
-        const need = floor + GUN_REST_CLEAR - bottom;
         // a DEPLOYED bipod is the only case that also settles DOWN onto the
-        // surface; everything else may only ever be lifted out of it
-        const deployed = !!(ch.aimBipod && prop.userData && prop.userData.bipod);
+        // surface; everything else may only ever be lifted out of it.
+        const bip = prop.userData && prop.userData.bipod;
+        const deployed = !!(ch.aimBipod && bip);
+        /* …and once lmg.js has the legs fully out, the FEET are what stand on
+           the deck, judged at the feet. The oriented box above is a bound, and
+           on a gun tipped even 3 degrees its "lowest corner" is a point under
+           the stock that does not exist — measured, it held the real feet
+           64 mm in the air. Mid-swing the box is used (re-measured as the legs
+           move), so the gun rides up onto the legs as they unfold. */
+        if (deployed && bip.feet && bip.deployed >= 1) {
+          bottom = Infinity; floor = -Infinity;
+          for (let i = 0; i < bip.feet.length; i++) {
+            _grCorner.copy(bip.feet[i]).applyMatrix4(prop.matrixWorld);
+            bottom = Math.min(bottom, _grCorner.y - GUN_FOOT_PAD * _grScale.y);
+            floor = Math.max(floor, gunFloorAt(_grCorner.x, _grCorner.z, _grCorner.y + 0.4));
+          }
+        }
+        const need = floor + (deployed ? GUN_REST_FEET : GUN_REST_CLEAR) - bottom;
         want = deployed ? prevLift + need : Math.max(0, prevLift + need);
         if (need > 0.02) _grStats.sunk++;
         // THE PINNABLE NUMBER. `sunk` is the raw fault rate BEFORE correction

@@ -135,6 +135,9 @@
   const ENGINE = [
     "systems/fpsmode.js",    // THE gun: spread, recoil pattern, ADS, reload,
                              // falloff, headshots, hit marker, reticle, tracers
+    "systems/holsterprops.js", // the gun IN HIS HANDS in third person: the one held
+                             // prop the city player carries (the fist closed on its
+                             // grip, CBZ.gunHold), his other guns slung on the back
     "systems/gunhands.js",   // the off hand actually holds the gun, and reloads it
     "systems/lockon.js",     // soft aim-lock while ADS + the real sniper scope
   ];

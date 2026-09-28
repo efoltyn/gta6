@@ -14,8 +14,8 @@
    Bipod contract (entities/character.js, tools/visual-presets/weapon-holds):
    userData.bipod.hinges/feet are the DEPLOYED leg geometry, unchanged.
    The legs themselves are drawn folded; userData.bipod.setDeployed(k) swings
-   them (0 = folded, 1 = planted on those feet) for whoever owns the prone
-   pose to call.
+   them (0 = folded, 1 = planted on those feet) and userData.bipod.drive(on,
+   dt) animates toward either end — see the note by DEPLOY_S for who drives.
 ============================================================ */
 (function () {
   "use strict";
@@ -106,14 +106,39 @@
       leg.quaternion.copy(leg.userData.qFold);
       return leg;
     });
+    /* setDeployed(k) poses the legs exactly (0 folded .. 1 planted). drive(on,
+       dt) is what a holder calls every frame with its OWN notion of
+       "supported" — it eases the legs there over DEPLOY_S with a smoothstep,
+       so a shooter dropping prone sees them swing down, not snap. Three
+       holders call it: fpsmode's viewmodel and the player's third-person gun
+       (holsterprops) off fpsmode's bipodActive(), and an armed NPC off its
+       posture (actorweapons bipodFromPosture). The ground rest
+       (entities/character.js gunGroundRest) measures the model's bounds once
+       and caches them on the prop; the legs change those bounds, so every leg
+       move drops the cache and the next rest solve measures the FEET. */
+    const DEPLOY_S = 0.35;
     g.userData.bipod = {
       attached: true, functional: true,
       hinges: [hingeL.clone(), hingeR.clone()], feet: [footL.clone(), footR.clone()],
-      deployed: 0,
+      deployed: 0,      // eased leg angle actually drawn, 0..1
+      t: 0,             // linear progress the easing is read off
+      want: false,
       setDeployed: function (k) {
         k = k < 0 ? 0 : k > 1 ? 1 : k;
+        if (k === this.deployed && this._posed) return;
+        this._posed = true;
         this.deployed = k;
         legs.forEach(function (leg) { leg.quaternion.copy(leg.userData.qFold).slerp(leg.userData.qOut, k); });
+        if (g.userData._restBounds) g.userData._restBounds = null;
+      },
+      drive: function (on, dt) {
+        this.want = !!on;
+        const goal = on ? 1 : 0;
+        if (this.t === goal && this._posed) return this.deployed;
+        const step = Math.max(0, dt || 0) / DEPLOY_S;
+        this.t = goal > this.t ? Math.min(goal, this.t + step) : Math.max(goal, this.t - step);
+        this.setDeployed(this.t * this.t * (3 - 2 * this.t));
+        return this.deployed;
       },
     };
 

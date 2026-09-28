@@ -50,7 +50,7 @@
     g.userData.grips = {
       support: new THREE.Vector3(0, -0.020, -0.335),
       // the part the first-person off hand closes on (fpsmode.js fitOffHand)
-      hold: { kind: "guard", y: 0.030, z: -0.300, w: 0.150, h: 0.150, rc: 0.030, len: 0.13, slide: 0 },   // the receiver's front end + nut
+      hold: { kind: "guard", y: 0.020, z: -0.265, w: 0.150, h: 0.150, rc: 0.030, len: 0.13, slide: 0 },   // the receiver's front end (its real centre: y 0.020, front face z -0.33)
       mag: new THREE.Vector3(0, -0.330, -0.172),       // the magazine IS the grip
       charge: new THREE.Vector3(0, 0.150, -0.130),     // top-cover cocking knob
       style: "mag",

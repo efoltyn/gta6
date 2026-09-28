@@ -59,10 +59,16 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.WEAPON_REAL_SCALE == null) CBZ.CONFIG.WEAPON_REAL_SCALE = true;
 
-  // The one stylization knob (see header). thrown covers hand grenades —
-  // small enough that they take the compact boost so a lobbed one stays
-  // visible in flight.
-  const READ = { compact: 1.75, long: 1.45, thrown: 1.75 };
+  /* The one stylization knob (see header) — and for guns it is now 1: REAL
+     SIZE. The 1.45 / 1.75 boosts dated from boxy arms that hid a real-size
+     gun; against the lofted, real-proportioned body and hands they drew every
+     gun half again too big for the hands on it (measured, tools/gun-hold-
+     check.mjs: the shotgun's pump held 7-12 cm BEHIND the pump, launchers
+     1-2 cm behind their foregrips, every long gun's handguard out of the off
+     arm's reach unless the body bladed hard). At real size the hands land on
+     the parts they are meant to hold. thrown covers hand grenades — small
+     enough that a lobbed one keeps its boost to stay visible in flight. */
+  const READ = { compact: 1.0, long: 1.0, thrown: 1.75 };
   CBZ.WEAPON_READ = READ;
 
   // M67 frag grenade, the thrown prop's reference: 64mm diameter, 90mm tall

@@ -437,6 +437,65 @@
      (poseFpArms). A melee weapon gets its fist here too. */
   const FPH = CBZ.fpHands || null;
   const _ofA = new THREE.Vector3(), _ofB = new THREE.Vector3(), _ofC = new THREE.Vector3();
+  const FORE_REAL = 0.265;                  // forearm, wrist to elbow, real metres (ARM_BODY[1])
+  /* THE FIRING FOREARM GOES ROUND THE GUN, NOT THROUGH IT. Its natural line
+     was the straight wrist, and on a rifle's raked pistol grip that points
+     straight back down the gun's centre plane: on the M4 the forearm ran
+     right under — and 2.4 cm into — the stock, on the shotgun 4 cm into it,
+     the RPG's tube and the LMG's butt the same. A real firing forearm leaves
+     the grip back, down and OUT to its own side (the elbow is out beside the
+     body, the stock in the shoulder pocket). So once per gun, at build, the
+     natural line is the nearest direction to the straight wrist whose whole
+     forearm (a third of the way up, to the elbow, at its real girth) clears
+     every drawn part of the gun — measured against the parts' boxes in
+     model space — preferring out to the side over down. */
+  function gunPartBoxes(model) {
+    const out = [], M = new THREE.Matrix4();
+    const skip = (o) => { for (let p = o; p && p !== model; p = p.parent) if (/^fp_hand/.test(p.name)) return true; return false; };
+    model.traverse((o) => {
+      if (!o.isMesh || !o.geometry || skip(o)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      M.identity();
+      for (let p = o; p && p !== model; p = p.parent) { p.updateMatrix(); M.premultiply(p.matrix); }
+      out.push(o.geometry.boundingBox.clone().applyMatrix4(M));
+    });
+    return out;
+  }
+  function clearFiringFore(model, fire) {
+    const boxes = gunPartBoxes(model);
+    // the wrist and the hand's frame in model space, and the hand's model units per metre
+    const W = new THREE.Vector3(), hq = new THREE.Quaternion();
+    let kM = 1;
+    for (let p = fire; p && p !== model; p = p.parent) { p.updateMatrix(); W.applyMatrix4(p.matrix); hq.premultiply(p.quaternion); kM *= p.scale.x; }
+    const L = FORE_REAL * kM, margin = 0.004 * kM;
+    const base = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+    const side = new THREE.Vector3(1, 0, 0), down = new THREE.Vector3(0, -1, 0);
+    const d = new THREE.Vector3(), p = new THREE.Vector3();
+    const clearance = (dir) => {
+      let worst = Infinity;
+      for (let u = 0.3; u <= 1.0001; u += 0.1) {
+        const s = FPH.math.foreHalf(u), r = Math.max(s.rx, s.ry) * kM;
+        p.copy(W).addScaledVector(dir, L * u);
+        for (let i = 0; i < boxes.length; i++) worst = Math.min(worst, boxes[i].distanceToPoint(p) - r);
+      }
+      return worst;
+    };
+    if (clearance(base) >= margin) return;          // a pistol: the straight wrist is already clear
+    let best = null, bestCost = Infinity, most = null, mostC = -Infinity;
+    for (let tx = 0; tx <= 1.2001; tx += 0.05) {
+      for (let ty = -0.3; ty <= 1.0001; ty += 0.05) {
+        d.copy(base).addScaledVector(side, tx).addScaledVector(down, ty).normalize();
+        if (d.angleTo(base) > 0.9) continue;        // a wrist bends only so far off its line
+        const cost = tx + 2 * Math.abs(ty);
+        if (cost >= bestCost) continue;
+        const c = clearance(d);
+        if (c >= margin) { bestCost = cost; best = d.clone(); }
+        else if (c > mostC) { mostC = c; most = d.clone(); }
+      }
+    }
+    const dir = best || most;
+    if (dir) fire.userData.foreLocal = dir.applyQuaternion(hq.invert());
+  }
   function fitOffHand(model, w) {
     if (!FPH || !mat.skin) return;
     let fire = null;
@@ -453,13 +512,19 @@
       fire.userData.foreLocal = new THREE.Vector3(0, 0, 1);
     }
     model.userData.fpFire = fire;
+    if (fire && fire.userData.grasp) {
+      // the gun is finished now: the thumb re-closes on the whole of it
+      FPH.regraspWithSolids(fire, model);
+      clearFiringFore(model, fire);
+    }
+    const solids = FPH.solidsOf(model, model);
     const gr = model.userData.grips, hold = gr && gr.hold;
     const fg = fire && fire.userData.grasp;
     if (!gr || !gr.support || !fg || hold === null) { model.userData.fpSupport = null; return; }
     // the off hand is the same size as the firing hand, in MODEL units
     const k = fg.k * (fire.parent && fire.parent !== model ? fire.parent.scale.x : 1);
     const V = (x, y, z) => new THREE.Vector3(x, y, z);
-    let spec, foreDir;
+    let spec, foreDir, maxDev = 0;
     if (hold && hold.kind === "guard") {
       // cupped under the handguard, yawed: fingers up the far side and forward
       const yaw = 0.62;
@@ -497,14 +562,29 @@
         side: -1, k: k, name: "cup:" + fg.pose.name,
         prism: { o: P.o.clone(), axis: P.axis.clone(), u: P.u.clone(), hw: P.hw + e, hh: P.hh + e * 0.8, rc: P.rc + e },
         n: P.u.clone().negate().addScaledVector(fwd, -0.30),
-        heading: fwd.clone().multiplyScalar(0.90).addScaledVector(P.axis, -0.40),
-        at: P.o.clone().addScaledVector(P.axis, -0.046 * k),
+        heading: fwd.clone().multiplyScalar(0.90).addScaledVector(P.axis, -0.60),
+        at: P.o.clone().addScaledVector(P.axis, -0.034 * k),
         palm: [0.006, -FPH.PALM.th * 0.5, -0.050],
         thumbAim: V(0.25, -0.10, -1),
         thumbAim2: V(0.12, -0.02, -1),
       };
-      foreDir = V(-0.35, -0.45, 0.82);
+      /* THE WATCH READS. The player's watch (entities/watch.js) sits 2.6 cm
+         up this forearm, i.e. at this wrist — and the cup's wrist hung so
+         low at the hip that the watch sat ON the bottom edge of the frame:
+         the Desert Eagle's case ran from 74% to 106% down the lens, cut in
+         half (the revolver's touched the edge, the Glock's reached 90%).
+         The cup now closes 1.2 cm higher on the firing fist (at) with its
+         fingers raked further down the grip (heading), which lifts the
+         wrist, and its forearm leaves back and out to the left, low but not
+         plunging, held near that line (maxDev): the case sits whole in the
+         lower frame (the Eagle's 62-85%). */
+      foreDir = V(-0.62, -0.30, 0.72);
+      maxDev = 0.30;
     }
+    // the support thumb rests on whatever of the gun it meets: a handguard's
+    // on the receiver or barrel nut beside it, a pistol cup's forward along
+    // the frame under the firing thumb
+    spec.solids = solids;
     // on a pump gun the hand rides the pump (it racks with it)
     const holder = (model.userData.pump && model.userData.pump.parent === model) ? model.userData.pump : model;
     const hand = FPH.graspHand(null, spec, mat.skin);
@@ -512,6 +592,7 @@
     holder.add(hand);
     // the forearm's natural line, in the hand's own frame (so it rides every rack, dip and kick)
     hand.userData.foreLocal = foreDir.normalize().applyQuaternion(hand.quaternion.clone().invert());
+    if (maxDev) hand.userData.foreLocal.maxDev = maxDev;      // gunArm's wrist limit for this hold
     hand.userData.pose0 = hand.userData.pose;
     hand.userData.baseQ = hand.quaternion.clone();
     hand.userData.basePos = hand.position.clone();
@@ -820,6 +901,28 @@
   }
   CBZ.fpsWeaponHasBipod = function (w) { return hasBipod(w || weapon()); };
   CBZ.fpsBipodActive = function () { return bipodActive(weapon()); };
+  /* THE LEGS SAY WHAT THE BALLISTICS SAY. The M249's bipod is modelled (see
+     weapons/appearances/lmg.js userData.bipod) and was never unfolded: prone
+     or braced, the recoil/cone/sway above tightened on a gun whose legs were
+     still folded under the barrel. Every frame, each bipod'd viewmodel (and
+     the legacy carried copy survival shows) is driven off bipodActive() —
+     the one notion of "deployed" — and animates there. holsterprops.js does
+     the same for the third-person drawn gun. Runs before the viewmodel pass
+     (onAlways 52) so the legs a frame shows match that frame's brace. */
+  CBZ.onAlways(51.5, function (dt) {
+    const on = armed() && bipodActive(weapon());
+    // …and the body's rest solve (entities/character.js gunGroundRest) reads
+    // the same bit, refreshed here even when the aim branch below early-outs
+    // (holstered, driving), so a stale "deployed" never pulls a gun down.
+    if (CBZ.playerChar) CBZ.playerChar.aimBipod = on;
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const want = on && i === fps.weapon;
+      const a = weaponModels[i] && weaponModels[i].userData.bipod;
+      const b = carriedModels[i] && carriedModels[i].userData.bipod;
+      if (a && a.drive) a.drive(want, dt);
+      if (b && b.drive) b.drive(want, dt);
+    }
+  });
   function kickView(pitchKick, yawKick) {
     if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + pitchKick));
     // systems/camera.js owns the third-person envelope (CBZ.camPitchRange); a
@@ -1199,7 +1302,7 @@
       _wArr[0] = _aW.x; _wArr[1] = _aW.y; _wArr[2] = _aW.z;
       _eArr[0] = _aE.x; _eArr[1] = _aE.y; _eArr[2] = _aE.z;
       _fArr[0] = _aF.x; _fArr[1] = _aF.y; _fArr[2] = _aF.z;
-      const e = FPH.math.clampFore(_wArr, _eArr, _fArr, WRIST_DEV[i], lens[1]);
+      const e = FPH.math.clampFore(_wArr, _eArr, _fArr, fl.maxDev || WRIST_DEV[i], lens[1]);   // a hold may keep its forearm nearer its own line (the pistol cup)
       _aE.set(e[0], e[1], e[2]);
     }
     FPH.poseArm(arm, _aW, _aE, _aS, _aQ, k, armSleeved);

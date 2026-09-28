@@ -823,11 +823,155 @@
       }
     }
 
+    try { buildHands(rec); } catch (e) { rec.hands = null; }
+
     craft._cockpit = rec;
     live.push(rec);
     attachCount++;
     return rec;
   };
+
+  // ============================================================
+  //  THE PILOT'S HANDS. The seat view drew the controls moving by
+  //  themselves — the stick's fat head stood in for a hand ("on a fighter
+  //  this is the whole hand"). Now systems/fphands.js's ONE hand, the same
+  //  one that holds every gun and the car's steering rim, GRASPED onto the
+  //  real grip the shape builder made (cockpit_shapes parts.handGrips:
+  //  curl-until-contact on that grip's own prism) and parented to the part
+  //  that moves, so it rides every stick throw, wheel turn and throttle
+  //  travel. The forearms are solved every frame from two shoulders below
+  //  and behind the eye to those wrists, elbows down and out on their own
+  //  side (they never cross), within the wrist's limit off the hand's line.
+  //  Which hand goes where follows the costume: a lever takes the hand on
+  //  its side, the stick or yoke the other; a yoke with no lever to hold
+  //  (the light single's plunger) takes both. Cost: two shared hand
+  //  geometries and two arms, three module-shared Lambert materials, no
+  //  lights. The hands are the pilot's, not the airframe: tagged seeThrough
+  //  so cockpitSightAudit keeps measuring structure.
+  // ============================================================
+  const HAND_MATS = { skin: null, fore: null, upper: null, hex: [-1, -1, -1] };
+  function handMats() {
+    if (!HAND_MATS.skin) {
+      ["skin", "fore", "upper"].forEach(function (k) {
+        const m = new THREE.MeshLambertMaterial({ color: 0xd6a57e });
+        m._cockpitShared = true;              // one set for every cockpit: never disposed
+        HAND_MATS[k] = m;
+      });
+    }
+    return HAND_MATS;
+  }
+  function dressHands(rec) {
+    const FPH = CBZ.fpHands, M = handMats();
+    const d = FPH.dressOf(CBZ.playerChar, { skin: 0xd6a57e, sleeve: 0x46503c });
+    const want = [d.hand, d.fore, d.upper];
+    ["skin", "fore", "upper"].forEach(function (k, i) {
+      if (M.hex[i] !== want[i]) { M.hex[i] = want[i]; M[k].color.setHex(want[i]); }
+    });
+    rec.handsSleeved = !!d.sleeved;
+  }
+  const _hv = new THREE.Vector3();
+  function buildHands(rec) {
+    const FPH = CBZ.fpHands, p = rec.parts, grips = p.handGrips;
+    rec.hands = null;
+    if (!FPH || !FPH.graspHand || !grips || !grips.length) return;
+    const M = handMats();
+    const k = +rec.spec.scale > 0 ? +rec.spec.scale : 1;   // the controls are drawn at the cockpit's scale
+    // who holds what: +X is the pilot's LEFT
+    const lever = grips.filter(function (g) { return g.part === "lever"; })[0] || null;
+    const leverSide = lever ? (lever.x > 0.02 ? -1 : 1) : 0;
+    const want = [];
+    if (lever) want.push({ g: lever, side: leverSide });
+    grips.forEach(function (g) {
+      if (g.part === "lever") return;
+      if (g.kind === "rim") {
+        const side = g.x > (+rec.spec.stick.x || 0) ? -1 : 1;
+        if (!lever || side !== leverSide) want.push({ g: g, side: side });
+      } else want.push({ g: g, side: lever ? -leverSide : 1 });
+    });
+    const V = function (a) { return new THREE.Vector3(a[0], a[1], a[2]); };
+    const hands = [];
+    want.forEach(function (w) {
+      const g = w.g, part = p[g.part];
+      if (!part) return;
+      const axis = V(g.axis), u = V(g.u), o = V(g.o);
+      const fwd = new THREE.Vector3(0, 0, 1);
+      const outward = new THREE.Vector3(w.side > 0 ? -1 : 1, 0, 0);   // the hand's own side
+      let n, heading, at, thumbAim;
+      if (g.kind === "rim") {
+        // a horn: knuckles outward, fingers over the front of the rim
+        n = V(g.out).addScaledVector(fwd, -0.15);
+        heading = fwd.clone();
+        at = o.clone();
+        thumbAim = axis.clone().multiplyScalar(axis.y >= 0 ? 1 : -1).addScaledVector(fwd, -0.3);
+      } else if (g.kind === "bar") {
+        // palm over the thrust levers, fingers curled over their front
+        n = new THREE.Vector3(0, 1, -0.25);
+        heading = fwd.clone();
+        at = o.clone().addScaledVector(axis, (w.side > 0 ? -1 : 1) * 0.02);
+        thumbAim = outward.clone().negate().addScaledVector(fwd, 0.5);
+      } else {
+        // a stick / throttle head: back of the hand outboard, fingers round
+        // its front, the thumb up over the top (the hat switch / the button)
+        n = outward.clone().addScaledVector(fwd, -0.22);
+        heading = fwd.clone().addScaledVector(axis, -0.15);
+        at = o.clone().addScaledVector(axis, -g.hl * 0.25);
+        thumbAim = axis.clone().addScaledVector(fwd, 0.45).addScaledVector(outward, -0.25);
+      }
+      let hand = null;
+      try {
+        hand = FPH.graspHand(part, {
+          side: w.side, k: k, name: "cockpit:" + rec.spec.id + ":" + g.part + ":" + w.side,
+          prism: { o: o, axis: axis, u: u, hw: g.hw, hh: g.hh, rc: g.rc, hl: g.hl },
+          n: n, heading: heading, at: at, thumbAim: thumbAim,
+        }, M.skin);
+      } catch (e) { hand = null; }
+      if (!hand) return;
+      hand.castShadow = false;
+      hand.userData.seeThrough = true;
+      const arm = FPH.makeArm({ fore: M.fore, upper: M.upper });
+      arm.userData.side = w.side;              // entities/watch.js: the watch goes on the LEFT arm
+      arm.traverse(function (o2) { if (o2.isMesh) { o2.userData.seeThrough = true; o2.castShadow = false; } });
+      rec.root.add(arm);
+      hands.push({ hand: hand, arm: arm, side: w.side });
+    });
+    rec.hands = hands.length ? hands : null;
+    rec.handK = k;
+    if (rec.hands) dressHands(rec);
+  }
+  // every frame the seat is seen: each arm from its shoulder to its wrist
+  const _hW = new THREE.Vector3(), _hE = new THREE.Vector3(), _hS = new THREE.Vector3(), _hQ = new THREE.Quaternion();
+  const _hF = new THREE.Vector3(), _hA = [0, 0, 0], _hB = [0, 0, 0], _hC = [0, 0, 0], _hP = [0, 0, 0];
+  function poseHands(rec) {
+    const FPH = CBZ.fpHands;
+    if (!rec.hands || !FPH) return;
+    dressHands(rec);
+    const eye = rec.spec.eye, k = rec.handK;
+    for (let i = 0; i < rec.hands.length; i++) {
+      const h = rec.hands[i], hand = h.hand;
+      // the wrist and the hand's rotation in the cockpit root's frame
+      _hW.set(0, 0, 0); _hQ.identity();
+      for (let o = hand; o && o !== rec.root; o = o.parent) {
+        o.updateMatrix();
+        _hW.applyMatrix4(o.matrix);
+        _hQ.premultiply(o.quaternion);
+      }
+      // shoulder joint: 19 cm out to its side, 26 below and 8 behind the eye,
+      // at the body's (the hand's) scale
+      _hS.set(eye.x + (h.side > 0 ? -0.19 : 0.19) * k, eye.y - 0.26 * k, eye.z - 0.08 * k);
+      _hA[0] = _hS.x; _hA[1] = _hS.y; _hA[2] = _hS.z;
+      _hB[0] = _hW.x; _hB[1] = _hW.y; _hB[2] = _hW.z;
+      _hP[0] = h.side > 0 ? -0.8 : 0.8; _hP[1] = -1; _hP[2] = -0.3;           // elbow down and out
+      let e = FPH.math.solveElbow(_hA, _hB, _hP, 0.30 * k, 0.265 * k);
+      // the wrist bends only so far off the hand's own line (its +Z)
+      _hF.set(0, 0, 1).applyQuaternion(_hQ);
+      _hC[0] = _hF.x; _hC[1] = _hF.y; _hC[2] = _hF.z;
+      e = FPH.math.clampFore(_hB, e, _hC, 0.75, 0.265 * k);
+      _hE.set(e[0], e[1], e[2]);
+      FPH.poseArm(h.arm, _hW, _hE, _hS, _hQ, k, rec.handsSleeved);
+    }
+  }
+  // the same two functions, for tools/fp-hands-check.mjs (plain node, no aircraft)
+  CBZ.cockpitHands = { build: buildHands, pose: poseHands };
 
   CBZ.cockpitOf = function (craft) { return (craft && craft._cockpit) || null; };
 
@@ -976,6 +1120,9 @@
       p.pedalL.position.z = (p.pedalL.userData.z0 || 0) - t;   // yaw right → right pedal forward
       p.pedalR.position.z = (p.pedalR.userData.z0 || 0) + t;
     }
+
+    // --- the pilot's arms follow the hands the controls just moved ---------
+    poseHands(rec);
 
     // --- backlighting ---------------------------------------------------
     // Instrument backlight is a NIGHT instrument: it ramps with the same

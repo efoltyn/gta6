@@ -1169,7 +1169,7 @@
       const lean = stType === "side" ? 0.14 : 0.0;   // a side-stick cants inboard
       const shaftLen = stLen * 0.82;
       const shaftGeo = new THREE.CylinderGeometry(0.024, 0.032, shaftLen, 8);
-      // the grip: a fat sculpted head — on a fighter this is the whole hand.
+      // the grip: a fat sculpted head; the pilot's hand closes on it (handGrips below, city/cockpit.js)
       const gripGeo = taper(0.075, stLen * 0.34, 0.09, { nz: 0.8, tz: 0.9, top: 0.62, bot: 1.12, segD: 3 });
       const gripX = -Math.sin(lean) * stLen * 0.9, gripY = stLen * 0.9;
       if (V2) {
@@ -1228,6 +1228,52 @@
         const arm = put(armGeo(lLen, 0.055, 1.7), mCtrl, lever);
         if (lType === "collective") arm.rotation.x = 0.55;
         arm.name = "cockpit-" + lType;
+      }
+    }
+
+    // ---- WHERE THE PILOT'S HANDS CLOSE. Each grip the builder just made,
+    // described as the rounded prism a hand closes on (fphands.grasp), in its
+    // moving group's own frame — so a hand parented to that group rides every
+    // pitch, roll and throttle travel. The numbers are the SAME ones the
+    // meshes above were built from (never re-measured, never re-typed by the
+    // caller): o = the part of the grip a palm sits on, axis = the grip's
+    // long direction, u = its width direction, hw/hh = half width along u /
+    // along axis x u, hl = half length. x = which side of the pilot it is on
+    // (+X is his LEFT, see cockpit.js HANDEDNESS). city/cockpit.js hands.
+    const handGrips = [];
+    if (stType === "yoke" && yoke) {
+      // the two horns: the rim's sides, a little below level, a round tube
+      const rr = 0.15, tr = 0.028;
+      [1, -1].forEach(function (sx) {
+        const th = sx > 0 ? -0.18 : Math.PI + 0.18;       // 10 deg below the horizontal
+        const c = Math.cos(th), s = Math.sin(th);
+        handGrips.push({ part: "yoke", x: (num(st.x, 0)) + sx * rr, kind: "rim",
+          o: [rr * c, rr * s, 0], axis: [-s * sx, c * sx, 0], u: [c, s, 0],
+          hw: tr, hh: tr, rc: tr, hl: 0.06, out: [c, s, 0] });
+      });
+    } else if (stick) {
+      const lean = stType === "side" ? 0.14 : 0.0, gh = stLen * 0.34;
+      const cl = Math.cos(lean), sl = Math.sin(lean);
+      // the sculpted head: 7.5 cm across, 9 cm deep, its lower two thirds
+      // (it narrows to the top, where the thumb goes)
+      handGrips.push({ part: "stick", x: num(st.x, 0), kind: "grip",
+        o: [-sl * stLen * 0.9, stLen * 0.9, 0], axis: [-sl, cl, 0], u: [cl, sl, 0],
+        hw: 0.075 * 0.86 / 2, hh: 0.09 * 0.86 / 2, rc: 0.014, hl: gh * 0.5 });
+    }
+    if (lever && lv && (lv.type || "throttle") !== "knob") {
+      const lLen = num(lv.len, 0.26), lType = lv.type || "throttle";
+      if (lType === "quadrant") {
+        // the pair of knobs, taken as one bar across the two levers; the palm on top
+        handGrips.push({ part: "lever", x: num(lv.x, 0), kind: "bar",
+          o: [0, lLen * 0.90, 0], axis: [1, 0, 0], u: [0, 1, 0],
+          hw: 0.05 * 1.8 / 2, hh: 0.05 * 1.05 * 1.8 / 2, rc: 0.016, hl: 0.105 });
+      } else {
+        // the throttle / collective head (armGeo swells 1.7x toward the top)
+        const ra = lType === "collective" ? 0.55 : 0, ca = Math.cos(ra), sa = Math.sin(ra);
+        const up = [0, ca, sa], at = lLen * 0.80;
+        handGrips.push({ part: "lever", x: num(lv.x, 0), kind: "grip",
+          o: [0, up[1] * at, up[2] * at], axis: up, u: [1, 0, 0],
+          hw: 0.055 * 1.45 / 2, hh: 0.055 * 1.05 * 1.45 / 2, rc: 0.012, hl: lLen * 0.12 });
       }
     }
 
@@ -1363,6 +1409,7 @@
         pedalL: pedalL,
         pedalR: pedalR,
         yoke: yoke,
+        handGrips: handGrips,
         lampMats: lampMats,
         glassMats: glassMats,             // REAL panes now — see section 4b
         glareMesh: hood,                  // the three the sightline audit reads

@@ -102,6 +102,9 @@
       if (o.axis !== "z") g.rotateY(Math.PI / 2);   // shape x → -z (forward), extrusion → x
       else g.rotateY(Math.PI);                      // front profile: extrude toward the muzzle
       g.computeVertexNormals();
+      // the exact shape rides the geometry: a first-person thumb closes on
+      // the drawn frame, not on its bounding box (fphands.solidsOf)
+      g.userData.profile = { list: list, holes: o.holes || null, width: width, bevel: bevel, axis: o.axis === "z" ? "z" : "x" };
       return g;
     });
     return place(ctx, parent, geo, material, o.x, o.y, o.z, o.rx, o.ry, o.rz);
@@ -224,13 +227,17 @@
       thumbAim2: new THREE.Vector3(-0.30, 0.10, -1),
       at: top.clone(),
     };
-    /* Slide the hand along the grip. The web goes as high as the grip allows
-       (a high grip, not a hovering one: the thumb-side edge of the palm, web
-       or index knuckle, whichever a diagonal hold lifts higher, stays under
-       the top), and the index knuckle sits where the trigger is a relaxed
-       finger's reach away (7 cm to the pad), as level with it as it can be.
-       Sliding moves every point of the hand 1:1 along the axis, so one grasp
-       measures the whole family and the search is arithmetic. */
+    /* Slide the hand along the grip. The web goes as HIGH as the grip allows
+       (the thumb-side edge of the palm, web or index knuckle, whichever a
+       diagonal hold lifts higher, stays just under the top) and comes down
+       only as far as the trigger needs: the index knuckle within a finger's
+       reach of the pad (4.5-7.2 cm). It used to aim for a fixed 7 cm AND for
+       the knuckle level with the trigger, which on a rifle (the trigger sits
+       ABOVE the grip's top) slid the whole hand 2.4 cm down the grip: on the
+       M4 the ring finger hung half off the bottom and the little finger
+       closed on nothing, reaching forward under the grip. Sliding moves every
+       point of the hand 1:1 along the axis, so one grasp measures the whole
+       family and the search is arithmetic. */
     let t = -0.045 * k;
     spec.at.copy(top).addScaledVector(axis, t);
     {
@@ -239,15 +246,15 @@
       const hi0 = Math.max(G.toM([-FPH.PALM.hw, 0, -0.030]).clone().sub(top).dot(axis),
         G.toM([-FPH.PALM.hw * 0.8, 0, -0.090]).clone().sub(top).dot(axis));
       const tMax = t + (-0.004 * k - hi0);
-      let best = tMax, bestC = Infinity;
-      for (let tt = tMax; tt > tMax - 0.10 * k; tt -= 0.002 * k) {
-        const idx = idx0.clone().addScaledVector(axis, tt - t);
-        let c = (tMax - tt) * 0.2;                     // prefer high
-        if (trig) {
-          const d = idx.distanceTo(trig);
-          c += Math.abs(d - 0.070 * k) + 0.3 * Math.abs(trig.clone().sub(idx).dot(axis));
+      let best = tMax;
+      if (trig) {
+        let bestC = Infinity;
+        for (let tt = tMax; tt > tMax - 0.10 * k; tt -= 0.002 * k) {
+          const d = idx0.clone().addScaledVector(axis, tt - t).distanceTo(trig) / k;
+          if (d >= 0.045 && d <= 0.072) { best = tt; break; }        // the highest hold that reaches
+          const c = Math.max(0.045 - d, d - 0.072);
+          if (c < bestC) { bestC = c; best = tt; }
         }
-        if (c < bestC) { bestC = c; best = tt; }
       }
       t = best;
     }

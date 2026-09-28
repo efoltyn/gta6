@@ -878,6 +878,95 @@
     const nu = n.dot(P.u), nv = n.dot(P.v);
     return (P.hw - P.rc) * Math.abs(nu) + (P.hh - P.rc) * Math.abs(nv) + P.rc;
   }
+  /* THE GUN AROUND THE GRIP, as exact solids: every part of `root` (hands
+     excluded) whose shape is known exactly — a box, a cylinder, or one of
+     the gun kit's extruded side profiles (sidearm.js prof() tags its
+     geometry with the outline it extruded) — expressed in `space` (an
+     ancestor of the hand; usually the gun model). Anything else is left
+     out rather than guessed as its bounding box. Built once per gun at load. */
+  const _sM = new THREE.Matrix4(), _sS = new THREE.Matrix4(), _sV = new THREE.Vector3();
+  function solidsOf(root, space) {
+    const toRoot = function (o, m) { m.identity(); for (let p = o; p && p !== root; p = p.parent) { p.updateMatrix(); m.premultiply(p.matrix); } return m; };
+    const hand = function (o) { for (let p = o; p && p !== root; p = p.parent) if (/^fp_hand/.test(p.name)) return true; return false; };
+    toRoot(space, _sS).invert();
+    const out = [];
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || hand(o)) return;
+      const g = o.geometry, pr = g.parameters || {};
+      if (!g.boundingBox) g.computeBoundingBox();
+      const bb = g.boundingBox, c = bb.getCenter(new THREE.Vector3()), h = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+      let s = null;
+      if (g.userData && g.userData.profile) s = { kind: 2, pf: g.userData.profile };
+      // a lathe: its profile (radius, height) closed on itself, turned round Y
+      else if (g.type === "LatheGeometry" && pr.points && pr.points.length > 2) s = { kind: 3, pts: pr.points.map(function (v) { return [v.x, v.y]; }) };
+      // a box (its geometry may have been turned by quarter turns: its bounds are still its shape)
+      else if (g.type === "BoxGeometry") s = { kind: 0, c: c, hx: h.x, hy: h.y, hz: h.z };
+      else if (g.type === "CylinderGeometry") {
+        // the axis is whichever bound is the cylinder's height (a kit tube is rotated in its geometry)
+        const H = pr.height / 2, ax = [h.x, h.y, h.z].findIndex(function (v) { return Math.abs(v - H) < 1e-4; });
+        s = ax < 0 ? { kind: 0, c: c, hx: h.x, hy: h.y, hz: h.z } : { kind: 1, c: c, ax: ax, hy: H, r: Math.max(pr.radiusTop, pr.radiusBottom) };
+      }
+      if (!s) return;
+      toRoot(o, _sM).premultiply(_sS);                    // mesh -> space
+      _sV.setFromMatrixScale(_sM);
+      s.k = Math.max(_sV.x, _sV.y, _sV.z) || 1;          // local units -> space units (parts are uniformly scaled)
+      s.inv = _sM.clone().invert().elements;
+      out.push(s);
+    });
+    return out;
+  }
+  // signed distance to a closed 2D polygon (negative inside)
+  function polySdf(P, x, y) {
+    let d = Infinity, sg = 1;
+    for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+      const ax = P[j][0], ay = P[j][1], ex = P[i][0] - ax, ey = P[i][1] - ay, wx = x - ax, wy = y - ay;
+      const t = Math.max(0, Math.min(1, (wx * ex + wy * ey) / ((ex * ex + ey * ey) || 1e-12)));
+      const bx = wx - ex * t, by = wy - ey * t;
+      d = Math.min(d, bx * bx + by * by);
+      if ((P[i][1] > y) !== (ay > y) && x < ax + (y - ay) * ex / ey) sg = -sg;
+    }
+    return sg * Math.sqrt(d);
+  }
+  function profileSdf(pf, lx, ly, lz) {
+    // sidearm.js prof(): shape x -> -Z (forward), extruded along X; axis "z": shape x -> -X, extruded along Z
+    const sx = pf.axis === "z" ? -lx : -lz, e = pf.axis === "z" ? lz : lx;
+    let d2 = Infinity;
+    for (let i = 0; i < pf.list.length; i++) {
+      let d = polySdf(pf.list[i], sx, ly);
+      if (i === 0 && pf.holes) for (let k = 0; k < pf.holes.length; k++) d = Math.max(d, -polySdf(pf.holes[k], sx, ly));
+      d2 = Math.min(d2, d);
+    }
+    // the extruded walls stand `bevel` proud of the outline (three's
+    // bevelSize grows the contour); the bevelled caps bring the total to `width`
+    d2 -= pf.bevel || 0;
+    const de = Math.abs(e) - pf.width / 2;
+    return Math.hypot(Math.max(d2, 0), Math.max(de, 0)) + Math.min(Math.max(d2, de), 0);
+  }
+  function solidsSdf(list, x, y, z) {
+    let best = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i], e = s.inv;
+      const lx = e[0] * x + e[4] * y + e[8] * z + e[12], ly = e[1] * x + e[5] * y + e[9] * z + e[13], lz = e[2] * x + e[6] * y + e[10] * z + e[14];
+      let d;
+      if (s.kind === 2) d = profileSdf(s.pf, lx, ly, lz);
+      else if (s.kind === 3) d = polySdf(s.pts, Math.hypot(lx, lz), ly);
+      else {
+        const px = lx - s.c.x, py = ly - s.c.y, pz = lz - s.c.z;
+        if (s.kind === 1) {
+          const along = s.ax === 0 ? px : s.ax === 1 ? py : pz;
+          const rad = s.ax === 0 ? Math.hypot(py, pz) : s.ax === 1 ? Math.hypot(px, pz) : Math.hypot(px, py);
+          const qx = rad - s.r, qy = Math.abs(along) - s.hy;
+          d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
+        } else {
+          const qx = Math.abs(px) - s.hx, qy = Math.abs(py) - s.hy, qz = Math.abs(pz) - s.hz;
+          d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0);
+        }
+      }
+      d *= s.k;
+      if (d < best) best = d;
+    }
+    return best;
+  }
   function grasp(spec) {
     const side = spec.side < 0 ? -1 : 1, k = spec.k;
     const P = makePrism(spec.prism);
@@ -908,12 +997,37 @@
       return [side * _gv.x / l, _gv.y / l, _gv.z / l];
     };
     const sdfH = function (h) { const m = toM(h); return prismSdf(P, m.x, m.y, m.z) / k; };
+    // the THUMB feels the whole gun: the held part plus every solid around it
+    // (spec.solids, see solidsOf) — the part alone is an endless/idealised
+    // prism, so a thumb laid "on" it could hang in the air past the grip's
+    // front strap or bury itself in the receiver or the barrel nut beside it
+    // (a solid the palm itself sits in — the drawn foregrip a little fatter
+    // than its hold data — is the held part, not something to rest on; a
+    // solid only the thumb's ROOT is in means the hand is pushed into the
+    // gun: it stays, the thumb reports itself wedged and the caller slides
+    // the hand clear, see regraspWithSolids)
+    const SOL = spec.solids && spec.solids.length ? spec.solids.filter(function (s) {
+      const c = toM(palm);
+      return solidsSdf([s], c.x, c.y, c.z) > -0.002 * k;
+    }) : null;
+    const sdfT = SOL ? function (h) { const m = toM(h); return Math.min(prismSdf(P, m.x, m.y, m.z), solidsSdf(SOL, m.x, m.y, m.z)) / k; } : sdfH;
+    /* THE FINGERS CLOSE ON WHAT IS DRAWN (spec.fingersOnSolids, the firing
+       hand once its gun is finished): the grip prism is endless, the drawn
+       grip is not, so a finger below the end of a short grip (the M24's)
+       used to close on the prism's air and hang there, reaching forward.
+       Its surface is now the prism INTERSECTED with the drawn solids — the
+       same grip where there is grip, nothing past its end, where the finger
+       closes into the palm. Only when the drawn gun is known round the grip
+       (the grasp point sits inside a solid). */
+    const sdfF = (SOL && spec.fingersOnSolids && solidsSdf(SOL, spec.at.x, spec.at.y, spec.at.z) < 0)
+      ? function (h) { const m = toM(h); return Math.max(prismSdf(P, m.x, m.y, m.z), solidsSdf(SOL, m.x, m.y, m.z)) / k; }
+      : sdfH;
     // clearance of the segment a->b (radii ra->rb) from the surface; < 0 = inside
-    const segGap = function (a, b, ra, rb, from) {
+    const segGap = function (a, b, ra, rb, from, f) {
       let g = Infinity;
       for (let t = from == null ? 0.25 : from; t <= 1.0001; t += 0.25) {
         const h = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        g = Math.min(g, sdfH(h) - (ra + (rb - ra) * t));
+        g = Math.min(g, (f || sdfH)(h) - (ra + (rb - ra) * t));
       }
       return g;
     };
@@ -953,17 +1067,19 @@
       }
       const flex = [0.04, 0.05, 0.04];
       const sp = spec.splay ? spec.splay[i] : null;
+      const segGapF = function (a, b, ra, rb) { return segGap(a, b, ra, rb, null, sdfF); };
+      let touched = false;
       for (let j = 0; j < 3; j++) {
         // a segment that STARTS inside (the one before it closed so far that
         // this one points into the part) opens back out until it is clear
         {
           const pts = fingerChain(f, flex, sp);
-          if (segGap(pts[j], pts[j + 1], rs[j], rs[j + 1]) < 0) {
+          if (segGapF(pts[j], pts[j + 1], rs[j], rs[j + 1]) < 0) {
             let a = flex[j];
             for (; a > -0.35; a -= 0.02) {
               flex[j] = a;
               const q = fingerChain(f, flex, sp);
-              if (segGap(q[j], q[j + 1], rs[j], rs[j + 1]) >= 0) break;
+              if (segGapF(q[j], q[j + 1], rs[j], rs[j + 1]) >= 0) break;
             }
             continue;
           }
@@ -975,9 +1091,9 @@
           // the middle joint also stops when the tip segment would dig in
           // (else a finger that never touched with its middle segment hooks
           // round and drives its tip into the part)
-          let gap = segGap(pts[j], pts[j + 1], rs[j], rs[j + 1]);
-          if (j === 1) gap = Math.min(gap, segGap(pts[2], pts[3], rs[2], rs[3]));
-          if (gap < CONTACT) { hit = true; break; }
+          let gap = segGapF(pts[j], pts[j + 1], rs[j], rs[j + 1]);
+          if (j === 1) gap = Math.min(gap, segGapF(pts[2], pts[3], rs[2], rs[3]));
+          if (gap < CONTACT) { hit = true; touched = true; break; }
         }
         flex[j] = hit ? Math.max(0, a - 0.02) : Math.min(a, SOFT_MAX[j]);
         if (hit && j === 0) {
@@ -986,14 +1102,16 @@
           for (let it = 0; it < 6; it++) {
             const mid = (lo + hi) / 2; flex[0] = mid;
             const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
-            if (segGap(pts[0], pts[1], rs[0], rs[1]) < CONTACT) hi = mid; else lo = mid;
+            if (segGapF(pts[0], pts[1], rs[0], rs[1]) < CONTACT) hi = mid; else lo = mid;
           }
           flex[0] = lo;
         }
       }
       const pts = fingerChain(f, flex, spec.splay ? spec.splay[i] : null);
       fingers.push(pts);
-      contacts.tips.push(sdfH(pts[3]) - rs[3]);
+      // a finger that met nothing (past the end of a drawn grip) closed into
+      // the palm like a fist: it has no surface to be measured against
+      contacts.tips.push(touched || sdfF === sdfH ? sdfF(pts[3]) - rs[3] : null);
     });
     // THE THUMB: segment by segment toward the axis from an aimed start
     const th = [THUMB.base.slice()];
@@ -1023,22 +1141,96 @@
         ];
       };
       const end = function (dd) { return [a0[0] + dd[0] * L, a0[1] + dd[1] * L, a0[2] + dd[2] * L]; };
-      let ang = 0, dd = rot(0);
-      // already in the part (a thumb aimed into it): swing out first
-      if (segGap(a0, end(dd), r0, r1, s === 0 ? 0.5 : 0.25) < 0) {
-        for (ang = 0; ang > -1.6; ang -= 0.03) { dd = rot(ang); if (segGap(a0, end(dd), r0, r1, s === 0 ? 0.5 : 0.25) >= CONTACT) break; }
-      } else {
-        const cap = spec.thumbBend ? spec.thumbBend[s] : [0.9, 1.1, 0.9][s];
-        for (ang = 0; ang <= cap; ang += 0.02) {
-          const nd = rot(ang);
-          if (segGap(a0, end(nd), r0, r1, s === 0 ? 0.5 : 0.25) < CONTACT) break;
-          dd = nd;
+      // the metacarpal lives in the hand's own flesh: only the held part
+      // shapes it; the two phalanges feel the whole gun (spec.solids)
+      let ang = 0, dd = rot(0), escaped = true;
+      const curl = function (fS) {
+        ang = 0; dd = rot(0); escaped = true;
+        // already in the part (a thumb aimed into it): swing out first
+        if (segGap(a0, end(dd), r0, r1, s === 0 ? (fS === sdfH ? 0.5 : 0.75) : 0.25, fS) < 0) {
+          escaped = false;
+          for (ang = 0; ang > -1.6; ang -= 0.03) { dd = rot(ang); if (segGap(a0, end(dd), r0, r1, s === 0 ? (fS === sdfH ? 0.5 : 0.75) : 0.25, fS) >= CONTACT) { escaped = true; break; } }
+        } else {
+          const cap = spec.thumbBend ? spec.thumbBend[s] : [0.9, 1.1, 0.9][s];
+          for (ang = 0; ang <= cap; ang += 0.02) {
+            const nd = rot(ang);
+            if (segGap(a0, end(nd), r0, r1, s === 0 ? (fS === sdfH ? 0.5 : 0.75) : 0.25, fS) < CONTACT) break;
+            dd = nd;
+          }
+        }
+      };
+      const useSol = !!SOL;
+      curl(useSol ? sdfT : sdfH);
+      if (useSol && !escaped) { curl(sdfH); contacts.wedged = (contacts.wedged || 0) + 1; }   // wedged among solids: the held part alone
+      /* SETTLE (against the whole gun): the curl above stops at the FIRST
+         touch anywhere along the segment, so a segment that grazes an edge
+         with its root is left pointing off into the air (the Uzi's pad hung
+         2 cm off its grip, over the front strap). Past the first joint the
+         segment instead takes the angle in its bending plane that lays its
+         END on a surface without any of it inside one. */
+      if (SOL && s >= 1) {
+        const cap = (spec.thumbBend ? spec.thumbBend[s] : [0.9, 1.1, 0.9][s]) + 0.3;
+        const endGap = function (v) { return sdfT(end(v)) - r1; };
+        let e0 = endGap(dd);
+        if (e0 > CONTACT * 2 || segGap(a0, end(dd), r0, r1, 0.25, sdfT) < -0.0005) {
+          let bestA = null, bestE = Infinity;
+          for (let a = -0.8; a <= cap + 1e-6; a += 0.02) {
+            const v = rot(a);
+            if (segGap(a0, end(v), r0, r1, 0.25, sdfT) < -0.0005) continue;
+            const e = Math.abs(endGap(v)) + 0.004 * Math.abs(a - ang);
+            if (e < bestE) { bestE = e; bestA = a; }
+          }
+          if (bestA != null) { dd = rot(bestA); e0 = endGap(dd); }
         }
       }
       d = dd;
       th.push(end(dd));
     }
-    contacts.thumb = sdfH(th[3]) - THUMB.r[2] * 0.85;
+    contacts.thumb = sdfT(th[3]) - THUMB.r[2] * 0.85;
+    /* THE PAD ON THE FAR FLANK (a firing grip, spec.thumbFlank, against the
+       finished gun). Curling toward the grip's axis cannot wrap a FAT grip:
+       on the Uzi's 4.8 x 5.8 cm magazine-well grip the thumb's root sits
+       behind the back strap, the forward aim runs into it, the swing-out
+       throws the thumb wide and the pad ended 1.8 cm off the left flank.
+       When the curl leaves the pad off the gun, the thumb is instead SOLVED
+       onto it: the pad on the far flank just under the top, the tip segment
+       laid forward along it, the two proximal segments by the same two-bone
+       solve the arms use, the knuckle bulging out and up. Taken only if no
+       segment passes through the gun and it lands closer. */
+    if (SOL && spec.thumbFlank && (contacts.thumb > 0.004 || contacts.wedged)) {
+      const nU = spec.n.dot(P.u) >= 0 ? -1 : 1;                  // the far flank is opposite the back of the hand
+      const far = P.u.clone().multiplyScalar(nU), fwdV = P.v.clone();
+      if (fwdV.dot(spec.heading) < 0) fwdV.negate();              // forward = where the fingers point
+      const rP = THUMB.r[2] * 0.85, L1 = THUMB.seg[0], L2 = THUMB.seg[1], L3 = THUMB.seg[2];
+      const r = [THUMB.r[0] * 1.1, THUMB.r[1], THUMB.r[2], rP];
+      const poleH = dirH(far.clone().addScaledVector(P.axis, 0.5));
+      const T = new THREE.Vector3(), P2 = new THREE.Vector3(), dir = new THREE.Vector3();
+      let best = null, bestS = Infinity;
+      for (const ta of [-0.012, -0.024, -0.036, -0.048]) {
+        for (const tv of [-0.6, -0.3, 0, 0.3, 0.6]) {
+          for (const lift of [0, 0.25]) {
+            T.copy(P.o).addScaledVector(P.axis, ta * k).addScaledVector(fwdV, tv * (P.hh - P.rc))
+              .addScaledVector(far, P.hw + rP * k);
+            dir.copy(fwdV).addScaledVector(P.axis, lift).normalize();
+            P2.copy(T).addScaledVector(dir, -L3 * k);
+            const Th = toH(T), P2h = toH(P2), B = THUMB.base;
+            const reach = Math.hypot(P2h[0] - B[0], P2h[1] - B[1], P2h[2] - B[2]);
+            if (reach > L1 + L2 - 0.002 || reach < Math.abs(L1 - L2) + 0.004) continue;
+            const P1 = solveElbow(B, P2h, poleH, L1, L2);
+            const g0 = segGap(B, P1, r[0], r[1], 0.75, sdfT), g1 = segGap(P1, P2h, r[1], r[2], 0.25, sdfT), g2 = segGap(P2h, Th, r[2], r[3], 0.25, sdfT);
+            if (Math.min(g0, g1, g2) < -0.001) continue;
+            const e = Math.abs(sdfT(Th) - rP), mid = Math.max(0, sdfT(P2h) - r[2] - 0.006);
+            const sc = e + 0.5 * mid + 0.2 * Math.max(0, sdfT(P1) - r[1] - 0.010);
+            if (sc < bestS) { bestS = sc; best = [B.slice(), P1, P2h, Th]; }
+          }
+        }
+      }
+      if (best && (contacts.wedged || bestS < Math.abs(contacts.thumb))) {
+        th.length = 0; best.forEach(function (p) { th.push(p); });
+        contacts.thumb = sdfT(th[3]) - rP;
+        contacts.wedged = 0;
+      }
+    }
     const pose = { name: "g:" + (spec.name || Math.random().toString(36).slice(2)), cup: spec.cup || 0.006, joints: { fingers: fingers, thumb: th } };
     // where the forearm WANTS to go (a straight wrist), caller space
     const fore = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
@@ -1052,7 +1244,48 @@
     h.position.copy(G.p);
     h.scale.setScalar(G.k);
     h.userData.grasp = G;
+    h.userData.graspSpec = spec;
     if (parent) parent.add(h);
+    return h;
+  }
+  /* Re-close a grasped hand's THUMB against the finished gun (solidsOf): the
+     gun builders grasp the grip while the gun is still being built, so the
+     caller that owns the whole model (fpsmode.fitOffHand) calls this once it
+     is complete. The palm and fingers do not move; only the pose changes. */
+  function regraspWithSolids(h, root) {
+    const spec = h && h.userData.graspSpec;
+    if (!spec || !h.parent) return h;
+    const sol = solidsOf(root, h.parent);
+    if (!sol.length) return h;
+    const s2 = Object.assign({}, spec, { solids: sol, fingersOnSolids: true, thumbFlank: true, name: (spec.name || "g") + "+solids", at: spec.at.clone() });
+    let G = grasp(s2);
+    // a hand pushed so high that the root of its thumb is buried in the
+    // frame / the stock's wrist above the grip comes down the grip until it
+    // is not, and its pad lies on the gun (tried every 3 mm down to 3 cm;
+    // the index re-solves onto the trigger) — but never so far that a
+    // finger slips off the bottom of a short grip and hangs in the air
+    if (G.contacts.wedged || Math.abs(G.contacts.thumb) > 0.004) {
+      const down = spec.prism.axis.clone().normalize().multiplyScalar(-0.003 * spec.k);
+      const hangs = function (g) { return g.contacts.tips.some(function (t) { return t != null && t > 0.008; }); };
+      const cost = function (g, i) {
+        return (g.contacts.wedged ? 0.02 : 0) + Math.abs(g.contacts.thumb) + 0.0005 * i + (hangs(g) ? 0.05 : 0);
+      };
+      const at0 = s2.at.clone();
+      let best = G, bestI = 0, bestC = cost(G, 0);
+      for (let i = 1; i <= 10; i++) {
+        s2.at.copy(at0).addScaledVector(down, i);
+        const g2 = grasp(s2), c = cost(g2, i);
+        if (c < bestC) { best = g2; bestC = c; bestI = i; }
+      }
+      s2.at.copy(at0).addScaledVector(down, bestI);
+      G = best;
+    }
+    h.position.copy(G.p);
+    h.quaternion.copy(G.q);
+    h.userData.grasp = G;
+    h.userData.graspSpec = s2;
+    h.userData.pose = G.pose;
+    h.geometry = handGeometry(G.side, G.pose);
     return h;
   }
 
@@ -1181,7 +1414,7 @@
     POSES, PALM, FINGERS, THUMB,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
-    grasp, graspHand, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
+    grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },
     WRIST, STUB_LATHE, FORE_NOM, FORE_DOME, CUFF_PROFILE,
   };

@@ -1094,8 +1094,12 @@
     const P = arm && arm.userData && arm.userData.parts;
     if (!P || !P.fore) return;
     let st = arm.userData.ww;
+    // the LEFT arm: an arm that says which it is (the cockpit's, whose frame
+    // has the pilot's left at +X) is believed; else the viewmodel's rule,
+    // shoulder on -X
     const lx = shoulder ? shoulder.x : (elbow.x - wrist.x);
-    const style = lx < 0 ? styleOf(recOf(CBZ.playerChar)) : null;
+    const left = arm && arm.userData && arm.userData.side != null ? arm.userData.side < 0 : lx < 0;
+    const style = left ? styleOf(recOf(CBZ.playerChar)) : null;
     if (!style || arm.visible === false) { if (st && st.inst) st.inst.visible = false; return; }
     if (!st) st = arm.userData.ww = { inst: null, key: "" };
     const lf = Math.max(1e-4, P.fore.scale.z);
