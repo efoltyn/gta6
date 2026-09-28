@@ -575,8 +575,8 @@
   }
 
   function releaseParty(slot) {
-    for (const gd of slot.guards) if (gd && !gd.dead) restorePed(gd);
-    slot.guards.length = 0;
+    for (const gd of slot.guards) if (gd && !gd.dead) { if (CBZ.detailBrain) CBZ.detailBrain.release(gd); restorePed(gd); }
+    slot.guards.length = 0; slot._det = null; slot._detFor = null;
     for (let i = 0; i < slot.cops.length; i++) {
       const c = slot.cops[i];
       if (c) { c._vipDetail = null; if (i > 0 && !c.dead) c._lead = false; }   // back to a normal beat pair
@@ -597,7 +597,7 @@
   function hardDrop(slot) {
     // world was cleared under us (reset path) — refs are gone, just re-form later
     for (const c of slot.cops) if (c) c._vipDetail = null;
-    slot.principal = null; slot.guards.length = 0; slot.cops.length = 0;
+    slot.principal = null; slot.guards.length = 0; slot.cops.length = 0; slot._det = null; slot._detFor = null;
     slot.threat = null; slot.state = "cool"; slot.cd = 20;
   }
 
@@ -769,11 +769,15 @@
   }
 
   // ---------- driving: guards hold formation / fight -------------------------
+  // THE FOLLOW is the detail brain's (city/brain_protection.js): the def's
+  // authored shape (`form`) becomes its slot table, assigned by least walking
+  // and smoothed, speed-matched to the principal, eyes out on a human
+  // cadence. The old per-frame slot off his raw heading, "walk if > 1.2 m
+  // else idle" and the instant rotation snap were the glitch.
+  const _calm = [];
   function driveGuards(slot, dt) {
     const pr = slot.principal;
-    const h = pr.group.rotation.y;
-    const dx = Math.sin(h), dz = Math.cos(h), lx = Math.cos(h), lz = -Math.sin(h);
-    const offs = slot.def.form || [];
+    _calm.length = 0;
     for (let i = slot.guards.length - 1; i >= 0; i--) {
       const gd = slot.guards[i];
       if (!gd || gd.dead) { slot.guards.splice(i, 1); slot.fillT = Math.max(slot.fillT, 16); continue; }
@@ -793,20 +797,23 @@
         gd.target.set(gd.pos.x, 0, gd.pos.z);
         continue;
       }
-      const o = offs.length ? offs[i % offs.length] : { f: -2, s: 0 };
-      const fx = pr.pos.x + dx * o.f + lx * o.s, fz = pr.pos.z + dz * o.f + lz * o.s;
-      const d = hyp(fx - gd.pos.x, fz - gd.pos.z);
-      if (d > 45 && camD2(gd.pos.x, gd.pos.z) > OFFSCREEN2 && camD2(fx, fz) > OFFSCREEN2) {
-        gd.pos.set(fx, 0, fz); gd.path = null;       // hopelessly dropped → fall back in (off-screen only)
-      } else if (d > 1.2) {
-        gd.state = "walk"; gd.path = null; gd.pause = 0;
-        gd.target.set(fx, 0, fz);
-      } else {
-        gd.state = "idle"; gd.speed = 0;
-        gd.target.set(gd.pos.x, 0, gd.pos.z);
-        gd.group.rotation.y = h;                     // stand the principal's way — eyes out
+      const d = hyp(pr.pos.x - gd.pos.x, pr.pos.z - gd.pos.z);
+      if (d > 45 && camD2(gd.pos.x, gd.pos.z) > OFFSCREEN2 && camD2(pr.pos.x, pr.pos.z) > OFFSCREEN2) {
+        gd.pos.set(pr.pos.x - Math.sin(pr.group.rotation.y) * 2, 0, pr.pos.z - Math.cos(pr.group.rotation.y) * 2);
+        gd.path = null;                              // hopelessly dropped → fall back in (off-screen only)
       }
+      _calm.unshift(gd);                             // roster order = hire order (stable)
     }
+    const B = CBZ.detailBrain;
+    if (!B) return;
+    if (!slot._det || slot._detFor !== pr) {
+      slot._det = B.create("vip", { form: slot.def.form && slot.def.form.length ? slot.def.form : null, sweep: false, small: true });
+      slot._detFor = pr;
+    }
+    const env = slot._detEnv || (slot._detEnv = { posture: "normal", crowd: 0, peds: null });
+    env.peds = CBZ.cityPeds || null;
+    env.also = CBZ.city && CBZ.city.playerActor;
+    B.step(slot._det, pr, _calm, dt, env);
   }
 
   // ---------- driving: the police escort (REAL cops, fed via their own fields)

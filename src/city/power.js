@@ -662,7 +662,7 @@
       const q = rec.guards[i];
       if (!q || q.dead) continue;
       const slot = slotFor(rec, i, n);
-      if (q._post) {
+      if (q._post && !q._detailBrain) {             // a detail-brain guard's post is the brain's
         q._post.x = slot.x; q._post.z = slot.z;
         q._post.fx = slot.fx; q._post.fz = slot.fz;
         // police.js's teardown branch counts up mountT to 2.2s before it
@@ -699,6 +699,10 @@
         continue;
       }
 
+      // THE DETAIL BRAIN (city/brain_protection.js) walks this guard: smoothed
+      // slots, speed matching, bounded turns, sector scans. The follow below
+      // is only for a ring nobody has handed to it.
+      if (q._detailBrain) continue;
       const dd = hyp(slot.x - q.pos.x, slot.z - q.pos.z);
       if (dd > 40) {
         // hopelessly dropped (a lift ride, a teardown) — fall back in, but

@@ -152,6 +152,7 @@
   function adopt(p) {
     const b = BR();
     if (!b || !p || p.dead || p.isPlayer || p.kind === "cop" || p._parked) return null;
+    if (p._detailBrain || p._protUnit) return p._brain || null;   // the protection detail brain owns these bodies (brain_protection.js)
     const s = p._cbSig;
     if (s && p._brain && p._brain.registered && s.name === p.name && s.gang === p.gang && s.crew === isCrew(p) &&
         s.cc === p._compoundCrew && s.clq === p.cliqueId && s.org === p.organization) return p._brain;
