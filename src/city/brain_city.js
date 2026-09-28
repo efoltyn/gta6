@@ -276,9 +276,9 @@
     else EXEC.say(a, line, { secs: secs, color: color });
   }
 
-  const SHOVE_LINES = ["“Back up.”", "“Get off him.”", "“Step off!”"];
-  const GLARE_LINES = ["“You got a problem?”", "“Watch yourself.”", "“Keep walking.”"];
-  const STOP_LINES = ["“Hey! HEY! Stop that!”", "“Leave him alone!”", "“Knock it off!”"];
+  const SHOVE_LINES = ["Back up.", "Get off him.", "Step off!"];
+  const GLARE_LINES = ["You got a problem?", "Watch yourself.", "Keep walking.", "What?"];
+  const STOP_LINES = ["Hey! HEY! Stop that!", "Leave him alone!", "Knock it off!", "I'm calling the cops!"];
   function pickLine(a, L) { return L[(hash01(a, 0x51A7 + ((now() * 3) | 0)) * L.length) | 0]; }
 
   // ============================================================
@@ -433,7 +433,7 @@
       p.reportState = "run"; p.reportTarget = cop; p.reportT = 16;
       p._vendetta = vendetta;
       w.reportAt = t + 16;                                   // lands on arrival (tickReport)
-      if (vendetta) say(p, "“Officer! OFFICER!”", 2.2, "#ffd27b");
+      if (vendetta) say(p, "Officer! OFFICER!", 2.2, "#ffd27b");
     } else {
       p.reportState = "phone"; p.reportTarget = null;
       const dial = 2.6 + hash01(p, 0xD1A1) * 2.2;
@@ -451,7 +451,7 @@
         p.posePoint = 1.4;
         const P = CBZ.player;
         if (P && !P.dead) faceAt(p, P.pos.x, P.pos.z, 1.5);
-        say(p, "“Right there. That's the one.”", 2.4, "#ffd27b");
+        say(p, "Right there. That's the one.", 2.4, "#ffd27b");
         if (CBZ.city && CBZ.city.note) CBZ.city.note("" + p.name + " pointed you out to the law!", 1.8);
       } else if (CBZ.city && CBZ.city.note) CBZ.city.note("" + p.name + " reported you!", 1.5);
     }

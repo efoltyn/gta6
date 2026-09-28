@@ -144,7 +144,15 @@ CBZ.cityRecolorRig(a, cat.street.colors, cat.street);
 check(a.skinSlots.hands.every((m) => hexOf(m) === a.skinTone), "back to street: hands are skin again");
 check(CBZ.headwear.worn(a) === null && a.neck.children.length === 0, "back to street: the helmet comes off");
 // ---- 4b: role hats by kind, and ONE gang headwear (clothes.js cityAttachBandana)
-const HATS = { police: "peaked", sheriff: "campaign", construction: "hardhat", soldier: "milcap", pilot: "peaked", corrections: "peaked", warden: "peaked" };
+const HATS = { police: "peaked", sheriff: "campaign", construction: "hardhat", soldier: "milcap", pilot: "peaked", corrections: "peaked" };
+// the warden is not an officer: a pinned charcoal three-piece, bareheaded, no badge
+{
+  const W = cat.warden;
+  check(W.id === "suit" && W.uniform === "warden" && W.style != null && !W.hat && !W.badge && !W.cap, "CAT.warden is a pinned suit, no hat, no badge");
+  const h = rig();
+  CBZ.cityRecolorRig(h, W.colors, W);
+  check(CBZ.headwear.worn(h) === null, `the warden wears no hat (got ${CBZ.headwear.worn(h)})`);
+}
 for (const id in HATS) {
   const h = rig();
   CBZ.cityRecolorRig(h, cat[id].colors, cat[id]);

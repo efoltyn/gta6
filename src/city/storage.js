@@ -307,9 +307,6 @@
     charge(prop.cost);
     state().owned[prop.id] = true;
     big(prop.emoji + " ACQUIRED " + prop.name);
-    note(prop.kind === "hangar" ? "Now STEAL an F-22 and land it inside to keep it." :
-         prop.kind === "warehouse" ? "Vehicle bays + ammo locker online, your armory." :
-         "A safe place to stash a hot ride, drive one in and store it.", 3);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(Math.max(3, Math.round(prop.cost / 12000)));
     sfx("coin");
     persist();

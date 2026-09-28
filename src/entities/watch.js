@@ -909,7 +909,7 @@
       const id = rec.id || "", tier = rec.tier || "", nm = rec.name || "";
       if (tier === "kid" || rec.kid) return { tier: "kid", style: R(1) < 0.3 ? "kid" : null };
       if (tier === "institution") return { tier: "institution", style: R(2) < 0.55 ? "clear" : (R(3) < 0.45 ? "resin" : null) };
-      if (id === "warden") return { tier: "law", style: "goldDress" };
+      if (id === "warden" || rec.uniform === "warden") return { tier: "law", style: "goldDress" };
       if (id === "swat" || id === "soldier" || id === "ski_patrol" || id === "tactical") return { tier: "law", style: "tactical" };
       if (rec.kit || /protective/i.test(nm)) return { tier: "law", style: "steelBlack" };
       if (rec.cop || tier === "law") return { tier: "law", style: R(2) < 0.8 ? "police" : "tactical" };

@@ -512,6 +512,12 @@
       // downstream (demolition's onBlast, buildings' structuralBlast) can tell
       // a nuke from a car fire without re-deriving it from `power`.
       ordnance: row.id,
+      // THE LOOK (city/crashfx.js blastVisual): which proportions of the one
+      // explosion to draw, and which way to throw it. `fx.kind` lets a caller
+      // name a look its row does not imply (a lava bomb is a "kinetic" row
+      // but a "volcano" picture).
+      kind: (opts.fx && opts.fx.kind) || opts.kind || row.id,
+      dirx: opts.dirx, dirz: opts.dirz, normal: opts.normal || null,
       _impact: true,
     });
   }
@@ -525,6 +531,8 @@
       byPlayer: !!opts.byPlayer,
       noDamage: !!opts.noDamage,
       ordnance: row.id,
+      kind: (opts.fx && opts.fx.kind) || opts.kind || row.id,
+      dirx: opts.dirx, dirz: opts.dirz,
       _impact: true,
     });
   }

@@ -65,6 +65,13 @@
   function isPlayer(a) { return !!(a && (a === CBZ.player || (CBZ.playerChar && a.group && a.group === CBZ.playerChar.group))); }
   function cliqueId(gang) { return gang >= 0 ? "prison:clique:" + gang : null; }
   PB.cliqueId = cliqueId;
+  /* THE CLIQUE IS THE CAR (systems/prisoncars.js). Every inmate is in his
+     race's car whether or not he is active in its business, and a car backs
+     its own: the brain's clique (retaliation, morale, rout, who will not rat)
+     is `n.yardCar`. A body built without one (a sim, an old save) falls back to
+     its gang index, which is the same number when he is active. */
+  function carKey(n) { return n && typeof n.yardCar === "number" && n.yardCar >= 0 ? n.yardCar : (n && n.gang != null ? n.gang : -1); }
+  PB.carKey = carKey;
 
   /* ==========================================================
      1. REGISTRATION
@@ -116,7 +123,7 @@
       const n = npcs[i];
       if (!n || !n.group || n._crowd) continue;
       if (n.gang === undefined) continue;                 // ai.js has not dealt him in yet
-      const cq = cliqueId(n.gang);
+      const cq = cliqueId(carKey(n));
       if (n._brain && n._brainClique === cq && n._brainReg) {
         // the shotcaller passed (ai.js kill(): leadership goes to an heir)
         if (cq && n.isLeader && !n._brain.leader && b0.social.setLeader) b0.social.setLeader(cq, n);
@@ -309,7 +316,8 @@
   const LAW_OPTS = { roe: "nonlethal", warnRange: 11, orderRange: 5.0, cuffRange: 1.35, patience: 2.6 };
   const LAW_LOSE_R = 26;
   function freeScrew(gd) {
-    return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) && !gd.tied &&
+    // the warden never runs the ladder himself: he orders an officer to (prisonwarden.js)
+    return !!(gd && gd.group && gd.kind !== "warden" && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) && !gd.tied &&
       !gd._escort && gd.intimidMode !== "scared" && !gd.approach && !(gd.hunt > 0) && !gd._yardCase && !(gd.pause > 0));
   }
   // begin a case: officer -> inmate. The authority record lives on gd._brain.case.
@@ -547,14 +555,19 @@
       if ((g.lowProfileT || 0) > 0) chance -= 0.08;
       return rng() < clamp(chance, 0.02, 0.95);
     }
-    // an inmate on an inmate: nobody rats on his own clique, and a man from
-    // the perp's rival set is glad to
-    if (perp && perp.gang >= 0 && n.gang === perp.gang) return false;
+    // an inmate on an inmate: nobody rats on his own car, and a man from a
+    // car at odds with the perp's is glad to
+    const pc = carKey(perp), nc = carKey(n);
+    if (perp && pc >= 0 && nc === pc) return false;
     const p = n.personality || {};
     let chance = 0.18 + ((p.snitch != null ? p.snitch : 0.5) - 0.5) * 0.4;
-    if (perp && perp.gang >= 0 && n.gang >= 0 && n.gang !== perp.gang) chance += 0.2;
+    if (perp && pc >= 0 && nc >= 0 && nc !== pc) {
+      const PC = CBZ.prisonCars;
+      chance += PC ? Math.min(0.25, 0.05 + PC.tension(nc, pc) / 160) : 0.2;
+    }
     return rng() < clamp(chance, 0.02, 0.9);
   }
+  PB.willTalk = willTalk;
   // SCARED OFF: the perp's people are standing on him and he knows it
   function scaredOff(n, perp) {
     if (!perp || !n.group) return false;
@@ -566,7 +579,7 @@
       if (CBZ.player && Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 5) stare += 1;
     } else if (perp.group) {
       if (alive(perp) && dist(perp, n) < 6) stare += 1;
-      const cq = cliqueId(perp.gang);
+      const cq = cliqueId(carKey(perp));
       if (cq && b && b.social && b.social.cliqueMates) {
         let mates = null;
         try { mates = b.social.cliqueMates(perp, 30); } catch (e) { mates = null; }
@@ -1072,7 +1085,7 @@
   PB.memberDown = function (victim, by, killed) {
     const b = BR();
     if (!b || !b.morale || !victim) return;
-    const gid = cliqueId(victim.gang);
+    const gid = cliqueId(carKey(victim));
     if (!gid) return;
     try {
       if (killed && b.morale.death) b.morale.death(gid, victim);
@@ -1097,7 +1110,7 @@
     let routed = 0;
     for (let i = 0; i < npcs.length; i++) {
       const m = npcs[i];
-      if (m === victim || !alive(m) || m.gang !== victim.gang || m.cuffed || (m._routT || 0) > 0) continue;
+      if (m === victim || !alive(m) || carKey(m) < 0 || carKey(m) !== carKey(victim) || m.cuffed || (m._routT || 0) > 0) continue;
       const engaged = m.aiState === "fight" || (m.huntPlayer || 0) > 0 || dist(m, victim) < 16;
       if (!engaged) continue;
       let broken = false;
@@ -1121,7 +1134,7 @@
   // a man whose clique has broken does not start anything
   PB.broken = function (n) {
     const b = BR();
-    if (!b || !b.morale || !b.morale.broken || !n || n.gang < 0) return false;
+    if (!b || !b.morale || !b.morale.broken || !n || carKey(n) < 0) return false;
     try { return !!b.morale.broken(n); } catch (e) { return false; }
   };
 
@@ -1218,11 +1231,13 @@
        tell on another. Men in the same yard are barely civil; the clique is
        the family (a man never reports his own set: willTalk above). */
     try { if (b.social && b.social.setAttitude) b.social.setAttitude("inmates", "inmates", 0.2); } catch (e) {}
-    // the two cliques are each other's enemy: a set that is winning holds
+    // each car's foe is the car its politics are pointed at (prisoncars'
+    // tension); a set that is winning holds
     try {
       if (b.morale && b.morale.config) {
-        b.morale.config(cliqueId(0), { foe: cliqueId(1) });
-        b.morale.config(cliqueId(1), { foe: cliqueId(0) });
+        const PC = CBZ.prisonCars;
+        const n = PC ? PC.N : 2;
+        for (let c = 0; c < n; c++) b.morale.config(cliqueId(c), { foe: cliqueId(PC ? PC.rivalOf(c) : 1 - c) });
       }
     } catch (e) {}
     return true;
@@ -1252,7 +1267,7 @@
       const npcs = CBZ.npcs || [];
       for (let i = 0; i < npcs.length; i++) {
         const n = npcs[i];
-        if (!n || n.gang < 0 || n.aiState !== "fight" || !alive(n) || (n._routT || 0) > 0 || n._lawBy) continue;
+        if (!n || carKey(n) < 0 || n.aiState !== "fight" || !alive(n) || (n._routT || 0) > 0 || n._lawBy) continue;
         if (PB.broken(n)) rout(n);
       }
     }

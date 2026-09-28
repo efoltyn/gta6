@@ -76,20 +76,33 @@
   addBox(-2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
   addBox(2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
 
-  // Access control is bolted to the housing-side jamb. It changes material at
-  // runtime but never changes transform, so it is dynamic, not a mover.
-  const reader = addBox(3.52, 1.48, -8.42, 0.48, 0.78, 0.18, 0x222831, { cast: false });
+  // Access control on the housing-side wall beside the opening: a real
+  // proximity reader. It was a 0.48 x 0.78 black slab with an 18 cm square
+  // lamp box on its face that beat orange whenever you stood near it (the
+  // "black cube with an orange block stuck on it"). Now a stainless back
+  // plate, a slim dark reader body with its read pad, and a 24 mm round LED
+  // in it. The LED keeps its OWN material: systems/interactions.js beats it
+  // amber on a refusal and this file turns it green on open.
+  const RX = 3.52, RY = 1.2, RF = -8.5;              // wall face (housing side)
+  const K = CBZ.prisonKit || null;
+  const plate = addBox(RX, RY, RF - 0.006, 0.1, 0.17, 0.012, 0xaeb7c0, { cast: false });
+  if (K) K.skinBox(plate, "galv", 0xb4bcc4);
+  const reader = addBox(RX, RY, RF - 0.027, 0.084, 0.145, 0.03, 0x1b1e22, { cast: false });
+  if (K) reader.material = K.skin("steel", 0x1b1e22, 0.5);
   reader.userData.dynamic = true;
-  addBox(3.52, 1.35, -8.53, 0.24, 0.08, 0.04, 0xaeb7c0, { cast: false });
-  const readerLight = addBox(3.52, 1.72, -8.54, 0.18, 0.18, 0.06, 0xff3b3b,
-    { emissive: 0xff0000, ei: 1.0, cast: false });
+  addBox(RX, RY - 0.02, RF - 0.0425, 0.06, 0.07, 0.002, 0x2c3138, { cast: false });   // read pad
+  const readerLight = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 14),
+    new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+  readerLight.rotation.x = Math.PI / 2;
+  readerLight.position.set(RX, RY + 0.045, RF - 0.045);
   readerLight.userData.dynamic = true;
+  (CBZ.prisonRoot || CBZ.scene).add(readerLight);
 
   const door = {
     mesh, reader, readerLight,
     collider: mesh.userData.collider,
     open: false, closedY: CLOSED_Y, travel: TRAVEL, t: 0,
-    readerPos: { x: 3.52, y: 1.72, z: -8.54 },
+    readerPos: { x: RX, y: RY + 0.045, z: RF - 0.045 },
   };
 
   CBZ.door = door;
@@ -183,7 +196,8 @@
     col: function () { return door.collider; },
     isOpen: function () { return !!door.open; },
     permanent: function () { return !!door.blown; },
-    canUse: function () { return !!(CBZ.game && CBZ.game.hasKey); },
+    // the stolen card, or the officer's own keys (CBZ.prisonStaffKey)
+    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey && CBZ.prisonStaffKey()))); },
     set: function (v) {
       if (v) { CBZ.openDoor(); return !!door.open; }
       CBZ.closeDoor(true);

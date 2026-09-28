@@ -12,8 +12,9 @@
    Merchants, the dealer and bent cops swap a row for Trade, guards for
    Bribe or Payoff, a cop player for Question / Search / Cuff, and an
    approaching NPC replaces the lot with its own offer — always the same
-   triad: take it, push back, walk away. THE WARDEN trades in names, never
-   cigarettes: Snitch / Insult / Steal (economy.js's snitch()).
+   triad: take it, push back, walk away. TELL is on every guard and on the
+   warden once you know something (systems/prisonsnitch.js): pressing it
+   turns the card into what you know, as short items.
 
    TALK routes through systems/quests.js (favors, rep, and the "they let
    you walk out" win). It used to be called BEFRIEND and be on every
@@ -124,11 +125,18 @@
       return res;
     } },
     bribe:    { label: "Bribe",           fn: (a) => CBZ.econ.bribe(a) },
-    snitch:   { label: "Snitch",          fn: (a) => (CBZ.econ.snitch ? CBZ.econ.snitch(a) : { ok: false, msg: "" }) },
     steal:    { label: "Steal",           fn: (a) => CBZ.econ.steal(a) },
-    // ---- in the warden's office, when he sent for you (systems/prisonwarden.js owns all four)
-    wdeal:    { label: "Deal",            fn: (a) => (CBZ.warden ? CBZ.warden.act("wdeal", a) : { ok: false, msg: "" }) },
+    /* TELL (systems/prisonsnitch.js owns all five). On a guard or the warden:
+       the card turns into what you actually know, best first, and one of the
+       three can be a name you put in on nothing (a lie, unless he is holding). */
+    tell:     { label: "Tell",            fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.open(a) : { ok: false, msg: "" }) },
+    tellA:    { label: "",                fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.pick(a, "tellA") : { ok: false, msg: "" }) },
+    tellB:    { label: "",                fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.pick(a, "tellB") : { ok: false, msg: "" }) },
+    tellC:    { label: "",                fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.pick(a, "tellC") : { ok: false, msg: "" }) },
+    tellNo:   { label: "Nothing",         fn: () => (CBZ.prisonSnitch ? CBZ.prisonSnitch.close() : { ok: true, msg: "" }) },
+    // ---- in the warden's office, when he sent for you (systems/prisonwarden.js owns these)
     wfavor:   { label: "Favor",           fn: (a) => (CBZ.warden ? CBZ.warden.act("wfavor", a) : { ok: false, msg: "" }) },
+    protect:  { label: "Protection",      fn: (a) => (CBZ.warden ? CBZ.warden.act("protect", a) : { ok: false, msg: "" }) },
     wthreat:  { label: "Threaten",        fn: (a) => (CBZ.warden ? CBZ.warden.act("wthreat", a) : { ok: false, msg: "" }) },
     whand:    { label: "Hand over",       fn: (a) => (CBZ.warden ? CBZ.warden.act("whand", a) : { ok: false, msg: "" }) },
     payoff:   { label: "Payoff",          fn: (a) => CBZ.econ.payoff(a) },
@@ -146,7 +154,8 @@
     question: { label: "Question",        fn: (a) => CBZ.econ.talk(a) },
     warn:     { label: "Warn",            fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
     detain:   { label: "Cuff",            fn: (a) => {
-      if (a.approach) return approachAction(a, "detain");
+      if (a.approach && /^cop[A-Z]/.test(a.approach.kind || "")) return approachAction(a, "detain");
+      dropPitch(a);
       const surrendered = a.intimidMode === "scared";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
       const justified = CBZ.game.role === "cop" && (surrendered || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
@@ -167,6 +176,7 @@
       return { ok: true, msg: "" };   // he goes down; that is the receipt
     } },
     search:   { label: "Search",          fn: (a) => {
+      dropPitch(a);
       const justified = a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
@@ -219,10 +229,14 @@
     max = max || 28;
     return s.length > max ? s.slice(0, Math.max(0, max - 1)) + "…" : s;
   }
+  // WHO HE RUNS WITH is his race's car (systems/prisoncars.js), every inmate
+  // has one, active in its business or not. No colour, no gang name.
   function gangShort(a) {
-    if (!a || a.gang == null || a.gang < 0) return "";
-    const names = CBZ.GANG_NAMES || ["Reds", "Blues"];
-    return (names[a.gang] || "Crew").replace(/^the /, "");
+    if (!a) return "";
+    const P = CBZ.prisonCars;
+    const car = a.yardCar != null && a.yardCar >= 0 ? a.yardCar : (a.gang != null && a.gang >= 0 ? a.gang : -1);
+    if (car < 0) return "";
+    return P ? P.label(car) : "";
   }
   /* THE CARD CARRIES VERBS, NOT A DOSSIER (owner, 2026-09-27: "all the
      text... there's just too much bullshit in the way").
@@ -268,6 +282,12 @@
     return `${shortText(o.item, 22)}, ${p ? p.price : o.price} cigs`;
   }
 
+  // an offer he walked up with is over the moment the badge acts on him
+  function dropPitch(a) {
+    if (!a || !a.approach || /^cop[A-Z]/.test(a.approach.kind || "")) return;
+    a.approach = null;
+    if (a.aiState === "approachPlayer") a.aiState = "wander";
+  }
   function verbsFor(a) {
     // Authored prison beats can temporarily replace the warden's generic
     // bribe/loot menu without teaching this legacy interaction system about
@@ -288,7 +308,14 @@
     // bedsheet: the surrender is the compliance, so the card is the badge's
     // own three (cuff him, toss him, let him go).
     if (a.intimidMode === "scared") return CBZ.game.role === "cop" ? ["detain", "search", "release"] : ["rob", "restrain", "release"];
-    if (a.approach && a.approach.t > 0) {
+    // YOU ARE TELLING HIM SOMETHING: the card is what you know (prisonsnitch.js)
+    const telling = CBZ.prisonSnitch && CBZ.prisonSnitch.menu ? CBZ.prisonSnitch.menu(a) : null;
+    if (telling) return telling;
+    // THE BADGE OUTRANKS A SALES PITCH: an officer's card is the cop's own
+    // verbs over any inmate's offer, except the four pitches made TO a cop
+    const copPitch = !!(a.approach && /^cop[A-Z]/.test(a.approach.kind || ""));
+    const badge = CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden") && !copPitch;
+    if (a.approach && a.approach.t > 0 && !badge) {
       /* THREE BUTTONS, AND "LISTEN" IS NOT ONE OF THEM (owner, 2026-08-21: "I
          like 3 interaction buttons max at a time... more than 3 interaction
          buttons showing at once looks bad").
@@ -363,15 +390,22 @@
       return ["question", "search", "detain"];
     }
     /* THE WARDEN DOES NOT CHAT. In his office on his summons the card is
-       his three: DEAL, FAVOR, THREATEN (systems/prisonwarden.js). Anywhere
-       else he will hear a name (SNITCH), and his pocket is only reachable
-       asleep or alone at his desk, never on rounds with his officers.
-       Campaign beats still outrank this above. */
+       his: TELL, FAVOR (or PROTECTION), THREATEN (systems/prisonwarden.js).
+       Anywhere else TELL gets you "My office." and an officer comes for you,
+       and his pocket is only reachable asleep or alone at his desk, never on
+       rounds with his officers. Campaign beats still outrank this above. */
+    const canTell = !!(CBZ.prisonSnitch && CBZ.prisonSnitch.canTell && CBZ.prisonSnitch.canTell(a));
     if (a.kind === "warden") {
       const W = CBZ.warden;
       const meet = W && W.verbs ? W.verbs(a) : null;
       if (meet) return meet;
-      return (W && W.exposed && !W.exposed()) ? ["snitch"] : ["snitch", "steal"];
+      // TALK stays when there is nothing to tell, and when he has come round
+      // to you (quests.js: his ear is the road out the side gate)
+      const out = [];
+      if (!canTell || (a.rep || 0) >= 100) out.push("talk");
+      if (canTell) out.push("tell");
+      if (!(W && W.exposed && !W.exposed())) out.push("steal");
+      return out;
     }
     if (a.kind === "guard") {
       /* THE BENT SCREW RAN FIVE (bribe/payoff/trade/insult/steal) — the exact
@@ -384,8 +418,10 @@
          swinging on him is still a left-click away. */
       const money = (a.corrupt && guardPayoffWorthIt(a)) ? "payoff" : "bribe";
       const merch = !!(a.data && a.data.offer);
-      if (a.corrupt) return merch ? [money, "trade", "steal"] : [money, "talk", "steal"];
-      return merch ? ["bribe", "trade", "steal"] : ["bribe", "talk", "steal"];
+      // what you know outranks small talk: TELL takes TALK's slot
+      const mid = canTell ? "tell" : "talk";
+      if (a.corrupt) return merch ? [money, "trade", "steal"] : [money, mid, "steal"];
+      return merch ? ["bribe", "trade", "steal"] : ["bribe", mid, "steal"];
     }
     // FLIRT IS GONE (see economy.js). A relationship that was a rising
     // counter with dialogue rungs is not a relationship.
@@ -418,7 +454,10 @@
     // a man carrying real bad blood leads with the way OUT of it — the most
     // fleeting thing about him, and the one the other verbs are useless under
     const sore = !!CBZ.squashGrudge && (a.playerGrudge || 0) >= 4;
-    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40;
+    // only your OWN car takes you in (systems/prisoncars.js); another car's man never offers
+    const PCs = CBZ.prisonCars;
+    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40 &&
+      (!PCs || (a.yardCar === PCs.playerCar() && (CBZ.game || {}).carClaim !== "out"));
     /* TWO NEW RUNGS, ON THE SAME LADDER AND FOR THE SAME REASON — how fleeting
        the thing is (PRISON_CONTRACTS).
 
@@ -544,7 +583,7 @@
       case "coverStory": return "Take the cover story";
       case "heatWarning":return "Duck the heat";
       case "alibiDeal":  return "Take the alibi";
-      case "gangInvite": return `Join the ${(CBZ.GANG_NAMES && CBZ.GANG_NAMES[a.gang]) || "crew"}`;
+      case "gangInvite": return `Ride with ${gangShort(a) ? (CBZ.prisonCars ? CBZ.prisonCars.phrase(a.yardCar != null && a.yardCar >= 0 ? a.yardCar : a.gang) : "them") : "them"}`;
       case "contract":   return ap.contract
         ? (ap.contract.kind === "repo" ? `Go take the ${ap.contract.item}`
           : ap.contract.kind === "roughUp" ? `Go put ${ap.contract.name} down`
@@ -570,10 +609,14 @@
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return c > 0 ? `Slip ${c} to look away` : "Ask him to look away"; }
-      case "snitch":   return "Give the warden a name";
+      case "tell":     return a.kind === "warden" ? "Tell the warden something" : `Tell ${nm} something`;
+      case "tellA": case "tellB": case "tellC":
+        return CBZ.prisonSnitch ? CBZ.prisonSnitch.label(v) : "";
+      case "tellNo":   return "Say nothing";
+      case "protect":  return "Ask for protection";
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
-      case "join":     return `Run with the ${gangShort(a) || "crew"}`;
+      case "join":     return `Ride with ${gangShort(a) || "them"}`;
       case "listen":   return "Hear them out";
       case "accept":   return acceptLine(a);
       case "respect":  return "Show respect, back off";
@@ -660,6 +703,8 @@
   function shortLabel(a, v) {
     if (v === "campaign-spy") return "Accept";
     if (v === "campaign-escape") return "Refuse";
+    // what you know, in a few words ("Rico's blade", "Dee stabbed Moss")
+    if ((v === "tellA" || v === "tellB" || v === "tellC") && CBZ.prisonSnitch) return shortText(CBZ.prisonSnitch.label(v), 20);
     if (VERB[v] && VERB[v].label) return VERB[v].label;
     const raw = String(labelFor(a, v) || v);
     return shortText(raw.split(/\s+[—–-]\s+/)[0], 18);
@@ -792,7 +837,8 @@
   const VERB_PRIORITY = {
     refuse: 100, talk: 90, steal: 87, befriend: 86, join: 85, accept: 92, trade: 88,
     settle: 93, collect: 86, work: 74,
-    confrontReport: 84, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78,
+    confrontReport: 84, paySilence: 80, tell: 80, bribe: 78, threatenSnitch: 78,
+    tellA: 99, tellB: 98, tellC: 97, tellNo: 96, protect: 82, wfavor: 72,
     payoff: 76, pay: 74, detain: 72, search: 70, warn: 66, threaten: 64,
     respect: 60, question: 60, haggle: 50, insult: 40,
     rob: 96, restrain: 95, release: 94,

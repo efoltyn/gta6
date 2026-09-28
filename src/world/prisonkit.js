@@ -52,6 +52,10 @@
                                           circuit
      CBZ.prisonGround(x,z,w,d,kind)      an asphalt / turf / concrete patch
                                           through CBZ.prisonGroundTex
+     K.hoop / K.courtHalf / K.bleacher    the one outdoor court kit
+     K.vehicle(kind,x,z,ry) / K.dumpster  the service yard's and the lower
+                                          yard's bus, vans and bins (profile-
+                                          extruded, colliders included)
      CBZ.prisonExteriorAudit()           fenceM, masts, programmedM2,
                                           ringOpenShare, texturedWalls
 
@@ -481,11 +485,31 @@
     const Rf = 3.35, eave = head + 0.12;
     stat(new THREE.ConeGeometry(Rf, 1.15, 8), steelRoof, x, eave + 0.575, z, { ry: Math.PI / 8 });
     octRing(Rf, eave - 0.09, 0.2, 0.06, steelDark, x, z, { cast: false });
-    stat(new THREE.CylinderGeometry(0.05, 0.05, 2.4, 6), galv, x, eave + 1.15 + 1.2, z, { cast: false });
-    stat(new THREE.BoxGeometry(0.38, 0.5, 0.38), steelDark, x, eave + 1.15 + 0.25, z, { cast: false });
-    // an under-eave floodlight aimed at the compound
-    stat(new THREE.BoxGeometry(0.62, 0.30, 0.42), steelDark, x + face.x * (Rf - 0.5), eave - 0.35, z + face.z * (Rf - 0.5), { ry: fa, rx: 0.45, cast: false });
-    const lamp = addBox(x + face.x * (Rf - 0.5) + 0.0, eave - 0.36, z + face.z * (Rf - 0.5), 0.5, 0.2, 0.36, 0x2b2b2b, { cast: false });
+    /* THE APEX. A round pedestal on the roof's point with a bolted flange on
+       top: the searchlight's yoke (entities/searchlight.js) stands on that
+       flange at CBZ.towerHeadY = eave + 1.15 + 0.5. It was a 0.38 m box with
+       a 2.4 m mast running straight up through where the lamp sits; the mast
+       is a lightning rod now, clamped to a roof hip near the eave. */
+    stat(new THREE.CylinderGeometry(0.17, 0.24, 0.62, 12), steelDark, x, eave + 1.15 + 0.17, z, { cast: false });
+    stat(new THREE.CylinderGeometry(0.27, 0.27, 0.04, 16), steelDark, x, eave + 1.15 + 0.48, z, { cast: false });
+    {
+      // a hip of the octagonal cone: ConeGeometry puts vertex 0 at +z, the roof is turned PI/8
+      const back = Math.round((Math.atan2(-face.x, -face.z) - Math.PI / 8) / (Math.PI / 4));
+      const ha = Math.PI / 8 + back * Math.PI / 4;              // the hip facing away from the ladder
+      const t = 0.8, hr = Rf * t, hy = eave + 1.15 * (1 - t);
+      const rx = x + Math.sin(ha) * hr, rz = z + Math.cos(ha) * hr;
+      stat(new THREE.CylinderGeometry(0.012, 0.016, 1.25, 6), galv, rx, hy + 0.6, rz, { cast: false });
+      stat(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 8), steelDark, rx, hy + 0.04, rz, { cast: false });   // the clamp
+    }
+    // an under-eave floodlight aimed at the compound: a housing pitched down
+    // at the yard and its lens FLUSH on the housing's face (the lens used to be
+    // an unrotated box sticking out of the pitched housing: at night it was a
+    // glowing block hanging off the eave)
+    const hx0 = x + face.x * (Rf - 0.5), hz0 = z + face.z * (Rf - 0.5), hy0 = eave - 0.35;
+    stat(new THREE.BoxGeometry(0.62, 0.30, 0.42), steelDark, hx0, hy0, hz0, { ry: fa, rx: 0.45, cast: false });
+    stat(new THREE.BoxGeometry(0.08, 0.3, 0.08), steelDark, hx0, eave - 0.1, hz0, { cast: false });           // the hanger to the soffit
+    const lamp = addBox(hx0 + face.x * 0.225 * Math.cos(0.45), hy0 - 0.225 * Math.sin(0.45), hz0 + face.z * 0.225 * Math.cos(0.45), 0.54, 0.24, 0.02, 0x2b2b2b, { cast: false });
+    lamp.rotation.order = "YXZ"; lamp.rotation.y = fa; lamp.rotation.x = 0.45;
     lamp.userData.mover = true;
     if (CBZ.prisonLights && CBZ.prisonLights.register) {
       try { CBZ.prisonLights.register({ x: x + face.x * 6, z: z + face.z * 6, r: 15, kind: "flood", mesh: lamp, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b }); } catch (e) {}
@@ -704,16 +728,25 @@
     const galv = skin("galv", 0xb4bcc4), concrete = skin("concrete", 0x9ea3a8), dark = skin("steel", 0x3a4048);
     aim = aim || { x: 0, z: 1 };
     const fa = Math.atan2(aim.x, aim.z);
+    const ax = Math.sin(fa), az = Math.cos(fa);            // the unit aim (callers pass 0.7, 0.7)
     stat(new THREE.BoxGeometry(1.0, 0.5, 1.0), concrete, x, 0.25, z, {});
     stat(new THREE.CylinderGeometry(0.11, 0.22, h, 8), galv, x, h / 2 + 0.5, z, {});
     stat(new THREE.BoxGeometry(2.8, 0.14, 0.14), dark, x, h + 0.3, z, { ry: fa + Math.PI / 2, cast: false });
+    /* THE HEADS. Each is a pitched housing on a knuckle bolted under the
+       crossarm, with its lens FLUSH on the housing's pitched face. The lens
+       used to be a separate box turned with the mesh's default XYZ Euler
+       (world-X pitch after the yaw): on every mast aimed along x that rolled
+       it sideways out of its housing, so at night each head was a lit block
+       hanging in the air beside the fitting it belonged to. */
+    const P = 0.55, D = 0.25 + 0.012;                      // pitch, centre-to-lens
     const heads = [];
     for (let i = 0; i < 4; i++) {
       const s = (i - 1.5) * 0.7;
       const hx = x + Math.cos(fa) * s, hz = z - Math.sin(fa) * s;
-      stat(new THREE.BoxGeometry(0.5, 0.34, 0.5), dark, hx, h + 0.05, hz, { ry: fa, rx: 0.55, cast: false });
-      const lamp = addBox(hx + aim.x * 0.18, h - 0.06, hz + aim.z * 0.18, 0.44, 0.16, 0.3, 0x2b2b2b, { cast: false });
-      lamp.rotation.y = fa; lamp.rotation.x = 0.55;
+      stat(new THREE.BoxGeometry(0.1, 0.12, 0.1), dark, hx, h + 0.2, hz, { cast: false });                 // knuckle
+      stat(new THREE.BoxGeometry(0.5, 0.34, 0.5), dark, hx, h + 0.0, hz, { ry: fa, rx: P, cast: false });
+      const lamp = addBox(hx + ax * D * Math.cos(P), h - D * Math.sin(P), hz + az * D * Math.cos(P), 0.42, 0.28, 0.02, 0x2b2b2b, { cast: false });
+      lamp.rotation.order = "YXZ"; lamp.rotation.y = fa; lamp.rotation.x = P;
       lamp.userData.mover = true;
       heads.push(lamp);
     }
@@ -838,34 +871,81 @@
     rtube(x, z, ry, [-0.68, 0.40, 0], [0.68, 0.40, 0], 0.018, frame, { cast: false });      // the stretcher
   }
 
-  /* THE HOOP. A round pole, a gooseneck arm, a 1.8 x 1.05 board with its
-     shooter's square painted on (not a red block glued to it), an orange
-     rim on a bracket and a net. Pole at (px, pz); the board faces `f` (the
-     unit direction into the court) with its face 1.2 m out from the pole. */
+  /* THE HOOP. An in-ground gooseneck, built the way the real ones are:
+     a square steel post on a base plate with a wrap-around safety pad, a
+     bent gooseneck arm over the top and a lower support strut, both landing
+     on a mounting frame behind the board. A 1.83 x 1.07 board with an
+     aluminium edge, its border and shooter's square painted on at the FIBA
+     place (the square's bottom edge level with the rim), an orange 45 cm rim
+     on a bracket, and a corded net: twelve strands each way hung from the
+     rim's hooks and crossing into diamonds down to a tapered bottom ring.
+     Pole at (px, pz); the board faces `f` (the unit direction into the
+     court) with its face `reach` m out from the pole. */
+  const NET_CORD = [];                              // twelve + twelve strand paths, built once
+  function netStrands() {
+    if (NET_CORD.length) return NET_CORD;
+    const N = 12, R0 = 0.215, R1 = 0.13, H = 0.42, TW = Math.PI / N;
+    for (const dir of [-1, 1]) for (let i = 0; i < N; i++) {
+      const pts = [];
+      for (let k = 0; k <= 4; k++) {
+        const t = k / 4, a = (i / N) * Math.PI * 2 + dir * t * TW * 2;
+        const r = R0 + (R1 - R0) * t - Math.sin(t * Math.PI) * 0.012;   // a slight belly
+        pts.push(new THREE.Vector3(Math.cos(a) * r, -t * H, Math.sin(a) * r));
+      }
+      NET_CORD.push(pts);
+    }
+    return NET_CORD;
+  }
   function hoop(px, pz, fx, fz, o) {
     o = o || {};
     const ry = Math.atan2(fx, fz);                // local +z = into the court
-    const post = skin("steel", 0x3a4048), white = skin("steel", 0xe6e7e3), line = skin("steel", 0xa3261f), orange = skin("steel", 0xe0672a);
-    const net = skin("chainlink", 0xf2f2ee);
+    const post = skin("steel", 0x2f3540), white = skin("steel", 0xeceeea, 0.35), line = skin("steel", 0x1f2f55, 0.45);
+    const orange = skin("steel", 0xd9561c, 0.4), edge = skin("galv", 0xc9ced3), pad = skin("steel", 0x1d2a44, 0.85);
+    const cord = skin("steel", 0xf1f0ea, 0.95), plate = skin("galv", 0x9aa1a8);
     const rimY = o.rimY || 3.05, boardZ = o.reach || 1.2;
-    tube(px, 0, pz, px, rimY + 0.35, pz, 0.075, post, { seg: 10 });
-    rtube(px, pz, ry, [0, rimY + 0.3, 0], [0, rimY + 0.3, boardZ - 0.1], 0.05, post, { cast: false });
-    rtube(px, pz, ry, [0, rimY - 0.2, 0], [0, rimY + 0.3, boardZ - 0.35], 0.035, post, { cast: false });
-    rbox(px, pz, ry, 0, rimY + 0.3, boardZ - 0.07, 0.6, 0.5, 0.08, post, { cast: false });   // board mount
-    rbox(px, pz, ry, 0, rimY + 0.3, boardZ, 1.8, 1.05, 0.04, white, {});
-    // the shooter's square and the board border: 5 cm strips 3 mm proud
-    const fz0 = boardZ + 0.023;
+    const bY = rimY - 0.15 + 0.535;               // board centre: its bottom edge 15 cm under the rim
+    const topY = rimY + 0.2;                      // the post's cap
+    // base plate, square post, cap, safety pad
+    rbox(px, pz, ry, 0, 0.01, 0, 0.42, 0.02, 0.42, plate, { cast: false });
+    rbox(px, pz, ry, 0, topY / 2, 0, 0.15, topY, 0.15, post, {});
+    rbox(px, pz, ry, 0, topY + 0.01, 0, 0.17, 0.02, 0.17, post, { cast: false });
+    rbox(px, pz, ry, 0, 0.1 + 0.9, 0, 0.27, 1.8, 0.27, pad, {});
+    // the gooseneck: up off the post, over, and down onto the board frame
+    const g = new THREE.CubicBezierCurve3(
+      new THREE.Vector3(0, topY - 0.25, 0), new THREE.Vector3(0, topY + 0.45, 0.02),
+      new THREE.Vector3(0, bY + 0.55, boardZ * 0.55), new THREE.Vector3(0, bY + 0.12, boardZ - 0.12));
+    const gg = new THREE.TubeGeometry(g, 14, 0.06, 8, false);
+    stat(gg, post, px, 0, pz, { ry: ry });
+    rtube(px, pz, ry, [0, topY - 0.9, 0.07], [0, bY - 0.3, boardZ - 0.12], 0.035, post, { cast: false });   // support strut
+    // the mounting frame behind the board
+    rbox(px, pz, ry, 0, bY - 0.05, boardZ - 0.08, 0.62, 0.62, 0.06, post, { cast: false });
+    for (const s of [-1, 1]) rbox(px, pz, ry, s * 0.3, bY - 0.05, boardZ - 0.1, 0.05, 0.9, 0.05, post, { cast: false });
+    // the board: a painted panel in an aluminium edge
+    rbox(px, pz, ry, 0, bY, boardZ, 1.8, 1.04, 0.035, white, {});
     for (const s of [-1, 1]) {
-      rbox(px, pz, ry, s * 0.295, rimY + 0.3, fz0, 0.05, 0.45, 0.004, line, { cast: false });
-      rbox(px, pz, ry, 0, rimY + 0.3 + s * 0.2, fz0, 0.64, 0.05, 0.004, line, { cast: false });
-      rbox(px, pz, ry, s * 0.875, rimY + 0.3, fz0, 0.05, 1.05, 0.004, line, { cast: false });
-      rbox(px, pz, ry, 0, rimY + 0.3 + s * 0.5, fz0, 1.8, 0.05, 0.004, line, { cast: false });
+      rbox(px, pz, ry, s * 0.905, bY, boardZ, 0.03, 1.07, 0.06, edge, { cast: false });
+      rbox(px, pz, ry, 0, bY + s * 0.52, boardZ, 1.84, 0.03, 0.06, edge, { cast: false });
     }
-    // bracket and rim, the net under it
-    const c = Math.cos(ry), s = Math.sin(ry), rz = boardZ + 0.15 + 0.23;
-    rbox(px, pz, ry, 0, rimY - 0.02, boardZ + 0.1, 0.2, 0.06, 0.18, orange, { cast: false });
-    stat(new THREE.TorusGeometry(0.23, 0.01, 6, 20), orange, px + rz * s, rimY, pz + rz * c, { rx: Math.PI / 2, cast: false });
-    stat(new THREE.CylinderGeometry(0.23, 0.14, 0.42, 14, 1, true), net, px + rz * s, rimY - 0.21, pz + rz * c, { cast: false });
+    // painted border and shooter's square, 5 cm lines 2 mm proud of the face
+    const fz0 = boardZ + 0.0185, sqY = rimY + 0.225;
+    for (const s of [-1, 1]) {
+      rbox(px, pz, ry, s * 0.27, sqY, fz0, 0.05, 0.45, 0.003, line, { cast: false });
+      rbox(px, pz, ry, 0, sqY + s * 0.2, fz0, 0.59, 0.05, 0.003, line, { cast: false });
+      rbox(px, pz, ry, s * 0.845, bY, fz0, 0.05, 0.98, 0.003, line, { cast: false });
+      rbox(px, pz, ry, 0, bY + s * 0.465, fz0, 1.74, 0.05, 0.003, line, { cast: false });
+    }
+    // the rim: a flange plate on the board, a braced bracket, the 45 cm ring
+    const c = Math.cos(ry), sn = Math.sin(ry), rz = boardZ + 0.15 + 0.225;
+    rbox(px, pz, ry, 0, rimY - 0.04, boardZ + 0.022, 0.26, 0.2, 0.012, orange, { cast: false });
+    rbox(px, pz, ry, 0, rimY - 0.005, boardZ + 0.09, 0.14, 0.02, 0.15, orange, { cast: false });
+    rtube(px, pz, ry, [0, rimY - 0.14, boardZ + 0.03], [0, rimY - 0.01, boardZ + 0.16], 0.012, orange, { cast: false });
+    stat(new THREE.TorusGeometry(0.2335, 0.009, 6, 28), orange, px + rz * sn, rimY, pz + rz * c, { rx: Math.PI / 2, cast: false });
+    // the net
+    for (const pts of netStrands()) {
+      const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 6, 0.005, 3, false);
+      stat(tg, cord, px + rz * sn, rimY - 0.01, pz + rz * c, { cast: false });
+    }
+    stat(new THREE.TorusGeometry(0.13, 0.006, 4, 16), cord, px + rz * sn, rimY - 0.43, pz + rz * c, { rx: Math.PI / 2, cast: false });
     return { x: px, z: pz };
   }
 
@@ -907,6 +987,392 @@
   }
 
   /* ==========================================================
+     8c. COURT MARKINGS AND BLEACHERS. One half of a FIBA court painted
+        from its baseline: the lane (4.9 x 5.8, optionally filled), the
+        free-throw circle (solid outside the lane, dashed inside), the
+        no-charge arc, the three-point line (6.75 m arc from the basket,
+        straight 0.9 m in from each sideline to where it meets the arc) and,
+        if asked, the half-court line with its centre circle. Flush paint on
+        a ground() court at y 0.03. `dir` is +1 when the court runs +z from
+        the baseline at `bz`, -1 when it runs -z. The caller paints the
+        boundary and stands the hoop.
+     ========================================================== */
+  let courtPaint = null, courtFill = new Map();
+  function courtPaintMat() {
+    if (courtPaint) return courtPaint;
+    const c = new THREE.Color(0xe9e9e4), g = (c.r + c.g + c.b) / 3;
+    c.setRGB((c.r * 0.7 + g * 0.3) * 0.84, (c.g * 0.7 + g * 0.3) * 0.84, (c.b * 0.7 + g * 0.3) * 0.84);
+    courtPaint = new THREE.MeshLambertMaterial({ color: c });
+    return courtPaint;
+  }
+  function arc(cx, cz, r, t0, tl, dir, y, segs) {
+    const g = new THREE.RingGeometry(r - 0.025, r + 0.025, segs || 40, 1, t0, tl);
+    g.rotateX(-Math.PI / 2);                          // ring +y -> world -z
+    return stat(g, courtPaintMat(), cx, y, cz, { ry: dir > 0 ? 0 : Math.PI, cast: false });
+  }
+  function courtHalf(cx, bz, dir, o) {
+    o = o || {};
+    const W = o.w || 15, PY = o.y != null ? o.y : 0.034, AY = PY + 0.001;
+    const line = (x, z, w, d) => paint(x, z, w, d, 0xe9e9e4, PY);
+    const bk = bz + dir * 1.575;                                        // the basket's centre
+    if (o.keyFill != null) {
+      let m = courtFill.get(o.keyFill);
+      if (!m) { m = new THREE.MeshLambertMaterial({ color: o.keyFill }); courtFill.set(o.keyFill, m); }
+      const p = new THREE.PlaneGeometry(4.9, 5.8); p.rotateX(-Math.PI / 2);
+      stat(p, m, cx, PY - 0.003, bz + dir * 2.9, { cast: false });
+    }
+    // the lane
+    for (const s of [-1, 1]) line(cx + s * 2.425, bz + dir * 2.9, 0.05, 5.8);
+    line(cx, bz + dir * 5.775, 4.9, 0.05);
+    // free-throw circle: the half outside the lane solid, the half inside dashed
+    const ftz = bz + dir * 5.8;
+    arc(cx, ftz, 1.8, Math.PI, Math.PI, dir, AY, 28);
+    for (let k = 0; k < 7; k++) arc(cx, ftz, 1.8, (k + 0.3) * Math.PI / 7, 0.4 * Math.PI / 7, dir, AY, 4);
+    // no-charge semicircle under the basket
+    arc(cx, bk, 1.25, Math.PI, Math.PI, dir, AY, 20);
+    // three-point line
+    const run = Math.sqrt(6.75 * 6.75 - 6.6 * 6.6);                      // basket-line to where the arc meets the straights
+    const a3 = Math.asin(run / 6.75), straight = 1.575 + run;
+    for (const s of [-1, 1]) line(cx + s * 6.6, bz + dir * straight / 2, 0.05, straight);
+    arc(cx, bk, 6.75, Math.PI + a3, Math.PI - 2 * a3, dir, AY, 56);
+    if (o.halfLine) {
+      const hz = bz + dir * 14;
+      line(cx, hz, W, 0.05);
+      arc(cx, hz, 1.8, 0, Math.PI, dir, AY, 28);                         // the half of the centre circle on this side
+    }
+    return { basket: { x: cx, z: bk } };
+  }
+
+  /* BLEACHERS: rows of aluminium plank seating on sloped stringers, a post
+     under every row, a rear guard rail. The front row's edge is at `x`, the
+     rows rise toward -x, so the crowd faces +x. One collider over the unit;
+     `o.seats` > 0 registers that many bench seats per row with city/
+     propuse.js at the plank's real height. */
+  function bleacher(x, z, len, o) {
+    o = o || {};
+    const galv = skin("galv", 0xb4bcc4), frame = skin("steel", 0x3a4048);
+    const rows = o.rows || 4, RD = 0.75, RR = 0.4, ys0 = 0.46;
+    const frames = Math.max(2, Math.round(len / 3.5) + 1);
+    const back = x - (rows - 1) * RD - 0.45, topY = ys0 + (rows - 1) * RR;
+    for (let t = 0; t < rows; t++) {
+      const xs = x - t * RD - 0.2, ys = ys0 + t * RR;
+      for (const k of [-0.09, 0.09]) stat(new THREE.BoxGeometry(0.16, 0.04, len), galv, xs + k, ys, z, { cast: k < 0 });
+      stat(new THREE.BoxGeometry(0.24, 0.035, len), galv, xs + 0.4, ys - 0.42 + 0.02, z, { cast: false });   // foot plank
+    }
+    for (let i = 0; i < frames; i++) {
+      const fz = z - len / 2 + 0.25 + (len - 0.5) * i / (frames - 1);
+      tube(x + 0.35, 0.0, fz, back, topY - 0.05, fz, 0.045, frame, { seg: 6, cast: false });           // stringer
+      for (let t = 0; t < rows; t++) {
+        const xs = x - t * RD - 0.2, ys = ys0 + t * RR;
+        tube(xs, 0, fz, xs, ys - 0.02, fz, 0.035, frame, { seg: 6, cast: false });                       // post under the row
+        tube(xs + 0.4, ys - 0.42, fz, xs - 0.1, ys - 0.02, fz, 0.022, frame, { seg: 5, cast: false });   // seat bracket
+      }
+      tube(back, 0, fz, back, topY + 1.0, fz, 0.035, galv, { seg: 6, cast: false });                     // rear guard post
+    }
+    for (const y of [topY + 0.5, topY + 1.0]) stat(new THREE.CylinderGeometry(0.025, 0.025, len, 6), galv, back, y, z, { rx: Math.PI / 2, cast: false });
+    CBZ.colliders.push({ minX: back - 0.1, maxX: x + 0.4, minZ: z - len / 2, maxZ: z + len / 2, noBreach: true });
+    if (o.seats > 0 && CBZ.roomSeatAnchor) {
+      for (let t = 0; t < rows; t++) for (let k = 0; k < o.seats; k++) {
+        try {
+          CBZ.roomSeatAnchor(x - t * RD - 0.2, 0, z - len / 2 + (k + 0.5) * len / o.seats, Math.PI / 2, "bench", null, { cushion: ys0 + t * RR + 0.02, floorBelow: 0 });
+        } catch (e) {}
+      }
+    }
+    return { back: back, front: x + 0.4, top: topY };
+  }
+
+  /* ==========================================================
+     8d. VEHICLES AND DUMPSTERS. A box does not read as a bus or a
+        dumpster: these are drawn from a SIDE PROFILE extruded across their
+        width with rounded edges, which is how a body panel or a bin is
+        actually shaped. Pieces are built about the object's own origin
+        (front is local -z), turned by `ry` and merged through stat(). Each
+        pushes its own collider (the rotated footprint's AABB, noBreach).
+        Nothing on them glows: lamps are lenses in housings, lit or not by
+        the sun like everything else parked in a yard.
+     ========================================================== */
+  // outline: [[lz, y], ...] around the side; arches: [{c, r}] cut out of the sill line at `sill`
+  function profileGeo(outline, width, bevel, arches, sill) {
+    const pts = outline.slice();
+    if (arches && arches.length) {
+      // the sill runs from the last outline point (rear, low) forward to the first (front, low)
+      const sorted = arches.slice().sort((a, b) => b.c - a.c);
+      for (const a of sorted) {
+        pts.push([a.c + a.r, sill]);
+        for (let k = 1; k < 10; k++) { const t = Math.PI * k / 10; pts.push([a.c + a.r * Math.cos(t), sill + a.r * Math.sin(t)]); }
+        pts.push([a.c - a.r, sill]);
+      }
+    }
+    const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p[0], p[1])));
+    const depth = Math.max(0.02, width - 2 * bevel);
+    const g = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6 });
+    g.translate(0, 0, -depth / 2);
+    g.rotateY(-Math.PI / 2);                      // shape x -> local z, extrusion -> local x
+    return g;
+  }
+  function place(g, mat, x, z, ry, o) { return stat(g, mat, x, 0, z, Object.assign({ ry: ry }, o || {})); }
+  function lbox(lx, y, lz, w, h, d, rx) { const g = new THREE.BoxGeometry(w, h, d); if (rx) g.rotateX(rx); g.translate(lx, y, lz); return g; }
+  function lwheel(lx, lz, r, w) {
+    const g = new THREE.CylinderGeometry(r, r, w, 18); g.rotateZ(Math.PI / 2); g.translate(lx, r, lz); return g;
+  }
+  function lwheelHub(lx, lz, r) {
+    const g = new THREE.CylinderGeometry(r * 0.55, r * 0.6, 0.03, 14); g.rotateZ(Math.PI / 2); g.translate(lx, r, lz); return g;
+  }
+  // a round lamp lens facing local +z (f = 1) or -z (f = -1)
+  function llens(lx, y, lz, r, f) {
+    const g = new THREE.CylinderGeometry(r, r, 0.03, 16); g.rotateX(Math.PI / 2); g.translate(lx, y, lz + f * 0.015); return g;
+  }
+  function footprint(x, z, ry, hw, hd) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    const ex = Math.abs(hw * c) + Math.abs(hd * s), ez = Math.abs(hw * s) + Math.abs(hd * c);
+    const col = { minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, noBreach: true };
+    CBZ.colliders.push(col);
+    return col;
+  }
+  // the side runs of a band that has to skip the wheel arches (and, on the
+  // door side, the door): [[z0, z1], ...] along the body
+  function runsAround(z0, z1, holes) {
+    const out = []; let cur = z0;
+    for (const h of holes.slice().sort((a, b) => a[0] - b[0])) {
+      if (h[0] > cur + 0.05) out.push([cur, Math.min(h[0], z1)]);
+      cur = Math.max(cur, h[1]);
+    }
+    if (z1 > cur + 0.05) out.push([cur, z1]);
+    return out;
+  }
+
+  /* THE TRANSPORT BUS. A white prison bus: one rounded shell from its side
+     profile with the wheel arches cut out of the sill, a grey lower skirt and
+     rub rail between the arches, a charcoal waist stripe, the window band of
+     tinted glass behind an expanded-steel security screen on a frame of
+     mullions, a two-leaf glazed door ahead of the front axle, a split
+     windscreen on the rake with its wipers, a louvred engine grille and the
+     emergency door's barred pane at the back, lamp clusters of round lenses
+     in dark housings, bumpers, mirrors on arms, roof hatches and the A/C
+     shroud, tyres with hubs. THE VAN is the same method at 5.6 m. */
+  function vehicle(kind, x, z, ry, o) {
+    o = o || {};
+    ry = ry || 0;
+    const body = skin("steel", o.tone != null ? o.tone : 0xe4e6e2), glassDark = skin("steel", 0x141b22, 0.12);
+    const rubber = skin("steel", 0x1c1e22, 0.7), hub = skin("galv", 0xb4bcc4), steelDark = skin("steel", 0x3a4048);
+    const lensClear = skin("steel", 0xe4e9ec, 0.12), lensRed = skin("steel", 0x9e2019, 0.2), lensAmber = skin("steel", 0xd48a2a, 0.2);
+    const stripe = skin("steel", o.stripe != null ? o.stripe : 0x2b3748), skirt = skin("steel", 0x8b9299);
+    const P = (g, m, oo) => place(g, m, x, z, ry, oo || { cast: false });
+    if (kind === "bus") {
+      const L = 5.5, W = 2.5, hw = W / 2, FA = -3.6, RA = 3.4, AR = 0.58;
+      const DZ0 = -5.25, DZ1 = -4.3;                                     // the door, +x side ahead of the axle
+      P(profileGeo([[-L, 0.45], [-L - 0.05, 1.4], [-L + 0.05, 2.75], [-L + 0.3, 3.02], [L - 0.2, 3.02], [L, 2.8], [L, 0.45]], W, 0.06,
+        [{ c: FA, r: AR }, { c: RA, r: AR }], 0.45), body, {});
+      const arches = [[FA - AR - 0.08, FA + AR + 0.08], [RA - AR - 0.08, RA + AR + 0.08]];
+      for (const s of [-1, 1]) {
+        const sx = s * (hw + 0.004);
+        const door = s > 0 ? [[DZ0 - 0.05, DZ1 + 0.05]] : [];
+        // skirt and rub rail between the arches, the waist stripe over them
+        for (const r of runsAround(-L + 0.1, L - 0.1, arches.concat(door))) {
+          const m = (r[0] + r[1]) / 2, len = r[1] - r[0];
+          P(lbox(sx, 0.74, m, 0.012, 0.5, len), skirt);
+          P(lbox(s * (hw + 0.02), 1.0, m, 0.04, 0.06, len), steelDark);
+        }
+        for (const r of runsAround(-L + 0.1, L - 0.1, door)) P(lbox(sx, 1.36, (r[0] + r[1]) / 2, 0.012, 0.16, r[1] - r[0]), stripe);
+        // the window band: glass, the security screen over it, mullions and rails
+        const w0 = s > 0 ? DZ1 + 0.15 : -L + 0.35, w1 = L - 0.35;
+        const wm = (w0 + w1) / 2, wl = w1 - w0;
+        P(lbox(sx, 2.15, wm, 0.012, 0.82, wl), glassDark);
+        const scr = new THREE.PlaneGeometry(wl, 0.8); scr.rotateY(Math.PI / 2); scr.translate(s * (hw + 0.03), 2.15, wm);
+        P(worldUV(scr, 1.2), skin("chainlink", 0x5a6068));
+        for (const y of [1.73, 2.57]) P(lbox(s * (hw + 0.03), y, wm, 0.05, 0.05, wl + 0.06), steelDark);
+        const bays = Math.max(2, Math.round(wl / 1.05));
+        for (let k = 0; k <= bays; k++) P(lbox(s * (hw + 0.035), 2.15, w0 + wl * k / bays, 0.03, 0.86, 0.05), steelDark);
+        P(lbox(s * (hw + 0.035), 2.15, wm, 0.025, 0.025, wl), steelDark);       // the screen's mid rail
+        // mirrors on their arms
+        P(lbox(s * 1.5, 2.25, -L + 0.05, 0.08, 0.42, 0.22), steelDark);
+        P(lbox(s * 1.37, 2.5, -L + 0.07, 0.26, 0.035, 0.035), steelDark);
+        P(lbox(s * 1.37, 2.0, -L + 0.07, 0.26, 0.035, 0.035), steelDark);
+        // tyres, hubs, and a mud flap behind each wheel
+        for (const c of [FA, RA]) {
+          P(lwheel(s * 1.05, c, 0.5, 0.3), rubber, {});
+          P(lwheelHub(s * 1.21, c, 0.5), hub);
+          for (let n = 0; n < 6; n++) {
+            const a = n * Math.PI / 3, g = new THREE.CylinderGeometry(0.022, 0.022, 0.02, 6);
+            g.rotateZ(Math.PI / 2); g.translate(s * 1.225, 0.5 + Math.sin(a) * 0.17, c + Math.cos(a) * 0.17); P(g, steelDark);
+          }
+          P(lbox(s * 1.05, 0.33, c + AR + 0.1, 0.34, 0.42, 0.012), rubber);
+        }
+      }
+      // the door: frame, two glazed leaves with the centre seal, a step light
+      const dm = (DZ0 + DZ1) / 2, dx = hw + 0.012;
+      P(lbox(dx, 1.62, dm, 0.012, 2.1, DZ1 - DZ0 - 0.06), glassDark);
+      for (const zz of [DZ0, DZ1]) P(lbox(dx + 0.012, 1.55, zz, 0.035, 2.25, 0.06), steelDark);
+      P(lbox(dx + 0.012, 2.67, dm, 0.035, 0.06, DZ1 - DZ0), steelDark);
+      P(lbox(dx + 0.012, 1.62, dm, 0.03, 2.1, 0.04), steelDark);                 // the seal where the leaves meet
+      for (const y of [0.9, 1.65]) P(lbox(dx + 0.012, y, dm, 0.025, 0.05, DZ1 - DZ0 - 0.08), steelDark);   // kick and mid rails
+      // front: split windscreen on the rake, wipers, grille, lamp clusters, bumper
+      const rk = Math.atan2(0.1, 1.35);
+      for (const s of [-1, 1]) P(lbox(s * 0.56, 2.08, -L - 0.07, 1.06, 1.12, 0.02, rk), glassDark);
+      P(lbox(0, 2.08, -L - 0.08, 0.07, 1.14, 0.03, rk), steelDark);
+      for (const s of [-1, 1]) P(lbox(s * 0.5, 1.55, -L - 0.105, 0.62, 0.02, 0.02), steelDark);
+      P(lbox(0, 0.98, -L - 0.1, 1.2, 0.38, 0.02), steelDark);
+      for (let k = 0; k < 4; k++) P(lbox(0, 0.86 + k * 0.08, -L - 0.115, 1.14, 0.025, 0.02), steelDark);
+      for (const s of [-1, 1]) {
+        P(lbox(s * 0.88, 1.0, -L - 0.11, 0.5, 0.24, 0.04), steelDark);
+        P(llens(s * 0.76, 1.0, -L - 0.125, 0.085, -1), lensClear);
+        P(llens(s * 0.99, 1.0, -L - 0.125, 0.085, -1), lensClear);
+        P(lbox(s * 1.17, 1.0, -L - 0.105, 0.1, 0.14, 0.03), lensAmber);
+      }
+      P(lbox(0, 0.6, -L - 0.2, 2.5, 0.26, 0.2), steelDark);
+      // rear: engine louvres, tail clusters, the emergency door's barred pane, bumper
+      P(lbox(0, 1.15, L + 0.075, 1.6, 0.62, 0.02), steelDark);
+      for (let k = 0; k < 6; k++) P(lbox(0, 0.9 + k * 0.1, L + 0.09, 1.54, 0.03, 0.02), rubber);
+      for (const s of [-1, 1]) {
+        P(lbox(s * 1.0, 1.3, L + 0.075, 0.28, 0.82, 0.03), steelDark);
+        P(llens(s * 1.0, 1.02, L + 0.09, 0.09, 1), lensRed);
+        P(llens(s * 1.0, 1.27, L + 0.09, 0.09, 1), lensRed);
+        P(llens(s * 1.0, 1.52, L + 0.09, 0.09, 1), lensAmber);
+      }
+      P(lbox(0, 2.25, L + 0.07, 1.3, 0.62, 0.02), glassDark);
+      for (let k = -2; k <= 2; k++) P(lbox(k * 0.25, 2.25, L + 0.09, 0.03, 0.66, 0.025), steelDark);
+      P(lbox(0, 0.6, L + 0.16, 2.5, 0.24, 0.18), steelDark);
+      // roof: two escape hatches and the A/C shroud
+      for (const hz of [-2.6, 0.2]) P(lbox(0, 3.1, hz, 0.85, 0.06, 0.85), skirt);
+      P(lbox(0, 3.2, 2.7, 1.5, 0.26, 2.2), body, {});
+      P(lbox(0, 3.335, 2.7, 1.2, 0.012, 1.9), steelDark);                 // the condenser grille
+      footprint(x, z, ry, 1.4, 5.75);
+    } else {
+      const W = 2.0;
+      P(profileGeo([[-2.75, 0.4], [-2.82, 0.78], [-2.72, 1.05], [-2.25, 1.2], [-1.6, 2.15], [-1.35, 2.4], [2.68, 2.44], [2.78, 2.34], [2.78, 0.45]], W, 0.06,
+        [{ c: 1.85, r: 0.46 }, { c: -1.85, r: 0.46 }], 0.4), body, {});
+      // windscreen on the rake, cab side windows, the rear door glass
+      P(lbox(0, 1.715, -1.98, 1.8, 1.1, 0.02, Math.atan2(2.25 - 1.6, 2.15 - 1.2)), glassDark);
+      for (const s of [-1, 1]) {
+        const sx = s * (W / 2 + 0.004);
+        P(lbox(sx, 1.72, -1.2, 0.01, 0.62, 0.8), glassDark);
+        P(lbox(sx, 1.05, 0.2, 0.01, 0.18, 4.8), stripe);
+        P(lbox(s * 0.45, 1.85, 2.85, 0.62, 0.5, 0.01), glassDark);
+        for (let k = -2; k <= 2; k++) P(lbox(s * 0.45 + k * 0.11, 1.85, 2.86, 0.02, 0.52, 0.015), steelDark);   // the rear pane's bars
+        P(lbox(s * 0.66, 0.95, -2.85, 0.3, 0.16, 0.04), steelDark);
+        P(llens(s * 0.6, 0.95, -2.88, 0.06, -1), lensClear);
+        P(llens(s * 0.74, 0.95, -2.88, 0.05, -1), lensAmber);
+        P(lbox(s * 0.9, 1.1, 2.85, 0.14, 0.36, 0.03), steelDark);
+        P(llens(s * 0.9, 1.0, 2.86, 0.05, 1), lensRed);
+        P(llens(s * 0.9, 1.18, 2.86, 0.05, 1), lensRed);
+        P(lbox(s * 1.12, 1.6, -1.72, 0.05, 0.26, 0.16), steelDark);       // mirrors
+        for (const c of [-1.85, 1.85]) {
+          P(lwheel(s * 0.84, c, 0.37, 0.24), rubber, {});
+          P(lwheelHub(s * 0.97, c, 0.37), hub);
+        }
+      }
+      P(lbox(0, 0.85, -2.86, 1.1, 0.26, 0.03), steelDark);                    // grille
+      P(lbox(0, 0.5, -2.9, 2.0, 0.2, 0.14), steelDark);                       // bumpers
+      P(lbox(0, 0.5, 2.88, 2.0, 0.2, 0.12), steelDark);
+      P(lbox(0, 1.6, 2.855, 0.02, 1.9, 0.015), steelDark);                    // the rear door split
+      footprint(x, z, ry, 1.2, 3.1);
+    }
+  }
+
+  /* THE DUMPSTER. A front-load bin: the body wider at the top than the
+     base (sloped front, near-vertical back) with a lip round the opening,
+     two black plastic lids on a hinge bar sloping to the front, three
+     pressed ribs up the front, a fork pocket along each flank, a skid frame
+     and four swivel casters. 2.0 m across (local x), the front at local -z. */
+  function dumpster(x, z, ry, o) {
+    o = o || {};
+    ry = ry || 0;
+    const bin = skin("steel", o.tone != null ? o.tone : 0x2f6b3a), lid = skin("steel", 0x17191c, 0.75);
+    const dark = skin("steel", 0x3a4048), rubber = skin("steel", 0x1c1e22, 0.7), hole = skin("steel", 0x0c0d0f, 0.9);
+    const P = (g, m, oo) => place(g, m, x, z, ry, oo || { cast: false });
+    P(profileGeo([[-0.62, 0.16], [-0.82, 1.3], [0.78, 1.36], [0.72, 0.16]], 2.0, 0.03), bin, {});
+    // the lip round the opening
+    P(lbox(0, 1.31, -0.84, 2.04, 0.07, 0.06), bin);
+    P(lbox(0, 1.37, 0.8, 2.04, 0.07, 0.06), bin);
+    for (const s of [-1, 1]) P(lbox(s * 1.0, 1.34, -0.02, 0.06, 0.07, 1.68), bin);
+    // two lids, sloped with the top, rounded edges, a hinge bar at the back
+    const slope = Math.atan2(0.06, 1.6);
+    for (const s of [-1, 1]) {
+      const g = profileGeo([[-0.9, 0], [-0.9, 0.03], [-0.84, 0.07], [0.8, 0.075], [0.84, 0.04], [0.84, 0]], 0.96, 0.012);
+      g.rotateX(-slope); g.translate(s * 0.5, 1.365, 0);
+      P(g, lid, {});
+      P(lbox(s * 0.5, 1.425, -0.5, 0.5, 0.02, 0.05), lid);                 // the moulded grip
+    }
+    const hb = new THREE.CylinderGeometry(0.025, 0.025, 2.0, 8); hb.rotateZ(Math.PI / 2); hb.translate(0, 1.42, 0.83); P(hb, dark);
+    // pressed ribs up the sloped front
+    const lean = -Math.atan2(0.2, 1.14);
+    for (const k of [-0.62, 0, 0.62]) P(lbox(k, 0.72, -0.76, 0.07, 1.12, 0.05, lean), bin);
+    // fork pockets: a steel channel along each flank, dark mouths at the ends
+    for (const s of [-1, 1]) {
+      P(lbox(s * 1.06, 0.95, -0.02, 0.1, 0.2, 1.5), dark);
+      for (const e of [-1, 1]) P(lbox(s * 1.06, 0.95, -0.02 + e * 0.752, 0.07, 0.13, 0.006), hole);
+    }
+    // skid frame and swivel casters
+    P(lbox(0, 0.17, -0.02, 1.9, 0.05, 1.3), dark);
+    for (const s of [-1, 1]) for (const t of [-1, 1]) {
+      P(lbox(s * 0.8, 0.125, t * 0.5, 0.12, 0.04, 0.12), dark);
+      for (const k of [-1, 1]) P(lbox(s * 0.8 + k * 0.035, 0.08, t * 0.5, 0.01, 0.1, 0.08), dark);
+      P(lwheel(s * 0.8, t * 0.5, 0.06, 0.05), rubber);
+    }
+    return footprint(x, z, ry, 1.1, 0.9);
+  }
+
+  /* ==========================================================
+     8e. SHOP AND CELL FITTINGS shared by the south block and the wings.
+     ========================================================== */
+  /* THE WORKBENCH: a hardwood top on a steel apron, square legs, a shelf low
+     down, a bench vice bolted at the +x end (or the end `o.vice` says, ±1,
+     0 = none), and what a shop leaves on a bench: an offcut in the jaws, a
+     hammer, a file. `len` along x, `dep` along z. Pushes its own waist-high
+     collider. */
+  function workbench(x, z, len, dep, o) {
+    o = o || {};
+    const frame = skin("steel", 0x4a525c), wood = skin("concrete", 0x9c7a4e);
+    const blue = skin("steel", 0x2f4f7a, 0.5), iron = skin("steel", 0x2a2f36, 0.6);
+    const hl = len / 2, hd = dep / 2;
+    stat(new THREE.BoxGeometry(len, 0.06, dep), wood, x, 0.87, z, { uv: 1 });
+    stat(new THREE.BoxGeometry(len - 0.1, 0.1, dep - 0.06), frame, x, 0.79, z, { cast: false });
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) stat(new THREE.BoxGeometry(0.06, 0.74, 0.06), frame, x + sx * (hl - 0.1), 0.37, z + sz * (hd - 0.08), { cast: false });
+    const legs = len > 3.4 ? [0] : [];
+    for (const lx of legs) for (const sz of [-1, 1]) stat(new THREE.BoxGeometry(0.06, 0.74, 0.06), frame, x + lx, 0.37, z + sz * (hd - 0.08), { cast: false });
+    stat(new THREE.BoxGeometry(len - 0.2, 0.03, dep - 0.14), frame, x, 0.18, z, { cast: false });
+    const vs = o.vice != null ? o.vice : 1;
+    if (vs) {
+      const vx = x + vs * (hl - 0.4), vz = z - hd + 0.04;
+      stat(new THREE.BoxGeometry(0.2, 0.05, 0.22), blue, vx, 0.925, vz + 0.08, { cast: false });
+      stat(new THREE.BoxGeometry(0.2, 0.14, 0.08), blue, vx, 1.02, vz + 0.1, { cast: false });
+      stat(new THREE.BoxGeometry(0.2, 0.12, 0.07), blue, vx, 1.01, vz - 0.04, { cast: false });
+      stat(new THREE.BoxGeometry(0.2, 0.012, 0.012), iron, vx, 1.085, vz + 0.055, { cast: false });   // jaw plates
+      stat(new THREE.BoxGeometry(0.2, 0.012, 0.012), iron, vx, 1.065, vz, { cast: false });
+      stat(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8), iron, vx, 0.99, vz - 0.14, { rx: Math.PI / 2, cast: false });
+      stat(new THREE.CylinderGeometry(0.007, 0.007, 0.24, 6), iron, vx, 0.99, vz - 0.25, { rz: Math.PI / 2, cast: false });
+      stat(new THREE.BoxGeometry(0.16, 0.1, 0.01), iron, vx, 1.12, vz + 0.03, { cast: false });          // the offcut in the jaws
+    }
+    if (o.clutter !== false) {
+      stat(new THREE.BoxGeometry(0.32, 0.03, 0.03), wood, x - 0.6, 0.915, z + 0.1, { ry: 0.3, cast: false });   // hammer
+      stat(new THREE.BoxGeometry(0.05, 0.05, 0.12), iron, x - 0.46, 0.925, z + 0.05, { ry: 0.3, cast: false });
+      stat(new THREE.BoxGeometry(0.3, 0.008, 0.025), iron, x - 0.1, 0.904, z - 0.2, { ry: -0.2, cast: false });  // file
+    }
+    const col = { minX: x - hl, maxX: x + hl, minZ: z - hd - 0.1, maxZ: z + hd, y0: 0, y1: 1.0 };
+    CBZ.colliders.push(col);
+    return col;
+  }
+
+  /* THE STAINLESS COMBI: the toilet/basin unit a jail bolts to a wall. A
+     chase with the basin and push-button tap on top, the bowl with its
+     rolled rim cantilevered off the front, no seat. (x, z) is the wall-face
+     point it stands against; `face` is the unit direction into the room. */
+  function combi(x, z, fx, fz) {
+    const ss = skin("steel", 0xc9ced3, 0.28), dark = skin("steel", 0x6b7480, 0.4);
+    const ry = Math.atan2(fx, fz);
+    rbox(x, z, ry, 0, 0.56, 0.13, 0.62, 1.12, 0.26, ss, { uv: 1 });              // the chase
+    rbox(x, z, ry, 0, 1.135, 0.15, 0.64, 0.03, 0.3, ss, { cast: false });
+    rbox(x, z, ry, 0, 1.2, 0.04, 0.05, 0.1, 0.05, ss, { cast: false });           // tap
+    const at = (d) => [x + fx * d, z + fz * d];
+    let p = at(0.15); stat(new THREE.CylinderGeometry(0.16, 0.13, 0.06, 16), dark, p[0], 1.12, p[1], { cast: false });   // basin
+    p = at(0.44);
+    stat(new THREE.CylinderGeometry(0.19, 0.14, 0.3, 18), ss, p[0], 0.26, p[1], { uv: 1 });                 // bowl
+    stat(new THREE.TorusGeometry(0.19, 0.03, 6, 20), ss, p[0], 0.41, p[1], { rx: Math.PI / 2, cast: false });
+    stat(new THREE.CylinderGeometry(0.14, 0.14, 0.01, 16), dark, p[0], 0.395, p[1], { cast: false });        // the water
+    rbox(x, z, ry, 0.18, 0.92, 0.265, 0.04, 0.04, 0.01, dark, { cast: false });                              // flush button
+  }
+
+  /* ==========================================================
      9. THE AUDIT. Numbers the exterior preset prints, and what the
         "empty and dumb" complaint is as a fraction.
      ========================================================== */
@@ -943,6 +1409,7 @@
   CBZ.prisonKit = {
     skin, skinBox, worldUV, stat, flush, octRing, post, coilRun, fence, floodMast, ground, paint, program, sign: signPlate, toneUp,
     tube, rbox, rtube, picnicTable, hoop, canopy, drum, pallet,
+    courtHalf, bleacher, profileGeo, vehicle, dumpster, workbench, combi,
     TOWER_DECK, TILE,
     // roombuild.js's roomShell skins its walls with this when a caller does not
     // say; world/prisongrounds.js (the last prison builder) clears it so the

@@ -20,7 +20,7 @@
 
    THE BLOCK LAW SHAPE (CLAUDE.md) — this file obeys all five:
      1. ONE-LINE ADOPTION, zero ceremony. `ranks` accepts bare strings:
-          CBZ.factions.declare({ id:"cartel", name:"Sinaloa Set",
+          CBZ.factions.declare({ id:"cartel", name:"Arenal Set",
             ranks:["Mule","Runner","Sicario","Capo"], wage:120 });
         …and you have a joinable, rankable, paying organisation. Rich rank
         objects are still accepted for anything that needs per-tier gear.
@@ -70,7 +70,7 @@
 
    ---- THE ONE QUERIES (replacing 16 hand-rolled membership reads) ----
      CBZ.factions.of(actor)                -> ["gang","army",...]
-     CBZ.factions.orgOf(actor)             -> the concrete org id ("bloods")
+     CBZ.factions.orgOf(actor)             -> the concrete org id ("saints")
      CBZ.factions.reactionTo(a, b)         -> -1..1, how A's factions see B
      CBZ.factions.hostile(a, b)            -> boolean
      CBZ.factionOf / CBZ.factionReactionTo — top-level aliases.

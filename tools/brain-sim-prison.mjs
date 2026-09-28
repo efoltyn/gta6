@@ -197,7 +197,32 @@ scenario(4, "morale + ROUT: a clique fight breaks when the shotcaller drops; a h
 });
 
 // =========================================================================
-scenario(5, "witnesses: an inmate who saw a fight reports it (a screw comes); a stared-down witness is SCARED OFF", function () {
+scenario(9, "THE CAR backs its own: a man's whole car answers (active or not), another car standing right there does not", function () {
+  fresh(53);
+  // car 1 (Black): the victim, two ACTIVE men and three who just ride under
+  // the car (gang -1, car 1). Car 2 (White): three men standing just as close.
+  const victim = inmate(0, 0, -1, { yardCar: 1 });
+  const aggressor = inmate(1.5, 0, 3, { yardCar: 3 });
+  const own = [], other = [];
+  for (let i = 0; i < 5; i++) own.push(inmate(-2 - i * 0.7, 1 + (i % 2), i < 2 ? 1 : -1, { yardCar: 1 }));
+  for (let i = 0; i < 3; i++) other.push(inmate(-2 - i * 0.7, -1.2, i < 1 ? 2 : -1, { yardCar: 2 }));
+  PB.sync();
+  check(own.every((m) => m._brainClique === PB.cliqueId(1)), "every man of the car is in its clique, active or not (" + own.map((m) => m._brainClique).join(",") + ")");
+  check(other.every((m) => m._brainClique === PB.cliqueId(2)), "the other car's men are in THEIR clique");
+  for (const m of own.concat(other)) { m._brain.personality.courage = 0.85; m._brain.personality.loyalty = 0.85; m._brain.personality.aggression = 0.7; }
+  const list = PB.retaliate(victim, aggressor, 0.8);
+  const who = list.map((e) => e.actor);
+  check(who.length > 0, "his car answers a beating (" + who.length + " men)");
+  check(who.every((a) => own.indexOf(a) >= 0), "only his own car answers; nobody from the car standing next to him");
+  check(who.some((a) => a.gang < 0), "a man who only rides under the car still backs him");
+  // nobody rats on his own car
+  let ratted = 0;
+  for (let k = 0; k < 40; k++) if (PB.willTalk && PB.willTalk(own[3], victim, {})) ratted++;
+  check(!PB.willTalk || ratted === 0, "nobody tells on his own car (" + ratted + "/40)");
+});
+
+// =========================================================================
+scenario(5,"witnesses: an inmate who saw a fight reports it (a screw comes); a stared-down witness is SCARED OFF", function () {
   fresh(51);
   // every inmate who sees it wants to report (the yard's odds are the brain's; pinned here)
   B.define("inmate", { witness: { report: 1, flee: 0, film: 0, intervene: 0, cower: 0, ignore: 0, cheer: 0 } });

@@ -173,27 +173,99 @@
         the fist-sized default worldSfx assumes.
      ========================================================== */
   const horns = [];
+  /* THE HORN ITSELF (rebuilt 2026-09-28; owner, iPad at night: a PA horn
+     "floating in the sky" with no pole or wall). It was a straight open cone,
+     a box and a stick, placed at a typed coordinate whether or not a wall was
+     still there, and its mouth glowed yellow while it sounded (a speaker does
+     not light up). Now: a real re-entrant PA horn (a flared spun-aluminium
+     bell on a compression driver) in a U-bracket on a wall plate, and it is
+     MOUNTED: at build it looks for the wall behind it and bolts itself to
+     that face; with no wall there it stands on its own galvanized pole. */
+  const HORN = (function () {
+    const BGU = THREE.BufferGeometryUtils;
+    const merge = function (list) { return BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(list, false) : list[0]; };
+    const m4 = new THREE.Matrix4(), eu = new THREE.Euler();
+    const at = function (g, x, y, z, rx, ry, rz) { eu.set(rx || 0, ry || 0, rz || 0); m4.makeRotationFromEuler(eu).setPosition(x || 0, y || 0, z || 0); return g.applyMatrix4(m4); };
+    const noUv = function (g) { if (g.getAttribute("uv")) g.deleteAttribute("uv"); return g; };
+    // the bell: an exponential flare from the 5 cm throat to a 27 cm mouth
+    // with a rolled lip, lathed about +y then laid along +z
+    const pts = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      pts.push(new THREE.Vector2(0.05 + 0.2 * Math.pow(t, 2.2), t * 0.42));
+    }
+    pts.push(new THREE.Vector2(0.272, 0.425), new THREE.Vector2(0.278, 0.415), new THREE.Vector2(0.262, 0.41));
+    const bell = noUv(at(new THREE.LatheGeometry(pts, 20), 0, 0, 0.02, Math.PI / 2));
+    const driver = merge([
+      noUv(at(new THREE.CylinderGeometry(0.1, 0.1, 0.15, 16), 0, 0, -0.06, Math.PI / 2)),     // the driver can
+      noUv(at(new THREE.CylinderGeometry(0.075, 0.1, 0.04, 16), 0, 0, -0.155, Math.PI / 2)),  // its domed back
+      noUv(at(new THREE.CylinderGeometry(0.058, 0.058, 0.05, 12), 0, 0, 0.03, Math.PI / 2)),  // throat collar
+      noUv(at(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 6), 0.07, -0.1, -0.12, 0.6)),    // the cable gland
+    ]);
+    // U-bracket round the driver, pivot bolts, and a 12 cm arm to a wall plate
+    const bracket = merge([
+      noUv(at(new THREE.BoxGeometry(0.02, 0.05, 0.2), -0.115, 0, -0.08)),
+      noUv(at(new THREE.BoxGeometry(0.02, 0.05, 0.2), 0.115, 0, -0.08)),
+      noUv(at(new THREE.BoxGeometry(0.25, 0.05, 0.02), 0, 0, -0.19)),
+      noUv(at(new THREE.CylinderGeometry(0.018, 0.018, 0.27, 8), 0, 0, -0.06, 0, 0, Math.PI / 2)),
+      noUv(at(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), 0, 0, -0.25, Math.PI / 2)),
+      noUv(at(new THREE.BoxGeometry(0.16, 0.22, 0.014), 0, 0, -0.317)),
+    ]);
+    // a pole mount: a 76 mm galvanized pole and its base plate (unit height)
+    const pole = new THREE.CylinderGeometry(0.038, 0.045, 1, 10);
+    pole.translate(0, 0.5, 0);
+    const plate = new THREE.BoxGeometry(0.3, 0.02, 0.3);
+    const alu = new THREE.MeshLambertMaterial({ color: 0xb9bec3, side: THREE.DoubleSide });
+    return {
+      bell: bell, driver: driver, bracket: bracket, pole: pole, plate: plate,
+      alu: alu,
+      dark: new THREE.MeshLambertMaterial({ color: 0x2e3238 }),
+      galv: new THREE.MeshLambertMaterial({ color: 0x9aa2aa }),
+    };
+  })();
+  // How far behind (x, z) at height y is the nearest solid face, looking
+  // back along -forward? null = nothing within reach.
+  function wallBehind(x, y, z, fx, fz) {
+    const cs = CBZ.colliders || [];
+    for (let d = 0.05; d <= 1.6; d += 0.05) {
+      const px = x - fx * d, pz = z - fz * d;
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+        if (!c || c.rail) continue;
+        if (px > c.minX && px < c.maxX && pz > c.minZ && pz < c.maxZ &&
+            (c.y1 == null || c.y1 >= y + 0.3) && (c.y0 == null || c.y0 <= y)) return d;
+      }
+    }
+    return null;
+  }
   function paHorn(x, y, z, yaw) {
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const d = wallBehind(x, y, z, fx, fz);
+    if (d != null) {
+      // bolt the plate (0.324 m behind the bell's pivot) onto the wall face
+      const k = d - 0.33;
+      x -= fx * k; z -= fz * k;
+    } else {
+      // no wall: its own pole, the horn clamped on top, 33 cm behind the bell
+      const px = x - fx * 0.33, pz = z - fz * 0.33;
+      const floor = CBZ.floorAt ? Math.max(0, CBZ.floorAt(px, pz, 0) || 0) : 0;
+      const pole = new THREE.Mesh(HORN.pole, HORN.galv);
+      pole.position.set(px, floor, pz);
+      pole.scale.y = y + 0.28 - floor;
+      root.add(pole);
+      const plate = new THREE.Mesh(HORN.plate, HORN.galv);
+      plate.position.set(px, floor + 0.01, pz);
+      root.add(plate);
+      if (CBZ.colliders) CBZ.colliders.push({ minX: px - 0.08, maxX: px + 0.08, minZ: pz - 0.08, maxZ: pz + 0.08, noBreach: true });
+    }
     const g = new THREE.Group();
     g.position.set(x, y, z);
+    g.rotation.order = "YXZ";
     g.rotation.y = yaw;
-    // the bell, opening along the group's forward (+z) axis
-    const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.11, 0.46, 10, 1, true), CBZ.mat(0x8d949d));
-    bell.rotation.x = Math.PI / 2;
-    bell.position.z = 0.23;
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.16), CBZ.mat(0x5b6470));
-    back.position.z = -0.06;
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.22), CBZ.mat(0x3c424d));
-    arm.position.z = -0.20;
-    // the mouth glows only while it is sounding — a speaker you can SEE
-    // shouting is the difference between a cue and an announcement.
-    const lit = new THREE.Mesh(new THREE.CircleGeometry(0.27, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0, depthWrite: false }));
-    lit.position.z = 0.455;
-    g.add(bell, back, arm, lit);
-    g.traverse(function (o) { o.castShadow = false; });
+    g.rotation.x = 0.18;                                // aimed a little down at the people it talks to
+    g.add(new THREE.Mesh(HORN.bell, HORN.alu), new THREE.Mesh(HORN.driver, HORN.dark), new THREE.Mesh(HORN.bracket, HORN.galv));
     root.add(g);
-    const rec = { x: x, y: y, z: z, group: g, lit: lit, flash: 0 };
+    const rec = { x: x, y: y, z: z, group: g, flash: 0, mount: d != null ? "wall" : "pole" };
     horns.push(rec);
     return rec;
   }
@@ -243,13 +315,9 @@
       CBZ.worldSfx("lockdown", h.x, h.z, { ref: 120, volume: 0.8, gap: 0.18, cutoff: 400, y: h.y });
     }
   }
+  // (the horn used to light its mouth while it sounded; a speaker does not glow)
   function pumpHornLamps(dt) {
-    for (let i = 0; i < horns.length; i++) {
-      const h = horns[i];
-      if (h.flash <= 0) continue;
-      h.flash = Math.max(0, h.flash - dt);
-      h.lit.material.opacity = h.flash * 1.6;
-    }
+    for (let i = 0; i < horns.length; i++) if (horns[i].flash > 0) horns[i].flash = Math.max(0, horns[i].flash - dt);
   }
 
   /* ==========================================================
@@ -550,7 +618,8 @@
   let curfewT = 0;
   function enforceCurfew(dt) {
     const g = CBZ.game;
-    if (!isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0) return;
+    // the officer on the night shift IS the curfew: nobody hunts him for being up
+    if (!isCurfew(live()) || !g || g.state !== "playing" || (g.invuln || 0) > 0 || g.role === "cop") return;
     const p = CBZ.player && CBZ.player.pos;
     if (!p || (CBZ.player.captureState && CBZ.player.captureState !== "normal")) return;
     if (belongs(p.x, p.z)) return;

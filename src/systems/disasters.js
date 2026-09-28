@@ -3719,7 +3719,7 @@
              resolving to 1e6, so the splash maims and the rock kills. */
           survBlast("kinetic", x, z, {
             r: 8, dmg: scale(34, ctx), cause: "caught by a volcanic bomb", ctx: ctx,
-            mass: 900, speed: 55, struct: 0.4, structR: 12,
+            mass: 900, speed: 55, struct: 0.4, structR: 12, fx: { kind: "volcano" },
             color: 0xff7a30, sfx: "punch", flash: 0.25, knockback: 12, fling: 6,
           });
         },
@@ -5439,6 +5439,55 @@
     if (dir.cur.tint != null) e.fog = lerpHex(e.fog, dir.cur.tint, 0.5 * k);
   }
 
+  /* ---- THE SURVIVORS TALK -----------------------------------------------
+     The only words in this game are people's: the nearest survivor to you
+     notices the thing starting, cries out when it lands, and says what it
+     cost him when it is over. Over his own head (systems/speech.js). Never
+     advice, never where to go: what saves you is yours to work out. */
+  const VOICE = {
+    warn: ["Do you feel that?", "What is that?", "Oh no. Not again.", "The birds just left.", "My phone has no signal."],
+    warnBy: {
+      quake: ["The glasses are rattling.", "Did the ground just move?"],
+      tornado: ["Look at that sky. It's gone green.", "That's not a cloud."],
+      flood: ["Why is the sea going out?", "Where did the water go?"],
+      flashflood: ["The drains are backing up.", "Hear that? Upstream."],
+      wildfire: ["I smell smoke.", "The hills are orange."],
+      volcano: ["The mountain's smoking again.", "It's raining ash."],
+      meteor: ["Is that a plane?", "Something's burning up there."],
+      hurricane: ["My ears just popped.", "Here it comes."],
+      storm: ["Here it comes.", "That thunder's close."],
+      blizzard: ["I can't feel my fingers.", "It was sunny an hour ago."],
+      nuke: ["Those are the real sirens.", "That's not a drill. That's not a drill."],
+      sinkhole: ["The road's cracking.", "Did you hear that under us?"],
+    },
+    active: ["Oh God. Oh God.", "Mama!", "Somebody help me!", "I can't see!", "Where's my daughter?", "Don't leave me!", "Not like this!", "Grab my hand!"],
+    after: ["I'm still here. I'm still here.", "Has anyone seen Rosa?", "My whole street. Gone.",
+      "I just paid that house off.", "My dog was in the yard.", "He was right behind me.",
+      "I should have left last year.", "Is it over? Is it really over?", "I can't stop shaking.", "Somebody call my mother."],
+  };
+  const voiceUsed = {};
+  function voiceLine(pool) {
+    // skip the last line said from this pool so two in a row never repeat
+    let i = (Math.random() * pool.length) | 0;
+    if (pool.length > 1 && voiceUsed[pool[0]] === i) i = (i + 1) % pool.length;
+    voiceUsed[pool[0]] = i;
+    return pool[i];
+  }
+  function survivorSays(pool, delay) {
+    setTimeout(function () {
+      const SP = CBZ.speech, P = CBZ.player, B = CBZ.bots;
+      if (!SP || !SP.say || !P || !P.pos || !B || !CBZ.game || CBZ.game.mode !== "survival") return;
+      let who = null, bd = 26 * 26;
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i]; if (!b || b.dead || !b.pos) continue;
+        const dx = b.pos.x - P.pos.x, dz = b.pos.z - P.pos.z, d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; who = b; }
+      }
+      if (!who) return;
+      try { SP.say(who, voiceLine(pool), { secs: 2.8 }); } catch (e) {}
+    }, delay * 1000);
+  }
+
   function beginWarn() {
     // survived a whole arc? reshuffle the next cycle from the same run stream
     // (nuke-last + gentle-first keeps the wraparound pacing legal by itself)
@@ -5460,16 +5509,18 @@
     // screen says what is coming — the world does.
     if (CBZ.CONFIG.SURV_TELEGRAPH !== false && CBZ.shake) CBZ.shake(0.22);
     try { dir.cur.warn(curCtx); } catch (e) { console.error("[disaster warn]", e); }
+    survivorSays(VOICE.warnBy[id] && Math.random() < 0.7 ? VOICE.warnBy[id] : VOICE.warn, 1.2 + Math.random());
   }
   function beginActive(ctx) {
     dir.state = "active"; dir.t = dir.cur.activeSecs;
     if (CBZ.surv) CBZ.surv._cause = dir.cur.cause || "killed by the disaster";   // default cause for kill feed
     narrate("banner", dir.cur.name);
     try { dir.cur.start(ctx); } catch (e) { console.error("[disaster start]", e); }
+    survivorSays(VOICE.active, 0.8 + Math.random() * 1.5);
   }
   function endActive(ctx) {
     try { dir.cur.end(ctx); } catch (e) { console.error("[disaster end]", e); }
-    if (!CBZ.player.dead) CBZ.surv.stats.disastersSurvived++;
+    if (!CBZ.player.dead) { CBZ.surv.stats.disastersSurvived++; survivorSays(VOICE.after, 2 + Math.random() * 2); }
     if (CBZ.surv) CBZ.surv._cause = null;
     // The ALL-CLEAR is now the world going quiet: warnAmbience releases the
     // sky tint, weatherOff() bleeds the rain out over ~3.5 s, and the surge

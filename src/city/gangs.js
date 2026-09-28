@@ -99,7 +99,7 @@
     "Rico", "Cash", "Bugsy", "Dutch", "Whitey", "Ghost", "Iron", "Slick", "Cold", "Reaper", "King", "Snake"];
   function pick(a) { return a[(rng() * a.length) | 0]; }
   // member names match each gang's ETHNICITY (config gangs carry `ethnicity`):
-  // Latin Kings + Trinitarios = Hispanic; Bloods/Crips/GDs/Black P. Stones = Black.
+  // e.g. Corona Dorada + Los Víboras = Hispanic; Crimson Row/Reapers/Disciples/Greenstone = Black.
   const FIRST_BLACK = ["Marcus", "DeShawn", "Tyrone", "Jamal", "Darnell", "Maurice", "Terrell", "Andre", "Rashad", "Jerome", "Malik", "Demetrius", "Cedric", "Reggie", "Dontae", "Trey", "Keon", "Marlo", "Dre", "Avon", "Lamar", "Tremaine", "Quan", "Deon"];
   const LAST_BLACK = ["Washington", "Banks", "Jefferson", "Booker", "Coleman", "Mosley", "Pruitt", "Carter", "Hollis", "Freeman", "Dawson", "Greer", "Mack", "Tate", "Childs", "Means", "Gaines", "Stroud", "Pickett", "Boyd"];
   const FIRST_LATINO = ["Carlos", "Miguel", "Jose", "Luis", "Jesus", "Angel", "Hector", "Rafael", "Diego", "Javier", "Ramon", "Emilio", "Nico", "Mateo", "Tito", "Beto", "Marco", "Cesar", "Rey", "Flaco", "Chuy", "Eddie", "Junior"];
@@ -1692,6 +1692,7 @@
   // world off-screen (the matching half of the shared post).
   function dbUnpostCrew(db, p) {
     if (!p) return;
+    if (p.dead && !p.collected) { if (db.gang && db.gang.members) { const i = db.gang.members.indexOf(p); if (i >= 0) db.gang.members.splice(i, 1); } return; }   // the corpse stays where it fell
     p.inCar = null; p.controlled = false;
     if (p._occSeat) { p._occSeat.ped = null; p._occSeat.gone = true; p._occSeat = null; p._occCar = null; }
     if (db.gang && db.gang.members) { const i = db.gang.members.indexOf(p); if (i >= 0) db.gang.members.splice(i, 1); }

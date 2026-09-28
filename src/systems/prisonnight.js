@@ -64,6 +64,28 @@
   const CB = WORLD.cellBlock;
   const addBox = CBZ.addBox;
 
+  /* SOFT LIGHT. Every floor pool and air beam in this file used to be a
+     flat MeshBasic disc with a hard polygon edge and a flat translucent cone
+     (owner, iPad at night: the beams "look unrealistic"). They now use the
+     searchlights' shared soft pieces: a feathered additive cookie on the
+     floor and a view-softened additive cone that thins with distance and
+     has no hard mouth. `material.opacity` is still the gain the fixtures rig
+     drives, so nothing else changes. */
+  function poolMat(color) {
+    if (CBZ.softPoolMaterial) return CBZ.softPoolMaterial(color, 0);
+    return new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0, depthWrite: false });
+  }
+  function beamMesh(color, r0) {
+    if (CBZ.unitBeamGeometry && CBZ.softBeamMaterial) {
+      const m = new THREE.Mesh(CBZ.unitBeamGeometry(r0), CBZ.softBeamMaterial(color, 0));
+      m.renderOrder = 3;
+      return m;
+    }
+    const g = new THREE.CylinderGeometry(1, r0, 1, 14, 1, true);
+    g.translate(0, 0.5, 0);
+    return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  }
+
   function on() { return CFG.PRISON_NIGHT_V1 !== false && CBZ.game && CBZ.game.mode === "escape"; }
   function sched() { return CBZ.prisonSchedule || null; }
   function lightsOut() { const s = sched(); return !!(s && s.lightsOut()); }
@@ -195,20 +217,25 @@
   //      now small ceiling-bolted cages beside the existing main luminaires;
   //      the light regions/pools stay at the same authored floor coordinates.
   (function wingNightLights() {
-    const spots = [[0, -12], [0, -20], [0, -28], [0, -36], [-9.5, -30], [9.5, -30]];
+    // ON THE TRUSSES (2026-09-28). They sat at 8.34-8.70 between the chords
+    // of world/cellblock.js's roof trusses (z -37.5/-30/-22.5/-15, bottom
+    // chord underside 7.95) with nothing holding them: small glowing boxes
+    // floating in the dark. Each is now a slim bulkhead bolted to the
+    // underside of a bottom chord, a step off the main pendant on that truss.
+    const spots = [[1.4, -15], [-1.4, -22.5], [1.4, -30], [-1.4, -37.5], [-9.5, -30], [9.5, -30]];
+    const CHORD_UNDER = 7.95;
     for (let i = 0; i < spots.length; i++) {
       const x = spots[i][0], z = spots[i][1];
-      addBox(x, 8.58, z, 0.44, 0.24, 0.34, 0x3c424d, { cast: false }); // ceiling backbox
-      const m = addBox(x, 8.34, z, 0.34, 0.10, 0.20, 0x2b2b2b, { cast: false });
+      addBox(x, CHORD_UNDER - 0.06, z, 0.44, 0.12, 0.2, 0x3c424d, { cast: false }); // body, bolted to the chord
+      const m = addBox(x, CHORD_UNDER - 0.13, z, 0.36, 0.02, 0.14, 0x2b2b2b, { cast: false }); // the diffuser
       m.userData.mover = true;                       // keep the static batcher off it
       for (const sx of [-1, 1])
-        addBox(x + sx * 0.19, 8.35, z, 0.04, 0.28, 0.25, 0x3c424d, { cast: false });
-      const pool = new THREE.Mesh(new THREE.CircleGeometry(2.6, 14),
-        new THREE.MeshBasicMaterial({ color: 0xbcd8ff, transparent: true, opacity: 0, depthWrite: false }));
+        addBox(x + sx * 0.2, CHORD_UNDER - 0.08, z, 0.03, 0.12, 0.22, 0x3c424d, { cast: false }); // end caps
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(3.2, 20), poolMat(0xbcd8ff));
       pool.rotation.x = -Math.PI / 2;
       pool.position.set(x, 0.05, z);
       root.add(pool);
-      register({ x: x, z: z, r: 6.5, kind: "night", mesh: m, pool: pool, poolPeak: 0.16,
+      register({ x: x, z: z, r: 6.5, kind: "night", mesh: m, pool: pool, poolPeak: 0.2,
         color: 0xdbe9ff, emissive: 0x7fa8d8, off: 0x2b2b2b });
     }
   })();
@@ -232,17 +259,18 @@
     addBox(x + 0.88 * s, 7.02, z, 0.62, 0.12, 0.36, 0x3a4048, { cast: false });           // luminaire housing
     const head = addBox(x + 0.88 * s, 6.95, z, 0.52, 0.03, 0.28, 0x2b2b2b, { cast: false });  // the lens (the lamp itself)
     head.userData.mover = true;
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(9, 22),
-      new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0, depthWrite: false }));
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(10, 28), poolMat(0xfff0c8));
     pool.rotation.x = -Math.PI / 2;
     pool.position.set(x + 0.88 * s, 0.045, z);
     root.add(pool);
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 8.4, 6.9, 14, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
-    beam.position.set(x + 0.88 * s, 3.42, z);
+    // the air under the head: a wide soft cone hanging DOWN from the lens
+    const beam = beamMesh(0xfff0c8, 0.05);
+    beam.position.set(x + 0.88 * s, 6.93, z);
+    beam.rotation.x = Math.PI;
+    beam.scale.set(6.5, 6.9, 6.5);
     root.add(beam);
-    const rec = register({ x: x, z: z, r: 13, kind: "flood", mesh: head, pool: pool, poolPeak: 0.26,
-      beam: beam, beamPeak: 0.07, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b });
+    const rec = register({ x: x, z: z, r: 13, kind: "flood", mesh: head, pool: pool, poolPeak: 0.32,
+      beam: beam, beamPeak: 0.16, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b });
     floods.push(rec);
   }
   floodMast(-28, 44); floodMast(28, 44); floodMast(-15, 1); floodMast(15, 1);
@@ -301,16 +329,15 @@
   const torchQuaternion = new THREE.Quaternion();
   function torchCone(g) {
     if (g._torchCone || !g.flashlight || !g.flashlight.group) return;
-    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 1.25, TORCH_LEN, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0.075, side: THREE.DoubleSide, depthWrite: false }));
-    cone.rotation.x = Math.PI / 2;                 // down the prop's own +z
+    const cone = beamMesh(0xdff2ff, 0.04);
+    cone.rotation.x = Math.PI / 2;                 // unit +y down the prop's own +z
     const beamZ = g.flashlight.group.userData.beamOrigin ? g.flashlight.group.userData.beamOrigin.z : 0.32;
-    cone.position.z = TORCH_LEN / 2 + beamZ;
+    cone.position.z = beamZ;
+    cone.scale.set(1.25, TORCH_LEN, 1.25);
     cone.userData.mover = true;
     g.flashlight.group.add(cone);
     g._torchCone = cone;
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(2.9, 16),
-      new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0, depthWrite: false }));
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(2.9, 20), poolMat(0xdff2ff));
     pool.rotation.x = -Math.PI / 2;
     pool.position.y = 0.05;
     pool.userData.mover = true;
@@ -346,9 +373,9 @@
       g._torchOrigin.x = torchOrigin.x; g._torchOrigin.y = torchOrigin.y; g._torchOrigin.z = torchOrigin.z;
       if (g._torchPool) {
         g._torchPool.position.set(ax, 0.05, az);
-        g._torchPool.material.opacity = 0.10 + dark * 0.20;
+        g._torchPool.material.opacity = 0.08 + dark * 0.34;
       }
-      if (g._torchCone) g._torchCone.material.opacity = 0.03 + dark * 0.075;
+      if (g._torchCone) g._torchCone.material.opacity = 0.03 + dark * 0.2;
     }
     if (!dyn.built) return;
     for (let i = 0; i < dyn.torch.length; i++) {

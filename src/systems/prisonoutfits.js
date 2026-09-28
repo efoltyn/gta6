@@ -36,7 +36,8 @@
     try { return CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null; } catch (e) { return null; }
   }
   function paint() { return CBZ.cityPaintSlot || null; }
-  function staffFit(id) { return id === "corrections" || id === "warden" || id === "swat"; }
+  // a duty belt is an officer's; the warden (a suit, city/outfits.js CAT.warden) wears none
+  function staffFit(id) { return id === "corrections" || id === "swat"; }
 
   function dressChar(ch, id) {
     if (!ch || !ch.skinSlots || !id || typeof CBZ.cityRecolorRig !== "function") return false;

@@ -818,7 +818,7 @@
       // instead of at the ground under it — and byPlayer FALSE throughout,
       // because a plane the player never touched must put no heat on him.
       const q = opts.impact || t.grp.position;
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(q.x, q.z, { power: 1.6, radius: 8, byPlayer: false, y: q.y }); } catch (e) {} }
+      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(q.x, q.z, { power: 1.6, radius: 8, byPlayer: false, y: q.y, kind: "aircraft" }); } catch (e) {} }
       if (CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(q.x, q.y, q.z, 1.8); } catch (e) {} }
       if (CBZ.cityShatter) { try { CBZ.cityShatter(q.x, q.z, 10); } catch (e) {} }
       if (CBZ.cityScorch) { try { CBZ.cityScorch(q.x, q.z, 3); } catch (e) {} }
@@ -914,7 +914,7 @@
     // airframe scale) + a scorch where it couples to true ground — never the
     // block-leveling airstrike blast.
     const onRoof = surf > ground + 0.5;
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(p.x, p.z, { power: onRoof ? 1.5 : 1.2, radius: onRoof ? 7 : 6, byPlayer: false, y: surf + 1.0 }); } catch (e) {} }
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(p.x, p.z, { power: onRoof ? 1.5 : 1.2, radius: onRoof ? 7 : 6, byPlayer: false, y: surf + 1.0, kind: "aircraft" }); } catch (e) {} }
     if (onRoof && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(p.x, surf + 1.0, p.z, 1.6); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(p.x, p.z, onRoof ? 9 : 7); } catch (e) {} }
     if (!onRoof && CBZ.cityScorch) { try { CBZ.cityScorch(p.x, p.z, 4); } catch (e) {} }

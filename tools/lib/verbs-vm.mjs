@@ -95,10 +95,14 @@ export function loadVerbsVM(opts = {}) {
   updaters.sort((a, b) => a.order - b.order);
 
   const actors = [];
+  // every actor's body type unless the spec names one (vmx.setPhysique switches
+  // it between runs, so a check can sweep slim / average / heavy / muscular)
+  let physique = opts.physique || "average";
+  function setPhysique(p) { physique = p || "average"; }
   function actor(o = {}) {
     const ch = CBZ.makeCharacter(Object.assign({
       skin: 0xc68e62, torso: 0x884422, collar: 0x884422, arms: 0x884422, legs: 0x223344,
-      shoes: 0x111111, hair: 0x221100,
+      shoes: 0x111111, hair: 0x221100, physique: physique,
     }, o));
     const a = { char: ch, group: ch.group, pos: ch.group.position, hp: 100, maxHp: 100, name: o.name || "actor", dead: false, speed: 0 };
     if (o.x != null) ch.group.position.set(o.x, o.y || 0, o.z || 0);
@@ -142,5 +146,5 @@ export function loadVerbsVM(opts = {}) {
     }
   }
   function setSpeed(a, v) { speeds.set(a, v); }
-  return { ctx, CBZ, THREE, updaters, actor, actors, clearActors, world, frame, setSpeed, slams, errors, loaded };
+  return { ctx, CBZ, THREE, updaters, actor, actors, clearActors, world, frame, setSpeed, setPhysique, slams, errors, loaded };
 }

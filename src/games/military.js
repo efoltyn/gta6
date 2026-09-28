@@ -306,11 +306,11 @@
       at: [V.fixerAt[0], V.fixerAt[1]], face: -Math.PI / 2, post: "pinned", pose: "stand",
       sayColor: "#d8e6b0", talkLabel: "Talk to the Fixer",
       dialogue: [
-        "Three jobs, one night. Photograph the prototype, tap the comms mast, and drive something loud out the gate.",
-        "Green means they're bored. Red means they've made you, and the gate seals.",
-        "Kill the generator if the lights get hot. It buys you a dark minute, but they'll notice.",
-        "Watch the mess. When the light's on, half the wire empties out to eat.",
-        "Get pinched once, it's the brig, pick your way out. Twice and it's a court martial. Don't get pinched twice.",
+        "Photo of the prototype. Tap on the mast. Out in something loud.",
+        "I did six years in there. Food was better than my ex's.",
+        "The buyer doesn't know my name. Keep it that way.",
+        "Heard the new CO sleeps in his boots.",
+        "Don't get pinched twice.",
       ],
     });
   }
@@ -871,7 +871,7 @@
         : "<span data-act='accept' style='" + BTN + "background:#1c6b40;color:#eafff0'>Take the contract</span>") +
       "<span data-act='close' style='" + BTN + "background:#26343c;color:#dfe7ff'>Leave</span></div>" +
       "<div style='font-size:11px;opacity:.6;margin-top:6px'>Won " + ((state && state.wins) || 0) + ", lost " + ((state && state.losses) || 0) + "</div>";
-    if (!nb.active && V.fixer && V.fixer.say) V.fixer.say("Three jobs, one night. Then out the gate in something loud.");
+    if (!nb.active && V.fixer && V.fixer.say) V.fixer.say("Three jobs, one night.");
     C.hud.panel(html, {
       accept: () => { startNight(); openBriefing(); },
       close: () => C.hud.closePanel(),

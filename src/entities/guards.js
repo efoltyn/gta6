@@ -12,6 +12,9 @@
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
 
   let guardNo = 0;
+  const CO_NAMES = ["Diaz", "Kowalski", "Brennan", "Okafor", "Reyes", "Haskell", "Morrow", "Pruitt", "Nguyen", "Castellano",
+    "Doyle", "Whitaker", "Boone", "Ferris", "Lindqvist", "Tate", "Mendez", "Harlan", "Sutter", "Greer", "Dunleavy", "Abernathy",
+    "Rourke", "Vasquez", "Bell", "Kincaid", "Oduya", "Marsh", "Tillman", "Soto"];
   function addFlashlight(ch) {
     // ONE MODEL at every scale: weapons/flashlight.js also feeds the physical
     // death drop and the inventory thumbnail.  Its +Z is the light direction;
@@ -20,6 +23,9 @@
     const group = CBZ.buildFlashlight ? CBZ.buildFlashlight() : new THREE.Group();
     group.position.set(0.01, -0.025, 0.025);
     group.rotation.x = Math.PI / 2;
+    // the model is life-size now (weapons/flashlight.js); the rig socket draws
+    // at ~0.7x, so undo that or a guard carries a pen light
+    group.scale.setScalar(1 / 0.70);
     const lens = group.userData.lens || null;
     const lensMat = group.userData.lensMat || (lens && lens.material) || CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
     group.visible = false;
@@ -34,9 +40,11 @@
     // CAT.warden / CAT.corrections verbatim (that file loads later, and
     // systems/prisonoutfits.js repaints every guard to the record within
     // 0.3 s). They used to be a different navy, so every guard popped colour.
+    // THE WARDEN WEARS A SUIT, NOT A UNIFORM: city/outfits.js CAT.warden (the
+    // charcoal three-piece) is the record; these are its first-frame colours.
     const ch = makeCharacter(warden ? {
-      legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d,
-      skin: 0xdcae84, cap: 0x171d29, capKind: "peaked:officer", shoes: 0x090b0f, belt: 0x111419, badge: true,
+      legs: 0x24272e, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36,
+      skin: 0xdcae84, shoes: 0x0c0d10, belt: 0x16171b,
     } : {
       legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
       skin: 0xe7b58c, cap: 0x202b3b, capKind: "peaked:police", shoes: 0x111419, belt: 0x111419, badge: true,
@@ -49,7 +57,8 @@
     ch.group.add(wedge);
     const flashlight = addFlashlight(ch);
 
-    const name = warden ? "the Warden" : "Officer #" + (++guardNo);
+    // a CO has a surname on his shirt; inmates use it ("Officer #3" was a spreadsheet row)
+    const name = warden ? "the Warden" : "Officer " + CO_NAMES[guardNo % CO_NAMES.length] + (guardNo++ >= CO_NAMES.length ? " " + Math.ceil(guardNo / CO_NAMES.length) : "");
     const id = guardNo || 0;
     const g = {
       char: ch, group: ch.group, wedge, flashlight,
@@ -63,8 +72,8 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["What do you want.", "Keep walking.", "Not now."]
-          : ["Keep moving.", "Move along.", "Back to your block."],
+          ? ["What do you want.", "Keep walking.", "Not now.", "My prison runs on time."]
+          : ["Keep moving.", "Move along.", "Back to your block.", "Twelve-hour shift. Don't start.", "Two years to my pension. Two.", "Tuck your shirt in."],
       },
     };
     // a post named by the roster outranks the one systems/economy.js derives
@@ -1609,6 +1618,16 @@
 
     perceive(g, dt);
 
+    // ---- THE WARDEN GIVES ORDERS; HE DOES NOT RUN THEM (systems/prisonwarden.js).
+    // A hunt, a search or a yard case that lands on him becomes an order to an
+    // officer before any branch below can make him chase, frisk or cuff; his
+    // gun and his inspections drive the body from there when they need to.
+    if (g.kind === "warden" && CBZ.warden && CBZ.warden.body) {
+      let own = false;
+      try { own = !!CBZ.warden.body(g, dt); } catch (e) { own = false; }
+      if (own) { noteState(g, "warden"); updateFlashlight(g, dt); return true; }
+    }
+
     // ---- HUNT --------------------------------------------------------------
     // Somebody zeroed the hunt from outside (a bribe, a payoff, a held-up
     // screw standing down): the chase dies with it. A hunt that ran out on its
@@ -1674,12 +1693,23 @@
       return true;
     }
 
+    // ---- A DOOR OFF THE CLOCK (systems/prisondoorwatch.js): he saw, heard or
+    // was radioed about a door standing open when the day says shut. He calls
+    // it, walks over, asks the officer, and shuts it himself if nobody does.
+    if (g._doorCase && CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.guardStep(g, dt)) {
+      noteState(g, "law");
+      updateFlashlight(g, dt);
+      return true;
+    }
+
     // THE PRODUCT PRESET (tools/visual-presets/prison-product.mjs) parks a man
     // with `pause`: he holds his post where he was put, eyes still open.
     if (g.pause > 0) {
       g.pause -= dt;
       noteState(g, "patrol");
       stand(g, dt);
+      // an officer taking the warden's order turns to him while he hears it
+      if (g._facePt) faceTo(g, g._facePt.x, g._facePt.z, 0.0001, dt);
       updateFlashlight(g, dt);
       return true;
     }
@@ -2050,6 +2080,7 @@
   CBZ.guardWalkTo = walkTo;
   CBZ.guardFaceTo = function (g, x, z, k, dt) { faceTo(g, x, z, k, dt); };
   CBZ.guardIdle = function (g, dt) { animChar(g.char, 0, dt); };
+  CBZ.guardStand = stand;
   CBZ.guardLookAt = lookAtPoint;
   CBZ.spawnGuard = makeGuard;   // systems/reinforcements.js spawns extra patrols
 

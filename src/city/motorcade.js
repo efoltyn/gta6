@@ -846,6 +846,24 @@
   const AUDIT = { runs: 0, evacs: 0, arrivals: 0, posts: 0, lastReason: null, lastDest: null, boarded: 0 };
 
   function fc(role) { for (let i = 0; i < MC.cars.length; i++) if (MC.cars[i].role === role) return MC.cars[i]; return null; }
+  // the detail talks the way a detail talks: short radio calls over an
+  // agent's head, never a word to the crowd about where the car is going
+  const DETAIL = {
+    depart: ["Moving, moving.", "Eagle is moving.", "Rolling. Keep it tight.", "Clear left. Go."],
+    seated: ["Eagle is secure.", "Principal in. Doors.", "Package is in the car."],
+    arrive: ["Arrival. Eyes up.", "Hands. Watch the hands.", "Rooftops, check your rooftops.", "Stay on him."],
+    evac: ["Cover! Cover!", "Get him down!", "Shots fired! Moving!", "Evac, evac, evac!"],
+  };
+  function detailSay(kind) {
+    if (!CBZ.citySay) return;
+    const f = fc("state") || MC.cars[0];
+    const crew = [];
+    if (f && f.crew) for (let i = 0; i < f.crew.length; i++) if (f.crew[i] && !f.crew[i].dead) crew.push(f.crew[i]);
+    if (!crew.length) return;
+    const pool = DETAIL[kind];
+    const a = crew[(Math.random() * crew.length) | 0];
+    try { CBZ.citySay(a, pool[(Math.random() * pool.length) | 0], kind === "evac" ? "#ffd76a" : "#d8e6ff", 2.4); } catch (e) {}
+  }
   function stateCar() { const f = fc("state"); return f && !f.released && carLive(f.car) ? f.car : null; }
   function liveCars() {
     const out = [];
@@ -1135,6 +1153,7 @@
   function depart(R) {
     R.phase = "drive"; MC.phase = "drive"; MC.stopT = 0;
     MC.onCourt = false; MC.where = "away";                        // the column has left its stand
+    detailSay("depart");
     if (CBZ.sfxAt) { const c = stateCar(); if (c) { try { CBZ.sfxAt("door_close", c.pos.x, c.pos.z, { volume: 0.5 }); } catch (e) {} } }
     emit("motorcade", { phase: "depart", to: R.to, route: R.route });
   }
@@ -1233,6 +1252,7 @@
       if (p.group) p.group.visible = false;
     }
     R.p.stage = "seated";
+    detailSay("seated");
     if (CBZ.sfxAt) { try { CBZ.sfxAt("door_close", c.pos.x, c.pos.z, { volume: 0.5 }); } catch (e) {} }
     return true;
   }
@@ -1288,7 +1308,7 @@
     }
     if (P.stage === "toVenue") {
       const v = P.venue;
-      if (d2(p.pos.x, p.pos.z, v.x, v.z) < 2 || P.t > 45) { holdPed(p, Math.atan2(R.to.x - p.pos.x, R.to.z - p.pos.z)); P.stage = "atVenue"; P.t = 0; R.dwellT = R.dwell; }
+      if (d2(p.pos.x, p.pos.z, v.x, v.z) < 2 || P.t > 45) { holdPed(p, Math.atan2(R.to.x - p.pos.x, R.to.z - p.pos.z)); P.stage = "atVenue"; P.t = 0; R.dwellT = R.dwell; detailSay("arrive"); }
       return;
     }
     if (P.stage === "atVenue") {
@@ -1521,6 +1541,7 @@
     alarmAt(at.x, at.z, reason);
     if (CBZ.sfxAt && sc) { try { CBZ.sfxAt("siren", sc.pos.x, sc.pos.z, { volume: 0.7 }); } catch (e) {} }
     R.panic = true;
+    detailSay("evac");
     const site = mansion();
     const fs = fc("state");
     if (fs && fs.released && R.npc && R.p && R.p.ped && !R.p.ped.dead && R.p.stage === "seated" && fs.car && !fs.car.dead) {

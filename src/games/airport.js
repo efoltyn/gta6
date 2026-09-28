@@ -338,7 +338,7 @@
       const craft = CBZ.citySpawnFlyableFromProp(rec);
       if (craft) {
         R.charterRec = rec;
-        radio("Cargo's aboard. Call the tower and go.");
+        radio("Cargo's aboard. You're on your own.");
         return;
       }
     }
@@ -728,11 +728,11 @@
     //      venue) and drained on the first tick, exactly like racing.js. ----
     venue._cast = [
       { role: "dispatcher", key: "DISPATCH", outfit: "worker", name: "Dispatch. Marla", at: [0, 1.0], face: Math.PI, post: "pinned", pose: "stand",
-        dialogue: ["Board's fresh. Legit keeps the lights on; hot pays the note.", "Twelve grand on that plane, rook. The bank called twice.", "Walk the jet before you fly her. She's old."] },
+        dialogue: ["Board's fresh. Coffee isn't.", "Twelve grand on that plane, rook. The bank called twice.", "She's old. Walk her before you fly.", "Fourteen years on this desk. Never once flew."] },
       { role: "inspector", key: "CUSTOMS", outfit: "security", name: "Inspector Vann", at: [14, 1.6], face: -Math.PI / 2, post: "pinned", pose: "foldarms",
         dialogue: ["Keep it clean tonight.", "Manifest or a reason. Your choice.", "I remember faces. And tail numbers."] },
       { role: "fueler", key: "FUEL", outfit: 0xffc81f, name: "Fueler. Bo", at: [-14, 1.3], face: 0, post: "pinned", pose: "stand",
-        dialogue: ["Topped her off. Didn't look in the back.", "Wind's up tonight, mind the sock on final.", "Vann's in a mood. Bring cash if you're dirty."] },
+        dialogue: ["Topped her off. Didn't look in the back.", "Wind's up tonight, mind the sock on final.", "My kid starts flight school in March.", "Heard a Cessna went down off the cape. Nobody talks about it."] },
     ];
     venue._pendingCast = true;
     tryDrainCast(ctx, venue);
@@ -760,9 +760,9 @@
   // own head (it used to be a panel of his words with one "Thanks, Bo" button)
   function openFuelBrief() {
     const j = R.job;
-    const line = !j ? "No run loaded. Take one at the desk."
-      : j.hot ? "Hot one. Customs pulls about " + Math.round(inspectionChance(true) * 100) + "% on the ramp home."
-        : "Clean cargo. Customs won't blink.";
+    const line = !j ? "Nothing to fuel yet, chief."
+      : j.hot ? (inspectionChance(true) > 0.5 ? "Vann's pulling everybody tonight." : "Vann looked half asleep an hour ago.")
+        : "Topped off. Safe flight.";
     if (FUEL && FUEL.say) FUEL.say(line, 3.2);
   }
 

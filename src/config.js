@@ -419,10 +419,11 @@
 
     // ---- gangs: factions that own the abandoned blocks (city/gangs.js) -----
     gangs: [
-      // Real gangs only, real colors, and the authentic People/Folk NATION split
-      // (Bloods, Latin Kings, Black P. Stones ride PEOPLE; Crips + Gangster
-      // Disciples ride FOLK) — turf.js seeds alliances off `nation`. ids kept
-      // stable where they were; names/colors/nation are what the game uses.
+      // INVENTED crews, no real gang or cartel names (owner, 2026-09-28): the
+      // colours and the three-bloc structure stay (east / west / north blocs,
+      // the neutral organised crews, and one prison brotherhood that allies
+      // with nobody) — turf.js seeds alliances off `nation`. ids kept stable
+      // (saves, props slogans, gang ops key off them); `name` is what shows.
       //
       // `type` is the faction ARCHETYPE (gangs.js GANG_TYPES drives how each one
       // spawns + fights so they play DIFFERENTLY — armed fraction, weapon tier,
@@ -433,28 +434,28 @@
       //              defends/retaliates hardest
       //   set      — scrappy big bench, lighter weapons, more bodies than guns
       //   brawlers — a melee mob: machetes/bats over guns, tanky, roams + brawls
-      { id: "saints",    name: "Bloods",             color: 0xc0392b, accent: 0x6e1c1c, nation: "people",  ethnicity: "black",  type: "street"    }, // red
-      { id: "reapers",   name: "Crips",              color: 0x2f6bd6, accent: 0x1a3a6e, nation: "folk",    ethnicity: "black",  type: "street"    }, // blue
-      { id: "kings",     name: "Latin Kings",        color: 0xe0b020, accent: 0x6e5210, nation: "people",  ethnicity: "latino", type: "cartel"    }, // gold
-      { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people",  ethnicity: "black",  type: "set"       }, // green
-      { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk",    ethnicity: "black",  type: "syndicate" }, // charcoal
-      { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino", type: "brawlers"  }, // teal (Dominican, machete crew)
+      { id: "saints",    name: "Crimson Row",         color: 0xc0392b, accent: 0x6e1c1c, nation: "east",    ethnicity: "black",  type: "street"    }, // red
+      { id: "reapers",   name: "Blue Reapers",       color: 0x2f6bd6, accent: 0x1a3a6e, nation: "west",    ethnicity: "black",  type: "street"    }, // blue
+      { id: "kings",     name: "Corona Dorada",      color: 0xe0b020, accent: 0x6e5210, nation: "east",    ethnicity: "latino", type: "cartel"    }, // gold
+      { id: "stones",    name: "Greenstone Boys",    color: 0x2f9e4f, accent: 0x123d22, nation: "east",    ethnicity: "black",  type: "set"       }, // green
+      { id: "disciples", name: "Ashgrove Disciples", color: 0x3a4150, accent: 0x141820, nation: "west",    ethnicity: "black",  type: "syndicate" }, // charcoal
+      { id: "vipers",    name: "Los Víboras",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino", type: "brawlers"  }, // teal (Caribbean machete crew)
       // ---- 2nd wave: the underworld's four tiers filled out (street / cartel /
       //      mafia / biker+prison). NATION drives turf.js alliances:
-      //        people  → Bloods, Latin Kings, Black P. Stones, + Vice Lords (PEOPLE bloc)
-      //        folk    → Crips, Gangster Disciples, + Sureños (FOLK bloc)
-      //        nortenos→ Norteños ride their OWN Norte bloc, sworn enemies of the Sur/Folk
-      //        neutral → Sinaloa Cartel, La Cosa Nostra, Iron Saints MC, Trinitarios
+      //        east    → Crimson Row, Corona Dorada, Greenstone Boys, + Goldhand Lords
+      //        west    → Blue Reapers, Ashgrove Disciples, + Bahía Sur
+      //        north   → Cañon Norte ride their OWN bloc, sworn enemies of Bahía Sur
+      //        neutral → Arenal Cartel, the Carrozza Family, Iron Saints MC, Los Víboras
       //                  (organized crime — they deal with everyone, ally no bloc)
-      //        brand   → Aryan Brotherhood rides its OWN bloc → allies with NOBODY
+      //        brand   → the Ironwood Brotherhood rides its OWN bloc → allies with NOBODY
       //      ORGANIZED-crime crews lean SMALL-BENCH (cartel/syndicate crewMul<1.1) for perf.
-      { id: "lords",     name: "Vice Lords",         color: 0xdaa520, accent: 0x141414, nation: "people",   ethnicity: "black",  type: "set"       }, // gold/black (People — distinct deeper goldenrod vs Kings' brighter gold)
-      { id: "surenos",   name: "Sureños 13",         color: 0x1d3f8f, accent: 0x0c1d44, nation: "folk",     ethnicity: "latino", type: "street"    }, // navy (Sur/Folk)
-      { id: "nortenos",  name: "Norteños 14",        color: 0xa62128, accent: 0x4d1013, nation: "nortenos", ethnicity: "latino", type: "street"    }, // deep red (own Norte bloc — arch-rival of Sureños; darker than Bloods' brighter red)
-      { id: "cartel",    name: "Sinaloa Cartel",     color: 0xc8a060, accent: 0x6b5026, nation: "neutral",  ethnicity: "latino", type: "cartel",    supplier: true }, // desert tan — the wholesale product SUPPLIER
-      { id: "cosa",      name: "La Cosa Nostra",     color: 0x7a2233, accent: 0x2a1016, nation: "neutral",  ethnicity: "mixed",  type: "syndicate", extortsBiz: true }, // wine/charcoal — protection + laundering, business district
+      { id: "lords",     name: "Goldhand Lords",     color: 0xdaa520, accent: 0x141414, nation: "east",     ethnicity: "black",  type: "set"       }, // gold/black (east bloc; a deeper goldenrod than the Corona's brighter gold)
+      { id: "surenos",   name: "Bahía Sur",          color: 0x1d3f8f, accent: 0x0c1d44, nation: "west",     ethnicity: "latino", type: "street"    }, // navy (west bloc)
+      { id: "nortenos",  name: "Cañon Norte",        color: 0xa62128, accent: 0x4d1013, nation: "north",    ethnicity: "latino", type: "street"    }, // deep red (own north bloc, arch-rival of Bahía Sur; darker than the Row's brighter red)
+      { id: "cartel",    name: "Arenal Cartel",      color: 0xc8a060, accent: 0x6b5026, nation: "neutral",  ethnicity: "latino", type: "cartel",    supplier: true }, // desert tan — the wholesale product SUPPLIER
+      { id: "cosa",      name: "Carrozza Family",    color: 0x7a2233, accent: 0x2a1016, nation: "neutral",  ethnicity: "mixed",  type: "syndicate", extortsBiz: true }, // wine/charcoal — protection + laundering, business district
       { id: "angels",    name: "Iron Saints MC",     color: 0x5a6068, accent: 0xd2691e, nation: "neutral",  ethnicity: "mixed",  type: "brawlers"  }, // gunmetal w/ orange accent — bikers, highways/industrial
-      { id: "brand",     name: "Aryan Brotherhood",  color: 0xcfc6b0, accent: 0x4a463c, nation: "brand",    ethnicity: "white",  type: "syndicate" }, // bone/ash — prison-power, OWN nation → hostile to all
+      { id: "brand",     name: "Ironwood Brotherhood", color: 0xcfc6b0, accent: 0x4a463c, nation: "brand",    ethnicity: "white",  type: "syndicate" }, // bone/ash — prison-power, OWN nation → hostile to all
     ],
     gangPerTurf: [2, 4],   // members spawned to hold each controlled building
     gangArmedFrac: 0.55,   // share of gang members packing a firearm

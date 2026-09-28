@@ -113,6 +113,32 @@
     const P = ch.profile || {}, s = scaleOf(ch);
     B.scale = s;
     B.depth = Math.max(P.torsoD || 0.5, P.pelvisD || 0.48, P.waistD || 0) * 0.5 * s;
+    /* THE BODY'S REAL EXTENT (entities/character.js TORSO block): the profile
+       numbers are the boxes the shape is lofted from, but a heavy man's belly
+       stands 5 cm proud of them and a muscular chest 2 cm. Every working
+       distance below is built on depth, so it is read off the surface itself:
+       the deepest point front and back along the centre line. */
+    B.front = B.back = B.depth;
+    if (ch.torsoShape && typeof ch.torsoFrontZ === "function") {
+      const TS = ch.torsoShape, y0 = TS.base, y1 = TS.yN != null ? TS.yN : TS.base + (P.torsoH || 0.95);
+      let fr = 0, bk = 0;
+      for (let i = 0; i <= 16; i++) {
+        const y = y0 + (y1 - y0) * i / 16;
+        const f = ch.torsoFrontZ(0, y), b = -ch.torsoBackZ(0, y);
+        if (f > fr) fr = f; if (b > bk) bk = b;
+      }
+      if (fr > 0 && isFinite(fr)) B.front = Math.max(B.depth, fr * s);
+      if (bk > 0 && isFinite(bk)) B.back = Math.max(B.depth, bk * s);
+      B.depth = Math.max(B.front, B.back);
+    }
+    // how much deeper than the AVERAGE body of his sex and age he is, front
+    // and back (0 for average and slim): the verbs tuned on the average body
+    // add exactly this where one body rests against another
+    const ref = CBZ.charProfile ? CBZ.charProfile(P.fem ? "f" : "m", P.child ? P.ageYears : null, "average") : P;
+    const refHalf = Math.max(ref.torsoD || 0.5, ref.pelvisD || 0.48, ref.waistD || 0) * 0.5 * s;
+    B.frontX = Math.max(0, B.front - refHalf);
+    B.backX = Math.max(0, B.back - refHalf);
+    B.widthX = Math.max(0, B.width - Math.max(ref.torsoW || 0.92, ref.pelvisW || 0.84) * 0.5 * s);
     B.width = Math.max(P.torsoW || 0.92, P.pelvisW || 0.84) * 0.5 * s;
     B.radius = Math.max(B.depth, B.width);
     B.height = (ch.metric && ch.metric.height) || 2.6 * (P.statureMul || 1) * s;
@@ -127,7 +153,7 @@
     const B = {
       a: a, ch: null, pos: null, isPlayer: false,
       radius: 0.32, depth: 0.18, width: 0.32, height: 1.82, arm: 0.63, scale: 0.7,
-      hipY: 0.665, shoulderY: 1.29, _dimCh: null, _yawLock: null,
+      hipY: 0.665, shoulderY: 1.29, front: 0.18, back: 0.18, frontX: 0, backX: 0, widthX: 0, _dimCh: null, _yawLock: null,
     };
     B.yaw = function () {
       if (B._yawLock != null) return B._yawLock;
@@ -271,6 +297,31 @@
     put("thighR", F_LEGR, -(legW / 2 + 0.01), -legUp * 0.45, 0);
     put("thighBackL", F_LEGL, 0, -legUp * 0.55, -legW / 2 - 0.01);
     put("thighBackR", F_LEGR, 0, -legUp * 0.55, -legW / 2 - 0.01);
+    /* THE SHAPED BODY (entities/character.js TORSO block): the collar, the
+       shoulder tops and the chest/back are a real surface now, not the old
+       box faces + the slab. Re-seat the points that sit ON the torso so a hand
+       lands on cloth, not a few centimetres in front of it (or inside it). */
+    const TS = ch.torsoShape;
+    if (TS && typeof ch.torsoFrontZ === "function") {
+      const fz = (x, y) => ch.torsoFrontZ(x, y), bz = (x, y) => ch.torsoBackZ(x, y);
+      const topAt = (x) => {                      // the shoulder's top surface over |x|
+        let y = TS.shoulderY;
+        for (let k = 0; k < 40; k++) { const yy = TS.shoulderY + (TS.yN - TS.shoulderY) * k / 40; if (TS.at(yy).a >= Math.abs(x)) y = yy; }
+        return y;
+      };
+      const cy = TS.yN - TS.tf - 0.05 * TS.vs;
+      put("collarL", F_BODY, 0.15, cy, fz(0.15, cy) + 0.03);
+      put("collarR", F_BODY, -0.15, cy, fz(-0.15, cy) + 0.03);
+      put("chest", F_BODY, 0, shY - 0.30, fz(0, shY - 0.30) + 0.01);
+      put("back", F_BODY, 0, shY - 0.24, bz(0, shY - 0.24) - 0.01);
+      put("chestL", F_BODY, 0.20, shY - 0.26, fz(0.20, shY - 0.26) + 0.015);
+      put("chestR", F_BODY, -0.20, shY - 0.26, fz(-0.20, shY - 0.26) + 0.015);
+      put("backCollar", F_BODY, 0, TS.yN - 0.02, bz(0, TS.yN - 0.02) - 0.015);
+      // (a body carried over the shoulder still rests on the old column top: the
+      // grip and the two torsos stay where the carry solve was tuned)
+      put("shoulderTopL", F_BODY, armX * 0.62, Math.max(topAt(armX * 0.62) + 0.01, neckY + 0.02), 0);
+      put("shoulderTopR", F_BODY, -armX * 0.62, Math.max(topAt(armX * 0.62) + 0.01, neckY + 0.02), 0);
+    }
     ch._vcl = T; ch._vclP = ch.profile;
     return T;
   }
@@ -893,7 +944,7 @@
   const STILL = { cuff: 1, uncuff: 1, frisk: 1, mug: 1, shove: 1, throw: 1, grab: 1, carry: 1 };
   const sessions = [];
   const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0 };
-  const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3();
+  const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3(), _V = new THREE.Vector3();
 
   // hands-on weight for the ordinary shape of a verb
   function kIn(S) {
@@ -1191,7 +1242,7 @@
 
   DEF.choke = { onExplicit: 15,
     face: "same", hold: true, speed: 2.2, close: 1.0,
-    work: (S) => S.A.depth + S.T.depth + 0.05,
+    work: (S) => S.A.front + S.T.back + 0.05,       // your chest (or belly) to his back
     dur(S, ph) { return ph === "align" ? 0.3 : ph === "contact" ? 0.35 : ph === "drive" ? 0.55 : ph === "release" ? (S.how === "ko" ? 0.9 : 0.35) : 0; },
     poseA: () => "a.choke",
     poseT: () => "t.choked",
@@ -1263,7 +1314,7 @@
     },
   };
 
-  DEF.carry = { onExplicit: 3, from: ["grab"],
+  DEF.carry = { onExplicit: 3, from: ["grab"], reachHold: true,
     face: "face", hold: true, speed: 2.4, close: 1.0, allowDown: true,
     work: (S) => S.A.depth + S.T.depth + 0.12,
     dur(S, ph) {
@@ -1319,9 +1370,12 @@
     o.anchor = lk > 0 ? "belt" : null;
     o.anchorK = smooth(lk / 0.22);
     o.anchorPitch = lerp(0.35, C.pitch, smooth((lk - 0.08) / 0.85));
-    o.anchorBack = lerp(-0.08, C.back, smooth((lk - 0.1) / 0.6));
+    // his belly on YOUR back: a deeper back or a deeper belly than the average
+    // pair this was tuned on sits him that much further behind the shoulder
+    o.anchorBack = lerp(-0.08, C.back + S.A.backX + S.T.frontX, smooth((lk - 0.1) / 0.6));
     // the heave: his hips ride up over the top of the shoulder mid-roll
-    o.liftUp = 0.12 * Math.sin(PI * clamp01((lk - 0.1) / 0.8));
+    // (a broader carrier's shoulder is that much more to roll him over)
+    o.liftUp = (0.12 + S.A.widthX) * Math.sin(PI * clamp01((lk - 0.1) / 0.8));
   }
   // tackle: both on the deck, him on his back, you on top of him
   function placeTackleGround(S, o) {
@@ -2071,7 +2125,10 @@
       const MT = (VP() && VP().MOUNT) || { pitch: 0.45, along: 0.35, spread: 0.3 };
       const th = MT.pitch;
       const kneel = (((P.legUp || 0.48) - 0.02) * Math.cos(MT.spread) + (P.legW || 0.34) * 0.45) * A.scale;
-      const up = T.hipY + MT.along * (T.shoulderY - T.hipY);            // a HIGH mount: astride his belly
+      // a HIGH mount: astride his belly. Either man thicker through the middle
+      // than average: the rider sits that much further up, off the belly
+      const up0 = T.hipY + MT.along * (T.shoulderY - T.hipY), fat = T.frontX + A.frontX;
+      const up = up0 + fat;
       const hx = x + S.dir.x * up, hz = z + S.dir.z * up;
       const mx = hx - S.dir.x * A.hipY * Math.sin(th), mz = hz - S.dir.z * A.hipY * Math.sin(th);
       const my = gy + kneel - A.hipY * Math.cos(th);
@@ -2081,9 +2138,11 @@
         setPos(A, lerp(S._m0x, mx, kk), lerp(S._m0y, my, kk), lerp(S._m0z, mz, kk));
         orient(A, yawA, th * kk, 0);
       } else {
-        // getting up off him: back onto your feet where your hips were
-        const kk = smooth(S.k);
-        setPos(A, lerp(mx, hx - S.dir.x * 0.15, kk), lerp(my, groundY(hx, hz, gy + 0.45), kk), lerp(mz, hz - S.dir.z * 0.15, kk));
+        // getting up off him: back onto your feet where your hips were (behind
+        // a thicker belly by however much thicker, so your hips do not rise
+        // through it)
+        const kk = smooth(S.k), bk = 0.15 + fat + T.backX + (up - up0);
+        setPos(A, lerp(mx, hx - S.dir.x * bk, kk), lerp(my, groundY(hx, hz, gy + 0.45), kk), lerp(mz, hz - S.dir.z * bk, kk));
         orient(A, yawA, th * (1 - kk), 0);
       }
     }
@@ -2091,7 +2150,10 @@
     if (o.drag) {
       // the collar point sits behind your right shoulder; his heels on the deck
       // (off the grabber's ROOT, not his shoulder: his lean must not drag the man into him)
-      _W.set(A.pos.x - fx * (A.depth + 0.2) - Math.cos(yawA) * 0.12, A.pos.y + A.hipY * 1.3, A.pos.z - fz * (A.depth + 0.2) + Math.sin(yawA) * 0.12);
+      // (a broader or deeper pair than the average one this was tuned on: the
+      // collar rides that much further off his back)
+      const off = A.depth + 0.2 + A.widthX + A.backX + Math.max(T.frontX, T.backX);
+      _W.set(A.pos.x - fx * off - Math.cos(yawA) * 0.12, A.pos.y + A.hipY * 1.3, A.pos.z - fz * off + Math.sin(yawA) * 0.12);
       const gy = groundY(_W.x - fx * 1.0, _W.z - fz * 1.0, A.pos.y + 0.45);
       const T0 = localTable(T.ch), j = CPI.backCollar * 4;
       const L = Math.max(0.5, T0[j + 2] * T.scale);                 // feet -> collar, standing
@@ -2119,7 +2181,30 @@
       T.ch.group.position.set(0, 0, 0);
       T.ch.group.updateMatrixWorld(true);
       contactPoint(T.ch, o.anchor, _C, true);
-      const ax = _W.x - _C.x, ay = _W.y - _C.y, az = _W.z - _C.z;
+      let ax = _W.x - _C.x, ay = _W.y - _C.y, az = _W.z - _C.z;
+      /* HIS LEGS COME TO YOUR HANDS. The shoulder rest is tuned on the
+         average body, but a heavy or muscular carrier's arms hang further out
+         (a wider chest) and the far hand reaches across to the far thigh: 7 cm
+         short mid-lift. Whatever grip THIS carrier's arms cannot span, the
+         load is drawn in toward that shoulder by, so the hands close on his
+         thighs for every body type. */
+      if (S.def.reachHold && CBZ.charArmTo && CBZ.charArmTo.span) {
+        A.ch.group.updateMatrixWorld(true);
+        for (let h = 0; h < 2; h++) {
+          const name = S.handsA[h], part = h === 0 ? A.ch.parts.la : A.ch.parts.ra;
+          if (!name || !part || !contactPoint(T.ch, name, _R, true)) continue;
+          part.getWorldPosition(_V);
+          const gx = _R.x + ax - _V.x, gy = _R.y + ay - _V.y, gz = _R.z + az - _V.z;
+          const d = Math.hypot(gx, gy, gz), reach = CBZ.charArmTo.span(A.ch, h === 0 ? "l" : "r") * 0.97;
+          if (!(d > reach && d > 1e-4)) continue;
+          // ACROSS only: in (forward) or down would drive the load through the
+          // carrier's own chest and shoulder, so only the sideways span closes
+          const lx = Math.cos(yawA), lz = -Math.sin(yawA), lat = gx * lx + gz * lz;
+          const keep = Math.sqrt(Math.max(0, reach * reach - (d * d - lat * lat)));
+          const sh = lat - Math.sign(lat) * Math.min(Math.abs(lat), keep);
+          ax -= lx * sh; az -= lz * sh;
+        }
+      }
       const k = smooth(o.anchorK);
       x = lerp(x, ax, k); y = lerp(y, ay, k); z = lerp(z, az, k);
       pitch = lerp(pitch, ap, k);

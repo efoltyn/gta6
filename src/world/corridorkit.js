@@ -52,7 +52,7 @@
   function keyTest(keys) {
     return function () {
       const g = CBZ.game;
-      if (g && g.role === "cop") return true;
+      if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
       if (!keys || !keys.length) return true;
       if (keys.indexOf("Keycard") >= 0 && g && g.hasKey) return true;
       const econ = CBZ.econ;
@@ -89,6 +89,7 @@
     }
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
       id: cfg.id, label: cfg.label, autoR: 2.5, openByTap: true,
+      keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return [d.group]; },
       col: function () { return d.collider; },
@@ -168,25 +169,115 @@
     };
     return registerDoor(d, cfg);
   }
-  /* cfg: { id, label, axis, a0, a1, fixed, h, keys, lb, swing (+1 opens
-            toward +z for axis x / +x for axis z), hinge (-1 at a0),
-            build(group, w, h, dir), autoShut } */
+  /* ==========================================================
+     THE DOOR SET. A leaf in a hole is not a door (owner, 2026-09-28: "look
+     at how stupid the opening to the warden's room is ... his door doesn't
+     have physics"). Every swinging leaf in the compound was a slab pivoting
+     on the wall's CENTRE LINE in a raw hole: no frame, no stop, no hinges,
+     and opened past 90 degrees it swung back through the wall it hung in.
+     A real door set is a frame that wraps the opening (two jambs and a head,
+     the full depth of the wall), a stop the leaf closes against, an
+     architrave on both faces that covers the joint with the wall, and a
+     leaf hung on three hinges at the FACE of the frame on the side it opens
+     to, so it swings clear of the jamb and stops square to the wall.
+
+     cfg: { axis "x" (wall along x, plane z = fixed) | "z" (plane x = fixed),
+            a0, a1        the rough opening along the wall
+            t             wall thickness (the frame wraps all of it)
+            h             head height; y0 the finished floor the leaf clears
+            open          +1 | -1: which side of the wall the leaf swings to,
+                          in LOCAL z (axis x: world z; axis z: world -x)
+            hinge         -1 hung at a0, +1 at a1, 0 = a PAIR meeting mid-span
+            meet          this set is one half of a pair drawn as two sets:
+                          no jamb or stop on the free side
+            build(g, w, h, dir)  draws one leaf from its hinge edge along
+                          +dir x, centred on g's z = 0, LT thick
+            frame         frame colour; max  fraction of 90 deg it opens }
+     -> { leaves: [{ pivot, base, swing, slab }], set(t 0..1), clear }     */
+  const JW = 0.05, AW = 0.075, AP = 0.025, LT = 0.05;
+  function doorSet(cfg) {
+    const along = cfg.axis === "z";
+    const a0 = Math.min(cfg.a0, cfg.a1), a1 = Math.max(cfg.a0, cfg.a1), fixed = cfg.fixed;
+    const t = cfg.t || 0.3, h = cfg.h || 2.3, y0 = cfg.y0 || 0, open = cfg.open < 0 ? -1 : 1;
+    const hinge = cfg.hinge == null ? -1 : cfg.hinge;
+    const fmat = K.skin("steel", cfg.frame != null ? cfg.frame : 0x5b636d, 0.5);
+    const hmat = K.skin("galv", 0xa9b0b7);
+    // local (lx along the wall, lz across it) -> world
+    const W = (lx, lz) => along ? [fixed - lz, lx] : [lx, fixed + lz];
+    const ry = along ? -Math.PI / 2 : 0;
+    function piece(w, hh, d, lx, y, lz, mat) {
+      const p = W(lx, lz);
+      stat(new THREE.BoxGeometry(w, hh, d), mat || fmat, p[0], y, p[1], { ry: ry, cast: false });
+    }
+    // which jambs this set owns: a pair-half has only its hinge jamb
+    const jamb0 = !(cfg.meet && hinge > 0), jamb1 = !(cfg.meet && hinge < 0);
+    const in0 = a0 + (jamb0 ? JW : 0), in1 = a1 - (jamb1 ? JW : 0);
+    // FRAME: jambs + head wrap the wall's full depth (+1 cm proud each face)
+    if (jamb0) piece(JW, h, t + 0.02, a0 + JW / 2, h / 2, 0);
+    if (jamb1) piece(JW, h, t + 0.02, a1 - JW / 2, h / 2, 0);
+    piece(a1 - a0, JW, t + 0.02, (a0 + a1) / 2, h - JW / 2, 0);
+    // STOP: the rebate the leaf shuts against, just behind the leaf's plane
+    const sz = open * (t / 2) - open * (LT + 0.02);
+    if (jamb0) piece(0.018, h - JW, 0.035, in0 + 0.009, (h - JW) / 2, sz);
+    if (jamb1) piece(0.018, h - JW, 0.035, in1 - 0.009, (h - JW) / 2, sz);
+    piece(in1 - in0, 0.018, 0.035, (in0 + in1) / 2, h - JW - 0.009, sz);
+    // ARCHITRAVE, both faces
+    for (const f of [-1, 1]) {
+      const az = f * (t / 2 + AP / 2);
+      if (jamb0) piece(AW, h + AW, AP, a0 - AW / 2, (h + AW) / 2, az);
+      if (jamb1) piece(AW, h + AW, AP, a1 + AW / 2, (h + AW) / 2, az);
+      const hx0 = a0 - (jamb0 ? AW : 0), hx1 = a1 + (jamb1 ? AW : 0);
+      piece(hx1 - hx0, AW, AP, (hx0 + hx1) / 2, h + AW / 2, az);
+    }
+    // THE LEAVES, each on three hinges at the frame face it opens to
+    const spans = hinge === 0 ? [[-1, in0, (in0 + in1) / 2 - 0.003], [1, (in0 + in1) / 2 + 0.003, in1]]
+      : [[hinge < 0 ? -1 : 1, in0, in1]];
+    const leaves = [];
+    const lh = h - JW - y0 - 0.012;
+    for (const s of spans) {
+      const side = s[0], dir = side < 0 ? 1 : -1, hx = side < 0 ? s[1] : s[2];
+      const lw = s[2] - s[1] - 0.004;
+      const pz = open * (t / 2);
+      const pivot = new THREE.Group(); pivot.userData.mover = true;
+      const p = W(hx, pz);
+      pivot.position.set(p[0], 0, p[1]);
+      pivot.rotation.y = ry;
+      const g = new THREE.Group();
+      g.position.set(0, y0 + 0.008, -open * LT / 2);
+      pivot.add(g);
+      const slab = cfg.build(g, lw, lh, dir, leaves.length) || null;
+      // hinges: knuckles on the frame at the pivot line (static), leaves on the leaf
+      for (const hy of [0.24, lh * 0.5, lh - 0.26]) {
+        const k = W(hx, pz + open * 0.004);
+        stat(new THREE.CylinderGeometry(0.012, 0.012, 0.11, 10), hmat, k[0], y0 + hy, k[1], { cast: false });
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.004), hmat);
+        m.position.set(dir * 0.03, hy - 0.008, open * (LT / 2 + 0.002)); g.add(m);
+      }
+      root().add(pivot);
+      leaves.push({ pivot: pivot, base: ry, swing: -open * dir * (Math.PI / 2) * (cfg.max || 0.97), slab: slab });
+    }
+    return {
+      leaves: leaves,
+      clear: { a0: in0, a1: in1 },
+      set: function (u) { for (const L of leaves) L.pivot.rotation.y = L.base + L.swing * u; },
+    };
+  }
+  /* cfg: { id, label, axis, a0, a1, fixed, t, h, keys, lb, swing,
+            hinge (-1 at a0), meet, build(group, w, h, dir), autoShut }
+     `swing` keeps its historic meaning in the LOCAL frame: the leaf goes to
+     local z = -swing (for axis "x" that is world -z at swing +1; for axis
+     "z", world +x). The door set above hangs it on that face. */
   function door(cfg) {
     const along = cfg.axis === "z";
-    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed;
-    const w = a1 - a0, h = cfg.h || 2.3, hingeA = cfg.hinge < 0 ? a0 : a1, dir = cfg.hinge < 0 ? 1 : -1;
-    const pivot = new THREE.Group(); pivot.userData.mover = true;
-    pivot.position.set(along ? fixed : hingeA, 0, along ? hingeA : fixed);
-    const g = new THREE.Group(); pivot.add(g);
-    cfg.build(g, w, h, dir);
-    root().add(pivot);
-    const base = along ? -Math.PI / 2 : 0;
-    pivot.rotation.y = base;
+    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed, t = cfg.t || 0.3;
+    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: cfg.h || 2.3, y0: cfg.y0,
+      open: -(cfg.swing || 1), hinge: cfg.hinge < 0 ? -1 : 1, meet: cfg.meet, build: cfg.build, frame: cfg.frame });
+    const L = set.leaves[0];
     const d = {
-      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed, group: pivot, kind: "swing", base: base,
-      swing: (cfg.swing || 1) * dir * (Math.PI / 2) * 0.94,
-      collider: along ? { minX: fixed - 0.1, maxX: fixed + 0.1, minZ: a0, maxZ: a1, ref: pivot }
-        : { minX: a0, maxX: a1, minZ: fixed - 0.1, maxZ: fixed + 0.1, ref: pivot },
+      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed, group: L.pivot, kind: "swing", base: L.base,
+      swing: L.swing,
+      collider: along ? { minX: fixed - t / 2, maxX: fixed + t / 2, minZ: a0, maxZ: a1, ref: L.pivot }
+        : { minX: a0, maxX: a1, minZ: fixed - t / 2, maxZ: fixed + t / 2, ref: L.pivot },
       autoShut: cfg.autoShut != null ? cfg.autoShut : 4,
     };
     if (cfg.lamp) d.lamp = cfg.lamp;
@@ -288,7 +379,18 @@
     stat(new THREE.BoxGeometry(axis === "x" ? len : 0.2, 0.09, axis === "x" ? 0.2 : len), steelDark, x, y, z, { cast: false });
     stat(new THREE.BoxGeometry(axis === "x" ? len - 0.24 : 0.13, 0.05, axis === "x" ? 0.13 : len - 0.24), K.skin("lit"), x, y - 0.07, z, { cast: false });
   }
+  /* An outdoor fitting on the flood circuit. It was a dark box with a second,
+     UNROTATED 0.42 m glowing box stuck through its face (on an x-facing wall
+     it poked 21 cm out sideways): at night, a floating white brick. It is
+     the prison's one wall lamp now, CBZ.prisonDress.lamp — a cast bulkhead
+     with a domed lens and a guard — on the flood schedule, its lit record 3 m
+     out where the light lands. The sally ports are built from
+     world/corridors.js, after world/cafeteria.js has published the kit. */
   function cagedLamp(x, y, z, face) {
+    const PD = CBZ.prisonDress;
+    if (PD && PD.lamp) {
+      return PD.lamp(x, y, z, face, { w: 0.5, h: 0.32, tone: 0xfff4d2, emissive: 0xffd88a, r: 9, kind: "flood", reach: 3 });
+    }
     stat(new THREE.BoxGeometry(0.5, 0.28, 0.16), steelDark, x, y, z, { ry: Math.atan2(face.x, face.z), cast: false });
     const lamp = addBox(x + face.x * 0.05, y, z + face.z * 0.05, 0.42, 0.2, 0.2, 0x2b2b2b, { cast: false });
     lamp.userData.mover = true;
@@ -340,7 +442,7 @@
     }
     const sp = P(0, Z0 - 0.02);
     K.sign(cfg.label || "GATE", sp[0], 3.0, sp[1], 0.9, 0.34, D > 0 ? Math.PI : 0, "#f3f3ef", "#1f3a5f");
-    const lp = P(-2.2, Z0 - 0.1); cagedLamp(lp[0], 3.15, lp[1], faceIn);
+    const lp = P(-2.2, Z0 - 0.06); cagedLamp(lp[0], 3.15, lp[1], faceIn);
     const cp = P(2.4, Z0 - 0.2), cq = P(2.4, Z0 - 0.3);
     stat(new THREE.BoxGeometry(0.18, 0.18, 0.34), steelDark, cp[0], 3.3, cp[1], { ry: -0.5 * D, rx: 0.4, cast: false });
     stat(new THREE.SphereGeometry(0.16, 10, 8), K.skin("glass", 0x202830), cq[0], 3.3, cq[1], { cast: false });
@@ -351,9 +453,11 @@
       lining(r[0], r[1], r[2], r[3], CH);
     const fr = L(-IW, IW, IZ0, IZ1);
     stat(new THREE.BoxGeometry(fr[1] - fr[0], 0.06, fr[3] - fr[2]), K.skin("polished", 0x9a9fa6), (fr[0] + fr[1]) / 2, 0.03, (fr[2] + fr[3]) / 2, { uv: 2, cast: false });
-    addBox((fr[0] + fr[1]) / 2, CH + 0.08, (fr[2] + fr[3]) / 2, fr[1] - fr[0], 0.16, fr[3] - fr[2], 0xdedbd2, { cast: false });
+    K.skinBox(addBox((fr[0] + fr[1]) / 2, CH + 0.08, (fr[2] + fr[3]) / 2, fr[1] - fr[0], 0.16, fr[3] - fr[2], 0xdedbd2, { cast: false }), "concrete", 0xdedbd2);
     for (const lz of [IZ0 + 2.0, IZ0 + 4.6, 2.2, IZ1 - 1.6]) { const p = P(0, lz); strip(p[0], CH - 0.02, p[1], 3.6, "x"); }
-    for (const s of [-1, 1]) { const p = P(s * (IW - 0.3), 0); stat(new THREE.BoxGeometry(0.75, CH, 1.25), steelDark, p[0], CH / 2, p[1], {}); }
+    // the grille's jamb piers: block piers in the vestibule's own two-tone
+    // paint (they were two full-height black steel slabs either side of it)
+    for (const s of [-1, 1]) { const p = P(s * (IW - 0.3), 0); lining(p[0] - 0.375, p[0] + 0.375, p[1] - 0.625, p[1] + 0.625, CH); }
     CBZ.onUpdate(21.38, (function () { let done = false; return function () {
       if (done || !CBZ.prisonLights || !CBZ.prisonLights.rooms) return; done = true;
       CBZ.prisonLights.rooms.push({ id: cfg.id, x0: X - IW, x1: X + IW, z0: wz0, z1: wz1 });
@@ -368,12 +472,12 @@
     K.sign("AUTHORIZED PERSONNEL ONLY\nBEYOND THIS POINT", rp[0], 2.05, rp[1], 1.3, 0.42, D > 0 ? Math.PI : 0, "#f3f3ef", "#b3261e");
     // the entry pair and the way out
     const ez = P(0, Z0 + T / 2)[1], oz = P(0, Z1 - T / 2)[1];
-    door({ id: cfg.id + "-entry-w", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X, fixed: ez, h: 2.4, keys: null, hinge: -1, swing: -D, build: glassLeaf });
-    door({ id: cfg.id + "-entry-e", label: "The sally port", axis: "x", a0: X, a1: X + DW / 2, fixed: ez, h: 2.4, keys: null, hinge: 1, swing: -D, build: glassLeaf });
-    door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, h: 2.3, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
+    door({ id: cfg.id + "-entry-w", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: -1, swing: -D, build: glassLeaf });
+    door({ id: cfg.id + "-entry-e", label: "The sally port", axis: "x", a0: X, a1: X + DW / 2, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: 1, swing: -D, build: glassLeaf });
+    door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, t: T, h: 2.35, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
     const stp = P(0, Z1 + 0.6);
     const step = addBox(stp[0], 0.08, stp[1], 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
-    const olp = P(0, Z1 + 0.1); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
+    const olp = P(0, Z1 + 0.06); cagedLamp(olp[0], 2.9, olp[1], { x: 0, z: D });
     // the booth
     if (cfg.booth !== null) {
       const side = cfg.booth === "W" ? -1 : 1;
@@ -393,8 +497,19 @@
       }
       stat(new THREE.BoxGeometry(0.02, 0.22, 0.34), galv, X + side * (IW - 0.06), 1.35, wc, { cast: false });
       const dx = X + side * (BX + 1.2);
-      addBox(dx, 0.74, wc, 0.7, 0.06, 2.6, 0x8a939d, { solid: true });
-      addBox(dx, 0.36, wc, 0.6, 0.7, 0.5, 0x5b6470, { cast: false });
+      /* the officer's console: a steel counter on two end panels with a
+         modesty panel between them (it was a slab on one grey block), and
+         the chair its seat anchor always promised — the anchor was there
+         with no chair drawn under it, so a body sat on air. */
+      K.skinBox(addBox(dx, 0.74, wc, 0.7, 0.06, 2.6, 0x8a939d, { solid: true, y0: 0, y1: 0.77 }), "steel", 0x8a939d);
+      for (const e of [-1, 1]) stat(new THREE.BoxGeometry(0.62, 0.71, 0.05), steelDark, dx, 0.355, wc + e * 1.22, { cast: false });
+      stat(new THREE.BoxGeometry(0.03, 0.5, 2.4), steelDark, dx - side * 0.28, 0.42, wc, { cast: false });
+      stat(new THREE.BoxGeometry(0.46, 0.02, 0.34), K.skin("steel", 0x24282d), dx + side * 0.08, 0.78, wc - 0.3, { cast: false });   // keyboard
+      stat(new THREE.BoxGeometry(0.05, 0.36, 0.56), K.skin("steel", 0x1d2025), dx - side * 0.2, 1.0, wc - 0.3, { cast: false });    // monitor
+      stat(new THREE.BoxGeometry(0.04, 0.2, 0.04), steelDark, dx - side * 0.2, 0.86, wc - 0.3, { cast: false });
+      if (CBZ.furnish && typeof CBZ.furnish.chair === "function") {
+        try { CBZ.furnish.chair(X + side * (BX + 2.0), 0, wc, side > 0 ? -Math.PI / 2 : Math.PI / 2, { tone: 0x2a2e34 }); } catch (e) {}
+      }
       if (CBZ.roomSeatAnchor) { try { CBZ.roomSeatAnchor(X + side * (BX + 2.0), 0, wc, side > 0 ? -Math.PI / 2 : Math.PI / 2, "chair", null, { cushion: 0.46, floorBelow: 0 }); } catch (e) {} }
       const KBX = X + side * (BX + 2.4), KBZ = D > 0 ? B.z0 + 0.3 : B.z1 - 0.3;
       addBox(KBX, 1.55, KBZ, 0.9, 0.7, 0.06, 0x6a563c, { cast: false });
@@ -403,7 +518,7 @@
       if (CBZ.prisonPlaceItem) { try { CBZ.prisonPlaceItem.apply(null, keyAt); } catch (e) {} }
       else (CBZ._prisonLateItems || (CBZ._prisonLateItems = [])).push(keyAt);
       strip(X + side * (BX + 2.1), B.h - 0.02, wc, 2.2, "z");
-      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, h: 2.2, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, build: steelLeaf(0x4f6f60) });
+      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, t: 0.5, h: 2.3, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, build: steelLeaf(0x4f6f60) });
       K.sign("AUTHORIZED\nPERSONNEL ONLY", (side > 0 ? B.x1 : B.x0) + side * 0.28, 2.6, wc, 0.9, 0.42, side > 0 ? Math.PI / 2 : -Math.PI / 2, "#f3f3ef", "#b3261e");
     }
     // the walkway
@@ -420,6 +535,6 @@
     return { gate: gate, win: { x: win[0], z: win[1] } };
   }
 
-  CBZ.corridorKit = { grille, door, lining, exitSign, strip, cagedLamp, keyTest, steelLeaf, glassLeaf, doors };
+  CBZ.corridorKit = { grille, door, doorSet, lining, exitSign, strip, cagedLamp, keyTest, steelLeaf, glassLeaf, doors };
   CBZ.buildSallyPort = buildSallyPort;
 })();

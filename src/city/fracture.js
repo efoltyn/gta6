@@ -202,6 +202,9 @@
     } else if (CBZ.cityChunk) {
       CBZ.cityChunk(x + nx * 0.4, vc, z + nz * 0.4, { count: 6, force: 4, dirx: nx, dirz: nz });
     }
+    // SOOT framing the opening on the outer face: only for a real carve in a
+    // masonry wall (crashfx refuses glass/curtain walls and any overhang)
+    if (CBZ.cityBlastWallSoot) { try { CBZ.cityBlastWallSoot(rec, power); } catch (e) {} }
   }
 
   // ---- blastAt: an explosion against a wall face carves a persistent hole --

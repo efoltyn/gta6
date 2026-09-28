@@ -311,6 +311,32 @@
   }
   CBZ.cityArmorFit = armorFit;                        // charpanel.js's portrait mirrors it
   function dimGeo(d) { return (CBZ.boxGeom && d) ? CBZ.boxGeom(d[0], d[1], d[2]) : null; }
+  /* THE VEST FOLLOWS THE BODY (entities/character.js TORSO block). On a shaped
+     rig the vest and the plate band are SHELLS of the torso surface held off it
+     — round the ribs, over the chest, cut under the arms — instead of a box
+     hung round a box. The box numbers above still size and place them (and
+     still report through geometry.parameters, which the coplanar audit reads);
+     only the drawn surface changes. A stiff plate is a boxier section (flat).
+     Degrade-safe: no shaped rig → the box. */
+  function shellGeo(ch, kind, dims, y, off, flat) {
+    if (!ch || !ch.torsoShape || !CBZ.humanShellSpec || !CBZ.humanLimbGeometry || !dims) return null;
+    const S = ch.torsoShape;
+    // a carrier rides from the navel to the armpits: under the arms, never
+    // over the shoulder (the pads do that), never down over the hips
+    const top = Math.min(y + dims[1] / 2, S.base + 0.78 * S.sp);
+    const bot = Math.min(Math.max(y - dims[1] / 2, S.pTop - 0.02), top - 0.08);
+    const spec = CBZ.humanShellSpec(ch, "vest", { y0: bot, y1: top, off: off, flat: flat, box: { w: dims[0], h: dims[1], d: dims[2], y: y }, origin: y });
+    if (!spec) return null;
+    const holder = { userData: { torsoPart: spec } };
+    return CBZ.humanLimbGeometry(holder, null);
+  }
+  function vestGeo(ch, fit, kitId) {
+    const plate = kitId && kitId !== "softVest";
+    return shellGeo(ch, "vest", fit.vest, fit.vestY, plate ? 0.045 : 0.032, plate ? 2.9 : 0) || dimGeo(fit.vest);
+  }
+  function bandGeo(ch, fit) {
+    return shellGeo(ch, "vestHi", fit.band, fit.bandY, 0.068, 3.0) || dimGeo(fit.band);
+  }
 
   /* ---- THE FIT IS ONLY TRUE UNTIL THE NEXT OUTFIT (probe, 2026-07-29) ------
      OWNER: "armor flickers with the outfit." armorFit measures what the rig is
@@ -351,9 +377,8 @@
       const m = kids[i], kind = m && m.userData && m.userData.armorKind;
       if (!kind || !CHEST_KINDS[kind]) continue;
       if (!fit) fit = armorFit(ch);
-      if (kind === "vest") { const gm = dimGeo(fit.vest); if (gm) m.geometry = gm; m.position.y = fit.vestY; }
-      else if (kind === "vestHi") { const gb = dimGeo(fit.band); if (gb) m.geometry = gb; m.position.set(0, fit.bandY, fit.bandZ); }
-      if (kind === "vest") setArmsClear(ch, fit);
+      if (kind === "vest") { const gm = vestGeo(ch, fit, m.userData.kitId); if (gm) m.geometry = gm; m.position.y = fit.vestY; setArmsClear(ch, fit); }
+      else if (kind === "vestHi") { const gb = bandGeo(ch, fit); if (gb) m.geometry = gb; m.position.set(0, fit.bandY, fit.bandZ); }
     }
     return !!fit;
   }
@@ -440,14 +465,15 @@
       const mat = matFor(k.id, k.color);
       const vest = acquire("vest");
       if (vest) {
-        const gm = dimGeo(fit.vest); if (gm) vest.geometry = gm;   // fitted to what it is worn OVER
+        vest.userData.kitId = k.id;
+        const gm = vestGeo(an.ch, fit, k.id); if (gm) vest.geometry = gm;   // fitted to what it is worn OVER
         vest.material = mat; vest.position.set(0, fit.vestY != null ? fit.vestY : 1.40, 0); an.body.add(vest); out.push(vest);
       }
       // the harder kits get a raised plate band so a SWAT reads heavier than a beat-cop vest
       if (k.id !== "softVest") {
         const band = acquire("vestHi");
         if (band) {
-          const gb = dimGeo(fit.band); if (gb) band.geometry = gb;
+          const gb = bandGeo(an.ch, fit); if (gb) band.geometry = gb;
           band.material = mat; band.position.set(0, fit.bandY != null ? fit.bandY : 1.58, fit.bandZ); an.body.add(band); out.push(band);
         }
       }

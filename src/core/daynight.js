@@ -214,6 +214,7 @@
       // sabotaging one. (Found while giving escape mode a real night: the
       // longer the dark gets, the more that beam is worth killing.)
       if (sl.disabled > 0) continue;
+      if (sl.selfLit) continue;   // entities/searchlight.js drives its own night gain
       if (sl.spot) sl.spot.intensity = 0.4 + nightAmt * 1.8;
       // ...AND A BEAM THAT IS HOLDING THE PLAYER OWNS ITS OWN OPACITY. The
       // other half of the same fault, found by the same route: searchlight.js

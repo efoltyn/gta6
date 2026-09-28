@@ -689,68 +689,6 @@
     return m;
   }
 
-  /* A PRINTED SHEET ON A WALL — a poster, a photograph, a calendar. Built in a
-     local frame (sheet in XY, facing +z, its back ON z = 0) and turned so +z
-     is the wall's normal (nx, nz), so the paper lies ON the wall face at
-     (x, y, z) instead of standing a box-thickness proud of it. No text
-     anywhere (signage law): the image is blocks of colour, the way a poster
-     reads from two metres. */
-  function wallSheet(x, y, z, nx, nz, w, h, kind, seed) {
-    const parts = [];
-    const T = 0.004;
-    const sheet = (px, py, pw, ph, col, dz) => {
-      const g = new THREE.BoxGeometry(pw, ph, T);
-      g.translate(px, py, T / 2 + (dz || 0));
-      parts.push(paintGeo(g, col));
-    };
-    const tri = (px, py, pw, ph, col, dz) => {           // a mountain / a sail
-      const s = new THREE.Shape();
-      s.moveTo(-pw / 2, 0); s.lineTo(pw / 2, 0); s.lineTo(pw * (0.1 * (seed % 3)), ph); s.closePath();
-      const g = new THREE.ShapeGeometry(s);
-      g.translate(px, py, T + 0.0015 + (dz || 0));
-      parts.push(paintGeo(g, col));
-    };
-    const disc = (px, py, r, col, dz) => {
-      const g = new THREE.CircleGeometry(r, 18);
-      g.translate(px, py, T + 0.0015 + (dz || 0));
-      parts.push(paintGeo(g, col));
-    };
-    if (kind === "photo") {
-      sheet(0, 0, w, h, 0xece6d6);                                            // print border
-      sheet(0, h * 0.06, w * 0.86, h * 0.72, [0x6f8aa0, 0x8a7a5c, 0x7a6e84][seed % 3], 0.0015);
-      sheet(0, h * 0.06 - h * 0.14, w * 0.86, h * 0.44, [0x5b6a4a, 0x9b8a6c, 0x6b5a50][seed % 3], 0.0025);
-      disc(w * 0.08 * ((seed % 3) - 1), h * 0.02, w * 0.14, [0xc79a7a, 0xb88a6a, 0x8a5e46][seed % 3], 0.002);
-    } else if (kind === "calendar") {
-      sheet(0, 0, w, h, 0xe9e6dd);
-      sheet(0, h * 0.30, w * 0.92, h * 0.34, [0x6d8fb0, 0x8aa36a, 0xb07a5a][seed % 3], 0.0015); // the month's picture
-      for (let r = 0; r < 5; r++) for (let c2 = 0; c2 < 7; c2++)
-        sheet(-w * 0.39 + c2 * w * 0.13, -h * 0.05 - r * h * 0.085, w * 0.10, h * 0.06, (r * 7 + c2 + seed) % 11 === 0 ? 0xb24a3a : 0xc9c5ba, 0.0015);
-    } else if (kind === "land") {
-      sheet(0, 0, w, h, 0xf1eee6);
-      sheet(0, h * 0.18, w * 0.9, h * 0.52, 0x8fb4cf, 0.0012);               // sky
-      sheet(0, h * 0.42, w * 0.9, h * 0.06, 0xb6cfe0, 0.0014);
-      tri(-w * 0.12, -h * 0.08, w * 0.62, h * 0.40, 0x5d6b73);                // range
-      tri(w * 0.22, -h * 0.08, w * 0.44, h * 0.28, 0x75818a, 0.0005);
-      sheet(0, -h * 0.20, w * 0.9, h * 0.24, 0x3f6f86, 0.0022);               // water
-      sheet(0, -h * 0.40, w * 0.9, h * 0.12, 0xd8c79e, 0.0024);               // beach
-    } else {                                                                  // a team / band poster
-      const a = [0x1f2f4a, 0x4a1f24, 0x1f3a2b][seed % 3], b = [0xc9a24a, 0xd9d4c8, 0xb2544a][seed % 3];
-      sheet(0, 0, w, h, a);
-      sheet(0, -h * 0.30, w * 0.9, h * 0.08, b, 0.0012);
-      disc(0, h * 0.12, w * 0.28, b, 0.0005);
-      disc(0, h * 0.12, w * 0.20, a, 0.0012);
-      sheet(0, h * 0.12, w * 0.07, w * 0.30, b, 0.0022);
-    }
-    // four strips of tape holding it up, catching the light
-    if (kind !== "photo") for (const sx of [-1, 1]) for (const sy of [-1, 1])
-      sheet(sx * (w / 2 - 0.02), sy * (h / 2 - 0.015), 0.06, 0.03, 0xd8d2b8, 0.0035);
-    else sheet(0, h / 2 - 0.01, 0.05, 0.03, 0xd8d2b8, 0.0035);
-    const g = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
-    for (const p of parts) p.dispose();
-    g.rotateY(Math.atan2(nx, nz));
-    g.translate(x, y + LIFT, z);
-    DRESS.push(g);
-  }
 
   /* ==========================================================
      4. ONE CELL. Structure, then the barred face, then the fittings.
@@ -1443,10 +1381,9 @@
     const opp = north ? { x: c.x - c.hx, z: c.z - 1.30, nx: 1, nz: 0 }                // the bunk-head partition
       : { x: c.x + inx * 0.55, z: c.z - c.hz, nx: 0, nz: 1 };
     const seed = (h01(c.x, c.z, 5503) * 97) | 0;
-    if (h01(c.x, c.z, 5501) < 0.62) {   // a poster taped up on the partition
-      const kind = ["land", "team", "calendar", "land", "team"][seed % 5];
-      wallSheet(side.x, 1.95, side.z, side.nx, side.nz, kind === "calendar" ? 0.40 : 0.56, kind === "calendar" ? 0.60 : 0.78, kind, seed);
-    }
+    // (No posters, no photographs, no scratched tally: owner 2026-09-28, "the
+    // drawing on the wall ... should ALL be removed. The whole point is that
+    // it's barren and has no personality." The cell is painted block.)
     if (h01(c.x, c.z, 5502) < 0.55) {   // a towel, folded at the foot of the bed
       // It was draped over the frame edge, and before that a 10 cm slab
       // standing beside the mattress (owner: "the bed has a floating white
@@ -1482,24 +1419,7 @@
       dbox(bx0 + (north ? t + 0.12 : 0), 1.655, bz0 + (north ? 0 : t + 0.12), 0.21, 0.04, 0.15, cols[(seed + 4) % 5], ry);
     }
 
-    // THE PLAYER'S CELL IS MARKED AS OURS — a red blanket (above), three taped
-    // photographs over the bunk head and a scratched tally by the door. No
-    // prompt and no icon: you recognise your own cell, which is the whole point.
-    // UP_TOP + 0.56 keeps them above his own pillow, clear of the rail and
-    // under the light.
-    if (c.player) {
-      const PHOTO_Y = UP_TOP + 0.56;
-      for (let i = 0; i < 3; i++) {
-        const o = -0.34 + i * 0.34, jy = (i === 1 ? 0.05 : 0) - i * 0.01;
-        wallSheet(opp.x + (north ? 0 : o), PHOTO_Y + jy, opp.z + (north ? o : 0), opp.nx, opp.nz,
-          i === 1 ? 0.20 : 0.15, i === 1 ? 0.15 : 0.20, "photo", seed + i);
-      }
-      for (let i = 0; i < 6; i++) {
-        const o = -0.9 + (i % 4) * 0.11;
-        dbox(side.x + side.nx * 0.002 + (north ? 0 : o), 1.62 - ((i / 4) | 0) * 0.24, side.z + side.nz * 0.002 + (north ? o : 0),
-          north ? 0.004 : 0.012, 0.18, north ? 0.012 : 0.004, 0x8e969c);   // scratched in, not white bars
-      }
-    }
+    // (The player's cell is still told apart by its red blanket, above.)
 
     // a barred window through the north wall, one per north-row cell
     if (north) cellWindow(c.x);
@@ -2072,7 +1992,18 @@
       for (let x = -15; x <= 15.01; x += 2.5) pushBox(g, x, (CHORD_LO + CHORD_HI) / 2, z, 0.10, CHORD_HI - CHORD_LO - 0.2, 0.10);
     }
     // purlins the long way, tying the trusses together under the lid
-    for (const x of [-12, -6, 0, 6, 12]) pushBox(g, x, CHORD_HI, -26, 0.12, 0.16, 36);
+    for (const x of [-13.2, -12, -6, 0, 6, 12, 13.2]) pushBox(g, x, CHORD_HI, -26, 0.12, 0.16, 36);
+    /* THE TIER STRIPS HANG ON RODS. world/roofs.js hangs seven block-circuit
+       strips at 7.88 (top 7.925): five down the spine at z -40.5..-14.5 and
+       one over each gallery at x +-13.2, z -26. Only two of them happened to
+       cross a truss chord; the rest hung 0.9 m under the purlins on nothing
+       (at night: glowing bars floating in the dark). Each gets two drop rods
+       up to the purlin over it (the +-13.2 purlins exist for these). Keep
+       these positions in step with roofs.js's two loops. */
+    const ROD_Y0 = 7.925, ROD_Y1 = CHORD_HI - 0.08;
+    const rod = (x, z) => pushBox(g, x, (ROD_Y0 + ROD_Y1) / 2, z, 0.025, ROD_Y1 - ROD_Y0, 0.025);
+    for (const z of [-40.5, -34, -27.5, -21, -14.5]) { rod(0, z - 1.6); rod(0, z + 1.6); }
+    for (const x of [-13.2, 13.2]) { rod(x, -26 - 1.4); rod(x, -26 + 1.4); }
     mergedMesh(g, 0x4a525c, false);
   })();
   function cageLamp(x, z) {
@@ -2200,11 +2131,29 @@
         col: function () { return c.doorCol; },
         isOpen: function () { return !c.locked; },
         permanent: function () { return !!c.tier; },
-        canUse: function () { return !c.tier; },
+        /* A LOCKED FRONT WANTS A KEY. Standing open, anybody may pull it to
+           (the close asks nothing, as above). Locked by the schedule or a
+           lockdown, only the officer's keys or a stolen Cell Key open it —
+           a bare hand used to be able to tap a racked door open at 02:00. */
+        canUse: function () {
+          if (c.tier) return false;
+          if (!c.locked) return true;
+          if (CBZ.prisonStaffKey && CBZ.prisonStaffKey()) return true;
+          const econ = CBZ.econ;
+          return !!(econ && econ.hasItem && econ.hasItem("Cell Key"));
+        },
         // OPENING IT AGAIN IS ALSO DELIBERATE, so it drops its own latch
         // before asking — otherwise the guard above would refuse the very
-        // man it exists to protect.
-        set: function (v) { if (v) this._latch = false; setDoor(c, !v); return c.locked === !v; },
+        // man it exists to protect. A leaf opened by hand while the wing is
+        // locked is `_keyed` (systems/prisonschedule.js leaves it open until
+        // somebody shuts it or the morning unlock); a close clears it.
+        set: function (v) {
+          if (v) this._latch = false;
+          const S = CBZ.prisonSchedule;
+          c._keyed = !!v && !!(S && S.cellsLocked && S.cellsLocked());
+          setDoor(c, !v);
+          return c.locked === !v;
+        },
       });
     })(cells[i]);
   }
@@ -2239,7 +2188,7 @@
   const TALK = [
     ["Bunk's mine. Floor's yours.", "Lights out at nine. Don't be loud."],
     ["I been in this cell longer than that paint.", "Count comes twice. Be in here for it."],
-    ["You hear the pipes at night? That's the whole block talking.", "Keep your door open, keep your friends closer."],
+    ["Snore and I'll smother you. Kidding. Mostly.", "Pictures on the wall are my girls. Don't look."],
     ["Third time in this same box. Feels like home now.", "Don't touch my shelf."],
     ["They move you when they feel like it. Not before.", "Sleep light."],
   ];

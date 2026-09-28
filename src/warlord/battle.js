@@ -1308,6 +1308,7 @@
     const was = m.routed;
     if (MO().stepRout(m, m.side.morale, nerveOf(m)) && !was) {
       m.side.brokeN = (m.side.brokeN || 0) + 1;
+      shoutNear(m, "broke", true);
       /* "HAKIM BREAKS" was the same mistake as "HAKIM DOWN": a name you have
          not learned, and no answer to the only question that matters, which
          is which part of your line is coming apart. An AMBER tick on the rim
@@ -2737,6 +2738,37 @@
     if (m.hp <= 0) killMan(m, imp);
   }
 
+  /* THE LINE TALKS. Men in a firefight shout what a man shouts: a name when
+     a friend drops, "fall back" when they break. Over the shouter's own head
+     through the one mouth (systems/speech.js); rate-limited per side so a
+     volley is one shout, not twelve. Never a tip, never a direction. */
+  const SHOUTS = {
+    down: ["Man down!", "They got {n}!", "{n}! Get up!", "{n} is hit!", "No, no, no!", "Stay down, stay down!"],
+    broke: ["Run! Run!", "Fall back!", "I'm out, I'm out!", "Leave it! Go!", "Not for this pay!"],
+  };
+  const shoutAt = { mine: -99, them: -99 };
+  function shoutNear(m, kind, self) {
+    const SP = CBZ.speech;
+    if (!SP || !SP.say || !m || !m.pos || !m.team) return;
+    if (simT - (shoutAt[m.team] || -99) < 2.4) return;
+    let who = self && !m.dead ? m : null, bd = 30 * 30;
+    if (!who) {
+      for (let i = 0; i < men.length; i++) {
+        const o = men[i];
+        if (!o || o === m || o.dead || o.isYou || o.team !== m.team || !o.pos) continue;
+        const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; who = o; }
+      }
+    }
+    if (!who) return;
+    shoutAt[m.team] = simT;
+    const nm = m.s && m.s.name ? String(m.s.name).split(/\s+/)[0] : "";
+    let pool = SHOUTS[kind];
+    if (!nm) pool = pool.filter(function (l) { return l.indexOf("{n}") < 0; });
+    const line = pool[(Math.random() * pool.length) | 0].replace(/\{n\}/g, nm);
+    safe(function () { SP.say(who, line, { secs: 2.2, headY: 2.0, ear: 45 }); });
+  }
+
   function killMan(m, imp) {
     m.dead = true; m.hp = 0;
     /* AND HE IS OUT OF THE FORMATION THE INSTANT HE IS HIT. frame() skips
@@ -2764,6 +2796,7 @@
     }
     m.side.deadN++;
     if (m.s) report.deadOf[m.team].push(m.s);
+    shoutNear(m, "down", false);
     /* HOW HE FALLS IS warlord/deaths.js's, ALL OF IT. This block used to be
        three lines — deathPose on frame zero, a coin-flip direction, and a
        one-axis plank — and the owner's report is exactly that: "death in
@@ -2813,8 +2846,13 @@
   const SINK_NEAR2 = 45 * 45;
   function retireOldestCorpse() {
     let pick = -1;
-    for (let i = 0; i < corpses.length; i++) if (camDist2(corpses[i].pos) > SINK_NEAR2) { pick = i; break; }
-    if (pick < 0) pick = 0;
+    const law = CBZ.corpseLaw;
+    for (let i = 0; i < corpses.length; i++) {
+      // THE CORPSE LAW (systems/bodyfall.js): never a body on screen, never one
+      // within 60 m; oldest first. Nobody eligible? The field keeps them all.
+      if (law ? law.hidden(corpses[i].pos) : camDist2(corpses[i].pos) > SINK_NEAR2) { pick = i; break; }
+    }
+    if (pick < 0) { if (law) return; pick = 0; }
     const old = corpses.splice(pick, 1)[0];
     if (!old || !old.group) return;
     if (CBZ.ragdollDrop) safe(function () { CBZ.ragdollDrop(old); });

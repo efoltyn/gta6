@@ -636,13 +636,13 @@
       dialogue: ["Protect yourself at all times.", "I stop it when I stop it. Fight."] }, "ref");
     for (let i = 0; i < 3; i++) queue({ role: "judge", name: "Judge " + (i + 1), outfit: 0x1c2230,
       at: [jx - 0.9, (i - 1) * 1.7], face: -Math.PI / 2, post: "pinned", pose: "sit",
-      dialogue: ["I score what I see. Clean punches, ring generalship."] }, "judge");
+      dialogue: ["I score what I see.", "Don't look at me. Look at him."] }, "judge");
     queue({ role: "bookmaker", name: "The Bookmaker", outfit: 0x6e1524, skin: 0xcaa06e,
       at: [wx - 1.2, wz], face: -Math.PI / 2, post: "pinned", pose: "stand",
       dialogue: ["Money down before the bell, friend.", "Odds are odds. The house keeps the vig."] }, "bookie");
     queue({ role: "cutman", name: "The Cutman", outfit: 0xe4e4e4, skin: 0x9c6b41,
       at: [-half - 1.4, -half - 0.4], face: 0, post: "pinned", pose: "stand",
-      dialogue: ["Sit down, breathe. I'll close that cut.", "One round at a time."] }, "cutman");
+      dialogue: ["Sit down, breathe. I'll close that cut.", "One round at a time.", "Your nose has been broke before. I can tell."] }, "cutman");
 
     // ---- the entry point: one zone, one panel ------------------------------
     ctx.zone({

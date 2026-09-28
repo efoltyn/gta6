@@ -1290,7 +1290,7 @@
           try { CBZ.cityOccupyGrant(rec.seat.lot, "faction", playerActor()); } catch (e) {}
         }
         if (CBZ.citySay) {
-          try { CBZ.citySay(p, "“You're expected. Sit down.”", "#8fe08a", 2.4); } catch (e) {}
+          try { CBZ.citySay(p, "You're expected. Sit down.", "#8fe08a", 2.4); } catch (e) {}
         }
       },
     });
@@ -1315,21 +1315,21 @@
         const r = reactionTo(rec.actor);
         const armed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
         if (armed) {
-          if (CBZ.citySay) { try { CBZ.citySay(q, "“Not with that in your hand.”", "#ff9aa2", 2.2); } catch (e) {} }
+          if (CBZ.citySay) { try { CBZ.citySay(q, "Not with that in your hand.", "#ff9aa2", 2.2); } catch (e) {} }
           const prev = rec.stage; rec.stage = Math.max(rec.stage, 2); applyStage(rec, prev);
           return;
         }
         if (r === "hostile" || (g.wanted | 0) > 0) {
-          if (CBZ.citySay) { try { CBZ.citySay(q, "“You're joking.”", "#ff9aa2", 2.2); } catch (e) {} }
+          if (CBZ.citySay) { try { CBZ.citySay(q, "You're joking.", "#ff9aa2", 2.2); } catch (e) {} }
           return;
         }
         if (r === "watch") {
           rec.audienceT = Math.max(rec.audienceT, 45);
-          if (CBZ.citySay) { try { CBZ.citySay(q, "“Two minutes. Don't waste them.”", "#8fe08a", 2.4); } catch (e) {} }
+          if (CBZ.citySay) { try { CBZ.citySay(q, "Two minutes. Don't waste them.", "#8fe08a", 2.4); } catch (e) {} }
           if (CBZ.cityRelShift) { try { CBZ.cityRelShift(q, "greeted", 0.4); } catch (e) {} }
           return;
         }
-        if (CBZ.citySay) { try { CBZ.citySay(q, "“He doesn't know you. Come back when he does.”", "#e8dcc0", 2.4); } catch (e) {} }
+        if (CBZ.citySay) { try { CBZ.citySay(q, "He doesn't know you.", "#e8dcc0", 2.4); } catch (e) {} }
       },
     });
   }

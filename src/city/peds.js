@@ -226,6 +226,7 @@
   // a few px tall — its shadow is invisible, but it doubled its cost in the
   // shadow pass). Toggled only on threshold crossings, so it's ~free per frame.
   let VIS_D2 = 95 * 95, SHADOW_D2 = 42 * 42;
+  const CORPSE_VIS_D2 = 200 * 200;
   // core/quality.js publishes a tier LOD here; re-derive the squared cutoffs.
   CBZ.refreshPedLOD = function () {
     const lod = CBZ.pedLOD;
@@ -2087,7 +2088,7 @@
       p.poseCower = Math.max(p.poseCower || 0, 0.7);            // reactions.js animates the hunch/recoil
       p._scareT = 0.9;                                          // transient marker (rig may read it)
       p._scareCD = 22 + rng() * 10;                             // this hobo won't scare you again for ~25s
-      if (CBZ.citySay) CBZ.citySay(p, pick(["“GET BACK!”", "“YOU SEE EM TOO?!”", "“DON'T TOUCH ME!”", "“THEY'RE WATCHING!”"], rng()), "#ff7b6b", 1.6);
+      if (CBZ.citySay) CBZ.citySay(p, pick(["GET BACK!", "YOU SEE EM TOO?!", "DON'T TOUCH ME!", "THEY'RE WATCHING!", "I KNOW WHAT YOU ARE!"], rng()), "#ff7b6b", 1.6);
       if (CBZ.sfx) CBZ.sfx("punch");                           // a sharp startle stinger
       if (CBZ.shake) CBZ.shake(0.5);                            // the camera flinch
       // THE LUNGE IS GONE FROM HERE ON PURPOSE. It used to fire for any
@@ -2830,7 +2831,8 @@
        the round and his own run, no spin. The verlet body used to take every
        near kill, and a limp stick figure hit by a pistol is a plank levered
        over its planted feet. */
-    const launches = cause === "explosion" || cause === "run over" || cause === "killed in the crash";
+    const launches = cause === "explosion" || cause === "run over" || cause === "killed in the crash" ||
+      !!(imp && imp.wkey === "shotgun" && (imp.dist || 99) < 7);   // a point-blank 12-gauge really does throw a man
     if (launches && CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar && !seatedCorpse) {
       let mag;
       const f0 = (imp && imp.force) || 0;
@@ -4033,7 +4035,7 @@
       const ax = P.pos.x - threat.pos.x, az = P.pos.z - threat.pos.z, al = Math.hypot(ax, az) || 1;
       ped.state = "flee"; ped.path = null;
       ped.target.set(P.pos.x + (ax / al) * 7, 0, P.pos.z + (az / al) * 7);
-      if (!ped._routSaid) { ped._routSaid = true; if (CBZ.citySay) CBZ.citySay(ped, "“Too many of them, falling back!”", null, 2.2); }
+      if (!ped._routSaid) { ped._routSaid = true; if (CBZ.citySay) CBZ.citySay(ped, "Too many. Back up!", null, 2.2); }
       return;
     }
     ped._routSaid = false;
@@ -4328,7 +4330,7 @@
         if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       }
     } else {
-      citySayBark(ped, pick(["Nah, nothing on me worth your while.", "Not today, maybe next time.", "I'm tapped out, sorry."], rng()), 1.8);
+      citySayBark(ped, pick(["Nah, I got nothing.", "Not today.", "I'm tapped out.", "Rent's due, man."], rng()), 1.8);
     }
     ped.reactCD = 16 + rng() * 10;
   }
@@ -4352,8 +4354,8 @@
     ped.poseAimBack = ped.armed || kind === "kill";   // weapon-draw / squared-up posture
     ped.reactCD = kind === "kill" ? 9 : 7;
     citySayBark(ped, kind === "kill"
-      ? pick(["You picked the wrong day!", "I'll drop you right here!", "This ends now!"], rng())
-      : pick(["You don't wanna do this.", "Last chance, walk away.", "Square up, then!"], rng()), 1.6);
+      ? pick(["You picked the wrong day!", "I'll drop you right here!", "You shoulda kept walking."], rng())
+      : pick(["You don't wanna do this.", "Walk away.", "Square up, then!", "Take your hands out your pockets."], rng()), 1.6);
   }
   // ticked from think() every frame a windup is live (cheap: a couple of field
   // writes; the actual commit only happens once when the timer crosses zero).
@@ -4410,16 +4412,16 @@
         if (intent === "beat") { beginViolentWindup(ped, "beat"); return true; }
         if (intent === "work") {
           ped.wantsWork = 12;                 // interact.js can read this; bark either way
-          citySayBark(ped, pick(["You hiring? I'll run with you.", "Put me on. I need the work.", "Let me earn with your crew."], rng()), 2.2);
+          citySayBark(ped, pick(["You hiring?", "Put me on. I need the work.", "I got a kid coming. I need money.", "I can drive. I can keep quiet."], rng()), 2.2);
           return true;
         }
         if (intent === "deal") {
-          citySayBark(ped, pick(["Got that good-good if you're buying.", "You need anything? I got product.", "Best prices in the city, my friend."], rng()), 2.2);
+          citySayBark(ped, pick(["You good? You need something?", "I got what you need.", "Psst. You looking?"], rng()), 2.2);
           ped.offersDeal = 10; return true;
         }
         if (intent === "trade") { pedTrade(ped); return true; }
         // talk / favor
-        citySayBark(ped, pick(["You see what happened over there?", "Spare a few bucks?", "Watch yourself out here.", "You that one from the news?", "Crazy day, right?"], rng()), 2.0);
+        citySayBark(ped, pick(["You see what happened over there?", "Spare a few bucks?", "You got a light?", "You that one from the news?", "You know what time it is?", "My landlord's a crook, man.", "You drop something?"], rng()), 2.0);
         return true;
       }
       return true;
@@ -4463,7 +4465,7 @@
       const side = rng() < 0.5 ? 1 : -1;                   // pick a kerb to cross to
       ped.target.set(ped.pos.x + ax * 6 - az * side * 9, 0, ped.pos.z + az * 6 + ax * side * 9);
       ped.state = "walk";
-      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again.”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
+      if (CBZ.citySay) CBZ.citySay(ped, pick(["Not again.", "Keep walking. Keep walking.", "Not today. Not me."], rng()), "#cfd6e6", 2);
       if (CBZ.cityStreetParts) CBZ.cityStreetParts(ped);   // warn the people around them
       return true;
     }
@@ -4480,8 +4482,8 @@
       // same man says the same thing until how he feels about you changes. The
       // street name still rides on it — that part was already right.
       const gl = CBZ.cityLine && CBZ.cityLine(ped, "greet");
-      const line = gl ? "“" + gl.replace(/\.$/, "") + ", " + title + ".”"
-                      : pick(["“Yo, " + title + "!”", "“Ayy, " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
+      const line = gl ? gl.replace(/\.$/, "") + ", " + title + "."
+                      : pick(["Yo, " + title + "!", "Ayy, " + title + "!", title + "! You good?"], rng());
       if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
       if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       return true;
@@ -4500,7 +4502,7 @@
         ped.rage = CBZ.city.playerActor; ped.state = "fight"; ped.reactCD = 10;
         if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, host === 2 ? 0.3 : 0.15);
         citySayBark(ped, host === 2 ? pick(["Wrong block, opp!", "You're a dead man here.", "Light him up!"], rng())
-                                    : pick(["You don't belong here.", "Off our turf.", "Bold move, comin' round here."], rng()), 1.6);
+                                    : pick(["You don't belong here.", "Off our block.", "Bold move, comin' round here."], rng()), 1.6);
         return true;
       }
     }
@@ -4513,8 +4515,8 @@
         ped.reactCD = 12 + rng() * 8;
         faceTo(ped, P.pos.x, P.pos.z, 1.5);
         ped.pause = Math.max(ped.pause, 0.7 + rng() * 0.8); ped.speed = 0;
-        citySayBark(ped, fam ? pick(["We move when you say, boss.", "Respect. You run this.", "Need anything, I'm on it."], rng())
-                              : pick(["That's the one from the news right there.", "Big respect, heard about you.", "We good, we good. No problems here."], rng()), 1.8);
+        citySayBark(ped, fam ? pick(["Boss.", "Respect.", "Need anything, I'm on it.", "It's quiet today, boss."], rng())
+                              : pick(["That's the one from the news.", "Heard about you.", "We good. No problems here."], rng()), 1.8);
         return true;
       }
     }
@@ -4627,7 +4629,7 @@
       // the street knows you as somebody who takes work, offers work instead of
       // product. Falls back to the old flat line if read.js is absent.
       const rl = CBZ.cityLine && CBZ.cityLine(ped, "trade");
-      citySayBark(ped, rl || pick(["Yo, you buying or selling?", "I got a little something if you're interested.", "Let's talk business a sec."], rng()), 2);
+      citySayBark(ped, rl || pick(["Yo, you buying or selling?", "What you got in the bag?", "Watch, real gold. Forty bucks."], rng()), 2);
       return true;
     }
     if (picked === "deal") {
@@ -4745,7 +4747,7 @@
     if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 12, "mugging");   // one offense (the caller no longer logs its own)
     if (CBZ.cityNpcGrudge) CBZ.cityNpcGrudge(victim, att);            // the mark may come back for the thief
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (CBZ.citySay && rng() < 0.5) CBZ.citySay(att, "“Gimme that!”", "#ffce6b", 1.4);
+    if (CBZ.citySay && rng() < 0.5) CBZ.citySay(att, "Gimme that!", "#ffce6b", 1.4);
     // the thief flees AWAY from the victim for a few seconds, then re-checks the
     // street — fleeFrom routes a clear path; a short timer keeps the run committed.
     att.state = "flee"; att._mugFleeT = 3 + rng() * 2;
@@ -5419,7 +5421,7 @@
   // is per GANG (one voice, one ladder), not per member, so a crew of six does
   // not bark six warnings. Cost: a few compares per guard think, no scans.
   const TW_WARN = [
-    ["Ay. Put that away. You're on our block.", "You lost? That piece stays in your pants round here.", "Wrong corner to be waving that."],
+    ["Ay. Put that away.", "You lost?", "Wrong corner to be waving that."],
     ["I'm not saying it again. Walk.", "Last time. Turn around.", "You got about two seconds."],
     ["Light him up!", "He wants it. Get him!", "That's it. Run him off!"],
   ];
@@ -6617,7 +6619,9 @@
         // rig below uses; this is what makes a held corpse past 95 m free.
         {
           const cdx = p.pos.x - camx, cdz = p.pos.z - camz;
-          if (p.group) p.group.visible = cdx * cdx + cdz * cdz < VIS_D2;
+          // a body you shot at range stays on screen where it fell: corpses
+          // draw out to 200 m (they are frozen, so they cost draw calls only)
+          if (p.group) p.group.visible = cdx * cdx + cdz * cdz < Math.max(VIS_D2, CORPSE_VIS_D2);
         }
         // BODIES STAY UNTIL SOMEBODY COMES FOR THEM (city/morgue.js). The old
         // rule was two timers: flag for pickup at 4 s so medics.js could walk a

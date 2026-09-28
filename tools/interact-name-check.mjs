@@ -45,7 +45,9 @@ function node() {
 {
   const SRC = readFileSync(join(ROOT, "src/systems/interact.js"), "utf8");
   const sb = {
-    CBZ: { GANG_NAMES: ["the Reds", "the Blues"], touchInteractionDocked: () => false },
+    // the role under a prison name is his race's car (systems/prisoncars.js)
+    CBZ: { touchInteractionDocked: () => false,
+      prisonCars: { label: (i) => ["Southsiders", "Black car", "White car", "Paisas", "Asian car", "Others"][i] || "", phrase: (i) => "car " + i } },
     el: { interactName: node(), interactNote: node(), interactOpts: node() },
     document: { documentElement: { style: { setProperty() {} } } },
     TOUCH: false,
@@ -74,10 +76,11 @@ function node() {
     function optChoice(i, a, v) { return optButton("", i, a, v); }
     this.renderPanel = renderPanel; this.whoFor = whoFor;`, sb);
 
-  const inmate = { data: { name: "Marcus Hale" }, gang: 0 };
+  // a man who only rides under his car (not active in its business) still shows it
+  const inmate = { data: { name: "Marcus Hale" }, gang: -1, yardCar: 1 };
   sb.renderPanel(inmate);
   check("prison desktop: #interactName carries the name", sb.el.interactName.innerHTML.startsWith("Marcus Hale"), sb.el.interactName.innerHTML);
-  check("prison desktop: clique in muted role span", /<span class="iname-role">Reds<\/span>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
+  check("prison desktop: his car in muted role span", /<span class="iname-role">Black car<\/span>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
   check("prison desktop: buttons still render", /Trade/.test(sb.el.interactOpts.innerHTML), sb.el.interactOpts.innerHTML);
 
   sb.renderPanel({ kind: "guard", data: { name: "Officer Diaz" } });

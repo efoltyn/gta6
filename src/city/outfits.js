@@ -216,9 +216,14 @@
     corrections: { id: "corrections", hat: "peaked:police", name: "Correctional Officer Uniform", tier: "law", who: "prison officers", price: 0, drip: 0,
                  cap: true, capColor: 0x202b3b, badge: true,
                  colors: { legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d, shoes: 0x111419, belt: 0x111419 } },
-    warden:    { id: "warden", hat: "peaked:officer", name: "Warden Dress Uniform", tier: "law", who: "the prison warden", price: 0, drip: 1,
-                 cap: true, capColor: 0x171d29, badge: true,
-                 colors: { legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d, shoes: 0x090b0f, belt: 0x111419 } },
+    // THE WARDEN IS NOT A GUARD (owner, 2026-09-28: "the warden just acts like
+    // a normal cop"). He wore a navy dress uniform with a peaked cap and a
+    // badge, the same silhouette as every officer he commands. He wears a
+    // charcoal three-piece: no cap, no badge, a tie. Same pinning as the
+    // detail below (id "suit" is the painter key; `uniform` names the role).
+    warden:    { id: "suit", uniform: "warden", name: "Warden's Three-Piece", tier: "law", who: "the prison warden", price: 0, drip: 9, formal: "suit",
+                 style: null, styleName: "Charcoal 3-Piece Suit",
+                 colors: { legs: 0x24272e, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36, shoes: 0x0c0d10, shirt: 0xf1f2ec, tie: 0x7a1f2b, belt: 0x16171b } },
     sheriff:   { id: "sheriff", hat: "campaign:sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
     soldier:   { id: "soldier", hat: "milcap",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
@@ -293,14 +298,15 @@
   // Pin CAT.detail to its SUIT_STYLES row by NAME (clothes.js owns the table
   // and may load after this file on a slice page). Mutating the catalog row is
   // right here: it is one uniform, every wearer shares it.
-  function pinDetail() {
-    const d = CAT.detail;
+  // a role suit is pinned to a NAMED style in clothes.js's table (indices move)
+  function pinSuitByName(d, names) {
     if (d.style != null) return d;
     const tbl = CBZ.citySuitStyles;
     if (!tbl || !tbl.length) return d;
     let idx = -1;
-    for (let i = 0; i < tbl.length; i++) if (tbl[i] && tbl[i].name === "Detail Black") { idx = i; break; }
-    if (idx < 0) for (let i = 0; i < tbl.length; i++) if (tbl[i] && tbl[i].name === "Black Suit") { idx = i; break; }
+    for (let k = 0; k < names.length && idx < 0; k++) {
+      for (let i = 0; i < tbl.length; i++) if (tbl[i] && tbl[i].name === names[k]) { idx = i; break; }
+    }
     if (idx < 0) return d;
     d.style = idx;
     const st = tbl[idx];
@@ -308,6 +314,10 @@
     if (st.legs != null) d.colors.legs = st.legs;
     if (st.tie != null) d.colors.tie = st.tie;
     return d;
+  }
+  function pinDetail() {
+    pinSuitByName(CAT.warden, ["Charcoal 3-Piece Suit", "Charcoal Suit"]);
+    return pinSuitByName(CAT.detail, ["Detail Black", "Black Suit"]);
   }
   pinDetail();
 

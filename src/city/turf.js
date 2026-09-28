@@ -277,8 +277,8 @@
     const gangs = (CBZ.cityGangs || []).filter((x) => !x.isPlayer);
     for (let i = 0; i < gangs.length; i++)
       for (let j = i + 1; j < gangs.length; j++) {
-        // Authentic blocs: same NATION → allies, rival nations (People vs Folk vs
-        // Norte) → at war, anyone neutral → a mild random lean. The Aryan Brotherhood
+        // Blocs: same NATION → allies, rival nations (east vs west vs north)
+        // → at war, anyone neutral → a mild random lean. The Ironwood Brotherhood
         // rides its OWN bloc ("brand") and is hostile to EVERYONE — including the
         // neutral organized-crime crews — so a hate faction is a wildcard nobody
         // shelters. Relations still DRIFT later (driftAlliances).
@@ -286,7 +286,7 @@
         let r;
         if (na === "brand" || nb === "brand") r = -0.55 - rng() * 0.25;      // hostile-to-all chaos faction
         else if (na !== "neutral" && na === nb) r = 0.5 + rng() * 0.25;       // brothers under one Nation
-        else if (na !== "neutral" && nb !== "neutral") r = -0.5 - rng() * 0.25; // People vs Folk vs Norte
+        else if (na !== "neutral" && nb !== "neutral") r = -0.5 - rng() * 0.25; // east vs west vs north
         else r = (rng() - 0.5) * 0.5;                                         // neutral crew (cartel/cosa/MC) — situational
         setRel(gangs[i].id, gangs[j].id, r);
       }
