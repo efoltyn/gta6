@@ -3126,6 +3126,13 @@
   // A SINGLE DRIP. Deliberately not goreImpact: a man walking with an open
   // wound leaves marks, not a spray and a pool at every footfall. One tiny
   // short-lived splat, seated on the terrain like every other ground decal.
+  // A POOL LAYER under a body that is still bleeding (systems/vitals.js calls
+  // this as blood leaves a lying man: each call a bigger layer, to its cap).
+  // `grow` is spawnSplat's own pool size (0.3 small .. 2.4 a man bled out).
+  CBZ.gorePool = function (x, z, grow) {
+    if (!CBZ.scene || dist2Cam(x, z) > 60 * 60) return null;
+    return spawnSplat(x, z, Math.max(0.2, Math.min(2.4, grow || 0.6)) * POOL_K * 1.35, BLOOD_D, true);
+  };
   CBZ.goreDrip = function (x, z, size) {
     if (!CBZ.scene) return;
     const d2 = dist2Cam(x, z);
