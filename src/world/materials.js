@@ -630,6 +630,13 @@
   const WET_COL = 0x24272c;   // darker, wet-slick asphalt
   const DRY_ROUGH = 0.92, WET_ROUGH = 0.32;   // wetter = shinier (lower roughness)
   const DRY_METAL = 0.02, WET_METAL = 0.12;   // a touch of metalness picks up envMap specular
+  // Sky reflection strength. DRY 0.18 (plain-node model of r128's env BRDF,
+  // driver's view N.V 0.1, day sky 0.75 vs sun+hemi diffuse on albedo 0.068):
+  // 3 % of the diffuse on the 0.92 base, ~10 % in the polished wheel paths at
+  // the asphalt shader's dry roughness floor 0.72: a broad sheen, not a
+  // mirror. 0.35 was 5-19 % and, through the aggregate normals, read as
+  // mottled blue gravel. WET 2.23 is the rain look, unchanged.
+  const DRY_ENV = 0.18, WET_ENV = 2.23;
 
   const roadMats = [];         // every material this factory ever produced
   let wetK = 0;                // smoothed 0..1 "how wet the road looks" (own damping — weather's own intensity already eases, this just avoids a second snap on top)
@@ -649,7 +656,7 @@
       roughness: DRY_ROUGH,
       metalness: DRY_METAL,
       envMap: CBZ.ENV || null, // carfx.js may not have built this yet; opportunistic only
-      envMapIntensity: 0.18,
+      envMapIntensity: DRY_ENV,
     });
     // SURFACE DETAIL. The asphalt normal map is what turns the wet-road
     // specular from a mirror sheet into scattered highlights, and the
@@ -705,10 +712,7 @@
         m.normalScale.set(ns, ns);
       }
       // A wet surface reflects the sky far harder than a dry one.
-      if ("envMapIntensity" in m) m.envMapIntensity = 0.18 + wetK * 2.05;
-      // Dry asphalt is a near-black diffuse surface: at 0.9 it mirrored the
-      // blue env gradient through the aggregate normals and the whole road
-      // read as mottled blue gravel. Dry 0.35, rain still takes it to ~2.
+      if ("envMapIntensity" in m) m.envMapIntensity = DRY_ENV + wetK * (WET_ENV - DRY_ENV);
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });
@@ -943,7 +947,15 @@
         .replace("#include <color_fragment>", "#include <color_fragment>\nfloat asRough = 1.0;\ndiffuseColor.rgb *= asphaltSurface(asRough);");
       if (fs.indexOf("#include <roughnessmap_fragment>") >= 0) {
         fs = fs.replace("#include <roughnessmap_fragment>",
-          "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor * asRough, 0.04, 1.0);");
+          // DRY ASPHALT IS NEVER A MIRROR. asRough (polish, tar, oil, seams)
+          // multiplies down to ~0.3 where they overlap: on the dry 0.92 road
+          // that was a GGX lobe 2-4 deg wide at 400-1800x the diffuse (a low
+          // sun or a lamp as a streak in every wheel path, plain-node model
+          // of r128's BRDF_Specular_GGX at a 5 deg driver's view). The floor
+          // roughness - 0.20 keeps the dry lobe >= 0.72: ~8 deg wide, 68x,
+          // the broad glare real dry asphalt has. Wet (0.32) the floor is
+          // 0.12, below anything the multiply reaches, so rain is untouched.
+          "#include <roughnessmap_fragment>\nroughnessFactor = clamp(max(roughnessFactor * asRough, roughnessFactor - 0.20), 0.04, 1.0);");
       }
       sh.fragmentShader = fs;
     };

@@ -2924,11 +2924,26 @@
     const headLampM = lampMat(0xffe9a8);          // the drop lens: shared, glow driven by night
     headLampM.emissiveIntensity = 0.0;
     headLampM.color.setHex(0x8e8a80);             // by day: dull glass in a grey housing, not a white disc
-    // LIGHT ON THE ROAD. Warm (~3000 K) and roughly a type-III footprint:
-    // long along the kerb, shorter across, hot spot under the head.
-    // (a lamp every 13 m, alternating kerbs: 15 m along keeps the pools
-    // distinct, with dark asphalt between the hot spots)
-    const LAMP_POOL_HEX = 0xffc88a, LAMP_POOL_K = 1.0, LAMP_POOL_ALONG = 15, LAMP_POOL_ACROSS = 11;
+    // LIGHT ON THE ROAD. Warm (~3000 K), a type-III footprint: long along the
+    // kerb, thrown out over the carriageway, hot spot at the head's nadir.
+    // TUNED IN A MODEL, NOT BY EYE (street_hardware.js poolMaterial has the
+    // falloff; the numbers are a plain-node fit of the real pipeline: ACES +
+    // grade at the deep-night exposure 0.79, asphalt albedo 0.068, the pool
+    // added in display space, vs the physical cos^3 sum of 8.4 m heads every
+    // 13 m on alternating kerbs, E0 set so the road under a head reads 0.36):
+    //   old 15 x 11 m, K 1.0: peak display (0.92, 0.75, 0.57), i.e. an orange
+    //     blob near white, and 0.04 (unlit road) between pools, min/max 0.06
+    //     along the kerb lane: hard spots on black.
+    //   new 32 x 16 m, K 0.42 (x the 0.9 night ramp): peak (0.40, 0.34, 0.29),
+    //     kerb lane min/max 0.32 (physical 0.56), centre lanes 0.87 (0.79):
+    //     no black gaps, still a visible rhythm of pools.
+    // ALONG 32 is the reach the 13 m stagger needs: 28 leaves the unlit 0.05
+    // between pools (black again), 36 lifts the trough to 0.17, which is
+    // closer to a uniform wash, for +12 % fill. ACROSS 16 with the quad centre SHIFT
+    // 3.2 m past the bulb toward the road puts the far rim 3.5 m beyond the
+    // centreline and the kerb-side rim at 11.5 m, still on the footway (it
+    // ends at 11), never inside a shop.
+    const LAMP_POOL_HEX = 0xffc88a, LAMP_POOL_K = 0.42, LAMP_POOL_ALONG = 32, LAMP_POOL_ACROSS = 16, LAMP_POOL_SHIFT = 3.2;
     const SIG_POOL = { red: [0xff2a1c, 0.16], yel: [0xffae00, 0.13], grn: [0x1cff8e, 0.11] };
     const lampBulbSpots = [];                     // {x,z,ang} per luminaire; index == lampIdx
     const lampPosts = [];                         // pole instances (the full lamp prototype)
@@ -2977,6 +2992,10 @@
       // streetlights on the highway and bridges"). Real highways/spans here
       // run unlit, so skip those districts outright.
       if (r.district === "highway" || r.district === "bridge") continue;
+      // A TOWN LIGHTS ITS OWN STREETS (towngen.js section 6 plants 6 m lamps
+      // on them and tags the road). Walking it again stood a second, 8 m city
+      // lamp every 13 m between the town's own: two lamp systems, one street.
+      if (r.litByTown) continue;
       // NO CITY STREET FURNITURE ON RESTRICTED GROUND (roadrules.js): apron
       // service lanes and compound spurs are not streets.
       if (CBZ.roadPropRoadOk && !CBZ.roadPropRoadOk(r)) continue;
@@ -3024,15 +3043,31 @@
       const items = [];
       for (const sp of lampBulbSpots) {
         const fx = Math.sin(sp.ang), fz = Math.cos(sp.ang);
-        const cx = sp.x + fx * (LO.bulbZ + 0.9), cz = sp.z + fz * (LO.bulbZ + 0.9);
-        items.push({ x: cx, y: HW.seatY(city, cx, cz, sp.ang, LAMP_POOL_ALONG, LAMP_POOL_ACROSS), z: cz, ry: sp.ang,
-          sx: LAMP_POOL_ALONG, sz: LAMP_POOL_ACROSS, color: LAMP_POOL_HEX, k: LAMP_POOL_K });
+        const cx = sp.x + fx * (LO.bulbZ + LAMP_POOL_SHIFT), cz = sp.z + fz * (LO.bulbZ + LAMP_POOL_SHIFT);
+        const py = HW.seatY(city, cx, cz, sp.ang, LAMP_POOL_ALONG, LAMP_POOL_ACROSS);
+        // nadir = the bulb, SHIFT behind the quad centre; H = bulb over the pool
+        items.push({ x: cx, y: py, z: cz, ry: sp.ang,
+          sx: LAMP_POOL_ALONG, sz: LAMP_POOL_ACROSS, color: LAMP_POOL_HEX, k: LAMP_POOL_K,
+          nz: -LAMP_POOL_SHIFT, h: Math.max(3, sp.y0 + LO.bulbY - py) });
       }
       // the pool index of lamp k MUST be k (hitProp zero-scales pools by lampIdx)
       if (items.length !== lampBulbSpots.length) console.error("[props] light-pool index bookkeeping broke", items.length, lampBulbSpots.length);
       for (const s of sigPoolSrc) {
         s.idx = items.length; s.key = null;
         items.push({ x: s.x, y: HW.seatY(city, s.x, s.z, s.ry, s.sx, s.sz), z: s.z, ry: s.ry, sx: s.sx, sz: s.sz, color: 0x000000, k: 0 });
+      }
+      // TOWN LAMPS (towngen.js) light their own streets, and this walk skips
+      // those roads (r.litByTown), so the town heads' road light comes from
+      // here: the same pool at the village head's height (6.2 m vs 8.4 m,
+      // footprint scaled by that 0.74). Appended after the signals: they are
+      // not shootable, so no lampIdx bookkeeping.
+      for (const t of city._townLampHeads || []) {
+        const k = Math.max(0.5, Math.min(1, t.h / 8.4));
+        const al = LAMP_POOL_ALONG * k, ac = LAMP_POOL_ACROSS * k, sh = LAMP_POOL_SHIFT * k;
+        const cx = t.x + Math.sin(t.ang) * sh, cz = t.z + Math.cos(t.ang) * sh;
+        const py = HW.seatY(city, cx, cz, t.ang, al, ac);
+        items.push({ x: cx, y: py, z: cz, ry: t.ang, sx: al, sz: ac, color: LAMP_POOL_HEX, k: LAMP_POOL_K,
+          nz: -sh, h: Math.max(3, t.y - py) });
       }
       const pools = HW.lightPools(items);
       if (pools) { pools.addTo(root); lampPools.glow = pools; }
