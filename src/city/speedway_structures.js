@@ -320,7 +320,11 @@
     const C = S.C;
     const t0 = P.t0, t1 = P.t1;
     const ROWS = P.rows || 26;
-    const TREAD = 0.95, RISE = 0.52, SEAT_W = 0.92;
+    // RISE 0.44, not 0.52: systems/physics.js steps a body up at most STEP_UP
+    // 0.45, and a stand is a staircase people walk ALONG AND UP. At 0.52 no
+    // row could be stepped onto from the one below, so the rake was either a
+    // solid block (what it was) or a trap. 0.44 is a real stadium riser.
+    const TREAD = 0.95, RISE = 0.44, SEAT_W = 0.92;
     const uBase = P.uBase == null ? 30 : P.uBase;
     const plinth = P.plinth == null ? 1.7 : P.plinth;
     const arc = Math.abs(t1 - t0) * S.L;
@@ -438,6 +442,9 @@
       const ax = f.x + f.nx * (uv - 1.2), az = f.z + f.nz * (uv - 1.2);
       const bx = f.x + f.nx * (uv + 2.6), bz = f.z + f.nz * (uv + 2.6);
       pushStrut(vomIM, ax, vy, az, bx, vy, bz, 2.2);
+      // the rows are walkable now, so the tunnel mouth is solid where it is
+      // drawn (2.2 wide along the rows, 3.8 deep, 2.2 tall)
+      S.solidYaw((ax + bx) / 2, (az + bz) / 2, 1.1, 1.9, Math.atan2(-f.tz, f.tx), vy - 1.1, vy + 1.56);
       box(grp, stairMat, (ax + bx) / 2, vy + 1.33, (az + bz) / 2,
         4.2, 0.46, 2.6, f.heading);                                     // the head
       propKeep(1, vy - 1.1, plinth + ROWS * 0.34 * RISE);
@@ -549,23 +556,132 @@
     // out over the apron in front of it and the same again out the back, which
     // is why the paddock side of this circuit felt walled off well short of the
     // seating. Registered with the tangent frame's own yaw instead.
-    const CN = Math.max(6, Math.round(arc / 12));
+    // ---- 6. THE STAND IS A STAIRCASE YOU CAN WALK -------------------------
+    // It used to be ONE solid block per 12 m chord, full height (0..topY+1.2)
+    // over the whole rake: a grandstand drawn as steps that no body could set
+    // foot on, with 40+ seated spectators nobody could walk up to. Now:
+    //   · every row is a flat tread platform (an oriented rectangle per ~6 m
+    //     chord, so the curve of a turn stand is followed), RISE 0.44 apart —
+    //     under STEP_UP, so the whole rake steps row to row like a real one;
+    //   · each aisle gets a CBZ.stairs flight from the ground up the plinth
+    //     face onto row 0 (drawn as real steps), and an AI link up the rows;
+    //   · the walls are only what a real stand has: the plinth face (gapped at
+    //     the aisle stairs), a stepped end wall + rail at each end, the back
+    //     wall, and the vomitory mouths. Nothing solid over a tread.
+    const SEGM = 6.0;
+    const posAt = function (t, u) { const f = S.frame(t); return { x: f.x + f.nx * u, z: f.z + f.nz * u, f: f }; };
+    const speedAt = function (t, u) {
+      const e = 1e-4, a = posAt(t - e, u), b = posAt(t + e, u);
+      return Math.hypot(b.x - a.x, b.z - a.z) / (2 * e) || 1;
+    };
+    const standArc = Math.abs(t1 - t0) * speedAt((t0 + t1) / 2, uBack);
+    const CN = Math.max(4, Math.round(standArc / SEGM));
+    const PL = (CBZ.platforms = CBZ.platforms || []);
+    // an oriented box between two points of the stand (a chord), `hd` deep
+    // across it, as an oriented collider
+    function chordSolid(pa, pb, hd, y0, y1) {
+      const len = Math.hypot(pb.x - pa.x, pb.z - pa.z);
+      if (len < 0.05) return;
+      const ux = (pb.x - pa.x) / len, uz = (pb.z - pa.z) / len;
+      S.solidYaw((pa.x + pb.x) / 2, (pa.z + pb.z) / 2, len / 2, hd, Math.atan2(-uz, ux), y0, y1);
+    }
+    // 6a. treads
     for (let i = 0; i < CN; i++) {
-      const t = t0 + (t1 - t0) * (i + 0.5) / CN;
-      const f = S.frame(t);
-      const um = (uBase + uBack) / 2, ud = (uBack - uBase) + 4;
-      const cxw = f.x + f.nx * um, czw = f.z + f.nz * um;
-      const half = Math.abs(t1 - t0) * S.L / CN * 0.55;
-      if (S.solidYaw && CBZ.orientedCollider) {
-        // local +x on the TANGENT (along the rows), local +z on the NORMAL
-        // (through the depth) — rotation.y maps local +x to world (cos,-sin).
-        S.solidYaw(cxw, czw, half, ud / 2, Math.atan2(-f.tz, f.tx), 0, topY + 1.2);
-      } else {
-        const ex = Math.abs(f.tx) * half + Math.abs(f.nx) * ud / 2;
-        const ez = Math.abs(f.tz) * half + Math.abs(f.nz) * ud / 2;
-        S.solidBox(cxw - ex, cxw + ex, czw - ez, czw + ez, 0, topY + 1.2);
+      const ta = t0 + (t1 - t0) * i / CN, tb = t0 + (t1 - t0) * (i + 1) / CN;
+      for (let r = 0; r < ROWS; r++) {
+        const um = uBase + (r + 0.5) * TREAD;
+        const pa = posAt(ta, um), pb = posAt(tb, um);
+        const len = Math.hypot(pb.x - pa.x, pb.z - pa.z);
+        const ux = (pb.x - pa.x) / len, uz = (pb.z - pa.z) / len;
+        const hl = len / 2 + 0.04, hw = TREAD / 2 + 0.005;
+        const cx = (pa.x + pb.x) / 2, cz = (pa.z + pb.z) / 2;
+        const ex = Math.abs(ux) * hl + Math.abs(uz) * hw, ez = Math.abs(uz) * hl + Math.abs(ux) * hw;
+        PL.push({
+          minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez,
+          top: plinth + r * RISE, standTread: true,
+          obb: { cx: cx, cz: cz, ux: ux, uz: uz, hl: hl, hw: hw },
+        });
       }
     }
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    // 6b. aisle stairs up the plinth face + AI links. Aisle c sits between
+    // seat columns c and c+1 (the seat loop leaves c%AISLE_EVERY in {0,1}).
+    const railMat = cmat(C.STEEL);
+    const nStep = Math.max(2, Math.ceil(plinth / 0.18)), stepH = plinth / nStep, GO = 0.28;
+    const aisleTs = [];
+    for (let c = AISLE_EVERY; c <= COLS - 3; c += AISLE_EVERY) aisleTs.push({ t: t0 + (t1 - t0) * (c + 1) / COLS, vom: hasVom(c) });
+    const stepIM = makeIM(stairMat, aisleTs.length * nStep + 2, { noShadow: true });
+    const FLW = 1.6;
+    for (const a of aisleTs) {
+      const f = S.frame(a.t);
+      const uB = uBase - (nStep - 1) * GO;
+      const yb = Math.max(0, S.heightAt ? S.heightAt(a.t, uB - 0.3) : 0);
+      const pB = posAt(a.t, uB), pT = posAt(a.t, uBase);
+      for (let k = 1; k < nStep; k++) {
+        const uk = uB + (k - 0.5) * GO, pk = posAt(a.t, uk), hk = yb + k * stepH;
+        _Q.setFromAxisAngle(_YAX, f.heading); _V.set(pk.x, hk / 2, pk.z); _SC.set(GO + 0.01, hk, FLW);
+        if (stepIM.count < stepIM.instanceMatrix.count) stepIM.setMatrixAt(stepIM.count++, _M.compose(_V, _Q, _SC));
+      }
+      if (CBZ.stairs) {
+        CBZ.stairs.flight({
+          bottom: { x: pB.x, y: yb, z: pB.z }, top: { x: pT.x, y: plinth, z: pT.z },
+          width: FLW, overlap: 0.3, kind: "stair", owner: grp.name,
+        });
+        // up the rows, for the planner (the rows themselves are steps)
+        if (!a.vom) {
+          const path = [];
+          for (let r = 0; r < ROWS; r += Math.max(1, Math.floor(ROWS / 6))) {
+            const p = posAt(a.t, uBase + (r + 0.3) * TREAD);
+            path.push({ x: p.x, y: plinth + r * RISE, z: p.z });
+          }
+          const pe = posAt(a.t, uBase + (ROWS - 0.5) * TREAD);
+          path.push({ x: pe.x, y: plinth + (ROWS - 1) * RISE, z: pe.z });
+          CBZ.stairs.link({ path: path, width: SEAT_W * 2, kind: "aisle", owner: grp.name });
+        }
+      }
+    }
+    finishIM(grp, stepIM);
+    // 6c. plinth face: a wall to anyone on the ground (and to cars), gapped
+    // at each aisle stair; a body on row 0 stands above it.
+    const gapHalf = FLW / 2 + 0.15;
+    let spans = [[t0, t1]];
+    for (const a of aisleTs) {
+      const dt = gapHalf / speedAt(a.t, uBase);
+      const next = [];
+      for (const sp of spans) {
+        if (a.t + dt <= sp[0] || a.t - dt >= sp[1]) { next.push(sp); continue; }
+        if (a.t - dt > sp[0]) next.push([sp[0], a.t - dt]);
+        if (a.t + dt < sp[1]) next.push([a.t + dt, sp[1]]);
+      }
+      spans = next;
+    }
+    for (const sp of spans) {
+      const n = Math.max(1, Math.round(Math.abs(sp[1] - sp[0]) * speedAt((sp[0] + sp[1]) / 2, uBase) / SEGM));
+      for (let i = 0; i < n; i++) {
+        const ta = sp[0] + (sp[1] - sp[0]) * i / n, tb = sp[0] + (sp[1] - sp[0]) * (i + 1) / n;
+        chordSolid(posAt(ta, uBase - 0.15), posAt(tb, uBase - 0.15), 0.15, 0, plinth - 0.05);
+      }
+    }
+    // 6d. back wall (the concourse facade is drawn at uBack + 0.6)
+    for (let i = 0; i < CN; i++) {
+      const ta = t0 + (t1 - t0) * i / CN, tb = t0 + (t1 - t0) * (i + 1) / CN;
+      chordSolid(posAt(ta, uBack + 0.4), posAt(tb, uBack + 0.4), 0.4, 0, topY + 1.2);
+    }
+    // 6e. the two ends: a wall stepped with the rows (1.0 m over each tread)
+    // and the rail that shows it. Without it a stand is a 10 m sheer edge.
+    const endRail = makeIM(railMat, ROWS * 4 + 4);
+    for (const te of [t0, t1]) {
+      const inward = te === t0 ? 1 : -1;
+      const tt = te + inward * 0.12 / speedAt(te, uBase);
+      for (let r = 0; r < ROWS; r++) {
+        const ya = plinth + r * RISE;
+        const pa = posAt(tt, uBase + r * TREAD), pb = posAt(tt, uBase + (r + 1) * TREAD);
+        chordSolid(pa, pb, 0.12, 0, ya + 1.0);
+        pushStrut(endRail, pa.x, ya + 1.0, pa.z, pb.x, ya + 1.0, pb.z, 0.07);
+        pushStrut(endRail, pa.x, ya, pa.z, pa.x, ya + 1.0, pa.z, 0.07);
+      }
+    }
+    finishIM(grp, endRail);
 
     if (P.sign && S.label) {
       const fm = S.frame((t0 + t1) / 2);

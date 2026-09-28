@@ -399,6 +399,9 @@
       if (touchedColliders) CBZ.colliders = next;
     }
     if (touchedColliders && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // a piece that registered a stair (building.js stairs, compoundkit's tower
+    // ladder) owns a CBZ.stairs link under "piece:<id>" — drop it with the piece
+    if (CBZ.stairs) ids.forEach(function (id) { CBZ.stairs.removeOwner("piece:" + id); });
 
     if (CBZ.platforms.length) {
       const next = [];

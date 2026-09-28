@@ -210,6 +210,19 @@
      of links joins the two levels. Dijkstra over link ends; small graph
      (only links within QUERY_R of either end), no allocation worth caching. */
   function sameLevel(a, b) { return Math.abs(a.y - b.y) < LEVEL_DY; }
+  /* A LINK WHOSE FLIGHT IS GONE IS NOT A ROUTE. Every teardown in the game
+     (a quake collapse, a nuke, a player-built piece knocked down) takes the
+     flight's platform out of CBZ.platforms and none of them has to know this
+     file exists: route() only offers a link whose own walk surface is still
+     in the world. Membership Set rebuilt when the platform array changes size. */
+  let liveSet = null, liveLen = -1;
+  function standing(L) {
+    const p = L.plats && L.plats[0];
+    if (!p) return true;                         // a bare link (ladder): trust its owner
+    const plats = CBZ.platforms;
+    if (!liveSet || liveLen !== plats.length) { liveSet = new Set(plats); liveLen = plats.length; }
+    return liveSet.has(p);
+  }
   // opts.ladders: include kind "ladder" links (a near-vertical climb no
   // walking AI can do on its ramp-less feet); off by default
   function route(from, to, opts) {
@@ -223,7 +236,7 @@
       if (L.off || (!ladders && L.kind === "ladder")) continue;   // off = its building is rubble
       const near = dist2(L.a.x, L.a.z, from.x, from.z) < R2 || dist2(L.a.x, L.a.z, to.x, to.z) < R2 ||
                    dist2(L.b.x, L.b.z, from.x, from.z) < R2 || dist2(L.b.x, L.b.z, to.x, to.z) < R2;
-      if (near) cand.push(L);
+      if (near && standing(L)) cand.push(L);
     }
     if (!cand.length) return null;
     // nodes: 0 = from, 1 = to, then 2+2i = cand[i].a, 3+2i = cand[i].b

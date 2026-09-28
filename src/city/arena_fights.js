@@ -1327,11 +1327,18 @@ CBZ.addLandmass(function(city){
       // or it is a platform nothing can reach. Three treads at 0.4 each — and
       // they climb INWARD, alongside the dock, instead of marching east out of
       // the standoff and into the fire lane where they used to end up.
+      // The treads are drawn; the walk surface is ONE CBZ.stairs flight from
+      // the first riser (x+3.05, apron) to the top tread's nosing (x+1.25,
+      // dock height) — three 0.4 m hops became a slope an AI can plan — and
+      // the top tread stays a flat platform beside the dock.
       for(var tr=0;tr<3;tr++){
         var ty=PY+0.4*(tr+1), tx2=CX+FACE_X+2.6-tr*0.9;
         concrete.push({x:tx2,y:ty-0.2,z:CZ+5.6,sx:0.9,sy:0.4,sz:2.6});
-        plat(tx2-0.45,CZ+4.3,tx2+0.45,CZ+6.9,ty);
+        if(tr===2)plat(tx2-0.45,CZ+4.3,tx2+0.45,CZ+6.9,ty);
       }
+      if(SOLID&&CBZ.stairs)CBZ.stairs.flight({
+        bottom:{x:CX+FACE_X+3.05,y:PY,z:CZ+5.6},top:{x:CX+FACE_X+1.25,y:PY+1.2,z:CZ+5.6},
+        width:2.6,overlap:0.3,kind:"stair",owner:"arena-dock"});
       steel.push({x:CX+FACE_X+0.15,y:PY+2.9,z:CZ,sx:0.3,sy:3.4,sz:6.4});
       dark.push({x:CX+FACE_X+0.6,y:PY+4.75,z:CZ,sx:1.4,sy:0.4,sz:7.2});
     })();

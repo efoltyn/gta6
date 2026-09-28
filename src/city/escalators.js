@@ -195,15 +195,31 @@
 
     // ---- RIDE: register the sloped surface as a CBZ.platforms RAMP ---------
     // groundAt interpolates top = y0 + t*(y1-y0), t along (z-z0)/(z1-z0).
+    // Now a CBZ.stairs flight: the same record, plus an AI link (either lane
+    // is walkable both ways; the carry below is only the player's bonus), plus
+    // the solid truss UNDER the band so nobody walks through the space under
+    // it. The balustrades are walls to a rider (stepped bands along each side,
+    // each topped 1.1 m over the band) — the old ride had none, so a rider
+    // stepped off the side of a 4.6 m run and fell.
     let ramp = null;
-    if (CBZ.platforms) {
-      ramp = {
-        minX: cx - width / 2, maxX: cx + width / 2,
-        minZ: minZ - 0.2, maxZ: maxZ + 0.2,
-        top: yHigh + 0.16,
-        ramp: { z0: zLow, z1: zHigh, y0: yLow + 0.16, y1: yHigh + 0.16 },
-      };
-      CBZ.platforms.push(ramp);
+    if (CBZ.stairs) {
+      const f = CBZ.stairs.flight({
+        bottom: { x: cx, y: yLow + 0.16, z: zLow }, top: { x: cx, y: yHigh + 0.16, z: zHigh },
+        width: width, overlap: 0.2, underside: true, kind: "escalator", owner: grp,
+      });
+      ramp = f && f.plat;
+      const SEG = 1.0, nSeg = Math.max(1, Math.ceil(run / SEG));
+      for (const sx of [-1, 1]) {
+        const bx = cx + sx * (width / 2 + 0.07);
+        for (let i = 0; i < nSeg; i++) {
+          const za = zLow + dirZ * run * i / nSeg, zb = zLow + dirZ * run * (i + 1) / nSeg;
+          const ya = yLow + riseY * i / nSeg, yb = yLow + riseY * (i + 1) / nSeg;
+          const c = { minX: bx - 0.05, maxX: bx + 0.05, minZ: Math.min(za, zb), maxZ: Math.max(za, zb),
+                      y0: ya - 0.2, y1: yb + 1.3 };
+          CBZ.colliders.push(c);
+          if (f && f.cols) f.cols.push(c);
+        }
+      }
     }
 
     // ride direction in +Z: positive means "standing still carries you toward +Z"
@@ -232,6 +248,33 @@
     // UP lane carries you toward the HIGH (dirZ) end; DOWN lane the other way.
     const a = makeEscalator({ root, cx: bankX - gap / 2, cz: bankZ, run, width, y0, riseY, dirZ, up: true });
     const b = makeEscalator({ root, cx: bankX + gap / 2, cz: bankZ, run, width, y0, riseY, dirZ, up: false });
+    // THE TOP. Both banks stand in the open ("ground -> mezzanine") and there
+    // never was a mezzanine: the high landing was a drawn plate with no
+    // platform, so the up lane delivered you 4.6 m up onto air and you fell.
+    // One shared deck spans both lanes' heads, railed on every open edge.
+    const zHigh = bankZ + dirZ * run / 2, DD = 3.2, top = y0 + riseY + 0.16;
+    const x0 = bankX - gap / 2 - width / 2 - 0.35, x1 = bankX + gap / 2 + width / 2 + 0.35;
+    const zA = Math.min(zHigh, zHigh + dirZ * DD), zB = Math.max(zHigh, zHigh + dirZ * DD);
+    const deck = new THREE.Group(); deck.matrixAutoUpdate = false; root.add(deck);
+    box(deck, (x0 + x1) / 2, top - 0.15, (zA + zB) / 2, x1 - x0, 0.3, zB - zA, DECK);
+    CBZ.platforms.push({ minX: x0, maxX: x1, minZ: zA, maxZ: zB, top: top });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    const zFar = zHigh + dirZ * DD;
+    const rail = function (ax, az, bx2, bz2) {
+      const mx = (ax + bx2) / 2, mz = (az + bz2) / 2, lx = Math.abs(bx2 - ax), lz = Math.abs(bz2 - az);
+      box(deck, mx, top + 1.05, mz, Math.max(0.08, lx), 0.08, Math.max(0.08, lz), TRIM);
+      box(deck, mx, top + 0.52, mz, Math.max(0.03, lx), 1.0, Math.max(0.03, lz), STEEL, { receive: false });
+      CBZ.colliders.push({ minX: Math.min(ax, bx2) - 0.06, maxX: Math.max(ax, bx2) + 0.06,
+                           minZ: Math.min(az, bz2) - 0.06, maxZ: Math.max(az, bz2) + 0.06,
+                           y0: top - 0.3, y1: top + 1.1 });
+    };
+    rail(x0, zFar, x1, zFar);                         // far edge
+    rail(x0, zHigh, x0, zFar);                        // both sides
+    rail(x1, zHigh, x1, zFar);
+    // the head edge between the two lanes (their balustrades sit at +-w/2+0.07)
+    rail(bankX - gap / 2 + width / 2 + 0.07, zHigh, bankX + gap / 2 - width / 2 - 0.07, zHigh);
+    rail(x0, zHigh, bankX - gap / 2 - width / 2 - 0.07, zHigh);
+    rail(bankX + gap / 2 + width / 2 + 0.07, zHigh, x1, zHigh);
     return [a, b];
   }
 

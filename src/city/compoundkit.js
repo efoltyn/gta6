@@ -702,17 +702,15 @@
       const y = piece.pos.y;
       const deck = { minX: piece.pos.x - 1.55, maxX: piece.pos.x + 1.55, minZ: piece.pos.z - 1.55, maxZ: piece.pos.z + 1.55, top: y + DECK, pieceId: piece.id };
       CBZ.platforms.push(deck); piece.platforms.push(deck);
-      // the ship ladder: a steep ramp record, foot at ST_Z1, top at the deck edge
-      const a = lpt(piece, ST_X0, ST_Z1), b = lpt(piece, ST_X1, ST_Z0);
+      // the ship ladder: a CBZ.stairs flight, foot at ST_Z1, top at the deck
+      // edge (flat 0.3 m onto the deck and the ground; an AI link, so a guard
+      // can be sent up to the searchlight)
       const foot = lpt(piece, (ST_X0 + ST_X1) / 2, ST_Z1), top = lpt(piece, (ST_X0 + ST_X1) / 2, ST_Z0);
-      const onX = Math.abs(foot.x - top.x) > Math.abs(foot.z - top.z);
-      const ramp = {
-        minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z),
-        top: y + DECK,
-        ramp: onX ? { axis: "x", x0: foot.x, x1: top.x, y0: y, y1: y + DECK } : { z0: foot.z, z1: top.z, y0: y, y1: y + DECK },
-        pieceId: piece.id,
-      };
-      CBZ.platforms.push(ramp); piece.platforms.push(ramp);
+      const f = CBZ.stairs && CBZ.stairs.flight({
+        bottom: { x: foot.x, y: y, z: foot.z }, top: { x: top.x, y: y + DECK, z: top.z },
+        width: ST_X1 - ST_X0, overlap: 0.3, kind: "ladder", owner: "piece:" + piece.id, plats: piece.platforms,
+      });
+      if (f && f.plat) f.plat.pieceId = piece.id;
     },
   });
 

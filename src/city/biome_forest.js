@@ -1246,54 +1246,88 @@
       ts.position.set(twX, twH + 7, twZ); ts.scale.set(9, 2.2, 1); root.add(ts);
     }
 
-    // ---- THE CLIMB: a switchback staircase up the +x face (clear of the
-    // legs at ±3), two flights around a mid-landing, exactly the elevators.js
-    // fire-escape idiom (tilted stringer slab + rail visual, CBZ.platforms
-    // ramp records for the actual walk-surface). CBZ.platforms only exists
-    // once city/buildings.js has loaded (it inits the array) — guard so a
-    // headless/stripped build never throws.
+    // ---- THE CLIMB: a switchback stair up the +x face, TWO LANES.
+    // What it was: both flights in ONE 1.2 m strip, the upper stacked straight
+    // over the lower (0.58 m apart at the landing end, so a climber's head went
+    // through the upper flight for its last 3 m), and the upper flight topped
+    // out at z = -5.5..-6.5 while the deck spans z +-4.25: a 1.25 m gap of air
+    // between the top of the stair and the deck it was built to reach. The
+    // lookout could not be reached at all. Now: the lower flight climbs the
+    // OUTER lane from the ground to a mid-landing that spans both lanes, the
+    // upper flight climbs the INNER lane back alongside the deck edge and tops
+    // out INSIDE the deck's z span, so the last metres of it step straight
+    // onto the deck. Both are CBZ.stairs flights (AI links); a rail between
+    // the lanes and on each open edge follows the flights.
     if (CBZ.platforms) {
       const railMat = mat(0x2c333d);
-      const stairX0 = twX + deckHalf - 0.05, stairX1 = twX + deckHalf + 1.15;   // stringer strip, just past the deck edge
-      const stairXC = (stairX0 + stairX1) / 2;
-      const zA = twZ - 6.5, zB = twZ + 6.5, LD = 1.0;      // flight run bounds + landing depth (~35° slope, matches elevators.js's fire-escape feel)
-      const midY = twH / 2;                                 // mid-landing height (half the climb)
-      function flight(zStart, zEnd, y0, y1) {
-        const dir = zEnd > zStart ? 1 : -1;
-        const rampEnd = zEnd - dir * LD;
-        CBZ.platforms.push({
-          minX: stairX0, maxX: stairX1,
-          minZ: Math.min(zStart, rampEnd), maxZ: Math.max(zStart, rampEnd),
-          top: y1, ramp: { z0: zStart, z1: rampEnd, y0, y1 },
+      const LW = 1.2;
+      const X0 = twX + deckHalf - 0.05;                    // inner lane: X0..X0+LW (against the deck)
+      const XI = X0 + LW / 2, XO = X0 + LW * 1.5;           // lane centres
+      const topY = twH + 0.2, midY = topY / 2, SLOPE = 0.6;
+      const RUN = midY / SLOPE;
+      const zLow = twZ - 3.25, zMid = zLow + RUN, LD = 1.1;  // lower flight zLow -> zMid; upper zMid -> zLow
+      const flightV = function (xc, z0, y0, z1, y1) {
+        const run = Math.abs(z1 - z0), rise = y1 - y0, dir = z1 > z0 ? 1 : -1;
+        const hyp = Math.hypot(run, rise);
+        const slab = new THREE.Mesh(CBZ.boxGeom(LW - 0.05, 0.1, hyp), towerWoodB);
+        slab.position.set(xc, (y0 + y1) / 2 - 0.05, (z0 + z1) / 2);
+        slab.rotation.x = -dir * Math.atan2(rise, run); slab.castShadow = true; root.add(slab);
+        // treads on it, so it reads as a stair
+        const n = Math.round(rise / 0.2);
+        for (let k = 1; k < n; k++) {
+          const t = k / n;
+          const tr = new THREE.Mesh(CBZ.boxGeom(LW - 0.1, 0.05, 0.26), towerWoodA);
+          tr.position.set(xc, y0 + rise * t, z0 + (z1 - z0) * t); root.add(tr);
+        }
+        if (CBZ.stairs) CBZ.stairs.flight({
+          bottom: { x: xc, y: y0, z: z0 }, top: { x: xc, y: y1, z: z1 },
+          width: LW - 0.05, overlap: 0.3, kind: "stair", owner: "forest-lookout",
         });
-        // flat landing nosing at the top of this flight
-        CBZ.platforms.push({
-          minX: stairX0, maxX: stairX1,
-          minZ: Math.min(rampEnd, zEnd), maxZ: Math.max(rampEnd, zEnd), top: y1,
-        });
-        // visual: one tilted stringer slab (mesh-count bound — no per-tread boxes)
-        const run = Math.abs(rampEnd - zStart), rise = y1 - y0;
-        const hyp = Math.hypot(run, rise), tilt = -dir * Math.atan2(rise, run);
-        const slab = new THREE.Mesh(CBZ.boxGeom(1.2, 0.1, hyp), towerWoodB);
-        slab.position.set(stairXC, (y0 + y1) / 2 - 0.05, (zStart + rampEnd) / 2);
-        slab.rotation.x = tilt; slab.castShadow = true; root.add(slab);
-        const rail = new THREE.Mesh(CBZ.boxGeom(0.07, 0.9, hyp), railMat);
-        rail.position.set(stairX1 + 0.03, (y0 + y1) / 2 + 0.4, (zStart + rampEnd) / 2);
-        rail.rotation.x = tilt; root.add(rail);
+      };
+      flightV(XO, zLow, 0, zMid, midY);                     // outer lane, rising +z
+      flightV(XI, zMid, midY, zLow, topY);                  // inner lane, rising -z
+      // the mid-landing, across both lanes
+      CBZ.platforms.push({ minX: X0, maxX: X0 + LW * 2, minZ: zMid - 0.05, maxZ: zMid + LD, top: midY });
+      const land = new THREE.Mesh(CBZ.boxGeom(LW * 2, 0.2, LD + 0.05), towerWoodB);
+      land.position.set(X0 + LW, midY - 0.1, zMid + LD / 2); root.add(land);
+      const yLowAt = function (z) { return midY * Math.max(0, Math.min(1, (z - zLow) / RUN)); };
+      const yUpAt = function (z) { return midY + (topY - midY) * Math.max(0, Math.min(1, (zMid - z) / RUN)); };
+      // stepped rail bands (1 m segments): a guard to anyone ON the flight beside
+      // it, nothing to anyone far below
+      const railSeg = function (x, z0, z1, yLo, yHi) {
+        CBZ.colliders.push({ minX: x - 0.05, maxX: x + 0.05, minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), y0: yLo, y1: yHi });
+      };
+      for (let z = zLow - 0.3; z < zMid - 0.05; z += 1.0) {
+        const z1 = Math.min(zMid - 0.05, z + 1.0);
+        const lo1 = yLowAt(z), hi1 = yLowAt(z1), lo2 = yUpAt(z1), hi2 = yUpAt(z);
+        // between the lanes: covers both climbers at this z
+        railSeg(X0 + LW, z, z1, Math.max(0, lo1 - 0.2), hi2 + 1.0);
+        // outer edge of the lower flight
+        railSeg(X0 + LW * 2, z, z1, Math.max(0, lo1 - 0.2), hi1 + 1.0);
+        // inner edge of the upper flight, except where it is level with the
+        // deck (that stretch IS the way onto the deck)
+        if (lo2 < topY - 0.4) railSeg(X0, z, z1, lo2 - 0.2, hi2 + 1.0);
       }
-      // flight 1: ground -> mid-landing (rising +z), flight 2: mid-landing -> deck (rising -z)
-      flight(zA, zB, 0, midY);
-      flight(zB, zA, midY, twH);
-      // mid-landing platform (small square where the flights meet)
-      CBZ.platforms.push({ minX: stairX0, maxX: stairX1, minZ: zB - LD, maxZ: zB + LD, top: midY });
-      // guard rail colliders on the outer stringer edge, y-gated above 1.6m so
-      // ground-level foot traffic never snags on them (mirrors elevators.js's
-      // y-gated fall-guard rail).
-      CBZ.colliders.push({ minX: stairX1 - 0.05, maxX: stairX1 + 0.12, minZ: zA - LD, maxZ: zB + LD, y0: 1.6, y1: twH + 1.0 });
+      // the landing's far end and outer side
+      railSeg(X0 + LW * 2, zMid, zMid + LD, midY - 0.2, midY + 1.0);
+      CBZ.colliders.push({ minX: X0, maxX: X0 + LW * 2, minZ: zMid + LD - 0.05, maxZ: zMid + LD + 0.05, y0: midY - 0.2, y1: midY + 1.0 });
+      // visual rails (one sloped bar per flight edge + the landing)
+      const bar = function (x, z0, y0, z1, y1) {
+        const run = Math.abs(z1 - z0), rise = y1 - y0, dir = z1 > z0 ? 1 : -1;
+        const r = new THREE.Mesh(CBZ.boxGeom(0.06, 0.06, Math.hypot(run, rise)), railMat);
+        r.position.set(x, (y0 + y1) / 2 + 0.95, (z0 + z1) / 2);
+        r.rotation.x = -dir * Math.atan2(rise, run); root.add(r);
+      };
+      bar(X0 + LW * 2, zLow, 0, zMid, midY);
+      bar(X0 + LW, zLow, 0, zMid, midY);
+      bar(X0, zMid, midY, zLow + 1.2, topY - 0.7);
+      const lb = new THREE.Mesh(CBZ.boxGeom(LW * 2, 0.06, 0.06), railMat);
+      lb.position.set(X0 + LW, midY + 0.95, zMid + LD); root.add(lb);
       // THE DECK is a real standable platform (was purely decorative before —
       // groundAt() never saw it, so the box was a visual lie). Registered flat
       // (no ramp) at the deck's walking height.
-      CBZ.platforms.push({ minX: twX - deckHalf, maxX: twX + deckHalf, minZ: twZ - deckHalf, maxZ: twZ + deckHalf, top: twH + 0.2 });
+      CBZ.platforms.push({ minX: twX - deckHalf, maxX: twX + deckHalf, minZ: twZ - deckHalf, maxZ: twZ + deckHalf, top: topY });
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
       // ---- VISTA interaction: a simple lookout payoff once you're up top ----
       if (CBZ.interactions && CBZ.interactions.registerZone) {

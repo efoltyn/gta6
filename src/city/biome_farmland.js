@@ -486,38 +486,96 @@
       root.children[root.children.length - 1].position.set(bx, 9, bz);
     }
 
-    // -- SILOS (cylinders, solid colliders) --
-    // NO-DECOY FIX: a silo can't take cityMakeBuilding's box shell (wrong
-    // footprint entirely), but a real grain silo DOES have a real exterior
-    // ladder to a roof hatch — so instead of a sealed doorless cylinder we
-    // give each one a climbable rung ladder (CBZ.platforms ramp, the same
-    // z-axis-interpolated rig the fire lookout tower / building stairs use)
-    // up to a small standable cap platform, plus a work-anchor so a farmhand
-    // is actually seen tending the silo line, not just walking past it.
-    const siloH = 21, siloR = 3.7, siloTop = siloH + 0.2;
+    // -- SILOS + WATER TOWER: the climbs --------------------------------------
+    // They had "rung ladders" registered as ramp records: 21.2 m of rise over
+    // 0.4 m of run on each silo, 9.5 m over 0.4 m on the tower — and the ramp
+    // ran the wrong way (its HIGH end was the outer one, so walking up to it you
+    // met the top of the ramp first). groundAt only takes a surface 0.45 m over
+    // your feet, so a 53:1 slope is a wall that twitches: nobody ever climbed
+    // one. The silo's collider was a square box round a round bin, and the
+    // tower's "catwalk" platform sat INSIDE the tank's full-height collider.
+    //
+    // Now each silo has what a real grain bin has: a HELICAL STAIR round the
+    // outside (0.3 m risers, a grating tread per step — flat platform records,
+    // each an oriented rectangle, so it is walked like any stair), a railed
+    // landing at the eave, and a ring of chord colliders for the bin itself so
+    // the stair can hug it. The water tower gets a railed catwalk ring OUTSIDE
+    // the tank and an inclined steel stair up to it. Every climb is a
+    // CBZ.stairs link, so a farmhand can be sent up too.
+    const PL = CBZ.platforms || (CBZ.platforms = []);
+    const _cm4 = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _cp = new THREE.Vector3(), _cs = new THREE.Vector3(), _cup = new THREE.Vector3(0, 1, 0);
+    const treadIM = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), M.metal, 4 * 80 + 40);
+    const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), M.metal, 4 * 160 + 120);
+    treadIM.count = 0; railIM.count = 0;
+    function inst(im, x, y, z, sx, sy, sz, yaw) {
+      if (im.count >= im.instanceMatrix.count) return;
+      _cq.setFromAxisAngle(_cup, yaw || 0); _cp.set(x, y, z); _cs.set(sx, sy, sz);
+      im.setMatrixAt(im.count++, _cm4.compose(_cp, _cq, _cs));
+    }
+    function obbCol(cx, cz, hw, hd, yaw, y0, y1) {
+      const c = CBZ.orientedCollider ? CBZ.orientedCollider(cx, cz, hw, hd, yaw, y0, y1)
+        : { minX: cx - Math.max(hw, hd), maxX: cx + Math.max(hw, hd), minZ: cz - Math.max(hw, hd), maxZ: cz + Math.max(hw, hd), y0: y0, y1: y1 };
+      cols.push(c); return c;
+    }
+    // a round bin as a ring of 16 chord walls (a body outside never meets
+    // air where the square used to be)
+    function ringCol(x, z, r, y0, y1) {
+      const N = 16, half = r * Math.tan(Math.PI / N);
+      for (let i = 0; i < N; i++) {
+        const a = (i + 0.5) * 2 * Math.PI / N, nx = Math.cos(a), nz = Math.sin(a);
+        // local +x along the chord (tangent (-nz, nx)); yaw maps +x -> (cos, -sin)
+        obbCol(x + nx * (r - 0.15), z + nz * (r - 0.15), half + 0.02, 0.15, Math.atan2(-nx, -nz), y0, y1);
+      }
+    }
+    const siloH = 21, siloR = 3.7;
     for (let i = 0; i < 4; i++) {
       const sx = HX - 4 + i * 9.5, sz = HZ - 34, sr = siloR;
-      cyl(sx, siloH / 2, sz, sr, sr, siloH, M.silo, true);
+      cyl(sx, siloH / 2, sz, sr, sr, siloH, M.silo, false);
       cyl(sx, siloH + 1.7, sz, 0.2, sr + 0.1, 3.4, M.siloCap, false);
-      // exterior rung ladder up the +z face (clear of the silo's own AABB, a
-      // thin z-aligned ramp so groundAt sees a real climbable surface)
-      const lz0 = sz + sr + 0.02, lz1 = sz + sr + 0.9;
-      CBZ.platforms.push({
-        minX: sx - 0.5, maxX: sx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
-        top: siloTop, ramp: { z0: sz + sr + 0.35, z1: sz + sr + 0.75, y0: 0, y1: siloTop },
-      });
-      // small round cap platform (stand on the roof hatch)
-      CBZ.platforms.push({ minX: sx - 1.6, maxX: sx + 1.6, minZ: sz - 1.6, maxZ: sz + 1.6, top: siloTop });
-      // rung visuals (instanced-free — only 3 silos, cheap as plain meshes)
-      for (let r = 0; r < 15; r++) {
-        const ry = 0.8 + r * 1.32;
-        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
-        rung.position.set(sx, ry, sz + sr + 0.35); root.add(rung);
+      ringCol(sx, sz, sr, 0, siloH + 3.4);
+      // the helix: treads from sr+0.25 to sr+1.05, starting on the +z face
+      // (the farmyard side) and climbing counter-clockwise
+      const RIN = sr + 0.25, ROUT = sr + 1.05, RM = (RIN + ROUT) / 2, GOING = 0.45, RISE = 0.3;
+      const n = Math.ceil(siloH / RISE), dA = GOING / RM, a0 = Math.PI / 2;
+      const path = [];
+      for (let k = 0; k < n; k++) {
+        const y = Math.min(siloH, (k + 1) * RISE);
+        const am = a0 + (k + 0.5) * dA, cx = sx + Math.cos(am) * RM, cz = sz + Math.sin(am) * RM;
+        // tangent direction (CCW): (-sin, cos)
+        const ux = -Math.sin(am), uz = Math.cos(am), hl = GOING / 2 + 0.03, hw = (ROUT - RIN) / 2;
+        const ex = Math.abs(ux) * hl + Math.abs(uz) * hw, ez = Math.abs(uz) * hl + Math.abs(ux) * hw;
+        PL.push({ minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez, top: y, obb: { cx: cx, cz: cz, ux: ux, uz: uz, hl: hl, hw: hw } });
+        const yaw = Math.atan2(ux, uz);                 // local +z along the going
+        inst(treadIM, cx, y - 0.03, cz, ROUT - RIN, 0.06, GOING + 0.04, yaw);
+        // the outer rail: a guard to a climber on this tread, nothing to one below
+        const ox = sx + Math.cos(am) * (ROUT + 0.05), oz = sz + Math.sin(am) * (ROUT + 0.05);
+        obbCol(ox, oz, 0.05, GOING / 2 + 0.02, Math.atan2(ux, uz), y - 0.25, y + 1.05);
+        inst(railIM, ox, y + 1.0, oz, 0.05, 0.05, GOING + 0.06, yaw);
+        if (k % 3 === 0) inst(railIM, ox, y + 0.5, oz, 0.05, 1.0, 0.05, 0);
+        if (k === 0 || k === n - 1 || k % 8 === 0) path.push({ x: cx, y: y, z: cz });
       }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, siloH, 0.06), M.metal);
-      rail.position.set(sx - 0.32, siloH / 2, sz + sr + 0.35); root.add(rail);
-      const rail2 = rail.clone(); rail2.position.x = sx + 0.32; root.add(rail2);
+      // the landing at the eave: a railed grating shelf off the last tread
+      const aL = a0 + (n + 1) * dA, lx = sx + Math.cos(aL) * RM, lz = sz + Math.sin(aL) * RM;
+      const lux = -Math.sin(aL), luz = Math.cos(aL);
+      const LL = 1.2, LW = ROUT - RIN;
+      {
+        const ex = Math.abs(lux) * LL / 2 + Math.abs(luz) * LW / 2, ez = Math.abs(luz) * LL / 2 + Math.abs(lux) * LW / 2;
+        PL.push({ minX: lx - ex, maxX: lx + ex, minZ: lz - ez, maxZ: lz + ez, top: siloH, obb: { cx: lx, cz: lz, ux: lux, uz: luz, hl: LL / 2, hw: LW / 2 } });
+        inst(treadIM, lx, siloH - 0.03, lz, LW, 0.06, LL, Math.atan2(lux, luz));
+        const ox = sx + Math.cos(aL) * (ROUT + 0.05), oz = sz + Math.sin(aL) * (ROUT + 0.05);
+        obbCol(ox, oz, 0.05, LL / 2, Math.atan2(lux, luz), siloH - 0.25, siloH + 1.05);
+        inst(railIM, ox, siloH + 1.0, oz, 0.05, 0.05, LL, Math.atan2(lux, luz));
+        // the far end of the shelf is railed too
+        const fx = lx + lux * (LL / 2 + 0.05), fz = lz + luz * (LL / 2 + 0.05);
+        obbCol(fx, fz, LW / 2, 0.05, Math.atan2(lux, luz), siloH - 0.25, siloH + 1.05);
+        inst(railIM, fx, siloH + 1.0, fz, LW, 0.05, 0.05, Math.atan2(lux, luz));
+      }
+      path.push({ x: lx, y: siloH, z: lz });
+      const aS = a0 - 0.9 / RM;
+      path.unshift({ x: sx + Math.cos(aS) * RM, y: 0, z: sz + Math.sin(aS) * RM });
+      if (CBZ.stairs) CBZ.stairs.link({ path: path, width: ROUT - RIN, kind: "stair", owner: "farm-silo-" + i });
     }
+
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "farmland", kind: "silo", role: "farmhand",
@@ -548,37 +606,65 @@
     }
 
     // -- WATER TOWER / WINDMILL (tank on legs + spinning blades) --
-    // NO-DECOY FIX: same treatment as the silos — a real exterior ladder up
-    // one leg to a small catwalk ring platform under the tank, registered as
-    // a real climbable/standable surface (CBZ.platforms), not just a solid
-    // collider you bump into.
     const wtx = HX + 5, wtz = HZ + 38;
     for (const lx of [-3, 3]) for (const lz of [-3, 3]) {
       // VEH_COLLIDE_FIX: legs are solid steel — the tank above was already a
       // collider but a car could drive clean through its supports.
       const legSolid = !CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false;
-      const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, legSolid);
+      // (banded to the legs: full height they were four posts through the catwalk)
+      const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, false);
+      if (legSolid) cols.push({ minX: wtx + lx - 0.2, maxX: wtx + lx + 0.2, minZ: wtz + lz - 0.2, maxZ: wtz + lz + 0.2, y0: 0, y1: 9.4 });
       leg.rotation.z = -lx * 0.04; leg.rotation.x = lz * 0.04;
     }
-    cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, true);
+    // the tank is solid only where it IS (9.5 up): it was a full-height
+    // column that also swallowed the catwalk
+    cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, false);
+    ringCol(wtx, wtz, 3, 9.4, 15.6);
     cyl(wtx, 14.5, wtz, 0.1, 3, 2, M.metal, false);
-    (function waterTowerLadder() {
-      const catwalkY = 9.5;                  // just under the tank
-      const lz0 = wtz + 3 + 0.02, lz1 = wtz + 3 + 0.85;
-      CBZ.platforms.push({
-        minX: wtx - 0.5, maxX: wtx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
-        top: catwalkY, ramp: { z0: wtz + 3.3, z1: wtz + 3.7, y0: 0, y1: catwalkY },
-      });
-      CBZ.platforms.push({ minX: wtx - 2.4, maxX: wtx + 2.4, minZ: wtz - 2.4, maxZ: wtz + 2.4, top: catwalkY });
-      for (let r = 0; r < 7; r++) {
-        const ry = 0.8 + r * 1.25;
-        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
-        rung.position.set(wtx, ry, wtz + 3.3); root.add(rung);
+    (function waterTowerClimb() {
+      const CW = 9.5, IN = 3.0, OUT = 4.1;              // catwalk ring, outside the tank
+      // four grating strips round the tank
+      const strips = [[-OUT, OUT, -OUT, -IN], [-OUT, OUT, IN, OUT], [-OUT, -IN, -IN, IN], [IN, OUT, -IN, IN]];
+      for (const r of strips) {
+        PL.push({ minX: wtx + r[0], maxX: wtx + r[1], minZ: wtz + r[2], maxZ: wtz + r[3], top: CW });
+        box(wtx + (r[0] + r[1]) / 2, CW - 0.04, wtz + (r[2] + r[3]) / 2, r[1] - r[0], 0.08, r[3] - r[2], M.metal, false);
       }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 9.5, 0.06), M.metal);
-      rail.position.set(wtx - 0.32, 4.75, wtz + 3.3); root.add(rail);
-      const rail2 = rail.clone(); rail2.position.x = wtx + 0.32; root.add(rail2);
+      // the stair: straight, steel, up the +z side onto the catwalk (slope
+      // 1.25 — a steep plant stair a body can walk at any frame rate)
+      const SW = 0.9, RUN = CW / 1.25, zTop = wtz + OUT, zFoot = zTop + RUN;
+      if (CBZ.stairs) CBZ.stairs.flight({
+        bottom: { x: wtx, y: 0, z: zFoot }, top: { x: wtx, y: CW, z: zTop },
+        width: SW, overlap: 0.3, kind: "stair", owner: "farm-watertower",
+      });
+      const nT = Math.round(CW / 0.25);
+      for (let k = 1; k < nT; k++) {
+        const t = k / nT;
+        inst(treadIM, wtx, t * CW, zFoot - (zFoot - zTop) * t, SW - 0.08, 0.05, 0.24, 0);
+      }
+      const sl = Math.hypot(RUN, CW), pitch = Math.atan2(CW, RUN);
+      for (const sxo of [-SW / 2, SW / 2]) {
+        const st = box(wtx + sxo, CW / 2, (zTop + zFoot) / 2, 0.07, 0.2, sl, M.metal, false);
+        st.rotation.x = pitch;
+        const hr = box(wtx + sxo, CW / 2 + 0.95, (zTop + zFoot) / 2, 0.05, 0.05, sl, M.metal, false);
+        hr.rotation.x = pitch;
+      }
+      // the catwalk rail, open at the stair head
+      const RY0 = CW - 0.25, RY1 = CW + 1.05;
+      const rail = function (x0, x1, z0, z1) {
+        cols.push({ minX: wtx + x0, maxX: wtx + x1, minZ: wtz + z0, maxZ: wtz + z1, y0: RY0, y1: RY1 });
+        box(wtx + (x0 + x1) / 2, CW + 1.0, wtz + (z0 + z1) / 2, Math.max(0.05, x1 - x0), 0.05, Math.max(0.05, z1 - z0), M.metal, false);
+      };
+      rail(-OUT - 0.05, OUT + 0.05, -OUT - 0.05, -OUT + 0.05);
+      rail(-OUT - 0.05, -OUT + 0.05, -OUT, OUT);
+      rail(OUT - 0.05, OUT + 0.05, -OUT, OUT);
+      rail(-OUT - 0.05, -SW / 2 - 0.05, OUT - 0.05, OUT + 0.05);
+      rail(SW / 2 + 0.05, OUT + 0.05, OUT - 0.05, OUT + 0.05);
     })();
+    treadIM.instanceMatrix.needsUpdate = true; railIM.instanceMatrix.needsUpdate = true;
+    treadIM.castShadow = true; treadIM.receiveShadow = true;
+    if (treadIM.count) root.add(treadIM);
+    if (railIM.count) root.add(railIM);
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     // windmill blades (animated)
     const millHub = new THREE.Group();
     millHub.position.set(wtx, 15.5, wtz - 3.2);

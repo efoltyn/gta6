@@ -3479,13 +3479,14 @@
         // (at rampEndZ). It ENDS at the landing's inner edge and meets it at the
         // SAME height, so there's no shelf-edge drop when you step off — that was
         // the descent glitch on short flights.
-        const ramp = {
-          minX: ox + lx0 + 0.04, maxX: ox + lx0 + laneW - 0.04,
-          minZ: oz + Math.min(startZ, rampEndZ), maxZ: oz + Math.max(startZ, rampEndZ),
-          top: gy + (k + 1) * FH,
-          ramp: { z0: oz + startZ, z1: oz + rampEndZ, y0: gy + k * FH, y1: gy + (k + 1) * FH },
-        };
-        CBZ.platforms.push(ramp); plats.push(ramp);
+        // THE ONE STAIR SYSTEM (systems/stairs.js): same ramp record, now with
+        // 0.3 m of flat overlap onto the landing/floor at each end (no seam)
+        // and an AI link, so a survivor can be sent upstairs.
+        CBZ.stairs.flight({
+          bottom: { x: ox + lx0 + laneW / 2, y: gy + k * FH, z: oz + startZ },
+          top: { x: ox + lx0 + laneW / 2, y: gy + (k + 1) * FH, z: oz + rampEndZ },
+          width: laneW - 0.08, overlap: 0.3, plats: plats, owner: bgroup,
+        });
         // the flight you SEE is drawn by the interior pass (closed steps on a
         // soffit between stringers, a rail) from this record
         flights.push({ k: k, dir: dir, lx0: lx0, startZ: startZ, rampEndZ: rampEndZ, endZ: endZ });
