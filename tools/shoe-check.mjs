@@ -357,14 +357,20 @@ for (const st of POSE_STYLES) {
       lieAt("KO " + v, footAngle(a.char.parts.ll), footAngle(a.char.parts.rl));
     }
   }
-  // GRAPPLE KNOCKDOWN (the downed body grapple.js owns; animChar is skipped)
+  // KNOCKDOWN: grapple.js hands the collapse to systems/bodyfall.js, which
+  // keys the fall on the rig (the group stays upright; the hips come down)
+  // and owns the body while it lies; animChar is skipped for it. Pushed from
+  // the front he goes over onto his back, from behind onto his face.
   if (X.body && X.body.hit) {
-    a = mk(); run(a, 0.2, 0);
-    X.body.hit(a, { force: 9, knockdown: 3, dir: { x: 0, z: 1 } });
-    for (let k = 0; k < 5; k++) { run(a, 0.3, 0); a.char.group.updateMatrixWorld(true); containment(a.char, "knockdown", st); }
-    const tilt = Math.abs(a.char.group.rotation.x);
-    if (tilt > 1.0) lieAt("knockdown", footAngle(a.char.parts.ll), footAngle(a.char.parts.rl));
-    check(tilt > 1.0, `knockdown [${st}]: the body is down (${tilt.toFixed(2)} rad)`, "knockdown down");
+    for (const [nm, dz] of [["knockdown back", -1], ["knockdown face", 1]]) {
+      a = mk(); run(a, 0.2, 0);
+      X.body.hit(a, { force: 9, knockdown: 3, dir: { x: 0, z: dz } });
+      for (let k = 0; k < 6; k++) { run(a, 0.3, 0); containment(a.char, nm, st); }
+      const hip = new XT.Vector3().setFromMatrixPosition(a.char.parts.ll.matrixWorld);
+      const down = hip.y < 0.35;
+      check(down, `${nm} [${st}]: the body is down (hips at ${hip.y.toFixed(2)} m)`, "knockdown down");
+      if (down) lieAt(nm, footAngle(a.char.parts.ll), footAngle(a.char.parts.rl));
+    }
   }
   // DEAD: the three deathPose templates
   for (const [seed, fall] of [[0.1, 0.0], [0.33, 0.6], [0.9, 1.0], [1.7, 0.2], [2.9, 0.9]]) {
