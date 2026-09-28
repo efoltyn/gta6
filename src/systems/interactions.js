@@ -1250,11 +1250,17 @@
     }
     const plan = CBZ.escapePlan;
     if (ex * ex + ez * ez < 9) {
-      if (!plan || plan.mayWin("gate", "prison-exit")) CBZ.winGame();
+      if (!plan || plan.mayWin("gate", "prison-exit")) getOut("gate");
     } else if (routeWin) {
       const kind = routeWin.name === "culvert" ? "culvert" : "gate";
-      if (!plan || plan.mayWin(kind, routeWin.name)) CBZ.winGame("route");
+      if (!plan || plan.mayWin(kind, routeWin.name)) getOut("route");
     }
+  }
+  // YOU ARE OUT, AND THE WORLD KEEPS GOING: the run out (systems/escapeend.js)
+  // owns the ending and calls winGame itself after the fade.
+  function getOut(reason) {
+    if (CBZ.escapeEnd && CBZ.escapeEnd.outro(reason)) return;
+    CBZ.winGame(reason === "gate" ? undefined : reason);
   }
 
   // ---- ratchet declarations (see CBZ.prisonPromptAudit) ----
