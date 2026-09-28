@@ -32,7 +32,7 @@
     box(g, 0.014, 0.030, 0.022, parker, 0.034, 0.062, -0.034);
     cyl(g, 0.012, 0.036, blued, 0.040, 0.052, 0.008, 0, 0, Math.PI / 2);
     // charging-handle latch behind the rail
-    box(g, 0.072, 0.012, 0.024, mat.black, 0, 0.076, 0.058);
+    K.tag(box(g, 0.072, 0.012, 0.024, mat.black, 0, 0.076, 0.058), "part_charge");
 
     // LOWER: flared magwell, trigger guard hole, buffer-tube housing
     K.prof(g, "m4.lower", [
@@ -54,8 +54,8 @@
       mf.push([0.340 + sweep, y]);
       mb.push([0.224 + sweep * 1.15, y]);
     }
-    K.prof(g, "m4.mag", mf.concat(mb.reverse()), 0.046, mat.dark, { bevel: 0.003 });
-    box(g, 0.054, 0.014, 0.128, mat.black, 0, -0.322, -0.314, 0.08);
+    K.tag(K.prof(g, "m4.mag", mf.concat(mb.reverse()), 0.046, mat.dark, { bevel: 0.003 }), "part_mag");
+    K.tag(box(g, 0.054, 0.014, 0.128, mat.black, 0, -0.322, -0.314, 0.08), "part_mag");
 
     // HANDGUARD: round, ribbed, between the delta ring and the cap
     K.prof(g, "m4.hg", K.ribs(0.048, 0.043, 14), 0.320, poly, { axis: "z", bevel: 0.002, y: BORE, z: -0.580 });

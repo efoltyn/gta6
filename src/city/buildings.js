@@ -3064,6 +3064,39 @@
     return false;
   }
 
+  /* A HAND ON THE DOOR AS YOU GO THROUGH IT. The leaf swings open ahead of
+     you (the proximity opener below); walking through the doorway, a person
+     puts a palm on the open leaf beside them and holds it while they pass.
+     The palm goes on the leaf's own face (CBZ.verbs.touchSurface on the leaf
+     mesh, the side you are on), PINNED to the leaf where it first landed —
+     the hand stays on the door while the body walks past it, and lets go
+     when the arm can no longer reach (the touch verb's reach gate) or you
+     leave the doorway. A sustained CBZ.verbs.touch: the plant solver, in
+     first person too. On foot only. */
+  const _dpP = new THREE.Vector3(), _dpN = new THREE.Vector3();
+  function doorPalm(dr) {
+    const V = CBZ.verbs, player = CBZ.player, P = player && player.pos;
+    if (!V || !V.touch || !V.touchSurface || !P || player.driving || player._aircraft || !dr.leaf || dr.t < 0.35) return;
+    const ax = P.x - dr.wx, az = P.z - dr.wz;
+    const across = ax * dr.inx + az * dr.inz;
+    if (Math.abs(across) > 1.2) { dr._palmL = null; return; }
+    const leaf = dr.leaf;
+    if (!dr._palmL) {
+      const y = (P.y || 0) + 1.02;
+      const s = V.touchSurface(leaf, { x: P.x, y: y, z: P.z }, y, 0.14);
+      if (!s) return;
+      leaf.updateWorldMatrix(true, false);
+      dr._palmL = leaf.worldToLocal(s.point.clone());
+      // the face normal, in the leaf's frame (it swings with the leaf)
+      const inv = new THREE.Matrix3().getNormalMatrix(leaf.matrixWorld).invert();
+      dr._palmN = s.normal.clone().applyMatrix3(inv).normalize();
+    }
+    leaf.updateWorldMatrix(true, false);
+    _dpP.copy(dr._palmL); leaf.localToWorld(_dpP);
+    _dpN.copy(dr._palmN).transformDirection(leaf.matrixWorld);
+    V.touch(player, { point: _dpP, normal: _dpN, kind: "palm", sustain: true, key: "citydoor" });
+  }
+
   // proximity-driven auto-opener: open when the player, peds or cars approach
   // the doorway; ease the swing; pull/restore the collider only when the passage
   // is clear. Cheap: still culled to doors near the player unless a door is open.
@@ -3106,6 +3139,8 @@
       //    pulled — you could ghost through a door that visually read closed.
       //    The doorOccupied guard below still prevents snapping a wall onto an
       //    actor lingering in the gap, so this is safe to tighten.
+      if (playerNear) doorPalm(dr);
+      else if (dr._palmL) dr._palmL = null;
       if (dr.colIn && dr.t > 0.30) {
         const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
         dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();

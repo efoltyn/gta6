@@ -195,10 +195,10 @@ console.log("ARMED (every weapon: hip, sights, reload; the real poseFpArms)");
 const box = (parent, sx, sy, sz, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.BoxGeometry(sx, sy, sz), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
 const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.CylinderGeometry(r, r, len, 8), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
 {
-  const GH = read("src/systems/gunhands.js");
-  const choreo = vm.runInContext("(function(){" + block(GH, "  const CHOREO = {", "  // the same choreography") + "; return CHOREO;})()", ctx);
+  // the reload table + parts (CBZ.gunReload): gunhands.js's first block; its
+  // body pass bails out here (no CBZ.gunHold), the shared rig stays
+  vm.runInContext(read("src/systems/gunhands.js"), ctx, { filename: "src/systems/gunhands.js" });
   let reloadP = -1;
-  CBZ.gunReloadChoreo = (st) => choreo[st] || choreo.mag;
   CBZ.gunReloadPose = () => reloadP >= 0 ? { active: true, p: reloadP, style: CBZ._style || "mag" } : { active: false };
   const armSrc = `
     const THREE = window.THREE; const CBZ = window.CBZ;
@@ -207,7 +207,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     const vm = new THREE.Group(); camera.add(vm);
     const gun = new THREE.Group();
     const weaponModels = [];
-    let ddT = -1; const fps = { weapon: 0 };
+    let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = []; let adsSightK = 0;
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [{ vis: false }, { vis: false }];
   ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
@@ -565,7 +565,7 @@ console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
     vm.position.set(0.12, -0.30, -0.66);
     const gun = new THREE.Group();
     const weaponModels = [];
-    let ddT = -1; const fps = { weapon: 0 };
+    let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = []; let adsSightK = 0;
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [
       { x: 0.10, y: -0.12, z: 0.20, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },

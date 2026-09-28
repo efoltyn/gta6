@@ -255,7 +255,10 @@
   const _grip = new THREE.Vector3();
   function gripLocal(pose, side, out) {
     const H = CBZ.fpHands;
-    if (pose === "card" || pose === "open" || pose === "relaxed") out.set(-0.030, -0.022, -0.100);    // thumb-to-index pinch
+    if (pose === "card" || pose === "open" || pose === "relaxed") {           // thumb-to-index pinch
+      const c = (H && H.CARD_PINCH) || [-0.030, -0.022, -0.100];
+      out.set(c[0], c[1], c[2]);
+    }
     else if (H && H.gripCentre) H.gripCentre(pose === "fist" ? "grip" : pose, out);
     else out.set(-0.006, -0.033, -0.086);
     if (side < 0) out.x = -out.x;
@@ -1114,6 +1117,513 @@
     }
   }
   V.pickupLens = LENS;
+
+  /* ============================================================
+     TOUCH — A HAND ON THE WORLD.
+     OWNER: "palm contact for the rest of the physical world using the same
+     plant solver." A vault's palms were the only hands in the game that were
+     ON something; a door was shoved open by a reach that stopped short of the
+     leaf, a lift button was pressed by nobody, a man in cover hovered his
+     hands in the air. Every hand that pushes, presses or pulls on the world
+     now goes through this ONE verb, which is nothing but a clock and a frame
+     around entities/character.js charArmTo.plant (the exact arm IK that lays
+     a posed hand's contact point on a world point):
+
+       CBZ.verbs.touch(actor, spec) -> C (a handle) or null
+         spec.point   world contact point, ON the surface ({x,y,z} or Vector3)
+         spec.normal  world surface normal (out of the surface, toward the actor)
+         spec.kind    "palm"   a flat hand on it (door leaf, wall, crate, body)
+                      "press"  the index pad on it, finger along -normal (a button)
+                      "handle" the hand closed round a bar at `point` (a door
+                               handle); spec.axis = the bar's direction
+                      "card"   the held card's pinch pressed onto it (a reader)
+         spec.along   optional: where the straight fingers point (palm) / where
+                      the back of the hand faces (press)
+         spec.arm     "l" | "r" (default: the shoulder nearer the point; the
+                      off hand when the actor holds a gun)
+         spec.hold    seconds the hand stays on (default per kind)
+         spec.key     de-dup: a second touch with the same key refreshes the
+                      first instead of stacking a second hand on it
+         spec.sustain true: the hand stays on for as long as the caller keeps
+                      calling touch() with this key (every frame: leaning on
+                      cover, pushing a crate, dragging a body) and lets go
+                      ~0.15 s after the calls stop
+         spec.again   true: a repeat with the same key puts the hand back on
+                      for a full hold (a button pressed twice)
+         spec.inCar   true: plays while the player is in a vehicle state
+         spec.step    false: the body never steps / turns in (default: a
+                      one-shot touch out of reach steps in and turns to it,
+                      like a take does)
+         spec.onTouch the frame the hand arrives (the game's consequence may
+                      wait for it; it fires at once when nothing can play,
+                      including a point further than one step can bring
+                      into reach: no hand is thrown across a room)
+         spec.onDone  after the hand is back
+       C.release() lets go now (blends out); C.res = the palm's miss in metres
+       this frame (null when not on), C.w = its weight.
+
+     THIRD PERSON: a late pose layer at CBZ.onUpdate(91.6) (right after the
+     takes, 91.5), re-asserted at CBZ.onAlways(54.75) for an armed actor (after
+     gunhands put the off hand back on the gun, after the take's 54.7).
+     FIRST PERSON: fpsmode.js's fpPlants reads CBZ.verbs.touchPlants() and
+     puts the bare hand on the same point down the lens, the same way it puts
+     it on a vault's plant. One solve, one hand, one list.
+     ============================================================ */
+  const TOUCH_KIND = {
+    palm:   { pose: "plant", reach: 0.26, hold: 0.34, back: 0.26 },
+    press:  { pose: "point", reach: 0.26, hold: 0.20, back: 0.24 },
+    handle: { pose: "grip",  reach: 0.28, hold: 0.42, back: 0.26 },
+    card:   { pose: "card",  reach: 0.30, hold: 0.45, back: 0.28 },
+  };
+  const touches = [];
+  const SUSTAIN_GRACE = 0.15;          // s a sustained touch outlives its last refresh
+  const TOUCH_REACH = 0.88;            // a stepped-in body plants at this share of the palm's span
+  const TOUCH_LEAN_MAX = 0.8;          // rad of extra waist pitch a low touch may take
+  const _tUp = new THREE.Vector3(0, 1, 0), _tS = new THREE.Vector3(), _tD = new THREE.Vector3();
+  function v3(dst, src) {
+    if (!src) return null;
+    return dst.set(+src.x || 0, +src.y || 0, +src.z || 0);
+  }
+  function touchActorMatch(C, B) {
+    if (C.B.isPlayer && B.isPlayer) return true;
+    return !!(C.B.ch && C.B.ch === B.ch);
+  }
+  function shoulderWorld(ch, arm, out) {
+    const part = ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (!part) return null;
+    if (ch.group) ch.group.updateMatrixWorld(true);
+    return part.getWorldPosition(out);
+  }
+  // the hand's frame for this touch: C.bk (where the back of the hand faces)
+  // and C.fg (where the straight fingers point), world
+  function touchFrame(C) {
+    const n = C.n, k = C.kind;
+    if (k === "press") {
+      C.fg.copy(n).negate();
+      if (C.along) C.bk.copy(C.along);
+      else if (Math.abs(n.y) < 0.7) C.bk.copy(_tUp);
+      else if (C.ch && C.ch.group) C.bk.set(Math.sin(C.ch.group.rotation.y), 0, Math.cos(C.ch.group.rotation.y));
+      else C.bk.set(0, 0, 1);
+      C.bk.addScaledVector(n, -C.bk.dot(n));
+      if (C.bk.lengthSq() < 1e-6) C.bk.set(1, 0, 0);
+      C.bk.normalize();
+      return;
+    }
+    C.bk.copy(n);
+    if (k === "handle" && C.axis) {
+      // the bar runs across the hand's width: the fingers go round it, up
+      // over it for a bar that lies flat, away from the body for an upright one
+      C.fg.crossVectors(n, C.axis);
+      if (C.fg.lengthSq() < 1e-6) C.fg.copy(_tUp);
+      C.fg.normalize();
+      if (Math.abs(C.fg.y) > 0.5) { if (C.fg.y < 0) C.fg.negate(); }
+      else if (C.ch && shoulderWorld(C.ch, C.arm, _tS)) {
+        _tD.copy(C.point).sub(_tS);
+        if (C.fg.dot(_tD) < 0) C.fg.negate();
+      }
+      return;
+    }
+    if (C.along) C.fg.copy(C.along);
+    else if (Math.abs(n.y) < 0.7) C.fg.copy(_tUp);        // a hand on a wall: fingers up
+    else if (C.ch && shoulderWorld(C.ch, C.arm, _tS)) {    // on a top: fingers away from the body
+      C.fg.copy(C.point).sub(_tS); C.fg.y = 0;
+      if (C.fg.lengthSq() < 1e-6) C.fg.set(0, 0, 1);
+    } else C.fg.set(0, 0, 1);
+    C.fg.addScaledVector(n, -C.fg.dot(n));
+    if (C.fg.lengthSq() < 1e-6) C.fg.set(1, 0, 0);
+    C.fg.normalize();
+  }
+  function pickArm(C, spec) {
+    if (spec.arm === "l" || spec.arm === "r") return spec.arm;
+    // a drawn gun keeps the firing hand: the off hand does the touching
+    if (C.kind !== "card" && armedNow(C.B)) return "l";
+    const ch = C.ch;
+    if (!ch || !ch.parts) return "r";
+    const l = shoulderWorld(ch, "l", _tS) ? _tS.distanceToSquared(C.point) : Infinity;
+    const r = shoulderWorld(ch, "r", _tD) ? _tD.distanceToSquared(C.point) : Infinity;
+    return l < r ? "l" : "r";
+  }
+  // one-shot: how far to step in and which way to face, planned once
+  function planTouchBody(C) {
+    const B = C.B, ch = C.ch, pos = B.pos;
+    C.stepLen = 0; C.yaw0 = C.yawT = ch.group ? ch.group.rotation.y : 0;
+    if (!pos || !ch.group || C.fp || C.sustain || C.spec.step === false) return;
+    if (B.isPlayer && CBZ.player && (CBZ.player.speed || 0) > MOVING) return;
+    const dx = C.point.x - pos.x, dz = C.point.z - pos.z, dh = Math.hypot(dx, dz);
+    if (dh < 0.05) return;
+    // face so the point is in front of the touching shoulder
+    const sx = shoulderLateral(ch, C.arm) * 0.8;
+    const ratio = Math.max(-0.9, Math.min(0.9, sx / Math.max(dh, 0.3)));
+    C.yawT = Math.atan2(dx, dz) - Math.asin(ratio);
+    // and near enough that the palm lands with the arm a little bent
+    if (!shoulderWorld(ch, C.arm, _tS)) return;
+    const span = CBZ.charArmTo && CBZ.charArmTo.palmSpan ? CBZ.charArmTo.palmSpan(ch, C.arm) : (B.arm || 0.63);
+    const dy = C.point.y - _tS.y;
+    const hWant = Math.sqrt(Math.max(0.0025, (span * TOUCH_REACH) * (span * TOUCH_REACH) - dy * dy));
+    const hNow = Math.sqrt(Math.max(0, dh * dh - sx * sx));
+    const maxStep = B.isPlayer ? 0.9 : 1.2;
+    // further than a step: a hand is not thrown at a thing across the room
+    if (hNow > hWant + maxStep + 0.25) { C.far = true; return; }
+    if (hNow > hWant + 0.03) {
+      C.stepLen = Math.min(maxStep, hNow - hWant);
+      C.step.set(dx / dh * C.stepLen, 0, dz / dh * C.stepLen);
+      C.stepFrom.set(pos.x, pos.y, pos.z);
+    }
+  }
+  function touchFinish(C) {
+    if (C.done) return;
+    C.done = true;
+    if (!C.fired) { C.fired = true; fire(C.onTouch, C); }
+    if (C.ch && C.posed && CBZ.charArmTo && CBZ.charArmTo.contactRelease) CBZ.charArmTo.contactRelease(C.ch, C.arm, C.pose0 || "relaxed");
+    if (C.ch && C.leaned && C.ch.body) C.leaned = 0;
+    const i = touches.indexOf(C);
+    if (i >= 0) touches.splice(i, 1);
+    fire(C.onDone, C);
+  }
+  V.touch = function (actor, spec) {
+    spec = spec || {};
+    actor = actor || CBZ.player;
+    const kind = TOUCH_KIND[spec.kind] ? spec.kind : "palm";
+    const K = TOUCH_KIND[kind];
+    const noPlay = function () { fire(spec.onTouch, null); fire(spec.onDone, null); return null; };
+    if (!spec.point || !spec.normal) return noPlay();
+    const B = actor ? bodyOf(actor) : null;
+    if (!B || actorDead(actor, B)) return noPlay();
+    // the same touch again: refresh it (a sustained lean is called every frame)
+    if (spec.key != null) {
+      for (let i = 0; i < touches.length; i++) {
+        const C = touches[i];
+        if (C.done || C.key !== spec.key || !touchActorMatch(C, B)) continue;
+        v3(C.point, spec.point); v3(C.n, spec.normal).normalize();
+        if (spec.along) C.along = v3(C.along || new THREE.Vector3(), spec.along).normalize();
+        if (spec.axis) C.axis = v3(C.axis || new THREE.Vector3(), spec.axis).normalize();
+        C.seen = C.t;
+        // pressed again (spec.again): the hand goes back on / stays on for a full hold
+        if (spec.again && !C.sustain && C.t > C.T.reach) {
+          const out = C.t - C.T.reach - C.T.hold;          // how far it had let go
+          C.t = out > 0 ? C.T.reach * (1 - Math.min(1, out / C.T.back)) : C.T.reach;
+        }
+        touchFrame(C);
+        return C;
+      }
+    }
+    const player = !!B.isPlayer;
+    const fp = player && fpActive();
+    if (!fp && !(B.ch && B.ch.parts && B.ch.body)) return noPlay();
+    if (player && playerBusy() && !spec.inCar) return noPlay();
+    const C = {
+      actor: actor, B: B, ch: B.ch, spec: spec, key: spec.key != null ? spec.key : null,
+      kind: kind, pose: K.pose, fp: fp, sustain: !!spec.sustain,
+      point: v3(new THREE.Vector3(), spec.point), n: v3(new THREE.Vector3(), spec.normal).normalize(),
+      along: spec.along ? v3(new THREE.Vector3(), spec.along).normalize() : null,
+      axis: spec.axis ? v3(new THREE.Vector3(), spec.axis).normalize() : null,
+      bk: new THREE.Vector3(), fg: new THREE.Vector3(),
+      arm: "r", t: 0, seen: 0, w: 0, res: null, share: 0, done: false, fired: false, posed: false, leaned: 0,
+      T: { reach: K.reach, hold: spec.hold > 0 ? +spec.hold : K.hold, back: K.back },
+      step: new THREE.Vector3(), stepFrom: new THREE.Vector3(), stepLen: 0, yaw0: 0, yawT: 0,
+      pose0: null, onTouch: spec.onTouch, onDone: spec.onDone, release: null,
+    };
+    C.arm = pickArm(C, spec);
+    // one hand, one touch: whatever that hand was on lets go
+    for (let i = touches.length - 1; i >= 0; i--) {
+      const O = touches[i];
+      if (!O.done && O.arm === C.arm && touchActorMatch(O, B)) touchFinish(O);
+    }
+    if (C.ch && C.ch.parts) { const m = handMesh(C.ch, C.arm); C.pose0 = m ? m.userData.handPose : null; }
+    touchFrame(C);
+    if (C.ch && C.ch.parts && C.ch.body) planTouchBody(C);
+    // first person has no body to step: out of an arm's length, no hand
+    if (fp && !C.sustain && B.pos && Math.hypot(C.point.x - B.pos.x, C.point.z - B.pos.z) > 1.3) C.far = true;
+    if (C.far) return noPlay();
+    C.release = function () {
+      if (C.done) return;
+      if (C.sustain) { C.seen = -1e9; return; }
+      // straight into the let-go, from however far the hand had come
+      const end = C.T.reach + C.T.hold;
+      if (C.t < C.T.reach) C.t = end + C.T.back * (1 - C.t / C.T.reach);
+      else if (C.t < end) C.t = end;
+    };
+    touches.push(C);
+    return C;
+  };
+  V.touchOf = function (actor, key) {
+    const pl = isPlayer(actor);
+    for (let i = 0; i < touches.length; i++) {
+      const C = touches[i];
+      if (C.done || (key != null && C.key !== key)) continue;
+      if (pl ? C.B.isPlayer : C.actor === actor) return C;
+    }
+    return null;
+  };
+  V.touches = touches;
+  V.TOUCH_KIND = TOUCH_KIND;
+  /* WHICH HAND IS BUSY. A hand on the world (a touch) or taking a thing (a
+     pickup) claims its arm; a gun hold / held item that reads this leaves
+     that arm to it instead of both writers fighting over one hand.
+       CBZ.verbs.handBusy(actor, arm) -> "touch" | "pickup" | null */
+  V.handBusy = function (actor, arm) {
+    if (!actor) return null;
+    const pl = isPlayer(actor);
+    const ch = pl ? CBZ.playerChar : (actor.char || actor.ch || (actor.parts ? actor : null));
+    for (let i = 0; i < active.length; i++) {
+      const P = active[i];
+      if (P.done || P.hand !== arm) continue;
+      if (pl ? (P.B && P.B.isPlayer) : (P.actor === actor || (ch && P.ch === ch))) return "pickup";
+    }
+    for (let i = 0; i < touches.length; i++) {
+      const C = touches[i];
+      if (C.done || C.arm !== arm || !(C.w > 0.01)) continue;
+      if (pl ? C.B.isPlayer : (C.actor === actor || (ch && C.ch === ch))) return "touch";
+    }
+    return null;
+  };
+  /* WHERE A HAND GOES ON A SLAB. A door leaf, a crate, a wall panel: the
+     face of `obj`'s own (oriented) box nearest `from`, at world height `y`
+     (default from.y), the point clamped `inset` m inside its edges, and that
+     face's outward normal. Real geometry (its bounding box through its world
+     matrix), so a leaf swung open answers with its turned face.
+       CBZ.verbs.touchSurface(obj, from, y, inset) -> { point, normal, axis } | null
+     `axis` is the slab's long in-face horizontal direction (a bar's run). */
+  const _sfL = new THREE.Vector3(), _sfN = new THREE.Vector3(), _sfBox = new THREE.Box3(), _sfS = new THREE.Vector3();
+  V.touchSurface = function (obj, from, y, inset) {
+    if (!obj || !from) return null;
+    inset = inset == null ? 0.06 : inset;
+    const out = { point: new THREE.Vector3(), normal: new THREE.Vector3(), axis: new THREE.Vector3() };
+    // a group (a door's pivot): its biggest mesh is the slab (the leaf)
+    if (!obj.geometry) {
+      let big = null, bv = 0;
+      obj.traverse(function (o) {
+        if (!o.isMesh || !o.geometry || o.isInstancedMesh) return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const b = o.geometry.boundingBox;
+        const v = (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z) * Math.abs(o.scale.x * o.scale.y * o.scale.z);
+        if (v > bv) { bv = v; big = o; }
+      });
+      if (big) obj = big;
+    }
+    obj.updateWorldMatrix(true, false);
+    const geo = obj.geometry;
+    if (geo) {
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox;
+      _sfS.setFromMatrixScale(obj.matrixWorld);
+      _sfL.set(+from.x || 0, y != null ? y : (+from.y || 0), +from.z || 0);
+      obj.worldToLocal(_sfL);
+      // the face: of the two horizontal local axes (the slab's up is its own
+      // +Y), the one `from` stands furthest outside of, in world metres
+      const keys = ["x", "y", "z"];
+      let a = 0, best = -Infinity;
+      for (let i = 0; i < 3; i += 2) {
+        const k = keys[i], c = (bb.min[k] + bb.max[k]) / 2, hw = (bb.max[k] - bb.min[k]) / 2;
+        const outside = (Math.abs(_sfL[k] - c) - hw) * Math.abs(_sfS[k]);
+        if (outside > best) { best = outside; a = i; }
+      }
+      const ka = keys[a], ca = (bb.min[ka] + bb.max[ka]) / 2;
+      const sg = _sfL[ka] >= ca ? 1 : -1;
+      for (let i = 0; i < 3; i++) {
+        const k = keys[i];
+        if (i === a) { _sfL[k] = sg > 0 ? bb.max[k] : bb.min[k]; continue; }
+        const ins = inset / (Math.abs(_sfS[k]) || 1);
+        const lo = bb.min[k] + Math.min(ins, (bb.max[k] - bb.min[k]) / 2), hi = bb.max[k] - Math.min(ins, (bb.max[k] - bb.min[k]) / 2);
+        _sfL[k] = Math.max(lo, Math.min(hi, _sfL[k]));
+      }
+      out.point.copy(_sfL).applyMatrix4(obj.matrixWorld);
+      _sfN.set(0, 0, 0); _sfN[ka] = sg;
+      out.normal.copy(_sfN).transformDirection(obj.matrixWorld);
+      // the in-face horizontal run: whichever other axis is not up
+      const kb = a === 0 ? "z" : "x";
+      _sfN.set(0, 0, 0); _sfN[kb] = 1;
+      out.axis.copy(_sfN).transformDirection(obj.matrixWorld);
+      return out;
+    }
+    // a group: its world box (axis-aligned) answers the same way
+    _sfBox.setFromObject(obj);
+    if (_sfBox.isEmpty()) return null;
+    const P = out.point.set(+from.x || 0, y != null ? y : (+from.y || 0), +from.z || 0);
+    const c = _sfBox.getCenter(_sfS);
+    const hx = (_sfBox.max.x - _sfBox.min.x) / 2 || 1e-6, hz = (_sfBox.max.z - _sfBox.min.z) / 2 || 1e-6;
+    const ax = hx < hz ? "x" : "z", other = ax === "x" ? "z" : "x";
+    const sg = P[ax] >= c[ax] ? 1 : -1;
+    P[ax] = sg > 0 ? _sfBox.max[ax] : _sfBox.min[ax];
+    P[other] = Math.max(_sfBox.min[other] + inset, Math.min(_sfBox.max[other] - inset, P[other]));
+    P.y = Math.max(_sfBox.min.y + inset, Math.min(_sfBox.max.y - inset, P.y));
+    out.normal.set(0, 0, 0); out.normal[ax] = sg;
+    out.axis.set(0, 0, 0); out.axis[other] = 1;
+    return out;
+  };
+
+  // this frame's weight of a touch (and advance its sustained ramp)
+  function touchWeight(C, dt) {
+    const T = C.T;
+    if (C.sustain) {
+      const on = C.t - C.seen <= SUSTAIN_GRACE;
+      C.ramp = Math.max(0, Math.min(1, (C.ramp || 0) + (on ? dt / T.reach : -dt / T.back)));
+      return smooth(C.ramp);
+    }
+    const t = C.t;
+    if (t < T.reach) return smooth(t / T.reach);
+    if (t < T.reach + T.hold) return 1;
+    return 1 - smooth((t - T.reach - T.hold) / T.back);
+  }
+  function touchOwned(C) {
+    const ch = C.ch;
+    if (!ch) return true;
+    // a vault owns both hands; a take owns its hand
+    if (ch.traversePose) return true;
+    for (let i = 0; i < active.length; i++) {
+      const P = active[i];
+      if (!P.done && P.ch === ch && P.hand === C.arm) return true;
+    }
+    return false;
+  }
+  // the body: step in / turn (one-shot, during the reach), lean over a low
+  // point, then the hand ON it through charArmTo.plant
+  function touchPose(C, reassert) {
+    const ch = C.ch, CA = CBZ.charArmTo;
+    if (!ch || !ch.parts || !ch.body || !CA || !CA.plant) return;
+    if (!reassert && (C.stepLen > 0 || C.yawT !== C.yaw0) && C.t <= C.T.reach + 0.02 && C.B.pos) {
+      const u = smooth(Math.min(1, C.t / (C.T.reach * 0.85)));
+      if (C.stepLen > 0) {
+        const p = C.B.pos;
+        p.x = C.stepFrom.x + C.step.x * u;
+        p.z = C.stepFrom.z + C.step.z * u;
+        if (C.B.isPlayer && ch.group && ch.group.position !== p) { ch.group.position.x = p.x; ch.group.position.z = p.z; }
+      }
+      if (ch.group && !C.fp) ch.group.rotation.y = C.yaw0 + angDiff(C.yaw0, C.yawT) * u;
+    }
+    if (C.w <= 0.001) { C.res = null; return; }
+    if (ch.group) ch.group.updateMatrixWorld(true);
+    let share = CA.plantShare(ch, C.point, C.arm, C.bk, C.fg, C.pose);
+    // a point below the reach of a standing arm: the waist goes over it
+    // (the least pitch over the hips that brings it in, searched from the
+    // pose as it stands: the gait damps from last frame's lean, so a held
+    // push settles on one lean instead of piling it up frame on frame)
+    if (share > 0.96 && shoulderWorld(ch, C.arm, _tS) && C.point.y < _tS.y - 0.1) {
+      const base = ch.body.rotation.x;
+      const tryLean = function (x) {
+        ch.body.rotation.x = base + x * C.w;
+        if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
+        ch.group.updateMatrixWorld(true);
+        return CA.plantShare(ch, C.point, C.arm, C.bk, C.fg, C.pose);
+      };
+      let lo = 0, hi = TOUCH_LEAN_MAX;
+      if (tryLean(hi) > 0.96) lo = hi;
+      else for (let it = 0; it < 5; it++) { const mid = (lo + hi) / 2; if (tryLean(mid) > 0.96) lo = mid; else hi = mid; }
+      share = tryLean(lo === TOUCH_LEAN_MAX ? lo : hi);
+      C.leaned = (lo === TOUCH_LEAN_MAX ? lo : hi) * C.w;
+    }
+    C.share = share;
+    // past the arm's length the hand does not pretend (as a vault's plant),
+    // and a point the body has walked past is let go, not reached back for
+    let behind = 0;
+    if (ch.group && shoulderWorld(ch, C.arm, _tS)) {
+      const yaw = ch.group.rotation.y;
+      const ahead = (C.point.x - _tS.x) * Math.sin(yaw) + (C.point.z - _tS.z) * Math.cos(yaw);
+      behind = smooth((-ahead - 0.05) / 0.15);
+    }
+    const w = C.w * (1 - smooth((share - 1.0) / 0.08)) * (1 - behind);
+    if (w <= 0.01) {
+      if (C.posed) { CA.contactRelease(ch, C.arm, C.pose0 || "relaxed"); C.posed = false; }
+      C.res = null;
+      return;
+    }
+    C.res = CA.plant(ch, C.point, C.arm, C.bk, C.fg, w, C.pose);
+    C.posed = true;
+  }
+  function touchUpdate(dt) {
+    if (!touches.length) return;
+    dt = Math.min(0.1, Math.max(0, dt || 0));
+    for (let i = touches.length - 1; i >= 0; i--) {
+      const C = touches[i];
+      if (!C || C.done) continue;
+      if (actorDead(C.actor, C.B) || (C.B.isPlayer && playerBusy() && !C.spec.inCar)) { touchFinish(C); continue; }
+      C.t += dt;
+      C.w = touchWeight(C, dt);
+      if (!C.fired && (C.sustain ? C.w > 0.9 : C.t >= C.T.reach)) { C.fired = true; fire(C.onTouch, C); }
+      if (!touchOwned(C)) touchPose(C, false);
+      else C.res = null;
+      const over = C.sustain ? (C.w <= 0 && C.t - C.seen > SUSTAIN_GRACE) : C.t >= C.T.reach + C.T.hold + C.T.back;
+      if (over) touchFinish(C);
+    }
+  }
+  function touchLate() {
+    for (let i = 0; i < touches.length; i++) {
+      const C = touches[i];
+      if (!C.done && armedNow(C.B) && !touchOwned(C)) touchPose(C, true);
+    }
+  }
+  /* FIRST PERSON: the player's live touches as plants for fpsmode's fpPlants
+     (the same record a vault's plant is: p, arm, w) plus the hand's frame
+     (bk: back of the hand, fg: fingers) and its pose. Reused array. */
+  const _fpTouch = [];
+  V.touchPlants = function () {
+    _fpTouch.length = 0;
+    for (let i = 0; i < touches.length; i++) {
+      const C = touches[i];
+      if (C.done || !C.B.isPlayer || !(C.w > 0.01)) continue;
+      _fpTouch.push(C.fpRec || (C.fpRec = { p: C.point, arm: C.arm, w: 0, bk: C.bk, fg: C.fg, pose: C.pose }));
+      C.fpRec.w = C.w; C.fpRec.arm = C.arm;
+    }
+    return _fpTouch;
+  };
+  /* HANDS ON THE WALL. The game has no cover state (the AI's "cover" is a
+     sidestep; the player has none), so the wall contact is what a body does
+     on its own: walk INTO a wall and a hand comes up flat on it (a brace);
+     stand still facing one close enough to touch and, after a beat, a palm
+     rests on it. The wall is the nearest solid collider face at chest height
+     (CBZ.queryCollidersNear — the colliders physics resolves against, i.e.
+     the real walls), the point in front of the nearer shoulder. Bare hands
+     only: a man with a gun out does not lean on walls. */
+  const _wallQ = [];
+  const _wP = new THREE.Vector3(), _wN = new THREE.Vector3(), _wS = new THREE.Vector3();
+  let wallStill = 0;
+  function wallHands(dt) {
+    const P = CBZ.player, ch = CBZ.playerChar;
+    if (!P || !P.pos || !ch || !ch.parts || P.dead || playerBusy() || !CBZ.queryCollidersNear || !P.grounded) { wallStill = 0; return; }
+    if (ch.traversePose || (CBZ.playerArmed && CBZ.playerArmed()) || fpActive()) { wallStill = 0; return; }
+    const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0, r = P.radius || 0.55;
+    const mx = P.moveX || 0, mz = P.moveZ || 0, sp = Math.hypot(mx, mz);
+    wallStill = sp < 0.15 ? wallStill + dt : 0;
+    if (sp >= 0.15 && sp < 0.5) return;
+    const list = CBZ.queryCollidersNear(px, pz, r + 0.6, _wallQ);
+    let best = null, bd = r + 0.32, bx = 0, bz = 0;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.minX == null) continue;
+      if (c.y0 != null && (c.y0 > py + 0.95 || c.y1 < py + 1.35)) continue;   // not a wall at chest height
+      if (c.maxX - c.minX < 0.3 && c.maxZ - c.minZ < 0.3) continue;            // a post, not a wall
+      const cx = Math.max(c.minX, Math.min(px, c.maxX)), cz = Math.max(c.minZ, Math.min(pz, c.maxZ));
+      const d = Math.hypot(px - cx, pz - cz);
+      if (d < 1e-3 || d >= bd) continue;
+      bd = d; best = c; bx = cx; bz = cz;
+    }
+    if (!best) return;
+    _wN.set((px - bx) / bd, 0, (pz - bz) / bd);
+    // the face is axis-aligned: snap the normal to it
+    if (Math.abs(_wN.x) >= Math.abs(_wN.z)) _wN.set(Math.sign(_wN.x), 0, 0); else _wN.set(0, 0, Math.sign(_wN.z));
+    const yaw = ch.group.rotation.y, fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const facing = -(fx * _wN.x + fz * _wN.z);
+    const brace = sp >= 0.5 && -(mx * _wN.x + mz * _wN.z) / sp > 0.6;
+    const lean = wallStill > 0.8 && facing > 0.55 && bd < r + 0.22;
+    if (!brace && !lean) return;
+    // in front of the nearer shoulder, on the face, a hand under shoulder height
+    ch.group.updateMatrixWorld(true);
+    const la = ch.parts.la.getWorldPosition(_wS).clone(), ra = ch.parts.ra.getWorldPosition(_wS);
+    const dl = (la.x - bx) * _wN.x + (la.z - bz) * _wN.z, dr = (ra.x - bx) * _wN.x + (ra.z - bz) * _wN.z;
+    const sh = dl < dr ? la : ra;
+    _wP.set(_wN.x ? bx : Math.max(best.minX + 0.08, Math.min(sh.x, best.maxX - 0.08)),
+      sh.y - 0.12,
+      _wN.z ? bz : Math.max(best.minZ + 0.08, Math.min(sh.z, best.maxZ - 0.08)));
+    if (best.y1 != null) _wP.y = Math.min(_wP.y, best.y1 - 0.08);
+    V.touch(P, { point: _wP, normal: _wN, kind: "palm", arm: dl < dr ? "l" : "r", sustain: true, key: "wall" });
+  }
+  V.wallHands = wallHands;
+  if (typeof CBZ.onUpdate === "function") CBZ.onUpdate(91.55, wallHands);
+
+  V.touchUpdate = touchUpdate;
+  V.touchLate = touchLate;
+  if (typeof CBZ.onUpdate === "function") CBZ.onUpdate(91.6, touchUpdate);
+  if (typeof CBZ.onAlways === "function") CBZ.onAlways(54.75, touchLate);
 
   V.pickupUpdate = update;          // the clock + TP pose (tools/verbs-pickup-check.mjs drives it by hand)
   V.pickupLensTick = lensTick;

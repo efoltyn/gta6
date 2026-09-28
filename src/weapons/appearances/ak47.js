@@ -37,7 +37,7 @@
       0.050, steel, { bevel: 0.004 });
     // SELECTOR lever down the right flank + charging handle on the carrier
     box(g, 0.005, 0.020, 0.150, K.fin("edge"), 0.036, 0.020, -0.135, -0.06);
-    cyl(g, 0.011, 0.050, blued, 0.050, 0.050, -0.285, 0, 0, Math.PI / 2);
+    K.tag(cyl(g, 0.011, 0.050, blued, 0.050, 0.050, -0.285, 0, 0, Math.PI / 2), "part_charge");
     box(g, 0.010, 0.044, 0.012, mat.black, 0, -0.062, -0.150, -0.30);   // trigger
 
     // FURNITURE: lower handguard (palm swell at the back), upper over the gas tube
@@ -73,10 +73,10 @@
       pts.push([cx + ux * -h, cy + uy * -h]);       // front edge (toward the centre)
       back.push([cx + ux * h, cy + uy * h]);
     }
-    K.prof(g, "ak.mag", pts.concat(back.reverse()), 0.052, steel, { bevel: 0.004 });
+    K.tag(K.prof(g, "ak.mag", pts.concat(back.reverse()), 0.052, steel, { bevel: 0.004 }), "part_mag");
     // floorplate, square to the curve where it ends
     const aEnd = 0.56, bx = C[0] - Math.cos(aEnd) * Rc + Math.sin(aEnd) * 0.006, by = C[1] - Math.sin(aEnd) * Rc - Math.cos(aEnd) * 0.006;
-    box(g, 0.058, 0.014, 0.128, blued, 0, by, -bx, aEnd);
+    K.tag(box(g, 0.058, 0.014, 0.128, blued, 0, by, -bx, aEnd), "part_mag");
 
     // wood pistol grip + the dropped wood stock with a steel buttplate
     const R = 20 * Math.PI / 180;

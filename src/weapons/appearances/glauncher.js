@@ -22,14 +22,15 @@
     cyl(g, 0.052, 0.46, mat.dark, 0, 0.05, -0.52, Math.PI / 2);
     cyl(g, 0.058, 0.06, mat.black, 0, 0.05, -0.73, Math.PI / 2);
     // the revolver DRUM — the landmark (fat, steel, axis on the bore)
-    cyl(g, 0.115, 0.17, mat.steel, 0, 0.02, -0.18, Math.PI / 2);
+    const tag = CBZ.gunKit ? CBZ.gunKit(ctx).tag : function (m) { return m; };
+    tag(cyl(g, 0.115, 0.17, mat.steel, 0, 0.02, -0.18, Math.PI / 2), "part_cylinder");
     // chamber mouths ringed on the drum face
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
-      cyl(g, 0.026, 0.03, mat.black, Math.cos(a) * 0.062, 0.02 + Math.sin(a) * 0.062, -0.275, Math.PI / 2);
+      tag(cyl(g, 0.026, 0.03, mat.black, Math.cos(a) * 0.062, 0.02 + Math.sin(a) * 0.062, -0.275, Math.PI / 2), "part_cylinder");
     }
     // one 40mm nose proud of the top chamber — the "loaded" read
-    cyl(g, 0.02, 0.05, mat.redShell, 0, 0.082, -0.305, Math.PI / 2);
+    tag(cyl(g, 0.02, 0.05, mat.redShell, 0, 0.082, -0.305, Math.PI / 2), "part_cylinder");
     // receiver bridging drum to stock + top rail
     box(g, 0.075, 0.09, 0.22, mat.dark, 0, 0.055, 0.02);
     box(g, 0.05, 0.03, 0.34, mat.black, 0, 0.115, -0.10);

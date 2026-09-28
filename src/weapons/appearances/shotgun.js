@@ -27,12 +27,12 @@
     const BORE = 0.090, TUBE = 0.030;
 
     // RECEIVER: flat sides, the top sweeping down into the stock tang
-    K.prof(g, "870.recv", [[-0.050, -0.030], [0.345, -0.030], [0.345, 0.118], [0.320, 0.124], [0.040, 0.124], [-0.020, 0.108], [-0.050, 0.080]],
-      0.066, steel, { bevel: 0.005 });
+    K.tag(K.prof(g, "870.recv", [[-0.050, -0.030], [0.345, -0.030], [0.345, 0.118], [0.320, 0.124], [0.040, 0.124], [-0.020, 0.108], [-0.050, 0.080]],
+      0.066, steel, { bevel: 0.005 }), "part_receiver");
     box(g, 0.004, 0.050, 0.150, mat.black, 0.032, 0.070, -0.180);         // ejection port
     // trigger plate + guard with its hole, trigger blade
-    K.prof(g, "870.guard", [[-0.030, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [-0.010, -0.048]],
-      0.040, parker, { bevel: 0.003, holes: [[[0.126, -0.040], [0.120, -0.088], [0.034, -0.088], [0.018, -0.046]]] });
+    K.tag(K.prof(g, "870.guard", [[-0.030, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [-0.010, -0.048]],
+      0.040, parker, { bevel: 0.003, holes: [[[0.126, -0.040], [0.120, -0.088], [0.034, -0.088], [0.018, -0.046]]] }), "part_guard");
     box(g, 0.010, 0.044, 0.010, mat.black, 0, -0.058, -0.080, -0.25);
 
     // BARREL over the MAGAZINE TUBE; cap + barrel lug tie them together
@@ -58,7 +58,7 @@
     // the flank the first-person camera sees): four shells, brass down
     box(g, 0.006, 0.090, 0.150, parker, -0.036, 0.050, -0.120);
     const shell = mat.redShell;
-    for (let i = 0; i < 4; i++) cyl(g, 0.016, 0.086, shell, -0.052, 0.060, -0.068 - i * 0.035);
+    for (let i = 0; i < 4; i++) K.tag(cyl(g, 0.016, 0.086, shell, -0.052, 0.060, -0.068 - i * 0.035), "part_shell");
     box(g, 0.034, 0.018, 0.140, mat.brass, -0.052, 0.012, -0.120);
 
     // straight WALNUT stock with a wrist, rubber recoil pad

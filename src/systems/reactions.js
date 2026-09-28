@@ -641,11 +641,11 @@
           // this path. Gated to city; jail aim-back (guards/npcs) is UNCHANGED.
           const heldGun = a._weaponProp && a._weaponProp.visible && !a._weaponProp.userData.weaponMelee ? a._weaponProp : null;
           const weaponOwnsArm = isCity && a.armed && heldGun;
-          /* A GUN IN THE HAND IS HELD WITH BOTH HANDS (every mode, not just the
-             city's armed-ped pass): the stand-off is CBZ.gunHold's ready pose,
-             the same solve every armed NPC uses — firing fist on the grip, the
-             off hand cupping it or on the handguard. The additive right-arm-only
-             raise below let the off hand hang off a pistol it was meant to hold. */
+          /* A GUN IN THE HAND IS HELD THE WAY THE HOLD ENGINE SAYS (every mode,
+             not just the city's armed-ped pass): the stand-off is CBZ.gunHold's
+             ready pose, the same solve every armed NPC uses — firing fist on the
+             grip; a long gun's off hand on the handguard, a handgun's off arm
+             free (CBZ.holds: one hand in third person). */
           const heldBoth = !weaponOwnsArm && heldGun && CBZ.gunHold && CBZ.gunHold.ready(a.char, heldGun, true);
           if (!weaponOwnsArm && !heldBoth) {
             if (parts.ra) {
@@ -904,7 +904,7 @@
             r.byOff += r.aimY * 0.3 * r.aimK;                           // shoulders open toward it
             if (gunArm) {                                               // only while actorweapons assigned the arm this frame
               if (parts.ra) parts.ra.rotation.x += r.aimA * r.aimK;
-              if (parts.la && a._weaponProp.userData && a._weaponProp.userData.weaponSlot === "long")
+              if (parts.la && CBZ.holds && CBZ.holds.hands(a._weaponProp, { view: "tp" }) >= 2)
                 parts.la.rotation.x += r.aimA * r.aimK;                 // support hand rides the long gun up/down
             }
           }

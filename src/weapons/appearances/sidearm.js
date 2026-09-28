@@ -271,6 +271,9 @@
       prof: function (parent, key, outlines, width, material, o) { return prof(ctx, parent, key, outlines, width, material, o); },
       tube: function (parent, rF, rB, len, segs, material, x, y, z) { return tube(ctx, parent, rF, rB, len, segs, material, x, y, z); },
       hand: function (parent, h) { return hand(ctx, parent, h); },
+      // a NAME on a drawn part, nothing else: the reload rig (systems/gunhands.js
+      // CBZ.gunReload) finds the moving parts by it ("part_mag", "part_slide", ...)
+      tag: function (m, name) { if (m) m.name = name; return m; },
       arc: arc,
       grip: gripOutline,
       rail: railOutline,
@@ -286,27 +289,27 @@
     const g = new THREE.Group();
 
     // SLIDE: flat top, chamfered edges, the nose bevelled underneath
-    K.prof(g, "g17.slide", [
+    K.tag(K.prof(g, "g17.slide", [
       [-0.004, 0.004], [0.398, 0.004], [0.414, 0.018], [0.414, 0.054],
       [0.404, 0.064], [0.006, 0.064], [-0.004, 0.056],
-    ], 0.058, blued, { bevel: 0.005 });
+    ], 0.058, blued, { bevel: 0.005 }), "part_slide");
     // rear cocking serrations: six ribs proud of both flanks
     const ribs = [];
     for (let i = 0; i < 6; i++) {
       const f = 0.012 + i * 0.013;
       ribs.push([[f, 0.012], [f + 0.006, 0.012], [f + 0.006, 0.052], [f, 0.052]]);
     }
-    K.prof(g, "g17.serr", ribs, 0.066, mat.black, { bevel: 0 });
+    K.tag(K.prof(g, "g17.serr", ribs, 0.066, mat.black, { bevel: 0 }), "part_slide");
     // ejection port + barrel hood, cut into the top right
-    box(g, 0.030, 0.010, 0.088, mat.black, 0.013, 0.066, -0.170);
-    box(g, 0.004, 0.012, 0.030, mat.dark, 0.031, 0.056, -0.112);    // extractor
+    K.tag(box(g, 0.030, 0.010, 0.088, mat.black, 0.013, 0.066, -0.170), "part_slide");
+    K.tag(box(g, 0.004, 0.012, 0.030, mat.dark, 0.031, 0.056, -0.112), "part_slide");    // extractor
     // sights: U-notch rear, post front with a white dot facing the eye
-    K.prof(g, "g17.rear", [
+    K.tag(K.prof(g, "g17.rear", [
       [-0.024, 0], [0.024, 0], [0.024, 0.018], [0.008, 0.018], [0.006, 0.008],
       [-0.006, 0.008], [-0.008, 0.018], [-0.024, 0.018],
-    ], 0.020, mat.black, { axis: "z", bevel: 0.002, y: 0.066, z: -0.022 });
-    box(g, 0.012, 0.020, 0.018, mat.black, 0, 0.076, -0.392);
-    box(g, 0.007, 0.007, 0.002, K.fin("whiteDot"), 0, 0.080, -0.382);
+    ], 0.020, mat.black, { axis: "z", bevel: 0.002, y: 0.066, z: -0.022 }), "part_slide");
+    K.tag(box(g, 0.012, 0.020, 0.018, mat.black, 0, 0.076, -0.392), "part_slide");
+    K.tag(box(g, 0.007, 0.007, 0.002, K.fin("whiteDot"), 0, 0.080, -0.382), "part_slide");
     // muzzle: the barrel crown sits flush in the slide nose
     const bore = cyl(g, 0.012, 0.004, mat.bore || mat.black, 0, 0.036, -0.421, Math.PI / 2);
     bore.userData.weaponBore = true;
@@ -338,7 +341,7 @@
       .concat(front).concat(back.reverse()).concat([[-0.046, -0.028]]), 0.068, poly, { bevel: 0.005 });
     // magazine baseplate, square to the grip
     const bx = (front[6][0] + back[0][0]) / 2, by = (front[6][1] + back[0][1]) / 2;
-    box(g, 0.072, 0.016, 0.118, mat.black, 0, by - 0.004, -bx + 0.004, -R);
+    K.tag(box(g, 0.072, 0.016, 0.118, mat.black, 0, by - 0.004, -bx + 0.004, -R), "part_mag");
 
     // the firing hand on the grip
     K.hand(g, { at: [-0.036, -0.030], rake: R, gripW: 0.068, gripD: 0.118, trigger: [-0.062, -0.118] });

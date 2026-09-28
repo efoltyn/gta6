@@ -389,6 +389,8 @@
     }
     const pose = m.userData.handPose;
     if (HOLD[pose] && H.gripCentre) { H.gripCentre(pose, out); if (m.userData.side < 0) out.x = -out.x; }
+    // a planted palm / a pressing finger touches with its own contact point (fphands.contactOf)
+    else if ((pose === "plant" || pose === "point") && H.contactOf) { H.contactOf(pose, out); if (m.userData.side < 0) out.x = -out.x; }
     else { const L = (H.PALM && H.PALM.len) || 0.096; out.set(0, 0, -L * (pose === "fist" ? 0.75 : 0.62)); }
     m.updateWorldMatrix(true, false);
     return out.applyMatrix4(m.matrixWorld);
@@ -947,6 +949,7 @@
   const sessions = [];
   const _pp = { k: 0, t: 0, phase: "", moving: false, sag: 0, crouch: 0, seed: 0, ground: false, verb: "", strain: 0, writhe: 0, knee: null, kneeSide: 1, twist: 0 };
   const _W = new THREE.Vector3(), _C = new THREE.Vector3(), _R = new THREE.Vector3(), _V = new THREE.Vector3();
+  const _UPV = new THREE.Vector3(0, 1, 0), _PLN = new THREE.Vector3();
 
   // hands-on weight for the ordinary shape of a verb
   function kIn(S) {
@@ -1016,17 +1019,20 @@
     outcome(S) { S.result = S.result || {}; S.result.outcome = "took"; },
   };
 
-  DEF.shove = { onExplicit: 3, from: ["grab"],
+  DEF.shove = { onExplicit: 3, from: ["grab"], palm: true,
     face: "face", hold: false, speed: 2.8, close: 1.0,
     work: (S) => S.A.depth + S.T.depth + 0.42 * S.A.arm,
     dur(S, ph) { return ph === "align" ? 0.1 : ph === "contact" ? 0.12 : ph === "drive" ? 0.42 : ph === "release" ? 0.45 : 0; },
     poseA: (S) => S.phase === "release" ? "a.follow" : (S.phase === "contact" || S.phase === "drive") ? "a.shove" : "a.reach",
     poseT: () => "t.shoved",
     hands(S) {
-      S.handsA[0] = "chestR"; S.handsA[1] = "chestL"; S.gA[0] = S.gA[1] = "open";
-      const k = S.phase === "drive" ? 1 - smooth((S.k - 0.64) / 0.14) : S.phase === "contact" ? smooth(S.k) : 0;
+      S.handsA[0] = "chestR"; S.handsA[1] = "chestL"; S.gA[0] = S.gA[1] = "plant";
+      // the palms are flat on his chest (charArmTo.plant, def.palm) until he
+      // leaves them: past half the drive he is going faster than a locked-out
+      // arm can follow, and a planted palm does not chase a chest that has gone
+      const k = S.phase === "drive" ? 1 - smooth((S.k - 0.50) / 0.14) : S.phase === "contact" ? smooth(S.k) : 0;
       S.kA[0] = S.kA[1] = k;
-      S.onA[0] = S.onA[1] = S.phase === "drive" && S.k < 0.63 || (S.phase === "contact" && S.k >= 1);
+      S.onA[0] = S.onA[1] = S.phase === "drive" && S.k < 0.5 || (S.phase === "contact" && S.k >= 1);
     },
     place(S, o) {
       const push = S.phase === "drive" ? 0.12 * smooth((S.k - 0.3) / 0.35) : 0;
@@ -2262,6 +2268,18 @@
         const l = _C.length(); if (l > 1e-4) S.pA[h].addScaledVector(_C, S.press / l);
       }
       const pole = def.pole && def.pole(S, h, S.poleA[h]) ? S.poleA[h] : null;
+      if (def.palm && CBZ.charArmTo && CBZ.charArmTo.plant) {
+        // A SHOVE IS TWO PALMS FLAT ON HIS CHEST, not two fists poking it:
+        // the same plant solver as every hand on the world (systems/
+        // verbs_pickup.js CBZ.verbs.touch), the palm facing back along the
+        // line between the two bodies, fingers up
+        _PLN.set(A.pos.x - T.pos.x, 0, A.pos.z - T.pos.z);
+        if (_PLN.lengthSq() < 1e-6) _PLN.set(0, 0, 1);
+        _PLN.normalize();
+        const r = CBZ.charArmTo.plant(A.ch, S.pA[h], h === 0 ? "l" : "r", _PLN, _UPV, S.kA[h], "plant");
+        S.resA[h] = r == null ? -1 : r;
+        continue;
+      }
       S.resA[h] = handTo(A.ch, h === 0 ? "l" : "r", S.pA[h], S.kA[h], pole);
     }
     if (S.handsT[0] || S.handsT[1]) {

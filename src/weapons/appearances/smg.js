@@ -29,7 +29,7 @@
       0.054, steel, { bevel: 0.004 });
     // COCKING TUBE forward over the barrel, lever out on the left
     K.tube(g, 0.018, 0.018, 0.300, 12, steel, 0, 0.086, -0.560);
-    box(g, 0.050, 0.014, 0.018, mat.black, -0.036, 0.100, -0.500, 0, 0, 0.55);
+    K.tag(box(g, 0.050, 0.014, 0.018, mat.black, -0.036, 0.100, -0.500, 0, 0, 0.55), "part_charge");
     // slim polymer handguard with a front lip
     K.prof(g, "mp5.hg", [[0.410, 0.066], [0.610, 0.066], [0.620, 0.050], [0.620, -0.010], [0.600, -0.016], [0.410, 0.006]],
       0.070, poly, { bevel: 0.008 });
@@ -76,7 +76,7 @@
       mf.push([cx + nx * D / 2, cy + ny * D / 2]);
       mb.push([cx - nx * D / 2, cy - ny * D / 2]);
     }
-    K.prof(g, "mp5.mag", mf.concat(mb.reverse()), 0.040, mat.dark, { bevel: 0.003 });
+    K.tag(K.prof(g, "mp5.mag", mf.concat(mb.reverse()), 0.040, mat.dark, { bevel: 0.003 }), "part_mag");
 
     // POLYMER TRIGGER GROUP: housing + the big wrap-around guard + grip
     K.prof(g, "mp5.tgroup", [

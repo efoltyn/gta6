@@ -5128,14 +5128,34 @@
        Returns the metres between the palm's contact point and `point` (0 =
        planted; more = out of reach), or null if the rig can't be solved.
      The hand wears fphands' "plant" pose (fingers flat, pads and heel on one
-     plane); charArmTo.plantRelease(ch, arm) hands it back. */
+     plane); charArmTo.plantRelease(ch, arm) hands it back.
+
+     THE SAME SOLVE FOR EVERY TOUCH. An optional 7th argument names another
+     fphands pose, and the point that goes on `point` is that pose's own
+     contact (fpHands.contactOf): "point" puts the index pad on a button,
+     "grip" closes the hand round a handle bar (its axis on `point`, running
+     along the hand's width), "card" presses the held card's pinch onto a
+     reader. `normal` is always where the BACK of the hand faces and `along`
+     where the straight fingers would point; systems/verbs_pickup.js
+     CBZ.verbs.touch picks those per kind. charArmTo.contactRelease(ch, arm,
+     pose) hands any of them back. */
   const _plN = new THREE.Vector3(), _plF = new THREE.Vector3(), _plX = new THREE.Vector3(), _plZ = new THREE.Vector3();
   const _plW = new THREE.Vector3(), _plC = new THREE.Vector3(), _plS = new THREE.Vector3(), _plT = new THREE.Vector3();
   const _plM = new THREE.Matrix4(), _plQ = new THREE.Quaternion(), _plLQ = new THREE.Quaternion(), _plR = new THREE.Quaternion();
   // the planted palm's world frame (+Y = the back of the hand = the surface
   // normal, -Z = the fingers, X = Y x Z) into _plQ, and the wrist crease that
   // puts its contact point on `point` into _plW
-  function plantFrame(hand, low, point, normal, along) {
+  const _plPC = new THREE.Vector3(), _plPCs = {};
+  // the contact point of `pose` (hand frame, right hand), as an array (cached per pose)
+  function plantContact(pose) {
+    const H = CBZ.fpHands;
+    if (!pose || pose === "plant" || !H.contactOf) return H.PLANT_CONTACT;
+    let c = _plPCs[pose];
+    if (!c) { H.contactOf(pose, _plPC); c = _plPCs[pose] = [_plPC.x, _plPC.y, _plPC.z]; }
+    return c;
+  }
+  charArmTo.contactOf = plantContact;
+  function plantFrame(hand, low, point, normal, along, pc) {
     _plN.copy(normal).normalize();
     _plF.copy(along).addScaledVector(_plN, -along.dot(_plN));
     if (_plF.lengthSq() < 1e-8) { _plF.set(1, 0, 0).addScaledVector(_plN, -_plN.x); }
@@ -5148,23 +5168,23 @@
     _plS.setFromMatrixScale(low.matrixWorld);
     const hs = hand.userData.fit.s * _plS.x;
     const side = hand.userData.side < 0 ? -1 : 1;
-    const pc = CBZ.fpHands.PLANT_CONTACT;
+    pc = pc || CBZ.fpHands.PLANT_CONTACT;
     _plC.set(pc[0] * side, pc[1], pc[2]).multiplyScalar(hs).applyQuaternion(_plQ);
     return _plW.copy(point).sub(_plC);
   }
   /* How far that crease is from its shoulder as a share of the arm's two
      bones (1 = at full stretch; the plant lands exactly below 1). */
-  charArmTo.plantShare = function (ch, point, arm, normal, along) {
+  charArmTo.plantShare = function (ch, point, arm, normal, along, pose) {
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     const low = part && part.userData && part.userData.low;
     const hand = part && part.userData && part.userData.cap;
     if (!low || !hand || !hand.userData.fit || !CBZ.fpHands || !CBZ.fpHands.PLANT_CONTACT) return Infinity;
-    plantFrame(hand, low, point, normal, along);
+    plantFrame(hand, low, point, normal, along, plantContact(pose));
     part.getWorldPosition(_plT);
     const L = (-low.position.y - hand.userData.fit.wristY) * _plS.x;
     return L > 0 ? _plT.distanceTo(_plW) / L : Infinity;
   };
-  charArmTo.plant = function (ch, point, arm, normal, along, k) {
+  charArmTo.plant = function (ch, point, arm, normal, along, k, pose) {
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     const low = part && part.userData && part.userData.low;
     const hand = part && part.userData && part.userData.cap;
@@ -5172,10 +5192,12 @@
     if (!low || !hand || !hand.userData.fit || !H || !H.PLANT_CONTACT || !point || !normal || !along) return null;
     const w = k == null ? 1 : Math.max(0, Math.min(1, k));
     if (w <= 0) return null;
-    plantFrame(hand, low, point, normal, along);       // _plQ: the palm; _plW: the crease
-    if (ch.setHandPose) ch.setHandPose(arm, "plant");
+    pose = pose && H.POSES[pose] ? pose : "plant";
+    const pc = plantContact(pose);
+    plantFrame(hand, low, point, normal, along, pc);   // _plQ: the palm; _plW: the crease
+    if (ch.setHandPose) ch.setHandPose(arm, pose);
+    else setBodyHandPose(ch, arm, pose);
     const side = hand.userData.side < 0 ? -1 : 1;
-    const pc = H.PLANT_CONTACT;
     // the forearm arrives from the shoulder's side of the hand: a support arm
     // is loaded along its length, not folded across it
     part.getWorldPosition(_plT);
@@ -5186,6 +5208,9 @@
     low.getWorldQuaternion(_plLQ);
     _plR.copy(_plLQ).invert().multiply(_plQ);
     placeBodyHand(hand);                               // the rest frame (and the crease position)
+    // a gun hold slides its hand down the wrist onto a socket; a touch keeps
+    // the hand ON its crease (the wrist solve above put the crease there)
+    hand.position.set(0, hand.userData.fit.wristY, 0);
     if (w >= 1) hand.quaternion.copy(_plR); else hand.quaternion.slerp(_plR, w);
     wristTwist(ch, arm);
     // residual: the palm's contact point where it actually is
@@ -5201,6 +5226,20 @@
       if (m && m.userData.handPose === "plant") {
         setBodyHandPose(ch, m.userData.side < 0 ? "l" : "r", "relaxed");
       }
+    }
+  };
+  // any touch (plant / point / grip / card) lets go: the hand takes `pose`
+  // (default relaxed) back in its rest frame on the forearm, untwisted
+  charArmTo.contactRelease = function (ch, arm, pose) {
+    const hs = handsOf(ch, arm || "both");
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i];
+      if (!m || !m.userData.fit) continue;
+      const side = m.userData.side < 0 ? "l" : "r";
+      setBodyHandPose(ch, side, pose || "relaxed");
+      placeBodyHand(m);
+      const fore = foreOf(ch, m);
+      if (fore) fore.rotation.y = 0;
     }
   };
   /* How far a PALM can get from its shoulder, world metres: the two bones to
@@ -7211,7 +7250,6 @@
     if (ch.aimingPose) {
       // present-weapon: gun arm out along the crosshair, support arm on the
       // handguard. animChar is the single owner of the arms while aiming.
-      const longGun = !!ch.aimLong;
       const recoil = ch.aimRecoil || 0;
       const recoilSide = ch.aimRecoilSide || 0;
       // SIGN: the arm terms below are UP-positive (a bigger `pitch` drives
@@ -7230,22 +7268,36 @@
       // horizon. hv is 0 for every weapon that declares no `hold`, and every
       // term below is + 0 at hv = 0 — so nothing that ships today moves.
       const hv = heavyHold(ch), hsup = heavySupport(ch);
+      /* HOW MANY HANDS is the hold engine's (systems/actorweapons.js
+         CBZ.holds, published by fpsmode as aimHands): a handgun is ONE hand
+         in third person. The two-hand pistol crossed both short arms into
+         the chest and hid the gun between the fists; one hand is the arm
+         out from its own shoulder down the aim (a touch inboard, sights
+         under the eye), the off arm down at the side, free for a torch, a
+         door, a radio. A long gun keeps the support arm on the handguard. */
+      const oneHand = ch.aimHands === 1;
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 + 0.12 * hv - pitch * 0.8 - recoil * 0.16, ar, dt);
-      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.18 - recoilSide * 0.22, ar, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.34, ar, dt);
-      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
-      // A pistol is still a TWO-HAND shot. The old sidearm targets left the
-      // support fist beside the left shoulder while the gun floated in the
-      // right hand (visible from the prison chase camera). Cross and extend the
-      // support arm onto the firing wrist; long guns keep their handguard pose.
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.56) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.32) - 0.10 * hv, ar - 1, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.68, ar - 1, dt);
-      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.20) + hsup * 0.5, ar - 1, dt);
-      // gun arm nearly locked; the support elbow closes onto the handguard.
-      // recoil folds the elbow a touch — the arm absorbs the kick.
-      setElbow(J.ra, -0.10 - recoil * 0.25, ar);
-      setElbow(J.la, (longGun ? -0.72 : -0.22) - 0.26 * hv, ar - 1);
+      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, (oneHand ? 0.06 : 0.18) - recoilSide * 0.22, ar, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, oneHand ? 0.12 : 0.34, ar, dt);
+      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, oneHand ? 0.06 : 0.14, ar, dt);
+      if (oneHand) {
+        // the off arm hangs relaxed beside the body, clear of the hip and of
+        // anything worn over the ribs (the same clearance the walk uses)
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.02, ar - 4, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, ar - 4, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, (ch.armOutZ != null ? ch.armOutZ : -0.08) + 0.04, ar - 4, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, ar - 4, dt);
+        setElbow(J.la, -0.22, ar - 4);
+      } else {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -1.55 - 0.14 * hv - pitch * 0.8, ar - 1, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.34 - 0.10 * hv, ar - 1, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.42, ar - 1, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.24 + hsup * 0.5, ar - 1, dt);
+        setElbow(J.la, -0.72 - 0.26 * hv, ar - 1);
+      }
+      // gun arm nearly locked (one hand: a soft elbow); recoil folds the
+      // elbow a touch — the arm absorbs the kick.
+      setElbow(J.ra, (oneHand ? -0.16 : -0.10) - recoil * 0.25, ar);
     } else if (ch.cuffed) {
       // CUFFED ARMS BELONG TO systems/verbs.js: its late pass (order 91)
       // solves the wrists together behind the back for every cuffed rig,

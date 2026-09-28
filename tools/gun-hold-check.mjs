@@ -210,8 +210,38 @@ function measure(rig, prop, tag, stance, opts) {
 
   // the support hand
   const g = prop.userData.grips, hold = g && g.hold;
-  const twoHand = !!(g && g.support) && !opts.released;
+  // HOW MANY HANDS is the hold engine's (CBZ.holds): a handgun is one hand in
+  // a body's hands, a long gun two
+  const policy = CBZ.holds.hands(prop, { view: "tp" });
+  r.policy = policy;
+  const twoHand = policy >= 2 && !!(g && g.support) && !opts.released;
   r.twoHand = twoHand;
+  if (policy < 2 && g && g.support) {
+    // ONE HAND: the off hand is FREE — not on the gun, not closed in a hold,
+    // hanging below its shoulder (standing / crouched), out of the body
+    const sc = handCentre(hl);
+    r.offGap = sc.distanceTo(gpW);
+    check(r.offGap > 0.10, `${tag}: one-handed: the off hand is off the gun (${(r.offGap * 100).toFixed(1)} cm)`);
+    check(!/^hold\d+$/.test(hl.userData.handPose || ""), `${tag}: one-handed: the off hand is open (${hl.userData.handPose})`);
+    if (!/prone/.test(stance)) {
+      const sh = rig.parts.la.getWorldPosition(new T.Vector3());
+      r.offDrop = sh.y - sc.y;
+      check(r.offDrop > 0.25, `${tag}: one-handed: the off arm hangs at the side (hand ${(r.offDrop * 100).toFixed(0)} cm below the shoulder)`);
+    }
+    // (the off arm this solve poses: the aimed one-hand stance. A pitched NPC
+    // case is posed without a frame and a carry walks the idle arm, both
+    // armor.js / overlap-audit's)
+    if (/^(npc|aim)/.test(stance) && stance !== "npc-pitch") {
+      r.offPen = CBZ.charArmTo.armPen(rig, "l") * WORLD;
+      check(r.offPen < ARM_TOL, `${tag}: one-handed: the off arm clears the body (${(r.offPen * 1000).toFixed(1)} mm inside)`);
+    }
+    // aimed: the gun arm is OUT, not folded to the chest
+    if (/^(npc|aim)/.test(stance) && !/prone/.test(stance)) {
+      const A = armPoints(rig, 1), lr = opts.rest[1][0] + opts.rest[1][1];
+      r.armOut = A.sh.distanceTo(A.wr) / lr;
+      check(r.armOut > 0.78, `${tag}: one-handed aim: the gun arm is out (${(r.armOut * 100).toFixed(0)}% of its length)`);
+    }
+  }
   if (twoHand) {
     const sc = handCentre(hl);
     let gap, along = null;
@@ -476,6 +506,35 @@ function playerCase(B, id, aiming, st) {
   const gc = H.gripCentre("hold40", new T.Vector3());
   check(Math.abs(gc.y + (H.PALM.th * 0.5 + 0.040)) < 1e-9, "a hold's grip centre sits its wrap radius under the palm");
 }
+// the hold engine: classes and hands
+{
+  const HO = CBZ.holds;
+  check(!!HO, "CBZ.holds exists (systems/actorweapons.js)");
+  const HAND = ["sidearm", "deagle", "revolver", "uzi", "taser"], LONG = ["carbine", "ak47", "smg", "shotgun", "sniper", "lmg", "bazooka", "glauncher"];
+  for (const id of HAND) {
+    check(HO.classOf(id) === "handgun", `holds: ${id} is a handgun (${HO.classOf(id)})`);
+    check(HO.hands(id, { view: "tp" }) === 1 && HO.hands(id, { view: "tp", aimed: true }) === 1, `holds: ${id} is one hand in third person`);
+    check(HO.hands(id, { view: "fp", aimed: true }) === 2 && HO.hands(id, { view: "fp" }) === 1, `holds: ${id} is two hands in first person only aimed`);
+  }
+  for (const id of LONG) {
+    check(HO.classOf(id) === "long", `holds: ${id} is a long gun (${HO.classOf(id)})`);
+    check(HO.hands(id, { view: "tp" }) === 2 && HO.hands(id, { view: "fp" }) === 2 && HO.hands(id, { view: "fp", aimed: true }) === 2, `holds: ${id} is two hands always`);
+    check(HO.hands(id, { view: "tp", offBusy: true }) === 1, `holds: ${id} with the off hand busy is a one-hand carry`);
+  }
+  check(HO.classOf("shank") === "melee" && HO.classOf("flashlight") === "small" && HO.classOf("keycard") === "small" && HO.classOf("crate") === "bulky", "holds: items are classed");
+  // anchors come off the model (named anchors first, the older data after)
+  for (const id of [...HAND, ...LONG]) {
+    const prop = CBZ.buildActorWeapon(id), A = HO.anchors(prop);
+    check(!!(A.grip && A.muzzle), `holds: ${id} publishes grip + muzzle anchors`);
+    if (LONG.includes(id)) check(!!A.support, `holds: ${id} publishes a support anchor`);
+  }
+  {
+    const prop = CBZ.buildActorWeapon("sidearm"), o = new T.Object3D();
+    o.name = "anchor_mag"; o.position.set(0.01, -0.2, 0.03); prop.add(o); prop.userData._anchors = null;
+    const A = HO.anchors(prop);
+    check(A.mag && Math.abs(A.mag.y + 0.2) < 1e-9, "holds: a named anchor child wins over the old data");
+  }
+}
 // arm solver: exact, rigid, elbow down
 {
   const { rig, rest } = freshRig({});
@@ -548,7 +607,7 @@ for (const r of rows) {
   a.armPen = Math.max(a.armPen || 0, r.armPen || 0); a.gunPen = Math.max(a.gunPen || 0, r.gunPen || 0);
   if (verbose || r.tag.startsWith("man/") || r.tag.startsWith("heavy+plate/")) {
     console.log(r.tag.padEnd(28) + cm(r.fireGap) + "  " + (r.fireAxis == null ? "  -" : r.fireAxis.toFixed(0).padStart(3)) + "  " + dg(r.fireBend) + "  |" +
-      (r.twoHand ? cm(r.supGap) + "  " + (r.supAlong == null ? "    -" : cm(r.supAlong)) + "   " + dg(r.supBend) : r.released ? "  one-hand carry          " : "  one-handed              ") +
+      (r.twoHand ? cm(r.supGap) + "  " + (r.supAlong == null ? "    -" : cm(r.supAlong)) + "   " + dg(r.supBend) : r.released ? "  one-hand carry          " : r.offGap != null ? ("  one hand, off " + cm(r.offGap) + " cm  ").padEnd(26) : "  one-handed              ") +
       " |" + (r.foreDist == null ? "     -" : cm(r.foreDist)) + "  " + (r.stretch == null ? "-" : (r.stretch * 1000).toFixed(2) + "mm") +
       " | " + (r.armPen == null ? "-" : (r.armPen * 1000).toFixed(1).padStart(5)) + " " + (r.gunPen == null ? "-" : (r.gunPen * 1000).toFixed(1).padStart(5)));
   }

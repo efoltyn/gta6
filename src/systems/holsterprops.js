@@ -412,7 +412,11 @@
   function reloadAimBlend(rl, ch, dir) {
     if (!rl || !ch || !ch.body) return;
     ch.body.getWorldQuaternion(_hgBodyQ);
-    _rlDir.copy(RELOAD_WORK).applyQuaternion(_hgBodyQ);
+    // the style's own work direction (CBZ.gunReload: a magazine is changed
+    // with the muzzle across the body, a rocket loaded with it well to the left)
+    if (rl.work) _rlDir.set(rl.work[0], rl.work[1], rl.work[2]).normalize();
+    else _rlDir.copy(RELOAD_WORK);
+    _rlDir.applyQuaternion(_hgBodyQ);
     dir.lerp(_rlDir, rl.weight).normalize();
   }
 

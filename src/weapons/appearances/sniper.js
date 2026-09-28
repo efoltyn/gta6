@@ -25,10 +25,10 @@
     const BORE = 0.050;
 
     // ROUND ACTION + bolt shroud, BOLT handle swept down on the right
-    K.tube(g, 0.030, 0.030, 0.380, 16, blued, 0, 0.054, -0.110);
-    K.tube(g, 0.020, 0.024, 0.050, 12, steel, 0, 0.056, 0.100);
-    box(g, 0.070, 0.014, 0.014, K.fin("edge"), 0.062, 0.040, 0.030, 0, 0, -0.45);
-    cyl(g, 0.019, 0.026, K.fin("edge"), 0.100, 0.022, 0.030, 0, 0, Math.PI / 2 - 0.45);
+    K.tag(K.tube(g, 0.030, 0.030, 0.380, 16, blued, 0, 0.054, -0.110), "part_action");
+    K.tag(K.tube(g, 0.020, 0.024, 0.050, 12, steel, 0, 0.056, 0.100), "part_bolt");
+    K.tag(box(g, 0.070, 0.014, 0.014, K.fin("edge"), 0.062, 0.040, 0.030, 0, 0, -0.45), "part_bolt");
+    K.tag(cyl(g, 0.019, 0.026, K.fin("edge"), 0.100, 0.022, 0.030, 0, 0, Math.PI / 2 - 0.45), "part_boltKnob");
 
     // HEAVY BARREL tapering to a plain crown
     K.tube(g, 0.019, 0.026, 1.020, 14, blued, 0, BORE, -0.810);
@@ -79,7 +79,7 @@
       hold: { kind: "guard", y: 0.000, z: -0.520, w: 0.074, h: 0.080, rc: 0.024, len: 0.40 },
       mag: new THREE.Vector3(0, -0.060, -0.200),       // hinged floorplate
       charge: new THREE.Vector3(0.110, 0.020, 0.030),  // the BOLT knob — this gun is worked by hand
-      style: "mag",
+      style: "bolt",     // top-fed through the open action, the bolt worked by the firing hand (CBZ.gunReload)
     };
     return g;
   };

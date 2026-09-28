@@ -29,9 +29,10 @@
     box(g, 0.085, 0.13, 0.10, mat.dark, 0, 0.005, -0.015);
     // THE CYLINDER — the revolver-maker: a fat drum on the bore axis,
     // two thin flute shadows so it reads machined, not a pipe
-    cyl(g, 0.062, 0.17, mat.steel, 0, 0.030, -0.175, Math.PI / 2);
-    box(g, 0.128, 0.022, 0.15, mat.black, 0, 0.030, -0.175);
-    box(g, 0.022, 0.128, 0.15, mat.black, 0, 0.030, -0.175);
+    const tag = CBZ.gunKit ? CBZ.gunKit(ctx).tag : function (m) { return m; };
+    tag(cyl(g, 0.062, 0.17, mat.steel, 0, 0.030, -0.175, Math.PI / 2), "part_cylinder");
+    tag(box(g, 0.128, 0.022, 0.15, mat.black, 0, 0.030, -0.175), "part_cylinder");
+    tag(box(g, 0.022, 0.128, 0.15, mat.black, 0, 0.030, -0.175), "part_cylinder");
     // 6" barrel with a VENT RIB on top and a FULL UNDERLUG beneath
     cyl(g, 0.030, 0.36, mat.dark, 0, 0.045, -0.45, Math.PI / 2);
     box(g, 0.030, 0.026, 0.34, mat.black, 0, 0.082, -0.44);

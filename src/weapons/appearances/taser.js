@@ -85,10 +85,11 @@
 
     // BLUNT BLACK CARTRIDGE — a single compact front module with a broad metal
     // face. Tiny contacts remain only where the two real probe wires originate.
-    box(visual, 0.180, 0.142, 0.145, mat.black, 0, 0.028, -0.460);
-    box(visual, 0.148, 0.098, 0.014, mat.worn, 0, 0.028, -0.540);
-    cyl(visual, 0.012, 0.018, mat.steel, -0.046, 0.028, -0.553, Math.PI / 2);
-    cyl(visual, 0.012, 0.018, mat.steel, 0.046, 0.028, -0.553, Math.PI / 2);
+    const tag = CBZ.gunKit ? CBZ.gunKit(ctx).tag : function (m) { return m; };
+    tag(box(visual, 0.180, 0.142, 0.145, mat.black, 0, 0.028, -0.460), "part_mag");
+    tag(box(visual, 0.148, 0.098, 0.014, mat.worn, 0, 0.028, -0.540), "part_mag");
+    tag(cyl(visual, 0.012, 0.018, mat.steel, -0.046, 0.028, -0.553, Math.PI / 2), "part_mag");
+    tag(cyl(visual, 0.012, 0.018, mat.steel, 0.046, 0.028, -0.553, Math.PI / 2), "part_mag");
 
     // The reference has one strong side release, one recessed grip control and
     // a black heel. They are accents, not a second layer of surface machinery.
