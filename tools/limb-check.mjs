@@ -269,6 +269,13 @@ for (const [name, r] of Object.entries(bodies)) {
 }
 check(bodies.swimmer.skinSlots.legsLower[0].userData.limb.variant === "bare" && bodies.man.skinSlots.legsLower[0].userData.limb.variant === "cloth", "bare vs clothed legs pick their loft");
 check(bodies.tee.skinSlots.armsLower[0].userData.limb.variant === "bare" && bodies.tee.skinSlots.arms[0].userData.limb.variant === "cloth", "a tee: sleeve upper, bare forearm");
+{ // a short sleeve ends MID-upper-arm: the flat sleeve stops ~45% down, the bare piece below wears the forearm
+  const up = bodies.tee.skinSlots.arms[0], bare = up.userData.bare, L = up.geometry.userData.limb;
+  up.geometry.computeBoundingBox();
+  const frac = (L.y0 - up.geometry.boundingBox.min.y) / L.sy;
+  check(!!bare && bare.visible && bare.material === bodies.tee.skinSlots.armsLower[0].material && frac > 0.38 && frac < 0.55,
+    `a tee's sleeve ends mid-upper-arm (${(frac * 100).toFixed(0)}% down) over a bare piece in the forearm's colour`);
+}
 check(bodies.swimmer.skinSlots.shoes[0].geometry !== bodies.man.skinSlots.shoes[0].geometry, "a bare foot is not a shoe");
 
 // ------------------------------------------------------------ 5. paint
@@ -308,8 +315,9 @@ const painter = { key: "test", fn: (face, u, v) => [COL[face] + u * 0.999, v] };
 {
   const r = build();
   const a = r.skinSlots.arms[0];
-  const near = a.geometry;
+  // (the PAINTED near loft: a flat upper arm is only its sleeve, character.js armBare)
   a.geometry = CBZ.humanLimbGeometry(a, painter);
+  const near = a.geometry;
   r.setHandLod(2);
   const far = a.geometry;
   check(far !== near && far.userData.limb && tris(far) < tris(near) * 0.6, `far LOD swaps the loft (${tris(near)} -> ${tris(far)} tris)`);

@@ -231,16 +231,12 @@
     return false;
   }
 
-  // the lids follow the head's tone (crowd.js re-skins pooled rigs, gore.js
-  // greys the dead, warlord relinearises): a shared cached material per tone
+  // the lids wear the head's own material (character.js); if anything swaps
+  // the head's material object (a re-skin, gore), the lids follow it
   function syncLidTone(rig) {
-    const f = rig.face, h = rig.head, H = HU();
-    if (!f || !f.lidUp || !h || !h.material || !h.material.color || !CBZ.cmat || !H.lidTone) return;
-    const hex = h.material.color.getHex();
-    if (rig._lidFor === hex) return;
-    rig._lidFor = hex;
-    const m = CBZ.cmat(H.lidTone(hex));
-    if (f.lidUp.material !== m) { f.lidUp.material = m; f.lidLow.material = m; }
+    const f = rig.face, h = rig.head;
+    if (!f || !f.lidUp || !h || !h.material) return;
+    if (f.lidUp.material !== h.material) { f.lidUp.material = h.material; f.lidLow.material = h.material; }
   }
 
   function updateRig(rig, dt, now) {

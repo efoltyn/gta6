@@ -51,8 +51,7 @@
    REPORTED, NEVER FAILED (printed as `known`, see each block): prone /
    lying / riding (folding poses: the body presses into itself), arm-vs-kit
    and the held gun in the gun-hold poses (the solved hold puts the arms
-   inside the chest), a toddler's head turned AND nodded, and the jacket
-   shell (`fenced`: the torso reshape owns it).
+   inside the chest), and a toddler's head turned AND nodded.
 
    Hats / helmets (headwear.js) belong to tools/headwear-check.mjs, the watch
    to tools/watch-check.mjs, the shoe to tools/shoe-check.mjs and the gun in
@@ -379,6 +378,9 @@ function isBodyish(ch) {
   // the hands / shoes / beard / role hat (their own checks own those)
   for (const slot of ["torso", "collar", "pelvis", "arms", "armsLower", "legs", "legsLower", "head"]) for (const m of s[slot] || []) if (m) skip.add(m);
   for (const slot of ["hands", "shoes", "beard", "cap"]) for (const m of s[slot] || []) if (m) m.traverse((o) => skip.add(o));
+  // the bare arm under a short sleeve is the upper arm's own lower half (its
+  // volume is the upper arm's full-length limb sdf above)
+  ch.group.traverse((o) => { if (o.userData && o.userData.limbPiece) skip.add(o); });
   for (const node of [ch.faceNodes && ch.faceNodes.near, ch.faceNodes && ch.faceNodes.far]) if (node) node.traverse((o) => skip.add(o));
   const face = ch.face;
   if (face) for (const k in face) if (face[k] && face[k].isObject3D) face[k].traverse((o) => skip.add(o));
@@ -401,10 +403,9 @@ function attachments(ch, labels) {
     if (mat && !Array.isArray(mat) && mat.visible === false) return;
     const u = o.userData || {};
     let label = labels.get(o);
-    // THE JACKET SHELL IS FENCED: it is the torso's clothing, which the torso /
-    // neck / shoulder reshape owns (city/clothes.js jacketFit) — measured and
-    // printed, never failed here, until that reshape lands
-    if (o === ch._jacketMesh) label = "fenced:jacket-shell";
+    // the jacket shell (city/clothes.js + character.js humanShellSpec) is one
+    // attachment whatever outfit put it there, measured and failed like any other
+    if (o === ch._jacketMesh) label = "cloth:jacket-shell";
     else if (!label) {
       if (ch.skinSlots.hair.indexOf(o) >= 0) label = "hair:" + (u.hairStyle || "?");
       else label = (u.armorKind && "armor:" + u.armorKind) || (u.blingKind && "bling:" + u.blingKind) || (u.clothingPart && "cloth:" + u.clothingPart) || o.name || (o.parent && o.parent.name) || "mesh";
@@ -587,7 +588,7 @@ function measure(ch, labels, tag, pose, opts) {
            is projected onto the nearest host surface; it only counts where
            that host point is clear of P. */
         if (!same && d < -worst && hostInside(p, P, sameParts)) continue;
-        if (d < -worst) { worst = -d; wp = q.clone(); if (process.env.OA_DBG && -d > +process.env.OA_DBG) { console.log("DBG", tag, pose, A.label, P.region, "world", p.toArray().map(v=>v.toFixed(3)).join(","), "local", q.toArray().map(v=>v.toFixed(3)).join(","), "scale", P.scale.toFixed(3), "d", d.toFixed(4), "armOutZ", ch.armOutZ, "laZ", ch.parts.la.rotation.z.toFixed(3)); } }
+        if (d < -worst) { worst = -d; wp = q.clone(); if (process.env.OA_DBG && -d > +process.env.OA_DBG) { console.log("DBG", tag, pose, A.label, P.region, "world", p.toArray().map(v=>v.toFixed(3)).join(","), "local", q.toArray().map(v=>v.toFixed(3)).join(","), "scale", P.scale.toFixed(3), "d", d.toFixed(4), "armOutZ", ch.armOutZ, "laZ", ch.parts.la.rotation.z.toFixed(3), "body", p.clone().applyMatrix4(new T.Matrix4().copy(ch.body.matrixWorld).invert()).toArray().map(v=>v.toFixed(3)).join(",")); } }
         if (same && Math.abs(d) < ZF_MM / 1000 && !isNaN(S[i + 3])) {
           n.set(S[i + 3], S[i + 4], S[i + 5]).applyMatrix3(_nm).normalize();
           bn.set(nrm[0], nrm[1], nrm[2]).applyMatrix3(P.nmat).normalize();

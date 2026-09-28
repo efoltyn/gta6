@@ -27,7 +27,13 @@
         kept, c.hat comes off while swimming and the hair springs back, the
         LOD swap changes hat + hair geometry, owners stack (armor beats
         outfit) and headwear meshes are poolable (no vertex colours; only the
-        riot shield is transparent).
+        glass is transparent: the riot shield and the moto / race visors).
+     8. THE SHOP HAT: every hat economy.js sells names a real kind, and
+        bling.js's player sync puts the worn one on the player's head, under a
+        uniform's hat, over the gang rag, off on unequip / sell / leaving the
+        city, onto a rebuilt rig.
+     9. THE VISOR: a full-face helmet's shell is open behind its visor (the
+        face shows) and the visor is tinted see-through glass.
 
      node tools/headwear-check.mjs [--verbose] [--only=kind,kind]
 */
@@ -69,7 +75,7 @@ const MM = 0.7 * 1000;                     // unit (adult head frame) -> mm, HUM
 const FORMS = ["m", "f", "c"];
 const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7).split(",").filter(Boolean);
 const KINDS = ONLY.length ? HW.kinds.filter((k) => ONLY.includes(k)) : HW.kinds;   // --only=ballcap,riot for a quick loop
-const VARIANTS = { ballcap: ["", "back"], peaked: ["police", "captain", "chauffeur"], shemagh: ["", "agal", "veil"], beret: ["", "plain"], campaign: ["", "sheriff"], ballistic: ["", "swat"] };
+const VARIANTS = { ballcap: ["", "back", "snap"], peaked: ["police", "captain", "chauffeur"], shemagh: ["", "agal", "veil"], beret: ["", "plain"], campaign: ["", "sheriff"], ballistic: ["", "swat"] };
 const NO_CONTACT = { moto: "rides on cheek pads inside the shell", race: "rides on cheek pads inside the shell", hijab: "a drape, not a band" };
 const HAS_STRAP = { ballistic: 1, pasgt: 1 };
 
@@ -363,6 +369,74 @@ for (const build of ["m", "f"]) {
   check(!hj.skinSlots.hair[0].visible, "a hijab covers all the hair");
   HW.wear(hj, null, { owner: "outfit" });
   check(hj.skinSlots.hair[0].visible, "hijab off, the hair shows");
+}
+
+// ---- 8: THE SHOP HAT reaches the player's head (economy.js rows -> bling.js
+// syncPlayerHat -> headwear.js "shop" owner). The catalog is read from
+// economy.js's source; bling.js is the real file, on a stub tick.
+{
+  const src = read("src/city/economy.js"), rows = {};
+  for (const m of src.matchAll(/^\s*("?[\w ]+"?)\s*:\s*\{([^}]*slot:\s*"hat"[^}]*)\}/gm)) {
+    const name = m[1].replace(/"/g, ""), body = m[2];
+    const look = (body.match(/hatLook:\s*"(\w+)"/) || [])[1], col = (body.match(/hatColor:\s*(0x[0-9a-fA-F]+)/) || [])[1];
+    rows[name] = { tag: "wearable", slot: "hat", hatLook: look, hatColor: col ? parseInt(col, 16) : undefined };
+  }
+  const names = Object.keys(rows);
+  check(names.length >= 3, "economy.js sells hats (" + names.join(", ") + ")");
+  for (const n of names) check(!!rows[n].hatLook && !!HW.canon(rows[n].hatLook), "shop hat " + n + " names a real headwear kind (" + rows[n].hatLook + ")");
+  const inv = {}, fit = {};
+  CBZ.game = { mode: "city" };
+  CBZ.onUpdate = () => {}; CBZ.onAlways = () => {};
+  CBZ.cityEcon = { ITEMS: rows, count: (n) => inv[n] | 0, outfit: () => fit };
+  vm.runInContext(read("src/city/bling.js"), ctx, { filename: "bling.js" });
+  const sync = CBZ.citySyncPlayerHat;
+  check(typeof sync === "function", "bling.js exposes the player hat sync");
+  if (sync) {
+    const me = rigOf({ build: "m", hairStyle: "short" });
+    CBZ.playerChar = me;
+    const shopLayer = () => me._hw && me._hw.layers.shop;
+    for (const n of names) {
+      inv[n] = 1; fit.hat = n; sync(false);
+      const want = HW.canon(rows[n].hatLook);
+      check(HW.worn(me) === want && shopLayer() && shopLayer().group.visible, "equip " + n + ": the player wears the " + want);
+    }
+    fit.hat = "Snapback"; sync(false);
+    check(shopLayer() && shopLayer().variant === "snap", "the Snapback is the flat-brim snap cut");
+    HW.wear(me, "peaked:police", { owner: "outfit" });
+    check(HW.worn(me) === "peaked", "a uniform's hat outranks the shop hat");
+    HW.wear(me, null, { owner: "outfit" });
+    check(HW.worn(me) === "ballcap", "back in civvies, the shop hat is back");
+    HW.wear(me, "bandana", { owner: "bandana" });
+    check(HW.worn(me) === "ballcap", "the chosen hat covers the gang rag");
+    HW.wear(me, null, { owner: "bandana" });
+    delete fit.hat; sync(false);
+    check(!shopLayer() && HW.worn(me) === null, "unequip takes the hat off");
+    fit.hat = "Beanie"; inv.Beanie = 0; sync(false);
+    check(!shopLayer(), "a hat you no longer own is not worn");
+    inv.Beanie = 1; sync(false);
+    const me2 = rigOf({ build: "f", hairStyle: "long" });
+    CBZ.playerChar = me2; sync(false);
+    check(HW.worn(me2) === "beanie" && !shopLayer(), "a rebuilt player rig gets the hat, the old one loses it");
+    sync(true);
+    check(HW.worn(me2) === null, "out of the city the shop hat comes off");
+    CBZ.playerChar = null;
+  }
+}
+
+// ---- 9: the face behind a full-face visor
+for (const kind of ["moto", "race"].filter((k) => KINDS.includes(k))) for (const form of FORMS) for (const lod of [0, 1]) {
+  const entry = HW.geometry(kind, form, "", lod), glass = kind === "race" ? "accent2" : "smoke";
+  const ms = hatMeshes(entry).filter((m) => m.userData.role !== glass);
+  const gm = hatMeshes(entry).filter((m) => m.userData.role === glass);
+  let blocked = 0, seen = 0;
+  for (const x of [-0.11, -0.05, 0, 0.05, 0.11]) for (const y of [0.33, 0.37, 0.41]) {
+    const d = norm([x, y - HCy, 0.33 - HCz]);
+    if (hatDist(ms, d) < Infinity) blocked++;
+    if (hatDist(gm, d) < Infinity) seen++;
+  }
+  check(!blocked && seen === 15, kind + "/" + form + (lod ? "/far" : "") + ": eyes and brows seen through the visor alone (" + blocked + " rays blocked, " + seen + "/15 through glass)");
+  const mat = HW.build(kind).children.find((m) => m.userData.hatRole === glass).material;
+  check(mat.transparent && !mat.depthWrite && mat.opacity >= 0.3 && mat.opacity <= 0.55, kind + " visor is tinted see-through glass (opacity " + mat.opacity + ")");
 }
 
 if (VERBOSE) for (const [t, n] of report) console.log("  " + t.padEnd(26) + n + " tris");
