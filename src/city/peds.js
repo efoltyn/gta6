@@ -2689,7 +2689,9 @@
     return { cash: got, item };
   };
 
-  CBZ.cityKOPed = function (ped, fromX, fromZ) {
+  // opts.rigFall: the blow that did it already put him down in his own rig
+  // (systems/verbs_strike.js knockdown) — do not topple the group on top of it
+  CBZ.cityKOPed = function (ped, fromX, fromZ, opts) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
     leaveSit(ped);                             // a felled desk worker leaves the seat (C3)
@@ -2697,7 +2699,7 @@
     // a plane-seated body's group is PARENT-LOCAL — the knockdown lie-flat
     // writes world coords onto it and teleports the rig (see cityKillPed's
     // seated gate); a tased passenger just slumps unconscious where they sit.
-    if (CBZ.body && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
+    if (CBZ.body && !(opts && opts.rigFall) && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     // laying hands on a boss's wife/kin brings the crew (non-lethal harm).
     if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
@@ -3042,7 +3044,10 @@
   }
 
   const _hurtWP = { x: 0, y: 0, z: 0 }, _hurtWO = { fromX: 0, fromZ: 0 };
-  function hurtActor(att, tgt, dmg, melee) {
+  // `res` is the landed strike when this is a fist (CBZ.verbs.strike): the
+  // verbs play the reaction on the body, and this may overrule it
+  // (res.reaction = "dead" | "knockdown" | "none")
+  function hurtActor(att, tgt, dmg, melee, res) {
     if (!tgt || tgt.dead) return;
     const fx = att.pos.x, fz = att.pos.z;
     if (tgt.isPlayer) {
@@ -3056,17 +3061,19 @@
       // pass the ATTACKER ACTOR (not just its name) so city/death.js can SPECTATE
       // your killer after WASTED; cityHurtPlayer derives the display name from it.
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, att);
-      // a melee beatdown can knock you off your feet (physics.js owns the get-up)
-      if (melee && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor &&
+      // a melee beatdown can knock you off your feet (physics.js owns the
+      // player's down and get-up); a blow you took on the guard does not
+      if (melee && !(res && res.blocked) && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor &&
           !((CBZ.game.invuln || 0) > 0) && !CBZ.body.busy(CBZ.city.playerActor) && rng() < 0.33) {
         CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
+        if (res) res.reaction = "none";
       }
       if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 22 : 40, melee ? "assault" : "shots-fired");
       return;
     }
     if (tgt.kind === "cop") {
       if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz });
-      if (melee && !tgt.dead && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
+      if (res && tgt.dead) res.reaction = "dead";
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 60 : 110, "attacked-officer");
       return;
     }
@@ -3083,11 +3090,13 @@
     // (hands up / run), and returns whether this person DARES to fight back.
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
     if (!tgt.rage && dare && !tgt.restraint && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
-    if (tgt.hp <= 0) CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
-    else {
-      if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
-      if (melee && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
-    }
+    if (tgt.hp <= 0) {
+      CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
+      if (res) res.reaction = "dead";
+    } else if (res) {
+      // a clean one can put him down: he falls in his own rig (CBZ.verbs.knockdown)
+      if (!res.blocked && rng() < 0.3) res.reaction = "knockdown";
+    } else if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: 3 });
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
 
@@ -3160,6 +3169,47 @@
     else { CBZ._combatIQAdopted = (CBZ._combatIQAdopted || []).concat(ids); }
   })();
 
+  /* THE SWING. The beat above says WHEN; the blow is a real strike on his rig
+     (CBZ.verbs.strike, systems/verbs_strike.js) that lands on the frame his
+     fist reaches the man it was thrown at, or whiffs if that man stepped out
+     of it. The damage below is paid only by a blow that landed, scaled by
+     where it landed; the reaction (head snap, fold, stagger, a knockdown in
+     his own rig) is the verbs'. A body with no human rig here (a remote
+     player) is resolved on the blow's beat, by reach. */
+  const PED_COMBO = ["jab", "cross", "hook", "jab", "body", "cross", "upper", "cross"];
+  function npcSwing(att, tgt, dmg) {
+    const V = CBZ.verbs;
+    if (!V || !V.strike) return;
+    const i = att._pk = ((att._pk | 0) + 1) % PED_COMBO.length;
+    const rigless = !!tgt.netHurt || (!tgt.isPlayer && !(tgt.char && tgt.char.parts));
+    V.strike(att, tgt, {
+      kind: PED_COMBO[i], maxLunge: 0.5,
+      onLand: function (res) {
+        const t = res.target;
+        if (att.dead || !t || t.dead) { res.reaction = "none"; return; }
+        punchSfx(att, t);
+        // your guard is the city's parry/chip system (city/combat.js wraps
+        // cityHurtPlayer): it gets the whole blow and takes its own cut
+        hurtActor(att, t, (t.isPlayer && res.blocked) ? dmg : dmg * res.dmgMul, true, res);
+      },
+      onBeat: rigless ? function () {
+        if (att.dead || tgt.dead) return;
+        const dx = tgt.pos.x - att.pos.x, dz = tgt.pos.z - att.pos.z;
+        if (dx * dx + dz * dz > 2.2 * 2.2) return;         // he moved out of it
+        punchSfx(att, tgt);
+        hurtActor(att, tgt, dmg, true);
+      } : null,
+    });
+  }
+  // Same law as the yard brawl (entities/ai.js): a punch thrown by someone
+  // who is not you is world foley, so it goes through CBZ.worldSfx and
+  // carries a distance. A street beef three blocks away used to land at
+  // full volume in your ear. Player-thrown blows keep CBZ.sfx (city/
+  // combat.js) because those genuinely happen where the listener is.
+  function punchSfx(att, tgt) {
+    if (tgt.isPlayer) { if (CBZ.sfxAt) CBZ.sfxAt("punch", att.pos.x, att.pos.z); }
+    else if (CBZ.worldSfx) CBZ.worldSfx("punch", att.pos.x, att.pos.z, { y: att.pos.y });
+  }
   function npcAttack(att, tgt, dt) {
     // hands zip-tied behind the back can neither pull a trigger nor throw a
     // punch — restrain.js's enum (ped.restraint) gates EVERY attack, whichever
@@ -3253,14 +3303,7 @@
       const beat = IQ && IQ.melee ? IQ.melee(att, tgt, dt || 0.016, { reach: 1.85 }) : null;
       if (beat && beat !== "swing") { att.attackCD = 0; return; }
       att.attackCD = 0.5 + rng() * 0.4;
-      // Same law as the yard brawl (entities/ai.js): a punch thrown by someone
-      // who is not you is world foley, so it goes through CBZ.worldSfx and
-      // carries a distance. A street beef three blocks away used to land at
-      // full volume in your ear. Player-thrown blows keep CBZ.sfx — city/
-      // combat.js — because those genuinely happen where the listener is.
-      if (tgt.isPlayer) { if (CBZ.sfxAt) CBZ.sfxAt("punch", att.pos.x, att.pos.z); }
-      else if (CBZ.worldSfx) CBZ.worldSfx("punch", att.pos.x, att.pos.z, { y: att.pos.y });
-      hurtActor(att, tgt, 16 + rng() * 8, true);
+      npcSwing(att, tgt, 16 + rng() * 8);
     } else if (att._iqM && IQ && IQ.meleeReset) {
       IQ.meleeReset(att);                                  // out of the bout — drop the beat state
     }
@@ -3269,8 +3312,27 @@
   // grab the nearest dropped gun (for an unarmed aggressive ped)
   function nearestDrop(x, z, maxd) {
     let best = -1, bd = maxd * maxd;
-    for (let i = 0; i < CBZ.cityDrops.length; i++) { const d = CBZ.cityDrops[i]; const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z); if (dd < bd) { bd = dd; best = i; } }
+    for (let i = 0; i < CBZ.cityDrops.length; i++) { const d = CBZ.cityDrops[i]; if (d._taking) continue; const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z); if (dd < bd) { bd = dd; best = i; } }
     return best;
+  }
+  // A PED PICKS UP A DROPPED GUN WITH HIS HAND (systems/verbs_pickup.js): he
+  // bends to it, the gun leaves the ground in his hand, and he is armed on the
+  // grab frame. The drop is claimed at once so nobody else goes for it.
+  function pedTakeDrop(ped, di) {
+    const d = CBZ.cityDrops[di];
+    if (!d || d._taking) return;
+    d._taking = true;
+    ped._pickingUp = true;
+    const took = function () {
+      ped._pickingUp = false;
+      const j = CBZ.cityDrops.indexOf(d);
+      if (j >= 0) removeDrop(j);
+      if (ped.dead) return;
+      ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo;
+      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(ped, d.mesh || { x: d.x, y: d.y, z: d.z, kind: "gun" }, { pose: "grip", keep: true, onTaken: took });
+    else took();
   }
 
   // ---- nearestActor predicates, at MODULE scope --------------------------
@@ -4552,14 +4614,15 @@
     ped.surrender = false; ped.surrenderT = 0; ped.fear = 0;     // a rampager knows no fear
     ped.poseHandsUp = false; ped.poseAimBack = false;
     // ARM UP: pull its own gun, or grab a dropped one nearby, or commit to fists.
+    if (!ped.armed && ped._pickingUp) return;      // his hand is on a gun already
     if (!ped.armed) {
       const di = nearestDrop(ped.pos.x, ped.pos.z, 22);
       if (di >= 0) {
         const d = CBZ.cityDrops[di];
         // close enough to scoop it up; else walk onto it (loot state carries the walk)
         if (Math.hypot(d.x - ped.pos.x, d.z - ped.pos.z) < 1.6) {
-          ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo;
-          if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); removeDrop(di);
+          pedTakeDrop(ped, di);
+          return;
         } else { ped.state = "loot"; ped.target.set(d.x, 0, d.z); return; }
       } else if (!ped._rampArmed) {
         // no gun to be found → snaps with a blade/fists. Give it a pistol if the
@@ -5948,7 +6011,7 @@
     // loot pickup (tied hands can't scoop a gun off the pavement)
     if (st === "loot" && !ped.restraint) {
       const di = nearestDrop(ped.pos.x, ped.pos.z, 1.6);
-      if (di >= 0) { const d = CBZ.cityDrops[di]; ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); removeDrop(di); ped.state = "walk"; }
+      if (di >= 0) { pedTakeDrop(ped, di); ped.state = "walk"; }
     }
 
     if (ped._screamT > 0) ped._screamT -= dt;
@@ -6804,12 +6867,22 @@
     // age out / pick up dropped weapons (player auto-grabs by walking over)
     for (let i = CBZ.cityDrops.length - 1; i >= 0; i--) {
       const d = CBZ.cityDrops[i]; d.t += dt;
+      if (d._taking) continue;           // a hand is already on it
       const P = CBZ.player;
       if (!P.dead && !P.driving && Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
-        if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(d.weapon);
-        if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(d.ammo);
-        CBZ.city && CBZ.city.note("Picked up " + d.weapon, 1.4);
-        removeDrop(i); continue;
+        // TAKEN WITH A HAND (systems/verbs_pickup.js): the gun leaves the
+        // ground in the hand; the weapon is yours on the grab frame
+        d._taking = true;
+        const took = function () {
+          if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(d.weapon);
+          if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(d.ammo);
+          CBZ.city && CBZ.city.note("Picked up " + d.weapon, 1.4);
+          const j = CBZ.cityDrops.indexOf(d);
+          if (j >= 0) removeDrop(j);
+        };
+        if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(P, d.mesh || { x: d.x, y: d.y, z: d.z, kind: "gun" }, { pose: "grip", keep: true, onTaken: took });
+        else took();
+        continue;
       }
       // A DEATH DROP BELONGS TO THE BODY. An ordinary dropped gun ages out in
       // 30 s, which was fine when a corpse was deleted at 75 s and is a lie now

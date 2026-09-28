@@ -8974,14 +8974,23 @@
         if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
         return { took: false, caught: true };
       }
-      // CLEAR: pocket one unit for seeded petty cash; deplete the shelf.
+      // CLEAR: pocket one unit for seeded petty cash; deplete the shelf. The
+      // unit is claimed now (the count drops, nobody takes it twice) and the
+      // hand goes to the shelf for it (systems/verbs_pickup.js); the cash and
+      // the line land when the hand closes on it.
       const val = seedVal(sh);
       sh.taken = (sh.taken | 0) + 1;
-      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(val);
-      if (CBZ.sfx) CBZ.sfx("coin");
       const left = remaining(sh);
-      note("Pocketed " + (ITEM[sh.kind] || "some stock") + " — " + fmt$(val) +
-        (left > 0 ? " · " + left + " left on the shelf" : " · shelf cleared"), 2);
+      const took = function () {
+        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(val);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        note("Pocketed " + (ITEM[sh.kind] || "some stock") + ", " + fmt$(val) +
+          (left > 0 ? ", " + left + " left on the shelf" : ", shelf cleared"), 2);
+      };
+      const P = CBZ.player, V = CBZ.verbs;
+      if (V && V.pickup && P && P.pos) {
+        V.pickup(P, { x: sh.x, y: (sh.y != null ? sh.y : (P.pos.y || 0) + 1.0), z: sh.z, kind: "box" }, { key: sh, pose: "grip", onTaken: took });
+      } else took();
       return { took: true, value: val, left: left };
     }
 

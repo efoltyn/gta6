@@ -189,10 +189,10 @@ export default {
     const before = !!CBZ.game.hasKey;
     const prompt = Array.from(document.querySelectorAll("#prisonPrompts *")).map((e) => e.textContent).join(" ").slice(0, 80);
     if (CBZ.escapePlanDesk) CBZ.escapePlanDesk();
+    // one press; the hand reaches, closes on the card and lifts it
+    // (systems/verbs_pickup.js), and the card is in the bag on the grab frame
+    step(0.5);
     const after = !!CBZ.game.hasKey || !!kc.collected;
-    // shoot the moment BEFORE the press would hide the card; re-show the
-    // prompt frame by stepping once (the card is now in the bag)
-    step(0.1);
     return { ok: true, prompt, before, after,
       metrics: { liveLines: CBZ.speech ? CBZ.speech.audit().live : 0, hudSpeech: hudSpeech(), tookInstantly: (!before && after) ? 1 : 0 } };
   },

@@ -408,17 +408,27 @@
   function grabLoot() {
     if (!loot.length) return;
     const P = CBZ.player; if (!P || P.dead) return;
+    const V = CBZ.verbs;
+    if (V && V.pickupOf && V.pickupOf(P)) return;     // one duffel at a time, hand by hand
     for (let i = loot.length - 1; i >= 0; i--) {
       const l = loot[i];
-      if (Math.hypot(l.x - P.pos.x, l.z - P.pos.z) > TUNE.lootRange) continue;
-      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(l.amount);
-      if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
-      if (CBZ.sfx) CBZ.sfx("coin");
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Grabbed $" + fmt(l.amount) + " from the truck haul.", 1.8);
-      if (l.mesh && l.mesh.parent) l.mesh.parent.remove(l.mesh);
-      loot.splice(i, 1);
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      break;   // one grab per frame keeps the notes/feed readable
+      if (l._taking || Math.hypot(l.x - P.pos.x, l.z - P.pos.z) > TUNE.lootRange) continue;
+      // TAKEN WITH A HAND (systems/verbs_pickup.js): the money is yours on the
+      // grab frame, the duffel leaves the road in the hand
+      l._taking = true;
+      const took = function () {
+        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(l.amount);
+        if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Grabbed $" + fmt(l.amount) + " from the truck haul.", 1.8);
+        if (l.mesh && l.mesh.parent) l.mesh.parent.remove(l.mesh);
+        const j = loot.indexOf(l);
+        if (j >= 0) loot.splice(j, 1);
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      };
+      if (V && V.pickup) V.pickup(P, l.mesh || { x: l.x, y: l.y || 0, z: l.z, kind: "bag" }, { pose: "grip", onTaken: took });
+      else took();
+      break;
     }
   }
 

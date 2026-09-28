@@ -1327,13 +1327,13 @@
       }
       case "circle": {
         // GUARD: a trained fighter answers an incoming swing instead of eating
-        // it. combat.js's land() already reads _blockT for its counter window,
-        // so raising it here makes an NPC block a DECISION the player can read
-        // and punish — replacing the 22-34% blind dice roll that lived there.
+        // it. The raised guard is his rig's (CBZ.verbs.block): the forearms
+        // really stop head shots, and city/combat.js reads it as the counter
+        // window, so an NPC block is a DECISION the player can read and punish.
         const incoming = opts.incoming || (tgt.isPlayer && CBZ.player && (CBZ.player._fighting || 0) > 0);
         if (incoming && dist < reach * 1.5 && trait(a, 0x6A2D + (M.n | 0)) < iq * 0.8) {
           M.st = "guard"; M.t = 0.35 + iq * 0.25;
-          a._blockT = Math.max(a._blockT || 0, M.t);
+          if (CBZ.verbs && CBZ.verbs.block) CBZ.verbs.block(a, M.t);
           return "guard";
         }
         // orbit at the edge of reach — brawlers do not stand in each other

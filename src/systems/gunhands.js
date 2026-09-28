@@ -316,7 +316,7 @@
     const prop = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
     const own = !!(prop && ch && ch.parts && ch.parts.la && ch.body && ch.sockets &&
       CBZ.CONFIG.CHAR_SUPPORT_HAND_IK !== false && CBZ.charArmTo &&
-      !ch.slidePose && !ch.cuffed && !ch.surrender && !ch.handsUp &&
+      !ch.slidePose && !ch.cuffed && !ch.surrender && !ch.handsUp && !ch.verbHold &&
       !(CBZ.player && CBZ.player.dead) &&
       !(CBZ.weaponTransferState && CBZ.weaponTransferState().active));
     // A one-handed weapon (the taser) publishes no support grip and keeps its
@@ -332,7 +332,7 @@
       seen.why = !prop ? "no drawn weapon"
         : !ch ? "no player rig"
         : ch.slidePose ? "slide pose owns the rig"
-        : (ch.cuffed || ch.surrender || ch.handsUp) ? "hands are busy"
+        : (ch.cuffed || ch.surrender || ch.handsUp || ch.verbHold) ? "hands are busy"
         : (CBZ.player && CBZ.player.dead) ? "dead"
         : (CBZ.weaponTransferState && CBZ.weaponTransferState().active) ? "stowing"
         : grips ? "one-handed weapon" : "no rig parts";
@@ -655,7 +655,7 @@
       !a._holstered && !a._gunLowered && !a._gunHidden && !a.surrender &&
       a.char && a.char.parts && a.char.parts.la && a.char.body && a.char.sockets &&
       !a.char.traversePose && !a.char.surrender && !a.char.handsUp &&
-      !a.char.slidePose && !a.char.cuffed &&
+      !a.char.slidePose && !a.char.cuffed && !a.char.verbHold &&
       a._weaponProp && a._weaponProp.visible;
   }
   function poseNpcList(list, origin, out) {

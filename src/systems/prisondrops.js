@@ -76,7 +76,6 @@
   // Floor loot is collected only when the player's feet actually cross it.
   // One close radius for every shape: no long invisible reach and no pickup UI.
   const AUTO_R = 1.15;       // m — tight walk-over radius for every floor item
-  const FADE = 0.34;         // s of rise-and-shrink when a drop is taken
   const BLINK = 1.6;         // s of flicker before an expired drop is gone
   const GRAV = 19.0;         // m/s² for the small-prop ballistic
   const SPAWN_Y = 1.06;      // m — pockets are at the chest, not at the feet
@@ -354,18 +353,34 @@
     CBZ.sfx && CBZ.sfx(rigidShape(d.shape) ? "equip" : "pickup");
   }
 
-  function takeDrop(inst) {
-    const d = inst.data;
-    if (d.taken) return;
-    d.taken = true; d.fade = 0;
-    // hand the model back from the shared gun solver before it starts moving
-    // under a take animation the solver knows nothing about
+  /* TAKEN WITH A HAND (systems/verbs_pickup.js), by you or by an inmate: the
+     body bends to it, the hand closes on it and it leaves the floor in the
+     hand. What it grants lands on the grab frame and the prop goes back to the
+     registry then. (It used to rise 0.65 m on its own and shrink to nothing:
+     a thing leaving the floor with no hand under it.) */
+  function releaseBody(d) {
+    // hand the model back from the shared gun solver before a hand moves it
     if (d.body && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
       try { CBZ.weaponPhysics.release(d.mesh); } catch (e) {}
       d.body = null;
     }
-    grant(d);
-    taken++;
+  }
+  function handTake(who, inst, d, then) {
+    d.taken = true;
+    releaseBody(d);
+    const took = function () {
+      then();
+      CBZ.removeProp && CBZ.removeProp(inst);
+      dropGone(inst);
+    };
+    const kind = d.cigs > 0 ? "card" : (rigidShape(d.shape) ? "grip" : "card");
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(who, d.mesh, { pose: kind, keep: d.item === "Gun" || d.item === "Taser", onTaken: took });
+    else took();
+  }
+  function takeDrop(inst) {
+    const d = inst.data;
+    if (d.taken) return;
+    handTake(CBZ.player, inst, d, function () { grant(d); taken++; });
   }
 
   if (CBZ.registerPropType) CBZ.registerPropType({
@@ -384,7 +399,7 @@
           hh: built.hh, r: built.r,
           vx: opts.vx, vy: opts.vy, vz: opts.vz,
           wx: (Math.random() - 0.5) * 9, wy: (Math.random() - 0.5) * 7, wz: (Math.random() - 0.5) * 9,
-          bounces: 0, rest: false, age2: 0, far: 0, taken: false, fade: -1,
+          bounces: 0, rest: false, age2: 0, far: 0, taken: false,
           body: null, inst: null,
         },
       };
@@ -393,17 +408,10 @@
       const d = inst.data;
       const m = d.mesh;
 
-      // TAKEN: rise and shrink out, then hand the instance back to the
-      // registry, which disposes it (every geometry/material here is _shared,
-      // so nothing another drop is using can be freed out from under it).
-      if (d.taken) {
-        d.fade += dt;
-        const t = Math.min(1, d.fade / FADE);
-        m.position.y += dt * 1.9;
-        m.scale.setScalar(Math.max(0.001, 1 - t));
-        if (t >= 1) { m.visible = false; CBZ.removeProp && CBZ.removeProp(inst); dropGone(inst); }
-        return;
-      }
+      // TAKEN: a hand has it (handTake above); the registry gets the instance
+      // back on the grab frame, which disposes it (every geometry/material
+      // here is _shared, so nothing another drop is using is freed).
+      if (d.taken) return;
 
       // PHYSICS. A gun is driven by the shared weapon solver (its body is a
       // record in actorweapons.js, ticked at 37.45); everything else falls
@@ -476,7 +484,7 @@
        · SAME WALK-OVER RADIUS the player uses, slightly widened for a body
          that has no camera to aim with. No second loot path, no reach prompt.
      The take routes through the same takeDrop bookkeeping, so the audit
-     counters and the fade stay honest about where the object went.
+     counters and the hand stay honest about where the object went.
      ============================================================ */
   const NPC_TAKE_R2 = (AUTO_R * 1.5) * (AUTO_R * 1.5);
   const ARMABLE = { "Gun": "Pistol", "Taser": "Taser" };
@@ -492,17 +500,17 @@
     for (let i = 0; i < npcs.length; i++) {
       const n = npcs[i];
       if (!n || !n.group || n.dead || n.escaped || (n.ko || 0) > 0) continue;
-      if (n.hasGun || n.armed) continue;      // he already has one
+      if (n.hasGun || n.armed || n._pickingUp) continue;   // he already has one (or is picking one up)
       if (n.restraint || n.cuffed) continue;  // cuffed hands take nothing
       const dx = px - n.group.position.x, dz = pz - n.group.position.z;
       if (dx * dx + dz * dz > NPC_TAKE_R2) continue;
-      armNpc(n, want, d.item);
-      d.taken = true; d.fade = 0;
-      if (d.body && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
-        try { CBZ.weaponPhysics.release(m); } catch (e) {}
-        d.body = null;
-      }
-      taken++; npcArmed++;
+      n._pickingUp = true;
+      handTake(n, inst, d, function () {
+        n._pickingUp = false;
+        if (n.dead) return;
+        armNpc(n, want, d.item);
+        taken++; npcArmed++;
+      });
       return;
     }
   }

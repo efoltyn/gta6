@@ -576,6 +576,17 @@ document.body.appendChild(b);}}catch(e){}})();
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
 <script src="src/entities/moves.js?v=moves1"></script>
+<!-- CBZ.verbs: THE ONE library of what two people do to each other with their
+     hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
+     drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
+     while they do it (verbposes.js), and the strikes and hit reactions
+     (meleeposes.js + verbs_strike.js). Everything else is feature-detected at
+     call time; the late pass runs at CBZ.onUpdate(91). -->
+<script src="src/systems/verbs.js?v=verbs1"></script>
+<script src="src/entities/verbposes.js?v=verbs1"></script>
+<script src="src/entities/meleeposes.js?v=verbs1"></script>
+<script src="src/systems/verbs_strike.js?v=verbs1"></script>
+<script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present

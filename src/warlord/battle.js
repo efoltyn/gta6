@@ -3323,7 +3323,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     let best = null, bd = PICK_R2;
     for (let i = 0; i < dropGuns.length; i++) {
       const g = dropGuns[i];
-      if (!g || !g.parent) continue;
+      if (!g || !g.parent || g.userData._taking) continue;   // a hand is already on it
       const b = g.userData && g.userData.weaponBody;
       if (b && !b.settled) continue;                 // still in the air
       const dx = g.position.x - px, dz = g.position.z - pz;
@@ -3402,7 +3402,30 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
     const gp = GP();
     if (gp && gp.showPick) gp.showPick(!!g, lbl);
 
-    if (edge && g) takeDrop(g);
+    if (edge && g) takeByHand(g);
+  }
+
+  /* THE HAND TAKES IT (systems/verbs_pickup.js). The warlord bends to the
+     rifle, his hand closes on it and it comes off the sand in the hand; the
+     bookkeeping above (takeDrop) runs on the grab frame. The warlord IS
+     CBZ.player (gunplay.js), so first person gets the viewmodel hand with the
+     rifle dipping out and back, third person gets the body. The pickup pose
+     layer runs at onUpdate(91.5), which microboot walks AFTER its always
+     hooks, so it lands on top of gunplay's onAlways(51.5) pose. */
+  function takeByHand(g) {
+    if (!g || !g.userData || g.userData._taking) return;
+    const id = g.userData.weaponId;
+    const gp = GP();
+    if (!id || (gp && gp.canHold && !gp.canHold(id))) return;
+    g.userData._taking = true;
+    // the shared gun solver lets go before a hand moves it
+    if (CBZ.weaponPhysics && CBZ.weaponPhysics.release) safe(function () { CBZ.weaponPhysics.release(g); });
+    const took = function () {
+      g.userData._taking = false;
+      if (g.parent && !over) takeDrop(g);
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, g, { pose: "grip", keep: true, onTaken: took });
+    else took();
   }
 
   /* ============================================================ THE HUD

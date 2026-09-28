@@ -545,10 +545,15 @@
     bin.position.set(0, 0.45, 0); grp.add(bin);
     const lid = new THREE.Mesh(geo("binlid", function () { return new THREE.CylinderGeometry(0.32, 0.32, 0.05, 12); }), mat("binlid", function () { return new THREE.MeshLambertMaterial({ color: 0x2f3830 }); }));
     lid.position.set(0, 0.92, 0); grp.add(lid);
+    // the bag is its own object (bag + strap), so the hand takes the BAG and
+    // the bin stays where it is
+    const sack = new THREE.Group();
+    sack.position.set(0.52, 0, 0.08); sack.rotation.y = 0.3; grp.add(sack);
     const bag = new THREE.Mesh(geo("bag", function () { return new THREE.BoxGeometry(0.55, 0.3, 0.28); }), mat("bag", function () { return new THREE.MeshLambertMaterial({ color: 0x1b2230 }); }));
-    bag.position.set(0.52, 0.15, 0.08); bag.rotation.y = 0.3; grp.add(bag);
+    bag.position.set(0, 0.15, 0); sack.add(bag);
     const strap = new THREE.Mesh(geo("strap", function () { return new THREE.TorusGeometry(0.13, 0.015, 4, 10, Math.PI); }), mat("strap", function () { return new THREE.MeshLambertMaterial({ color: 0x111111 }); }));
-    strap.position.set(0.52, 0.3, 0.08); strap.rotation.y = 0.3; grp.add(strap);
+    strap.position.set(0, 0.3, 0); sack.add(strap);
+    grp.userData.sack = sack;
     return grp;
   }
   // opts: {pay, from, line(where) -> text, salt, near:{x,z}}
@@ -576,21 +581,33 @@
     return S.drop;
   }
   function dropState() { const S = store(); return S.drop || null; }
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the bag leaves the bins in
+  // the hand, the money is yours on the grab frame, the bin stays put.
+  // (CBZ.sfx is a function; the old CBZ.sfx.pickup() call never played.)
   function takeDrop() {
     const S = store(); const D = S.drop;
-    if (!D || D.taken) return;
-    D.taken = true;
-    if (RT.drop) { killGroup(RT.drop.grp); RT.drop = null; }
-    if (CBZ.city && CBZ.city.addCash && D.pay > 0) { try { CBZ.city.addCash(D.pay); } catch (e) {} }
-    const R = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
-    if (R && R.records && R.records.hitman) R.records.hitman.paid = (R.records.hitman.paid | 0) + D.pay;
-    RT.lastTaken = D.id;
-    commit();
-    if (CBZ.sfx && CBZ.sfx.pickup) { try { CBZ.sfx.pickup(); } catch (e) {} }
+    if (!D || D.taken || D._taking) return;
+    D._taking = true;
+    const took = function () {
+      D._taking = false;
+      if (D.taken) return;
+      D.taken = true;
+      if (CBZ.city && CBZ.city.addCash && D.pay > 0) { try { CBZ.city.addCash(D.pay); } catch (e) {} }
+      const R = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+      if (R && R.records && R.records.hitman) R.records.hitman.paid = (R.records.hitman.paid | 0) + D.pay;
+      RT.lastTaken = D.id;
+      commit();
+      if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} }
+    };
+    const sack = RT.drop && RT.drop.grp && RT.drop.grp.userData.sack;
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(P(), sack || null, { pose: "grip", onTaken: took });
+    else took();
   }
   function tickDrop() {
     const D = dropState();
-    if (!D || D.taken) { if (RT.drop) { killGroup(RT.drop.grp); RT.drop = null; } return; }
+    // a taken drop leaves its (empty) bin until you are well away from it
+    if (!D || (D.taken && distP(D.x, D.z) > 30)) { if (RT.drop) { killGroup(RT.drop.grp); RT.drop = null; } return; }
+    if (D.taken) return;
     if (!RT.drop || RT.drop.id !== D.id || !RT.drop.grp.parent) {
       if (RT.drop) killGroup(RT.drop.grp);
       RT.drop = { id: D.id, grp: buildBag(D) };

@@ -1380,20 +1380,55 @@
   function priceOf(name) { const e = econ(); return (e && e.buyPrice) ? e.buyPrice(name) : 0; }
   function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
 
+  /* THE ONE SLOT, IN THE HAND (systems/verbs_pickup.js). A shelf's stock is
+     one merged mesh per product, so the unit you take is stood up as its own
+     little object on the slot (the same parts, the same slot transform
+     buildReal uses) for the length of the reach: the hand closes on it, it
+     comes off the shelf in the hand, and on that grab frame the shelf is
+     rebuilt without it. Nothing is merged twice: the stand-up is hidden (the
+     merged shelf still draws the unit) until the hand has it. */
+  function slotObject(sl) {
+    const p = sl.plan, Pt = partsOf(sl.name);
+    const parent = p && (p.goodsGroup || p.group);
+    if (!Pt || !parent) return null;
+    const g = new THREE.Group();
+    const kk = Pt.h > sl.clr - 0.01 && Pt.h > 0 ? Math.max(0.3, (sl.clr - 0.01) / Pt.h) : 1;
+    g.position.set(sl.lx, sl.ly, sl.lz);
+    g.rotation.set(0, sl.yaw, 0);
+    g.scale.setScalar(kk);
+    for (const part of Pt.parts) g.add(new THREE.Mesh(part.geo, part.mat));
+    g.visible = false;
+    parent.add(g);
+    return g;
+  }
+  function byHand(sl, then) {
+    if (sl._taking) return;
+    const V = CBZ.verbs;
+    const obj = V && V.pickup ? slotObject(sl) : null;
+    if (!obj) { then(); return; }
+    sl._taking = true;
+    V.pickup(CBZ.player, obj, {
+      onTaken: function () { sl._taking = false; then(); },
+      onDone: function () { sl._taking = false; if (obj.parent) obj.parent.remove(obj); },
+    });
+  }
+
   function buySlot(sl) {
-    if (!sl || !sl.obj) return;
+    if (!sl || !sl.obj || sl._taking) return;
     if (!CBZ.cityShopAcquire) { note("The clerk waves you to the counter.", 1.6); return; }
     if (!CBZ.cityShopAcquire(sl.lot, sl.name, 1, null)) return;   // failed spend keeps the goods
-    clearSlot(sl);
+    byHand(sl, function () { clearSlot(sl); });
   }
 
   function takeSlot(sl) {
-    if (!sl || !sl.obj) return;
+    if (!sl || !sl.obj || sl._taking) return;
     // one theft model for the whole city: the shoplift system's own charge
     if (CBZ.cityShopTheftSeen && CBZ.cityShopTheftSeen(sl.lot, sl.x, sl.z)) return;
-    if (!CBZ.cityShopAcquire || !CBZ.cityShopAcquire(sl.lot, sl.name, 1, { free: true })) return;
-    if (CBZ.sfx) CBZ.sfx("coin");
-    clearSlot(sl);
+    byHand(sl, function () {
+      if (!CBZ.cityShopAcquire || !CBZ.cityShopAcquire(sl.lot, sl.name, 1, { free: true })) return;
+      if (CBZ.sfx) CBZ.sfx("coin");
+      clearSlot(sl);
+    });
   }
 
   const I = CBZ.interactions;

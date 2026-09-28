@@ -1626,11 +1626,29 @@
             const it = LOADOUT[i - 1]; if (!it) return "";
             return carrying(it.id) ? "Put it back" : "Take " + it.noun;
           },
+          /* BY HAND (systems/verbs_pickup.js). The body is out of frame in
+             this lens, so the take plays on the lens hand: it reaches into
+             the foam, closes on the gun and lifts it out (the gun is yours on
+             the grab frame); "Put it back" is the same reach reversed, the
+             gun comes out of your hand and lands in its cut-out (it is back
+             in the case on the release frame). */
           onUse: function (i) {
             const it = LOADOUT[i - 1]; if (!it) return;
-            if (carrying(it.id)) returnGun(it); else giveGun(it);
-            syncCase();
-            if (CBZ.hmInspect && CBZ.hmInspect.refreshVerb) CBZ.hmInspect.refreshVerb();
+            const model = B && B.guns && B.guns[it.key];
+            const after = function () {
+              syncCase();
+              if (CBZ.hmInspect && CBZ.hmInspect.refreshVerb) CBZ.hmInspect.refreshVerb();
+            };
+            const Vb = CBZ.verbs;
+            if (carrying(it.id)) {
+              const put = function () { returnGun(it); after(); };
+              if (Vb && Vb.putDown && model) Vb.putDown(CBZ.player, model, null, { pose: "grip", lens: true, onPlaced: put });
+              else put();
+            } else {
+              const take = function () { giveGun(it); after(); };
+              if (Vb && Vb.pickup && model) Vb.pickup(CBZ.player, model, { pose: "grip", keep: true, lens: true, onTaken: take });
+              else take();
+            }
           },
         }],
       });
@@ -1899,15 +1917,25 @@
     d.g.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
     delete B.deliveries[kind];
   }
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): the paper comes up off the
+  // mat in the hand (it is picked up on the grab frame), and you read it once
+  // it is up.
   function pickDelivery(kind) {
     if (!B) return;
-    const d = B.deliveries[kind]; if (!d) return;
+    const d = B.deliveries[kind]; if (!d || d._taking) return;
+    d._taking = true;
     const cb = d.onPick, canvas = d.canvas;
-    clearDelivery(kind);
-    if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} }
-    emit("pick", { kind: kind, canvas: canvas });
-    if (cb) { try { cb(canvas); } catch (e) { if (window.console) console.error("[hmRoom] onPick", e); } }
-    else if (CBZ.hmHold && CBZ.hmHold.open) { try { CBZ.hmHold.open(canvas, { kind: kind === "paper" ? "news" : "paper" }); } catch (e) {} }
+    const took = function () {
+      if (B && B.deliveries[kind] === d) clearDelivery(kind);
+      if (CBZ.sfx) { try { CBZ.sfx("pickup"); } catch (e) {} }
+      emit("pick", { kind: kind, canvas: canvas });
+    };
+    const read = function () {
+      if (cb) { try { cb(canvas); } catch (e) { if (window.console) console.error("[hmRoom] onPick", e); } }
+      else if (CBZ.hmHold && CBZ.hmHold.open) { try { CBZ.hmHold.open(canvas, { kind: kind === "paper" ? "news" : "paper" }); } catch (e) {} }
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, d.g || null, { pose: "card", onTaken: took, onDone: read });
+    else { took(); read(); }
   }
 
   /* ================================================================

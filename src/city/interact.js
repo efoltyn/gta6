@@ -175,14 +175,12 @@
   }
 
   // ---- the raw VERBS (unchanged behavior) ---------------------------------
+  // "Swing on" is a PUNCH: the same thrown, contact-resolved blow as a
+  // left-click (city/combat.js → systems/verbs_strike.js), aimed at him. It
+  // used to be a flat 35 HP and a guaranteed knockout with no swing at all.
   function attack(p) {
-    const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     CBZ.player._fighting = 1.5;
-    if (p.kind === "cop") { CBZ.cityHurtCop && CBZ.cityHurtCop(p, 35, { fromX: fx, fromZ: fz }); return; }
-    p.hp -= 35;
-    if (CBZ.sfx) CBZ.sfx("punch");
-    if (p.hp <= 0) CBZ.cityKillPed(p, { fromX: fx, fromZ: fz }, "beaten");
-    else CBZ.cityKOPed(p, fx, fz);
+    if (CBZ.citySwingOn) CBZ.citySwingOn(p);
   }
   function execute(p) {
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
@@ -286,7 +284,15 @@
   // MUG / ROBBERY — takes their cash + the loot item (cityRobPed's payout) AND
   // transfers EVERY valuable they're carrying into your inventory to pawn. A
   // rich victim = a big haul (a Patek + a ring); a broke one = scraps.
+  // THE HANDS DO IT (CBZ.verbs.mug): a fist in his collar, the other hand in
+  // his front pocket, and the haul lands when the hand comes out with it.
   function mug(p) {
+    if (!p || p.dead) return;
+    const V = CBZ.verbs;
+    const S = V && V.mug ? V.mug(V.playerActor(), p, { far: true, onOutcome: function () { mugPayout(p); } }) : null;
+    if (!S) mugPayout(p);
+  }
+  function mugPayout(p) {
     if (!p || p.dead) return;
     // snapshot the valuables BEFORE the rob (cityRobPed only handles cash + loot;
     // we own routing the watch/ring/etc into inventory). Clear so it can't re-drop.
@@ -322,7 +328,20 @@
   // PICKPOCKET — lift a SLICE of their cash (scaled to WHO they are: a billionaire's
   // pocket slice dwarfs a junkie's), and on a lucky dip palm ONE of their valuables
   // (a watch/ring) into your inventory to fence. A pickpocketed billionaire = jackpot.
+  // THE DIP IS A HAND (systems/verbs_pickup.js takeFrom): a low, quick reach
+  // into his pocket, never a collar grab; what it finds is decided when the
+  // fingers are in the pocket (the grab frame), and comes out in the hand.
+  // (This replaces the old CBZ.charReach "dip", a reach toward no point.)
   function pickpocket(p) {
+    if (!p || p._dipping) return;
+    const V = CBZ.verbs;
+    if (V && V.takeFrom && p.pos) {
+      p._dipping = true;
+      V.takeFrom(CBZ.player, p, { at: "pocketR", kind: "cash", pose: "card", dur: 0.5,
+        onTaken: function () { p._dipping = false; pickpocketNow(p); } });
+    } else pickpocketNow(p);
+  }
+  function pickpocketNow(p) {
     /* THE KEY COMES OFF FIRST. A dip that finds a vault key and hands you $14
        instead is the whole feature going missing, so city/keys.js gets the
        pocket before the cash roll does — and a successful lift IS the dip
@@ -785,7 +804,12 @@
   I.registerZone({
     id: "zone-stash", kind: "stash", prio: 10, driving: false,
     find: function (px, pz) { return CBZ.cityNearestStash ? CBZ.cityNearestStash(px, pz, REACH) : null; },
-    options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) { CBZ.cityRobStash(lot); } }],
+    // the hand goes into their duffel (systems/verbs_pickup.js); robbed on the grab frame
+    options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) {
+      const st = lot && lot.building && lot.building.stash, V = CBZ.verbs, P = CBZ.player;
+      if (!st || st.looted || !V || !V.pickup || !P || !P.pos) { CBZ.cityRobStash(lot); return; }
+      V.pickup(P, { x: st.x, y: (P.pos.y || 0) + 0.3, z: st.z, kind: "bag" }, { key: st, pose: "grip", onTaken: function () { CBZ.cityRobStash(lot); } });
+    } }],
   });
   // NO-DECOY FIX: street furniture used to be pure decoration (or gunfire-only —
   // see props.js's shootables). Trash cans and news boxes are exactly the kind
@@ -1738,23 +1762,42 @@
     if (g.mode !== "city" || g.state !== "playing" || CBZ.player.dead) return;
     if (!CBZ.cityNearestCorpse || !CBZ.cityLootCorpse) return;
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
+    // ON FOOT IT IS A HAND (systems/verbs_pickup.js): one body at a time, the
+    // hand takes what spilled out of his pockets (the wallet/cash prop beside
+    // him) or goes into the pocket itself; the loot lands on the grab frame.
+    // From a car the plough-loot stays instant.
+    const Vb = CBZ.verbs;
+    if (!CBZ.player.driving && Vb && Vb.pickup) {
+      if (Vb.pickupOf && Vb.pickupOf(CBZ.player)) return;       // the hand is busy
+      const c = CBZ.cityNearestCorpse(px, pz, LOOT_R);
+      if (!c) return;
+      const loot = function () { const dl = CBZ.cityLootCorpse(c); if (dl) surfaceLoot(dl); };
+      const prop = c._invLootProp;
+      if (prop && prop.parent) Vb.pickup(CBZ.player, prop, { pose: "card", key: c, onTaken: loot });
+      else if (Vb.takeFrom) Vb.takeFrom(CBZ.player, c, { at: "pocketR", kind: "cash", key: c, onTaken: loot });
+      else loot();
+      return;
+    }
     let c;
     // loop in case several bodies are piled within reach (e.g. a car plough)
     while ((c = CBZ.cityNearestCorpse(px, pz, LOOT_R))) {
       const dl = CBZ.cityLootCorpse(c);    // routes cash + items (incl. valuables) into inv
       if (!dl) break;                       // looted() flips so the next call skips it
-      // SURFACE THE JACKPOT: cityLootCorpse already added every item to inventory
-      // (no double-add here). If the body was carrying a high-value valuable, fire a
-      // satisfying headline so the score feels great. Bounty cash, if any, was already
-      // paid in cityKillPed — we only surface the loot, never re-pay it.
-      if (Array.isArray(dl.items) && dl.items.length) {
-        let topName = "", topVal = 0;
-        for (const it of dl.items) { const v = itemVal(it); if (v > topVal) { topVal = v; topName = it; } }
-        if (topName && (isLuxe(topName) || topVal >= 20000) && CBZ.city && CBZ.city.big) {
-          CBZ.city.big("You looted a " + topName + " — " + money(pawnPay(topName)) + " at the pawn!");
-          if (CBZ.city.addRespect) CBZ.city.addRespect(isLuxe(topName) ? 6 : 2);
-        }
-      }
+      surfaceLoot(dl);
     }
   });
+  function surfaceLoot(dl) {
+    // SURFACE THE JACKPOT: cityLootCorpse already added every item to inventory
+    // (no double-add here). If the body was carrying a high-value valuable, fire a
+    // satisfying headline so the score feels great. Bounty cash, if any, was already
+    // paid in cityKillPed — we only surface the loot, never re-pay it.
+    if (Array.isArray(dl.items) && dl.items.length) {
+      let topName = "", topVal = 0;
+      for (const it of dl.items) { const v = itemVal(it); if (v > topVal) { topVal = v; topName = it; } }
+      if (topName && (isLuxe(topName) || topVal >= 20000) && CBZ.city && CBZ.city.big) {
+        CBZ.city.big("You looted a " + topName + " — " + money(pawnPay(topName)) + " at the pawn!");
+        if (CBZ.city.addRespect) CBZ.city.addRespect(isLuxe(topName) ? 6 : 2);
+      }
+    }
+  }
 })();

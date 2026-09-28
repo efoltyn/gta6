@@ -165,7 +165,7 @@
         return true;
       }
       if (typeof CBZ.cityNpcArrest === "function") {
-        CBZ.cityNpcArrest(b);
+        CBZ.cityNpcArrest(b, a);              // the cop cuffs him (CBZ.verbs.cuff)
         a.npcTarget = null; a.curTarget = null;
         return true;
       }
@@ -177,8 +177,13 @@
         if (!H.tackle || !H.tackle(a)) return false;
       } else {
         if (b.dead) return false;
-        b.ko = Math.max(b.ko || 0, 2.2);     // down on the pavement = prone = compliant
-        if (CBZ.body && CBZ.body.hit) { try { CBZ.body.hit(b, { fromX: a.pos.x, fromZ: a.pos.z, force: 3.5, knockdown: 1.4 }); } catch (e) {} }
+        // HOW a man is taken down is CBZ.verbs.tackle (shoulder in, arms round
+        // the thighs, both to the ground); the knockdown is the fallback only
+        const V = CBZ.verbs;
+        if (!(V && V.tackle && V.tackle(a, b, { far: true }))) {
+          b.ko = Math.max(b.ko || 0, 2.2);   // down on the pavement = prone = compliant
+          if (CBZ.body && CBZ.body.hit) { try { CBZ.body.hit(b, { fromX: a.pos.x, fromZ: a.pos.z, force: 3.5, knockdown: 1.4 }); } catch (e) {} }
+        }                                    // (the tackle's knockdown sets his ko itself)
       }
       L.tackleCD = TACKLE_CD;
       return true;

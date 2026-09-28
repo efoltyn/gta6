@@ -1556,7 +1556,9 @@
       noteState(g, "ko");
       g.ko -= dt;
       g._chase = null;
-      g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
+      // a rig fall (entities/meleeposes.js) is the visible fall; the side roll
+      // is only for a KO without one
+      if (!(g.char && g.char.fall && g.char.fall.on)) g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
       still(g);
       updateFlashlight(g, dt);
       animChar(g.char, 0, dt);
@@ -2069,7 +2071,7 @@
     // gives the roster its own two plans; prisonnav re-opens it for the cast.
     if (navOn()) CBZ.navGrid.frame(2, 1.5);
     auditPre();
-    for (const g of CBZ.guards) updateGuard(g, dt);
+    for (const g of CBZ.guards) { if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(g)) continue; updateGuard(g, dt); }   // a body a verb holds is the verb's
   });
   CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });
 })();

@@ -555,7 +555,9 @@ async function stagePrisonCombatLooks(input) {
     if (dropInst && dropInst.mesh) dropInst.mesh.visible = true;
     if (subject.state === "drop-walkover" && dropInst) {
       const walkX = dropInst.pos.x + 0.34, walkZ = dropInst.pos.z + 0.16;
-      for (let i = 0; i < 30; i++) {
+      // 80 frames: the walk-over is a hand take now (systems/verbs_pickup.js,
+      // ~1 s bending to a floor item), so let it finish before the shot
+      for (let i = 0; i < 80; i++) {
         player.pos.set(walkX, groundAt(walkX, walkZ), walkZ);
         player.vy = 0; player.grounded = true; player.dead = false; player.hp = 100;
         playerChar.group.position.copy(player.pos);

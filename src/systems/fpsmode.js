@@ -3046,10 +3046,12 @@
     if (shotCD > 0) return;
     shotCD = w.interval || 0.42;
     const hit = aimedActor(w.range || MELEE);
-    triggerFistPunch(true);
     const strike = CBZ.prisonStab || CBZ.punch;
-    if (!strike) { CBZ.sfx && CBZ.sfx("step"); return; }
+    if (!strike) { triggerFistPunch(true); CBZ.sfx && CBZ.sfx("step"); return; }
     const r = strike(hit && hit.actor);
+    // the first-person hand swings AFTER the body has its kind and clock, so
+    // both views run the same stab on the same beat
+    if (r && r.ok) triggerFistPunch(true);
     if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
   }
 
@@ -5073,8 +5075,12 @@
     const carriedSg = carriedModels[1];
     if (carriedSg && carriedSg.userData.pump) carriedSg.userData.pump.position.z = carriedSg.userData.pumpBaseZ + Math.sin(pumpT * Math.PI) * 0.22;
     const fpStowingGun = fps.active && fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
-    gun.visible = armed() || fpStowingGun;
-    fists.visible = !armed() && !fpStowingGun;
+    // TAKING A THING (systems/verbs_pickup.js): for its beat a pickup owns one
+    // hand's wrist target; a held gun dips out of frame and comes back after.
+    const pick = CBZ.verbs && CBZ.verbs.fpPickup ? CBZ.verbs.fpPickup(vm, fistT, handR, handL, armed() || fpStowingGun) : null;
+    gun.visible = (armed() || fpStowingGun) && !(pick && pick.hands);
+    fists.visible = (!armed() && !fpStowingGun) || !!(pick && pick.hands);
+    if (ddT < 0) gun.position.y = pick ? -0.9 * pick.gunDip : 0;
     poseFpArms();
 
     if (muzzleT > 0) {

@@ -21,6 +21,13 @@
    function (CBZ.cityRestrain.cuff/escort/release/seat/unseat/turnIn/
    grapple) so a net layer can drive the same machine later.
 
+   THE HANDS ARE CBZ.verbs' (systems/verbs.js). This file keeps the RULES —
+   the enum, the bounty, the back seat, the desk — and asks the shared verbs
+   for every body: the zip ties (on the WRISTS, hands behind the back, solved
+   every frame for any rig in any game), the clinch (a collar grip, the man's
+   hands on your wrists), the march (a hand on his arm, one on the ties), the
+   slam and the shove (the world in front of him decides where he goes).
+
    Registers through CBZ.interactions only — interact.js untouched.
    police.js provides the desk: CBZ.cityPoliceStation() (the intake
    point) + CBZ.cityStationIntake(ped) (walked through the door,
@@ -35,8 +42,7 @@
   if (!I) return;   // registry is the foundation; without it there is no layer
 
   // ---- tuning ---------------------------------------------------------------
-  const ESCORT_D = 0.9;        // marched one pace ahead of you (derived, never simulated)
-  const CLINCH_D = 0.9;        // clinch range — chest to chest
+  const ESCORT_D = 0.9;        // the perp-walk pace city/wanted.js still reads (verbs place a march from both bodies)
   const WEAR_T = 1.2;          // seconds of clinch before their struggle is broken (tie-able)
   const CAR_REACH = 4.6;       // back-seat stuffing reach
   const STATION_R = 7;         // the desk hand-over zone radius
@@ -48,144 +54,27 @@
   function st(p) { return p && p.restraint ? p.restraint.state : null; }
   function pa() { return CBZ.city && CBZ.city.playerActor; }
 
-  // ---- real zip-tie look: a narrow polymer loop at each WRIST plus the short
-  //      bridge joining both hands behind the back. The old 0.34m solid steel
-  //      cubes sat halfway up each forearm and never connected, so the pose read
-  //      as two floating bracelets rather than tied hands. --------------------
-  const CUFF_MAT = CBZ.cmat ? CBZ.cmat(0xd7dbe0) : new THREE.MeshLambertMaterial({ color: 0xd7dbe0 });
-  const ZIP_RING_GEO = new THREE.TorusGeometry(0.155, 0.022, 4, 10);
-  ZIP_RING_GEO._shared = true;
-  const ZIP_LATCH_GEO = CBZ.boxGeom ? CBZ.boxGeom(0.08, 0.055, 0.07) : new THREE.BoxGeometry(0.08, 0.055, 0.07);
-  const ZIP_LINK_GEO = CBZ.boxGeom ? CBZ.boxGeom(0.24, 0.035, 0.035) : new THREE.BoxGeometry(0.24, 0.035, 0.035);
-  const cuffPool = [];
-  function cuffMesh() {
-    let g = cuffPool.pop();
-    if (!g) {
-      g = new THREE.Group(); g.name = "zip-tie-wrist";
-      const ring = new THREE.Mesh(ZIP_RING_GEO, CUFF_MAT);
-      ring.rotation.x = Math.PI / 2; ring.castShadow = false;
-      const latch = new THREE.Mesh(ZIP_LATCH_GEO, CUFF_MAT);
-      latch.position.set(0.15, 0, 0); latch.castShadow = false;
-      g.add(ring, latch);
-    }
-    g.visible = true;
-    return g;
-  }
-  function addCuffs(ped) {
-    const ch = ped.char; if (!ch || !ch.parts || ped._cuffMeshes) return;
-    const out = [];
-    for (const k of ["la", "ra"]) {
-      const arm = ch.parts[k]; if (!arm) continue;
-      const m = cuffMesh();
-      // two-segment arms: the wrist lives in the elbow group's frame — mount
-      // there so the cuff rides the forearm when the elbow bends. Falls back
-      // to the old shoulder-frame offset on a legacy single-segment rig.
-      //
-      // KNOWN, AND DELIBERATELY NOT MOVED: -0.42 is inside the DRAWN hand cap
-      // (which spans -armLo-0.03 -> handH-armLo, i.e. -0.49 -> -0.26 on an
-      // adult male), so this tie is round the hand rather than the wrist — the
-      // same fault CBZ.charArmLandmarks() just cured for bling.js's watch. It
-      // cannot be fixed by moving this line alone: pinArm() below drives the
-      // forearm END (L2 = 0.46) onto a FIXED body-local target and the bridge
-      // mesh is parked between those targets, so a cuff moved 0.20 up the
-      // forearm would float off the bridge that joins it. Retargeting the IK
-      // to the wrist crease and re-seating the bridge is one coherent change,
-      // and it is not this one.
-      const low = arm.userData && arm.userData.low;
-      if (low) { m.position.set(0, -0.42, 0); low.add(m); }
-      else { m.position.set(0, -0.66, 0); arm.add(m); }
-      out.push(m);
-    }
-    // The bridge is body-local because cuffPose solves both wrist centres to
-    // this fixed point every frame. It therefore follows running/lean/ragdoll
-    // transforms without a second world-space animation writer.
-    if (ch.body && !ch._zipTieLink) {
-      const link = new THREE.Mesh(ZIP_LINK_GEO, CUFF_MAT);
-      link.name = "zip-tie-bridge";
-      link.position.set(0, 1.26, -0.33);
-      link.castShadow = false; link.receiveShadow = false;
-      ch.body.add(link); ch._zipTieLink = link;
-    }
-    ped._cuffMeshes = out;
-  }
-  function removeCuffs(ped) {
-    if (!ped._cuffMeshes) return;
-    for (const m of ped._cuffMeshes) { if (m.parent) m.parent.remove(m); cuffPool.push(m); }
-    ped._cuffMeshes = null;
-    const ch = ped.char;
-    if (ch && ch._zipTieLink) {
-      if (ch._zipTieLink.parent) ch._zipTieLink.parent.remove(ch._zipTieLink);
-      ch._zipTieLink = null;
-    }
-  }
+  // ---- THE TIES AND THE HANDS ARE CBZ.verbs' --------------------------------
+  // The zip ties, the hands-behind-the-back solve and the player's own ties
+  // used to live here (addCuffs / pinArm / cuffPose): a hand-rolled two-bone IK
+  // with typed bone lengths that met the FISTS behind the back, the ties
+  // buried in the hand. CBZ.verbs.setCuffs puts them on the wrists of any rig
+  // in any game, and its late pass holds the wrists together every frame.
+  const VB = () => CBZ.verbs || null;
+  function tie(p, on) { const v = VB(); if (v && v.setCuffs) v.setCuffs(p, on); }
+  function letGo(p, how) { const v = VB(); if (v && v.sessionOf(p)) v.release(p, how || "set"); }
+  function held(p) { const v = VB(); return !!(v && v.sessionOf(p)); }
 
-  // Exact two-bone solve for a wrist target behind the lower back. This runs
-  // AFTER animChar, so gait cannot pull the hands apart. Both targets sit only
-  // 12cm apart on the zip-tie bridge; elbows use an outward pole so shoulders
-  // remain anatomical instead of folding through the torso.
-  const DOWN = new THREE.Vector3(0, -1, 0);
-  const ikU = new THREE.Vector3(), ikPole = new THREE.Vector3();
-  const ikElbow = new THREE.Vector3(), ikDir = new THREE.Vector3();
-  const ikInv = new THREE.Quaternion();
-  function pinArm(arm, side) {
-    if (!arm) return;
-    const low = arm.userData && arm.userData.low;
-    if (!low) return;
-    arm.position.z = 0;
-    const sx = arm.position.x, sy = arm.position.y, sz = arm.position.z;
-    const tx = side * 0.06, ty = 1.24, tz = -0.34;
-    const L1 = 0.44, L2 = 0.46;
-    ikU.set(tx - sx, ty - sy, tz - sz);
-    let d = Math.max(0.05, Math.min(L1 + L2 - 0.002, ikU.length()));
-    ikU.multiplyScalar(1 / Math.max(ikU.length(), 1e-5));
-    const along = (L1 * L1 - L2 * L2 + d * d) / (2 * d);
-    const bend = Math.sqrt(Math.max(0, L1 * L1 - along * along));
-    ikPole.set(side, 0, 0).addScaledVector(ikU, -side * ikU.x);
-    if (ikPole.lengthSq() < 1e-5) ikPole.set(0, 1, 0);
-    ikPole.normalize();
-    ikElbow.set(sx, sy, sz).addScaledVector(ikU, along).addScaledVector(ikPole, bend);
-    ikDir.copy(ikElbow).sub(arm.position).normalize();
-    arm.quaternion.setFromUnitVectors(DOWN, ikDir);
-    // Desired forearm direction in the shoulder group's local frame.
-    ikDir.set(tx, ty, tz).sub(ikElbow).normalize();
-    ikInv.copy(arm.quaternion).invert();
-    ikDir.applyQuaternion(ikInv).normalize();
-    low.quaternion.setFromUnitVectors(DOWN, ikDir);
-  }
-  function cuffPose(ped) {
-    const ch = ped.char; if (!ch || !ch.parts) return;
-    const la = ch.parts.la, ra = ch.parts.ra;
-    pinArm(la, 1);
-    pinArm(ra, -1);
-  }
-
-  // ---- THE PLAYER WEARS THE SAME TIES -------------------------------------
-  // addCuffs/removeCuffs/cuffPose only ever read `ped.char` and `ped._cuffMeshes`,
-  // so the real zip-tie meshes and the two-bone wrists-behind-the-back IK are
-  // already rig-agnostic — they were simply never handed the player's rig,
-  // because nothing in the game had ever cuffed the player. city/wanted.js's
-  // arrest arc does. This is the WHOLE adoption: one proxy object standing in
-  // for the "ped" record the player does not have.
-  //
-  // entities/character.js's `ch.cuffed` branch (a crude two-axis damp on the
-  // upper arms) stays exactly as it was and is the DEGRADE: with this off, or
-  // on a rig with no elbow joints, the player still reads as cuffed — just
-  // without the ties or the solved wrists.
-  let PCUFF = null;
+  // ---- THE PLAYER WEARS THE SAME TIES (city/wanted.js's arrest arc, the
+  // prison haul in systems/capture.js, games/jail.js) ----------------------
   function cuffPlayer(on) {
-    const ch = CBZ.playerChar;
-    if (!on) { if (PCUFF) { removeCuffs(PCUFF); PCUFF = null; } return true; }
-    if (!ch || !ch.parts) return false;
-    if (PCUFF && PCUFF.char !== ch) { removeCuffs(PCUFF); PCUFF = null; }
-    if (!PCUFF) PCUFF = { char: ch, _cuffMeshes: null };
-    addCuffs(PCUFF);
-    return true;
+    const v = VB();
+    if (!v || !v.setCuffs) return false;
+    return v.setCuffs(v.playerActor(), !!on);
   }
-  function playerCuffed() { return !!PCUFF; }
-  // Runs AFTER whatever animated the player this frame (the arrest arc calls
-  // animChar at order 32.8; this updater is 38.5), so gait can never pull the
-  // solved hands back apart — the same ordering law the NPC pose relies on.
-  function posePlayerCuffs() { if (PCUFF && PCUFF.char) cuffPose(PCUFF); }
+  function playerCuffed() { return !!(CBZ.playerChar && CBZ.playerChar.cuffed && VB() && VB().cuffed(VB().playerActor())); }
+  // kept for callers: the verbs' late pass poses every cuffed rig every frame
+  function posePlayerCuffs() {}
 
   // ---- who's actually GOT a charge coming (the desk only pays for real
   //      collars): a rolled bounty, NPC heat the city itself polices, colors,
@@ -255,8 +144,11 @@
     if (ped.char) { ped.char.handsUp = false; ped.char.surrender = false; }
     if (g.cityHostage === ped) { g.cityHostage = null; ped.hostage = false; }
     if (CBZ.cityCancelReport) CBZ.cityCancelReport(ped);   // tied hands can't dial
-    addCuffs(ped);
-    if (CBZ.sfx) CBZ.sfx("reload");                        // the ratchet click
+    // YOUR hands do it: turn him, wrists behind his back, the ratchet. Anyone
+    // else's (a crew offshore) is tied where he stands.
+    const v = VB();
+    const S = v && ped.restraint.by === "player" && pa() ? v.cuff(pa(), ped, { far: true }) : null;
+    if (!S) { tie(ped, true); if (CBZ.sfx) CBZ.sfx("reload"); }
     // tying up a clean citizen IS a crime — the block sees it like any mugging.
     // But only when it was YOU: `by` is the taker, and an NPC crew's kidnapping
     // is that crew's business, not a charge filed against a player who was not
@@ -270,6 +162,9 @@
 
   function escort(ped) {
     if (st(ped) !== "cuffed") return false;
+    const v = VB();
+    // a hand on his arm, one on the ties: the march is a hold
+    if (!v || !pa() || !v.escort(pa(), ped, { far: true })) return false;
     ped.restraint.state = "escorted";
     I.refresh();
     return true;
@@ -277,6 +172,7 @@
   // release from ESCORT only — still tied, stands where you leave them
   function stand(ped) {
     if (st(ped) !== "escorted") return false;
+    letGo(ped, "set");
     ped.restraint.state = "cuffed";
     ped.target.set(ped.pos.x, 0, ped.pos.z); ped.speed = 0;
     I.refresh();
@@ -289,7 +185,8 @@
     if (r.state === "in_vehicle" || r.state === "boarding") unseatBody(ped, r.vehicle);
     ped.restraint = null;
     untrack(ped);
-    removeCuffs(ped);
+    letGo(ped, "set");
+    tie(ped, false);
     ped.controlled = false;
     if (ped.char) ped.char.guardBroke = 0;   // the clinch wear-down look ends with the hold
     ped.fear = Math.max(ped.fear || 0, 6); ped.alarmed = 4;
@@ -336,6 +233,7 @@
       // the BACK — the seat picker puts a tied man behind the driver, which is
       // both where he goes and why the one-body cap could be lifted at all.
       if (CBZ.boarding.freeSeats && CBZ.boarding.freeSeats(car) <= 0) return false;
+      letGo(ped, "set");                             // the car takes him from here
       ped.restraint.state = "boarding";
       ped.restraint.vehicle = car;
       const ok = CBZ.boarding.board(ped, car, { role: "captive", run: false });
@@ -345,6 +243,7 @@
       return false;
     }
     if (car._captive) return false;                  // one body per back seat
+    letGo(ped, "set");
     ped.restraint.state = "in_vehicle";
     ped.restraint.vehicle = car;
     noteCaptive(car, ped);
@@ -385,6 +284,12 @@
   // ---- GRAPPLE: the clinch ---------------------------------------------------
   function grapple(ped) {
     if (!cuffablePed(ped)) return false;
+    // THE CLINCH IS A COLLAR GRIP: both fists in his shirt, his hands on your
+    // wrists (CBZ.verbs.grab). No grip, no clinch.
+    const v = VB();
+    // he FIGHTS the grip (CBZ.verbs struggle), as well as your read of each
+    // other says he can: a better man than you tears loose sooner
+    if (!v || !pa() || !v.grab(pa(), ped, { far: true, struggle: clinchFight(ped) })) return false;
     ped.restraint = { state: "grappled", by: "player", t: 0, vehicle: null };
     track(ped);
     ped.controlled = true; ped.rage = null; ped.state = "walk"; ped.speed = 0;
@@ -396,44 +301,59 @@
     I.refresh();
     return true;
   }
-  // how long they last in your clinch: your read vs theirs (sizeup levels)
-  function breakTime(ped) {
+  // how well he fights your clinch, 0..1: your read vs theirs (sizeup levels)
+  function clinchFight(ped) {
     const mine = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 10;
     const theirs = CBZ.cityLevel ? CBZ.cityLevel(ped) : 10;
-    return Math.max(1.4, Math.min(7, 2.6 + (mine - theirs) * 0.09));
+    return Math.max(0.1, Math.min(1, 0.45 + (theirs - mine) * 0.03));
   }
   function breakFree(ped) {
+    letGo(ped, "drop");
     release(ped, { silent: true });
     ped.rage = pa(); ped.state = "fight";
     if (CBZ.citySay) CBZ.citySay(ped, "“Get OFF me!”", "#ff9a9a", 1.8);
     if (CBZ.shake) CBZ.shake(0.3);
     I.refresh();
   }
+  // SLAM: a heave out of the clinch into whatever is in front of him — the
+  // pavement, a wall, over a rail, into the harbour (the world decides, the
+  // verb says which); the damage lands when he does.
   function slam(ped) {
     if (st(ped) !== "grappled") return false;
+    const v = VB();
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-    release(ped, { silent: true });
-    ped.hp -= 30;
-    if (CBZ.sfx) CBZ.sfx("ko");
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    ped.restraint = null; untrack(ped);
+    ped.controlled = false;
+    if (ped.char) ped.char.guardBroke = 0;
+    const hurt = function (S, kind) {
+      if (ped.dead) return;
+      ped.hp -= kind === "water" ? 8 : kind === "wall" ? 38 : 30;
+      if (ped.hp <= 0) {
+        CBZ.cityKillPed && CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, force: 7 }, kind === "wall" ? "slammed into a wall" : "slammed into the pavement");
+      } else {
+        ped.ko = Math.max(ped.ko || 0, kind === "water" ? 0 : 3.5);
+        CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
+        CBZ.cityAlarm && CBZ.cityAlarm(ped.pos.x, ped.pos.z, 12, 0.8, pa());
+      }
+    };
+    const S = v && pa() ? v.throw(pa(), ped, { dir: { x: -Math.sin(yaw), z: -Math.cos(yaw) }, power: 1, onOutcome: hurt }) : null;
+    if (!S) { hurt(null, "open"); if (CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 9, knockdown: 1.5 }); }
     if (CBZ.shake) CBZ.shake(0.5);
-    if (ped.hp <= 0) {
-      CBZ.cityKillPed && CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, force: 7 }, "slammed into the pavement");
-    } else {
-      ped.ko = Math.max(ped.ko || 0, 3.5);
-      if (CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 9, knockdown: 1.5 });
-      if (CBZ.gore && Math.random() < 0.4) CBZ.gore(ped.pos.x, 0.4, ped.pos.z, { amount: 0.4, player: false });
-      CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
-      CBZ.cityAlarm && CBZ.cityAlarm(ped.pos.x, ped.pos.z, 12, 0.8, pa());
-    }
     CBZ.player._fighting = 1.5;
     I.refresh();
     return true;
   }
+  // SHOVE: both palms out of the clinch; a shove near a ledge is a fall
   function shove(ped) {
     if (st(ped) !== "grappled") return false;
+    const v = VB();
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-    release(ped, { silent: true });
-    if (CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 5 });
+    ped.restraint = null; untrack(ped);
+    ped.controlled = false;
+    if (ped.char) ped.char.guardBroke = 0;
+    const S = v && pa() ? v.shove(pa(), ped, { power: 0.7 }) : null;
+    if (!S && CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 5 });
     ped.fear = 6; ped.state = "flee";
     if (CBZ.sfx) CBZ.sfx("punch");
     I.refresh();
@@ -450,7 +370,8 @@
     const tag = ped.bountyTag || "";
     ped.restraint = null;
     untrack(ped);
-    removeCuffs(ped);
+    letGo(ped, "set");
+    tie(ped, false);
     if (wanted) {
       ped.bounty = 0; ped.bountyTag = null;
       if (CBZ.cityStationIntake) CBZ.cityStationIntake(ped);   // walked through the door, off the board
@@ -498,15 +419,14 @@
     // cut. Every other mode still strips them.
     if (g.mode !== "city") {
       if (restrained.length) releaseAll();
-      if (PCUFF) { if (g.mode === "escape") posePlayerCuffs(); else cuffPlayer(false); }
+      // the prison's haul scene ties the player itself and takes them off
+      // itself; every other mode strips them
+      if (g.mode !== "escape" && playerCuffed()) cuffPlayer(false);
       return;
     }
-    posePlayerCuffs();
     if (!restrained.length) return;
     const P = CBZ.player;
     pleadCD -= dt; copSuspectCD -= dt;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
 
     for (let i = restrained.length - 1; i >= 0; i--) {
       const ped = restrained[i];
@@ -533,41 +453,24 @@
       if (r.state !== "grappled" && CBZ.boardingHolds && CBZ.boardingHolds(ped) && ped._cbzArc) continue;
 
       if (r.state === "grappled") {
-        // player death / driving off mid-clinch = they're loose
-        if (P.dead || P.driving) { breakFree(ped); continue; }
-        // derived attach: held at arm's reach, facing you. Never simulated.
-        ped.pos.x = P.pos.x + fx * CLINCH_D;
-        ped.pos.z = P.pos.z + fz * CLINCH_D;
-        ped.pos.y = 0;
-        if (CBZ.collide) CBZ.collide(ped.pos, 0.5, 0, 1.7);
+        // player death / driving off mid-clinch / the grip gone = they're loose
+        if (P.dead || P.driving || !held(ped)) { breakFree(ped); continue; }
+        // CBZ.verbs.grab holds him (hands in his collar, his on your wrists)
         ped.target.set(ped.pos.x, 0, ped.pos.z); ped.speed = 0;
-        ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
         ped.attackCD = Math.max(ped.attackCD || 0, 0.5);   // no swings from inside the clinch
         ped.pause = Math.max(ped.pause || 0, 0.5);
-        if (CBZ.animChar) CBZ.animChar(ped.char, 0, dt);
         if (ped.char) ped.char.guardBroke = r.t >= WEAR_T ? 1 : 0;   // visibly wearing down
-        if (r.t >= breakTime(ped)) { breakFree(ped); continue; }
         continue;
       }
 
       if (r.state === "escorted") {
-        if (P.dead || P.driving) { r.state = "cuffed"; ped.target.set(ped.pos.x, 0, ped.pos.z); }
-        else {
-          const ax = P.pos.x + fx * ESCORT_D, az = P.pos.z + fz * ESCORT_D;
-          // a teleport (lift, mode warp) snapped the attach apart → they stay put, tied
-          if (Math.hypot(ax - ped.pos.x, az - ped.pos.z) > TELEPORT_D) {
-            r.state = "cuffed"; ped.target.set(ped.pos.x, 0, ped.pos.z);
-          } else {
-            const wasX = ped.pos.x, wasZ = ped.pos.z;
-            ped.pos.x = ax; ped.pos.z = az; ped.pos.y = 0;
-            if (CBZ.collide) CBZ.collide(ped.pos, 0.5, 0, 1.7);   // marched, not phased, through walls
-            ped.target.set(ped.pos.x, 0, ped.pos.z);
-            const moved = Math.hypot(ped.pos.x - wasX, ped.pos.z - wasZ) / Math.max(dt, 1e-4);
-            ped.speed = 0;
-            ped.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ped.group.rotation.y, yaw + Math.PI, 1 - Math.pow(0.001, dt)) : yaw + Math.PI;
-            if (CBZ.animChar) CBZ.animChar(ped.char, moved, dt);
-          }
-        }
+        // CBZ.verbs.escort marches him (a hand on his arm, one on the ties).
+        // Driving off, dying, a teleport that snapped the march: he stays put, tied.
+        const far = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) > TELEPORT_D;
+        if (P.dead || P.driving || far || !held(ped)) {
+          letGo(ped, "set");
+          r.state = "cuffed"; ped.target.set(ped.pos.x, 0, ped.pos.z);
+        } else ped.speed = 0;
       }
 
       if (r.state === "in_vehicle") {
@@ -598,9 +501,8 @@
       if (r.state === "cuffed") {
         // pinned in place every frame so nothing (panic, gunfire) walks them off
         ped.speed = 0; ped.target.set(ped.pos.x, 0, ped.pos.z);
-        if (CBZ.animChar && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 70) CBZ.animChar(ped.char, 0, dt);
+        if (CBZ.animChar && !held(ped) && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 70) CBZ.animChar(ped.char, 0, dt);
       }
-      cuffPose(ped);
       if (pleadCD <= 0 && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 8 && Math.random() < 0.3) {
         pleadCD = 9;
         if (CBZ.citySay) CBZ.citySay(ped, PLEADS[(Math.random() * PLEADS.length) | 0], "#cfd6e6", 2.2);
@@ -626,7 +528,6 @@
   function releaseAll() {
     for (let i = restrained.length - 1; i >= 0; i--) release(restrained[i], { silent: true });
   }
-  if (CBZ.onModeExit) CBZ.onModeExit("city", releaseAll);
 
   // ============================================================
   //  OPTIONS — all through the registry; every gate reads the enum.
@@ -681,6 +582,7 @@
     id: "rs-clinch-cuff", slot: "e", prio: 90, bad: true,
     canShow: (p) => st(p) === "grappled" && p.restraint.t >= WEAR_T,
     label: "Zip wrists",
+    // the collar grip lets go and the cuff turns him (CBZ.verbs.cuff)
     onSelect: (p) => { if (st(p) === "grappled") { p.restraint = null; untrack(p); cuff(p); } },
   });
   I.register("ped", {

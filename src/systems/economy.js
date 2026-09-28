@@ -1756,7 +1756,19 @@
       announceLoot(cigs, items);
       CBZ.sfx && CBZ.sfx("loot");
     }
+    // A FRISK IS A HAND IN HIS POCKETS (systems/verbs_pickup.js takeFrom):
+    // when you are standing over him the reach plays and what you found comes
+    // out in the hand. The bookkeeping above stays synchronous (callers read
+    // the return); a kill frisk from across the yard plays no reach.
+    if ((cigs > 0 || items.length) && !opts.noReach) handReach(actor, cigs > 0 && !items.length ? "box" : "cash");
     return { cigs: cigs, items: items };
+  }
+  function handReach(actor, kind) {
+    const Vb = CBZ.verbs, P = CBZ.player;
+    const ap = actor && (actor.pos || (actor.group && actor.group.position));
+    if (!Vb || !Vb.takeFrom || !P || !P.pos || !ap) return;
+    if (Math.hypot(ap.x - P.pos.x, ap.z - P.pos.z) > 1.8 || Math.abs((ap.y || 0) - (P.pos.y || 0)) > 1.2) return;
+    try { Vb.takeFrom(P, actor, { at: "pocketR", kind: kind }); } catch (e) {}
   }
 
   // A NEW RUN puts everybody back on their feet, so it has to put their

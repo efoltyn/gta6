@@ -316,12 +316,8 @@
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE == null) CBZ.CONFIG.ARREST_TACKLE = true;
   function tackleOn() {
-    return !!(CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE) && typeof CBZ.predatorSeize === "function";
+    return !!(CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE) && !!(CBZ.verbs && CBZ.verbs.tackle);
   }
-  // this file adopts the shared seize; police.js loads BEFORE predator.js, so
-  // use the documented pre-load buffer rather than the (absent) direct call.
-  if (CBZ.predatorAdopt) CBZ.predatorAdopt("police:arrest-tackle");
-  else (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("police:arrest-tackle");
 
   // THE TACKLE IS A VERB NOW: brain.authority's "force" rung asks for
   // act.verb("tackle"); city/law.js's executor lands here (reach + the
@@ -330,41 +326,34 @@
     if (!tackleOn() || !c || c.dead || !c.group || c._seizing) return false;
     const victim = (CBZ.city && CBZ.city.playerActor) || CBZ.player;
     if (!victim) return false;
-    const h = CBZ.predatorSeize(c, victim, {
-      // "pin" is the big-cat style: the body goes STILL, which is what a
-      // takedown looks like — never the shake/worry rhythms of a mauling.
-      style: "pin",
-      nonLethal: true,
-      dps: 0,                       // a tackle bruises; it does not open you
-      hold: 2.4,
-      escape: 0,                    // only the timed press decides this
-      qteMax: 1,
-      thrash: 0.35,
-      cause: "taken down",
-      // human rigs in this repo face +Z (police.js aims them with
-      // atan2(dx, dz)); the wildlife default anchor is nose-toward-+X, so the
-      // jaw MUST be given explicitly or the officer would grab sideways.
-      // y ≈ 0.95 puts the held body at ground level (anchorVictim sits the
-      // player at jaw.y − 0.85).
-      jaw: { x: 0, y: 0.95, z: 0.62 },
-      onEnd: function (result) {
+    // THE TACKLE (CBZ.verbs.tackle): he runs in low, shoulder into your waist,
+    // arms round your thighs, drives you down and ends kneeling on you. Down
+    // or pinned to a wall = he has you (the arrest arc takes it from here, and
+    // a violent collar is the expensive one: city/wanted.js's 50% forfeit).
+    // It not connecting (you slipped it, he was hit off you) = you are loose,
+    // and that is resisting.
+    const V = CBZ.verbs;
+    if (!V || !V.tackle) return false;
+    const h = V.tackle(c, victim, {
+      far: true,
+      onEnd: function (S) {
         c._seizing = null;
-        if (result === "taken") {
-          // he has you: the arrest arc takes it from here, and a violent
-          // collar is the expensive one (city/wanted.js's 50% forfeit).
+        const k = S.result && S.result.outcome;
+        if (k === "open" || k === "wall") {
+          if (V.getUp) { try { V.getUp(victim); } catch (e) {} }   // up onto your knees for the cuffs
           if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
           return;
         }
-        if (result === "escaped") {
-          // you broke his grip. That IS a crime, and the report is the one the
-          // world already has for it — never a bespoke penalty.
-          copSay(c, "SUSPECT IS RESISTING!", 2.0);
-          if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: c.pos.x, z: c.pos.z, type: "resisting" }); } catch (e) {} }
-          LAW.release(c); c.arrestT = 0;
-          c.curTarget = (CBZ.city && CBZ.city.playerActor) || null; c.sees = true; c.retarget = 0.6;
-        }
+        // anything but a takedown (you broke his grip, or he never got his arms
+        // round you) is resisting, and the report is the one the world has
+        copSay(c, "SUSPECT IS RESISTING!", 2.0);
+        if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: c.pos.x, z: c.pos.z, type: "resisting" }); } catch (e) {} }
+        if (LAW && LAW.release) LAW.release(c);
+        c.arrestT = 0;
+        c.curTarget = (CBZ.city && CBZ.city.playerActor) || null; c.sees = true; c.retarget = 0.6;
       },
     });
+    c._seizing = h || null;
     if (!h) return false;
     copSay(c, "STOP RIGHT THERE!", 1.4);
     if (CBZ.arrestCount) CBZ.arrestCount("tackles");
@@ -2154,12 +2143,22 @@
     ped.npcWanted = ped.npcHeat > 130 ? 3 : ped.npcHeat > 60 ? 2 : ped.npcHeat > 22 ? 1 : 0;
   };
   CBZ.cityRegisterCarSuspect = function (car) { if (car && carSuspects.indexOf(car) < 0) carSuspects.push(car); };
-  CBZ.cityNpcArrest = function (ped) {
+  // cop (optional): the officer making it. His hands do it (CBZ.verbs.cuff):
+  // turned round, wrists behind the back, the cuffs ON them, then put on the
+  // ground for the count, cuffed until he is let up.
+  CBZ.cityNpcArrest = function (ped, cop) {
     if (!ped || ped.dead) return;
     ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.armed = false; ped.weapon = null;
-    ped.ko = 4; ped.alarmed = 0;
+    ped.alarmed = 0;
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
-    if (CBZ.body) CBZ.body.hit(ped, { dir: { x: 0, z: 1 }, force: 3, knockdown: 1.2 });
+    const V = CBZ.verbs;
+    const down = function () {
+      ped.ko = Math.max(ped.ko || 0, 4);
+      if (V && V.setCuffs) V.setCuffs(ped, true, { whileKo: true });
+      if (CBZ.body) CBZ.body.hit(ped, { dir: { x: 0, z: 1 }, force: 3, knockdown: 1.2 });
+    };
+    const S = V && V.cuff && cop && !cop.dead ? V.cuff(cop, ped, { far: true, onEnd: down }) : null;
+    if (!S) down();
   };
 
   // ---- the PRECINCT DESK (city/restrain.js's citizen-collar pipeline) -------

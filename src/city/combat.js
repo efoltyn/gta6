@@ -11,20 +11,22 @@
      • handles UNARMED punches + melee weapons (Bat/Knife) on left-click
        (only while you're NOT holding a firearm — fpsmode owns that click).
 
-   MELEE FEEL (GTA-grade), all self-contained here:
+   MELEE. What is thrown and what it costs lives here; HOW a blow lands is
+   systems/verbs_strike.js (the swing is a real rig strike that lands on the
+   frame the fist meets his jaw, head, liver, ribs or legs):
      • LMB  = LIGHT attack → a 3-hit COMBO (jab → cross → hook) with a
-              timing window; the 3rd hit is a knockdown FINISHER.
-     • RMB  = HEAVY attack (unarmed/melee only) → slow, costs stamina,
-              guaranteed stagger/knockdown, big hitstop + shake.
-     • Hold RMB (no swing) raises a GUARD; a freshly-raised guard is a
-              PARRY window — eat an incoming melee blow there and you
-              negate it AND auto-counter the attacker.
-     • Tough NPCs (gang/guard/cop/armed) can BLOCK a light jab and stagger
-              you; punish a blocking enemy with a heavy/combo for a COUNTER.
-     • HIT-STOP on every connect, velocity knockback + ragdoll via CBZ.body,
-              stamina drain, screen shake, punch/hit/ko sfx, KO slow-mo.
-   Public APIs (cityGiveWeapon/cityAddAmmo/cityCurrentWeapon/cityHasGun)
-   and the punch/meleeSwing behavior are PRESERVED.
+              timing window; the 3rd hit is the FINISHER.
+     • RMB  = HEAVY attack (unarmed/melee only) → a looping overhand, costs
+              stamina, stagger/knockdown.
+     • Hold RMB (no swing) raises a GUARD (the rig's forearms come up); a
+              freshly-raised guard is a PARRY window — eat an incoming melee
+              blow there and you negate it AND throw a counter hook.
+     • Tough NPCs (gang/guard/cop/armed) get their hands up against light
+              shots: a head shot lands on the forearms and you eat the
+              rebound; a body shot goes under. Punish the cover with a heavy.
+     • POSTURE on both sides; a guard-broken or downed foe is finished off.
+   Public APIs (cityGiveWeapon/cityAddAmmo/cityCurrentWeapon/cityHasGun) are
+   unchanged.
 ============================================================ */
 (function () {
   "use strict";
@@ -106,11 +108,11 @@
   // GUARD BREAK: a foe's posture capped → they reel, drop their guard, and are
   // wide open. peds.js already animates a hands-down/stunned look via .stun +
   // we flag .ko-light so the brain pauses; the FINISHER prompt lights up.
+  const _brk = { x: 0, z: 1 };
   function breakGuard(a) {
     if (!a || a.dead) return;
     a._broken = BROKEN_TIME;
     a._posture = a._postMax || postureMax(a);
-    a._blockT = 0;                               // guard's gone
     a.stun = Math.max(a.stun || 0, BROKEN_TIME); // generic stun flag (any reader)
     // freeze their offense for the whole break: peds.js gates every swing/shot on
     // attackCD, so holding it high keeps a guard-broken foe from retaliating while
@@ -118,9 +120,14 @@
     a.attackCD = Math.max(a.attackCD || 0, BROKEN_TIME);
     a.pause = Math.max(a.pause || 0, BROKEN_TIME);
     a.alarmed = Math.max(a.alarmed || 0, 6);
-    if (a.char) { a.char.guardBroke = 1; a.char.handsUp = false; }
-    if (CBZ.body && CBZ.body.hit) CBZ.body.hit(a, { fromX: P.pos.x, fromZ: P.pos.z, force: 2.2, knockdown: 0 });
-    if (CBZ.city) CBZ.city.note("He's wide open", 1.1);
+    if (a.char) { a.char.guardBroke = 1; a.char.handsUp = false; a.char.blockT = 0; }
+    // he reels: a real step back off his heels (the guard-broken daze pose
+    // takes it from there — systems/reactions.js)
+    if (CBZ.verbs && CBZ.verbs.react && a.pos) {
+      const dx = a.pos.x - P.pos.x, dz = a.pos.z - P.pos.z, d = Math.hypot(dx, dz) || 1;
+      _brk.x = dx / d; _brk.z = dz / d;
+      CBZ.verbs.react(a, { zone: "body", reaction: "stagger", dir: _brk, power: 0.6, stagger: true });
+    } else if (CBZ.body && CBZ.body.hit) CBZ.body.hit(a, { fromX: P.pos.x, fromZ: P.pos.z, force: 2.2, knockdown: 0 });
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doHitstop) CBZ.doHitstop(0.11);
     if (CBZ.shake) CBZ.shake(0.45);
@@ -155,32 +162,6 @@
     if (n.indexOf("knife") >= 0 || n.indexOf("machete") >= 0 || n.indexOf("blade") >= 0 || n.indexOf("sword") >= 0)
       return { post: 0.7, kb: 0.8, bleed: 0.5, reach: 0.3, name: "blade" };
     return { post: 1.3, kb: 1.2, bleed: 0.1, reach: 0.4, name: "melee" };
-  }
-
-  // best target in a forward cone within range (melee only — guns use fpsmode)
-  function aimTarget(range, cone) {
-    const Pp = P.pos, L = lookDir();
-    let best = null, bd = range;
-    const consider = (a) => {
-      if (!a || a.dead) return;
-      const dx = a.pos.x - Pp.x, dz = a.pos.z - Pp.z, d = Math.hypot(dx, dz);
-      if (d > range || d < 0.2) return;
-      const dot = (dx / d) * L.x + (dz / d) * L.z;
-      if (dot < cone) return;
-      // keep chaining on the same target if it's still in arc
-      let score = d - dot * 6;
-      if (a === lastTarget) score -= 3;
-      if (score < bd) { bd = score; best = a; }
-    };
-    for (const c of CBZ.cityCops) consider(c);
-    for (const p of CBZ.cityPeds) if (!p.vendor) consider(p);
-    // WILDLIFE: animals are punchable/batable too — same forward-cone scan.
-    // Damage routes through CBZ.cityWildlifeHit in land(), the exact hit API
-    // gunfire already uses, so wounded-flee/charge + pelts work for melee.
-    if (CBZ.cityWildlife) for (const w of CBZ.cityWildlife) consider(w);
-    // multiplayer: remote players + host-synced puppet NPCs take punches too
-    if (CBZ.net && CBZ.net.active && CBZ.net.targetList) for (const a of CBZ.net.targetList()) consider(a);
-    return best;
   }
 
   // ---- weapon-acquisition bridge to the engine gun system ----
@@ -231,20 +212,96 @@
 
   function markFighting() { P._fighting = 1.5; }
 
-  // drive the third-person punch rig (jab/cross/hook/upper) — character.js reads these
-  function animSwing(kind, heavy) {
+  /* ---- THE SWING. Every city blow is a real strike (CBZ.verbs.strike,
+     systems/verbs_strike.js): the rig throws it, and it lands on the frame the
+     fist reaches a body — the jaw, the head, the liver, the ribs, the legs —
+     or it does not. The old click-time target cone, the fixed 0.1 s delay and
+     the "(reach + 0.7) m grace" are gone; a man who steps back is a whiff, a
+     man who puts his hands up takes it on the forearms. Animals and remote
+     players (no human rig to meet) are aimed by the cone and resolved on the
+     blow's impact beat. */
+  function playerActor() { return (CBZ.city && CBZ.city.playerActor) || (CBZ.verbs && CBZ.verbs.playerActor && CBZ.verbs.playerActor()); }
+  function cityCandidates(out) {
+    const cops = CBZ.cityCops, peds = CBZ.cityPeds;
+    if (cops) for (let i = 0; i < cops.length; i++) { const c = cops[i]; if (c && !c.dead) out.push(c); }
+    if (peds) for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (p && !p.dead && !p.vendor && !p.inCar) out.push(p); }
+    // bodies another system scores itself (the arena cage opponent): a landed
+    // blow is handed to its meleeHit(res, dmg) instead of the street's paths
+    const ex = CBZ.cityMeleeTargets;
+    if (ex) for (let i = 0; i < ex.length; i++) { const a = ex[i]; if (a && !a.dead) out.push(a); }
+    return out;
+  }
+  // square up to where you are looking (the rig faces +Z at yaw 0; the camera
+  // looks down -Z at cam.yaw 0)
+  function faceLook() {
     const ch = CBZ.playerChar;
-    if (!ch) return;
-    ch.punchKind = kind;
-    ch.punchArm = (combo % 2) ? "l" : "r";
-    ch.punchDur = heavy ? 0.44 : (kind === "hook" ? 0.38 : 0.32);
-    ch.punchT = ch.punchDur;
-    if (CBZ.cam) {
-      const yaw = CBZ.cam.yaw;
-      // square up toward the look direction on each swing so hits land where you face
-      ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.7) : yaw;
+    if (!ch || !CBZ.cam) return;
+    const L = lookDir(), yaw = Math.atan2(L.x, L.z);
+    ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.7) : yaw;
+  }
+  const BLADE_W = { kind: "knife", blade: true, mass: 0.3 };
+  function swing(kind, tier, dmg, extra) {
+    const V = CBZ.verbs, pa = playerActor();
+    if (!V || !V.strike || !pa) return null;
+    const feel = weaponFeel();
+    const heavy = tier !== "light";
+    // rig-less targets (wildlife, remote players) are picked by the look cone
+    const special = aimSpecial(heavy ? 2.1 : 1.95, 0.3);
+    faceLook();
+    const S = V.strike(pa, special, {
+      kind, heavy,
+      weapon: feel.name === "blade" ? BLADE_W : null,
+      candidates: special ? null : cityCandidates,
+      onLand: function (res) { landCity(res, dmg, tier, kind, extra); },
+      onBlocked: function (res) { blockedCity(res, dmg, kind); },
+      onBeat: special ? function () { landSpecial(special, dmg, tier); } : null,
+    });
+    if (!S) return null;
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // the first-person fist runs the same beat off the rig's clock
+    // TOUGH NPCs GET THEIR HANDS UP. What was a hidden block roll on the
+    // damage is now a guard in front of his face: a head shot lands on his
+    // forearms (and you eat the rebound), a body shot goes under it, and a
+    // heavy is thrown before he can cover.
+    const T = S.aimT;
+    if (T && !heavy && isTough(T) && !(T._broken > 0) && !(T.ko > 0) && !(T.hp <= (T.maxHp || 100) * 0.3) &&
+        !(CBZ.body && CBZ.body.busy && CBZ.body.busy(T))) {
+      const pf = posture(T) / (T._postMax || postureMax(T));
+      const blockChance = (T.kind === "cop" ? 0.34 : (T.gang ? 0.30 : 0.22)) * (1 - pf * 0.4);
+      if (Math.random() < blockChance) V.block(T, 0.5);
     }
-    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // first-person hand swings too
+    return S;
+  }
+  function aimSpecial(range, cone) {
+    const Pp = P.pos, L = lookDir();
+    let best = null, bd = range;
+    const consider = (a) => {
+      if (!a || a.dead) return;
+      const dx = a.pos.x - Pp.x, dz = a.pos.z - Pp.z, d = Math.hypot(dx, dz);
+      if (d > range || d < 0.2) return;
+      if ((dx / d) * L.x + (dz / d) * L.z < cone) return;
+      if (d < bd) { bd = d; best = a; }
+    };
+    if (CBZ.cityWildlife) for (const w of CBZ.cityWildlife) consider(w);
+    if (CBZ.net && CBZ.net.active && CBZ.net.targetList) for (const a of CBZ.net.targetList()) consider(a);
+    return best;
+  }
+  // a guard-broken OR downed foe in finisher range, in front of you
+  function aimTarget(range, cone) {
+    const Pp = P.pos, L = lookDir();
+    let best = null, bd = range;
+    const consider = (a) => {
+      if (!a || a.dead) return;
+      const dx = a.pos.x - Pp.x, dz = a.pos.z - Pp.z, d = Math.hypot(dx, dz);
+      if (d > range || d < 0.2) return;
+      const dot = (dx / d) * L.x + (dz / d) * L.z;
+      if (dot < cone) return;
+      let score = d - dot * 6;
+      if (a === lastTarget) score -= 3;
+      if (score < bd) { bd = score; best = a; }
+    };
+    for (const c of CBZ.cityCops) consider(c);
+    for (const p of CBZ.cityPeds) if (!p.vendor) consider(p);
+    return best;
   }
 
   // a clean, GTA-style stagger pop on the player when you eat a block/counter
@@ -269,7 +326,6 @@
       staggerT = Math.max(staggerT, pBrokenT);
       guardT = 0; parryT = 0; P._blocking = 0;  // guard's gone
       P.stun = Math.max(P.stun || 0, pBrokenT * 0.6);
-      if (CBZ.city) CBZ.city.big ? CBZ.city.big("GUARD BROKEN!") : CBZ.city.note("GUARD BROKEN!", 1.2);
       if (CBZ.sfx) CBZ.sfx("ko");
       if (CBZ.shake) CBZ.shake(0.5);
       if (CBZ.doHitstop) CBZ.doHitstop(0.1);
@@ -278,203 +334,164 @@
   // expose posture state for the HUD (read-only snapshot, no allocations/frame)
   CBZ.cityPosture = function () { return { p: pPosture, max: pPostureMax(), broken: pBrokenT > 0 }; };
 
-  const _woundP = { x: 0, y: 0, z: 0 };
-  const _woundO = { melee: "blade", cal: 0.7, fromX: 0, fromZ: 0 };
-
-  // ---- CONTACT TIMING -------------------------------------------------------
-  // The blow used to resolve on the CLICK frame: hit-stop, shake, the target's
-  // head snap and the ragdoll all fired while the fist was still at the
-  // shoulder (the punch rig takes 0.32 s, the heavy 0.44 s), so every punch
-  // read as the victim flinching before it was touched. The target is still
-  // chosen at the click (what you aimed at is what you swing at), but the
-  // damage and all its juice land at the arm's extension. One slot, reused;
-  // a new swing, a death or a mode change settles/clears it first.
-  const blow = { t: null, dmg: 0, tier: "light", kind: "jab", reach: 0, T: 0, live: false };
-  function queueBlow(t, dmg, tier, kind, reach, delay) {
-    if (blow.live) settleBlow();
-    blow.t = t; blow.dmg = dmg; blow.tier = tier; blow.kind = kind; blow.reach = reach; blow.T = delay; blow.live = true;
+  // his forearms took it: the guard still wears (posture chip), and the
+  // rebound comes back up your arm
+  function blockedCity(res, dmg, kind) {
+    const t = res.target;
+    if (!t || t.dead || g.mode !== "city") return;
+    if (t.meleeHit) t.meleeHit(res, dmg * res.dmgMul, "blocked");
+    else {
+      if (CBZ.verbs && CBZ.verbs.block) CBZ.verbs.block(t, 0.7);   // he is covering → punish it with a heavy
+      addPosture(t, dmg * 0.22 * weaponFeel().post);
+    }
+    if (CBZ.sfx) CBZ.sfx("hit");
+    addSelfPosture(10);
+    if (Math.random() < 0.5) selfStagger(0.30);
+    combo = 0; comboT = 0;
+    lastTarget = t;
+    void kind;
   }
-  function settleBlow() {
-    if (!blow.live) return;
-    blow.live = false;
-    const t = blow.t; blow.t = null;
+  // animals and remote players: resolved on the blow's beat, by reach
+  function landSpecial(t, dmg, tier) {
     if (!t || t.dead || P.dead || g.mode !== "city") return;
-    // he stepped out of range during the wind-up: a clean whiff (0.7 m grace)
     const dx = t.pos.x - P.pos.x, dz = t.pos.z - P.pos.z;
-    if (dx * dx + dz * dz > (blow.reach + 0.7) * (blow.reach + 0.7)) return;
-    const ok = land(t, blow.dmg, blow.tier, { kind: blow.kind });
-    if (ok && blow.tier === "finisher") { combo = 0; comboT = 0; }
-  }
-
-  // ---- the connect: shared damage + juice for a single landed blow --------
-  // tier: "light" | "heavy" | "finisher".  Returns true if it connected.
-  function land(t, dmg, tier, opts) {
-    opts = opts || {};
-    /* THE SAME BLOW IS NOT THE SAME BLOW. `dmg` arrives describing the swing —
-       the tier, the weapon, the combo — and nothing about the target, so a fist
-       hit a pedestrian, a cop and a black bear for identical numbers. The
-       scale is a ratio of the two bodies (systems/bodymass.js): adult man on
-       adult man is 1.0 by construction, so every street fight in the shipped
-       game is untouched, and only the mismatches — the bear, the child, the
-       woman — start reading as mismatches. Applied here, at the ONE place the
-       street's melee resolves, rather than at each of the callers. */
+    if (dx * dx + dz * dz > 2.3 * 2.3) return;          // he moved out of it
     if (CBZ.meleeScale) dmg *= CBZ.meleeScale(P, t);
-    // multiplayer target (remote player / synced puppet): authority is over the
-    // wire — net code routes the damage and plays the local juice.
-    if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) return CBZ.net.localMeleeHit(t, dmg, tier);
-    // WILDLIFE: an animal is a plain hit receiver — no block/posture/guard
-    // minigame, no cop/ped damage router. Route through the SAME hit API the
-    // gun path uses (CBZ.cityWildlifeHit) so wounded flee/charge, pelt quality
-    // and the carcass flow all fire for a bat swing exactly as for a bullet.
+    if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) { CBZ.net.localMeleeHit(t, dmg, tier); return; }
     if (t.animal) {
       const heavyA = tier !== "light";
       if (CBZ.doHitstop) CBZ.doHitstop(heavyA ? 0.08 : 0.05);
       if (CBZ.shake) CBZ.shake(heavyA ? 0.4 : 0.22);
-      const res = CBZ.cityWildlifeHit ? CBZ.cityWildlifeHit(t, { head: false, point: null }, { damage: dmg }) : null;
-      if (CBZ.sfx) { CBZ.sfx("punch"); CBZ.sfx(res && res.down ? "ko" : "hit"); }
+      const r = CBZ.cityWildlifeHit ? CBZ.cityWildlifeHit(t, { head: false, point: null }, { damage: dmg }) : null;
+      if (CBZ.sfx) { CBZ.sfx("punch"); CBZ.sfx(r && r.down ? "ko" : "hit"); }
+      if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded("cross", heavyA);
       lastTarget = t.dead ? null : t;
-      return true;
     }
+  }
+
+  // ---- the connect: damage and consequences for a blow that met a body ----
+  // tier: "light" | "heavy" | "finisher".
+  function landCity(res, dmg, tier, kind, extra) {
+    const t = res.target;
+    if (!t || t.dead || P.dead || g.mode !== "city") { res.reaction = "none"; return; }
+    if (t.meleeHit) {
+      t.meleeHit(res, dmg * res.dmgMul, tier);
+      if (CBZ.sfx) CBZ.sfx("punch");
+      if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(false, false);
+      return;
+    }
+    /* THE SAME BLOW IS NOT THE SAME BLOW. `dmg` describes the swing; WHERE it
+       landed (res.dmgMul: jaw 1.3, liver 1.25, head 1, body 0.8, legs 0.6)
+       and WHO it landed on (systems/bodymass.js — adult on adult is 1.0)
+       finish the sum. */
+    dmg *= res.dmgMul;
+    if (CBZ.meleeScale) dmg *= CBZ.meleeScale(P, t);
     const fx = P.pos.x, fz = P.pos.z;
     const heavy = tier !== "light";
     const finisher = tier === "finisher";
     const feel = weaponFeel();
     const broken = (t._broken || 0) > 0;        // foe is guard-broken & wide open
-
-    // tough NPCs can block a LIGHT jab (not a heavy/finisher) — UNLESS their
-    // guard is already broken (then nothing connects but raw punishment).
-    if (!broken && !heavy && isTough(t) && !t.ko && !(t.hp <= (t.maxHp || 100) * 0.3)) {
-      // a foe near posture-break guards more desperately (emergent tell)
-      const pf = posture(t) / (t._postMax || postureMax(t));
-      let blockChance = (t.kind === "cop" ? 0.34 : (t.gang ? 0.30 : 0.22)) * (1 - pf * 0.4);
-      if (Math.random() < blockChance && !(CBZ.body && CBZ.body.busy && CBZ.body.busy(t))) {
-        t._blockT = 0.7;                       // they're in a block → punish with heavy
-        // a BLOCKED blow still chips their posture (Sekiro: blocking isn't free)
-        addPosture(t, dmg * 0.22 * feel.post);
-        if (CBZ.city) CBZ.city.note("Blocked!", 0.6);
-        if (CBZ.sfx) CBZ.sfx("hit");
-        if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(opts.kind || "jab", false);   // you hit forearms, not air
-        // they jab back — builds YOUR posture & may stagger you a touch
-        addSelfPosture(10);
-        if (Math.random() < 0.5) selfStagger(0.30);
-        combo = 0; comboT = 0;
-        return false;
-      }
-    }
-
-    // punishing a blocking/guarding enemy with a heavy = COUNTER (bonus dmg + KD)
-    const counter = heavy && t._blockT > 0 && !broken;
-    if (counter) { dmg = Math.round(dmg * 1.6); t._blockT = 0; if (CBZ.city) CBZ.city.note("Caught him cold", 0.7); }
+    // punishing a covering enemy with a heavy = COUNTER (bonus dmg + a knockdown)
+    // (his guard is his rig's: ch.blockT, raised by CBZ.verbs.block)
+    const counter = heavy && !!(t.char && t.char.blockT > 0) && !broken;
+    if (counter) { dmg = Math.round(dmg * 1.6); t.char.blockT = 0; }
     // a broken foe eats EVERYTHING amplified — this is the payoff window
     if (broken) dmg = Math.round(dmg * 1.55);
-
-    // --- HEAD SNAP + clutch/daze reaction: the blow genuinely connected (we're
-    // past the block-check above), so drive the target's neck whip + a beat of
-    // wound-clutch on anything heavy — direction-aware from the real swing.
-    if (CBZ.reactPunch) CBZ.reactPunch(t, { kind: opts.kind || (finisher ? "hook" : "cross"), heavy: heavy || broken || counter, fromX: fx, fromZ: fz });
-
-    // --- POSTURE damage: how much this blow batters their guard. Heavies and
-    // the finisher pump it hard; the weapon profile scales it (a bat shatters
-    // a guard, a knife barely dents it). Capping it = GUARD BREAK (handled in
-    // addPosture → breakGuard). This is the real "win condition" of a fight.
+    // --- POSTURE damage: how much this blow batters their guard. Capping it =
+    // GUARD BREAK (addPosture → breakGuard), the real win condition.
     if (!broken && !(t.hp - dmg <= 0)) {
       const postDmg = (finisher ? 34 : (counter ? 40 : (heavy ? 26 : 11 + combo * 3))) * feel.post;
       addPosture(t, postDmg);
     }
-
-    // --- HIT-STOP: the crunch of contact (light ~0.05, heavy ~0.09, KO 0.14)
-    const lethal = (t.kind === "cop") ? null : (t.hp - dmg <= 0);
-    if (CBZ.doHitstop) CBZ.doHitstop(finisher ? 0.14 : (heavy ? 0.09 : 0.055));
+    if (finisher && CBZ.doHitstop) CBZ.doHitstop(0.14);
     if (CBZ.shake) CBZ.shake(finisher ? 0.7 : (heavy ? 0.5 : 0.22 + combo * 0.04));
-
-    // --- A BLADE CUTS. The knife used to leave nothing on the body in the city
-    // (only an invisible _bleed tick) while the prison's shank already opened a
-    // real slit via wounds.js. Same call, low in the body where a stab lands.
-    // Fists and bats stay mark-free (owner: no punch bruise decals).
-    if (feel.name === "blade" && CBZ.bodyWound && t.pos) {
-      _woundP.x = t.pos.x; _woundP.y = (t.pos.y || 0) + 1.18; _woundP.z = t.pos.z;
-      _woundO.fromX = fx; _woundO.fromZ = fz;
-      try { CBZ.bodyWound(t, _woundP, _woundO); } catch (e) {}
-    }
-
-    // --- apply damage through the existing city damage paths ---------------
+    // --- damage through the city's own damage paths ---
     if (t.kind === "cop") {
       CBZ.cityHurtCop(t, dmg, { fromX: fx, fromZ: fz });
-      if (!t.dead && CBZ.body) {
-        const force = (finisher ? 9 : (heavy ? 6.5 : 4)) * feel.kb;
-        // a guard-broken or finisher blow always sends them sprawling
-        if (finisher || counter || broken) CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: 1.1 });
-        else CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: heavy && Math.random() < 0.5 ? 1.0 : 0 });
+      if (!t.dead && CBZ.body && (finisher || counter || broken || (heavy && Math.random() < 0.5))) {
+        // a cop has no knocked-out state of his own: the body layer owns his fall
+        CBZ.body.hit(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6.5) * feel.kb, knockdown: finisher || counter || broken ? 1.1 : 1.0 });
+        res.reaction = "none";
       }
+      if (t.dead) res.reaction = "dead";
     } else {
       t.hp -= dmg;
       if (t.hp <= 0) {
         // a heavy/finisher kills outright; a light blow that drops them = a clean KO
-        if (heavy || finisher || broken || opts.lethalIntent) {
+        if (heavy || finisher || broken || (extra && extra.lethalIntent)) {
           CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6) * feel.kb, fling: finisher ? 4 : 3 }, feel.name === "blade" ? "stabbed" : "beaten");
+          res.reaction = "dead";
         } else {
-          t.hp = 1; CBZ.cityKOPed(t, fx, fz);   // light blows knock out rather than execute
+          t.hp = 1;
+          CBZ.cityKOPed(t, fx, fz, { rigFall: true });   // out cold: he falls in his own body
+          res.reaction = "knockdown";
         }
       } else {
-        if (CBZ.body) {
-          const force = (finisher ? 8.5 : (heavy ? 6 : 4)) * feel.kb;
-          const kd = finisher || counter || broken ? 1.0 : (heavy && Math.random() < 0.45 ? 0.9 : 0);
-          CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: kd });
-          if (kd) { t.ko = Math.max(t.ko || 0, 5); t.alarmed = 6; }
+        if (finisher || counter || broken || (heavy && Math.random() < 0.45)) {
+          t.ko = Math.max(t.ko || 0, 5); t.alarmed = 6;
+          res.reaction = "knockdown";
         }
         // a blade leaves a BLEED — damage-over-time ticked in the combat loop
         if (feel.bleed > 0) { t._bleed = (t._bleed || 0) + dmg * feel.bleed; t._bleedSrcX = fx; t._bleedSrcZ = fz; }
         // provoke / alarm so the world reacts to a non-lethal beating
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
-        if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "fight", pos: t.pos, radius: 10, intensity: 0.6 });   // crowd panic bus (cityevents.js): a brawl spooks bystanders nearby
-        // SIZE-UP (sizeup.js): a survivor reads who just hit them — a ganger's
-        // set piles in, an outclassed civilian folds instead of swinging back.
+        if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "fight", pos: t.pos, radius: 10, intensity: 0.6 });
+        // SIZE-UP (sizeup.js): a survivor reads who just hit them
         if (CBZ.citySizeUpHit && CBZ.city && CBZ.city.playerActor) CBZ.citySizeUpHit(t, CBZ.city.playerActor);
       }
     }
-
-    // --- audio + KO flourish ---------------------------------------------
     if (CBZ.sfx) CBZ.sfx("punch");
     const downed = (t.dead || t.ko > 0);
-    // THE SAME CONFIRMATION A BULLET GETS. A landed gun round flashes the hit
-    // marker (red on a kill) and fpsmode jolts the viewmodel; a landed punch in
-    // the city did neither, so in first person a connecting jab and a whiff
-    // looked identical. Both hooks already exist (the prison fist uses the
-    // second one); the street melee just never called them.
+    // THE SAME CONFIRMATION A BULLET GETS: the hit marker (red on a kill);
+    // verbs_strike jolts the first-person fist on the same frame.
     if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(!!t.dead, false);
-    if (CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(opts.kind || "cross", heavy || broken || counter);
     if (downed && (finisher || heavy)) {
       if (CBZ.sfx) CBZ.sfx("ko");
       if (CBZ.doSlowmo) CBZ.doSlowmo(finisher ? 0.5 : 0.28);   // brief bullet-time on a knockout
     } else if (CBZ.sfx) {
       CBZ.sfx("hit");
     }
+    if (tier === "finisher") { combo = 0; comboT = 0; }
     lastTarget = t.dead ? null : t;
-    return true;
   }
 
   // find a guard-broken OR downed foe in finisher range (close, in front)
   function finisherTarget() {
     const t = aimTarget(1.82, 0.1);
-    if (!t || t.animal) return null;   // animals aren't execution targets — land() routes them
+    if (!t) return null;
     const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) ||
                  (CBZ.body && CBZ.body.busy && CBZ.body.busy(t) && t.hp <= (t.maxHp || 100) * 0.45);
     return open ? t : null;
   }
 
   // ---- DEATHBLOW / FINISHER: a single brutal execution on an open foe ------
-  // Triggered automatically when you swing at a guard-broken or downed enemy.
-  // Cinematic: hard hit-stop, slow-mo, max knockback ragdoll, lethal intent.
+  // A guard-broken man on his feet takes it where the fist meets him; a man on
+  // the ground takes it on the blow's beat (the fist comes down on him).
   function doFinisher(t) {
     if (!t || t.dead) return;
+    const V = CBZ.verbs, pa = playerActor();
     markFighting();
     combo = 0; comboT = 0;
     spend(7);
     const feel = weaponFeel();
-    animSwing(feel.name === "blade" ? "cross" : "upper", true);
+    const down = t.ko > 0 || (CBZ.body && CBZ.body.busy && CBZ.body.busy(t));
+    faceLook();
+    const S = V && V.strike && pa ? V.strike(pa, down ? null : t, {
+      kind: feel.name === "blade" ? "stab" : (down ? "overhand" : "upper"), heavy: true,
+      lunge: !down, weapon: feel.name === "blade" ? BLADE_W : null,
+      onLand: function (res) { if (res.target === t) { finishOff(t, feel); res.reaction = "dead"; } },
+      onBeat: down ? function () { finishOff(t, feel); } : null,
+    }) : null;
+    if (!S) finishOff(t, feel);                  // no rig to swing: the old instant finish
+    else if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+    fireCD = 0.55; heavyCD = 0.3;
+  }
+  function finishOff(t, feel) {
+    if (!t || t.dead || g.mode !== "city") return;
+    const dx = t.pos.x - P.pos.x, dz = t.pos.z - P.pos.z;
+    if (dx * dx + dz * dz > 2.4 * 2.4) return;
     const fx = P.pos.x, fz = P.pos.z;
-    if (CBZ.city) CBZ.city.note(feel.name === "blade" ? "EXECUTED" : "FINISHED", 1.0);
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.55);
     if (CBZ.doHitstop) CBZ.doHitstop(0.16);
     if (CBZ.shake) CBZ.shake(0.8);
@@ -487,44 +504,37 @@
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.city) CBZ.city.addRespect && CBZ.city.addRespect(2);   // a brutal finish earns respect
     lastTarget = null;
-    fireCD = 0.55; heavyCD = 0.3;
+  }
+
+  // a swing that finds nobody can still find the world: a harvest node, a window
+  function swingAtWorld(heavy) {
+    if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) return;   // B7: tree/rock/scrap node
+    if (CBZ.cityShatterRay) {
+      // first punch spider-cracks a window, the next blows it out; a heavy goes straight through
+      const L2 = lookDir();
+      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, heavy ? 3.0 : 2.7, !!heavy, { directPlayer: true });
+    }
   }
 
   // ---- LIGHT attack: chains jab → cross → hook (3rd = finisher) -----------
   function lightAttack() {
     if (pBrokenT > 0) return;                    // you're guard-broken, can't swing
-    if (staggerT > 0 || tired()) { if (tired() && CBZ.city) CBZ.city.note("Winded", 0.6); return; }
-    // an open foo in front → DEATHBLOW instead of a jab
+    if (staggerT > 0 || tired()) return;         // gassed: the guard sags (ch.winded), the fists stay home
+    // an open foe in front → DEATHBLOW instead of a jab
     const fin = finisherTarget();
     if (fin) { doFinisher(fin); return; }
     markFighting();
-    // advance the combo if we're inside the window, else start fresh
-    if (comboT > 0 && combo < 3) combo++; else combo = 1;
-    comboT = COMBO_WINDOW;
-    const finisher = combo >= 3;
-    const kind = finisher ? "hook" : KINDS[(combo - 1) % 3];
-    animSwing(kind, finisher);
-    spend(finisher ? 9 : 5);
-
-    const t = aimTarget(finisher ? 2.17 : 1.89, 0.3);
+    const next = (comboT > 0 && combo < 3) ? combo + 1 : 1;
+    const finisher = next >= 3;
+    const kind = finisher ? "hook" : KINDS[(next - 1) % 3];
     const base = it() ? it().dmg : 16;
     // jab/cross scale up through the chain; the hook (3rd) is the big one
-    const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (combo - 1) * 0.18));
-    if (t) {
-      // lands at extension (see CONTACT TIMING); a block resets the combo in land()
-      queueBlow(t, dmg, finisher ? "finisher" : "light", kind, finisher ? 2.17 : 1.89, finisher ? 0.13 : 0.1);
-    } else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
-      // B7: no ped in the cone, but a harvest node (tree/rock/scrap pile —
-      // systems/resources.js) is — the swing lands on that instead. aimTarget()
-      // only ever considers cityCops/cityPeds, so `t` is guaranteed null here
-      // whenever a node (not a person) is what's actually in front of you.
-    } else if (CBZ.cityShatterRay) {
-      // a swing that hits no one can hit a WINDOW: first punch spider-cracks
-      // it, the next blows it out (cityShatterRay's two-stage default)
-      const L2 = lookDir();
-      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z,
-        finisher ? 3.1 : 2.7, false, { directPlayer: true });
-    }
+    const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (next - 1) * 0.18));
+    const S = swing(kind, finisher ? "finisher" : "light", dmg);
+    if (!S) return;                              // the last swing still owns the fists
+    combo = next; comboT = COMBO_WINDOW;
+    spend(finisher ? 9 : 5);
+    if (!S.aimT) swingAtWorld(false);
     fireCD = finisher ? 0.34 : 0.22;
   }
 
@@ -532,44 +542,41 @@
   function heavyAttack() {
     if (pBrokenT > 0) return;                    // guard-broken — can't swing
     if (heavyCD > 0 || staggerT > 0) return;
-    if (tired()) { if (CBZ.city) CBZ.city.note("Too winded for a heavy", 0.8); return; }
-    // a heavy on an open foe is also a finisher
+    if (tired()) return;
     const fin = finisherTarget();
     if (fin) { doFinisher(fin); return; }
     markFighting();
     combo = 0; comboT = 0;
-    animSwing("upper", true);                 // a big rising/overhand blow
-    spend(16);
-
-    const t = aimTarget(2.1, 0.2);
     const base = it() ? it().dmg : 16;
-    const dmg = Math.round(base * 2.4);
-    if (t) queueBlow(t, dmg, "heavy", "upper", 2.1, 0.17);
-    else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
-      // B7: same harvest fallback as lightAttack — a heavy swing chops/mines
-      // just as well (no extra yield bonus, keeps this simple).
-    } else if (CBZ.cityShatterRay) {
-      // a heavy (bat/pipe-class swing) puts a window straight through
-      const L2 = lookDir();
-      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z,
-        3.0, true, { directPlayer: true });
-    }
+    const S = swing("overhand", "heavy", Math.round(base * 2.4));   // a big looping overhand
+    if (!S) return;
+    spend(16);
+    if (!S.aimT) swingAtWorld(true);
     heavyCD = 0.6;
     fireCD = 0.5;
   }
 
   function it() { return currentWeaponItem(); }
 
-  // ---- legacy entry points (PRESERVED public behavior) -------------------
-  // old code / other systems may still call these; keep them swinging.
-  function punch() {
-    if (it() && it().melee) { lightAttack(); return; }
-    lightAttack();
-  }
-  function meleeSwing() {
-    lightAttack();
+  // SWING ON HIM (city/interact.js "Swing on", the cop-assault verb): a
+  // committed sucker punch — a full cross with the hips in it, thrown at the
+  // man you named, resolved exactly like a left-click.
+  CBZ.citySwingOn = function (t) {
+    if (!t || t.dead || P.dead || pBrokenT > 0 || CBZ.cityHasGun()) return false;
+    markFighting();
+    const V = CBZ.verbs, pa = playerActor();
+    if (!V || !V.strike || !pa) return false;
+    const base = it() ? it().dmg : 16, dmg = Math.round(base * 2.0);
+    const feel = weaponFeel();
+    const S = V.strike(pa, t, { kind: "cross", heavy: true, weapon: feel.name === "blade" ? BLADE_W : null,
+      onLand: function (res) { landCity(res, dmg, "heavy", "cross"); },
+      onBlocked: function (res) { blockedCity(res, dmg, "cross"); } });
+    if (!S) return false;
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+    combo = 0; comboT = 0; spend(8);
     fireCD = 0.4;
-  }
+    return true;
+  };
 
   // ============================================================
   //  GUARD / PARRY: holding RMB (with no gun) raises a block.
@@ -597,17 +604,27 @@
           if (CBZ.shake) CBZ.shake(0.4);
           if (CBZ.doHitstop) CBZ.doHitstop(0.08);
           if (CBZ.doSlowmo) CBZ.doSlowmo(0.22);
+          if (CBZ.playerChar) CBZ.playerChar.blockHitT = 0.2;   // it came off your forearms
           if (attacker && attacker.pos && !attacker.dead) {
             attacker._windup = 0;                     // their swing is spent
             // a deflect alone deals heavy posture damage — repeated parries break them
             addPosture(attacker, 38 + weaponFeel().post * 18);
-            const base = (it() && it().dmg) || 16;
-            land(attacker, Math.round(base * 1.8), "heavy", { lethalIntent: true, kind: "hook" });
+            // THE RIPOSTE IS A REAL HOOK, thrown into the opening: it lands where
+            // the fist meets him (it is a blow, not a number applied on the parry)
+            const base = (it() && it().dmg) || 16, rdmg = Math.round(base * 1.8);
+            const V = CBZ.verbs, pa = playerActor();
+            if (V && V.strike && pa) {
+              V.strike(pa, attacker, { kind: "hook", heavy: true,
+                onLand: function (res) { landCity(res, rdmg, "heavy", "hook", { lethalIntent: true }); },
+                onBlocked: function (res) { blockedCity(res, rdmg, "hook"); } });
+              if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+            }
           }
           return;   // blow fully negated
         }
         // normal BLOCK → big chip reduction + no knockdown, costs stamina, and
         // it builds YOUR posture (a held guard erodes — you must parry, not turtle).
+        if (CBZ.playerChar) CBZ.playerChar.blockHitT = 0.2;     // the forearms give with it
         dmg *= 0.3; spend(10);
         addSelfPosture(16 + dmg * 0.25);
         if (CBZ.shake) CBZ.shake(0.2);
@@ -1161,7 +1178,6 @@
     if (heavyCD > 0) heavyCD -= dt;
     if (staggerT > 0) staggerT -= dt;
     if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
-    if (blow.live) { blow.T -= dt; if (blow.T <= 0 || P.dead) settleBlow(); }
     if (parryT > 0) parryT -= dt;
     if (P._fighting > 0) P._fighting -= dt;
 
@@ -1169,7 +1185,7 @@
     // stamina to spare. Guard-break stun winds down and resets your posture.
     if (pBrokenT > 0) {
       pBrokenT -= dt;
-      if (pBrokenT <= 0) { pPosture = 0; pPostNoHit = 0; if (CBZ.city) CBZ.city.note("Guard recovered", 0.6); }
+      if (pBrokenT <= 0) { pPosture = 0; pPostNoHit = 0; }
     } else if (pPosture > 0) {
       pPostNoHit += dt;
       if (pPostNoHit >= POSTURE_REGEN_DELAY) {
@@ -1192,10 +1208,17 @@
       if (guardT <= 0) { P._blocking = 0; }
     }
     if (rmbDown) rmbT += dt;
+    // YOUR BODY SHOWS IT. The held guard is the rig's high block (forearms up,
+    // chin down — entities/meleeposes.js); a fight puts you in your stance, and
+    // a spent stamina bar drops the hands (ch.winded) — what the "Winded" and
+    // "GUARD BROKEN!" captions used to say in words.
+    const pch = CBZ.playerChar;
+    if (pch) {
+      if (P._blocking && pBrokenT <= 0) pch.blockT = Math.max(pch.blockT || 0, 0.1);
+      pch.fightStance = !CBZ.cityHasGun() && ((P._fighting || 0) > 0 || !!P._blocking) && !P.driving;
+      pch.winded = pBrokenT > 0 ? 1 : Math.max(0, Math.min(1, 1 - stam() / 45));
+    }
 
-    // bleed off enemy block flags
-    for (const c of CBZ.cityCops) if (c._blockT > 0) c._blockT -= dt;
-    for (const p of CBZ.cityPeds) if (p._blockT > 0) p._blockT -= dt;
   });
 
   // ---- input: LMB = light combo, RMB = heavy / hold-guard --------------
