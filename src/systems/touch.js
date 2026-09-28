@@ -1630,14 +1630,6 @@
       releaseLatches();   // aim must never outlive the controls that show it
       return;
     }
-    // SCOPED: lockon.js's optic (#realScope, z-45) masks the whole screen
-    // outside the tube — including, until now, the trigger. Aiming used to
-    // make the FIRE button VANISH, which is exactly why the only way to shoot
-    // felt like the slide gesture. The cluster steps above the mask while the
-    // optic is up; the rest of the HUD stays behind it, which is the point of
-    // the mask. (One class, so the ordering lives in CSS with the z-index it
-    // has to beat, not in a magic number here.)
-    root.classList.toggle("tabovescope", !!(CBZ.fpsScoped && CBZ.fpsScoped()));
     // touch_vehicle's context watcher runs at 97, immediately before this one.
     // If the player entered a road car while still holding the on-foot stick,
     // release it before another frame can leak its WASD into the car.

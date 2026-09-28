@@ -607,6 +607,9 @@
     hand.userData.foreLocal = foreDir.normalize().applyQuaternion(hand.quaternion.clone().invert());
     if (maxDev) hand.userData.foreLocal.maxDev = maxDev;      // gunArm's wrist limit for this hold
     hand.userData.pose0 = hand.userData.pose;
+    // the pistol cup: the off hand joins a handgun only down the sights
+    // (owner's rule: pistols two-handed in first-person ADS, one hand otherwise)
+    if (!hold) hand.userData.pistolCup = true;
     hand.userData.baseQ = hand.quaternion.clone();
     hand.userData.basePos = hand.position.clone();
     model.userData.fpSupport = hand;
@@ -812,9 +815,8 @@
   // damped spring returns most (not all) of that impulse. There is no hidden
   // bullet-only recoil channel: what moves on screen is what moves the shot.
   let recoilPitch = 0, recoilYaw = 0;
-  // FPS_ADS_SIGHTS: 0..1 blend of the FP viewmodel from its corner carry to a
-  // centered, down-the-sights pose while aiming. Eased at the FOV-drop rate.
-  let adsSightK = 0;
+  // systems/sights.js's per-frame inputs (one reused record, no allocation)
+  const adsOpts = { aim: false, dt: 0, recoil: 0, recoilSide: 0, punch: 0, reload: false, swap: false, bobX: 0, bobY: 0 };
   let shotsInBurst = 0;                    // pattern position; reset by a fire gap
   let sinceShot = 99;                      // s since last shot — drives the burst reset
   // deterministic L/R yaw weave (signed fractions of basePitch): straight up for
@@ -1343,8 +1345,10 @@
     const sup = model && model.userData.fpSupport;
     armR.visible = !!fire;
     if (fire) gunArm(0, fire, armR);
-    armL.visible = !!sup;
-    if (sup) {
+    const cupOff = !!(sup && sup.userData.pistolCup && CBZ.fpsAdsK && CBZ.fpsAdsK() < 0.35);
+    armL.visible = !!sup && !cupOff;
+    if (sup && cupOff) sup.visible = false;
+    else if (sup) {
       sup.visible = true;
       // the reload walks the hand through the gun's own anchors
       const mode = supportReloadOffset(model, sup, _rOff);
@@ -5242,16 +5246,11 @@
       (CBZ.playerChar && CBZ.playerChar.skydiving));
     // bailout.js owns a dedicated two-hand/riser viewmodel. Hide the generic
     // fist/gun while it is active, then restore it automatically on landing.
-    /* AND NOT WHILE THE EYE IS BEHIND AN EYEPIECE. A magnified optic is a
-       sight you look THROUGH: at the M3A's 8.8 degrees the corner-carry rifle
-       is blown up into a wall of receiver across the bottom half of the glass,
-       which is exactly what the first storyboard of the new scope photographed.
-       A red dot is a sight you look OVER, so the gun stays in frame there —
-       fpsScopeTube(), not fpsScoped(), is the question. */
-    const tubeUp = !!(CBZ.fpsScopeTube && CBZ.fpsScopeTube());
+    /* The gun stays in your hands down a scope too: you look THROUGH its
+       ocular (systems/sights.js), not at a black mask with the gun deleted. */
     const seatGun = carGun();
     const cuffs = cuffedHands();
-    if (ddT < 0) vm.visible = !!((fps.active || seatGun) && !chutePresentation && !aquaticRide() && !tubeUp && !cuffs);
+    if (ddT < 0) vm.visible = !!((fps.active || seatGun) && !chutePresentation && !aquaticRide() && !cuffs);
     const aiming = fps.active || shoulderActive() || seatGun;
     /* A SHARK HAS NO GUNSIGHT.
 
@@ -5269,7 +5268,9 @@
 
        Same predicate as the hands, for the same reason, so the two cannot
        disagree about whether you are currently a person. */
-    const crossShow = aiming && !chutePresentation && !aquaticRide() && !cuffs &&
+    // ...and not down the sights: the sight on the gun IS the reticle then
+    const sighted = fps.active && !!(CBZ.fpsAdsK && CBZ.fpsAdsK() > 0.6);
+    const crossShow = aiming && !chutePresentation && !aquaticRide() && !cuffs && !sighted &&
       CBZ.game.state === "playing";
     const cross = crossEl();
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
@@ -5555,52 +5556,29 @@
       // has dipped out, then reveal the fist.
       const fpStowingGun = fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
       if (armed() || fpStowingGun) {
-        // FPS_ADS_SIGHTS: while aiming (and NOT down a real optic), ease the
-        // viewmodel from its corner carry (0.36,-0.34) to a centered, down-the-
-        // sights pose (0.00,-0.05). Only X/Y shift — Z is held at the carry
-        // depth so the gun never travels FORWARD across the near plane (no clip),
-        // and the depth-clear sentinel still owns occlusion. Bullets are
-        // unchanged (they fly the camera ray, not the viewmodel). Skipped when a
-        // scope FOV owns the view (sniper / gunsmith optic overlay) so a centered
-        // receiver can't intrude into the scope glass.
-        const scopeUp = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-        // LIVE BY DEFAULT: an earlier "default OFF" pass flipped only this gate
-        // to `=== true`, but config.js still seeds FPS_ADS_SIGHTS = true before
-        // this ever reads it — the sighted pose never actually went away, and
-        // with the -0.22 sight plane below the owner has since approved it for
-        // GUNS ("the AR-15 looking gun looks amazing while scoped").
-        // LAUNCHER-CLASS EXCLUDED (owner screenshot: scoped RPG = near-black
-        // screen with a peaked silhouette): the bazooka's bore axis is authored
-        // HIGH (model y=+0.05, tube r=0.11, ~2.3 units long), so the centered
-        // pose parks the tube's top edge ON the camera axis with the warhead
-        // bulb + cone dead in the sight line, and the ADS FOV punch-in
-        // magnifies that dark mass until it swallows the frame. A shoulder tube
-        // has no eye-line iron sights: it HOLDS the corner carry (same pose the
-        // owner already sees hip-firing), keeps the same ADS FOV zoom, and aims
-        // by crosshair/lock-on — and the rocket still visibly soft-launches
-        // from the rendered muzzle socket (muzzleWorld reads the live model).
-        // Gated on w.explosive so any future launcher is excluded with it.
-        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS === true && aimHeld && !scopeUp && !w.explosive;
-        adsSightK += ((wantSight ? 1 : 0) - adsSightK) * Math.min(1, dt * 12);
-        if (adsSightK < 1e-3) adsSightK = 0;
-        const sightX = 0.36 * (1 - adsSightK);      // 0.36 → 0.00 (centered)
-        const sightY = -0.34 + 0.12 * adsSightK;    // -0.34 → -0.22: origin stays LOW so the slide top sits just under the crosshair (at -0.05 the receiver blocked the view)
-        // Sustained-fire climb stays small; bullets now use the exact live
-        // muzzle socket, so the rendered barrel and projectile remain welded
-        // together through the kick instead of diverging under an origin clamp.
+        // THE HIP CARRY, then the sight. systems/sights.js solves the raise:
+        // the gun's own sight eye point onto the camera, its line of sight
+        // onto the view axis, both hands still on it (the arms re-solve off
+        // the moved gun in poseFpArms). Bullets fly the camera ray, which is
+        // now exactly the sight line. Recoil at the hip kicks the corner
+        // carry; down the sights it kicks the gun OFF the sight line and
+        // sights.js lets it settle back as `recoil` decays.
         vm.position.set(
-          sightX - bobX * 0.5 + recoilSide * 0.55,
-          sightY + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
+          0.36 - bobX * 0.5 + recoilSide * 0.55,
+          -0.34 + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
           -0.72 + recoil * 0.12 - vmPunch * 0.3
         );
-        vm.rotation.x = -0.10 + recoil * 0.26 + vmPunch * 0.4 + reloadDip * 0.8;   // level the barrel forward (was tilted up)
-        vm.rotation.z = recoilSide * 0.7 - bobX * 0.18;
+        vm.rotation.set(-0.10 + recoil * 0.26 + vmPunch * 0.4 + reloadDip * 0.8, 0, recoilSide * 0.7 - bobX * 0.18);
+        if (CBZ.sights && CBZ.sights.fpApply && !fpStowingGun) {
+          adsOpts.aim = aimHeld; adsOpts.dt = dt; adsOpts.recoil = recoil; adsOpts.recoilSide = recoilSide;
+          adsOpts.punch = vmPunch; adsOpts.reload = fps.reloading > 0; adsOpts.swap = fpSwapT > 0;
+          adsOpts.bobX = bobX; adsOpts.bobY = bobY;
+          CBZ.sights.fpApply(vm, weaponModels[fps.weapon], w, adsOpts);
+        }
       } else {
-        adsSightK = 0;   // sighted pose is armed-only; reset so a re-draw eases up clean
         // unarmed single hand sits low and to the right (Minecraft-style)
         vm.position.set(0.12 * (1 - guardK) + bobX * 0.4, -0.30 + bobY * 0.5 - vmPunch * 0.05, -0.66 - vmPunch * 0.05);
-        vm.rotation.x = vmPunch * 0.10;
-        vm.rotation.z = -bobX * 0.10;
+        vm.rotation.set(vmPunch * 0.10, 0, -bobX * 0.10);   // (y too: a sighted pose may have left a yaw)
       }
       // First person gets only the near-field portion of a holster: the old
       // gun dips out below/right, then the fist rises. The full hand-to-mount
