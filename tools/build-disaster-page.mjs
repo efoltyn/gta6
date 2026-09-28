@@ -65,16 +65,18 @@ export function buildPage(html, dropSet) {
     return true;
   }).join("\n");
 
-  // 2. the start mode, declared before config.js reads it. Goes into the
-  //    existing pre-config inline block rather than adding a second one.
-  const POP = `    if (_popOverride > 0) window.CBZ = Object.assign(window.CBZ || {}, { MASS_CROWD: _popOverride });`;
-  const DECL = `  /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
+  // 2. the start mode, declared in its own inline block right before
+  //    config.js reads it (index.html's old pre-config block is gone).
+  const ANCHOR = `<!-- 0. namespace + constants -->`;
+  const DECL = `<script>
+  /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
      the island is the only world this build ever stands up — no city, no
      prison, nothing behind the title card that the player did not ask for. */
   window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
-  try {`;
-  if (!out.includes(POP)) throw new Error("index.html's pre-config inline block moved — update this tool");
-  out = out.replace("  try {", DECL);
+</script>
+`;
+  if (!out.includes(ANCHOR)) throw new Error("index.html's config.js anchor moved — update this tool");
+  out = out.replace(ANCHOR, DECL + ANCHOR);
 
   // 3. the document is this game, not the release
   out = out.replace("<title>Gang Life</title>", "<title>Natural Disaster Survival</title>");

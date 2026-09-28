@@ -289,7 +289,6 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">Punch, start a fight</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map, waypoint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
           <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
         </div>
         <div class="controls-note">Everything else is on the card in front of you. Walk up and it shows the buttons.</div>
@@ -1065,6 +1064,10 @@ document.body.appendChild(b);}}catch(e){}})();
      hoardings, marshal posts, tyre walls, paddock. Authored against the track
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
+<!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
+     it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
+     APEX bookmaker, the Speedway race book, the racepark windows) and settled
+     through it into the betting ledger. Before every venue that uses it. -->
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
      tower, fence, kerb, access causeway) from one spec at any origin and any
@@ -1843,7 +1846,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=plots1"></script>
+<script src="src/city/plots.js?v=onebet1"></script>
 <script src="src/city/compoundcrew.js?v=boom2"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
