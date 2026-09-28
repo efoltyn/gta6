@@ -2076,25 +2076,6 @@
   }
   CBZ.fpsHitMarker = flashHitMarker;
 
-  // THE BAR TRACKS THE BAG. setAmmoHud (which drives the strip) only fires on a
-  // weapon swap / reload / mode change, so a gun picked up off a body would not
-  // appear until you next changed weapons. A 5 Hz poll of the inventory's shape
-  // is enough and costs one string compare.
-  let _stripSig = "", _stripT = 0;
-  if (CBZ.onAlways) CBZ.onAlways(71, function (dt) {
-    _stripT -= dt || 0;
-    if (_stripT > 0) return;
-    _stripT = 0.2;
-    const inv = CBZ.weaponInventory || [];
-    const sig = CBZ.game.mode + "|" + CBZ.game.state + "|" + inv.join(",") + "|" +
-      (CBZ.currentWeaponId || "") + "|" + (CBZ.game.cityMeleeWeapon || "") + "|" +
-      (CBZ.game.prisonHolstered ? "fists" : "armed") + "|" +
-      (CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout().join(",") : "");
-    if (sig === _stripSig) return;
-    _stripSig = sig;
-    try { setWeaponStrip(); } catch (e) {}
-  });
-
   function setAmmoHud() {
     const ammoEl = ammoHudEl();
     if (!ammoEl) return;
@@ -2143,101 +2124,13 @@
     setWeaponStrip();
   }
 
-  // ============================================================
-  //  THE PRISON GETS THE CITY'S INVENTORY BAR (WEAPON_STRIP_SHARED).
-  //
-  //  OWNER: "only one gun at a time shows in inventory unlike gang city."
-  //
-  //  What this used to draw was a row of WORDS — `9MM / 12G / 762` — right-
-  //  aligned under the ammo readout, which is why the prison's visible bag (the
-  //  9-slot bar systems/inventory.js draws) showed exactly one gun chip: that
-  //  bag carries weapon-data.js's single legacy "Gun" proxy item, and the
-  //  actual inventory was over here as text.
-  //
-  //  There is now ONE renderer for the weapon bar in this game and it is
-  //  city/hud.js's icon hotbar (CBZ.weaponSlotsHTML). This is its second
-  //  consumer. Same chips, same boxes, same held highlight, same dry marker,
-  //  driven off the same CBZ.weaponInventory — so a prisoner holding three
-  //  pieces sees three boxes, exactly like the city.
-  //
-  //  The styling is INJECTED FROM HERE (css/hud.css belongs to another
-  //  territory and #weaponStrip was authored for a text row). It is one rule
-  //  set, scoped to #weaponStrip, and it deliberately mirrors the city's slot
-  //  metrics rather than inventing a second look.
-  //
-  //  Degrade: no CBZ.weaponSlotsHTML (an older merge, or WEAPON_STRIP_SHARED
-  //  off) → the original word row, byte for byte.
-  // ============================================================
-  let stripStyled = false;
-  function styleStrip() {
-    if (stripStyled || typeof document === "undefined" || !document.head) return;
-    stripStyled = true;
-    const st = document.createElement("style");
-    st.id = "weaponStripSlots";
-    st.textContent =
-      "#weaponStrip.slots{white-space:normal;text-transform:none;letter-spacing:0;padding:6px 8px;" +
-      "display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap;max-width:min(360px,80vw)}" +
-      "#weaponStrip.slots .cSlot{position:relative;display:flex;align-items:center;justify-content:center;" +
-      "width:44px;height:44px;box-sizing:border-box;padding:2px;border-radius:3px;background:rgba(10,12,16,.66);" +
-      "border:2px solid #0a0c10;box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),inset -2px -2px 0 rgba(255,255,255,.10),0 2px 6px rgba(0,0,0,.45)}" +
-      "#weaponStrip.slots .cSlot.held{border-color:#e8ecf2;box-shadow:0 0 0 2px rgba(232,236,242,.85);transform:scale(1.08);z-index:1}" +
-      "#weaponStrip.slots .cSlot .key{position:absolute;left:3px;top:1px;font-size:8px;font-weight:800;color:#8b95a1;line-height:1}" +
-      "#weaponStrip.slots .cSlot .s{font-size:11px;font-weight:700;color:#d7e4f3;letter-spacing:0}" +
-      "#weaponStrip.slots .cSlot>.ic{font-size:18px;line-height:1}" +
-      "#weaponStrip.slots .cSlot .ic.gun{font-size:20px;line-height:1;color:#e8ecf2;transform:scaleX(1.25)}" +
-      "#weaponStrip.slots .cSlot .gunModel{display:block;width:40px;height:26px;object-fit:contain;" +
-      "pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-      "#weaponStrip.slots .cSlot .a{position:absolute;right:2px;bottom:1px;font-size:9px;color:#8b95a1;line-height:1}" +
-      "#weaponStrip.slots .cSlot .a.dry{color:#ff7a6a;font-weight:700}" +
-      "@media (max-width:820px){#weaponStrip.slots .cSlot{width:36px;height:36px}" +
-      "#weaponStrip.slots .cSlot .gunModel{width:32px;height:21px}}";
-    document.head.appendChild(st);
-  }
-
+  // THE WEAPON STRIP IS GONE (2026-09-28). The guns you carry are drawn by
+  // exactly one bar per game: systems/inventory.js's #hotbar everywhere but
+  // the city, city/hud.js's #cSlots in the city. This used to be a third
+  // renderer (a text row, later a docked chip row) that other files spent
+  // years hiding and re-parenting. The element stays in the page, empty.
   function setWeaponStrip() {
-    if (!stripEl) return;
-    // The city draws the SAME component into its own #cSlots bar, so drawing it
-    // here as well would put two identical hotbars on one screen.
-    if (CBZ.game.mode === "city") {
-      stripEl.innerHTML = "";
-      stripEl.className = "panel";
-      stripEl.style.display = "none";
-      return;
-    }
-    const shared = CBZ.CONFIG.WEAPON_STRIP_SHARED !== false && typeof CBZ.weaponSlotsHTML === "function";
-    // THE BAG IS ALWAYS THE BAG. The old row appeared only while first-person
-    // AND armed, which is another reason the prison read as having one gun: put
-    // the rifle away and the whole inventory vanished. It now behaves like the
-    // city's — visible whenever you are playing and carrying something.
-    const carrying = armed() || !!CBZ.game.cityMeleeWeapon ||
-      !!(CBZ.weaponInventory && CBZ.weaponInventory.length);
-    if (!shared && (!(fps.active || shoulderActive()) || !armed())) {
-      stripEl.style.display = "none";
-      return;
-    }
-    if (shared && (!carrying || CBZ.game.state !== "playing")) {
-      stripEl.style.display = "none";
-      return;
-    }
-    if (shared) {
-      styleStrip();
-      const html = CBZ.weaponSlotsHTML({
-        icons: true,
-        prisonLoadout: CBZ.game.mode === "escape",
-      });
-      stripEl.className = "panel slots";
-      stripEl.innerHTML = html;
-      stripEl.style.display = html ? "flex" : "none";
-      return;
-    }
-    const html = availableIndices().map((idx) => {
-      const w = WEAPONS[idx];
-      const active = idx === fps.weapon ? " class=\"active\"" : "";
-      return `<span${active}>${w.short}</span>`;
-    }).join("  /  ");
-    stripEl.className = "panel";
-    stripEl.innerHTML = html;
-    stripEl.style.display = html ? "block" : "none";
+    if (stripEl && stripEl.style.display !== "none") { stripEl.innerHTML = ""; stripEl.style.display = "none"; }
   }
 
   // ---- raycast helpers ----
@@ -4149,108 +4042,110 @@
     return s >= 0 ? selectWeaponSlot(s) : false;
   };
 
-  // ---- UNIFIED CITY HOTBAR (shared with HOTBAR + CHARPANEL) -----------------
-  // CITY-ONLY. The single source of truth for the in-world bar AND the mirrored
-  // bar in the I-screen. Order (contract): [0] HOLSTER/fists chip, then the
-  // OWNED GUNS in their current left-to-right order (gunSlot = index into
-  // availableIndices, selected byte-identically via CBZ.fpsSelectSlot), then the
-  // USABLE ITEMS (g.cityInv entries whose econ tag is food/drug/throwable), then
-  // the PHONE when the campaign handset is live (see the phone note below).
-  // Each entry: { kind:"holster"|"gun"|"item"|"phone", label, short, item?,
-  //   gunSlot?, count?, active }. HOTBAR/CHARPANEL render exactly this;
-  // CBZ.cityHotbarSelect dispatches a bar index. Pure read (no side effects) so
-  // the renderers can poll.
-  const USABLE_TAGS = { food: 1, drug: 1, throwable: 1 };
-  function hotbarItemNames() {
-    // stable order: ITEMS catalog declaration order, filtered to owned usables.
+  // ---- THE CITY BAR IS THE INVENTORY -----------------------------------------
+  // OWNER: "only guns are cool, and the keycard is cool af. All other inventory
+  // is dumb af... The flashlight is a cool thing in inventory because at night
+  // it helps. Its icon should be the flashlight, like how the guns are."
+  // So the city carries ONE row and nothing else: the owned GUNS (their
+  // left-to-right order), then THROWABLES (grenade / C4: weapons, one chip per
+  // kind with a count), then the FLASHLIGHT once you own one, then the PHONE
+  // when the campaign handset is live. No fists chip: empty hands are simply
+  // nothing lit, and selecting the gun you already hold puts it away. Food and
+  // medicine are not chips any more: city/hunger.js eats and patches up on its
+  // own when you need it. Drugs are product; the dealers' trade flows read them
+  // straight out of g.cityInv.
+  // Each entry: { kind:"gun"|"throwable"|"flashlight"|"phone", label, short,
+  //   id?, gunSlot?, item?, count?, active }. city/hud.js renders exactly this;
+  // CBZ.cityHotbarSelect dispatches a bar index. Pure read so renderers poll.
+  //
+  // cityBarEntries is the PURE assembly (no CBZ reads), so the order contract
+  // can be checked in plain node: it takes what the world already knows.
+  function cityBarEntries(s) {
+    const bar = [];
+    const guns = s.guns || [];
+    for (let i = 0; i < guns.length; i++) {
+      const gn = guns[i];
+      bar.push({ kind: "gun", id: gn.id, gunSlot: i, label: gn.label, short: gn.short, active: !s.holstered && !!gn.held });
+    }
+    const th = s.throwables || [];
+    for (let i = 0; i < th.length; i++) {
+      if (!(th[i].count > 0)) continue;
+      bar.push({ kind: "throwable", item: th[i].name, label: th[i].name, short: th[i].name, count: th[i].count | 0, active: false });
+    }
+    if (s.flashlight && s.flashlight.owned) {
+      bar.push({ kind: "flashlight", item: "Flashlight", label: "Flashlight", short: "LIGHT", active: !!s.flashlight.on });
+    }
+    const ph = s.phone;
+    if (ph && ph.available) {
+      bar.push({ kind: "phone", label: "Phone", short: "PHONE", item: "Phone", active: !!ph.open, unread: !!ph.unread, buzz: !!ph.buzz });
+    }
+    return bar;
+  }
+  function cityThrowables() {
+    // stable order: ITEMS catalog declaration order, filtered to owned throwables
     const inv = CBZ.game.cityInv || {}, ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
     const out = [];
     for (const name in ITEMS) {
       const it = ITEMS[name];
-      if (it && USABLE_TAGS[it.tag] && (inv[name] || 0) > 0) out.push(name);
+      if (it && it.tag === "throwable" && (inv[name] || 0) > 0) out.push({ name: name, count: inv[name] | 0 });
     }
-    // any owned usable not in the catalog map (defensive) appended after
-    for (const name in inv) {
-      if ((inv[name] || 0) > 0 && !ITEMS[name] && out.indexOf(name) < 0) out.push(name);
-    }
-    // the bar's keys are 1-9 and the guns come first; a hunter with six kinds
-    // of meat must not push his rifle off the keyboard.
-    return out.slice(0, 6);
+    return out;
   }
   function cityHotbar() {
     if (CBZ.game.mode !== "city") return [];
-    const bar = [];
-    const guns = availableIndices();
-    // holster chip is "active" when holstered OR when you simply have no gun (so
-    // the bar always shows your current empty-hand state highlighted)
-    bar.push({ kind: "holster", label: "FISTS", short: "FIST", active: !!CBZ.game.cityHolstered || guns.length === 0 });
-    for (let s = 0; s < guns.length; s++) {
-      const w = WEAPONS[guns[s]];
-      bar.push({ kind: "gun", id: w.id || w.key, gunSlot: s, label: w.label, short: w.short, active: !CBZ.game.cityHolstered && guns[s] === fps.weapon });
+    const idx = availableIndices();
+    const guns = [];
+    for (let s = 0; s < idx.length; s++) {
+      const w = WEAPONS[idx[s]];
+      guns.push({ id: w.id || w.key, label: w.label, short: w.short, held: idx[s] === fps.weapon });
     }
-    const items = hotbarItemNames(), inv = CBZ.game.cityInv || {};
-    for (let i = 0; i < items.length; i++) {
-      const name = items[i];
-      bar.push({ kind: "item", item: name, label: name, short: name, count: inv[name] || 0, active: false });
-    }
-    // ---- THE PHONE IS A POCKET ITEM, NOT A CORNER BUTTON --------------------
-    // OWNER (2026-08-04): "in hitman mode there's a phone in the right corner
-    // of the screen, click to press. Instead that should just be like a gun —
-    // it should just be in the inventory." Doctrine already says so: "the
-    // pocket keeps only what a person pockets: cash, PHONE, keys/keycards,
-    // medkit, grenades, bricks" (doctrine.md, item existence test).
-    // So the handset becomes a SLOT on this one bar and gets a number key, a
-    // click target, a highlight and the I-screen mirror for free — exactly
-    // what a gun gets. city/campaign_ui.js still owns the device itself and
-    // publishes its chip state read-only through CBZ.campaignPhoneChip();
-    // this file owns only the slot's place in the bar.
+    // The flashlight: systems/playerflashlight.js owns the lamp and whether you
+    // own one; this bar only gives it a slot. The phone: city/campaign_ui.js
+    // owns the device, publishing its chip state read-only.
+    let fl = null;
+    try {
+      const PF = CBZ.playerFlashlight;
+      if (PF && typeof PF.owned === "function" && PF.owned()) fl = { owned: true, on: !!(PF.on && PF.on()) };
+    } catch (e) { fl = null; }
     let ph = null;
     try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
-    if (ph && ph.available) {
-      bar.push({
-        kind: "phone", label: "Phone", short: "PHONE", item: "Phone",
-        active: !!ph.open, unread: !!ph.unread, buzz: !!ph.buzz,
-      });
-    }
-    return bar;
+    return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph });
   }
   CBZ.cityHotbar = cityHotbar;
 
-  // dispatch a UNIFIED-bar index: holster -> de-escalate; gun -> existing
-  // fpsSelectSlot (byte-identical) + un-holster; item -> the EXISTING consume/
-  // throw path for that item's tag. Returns true if it acted on a valid slot.
+  // dispatch a bar index: gun -> draw it (fpsSelectSlot, which un-holsters), or
+  // put it away when it is already the one in your hands; throwable -> the
+  // EXISTING throw / plant path for that kind; flashlight -> click the lamp;
+  // phone -> raise/stow the handset. Returns true if it acted on a valid slot.
   function cityHotbarSelect(barIdx) {
     if (CBZ.game.mode !== "city") return false;
     const bar = cityHotbar();
     if (barIdx < 0 || barIdx >= bar.length) return false;
     const e = bar[barIdx];
-    if (e.kind === "holster") { CBZ.cityHolster(true); return true; }
-    if (e.kind === "gun") { CBZ.game.cityHolstered = false; return selectWeaponSlot(e.gunSlot); }   // fpsSelectSlot also clears holster
-    if (e.kind === "item") return useHotbarItem(e.item);
-    // the phone slot raises/stows the handset — the same "select the slot,
-    // hold the thing" verb every other chip on this bar answers to.
+    if (e.kind === "gun") {
+      if (e.active) { CBZ.cityHolster(true); return true; }
+      CBZ.game.cityHolstered = false;
+      return selectWeaponSlot(e.gunSlot);
+    }
+    if (e.kind === "throwable") {
+      const it = ((CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {})[e.item] || {};
+      if (it.c4) return !!(CBZ.cityC4Plant && CBZ.cityC4Plant());
+      if (CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
+      return false;
+    }
+    if (e.kind === "flashlight") {
+      const PF = CBZ.playerFlashlight;
+      if (PF && typeof PF.toggle === "function") { try { PF.toggle(); } catch (err) { return false; } return true; }
+      return false;
+    }
     if (e.kind === "phone") { try { return !!(CBZ.campaignPhoneToggle && CBZ.campaignPhoneToggle()); } catch (err) { return false; } }
     return false;
   }
   CBZ.cityHotbarSelect = cityHotbarSelect;
 
-  // route a usable item to its EXISTING consume/throw path (no new mechanics):
-  // food -> CBZ.cityEat, throwable -> CBZ.cityThrowFromInventory. Drugs have no
-  // existing player-consume action (they're product to sell) — a graceful note.
-  function useHotbarItem(name) {
-    const ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
-    const it = ITEMS[name];
-    if (!it) return false;
-    if (it.tag === "food" && CBZ.cityEat) return CBZ.cityEat(name);
-    if (it.tag === "throwable" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
-    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer, not for using.", 1.4); return false; }
-    return false;
-  }
-
-  // number-key hotbar in CITY (jail keeps its own stash-hotbar in inventory.js).
-  // [1]..[9] map across the WHOLE unified bar (holster + guns + usable items),
-  // so a keypress matches exactly what HOTBAR/CHARPANEL draw. Guns still select
-  // byte-identically. Gated so it never fires while a menu/map is up.
+  // number-key bar in CITY (jail keeps its own bar in systems/inventory.js).
+  // [1]..[9] map across the visible chips, so a keypress matches what
+  // city/hud.js draws. Gated so it never fires while a menu/map is up.
   addEventListener("keydown", function (e) {
     if (e.repeat || CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
     if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
@@ -4424,30 +4319,26 @@
   document.addEventListener("contextmenu", (e) => {
     if ((fps.active || shoulderActive() || carGunEligible()) && CBZ.game.state === "playing") e.preventDefault();
   });
-  // index of the currently-selected entry in the unified city bar (the active
-  // gun, or the holster chip when holstered/empty-handed). For scroll stepping.
-  function cityHotbarCurrentIndex() {
-    const bar = cityHotbar();
-    for (let i = 0; i < bar.length; i++) if (bar[i].active) return i;
-    return 0;   // fall back to the holster chip
-  }
   addEventListener("wheel", (e) => {
-    // CITY: scroll cycles the DURABLE selection (holster chip + guns), so you
-    // can wheel back to fists or to any gun — works even while holstered. Item
-    // slots are intentionally SKIPPED by the wheel (one-shot uses would fire
-    // just from scrolling past them); reach items with the number keys.
+    // CITY: the wheel walks EMPTY HANDS -> each gun -> back round. Only the
+    // durable selection: a throwable, the flashlight or the phone would fire
+    // just from scrolling past them; they answer the number keys and taps.
     if (CBZ.game.mode === "city") {
       if (CBZ.game.state !== "playing" || CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
       const bar = cityHotbar();
-      // selectable = holster + gun entries only
-      const sel = [];
-      for (let i = 0; i < bar.length; i++) if (bar[i].kind !== "item") sel.push(i);
+      const sel = [-1];                          // -1 = nothing in your hands
+      let cur = -1;
+      for (let i = 0; i < bar.length; i++) {
+        if (bar[i].kind !== "gun") continue;
+        sel.push(i);
+        if (bar[i].active) cur = i;
+      }
       if (sel.length <= 1) return;
       e.preventDefault();
-      const cur = cityHotbarCurrentIndex();
-      let pos = sel.indexOf(cur); if (pos < 0) pos = 0;
-      const dir = e.deltaY > 0 ? 1 : -1;
-      cityHotbarSelect(sel[(pos + dir + sel.length) % sel.length]);
+      const pos = sel.indexOf(cur);
+      const next = sel[(pos + (e.deltaY > 0 ? 1 : -1) + sel.length) % sel.length];
+      if (next < 0) CBZ.cityHolster(true);
+      else cityHotbarSelect(next);
       return;
     }
     if (!(fps.active || shoulderActive()) || !armed()) return;
