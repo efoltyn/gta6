@@ -345,7 +345,7 @@
     grp.userData.lower = lower;
     return grp;
   }
-  CBZ.humanLimbGeometry = limbGeometry;
+  CBZ.humanLimbGeometry = partGeometry;      // limbs AND torso parts (TORSO block)
   CBZ.humanLimbHalfAt = limbHalfAt;
 
   // Whole-limb lengths preserved: arm 0.92 (+0.2 hand), leg 0.95 (+0.2 shoe).
@@ -880,10 +880,42 @@
     return p;
   }
 
+  /* ---- PHYSIQUE: a body type is PROPORTIONS, not a scale ------------------
+     Owner: body types vary (slim, average, heavy, muscular). Every row is a set
+     of multipliers on the profile's own segment numbers plus the shape weights
+     the TORSO block reads (pecs, bust, belly, shoulder blades, spine). The arm
+     pivot moves out with a wider chest (ax) so a heavy man's arms hang beside
+     his ribs instead of inside them. "average" is the identity, and is the SAME
+     profile object as before this table existed. */
+  const PHYSIQUE = {
+    average:  { tw: 1, td: 1, pw: 1, pd: 1, aw: 1, lw: 1, ax: 0, hx: 0, waist: 0.86, pec: 1, bust: 1, belly: 0.22, scap: 1, spine: 1, soft: 0 },
+    slim:     { tw: 0.92, td: 0.90, pw: 0.95, pd: 0.92, aw: 1, lw: 1, ax: -0.03, hx: -0.01, waist: 0.82, pec: 0.55, bust: 0.8, belly: 0, scap: 1.35, spine: 1.15, soft: 0 },
+    heavy:    { tw: 1.10, td: 1.14, pw: 1.08, pd: 1.10, aw: 1, lw: 1, ax: 0.04, hx: 0.02, waist: 1.03, pec: 0.7, bust: 1.25, belly: 1, scap: 0.3, spine: 0.35, soft: 1 },
+    muscular: { tw: 1.08, td: 1.10, pw: 1.00, pd: 1.02, aw: 1, lw: 1, ax: 0.04, hx: 0.01, waist: 0.80, pec: 1.8, bust: 0.85, belly: 0, scap: 1.3, spine: 1.4, soft: 0 },
+  };
+  const PHYSIQUE_IDS = ["average", "slim", "heavy", "muscular"];
+  function applyPhysique(P0, ph) {
+    const M = PHYSIQUE[ph];
+    // before puberty a body type is half as pronounced, and a child is never "muscular"
+    const s = !P0.child ? 1 : (ph === "muscular" ? 0 : (P0.ageYears < 13 ? 0.5 : 0.8));
+    const m = (k) => 1 + (M[k] - 1) * s;
+    const p = Object.assign({}, P0);
+    p.key = P0.key + "~" + ph; p.physique = ph;
+    const jw = P0.jacketW - P0.torsoW, jd = P0.jacketD - P0.torsoD;
+    p.torsoW = P0.torsoW * m("tw"); p.torsoD = P0.torsoD * m("td");
+    if (P0.waistShare > 0) { p.waistW = P0.waistW * m("tw") * (ph === "heavy" ? 1.08 : ph === "muscular" ? 0.94 : 1); p.waistD = P0.waistD * m("td"); }
+    p.pelvisW = P0.pelvisW * m("pw"); p.pelvisD = P0.pelvisD * m("pd");
+    p.armW = P0.armW * m("aw"); p.legW = P0.legW * m("lw");
+    p.armX = P0.armX + M.ax * s * P0.armX / 0.62; p.hipX = P0.hipX + M.hx * s;
+    p.collarW = P0.collarW * m("tw"); p.collarD = P0.collarD * m("td");
+    p.jacketW = p.torsoW + jw; p.jacketD = p.torsoD + jd;
+    return p;
+  }
+
   const profileCache = Object.create(null);
-  // CBZ.charProfile(build, age) — the public read. Cached: the crowd asks
-  // this per body, and a profile is pure data derived from two numbers.
-  function charProfile(build, age) {
+  // CBZ.charProfile(build, age, physique) — the public read. Cached: the crowd
+  // asks this per body, and a profile is pure data derived from three values.
+  function charProfile(build, age, physique) {
     const b = build === "f" ? "f" : "m";
     let a = (age == null || !isFinite(age)) ? null : +age;
     if (a != null) {
@@ -891,12 +923,22 @@
       if (a >= CHILD_ADULT_AGE) a = null;
       else a = Math.round(a * 4) / 4;              // quantised: 160 possible child bodies, not infinite
     }
-    const key = b + "|" + (a == null ? "A" : a);
+    const ph = PHYSIQUE[physique] && physique !== "average" ? physique : null;
+    const key = b + "|" + (a == null ? "A" : a) + (ph ? "|" + ph : "");
     let p = profileCache[key];
     if (p) return p;
     p = a == null ? (b === "f" ? ADULT_F : ADULT_M) : childProfile(b, a);
+    if (ph) p = applyPhysique(p, ph);
     profileCache[key] = p;
     return p;
+  }
+  // c.physique wins; otherwise a stable pick off the look (skin x hair), so a
+  // crowd varies and the same person is always the same shape.
+  function physiqueOf(c) {
+    if (c.physique && PHYSIQUE[c.physique]) return c.physique;
+    if (c.age != null && c.age < 16) return "average";       // a child is a child; the look carries it
+    const h = hashN((c.skin != null ? c.skin : 0xcf9a72) ^ 0x2f6b1d3, (c.hair != null ? c.hair : 0x4a3526) + (c.build === "f" ? 7 : 0)) % 100;
+    return h < 52 ? "average" : h < 72 ? "slim" : h < 88 ? "heavy" : "muscular";
   }
 
   /* ============================================================
@@ -1231,17 +1273,9 @@
         flatUV(finishGeo(ear), PLAIN_U, PLAIN_V);
         parts.push(ear);
       }
-      // NECK — chin to collar, buried in the yoke below and the skull above
-      const nr0 = F.neck[0], nr1 = F.neck[1], nH = 0.30;
-      const neck3 = rbox(nr1 * 2, nH, nr1 * 1.9, nr1 * 0.75, [2, 1, 2]);
-      atlasUV(neck3, HEAD_ATLAS.headV, 1);
-      sculpt(neck3, function (v) {
-        const k = lerpN(1, nr0 / nr1, cl01((v.y + nH / 2) / nH));
-        v.x *= k; v.z *= k;
-      });
-      neck3.translate(0, 0.01 - 0.30, -0.025);
-      finishGeo(neck3);
-      parts.push(neck3);
+      // NECK — a real column from inside the body up into the skull: the
+      // sternocleidomastoids, the notch, an Adam's apple (see THE NECK COLUMN)
+      parts.push(neckColumnGeometry(F, fk, far));
       const g = mergeGeos(parts);
       // THE SKULL'S BOX ENVELOPE, in geometry units. systems/wounds.js seats
       // head decals on (and measures hits against) `geometry.parameters` as a
@@ -2460,6 +2494,558 @@
     return "short";
   }
 
+  /* ==== TORSO — NECK, SHOULDERS, CHEST, BACK, WAIST, PELVIS =================
+     Owner, 2026-09-28: "like a little kid drew everything there and you're
+     redrawing it." The limbs, hands and face had been redrawn; the body they
+     hung off was still four painted boxes: a chest box, an optional waist box,
+     a flat shoulder SLAB (the "yoke") laid across the top of the chest with the
+     chin sitting in it, and a pelvis box. No shoulders, no neck showing, no
+     chest, no back, no waist on a man.
+
+     WHAT IT IS NOW. One continuous body SHAPE per (profile, physique, head
+     form, age) — a stack of rounded cross sections (superellipses) from inside
+     the pelvis up to the neck — that every torso part SAMPLES:
+       · CHEST (skinSlots.torso[0]) — ribcage taper, a pectoral shelf (men) or a
+         bust (women, modest: a lobe with a soft underside, a natural cleavage
+         dip, no exaggeration), shoulder blades and a spine groove on the back,
+         lats into the armpit, then the SHOULDER: the section widens out to the
+         arm pivot and the TRAPEZIUS slopes from there up to the neck, the top
+         ring tipping forward (the collarbone notch sits lower than C7).
+       · WAIST (torso[1], women and children) — the same surface below the
+         chest, its top tucked a hair inside the chest so the seam is hidden.
+       · PELVIS — hips out to the thighs, glutes and a cleft behind, the crotch
+         bridging the legs, and a waistband ledge the torso tucks into.
+       · COLLAR (skinSlots.collar, was the slab) — a real collar band standing
+         round the base of the neck, dressed with the yoke atlas (shirt collar,
+         the tie knot at the throat).
+       · NECK (in headGeometry) — a lofted column: sternocleidomastoid ridges
+         from behind the ear to the collarbone notch, an Adam's apple on men,
+         the suprasternal notch, the nape. The HEAD RIDES NECK_LEN higher and
+         the ARM PIVOTS sit SHOULDER_DROP below the column top (was 0.04), so
+         there is neck between the chin and the collar instead of a chin in a
+         slab, and the trapezius has somewhere to slope to.
+
+     SHOULDER SEAM. The lateral end of the shoulder section is built INSIDE the
+     ball the arm's own top dome always covers round its pivot (limb(): every
+     segment's end dome is centred on its joint), so whatever the arm does —
+     raised, forward, behind the back in cuffs — the deltoid still swallows
+     the end of the shoulder: no gap can open. tools/torso-check.mjs sweeps it.
+
+     PAINT. Each ring's circumference is four faces at 45° like a box
+     (front / side / back / side, BoxGeometry's u directions), u is a PLANAR
+     projection across the face (so a lapel painted 30% across the front lands
+     30% across the chest) and v runs the OLD box span, so city/clothes.js's
+     atlas rows land where they always did. geometry.parameters still reports
+     the box each part replaced (armor, wounds, warlord kits size off it).
+     CLOTHES FOLLOW THE BODY: CBZ.humanShellSpec builds the jacket shell, the
+     prison stripes and armour as offset shells of the same surface.
+
+     INSTANCING. The shape is a pure function of the profile key, so every
+     adult average man shares ONE chest geometry object (one per LOD), and
+     pedinstance.js pools it by geometry exactly like the hair shells.
+     LOD: rig.setHandLod(2) swaps the torso parts to their 12-around far lofts
+     together with the limbs. */
+  const NECK_LEN = 0.09;          // the head rides this far above the column top (adult)
+  const SHOULDER_DROP = 0.10;     // the arm pivot sits this far below the column top (adult)
+  const TORSO_SPECS = Object.create(null), TORSO_GEO = Object.create(null);
+  const SQH = Math.SQRT1_2;
+  const TORSO_FACE = ["front", "side", "back", "side", "cap"];
+  const gss = (x, s) => Math.exp(-(x / s) * (x / s));
+  const winK = (k, a, b) => sm01((k - a) / 0.08) * sm01((b - k) / 0.08);
+  // Monotone cubic (Fritsch-Carlson) through keyed rows: smooth, no overshoot.
+  function pchip(xs, ys) {
+    const n = xs.length, h = [], dl = [], m = new Float64Array(n);
+    for (let i = 0; i < n - 1; i++) { h[i] = xs[i + 1] - xs[i]; dl[i] = (ys[i + 1] - ys[i]) / h[i]; }
+    m[0] = dl[0]; m[n - 1] = dl[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      if (dl[i - 1] * dl[i] <= 0) m[i] = 0;
+      else { const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1]; m[i] = (w1 + w2) / (w1 / dl[i - 1] + w2 / dl[i]); }
+    }
+    return function (x) {
+      if (x <= xs[0]) return ys[0];
+      if (x >= xs[n - 1]) return ys[n - 1];
+      let i = 0;
+      while (i < n - 2 && xs[i + 1] < x) i++;
+      const t = (x - xs[i]) / h[i], t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h[i] * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h[i] * m[i + 1];
+    };
+  }
+  const RING_FIELDS = ["a", "zf", "zb", "zc", "n", "tw"];
+  function ringTable(rows) {
+    for (let i = 1; i < rows.length; i++) if (rows[i].y < rows[i - 1].y + 0.002) rows[i].y = rows[i - 1].y + 0.002;
+    const ys = rows.map((r) => r.y), f = {};
+    for (const k of RING_FIELDS) f[k] = pchip(ys, rows.map((r) => r[k]));
+    return function (y) { const r = { y }; for (const k of RING_FIELDS) r[k] = f[k](y); return r; };
+  }
+
+  /* The body's shape record. Everything is in BODY-local authored units (the
+     frame the old boxes were placed in), derived from the profile — nothing
+     here is an adult-male literal except the relative section shape. */
+  function torsoSpec(P, form, elder, headZ) {
+    const key = P.key + "|" + form + "|" + elder + "|" + (headZ || 0).toFixed(3);
+    let S = TORSO_SPECS[key];
+    if (S) return S;
+    const hipY = P.legUp + P.legLo, base = hipY - 0.005;
+    const neckY = base + P.torsoH - 0.015;
+    const vs = P.torsoH / 0.95;                                 // column scale (child/female)
+    const nk = P.headSize > 0 ? cl01(1 - P.neckDrop / (P.headSize * 0.17)) : 1;
+    const hk = P.headSize / 0.60;
+    const F = HEAD_FORMS[form] || HEAD_FORMS.m;
+    const W = P.torsoW / 2, D = P.torsoD / 2, R = P.armW / 2, AX = P.armX;
+    // the head first (a young child still carries it low, half the old sink),
+    // then the shoulders: never so high that the trapezius cannot pass under the chin
+    const pivotY = neckY + NECK_LEN * vs * nk - 0.6 * P.neckDrop;
+    const shoulderY = Math.min(neckY - SHOULDER_DROP * vs * (0.4 + 0.6 * nk), pivotY - 0.075 * vs - 0.43 * R);
+    const ph = PHYSIQUE[P.physique] || PHYSIQUE.average;
+    const fem = P.fem ? (P.child ? cl01((P.ageYears - 11) / 5) : 1) : 0;
+    const man = P.fem ? 0 : (P.child ? cl01((P.ageYears - 12) / 6) : 1);
+    const kidK = P.child ? cl01((P.ageYears - 2) / 14) : 1;     // a body's definition fades in with age
+    // THE NECK where it meets the body (headGeometry's column at the junction)
+    const nRx = F.neck[1] * 0.98 * hk, nRz = nRx * 0.94, nZc = -0.031 * hk + (headZ || 0);
+    const yN = Math.max(Math.min(neckY, pivotY - 0.07 * vs), shoulderY + 0.30 * R + 0.05 * vs);
+    const tb = 0.05 * vs;
+    const sp = shoulderY - base;
+    const kY = (k) => base + k * sp;
+    // ---- the PELVIS ------------------------------------------------------
+    const pw = P.pelvisW / 2, pd = P.pelvisD / 2, pk = P.pelvisH / 0.20;
+    const hipOut = Math.max(pw, P.hipX + P.legW / 2 + 0.012);
+    const pTop = hipY + 0.03 + P.pelvisH / 2, pBot = hipY - 0.115 * pk;
+    const pel = ringTable([
+      { y: pBot,                a: Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), zf: 0.40 * pd, zb: 0.50 * pd, zc: 0, n: 2.2, tw: 0 },
+      { y: hipY - 0.07 * pk,    a: 0.64 * hipOut, zf: 0.72 * pd, zb: 0.86 * pd, zc: 0, n: 2.4, tw: 0 },
+      { y: hipY - 0.01 * pk,    a: 0.94 * hipOut, zf: 0.86 * pd, zb: 0.98 * pd, zc: 0, n: 2.6, tw: 0 },
+      { y: hipY + 0.05 * pk,    a: hipOut,        zf: 0.92 * pd, zb: 0.98 * pd, zc: 0, n: 2.7, tw: 0 },
+      { y: hipY + 0.10 * pk,    a: lerpN(hipOut, pw, 0.6) * 0.985, zf: 0.93 * pd, zb: 0.93 * pd, zc: 0, n: 2.7, tw: 0 },
+      { y: pTop,                a: 0.95 * pw,     zf: 0.93 * pd, zb: 0.91 * pd, zc: 0, n: 2.7, tw: 0 },
+    ]);
+    // ---- the COLUMN (chest + waist + shoulders), rows in D/W units ----------
+    const waistA = P.waistShare > 0 ? (P.waistW / 2) / W : ph.waist;
+    const waistZ = P.waistShare > 0 ? (P.waistD / 2) / D : (ph.soft ? 1.04 : 0.90);
+    const aSh1 = (W + (AX - W) * 0.45) / W, aSh2 = (AX - 0.35 * R) / W, aSh3 = (AX - 0.55 * R) / W;
+    const chestZ = lerpN(0.96, 0.86, fem);
+    // [k, half width /W, front /D, back /D, squareness]. The back is DEEP at the
+    // shoulder line (the trapezius over C7 carries the neck) and the section
+    // turns elliptical there (n < 2 thins the tips into the deltoid).
+    const body = [
+      [-0.05, 0.90, 0.86, 0.86, 2.6],
+      [0.08, lerpN(0.90, waistA, 0.35), 0.86, 0.84, 2.6],
+      [0.24, waistA, waistZ, 0.76 + 0.14 * ph.soft, 2.6],
+      [0.40, lerpN(waistA, 0.955, 0.55), lerpN(waistZ, 0.91, 0.5), 0.84, 2.65],
+      [0.52, 0.965, 0.93, 0.92, 2.7],
+      [0.64, 0.99, chestZ, 0.97, 2.8],
+      [0.76, 1.00, chestZ - 0.02, 1.00, 2.9],
+      [0.86, aSh1, 0.80, 0.92, 2.3],
+      [0.94, aSh2, 0.72, 0.82, 2.0],
+      [1.02, aSh3, 0.66, 0.74, 1.9],
+    ];
+    const rows = [];
+    for (const r of body) {
+      const y = kY(r[0]);
+      const row = { y, a: r[1] * W, zf: r[2] * D, zb: r[3] * D, zc: 0, n: r[4], tw: 0 };
+      if (y < pTop + 0.03) {                                    // the shirt tucks INTO the trousers
+        const p = pel(Math.min(y, pTop)), cl = 0.016 * vs;
+        row.a = Math.min(row.a, p.a - cl); row.zf = Math.min(row.zf, p.zf - cl); row.zb = Math.min(row.zb, p.zb - cl);
+      }
+      rows.push(row);
+    }
+    // THE TRAPEZIUS: from the shoulder end (inside the deltoid ball) up and in
+    // to the neck, rising steeply only near the neck (y ~ u^2), the ring
+    // tipping forward as it goes (tw: 0 at the shoulder, 1 at the neck).
+    const yT0 = shoulderY + 0.30 * R, aT0 = AX - 0.95 * R;
+    // the front of the neck ring (the collarbone notch) sits lower than its
+    // sides, but never lower than the shoulder line allows (no fold)
+    const tf = Math.min(0.07 * vs * (0.4 + 0.6 * nk), 0.8 * (yN - yT0));
+    for (const u of [0, 0.3, 0.55, 0.78, 1]) {
+      rows.push({
+        y: yT0 + (yN - yT0) * Math.pow(u, 1.4),
+        a: lerpN(aT0, nRx + 0.010 * vs, Math.pow(u, 0.8)),
+        zf: lerpN(0.62 * D, nRz + 0.010 * vs, u), zb: lerpN(0.70 * D, nRz + 0.010 * vs, u),
+        zc: lerpN(0, nZc, u), n: lerpN(1.9, 2.0, u), tw: u * u,
+      });
+    }
+    // an older back rounds and the shoulders roll forward
+    if (elder > 0) for (const r of rows) { const k = (r.y - base) / sp; r.zc += 0.05 * elder * D * sm01((k - 0.7) / 0.4); }
+    // THE NECK IS CARRIED BY THE BACK: wherever the neck column is buried (it
+    // hangs 0.20 below its pivot), the section's back must lie behind it, or
+    // the nape pokes out through the top of the back.
+    // (and in front of it: a head thrown back swings the throat forward)
+    const S_notch = yN - tf - 0.03 * vs;
+    const neckBot = pivotY - 0.20 * hk, needBack = -nZc + nRz * 1.02 + 0.03 * vs, needFront = nZc + nRz + 0.05 * vs;
+    for (let i = 0; i < rows.length - 1; i++) {
+      const r = rows[i];
+      if (r.y > neckBot - 0.02) r.zb = Math.max(r.zb, needBack + r.zc);
+      // the front only BELOW the collarbone notch: above it the throat must show
+      if (r.y > neckBot - 0.02 && r.y < S_notch) r.zf = Math.max(r.zf, needFront - r.zc);
+    }
+    const at = ringTable(rows);
+    const waistH = P.waistShare > 0 ? P.waistShare * P.torsoH : 0;
+    S = TORSO_SPECS[key] = {
+      key, P, vs, base, hipY, neckY, shoulderY, pivotY, yN, tf, tb, sp, W, D, R, AX,
+      nRx, nRz, nZc, pTop, pBot, hipOut, pw, pd, pk, at, pel,
+      yBot: kY(-0.05), yTop: yN, chestBot: base + waistH, waistH,
+      // shape weights (features), by sex, physique and age
+      pec: man * ph.pec * kidK, pecK: ph.soft ? 0.57 : 0.63,
+      bust: fem * ph.bust, bustK: 0.585 - 0.05 * elder,
+      belly: (P.child ? 0 : ph.belly * (P.fem ? 0.6 : 1)) + 0.35 * elder,
+      scap: ph.scap * (0.4 + 0.6 * kidK), spine: ph.spine * (0.4 + 0.6 * kidK), elder,
+      glute: (P.fem ? 1.35 : 1) * (ph.soft ? 1.25 : ph === PHYSIQUE.slim ? 0.75 : 1) * (0.5 + 0.5 * kidK),
+    };
+    return S;
+  }
+  // Surface relief on a column section, as a z offset (front +): xn = x / a.
+  function featZ(S, k, xn, c) {
+    const ax = Math.abs(xn), D = S.D;
+    let dz = 0;
+    if (c > 0) {
+      const fw = Math.pow(c, 0.8);
+      if (S.pec > 0) {
+        dz += S.pec * 0.10 * D * gss(k - S.pecK, k > S.pecK ? 0.10 : 0.045) * gss(ax - 0.42, 0.30) * fw;
+        dz -= S.pec * 0.012 * D * gss(xn, 0.09) * winK(k, 0.42, 0.80) * fw;        // the sternum between
+      }
+      if (S.bust > 0) dz += S.bust * 0.20 * D * gss(k - S.bustK, k > S.bustK ? 0.11 : 0.065) * gss(ax - 0.40, 0.26) * fw;
+      if (S.belly > 0) dz += S.belly * 0.16 * D * gss(k - 0.27, k > 0.27 ? 0.15 : 0.10) * gss(xn, 0.55) * fw;
+    } else if (c < 0) {
+      const bw = Math.pow(-c, 0.8);
+      if (S.scap > 0) dz -= S.scap * 0.07 * D * gss(k - 0.74, k > 0.74 ? 0.09 : 0.12) * gss(ax - 0.42, 0.22) * bw;
+      if (S.spine > 0) dz += S.spine * 0.035 * D * gss(xn, 0.07) * winK(k, 0.10, 0.95) * bw;
+      if (S.elder > 0) dz -= S.elder * 0.10 * D * gss(k - 0.86, 0.14) * bw;
+    }
+    return dz;
+  }
+  function pelvisFeatZ(S, y, xn, c) {
+    const ax = Math.abs(xn), pd = S.pd, pk = S.pk;
+    let dz = 0;
+    if (c < 0) {
+      const bw = Math.pow(-c, 0.8);
+      dz -= S.glute * 0.16 * pd * gss(y - (S.hipY - 0.015 * pk), 0.055 * pk) * gss(ax - 0.45, 0.30) * bw;
+      dz += 0.025 * pd * gss(xn, 0.06) * sm01((S.hipY + 0.03 * pk - y) / (0.03 * pk)) * bw;       // the cleft
+    } else if (c > 0 && S.belly > 0) {
+      dz += S.belly * 0.05 * pd * gss(y - (S.pTop - 0.03 * pk), 0.05 * pk) * gss(xn, 0.6) * Math.pow(c, 0.8);
+    }
+    return dz;
+  }
+  /* One point of a section: face 0 front (u -x -> +x), 1 +x side (front ->
+     back), 2 back (+x -> -x), 3 -x side (back -> front) — BoxGeometry's own u
+     directions. u is uniform across the face's PLANAR projection. */
+  const _rp = { x: 0, y: 0, z: 0, c: 0, xn: 0 };
+  function ringPoint(R, f, u) {
+    const e = 2 / R.n, q = Math.pow(SQH, e);
+    let s, c;
+    if (f === 0 || f === 2) {
+      const xr = (f === 0 ? 2 * u - 1 : 1 - 2 * u) * q;          // x / a
+      s = Math.sign(xr) * Math.pow(Math.abs(xr), 1 / e);
+      c = Math.sqrt(Math.max(0, 1 - s * s)) * (f === 0 ? 1 : -1);
+    } else {
+      const zt = R.zf * q, zm = -R.zb * q;
+      const z = f === 1 ? zt + (zm - zt) * u : zm + (zt - zm) * u;
+      c = z >= 0 ? Math.pow(z / R.zf, 1 / e) : -Math.pow(-z / R.zb, 1 / e);
+      s = Math.sqrt(Math.max(0, 1 - c * c)) * (f === 1 ? 1 : -1);
+    }
+    const x = R.a * Math.sign(s) * Math.pow(Math.abs(s), e);
+    _rp.x = x; _rp.xn = R.a > 1e-6 ? x / R.a : 0; _rp.c = c;
+    _rp.z = R.zc + (c >= 0 ? R.zf : R.zb) * Math.sign(c) * Math.pow(Math.abs(c), e);
+    _rp.y = R.y + (R.tw || 0) * (c > 0 ? -(R.tf || 0) * Math.pow(c, 1.5) : (R.tb || 0) * Math.pow(-c, 1.5));
+    return _rp;
+  }
+  // Ring heights for [y0, y1] spaced by ARC LENGTH through the shape (width,
+  // depth and relief), so the shoulders and the chest get the rings.
+  function sampleYs(ringAt, reliefAt, y0, y1, count) {
+    const N = 96, cum = [0], ys = [y0];
+    let pr = ringAt(y0), pf = reliefAt ? reliefAt(y0) : 0, acc = 0;
+    for (let i = 1; i <= N; i++) {
+      const y = y0 + (y1 - y0) * i / N, r = ringAt(y), fz = reliefAt ? reliefAt(y) : 0;
+      acc += Math.sqrt((y - ys[i - 1]) * (y - ys[i - 1]) + (r.a - pr.a) * (r.a - pr.a) +
+        0.5 * ((r.zf - pr.zf) * (r.zf - pr.zf) + (r.zb - pr.zb) * (r.zb - pr.zb)) + 4 * (fz - pf) * (fz - pf));
+      cum.push(acc); ys.push(y); pr = r; pf = fz;
+    }
+    const out = [];
+    let j = 0;
+    for (let i = 0; i <= count; i++) {
+      const target = acc * i / count;
+      while (j < N - 1 && cum[j + 1] < target) j++;
+      const t = cum[j + 1] > cum[j] ? (target - cum[j]) / (cum[j + 1] - cum[j]) : 0;
+      out.push(ys[j] + (ys[j + 1] - ys[j]) * Math.min(1, Math.max(0, t)));
+    }
+    return out;
+  }
+  const TORSO_COUNTS = {   // [near, far] rings
+    chest: [20, 10], chestTop: [16, 8], waist: [7, 4], pelvis: [9, 5], jacket: [20, 10], band: [3, 2], vest: [12, 6],
+  };
+  /* The rings of a part, TOP first, each a section record plus the relief
+     function the surface wears. Shells (jacket / band / vest) are the column
+     inflated off the body: the section is widened by `off`, never tucks in
+     below the pelvis or (a jacket) below a straight drape from the chest, and
+     the shoulder top rises by the same offset. */
+  function partRings(spec, lod) {
+    const S = spec.S, far = lod >= 2 ? 1 : 0, part = spec.part;
+    const rings = [];
+    if (part === "pelvis") {
+      const ys = sampleYs(S.pel, null, S.pBot, S.pTop, TORSO_COUNTS.pelvis[far]);
+      for (let i = ys.length - 1; i >= 0; i--) { const r = S.pel(ys[i]); r.k = -1; rings.push(r); }
+      // the waistband: a ledge that slopes in and up under the shirt
+      const t = S.pel(S.pTop);
+      rings.unshift({ y: S.pTop + 0.012 * S.vs, a: t.a * 0.84, zf: t.zf * 0.84, zb: t.zb * 0.84, zc: 0, n: t.n, tw: 0, k: -1 });
+      return rings;
+    }
+    if (part === "collar") {
+      if (spec.bare) {                 // no garment: the neck FLARES into the trapezius (a fillet, tucked under the neck)
+        const mk = (y, add, m, v) => ({ y, a: (S.nRx + add) * m, zf: (S.nRz + add) * m, zb: (S.nRz + add) * m, zc: S.nZc, n: 2, tw: 1, tf: S.tf, tb: S.tb, k: 2, v });
+        const r = [mk(S.yN + 0.03 * S.vs, 0, 0.97, 1), mk(S.yN + 0.004 * S.vs, 0.006 * S.vs, 1, 0.6), mk(S.yN - 0.02 * S.vs, 0.02 * S.vs, 1.06, 0.3), mk(S.yN - 0.05 * S.vs, 0.03 * S.vs, 1.16, 0)];
+        return far ? [r[0], r[2], r[3]] : r;
+      }
+      const rx = S.nRx + 0.022 * S.vs, rz = S.nRz + 0.022 * S.vs, h = 0.038 * S.vs;
+      const mk = (y, m, v, dtf) => ({ y, a: rx * m, zf: rz * m, zb: rz * m, zc: S.nZc, n: 2, tw: 1, tf: S.tf + (dtf || 0), tb: S.tb, k: 2, v });
+      const r = [mk(S.yN + h, 0.99, 1, 0.012 * S.vs), mk(S.yN + 0.5 * h, 1.0, 0.62, 0.006 * S.vs), mk(S.yN - 0.012 * S.vs, 1.02, 0.25), mk(S.yN - 0.05 * S.vs, 1.07, 0)];
+      return far ? [r[0], r[2], r[3]] : r;
+    }
+    const shell = part === "jacket" || part === "band" || part === "vest";
+    let y0, y1, n;
+    if (part === "chest") { y0 = S.chestBot > S.base + 0.001 ? S.chestBot : S.yBot; y1 = S.yTop; n = TORSO_COUNTS[S.chestBot > S.base + 0.001 ? "chestTop" : "chest"][far]; }
+    else if (part === "waist") { y0 = S.yBot; y1 = S.chestBot + WAIST_TUCK; n = TORSO_COUNTS.waist[far]; }
+    else { y0 = spec.y0; y1 = Math.min(spec.y1, S.yTop); n = TORSO_COUNTS[part][far]; }
+    const off = shell ? spec.off : 0;
+    const drapeR = part === "jacket" ? S.at(S.base + 0.60 * S.sp) : null;
+    const drapeK = part === "jacket" ? (S.P.fem ? 0.90 : 0.96) : 0;
+    const ringAt = function (y) {
+      const r = S.at(y);
+      r.tf = S.tf; r.tb = S.tb; r.k = (y - S.base) / S.sp;
+      if (shell) {
+        if (y < S.pTop + 0.03) { const p = S.pel(Math.max(S.pBot, Math.min(y, S.pTop))); r.a = Math.max(r.a, p.a); r.zf = Math.max(r.zf, p.zf); r.zb = Math.max(r.zb, p.zb); }
+        if (drapeR && y < drapeR.y) { r.a = Math.max(r.a, drapeR.a * drapeK); r.zf = Math.max(r.zf, drapeR.zf * drapeK); r.zb = Math.max(r.zb, drapeR.zb * drapeK); }
+        if (spec.flat) { r.n = Math.max(r.n, spec.flat); }
+        r.a += off; r.zf += off; r.zb += off;
+        if (r.k > 1) r.y += off * 0.9;                        // the shoulder top rises with the shell
+      }
+      if (part === "waist") {                                   // tuck the top a hair inside the chest
+        const m = 1 - 0.035 * cl01((y - S.chestBot + 0.004) / 0.03);
+        r.a *= m; r.zf *= m; r.zb *= m;
+      }
+      return r;
+    };
+    const relief = function (y) { const k = (y - S.base) / S.sp; return featZ(S, k, 0.42, 1) - featZ(S, k, 0.42, -1); };
+    const ys = sampleYs(ringAt, relief, y0, y1, n);
+    for (let i = ys.length - 1; i >= 0; i--) rings.push(ringAt(ys[i]));
+    if (part === "jacket") {                                     // the jacket's stand collar, higher at the back
+      const t = rings[0];
+      rings.unshift(Object.assign({}, t, { y: t.y + 0.03 * S.vs, a: t.a + 0.004, zf: t.zf + 0.004, zb: t.zb + 0.004, tf: t.tf + 0.03 * S.vs }));
+    }
+    return rings;
+  }
+  /* Bake a part: rings (top first) x 4 faces x (nq+1) verts (seams duplicated
+     so each face owns its atlas column), optional fan caps. `paint` = {key,
+     fn(face, u, v) -> [U, V]} from city/clothes.js, or null (flat). */
+  function torsoBake(spec, lod, paint) {
+    lod = lod >= 2 ? 2 : 1;
+    const key = spec.key + "|" + lod + "|" + (paint ? paint.key : "-");
+    let g = TORSO_GEO[key];
+    if (g) return g;
+    const S = spec.S, part = spec.part;
+    const rings = partRings(spec, lod);
+    const nq = lod >= 2 ? 3 : 7, RV = 4 * (nq + 1);
+    const capTop = part === "chest" || part === "waist" || part === "pelvis" || (part === "collar" && !spec.bare);
+    const capBot = part === "chest" || part === "waist" || part === "pelvis";
+    const nv = rings.length * RV + 2 * (2 * RV + 1);              // rings + room for either cap kind
+    const Pp = new Float32Array(nv * 3), Fc = new Uint8Array(nv), Uq = new Float32Array(nv), Vq = new Float32Array(nv);
+    const box = spec.box, bh = box.h, bb = box.y - bh / 2, oy = spec.origin;
+    const shellRelief = part === "jacket" ? 0.8 : (part === "vest" ? (spec.flat ? 0.35 : 0.7) : 1);
+    let o = 0;
+    const put = function (x, y, z, f, u, v) { Pp[o * 3] = x; Pp[o * 3 + 1] = y - oy; Pp[o * 3 + 2] = z; Fc[o] = f; Uq[o] = u; Vq[o] = v; return o++; };
+    const ringStart = [];
+    for (let i = 0; i < rings.length; i++) {
+      const R = rings[i];
+      ringStart.push(o);
+      for (let f = 0; f < 4; f++) for (let k = 0; k <= nq; k++) {
+        const u = k / nq, p = ringPoint(R, f, u);
+        let z = p.z;
+        if (part === "pelvis") z += pelvisFeatZ(S, p.y, p.xn, p.c);
+        else if (part !== "collar") z += featZ(S, R.k, p.xn, p.c) * shellRelief;
+        // v never sits ON the row edge (the next atlas row is a cut jacket)
+        const v = 0.01 + 0.98 * (R.v != null ? R.v : cl01((p.y - bb) / bh));
+        put(p.x, p.y, z, f, u, v);
+      }
+    }
+    const idx = [];
+    for (let i = 0; i < rings.length - 1; i++) for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
+      const c = ringStart[i] + f * (nq + 1) + k, b = c + RV;
+      idx.push(b, b + 1, c, b + 1, c + 1, c);
+    }
+    // FAN CAPS on duplicated rims (shrunk a hair so the smooth-normal weld
+    // leaves the visible rim's normals alone)
+    const cap = function (ri, top) {
+      const s0 = ringStart[ri], rim = o;
+      let cx = 0, cy = 0, cz = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let j = 0; j < RV; j++) {
+        const q = s0 + j;
+        const x = Pp[q * 3], y = Pp[q * 3 + 1] + oy, z = Pp[q * 3 + 2];
+        cx += x; cy += y; cz += z; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+      }
+      cx /= RV; cy /= RV; cz /= RV;
+      for (let j = 0; j < RV; j++) {
+        const q = s0 + j, x = Pp[q * 3], y = Pp[q * 3 + 1] + oy, z = Pp[q * 3 + 2];
+        const ux = cl01((x - x0) / (x1 - x0 || 1)), vz = cl01((z - z0) / (z1 - z0 || 1));
+        put(cx + (x - cx) * 0.998, y, cz + (z - cz) * 0.998, 4, 0.01 + 0.98 * ux, 0.01 + 0.98 * (top ? 1 - vz : vz));
+      }
+      const ctr = put(cx, cy + (top ? -0.02 : 0.004) * S.vs, cz, 4, 0.5, 0.5);
+      for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
+        const a = rim + f * (nq + 1) + k;
+        if (top) idx.push(ctr, a, a + 1); else idx.push(ctr, a + 1, a);
+      }
+    };
+    if (capTop) {
+      if (part === "collar") {                                   // the collar's top edge folds in to the neck
+        const s0 = ringStart[0], rim = o;
+        for (let j = 0; j < RV; j++) { const q = s0 + j; put(Pp[q * 3] * 0.999, Pp[q * 3 + 1] + oy, S.nZc + (Pp[q * 3 + 2] - S.nZc) * 0.999, 4, (j % (nq + 1)) / nq, 0.99); }
+        const inner = o;
+        for (let j = 0; j < RV; j++) { const q = s0 + j; put(Pp[q * 3] * 0.78, Pp[q * 3 + 1] + oy - 0.012 * S.vs, S.nZc + (Pp[q * 3 + 2] - S.nZc) * 0.78, 4, (j % (nq + 1)) / nq, 0.01); }
+        for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
+          const a = rim + f * (nq + 1) + k, b = inner + f * (nq + 1) + k;
+          idx.push(a, b, a + 1, a + 1, b, b + 1);
+        }
+      } else cap(0, true);
+    }
+    if (capBot) cap(rings.length - 1, false);
+    const nUsed = o;
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(Pp.slice(0, nUsed * 3), 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nUsed * 3), 3));
+    const U = new Float32Array(nUsed * 2);
+    for (let i = 0; i < nUsed; i++) {
+      if (paint) { const uv = paint.fn(TORSO_FACE[Fc[i]], Uq[i], Vq[i]); U[i * 2] = uv[0]; U[i * 2 + 1] = uv[1]; }
+      else { U[i * 2] = Fc[i] < 4 ? (Fc[i] + Uq[i]) / 4 : Uq[i]; U[i * 2 + 1] = Vq[i]; }
+    }
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    g.setIndex(new THREE.BufferAttribute(nUsed > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+    finishGeo(g);
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.parameters = { width: box.w, height: box.h, depth: box.d };   // the box this part replaced
+    g.userData.torso = { part, box, origin: oy, face: Fc.slice(0, nUsed), u: Uq.slice(0, nUsed), v: Vq.slice(0, nUsed), rings: rings.length, nq };
+    g.name = "torso~" + part + "~" + lod;
+    g._shared = true;
+    return (TORSO_GEO[key] = g);
+  }
+  /* A part's spec: which slice of which body, in which mesh frame. box = the
+     box it replaces {w, h, d, y (body-local centre)}, origin = the mesh's
+     body-local y (geometry is baked relative to it). */
+  function partSpec(S, part, box, origin, extra) {
+    const sp = Object.assign({ S, part, box, origin, lod: 1 }, extra || {});
+    // a collar is the NECK's, not the body's: every physique of a form shares it
+    // (baked relative to its own origin at the neck ring), which keeps the
+    // painted-collar pools one per neck, not one per body type
+    const who = part === "collar" ? "N" + [S.nRx, S.nRz, S.nZc, S.tf, S.tb, S.vs].map((x) => x.toFixed(4)).join(",") : S.key;
+    if (part === "collar") sp.key = who + "|collar|" + (sp.bare ? 1 : 0) + "|" + [box.w, box.h, box.d].map((x) => (+x).toFixed(4)).join(",");
+    else sp.key = who + "|" + part + "|" + [box.w, box.h, box.d, box.y, origin, sp.y0 || 0, sp.y1 || 0, sp.off || 0, sp.flat || 0, sp.bare ? 1 : 0].map((x) => (+x).toFixed(4)).join(",");
+    return sp;
+  }
+  function partMesh(spec, material) {
+    const m = new THREE.Mesh(torsoBake(spec, 1, null), material);
+    m.userData.torsoPart = spec;
+    m.castShadow = m.receiveShadow = true;
+    return m;
+  }
+  // the geometry of ANY shaped body part (limb loft or torso part) for its
+  // current LOD and paint — city/clothes.js calls this with a painter on
+  // dress and with null on strip; omitted = keep the paint.
+  function partGeometry(mesh, paint) {
+    const ud = mesh && mesh.userData;
+    if (!ud) return null;
+    if (ud.limb) return limbGeometry(mesh, paint);
+    const spec = ud.torsoPart;
+    if (!spec) return null;
+    if (paint !== undefined) ud.limbPaint = paint || null;
+    return torsoBake(spec, spec.lod, ud.limbPaint || null);
+  }
+  function setTorsoLod(rig, lod) {
+    lod = lod >= 2 ? 2 : 1;
+    const s = rig && rig.skinSlots;
+    if (!s) return;
+    const list = [].concat(s.torso || [], s.collar || [], s.pelvis || [], s.stripes || [], rig._jacketMesh ? [rig._jacketMesh] : []);
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i], spec = m && m.userData && m.userData.torsoPart;
+      if (!spec || spec.lod === lod) continue;
+      spec.lod = lod;
+      const flat = m.userData._cbzFlat;
+      if (flat && flat.g && flat.g.userData && flat.g.userData.torso) flat.g = torsoBake(spec, lod, null);
+      if (m.geometry && m.geometry.userData && m.geometry.userData.torso) m.geometry = partGeometry(m);
+    }
+  }
+  // The body's FRONT (side > 0) or BACK (side < 0) surface z at body-local
+  // (x, y) — where a badge, a tie or a strap should sit.
+  function torsoSurfaceZ(S, x, y, side) {
+    const R = S.at(y), e = 2 / R.n;
+    const xr = Math.min(0.999, Math.abs(x) / Math.max(1e-6, R.a));
+    const s = Math.pow(xr, 1 / e), c = Math.sqrt(Math.max(0, 1 - s * s)) * (side < 0 ? -1 : 1);
+    const k = (y - S.base) / S.sp;
+    return R.zc + (c >= 0 ? R.zf : -R.zb) * Math.pow(Math.abs(c), e) + featZ(S, k, x / Math.max(1e-6, R.a), c);
+  }
+  /* CBZ.humanShellSpec(rig, kind, opts) — a garment/armour SHELL that follows
+     this body: kind "jacket" | "band" | "vest"; opts {y0, y1 (body-local
+     span; a jacket runs to the neck), off (clearance), flat (a stiffer, boxier
+     section for plate armour), box: {w,h,d,y} for the paint's v span,
+     origin: the mesh's body-local y}. Returns the spec to hang on the mesh as
+     userData.torsoPart; CBZ.humanLimbGeometry(mesh, painter) then bakes it. */
+  function shellSpec(rig, kind, opts) {
+    const S = rig && rig.torsoShape;
+    if (!S) return null;
+    opts = opts || {};
+    const y0 = opts.y0 != null ? opts.y0 : S.base, y1 = opts.y1 != null ? opts.y1 : S.yTop;
+    const box = opts.box || { w: S.W * 2, h: y1 - y0, d: S.D * 2, y: (y0 + y1) / 2 };
+    return partSpec(S, kind, box, opts.origin != null ? opts.origin : 0,
+      { y0, y1, off: opts.off != null ? opts.off : 0.03 * S.vs, flat: opts.flat || 0 });
+  }
+  CBZ.humanShellSpec = shellSpec;
+
+  /* ==== THE NECK COLUMN (merged into the head geometry) ====================
+     In the HEAD's frame (the adult 0.60 head; the neck pivot is y = -0.30):
+     a lofted column from inside the body (y -0.50) up into the skull,
+     leaning forward a touch, with the two sternocleidomastoid ridges running
+     from behind the ear down to the collarbone notch, the notch itself, an
+     Adam's apple on a man, and the nape. UVs are the ink atlas's neck band. */
+  const NECK_RINGS = [[-0.11, 0.88, -0.012], [-0.17, 0.90, -0.016], [-0.24, 0.91, -0.020], [-0.31, 0.93, -0.025],
+    [-0.38, 0.97, -0.030], [-0.43, 1.00, -0.033], [-0.47, 0.78, -0.036]];
+  const NECK_RELIEF = { m: [0.011, 0.018, 0.009], f: [0.007, 0.004, 0.008], c: [0.004, 0, 0.004] };  // scm, adam's apple, notch
+  function neckColumnGeometry(F, fk, far) {
+    const rows = far ? [NECK_RINGS[0], NECK_RINGS[2], NECK_RINGS[4], NECK_RINGS[5], NECK_RINGS[6]] : NECK_RINGS;
+    const nq = far ? 3 : 6, RV = 4 * (nq + 1), r1 = F.neck[1], A = HEAD_ATLAS;
+    const rel = NECK_RELIEF[fk] || NECK_RELIEF.m;
+    const nv = rows.length * RV + RV + 1;
+    const P = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
+    let o = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const y = rows[i][0], r = r1 * rows[i][1], zc = rows[i][2];
+      const sN = cl01((y + 0.44) / 0.28);                        // 0 at the notch .. 1 behind the ear
+      const phi = lerpN(0.32, 1.92, sN), win = sm01(sN / 0.15) * sm01((1 - sN) / 0.2);
+      for (let f = 0; f < 4; f++) for (let k = 0; k <= nq; k++) {
+        const u = k / nq, al = -Math.PI / 4 + f * Math.PI / 2 + u * Math.PI / 2;
+        const aa = Math.abs(Math.atan2(Math.sin(al), Math.cos(al)));
+        let dr = rel[0] * gss(aa - phi, 0.30) * win;                           // sternocleidomastoid
+        dr += rel[1] * gss(aa, 0.30) * gss(y + 0.265, 0.035);                  // Adam's apple
+        dr -= rel[2] * gss(aa, 0.35) * gss(y + 0.45, 0.035);                   // the notch
+        dr -= 0.006 * gss(aa - Math.PI, 0.3) * cl01((y + 0.40) / 0.1);         // the nape
+        P[o * 3] = (r + dr) * Math.sin(al); P[o * 3 + 1] = y; P[o * 3 + 2] = zc + (r * 0.94 + dr) * Math.cos(al);
+        const col = f === 0 ? A.front : f === 2 ? A.back : A.side;
+        const uu = f === 3 ? 1 - u : u;                                           // both sides run front -> back
+        const ay = 1 - (1 - A.headV) * cl01((y + 0.44) / 0.30);
+        U[o * 2] = (col[0] + uu * (col[1] - col[0])) / A.W; U[o * 2 + 1] = 1 - ay;
+        o++;
+      }
+    }
+    const idx = [];
+    for (let i = 0; i < rows.length - 1; i++) for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
+      const c = i * RV + f * (nq + 1) + k, b = c + RV;
+      idx.push(b, b + 1, c, b + 1, c + 1, c);
+    }
+    const last = (rows.length - 1) * RV, rim = o;               // the buried bottom, closed
+    for (let j = 0; j < RV; j++) { P[o * 3] = P[(last + j) * 3] * 0.998; P[o * 3 + 1] = P[(last + j) * 3 + 1]; P[o * 3 + 2] = P[(last + j) * 3 + 2]; U[o * 2] = PLAIN_U; U[o * 2 + 1] = PLAIN_V; o++; }
+    const ctr = o; P[o * 3] = 0; P[o * 3 + 1] = rows[rows.length - 1][0]; P[o * 3 + 2] = rows[rows.length - 1][2]; U[o * 2] = PLAIN_U; U[o * 2 + 1] = PLAIN_V; o++;
+    for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) { const a = rim + f * (nq + 1) + k; idx.push(ctr, a + 1, a); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    g.setIndex(new THREE.BufferAttribute(new Uint16Array(idx), 1));
+    return finishGeo(g);
+  }
+
   function makeCharacter(c) {
     const g = new THREE.Group();
     // Keep the world/physics root at scale 1: ragdoll, KO, child rigs and mode
@@ -2530,7 +3116,8 @@
     // so the untouched default path (c.build undefined/"m", no c.age) is
     // byte-identical to before this change: same widths, same offsets, same
     // leg height. Adding a body is a row in GROWTH, not new geometry code.
-    const P = charProfile(c.build, c.age);
+    const physique = physiqueOf(c);
+    const P = charProfile(c.build, c.age, physique);
     // Stamped on the ROOT so any system holding only an Object3D can ask what
     // it is looking at — systems/childsafe.js reads exactly these to keep
     // children out of weapons, gore and the kill feed.
@@ -2575,100 +3162,70 @@
     body.position.y = 0; // bob/sway/lean applied here
     model.add(body);
 
-    // A shallow pelvis overlaps both leg caps and the bottom of the torso. It
-    // MUST live on `body`, not beside it on `model`: walking rotates and bobs
-    // body around the hip socket. A model-level pelvis stays still, so its
-    // horizontal top-back corner repeatedly crosses the animated lower-back
-    // face and appears as a flickering pants-coloured shelf through the back.
-    // Sharing the hip-locked transform makes that overlap rigid while the
-    // existing lower tuck continues to cover the independently swinging legs.
+    // A pelvis overlaps both hip joints and the bottom of the torso. It MUST
+    // live on `body`, not beside it on `model`: walking rotates and bobs body
+    // round the hip socket, and sharing that transform keeps the overlap rigid.
+    // THE BODY SHAPE (TORSO block): one surface per profile/physique/form/age
+    // that the pelvis, chest, waist and collar all sample, so they meet.
+    const form = headForm(P);
+    const elder = (c.age != null && isFinite(c.age) && c.age >= 50) ? Math.round(cl01((c.age - 50) / 30) * 4) / 4 : 0;
+    const headZ = 0.035 * elder * (P.torsoH / 0.95);            // an older head carries forward
+    const TS = torsoSpec(P, form, elder, headZ);
     // c.pelvis: the hips in their own colour (swim briefs over bare thighs).
-    const pelvis = new THREE.Mesh(boxGeom(P.pelvisW, P.pelvisH, P.pelvisD), cmat(c.pelvis != null ? c.pelvis : c.legs));
-    pelvis.position.set(0, hipY + 0.03, 0); pelvis.castShadow = pelvis.receiveShadow = true;
+    const pelvisY = hipY + 0.03;
+    const pelvis = partMesh(partSpec(TS, "pelvis", { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: pelvisY }, pelvisY),
+      cmat(c.pelvis != null ? c.pelvis : c.legs));
+    pelvis.position.set(0, pelvisY, 0);
     body.add(pelvis);
 
-    // Stature is BAKED INTO THE SEGMENTS now (a female rig is shorter because
-    // her femur and torso boxes are shorter, a toddler because all of them
-    // are), so this node does nothing but the metre conversion. The old
-    // non-uniform `scale.y * 0.97` fem squash is gone: squashing a body is what
-    // made women read as compressed men rather than differently proportioned.
+    // Stature is BAKED INTO THE SEGMENTS (a female rig is shorter because her
+    // femur and torso are shorter, a toddler because all of them are), so this
+    // node does nothing but the metre conversion.
     model.scale.setScalar(humanScale);
 
-    // ---- torso column: chest, plus an optional WAIST box ----------------
-    // base sits a whisker below the hip pivot so the column overlaps the pelvis
-    // and no sub-frame gap can open. neckY then FALLS OUT of the stack instead
-    // of being an adult constant — this single line is what lets a short child
-    // torso put the shoulders where they anatomically belong.
+    // ---- the torso column: CHEST, plus a WAIST part on women and children ----
+    // base sits a whisker below the hip pivot so the column overlaps the pelvis.
+    // neckY is the column's nominal top; the shoulders and the neck pivot fall
+    // out of the body shape (TS.shoulderY / TS.pivotY).
     const base = hipY - 0.005;
     const neckY = base + P.torsoH - 0.015;
     const waistH = P.waistShare > 0 ? P.waistShare * P.torsoH : 0;
     const chestBot = base + waistH;
     const chestH = P.torsoH - waistH;
-    const torso = new THREE.Mesh(boxGeom(P.torsoW, chestH, P.torsoD), cmat(c.torso));
-    torso.position.y = chestBot + chestH / 2;
-    torso.castShadow = torso.receiveShadow = true;
+    const chestY = chestBot + chestH / 2;
+    const torso = partMesh(partSpec(TS, "chest", { w: P.torsoW, h: chestH, d: P.torsoD, y: chestY }, chestY), cmat(c.torso));
+    torso.position.y = chestY;
     body.add(torso);
-    // THE WAIST is the highest-value cheap female cue at gameplay distance.
-    // Shoulder:hip alone still reads "small man" until something carves the
-    // taper between them (WHR ~0.7-0.8 female vs ~0.85-0.95 male). The SAME box
-    // is the toddler's pot belly — there it is WIDER and DEEPER than the chest
-    // instead of narrower. Two boxes either way; the profile numbers do all the
-    // work, which is the whole point of the table.
+    // THE WAIST is the highest-value cheap female cue at gameplay distance, and
+    // the SAME part is a toddler's pot belly (the profile numbers do the work).
     let waist = null;
     if (waistH > 0) {
       // c.waist: the midriff in its own colour (a bikini top's bare middle).
-      waist = new THREE.Mesh(boxGeom(P.waistW, waistH + WAIST_TUCK, P.waistD), cmat(c.waist != null ? c.waist : c.torso));
-      // The top tucks UP into the chest box (the same overlap trick the limb
-      // joints use), so leaning or a hit reaction can never open a seam.
-      waist.position.y = base + (waistH + WAIST_TUCK) / 2;
-      waist.castShadow = waist.receiveShadow = true;
+      const wy = base + (waistH + WAIST_TUCK) / 2;
+      waist = partMesh(partSpec(TS, "waist", { w: P.waistW, h: waistH + WAIST_TUCK, d: P.waistD, y: wy }, wy),
+        cmat(c.waist != null ? c.waist : c.torso));
+      waist.position.y = wy;
       body.add(waist);
     }
-    /* ---- the SHOULDER YOKE (rig.skinSlots.collar) -------------------------
-       OWNER BUG: "security guards and my player sometimes have what looks like
-       a WHITE NECK ROLL — it disrupts outfits and FLICKERS, meaning it must be
-       overlapping." It does overlap, and the flicker is ARITHMETIC, not taste:
-       collarW/collarD were authored in the profile table against NOTHING, and
-       on shipped bodies they came out EXACTLY equal to a plane they sit on.
-         • ADULT_F  collarD 0.46 == torsoD 0.46 — the yoke's front AND back
-           faces share a plane with the chest's over the whole 0.145 they
-           overlap. BOTH are front-facing and BOTH are visible, which is a
-           guaranteed z-fight stipple across the upper chest, drawn in the
-           yoke's flat colour (outfits.js's `security` is 0xe8e8e8 — a near-
-           white band). Every child body from ~15 up lands on it too.
-         • ADULT_M  collarW/2 0.47 == armX - armW/2 0.47 — the yoke butts the
-           arm sockets on exactly their inner plane.
-       So the box is no longer authored against nothing: it is CLAMPED into the
-       gaps it actually bridges. PROUD of the chest and BURIED into each arm
-       socket by a minimum YOKE_CLEAR per face — the 0.01-0.03 clearance family
-       the belt block below already uses, and the same overlap trick limb()
-       uses at the elbow and the pelvis uses over the leg caps, so no seam can
-       open when gait, lean and a hit reaction blend on one frame. Coplanarity
-       is now impossible BY CONSTRUCTION instead of by luck, for every body the
-       table can build. ADULT_M's depth is unchanged (0.50 + 2x0.01 IS the
-       authored 0.52); its width grows 0.02, every millimetre of it inside the
-       arm socket where nothing can see it.
-       One-line revert: CBZ.CONFIG.CHAR_YOKE_CLEAR = false. */
-    const yokeClear = !CBZ.CONFIG || CBZ.CONFIG.CHAR_YOKE_CLEAR !== false;
-    // clear the plane, whichever side of it you are on — a face that is BURIED
-    // is as safe as a face that is PROUD, and only a face that is ON it fights.
-    const clearOf = (v, plane) => (Math.abs(v - plane) < 2 * YOKE_CLEAR ? plane + 2 * YOKE_CLEAR : v);
-    let collarD = P.collarD, collarW = P.collarW;
-    if (yokeClear) {
-      collarD = Math.max(collarD, P.torsoD + 2 * YOKE_CLEAR);
-      collarW = Math.max(collarW, (P.armX - P.armW / 2 + YOKE_CLEAR) * 2);
-      // …and the HEAD sits IN the yoke on a young body (neckDrop sinks it), so
-      // its faces are a plane the yoke can land on too: at age ~2.5 the clamps
-      // above put the yoke's depth within 0.8mm of the skull's.
-      collarD = clearOf(collarD, P.headSize);
-      collarW = clearOf(collarW, P.headSize);
-    }
-    const collar = new THREE.Mesh(boxGeom(collarW, P.collarH, collarD), cmat(c.collar || c.torso));
-    collar.position.y = neckY - 0.04;
+    /* ---- the COLLAR (rig.skinSlots.collar) --------------------------------
+       This slot was the SHOULDER YOKE: a flat slab laid across the top of the
+       chest, bridging it to the arm sockets, with the chin sitting in it (and
+       two rounds of z-fight clamps holding its faces off the chest's). The
+       body now has real shoulders, so the slab is gone and the slot is what a
+       garment actually has there: a COLLAR BAND standing round the base of the
+       neck, bottom buried in the trapezius, top folded in to the neck.
+       city/clothes.js dresses it with the yoke atlas (shirt collar, the tie
+       knot at the throat); flat, it is c.collar (a jumpsuit's lighter collar). */
+    const collarBox = { w: 2 * (TS.nRx + 0.022 * TS.vs) * 1.07, h: 0.108 * TS.vs, d: 2 * (TS.nRz + 0.022 * TS.vs) * 1.07, y: TS.yN };
+    const collarHex = c.collar != null ? c.collar : c.torso;
+    const collar = partMesh(partSpec(TS, "collar", collarBox, TS.yN, { bare: collarHex === skinC }), cmat(c.collar || c.torso));
+    collar.castShadow = false;
+    collar.position.y = TS.yN;
     body.add(collar);
 
     // short-sleeve opt-in: the forearm reads as bare skin (peds.js tees).
-    const shoulderY = neckY - 0.04;
+    // The arm pivots sit inside the shoulder the body shape ends in.
+    const shoulderY = TS.shoulderY;
     // The forearm box stops at the WRIST CREASE (handH above the old wrist
     // line, exactly where the box hand used to start), and the real hand
     // hangs from there — see the HANDS block (bodyHandFit / makeBodyHand).
@@ -2706,14 +3263,15 @@
     // all, and that "head sitting straight on the shoulders" read is half of
     // what makes a small body look like a CHILD instead of a distant adult.
     const neck = new THREE.Group();
-    neck.position.y = neckY - P.neckDrop;
+    // The pivot rides NECK_LEN above the column top (TORSO block), so the
+    // neck shows between the chin and the collar; an older head carries forward.
+    neck.position.set(0, TS.pivotY, headZ);
     // head keeps a FRESH (unshared) material — reactions.js / gore.js /
     // crowd.js tint it per actor, so it must not be a shared cache entry. Its
     // GEOMETRY is shared (see SHAPED PARTS): one per form + nose, sized by
     // scale, and it carries the neck, nose and ears in the same skin.
     const headSize = P.headSize;
     const hk = headSize / 0.60;
-    const form = headForm(P);
     const skinHex = c.skin != null ? c.skin : 0xcf9a72;
     const hairHex = c.hair != null ? c.hair : 0x4a3526;
     const noseV = c.nose != null ? c.nose : defaultNose(skinHex, hairHex);
@@ -2797,9 +3355,14 @@
     body.add(neck);
 
     // ---- accessories (all on the body so they move with it) ----
+    // Jumpsuit STRIPES were three 0.94-wide slabs round a box; now each is a
+    // band of the body's own surface, held 1 cm off it (TORSO block shells).
     if (c.stripes) for (let i = 0; i < 3; i++) {
-      const s = new THREE.Mesh(boxGeom(0.94, 0.12, 0.52), cmat(c.stripes));
-      s.position.y = 1.18 + i * 0.28; body.add(s);
+      const yc = base + (1.18 + i * 0.28 - 0.945) / 0.95 * P.torsoH, hh = 0.06 * TS.vs;
+      const sp = partSpec(TS, "band", { w: P.torsoW + 0.03, h: 2 * hh, d: P.torsoD + 0.03, y: yc }, yc, { y0: yc - hh, y1: yc + hh, off: 0.012 * TS.vs });
+      const s = partMesh(sp, cmat(c.stripes));
+      s.castShadow = false;
+      s.position.y = yc; body.add(s);
       (body.userData.stripes || (body.userData.stripes = [])).push(s);
     }
     const beltParts = [], badgeParts = [], capParts = [], hairParts = [];
@@ -2844,7 +3407,8 @@
     }
     if (c.badge) {
       const badge = new THREE.Mesh(boxGeom(0.16, 0.16, 0.05), cmat(0xffd451));
-      badge.position.set(-0.28, chestBot + chestH * 0.64, P.torsoD / 2 + 0.02);
+      const bx = -0.28 * P.torsoW / 0.92, by = chestBot + chestH * 0.64;
+      badge.position.set(bx, by, torsoSurfaceZ(TS, bx, by, 1) + 0.02);       // pinned ON the chest, not in front of a box
       body.add(badge); badgeParts.push(badge);
     }
     /* HEADWEAR (entities/headwear.js, CBZ.headwear) is fitted AFTER the rig
@@ -2952,13 +3516,17 @@
       // (clothes.js wifebeater etc.) read it so a bare shoulder matches the
       // face instead of a hard-coded shared-atlas tan.
       skinTone: c.skin != null ? c.skin : 0xcf9a72,
+      // THE BODY SHAPE (TORSO block): garment shells, badges and ties read it
+      torsoShape: TS, physique: physique,
+      torsoFrontZ: function (x, y) { return torsoSurfaceZ(TS, x, y, 1); },
+      torsoBackZ: function (x, y) { return torsoSurfaceZ(TS, x, y, -1); },
     };
     // HANDS: rig.setHandPose / rig.setHandLod (HANDS block above makeCharacter)
     rig.handFit = handFit;
     rig.setHandPose = function (side, pose) { setBodyHandPose(rig, side, pose); };
     // one distance LOD for the whole body: the hands (fphands body LODs) and
     // the limb lofts (LIMBS block) swap together
-    rig.setHandLod = function (lod) { rig._lodExt = true; setBodyHandLod(rig, lod); setLimbLod(rig, lod); setHairLod(rig, lod); };
+    rig.setHandLod = function (lod) { rig._lodExt = true; setBodyHandLod(rig, lod); setLimbLod(rig, lod); setHairLod(rig, lod); setTorsoLod(rig, lod); };
     /* A rig no system LODs (every mode but the city crowd) checks its own
        distance to the camera every 24th animChar and takes the far hands and
        limbs past ~30 m, with the same 26/30 m hysteresis as peds.js. The
@@ -2972,7 +3540,7 @@
       const e = g.matrixWorld.elements, c = cam.matrixWorld.elements, dx = e[12] - c[12], dy = e[13] - c[13], dz = e[14] - c[14];
       const d2 = dx * dx + dy * dy + dz * dz;
       const want = lodNow === 2 ? (d2 < 26 * 26 ? 1 : 2) : (d2 > 30 * 30 ? 2 : 1);
-      if (want !== lodNow) { lodNow = want; setBodyHandLod(rig, want); setLimbLod(rig, want); setHairLod(rig, want); }
+      if (want !== lodNow) { lodNow = want; setBodyHandLod(rig, want); setLimbLod(rig, want); setHairLod(rig, want); setTorsoLod(rig, want); }
     };
     // HEADWEAR: the role's uniform hat (c.cap = its colour, c.capKind the kind,
     // "peaked" when unsaid — the police/guard cap every c.cap caller wanted)
@@ -3305,7 +3873,12 @@
         let o = mesh;
         for (; o && o !== parent; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
         if (o !== parent) continue;
-        box.union(b.copy(mesh.geometry.boundingBox).applyMatrix4(m));
+        // a shaped torso part's bounds include its SHOULDERS, which the upper
+        // arm always overlaps — test against the ribcage box it replaced
+        const tp = mesh.geometry.userData && mesh.geometry.userData.torso, pr = mesh.geometry.parameters;
+        if (tp && pr) b.set(new THREE.Vector3(-pr.width / 2, -pr.height / 2, -pr.depth / 2), new THREE.Vector3(pr.width / 2, pr.height / 2, pr.depth / 2));
+        else b.copy(mesh.geometry.boundingBox);
+        box.union(b.applyMatrix4(m));
       }
       if (box.isEmpty()) box = null;
       else box.expandByScalar(0.04);
@@ -6325,7 +6898,9 @@
     const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
     // neck socket above the hip pivot: makeCharacter stacks
     // neckY = (hipY - 0.005) + torsoH - 0.015, then sinks the head by neckDrop.
-    const neckOverHip = P.torsoH - 0.020 - (P.neckDrop || 0);
+    // (the TORSO block's pivot when the rig has one: the neck shows now)
+    const TSh = ch.torsoShape;
+    const neckOverHip = TSh ? TSh.pivotY - TSh.hipY : P.torsoH - 0.020 - (P.neckDrop || 0);
     // the eye boxes live in a face group scaled headSize/0.60, at local y 0.34
     const eyeOverNeck = 0.34 * (P.headSize / 0.60);
     const shin = (P.legLo + 0.03) * hs;
