@@ -263,7 +263,6 @@
   function encounter(band, opts) {
     opts = opts || {};
     if (!band || !band.men || !band.men.length) {
-      W.toast("NOTHING OUT THERE", "bad");
       if (W.campaign && W.campaign.enter) W.campaign.enter();
       return;
     }
@@ -394,10 +393,8 @@
     if (n) {
       W.log(band.name + " rode through your column. " + n +
         (n === 1 ? " man scattered into the dark." : " men scattered into the dark."), "bad");
-      W.toast(n + " MEN SCATTER", "bad");
     } else {
       W.log("you got clear of " + band.name + " with what you had.", "bad");
-      W.toast("YOU GOT CLEAR", "bad");
     }
     /* THEY TOOK WHAT THEY CAME FOR AND RIDE ON, through this file's own
        break-off so the party is visibly leaving rather than standing on you
@@ -416,7 +413,6 @@
   function gone() {
     const b = curBand;
     if (b && W.state.bands && W.state.bands.indexOf(b) >= 0 && b.men && b.men.length) return false;
-    W.toast("THEY ARE GONE", "bad");
     finish();
     return true;
   }
@@ -793,7 +789,6 @@
       band.wealth = Math.max(0.12, band.wealth * 0.5);
       W.state.fame = Math.max(0, W.state.fame - 1);
       W.log("robbed " + band.name + " at gunpoint — $" + gold + ".", "good");
-      W.toast("TAKEN: $" + gold, "good");
       finish();
     };
     if (!stageable()) { takeTheirArms(band); apply(); return; }
@@ -882,7 +877,6 @@
       (band.mood === "hunt" ? 0.25 : 0), 0, 0.92);
     if (W.chance(chase)) {
       W.log(band.name + " ran you down.", "bad");
-      W.toast("THEY CHASE YOU", "bad");
       startBattle({ defending: true, chased: true });
       return;
     }
