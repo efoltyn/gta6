@@ -932,7 +932,9 @@
     relin(s.hands, false);
     relin(s.hair, false);
     const f = ch.face;
-    if (f) relin([f.eyeL, f.eyeR, f.brow, f.mouth], true);
+    // the eyeballs are a painted texture (no tone to move); the lids follow the
+    // head's tone on their own (systems/facial.js)
+    if (f) relin([f.brow, f.mouth, f.lipLow], true);
   }
 
   /* THE ATLAS IS sRGB BYTES AND NEVER SAID SO. city/clothes.js paints its
