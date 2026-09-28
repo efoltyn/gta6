@@ -129,8 +129,11 @@
     if (CBZ.econ.reseed) CBZ.econ.reseed();   // fresh prison every run (no identical carnage)
     el.cigText.textContent = "0";
     if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory(role);
+    // THE OFFICER'S BELT: sidearm + taser (above) and the duty torch, so the
+    // bar shows a light for the night rounds. Cuffs and the pat-down are the
+    // card's verbs on the man himself; the doors know the badge (role checks).
+    if (role === "cop") g.inventory["Guard Torch"] = 1;
     CBZ.refreshInventory();
-    el.keycard.classList.remove("have");
     el.bar.style.width = "0%";
     el.vignette.style.boxShadow = "inset 0 0 200px 40px rgba(220,30,40,0)";
     CBZ.setObjective(role === "cop" ? "Patrol the block, break up fights, and raid the armory." : "Plan your escape. The plan panel lists every route and its next step.");

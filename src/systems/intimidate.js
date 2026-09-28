@@ -429,7 +429,10 @@
       if (hit && hit.actor && alive(hit.actor)) {
         const k = hit.actor.kind;
         if (k === "inmate") target = hit.actor;
-        else if ((k === "guard" || k === "warden") && lethal) guardTarget = hit.actor;
+        // an OFFICER's sights crossing a colleague is not a hold-up: the cop
+        // role walks the block with his sidearm out, and every screw he swept
+        // used to fold or defy and radio it in against his own man
+        else if ((k === "guard" || k === "warden") && lethal && CBZ.game.role !== "cop") guardTarget = hit.actor;
       }
     }
     currentTarget = target || guardTarget;
