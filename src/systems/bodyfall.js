@@ -318,6 +318,11 @@
         : fall.phase === "getup" ? Math.max(0, 1 - (fall.gt || 0) / 0.3) : 0);
     }
     if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
+    // the FEET (entities/character.js ANKLE SOLVE): animChar is skipped for a
+    // body this owns, so solve them here off the pose just written: slack and
+    // pointing away on the back, instep to the floor face down, flat again
+    // through the get-up. Frozen with the rest of the body once asleep.
+    if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, false);
     // ---- the turn: eased through the collapse, about the hips' vertical ----
     const k = Math.min(1, R.t / Math.max(0.2, R.fallT * 0.85));
     const ek = k * k * (3 - 2 * k);
