@@ -3614,9 +3614,11 @@
       // the shoulder yoke as THIS rig built it, in the unit head frame (the
       // neck pivot, scaled by the head): a young body's hair is fitted to it
       const hairYoke = {
-        top: Math.round((collar.position.y + P.collarH / 2 - neck.position.y) / hk * 200) / 200,
-        back: Math.round(-collarD / 2 / hk * 200) / 200,
-        half: Math.round(collarW / 2 / hk * 200) / 200,
+        // (the torso merge: the collar is now a band round the neck base, so the
+        // yoke's reach is the profile's shoulder yoke, its top the band's top)
+        top: Math.round((collar.position.y + collarBox.h / 2 - neck.position.y) / hk * 200) / 200,
+        back: Math.round(-P.collarD / 2 / hk * 200) / 200,
+        half: Math.round(P.collarW / 2 / hk * 200) / 200,
         // the shoulder: each upper arm's top dome is centred ON its pivot, so a
         // ball there is the shoulder in every arm pose
         armX: Math.round(P.armX / hk * 200) / 200,
