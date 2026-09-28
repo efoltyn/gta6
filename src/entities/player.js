@@ -29,7 +29,7 @@
     legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
     skin: 0xf0c39a, hair: 0x4a3526, shoes: 0x2b2b2b,
     stripes: 0xc85c00, belt: 0x6b4a2a,
-    build: playerBuild, longHair: playerBuild === "f",
+    build: playerBuild, longHair: playerBuild === "f", physique: "average",
   });
   CBZ.scene.add(playerChar.group);
 

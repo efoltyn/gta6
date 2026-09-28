@@ -868,7 +868,10 @@
     for (let i = recs.length - 1; i >= 0; i--) {
       const rec = recs[i];
       if (rec.stamp === stamp) continue;
-      if (stamp - rec.stamp > STALE) release(rec);
+      // a part taken OFF the body (clothes.js clears a composite tie, a shell
+      // is swapped) can never be walked again: hand it back now, or the body
+      // counts as half-pooled while it draws itself
+      if (stamp - rec.stamp > STALE || !rec.mesh.parent) release(rec);
       else park(rec);
     }
   }
@@ -996,6 +999,10 @@
       for (let i = 0; i < r.recs.length; i++) {
         const rec = r.recs[i];
         if (rec.dead) continue;
+        // only parts that DRAW count: a parked record (a part taken off the
+        // body, hidden by its owner, or waiting out STALE) draws nothing by
+        // either mechanism, so it cannot split a body
+        if (rec.parked && (rec.hidden || !chainVisible(rec.mesh) || !rec.mesh.parent)) continue;
         if (rec.hidden) pooled++; else real++;
       }
       if (pooled && real) n++;

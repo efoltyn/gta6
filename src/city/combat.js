@@ -725,7 +725,7 @@
   const AIM_ELEV_MAX = 0.70;   // rad (~40°) arm pitch clamp (reactions used 0.55; raised for rooftops)
   const AIM_DAMP = 0.0008;     // damp base → ~130ms acquire/release blend (k = 1 - AIM_DAMP^dt)
   const AIM_HOLD = 1.2;        // s the arm holds its aim after the last shot (> max NPC fire cadence)
-  const AIM_SHOULDER_Y = 1.29; // shoulder height above actor.pos.y — character.js collar (1.84 local) × HUMAN_SCALE 0.70 for the shrunk ~1.82m rig (was 1.84, aimed the gun-arm ~0.55m high)
+  const AIM_SHOULDER_Y = 1.25; // shoulder height above actor.pos.y — character.js arm pivot (1.78 local since the TORSO block; was 1.84) × HUMAN_SCALE 0.70 for the shrunk ~1.82m rig (was 1.84, aimed the gun-arm ~0.55m high)
   const RA_BASE = -1.45, RA_BASE_LONG = -1.50, LA_BASE_LONG = -1.20; // MUST match actorweapons setReadyPose
   // per-slot tracer spread half-angle (rad); table lives with the weapon data
   const SPREAD_DEF = { pistol: 0.065, rifle: 0.040, auto: 0.090, long: 0.075, utility: 0.055, _def: 0.055 };

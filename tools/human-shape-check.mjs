@@ -101,8 +101,11 @@ for (const id of ids) for (const b of bodies) for (const seed of ["a", "b"]) {
     const p = m.geometry.parameters || {};
     check(!!(m.userData.limb && m.geometry.userData.limb && p.width > 0 && p.height > 0 && p.depth > 0), `${id}/${b.tag} limb part is a loft reporting its box`);
   }
+  // the torso parts are the SHAPED body now (character.js TORSO block) and,
+  // like the limbs, still report the box they replaced (tools/torso-check.mjs owns them)
   for (const m of [].concat(rig.skinSlots.torso, rig.skinSlots.collar, rig.skinSlots.pelvis)) {
-    check(isTrueBox(m.geometry), `${id}/${b.tag} cloth part is a 1-seg box`);
+    const p = m.geometry.parameters || {};
+    check(!!(m.userData.torsoPart && m.geometry.userData.torso && p.width > 0 && p.height > 0 && p.depth > 0), `${id}/${b.tag} torso part is a shaped loft reporting its box`);
   }
   // sharing: collect every non-box geometry per form key
   const key = rig.headForm + "|" + b.tag;

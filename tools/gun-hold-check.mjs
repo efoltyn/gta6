@@ -132,8 +132,13 @@ function restLengths(rig) {
 }
 function chestBox(rig) {
   const torso = rig.skinSlots.torso[0];
+  // the RIBCAGE box the chest part replaced (geometry.parameters) — a shaped
+  // chest's bounds also hold its shoulders, which the upper arm always overlaps
+  const pr = torso.geometry.parameters;
   torso.geometry.computeBoundingBox();
-  const b = torso.geometry.boundingBox.clone();
+  const b = pr && torso.geometry.userData.torso
+    ? new T.Box3(new T.Vector3(-pr.width / 2, -pr.height / 2, -pr.depth / 2), new T.Vector3(pr.width / 2, pr.height / 2, pr.depth / 2))
+    : torso.geometry.boundingBox.clone();
   // into the BODY frame (torso hangs directly off body)
   const M = new T.Matrix4();
   for (let o = torso; o && o !== rig.body; o = o.parent) { o.updateMatrix(); M.premultiply(o.matrix); }

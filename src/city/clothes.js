@@ -2391,6 +2391,10 @@
   // ONE UV-remapped box per yoke SIZE (adult male / female / the child bands —
   // a handful, ever), same shape as clothGeom's cache.
   const yokeGeoms = {};
+  const YOKE_PAINTER = {
+    key: "yoke",
+    fn: function (face, u, v) { const col = YCOLS[face] || YCOLS.side; return [(col[0] + u * (col[1] - col[0])) / YW, v]; },
+  };
   function yokeGeom(dims) {
     const key = dims[0].toFixed(3) + "," + dims[1].toFixed(3) + "," + dims[2].toFixed(3);
     let g = yokeGeoms[key];
@@ -2840,8 +2844,11 @@
     };
     return p;
   }
+  // a SHAPED body part: a limb loft or a torso part (entities/character.js
+  // TORSO block) — both bake the garment row onto their own surface
+  function shaped(mesh) { return !!(mesh && mesh.userData && (mesh.userData.limb || mesh.userData.torsoPart)); }
   function limbDressGeom(mesh, part) {
-    if (!mesh.userData.limb || !CBZ.humanLimbGeometry) return null;
+    if (!shaped(mesh) || !CBZ.humanLimbGeometry) return null;
     return CBZ.humanLimbGeometry(mesh, limbPainter(part, mesh.userData.clothBand));
   }
 
@@ -2877,7 +2884,9 @@
       const b = boxOf(mesh);
       if (!b) continue;                              // stub rig / no box params → leave it flat
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
-      mesh.geometry = yokeGeom([b.w, b.h, b.d]);
+      // the COLLAR BAND (character.js TORSO block) wears the same four columns
+      // round the neck: the knot lands at the throat, the collar stand behind
+      mesh.geometry = (mesh.userData.torsoPart && CBZ.humanLimbGeometry && CBZ.humanLimbGeometry(mesh, YOKE_PAINTER)) || yokeGeom([b.w, b.h, b.d]);
       mesh.material = m;
       mesh.userData._cbzPart = "yoke";
       any = true;
@@ -2895,7 +2904,7 @@
       // tag on a restored (flat) mesh would leave it permanently uncolourable.
       // a lofted limb goes back to its FLAT loft at its CURRENT lod (the saved
       // original may be a different lod by now — character.js setLimbLod)
-      const flatLimb = mesh.userData.limb && CBZ.humanLimbGeometry ? CBZ.humanLimbGeometry(mesh, null) : null;
+      const flatLimb = shaped(mesh) && CBZ.humanLimbGeometry ? CBZ.humanLimbGeometry(mesh, null) : null;
       if (!guard) { mesh.geometry = flatLimb || f.g; mesh.material = f.m; mesh.userData._cbzPart = null; continue; }
       // A FLAT ORIGINAL THAT DIED TAKES THE BODY WITH IT. `_cbzFlat` is captured
       // ONCE, at the very first dress, and then held for the whole life of the
@@ -2982,11 +2991,21 @@
         const t = s.torso && s.torso[0];
         if (t) t.add(jm);                            // rides the CHEST — animates for free
         ch._jacketMesh = jm;
-      } else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
+      }
       // torso[0] is only the chest on a body with a waist box, so the shell has
       // to drop half a waist to keep wrapping the whole column (0 for an adult
       // male — his chest IS the column).
       if (jf) jm.position.y = jf.y;
+      // A SHELL OF THE BODY, not a box: on a shaped rig the jacket is the torso
+      // surface held off it (shoulders, chest, a straight drape below), cut at
+      // the old box's hem and open at the neck (character.js humanShellSpec).
+      const chestM = s.torso && s.torso[0];
+      const spec = jf && chestM && CBZ.humanShellSpec ? CBZ.humanShellSpec(ch, "jacket", {
+        y0: chestM.position.y + jf.y - jf.dims[1] / 2, off: 0.03 * ((ch.profile && ch.profile.torsoH) || 0.95) / 0.95,
+        box: { w: jf.dims[0], h: jf.dims[1], d: jf.dims[2], y: chestM.position.y + jf.y }, origin: chestM.position.y + jf.y,
+      }) : null;
+      if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, limbPainter("jacket", null)); }
+      else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
       jm.material = m;
       jm.visible = true;
     } else if (ch._jacketMesh) ch._jacketMesh.visible = false;
@@ -3104,7 +3123,7 @@
         if (CBZ.pedInstanceRelease) CBZ.pedInstanceRelease(mesh);
         const f = mesh.userData && mesh.userData._cbzFlat;
         if (f && geomOk(f.g)) mesh.geometry = f.g;
-        if (mesh.userData && mesh.userData.limb && CBZ.humanLimbGeometry) mesh.geometry = CBZ.humanLimbGeometry(mesh, null) || mesh.geometry;
+        if (shaped(mesh) && CBZ.humanLimbGeometry) mesh.geometry = CBZ.humanLimbGeometry(mesh, null) || mesh.geometry;
         if (row[3] && !geomOk(mesh.geometry)) {
           mesh.geometry = clothGeom(row[1], mesh.userData && mesh.userData.clothDims, mesh.userData && mesh.userData.clothBand);
         }
@@ -3373,6 +3392,22 @@
     ch._compMeshes = [];
   }
   CBZ.cityClearComposite = clearComposite;
+  // Composite pieces were authored proud of a FLAT chest plane (z 0.25). On a
+  // shaped body, move each front piece so it keeps the same standoff from the
+  // real surface at its own height (a tie follows the sternum, a collar sits
+  // at the neck instead of floating in front of it).
+  function snapToChest(ch, host, grp) {
+    if (!ch || typeof ch.torsoFrontZ !== "function" || !host || !host.position) return;
+    const sx = grp.scale.x || 1, sy = grp.scale.y || 1, sz = grp.scale.z || 1;
+    for (let i = 0; i < grp.children.length; i++) {
+      const m = grp.children[i];
+      if (!m || !(m.position.z > 0.15)) continue;    // front pieces only (a blazer's back panel stays)
+      const bx = m.position.x * sx, by = host.position.y + grp.position.y + m.position.y * sy;
+      const surf = ch.torsoFrontZ(bx, by);
+      if (!isFinite(surf)) continue;
+      m.position.z = (surf + (m.position.z * sz - 0.25 * sz)) / sz;
+    }
+  }
   function cityApplyComposite(ch, comp) {
     if (!ch || !ch.skinSlots || !comp) return false;
     const items = comp.items || [];
@@ -3459,6 +3494,7 @@
         // every composable at once instead of re-authoring fourteen of them.
         if (cf) { grp.scale.set(cf.sx, cf.sy, cf.sz); grp.position.y = cf.y; }
         sp.draw(grp, {});
+        snapToChest(ch, host, grp);
         grp.children.forEach((m) => bin.push(m));
         host.add(grp);
         bin.push(grp);

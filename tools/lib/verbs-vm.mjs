@@ -97,7 +97,7 @@ export function loadVerbsVM(opts = {}) {
   function actor(o = {}) {
     const ch = CBZ.makeCharacter(Object.assign({
       skin: 0xc68e62, torso: 0x884422, collar: 0x884422, arms: 0x884422, legs: 0x223344,
-      shoes: 0x111111, hair: 0x221100,
+      shoes: 0x111111, hair: 0x221100, physique: "average",   // the verbs are tuned on the average body (heavy/muscular: see torso-check)
     }, o));
     const a = { char: ch, group: ch.group, pos: ch.group.position, hp: 100, maxHp: 100, name: o.name || "actor", dead: false, speed: 0 };
     if (o.x != null) ch.group.position.set(o.x, o.y || 0, o.z || 0);

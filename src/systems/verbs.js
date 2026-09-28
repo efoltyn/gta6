@@ -271,6 +271,31 @@
     put("thighR", F_LEGR, -(legW / 2 + 0.01), -legUp * 0.45, 0);
     put("thighBackL", F_LEGL, 0, -legUp * 0.55, -legW / 2 - 0.01);
     put("thighBackR", F_LEGR, 0, -legUp * 0.55, -legW / 2 - 0.01);
+    /* THE SHAPED BODY (entities/character.js TORSO block): the collar, the
+       shoulder tops and the chest/back are a real surface now, not the old
+       box faces + the slab. Re-seat the points that sit ON the torso so a hand
+       lands on cloth, not a few centimetres in front of it (or inside it). */
+    const TS = ch.torsoShape;
+    if (TS && typeof ch.torsoFrontZ === "function") {
+      const fz = (x, y) => ch.torsoFrontZ(x, y), bz = (x, y) => ch.torsoBackZ(x, y);
+      const topAt = (x) => {                      // the shoulder's top surface over |x|
+        let y = TS.shoulderY;
+        for (let k = 0; k < 40; k++) { const yy = TS.shoulderY + (TS.yN - TS.shoulderY) * k / 40; if (TS.at(yy).a >= Math.abs(x)) y = yy; }
+        return y;
+      };
+      const cy = TS.yN - TS.tf - 0.05 * TS.vs;
+      put("collarL", F_BODY, 0.15, cy, fz(0.15, cy) + 0.03);
+      put("collarR", F_BODY, -0.15, cy, fz(-0.15, cy) + 0.03);
+      put("chest", F_BODY, 0, shY - 0.30, fz(0, shY - 0.30) + 0.01);
+      put("back", F_BODY, 0, shY - 0.24, bz(0, shY - 0.24) - 0.01);
+      put("chestL", F_BODY, 0.20, shY - 0.26, fz(0.20, shY - 0.26) + 0.015);
+      put("chestR", F_BODY, -0.20, shY - 0.26, fz(-0.20, shY - 0.26) + 0.015);
+      put("backCollar", F_BODY, 0, TS.yN - 0.02, bz(0, TS.yN - 0.02) - 0.015);
+      // (a body carried over the shoulder still rests on the old column top: the
+      // grip and the two torsos stay where the carry solve was tuned)
+      put("shoulderTopL", F_BODY, armX * 0.62, Math.max(topAt(armX * 0.62) + 0.01, neckY + 0.02), 0);
+      put("shoulderTopR", F_BODY, -armX * 0.62, Math.max(topAt(armX * 0.62) + 0.01, neckY + 0.02), 0);
+    }
     ch._vcl = T; ch._vclP = ch.profile;
     return T;
   }
