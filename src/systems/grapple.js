@@ -1,16 +1,19 @@
 /* ============================================================
-   systems/grapple.js — PHYSICAL INTERACTION + body physics (SURVIVAL).
+   systems/grapple.js — the survival player's hands, + body physics.
 
-   The disaster mode's whole interaction set is physical and real:
-     • PUNCH  (LMB)        — a strike that staggers / knocks back; can
-                             knock someone off high ground or into a hazard.
-     • PUSH   (RMB)        — a hard two-handed shove.
-     • GRAB   (hold E)     — grab the nearest person in front and hold them;
-                             carry them (drag them out of a flood / off a
-                             collapsing spot = SAVE them), then…
-     • THROW  (LMB while holding) — launch them (into the lava / off the
-                             cliff = KILL them), or
-     • RELEASE(let go of E) — set them down safely.
+   The disaster mode's whole interaction set is physical and real, and it is
+   CBZ.verbs' now (systems/verbs.js + verbs_strike.js), the same verbs every
+   other game uses:
+     • PUNCH  (LMB)        — CBZ.verbs.strike: a contact-resolved blow.
+     • PUSH   (RMB)        — CBZ.verbs.shove: two palms to the chest; the
+                             WORLD decides the rest (a wall, a rail, a ledge,
+                             the water).
+     • GRAB   (hold E)     — CBZ.verbs.grab (a collar grip), or a fireman
+                             carry of somebody already down: take them out of
+                             a flood / off a collapsing spot = SAVE them, then…
+     • THROW  (LMB while holding) — CBZ.verbs.throw off the grip or the
+                             shoulder (into the lava / off the cliff), or
+     • RELEASE(let go of E) — set them down.
 
    It also owns the BODY PHYSICS that make every impact look real — for
    bots AND the player: directional knockback that slides + decays, a
@@ -50,14 +53,19 @@
   if (CBZ.CONFIG.SURV_THROW_INTACT == null) CBZ.CONFIG.SURV_THROW_INTACT = true;
   const intactOn = () => CBZ.CONFIG.SURV_THROW_INTACT !== false;
 
-  const REACH = 3.1;          // arm's length for push / grab / punch
-  const CONE = 0.25;          // forward-cone dot threshold for aiming
-  const THROW_FWD = 13, THROW_UP = 7.5;
-  const PUSH_FORCE = 12, PUNCH_FORCE = 6;
+  const PUNCH_FORCE = 6;
   const BOT_R = 0.5;
   const _corpseC = { x: 0, z: 0 };   // scratch for the corpse-extent wall push
   function G() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
-  function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
+  /* THE FLOOR A BODY IS OVER. CBZ.groundAt counts platforms (roofs, decks,
+     stairs, walkways) where floorAt only knew terrain + carvings, so a body
+     thrown off a roof used to "land" on the terrain UNDER the building, and a
+     body shoved off a walkway never fell. fromY picks the surface near the
+     body, not the topmost one over it. */
+  function floorAt(x, z, fromY) {
+    if (CBZ.groundAt) return CBZ.groundAt(x, z, fromY);
+    return CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : 0;
+  }
 
   // ---- per-actor physical state (lazily attached). For the player adapter
   //      (a.isPlayer) the state lives on CBZ.player so physics.js can read it.
@@ -383,8 +391,10 @@
     const ch = a.char, grp = a.group; if (!ch || !grp) return;
     if (a._deathSeed == null) a._deathSeed = Math.random() * 6.28;
     const intact = !a.dead && intactOn();
+    if (p.heldBy && p.heldBy.verb) return;          // CBZ.verbs poses a body it holds
     if (p.heldBy && intact) {
-      // CARRIED (live): a rigid hang pose, written absolutely — the old path
+      // HELD by something that is not a person (the ape's fist): a rigid hang
+      // pose, written absolutely — the old path
       // fell through to the upright flail below, whose additive late-write
       // had no animChar base while held and wound the limbs up over time.
       if (Math.abs(grp.rotation.x) > 0.01) grp.rotation.x = damp(grp.rotation.x, 0, 9, dt);
@@ -413,8 +423,16 @@
       // Variety comes from the side-ROLL below (a corpse rolls onto a shoulder),
       // which reads as a natural crumple, not a broken backward fold.
       const topple = Math.PI / 2;
+      /* FALL ALONG THE BLOW. Euler order XYZ applies the pitch LAST, about the
+         WORLD x axis, so every body used to topple with its head toward world
+         -z whatever ddir said (ddir only spun him about his own spine). YXZ
+         pitches about his OWN right axis after the yaw; facing back along
+         the push (ddir + pi) he goes over backward, head along the push. With
+         x = z = 0 the two orders are the same rotation, so nothing standing
+         changes. */
+      if (grp.rotation.order !== "YXZ") grp.rotation.order = "YXZ";
       grp.rotation.x = damp(grp.rotation.x, -topple, a.dead ? 7 : 11, dt); // fall onto back (never past flat)
-      grp.rotation.y = damp(grp.rotation.y, p.ddir, 8, dt);
+      grp.rotation.y = (CBZ.lerpAngle || lerpA)(grp.rotation.y, p.ddir + Math.PI, 1 - Math.exp(-8 * dt));
       const roll = a.dead ? 0.6 * Math.sin(a._deathSeed * 1.7) : 0;   // ~±35° onto a shoulder
       grp.rotation.z = damp(grp.rotation.z, roll, 9, dt);
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
@@ -466,7 +484,7 @@
       p.kx = p.kz = 0; p.vx = p.vy = p.vz = 0; p.air = false; p.down = 0;
       return false;
     }
-    if (p.heldBy) { poseActor(a, p, dt); return true; } // position set by the holder
+    if (p.heldBy) { poseActor(a, p, dt); return true; } // position (and, for a verb, pose) set by the holder
 
     if (p.air) {
       p.vy -= G() * dt;
@@ -509,7 +527,16 @@
           }
         }
       }
-      const fl = floorAt(grp.position.x, grp.position.z);
+      // INTO THE WATER: a body that goes under is the swimmer's (survivorbot's
+      // wade/swim step, the shared poseSwimmer), not a knockdown on the bed
+      if (p.vy < 0 && !a.dead && CBZ.waterSubmergence &&
+          CBZ.waterSubmergence(grp.position.x, grp.position.y + 0.9, grp.position.z) > 0) {
+        p.air = false; p.vx = p.vy = p.vz = 0; p.kx = p.kz = 0; p.down = 0; p.bounce = 0;
+        grp.rotation.x = 0; grp.rotation.z = 0;
+        if (CBZ.sfx && near(grp.position, 16)) CBZ.sfx("splash");
+        return false;
+      }
+      const fl = floorAt(grp.position.x, grp.position.z, grp.position.y);
       if (grp.position.y <= fl && p.vy <= 0) {
         // rest ON the surface. In city, a flat (toppled/dead) body would have its
         // mid-height at floor level and sink the lower half through the street, so
@@ -572,7 +599,9 @@
     // keep p.down topped up to the remaining ko so the body lies the whole time and
     // then gets up cleanly — same weighty topple as a kill, just temporary. Only in
     // city; survival/jail never set a.ko on a grapple-owned body, so untouched.
-    const cityKO = inCity && (a.ko || 0) > 0 && !a.dead;
+    // (not while STRIKE's rig fall has him: that pose owns a melee knockdown,
+    // and a second topple here would drop him twice)
+    const cityKO = inCity && (a.ko || 0) > 0 && !a.dead && !(a.char && a.char.fall && a.char.fall.on);
     if (cityKO && p.down < a.ko) p.down = a.ko;                  // lie for as long as KO'd
     const cityFlat = Math.abs(grp.rotation.x) > 0.04;            // still laid/laying flat
     const cityGround = inCity && (p.down > 0 || a.dead || cityKO || cityFlat);
@@ -590,8 +619,9 @@
       // gradient and push them down it; friction (below) always wins on flat
       // ground, so the slide is bounded and they stop at the base.
       const x = grp.position.x, z = grp.position.z;
-      const gx = floorAt(x - 0.8, z) - floorAt(x + 0.8, z);   // downhill in +x
-      const gz = floorAt(x, z - 0.8) - floorAt(x, z + 0.8);   // downhill in +z
+      const fy = grp.position.y + 0.3;
+      const gx = floorAt(x - 0.8, z, fy) - floorAt(x + 0.8, z, fy);   // downhill in +x
+      const gz = floorAt(x, z - 0.8, fy) - floorAt(x, z + 0.8, fy);   // downhill in +z
       const grad = Math.hypot(gx, gz) / 1.6;                  // rise / run
       if (grad > 0.12) { p.kx += (gx / 1.6) * 16 * dt; p.kz += (gz / 1.6) * 16 * dt; }
 
@@ -616,7 +646,7 @@
       if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
       // city downed/dead/flat bodies rest ON the surface (lifted by flatness);
       // other sliding bodies hug the floor exactly. Applied LAST so nothing sinks.
-      grp.position.y = cityGround ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
+      grp.position.y = cityGround ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z, grp.position.y + 0.3);
     } else if (cityGround) {
       // not sliding, but a city body that is down/dead/still-flat must STILL be
       // ground-clamped every frame (peds.js would otherwise pin pos.y to the bare
@@ -624,7 +654,7 @@
       // that has finished standing up (rotation.x≈0) just sits exactly on the floor.
       grp.position.y = cityRestY(grp);
     } else if (p.down > 0) {
-      grp.position.y = floorAt(grp.position.x, grp.position.z);
+      grp.position.y = floorAt(grp.position.x, grp.position.z, grp.position.y + 0.3);
     }
     // CORPSE EXTENT vs WALLS: a flat body extends ~1.7m from its feet (grp.position,
     // the only point collide() above tested) toward where the HEAD fell, so the
@@ -652,6 +682,7 @@
     return owns;
   }
 
+  function lerpA(a, b, t) { let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
   function near(pos, r) {
     const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z;
     return dx * dx + dz * dz < r * r;
@@ -677,181 +708,87 @@
   const FLAT_LIFT = 0.42;
   function cityRestY(grp) {
     const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
-    return floorAt(grp.position.x, grp.position.z) + FLAT_LIFT * flat;
+    return floorAt(grp.position.x, grp.position.z, grp.position.y + 0.3) + FLAT_LIFT * flat;
   }
 
-  // ---- aiming: nearest living bot in front of the player ----
-  function lookDir() {
-    const y = CBZ.cam ? CBZ.cam.yaw : 0;
-    return { x: -Math.sin(y), z: -Math.cos(y) };
+  /* ---- THE PLAYER'S VERBS (survival). CBZ.verbs owns all of them: the grab,
+     the carry, the throw and the shove are two-person choreography with the
+     hands on the body (systems/verbs.js), the punch is the contact-resolved
+     blow (systems/verbs_strike.js). This file only maps the keys. The old
+     1.5 m position lerp in front of the camera, the hang pose and the swing
+     resolver that used to live here are gone. ---- */
+  const VB = () => CBZ.verbs || null;
+  function me() {
+    const v = VB();
+    return v && v.playerActor ? v.playerActor() : (CBZ.surv && CBZ.surv.playerActor) || null;
   }
-  function aimTarget() {
-    const P = CBZ.player.pos, L = lookDir();
-    let best = null, bestD = REACH;
-    for (const b of CBZ.bots) {
-      if (b.dead || busy(b)) continue;
-      const dx = b.pos.x - P.x, dz = b.pos.z - P.z;
-      const d = Math.hypot(dx, dz);
-      if (d > REACH || d < 0.1) continue;
-      const dot = (dx / d) * L.x + (dz / d) * L.z;
-      if (dot < CONE) continue;
-      if (d < bestD) { bestD = d; best = b; }
-    }
-    return best;
+  function botsInReach(out) {
+    const b = CBZ.bots || [];
+    for (let i = 0; i < b.length; i++) if (!b[i].dead) out.push(b[i]);
+    return out;
   }
-
-  // ---- THIRD-PERSON SWING: the survival verbs drive the player rig through
-  //      the same flag layer every other mode's melee uses (entities/
-  //      character.js reads punchT/punchArm/punchKind at animChar time, and
-  //      physics.js runs animChar on CBZ.playerChar every frame; fpsmode
-  //      hides the rig in first person, so the flags are always safe to set).
-  //      Until this existed the NPC staggered and fell while the player's own
-  //      body just stood there — the hit had physics but the swing had no
-  //      animation. The snap toward the camera aim is systems/combat.js:245's
-  //      trick: physics.js only steers body yaw while you MOVE, so a
-  //      stationary punch must square up here or the body swings 90° off the
-  //      crosshair it just landed a hit through. ----
-  let swingSide = false, lastSwing = -1e9, swingCombo = 0;
-  function swingPlayer(kind, dur) {
-    const ch = CBZ.playerChar; if (!ch || !ch.group) return;
-    ch.punchArm = kind === "shove" ? "r" : ((swingSide = !swingSide) ? "l" : "r");
-    ch.punchKind = kind;
-    ch.punchDur = dur; ch.punchT = dur;
-    const L = lookDir(), yaw = Math.atan2(L.x, L.z);
-    ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.85) : yaw;
-  }
-
-  // ---- CONTACT-RESOLVED STRIKES: the click starts a SWING, nothing else.
-  //      The blow lands in the order-50 pass below, on the frame the animed
-  //      fist's ACTUAL world position (the rig's hand socket at the end of
-  //      the forearm — character.js sockets.leftHand/rightHand) overlaps the
-  //      target's body. No more hitting from 3.1 m at click time, before the
-  //      arm had even chambered: range now EMERGES from arm length + lunge
-  //      (~2 m centre-to-centre, the same figure boxing.js and city combat
-  //      tuned by hand), timing emerges from the animation's own drive, and
-  //      a body that steps into the arc gets clipped while one that steps
-  //      back out of it is a whiff. Order 50 runs after animChar (30-46) so
-  //      the socket is posed for THIS frame; getWorldPosition refreshes the
-  //      parent matrix chain itself in r128. One victim per swing, downed/
-  //      airborne bodies excluded — both exactly the old aimTarget contract.
-  let strike = null;                     // { kind, t, dur, arm }
-  const _fist = new THREE.Vector3();
-  const FIST_SLACK2 = 0.68 * 0.68;       // fist sphere vs body capsule (BOT_R + fist)
-  const SHOVE_SIDES = ["l", "r"];        // a shove drives both palms
-  function fistPos(ch, side, out) {
-    const s = ch.sockets && (side === "l" ? ch.sockets.leftHand : ch.sockets.rightHand);
-    if (s) return s.getWorldPosition(out);
-    const L = lookDir(), P = CBZ.player.pos;   // socketless rig: arm's length forward
-    return out.set(P.x + L.x * 1.35, P.y + 1.35, P.z + L.z * 1.35);
-  }
-  function strikeVictim(kind, arm) {
-    const ch = CBZ.playerChar; if (!ch) return null;
-    const P = CBZ.player.pos, L = lookDir();
-    const sides = kind === "shove" ? SHOVE_SIDES : [arm];
-    for (const s of sides) {
-      fistPos(ch, s, _fist);
-      for (const b of CBZ.bots) {
-        if (b.dead || busy(b)) continue;
-        const dx = b.pos.x - P.x, dz = b.pos.z - P.z;
-        if (dx * dx + dz * dz > 7.3) continue;         // coarse cull
-        if (dx * L.x + dz * L.z < 0.1) continue;       // behind you: a chambering
-        //                                                fist can't "hit" someone
-        //                                                hugging your back
-        const fx = _fist.x - b.pos.x, fz = _fist.z - b.pos.z;
-        if (fx * fx + fz * fz > FIST_SLACK2) continue; // the hand isn't ON them
-        if (_fist.y < b.pos.y + 0.1 || _fist.y > b.pos.y + 2.1) continue; // over the head / under the feet
-        return b;
-      }
-    }
-    return null;
-  }
-  function landStrike(kind, t) {
-    const P = CBZ.player.pos, L = lookDir();
-    if (kind === "punch") {
-      const knockdown = Math.random() < 0.4 ? 1.2 : 0;
-      hit(t, { fromX: P.x, fromZ: P.z, force: PUNCH_FORCE, knockdown });
-      // A BEATING ADDS UP. The first two land as bruises (systems/wounds.js);
-      // the third or fourth splits skin and the face starts wearing it. That
-      // ramp is the ledger's job — this line just reports the blow.
-      if (CBZ.trauma) CBZ.trauma.strike(t, PUNCH_FORCE, { dir: { x: L.x, y: 0.35, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
-      if (CBZ.surv) CBZ.surv.hurt(t, 18, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
-      CBZ.sfx && CBZ.sfx("punch");
-      CBZ.shake && CBZ.shake(0.18);
-      CBZ.doHitstop && CBZ.doHitstop(0.04);   // the freeze sits ON the impact frame now
-    } else {
-      hit(t, { fromX: P.x, fromZ: P.z, force: PUSH_FORCE, knockdown: Math.random() < 0.5 ? 1.0 : 0 });
-      // A SHOVE IS A BIG FORCE THAT BARELY BREAKS SKIN — it's flat palms across
-      // a wide area. What makes a push bloody is WHAT IT PUTS YOU INTO, and that
-      // arrives later through the wall-slam / landing hooks in step(). So the
-      // knockback number stays at 12 and the flesh weight is cut to a fifth.
-      if (CBZ.trauma) CBZ.trauma.strike(t, PUSH_FORCE, { flesh: 0.2, dir: { x: L.x, y: 0.2, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.2 });
-      CBZ.sfx && CBZ.sfx("punch");
-      CBZ.shake && CBZ.shake(0.12);
-    }
-  }
-  //      after animChar has posed this frame's arms (orders 30-46):
-  CBZ.onUpdate(50, function (dt) {
-    if (!strike) return;
-    if (CBZ.game.mode !== "survival" || (CBZ.player && CBZ.player.dead)) { strike = null; return; }
-    strike.t += dt;
-    const prog = strike.t / strike.dur;
-    if (prog > 0.74) { strike = null; return; }   // recover phase: the swing is spent — a whiff
-    if (prog < 0.16) return;                      // wind-up: the fist is still at the chest
-    const v = strikeVictim(strike.kind, strike.arm);
-    if (v) { landStrike(strike.kind, v); strike = null; }
-  });
-
-  // ---- the verbs ----
-  let held = null;
   function grab() {
-    if (held) return;
-    const t = aimTarget(); if (!t) return;
-    held = t; phys(t).heldBy = CBZ.player;
-    phys(t).down = 0; phys(t).air = false;
-    CBZ.sfx && CBZ.sfx("whoosh");
-    // NO caption here (owner: "I know that I have grabbed"). The body in your
-    // arms is the feedback, and survival_interact.js already shows the verbs
-    // (Throw / Set down) the moment you're holding. Don't re-add a flashHint.
+    const v = VB(), pa = me();
+    if (!v || !pa || v.holding(pa)) return;
+    // a man on his feet is taken by the collar; a man already down is lifted
+    const up = v.pick(pa, "grab");
+    const t = up || v.pick(pa, "carry", { down: true });
+    if (!t) return;
+    const S = up ? v.grab(pa, t) : v.carry(pa, t);
+    if (S && CBZ.sfx) CBZ.sfx("whoosh");
+    // NO caption (owner: "I know that I have grabbed"). The body in your hands
+    // is the feedback; survival_interact.js shows what you can do with it.
   }
   function release(thrown) {
-    if (!held) return;
-    const p = phys(held);
-    p.heldBy = null;
+    const v = VB(), pa = me();
+    if (!v || !pa) return;
+    const S = v.sessionOf(pa);
+    if (!S || S.a !== pa) return;
     if (thrown) {
-      const L = lookDir();
-      // the heave: a throw is a two-handed drive off the chest — same body
-      // as the shove, held a beat longer for the weight leaving the arms
-      swingPlayer("shove", 0.46);
       CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);   // silent: "ko" is the voice here
-      hit(held, { dir: L, force: THROW_FWD, fling: THROW_UP });
+      v.release(S, "throw");
       CBZ.sfx && CBZ.sfx("ko");
       CBZ.shake && CBZ.shake(0.3);
-    }
-    held = null;
+    } else v.release(S, "set");
+  }
+  let swingCombo = 0, lastSwing = -1e9;
+  function landPunch(res) {
+    const t = res && res.target;
+    if (!t || t.dead) return;
+    const P = CBZ.player.pos, d = res.dir || { x: 0, z: 1 };
+    const mul = (res.dmgMul || 1) * (res.blocked ? 0.25 : 1);
+    // A BEATING ADDS UP. The ledger (systems/trauma.js) turns repeated blows
+    // into bruises, then split skin; this only reports the blow.
+    if (CBZ.trauma) CBZ.trauma.strike(t, PUNCH_FORCE * mul, { dir: { x: d.x, y: 0.35, z: d.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
+    if (CBZ.surv) CBZ.surv.hurt(t, 18 * mul, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
+    CBZ.sfx && CBZ.sfx("punch");
+    CBZ.shake && CBZ.shake(0.18);
   }
   function punch() {
-    if (held) { release(true); return; }   // LMB while holding = throw
-    CBZ.fpsPunchAnim && CBZ.fpsPunchAnim();  // swing the first-person hand
-    // the third-person body throws the REAL swing — alternating fists, every
-    // third blow inside a combo winding up into a hook (city combat's rhythm)
+    const v = VB(), pa = me();
+    if (!v || !pa) return;
+    if (v.holding(pa)) { release(true); return; }   // LMB while holding = throw
+    if (!v.strike) return;
+    CBZ.fpsPunchAnim && CBZ.fpsPunchAnim();        // the first-person hand swings
+    // alternating fists, every third blow inside a combo winding into a hook
     swingCombo = (CBZ.now - lastSwing < 980) ? swingCombo + 1 : 1;
     lastSwing = CBZ.now;
-    const hook = swingCombo % 3 === 0;
-    const dur = hook ? 0.42 : 0.34;
-    swingPlayer(hook ? "hook" : (swingCombo % 2 ? "jab" : "cross"), dur);
+    const kind = swingCombo % 3 === 0 ? "hook" : (swingCombo % 2 ? "jab" : "cross");
+    // no target, no damage here: the blow lands on the frame the fist reaches
+    // somebody (or it is a miss), and landPunch applies it
+    v.strike(pa, null, { kind: kind, candidates: botsInReach, onLand: landPunch });
     CBZ.sfx && CBZ.sfx("whoosh");
-    // no target check, no damage here: the strike resolver lands the blow on
-    // the frame the fist physically arrives — or it doesn't, and that's a miss
-    strike = { kind: "punch", t: 0, dur, arm: (CBZ.playerChar && CBZ.playerChar.punchArm) || "r" };
   }
   function push() {
-    // the swing plays whether or not it connects (same contract as punch):
-    // both palms drive off the sternum in third person, the first-person
-    // hand thrusts silently (the shove's contact sfx lands with the strike)
-    swingPlayer("shove", 0.40);
+    const v = VB(), pa = me();
+    if (!v || !pa) return;
     CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);
     CBZ.sfx && CBZ.sfx("whoosh");
-    strike = { kind: "shove", t: 0, dur: 0.40, arm: "r" };
+    // out of a grip: shove the man you hold; otherwise whoever is in reach
+    const t = v.holding(pa) || v.pick(pa, "shove");
+    if (t && v.shove(pa, t, { force: true })) return;
+    // nobody there: the palms go out at the air
+    if (v.strike) v.strike(pa, null, { kind: "shove", candidates: botsInReach });
   }
 
   // ---- public body API used by disasters / movement modules ----
@@ -861,7 +798,10 @@
     knockdown(a, o) { hit(a, { fromX: o.fromX, fromZ: o.fromZ, dir: o.dir, force: o.force || 4, knockdown: o.t || 1.3 }); },
     busy, step, phys, flash: flashHead,
   };
-  CBZ.grapple = { grab, release, punch, push, holding() { return !!held; } };
+  CBZ.grapple = {
+    grab, release, punch, push,
+    holding() { const v = VB(), pa = me(); return !!(v && pa && v.holding(pa)); },
+  };
 
   // ---- input (survival only; jail keeps its own combat) ----
   function active() { return CBZ.game.mode === "survival" && CBZ.game.state === "playing" && document.pointerLockElement; }
@@ -896,15 +836,6 @@
   CBZ.onUpdate(24, function (dt) {
     if (CBZ.game.mode === "escape") return;
     physFrame++;
-
-    // carry a held bot in front of the player (this is how you SAVE someone)
-    if (held && !held.dead) {
-      const L = lookDir(), P = CBZ.player.pos;
-      const hx = P.x + L.x * 1.5, hz = P.z + L.z * 1.5;
-      held.pos.x = hx; held.pos.z = hz;
-      held.pos.y = floorAt(hx, hz) + 0.4;
-      held.group.rotation.y = Math.atan2(L.x, L.z);
-    } else if (held && held.dead) { release(false); }
 
     for (const b of CBZ.bots) step(b, dt);
     if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) step(CBZ.cityPeds[i], dt);

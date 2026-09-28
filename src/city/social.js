@@ -786,12 +786,30 @@
     if (!armed) { CBZ.city.note("Need a gun to take a hostage.", 1.6); return; }
     if (g.cityHostage) { CBZ.city.note("You already have a hostage.", 1.4); return; }
     g.cityHostage = ped; ped.controlled = true; ped.hostage = true; ped.fear = 10; ped.rage = null;
+    // A HUMAN SHIELD, not a man walking behind you: he is pulled in with his
+    // back to you, your forearm across his throat, the gun hand free, and he
+    // hangs on to the arm at his neck (CBZ.verbs.shield). He walks where you walk.
+    holdHostage(ped);
     CBZ.cityRelShift(ped, "intimidated", 1.5);   // grabbed at gunpoint → terror + grudge
     CBZ.city.big("HOSTAGE TAKEN");
     CBZ.cityCrime && CBZ.cityCrime(40, { x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
   };
+  function shieldOf(ped) {
+    const v = CBZ.verbs, S = v && v.sessionOf ? v.sessionOf(ped) : null;
+    return S && S.verb === "shield" ? S : null;
+  }
+  function holdHostage(ped) {
+    const v = CBZ.verbs, pa = CBZ.city && CBZ.city.playerActor;
+    if (!v || !v.shield || !pa || shieldOf(ped)) return !!shieldOf(ped);
+    return !!v.shield(pa, ped);
+  }
+  function unholdHostage(ped) {
+    const S = shieldOf(ped);
+    if (S && CBZ.verbs) CBZ.verbs.release(S, "set");
+  }
   CBZ.cityReleaseHostage = function (ransom) {
     const ped = g.cityHostage; if (!ped) return;
+    unholdHostage(ped);
     ped.controlled = false; ped.hostage = false; ped.alarmed = 8; ped.fear = 10;
     g.cityHostage = null;
     if (ransom) {
@@ -1519,11 +1537,21 @@
     };
     const partner = g.cityPartner && g.cityPartner.companion && !g.cityPartner.kidnapped ? g.cityPartner : null;
     if (partner) follow(partner, 2.6);
-    if (g.cityHostage) follow(g.cityHostage, 1.2);
+    // the hostage is HELD (CBZ.verbs.shield) while you are on foot; a car
+    // ends the hold (boarding.js seats him or he walks after you) and your
+    // feet back on the ground take it up again
+    const hostage = g.cityHostage && !g.cityHostage.dead ? g.cityHostage : null;
+    if (hostage) {
+      const aboard = !!(hostage._cbzSeat || hostage._cbzArc) || (CBZ.boardingHolds && CBZ.boardingHolds(hostage));
+      if (P.driving || P._aircraft || aboard) unholdHostage(hostage);
+      else if (!shieldOf(hostage) && Math.hypot(hostage.pos.x - P.pos.x, hostage.pos.z - P.pos.z) < 3) holdHostage(hostage);
+      if (!shieldOf(hostage)) follow(hostage, 1.2);
+      else if (hostage.moveOrder && hostage.moveOrder._follow) hostage.moveOrder = null;
+    }
     // whoever is no longer being walked at your heel gets his own brain back
     for (let i = _followers.length - 1; i >= 0; i--) {
       const f = _followers[i];
-      if (f !== partner && f !== g.cityHostage || f.dead) {
+      if (f !== partner && (f !== g.cityHostage || shieldOf(f)) || f.dead) {
         if (f.moveOrder && f.moveOrder._follow) f.moveOrder = null;
         _followers.splice(i, 1);
       }

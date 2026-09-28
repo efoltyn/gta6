@@ -3847,11 +3847,9 @@
       setElbow(J.ra, -0.10 - recoil * 0.25, ar);
       setElbow(J.la, (longGun ? -0.72 : -0.22) - 0.26 * hv, ar - 1);
     } else if (ch.cuffed) {
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
-      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.5, 10, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.5, 10, dt);
-      setElbow(J.la, -0.55, 10); setElbow(J.ra, -0.55, 10);
+      // CUFFED ARMS BELONG TO systems/verbs.js: its late pass (order 91)
+      // solves the wrists together behind the back for every cuffed rig,
+      // after this. Writing here too would only be a damp for it to undo.
     } else if (ch.surrender || ch.handsUp) {
       // the hands-up layer below OWNS the arms — if the idle counter-swing
       // also wrote them, the two damps fight and the arms equilibrate at a

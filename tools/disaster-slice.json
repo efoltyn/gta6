@@ -4435,6 +4435,10 @@
   "src/city/facades/sunburst.js",
   "src/city/facades/techhouse.js",
   "src/city/facades/victorian.js",
-  "src/city/facades/ziggurat.js"
+  "src/city/facades/ziggurat.js",
+  "src/systems/verbs.js",
+  "src/entities/verbposes.js",
+  "src/entities/meleeposes.js",
+  "src/systems/verbs_strike.js"
  ]
 }

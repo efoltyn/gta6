@@ -252,6 +252,19 @@
       publishes: ["human", "makeCharacter", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
+    // ---- two people, hands on each other -------------------------------------
+    verbs: {
+      gives: "CBZ.verbs, what two people do to each other with their hands, the " +
+             "same in every game: grab, carry, throw, shove, tackle, cuff, frisk, " +
+             "drag, escort, choke, shield, mug (hands really on the collar, the " +
+             "wrists, the neck; the world in front decides a shove into a wall, " +
+             "over a rail, off a ledge, into water), plus strike / knockdown / " +
+             "getUp and the fighter's timing. CBZ.verbs.grab(a, b) and it plays",
+      needs: ["people"],
+      files: ["systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js"],
+      publishes: ["verbs", "verbPoses", "meleePoses"],
+    },
+
     ragdoll: {
       gives: "REAL DEAD PEOPLE: 13 mass points, Jakobsen sticks, joint limits, " +
              "ground friction and buoyancy, writing back onto the SAME rig " +

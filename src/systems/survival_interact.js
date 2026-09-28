@@ -9,8 +9,11 @@
    ADDITIVE — the direct controls (LMB punch / RMB shove / E grab) still
    work; this just gives the discoverable menu the user liked in jail.
 
-   The verbs delegate to systems/grapple.js (which owns the body physics
-   and aims at the nearest target itself), so this module is pure UI.
+   The verbs are CBZ.verbs' (systems/verbs.js): who is in reach is asked of
+   CBZ.verbs.pick with the verb's OWN reach, so the menu can never offer a
+   verb the hands cannot do, and what is offered follows the world in front
+   of you (a man over water is thrown IN, over a drop he is thrown OVER,
+   against a wall he is slammed). This module is pure UI.
 ============================================================ */
 (function () {
   "use strict";
@@ -26,20 +29,30 @@
   if (!el.interact) return;
 
   const OPT_KEYS = ["i", "j", "k", "l"];   // same 4 interaction slots as every mode
-  // must match grapple.js's REACH/CONE exactly — a looser menu advertises
-  // Grab/Punch/Shove in a shell where aimTarget() is null and the verb no-ops
-  const REACH = 3.1, CONE = 0.25;
 
-  // verb sets — labels + the grapple call each one fires
-  const HOLD_VERBS = [
-    { label: "Throw", fn: () => CBZ.grapple && CBZ.grapple.release(true) },
-    { label: "Set down", fn: () => CBZ.grapple && CBZ.grapple.release(false) },
-  ];
+  // verb sets — labels + the call each one fires (the keys map through
+  // systems/grapple.js; the rest go to CBZ.verbs directly)
+  const VB = () => CBZ.verbs || null;
+  const me = () => (VB() ? VB().playerActor() : null);
+  let tgt = null;                              // the man the card is about
+  const THROW = { label: "Throw", fn: () => CBZ.grapple && CBZ.grapple.release(true) };
+  const SET_DOWN = { label: "Set down", fn: () => CBZ.grapple && CBZ.grapple.release(false) };
+  const CARRY = { label: "Carry", fn: () => { const v = VB(); if (v && tgt) v.carry(me(), tgt); } };
+  const HOLD_VERBS = [THROW, CARRY, SET_DOWN];
+  const CARRY_VERBS = [THROW, SET_DOWN];
+  const DRAG_VERBS = [{ label: "Let go", fn: () => CBZ.grapple && CBZ.grapple.release(false) }];
   const FREE_VERBS = [
     { label: "Grab", fn: () => CBZ.grapple && CBZ.grapple.grab() },
     { label: "Punch", fn: () => CBZ.grapple && CBZ.grapple.punch() },
     { label: "Shove", fn: () => CBZ.grapple && CBZ.grapple.push() },
+    { label: "Tackle", fn: () => { const v = VB(); if (v && tgt) v.tackle(me(), tgt); } },
   ];
+  const DOWN_VERBS = [
+    { label: "Pick up", fn: () => CBZ.grapple && CBZ.grapple.grab() },
+    { label: "Drag", fn: () => { const v = VB(); if (v && tgt) v.drag(me(), tgt); } },
+  ];
+  // what the world in front of you makes of a throw
+  const THROW_WORD = { water: "Throw in", ledge: "Throw over", rail: "Throw over", wall: "Slam", bed: "Throw", table: "Throw", open: "Throw" };
   // THE WATER'S ONE VERB (owner: "I want climb out placed like" these).
   // city/swim.js used to render the haul-out as a .tpill in the centre-screen
   // prompt band, which is where a walk-up verb belongs and not where a verb you
@@ -113,29 +126,42 @@
 
   function lookDir() { const y = CBZ.cam ? CBZ.cam.yaw : 0; return { x: -Math.sin(y), z: -Math.cos(y) }; }
 
-  // nearest living survivor within reach + roughly in front (for showing the menu)
+  // who the hands can reach right now: the man you hold, the nearest man on
+  // his feet in front (the grab's own reach and cone), or a man already down
+  const _T = { set: null };
   function target() {
-    const held = CBZ.grapple && CBZ.grapple.holding && CBZ.grapple.holding();
-    if (held) return { held: true };
-    const P = CBZ.player.pos, L = lookDir();
-    let best = null, bd = REACH;
-    const bots = CBZ.bots || [];
-    for (let i = 0; i < bots.length; i++) {
-      const b = bots[i];
-      if (b.dead || (CBZ.body && CBZ.body.busy(b))) continue;
-      const dx = b.pos.x - P.x, dz = b.pos.z - P.z, d = Math.hypot(dx, dz);
-      if (d > REACH || d < 0.1) continue;
-      if ((dx / d) * L.x + (dz / d) * L.z < CONE) continue;
-      if (d < bd) { bd = d; best = b; }
+    const v = VB(); if (!v) return null;
+    const pa = me(); if (!pa) return null;
+    const S = v.sessionOf(pa);
+    if (S && S.a === pa && v.holding(pa)) {
+      tgt = S.t;
+      if (S.verb === "drag") _T.set = DRAG_VERBS;
+      else if (S.verb === "carry") _T.set = CARRY_VERBS;
+      else _T.set = HOLD_VERBS;
+      if (_T.set !== DRAG_VERBS) {
+        const L = lookDir(), c = v.context(CBZ.player.pos, L, 2.6);
+        THROW.label = THROW_WORD[c.kind] || "Throw";
+      }
+      return _T;
     }
-    return best ? { held: false, bot: best } : null;
+    const up = v.pick(pa, "grab");
+    if (up) { tgt = up; _T.set = FREE_VERBS; return _T; }
+    const dn = v.pick(pa, "carry", { down: true });
+    if (dn) { tgt = dn; _T.set = DOWN_VERBS; return _T; }
+    tgt = null;
+    return null;
   }
 
   // The desktop card is the verbs and their keys, nothing else: the old
   // "SURVIVOR / in reach" header and the one-word subtitles under each verb
   // ("fling", "hold", "hit") labelled what the verb already says.
-  function render(held) {
-    verbs = held ? HOLD_VERBS : FREE_VERBS;
+  let cardKey = "";
+  function keyOf(set) { let k = ""; for (let i = 0; i < set.length; i++) k += set[i].label + "|"; return k; }
+  function render(set) {
+    verbs = set;
+    const key = keyOf(set);
+    if (key === cardKey) return;              // same card: leave the DOM alone
+    cardKey = key;
     if (el.name.textContent) el.name.textContent = "";
     if (el.note.textContent) el.note.textContent = "";
     el.opts.innerHTML = verbs.map((v, i) =>
@@ -184,14 +210,14 @@
       return;
     }
     const t = live ? target() : null;
-    if (!t) { if (shown) { shown = false; el.interact.classList.remove("show"); hideDock(); } return; }
-    verbs = t.held ? HOLD_VERBS : FREE_VERBS;
+    if (!t) { if (shown) { shown = false; cardKey = ""; el.interact.classList.remove("show"); hideDock(); } return; }
+    verbs = t.set;
     if (CBZ.touchMode) {
       // touch: tappable verb buttons by the thumb cluster, no reach-across card
-      renderDock(verbs, t.held ? "held" : "free");
+      renderDock(verbs, keyOf(verbs));
       el.interact.classList.remove("show");
     } else {
-      render(t.held);
+      render(verbs);
       el.interact.classList.add("show");
     }
     shown = true;
@@ -199,7 +225,7 @@
 
   CBZ.onAlways(96, function () {
     if (CBZ.game.mode === "survival" && CBZ.game.state !== "playing" && shown) {
-      shown = false; el.interact.classList.remove("show"); hideDock();
+      shown = false; cardKey = ""; el.interact.classList.remove("show"); hideDock();
     }
   });
 })();
