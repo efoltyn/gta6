@@ -3255,8 +3255,12 @@
             return;
           }
           if (t.what === "rack") {
+            if (v.rack) return;
             v.rack = true;
-            srTakeRack(v);
+            // the hand takes a gun off the rack (systems/verbs_pickup.js)
+            const at = v.rackAt || t;
+            if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(CBZ.player, { x: at.x, y: (v.floorY || 0) + 1.1, z: at.z, kind: "gun" }, { key: v, pose: "grip", keep: true, onTaken: function () { srTakeRack(v); } });
+            else srTakeRack(v);
             return;
           }
           if (t.what === "seal") {

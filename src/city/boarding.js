@@ -1430,14 +1430,31 @@
     bag.mesh.rotation.set(0.08, -0.20, -0.46);
     return true;
   }
+  /* HE PICKS IT UP WITH HIS HAND (systems/verbs_pickup.js): the bag is his
+     the moment he reaches for it (nobody else goes for it), he bends to it,
+     it comes off the ground in his hand, and it goes up onto his shoulder
+     when the lift ends. His bag duty waits while his hand is on it. */
   function takeBag(ped, bag) {
-    if (!bag || bag.carried || bag._cbzBy) return false;
-    if (!mountBag(ped, bag)) return false;
+    if (!bag || bag.carried || bag._cbzBy || ped._cbzTaking) return false;
+    if (!ped.char || !bag.mesh) return false;
     bag.carried = true; bag.held = true; bag.air = false;
     bag._cbzBy = ped;
-    ped._cbzHeldBag = bag;
-    if (CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, "haul"); } catch (e) {} }
-    TALLY.bagsCarriedByNpcs++;
+    ped._cbzTaking = bag;
+    const shoulder = function () {
+      ped._cbzTaking = null;
+      if (bag._cbzBy !== ped || bag.dead) return;
+      bag.mesh.visible = true;
+      if (ped.dead || !mountBag(ped, bag)) {
+        // he went down (or has no body): the bag stays where it lay
+        bag.carried = false; bag.held = false; bag._cbzBy = null;
+        return;
+      }
+      ped._cbzHeldBag = bag;
+      if (CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, "haul"); } catch (e) {} }
+      TALLY.bagsCarriedByNpcs++;
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(ped, bag.mesh, { pose: "grip", keep: true, onDone: shoulder });
+    else shoulder();
     return true;
   }
   /* Board with a bag and the bag rides too. A hold takes it as real freight
@@ -1517,6 +1534,7 @@
 
       // --- BAG DUTY: pick one up, carry it to the ride -------------------
       const job = p._cbzBag;
+      if (job && p._cbzTaking) { p.state = "idle"; p.speed = 0; continue; }   // his hand is on a bag
       if (job && !p._cbzArc) {
         if (p._cbzHeldBag) {
           const veh = job.to || vehOf(null) || nearestBoardable(P.pos.x, P.pos.z, 40);

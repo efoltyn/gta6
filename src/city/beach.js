@@ -1095,6 +1095,13 @@
   function setLook(L, full) {
     L.body.material = full ? (L.bag ? BAG_FULL() : LOOT_FULL()) : (L.bag ? BAG_EMPTY() : LOOT_EMPTY());
   }
+  // A HAND INTO IT (systems/verbs_pickup.js): the reach goes into the container
+  // and what is in it comes out in the hand; the take lands on the grab frame.
+  function byHand(key, x, y, z, kind, fn) {
+    const V = CBZ.verbs;
+    if (V && V.pickup && CBZ.player) V.pickup(CBZ.player, { x: x, y: y, z: z, kind: kind }, { key: key, pose: kind === "cash" ? "card" : "grip", onTaken: fn });
+    else fn();
+  }
   function rifle(L) {
     L.looted = true;
     L.t = RESPAWN * (0.8 + Math.random() * 0.6);
@@ -1185,7 +1192,12 @@
         // the button names what you are actually rifling (the deleted pill
         // distinguished bag from cooler; the one surviving surface keeps that)
         label: function (L) { return L && L.bag ? "Go through the bag" : "Go through the cooler"; },
-        onSelect: function (L) { if (L && !L.looted) rifle(L); },
+        onSelect: function (L) {
+          if (!L || L.looted || L._taking) return;
+          L._taking = true;
+          const y = (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y || 0 : 0) + 0.25;
+          byHand(L, L.x, y, L.z, "cash", function () { L._taking = false; if (!L.looted) rifle(L); });
+        },
       }],
     });
   });

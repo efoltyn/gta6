@@ -232,6 +232,209 @@ tpRun("NPC, keycard on a desk 1.2 m ahead", "m", [0.35, 0.94, 1.1]);
 tpRun("NPC woman, card on the floor, close", "f", [-0.15, 0.0, 0.5]);
 tpRun("player, keycard on the desk", "player", [0.3, 0.94, 0.95]);
 
+/* ================================================================ SECOND WAVE
+   10. a MOVING player is not pulled onto the thing: no step-in, no turn, a
+       shorter scoop, and the take still lands exactly once;
+   11. putDown (TP): the thing is hidden from the start, its copy rides the
+       hand and lands EXACTLY on the rest pose on the release frame, where the
+       real object reappears; onPlaced fires once; phases reach -> release ->
+       withdraw -> done; the rig is handed back;
+   12. putDown (FP): the release frame is the same pixels as the object;
+   13. the LENS hand: with the body hidden and first person off (an inspect
+       camera), the take is played on a hand under the camera;
+   14. takeFrom: a reach into a corpse's pocket lands on the pocket point and
+       a stand-in comes out in the hand; copy:false reaches with nothing. */
+function fpHarness() {
+  const cam = CBZ.camera;
+  cam.position.set(0, 1.65, 0);
+  cam.rotation.set(-0.55, 0, 0);
+  cam.updateMatrixWorld(true);
+  const H = CBZ.fpHands;
+  const vmG = new THREE.Group();
+  cam.add(vmG);
+  vmG.position.set(0.12, -0.30, -0.66);
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd6a57e });
+  const handR = H.makeHand(1, "relaxed", skin), handL = H.makeHand(-1, "fist", skin);
+  handR.scale.setScalar(1.9); handL.scale.setScalar(1.9);
+  vmG.add(handR, handL);
+  const fistT = [
+    { x: 0.26, y: -0.26, z: 0.04, roll: 0.95, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
+    { x: -0.30, y: -0.60, z: 0.10, roll: 0.95, bend: -0.2, vis: false, curl: "fist", hook: 0 },
+  ];
+  const REST = Object.assign({}, fistT[0]);
+  const S = new THREE.Vector3(0.30, -0.45, 0.12);
+  function frame() {
+    Object.assign(fistT[0], REST);
+    vmx.frame(DT);
+    const out = V.fpPickup(vmG, fistT, handR, handL, false);
+    const T = fistT[0];
+    handR.position.set(T.x, T.y, T.z);
+    vmG.updateMatrix();
+    const Svm = S.clone().applyMatrix4(vmG.matrix.clone().invert());
+    H.orientAlong(1, handR.position.clone().sub(Svm), T.roll, T.bend, handR.quaternion);
+    cam.updateMatrixWorld(true);
+    return out;
+  }
+  return { cam, vmG, handR, frame, dispose() { cam.remove(vmG); } };
+}
+
+function movingRun() {
+  console.log("\nTHIRD PERSON: player RUNNING past a gun on the floor");
+  vmx.clearActors();
+  const ch = CBZ.playerChar;
+  CBZ.player.pos.set(0, 0, 0);
+  ch.group.position.copy(CBZ.player.pos);
+  ch.group.rotation.y = 0;
+  CBZ.player.speed = 5.5;
+  for (let i = 0; i < 10; i++) { CBZ.animChar(ch, 5.5, DT); vmx.frame(DT); }
+  const item = gunProp(0.5, 0, 1.3);
+  let taken = 0;
+  const P = V.pickup(CBZ.player, item, { onTaken() { taken++; } });
+  check(!!P && P.moving && P.stepLen === 0, "a running player takes it on the move (no step-in)");
+  let maxPull = 0, frames = 0, lastGap = null;
+  const yaw0 = ch.group.rotation.y;
+  while (!P.done && frames < 200) {
+    // the player keeps running: physics moves him 5.5 m/s along +z
+    CBZ.player.pos.z += 5.5 * DT; ch.group.position.copy(CBZ.player.pos);
+    const before = CBZ.player.pos.clone();
+    CBZ.animChar(ch, 5.5, DT);
+    vmx.frame(DT);
+    maxPull = Math.max(maxPull, before.distanceTo(CBZ.player.pos));
+    if (P.proxy && P.phase === "lift") {
+      proxyWorld(P, _p); ch.group.updateMatrixWorld(true);
+      V.pickupGripPoint(ch, P.hand, P.pose, _q);
+      lastGap = _p.distanceTo(_q);
+    }
+    frames++;
+  }
+  check(lastGap != null && lastGap < 0.08, "the gun trails in to the hand (in the hand before the pocket)", lastGap != null ? f3(lastGap) + " m" : "no copy");
+  check(maxPull < 1e-6, "the take never moves the running player's root", f3(maxPull) + " m");
+  check(Math.abs(ch.group.rotation.y - yaw0) < 1e-6, "nor turns him off his line");
+  check(taken === 1 && P.done, "the take lands once", taken);
+  check(frames * DT < 0.75, "a shorter scoop on the move", (frames * DT).toFixed(2) + " s");
+  CBZ.player.speed = 0;
+  CBZ.scene.remove(item);
+}
+
+function putRunTP() {
+  console.log("\nTHIRD PERSON: NPC puts a card DOWN on a desk");
+  vmx.clearActors();
+  const a = vmx.actor({ x: 0, z: 0, yaw: 0.3 });
+  const ch = a.char;
+  for (let i = 0; i < 20; i++) vmx.frame(DT);
+  const item = card(0.35, 0.94, 1.0);
+  const rest = new THREE.Box3().setFromObject(item).getCenter(new THREE.Vector3());
+  let placed = 0, placedAt = -1, frame = 0, visBefore = false, lastCopy = null, maxStep = 0, prev = null;
+  const P = V.putDown(a, item, null, { onPlaced() { placed++; placedAt = frame; } });
+  check(!!P && P.put && !item.visible, "putDown hides the thing: it is in the hand");
+  const phases = [];
+  for (frame = 1; frame < 200 && !P.done; frame++) {
+    vmx.frame(DT);
+    if (phases[phases.length - 1] !== P.phase) phases.push(P.phase);
+    if (!P.grabbed && item.visible) visBefore = true;
+    if (P.proxy && !P.proxyGone) {
+      proxyWorld(P, _p);
+      if (prev && frame > 12) maxStep = Math.max(maxStep, _p.distanceTo(prev));
+      prev = (prev || new THREE.Vector3()).copy(_p);
+      lastCopy = _p.clone();
+    }
+  }
+  if (P.done && phases[phases.length - 1] !== "done") phases.push("done");
+  check(JSON.stringify(phases) === JSON.stringify(["reach", "release", "withdraw", "done"]), "phases reach -> release -> withdraw -> done", phases.join(","));
+  check(placed === 1 && item.visible && !visBefore, "the real card reappears on the release frame, once", placed);
+  check(lastCopy && lastCopy.distanceTo(rest) < 0.02, "the copy lands on the card's rest pose (no pop)", lastCopy ? f3(lastCopy.distanceTo(rest)) + " m" : "no copy");
+  check(maxStep < 0.08, "the copy rides the hand, no jump", "max " + f3(maxStep) + " m/frame");
+  check(Math.abs(ch.model.position.y) < 1e-6 && !P.proxy, "the rig is handed back, no copy left");
+  CBZ.scene.remove(item);
+}
+
+function putRunFP() {
+  console.log("\nFIRST PERSON: player puts a card DOWN");
+  CBZ.fpsActive = () => true;
+  const R = fpHarness();
+  const item = card(0.12, 0.94, -0.75);
+  const want = new THREE.Box3().setFromObject(item).getCenter(new THREE.Vector3()).project(R.cam);
+  let placed = 0, lastNdc = null;
+  const P = V.putDown(CBZ.player, item, null, { onPlaced() { placed++; } });
+  check(!!P && P.fp && P.put, "a first-person put");
+  for (let f = 0; f < 120 && !P.done; f++) {
+    R.frame();
+    if (P.proxy && !P.grabbed) { P.proxy.updateMatrixWorld(true); lastNdc = new THREE.Box3().setFromObject(P.proxy).getCenter(new THREE.Vector3()).project(R.cam); }
+  }
+  const dn = lastNdc ? Math.hypot(lastNdc.x - want.x, lastNdc.y - want.y) : 9;
+  check(placed === 1 && item.visible, "placed once, the real card is back");
+  check(dn < 0.03, "the last carried frame is on the card's own pixels", "ndc delta " + dn.toFixed(4));
+  R.dispose();
+  CBZ.fpsActive = () => false;
+  CBZ.scene.remove(item);
+}
+
+function lensRun() {
+  console.log("\nLENS: body hidden, first person off (an inspect camera)");
+  const cam = CBZ.camera;
+  cam.position.set(0, 1.4, 0.3);
+  cam.rotation.set(-0.7, 0, 0);
+  cam.updateMatrixWorld(true);
+  CBZ.fpsActive = () => false;
+  CBZ.playerChar.group.visible = false;
+  const item = gunProp(0.05, 0.94, -0.35);
+  let taken = 0, lensSeen = false, handAtGrab = null;
+  const P = V.pickup(CBZ.player, item, { pose: "grip", keep: true, onTaken() { taken++; } });
+  check(!!P && P.lens && P.fp, "the take goes to the lens hand");
+  for (let f = 0; f < 120 && !P.done; f++) {
+    vmx.frame(DT);
+    V.pickupLensTick();
+    const L = V.pickupLens;
+    if (L.vm && L.vm.visible && L.hR.visible) lensSeen = true;
+    if (P.grabbed && handAtGrab == null && L.hR) {
+      L.vm.updateMatrixWorld(true);
+      const g = new THREE.Vector3(-0.006, -0.033, -0.086).applyMatrix4(L.hR.matrixWorld).project(cam);
+      const it = new THREE.Box3().setFromObject(item).getCenter(new THREE.Vector3());
+      item.visible = true; const w = it.project(cam); item.visible = false;
+      handAtGrab = Math.hypot(g.x - w.x, g.y - w.y);
+    }
+  }
+  V.pickupLensTick();
+  check(lensSeen, "the lens hand is drawn during the take");
+  check(handAtGrab != null && handAtGrab < 0.12, "the lens hand is over the gun on screen at the grab", handAtGrab != null ? "ndc " + handAtGrab.toFixed(3) : "never");
+  check(taken === 1 && !V.pickupLens.vm.visible, "taken once, the lens hand gone after");
+  CBZ.playerChar.group.visible = true;
+  CBZ.scene.remove(item);
+}
+
+function takeFromRun() {
+  console.log("\nTHIRD PERSON: player goes through a corpse's pocket (takeFrom)");
+  vmx.clearActors();
+  const ch = CBZ.playerChar;
+  CBZ.player.pos.set(0, 0, 0); ch.group.position.set(0, 0, 0); ch.group.rotation.y = 0;
+  const body = vmx.actor({ x: 0.2, z: 0.75, yaw: 2.0 });
+  body.dead = true;
+  for (let i = 0; i < 10; i++) { CBZ.animChar(ch, 0, DT); vmx.frame(DT); }
+  let taken = 0, resid = null, sawCopy = false;
+  const P = V.takeFrom(CBZ.player, body, { kind: "cash", onTaken() { taken++; } });
+  check(!!P, "a reach into the body is running", P && P.heightKind);
+  const target = P.point.clone();
+  for (let f = 0; f < 200 && !P.done; f++) {
+    CBZ.animChar(ch, 0, DT);
+    vmx.frame(DT);
+    if (P.grabbed && resid == null) { ch.group.updateMatrixWorld(true); V.pickupGripPoint(ch, P.hand, P.pose, _p); resid = _p.distanceTo(target); }
+    if (P.proxy) sawCopy = true;
+  }
+  check(resid != null && resid <= 0.05, "the hand is at the pocket on the grab frame", resid != null ? f3(resid) + " m" : "never");
+  check(taken === 1 && sawCopy, "taken once, and a wallet comes out in the hand");
+  let n2 = 0;
+  const Q = V.pickup(CBZ.player, { x: 0.3, y: 0.94, z: 0.8 }, { copy: false, onTaken() { n2++; } });
+  let any = false;
+  for (let f = 0; f < 200 && !Q.done; f++) { CBZ.animChar(ch, 0, DT); vmx.frame(DT); if (Q.proxy) any = true; }
+  check(n2 === 1 && !any, "copy:false reaches with nothing in the hand");
+}
+
+movingRun();
+putRunTP();
+putRunFP();
+lensRun();
+takeFromRun();
+
 console.log("\nHEADLESS");
 {
   let n = 0;

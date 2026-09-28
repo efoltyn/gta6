@@ -220,6 +220,13 @@
     if (st.empty) st.empty.visible = !full;
   }
 
+  // A HAND INTO IT (systems/verbs_pickup.js): the reach goes into the container
+  // and what is in it comes out in the hand; the take lands on the grab frame.
+  function byHand(key, x, y, z, kind, fn) {
+    const V = CBZ.verbs;
+    if (V && V.pickup && CBZ.player) V.pickup(CBZ.player, { x: x, y: y, z: z, kind: kind }, { key: key, pose: kind === "cash" ? "card" : "grip", onTaken: fn });
+    else fn();
+  }
   function crackOpen(st) {
     st.looted = true;
     st.t = RESPAWN * (0.8 + rng() * 0.6);        // the restock truck takes its time
@@ -338,7 +345,12 @@
           if (st && st.kind === "case") return st.rich ? "Pop the set's case" : "Pop the latches";
           return st && st.rich ? "Unzip the set's bag" : "Unzip it";
         },
-        onSelect: function (st) { if (st && !st.looted) { if (CBZ.shake) CBZ.shake(0.06); crackOpen(st); } },
+        onSelect: function (st) {
+          if (!st || st.looted || st._taking) return;
+          if (CBZ.shake) CBZ.shake(0.06);
+          st._taking = true;
+          byHand(st, st.x, (st.y || 0) + 0.2, st.z, "cash", function () { st._taking = false; if (!st.looted) crackOpen(st); });
+        },
       }],
     });
   });

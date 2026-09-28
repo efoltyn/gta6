@@ -215,7 +215,13 @@
         const k = b && b._keys;
         return (k && k.length > 1) ? "Take the keys" : "Take the key";
       },
-      onSelect: function (b) { lift(b, "corpse"); },
+      // the hand goes into his pocket and comes out with the ring
+      // (systems/verbs_pickup.js takeFrom); the keys are yours on the grab frame
+      onSelect: function (b) {
+        const V = CBZ.verbs;
+        if (V && V.takeFrom) V.takeFrom(CBZ.player, b, { at: "pocketR", kind: "key", pose: "card", onTaken: function () { lift(b, "corpse"); } });
+        else lift(b, "corpse");
+      },
     });
     wiredVerb = true;
     return true;

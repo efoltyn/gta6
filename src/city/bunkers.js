@@ -398,6 +398,13 @@
         note: L.open ? "Hardened shelter, the door is the only way in" : "SEALED · " + (t.lockNote || "it answers to somebody who has more than you"),
       };
     });
+    // A HAND INTO THE CRATE (systems/verbs_pickup.js): the reach, and what is
+    // in it comes out in the hand; the take lands on the grab frame
+    const crateHand = function (t, kind, fn) {
+      const V = CBZ.verbs, P = CBZ.player;
+      if (V && V.pickup && P && P.pos) V.pickup(P, { x: t.x, y: (P.pos.y || 0) + 0.55, z: t.z, kind: kind }, { key: t, pose: "grip", onTaken: fn });
+      else fn();
+    };
     I.registerZone({
       id: "bunker-crates", kind: "bunkercrate", radius: 3.2,
       find: function (px, pz) { return nearestTok(crateTokens, px, pz, 3.2); },
@@ -424,16 +431,21 @@
             const day = CBZ.dayCount ? CBZ.dayCount() : 0;
             if (day < t.nextRestock) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The quartermaster restocks the penetrators daily.", 2); return; }
             t.nextRestock = day + 1;
-            if (e && e.add) e.add("Bunker Buster", 2);
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("2× GBU-57 bunker busters loaded, the B-2's bay carries them.", 2.6);
+            // the hands go into the crate (systems/verbs_pickup.js); loaded on the grab frame
+            crateHand(t, "box", function () {
+              if (e && e.add) e.add("Bunker Buster", 2);
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("2× GBU-57 bunker busters loaded, the B-2's bay carries them.", 2.6);
+            });
           } else {
             if (t.taken) return;
             t.taken = true;
-            if (e && e.add) e.add("Bunker Buster", 1);
-            if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(2500);
-            if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(60); } catch (er) {} }
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("Cache: a bunker buster, $2,500 and 60 rounds.", 2.6);
-            if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (er) {} }
+            crateHand(t, "cash", function () {
+              if (e && e.add) e.add("Bunker Buster", 1);
+              if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(2500);
+              if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(60); } catch (er) {} }
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("Cache: a bunker buster, $2,500 and 60 rounds.", 2.6);
+              if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (er) {} }
+            });
           }
         },
       }],

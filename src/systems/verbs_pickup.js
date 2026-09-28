@@ -37,6 +37,28 @@
                            its own key): a second pickup of the same item while
                            the first is running returns the first handle and
                            never fires onTaken twice.
+               copy        false: a reach with nothing coming away in the hand
+                           (the thing stays, or there is nothing to show)
+               lens        true: play it on a hand drawn in the camera even
+                           when first person is off (automatic whenever the
+                           player's body is hidden, e.g. an inspect camera)
+
+     CBZ.verbs.takeFrom(actor, body, opts) — a reach into a person or a corpse
+       (a pocket, a hip, a collar: opts.at names a CBZ.verbs contact point,
+       default "pocketR"); a stand-in (opts.kind: "cash" wallet, "key", ...)
+       comes out in the hand. Same opts as pickup.
+
+     CBZ.verbs.putDown(actor, item, spot, opts) — the same reach reversed. The
+       thing (hidden until then) comes out of the pocket in the hand, is set
+       down so it lands exactly as `item` rests (spot {x,y,z} overrides where
+       the hand aims), and the hand goes back. Phases reach -> release ->
+       withdraw -> done; opts.onPlaced() fires on the release frame (the real
+       object reappears there), onDone after. Same hand/pose/dur/lens opts.
+
+   A MOVING PLAYER is not pulled onto the thing: faster than a stroll the take
+   skips the step-in and the turn, the body dips less and the whole beat is
+   shorter (a scoop on the move); the thing trails to the hand if it lay out
+   of reach.
 
    PHASES: reach -> close -> lift -> done (first person with a gun out adds
    lower before and raise after: the gun dips out of frame, the hand does
@@ -247,6 +269,7 @@
   const FP_SPLIT = [0.36, 0.12, 0.52];   // reach, close, lift (fractions of dur)
   const TP_SPLIT = [0.45, 0.12, 0.43];
   const ARM_DIP = 0.08, ARM_RAISE = 0.10;
+  const MOVING = 1.5;              // m/s: faster than this the player scoops on the move
   const POCKET_U = 0.62;           // TP: the copy goes into the pocket here (fraction of lift)
 
   const _c = new THREE.Vector3(), _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -297,6 +320,7 @@
       seatFrom: new THREE.Vector3(), seatDelta: new THREE.Vector3(),
       // FP state
       fpRel: new THREE.Matrix4(), fpSeat: new THREE.Vector3(), fpReady: false, fpGrip: new THREE.Vector3(),
+      lens: false, moving: false, put: false, localCenter: new THREE.Vector3(),
       cancel: null,
     };
     P.cancel = function () { finish(P, true); };
@@ -305,15 +329,24 @@
     P.abort = function () {
       if (P.done) return;
       P.taken = true; P.grabbed = true;
-      if (P.hidObj && P.obj) P.obj.visible = true;
+      if (P.hidObj && P.obj && !P.put) P.obj.visible = true;
       finish(P, true);
     };
     return P;
   }
 
-  V.pickup = function (actor, item, opts) {
+  function lensWanted(opts) {
+    if (opts.lens) return true;
+    const pc = CBZ.playerChar;
+    return !!(pc && pc.group && pc.group.visible === false && CBZ.camera);
+  }
+  function start(actor, item, opts, put) {
     opts = opts || {};
-    if (!item) { fire(opts.onTaken); fire(opts.onDone); return null; }
+    const doneNow = function () {
+      if (put) { const o = item && (item.isObject3D ? item : item.obj); if (o && o.isObject3D) o.visible = true; fire(opts.onPlaced); fire(opts.onDone); return null; }
+      return instant(item, opts);
+    };
+    if (!item) { if (put) { fire(opts.onPlaced); fire(opts.onDone); } else { fire(opts.onTaken); fire(opts.onDone); } return null; }
     actor = actor || CBZ.player;
     const key = itemKey(item, opts);
     // the same thing is already being taken: that take is the answer
@@ -322,31 +355,38 @@
     }
     const B = actor ? bodyOf(actor) : null;
     const player = !!(B && B.isPlayer);
-    const fp = player && fpActive();
+    const lens = player && !fpActive() && lensWanted(opts) && !!CBZ.fpHands;
+    const fp = player && (fpActive() || lens);
     if (!B || opts.instant || actorDead(actor, B) || (player && playerBusy()) || (!fp && !(B.ch && B.ch.parts && B.ch.body))) {
-      return instant(item, opts);
+      return doneNow();
     }
     // one take per actor: a new one finishes the old one first (its onTaken fires)
     for (let i = active.length - 1; i >= 0; i--) if (sameActor(active[i], B)) finish(active[i], true);
 
     const P = makeTake(actor, item, opts);
     P.key = key;
-    P.B = B; P.ch = B.ch; P.fp = fp;
-    P.armed = armedNow(B);
+    P.put = !!put;
+    P.B = B; P.ch = B.ch; P.fp = fp; P.lens = lens;
+    P.armed = !lens && armedNow(B);
+    P.moving = player && !fp && !put && !!(CBZ.player && (CBZ.player.speed || 0) > MOVING);
     measureItem(P);
+    if (put && opts.spot && opts.spot.x != null) P.point.set(+opts.spot.x || 0, +opts.spot.y || 0, +opts.spot.z || 0);
     P.hand = opts.hand === "l" || opts.hand === "r" ? opts.hand : (P.armed && !fp ? "l" : "r");
     P.side = P.hand === "l" ? -1 : 1;
     P.pose = opts.pose === "open" ? "grip" : (opts.pose || (P.thin || P.size < 0.1 ? "card" : "grip"));
     if (P.fp) {
-      const dur = opts.dur > 0 ? +opts.dur : 0.36;
+      const dur = opts.dur > 0 ? +opts.dur : (put ? 0.42 : 0.36);
       P.T.lower = P.armed ? ARM_DIP : 0;
       P.T.reach = dur * FP_SPLIT[0]; P.T.close = dur * FP_SPLIT[1]; P.T.lift = dur * FP_SPLIT[2];
+      if (put) { P.T.reach = dur * 0.5; P.T.close = dur * 0.12; P.T.lift = dur * 0.38; }
       P.T.raise = P.armed ? ARM_RAISE : 0;
     } else {
       planBody(P);
-      const dur = opts.dur > 0 ? +opts.dur : (P.heightKind === "floor" ? 1.05 : P.heightKind === "table" ? 0.7 : 0.6);
+      const base = P.heightKind === "floor" ? 1.05 : P.heightKind === "table" ? 0.7 : 0.6;
+      const dur = opts.dur > 0 ? +opts.dur : (P.moving ? base * 0.6 : base);
       P.T.reach = dur * TP_SPLIT[0]; P.T.close = dur * TP_SPLIT[1]; P.T.lift = dur * TP_SPLIT[2];
     }
+    if (put) beginPut(P);
     P.total = P.T.lower + P.T.reach + P.T.close + P.T.lift + P.T.raise;
     P.phase = P.T.lower > 0 ? "lower" : "reach";
     if (P.ch && P.ch.parts) {
@@ -356,6 +396,34 @@
     }
     active.push(P);
     return P;
+  }
+  V.pickup = function (actor, item, opts) { return start(actor, item, opts, false); };
+  V.putDown = function (actor, item, spot, opts) {
+    opts = Object.assign({}, opts || {});
+    if (spot) opts.spot = spot;
+    return start(actor, item, opts, true);
+  };
+  // a reach into a body: the pocket (or any contact point) is the place
+  const _tf = new THREE.Vector3();
+  V.takeFrom = function (actor, target, opts) {
+    opts = Object.assign({}, opts || {});
+    if (opts.key == null) opts.key = target;
+    let pt = null;
+    const tch = target && (target.char || target.ch || (target.parts && target.group ? target : null));
+    if (tch && V.contactPoint) { try { pt = V.contactPoint(tch, opts.at || "pocketR", _tf); } catch (e) { pt = null; } }
+    if (!pt && tch && tch.body) {
+      // no contact table: the hip of the body, off its live matrix
+      tch.group.updateMatrixWorld(true);
+      pt = _tf.set(0, (tch.hipY || 0.95) - 0.05, 0.12);
+      tch.body.localToWorld(pt);
+    }
+    if (!pt) {
+      const p = target && (target.pos || (target.group && target.group.position));
+      if (!p) return start(actor, null, opts, false);
+      const down = !!(target.dead || target.ko > 0);
+      pt = _tf.set(p.x, (p.y || 0) + (down ? 0.2 : 0.9), p.z);
+    }
+    return start(actor, { x: pt.x, y: pt.y, z: pt.z, kind: opts.kind || "cash" }, opts, false);
   };
   function sameActor(P, B) {
     if (P.B && P.B.isPlayer && B.isPlayer) return true;
@@ -425,7 +493,7 @@
     const maxStep = B.isPlayer ? 0.8 : 1.2;
     P.stepFrom.set(pos.x, pos.y, pos.z);
     P.stepLen = 0;
-    if (dh > workD + 0.06 && !P.opts.noStep) {
+    if (dh > workD + 0.06 && !P.opts.noStep && !P.moving) {
       P.stepLen = Math.min(maxStep, dh - workD);
       P.step.set(dx / dh * P.stepLen, 0, dz / dh * P.stepLen);
     } else P.step.set(0, 0, 0);
@@ -435,7 +503,7 @@
     const bearing = Math.atan2(dx, dz);
     const ratio = Math.max(-0.9, Math.min(0.9, sx / Math.max(dAfter, 0.3)));
     P.yaw0 = ch.group ? ch.group.rotation.y : 0;
-    P.yawT = bearing - Math.asin(ratio);
+    P.yawT = P.moving ? P.yaw0 : bearing - Math.asin(ratio);   // on the move the body keeps its line
     const df = Math.sqrt(Math.max(0.0025, dAfter * dAfter - sx * sx));
     const reachR = (B.arm || 0.63) * 0.9;
     let best = null, bestCost = 1e9;
@@ -454,7 +522,7 @@
         if (cost < bestCost) { bestCost = cost; best = [h, th]; }
       }
     }
-    P.drop = P.heightKind === "shelf" ? 0 : best[0];
+    P.drop = P.heightKind === "shelf" ? 0 : best[0] * (P.moving ? 0.6 : 1);
     P.lean = P.heightKind === "shelf" ? 0 : best[1];
   }
 
@@ -518,7 +586,22 @@
     // THE ARM
     const tr = T.lower;
     let k = 0, pose = null;
-    if (t < tr) k = 0;
+    if (P.put) {
+      // the reverse: out of the pocket to the spot, open, and back
+      pocketPoint(P, _pk);
+      if (t < tc) {
+        const u = (t - tr) / T.reach;
+        k = smooth(u / 0.3);
+        _tgt.copy(_pk).lerp(P.point, smooth(u));
+        pose = P.pose;
+      } else if (t < tl) { k = 1; _tgt.copy(P.point); pose = "open"; }
+      else {
+        const u = (t - tl) / (te - tl);
+        _tgt.copy(P.point).lerp(_pk, smooth(u / 0.8));
+        k = 1 - smooth((u - 0.4) / 0.6);
+        pose = "relaxed";
+      }
+    } else if (t < tr) k = 0;
     else if (t < tc) {
       const u = (t - tr) / T.reach;
       k = smooth(u / 0.9);
@@ -547,7 +630,8 @@
         // the lift uses the closed-form solve only: its Euler channels blend
         // smoothly back into the gait (the core's exact quaternion solve
         // writes a twist that a partial blend would snap through)
-        if (t < tl && V.handTo && V.handPoint && own && V.handPoint(ch, P.hand, _w)) {
+        const exact = P.put ? (t >= tc && t < tl) || (t < tc && (t - tr) / T.reach > 0.6) : t < tl;
+        if (exact && V.handTo && V.handPoint && own && V.handPoint(ch, P.hand, _w)) {
           _v.copy(_tgt).sub(_hp).add(_w);
           V.handTo(ch, P.hand, _v, k);
         } else if (CBZ.charArmTo) {
@@ -578,6 +662,13 @@
     if (P.grabbed) return;
     P.grabbed = true;
     const obj = P.obj;
+    if (P.opts.copy === false) {
+      // a reach with nothing coming away in the hand
+      if (obj && !P.opts.leave) { obj.visible = false; P.hidObj = true; }
+      P.proxyGone = true;
+      take(P);
+      return;
+    }
     // the copy, built from the real thing BEFORE the game's onTaken may
     // dispose, pool or remove it
     if (obj) {
@@ -625,15 +716,67 @@
     _v.copy(P.point); hand.worldToLocal(_v);
     P.seatDelta.copy(_grip).sub(_v);
     const ws = hand.matrixWorld.getMaxScaleOnAxis() || 1;
-    const maxL = 0.12 / ws;
+    const maxL = (P.moving ? 2.0 : 0.12) / ws;          // on the move it trails in to the hand from where it lay
     if (P.seatDelta.length() > maxL) P.seatDelta.setLength(maxL);
   }
   function seatTP(P) {
     const c = P.proxy;
     if (!c || P.fp || !c.parent) return;
     const tl = P.T.lower + P.T.reach;
-    const u = smooth((P.t - tl) / (P.T.close * 1.6));
+    const u = smooth((P.t - tl) / (P.T.close * (P.moving ? 3.5 : 1.6)));
     c.position.copy(P.seatFrom).addScaledVector(P.seatDelta, u);
+  }
+
+  /* ============================================================
+     PUT DOWN — the copy starts in the hand and ends exactly where the thing
+     rests; on the release frame it is swapped for the real object
+     ============================================================ */
+  function beginPut(P) {
+    const obj = P.obj;
+    if (obj) {
+      obj.updateWorldMatrix(true, true);
+      P.itemMat.copy(obj.matrixWorld);
+      P.proxy = copyNode(obj);
+      if (P.proxy) { P.proxy.position.set(0, 0, 0); P.proxy.quaternion.identity(); P.proxy.scale.set(1, 1, 1); P.proxy.visible = true; }
+      obj.visible = false; P.hidObj = true;
+    }
+    if (!P.proxy && P.opts.copy !== false) {
+      P.proxy = standIn((P.item && P.item.kind) || (P.thin ? "card" : "box"));
+      P.itemMat.makeTranslation(P.point.x, P.point.y, P.point.z);
+    }
+    // the thing's centre in its own frame (the hand seats THAT)
+    P.localCenter.copy(P.point).applyMatrix4(_m4.copy(P.itemMat).invert());
+    if (!P.fp && P.proxy) {
+      const hand = handMesh(P.ch, P.hand);
+      if (hand) hand.add(P.proxy); else { disposeCopy(P); }
+    }
+    P.fpReady = false;
+  }
+  const _rp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _rs = new THREE.Vector3();
+  function seatPutTP(P) {
+    const c = P.proxy;
+    if (!c || !P.put || P.fp || P.grabbed || !c.parent) return;
+    const hand = c.parent;
+    hand.updateMatrixWorld(true);
+    _m4.copy(hand.matrixWorld).invert().multiply(P.itemMat);
+    _m4.decompose(_rp, _rq, _rs);
+    const side = hand.userData && hand.userData.side < 0 ? -1 : 1;
+    gripLocal(P.pose, side, _grip);
+    _v.copy(P.localCenter).applyMatrix4(_m4);            // its centre, hand frame, at rest
+    const u = (P.t - P.T.lower) / P.T.reach;
+    const u2 = smooth((u - 0.5) / 0.5);
+    c.position.copy(_grip).sub(_v).multiplyScalar(1 - u2).add(_rp);
+    c.quaternion.copy(_rq);
+    c.scale.copy(_rs).multiplyScalar(Math.max(0.001, smooth(u / 0.2)));
+  }
+  function place(P) {
+    if (P.grabbed) return;
+    P.grabbed = true;
+    disposeCopy(P);
+    P.proxyGone = true;
+    if (P.obj) P.obj.visible = true;
+    P.hidObj = false;
+    if (!P.taken) { P.taken = true; fire(P.opts.onPlaced, P); }
   }
 
   /* ============================================================
@@ -655,7 +798,11 @@
   }
   V.fpPickup = function (vmObj, fistT, handR, handL, armedFp) {
     let P = null;
-    for (let i = 0; i < active.length; i++) if (active[i].fp && !active[i].done) { P = active[i]; break; }
+    const isLens = vmObj === LENS.vm;
+    for (let i = 0; i < active.length; i++) {
+      const A = active[i];
+      if (A.fp && !A.done && A.lens === isLens) { P = A; break; }
+    }
     if (!P || !vmObj || !fistT) return null;
     const cam = CBZ.camera;
     if (!cam) return null;
@@ -698,10 +845,26 @@
     camToVm(vmObj, 0.14 * P.side, -0.30, -0.62, _show);
     camToVm(vmObj, 0.34 * P.side, -0.62, -0.42, _pocket);
 
-    const base = P.armed ? LOW : F;         // the hand's own pose this frame (animFists), or below the frame
+    const base = (P.armed || P.lens) ? LOW : F;   // the hand's own pose this frame (animFists), or below the frame
     const bx = base.x, by = base.y, bz = base.z;
     let wx, wy, wz, wgt = 1, roll = 0.35, bend = -0.30, curl = "open";
-    if (t < tc) {
+    if (P.put) {
+      // out of the pocket, to the spot, open, back
+      if (t < tc) {
+        const u = smooth((t - tr) / T.reach);
+        _v.copy(_pocket).lerp(_W, u);
+        wgt = smooth(((t - tr) / T.reach) / 0.3);
+        roll = 0.9 - 0.55 * u; bend = -0.05 - 0.25 * u;
+        curl = P.pose;
+      } else if (t < tl) { _v.copy(_W); curl = "open"; }
+      else {
+        const u = (t - tl) / (te - tl);
+        _v.copy(_W).lerp(_pocket, smooth(u / 0.8));
+        wgt = 1 - smooth((u - 0.6) / 0.4);
+        curl = "relaxed";
+      }
+      wx = _v.x; wy = _v.y; wz = _v.z;
+    } else if (t < tc) {
       const u = smooth((t - tr) / T.reach);
       wgt = u;
       wx = _W.x; wy = _W.y; wz = _W.z;
@@ -729,6 +892,33 @@
     F.hook = 0;
     F.curl = curl;
     if (t < tl) P.fpGrip.set(F.x, F.y, F.z);
+
+    // PUT: the copy is carried in the hand frame and lands on the rest pose
+    // (scaled about the eye, so the release frame is the same pixels as the
+    // real object that replaces it)
+    if (P.put) {
+      if (P.proxy && !P.grabbed) {
+        if (!P.fpReady) { P.fpReady = true; toViewmodel(P); vmObj.add(P.proxy); }
+        _Hf.compose(_pos.set(F.x, F.y, F.z), handQ, _one);
+        cam.getWorldPosition(_eye);
+        if (inView) {
+          const k = dReach / D;
+          _M0.makeTranslation(-_eye.x, -_eye.y, -_eye.z).premultiply(_m4.makeScale(k, k, k))
+            .premultiply(_m4.makeTranslation(_eye.x, _eye.y, _eye.z)).multiply(P.itemMat);
+          _M0.premultiply(_vmInv.copy(vmObj.matrixWorld).invert());
+        } else {
+          P.itemMat.decompose(_pos, _q, _scl);
+          _M0.compose(_G, _q.identity(), _scl.multiplyScalar(dReach / D));
+        }
+        const rel = P.fpRel.copy(_Hf).invert().multiply(_M0);   // rest, in the hand frame
+        _v.copy(P.localCenter).applyMatrix4(rel);
+        gripLocal(P.pose, P.side, _grip).multiplyScalar(K).sub(_v);
+        const u2 = 1 - smooth((((t - tr) / T.reach) - 0.5) / 0.5);
+        _M0.makeTranslation(_grip.x * u2, _grip.y * u2, _grip.z * u2).multiply(rel).premultiply(_Hf);
+        _M0.decompose(P.proxy.position, P.proxy.quaternion, P.proxy.scale);
+      }
+      return FP_OUT;
+    }
 
     // THE COPY: placed on the grab frame by scaling the thing about the eye
     // (same pixels), then carried by the hand frame, seating into the pinch
@@ -782,18 +972,21 @@
     const T = P.T, t = P.t;
     if (t < T.lower) return "lower";
     if (t < T.lower + T.reach) return "reach";
-    if (t < T.lower + T.reach + T.close) return "close";
-    if (t < T.lower + T.reach + T.close + T.lift) return "lift";
+    if (t < T.lower + T.reach + T.close) return P.put ? "release" : "close";
+    if (t < T.lower + T.reach + T.close + T.lift) return P.put ? "withdraw" : "lift";
     if (t < P.total) return "raise";
     return "done";
   }
   function finish(P, cut) {
     if (P.done) return;
     if (!P.grabbed) {
-      // cut short before the hand got there: the take still happens
-      if (P.obj && !P.opts.leave) P.obj.visible = false;
-      P.grabbed = true;
-      take(P);
+      if (P.put) place(P);               // cut short: it is set down all the same
+      else {
+        // cut short before the hand got there: the take still happens
+        if (P.obj && !P.opts.leave) P.obj.visible = false;
+        P.grabbed = true;
+        take(P);
+      }
     }
     disposeCopy(P);
     P.proxyGone = true;
@@ -822,6 +1015,12 @@
       const was = P.phase;
       P.phase = phaseOf(P);
       if (!P.fp) poseBody(P, false);
+      if (P.put) {
+        if (!P.fp) seatPutTP(P);
+        if (!P.grabbed && P.t >= P.T.lower + P.T.reach) place(P);
+        if (P.phase === "done" || was === "done") finish(P, false);
+        continue;
+      }
       if (!P.grabbed && P.t >= P.T.lower + P.T.reach) grab(P);
       if (!P.fp) seatTP(P);
       // the copy goes into the pocket out of sight (TP: when the hand is there)
@@ -833,11 +1032,94 @@
   function lateTP() {
     for (let i = 0; i < active.length; i++) {
       const P = active[i];
-      if (!P.done && !P.fp && P.armed) { poseBody(P, true); seatTP(P); }
+      if (!P.done && !P.fp && P.armed) { poseBody(P, true); if (P.put) seatPutTP(P); else seatTP(P); }
     }
   }
+  /* ============================================================
+     THE LENS HAND. When the player's body is not being drawn and first
+     person is off (an inspect camera a foot from a gun case, a cinematic
+     close-up), the take still needs a hand: the same fphands hand and arm
+     fpsmode uses, on its own small viewmodel under the camera, posed by the
+     same fpPickup maths. Built on first use, hidden when no take needs it.
+     ============================================================ */
+  const LENS = { vm: null, hR: null, hL: null, aR: null, aL: null, T: null, mats: null };
+  const LENS_REST = { x: 0.30, y: -0.72, z: 0.12, roll: 0.95, bend: -0.2 };
+  function lensBuild() {
+    const H = CBZ.fpHands, cam = CBZ.camera;
+    if (LENS.vm || !H || !cam) return !!LENS.vm;
+    const skin = new THREE.MeshLambertMaterial({ color: 0xd6a57e });
+    const fore = new THREE.MeshLambertMaterial({ color: 0x3a4048 });
+    const upper = new THREE.MeshLambertMaterial({ color: 0x3a4048 });
+    LENS.mats = { skin: skin, fore: fore, upper: upper };
+    const vm = new THREE.Group();
+    vm.name = "pickup_lens_vm";
+    vm.position.set(0.12, -0.30, -0.66);
+    LENS.hR = H.makeHand(1, "relaxed", skin); LENS.hL = H.makeHand(-1, "relaxed", skin);
+    LENS.hR.scale.setScalar(1.9); LENS.hL.scale.setScalar(1.9);
+    LENS.aR = H.makeArm({ fore: fore, upper: upper }); LENS.aL = H.makeArm({ fore: fore, upper: upper });
+    vm.add(LENS.hR, LENS.hL, LENS.aR, LENS.aL);
+    vm.traverse(function (o) {
+      o.renderOrder = 1000; o.frustumCulled = false;
+      if (o.material) { o.material.depthTest = true; o.material.depthWrite = true; o.material.transparent = true; }
+    });
+    // the depth clear: the hand draws over the case lid it is reaching into
+    const dcGeo = new THREE.BufferGeometry();
+    dcGeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(9), 3));
+    const dc = new THREE.Mesh(dcGeo, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false, transparent: true }));
+    dc.frustumCulled = false; dc.renderOrder = 999;
+    dc.onBeforeRender = function (renderer) { renderer.clearDepth(); };
+    vm.add(dc);
+    LENS.T = [Object.assign({ vis: false, curl: "relaxed", hook: 0 }, LENS_REST),
+              Object.assign({ vis: false, curl: "relaxed", hook: 0 }, LENS_REST, { x: -0.30 })];
+    vm.visible = false;
+    cam.add(vm);
+    LENS.vm = vm;
+    return true;
+  }
+  const _lS = new THREE.Vector3(), _lE = new THREE.Vector3(), _lW = new THREE.Vector3(), _lA = new THREE.Vector3();
+  const _sArr = [0, 0, 0], _wArr = [0, 0, 0], _pole = [0, 0, 0];
+  function lensTick() {
+    let need = false;
+    for (let i = 0; i < active.length; i++) if (active[i].lens && !active[i].done) { need = true; break; }
+    if (!need) { if (LENS.vm && LENS.vm.visible) LENS.vm.visible = false; return; }
+    if (!lensBuild()) return;
+    const H = CBZ.fpHands;
+    if (LENS.vm.parent !== CBZ.camera && CBZ.camera) CBZ.camera.add(LENS.vm);
+    for (let i = 0; i < 2; i++) Object.assign(LENS.T[i], LENS_REST, { x: i ? -0.30 : 0.30, vis: false, curl: "relaxed" });
+    const out = V.fpPickup(LENS.vm, LENS.T, LENS.hR, LENS.hL, false);
+    LENS.vm.visible = !!(out && out.hands);
+    if (!LENS.vm.visible) return;
+    // the body's dress on the lens arms
+    const d = H.dressOf ? H.dressOf(CBZ.playerChar, {}) : null;
+    if (d) { LENS.mats.skin.color.setHex(d.hand); LENS.mats.fore.color.setHex(d.fore); LENS.mats.upper.color.setHex(d.upper); }
+    LENS.vm.updateMatrix();
+    _vmInv.copy(LENS.vm.matrix).invert();
+    for (let i = 0; i < 2; i++) {
+      const T = LENS.T[i], hand = i ? LENS.hL : LENS.hR, arm = i ? LENS.aL : LENS.aR, side = i ? -1 : 1;
+      hand.visible = arm.visible = !!T.vis;
+      if (!T.vis) continue;
+      H.setPose(hand, T.curl || "relaxed");
+      const sh = SHOULDER_CAM[i];
+      _lS.set(sh[0], sh[1], sh[2]).applyMatrix4(_vmInv);
+      _lW.set(T.x, T.y, T.z);
+      _sArr[0] = _lS.x; _sArr[1] = _lS.y; _sArr[2] = _lS.z;
+      _wArr[0] = _lW.x; _wArr[1] = _lW.y; _wArr[2] = _lW.z;
+      _pole[0] = side * 0.45; _pole[1] = -1; _pole[2] = 0.15;
+      const e = H.math.solveElbow(_sArr, _wArr, _pole, 0.46, 0.44);
+      _lE.set(e[0], e[1], e[2]);
+      _lA.subVectors(_lW, _lE);
+      H.orientAlong(side, _lA, T.roll || 0, T.bend || 0, hand.quaternion);
+      hand.position.copy(_lW);
+      H.poseArm(arm, _lW, _lE, _lS, hand.quaternion, 1.9, !!(d && d.sleeved));
+    }
+  }
+  V.pickupLens = LENS;
+
   V.pickupUpdate = update;          // the clock + TP pose (tools/verbs-pickup-check.mjs drives it by hand)
+  V.pickupLensTick = lensTick;
   V.pickupLate = lateTP;
   if (typeof CBZ.onUpdate === "function") CBZ.onUpdate(91.5, update);
   if (typeof CBZ.onAlways === "function") CBZ.onAlways(54.7, lateTP);
+  // the lens hand after the cameras have moved (camera 50, fpsmode 52, gunhands 54.6)
+  if (typeof CBZ.onAlways === "function") CBZ.onAlways(54.8, lensTick);
 })();

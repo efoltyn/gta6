@@ -1209,15 +1209,22 @@
       canShow: (p) => canLiftKeys() && jailGuardPed(p) && !p.dead &&
         !!(CBZ.cityRestrain && /^(cuffed|escorted)$/.test(CBZ.cityRestrain.stateOf(p) || "")),
       label: "Take keys",
-      onSelect: () => takeKeys(),
+      onSelect: (p) => takeKeysByHand(p),
     });
     // a dead guard can't hold onto anything
     CBZ.interactions.register("corpse", {
       id: "jail-keys-corpse", slot: "e", prio: 95,
       canShow: (b) => canLiftKeys() && jailGuardPed(b),
       label: "Take keys",
-      onSelect: () => takeKeys(),
+      onSelect: (b) => takeKeysByHand(b),
     });
+  }
+  // the hand goes to his belt and comes away with the ring
+  // (systems/verbs_pickup.js takeFrom); the door is yours on the grab frame
+  function takeKeysByHand(p) {
+    const Vb = CBZ.verbs;
+    if (Vb && Vb.takeFrom && p) Vb.takeFrom(CBZ.player, p, { at: "hipR", kind: "key", pose: "card", key: "jail-keys", onTaken: takeKeys });
+    else takeKeys();
   }
 
   /* ==========================================================
