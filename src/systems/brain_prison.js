@@ -316,7 +316,8 @@
   const LAW_OPTS = { roe: "nonlethal", warnRange: 11, orderRange: 5.0, cuffRange: 1.35, patience: 2.6 };
   const LAW_LOSE_R = 26;
   function freeScrew(gd) {
-    return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) && !gd.tied &&
+    // the warden never runs the ladder himself: he orders an officer to (prisonwarden.js)
+    return !!(gd && gd.group && gd.kind !== "warden" && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) && !gd.tied &&
       !gd._escort && gd.intimidMode !== "scared" && !gd.approach && !(gd.hunt > 0) && !gd._yardCase && !(gd.pause > 0));
   }
   // begin a case: officer -> inmate. The authority record lives on gd._brain.case.

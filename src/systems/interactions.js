@@ -1,6 +1,6 @@
 /* ============================================================
    systems/interactions.js — the door, breaker box, security cameras,
-   ventilation, and win check (the plan in systems/escapeplan.js signs
+   ventilation (unscrew the grille, crawl the duct), and win check (the plan in systems/escapeplan.js signs
    off on crawls and wins; it also owns the keycard now). (Cigarette-pack
    pickups used to live here too — that block is now the "coin"
    prop type in systems/proptypes.js / entities/coins.js, the F3
@@ -592,6 +592,7 @@
     breaker.timer = 20;
     breaker.light.material.color.setHex(0xff3b3b);
     breaker.light.material.emissive.setHex(0xff0000);
+    if (breaker.setOpen) breaker.setOpen(true);          // the cabinet door hangs open on its hinge
     if (CBZ.ceilingLamp) {
       CBZ.ceilingLamp.material.color.setHex(0x2b2b2b);
       CBZ.ceilingLamp.material.emissive.setHex(0x000000);
@@ -604,17 +605,122 @@
     if (CBZ.sfx) CBZ.sfx("switch");
   }
 
-  function crawlVent(vent) {
-    if (!vent || CBZ.crawling) return;
-    // the culvert only goes when nobody is watching the ditch
-    if (CBZ.escapePlan && !CBZ.escapePlan.mayCrawl(vent)) return;
+  /* ============================================================
+     THE VENTS: A GRILLE YOU TAKE OFF, A DUCT YOU CRAWL.
+
+     OWNER (2026-09-28): "vents, and the buttons to jump into vents are also
+     dumb." What he was looking at: a pill reading "Enter / to Armory Duct"
+     over a grille that was a picture on the wall, and a tap that blacked the
+     screen and dropped him in another building. Now:
+
+     1. THE GRILLE IS SCREWED ON (world/ventilation.js's louvre panel, world/
+        escape_routes.js's hatch lid: vent.cover). At a closed grille the verb
+        over it is "Unscrew" if you carry a flat blade (a shiv, a razor, a
+        hacksaw blade, a pick, a hatchet: BLADES) or "Pry" with bare hands.
+        The work is TIMED and it is the play: 2.6 s of quiet screw turns, or
+        6.5 s of wrenching sheet steel that anyone standing within 7 m hears.
+        Seen or heard with your hands on it = a report and heat, the same
+        currency the culvert saw spends (systems/escapeplan.js). The panel
+        is then set down against the wall, the lid slid aside, for the rest
+        of the run.
+     2. AN OPEN GRILLE OFFERS "Crawl" (or "Climb in" at a floor hatch), with
+        where it goes as the small second line.
+     3. THE CRAWL IS A BODY, NOT A FADE. This file takes the player's body
+        (the `_doorArc` seam systems/physics.js and entities/moves_posture.js
+        already share) and the lens (CBZ.cineCam, the one scripted-camera
+        channel systems/camera.js reads): he goes down PRONE (character.js's
+        own crawl pose, paddling), crawls to the grille and head first into
+        the duct mouth with the camera low behind him; then crawls a stretch
+        of real galvanised duct (CBZ.ventDuct, world/ventilation.js) with the
+        camera behind his boots toward the light of the far grille; then
+        comes out of the far grille head first, pushes its panel off, and
+        gets up. A floor hatch is climbed down into and up out of. No black
+        card, no teleport you can see.
+     Tower ladders (world/prisonkit.js, ladder:true) are not vents and keep
+     their climb exactly as it was (climbLadder).
+     ============================================================ */
+  const BLADES = ["Shiv", "Shank", "Razor Blade", "Hacksaw Blade", "Lockpick", "Hatchet", "Pickaxe"];
+  const VENT_REACH2 = 1.6;
+  function ventTool() {
+    const e = CBZ.econ;
+    if (!e || !e.hasItem) return null;
+    for (let i = 0; i < BLADES.length; i++) if (e.hasItem(BLADES[i])) return BLADES[i];
+    return null;
+  }
+  function ventD2(v) { const dx = player.pos.x - v.x, dz = player.pos.z - v.z; return dx * dx + dz * dz; }
+  function uprightGuard(gd) {
+    return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && !gd.asleep && !gd.tied && !(gd.bribed > 0));
+  }
+  function guardOnYou(hearR) {
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const gd = list[i];
+      if (!uprightGuard(gd)) continue;
+      if (hearR > 0) {
+        const dx = gd.group.position.x - player.pos.x, dz = gd.group.position.z - player.pos.z;
+        if (dx * dx + dz * dz < hearR * hearR) return gd;
+      }
+      if (CBZ.guardSees) { try { if (CBZ.guardSees(gd)) return gd; } catch (e) {} }
+    }
+    return null;
+  }
+
+  // ---- 1. taking the grille off -------------------------------------------
+  const VW = { vent: null, t: 0, need: 0, tool: null, tick: 0 };
+  function ventWorkStart(v) {
+    if (!v || !v.cover || v.cover.open || VW.vent || CBZ.crawling) return;
+    if (ventD2(v) >= VENT_REACH2) return;
+    VW.vent = v; VW.t = 0; VW.tick = 0;
+    VW.tool = ventTool();
+    VW.need = VW.tool ? 2.6 : 6.5;
+    player.crouch = true;                     // down on a knee at the grille
+  }
+  function ventWorkTick(dt) {
+    const v = VW.vent;
+    if (!v) return;
+    if (!v.cover || v.cover.open || player.dead || CBZ.crawling || ventD2(v) >= VENT_REACH2) { VW.vent = null; return; }
+    const at = ventPoint(v);
+    // caught with your hands on it: seen, or (prying) heard
+    if (guardOnYou(VW.tool ? 0 : 7)) {
+      VW.vent = null;
+      if (CBZ.reportCrime) { try { CBZ.reportCrime(25, { type: "steal" }); } catch (e) {} }
+      if (CBZ.addHeat) CBZ.addHeat(18);
+      return;
+    }
+    VW.t += dt;
+    if ((VW.tick -= dt) <= 0) {
+      VW.tick = VW.tool ? 0.55 : 0.7;
+      if (CBZ.worldSfx) {
+        if (VW.tool) CBZ.worldSfx("switch", at.x, at.z, { y: at.y, ref: 2.5, volume: 0.16, gap: 0.2 });
+        else CBZ.worldSfx("shell", at.x, at.z, { y: at.y, ref: 7, volume: 0.5, gap: 0.2 });
+      }
+      if (!VW.tool && CBZ.shake) { try { CBZ.shake(0.04); } catch (e) {} }
+    }
+    if (VW.t < VW.need) return;
+    VW.vent = null;
+    v.cover.set(true);
+    if (CBZ.worldSfx) CBZ.worldSfx("shell", at.x, at.z, { y: 0.2, ref: 6, volume: 0.6, gap: 0.2 });
+  }
+  // a new run puts every grille back on (g.elapsed restarts at resetGame)
+  let ventRunE = 0;
+  function ventRunWatch() {
+    const e = g.elapsed || 0;
+    if (e + 1e-6 < ventRunE) {
+      const vs = CBZ.vents || [];
+      for (let i = 0; i < vs.length; i++) if (vs[i].cover && vs[i].cover.open) vs[i].cover.set(false);
+      VW.vent = null;
+    }
+    ventRunE = e;
+  }
+
+  // ---- 2. the tower ladders: unchanged (a fade up or down the rungs) -------
+  function climbLadder(vent) {
+    if (!vent || !vent.dest || CBZ.crawling) return;
     CBZ.crawling = true;
-    player.crouch = true;                 // you go in low; the stance is part of the act
     if (fadeEl) fadeEl.style.opacity = "1";
     setTimeout(() => {
       player.pos.set(vent.dest.x, vent.dest.y, vent.dest.z);
       if (CBZ.playerChar) CBZ.playerChar.group.position.copy(player.pos);
-      player.crouch = true;
       setTimeout(() => {
         if (fadeEl) fadeEl.style.opacity = "0";
         CBZ.crawling = false;
@@ -622,10 +728,248 @@
     }, 200);
   }
 
-  // The two @fn targets a pill fires. Named on CBZ because touch.js's pill
+  // ---- 3. the crawl ----------------------------------------------------------
+  const CR = { on: false, ph: "", t: 0, from: null, to: null, e0: 0, fp: false,
+    sx: 0, sz: 0, yaw: 0, s: 0, ductT: 0, speed: 0 };
+  const CRAWL_V = 0.85;                 // m/s on elbows and knees
+  const HEAD = 0.8, FEET = 0.9;         // prone plank: head ahead of the rig origin, feet behind
+  const _dp = {};
+  function lens(x, y, z, lx, ly, lz, snap) {
+    let c = CBZ.cineCam;
+    if (!c) c = CBZ.cineCam = { active: false, x: 0, y: 0, z: 0, lx: 0, ly: 0, lz: 0, snap: false };
+    c.active = true;
+    c.x = x; c.y = y; c.z = z; c.lx = lx; c.ly = ly; c.lz = lz;
+    if (snap) c.snap = true;
+  }
+  function smooth(a, b, u) { const t = Math.max(0, Math.min(1, (u - a) / (b - a))); return t * t * (3 - 2 * t); }
+  function yawTo(dx, dz) { return Math.atan2(dx, dz); }
+  function turn(a, b, k) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * k; }
+  // put the body where the crawl says, in the pose it says, and animate it
+  function pose(x, y, z, yaw, speed, prone, dt) {
+    player.pos.set(x, y, z);
+    player.vy = 0; player.speed = speed;
+    player.prone = !!prone; player.crouch = !prone;
+    const pc = CBZ.playerChar;
+    if (!pc) return;
+    pc.slidePose = false; pc.pronePose = !!prone; pc.crouch = !prone;
+    pc.group.rotation.y = yaw;
+    if (pc.group.rotation.x) pc.group.rotation.x = 0;
+    if (CBZ.animChar) CBZ.animChar(pc, speed, dt);
+    const sink = ((CBZ.charProneSink && CBZ.charProneSink(pc)) || 0.62) * (pc._proneB || 0);
+    pc.group.position.set(x, y - sink, z);
+  }
+
+  function crawlVent(vent) {
+    if (!vent || !vent.dest || CBZ.crawling || CR.on) return;
+    if (vent.ladder) { climbLadder(vent); return; }
+    if (vent.cover && !vent.cover.open) return;          // screwed on: take it off first
+    // the culvert only goes when nobody is watching the ditch
+    if (CBZ.escapePlan && !CBZ.escapePlan.mayCrawl(vent)) return;
+    const a = vent.mouth, b = vent.dest.mouth;
+    if (!a || !b) { climbLadder(vent); return; }         // an unauthored pair: never strand the body
+    CR.on = true; CR.from = vent; CR.to = vent.dest;
+    CR.ph = "down"; CR.t = 0; CR.e0 = g.elapsed || 0;
+    CR.sx = player.pos.x; CR.sz = player.pos.z;
+    CR.yaw = CBZ.playerChar ? CBZ.playerChar.group.rotation.y : 0;
+    // the duct is as long as the run is far, within reason
+    const dist = Math.hypot(b.x - a.x, b.z - a.z);
+    CR.ductT = Math.max(2.4, Math.min(4.2, dist / 4));
+    CBZ.crawling = true;
+    VW.vent = null;
+    player._doorArc = true; player._doorArcOwner = "vent";
+    CR.fp = !!(CBZ.fpsActive && CBZ.fpsActive());
+    if (CR.fp && CBZ.setFPS) CBZ.setFPS(false);
+    if (CBZ.sfx) CBZ.sfx("cloth", { volume: 0.5 });
+  }
+  function crawlRelease() {
+    CR.on = false; CR.ph = "";
+    if (CBZ.ventDuct) CBZ.ventDuct.show(false);
+    if (CBZ.cineCam) { CBZ.cineCam.active = false; CBZ.cineCam.snap = false; }
+    if (player._doorArcOwner === "vent") { player._doorArc = false; player._doorArcOwner = null; }
+    player.prone = false; player.crouch = true;
+    if (CBZ.playerChar) CBZ.playerChar.pronePose = false;
+    CBZ.crawling = false;
+    if (CR.fp && CBZ.setFPS) CBZ.setFPS(true);
+    CR.fp = false;
+  }
+  // where the far end leaves you standing: the far vent's own crawl point
+  function landAt(v) {
+    const m = v.mouth;
+    if (m && m.kind === "floor") { const o = m.off || { x: -1, z: 0 }, r = (m.size || 1.4) * 0.5 + 0.45; return { x: m.x + o.x * r, z: m.z + o.z * r }; }
+    if (m) return { x: m.x + m.nx * 1.35, z: m.z + m.nz * 1.35 };
+    return { x: v.x, z: v.z };
+  }
+
+  function crawlTick(dt) {
+    if (!CR.on) return;
+    // a new run, a death or a knockout mid-crawl: hand the body straight back
+    if ((g.elapsed || 0) + 1e-6 < CR.e0 || player.dead || g.mode !== "escape") {
+      if (player.pos.y < -20) { const L = landAt(CR.to); player.pos.set(L.x, (CR.to.mouth && CR.to.mouth.y > 0.5 ? 0 : (CR.to.mouth ? CR.to.mouth.y || 0 : 0)), L.z); }
+      crawlRelease();
+      return;
+    }
+    CR.t += dt;
+    const a = CR.from.mouth, b = CR.to.mouth;
+    const fy = a.kind === "floor" ? (a.y || 0) : 0;
+    if (CR.ph === "down" || CR.ph === "in") {
+      if (a.kind === "floor") return floorIn(a, dt);
+      return wallIn(a, dt, fy);
+    }
+    if (CR.ph === "duct") return ductRun(dt);
+    if (CR.ph === "out") {
+      if (b.kind === "floor") return floorOut(b, dt);
+      return wallOut(b, dt);
+    }
+    if (CR.ph === "up") {
+      const L = landAt(CR.to);
+      pose(L.x, b.kind === "floor" ? (b.y || 0) : 0, L.z, CR.yaw, 0, false, dt);
+      if (CR.t >= 0.45) crawlRelease();
+    }
+  }
+
+  // HORIZONTAL MOUTH (a wall grille, the culvert bore): get down facing it,
+  // crawl to it and in, head first, lifting onto the sill as the chest
+  // reaches it. The camera starts low behind him and ends a hand's breadth
+  // off the duct mouth, looking into the dark.
+  function wallIn(m, dt, fy) {
+    const ix = -m.nx, iz = -m.nz;                         // into the wall
+    const wantYaw = yawTo(ix, iz);
+    const ex = m.x + ix * 0.4, ez = m.z + iz * 0.4;       // end: head and shoulders deep in, boots on the sill (the wall is only 0.5 m thick)
+    // two legs: square up in front of the mouth, then straight in, so the
+    // body never cuts into the wall beside the opening
+    const ax = m.x + m.nx * (HEAD + 0.35), az = m.z + m.nz * (HEAD + 0.35);
+    const l1 = Math.hypot(ax - CR.sx, az - CR.sz), l2 = Math.hypot(ex - ax, ez - az);
+    const total = Math.max(0.3, l1 + l2);
+    if (CR.ph === "down") {
+      CR.yaw = turn(CR.yaw, wantYaw, 1 - Math.pow(0.001, dt));
+      pose(CR.sx, fy, CR.sz, CR.yaw, 0, true, dt);
+      lensBehind(CR.sx, fy, CR.sz, m, 0);
+      if (CR.t >= 0.5) { CR.ph = "in"; CR.t = 0; }
+      return;
+    }
+    const d = Math.min(total, CR.t * CRAWL_V), u = d / total;
+    const k1 = l1 > 1e-3 ? Math.min(1, d / l1) : 1, k2 = l2 > 1e-3 ? Math.max(0, Math.min(1, (d - l1) / l2)) : 1;
+    const x = d < l1 ? CR.sx + (ax - CR.sx) * k1 : ax + (ex - ax) * k2;
+    const z = d < l1 ? CR.sz + (az - CR.sz) * k1 : az + (ez - az) * k2;
+    // distance from the head to the wall plane decides the lift onto the sill
+    const headOut = (x - m.x) * m.nx + (z - m.z) * m.nz - HEAD;
+    const y = fy + (m.sill - fy) * (1 - smooth(0.05, 0.5, headOut));
+    CR.yaw = turn(CR.yaw, wantYaw, 1 - Math.pow(0.001, dt));
+    pose(x, y, z, CR.yaw, CRAWL_V, true, dt);
+    lensBehind(x, y, z, m, smooth(0.45, 1, u));
+    if (CR.t % 0.6 < dt && CBZ.sfx) CBZ.sfx("cloth", { volume: 0.25 });
+    if (u >= 1) { CR.ph = "duct"; CR.t = 0; CR.s = 1.8; if (CBZ.ventDuct) CBZ.ventDuct.show(true); }
+  }
+  function lensBehind(x, y, z, m, k) {
+    // behind and above the crawling body, blended toward the duct mouth
+    const bx = x + m.nx * 1.9, by = y + 1.05, bz = z + m.nz * 1.9;
+    const mx = m.x + m.nx * 0.32, my = m.y + 0.02, mz = m.z + m.nz * 0.32;
+    const lx0 = x - m.nx * 0.6, ly0 = y + 0.25, lz0 = z - m.nz * 0.6;
+    const lx1 = m.x - m.nx * 2, ly1 = m.y - 0.05, lz1 = m.z - m.nz * 2;
+    lens(bx + (mx - bx) * k, by + (my - by) * k, bz + (mz - bz) * k,
+      lx0 + (lx1 - lx0) * k, ly0 + (ly1 - ly0) * k, lz0 + (lz1 - lz0) * k, false);
+  }
+
+  // FLOOR MOUTH: step onto the open hatch, crouch, lower yourself in. The
+  // camera looks down over your shoulder and follows you into the shaft.
+  function floorIn(m, dt) {
+    const f = m.y || 0;
+    const bx = CR.sx - m.x, bz = CR.sz - m.z, bl = Math.hypot(bx, bz) || 1;
+    const cx = m.x + (bx / bl) * 1.3, cz = m.z + (bz / bl) * 1.3;   // camera side: where he came from
+    if (CR.ph === "down") {
+      const u = smooth(0, 0.6, CR.t);
+      pose(CR.sx + (m.x - CR.sx) * u, f, CR.sz + (m.z - CR.sz) * u, CR.yaw, 1.2 * (1 - u), false, dt);
+      lens(cx, f + 1.9, cz, m.x, f, m.z, false);
+      if (CR.t >= 0.6) { CR.ph = "in"; CR.t = 0; }
+      return;
+    }
+    const u = Math.min(1, CR.t / 1.2);
+    pose(m.x, f - 1.6 * smooth(0.1, 1, u), m.z, CR.yaw, 0, false, dt);
+    lens(cx + (m.x - cx) * u * 0.8, f + 1.9 - 1.3 * u, cz + (m.z - cz) * u * 0.8, m.x, f - 1.2 * u, m.z, false);
+    if (u >= 1) { CR.ph = "duct"; CR.t = 0; CR.s = 1.8; if (CBZ.ventDuct) CBZ.ventDuct.show(true); }
+  }
+
+  // THE DUCT: prone, down the galvanised run toward the far grille's light,
+  // the lens low behind his boots. The body is 70 m under the compound here,
+  // out of every guard's sight and every camera's.
+  function ductRun(dt) {
+    const D = CBZ.ventDuct;
+    if (!D) { CR.ph = "out"; CR.t = 0; return; }
+    CR.s += 1.0 * dt;
+    const p = D.at(CR.s, _dp);
+    pose(p.x, p.y, p.z, D.yaw, 1.0, true, dt);
+    const c = D.at(CR.s - 1.3, {}), l = D.at(CR.s + 2.5, {});
+    lens(c.x, c.y + 0.5, c.z, l.x, l.y + 0.3, l.z, CR.t < dt * 1.5);
+    if (CR.t % 0.6 < dt && CBZ.sfx) CBZ.sfx("cloth", { volume: 0.3 });
+    if (CR.t >= CR.ductT) {
+      D.show(false);
+      CR.ph = "out"; CR.t = 0;
+      if (CR.to.cover && !CR.to.cover.open) {
+        CR.to.cover.set(true);                            // shoved out from inside
+        const b = CR.to.mouth;
+        if (CBZ.worldSfx) CBZ.worldSfx("shell", b.x, b.z, { y: 0.3, ref: 6, volume: 0.55, gap: 0.2 });
+      }
+    }
+  }
+
+  // HORIZONTAL EXIT: head first out of the far grille. The first frame is
+  // his eyes at the mouth looking out into the room; the lens then backs
+  // out ahead of him and turns to watch him come out of the wall.
+  function wallOut(m, dt) {
+    const ox = m.nx, oz = m.nz;
+    const yaw = yawTo(ox, oz);
+    const sx = m.x - ox * 0.6, sz = m.z - oz * 0.6;       // start: boots inside the wall, head at the mouth
+    const L = landAt(CR.to);
+    const total = Math.max(0.3, Math.hypot(L.x - sx, L.z - sz));
+    const d = Math.min(total, CR.t * CRAWL_V), u = d / total;
+    const x = sx + (L.x - sx) * u, z = sz + (L.z - sz) * u;
+    const feetOut = (x - m.x) * ox + (z - m.z) * oz - FEET;      // how far the boots are past the wall plane
+    const y = m.sill * (1 - smooth(0.0, 0.6, feetOut));
+    CR.yaw = yaw;
+    pose(x, y, z, yaw, CRAWL_V, true, dt);
+    // side of the room to stand the lens: across the grille's face
+    const sd = { x: -oz, z: ox };
+    const hx = x + ox * HEAD, hz = z + oz * HEAD;
+    const k = smooth(0.12, 0.7, u);
+    const px0 = m.x + ox * 0.3, py0 = m.y + 0.05, pz0 = m.z + oz * 0.3;
+    const px1 = m.x + ox * 2.6 + sd.x * 0.9, py1 = 1.3, pz1 = m.z + oz * 2.6 + sd.z * 0.9;
+    const lx0 = m.x + ox * 3, ly0 = m.y - 0.1, lz0 = m.z + oz * 3;
+    lens(px0 + (px1 - px0) * k, py0 + (py1 - py0) * k, pz0 + (pz1 - pz0) * k,
+      lx0 + (hx - lx0) * k, ly0 + (y + 0.25 - ly0) * k, lz0 + (hz - lz0) * k, CR.t < dt * 1.5);
+    if (CR.t % 0.6 < dt && CBZ.sfx) CBZ.sfx("cloth", { volume: 0.25 });
+    if (u >= 1) { CR.ph = "up"; CR.t = 0; }
+  }
+
+  // FLOOR EXIT: up out of the shaft, then a step off the hatch.
+  function floorOut(m, dt) {
+    const f = m.y || 0;
+    const L = landAt(CR.to);
+    const o = m.off || { x: -1, z: 0 };
+    const cx = m.x + o.x * 1.4 + o.z * 0.8, cz = m.z + o.z * 1.4 - o.x * 0.8;   // over the side he steps off to
+    const u = Math.min(1, CR.t / 1.6);
+    const rise = smooth(0, 0.7, u), step = smooth(0.7, 1, u);
+    CR.yaw = yawTo(L.x - m.x, L.z - m.z);
+    pose(m.x + (L.x - m.x) * step, f - 1.6 * (1 - rise), m.z + (L.z - m.z) * step, CR.yaw, step > 0 && step < 1 ? 1.2 : 0, false, dt);
+    lens(cx, f + 1.8, cz, m.x, f + 0.3 * rise, m.z, CR.t < dt * 1.5);
+    if (u >= 1) { CR.ph = "up"; CR.t = 0; }
+  }
+
+  // updateInteractions stops running outside a live prison, so a quit to
+  // the menu or a mode switch mid-crawl would strand the body it owns.
+  CBZ.onAlways(40.5, function () {
+    if (!CR.on) return;
+    if (g.mode !== "escape" || g.state === "idle") crawlRelease();
+  });
+
+  // The @fn targets a pill fires. Named on CBZ because touch.js's pill
   // router resolves data-tfn straight off the namespace.
   CBZ.prisonSabotagePower = sabotagePower;
   CBZ.prisonVentCrawl = function () { crawlVent(armedVent); };
+  CBZ.prisonVentWork = function () { ventWorkStart(armedVent); };
+  CBZ.prisonVentState = function () {
+    return { crawling: CR.on, phase: CR.ph, from: CR.from && CR.from.name, to: CR.to && CR.to.name,
+      work: VW.vent ? { vent: VW.vent.name, t: +VW.t.toFixed(2), need: VW.need, tool: VW.tool } : null };
+  };
 
   /* ---- THE READER ANSWERS FOR THE DOOR -------------------------------------
      world/door.js already bolts a card reader with a status light beside the
@@ -657,16 +1001,21 @@
     }
   }
 
-  // Where a prompt HANGS: the face of the breaker box (CBZ.breaker.x/z is the
-  // stand spot 0.7 m in front of it, world/props.js), and a hand's height
-  // over a grate. Cheap objects, built per frame only while a prompt is live.
+  // Where a prompt HANGS: the face of the breaker cabinet (CBZ.breaker.x/z
+  // is the stand spot in front of it, world/props.js), and on the grille or
+  // the hatch itself. Cheap objects, built per frame only while a prompt is live.
   function breakerPoint() {
     const b = CBZ.breaker;
+    if (b.face) return { x: b.face.x, y: b.face.y + 0.1, z: b.face.z };
     const box = b && b.box;
     if (box && box.position) return { x: box.position.x, y: box.position.y + 0.35, z: box.position.z };
     return { x: b.x, y: 2.0, z: b.z - 0.7 };
   }
   function ventPoint(v) {
+    const m = v.mouth;
+    if (m && m.kind === "wall") return { x: m.x + m.nx * 0.05, y: m.y, z: m.z + m.nz * 0.05 };
+    if (m && m.kind === "floor") return { x: m.x, y: (m.y || 0) + 0.35, z: m.z };
+    if (m) return { x: m.x, y: (m.y || 0) + 0.4, z: m.z };
     const g = v.grate;
     return { x: g ? g.x : v.x, y: (v.y || 0.1) + 0.55, z: g ? g.z : v.z };
   }
@@ -751,6 +1100,7 @@
           breaker.sabotaged = false;
           breaker.light.material.color.setHex(0x39ff88);
           breaker.light.material.emissive.setHex(0x14c258);
+          if (breaker.setOpen) breaker.setOpen(false);     // the screw on rounds shuts it
           if (CBZ.ceilingLamp) {
             CBZ.ceilingLamp.material.color.setHex(0xffe9a8);
             CBZ.ceilingLamp.material.emissive.setHex(0xffcf66);
@@ -762,6 +1112,7 @@
           if (CBZ.worldSfx) CBZ.worldSfx("switch", breaker.x, breaker.z, { y: 1.6, ref: 7, volume: 0.6, gap: 0.5 });
         }
       } else {
+        if (breaker.isOpen && breaker.isOpen()) breaker.setOpen(false);   // a run reset restores power, not the door
         const bdx = player.pos.x - breaker.x, bdz = player.pos.z - breaker.z;
         if (bdx * bdx + bdz * bdz < 1.8) {
           // "Sabotage", over the box. The box is the noun.
@@ -835,24 +1186,33 @@
       }
     }
 
-    // ---- ventilation grates (secret crawlspaces) ----
+    // ---- vents: take the grille off, then crawl (see THE VENTS above) ----
+    ventRunWatch();
+    ventWorkTick(dt);
+    crawlTick(dt);
     if (CBZ.vents && !CBZ.crawling) {
       for (const vent of CBZ.vents) {
-        const vdx = player.pos.x - vent.x, vdz = player.pos.z - vent.z;
-        const vd2 = vdx * vdx + vdz * vdz;
+        const vd2 = ventD2(vent);
+        if (vd2 >= VENT_REACH2 || !vent.dest) continue;
         // a welded culvert grate is the plan's prompt ("Cut"), not a crawl
-        if (vd2 < 1.6 && CBZ.escapePlan && !CBZ.escapePlan.ventOpen(vent)) continue;
-        if (vd2 < 1.6) {
-          armedVent = vent;                       // what a pill tap would enter
-          armedVentT = 0.25;
-          /* ONE BUTTON. This used to be two prompts — "Crouch" first, then
-             "Crawl" once you were down — and the stance gate was ceremony:
-             the crawl teleports you and puts you down on arrival anyway, and
-             touch already did both in one tap. (Owner, 2026-09-05: "the whole
-             crouch crawl vent thing should just be a button to enter the
-             vent.") Where it goes is the one thing the grate itself cannot
-             show, so it rides as the small second line. */
-          CBZ.prisonPrompt("vent", "@prisonVentCrawl", vent.verb || "Enter",
+        if (CBZ.escapePlan && !CBZ.escapePlan.ventOpen(vent)) continue;
+        armedVent = vent;                       // what a pill tap acts on
+        armedVentT = 0.25;
+        if (vent.ladder) {
+          // the tower ladders: the climb they always had
+          CBZ.prisonPrompt("vent", "@prisonVentCrawl", vent.verb || "Climb",
+            { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
+          if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
+        } else if (vent.cover && !vent.cover.open) {
+          // screwed on. The verb is what your hands can do to it.
+          const working = VW.vent === vent;
+          const tool = working ? VW.tool : ventTool();
+          CBZ.prisonPrompt("vent", "@prisonVentWork", tool ? "Unscrew" : "Pry",
+            { at: ventPoint(vent), d2: vd2, prog: working ? VW.t / VW.need : 0 });
+          if (CBZ.keys && CBZ.keys["e"]) ventWorkStart(vent);
+        } else {
+          const floor = vent.mouth && vent.mouth.kind === "floor";
+          CBZ.prisonPrompt("vent", "@prisonVentCrawl", floor ? "Climb in" : "Crawl",
             { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
           if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
         }
@@ -876,6 +1236,7 @@
     // the admin door plates and every camera lens already speak. Nothing to
     // print here any more — just no win.
     if (g.role === "cop") return;
+    if (CBZ.crawling) return;            // a crawl finishes before the bore mouth counts
     // THE PLAN SIGNS OFF ON EVERY WIN (systems/escapeplan.js): a gate is won
     // only if nobody has you in sight in the port, the culvert mouth only if
     // the grate was actually cut. Reaching the point is no longer the route.
@@ -899,7 +1260,8 @@
   // ---- ratchet declarations (see CBZ.prisonPromptAudit) ----
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
     { id: "breaker", act: "@prisonSabotagePower", was: "Press [E] to Sabotage Power", now: "Sabotage, over the box" },
-    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent", now: "Enter, over the grate" },
+    { id: "vent", act: "@prisonVentCrawl", was: "Press [E] to Crawl to … / Crouch [Shift] to enter vent", now: "Crawl / Climb in, over the open grille or hatch" },
+    { id: "vent-work", act: "@prisonVentWork", was: "(none: the grille was a picture)", now: "Unscrew / Pry, over the screwed grille" },
     { id: "door", act: "@prisonDoorCloseNearest", was: "Press [E] to close your cell door", now: "Close, over the leaf" }
   );
 

@@ -513,7 +513,7 @@
   function pickScrews() {
     const out = [];
     for (const gd of CBZ.guards || []) {
-      if (!gd || !gd.group || gd.dead || gd.ko > 0 || gd.asleep || gd.bribed > 0 || gd.tied || gd._escort) continue;
+      if (!gd || !gd.group || gd.kind === "warden" || gd.dead || gd.ko > 0 || gd.asleep || gd.bribed > 0 || gd.tied || gd._escort) continue;
       const dx = player.pos.x - gd.group.position.x, dz = player.pos.z - gd.group.position.z;
       out.push({ gd, d2: dx * dx + dz * dz });
     }
@@ -521,7 +521,8 @@
     const picked = out.slice(0, 2).filter((o, i) => i === 0 || o.d2 < ESC.SECOND_R * ESC.SECOND_R);
     return picked.map((o) => o.gd);
   }
-  function screwUsable(gd) { return !!(gd && gd.group && !gd.dead && !(gd.ko > 0)); }
+  // the warden never walks a man to the hole himself: he orders it (prisonwarden.js)
+  function screwUsable(gd) { return !!(gd && gd.group && !gd.dead && !(gd.ko > 0) && gd.kind !== "warden"); }
   function releaseScrews() {
     if (!esc) return;
     for (const gd of esc.screws) {

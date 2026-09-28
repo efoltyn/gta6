@@ -3244,43 +3244,8 @@
       standing: (g.gangStanding || [0, 0]).slice(), debt: (g.gangDebt || [0, 0]).slice(),
     };
   };
-  /* THE WARDEN IS SOMEBODY YOU ALIGN WITH, TOO. prisonwarden.js stamps
-     g.wardenDeal = {clique, name, mark, t, out} when you give him a name.
-     It stays between you and him for a while; yards leak. Once it is out,
-     that clique's standing drops hard, the man you named carries it, and
-     the yard has you down as a man who talks. */
-  function rollWardenDeal(dt) {
-    const g = CBZ.game || {};
-    const d = g.wardenDeal;
-    if (!d || d.out) return;
-    if (!d.seen) {
-      // naming the man who tested you is the "snitched" answer to the test
-      d.seen = true;
-      const mk = d.mark ? (CBZ.npcs || []).find((n) => n.data && n.data.name === d.mark) : null;
-      if (mk) noteFishSnitched(mk);
-    }
-    d.age = (d.age || 0) + dt;
-    if (d.age < 45) return;                                   // nobody knows yet
-    const yr = yardRep();
-    const perSec = 1 / 260 + (yr.snitch || 0) * 0.0015 + (d.age > 240 ? 0.004 : 0);
-    if (rng() >= perSec * dt) return;
-    d.out = true;
-    yr.snitch = (yr.snitch || 0) + 1;
-    addBuzz("snitch", 18, "warden deal");
-    if (d.clique >= 0) addGangStanding(d.clique, -18);
-    const mark = d.mark ? (CBZ.npcs || []).find((n) => n.data && n.data.name === d.mark && alive(n)) : null;
-    if (mark) {
-      mark.playerGrudge = Math.min(14, (mark.playerGrudge || 0) + 6);
-      mark.grudgeWhy = "you giving the warden my name";
-      if (playerDist(mark) < 14) {
-        say(mark, "You gave the warden my name.", null, 2.2);
-        if (rng() < testerSwing(mark) + 0.2) requestHunt(mark, 7, "snitch");
-      }
-    }
-    for (const m of CBZ.npcs || []) {
-      if (m !== mark && alive(m) && m.gang === d.clique) rememberBlockRead(m, "snitch", 30, "warden");
-    }
-  }
+  /* The warden deal's slow leak lived here (rollWardenDeal). Telling, and
+     the yard finding out, is systems/prisonsnitch.js now. */
   CBZ.cliqueName = function (id) { const P = PCARS(); return P && id >= 0 && id < P.N ? P.label(id) : "nobody"; };
   CBZ.prisonNewFish = freshNewFish;
   CBZ.prisonYardRep = yardRep;
@@ -3292,7 +3257,6 @@
     if (g.state !== "playing") return;
     g.pitchGapT = Math.max(0, (g.pitchGapT || 0) - dt);
     updateArrival(dt);
-    rollWardenDeal(dt);
     if ((CBZ.player.stun || 0) > 0) return;
     g.socialDirectorT = Math.max(0, (g.socialDirectorT || 0) - dt);
     if (g.socialDirectorT > 0 || playerApproachBusy() || g.pitchGapT > 0) return;

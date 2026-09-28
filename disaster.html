@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 447
+     Natural Disaster Survival, standing alone: index.html minus the 446
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -504,7 +504,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
-<script src="src/core/daynight.js?v=neutralhaze1"></script>
+<script src="src/core/daynight.js?v=dsl3"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -514,8 +514,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=flick1"></script>
-<script src="src/world/corridorkit.js"></script>
+<script src="src/world/prisonkit.js?v=dsl3"></script>
+<script src="src/world/corridorkit.js?v=dsl3"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -540,14 +540,14 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/world/cellblock.js"></script>
+<script src="src/world/cellblock.js?v=dsl3"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
      depended on their (synchronous, load-time) execution happening this
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
-<script src="src/world/door.js?v=scale2"></script>
+<script src="src/world/door.js?v=dsl3"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
 
@@ -663,8 +663,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisongrounds.js"></script>
-<script src="src/world/corridors.js"></script>
+<script src="src/world/prisongrounds.js?v=dsl3"></script>
+<script src="src/world/corridors.js?v=dsl3"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -773,7 +773,9 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=cars1"></script>
+<script src="src/systems/prisonwarden.js?v=tell2"></script>
+<!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
+<script src="src/systems/prisonsnitch.js?v=tell2"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -785,13 +787,10 @@ document.body.appendChild(b);}}catch(e){}})();
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=cars1"></script>
-<script src="src/systems/interactions.js?v=lift1"></script>
-<!-- A door opened off the clock is noticed: the screws who see, hear or get
-     radioed about it, the inmates it was shut on, and the Warden's record of
-     the officer. After interactions.js (the door registry); guards.js,
-     brain_prison.js and prisonwarden.js are all read lazily. -->
-<script src="src/systems/prisondoorwatch.js?v=doors1"></script>
+<script src="src/systems/prisonfriends.js?v=m0928s"></script>
+<script src="src/systems/interactions.js?v=m0928s"></script>
+<!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
+<script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
@@ -1055,18 +1054,15 @@ document.body.appendChild(b);}}catch(e){}})();
      into systems/building.js's CATALOG. City-only; everything city-side is looked
      up lazily. -->
 <script src="src/city/compoundkit.js?v=cpd1"></script>
-<!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
-     (moved from the "2. world geometry" wave above, right after
-     towers.js): they now need spawnPiece to exist at parse time. -->
-<script src="src/world/crates.js?v=nodash1"></script>
-<!-- THE YARD IS A PRISON YARD. crates.js already killed the loot verb on its
-     five packing cases; this stands the cases DOWN and puts what a real
-     exercise yard contains on the same five spots — handball wall, weight
-     pile, shade pavilion, phone bank, notice board — keeping every metre of
-     the line-of-sight cover the stealth layer is built on. It also re-homes
-     the Hacksaw Blade and the Lockpick into the workshop and the laundry,
-     which is where a saw and a pick would actually be. AFTER crates.js
-     (whose PRISON_YARD_FURNITURE flag it shares) and props.js. -->
+<!-- F7 — world/props.js migrated onto CBZ.spawnPiece (moved from the
+     "2. world geometry" wave above, right after towers.js): it needs
+     spawnPiece to exist at parse time. (world/crates.js, the five yard
+     packing cases, deleted 2026-09-28: yardfurniture.js had replaced them.) -->
+<!-- THE YARD IS A PRISON YARD: what a real exercise yard contains on the
+     five spots the old packing cases held — handball wall, weight pile,
+     shade pavilion, phone bank, notice board — keeping every metre of the
+     line-of-sight cover the stealth layer is built on. It also puts the
+     Hacksaw Blade and the Lockpick in the workshop and the laundry. -->
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->

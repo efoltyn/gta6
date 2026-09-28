@@ -609,21 +609,12 @@
     /* THE WARDEN'S VOICE IS AUTHORITY, NOT COMMERCE (owner, 2026-08-19: "he
        should not accept cigs... he legit acted like an inmate"). Every warden
        line below exists because the generic guard/inmate line was wrong in
-       his mouth. His one currency is NAMES — see snitch() below. */
+       his mouth. His one currency is what you know (systems/prisonsnitch.js). */
     wardenNoCigs: ["Cigarettes? I sign for this whole prison. Walk.",
                    "Put them away. I'm not one of my officers.",
                    "You can't afford me, and it isn't counted in smokes."],
     wardenNoPaper: ["The sheet stays the sheet. Bring me something I can use.",
                     "You don't buy paperwork in here. You earn it. With names."],
-    wardenNotBuying: ["You're not in enough trouble to need me. Keep it that way.",
-                      "Your sheet's thin. Nothing to trade. Go on."],
-    wardenHeardIt: ["I've heard enough out of you today.",
-                    "Not today. Go."],
-    wardenNoNames: ["Names. Real ones. Come back when you hold one.",
-                    "Your yard's gone quiet on you? Then we're done."],
-    wardenPaidName: ["Good. That stays in this room.",
-                     "Noted. My officers will take it from here.",
-                     "Good. Keep your ears open."],
     // his card has no Insult any more (systems/prisonwarden.js); these only
     // answer a stray insult() from an old path
     wardenInsulted: ["Segregation. Tonight."],
@@ -1086,97 +1077,9 @@
       : "Your name comes off the sheet. It goes back on if you make me look stupid.") };
   }
 
-  /* ---------- SNITCH: the warden's price is a NAME ----------
-     OWNER (2026-08-19): "he should not accept cigs" — so what DOES the top of
-     a prison trade in? Information. The game already runs a whole snitch
-     economy pointed AT the player (inmates report you, credibility, "talks to
-     the screws" reads); this is the same economy with the player on the
-     selling side, and every consequence goes through machinery that already
-     exists:
-       · the heat relief is payoff()'s own sweep, paid in risk instead of cigs
-       · the name is a REAL man — a rival crew's holder, found by what his
-         rolled loadout actually carries — and the nearest free officer
-         physically walks to him (guards.js's investigate beat)
-       · the risk is the yard finding out: provokeGang turns the burned crew
-         on you, and noteRead("snitch") drops you into the same block-gossip
-         channel that brands any other man who talks to the screws
-     One name a schedule block. A clean sheet has nothing to trade. */
-  const SNITCH_HEAT_MIN = 14;
-  // the gate, published so the menu chip and the act can never disagree:
-  // "" = he is buying · "count" | "later" | "clean" = why not
-  function snitchOffer(actor) {
-    if (!actor || actor.kind !== "warden") return "clean";
-    if (counting()) return "count";
-    const b = blockId();
-    if (b && g.wardenHeardBlock === b) return "later";
-    if ((g.detection || 0) < SNITCH_HEAT_MIN && (g.complaints || 0) < 25) return "clean";
-    return "";
-  }
-  function snitchMark() {
-    // THE MAN WHO JUST SHOOK YOU DOWN is the name a new arrival gives
-    // (ai.js's new-fish arc: this is the "snitched" answer to a test)
-    const nf = g.newFish;
-    const t = nf && nf.lastTester;
-    if (t && !t.dead && !t.escaped && !((t.ko || 0) > 0) && t.group && nf.t - (nf.lastTestAt || 0) < 180) return t;
-    // a name worth money: a live rival-crew man, weighted by what he holds
-    let best = null, bs = -1;
-    for (const n of CBZ.npcs || []) {
-      if (!n || n.dead || n.escaped || (n.ko || 0) > 0 || !n.group) continue;
-      if (n.gang == null || n.gang < 0 || n.gang === CBZ.player.gang) continue;
-      const load = rollLoadout(n);
-      const s = (load.items ? load.items.length * 4 : 0) + (load.cigs || 0) * 0.3 + (n.isLeader ? 3 : 0);
-      if (s > bs) { bs = s; best = n; }
-    }
-    return best;
-  }
-  function snitch(actor) {
-    const why = snitchOffer(actor);
-    if (why === "count") return { ok: false, msg: pick(VOICE.wardenBusy) };
-    if (why === "later") return { ok: false, msg: pick(VOICE.wardenHeardIt) };
-    if (why === "clean") return { ok: false, msg: pick(VOICE.wardenNotBuying) };
-    const mark = snitchMark();
-    if (!mark) return { ok: false, msg: pick(VOICE.wardenNoNames) };
-    const heat = g.detection || 0, complaints = g.complaints || 0;
-    g.wardenHeardBlock = blockId() || "x";
-    if (CBZ.addHeat) CBZ.addHeat(-(22 + heat * 0.45));
-    if (CBZ.addComplaint) CBZ.addComplaint(-(12 + complaints * 0.3));
-    if (CBZ.reduceCasePressure) CBZ.reduceCasePressure(16, nm(actor));
-    g.witnessReportT = Math.max(0, (g.witnessReportT || 0) - 8);
-    if ((g.detection || 0) < 32) g.lastKnown = null;
-    // payoff()'s own stand-down sweep: the search cools because the office
-    // suddenly has a better name than yours
-    for (const gd of CBZ.guards || []) {
-      if ((g.detection || 0) < 28) {
-        gd.hunt = 0;
-        gd.alert = Math.min(gd.alert || 0, 0.2);
-        gd.investigate = null;
-      }
-    }
-    addLoyalty(actor, 12);                    // an informant is an asset
-    // THE NAME GETS ACTED ON: the nearest free officer walks to the man you
-    // sold. guards.js's investigate beat does the walking and the looking.
-    const mp = mark.group.position;
-    let officer = null, od = Infinity;
-    for (const gd of CBZ.guards || []) {
-      if (!gd || gd.dead || gd.ko > 0 || gd.kind === "warden" || gd.hunt > 0 || gd.asleep) continue;
-      const dx = gd.group.position.x - mp.x, dz = gd.group.position.z - mp.z, d2 = dx * dx + dz * dz;
-      if (d2 < od) { od = d2; officer = gd; }
-    }
-    if (officer) officer.investigate = { x: mp.x, z: mp.z, t: 16 };
-    // THE RISK. A yard is a small place: roughly one name in three comes back
-    // on you. The burned crew turns (the same verb an insult or a beating
-    // uses), and the block-gossip channel starts carrying "talks to the
-    // screws" about YOU — the exact read the game already prints on any
-    // other man who does this.
-    if (CBZ.prisonNoteSnitched) CBZ.prisonNoteSnitched(mark);
-    if (rng() < 0.35) {
-      if (CBZ.provokeGang) CBZ.provokeGang(mark, 11, { crew: 1, why: "snitch" });
-      noteRead("snitch", 14, nm(mark), 22);
-      if (CBZ.prisonSay) CBZ.prisonSay(mark, "You went to the man. That's done now.", { force: true });
-    }
-    CBZ.sfx("coin");
-    return { ok: true, msg: pick(VOICE.wardenPaidName) };
-  }
+  /* SNITCH lived here: a warden-only button, gated on YOUR heat, that sold a
+     random rival the player had never seen. It is systems/prisonsnitch.js
+     now: TELL on any guard or the warden, about what you actually know. */
 
   /* ---------- STEAL: a hand in somebody else's pocket ----------
      THE HALF THAT WAS A LIE. The old lift spliced the best item out of the
@@ -1904,7 +1807,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, snitch, snitchOffer, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
     // the phone bridge — ask these, never re-derive the rule or the words
     hasPhoneAccess, phoneGate, phoneTerms, grantPhoneTime, consumePhoneTime, phoneBridge, outsidePaidPrefix, PHONE_TIME_SECS,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)

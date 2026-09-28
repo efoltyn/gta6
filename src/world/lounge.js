@@ -91,8 +91,6 @@
     });
   }
 
-  // "STAFF ONLY" sign band over the door
-  addBox(19, 5.4, 37, 0.2, 0.8, 3.0, 0x1d2a4d, { cast: false });
 
   // ---- shared plumbing --------------------------------------------------
   // Always invoke THROUGH the namespace (never a detached reference) so a kit
@@ -193,11 +191,32 @@
   addBox(28.3, 0.47, 31.5, 0.6, 0.82, 1.4, 0x7a6a55, { solid: true });                  // cabinet
   addBox(28.28, 0.9, 31.5, 0.66, 0.04, 1.46, 0xd8d2c4, { cast: false });                 // top
   for (const dz of [-0.35, 0.35]) addBox(27.99, 0.5, 31.5 + dz, 0.02, 0.66, 0.66, 0x6b5c49, { cast: false });   // doors
-  addBox(28.45, 1.12, 31.3, 0.3, 0.4, 0.26, 0x1e2227, { cast: false });                  // brewer
-  addBox(28.36, 1.3, 31.3, 0.36, 0.06, 0.28, 0x1e2227, { cast: false });                 // brewer head
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.16, 12), CBZ.cmat(0x3b2a1e));
-  pot.position.set(28.34, 1.0, 31.3); (CBZ.prisonRoot || CBZ.scene).add(pot);
-  addBox(28.3, 0.935, 31.3, 0.02, 0.012, 0.02, 0xff5a3a, { emissive: 0xc02a10, ei: 0.8, cast: false }); // power lamp
+  /* the brewer: a pour-over machine, not two black boxes. Base with the
+     warmer plate, the tower at the back, the head over the brew basket, the
+     glass carafe on the plate with its handle and lid, two mugs beside it. */
+  if (PD && PD.Paint) {
+    const B = new PD.Paint(), BLK = 0x1e2227, STL = 0xa9b0b7;
+    B.box(0, 0.015, 0, 0.34, 0.03, 0.28, BLK);                                        // base
+    B.box(0.11, 0.25, 0, 0.12, 0.44, 0.26, BLK);                                      // tower
+    B.box(-0.01, 0.47, 0, 0.32, 0.07, 0.26, BLK);                                     // head
+    B.box(-0.01, 0.438, 0, 0.3, 0.006, 0.24, STL);                                    // spray plate
+    B.cyl(-0.07, 0.395, 0, 0.085, 0.06, 0.07, BLK, 16);                               // brew basket
+    B.box(-0.19, 0.41, 0, 0.1, 0.022, 0.035, BLK);                                    // its handle
+    B.cyl(-0.07, 0.036, 0, 0.09, 0.09, 0.012, STL, 16);                               // warmer plate
+    B.cyl(-0.07, 0.1, 0, 0.068, 0.085, 0.11, 0x3b2a1e, 16);                           // carafe, full
+    B.cyl(-0.07, 0.175, 0, 0.05, 0.068, 0.04, 0xb8c6cc, 16);                          // its glass shoulder
+    B.cyl(-0.07, 0.205, 0, 0.055, 0.055, 0.02, BLK, 16);                              // lid
+    B.add(new THREE.TorusGeometry(0.045, 0.01, 5, 12, Math.PI).rotateZ(-HALF).rotateY(HALF).translate(-0.07, 0.12, -0.075), BLK);  // handle
+    B.box(-0.172, 0.018, 0.1, 0.006, 0.012, 0.012, 0x2a2e33);                         // switch
+    for (const dz of [0.28, 0.4]) {                                                   // two mugs
+      B.cyl(-0.05, 0.05, dz, 0.042, 0.038, 0.1, 0xece8df, 12, 0, 0, true);
+      B.add(new THREE.CircleGeometry(0.038, 12).rotateX(-HALF).translate(-0.05, 0.004, dz), 0xece8df);
+      B.add(new THREE.TorusGeometry(0.025, 0.006, 4, 10, Math.PI).rotateZ(-HALF).rotateY(-HALF).translate(-0.05, 0.05, dz + 0.042), 0xece8df);
+    }
+    B.mesh(28.42, 0.92, 31.3);
+  }
+  // its power light, on the base's front edge
+  addBox(28.247, 0.938, 31.4, 0.006, 0.01, 0.01, 0xff5a3a, { emissive: 0xc02a10, ei: 0.8, cast: false });
 
   // a couple of loose cigarette packs left on the table (steal-bait)
   if (CBZ.addPack) { CBZ.addPack(25.5, 37, 8); CBZ.addPack(24.5, 41.5, 6); }
@@ -279,20 +298,73 @@
         { color: PD.h01(n[0], n[1], 0x9331) > 0.6 ? 0xf1ecdd : 0xe0d8c2 });
 
     // ---- 6. VENDING MACHINE (north-east, beside the coffee machine) -------
-    addBox(28.2, 0.95, 33.6, 0.9, 1.9, 1.0, 0x2a3550, { solid: true });
-    const glass = addBox(27.7, 1.15, 33.6, 0.06, 1.3, 0.8, 0xbfe9f7, { cast: false });
-    glass.material.transparent = true; glass.material.opacity = 0.3;
-    for (let i = 0; i < 3; i++)                                        // stock behind the glass
-      addBox(27.82, 0.72 + i * 0.42, 33.6, 0.16, 0.2, 0.66,
-        [0xc94d3a, 0xe8c33c, 0x3ad17a][i], { cast: false });
-    addBox(27.75, 1.92, 33.6, 0.1, 0.16, 0.8, 0xff8a3c,
-      { emissive: 0xc85c00, ei: 0.5, cast: false });                   // header glow
+    /* A SNACK MACHINE, not a navy box with three coloured bricks in it and
+       a glowing orange slab stuck on its face (at night: a dark cube with an
+       orange block on it). Cabinet on levelling feet; a framed glass front
+       over a lit-from-inside cavity with five spiral trays of product; the
+       selection panel beside it with its keypad, coin slot and note reader;
+       the push flap at the bottom. Nothing on it emits: the room's troffers
+       light it like everything else, and at lights-out it goes dark. */
+    const VX = 28.2, VZ = 33.6, FX = VX - 0.45;         // front face plane (faces -x)
+    // the carcass behind the cavity; the front 25 cm is built open below
+    const cab = addBox(VX + 0.125, 0.98, VZ, 0.65, 1.84, 1.0, 0x243049, { cast: true });
+    if (CBZ.prisonKit) CBZ.prisonKit.skinBox(cab, "steel", 0x243049);
+    if (CBZ.colliders) {
+      CBZ.colliders.push({ minX: VX - 0.45, maxX: VX + 0.45, minZ: VZ - 0.5, maxZ: VZ + 0.5, y0: 0, y1: 1.9, ref: cab });
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    const V = new PD.Paint(), BODY = 0x243049;
+    for (const b of [-1, 1]) V.box(-0.325, 0.98, b * 0.485, 0.25, 1.84, 0.03, BODY);   // cheeks
+    V.box(-0.325, 1.84, 0, 0.25, 0.12, 1.0, BODY);                                    // head
+    V.box(-0.325, 0.29, 0, 0.25, 0.46, 1.0, BODY);                                    // base
+    V.box(-0.325, 1.15, 0.36, 0.25, 1.26, 0.25, BODY);                                // panel column
+    for (const a of [-1, 1]) for (const b of [-1, 1]) V.cyl(a * 0.36, 0.03, b * 0.42, 0.035, 0.04, 0.06, 0x1a1c1f, 8);   // feet
+    V.box(0, 0.06, 0, 0.84, 0.04, 0.94, 0x15181c);                                   // toe recess
+    // the cavity behind the glass and its five trays of stock
+    const GZ0 = -0.44, GZ1 = 0.2, GY0 = 0.52, GY1 = 1.78;
+    V.box(-0.205, (GY0 + GY1) / 2, (GZ0 + GZ1) / 2, 0.012, GY1 - GY0, GZ1 - GZ0 + 0.06, 0x2e3440);  // back of the cavity
+    const STOCK = [0xc94d3a, 0xe8c33c, 0x3a7fd1, 0x3ab06a, 0xd9803a, 0x8a3b8f, 0xe6e1d3];
+    for (let r = 0; r < 5; r++) {
+      const y = GY0 + 0.05 + r * 0.25;
+      V.box(-0.32, y, (GZ0 + GZ1) / 2, 0.22, 0.012, GZ1 - GZ0 - 0.04, 0x9aa3ad);   // tray
+      for (let k = 0; k < 5; k++) {
+        const z = GZ0 + 0.08 + k * 0.12, col = STOCK[(r * 3 + k * 2) % STOCK.length];
+        const tall = r < 2 ? 0.17 : r === 4 ? 0.12 : 0.15;
+        if (r === 4) V.cyl(-0.33, y + 0.066, z, 0.032, 0.032, 0.12, col, 10);     // cans on the bottom row
+        else V.box(-0.33, y + tall / 2 + 0.006, z, 0.05, tall, 0.1, col);          // bags and bars
+        V.add(new THREE.TorusGeometry(0.035, 0.004, 4, 10).rotateY(HALF).translate(-0.39, y + 0.04, z), 0x9aa3ad);  // the spiral's front coil
+      }
+    }
+    // the door frame round the glass, the selection panel, the flap
+    V.box(-0.462, GY1 + 0.03, (GZ0 + GZ1) / 2, 0.03, 0.06, GZ1 - GZ0 + 0.08, 0x3a4150);
+    V.box(-0.462, GY0 - 0.03, (GZ0 + GZ1) / 2, 0.03, 0.06, GZ1 - GZ0 + 0.08, 0x3a4150);
+    V.box(-0.462, (GY0 + GY1) / 2, GZ0 - 0.02, 0.03, GY1 - GY0, 0.04, 0x3a4150);
+    V.box(-0.462, (GY0 + GY1) / 2, GZ1 + 0.02, 0.03, GY1 - GY0, 0.04, 0x3a4150);
+    V.box(-0.458, 1.2, 0.33, 0.02, 0.9, 0.2, 0x1d222b);                              // selection panel
+    V.box(-0.47, 1.52, 0.33, 0.01, 0.1, 0.15, 0x3c5a4a);                             // the price readout, unlit
+    for (let i = 0; i < 12; i++)
+      V.box(-0.472, 1.38 - ((i / 3) | 0) * 0.055, 0.29 + (i % 3) * 0.04, 0.012, 0.035, 0.03, 0xc8ced4);   // keypad
+    V.box(-0.47, 1.05, 0.33, 0.012, 0.06, 0.02, 0x9aa3ad);                           // coin slot
+    V.box(-0.47, 0.95, 0.33, 0.012, 0.03, 0.12, 0x0e1014);                           // note reader
+    V.box(-0.462, 0.3, -0.1, 0.03, 0.22, 0.6, 0x1a1e24);                            // the push flap
+    V.box(-0.47, 0.38, -0.1, 0.012, 0.03, 0.5, 0x3a4150);
+    V.mesh(VX, 0, VZ);
+    const glass = addBox(FX - 0.012, (GY0 + GY1) / 2, VZ + (GZ0 + GZ1) / 2, 0.012, GY1 - GY0, GZ1 - GZ0, 0xbfe9f7, { cast: false, receive: false });
+    glass.material.transparent = true; glass.material.opacity = 0.22; glass.material.depthWrite = false;
 
     // ---- 7. THE DOOR HEAD + FIRE KIT ----------------------------------------
     // (the dado/scuff planks, joists, sticks, wall lamps, conduit and the blue
     // floor line are gone: the finish kit above is the shell now)
-    addBox(19, 3.95, 37, 0.5, 2.1, 3.4, 0x6b7480, { cast: false });
+    // the head runs to the wall top (it stopped at 5.0 and a blank blue
+    // "STAFF ONLY" board with nothing on it half-filled the hole above it)
+    addBox(19, 4.45, 37, 0.5, 3.1, 3.4, 0x6b7480, { cast: false });
     addBox(19.3, 2.88, 37, 0.14, 0.16, 3.5, 0x515a66, { cast: false });
+    // the door that was never hung in this 3.4 m hole: a framed steel pair,
+    // hooked back against the yard face (corridorkit's door set, no collider)
+    if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
+      CBZ.corridorKit.doorSet({ axis: "z", a0: 35.3, a1: 38.7, fixed: 19, t: 0.5, h: 2.8, y0: 0.06,
+        open: 1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+    }
     PD.extinguisher(WX0 + 0.18, 1.1, 34.9, "x+");
   })();
 
