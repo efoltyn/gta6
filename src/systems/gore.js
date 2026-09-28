@@ -2,10 +2,11 @@
    systems/gore.js — cinematic, visceral death gore for BOTH games.
 
    One call, CBZ.gore(x, y, z, opts), throws a layered blood event:
-     • a forward-biased SPRAY of fast droplets that fling AWAY from the
-       impact (exit-wound directionality), each leaving a splat where it lands
-     • a fine high-velocity MIST puff (rifle/headshot/explosion feel) that
-       hangs, drifts, and fades — the subtle aerosol that reads as "real"
+     • BLOOD IN THE AIR shaped by the cause (see THE AIRBORNE BLOOD): a
+       round's entry back-spatter and exit spray of real-size drops drawn as
+       motion streaks, a short soft mist down the shot line, a blade's heavy
+       drops and stream, an artery's pulsing jet; every drop that lands is a
+       spatter mark on the floor or the wall it hit
      • chunky flying GIBS (limbs/torso, gravity + tumble + settle as debris)
      • lingering ground POOLS that spread from the body and stop, then dry
        from deep glossy red to matte red-brown, soaked into the floor — every
@@ -50,10 +51,9 @@
 
    NOTHING HERE IS A CUBE (CBZ.CONFIG.GORE_REALISM_V2, default on — see the
    block at the top of the IIFE): a gunshot throws no generic chunks in any
-   mode, the chunks an explosion DOES throw are torn irregular solids, droplets
-   are centimetres and stretch along their own velocity, aerosol is a soft
-   camera-facing puff, and a drop's landing mark is a splash rather than a
-   metre-and-a-half blot. One flag reverts all of it.
+   mode and the chunks an explosion DOES throw are torn irregular solids. The
+   blood in the air is not a mesh at all any more (THE AIRBORNE BLOOD, one
+   draw call, not behind the flag).
 
    PRESERVED public API: CBZ.gore(x,y,z,opts), CBZ.clearGore().
    ADDED public API: CBZ.goreMedium(x,y,z), CBZ.goreBloom(x,y,z,opts),
@@ -98,12 +98,9 @@
   //           growing 3.2x, an "aerosol" was a cloud of hard-edged lumps.
   // So the fix is two laws, both live-read so ?cfg_GORE_REALISM_V2=0 reverts
   // the whole pass in one line:
-  //   realism()  — the LOOK. Torn irregular chunks instead of boxes, droplets
-  //                at real scale stretched along their own velocity, aerosol as
-  //                a soft camera-facing puff on the feathered blood texture,
-  //                and a droplet's landing mark sized like a splash and not
-  //                like a puddle. Mode-blind: the city's blood was the same
-  //                blood, so the city gets it too.
+  //   realism()  — the LOOK of the solids: torn irregular chunks instead of
+  //                boxes. (The droplets and mist it once also covered are THE
+  //                AIRBORNE BLOOD now, which has no legacy path to revert to.)
   //   debrisLaw() — the CITY's death-realism rule, promoted to every mode: a
   //                bullet DROPS a person (ragdoll.js already leaves an intact
   //                body), so it throws no generic chunks at all; an explosion
@@ -111,38 +108,19 @@
   //                settles, fades and clears instead of decorating the yard.
   function realism() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_REALISM_V2 !== false; }
   function debrisLaw() { return cityMode() || realism(); }
-  // A droplet's authored `size` is read as a sphere RADIUS. DROP_R below (the
-  // island wave) already pulled the call-site magnitudes down for a ROUND drop;
-  // this is the extra factor a STRETCHED one needs, because the same volume of
-  // blood drawn out along its flight has to be thinner across. Composed, the
-  // two land a spray at ~4-10 cm across and 3-6x that long. Keeps every call
-  // site's relative weighting (a stump vent is still finer than an exit spray).
-  const DROP_K = 0.55;
   // Body-drain pools have the same unit bug as the droplets: spawnSplat's
   // `grow` is a RADIUS, so the authored 1.87 for an ordinary kill stamped a
   // 3.7 m lake under one man. Measured against the rig it lies next to, a
   // bled-out body owns something closer to a metre and a half.
   const POOL_K = 0.42;
-  // Aerosol: a soft quad hides nothing behind it, so it needs a FRACTION of the
-  // reach a hard lump could get away with. `size` is still the authored sphere
-  // radius; these turn a 7-puff burst into a knee-high haze at the wound rather
-  // than a four-metre pink cloud over the yard.
-  const MIST_K = 2.4, MIST_A = 0.24;
   function survMode() { return !!(CBZ.game && CBZ.islandModeOn(CBZ.game.mode)); }
   const GRAV = 24;
-  // The three blood rungs, for what flies (droplets, mist, gibs). Land marks
-  // do not take a colour from a caller at all — they filter the floor they lie
-  // on, and their shade is their age and depth (see the STAIN IN THE FLOOR
-  // block). The old DECAL_C palette that re-darkened these for an unlit decal
-  // went with the unlit decal.
+  // What flies is drawn by THE AIRBORNE BLOOD block below (its own colours,
+  // authored as the pixel). These three are what callers still hand in as a
+  // `color` for gibs and what the pools are nominally stamped with.
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
-  // Droplets stay LIT and stay bright — they have to be findable at 20 m — but
-  // the old rungs came out of the sRGB pass as pillar-box red. One stop down is
-  // still legible against sky and concrete and stops reading as cherry candy.
-  const DROP_C = { 0x5e070b: 0x4b060a, 0x8a0b10: 0x6e090d, 0xb01218: 0x8c0e13 };
-  function dropCol(c) { return realism() ? (DROP_C[c] != null ? DROP_C[c] : c) : c; }
   const BONE = 0xe6ddc8, BONE_D = 0xcfc3ad, TOOTH = 0xf2ead8;
-  const bits = [];     // flying gibs + blood droplets + mist
+  const bits = [];     // flying gibs + severed parts (blood in the air is the AIR pool)
   const splats = [];   // ground blood pools + tire-smear streaks
   const walls = [];    // vertical wall/surface splatter decals
   const later = [];    // delayed gore beats (arterial spurts, bleed-out pools)
@@ -192,24 +170,8 @@
   function rm(m) { if (!m) return; if (m.parent) m.parent.remove(m); if (m.material && !m.material._shared && m.material.dispose) m.material.dispose(); }
 
   // ---- shared geometry (one allocation, reused by every bit/decal) ----
-  const G_DROP = new THREE.SphereGeometry(1, 7, 5);   // blood droplet (scaled + stretched per-bit)
-  /* A DROPLET IS A DROPLET, NOT A PEBBLE (owner, on the blood blocks). G_DROP
-     is a 5x4 sphere — deliberately, it is cheap — but a 5x4 sphere is a
-     FACETED POLYHEDRON, and the spray was scaling it to a 0.07-0.18 radius:
-     up to 36 cm across. Three simultaneous kills filled the air with what read
-     as flying red rocks, which is the same complaint as the cubes wearing a
-     different geometry. Real spatter is millimetres; at this art scale ~8-16 cm
-     is the honest read, still visible in flight and still stamping its landing
-     mark. One constant, so every emitter in this file moves together.
-     GORE_DROP_SCALE dials it back up (1.9 restores the old spray exactly). */
-  if (CBZ.CONFIG.GORE_DROP_SCALE == null) CBZ.CONFIG.GORE_DROP_SCALE = 1;
-  function DROP_R(k) {
-    return (0.038 + Math.random() * 0.052) * (k || 1) * (+CBZ.CONFIG.GORE_DROP_SCALE || 1);
-  }
-  const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // legacy aerosol lump (realism OFF)
   const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // legacy chunk (realism OFF) only — the stump
                                                       // is its own torn geometry now, see stumpGeo()
-  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // aerosol billboards
   // TORN FLESH, NOT DICE: three irregular chunk silhouettes baked ONCE at
   // startup and picked at random per piece, so no two chunks share an outline
   // and none of them has a flat square face to catch the light like a box.
@@ -238,17 +200,6 @@
   const G_CHUNK = [chunkGeo(), chunkGeo(), chunkGeo()];
   function chunk() { return G_CHUNK[(Math.random() * 3) | 0]; }
 
-  // A DROPLET POINTS WHERE IT IS GOING. One quaternion off the velocity vector
-  // turns a stretched sphere into a streak of blood in flight — the single
-  // cheapest thing that stops a spray reading as a handful of thrown beads.
-  const _UP = new THREE.Vector3(0, 1, 0), _aim = new THREE.Vector3();
-  function aimDrop(m, vx, vy, vz) {
-    _aim.set(vx, vy, vz);
-    const l = _aim.length();
-    if (l < 0.001) return;
-    _aim.multiplyScalar(1 / l);
-    m.quaternion.setFromUnitVectors(_UP, _aim);
-  }
   // the WATER slick's outline (land marks use the atlas): a circle with
   // per-vertex radial jitter (sum of randomly-phased sines) baked ONCE at
   // startup. 3 shared geometries, randomly picked + spun + stretched per
@@ -729,10 +680,10 @@
   //  THE WATER MEDIUM — blood does NOTHING underwater that it does in air.
   //
   //  Nothing outside this file changes to get it. gore()/gore.spray() ask
-  //  goreMedium() where the wound is and branch themselves, and spawnBit() —
-  //  which EVERY incidental emitter in this file already funnels through
-  //  (stump vents, arterial arcs, blunt spit, skull frags, both spray layers)
-  //  — redirects blood/mist into a bloom puff while a wet event is in flight.
+  //  goreMedium() where the wound is and branch themselves, and airDrop() /
+  //  airMist() — which EVERY incidental emitter in this file funnels through
+  //  (stump vents, arterial streams, blunt spit, both spray layers) —
+  //  redirect blood/mist into a bloom puff while a wet event is in flight.
   //  So the whole file gains the medium, not just the shark that prompted it.
   //
   //  WHAT IT LOOKS LIKE — colour, size, motion, counts — is THE PLUME
@@ -843,10 +794,10 @@
   // float like a mist over the water — blood is never a mist lol")
   //
   // One predicate, enforced at the single choke point all of those already go
-  // through (spawnBit), so there is no ninth copy of a water check. Ballistic
-  // DROPLETS are deliberately NOT banned: they are the half of a breaching bite
-  // that is real, and they now go INTO the water where they land — see the
-  // sea-surface test in the bits loop.
+  // through (airMist, in THE AIRBORNE BLOOD), so there is no ninth copy of a
+  // water check. Ballistic DROPLETS are deliberately NOT banned: they are the
+  // half of a breaching bite that is real, and they go INTO the water where
+  // they land — see the sea-surface test in updateAir.
   const MIST_AIRGAP = 3.5;      // more clear air than this above the swell = sky, not sea
   // ONE-CELL, ONE-FRAME MEMO. A burst is 5-18 mist bits inside a 35 cm box all
   // fired on the same frame, and "is this column open water" is a property of
@@ -1424,6 +1375,648 @@
     return true;
   };
 
+  /* ============================================================
+     THE AIRBORNE BLOOD — everything that leaves a body through the air.
+
+     OWNER, 2026-09-28: "Blood is very good on the ground, but blood flying
+     out of people is very geometric and dumb." What he was looking at, read
+     off the code this replaced:
+       * A DROP was its own Mesh: SphereGeometry(1,7,5), a 35-facet ball,
+         scaled to a 2-5 cm radius and stretched a RANDOM 2-4x (not by its
+         speed) into an 8-40 cm faceted dart. Lambert-lit, so each facet
+         caught the sun as a flat plane; opaque, with a hard silhouette;
+         falling at 24 m/s^2 with no air drag. 22-32 of them per kill, born up
+         a 1.2 m vertical column, one draw call each.
+       * THE MIST was a camera-facing quad with its OWN new MeshBasicMaterial
+         (a material allocated per puff, a draw call per puff) on
+         bloodTexture(), whose alpha is solid to 55% of its radius: a DISC.
+         Coloured 0x8a0b10/0xb01218 and tone mapped, it came out a bright
+         saturated red, and it grew 3.2x in half a second: flat red plates
+         swelling in the air.
+     Faceted darts and flat discs: that is "geometric".
+
+     WHAT IT IS NOW. One InstancedBufferGeometry draws every drop and every
+     puff in the air in ONE draw call. Each instance is a quad built in
+     SCREEN space by the vertex shader: it runs from where the drop was one
+     exposure ago to where it is now (a real motion streak, length = speed x
+     shutter), it is as wide as the drop actually projects (never under ~1.5
+     px, with its alpha paying for the difference), and the fragment shader
+     cuts a soft capsule out of it. A streak smeared over more pixels is
+     fainter, as a photographed one is. Nothing has a facet or a lit face.
+       * DROPS are real sizes: 0.25-2.5 mm radius in a gunshot's spray, 1.5-5
+         mm for a blade's heavy drops. Gravity, plus quadratic air drag with
+         the terminal speed a drop that size really has. What lands becomes a
+         spatter mark through the stain layer (spawnSplat's "drop"/"dot" on a
+         floor, the same atlas cells on a wall face), sized by the drop and
+         stretched by its impact angle, tail pointing the way it was going.
+       * MIST is a soft gaussian puff thrown down the shot line, dragged to a
+         stop in centimetres and gone in 0.2-0.4 s. Gunshots only.
+       * STREAMS (a blade, an artery, an open neck or joint) are EMITTERS that
+         lay drops along a jet, 45-70 a second. Near the source each drop's
+         streak is stretched to meet the next one, so it reads as one
+         continuous stream; the stretch relaxes over ~0.12 s, so the jet
+         breaks into drops as it flies. An artery PULSES: a few beats, each
+         weaker than the last.
+     COLOUR is a FILTER, exactly as the stain's is: the air layer MULTIPLIES
+     the drawn frame, per channel, with green/blue falling faster than red
+     at partial coverage. Worked through core/renderer.js's grade and the
+     sRGB framebuffer, the old lit drop came out (255,63,81) on its sunlit
+     facets and the old mist (255,80,93): candy pink-red. Alpha-blending any
+     honest dark red instead still goes pink over pale concrete and MAUVE
+     over sky wherever it is thin (a 0.4 veil of #600609 over sky is hue 287).
+     A filter cannot: a drop over pale concrete is (95,7,8), over sky
+     (75,6,10), and the thinnest edge of a puff is a darker red, not a pink
+     one. It also takes the scene's light for free — a drop in a dark cell or
+     at night is as dark as blood there is, it never glows.
+     COST: one draw call, one program, no texture, fixed typed arrays, a hard
+     cap that recycles, counts LOD'd by distance at spawn, no per-frame
+     allocation. Ground marks cost what they always cost (one stain slot).
+  ============================================================ */
+  const AIR_MAX = 1400;                            // hard allocation; the live cap is airCap()
+  function airCap() { return CBZ.qScale ? CBZ.qScale(360, 1400) : 900; }
+  const AIR_G = 12;                                // world units/s^2 (a rig is ~2 units tall)
+  // what the drawn frame is MULTIPLIED by where the blood fully covers it
+  // (screen-space, the framebuffer's own sRGB values): pale concrete
+  // (190,188,182) -> (95,7,8) under a drop, (152,84,80) under a puff's core
+  const AIR_T_CORE = [0.50, 0.035, 0.045], AIR_T_MIST = [0.60, 0.09, 0.10];
+  const AIR_LAND_FRAME = 14;                       // marks stamped per frame, at most
+  const AX = new Float32Array(AIR_MAX), AY = new Float32Array(AIR_MAX), AZ = new Float32Array(AIR_MAX);
+  const AVX = new Float32Array(AIR_MAX), AVY = new Float32Array(AIR_MAX), AVZ = new Float32Array(AIR_MAX);
+  const AR = new Float32Array(AIR_MAX);            // drop radius / puff start size (m)
+  const AS1 = new Float32Array(AIR_MAX);           // puff end size (m)
+  const AT = new Float32Array(AIR_MAX), AL = new Float32Array(AIR_MAX), AA = new Float32Array(AIR_MAX);
+  const AK = new Float32Array(AIR_MAX);            // drop: quadratic drag g/vt^2; puff: linear drag /s
+  const ATR = new Float32Array(AIR_MAX), ABRK = new Float32Array(AIR_MAX);   // stream stretch + breakup
+  const AFL = new Float32Array(AIR_MAX), AFT = new Float32Array(AIR_MAX);    // floor cache + re-read timer
+  const ASEA = new Float32Array(AIR_MAX), AMG = new Float32Array(AIR_MAX);   // sea timer, mark-size override
+  const AMK = new Float32Array(AIR_MAX);           // mark-size multiplier (drops that merge on landing)
+  const AKIND = new Uint8Array(AIR_MAX), AMARK = new Uint8Array(AIR_MAX);    // 0 drop / 1 mist; leaves a mark
+  const AWP = new Int8Array(AIR_MAX), AWG = new Uint16Array(AIR_MAX);        // wall plane + its generation
+  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG];
+  let airN = 0, airCursor = 0, airShutter = 1 / 120, airLands = 0;
+  // A STREAM LANDS AS A FEW BIGGER MARKS, NOT SIXTY SMALL ONES: drops that
+  // arrive on top of each other merge. An emitter (or a blast) sets these
+  // around its own drops — the chance a drop leaves its own mark, and how
+  // much bigger that mark is for the ones it absorbed.
+  let airMarkP = 1, airMarkK = 1;
+  // lifetime emit counts (goreAudit)
+  const AIR_AUDIT = { drops: 0, mist: 0, lands: 0, wallLands: 0, water: 0, recycled: 0, streams: 0, skippedMarks: 0 };
+
+  let airMesh = null, airGeo = null, aiPos = null, aiVel = null, aiMisc = null;
+  function airReady() {
+    const sc = scene();
+    if (!sc) return false;
+    if (!airMesh) {
+      const quad = new THREE.PlaneGeometry(1, 1);
+      airGeo = new THREE.InstancedBufferGeometry();
+      airGeo.setIndex(quad.index);
+      airGeo.setAttribute("position", quad.attributes.position);
+      aiPos = new THREE.InstancedBufferAttribute(new Float32Array(AIR_MAX * 4), 4);
+      aiVel = new THREE.InstancedBufferAttribute(new Float32Array(AIR_MAX * 4), 4);
+      aiMisc = new THREE.InstancedBufferAttribute(new Float32Array(AIR_MAX * 2), 2);
+      aiPos.setUsage(THREE.DynamicDrawUsage); aiVel.setUsage(THREE.DynamicDrawUsage); aiMisc.setUsage(THREE.DynamicDrawUsage);
+      airGeo.setAttribute("iPos", aiPos);
+      airGeo.setAttribute("iVel", aiVel);
+      airGeo.setAttribute("iMisc", aiMisc);
+      airGeo.instanceCount = 0;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          tCore: { value: new THREE.Vector3(AIR_T_CORE[0], AIR_T_CORE[1], AIR_T_CORE[2]) },
+          tMist: { value: new THREE.Vector3(AIR_T_MIST[0], AIR_T_MIST[1], AIR_T_MIST[2]) },
+          uPx: { value: 2 / 900 },
+        },
+        vertexShader: [
+          "attribute vec4 iPos;",    // xyz where the drop IS, w radius (m)
+          "attribute vec4 iVel;",    // xyz velocity (m/s), w seconds of it to draw behind (shutter)
+          "attribute vec2 iMisc;",   // x alpha, y kind (0 drop, 1 mist)
+          "uniform float uPx;",      // one pixel, in NDC-y units
+          "varying vec2 vQ; varying float vLen; varying float vA; varying float vK;",
+          "void main() {",
+          "  vec4 vh = modelViewMatrix * vec4(iPos.xyz, 1.0);",
+          "  vec4 vt = modelViewMatrix * vec4(iPos.xyz - iVel.xyz * iVel.w, 1.0);",
+          "  if (vh.z > -0.06) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vQ = vec2(9.0); vLen = 0.0; vK = 0.0; return; }",
+          "  if (vt.z > -0.06) vt = vh;",
+          "  vec4 ch = projectionMatrix * vh;",
+          "  vec4 ct = projectionMatrix * vt;",
+          // isotropic screen space: x scaled by the aspect so a pixel is square
+          "  float asp = projectionMatrix[1][1] / projectionMatrix[0][0];",
+          "  vec2 sh = ch.xy / ch.w; sh.x *= asp;",
+          "  vec2 st = ct.xy / ct.w; st.x *= asp;",
+          "  float rTrue = iPos.w * projectionMatrix[1][1] / ch.w;",
+          "  float rad = max(rTrue, uPx * 0.75);",
+          "  vec2 d = sh - st; float L = length(d);",
+          "  vec2 ax = L > 1e-6 ? d / L : vec2(0.0, 1.0);",
+          "  vec2 nx = vec2(-ax.y, ax.x);",
+          "  float along = position.y + 0.5;",                    // 0 = tail, 1 = head
+          "  vec2 s = mix(st - ax * rad, sh + ax * rad, along) + nx * (position.x * 2.0) * rad;",
+          "  vQ = vec2(position.x * 2.0, (along * (L + 2.0 * rad) - rad) / rad);",
+          "  vLen = L / rad;",
+          // a drop smaller than the pixel floor pays for it in coverage, and a
+          // streak smeared over its length thins as a photographed one does —
+          // but only so far: a real mm drop at 5 m is a third of a pixel, and
+          // at its honest coverage it is a faint salmon hair, not blood. The
+          // floors keep every drop a dense dark-red line. Past ~45 m it thins
+          // out with the stains.
+          "  float cov = clamp(rTrue / rad, 0.6, 1.0);",
+          "  float smear = clamp(2.0 * rad / (L + 2.0 * rad), 0.6, 1.0);",
+          "  float far = 1.0 - smoothstep(45.0, 70.0, -vh.z);",
+          "  vA = iMisc.x * far * (iMisc.y > 0.5 ? 1.0 : cov * smear);",
+          "  vK = iMisc.y;",
+          "  float w = mix(ct.w, ch.w, along);",
+          "  float z = mix(ct.z / ct.w, ch.z / ch.w, along);",
+          "  s.x /= asp;",
+          "  gl_Position = vec4(s * w, z * w, w);",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "uniform vec3 tCore; uniform vec3 tMist;",
+          "varying vec2 vQ; varying float vLen; varying float vA; varying float vK;",
+          "void main() {",
+          // distance to the streak's axis segment, in radii: 0 on it, 1 at the rim
+          "  float d = length(vec2(vQ.x, vQ.y - clamp(vQ.y, 0.0, vLen)));",
+          "  float c; vec3 T;",
+          "  if (vK < 0.5) {",
+          "    c = 1.0 - smoothstep(0.55, 1.0, d);",
+          // the drop leads, the blur trails it: the head end is the dense end
+          "    c *= vLen > 0.01 ? 0.72 + 0.28 * clamp(vQ.y / vLen, 0.0, 1.0) : 1.0;",
+          "    T = tCore;",
+          "  } else {",
+          "    c = exp(-d * d * 3.2) * (1.0 - smoothstep(0.75, 1.0, d));",
+          "    T = tMist;",
+          "  }",
+          "  c *= vA;",
+          "  if (c < 0.004) discard;",
+          // A FILTER, NOT A PAINT (the stain's rule, for the stain's reason):
+          // the screen is MULTIPLIED by this, so blood can only take light
+          // away, and green/blue go faster than red at partial coverage — a
+          // thin streak or the edge of a puff reads darker-red, never pink,
+          // over pale concrete and sky alike, and the scene's own light
+          // (a lamp, a dark cell, night) comes through untouched.
+          "  float e = vK < 0.5 ? 0.3 : 0.45;",
+          "  gl_FragColor = vec4(1.0 - c * (1.0 - T.r), vec2(1.0) - pow(c, e) * (vec2(1.0) - T.gb), 1.0);",
+          "}",
+        ].join("\n"),
+        transparent: true, depthWrite: false, depthTest: true, fog: false, lights: false, toneMapped: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+        blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor,
+        blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+      });
+      mat._shared = true;
+      airMesh = new THREE.Mesh(airGeo, mat);
+      airMesh.frustumCulled = false;     // instances span the map; the unit quad's bounds are meaningless
+      airMesh.raycast = function () {};  // blood in the air is never a surface
+      airMesh.renderOrder = 4;           // over the stains (-4), under the sea plume (5)
+      airMesh.name = "gore.air";
+    }
+    if (airMesh.parent !== sc) sc.add(airMesh);
+    return true;
+  }
+
+  function killAir(i) {
+    const last = --airN;
+    if (i !== last) for (let k = 0; k < AIR_FIELDS.length; k++) AIR_FIELDS[k][i] = AIR_FIELDS[k][last];
+  }
+  // a free slot, or (full) the next one round the ring: the air is never
+  // refused fresh blood, it gives up something that has been flying longer
+  function airSlot() {
+    const cap = Math.min(AIR_MAX, airCap());
+    if (airN < cap) return airN++;
+    AIR_AUDIT.recycled++;
+    airCursor = (airCursor + 1) % airN;
+    return airCursor;
+  }
+
+  // a drop radius in metres, skewed small: most of a spray is fine, the odd drop is heavy
+  function rMM(lo, hi) { const u = Math.random(); return (lo + (hi - lo) * u * u * u) * 0.001; }
+  // how much of an event to throw at this distance from the lens
+  function airLod(x, z) {
+    const d2 = dist2Cam(x, z);
+    return d2 < 15 * 15 ? 1 : (d2 < 30 * 30 ? 0.6 : (d2 < 50 * 50 ? 0.35 : 0.2));
+  }
+  // a unit vector inside a cone of half-angle `ang` round (dx,dy,dz) → _cv
+  const _cv = { x: 0, y: 0, z: 0 };
+  function cone(dx, dy, dz, ang) {
+    let l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    dx /= l; dy /= l; dz /= l;
+    let ux, uy, uz;
+    if (Math.abs(dy) < 0.9) { ux = -dz; uy = 0; uz = dx; } else { ux = 0; uy = dz; uz = -dy; }
+    l = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1; ux /= l; uy /= l; uz /= l;
+    const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+    const th = ang * Math.sqrt(Math.random()), ph = Math.random() * 6.2832;
+    const ct = Math.cos(th), st = Math.sin(th), cp = Math.cos(ph) * st, sp = Math.sin(ph) * st;
+    _cv.x = dx * ct + ux * cp + vx * sp; _cv.y = dy * ct + uy * cp + vy * sp; _cv.z = dz * ct + uz * cp + vz * sp;
+    return _cv;
+  }
+
+  /* airDrop(x,y,z, vx,vy,vz, r, wp, trail0, brk, markR)
+     r: radius in metres. wp: a wall plane from airWall() (-1: none). trail0 /
+     brk: a stream drop's stretched streak (seconds of velocity) and how long
+     it takes to break up. markR: the landing mark's radius, when the caller
+     knows it better than the drop does (a walking bleeder's drip). */
+  function airDrop(x, y, z, vx, vy, vz, r, wp, trail0, brk, markR) {
+    // a wound under the sea does not throw drops: it blooms (THE WATER MEDIUM)
+    if (wetEvent) { AIR_AUDIT.water++; puffFromBit(x, y, z, vx, vy, vz, r * 20, false); return -1; }
+    if (!airReady()) return -1;
+    const i = airSlot();
+    r *= +CBZ.CONFIG.GORE_DROP_SCALE || 1;
+    AX[i] = x; AY[i] = y; AZ[i] = z; AVX[i] = vx; AVY[i] = vy; AVZ[i] = vz;
+    AR[i] = r; AS1[i] = r; AT[i] = 0; AL[i] = 4; AA[i] = 0.95;
+    // terminal speed by size (a 1 mm drop ~4 m/s, 3 mm ~8, 5 mm+ ~9): the fine
+    // spray slows in the air and drifts down, the heavy drops keep their arc
+    const vt = 0.6 + 9 * (1 - Math.exp(-(r * 1000) / 1.1));
+    AK[i] = AIR_G / (vt * vt);
+    ATR[i] = trail0 || 0; ABRK[i] = brk || 0.12;
+    AKIND[i] = 0; AMARK[i] = airMarkP >= 1 || Math.random() < airMarkP ? 1 : 0; AMG[i] = markR || 0; AMK[i] = airMarkK;
+    AWP[i] = wp == null || wp < 0 ? -1 : wp; AWG[i] = wp == null || wp < 0 ? 0 : WP_GEN[wp];
+    AFL[i] = decalFloorAt(x, z); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
+    AIR_AUDIT.drops++;
+    return i;
+  }
+  /* airMist(x,y,z, vx,vy,vz, s0, s1, life, alpha) — one soft puff; s0 -> s1
+     is its radius (m) from birth to death. */
+  function airMist(x, y, z, vx, vy, vz, s0, s1, life, alpha) {
+    if (wetEvent) { AIR_AUDIT.water++; puffFromBit(x, y, z, vx, vy, vz, s1 * 0.3, true); return -1; }
+    if (waterOn() && mistOverSea(x, y, z)) return -1;   // no aerosol over open water
+    if (!airReady()) return -1;
+    const i = airSlot();
+    AX[i] = x; AY[i] = y; AZ[i] = z; AVX[i] = vx; AVY[i] = vy; AVZ[i] = vz;
+    AR[i] = s0; AS1[i] = Math.max(s0, s1); AT[i] = 0; AL[i] = life; AA[i] = alpha;
+    AK[i] = 7 + Math.random() * 4;                      // aerosol stops in centimetres
+    ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AWP[i] = -1; AWG[i] = 0;
+    AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0;
+    AIR_AUDIT.mist++;
+    return i;
+  }
+
+  // ---- WALL PLANES: a spray headed for a wall lands ON it ---------------------
+  // One scan per EVENT (the same opaque/wall-sized gate a kill's wall splat
+  // passes), shared by every drop of it: a drop tests one plane per frame,
+  // never the collider list. Generation-stamped so a recycled slot can never
+  // catch a drop from an older event on a different wall.
+  const WP_MAX = 16;
+  const WP_NX = new Float32Array(WP_MAX), WP_NZ = new Float32Array(WP_MAX), WP_D = new Float32Array(WP_MAX);
+  const WP_T0 = new Float32Array(WP_MAX), WP_T1 = new Float32Array(WP_MAX);
+  const WP_Y0 = new Float32Array(WP_MAX), WP_Y1 = new Float32Array(WP_MAX);
+  const WP_GEN = new Uint16Array(WP_MAX);
+  let wpCursor = 0;
+  function airWall(x, y, z, dx, dz) {
+    if (!(dx || dz)) return -1;
+    const f = wallFace(x, y, z, dx, dz, 3.4);
+    if (!f) return -1;
+    const k = wpCursor; wpCursor = (wpCursor + 1) % WP_MAX;
+    const c = f.c, hx = x + dx * f.t, hz = z + dz * f.t;
+    const nx = f.face === "xmin" ? -1 : (f.face === "xmax" ? 1 : 0);
+    const nz = f.face === "zmin" ? -1 : (f.face === "zmax" ? 1 : 0);
+    WP_NX[k] = nx; WP_NZ[k] = nz; WP_D[k] = nx * hx + nz * hz;
+    if (nx) { WP_T0[k] = c.minZ; WP_T1[k] = c.maxZ; } else { WP_T0[k] = c.minX; WP_T1[k] = c.maxX; }
+    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1;
+    WP_GEN[k] = (WP_GEN[k] + 1) & 0xffff;
+    return k;
+  }
+  // a drop's mark on a wall face: the stain layer's drop/dot cells, laid in
+  // the face's plane, tail pointing along the drop's in-plane travel
+  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g) {
+    if (walls.length > 34) return false;             // the kills' own wall splats come first
+    const c = claimLand();
+    if (!c) return false;
+    const m = c.m;
+    const ry = nx ? (nx > 0 ? Math.PI / 2 : -Math.PI / 2) : (nz > 0 ? 0 : Math.PI);
+    const tx = Math.cos(ry), tz = -Math.sin(ry);     // the face's local +x in world
+    const u = vx * tx + vz * tz, w = vy;
+    const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+    const sinA = Math.abs(vx * nx + vz * nz) / sp;
+    const drop = sinA < 0.9 && Math.hypot(u, w) > 0.3;
+    let sx = (g * 2) / (drop ? 0.6 : 0.92);
+    const sy = sx * (drop ? Math.max(1, Math.min(3.4, 1 / Math.max(0.3, sinA))) : 1);
+    if (Math.random() < 0.5) sx = -sx;
+    m.position.set(px + nx * 0.021, py, pz + nz * 0.021);
+    m.rotation.set(0, ry, drop ? Math.atan2(-u, w) : Math.random() * 6.28);
+    m.scale.set(sx, sy, 1);
+    ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 1, 0.08, 5 + Math.random() * 5, 0.35, 0.55, 0.1, 1, 0);
+    const near = dist2Cam(px, pz) < 24 * 24;
+    walls.push({ m, slot: c.slot, t: 0, hold: near ? 40 : 14, fade: 8 });
+    return true;
+  }
+  // how big a mark a drop leaves: a few times its own size, more the faster
+  // it hits (the forensic spread factor), unless the caller said otherwise
+  function markOf(i, sp) { return AMG[i] || AR[i] * AMK[i] * Math.min(4.5, 1.7 + sp * 0.3); }
+  function floorLand(i) {
+    if (!AMARK[i]) return;
+    const vx = AVX[i], vy = AVY[i], vz = AVZ[i];
+    const hs = Math.hypot(vx, vz), sp = Math.hypot(hs, vy);
+    const g = markOf(i, sp);
+    // a 3 mm mark is real, and invisible from across the room: don't spend a
+    // stain slot on one nobody can see, or on the fifteenth in one frame
+    if ((g < 0.0035 && dist2Cam(AX[i], AZ[i]) > 8 * 8) || airLands >= AIR_LAND_FRAME) { AIR_AUDIT.skippedMarks++; return; }
+    airLands++;
+    const sinA = Math.abs(vy) / (sp || 1);
+    _dropO.kind = sinA > 0.9 || hs < 0.3 ? "dot" : "drop";
+    _dropO.dirX = hs > 0 ? vx / hs : 0; _dropO.dirZ = hs > 0 ? vz / hs : 0;
+    _dropO.elong = 1 / Math.max(0.3, sinA);
+    if (spawnSplat(AX[i], AZ[i], g, BLOOD_D, false, _dropO)) AIR_AUDIT.lands++;
+  }
+
+  // ---- STREAMS: a jet that pulses, laid down drop by drop ---------------------
+  const EM_MAX = 12;
+  const E_ON = new Uint8Array(EM_MAX), E_SRC = new Uint8Array(EM_MAX), E_WET = new Uint8Array(EM_MAX);
+  const E_REF = new Array(EM_MAX).fill(null);   // the body / stump it rides (0 = a fixed point)
+  const E_X = new Float32Array(EM_MAX), E_Y = new Float32Array(EM_MAX), E_Z = new Float32Array(EM_MAX);
+  const E_Y1 = new Float32Array(EM_MAX);
+  const E_DX = new Float32Array(EM_MAX), E_DY = new Float32Array(EM_MAX), E_DZ = new Float32Array(EM_MAX);
+  const E_SP = new Float32Array(EM_MAX), E_DEL = new Float32Array(EM_MAX), E_T = new Float32Array(EM_MAX);
+  const E_TT = new Float32Array(EM_MAX), E_PER = new Float32Array(EM_MAX), E_PL = new Float32Array(EM_MAX);
+  const E_N = new Float32Array(EM_MAX), E_K = new Float32Array(EM_MAX), E_FALL = new Float32Array(EM_MAX);
+  const E_ACC = new Float32Array(EM_MAX), E_RATE = new Float32Array(EM_MAX), E_SPR = new Float32Array(EM_MAX);
+  const E_R0 = new Float32Array(EM_MAX), E_R1 = new Float32Array(EM_MAX);
+  const _emBloom = { amount: 0.5, arterial: true };
+  /* airStream(src, ref, x, y, z, dx, dy, dz, o)
+     src 0: a fixed point (x,y,z). src 1: an actor — rides ref.pos, at a
+     height sliding from y to o.y1 over ~0.9 s as the body goes down. src 2:
+     an Object3D (a stump) — rides its world position and jets along its
+     world +Y, which is the way a cut face looks out.
+     o: speed (m/s at the top of a beat), pulses, period (s between beats),
+     len (s a beat lasts), fall (each beat's strength vs the last), rate
+     (drops/s), r0/r1 (drop radius, mm), spread (cone half-angle), delay. */
+  function airStream(src, ref, x, y, z, dx, dy, dz, o) {
+    let e = -1;
+    for (let k = 0; k < EM_MAX; k++) if (!E_ON[k]) { e = k; break; }
+    if (e < 0) return -1;
+    const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    E_ON[e] = 1; E_SRC[e] = src; E_REF[e] = ref || null; E_WET[e] = 0;
+    E_X[e] = x; E_Y[e] = y; E_Z[e] = z; E_Y1[e] = o.y1 != null ? o.y1 : y;
+    E_DX[e] = dx / l; E_DY[e] = dy / l; E_DZ[e] = dz / l;
+    E_SP[e] = o.speed; E_N[e] = o.pulses || 1; E_PER[e] = o.period || 0.5; E_PL[e] = o.len || 0.22;
+    E_FALL[e] = o.fall || 0.7; E_RATE[e] = o.rate || 55; E_R0[e] = o.r0 || 1; E_R1[e] = o.r1 || 2.5;
+    E_SPR[e] = o.spread || 0.12; E_DEL[e] = o.delay || 0; E_K[e] = 1;
+    E_T[e] = 0; E_TT[e] = 0; E_ACC[e] = 0.999;           // the first drop leaves on the first frame
+    AIR_AUDIT.streams++;
+    return e;
+  }
+  function stopStream(e) { E_ON[e] = 0; E_REF[e] = null; }
+  const _esp = new THREE.Vector3();
+  function updateStreams(dt) {
+    for (let e = 0; e < EM_MAX; e++) {
+      if (!E_ON[e]) continue;
+      if (E_DEL[e] > 0) { E_DEL[e] -= dt; continue; }
+      const ref = E_REF[e];
+      let sx, sy, sz, jx = E_DX[e], jy = E_DY[e], jz = E_DZ[e];
+      if (E_SRC[e] === 1) {
+        const p = ref && !ref.culled ? (ref.pos || (ref.group && ref.group.position)) : null;
+        if (!p) { stopStream(e); continue; }
+        const k = Math.min(1, E_TT[e] / 0.9);
+        sx = p.x + E_X[e]; sz = p.z + E_Z[e]; sy = (p.y || 0) + E_Y[e] + (E_Y1[e] - E_Y[e]) * k;
+      } else if (E_SRC[e] === 2) {
+        if (!ref || !ref.parent) { stopStream(e); continue; }
+        ref.updateWorldMatrix(true, false);
+        const me = ref.matrixWorld.elements;
+        sx = me[12]; sy = me[13]; sz = me[14];
+        const al = Math.sqrt(me[4] * me[4] + me[5] * me[5] + me[6] * me[6]) || 1;
+        jx = me[4] / al; jy = me[5] / al; jz = me[6] / al;
+      } else { sx = E_X[e]; sy = E_Y[e]; sz = E_Z[e]; }
+      const first = E_TT[e] === 0;
+      E_TT[e] += dt;
+      E_T[e] += dt;
+      if (E_T[e] >= E_PER[e]) {
+        E_T[e] -= E_PER[e];
+        if (--E_N[e] <= 0) { stopStream(e); continue; }
+        E_K[e] *= E_FALL[e];
+        E_ACC[e] = 0.999;
+      }
+      // each BEAT decides its own medium (a body can fall in the water between them)
+      if (first || E_T[e] < dt) {
+        E_WET[e] = waterOn() && woundInWater(sx, sy, sz) ? 1 : 0;
+        if (E_WET[e]) { _emBloom.amount = 0.3 + 0.4 * E_K[e]; CBZ.goreBloom(sx, sy, sz, _emBloom); }
+      }
+      if (E_WET[e]) continue;
+      const ph = E_T[e] / E_PL[e];
+      if (ph >= 1) continue;                               // between beats
+      // a beat SURGES and collapses; the stream never quite stops inside one
+      const surge = Math.pow(Math.sin(Math.PI * Math.min(1, ph + 0.08)), 0.7);
+      const rate = E_RATE[e] * (dist2Cam(sx, sz) > 30 * 30 ? 0.5 : 1);
+      E_ACC[e] += dt * rate;
+      const trail = 1.15 / rate;
+      airMarkP = 0.3; airMarkK = 1.6;
+      while (E_ACC[e] >= 1) {
+        E_ACC[e] -= 1;
+        const v = cone(jx, jy, jz, E_SPR[e]);
+        const sp = E_SP[e] * E_K[e] * (0.3 + 0.7 * surge) * (0.93 + Math.random() * 0.14);
+        airDrop(sx + (Math.random() - 0.5) * 0.012, sy + (Math.random() - 0.5) * 0.012, sz + (Math.random() - 0.5) * 0.012,
+          v.x * sp, v.y * sp, v.z * sp, rMM(E_R0[e], E_R1[e]), -1, trail, 0.13 + Math.random() * 0.07, 0);
+      }
+      airMarkP = 1; airMarkK = 1;
+    }
+  }
+
+  // ---- THE EVENTS --------------------------------------------------------------
+  /* A ROUND THROUGH FLESH. (dx,dy,dz): the shot line, shooter -> victim.
+       entry: a small cone of FINE drops thrown back toward the shooter (back
+              spatter), and a wisp of mist at the hole
+       exit (`through`): a bigger, faster cone out the far side along the
+              bullet path, a mist puff down the line, and the wall behind it
+              catches whatever reaches it
+     `amt` ~0.3 a pellet .. ~1 a head. */
+  function shotBlood(x, y, z, dx, dy, dz, amt, through, head, lod, pop) {
+    const nE = Math.round((3 + 7 * amt) * lod);
+    for (let i = 0; i < nE; i++) {
+      const v = cone(-dx, -dy + 0.2, -dz, 0.62);
+      const sp = 1.2 + Math.random() * 3.8;
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.25, 1.3), -1, 0, 0, 0);
+    }
+    const nEM = lod < 0.5 ? 0 : (amt >= 0.5 ? 2 : 1);
+    for (let i = 0; i < nEM; i++) {
+      airMist(x - dx * 0.03, y, z - dz * 0.03,
+        -dx * (0.8 + Math.random()) + (Math.random() - 0.5) * 0.5, 0.15 + Math.random() * 0.3, -dz * (0.8 + Math.random()) + (Math.random() - 0.5) * 0.5,
+        0.02, 0.07 + 0.07 * amt, 0.18 + Math.random() * 0.08, 0.26);
+    }
+    if (!through) return;
+    const T = head ? 0.17 : 0.26;
+    const ex = x + dx * T, ey = y + dy * T, ez = z + dz * T;
+    const wp = lod >= 0.6 ? airWall(ex, ey, ez, dx, dz) : -1;
+    const nX = Math.round((8 + 20 * amt) * (head ? 1.3 : 1) * (pop ? 1.5 : 1) * lod);
+    const k = 0.7 + 0.45 * Math.min(1.4, amt);
+    for (let i = 0; i < nX; i++) {
+      const v = cone(dx, dy + 0.08, dz, head ? 0.42 : 0.32);
+      const sp = (3 + Math.random() * Math.random() * 10) * k;
+      airDrop(ex + (Math.random() - 0.5) * 0.04, ey + (Math.random() - 0.5) * 0.04, ez + (Math.random() - 0.5) * 0.04,
+        v.x * sp, v.y * sp, v.z * sp, rMM(0.3, head ? 2.6 : 2.2), wp, 0, 0, 0);
+    }
+    const nXM = lod < 0.35 ? 1 : (head ? 4 : 2) + (amt > 0.8 ? 1 : 0) + (pop ? 3 : 0);
+    const big = (head ? 1.45 : 1) * (pop ? 1.5 : 1) * (0.7 + 0.4 * Math.min(1.4, amt));
+    for (let i = 0; i < nXM; i++) {
+      const v = cone(dx, dy + 0.1, dz, 0.35);
+      const sp = 2.5 + Math.random() * 3.5;
+      airMist(ex, ey, ez, v.x * sp, v.y * sp, v.z * sp,
+        0.03, (0.16 + Math.random() * 0.12) * big, 0.22 + Math.random() * 0.16, head ? 0.34 : 0.27);
+    }
+  }
+  // no shot line (a fall, a disaster, an unknown cause): a short burst all round
+  function omniBlood(x, y, z, amt, lod) {
+    const n = Math.round((4 + 6 * amt) * lod);
+    for (let i = 0; i < n; i++) {
+      const v = cone(0, 1, 0, 1.25);
+      const sp = 0.8 + Math.random() * 2.6;
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.4, 3), -1, 0, 0, 0);
+    }
+  }
+  // a blast: drops out in every direction, fast, and one wide dark puff
+  function blastBlood(x, y, z, amt, lod) {
+    const n = Math.round(26 * amt * lod);
+    airMarkP = 0.4; airMarkK = 1.3;
+    for (let i = 0; i < n; i++) {
+      const v = cone(0, 1, 0, 1.45);
+      const sp = 3 + Math.random() * 7;
+      airDrop(x + (Math.random() - 0.5) * 0.4, y + (Math.random() - 0.5) * 0.6, z + (Math.random() - 0.5) * 0.4,
+        v.x * sp, v.y * sp + 1.5, v.z * sp, rMM(0.4, 3.5), -1, 0, 0, 0);
+    }
+    airMarkP = 1; airMarkK = 1;
+    const nm = Math.max(1, Math.round(5 * lod));
+    for (let i = 0; i < nm; i++) {
+      const v = cone(0, 1, 0, 1.4), sp = 2 + Math.random() * 3;
+      airMist(x, y, z, v.x * sp, v.y * sp, v.z * sp, 0.08, 0.4 + Math.random() * 0.4, 0.3 + Math.random() * 0.15, 0.3);
+    }
+  }
+  /* A BLADE: no aerosol. A few HEAVY drops flicked off along the cut, and a
+     short stream out of the wound (two beats when it went deep). */
+  function stabBlood(x, y, z, dx, dz, amt, lod) {
+    const n = Math.round((3 + 3 * Math.min(1.5, amt)) * lod);
+    for (let i = 0; i < n; i++) {
+      const v = cone(dx, 0.45, dz, 0.6);
+      const sp = 0.8 + Math.random() * 1.8;
+      airDrop(x, y, z, v.x * sp, v.y * sp, v.z * sp, rMM(1.5, 5), -1, 0, 0, 0);
+    }
+    if (lod >= 0.35) {
+      airStream(0, null, x + dx * 0.04, y, z + dz * 0.04, dx, 0.35, dz, {
+        speed: 1.9 + 0.6 * Math.min(1.5, amt), pulses: amt > 1 ? 2 : 1, period: 0.42, len: 0.2 + Math.random() * 0.1,
+        fall: 0.6, rate: 55, r0: 1.0, r1: 2.6, spread: 0.12,
+      });
+    }
+  }
+  /* BLUNT: a split lip or a brow. A punch throws little or nothing — a light
+     hit is 0-2 fine drops, a real crunch a handful, and only a hard one
+     atomises anything (opts.mist). */
+  function bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, lod, mist) {
+    let n;
+    if (amt < 0.5) n = Math.min(2, (Math.random() * amt * 5) | 0);
+    else n = Math.round((2 + 5 * (amt - 0.5)) * lod);
+    for (let i = 0; i < n; i++) {
+      const v = hasDir ? cone(dx, dy + 0.35, dz, 0.75) : cone(0, 1, 0, 1.2);
+      const sp = 0.8 + Math.random() * (1.4 + amt * 1.6);
+      airDrop(x + (Math.random() - 0.5) * 0.08, y + (Math.random() - 0.5) * 0.08, z + (Math.random() - 0.5) * 0.08,
+        v.x * sp, v.y * sp, v.z * sp, rMM(0.4, amt < 0.5 ? 1.6 : 3), -1, 0, 0, 0);
+    }
+    if (mist && lod >= 0.35) {
+      const nm = amt > 1.2 ? 2 : 1;
+      for (let i = 0; i < nm; i++) {
+        airMist(x, y, z, dx * 1.2 + (Math.random() - 0.5) * 0.6, 0.3, dz * 1.2 + (Math.random() - 0.5) * 0.6,
+          0.03, 0.1 + 0.06 * amt, 0.2 + Math.random() * 0.1, 0.22);
+      }
+    }
+  }
+  // the dedupe: a player's round runs gore.spray (entry + exit) and, if it
+  // kills, CBZ.gore on the same body a moment later — one wound, one spray
+  let sprayX = 1e9, sprayZ = 0, sprayT = -9;
+  function noteSpray(x, z) { sprayX = x; sprayZ = z; sprayT = plumeClock; }
+  function sprayedHere(x, z) {
+    return plumeClock - sprayT < 0.3 && Math.abs(x - sprayX) < 1.5 && Math.abs(z - sprayZ) < 1.5;
+  }
+
+  // ---- the frame ----------------------------------------------------------------
+  function updateAir(dt) {
+    airLands = 0;
+    updateStreams(dt);
+    if (!airGeo) return;
+    // a 180-degree shutter: a drop smears across half the frame's time
+    airShutter = Math.min(1 / 45, Math.max(1 / 240, dt * 0.5));
+    const sea = waterOn();
+    for (let i = airN - 1; i >= 0; i--) {
+      const t = (AT[i] += dt);
+      if (t >= AL[i]) { killAir(i); continue; }
+      if (AKIND[i] === 1) {
+        const dg = Math.exp(-AK[i] * dt);
+        AVX[i] *= dg; AVZ[i] *= dg; AVY[i] = AVY[i] * dg - 0.5 * dt;
+        AX[i] += AVX[i] * dt; AY[i] += AVY[i] * dt; AZ[i] += AVZ[i] * dt;
+        continue;
+      }
+      // quadratic drag (implicit, so a fast fine drop can never overshoot), then gravity
+      let vx = AVX[i], vy = AVY[i], vz = AVZ[i];
+      const f = 1 / (1 + AK[i] * Math.sqrt(vx * vx + vy * vy + vz * vz) * dt);
+      vx *= f; vy = vy * f - AIR_G * dt; vz *= f;
+      AVX[i] = vx; AVY[i] = vy; AVZ[i] = vz;
+      const x = (AX[i] += vx * dt), y = (AY[i] += vy * dt), z = (AZ[i] += vz * dt);
+      // A DROP THAT REACHES THE SEA GOES INTO IT (a jittered ~0.2 s stagger;
+      // submRaw is one call returning DRY on a map with no water)
+      if (sea) {
+        ASEA[i] -= dt;
+        if (ASEA[i] <= 0) {
+          ASEA[i] = 0.16 + Math.random() * 0.08;
+          const sub = submRaw(x, y, z);
+          if (sub !== DRY && sub >= 0) {
+            AIR_AUDIT.water++;
+            puffFromBit(x, y, z, vx, vy, vz, AR[i] * 20, false);
+            if (Math.random() < 0.3) surfaceSlick(x, z, 0.3);
+            killAir(i); continue;
+          }
+        }
+      }
+      // the wall its spray was headed for
+      const wp = AWP[i];
+      if (wp >= 0) {
+        if (AWG[i] !== WP_GEN[wp]) AWP[i] = -1;
+        else {
+          const s = WP_NX[wp] * x + WP_NZ[wp] * z - WP_D[wp];
+          if (s <= 0.01) {
+            const tan = WP_NX[wp] ? z : x;
+            if (tan >= WP_T0[wp] && tan <= WP_T1[wp] && y >= WP_Y0[wp] && y <= WP_Y1[wp]) {
+              if (AMARK[i] && airLands < AIR_LAND_FRAME) {
+                airLands++;
+                const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
+                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp))) AIR_AUDIT.wallLands++;
+              }
+              killAir(i); continue;
+            }
+            AWP[i] = -1;                                  // it went past the end of that wall
+          }
+        }
+      }
+      // the floor: a slow field, re-read on a stagger, every frame near it
+      AFT[i] -= dt;
+      if (AFT[i] <= 0 || y < AFL[i] + 0.3) { AFT[i] = 0.08; AFL[i] = decalFloorAt(x, z); }
+      if (y <= AFL[i] && vy < 0) { AY[i] = AFL[i]; floorLand(i); killAir(i); continue; }
+    }
+    // ---- the instance buffers (live count only) ----
+    const n = airN;
+    airGeo.instanceCount = n;
+    if (!n) return;
+    const cv = CBZ.renderer && CBZ.renderer.domElement;
+    airMesh.material.uniforms.uPx.value = 2 / (cv && cv.height ? cv.height : 900);
+    const ap = aiPos.array, av = aiVel.array, am = aiMisc.array;
+    for (let i = 0; i < n; i++) {
+      const o = i * 4, o2 = i * 2, t = AT[i];
+      ap[o] = AX[i]; ap[o + 1] = AY[i]; ap[o + 2] = AZ[i];
+      av[o] = AVX[i]; av[o + 1] = AVY[i]; av[o + 2] = AVZ[i];
+      if (AKIND[i] === 1) {
+        const f = t / AL[i], q = 1 - f;
+        ap[o + 3] = AR[i] + (AS1[i] - AR[i]) * (1 - q * q * q);   // opens fast, then hangs
+        av[o + 3] = 0.035;                                         // smeared a little down its flight
+        am[o2] = AA[i] * q * Math.sqrt(q) * (t < 0.03 ? t / 0.03 : 1);
+        am[o2 + 1] = 1;
+      } else {
+        let tr = airShutter;
+        // a stream drop holds its full stretch (joined to the next) for the
+        // first ~60% of its breakup time, then lets go
+        if (ATR[i] > 0 && t < ABRK[i]) {
+          const u = t / ABRK[i], k = ATR[i] * (u < 0.6 ? 1 : (1 - u) / 0.4);
+          if (k > tr) tr = k;
+        }
+        ap[o + 3] = AR[i];
+        av[o + 3] = tr;
+        am[o2] = AA[i];
+        am[o2 + 1] = 0;
+      }
+    }
+    aiPos.needsUpdate = true; aiVel.needsUpdate = true; aiMisc.needsUpdate = true;
+  }
+
   // where a gib comes to rest it bleeds. On the seabed that must NOT be a
   // ground pool — a decal lying in the dark under 30m of water is the exact
   // "invisible gore at the bottom of the ocean" bug this whole block exists to
@@ -1521,115 +2114,52 @@
     return false;
   }
 
+  /* spawnBit — a SOLID piece in flight: a torn chunk (explosions only), a
+     tooth, a skull fragment. Blood in the air is not a bit any more; it is
+     THE AIRBORNE BLOOD's pool (airDrop / airMist / airStream). `kind` is
+     kept in the signature for the callers, and is always "gib". */
   function spawnBit(x, y, z, vx, vy, vz, size, color, kind) {
-    // MEDIUM REDIRECT: a droplet or an aerosol puff spawned during a WET event
-    // is not ballistic, it is a bloom. ONE branch here is what gives every
-    // incidental emitter in this file (stump vents, arterial arcs, blunt spit,
-    // both spray layers) the water medium without a single call site changing
-    // — the alternative was a water check duplicated at nine spawn sites.
-    // Gibs fall through on purpose: a tooth or a severed forearm still sinks,
-    // it just sinks slowly (see the b.wet drag in the updater).
-    if (wetEvent && (kind === "blood" || kind === "mist")) {
-      puffFromBit(x, y, z, vx, vy, vz, size, kind === "mist");
-      return null;
-    }
-    // AND NO AEROSOL OVER OPEN WATER AT ALL (see mistOverSea). The redirect
-    // above only covers emitters that came through CBZ.gore(); this one test
-    // covers every emitter in the file, including the three that never had a
-    // wet gate — the shark's per-lunge goreImpact above all.
-    if (kind === "mist" && waterOn() && mistOverSea(x, y, z)) return null;
     // Standing gibs are FADING debris now, not permanent evidence, so the pool
     // can be far smaller — a shootout can never leave a huge persistent pile.
     // With the debris law off (pre-pass revert) jail/survival keep the original
     // "true world" 520-gib budget.
     const city = debrisLaw();
     const real = realism();
-    // pool caps now ride the quality tier — read LIVE per spawn (the slider can
-    // move mid-run); fallbacks = the old constants for qScale-less test runs.
-    const cap = kind === "mist" ? (CBZ.qScale ? CBZ.qScale(310, 1100) : 620)
-      : (kind === "gib" && city ? (CBZ.qScale ? CBZ.qScale(45, 180) : 90)
-        : (CBZ.qScale ? CBZ.qScale(260, 900) : 520));
+    const cap = city ? (CBZ.qScale ? CBZ.qScale(45, 180) : 90) : (CBZ.qScale ? CBZ.qScale(260, 900) : 520);
     if (bits.length > cap) {
       // CITY gibs are fading debris: make room by recycling a far/old LANDED gib
-      // instead of refusing to spawn the new piece. Jail/survival keep the
-      // original hard-cap drop-if-full behaviour (return null) byte-identical.
-      if (kind === "gib" && city && recycleFarGib()) { /* room made */ }
-      else return null;
+      // instead of refusing to spawn the new piece.
+      if (!(city && recycleFarGib())) return null;
     }
-    let geo, mat;
-    if (kind === "gib") { geo = real ? chunk() : G_GIB; mat = lambert(color); }
-    else if (kind === "mist") {
-      // AEROSOL IS NOT A SOLID. A camera-facing quad on the same feathered
-      // blood texture the pools use has no silhouette to give itself away, so
-      // it can be bigger AND fainter than the old lump and still read as a
-      // hanging cloud instead of a floating polyhedron.
-      geo = real ? G_PLANE : G_MIST;
-      mat = new THREE.MeshBasicMaterial({
-        color, map: real ? bloodTexture() : null,
-        transparent: true, opacity: real ? MIST_A : 0.5, depthWrite: false,
-      });
+    const m = new THREE.Mesh(real ? chunk() : G_GIB, lambert(color));
+    // gibs are lumpy with random proportions
+    let hh = 0.06;
+    if (city) {
+      // rest-height: track the piece's half-Y so its BOTTOM rests on the road.
+      const sy = size * (0.5 + Math.random());
+      m.scale.set(size, sy, size * (0.7 + Math.random() * 0.6));
+      hh = sy * 0.5;
+    } else {
+      m.scale.set(size, size * (0.5 + Math.random()), size * (0.7 + Math.random() * 0.6));
     }
-    else { geo = G_DROP; mat = lambert(dropCol(color)); }
-    const m = new THREE.Mesh(geo, mat);
-    // gibs are lumpy with random proportions; drops stretch along their flight;
-    // aerosol is a flat billboard sized off the same authored number.
-    let hh = 0.06, dropR = 0, billScale = 0;
-    if (kind === "gib") {
-      if (city) {
-        // rest-height: track the piece's half-Y so its BOTTOM rests on the road.
-        const sy = size * (0.5 + Math.random());
-        m.scale.set(size, sy, size * (0.7 + Math.random() * 0.6));
-        hh = sy * 0.5;
-      } else {
-        // pre-pass jail/survival: original boxy scale, original 0.06 rest radius.
-        m.scale.set(size, size * (0.5 + Math.random()), size * (0.7 + Math.random() * 0.6));
-      }
-    } else if (real && kind === "blood") {
-      // ~4-10 cm across, 2-4x that along the shot line. The stretch is what
-      // sells it: a sphere in the air is a bead, a streak is blood moving.
-      // Don't overdo it — a UV sphere's POLES are points, and the stretch axis
-      // runs through them, so a long drop sharpens into a dart. 2-4x reads as
-      // motion; past that it reads as a red arrow. (The extra ring on G_DROP is
-      // for the same reason: it rounds the two tips the stretch pulls on.)
-      dropR = size * DROP_K;
-      m.scale.set(dropR, dropR * (2.0 + Math.random() * 2.0), dropR);
-      aimDrop(m, vx, vy, vz);
-    } else if (real && kind === "mist") {
-      billScale = size * MIST_K;
-      m.scale.setScalar(billScale);
-    } else m.scale.setScalar(size);
-    m.position.set(x, y, z); m.castShadow = false; m.renderOrder = kind === "mist" ? 5 : 0;
+    m.position.set(x, y, z); m.castShadow = false;
     scene().add(m);
     const rec = {
-      m, vx, vy, vz, kind, mat: kind === "mist" ? mat : null, mistFade: 0,
+      m, vx, vy, vz, kind: "gib", mat: null,
       sx: (Math.random() - 0.5) * 18, sy: (Math.random() - 0.5) * 18, sz: (Math.random() - 0.5) * 18,
       landed: false, bled: false,
-      baseScale: billScale || size,
-      rad: kind === "gib" ? hh : (dropR ? Math.max(0.015, dropR) : 0.06),
-      // a stretched droplet is steered by its velocity every frame instead of
-      // tumbling on three random axes; a billboard puff faces the lens.
-      drop: !!dropR, bill: !!billScale,
+      baseScale: size, rad: hh,
       // sunk in water at spawn → the updater sinks it slowly with drag instead
       // of dropping it like a rock, and it blooms where it settles instead of
       // stamping a ground pool on the seabed. Always false on land.
       wet: wetEvent,
-      // jittered stagger for the droplet's sea-surface test (bits loop). Only
-      // "blood" reads it; the phase spread stops a whole spray querying the
-      // swell table on the same frame.
-      seaT: kind === "blood" ? Math.random() * 0.18 : 0,
       // a landed chunk is short-lived debris that SHRINKS/SINKS to nothing (see
-      // the updater) so the ground clears after combat — not a permanent
-      // coloured lump lying in the yard. With the debris law off, jail/survival
-      // chunks PERSIST again (the original "true world" model). Blood/mist are
-      // brief in every mode.
-      fade: kind === "gib" && city,
+      // the updater) so the ground clears after combat.
+      fade: city,
       // the coverage already down when this piece was thrown, + how much NEW
       // snow it takes to vanish under (see the SNOW BURIES BLOOD block)
-      snow0: kind === "gib" ? snowCover() : 0,
-      snowNeed: kind === "gib" ? 0.26 + Math.random() * 0.24 : null,
-      life: kind === "blood" ? 0.7 + Math.random() * 0.8
-        : (kind === "mist" ? 0.45 + Math.random() * 0.45
-          : (city ? 5 + Math.random() * 4 : 7 + Math.random() * 6)),
+      snow0: snowCover(), snowNeed: 0.26 + Math.random() * 0.24,
+      life: city ? 5 + Math.random() * 4 : 7 + Math.random() * 6,
     };
     bits.push(rec);
     return rec;
@@ -1949,11 +2479,16 @@
     if (y1 - y < 0.45) return true;                  // face too short above the splat seat
     return false;
   }
-  function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
+  /* wallFace(x,y,z, dx,dz, maxD) — the nearest REAL wall face ahead along
+     (dx,dz): opaque, wall-sized, tall enough, the seat height inside its solid
+     band, not a shot-open window. Shared by the kill's wall splat and the
+     airborne spray (airWall), so both obey the one gate. Returns a reused
+     record { c, t, face, y0, y1 } or null. */
+  const _wf = { c: null, t: 0, face: null, y0: 0, y1: 0 };
+  function wallFace(x, y, z, dx, dz, MAXD) {
     const cols = CBZ.colliders;
-    if (!cols || !cols.length || walls.length > 48) return;
-    const MAXD = 3.4;
-    let best = null, bestT = MAXD;
+    if (!cols || !cols.length) return null;
+    let best = null, bestT = MAXD, by0 = -1e9, by1 = 1e9;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i]; if (!c || c.minX == null) continue;
       // height-gated band: require the splat seat to land INSIDE the solid band
@@ -1984,9 +2519,11 @@
       // is a wall. This is where the table gets thrown out — 2.2 m wide, and
       // 0.10 m tall. Placed after the slab test on purpose: the derive only
       // ever runs on a collider the ray already hit inside 3.4 m.
+      let y0 = c.y1 != null ? (c.y0 || 0) : -1e9, y1 = c.y1 != null ? c.y1 : 1e9;
       if (c.y1 == null) {
         const band = drawnBand(c);
         if (band && bandRejects(band.y0, band.y1, y)) continue;
+        if (band) { y0 = band.y0; y1 = band.y1; }
       }
       // OPEN / SHATTERED WINDOW: the bullet flew through a hole — there is no
       // surface to splat. Skip and keep scanning for a real wall behind it.
@@ -1994,8 +2531,15 @@
       const nx = face === "xmin" ? -1 : face === "xmax" ? 1 : 0;
       const nz = face === "zmin" ? -1 : face === "zmax" ? 1 : 0;
       if (CBZ.cityShotHole && CBZ.cityShotHole(hx, y, hz, nx, nz)) continue;
-      bestT = t0; best = { c, t: t0, face };
+      bestT = t0; best = c; _wf.face = face; by0 = y0; by1 = y1;
     }
+    if (!best) return null;
+    _wf.c = best; _wf.t = bestT; _wf.y0 = by0; _wf.y1 = by1;
+    return _wf;
+  }
+  function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
+    if (walls.length > 48) return;
+    const best = wallFace(x, y, z, dx, dz, 3.4);
     if (!best) return;
     const c = claimLand();
     if (!c) return;
@@ -2066,34 +2610,31 @@
     const d = imp && imp.dist != null ? imp.dist : 99;
     return k.indexOf("shotgun") >= 0 && d <= 5.5;
   }
-  // HEAVY NECK-STUMP SPURT: a real decapitation geysers from the open neck — a
-  // dense fan of bright arterial droplets up + along the shot line, plus a thick
-  // mist puff and an immediate timed second pulse (the heart pumps twice before it
-  // realizes). Pooled/capped through spawnBit like every other gore bit; fades
-  // like the rest. Seated at the neck joint (chest-high y + STUMPS.head.py).
-  function neckStumpSpurt(x, y, z, dx, dz, lod) {
+  // HEAVY NECK-STUMP SPURT: a real decapitation pumps from the open neck —
+  // three beats of an arterial jet up out of the stump (it rides the stump,
+  // so it follows the body down), each weaker than the last, and one dark
+  // puff over it the moment the head leaves. Falls back to the neck's seat
+  // when the stump is missing (a far/culled rig).
+  function neckStumpSpurt(actor, x, y, z, dx, dz, lod) {
+    const st = stumpOf(actor, "head");
+    const o = { speed: 4.6, pulses: 3, period: 0.46, len: 0.26, fall: 0.7, rate: 70, r0: 1.2, r1: 3.5, spread: 0.16 };
     const ny = y + STUMPS.head.py - 0.06;   // y arrives chest-high; lift to the neck
-    function pulse(strength) {
-      const n = Math.round(10 * strength * lod);
-      for (let i = 0; i < n; i++) {
-        const a = Math.random() * 6.28, sp = 1.4 + Math.random() * 3.2;
-        spawnBit(x + (Math.random() - 0.5) * 0.16, ny + Math.random() * 0.12, z + (Math.random() - 0.5) * 0.16,
-          dx * (2.0 + Math.random() * 2.8) * strength + Math.cos(a) * sp * 0.6,
-          (5.5 + Math.random() * 4.0) * strength,                 // GEYSERS straight up
-          dz * (2.0 + Math.random() * 2.8) * strength + Math.sin(a) * sp * 0.6,
-          0.06 + Math.random() * 0.07, Math.random() < 0.7 ? BLOOD_BRT : BLOOD, "blood");
-      }
-      // a thick aerosol cap over the stump
-      for (let i = 0; i < Math.round(5 * strength * lod); i++) {
-        const a = Math.random() * 6.28, sp = 1 + Math.random() * 2.5;
-        spawnBit(x + (Math.random() - 0.5) * 0.2, ny + 0.1 + Math.random() * 0.25, z + (Math.random() - 0.5) * 0.2,
-          Math.cos(a) * sp, 1.5 + Math.random() * 2.5, Math.sin(a) * sp,
-          0.05 + Math.random() * 0.06, BLOOD_BRT, "mist");
-      }
+    // the joint's own two-beat pump on this stump is superseded by the neck's
+    if (st) { for (let e = 0; e < EM_MAX; e++) if (E_ON[e] && E_REF[e] === st) stopStream(e); airStream(2, st, 0, 0, 0, 0, 1, 0, o); }
+    else airStream(0, null, x, ny, z, dx * 0.4, 1, dz * 0.4, o);
+    const nm = lod < 0.5 ? 1 : 3;
+    for (let i = 0; i < nm; i++) {
+      const v = cone(dx * 0.5, 1, dz * 0.5, 0.6), sp = 1.2 + Math.random() * 1.6;
+      airMist(x, ny + 0.08, z, v.x * sp, v.y * sp, v.z * sp, 0.04, 0.22 + Math.random() * 0.14, 0.28 + Math.random() * 0.1, 0.3);
     }
-    pulse(1);                       // the burst the moment the head leaves
-    after(0.45, function () { pulse(0.7); });   // a second weaker pump
-    after(0.95, function () { pulse(0.45); });  // a last trickle pulse
+  }
+  function stumpOf(actor, key) {
+    for (let i = 0; i < severed.length; i++) {
+      if (severed[i].actor !== actor) continue;
+      const it = severed[i].items;
+      for (let j = 0; j < it.length; j++) if (it[j].key === key) return it[j].stump;
+    }
+    return null;
   }
 
   // ---- HEADSHOT: dry skull fragments riding the exit line --------------------
@@ -2124,11 +2665,12 @@
         0.045 + Math.random() * 0.035, TOOTH, "gib");
       if (b) b.bled = true;          // teeth are dry — no pool where one lands
     }
-    for (let i = 0; i < 3; i++) {
-      spawnBit(x, y + 1.05, z,
-        (hasDir ? dx * 2 : 0) + (Math.random() - 0.5) * 3, 2 + Math.random() * 2.5,
-        (hasDir ? dz * 2 : 0) + (Math.random() - 0.5) * 3,
-        0.05 + Math.random() * 0.04, BLOOD_BRT, "blood");
+    // and the mouth bleeds: a few drops of spit and blood off the split lip
+    const ns = 3 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < ns; i++) {
+      const v = hasDir ? cone(dx, 0.5, dz, 0.55) : cone(0, 1, 0, 1.0);
+      const sp = 1.6 + Math.random() * 1.8;
+      airDrop(x, y + 1.05, z, v.x * sp, v.y * sp, v.z * sp, rMM(0.6, 2.4), -1, 0, 0, 0);
     }
   }
 
@@ -2178,27 +2720,16 @@
     after(3.3, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 1.5 * pk, BLOOD_D, true); });
   }
 
-  // ---- BLADE KILL: 2-3 timed ARTERIAL spurts as the heart dies ----------------
-  // each spurt arcs up and out of the corpse (tracking wherever the ragdoll
-  // ended up), weaker each beat; every droplet stamps its own landing splat.
-  function arterialArcs(ped, dx, dz) {
-    for (let s = 0; s < 3; s++) {
-      (function (idx) {
-        after(0.3 + idx * 0.45, function () {
-          if (!ped || !ped.pos || ped.culled) return;
-          const px = ped.pos.x, pz = ped.pos.z, py = ped.pos.y + (idx === 0 ? 1.3 : 0.55);
-          const fade = 1 - idx * 0.24;
-          const n = 7 - idx * 2;
-          for (let i = 0; i < n; i++) {
-            spawnBit(px, py, pz,
-              dx * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
-              (4.6 + Math.random() * 2.6) * fade,
-              dz * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
-              DROP_R(0.85), Math.random() < 0.6 ? BLOOD_BRT : BLOOD, "blood");
-          }
-        });
-      })(s);
-    }
+  // ---- BLADE KILL: the ARTERIAL beats as the heart dies ----------------------
+  // A jet out of the wound that rides the body as it goes down (chest-high at
+  // the first beat, lying at the last), four beats, each weaker; every drop
+  // that lands leaves its own mark. With no body to ride (the prison's kill
+  // path is positional) it pumps from where the blow landed.
+  function arterialArcs(ped, x, y, z, dx, dz) {
+    const o = { speed: 3.4, pulses: 4, period: 0.5, len: 0.24, fall: 0.72, rate: 60, r0: 1.0, r1: 3.0, spread: 0.1, delay: 0.12, y1: 0.35 };
+    const jx = dx * 0.8 + (Math.random() - 0.5) * 0.3, jz = dz * 0.8 + (Math.random() - 0.5) * 0.3;
+    if (ped && (ped.pos || ped.group)) { o.y1 = 0.35; airStream(1, ped, 0, 1.15, 0, jx, 0.75, jz, o); }
+    else { o.y1 = y + 0.15; airStream(0, null, x, y + 0.15, z, jx, 0.75, jz, o); }
   }
 
   // ---- CORPSE STAIN: a body lying in a pool slowly soaks dark -----------------
@@ -2597,9 +3128,18 @@
   // short-lived splat, seated on the terrain like every other ground decal.
   CBZ.goreDrip = function (x, z, size) {
     if (!CBZ.scene) return;
-    if (dist2Cam(x, z) > 55 * 55) return;
+    const d2 = dist2Cam(x, z);
+    if (d2 > 55 * 55) return;
     // `size` keeps its old scale (0.1-0.5); a walking drip lands 2-6 cm across
-    spawnSplat(x, z, Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)) * 0.12, BLOOD_D, false, _dotO);
+    const g = Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)) * 0.12;
+    // near the lens you see it FALL: a drop let go at hand height, which
+    // stamps the same mark when it lands. Far off, just the mark.
+    if (d2 < 22 * 22 && !wetEvent) {
+      const fy = decalFloorAt(x, z);
+      if (airDrop(x, fy + 0.7 + Math.random() * 0.3, z, (Math.random() - 0.5) * 0.2, -0.3, (Math.random() - 0.5) * 0.2,
+        0.0015 + g * 0.05, -1, 0, 0, g) >= 0) return;
+    }
+    spawnSplat(x, z, g, BLOOD_D, false, _dotO);
   };
 
   // ============================================================
@@ -2823,8 +3363,8 @@
         if (wet) { if (CBZ.goreBloom) CBZ.goreBloom(_mfV.x, _mfV.y, _mfV.z, { amount: 0.30 }); }
         else {
           for (let k = 0; k < 2; k++) {
-            spawnBit(_mfV.x, _mfV.y - 0.05, _mfV.z, (Math.random() - 0.5) * 0.8, -0.2 - Math.random(),
-              (Math.random() - 0.5) * 0.8, DROP_R(0.7), Math.random() < 0.5 ? BLOOD_BRT : BLOOD, "blood");
+            airDrop(_mfV.x, _mfV.y - 0.05, _mfV.z, (Math.random() - 0.5) * 0.5, -0.2 - Math.random() * 0.6,
+              (Math.random() - 0.5) * 0.5, rMM(1.2, 3.4), -1, 0, 0, 0);
           }
         }
       }
@@ -2915,32 +3455,19 @@
     // an open joint pumps wherever it happens — the island tears limbs off now
     // too (opts.limbs), and a stump that just sits there is the tell.
     if (stump && (debrisLaw() || survMode())) {
-      [0.38, 0.92].forEach(function (delay, pulse) {
-        after(delay, function () {
-          if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
-          const wp = _svp; stump.getWorldPosition(wp);
-          // ARM THE MEDIUM PER BEAT, off the stump's LIVE position — a corpse
-          // sinks between pulses, and a body that fell in the water after the
-          // sever is bleeding into it now even though it wasn't then. spawnBit's
-          // own redirect turns these into blooms; the frame loop clears
-          // wetEvent the instant this callback returns, so the write is bounded.
-          const wet = waterOn() && woundInWater(wp.x, wp.y, wp.z);
-          if (wet) wetEvent = true;
-          const n = pulse ? 2 : 4;
-          for (let i = 0; i < n; i++) {
-            const a = Math.random() * Math.PI * 2, sp = 0.6 + Math.random() * 1.8;
-            spawnBit(wp.x, wp.y, wp.z, Math.cos(a) * sp, 1.6 + Math.random() * 2.4,
-              Math.sin(a) * sp, 0.045 + Math.random() * 0.045,
-              Math.random() < 0.55 ? BLOOD_BRT : BLOOD, "blood");
-          }
-          // and the pool the second pulse leaves is a GROUND pool. Under the sea
-          // that decal lands on the seabed in the dark; the surface slick is the
-          // thing anyone can actually see, so wet bleeds go there instead.
-          if (pulse) {
-            if (wet) surfaceSlick(wp.x, wp.z, 0.4);
-            else spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
-          }
-        });
+      // the jet rides the stump itself (its +Y is the way the cut looks out),
+      // decides its medium per beat, and stops the instant the stump goes
+      airStream(2, stump, 0, 0, 0, 0, 1, 0, {
+        speed: 2.6, pulses: 2, period: 0.54, len: 0.2, fall: 0.6, rate: 45, r0: 1.0, r1: 2.6, spread: 0.22, delay: 0.38,
+      });
+      // and the pool the second beat leaves is a GROUND pool. Under the sea
+      // that decal lands on the seabed in the dark; the surface slick is the
+      // thing anyone can actually see, so wet bleeds go there instead.
+      after(0.92, function () {
+        if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
+        const wp = _svp; stump.getWorldPosition(wp);
+        if (waterOn() && woundInWater(wp.x, wp.y, wp.z)) surfaceSlick(wp.x, wp.z, 0.4);
+        else spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
       });
     }
     // a severed LEG = the rig can't stand: flag the char so entities/character.js
@@ -2954,9 +3481,9 @@
       // the joint vents in its own medium exactly as the flying path does
       const prevWet0 = wetEvent; wetEvent = wetHere;
       const _pm = part.matrixWorld.elements;
-      for (let i = 0; i < 4; i++) {
-        spawnBit(_pm[12], _pm[13], _pm[14], (Math.random() - 0.5) * 3, 3 + Math.random() * 3,
-          (Math.random() - 0.5) * 3, DROP_R(0.9), BLOOD_BRT, "blood");
+      for (let i = 0; i < 5; i++) {
+        const v = cone(0, 1, 0, 0.9), sp = 1.5 + Math.random() * 2;
+        airDrop(_pm[12], _pm[13], _pm[14], v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), -1, 0, 0, 0);
       }
       wetEvent = prevWet0;
       return true;
@@ -2996,7 +3523,7 @@
       const cityLimb = debrisLaw();
       bits.push({
         m: fly, vx: dx * sp + (Math.random() - 0.5) * 1.5, vy: up, vz: dz * sp + (Math.random() - 0.5) * 1.5,
-        kind: "gib", mat: null, mistFade: 0,
+        kind: "gib", mat: null,
         sx: (Math.random() - 0.5) * 12, sy: (Math.random() - 0.5) * 12, sz: (Math.random() - 0.5) * 12,
         landed: false, bled: false, baseScale: 1, rad: key === "head" ? 0.3 : 0.2,
         // THIS IS A REAL BODY PART, NOT A GENERIC BOX. The flag is what lets
@@ -3015,10 +3542,9 @@
       // Armed with the joint's real medium (see wetHere): under water that burst
       // becomes a bloom through spawnBit's redirect instead of ballistic drops.
       const prevWet = wetEvent; wetEvent = wetHere;
-      for (let i = 0; i < 4; i++) {
-        spawnBit(fly.position.x, fly.position.y, fly.position.z,
-          dx * 2 + (Math.random() - 0.5) * 3, 3 + Math.random() * 3, dz * 2 + (Math.random() - 0.5) * 3,
-          DROP_R(0.9), BLOOD_BRT, "blood");
+      for (let i = 0; i < 6; i++) {
+        const v = cone(dx, 0.9, dz, 0.7), sp = 1.8 + Math.random() * 2.2;
+        airDrop(fly.position.x, fly.position.y, fly.position.z, v.x * sp, v.y * sp, v.z * sp, rMM(1, 3), -1, 0, 0, 0);
       }
       wetEvent = prevWet;
     }
@@ -3302,7 +3828,7 @@
           // rig is never permanently headless. Pistol/SMG never reach here.
           if (popHead && cityMode() && !ctx.ped._decapped && headDecaps(ctx.imp)) {
             ctx.ped._decapped = true;   // guard: one geyser per head (cleared on regrow)
-            neckStumpSpurt(x, y, z, dx, dz, lod);
+            neckStumpSpurt(ctx.ped, x, y, z, dx, dz, lod);
           }
         }
         // no pop: the ragdoll kick already whips the skull with the round —
@@ -3343,45 +3869,24 @@
       return;
     }
 
-    // --- LAYER 1: directional SPRAY — fast droplets flung AWAY from impact ---
-    // forward-biased fan, leaning HARD into the shot line so the exit wound
-    // reads which way the bullet went; tighter+faster for a clean headshot,
-    // omnidirectional only for boom. Sideways fan stays narrow vs the forward
-    // push so the spray is a LINE on the ground, not a blot.
-    const spread = boom ? 1.0 : (head ? 0.42 : 0.6);
-    const fwd = boom ? 1.5 : (head ? 9 : 6.5);  // forward push along dir (exit wound)
-    // finer drops need MORE of them to read as one wet event rather than as a
-    // handful of thrown objects — the old count was sized for grapefruits.
-    const nb = Math.round((head ? 24 : 16) * (realism() ? 1.35 : 1) * amt * lod);
-    for (let i = 0; i < nb; i++) {
-      const side = (Math.random() - 0.5) * 2;          // -1..1 across the fan
-      const fanX = dx * (fwd + Math.random() * 6) + px * side * spread * (2.5 + Math.random() * 3.5);
-      const fanZ = dz * (fwd + Math.random() * 6) + pz * side * spread * (2.5 + Math.random() * 3.5);
-      // boom has no preferred direction → omnidirectional ring
-      const omni = boom || !hasDir;
-      const a = Math.random() * 6.28, sp = 2 + Math.random() * 8;
-      // a directed shot throws blood FLATTER (it travels, then lands down-range);
-      // only boom lofts it high.
-      spawnBit(x, y + 0.3 + Math.random() * 1.2, z,
-        omni ? Math.cos(a) * sp * 0.7 : fanX,
-        (omni ? 3 + Math.random() * 7 : 2 + Math.random() * 5) + (boom ? 4 : 0),
-        omni ? Math.sin(a) * sp * 0.7 : fanZ,
-        DROP_R(), Math.random() < 0.5 ? BLOOD : BLOOD_D, "blood");
-    }
-
-    // --- LAYER 2: fine MIST — high-velocity aerosol (headshot/rifle/explosion) -
-    // subtle hanging puff that drifts on the shot line and fades fast; this is
-    // the touch that reads as "real" for high-velocity wounds.
-    // a popped skull / blast aerosolizes far more than a through-and-through —
-    // a pistol headshot keeps its mist LOCAL (the burst at the entry, not a cloud)
-    const nm = Math.round(((popHead || boom) ? 18 : (head ? 12 : 8)) * amt * lod);
-    for (let i = 0; i < nm; i++) {
-      const a = Math.random() * 6.28, sp = 1 + Math.random() * 4;
-      spawnBit(x + (Math.random() - 0.5) * 0.3, y + 0.6 + Math.random() * 1.0, z + (Math.random() - 0.5) * 0.3,
-        dx * (big ? 5 : 2.5) + Math.cos(a) * sp,
-        2 + Math.random() * 3,
-        dz * (big ? 5 : 2.5) + Math.sin(a) * sp,
-        0.05 + Math.random() * 0.07, Math.random() < 0.4 ? BLOOD_BRT : BLOOD, "mist");
+    // --- LAYERS 1+2: THE BLOOD IN THE AIR (see THE AIRBORNE BLOOD) --------
+    // `y` arrives chest-high: the chest is ~+0.35 above it, the head ~+1.1.
+    // Each cause throws what that cause throws: a round an entry spatter and
+    // an exit spray + mist down its line, a blast a ring of drops and a dark
+    // puff, a blade heavy drops and a stream (its arterial beats come with the
+    // cause beats below), a beating nothing here (the split lip is bluntBurst).
+    // A player's round has usually just sprayed this body through
+    // CBZ.gore.spray, so the kill adds a lighter second burst, not a double.
+    {
+      const al = airLod(x, z) * (far ? 0.6 : 1);
+      if (boom) blastBlood(x, y + 0.35, z, amt, al);
+      else if (blade) stabBlood(x + dx * 0.15, y + 0.35, z + dz * 0.15, dx, dz, amt, al);
+      else if (blunt) { /* bluntBurst, below */ }
+      else if (!hasDir) omniBlood(x, y + 0.35, z, amt, al);
+      else {
+        const hy = head ? 1.1 : 0.35;
+        shotBlood(x - dx * 0.12, y + hy, z - dz * 0.12, dx, 0, dz, amt * (sprayedHere(x, z) ? 0.4 : 1), true, head, al, popHead);
+      }
     }
 
     // --- LAYER 3: chunky GIBS — limbs/torso, heavier, tumble then settle ------
@@ -3465,7 +3970,7 @@
       // bone only flies when the head actually came apart — a pistol/SMG
       // headshot is a snap + blood, never skull fragments
       if (popHead && hasDir) skullFrags(x, y, z, dx, dz, lod);
-      if (blade && ctx && ctx.ped) arterialArcs(ctx.ped, dx, dz);
+      if (blade) arterialArcs(ctx && ctx.ped, x, y, z, dx, dz);
       if (blunt) {
         bluntBurst(x, y, z, dx, dz, hasDir);
         if (ctx && ctx.ped) delayedBleedPool(ctx.ped);
@@ -3503,24 +4008,16 @@
       return;
     }
     let dx = dir ? (+dir.x || 0) : 0, dy = dir ? (+dir.y || 0) : 0, dz = dir ? (+dir.z || 0) : 0;
-    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
-    const real = realism();
-    const drops = real ? Math.max(4, Math.round(11 * amt)) : Math.max(2, Math.round(5 * amt));
-    for (let i = 0; i < drops; i++) {
-      spawnBit(point.x, point.y, point.z,
-        dx * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
-        dy * 2 + 0.7 + Math.random() * 2.2,
-        dz * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
-        0.035 + Math.random() * 0.045, Math.random() < 0.35 ? BLOOD_BRT : BLOOD, "blood");
-    }
-    const mist = Math.max(1, Math.round((real ? 3.5 : 2) * amt));
-    for (let i = 0; i < mist; i++) {
-      spawnBit(point.x, point.y, point.z,
-        dx * (1.5 + Math.random() * 2) + (Math.random() - 0.5),
-        dy + 0.5 + Math.random() * 1.3,
-        dz * (1.5 + Math.random() * 2) + (Math.random() - 0.5),
-        0.035 + Math.random() * 0.035, BLOOD, "mist");
-    }
+    const dl = Math.hypot(dx, dy, dz);
+    const al = airLod(point.x, point.z);
+    noteSpray(point.x, point.z);
+    if (dl < 0.001) { omniBlood(point.x, point.y, point.z, amt * 0.6, al); return; }
+    dx /= dl; dy /= dl; dz /= dl;
+    // WHAT GOES THROUGH. A full-bore round (0.58 x calibre for a body, 0.95
+    // for a head) exits and throws the big spray out of the far side; a
+    // buckshot pellet (0.28-0.34) or a spent round stays in, so it is the
+    // entry spatter alone.
+    shotBlood(point.x, point.y, point.z, dx, dy, dz, amt, amt >= 0.45, amt >= 0.9, al, false);
   };
 
   /* ============================================================
@@ -3547,7 +4044,8 @@
      under the sea blooms instead of raining droplets on the seabed.
 
      opts: { dir:{x,y,z} (away from the surface), amount:0.2..2, mist:bool,
-             pool:bool, wall:bool, player:bool, sfx:bool|string }
+             pool:bool, wall:bool, player:bool, sfx:bool|string,
+             blade:bool (a cut: heavy drops + a short stream, no mist) }
   ============================================================ */
   CBZ.goreImpact = function (x, y, z, opts) {
     if (!CBZ.scene) return;
@@ -3574,30 +4072,13 @@
       return;
     }
 
-    // THE SPRAY. A blunt impact does not have a shot line to exit along, so the
-    // fan is wide and the throw is short: blood leaves the wound at the speed
-    // the body arrived, not at the speed of a round.
-    const px = -dz, pz = dx;
-    const nb = Math.max(3, Math.round(11 * amt * lod));
-    for (let i = 0; i < nb; i++) {
-      const a = Math.random() * 6.28, sp = 1.6 + Math.random() * 4.6;
-      const side = (Math.random() - 0.5) * 2;
-      spawnBit(x + (Math.random() - 0.5) * 0.3, y + (Math.random() - 0.5) * 0.5, z + (Math.random() - 0.5) * 0.3,
-        hasDir ? dx * (2.2 + Math.random() * 4.5 * amt) + px * side * 2.6 : Math.cos(a) * sp,
-        (hasDir ? dy * 3.5 : 0) + 1.4 + Math.random() * 3.4 * amt,
-        hasDir ? dz * (2.2 + Math.random() * 4.5 * amt) + pz * side * 2.6 : Math.sin(a) * sp,
-        DROP_R(), Math.random() < 0.45 ? BLOOD_BRT : BLOOD, "blood");
-    }
-    if (opts.mist) {
-      const nm2 = Math.max(2, Math.round(6 * amt * lod));
-      for (let i = 0; i < nm2; i++) {
-        const a = Math.random() * 6.28, sp = 0.8 + Math.random() * 2.4;
-        spawnBit(x + (Math.random() - 0.5) * 0.35, y + 0.15 + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.35,
-          dx * 2.4 * amt + Math.cos(a) * sp, 1.2 + Math.random() * 2,
-          dz * 2.4 * amt + Math.sin(a) * sp,
-          0.045 + Math.random() * 0.06, BLOOD, "mist");
-      }
-    }
+    // THE SPRAY. A blunt impact does not have a shot line to exit along, so
+    // the fan is wide and the throw is short: blood leaves the wound at the
+    // speed the body arrived, not at the speed of a round. opts.blade is a
+    // cut: heavy drops and a short stream instead (see THE AIRBORNE BLOOD).
+    const al = airLod(x, z) * lod;
+    if (opts.blade) stabBlood(x, y, z, hasDir ? dx : 0, hasDir ? dz : 0, amt, al);
+    else bluntBlood(x, y, z, dx, dy, dz, hasDir, amt, al, !!opts.mist);
     // the pool is the RESTRAINT: only an open wound leaves evidence on the
     // ground, so a bruising hit passes pool:false and stains nothing.
     if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
@@ -3621,6 +4102,8 @@
     // the land-decal layer lives in the scene from the first frame, so its one
     // program compiles at load and not in the frame of the first kill
     if (CBZ.scene && (!ldMesh || ldMesh.parent !== CBZ.scene)) landLayer();
+    // ...and the air layer's, for the same reason
+    if (CBZ.scene && !airMesh) airReady();
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
 
@@ -3635,6 +4118,9 @@
     plumeClock += dt;
     updateChum(dt);
     updatePuffs(dt);
+    // the air: streams lay their drops, every drop and puff flies, lands, stains
+    if (CBZ.scene && airMesh && airMesh.parent !== CBZ.scene) airReady();
+    updateAir(dt);
 
     // throttled corpse-stain scan: bodies lying in a pool soak dark, once each
     // + the dismemberment audit: recycled/respawned rigs get their parts back
@@ -3658,21 +4144,6 @@
     const snowCoverNow = snowCover();
     for (let i = bits.length - 1; i >= 0; i--) {
       const b = bits[i], m = b.m;
-      if (b.kind === "mist") {
-        // mist floats: light gravity, drag, gentle rise then settle, fades out
-        b.vy -= GRAV * 0.12 * dt;
-        b.vx *= Math.pow(0.04, dt); b.vz *= Math.pow(0.04, dt);
-        m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
-        // a billboard puff turns to face the lens — the whole point of the quad
-        // is that it never shows the viewer an edge or a corner.
-        if (b.bill && CBZ.camera) m.quaternion.copy(CBZ.camera.quaternion);
-        b.life -= dt;
-        const k = Math.max(0, b.life);
-        m.scale.setScalar(b.baseScale * (1 + (1 - Math.min(1, b.life)) * 2.2));  // expand as it dissipates
-        if (b.mat) b.mat.opacity = (b.bill ? MIST_A : 0.5) * Math.min(1, k * 2.2);
-        if (b.life <= 0) { rm(m); bits.splice(i, 1); }
-        continue;
-      }
       // AND SNOW COVERS WHAT IS LYING ON IT. A landed chunk is a small solid
       // on the ground, so the same fall of snow that takes the pools takes it
       // — otherwise a whiteout ends with a pristine field and a scatter of red
@@ -3740,31 +4211,23 @@
         b.sx *= wd; b.sy *= wd; b.sz *= wd;   // the tumble drags out too
       } else b.vy -= GRAV * dt;
       m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
-      // a droplet is STEERED, not tumbled: it keeps pointing down its own
-      // velocity, so the arc of a spray is legible as it falls.
-      if (b.drop) aimDrop(m, b.vx, b.vy, b.vz);
-      else { m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt; }
-      // A DROPLET THAT REACHES THE SEA GOES INTO IT. The only vertical test in
-      // this loop is decalFloorAt() — the terrain/seabed — so a drop thrown over
-      // water fell straight THROUGH the swell and stamped a splat in the dark
-      // under thirty metres of water, where nobody will ever see it. Crossing
-      // the live surface hands the drop to puffFromBit, the same ballistic→plume
-      // seam a wet event uses, so the spray off a breaching shark ends as blood
-      // IN the water (the thing the owner likes) instead of as seabed litter.
-      // Cost: one guarded submRaw on a jittered ~0.2 s stagger. A blood bit
-      // lives 0.7-1.5 s, so that is four to seven queries for its whole flight,
-      // not one per drop per frame — and submRaw short-circuits to DRY with no
-      // water system at all, so land maps pay a single function call.
-      if (b.kind === "blood" && waterOn()) {
-        b.seaT -= dt;
-        if (b.seaT <= 0) {
-          b.seaT = 0.16 + Math.random() * 0.08;
-          const sub = submRaw(m.position.x, m.position.y, m.position.z);
-          if (sub !== DRY && sub >= 0) {                 // at or under the live surface
-            puffFromBit(m.position.x, m.position.y, m.position.z, b.vx, b.vy, b.vz, b.baseScale, false);
-            // and enough of them together mark the surface (throttled: see surfaceSlick)
-            if (Math.random() < 0.3) surfaceSlick(m.position.x, m.position.z, 0.3);
-            rm(m); bits.splice(i, 1); continue;
+      m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt;
+      // A TORN-OFF PIECE BLEEDS AS IT FLIES: a severed limb sheds a drop every
+      // ~55 ms for its first second in the air (a blast chunk, every ~0.1 s
+      // for 0.6 s), carried with the piece's own speed, so
+      // a severed arm draws a line of blood through the air and a spatter
+      // trail where it went. Dry pieces (teeth, bone: `bled` at spawn) don't.
+      if (!b.bled && !b.landed && !b.wet) {
+        b.trl = (b.trl || 0) + dt;
+        if (b.trl < (b.limb ? 1.0 : 0.6)) {
+          b.trlT = (b.trlT || 0) - dt;
+          if (b.trlT <= 0) {
+            b.trlT = b.limb ? 0.04 + Math.random() * 0.03 : 0.07 + Math.random() * 0.05;
+            airMarkP = 0.5;
+            airDrop(m.position.x, m.position.y, m.position.z,
+              b.vx * 0.85 + (Math.random() - 0.5) * 0.6, b.vy * 0.85 + (Math.random() - 0.5) * 0.6, b.vz * 0.85 + (Math.random() - 0.5) * 0.6,
+              rMM(0.8, b.limb ? 2.8 : 2), -1, 0, 0, 0);
+            airMarkP = 1;
           }
         }
       }
@@ -3775,25 +4238,6 @@
       // road paint; jail/survival keep the original bare radius.
       const rr = gibCity ? (b.rad || 0.06) + 0.012 : (b.rad || 0.06);
       if (m.position.y <= fl + rr && b.vy < 0) {
-        if (b.kind === "blood") {
-          // A LANDING DROPLET LEAVES A SPLASH, NOT A PUDDLE. spawnSplat's
-          // `grow` is the decal's RADIUS in world units, so the authored
-          // 0.3-0.8 stamped a 60-160 cm blot for every single drop — two dozen
-          // of them per kill, overlapping into one red carpet. Hand-sized marks
-          // let the SPRAY PATTERN read: you can see which way the round went.
-          // And the mark is the size of the DROP (a few cm, most of them
-          // small, the odd big one), stretched by how flat it came in: a drop
-          // landing at angle A is 1/sin(A) times longer than it is wide, tail
-          // pointing the way it was going. That is what makes a spray pattern
-          // readable as a direction instead of as scattered dots.
-          const hs = Math.hypot(b.vx, b.vz), sinA = Math.abs(b.vy) / (Math.hypot(hs, b.vy) || 1);
-          const g = (b.rad || 0.03) * (0.55 + Math.random() * Math.random() * 1.6);
-          _dropO.kind = sinA > 0.9 || hs < 0.3 ? "dot" : "drop";
-          _dropO.dirX = hs > 0 ? b.vx / hs : 0; _dropO.dirZ = hs > 0 ? b.vz / hs : 0;
-          _dropO.elong = 1 / Math.max(0.3, sinA);
-          spawnSplat(m.position.x, m.position.z, g, BLOOD_D, false, _dropO);
-          rm(m); bits.splice(i, 1); continue;
-        }
         if (gibCity) {
           // CITY SETTLE: clamp to ground, kill vertical, bleed off horizontal +
           // spin. A slow piece comes to REST this frame; a still-fast one keeps a
@@ -3808,14 +4252,13 @@
         }
       }
       if (gibCity) {
-        if (b.kind === "blood") b.life -= dt;
-        else b.airT = (b.airT || 0) + dt;   // gib still in flight
+        b.airT = (b.airT || 0) + dt;        // gib still in flight
         // safety: a gib flung off the map (never lands) still retires so a long
         // life can't leak the pool.
         if (b.airT > 14) { rm(m); bits.splice(i, 1); continue; }
       } else {
-        // ORIGINAL: only a landed gib (or any blood) counts down.
-        if (b.landed || b.kind === "blood") b.life -= dt;
+        // ORIGINAL: only a landed gib counts down.
+        if (b.landed) b.life -= dt;
       }
       if (b.life <= 0) { rm(m); bits.splice(i, 1); }
     }
@@ -3988,28 +4431,28 @@
     }
     // how much of what is still on the ground is currently under snow — the
     // ratchet for "a whiteout does not leave crisp red on a white island".
-      // ---- the cube ratchet: how big is what is in the air right now? ----
-      let boxGibs = 0, drops = 0, mist = 0, maxGib = 0, maxDrop = 0, fatDrop = 0;
-      for (let i = 0; i < bits.length; i++) {
-        const b = bits[i], bm = b.m, bg = bm && bm.geometry;
-        let span = 0, thick = 0;
-        if (bg) {
-          if (!bg.boundingBox) bg.computeBoundingBox();
-          const bb = bg.boundingBox;
-          const wx = (bb.max.x - bb.min.x) * Math.abs(bm.scale.x);
-          const wy = (bb.max.y - bb.min.y) * Math.abs(bm.scale.y);
-          const wz = (bb.max.z - bb.min.z) * Math.abs(bm.scale.z);
-          span = Math.max(wx, wy, wz);
-          // a stretched droplet's LENGTH is the point of it; what used to read as
-          // a floating ball is its CROSS-SECTION, so that is the honest number.
-          thick = Math.min(wx, wy, wz);
-        }
-        if (b.kind === "gib") {
-          if (bg && bg.type === "BoxGeometry") boxGibs++;
-          if (span > maxGib) maxGib = span;
-        } else if (b.kind === "mist") mist++;
-        else { drops++; if (span > maxDrop) maxDrop = span; if (thick > fatDrop) fatDrop = thick; }
+    // ---- the cube ratchet: how big is what is in the air right now? ----
+    let boxGibs = 0, maxGib = 0;
+    for (let i = 0; i < bits.length; i++) {
+      const b = bits[i], bm = b.m, bg = bm && bm.geometry;
+      if (bg && bg.type === "BoxGeometry") boxGibs++;
+      if (bg) {
+        if (!bg.boundingBox) bg.computeBoundingBox();
+        const bb = bg.boundingBox;
+        const span = Math.max((bb.max.x - bb.min.x) * Math.abs(bm.scale.x), (bb.max.y - bb.min.y) * Math.abs(bm.scale.y),
+          (bb.max.z - bb.min.z) * Math.abs(bm.scale.z));
+        if (span > maxGib) maxGib = span;
       }
+    }
+    // the air pool: a drop's size is its DIAMETER (what used to read as a
+    // floating ball was its cross-section; a streak's length is its speed)
+    let drops = 0, mist = 0, fatDrop = 0;
+    for (let i = 0; i < airN; i++) {
+      if (AKIND[i] === 1) mist++;
+      else { drops++; if (AR[i] * 2 > fatDrop) fatDrop = AR[i] * 2; }
+    }
+    let streams = 0;
+    for (let e = 0; e < EM_MAX; e++) if (E_ON[e]) streams++;
     const cov = snowCover();
     let visible = 0, buried = 0, washes = 0, diluted = 0, candidates = 0;
     for (let i = 0; i < splats.length; i++) {
@@ -4026,11 +4469,12 @@
       if (u >= 1 || d >= 1) buried++; else visible += (1 - u) * (1 - d);
     }
     return {
-      bits: bits.length, pools, streaks, slicks: water, walls: walls.length,
+      bits: bits.length + airN, pools, streaks, slicks: water, walls: walls.length,
+      air: airN, airDrawCalls: airMesh && airMesh.parent ? 1 : 0, streams, airEmits: AIR_AUDIT,
       realism: realism(), debrisLaw: debrisLaw(), mode: (CBZ.game && CBZ.game.mode) || null,
       boxGibs, drops, mist,
-      maxGibCm: Math.round(maxGib * 100), maxDropCm: Math.round(maxDrop * 100),
-      maxDropThickCm: Math.round(fatDrop * 100),
+      maxGibCm: Math.round(maxGib * 100), maxDropCm: +(fatDrop * 100).toFixed(2),
+      maxDropThickCm: +(fatDrop * 100).toFixed(2),
       // `gibs` is the count of GENERIC flying boxes still alive, and on the
       // island it may only ever be 0 — the ratchet for "I hate the blood
       // blocks". `severed` counts rigs currently missing a real body part.
@@ -4060,6 +4504,9 @@
   CBZ.clearGore = function () {
     for (const r of severed) restoreRecord(r); severed.length = 0;   // every rig leaves whole
     for (const b of bits) rm(b.m); bits.length = 0;
+    airN = 0; if (airGeo) airGeo.instanceCount = 0;
+    for (let e = 0; e < EM_MAX; e++) stopStream(e);
+    if (airMesh && airMesh.parent) airMesh.parent.remove(airMesh);       // re-added on the next frame
     for (const s of splats) freeSlick(s); splats.length = 0; slickN = 0;
     for (const w of walls) ldRelease(w); walls.length = 0;
     if (ldMesh && ldMesh.parent) ldMesh.parent.remove(ldMesh);          // re-added on the next mark
