@@ -15,11 +15,19 @@
      · the raked pistol grip + trigger guard under the front third, and the
        plain second grip behind it;
      · the flared rear venturi (a real shell of revolution, open bell);
-     · the PGO-7 box scope on a bracket on the LEFT, plus the folding iron
-       sight posts on top;
+     · the trigger housing welded under the tube, the guard a pressed loop
+       with a real finger hole, a curved trigger blade;
+     · the PGO-7 on the LEFT: a chamfered OD body with its hooded objective,
+       rubber eyecup, range drum and lamp cap, clamped to a dovetail block on
+       a bracket plate welded to the tube's flank;
+     · the folding irons on top: a post on a clamp band near the muzzle and
+       a U-notch leaf above the trigger group, tall enough that the sight
+       line clears the PG-7V's bulb;
      · the PG-7V seated in the muzzle: the 85 mm bulb is WIDER than the
        tube, an ogive cone runs to the piezo fuze tip, and the sustainer
-       neck disappears into the muzzle.
+       neck disappears into the muzzle. (The folding tail fins ride the
+       sustainer, which is inside the tube until it flies: fpsmode draws
+       them on the round in flight.)
 
    The warhead is its own group, g.userData.warhead, so fpsmode can take it
    away when the rocket leaves and put it back when the reload seats a new
@@ -126,7 +134,7 @@
 
   CBZ.weaponAppearance.bazooka = function (ctx) {
     const { THREE, box, cyl, mat } = ctx;
-    const K = CBZ.gunKit ? CBZ.gunKit(ctx) : null;
+    const K = CBZ.gunKit(ctx);   // sidearm.js (the appearances index) loads first on every page
     const M = mats(ctx);
     const g = new THREE.Group();
 
@@ -170,56 +178,78 @@
     const rearWood = woodSleeve(WOOD_R2[0], WOOD_R2[1]);
     if (rearWood) rearWood.name = "rpg:rearWood";
 
-    // ---- trigger group: housing, raked pistol grip, guard, blade ----------
+    // ---- trigger group -----------------------------------------------------
+    // The trigger mechanism housing welded under the tube: one side profile,
+    // chamfered at both ends, its belly flat where the grip and guard hang.
     const tubeBot = BY - TUBE_R;                        // 0.000
-    box(g, 0.056, 0.040, 0.24, M.steel, 0, tubeBot - 0.012, -0.06);   // trigger housing under the tube
+    K.prof(g, "rpg.housing", [
+      [-0.064, 0.012], [0.180, 0.012], [0.188, -0.004], [0.170, -0.024], [0.120, -0.034],
+      [-0.030, -0.034], [-0.052, -0.022], [-0.066, 0.000],
+    ], 0.046, M.steel, { bevel: 0.004 }).name = "rpg:housing";
+    // the raked pistol grip (black bakelite, finger swells)
     const R = 0.26;
-    let pistol = null;
-    if (K) {
-      pistol = K.prof(g, "rpg.grip", K.grip(0.050, tubeBot - 0.032, 0.100, 0.215, R, { swellF: 0.006, swellB: 0.008, grooves: 3 }),
-        0.066, M.black, { bevel: 0.007 });
-      // the guard: a steel loop from the housing round the front of the trigger
-      K.prof(g, "rpg.guard", [
-        [0.150, tubeBot - 0.030], [0.176, tubeBot - 0.030], [0.142, tubeBot - 0.132], [0.020, tubeBot - 0.132],
-        [0.024, tubeBot - 0.114], [0.126, tubeBot - 0.114],
-      ], 0.020, M.steel, { bevel: 0.003 });
-    } else {
-      pistol = box(g, 0.066, 0.215, 0.10, M.black, 0, tubeBot - 0.14, 0.0, -R);
-    }
-    if (pistol) pistol.name = "rpg:pistolGrip";
-    box(g, 0.012, 0.052, 0.014, M.edge, 0, tubeBot - 0.068, -0.092, -0.22);   // trigger blade
+    K.prof(g, "rpg.grip", K.grip(0.050, tubeBot - 0.032, 0.100, 0.215, R, { swellF: 0.006, swellB: 0.008, grooves: 3 }),
+      0.066, M.black, { bevel: 0.007 }).name = "rpg:pistolGrip";
+    // the guard: a pressed steel loop from the housing's nose round the
+    // trigger to the grip's front strap, a real hole for the finger
+    K.prof(g, "rpg.guard2", [
+      [0.040, -0.030], [0.170, -0.030], [0.150, -0.100], [0.128, -0.136], [0.024, -0.136], [0.020, -0.118], [0.034, -0.080],
+    ], 0.016, M.steel, { bevel: 0.003,
+      holes: [[[0.060, -0.036], [0.152, -0.036], [0.136, -0.098], [0.118, -0.122], [0.040, -0.122], [0.040, -0.090]]] });
+    // the trigger: a curved blade hung from the housing
+    K.prof(g, "rpg.trigger", [
+      [0.084, -0.034], [0.098, -0.034], [0.101, -0.060], [0.095, -0.090], [0.083, -0.100], [0.088, -0.086], [0.090, -0.060],
+    ], 0.010, M.edge, { bevel: 0.002 });
 
     // ---- the second (rear) grip under the rear heat shield ---------------
     const REAR_Z = 0.26;                                 // grip centre, model z
-    let rearGrip = null;
-    if (K) {
-      rearGrip = K.prof(g, "rpg.rear", K.grip(-REAR_Z + 0.042, BY - WOOD_R + 0.004, 0.084, 0.180, 0.12, { swellF: 0.004, swellB: 0.004 }),
-        0.060, M.black, { bevel: 0.006 });
-    } else {
-      rearGrip = box(g, 0.060, 0.18, 0.084, M.black, 0, BY - WOOD_R - 0.09, REAR_Z, -0.12);
-    }
-    if (rearGrip) rearGrip.name = "rpg:rearGrip";
+    K.prof(g, "rpg.rear", K.grip(-REAR_Z + 0.042, BY - WOOD_R + 0.004, 0.084, 0.180, 0.12, { swellF: 0.004, swellB: 0.004 }),
+      0.060, M.black, { bevel: 0.006 }).name = "rpg:rearGrip";
 
     // ---- PGO-7 on its bracket, on the LEFT (-x) ---------------------------
-    box(g, 0.014, 0.090, 0.110, M.steel, -TUBE_R - 0.004, BY + 0.030, -0.02);   // bracket plate off the tube's left
-    box(g, 0.050, 0.016, 0.060, M.steel, -TUBE_R - 0.026, BY + 0.078, -0.02);   // dovetail rail
+    // the sight bracket: a plate welded along the tube's left flank, and the
+    // dovetail block the scope's clamp rides, bridging out under the body
+    K.prof(g, "rpg.bracket", [[-0.050, 0.036], [0.072, 0.036], [0.062, 0.128], [-0.040, 0.128]],
+      0.012, M.steel, { bevel: 0.002, x: -TUBE_R - 0.005 });
+    // front profile along the barrel (axis "z" mirrors x: authored +x = left)
+    K.prof(g, "rpg.dovetail", [[0.052, 0.098], [0.064, 0.098], [0.076, 0.120], [0.134, 0.120], [0.134, 0.138], [0.052, 0.138]],
+      0.100, M.steel, { axis: "z", bevel: 0.003, z: -0.010 });
+    // the scope body: a chamfered housing, sloped where the reticle prism sits
     const SX = -TUBE_R - 0.058, SY = BY + 0.126;
-    box(g, 0.064, 0.080, 0.240, M.steel, SX, SY, 0.000).name = "rpg:scope";
-    place(ctx, g, cached("rpg:obj", function () {
-      const t = new THREE.CylinderGeometry(0.030, 0.034, 0.060, 14); t.rotateX(-Math.PI / 2); return t;
-    }), M.steel, SX, SY + 0.004, -0.148);
-    cyl(g, 0.026, 0.004, M.lens, SX, SY + 0.004, -0.180, Math.PI / 2);                   // objective glass
-    place(ctx, g, cached("rpg:eyecup", function () {
-      const t = new THREE.CylinderGeometry(0.034, 0.028, 0.060, 14); t.rotateX(-Math.PI / 2); return t;
-    }), M.black, SX, SY + 0.004, 0.150);
-    box(g, 0.030, 0.026, 0.030, M.steel, SX, SY + 0.052, -0.030);                       // elevation turret
-    box(g, 0.026, 0.030, 0.030, M.steel, SX - 0.044, SY, -0.030);                       // lamp / windage knob
+    K.prof(g, "rpg.pgo", [
+      [-0.120, -0.040], [0.110, -0.040], [0.124, -0.026], [0.124, 0.030], [0.100, 0.040], [-0.090, 0.040], [-0.120, 0.024],
+    ], 0.058, M.od, { bevel: 0.006, x: SX, y: SY }).name = "rpg:scope";
+    // objective with its sun hood and recessed glass; rubber eyecup behind
+    place(ctx, g, lathe(THREE, "rpg:pgoObj", [
+      [0.020, 0], [0.029, 0.006], [0.029, 0.048], [0.033, 0.054], [0.033, 0.070], [0.029, 0.070], [0.027, 0.060], [0, 0.060],
+    ], 1, 16), M.steel, SX, SY + 0.004, -0.118, -Math.PI / 2);
+    cyl(g, 0.026, 0.002, M.lens, SX, SY + 0.004, -0.179, Math.PI / 2);                   // objective glass
+    place(ctx, g, lathe(THREE, "rpg:pgoEye", [
+      [0.018, 0], [0.025, 0.004], [0.025, 0.030], [0.029, 0.040], [0.035, 0.058], [0.032, 0.060], [0.023, 0.046], [0, 0.046],
+    ], 1, 16), M.black, SX, SY + 0.004, 0.118, Math.PI / 2);
+    // range drum on top, the reticle lamp's battery cap on the left flank
+    K.lathe(g, "rpg.drum", [[0.017, 0], [0.017, 0.014], [0.014, 0.020], [0, 0.020]], 12, M.steel, SX, SY + 0.040, -0.030, { axis: "y" });
+    K.lathe(g, "rpg.lamp", [[0.012, 0], [0.012, 0.018], [0.009, 0.024], [0, 0.024]], 12, M.steel, SX - 0.029, SY - 0.004, 0.040,
+      { axis: "y", rz: Math.PI / 2 });
 
     // ---- folding iron sights on top ---------------------------------------
-    box(g, 0.030, 0.012, 0.030, M.steel, 0, BY + TUBE_R + 0.004, MUZZLE_Z + 0.10);       // front base
-    box(g, 0.008, 0.060, 0.010, M.steel, 0, BY + TUBE_R + 0.038, MUZZLE_Z + 0.10);       // front post
-    box(g, 0.040, 0.012, 0.030, M.steel, 0, BY + TUBE_R + 0.004, WOOD_F[1] + 0.03);      // rear leaf base
-    box(g, 0.034, 0.040, 0.008, M.steel, 0, BY + TUBE_R + 0.028, WOOD_F[1] + 0.03);      // rear leaf (notch reads at range)
+    // front: a clamp band round the tube, its block, and the folding post
+    // standing up (its tip is what the eye lays on the target); tall enough
+    // that the sight line clears the PG-7V's bulb
+    const FZ = MUZZLE_Z + 0.10;
+    place(ctx, g, lathe(THREE, "rpg:fsBand", [[TUBE_R + 0.001, 0], [TUBE_R + 0.005, 0.003], [TUBE_R + 0.005, 0.027], [TUBE_R + 0.001, 0.030]], 1, 16),
+      M.steel, 0, BY, FZ + 0.015, -Math.PI / 2);
+    K.prof(g, "rpg.fsBlock", [[-FZ - 0.020, 0.094], [-FZ + 0.020, 0.094], [-FZ + 0.016, 0.108], [-FZ - 0.016, 0.108]],
+      0.020, M.steel, { bevel: 0.002 });
+    K.prof(g, "rpg.fsPost", [[-FZ - 0.010, 0.104], [-FZ + 0.012, 0.104], [-FZ + 0.004, 0.118], [-FZ + 0.002, 0.160],
+      [-FZ - 0.004, 0.160], [-FZ - 0.006, 0.118]], 0.008, M.steel, { bevel: 0.001 });
+    // rear: the base on the tube above the trigger group, and the folding
+    // leaf standing on it with its U-notch
+    const RZ = -0.070;
+    K.prof(g, "rpg.rsBase", [[-RZ - 0.030, 0.096], [-RZ + 0.030, 0.096], [-RZ + 0.030, 0.106], [-RZ - 0.024, 0.110], [-RZ - 0.030, 0.106]],
+      0.028, M.steel, { bevel: 0.002 });
+    K.prof(g, "rpg.rsLeaf", [[-0.017, 0], [0.017, 0], [0.017, 0.060], [0.005, 0.060], [0.003, 0.054], [-0.003, 0.054],
+      [-0.005, 0.060], [-0.017, 0.060]], 0.006, M.steel, { axis: "z", bevel: 0.001, y: 0.104, z: RZ });
 
     // ---- the round, seated ------------------------------------------------
     const warhead = buildWarhead(ctx, M);
@@ -238,7 +268,7 @@
 
     // ---- the firing hand on the pistol grip -------------------------------
     // top centre of the grip: front strap at z=-0.050, back at +0.050
-    if (K) K.hand(g, { at: [tubeBot - 0.032, 0.000], rake: R, gripW: 0.066, gripD: 0.100, trigger: [tubeBot - 0.068, -0.092] });
+    K.hand(g, { at: [tubeBot - 0.032, 0.000], rake: R, gripW: 0.066, gripD: 0.100, trigger: [tubeBot - 0.068, -0.092] });
 
     // The projectile leaves from the fuze tip — the round that flies IS the
     // round that was seated.
@@ -267,6 +297,31 @@
       charge: null,
       style: "rocket",
     };
+    /* THE ANCHORS (contract: sidearm.js), S = 2 units per real metre.
+         grip     mid-palm on the trigger pistol grip, down its raked axis
+         support  "tube": the off hand under the FRONT heat shield (where
+                  grips.support/hold already put it; the second grip on this
+                  launcher sits BEHIND the trigger grip, under the shoulder)
+         mag      the loaded PG-7V: its bulb centre, `well` the tube's mouth
+                  it seats in (+Y from the round back into the tube)
+         stock    the shoulder contact: the underside of the rear heat shield
+                  at shoulderZ, where the tube rests on the shoulder
+         sight    the folding rear leaf's notch -> the front post's tip; the
+                  eye is ~22 cm behind the leaf, over the shoulder */
+    const gTop = [(tubeBot - 0.032 + tubeBot - 0.032 + Math.sin(R) * 0.100) / 2, -(0.050 + 0.050 - Math.cos(R) * 0.100) / 2];
+    const gAt = (t) => [0, gTop[0] - Math.cos(R) * t, gTop[1] + Math.sin(R) * t];
+    K.anchors(g, {
+      k: S,
+      grip: { pos: gAt(0.090), rake: R },
+      trigger: [0, tubeBot - 0.068, -0.097],
+      support: { pos: [0, BY - WOOD_R, woodMidZ], kind: "tube", len: WOOD_F[1] - WOOD_F[0] },
+      mag: { pos: [0, BY, MUZZLE_Z - 0.160 * S], well: [0, BY, MUZZLE_Z],
+        quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)) },
+      stock: [0, BY - WOOD_R, g.userData.shoulderZ],
+      charge: null,
+      sight: { rear: [0, 0.160, RZ], front: [0, 0.160, FZ + 0.001], eyeRelief: 0.22, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 

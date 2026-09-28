@@ -47,7 +47,9 @@
     box(g, 0.012, 0.018, 0.040, mat.black, -0.042, 0.062, 0.010);
     K.prof(g, "de.rear", [[-0.024, 0], [0.024, 0], [0.024, 0.020], [0.007, 0.020], [0.005, 0.009],
       [-0.005, 0.009], [-0.007, 0.020], [-0.024, 0.020]], 0.022, mat.black, { axis: "z", bevel: 0.002, y: 0.100, z: 0.004 });
-    box(g, 0.010, 0.024, 0.030, mat.black, 0, 0.110, -0.580);
+    // front post on the rail's nose: square rear face to the eye, ramped front
+    K.prof(g, "de.front", [[0.568, 0.096], [0.596, 0.096], [0.582, 0.122], [0.568, 0.122]],
+      0.010, mat.black, { bevel: 0.0015 });
     // the .50 BORE, low in the barrel's wide base
     const bore = cyl(g, 0.017, 0.006, mat.bore || mat.black, 0, BORE, -0.606, Math.PI / 2);
     bore.userData.weaponBore = true;
@@ -78,6 +80,22 @@
       charge: new THREE.Vector3(0, 0.050, -0.040),     // rear slide serrations
       style: "mag",
     };
+    // THE ANCHORS (contract: sidearm.js). The grip's top centre (z -0.016,
+    // y -0.048) run down the raked axis: a palm down = the hand's centre; the
+    // 7-round mag rides that axis inside the grip, its well at the foot.
+    const down = (t) => [0, -0.048 - Math.cos(R) * t, -0.016 + Math.sin(R) * t];
+    K.anchors(g, {
+      k: 2.4,
+      grip: { pos: down(0.100), rake: R },
+      trigger: [0, -0.098, -0.136],
+      support: { pos: [-0.043, down(0.100)[1], down(0.100)[2]], kind: "cup", len: 0 },
+      mag: { pos: down(0.140), well: down(0.236), rake: R },
+      stock: null,
+      charge: [0, 0.050, -0.040],
+      // rear notch (ears' top line) -> front post top
+      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.42, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 })();

@@ -21,6 +21,61 @@
    hand, closed on the grip) on mat.skin, which fpsmode tints to the
    player's skin and which the gun room and weapon-scale skip. fpsmode grows
    the forearm out of its wrist and puts the off hand on userData.grips.
+
+   THIS FILE IS THE APPEARANCES INDEX: it loads first on every page, so the
+   contract every weapons/appearances/* model (and every held item: the
+   flashlight, the charge + detonator, the grenade, the shank) honours is
+   written here.
+
+   ANCHOR CONTRACT — model.userData.anchors
+   Every appearance names the points a hand, an eye or a solver needs, in the
+   MODEL'S OWN LOCAL SPACE and units (the same space as userData.muzzle; the
+   consumer's scale/rotation of the model applies on top). Axes: -Z toward
+   the muzzle, +Y up, +X the gun's right. Every point is { pos: Vector3,
+   quat: Quaternion } plus the extra fields listed; an absent part is null.
+
+     k        model units per REAL metre as authored (Glock 2.25, Deagle
+              2.4 ...). Real-metre fields (eyeRelief) times k = model units.
+     grip     the firing hand's CENTRE on the grip (palm-mid, on the grip
+              axis, a palm below its top). quat: +Y up the grip axis (raked
+              forward-up), -Z out through the front strap where the fingers
+              close, +X the gun's right. `rake` (rad) rides along.
+     trigger  the face of the trigger blade the index pad presses. quat:
+              the gun frame (-Z forward; the pull is +Z).
+     support  the part the off hand holds, with `kind`: "guard" handguard,
+              "pump" (moves with the pump), "vgrip" vertical foregrip (quat
+              +Y up its axis, like grip), "tube" launcher tube, "cup" (a
+              pistol: the off hand cups the firing fist, pos on the left
+              grip panel), "frame" (a mag-in-grip SMG: the receiver front).
+              `len` = the length of holdable surface along the bore.
+     muzzle   the bore's exit (== userData.muzzle). quat: -Z the shot's way.
+     mag      the magazine BODY centre; `well` = the mouth it seats into.
+              quat: +Y from the body up into the well (insertion reversed).
+     stock    the centre of the butt plate face that goes in the shoulder;
+              `folded` true when it is drawn folded. null on a pistol.
+     bolt     a bolt gun's bolt knob (the hand that works it). null if none.
+     charge   the charging handle / slide serrations / cocking knob.
+     sight    the EYE point for aiming: behind `rear` along the sight line
+              by eyeRelief (real metres) x k. quat: a camera frame, looking
+              down -Z along rear -> front, +Y up. `rear`/`front` ride along
+              (irons: rear notch/aperture + front post tip; optics: ocular
+              lens + objective / window centres).
+     lens     scoped/dot optics only: the ocular lens (rear window) centre,
+              `radius`, quat facing the eye (+Z toward it). null on irons.
+     optic    { type: "iron"|"reddot"|"holo"|"scope"|"none", mag }.
+
+   An optic group carries its own record (userData.opticAnchors, built by
+   CBZ.gunAnchors.optic) in ITS local space; the gun's sight/lens/optic come
+   from its "_baseOptic" child when there is one. A gunsmith optic
+   (weapons/optics.js createWeaponOptic) stamps its own, and
+   CBZ.gunAnchors.activeSight(model) returns the sight in use NOW (the fitted
+   one if visible, else the factory one). CBZ.gunAnchors.world(model, name,
+   outPos, outQuat) resolves any anchor to world space.
+   Authoring: K.anchors(g, spec) at the end of a builder (spec fields as
+   above, points as [x, y, z]); K.opticAnchors(group, {...}) on an optic.
+   tools/gun-anchors-check.mjs proves every appearance carries them and that
+   each lies on or inside the drawn mesh (the eye point excepted: it is
+   behind the gun, and the check instead proves its line clears the sights).
 ============================================================ */
 (function () {
   "use strict";
@@ -49,6 +104,13 @@
     whiteDot: [0xe8e6dc, 0, 0, 0x222222],  // sight dots
     redDot: [0xff2a1e, 0, 0, 0xff2a1e],    // reflex dot / emitter
     lens: [0x1d2a33, 80, 0x8fb4cc],        // dark coated glass
+    royalBlue: [0x131c30, 70, 0x6f86b8],   // Colt Royal Blue (Python)
+    walnutCheck: [0x2e1b0e, 0, 0, 0],      // cut checkering between the diamonds
+    redInsert: [0xd01e14, 0, 0, 0x3a0604], // red ramp-sight insert
+    caseBrass: [0xc99a3e, 40, 0x7a5a20],   // cartridge case heads
+    mglTan: [0x7a6d4e, 0, 0, 0],           // MGL flat dark earth polymer
+    taserYellow: [0xf0c418, 0, 0, 0x2a1c00], // X26 safety-yellow polymer
+    cartGrey: [0x3a3d40, 6, 0x222428],     // TASER cartridge housing
   };
   function finish(ctx, name) {
     const key = "gk_" + name, mat = ctx.mat;
@@ -119,6 +181,24 @@
       return g;
     });
     return place(ctx, parent, geo, material, x, y, z);
+  }
+
+  /* A turned part along the barrel: `pts` are [radius, forward] pairs (forward
+     = -z, model units) revolved about the bore axis. A barrel with its crown,
+     a knurled nut, a scope tube with its bells, a grenade body — one mesh with
+     a real profile instead of a stack of cylinders. `o.axis` "y" turns about
+     +Y instead (a knob, a grenade standing up); o.phi limits the sweep. */
+  function lathe(ctx, parent, key, pts, segs, material, x, y, z, o) {
+    o = o || {};
+    const THREE = ctx.THREE;
+    const geo = cachedGeo("lathe:" + key, function () {
+      const g = new THREE.LatheGeometry(pts.map(function (p) { return new THREE.Vector2(Math.max(0, p[0]), p[1]); }),
+        segs || 16, o.phi0 || 0, o.phi || Math.PI * 2);
+      if (o.axis !== "y") g.rotateX(-Math.PI / 2);   // +y (forward) -> -z
+      g.computeVertexNormals();
+      return g;
+    });
+    return place(ctx, parent, geo, material, x, y, z, o.rx, o.ry, o.rz);
   }
 
   function arc(cx, cy, r, a0, a1, n) {
@@ -265,11 +345,218 @@
     return hd;
   }
 
+  /* ------------------------------------------------------ THE ANCHORS
+     See "ANCHOR CONTRACT" at the top of this file. CBZ.gunAnchors is plain
+     THREE (no ctx), so a held item built outside the kit (the flashlight,
+     the charge, the grenade) can stamp the same record the same way. */
+  const GA = CBZ.gunAnchors = CBZ.gunAnchors || {};
+  const DEF_RELIEF = { iron: 0.08, reddot: 0.20, holo: 0.18, scope: 0.09, none: 0 };
+  GA.NAMES = ["grip", "trigger", "support", "muzzle", "mag", "stock", "bolt", "charge", "sight", "lens"];
+  function v3(THREE, a) {
+    if (!a) return null;
+    return a.isVector3 ? a.clone() : new THREE.Vector3(a[0] || 0, a[1] || 0, a[2] || 0);
+  }
+  // a frame whose -Z looks along `dir`, +Y as near `up` (default +Y) as it can be
+  function lookQuat(THREE, dir, up) {
+    const z = dir.clone().normalize().negate();
+    const x = new THREE.Vector3().crossVectors(up || new THREE.Vector3(0, 1, 0), z);
+    if (x.lengthSq() < 1e-8) x.set(1, 0, 0);
+    x.normalize();
+    const y = new THREE.Vector3().crossVectors(z, x);
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  }
+  GA.lookQuat = lookQuat;
+  // +Y up a part raked back from vertical by `rake` (the kit's grip axis)
+  function rakeQuat(THREE, rake) {
+    return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -(rake || 0));
+  }
+  function pt(THREE, s) {
+    if (s == null) return null;
+    const isObj = !Array.isArray(s) && !s.isVector3;
+    const o = { pos: v3(THREE, isObj ? s.pos : s) };
+    o.quat = isObj && s.quat ? s.quat.clone()
+      : isObj && s.dir ? lookQuat(THREE, v3(THREE, s.dir), s.up ? v3(THREE, s.up) : null)
+      : rakeQuat(THREE, isObj ? s.rake : 0);
+    if (isObj) for (const k in s) if (k !== "pos" && k !== "quat" && k !== "dir" && k !== "up") o[k] = s[k];
+    if (o.well) o.well = v3(THREE, o.well);
+    return o;
+  }
+  /* An optic's own anchors, in the OPTIC GROUP's local space:
+       rear   ocular lens / rear window / rear aperture centre
+       front  objective / front window / front post tip
+       lensR  ocular lens radius (scopes, dots); omit for irons
+       eyeRelief real metres from `rear` back to the eye
+       k      model units per real metre the optic was drawn at
+       type   "iron" | "reddot" | "holo" | "scope"   mag  true magnification
+     Stamped on group.userData.opticAnchors (when a group is given) so a
+     gunsmith scope that replaces a factory one carries its own. */
+  GA.optic = function (THREE, group, o) {
+    const rear = v3(THREE, o.rear), front = v3(THREE, o.front);
+    const dir = front.clone().sub(rear).normalize();
+    const relief = o.eyeRelief != null ? o.eyeRelief : (DEF_RELIEF[o.type] != null ? DEF_RELIEF[o.type] : 0.1);
+    const k = o.k || 2.0;
+    const q = lookQuat(THREE, dir);
+    const rec = {
+      optic: { type: o.type || "iron", mag: o.mag || 1 },
+      sight: { pos: rear.clone().addScaledVector(dir, -relief * k), quat: q, eyeRelief: relief, rear: rear, front: front },
+      lens: o.lensR ? { pos: rear.clone(), quat: q.clone(), radius: o.lensR } : null,
+    };
+    if (group) group.userData.opticAnchors = rec;
+    return rec;
+  };
+  // an optic group's anchors carried into an ancestor's (the gun's) space
+  GA.inParent = function (THREE, node, root, rec) {
+    const M = new THREE.Matrix4();
+    for (let o = node; o && o !== root; o = o.parent) { o.updateMatrix(); M.premultiply(o.matrix); }
+    const q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+    M.decompose(p, q, sc);
+    const tp = function (v) { return v.clone().applyMatrix4(M); };
+    const out = { optic: Object.assign({}, rec.optic), sight: null, lens: null };
+    if (rec.sight) out.sight = { pos: tp(rec.sight.pos), quat: q.clone().multiply(rec.sight.quat), eyeRelief: rec.sight.eyeRelief, rear: tp(rec.sight.rear), front: tp(rec.sight.front) };
+    if (rec.lens) out.lens = { pos: tp(rec.lens.pos), quat: q.clone().multiply(rec.lens.quat), radius: rec.lens.radius * sc.x };
+    return out;
+  };
+  /* Stamp model.userData.anchors from a spec (arrays [x,y,z] or Vector3s,
+     all in the model's own units and space). See the contract up top. */
+  GA.stamp = function (THREE, model, s) {
+    const A = { k: s.k || 2.0 };
+    A.grip = pt(THREE, s.grip);
+    A.trigger = pt(THREE, s.trigger);
+    A.support = pt(THREE, s.support);
+    const mz = s.muzzle || model.userData.muzzle;
+    A.muzzle = mz ? pt(THREE, mz) : null;
+    A.mag = pt(THREE, s.mag);
+    A.stock = pt(THREE, s.stock);
+    A.bolt = pt(THREE, s.bolt);
+    A.charge = pt(THREE, s.charge);
+    A.optic = { type: (s.optic && s.optic.type) || (s.sight && s.sight.type) || "none", mag: (s.optic && s.optic.mag) || 1 };
+    A.sight = null; A.lens = null;
+    if (s.sight) {
+      const r = GA.optic(THREE, null, Object.assign({ k: A.k, type: A.optic.type, mag: A.optic.mag }, s.sight));
+      A.sight = r.sight; A.lens = r.lens; A.optic = r.optic;
+    }
+    const base = model.getObjectByName && model.getObjectByName("_baseOptic");
+    if (base && base.userData.opticAnchors) {
+      const r = GA.inParent(THREE, base, model, base.userData.opticAnchors);
+      A.sight = r.sight; A.lens = r.lens; A.optic = r.optic;
+    }
+    model.userData.anchors = A;
+    // systems/sights.js reads the scale here
+    if (model.userData.unitsPerMetre == null) model.userData.unitsPerMetre = A.k;
+    return A;
+  };
+  /* THE SIGHT IN USE NOW, in the model's space: a visible fitted optic
+     (city/gunmods.js adds one through CBZ.createWeaponOptic and hides
+     "_baseOptic") wins over the factory sight. -> { sight, lens, optic } */
+  GA.activeSight = function (model) {
+    const THREE = window.THREE, A = model && model.userData.anchors;
+    let found = null;
+    if (model && THREE) model.traverse(function (o) {
+      if (found || o === model || !o.userData.opticAnchors || o.name === "_baseOptic") return;
+      for (let p = o; p && p !== model; p = p.parent) if (!p.visible) return;
+      found = o;
+    });
+    if (found) return GA.inParent(THREE, found, model, found.userData.opticAnchors);
+    return A ? { sight: A.sight, lens: A.lens, optic: A.optic } : null;
+  };
+  // one anchor in world space, for a model placed anywhere (outs optional)
+  GA.world = function (model, name, outPos, outQuat) {
+    const A = model && model.userData.anchors, a = A && A[name];
+    if (!a) return null;
+    model.updateMatrixWorld(true);
+    if (outPos) outPos.copy(a.pos).applyMatrix4(model.matrixWorld);
+    if (outQuat) { model.getWorldQuaternion(outQuat); outQuat.multiply(a.quat); }
+    return a;
+  };
+
+  /* THE BAKE. A gun is 20-40 parts so it can read as a real gun up close;
+     an NPC's gun or a racked one never needs them as separate draw calls.
+     In a no-hand / display context (actorweapons' NPC props, the armory
+     rack) every static part that is a DIRECT child of the model, unnamed,
+     unflagged, untextured and opaque, is merged into ONE mesh per material.
+     Anything that moves or is looked up stays a part: the pump, the bipod
+     legs and every optic are groups, the bore is flagged. The merged
+     geometry is cached by the parts' signature, so every cop's M4 shares
+     one geometry per material. */
+  const BAKED = new Map();
+  function bake(THREE, model, skin) {
+    const parts = [];
+    for (let i = 0; i < model.children.length; i++) {
+      const o = model.children[i];
+      if (!o.isMesh || o.name || !o.visible || !o.geometry || !o.geometry.attributes.position || !o.geometry.attributes.normal) continue;
+      let flagged = false;
+      for (const key in o.userData) { flagged = true; break; }
+      const m = o.material;
+      if (flagged || !m || Array.isArray(m) || m.map || m.transparent || m === skin) continue;
+      o.updateMatrix();
+      parts.push(o);
+    }
+    if (parts.length < 4) return 0;
+    const sig = parts.map(function (o) {
+      return o.geometry.uuid + "|" + o.material.uuid + "|" + o.matrix.elements.map(function (e) { return e.toFixed(5); }).join(",");
+    }).join(";");
+    let merged = BAKED.get(sig);
+    if (!merged) {
+      const byMat = new Map();
+      parts.forEach(function (o) {
+        if (!byMat.has(o.material)) byMat.set(o.material, []);
+        byMat.get(o.material).push(o);
+      });
+      merged = [];
+      byMat.forEach(function (list, material) {
+        let n = 0;
+        const geos = list.map(function (o) {
+          const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+          n += g.attributes.position.count;
+          return g;
+        });
+        const P = new Float32Array(n * 3), N = new Float32Array(n * 3);
+        const v = new THREE.Vector3(), nm = new THREE.Matrix3();
+        let at = 0;
+        geos.forEach(function (g, gi) {
+          const M = list[gi].matrix, pa = g.attributes.position, na = g.attributes.normal;
+          nm.getNormalMatrix(M);
+          for (let i = 0; i < pa.count; i++, at++) {
+            v.fromBufferAttribute(pa, i).applyMatrix4(M); P[at * 3] = v.x; P[at * 3 + 1] = v.y; P[at * 3 + 2] = v.z;
+            v.fromBufferAttribute(na, i).applyMatrix3(nm).normalize(); N[at * 3] = v.x; N[at * 3 + 1] = v.y; N[at * 3 + 2] = v.z;
+          }
+          if (g !== list[gi].geometry) g.dispose();
+        });
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+        geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+        geo.computeBoundingBox(); geo.computeBoundingSphere();
+        geo._shared = true;
+        merged.push({ geo: geo, material: material });
+      });
+      BAKED.set(sig, merged);
+    }
+    const cast = parts[0].castShadow, recv = parts[0].receiveShadow;
+    parts.forEach(function (o) { model.remove(o); });
+    merged.forEach(function (e) {
+      const mesh = new THREE.Mesh(e.geo, e.material);
+      mesh.castShadow = cast; mesh.receiveShadow = recv;
+      model.add(mesh);
+    });
+    model.userData.bakedParts = parts.length;
+    return parts.length;
+  }
+  GA.bake = bake;
+
   CBZ.gunKit = function (ctx) {
     return {
+      // stamps the anchors (the builder's last call), then bakes a no-hand /
+      // display model's static parts (see THE BAKE)
+      anchors: function (model, spec) {
+        const A = GA.stamp(ctx.THREE, model, spec);
+        if (ctx.noHand || ctx.display) bake(ctx.THREE, model, ctx.mat && ctx.mat.skin);
+        return A;
+      },
+      opticAnchors: function (group, o) { return GA.optic(ctx.THREE, group, o); },
       fin: function (name) { return finish(ctx, name); },
       prof: function (parent, key, outlines, width, material, o) { return prof(ctx, parent, key, outlines, width, material, o); },
       tube: function (parent, rF, rB, len, segs, material, x, y, z) { return tube(ctx, parent, rF, rB, len, segs, material, x, y, z); },
+      lathe: function (parent, key, pts, segs, material, x, y, z, o) { return lathe(ctx, parent, key, pts, segs, material, x, y, z, o); },
       hand: function (parent, h) { return hand(ctx, parent, h); },
       arc: arc,
       grip: gripOutline,
@@ -305,8 +592,10 @@
       [-0.024, 0], [0.024, 0], [0.024, 0.018], [0.008, 0.018], [0.006, 0.008],
       [-0.006, 0.008], [-0.008, 0.018], [-0.024, 0.018],
     ], 0.020, mat.black, { axis: "z", bevel: 0.002, y: 0.066, z: -0.022 });
-    box(g, 0.012, 0.020, 0.018, mat.black, 0, 0.076, -0.392);
-    box(g, 0.007, 0.007, 0.002, K.fin("whiteDot"), 0, 0.080, -0.382);
+    // front post: square rear face toward the eye, ramped nose, dot on the face
+    K.prof(g, "g17.front", [[0.384, 0.064], [0.402, 0.064], [0.398, 0.078], [0.386, 0.086], [0.382, 0.086]],
+      0.012, mat.black, { bevel: 0.001 });
+    box(g, 0.007, 0.007, 0.002, K.fin("whiteDot"), 0, 0.079, -0.381);
     // muzzle: the barrel crown sits flush in the slide nose
     const bore = cyl(g, 0.012, 0.004, mat.bore || mat.black, 0, 0.036, -0.421, Math.PI / 2);
     bore.userData.weaponBore = true;
@@ -352,6 +641,22 @@
       charge: new THREE.Vector3(0, 0.034, -0.045),     // rear slide serrations
       style: "mag",
     };
+    // THE ANCHORS (contract up top). Grip top centre (-0.034 z, -0.038 y) run
+    // 9 cm-model down the raked axis = mid-palm; the mag rides the same axis
+    // in the grip, its well at the grip's foot.
+    const down = (t) => [0, -0.038 - Math.cos(R) * t, -0.034 + Math.sin(R) * t];
+    K.anchors(g, {
+      k: 2.25,
+      grip: { pos: down(0.090), rake: R },
+      trigger: [0, -0.066, -0.128],
+      support: { pos: [-0.034, down(0.090)[1], down(0.090)[2]], kind: "cup", len: 0 },
+      mag: { pos: down(0.130), well: down(0.222), rake: R },
+      stock: null,
+      charge: [0, 0.034, -0.045],
+      // U-notch (ears' top line, between the ears) -> front post top
+      sight: { rear: [0, 0.083, -0.022], front: [0, 0.086, -0.384], eyeRelief: 0.42, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 })();

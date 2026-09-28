@@ -30,6 +30,10 @@
     K.prof(g, "870.recv", [[-0.050, -0.030], [0.345, -0.030], [0.345, 0.118], [0.320, 0.124], [0.040, 0.124], [-0.020, 0.108], [-0.050, 0.080]],
       0.066, steel, { bevel: 0.005 });
     box(g, 0.004, 0.050, 0.150, mat.black, 0.032, 0.070, -0.180);         // ejection port
+    // the matted sighting groove down the receiver's top: the rear of the
+    // bead gun's sight line (the eye lays the bead in its rear end)
+    K.prof(g, "870.groove", [[0.030, 0.1215], [0.322, 0.1215], [0.322, 0.1245], [0.030, 0.1245]],
+      0.010, mat.black, { bevel: 0 });
     // trigger plate + guard with its hole, trigger blade
     K.prof(g, "870.guard", [[-0.030, -0.020], [0.150, -0.020], [0.150, -0.040], [0.134, -0.100], [0.020, -0.100], [-0.010, -0.048]],
       0.040, parker, { bevel: 0.003, holes: [[[0.126, -0.040], [0.120, -0.088], [0.034, -0.088], [0.018, -0.046]]] });
@@ -40,12 +44,16 @@
     K.tube(g, 0.022, 0.022, 0.560, 14, steel, 0, TUBE, -0.625);
     K.tube(g, 0.024, 0.026, 0.040, 14, parker, 0, TUBE, -0.925);          // mag cap
     box(g, 0.022, 0.050, 0.030, parker, 0, 0.062, -0.890);                // barrel lug
-    cyl(g, 0.008, 0.012, mat.brass, 0, BORE + 0.026, -1.080);             // brass bead
+    // brass bead on a short stem at the muzzle, its crown level with the
+    // receiver's top groove (a bead gun's whole sight picture)
+    K.lathe(g, "870.bead", [[0.0045, 0], [0.0045, 0.010], [0.0068, 0.0135], [0.0068, 0.0165], [0.0040, 0.0205], [0, 0.0220]],
+      10, mat.brass, 0, BORE + 0.012, -1.080, { axis: "y" });
     const bore = cyl(g, 0.017, 0.006, mat.bore || mat.black, 0, BORE, -1.104, Math.PI / 2);
     bore.userData.weaponBore = true;
 
     // the PUMP: grooved walnut fore-end + action bars, racked as one group
     const pump = new THREE.Group();
+    pump.name = "870:pump";
     pump.position.set(0, 0, -0.660);
     g.add(pump);
     K.prof(pump, "870.pump", [[-0.135, 0.064], [0.135, 0.064], [0.142, 0.040], [0.142, 0.000], [0.128, -0.014],
@@ -86,6 +94,29 @@
       charge: new THREE.Vector3(0, -0.040, -0.660),    // racking IS the pump
       style: "shell",
     };
+    /* THE ANCHORS (contract: sidearm.js). 1.576 model units over the real
+       978 mm: k 1.61. The pump points are its REST position in model space;
+       `node` names the pump group they ride with when it racks. The wrist is
+       a straight stock's (52 deg), but the fist on it closes canted (the
+       fingers run diagonally, K.hand's heading), so the grip frame carries
+       the hand's own axis, 26 deg back from vertical. */
+    const PZ = pump.position.z;
+    const MAG = [0, TUBE, -0.625], WELL = [0, -0.032, -0.230];
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(WELL[0] - MAG[0], WELL[1] - MAG[1], WELL[2] - MAG[2]).normalize());   // +Y: body -> well
+    K.anchors(g, {
+      k: 1.61,
+      grip: { pos: [0, -0.005, 0.090], rake: 26 * Math.PI / 180 },
+      trigger: [0, -0.060, -0.084],
+      support: { pos: [0, -0.016, PZ], kind: "pump", len: 0.284, node: "870:pump" },
+      // shells go up through the loading port (receiver belly, ahead of the
+      // guard) and forward into the tube under the barrel
+      mag: { pos: MAG, well: WELL, quat: q },
+      stock: [0, -0.041, 0.472],
+      charge: { pos: [0, -0.016, PZ], node: "870:pump" },
+      sight: { rear: [0, 0.1245, -0.034], front: [0, 0.124, -1.080], eyeRelief: 0.08, type: "iron" },
+      optic: { type: "iron", mag: 1 },
+    });
     return g;
   };
 })();
