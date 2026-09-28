@@ -68,17 +68,17 @@ function torsoPen(THREE, a, b) {
 }
 
 /* ---- one verb, frame by frame ---- */
-function runVerb(v, spec) {
+function runVerb(v, spec, bodies) {
   const { CBZ, THREE } = v;
   const V = CBZ.verbs;
   v.clearActors();
   v.world(spec.world || {});
-  const a = v.actor(Object.assign({ x: 0, z: 0, yaw: 0, bot: true, name: "A" }, spec.a || {}));
-  const t = v.actor(Object.assign({ x: 0, z: 0.9, yaw: Math.PI, bot: true, name: "T", build: "f" }, spec.t || {}));
+  const a = v.actor(Object.assign({ x: 0, z: 0, yaw: 0, bot: true, name: "A", physique: bodies ? bodies[0] : "average" }, spec.a || {}));
+  const t = v.actor(Object.assign({ x: 0, z: 0.9, yaw: Math.PI, bot: true, name: "T", build: (bodies && bodies[2]) || "f", physique: bodies ? bodies[1] : "average" }, spec.t || {}));
   for (let i = 0; i < 6; i++) v.frame(DT);                 // settle both rigs into their idle
   if (spec.pre) spec.pre(v, a, t);
   const S = V[spec.verb](a, t, spec.opts || {});
-  const row = { name: spec.name, verb: spec.verb, phases: [], okOrder: true, ended: false, onFrames: 0,
+  const row = { name: spec.name + (bodies && (bodies[0] !== "average" || bodies[1] !== "average") ? " " + bodies[0].slice(0, 3) + "/" + bodies[1].slice(0, 3) + (bodies[2] ? bodies[2] : "") : ""), verb: spec.verb, phases: [], okOrder: true, ended: false, onFrames: 0,
     maxA: 0, maxT: 0, pen: -1, outcome: "", ok: true, notes: [] };
   if (!S) { row.ok = false; row.notes.push("start() returned null"); return row; }
   const hp = new THREE.Vector3(), cp = new THREE.Vector3();
@@ -250,7 +250,12 @@ const results = [];
 const vS = vmFor("survival");
 const ctxRows = contextChecks(vS);
 for (const c of ctxRows) if (c.want !== c.got) { fails++; console.log(`FAIL context ${c.want}: got ${c.got}`); }
-for (const s of specs) { const r = runVerb(vS, s); r.mode = "surv"; results.push(r); }
+/* EVERY BODY TYPE (character.js PHYSIQUE): the contact points are read off
+   each body's own shape, so the verbs run on every physique, same-type pairs
+   and the two broad types against each other (the widest chest meets the
+   deepest belly). */
+const PAIRS = [["average", "average"], ["slim", "slim"], ["heavy", "heavy"], ["muscular", "muscular"], ["heavy", "muscular"], ["muscular", "heavy"], ["slim", "heavy"], ["heavy", "heavy", "m"], ["muscular", "heavy", "m"]];
+for (const bodies of PAIRS) for (const s of specs) { const r = runVerb(vS, s, bodies); r.mode = "surv"; results.push(r); }
 // ---- the survival PLAYER's keys (systems/grapple.js), through the player adapter
 function playerRun(v, name, act, check) {
   const { CBZ } = v;
@@ -384,8 +389,8 @@ function prisonRow(name) { return { name, verb: name, mode: "esc", phases: [], o
   results.push(row);
   CBZ.guards = []; CBZ.npcs = [];
 }
-for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name === "tackle" || s.name === "carry")) {
-  const r = runVerb(vE, s); r.mode = "esc"; results.push(r);
+for (const bodies of PAIRS) for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name === "tackle" || s.name === "carry")) {
+  const r = runVerb(vE, s, bodies); r.mode = "esc"; results.push(r);
 }
 
 // ---- THE STRUGGLE (systems/arrest.js's contest): timed wrenches break a weak
@@ -448,11 +453,13 @@ for (const s of specs.filter((s) => /^(shove|throw)@/.test(s.name) || s.name ===
 }
 
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad("verb", 20) + pad("mode", 6) + pad("phases", 44) + pad("on", 5) + pad("handA", 7) + pad("handT", 7) + pad("pen cm", 8) + pad("outcome", 10) + "ok");
+const QUIET = !VERBOSE && !process.argv.includes("--all");   // other physiques print only when they fail
+console.log(pad("verb", 28) + pad("mode", 6) + pad("phases", 44) + pad("on", 5) + pad("handA", 7) + pad("handT", 7) + pad("pen cm", 8) + pad("outcome", 10) + "ok");
 for (const r of results) {
   if (!r.ok) fails++;
+  if (QUIET && r.ok && / [a-z]{3}\/[a-z]{3}m?$/.test(r.name)) continue;
   const ph = r.phases.map((p) => (p.indexOf(" ") >= 0 ? p : p.slice(0, 4))).join(">");
-  console.log(pad(r.name, 20) + pad(r.mode, 6) + pad(ph, 44) + pad(r.onFrames, 5) + pad(r.maxA.toFixed(3), 7) + pad(r.maxT.toFixed(3), 7) +
+  console.log(pad(r.name, 28) + pad(r.mode, 6) + pad(ph, 44) + pad(r.onFrames, 5) + pad(r.maxA.toFixed(3), 7) + pad(r.maxT.toFixed(3), 7) +
     pad(r.pen > 0 ? (r.pen * 100).toFixed(1) : "-", 8) + pad(r.outcome || "-", 10) + (r.ok ? "ok" : "FAIL  " + r.notes.join("; ")));
 }
 console.log("context: " + ctxRows.map((c) => `${c.want}->${c.got}`).join("  "));
