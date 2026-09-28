@@ -1309,7 +1309,7 @@
       // solves the eye and hands back plain numbers, and this function — still
       // the one and only camera transform writer — applies them. It cannot
       // race the chase below because it RETURNS instead of it, and it cannot
-      // race fpsmode/scopeview because those bow out while player.driving
+      // race fpsmode/sights because those bow out while player.driving
       // (fpsmode's own guard, three branches up). A fitted optic still wins
       // the lens: view.js resolves fpsScopeFov before it hands the FOV over.
       if (CBZ.carFpPose) {
@@ -1487,7 +1487,7 @@
         // zoom holds rock-steady through firing. (Hip 70 / drop 14 mirror fpsmode.)
         // A LIVE SCOPE outranks the hip/ADS pair for the same reason: while the
         // factory sniper's real scope (lockon.js, fpsScopeFov) or a fitted
-        // gunsmith optic (scopeview.js, cityScopeFov) is up, easing toward 70/56
+        // gunsmith optic (sights.js) is up, easing toward 70/56
         // here while fpsmode eased toward the scope's lens was the EXACT same
         // tug-of-war — the zoom never landed, "holding the scope but just looking
         // down the sights". Same precedence as fpsmode's block: lockon returns
@@ -2162,7 +2162,7 @@
     // you're holding aim on foot: the factory sniper's real scope (lockon.js,
     // fpsScopeFov — e.g. still engaged after a [V] toggle back to third person)
     // outranks nothing but itself, because it returns null whenever a fitted
-    // gunsmith optic (city/gunmods.js + city/scopeview.js, cityScopeFov) owns
+    // gunsmith optic (city/gunmods.js + systems/sights.js) owns
     // the weapon — the fitted optic wins its magnification, exactly one is
     // ever non-null (same precedence as fpsmode.js's FP FOV block). This tail
     // honoring only cityScopeFov was the third-person half of the fake-scope

@@ -1588,63 +1588,57 @@
   }
 
   // ========================================================================
-  //   WATCHTOWER — legs, a deck you can stand on, a waist-high cabin wall,
-  //   a roof, and a ship ladder up the side that faces the base.
-  //   It used to be a closed 3.2 m box on 6 m legs with a "ladder hint" in
-  //   the comment and none in the world: no ladder, no deck record — a guard
-  //   post nobody could ever post a guard in.
+  //   WATCHTOWER — four legs, a railed deck at 6.35 m under a roof, and a
+  //   caged ladder up the face toward the base (world/ladderkit.js draws it,
+  //   systems/climb.js climbs it; a soldier can go up it and come down it).
+  //   WHAT IT WAS: a "ladder hint" with no ladder, a SOLID box where the cabin
+  //   should be (the "open sides" were a 3.2 x 1.4 x 3.2 block) and a 3.4 m
+  //   solid column from the ground to the deck, so the patrol spot at a tower
+  //   corner stood inside it. Now the legs are the columns, the ground under
+  //   the tower is ground, the deck is a platform with a waist-high parapet
+  //   you cannot walk off, and the roof is high enough to stand under.
+  //   `inX`: the base's centre x — the ladder goes on the face toward it.
   // ========================================================================
-  function watchtower(root, cx, cz, face) {
-    const fz = face < 0 ? -1 : 1;              // the ladder side (toward the yard)
-    const DECKY = 6.35, H = 1.7, LX0 = 0.2, LX1 = 1.0, RUN = 3.8;
+  function watchtower(root, cx, cz, inX) {
+    const DECK = 6.35, PAR = 1.0, ROOF = 8.6, HW = 1.7;
+    const s = (inX == null ? CEN_X : inX) >= cx ? 1 : -1;       // the ladder face, +x or -x
     const g = new THREE.Group(); g.position.set(cx, 0, cz); root.add(g);
     [-1, 1].forEach(function (sx) {
-      [-1, 1].forEach(function (sz) { box(g, sx * 1.4, 3.0, sz * 1.4, 0.25, 6.0, 0.25, M.oliveD); });
-    });
-    box(g, 0, 6.2, 0, 3.4, 0.3, 3.4, M.olive);           // deck
-    // cabin: four posts, a waist wall on three sides and both sides of the
-    // ladder gap, roof on the posts
-    [-1, 1].forEach(function (sx) {
-      [-1, 1].forEach(function (sz) { box(g, sx * 1.55, DECKY + 1.05, sz * 1.55, 0.14, 2.1, 0.14, M.oliveD); });
-    });
-    box(g, 0, DECKY + 0.5, -fz * 1.6, 3.2, 1.0, 0.12, M.olive);
-    box(g, -1.6, DECKY + 0.5, 0, 0.12, 1.0, 3.2, M.olive);
-    box(g, 1.6, DECKY + 0.5, 0, 0.12, 1.0, 3.2, M.olive);
-    box(g, (-1.6 + LX0 - 0.1) / 2, DECKY + 0.5, fz * 1.6, LX0 - 0.1 + 1.6, 1.0, 0.12, M.olive);
-    box(g, (LX1 + 0.1 + 1.6) / 2, DECKY + 0.5, fz * 1.6, 1.6 - LX1 - 0.1, 1.0, 0.12, M.olive);
-    box(g, 0, DECKY + 2.2, 0, 3.6, 0.3, 3.6, M.oliveD);  // roof: 2.05 m clear over the deck (it was 1.5)
-    // searchlight
-    cyl(g, 0, 7.1, fz * 1.4, 0.3, 0.35, 0.5, M.warn, 8).rotation.x = Math.PI / 2;
-    // the ladder: stringers + treads drawn, one CBZ.stairs flight to walk
-    const zTop = fz * 1.7, zFoot = fz * (1.7 + RUN);
-    const n = Math.round(DECKY / 0.3);
-    for (const sx of [LX0, LX1]) {
-      const len = Math.hypot(RUN, DECKY);
-      const st = box(g, sx, DECKY / 2, (zTop + zFoot) / 2, 0.07, 0.16, len, M.steelD);
-      st.rotation.x = fz * Math.atan2(DECKY, RUN);
-    }
-    for (let k = 1; k < n; k++) {
-      const t = k / n;
-      box(g, (LX0 + LX1) / 2, t * DECKY, zFoot + (zTop - zFoot) * t, LX1 - LX0 - 0.06, 0.04, 0.22, M.steel);
-    }
-    if (CBZ.stairs) {
-      CBZ.stairs.flight({
-        bottom: { x: cx + (LX0 + LX1) / 2, y: 0, z: cz + zFoot },
-        top: { x: cx + (LX0 + LX1) / 2, y: DECKY, z: cz + zTop },
-        width: LX1 - LX0, overlap: 0.3, kind: "ladder", owner: g,
+      [-1, 1].forEach(function (sz) {
+        box(g, sx * 1.4, (DECK - 0.3) / 2, sz * 1.4, 0.25, DECK - 0.3, 0.25, M.oliveD);
+        col(cx + sx * 1.4, cz + sz * 1.4, 0.3, 0.3, 0, DECK - 0.3);
+        // corner posts, parapet to roof
+        box(g, sx * 1.55, (DECK + PAR + ROOF - 0.15) / 2, sz * 1.55, 0.12, ROOF - 0.15 - DECK - PAR, 0.12, M.oliveD);
       });
+    });
+    // a brace ring half way up the legs
+    box(g, 0, 3.0, -1.4, 2.8, 0.14, 0.14, M.oliveD); box(g, 0, 3.0, 1.4, 2.8, 0.14, 0.14, M.oliveD);
+    box(g, -1.4, 3.0, 0, 0.14, 0.14, 2.8, M.oliveD); box(g, 1.4, 3.0, 0, 0.14, 0.14, 2.8, M.oliveD);
+    box(g, 0, DECK - 0.15, 0, HW * 2, 0.3, HW * 2, M.olive);                 // deck slab
+    // the parapet: three full walls, and the ladder face split round the gap
+    const py = DECK + PAR / 2;
+    box(g, 0, py, -HW + 0.05, HW * 2, PAR, 0.1, M.olive, { cast: false });
+    box(g, 0, py, HW - 0.05, HW * 2, PAR, 0.1, M.olive, { cast: false });
+    box(g, -s * (HW - 0.05), py, 0, 0.1, PAR, HW * 2, M.olive, { cast: false });
+    const seg = HW - 0.42;
+    box(g, s * (HW - 0.05), py, -(0.42 + seg / 2), 0.1, PAR, seg, M.olive, { cast: false });
+    box(g, s * (HW - 0.05), py, 0.42 + seg / 2, 0.1, PAR, seg, M.olive, { cast: false });
+    box(g, 0, ROOF, 0, 3.6, 0.3, 3.6, M.oliveD);                            // roof
+    // searchlight on the outer parapet, looking out over the wire
+    cyl(g, -s * 1.45, DECK + PAR + 0.25, 0, 0.3, 0.35, 0.5, M.warn, 8).rotation.z = Math.PI / 2;
+    if (CBZ.ladderKit) {
+      CBZ.ladderKit.deck({
+        minX: cx - HW, maxX: cx + HW, minZ: cz - HW, maxZ: cz + HW, top: DECK, rail: PAR,
+        gaps: [{ x: cx + s * HW, z: cz, w: 0.42 }],
+      });
+      CBZ.ladderKit.build(root, {
+        x: cx + s * (HW + 0.05), z: cz, nx: s, nz: 0, y0: 0, y1: DECK,
+        name: "watchtower", tag: "military:watchtower", mode: "city",
+      }, cm(M.steelD));
+      return { x: cx, z: cz, y: DECK };
     }
-    (CBZ.platforms = CBZ.platforms || []).push({ minX: cx - 1.7, maxX: cx + 1.7, minZ: cz - 1.7, maxZ: cz + 1.7, top: DECKY });
-    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    col(cx, cz, 3.4, 3.4, 0, 6.0);                        // the legs + bracing (under the deck)
-    // the cabin wall is solid (waist-high, on the deck), open at the ladder
-    col(cx, cz - fz * 1.6, 3.3, 0.14, DECKY, DECKY + 1.0);
-    col(cx - 1.6, cz, 0.14, 3.3, DECKY, DECKY + 1.0);
-    col(cx + 1.6, cz, 0.14, 3.3, DECKY, DECKY + 1.0);
-    col(cx + (-1.65 + LX0 - 0.1) / 2, cz + fz * 1.6, LX0 - 0.1 + 1.65, 0.14, DECKY, DECKY + 1.0);
-    col(cx + (LX1 + 0.1 + 1.65) / 2, cz + fz * 1.6, 1.65 - LX1 - 0.1, 0.14, DECKY, DECKY + 1.0);
-    // the roof, so nobody jumps up through it
-    col(cx, cz, 3.6, 3.6, DECKY + 2.05, DECKY + 2.35);
+    col(cx, cz, 3.4, 3.4, 0, DECK);            // no ladder kit: the old solid footprint
+    return null;
   }
 
   // ========================================================================
@@ -1889,10 +1883,14 @@
     } catch (e) { armoryWired = "note"; }
 
     // ---- WATCHTOWERS at the four corners (the base is WATCHED) ----
-    watchtower(root, MINX + 18, MINZ + 18, 1);
-    watchtower(root, MAXX - 18, MINZ + 18, 1);
-    watchtower(root, MINX + 18, MAXZ - 18, -1);
-    watchtower(root, MAXX - 18, MAXZ - 18, -1);
+    // (published on CBZ._militaryBase.towers: garrison.js stands the corner
+    // sentries on these decks, and they climb the ladders to get there)
+    const towers = [
+      watchtower(root, MINX + 18, MINZ + 18, CEN_X),
+      watchtower(root, MAXX - 18, MINZ + 18, CEN_X),
+      watchtower(root, MINX + 18, MAXZ - 18, CEN_X),
+      watchtower(root, MAXX - 18, MAXZ - 18, CEN_X),
+    ].filter(Boolean);
 
     // ---- SANDBAG BUNKERS scattered at posts ----
     sandbagBunker(root, CEN_X - 30, MINZ + 40);
@@ -2235,6 +2233,7 @@
       parade: { x: CEN_X - 90, z: CEN_Z + 40 },
       barracks: { x: MAXX - 60, z: MINZ + 60 },
       runway: { x: CEN_X, z: MAXZ - 70, len: 360, w: 26 },
+      towers: towers,
     };
   }, 22);
 })();

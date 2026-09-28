@@ -16,10 +16,8 @@
    records are unchanged in number and position, so capture.js fires from
    exactly where it did.
 
-   The deck is a CBZ.platforms record (standable: physics.js reads platforms
-   in escape mode now). The ladder is NOT a ramp — 12 m over 0.8 m is a wall
-   — it is the Climb verb (a vent pair) plus a CBZ.stairs link of kind
-   "ladder" so the AI knows the tower connects to the ground.
+   The ladder is climbed (systems/climb.js) and every wall tower has an
+   officer on post in the cabin (entities/towerwatch.js) who comes down it.
 ============================================================ */
 (function () {
   "use strict";

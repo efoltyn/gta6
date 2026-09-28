@@ -465,7 +465,13 @@
         O.leg = onLeg(n);
         O.accel = O.speed > 3 ? 5.2 : 0;           // a man breaking into a run gets going harder
         if (O.lod === 0 && O.speed > 0) { O.nbrN = jailNbrs(gp, _nbrs); O.nbrs = _nbrs; }
-        M.step(m, gp, n.group.rotation.y, n.target.x, n.target.z, O, dt);
+        // another level (systems/climb.js nav link): walk to the ladder first
+        let gx = n.target.x, gz = n.target.z;
+        if (CBZ.climb && CBZ.climb.list.length) {
+          const D = CBZ.climb.detour(n, gx, n.target.y, gz);
+          if (D && !D.climbing) { gx = D.x; gz = D.z; }
+        }
+        if (!n._climb) M.step(m, gp, n.group.rotation.y, gx, gz, O, dt);
         if (m.arrived && !CBZ.aiThink) { n.pause = 0.8 + econ.rng() * 2.4; pickTarget(n); }
         /* A WANDERER THAT IS STILL STUCK after the motor's own detours (three
            committed side-steps) gives the spot up and picks another. Never a
@@ -803,6 +809,10 @@
     frame++;
     const cam = CBZ.camera.position, cx = cam.x, cz = cam.z;
     const npcs = CBZ.npcs;
-    for (let i = 0; i < npcs.length; i++) { if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(npcs[i])) continue; updateNpc(npcs[i], dt, cx, cz); }   // a body a verb holds is the verb's
+    for (let i = 0; i < npcs.length; i++) {
+      if (CBZ.verbs && CBZ.verbs.held && CBZ.verbs.held(npcs[i])) continue;   // a body a verb holds is the verb's
+      if (CBZ.climb && CBZ.climb.owns(npcs[i])) continue;                     // a body on a ladder is the ladder's
+      updateNpc(npcs[i], dt, cx, cz);
+    }
   });
 })();

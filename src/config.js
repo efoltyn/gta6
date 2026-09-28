@@ -1649,18 +1649,7 @@
   // the fifth (LOCKON_SQUARE_SPIN) defaults OFF because the owner asked to kill
   // that animation. Flip any one to revert its feel in a single line.
   //
-  // FPS_ADS_SIGHTS (systems/fpsmode.js): holding aim in FIRST person eases the
-  // weapon viewmodel from its corner carry to a CENTERED, down-the-sights pose,
-  // paired with the existing ADS FOV drop. Bullets still fly the camera ray
-  // (unchanged) and the depth-clear viewmodel can't wall-clip; forward travel is
-  // capped (Z held at the carry depth) so the gun never crosses the near plane.
-  // Skipped while a real optic (sniper scope / fitted gunsmith optic) owns the
-  // view, AND for explosive launchers (w.explosive — the RPG): the fat
-  // bore-axis tube centered on the eye filled the zoomed frame with its own
-  // dark silhouette (owner-filmed), so launchers hold the corner carry and
-  // keep only the ADS FOV punch-in.
-  // Flip false → every gun stays corner-pinned while aiming (prior look).
-  if (CBZ.CONFIG.FPS_ADS_SIGHTS == null) CBZ.CONFIG.FPS_ADS_SIGHTS = true;
+  // (FPS_ADS_SIGHTS is gone: aiming down the sights is systems/sights.js, always.)
   // CAM_ADS_PITCH_WIDE (systems/camera.js): while AIMING on TOUCH, open the
   // third-person touch pitch clamp from [-0.85,0.75] toward desktop's [-1.0,0.9]
   // so an iPad can actually put the reticle on high/low targets. Touch-only (the

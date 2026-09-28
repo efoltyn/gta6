@@ -1313,16 +1313,34 @@
       ], cmat(0x6e5436), { cast: true });
       solid(ox, oz, 5, 1.2, hf);
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("MINE"); if (s) { s.position.set(ox, hf + 1.2, oz); s.scale.set(6, 1.6, 1); root.add(s); } }
-      // derelict water tower: tank on legs (merged)
+      // derelict water tower: tank on legs (merged), seated on the grade, a
+      // railed catwalk at the tank's foot and a caged ladder up to it
+      // (world/ladderkit.js; systems/climb.js climbs it). It was a solid 4 m
+      // block from the ground to the roof with no way up.
       const tx = ox + 26, tz = oz - 12;
+      const tgy = CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(tx, tz) : 0;
       mergeAdd([
-        (function () { const g = new THREE.CylinderGeometry(2.6, 2.6, 3.2, 10); g.translate(tx, 8.6, tz); return g; })(),
-        (function () { const g = new THREE.ConeGeometry(2.8, 1.4, 10); g.translate(tx, 10.9, tz); return g; })(),
+        (function () { const g = new THREE.CylinderGeometry(2.6, 2.6, 3.2, 10); g.translate(tx, tgy + 8.6, tz); return g; })(),
+        (function () { const g = new THREE.ConeGeometry(2.8, 1.4, 10); g.translate(tx, tgy + 10.9, tz); return g; })(),
       ], cmat(0x8c7d68), { cast: true });
       const legIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.3, 7, 0.3), cmat(0x6e5436), 4);
-      [[-1.7, -1.7], [1.7, -1.7], [-1.7, 1.7], [1.7, 1.7]].forEach((c, i) => { dummy.position.set(tx + c[0], 3.5, tz + c[1]); dummy.scale.set(1, 1, 1); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); legIM.setMatrixAt(i, dummy.matrix); });
+      [[-1.7, -1.7], [1.7, -1.7], [-1.7, 1.7], [1.7, 1.7]].forEach((c, i) => { dummy.position.set(tx + c[0], tgy + 3.5, tz + c[1]); dummy.scale.set(1, 1, 1); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); legIM.setMatrixAt(i, dummy.matrix); });
       legIM.instanceMatrix.needsUpdate = true; legIM.matrixAutoUpdate = false; legIM.castShadow = true; root.add(legIM);
-      solid(tx, tz, 4, 4, 11);
+      for (const c of [[-1.7, -1.7], [1.7, -1.7], [-1.7, 1.7], [1.7, 1.7]]) solid(tx + c[0], tz + c[1], 0.35, 0.35, 7);
+      CBZ.colliders.push({ minX: tx - 2.6, maxX: tx + 2.6, minZ: tz - 2.6, maxZ: tz + 2.6, y0: tgy + 7, y1: tgy + 11.6 });
+      if (CBZ.ladderKit) {
+        const rust = cmat(0x6e5436);
+        CBZ.ladderKit.deck({
+          minX: tx - 3.3, maxX: tx + 3.3, minZ: tz - 3.3, maxZ: tz + 3.3, top: tgy + 7,
+          gaps: [{ x: tx, z: tz + 3.3, w: 0.42 }],
+          floor: true, hole: { minX: tx - 2.6, maxX: tx + 2.6, minZ: tz - 2.6, maxZ: tz + 2.6 },
+          root: root, mat: rust,
+        });
+        CBZ.ladderKit.build(root, {
+          x: tx, z: tz + 3.35, nx: 0, nz: 1, y0: tgy, y1: tgy + 7,
+          name: "water tower", tag: "desert:watertower", mode: "city",
+        }, rust);
+      }
       } // DESERT_PROP_SCATTER
     }
 

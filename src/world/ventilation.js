@@ -77,7 +77,7 @@
   if (!CBZ || !CBZ.scene) return;
   const scene = CBZ.prisonRoot || CBZ.scene;
 
-  CBZ.vents = CBZ.vents || [];   // world/prisonkit.js's tower ladders are vents too, registered before this parses
+  CBZ.vents = CBZ.vents || [];
   const solved = [];        // every grate this file placed, for the audit
   const K = CBZ.prisonKit || null;
 

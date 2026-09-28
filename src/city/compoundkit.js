@@ -17,7 +17,7 @@
         draw calls, not 600.
      2. Kinds (city only, def.kit = true: their front, local -z, faces out of
         the edge `rot` names): cwall, bwall, fence, sandbags, gate (2 edges,
-        slides), tower (5 m deck + ship ladder + searchlight), floodlight,
+        slides), tower (5 m deck + rung ladder + searchlight), floodlight,
         camera (mounts on a wall/fence/gate/tower edge), garage (2x3, roll-up
         door, +2 storage bays), helipad (3x3), stash (cash cage: real
         dollars, visible straps), bunk (2 crew), bench.
@@ -618,7 +618,17 @@
 
   // ---------- GUARD TOWER ----------------------------------------------------
   const DECK = 5.0, TOWER_TOP = 7.55;
-  const ST_X0 = 0.3, ST_X1 = 1.1, ST_Z0 = 1.5, ST_Z1 = 4.7;   // ship ladder: local x band, z from deck edge to foot
+  /* THE WAY UP is a vertical rung ladder off the back edge of the deck,
+     through the gap the parapet already leaves there (local x 0.2..1.2): drawn
+     by world/ladderkit.js and climbed by systems/climb.js, so the player and a
+     crew guard both go up it and come down it hand over hand. It replaces a
+     "ship ladder" that was a walkable 57-degree ramp record running 3.2 m off
+     the piece's own footprint into the next build cell, which nobody but the
+     player could use: the crew guard was teleported onto the deck and back. */
+  const TL_X = 0.7, TL_Z = 1.62;          // the rung line, local; the climber hangs on +z (inside the compound)
+  function towerLadderSpec() {
+    return { x: TL_X, z: TL_Z, nx: 0, nz: 1, y0: 0, y1: DECK };
+  }
   SHAPES.tower = {
     root: [function () {   // the cabin parapet (concrete): bullets land here
       return worldUV(merge([
@@ -652,17 +662,8 @@
           }
           P.push(f[0] !== 0 ? box(0.08, 0.1, 2.5, f[0] * L, 2.4, 0) : box(2.5, 0.1, 0.08, 0, 2.4, f[1] * L));
         }
-        // ship ladder: stringers, treads, handrails
-        const rise = DECK, run = ST_Z1 - ST_Z0, n = 18;
-        for (const sx of [ST_X0, ST_X1]) {
-          P.push(bar(0.07, [sx, 0.02, ST_Z1], [sx, DECK, ST_Z0]));
-          P.push(rod(0.02, [sx, 0.95, ST_Z1], [sx, DECK + 0.95, ST_Z0], 6));
-          P.push(rod(0.02, [sx, 0, ST_Z1 - 0.02], [sx, 0.95, ST_Z1 - 0.02], 6));
-        }
-        for (let k = 1; k < n; k++) {
-          const t = k / n;
-          P.push(box(ST_X1 - ST_X0 - 0.06, 0.03, 0.2, (ST_X0 + ST_X1) / 2, t * rise, ST_Z1 - t * run));
-        }
+        // the ladder, off the back edge of the deck
+        if (CBZ.ladderKit) { const LP = CBZ.ladderKit.parts(towerLadderSpec()); for (let i = 0; i < LP.length; i++) P.push(LP[i]); }
         // top rail around the cabin window band
         P.push(box(3.1, 0.06, 0.06, 0, DECK + 1.12, -1.47));
         P.push(box(0.06, 0.06, 3.1, -1.47, DECK + 1.12, 0)); P.push(box(0.06, 0.06, 3.1, 1.47, DECK + 1.12, 0));
@@ -702,17 +703,31 @@
       const y = piece.pos.y;
       const deck = { minX: piece.pos.x - 1.55, maxX: piece.pos.x + 1.55, minZ: piece.pos.z - 1.55, maxZ: piece.pos.z + 1.55, top: y + DECK, pieceId: piece.id };
       CBZ.platforms.push(deck); piece.platforms.push(deck);
-      // the ship ladder: a CBZ.stairs flight, foot at ST_Z1, top at the deck
-      // edge (flat 0.3 m onto the deck and the ground; an AI link, so a guard
-      // can be sent up to the searchlight)
-      const foot = lpt(piece, (ST_X0 + ST_X1) / 2, ST_Z1), top = lpt(piece, (ST_X0 + ST_X1) / 2, ST_Z0);
-      const f = CBZ.stairs && CBZ.stairs.flight({
-        bottom: { x: foot.x, y: y, z: foot.z }, top: { x: top.x, y: y + DECK, z: top.z },
-        width: ST_X1 - ST_X0, overlap: 0.3, kind: "ladder", owner: "piece:" + piece.id, plats: piece.platforms,
-      });
-      if (f && f.plat) f.plat.pieceId = piece.id;
+      // the ladder: the climb record for the steel drawn off the same spec
+      towerLadderAdd(piece);
     },
+    onRemove: function (piece) { towerLadderDrop(piece); },
   });
+  // world-space climb records for the placed towers (the piece's frame: local
+  // x along the edge, local -z out of it — lpt())
+  const towerLadders = new Map();          // piece -> climb.js ladder
+  function towerLadderAdd(piece) {
+    towerLadderDrop(piece);
+    if (!CBZ.ladderKit) return;
+    const o = outDir(piece.rot), y = piece.pos.y;
+    const r = lpt(piece, TL_X, TL_Z), top = lpt(piece, TL_X, TL_Z - 0.6), bot = lpt(piece, TL_X, TL_Z + 0.8);
+    const L = CBZ.ladderKit.register({
+      x: r.x, z: r.z, nx: -o.x, nz: -o.z, y0: y, y1: y + DECK,
+      top: top, bottom: bot, name: "guard tower", tag: "compound:tower", mode: "city", meta: { piece: piece },
+    });
+    if (L) towerLadders.set(piece, L);
+  }
+  function towerLadderDrop(piece) {
+    const L = towerLadders.get(piece);
+    if (!L) return;
+    towerLadders.delete(piece);
+    if (CBZ.climb && CBZ.climb.remove) CBZ.climb.remove(L);
+  }
 
   // ---------- FLOODLIGHT POLE (hugs the edge `rot`, lights the yard) -------
   const FL_H = 6.3;
@@ -1490,6 +1505,7 @@
       animate(p, dt, 0.7, applyGarageVisual);
     });
     if (lightAcc >= 0.25) { lightAcc = 0; lightTick(); }
+    if (doDecide && towerLadders.size) towerLadders.forEach(function (L, p) { if (!p.alive) towerLadderDrop(p); });
     void P;
   }
   // THE NIGHT: three shared materials, so every lamp on the map follows one write

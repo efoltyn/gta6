@@ -1,14 +1,9 @@
 /* ============================================================
    systems/actorcollide.js — runs AFTER movement each frame: stops
    every standing actor (guards + inmates) from walking through walls
-   or crates, and pushes overlapping actors (including you) apart so
-   nobody phases through anybody. KO'd/dead bodies are skipped so you
-   can step over them.
-
-   Separation is an O(n) spatial-hash (CBZ.makeGrid) — the same grid the
-   survival bots use — so it scales to hundreds of inmates instead of the
-   old O(n²) double loop (~500k checks/frame at 1000 actors). It's not
-   full pathfinding, so an NPC may bump a wall its target is behind.
+   or crates, and hands the prison cast (and you) to the one body-contact
+   solver, systems/humancontact.js: solid bodies with mass and momentum,
+   KO'd and dead men stepped over or tripped on, never walked through.
 
    ---- VAULTING (2026-08-06) --------------------------------------------
    THIS IS ALSO WHERE THE PRISON CAST LEARNS TO GET OVER THINGS. The owner:
@@ -34,7 +29,6 @@
   "use strict";
   const CBZ = window.CBZ;
   const R = 0.5;
-  const CELL = 2.4;            // ~= the largest interaction diameter
 
   // A wanderer must not treat every stool as parkour. City pedestrians gate on
   // `spd >= max(1.7, base*1.42)`; prison base speeds run 1.4–2.8 and the hunt/
@@ -43,8 +37,11 @@
   const TRAV_SPEED = 2.6;
   const TRAV_PROBE_CD = 0.12;  // seconds between probes for one actor
 
-  // (two people with their hands on each other are not pushed apart: CBZ.verbs places them)
-  function standing(a) { return !a.dead && !(a.ko > 0) && !a.escaped && !(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(a)); }
+  // a man down or gone is not a standing collider (humancontact steps over the
+  // downed itself); two people with their hands on each other are sorted out
+  // inside humancontact (the held man is the verb's, his captor still collides)
+  function standing(a) { return !a.dead && !(a.ko > 0) && !a.escaped; }
+  function inVerb(a) { return !!(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(a)); }
   function posOf(a) { return a._p ? a.pos : a.group.position; }
   function radOf(a) { return a._p ? a.r : R; }
 
@@ -115,7 +112,6 @@
   }
 
   // reused every frame — no per-frame allocation
-  let grid = null;
   const list = [];
   const playerEntry = { _p: true, pos: null, r: 0 };
 
@@ -176,7 +172,6 @@
 
   CBZ.onUpdate(25, function (dt) {
     if (CBZ.game.mode !== "escape") return; // survival uses its own grid separation
-    if (!grid) grid = CBZ.makeGrid(CELL);
 
     const vaultOn = CBZ.modeHas ? CBZ.modeHas("traverse") : false;
     list.length = 0;
@@ -186,14 +181,14 @@
       // furniture-held: neither shoved nor clamped; keep the traversal sample
       // fresh so standing up is never read back as a sprint by the vault probe
       if (furnitureHeld(g)) { stampRest(g); continue; }
-      if (vaultOn && traverse(g, dt)) continue;   // the vault owns this body
+      if (vaultOn && !inVerb(g) && traverse(g, dt)) continue;   // the vault owns this body
       list.push(g);
     }
     for (let i = 0; i < CBZ.npcs.length; i++) {
       const n = CBZ.npcs[i];
       if (!standing(n) || n._crowd) continue;
       if (furnitureHeld(n)) { stampRest(n); continue; }
-      if (vaultOn && traverse(n, dt)) continue;
+      if (vaultOn && !inVerb(n) && traverse(n, dt)) continue;
       list.push(n);
     }
     for (let i = 0; i < list.length; i++) settleFeet(list[i], dt);
@@ -213,49 +208,16 @@
         }
       }
     }
-    if (!CBZ.player.dead && !(CBZ.verbs && CBZ.verbs.sessionOf && CBZ.verbs.sessionOf(CBZ.player))) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
+    if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
 
-    // Shared human-contact rules block ordinary movement. A prison knockdown
-    // requires an explicit combat action, never merely sprinting into someone.
-    if (CBZ.humanContact) {
-      CBZ.humanContact.resolve(list, dt, {
-        mode: "escape",
-        clamp: clampOut,
-      });
-      for (let i = 0; i < list.length; i++) if (!list[i]._p) stampRest(list[i]);
-      return;
-    }
-
-    grid.rebuild(list, posOf);
-
-    // push overlapping actors apart, querying only the 3×3 neighbourhood
-    for (let i = 0; i < list.length; i++) {
-      const A = list[i], ap = posOf(A), ar = radOf(A);
-      const gx = grid.cellIndex(ap.x), gz = grid.cellIndex(ap.z);
-      for (let cx = gx - 1; cx <= gx + 1; cx++) for (let cz = gz - 1; cz <= gz + 1; cz++) {
-        const a = grid.bucket(cx, cz); if (!a) continue;
-        for (let k = 0; k < a.length; k++) {
-          const B = a[k];
-          if (B === A) continue;
-          const bp = posOf(B);
-          const dx = bp.x - ap.x, dz = bp.z - ap.z;
-          const min = ar + radOf(B);
-          const d2 = dx * dx + dz * dz;
-          if (d2 < min * min && d2 > 1e-6) {
-            const d = Math.sqrt(d2), push = ((min - d) / d) * 0.5;
-            // never shove the player; only other actors yield
-            if (!A._p) { ap.x -= dx * push; ap.z -= dz * push; }
-            if (!B._p) { bp.x += dx * push; bp.z += dz * push; }
-          }
-        }
-      }
-    }
-
-    // then clamp everyone back out of walls (including the player)
-    for (let i = 0; i < list.length; i++) clampOut(list[i]);
+    // THE ONE CONTACT SOLVER (systems/humancontact.js): solid bodies with mass
+    // and momentum. A walk into a man is a shoulder, a sprint into his back
+    // puts him on the floor, a man on the floor is stepped over. The wall
+    // clamp runs inside it, after the bodies are pushed apart.
+    if (!CBZ.humanContact) { for (let i = 0; i < list.length; i++) clampOut(list[i]); return; }
+    CBZ.humanContact.resolve(list, dt, { mode: "escape", clamp: clampOut });
     // AFTER the clamp: this settled position is next frame's reference, so the
-    // difference the probe reads is the step the mover TRIED to take, not the
-    // one the wall allowed. See the note on stampRest.
+    // difference the vault probe reads is the step the mover TRIED to take.
     for (let i = 0; i < list.length; i++) if (!list[i]._p) stampRest(list[i]);
   });
 })();
