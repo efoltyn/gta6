@@ -1962,6 +1962,7 @@
       });
     }
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
+    if (CBZ.wristwatch) CBZ.wristwatch.fit(rig, c);   // entities/watch.js: the watch on the left wrist, by role
     return rig;
   }
 

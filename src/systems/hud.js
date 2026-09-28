@@ -35,7 +35,6 @@
     objText: document.getElementById("objText"),
     cigText: document.getElementById("cigText"),
     timer: document.getElementById("timer"),
-    keycard: document.getElementById("keycard"),
     detectLabel: document.querySelector("#detectWrap .lab span:first-child"),
     bar: document.getElementById("detectBar"),
     dstate: document.getElementById("detectState"),
@@ -43,7 +42,6 @@
     toast: document.getElementById("toast"),
     vignette: document.getElementById("vignette"),
     flash: document.getElementById("flash"),
-    invList: document.getElementById("invList"),
     interact: document.getElementById("interact"),
     interactName: document.getElementById("interactName"),
     interactNote: document.getElementById("interactNote"),
@@ -367,14 +365,11 @@
     return String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
   }
 
-  // redraw the small inventory strip from game.inventory (hidden in the
-  // prison; the hotbar is the inventory there)
-  function refreshInventory() {
-    const inv = CBZ.game.inventory;
-    const parts = Object.keys(inv).filter((k) => inv[k] > 0)
-      .map((k) => `${k}${inv[k] > 1 ? " x" + inv[k] : ""}`);
-    el.invList.textContent = parts.length ? parts.join(", ") : "";
-  }
+  // The text "Stash" strip is gone (2026-09-28): the hotbar is the whole
+  // inventory (systems/inventory.js). Callers still poke this after every
+  // trade, so it stays as a seam that draws nothing.
+  function refreshInventory() {}
+
 
   /* CBZ.prisonHudAudit() — the live numbers behind the bare prison.
      panelsVisible counts the always-on HUD panels that are actually painted

@@ -162,10 +162,6 @@
       silver: metal(0xc6cdd6, 0x2a2f38, 0.2, 110, 0xffffff),
       ice: metal(0xeaf6ff, 0x6a8aa8, 0.22, 160, 0xffffff),
       glint: metal(0xffffff, 0x9fb8d0, 0.3, 200, 0xffffff),
-      dial: new THREE.MeshPhongMaterial({ color: 0x14171d, specular: 0x444a55, shininess: 80 }),
-      blueDial: new THREE.MeshPhongMaterial({ color: 0x1c3a66, specular: 0x5a7aa8, shininess: 80 }),
-      bezelIn: new THREE.MeshPhongMaterial({ color: 0x0f1c38, specular: 0x333a48, shininess: 60 }),
-      lume: new THREE.MeshLambertMaterial({ color: 0xd8ffe6, emissive: 0x6fdf9a, emissiveIntensity: 0.35 }),
     };
     Object.keys(M).forEach((k) => { M[k]._shared = true; });
     return M;
@@ -195,48 +191,13 @@
   // the head sits on the pillow's front shoulder 35 degrees up, dial facing
   // out. Origin = pillow axis; the mount (buildMount) draws the pillow itself.
   const PR = 0.03;
+  // The watch in the case IS the watch you wear (entities/watch.js): the same
+  // case, bezel, dial and bracelet, wrapped round the pillow, dial tilted 35
+  // degrees up at the customer, hands at 10:10 like every shop window.
+  const DISPLAY_STYLE = { watch_steel: "steel", watch_diver: "diver", watch_gold: "gold", watch_iced: "iced" };
   function buildWatch(visualId, grp) {
-    const m = mats();
-    const band = visualId === "watch_iced" ? m.ice : m.silver;
-    // the bracelet: a flat band all the way round the pillow
-    const br = mesh(torG(PR + 0.004, 0.0035, 28), band, 0, 0, 0, 0, PI / 2, 0);
-    br.scale.z = 2.7; grp.add(br);
-    if (visualId === "watch_gold") { const c = mesh(torG(PR + 0.0055, 0.0022, 28), m.gold, 0, 0, 0, 0, PI / 2, 0); c.scale.z = 1.5; grp.add(c); }   // two-tone centre links
-    if (visualId === "watch_iced") for (let i = 0; i < 14; i++) {                                                  // stones set in the links
-      const a = PI * 0.15 + (i / 14) * PI * 1.3;
-      grp.add(mesh(octG(0.0022), m.glint, 0, Math.sin(a) * (PR + 0.0075), Math.cos(a) * (PR + 0.0075)));
-    }
-    // the head: +Y is the dial's outward normal
-    const ang = 35 * PI / 180, R = PR + 0.0075;
-    const head = new THREE.Group();
-    head.position.set(0, Math.sin(ang) * R, Math.cos(ang) * R);
-    head.rotation.x = PI / 2 - ang;
-    grp.add(head);
-    const caseMat = visualId === "watch_gold" ? m.gold : (visualId === "watch_iced" ? m.ice : m.silver);
-    const rCase = visualId === "watch_diver" ? 0.0215 : 0.0205;
-    head.add(mesh(cylG(rCase, rCase, 0.011, 24), caseMat, 0, 0.0055, 0));
-    for (const s of [-1, 1]) head.add(mesh(boxG(0.018, 0.006, 0.01), caseMat, s * (rCase + 0.001), 0.004, 0, 0, 0, 0));   // lugs
-    head.add(mesh(cylG(0.0025, 0.0025, 0.005, 10), caseMat, rCase + 0.0025, 0.006, 0, 0, 0, PI / 2));                   // crown
-    const dialMat = visualId === "watch_diver" ? m.blueDial : (visualId === "watch_iced" ? m.glint : m.dial);
-    const rDial = rCase - 0.0035;
-    head.add(mesh(cylG(rDial, rDial, 0.001, 24), dialMat, 0, 0.0112, 0));
-    if (visualId === "watch_diver" || visualId === "watch_gold" || visualId === "watch_iced") {
-      head.add(mesh(torG(rCase - 0.0015, 0.0022, 28), visualId === "watch_diver" ? m.bezelIn : caseMat, 0, 0.0112, 0, PI / 2));
-    }
-    if (visualId === "watch_iced") for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * PI * 2;
-      head.add(mesh(octG(0.0018), m.glint, Math.cos(a) * (rCase - 0.0015), 0.0128, Math.sin(a) * (rCase - 0.0015)));
-    }
-    const handMat = visualId === "watch_diver" ? m.lume : (visualId === "watch_gold" ? m.gold : m.silver);
-    head.add(mesh(boxG(0.0014, 0.0008, 0.011), handMat, 0.002, 0.0122, -0.004, 0, 0.6, 0));
-    head.add(mesh(boxG(0.0012, 0.0008, 0.015), handMat, -0.002, 0.0126, -0.0055, 0, -0.3, 0));
-    if (visualId === "watch_diver") {
-      for (let i = 0; i < 12; i++) { const a = (i / 12) * PI * 2; head.add(mesh(cylG(0.0012, 0.0012, 0.0008, 6), m.lume, Math.cos(a) * 0.013, 0.0118, Math.sin(a) * 0.013)); }
-    } else if (visualId === "watch_gold") {
-      for (const p of [[-0.0065, 0.002], [0.0065, 0.002], [0, -0.0065]]) head.add(mesh(cylG(0.0035, 0.0035, 0.0006, 12), m.gold, p[0], 0.0117, p[1]));
-    } else if (visualId === "watch_steel") {
-      for (let i = 0; i < 4; i++) { const a = (i / 4) * PI * 2; head.add(mesh(boxG(0.0012, 0.0006, 0.003), m.silver, Math.cos(a) * 0.012, 0.0118, Math.sin(a) * 0.012, 0, -a, 0)); }
-    }
+    const W = CBZ.wristwatch;
+    if (W && W.display) grp.add(W.display(DISPLAY_STYLE[visualId] || "steel", PR, 35 * PI / 180));
     return grp;
   }
 
