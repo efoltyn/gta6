@@ -925,8 +925,8 @@
     for (let i = 0; i < list.length; i++) { const v = list[i].slot.row * 10 + Math.abs(list[i].slot.lat) + Math.random() * 3; if (v < bv) { bv = v; best = list[i]; } }
     return best;
   }
-  const CHEERS = ["Yes!", "Hear, hear!", "Four more years!", "That's right!", "We're with you!"];
-  const BOOS = ["Boo!", "Liar!", "Resign!", "Shame!", "Nobody believes you!"];
+  const CHEERS = ["Yes!", "Hear, hear!", "Four more years!", "That's right!", "We're with you!", "My mother voted for you!", "Say it again!"];
+  const BOOS = ["Boo!", "Liar!", "Resign!", "Shame!", "Nobody believes you!", "Where's my pension?", "My son's still in your jail!"];
   function react(kind, proToo) {
     const sup = members("sup"), pro = members("pro");
     if (kind === "cheer") {
@@ -1386,7 +1386,7 @@
   // THE NPC PRESIDENT speaks by himself: three lines over the appearance
   const NPC_LINES = [
     ["My fellow citizens, thank you for coming.", "Thank you. Thank you all for coming out today."],
-    ["This country will be safe. I will see to it.", "We have work to do, and we will do it together.", "Nobody is above the law in this republic."],
+    ["This country will be safe. I will see to it.", "We have work to do, and we will do it together.", "Nobody is above the law in this republic.", "Bread costs less than last year. Remember that."],
     ["God bless you, and God bless this country.", "Go home safe. Thank you."],
   ];
   function tickNpcSpeech(L, dt) {

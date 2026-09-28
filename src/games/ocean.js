@@ -407,11 +407,11 @@
       post: "pinned", pose: "stand", sayColor: "#9adcb8",
       talkLabel: "Talk to Mona",
       dialogue: [
-        "Follow an amber buoy, anchor your nerve, and dive. Deeper wrecks pay better.",
-        "The Aurora's gold sits over the trench. Something down there guards it. I'd know.",
+        "Lost my husband to that water. Still sell bait on it.",
+        "They say the Aurora went down with gold. They say a lot.",
         "Night salvage pays double. So does a mistake after dark.",
-        "Dolphins near you? Good. They run the whites off. Orcas run everything off.",
-        "Air's your real problem. Sell here, buy a bigger tank, then chase the deep money.",
+        "Saw a fin bigger than my boat in '09. Nobody believed me.",
+        "Bring my buckets back, hon.",
       ],
     });
 
