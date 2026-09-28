@@ -241,6 +241,11 @@
     if (!ped || ped.dead) return 0;
     const d = REL_EVENTS[kind]; if (!d) return 0;
     const bond = applyDelta(ped, d, amt == null ? 1 : amt);
+    // the HOT half of a harm: relPlayer is the durable opinion; the brain's
+    // decaying grudge is what proportional retaliation and feuds climb on
+    if (d.grudge > 0 && CBZ.cityBrain && CBZ.city && CBZ.city.playerActor) {
+      CBZ.cityBrain.grudge(ped, CBZ.city.playerActor, (d.grudge / 100) * (amt == null ? 1 : amt));
+    }
     driveFlags(ped);
     // ripple to the social circle — hurting/helping one is felt by their people.
     if (RIPPLE[kind]) rippleToCircle(ped, kind, (amt == null ? 1 : amt) * RIPPLE[kind]);
@@ -1450,6 +1455,9 @@
         } else {
           // a coward's revenge: become a committed witness against you
           p.snitch = 1; p.mem = PA || P; p.alarmed = Math.max(p.alarmed || 0, 4);
+          // a witness of ONE: the brain schedules his call like any other
+          // (it can still be stopped), brain_city shows him making it
+          if (CBZ.cityBrain) CBZ.cityBrain.accuse(p, PA || P, "assault", 60);
           if ((p.witnessSev || 0) < 60) { p.witnessSev = 60; p.witnessType = p.witnessType || "the gunman"; }
           r.ambushT = 30 + rng() * 30;
         }

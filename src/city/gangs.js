@@ -2108,11 +2108,22 @@
   };
 
   // ---- per-faction PLAYER STANDING (-100..100). Friendly acts raise it,
-  //      clipping their crew (off the books) drops it. The HUD reads this. ----
-  CBZ.cityGangStanding = function (gangId) { const gang = gangById(gangId); return gang ? (gang.standing || 0) : 0; };
+  //      clipping their crew (off the books) drops it. The HUD reads this.
+  //      THE TRUTH IS CBZ.brain.rep["gang:<id>"] (respect vs hostility, plus
+  //      the fear hurting a set earns) — the same reputation every brain-run
+  //      NPC reads; city/brain_city.js maps the -100..100 scale onto it.
+  //      gang.standing is its persisted mirror (netpersist saves/loads it; a
+  //      loaded value is folded back into rep by brain_city.syncFactions). ----
+  CBZ.cityGangStanding = function (gangId) {
+    const gang = gangById(gangId); if (!gang) return 0;
+    const CB = CBZ.cityBrain, v = CB ? CB.standing(gang.id) : null;
+    return v == null ? (gang.standing || 0) : v;
+  };
   CBZ.cityGangAddStanding = function (gangId, amt) {
     const gang = gangById(gangId); if (!gang || !amt) return 0;
-    gang.standing = clamp((gang.standing || 0) + amt, -100, 100);
+    const CB = CBZ.cityBrain, v = CB ? CB.addStanding(gang.id, amt) : null;
+    gang.standing = v == null ? clamp((gang.standing || 0) + amt, -100, 100) : v;
+    gang._repStanding = gang.standing;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return gang.standing;
   };
@@ -2242,10 +2253,10 @@
   //  A street crew used to fight to the last man every time: the only exit
   //  was a per-body "under 30% hp" bail, so a set of six stood in the open
   //  and died one at a time, and when the last one dropped nothing about the
-  //  block changed. Now (1) a crew that has lost as many as it has left
-  //  standing near the fight BREAKS: the shaky ones (low loyalty, or already
-  //  hurt) run and stay gone a while (peds.js honours _routT), the hard core
-  //  and the brass hold; and (2) once nobody from the set is left on the post
+  //  block changed. Now (1) a crew whose MORALE breaks (CBZ.brain: losses,
+  //  shock, the boss dropping) routs man by man on each one's own nerve: the
+  //  shaky ones run and stay gone a while (peds.js honours _routT), the hard
+  //  core and the brass hold; and (2) once nobody from the set is left on the post
   //  you hit, the corner is CLEARED: their take for the block comes out of
   //  the gang treasury onto the pavement for you to pick up, plus respect.
   //  All of it is per-death bookkeeping, nothing per frame except one timer.
@@ -2263,37 +2274,30 @@
     }
     return best;
   }
+  // THE SET BREAKS ON ITS NERVE, NOT ON A HEADCOUNT. The rule used to be
+  // "lost as many as are standing" plus a per-man loyalty coin. Now the loss
+  // is the brain's (peds.js cityKillPed → morale.death on "gang:<id>": the
+  // shock, the leader term when the boss or his lieutenant drops, the rattle
+  // on the man beside him) and each member asks morale.broken — his own
+  // nerve (courage, a boss's discipline, a lieutenant's rank) against the
+  // set's morale, latched with the brain's rally band so nobody flip-flops.
+  // Routed men run and stay gone a while (peds.js honours _routT).
   function crewTakesLoss(gang, dead) {
     const P = CBZ.player; if (!P || P.dead) return;
-    const now = (CBZ.now || 0) / 1000;
-    // losses in THIS fight: a 25 s window that each fresh body extends
-    if (!(now - (gang._lossT || -1e9) < 25)) gang._lossN = 0;
-    gang._lossN = (gang._lossN || 0) + 1; gang._lossT = now;
-    let standing = 0;
+    const CB = CBZ.cityBrain;
+    let barked = false;
     for (const m of gang.members) {
-      if (!m || m === dead || m.dead || m.ko > 0 || m._wRole) continue;
+      if (!m || m === dead || m.dead || m.ko > 0 || m._wRole || m.restraint || m.controlled) continue;
       const dx = m.pos.x - dead.pos.x, dz = m.pos.z - dead.pos.z;
-      if (dx * dx + dz * dz < BREAK_R2) standing++;
-    }
-    if (gang._lossN >= 2 && gang._lossN >= standing && standing > 0) {
-      let barked = false;
-      for (const m of gang.members) {
-        if (!m || m === dead || m.dead || m.ko > 0 || m._wRole || m.restraint || m.controlled) continue;
-        const dx = m.pos.x - dead.pos.x, dz = m.pos.z - dead.pos.z;
-        if (dx * dx + dz * dz >= BREAK_R2) continue;
-        const brass = m === gang.boss || m.isBoss || m.rank === "boss" || m.rank === "lt";
-        const loyal = CBZ.cityMemberLoyalty ? CBZ.cityMemberLoyalty(m) : 0.5;
-        const hurt = m.hp < (m.maxHp || 100) * 0.55;
-        if (brass && !hurt) continue;                         // the brass hold the corner
-        if (loyal > 0.7 && !hurt && Math.random() < 0.6) continue;
-        m.rage = null; m._routT = 10 + Math.random() * 8;
-        m.alarmed = Math.max(m.alarmed || 0, 6); m.fear = 10;
-        if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(m, P.pos.x, P.pos.z); else m.state = "flee";
-        if (!barked) { barked = true; wbark(gang, m, BREAK_BARK); }
-      }
+      if (dx * dx + dz * dz >= BREAK_R2) continue;
+      if (!(CB && CB.broken(m))) continue;
+      m.rage = null; m._routT = 10 + Math.random() * 8;
+      m.alarmed = Math.max(m.alarmed || 0, 6); m.fear = 10;
+      if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(m, P.pos.x, P.pos.z); else m.state = "flee";
+      if (!barked) { barked = true; wbark(gang, m, BREAK_BARK); }
     }
     const lot = lotOfPost(gang, dead);
-    if (lot) { corner.lot = lot; corner.gang = gang; corner.at = now + 2.5; }   // judged once the dust settles
+    if (lot) { corner.lot = lot; corner.gang = gang; corner.at = (CBZ.now || 0) / 1000 + 2.5; }   // judged once the dust settles
   }
   function judgeCorner(now) {
     const lot = corner.lot, gang = corner.gang;
