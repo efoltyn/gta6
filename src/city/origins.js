@@ -491,19 +491,22 @@
     c.hp = 999999; c.dead = false; c._scripted = true;
     return c;
   }
+  // a scripted officer walks through CBZ.moves like everybody else: velocity,
+  // braking arrival, bounded turn, and the legs animate what the body did
+  const _scrMo = { speed: 0, stop: 0.3, accel: 3.6, lod: 1 };
   function stepScriptedTo(c, floorY, tx, tz, spd, dt) {
     const dx = tx - c.pos.x, dz = tz - c.pos.z, gd = Math.hypot(dx, dz) || 1e-4;
-    c.pos.x += (dx / gd) * spd * dt;
-    c.pos.z += (dz / gd) * spd * dt;
+    const m = CBZ.moves.motor(c);
+    _scrMo.speed = spd; _scrMo.accel = spd > 3 ? 5.5 : 3.6;
+    CBZ.moves.step(m, c.pos, c.group.rotation.y, tx, tz, _scrMo, dt);
+    c.group.rotation.y = m.yaw;
     c.pos.y = floorY;
-    const targetYaw = Math.atan2(dx, dz);
-    c.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(c.group.rotation.y, targetYaw, Math.min(1, dt * 8)) : targetYaw;
     // don't run THROUGH desks/walls on the way — and pass the actor's real
     // standing band, else collide() treats every collider on every OTHER
     // floor of the tower as blocking too (its height gate needs feetY/headY).
     if (CBZ.collide) CBZ.collide(c.pos, 0.45, floorY + 0.1, floorY + 1.9);
     c.pos.y = floorY;                            // re-seat on the slab after any nudge
-    if (CBZ.animChar) CBZ.animChar(c.char, spd, dt);
+    if (CBZ.animChar) CBZ.animChar(c.char, m.gs, dt);
     return gd;
   }
 

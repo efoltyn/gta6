@@ -2622,7 +2622,8 @@
     if (m.target) m.target.set(px, 0, pz);
     m.fear = Math.max(m.fear || 0, 5); m.alarmed = Math.max(m.alarmed || 0, 4);
     // one last look at the threat as they peel off (flee owns the legs after)
-    if (m.group) m.group.rotation.y = Math.atan2(E.x - m.pos.x, E.z - m.pos.z);
+    // (a held facing: peds.js turns him through CBZ.moves, never a one-frame snap)
+    if (CBZ.cityPedFaceTo) CBZ.cityPedFaceTo(m, E.x, E.z, 0.5);
   }
 
   // nearest live member of the engaged ENEMY gang (or the player) near a fighter

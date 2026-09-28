@@ -246,8 +246,8 @@
          person on screen can answer how heavy they are, and a page that cannot
          has nothing to ask about. */
       needs: ["look"],
-      files: ["entities/character.js", "entities/poses.js", "systems/bodymass.js"],
-      publishes: ["makeCharacter", "animChar", "charPoses", "bodyMass", "meleeScale"],
+      files: ["entities/character.js", "entities/moves.js", "entities/poses.js", "systems/bodymass.js"],
+      publishes: ["makeCharacter", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
     ragdoll: {

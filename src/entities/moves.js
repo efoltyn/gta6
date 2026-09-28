@@ -115,7 +115,7 @@
       vx: 0, vz: 0, yaw: null, gs: 0, speed: 0, gait: "idle", arrived: false,
       lx: null, lz: null,            // position at the previous step (achieved-speed probe)
       ax: 0, az: 0,                  // low-passed avoidance push
-      stuckT: 0, stuckN: 0, goodT: 0, detourT: 0, detourS: 1,
+      stuckT: 0, stuckN: 0, goodT: 0, detourT: 0, detourS: 1, passS: 0, passT: 0,
       gx: null, gz: null,            // the goal the arrival latch belongs to
       id: (motor._seq = (motor._seq || 0) + 1),
     };
@@ -180,15 +180,28 @@
       if (ahead <= 0 && d > R) continue;
       if (cd < R + 0.25 && t > 0) {
         const urg = (1 - t / 2.2) * (1 - Math.max(0, cd - R * 0.6) / (R * 0.8 + 0.25));
-        if (urg <= 0) continue;
-        // side: away from where he will be; near the centreline, KEEP RIGHT.
-        // right of heading (hx,hz) in this yaw convention (yaw = atan2(x,z)) is (-hz, hx)
-        const lat = cx * -hz + cz * hx;               // + = he'll be on my right
-        let side;
-        if (Math.abs(lat) < 0.22) side = 1;          // pass him on my... step right
-        else side = lat > 0 ? -1 : 1;                // step away from his side
-        const k = clamp(urg, 0, 1) * 1.25;
-        _av.x += -hz * side * k; _av.z += hx * side * k;
+        if (urg > 0) {
+          // side: away from where he will be; near the centreline, KEEP RIGHT.
+          // right of heading (hx,hz) in this yaw convention (yaw = atan2(x,z)) is (-hz, hx)
+          const lat = cx * -hz + cz * hx;               // + = he'll be on my right
+          // A COMMITTED SIDE: the choice is held for a beat (m.passS/passT),
+          // so a neighbour drifting across the centreline cannot flip it
+          // frame to frame. A fresh choice keeps right unless he is clearly
+          // already on my right.
+          let side;
+          if (m.passT > 0 && m.passS && lat * m.passS < 0.35) side = m.passS;
+          else side = lat > 0.3 ? -1 : lat < -0.3 ? 1 : (m.passS || 1);
+          if (side !== m.passS || m.passT <= 0) { m.passS = side; m.passT = 0.9; }
+          const k = clamp(urg, 0, 1) * 1.25;
+          _av.x += -hz * side * k; _av.z += hx * side * k;
+        }
+      }
+      // near-contact comfort: anyone within arm's length who is not overlapping
+      // yet still gets a gentle push apart (side-by-side walkers converging on
+      // one goal never register a closing time)
+      if (d >= R && d < R + 0.3) {
+        const k = (R + 0.3 - d) / 0.3 * 0.45;
+        _av.x -= (rx / d) * k; _av.z -= (rz / d) * k;
       }
       // a slower body in my lane, going my way: follow at his pace (checked
       // whatever the closing speed — once matched, the gap must hold)
@@ -286,9 +299,10 @@
         if (want > 1e-4) { hx = wx / want; hz = wz / want; }
       }
       // ---- local avoidance ------------------------------------------------
+      if (m.passT > 0) m.passT -= dt;
       if (lod === 0 && o.nbrs && want > 0.05) {
         const av = avoid(m, pos, hx, hz, want, o.nbrs, o.nbrN != null ? o.nbrN : o.nbrs.length, o.getPos, radius);
-        m.ax = damp(m.ax, av.x, 7, dt); m.az = damp(m.az, av.z, 7, dt);
+        m.ax = damp(m.ax, av.x, 5, dt); m.az = damp(m.az, av.z, 5, dt);
         if (av.follow < want) {
           const f = Math.max(av.follow, want * 0.25);
           wx *= f / want; wz *= f / want; want = f;
@@ -349,6 +363,25 @@
       if (r2 > (stop + 0.05) * (stop + 0.05)) { sx = 0; sz = 0; m.vx = 0; m.vz = 0; }
     }
     pos.x += sx; pos.z += sz;
+    // ---- BODIES DO NOT PASS THROUGH BODIES (near tier): after the step, any
+    // neighbour closer than two shoulder radii gets half the overlap resolved
+    // from this side (he resolves his half on his own step), and the velocity
+    // component driving into him is dropped. Positional, so it cannot ring.
+    if (lod === 0 && o.nbrs) {
+      const nN = o.nbrN != null ? o.nbrN : o.nbrs.length, HARD = radius * 2 * 0.82;
+      for (let i = 0; i < nN; i++) {
+        const q = o.nbrs[i];
+        if (!q || q._mv === m) continue;
+        const op = o.getPos ? o.getPos(q) : (q.pos || (q.group && q.group.position));
+        if (!op || op === pos) continue;
+        const rx = pos.x - op.x, rz = pos.z - op.z, d2 = rx * rx + rz * rz;
+        if (d2 >= HARD * HARD || d2 < 1e-8) continue;
+        const d = Math.sqrt(d2), nx = rx / d, nz = rz / d, pen = (HARD - d) * 0.5;
+        pos.x += nx * pen; pos.z += nz * pen;
+        const into = m.vx * nx + m.vz * nz;
+        if (into < 0) { m.vx -= nx * into; m.vz -= nz * into; }
+      }
+    }
     m.speed = Math.hypot(m.vx, m.vz);
 
     // ---- stuck recovery ---------------------------------------------------
@@ -436,7 +469,7 @@
       px: null, pz: null, vx: 0, vz: 0, speed: 0, moving: false,
       h: null, ax: 0, az: 0, t: 0,
       turn: opts.turn || 1.7,              // rad/s the frame may rotate
-      leadMax: opts.lead != null ? opts.lead : 0.7,
+      leadMax: opts.lead != null ? opts.lead : 0.2,
       _asg: null, _asgKey: "", _asgT: 0,
       _scan: [],
       update(px, pz, pyaw, dt) {

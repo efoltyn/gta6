@@ -26,7 +26,13 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
-  const { makeCharacter, animChar, lerpAngle, damp } = CBZ;
+  const { makeCharacter, animChar, damp } = CBZ;
+  // THE ONE LOCOMOTION LAYER (entities/moves.js): every survivor on land walks
+  // through it; one options record, mutated per body (no per-frame allocation).
+  const MV = CBZ.moves;
+  const _mo = { speed: 0, stop: 0.5, face: null, nbrs: null, nbrN: 0, lod: 0, radius: 0.42 };
+  const SWIM_TURN = 1.5;          // rad/s a crawling swimmer can come round
+  const SWIM_TURN_PANIC = 2.3;    // rad/s with a fin behind it
 
   const BOT_RADIUS = 0.5;
   const ANIM_DIST2 = 62 * 62;     // beyond this, freeze animation
@@ -74,7 +80,6 @@
   const FLOAT_DEPTH = 1.275;      // swim.js: feet below the surface on a floating body
   const SWIM_SPEED = 1.15;        // m/s — an unhurried survivor's crawl
   const PANIC_SPEED = 2.10;       // m/s — everything they have
-  const WATER_TURN = 0.05;        // per-second retention: a body turns slowly in water
   const PANIC_R = 22;             // m — a predator this close and you stop swimming
   const PANIC_HOLD = 5;           // s — you do not calm down the instant the fin turns
 
@@ -1157,13 +1162,14 @@
   }
 
   // ---- locomotion (every frame; only for living, non-busy bots) ----
-  function move(b, dt, animate) {
+  function move(b, dt, animate, simD2) {
+    const m = MV.motor(b);
     // fleeing reads urgency: a bot brushing a threat jogs (~1.55×), one caught
     // outside the closing zone or under a strike marker SPRINTS (~2.15×). A
     // body with a shark behind it is at the top of that scale by definition.
     const running = b.state === "flee" || b.state === "panic";
     const spd = running ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
-    if (botTraverse(b, dt, spd)) return;
+    if (botTraverse(b, dt, spd)) { MV.reset(m, b.pos); return; }
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
     const dist = Math.hypot(dx, dz);
     if (b.panicT > 0) b.panicT -= dt;
@@ -1185,7 +1191,8 @@
     const wasSwim = !!b.swim;
     if (depth >= SWIM_ENTER) b.swim = true;
     else if (depth <= SWIM_LEAVE) b.swim = false;
-    if (b.swim) { swimStep(b, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
+    if (b.swim) { swimStep(b, m, dt, dx, dz, dist, depth, animate, !wasSwim); return; }
+    if (wasSwim) MV.reset(m, b.pos);    // out of the water: the walk starts from rest
     if (wasSwim && b.char) {
       b.char.swimming = false;
       // the prone stroke turns the head; nothing on land ever resets that axis
@@ -1199,35 +1206,34 @@
     // swim.js's own grading: sub = depth/BODY_H, and control is fully aquatic
     // at SWIM_BLEND (0.5) of a body height.
     const step = depth > 0.02 ? spd * (1 - WADE_SLOW * Math.min(1, depth / (BODY_H * 0.5))) : spd;
+    // CBZ.moves carries the walk: speeds up and brakes into the spot (no
+    // full-speed-then-dead-stop at half a metre), turns at a human rate, keeps
+    // right past the people coming the other way. The rig reads the MEASURED
+    // speed, so a body held on a wall or a boulder stands instead of running.
+    // LOD is by distance to the PLAYER, never the camera: the walk is sim, and
+    // the sim must match on every client (see the think cadence below).
+    const O = _mo;
+    O.speed = step;
+    O.nbrs = CBZ.bots; O.nbrN = CBZ.bots.length;
+    O.lod = MV.lodFor(simD2, true);
+    // the stare: a body waiting to react, at its spot, turns to face the thing coming
+    O.face = (dist <= 0.5 && b.state === "look" && b._lookX != null)
+      ? Math.atan2(b._lookX - b.pos.x, b._lookZ - b.pos.z) : null;
+    MV.step(m, b.pos, b.group.rotation.y, b.target.x, b.target.z, O, dt);
+    b.group.rotation.y = m.yaw;
+    b.speed = m.gs;
     if (dist > 0.5) {
-      b.pos.x += (dx / dist) * step * dt;
-      b.pos.z += (dz / dist) * step * dt;
-      b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-      b.speed = step;
       b._arrived = false;
     } else {
-      b.speed = 0;
       /* YOU ARRIVE ONCE. This clamp ran on EVERY frame the body was within half
          a metre of its target, so `pause` was pinned at 0.4 and could never
          reach zero — and think()'s re-roll is gated on `pause <= 0`. A survivor
          that reached its spot therefore STOOD THERE FOR THE REST OF THE MATCH.
 
-         Measured on HEAD, sixty seconds of a ninety-nine-body crowd: the number
-         of people standing in water deeper than 0.25 m went 16 -> 17, the
-         deepest anyone stood went 0.86 m -> 1.00 m, and the whole population
-         produced TWO new wander decisions. The beach is a diorama, and it is
-         also why the swim band looked broken before it was — a body cannot
-         decide to swim if it has stopped deciding anything.
-
          The intent was obviously a floor applied ON ARRIVAL: stand here a beat
-         before picking somewhere new. Latched, that is what it does. */
-      // The dwell is per-body and costs no new draw: `reactivity` is already
-      // one, so a twitchy survivor moves on in half a second and a placid one
-      // stands in the surf for four.
-      // the stare: a body waiting to react turns to face the thing coming
-      if (b.state === "look" && b._lookX != null) {
-        b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(b._lookX - b.pos.x, b._lookZ - b.pos.z), 1 - Math.pow(0.02, dt));
-      }
+         before picking somewhere new. Latched, that is what it does. The dwell
+         is per-body: `reactivity` is already one, so a twitchy survivor moves
+         on in half a second and a placid one stands in the surf for four. */
       if (b.state === "wander" && !b._arrived) {
         b._arrived = true;
         b.pause = Math.max(b.pause, 0.5 + (+b.reactivity || 0) * 3.5);
@@ -1237,7 +1243,7 @@
     // height-gated upper-floor walls of buildings don't block them at ground level
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
     b.pos.y = CBZ.surv ? standY(b) : 0;
-    if (animate) animChar(b.char, b.speed, dt);
+    if (animate) animChar(b.char, m.gs, dt);
   }
 
   /* ---- IN THE WATER, OFF THE BOTTOM ---------------------------------------
@@ -1253,7 +1259,7 @@
      it keeps the hip-pivot compensation and the head/torso idle alive under the
      stroke, and it is what makes climbing back out of the water a damped blend
      into the walk instead of a snap. */
-  function swimStep(b, dt, dx, dz, dist, depth, animate, entered) {
+  function swimStep(b, m, dt, dx, dz, dist, depth, animate, entered) {
     /* EVERY BODY ON ITS OWN BEAT. Ten states created at zero on the same tick
        advance by the same dt for ever, so a line of survivors strokes in
        PERFECT UNISON — synchronised swimming, which is a very funny thing to
@@ -1279,14 +1285,22 @@
     // HORIZONTAL. A stroke builds and bleeds; it does not start and stop like a
     // footfall, so the speed is eased rather than assigned and a body that
     // arrives keeps gliding for a beat.
-    const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) : 0;
+    // HEADING: a swimmer comes round slowly (bounded rate through CBZ.moves.face,
+    // never a lerp that whips a 180 in a few frames), and the stroke only drives
+    // the body the way it is pointing, so a turning swimmer slows instead of
+    // sliding sideways through the water.
+    let gate = 1;
+    if (dist > 0.8) {
+      const wantYaw = Math.atan2(dx, dz);
+      b.group.rotation.y = MV.face(m, b.group.rotation.y, wantYaw, dt, panic ? SWIM_TURN_PANIC : SWIM_TURN);
+      const c = Math.cos(MV.wrap(wantYaw - b.group.rotation.y));
+      gate = c > 0.9 ? 1 : Math.max(0.2, (c + 0.3) / 1.2);
+    }
+    const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) * gate : 0;
     b.speed = damp(b.speed, want, panic ? 3.4 : 1.9, dt);
     if (dist > 1e-4 && b.speed > 1e-4) {
       b.pos.x += (dx / dist) * b.speed * dt;
       b.pos.z += (dz / dist) * b.speed * dt;
-    }
-    if (dist > 0.8) {
-      b.group.rotation.y = lerpAngle(b.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(WATER_TURN, dt));
     }
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
 
@@ -1298,7 +1312,7 @@
        off the bottom over about half a second. */
     const bedY = surf - depth;
     const floatY = Math.max(bedY + 0.22, surf - FLOAT_DEPTH);
-    if (entered) { b._floatY = b.pos.y; entrySplash(b, surf); }
+    if (entered) { b._floatY = b.pos.y; entrySplash(b, surf); MV.reset(m, b.pos); }
     b._floatY = b._floatY == null ? floatY : b._floatY + (floatY - b._floatY) * (1 - Math.exp(-6 * dt));
 
     // ANIMATION. Panic runs the cycle hot AND layers the thrash on top; both
@@ -1392,13 +1406,13 @@
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
       const dist2 = dx * dx + dz * dz;
       if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
-      if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
+      if (CBZ.body && CBZ.body.busy(b)) { if (b._mv) MV.reset(b._mv, b.pos); continue; }   // thrown / knocked down / held → body owns it
       /* ABOARD A BOAT. world/sea_craft.js owns this body's position and pose
          while it is sitting in a hull — a wander leg here walks it off the
          deck and a swim leg drops it over the side, both of which this file
          did to every crewman on its first frame. The craft releases the flag
          when the man goes in the water (or is eaten). */
-      if (b._aboard) continue;
+      if (b._aboard) { if (b._mv) MV.reset(b._mv, b.pos); continue; }
       const near = dist2 < ANIM_DIST2;
       /* HOW OFTEN A BOT THINKS IS A SIM DECISION. HOW OFTEN IT ANIMATES IS NOT.
 
@@ -1416,7 +1430,7 @@
       const sdx = b.pos.x - px, sdz = b.pos.z - pz;
       const stride = (sdx * sdx + sdz * sdz) < ANIM_DIST2 ? 3 : 7;
       if ((frame + b.slice) % stride === 0) think(b);
-      move(b, dt, near);
+      move(b, dt, near, sdx * sdx + sdz * sdz);
     }
   });
 

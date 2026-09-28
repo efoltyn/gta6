@@ -369,6 +369,7 @@
   }
   function releaseMember(m) {
     if (!m) return;
+    if (m.moveOrder && m.moveOrder._kin) m.moveOrder = null;
     m._kinPaceT = 0;
     unpace(m);
     m._kinUnit = null;
@@ -467,23 +468,19 @@
   }
 
   // ============================================================
-  //  STEERING — a target nudge, nothing more. peds.js's move() does the walk,
+  //  STEERING — a move order, nothing more. peds.js's move() does the walk,
   //  the collision and the legs; we only say where the shoulder is.
   // ============================================================
-  // SHOULDER SPACING, and it is arithmetic rather than taste. citynav.js's
-  // context steering treats another body as DANGER inside NBR_SENSE = 2.4 m and
-  // SATURATES that danger below NBR_HARD = 0.95 m — a saturated slot is masked
-  // out of the steering parse entirely, so a formation authored tighter than
-  // 0.95 would have the follower actively refusing to stand where we put it.
-  // These sit just above that saturation knee, in the falloff band, where the
-  // pull of the slot wins cleanly.
+  // SHOULDER SPACING, and it is arithmetic rather than taste. CBZ.moves pushes
+  // two bodies apart only inside the sum of their radii plus a margin
+  // (0.32 + 0.32 + 0.18 = 0.82 m); two people walking in step have no closing
+  // speed, so its predictive half leaves them alone. Every slot sits outside
+  // that 0.82 m so the follower is never argued off the place we put him.
   const SPACING = {
     couple:  { lat: 0.98, fwd: -0.10 },
     family:  { lat: 0.86, fwd: -0.04 },   // closer: you are holding a child's hand
     friends: { lat: 1.16, fwd: -0.22 },
   };
-  const CORRECT = 0.55;      // m/s of formation correction, capped well under a walk
-  const PED_R = 0.5;         // peds.js's own body radius (its collide() call uses it)
   function driveUnit(u, dt) {
     const L = u.leader;
     // any member gone/claimed → the whole unit dissolves, cleanly, this frame.
@@ -514,34 +511,23 @@
       const away = d2(m.pos.x, m.pos.z, L.pos.x, L.pos.z);
       if (away > LEASH * LEASH) { dropUnit(u, "leash"); return; }
       pace(m, u.pace);
-      if (m._kinBeat) continue;                              // mid-beat: standing still on purpose
+      if (m._kinBeat) { if (m.moveOrder && m.moveOrder._kin) m.moveOrder = null; continue; }   // mid-beat: standing still on purpose
       if (m.target && m.target.set) m.target.set(tx, 0, tz);
       m.path = null; m.pause = 0;
       if (m.state !== "walk" && m.state !== "chat") m.state = "walk";
-      // peds.js's OTHER (non-context) steering path keeps a cached Reynolds
-      // separation vector on the body and re-applies it every frame between
-      // recomputes. For a follower we ARE the separation — we are placing this
-      // body deliberately — so the cache is zeroed and its recompute gate held
-      // off. Only the follower: the LEADER keeps full crowd avoidance, which is
-      // what makes the pair navigate a busy pavement as one person would.
-      m._sepX = 0; m._sepZ = 0; m._sepT = Math.max(m._sepT || 0, 0.4);
-      // FORMATION CORRECTION. The near/active steering (citynav's 8-slot parse)
-      // can mask out the slot that points at a body 1 m away, which would leave
-      // a couple drifting a metre and a half apart and swinging. A small capped
-      // pull toward the shoulder closes that — capped at CORRECT m/s, which is
-      // a fraction of a walk, and only applied while the legs are ALREADY
-      // swinging, so no foot ever slides. Collision is re-resolved afterwards
-      // through the same shared collide() the ped loop uses, so this can never
-      // push anybody into a wall.
-      const sdx = tx - m.pos.x, sdz = tz - m.pos.z;
-      const sd = Math.sqrt(sdx * sdx + sdz * sdz);
-      if (sd > 0.7 && (m.speed || 0) > 0.2) {
-        const step = Math.min(CORRECT * dt, sd - 0.7);
-        m.pos.x += (sdx / sd) * step;
-        m.pos.z += (sdz / sd) * step;
-        if (CBZ.collide) CBZ.collide(m.pos, PED_R, m.pos.y, m.pos.y + 1.7);
-        m.pos.y = 0;
-      }
+      /* THE SHOULDER IS A MOVE ORDER (peds.js move() -> CBZ.moves). The slot
+         is handed over with the leader's own motor velocity as feed-forward,
+         so the follower matches his pace instead of chasing and stopping; the
+         motor's arrival latch holds the slot when the pair stops. This
+         replaced a capped side-pull that dragged the body sideways under
+         swinging legs. The order is cleared the moment the unit lets go
+         (releaseMember) or a beat stands the body still. */
+      const Lm = L._mv;
+      let o = m.moveOrder;
+      if (!o || !o._kin) o = m.moveOrder = { _kin: true, x: 0, z: 0, speed: 0, stop: 0.2, vffX: 0, vffZ: 0 };
+      o.x = tx; o.z = tz;
+      o.speed = (m.baseSpeed || 1.4) * 1.3;
+      o.vffX = Lm ? Lm.vx : 0; o.vffZ = Lm ? Lm.vz : 0;
       // HAND IN HAND. This is the one thing you cannot do with ch.pose, because
       // animChar refuses a held pose while the body is moving — and holding a
       // hand is something you do WHILE walking. So it is a post-anim write, the
@@ -636,14 +622,15 @@
   // tickBeat re-checks it every frame, so this can only ever be a belt on top
   // of braces — but this is the ONE place this file turns a body, so the guard
   // lives here where it cannot be forgotten.
+  // The turn goes through CBZ.moves at a bounded rate (rad/s): a glance at a
+  // partner is a turn of the body, never a per-frame lerp that snaps a 180.
+  let _frameDt = 0;
   function faceAt(p, x, z, rate) {
-    if (!p.group) return;
+    if (!p.group || !CBZ.moves) return;
     if (p._npcAttached || p.inCar || p._propSeat || (p.char && p.char.sitting)) return;
     const dx = x - p.pos.x, dz = z - p.pos.z;
     if (dx * dx + dz * dz < 0.0004) return;
-    const yaw = Math.atan2(dx, dz);
-    const k = rate || 0.35;
-    p.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(p.group.rotation.y, yaw, k) : yaw;
+    p.group.rotation.y = CBZ.moves.faceAt(CBZ.moves.motor(p), p.group.rotation.y, p.pos, x, z, _frameDt, rate || 3.4);
   }
 
   function startBeat(a, b, kind, secs) {
@@ -732,7 +719,7 @@
     // an explicit false gives back the single shared 0.35 exactly.)
     const waving = bt.role === "open" && bt.kind === "greet" && bt.t > 1.1;
     const sharp = waving && (!CBZ.CONFIG || CBZ.CONFIG.CITY_GESTURE_LEGIBILITY !== false);
-    faceAt(p, look.pos.x, look.pos.z, sharp ? 0.6 : 0.35);
+    faceAt(p, look.pos.x, look.pos.z, sharp ? 5.6 : 3.4);
     // The arms tell the beat's shape: whoever opened it waves first, whoever
     // answers listens first, and they both end up talking. That asymmetry is
     // the whole reason it reads as two people and not two idle animations.
@@ -930,10 +917,12 @@
       const p = peds[i];
       if (!p) continue;
       if (p._kinBase != null) { p._kinPaceT = 0; unpace(p); }
+      if (p.moveOrder && p.moveOrder._kin) p.moveOrder = null;
       if (p._kinBeat) endBeat(p);
     }
   }
   CBZ.onUpdate(36.4, function (dt) {
+    _frameDt = dt > 0 ? dt : 0;
     if (!g || g.mode !== "city" || !on()) {
       if (units.length || grieving.length) standDown();
       return;
@@ -988,6 +977,7 @@
         const p = peds[i];
         if (!p) continue;
         if (p._kinBase != null && !unitLive(p) && !paceHeld(p)) { unpace(p); p._kinUnit = null; p._kinPaceT = 0; }
+        if (p.moveOrder && p.moveOrder._kin && !unitLive(p)) p.moveOrder = null;   // an orphaned shoulder order
         if (p._kinHeld && !p._kinGrief) { p.controlled = false; p._kinHeld = false; }
       }
     }
