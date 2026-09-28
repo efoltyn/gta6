@@ -658,6 +658,10 @@
   function recolorRig(ch, c, rec, opts) {
     if (!ch || !ch.skinSlots || !c) return false;
     const s = ch.skinSlots;
+    // THE RIGHT SHOES FOR THE JOB (entities/footwear.js): boots on officers,
+    // slip-ons on inmates, oxfords on suits. Same slot mesh, so the paint
+    // below lands on the new shoe.
+    if (CBZ.footwear) CBZ.footwear.restyle(ch, rec || null, c);
     // COMPOSITE (business fits): a composed blazer + collared shirt + tie layered
     // on the PLAIN base. cityApplyComposite is idempotent (strips any painted
     // look, flat-tints the base, then layers), so a re-dress never accumulates.

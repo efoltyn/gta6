@@ -410,7 +410,7 @@
       // landing (see step()). Dead bodies keep the legacy deathPose + flail.
       grp.rotation.x += p.spin * dt;
       grp.rotation.z += p.spinZ * dt;
-      if (intact) { bracePose(a); return; }
+      if (intact) { bracePose(a); if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true); return; }
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
       applyRag(a, p, dt);
       return;
@@ -441,9 +441,13 @@
         // (animChar is skipped while owned, so the additive write had no base
         // and accumulated — the wind-up half of the mangled-bodies bug).
         integRag(a, p, dt); writeRag(a, p, true);
+        // animChar is skipped while owned: the feet fall slack here instead of
+        // standing straight up off the end of the legs (character.js ANKLE SOLVE)
+        if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
         return;
       }
       applyRag(a, p, dt);     // limbs jiggle as the body lands & settles, then still
+      if (CBZ.charAnkleSolve) CBZ.charAnkleSolve(ch, dt, true);
       return;
     }
     // getting up: ease back upright

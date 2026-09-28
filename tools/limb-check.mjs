@@ -34,7 +34,7 @@ const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const ctx = vm.createContext({ console, Math, performance });
 ctx.window = ctx; ctx.self = ctx;
 ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js"]) {
+for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ } = ctx;
@@ -250,18 +250,21 @@ for (const [name, r] of Object.entries(bodies)) {
     }
     check(worst < 1.25, `${name} hand's wrist stub sits in the forearm (${worst.toFixed(2)} of the section)`);
   }
-  // the ankle goes INTO the shoe collar; a trouser hem is wider than it
+  // THE LEG ENDS INSIDE THE SHOE (entities/footwear.js re-bakes the shin):
+  // a bare shin ends at the ankle pivot, a trouser leg at its hem, both well
+  // above the sole and no higher than the shoe's top (tools/shoe-check.mjs
+  // sweeps the full containment over every style and pose)
   const shoe = s.shoes && s.shoes[0];
   if (shoe) {
-    const g = shoe.geometry, P = g.attributes.position.array;
-    let top = -Infinity; for (let i = 1; i < P.length; i += 3) top = Math.max(top, P[i]);
-    let cx = 0; for (let i = 0; i < P.length; i += 3) if (P[i + 1] > top - 0.08) cx = Math.max(cx, Math.abs(P[i]));
-    const collarHalf = cx * shoe.scale.x, yTop = shoe.position.y + top * shoe.scale.y;   // knee frame
-    const L = sh.geometry.userData.limb, atTop = CBZ.humanLimbHalfAt(sh.geometry, yTop - sh.position.y);
-    const tLeg = (L.y0 - (yTop - sh.position.y)) / L.sy;
-    if (sh.userData.limb.variant === "bare") check(atTop.hx < collarHalf * 1.02, `${name} bare ankle fits the collar (${atTop.hx.toFixed(3)} vs ${collarHalf.toFixed(3)})`);
-    else check(atTop.hx > collarHalf, `${name} trouser hem breaks over the collar (${atTop.hx.toFixed(3)} vs ${collarHalf.toFixed(3)})`);
-    check(tLeg > 0.5 && tLeg < 0.95, `${name} shoe top at ${(tLeg * 100).toFixed(0)}% down the shin`);
+    const foot = shoe.parent, d = foot.userData.dims;
+    const L = sh.geometry.userData.limb;
+    const endY = sh.position.y + L.y0 - L.sy;                        // knee frame
+    const soleY = d.sole;
+    shoe.geometry.computeBoundingBox();
+    const topY = foot.position.y + shoe.position.y + shoe.geometry.boundingBox.max.y * shoe.scale.y;
+    check(endY > soleY + 0.06, `${name} the shin ends above the sole (${(endY - soleY).toFixed(3)} over it)`);
+    check(endY < topY, `${name} the shin ends inside the shoe (${(topY - endY).toFixed(3)} under its top)`);
+    if (sh.userData.limb.variant === "bare") check(Math.abs(endY - foot.position.y) < 1e-6, `${name} a bare shin ends at the ankle pivot`);
   }
 }
 check(bodies.swimmer.skinSlots.legsLower[0].userData.limb.variant === "bare" && bodies.man.skinSlots.legsLower[0].userData.limb.variant === "cloth", "bare vs clothed legs pick their loft");
@@ -323,7 +326,7 @@ const bodyTris = (lod) => {
   let limbs = 0, hands = 0, shoes = 0;
   for (const [slot, i] of SEGS) limbs += tris(man.skinSlots[slot][i].geometry);
   for (const h of man.skinSlots.hands) hands += tris(h.geometry);
-  for (const s of man.skinSlots.shoes) shoes += tris(s.geometry);
+  for (const s of man.skinSlots.shoes) s.traverse((o) => { if (o.isMesh && o.visible) shoes += tris(o.geometry); });
   return { limbs, hands, shoes };
 };
 const nearT = bodyTris(1), farT = bodyTris(2);

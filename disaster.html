@@ -557,10 +557,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=grasp2"></script>
-  <script src="src/entities/character.js?v=face1"></script>
+  <script src="src/systems/fphands.js?v=wrist1"></script>
+  <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
+  <script src="src/entities/footwear.js?v=feet1"></script>
+  <script src="src/entities/character.js?v=feet1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=watch1"></script>
+  <script src="src/entities/watch.js?v=watch2"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -839,7 +841,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=nohint1"></script>
+<script src="src/systems/grapple.js?v=ankle1"></script>
 <script src="src/entities/survivorbot.js?v=armed1"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
