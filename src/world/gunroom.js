@@ -908,7 +908,7 @@
            anyway: in here you have no people, so the ledger route was
            unreachable while still quoting a cash price at the player. The key
            is the way, which is exactly the story. */
-        const have = !!(CBZ.game.hasKey || CBZ.game.role === "cop");
+        const have = !!(CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop"));
         const L = CBZ.cityLock
           ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"], power: LOCK_POWER })
           : { open: have, line: "The armory door needs a Keycard." };
@@ -1087,7 +1087,7 @@
     col: function () { return armory.collider; },
     isOpen: function () { return !!armory.open; },
     permanent: function () { return false; },
-    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop")); },
+    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop"))); },
     set: function (v) { armory.setOpen(v); return armory.open === !!v; },
   });
   if (inner.gate) {

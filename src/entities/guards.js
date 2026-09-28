@@ -1678,6 +1678,15 @@
       return true;
     }
 
+    // ---- A DOOR OFF THE CLOCK (systems/prisondoorwatch.js): he saw, heard or
+    // was radioed about a door standing open when the day says shut. He calls
+    // it, walks over, asks the officer, and shuts it himself if nobody does.
+    if (g._doorCase && CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.guardStep(g, dt)) {
+      noteState(g, "law");
+      updateFlashlight(g, dt);
+      return true;
+    }
+
     // THE PRODUCT PRESET (tools/visual-presets/prison-product.mjs) parks a man
     // with `pause`: he holds his post where he was put, eyes still open.
     if (g.pause > 0) {

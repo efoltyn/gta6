@@ -103,7 +103,7 @@ await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
 await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/index.html?mode=escape` });
 
 let ready = false;
-for (let i = 0; i < 120 && !ready; i++) {
+for (let i = 0; i < 300 && !ready; i++) {
   await sleep(1000);
   try { ready = await ev("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&CBZ.setRole&&document.getElementById('playBtn'))"); } catch (_) {}
 }
@@ -206,6 +206,60 @@ const after = await ev(`(function(){ var a = window.__copTarget; if (!a) return 
 log("  target after 6s: " + JSON.stringify(after));
 check("the card offers the cop's verbs", cuff && Array.isArray(cuff.verbs) && cuff.verbs.includes("detain"), cuff && cuff.verbs);
 check("CUFF lands on an inmate", !cuff.err && after && (after.cuffed || after.ko > 0), after);
+
+// ---- THE KEYS, AND A DOOR OFF THE CLOCK (systems/prisondoorwatch.js) --------
+// The officer's keys open the yard gate and a racked cell; a cell he opens
+// after lock-up is noticed by a screw, who calls it and walks over.
+const creds = await ev(`(function(){
+  var a = CBZ.prisonDoorAudit ? CBZ.prisonDoorAudit() : null; if (!a) return null;
+  var r = {}; a.rows.forEach(function(x){ if (x.id === 'prison-yard-door' || x.id === 'prison-armory') r[x.id] = x.cred; });
+  return r;
+})()`);
+check("the officer's keys open the yard gate and the armory", creds && creds["prison-yard-door"] && creds["prison-armory"], creds);
+// 23:00: the wing is racked shut
+const phase = ((23 - 6) / 24).toFixed(5);
+for (let i = 0; i < 6; i++) await ev(`(function(){ if (CBZ.dayPhase) CBZ.dayPhase(${phase}); for (var i=0;i<30;i++) CBZ.stepSim(1/60); return true; })()`);
+const setup = await ev(`(function(){
+  var S = CBZ.prisonSchedule, cb = CBZ.cellblock;
+  if (!S || !cb || !cb.cells) return { err: 'no schedule/cellblock' };
+  if (window.__copTarget) { window.__copTarget.cuffed = false; }
+  var c = null;
+  for (var i = 0; i < cb.cells.length; i++) { var k = cb.cells[i]; if (k.locked && !k.tier && k.leafClosed && !k.player) { c = k; break; } }
+  // the wing can still be holding leaves for stragglers: rack one ourselves
+  if (!c && S.cellsLocked()) for (var j = 0; j < cb.cells.length && !c; j++) { var q = cb.cells[j]; if (!q.tier && q.leafClosed && !q.player && cb.setDoor(q, true)) c = q; }
+  if (!c) return { err: 'no locked cell', block: S.id(), locked: S.cellsLocked() };
+  // the officer in the aisle, facing the bars
+  var dx = c.leafClosed.x - c.x, dz = c.leafClosed.z - c.z, dl = Math.hypot(dx, dz) || 1;
+  var px = c.leafClosed.x + dx / dl * 1.3, pz = c.leafClosed.z + dz / dl * 1.3;
+  var p = CBZ.player; p.pos.set(px, c.fy || 0, pz);
+  if (CBZ.playerChar) CBZ.playerChar.group.position.copy(p.pos);
+  if (CBZ.cam) CBZ.cam.yaw = Math.atan2(-(c.leafClosed.x - px), -(c.leafClosed.z - pz));
+  // a screw a few metres down the aisle, awake and looking this way
+  var gd = (CBZ.guards||[]).filter(function(g){ return !g.dead && g.kind !== 'warden'; })[0];
+  if (gd) {
+    gd.asleep = false; gd.pause = 0; gd.hunt = 0;
+    var ax = -dz / dl, az = dx / dl;   // along the aisle
+    gd.group.position.set(px + ax * 6, p.pos.y, pz + az * 6);
+    gd.group.rotation.y = Math.atan2(px - gd.group.position.x, pz - gd.group.position.z);
+  }
+  CBZ.stepSim(1/60);
+  var r = CBZ.prisonDoorVerbNearest ? CBZ.prisonDoorVerbNearest() : 'no verb';
+  window.__copCell = c;
+  return { block: S.id(), locked: S.cellsLocked(), cell: c.i, result: r, open: !c.locked };
+})()`);
+log("  door setup: " + JSON.stringify(setup));
+check("the officer opens a racked cell with his keys", setup && setup.result === "opened" && setup.open, setup);
+let dw = null, reacted = false, shut = false;
+for (let i = 0; i < 40 && !(reacted && shut); i++) {
+  await ev(`(function(){ for (var i=0;i<30;i++) CBZ.stepSim(1/60); return true; })()`);
+  dw = await ev(`(function(){ var a = CBZ.prisonDoorWatch.audit(); a.cellLocked = !!(window.__copCell && window.__copCell.locked); return a; })()`);
+  if (i % 6 === 0) log(`   +${((i + 1) * 0.5).toFixed(1)}s ` + JSON.stringify(dw.live));
+  if (dw.log.challenged > 0 || dw.log.radioed > 0) reacted = true;
+  if (reacted && dw.cellLocked) shut = true;
+}
+log("  door watch: " + JSON.stringify(dw));
+check("a screw reacts to the cell opened off the clock", reacted, dw && dw.log);
+check("the cell ends up shut again (by him, or the officer on his word)", shut, dw && { locked: dw.cellLocked, log: dw.log });
 
 check("no console errors after PLAY", errors.length === 0, errors.length);
 if (errors.length) {

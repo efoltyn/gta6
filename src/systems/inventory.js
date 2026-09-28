@@ -114,7 +114,7 @@
       held: CBZ.currentWeaponId || null,
       holstered: holstered(),
       // an officer carries the staff card from the first frame
-      hasKeycard: !!(g.hasKey || inv["Keycard"] > 0 || (mode() === "escape" && g.role === "cop")),
+      hasKeycard: !!(g.hasKey || inv["Keycard"] > 0 || (mode() === "escape" && g.role === "cop" && !g.copKeysPulled)),
       keys: keys,
       flashlight: flashlightState(),
     });

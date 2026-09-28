@@ -52,7 +52,7 @@
   function keyTest(keys) {
     return function () {
       const g = CBZ.game;
-      if (g && g.role === "cop") return true;
+      if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
       if (!keys || !keys.length) return true;
       if (keys.indexOf("Keycard") >= 0 && g && g.hasKey) return true;
       const econ = CBZ.econ;
@@ -89,6 +89,7 @@
     }
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
       id: cfg.id, label: cfg.label, autoR: 2.5, openByTap: true,
+      keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return [d.group]; },
       col: function () { return d.collider; },
