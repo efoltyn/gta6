@@ -553,11 +553,10 @@
       toWorld(x, z) { const o = venue.origin; return { x: o.x + (x || 0), z: o.z + (z || 0) }; },
       toLocal(x, z) { const o = venue.origin; return { x: (x || 0) - o.x, z: (z || 0) - o.z }; },
 
-      /* THE TWO CLOCKS, moved together. core/daynight.js owns the SKY (dayPhase
-         0..1, sunrise at 0) and city/peds.js owns the ped SCHEDULE (cityHour
-         0..24, loose). They drift on purpose and are related by one identity —
-         hour = phase*24 + 6 — so set() can move both and leave the world
-         agreeing with itself, which is the whole reason a package would ask. */
+      /* THE ONE CLOCK. core/daynight.js owns it (dayPhase 0..1, sunrise at 0;
+         dayCount the calendar). city/peds.js's cityHour is a VIEW of it —
+         hour = phase*24 + 6 — so moving the phase moves the sky, the peds and
+         every schedule at once. */
       time: {
         phase(v) {
           if (v != null && !CBZ.CONFIG.PKG_WORLD_DRIVE) return CBZ.dayPhase ? CBZ.dayPhase() : 0.18;
@@ -577,7 +576,6 @@
           const h = typeof when === "number" ? when : TIME_NAMES[String(when).toLowerCase()];
           if (!isFinite(h)) return false;
           if (CBZ.dayPhase) CBZ.dayPhase((((h - 6) / 24) % 1 + 1) % 1);
-          if (CBZ.cityHour) CBZ.cityHour(h);
           return true;
         },
         // roll the clock FORWARD in days (0.5 = half a day). Serving a sentence,
@@ -589,7 +587,6 @@
             if (CBZ.dayCount) CBZ.dayCount(CBZ.dayCount() + Math.floor(p));  // midnight wraps the caller skipped
             CBZ.dayPhase(p);
           }
-          if (CBZ.cityHour) CBZ.cityHour(CBZ.cityHour() + days * 24);
           return true;
         },
       },

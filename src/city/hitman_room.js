@@ -57,7 +57,7 @@
                                                       hinge x 2.80, swings in
      ceiling fixture + the ONE PointLight   (0.30, 2.35, -0.20)
      corkboard centre (-0.80, 1.62) on the back wall, 1.8 x 1.1, cork face
-       at z -2.47; paper layers at +0.025 + 0.004 i off the cork.
+       at z -2.47; paper i lies flush at +0.0015 + 0.0012 i off the cork.
      envelope lands at (2.30, 0.006, 2.18) after sliding from z 2.62.
 
    COLLIDERS (y0 = floor, world AABB, all tagged _hmRoom):
@@ -1119,10 +1119,12 @@
     ph.scr.color.setHex(state === "ringing" ? 0xffffff : 0x3a3a3a);
   }
   // the buzz: a motor rattle synthesised on the game's own AudioContext
-  // (systems/audio.js has no vibration sample), scaled by distance
+  // (systems/audio.js has no vibration sample), scaled by distance, and fed
+  // into the game's sfx bus so the master (and every hush/duck) governs it
   function buzz(vol) {
     const ctx = CBZ.getAudioCtx ? CBZ.getAudioCtx() : null;
-    if (!ctx || ctx.state !== "running" || vol <= 0.002) return;
+    const bus = CBZ.audioSfxBus ? CBZ.audioSfxBus() : null;
+    if (!ctx || !bus || ctx.state !== "running" || vol <= 0.002) return;
     try {
       const t = ctx.currentTime;
       const o = ctx.createOscillator(), o2 = ctx.createOscillator(), f = ctx.createBiquadFilter(), gn = ctx.createGain(), am = ctx.createGain();
@@ -1134,7 +1136,7 @@
       gn.gain.linearRampToValueAtTime(vol, t + 0.03);
       gn.gain.setValueAtTime(vol, t + 0.36);
       gn.gain.linearRampToValueAtTime(0.0001, t + 0.4);
-      o.connect(f); f.connect(gn); gn.connect(ctx.destination);
+      o.connect(f); f.connect(gn); gn.connect(bus);
       o.start(t); o2.start(t); o.stop(t + 0.42); o2.stop(t + 0.42);
     } catch (e) {}
   }
@@ -1338,14 +1340,19 @@
     bd.items = list;
     const pinAt = {};
     const pinGeo = new THREE.CylinderGeometry(0.0065, 0.0075, 0.009, 12);
-    const needleGeo = new THREE.CylinderGeometry(0.0007, 0.0007, 0.04, 4);
+    const needleGeo = new THREE.CylinderGeometry(0.0007, 0.0007, 0.025, 4);   // stays inside the 3 cm cork
     let top = 0;
     for (let i = 0; i < list.length; i++) {
       const it = list[i];
       const cw = it.canvas.width || 1, ch = it.canvas.height || 1;
       const w = it.w || (it.h ? it.h * cw / ch : 0.25), h = it.h || w * ch / cw;
       it.w = w; it.h = h;
-      const z = 0.025 + 0.004 * i;
+      // FLUSH to the cork: the group's origin IS the cork face (buildBoard),
+      // so a sheet sits 1.5 mm proud of it and each later sheet 1.2 mm over
+      // the last: enough depth separation not to z-fight at reading range,
+      // too little to see as a gap. (It was 25 mm + 4 mm/sheet: every paper
+      // floated a thumb's width off the board.)
+      const z = 0.0015 + 0.0012 * i;
       top = z;
       const tex = paperTex(it.canvas);
       const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, side: THREE.FrontSide });
@@ -1361,16 +1368,16 @@
       pinAt[it.id] = { x: px, y: py, z: z + 0.006 };
       const head = new THREE.Mesh(pinGeo.clone(), it.pin === "white" ? MM.pinWhite : MM.pinRed);
       head.rotation.x = Math.PI / 2;
-      head.position.set(px, py, z + 0.0055);
+      head.position.set(px, py, z + 0.0046);             // 9 mm head, its underside on the sheet
       bd.g.add(head); bd.nodes.push(head);
       const nd = new THREE.Mesh(needleGeo.clone(), MM.steel);
       nd.rotation.x = Math.PI / 2;
-      nd.position.set(px, py, z - 0.019);
+      nd.position.set(px, py, z - 0.012);                 // head underside down into the cork
       bd.g.add(nd); bd.nodes.push(nd);
     }
     pinGeo.dispose(); needleGeo.dispose();
     // red string between linked pins, above the top paper
-    const sz = top + 0.012;
+    const sz = top + 0.003;                                // at the pin heads, just over the top sheet
     for (let i = 0; i < list.length; i++) {
       const it = list[i], a = pinAt[it.id];
       const links = it.links || [];
@@ -1711,8 +1718,7 @@
     const np = p - wraps;
     // the sky's calendar (daynight.js counts a day each time the phase wraps)
     if (wraps > 0 && CBZ.dayCount) CBZ.dayCount(CBZ.dayCount() + wraps);
-    CBZ.dayPhase(np);
-    if (CBZ.cityHour) CBZ.cityHour(hour);            // the ped schedule: hour = phase*24 + 6
+    CBZ.dayPhase(np);                                // the one clock: cityHour reads phase*24 + 6
     // polity.js's worldDay counts a wrap only when the phase DROPS by more
     // than half a day between frames; a shorter drop would be missed
     if (wraps > 0 && CBZ.worldDay && !(cur - np > 0.5)) { try { CBZ.worldDay(CBZ.worldDay() + 1); } catch (e) {} }
