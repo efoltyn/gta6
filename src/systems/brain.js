@@ -24,7 +24,10 @@
    THE API (binding contract; additions marked +)
      brain.of(actor, archetypeId?)        brain.define(id, spec)   brain.archetype(id)
      brain.register(actor, archId, opts)  brain.unregister(actor)
-       opts: { faction, clique, group, leader, personality, game, protect, safe, behavior }
+       opts: { faction, clique, group, leader, personality, game, protect, safe, behavior,
+               + nerve (absolute break point), + nerveJ }  — a FULL personality + nerve
+               consume no brain RNG (deterministic games stay deterministic)
+     archetype spec + selfAttitude: same-faction attitude for this kind (inmate 0.2)
      brain.clock(t)  brain.now()          + brain.update(dt)  + brain.reset()  + brain.seed(n)
      + brain.list()  + brain.near(x, z, r, out?)  + brain.rng()
      brain.tick(actor, dt, ctx) -> INTENT { kind, x, z, speed, posture, target, say, response, phase }
@@ -32,12 +35,14 @@
      perception.sees(obs, target, opts)  .seesPoint(obs, x, y, z, opts)
      perception.awareness(obs, target, dt, opts) -> 0..1 (>=1 SPOTTED)
      perception.noise(x, z, loudness_m, kind, source) -> listeners reached
-     perception.blind(actor)  .addBlind(fn)  .setOcclusion(fn)  .setLight(fn)
+     perception.blind(actor)  .addBlind(fn)  .setOcclusion(fn, + game?)  .setLight(fn)
+       awareness opts.reason 0 = seen but no reason to care: the meter still drains
      + perception.occluded(ox,oy,oz, tx,ty,tz)  + perception.NOISE (default radii by kind)
      + perception.spotted(obs, target) -> awareness >= 1
 
      memory.see(a, t)  .lastSeen(a, t)  .heard(a)  .grudge(a, other, delta?)
      memory.forget(a)  memory.tick(a, dt)   + memory.recent(a, t, sec)  + memory.hear(a, ...)
+     + memory.aware(obs, t) -> meter record  + memory.setAware(obs, t, v, hold?)
      brain.rep.get(faction)  .add(faction, {fear,respect,hostility})  .reset()
 
      needs.define(archOrGame, blocks)  needs.current(actor, hour?)
@@ -47,6 +52,9 @@
      social.cliqueMates(a, radius)  social.crime(kind, x, z, perp, severity, opts)
      social.onReport(game, fn) -> unsubscribe   social.retaliate(victim, aggressor, harm)
      + social.silence(witness, how) (alias cancelReport)  + social.pending()
+     + social.fileNow(witness)  + social.holdReport(witness)  + social.accuse(w, perp, kind, sev, opts)
+     + social.setReportBias(fn(witness, crime) -> mult, game?)
+       reports carry report.heat / report.type (= opts.heat / opts.type) untouched
      + social.setLeader(clique, actor)  + social.leader(clique)
        crime opts: { game, victim, loud, sightRange, instant, noReport, y, ...any }
        (the whole opts object rides every report as report.opts)
@@ -56,7 +64,9 @@
        threat: { source, x, z, armed, aimingAtMe, distance, kind, + authority, + sheltered }
      morale.group(id)  .hit(id, amt)  .death(id, actor)  .rattle(actor, amt)
      morale.of(actor)  .broken(actor)  .tick(dt)
-       + morale.config(id, k)  + morale.nerve(actor)
+       + morale.config(id, k)  + morale.nerve(actor)  + morale.clear(id)  + tick(dt, groupId)
+       tick is idempotent per clock stamp; rattle drains in memory.tick for the
+       brains a game memory-ticks, in morale.tick only for the rest
        + EXACT PORTS for thin callers: morale.fromLosses(o) (warlord moraleFrom),
          morale.brokenSide(side, fled) (warlord), morale.stepRout(m, sideMorale,
          nerve) (warlord), morale.nerveOf(cq) (warlord), morale.armyStep(A, F,
@@ -69,11 +79,14 @@
                + minor (a complied minor matter = frisk + warning, no cuffs) }
      authority.step(officer, dt, suspectState) -> { phase, say, act, verb, x, z }
      authority.cancel(officer)   + authority.caseOf(officer)  + authority.LINES  + .ARREST
-       case.outcome: cuffed | warned | lost | dead | cancelled
+       case.outcome: cuffed | warned | released | complied | lost | dead | cancelled
+       + opts.hold (challenge in place)  + opts.comply "disarm" + opts.outcome "release"
+       + opts.rechallenge (true | window s: patience / n for the same man again)
 
      act.moveTo(a, x, z, opts)  act.stop(a)  act.face(a, x, z)  act.posture(a, p)
      act.say(a, line, opts)  act.verb(name, a, b, opts)  act.use(game, executor)
        + executor.prefer: true makes the game's executor win over the seams
+       + actor._brain.movedAt / movedFrame  + act.movedThisFrame(a)
 ============================================================ */
 (function (root) {
   "use strict";
@@ -177,7 +190,7 @@
 
   define("civilian", {});
   define("inmate", {
-    viewDist: 18, fovHalf: 1.2, faction: "inmates", cq: "thug",
+    viewDist: 18, fovHalf: 1.2, faction: "inmates", cq: "thug", selfAttitude: 0.2,
     personality: P5([0.2, 0.9], [0.3, 0.9], [0.1, 0.4], [0.3, 0.7], [0.4, 0.9]),
     // the yard's code: most look away, some enjoy it, a few snitch
     witness: { flee: 0.2, film: 0, report: 0.07, intervene: 0.12, cower: 0.16, ignore: 0.3, cheer: 0.15 },
@@ -303,10 +316,24 @@
     out.discipline = clamp01(1 - (B.picksWeak || 0) * 0.4 - B.init);
     return out;
   }
-  function makeRecord(actor, archId) {
+  const AXES = ["courage", "aggression", "discipline", "curiosity", "loyalty"];
+  function fullPersonality(P) {
+    if (!P) return false;
+    for (let i = 0; i < AXES.length; i++) if (typeof P[AXES[i]] !== "number") return false;
+    return true;
+  }
+  // opts (register's) lets a DETERMINISTIC game (seeded sims, lockstep war)
+  // hand the whole person in: a full personality + a nerve consume no brain
+  // RNG at all, so its stream is untouched by who else registered first.
+  function makeRecord(actor, archId, opts) {
     const A = archetype(archId || "civilian");
     const pr = A.personality;
-    const p = {
+    const given = opts && fullPersonality(opts.personality) ? opts.personality : null;
+    const noRng = !!given && opts.nerve != null;
+    const p = given ? {
+      courage: clamp01(given.courage), aggression: clamp01(given.aggression), discipline: clamp01(given.discipline),
+      curiosity: clamp01(given.curiosity), loyalty: clamp01(given.loyalty),
+    } : {
       courage: range(pr.courage), aggression: range(pr.aggression), discipline: range(pr.discipline),
       curiosity: range(pr.curiosity), loyalty: range(pr.loyalty),
     };
@@ -326,7 +353,8 @@
       needs: null,
       witness: null,
       retaliation: null,
-      rattle: 0, routed: false, rallyT: 0, nerveJ: (((id * 37) % 11) - 5) * 0.012,
+      rattle: 0, rattleAt: null, routed: false, rallyT: 0, nerveJ: (((id * 37) % 11) - 5) * 0.012, nerveAbs: null,
+      movedAt: -1e9, movedFrame: -1,
       case: null,
       protect: null, safe: null,
       lastSay: "", lastSayT: -1e9,
@@ -337,21 +365,25 @@
     };
     if (A.needs) {
       b.needs = { levels: {}, rates: A.needs, t: now() };
-      for (const k in A.needs) b.needs.levels[k] = 0.55 + rng() * 0.4;
+      for (const k in A.needs) b.needs.levels[k] = noRng ? 0.75 : 0.55 + rng() * 0.4;
     }
     return b;
   }
-  function of(actor, archId) {
+  function of(actor, archId, opts) {
     if (!actor) return null;
     let b = actor._brain;
-    if (!b) { b = actor._brain = makeRecord(actor, archId); }
+    if (!b) { b = actor._brain = makeRecord(actor, archId, opts); }
     else if (archId && b.archId !== archId && ARCH[archId]) { b.arch = ARCH[archId]; b.archId = archId; }
     return b;
   }
   function register(actor, archId, opts) {
-    const b = of(actor, archId);
     opts = opts || {};
+    const b = of(actor, archId, opts);
     if (opts.faction) b.faction = opts.faction;
+    // an absolute break point (0..1) replaces archetype nerve + courage push +
+    // jitter; nerveJ alone replaces only the id-ordered jitter
+    if (opts.nerve != null) b.nerveAbs = clamp01(opts.nerve);
+    if (opts.nerveJ != null) b.nerveJ = opts.nerveJ;
     if (opts.clique != null) b.clique = opts.clique;
     if (opts.group != null) b.group = opts.group;
     if (opts.game) b.game = opts.game;
@@ -453,7 +485,12 @@
     const hits = CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false);
     return !!(hits && hits.length > 0);
   }
-  function occluded(ox, oy, oz, tx, ty, tz) {
+  // per-GAME occlusion (setOcclusion(fn, game)): the observer's own game wins,
+  // then the global one, then the THREE default
+  const OCC = Object.create(null);
+  function occluded(ox, oy, oz, tx, ty, tz, game) {
+    const g = game != null && OCC[game];
+    if (g) return g(ox, oy, oz, tx, ty, tz);
     return (occlusionFn || defaultOcclusion)(ox, oy, oz, tx, ty, tz);
   }
   // LIGHT: fn(observer, x, z) -> range multiplier (1 = daylight). Default is
@@ -490,7 +527,7 @@
     if (opts && opts.occlude === false) return true;
     const eye = opts && opts.eyeY != null ? opts.eyeY : 1.5;
     const tgt = opts && opts.targetY != null ? opts.targetY : 1.0;
-    return !occluded(ox, oy + eye, oz, x, y + tgt, z);
+    return !occluded(ox, oy + eye, oz, x, y + tgt, z, b ? b.game : null);
   }
   function sees(obs, target, opts) {
     if (!target || target === obs) return false;
@@ -511,11 +548,14 @@
     const tz = target.pos || target.group || target.position ? az(target) : target.z;
     const vis = sees(obs, target, opts);
     m.visible = vis;
-    if (vis) {
+    const reason = opts && opts.reason != null ? opts.reason : 1;
+    // SEEN, but no reason to care (guards.js: a screw watching a man who has
+    // done nothing): the sighting is remembered, the meter still lets go
+    if (vis) { m.x = tx; m.z = tz; m.t = now(); m.valid = true; }
+    if (vis && reason > 0) {
       const d = Math.hypot(tx - ax(obs), tz - az(obs));
       const vd = Math.max(1, opts && opts.range != null ? opts.range : b.arch.viewDist * b.viewMul);
       const prox = clamp01(1 - d / vd);
-      const reason = opts && opts.reason != null ? opts.reason : 1;
       // movement: the guard's moveMul off the TARGET's own speed / crouch
       let move = 1;
       if (opts && opts.moveMul != null) move = opts.moveMul;
@@ -533,7 +573,6 @@
       if (d < b.arch.closeSpot) rate = 50;
       m.aware = Math.min(1, m.aware + rate * dt);
       m.hold = SUS_HOLD;
-      m.x = tx; m.z = tz; m.t = now(); m.valid = true;
     } else {
       m.hold -= dt;
       if (m.hold <= 0 && m.aware > 0) m.aware = Math.max(0, m.aware - SUS_DRAIN * dt);
@@ -558,7 +597,7 @@
       const dx = ax(a) - x, dz = az(a) - z;
       const d = Math.sqrt(dx * dx + dz * dz);
       if (d > r) continue;
-      if (d > r * 0.5 && occluded(x, 1.2, z, ax(a), ay(a) + 1.5, az(a))) continue;   // through a wall: half range
+      if (d > r * 0.5 && occluded(x, 1.2, z, ax(a), ay(a) + 1.5, az(a), b.game)) continue;   // through a wall: half range
       hear(a, x, z, kind, source, d, t);
       n++;
     }
@@ -580,7 +619,11 @@
     occluded: occluded, NOISE: NOISE,
     spotted: function (obs, target) { const b = obs && obs._brain; const r = b ? seenRec(b, target, false) : null; return !!(r && r.aware >= 1); },
     addBlind: function (fn) { if (typeof fn === "function" && blindFns.indexOf(fn) < 0) blindFns.push(fn); return function () { const i = blindFns.indexOf(fn); if (i >= 0) blindFns.splice(i, 1); }; },
-    setOcclusion: function (fn) { occlusionFn = typeof fn === "function" ? fn : null; },
+    setOcclusion: function (fn, game) {
+      const f = typeof fn === "function" ? fn : null;
+      if (game != null) { if (f) OCC[game] = f; else delete OCC[game]; }
+      else occlusionFn = f;
+    },
     setLight: function (fn) { lightFn = typeof fn === "function" ? fn : null; },
   };
 
@@ -650,7 +693,7 @@
   }
   function memTick(a, dt) {
     const b = a && a._brain; if (!b || !(dt > 0)) return;
-    b._memT = frame;
+    b._memT = frame; b._memAt = now();      // morale.tick leaves this man's rattle to us
     const k = Math.pow(0.5, dt / GRUDGE_HALF);
     const v = b.gVals;
     for (let i = 0; i < v.length; i++) v[i] *= k;
@@ -662,6 +705,16 @@
     see: function (a, target, x, z) { return memSee(a, target, x, z); },
     lastSeen: lastSeen, recent: recent, heard: heard, grudge: grudge, forget: forget, tick: memTick,
     hear: function (a, x, z, kind, source) { hear(a, x, z, kind, source); return of(a).heardR; },
+    // the awareness meter's record for (obs, target): { aware, hold, visible, x, z, t }
+    // or null. setAware writes it (another system turned his head / stood him
+    // down); hold is optional and keeps its value when omitted.
+    aware: function (obs, target) { const b = obs && obs._brain; return b ? seenRec(b, target, false) : null; },
+    setAware: function (obs, target, v, hold) {
+      const r = seenRec(of(obs), target, true);
+      r.aware = clamp01(+v || 0);
+      if (hold != null) r.hold = +hold || 0;
+      return r;
+    },
   };
 
   /* ---------------------------------------------------------------- REPUTATION
@@ -749,7 +802,11 @@
     if (fa == null || fb == null) return 0;
     const v = ATT[attKey(fa, fb)];
     if (v != null) return v;
-    return fa === fb ? 1 : 0;
+    if (fa !== fb) return 0;
+    // same side: 1, unless the ARCHETYPE says its own kind is no family
+    // (inmate selfAttitude 0.2: one inmate will report another)
+    const A = a && typeof a === "object" && a._brain ? a._brain.arch : null;
+    return A && A.selfAttitude != null ? A.selfAttitude : 1;
   }
   setAttitude("police", "gang", -0.6);
   setAttitude("civilians", "police", 0.3);
@@ -840,12 +897,12 @@
       let heardIt = false;
       if (!saw && loud > 0) {
         const r = loud * (b.arch.hearMul || 1);
-        heardIt = d <= r && (d <= r * 0.5 || !occluded(x, 1.2, z, ax(a), ay(a) + 1.5, az(a)));
+        heardIt = d <= r && (d <= r * 0.5 || !occluded(x, 1.2, z, ax(a), ay(a) + 1.5, az(a), b.game));
       }
       if (!saw && !heardIt) continue;
       if (!snap) { snap = {}; for (const k in opts) snap[k] = opts[k]; }
       // a witness who only HEARD it knows where, not who
-      const w = b.witness || (b.witness = { kind: null, x: 0, z: 0, perp: null, severity: 0, t: 0, response: null, reportAt: null, saw: false, cancelled: false, reported: false });
+      const w = witnessRec(b);
       if (w.reportAt != null && !w.reported && w.severity > sev) continue;   // keeps the WORST thing they saw
       w.kind = kind; w.x = x; w.z = z; w.perp = saw ? perp : null; w.severity = sev; w.t = t;
       w.saw = saw; w.cancelled = false; w.reported = false; w.game = opts.game || null; w.opts = snap;
@@ -858,7 +915,17 @@
       if (a === opts.victim) pr = Math.max(pr, 0.8);
       if (perpIsPlayer) pr *= 1 - rep.get(b.faction).fear * 0.6;
       if (opts.noReport || attitude(a, perp) > 0.5) pr = 0;
-      if (pr > 0 && rng() < pr) {
+      // the game's own say on who talks (a snitch trait, the yard's code, a
+      // neighbourhood): a multiplier, per game or global
+      if (pr > 0) {
+        const bf = (b.game != null && BIAS[b.game]) || BIAS["*"];
+        if (bf) {
+          _cInfo.kind = kind; _cInfo.x = x; _cInfo.z = z; _cInfo.perp = perp; _cInfo.severity = sev; _cInfo.opts = snap; _cInfo.saw = saw;
+          const m = +bf(a, _cInfo);
+          if (m >= 0) pr *= m;
+        }
+      }
+      if (pr > 0 && rng() < Math.min(1, pr)) {
         const delay = isAuthority(b) ? 0.6 + rng() * 1.2                   // a radio
           : w.response === "flee" ? 6 + rng() * 6                           // once they're clear
             : 3 + rng() * 6;                                                // dialling / walking to a cop
@@ -873,6 +940,63 @@
       n++;
     }
     return n;
+  }
+  function witnessRec(b) {
+    return b.witness || (b.witness = { kind: null, x: 0, z: 0, perp: null, severity: 0, t: 0, response: null, reportAt: null,
+      saw: false, cancelled: false, reported: false, game: null, opts: null, toAuth: null });
+  }
+  const BIAS = Object.create(null);
+  const _cInfo = { kind: null, x: 0, z: 0, perp: null, severity: 0, opts: null, saw: false };
+  function setReportBias(fn, game) {
+    const k = game != null ? game : "*";
+    if (typeof fn === "function") BIAS[k] = fn; else delete BIAS[k];
+  }
+  // one report, to every subscriber of its game. heat / type ride on top
+  // of report.opts untouched (wanted.js and detection.js read them).
+  function dispatch(b, w, t) {
+    w.reported = true;
+    const o = w.opts;
+    const rep0 = { kind: w.kind, x: w.x, z: w.z, perp: w.perp, severity: w.severity, witness: b.actor, t: t, response: w.response,
+      game: w.game || b.game, opts: o, heat: o ? o.heat : undefined, type: o ? o.type : undefined };
+    const gm = w.game || b.game;
+    for (let s = 0; s < reportSubs.length; s++) {
+      const sub = reportSubs[s];
+      if (sub.game && sub.game !== "*" && gm && sub.game !== gm) continue;
+      try { sub.fn(rep0); } catch (e) { if (typeof console !== "undefined") console.error("[brain] onReport", e); }
+    }
+    return rep0;
+  }
+  function dropPending(b) { const k = pending.indexOf(b); if (k >= 0) { pending[k] = pending[pending.length - 1]; pending.pop(); } }
+  // FILE IT NOW: the witness reached the officer (prison: walked to a screw).
+  function fileNow(witness) {
+    const b = witness && witness._brain, w = b && b.witness;
+    if (!w || w.reported || w.cancelled || w.reportAt == null || reportBlocked(witness)) return false;
+    dropPending(b);
+    dispatch(b, w, now());
+    return true;
+  }
+  // HOLD IT: the report waits (reportAt = Infinity) until fileNow or silence
+  function holdReport(witness) {
+    const b = witness && witness._brain, w = b && b.witness;
+    if (!w || w.reported || w.cancelled || w.reportAt == null) return false;
+    w.reportAt = Infinity;
+    return true;
+  }
+  // A LONE ACCUSER: a grudge-holder going to the law about a man, no crime
+  // event needed. opts: { delay (s, default 0 = files now), x, z, game, ...any }
+  function accuse(witness, perp, kind, severity, opts) {
+    if (!witness || reportBlocked(witness)) return false;
+    opts = opts || {};
+    const b = of(witness), w = witnessRec(b);
+    const snap = {}; for (const k in opts) snap[k] = opts[k];
+    w.kind = kind || "accusation"; w.perp = perp || null; w.severity = clamp01(severity == null ? 0.5 : severity);
+    w.x = opts.x != null ? opts.x : (perp ? ax(perp) : ax(witness)); w.z = opts.z != null ? opts.z : (perp ? az(perp) : az(witness));
+    w.t = now(); w.saw = true; w.cancelled = false; w.reported = false; w.response = "report";
+    w.game = opts.game || null; w.opts = snap; w.toAuth = null;
+    w.reportAt = w.t + (opts.delay || 0);
+    if (!(opts.delay > 0)) { dispatch(b, w, w.t); return true; }
+    if (pending.indexOf(b) < 0) pending.push(b);
+    return true;
   }
   const _authBuf = [];
   function nearestAuthority(x, z, r, self) {
@@ -903,15 +1027,8 @@
         continue;
       }
       if (t < w.reportAt) continue;
-      w.reported = true;
       pending[i] = pending[pending.length - 1]; pending.pop();
-      const rep0 = { kind: w.kind, x: w.x, z: w.z, perp: w.perp, severity: w.severity, witness: b.actor, t: t, response: w.response, game: w.game || b.game, opts: w.opts };
-      for (let s = 0; s < reportSubs.length; s++) {
-        const sub = reportSubs[s];
-        const gm = w.game || b.game;
-        if (sub.game && sub.game !== "*" && gm && sub.game !== gm) continue;
-        try { sub.fn(rep0); } catch (e) { if (typeof console !== "undefined") console.error("[brain] onReport", e); }
-      }
+      dispatch(b, w, t);
     }
   }
   function onReport(game, fn) {
@@ -966,7 +1083,8 @@
     setAttitude: setAttitude, attitude: attitude,
     clique: function (a) { return a && a._brain ? a._brain.clique : null; },
     cliqueMates: cliqueMates, crime: crime, onReport: onReport, retaliate: retaliate,
-    silence: silence, cancelReport: silence, setLeader: setLeader, leader: function (c) { return LEADERS[c] || null; },
+    silence: silence, cancelReport: silence, fileNow: fileNow, holdReport: holdReport, accuse: accuse,
+    setReportBias: setReportBias, setLeader: setLeader, leader: function (c) { return LEADERS[c] || null; },
     pending: function () { return pending.length; },
     LEVELS: LEVELS, LOUD: LOUD,
   };
@@ -1044,7 +1162,7 @@
     let G = GROUPS[id];
     if (!G) {
       G = GROUPS[id] = { id: id, morale: 1, shock: 0, alive: 0, routing: 0, men0: 0, p0: 0, pNow: 0, dead: 0,
-        leaderDown: false, malus: 0, broken: false, foe: null, members: [], k: {} };
+        leaderDown: false, malus: 0, broken: false, foe: null, members: [], ghosts: [], tickT: null, k: {} };
       for (const k in GDEF) G.k[k] = GDEF[k];
       groupList.push(G);
     }
@@ -1055,11 +1173,17 @@
     b._gid = id;
     if (G.members.indexOf(b) >= 0) return;
     G.members.push(b);
+    // A RECYCLED BODY: the same actor object left this group dead (his share
+    // stayed in p0 as a loss) and is back as a new man. He refills his old
+    // slot; the starting size does not grow.
+    const gi = G.ghosts.indexOf(b.actor);
+    if (gi >= 0) { G.ghosts[gi] = G.ghosts[G.ghosts.length - 1]; G.ghosts.pop(); return; }
     G.men0++; G.p0 += b.arch.moraleK || 1;
   }
   // leaving a group ALIVE (despawned, re-grouped) takes his share of p0 with
   // him, so a crowd streaming out of range is not read as casualties; a dead
-  // man's share stays, because the loss is real.
+  // man's share stays, because the loss is real (remembered as a ghost, so a
+  // recycled body does not count twice).
   function moraleLeave(b) {
     const id = b._gid;
     b._gid = null;
@@ -1069,6 +1193,18 @@
     if (i < 0) return;
     G.members[i] = G.members[G.members.length - 1]; G.members.pop();
     if (!isDead(b.actor)) { G.men0 = Math.max(0, G.men0 - 1); G.p0 = Math.max(0, G.p0 - (b.arch.moraleK || 1)); }
+    else if (G.ghosts.indexOf(b.actor) < 0) G.ghosts.push(b.actor);
+  }
+  // EMPTY A GROUP (a new match, a new crowd). Its config (morale.config) is
+  // kept; members are released, every count and the ghosts go.
+  function moraleClear(id) {
+    const G = GROUPS[id];
+    if (!G) return null;
+    for (let i = 0; i < G.members.length; i++) if (G.members[i]._gid === id) G.members[i]._gid = null;
+    G.members.length = 0; G.ghosts.length = 0;
+    G.men0 = 0; G.p0 = 0; G.pNow = 0; G.dead = 0; G.alive = 0; G.routing = 0;
+    G.shock = 0; G.morale = 1; G.broken = false; G.leaderDown = false; G.tickT = null;
+    return G;
   }
   function recompute(G) {
     let alive = 0, routing = 0, pNow = 0;
@@ -1089,19 +1225,44 @@
     G.morale = clamp01(mo);
     return G;
   }
-  function moraleTick(dt) {
-    for (let i = 0; i < groupList.length; i++) {
-      const G = groupList[i];
-      G.shock *= Math.exp(-(dt || 0) / G.k.shockTau);
-      recompute(G);
-      if (!G.broken && G.alive >= 2 && G.routing >= G.alive * 0.5) G.broken = true;
-      else if (G.broken && G.alive - G.routing > 0 && G.routing < G.alive * 0.25) G.broken = false;
+  /* IDEMPOTENT PER CLOCK STAMP. The prison ticks morale at 4 Hz, the city and
+     the survivors call it too; a second call on the same stamp (brain.now())
+     is a no-op for every group it already ticked, so nothing drains twice.
+     tick(dt, groupId) ticks ONE group. With no driven clock (no clock(), no
+     CBZ.game.elapsed) there is no stamp to key on and every call counts. */
+  function clockDriven() { return clockSet || !!(CBZ.game && typeof CBZ.game.elapsed === "number"); }
+  function memTickedRecently(b) {
+    if (b._memAt == null) return false;
+    return clockDriven() ? now() - b._memAt <= 1 : b._memT === frame;
+  }
+  function tickGroup(G, dt, s, driven) {
+    if (driven && G.tickT === s) return false;
+    G.tickT = s;
+    G.shock *= Math.exp(-(dt || 0) / G.k.shockTau);
+    recompute(G);
+    if (!G.broken && G.alive >= 2 && G.routing >= G.alive * 0.5) G.broken = true;
+    else if (G.broken && G.alive - G.routing > 0 && G.routing < G.alive * 0.25) G.broken = false;
+    return true;
+  }
+  // the rattle drains here only for brains nobody memory.tick()s (memTick
+  // owns it for the rest), once per stamp
+  function drainRattle(b, dt, s, driven) {
+    if (b.rattle <= 0 || memTickedRecently(b)) return;
+    if (driven && b.rattleAt === s) return;
+    b.rattleAt = s;
+    b.rattle = Math.max(0, b.rattle - MK.SUPP_DECAY * (dt || 0));
+  }
+  function moraleTick(dt, groupId) {
+    const s = now(), driven = clockDriven();
+    if (groupId != null) {
+      const G = GROUPS[groupId];
+      if (!G || !tickGroup(G, dt, s, driven)) return G || null;
+      for (let i = 0; i < G.members.length; i++) drainRattle(G.members[i], dt, s, driven);
+      return G;
     }
-    // the rattle drains for brains no game is ticking
-    for (let i = 0; i < registered.length; i++) {
-      const b = registered[i];
-      if (b._memT !== frame && b.rattle > 0) b.rattle = Math.max(0, b.rattle - MK.SUPP_DECAY * (dt || 0));
-    }
+    for (let i = 0; i < groupList.length; i++) tickGroup(groupList[i], dt, s, driven);
+    for (let i = 0; i < registered.length; i++) drainRattle(registered[i], dt, s, driven);
+    return null;
   }
   function moraleHit(id, amt) { const G = group(id); G.shock = Math.max(0, G.shock + (amt || 0)); recompute(G); return G; }
   function moraleDeath(id, actor) {
@@ -1127,6 +1288,7 @@
   // a person's nerve: combat_iq's column for his cq, pushed by his courage
   function nerve(actor) {
     const b = of(actor);
+    if (b.nerveAbs != null) return b.nerveAbs;             // register({ nerve }) — the game's own number
     const base = b.arch.nerve != null ? b.arch.nerve : nerveOf(b.arch.cq);
     return clamp(base + (0.5 - b.personality.courage) * 0.5 + b.nerveJ, 0.05, 0.95);
   }
@@ -1149,7 +1311,7 @@
   }
   const morale = {
     group: group, hit: moraleHit, death: moraleDeath, rattle: rattle, of: moraleOf, broken: broken, tick: moraleTick,
-    nerve: nerve,
+    nerve: nerve, clear: moraleClear,
     config: function (id, k) { const G = group(id); for (const j in k) { if (j === "foe") G.foe = k[j]; else if (j === "malus") G.malus = k[j]; else G.k[j] = k[j]; } return G; },
     fromLosses: fromLosses, brokenSide: brokenSide, stepRout: stepRout, nerveOf: nerveOf,
     armyStep: armyStep, deathShock: deathShock, manMorale: manMorale, nerveFor: nerveFor,
@@ -1262,10 +1424,15 @@
   function moveTo(a, x, z, opts) {
     const o = opts || _moveOpts;
     o.speedMps = speedNum(o.speed);
-    return !!via(N_MOVE, "moveTo", a, x, z, o);
+    const ok = !!via(N_MOVE, "moveTo", a, x, z, o);
+    if (ok) markMoved(a);
+    return ok;
   }
   const _moveOpts = { speed: "walk", arrive: 1, face: true, speedMps: 1.4 };
-  function stop(a) { return !!via(N_STOP, "stop", a); }
+  // actor._brain.movedAt / movedFrame: when the brain last moved or stopped
+  // this body, so a game's own loop can skip moving him twice (act.movedThisFrame)
+  function markMoved(a) { const b = a && a._brain; if (b) { b.movedAt = now(); b.movedFrame = frame; } }
+  function stop(a) { const ok = !!via(N_STOP, "stop", a); if (ok) markMoved(a); return ok; }
   function face(a, x, z) { return !!via(N_FACE, "face", a, x, z); }
   function posture(a, p) { const b = a && a._brain; if (b) b.posture = p; return !!via(N_POST, "posture", a, p); }
   // SPEECH: in-world only (systems/speech.js puts it over the speaker's head).
@@ -1307,6 +1474,7 @@
     moveTo: moveTo, stop: stop, face: face, posture: posture, say: say, verb: verb,
     use: function (game, ex) { EXEC[game || "*"] = ex || null; return function () { if (EXEC[game || "*"] === ex) delete EXEC[game || "*"]; }; },
     SPEEDS: SPEEDS,
+    movedThisFrame: function (a) { const b = a && a._brain; return !!b && b.movedFrame === frame && b.movedAt === now(); },
   };
 
   /* ================================================================ AUTHORITY
@@ -1330,6 +1498,7 @@
     force: ["Taser! Taser!", "Get down!"],
     lethal: ["Drop it or I shoot!"],
     done: ["You're done.", "Move along."],
+    released: ["Keep it holstered.", "Put it away and keep it away.", "Alright. Move along."],
     frisk: ["Hands on the wall.", "Arms out."],
     warned: ["Move along.", "Don't let me see it again.", "Walk away."],
   };
@@ -1351,8 +1520,26 @@
     c.patience = opts.patience != null ? opts.patience : (ao.patience || 2.2);
     c.skipWarn = !!opts.skipWarn;
     c.minor = !!opts.minor;
+    // hold: challenge IN PLACE (a protection detail never leaves the principal
+    // to walk a man down): no approach, no chase, force only inside reach
+    c.hold = !!opts.hold;
+    // THE GUN-STOP (police.js challengeCall, absorbed): comply "disarm" means
+    // compliance is the weapon going away (holstered / dropped), and outcome
+    // "release" ends a complied case with him let go instead of cuffed
+    c.complyMode = opts.comply || "submit";
+    c.onComply = opts.outcome || (c.complyMode === "disarm" ? "release" : "cuff");
+    // RE-CHALLENGES come shorter: the same man challenged again inside the
+    // window (60 s) gets patience / n (floor 0.8 s), police.js's _chalN rule
+    if (opts.rechallenge) {
+      const ch = b.chal || (b.chal = { suspect: null, n: 0, t: -1e9 });
+      const win = typeof opts.rechallenge === "number" ? opts.rechallenge : 60;
+      ch.n = ch.suspect === suspect && now() - ch.t < win ? ch.n + 1 : 1;
+      ch.suspect = suspect; ch.t = now();
+      c.patience = Math.max(0.8, c.patience / ch.n);
+      c.challengeN = ch.n;
+    } else c.challengeN = 1;
     c.phase = "observe"; c.t = 0; c.phaseT = 0; c.comply = 0; c.flee = 0; c.lastD = -1;
-    c.tased = false; c.forceN = 0; c.cuffed = false; c.verbResult = null; c.outcome = null;
+    c.tased = false; c.noTaser = false; c.tackleN = 0; c.tackleCD = 0; c.forceN = 0; c.cuffed = false; c.verbResult = null; c.outcome = null;
     c.n = (c.n || 0) + 1; c.saidPhase = null; c.active = true;
     c.out = c.out || { phase: null, say: null, act: null, verb: null, x: 0, z: 0 };
     return c;
@@ -1376,6 +1563,9 @@
     const still = (s.speed || 0) < ARREST.COMPLY_SPD || s.handsUp || s.kneeling || s.prone;
     const running = (s.speed || 0) > ARREST.FLEE_SPD && opening;
     const threatening = s.armed && (s.aiming || s.attacking);
+    // what compliance IS for this case: a gun-stop only wants the gun away
+    const complying = c.complyMode === "disarm" ? !s.armed && !s.aiming && !s.attacking : still && !s.armed;
+    const hold = c.hold;
     const lethalOk = c.roe === "lethal" || c.roe === "protect";
     const seen = s.seen !== false;
     let ph = c.phase;
@@ -1387,32 +1577,39 @@
     if (ph === "observe") {
       out.act = "watch";
       if (seen && d <= c.warnRange) { setPhase(c, c.skipWarn || d <= c.orderRange ? "order" : "warn"); ph = c.phase; }
-      else if (seen) { out.act = "approach"; moveTo(officer, sx, sz, _mJog); }
+      else if (seen && !hold) { out.act = "approach"; moveTo(officer, sx, sz, _mJog); }
     }
     if (ph === "warn") {
       out.act = "approach";
       if (c.saidPhase !== "warn") { out.say = line(b, "warn"); c.saidPhase = "warn"; }
       face(officer, sx, sz);
-      if (d > c.orderRange) moveTo(officer, sx, sz, _mJog);
+      if (d > c.orderRange && !hold) moveTo(officer, sx, sz, _mJog);
       if (s.attacking) { setPhase(c, "escalate"); ph = c.phase; }
-      else if (d <= c.orderRange || c.phaseT > 1.5) { setPhase(c, "order"); ph = c.phase; }
+      else if (d <= c.orderRange || c.phaseT > 1.5 || hold) { setPhase(c, "order"); ph = c.phase; }
       else if (d > ARREST.LOSE_R && c.phaseT > 1) { setPhase(c, "escalate"); ph = c.phase; }
     }
     if (ph === "order") {
       out.act = "hold";
       if (c.saidPhase !== "order") { out.say = line(b, s.armed ? "orderArmed" : "order"); c.saidPhase = "order"; }
       face(officer, sx, sz);
-      if (d > c.orderRange + 0.5) moveTo(officer, sx, sz, _mWalk); else stop(officer);
+      if (d > c.orderRange + 0.5 && !hold) moveTo(officer, sx, sz, _mWalk); else stop(officer);
       if (s.attacking) { setPhase(c, "escalate"); ph = c.phase; }
       else {
-        c.comply = still && !s.armed ? c.comply + dt : Math.max(0, c.comply - dt * 0.5);
+        c.comply = complying ? c.comply + dt : Math.max(0, c.comply - dt * 0.5);
         c.flee = running ? c.flee + dt : Math.max(0, c.flee - dt * 0.5);
-        if (c.comply >= ARREST.COMPLY_HOLD) { setPhase(c, "approach"); ph = c.phase; }
-        else if (c.flee >= ARREST.FLEE_HOLD || d > ARREST.LOSE_R) { setPhase(c, "escalate"); ph = c.phase; }
-        else if (c.phaseT >= c.patience) {
-          if ((s.speed || 0) < 1.4 && !s.armed) { setPhase(c, "approach"); ph = c.phase; }
+        const lateOk = c.complyMode === "disarm" ? complying : (s.speed || 0) < 1.4 && !s.armed;
+        if (c.comply >= ARREST.COMPLY_HOLD || (c.phaseT >= c.patience && lateOk)) {
+          if (c.onComply === "release") {
+            out.say = line(b, "released"); c.outcome = "released"; c.active = false; setPhase(c, "done"); ph = "done";
+          } else if (hold && d > c.cuffRange) {
+            c.outcome = "complied"; c.active = false; setPhase(c, "done"); ph = "done";
+          } else { setPhase(c, "approach"); ph = c.phase; }
+        }
+        else if (c.flee >= ARREST.FLEE_HOLD || d > ARREST.LOSE_R) {
+          if (hold && d > ARREST.LOSE_R) { c.outcome = "lost"; c.active = false; setPhase(c, "done"); ph = "done"; }
           else { setPhase(c, "escalate"); ph = c.phase; }
         }
+        else if (c.phaseT >= c.patience) { setPhase(c, "escalate"); ph = c.phase; }
       }
     }
     if (ph === "approach") {
@@ -1420,6 +1617,7 @@
       if (c.saidPhase !== "approach") { out.say = line(b, "approach"); c.saidPhase = "approach"; }
       if (s.attacking || running || s.armed) { setPhase(c, "escalate"); ph = c.phase; }
       else if (d <= c.cuffRange) { setPhase(c, "cuff"); ph = c.phase; }
+      else if (hold) { c.outcome = "complied"; c.active = false; setPhase(c, "done"); ph = "done"; }
       else moveTo(officer, sx, sz, _mWalkArrive);
     }
     if (ph === "cuff") {
@@ -1444,22 +1642,30 @@
     if (ph === "escalate") {
       out.act = "chase";
       if (c.saidPhase !== "escalate") { out.say = line(b, "escalate"); c.saidPhase = "escalate"; }
-      moveTo(officer, sx, sz, _mRun);
+      if (hold) { out.act = "hold"; face(officer, sx, sz); } else moveTo(officer, sx, sz, _mRun);
       if (c.phaseT >= ARREST.ESC_T) { setPhase(c, "force"); ph = c.phase; }
     }
     if (ph === "force") {
-      // capture.js's ladder: the taser from range, the tackle if he gets up
-      // and resists again; lie still after either and it is cuffs.
+      // capture.js's ladder: the taser from range, then the TACKLE on any man
+      // in reach who is still not complying (walking off counts, not only a
+      // sprint). A game with no taser (the verb answers false) goes straight
+      // to the tackle instead of stalling; lie still after either = cuffs.
       out.act = "force";
-      if (!c.tased && d <= ARREST.TASE_R && c.saidPhase !== "force") {
+      if (c.tackleCD > 0) c.tackleCD -= dt;
+      const resisting = s.attacking || !(still && !s.armed);
+      if (!c.tased && !c.noTaser && d <= ARREST.TASE_R && c.saidPhase !== "force") {
         out.say = line(b, "force"); c.saidPhase = "force";
-        c.verbResult = verb("tase", officer, sus, _vOpts(c)); out.verb = "tase"; c.tased = true; c.forceN++; c.afterT = 0;
-      } else if (c.tased && d <= ARREST.TACKLE_R && (running || s.attacking) && c.forceN < 2) {
-        c.verbResult = verb("tackle", officer, sus, _vOpts(c)); out.verb = "tackle"; c.forceN++; c.afterT = 0;
-      } else if (d > ARREST.TASE_R) {
-        moveTo(officer, sx, sz, _mRun);
-        if (d > ARREST.LOSE_R * 1.6) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
+        const r = verb("tase", officer, sus, _vOpts(c));
+        if (r) { c.verbResult = r; out.verb = "tase"; c.tased = true; c.forceN++; c.afterT = 0; }
+        else c.noTaser = true;                                   // no taser here: the tackle is next
       }
+      if (!out.verb && (c.tased || c.noTaser) && d <= ARREST.TACKLE_R && resisting && c.tackleN < 2 && c.tackleCD <= 0) {
+        c.verbResult = verb("tackle", officer, sus, _vOpts(c)); out.verb = "tackle";
+        c.tackleN++; c.tackleCD = 1.5; c.forceN++; c.afterT = 0;
+      } else if (!out.verb && !hold && d > (c.tased || c.noTaser ? ARREST.TACKLE_R * 0.8 : ARREST.TASE_R)) {
+        moveTo(officer, sx, sz, _mRun);
+      }
+      if (d > (hold ? ARREST.LOSE_R : ARREST.LOSE_R * 1.6)) { c.active = false; c.outcome = "lost"; setPhase(c, "done"); ph = "done"; }
       if (ph === "force" && c.forceN > 0) {
         c.afterT = (c.afterT || 0) + dt;
         if (!running && !s.attacking && (s.prone || still) && c.afterT > 0.5) { setPhase(c, "approach"); ph = c.phase; c.saidPhase = "approach"; }

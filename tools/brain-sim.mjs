@@ -428,6 +428,111 @@ scenario(8, "prison minor matter: frisk + warning, no cuffs; survivors keep to s
 });
 
 // =========================================================================
+scenario(9, "core follow-up: idempotent morale, clear/recycle, per-game walls, nerve, reason 0, reports, hold/disarm/force", function () {
+  // ---- 1. morale.tick idempotent per clock stamp; single group; memory.tick owns rattle
+  fresh(91);
+  const m1 = actor(0, 0, 0), m2 = actor(1, 0, 0);
+  B.register(m1, "inmate", { game: "sim", clique: "a" }); B.register(m2, "inmate", { game: "sim", clique: "b" });
+  B.morale.hit("a", 0.5); B.morale.hit("b", 0.5);
+  T += 1; B.clock(T);
+  B.morale.tick(1); const sA = B.morale.group("a").shock; B.morale.tick(1);
+  check(B.morale.group("a").shock === sA, "a second morale.tick on the same clock stamp is a no-op");
+  T += 1; B.clock(T);
+  B.morale.tick(1, "a");
+  check(B.morale.group("a").shock < sA && B.morale.group("b").shock === sA, "tick(dt, groupId) ticks only that group");
+  B.morale.rattle(m1, 1); B.memory.tick(m1, 0.5); const r1 = m1._brain.rattle;
+  T += 0.5; B.clock(T); B.morale.tick(0.5);
+  check(m1._brain.rattle === r1, "memory-ticked brain: morale.tick does not drain his rattle again");
+  B.morale.rattle(m2, 1); const r2 = m2._brain.rattle; T += 0.5; B.clock(T); B.morale.tick(0.5);
+  check(m2._brain.rattle < r2, "a brain nobody memory-ticks is drained by morale.tick");
+  // ---- 2. clear / unregister / recycled body
+  fresh(92);
+  const crew = [0, 1, 2, 3].map((i) => { const a = actor(i, 0, 0); B.register(a, "crew", { game: "sim", group: "g" }); return a; });
+  check(B.morale.group("g").men0 === 4, "group counts 4");
+  crew[0].dead = true; crew[0].hp = 0; B.unregister(crew[0]);
+  check(B.morale.group("g").men0 === 4 && B.morale.group("g").members.length === 3, "a dead man leaves the members but his loss stays");
+  crew[0].dead = false; crew[0].hp = 100; B.register(crew[0], "crew", { game: "sim", group: "g" });
+  check(B.morale.group("g").men0 === 4 && B.morale.group("g").members.length === 4, "the recycled body refills his slot, starting size stays 4");
+  B.unregister(crew[1]);
+  check(B.morale.group("g").men0 === 3, "unregistering a live man removes him from his group");
+  B.morale.config("g", { lostK: 1 }); B.morale.clear("g");
+  const G = B.morale.group("g");
+  check(G.men0 === 0 && G.members.length === 0 && G.k.lostK === 1 && crew[2]._brain._gid == null, "morale.clear empties the group, keeps its config");
+  // ---- 3. occlusion per game
+  fresh(93);
+  const ga = actor(0, 0, Math.PI / 2), gb = actor(0, 5, Math.PI / 2);
+  B.register(ga, "guard", { game: "walls" }); B.register(gb, "guard", { game: "open" });
+  B.perception.setOcclusion(() => true, "walls");
+  check(!B.perception.sees(ga, actor(6, 0)) && B.perception.sees(gb, actor(6, 5)), "setOcclusion(fn, game) walls one game only");
+  B.perception.setOcclusion(null, "walls");
+  check(B.perception.sees(ga, actor(6, 0)), "clearing it restores the global default");
+  // ---- 4. nerve + no RNG when the whole person is handed in
+  fresh(94);
+  const before = B.rng(); fresh(94);
+  const full = { courage: 0.5, aggression: 0.5, discipline: 0.5, curiosity: 0.5, loyalty: 0.5 };
+  const det = actor(0, 0, 0); B.register(det, "inmate", { game: "sim", personality: full, nerve: 0.33 });
+  check(B.rng() === before, "full personality + nerve consume no brain RNG");
+  check(B.morale.nerve(det) === 0.33, "register({ nerve }) is the man's break point");
+  // ---- 5. reason 0: seen, not suspicious -> the meter drains
+  fresh(95);
+  const scr = actor(0, 0, 0), man = actor(0, 8, 0);
+  B.register(scr, "guard", { game: "sim" });
+  B.memory.setAware(scr, man, 0.8, 0);
+  B.perception.awareness(scr, man, 0.5, { reason: 0 });
+  const rec = B.memory.aware(scr, man);
+  check(rec.visible === true && rec.aware < 0.8, "reason 0 while visible drains (" + rec.aware.toFixed(3) + ") and still marks him seen");
+  // ---- 6. reports: bias, heat/type, hold + fileNow, accuse
+  fresh(96);
+  const got = [];
+  B.social.onReport("sim", (r) => got.push(r));
+  B.social.setReportBias(() => 0, "sim");
+  const civ = actor(0, 4, Math.PI); B.register(civ, "sim_snitch", { game: "sim" });
+  B.social.crime("assault", 0, 0, actor(0, 0), 0.5, { game: "sim", heat: 40, type: "assault" });
+  check(civ._brain.witness.reportAt == null, "setReportBias 0 means nobody in that game calls");
+  B.social.setReportBias(null, "sim");
+  B.social.crime("assault", 0, 0, actor(0, 0), 0.6, { game: "sim", heat: 40, type: "assault" });
+  check(B.social.holdReport(civ) && civ._brain.witness.reportAt === Infinity, "holdReport keeps it until he gets there");
+  for (let i = 0; i < 40; i++) advance(0.5);
+  check(got.length === 0, "a held report never lands on its own");
+  check(B.social.fileNow(civ) && got.length === 1 && got[0].heat === 40 && got[0].type === "assault", "fileNow lands it at once, heat/type carried (" + got.length + ")");
+  const lone = actor(3, 3); B.register(lone, "inmate", { game: "sim" });
+  B.social.accuse(lone, civ, "stole", 0.4, { game: "sim", heat: 12 });
+  check(got.length === 2 && got[1].witness === lone && got[1].perp === civ && got[1].heat === 12, "accuse: a lone grudge-holder reports");
+  // ---- 8. inmates can report inmates
+  const i1 = actor(0, 0), i2 = actor(1, 0);
+  B.register(i1, "inmate", { game: "sim" }); B.register(i2, "inmate", { game: "sim" });
+  check(B.social.attitude(i1, i2) === 0.2 && B.social.attitude(civ, actor(9, 9)) === 0, "inmate selfAttitude 0.2");
+  // ---- 7 / 9 / 10 / 11: authority
+  fresh(97);
+  const ag = actor(0, 0, 0), walker = actor(0, 5, Math.PI);
+  B.register(ag, "agent_cp", { game: "sim" });
+  B.authority.begin(ag, walker, "approach", { hold: true, roe: "nonlethal", patience: 1 });
+  let r = null;
+  for (let i = 0; i < 80; i++) { r = B.authority.step(ag, 0.05, { speed: 1.2, armed: false }); walker.pos.z += 0.06; advance(0.05); if (!r || r.phase === "done") break; }
+  check(ag._goal == null, "hold: the agent never walks or chases (outcome " + ag._brain.case.outcome + ")");
+  fresh(98);
+  const cop = actor(0, 0, 0), gunman = actor(0, 5, Math.PI);
+  B.register(cop, "cop", { game: "sim" });
+  B.authority.begin(cop, gunman, "open carry", { comply: "disarm", outcome: "release", rechallenge: true });
+  let ph = [];
+  const st = { speed: 1, armed: true };
+  for (let i = 0; i < 200; i++) { r = B.authority.step(cop, 0.05, st); if (ph[ph.length - 1] !== r.phase) ph.push(r.phase); if (i === 30) st.armed = false; advance(0.05); if (r.phase === "done") break; }
+  check(cop._brain.case.outcome === "released" && !verbs.some((v) => v.name === "restrain"), "gun-stop: holstered = released, no cuffs (" + ph.join(">") + ")");
+  const p1 = cop._brain.case.patience;
+  B.authority.begin(cop, gunman, "open carry", { comply: "disarm", rechallenge: true });
+  check(cop._brain.case.patience < p1 && cop._brain.case.challengeN === 2, "re-challenge inside 60 s is shorter (" + p1 + " -> " + cop._brain.case.patience + ")");
+  check(cop._brain.movedAt > -1e9 && cop._brain.movedFrame >= 0 && !B.act.movedThisFrame(cop), "act records movedAt / movedFrame (and a new frame clears movedThisFrame)");
+  // no taser here: straight to the tackle, and a man merely walking off in reach is tackled
+  fresh(99);
+  B.act.use("notaser", { verb(name, a, b) { verbs.push({ name, a, b }); return name === "tase" ? false : { ok: true }; }, moveTo() { return true; }, stop() { return true; }, face() { return true; } });
+  const c2 = actor(0, 0, 0), w2 = actor(0, 2, 0);
+  B.register(c2, "cop", { game: "notaser" });
+  B.authority.begin(c2, w2, "theft", { skipWarn: true, patience: 0.5 });
+  for (let i = 0; i < 60; i++) { r = B.authority.step(c2, 0.05, { speed: 1.8, armed: false }); advance(0.05); if (verbs.some((v) => v.name === "tackle")) break; }
+  check(verbs.some((v) => v.name === "tase") && verbs.some((v) => v.name === "tackle"), "taser answered false -> tackle; a walking (not running) non-complier in reach is tackled");
+});
+
+// =========================================================================
 // ROUTER SCENARIOS — prison / city / President / disaster+war leads add theirs
 // below this line, as scenario(<n>, "<name>", fn). Keep the core ones above.
 // =========================================================================
