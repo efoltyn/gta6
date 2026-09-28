@@ -734,6 +734,8 @@
     const w = wardenG();
     if (!w || w.dead) return false;
     if (w.asleep) return true;
+    // knocked down, tied or cuffed: nobody's shoulder protects that belt
+    if (w.ko > 0 || w.tied || (w.char && w.char.cuffed)) return true;
     if (escorted()) return false;
     if (post() !== "office" || !wardenIn(OFFICE)) return false;
     const list = CBZ.guards || [];

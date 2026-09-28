@@ -1977,7 +1977,11 @@
     const S = {
       verb, def, a, t, A, T, opts, from,
       phase: "approach", pt: 0, age: 0, dur: Infinity, k: 0, done: false, result: null, ctx: null,
-      work: 0, dir: { x: 0, z: 1 }, power: opts.power != null ? clamp01(opts.power) : 1,
+      // a shove or a tackle hits as hard as the two bodies make it (their
+      // masses, his run, where it lands on the man): the same momentum model
+      // as walking into somebody (systems/humancontact.js)
+      work: 0, dir: { x: 0, z: 1 }, power: opts.power != null ? clamp01(opts.power)
+        : ((verb === "shove" || verb === "tackle") && CBZ.bodyImpact ? CBZ.bodyImpact.verbPower(a, t, verb) : 1),
       ownT: false, tFree: false, how: null, sag: 0, crouch: 0, press: 0, wasDown: !!down,
       handsA: [null, null], handsT: [null, null], kA: [0, 0], kT: [0, 0],
       gA: ["grip", "grip"], gT: ["support", "support"],

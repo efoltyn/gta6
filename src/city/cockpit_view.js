@@ -329,7 +329,7 @@
   // ============================================================
   //  THE PER-FRAME CAMERA WRITE
   //  onAlways(54): AFTER camera.js (50), fpsmode.js (52) and
-  //  city/scopeview.js (53) — the last word on where the eye is, but never
+  //  systems/sights.js — the last word on where the eye is, but never
   //  on what the FOV means (a fitted optic still wins, per CLAUDE.md).
   // ============================================================
   CBZ.onAlways(54, function (dt) {

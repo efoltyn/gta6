@@ -16,7 +16,7 @@
        every shot: gunModsMag (bigger clips), gunModsSuppressed (killed flash +
        muffled report + quieter alarm), gunModsRecoilMul / gunModsSpreadMul
        (brake/grip/laser tighten the gun), and gunModsScopeOf (which optic →
-       city/scopeview.js does the zoom + overlay).
+       systems/sights.js draws the sight picture).
      • the VISUAL: real child meshes bolted onto the held gun (the scope tube on
        the rail, the can on the muzzle, the grip under the barrel) so what you
        bought is what you SEE — first person, third person, every instance.
@@ -143,7 +143,7 @@
     SLOTS.forEach((sl) => { const mid = r[sl]; if (mid && MODS[mid] && MODS[mid].spreadMul) k *= MODS[mid].spreadMul; });
     return k;
   };
-  // the fitted optic spec (or null) — city/scopeview.js drives the zoom+overlay
+  // the fitted optic spec (or null) — systems/sights.js reads it
   CBZ.gunModsScopeOf = function (id) {
     const r = store()[id]; if (!r || !r.scope) return null;
     const m = MODS[r.scope]; if (!m || !m.scope) return null;

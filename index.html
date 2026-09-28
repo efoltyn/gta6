@@ -437,7 +437,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=inworld1"></script>
+<script src="src/config.js?v=me6f1ee"></script>
 <script src="src/core/seed.js"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -571,7 +571,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/systems/fphands.js?v=boom2"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=hats2"></script>
+  <script src="src/entities/character.js?v=me6f1ee"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=watch2"></script>
@@ -600,7 +600,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=cuffs1"></script>
-<script src="src/systems/verbs.js?v=arrest1"></script>
+<script src="src/systems/verbs.js?v=bodyphys1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -638,10 +638,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=m0927p"></script>
 <script src="src/systems/hud.js?v=m0927p"></script>
-<script src="src/systems/economy.js?v=vit3"></script>
+<script src="src/systems/economy.js?v=armory1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/weapon-data.js?v=nodash1"></script>
+<script src="src/weapons/weapon-data.js?v=me6f1ee"></script>
 <script src="src/weapons/weapon-scale.js?v=realsize1"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
 <script src="src/weapons/appearances/sidearm.js?v=anchor1"></script>
@@ -678,7 +678,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js?v=m0928s"></script>
 <script src="src/world/lounge.js?v=m0928s"></script>
-<script src="src/world/gunroom.js?v=m0928s"></script>
+<script src="src/world/gunroom.js?v=armory1"></script>
 <script src="src/world/ventilation.js?v=m0928s"></script>
 <script src="src/world/escape_routes.js?v=m0928s"></script>
 <script src="src/world/southblock.js?v=vit3"></script>
@@ -695,7 +695,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/vision.js"></script>
 <script src="src/entities/guards.js?v=vit3"></script>
 <script src="src/entities/searchlight.js?v=m0928s"></script>
-<script src="src/entities/keycard.js"></script>
+<script src="src/entities/keycard.js?v=armory1"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
 <script src="src/entities/npclife.js?v=allmain3"></script>
@@ -715,7 +715,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=m0928s"></script>
+<script src="src/world/adminwing.js?v=armory1"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -812,7 +812,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=cars1"></script>
+<script src="src/systems/camera.js?v=me6f1ee"></script>
 <script src="src/systems/physics.js?v=vit3"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -826,7 +826,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
-<script src="src/systems/actorcollide.js?v=contact1"></script>
+<script src="src/systems/actorcollide.js?v=bodyphys1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -867,7 +867,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
 <script src="src/systems/lockdown.js?v=warden1"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=tell2"></script>
+<script src="src/systems/prisonwarden.js?v=armory1"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=tell2"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
@@ -941,7 +941,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=boom2"></script>
+<script src="src/systems/touch.js?v=me6f1ee"></script>
 <script src="src/systems/touch_vehicle.js?v=boom2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -950,7 +950,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=vit3"></script>
+<script src="src/systems/fpsmode.js?v=me6f1ee"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -1355,7 +1355,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=hats1"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=brainmoves1"></script>
+<script src="src/city/crowd.js?v=bodyphys1"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1386,7 +1386,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=lod1"></script>
-<script src="src/city/vehicles.js?v=boom2"></script>
+<script src="src/city/vehicles.js?v=bodyphys1"></script>
 <script src="src/city/carinstances.js?v=cars2"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=hats1"></script>
@@ -1403,7 +1403,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
 <script src="src/city/cockpit.js?v=cockpit1w9"></script>
-<script src="src/city/cockpit_view.js?v=cockpit1"></script>
+<script src="src/city/cockpit_view.js?v=me6f1ee"></script>
 <!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
      a parked machine — it zeroes attitude and velocity and forces onGround, so
      bailing at 500m teleported the plane flat and landed it. This file owns
@@ -1496,16 +1496,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=onebet1"></script>
 <script src="src/city/gunstore.js?v=boom2"></script>
-<!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
-     gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
-<script src="src/city/gunmods.js?v=nodash1"></script>
-<script src="src/city/scopeview.js?v=mods1"></script>
-<!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
-     scope. After fpsmode/weapons (whose fire paths it feeds) and after
-     scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
-     always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
-     CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
-<script src="src/systems/lockon.js?v=cars1"></script>
+<!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
+     gunsmith bench in the gun store (sights.js reads a fitted optic) -->
+<script src="src/city/gunmods.js?v=me6f1ee"></script>
+<!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
+     person, reticles at infinity on red-dot glass, a real scope (magnified
+     second camera in the ocular), sway + breath, the 3P cheek weld. -->
+<script src="src/systems/sights.js?v=ads1"></script>
+<!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
+     fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
+<script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=deslop1"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=onebet1"></script>
@@ -1797,9 +1797,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=markphoto1"></script>
-<script src="src/city/campaign.js?v=inworld1"></script>
+<script src="src/city/campaign.js?v=me6f1ee"></script>
 <script src="src/city/cinematics.js?v=nodash1"></script>
-<script src="src/systems/humancontact.js?v=brain1"></script>
+<script src="src/systems/humancontact.js?v=bodyphys1"></script>
 <script src="src/systems/navigation.js?v=sharkmode1"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a

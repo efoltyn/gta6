@@ -49,6 +49,12 @@
    Nothing announces any of this. The hook is either wearing a key or it is
    not, and that is the entire readout.
 
+   (2026-09-28) The key is ONE object that moves (driveHook): pocket on shift,
+   hook at night, back at shift change; lifted off him means an empty hook.
+   He is no longer the only holder: the run's armory sergeant wears a
+   duplicate (systems/economy.js armorySergeant), so the cage has a key on a
+   reachable belt on every run. tools/armory-reach-check.mjs proves it.
+
    ---- LOCKS: THE LOCKPICK FINALLY HAS A VERB ----------------------------
    world/gunroom.js's inner cage taught the Hacksaw Blade its first verb.
    The Lockpick was the other tool in that pair and still had none — a fence
@@ -1533,13 +1539,31 @@
     layDrop("Contraband Map", SAFE.x - 0.05, 0.80, SAFE.z + 0.26);
     layDrop("Luxury Watch", SAFE.x + 0.12, 0.80, SAFE.z - 0.24);
   }
-  let keyLaid = false;
+  /* ON THE HOOK, OR ON HIS HIP. Never both, and never NEITHER by accident.
+     The key is ONE object that moves: it is in his pocket (econ loadout)
+     while he is on shift; at bedtime he takes it off and hangs it in the
+     safe (it leaves the loadout); at shift change he takes it back. If it
+     was lifted off him, it is not on the hook that night. If you took it
+     from the safe, he has none in the morning. */
+  let keyLaid = false, keyOnHook = false;
+  function wardenLoad() {
+    const w = warden.g;
+    const E = CBZ.econ;
+    if (!w || w.dead || !E || !E.rollLoadout) return null;
+    try { return E.rollLoadout(w); } catch (e) { return null; }
+  }
   function driveHook() {
-    // ON THE HOOK, OR ON HIS HIP. Never both — see CBZ.adminWingAudit.
-    const hung = offShift();
-    SAFE.fob.visible = hung && !keyLaid;
-    if (!hung || !SAFE.open || keyLaid || !CBZ.prisonDropOne) return;
-    keyLaid = true;
+    const L = wardenLoad();
+    if (L && !keyLaid) {
+      const i = L.items.indexOf("Gun-Room Key");
+      const w = warden.g;
+      const free = !(w.ko > 0) && !w.tied && !(w.char && w.char.cuffed);
+      if (offShift() && i >= 0 && !keyOnHook && free) { L.items.splice(i, 1); keyOnHook = true; }
+      else if (!offShift() && keyOnHook && free) { L.items.push("Gun-Room Key"); keyOnHook = false; }
+    }
+    SAFE.fob.visible = keyOnHook && !keyLaid;
+    if (!keyOnHook || !SAFE.open || keyLaid || !CBZ.prisonDropOne) return;
+    keyLaid = true; keyOnHook = false;
     SAFE.fob.visible = false;
     layDrop("Gun-Room Key", SAFE.x + 0.1, 0.80, SAFE.z - 0.2);
   }
@@ -1782,7 +1806,7 @@
     SAFE.open = false; SAFE.picked = 0; SAFE.pivot.rotation.y = 0; SAFE.stocked = false;
     CASE.open = false; CASE.picked = 0; CASE.t = 0; CASE.pivot.rotation.y = 0; CASE.laid = false; CASE.gun = null; CASE.taken = false;
     if (CASE.display) CASE.display.visible = true;
-    keyLaid = false; lastBlock = null;
+    keyLaid = false; keyOnHook = false; lastBlock = null;
     warden.tresT = 0; warden.tresStage = 0;
     if (warden.g) { warden.at = "check"; sendTo(warden.g, "check"); warden.transit = 0; }
   };
@@ -1811,7 +1835,7 @@
       on: true, rooms: ROOMS.length, doors: doors.length,
       rect: { x0: AW.x0, x1: AW.x1, z0: AW.z0, z1: AW.z1 },
       unreachable: unreachable,                       // MUST be 0
-      keyBothPlaces: (SAFE.fob.visible && !offShift()) ? 1 : 0,   // MUST be 0
+      keyBothPlaces: (SAFE.fob.visible && (wardenLoad() || { items: [] }).items.indexOf("Gun-Room Key") >= 0) ? 1 : 0,   // MUST be 0
       unknownBlocks: unknownBlocks,                   // duty posts this file has no POST for
       seated: !!(warden.g && warden.g._propSeat),
       chair: warden.seat ? { x: Math.round(warden.seat.x * 10) / 10, z: Math.round(warden.seat.z * 10) / 10, kind: warden.seat.kind } : null,

@@ -839,6 +839,14 @@
     }
     // refresh their offer to something else next time, from their own stock
     actor.data.offer = pickOffer(actor.data.pool);
+    // A BENT SCREW WHO TRUSTS YOU CUTS YOU A COPY. Once per run, from the
+    // officer you have been buying from long enough to be "bought" (loyalty
+    // 35: his shelf, names), the next thing on his shelf is a copy of the
+    // cage key. Dear, and it only comes out after the relationship is built.
+    if (actor.corrupt && actor.kind === "guard" && bought(actor) && !g._cageKeyCopy && !hasItem("Gun-Room Key") && offer.item !== "Gun-Room Key") {
+      g._cageKeyCopy = 1;
+      actor.data.offer = { item: "Gun-Room Key", price: ITEMS["Gun-Room Key"].value, basePrice: ITEMS["Gun-Room Key"].value };
+    }
     CBZ.sfx("coin");
     // A HONOURED TRADE IS STANDING. Small, capped, and the reason prices soften
     // for a regular — you become someone this person does business with.
@@ -1128,10 +1136,16 @@
     // multiplies rather than subtracts so every reason above (the hour, the
     // mark, his kit) still counts for what it is worth.
     chance *= tierGain("stealMul");
+    // A MAN ON THE FLOOR, IN CUFFS OR ASLEEP IS NOT GUARDING HIS BELT. The
+    // hard part was putting him there; his pockets are the easy part.
+    if (downed(actor)) chance = 0.95;
     return Math.max(0.05, Math.min(0.95, chance));
   }
   // he can only lose what is in a POCKET. A lit torch is in his hand and a
   // stripped man has nothing left — both are refusals the world can show.
+  function downed(a) {
+    return !!(a && (a.ko > 0 || a.asleep || a.tied || (a.char && a.char.cuffed)));
+  }
   function liftBest(actor, load) {
     let bi = -1, bv = -1;
     for (let i = 0; i < load.items.length; i++) {
@@ -1153,6 +1167,7 @@
      quarters, or alone at his desk with no officer near. Anywhere else the
      hand and the fist both fail, and no Gun-Room Key changes hands. */
   function wardenShielded(actor) {
+    if (downed(actor)) return false;
     return !!(actor && actor.kind === "warden" && !(CBZ.warden && CBZ.warden.exposed && CBZ.warden.exposed()));
   }
   function steal(actor) {
@@ -1363,7 +1378,8 @@
       if (actor.gang >= 0) nudgeGang(actor, -10, 2);
       if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "ko", 9, { source: "beatdown" });
       if (guardish && actor.corrupt) addRacketDebt(4);
-      if (guardish && !shielded && rng() < 0.5 && !hasItem("Gun-Room Key") && actor.kind === "warden") addItem("Gun-Room Key", 1);
+      // (a KO used to MINT a Gun-Room Key half the time, whether or not he
+      // had one on him. The key is on his belt now; lift it while he's down.)
       // A DOWNED MARK DROPS WHAT HE HAD, not what the die felt like minting.
       // Same odds, same magnitude, taken off HIS pile — so beating the same
       // man twice does not print money, and a poor man is a poor score.
@@ -1453,6 +1469,54 @@
      so the guard branch and the `inmate` gate below cannot fire on them: a
      city frisk rolls exactly what it rolled before this phase. */
   function jailInmate(a) { return !!a && a.kind === "inmate"; }
+  /* THE ARMORY SERGEANT. One officer per run holds the duplicate cage key:
+     drawn by the run's own rng from the (up to) three officers whose patrol
+     loop passes closest to the gun-room door, so which man it is changes
+     run to run but it is always a man who walks past the room he keys.
+     Pure over the roster (pickArmorySergeant) so tools/armory-reach-check.mjs
+     can prove a holder exists on every seed. */
+  const ARMORY_DOOR = { x: 19, z: 1 };
+  function beatDistance(a, door) {
+    const wps = (a && a.waypoints) || [];
+    let best = 1e9;
+    for (let i = 0; i < wps.length; i++) {
+      const p = wps[i];
+      if (p) best = Math.min(best, Math.hypot(p.x - door.x, p.z - door.z));
+    }
+    if (best === 1e9 && a && a.group) best = Math.hypot(a.group.position.x - door.x, a.group.position.z - door.z);
+    return best;
+  }
+  function pickArmorySergeant(list, r, door) {
+    door = door || ARMORY_DOOR;
+    const c = [];
+    for (let i = 0; list && i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.kind !== "guard" || a._crowd) continue;
+      c.push({ a: a, d: beatDistance(a, door), i: i });
+    }
+    if (!c.length) return null;
+    c.sort(function (p, q) { return (p.d - q.d) || (p.i - q.i); });
+    const n = Math.min(3, c.length);
+    return c[Math.min(n - 1, Math.floor(r() * n))].a;
+  }
+  let _sergeant = null;
+  function armorySergeant() {
+    if (_sergeant && CBZ.guards && CBZ.guards.indexOf(_sergeant) >= 0) return _sergeant;
+    _sergeant = pickArmorySergeant(CBZ.guards, rng);
+    return _sergeant;
+  }
+  // every man wearing a cage key right now (keycard.js hangs the fob on them)
+  function keyHolders() {
+    const out = [];
+    const list = CBZ.guards || [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || !a.loadout || a.dead) continue;
+      if (a.loadout.items.indexOf("Gun-Room Key") >= 0) out.push(a);
+    }
+    return out;
+  }
+
   function rollLoadout(actor) {
     if (actor.loadout) return actor.loadout;
     const items = [];
@@ -1490,7 +1554,16 @@
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.
-      if (actor.kind === "warden") { cigs += 22; maybe("Gun-Room Key", 0.7); maybe("Luxury Watch", 0.5); maybe("Gold Chain", 0.35); maybe("Gun", 0.05); }
+      /* THE CAGE KEY IS WORN, NOT ROLLED (owner, 2026-09-28: "if nobody has a
+         key to the room with the explosives in it, that's kind of dumb").
+         It was a 70% roll on the one man in the prison who is untouchable most
+         of the day, so three runs in ten the inner cage had no key anywhere.
+         Now two belts carry it on every run: the warden's (world/adminwing.js
+         moves it to the hook in his safe while he sleeps and back at shift
+         change, so it is never in both places), and the ARMORY SERGEANT's
+         duplicate: the officer whose beat runs past the gun-room door. */
+      if (actor.kind === "warden") { cigs += 22; add("Gun-Room Key"); maybe("Luxury Watch", 0.5); maybe("Gold Chain", 0.35); maybe("Gun", 0.05); }
+      else if (actor === armorySergeant()) add("Gun-Room Key");
     } else if (role === "dealer") {
       cigs += 6 + Math.floor(rng() * 12);
       add(rng() < 0.5 ? "Powder" : "Pills"); maybe("Pruno Hooch", 0.5); maybe("Painkillers", 0.4);
@@ -1725,6 +1798,12 @@
     // so the window and the once-a-run honest line are cleared here, beside
     // the loyalty ledger they belong with.
     g.phoneTimeT = 0; g._phoneBridgeSaid = 0;
+    // a new run draws a new armory sergeant, and the bent copy is uncut
+    _sergeant = null; g._cageKeyCopy = 0;
+    for (let i = 0; CBZ.guards && i < CBZ.guards.length; i++) {
+      const a = CBZ.guards[i];
+      if (a && a.data && a.data.offer && a.data.offer.item === "Gun-Room Key") a.data.offer = pickOffer(a.data.pool);
+    }
     // re-arm the cast-time mint so the fresh run has real pockets from frame one
     _mintPending = true;
     return n;
@@ -1815,7 +1894,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
     // the phone bridge — ask these, never re-derive the rule or the words
     hasPhoneAccess, phoneGate, phoneTerms, grantPhoneTime, consumePhoneTime, phoneBridge, outsidePaidPrefix, PHONE_TIME_SECS,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)

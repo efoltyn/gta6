@@ -335,12 +335,6 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   border: 2px dashed rgba(255,255,255,.30); background: rgba(255,255,255,.05);
 }
 
-/* SCOPED: lockon.js's optic (#realScope, z-45) blacks out everything outside
-   the tube. It used to black out the TRIGGER too — aiming made the fire button
-   disappear. touch.js lifts the cluster over the mask for exactly as long as
-   the optic is up; every other HUD layer stays masked, which is the point. */
-#touch.tabovescope { z-index: 46; }
-
 /* ============================================================
    VERB PILLS (TOUCH_VERB_PROMPTS) — the owner's "button that SAYS
    HIJACK". touch.js/CBZ.touchActionPrompt renders these in place of
