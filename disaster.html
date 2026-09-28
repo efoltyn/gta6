@@ -576,7 +576,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=cuffs1"></script>
-<script src="src/systems/verbs.js?v=arrest1"></script>
+<script src="src/systems/verbs.js?v=bodyphys1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -749,7 +749,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/actorcollide.js?v=contact1"></script>
+<script src="src/systems/actorcollide.js?v=bodyphys1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -863,6 +863,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a"></script>
+<!-- systems/humancontact.js: bodies are solid and have weight (mass, momentum,
+     knockdowns by angle and speed, the downed stepped over). survivorbot.js's
+     separation pass hands its list to it. -->
+<script src="src/systems/humancontact.js?v=bodyphys1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
