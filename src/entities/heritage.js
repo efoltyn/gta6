@@ -54,59 +54,72 @@
   // beard    odds per facial-hair style (character.js c.beard)
   // ink      odds of tattoos at all; sets: which ink set when inked
   // tank     odds the jumpsuit top is tied at the waist over a tank (bare arms)
+  // eyes     weighted eye colours (names from CBZ.human.eyeColours)
+  // nose     weights for [narrow, medium, broad] (character.js head variants)
+  // lips     odds of fuller lips
   const H = {
     black: { name: "Black", weight: 34,
       // the game's exposure lifts every tone ~a stop (a 0x25282d shoe reads
       // mid-grey), so the range starts darker than the hex suggests
       skins: [0x6b4a32, 0x5a3c28, 0x4a3020, 0x3c2618, 0x2e1c12, 0x7a5236],
-      hair: [0x141010, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2]],
+      hair: [0x141010, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2], ["curly", 2], ["afro", 1], ["locs", 1]],
       bald: 0.18, beard: { full: 0.22, goatee: 0.28, stubble: 0.15 },
-      ink: 0.45, sets: [["script", 3], ["chest", 2]], tank: 0.35 },
+      ink: 0.45, sets: [["script", 3], ["chest", 2]], tank: 0.35,
+      eyes: [["dark", 8], ["brown", 2]], nose: [1, 3, 6], lips: 0.70 },
     white: { name: "White", weight: 26,
       skins: [0xf0c39a, 0xfae0c8, 0xe8b58c, 0xe8c39a, 0xf5d3b3, 0xd9b08e],
       hair: [0x4a3526, 0x2a2018, 0x7a4a2e, 0xb08a4a, 0xa3401f, 0x8c7a68], styles: [["short", 4], ["crop", 3], ["buzz", 3], ["long", 1]],
       bald: 0.12, beard: { full: 0.20, goatee: 0.18, stubble: 0.22, moustache: 0.06 },
-      ink: 0.35, sets: [["script", 2], ["web", 2]], tank: 0.30 },
+      ink: 0.35, sets: [["script", 2], ["web", 2]], tank: 0.30,
+      eyes: [["brown", 3], ["hazel", 2], ["blue", 3], ["green", 1.5], ["grey", 1]], nose: [4, 5, 1], lips: 0.15 },
     skinhead: { name: "White-power crew", weight: 8,
       skins: [0xf5d3b3, 0xfae0c8, 0xf0c39a, 0xecc6a3],
       hair: [0x8c7a68, 0x7a4a2e, 0x4a3526], styles: [["buzz", 1]],
       bald: 0.65, beard: { goatee: 0.35, stubble: 0.30 },
-      ink: 1.0, sets: [["skinhead", 1]], tank: 0.85 },
+      ink: 1.0, sets: [["skinhead", 1]], tank: 0.85,
+      eyes: [["blue", 3], ["grey", 2], ["green", 1], ["brown", 1], ["hazel", 1]], nose: [4, 5, 1], lips: 0.10 },
     latino: { name: "Latino", weight: 22,
       skins: [0xc08a5a, 0xd8a177, 0xb5825a, 0xb67b52, 0xa87049, 0xd9a983],
-      hair: [0x101820, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2]],
+      hair: [0x101820, 0x1a120c, 0x0d0b0a], styles: [["buzz", 5], ["short", 2], ["crop", 2], ["curly", 1]],
       bald: 0.28, beard: { goatee: 0.35, moustache: 0.18, stubble: 0.20 },
-      ink: 0.80, sets: [["chicano", 4], ["script", 1], ["teardrop", 1]], tank: 0.60 },
+      ink: 0.80, sets: [["chicano", 4], ["script", 1], ["teardrop", 1]], tank: 0.60,
+      eyes: [["dark", 3], ["brown", 5], ["hazel", 2], ["amber", 1]], nose: [2, 5, 3], lips: 0.30 },
     eastasian: { name: "East Asian", weight: 5,
       skins: [0xf0d0a8, 0xe8c39a, 0xd9b08e, 0xf5d3b3],
       hair: [0x0d0b0a, 0x101820], styles: [["short", 3], ["crop", 3], ["buzz", 2]],
       bald: 0.05, beard: { stubble: 0.12, goatee: 0.08 },
-      ink: 0.30, sets: [["sleeve", 1]], tank: 0.25 },
+      ink: 0.30, sets: [["sleeve", 1]], tank: 0.25,
+      eyes: [["dark", 7], ["brown", 3]], nose: [2, 5, 3], lips: 0.20 },
     southasian: { name: "South Asian (Indian)", weight: 4,
       skins: [0x9c6a45, 0x8a5a3a, 0xb5825a, 0x7a4a2e, 0xa87049],
       hair: [0x0d0b0a, 0x141010], styles: [["short", 4], ["crop", 2], ["buzz", 2]],
       bald: 0.10, beard: { full: 0.40, stubble: 0.30, moustache: 0.15 },
-      ink: 0.15, sets: [["script", 1]], tank: 0.20 },
+      ink: 0.15, sets: [["script", 1]], tank: 0.20,
+      eyes: [["dark", 6], ["brown", 3], ["hazel", 1]], nose: [2, 5, 3], lips: 0.25 },
     mideast: { name: "Middle Eastern", weight: 4,
       skins: [0xd0b08a, 0xc9a27a, 0xb58a62, 0xdcb691],
       hair: [0x0d0b0a, 0x1a120c], styles: [["short", 4], ["crop", 2], ["buzz", 2]],
       bald: 0.15, beard: { full: 0.50, stubble: 0.30 },
-      ink: 0.10, sets: [["script", 1]], tank: 0.15 },
+      ink: 0.10, sets: [["script", 1]], tank: 0.15,
+      eyes: [["brown", 5], ["dark", 3], ["hazel", 2], ["green", 1]], nose: [3, 6, 1], lips: 0.20 },
     native: { name: "Native American", weight: 4,
       skins: [0xb06f48, 0x9c5f3c, 0xc4835a, 0xa8683f],
       hair: [0x0d0b0a, 0x141010], styles: [["long", 4], ["pony", 3], ["short", 2]],
       bald: 0.04, beard: { stubble: 0.10 },
-      ink: 0.35, sets: [["chest", 2], ["script", 1]], tank: 0.30 },
+      ink: 0.35, sets: [["chest", 2], ["script", 1]], tank: 0.30,
+      eyes: [["dark", 6], ["brown", 4]], nose: [2, 6, 2], lips: 0.20 },
     islander: { name: "Pacific Islander", weight: 4,
       skins: [0x8a5a3a, 0x9c6a45, 0x7a4a2e, 0xa87049],
-      hair: [0x0d0b0a, 0x141010], styles: [["buzz", 3], ["short", 3], ["crop", 2], ["bun", 1]],
+      hair: [0x0d0b0a, 0x141010], styles: [["buzz", 3], ["short", 3], ["crop", 2], ["bun", 1], ["curly", 2]],
       bald: 0.12, beard: { goatee: 0.30, full: 0.20, stubble: 0.20 },
-      ink: 0.85, sets: [["tribal", 1]], tank: 0.70 },
+      ink: 0.85, sets: [["tribal", 1]], tank: 0.70,
+      eyes: [["dark", 6], ["brown", 4]], nose: [1, 3, 6], lips: 0.50 },
     easteuro: { name: "Eastern European", weight: 6,
       skins: [0xf0c39a, 0xfae0c8, 0xe8b58c, 0xecc6a3],
       hair: [0x4a3526, 0x2a2018, 0x8c7a68, 0xb08a4a], styles: [["buzz", 5], ["short", 2]],
       bald: 0.30, beard: { stubble: 0.35, goatee: 0.10 },
-      ink: 0.75, sets: [["vory", 1]], tank: 0.55 },
+      ink: 0.75, sets: [["vory", 1]], tank: 0.55,
+      eyes: [["blue", 4], ["grey", 3], ["green", 2], ["brown", 2], ["hazel", 1]], nose: [3, 6, 1], lips: 0.10 },
   };
   const IDS = Object.keys(H);
   let totalW = 0;
@@ -150,6 +163,14 @@
     for (let i = 0; i < bk.length; i++) if (r() < d.beard[bk[i]]) { look.beard = bk[i]; break; }
     if (r() < d.ink) look.ink = pickW(d.sets, r());
     look.tank = r() < d.tank;
+    // FEATURES (character.js reads c.eye / c.nose / c.lips). Drawn last so the
+    // rolls above keep their place in a seeded stream.
+    const EC = (CBZ.human && CBZ.human.eyeColours) || null;
+    const eyeName = d.eyes ? pickW(d.eyes, r()) : null;
+    if (EC && eyeName && EC[eyeName] != null) look.eye = EC[eyeName];
+    const nw = d.nose || [1, 2, 1];
+    look.nose = pickW([[0, nw[0]], [1, nw[1]], [2, nw[2]]], r());
+    look.lips = r() < (d.lips || 0);
     if (over) Object.assign(look, over);
     return look;
   }
@@ -161,28 +182,13 @@
   // reads or resets the head's colour has to know a texture exists.
   const HW = 128, HH = 64;
   const HCOL = { front: [0, 64], side: [64, 96], back: [96, 128] };
-  const HFACE = ["side", "side", "back", "back", "front", "back"];   // +x -x +y -y +z -z
-  const headGeoCache = Object.create(null);
-  function headInkGeom(size) {
-    const key = size.toFixed(3);
-    let g = headGeoCache[key];
-    if (g) return g;
-    g = new THREE.BoxGeometry(size, size, size);
-    const uv = g.attributes.uv;
-    for (let f = 0; f < 6; f++) {
-      const col = HCOL[HFACE[f]];
-      for (let v = 0; v < 4; v++) {
-        const i = f * 4 + v, u = uv.getX(i), vv = uv.getY(i);
-        // top/bottom faces land on a plain 8x8 corner of the back column
-        if (f === 2 || f === 3) uv.setXY(i, (col[0] + 2 + u * 6) / HW, 1 - (2 + (1 - vv) * 6) / HH);
-        else uv.setXY(i, (col[0] + u * (col[1] - col[0])) / HW, vv);
-      }
-    }
-    uv.needsUpdate = true;
-    g._shared = true;
-    headGeoCache[key] = g;
-    return g;
-  }
+  // The head's UVs ARE this atlas (entities/character.js, CBZ.human.headAtlas):
+  // the skull fills atlas y [0, 0.80] (crown -> chin), the NECK fills
+  // [0.80, 1] — so throat and neck marks sit on the throat, not on the chin.
+  // Face landmarks in atlas y: brow 0.21, eye 0.35 (bottom 0.40), nose tip
+  // 0.51, mouth 0.59, chin 0.80. Side column: 0 = the face edge, 1 = the back
+  // of the head, the ear at ~0.56. The geometry never swaps; an inked head just
+  // gets a map.
   // Under the game's own exposure a 0x25282d shoe reads as mid grey, so ink
   // has to start near black to end up as ink (measured on the first lineup run).
   const INK = "rgba(16,20,28,0.94)", INK2 = "rgba(16,20,28,0.62)";
@@ -228,29 +234,28 @@
     }
     return { R, P, D, script, star, web };
   }
-  // the head sets. Atlas y: 0 = crown, 1 = chin. The face's eyes sit near
-  // y≈0.43, mouth y≈0.73 (character.js: eye 0.34/0.60 from the bottom, mouth 0.16).
+  // the head sets (atlas y: see the layout note above).
   const HEAD_INK = {
-    script: function (p) { p.script("front", 0.12, 0.88, 0.93, 0.02); },
-    teardrop: function (p) { p.D("front", 0.30, 0.56, 0.028); p.P("front", [[0.30, 0.50], [0.27, 0.56], [0.33, 0.56]]); },
+    script: function (p) { p.script("front", 0.12, 0.88, 0.90, 0.02); },
+    teardrop: function (p) { p.D("front", 0.30, 0.465, 0.026); p.P("front", [[0.30, 0.415], [0.275, 0.465], [0.325, 0.465]]); },
     chicano: function (p) {
-      p.script("front", 0.10, 0.90, 0.93, 0.02);                          // throat script
-      p.D("front", 0.72, 0.52, 0.02); p.D("front", 0.76, 0.56, 0.02); p.D("front", 0.68, 0.56, 0.02);   // three dots
+      p.script("front", 0.10, 0.90, 0.90, 0.02);                          // throat script
+      p.D("front", 0.72, 0.45, 0.02); p.D("front", 0.76, 0.49, 0.02); p.D("front", 0.68, 0.49, 0.02);   // three dots on the cheek
       p.script("side", 0.15, 0.85, 0.90, 0.015);                          // script round the neck
     },
-    web: function (p) { p.web("side", 0.5, 0.86, 0.34); },
-    vory: function (p) { p.star("side", 0.5, 0.84, 0.22); p.D("front", 0.40, 0.94, 0.018); p.D("front", 0.60, 0.94, 0.018); },
+    web: function (p) { p.web("side", 0.5, 0.90, 0.30); },
+    vory: function (p) { p.star("side", 0.5, 0.89, 0.20); p.D("front", 0.40, 0.92, 0.018); p.D("front", 0.60, 0.92, 0.018); },
     tribal: function (p) {
       p.P("side", [[0, 0.80], [1, 0.74], [1, 0.84], [0, 0.90]]); p.P("side", [[0, 0.93], [1, 0.88], [1, 0.96], [0, 1]]);
       p.P("back", [[0.2, 0.78], [0.8, 0.78], [0.62, 1], [0.38, 1]]);
     },
     skinhead: function (p) {
-      p.R("front", 0.08, 0.86, 0.84, 0.10);                               // solid throat band (script block)
-      p.script("front", 0.10, 0.90, 0.91, 0.02, "rgba(255,255,255,0.28)");
-      p.P("front", [[0.31, 0.50], [0.27, 0.58], [0.34, 0.58]]);           // mark under the eye
-      p.P("side", [[0.40, 0.30], [0.60, 0.30], [0.50, 0.46], [0.66, 0.46], [0.42, 0.68], [0.50, 0.50], [0.34, 0.50]]);   // the bolt behind the ear
+      p.R("front", 0.08, 0.85, 0.84, 0.10);                               // solid throat band (script block)
+      p.script("front", 0.10, 0.90, 0.90, 0.02, "rgba(255,255,255,0.28)");
+      p.P("front", [[0.31, 0.42], [0.275, 0.48], [0.34, 0.48]]);          // mark under the eye
+      p.P("side", [[0.62, 0.26], [0.82, 0.26], [0.72, 0.42], [0.88, 0.42], [0.64, 0.64], [0.72, 0.46], [0.56, 0.46]]);   // the bolt behind the ear
       p.R("side", 0.12, 0.14, 0.30, 0.05); p.R("side", 0.12, 0.22, 0.30, 0.05);   // temple bars
-      p.R("back", 0.25, 0.70, 0.50, 0.08); p.P("back", [[0.5, 0.40], [0.68, 0.70], [0.32, 0.70]]);   // nape crest
+      p.R("back", 0.25, 0.86, 0.50, 0.07); p.P("back", [[0.5, 0.60], [0.68, 0.84], [0.32, 0.84]]);   // nape crest
       p.web("side", 0.5, 0.90, 0.30);
     },
     chest: function () {}, sleeve: function () {},
@@ -332,8 +337,6 @@
     if (head && look.ink && HEAD_INK[look.ink] && head.material && !head.material.map) {
       const tex = headInkTex(look.ink);
       if (tex) {
-        const size = head.geometry && head.geometry.parameters ? head.geometry.parameters.width : 0.6;
-        head.geometry = headInkGeom(size);
         head.material.map = tex;
         head.material.needsUpdate = true;
       }
