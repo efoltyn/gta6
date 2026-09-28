@@ -153,11 +153,11 @@ if (REVERT) {
 }
 
 // ---- 2. CHOW — claimed seats hold their bodies ----------------------------
-// 11:30-13:00 is mess; systems/prisonrest.js sits a third of the hall. Forty
+// 11:30-13:00 is mess; each man walks to a stool his car hands him. Sixty
 // sim-seconds spans many muster sweeps — the drag that pulled a sitter 2.13 m
 // off his stool fired well inside that.
 if (!REVERT) {
-  const blk2 = await holdHour(12.2, 40);
+  const blk2 = await holdHour(12.2, 60);   // (a walk from the far yards to the hall)
   const chow = await evl(`
     var r = CBZ.prisonRestAudit ? CBZ.prisonRestAudit() : {};
     var u = CBZ.propUseAudit ? CBZ.propUseAudit() : {};
@@ -170,9 +170,20 @@ if (!REVERT) {
       var d = Math.hypot(p.x - s.x, p.z - s.z);
       if (d > worst) worst = d;
     }
-    return { block: "${blk2}", seated: r.seated | 0, airSitters: u.airSitters, worst: Math.round(worst * 100) / 100 };`);
+    // THE CARS (systems/prisoncars.js): a man at chow sits at his own car's run
+    var R = CBZ.prisonRestSeats, PC = CBZ.prisonCars, atMess = 0, wrongCar = 0;
+    for (var i = 0; i < list.length; i++) {
+      var a = list[i], s = a && a._propSeat;
+      if (!s || !R || R.mess.indexOf(s) < 0) continue;
+      atMess++;
+      if (PC && typeof s._car === "number" && s._car >= 0 && s._car !== PC.carOf(a)) wrongCar++;
+    }
+    return { block: "${blk2}", seated: r.seated | 0, atMess: atMess, wrongCar: wrongCar, airSitters: u.airSitters, worst: Math.round(worst * 100) / 100 };`);
   console.log("chow:", JSON.stringify(chow));
-  check("somebody actually sat down at chow", chow.seated >= 1, `seated=${chow.seated}`);
+  // (each man walks to a stool his car hands him: forty seconds of chow fills
+  // several of them, not one lucky man who wandered past a free stool)
+  check("men actually sat down at the chow tables", chow.atMess >= 3, `atMess=${chow.atMess} seated=${chow.seated}`);
+  check("every man at chow sits at his own car's table", chow.wrongCar === 0, `wrongCar=${chow.wrongCar}`);
   check("no claimed sitter is off his seat (airSitters 0)", chow.airSitters === 0, `airSitters=${chow.airSitters}`);
   check("worst seated offset is arm's-length of zero", chow.worst <= 0.35, `worst=${chow.worst}m`);
 }
