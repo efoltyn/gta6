@@ -183,22 +183,24 @@
     onSelect: (p) => doYes(p),
   });
 
-  // Describe ped approaches with the level/offer read (panel note uses this).
+  // THE CARD HEADER FOR A PERSON: his name, and in muted type what he is.
+  // (The card has no note line since 2026-09-27; what he wants he SAYS, over
+  // his head. This is the only "ped" describer: city/interact.js's older one
+  // was shadowed by this file loading later and is gone.)
+  function pedRole(p) {
+    if (p.recruited || p.companion || p === g.cityPartner || p.gang === "player") return "Your crew";
+    if (p.kind === "security" || p.archetype === "security") return "Security";
+    if (p.gang) {
+      const r = (CBZ.cityGangs || []).find(function (x) { return x.id === p.gang; });
+      return r && r.name ? String(r.name).replace(/^the /i, "") : "";
+    }
+    return "";
+  }
   I.describe("ped", function (p) {
-    if (!on() || !p) return { label: (p && p.name) || "—", note: "" };
-    const o = offerOf(p);
-    // The level now reads over their head (aim_dossier overhead label), so the
-    // card is just their name — and the note is an in-world cue, NOT a stat line
-    // ("You Lv.23 · gap +7 · max offer $180"). The action itself is the YES verb.
-    if (!o) return { label: (p.name || "Someone"), note: "" };
-    const CUE = {
-      tribute: "They're sizing you up, and folding.", tax: "They expect their cut.",
-      charity: "They could use a hand.", handout: "They're pressing cash on you.",
-      deal: "There's product to move here.", flex: "Old money, measuring you.",
-      chat: "Just street talk.",
-    };
-    return { label: (p.name || "Someone"), note: CUE[o.kind] || "" };
+    if (!p) return { label: "", note: "" };
+    return { label: p.name || "Someone", role: pedRole(p), note: "" };
   });
+  CBZ.cityPedRole = pedRole;
 
   CBZ.streetTalkOffer = offerOf;
   CBZ.streetTalkEnabled = on;

@@ -31,8 +31,8 @@
                 thumb should never see a seam because of it. On iPad
                 they become the explained vertical rail below.
      #pinteractWho
-                one line above the verbs: a stall's item and price, and
-                nothing else (no name plate, no read, no teaching line)
+                above the verbs: the person's name (+ muted role), and a
+                stall's item and price (no read, no teaching line)
 
    --------------------------------------------------------------------
    WHERE THE DOCK SITS — copied from the thing being copied.
@@ -150,6 +150,16 @@
   pointer-events: none;
 }
 #survVerbs.show{ display: flex; }
+/* the person's name, on top of the stack (column-reverse: last child) */
+#survVerbs .sv-who{
+  align-self: flex-end; max-width: 220px; margin-bottom: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size: 16px; font-weight: 700; letter-spacing: .4px; color: #fff;
+  paint-order: stroke fill;
+  -webkit-text-stroke: var(--ink-stroke, 1.2px) var(--ink, #090909);
+  text-shadow: var(--ink-shadow, 0 2px 1px rgba(0,0,0,.85));
+}
 /* ON FOOT the dock is seated left of #tbtns, the on-foot icon cluster.
    IN THE WATER that corner belongs to somebody else: touch_vehicle.js
    hides #tbtns (body.tveh-on) and puts DIVE/RISE there instead, and those
@@ -228,6 +238,7 @@
 #pinteractWho > span{
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+#pinteractWho .piw-name{ font-size: 16px; font-weight: 700; letter-spacing: .4px; color: #fff; }
 #pinteractWho .piw-note{ font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #ffd451; }
 
 /* the 0.35 s post-action cooldown, made visible: interact.js refuses the
