@@ -1148,7 +1148,22 @@
     if (!b) {
       b = new THREE.Group();
       b.name = "warlord-webbing";
-      b.add(box(w, 0.15, d, hex));
+      const band = box(w, 0.15, d, hex);
+      /* ON A SHAPED BODY THE BAND IS A SHELL of the waist it is buckled round
+         (CBZ.humanShellSpec, as the city's vest): a box has a BOTTOM FACE, and
+         that face lay across the tops of both thighs, which a stride swings up
+         through (tools/overlap-audit.mjs: 19.5 mm running). A shell is an open
+         ring held off the body — nothing under it for a thigh to meet. */
+      let bandFront = d * 0.5;
+      const S = ch.torsoShape;
+      if (S && CBZ.humanShellSpec && CBZ.humanLimbGeometry && chest.parent === ch.body && chest.position) {
+        const cy = chest.position.y + y;
+        const spec = CBZ.humanShellSpec(ch, "band", { y0: cy - 0.075, y1: cy + 0.075, off: 0.04, flat: 0,   // (0.025 lay on the glutes)
+          box: { w: w, h: 0.15, d: d, y: cy }, origin: cy });
+        const sg = spec && CBZ.humanLimbGeometry({ userData: { torsoPart: spec } }, null);
+        if (sg) { band.geometry = sg; sg.computeBoundingBox(); bandFront = sg.boundingBox.max.z; }
+      }
+      b.add(band);
       /* POUCHES ONLY ON THE MEN WHO WOULD CARRY THEM. Three meshes per belt
          over three hundred men is nine hundred draw calls for a detail a
          levy has no business having anyway; a veteran gets the pouches and
@@ -1158,8 +1173,8 @@
         // on the band's FRONT face, not sunk through it: a pouch reaching 0.18 d
         // back into the body sat inside the swing of the thigh (15-28 mm)
         const pd = d * 0.2;
-        const pl = box(w * 0.22, 0.18, pd, tone(hex, -0.24)); pl.position.set(-w * 0.27, -0.02, d * 0.5 + pd * 0.5 - 0.01); b.add(pl);
-        const pr = box(w * 0.22, 0.18, pd, tone(hex, -0.24)); pr.position.set(w * 0.27, -0.02, d * 0.5 + pd * 0.5 - 0.01); b.add(pr);
+        const pl = box(w * 0.22, 0.18, pd, tone(hex, -0.24)); pl.position.set(-w * 0.27, -0.02, bandFront + pd * 0.5 - 0.01); b.add(pl);
+        const pr = box(w * 0.22, 0.18, pd, tone(hex, -0.24)); pr.position.set(w * 0.27, -0.02, bandFront + pd * 0.5 - 0.01); b.add(pr);
       }
       chest.add(b);
       ch._wlBelt = b;
@@ -1257,11 +1272,12 @@
     if (ch._wlArmBase == null) ch._wlArmBase = ch.armOutZ != null ? ch.armOutZ : ch.profile.armOutZ;
     if (!CBZ.cityArmorArmClear || !chest) return;
     const cy = chest.position ? chest.position.y : 0;
-    const a = CBZ.cityArmorArmClear(ch, halfW, cy + yTop, cy + yBot, clearOf() || 0.01);
+    const a = CBZ.cityArmorArmClear(ch, halfW, cy + yTop, cy + yBot, (clearOf() || 0.01) + 0.005);
     if (a != null) ch.armOutZ = Math.max(ch._wlArmBase, a);
+    ch.armWear = Math.max(0, ch.armOutZ - ch._wlArmBase);   // the seated pose adds it too
   }
   function armsRestore(ch) {
-    if (ch && ch._wlArmBase != null) { ch.armOutZ = ch._wlArmBase; ch._wlArmBase = null; }
+    if (ch && ch._wlArmBase != null) { ch.armOutZ = ch._wlArmBase; ch._wlArmBase = null; ch.armWear = 0; }
   }
 
   function armourKit(ch, det, rec) {
@@ -1318,8 +1334,35 @@
        rather than as a fatter man. Height and offset come off the chest box. */
     const carH = chH * 0.68;
     const car = box(w, carH, d, hex);
-    car.position.y = chH * 0.5 - carH * 0.5 - chH * 0.10;
+    const carY = chH * 0.5 - carH * 0.5 - chH * 0.10;   // the carrier's centre, chest-local (the shell mesh itself sits at 0)
+    car.position.y = carY;
     g.add(car);
+    /* ON A SHAPED BODY THE CARRIER IS A SHELL OF IT (the torso block's
+       CBZ.humanShellSpec, what city/armor.js's vest already wears): a box
+       sized off the chest's reported box met the real chest's pecs, bust
+       and shoulder blades ON its faces (tools/overlap-audit.mjs: 13-36
+       samples of z-fight per rung). A shell held `off` proud of the actual
+       surface cannot. The pieces bolted to its front then sit on the shell's
+       measured front (`front`), and its measured width drives the arm clearance. */
+    const S = ch.torsoShape, cy0 = chest.position ? chest.position.y : 0;
+    const shellOf = function (yBot, yTop, off, flat, bh) {
+      if (!S || !CBZ.humanShellSpec || !CBZ.humanLimbGeometry || chest.parent !== ch.body) return null;
+      // (a thick plate stops lower under the arm: its standoff is out at the lats,
+      // where the hanging arm cannot swing clear of its own armpit)
+      const top = Math.min(cy0 + yTop, S.base + (0.78 - 1.2 * Math.max(0, off - 0.045)) * S.sp);
+      const bot = Math.min(Math.max(cy0 + yBot, S.pTop - 0.02), top - 0.08);
+      const spec = CBZ.humanShellSpec(ch, "vest", { y0: bot, y1: top, off: off, flat: flat,
+        box: { w: w, h: bh, d: d, y: (top + bot) / 2 }, origin: cy0 });
+      return spec ? CBZ.humanLimbGeometry({ userData: { torsoPart: spec } }, null) : null;
+    };
+    const flatK = id === "vest" ? 0 : 2.9;
+    const carG = shellOf(carY - carH / 2, carY + carH / 2, stand + CL, flatK, carH);
+    let front = d * 0.5, halfW = w / 2;
+    if (carG) {
+      car.geometry = carG; car.position.set(0, 0, 0);
+      carG.computeBoundingBox();
+      front = carG.boundingBox.max.z; halfW = Math.max(-carG.boundingBox.min.x, carG.boundingBox.max.x);
+    }
     /* THE PLATE BAND: one raised course across the chest, proud of the
        carrier by another standoff. This is the piece that separates a vest
        from a rig at range — city/armor.js reaches for the same trick for the
@@ -1329,7 +1372,14 @@
       // proud front and back, its sides BURIED in the carrier's (no second
       // pair of side faces for the arms to go through)
       const bnd = box(w - CL, bandH, d + CL * 2, tone(hex, -0.14));
-      bnd.position.y = car.position.y + carH * 0.16;
+      bnd.position.y = carY + carH * 0.16;
+      // on a shaped body: a second, stiffer shell a standoff further out
+      const bg = carG ? shellOf(carY + carH * 0.16 - bandH / 2, carY + carH * 0.16 + bandH / 2, stand + CL + 0.02, 3.0, bandH) : null;
+      if (bg) {
+        bnd.geometry = bg; bnd.position.set(0, 0, 0);
+        bg.computeBoundingBox();
+        halfW = Math.max(halfW, -bg.boundingBox.min.x, bg.boundingBox.max.x);
+      }
       g.add(bnd);
     }
     if (shape.pouches) {
@@ -1339,7 +1389,7 @@
       const n = shape.pouches, pw = w / (n + 1.6), ph = carH * 0.3;
       for (let i = 0; i < n; i++) {
         const pch = box(pw, ph, stand * 2 + CL, tone(hex, -0.22));
-        pch.position.set((i - (n - 1) / 2) * (pw * 1.16), car.position.y - carH * 0.26, d * 0.5);
+        pch.position.set((i - (n - 1) / 2) * (pw * 1.16), carY - carH * 0.26, front);
         g.add(pch);
       }
     }
@@ -1356,11 +1406,11 @@
       // taller as well as wider.
       // and it stops under the CHIN: the jaw is the neck pivot's height, read
       // off the rig (a 0.16-chest collar reached 9 mm into it standing still)
-      const carTop = car.position.y + carH * 0.5 - CL;
+      const carTop = carY + carH * 0.5 - CL;
       const chin = (ch.neck && chest.parent === ch.neck.parent) ? ch.neck.position.y - chest.position.y - 3 * CL : Infinity;
       const colH = Math.max(0.03, Math.min(chH * 0.16, chin - carTop)), colD = d * 0.22;
       const col = box(w * 0.62, colH, colD, tone(hex, -0.2));
-      col.position.set(0, car.position.y + carH * 0.5 + colH * 0.5 - CL, d * 0.5 - colD * 0.5 + CL);
+      col.position.set(0, carY + carH * 0.5 + colH * 0.5 - CL, front - colD * 0.5 + CL);
       g.add(col);
     }
     /* THE SASH IS WORN OVER THE CARRIER, and this is the fix for the fault
@@ -1388,7 +1438,7 @@
     const sashH = carH * 0.2;
     const sash = box(w * 1.02, sashH, CL * 2 + stand,
                      det.accent != null ? det.accent : YOUR_COLOUR);
-    sash.position.set(0, car.position.y + carH * 0.06, d * 0.5);
+    sash.position.set(0, carY + carH * 0.06, front);
     sash.rotation.z = -0.42;
     g.add(sash);
 
@@ -1430,7 +1480,9 @@
       }
     }
     // the arms carry clear of the carrier's sides (city/armor.js's solver, by name)
-    armsClear(ch, w / 2, chest, car.position.y + carH / 2, car.position.y - carH / 2);
+    // against the drawn pieces' own width at each height (a shell is wide at
+    // the lats, and the arm cannot swing clear of its own armpit)
+    armsClear(ch, CBZ.cityArmorWidthProfile ? CBZ.cityArmorWidthProfile(ch, g.children) : halfW, chest, carY + carH / 2, carY - carH / 2);
     return g;
   }
 

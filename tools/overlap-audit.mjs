@@ -42,7 +42,7 @@
    cannot move, so they cannot flicker, and are reported as `sink` only.
    CLOTHING LAYERS: a same-facing attachment surface within ZF_MM (0.6 mm) of
    a same-frame body surface is a z-fight (two coplanar faces stipple), and
-   fails at any area. HAIR is soft (a 2-3 cm lock compresses where it rests
+   fails from ZF_MIN samples (a patch, not a tangent point). HAIR is soft (a 2-3 cm lock compresses where it rests
    on a shoulder): HAIR_TOL_MM 6.
    THE BODY'S OWN COLLISION IS NOT THE ATTACHMENT'S: a sample only counts
    where the surface of the part it is worn ON (projected, nearest point) is
@@ -79,6 +79,10 @@ const TOL_MM = 4.0;                      // cross-frame penetration allowed (wor
 const HAIR_TOL_MM = 6.0;                 // hair is soft: a 2-3 cm lock compresses where it rests on a shoulder
 const tolOf = (label) => (/^(known:)?hair:/.test(label) ? HAIR_TOL_MM : TOL_MM);
 const ZF_MM = 0.6;                       // coplanar same-facing = z-fight (world mm)
+// a z-fight is a coplanar PATCH: 4 samples (~13 cm² at the sample spacing). One
+// or two samples are where a crossing surface is momentarily tangent to the
+// body (a barrel across the curve of the back), which is not a stipple.
+const ZF_MIN = 4;
 const SAMPLE_M = 0.018;                  // surface sample spacing (world metres)
 const HAIR_HUG = 0.035;                  // hair this close to the skull/neck (unit head) is the scalp layer
 
@@ -239,7 +243,9 @@ function partSdf(part, x, y, z, nrm, withNeck, needN) {
     const l = Math.hypot(gx, gy, gz) || 1; nrm[0] = gx / l; nrm[1] = gy / l; nrm[2] = gz / l;
     return d;                                       // the head mesh's scale (hk) is in its matrixWorld
   }
-  // generic mesh: nearest triangle, signed by its face normal
+  // generic mesh: its cached signed-distance grid (the shaped torso), trilinear
+  if (part.grid) return gridSdf(part.grid, x, y, z, nrm);
+  // …or, with no grid, nearest triangle, signed by its face normal
   const t = part.tris;
   let best = Infinity, bo = 0;
   for (let o = 0; o < t.length; o += 12) {
@@ -251,6 +257,85 @@ function partSdf(part, x, y, z, nrm, withNeck, needN) {
   const s = (x - _c[0]) * t[bo + 9] + (y - _c[1]) * t[bo + 10] + (z - _c[2]) * t[bo + 11];
   nrm[0] = t[bo + 9]; nrm[1] = t[bo + 10]; nrm[2] = t[bo + 11];
   return Math.sqrt(best) * (s < 0 ? -1 : 1);
+}
+
+/* A SHAPED BODY PART (the torso's lofted chest / waist / pelvis / collar band)
+   is measured through a SIGNED DISTANCE GRID built once per geometry (the
+   shape is shared by every body of one profile): triangles bucketed in a
+   coarse hash, each voxel takes the nearest triangle in its 3x3x3 buckets
+   (sign = that triangle's facing), voxels farther than a bucket from any
+   surface take the sign carried along their x row from outside the box.
+   Queries are trilinear, the normal the grid's gradient. */
+const gridCache = new Map();
+const GRID_H = 0.022, GRID_B = 0.045, GRID_PAD = 0.07;
+function sdfGrid(g) {
+  let G = gridCache.get(g.uuid);
+  if (G) return G;
+  const t = meshTris(g);
+  g.computeBoundingBox();
+  const bb = g.boundingBox, x0 = bb.min.x - GRID_PAD, y0 = bb.min.y - GRID_PAD, z0 = bb.min.z - GRID_PAD;
+  const nx = Math.ceil((bb.max.x - bb.min.x + 2 * GRID_PAD) / GRID_H) + 1, ny = Math.ceil((bb.max.y - bb.min.y + 2 * GRID_PAD) / GRID_H) + 1, nz = Math.ceil((bb.max.z - bb.min.z + 2 * GRID_PAD) / GRID_H) + 1;
+  // bucket the triangles
+  const bx = Math.ceil(nx * GRID_H / GRID_B) + 1, by = Math.ceil(ny * GRID_H / GRID_B) + 1, bz = Math.ceil(nz * GRID_H / GRID_B) + 1;
+  const buckets = new Map();
+  const cell = (v, v0) => Math.floor((v - v0) / GRID_B);
+  for (let o = 0; o < t.length; o += 12) {
+    const ax = Math.min(t[o], t[o + 3], t[o + 6]), bxx = Math.max(t[o], t[o + 3], t[o + 6]);
+    const ay = Math.min(t[o + 1], t[o + 4], t[o + 7]), byy = Math.max(t[o + 1], t[o + 4], t[o + 7]);
+    const az = Math.min(t[o + 2], t[o + 5], t[o + 8]), bzz = Math.max(t[o + 2], t[o + 5], t[o + 8]);
+    for (let i = cell(ax, x0); i <= cell(bxx, x0); i++) for (let j = cell(ay, y0); j <= cell(byy, y0); j++) for (let k = cell(az, z0); k <= cell(bzz, z0); k++) {
+      const key = (i * by + j) * bz + k;
+      let L = buckets.get(key); if (!L) buckets.set(key, (L = [])); L.push(o);
+    }
+  }
+  const D = new Float32Array(nx * ny * nz), known = new Uint8Array(nx * ny * nz);
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
+    const px = x0 + i * GRID_H, py = y0 + j * GRID_H, pz = z0 + k * GRID_H;
+    const ci = cell(px, x0), cj = cell(py, y0), ck = cell(pz, z0);
+    let best = Infinity, bo = -1;
+    for (let a = ci - 1; a <= ci + 1; a++) for (let b = cj - 1; b <= cj + 1; b++) for (let c = ck - 1; c <= ck + 1; c++) {
+      const L = buckets.get((a * by + b) * bz + c); if (!L) continue;
+      for (const o of L) {
+        closestOnTri(px, py, pz, t, o, _c);
+        const dd = (px - _c[0]) ** 2 + (py - _c[1]) ** 2 + (pz - _c[2]) ** 2;
+        if (dd < best) { best = dd; bo = o; }
+      }
+    }
+    const id = (i * ny + j) * nz + k;
+    if (bo >= 0 && best <= GRID_B * GRID_B) {
+      closestOnTri(px, py, pz, t, bo, _c);
+      const s = (px - _c[0]) * t[bo + 9] + (py - _c[1]) * t[bo + 10] + (pz - _c[2]) * t[bo + 11];
+      D[id] = Math.sqrt(best) * (s < 0 ? -1 : 1); known[id] = 1;
+    }
+  }
+  // far voxels: the sign carried along the x row from outside the box
+  for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
+    let sign = 1;
+    for (let i = 0; i < nx; i++) {
+      const id = (i * ny + j) * nz + k;
+      if (known[id]) sign = D[id] < 0 ? -1 : 1;
+      else D[id] = sign * GRID_B;
+    }
+  }
+  G = { D, nx, ny, nz, x0, y0, z0 };
+  gridCache.set(g.uuid, G);
+  return G;
+}
+function gridAt(G, x, y, z) {
+  const fx = (x - G.x0) / GRID_H, fy = (y - G.y0) / GRID_H, fz = (z - G.z0) / GRID_H;
+  if (fx < 0 || fy < 0 || fz < 0 || fx >= G.nx - 1 || fy >= G.ny - 1 || fz >= G.nz - 1) return GRID_B;
+  const i = fx | 0, j = fy | 0, k = fz | 0, u = fx - i, v = fy - j, w = fz - k, ny = G.ny, nz = G.nz, D = G.D;
+  const at = (a, b, c) => D[((i + a) * ny + (j + b)) * nz + (k + c)];
+  const c00 = at(0, 0, 0) * (1 - u) + at(1, 0, 0) * u, c10 = at(0, 1, 0) * (1 - u) + at(1, 1, 0) * u;
+  const c01 = at(0, 0, 1) * (1 - u) + at(1, 0, 1) * u, c11 = at(0, 1, 1) * (1 - u) + at(1, 1, 1) * u;
+  return (c00 * (1 - v) + c10 * v) * (1 - w) + (c01 * (1 - v) + c11 * v) * w;
+}
+function gridSdf(G, x, y, z, nrm) {
+  const d = gridAt(G, x, y, z), e = GRID_H * 0.5;
+  const gx = gridAt(G, x + e, y, z) - gridAt(G, x - e, y, z), gy = gridAt(G, x, y + e, z) - gridAt(G, x, y - e, z), gz = gridAt(G, x, y, z + e) - gridAt(G, x, y, z - e);
+  const l = Math.hypot(gx, gy, gz) || 1;
+  nrm[0] = gx / l; nrm[1] = gy / l; nrm[2] = gz / l;
+  return d;
 }
 
 // ---------------------------------------------------------------- the rig
@@ -279,7 +364,7 @@ function bodyParts(ch) {
         part.domeTop = /Up$/.test(kind || "") ? 0.85 : 1;
         part.domeBot = /armLo/.test(kind || "") ? (variant === "bare" ? 0.20 : 0.22) : (/legLo/.test(kind || "") ? (variant === "bare" ? 0.4 : 0.3) : 1);
       } else if (slot === "head" && headSdf(ch.headForm)) { part.kind = "head"; part.H = headSdf(ch.headForm, false); part.Hn = headSdf(ch.headForm, true); }
-      else { const p = flatBoxParams(m); if (p) { part.kind = "box"; part.p = p; } else { part.kind = "mesh"; part.tris = meshTris(g); } }
+      else { const p = flatBoxParams(m); if (p) { part.kind = "box"; part.p = p; } else { const f = m.userData && m.userData._cbzFlat && m.userData._cbzFlat.g; part.kind = "mesh"; part.grid = sdfGrid(f || g); } }
       out.push(part);
     }
   }
@@ -502,11 +587,11 @@ function measure(ch, labels, tag, pose, opts) {
            is projected onto the nearest host surface; it only counts where
            that host point is clear of P. */
         if (!same && d < -worst && hostInside(p, P, sameParts)) continue;
-        if (d < -worst) { worst = -d; wp = q.clone(); if (process.env.OA_DBG && -d > +process.env.OA_DBG) { console.log("DBG", tag, pose, A.label, P.region, "world", p.toArray().map(v=>v.toFixed(3)).join(","), "local", q.toArray().map(v=>v.toFixed(3)).join(","), "scale", P.scale.toFixed(3), "d", d.toFixed(4)); } }
+        if (d < -worst) { worst = -d; wp = q.clone(); if (process.env.OA_DBG && -d > +process.env.OA_DBG) { console.log("DBG", tag, pose, A.label, P.region, "world", p.toArray().map(v=>v.toFixed(3)).join(","), "local", q.toArray().map(v=>v.toFixed(3)).join(","), "scale", P.scale.toFixed(3), "d", d.toFixed(4), "armOutZ", ch.armOutZ, "laZ", ch.parts.la.rotation.z.toFixed(3)); } }
         if (same && Math.abs(d) < ZF_MM / 1000 && !isNaN(S[i + 3])) {
           n.set(S[i + 3], S[i + 4], S[i + 5]).applyMatrix3(_nm).normalize();
           bn.set(nrm[0], nrm[1], nrm[2]).applyMatrix3(P.nmat).normalize();
-          if (n.dot(bn) > 0.95) zf++;
+          if (n.dot(bn) > 0.95) { zf++; if (process.env.OA_ZF && pose === "stand") console.log("ZF", tag, A.label, A.mesh.name || JSON.stringify(A.mesh.geometry.parameters), A.mesh.position.toArray().map((v) => v.toFixed(3)).join("/"), P.region, "local", q.x.toFixed(3), q.y.toFixed(3), q.z.toFixed(3), "n", n.x.toFixed(2), n.y.toFixed(2), n.z.toFixed(2)); }
         }
       }
       const mm = worst * 1000;
@@ -618,6 +703,7 @@ process.on("exit", () => { if (process.env.OA_TIME) console.log("TIME pose " + (
 const FOLDING = { prone: 1, lie: 1, ride: 1 };    // (astride a saddle: legs spread, both hands meet at the reins)
 const AIMS = { aim: 1, aimPistol: 1 };
 function run(ch, tag, labels, poses, opts) {
+  if (process.env.OA_ARMS && ch.armOutZ !== ch.profile.armOutZ) console.log("ARMS", tag, "armOutZ", (+ch.armOutZ).toFixed(3), "base", ch.profile.armOutZ);
   for (const pz of poses) {
     const a = performance.now(); POSES[pz](ch);
     const b = performance.now(); measure(ch, labels, tag, pz, FOLDING[pz] ? Object.assign({}, opts, { known: true }) : opts);
@@ -797,7 +883,7 @@ const fam = new Map();
 for (const [label, r] of rows) {
   const f = label.replace(/:.*$/, "");
   const known = /^(known|fenced):/.test(label), tol = tolOf(label);
-  const bad = !known && (r.worst > tol || r.zf > 0);
+  const bad = !known && (r.worst > tol || r.zf >= ZF_MIN);
   if (bad) fails++;
   if (bad || VERBOSE || known || r.worst > tol * 0.5) {
     console.log((bad ? "  FAIL " : known ? "  known" : "  ok   ") + " " + label.padEnd(44) + " worst " + r.worst.toFixed(1).padStart(5) + " mm" +

@@ -212,6 +212,9 @@
     const ll = ch && ch.parts && ch.parts.ll, lm = ll && ll.userData && ll.userData.main;
     const LL = lm && lm.geometry && lm.geometry.userData && lm.geometry.userData.limb;
     if (LL && ll.position) thighTop = ll.position.y + lm.position.y + LL.y0 + 0.85 * Math.max(LL.rows[0][1] * LL.sx, LL.rows[0][2] * LL.sz);
+    // …and SEATED the thigh lies level, its top a whole half-thickness over the
+    // hip pivot (a chair put 6-9 mm of thigh into the vest's hem)
+    if (ll && ll.position && ch.profile) thighTop = Math.max(thighTop, ll.position.y + ch.profile.legW / 2);
     const topY = shoulderY - c;
     const botY = Math.max(chestBot + c, thighTop + c);
     const VEST_H = Math.max(0.3, topY - botY);
@@ -287,27 +290,74 @@
         if (h) samples.push([off + yl, h.hx]);
       }
     }
+    // the first angle that clears everything; if none can (a piece reaching
+    // up into the armpit, where the arm cannot swing away from its own
+    // pivot), the angle that leaves the least of the arm inside it
+    let best = base, bestDef = Infinity;
     for (let a = base; a <= 0.45; a += 0.01) {
-      let ok = true;
+      let def = 0;
       for (const [dy, hx] of samples) {
         const y = pivY + dy * Math.cos(a);                 // the section's height, arm swung out by a
         if (y > yTop || y < yBot) continue;
         const cx = armX - dy * Math.sin(a);                // dy < 0 below the pivot: out is +x
-        if (cx - hx * Math.cos(a) < halfW + clear) { ok = false; break; }
+        const hw = typeof halfW === "function" ? halfW(y) : halfW;      // a width PROFILE (drawn shells) or one number
+        def = Math.max(def, hw + clear - (cx - hx * Math.cos(a)));
       }
-      if (ok) return Math.max(base, a);
+      if (def <= 0) return Math.max(base, a);
+      if (def < bestDef - 1e-4) { bestDef = def; best = a; }
     }
-    return 0.45;
+    return Math.max(base, best);
   }
   CBZ.cityArmorArmClear = armClear;
+  /* The half-width PROFILE of what is drawn: max |x| of the meshes' vertices
+     in each 2 cm slice of body height (a torso shell is wide at the lats and
+     narrow at the waist; one max width over it all is a width no arm can
+     clear at the armpit, where the arm cannot swing away from its own
+     pivot). `meshes` are children of rig.body (or of a mesh that is). */
+  function widthProfile(ch, meshes) {
+    const bins = new Map(), q = new THREE.Vector3(), m4 = new THREE.Matrix4();
+    for (let i = 0; i < meshes.length; i++) {
+      const m = meshes[i], g = m && m.geometry, pos = g && g.attributes && g.attributes.position;
+      if (!pos) continue;
+      m4.identity();
+      let o = m;
+      for (; o && o !== ch.body; o = o.parent) { o.updateMatrix(); m4.premultiply(o.matrix); }
+      if (o !== ch.body) continue;
+      for (let k = 0; k < pos.count; k++) {
+        q.fromBufferAttribute(pos, k).applyMatrix4(m4);
+        const b = Math.round(q.y / 0.02), ax = Math.abs(q.x);
+        if (!(bins.get(b) >= ax)) bins.set(b, ax);
+      }
+    }
+    return function (y) {
+      const b = Math.round(y / 0.02);
+      return Math.max(bins.get(b) || 0, bins.get(b - 1) || 0, bins.get(b + 1) || 0);
+    };
+  }
+  CBZ.cityArmorWidthProfile = widthProfile;
   function setArmsClear(ch, fit) {
     if (!ch || !fit || !ch.profile) return;
     if (ch._armorArmBase == null) ch._armorArmBase = ch.armOutZ != null ? ch.armOutZ : ch.profile.armOutZ;
-    const a = armClear(ch, fit.vestHalfW, fit.vestTop, fit.vestBot, clearance() || 0.01);
+    /* against what is DRAWN: the vest and band are torso shells now, a
+       flattened plate section wider than the box numbers at the ribs — so the
+       width and span come off the mounted meshes' own geometry */
+    let top = fit.vestTop, bot = fit.vestBot;
+    const kids = ch.body ? ch.body.children : [], worn = [];
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i], kind = m && m.userData && m.userData.armorKind;
+      if (!kind || !CHEST_KINDS[kind] || !m.geometry) continue;
+      m.geometry.computeBoundingBox();
+      const b = m.geometry.boundingBox;
+      top = Math.max(top, b.max.y + m.position.y); bot = Math.min(bot, b.min.y + m.position.y);
+      worn.push(m);
+    }
+    const prof = worn.length ? widthProfile(ch, worn) : null;
+    const a = armClear(ch, prof ? function (y) { return Math.max(prof(y), y <= fit.vestTop && y >= fit.vestBot ? fit.vestHalfW : 0); } : fit.vestHalfW, top, bot, clearance() || 0.01);
     if (a != null) ch.armOutZ = Math.max(ch._armorArmBase, a);
+    ch.armWear = Math.max(0, ch.armOutZ - ch._armorArmBase);   // the seated pose adds it too
   }
   function restoreArms(ch) {
-    if (ch && ch._armorArmBase != null) { ch.armOutZ = ch._armorArmBase; ch._armorArmBase = null; }
+    if (ch && ch._armorArmBase != null) { ch.armOutZ = ch._armorArmBase; ch._armorArmBase = null; ch.armWear = 0; }
   }
   CBZ.cityArmorFit = armorFit;                        // charpanel.js's portrait mirrors it
   function dimGeo(d) { return (CBZ.boxGeom && d) ? CBZ.boxGeom(d[0], d[1], d[2]) : null; }
@@ -377,9 +427,10 @@
       const m = kids[i], kind = m && m.userData && m.userData.armorKind;
       if (!kind || !CHEST_KINDS[kind]) continue;
       if (!fit) fit = armorFit(ch);
-      if (kind === "vest") { const gm = vestGeo(ch, fit, m.userData.kitId); if (gm) m.geometry = gm; m.position.y = fit.vestY; setArmsClear(ch, fit); }
+      if (kind === "vest") { const gm = vestGeo(ch, fit, m.userData.kitId); if (gm) m.geometry = gm; m.position.y = fit.vestY; }
       else if (kind === "vestHi") { const gb = bandGeo(ch, fit); if (gb) m.geometry = gb; m.position.set(0, fit.bandY, fit.bandZ); }
     }
+    if (fit) setArmsClear(ch, fit);
     return !!fit;
   }
   CBZ.cityArmorRefit = refitRig;

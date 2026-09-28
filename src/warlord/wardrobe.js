@@ -352,6 +352,7 @@
       if (n && n.parent) n.parent.remove(n);
     }
     rig._wlKit = null;
+    if (rig._wlCuffBase != null) { rig.armOutZ = rig._wlCuffBase; rig._wlCuffBase = null; }
   }
   // how far in front of the chest an ornament has to sit to clear whatever is
   // being worn. A painted jacket is a real inflated shell (clothes.js builds
@@ -384,6 +385,23 @@
     const P = rig.profile || {};
     const hs = P.headSize || 0.6, k = hs / 0.6;
     const cb = chestBox(rig), zF = chestZ(rig);
+    /* ON A SHAPED BODY the chest is not a box's flat face: pecs, a bust, a
+       belly stand out of it (tools/overlap-audit.mjs: the tactical plate's
+       front face lay ON a man's belly). zOn(x0, x1, y0, y1) is the front of
+       what this rig wears over that footprint (chest-local), measured off
+       the body surface (rig.torsoFrontZ) + a jacket shell's standoff when one
+       is on, never less than the old box answer. */
+    const jOn = !!(rig._jacketMesh && rig._jacketMesh.visible);
+    const zOn = function (x0, x1, y0, y1) {
+      let z = zF;
+      if (rig.torsoFrontZ && chest && chest.position) {
+        for (let i = 0; i <= 3; i++) for (let j = 0; j <= 3; j++) {
+          const x = x0 + (x1 - x0) * i / 3, y = chest.position.y + y0 + (y1 - y0) * j / 3;
+          z = Math.max(z, rig.torsoFrontZ(x, y) + (jOn ? 0.035 : 0) + 0.018);
+        }
+      }
+      return z;
+    };
 
     /* HEADWEAR is entities/headwear.js's (CBZ.headwear), on the real head,
        with the hair kept and compressed under it. The engine cap a
@@ -438,8 +456,47 @@
          outside the ears to the yoke's own end, both MEASURED on this rig
          (the yoke is clamped wider than the profile says; ears 0.35 of a
          unit head out). */
+      /* ON A SHAPED BODY there is no slab to lay a board on: the collar is a
+         band round the neck and the shoulder is a sloping TRAPEZIUS. The
+         board lies ON that slope — from a clearance outside the neck out to a
+         clearance inside the arm's joint dome — at the chest surface's
+         measured top, tilted with it, as deep as the shoulder is there (+ a
+         coat's standoff), riding the chest. */
+      const TSh = rig.torsoShape, cg = chest && chest.geometry;
+      if (TSh && cg && cg.attributes && cg.attributes.position && rig.parts && rig.parts.la) {
+        const cpos = cg.attributes.position, jOn2 = !!(rig._jacketMesh && rig._jacketMesh.visible);
+        const topAt = function (x0) {
+          let t = -Infinity, z0 = Infinity, z1 = -Infinity;
+          for (let i = 0; i < cpos.count; i++) if (Math.abs(Math.abs(cpos.getX(i)) - x0) < 0.03) t = Math.max(t, cpos.getY(i));
+          for (let i = 0; i < cpos.count; i++) if (Math.abs(Math.abs(cpos.getX(i)) - x0) < 0.03 && cpos.getY(i) > t - 0.04) { z0 = Math.min(z0, cpos.getZ(i)); z1 = Math.max(z1, cpos.getZ(i)); }
+          return { y: t, z0: z0, z1: z1 };
+        };
+        const armIn = Math.abs(rig.parts.la.position.x) - (P.armW || 0.3) / 2;
+        const xi = (TSh.nRx || 0.15) + 0.04, xo = Math.max(xi + 0.06, armIn - 0.02);
+        const a = topAt(xi), b = topAt(xo), m = topAt((xi + xo) / 2);
+        if (isFinite(a.y) && isFinite(b.y) && isFinite(m.z0)) {
+          const L = Math.hypot(xo - xi, b.y - a.y), tilt = Math.atan2(b.y - a.y, xo - xi);
+          const dep2 = (m.z1 - m.z0) * 0.9 + (jOn2 ? 0.07 : 0), zc = (m.z0 + m.z1) / 2;
+          const lift = 0.025 + 0.012 + (jOn2 ? 0.035 : 0);             // half the board + air (+ the coat)
+          for (let s2 = -1; s2 <= 1; s2 += 2) {
+            const ep = box(L, 0.05, dep2, K.epauletteColor != null ? K.epauletteColor : trim);
+            const cx = s2 * (xi + xo) / 2, cy = Math.max(a.y, b.y, m.y) - Math.abs(b.y - a.y) / 2;
+            ep.position.set(cx - s2 * Math.sin(tilt) * lift * 0, cy + lift, zc);
+            ep.rotation.z = s2 * tilt;
+            add(chest, ep);
+            if (K.pips) {
+              for (let p2 = 0; p2 < K.pips; p2++) {
+                const pip = box(0.034, 0.020, 0.034, 0xf0dc9a);
+                pip.position.set(cx, cy + lift + 0.035, zc + dep2 * 0.5 - 0.09 - p2 * 0.062);
+                add(chest, pip);
+              }
+            }
+          }
+        }
+      }
       const yp = yoke.geometry && yoke.geometry.parameters;
       const cw = (yp && yp.width) || P.collarW || 0.94, chh = (yp && yp.height) || P.collarH || 0.18;
+      if (!TSh) {
       const dep = ((P.jacketD || (P.torsoD || 0.5) + 0.12)) + 0.06;
       const inner = 0.35 * k + 0.02, outer = cw / 2 - 0.01;   // (its end ON the yoke's end face was a 429-sample stipple)
       const bw = Math.max(0.05, Math.min(0.21, outer - inner)), ex = outer - bw / 2;
@@ -455,6 +512,7 @@
           }
         }
       }
+      }
     }
     if (chest) {
       /* THE SASH. One long thin box rotated across the chest, plus a lighter
@@ -468,9 +526,10 @@
            nothing hangs off the top. */
         const L = cb.h / Math.cos(0.6);
         const s1 = box(0.155, L, 0.030, K.sash);
-        s1.position.set(0, 0, zF); s1.rotation.z = 0.60; add(chest, s1);
+        const sz = zOn(-cb.w * 0.4, cb.w * 0.4, -cb.h * 0.45, cb.h * 0.45);
+        s1.position.set(0, 0, sz); s1.rotation.z = 0.60; add(chest, s1);
         const s2 = box(0.032, L, 0.032, shade(K.sash, 0.35));
-        s2.position.set(0.078, 0, zF + 0.001); s2.rotation.z = 0.60; add(chest, s2);
+        s2.position.set(0.078, 0, sz + 0.001); s2.rotation.z = 0.60; add(chest, s2);
       }
       /* MEDALS ARE A BLOCK, NOT MEDALS. Eight ribbons in two rows on the left
          chest: at this scale the individual award is invisible and the BLOCK
@@ -480,14 +539,15 @@
       if (K.medals) {
         const RIB = [0x8f2c2c, 0x2d4f8f, 0x5c7d34, 0xc8a53a, 0x6b3a7d, 0x2f7d78, 0xb8632a, 0x8a8f97];
         const n = Math.min(8, K.medals | 0 || 6);
+        const mz = zOn(-0.35, -0.10, cb.h * 0.20 - 0.09, cb.h * 0.20 + 0.04);
         for (let i = 0; i < n; i++) {
           const col = i % 4, row = (i / 4) | 0;
           const rib = box(0.062, 0.050, 0.016, RIB[i % RIB.length]);
-          rib.position.set(-0.31 + col * 0.067, cb.h * 0.20 - row * 0.056, zF);
+          rib.position.set(-0.31 + col * 0.067, cb.h * 0.20 - row * 0.056, mz);
           add(chest, rib);
         }
         const bar = box(0.275, 0.011, 0.018, 0xc9a83c);
-        bar.position.set(-0.209, cb.h * 0.20 + 0.033, zF); add(chest, bar);
+        bar.position.set(-0.209, cb.h * 0.20 + 0.033, mz); add(chest, bar);
       }
       /* AIGUILLETTE. A shoulder cord and two loops off the right shoulder —
          the thing that says "staff officer" faster than any amount of braid
@@ -510,6 +570,21 @@
            Nothing floats on the chest any more. */
         const gold = K.braidColor != null ? K.braidColor : 0xd9b64a;
         const low = rig.skinSlots && rig.skinSlots.armsLower;
+        /* the rings stand off the wrist, and a hanging wrist rests against the
+           HIPS (the idle carry tucks the hands in): 11 mm of ring into the
+           pelvis standing still (tools/overlap-audit.mjs). The arms are carried
+           just clear of the widest hip section, measured off the body shape
+           (city/armor.js's arm solver, by name); clearKit gives them back. */
+        const TS2 = rig.torsoShape;
+        if (low && TS2 && TS2.pel && CBZ.cityArmorArmClear && rig.profile) {
+          let hw = 0;
+          for (let j = 0; j <= 6; j++) { const y = TS2.pBot + (TS2.pTop + 0.1 - TS2.pBot) * j / 6; hw = Math.max(hw, (y <= TS2.pTop ? TS2.pel(y).a : TS2.at(y).a)); }
+          const a2 = CBZ.cityArmorArmClear(rig, hw + 0.012, TS2.pTop + 0.1, TS2.pBot, 0.01);
+          if (a2 != null) {
+            if (rig._wlCuffBase == null) rig._wlCuffBase = rig.armOutZ != null ? rig.armOutZ : rig.profile.armOutZ;
+            rig.armOutZ = Math.max(rig.armOutZ != null ? rig.armOutZ : rig._wlCuffBase, a2);
+          }
+        }
         if (low) {
           for (let i = 0; i < low.length; i++) {
             const a = low[i];
@@ -533,7 +608,10 @@
           }
         }
         if (yoke) {
-          const cd = (P.collarD || 0.52) / 2 + 0.055;
+          // on the collar's own front (measured: the collar is a band round the
+          // neck now, and the old slab-depth number hung the tabs in the air)
+          if (!yoke.geometry.boundingBox) yoke.geometry.computeBoundingBox();
+          const cd = rig.torsoShape ? yoke.geometry.boundingBox.max.z + 0.016 : (P.collarD || 0.52) / 2 + 0.055;
           for (let s3 = -1; s3 <= 1; s3 += 2) {
             const tab = box(0.085, 0.055, 0.03, gold);
             tab.position.set(s3 * 0.11, 0.005, cd);
@@ -636,7 +714,19 @@
           capeBot = Math.max(capeBot, hipLeg.position.y + (P.legW || 0.34) / 2 - yoke.position.y);
         }
         const cp = box(capeW, 0.01 - capeBot, 0.05, K.cape);
-        cp.position.set(0, (0.01 + capeBot) / 2, -(P.collarD || 0.52) / 2 - 0.03);
+        // behind the BACK as this body is shaped (shoulder blades stand out of
+        // the old box plane): the cape's front a clearance off the furthest-back
+        // point of the back over its whole drop, measured
+        let capeZ = -(P.collarD || 0.52) / 2 - 0.03;
+        if (rig.torsoBackZ && yoke.parent === rig.body) {
+          let zb = Infinity;
+          for (let i = 0; i <= 4; i++) for (let j = 0; j <= 6; j++) {
+            const x = (i / 4 - 0.5) * capeW, y = yoke.position.y + capeBot + (0.01 - capeBot) * j / 6;
+            zb = Math.min(zb, rig.torsoBackZ(x, y));
+          }
+          if (isFinite(zb)) capeZ = Math.min(capeZ, zb - yoke.position.z - ((rig._jacketMesh && rig._jacketMesh.visible) ? 0.035 : 0) - 0.04);
+        }
+        cp.position.set(0, (0.01 + capeBot) / 2, capeZ);
         cp.rotation.x = -0.05; add(yoke, cp);
         const collarRoll = box(cw + 0.14, 0.11, 0.16, K.capeTrim != null ? K.capeTrim : shade(K.cape, 0.3));
         // its top face sits just UNDER the yoke's (at 0.03 + 0.055 it landed on a
@@ -649,10 +739,11 @@
         // a slab carrier over the chest: the one silhouette change that makes
         // a fighting man read differently from a walking one.
         const pl = box(cb.w * 0.86, cb.h * 0.62, 0.09, K.plate);
-        pl.position.set(0, cb.h * 0.02, zF - 0.02); add(chest, pl);
+        const pz = zOn(-cb.w * 0.43, cb.w * 0.43, cb.h * 0.02 - cb.h * 0.31, cb.h * 0.02 + cb.h * 0.31) - 0.02;
+        pl.position.set(0, cb.h * 0.02, pz); add(chest, pl);
         for (let i = 0; i < 3; i++) {
           const pouch = box(0.16, 0.13, 0.09, shade(K.plate, -0.18));
-          pouch.position.set(-0.20 + i * 0.20, -cb.h * 0.20, zF + 0.005); add(chest, pouch);
+          pouch.position.set(-0.20 + i * 0.20, -cb.h * 0.20, pz + 0.025); add(chest, pouch);
         }
       }
       if (K.scarf != null) {
