@@ -571,6 +571,11 @@ document.body.appendChild(b);}}catch(e){}})();
        profile character.js already builds and the species row's own scale —
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
+<!-- CBZ.moves: THE ONE locomotion layer (velocity, arrival, turn rate,
+     avoidance, stuck recovery, foot-matched stride, formations). Pure math;
+     every AI mover in every game steps through it. Before poses.js so the
+     rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
+<script src="src/entities/moves.js?v=moves1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -1061,6 +1066,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/street_hardware.js?v=hw1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
+<!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
+     climb sequencer for every game (propuse's verbs and the cell bunks call it).
+     Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
+<script src="src/entities/moves_posture.js?v=posture1"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->

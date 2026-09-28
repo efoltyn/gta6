@@ -152,10 +152,16 @@
   }
   function clearAll() { for (let i = 0; i < medics.length; i++) despawn(medics[i]); medics.length = 0; }
 
+  // the walk itself is CBZ.moves: a velocity, a braking arrival at the
+  // stretcher, a bounded turn; the rig is fed what the body really did
+  const _medMo = { speed: 0, stop: 0.35, accel: 3.6, lod: 1 };
   function walkTo(m, tx, tz, dt, spd) {
     spd = spd || SPEED;
     const dx = tx - m.pos.x, dz = tz - m.pos.z, dist = Math.hypot(dx, dz) || 1;
-    m.pos.x += (dx / dist) * spd * dt; m.pos.z += (dz / dist) * spd * dt;
+    const mv = CBZ.moves.motor(m);
+    _medMo.speed = spd; _medMo.accel = spd > 3 ? 5.5 : 3.6;
+    CBZ.moves.step(mv, m.pos, m.group.rotation.y, tx, tz, _medMo, dt);
+    m.group.rotation.y = mv.yaw;
     // THE PED WALL CONTRACT (peds.js move(), verbatim): multi-pass collide with
     // the body's vertical span + the city clamp between passes. The old single
     // bare-radius pass was the documented corner-tunnel bug — one push can shove
@@ -170,8 +176,7 @@
       }
     }
     m.pos.y = CBZ.floorAt ? CBZ.floorAt(m.pos.x, m.pos.z) : 0;
-    m.group.rotation.y = CBZ.lerpAngle(m.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0008, dt));
-    if (CBZ.animChar) CBZ.animChar(m.char, spd, dt);
+    if (CBZ.animChar) CBZ.animChar(m.char, mv.gs, dt);
     return dist;
   }
 

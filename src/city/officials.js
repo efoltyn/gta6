@@ -738,7 +738,7 @@
     if (pr.state === "mourn") {
       pr.mournT -= dt;
       const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + rec.id) : null;
-      if (det) for (let i = 0; i < det.memberPedRefs.length; i++) { const gd = det.memberPedRefs[i]; if (gd && !gd.dead) { gd.state = "idle"; gd.speed = 0; } }
+      if (det) for (let i = 0; i < det.memberPedRefs.length; i++) { const gd = det.memberPedRefs[i]; if (gd && !gd.dead) { if (CBZ.protection.release) CBZ.protection.release(gd); gd.state = "idle"; gd.speed = 0; } }
       if (pr.mournT <= 0) despawnPresence(pr);
       return;
     }

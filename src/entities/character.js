@@ -1944,6 +1944,7 @@
   // no profile falls back to the old constant, so nothing can regress.
   const CHARACTER_HIP_Y = 0.95;
   const hipYOf = (ch) => (ch && ch.hipY > 0 ? ch.hipY : CHARACTER_HIP_Y);
+  const LEG_KEYS = ["ll", "rl"];
   const _hipPivot = new THREE.Vector3();
   function beginCharacterHipFrame(ch) {
     if (!ch || !ch.body) return;
@@ -2726,6 +2727,10 @@
       // A seat solve that was live a beat ago (the perch on the mattress edge)
       // is refunded here — this branch early-returns past the blend-out below.
       refundSeatSolve(ch, J, dt, sr);
+      // …unless CBZ.moves is carrying the hips from the perch onto the pillow:
+      // then the drop is ITS number for this frame (it pivots the transform
+      // about the hip, so a damp here would let the hips sink or float)
+      if (ch.postureSink != null && ch.model) { ch.model.position.y = ch.postureSink; ch._seatSunk = 1; }
       if (ch.typing) ch.typing = false;
 
       const roll = back ? LIE_ROLL_BACK : LIE_ROLL_SIDE;
@@ -2799,6 +2804,42 @@
       return;   // the sleep pose owns the whole rig
     }
 
+    /* ---- ONE KNEE DOWN (CBZ.moves.kneel) ----------------------------------
+       The medic over a body, a man tying a lace, anyone tending something on
+       the floor: the left knee on the ground with the shin laid back along
+       it, the right foot planted ahead, hips at knee height. The angles are
+       solved from THIS rig's segments by CBZ.moves.kneelLegs (the sequencer
+       tracks the same hip), and written EXACTLY at the blend CBZ.moves
+       publishes (`kneelB`, 0 standing .. 1 down), so going down and coming up
+       are the sequencer's 0.6 s / 0.5 s curves, not a damp's guess. The arms
+       are whatever held pose the caller set (`tend` by default reads as
+       working hands); with none, the forearms rest over the forward knee. */
+    if (ch.kneelB > 0 && !ch.sitting && !ch.lying && CBZ.moves && CBZ.moves.kneelLegs) {
+      const kb = Math.min(1, ch.kneelB), sr = 14;
+      const KL = CBZ.moves.kneelLegs(ch, ch._kneelSol || (ch._kneelSol = {}));
+      if (ch.model) { ch.model.position.y = ch.postureSink != null ? ch.postureSink : KL.sink * kb; ch._seatSunk = 1; }
+      ch.body.position.y = damp(ch.body.position.y, 0, sr, dt);
+      ch.body.rotation.x = 0.16 * kb;
+      ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = -KL.ak * kb; ch.parts.ll.rotation.z = 0.04 * kb; ch.parts.ll.rotation.y = 0; ch.parts.ll.scale.y = 1; }
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = -KL.af * kb; ch.parts.rl.rotation.z = -0.05 * kb; ch.parts.rl.rotation.y = 0; ch.parts.rl.scale.y = 1; }
+      if (J.ll) { J.ll.rotation.x = KL.kk * kb; J.ll.rotation.y = 0; J.ll.rotation.z = 0; J.ll.scale.y = 1; }
+      if (J.rl) { J.rl.rotation.x = KL.kf * kb; J.rl.rotation.y = 0; J.rl.rotation.z = 0; J.rl.scale.y = 1; }
+      const heldArms = ch.pose && CBZ.charPoses && CBZ.charPoses[ch.pose];
+      if (heldArms) heldArms(ch, dt);
+      else {
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.55, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.14, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.55, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.14, sr, dt); }
+        setElbow(J.la, -0.95, sr); setElbow(J.ra, -0.95, sr);
+      }
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.14 * kb, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+      ch.bob = ch.body.position.y; ch.lean = ch.body.rotation.x; ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;   // the kneel owns the whole rig
+    }
+
     // ---- SEATED (office-jobs): full-rig pose that OWNS the body ----
     if (ch.sitting) {
       const sr = 12;
@@ -2820,21 +2861,29 @@
       // loungers (the private-jet recliners) where a tuck would demand an
       // anatomically absurd fold.
       const ref = ch.seatRef && (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SEAT_POSE_V2 !== false) ? ch.seatRef : null;
-      if (ref && ch.model) {
-        const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
-        // Profile-driven so a child folds at a child's knee: the segment
-        // lengths ARE the rig's own (plus the shoe cap for the sole). Legacy
-        // rigs with no profile keep the authored adult constants exactly.
+      if (ref && ch.model && CBZ.moves && CBZ.moves.seatLegs) {
         const pf = ch.profile;
-        const THIGH = (pf ? pf.legUp : 0.46) * hs;
-        const SHIN = (pf ? pf.legLo + 0.03 : 0.50) * hs;   // hip→knee pivot, knee→sole
-        // hip pivot above the FLOOR: cushion + a whisker less than the thigh's
-        // half-thickness (~0.12·hs) so the thigh presses INTO the cushion a
-        // touch — a sat-in seat, never a hover. Floor for the low clamp: the
-        // hips can't drop below what a near-vertical shin can span.
-        const hipF = Math.max((ref.cushion != null ? ref.cushion : 0.45) + 0.10 * hs, SHIN * 0.55);
-        const sink = hipF - hipYOf(ch) * hs - (ref.floorBelow || 0);
-        ch.model.position.y = damp(ch.model.position.y, sink, sr, dt);
+        const post = (CBZ.CONFIG.CHAR_SEAT_POSTURE !== false && CBZ.charSeatPosture)
+          ? CBZ.charSeatPosture(ref.kind) : null;
+        /* THE LEG SOLVE IS SHARED (entities/moves_posture.js CBZ.moves.seatLegs):
+           the hip pivot over the cushion (a whisker less than the thigh's
+           half-thickness, so the thigh presses in — never a hover), the model
+           sink that puts it there, the thigh/knee/shin that land the sole on
+           the floor or the rail. The posture sequencer asks the SAME function
+           where the hips and feet end before this branch has ever run, so the
+           hip it tracks while a body sits down is the hip drawn here. */
+        const SL = CBZ.moves.seatLegs(ch, ref, post, ch._seatSol || (ch._seatSol = {}));
+        const hipF = SL.hipF;
+        /* A TRANSITION, NOT A DAMP. While CBZ.moves is lowering or raising the
+           body it publishes the fold (`seatBlend`, 0 standing .. 1 seated) and
+           the hip drop (`postureSink`) it chose for this frame; both are
+           written here exactly, because a damp toward the end pose is what
+           made the old arc's hips arrive late and pop. Held seats (no blend)
+           keep the damped approach, whose target is the same end pose. */
+        const blend = ch.seatBlend != null ? Math.max(0, Math.min(1, ch.seatBlend)) : null;
+        if (ch.postureSink != null) ch.model.position.y = ch.postureSink;
+        else if (blend != null) ch.model.position.y = SL.sink * blend;
+        else ch.model.position.y = damp(ch.model.position.y, SL.sink, sr, dt);
         ch._seatSunk = 1;
 
         /* ---- POSTURE FOLLOWS THE SEAT (CHAR_SEAT_POSTURE) ---------------
@@ -2855,16 +2904,15 @@
            anchor npclife's attach() builds (aircraft cabins, arena bowls)
            resolve to null and take the branch below UNCHANGED — the defaults
            here are the exact literals this solve has always used, so the
-           airliner row, the desk worker and the typing loop are untouched. */
-        const post = (CBZ.CONFIG.CHAR_SEAT_POSTURE !== false && CBZ.charSeatPosture)
-          ? CBZ.charSeatPosture(ref.kind) : null;
+           airliner row, the desk worker and the typing loop are untouched.
+           (`post` is resolved above, before the shared leg solve.) */
         // Per-seat variance, deterministic from the anchor's own coordinates
         // (propSeatRef hashes them) — a row of five sofa-sitters must not read
         // as one body stamped five times. Zero unless a posture claimed the
         // seat, so the default pose stays bit-for-bit what it was.
         const sv = (post && ref.vary != null) ? (ref.vary - 0.5) : 0;
         let leanX = 0.1, sitY = -0.06, slideZ = 0, yawY = 0;
-        let armX = -0.34, armZ = 0.12, elb = -0.72, neckX = 0.04, railF = 0;
+        let armX = -0.34, armZ = 0.12, elb = -0.72, neckX = 0.04;
         if (post === "lounge") {
           // You do not SIT on a couch, you fall back into one: the shoulders
           // pitch ~14° behind the hips, the pelvis slides forward off the
@@ -2873,7 +2921,7 @@
           // armrest is — wider and straighter than hands-on-thighs.
           leanX = -0.24 + sv * 0.06;
           sitY = -0.09;
-          slideZ = (pf ? pf.pelvisD : 0.48) * 0.25 * hs;
+          slideZ = (pf ? pf.pelvisD : 0.48) * 0.25 * SL.hs;
           armX = -0.20; armZ = 0.30 + sv * 0.05; elb = -0.95;
           neckX = -0.06;                       // head back against the rest
         } else if (post === "throne") {
@@ -2889,10 +2937,10 @@
           // every counter stool in the world carries a footrail, and the
           // standard one sits at ~40% of the stool's own height. Shortening
           // the hip→sole drop by that much is the whole fix, and it falls out
-          // of the declared cushion instead of a new number.
+          // of the declared cushion instead of a new number (the 0.42 lives
+          // in CBZ.moves.seatLegs with the rest of the leg solve).
           leanX = 0.06 + sv * 0.04;
           armX = -0.44; armZ = 0.10; elb = -0.90;
-          railF = 0.42;
         } else if (post === "bench") {
           // A bench is a plank: people perch forward on it and put their
           // elbows toward their knees, which is the difference between
@@ -2996,62 +3044,38 @@
         }
         if (post) yawY = sv * 0.10;            // a hair of torso yaw, per seat
         ch.model.position.z = damp(ch.model.position.z, slideZ, sr, dt);
-        const railY = railF > 0 ? (ref.cushion != null ? ref.cushion : 0.45) * railF : 0;
-        const drop = Math.max(0.05, hipF - 0.03 * hs - railY);   // hip → sole, soles a hair above the floor/rail
-        let th, fold, shinScale = 1;
-        // A chair is read by its THIGH line. The old V2 solve began at 0.95 rad
-        // (54° from vertical) solely to make the short voxel shin touch the
-        // floor. That drove the knee DOWN through the cushion: the body was at
-        // the right height, but the legs visibly pierced the seat. Put a normal
-        // chair thigh almost level first, then lengthen only the lower-leg
-        // chain enough to meet the floor. This is also the honest correction
-        // for this stylised rig: its authored shin is only ~0.35 m in world
-        // scale, while a real 0.45-0.50 m chair needs a longer seated drop.
-        const chairTh = 1.38;                            // 79° from vertical
-        const chairShin = (drop - THIGH * Math.cos(chairTh)) / SHIN;
-        if (post === "bunkback") {
-          // LEGS ALONG THE BED, not down to a floor that is 79 cm below the
-          // mattress he is sitting on. Same shape of answer as the driver
-          // below and for the same reason: the floor-reaching solve has
-          // nothing to reach, and letting it try would hang two shins through
-          // the bunk frame. Thigh level down the mattress, knee barely bent,
-          // heels resting on the bedding.
-          th = 1.58;                                     // ~90°: flat down the bed
-          fold = 0.12;                                   // a knee, not a plank
-          shinScale = 1;
-        } else if (post === "drive") {
-          // A DRIVER'S LEGS GO FORWARD, NOT DOWN. A car's floor pan sits a
-          // hand's width below the cushion, so the floor-reaching solve below
-          // has nothing to reach: it would either drive the knee down through
-          // the seat (the chair branch) or fold the body into a lounger (the
-          // low branch). Neither is a car. The thigh runs level along the
-          // cushion and the shin reaches out to a pedal box ahead of the
-          // firewall — one authored pair of angles, no solve, because the
-          // geometry it would solve against is the same in every car.
-          th = 1.46;                                     // ~84°: level thigh
-          fold = 0.62;                                   // shin forward-down to the pedals
-          shinScale = 1;
-        } else if (chairShin >= 0.82) {
-          th = chairTh;
-          fold = th;                                     // lower leg hangs vertically
-          // Standard chairs reach the floor; tall benches/stools dangle rather
-          // than destroying the seat-clear thigh line to chase it.
-          shinScale = Math.max(0.88, Math.min(1.38, chairShin));
+        // THE LEGS (CBZ.moves.seatLegs, above): a chair is read by its THIGH
+        // line — near level (1.38 rad), the shin lengthened only as far as the
+        // floor needs (tall benches/stools dangle; the stool's feet find the
+        // rail); a low lounger puts the knees over the hips; a "bunkback" runs
+        // the legs down the mattress; a driver reaches for the pedals.
+        const th = SL.th, fold = SL.fold, shinScale = SL.shinScale;
+        const leanT = leanX + (ch.seatLean || 0);        // + the push of getting up (CBZ.moves)
+        if (blend != null) {
+          // mid-transition: exactly the fold the sequencer is at (its hip curve
+          // and foot plant are computed from these same angles)
+          const shinB = CBZ.moves.shinAt ? CBZ.moves.shinAt(SL, blend) : 1 + (shinScale - 1) * blend;
+          ch.body.position.y = sitY * blend;
+          ch.body.rotation.x = leanX * blend + (ch.seatLean || 0);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+          ch.body.rotation.y = damp(ch.body.rotation.y, yawY * blend, sr, dt);
+          for (let li = 0; li < 2; li++) {
+            const k = LEG_KEYS[li], P = ch.parts[k];
+            if (P) { P.rotation.x = -th * blend; P.rotation.z = (k === "ll" ? 0.06 : -0.06) * blend; P.rotation.y = 0; P.scale.y = 1; }
+            const Jk = J[k];
+            if (Jk) { Jk.rotation.x = Math.max(0, (fold + (k === "ll" ? 0.03 : 0)) * blend); Jk.rotation.y = 0; Jk.rotation.z = 0; Jk.scale.y = shinB; }
+          }
         } else {
-          // low lounger: knees ride above the hips, feet planted forward
-          const a2 = 0.55;                                // shin leans forward of vertical
-          th = Math.acos(Math.max(-0.45, Math.min(1, (drop - SHIN * Math.cos(a2)) / THIGH)));
-          fold = Math.max(0.3, th - a2);
+          ch.body.position.y = damp(ch.body.position.y, sitY, sr, dt);  // small settle, torso stays stacked on the pelvis
+          ch.body.rotation.x = damp(ch.body.rotation.x, leanT, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+          ch.body.rotation.y = damp(ch.body.rotation.y, yawY, sr, dt);
+          if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -th, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
+          if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -th, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
+          setKnee(J.ll, fold + 0.03, sr); setKnee(J.rl, fold, sr);       // hair of asymmetry so rows don't read cloned
+          if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, shinScale, sr, dt);
+          if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, shinScale, sr, dt);
         }
-        ch.body.position.y = damp(ch.body.position.y, sitY, sr, dt);  // small settle, torso stays stacked on the pelvis
-        ch.body.rotation.x = damp(ch.body.rotation.x, leanX, sr, dt);
-        ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
-        ch.body.rotation.y = damp(ch.body.rotation.y, yawY, sr, dt);
-        if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -th, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
-        if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -th, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
-        setKnee(J.ll, fold + 0.03, sr); setKnee(J.rl, fold, sr);       // hair of asymmetry so rows don't read cloned
-        if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, shinScale, sr, dt);
-        if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, shinScale, sr, dt);
         ch._seatShinScaled = !!((J.ll && Math.abs(J.ll.scale.y - 1) > 0.001) ||
           (J.rl && Math.abs(J.rl.scale.y - 1) > 0.001));
         // forearms rest on the thighs/armrests (same relaxed carry as legacy;
@@ -3713,7 +3737,12 @@
     // else, weighted differently. That is why all ~15 makeCharacter call sites
     // get the new motion without a line of change.
     const GA = ch.gait || GAIT_NEUTRAL;
-    ch.phase += gaitPhaseDelta(speed, dt, walkRef, GA.step);
+    // FOOT-PLANT-MATCHED STRIDE (entities/moves.js): one footfall covers the
+    // ground the planted foot sweeps under THIS rig's hip, so walkers stop
+    // skating. Runs keep the authored stride (flight phase).
+    ch.phase += (CBZ.moves && CBZ.moves.phaseDelta)
+      ? CBZ.moves.phaseDelta(ch, speed, dt, walkRef, GA)
+      : gaitPhaseDelta(speed, dt, walkRef, GA.step);
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so

@@ -1186,16 +1186,17 @@
     if (sc.phase === "hands") {
       g.cityHolstered = true;
       if (ch) { ch.handsUp = true; ch.cuffed = false; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
-      if (cop && !cop.dead && P) {
-        const dx = P.pos.x - cop.pos.x, dz = P.pos.z - cop.pos.z, d = Math.hypot(dx, dz) || 1;
-        if (d > 1.5) {
-          const step = Math.min(d - 1.4, 2.4 * dt);
-          cop.pos.x += dx / d * step; cop.pos.z += dz / d * step;
-          if (cop.group) cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
-          if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, step / dt, dt);
-        } else if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
+      if (cop && !cop.dead && P && cop.group && CBZ.moves) {
+        // the last metre through the motor: he brakes onto 1.4 m and squares
+        // up at a bounded turn, never a slide with a snapped heading
+        const dx = P.pos.x - cop.pos.x, dz = P.pos.z - cop.pos.z;
+        const m = CBZ.moves.motor(cop);
+        _copHands.face = Math.atan2(dx, dz);
+        CBZ.moves.step(m, cop.pos, cop.group.rotation.y, P.pos.x, P.pos.z, _copHands, dt);
+        cop.group.rotation.y = m.yaw;
+        cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
+        if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, m.gs, dt);
         cop.speed = 0;
-        if (cop.group) cop.group.rotation.y = Math.atan2(dx, dz);
       }
       if (sc.t >= HANDS_T) { sc.phase = "cuff"; sc.t = 0; }
       return;
@@ -1311,6 +1312,8 @@
   // and the officer holds ESCORT_D behind, which is city/restrain.js's own
   // escort offset rather than a second opinion about how far back that is.
   // Returns the distance still to run (0 = arrived).
+  const _copHands = { speed: 2.4, stop: 1.4, face: null, lod: 1 };
+  const _copEscort = { speed: 2.6, stop: 0.12, face: null, strafe: true, vffX: 0, vffZ: 0, lod: 1 };
   function marchTo(P, ch, cop, tx, tz, dt) {
     if (!P) return 0;
     const dx = tx - P.pos.x, dz = tz - P.pos.z, d = Math.hypot(dx, dz);
@@ -1334,16 +1337,21 @@
       const want = Math.atan2(ux, uz) + Math.PI;
       CBZ.cam.yaw = CBZ.lerpAngle ? CBZ.lerpAngle(CBZ.cam.yaw, want, 1 - Math.pow(0.55, dt)) : want;
     }
-    if (cop && !cop.dead) {
+    if (cop && !cop.dead && cop.group && CBZ.moves) {
+      // the officer holds the slot behind you through the motor, fed forward
+      // with the pace he is marching you at: no chase-and-stop, no heading snap
       const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
       const bx = P.pos.x - ux * (back + 0.55), bz = P.pos.z - uz * (back + 0.55);
-      const cd = Math.hypot(bx - cop.pos.x, bz - cop.pos.z);
-      const cstep = Math.min(cd, Math.max(WALK_SPD, 2.6) * dt);
-      if (cd > 0.02) { cop.pos.x += (bx - cop.pos.x) / cd * cstep; cop.pos.z += (bz - cop.pos.z) / cd * cstep; }
+      const m = CBZ.moves.motor(cop);
+      const v = step / Math.max(dt, 1e-4);
+      _copEscort.vffX = ux * v; _copEscort.vffZ = uz * v;
+      _copEscort.face = Math.atan2(ux, uz);
+      CBZ.moves.step(m, cop.pos, cop.group.rotation.y, bx, bz, _copEscort, dt);
+      cop.group.rotation.y = m.yaw;
       cop.pos.y = 0; cop.speed = 0;
-      if (cop.group) { cop.group.position.set(cop.pos.x, 0, cop.pos.z); cop.group.rotation.y = Math.atan2(ux, uz); }
+      cop.group.position.set(cop.pos.x, 0, cop.pos.z);
       if (cop.target) cop.target.set(cop.pos.x, 0, cop.pos.z);
-      if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, cstep / Math.max(dt, 1e-4), dt);
+      if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, m.gs, dt);
     }
     return d;
   }

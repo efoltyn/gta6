@@ -4,8 +4,8 @@
    WHY a separate module: peds.js and crowd.js both need the same
    spatial answers — "am I indoors / which lot encloses me", "which
    exit do I flee toward", "route me to a goal across the street
-   grid", and "which way do I actually step this frame avoiding
-   walls + my neighbours" — but neither owns the arena or the
+   grid", and "which way do I step this frame without walking into a
+   wall" — but neither owns the arena or the
    building footprints. Duplicating that math in two files drifts;
    one snapshot-once module keeps the two crowds agreeing on the
    world and keeps the hot per-frame query (contextSteer) in one
@@ -16,7 +16,9 @@
      CBZ.cityNav.indoorLotAt(x, z)                         -> lot | null
      CBZ.cityNav.nearestExit(x, z, awayX, awayZ)           -> {x,z,nx,nz} | null
      CBZ.cityNav.routeTo(fromX, fromZ, goalX, goalZ, out)  -> out (waypoints)
-     CBZ.cityNav.contextSteer(px,pz, gdx,gdz, nbrs,n, px0,pz0, out) -> out
+     CBZ.cityNav.contextSteer(px,pz, gdx,gdz, _,_, px0,pz0, out) -> out
+       (the two middle arguments were a neighbour buffer; neighbours are
+       CBZ.moves' predictive avoidance now, and they are ignored)
 
    EVERY function is null-safe: if the arena was never built or
    CBZ.colliders is missing, indoorLotAt/nearestExit -> null,
@@ -403,11 +405,11 @@
   //
   //  INTEREST map : interest[k] = max(0, dot(slot_k, goalDir)) — slots that
   //     point toward the goal are attractive.
-  //  DANGER map   : the max over (a) the 2-4 nearest WALL AABBs in
-  //     CBZ.colliders (closest-point on the box expanded by PED_R, falloff
-  //     with distance) and (b) the supplied neighbour peds (a soft repulsion
-  //     skirt), written into the slot facing the obstacle with a small
-  //     angular spread.
+  //  DANGER map   : the max over the nearest WALL AABBs in CBZ.colliders
+  //     (closest-point on the box expanded by PED_R, falloff with distance),
+  //     written into the slot facing the obstacle with a small angular
+  //     spread. WALLS ONLY: other bodies are CBZ.moves' job (predictive,
+  //     keep-right, velocity-aware), which is why nbrs/nbrCount are ignored.
   //  PARSE        : find min danger, MASK out every slot with danger more than
   //     a small epsilon above the minimum, argmax the surviving interest, then
   //     parabolic sub-slot interpolation across the winning slot's neighbours
@@ -431,8 +433,6 @@
 
   // distances that shape the danger skirt
   const WALL_SENSE = 3.2;        // start feeling a wall within this range
-  const NBR_SENSE = 2.4;         // neighbour repulsion radius
-  const NBR_HARD = 0.95;         // below this, neighbour danger saturates
 
   // write a danger value into the slot facing dir (dx,dz), plus a falloff
   // skirt into the two adjacent slots, taking the MAX (per the literature:
@@ -521,22 +521,6 @@
         // wall, so danger is high in the direction TOWARD the wall (-w).
         const mag = (1 - dist / WALL_SENSE) * wScale;   // 0 at sense edge, ->1 at contact
         spreadDanger(-wx, -wz, mag * mag);       // squared falloff = sharper near
-      }
-    }
-
-    // ---- DANGER (b): neighbour peds (caller-supplied flat Float32Array) ----
-    // nbrs = [x0,z0,x1,z1,...]; nbrCount = pair count. A soft skirt so bodies
-    // don't interpenetrate but the crowd still flows.
-    if (nbrs && nbrCount > 0) {
-      for (let i = 0; i < nbrCount; i++) {
-        const nx = nbrs[i * 2], nz = nbrs[i * 2 + 1];
-        let wx = px - nx, wz = pz - nz;
-        const dist = Math.sqrt(wx * wx + wz * wz);
-        if (dist >= NBR_SENSE) continue;
-        if (dist < 1e-4) { wx = 0.001; wz = 0; }
-        else { wx /= dist; wz /= dist; }
-        const mag = dist <= NBR_HARD ? 1 : (1 - (dist - NBR_HARD) / (NBR_SENSE - NBR_HARD));
-        spreadDanger(-wx, -wz, mag * 0.85);      // toward-neighbour = dangerous
       }
     }
 

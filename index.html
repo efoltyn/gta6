@@ -597,6 +597,11 @@ document.body.appendChild(b);}}catch(e){}})();
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
   <script src="src/systems/bodymass.js?v=mass1"></script>
+<!-- CBZ.moves: THE ONE locomotion layer (velocity, arrival, turn rate,
+     avoidance, stuck recovery, foot-matched stride, formations). Pure math;
+     every AI mover in every game steps through it. Before poses.js so the
+     rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
+<script src="src/entities/moves.js?v=moves1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <script src="src/entities/coins.js"></script>
@@ -1070,7 +1075,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=deslop1"></script>
-<script src="src/city/citynav.js?v=brains1"></script>
+<script src="src/city/citynav.js?v=moves1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
 <script src="src/city/demolition.js?v=cpd1"></script>
 <script src="src/city/elevators.js?v=fesc1"></script>
@@ -1240,27 +1245,31 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/props.js?v=deslop1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
-<script src="src/city/propuse.js?v=nodash1"></script>
+<script src="src/city/propuse.js?v=moves1"></script>
+<!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
+     climb sequencer for every game (propuse's verbs and the cell bunks call it).
+     Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
+<script src="src/entities/moves_posture.js?v=posture1"></script>
 <script src="src/city/adboard.js?v=onecall1"></script>
 <script src="src/city/mode.js?v=raceabort1"></script>
 <script src="src/city/economy.js?v=cars1"></script>
 <script src="src/city/clothes.js?v=races1"></script>
 <script src="src/city/outfits.js?v=races1"></script>
 <script src="src/city/hunger.js?v=nodash1"></script>
-<script src="src/city/wanted.js?v=nodash1"></script>
+<script src="src/city/wanted.js?v=moves1"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=allmain1"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=nodash1"></script>
-<script src="src/city/gangs.js?v=deslop1"></script>
-<script src="src/city/social.js?v=bare1"></script>
+<script src="src/city/gangs.js?v=moves1"></script>
+<script src="src/city/social.js?v=moves1"></script>
 <script src="src/city/realestate.js?v=nodash1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=deslop1"></script>
+<script src="src/city/peds.js?v=moves2"></script>
 <script src="src/entities/pedinstance.js?v=pedinst2"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
@@ -1282,17 +1291,17 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=nukefield1"></script>
+<script src="src/city/crowd.js?v=moves1"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
      After blobshadows.js (same pool shape) and before vehicles.js: it only
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=lamps1"></script>
-<script src="src/city/medics.js?v=medic2"></script>
+<script src="src/city/medics.js?v=moves1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=nodash1"></script>
-<script src="src/city/police.js?v=cars1"></script>
+<script src="src/city/police.js?v=moves1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=nodash1"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -1704,7 +1713,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=deslop1"></script>
+<script src="src/city/origins.js?v=moves1"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -1842,7 +1851,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
      greetings, grief, homecoming. Loads after familypanel (reads the whole
      family cluster lazily; only hard dep is entities/poses.js far above). -->
-<script src="src/city/kinship.js?v=nodash1"></script>
+<script src="src/city/kinship.js?v=moves1"></script>
 <!-- tells.js — body-language tells: maps already-tracked ped scalars (fear,
      grudge, bond, wealth, aggr) onto CBZ.charPoses rows so internal state is
      legible as posture. Loads after kinship (reuses kinWave; yields to kin
