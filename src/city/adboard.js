@@ -221,9 +221,13 @@
   function liftNearby() {
     const els = CBZ.cityElevators && CBZ.cityElevators(); if (!els) return false;
     const P = CBZ.player;
+    // every landing of every lift (elevators.js records carry stops[], one
+    // per floor it serves; the old groundPad/roofPad pair no longer exists)
     for (const el of els) {
-      if (P.pos.y < 2.0 && Math.hypot(P.pos.x - el.groundPad.x, P.pos.z - el.groundPad.z) <= 2.6) return true;
-      if (Math.abs(P.pos.y - el.b.h) < 1.6 && Math.hypot(P.pos.x - el.roofPad.x, P.pos.z - el.roofPad.z) <= 2.6) return true;
+      const st = el && el.stops; if (!st) continue;
+      for (const s of st) {
+        if (s && s.pad && Math.abs(P.pos.y - (s.base || 0)) < 1.6 && Math.hypot(P.pos.x - s.pad.x, P.pos.z - s.pad.z) <= 2.6) return true;
+      }
     }
     return false;
   }

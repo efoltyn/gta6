@@ -879,7 +879,7 @@
       // heavy cumulative bodywork finally reaches the motor — ONE nudge so the
       // crash sites that already fed damageEngine never double-dip
       e.nudged = true;
-      if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, 8, {});
+      if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, 8, { crash: true });   // bodywork, not gunfire
     }
   }
 

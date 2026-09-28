@@ -448,6 +448,7 @@
   // ---- active scripted-scene state (one at a time) --------------------------
   let scene = null;
   let introActiveFlag = false;
+  let pendingTP = false;    // one-shot: disarm fpsmode's FP-after-intro on the first frame of the run
   let introOptsCache = null;
 
   function clearScene() {
