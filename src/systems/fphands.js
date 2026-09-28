@@ -563,8 +563,14 @@
         const d0 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
         const l0 = Math.hypot(d0[0], d0[1], d0[2]) || 1;
         const root = [pts[0][0] - d0[0] / l0 * f.r * 1.4, pts[0][1] - d0[1] / l0 * f.r * 1.4 + 0.001, pts[0][2] - d0[2] / l0 * f.r * 1.4];
-        const rs = [1.10, 1.04, 0.95, 0.86, 0.78].map(function (k) { const r = f.r * k * SQ2 * 0.92; return [r, r]; });
-        tube(parts, [root].concat(pts), rs, 4, Math.PI / 4, f.r * 0.75);
+        // SIX-SIDED, with the joints standing proud. The square tube read as
+        // four boxy sticks on the closest body in the game — your own, three
+        // metres from the chase camera. A hexagon (circumradius 1.08 r puts
+        // its flats at 0.94 r) is round at that distance, and a ring that is
+        // a touch fatter at each joint than the bone either side is the
+        // knuckle line a hand is recognised by.
+        const rs = [1.10, 1.07, 0.97, 0.90, 0.74].map(function (k) { const r = f.r * k * 1.08; return [r, r]; });
+        tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70);
       });
     } else {
       // THE MITTEN: the averaged chain, index..little wide, a finger thick
@@ -582,11 +588,11 @@
     const tpts = p._joints.thumb;
     const trs = tpts.map(function (_, s) {
       const r = s === 0 ? THUMB.r[0] * 1.25 : (s < 3 ? THUMB.r[s] : THUMB.r[2] * 0.85);
-      const k = far ? 1.3 : SQ2 * 0.95;
+      const k = far ? 1.3 : 1.10;
       return [r * k, r * k];
     });
     if (far) tube(parts, [tpts[0], tpts[1], tpts[3]], [trs[0], trs[1], trs[3]], 3, Math.PI / 2, THUMB.r[2] * 0.6);
-    else tube(parts, tpts, trs, 4, Math.PI / 4, THUMB.r[2] * 0.7);
+    else tube(parts, tpts, trs, 6, Math.PI / 6, THUMB.r[2] * 0.7);
     const geo = mergeParts(parts);
     if (side < 0) mirrorX(geo);
     geo.computeBoundingSphere();

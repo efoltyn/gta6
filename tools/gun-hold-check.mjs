@@ -217,8 +217,10 @@ function measure(rig, prop, tag, stance, opts) {
     let gap, along = null;
     if (hold && hold.kind === "guard") {
       // the handguard's axis, from its front back to just ahead of the firing hand
-      const front = new T.Vector3(0, hold.y, hold.z - hold.len / 2);
-      const rear = new T.Vector3(0, hold.y, Math.max(hold.z + hold.len / 2, gp.z - 0.11 * k));
+      // (a pump gun's is the PUMP: wherever the rack has slid it)
+      const pdz = prop.userData.pump ? (prop.userData._pumpDz || 0) : 0;
+      const front = new T.Vector3(0, hold.y, hold.z - hold.len / 2 + pdz);
+      const rear = new T.Vector3(0, hold.y, Math.max(hold.z + hold.len / 2 + pdz, gp.z - 0.11 * k));
       const a = prop.localToWorld(front.clone()), b = prop.localToWorld(rear.clone());
       const ab = b.clone().sub(a), t = Math.max(0, Math.min(1, sc.clone().sub(a).dot(ab) / ab.lengthSq()));
       gap = sc.distanceTo(a.clone().addScaledVector(ab, t));
@@ -381,9 +383,11 @@ function playerCase(B, id, aiming, st) {
   for (let f = 0; f < 120; f++) {
     rig.aimingPose = aiming; rig.carryPose = !aiming; rig.aimLong = slot !== "pistol" && slot !== "utility";
     rig.crouch = !!st.crouch; rig.pronePose = !!st.prone;
+    CBZ.fpsPumpRack = st.rack || 0;
     frame(rig, null, true, st.speed || 0);
     scene.updateMatrixWorld(true);
     const p = CBZ.tpHandWeapon();
+    if (process.env.GHC_LIFT && p && f >= 60) console.log("LIFT", f, (rig._gunRestY || 0).toFixed(4), rig.body.worldToLocal(p.getWorldPosition(new T.Vector3())).toArray().map((v) => v.toFixed(3)).join(","));
     if (p && f >= 100) {
       // in the chest's own frame: a walking body bobs, the gun must not slide in it
       const w = rig.body.worldToLocal(p.getWorldPosition(new T.Vector3())).multiplyScalar(WORLD);
@@ -400,6 +404,9 @@ function playerCase(B, id, aiming, st) {
   const released = /out of reach/.test(au.why || "");
   const r = measure(rig, prop, tag, (aiming ? "aim" : "carry") + (st.name ? "-" + st.name : ""), { rest, released });
   r.released = released;
+  if (st.rack && prop.userData.pump) {
+    check(Math.abs(prop.userData.pump.position.z - (prop.userData.pumpBaseZ + st.rack)) < 1e-6, `${tag}: the pump is racked on the third-person gun`);
+  }
   // THE GUN IS NOT IN THE GROUND (the test floor is y = 0; a prone body here
   // is not sunk, so this bites the crouch and the low carries): the drawn gun's
   // lowest vertex, after entities/character.js gunGroundRest has had its say
@@ -420,7 +427,10 @@ function playerCase(B, id, aiming, st) {
     console.log("POS", tag, "Lsh", f(L.sh), "Lel", f(L.el), "Lwr", f(L.wr), "Rsh", f(R.sh), "Rwr", f(R.wr), "gun", f(gpos), "sup", f(sp), "|Lsh-sup|", L.sh.distanceTo(sp).toFixed(2), "span", CBZ.charArmTo.span(rig, "l").toFixed(2));
   }
   r.drift = drift;
-  check(drift < 0.004, `${tag}: the hold is steady frame to frame (${(drift * 1000).toFixed(1)} mm)`);
+  // (walking, the chest bobs and leans under a gun held on the aim: the arms
+  // take that up, so the gun moves in the chest's frame by a few mm a frame)
+  const driftTol = st.speed ? 0.008 : 0.004;
+  check(drift < driftTol, `${tag}: the hold is steady frame to frame (${(drift * 1000).toFixed(1)} mm)`);
   if (aiming) {
     // the barrel is still on the aim
     prop.updateMatrixWorld(true);
@@ -505,6 +515,8 @@ const STANCES = [
   { name: "crouch", aim: true, crouch: true },
   { name: "prone", aim: true, prone: true },
   { name: "walk", aim: false, speed: 3.2 },
+  // a pump gun mid-rack: the fore-end slid 15 cm back, the off hand on it
+  { name: "rack", aim: true, rack: 0.15, only: /shotgun/ },
   { name: "crouch", aim: false, crouch: true },
 ];
 const rows = [];
@@ -520,7 +532,7 @@ for (const B of BODIES) {
     rows.push(npcPitchCase(B, id, -0.175));
     rows.push(playerCase(B, id, true));
     rows.push(playerCase(B, id, false));
-    for (const st of STANCES) rows.push(playerCase(B, id, st.aim, st));
+    for (const st of STANCES) if (!st.only || st.only.test(id)) rows.push(playerCase(B, id, st.aim, st));
   }
 }
 const cm = (v) => (v == null ? "   -" : (v * 100).toFixed(1).padStart(5));

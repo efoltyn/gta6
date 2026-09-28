@@ -499,15 +499,26 @@
          on the firing wrist (the gun is seated in that fist): the support
          hand re-lands below because the gun has moved. */
       const lift = ch._gunRestY || 0;
-      if (lift > 0.002) GH.fire(ch, prop, aimed, lift);
+      if (lift > 1e-4) {
+        // straight up at the wrist, the forearm kept on its own line (not a
+        // fresh fist solve: that re-seats the whole hold and, switched on and
+        // off at a threshold, walked the gun 3 cm every few frames)
+        CBZ.charArmTo.crease(ch, "r", _a);
+        _a.y += lift;
+        ch.parts.ra.userData.low.getWorldQuaternion(_eq);
+        _t.set(0, 1, 0).applyQuaternion(_eq);
+        CBZ.charArmTo.wrist(ch, _a, "r", _t, 1);
+      }
       // presenting, exactly onto the crosshair: the last half-degree the
       // pitch table leaves, turned into the gun and the fist together
       if (aimed) aimTrim(ch, prop);
-      /* AT LOW READY the cached solve can leave a pitched-down stock's toe in
-         the chest (or its plate carrier): carry the fist, and the gun in it,
-         out by exactly what is inside. (Presenting, the solve's own stand-off
-         holds: the fist's aim-locked wrist would only walk it back.) */
-      for (let i = 0; i < (aimed ? 0 : 6); i++) {
+      /* The cached solve can leave a pitched-down stock's toe in the chest
+         (or its plate carrier): carry the fist, and the gun in it, out by
+         exactly what is inside. At low ready always; presenting too now —
+         between two cached pitch levels the wrist finishes the aim
+         (actorweapons.js seatBlended) and that turn can tip the stock 1-2 cm
+         into the chest on a steep down-aim (gun-hold-check, aim-down). */
+      for (let i = 0; i < 6; i++) {
         const gp = GH.gunInBody(ch, prop);
         if (gp < 0.003) break;
         CBZ.charArmTo.crease(ch, "r", _a);
@@ -529,7 +540,7 @@
       prop.updateWorldMatrix(true, false);
       _tp.setFromMatrixPosition(prop.matrixWorld);
       _t.setFromMatrixPosition(_m0);
-      if (_tp.distanceTo(_t) > 0.012 && GH.specOf(prop) && GH.specOf(prop).sup) {
+      if ((_tp.distanceTo(_t) > 0.012 || Math.abs(prop.userData._pumpDz || 0) > 0.002) && GH.specOf(prop) && GH.specOf(prop).sup) {
         GH.supportPoint(ch, prop, _sp);
         const floorY = floorUnder(_sp);
         const gap = GH.support(ch, prop, 1, 0, 3, floorY);

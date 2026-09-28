@@ -1153,6 +1153,67 @@
     if (Math.abs(fpRoll) < 1e-5 && Math.abs(fpRollV) < 1e-4) { fpRoll = 0; fpRollV = 0; }
   }
 
+  /* ---- HANDS ON THE LEDGE, DOWN THE LENS -----------------------------------
+     A vault or a mantle plants the BODY's palms on the obstacle (entities/
+     character.js traversePlants: a real point on its top, the exact arm IK).
+     In first person the same contact has to be what you see: the bare hands
+     go to that point instead of holding their guard in the air while the
+     view climbs over a wall. Same rule the pickup uses to put a hand on a
+     thing (systems/verbs_pickup.js fpPickup): the grip point rides the ray to
+     the real point, as far as the arm reaches, so the palm sits over the
+     contact on screen; the palm lies flat on the top, fingers along the move,
+     and it carries exactly the body plant's weight (it arrives and lets go
+     with it). Unarmed only: a drawn gun keeps both hands. */
+  const FP_SH = [[0.30, -0.45, 0.12], [-0.30, -0.45, 0.12]];   // shoulders, camera space (as fpPickup)
+  const _fpC = new THREE.Vector3(), _fpS = new THREE.Vector3(), _fpG = new THREE.Vector3(), _fpO = new THREE.Vector3();
+  const _fpX = new THREE.Vector3(), _fpY = new THREE.Vector3(0, 1, 0), _fpZ = new THREE.Vector3();
+  const _fpM = new THREE.Matrix4(), _fpQ = new THREE.Quaternion(), _fpCQ = new THREE.Quaternion(), _fpVI = new THREE.Matrix4();
+  const _fpVQ = new THREE.Quaternion();
+  function fpPlants() {
+    fistT[0].plantW = 0; fistT[1].plantW = 0;
+    const rig = CBZ.playerChar, tp = rig && rig.traversePose, plants = tp && tp._plants;
+    if (!plants || !CBZ.camera || !FPH || !FPH.PLANT_CONTACT) return false;
+    const cam = CBZ.camera;
+    cam.updateMatrixWorld(true);
+    vm.updateMatrix();
+    _fpVI.copy(vm.matrix).invert();
+    cam.getWorldQuaternion(_fpCQ).invert();
+    _fpVQ.copy(vm.quaternion).invert();
+    let any = false;
+    for (let k = 0; k < plants.length; k++) {
+      const pl = plants[k], w = Math.min(1, pl.w || 0);
+      if (!(w > 0.01)) continue;
+      const i = pl.arm === "l" ? 1 : 0, T = fistT[i], side = i ? -1 : 1;
+      // along the ray to the real point, as far as this arm reaches
+      _fpC.copy(pl.p); cam.worldToLocal(_fpC);
+      const D = _fpC.length() || 1;
+      _fpC.multiplyScalar(1 / D);
+      if (_fpC.z > -0.25) { _fpC.z = -0.25; _fpC.normalize(); }
+      const sh = FP_SH[i];
+      _fpS.set(sh[0], sh[1], sh[2]);
+      const us = _fpC.dot(_fpS), disc = us * us - _fpS.lengthSq() + 1;
+      const dR = Math.max(0.5, Math.min(D, Math.min(1.0, disc > 0 ? us + Math.sqrt(disc) : 0.8)));
+      _fpG.copy(_fpC).multiplyScalar(dR).applyMatrix4(_fpVI);              // the palm's point, vm space
+      // the palm, flat on the top: +Y up, fingers (-Z) along the move; world -> camera -> vm
+      _fpZ.set(-tp.dirX, 0, -tp.dirZ);
+      _fpX.crossVectors(_fpY, _fpZ);
+      _fpM.makeBasis(_fpX, _fpY, _fpZ);
+      _fpQ.setFromRotationMatrix(_fpM).premultiply(_fpCQ).premultiply(_fpVQ);
+      T.plantQ = (T.plantQ || new THREE.Quaternion()).copy(_fpQ);
+      // the wrist that puts the palm's contact point there
+      const pc = FPH.PLANT_CONTACT;
+      _fpO.set(pc[0] * side, pc[1], pc[2]).multiplyScalar(HAND_K).applyQuaternion(_fpQ);
+      _fpG.sub(_fpO);
+      T.x += (_fpG.x - T.x) * w; T.y += (_fpG.y - T.y) * w; T.z += (_fpG.z - T.z) * w;
+      T.vis = true;
+      T.hook = 0;
+      if (w > 0.3) T.curl = "plant";
+      T.plantW = w;
+      any = true;
+    }
+    return any;
+  }
+
   /* ---- THE ARMS, SOLVED EVERY FRAME ---------------------------------------
      Shoulders are fixed in CAMERA space (a body, not the swaying viewmodel)
      and carried into vm space through vm's own transform, so bob and recoil
@@ -1270,6 +1331,7 @@
         elbowFor(i, _aW, _aS, defaultPole(side, T.hook, _poleArr), ARM_FIST, _aE);
         _aAlong.subVectors(_aW, _aE);
         FPH.orientAlong(side, _aAlong, T.roll, T.bend, hand.quaternion);
+        if (T.plantW > 0 && T.plantQ) hand.quaternion.slerp(T.plantQ, T.plantW);   // flat on the ledge (fpPlants)
         hand.position.copy(_aW);
         FPH.poseArm(arm, _aW, _aE, _aS, hand.quaternion, HAND_K, armSleeved);
       }
@@ -3507,6 +3569,10 @@
       } else {
         fps.reloading = 0;
         CBZ.sfx && CBZ.sfx("rack");
+        // the rack you HEAR is a rack you see: the pump slides back and home
+        // under the off hand (first person, and the third-person gun rides
+        // the same stroke off CBZ.fpsPumpRack)
+        if (w.pump) pumpT = 1;
       }
       syncAmmo();
       setAmmoHud();
@@ -5657,6 +5723,9 @@
     if (sg && sg.userData.pump) sg.userData.pump.position.z = sg.userData.pumpBaseZ + Math.sin(pumpT * Math.PI) * 0.22;
     const carriedSg = carriedModels[1];
     if (carriedSg && carriedSg.userData.pump) carriedSg.userData.pump.position.z = carriedSg.userData.pumpBaseZ + Math.sin(pumpT * Math.PI) * 0.22;
+    // the same rack, published for the third-person gun (systems/holsterprops.js
+    // slides that prop's pump and systems/actorweapons.js the support hand on it)
+    CBZ.fpsPumpRack = Math.sin(pumpT * Math.PI) * 0.22;
     const fpStowingGun = fps.active && fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
     // TAKING A THING (systems/verbs_pickup.js): for its beat a pickup owns one
     // hand's wrist target; a held gun dips out of frame and comes back after.
@@ -5664,6 +5733,8 @@
     // the charge / detonator / frag in the right hand owns its wrist target
     // (systems/helditems.js), unless a pickup has the hand this beat
     if (CBZ.heldItem) CBZ.heldItem.fpHold(pick ? null : vm, fistT, pick ? null : handR, handL);
+    // a vault / mantle puts the bare hands on the obstacle (after the fists' own pose)
+    if (!pick && !armed()) fpPlants(); else { fistT[0].plantW = 0; fistT[1].plantW = 0; }
     gun.visible = (armed() || fpStowingGun) && !(pick && pick.hands);
     fists.visible = (!armed() && !fpStowingGun) || !!(pick && pick.hands);
     if (ddT < 0) gun.position.y = pick ? -0.9 * pick.gunDip : 0;

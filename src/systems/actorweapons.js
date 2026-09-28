@@ -844,6 +844,8 @@
     const _cw = new THREE.Vector3(), _gcw = new THREE.Vector3();
     function supportTarget(spec, z, prop, slide, out) {
       out.copy(z.sc);
+      // a pump gun's support hand is ON the pump: it rides the rack
+      if (prop.userData._pumpDz) out.z += prop.userData._pumpDz;
       // back ALONG THE BORE LINE, under the gun, to just ahead of the firing
       // hand — the hand stays on the weapon's underside the whole way
       // (a foregrip out of reach: the hand takes the tube behind it the same way)
@@ -934,7 +936,9 @@
       if (!spec || !spec.sup || !hand) return prop.localToWorld(out.set(0, 0, 0));
       const z = sized(spec, hand.userData.fit.s / (prop.scale.x || 1));
       prop.updateWorldMatrix(true, false);
-      return prop.localToWorld(out.copy(z.sc));
+      out.copy(z.sc);
+      if (prop.userData._pumpDz) out.z += prop.userData._pumpDz;
+      return prop.localToWorld(out);
     }
     return {
       fire, ready, pitchNpc, lowReady, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,

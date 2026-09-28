@@ -503,6 +503,16 @@
       ch.setHandPose("r", drawingBlocked ? "relaxed" : melee ? "grip" : "pistol");
     }
     hand.prop.position.set(0.02, 0.02, 0.03);
+    /* THE PUMP RACKS IN THIRD PERSON TOO. fpsmode racked only its own two
+       models; the gun you see in the body's hands kept its fore-end parked
+       while the shot cycled. Same stroke, off the same clock (CBZ.fpsPumpRack),
+       and the off hand rides it (actorweapons.js supportTarget reads _pumpDz). */
+    const pump = hand.prop.userData.pump;
+    if (pump) {
+      const dz = CBZ.fpsPumpRack || 0;
+      pump.position.z = hand.prop.userData.pumpBaseZ + dz;
+      hand.prop.userData._pumpDz = dz;
+    }
     // A BIPOD'D GUN UNFOLDS ITS LEGS when fpsmode's bipodActive() says the
     // body is braced on them (prone, or crouched + shouldered + still) — the
     // same bit the ground rest pulls the gun onto the deck by, so the legs
