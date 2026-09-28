@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
-<link rel="stylesheet" href="css/title_hub.css?v=pause1">
+<link rel="stylesheet" href="css/title_hub.css?v=end1">
 <meta name="description" content="Become the shark. Hunt, grow, evolve into a megalodon, and survive the orca pod. Play free in your browser.">
 <script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:"sharksim"});</script>
 </head>
@@ -296,18 +296,12 @@ document.body.appendChild(b);}}catch(e){}})();
 </div>
 
 
-<div id="win" class="screen hidden">
+<div id="escFade" aria-hidden="true"></div>
+<div id="escEnd" class="screen hidden">
   <div class="card-box">
-    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">YOU'RE OUT!</div>
-    <div class="sub" id="wReason" style="color:#3c7a52">Freedom</div>
-    <div class="stats">
-      <div class="stat"><div class="v" id="wTime">--</div><div class="l">Escape Time</div></div>
-      <div class="stat"><div class="v" id="wCigs">0</div><div class="l">Cigarettes</div></div>
-      <div class="stat"><div class="v" id="wKos">0</div><div class="l">Knockouts</div></div>
-      <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
-    </div>
-    <button class="btn" id="againBtn">Escape Again</button>
-    <button class="btn btn-quiet" id="winMenuBtn" type="button">Main Menu</button>
+    <div class="end-line" id="escEndLine"></div>
+    <button class="btn" id="escEndAgain" type="button">Play Again</button>
+    <button class="btn btn-quiet" id="escEndMenu" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -414,7 +408,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=dsl3"></script>
-<script src="src/world/corridorkit.js?v=dsl3"></script>
+<script src="src/world/corridorkit.js?v=gate1"></script>
 
 <script src="src/world/textures_masonry.js?v=masonry1"></script>
 
@@ -459,8 +453,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/arrest.js?v=arrest1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=airblood2"></script>
-<script src="src/systems/bodyfall.js?v=m0928a"></script>
+<script src="src/systems/verbs_strike.js?v=vit3"></script>
+<script src="src/systems/bodyfall.js?v=vit3"></script>
+
+<script src="src/systems/vitals.js?v=vit3"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <script src="src/entities/coins.js"></script>
@@ -472,7 +468,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/audio.js?v=m0927p"></script>
 <script src="src/systems/hud.js?v=m0927p"></script>
-<script src="src/systems/economy.js?v=cars1"></script>
+<script src="src/systems/economy.js?v=vit3"></script>
 
 
 <script src="src/weapons/weapon-data.js?v=nodash1"></script>
@@ -501,7 +497,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/holsterprops.js?v=gunhands1"></script>
 
 <script src="src/systems/gunhands.js?v=boom2"></script>
-<script src="src/systems/prisondrops.js?v=duty1"></script>
+<script src="src/systems/prisondrops.js?v=vit3"></script>
 
 
 <script src="src/world/roombuild.js"></script>
@@ -510,13 +506,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/gunroom.js?v=m0928s"></script>
 <script src="src/world/ventilation.js?v=m0928s"></script>
 <script src="src/world/escape_routes.js?v=m0928s"></script>
-<script src="src/world/southblock.js?v=m0928s"></script>
+<script src="src/world/southblock.js?v=vit3"></script>
 
 <script src="src/world/roofs.js?v=dsl3"></script>
 
 
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=m0928s"></script>
+<script src="src/entities/guards.js?v=vit3"></script>
 <script src="src/entities/searchlight.js?v=m0928s"></script>
 <script src="src/entities/keycard.js"></script>
 
@@ -525,8 +521,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/heritage.js?v=cars1"></script>
 
 <script src="src/systems/prisoncars.js?v=cars1"></script>
-<script src="src/entities/npc.js?v=carsm1"></script>
-<script src="src/entities/ai.js?v=carsm1"></script>
+<script src="src/entities/npc.js?v=vit3"></script>
+<script src="src/entities/ai.js?v=vit3"></script>
 
 <script src="src/world/adminwing.js?v=m0928s"></script>
 
@@ -550,7 +546,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonrest.js?v=cars1"></script>
 
 
-<script src="src/systems/prisontiers.js?v=m0928s"></script>
+<script src="src/systems/prisontiers.js?v=end1"></script>
 
 
 <script src="src/systems/quests.js?v=radio1"></script>
@@ -560,7 +556,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=cars1"></script>
-<script src="src/systems/physics.js?v=sharkmode1"></script>
+<script src="src/systems/physics.js?v=vit3"></script>
 
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
@@ -578,9 +574,9 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=nodash1"></script>
+<script src="src/systems/capture.js?v=end1vit3"></script>
 
-<script src="src/systems/brain_prison.js?v=cars1"></script>
+<script src="src/systems/brain_prison.js?v=vit3"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
@@ -596,40 +592,42 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
-<script src="src/systems/combat.js?v=sharkmode1"></script>
+<script src="src/systems/combat.js?v=vit3"></script>
 <script src="src/systems/killstreaks.js?v=flick1"></script>
 <script src="src/systems/interact.js?v=cars1"></script>
 
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=m0928s"></script>
+<script src="src/systems/interactions.js?v=gate1"></script>
 
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 
 <script src="src/systems/liftcore.js?v=lift1"></script>
-<script src="src/systems/escapeplan.js?v=pause1"></script>
+<script src="src/systems/escapeplan.js?v=gate1"></script>
 
-<script src="src/city/itemassets.js?v=deslop1"></script>
+<script src="src/city/itemassets.js?v=vit3"></script>
 
-<script src="src/city/itemicons.js?v=deslop1"></script>
-<script src="src/systems/hotbar_model.js?v=boom2"></script>
-<script src="src/systems/helditem_model.js?v=boom2"></script>
-<script src="src/systems/inventory.js?v=boom2"></script>
+<script src="src/city/itemicons.js?v=vit3"></script>
+<script src="src/systems/hotbar_model.js?v=vit3"></script>
+<script src="src/systems/helditem_model.js?v=vit3"></script>
+<script src="src/systems/inventory.js?v=vit3"></script>
 
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=cop1"></script>
+<script src="src/systems/state.js?v=end1"></script>
 
 <script src="src/systems/glcontext.js?v=glguard1"></script>
 
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
-<script src="src/systems/save.js"></script>
-<script src="src/systems/runstats.js"></script>
+<script src="src/systems/save.js?v=end1"></script>
+
+<script src="src/systems/escapeend.js?v=end1"></script>
+<script src="src/systems/runstats.js?v=end1"></script>
 <script src="src/systems/touch.js?v=boom2"></script>
 <script src="src/systems/touch_vehicle.js?v=boom2"></script>
 
 <script src="src/systems/seat_exit.js?v=exit1"></script>
 
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=boom2"></script>
+<script src="src/systems/fpsmode.js?v=vit3"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -641,15 +639,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a"></script>
-<script src="src/modes/survival.js?v=sharkmode1"></script>
+<script src="src/modes/survival.js?v=vit3"></script>
 <script src="src/modes/shark_sim.js?v=pause1"></script>
 
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=pause1"></script>
+<script src="src/systems/title_hub.js?v=end1"></script>
 
-<script src="src/modes/gungame.js?v=fallstay1"></script>
+<script src="src/modes/gungame.js?v=vit3"></script>
 
 <script src="src/world/groundshaft.js?v=shaft1"></script>
 
@@ -836,10 +834,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/moves_posture.js?v=posture1"></script>
 <script src="src/city/adboard.js?v=onecall1"></script>
 <script src="src/city/mode.js?v=raceabort1"></script>
-<script src="src/city/economy.js?v=cars1"></script>
+<script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=hats2"></script>
 <script src="src/city/outfits.js?v=hats2"></script>
-<script src="src/city/hunger.js?v=nodash1"></script>
+<script src="src/city/hunger.js?v=vit3"></script>
 
 <script src="src/city/law.js?v=brainmoves1"></script>
 <script src="src/city/wanted.js?v=brainmoves1"></script>
@@ -849,11 +847,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=nodash1"></script>
 <script src="src/city/gangs.js?v=fallstay1"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
-<script src="src/city/realestate.js?v=onebet1"></script>
+<script src="src/city/realestate.js?v=vit3"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=m0928a"></script>
+<script src="src/city/peds.js?v=vit3"></script>
 
 <script src="src/city/brain_city.js?v=armed1"></script>
 <script src="src/entities/pedinstance.js?v=pedinst2"></script>
@@ -874,7 +872,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=moves1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=brainmoves1"></script>
-<script src="src/city/police.js?v=boom2"></script>
+<script src="src/city/police.js?v=vit3"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=boom2"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -950,17 +948,17 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carcluster.js?v=speedunit1"></script>
 <script src="src/city/interact.js?v=onebet1"></script>
 
-<script src="src/city/roleverbs.js?v=nodash1"></script>
+<script src="src/city/roleverbs.js?v=vit3"></script>
 <script src="src/city/restrain.js?v=nodash1"></script>
-<script src="src/city/combat.js?v=boom2"></script>
+<script src="src/city/combat.js?v=vit3"></script>
 
 <script src="src/systems/resources.js?v=deslop1"></script>
 <script src="src/city/explosives.js?v=boom2"></script>
-<script src="src/systems/helditems.js?v=boom2"></script>
+<script src="src/systems/helditems.js?v=vit3"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=nodash1"></script>
+<script src="src/city/death.js?v=vit3"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
-<script src="src/city/ragdoll.js?v=fallreal1"></script>
+<script src="src/city/ragdoll.js?v=vit3"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 
@@ -1046,7 +1044,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=nodash1"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=boom2"></script>
+<script src="src/city/hud.js?v=vit3"></script>
 
 <script src="src/city/drinking.js?v=nodash1"></script>
 <script src="src/city/charpanel.js?v=hats1"></script>
@@ -1059,7 +1057,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/city/morgue.js?v=fallstay1"></script>
 
-<script src="src/city/origins.js?v=moves1"></script>
+<script src="src/city/origins.js?v=tp1"></script>
 
 
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
@@ -1083,10 +1081,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fullmap.js?v=cars1"></script>
 
 
-<script src="src/systems/gore.js?v=exit1"></script>
-<script src="src/systems/wounds.js?v=soak4w9"></script>
+<script src="src/systems/gore.js?v=vit3"></script>
+<script src="src/systems/wounds.js?v=vit3"></script>
 
-<script src="src/systems/trauma.js?v=sharkmode1"></script>
+<script src="src/systems/trauma.js?v=vit3"></script>
 
 <script src="src/systems/predator.js?v=allmain1"></script>
 
@@ -1110,7 +1108,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/net/net.js?v=nodash1"></script>
 <script src="src/net/netpersist.js?v=nodash1"></script>
 <script src="src/net/netactors.js?v=mp2"></script>
-<script src="src/net/networld.js?v=mp3"></script>
+<script src="src/net/networld.js?v=vit3"></script>
 <script src="src/net/netvoice.js?v=nodash1"></script>
 <script src="src/net/netui.js?v=nodash1"></script>
 
