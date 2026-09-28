@@ -619,7 +619,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
 <script src="src/systems/verbs_strike.js?v=fallreal1"></script>
-<script src="src/systems/bodyfall.js?v=fall2"></script>
+<script src="src/systems/bodyfall.js?v=m0928a"></script>
 <script src="src/systems/verbs_pickup.js?v=verbs1"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <script src="src/entities/coins.js"></script>
@@ -800,7 +800,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=radio1"></script>
+<script src="src/systems/prisontiers.js?v=fallstay1"></script>
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=radio1"></script>
@@ -961,8 +961,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=fallankle1"></script>
-<script src="src/entities/survivorbot.js?v=armed1"></script>
+<script src="src/systems/grapple.js?v=m0928a"></script>
+<script src="src/entities/survivorbot.js?v=m0928a"></script>
 <script src="src/modes/survival.js?v=sharkmode1"></script>
 <script src="src/modes/shark_sim.js?v=uicut1"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
@@ -971,7 +971,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=hub1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=fallreal1"></script>
+<script src="src/modes/gungame.js?v=fallstay1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1307,13 +1307,13 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=nodash1"></script>
-<script src="src/city/gangs.js?v=brainmoves1"></script>
+<script src="src/city/gangs.js?v=fallstay1"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
 <script src="src/city/realestate.js?v=lift1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=hats2"></script>
+<script src="src/city/peds.js?v=m0928a"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1324,7 +1324,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=nodash1"></script>
+<script src="src/city/occupy.js?v=fallstay1"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1351,7 +1351,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=moves1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=brainmoves1"></script>
-<script src="src/city/police.js?v=fallreal1"></script>
+<script src="src/city/police.js?v=fallstay1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=nodash1"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -1619,7 +1619,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/tsunami.js?v=tsureal2"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
 <script src="src/city/construction.js?v=nodash1"></script>
-<script src="src/city/companies.js?v=nodash1"></script>
+<script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
 <script src="src/city/playergang.js?v=cpd1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
@@ -1758,7 +1758,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the EMS dispatcher that puts traffic.js's ambulance and medics.js's
      paramedic on the same scene. Needs peds.js, police.js, traffic.js,
      armor.js and interact.js — all above. -->
-<script src="src/city/morgue.js?v=weaponphysics1"></script>
+<script src="src/city/morgue.js?v=fallstay1"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
@@ -2007,8 +2007,8 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=brainmoves1"></script>
-<script src="src/city/protection.js?v=fallreal1"></script>
-<script src="src/city/officials.js?v=seawave1"></script>
+<script src="src/city/protection.js?v=fallstay1"></script>
+<script src="src/city/officials.js?v=fallstay1"></script>
 <script src="src/city/approval.js?v=pres3"></script>
 <script src="src/city/elections.js?v=nodash1"></script>
 

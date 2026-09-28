@@ -2278,7 +2278,14 @@
         CBZ.gore(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, { dir, amount: imp && imp.headshot ? 1.3 : 1.0, head: !!(imp && imp.headshot), player: false });
       }
       let copRagged = false;
-      if (CBZ.cityRagdoll && imp) {
+      // ONLY WHAT THROWS A BODY GETS THE LIMP VERLET ONE (a car, a blast: the
+      // callers that pass a fling). A shot officer collapses in the one fall
+      // (systems/bodyfall.js via the knockdown below), legs first, no spin.
+      // (a round carries a fling too, for the old tumble; only a point-blank
+      // shotgun blast counts as a launch among shots)
+      const copShot = !!(imp && (imp.wkey || imp.shot || imp.cal || imp.point));
+      const copLaunch = !!(imp && imp.fling != null && imp.fling > 0 && (!copShot || imp.fling >= 6));
+      if (CBZ.cityRagdoll && imp && copLaunch) {
         let rx, ry, rz;
         if (imp.dir) { rx = imp.dir.x || 0; ry = imp.dir.y || 0; rz = imp.dir.z || 0; }
         else if (imp.fromX != null) { rx = cop.pos.x - imp.fromX; ry = 0; rz = cop.pos.z - imp.fromZ; }
@@ -2288,7 +2295,13 @@
         const mag = Math.max(4.5, Math.min(18, rawForce * (imp.headshot ? 1.18 : 1)));
         copRagged = CBZ.cityRagdoll(cop, imp.point || null, { x: rx / rl, y: ry / rl, z: rz / rl }, mag);
       }
-      if (CBZ.body && !copRagged) {
+      if (CBZ.body && !copRagged && !copLaunch && CBZ.body.knockdown) {
+        let kx = 0, kz = 0;
+        if (imp && imp.dir) { kx = imp.dir.x || 0; kz = imp.dir.z || 0; }
+        else if (imp && imp.fromX != null) { kx = cop.pos.x - imp.fromX; kz = cop.pos.z - imp.fromZ; }
+        if (kx * kx + kz * kz < 1e-8) { const yw = cop.group ? cop.group.rotation.y : 0; kx = -Math.sin(yw); kz = -Math.cos(yw); }
+        CBZ.body.knockdown(cop, { dir: { x: kx, z: kz }, force: imp && imp.force != null ? imp.force : 6, t: 9999 });
+      } else if (CBZ.body && !copRagged) {
         if (imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ,
           dir: imp.dir, force: imp.force != null ? imp.force : 7,
           // An explicit zero is nuclear horizontal drag, not a request for the
@@ -3300,7 +3313,7 @@
         // a corpse across the map costs no draw call while it waits for EMS.
         else if (!c.culled && c.group) {
           const cdx = c.pos.x - camx, cdz = c.pos.z - camz;
-          c.group.visible = cdx * cdx + cdz * cdz < 95 * 95;
+          c.group.visible = cdx * cdx + cdz * cdz < 200 * 200;   // a body you shot at range stays drawn
         }
         continue;
       }

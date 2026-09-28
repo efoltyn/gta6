@@ -2813,8 +2813,13 @@
   const SINK_NEAR2 = 45 * 45;
   function retireOldestCorpse() {
     let pick = -1;
-    for (let i = 0; i < corpses.length; i++) if (camDist2(corpses[i].pos) > SINK_NEAR2) { pick = i; break; }
-    if (pick < 0) pick = 0;
+    const law = CBZ.corpseLaw;
+    for (let i = 0; i < corpses.length; i++) {
+      // THE CORPSE LAW (systems/bodyfall.js): never a body on screen, never one
+      // within 60 m; oldest first. Nobody eligible? The field keeps them all.
+      if (law ? law.hidden(corpses[i].pos) : camDist2(corpses[i].pos) > SINK_NEAR2) { pick = i; break; }
+    }
+    if (pick < 0) { if (law) return; pick = 0; }
     const old = corpses.splice(pick, 1)[0];
     if (!old || !old.group) return;
     if (CBZ.ragdollDrop) safe(function () { CBZ.ragdollDrop(old); });

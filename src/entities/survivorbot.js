@@ -1509,6 +1509,7 @@
   const CORPSE_FAR_T = 6;          // out of sight: the original flat lifetime, unchanged
   const CORPSE_NEAR_T = 22;        // in sight: long enough to read the body and its pool
   const CORPSE_CAP = 12;           // how many may linger at once
+  let corpseN = 0, oldestT = -1, oldestB = null;   // the corpse-law census (see the dead branch)
   let lingering = 0;
 
   // ---- per-frame update (order 23: after player @10, prison npc @22 is gated off) ----
@@ -1525,6 +1526,14 @@
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
     lingering = 0;                                   // recounted in the pass below
+    // last pass's corpse census under the corpse law: past the cap (or past
+    // its age) the oldest body nobody can see, 60 m+ away, is taken
+    if (oldestB && !oldestB.culled && CBZ.corpseLaw &&
+        (corpseN > CBZ.corpseLaw.LAW.CAP || oldestT > CBZ.corpseLaw.LAW.AGE) && CBZ.corpseLaw.hidden(oldestB.pos)) {
+      oldestB.culled = true;
+      if (oldestB.group.parent) oldestB.group.parent.remove(oldestB.group);
+    }
+    corpseN = 0; oldestT = -1; oldestB = null;
     // the crowd's morale on the sim clock, 4 Hz (shock decay, recount, latch)
     if (BR) { moraleAcc += dt; if (moraleAcc >= 0.25) { BR.morale.tick(moraleAcc); moraleAcc = 0; } }
     for (let i = 0; i < bots.length; i++) {
@@ -1551,6 +1560,15 @@
            — past the cap the newest death takes the oldest one's place, so a
            mass-casualty disaster can never stack the whole lobby in front of
            the lens. */
+        /* THE CORPSE LAW (systems/bodyfall.js) supersedes the timers below:
+           a body stays where it fell, is never taken on screen or within 60 m
+           of you, and past the cap the OLDEST hidden one goes first. (Owner:
+           "when you shoot someone, they just DISAPPEAR".) */
+        if (!b.culled && CBZ.corpseLaw) {
+          corpseN++;
+          if (b.deadT > oldestT && CBZ.corpseLaw.hidden(b.pos)) { oldestT = b.deadT; oldestB = b; }
+          continue;
+        }
         if (!b.culled) {
           const cdx = b.pos.x - camx, cdz = b.pos.z - camz;
           const seen = (cdx * cdx + cdz * cdz) < CORPSE_NEAR2;
