@@ -58,7 +58,8 @@
      giveBandage(n)  / bandages() — the player's rolls
      kill(a, cause, o) — the one death this file hands out (routes per game)
      on(mode, hooks) — a game plugs in: { kill(a,cause,o), playerKill(cause,o),
-                        playerDown(on, o), safe(a), hold(a, secs) }
+                        playerDown(on, o), safe(a), hold(a, secs, o),
+                        rolls() -> n, useRoll(n) }
      reset(a) · peek(a) · of(a) · list
 ============================================================ */
 (function () {
@@ -530,13 +531,23 @@
     }
     return best;
   }
-  function playerRolls() { const P = CBZ.player; return P ? (P._bandages | 0) : 0; }
-  VT.bandages = playerRolls;
-  VT.giveBandage = function (n) {
+  /* THE PLAYER'S ROLLS live in the game's own pockets when it has them (the
+     prison's g.inventory, the city's bag): hooks.rolls() -> count and
+     hooks.useRoll(n) (n < 0 spends, n > 0 adds). No hook: CBZ.player._bandages. */
+  function playerRolls() {
+    const h = hook("rolls");
+    if (h) { try { return h() | 0; } catch (e) { return 0; } }
+    const P = CBZ.player; return P ? (P._bandages | 0) : 0;
+  }
+  function addRolls(n) {
+    const h = hook("useRoll");
+    if (h) { try { h(n); } catch (e) { /* game pockets */ } return playerRolls(); }
     const P = CBZ.player; if (!P) return 0;
-    P._bandages = Math.max(0, (P._bandages | 0) + (n == null ? 1 : n | 0));
+    P._bandages = Math.max(0, (P._bandages | 0) + n);
     return P._bandages;
-  };
+  }
+  VT.bandages = playerRolls;
+  VT.giveBandage = function (n) { return addRolls(n == null ? 1 : n | 0); };
   // medic wraps patient's worst open bleed. Self when patient is omitted.
   VT.bandage = function (medic, patient, o) {
     medic = real(medic); patient = real(patient || medic);
@@ -588,7 +599,7 @@
     const k = limb ? 0.95 : b.zone === "head" ? 0.85 : b.zone === "neck" ? 0.55 : 0.7;
     b.band = B.roll ? k : k * 0.8;
     b.tau = Math.min(b.tau, 70);
-    if (isPlayer(B.medic) && B.roll) CBZ.player._bandages = Math.max(0, playerRolls() - 1);
+    if (isPlayer(B.medic) && B.roll) addRolls(-1);
     addWrap(R, b, !B.roll);
     // a man who was down and is no longer pouring gets up in a while
     if (R.critical && rateOf(R) < 0.004) { R.critical = false; R.riseT = 6; }
