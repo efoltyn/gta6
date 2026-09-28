@@ -2200,11 +2200,29 @@
         col: function () { return c.doorCol; },
         isOpen: function () { return !c.locked; },
         permanent: function () { return !!c.tier; },
-        canUse: function () { return !c.tier; },
+        /* A LOCKED FRONT WANTS A KEY. Standing open, anybody may pull it to
+           (the close asks nothing, as above). Locked by the schedule or a
+           lockdown, only the officer's keys or a stolen Cell Key open it —
+           a bare hand used to be able to tap a racked door open at 02:00. */
+        canUse: function () {
+          if (c.tier) return false;
+          if (!c.locked) return true;
+          if (CBZ.prisonStaffKey && CBZ.prisonStaffKey()) return true;
+          const econ = CBZ.econ;
+          return !!(econ && econ.hasItem && econ.hasItem("Cell Key"));
+        },
         // OPENING IT AGAIN IS ALSO DELIBERATE, so it drops its own latch
         // before asking — otherwise the guard above would refuse the very
-        // man it exists to protect.
-        set: function (v) { if (v) this._latch = false; setDoor(c, !v); return c.locked === !v; },
+        // man it exists to protect. A leaf opened by hand while the wing is
+        // locked is `_keyed` (systems/prisonschedule.js leaves it open until
+        // somebody shuts it or the morning unlock); a close clears it.
+        set: function (v) {
+          if (v) this._latch = false;
+          const S = CBZ.prisonSchedule;
+          c._keyed = !!v && !!(S && S.cellsLocked && S.cellsLocked());
+          setDoor(c, !v);
+          return c.locked === !v;
+        },
       });
     })(cells[i]);
   }

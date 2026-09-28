@@ -860,6 +860,14 @@
     verbs: verbs,
     act: act,
     line: function (group) { return LINE[group] ? pick(LINE[group]) : ""; },
+    // THE OFFICER'S RECORD (systems/prisondoorwatch.js): a cop who keeps
+    // opening doors off the schedule loses standing, and the PA says so
+    officer: function (dv, lines) {
+      if (g.role !== "cop" || g.mode !== "escape") return false;
+      standing(dv || 0);
+      if (lines && lines.length) paSay(lines);
+      return true;
+    },
     CORE: CORE,
   };
 

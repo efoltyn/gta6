@@ -884,6 +884,11 @@ document.body.appendChild(b);}}catch(e){}})();
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=lift1"></script>
+<!-- A door opened off the clock is noticed: the screws who see, hear or get
+     radioed about it, the inmates it was shut on, and the Warden's record of
+     the officer. After interactions.js (the door registry); guards.js,
+     brain_prison.js and prisonwarden.js are all read lazily. -->
+<script src="src/systems/prisondoorwatch.js?v=doors1"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
