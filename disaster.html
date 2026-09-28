@@ -28,7 +28,7 @@
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
 <link rel="stylesheet" href="css/mobile.css?v=exit1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
-<link rel="stylesheet" href="css/inventory.css?v=bagless1">
+<link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=bare1">
@@ -62,8 +62,6 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="timer" class="pill panel">00:00</div>
     <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
   </div>
-  <div id="keycard" class="panel"><span class="card"></span><span>Keycard</span></div>
-  <div id="inventory" class="panel"><span class="tag">Stash</span><span id="invList">—</span></div>
 
   <div id="hint" class="panel"></div>
 
@@ -689,6 +687,11 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js's cameras multiply by, so darkness is priced once.
      After cellblock/guards/searchlight/npc (all read at parse), before the
      detection sweep that consumes the result. -->
+<!-- THE PLAYER'S FLASHLIGHT: owning a Guard Torch (prison) or a Flashlight
+     (city) buys one shadowless SpotLight + floor pool, toggled through
+     CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
+     prisonnight.js (CBZ.prisonLights.level prices the dark). -->
+<script src="src/systems/playerflashlight.js?v=torch1"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -785,6 +788,7 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
+<script src="src/systems/hotbar_model.js?v=hotbar1"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
