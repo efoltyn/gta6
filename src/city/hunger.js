@@ -21,20 +21,27 @@
    is a sit-down.
 
    THIS IS STILL THE ONE HUNGER WRITER for the city. Everything that
-   feeds you — the hotbar number key (fpsmode's useHotbarItem), the
-   pockets card (interact.js self-eat), the line cook's plate
-   (roleverbs.js), the inventory grid — routes HERE. Never write g.hunger
-   from a new place; call CBZ.cityEat.
+   feeds you — the pockets card (interact.js self-eat), the line cook's
+   plate (roleverbs.js), a diner counter, and the automatic meal below —
+   routes HERE. Never write g.hunger from a new place; call CBZ.cityEat.
+
+   FOOD AND MEDS USE THEMSELVES (2026-09-28). OWNER: "only guns are cool...
+   all other inventory is dumb af." A burger was a chip on the weapon bar
+   you had to remember to press. Now a man with food in his pocket eats it
+   when he gets hungry (the cheapest thing that fixes it), and a man with a
+   medkit patches himself up when he is hurt badly. No chip, no line of
+   text: the chew's bites and the hurt vignette fading ARE the feedback.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
-  const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
-  if (CFG.FOOD_EAT_V2 == null) CFG.FOOD_EAT_V2 = true;
-  function chewOn() { return CFG.FOOD_EAT_V2 !== false; }
 
-  let warnT = 0, tireWarnT = 0;
+  // AUTO-USE thresholds: eat below HUNGRY, aiming to land at least at FED;
+  // patch up below HURT (a fraction of max hp). The cooldowns keep one item
+  // per beat so a stack is never wolfed in a single frame.
+  const AUTO = { hungry: 35, fed: 70, hurt: 0.35, eatCD: 2.5, medCD: 4 };
+  let autoEatT = 0, autoMedT = 0;
 
   function isResting(P) {
     if (P.driving) return false;
@@ -73,10 +80,6 @@
     if (P && m.hp > 0 && P.maxHp) P.hp = Math.min(P.maxHp, (P.hp || 0) + m.hp);
     if (m.boost) CBZ.player._boost = 12;       // energy drink = temporary stamina/regen
     sfx("pickup", 0.45);
-    if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note((m.drink ? "Drank " : "Ate ") + m.name + " (+" + Math.round(m.heal) + " food" +
-        (m.hp > 0 ? ", +" + m.hp + " hp" : "") + ")", 1.6);
-    }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
@@ -113,8 +116,6 @@
       // per MASTER-PLAN V.1b, starvation stays fully lethal outside the
       // city (see systems/hunger.js's survival/escape branch).
       P.hp = Math.max(5, P.hp - C.starveDmg * dt);
-      warnT -= dt;
-      if (warnT <= 0) { warnT = 5; CBZ.city && CBZ.city.note("You're starving! Find food.", 2); }
     }
 
     // ---- TIREDNESS: night wears you down; resting (standing still) sleeps it
@@ -131,16 +132,66 @@
     if (g.tired > 70) { P.stamina = Math.min(P.stamina || 0, 8); P.sprint = false; }
     if (g.tired >= 100 && g.invuln <= 0) {
       P.hp -= (C.tireExhaustDmg || 1.4) * dt;
-      tireWarnT -= dt;
-      if (tireWarnT <= 0) { tireWarnT = 5; CBZ.city && CBZ.city.note("Exhausted, find somewhere to sleep.", 2.4); }
       if (P.hp <= 0 && CBZ.cityKillPlayer) CBZ.cityKillPlayer("collapsed from exhaustion");
-    } else if (g.tired > 60 && night > 0.5) {
-      tireWarnT -= dt;
-      if (tireWarnT <= 0) { tireWarnT = 9; CBZ.city && CBZ.city.note("Getting tired, rest somewhere safe.", 2); }
     }
+
+    autoUse(P, dt);
 
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   });
+
+  // ============================================================
+  //  AUTO-USE — the pocket looks after itself
+  // ============================================================
+  // PURE: which carried food to eat at hunger `h`. The cheapest item that
+  // lifts you to AUTO.fed; if nothing that big is carried, the most filling
+  // one. Dog treats are for dogs. Returns a name or null.
+  function pickFood(inv, ITEMS, h) {
+    const need = AUTO.fed - h;
+    let fix = null, fixV = Infinity, big = null, bigH = -1;
+    for (const name in inv) {
+      if (!((inv[name] | 0) > 0)) continue;
+      const it = ITEMS[name];
+      if (!it || it.tag !== "food" || !(it.heal > 0) || it.dogfeed) continue;
+      const v = it.value || 0;
+      if (it.heal >= need) { if (v < fixV || (v === fixV && fix && it.heal < ITEMS[fix].heal)) { fix = name; fixV = v; } }
+      else if (it.heal > bigH) { big = name; bigH = it.heal; }
+    }
+    return fix || big;
+  }
+  // PURE: which carried medicine to use (any row with a `medkit` heal): the
+  // smallest that covers the wound, else the biggest.
+  function pickMed(inv, ITEMS, missing) {
+    let fix = null, fixH = Infinity, big = null, bigH = -1;
+    for (const name in inv) {
+      if (!((inv[name] | 0) > 0)) continue;
+      const it = ITEMS[name];
+      if (!it || !(it.medkit > 0)) continue;
+      if (it.medkit >= missing) { if (it.medkit < fixH) { fix = name; fixH = it.medkit; } }
+      else if (it.medkit > bigH) { big = name; bigH = it.medkit; }
+    }
+    return fix || big;
+  }
+  CBZ.cityAutoPick = { food: pickFood, med: pickMed, AUTO: AUTO };
+  function autoUse(P, dt) {
+    autoEatT = Math.max(0, autoEatT - dt);
+    autoMedT = Math.max(0, autoMedT - dt);
+    if (g.state !== "playing" || CBZ.cityMenuOpen || P.dead) return;
+    const econ = CBZ.cityEcon;
+    if (!econ || !econ.ITEMS) return;
+    const inv = g.cityInv || {};
+    if (!meal && autoEatT <= 0 && (g.hunger == null ? 100 : g.hunger) < AUTO.hungry) {
+      const food = pickFood(inv, econ.ITEMS, g.hunger || 0);
+      autoEatT = AUTO.eatCD;
+      if (food) CBZ.cityEat(food);
+    }
+    const maxHp = P.maxHp || 100;
+    if (autoMedT <= 0 && (P.hp || 0) > 0 && (P.hp || 0) < maxHp * AUTO.hurt) {
+      const med = pickMed(inv, econ.ITEMS, maxHp - (P.hp || 0));
+      autoMedT = AUTO.medCD;
+      if (med && CBZ.cityUseItem) CBZ.cityUseItem(med);
+    }
+  }
 
   // ---- the ONE eat. Returns true if the food left your bag. ---------------
   // The item is CONSUMED at the first bite (you cannot eat the same steak
@@ -150,25 +201,13 @@
     const econ = CBZ.cityEcon; if (!econ) return false;
     const it = econ.ITEMS[name];
     if (!it || !it.heal || !econ.has(name)) return false;
-    if ((g.hunger || 0) >= 100 && !it.boost) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("You're full.", 1.2);
-      return false;
-    }
+    if ((g.hunger || 0) >= 100 && !it.boost) return false;   // full: the food stays in your pocket
     if (!econ.take(name, 1)) return false;
 
     const heal = it.heal;
     const hp = Math.max(0, Math.round(heal * 0.25));
     const drink = !!(it.boost || /soda|drink|water|juice|beer|coffee|hooch/i.test(name));
 
-    if (!chewOn()) {
-      // flag-off: the original one-frame transaction, byte-for-byte in effect.
-      g.hunger = Math.min(100, (g.hunger || 0) + heal);
-      if (it.boost) CBZ.player._boost = 12;
-      if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city && CBZ.city.note("Ate " + name + " (+" + heal + " food)", 1.6);
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      return true;
-    }
     if (meal) { finishMeal(); }                 // never drop a paid-for meal
     meal = { name, heal, hp, boost: !!it.boost, drink, t: 0, dur: chewTime(heal), given: 0, bites: 0 };
     sfx(drink ? "water" : "pickup", drink ? 0.3 : 0.5);   // unwrap / uncap — the first beat

@@ -1629,8 +1629,12 @@
     if (rl) rl.style.display = armed ? "" : "none";
     // AIM whenever armed (fpsSetAim ships today); SCOPE only when the sibling
     // scope system says the held weapon can true-zoom. Both may show at once.
+    // ...and in the city with EMPTY HANDS the same AIM control raises the
+    // binoculars (city/hitman_hands.js reads fpsAimHeld): the glasses are a
+    // context of aiming, not a button of their own.
     const am = document.getElementById("taim");
-    if (am) am.style.display = (armed && CBZ.fpsSetAim) ? "" : "none";
+    const binoCtx = CBZ.game.mode === "city" && !!CBZ.hmBinoculars && !!CBZ.player && !CBZ.player.driving && !CBZ.player.dead;
+    if (am) am.style.display = ((armed || binoCtx) && CBZ.fpsSetAim) ? "" : "none";
     const sc = document.getElementById("tscope");
     if (sc) sc.style.display = (armed && CBZ.fpsCanScope && CBZ.fpsCanScope()) ? "" : "none";
     // LATCH HYGIENE, in this order: drop any latch whose button just left the

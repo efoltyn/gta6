@@ -183,8 +183,7 @@ body.campaign-canonical-title #title .mode-sharksim-only{display:none !important
 /* ---- panel gating: prison furniture off, the health plate on ----------
    #objective held twenty-two words of rules text for the whole match and
    the HEALTH/STAMINA captions labelled bars that are self-evidently bars;
-   both stay off. The hotbar keeps only the docked gun chip (a gun-game
-   player carries no contraband). */
+   both stay off. The hotbar shows guns only here (systems/hotbar_model.js). */
 body.mode-gungame #cigs,
 body.mode-gungame #keycard,
 body.mode-gungame #inventory,
@@ -193,7 +192,6 @@ body.mode-gungame #gangHud,
 body.mode-gungame #compass,
 body.mode-gungame #minimap,
 body.mode-gungame #objective{ display:none !important; }
-body.mode-gungame #hotbar .islot{ display:none !important; }
 
 /* shared HUD tokens for this mode */
 body.mode-gungame{

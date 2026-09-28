@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
 <link rel="stylesheet" href="css/mobile.css?v=exit1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
-<link rel="stylesheet" href="css/inventory.css?v=bagless1">
+<link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
 <link rel="stylesheet" href="css/interact_touch.css?v=bare1">
@@ -53,8 +53,6 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="timer" class="pill panel">00:00</div>
     <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
   </div>
-  <div id="keycard" class="panel"><span class="card"></span><span>Keycard</span></div>
-  <div id="inventory" class="panel"><span class="tag">Stash</span><span id="invList">—</span></div>
 
   <div id="hint" class="panel"></div>
 
@@ -586,6 +584,8 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=grasp2"></script>
   <script src="src/entities/character.js?v=human1"></script>
+  <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
+  <script src="src/entities/watch.js?v=watch1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -761,6 +761,11 @@ document.body.appendChild(b);}}catch(e){}})();
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=duty1"></script>
+<!-- THE PLAYER'S FLASHLIGHT: owning a Guard Torch (prison) or a Flashlight
+     (city) buys one shadowless SpotLight + floor pool, toggled through
+     CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
+     prisonnight.js (CBZ.prisonLights.level prices the dark). -->
+<script src="src/systems/playerflashlight.js?v=torch1"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -888,7 +893,8 @@ document.body.appendChild(b);}}catch(e){}})();
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=deslop1"></script>
-<script src="src/systems/inventory.js?v=sharkmode1"></script>
+<script src="src/systems/hotbar_model.js?v=hotbar1"></script>
+<script src="src/systems/inventory.js?v=hotbar1"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which

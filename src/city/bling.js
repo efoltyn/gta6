@@ -16,13 +16,11 @@
                 silver links + a cut stone = Diamond Necklace; fat iced
                 links + a medallion = Iced Chain). Never a hoop, never
                 upright, never bigger than the head.
-     • wristL — a WATCH, not a box: a thin band wrapping the forearm
-                just above the hand, a case with lugs, a bezel ring, a
-                dial and four marks on it. The tier is in the finish —
-                steel / gold / diver (dark bezel + lume pip) / iced
-                (pavé) — and the loot unicorns get their own read:
-                Royal-Oak octagon (AP), gold dress case (Patek),
-                tonneau carbon (Richard Mille). Smaller than the hand.
+     • wristL — THE WATCH IS entities/watch.js's (CBZ.wristwatch): steel /
+                gold Day-Date / diver / iced / Royal Oak / Calatrava /
+                Richard Mille, with hands on the game clock. The look
+                here is one `watch` part; it replaces the wearer's
+                everyday role watch on the same wrist.
      • ring   — a BAND round the finger with a cut stone on it, on the
                 right hand's edge (Engagement = the $5M rock, Diamond
                 Ring, Pinky = smaller and further outboard)
@@ -207,7 +205,6 @@
       gm = new THREE.TorusGeometry(0.185, 0.028, 4, 8);
       gm.rotateX(Math.PI / 2);          // torus lies in XY by default; lay it flat around the arm
     }
-    else if (kind === "face") gm = CBZ.boxGeom(0.10, 0.07, 0.03);     // watch face plate on the band
     else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
     else if (kind === "grill") gm = CBZ.boxGeom(0.16, 0.05, 0.04);    // an iced bar across the mouth (a grill)
     else if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);     // one shade lens (two of these cover the eyes)
@@ -240,43 +237,6 @@
     // a cut stone. An octahedron is 8 faces — the cheapest thing in the engine
     // that catches light like a brilliant instead of like a sugar cube.
     else if (kind === "gem") gm = THREE.OctahedronGeometry ? new THREE.OctahedronGeometry(0.030, 0) : CBZ.boxGeom(0.040, 0.052, 0.040);
-    // watch: band, case+lugs, bezel ring, dial, marks, pavé. WHY a bezel TORUS
-    // and not a second cylinder — a solid disc buries the dial; a ring leaves
-    // the hole the dial shows through, which is what makes it read as a watch.
-    else if (kind === "band2") gm = limbBand(0.185, 0.020, 6, 8);
-    else if (kind === "bandFine") gm = limbBand(0.185, 0.014, 6, 8);
-    else if (kind === "wCase" || kind === "wTonneau") {
-      // 0.124 across (a third of the 0.31 hand cap) and only 0.040 deep: the
-      // whole stack — band 0.185 + case + bezel — stands 0.071 off the forearm
-      // centre, i.e. about 1.5 cm of watch over 2.4 cm of sleeve clearance in
-      // real units. A deeper case is what made the V1 face read as a taped box.
-      const body = disc(0.062, 0.040, 8);
-      // Richard Mille's tonneau: the SAME octagonal case stretched up the
-      // forearm. A barrel, not a puck, and it costs no extra geometry kind.
-      if (kind === "wTonneau" && body.scale) body.scale(1, 1.30, 1);
-      const lugs = [];
-      for (let i = 0; i < 2; i++) {
-        const b = new THREE.BoxGeometry(0.042, 0.066, 0.042);
-        if (b.translate) b.translate(i ? 0.066 : -0.066, 0, -0.010);
-        lugs.push(b);
-      }
-      gm = mergeGeos([body].concat(lugs));
-    }
-    else if (kind === "wBezel") {
-      gm = THREE.TorusGeometry ? new THREE.TorusGeometry(0.064, 0.014, 4, 8) : CBZ.boxGeom(0.156, 0.156, 0.028);
-    }
-    else if (kind === "wDial") gm = disc(0.046, 0.010, 8);
-    else if (kind === "wMarks") gm = mergeBoxes([
-      { w: 0.010, h: 0.022, d: 0.010, y: 0.032 }, { w: 0.010, h: 0.022, d: 0.010, y: -0.032 },
-      { w: 0.022, h: 0.010, d: 0.010, x: 0.032 }, { w: 0.022, h: 0.010, d: 0.010, x: -0.032 }]);
-    else if (kind === "wPave") {
-      const specs = [];
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        specs.push({ w: 0.015, h: 0.015, d: 0.015, x: Math.sin(a) * 0.064, y: Math.cos(a) * 0.064, rz: a });
-      }
-      gm = mergeBoxes(specs);
-    }
     // bracelet: a finer band + the stones that make it a TENNIS bracelet.
     else if (kind === "braceStones") gm = ringStones(8, 0.185, 0.020, 0);
     // ring: a band round the finger, and the stone is a separate `gem` part.
@@ -381,12 +341,8 @@
   // the meet. WATCH: band ON THE WRIST + a face plate on the outer front.
   // RING: a dot on the front edge of the hand, at the knuckle line.
   const CHAIN_Y = 1.65, CHAIN_Z = 0.268, CHAIN_TILT = 0.83;
-  // WZ — the watch stack's AUTHORED z on the wrist: the band torus's rim, so
-  // the case sits ON the band and every plate above it is an offset FROM that
-  // one number instead of six independently-typed z's that drift apart. (At
-  // mount time placePart rolls the stack about the forearm axis, so this z
-  // lands DORSAL — outboard — not on the front of the wrist.)
-  const WZ = 0.185;
+  // every look key that is a wristwatch (entities/watch.js maps each to a style)
+  const WATCH_LOOKS = { watchSteel: 1, watchSilver: 1, watchGold: 1, watchIced: 1, watchDiver: 1, watchAP: 1, watchPatek: 1, watchRM: 1 };
   let _looks = null, _looksFlag = null;
   function looks() {
     if (_looks && _looksFlag === v2()) return _looks;
@@ -411,25 +367,11 @@
        constant to get wrong any more, and it is no longer authored for one
        body — a woman's shorter forearm and a child's much shorter one place
        their own watch correctly with no table here. */
-    const watch = function (band, faceM) {
-      return [
-        { kind: "cuff", at: "wrist", mat: band, x: 0, y: 0, z: 0 },
-        { kind: "face", at: "wrist", mat: faceM, x: 0, y: 0, z: 0.175 },   // the dial rides ON the band
-      ];
-    };
     _looks = {
       // necklaces — flat V + pendant, all smaller than the head
       chainGold: v("link", M.gold).concat([{ kind: "pendant", mat: M.gold, x: 0, y: 1.515, z: 0.272 }]),
       chainDiamond: v("linkThin", M.silver).concat([{ kind: "pendant", mat: M.glint, x: 0, y: 1.515, z: 0.272 }]),
       chainIced: v("linkThick", M.ice).concat([{ kind: "pendant", mat: M.ice, x: 0, y: 1.515, z: 0.272 }]),
-      // watches — thin band + face, on the WRIST (see `watch` above)
-      watchGold: watch(M.gold, M.gold),
-      watchSilver: watch(M.silver, M.silver),
-      watchIced: watch(M.ice, M.glint),
-      watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
-      watchDiver: [{ kind: "cuff", at: "wrist", mat: M.silver, x: 0, y: 0, z: 0 },     // steel band, on the wrist
-        { kind: "face", at: "wrist", mat: M.blueDial, x: 0, y: 0, z: 0.175 },          // signature blue dial
-        { kind: "ring", at: "wrist", mat: M.glint, x: 0, y: 0.06, z: 0.19 }],          // lume pip
       // tennis bracelet — band only
       bracelet: [{ kind: "cuff", at: "wrist", mat: M.ice, x: 0, y: 0.06, z: 0 }],   // a band's width above the watch line, on skin
       // ring — a glint dot on the hand's front edge (the ONE piece that really
@@ -486,6 +428,12 @@
       ],
     };
     if (v2()) blingV2(_looks, M);
+    // WATCHES are entities/watch.js's: a real case, bezel, dial, hands on the
+    // game clock, crystal and strap, swept round the measured wrist. A look is
+    // one `watch` part naming the style; mountParts hands it to
+    // CBZ.wristwatch.attach, which puts it on the wrist in place of the
+    // wearer's everyday (role) watch.
+    for (const k in WATCH_LOOKS) _looks[k] = [{ kind: "watch", at: "wrist", look: k }];
     _looksFlag = v2();
     return _looks;
   }
@@ -510,21 +458,6 @@
         { kind: kind, mat: mat, x: 0.10, y: CHAIN_Y, z: CHAIN_Z, rz: CHAIN_TILT },
       ];
     };
-    // one watch: band → case+lugs → bezel ring → dial → marks (+ pavé). Every
-    // z is WZ plus a stack offset, so the parts can never separate.
-    const watch2 = function (o) {
-      const P = [
-        { kind: "band2", at: "wrist", mat: o.band, x: 0, y: 0, z: 0 },
-        { kind: o.tonneau ? "wTonneau" : "wCase", at: "wrist", mat: o.body, x: 0, y: 0, z: WZ },
-        { kind: "wBezel", at: "wrist", mat: o.bezel, x: 0, y: 0, z: WZ + 0.022 },
-        { kind: "wDial", at: "wrist", mat: o.dial, x: 0, y: 0, z: WZ + 0.022 },
-        { kind: "wMarks", at: "wrist", mat: o.mark, x: 0, y: 0, z: WZ + 0.029 },
-      ];
-      if (o.pave) P.push({ kind: "wPave", at: "wrist", mat: M.glint, x: 0, y: 0, z: WZ + 0.022 });
-      // a diver's lume pip at 12 o'clock — up the FOREARM, which is +y here.
-      if (o.pip) P.push({ kind: "gem", at: "wrist", mat: M.glint, s: 0.42, x: 0, y: 0.072, z: WZ + 0.026 });
-      return P;
-    };
     // ---- necklaces: gold curb + cross, fine silver + stone, fat iced + medal
     L.chainGold = strand("chainRun", M.gold).concat([{ kind: "cross", mat: M.gold, x: 0, y: 1.505, z: 0.278 }]);
     L.chainDiamond = strand("chainRunFine", M.silver).concat([{ kind: "gem", mat: M.glint, x: 0, y: 1.515, z: 0.284 }]);
@@ -532,18 +465,6 @@
       { kind: "medallion", mat: M.ice, x: 0, y: 1.505, z: 0.278 },
       { kind: "gem", mat: M.glint, s: 0.7, x: 0, y: 1.505, z: 0.298 },
     ]);
-    // ---- watches. The tier IS the finish; the unicorns get their own read so
-    // a $900k wrist is not the same picture as a $12k one.
-    L.watchSteel = watch2({ band: M.steel, body: M.steel, bezel: M.steel, dial: M.dialWhite, mark: M.carbon });
-    L.watchSilver = L.watchSteel;                       // economy.js's declared name for the steel look
-    L.watchGold = watch2({ band: M.goldRich, body: M.goldRich, bezel: M.goldRich, dial: M.gold, mark: M.carbon });
-    L.watchDiver = watch2({ band: M.steel, body: M.steel, bezel: M.bezelDark, dial: M.blueDial, mark: M.glint, pip: true });
-    L.watchIced = watch2({ band: M.ice, body: M.ice, bezel: M.ice, dial: M.glint, mark: M.ice, pave: true });
-    // Royal Oak: steel case, GOLD octagonal bezel (the wBezel torus is 8-sided
-    // already), blue dial. Patek: a gold dress watch, white dial, no ice.
-    L.watchAP = watch2({ band: M.steel, body: M.steel, bezel: M.goldRich, dial: M.blueDial, mark: M.goldRich });
-    L.watchPatek = watch2({ band: M.goldRich, body: M.goldRich, bezel: M.goldRich, dial: M.dialWhite, mark: M.carbon });
-    L.watchRM = watch2({ band: M.carbon, body: M.carbon, bezel: M.rose, dial: M.carbon, mark: M.rose, tonneau: true });
     // ---- tennis bracelet: a finer band than the watch's, plus its stones.
     L.bracelet = [
       { kind: "bandFine", at: "wrist", mat: M.silver, x: 0, y: 0.06, z: 0 },
@@ -710,6 +631,7 @@
   }
   function releaseMesh(mesh) {
     if (!mesh) return;
+    if (mesh.userData && mesh.userData.wristwatch) { if (CBZ.wristwatch) CBZ.wristwatch.detach(mesh); return; }
     if (mesh.parent) mesh.parent.remove(mesh);
     const pool = poolFor(mesh.userData.blingKind);
     if (pool && pool.length < POOL_MAX) pool.push(mesh);
@@ -792,6 +714,7 @@
     const side = wristSide(parent);
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
+      if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
       const mesh = acquire(p.kind);
       mesh.material = p.mat;
       (placePart(mesh, p, lm, side) || parent).add(mesh);
@@ -1084,6 +1007,7 @@
     const side = wristSide(parent);   // portrait wrists take the same dorsal roll
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
+      if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
       const geo = geoFor(p.kind);
       if (!geo || !p.mat) continue;
       const m = new THREE.Mesh(geo, p.mat);
