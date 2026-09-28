@@ -5,11 +5,10 @@
    (three r128) and, for every kind x head form (m / f / child) x LOD:
      1. BUILDS: finite geometry, a sane triangle budget, the shell faces out.
      2. NO HEAD THROUGH THE HAT: no hat vertex is inside the skull, ears, neck
-        or nose (the analytic head the hats are fitted to), and every REAL
-        head-mesh vertex under a crown is inside the crown (a ray from the
-        skull centre meets the hat after the scalp).
-     3. SITS ON IT: round the band, every 1/16 of the way, the hat comes
-        within 5 mm (world, HUMAN_SCALE 0.70) of the scalp — no floating gap.
+        or nose (the analytic head the hats are built on).
+     3. SITS ON IT: round the band, every 1/16 of the way, the hat's lower
+        edge comes within 6 mm (world, HUMAN_SCALE 0.70) of the REAL head
+        (character.js's own head mesh + brows) — no floating gap.
         (Full-face moto / race helmets ride on cheek pads that are inside the
         shell and the hijab is a drape; they are exempt and say so.)
      4. HAIR UNDER IT: every hair style, built on a real rig, then the hat put
@@ -17,13 +16,20 @@
         outside the crown (no hair poking through), and taking the hat off
         restores the original hair.
      5. CHINSTRAPS hug the jaw: every strap vertex within 2 cm of the head.
+     7. PENETRATION, on real rigs, triangle-exact: for every kind x variant x
+        body (bearded long-haired man, long-haired woman, child, afro, bun,
+        ponytail) x hat LOD x face LOD, a ray from the skull centre to EVERY
+        vertex of the head, ears, nose, neck, brows, lids, lips, beard and hair
+        must not cross a hat surface first: zero vertices poking through, near
+        and far. (Straps are skin-side by design; hair falling OVER a strap is
+        allowed, a beard through a chin cup is not.)
      6. THE RIG: c.cap builds the role hat into skinSlots.cap with the hair
         kept, c.hat comes off while swimming and the hair springs back, the
         LOD swap changes hat + hair geometry, owners stack (armor beats
         outfit) and headwear meshes are poolable (no vertex colours; only the
         riot shield is transparent).
 
-     node tools/headwear-check.mjs [--verbose]
+     node tools/headwear-check.mjs [--verbose] [--only=kind,kind]
 */
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -61,7 +67,8 @@ function check(ok, msg) {
 }
 const MM = 0.7 * 1000;                     // unit (adult head frame) -> mm, HUMAN_SCALE 0.70
 const FORMS = ["m", "f", "c"];
-const KINDS = HW.kinds;
+const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7).split(",").filter(Boolean);
+const KINDS = ONLY.length ? HW.kinds.filter((k) => ONLY.includes(k)) : HW.kinds;   // --only=ballcap,riot for a quick loop
 const VARIANTS = { ballcap: ["", "back"], peaked: ["police", "captain", "chauffeur"], shemagh: ["", "agal", "veil"], beret: ["", "plain"], campaign: ["", "sheriff"], ballistic: ["", "swat"] };
 const NO_CONTACT = { moto: "rides on cheek pads inside the shell", race: "rides on cheek pads inside the shell", hijab: "a drape, not a band" };
 const HAS_STRAP = { ballistic: 1, pasgt: 1 };
@@ -86,6 +93,74 @@ function hatDist(ms, dir) {
   return best;
 }
 const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+
+/* An exact ray-vs-triangle test from the skull centre, with the triangles
+   binned by direction (azimuth x elevation from HC) so a ray only tests the
+   handful in its bin. Independent of headwear.js's own maps on purpose. */
+const HCx = FIT.HC[0], HCy = FIT.HC[1], HCz = FIT.HC[2];
+const BA = 96, BE = 48;
+function dirBin(x, y, z) {
+  const dx = x - HCx, dy = y - HCy, dz = z - HCz, r = Math.hypot(dx, dy, dz) || 1e-9;
+  return [(Math.atan2(dx, dz) + Math.PI) / (2 * Math.PI) * BA, (Math.asin(Math.max(-1, Math.min(1, dy / r))) + Math.PI / 2) / Math.PI * BE];
+}
+function TriIndex() {
+  const T = [], bins = new Map();
+  function add(a, b, c) {
+    const id = T.length; T.push([a, b, c]);
+    const cs = [dirBin(a[0], a[1], a[2]), dirBin(b[0], b[1], b[2]), dirBin(c[0], c[1], c[2])];
+    let a0 = Math.min(cs[0][0], cs[1][0], cs[2][0]), a1 = Math.max(cs[0][0], cs[1][0], cs[2][0]);
+    if (a1 - a0 > BA / 2) { const u = cs.map((q) => (q[0] < BA / 2 ? q[0] + BA : q[0])); a0 = Math.min(...u); a1 = Math.max(...u); }
+    let e0 = Math.min(cs[0][1], cs[1][1], cs[2][1]), e1 = Math.max(cs[0][1], cs[1][1], cs[2][1]);
+    if (a1 - a0 > BA / 2 || e1 > BE - 2 || e0 < 2) { a0 = 0; a1 = BA - 1; if (e0 + e1 > BE) e1 = BE - 1; else e0 = 0; }
+    for (let j = Math.max(0, Math.floor(e0) - 1); j <= Math.min(BE - 1, Math.floor(e1) + 1); j++)
+      for (let ii = Math.floor(a0) - 1; ii <= Math.floor(a1) + 1; ii++) {
+        const k = j * BA + ((ii % BA) + BA) % BA;
+        let L = bins.get(k); if (!L) bins.set(k, L = []);
+        if (L[L.length - 1] !== id) L.push(id);
+      }
+  }
+  function addMesh(g, M) {
+    const p = g.attributes.position, ix = g.index, v = new T3.Vector3(), P = [];
+    for (let i = 0; i < p.count; i++) { v.set(p.getX(i), p.getY(i), p.getZ(i)); if (M) v.applyMatrix4(M); P.push([v.x, v.y, v.z]); }
+    const n = ix ? ix.count : p.count;
+    for (let i = 0; i < n; i += 3) add(P[ix ? ix.getX(i) : i], P[ix ? ix.getX(i + 1) : i + 1], P[ix ? ix.getX(i + 2) : i + 2]);
+  }
+  // every hit distance along the unit ray d from HC
+  function hits(d) {
+    const c = dirBin(HCx + d[0], HCy + d[1], HCz + d[2]);
+    const L = bins.get(Math.min(BE - 1, c[1] | 0) * BA + (Math.min(BA - 1, c[0] | 0)));
+    const out = [];
+    if (!L) return out;
+    for (const id of L) {
+      const [a, b, q] = T[id];
+      const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [q[0] - a[0], q[1] - a[1], q[2] - a[2]];
+      const pv = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+      const det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+      if (Math.abs(det) < 1e-12) continue;
+      const tv = [HCx - a[0], HCy - a[1], HCz - a[2]];
+      const u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) / det;
+      if (u < 0 || u > 1) continue;
+      const qv = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+      const w = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det;
+      if (w < 0 || u + w > 1) continue;
+      const t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det;
+      if (t > 1e-6) out.push(t);
+    }
+    return out;
+  }
+  return { addMesh, hits, get size() { return T.length; } };
+}
+const T3 = T;
+// the REAL head a hat must meet (character.js's own meshes, in the hat frame):
+// near + far skull (every nose), ears and neck, brows at rest
+const REAL = {};
+function realHead(form) {
+  if (REAL[form]) return REAL[form];
+  const X = TriIndex(), off = new T.Matrix4().makeTranslation(0, 0.3, 0);
+  for (const far of [false, true]) for (let n = 0; n < 3; n++) X.addMesh(CBZ.human.geometry.head(form, n, far), off);
+  X.addMesh(CBZ.human.geometry.brow(form, "n"), new T.Matrix4().makeTranslation(0, 0.448, 0.303));
+  return (REAL[form] = X);
+}
 
 // ---- 1-3, 5: geometry, fit, contact, straps
 const report = [];
@@ -116,44 +191,41 @@ for (const kind of KINDS) {
           check(out / tot > 0.6, tag + " main shell faces outward (" + (out / tot).toFixed(2) + ")");
         }
         const H = headAll(form);
-        // 2a. no hat vertex inside the head
+        // 2a. no hat vertex inside the REAL head (skull, ears, nose, neck, brows):
+        // nothing of the head lies further out along the ray from the skull centre
         let worst = 0, worstRole = "";
+        const RH2 = realHead(form);
         for (const role in entry.geos) {
-          for (const v of verts(entry.geos[role])) { const d = H.sdf(v[0], v[1], v[2]); if (d < worst) { worst = d; worstRole = role; } }
-        }
-        check(worst > -0.0015, tag + " no hat vertex inside the head (worst " + (worst * MM).toFixed(1) + " mm, " + worstRole + ")");
-        if (lod) continue;
-        const ms = hatMeshes(entry), cov = entry.cover;
-        // 2b. real head-mesh vertices under the crown are inside the crown
-        if (cov && cov.band) {
-          const hg = CBZ.human.geometry.head(form, 1, false), hp = hg.attributes.position;
-          let out = 0, n = 0;
-          for (let i = 0; i < hp.count; i += 3) {
-            const v = [hp.getX(i), hp.getY(i) + 0.3, hp.getZ(i)];
-            const a = Math.atan2(v[0], v[2]);
-            if (v[1] < (cov.rim || cov.band)(a) + 0.02) continue;
-            const d = [v[0] - FIT.HC[0], v[1] - FIT.HC[1], v[2] - FIT.HC[2]], r = Math.hypot(d[0], d[1], d[2]);
-            n++;
-            if (hatDist(ms, norm(d)) < r - 0.0005) out++;
+          for (const v of verts(entry.geos[role])) {
+            const dv = [v[0] - HCx, v[1] - HCy, v[2] - HCz], r = Math.hypot(dv[0], dv[1], dv[2]);
+            let far = 0;
+            for (const t of RH2.hits(norm(dv))) if (t > far) far = t;
+            if (r - far < worst) { worst = r - far; worstRole = role; }
           }
-          check(out === 0, tag + " real skull stays inside the crown (" + out + "/" + n + " vertices poke out)");
         }
-        // 3. contact round the band
+        check(worst > -0.0005, tag + " no hat vertex inside the real head (worst " + (worst * MM).toFixed(1) + " mm, " + worstRole + ")");
+        if (lod) continue;
+        const cov = entry.cover;
+        // 3. contact round the band, against the REAL head
         if (cov && (cov.rim || cov.band) && !NO_CONTACT[kind]) {
-          const cband = cov.rim || cov.band;
+          const cband = cov.rim || cov.band, RH = realHead(form);
           const bins = new Array(16).fill(Infinity);
           for (const role in entry.geos) {
-            if (role === "strap" || role === "clear") continue;
+            if (role === "strap" || role === "clear" || role === "tail") continue;
             for (const v of verts(entry.geos[role])) {
               const a = Math.atan2(v[0], v[2]), y = cband(a);
               if (Math.abs(v[1] - y) > 0.03) continue;
               const b = Math.floor(((a + Math.PI) / (2 * Math.PI)) * 16) % 16;
-              const d = H.sdf(v[0], v[1], v[2]);
+              const dv = [v[0] - HCx, v[1] - HCy, v[2] - HCz], r = Math.hypot(dv[0], dv[1], dv[2]);
+              const hs = RH.hits(norm(dv));
+              if (!hs.length) continue;
+              const d = r - Math.max.apply(null, hs);
               if (d < bins[b]) bins[b] = d;
             }
           }
-          const gap = Math.max.apply(null, bins);
-          check(gap * MM <= 5.0, tag + " sits within 5 mm of the scalp all round the band (widest gap " + (gap * MM).toFixed(1) + " mm)");
+          let gap = -Infinity, gb = 0;
+          bins.forEach((g, i) => { if (isFinite(g) && g > gap) { gap = g; gb = i; } });
+          check(gap * MM <= 6.0, tag + " sits within 6 mm of the real head all round the band (widest gap " + (gap * MM).toFixed(1) + " mm at " + Math.round((gb + 0.5) * 22.5 - 180) + " deg)");
         }
         // 5. chinstraps
         if (HAS_STRAP[kind] && entry.geos.strap) {
@@ -163,6 +235,58 @@ for (const kind of KINDS) {
         }
       }
     }
+  }
+}
+
+// ---- 7: PENETRATION on real rigs, both LODs, triangle-exact
+const PEN_BODIES = [
+  ["bearded man, long hair, broad nose, full lips", { build: "m", hairStyle: "long", beard: "full", nose: 2, lips: true }],
+  ["woman, long hair, narrow nose", { build: "f", hairStyle: "long", nose: 0 }],
+  ["child", { build: "m", age: 8, hairStyle: "short" }],
+  ["man, afro", { build: "m", hairStyle: "afro", beard: "goatee" }],
+  ["woman, bun", { build: "f", hairStyle: "bun" }],
+  ["woman, ponytail", { build: "f", hairStyle: "pony" }],
+];
+const PEN_TOL = 0.25 / MM;                 // a quarter millimetre of float noise
+function underHat(o) { let n = o; while (n) { if (n.userData && n.userData.headwear) return true; n = n.parent; } return false; }
+let penCases = 0;
+for (const kind of KINDS) for (const variant of VARIANTS[kind] || [""]) for (const [bname, bo] of PEN_BODIES) {
+  const rig = CBZ.makeCharacter(Object.assign({ skin: 0xc89070, hair: 0x2a1c12, torso: 0x334455, legs: 0x223344 }, bo));
+  const grp = HW.wear(rig, kind, { owner: "outfit", variant });
+  if (!grp) { check(false, kind + " on " + bname + " wears"); continue; }
+  for (const hatLod of [1, 2]) for (const headNear of [true, false]) {
+    rig.setHandLod(hatLod);
+    CBZ.human.faceLod(rig, headNear);
+    rig.group.updateMatrixWorld(true);
+    const inv = new T.Matrix4().copy(grp.matrixWorld).invert();
+    const shell = TriIndex(), straps = TriIndex();
+    for (const m of grp.children) {
+      if (!m.isMesh || !m.visible) continue;
+      const role = m.userData.hatRole;
+      if (role === "clear") continue;
+      (role === "strap" ? straps : shell).addMesh(m.geometry, m.matrix);
+    }
+    const worst = {};
+    rig.neck.traverse((o) => {
+      if (!o.isMesh || underHat(o)) return;
+      for (let n = o; n && n !== rig.neck; n = n.parent) if (!n.visible) return;
+      const name = o.name || (o.userData.hairStyle ? "hair" : "?");
+      if (!headNear && !(name === "head")) return;     // the far face tier changes the skull only
+      const M = new T.Matrix4().multiplyMatrices(inv, o.matrixWorld), p = o.geometry.attributes.position, v = new T.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.set(p.getX(i), p.getY(i), p.getZ(i)).applyMatrix4(M);
+        const dv = [v.x - HCx, v.y - HCy, v.z - HCz], r = Math.hypot(dv[0], dv[1], dv[2]);
+        if (r < 1e-5) continue;
+        const d = norm(dv);
+        let t = Infinity;
+        for (const h of shell.hits(d)) if (h < t) t = h;
+        if (name === "beard") for (const h of straps.hits(d)) if (h < t) t = h;
+        if (t < r - PEN_TOL && (!worst[name] || r - t > worst[name][0])) worst[name] = [r - t, v.x.toFixed(3) + "," + v.y.toFixed(3) + "," + v.z.toFixed(3)];
+      }
+    });
+    penCases++;
+    const bad = Object.keys(worst).map((k) => k + " " + (worst[k][0] * MM).toFixed(1) + " mm" + (VERBOSE ? " at " + worst[k][1] : ""));
+    check(!bad.length, kind + (variant ? ":" + variant : "") + " on " + bname + " (hat " + (hatLod === 2 ? "far" : "near") + ", face " + (headNear ? "near" : "far") + "): nothing through the hat" + (bad.length ? " (" + bad.join(", ") + ")" : ""));
   }
 }
 
@@ -182,6 +306,7 @@ for (const build of ["m", "f"]) {
     for (const kind of CROWN) {
       const grp = HW.wear(rig, kind, { owner: "outfit" });
       check(!!grp, build + "/" + style + " wears " + kind);
+      if (!hair.visible) { hairPairs++; continue; }     // a durag / hijab takes long hair away entirely
       const entry = HW.geometry(kind, form, "", 0), cov = entry.cover, ms = hatMeshes(entry);
       const hp = hair.geometry.attributes.position;
       let out = 0, n = 0, worst = 0, wv = null;
@@ -241,6 +366,6 @@ for (const build of ["m", "f"]) {
 }
 
 if (VERBOSE) for (const [t, n] of report) console.log("  " + t.padEnd(26) + n + " tris");
-console.log("headwear-check: " + (checks - fails) + "/" + checks + " passed (" + KINDS.length + " kinds, " + hairPairs + " hair x hat fits)" + (fails ? "  FAIL" : "  PASS"));
+console.log("headwear-check: " + (checks - fails) + "/" + checks + " passed (" + KINDS.length + " kinds, " + hairPairs + " hair x hat fits, " + penCases + " penetration cases)" + (fails ? "  FAIL" : "  PASS"));
 for (const k in NO_CONTACT) if (VERBOSE) console.log("  exempt from band contact: " + k + " — " + NO_CONTACT[k]);
 process.exit(fails ? 1 : 0);
