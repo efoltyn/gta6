@@ -147,7 +147,9 @@
     warn:     { label: "Warn",            fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
     detain:   { label: "Cuff",            fn: (a) => {
       if (a.approach) return approachAction(a, "detain");
-      const justified = CBZ.game.role === "cop" && (a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
+      const surrendered = a.intimidMode === "scared";
+      if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
+      const justified = CBZ.game.role === "cop" && (surrendered || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
       a.hp = Math.max(a.hp || 0, 45); a.aiState = "flee"; a.foe = null;
       if (a.copMarked > 0) a.copMarked = 0;
       // YOUR HANDS DO IT (CBZ.verbs.cuff): turned round, wrists behind his
@@ -165,7 +167,8 @@
       return { ok: true, msg: "" };   // he goes down; that is the receipt
     } },
     search:   { label: "Search",          fn: (a) => {
-      const justified = a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
+      const justified = a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
+      if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
       if (a.copMarked > 0) a.copMarked = 0;
       // THE PAT-DOWN (CBZ.verbs.frisk): hands up, turned to the wall, your
@@ -281,7 +284,10 @@
        the same panel, the same four keys, different verbs — which is exactly
        what happens when a man walks up with an offer. Outranks every approach
        kind because a drawn gun outranks a conversation. */
-    if (a.intimidMode === "scared") return ["rob", "restrain", "release"];
+    // An OFFICER does not rob a man with his hands up or tie him with a
+    // bedsheet: the surrender is the compliance, so the card is the badge's
+    // own three (cuff him, toss him, let him go).
+    if (a.intimidMode === "scared") return CBZ.game.role === "cop" ? ["detain", "search", "release"] : ["rob", "restrain", "release"];
     if (a.approach && a.approach.t > 0) {
       /* THREE BUTTONS, AND "LISTEN" IS NOT ONE OF THEM (owner, 2026-08-21: "I
          like 3 interaction buttons max at a time... more than 3 interaction
@@ -861,6 +867,10 @@
     if (row && row.dataset.i != null) doAction(+row.dataset.i);
   });
   CBZ.doInteract = doAction;       // touch buttons call this
+  // read-only views for tools/prison-cop-check.mjs: who the card is on, and
+  // the verbs it shows him (the same list doAction indexes into)
+  CBZ.prisonInteractTarget = function () { return current; };
+  CBZ.prisonVerbsFor = function (a) { return a ? (a._verbs || capVerbs(verbsFor(a))) : []; };
 
   CBZ.onUpdate(45, update);
   CBZ.onAlways(97, function (dt) {

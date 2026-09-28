@@ -119,8 +119,6 @@
   function syncKey() {
     const have = has("Keycard");
     if (!!g.hasKey !== have) g.hasKey = have;
-    const chip = CBZ.el && CBZ.el.keycard;
-    if (chip && chip.classList.contains("have") !== have) chip.classList.toggle("have", have);
   }
   function grantKeycard() {
     const e = econ();

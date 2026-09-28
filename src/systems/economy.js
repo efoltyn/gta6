@@ -691,7 +691,6 @@
     if (name !== "Keycard") return;
     if (g.hasKey) return;
     g.hasKey = true;
-    if (CBZ.el && CBZ.el.keycard) CBZ.el.keycard.classList.add("have");
     if (CBZ.setObjective) CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
   }
 
