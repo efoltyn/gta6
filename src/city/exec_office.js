@@ -1110,10 +1110,10 @@
     // THE MOVING PARTS are real meshes (the kit merges everything else):
     // the two leafs, and the call button's lamp, which the lift lights.
     const leafMat = new THREE.MeshPhongMaterial({ color: 0xcfd3d8, shininess: 70, specular: 0x6a6a6a });
-    const leafGeo = new THREE.BoxGeometry(DW / 2 - 0.004, DH, 0.03);
+    const doorLeafGeo = new THREE.BoxGeometry(DW / 2 - 0.004, DH, 0.03);
     const liftRig = { leaves: [], open: 0, target: 0, autoClose: null, autoCloseAudible: false, trav: DW / 2 - 0.03 };
     for (const e of [-1, 1]) {
-      const m = new THREE.Mesh(leafGeo, leafMat);
+      const m = new THREE.Mesh(doorLeafGeo, leafMat);
       m.position.set(core.x + e * (DW / 4 + 0.002), Y + DH / 2, fz + 0.035);
       m.castShadow = true; m.receiveShadow = true;
       m.name = "exec-lift-leaf";
