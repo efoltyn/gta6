@@ -158,7 +158,7 @@
       stock: { pos: [0.084, 0.033, -0.340], folded: true },
       charge: [0, 0.126, -0.336],
       // the Micro Uzi is shot folded, held out at the chin: a long relief
-      sight: { rear: [0, 0.142, -0.046], front: [0, 0.142, -0.404], eyeRelief: 0.30, type: "iron" },
+      sight: { rear: [0, 0.142, -0.046], front: [0, 0.142, -0.404], eyeRelief: 0.36, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

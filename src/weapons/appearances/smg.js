@@ -7,9 +7,13 @@
    handguard, the rotary drum rear sight, the one-piece polymer trigger
    group whose big guard wraps the grip, the slim 9 mm magazine that runs
    straight then curves forward, the three-lug barrel end, and the solid
-   A2 fixed stock. weapon-data gives it optic "dot", so a micro red dot
-   rides a claw mount over the receiver (named "_baseOptic" so a gunsmith
-   scope replaces it). Built on CBZ.gunKit (sidearm.js).
+   A2 fixed stock. weapon-data gives it optic "dot": an Aimpoint Micro
+   T-2 (the short turned housing with its front hood, elevation cap on top,
+   windage cap + brightness dial on the right, coated glass, the dot) on an
+   HK claw mount whose four claws hook the receiver, locking knob on the
+   left. The mount + dot are the "_baseOptic" group (a gunsmith scope hides
+   it) and stamp their own anchors. MP5A2: 680 mm at k = 1.64.
+   Built on CBZ.gunKit (sidearm.js).
 ============================================================ */
 (function () {
   "use strict";

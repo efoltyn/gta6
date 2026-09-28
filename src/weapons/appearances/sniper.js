@@ -57,7 +57,7 @@
     // it and stamps its anchors (10x, 90 mm eye relief).
     if (CBZ.createWeaponOptic) {
       g.add(CBZ.createWeaponOptic({
-        name: "_baseOptic", x: 0, y: 0.170, z: -0.140,
+        name: "_baseOptic", x: 0, y: 0.170, z: -0.170,
         length: 0.50, radius: 0.028, objectiveRadius: 0.046, ocularRadius: 0.036, mountDrop: 0.083,
         highMag: true, mag: 10, k: 1.66, tint: "#a9d8ff", materials: { dark: mat.black, steel: mat.steel || steel },
       }));
@@ -65,7 +65,7 @@
       // a page without optics.js: the same turned shell from the kit
       const sc = new THREE.Group();
       sc.name = "_baseOptic";
-      sc.position.set(0, 0.170, -0.140);
+      sc.position.set(0, 0.170, -0.170);
       g.add(sc);
       K.lathe(sc, "m24.fbScope", [[0.032, -0.250], [0.036, -0.246], [0.036, -0.165], [0.029, -0.120], [0.028, -0.115],
         [0.028, 0.080], [0.030, 0.095], [0.046, 0.180], [0.046, 0.250], [0.040, 0.250], [0.040, 0.235], [0.024, 0.150],

@@ -25,7 +25,7 @@
 
   const K_REAL = 2.25;                 // model units per real metre (the Glock's)
   const S = K_REAL / 1000;             // per millimetre
-  const F0 = 23, Y0 = 0.041;           // grip top centre at z 0, bore at y 0.041
+  const F0 = 23, Y0 = 0.03;           // grip top centre at z 0, bore at y 0.03 (TP aim-down arm clearance)
   const P = (f, y) => [(f - F0) * S, y * S + Y0];
   const PS = (a) => a.map((p) => P(p[0], p[1]));
   const Z = (f) => -(f - F0) * S;
@@ -186,7 +186,7 @@
       mag: { pos: cylC, well: well, quat: magQ },
       stock: null, bolt: null,
       charge: [0, spur[1], -spur[0]],
-      sight: { rear: rs, front: [0, fs[1], -fs[0]], eyeRelief: 0.55, type: "iron" },
+      sight: { rear: rs, front: [0, fs[1], -fs[0]], eyeRelief: 0.42, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

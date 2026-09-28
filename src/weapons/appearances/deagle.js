@@ -93,7 +93,7 @@
       stock: null,
       charge: [0, 0.050, -0.040],
       // rear notch (ears' top line) -> front post top
-      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.55, type: "iron" },
+      sight: { rear: [0, 0.119, 0.004], front: [0, 0.122, -0.570], eyeRelief: 0.42, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;

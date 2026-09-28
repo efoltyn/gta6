@@ -441,6 +441,8 @@
       A.sight = r.sight; A.lens = r.lens; A.optic = r.optic;
     }
     model.userData.anchors = A;
+    // systems/sights.js reads the scale here
+    if (model.userData.unitsPerMetre == null) model.userData.unitsPerMetre = A.k;
     return A;
   };
   /* THE SIGHT IN USE NOW, in the model's space: a visible fitted optic
@@ -652,7 +654,7 @@
       stock: null,
       charge: [0, 0.034, -0.045],
       // U-notch (ears' top line, between the ears) -> front post top
-      sight: { rear: [0, 0.083, -0.022], front: [0, 0.086, -0.384], eyeRelief: 0.55, type: "iron" },
+      sight: { rear: [0, 0.083, -0.022], front: [0, 0.086, -0.384], eyeRelief: 0.42, type: "iron" },
       optic: { type: "iron", mag: 1 },
     });
     return g;
