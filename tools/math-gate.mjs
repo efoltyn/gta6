@@ -365,8 +365,12 @@ const PASS = `(() => {
   // it so a run that instanced nobody at all cannot pass by doing no work.
   if (CBZ.pedInstanceAudit) { try { const pi = CBZ.pedInstanceAudit();
     out.pedInst = "pools=" + pi.poolsTotal + " live=" + pi.instancesLive +
-      " saved=" + pi.drawCallsSaved + " fallback=" + pi.fallbackMeshes + " black=" + pi.blackPools;
+      " saved=" + pi.drawCallsSaved + " fallback=" + pi.fallbackMeshes + " black=" + pi.blackPools +
+      " split=" + pi.splitRigs + " selfDrawn=" + pi.selfDrawnRigs;
     if (pi.blackPools > 0) out.fails.push("BLACK PED POOLS: " + pi.blackPools);
+    // a body drawn half by pools and half by its own meshes is the owner's
+    // "hands but no shirt or pants" waiting to happen (pedinstance placeRig)
+    if (pi.splitRigs > 0) out.fails.push("SPLIT PED BODIES: " + pi.splitRigs);
   } catch (e) { out.fails.push("pedInstanceAudit threw: " + (e && e.message)); } }
   // ---- weapon latency ledger (fpsmode.js): press→boom as a NUMBER. Derived
   // from tuning constants (no world state, seed-independent), so it is safe

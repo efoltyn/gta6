@@ -246,8 +246,10 @@
          person on screen can answer how heavy they are, and a page that cannot
          has nothing to ask about. */
       needs: ["look"],
-      files: ["entities/character.js", "entities/moves.js", "entities/poses.js", "systems/bodymass.js"],
-      publishes: ["makeCharacter", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
+      // fphands.js first: every body's hand IS the first-person hand (body LOD),
+      // built inside makeCharacter
+      files: ["systems/fphands.js", "entities/character.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
+      publishes: ["human", "makeCharacter", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
     },
 
     ragdoll: {
@@ -932,9 +934,6 @@
     pilot:     { pal: { legs: 0x3f4438, torso: 0x5a6046, arms: 0x5a6046, shoes: 0x241f19, cap: 0xd8dce2 }, hp: 120 },
     runner:    { pal: { legs: 0x2f3a48, torso: 0xb4643a, arms: 0xb4643a, shoes: 0x22201c }, hp: 100 },
   };
-  const SKINS = [0xc9a07a, 0x8d5a3b, 0x6b4228, 0xe0b894, 0x4a2f1e, 0xa87551];
-  const HAIRS = [0x1a1410, 0x3a2a1c, 0x6b4a2a, 0x101010, 0x8a7250, 0x2a1f18];
-
   CBZ.studio.roles = function () { return Object.keys(CASTING).slice(); };
 
   /* cast(role, opts) -> THREE.Group (the rig's group), with .userData.charRig
@@ -943,10 +942,19 @@
            { scale }   metres tall override, default the shipped 1.82 m
            { build }   "m" | "f" — entities/character.js's body profile
            { hairStyle } a key in character.js's HAIR_STYLES table
+           { heritage } an entities/heritage.js id (default: rolled)
+           { beard }   false = clean-shaven regardless of the roll
+     WHO the person is comes from entities/heritage.js — one seeded roll per
+     (role, variant), so variant 3 of "guard" is the same man on every page and
+     every boot: skin, hair colour + texture, eyes, nose, lips, facial hair.
+     (It used to be two six-entry colour tables indexed by variant — a palette,
+     not a population.) The body is built through CBZ.human, the same door
+     every other system uses.
      Returns null when the `people` pack is not loaded, so a caller can fall
      back rather than crash — the same degrade rule the rest of the file uses. */
   CBZ.studio.cast = function (role, opts) {
-    if (!CBZ.makeCharacter) return null;
+    const build = (CBZ.human && CBZ.human.build) || CBZ.makeCharacter;
+    if (!build) return null;
     opts = opts || {};
     const occ = (CBZ.cityOccupyRoles && CBZ.cityOccupyRoles[role]) || null;
     const C = CASTING[role] || CASTING[(occ && occ.archetype)] || CASTING.civilian;
@@ -956,9 +964,19 @@
       legs: pal.legs, torso: opts.color != null ? opts.color : pal.torso,
       collar: opts.color != null ? opts.color : pal.torso,
       arms: pal.arms, shoes: pal.shoes,
-      skin: SKINS[((v % SKINS.length) + SKINS.length) % SKINS.length],
-      hair: HAIRS[((v * 3 + 1) % HAIRS.length + HAIRS.length) % HAIRS.length],
     };
+    const fem = opts.build === "f";
+    const look = CBZ.heritageRoll ? CBZ.heritageRoll(opts.heritage || null, "cast|" + role + "|" + v) : null;
+    if (look) {
+      body.skin = look.skin; body.hair = look.hair;
+      if (look.eye != null) body.eye = look.eye;
+      body.nose = look.nose; body.lips = look.lips;
+      if (!fem && look.beard && opts.beard !== false) body.beard = look.beard;
+      // the roll's hair texture for men; a woman keeps the body's own default
+      if (!fem) { body.hairStyle = look.hairStyle; if (look.bald) body.bald = true; }
+    } else {
+      body.skin = 0xc9a07a; body.hair = 0x2a1f18;       // heritage.js not loaded: one plain person
+    }
     if (pal.cap != null) body.cap = opts.color != null ? opts.color : pal.cap;
     /* A UNIFORM, NOT A PAINT BUCKET. `color` repaints torso+collar+cap in one
        flat team colour, which is how NPC War's armies came out as toy soldiers.
@@ -985,9 +1003,9 @@
        style id falls through character.js's own `HAIR_STYLES[c.hairStyle]`
        guard back to the default rather than throwing. */
     if (opts.build) body.build = opts.build;
-    if (opts.hairStyle) body.hairStyle = opts.hairStyle;
+    if (opts.hairStyle) { body.hairStyle = opts.hairStyle; body.bald = false; }
     let ch = null;
-    try { ch = CBZ.makeCharacter(body); } catch (e) { return null; }
+    try { ch = build(body); } catch (e) { return null; }
     const g = (ch && ch.isObject3D) ? ch : (ch && ch.group);
     if (!g) return null;
     g.userData.charRig = ch;

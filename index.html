@@ -584,7 +584,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=sharkfix2"></script>
+  <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
+       every body's hand (character.js builds it) — so it loads before bodies -->
+  <script src="src/systems/fphands.js?v=hands2"></script>
+  <script src="src/entities/character.js?v=human1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -619,8 +622,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/weapon-data.js?v=nodash1"></script>
 <script src="src/weapons/weapon-scale.js?v=realsize1"></script>
 <script src="src/weapons/optics.js?v=optic1"></script>
-<!-- the ONE first-person hand + arm (gun kit hands, fists, car wheel, bailout) -->
-<script src="src/systems/fphands.js?v=hands1"></script>
 <script src="src/weapons/appearances/sidearm.js?v=hands1"></script>
 <script src="src/weapons/appearances/shotgun.js?v=hands1"></script>
 <script src="src/weapons/appearances/carbine.js?v=hands1"></script>
@@ -678,7 +679,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=races1"></script>
+<script src="src/entities/heritage.js?v=human1"></script>
 <script src="src/entities/npc.js?v=races1"></script>
 <script src="src/entities/ai.js?v=nodash1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
@@ -833,7 +834,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
 <script src="src/systems/reactions.js?v=prisonhit1"></script>
-<script src="src/systems/facial.js?v=glance1"></script>
+<script src="src/systems/facial.js?v=human1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
@@ -1268,8 +1269,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=moves1"></script>
-<script src="src/entities/pedinstance.js?v=pedinst1"></script>
+<script src="src/city/peds.js?v=moves2"></script>
+<script src="src/entities/pedinstance.js?v=pedinst2"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->

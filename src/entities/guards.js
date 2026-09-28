@@ -30,13 +30,16 @@
   function makeGuard(waypoints, speed, viewDist, half, opts) {
     opts = opts || {};
     const warden = opts.kind === "warden";
-    // wardens wear a darker dress uniform with a peaked cap
+    // ONE corrections uniform: these build colours are city/outfits.js's
+    // CAT.warden / CAT.corrections verbatim (that file loads later, and
+    // systems/prisonoutfits.js repaints every guard to the record within
+    // 0.3 s). They used to be a different navy, so every guard popped colour.
     const ch = makeCharacter(warden ? {
-      legs: 0x14182a, torso: 0x1a2138, collar: 0x0e1322, arms: 0x1a2138,
-      skin: 0xdcae84, cap: 0x0e1322, shoes: 0x080808, belt: 0x0a0d18, badge: true,
+      legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d,
+      skin: 0xdcae84, cap: 0x171d29, shoes: 0x090b0f, belt: 0x111419, badge: true,
     } : {
-      legs: 0x232c47, torso: 0x2b3a67, collar: 0x1d2a4d, arms: 0x2b3a67,
-      skin: 0xe7b58c, cap: 0x1d2a4d, shoes: 0x141414, belt: 0x14182a, badge: true,
+      legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
+      skin: 0xe7b58c, cap: 0x202b3b, shoes: 0x111419, belt: 0x111419, badge: true,
     });
     ch.group.userData.dynamic = true;
     (CBZ.prisonRoot || CBZ.scene).add(ch.group);

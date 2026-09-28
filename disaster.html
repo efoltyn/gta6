@@ -559,7 +559,10 @@ document.body.appendChild(b);}}catch(e){}})();
      before any entity that registers a prop type, e.g. coins.js below -->
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=sharkfix2"></script>
+  <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
+       every body's hand (character.js builds it) — so it loads before bodies -->
+  <script src="src/systems/fphands.js?v=hands2"></script>
+  <script src="src/entities/character.js?v=human1"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -586,8 +589,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<!-- the ONE first-person hand + arm (gun kit hands, fists, car wheel, bailout) -->
-<script src="src/systems/fphands.js?v=hands1"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -613,7 +614,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=races1"></script>
+<script src="src/entities/heritage.js?v=human1"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.

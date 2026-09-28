@@ -443,8 +443,12 @@
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
-      // the Secret Service wear dark suits (outfits.js's own two-piece suit)
-      if (detail.fundingSource === "treasury") dressAs(q, "suit");
+      // DRESS: the job IS the uniform. "secret service" / "hired security"
+      // cast city/outfits.js CAT.detail (black suit, white shirt, black tie,
+      // shades, earpiece) through jobFit inside cityPostNpc -> makePed, and
+      // every later re-dress re-reads the same job. The old dressAs(q, "suit")
+      // here painted CAT.suit, whose painter picks a suit style off the rig id:
+      // that was the President's detail in tan / powder-blue / white suits.
       if (CBZ.cityRelShift) CBZ.cityRelShift(q, "recruited", 0.5);   // a fresh hire starts with SOME goodwill, not none
       detail.memberPedRefs.push(q);
     }
@@ -1054,14 +1058,6 @@
     if (p.dead) return;
     removePed(p);
   }
-  function dressAs(ped, catId) {
-    if (!ped || !ped.char || !CBZ.cityOutfitCatalog || !CBZ.cityRecolorRig) return;
-    try {
-      const cat = CBZ.cityOutfitCatalog();
-      const fit = cat && cat[catId];
-      if (fit && fit.colors) CBZ.cityRecolorRig(ped.char, fit.colors, fit);
-    } catch (e) {}
-  }
   function spawnUnit(u, A) {
     if (!CBZ.cityPostNpc || !A || !A.root) return null;
     const o = { src: "protection:mansion", parent: A.root, face: u.face, controlled: true, wealth: 0.45 };
@@ -1080,8 +1076,9 @@
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }
-    if (u.role === "gate") dressAs(q, "police");
-    else if (u.role === "patrol") dressAs(q, "suit");
+    // dress comes from the job (outfits.js jobFit): gate "uniformed division
+    // officer" -> police uniform, "counter-sniper" -> all-black tactical with
+    // gloves, "secret service" (agents + patrol) -> the detail's black suit.
     if (u.role === "gate" && CBZ.cityPostStand) {
       // THE SHARED POST RECORD (garrison.js) — its stationed brain (hold the
       // slot, leash, bolt and come back) runs this officer between challenges;

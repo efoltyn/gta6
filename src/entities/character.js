@@ -8,7 +8,7 @@
       └─ body            ← hip-locked pelvis + upper body; bob / sway / lean
           ├─ pelvis, torso, collar
           ├─ la, ra      ← arm pivots at the SHOULDERS
-          │    └─ low    ← ELBOW pivot (forearm + hand cap + hand socket)
+          │    └─ low    ← ELBOW pivot (forearm + the real hand + hand socket)
           └─ neck → head ← head pivot for look / bob
 
    Joint conventions (facing +z):
@@ -19,7 +19,7 @@
    Compatibility contract kept for every other system:
      rig.parts.{ll,rl,la,ra}    = the TOP pivots (hip/shoulder), as before
      part.userData.main         = the UPPER segment mesh
-     part.userData.cap          = the hand/shoe cap mesh
+     part.userData.cap          = the hand mesh (arms: fphands body LOD) / shoe cap
      part.userData.low          = the NEW joint pivot group
      part.userData.lower        = the NEW lower segment mesh
      rig.low.{ll,rl,la,ra}      = the joint pivots (same objects as .low)
@@ -109,6 +109,135 @@
   // Whole-limb lengths preserved: arm 0.92 (+0.2 hand), leg 0.95 (+0.2 shoe).
   const ARM_UP = 0.46, ARM_LO = 0.46;
   const LEG_UP = 0.48, LEG_LO = 0.47;
+
+  /* ==== HANDS — EVERY BODY WEARS THE FIRST-PERSON HAND ====================
+     Owner: "The FP hands are really real, but on the third-person models
+     those hands are way different." Every body's hand was limb()'s skin BOX
+     cap (0.29 x 0.23 x 0.37 on an adult male — a brick that also swallowed the
+     last 0.20 of the forearm). Now it is systems/fphands.js's hand — same
+     palm, jointed fingers, opposing thumb, same pose curl — at its BODY LOD
+     (~216 tris; lod 2 ~51 tris for far crowds), one shared geometry per
+     (side, pose, lod) so pedinstance pools it, sized per body by mesh.scale.
+
+     WHERE IT HANGS. The forearm box now stops at the WRIST CREASE (handH above
+     the old wrist line — exactly where the box used to start), and the hand
+     hangs from there in the ELBOW group: fingers down (-Y), palm to the thigh,
+     thumb forward, turned a little back like a relaxed arm. Relaxed, its
+     fingertips land within a couple of centimetres of where the box's bottom
+     was, so the silhouette's arm length does not change.
+
+     SIZE. The hand is authored in metres; this rig is authored in 1/0.70
+     units (model.scale = HUMAN_SCALE), so life size is x1/0.70. It is drawn
+     x1.1 life size against the chunky voxel forearm, then by the profile:
+     handH carries a child's growth, sqrt(armW/0.30) a woman's slimmer hand.
+
+     HOLDING. rig.sockets.* never move (weapons hang off them). A HOLD pose
+     (pistol / grip / support / cupover / wheel) slides the hand down its own
+     wrist until the closed hand's grip centre sits on that side's socket —
+     the thirdPersonWeapon socket on the right, leftHand on the left — so the
+     fingers close round the thing held rather than above it. The wrist stub
+     is long enough that the slide never opens a gap at the cuff.
+
+     API: rig.setHandPose("l" | "r" | "both", pose)  pose = a fpHands.POSES name
+          rig.setHandLod(0 | 1 | 2)                  (default 1)
+     Dependency: systems/fphands.js must load before a body is BUILT (it is in
+     the studio `people` pack and ahead of this file in index/disaster.html). */
+  const HAND_LIFE = 1 / 0.70;          // rig units per metre
+  const HAND_K = 1.1;                  // drawn a touch over life size against the voxel limbs
+  const HAND_REST_YAW = 0.30;          // a hanging palm turns a little back toward the thigh
+  const HAND_HOLD = { pistol: 1, grip: 1, support: 1, cupover: 1, wheel: 1 };
+  const HAND_STUB_M = 0.06;            // how far the hand may slide down (its wrist stub reaches 0.07 m back)
+  let _handWarned = false;
+  function bodyHandFit(P) {
+    const s = HAND_LIFE * HAND_K * (P.handH / 0.20) * Math.sqrt((P.armW || 0.30) / 0.30);
+    return {
+      s,
+      wristY: P.handH - P.armLo,                         // the crease = the forearm box's bottom
+      socketY: -P.armLo - 0.01, socketZ: 0.035,          // rig.sockets.leftHand/rightHand (fixed)
+      maxDrop: HAND_STUB_M * s,
+    };
+  }
+  const _hq = new THREE.Quaternion(), _hyq = new THREE.Quaternion(), _hm4 = new THREE.Matrix4();
+  const _hY = new THREE.Vector3(0, 1, 0), _hgc = new THREE.Vector3();
+  const _hbx = new THREE.Vector3(), _hby = new THREE.Vector3(), _hbz = new THREE.Vector3();
+  function placeBodyHand(m) {
+    const side = m.userData.side, fit = m.userData.fit, pose = m.userData.handPose;
+    const hold = !!HAND_HOLD[pose];
+    // hand frame -> elbow frame: fingers (-Z_h) down, palm (-Y_h) inward,
+    // thumb forward. Right arm (semantic right, at -X): palm faces +X.
+    if (side > 0) { _hbx.set(0, 0, -1); _hby.set(-1, 0, 0); }
+    else { _hbx.set(0, 0, 1); _hby.set(1, 0, 0); }
+    _hbz.set(0, 1, 0);
+    _hm4.makeBasis(_hbx, _hby, _hbz);
+    _hq.setFromRotationMatrix(_hm4);
+    if (!hold) _hq.premultiply(_hyq.setFromAxisAngle(_hY, side > 0 ? HAND_REST_YAW : -HAND_REST_YAW));
+    m.quaternion.copy(_hq);
+    m.position.set(0, fit.wristY, 0);
+    if (hold && CBZ.fpHands && CBZ.fpHands.gripCentre) {
+      // the grip centre (hand frame, right-handed; mirrored for the left)
+      CBZ.fpHands.gripCentre(pose, _hgc);
+      if (side < 0) _hgc.x = -_hgc.x;
+      _hgc.multiplyScalar(fit.s).applyQuaternion(_hq);
+      // the target: the socket this side holds with (the weapon socket's
+      // offset on the right, the bare wrist socket on the left)
+      const tx = side > 0 ? 0.02 : 0, ty = fit.socketY + (side > 0 ? -0.03 : 0), tz = fit.socketZ + (side > 0 ? 0.06 : 0);
+      const y = Math.max(fit.wristY - fit.maxDrop, Math.min(fit.wristY, ty - _hgc.y));
+      const lim = fit.maxDrop * 0.6;
+      m.position.set(Math.max(-lim, Math.min(lim, tx - _hgc.x)), y, Math.max(-lim, Math.min(lim, tz - _hgc.z)));
+    }
+  }
+  function makeBodyHand(side, fit, color) {
+    const H = CBZ.fpHands;
+    if (!H || !H.bodyHandGeometry) {
+      if (!_handWarned && typeof console !== "undefined") console.warn("character.js: systems/fphands.js not loaded before makeCharacter — bodies have no hands");
+      _handWarned = true;
+      return null;
+    }
+    const m = new THREE.Mesh(H.bodyHandGeometry(side, "relaxed", 1), cmat(color != null ? color : 0xcf9a72));
+    m.name = side < 0 ? "hand_l" : "hand_r";
+    m.userData.side = side < 0 ? -1 : 1;
+    m.userData.fit = fit;
+    m.userData.handPose = "relaxed";
+    m.userData.handLod = 1;
+    m.scale.setScalar(fit.s);
+    m.castShadow = false;
+    m.receiveShadow = true;
+    placeBodyHand(m);
+    return m;
+  }
+  function handsOf(rig, side) {
+    const la = rig.parts && rig.parts.la, ra = rig.parts && rig.parts.ra;
+    const l = la && la.userData.cap, r = ra && ra.userData.cap;
+    if (side === "l" || side === -1) return [l];
+    if (side === "r" || side === 1) return [r];
+    return [l, r];
+  }
+  function setBodyHandPose(rig, side, pose) {
+    const H = CBZ.fpHands;
+    if (!H) return;
+    pose = pose && H.POSES[pose] ? pose : "relaxed";
+    const hs = handsOf(rig, side);
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i];
+      if (!m || !m.userData.fit || m.userData.handPose === pose) continue;
+      m.userData.handPose = pose;
+      m.geometry = H.bodyHandGeometry(m.userData.side, pose, m.userData.handLod);
+      placeBodyHand(m);
+    }
+  }
+  function setBodyHandLod(rig, lod) {
+    const H = CBZ.fpHands;
+    if (!H) return;
+    lod = Math.max(0, Math.min(2, lod | 0));
+    const hs = handsOf(rig, "both");
+    for (let i = 0; i < hs.length; i++) {
+      const m = hs[i];
+      if (!m || !m.userData.fit || m.userData.handLod === lod) continue;
+      m.userData.handLod = lod;
+      m.geometry = H.bodyHandGeometry(m.userData.side, m.userData.handPose, lod);
+    }
+  }
+  CBZ.charSetHandPose = setBodyHandPose;
 
   /* ============================================================
      BODY PROFILE — the ONE place a body's proportions live.
@@ -485,6 +614,420 @@
     return p;
   }
 
+  /* ============================================================
+     SHAPED PARTS — A PERSON, NOT A STACK OF CUBES.
+
+     The head was a 0.60 cube with four flat boxes on the front (two 0.13 x
+     0.16 black blocks for eyes, a brow bar, a mouth bar), no nose, no ears, no
+     jaw, no neck — the chin sat straight on the shoulder yoke. The feet were a
+     box cap. Hair was a stack of hard boxes around the cube. At street distance
+     that is a robot; up close it is a robot with no face.
+
+     What replaces it, and what it costs:
+       · HEAD — one SHARED geometry per (form m/f/c, nose 0-2): a rounded skull
+         with a jaw that tapers to the chin, a forehead that slopes back, the
+         skull base lifted at the back so a NECK shows under it, plus the nose,
+         both ears and the neck column merged in. All skin, so it is still ONE
+         mesh with ONE fresh material (reactions.js / gore.js / crowd.js tint
+         it). Sized per body by mesh.scale, so pedinstance pools every head of
+         a form on one geometry. Its UVs ARE the heritage.js ink atlas (front /
+         side / back columns, the neck at the bottom of the atlas) — an inked
+         head only gets a `map`, the geometry never swaps.
+       · EYES — a white (rig.face.eyeL/eyeR, still a true box, still what
+         facial.js blinks) with an iris child carrying a tiny pupil texture
+         (rig.face.irisL/irisR, what facial.js darts). Eye colour per body.
+       · BROWS — one mesh, two shaped brows (per eye, arched for f), hair-toned.
+       · MOUTH — the same animated box, in a LIP tone derived from the skin.
+       · HAIR — every piece is a ROUNDED box now (one merged shell as before),
+         with fringes, a tapered ponytail, a round bun, and three heritage
+         textures: afro, curly, locs.
+       · BEARDS — one merged mesh per style that follows the tapered jaw.
+       · SHOES — one shared unit shoe (sole, heel, a toe that drops and
+         narrows), scaled per body. Same slot, same colour, same planted sole.
+
+     Mesh count per adult body: +2 (the irises). Every new geometry is cached
+     and shared (see SHAPE); nothing is built per body.
+  ============================================================ */
+  const SHAPE = Object.create(null);
+  function shared(key, build) {
+    let g = SHAPE[key];
+    if (!g) { g = build(); g._shared = true; SHAPE[key] = g; }
+    return g;
+  }
+  // sm01 (smoothstep) is the hoisted one the swim pose uses, further down.
+  const cl01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
+  const lerpN = (a, b, t) => a + (b - a) * t;
+
+  /* rbox(w, h, d, r, n, flatBottom) — a rounded box as an indexed
+     BufferGeometry (a segmented BoxGeometry whose outer grid row is pushed out
+     onto the rounding, so every edge arc actually has vertices on it). n is a
+     segment count or [nx, ny, nz]; r is clamped per axis, so r >= half an axis
+     turns that axis elliptical (n=2 with r at the half extents is a ball).
+     Returns positions only reshaped: its normals are still the BoxGeometry's
+     per-face normals (callers read them to pick an atlas column), and
+     finishGeo() recomputes smooth ones after any further sculpting. */
+  function rbox(w, h, d, r, n, flatBottom) {
+    const ns = Array.isArray(n) ? n : [n || 4, n || 4, n || 4];
+    const g = new THREE.BoxGeometry(2, 2, 2, ns[0], ns[1], ns[2]);
+    const half = [w / 2, h / 2, d / 2];
+    const rad = [Math.min(r, half[0]), Math.min(r, half[1]), Math.min(r, half[2])];
+    const core = [half[0] - rad[0], half[1] - rad[1], half[2] - rad[2]];
+    const fi = ns.map((k) => Math.max(0, 1 - 2 * (k <= 4 ? 1 : 2) / k));
+    const pos = g.attributes.position;
+    const p = [0, 0, 0], q = [0, 0, 0];
+    for (let i = 0; i < pos.count; i++) {
+      const c = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+      for (let a = 0; a < 3; a++) {
+        const ac = Math.abs(c[a]), s = c[a] < 0 ? -1 : 1;
+        if (flatBottom && a === 1 && c[a] < 0) { p[a] = c[a] * half[a]; q[a] = p[a]; continue; }
+        const v = ac <= fi[a] ? (fi[a] > 0 ? ac / fi[a] * core[a] : 0) : core[a] + (ac - fi[a]) / (1 - fi[a]) * rad[a];
+        p[a] = s * v;
+        q[a] = Math.max(-core[a], Math.min(core[a], p[a]));
+      }
+      let e = 0;
+      for (let a = 0; a < 3; a++) if (rad[a] > 1e-9) { const t = (p[a] - q[a]) / rad[a]; e += t * t; }
+      e = Math.sqrt(e);
+      if (e > 1e-9) for (let a = 0; a < 3; a++) p[a] = q[a] + (p[a] - q[a]) / e;
+      pos.setXYZ(i, p[0], p[1], p[2]);
+    }
+    return g;
+  }
+  // per-vertex reshape: fn(v) mutates v = {x, y, z} in place
+  const _sv = { x: 0, y: 0, z: 0 };
+  function sculpt(g, fn) {
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      _sv.x = pos.getX(i); _sv.y = pos.getY(i); _sv.z = pos.getZ(i);
+      fn(_sv);
+      pos.setXYZ(i, _sv.x, _sv.y, _sv.z);
+    }
+    return g;
+  }
+  /* Smooth normals ACROSS the box's per-face vertex seams (area-weighted,
+     welded by position), leaving the seams themselves in place so the atlas
+     UVs stay per face. A plain computeVertexNormals would crease every rounded
+     edge down its middle. */
+  function finishGeo(g) {
+    const pos = g.attributes.position, idx = g.index, n = pos.count;
+    const key = new Int32Array(n), map = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = Math.round(pos.getX(i) * 2e4) + "," + Math.round(pos.getY(i) * 2e4) + "," + Math.round(pos.getZ(i) * 2e4);
+      let id = map.get(k);
+      if (id === undefined) { id = map.size; map.set(k, id); }
+      key[i] = id;
+    }
+    const acc = new Float64Array(map.size * 3);
+    const tri = idx ? idx.count : n;
+    for (let t = 0; t < tri; t += 3) {
+      const a = idx ? idx.getX(t) : t, b = idx ? idx.getX(t + 1) : t + 1, c = idx ? idx.getX(t + 2) : t + 2;
+      const ax = pos.getX(a), ay = pos.getY(a), az = pos.getZ(a);
+      const ux = pos.getX(b) - ax, uy = pos.getY(b) - ay, uz = pos.getZ(b) - az;
+      const vx = pos.getX(c) - ax, vy = pos.getY(c) - ay, vz = pos.getZ(c) - az;
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      for (const v of [a, b, c]) { const o = key[v] * 3; acc[o] += fx; acc[o + 1] += fy; acc[o + 2] += fz; }
+    }
+    const nrm = g.attributes.normal;
+    for (let i = 0; i < n; i++) {
+      const o = key[i] * 3, x = acc[o], y = acc[o + 1], z = acc[o + 2];
+      const l = Math.sqrt(x * x + y * y + z * z) || 1;
+      nrm.setXYZ(i, x / l, y / l, z / l);
+    }
+    nrm.needsUpdate = true; pos.needsUpdate = true;
+    return g;
+  }
+  function flatUV(g, u, v) {
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, u, v);
+    return g;
+  }
+  // Concatenate indexed parts (position/normal/uv) into one indexed geometry.
+  // Local, so a page without BufferGeometryUtils still gets a whole head.
+  function mergeGeos(parts) {
+    let nv = 0, ni = 0;
+    for (const p of parts) { nv += p.attributes.position.count; ni += p.index ? p.index.count : p.attributes.position.count; }
+    const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
+    const I = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+    let vo = 0, io = 0;
+    for (const p of parts) {
+      const pc = p.attributes.position.count;
+      for (let i = 0; i < pc; i++) {
+        P[(vo + i) * 3] = p.attributes.position.getX(i); P[(vo + i) * 3 + 1] = p.attributes.position.getY(i); P[(vo + i) * 3 + 2] = p.attributes.position.getZ(i);
+        N[(vo + i) * 3] = p.attributes.normal.getX(i); N[(vo + i) * 3 + 1] = p.attributes.normal.getY(i); N[(vo + i) * 3 + 2] = p.attributes.normal.getZ(i);
+        U[(vo + i) * 2] = p.attributes.uv.getX(i); U[(vo + i) * 2 + 1] = p.attributes.uv.getY(i);
+      }
+      if (p.index) for (let i = 0; i < p.index.count; i++) I[io++] = p.index.getX(i) + vo;
+      else for (let i = 0; i < pc; i++) I[io++] = i + vo;
+      vo += pc;
+      p.dispose();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    g.setIndex(new THREE.BufferAttribute(I, 1));
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    return g;
+  }
+
+  /* ---- THE HEAD ATLAS ----------------------------------------------------
+     heritage.js paints head ink into a 128x64 canvas: front [0,64), side
+     [64,96) (both sides run front -> back), back [96,128). Atlas y 0 is the
+     crown; the HEAD's surface fills y [0, headV] (chin at headV) and the NECK
+     fills [headV, 1], so throat script lands on the throat instead of across
+     the chin. Top/bottom faces, nose and ears read one plain texel. heritage.js
+     reads this record (CBZ.human.headAtlas) to place its marks. */
+  const HEAD_ATLAS = { W: 128, H: 64, front: [0, 64], side: [64, 96], back: [96, 128], headV: 0.80,
+    // face-space y (0 chin .. 0.60 crown) -> atlas y
+    faceY: function (y) { return (1 - y / 0.60) * 0.80; } };
+  const PLAIN_U = 100 / 128, PLAIN_V = 1 - 4 / 64;
+  function atlasUV(g, y0, y1) {
+    const nrm = g.attributes.normal, uv = g.attributes.uv, A = HEAD_ATLAS;
+    for (let i = 0; i < uv.count; i++) {
+      const nx = nrm.getX(i), ny = nrm.getY(i), nz = nrm.getZ(i);
+      if (Math.abs(ny) > 0.5) { uv.setXY(i, PLAIN_U, PLAIN_V); continue; }
+      const col = nz > 0.5 ? A.front : nz < -0.5 ? A.back : A.side;
+      const u = nx < -0.5 ? 1 - uv.getX(i) : uv.getX(i);
+      const ay = y0 + (1 - uv.getY(i)) * (y1 - y0);
+      uv.setXY(i, (col[0] + u * (col[1] - col[0])) / A.W, 1 - ay);
+    }
+    return g;
+  }
+
+  /* HEAD FORMS. Authored at the adult 0.60 head, centred on the skull (the
+     mesh sits at y = headSize/2 in the neck frame, as the cube did, so every
+     getWorldPosition on rig.head still lands on the skull centre).
+       jaw    chin width as a share of the skull (the taper that makes a face)
+       brow   how far the forehead slopes back above the brows
+       round  skull corner radius (children are rounder)
+       neck   neck column half-width top/bottom (women slimmer)
+       nose/ear  feature scale */
+  const HEAD_FORMS = {
+    m: { jaw: 0.60, brow: 0.026, round: 0.150, neck: [0.140, 0.158], nose: 1.00, ear: 1.00, chin: 0.012 },
+    f: { jaw: 0.52, brow: 0.014, round: 0.165, neck: [0.118, 0.132], nose: 0.84, ear: 0.90, chin: 0.004 },
+    c: { jaw: 0.72, brow: 0.004, round: 0.195, neck: [0.132, 0.142], nose: 0.70, ear: 0.95, chin: 0.000 },
+  };
+  const NOSE_W = [0.070, 0.090, 0.116];          // narrow | medium | broad bridge-to-nostril width
+  // The jaw taper, shared by the head and the beards that must hug it.
+  // u = face-space height (0 chin .. 0.60 crown), z = depth (+ is the face).
+  function jawMul(F, u, z) {
+    const front = cl01((z + 0.05) / 0.30);
+    const jw = lerpN(1 - (1 - F.jaw) * 0.55, F.jaw, front);   // the back of the jaw tapers less
+    return lerpN(jw, 1, sm01(u / 0.32));
+  }
+  function headForm(P) { return (P.child && (P.ageYears == null || P.ageYears < 12)) ? "c" : (P.fem ? "f" : "m"); }
+
+  function headGeometry(form, nose) {
+    const fk = HEAD_FORMS[form] ? form : "m";
+    const ni = Math.max(0, Math.min(2, nose | 0));
+    return shared("head|" + fk + "|" + ni, function () {
+      const F = HEAD_FORMS[fk];
+      const skull = rbox(0.60, 0.60, 0.60, F.round, [6, 6, 6]);
+      atlasUV(skull, 0, HEAD_ATLAS.headV);
+      sculpt(skull, function (v) {
+        let u = v.y + 0.30;
+        // the forehead leans back above the brow ridge
+        if (v.z > 0) v.z -= F.brow * sm01((u - 0.40) / 0.20) * cl01(v.z / 0.30);
+        // the chin juts a touch, the jaw tapers
+        if (v.z > 0.1 && u < 0.12) v.z += F.chin * (1 - u / 0.12);
+        v.x *= jawMul(F, u, v.z);
+        // the skull base lifts at the back: the neck shows under it
+        const back = cl01(-v.z / 0.30);
+        if (u < 0.24) u += 0.12 * (1 - u / 0.24) * back * back;
+        v.y = u - 0.30;
+      });
+      finishGeo(skull);
+      const parts = [skull];
+      // NOSE — a wedge: narrow bridge between the eyes, the tip and nostrils proud
+      const nw = NOSE_W[ni] * F.nose, nh = 0.165 * (fk === "c" ? 0.78 : 1), nd = 0.066 * F.nose + 0.012;
+      const nose3 = rbox(nw, nh, nd, 0.018, [2, 3, 1]);
+      sculpt(nose3, function (v) {
+        const t = cl01((v.y + nh / 2) / nh);              // 0 nostrils .. 1 bridge
+        v.x *= lerpN(1.08, 0.50, t);
+        if (v.z > 0) v.z -= 0.042 * t * F.nose;
+      });
+      nose3.translate(0, 0.215 + nh / 2 - 0.30, 0.30 + nd / 2 - 0.024);
+      flatUV(finishGeo(nose3), PLAIN_U, PLAIN_V);
+      parts.push(nose3);
+      // EARS — outer faces clear the widest side-hair panel (see hairGeometry)
+      for (const s of [-1, 1]) {
+        const ear = rbox(0.048, 0.150 * F.ear, 0.100 * F.ear, 0.022, [1, 2, 2]);
+        sculpt(ear, function (v) { v.x += s * 0.012 * cl01(-v.z / 0.05); });   // the back rim flares out
+        ear.translate(s * 0.316, 0.305 - 0.30, -0.035);
+        flatUV(finishGeo(ear), PLAIN_U, PLAIN_V);
+        parts.push(ear);
+      }
+      // NECK — chin to collar, buried in the yoke below and the skull above
+      const nr0 = F.neck[0], nr1 = F.neck[1], nH = 0.30;
+      const neck3 = rbox(nr1 * 2, nH, nr1 * 1.9, nr1 * 0.75, [2, 1, 2]);
+      atlasUV(neck3, HEAD_ATLAS.headV, 1);
+      sculpt(neck3, function (v) {
+        const k = lerpN(1, nr0 / nr1, cl01((v.y + nH / 2) / nH));
+        v.x *= k; v.z *= k;
+      });
+      neck3.translate(0, 0.01 - 0.30, -0.025);
+      finishGeo(neck3);
+      parts.push(neck3);
+      const g = mergeGeos(parts);
+      // THE SKULL'S BOX ENVELOPE, in geometry units. systems/wounds.js seats
+      // head decals on (and measures hits against) `geometry.parameters` as a
+      // box, and warlord/outfits.js falls back to parameters.width for the
+      // head size. Honest for the skull (0.60 on every axis, centred); the
+      // nose/ears/neck poke past it by design. type stays "BufferGeometry",
+      // so pedinstance's unit-box proof never mistakes it for a box.
+      g.parameters = { width: 0.60, height: 0.60, depth: 0.60 };
+      return g;
+    });
+  }
+
+  /* ---- FACE FEATURE GEOMETRY (face frame: y 0 chin .. 0.60 crown) -------- */
+  const SCLERA = 0xd8d2c4;
+  const EYE_REST = { x: 0.14, y: 0.34, z: 0.295 };   // facial.js reads rig.faceRest
+  const MOUTH_REST_Y = 0.16;
+  function browGeometry(form) {
+    const fk = form === "f" ? "f" : (form === "c" ? "c" : "m");
+    return shared("brow|" + fk, function () {
+      const parts = [];
+      const w = fk === "f" ? 0.128 : 0.146, h = fk === "f" ? 0.022 : (fk === "c" ? 0.024 : 0.034), d = 0.034;
+      const arch = fk === "f" ? 0.016 : 0.006;
+      for (const s of [-1, 1]) {
+        const b = rbox(w, h, d, h * 0.45, [4, 1, 1]);
+        sculpt(b, function (v) {
+          const t = cl01(v.x / w + 0.5), out = s > 0 ? t : 1 - t;          // 0 at the nose end
+          v.y *= lerpN(1.15, 0.65, out);                                    // thick head, thin tail
+          v.y += arch * (1 - Math.pow(2 * out - 1.1, 2)) - (fk === "m" ? 0.006 * out : 0);
+          v.z -= 0.012 * out * out;                                         // the tail wraps round the brow
+        });
+        b.translate(s * 0.145, -h / 2 - arch, 0);
+        flatUV(finishGeo(b), 0.5, 0.5);
+        parts.push(b);
+      }
+      return mergeGeos(parts);
+    });
+  }
+  // A tiny pupil texture per eye colour (degrade-safe: no canvas -> flat colour).
+  const irisMats = Object.create(null);
+  function irisMat(hex) {
+    let m = irisMats[hex];
+    if (m) return m;
+    let map = null;
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const cv = document.createElement("canvas"); cv.width = cv.height = 16;
+        const x = cv.getContext && cv.getContext("2d");
+        if (x) {
+          const css = (h) => "#" + ("00000" + (h >>> 0).toString(16)).slice(-6);
+          const dk = ((((hex >> 16) & 255) * 0.55) << 16) | ((((hex >> 8) & 255) * 0.55) << 8) | ((hex & 255) * 0.55);
+          x.fillStyle = css(dk); x.fillRect(0, 0, 16, 16);                  // limbal ring
+          x.fillStyle = css(hex); x.beginPath(); x.arc(8, 8, 6.6, 0, 6.2832); x.fill();
+          x.fillStyle = "#050505"; x.beginPath(); x.arc(8, 8.4, 3.1, 0, 6.2832); x.fill();   // pupil
+          x.fillStyle = "rgba(255,255,255,0.85)"; x.fillRect(5, 4, 2, 2);  // catch-light
+          map = new THREE.CanvasTexture(cv);
+          map.magFilter = THREE.NearestFilter;
+          map._shared = true;
+        }
+      }
+    } catch (e) { map = null; }
+    if (map) { m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: map }); m._shared = true; }
+    else m = cmat(hex);
+    irisMats[hex] = m;
+    return m;
+  }
+  /* BEARDS follow the tapered jaw: each piece is authored around the skull,
+     then squeezed by the SAME jawMul the head uses, with a ~0.02 margin, so
+     the beard hugs the chin instead of standing off it as a crate. One merged
+     mesh per (style, form). */
+  function beardGeometry(style, form) {
+    const fk = HEAD_FORMS[form] ? form : "m";
+    return shared("beard|" + style + "|" + fk, function () {
+      const F = HEAD_FORMS[fk];
+      const parts = [];
+      const hug = (g) => sculpt(g, function (v) { v.x *= jawMul(F, v.y, v.z); });
+      const put = (g, x, y, z, hugJaw) => { g.translate(x, y, z); if (hugJaw) hug(g); parts.push(flatUV(finishGeo(g), 0.5, 0.5)); };
+      const moustache = () => {
+        const m = rbox(0.25, 0.046, 0.05, 0.02, [4, 1, 1]);
+        sculpt(m, function (v) { v.y -= 0.022 * Math.pow(2 * v.x / 0.25, 2); });
+        put(m, 0, 0.203, 0.318, false);
+      };
+      if (style === "full" || style === "stubble") {
+        const thick = style === "full" ? 1 : 0.55;
+        put(rbox(0.60 + 0.04 * thick, 0.165 + 0.02 * thick, 0.44, 0.09, [4, 2, 3]), 0, 0.058 - 0.01 * thick, 0.090 + 0.012 * thick, true);
+        for (const s of [-1, 1]) put(rbox(0.030 + 0.03 * thick, 0.22, 0.20, 0.02, [1, 2, 2]), s * (0.290 + 0.012 * thick), 0.205, 0.045, true);
+        if (style === "full") moustache();
+      } else if (style === "goatee") {
+        put(rbox(0.20, 0.13, 0.07, 0.03, [2, 2, 1]), 0, 0.068, 0.284, false);
+        moustache();
+      } else if (style === "moustache") {
+        moustache();
+      }
+      if (!parts.length) moustache();
+      return mergeGeos(parts);
+    });
+  }
+  /* THE SHOE — one unit geometry (x -0.5..0.5, y 0..1, z -0.5 heel .. 0.5
+     toe), scaled per body: a full-height heel/ankle, an instep that falls to
+     a low rounded toe, a sole lip. The ankle zone is full width and full
+     height exactly where the shin box ends, so no trouser corner pokes out. */
+  function shoeGeometry() {
+    return shared("shoe", function () {
+      const shape = function (v) {
+        const t = cl01(v.z + 0.5);                                           // 0 heel .. 1 toe
+        const top = t < 0.45 ? 1 : lerpN(1, 0.40, sm01((t - 0.45) / 0.45));
+        v.y *= top;
+        v.x *= t > 0.66 ? lerpN(1, 0.70, sm01((t - 0.66) / 0.34)) : (t < 0.08 ? lerpN(0.93, 1, t / 0.08) : 1);
+        if (v.z > 0.36) v.z -= 0.12 * Math.pow(Math.min(1, Math.abs(v.x) * 2 / 0.70), 2);
+        if (v.z < -0.42) v.z += 0.04 * Math.pow(Math.min(1, Math.abs(v.x) * 2), 2);
+      };
+      const upper = rbox(1, 1, 1, 0.16, [2, 2, 4]);
+      upper.translate(0, 0.5, 0);
+      sculpt(upper, function (v) { shape(v); v.y = 0.02 + v.y * 0.98; });   // its sole face sits inside the sole's
+      const sole = rbox(1.05, 0.13, 1.04, 0.05, [2, 1, 4]);
+      sole.translate(0, 0.065, 0.004);
+      sculpt(sole, function (v) { const y = v.y; shape(v); v.y = y; });
+      return mergeGeos([flatUV(finishGeo(upper), 0.5, 0.5), flatUV(finishGeo(sole), 0.5, 0.5)]);
+    });
+  }
+  // The shoe on a leg: the slot contract (leg.userData.cap, skinSlots.shoes)
+  // is unchanged — only the shape is.
+  function addShoe(leg, P, color) {
+    const lw = P.legW * 0.9, lowerH = P.legLo;
+    const W = lw * 1.06, H = P.shoeH + 0.03, D = lw * 1.62;
+    const shoe = new THREE.Mesh(shoeGeometry(), cmat(color));
+    shoe.scale.set(W, H, D);
+    shoe.position.set(0, -lowerH - 0.03, -lw / 2 - 0.035 + D / 2);   // the sole plane never moved
+    shoe.castShadow = true;
+    shoe.name = "shoe";
+    leg.userData.low.add(shoe);
+    leg.userData.cap = shoe;
+    return shoe;
+  }
+
+  /* ---- DEFAULT FEATURES (pure functions of the colours asked for) ---------
+     No RNG lives in this file (see hairStyleFor), so a body built without
+     heritage.js's look still gets believable features DETERMINISTICALLY from
+     the skin + hair it was given: darker skin -> brown eyes, fairer skin ->
+     a spread of hazel/blue/green/grey. */
+  const EYE_COLOURS = { brown: 0x4a2c18, dark: 0x2a1a10, hazel: 0x6b5028, green: 0x4d6a3a, blue: 0x4a6f9a, grey: 0x6f7c86, amber: 0x7a5220 };
+  function hashN(a, b) { let h = (Math.imul((a | 0) ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul((b | 0) + 0x632be5ab, 0xc2b2ae35)) >>> 0; h ^= h >>> 15; return h >>> 0; }
+  function lumOf(hex) { return (0.299 * ((hex >> 16) & 255) + 0.587 * ((hex >> 8) & 255) + 0.114 * (hex & 255)) / 255; }
+  function mixHex(a, b, t) {
+    const ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
+    return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
+  }
+  function defaultEye(skin, hair) {
+    const L = lumOf(skin), h = hashN(skin, hair) % 100;
+    if (L < 0.55) return h < 80 ? EYE_COLOURS.dark : EYE_COLOURS.brown;
+    if (L < 0.70) return h < 70 ? EYE_COLOURS.brown : (h < 88 ? EYE_COLOURS.hazel : EYE_COLOURS.amber);
+    return h < 38 ? EYE_COLOURS.brown : h < 56 ? EYE_COLOURS.hazel : h < 80 ? EYE_COLOURS.blue : h < 91 ? EYE_COLOURS.green : EYE_COLOURS.grey;
+  }
+  function defaultNose(skin, hair) { return hashN(hair, skin) % 3 === 0 ? 0 : (lumOf(skin) < 0.45 ? 2 : 1); }
+  // lips: the skin pulled toward a blood-red and down a touch; quantised so a
+  // city of skins lands on a handful of cached materials
+  function lipTone(skin) {
+    const t = mixHex(skin, 0x8a3438, 0.34), q = (c) => Math.min(255, Math.round(c * 0.78 / 8) * 8);
+    return (q(t >> 16 & 255) << 16) | (q(t >> 8 & 255) << 8) | q(t & 255);
+  }
+  function browTone(hair) { return lumOf(hair) > 0.35 ? mixHex(hair, 0x2a1f16, 0.35) : mixHex(hair, 0x0a0806, 0.25); }
+
   /* ---- HAIR SHELL -------------------------------------------------------
      OWNER BUG: "the back-of-head hair reads as two separate blocks."
      It did, and no amount of tucking two boxes together fixes it, because
@@ -494,154 +1037,136 @@
      pack) models hair as ONE continuous shell spanning crown -> nape ->
      tail, never a skull cap plus a floating tail.
 
-     So hair is now literally one mesh: the boxes are merged into a single
-     cached BufferGeometry per (style, head size). Draw calls go DOWN — a
-     long-haired woman was 2 meshes and is now 1 — and the seam cannot
-     exist because there is no seam.
+     So hair is literally one mesh: the pieces are merged into a single
+     cached BufferGeometry per (style, head size). The pieces are ROUNDED
+     boxes now (rbox) — a hard-edged crown on a rounded skull is a helmet —
+     and the crown shares the skull's corner radius with a clear margin on
+     every side, so it contains the head it sits on by construction.
 
      The nape/lower-back-of-skull volume is the highest-leverage female cue
      at gameplay distance: it reads from front, side AND behind, unlike a
      fringe or hairline which only reads face-on. That is why every style
-     below is defined by how far its mass hangs BELOW the crown line. */
+     below is defined by how far its mass hangs BELOW the crown line.
+     fringe: 1 full bangs, 2 a side-swept fringe. afro/curls/locs: the
+     textured styles heritage.js rolls. */
   const HAIR_STYLES = {
-    buzz:  { crownH: 0.13, backH: 0.24, sideW: 0.05, sideH: 0.18, tail: 0, bun: 0 },
-    short: { crownH: 0.21, backH: 0.34, sideW: 0.09, sideH: 0.25, tail: 0, bun: 0 },
-    crop:  { crownH: 0.24, backH: 0.30, sideW: 0.08, sideH: 0.21, tail: 0, bun: 0 },
-    bob:   { crownH: 0.22, backH: 0.60, sideW: 0.11, sideH: 0.54, tail: 0, bun: 0 },
-    long:  { crownH: 0.22, backH: 0.98, sideW: 0.115, sideH: 0.66, tail: 0, bun: 0 },
-    pony:  { crownH: 0.21, backH: 0.34, sideW: 0.085, sideH: 0.26, tail: 0.62, bun: 0 },
-    bun:   { crownH: 0.21, backH: 0.30, sideW: 0.085, sideH: 0.24, tail: 0, bun: 1 },
-    pigtail: { crownH: 0.21, backH: 0.36, sideW: 0.13, sideH: 0.46, tail: 0, bun: 0 },
+    buzz:  { crownH: 0.13, backH: 0.24, sideW: 0.05, sideH: 0.18 },
+    short: { crownH: 0.21, backH: 0.34, sideW: 0.09, sideH: 0.25 },
+    crop:  { crownH: 0.24, backH: 0.30, sideW: 0.08, sideH: 0.21 },
+    bob:   { crownH: 0.22, backH: 0.60, sideW: 0.11, sideH: 0.54, fringe: 1 },
+    long:  { crownH: 0.22, backH: 0.98, sideW: 0.115, sideH: 0.66, fringe: 2 },
+    pony:  { crownH: 0.21, backH: 0.34, sideW: 0.085, sideH: 0.26, tail: 0.62 },
+    bun:   { crownH: 0.21, backH: 0.30, sideW: 0.085, sideH: 0.24, bun: 1 },
+    pigtail: { crownH: 0.21, backH: 0.36, sideW: 0.13, sideH: 0.46, fringe: 1 },
+    afro:  { crownH: 0.22, backH: 0.30, sideW: 0.09, sideH: 0.24, afro: 1 },
+    curly: { crownH: 0.22, backH: 0.34, sideW: 0.09, sideH: 0.25, curls: 1 },
+    locs:  { crownH: 0.22, backH: 0.40, sideW: 0.09, sideH: 0.30, locs: 1 },
   };
-  const hairGeoCache = Object.create(null);
 
   /* TEMPLE TAPER (owner: "everyone has too much hair on left and right side of
-     their head"). MEASURED CAUSE, not a guess: the side pieces were authored as
-     OUTBOARD SLABS rather than as a layer lying on the skull. Their inner face
-     sat at S/2 - 0.02k — i.e. ON the skull surface — so the whole declared
-     `sideW` hung OUTSIDE the head. On the adult male (S=0.60, k=1, HUMAN_SCALE
-     0.70) that put the hair 0.070 rig units proud of the skull per side for
-     `short` and 0.095 for `long` — 4.9 cm and 6.7 cm of REAL hair standing off
-     each ear — while the crown directly above it was only (S+0.04)/2, i.e.
-     0.020 proud (1.4 cm). The silhouette therefore flared to 3.5-5.5x the
-     crown's thickness at exactly ear height, which is the "too much hair on the
-     sides" read. Two lesser faults compounded it: the slab was a CONSTANT-width
-     box from temple to jaw (no taper in toward the ears) and its front face
-     reached z=+0.18, only 0.12 behind the face plane, so it covered the temples
-     instead of sitting above and behind them.
-
-     The fix keeps every style's identity (crown / back / occipital / tail / bun
-     are untouched, so the table above still drives the read) and changes only
-     how the SIDE is built:
-       1. it is a skull-hugging layer — inner face BURIED at S/2 - 0.062k, so no
-          skin gap can open at any angle, outer face only `sideT` proud;
-       2. `sideT` is capped into the same family as the crown: buzz 0.017k,
-          short 0.031k, bob 0.035k, long 0.036k, pigtail 0.038k (1.2 - 2.7 cm
-          real) instead of a flat 0.05-0.13k;
-       3. the outboard offset TAPERS to 0.58 at the panel's bottom, so the hair
-          narrows in toward the ear instead of running straight down;
-       4. the panel is pulled BACK (depth 0.72 -> 0.64 of hd, centre -0.05 ->
-          -0.085k) so the hairline starts behind the temple.
-     Head+hair width falls 10.6% (short) / 15% (long) / 17% (pigtail).
-     CHAR_HAIR_TEMPLE=false restores the old slabs byte-for-byte. */
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.CHAR_HAIR_TEMPLE == null) CBZ.CONFIG.CHAR_HAIR_TEMPLE = true;
-  function templeTaper() { return CBZ.CONFIG.CHAR_HAIR_TEMPLE !== false; }
-
+     their head"). MEASURED CAUSE: the side pieces were authored as OUTBOARD
+     SLABS whose whole declared `sideW` hung outside the skull — 4.9 cm (short)
+     to 6.7 cm (long) of real hair standing off each ear while the crown was
+     1.4 cm proud. So the side is a skull-hugging layer: inner face BURIED at
+     S/2 - 0.062k, outer face only `sideT` proud (same family as the crown),
+     tapering to 0.58 toward the ear, pulled back behind the temple. */
   function hairGeometry(styleId, S) {
     const st = HAIR_STYLES[styleId] || HAIR_STYLES.short;
-    const taper = templeTaper();
-    const key = styleId + "|" + S.toFixed(3) + (taper ? "|t" : "");
-    const hit = hairGeoCache[key];
-    if (hit) return hit;
-    const k = S / 0.60;                       // every offset scales with the head
-    const hw = S + 0.04, hd = S + 0.04;
-    const crownH = st.crownH * k, backH = st.backH * k, sideH = st.sideH * k;
-    const sideW = st.sideW * k;
-    const crownTop = S + 0.06 * k;            // sits proud of the skull crown
-    const crownBot = crownTop - crownH;
-    const shellTop = crownBot + 0.07 * k;     // everything else tucks UP into the crown
-    const parts = [];
-    const put = (w, h, d, x, y, z) => {
-      const g = new THREE.BoxGeometry(w, h, d);
-      g.translate(x, y, z);
-      parts.push(g);
-    };
-    /* One side panel, sculpted (r128: write geometry.attributes.position, then
-       computeVertexNormals — there is no .vertices[] on a BufferGeometry).
-       `sign` is +1 starboard / -1 port. The box spans from a face BURIED inside
-       the skull out to `outer`, and every vertex's OUTBOARD component is scaled
-       by a factor that falls with height — that is the taper toward the ear.
-       The outboard direction is measured WITH the sign rather than building one
-       panel and mirroring it: a negative scale would reverse the triangle
-       winding and render the port side inside-out under FrontSide culling. */
-    const sidePanel = (sign, inner, outer, yTop, yBot, zc, dz, botMul) => {
-      const w = outer - inner, h = yTop - yBot;
-      const g = new THREE.BoxGeometry(w, h, dz, 1, 3, 1);
-      const pos = g.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        const t = (pos.getY(i) + h / 2) / h;               // 0 at the bottom, 1 at the top
-        const f = botMul + (1 - botMul) * t;
-        const out = sign > 0 ? pos.getX(i) + w / 2 : w / 2 - pos.getX(i);
-        pos.setX(i, sign > 0 ? out * f - w / 2 : w / 2 - out * f);
+    const key = "hair|" + (HAIR_STYLES[styleId] ? styleId : "short") + "|" + S.toFixed(3);
+    return shared(key, function () {
+      const k = S / 0.60;                       // every offset scales with the head
+      const hw = S + 0.04, hd = S + 0.04;
+      const crownH = st.crownH * k, backH = st.backH * k, sideH = st.sideH * k;
+      const crownTop = S + 0.06 * k;            // sits proud of the skull crown
+      const crownBot = crownTop - crownH;
+      const shellTop = crownBot + 0.07 * k;     // everything else tucks UP into the crown
+      const parts = [];
+      const put = (g, x, y, z, flat) => {
+        g.translate(x, y, z);
+        if (flat) g.computeVertexNormals(); else finishGeo(g);     // a slab keeps its hard faces
+        parts.push(flatUV(g, 0.5, 0.5));
+      };
+      /* One side panel, sculpted. `sign` is +1 starboard / -1 port. The box
+         spans from a face BURIED inside the skull out to `outer`, and every
+         vertex's OUTBOARD component is scaled by a factor that falls with
+         height — the taper toward the ear. Measured WITH the sign rather than
+         mirrored: a negative scale would flip the winding inside-out. */
+      const sidePanel = (sign, inner, outer, yTop, yBot, zc, dz, botMul) => {
+        const w = outer - inner, h = yTop - yBot;
+        const g = new THREE.BoxGeometry(w, h, dz, 1, 3, 1);
+        sculpt(g, function (v) {
+          const t = (v.y + h / 2) / h, f = botMul + (1 - botMul) * t;
+          const out = sign > 0 ? v.x + w / 2 : w / 2 - v.x;
+          v.x = sign > 0 ? out * f - w / 2 : w / 2 - out * f;
+        });
+        put(g, sign * (inner + w / 2), (yTop + yBot) / 2, zc, true);
+      };
+      const skullR = 0.15 * k;
+      if (st.afro) {
+        // one round mass over the crown, set back so the forehead and hairline read
+        put(rbox(0.82 * k, 0.54 * k, 0.76 * k, 0.25 * k, [4, 4, 4]), 0, 0.56 * k, -0.10 * k);
+      } else {
+        // crown: pulled back off the brow so a hairline reads, top edges rounded
+        put(rbox(hw, crownH, hd * 0.92, skullR, [4, 2, 4], true), 0, (crownTop + crownBot) / 2, -0.03 * k);
+        // OCCIPITAL WEDGE — extra mass over the occipital bone breaks the
+        // perfectly round rear silhouette that reads as a helmet
+        put(rbox(hw * 0.80, crownH * 0.85, 0.11 * k, 0.045 * k, [3, 2, 2]), 0, crownBot + 0.01 * k, -(S / 2 + 0.085 * k));
       }
-      pos.needsUpdate = true;
-      g.computeVertexNormals();
-      g.translate(sign * (inner + w / 2), (yTop + yBot) / 2, zc);
-      parts.push(g);
-    };
-    // crown: pulled back off the brow so a hairline reads instead of a helmet
-    put(hw, crownH, hd * 0.92, 0, (crownTop + crownBot) / 2, -0.03 * k);
-    // back of the skull down to the nape (and past it, for long styles)
-    put(hw * 0.97, backH, 0.17 * k, 0, shellTop - backH / 2, -(S / 2 + 0.025 * k));
-    // OCCIPITAL WEDGE. A shell that wraps the skull as a smooth even layer is
-    // exactly what reads as a HELMET — the tell is the perfectly round rear
-    // silhouette. Real hair carries extra mass over the occipital bone, so one
-    // short proud block at the back-upper skull breaks that circle. It is the
-    // cheapest single fix for helmet-head and it costs nothing (same merge).
-    // Offset so its rear face stands a clear ~0.03 PROUD of the back panel: a
-    // 5mm bulge is invisible at 30m and close enough to shimmer against the
-    // panel's parallel face, while its front stays buried inside the panel so
-    // no seam can open between them.
-    put(hw * 0.80, crownH * 0.85, 0.11 * k, 0, crownBot + 0.01 * k, -(S / 2 + 0.085 * k));
-    // sides: temple -> ear -> jaw. THIS is what closes the old skin gap — and
-    // it closes it from INSIDE the skull now, not by hanging a slab off it.
-    if (taper) {
-      // proud of the skull: same family as the crown's 0.020k, ordered by style
+      // back of the skull down to the nape (and past it, for long styles),
+      // narrowing and thinning to the tips when it is long
+      const back = rbox(hw * 0.97, backH, 0.17 * k, 0.06 * k, [3, backH > 0.5 * k ? 4 : 2, 2]);
+      if (backH > 0.5 * k) sculpt(back, function (v) { const t = cl01((backH / 2 - v.y) / backH); v.x *= 1 - 0.20 * sm01(t); v.z *= 1 - 0.30 * sm01(t); });
+      put(back, 0, shellTop - backH / 2, -(S / 2 + 0.025 * k));
+      // sides: temple -> ear -> jaw, closed from INSIDE the skull
       const sideT = Math.min(st.sideW * 0.34, 0.020 + st.sideW * 0.14) * k;
-      const inner = S / 2 - 0.062 * k;        // buried well inside — no skin can show through
-      const outer = S / 2 + sideT;
-      for (const sgn of [-1, 1]) {
-        sidePanel(sgn, inner, outer, shellTop, shellTop - sideH, -0.085 * k, hd * 0.64, 0.58);
+      for (const sgn of [-1, 1]) sidePanel(sgn, S / 2 - 0.062 * k, S / 2 + sideT, shellTop, shellTop - sideH, -0.085 * k, hd * 0.64, 0.58);
+      if (st.fringe === 1) {
+        // bangs across the brow, a hair side-swept
+        const f = rbox(0.56 * k, 0.10 * k, 0.05 * k, 0.025 * k, [3, 2, 1]);
+        f.rotateZ(0.06);
+        put(f, -0.015 * k, 0.515 * k, 0.297 * k);
+      } else if (st.fringe === 2) {
+        // a long side-swept fringe falling off the parting
+        const f = rbox(0.34 * k, 0.10 * k, 0.05 * k, 0.025 * k, [3, 2, 1]);
+        f.rotateZ(-0.22);
+        put(f, 0.10 * k, 0.53 * k, 0.29 * k);
       }
-    } else {
-      const sx = S / 2 + sideW / 2 - 0.02 * k;
-      put(sideW, sideH, hd * 0.72, -sx, shellTop - sideH / 2, -0.05 * k);
-      put(sideW, sideH, hd * 0.72, sx, shellTop - sideH / 2, -0.05 * k);
-    }
-    if (st.tail) {
-      const tH = st.tail * k;
-      put(0.17 * k, tH, 0.17 * k, 0, shellTop - 0.05 * k - tH / 2, -(S / 2 + 0.15 * k));
-    }
-    if (st.bun) put(0.26 * k, 0.24 * k, 0.26 * k, 0, crownTop - 0.02 * k, -(S / 2 + 0.02 * k));
-    if (styleId === "pigtail") {
-      // Pigtails legitimately stand off the head — that is what a pigtail IS —
-      // but they were compounding a slab that was already too wide. Pulled in
-      // with the sides so the pair reads as bunched hair, not as ear muffs.
-      const tH = 0.34 * k, pw = taper ? 0.115 : 0.14, px = taper ? 0.052 : 0.08;
-      put(pw * k, tH, pw * k, -(S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
-      put(pw * k, tH, pw * k, (S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
-    }
-    let geo;
-    const U = THREE.BufferGeometryUtils;
-    if (U && U.mergeBufferGeometries && parts.length > 1) {
-      geo = U.mergeBufferGeometries(parts, false);
-      for (let i = 0; i < parts.length; i++) parts[i].dispose();
-    }
-    if (!geo) geo = parts[0];                 // degrade-safe: no merge util -> the crown alone
-    geo._shared = true;
-    hairGeoCache[key] = geo;
-    return geo;
+      if (st.tail) {
+        const tH = st.tail * k;
+        const t = rbox(0.16 * k, tH, 0.15 * k, 0.07 * k, [2, 3, 2]);
+        sculpt(t, function (v) { const u = cl01((tH / 2 - v.y) / tH); v.x *= 1 - 0.45 * u; v.z *= 1 - 0.45 * u; });
+        t.rotateX(0.18);
+        put(t, 0, shellTop - 0.05 * k - tH / 2, -(S / 2 + 0.15 * k));
+      }
+      if (st.bun) put(rbox(0.26 * k, 0.22 * k, 0.26 * k, 0.12 * k, [2, 2, 2]), 0, crownTop - 0.02 * k, -(S / 2 + 0.02 * k));
+      if (st.curls) {
+        // a crown of tight curls: the silhouette goes lumpy, which is the read
+        const C = [[-0.20, 0.64, 0.10], [0, 0.67, 0.12], [0.20, 0.64, 0.10], [-0.24, 0.63, -0.12], [0.24, 0.63, -0.12],
+          [0, 0.68, -0.08], [-0.13, 0.60, -0.28], [0.13, 0.60, -0.28], [-0.12, 0.57, 0.22], [0.12, 0.57, 0.22]];
+        for (const c of C) put(rbox(0.15 * k, 0.13 * k, 0.15 * k, 0.07 * k, [2, 2, 2]), c[0] * k, c[1] * k, c[2] * k);
+      }
+      if (st.locs) {
+        // locs hang round the back and sides, never across the face
+        for (let i = 0; i < 10; i++) {
+          const a = -1.75 + i * (3.5 / 9);                       // radians round from the back
+          const L = (0.58 - 0.12 * Math.abs(a)) * k;
+          const g = rbox(0.06 * k, L, 0.06 * k, 0.03 * k, [1, 2, 1]);
+          g.rotateZ(-Math.sin(a) * 0.10); g.rotateX(Math.cos(a) * 0.10);
+          put(g, Math.sin(a) * 0.32 * k, shellTop - L / 2 + 0.02 * k, -Math.cos(a) * 0.32 * k - 0.03 * k);
+        }
+      }
+      if (styleId === "pigtail") {
+        // pigtails stand off the head — that is what a pigtail IS — pulled in
+        // with the sides so the pair reads as bunched hair, not ear muffs
+        const tH = 0.34 * k, pw = 0.115, px = 0.052;
+        for (const s of [-1, 1]) {
+          const g = rbox(pw * k, tH, pw * k, 0.05 * k, [2, 3, 2]);
+          sculpt(g, function (v) { const u = cl01((tH / 2 - v.y) / tH); v.x *= 1 - 0.35 * u; v.z *= 1 - 0.35 * u; });
+          put(g, s * (S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
+        }
+      }
+      return mergeGeos(parts);
+    });
   }
 
   /* Pick a style. NO RNG LIVES HERE — this file has no seeded stream in scope
@@ -650,16 +1175,14 @@
      stays the caller's (peds.js rolls it seeded) and this is a pure function of
      what the caller asked for plus the body it is building.
 
-     `c.hairStyle` is the new explicit control. `c.longHair` is the LEGACY
-     boolean and still works untouched, which is why every existing call site
-     (player.js, peds.js, entities/crowd.js) keeps behaving without an edit. */
+     `c.hairStyle` is the explicit control. `c.longHair` is the LEGACY boolean
+     and still works untouched (player.js, peds.js, entities/crowd.js). */
   function hairStyleFor(c, P) {
     if (c.hairStyle && HAIR_STYLES[c.hairStyle]) return c.hairStyle;
     if (c.bald) return "buzz";
     if (P.band === "baby") return "buzz";                  // wispy, barely there
     // Before puberty a boy and a girl share one body — the read comes from hair
-    // and dress, exactly as it does in life. So childhood is where hair carries
-    // the MOST signal, not the least.
+    // and dress, exactly as it does in life.
     if (P.child) return P.fem ? (c.longHair ? "pigtail" : "bob") : "crop";
     if (P.fem) return c.longHair ? "long" : "bob";
     return "short";
@@ -757,8 +1280,11 @@
     const hipY = P.legUp + P.legLo;
     // c.shins: a different colour below the knee (bare legs under shorts or a
     // swimsuit). Absent = the whole leg is c.legs, exactly as before.
-    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH, c.shins);
-    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH, c.shins);
+    // The shoe is built here, not by limb(): a shaped shared shoe (see
+    // SHAPED PARTS), same slot (leg.userData.cap), same planted sole.
+    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, null, P.shoeH, c.shins);
+    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, null, P.shoeH, c.shins);
+    if (c.shoes != null) { addShoe(ll, P, c.shoes); addShoe(rl, P, c.shoes); }
     ll.position.set(-P.hipX, hipY, 0); rl.position.set(P.hipX, hipY, 0);
     // STEP WIDTH, from frame zero. animChar damps this channel toward the same
     // value every frame, but a rig that never animates (the charpanel portrait,
@@ -865,8 +1391,12 @@
 
     // short-sleeve opt-in: the forearm reads as bare skin (peds.js tees).
     const shoulderY = neckY - 0.04;
-    const la = limb(P.armW, P.armUp, P.armLo, P.armW, c.arms, c.skin, P.handH, c.shortSleeve ? c.skin : null);
-    const ra = limb(P.armW, P.armUp, P.armLo, P.armW, c.arms, c.skin, P.handH, c.shortSleeve ? c.skin : null);
+    // The forearm box stops at the WRIST CREASE (handH above the old wrist
+    // line, exactly where the box hand used to start), and the real hand
+    // hangs from there — see the HANDS block (bodyHandFit / makeBodyHand).
+    const foreH = P.armLo - P.handH;
+    const la = limb(P.armW, P.armUp, foreH, P.armW, c.arms, null, 0, c.shortSleeve ? c.skin : null);
+    const ra = limb(P.armW, P.armUp, foreH, P.armW, c.arms, null, 0, c.shortSleeve ? c.skin : null);
     // The chase camera sees the old +X "right" socket on the player's visible
     // left flank. Mirror the arm roots so the semantic right hand — and every
     // weapon attached to it — is actually on the player's right in third person.
@@ -884,6 +1414,12 @@
     thirdPersonWeapon.position.set(0.02, -0.03, 0.06);
     thirdPersonWeapon.userData.isSocket = true;
     rightHand.add(thirdPersonWeapon);
+    // HANDS: the first-person hand, hung at the wrist crease (HANDS block).
+    const handFit = bodyHandFit(P);
+    const handL = makeBodyHand(-1, handFit, c.skin);
+    const handR = makeBodyHand(1, handFit, c.skin);
+    if (handL) { la.userData.low.add(handL); la.userData.cap = handL; }
+    if (handR) { ra.userData.low.add(handR); ra.userData.cap = handR; }
 
     // neck pivot so the head can turn/tilt independently. neckDrop sinks the
     // head toward the shoulders for the young: a toddler has no visible neck at
@@ -891,62 +1427,70 @@
     // what makes a small body look like a CHILD instead of a distant adult.
     const neck = new THREE.Group();
     neck.position.y = neckY - P.neckDrop;
-    // head keeps a FRESH (unshared) material — systems/reactions.js flashes
-    // its emissive per-actor on hits, so it must not be a shared cache entry.
+    // head keeps a FRESH (unshared) material — reactions.js / gore.js /
+    // crowd.js tint it per actor, so it must not be a shared cache entry. Its
+    // GEOMETRY is shared (see SHAPED PARTS): one per form + nose, sized by
+    // scale, and it carries the neck, nose and ears in the same skin.
     const headSize = P.headSize;
-    const head = new THREE.Mesh(boxGeom(headSize, headSize, headSize), mat(c.skin));
-    head.position.y = headSize / 2; head.castShadow = true;
+    const hk = headSize / 0.60;
+    const form = headForm(P);
+    const skinHex = c.skin != null ? c.skin : 0xcf9a72;
+    const hairHex = c.hair != null ? c.hair : 0x4a3526;
+    const noseV = c.nose != null ? c.nose : defaultNose(skinHex, hairHex);
+    const head = new THREE.Mesh(headGeometry(form, noseV), mat(skinHex));
+    head.position.y = headSize / 2; head.scale.setScalar(hk); head.castShadow = true;
+    head.name = "head";
     neck.add(head);
-    // FACE READS AT RANGE: slightly bigger, darker, prouder features so a face
-    // is legible at 20-40u (street distance), not just in a close-up. Deeper
-    // boxes wrap back into the head so the features hold up at oblique angles
-    // instead of vanishing edge-on.
-    //
-    // FACE SCALE NODE: systems/facial.js owns eye x/y and mouth y at runtime and
-    // writes them as ABSOLUTE numbers tuned for the 0.60 adult head — it would
-    // stamp adult-spaced eyes onto a toddler's small skull every frame. Parenting
-    // the features to a group scaled by headSize/0.60 means those writes land in
-    // a frame that shrinks WITH the head, so every face is correct and facial.js
-    // never has to learn that children exist. At adult size the factor is 1 and
-    // every literal below is the one that was here before.
+    // FACE SCALE NODE: systems/facial.js owns eye/iris/mouth positions at
+    // runtime as ABSOLUTE numbers for the 0.60 adult head (it reads them from
+    // rig.faceRest). Parenting the features to a group scaled by headSize/0.60
+    // means those writes land in a frame that shrinks WITH the head, so a
+    // toddler's face is a toddler's face without facial.js knowing children
+    // exist.
     const face = new THREE.Group();
-    face.scale.setScalar(headSize / 0.60);
+    face.scale.setScalar(hk);
     neck.add(face);
-    const faceZ = 0.315;                       // 0.60/2 + the 0.015 protrusion
-    const eyeMat = cmat(0x101010);
-    const le = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
-    const re = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
-    le.position.set(-0.14, 0.34, faceZ); re.position.set(0.14, 0.34, faceZ);
-    // a brow line + a small mouth for expression (animated by systems/facial.js)
-    const brow = new THREE.Mesh(boxGeom(0.46, 0.06, 0.06), cmat(0x1c150e));
-    brow.position.set(0, 0.46, faceZ);
-    const mouth = new THREE.Mesh(boxGeom(0.22, 0.06, 0.06), cmat(0x4a2528));
-    mouth.position.set(0, 0.16, faceZ);
+    // EYES: a white you can see at street distance (the silhouette of a face
+    // is its eye line), an iris with a pupil and a catch-light up close. The
+    // white stays a true box — it is what facial.js blinks and what
+    // warlord/outfits.js measures the brow line off.
+    const kid = form === "c";
+    const scl = cmat(c.sclera != null ? c.sclera : SCLERA);
+    const eyeW = kid ? 0.135 : 0.13, eyeH = kid ? 0.095 : (form === "f" ? 0.088 : 0.082);
+    // 0.05 deep: the back face stays buried where the skull rounds away at
+    // the outer corner, the front stands 0.02 proud of the face plane
+    const le = new THREE.Mesh(boxGeom(eyeW, eyeH, 0.05), scl);
+    const re = new THREE.Mesh(boxGeom(eyeW, eyeH, 0.05), scl);
+    le.position.set(-EYE_REST.x, EYE_REST.y, EYE_REST.z); re.position.set(EYE_REST.x, EYE_REST.y, EYE_REST.z);
+    const im = irisMat(c.eye != null ? c.eye : defaultEye(skinHex, hairHex));
+    const irisW = kid ? 0.068 : 0.062;
+    const li = new THREE.Mesh(boxGeom(irisW, eyeH - 0.004, 0.02), im);
+    const ri = new THREE.Mesh(boxGeom(irisW, eyeH - 0.004, 0.02), im);
+    li.position.set(0, 0, 0.022); ri.position.set(0, 0, 0.022);   // front 0.007 proud of the white
+    li.name = ri.name = "iris";
+    le.add(li); re.add(ri);
+    // BROWS: one mesh, a shaped brow over each eye, in the hair's own tone.
+    // Its geometry hangs BELOW its origin, so position.y is the brow's top.
+    const brow = new THREE.Mesh(browGeometry(form), cmat(c.brow != null ? c.brow : browTone(hairHex)));
+    brow.position.set(0, 0.448, 0.303);
+    // MOUTH: the animated box, in a lip tone off the skin (fuller for f, and
+    // for c.lips — heritage.js rolls it).
+    const mouth = new THREE.Mesh(boxGeom(0.17, (form === "f" ? 0.05 : 0.044) + (c.lips ? 0.008 : 0), 0.04), cmat(c.lip != null ? c.lip : lipTone(skinHex)));
+    mouth.position.set(0, MOUTH_REST_Y, 0.305);
+    le.castShadow = re.castShadow = brow.castShadow = mouth.castShadow = false;
     face.add(le, re, brow, mouth);
     /* ---- FACIAL HAIR (entities/heritage.js) --------------------------------
-       c.beard: "full" | "goatee" | "moustache" | "stubble". Boxes in the face
-       frame (head spans y 0..0.60, z ±0.30, the face plane at 0.315), every
-       face at least 0.01 clear of the skull's (the z-fight law above). A full
-       beard wraps the jaw and hangs 0.03 below the chin; its top stops UNDER
-       the mouth so the lips still read; the moustache sits over them. Stubble
-       is the same jaw box in a tone halfway between hair and skin — a
-       five-o'clock shadow, not a beard. */
+       c.beard: "full" | "goatee" | "moustache" | "stubble". ONE merged mesh
+       per (style, form), squeezed by the head's own jaw taper so it hugs the
+       chin (see beardGeometry). A full beard stops UNDER the mouth so the lips
+       read; the moustache sits under the nose over the upper lip. Stubble is
+       a thinner jaw in a tone halfway between hair and skin. */
     const beardParts = [];
     if (c.beard) {
-      const bh = c.hair != null ? c.hair : 0x4a3526;
-      const mix = (a, b, t) => {
-        const ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
-        return ((ar + (br - ar) * t) << 16) | ((ag + (bg - ag) * t) << 8) | (ab + (bb - ab) * t);
-      };
-      const bm = c.beard === "stubble" ? cmat(mix(bh, c.skin != null ? c.skin : 0xcf9a72, 0.55)) : cmat(bh);
-      const add = (w, h, d, x, y, z) => {
-        const m = new THREE.Mesh(boxGeom(w, h, d), bm);
-        m.position.set(x, y, z); m.castShadow = false; face.add(m); beardParts.push(m);
-      };
-      if (c.beard === "full") { add(0.62, 0.17, 0.64, 0, 0.055, 0); add(0.30, 0.055, 0.07, 0, 0.225, 0.325); }
-      else if (c.beard === "goatee") { add(0.24, 0.15, 0.07, 0, 0.075, 0.325); add(0.30, 0.055, 0.07, 0, 0.225, 0.325); }
-      else if (c.beard === "moustache") add(0.32, 0.055, 0.07, 0, 0.225, 0.325);
-      else if (c.beard === "stubble") add(0.62, 0.15, 0.64, 0, 0.065, 0);
+      const bm = c.beard === "stubble" ? cmat(mixHex(hairHex, skinHex, 0.55)) : cmat(hairHex);
+      const bd = new THREE.Mesh(beardGeometry(c.beard, form), bm);
+      bd.castShadow = false; bd.name = "beard";
+      face.add(bd); beardParts.push(bd);
     }
     body.add(neck);
 
@@ -1015,7 +1559,8 @@
       // boxes are merged into a single cached BufferGeometry, so the seam
       // cannot exist (there is no seam) and a long-haired woman now costs ONE
       // draw call where she used to cost two.
-      const styleId = hairStyleFor(c, P);
+      let styleId = hairStyleFor(c, P);
+      if (styleId === "afro" && c.hat) styleId = "curly";   // an afro would stand through any hat crown
       const hairMesh = new THREE.Mesh(hairGeometry(styleId, headSize), cmat(c.hair || 0x4a3526));
       hairMesh.castShadow = true;
       hairMesh.userData.hairStyle = styleId;
@@ -1063,12 +1608,13 @@
       tagCloth(torso, [P.torsoW, chestH, P.torsoD], [waistH / P.torsoH, 1]);          // TOP of the row
       tagCloth(waist, [P.waistW, wh, P.waistD], [0, Math.min(1, wh / P.torsoH)]);     // BOTTOM of the row
     }
-    const armLen = P.armUp + P.armLo, legLen = P.legUp + P.legLo;
+    // the sleeve is shoulder -> wrist crease (the hand is skin, not garment)
+    const armLen = P.armUp + foreH, legLen = P.legUp + P.legLo;
     const alw = P.armW * 0.9, llw = P.legW * 0.9;
     tagCloth(la.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
     tagCloth(ra.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
-    tagCloth(la.userData.lower, [alw, P.armLo + 0.06, alw], [0, (P.armLo + 0.06) / armLen]);
-    tagCloth(ra.userData.lower, [alw, P.armLo + 0.06, alw], [0, (P.armLo + 0.06) / armLen]);
+    tagCloth(la.userData.lower, [alw, foreH + 0.06, alw], [0, (foreH + 0.06) / armLen]);
+    tagCloth(ra.userData.lower, [alw, foreH + 0.06, alw], [0, (foreH + 0.06) / armLen]);
     tagCloth(ll.userData.main, [P.legW, P.legUp, P.legW], [1 - P.legUp / legLen, 1]);
     tagCloth(rl.userData.main, [P.legW, P.legUp, P.legW], [1 - P.legUp / legLen, 1]);
     tagCloth(ll.userData.lower, [llw, P.legLo + 0.06, llw], [0, (P.legLo + 0.06) / legLen]);
@@ -1104,7 +1650,11 @@
         hair: hairParts,
         beard: beardParts,
       },
-      face: { eyeL: le, eyeR: re, brow, mouth }, // animated by systems/facial.js
+      // animated by systems/facial.js (eyeL/eyeR blink, irisL/irisR dart,
+      // mouth talks); faceRest is where it returns them to.
+      face: { eyeL: le, eyeR: re, irisL: li, irisR: ri, brow, mouth },
+      faceRest: { eyeX: EYE_REST.x, eyeY: EYE_REST.y, mouthY: MOUTH_REST_Y },
+      headForm: form,
       detail: [le, re, brow, mouth].concat(hairParts, beardParts, capParts, body.userData.stripes || [], badgeParts),
       phase: Math.random() * 6.28,  // desync gaits between actors
       bob: 0, breath: Math.random() * 6.28,
@@ -1114,6 +1664,10 @@
       // face instead of a hard-coded shared-atlas tan.
       skinTone: c.skin != null ? c.skin : 0xcf9a72,
     };
+    // HANDS: rig.setHandPose / rig.setHandLod (HANDS block above makeCharacter)
+    rig.handFit = handFit;
+    rig.setHandPose = function (side, pose) { setBodyHandPose(rig, side, pose); };
+    rig.setHandLod = function (lod) { setBodyHandLod(rig, lod); };
     // A c.hat comes off in the water: every swimmer's pose (poseSwimmer) sets
     // rig.swimming true and the caller clears it on landing, so the hat rides
     // that one flag — no caller has to remember it, and it costs a compare.
@@ -4560,29 +5114,52 @@
      That is 0.20 - 0.46 = -0.26 on an adult male: bling's watch at -0.36 and
      restrain's tie at -0.42 were both buried in it.
 
-     Nothing here is a taste number — every line is limb()'s own placement
-     solved for its landmarks, read off THIS rig's profile, so a woman's
-     shorter forearm and a child's much shorter one put their own hardware on
-     their own wrist with no per-body table anywhere and no call-site edit.
-     Degrade-safe: returns null with the flag off (each caller keeps its old
-     literal as the fallback) and never throws on a stub rig. */
+     THE HAND IS REAL NOW (HANDS block): the forearm box stops at the crease
+     (handH - armLo) and the first-person hand hangs from it, so every number
+     below is read off that hand — its size off bodyHandFit, its length off
+     the relaxed body-LOD geometry itself. Nothing here is a taste number, and
+     it is all read off THIS rig's profile, so a woman's shorter forearm and a
+     child's much shorter one put their own hardware on their own wrist with
+     no per-body table anywhere and no call-site edit. Degrade-safe: returns
+     null with the flag off (each caller keeps its old literal as the
+     fallback) and never throws on a stub rig.
+
+     RINGS go on the HAND MESH itself (ringHand), in its own metre frame at
+     the base of a finger — the knuckle point is the one spot on a finger that
+     does not move when the hand closes on a gun. ringK scales a part authored
+     in rig units (bling's 0.045 band) down onto a real finger. */
+  let _handRestLen = null;
+  function handRestLen() {
+    if (_handRestLen != null) return _handRestLen;
+    const H = CBZ.fpHands;
+    if (!H || !H.bodyHandGeometry) return 0.177;
+    const g = H.bodyHandGeometry(1, "relaxed", 1);
+    if (!g.boundingBox) g.computeBoundingBox();
+    return (_handRestLen = -g.boundingBox.min.z);
+  }
   CBZ.charArmLandmarks = function (ch) {
     if (CBZ.CONFIG && CBZ.CONFIG.CHAR_WRIST_LANDMARK === false) return null;
     const P = ch && ch.profile;
-    const armLo = (P && P.armLo > 0) ? P.armLo : ARM_LO;   // elbow -> wrist
-    const handH = (P && P.handH > 0) ? P.handH : 0.20;     // limb()'s capH
-    const capH = handH + 0.03;                             // the cap is capH + 0.03 tall
-    const handTop = handH - armLo;                         // = the wrist crease
+    const armLo = (P && P.armLo > 0) ? P.armLo : ARM_LO;   // elbow -> old wrist line
+    const handH = (P && P.handH > 0) ? P.handH : 0.20;
+    const fit = (ch && ch.handFit) || bodyHandFit({ handH: handH, armLo: armLo, armW: (P && P.armW) || 0.30 });
+    const handTop = handH - armLo;                         // the wrist crease = the forearm's end
+    const H = CBZ.fpHands;
+    const palm = (H && H.PALM) ? H.PALM.len : 0.096;
+    const rh = ch && ch.parts && ch.parts.ra && ch.parts.ra.userData && ch.parts.ra.userData.cap;
     return {
-      handTop: handTop,                    // top face of the drawn hand
-      handBottom: -armLo - 0.03,           // bottom face of the drawn hand
+      handTop: handTop,                                    // the wrist crease
+      handBottom: handTop - handRestLen() * fit.s,         // relaxed fingertips
       // A BAND GOES HERE: just proximal of the crease, on the last of the
       // forearm. The rise clears the fattest band in the game (bling's torus
       // tube is 0.028) with a millimetre of skin to spare.
       wrist: handTop + 0.04,
-      // A RING GOES HERE: the knuckle line, in the upper third of the hand.
-      hand: handTop - capH * 0.35,
+      // the knuckle line of the relaxed hand (elbow frame)
+      hand: handTop - palm * fit.s,
       forearmTop: 0.06,                    // the lower box tucks 0.06 into the upper
+      ringHand: (rh && rh.userData && rh.userData.fit) ? rh : null,
+      ringFingers: (H && H.FINGERS) ? H.FINGERS : null,
+      ringK: 0.0100 / 0.045,
     };
   };
   /* ---- HOW FAR THE PRONE RIG DROPS, in METRES -----------------------------
@@ -4713,4 +5290,78 @@
   CBZ.charMounts = charMounts;
   CBZ.lerpAngle = lerpAngle;
   CBZ.damp = damp;
+
+  /* ==== CBZ.human — THE ONE DOOR TO A PERSON ==============================
+     Every system that builds, dresses, poses or audits a human goes through
+     here instead of reaching into makeCharacter's internals:
+       build(opts)                -> rig            (makeCharacter; CBZ.makeCharacter stays the alias)
+       profile(build, age)        -> body profile   (charProfile, cached)
+       dress(rig, idOrRecord)     -> bool           an outfit catalog id, a catalog record
+                                                    ({colors,...}) or a bare colour object;
+                                                    delegates to the city wardrobe when loaded
+       setHandPose(rig, side, pose)                 rig.setHandPose (HANDS block)
+       regions(rig)               -> {head, face, hair, torso, waist, pelvis, armsUpper,
+                                      armsLower, hands, legsUpper, legsLower, shoes} mesh lists
+       headAtlas                  the head UV layout heritage.js paints ink into
+       hairStyles()               the HAIR_STYLES ids
+       eyeColours                 named eye colours (heritage.js rolls from these) */
+  function humanRegions(rig) {
+    const s = (rig && rig.skinSlots) || {};
+    const L = (a) => (a || []).filter(Boolean);
+    const t = L(s.torso), f = rig && rig.face;
+    return {
+      head: L(s.head),
+      face: f ? L([f.eyeL, f.eyeR, f.irisL, f.irisR, f.brow, f.mouth]) : [],
+      hair: L(s.hair).concat(L(s.beard)),
+      torso: t.slice(0, 1).concat(L(s.collar)),
+      waist: t.slice(1),
+      pelvis: L(s.pelvis),
+      armsUpper: L(s.arms), armsLower: L(s.armsLower), hands: L(s.hands),
+      legsUpper: L(s.legs), legsLower: L(s.legsLower), shoes: L(s.shoes),
+    };
+  }
+  function humanDress(rig, outfit, opts) {
+    if (!rig || !rig.skinSlots || outfit == null) return false;
+    let rec = null, colors = null;
+    if (typeof outfit === "string") {
+      let cat = null;
+      try { cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null; } catch (e) { cat = null; }
+      rec = cat && cat[outfit];
+      if (!rec) return false;
+      colors = rec.colors || null;
+    } else if (outfit.colors) { rec = outfit; colors = outfit.colors; }
+    else colors = outfit;
+    if (!colors) return false;
+    if (CBZ.cityRecolorRig) return CBZ.cityRecolorRig(rig, colors, rec, opts) !== false;
+    // no wardrobe loaded: flat-tint the slots (never mutate a shared material)
+    const s = rig.skinSlots;
+    const paint = (list, hex) => {
+      if (hex == null || !list) return;
+      for (const m of list) if (m && m.material && m.material.color) {
+        if (m.material._shared) m.material = m.material.clone();
+        m.material.color.setHex(hex);
+      }
+    };
+    paint(s.torso, colors.torso); paint(s.collar, colors.collar != null ? colors.collar : colors.torso);
+    const arms = colors.arms != null ? colors.arms : colors.torso;
+    paint(s.arms, arms); paint(s.armsLower, arms);
+    paint(s.legs, colors.legs); paint(s.legsLower, colors.legs); paint(s.pelvis, colors.legs);
+    paint(s.shoes, colors.shoes);
+    return true;
+  }
+  CBZ.human = {
+    build: makeCharacter,
+    profile: charProfile,
+    dress: humanDress,
+    setHandPose: function (rig, side, pose) {
+      if (rig && typeof rig.setHandPose === "function") { rig.setHandPose(side, pose); return true; }
+      return false;
+    },
+    regions: humanRegions,
+    headAtlas: HEAD_ATLAS,
+    hairStyles: function () { return Object.keys(HAIR_STYLES); },
+    eyeColours: EYE_COLOURS,
+    // shared-geometry builders, for tools and previews (all cached)
+    geometry: { head: headGeometry, hair: hairGeometry, brow: browGeometry, beard: beardGeometry, shoe: shoeGeometry },
+  };
 })();
