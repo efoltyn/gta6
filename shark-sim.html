@@ -10,15 +10,15 @@
 
 
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=bare1">
+<link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
 <link rel="stylesheet" href="css/shark_title.css?v=uicut1">
-<link rel="stylesheet" href="css/mobile.css?v=onecall1">
+<link rel="stylesheet" href="css/mobile.css?v=flick1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
-<link rel="stylesheet" href="css/inventory.css?v=bagless1">
+<link rel="stylesheet" href="css/inventory.css?v=hotbar1">
 <link rel="stylesheet" href="css/city.css?v=onecall1">
 <link rel="stylesheet" href="css/campaign.css?v=onecall1">
-<link rel="stylesheet" href="css/interact_touch.css?v=bare1">
+<link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=hub1">
 <meta name="description" content="Become the shark. Hunt, grow, evolve into a megalodon, and survive the orca pod. Play free in your browser.">
 <script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:"sharksim"});</script>
@@ -48,8 +48,6 @@ document.body.appendChild(b);}}catch(e){}})();
     <div id="timer" class="pill panel">00:00</div>
     <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
   </div>
-  <div id="keycard" class="panel"><span class="card"></span><span>Keycard</span></div>
-  <div id="inventory" class="panel"><span class="tag">Stash</span><span id="invList">—</span></div>
 
   <div id="hint" class="panel"></div>
 
@@ -69,8 +67,6 @@ document.body.appendChild(b);}}catch(e){}})();
 
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
   <div id="simHud" class="panel"></div>
-
-  <div id="dashBtn" class="panel"><span>Ranks</span></div>
 
   
   <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
@@ -327,7 +323,7 @@ document.body.appendChild(b);}}catch(e){}})();
       <div class="stat"><div class="v" id="swDis">0</div><div class="l">Disasters</div></div>
     </div>
     <button class="btn" id="survAgainBtn">Play Again</button>
-    <button class="btn" id="survMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+    <button class="btn btn-quiet" id="survMenuBtn" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -342,7 +338,7 @@ document.body.appendChild(b);}}catch(e){}})();
       <div class="stat"><div class="v" id="slDis">0</div><div class="l">Disasters</div></div>
     </div>
     <button class="btn" id="loseAgainBtn">Try Again</button>
-    <button class="btn" id="loseMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+    <button class="btn btn-quiet" id="loseMenuBtn" type="button">Main Menu</button>
   </div>
 </div>
 
@@ -385,7 +381,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/modecaps.js?v=caps1"></script>
 
-<script src="src/systems/speech.js?v=overhead1"></script>
+<script src="src/systems/speech.js?v=face1"></script>
 
 <script src="src/systems/breach.js?v=breach1"></script>
 
@@ -425,7 +421,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js"></script>
+<script src="src/world/prisonkit.js?v=flick1"></script>
 <script src="src/world/corridorkit.js"></script>
 
 <script src="src/world/textures_masonry.js?v=masonry1"></script>
@@ -436,7 +432,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/pushables.js?v=push2"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
-<script src="src/world/ground.js"></script>
+<script src="src/world/ground.js?v=flick1"></script>
 <script src="src/world/cellblock.js"></script>
 <script src="src/world/yard.js"></script>
 <script src="src/world/razorwire.js?v=mapflow2"></script>
@@ -455,7 +451,9 @@ document.body.appendChild(b);}}catch(e){}})();
 
   
   <script src="src/systems/fphands.js?v=grasp2"></script>
-  <script src="src/entities/character.js?v=human1"></script>
+  <script src="src/entities/character.js?v=face1"></script>
+  
+  <script src="src/entities/watch.js?v=watch1"></script>
   
   <script src="src/systems/bodymass.js?v=mass1"></script>
 
@@ -514,7 +512,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/gunroom.js?v=nodash1"></script>
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
-<script src="src/world/southblock.js?v=bigmap1"></script>
+<script src="src/world/southblock.js?v=flick1"></script>
 
 <script src="src/world/roofs.js?v=lid1"></script>
 
@@ -526,7 +524,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/entities/npclife.js?v=allmain3"></script>
 
-<script src="src/entities/heritage.js?v=human1"></script>
+<script src="src/entities/heritage.js?v=face1"></script>
 <script src="src/entities/npc.js?v=races1"></script>
 <script src="src/entities/ai.js?v=armed1"></script>
 
@@ -545,6 +543,8 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=duty1"></script>
+
+<script src="src/systems/playerflashlight.js?v=torch1"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 
 <script src="src/systems/prisonrest.js?v=rest1"></script>
@@ -587,24 +587,27 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/prisonwarden.js?v=warden1"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=prisonhit1"></script>
-<script src="src/systems/facial.js?v=human1"></script>
+<script src="src/systems/reactions.js?v=face1"></script>
+<script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=nodash1"></script>
 <script src="src/systems/combat.js?v=sharkmode1"></script>
-<script src="src/systems/killstreaks.js?v=sharkmode1"></script>
-<script src="src/systems/interact.js?v=bare1"></script>
+<script src="src/systems/killstreaks.js?v=flick1"></script>
+<script src="src/systems/interact.js?v=name1"></script>
 
 <script src="src/systems/prisonfriends.js?v=crew1"></script>
-<script src="src/systems/interactions.js?v=m0927p"></script>
+<script src="src/systems/interactions.js?v=lift1"></script>
+
+<script src="src/systems/liftcore.js?v=lift1"></script>
 <script src="src/systems/escapeplan.js?v=m0927p"></script>
 
 <script src="src/city/itemassets.js?v=deslop1"></script>
 
 <script src="src/city/itemicons.js?v=deslop1"></script>
-<script src="src/systems/inventory.js?v=sharkmode1"></script>
+<script src="src/systems/hotbar_model.js?v=hotbar1"></script>
+<script src="src/systems/inventory.js?v=hotbar1"></script>
 
 <script src="src/systems/bootprogress.js?v=meter1"></script>
 <script src="src/systems/state.js?v=sharkmode1"></script>
@@ -614,11 +617,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=sharkmode1"></script>
-<script src="src/systems/touch_vehicle.js?v=sharkmode1"></script>
+<script src="src/systems/touch.js?v=flick1"></script>
+<script src="src/systems/touch_vehicle.js?v=exit1"></script>
 
-<script src="src/systems/gamepad.js?v=nodash1"></script>
-<script src="src/systems/fpsmode.js?v=grasp2"></script>
+<script src="src/systems/seat_exit.js?v=exit1"></script>
+
+<script src="src/systems/gamepad.js?v=exit1"></script>
+<script src="src/systems/fpsmode.js?v=flick1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=armed1"></script>
 
@@ -628,7 +633,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=merge0927a"></script>
+<script src="src/world/disaster_arena.js?v=lift1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=armed1"></script>
@@ -665,8 +670,8 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 <script src="src/systems/disasters.js?v=tsureal1"></script>
-<script src="src/systems/survival_interact.js?v=climbdock1"></script>
-<script src="src/systems/survivalhud.js?v=sharkmode1"></script>
+<script src="src/systems/survival_interact.js?v=name1"></script>
+<script src="src/systems/survivalhud.js?v=name1"></script>
 
 <script src="src/net/survnet.js?v=survnet1"></script>
 
@@ -729,23 +734,23 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/citynav.js?v=moves1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
 <script src="src/city/demolition.js?v=cpd1"></script>
-<script src="src/city/elevators.js?v=fesc1"></script>
-<script src="src/city/exec_office.js?v=deslop1"></script>
+<script src="src/city/elevators.js?v=lift1"></script>
+<script src="src/city/exec_office.js?v=leaf2"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=deslop1"></script>
-<script src="src/city/beach.js?v=sharkfix2"></script>
-<script src="src/city/expansion.js?v=fuel1"></script>
+<script src="src/city/beach.js?v=flick1"></script>
+<script src="src/city/expansion.js?v=flick1"></script>
 
 <script src="src/city/worldmap.js?v=nodash1"></script>
 
 <script src="src/city/waterfield.js?v=tsuedge1"></script>
 
 <script src="src/world/waterfx.js?v=roadmerge1"></script>
-<script src="src/city/highways.js?v=roadmerge1"></script>
+<script src="src/city/highways.js?v=flick1"></script>
 
 <script src="src/city/highwaynet.js?v=hwy1"></script>
 
-<script src="src/city/interchange.js?v=hwy1"></script>
+<script src="src/city/interchange.js?v=flick1"></script>
 
 <script src="src/city/assets.js?v=nodash1"></script>
 <script src="src/city/placement.js?v=sims2"></script>
@@ -770,15 +775,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/yardfurniture.js?v=yard1"></script>
 
 <script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=skylinecluster4t"></script>
+<script src="src/city/towngen.js?v=flick1"></script>
 
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=racerstory1"></script>
+<script src="src/city/island_speedway.js?v=flick1"></script>
 <script src="src/city/island_airport.js?v=deslop1"></script>
 
 <script src="src/city/airport_kit.js?v=deslop1"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
-<script src="src/city/island_military.js?v=nodash1"></script>
+<script src="src/city/island_military.js?v=flick1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=allmain1"></script>
 <script src="src/city/biome_farmland.js?v=nodash1"></script>
@@ -817,7 +822,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/arena_fights.js?v=nodash1"></script>
 
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=deslop1"></script>
+<script src="src/city/props.js?v=flick1"></script>
 
 <script src="src/city/propuse.js?v=moves1"></script>
 
@@ -837,7 +842,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=nodash1"></script>
 <script src="src/city/gangs.js?v=brainmoves1"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
-<script src="src/city/realestate.js?v=nodash1"></script>
+<script src="src/city/realestate.js?v=lift1"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -880,7 +885,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=hands1"></script>
 <script src="src/city/carinstances.js?v=cars1"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
-<script src="src/city/playeraircraft.js?v=nodash1"></script>
+<script src="src/city/playeraircraft.js?v=exit1"></script>
 
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
@@ -895,7 +900,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/city/boarding.js?v=cars1"></script>
 
-<script src="src/city/passengerseat.js?v=cars1"></script>
+<script src="src/city/passengerseat.js?v=exit1"></script>
 
 <script src="src/city/airtraffic.js?v=air2w11"></script>
 
@@ -918,7 +923,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=nodash1"></script>
 <script src="src/city/heists.js?v=nodash1"></script>
-<script src="src/city/interactions.js?v=nodash1"></script>
+<script src="src/city/interactions.js?v=name1"></script>
 
 <script src="src/city/fuel.js?v=fuel1"></script>
 
@@ -934,7 +939,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/checkpoints.js?v=seawave1"></script>
 
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=nodash1"></script>
+<script src="src/city/interact.js?v=name1"></script>
 
 <script src="src/city/roleverbs.js?v=nodash1"></script>
 <script src="src/city/restrain.js?v=nodash1"></script>
@@ -979,7 +984,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/turf.js?v=nodash1"></script>
 <script src="src/city/gangops.js?v=cpd1"></script>
 
-<script src="src/city/militaryvehicles.js?v=nodash1"></script>
+<script src="src/city/militaryvehicles.js?v=exit1"></script>
 
 <script src="src/city/strategic.js?v=nodash1"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
@@ -988,7 +993,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
-<script src="src/city/minicities.js?v=sim4w9x"></script>
+<script src="src/city/minicities.js?v=flick1"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=nodash1"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
@@ -999,7 +1004,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/racecareer.js?v=nodash1"></script>
 
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
-<script src="src/city/street_talk.js?v=nodash1"></script>
+<script src="src/city/street_talk.js?v=name1"></script>
 
 <script src="src/city/interactions_rich.js?v=nodash1"></script>
 
@@ -1017,7 +1022,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/marina.js?v=deslop1"></script>
 <script src="src/city/boatyard.js?v=deslop1"></script>
 
-<script src="src/city/approach.js?v=approach1"></script>
+<script src="src/city/approach.js?v=flick1"></script>
 
 <script src="src/city/fishing.js?v=allmain1"></script>
 
@@ -1269,7 +1274,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js"></script>
+<script src="src/core/batch.js?v=flick1"></script>
 
 <script src="src/core/gfx.js?v=gfx1"></script>
 <script src="src/city/localinst.js?v=li2"></script>

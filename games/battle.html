@@ -23,7 +23,7 @@
   the towers down through the same collapse chain a bomber uses.
 
   What IS this file: who is on which side, the spectator cameras, the sim
-  clock (pause, quarter speed, up to eight times), and the benchmark that
+  clock (pause, quarter speed, up to eight times), and the ?bench=1 benchmark that
   answers "how many can this machine actually show" by measuring instead
   of guessing. There is NO cap on team size anywhere in this page — the
   input takes what you type and the frame rate tells you the truth.
@@ -207,12 +207,6 @@
   #boottrack{margin:7px auto 0;max-width:320px;height:3px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
   #bootbar{height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,#ff8a3d,#ffc56e);transition:width .18s linear}
   #boottrack.done{opacity:0;transition:opacity .5s}
-  .quiet{text-align:center;padding:4px 0 calc(22px + env(safe-area-inset-bottom,0px))}
-  #bench{appearance:none;cursor:pointer;min-height:44px;padding:0 14px;border:0;background:transparent;
-    font-size:12px;font-weight:700;letter-spacing:.2em;opacity:.55;text-decoration:underline;text-underline-offset:5px;
-    text-decoration-color:rgba(255,255,255,.3)}
-  #bench:hover{opacity:.9}
-  #maxline{font-size:11px;letter-spacing:.16em;opacity:.45;text-align:center;min-height:14px}
 
   /* ---- battle chrome ----
      The armies ARE the scoreboard: no counts, no clock, no ticker, no key
@@ -391,10 +385,6 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
     <div id="bootst"></div>
     <div id="boottrack"><div id="bootbar"></div></div>
   </div></div>
-  <div class="quiet">
-    <button id="bench">FIND MY MAX</button>
-    <div id="maxline"></div>
-  </div>
 </div></div>
 
 <div id="ctl">
@@ -1127,8 +1117,6 @@ CBZ.studio.need(NEED).then(function () {
   }
   sumUp();
 
-  const savedMax = (function () { try { return parseInt(localStorage.getItem("cbz-npcwar-max") || "0", 10); } catch (e) { return 0; } })();
-  if (savedMax > 0) el("maxline").textContent = "MEASURED HERE " + savedMax + " PER SIDE AT 30 FPS";
 
   function readMenu() {
     SET.redN = Math.max(1, parseInt(el("redN").value, 10) || 1);
@@ -1212,10 +1200,6 @@ CBZ.studio.need(NEED).then(function () {
       bar("BUILDING THE GROUND");
       CBZ.studio.need(need).then(function () { begin(false); });
     } else begin(false);
-  });
-  el("bench").addEventListener("click", function () {
-    readMenu();
-    begin(true);
   });
   el("boottrack").classList.add("done");
   el("menu").classList.add("ready");
