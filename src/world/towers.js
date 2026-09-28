@@ -16,10 +16,8 @@
    records are unchanged in number and position, so capture.js fires from
    exactly where it did.
 
-   The ladder is still a registered z/x-axis ramp in CBZ.platforms;
-   systems/physics.js skips platforms in escape mode, so it is honest
-   geometry and a record, not a climb — the day that gate lifts, the deck
-   is standable with no change here.
+   The ladder is climbed (systems/climb.js) and every wall tower has an
+   officer on post in the cabin (entities/towerwatch.js) who comes down it.
 ============================================================ */
 (function () {
   "use strict";

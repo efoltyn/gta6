@@ -504,6 +504,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=dsl3"></script>
+<!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
+     off the same numbers systems/climb.js climbs, + railed landings. Every
+     tower ladder in every game is made here and registered with climb.js. -->
+<script src="src/world/ladderkit.js?v=lad1"></script>
 <script src="src/world/corridorkit.js?v=gate1"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
@@ -738,6 +742,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=cars1"></script>
 <script src="src/systems/physics.js?v=vit3"></script>
+<!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
+<script src="src/systems/climb.js?v=lad1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries

@@ -1171,7 +1171,10 @@
   const _fpVQ = new THREE.Quaternion();
   function fpPlants() {
     fistT[0].plantW = 0; fistT[1].plantW = 0;
-    const rig = CBZ.playerChar, tp = rig && rig.traversePose, plants = tp && tp._plants;
+    // a vault's plants, or (systems/climb.js) the rungs your hands are on
+    const rig = CBZ.playerChar, tp0 = rig && rig.traversePose;
+    const tp = (tp0 && tp0._plants) ? tp0 : (CBZ.climb && CBZ.climb.fpSource ? CBZ.climb.fpSource() : null);
+    const plants = tp && tp._plants;
     if (!plants || !CBZ.camera || !FPH || !FPH.PLANT_CONTACT) return false;
     const cam = CBZ.camera;
     cam.updateMatrixWorld(true);
@@ -1207,7 +1210,7 @@
       T.x += (_fpG.x - T.x) * w; T.y += (_fpG.y - T.y) * w; T.z += (_fpG.z - T.z) * w;
       T.vis = true;
       T.hook = 0;
-      if (w > 0.3) T.curl = "plant";
+      if (w > 0.3) T.curl = tp.curl || "plant";
       T.plantW = w;
       any = true;
     }
@@ -3491,8 +3494,25 @@
     // (e) same shared per-class falloff evaluator as cityGunHit above.
     const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
       : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
-    const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
-    const lethalHeadshot = hit.head && !w.nonlethal;
+    let dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
+    let lethalHeadshot = hit.head && !w.nonlethal;
+    /* WORN ARMOUR (city/armor.js's kit, dressed on a prison body: the tower
+       posts wear a plate carrier and a helmet). The plate eats most of a
+       body round while it lasts; the helmet turns a head shot from the end
+       into a hard knock. Both wear down, the same pool the city drains. */
+    const kit = a._armorKitMap;
+    if (kit && (a._armor || 0) > 0 && !w.nonlethal) {
+      const K = CBZ.ARMOR_KITS || {};
+      if (hit.head && kit.head) {
+        lethalHeadshot = false;
+        const eat = Math.round(dmg * (1 - ((K[kit.head] && K[kit.head].headFrac) || 0.25)));
+        a._armor = Math.max(0, a._armor - eat); dmg = Math.max(1, dmg - eat);
+      } else if (!hit.head && kit.chest) {
+        const eat = Math.round(dmg * ((K[kit.chest] && K[kit.chest].absorb) || 0.7));
+        a._armor = Math.max(0, a._armor - eat); dmg = Math.max(1, dmg - eat);
+      }
+      if (CBZ.sfx) { try { CBZ.sfx("hit", { dist: hit.dist, volume: 0.5, ghost: true }); } catch (e) {} }
+    }
     if (lethalHeadshot) a.hp = 0;
     else a.hp -= dmg;
 

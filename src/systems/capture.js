@@ -195,8 +195,16 @@
 
   // a burst of tracer rounds from the tower cabin toward the player, scattered
   // over a radius (big = warning shots, ~0 = dead on). Needs no new assets.
+  const _muz = new THREE.Vector3();
   function towerBurst(src, spreadR, count) {
-    const from = { x: src.x, y: 6.6, z: src.z };
+    // from the rifle of the man on the tower (entities/towerwatch.js), or
+    // the cabin if the build has no man in it
+    let from = { x: src.x, y: (CBZ.TOWER_DECK || 5) + 1.5, z: src.z };
+    const gd = src.guard;
+    if (gd && gd.group) {
+      from = { x: gd.group.position.x, y: gd.group.position.y + 1.45, z: gd.group.position.z };
+      if (CBZ.actorMuzzle) { try { const m = CBZ.actorMuzzle(gd, _muz); if (m && isFinite(m.x)) from = { x: m.x, y: m.y, z: m.z }; } catch (e) {} }
+    }
     const pp = player.pos;
     for (let i = 0; i < count; i++) {
       const to = {
@@ -1825,7 +1833,23 @@
       (CBZ.prisonOutOfBounds && CBZ.prisonOutOfBounds(player.pos.x, player.pos.z));
     const inKillZone = g.detection >= 85 && onTheRun && g.invuln <= 0 && !(CBZ.door && CBZ.door.open);
     if (inKillZone) {
-      if (towerSeq === 0) { towerSrc = nearestTower(player.pos.x, player.pos.z); towerSeq = 1; towerT = 0; towerShotCD = 0; }
+      /* A TOWER FIRES ONLY IF A MAN IS UP IT. The rounds come from the
+         officer on the nearest manned post in range (entities/towerwatch.js:
+         alive, on his feet, on the deck); take him down, or wait for him to
+         come down at the change of shift, and that tower is silent. */
+      const TW = CBZ.towerWatch;
+      if (TW && TW.shooter) {
+        const sh = TW.shooter(player.pos.x, player.pos.z);
+        if (!sh) { towerSeq = 0; towerT = 0; towerSrc = null; }
+        else {
+          if (!towerSrc || towerSrc.guard !== sh) towerSrc = { x: 0, z: 0, guard: sh };
+          towerSrc.x = sh.group.position.x; towerSrc.z = sh.group.position.z;
+          if (towerSeq === 0) { towerSeq = 1; towerT = 0; towerShotCD = 0.6; }
+          TW.engage(sh, player.pos);
+        }
+      } else if (towerSeq === 0) { towerSrc = nearestTower(player.pos.x, player.pos.z); towerSeq = 1; towerT = 0; towerShotCD = 0; }
+    }
+    if (inKillZone && towerSrc) {
       towerT += dt;
       if (towerSeq === 1 && towerShotCD <= 0) {
         towerBurst(towerSrc, 6.0, 3);                                   // warning shots, WIDE

@@ -139,7 +139,7 @@
 
   // name -> shape overrides. Everything else falls through to its ITEMS tag.
   const SHAPE_BY_NAME = {
-    "Gun": "gun", "Guard Torch": "torch",
+    "Gun": "gun", "Rifle": "gun", "Guard Torch": "torch",
     // "shank" is the Shiv's OWN shape, not the generic blade: it is the only
     // improvised blade in the catalog with a real authored model, so the thing
     // you see lying on the concrete is the thing that was in his fist a second
@@ -388,7 +388,7 @@
       dropGone(inst);
     };
     const kind = d.cigs > 0 ? "card" : (rigidShape(d.shape) ? "grip" : "card");
-    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(who, d.mesh, { pose: kind, keep: d.item === "Gun" || d.item === "Taser", onTaken: took });
+    if (CBZ.verbs && CBZ.verbs.pickup) CBZ.verbs.pickup(who, d.mesh, { pose: kind, keep: d.item === "Gun" || d.item === "Rifle" || d.item === "Taser", onTaken: took });
     else took();
   }
   function takeDrop(inst) {
@@ -507,7 +507,7 @@
      counters and the hand stay honest about where the object went.
      ============================================================ */
   const NPC_TAKE_R2 = (AUTO_R * 1.5) * (AUTO_R * 1.5);
-  const ARMABLE = { "Gun": "Pistol", "Taser": "Taser" };
+  const ARMABLE = { "Gun": "Pistol", "Rifle": "Rifle", "Taser": "Taser" };
 
   function npcTakeWeapon(inst, d) {
     const want = ARMABLE[d.item];

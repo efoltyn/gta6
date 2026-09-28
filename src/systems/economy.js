@@ -116,6 +116,9 @@
     // key per door. On the movement officers' belts and the board in control.
     "Corridor Key":    { value: 40, tag: "key",       rarity: "rare" },
     Gun:               { value: 50, tag: "key",       rarity: "epic" },
+    // THE TOWER RIFLE: the carbine the post officer carries up the ladder
+    // (entities/towerwatch.js). Taken off him, it is the M4 on your rail.
+    Rifle:             { value: 80, tag: "key",       rarity: "epic" },
     // --- B7: catalog parity with city/economy.js's harvest-node resources +
     // tools (systems/resources.js is CITY-only — no gather nodes in the
     // yard/disaster arena — so these entries exist just to keep the two item
@@ -183,6 +186,12 @@
     n = n || 1;
     g.inventory[name] = (g.inventory[name] || 0) + n;
     if (name === "Shiv" || name === "Shank") syncShankWeapon();
+    // a rifle off a tower is a gun in your hands, not a line in the bag
+    if (name === "Rifle" && CBZ.unlockWeapon) {
+      g.inventory[name] = Math.max(0, g.inventory[name] - n);
+      CBZ.unlockWeapon("carbine", { select: true });
+      if (CBZ.playerHolster) CBZ.playerHolster(false);
+    }
     CBZ.refreshInventory && CBZ.refreshInventory();
   }
   function hasItem(name) { return (g.inventory[name] || 0) > 0; }
@@ -1487,6 +1496,7 @@
       if (rank >= 2) maybe("Keycard", key(actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6));
       if (actor.post === "gate") add("Gate Key");     // the exit's key is on the exit's man, not rolled
       if (actor.post === "corridor") add("Corridor Key");
+      if (actor.post === "tower") add("Rifle");        // the post's carbine, slung up the ladder with him
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.
