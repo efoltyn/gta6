@@ -1745,7 +1745,15 @@
       // Small open shelters + tall survey masts. They are navigation objects,
       // not sealed fake buildings, and their footprint is published for the
       // world audit's full 3x3 coast test.
-      const gravelMat = new THREE.MeshLambertMaterial({ color: 0x817b68 });
+      // The lookout pad is graded gravel on the SHARED ground skin (was a flat
+      // 0x817b68 beige card lying on the textured plate). Vertex colour is the
+      // gravel tone in the middle, grading to the surrounding scrub over the
+      // outer ring, so the pad wears into the country instead of ending on a
+      // ruled edge; groundSkin supplies the soil/stone detail per pixel.
+      const gravelMat = CBZ.groundSkin
+        ? CBZ.groundSkin({ name: "frontier-lookout-pad", far: 260, sandY: [-9, -8],
+            extra: { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 } })
+        : new THREE.MeshLambertMaterial({ vertexColors: true });
       const steelMat = new THREE.MeshLambertMaterial({ color: 0x68727d });
       const roofMat = new THREE.MeshLambertMaterial({ color: 0x39434d });
       const beaconMat = new THREE.MeshLambertMaterial({ color: 0xff6a45, emissive: 0x7a1d10, emissiveIntensity: 0.45 });
@@ -1755,7 +1763,22 @@
       const beaconGeo = new THREE.SphereGeometry(0.46, 8, 6);
       const postGeo = new THREE.BoxGeometry(0.22, 3.2, 0.22);
       const roofGeo = new THREE.BoxGeometry(9, 0.32, 5.6);
-      const padGeo = new THREE.PlaneGeometry(32, 24);
+      const padGeo = (function () {
+        const g = new THREE.PlaneGeometry(36, 28, 12, 10);
+        const pos = g.attributes.position, colA = new Float32Array(pos.count * 3);
+        const cGravel = new THREE.Color(0x7d725c), cScrubEdge = new THREE.Color(0x55653f), c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i);
+          // 0 inside the 32 x 24 working pad, 1 at the frayed outer ring
+          const e = Math.max(Math.abs(x) - 14, 0) / 4 + Math.max(Math.abs(y) - 10, 0) / 4;
+          const n = CBZ.hash01 ? CBZ.hash01(i, 7, 0x6a1d) : 0.5;
+          c.copy(cGravel).lerp(cScrubEdge, Math.min(1, e * (0.75 + 0.5 * n)));
+          c.multiplyScalar(0.92 + 0.16 * n);
+          colA[i * 3] = c.r; colA[i * 3 + 1] = c.g; colA[i * 3 + 2] = c.b;
+        }
+        g.setAttribute("color", new THREE.BufferAttribute(colA, 3));
+        return g;
+      })();
       const landmarks = [];
       function footprintShoreMin(x, z, hx, hz) {
         let best = Infinity;

@@ -187,25 +187,17 @@
     // ================================================================
     //  CAUSEWAY — dirt logging road deck (drive the bridge to the woods).
     // ================================================================
-    const cwW = CW_MAXX - CW_MINX, cwL = CW_MAXZ - CW_MINZ;
+
     const cwCX = (CW_MINX + CW_MAXX) / 2;
-    if (CBZ.buildHighway) {
-      // REAL wide dirt-logging highway over the water to the woods. heightAt:
-      // grade-follow world/terrain.js relief (0 over this rect's flat
-      // playable footprint — a free, safe hook for the backdrop rim).
-      CBZ.buildHighway(root, {
-        path: [{ x: cwCX, z: CW_MINZ }, { x: cwCX, z: CW_MAXZ }],
-        width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
-        guardrail: false, elevated: false, rng: rng,
-        heightAt: CBZ.terrainHeight,
-      });
-    } else {
-      // ---- fallback: bespoke narrow dirt deck (only if buildHighway absent) ----
-      const road = new THREE.Mesh(new THREE.PlaneGeometry(cwW + 6, cwL + 4), mat(0x6b5536));
-      road.rotation.x = -Math.PI / 2;
-      road.position.set(cwCX, 0.04, (CW_MINZ + CW_MAXZ) / 2);
-      road.receiveShadow = true; root.add(road);
-    }
+    // REAL wide dirt-logging highway over the water to the woods (highways.js
+    // loads before every biome; its dirt deck wears the shared ground skin).
+    // heightAt: grade-follow world/terrain.js relief.
+    CBZ.buildHighway(root, {
+      path: [{ x: cwCX, z: CW_MINZ }, { x: cwCX, z: CW_MAXZ }],
+      width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
+      guardrail: false, elevated: false, rng: rng,
+      heightAt: CBZ.terrainHeight,
+    });
 
     // ================================================================
     //  LAKE — the basin was carved into the forest heightfield above and its
@@ -224,6 +216,30 @@
     const trailPts = [];            // {x,z} sampled along all trails
     const TRAIL_KEEP = 7 * 7;       // squared radius cleared around a trail point
 
+    /* The trails are ONE mesh on the shared ground skin (was: ~56 separate
+       flat 0x5a4a2e planes, one draw each, reading as brown tape on the
+       textured floor). Each segment is a 3-column strip: packed soil down the
+       middle, its two edges already grading into the moss, so groundSkin's
+       soil/grass pick blends the path into the floor instead of cutting it. */
+    const trailPos = [], trailCol = [];
+    const cTrail = new THREE.Color(0x6a5534), cTrailEdge = new THREE.Color(0x4f5a2c);
+    function trailQuad(cx, cz, ux, uz, wid, len) {
+      const vx = -uz, vz = ux, hl = len / 2, hw = wid / 2;
+      const cols = [[-hw, cTrailEdge], [0, cTrail], [hw, cTrailEdge]];
+      for (let k = 0; k < 2; k++) {
+        const a = cols[k], b = cols[k + 1];
+        const P = [
+          [cx - ux * hl + vx * a[0], cz - uz * hl + vz * a[0], a[1]],
+          [cx + ux * hl + vx * a[0], cz + uz * hl + vz * a[0], a[1]],
+          [cx + ux * hl + vx * b[0], cz + uz * hl + vz * b[0], b[1]],
+          [cx - ux * hl + vx * b[0], cz - uz * hl + vz * b[0], b[1]],
+        ];
+        for (const i of [0, 2, 1, 0, 3, 2]) {
+          trailPos.push(P[i][0], 0.05, P[i][1]);
+          trailCol.push(P[i][2].r, P[i][2].g, P[i][2].b);
+        }
+      }
+    }
     function trail(x0, z0, x1, z1, wid, kinks) {
       const segs = 14;
       let px = x0, pz = z0;
@@ -242,11 +258,7 @@
         if (d2(mx, mz, LAKE_X, LAKE_Z) < (LAKE_R + 2) * (LAKE_R + 2)) {
           px = nx; pz = nz; continue;
         }
-        const seg = new THREE.Mesh(new THREE.PlaneGeometry(wid, len + 1.5), mat(0x5a4a2e));
-        seg.rotation.x = -Math.PI / 2;
-        seg.rotation.z = -Math.atan2(dx, dz);
-        seg.position.set((px + nx) / 2, 0.06, (pz + nz) / 2);
-        seg.receiveShadow = true; root.add(seg);
+        trailQuad(mx, mz, dx / len, dz / len, wid, len + 1.5);
         trailPts.push({ x: mx, z: mz });
         if (layout) {
           // AABB intentionally covers the rotated ribbon plus shoulder: tree
@@ -267,6 +279,23 @@
       trail(lakeX + dx * inv * (lakeR + 5), lakeZ + dz * inv * (lakeR + 5), tx, tz, 4.0, 30);
     })();
     trail(CX - 260, CZ - 150, CX + 200, CZ + 50, 3.6, 28);
+    if (trailPos.length) {
+      const tg = new THREE.BufferGeometry();
+      tg.setAttribute("position", new THREE.Float32BufferAttribute(trailPos, 3));
+      tg.setAttribute("color", new THREE.Float32BufferAttribute(trailCol, 3));
+      const tn = new Float32Array(trailPos.length);
+      for (let i = 1; i < tn.length; i += 3) tn[i] = 1;
+      tg.setAttribute("normal", new THREE.BufferAttribute(tn, 3));
+      const tOff = { vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
+      const tMat = CBZ.groundSkin
+        ? CBZ.groundSkin({ name: "redhollow-trail", far: 300, sandY: [-9, -8], extra: tOff })
+        : new THREE.MeshLambertMaterial(tOff);
+      const trails = new THREE.Mesh(tg, tMat);
+      trails.name = "redhollow-trails";
+      trails.receiveShadow = true;
+      trails.userData.terrain = true;
+      root.add(trails);
+    }
 
     function nearTrail(x, z) {
       for (let i = 0; i < trailPts.length; i++)
