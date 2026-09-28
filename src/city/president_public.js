@@ -18,8 +18,9 @@
    2. THE BALCONY. A Truman-style speaking balcony is built here on the
       Mansion's front facade, over the front door, between the two columns
       that flank the doorway: stone deck at the upper floor, a balustrade, two
-      corbels under it, a lectern with the seal, two flags, and a glass screen
-      that goes up in front of the lectern for a speech. You reach it from the
+      corbels under it, a lectern with the seal, two flags, and a BULLETPROOF
+      glass screen that goes up in front of the lectern for a speech (a
+      losBlocker while it is up, with the balustrade under it). You reach it from the
       state residence upstairs ("Step out onto the balcony"); "Go back
       inside" takes you in again.
 
@@ -29,7 +30,8 @@
       few hold FOUR MORE YEARS boards; protesters, a bigger share the lower the
       rating and after unpopular orders and attacks, hold signs over their
       heads whose words are what actually happened (NO CURFEW, SOLDIERS OUT,
-      WHERE IS THE MONEY ...). They face the balcony and cheer or boo each beat.
+      WHERE IS THE MONEY ...). They face the balcony and cheer or boo each beat,
+      out loud: audio.js crowdVoice, the cheer/boo balance set by approval.
 
    4. THE SPEECH. When you are the President your Chief of Staff comes to find
       you about 20 seconds before, and you have to physically go. At the
@@ -138,7 +140,7 @@
   //  4.29 up. The deck sits at the upper floor, 3.5 m out, 9.8 m wide.
   // ============================================================
   const B = {
-    builtFor: null, group: null, glass: null, glassCol: null, cols: [], plats: [],
+    builtFor: null, group: null, glass: null, shield: null, glassCol: null, cols: [], plats: [],
     deckY: 3.35, floorY: 3.2, facadeZ: 0, cx: 0, stand: null, lect: null, inside: null, door: null,
     zonesWired: false,
   };
@@ -271,12 +273,13 @@
     if (B.group && B.group.parent) B.group.parent.remove(B.group);
     for (let i = 0; i < B.cols.length; i++) uncol(B.cols[i]);
     if (B.glassCol) uncol(B.glassCol);
+    paneBlocks(false);
     for (let i = 0; i < B.plats.length; i++) {
       const k = CBZ.platforms ? CBZ.platforms.indexOf(B.plats[i]) : -1;
       if (k >= 0) CBZ.platforms.splice(k, 1);
     }
     dirtyCols(); dirtyPlats();
-    B.group = null; B.glass = null; B.glassCol = null; B.cols = []; B.plats = []; B.builtFor = null;
+    B.group = null; B.glass = null; B.shield = null; B.glassCol = null; B.cols = []; B.plats = []; B.builtFor = null;
   }
 
   function buildBalcony() {
@@ -376,11 +379,27 @@
       box(grp, px - sx * 0.43, D + 2.42, pz, 0.86, 0.02, 0.02, BRONZE);          // the cross bar
     }
 
-    // the glass: up for a speech, gone the rest of the time
+    // the glass: up for a speech, gone the rest of the time. It is
+    // BULLETPROOF: while it is up the pane is a losBlocker, the one list both
+    // the player's rounds (fpsmode wallDistance) and every NPC's line of fire
+    // (city/los.js clearLineOfFire) are traced against, and `bulletproof`
+    // stops fpsmode's thin-wall penetration. `mover` hangs any pock on the
+    // glass itself, so the marks go away with it.
     const gl = new THREE.Group();
+    gl.userData.mover = true;
     const pane = new THREE.Mesh(boxG(2.3, 1.2, 0.035), glassMat());
     pane.position.set(cx, D + RAIL_H + 0.62, z1 - 0.44);
+    pane.userData.bulletproof = true;
     gl.add(pane);
+    // the stone balustrade under it stops a round too (a steep shot from the
+    // lawn crosses the rail, not the glass): an unseen block over the rail
+    // in front of the lectern, a blocker only while the glass is up
+    const rail = new THREE.Mesh(boxG(2.3, RAIL_H, 0.34), glassMat());
+    rail.position.set(cx, D + RAIL_H / 2, z1 - 0.14);
+    rail.visible = false;
+    rail.userData.bulletproof = true;
+    gl.add(rail);
+    B.shield = [pane, rail];
     for (const sx of [-1, 1]) box(gl, cx + sx * 1.16, D + RAIL_H + 0.62, z1 - 0.44, 0.05, 1.24, 0.06, 0x2a2e33);
     box(gl, cx, D + RAIL_H + 0.02, z1 - 0.44, 2.36, 0.06, 0.1, 0x2a2e33);
     gl.visible = false;
@@ -402,9 +421,21 @@
     B.builtFor = CBZ.govComplexes;
     return true;
   }
+  function paneBlocks(on) {
+    const L = CBZ.losBlockers, S = B.shield;
+    if (!L || !S) return;
+    let changed = false;
+    for (let k = 0; k < S.length; k++) {
+      const i = L.indexOf(S[k]);
+      if (on && i < 0) { L.push(S[k]); changed = true; }
+      else if (!on && i >= 0) { L.splice(i, 1); changed = true; }
+    }
+    if (changed && CBZ.losGridDirty) CBZ.losGridDirty();
+  }
   function glassUp(on) {
     if (!B.glass) return;
     B.glass.visible = !!on;
+    paneBlocks(!!on);
     if (on && !B.glassCol && B.glassColSpec) {
       const s = B.glassColSpec;
       B.glassCol = { minX: s[0], maxX: s[1], minZ: s[2], maxZ: s[3], y0: s[4], y1: s[5], _city: true };
@@ -927,8 +958,33 @@
   }
   const CHEERS = ["Yes!", "Hear, hear!", "Four more years!", "That's right!", "We're with you!", "My mother voted for you!", "Say it again!"];
   const BOOS = ["Boo!", "Liar!", "Resign!", "Shame!", "Nobody believes you!", "Where's my pension?", "My son's still in your jail!"];
+  /* THE CROWD IS HEARD. One synthesised crowd (systems/audio.js crowdVoice)
+     from the middle of the people who are actually there. Approval sets the
+     balance: a cheer from a country that likes him is a big warm one with
+     hardly a boo in it; a cheer at 20% is thin, and the protest block boos
+     through it. A boo is the mirror. */
+  function crowdSound(kind, proToo, sup, pro) {
+    if (!CBZ.crowdVoiceAt) return;
+    const all = sup.concat(pro);
+    if (!all.length) return;
+    let x = 0, y = 0, z = 0;
+    for (let i = 0; i < all.length; i++) { x += all[i].ped.pos.x; y += all[i].ped.pos.y || 0; z += all[i].ped.pos.z; }
+    x /= all.length; y /= all.length; z /= all.length;
+    const a = approval() / 100;
+    const proShare = pro.length / all.length, supShare = 1 - proShare;
+    let cheer, boo;
+    if (kind === "cheer") {
+      cheer = supShare * (0.45 + 0.55 * a);
+      boo = proToo ? proShare * 0.25 : proShare * (0.4 + 0.6 * (1 - a));
+    } else {
+      boo = Math.max(proShare, 0.35) * (0.5 + 0.5 * (1 - a));
+      cheer = supShare * a * 0.3;
+    }
+    try { CBZ.crowdVoiceAt(x, z, { y: y + 1.5, cheer: cheer, boo: boo, size: all.length }); } catch (e) {}
+  }
   function react(kind, proToo) {
     const sup = members("sup"), pro = members("pro");
+    crowdSound(kind, proToo, sup, pro);
     if (kind === "cheer") {
       for (let i = 0; i < sup.length; i++) {
         hype(sup[i].ped.char ? sup[i].ped : null, 3.2);

@@ -1386,8 +1386,114 @@
     if (eng && performance.now() * 0.001 - engFed > 0.4) engineStop();
   }
 
+  /* ---- A CROWD: cheer and boo, synthesised --------------------------------
+     There is no crowd recording in the bank, so a crowd is built here the way
+     the gun and horn fallbacks are: from the shared noise buffer and a few
+     oscillators, into sfxBus (so the master, the hush and the pressure stage
+     all apply). Three layers, each scaled by how much of it the caller asks
+     for, so one call can be a warm cheer with a few boos in it:
+       roar   band-passed noise, the whole crowd as one body (bright for a
+              cheer, dark for a boo), swelling and settling over ~3 s;
+       voices short sawtooth "woo"s gliding UP through a vowel formant for a
+              cheer, long low "booo"s sagging DOWN through an "oo" formant;
+       claps  sparse high-passed noise ticks (cheer only).
+     opts: cheer 0..1, boo 0..1, size (people, sets the voice count), dist
+     (m from the listener; the gun curve, then the far muffle past FAR_DIST),
+     volume. One crowd at a time: a second call inside 1.2 s is gated. */
+  function crowdVoice(opts) {
+    if (!ctx || !sfxBus) return false;
+    if (ctx.state === "suspended") ctx.resume();
+    opts = opts || {};
+    const row = auditRow("crowd");
+    row.req++;
+    let vol = opts.volume == null ? 1 : +opts.volume;
+    let out = sfxBus;
+    if (opts.dist != null && isFinite(opts.dist)) {
+      row.spatial++;
+      const d = opts.dist;
+      if (d > 240) { row.gated++; return false; }
+      vol *= d <= 20 ? 1 : Math.max(0.1, 1 - (d - 20) / 220);
+      if (d > FAR_DIST) { ensureFarBus(); if (farIn) { out = farIn; row.far++; } }
+    } else row.global++;
+    const nowS = performance.now() * 0.001;
+    if (!opts.force && nowS - (last.get("crowd") || -1e9) < 1.2) { row.gated++; return false; }
+    last.set("crowd", nowS);
+    const cheer = Math.max(0, Math.min(1, +opts.cheer || 0));
+    const boo = Math.max(0, Math.min(1, +opts.boo || 0));
+    if (cheer + boo < 0.02 || vol <= 0.01) { row.gated++; return false; }
+    row.sent++;
+    const n = Math.max(3, Math.min(14, Math.round((opts.size || 20) / 3)));
+    const t0 = ctx.currentTime + 0.03;
+    const bus = ctx.createGain(); bus.gain.value = 0.3 * vol; bus.connect(out);
+    const R = Math.random;
+
+    // the roar
+    function roar(level, f, q, peak, dur) {
+      if (level < 0.02) return;
+      const src = nsrc(t0, dur + 0.1);
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = q;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(0.55 * level, t0 + peak);
+      g.gain.setValueAtTime(0.5 * level, t0 + dur * 0.55);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      src.connect(bp); bp.connect(g); g.connect(bus);
+    }
+    roar(cheer, 1150, 0.55, 0.35, 3.0);
+    roar(boo, 380, 0.8, 0.5, 3.2);
+
+    // one voice: a sawtooth through a formant bandpass, gliding
+    function voice(at, dur, f0, f1, formant, gain) {
+      const o = ctx.createOscillator(); o.type = "sawtooth";
+      o.frequency.setValueAtTime(f0, at);
+      o.frequency.linearRampToValueAtTime(f1, at + dur * 0.6);
+      o.frequency.linearRampToValueAtTime(f1 * 0.94, at + dur);
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = formant; bp.Q.value = 2.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(gain, at + Math.min(0.12, dur * 0.25));
+      g.gain.setValueAtTime(gain * 0.85, at + dur * 0.7);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      o.connect(bp); bp.connect(g); g.connect(bus);
+      o.start(at); o.stop(at + dur + 0.05);
+    }
+    const nc = Math.round(n * cheer), nb = Math.round(n * boo);
+    for (let i = 0; i < nc; i++) {
+      const f = 240 + R() * 300;                               // men and women, a spread of throats
+      voice(t0 + 0.1 + R() * 1.1, 0.45 + R() * 0.7, f, f * (1.25 + R() * 0.25), 850 + R() * 600, 0.07);
+    }
+    for (let i = 0; i < nb; i++) {
+      const f = 95 + R() * 110;
+      voice(t0 + 0.05 + R() * 0.8, 1.1 + R() * 0.9, f, f * (0.82 + R() * 0.08), 360 + R() * 140, 0.09);
+    }
+
+    // claps
+    const claps = Math.round(n * 2.2 * cheer);
+    for (let i = 0; i < claps; i++) {
+      const at = t0 + 0.25 + R() * 2.4;
+      const src = nsrc(at, 0.05);
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 1300 + R() * 900;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.16, at);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.035);
+      src.connect(hp); hp.connect(g); g.connect(bus);
+    }
+    if (soundDebugEnabled) {
+      debugSoundPlayed("crowd", "procedural crowd cheer " + cheer.toFixed(2) + " boo " + boo.toFixed(2) + (out !== sfxBus ? " (far)" : ""), t0, soundDebugCaller());
+    }
+    return true;
+  }
+
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
+  CBZ.crowdVoice = crowdVoice;
+  CBZ.crowdVoiceAt = function (x, z, opts) {
+    const p = CBZ.player && CBZ.player.pos;
+    const o = Object.assign({}, opts || {});
+    if (p && isFinite(x) && isFinite(z)) o.dist = Math.hypot(x - p.x, (o.y == null ? p.y || 0 : o.y) - (p.y || 0), z - p.z);
+    delete o.y;
+    return crowdVoice(o);
+  };
   CBZ.nuclearShock = nuclearShock;
 
   /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
@@ -1515,6 +1621,11 @@
   CBZ.gunVoiceName = voiceFor; // weapon name -> bank voice, for player-fired call sites (full volume via CBZ.sfx)
   CBZ.setGunIndoor = function (v) { gunTailScale = v ? 0.35 : 1; }; // interiors choke the echo tail
   CBZ.getAudioCtx = function () { return ctx; };
+  // the one door into the mix for a voice synthesised outside this file:
+  // sfxBus -> hush/pressure stage -> master. Anything that builds its own nodes
+  // on getAudioCtx() connects HERE, never to ctx.destination (which bypasses
+  // the master and every duck).
+  CBZ.audioSfxBus = function () { return sfxBus; };
   CBZ.setAudioLoop = setAudioLoop;
   CBZ.stopAudioLoop = stopAudioLoop;
   CBZ.audioManifest = { effects: BANK, loops: LOOPS, guns: GUNS, samples: SAMPLES };
