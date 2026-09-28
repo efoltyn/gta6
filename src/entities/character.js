@@ -173,26 +173,47 @@
      z = cz + rz·cosα, y = −t (top joint at 0, bottom end at −1). `aq` is the
      aspect (half width / length) x100, which is all the domes need to come out
      round in real space. */
-  function limbCanon(kind, variant, lod, aq) {
-    const key = "C|" + kind + "|" + variant + "|" + lod + "|" + aq;
+  // the section rows between t0 and t1 (interpolated at the cut ends), scaled
+  function cutRows(rows, t0, t1, s) {
+    const at = (t) => {
+      let i = 0;
+      while (i < rows.length - 2 && rows[i + 1][0] < t) i++;
+      const A = rows[i], B = rows[i + 1] || A, u = B[0] > A[0] ? Math.min(1, Math.max(0, (t - A[0]) / (B[0] - A[0]))) : 0;
+      return [t, lerpN(A[1], B[1], u), lerpN(A[2], B[2], u), lerpN(A[3], B[3], u)];
+    };
+    const out = [at(t0)];
+    for (const r of rows) if (r[0] > t0 + 1e-4 && r[0] < t1 - 1e-4) out.push(r.slice());
+    out.push(at(t1));
+    for (const r of out) { r[1] *= s; r[2] *= s; }
+    return out;
+  }
+  /* cut = null (the whole segment) or [t0, t1, scale]: only that stretch of
+     the loft, its top dome only if t0 is 0 and its bottom dome only if t1 is
+     1, open at a cut end (the SHORT SLEEVE and the bare arm below it). */
+  function limbCanon(kind, variant, lod, aq, cut) {
+    const key = "C|" + kind + "|" + variant + "|" + lod + "|" + aq + (cut ? "|" + cut.join(",") : "");
     let g = LIMB_GEO[key];
     if (g) return g;
     const sh = LIMB_SHAPES[kind][variant];
-    const rows = limbRows(sh, lod);
+    const full = limbRows(sh, lod);
+    const rows = cut ? cutRows(full, cut[0], cut[1], cut[2]) : full;
     const n = lod >= 2 ? 2 : 3;                 // segments per quadrant (8 / 12 around)
     const nd = lod >= 2 ? 1 : 2;                // dome rings between the end section and the apex
     const a = aq / 100;
     const rings = [];
     const domeH = (row, k) => k * Math.max(row[1], row[2]) * a;
     const r0 = rows[0], rN = rows[rows.length - 1];
+    // a cut end is closed by a near-flat cap (the other piece covers it)
+    const topK = cut && cut[0] > 0 ? 0.03 : sh.top, botK = cut && cut[1] < 1 ? 0.03 : sh.bot;
+    const t0 = cut ? cut[0] : 0, t1 = cut ? cut[1] : 1;
     for (let k = nd + 1; k >= 1; k--) {         // top dome: apex first
       const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
-      rings.push([domeH(r0, sh.top) * Math.sin(th), r0[1] * c, r0[2] * c, r0[3]]);
+      rings.push([-t0 + domeH(r0, topK) * Math.sin(th), r0[1] * c, r0[2] * c, r0[3]]);
     }
     for (let i = 0; i < rows.length; i++) rings.push([-rows[i][0], rows[i][1], rows[i][2], rows[i][3]]);
     for (let k = 1; k <= nd + 1; k++) {         // bottom dome: apex last
       const th = (Math.PI / 2) * k / (nd + 1), c = Math.cos(th);
-      rings.push([-1 - domeH(rN, sh.bot) * Math.sin(th), rN[1] * c, rN[2] * c, rN[3]]);
+      rings.push([-t1 - domeH(rN, botK) * Math.sin(th), rN[1] * c, rN[2] * c, rN[3]]);
     }
     const RV = 4 * (n + 1), nv = rings.length * RV;
     const P = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
@@ -225,7 +246,7 @@
     g.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
     finishGeo(g);                                // smooth normals welded across the uv seams
     g.computeBoundingBox(); g.computeBoundingSphere();
-    g.userData.limbFace = F; g.userData.limbU = Q; g.userData.limbRows = rows;
+    g.userData.limbFace = F; g.userData.limbU = Q; g.userData.limbRows = full;   // (the WHOLE segment's: humanLimbHalfAt)
     g.name = "limb~" + key;
     g._shared = true;
     return (LIMB_GEO[key] = g);
@@ -237,11 +258,15 @@
   function limbBake(spec, lod, paint) {
     lod = lod >= 2 ? 2 : 1;
     const aq = Math.round(Math.min(0.8, Math.max(0.05, spec.w / 2 / spec.len)) * 100);
+    // a FLAT upper arm is only the sleeve (spec.cut); the bare arm below it is
+    // its own piece wearing the forearm's colour (limb()). Painted, the atlas
+    // draws the sleeve hem itself, so the whole segment bakes.
+    const cut = paint ? null : (spec.cut || null);
     const key = "B|" + spec.kind + "|" + spec.variant + "|" + lod + "|" + aq + "|" +
-      [spec.w, spec.d, spec.len, spec.y0, spec.boxH].map((x) => x.toFixed(4)).join(",") + "|" + (paint ? paint.key : "-");
+      [spec.w, spec.d, spec.len, spec.y0, spec.boxH].map((x) => x.toFixed(4)).join(",") + "|" + (paint ? paint.key : "-") + (cut ? "|" + cut.join(",") : "");
     let g = LIMB_GEO[key];
     if (g) return g;
-    const C = limbCanon(spec.kind, spec.variant, lod, aq);
+    const C = limbCanon(spec.kind, spec.variant, lod, aq, cut);
     const sx = spec.w / 2, sy = spec.len, sz = spec.d / 2, y0 = spec.y0;
     const cp = C.attributes.position.array, cn = C.attributes.normal.array, nv = cp.length / 3;
     const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3);
@@ -343,7 +368,42 @@
     lower.position.y = (LIMB_OVERLAP - lowerH) / 2;
     low.add(lower);
     grp.userData.lower = lower;
+    if (kind === "arm") armBare(upper, lower);
     return grp;
+  }
+  /* THE SHORT SLEEVE ENDS MID-UPPER-ARM. A flat-coloured arm is one colour per
+     segment (the crowd instancer tints each pooled part by ONE instance
+     colour), so a tee used to end at the elbow: shirt upper arm, skin forearm.
+     Now a flat upper arm bakes only its top SLEEVE_T (the sleeve), and a bare
+     piece hangs below it in the same pivot wearing the FOREARM's material —
+     read live, so every writer that paints a forearm (skin for a tee, shirt
+     for a long sleeve) paints this too, with no new slot to keep in step. A
+     long sleeve is the same colour top to bottom; a tee shows skin from mid-
+     bicep. Painted (clothes.js atlas on the upper arm), the whole segment
+     bakes and this piece hides: the atlas draws its own hem. The piece pools
+     like any flat limb (canonical loft, instance colour). */
+  const SLEEVE_T = 0.45;
+  function armBare(upper, lower) {
+    const us = upper.userData.limb;
+    us.cut = [0, SLEEVE_T, 1];
+    upper.geometry = limbBake(us, us.lod, null);
+    const ps = Object.assign({}, us, { cut: [SLEEVE_T - 0.04, 1, 0.985] });
+    const bare = new THREE.Mesh(limbBake(ps, 1, null), lower.material);
+    bare.name = "armBare";
+    bare.position.copy(upper.position);
+    bare.castShadow = bare.receiveShadow = true;
+    bare.userData.limbPiece = true;                   // (overlap-audit: this IS the upper arm; no back-ref — Object3D.copy JSON-clones userData)
+    let shown = true, gLod = 1, g = bare.geometry;
+    Object.defineProperty(bare, "material", { get() { return lower.material; }, set() {}, configurable: true });
+    Object.defineProperty(bare, "geometry", {                  // follows the upper arm's LOD (setLimbLod)
+      get() { if (us.lod !== gLod) { gLod = us.lod; g = limbBake(ps, gLod, null); } return g; }, set() {}, configurable: true,
+    });
+    Object.defineProperty(bare, "visible", {
+      get() { return shown && upper.visible !== false && !upper.userData.limbPaint && !!(upper.geometry && upper.geometry.userData && upper.geometry.userData.limb); },
+      set(v) { shown = v !== false; }, configurable: true,
+    });
+    upper.parent.add(bare);
+    upper.userData.bare = bare;
   }
   CBZ.humanLimbGeometry = partGeometry;      // limbs AND torso parts (TORSO block)
   CBZ.humanLimbHalfAt = limbHalfAt;
@@ -1145,6 +1205,103 @@
     return lerpN(jw, 1, sm01(u / 0.32));
   }
   function headForm(P) { return (P.child && (P.ageYears == null || P.ageYears < 12)) ? "c" : (P.fem ? "f" : "m"); }
+  /* The skull of form F as a signed distance (face frame: u 0 chin .. 0.60
+     crown): headGeometry's sculpt inverted point-wise (no socket/philtrum
+     carve). Brows and beards are laid ON this surface instead of floating
+     boxes; headwear.js keeps its own copy for hats. */
+  function skullSdfF(F, x, u, z) {
+    const back = cl01(-z / 0.30), B = back * back;
+    if (u < 0.24 && B > 0) u = (u - 0.12 * B) / (1 - 0.5 * B);
+    const xx = x / jawMul(F, u, z);
+    let zz = z;
+    if (zz > 0.1 && u < 0.12) zz -= F.chin * (1 - u / 0.12);
+    if (zz > 0) zz += F.brow * sm01((u - 0.40) / 0.20) * cl01(zz / 0.30);
+    const b = 0.30 - F.round;
+    const qx = Math.abs(xx) - b, qy = Math.abs(u - 0.30) - b, qz = Math.abs(zz) - b;
+    const ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0, oz = qz > 0 ? qz : 0;
+    return Math.sqrt(ox * ox + oy * oy + oz * oz) + Math.min(Math.max(qx, qy, qz), 0) - F.round;
+  }
+  // where a ray from o (inside the skull) along unit d leaves it: writes the
+  // surface point and its outward normal into out = {p:[3], n:[3]}
+  function skullHit(F, o, d, out) {
+    let last = 0;
+    for (let t = 0.01; t <= 0.72; t += 0.01) if (skullSdfF(F, o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t) < 0) last = t;
+    let lo = last, hi = last + 0.01;
+    for (let i = 0; i < 14; i++) { const m = (lo + hi) / 2; if (skullSdfF(F, o[0] + d[0] * m, o[1] + d[1] * m, o[2] + d[2] * m) < 0) lo = m; else hi = m; }
+    const t = (lo + hi) / 2, p = out.p, n = out.n, e = 0.002;
+    p[0] = o[0] + d[0] * t; p[1] = o[1] + d[1] * t; p[2] = o[2] + d[2] * t;
+    n[0] = skullSdfF(F, p[0] + e, p[1], p[2]) - skullSdfF(F, p[0] - e, p[1], p[2]);
+    n[1] = skullSdfF(F, p[0], p[1] + e, p[2]) - skullSdfF(F, p[0], p[1] - e, p[2]);
+    n[2] = skullSdfF(F, p[0], p[1], p[2] + e) - skullSdfF(F, p[0], p[1], p[2] - e);
+    const l = Math.hypot(n[0], n[1], n[2]) || 1;
+    n[0] /= l; n[1] /= l; n[2] /= l;
+    return out;
+  }
+  // a cheap deterministic 1-D value noise in [-1, 1] (edge raggedness, clumps)
+  function vnoise(x, seed) {
+    const i = Math.floor(x), f = x - i, h = (k) => { const s = Math.sin((k + seed * 17.13) * 127.1) * 43758.5453; return (s - Math.floor(s)) * 2 - 1; };
+    const w = f * f * (3 - 2 * f);
+    return h(i) + (h(i + 1) - h(i)) * w;
+  }
+  /* HAIR TEXTURE: one tiny shared canvas per kind, drawn WHITE-ish so the
+     material colour (the hair tone) multiplies through.
+       brow   strokes along u (inner end -> tail), rising at the inner end,
+              ragged alpha at the top/bottom edges (alphaTest cuts them)
+       beard  strokes along v (growing down), ragged at both v edges, wraps in u
+       stubble opaque: a light base speckled with dark dots (no alpha) */
+  const _hairTex = Object.create(null);
+  function hairTex(kind) {
+    if (kind in _hairTex) return _hairTex[kind];
+    let tex = null;
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const S = 64, cv = document.createElement("canvas"); cv.width = cv.height = S;
+        const x = cv.getContext && cv.getContext("2d");
+        if (x) {
+          let seed = kind === "brow" ? 911 : kind === "beard" ? 4271 : 77;
+          const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return (seed >>> 8) / 16777216; };
+          const grey = (k, a) => { const g = Math.round(255 * k); return "rgba(" + g + "," + g + "," + g + "," + a + ")"; };
+          x.clearRect(0, 0, S, S);
+          if (kind === "stubble") {
+            x.fillStyle = grey(1, 1); x.fillRect(0, 0, S, S);
+            for (let i = 0; i < 900; i++) { x.fillStyle = grey(0.35 + rnd() * 0.3, 1); x.fillRect(rnd() * S | 0, rnd() * S | 0, 1, 1); }
+          } else {
+            // canvas y 0 is texture v 1: the solid core, then strokes that
+            // run out past it by a random length (the ragged edge)
+            const brow = kind === "brow";
+            x.fillStyle = grey(0.82, 1); x.fillRect(0, S * 0.26, S, S * 0.48);
+            x.lineWidth = 1.3; x.lineCap = "round";
+            for (let i = 0; i < 520; i++) {
+              const px = rnd() * S, py = S * (0.06 + rnd() * 0.88);
+              const len = 4 + rnd() * 9;
+              let ang;
+              if (brow) { const t = px / S; ang = -(1.15 - 0.95 * t) + (rnd() - 0.5) * 0.35; }   // steep at the inner end, flat to the tail
+              else ang = Math.PI / 2 + (rnd() - 0.5) * 0.5;                                       // hanging down
+              const dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
+              x.strokeStyle = grey(0.55 + rnd() * 0.45, 1);
+              for (const w of [-S, 0, S]) { x.beginPath(); x.moveTo(px + w, py); x.lineTo(px + w + dx, py + dy); x.stroke(); }
+            }
+          }
+          tex = new THREE.CanvasTexture(cv);
+          if (kind !== "brow") tex.wrapS = THREE.RepeatWrapping;
+          tex._shared = true;
+        }
+      }
+    } catch (e) { tex = null; }
+    return (_hairTex[kind] = tex);
+  }
+  // brow / beard material: the hair tone over its stroke texture, alpha-tested
+  // (stubble opaque). Cached per (tone, kind); plain cmat when there is no canvas.
+  const _hairMats = Object.create(null);
+  function faceHairMat(hex, kind) {
+    const k = hex + "|" + kind;
+    if (_hairMats[k]) return _hairMats[k];
+    const map = hairTex(kind);
+    if (!map) return (_hairMats[k] = cmat(hex));
+    const m = new THREE.MeshLambertMaterial({ color: hex, map: map, alphaTest: kind === "stubble" ? 0 : 0.5 });
+    m._shared = true;
+    return (_hairMats[k] = m);
+  }
 
   /* ==== THE FACE — EYES IN SOCKETS, LIDS THAT CLOSE, A MOUTH THAT OPENS ====
      Owner 2026-09-28: "eyes and mouths much more realistic".
@@ -1208,6 +1365,77 @@
   function lidCloseAngle(si, fk) { const S = lidShape(si, fk); return S.eU - S.eL + 0.24; }
   const SOCKET = { ax: 0.084, ayUp: 0.066, ayDn: 0.050, depth: 0.24 };
 
+  /* THE EAR (was a 0.048 x 0.150 x 0.100 rounded box: a slab from the front).
+     One closed surface in the ear's own plane (a up, b toward the face, w
+     out of the head), lofted in rings from the front centre out to the rim
+     and back over the rear face. The front is a relief: the HELIX rolls round
+     the top and back, the ANTIHELIX ridge inside it, a CONCHA bowl in front of
+     the canal, the TRAGUS bump, a soft LOBE. The plane tilts back (beta) and
+     swings out from its front edge (alpha) so the rim stands off the skull
+     behind it. headwear.js earSdf mirrors EAR_SPEC; HAIR_EAR boxes it.
+     Face frame (u 0 chin .. 0.60 crown), shifted into the head's centred frame. */
+  const EAR_SPEC = { x0: 0.290, yc: 0.305, zc: -0.035, H: 0.150, W: 0.100, bf: 0.040, alpha: 0.35, beta: 0.20 };
+  function earGeometry(F, s, far) {
+    const E = EAR_SPEC, k = F.ear || 1, ea = E.H / 2 * k, eb = E.W / 2 * k;
+    const NT = far ? 10 : 16;
+    const front = far ? [0, 0.6, 0.86, 1] : [0, 0.28, 0.48, 0.62, 0.74, 0.84, 0.93, 1];
+    const backR = far ? [0.8, 0] : [0.9, 0.55, 0];
+    const ca = Math.cos(E.alpha), sa = Math.sin(E.alpha), cb = Math.cos(E.beta), sb = Math.sin(E.beta);
+    const bf = E.bf * k;
+    const rings = front.length + backR.length, P = new Float32Array(rings * NT * 3);
+    const g1 = (x, w) => Math.exp(-(x / w) * (x / w));
+    const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    // front relief height (w) at polar (rho, th) / local (a, b)
+    const relief = function (rho, th, a, b) {
+      const T = th < 0 ? th + 2 * Math.PI : th;                                 // 0 front, pi/2 top, pi back, 3pi/2 lobe
+      const hW = sm01((T - 0.3) / 0.5) * (1 - sm01((T - 4.1) / 0.55));         // the helix: over the top and down the back
+      const aW = sm01((T - 0.9) / 0.5) * (1 - sm01((T - 3.9) / 0.5));
+      const lobe = g1(T - 4.75, 0.55) * sm01(rho / 0.5);
+      const trag = g1(wrapA(T - 6.0), 0.3) * g1(rho - 0.70, 0.12);
+      const conc = g1(Math.hypot((b - 0.15 * eb) / eb, (a + 0.10 * ea) / ea), 0.34);
+      if (far) return k * Math.max(0.004, 0.012 + 0.014 * g1(rho - 0.84, 0.12) * hW + 0.008 * lobe - 0.008 * conc);
+      return k * Math.max(0.003, 0.013 + 0.019 * g1(rho - 0.84, 0.085) * hW + 0.011 * g1(rho - 0.58, 0.10) * aW
+        + 0.010 * lobe + 0.009 * trag - 0.013 * conc);
+    };
+    let o = 0;
+    const put = function (rho, th, w) {
+      const c = Math.cos(th), sn = Math.sin(th);
+      // the outline: an egg, the lobe narrower and a touch forward, widest up top
+      let b = eb * c * (sn < 0 ? 1 - 0.32 * -sn : 1 + 0.06 * sn) + (sn < 0 ? 0.12 * eb * -sn : 0);
+      let a = ea * sn;
+      b *= rho; a *= rho;
+      // tilt back, then swing out about the front edge
+      const b1 = b * cb - a * sb, a1 = a * cb + b * sb;
+      const db = b1 - bf, db2 = db * ca + w * sa, w2 = -db * sa + w * ca;
+      P[o++] = s * (E.x0 + w2); P[o++] = E.yc + a1 - 0.30; P[o++] = E.zc + bf + db2;
+    };
+    for (let r = 0; r < front.length; r++) for (let j = 0; j < NT; j++) {
+      const th = j / NT * 2 * Math.PI, c = Math.cos(th), sn = Math.sin(th);
+      const rho = front[r], rr = rho >= 1 ? front[r - 1] : rho;
+      const w = relief(rr, th, ea * sn * rr, eb * c * rr);
+      put(rho, th, rho >= 1 ? 0.5 * w : w);                                    // the last ring is the rolled edge
+    }
+    for (let r = 0; r < backR.length; r++) for (let j = 0; j < NT; j++) put(backR[r], j / NT * 2 * Math.PI, backR[r] > 0.85 ? 0.002 * k : 0);
+    const I = [];
+    for (let r = 0; r < rings - 1; r++) for (let j = 0; j < NT; j++) {
+      const a = r * NT + j, b = r * NT + (j + 1) % NT, c = a + NT, d = b + NT;
+      I.push(a, b, d, a, d, c);
+    }
+    // closed surface: flip the winding if its signed volume says it faces in
+    let vol = 0;
+    for (let t = 0; t < I.length; t += 3) {
+      const A = I[t] * 3, B = I[t + 1] * 3, C = I[t + 2] * 3;
+      vol += P[A] * (P[B + 1] * P[C + 2] - P[B + 2] * P[C + 1]) - P[A + 1] * (P[B] * P[C + 2] - P[B + 2] * P[C]) + P[A + 2] * (P[B] * P[C + 1] - P[B + 1] * P[C]);
+    }
+    if (vol < 0) for (let t = 0; t < I.length; t += 3) { const x = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = x; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(P.length), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(P.length / 3 * 2), 2));
+    g.setIndex(I);
+    return flatUV(finishGeo(g), PLAIN_U, PLAIN_V);
+  }
+
   function headGeometry(form, nose, far) {
     const fk = HEAD_FORMS[form] ? form : "m";
     const ni = Math.max(0, Math.min(2, nose | 0));
@@ -1245,6 +1473,33 @@
         v.y = u - 0.30;
       });
       finishGeo(skull);
+      if (!far) {
+        // THE SOCKET RING: the carve spans only a few grid cells, so its pit
+        // is steep facets and the smoothed normals of the rim vertices round it
+        // face into the pit (down above the eye, up below) — a dark ring the
+        // lids read pale against. Shade the socket and its rim with the SMOOTH
+        // uncarved skull's normal instead (skullSdfF), keeping 12% of the pit's
+        // own so the lid junction holds a slight crease shade.
+        const sp = skull.attributes.position, sn = skull.attributes.normal, e = 0.002;
+        for (let i = 0; i < sp.count; i++) {
+          const x = sp.getX(i), u = sp.getY(i) + 0.30, z = sp.getZ(i);
+          if (z < 0.05) continue;
+          const dx = Math.abs(x) - EYE.x, dy = u - EYE.y;
+          const ay = dy > 0 ? SOCKET.ayUp : SOCKET.ayDn;
+          const e2 = (dx / SOCKET.ax) * (dx / SOCKET.ax) + (dy / ay) * (dy / ay);
+          if (e2 >= 1.8) continue;
+          const w = 0.88 * (1 - sm01((e2 - 1.0) / 0.8));
+          // the surface the carve left, at the rim (z pushed out to it)
+          const zs = z + (e2 < 1 ? SOCKET.depth * (1 - e2) * (1 - e2) : 0);
+          let gx = skullSdfF(F, x + e, u, zs) - skullSdfF(F, x - e, u, zs);
+          let gy = skullSdfF(F, x, u + e, zs) - skullSdfF(F, x, u - e, zs);
+          let gz = skullSdfF(F, x, u, zs + e) - skullSdfF(F, x, u, zs - e);
+          const gl = Math.hypot(gx, gy, gz) || 1;
+          const nx = sn.getX(i) * (1 - w) + gx / gl * w, ny = sn.getY(i) * (1 - w) + gy / gl * w, nz = sn.getZ(i) * (1 - w) + gz / gl * w;
+          const l = Math.hypot(nx, ny, nz) || 1;
+          sn.setXYZ(i, nx / l, ny / l, nz / l);
+        }
+      }
       const parts = [skull];
       // NOSE — a wedge: narrow bridge between the eyes, the tip and nostrils proud
       const nw = NOSE_W[ni] * F.nose, nh = 0.165 * (fk === "c" ? 0.78 : 1), nd = 0.066 * F.nose + 0.012;
@@ -1265,14 +1520,8 @@
       nose3.translate(0, 0.215 + nh / 2 - 0.30, 0.30 + nd / 2 - 0.024);
       flatUV(finishGeo(nose3), PLAIN_U, PLAIN_V);
       parts.push(nose3);
-      // EARS — outer faces clear the widest side-hair panel (see hairGeometry)
-      for (const s of [-1, 1]) {
-        const ear = rbox(0.048, 0.150 * F.ear, 0.100 * F.ear, 0.022, [1, 2, 2]);
-        sculpt(ear, function (v) { v.x += s * 0.012 * cl01(-v.z / 0.05); });   // the back rim flares out
-        ear.translate(s * 0.316, 0.305 - 0.30, -0.035);
-        flatUV(finishGeo(ear), PLAIN_U, PLAIN_V);
-        parts.push(ear);
-      }
+      // EARS — a real ear each side (see earGeometry), inside HAIR_EAR
+      for (const s of [-1, 1]) parts.push(earGeometry(F, s, far));
       // NECK — a real column from inside the body up into the skull: the
       // sternocleidomastoids, the notch, an Adam's apple (see THE NECK COLUMN)
       parts.push(neckColumnGeometry(F, fk, far));
@@ -1292,29 +1541,52 @@
   const MOUTH_REST_Y = 0.16;
   const BROW_REST_Y = 0.448;
   // brow expression: n neutral, a angry/pained (inner ends down), f fear/surprise (inner ends up)
+  /* BROWS (were two rounded boxes 3.4 cm deep standing off the forehead). Each
+     brow is a thin strip LAID ON the skull (skullHit): thick and a touch
+     lifted at the inner head, arching, tapering to a thin tail that wraps
+     round the brow ridge; its edges dive just under the skin. UV u runs head
+     -> tail, v across, for the stroke texture (faceHairMat "brow"). Built in
+     the face frame, shifted so the mesh origin is (0, BROW_REST_Y, 0.303). */
+  const BROW_FORM = {
+    m: { xi: 0.070, xt: 0.218, y0: 0.424, arch: 0.009, drop: 0.013, wi: 0.032, wt: 0.009, th: 0.0050 },
+    f: { xi: 0.078, xt: 0.212, y0: 0.428, arch: 0.017, drop: 0.017, wi: 0.021, wt: 0.005, th: 0.0035 },
+    c: { xi: 0.074, xt: 0.205, y0: 0.425, arch: 0.009, drop: 0.010, wi: 0.020, wt: 0.006, th: 0.0035 },
+  };
   function browGeometry(form, expr) {
     const fk = form === "f" ? "f" : (form === "c" ? "c" : "m");
     const ek = expr === "a" || expr === "f" ? expr : "n";
     return shared("brow|" + fk + (ek === "n" ? "" : "|" + ek), function () {
-      const parts = [];
-      const w = fk === "f" ? 0.128 : 0.146, h = fk === "f" ? 0.022 : (fk === "c" ? 0.024 : 0.034), d = 0.034;
-      const arch = fk === "f" ? 0.016 : 0.006;
+      const B = BROW_FORM[fk], F = HEAD_FORMS[fk];
+      const NT = 12, NV = 4, P = [], U = [], I = [], hit = { p: [0, 0, 0], n: [0, 0, 0] }, fwd = [0, 0, 1];
       for (const s of [-1, 1]) {
-        const b = rbox(w, h, d, h * 0.45, [4, 1, 1]);
-        sculpt(b, function (v) {
-          const t = cl01(v.x / w + 0.5), out = s > 0 ? t : 1 - t;          // 0 at the nose end
-          v.y *= lerpN(1.15, 0.65, out);                                    // thick head, thin tail
-          v.y += arch * (1 - Math.pow(2 * out - 1.1, 2)) - (fk === "m" ? 0.006 * out : 0);
-          v.z -= 0.012 * out * out;                                         // the tail wraps round the brow
-          const inner = (1 - out) * (1 - out);
-          if (ek === "a") { v.y -= 0.020 * inner - 0.004 * out; v.z += 0.005 * inner; v.x -= s * 0.006 * inner; }
-          else if (ek === "f") { v.y += 0.016 * inner - 0.003 * out; }
-        });
-        b.translate(s * 0.145, -h / 2 - arch, 0);
-        flatUV(finishGeo(b), 0.5, 0.5);
-        parts.push(b);
+        const base = P.length / 3;
+        for (let i = 0; i <= NT; i++) {
+          const t = i / NT, inner = (1 - t) * (1 - t);
+          let yc = B.y0 + B.arch * sm01(t / 0.62) - B.drop * sm01((t - 0.62) / 0.38);
+          let x = B.xi + (B.xt - B.xi) * t, lift = 0;
+          if (ek === "a") { yc -= 0.020 * inner - 0.004 * t; x -= 0.006 * inner; lift = 0.004 * inner; }   // knit: down, in, bunched
+          else if (ek === "f") yc += 0.016 * inner - 0.003 * t;
+          const w = (B.wi + (B.wt - B.wi) * Math.pow(t, 0.9)) * (t < 0.08 ? 0.7 + 0.3 * t / 0.08 : 1);
+          for (let j = 0; j <= NV; j++) {
+            const v = -1 + 2 * j / NV;
+            skullHit(F, [s * x, yc + v * w / 2, 0], fwd, hit);
+            const h = j === 0 || j === NV ? -0.0015 : (B.th * (1 - 0.55 * t) + lift) * Math.sqrt(1 - v * v);
+            P.push(hit.p[0] + hit.n[0] * h, hit.p[1] + hit.n[1] * h - BROW_REST_Y, hit.p[2] + hit.n[2] * h - 0.303);
+            U.push(t, (v + 1) / 2);
+          }
+        }
+        const C = NV + 1;
+        for (let i = 0; i < NT; i++) for (let j = 0; j < NV; j++) {
+          const a = base + i * C + j, b = a + C;
+          windTri(P, I, a, b, b + 1, 0, 0, 1); windTri(P, I, a, b + 1, a + 1, 0, 0, 1);
+        }
       }
-      return mergeGeos(parts);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(U), 2));
+      g.setIndex(I);
+      g.computeVertexNormals();
+      return g;
     });
   }
 
@@ -1483,7 +1755,21 @@
         }
         parts.push(gridGeo(P, I));
       }
-      return mergeGeos(parts);
+      /* THE PALE RING was the lid's own normals: a sphere's, so the open upper
+         lid faced UP (0.4-0.9 rad) and caught the sun while the socket rim and
+         brow beside it face forward/down — a bright band round every eye (and
+         a dark one under it). Tip the shading normals toward the face plane
+         (upper down, lower up) so the lid lights like the skin it meets; the
+         silhouette stays the sphere's. It also wears the head's own material
+         (see the build) and its plain atlas texel. */
+      const g = mergeGeos(parts), nrm = g.attributes.normal, dl = up ? 0.55 : -0.50;
+      const cd = Math.cos(dl), sd = Math.sin(dl);
+      for (let i = 0; i < nrm.count; i++) {
+        const ny = nrm.getY(i), nz = nrm.getZ(i);
+        nrm.setXYZ(i, nrm.getX(i) * 0.85, ny * cd - nz * sd, nz * cd + ny * sd);
+      }
+      for (let i = 0; i < nrm.count; i++) { const x = nrm.getX(i), y = nrm.getY(i), z = nrm.getZ(i), l = Math.hypot(x, y, z) || 1; nrm.setXYZ(i, x / l, y / l, z / l); }
+      return flatUV(g, PLAIN_U, PLAIN_V);
     });
   }
   // the upper lash line: a dark band along the upper lid's edge that flares
@@ -1715,17 +2001,89 @@
     if (!near) facePose(rig, REST_POSE);
     return true;
   }
-  /* BEARDS follow the tapered jaw: each piece is authored around the skull,
-     then squeezed by the SAME jawMul the head uses, with a ~0.02 margin, so
-     the beard hugs the chin instead of standing off it as a crate. One merged
-     mesh per (style, form). */
+  /* BEARDS. Full / stubble / goatee were rounded boxes squeezed by jawMul — a
+     crate round the jaw with a flat top edge. Now each is a SHELL laid on the
+     skull (skullHit): columns fan round the jaw from a point inside the head,
+     each running from the neckline under the chin (just ahead of the neck
+     column) up to the cheek line, which sweeps from under the lower lip past
+     the mouth corner up to the sideburn in front of the ear. Both edges are
+     jittered (vnoise) and the stroke texture's alpha rags them further; the
+     thickness swells at the chin, thins up the cheek and dives under the skin
+     at every edge, with clumpy variation. The moustache is still the shaped
+     rbox. One merged mesh per (style, form). */
+  const lerpKnots = (K, x) => {
+    if (x <= K[0][0]) return K[0][1];
+    for (let i = 1; i < K.length; i++) if (x <= K[i][0]) return lerpN(K[i - 1][1], K[i][1], (x - K[i - 1][0]) / (K[i][0] - K[i - 1][0]));
+    return K[K.length - 1][1];
+  };
+  const BEARD_SHELLS = {
+    full: { phi: 1.46, NP: 28, NS: 10, top: [[0, 0.116], [0.26, 0.122], [0.40, 0.150], [0.58, 0.188], [0.85, 0.214], [1.15, 0.248], [1.46, 0.335]],
+            thick: [[0, 0.030], [0.5, 0.024], [1.0, 0.014], [1.46, 0.007]] },
+    stubble: { phi: 1.46, NP: 22, NS: 7, top: [[0, 0.118], [0.26, 0.124], [0.40, 0.152], [0.58, 0.190], [0.85, 0.214], [1.15, 0.244], [1.46, 0.320]],
+               thick: [[0, 0.0024]], flat: true },
+    goatee: { phi: 0.36, NP: 8, NS: 8, top: [[0, 0.116], [0.2, 0.120], [0.36, 0.130]], thick: [[0, 0.022], [0.36, 0.012]] },
+  };
+  function beardShell(F, S, seed) {
+    const C = [0, 0.22, 0.02], NK = 64, hit = { p: [0, 0, 0], n: [0, 0, 0] };
+    const rN = F.neck[1] * 0.925;
+    const P = [], N = [], U = [], I = [], d = [0, 0, 0];
+    for (let i = 0; i <= S.NP; i++) {
+      const phi = -S.phi + 2 * S.phi * i / S.NP, ap = Math.abs(phi);
+      const top = lerpKnots(S.top, ap) + 0.006 * vnoise(phi * 9, seed);
+      const clear = 0.012 + 0.005 * vnoise(phi * 7, seed + 3);
+      // walk up the column: the skin path from the neckline to the cheek line
+      const path = [];
+      for (let k = 0; k < NK; k++) {
+        const th = -1.52 + 2.3 * k / (NK - 1), ct = Math.cos(th);
+        d[0] = Math.sin(phi) * ct; d[1] = Math.sin(th); d[2] = Math.cos(phi) * ct;
+        skullHit(F, C, d, hit);
+        const p = hit.p, dn = Math.hypot(p[0], (p[2] + 0.024) / 0.94) - rN;
+        if (!path.length && dn < clear) continue;
+        if (p[1] > top) {
+          const q = path[path.length - 1];
+          if (q) { const f = (top - q[1]) / (p[1] - q[1]); path.push([q[0] + (p[0] - q[0]) * f, top, q[2] + (p[2] - q[2]) * f, hit.n[0], hit.n[1], hit.n[2]]); }
+          break;
+        }
+        path.push([p[0], p[1], p[2], hit.n[0], hit.n[1], hit.n[2]]);
+      }
+      const L = [0];
+      for (let k = 1; k < path.length; k++) L.push(L[k - 1] + Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1], path[k][2] - path[k - 1][2]));
+      const tot = L[L.length - 1] || 1e-6;
+      const side = 0.35 + 0.65 * sm01((S.phi - ap) / 0.15);
+      for (let j = 0; j <= S.NS; j++) {
+        const s = j / S.NS, want = s * tot;
+        let k = 1; while (k < path.length - 1 && L[k] < want) k++;
+        const a = path[Math.max(0, k - 1)], b = path[Math.min(k, path.length - 1)];
+        const f = b === a ? 0 : cl01((want - L[k - 1]) / ((L[k] - L[k - 1]) || 1e-6));
+        const px = lerpN(a[0], b[0], f), py = lerpN(a[1], b[1], f), pz = lerpN(a[2], b[2], f);
+        let nx = lerpN(a[3], b[3], f), ny = lerpN(a[4], b[4], f), nz = lerpN(a[5], b[5], f);
+        const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+        const prof = S.flat ? 1 : sm01(s / 0.10) * (1 - 0.82 * sm01((s - 0.30) / 0.70));
+        const h = (j === 0 || j === S.NS) ? -0.0015
+          : lerpKnots(S.thick, ap) * prof * side * (1 + 0.18 * vnoise(phi * 14 + s * 5, seed + 1));
+        P.push(px + nx * h, py + ny * h, pz + nz * h); N.push(nx, ny, nz);
+        U.push((phi + S.phi) * 1.3, s);
+      }
+    }
+    const C2 = S.NS + 1;
+    for (let i = 0; i < S.NP; i++) for (let j = 0; j < S.NS; j++) {
+      const a = i * C2 + j, b = a + C2;
+      windTri(P, I, a, b, b + 1, N[a * 3], N[a * 3 + 1], N[a * 3 + 2]);
+      windTri(P, I, a, b + 1, a + 1, N[a * 3], N[a * 3 + 1], N[a * 3 + 2]);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(U), 2));
+    g.setIndex(I);
+    g.computeVertexNormals();
+    return g;
+  }
   function beardGeometry(style, form) {
     const fk = HEAD_FORMS[form] ? form : "m";
     return shared("beard|" + style + "|" + fk, function () {
       const F = HEAD_FORMS[fk];
       const parts = [];
-      const hug = (g) => sculpt(g, function (v) { v.x *= jawMul(F, v.y, v.z); });
-      const put = (g, x, y, z, hugJaw) => { g.translate(x, y, z); if (hugJaw) hug(g); parts.push(flatUV(finishGeo(g), 0.5, 0.5)); };
+      const put = (g, x, y, z) => { g.translate(x, y, z); parts.push(flatUV(finishGeo(g), 0.5, 0.5)); };
       // a moustache sits ON the skin between nose and upper lip: thick in the
       // middle, thinning and drooping to the mouth corners, wrapped round the face
       const moustache = () => {
@@ -1736,23 +2094,11 @@
           v.y -= 0.022 * t2;
           v.z -= 0.028 * t2;
         });
-        put(m, 0, 0.203, 0.312, false);
+        put(m, 0, 0.203, 0.312);
       };
-      if (style === "full" || style === "stubble") {
-        const thick = style === "full" ? 1 : 0.55;
-        put(rbox(0.60 + 0.04 * thick, 0.165 + 0.02 * thick, 0.44, 0.09, [4, 2, 3]), 0, 0.058 - 0.01 * thick, 0.090 + 0.012 * thick, true);
-        for (const s of [-1, 1]) put(rbox(0.030 + 0.03 * thick, 0.22, 0.20, 0.02, [1, 2, 2]), s * (0.290 + 0.012 * thick), 0.205, 0.045, true);
-        if (style === "full") moustache();
-      } else if (style === "goatee") {
-        // a goatee: under the lower lip, tapering to the point of the chin
-        const gt = rbox(0.15, 0.115, 0.05, 0.03, [4, 4, 2]);
-        sculpt(gt, function (v) {
-          const u = cl01((v.y + 0.0575) / 0.115);
-          v.x *= lerpN(0.66, 1, u);
-          v.z -= 0.02 * Math.pow(2 * v.x / 0.15, 2);
-        });
-        put(gt, 0, 0.068, 0.300, false);
-        moustache();
+      if (BEARD_SHELLS[style]) {
+        parts.push(beardShell(F, BEARD_SHELLS[style], style.length * 7 + fk.charCodeAt(0)));
+        if (style !== "stubble") moustache();
       } else if (style === "moustache") {
         moustache();
       }
@@ -1824,12 +2170,6 @@
   // city of skins lands on a handful of cached materials
   function lipTone(skin) {
     const t = mixHex(skin, 0x8a3438, 0.34), q = (c) => Math.min(255, Math.round(c * 0.78 / 8) * 8);
-    return (q(t >> 16 & 255) << 16) | (q(t >> 8 & 255) << 8) | q(t & 255);
-  }
-  // lids: the skin a shade down (the socket's own shade), so an open eye has
-  // no pale ring round it; quantised like the lips
-  function lidTone(skin) {
-    const t = mixHex(skin, 0x3a2418, 0.09), q = (c) => Math.min(255, Math.round(c / 4) * 4);
     return (q(t >> 16 & 255) << 16) | (q(t >> 8 & 255) << 8) | q(t & 255);
   }
   function browTone(hair) { return lumOf(hair) > 0.35 ? mixHex(hair, 0x2a1f16, 0.35) : mixHex(hair, 0x0a0806, 0.25); }
@@ -2956,6 +3296,90 @@
   const TORSO_COUNTS = {   // [near, far] rings
     chest: [20, 10], chestTop: [16, 8], waist: [7, 4], pelvis: [9, 5], jacket: [20, 10], band: [3, 2], vest: [12, 6],
   };
+  const JACKET_HUG = 0.003;    // the least a jacket stands off the body (model units): under the 4 mm cloth tolerance, clear of a z-fight
+  // x of the arm's INNER surface at body height y: below the shoulder pivot
+  // the pivot at AX, tilted in by the idle carry (walk/run keep it), the
+  // upper loft's fullest section (0.99 R), 1.25x the drop for a swung arm
+  // reaching the same height from further down its length; above it the
+  // loft's top dome (~0.81 R high), which a swing turns about the pivot.
+  function jacketArmIn(S) {
+    const tilt = Math.min(0, S.P.armOutZ || 0) - 0.02, R = S.R, pad = 0.004 * S.vs;
+    return function (y) {
+      const h = y - S.shoulderY;
+      if (h <= 0) return S.AX - 0.99 * R + 1.25 * tilt * -h - pad;
+      // (an arm held out — armour pushes it, ch.armWear — tips the dome in)
+      const q = h / R;
+      return q >= 1 ? Infinity : S.AX - 0.99 * R * Math.sqrt(1 - q * q) - 0.35 * h - pad;
+    };
+  }
+  /* The last word on a jacket VERTEX, at its own (lifted) height. A ring is
+     one superellipse, so a ring held to the hug at the flank but a full
+     offset deeper front and back bulges at its flank CORNERS (1 cm on a
+     child's waist) — right where a hanging arm is. So, per vertex:
+       1. within an arm's depth of the flank, no further out than the body +
+          hug, or the arm's inner line (armIn), whichever is further;
+       2. at least the hug off the body (column and pelvis sections, with the
+          body's relief), pushed straight out from the section centre if not —
+          a lifted front or a squarer body ring above can bring a vertex onto
+          the body, and a coplanar patch there z-fights. */
+  /* …and the ring itself is rounded first (lower n) until its flank, out to
+     about an arm's depth, stays within `gap` of the body without touching it,
+     so the per-vertex cap is only a last trim. */
+  function jacketFlankN(S, y, r, gap) {
+    const t = S.at(y), p = (y >= S.pBot && y <= S.pTop + 0.03) ? S.pel(Math.min(y, S.pTop)) : null;
+    const sx = (a, zz, n, z) => (z >= zz ? 0 : a * Math.pow(1 - Math.pow(z / zz, n), 1 / n));
+    const body = (z, fr) => Math.max(sx(t.a, fr ? t.zf : t.zb, t.n, z), p ? sx(p.a, fr ? p.zf : p.zb, p.n, z) : 0);
+    const zArm = 1.3 * S.R;
+    let best = r.n, bestBad = Infinity;
+    for (let n = r.n; n >= 1.5; n -= 0.05) {
+      let bad = 0, ok = true;
+      for (let fr = 0; fr < 2 && ok; fr++) {
+        const zz = fr ? r.zf : r.zb;
+        for (let k = 1; k <= 16; k++) {
+          const z = zz * k / 17, xs = sx(r.a, zz, n, z), xb = body(z, fr);
+          if (xb > 0 && xs < xb + 0.7 * JACKET_HUG) { ok = false; break; }   // would touch the body: z-fight
+          if (z <= zArm) bad = Math.max(bad, xs - xb - gap);
+        }
+      }
+      if (!ok) break;                                          // rounder only gets closer
+      if (bad < bestBad) { bestBad = bad; best = n; }
+      if (bad <= 0) break;
+    }
+    return best;
+  }
+  const _jc = [0, 0];
+  // twice the hug under the shoulder flare: the surfaces there slope steeply,
+  // so a horizontal gap is a much thinner one along the normal
+  function jacketHug(S, y) { return y > S.shoulderY - 1.3 * S.R ? 2 * JACKET_HUG : JACKET_HUG; }
+  function jacketFit(S, y, out, armIn) {
+    const k = (y - S.base) / S.sp, m = jacketHug(S, y);
+    const secs = [S.at(y)];
+    if (y >= S.pBot && y <= S.pTop) secs.push(S.pel(y));
+    const zv = out[1];
+    // the arms hang between the thigh tops (below them the thighs set the hem)
+    // and the shoulder flare (where the body itself meets the arm)
+    if (Math.abs(zv) < S.R && y > S.hipY + 0.25 * S.P.legW && y < S.shoulderY - 1.3 * S.R) {
+      let xb = 0;
+      for (const R of secs) {
+        const zz = zv - R.zc >= 0 ? R.zf : R.zb, q = Math.abs(zv - R.zc) / zz;
+        if (q < 1) xb = Math.max(xb, R.a * Math.pow(1 - Math.pow(q, R.n), 1 / R.n));
+      }
+      // the arm is round: off its axis its inner face stands further out
+      const round = S.R - Math.sqrt(Math.max(0, S.R * S.R - zv * zv));
+      const cap = Math.max(xb + 1.3 * m, armIn(y) + 0.6 * round);
+      if (Math.abs(out[0]) > cap) out[0] = Math.sign(out[0]) * cap;
+    }
+    for (let pass = 0; pass < 2; pass++) for (const R of secs) {
+      const x = out[0], zr = out[1] - R.zc;
+      const zz = zr >= 0 ? R.zf : R.zb;
+      const cz = Math.max(-1, Math.min(1, zr / zz));
+      const zb = zr - (R === secs[0] ? featZ(S, k, x / R.a, cz) : 0);   // the body's own relief at this spot
+      const F = Math.pow(Math.abs(x) / R.a, R.n) + Math.pow(Math.abs(zb) / zz, R.n);
+      const rho = Math.pow(F, 1 / R.n), rad = Math.hypot(x, zb);
+      const need = 1 + m / Math.max(rad, 1e-4);
+      if (rho < need) { const s = need / Math.max(rho, 1e-4); out[0] = x * s; out[1] = R.zc + zb * s + (zr - zb); }
+    }
+  }
   /* The rings of a part, TOP first, each a section record plus the relief
      function the surface wears. Shells (jacket / band / vest) are the column
      inflated off the body: the section is widened by `off`, never tucks in
@@ -2991,15 +3415,33 @@
     const off = shell ? spec.off : 0;
     const drapeR = part === "jacket" ? S.at(S.base + 0.60 * S.sp) : null;
     const drapeK = part === "jacket" ? (S.P.fem ? 0.90 : 0.96) : 0;
+    const armIn = part === "jacket" ? jacketArmIn(S) : null;
     const ringAt = function (y) {
       const r = S.at(y);
       r.tf = S.tf; r.tb = S.tb; r.k = (y - S.base) / S.sp;
+      if (shell && y < S.pTop + 0.03) {                         // never inside the pelvis (nor, a jacket, its seat)
+        const p = S.pel(Math.max(S.pBot, Math.min(y, S.pTop)));
+        const seat = part === "jacket" ? S.glute * 0.16 * S.pd * gss(y - (S.hipY - 0.015 * S.pk), 0.055 * S.pk) : 0;
+        r.a = Math.max(r.a, p.a); r.zf = Math.max(r.zf, p.zf); r.zb = Math.max(r.zb, p.zb + seat);
+      }
+      const aHere = r.a;
       if (shell) {
-        if (y < S.pTop + 0.03) { const p = S.pel(Math.max(S.pBot, Math.min(y, S.pTop))); r.a = Math.max(r.a, p.a); r.zf = Math.max(r.zf, p.zf); r.zb = Math.max(r.zb, p.zb); }
         if (drapeR && y < drapeR.y) { r.a = Math.max(r.a, drapeR.a * drapeK); r.zf = Math.max(r.zf, drapeR.zf * drapeK); r.zb = Math.max(r.zb, drapeR.zb * drapeK); }
         if (spec.flat) { r.n = Math.max(r.n, spec.flat); }
         r.a += off; r.zf += off; r.zb += off;
-        if (r.k > 1) r.y += off * 0.9;                        // the shoulder top rises with the shell
+        // THE JACKET HANGS INSIDE THE ARMS: the sleeves are painted on the arm
+        // lofts, so the shell's flank stops short of the arm's inner surface
+        // (the idle carry tilts the arm in; a swing only moves it in z), never
+        // closer to the body than JACKET_HUG (a coplanar shell would z-fight).
+        if (armIn) {                                            // (+ per vertex: jacketFit)
+          const aFree = r.a;
+          r.a = Math.max(aHere + jacketHug(S, y), Math.min(r.a, armIn(y)));
+          if (r.a < aFree - 1e-6) r.n = jacketFlankN(S, y, r, r.a - aHere);
+        }
+        // the shoulder top rises with the shell (a jacket's rise eases in: a
+        // step in ring height would stretch one band across the shoulder cap)
+        if (part === "jacket") r.y += off * 0.9 * sm01((r.k - 0.9) / 0.2);
+        else if (r.k > 1) r.y += off * 0.9;
       }
       if (part === "waist") {                                   // tuck the top a hair inside the chest
         const m = 1 - 0.035 * cl01((y - S.chestBot + 0.004) / 0.03);
@@ -3008,8 +3450,40 @@
       return r;
     };
     const relief = function (y) { const k = (y - S.base) / S.sp; return featZ(S, k, 0.42, 1) - featZ(S, k, 0.42, -1); };
-    const ys = sampleYs(ringAt, relief, y0, y1, n);
-    for (let i = ys.length - 1; i >= 0; i--) rings.push(ringAt(ys[i]));
+    let ys = sampleYs(ringAt, relief, y0, y1, n);
+    if (part === "jacket") {
+      // A JACKET HUGGING THE BODY HAS ITS RINGS WHERE THE BODY HAS ITS RINGS:
+      // two lofts sampled at different heights are two different chords of the
+      // same curve, and a 4 mm offset between chords is not an offset (it
+      // crosses the chest flare and the hip bulge). So the shell takes the
+      // chest's, the waist's and the pelvis's ring heights in its span.
+      const at = [y0, y1];
+      const take = (p) => { for (const r of partRings({ S, part: p }, lod)) if (r.y > y0 && r.y < y1) at.push(r.y); };
+      take("chest"); take("pelvis");
+      if (S.chestBot > S.base + 0.001) take("waist");
+      at.sort((a, b) => a - b);
+      ys = at.filter((y, i) => i === 0 || y - at[i - 1] > 0.002 * S.vs);
+    }
+    // THE FRONT OF A JACKET IS CUT AWAY ABOVE THE LAP: seated, the thighs come
+    // up level with the hip joint plus their own radius, so the hem sweeps up
+    // at the front and hangs to y0 at the sides and back: a low ring's front
+    // vertices move onto the shell's own ring at the height they rise to
+    // (ring.lift, blended by front-ness in torsoBake), so they stay the right
+    // distance off the belly and the arms there.
+    const liftTop = part === "jacket" ? Math.max(y0, S.hipY + 0.5 * S.P.legW + 0.02 * S.vs) : y0;
+    const liftZ = liftTop + 0.12 * S.vs;
+    for (let i = ys.length - 1; i >= 0; i--) {
+      const y = ys[i], r = ringAt(y);
+      if (liftTop > y0 && y < liftZ) {
+        const t = (y - y0) / (liftZ - y0), yl = y + (liftTop - y0) * (1 - t);
+        for (let j = 1; j <= 8; j++) {                           // as big as every height the front sweeps past (the hips)
+          const q = ringAt(y + (yl - y) * j / 8);
+          r.a = Math.max(r.a, q.a); r.zf = Math.max(r.zf, q.zf); r.zb = Math.max(r.zb, q.zb);
+        }
+        r.lift = yl - y;
+      }
+      rings.push(r);
+    }
     if (part === "jacket") {                                     // the jacket's stand collar, higher at the back
       const t = rings[0];
       rings.unshift(Object.assign({}, t, { y: t.y + 0.03 * S.vs, a: t.a + 0.004, zf: t.zf + 0.004, zb: t.zb + 0.004, tf: t.tf + 0.03 * S.vs }));
@@ -3026,13 +3500,16 @@
     if (g) return g;
     const S = spec.S, part = spec.part;
     const rings = partRings(spec, lod);
-    const nq = lod >= 2 ? 3 : 7, RV = 4 * (nq + 1);
+    // a jacket a few mm off the body needs finer columns than the body: two
+    // lofts of different squareness cut different chords between vertices
+    const nq = lod >= 2 ? 3 : (part === "jacket" ? 11 : 7), RV = 4 * (nq + 1);
     const capTop = part === "chest" || part === "waist" || part === "pelvis" || (part === "collar" && !spec.bare);
     const capBot = part === "chest" || part === "waist" || part === "pelvis";
     const nv = rings.length * RV + 2 * (2 * RV + 1);              // rings + room for either cap kind
     const Pp = new Float32Array(nv * 3), Fc = new Uint8Array(nv), Uq = new Float32Array(nv), Vq = new Float32Array(nv);
     const box = spec.box, bh = box.h, bb = box.y - bh / 2, oy = spec.origin;
     const shellRelief = part === "jacket" ? 0.8 : (part === "vest" ? (spec.flat ? 0.35 : 0.7) : 1);
+    const armIn = part === "jacket" ? jacketArmIn(S) : null;
     let o = 0;
     const put = function (x, y, z, f, u, v) { Pp[o * 3] = x; Pp[o * 3 + 1] = y - oy; Pp[o * 3 + 2] = z; Fc[o] = f; Uq[o] = u; Vq[o] = v; return o++; };
     const ringStart = [];
@@ -3042,11 +3519,15 @@
       for (let f = 0; f < 4; f++) for (let k = 0; k <= nq; k++) {
         const u = k / nq, p = ringPoint(R, f, u);
         let z = p.z;
+        // v never sits ON the row edge (the next atlas row is a cut jacket);
+        // taken before the lift, so the painted hem follows the cutaway
+        const v = 0.01 + 0.98 * (R.v != null ? R.v : cl01((p.y - bb) / bh));
         if (part === "pelvis") z += pelvisFeatZ(S, p.y, p.xn, p.c);
         else if (part !== "collar") z += featZ(S, R.k, p.xn, p.c) * shellRelief;
-        // v never sits ON the row edge (the next atlas row is a cut jacket)
-        const v = 0.01 + 0.98 * (R.v != null ? R.v : cl01((p.y - bb) / bh));
-        put(p.x, p.y, z, f, u, v);
+        let x = p.x, y = p.y;
+        if (R.lift) y += R.lift * sm01((p.c + 0.15) / 0.55);   // the jacket's cutaway front (partRings)
+        if (armIn) { _jc[0] = x; _jc[1] = z; jacketFit(S, y, _jc, armIn); x = _jc[0]; z = _jc[1]; }
+        put(x, y, z, f, u, v);
       }
     }
     const idx = [];
@@ -3491,9 +3972,11 @@
     le.position.set(-EYE.x, EYE.y, eyeZ); re.position.set(EYE.x, EYE.y, eyeZ);
     le.rotation.order = re.rotation.order = "YXZ";
     le.name = re.name = "eye";
-    const lidMat = cmat(lidTone(skinHex));
-    const lidUp = new THREE.Mesh(lidGeometry("U", eyeShape, form), lidMat);
-    const lidLow = new THREE.Mesh(lidGeometry("L", eyeShape, form), lidMat);
+    // the lids wear the HEAD'S OWN material: same shader, tint, reactions
+    // flush, gore grey and ink map (their UVs read the plain texel), so the
+    // lid can never read as a different skin (facial.js re-syncs on a swap)
+    const lidUp = new THREE.Mesh(lidGeometry("U", eyeShape, form), head.material);
+    const lidLow = new THREE.Mesh(lidGeometry("L", eyeShape, form), head.material);
     lidUp.position.set(0, EYE.y, eyeZ); lidLow.position.set(0, EYE.y, eyeZ);
     lidUp.name = "lidUpper"; lidLow.name = "lidLower";
     const lashes = new THREE.Mesh(lashGeometry(eyeShape, form), cmat(LASH));
@@ -3503,9 +3986,9 @@
     const farEyes = new THREE.Mesh(farEyeGeometry(), farEyeMat());
     farEyes.name = "farEyes";
     eyesFar.add(farEyes);
-    // BROWS: one mesh, a shaped brow over each eye, in the hair's own tone.
-    // Its geometry hangs BELOW its origin, so position.y is the brow's top.
-    const brow = new THREE.Mesh(browGeometry(form, "n"), cmat(c.brow != null ? c.brow : browTone(hairHex)));
+    // BROWS: one mesh, a brow laid on the skin over each eye, in the hair's
+    // tone over a stroke texture. Its geometry sits BELOW its origin.
+    const brow = new THREE.Mesh(browGeometry(form, "n"), faceHairMat(c.brow != null ? c.brow : browTone(hairHex), "brow"));
     brow.position.set(0, BROW_REST_Y, 0.303);
     // MOUTH: two lips in a lip tone off the skin (fuller for f and for c.lips —
     // heritage.js rolls it), closed; the inside + teeth only exist when open
@@ -3526,13 +4009,13 @@
     face.add(brow, mouth, lipLow, cavity, teethUp, teethLow);
     /* ---- FACIAL HAIR (entities/heritage.js) --------------------------------
        c.beard: "full" | "goatee" | "moustache" | "stubble". ONE merged mesh
-       per (style, form), squeezed by the head's own jaw taper so it hugs the
-       chin (see beardGeometry). A full beard stops UNDER the mouth so the lips
-       read; the moustache sits under the nose over the upper lip. Stubble is
-       a thinner jaw in a tone halfway between hair and skin. */
+       per (style, form), a shell laid on the skull (see beardGeometry). A
+       full beard stops UNDER the mouth so the lips read; the moustache sits
+       under the nose over the upper lip. Stubble is a skin-thin shell in a
+       tone halfway between hair and skin, speckled. */
     const beardParts = [];
     if (c.beard) {
-      const bm = c.beard === "stubble" ? cmat(mixHex(hairHex, skinHex, 0.55)) : cmat(hairHex);
+      const bm = c.beard === "stubble" ? faceHairMat(mixHex(hairHex, skinHex, 0.55), "stubble") : faceHairMat(hairHex, "beard");
       const bd = new THREE.Mesh(beardGeometry(c.beard, form), bm);
       bd.castShadow = false; bd.name = "beard";
       face.add(bd); beardParts.push(bd);
@@ -7275,6 +7758,5 @@
     faceLod: faceLod,
     faceRestPose: REST_POSE,
     faceExpressions: Object.keys(LIP_EXPR),
-    lidTone: lidTone,
   };
 })();

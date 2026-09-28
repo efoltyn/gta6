@@ -46,6 +46,14 @@
   const COLS = { front: [0, 64], back: [64, 96], side: [96, 112], cap: [112, 128] };
   const ROWS = { torso: [0, 96], jacket: [96, 176], arm: [176, 216], leg: [216, 256] };
   // part dims MUST match entities/character.js boxes; jacket = inflated torso
+  /* A SHORT SLEEVE ENDS MID-UPPER-ARM. The arm row runs shoulder (0) to wrist
+     crease (1); the upper arm shows the top ~0.64 of it (character.js tags its
+     band from armUp / (armUp + forearm): 0.64 adult, ~0.67 child), so row 0.29
+     is ~45% down the upper arm on every body. Hem band above, bare skin below. */
+  const SLEEVE_HEM = 0.29;
+  function shortSleeve(A, hem, skin) {
+    for (const col of ["front", "back", "side"]) { A.rect(col, 0, SLEEVE_HEM - 0.035, 1, 0.035, hem); A.rect(col, 0, SLEEVE_HEM, 1, 1 - SLEEVE_HEM, skin); }
+  }
   const DIMS = { torso: [0.92, 0.95, 0.5], jacket: [0.98, 1.0, 0.6], arm: [0.3, 0.92, 0.3], leg: [0.34, 0.95, 0.34] };
 
   // ---- the PLAIN-CIVVIE switch (owner's "plain civilians" rule) -------------
@@ -1943,7 +1951,7 @@
       L.rect(col, 0, 0.92, 1, 0.06, lo);                          // hem band
     }
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // SUNDRESS — a light summer dress in a woven GINGHAM check.
@@ -1991,7 +1999,7 @@
     if (ctx) patternRow(L, ctx, body, "gingham", accent);         // the skirt carries the same check
     for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.92, 1, 0.05, tone(body, -0.2)); // hem
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // TRACKSUIT VARIANTS — color/stripe themes. PAINT.tracksuit already exists;
@@ -2070,7 +2078,7 @@
     L.rect("front", 0, 0.86, 1, 0.14, tc);                           // the sewn-in FOOT
     L.rect("side", 0, 0.86, 1, 0.14, tc); L.rect("back", 0, 0.86, 1, 0.14, tc);
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // PYJAMAS — horizontal stripes over a pastel ground, button placket, elastic
@@ -2096,7 +2104,7 @@
     T.shade();
     A.fill(bc); stripes(A, 0.16, 0.06); A.rect("front", 0, 0.88, 1, 0.08, lo); A.rect("side", 0, 0.88, 1, 0.08, lo); A.shade();
     L.fill(bc); stripes(L, 0.16, 0.06); L.rect("front", 0, 0.9, 1, 0.08, lo); L.rect("side", 0, 0.9, 1, 0.08, lo); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // ROMPER — a toddler's dungaree romper: a bib-and-straps front in the romper
@@ -2118,8 +2126,7 @@
     T.dot("front", 0.26, 0.44, 0.03, "#d8b04a"); T.dot("front", 0.74, 0.44, 0.03, "#d8b04a"); // strap buttons
     T.rect("side", 0, 0.5, 1, 0.5, dc); T.rect("back", 0, 0.5, 1, 0.5, dc);   // the romper body wraps round
     T.shade();
-    A.fill(tc); A.rect("front", 0, 0.4, 1, 0.05, tone(tee, -0.2)); A.rect("side", 0, 0.4, 1, 0.05, tone(tee, -0.2)); // short sleeve seam
-    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.45, 1, 0.55, sk);   // bare forearm
+    A.fill(tc); shortSleeve(A, tone(tee, -0.2), sk);
     A.shade();
     L.fill(dc);
     for (const col of ["front", "back", "side"]) {
@@ -2127,7 +2134,7 @@
       L.rect(col, 0, 0.39, 1, 0.61, sk);                             // BARE SHINS
     }
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // KIDTEE — the everyday child fit: a bright tee with a chest motif and
@@ -2150,8 +2157,7 @@
     for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.93, 1, 0.07, lo);   // hem (one line, at the bottom)
     T.shade();
     A.fill(bc);
-    A.rect("front", 0, 0.36, 1, 0.04, lo); A.rect("side", 0, 0.36, 1, 0.04, lo);      // sleeve hem
-    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.4, 1, 0.6, sk);     // bare arms
+    shortSleeve(A, lo, sk);
     A.shade();
     L.fill(lc);
     for (const col of ["front", "back", "side"]) {
@@ -2160,7 +2166,7 @@
     }
     L.rect("front", 0.44, 0, 0.12, 0.36, tone(legHex, -0.18));       // shorts seam
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // SCHOOL — a pale polo under a V-neck jumper, dark shorts and long socks.
@@ -2198,7 +2204,7 @@
   };
   // the girls' variant is the SAME painter with the pleated skirt (the
   // tracksuit2/3 wrapper grammar — one painter, distinct cache keys).
-  PAINT.schoolgirl = function (P, c) { return PAINT.school(P, c, true); };
+  PAINT.schoolgirl = function (P, c) { return Object.assign(PAINT.school(P, c, true), { hips: 1 }); };
   // kids' hoodie: the adult hoodie painter, cast in a child's colors. Nothing
   // about a hoodie changes with age — only the palette and the BODY do.
   PAINT.kidhoodie = function (P, c) { return PAINT.hoodie(P, c); };
@@ -2221,8 +2227,7 @@
     for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.9, 1, 0.05, lo);   // gathered waist tie
     T.shade();
     A.fill(tc);
-    A.rect("front", 0, 0.34, 1, 0.04, tone(tee, -0.2)); A.rect("side", 0, 0.34, 1, 0.04, tone(tee, -0.2));
-    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.38, 1, 0.62, sk);  // bare arms
+    shortSleeve(A, tone(tee, -0.2), sk);
     A.shade();
     L.fill(bc);
     for (const col of ["front", "back", "side"]) {
@@ -2231,7 +2236,7 @@
       L.rect(col, 0, 0.53, 1, 0.47, sk);                              // BARE SHINS below the knee
     }
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, hips: 1 };
   };
 
   // ============================================================
@@ -2861,6 +2866,19 @@
   // a SHAPED body part: a limb loft or a torso part (entities/character.js
   // TORSO block) — both bake the garment row onto their own surface
   function shaped(mesh) { return !!(mesh && mesh.userData && (mesh.userData.limb || mesh.userData.torsoPart)); }
+  // the pelvis wears the top sliver of the leg row (where the skirt starts)
+  const HIPS_PAINTER = limbPainter("leg", [0.94, 0.995]);
+  function dressHips(list, m) {
+    if (!list || !m || !CBZ.humanLimbGeometry) return;
+    for (let i = 0; i < list.length; i++) {
+      const mesh = list[i];
+      if (!mesh || !shaped(mesh)) continue;          // a stub box pelvis keeps its flat tint
+      if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
+      mesh.geometry = CBZ.humanLimbGeometry(mesh, HIPS_PAINTER);
+      mesh.material = m;
+      mesh.userData._cbzPart = "hips";
+    }
+  }
   function limbDressGeom(mesh, part) {
     if (!shaped(mesh) || !CBZ.humanLimbGeometry) return null;
     return CBZ.humanLimbGeometry(mesh, limbPainter(part, mesh.userData.clothBand));
@@ -2971,7 +2989,7 @@
     if (!set) {                                      // no painted look → strip back to flat
       if (ch._clothesKey != null) {
         const s = ch.skinSlots;
-        restore(s.torso); restore(s.arms); restore(s.legs);
+        restore(s.torso); restore(s.arms); restore(s.legs); restore(s.pelvis);
         restore(s.armsLower); restore(s.legsLower); restore(s.collar);
         if (ch._jacketMesh) ch._jacketMesh.visible = false;
         ch._clothesKey = null;
@@ -2994,6 +3012,15 @@
     else { restore(s.arms); restore(s.armsLower); }
     if (set.parts.legs) { dress(s.legs, "leg", m); dress(s.legsLower, "leg", m); }
     else { restore(s.legs); restore(s.legsLower); }
+    // THE HIPS WEAR THE SKIRT. A dress / one-piece / derived-shorts garment
+    // paints its skirt on the leg row, but the pelvis between waist and thighs
+    // is flat-tinted c.legs (the trouser colour) by outfits.js — a band of
+    // jeans at the hips of every dress. A garment that declares `hips` dresses
+    // the pelvis with the TOP of its own leg row, on its own atlas material:
+    // no new material, no per-colour geometry (one painted pelvis per body
+    // form, shared like the legs), so the crowd pools stay per atlas.
+    if (set.parts.hips && set.parts.legs) dressHips(s.pelvis, m);
+    else restore(s.pelvis);
     // ---- the JACKET SHELL (tux/suit/police): silhouette via one inflated
     //      torso shell, structure via the alpha-cut open-jacket paint ----
     if (set.parts.jacket) {
@@ -3059,7 +3086,8 @@
   // [slot, cloth part, wears the LEG colour, may have its box re-synthesised]
   // Only a DRESSABLE slot gets a synthesised box: dress() itself would give
   // that mesh exactly this geometry, so the fallback is the file's own answer.
-  // The pelvis and the yoke are never dressed, so a wrong-sized box there would
+  // The pelvis and the yoke are only ever dressed on their own shaped parts
+  // (dressHips / dressYoke, never a clothGeom box), so a wrong-sized box there would
   // be a worse lie than the broken one — those get their material back only.
   const REPAIR_SLOTS = [
     ["torso", "torso", 0, 1], ["collar", "torso", 0, 0],
