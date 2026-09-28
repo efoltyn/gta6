@@ -94,6 +94,8 @@ const CBZ = {
   lerpAngle(a, b, t) { return a + (b - a) * t; },
   damp(a, b, rate, dt) { return a + (b - a) * (1 - Math.exp(-rate * dt)); },
   floorAt() { return 0; },
+  // physics.js landingClear asks this (world/water_survival.js owns it in the game)
+  islandModeOn() { return false; },
   onUpdate(order, fn) { updates.push({ order, fn }); },
   sfx() {},
 };

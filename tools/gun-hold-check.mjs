@@ -217,8 +217,10 @@ function measure(rig, prop, tag, stance, opts) {
     let gap, along = null;
     if (hold && hold.kind === "guard") {
       // the handguard's axis, from its front back to just ahead of the firing hand
-      const front = new T.Vector3(0, hold.y, hold.z - hold.len / 2);
-      const rear = new T.Vector3(0, hold.y, Math.max(hold.z + hold.len / 2, gp.z - 0.11 * k));
+      // (a pump gun's is the PUMP: wherever the rack has slid it)
+      const pdz = prop.userData.pump ? (prop.userData._pumpDz || 0) : 0;
+      const front = new T.Vector3(0, hold.y, hold.z - hold.len / 2 + pdz);
+      const rear = new T.Vector3(0, hold.y, Math.max(hold.z + hold.len / 2 + pdz, gp.z - 0.11 * k));
       const a = prop.localToWorld(front.clone()), b = prop.localToWorld(rear.clone());
       const ab = b.clone().sub(a), t = Math.max(0, Math.min(1, sc.clone().sub(a).dot(ab) / ab.lengthSq()));
       gap = sc.distanceTo(a.clone().addScaledVector(ab, t));
@@ -318,13 +320,20 @@ function freshRig(c, kit) {
 // one game frame, in the loop's order: updaters (the hold's restore at 9.99,
 // the player's animChar at 10, actorweapons' passes at 36/36.5), then the
 // always passes (the player's hold at 53.9..54.6)
-function frame(rig, after, player) {
+function frame(rig, after, player, speed) {
   const dt = 1 / 60;
   for (const [o, fn] of updates) if (o < 10) fn(dt);
-  CBZ.animChar(rig, 0, dt);
+  CBZ.animChar(rig, speed || 0, dt);
   for (const [o, fn] of updates) if (o >= 10) fn(dt);
   if (after) after();
-  if (player) for (const [, fn] of always) fn(dt);
+  if (player) for (const [o, fn] of always) {
+    fn(dt);
+    if (process.env.GHC_TRACE && CBZ.tpHandWeapon && CBZ.tpHandWeapon()) {
+      const p = CBZ.tpHandWeapon(); rig.group.updateMatrixWorld(true);
+      const w = p.getWorldPosition(new T.Vector3()), c = CBZ.charArmTo.crease(rig, "r", new T.Vector3());
+      console.log("TRACE", o, w.distanceTo(c).toFixed(3), p.parent && p.parent.name, p.position.toArray().map((v) => v.toFixed(2)).join(","));
+    }
+  }
 }
 function npcCase(B, id) {
   const { scene, rig, rest } = freshRig(B.c, B.kit);
@@ -353,7 +362,8 @@ function npcPitchCase(B, id, pitch) {
   const r = measure(rig, prop, tag, "npc-pitch", { rest });
   return r;
 }
-function playerCase(B, id, aiming) {
+function playerCase(B, id, aiming, st) {
+  st = st || {};
   const { scene, rig, rest } = freshRig(B.c, B.kit);
   CBZ.scene = scene; CBZ.game = { mode: "city" };
   CBZ.player = { dead: false, pos: rig.group.position };
@@ -364,39 +374,70 @@ function playerCase(B, id, aiming) {
   CBZ.cam = { pitch: 0 };
   CBZ.playerArmed = () => true; CBZ.currentWeaponId = id; CBZ.weaponInventory = [id];
   CBZ.tpPresenting = () => aiming;
-  CBZ.playerAimDir = (o) => o.set(0, 0, 1);
+  const ap = st.pitch || 0;
+  CBZ.playerAimDir = (o) => o.set(0, Math.sin(ap), Math.cos(ap));
   CBZ.fps = { active: false, reloading: 0 };
   CBZ.cityPeds = []; CBZ.cityCops = [];
   const slot = CBZ.buildActorWeapon(id).userData.weaponSlot;
   let prev = null, drift = 0;
   for (let f = 0; f < 120; f++) {
     rig.aimingPose = aiming; rig.carryPose = !aiming; rig.aimLong = slot !== "pistol" && slot !== "utility";
-    frame(rig, null, true);
+    rig.crouch = !!st.crouch; rig.pronePose = !!st.prone;
+    CBZ.fpsPumpRack = st.rack || 0;
+    frame(rig, null, true, st.speed || 0);
     scene.updateMatrixWorld(true);
     const p = CBZ.tpHandWeapon();
+    if (process.env.GHC_LIFT && p && f >= 60) console.log("LIFT", f, (rig._gunRestY || 0).toFixed(4), rig.body.worldToLocal(p.getWorldPosition(new T.Vector3())).toArray().map((v) => v.toFixed(3)).join(","));
     if (p && f >= 100) {
-      const w = p.getWorldPosition(new T.Vector3());
+      // in the chest's own frame: a walking body bobs, the gun must not slide in it
+      const w = rig.body.worldToLocal(p.getWorldPosition(new T.Vector3())).multiplyScalar(WORLD);
       if (prev) { drift = Math.max(drift, w.distanceTo(prev)); if (process.env.GHC_DEBUG && w.distanceTo(prev) > 0.004) console.log("DRIFT", B.label, id, aiming, f, w.distanceTo(prev).toFixed(4), JSON.stringify(CBZ.gunHandAudit())); }
       prev = w;
     }
   }
   const prop = CBZ.tpHandWeapon();
-  const tag = `${B.label}/${id}/${aiming ? "aim" : "carry"}`;
+  const tag = `${B.label}/${id}/${aiming ? "aim" : "carry"}${st.name ? "-" + st.name : ""}`;
   check(!!prop, `${tag}: a gun is in the third-person hand`);
   if (!prop) return { tag };
   const au = CBZ.gunHandAudit() || {};
+  if (process.env.GHC_AUDIT) console.log("AUDIT", B.label, id, aiming, st.name || "", JSON.stringify(au));
   const released = /out of reach/.test(au.why || "");
-  const r = measure(rig, prop, tag, aiming ? "aim" : "carry", { rest, released });
+  const r = measure(rig, prop, tag, (aiming ? "aim" : "carry") + (st.name ? "-" + st.name : ""), { rest, released });
   r.released = released;
+  if (st.rack && prop.userData.pump) {
+    check(Math.abs(prop.userData.pump.position.z - (prop.userData.pumpBaseZ + st.rack)) < 1e-6, `${tag}: the pump is racked on the third-person gun`);
+  }
+  // THE GUN IS NOT IN THE GROUND (the test floor is y = 0; a prone body here
+  // is not sunk, so this bites the crouch and the low carries): the drawn gun's
+  // lowest vertex, after entities/character.js gunGroundRest has had its say
+  {
+    let lo = Infinity; const v = new T.Vector3();
+    prop.updateMatrixWorld(true);
+    prop.traverse((o) => {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes.position || o.visible === false) return;
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) lo = Math.min(lo, v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld).y);
+    });
+    r.gunLow = lo;
+    check(lo > -0.01, `${tag}: the gun is out of the ground (lowest point ${(lo * 100).toFixed(1)} cm)`);
+  }
+  if (process.env.GHC_POS) {
+    const L = armPoints(rig, -1), R = armPoints(rig, 1), sp = GH.supportPoint(rig, prop, new T.Vector3());
+    const gpos = prop.getWorldPosition(new T.Vector3()), f = (v) => v.toArray().map((x) => x.toFixed(2)).join("/");
+    console.log("POS", tag, "Lsh", f(L.sh), "Lel", f(L.el), "Lwr", f(L.wr), "Rsh", f(R.sh), "Rwr", f(R.wr), "gun", f(gpos), "sup", f(sp), "|Lsh-sup|", L.sh.distanceTo(sp).toFixed(2), "span", CBZ.charArmTo.span(rig, "l").toFixed(2));
+  }
   r.drift = drift;
-  check(drift < 0.004, `${tag}: the hold is steady frame to frame (${(drift * 1000).toFixed(1)} mm)`);
+  // (walking, the chest bobs and leans under a gun held on the aim: the arms
+  // take that up, so the gun moves in the chest's frame by a few mm a frame)
+  const driftTol = st.speed ? 0.008 : 0.004;
+  check(drift < driftTol, `${tag}: the hold is steady frame to frame (${(drift * 1000).toFixed(1)} mm)`);
   if (aiming) {
     // the barrel is still on the aim
     prop.updateMatrixWorld(true);
     // the bore runs down the model's -Z (the muzzle point sits above the origin)
     const o = prop.localToWorld(prop.userData.muzzle.clone());
     const dir = new T.Vector3(0, 0, -1).applyQuaternion(prop.getWorldQuaternion(new T.Quaternion()));
-    const tgt = CBZ.camera.position.clone().addScaledVector(new T.Vector3(0, 0, 1), 120).sub(o).normalize();
+    const tgt = CBZ.camera.position.clone().addScaledVector(CBZ.playerAimDir(new T.Vector3()), 120).sub(o).normalize();
     r.aimErr = Math.acos(Math.min(1, dir.dot(tgt))) * DEG;
     check(r.aimErr < 1.5, `${tag}: barrel still locked to the aim (${r.aimErr.toFixed(2)} deg)`);
   }
@@ -464,6 +505,20 @@ function playerCase(B, id, aiming) {
 }
 
 // ---------------------------------------------------------------- run
+// the stances a shooter actually moves through: walking with the gun up,
+// crouched, prone (aim), and a walking / crouched low-ready carry
+const STANCES = [
+  { name: "walk", aim: true, speed: 3.2 },
+  // looking up and down between the cached pitch levels
+  { name: "up", aim: true, pitch: 0.17 },
+  { name: "down", aim: true, pitch: -0.23 },
+  { name: "crouch", aim: true, crouch: true },
+  { name: "prone", aim: true, prone: true },
+  { name: "walk", aim: false, speed: 3.2 },
+  // a pump gun mid-rack: the fore-end slid 15 cm back, the off hand on it
+  { name: "rack", aim: true, rack: 0.15, only: /shotgun/ },
+  { name: "crouch", aim: false, crouch: true },
+];
 const rows = [];
 // GHC_ONLY=<regex> runs only the matching body/gun pairs (e.g. "man/carbine")
 const ONLY = process.env.GHC_ONLY ? new RegExp(process.env.GHC_ONLY) : null;
@@ -473,8 +528,11 @@ for (const B of BODIES) {
     rows.push(npcCase(B, id));
     rows.push(npcPitchCase(B, id, -0.45));
     rows.push(npcPitchCase(B, id, 0.30));
+    // between two cached pitch levels (the blend, not an exact level)
+    rows.push(npcPitchCase(B, id, -0.175));
     rows.push(playerCase(B, id, true));
     rows.push(playerCase(B, id, false));
+    for (const st of STANCES) if (!st.only || st.only.test(id)) rows.push(playerCase(B, id, st.aim, st));
   }
 }
 const cm = (v) => (v == null ? "   -" : (v * 100).toFixed(1).padStart(5));

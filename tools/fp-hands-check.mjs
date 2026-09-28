@@ -547,6 +547,85 @@ console.log("DRIVING (hands on the rim through full lock)");
   console.log(`  closest forearm approach through lock-to-lock ${minD.toFixed(3)} m`);
 }
 
+// ---------------------------------------------------------------- HANDS ON THE LEDGE (first person)
+/* A vault / mantle plants the body's palms on the obstacle (character.js
+   traversePlants, measured by tools/traverse-hands-check.mjs); fpsmode.js
+   fpPlants puts the bare first-person hands on the same points. The REAL
+   fpPlants + poseFpArms, cut out by their markers: with a ledge ahead of and
+   below the lens, each palm's contact point sits on the ray to its real
+   point (it covers it on screen), lies flat (back of the hand up), fingers
+   along the move, and the two arms still never cross. */
+console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
+{
+  const src = `
+    const THREE = window.THREE; const CBZ = window.CBZ;
+    const mat = { skin: new THREE.MeshLambertMaterial() };
+    const camera = new THREE.Group(); CBZ.camera = camera;
+    const vm = new THREE.Group(); camera.add(vm);
+    vm.position.set(0.12, -0.30, -0.66);
+    const gun = new THREE.Group();
+    const weaponModels = [];
+    let ddT = -1; const fps = { weapon: 0 };
+    let punchT = 0, vmPunch = 0, guardK = 0;
+    const fistT = [
+      { x: 0.10, y: -0.12, z: 0.20, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
+      { x: -0.30, y: -0.14, z: 0.22, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
+    ];
+  ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
+    + block(FPS, "  const fists = new THREE.Group();", "  vm.add(gun, fists, fpArms);")
+    + `  vm.add(gun, fists, fpArms); fists.visible = true; vm.visible = true;`
+    + block(FPS, "  /* ---- HANDS ON THE LEDGE, DOWN THE LENS", "  /* ---- THE ARMS, SOLVED EVERY FRAME")
+    + block(FPS, "  /* ---- THE ARMS, SOLVED EVERY FRAME", "  let aimHeld = false;")
+    + `
+    return { vm, fistT, fpPlants, poseFpArms, handR, handL, armR, armL, camera };`;
+  const P = vm.runInContext("(function(){" + src + "})()", ctx);
+  const pc = H.PLANT_CONTACT;
+  let worstAng = 0, worstUp = 1, worstFwd = 1;
+  // ledges: a waist-high wall a stride ahead, a chest-high lip close in, off to one side
+  // (camera space: the lens looks down -Z, so the LEFT hand's side is -X)
+  const cases = [
+    { tag: "wall", l: [-0.18, -0.85, -0.75], r: [0.18, -0.85, -0.75] },
+    { tag: "lip", l: [-0.22, -0.25, -0.55], r: [0.22, -0.25, -0.55] },
+    { tag: "left", l: [-0.30, -0.70, -0.60], r: null },
+  ];
+  for (const c of cases) {
+    const plants = [];
+    if (c.l) plants.push({ arm: "l", p: new T.Vector3(...c.l), w: 1 });
+    if (c.r) plants.push({ arm: "r", p: new T.Vector3(...c.r), w: 1 });
+    CBZ.playerChar = { traversePose: { dirX: 0, dirZ: -1, _plants: plants } };
+    P.fistT[0].vis = P.fistT[1].vis = true;
+    const on = P.fpPlants();
+    check(on, `${c.tag}: fpPlants engages`);
+    P.poseFpArms();
+    P.camera.updateMatrixWorld(true);
+    for (const pl of plants) {
+      const hand = pl.arm === "l" ? P.handL : P.handR, side = pl.arm === "l" ? -1 : 1;
+      check(hand.visible, `${c.tag}/${pl.arm}: the hand is drawn`);
+      check(hand.userData.pose === "plant", `${c.tag}/${pl.arm}: wears the plant pose (${hand.userData.pose})`);
+      const cp = hand.localToWorld(new T.Vector3(pc[0] * side, pc[1], pc[2]));
+      const ang = Math.acos(Math.min(1, cp.clone().normalize().dot(pl.p.clone().normalize()))) * 180 / Math.PI;
+      worstAng = Math.max(worstAng, ang);
+      check(ang < 2.5, `${c.tag}/${pl.arm}: palm over its point on screen (${ang.toFixed(2)} deg off the ray)`);
+      const q = hand.getWorldQuaternion(new T.Quaternion());
+      const up = new T.Vector3(0, 1, 0).applyQuaternion(q).y, fwd = -new T.Vector3(0, 0, -1).applyQuaternion(q).z;
+      worstUp = Math.min(worstUp, up); worstFwd = Math.min(worstFwd, fwd);
+      check(up > 0.97, `${c.tag}/${pl.arm}: palm flat (back of the hand up: ${up.toFixed(3)})`);
+      check(fwd > 0.97, `${c.tag}/${pl.arm}: fingers along the move (${fwd.toFixed(3)})`);
+    }
+    if (c.l && c.r) {
+      const seg = (arm) => { const f = arm.userData.parts.fore; const w = f.position.clone(); const e = new T.Vector3(0, 0, 1).applyQuaternion(f.quaternion).multiplyScalar(f.scale.z).add(w); return [arr(w), arr(e)]; };
+      const [RW, RE] = seg(P.armR), [LW, LE] = seg(P.armL);
+      const d = M.segDist(RW, RE, LW, LE);
+      check(d > RAD_WRIST * 1.9 * 2, `${c.tag}: forearms clear each other (${d.toFixed(3)})`);
+    }
+  }
+  // off again: the weight goes to 0, the fists take their own pose back
+  CBZ.playerChar = { traversePose: null };
+  check(!P.fpPlants() && !(P.fistT[0].plantW > 0) && !(P.fistT[1].plantW > 0), "no traversal: fpPlants lets go");
+  console.log(`  palms on their rays within ${worstAng.toFixed(2)} deg; flat ${worstUp.toFixed(3)}; fingers along ${worstFwd.toFixed(3)}`);
+  CBZ.playerChar = { _ww: { role: "diver", over: null } };
+}
+
 // ---------------------------------------------------------------- THE OLD RIG (on record)
 {
   // rigid forearm boxes (0.16 wide) along the fist's local +Z, 0.28 long, on hand-typed Eulers

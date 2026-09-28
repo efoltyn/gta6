@@ -1006,10 +1006,17 @@
       // Rise against the face first, then bring the hips across. Advancing XZ
       // at the same rate as Y cramped the shoulder directly over the ledge and
       // forced even a correct IK chain into a folded chicken-wing silhouette.
-      const cross = smooth01((phase - 0.12) / 0.88);
+      // …and the body only goes ACROSS once it is UP: the old phase-timed cross
+      // (from 12% of the pull) carried the feet 40 cm into the wall below the
+      // lip (tools/traverse-hands-check.mjs). The hands hold the lip, the arms
+      // pull the chest up past it, a knee comes up onto the top (the pose
+      // tucks the lead foot ~0.3 m), and only then do the hips travel over.
+      out.y = s.hangY + (s.crestY - s.hangY) * q;
+      const cross = s.top != null
+        ? smooth01((out.y - (s.top - 0.30)) / 0.45)
+        : smooth01((phase - 0.12) / 0.88);
       out.x = s.contactX + (s.crestX - s.contactX) * cross;
       out.z = s.contactZ + (s.crestZ - s.contactZ) * cross;
-      out.y = s.hangY + (s.crestY - s.hangY) * q;
     } else {
       const q = smooth01((u - 0.68) / 0.32);
       out.x = s.crestX + (s.endX - s.crestX) * q;

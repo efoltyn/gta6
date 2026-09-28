@@ -8,7 +8,7 @@
    node (no browser, no captures) and asserts:
 
      1. the body LODs are the same hand: finite, inside their triangle
-        budgets (lod 1 120..250, lod 2 30..75: the far wrist stub is 16), within a few mm of the full
+        budgets (lod 1 120..340: six-sided fingers, lod 2 30..75: the far wrist stub is 16), within a few mm of the full
         hand's bounds in every pose, and the left is a true mirror with
         outward winding;
      2. a built rig has two hand meshes, in the ELBOW groups, hanging from the
@@ -47,7 +47,7 @@ for (const p of Object.keys(H.POSES)) for (const s of [1, -1]) {
     const t = a.length / 9;
     tris[lod] = Math.max(tris[lod] || 0, t);
     check(a.every(Number.isFinite) && n.every(Number.isFinite), `lod${lod} ${p} ${s} finite`);
-    check(lod === 1 ? (t >= 120 && t <= 250) : (t >= 30 && t <= 75), `lod${lod} ${p} tri budget (${t})`);
+    check(lod === 1 ? (t >= 120 && t <= 340) : (t >= 30 && t <= 75), `lod${lod} ${p} tri budget (${t})`);
     check(g === H.bodyHandGeometry(s, p, lod), `lod${lod} ${p} cached`);
     check(g._shared === true, `lod${lod} ${p} marked _shared`);
     const b = bb(g);

@@ -611,6 +611,13 @@
       C.hrQ.copy(hr.quaternion); C.hrP.copy(hr.position);
       if (hl) { C.hlQ.copy(hl.quaternion); C.hlP.copy(hl.position); }
       C.gQ.copy(prop.quaternion); C.gP.copy(prop.position);
+      // the barrel as solved, in the body frame (what a blend between levels aims along)
+      C.dirB = C.dirB || new THREE.Vector3();
+      {
+        let o = prop; _rq.identity();
+        for (; o && o !== ch.body; o = o.parent) _rq.premultiply(o.quaternion);
+        C.dirB.set(0, 0, -1).applyQuaternion(_rq);
+      }
       C.fireBend = fireBend; C.supBend = last.supBend; C.supGap = gap; C.slide = last.slide;
       C.hasSupport = !!(spec.sup && hl && gap != null);
       C.inb = place.inb; C.fwd = place.fwd; C.pull = place.pull; C.prot = place.prot;
@@ -676,6 +683,62 @@
       return C;
     }
     const _bq = new THREE.Quaternion(), _bv = new THREE.Vector3();
+    /* THE GUN STAYS IN THE FIST BETWEEN TWO PITCH LEVELS. Two neighbouring
+       levels are two separate solves, and the stock placement search can land
+       them centimetres apart (the sniper and the M249 especially). Blending
+       the fist and the gun independently parked the grip up to 8.6 cm out of
+       the hand at every in-between aim (tools/gun-hold-check.mjs, aim-up /
+       aim-down / npc between levels). The gun is carried by the blended fist
+       instead, with the blend of the two levels' own fist->gun holds (each
+       level's is a real hold; they differ by the grip frame's tilt budget),
+       and the wrist then finishes the aim: fist and gun turn together about
+       the wrist onto the blended barrel line, a few degrees at most. */
+    const _sbA = new THREE.Matrix4(), _sbB = new THREE.Matrix4(), _sbH = new THREE.Matrix4();
+    const _sbS = new THREE.Matrix4(), _sbG = new THREE.Matrix4(), _sbM = new THREE.Matrix4();
+    const _sbP = new THREE.Vector3(), _sbPB = new THREE.Vector3(), _sbSc = new THREE.Vector3(), _sbOne = new THREE.Vector3(1, 1, 1);
+    const _sbQ = new THREE.Quaternion(), _sbQB = new THREE.Quaternion(), _sbQL = new THREE.Quaternion();
+    const _sbW = new THREE.Vector3(), _sbD = new THREE.Vector3(), _rq = new THREE.Quaternion();
+    function relOf(C, hr, prop, out) {
+      _sbH.compose(C.hrP, C.hrQ, hr.scale);
+      _sbG.compose(C.gP, C.gQ, prop.scale);
+      return out.copy(_sbH).invert().multiply(_sbS).multiply(_sbG);
+    }
+    function carry(hr, prop) {
+      // the gun where the fist (at its current local transform) holds it: rel in _sbA
+      _sbH.compose(hr.position, hr.quaternion, hr.scale);
+      _sbG.copy(_sbS).invert().multiply(_sbH).multiply(_sbA);
+      _sbG.decompose(_sbP, _sbQ, _sbSc);
+      prop.position.copy(_sbP);
+      prop.quaternion.copy(_sbQ);
+    }
+    function seatBlended(ch, hr, prop, A, B, k, trim) {
+      const low = hr.parent;
+      // the socket chain (prop.parent up to the hand's own parent) in the elbow frame
+      _sbS.identity();
+      let o = prop.parent;
+      for (; o && o !== low; o = o.parent) { o.updateMatrix(); _sbS.premultiply(o.matrix); }
+      if (o !== low) return;
+      relOf(A, hr, prop, _sbA).decompose(_sbP, _sbQ, _sbSc);
+      relOf(B, hr, prop, _sbB).decompose(_sbPB, _sbQB, _sbSc);
+      _sbP.lerp(_sbPB, k); _sbQ.slerp(_sbQB, k);
+      _sbA.compose(_sbP, _sbQ, _sbOne);
+      carry(hr, prop);
+      if (!trim || !A.dirB || !B.dirB || !ch.body) return;
+      // the elbow frame in the body frame (rotation only: the arm is rigid)
+      _sbM.identity();
+      for (o = low; o && o !== ch.body; o = o.parent) { o.updateMatrix(); _sbM.premultiply(o.matrix); }
+      if (o !== ch.body) return;
+      _sbM.decompose(_sbP, _sbQL, _sbSc);
+      _sbQL.invert();                                            // body -> elbow frame
+      _sbW.copy(A.dirB).lerp(B.dirB, k).normalize().applyQuaternion(_sbQL);   // wanted barrel, elbow frame
+      // the barrel as it sits now, elbow frame: socket chain x gun, -Z
+      _sbG.copy(_sbS).multiply(_sbH.compose(prop.position, prop.quaternion, prop.scale));
+      _sbG.decompose(_sbP, _sbQ, _sbSc);
+      _sbD.set(0, 0, -1).applyQuaternion(_sbQ);
+      _sbQ.setFromUnitVectors(_sbD, _sbW);
+      hr.quaternion.premultiply(_sbQ);
+      carry(hr, prop);
+    }
     // write a solved ready pose (B, t: blended toward a neighbouring pitch level)
     function applyReady(ch, prop, A, B, t, arms) {
       const hr = handOf(ch, 1), ra = ch.parts.ra, la = ch.parts.la;
@@ -686,7 +749,7 @@
       prop.quaternion.copy(A.gQ); if (k) prop.quaternion.slerp(B.gQ, k);
       prop.position.copy(A.gP); if (k) prop.position.lerp(B.gP, k);
       last.fireBend = A.fireBend + ((B ? B.fireBend : A.fireBend) - A.fireBend) * k;
-      if (!arms) return;
+      if (!arms) { if (k) seatBlended(ch, hr, prop, A, B, k, false); return; }
       ra.quaternion.copy(A.raQ); if (k) ra.quaternion.slerp(B.raQ, k);
       ra.position.z = A.raZ + ((B ? B.raZ : A.raZ) - A.raZ) * k;
       _bv.copy(A.raL); if (k) _bv.lerp(B.raL, k);
@@ -706,6 +769,8 @@
       // counter-rotation left in would turn the chest under solved arms
       ch.body.rotation.y = -(A.blade || 0);
       bakeNeck(ch, (A.blade || 0) * BLADE_NECK);
+      // (after the arms: the barrel trim reads the elbow's frame in the body)
+      if (k) seatBlended(ch, hr, prop, A, B, k, true);
     }
     function readyOk(ch, prop) {
       return !!(specOf(prop) && handOf(ch, 1) && prop.parent && ch.parts && ch.parts.ra && ch.parts.la && ch.body &&
@@ -779,6 +844,8 @@
     const _cw = new THREE.Vector3(), _gcw = new THREE.Vector3();
     function supportTarget(spec, z, prop, slide, out) {
       out.copy(z.sc);
+      // a pump gun's support hand is ON the pump: it rides the rack
+      if (prop.userData._pumpDz) out.z += prop.userData._pumpDz;
       // back ALONG THE BORE LINE, under the gun, to just ahead of the firing
       // hand — the hand stays on the weapon's underside the whole way
       // (a foregrip out of reach: the hand takes the tube behind it the same way)
@@ -869,7 +936,9 @@
       if (!spec || !spec.sup || !hand) return prop.localToWorld(out.set(0, 0, 0));
       const z = sized(spec, hand.userData.fit.s / (prop.scale.x || 1));
       prop.updateWorldMatrix(true, false);
-      return prop.localToWorld(out.copy(z.sc));
+      out.copy(z.sc);
+      if (prop.userData._pumpDz) out.z += prop.userData._pumpDz;
+      return prop.localToWorld(out);
     }
     return {
       fire, ready, pitchNpc, lowReady, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,

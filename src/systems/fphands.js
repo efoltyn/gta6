@@ -151,7 +151,18 @@
     wheel:   { wrap: 0.016, thumb: T_WRAP, cup: 0.005 },
     grip:    { wrap: 0.019, thumb: T_FIST, cup: 0.006 },          // a knife / bar / riser
     card:    { flex: [[0.55, 0.55, 0.20], [0.70, 0.95, 0.45], [0.85, 1.10, 0.55], [0.95, 1.20, 0.60]], thumb: T_PINCH, cup: 0.004, stub: 0 },
+    /* A PALM PLANTED ON A SURFACE (a vault, a mantle, a hand on a door): the
+       fingers lie flat and spread with just enough flexion that their pads
+       and the heel of the palm meet ONE plane (PLANT_Y below the palm's
+       centre), the thumb out to the side for the base of support. The
+       character's charArmTo.plant lays this hand on the real contact point;
+       stub 0 like a gun hold: the hand bends at the crease, it does not slide. */
+    plant:   { flex: [[0.10, 0.12, 0.08], [0.09, 0.11, 0.07], [0.10, 0.12, 0.08], [0.12, 0.14, 0.09]], splay: 1.6,
+               thumb: [[-0.85, 0.00, -0.52], [-0.72, 0.03, -0.69], [-0.58, 0.03, -0.81]], cup: 0.0015, stub: 0 },
   };
+  // the plane a planted palm rests on: under the heel and the finger pads
+  // (hand metres, right-hand frame: y below the palm centre, z = the palm's middle)
+  const PLANT_CONTACT = [0, -0.0224, -0.050];
   /* BODY GUN HOLDS, SIZED TO WHAT IS HELD (systems/gunhands.js CBZ.gunHold).
      A body hand closes round a gun drawn at 1.45-1.75x real size (weapon-
      scale.js READ) with a hand drawn at 1.1x, so the part it wraps is, in the
@@ -199,7 +210,8 @@
       return flexForWrap(pose.wrap, f);
     });
     pose._flex = flex;
-    pose._joints = { fingers: FINGERS.map(function (f, i) { return fingerChain(f, flex[i]); }), thumb: thumbChain(pose.thumb) };
+    const spk = pose.splay || 1;
+    pose._joints = { fingers: FINGERS.map(function (f, i) { return fingerChain(f, flex[i], spk !== 1 ? f.splay * spk : null); }), thumb: thumbChain(pose.thumb) };
     return pose;
   }
   // centre of the cylinder a wrap pose closes round, hand frame (right hand)
@@ -551,8 +563,14 @@
         const d0 = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]];
         const l0 = Math.hypot(d0[0], d0[1], d0[2]) || 1;
         const root = [pts[0][0] - d0[0] / l0 * f.r * 1.4, pts[0][1] - d0[1] / l0 * f.r * 1.4 + 0.001, pts[0][2] - d0[2] / l0 * f.r * 1.4];
-        const rs = [1.10, 1.04, 0.95, 0.86, 0.78].map(function (k) { const r = f.r * k * SQ2 * 0.92; return [r, r]; });
-        tube(parts, [root].concat(pts), rs, 4, Math.PI / 4, f.r * 0.75);
+        // SIX-SIDED, with the joints standing proud. The square tube read as
+        // four boxy sticks on the closest body in the game — your own, three
+        // metres from the chase camera. A hexagon (circumradius 1.08 r puts
+        // its flats at 0.94 r) is round at that distance, and a ring that is
+        // a touch fatter at each joint than the bone either side is the
+        // knuckle line a hand is recognised by.
+        const rs = [1.10, 1.07, 0.97, 0.90, 0.74].map(function (k) { const r = f.r * k * 1.08; return [r, r]; });
+        tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70);
       });
     } else {
       // THE MITTEN: the averaged chain, index..little wide, a finger thick
@@ -570,11 +588,11 @@
     const tpts = p._joints.thumb;
     const trs = tpts.map(function (_, s) {
       const r = s === 0 ? THUMB.r[0] * 1.25 : (s < 3 ? THUMB.r[s] : THUMB.r[2] * 0.85);
-      const k = far ? 1.3 : SQ2 * 0.95;
+      const k = far ? 1.3 : 1.10;
       return [r * k, r * k];
     });
     if (far) tube(parts, [tpts[0], tpts[1], tpts[3]], [trs[0], trs[1], trs[3]], 3, Math.PI / 2, THUMB.r[2] * 0.6);
-    else tube(parts, tpts, trs, 4, Math.PI / 4, THUMB.r[2] * 0.7);
+    else tube(parts, tpts, trs, 6, Math.PI / 6, THUMB.r[2] * 0.7);
     const geo = mergeParts(parts);
     if (side < 0) mirrorX(geo);
     geo.computeBoundingSphere();
@@ -1411,7 +1429,7 @@
 
   CBZ.fpHands = {
     version: 2,
-    POSES, PALM, FINGERS, THUMB,
+    POSES, PALM, FINGERS, THUMB, PLANT_CONTACT,
     handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
     grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,

@@ -462,9 +462,30 @@
     dsafe(function () { return s.set(want); }, false);
     if (doorIsOpen(s) !== want) return "refused";
     s._latch = !want;                                   // shutting it LATCHES it shut
+    handOnDoor(s);
     // the block notices a door opened off the clock (systems/prisondoorwatch.js)
     if (CBZ.prisonDoorWatch && CBZ.prisonDoorWatch.acted) dsafe(function () { return CBZ.prisonDoorWatch.acted(s, want); }, null);
     return want ? "opened" : "closed";
+  }
+  /* A DOOR IS MOVED WITH A HAND. The leaf used to swing on the keypress with
+     both arms at the sides. The player's hand now goes to the leaf — an open
+     palm on it at chest height, the body stepping in and turning to it if it
+     stood off — through the one "put a hand on a thing" verb every take in
+     the game uses (systems/verbs_pickup.js; copy:false, leave:true: nothing
+     comes away in the hand). In first person it is the same beat down the
+     lens. Guarded: no verbs, no hand, the door still moves. */
+  function handOnDoor(s) {
+    const V = CBZ.verbs;
+    if (!V || !V.pickup || !player || !player.pos) return;
+    const p = doorPoint(s);
+    if (!p) return;
+    // the near face of the leaf, not its middle: a hand's width short of it along the line from the body
+    const dx = p.x - player.pos.x, dz = p.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
+    const k = Math.max(0, d - 0.08) / d;
+    dsafe(function () {
+      return V.pickup(player, { x: player.pos.x + dx * k, y: (player.pos.y || 0) + 1.15, z: player.pos.z + dz * k },
+        { copy: false, leave: true, pose: "open", key: "door:" + s.id });
+    }, null);
   }
   // open === null: either state (the [E] verb offers whichever the door is not)
   function nearestDoor(open, reach, facing) {
@@ -1065,6 +1086,11 @@
       // shared registry above; the credential test below is untouched.
       if (nearDoor && g.hasKey && !cuffedNow() && !CBZ.prisonDoorLatched("prison-yard-door")) {
         CBZ.openDoor();
+        // the card goes to the reader in a hand (the reader is what opens it)
+        if (CBZ.verbs && CBZ.verbs.pickup && door.readerPos) {
+          const rp = door.readerPos;
+          try { CBZ.verbs.pickup(player, { x: rp.x, y: rp.y, z: rp.z + 0.04 }, { copy: false, leave: true, pose: "card", key: "yard-reader" }); } catch (e) {}
+        }
         readerK = ""; readerRung = false;
         CBZ.setObjective("");
       } else if (nearDoor && !cuffedNow()) {
