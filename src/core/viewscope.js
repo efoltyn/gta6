@@ -30,6 +30,11 @@
    hidden); a group that moves is an actor and is blacklisted, exactly like
    farcull does.
 
+   NEVER A LIGHT. A subtree holding a light (b.lit) is never hidden: a light
+   outside the frustum still lights what is inside it, and r128 keys every lit
+   program by the scene's light COUNT, so hiding one point light as the camera
+   turned re-keyed every lit material in view (new programs mid-play).
+
    CBZ.subtreeSphere(o) is the ONE 3-D subtree measurement (moved here from
    city/cctv.js, which now calls it): a cached world-space sphere per top-level
    arena child, instanced pools measured over their instances, world-spanning
@@ -58,7 +63,7 @@
     // the version counter is the measurement's own receipt (farcull's trick).
     if (b && b.iv != null && o.instanceMatrix && o.instanceMatrix.version !== b.iv) b = null;
     if (b) return b;
-    b = { x: 0, y: 0, z: 0, r: 0, px: o.position.x, pz: o.position.z, iv: null, dyn: false, loose: false };
+    b = { x: 0, y: 0, z: 0, r: 0, px: o.position.x, pz: o.position.z, iv: null, dyn: false, loose: false, lit: false };
     try {
       if (o.userData && o.userData.dynamic) b.dyn = true;
       else if (o.isInstancedMesh) {
@@ -97,6 +102,7 @@
         }
       }
       else if (o.isMesh && o.geometry) {
+        if (o.children.length) o.traverse(function (x) { if (x.isLight) b.lit = true; });
         // O(1): batch.js/buildings.js already computed these spheres.
         if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
         const s = o.geometry.boundingSphere;
@@ -117,7 +123,10 @@
         // Either one inside this subtree makes the group unscopeable for the
         // main camera. `loose` is separate from `dyn` because the CCTV feed
         // (city/cctv.js) accepts that approximation for its 256 px monitor.
-        o.traverse(function (x) { if (x.isMesh && (x.frustumCulled === false || x.isInstancedMesh)) b.loose = true; });
+        o.traverse(function (x) {
+          if (x.isMesh && (x.frustumCulled === false || x.isInstancedMesh)) b.loose = true;
+          if (x.isLight) b.lit = true;
+        });
         if (isFinite(_box.min.x) && isFinite(_box.max.x)) {
           _box.getCenter(_v);
           b.x = _v.x; b.y = _v.y; b.z = _v.z;
@@ -187,7 +196,7 @@
       if (o.isGroup && !o.children.length) continue;
       if (!cache.has(o)) { if (measures <= 0) continue; measures--; A.measures++; }
       const b = CBZ.subtreeSphere(o);
-      if (b.dyn || b.loose) continue;
+      if (b.dyn || b.loose || b.lit) continue;
       if (o.position.x !== b.px || o.position.z !== b.pz) { b.dyn = true; continue; }   // it moved: an actor, not a building
       A.tested++;
       _s.center.set(b.x, b.y, b.z); _s.radius = b.r + PAD;
