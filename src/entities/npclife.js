@@ -190,6 +190,19 @@
     anchor = anchor || {};
     if (actor._npcAttached) detach(actor, { parent: cityRoot() });
     const group = actor.group;
+    /* A SEAT CAN BE SMALLER THAN THE BODY. The rig is stylised (its head is a
+       quarter of its height), so a 1:1 adult folded into a real car cabin
+       puts his crown through the headliner — the owner's "you see the NPC
+       driver outside the car". An anchor may carry `fit(ch) -> scale` (car
+       seats: vehicles.js CBZ.carSeatPlacement, which answers through the ONE
+       seated-fit solve CBZ.carSeatFit for THIS body) or a fixed `scale`. The
+       scale is re-asserted every sync and handed back on detach, so nobody
+       walks away from a car shrunk. Anchors with neither (aircraft rows,
+       benches) are untouched. */
+    let seatScale = 0;
+    if (typeof anchor.fit === "function" && actor.char) {
+      try { seatScale = +anchor.fit(actor.char) || 0; } catch (_) { seatScale = 0; }
+    } else if (anchor.scale > 0) seatScale = anchor.scale;
     actor._npcAttached = {
       parent: parent,
       anchor: copy(anchor),
@@ -197,7 +210,9 @@
       oldState: actor.state,
       oldParked: actor._parked,
       oldVisible: group.visible,
+      seatScale: seatScale,
     };
+    if (seatScale && group.scale) group.scale.setScalar(seatScale);
     parent.add(group);
     group.position.set(anchor.x || 0, anchor.y || 0, anchor.z || 0);
     if (group.rotation && group.rotation.set) group.rotation.set(anchor.pitch || 0, anchor.yaw || 0, anchor.roll || 0);
@@ -229,8 +244,12 @@
       // seat geometry → the V2 chair sit (character.js). Only anchors that
       // DECLARE cushion/floor data (aircraft seat records) get the real
       // solve; undeclared anchors (car interiors) keep the legacy pose.
+      // (group-LOCAL units: the seat solve runs inside the scaled group, so a
+      // fitted body's clearances are divided back out by its scale)
+      const k = seatScale || 1;
       actor.char.seatRef = (anchor.cushionH != null || anchor.floorBelow != null)
-        ? { cushion: anchor.cushionH != null ? anchor.cushionH : 0.45, floorBelow: anchor.floorBelow || 0 }
+        ? { cushion: (anchor.cushionH != null ? anchor.cushionH : 0.45) / k, floorBelow: (anchor.floorBelow || 0) / k,
+            kind: anchor.seatKind || null }
         : null;
     }
     actor._seatSlumped = false;   // fresh claim: the one-shot death slump re-arms
@@ -251,6 +270,10 @@
       if (pose.q && actor.group.quaternion && actor.group.quaternion.copy) actor.group.quaternion.copy(pose.q);
       if (pose.s && actor.group.scale && actor.group.scale.copy) actor.group.scale.copy(pose.s);
     }
+    // a seat fit is the SEAT's, not the person's: he stands up his own size
+    // (1, not the pre-attach scale: a door beat hands the body over already
+    // shrunk to the fit, and a rig's own size lives on its model, never its group)
+    if (rec.seatScale && actor.group.scale) actor.group.scale.setScalar(1);
     actor.pos = actor.group.position;
     actor._npcAttached = null;
     actor._parked = !!rec.oldParked;
@@ -448,6 +471,7 @@
     if (a && actor._seatHold !== false &&
         !(CBZ.propArcActive ? CBZ.propArcActive(actor) : actor._propArc)) {
       actor.group.position.set(a.x || 0, a.y || 0, a.z || 0);
+      if (rec.seatScale && actor.group.scale.x !== rec.seatScale) actor.group.scale.setScalar(rec.seatScale);
       if (actor.group.rotation && actor.group.rotation.set) {
         actor.group.rotation.set(a.pitch || 0, a.yaw || 0, a.roll || 0);
       } else if (actor.group.rotation) actor.group.rotation.y = a.yaw || 0;
