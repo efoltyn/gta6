@@ -1082,7 +1082,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=w0929gnd"></script>
 <script src="src/city/world.js?v=w0929gnd"></script>
-<script src="src/city/interior_programs.js?v=deslop1"></script>
+<script src="src/city/interior_programs.js?v=w0929est"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1092,8 +1092,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
-<script src="src/city/buildings_civic.js?v=meshcol1"></script>
-<script src="src/city/buildings.js?v=meshcol2"></script>
+<script src="src/city/buildings_civic.js?v=w0929est"></script>
+<script src="src/city/buildings.js?v=w0929est"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1407,7 +1407,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=vehobb1"></script>
 <script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
-<script src="src/city/playeraircraft.js?v=hats1"></script>
+<script src="src/city/playeraircraft.js?v=w0929est"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1484,7 +1484,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=w09290242x"></script>
+<script src="src/city/airtraffic.js?v=w0929est"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -2242,7 +2242,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=meshcol1"></script>
+<script src="src/city/govcomplex.js?v=w0929est"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2254,7 +2254,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=w09290219"></script>
+<script src="src/city/presidency.js?v=w0929est"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2264,9 +2264,9 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres3"></script>
-<script src="src/city/motorcade.js?v=w09290250y"></script>
-<script src="src/city/president_public.js?v=w09290219"></script>
-<script src="src/city/president_regime.js?v=pres3-st1"></script>
+<script src="src/city/motorcade.js?v=w0929est"></script>
+<script src="src/city/president_public.js?v=w0929est"></script>
+<script src="src/city/president_regime.js?v=w0929est"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
