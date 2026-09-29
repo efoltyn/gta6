@@ -542,7 +542,7 @@ document.body.appendChild(b);}}catch(e){}})();
      depended on their (synchronous, load-time) execution happening this
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
-<script src="src/world/door.js?v=dsl3"></script>
+<script src="src/world/door.js?v=mce86a5"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
 
@@ -552,10 +552,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=boom2"></script>
+  <script src="src/systems/fphands.js?v=mce86a5"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=me6f1ee"></script>
+  <script src="src/entities/character.js?v=mce86a5"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=watch2"></script>
@@ -582,7 +582,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=cuffs1"></script>
-<script src="src/systems/verbs.js?v=bodyphys1-st1"></script>
+<script src="src/systems/verbs.js?v=mce86a5"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -601,7 +601,7 @@ document.body.appendChild(b);}}catch(e){}})();
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <script src="src/systems/vitals.js?v=vit3"></script>
-<script src="src/systems/verbs_pickup.js?v=verbs1"></script>
+<script src="src/systems/verbs_pickup.js?v=mce86a5"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -712,7 +712,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=boom2"></script>
+<script src="src/systems/playerflashlight.js?v=mce86a5"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -800,7 +800,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=m489457"></script>
+<script src="src/systems/interactions.js?v=mce86a5"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -1350,7 +1350,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/helditems.js?v=vit3"></script>
+<script src="src/systems/helditems.js?v=mce86a5"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores

@@ -548,7 +548,7 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/systems/pushables.js?v=push2"></script>
+<script src="src/systems/pushables.js?v=mce86a5"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
 <script src="src/world/cellblock.js?v=dsl3-st1"></script>
@@ -562,7 +562,7 @@ document.body.appendChild(b);}}catch(e){}})();
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
 <script src="src/world/clutter.js?v=dsl3"></script>
-<script src="src/world/door.js?v=dsl3"></script>
+<script src="src/world/door.js?v=mce86a5"></script>
 <script src="src/world/exit.js"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
@@ -574,10 +574,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=boom2"></script>
+  <script src="src/systems/fphands.js?v=mce86a5"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=me6f1ee"></script>
+  <script src="src/entities/character.js?v=mce86a5"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=watch2"></script>
@@ -606,7 +606,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=cuffs1"></script>
-<script src="src/systems/verbs.js?v=bodyphys1-st1"></script>
+<script src="src/systems/verbs.js?v=mce86a5"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -625,7 +625,7 @@ document.body.appendChild(b);}}catch(e){}})();
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <script src="src/systems/vitals.js?v=vit3"></script>
-<script src="src/systems/verbs_pickup.js?v=verbs1"></script>
+<script src="src/systems/verbs_pickup.js?v=mce86a5"></script>
 <script src="src/entities/player.js?v=hats1"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -647,37 +647,37 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/economy.js?v=m489457"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/weapon-data.js?v=me6f1ee"></script>
+<script src="src/weapons/weapon-data.js?v=mce86a5"></script>
 <script src="src/weapons/weapon-scale.js?v=realsize1"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
-<script src="src/weapons/appearances/sidearm.js?v=anchor1"></script>
-<script src="src/weapons/appearances/shotgun.js?v=anchor1"></script>
-<script src="src/weapons/appearances/carbine.js?v=anchor1"></script>
-<script src="src/weapons/appearances/smg.js?v=anchor1"></script>
-<script src="src/weapons/appearances/taser.js?v=anchor1"></script>
+<script src="src/weapons/appearances/sidearm.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/shotgun.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/carbine.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/smg.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/taser.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/bazooka.js?v=anchor1"></script>
-<script src="src/weapons/appearances/glauncher.js?v=anchor1"></script>
+<script src="src/weapons/appearances/glauncher.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/grenade.js?v=anchor1"></script>
 <script src="src/weapons/appearances/c4.js?v=anchor1"></script>
-<script src="src/weapons/appearances/ak47.js?v=anchor1"></script>
-<script src="src/weapons/appearances/revolver.js?v=anchor1"></script>
-<script src="src/weapons/appearances/deagle.js?v=anchor1"></script>
-<script src="src/weapons/appearances/uzi.js?v=anchor1"></script>
-<script src="src/weapons/appearances/sniper.js?v=anchor1"></script>
-<script src="src/weapons/appearances/lmg.js?v=anchor1"></script>
+<script src="src/weapons/appearances/ak47.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/revolver.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/deagle.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/uzi.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/sniper.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/lmg.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/shank.js?v=anchor1"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
-<script src="src/systems/actorweapons.js?v=boom2"></script>
+<script src="src/systems/actorweapons.js?v=mce86a5"></script>
 <script src="src/city/weapon_thumbnails.js?v=duty1"></script>
-<script src="src/systems/holsterprops.js?v=gunhands1"></script>
+<script src="src/systems/holsterprops.js?v=mce86a5"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
      support arm onto the drawn weapon's own authored handguard every
      frame (instead of the old hand-tuned Euler guess, which could not
      know which gun was out) and choreographs the reload the same way.
      After holsterprops — it reads the gun that module just placed. -->
-<script src="src/systems/gunhands.js?v=boom2"></script>
+<script src="src/systems/gunhands.js?v=mce86a5"></script>
 <script src="src/systems/prisondrops.js?v=m489457"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
@@ -783,7 +783,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=boom2"></script>
+<script src="src/systems/playerflashlight.js?v=mce86a5"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -881,7 +881,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=tell2"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=fallreal1"></script>
+<script src="src/systems/reactions.js?v=mce86a5"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=snowbury1"></script>
@@ -900,7 +900,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=m489457"></script>
+<script src="src/systems/interactions.js?v=mce86a5"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -960,7 +960,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=m489457"></script>
+<script src="src/systems/fpsmode.js?v=mce86a5"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -1086,7 +1086,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=deslop1"></script>
-<script src="src/city/buildings.js?v=deslop1-st1"></script>
+<script src="src/city/buildings.js?v=mce86a5"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1140,7 +1140,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/citynav.js?v=moves1"></script>
 <script src="src/city/fracture.js?v=boom2"></script>
 <script src="src/city/demolition.js?v=cpd1-st1"></script>
-<script src="src/city/elevators.js?v=lift1-st1"></script>
+<script src="src/city/elevators.js?v=mce86a5"></script>
 <script src="src/city/exec_office.js?v=leaf2-st1"></script>
 <script src="src/city/escalators.js?v=esc2-st1"></script>
 <script src="src/city/roofloot.js?v=deslop1"></script>
@@ -1386,7 +1386,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=cars1"></script>
-<script src="src/city/playercars.js?v=hats1"></script>
+<script src="src/city/playercars.js?v=mce86a5"></script>
 <script src="src/city/crashfx.js?v=boom2"></script>
 <script src="src/city/crashdeform.js?v=boom2"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
@@ -1396,7 +1396,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=lod1"></script>
-<script src="src/city/vehicles.js?v=bodyphys1"></script>
+<script src="src/city/vehicles.js?v=mce86a5"></script>
 <script src="src/city/carinstances.js?v=cars2"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=hats1"></script>
@@ -1455,7 +1455,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=cars1"></script>
+<script src="src/city/boarding.js?v=mce86a5"></script>
 <!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
      if I go to the door I can even jump out"). [G] / the SEAT pill slides the
      player across to the shotgun seat of a car or back from a boat's helm: the
@@ -1512,7 +1512,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
      person, reticles at infinity on red-dot glass, a real scope (magnified
      second camera in the ocular), sway + breath, the 3P cheek weld. -->
-<script src="src/systems/sights.js?v=ads1"></script>
+<script src="src/systems/sights.js?v=mce86a5"></script>
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
@@ -1598,7 +1598,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vit3"></script>
 <script src="src/city/restrain.js?v=nodash1"></script>
-<script src="src/city/combat.js?v=vit3"></script>
+<script src="src/city/combat.js?v=mce86a5"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1608,7 +1608,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=deslop1"></script>
 <script src="src/city/explosives.js?v=boom2"></script>
-<script src="src/systems/helditems.js?v=vit3"></script>
+<script src="src/systems/helditems.js?v=mce86a5"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=vit3"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
@@ -2229,7 +2229,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=lad1"></script>
+<script src="src/city/govcomplex.js?v=mce86a5"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
