@@ -176,10 +176,8 @@
   // grows a DIFFERENT mountain), with a self-contained fallback for the window
   // before seed.js has parsed — nothing samples the fields that early, the
   // fallback only exists so a stray probe can never throw.
-  let hash01 = null;                   // bound on first use: CBZ is a dictionary-mode object
   function h01(x, z, salt) {
-    const H = hash01 || (hash01 = CBZ.hash01 || null);
-    if (H) return H(x, z, salt);
+    if (CBZ.hash01) return CBZ.hash01(x, z, salt);
     let h = ((Math.round(x * 10) * 374761393) ^ (Math.round(z * 10) * 668265263) ^ (salt * 1442695041)) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
