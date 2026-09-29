@@ -653,7 +653,6 @@ async function playSpots(P, m) {
       var rows = S.step(${FRAMES}, { finish: true, perUpdater: true, path: pin });
       var o = S.summ(rows); o.spot = ${JSON.stringify(sp)}; o.look = S.look(); o.calib = (cal + S.calib()) / 2;
       o.emptyFrames = rows.filter(function(r){ return r.empty; }).length; return o; })()`, 300000);
-    if (ATTRIBUTE) r.attribute = await attribute(P);
     res.spots[name] = r;
     log(`[speed ${since()}]   ${m}/${name}: frame ${fmt(r.cpu.med)}+${fmt(r.fin.med)} ms (sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med} tris ${r.tris && r.tris.med}`);
   }
@@ -665,16 +664,23 @@ async function playSpots(P, m) {
     res.spots.drive = r;
     log(`[speed ${since()}]   ${m}/drive: frame ${fmt(r.cpu.med)}+${fmt(r.fin.med)} ms (sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med}`);
   }
+  /* the diagnostic pass runs AFTER every measured spot, so its extra frames
+     (world time moves on: aircraft fall, fires spread) never leak into them */
+  if (ATTRIBUTE) for (const name of order) {
+    await P.ev(`(function(){ var S = window.__speed, sp = ${JSON.stringify(spots[name])}; S.place(sp); S.step(${WARM}, { finish: true, path: S.pin(sp) }); return 1; })()`, 300000);
+    res.spots[name].attribute = await attribute(P, spots[name]);
+    log(`[speed ${since()}]   ${m}/${name}: attribution done`);
+  }
   return res;
 }
 
 /* DIAGNOSTIC ONLY: what share of the frame do the HD settings and the trees
    explain at this spot? Same spot, same frame; toggles restored after. Never
    a default, never a "win". */
-async function attribute(P) {
+async function attribute(P, sp) {
   return P.ev(`(function(){
-    var S = window.__speed, C = window.CBZ, r = C.renderer, sun = C.sun, N = 20;
-    function meas(){ S.step(4, { finish: true }); var rows = S.step(N, { finish: true }); var o = S.summ(rows);
+    var S = window.__speed, C = window.CBZ, r = C.renderer, sun = C.sun, N = 24, pin = S.pin(${JSON.stringify(sp)});
+    function meas(){ S.step(4, { finish: true, path: pin }); var rows = S.step(N, { finish: true, path: pin }); var o = S.summ(rows);
       return { frame: +(o.cpu.med + o.fin.med).toFixed(2), render: +o.render.med.toFixed(2), fin: +o.fin.med.toFixed(2), sim: +o.sim.med.toFixed(2), calls: o.calls && o.calls.med, tris: o.tris && o.tris.med }; }
     var out = { base: meas() };
     var pr0 = r.getPixelRatio();
@@ -858,7 +864,9 @@ function compare(cur, base) {
     if (/\.upd\.|\.builder\.|\.build\./.test(k) && Math.max(a.v, b.v) < 3) continue;
     const d = b.v - a.v;
     const noise = Math.hypot(a.noise || 0, b.noise || 0);
-    const floor = b.unit === "n" ? Math.max(1, 0.02 * a.v) : Math.max(0.5, 0.05 * a.v);
+    if (/\.build\.lm:/.test(k)) continue;              // same number as .builder.<file>
+    const sub = /\.upd\.|\.builder\.|\.build\./.test(k); // sub-items: single-sample jitter, wider floor
+    const floor = b.unit === "n" ? Math.max(1, 0.02 * a.v) : sub ? Math.max(15, 0.15 * a.v) : Math.max(0.5, 0.05 * a.v);
     const thr = Math.max(3 * noise, floor);
     if (Math.abs(d) <= thr) continue;
     const verdict = d > 0 ? "SLOWER" : "faster";
@@ -923,8 +931,9 @@ function table(res) {
       if (o.hitches && o.hitches.length) p("     hitches [frame, ms, worst, its ms, new programs]: " + o.hitches.slice(0, 5).map((h) => JSON.stringify(h)).join(" "));
       if (o.attribute) {
         const A = o.attribute, b = (A.base.frame + A.base2.frame) / 2;
-        const sh = (x) => x ? `${fmt(x.frame, 1)}ms (${fmt(100 * (b - x.frame) / b, 0)}%)` : "-";
-        p(`     ATTRIBUTE (diagnostic): base ${fmt(b)}ms · no shadows ${sh(A.noShadows)} · pr/2 ${sh(A.halfPR)} · full DPR ${sh(A.fullDPR)} · tier-1 ${sh(A.tierDown)} · tier+1 ${sh(A.tierUp)} · no vegetation ${sh(A.noVegetation)} [calls ${A.base.calls}→${A.noVegetation.calls}, tris ${A.base.tris}→${A.noVegetation.tris}]`);
+        const gb = (A.base.fin + A.base2.fin) / 2;
+        const sh = (x) => x ? `${fmt(x.frame, 1)}ms (${fmt(100 * (b - x.frame) / b, 0)}%, gpu ${fmt(100 * (gb - x.fin) / gb, 0)}%)` : "-";
+        p(`     ATTRIBUTE (diagnostic, % saved of frame / of GPU wait): base ${fmt(b)}ms gpu ${fmt(gb)}ms · no shadows ${sh(A.noShadows)} · pr/2 ${sh(A.halfPR)} · full DPR ${sh(A.fullDPR)} · tier-1 ${sh(A.tierDown)} · tier+1 ${sh(A.tierUp)} · no vegetation ${sh(A.noVegetation)} [calls ${A.base.calls}→${A.noVegetation.calls}, tris ${A.base.tris}→${A.noVegetation.tris}]`);
       }
     }
     if (r.errors && r.errors.n) p(`  console errors: ${r.errors.n}  ${(r.errors.first || []).slice(0, 2).join(" | ").slice(0, 200)}`);
@@ -989,7 +998,15 @@ try {
     if (c.regress || c.lookBad.length) exitCode = exitCode || 4;
   }
   const json = JSON.stringify(res, null, 1);
-  if (SAVE) { fs.writeFileSync(SAVE, json); log(`[speed] saved ${SAVE}`); }
+  if (SAVE) {
+    // the committed baseline keeps metrics + look + census + run 1's detail (no per-frame series)
+    const slim = { ...res, detail: Object.fromEntries(Object.entries(res.detail).map(([m, rs]) => {
+      const r = JSON.parse(JSON.stringify(rs[0] || {}));
+      if (r.play) for (const o of Object.values(r.play.spots)) { delete o.series; if (o.updaters) o.updaters = o.updaters.slice(0, 20); }
+      if (r.scripts) r.scripts.byDir = undefined;
+      return [m, [r]]; })) };
+    fs.writeFileSync(SAVE, JSON.stringify(slim, null, 1)); log(`[speed] saved ${SAVE}`);
+  }
   if (JSON_OUT) { fs.writeFileSync(JSON_OUT, json); log(`[speed] wrote ${JSON_OUT}`); }
   if (!SAVE && !JSON_OUT) { const f = path.join(os.tmpdir(), `cbz-speed-${Date.now()}.json`); fs.writeFileSync(f, json); log(`[speed] full JSON: ${f}`); }
   log(`[speed] done in ${((Date.now() - TOOL_T0) / 1000).toFixed(1)}s`);
