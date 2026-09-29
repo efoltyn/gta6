@@ -190,7 +190,8 @@
       else if (L.isHemisphereLight) n.H++; else if (L.isRectAreaLight) n.R++; else n.A++;
       if (L.castShadow) n.s++;
     }
-    lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0);
+    lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0) +
+      (opts && opts.target ? "|t" + (opts.target.texture ? opts.target.texture.encoding : 0) : "");
     const reps = [];
     const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled) ? [] : null;
     let bad = 0;
@@ -224,7 +225,12 @@
     if (reps.length) {
       STAND_IN.fog = sc.fog; STAND_IN.environment = sc.environment; STAND_IN.background = sc.background;
       STAND_IN._lights = lights; STAND_IN._objs = reps;
-      try { r.compile(STAND_IN, cam); } catch (e) { rep.threw = true; try { console.warn("[fxwarm] compile threw:", e && e.message); } catch (e2) {} }
+      // opts.target: compile for a render target (a render-to-texture pass keys
+      // its programs on the target's encoding, e.g. the cctv feed)
+      const tgt = opts && opts.target, prevT = tgt ? r.getRenderTarget() : null;
+      try { if (tgt) r.setRenderTarget(tgt); r.compile(STAND_IN, cam); }
+      catch (e) { rep.threw = true; try { console.warn("[fxwarm] compile threw:", e && e.message); } catch (e2) {} }
+      finally { if (tgt) r.setRenderTarget(prevT); }
       STAND_IN._lights = null; STAND_IN._objs = null;
     }
     if (casters && casters.length) { rep.depth = casters.length; queueDepth(r, cam, casters, lights); }
@@ -242,6 +248,11 @@
   // frames are actually drawn. `root` is walked from child index `from`
   // (cursor per root) so a builder's new children are visited once; call
   // with {full:true} to rewalk everything (after the batch pass).
+  // opts: full (rewalk the whole root), depth (also the shadow pass's depth
+  // programs), target (compile for that render target: a render-to-texture
+  // pass keys programs on its encoding), skip(o) (prune for this call).
+  // Anything that is about to draw a new root (a spawned rig, a streamed
+  // chunk, a feed camera) can call it a frame early and never hitch.
   const cursors = new WeakMap();
   CBZ.shaderQueue = function (root, opts) {
     if (!LAZY) return null;
