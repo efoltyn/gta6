@@ -29,6 +29,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/security.js", function () {
   if (!CBZ || !CBZ.scene) return;
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { addBox, mat } = CBZ;
@@ -233,4 +236,5 @@
       setLamp(cam, "idle", 0);
     }
   };
+  });
 })();

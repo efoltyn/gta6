@@ -15,6 +15,12 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_GROUND_CIGS == null) CBZ.CONFIG.PRISON_GROUND_CIGS = false;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/coins.js", function () {
   const mat = CBZ.mat;
 
   /* ==========================================================================
@@ -51,7 +57,6 @@
        · a downed man spills what he HAD instead of minting 2-8 from nothing
      Net: the same order of money, none of it free, all of it off a person.
      ========================================================================== */
-  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_CIGS == null) CBZ.CONFIG.PRISON_GROUND_CIGS = false;
   function groundCigs() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_CIGS); }
 
   // planar proximity radius for pickup: the original block tested
@@ -157,4 +162,5 @@
   };
 
   CBZ.addPack = addPack;
+  });
 })();

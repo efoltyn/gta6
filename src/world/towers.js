@@ -24,6 +24,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/towers.js", function () {
   if (!CBZ || !CBZ.guardTower || !CBZ.WORLD) return;
   const { WORLD } = CBZ;
   const N = WORLD.northYard, S = WORLD.southBlock, EZ = WORLD.exit.z;
@@ -42,4 +45,5 @@
   CBZ.guardTower(S.x1, SM, { inward: { x: -1, z: 0 } });       // east wall
   CBZ.guardTower(S.x0, EZ, { inward: { x: 1, z: -1 }, perimeter: OUT });  // flanking the freedom gate
   CBZ.guardTower(S.x1, EZ, { inward: { x: -1, z: -1 }, perimeter: OUT });
+  });
 })();

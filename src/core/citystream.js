@@ -129,6 +129,8 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
+  const RECENTRE = 0.5;               // the centre follows the player at r * RECENTRE
+  const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
     const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 60; };
@@ -136,7 +138,15 @@
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
       view: view,
-      keepR: function () { return S.r + S.view(); },
+      /* THE KEEP CIRCLE IS WHAT CAN BE SEEN, NO MORE. The player is never
+         more than RECENTRE (half the playable radius) from the centre (the
+         centre follows at that distance), and sees `view` (fog + 60 m) from
+         there; `lead` adds the ground a moving player covers before the next
+         tick builds it (speed x 2.5 s, up to 250 m). It was r + view: the
+         whole playable radius again on top, ~35% more city in memory at the
+         downtown spawn for ground nobody could see yet. */
+      lead: 0,
+      keepR: function () { return S.r * RECENTRE + S.view() + S.lead; },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -211,8 +221,15 @@
   };
 
   /* ---- park / unpark ------------------------------------------------------ */
+  // a geometry that dropped its CPU arrays after upload (metro far tiles) can
+  // never be uploaded again: it keeps its GPU buffers
+  function reuploadable(g) {
+    if (g.index && !g.index.array) return false;
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array && !(a.data && a.data.array)) return false; }
+    return true;
+  }
   function releaseGPU(o) {
-    o.traverse(function (c) { if (c.geometry && c.geometry.dispose) c.geometry.dispose(); });
+    o.traverse(function (c) { const g = c.geometry; if (g && g.dispose && g.attributes && reuploadable(g)) g.dispose(); });
   }
   function removeFrom(arr, list) {
     if (!arr || !list || !list.length) return;
@@ -220,10 +237,23 @@
     let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
     arr.length = w;
   }
+  // the LOS blockers under a job's objects leave CBZ.losBlockers with it
+  function takeLos(job) {
+    const L = CBZ.losBlockers; if (!L || !L.length || !job.objs || !job.objs.length) return;
+    const tops = new Set(); for (const it of job.objs) tops.add(it.o);
+    let w = 0;
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i]; let p = m, hit = false;
+      while (p) { if (tops.has(p)) { hit = true; break; } p = p.parent; }
+      if (hit) (job.los || (job.los = [])).push(m); else L[w++] = m;
+    }
+    L.length = w;
+  }
   function park(job) {
+    takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
     removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
-    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.state = "queued"; }
+    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.los = null; job.state = "queued"; }
     else job.state = "parked";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
@@ -231,13 +261,31 @@
     for (const it of job.objs) if (it.parent) it.parent.add(it.o);
     for (const c of job.cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
+    if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
     job.state = "built";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function settle(job) {
-    // late content: freeze its matrices and queue its shaders (the batch pass
-    // is a once-per-world step; late content keeps its own draws, like the
-    // metro's streamed tiles)
+    // LATE CONTENT IS BATCHED LIKE BOOT CONTENT. What the job added under the
+    // city root moves into one identity group, and that group gets the same
+    // passes the boot world got (core/batch.js merge, local instancing): a
+    // streamed town draws in a handful of calls, not one per box, and parks
+    // and returns as one unit. Only after the world's own batch ran (a job
+    // that runs during the build is batched with everything else).
+    const root = cityRoot();
+    if (root && root.userData && root.userData._batched && job.objs && job.objs.length && CBZ.batchStaticUnder && window.THREE) {
+      const mine = job.objs.filter(function (it) { return it.parent === root && it.o.parent === root; });
+      if (mine.length) {
+        const G = new window.THREE.Group();
+        G.name = "stream-job";
+        root.add(G);
+        for (const it of mine) { root.remove(it.o); G.add(it.o); }
+        try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[stream batch " + (job.name || "?") + "]", e); }
+        try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+        job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
+        job.objs.push({ o: G, parent: root });
+      }
+    }
     for (const it of job.objs || []) {
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(it.o, { full: true }); } catch (e) {}
@@ -253,6 +301,12 @@
   // one parked job per 400 m cell (by the subtree's centre), not per object:
   // the streamer scans its job list twice a second
   const prunedCells = new Map();
+  const jobOfTop = new WeakMap();
+  // a pruned LOS blocker rides with the parked job that holds its subtree
+  CBZ.streamParkLos = function (top, m) {
+    const job = jobOfTop.get(top); if (!job) return;
+    (job.los || (job.los = [])).push(m);
+  };
   CBZ.streamParkPruned = function (o, parent, box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
     const k = Math.floor(cx / 400) + "," + Math.floor(cz / 400);
@@ -265,6 +319,7 @@
     r.minX = Math.min(r.minX, box.min.x); r.maxX = Math.max(r.maxX, box.max.x);
     r.minZ = Math.min(r.minZ, box.min.z); r.maxZ = Math.max(r.maxZ, box.max.z);
     job.objs.push({ o: o, parent: parent });
+    jobOfTop.set(o, job);
     releaseGPU(o);
   };
 
@@ -277,7 +332,19 @@
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
-    if (force || dx * dx + dz * dz > (s.r * 0.5) * (s.r * 0.5)) {
+    // how far a moving player gets before the next few ticks (vehicle or feet)
+    // (measured from the position between ticks: a car, a plane, a horse,
+    // a teleport all count the same way; a jump of > 400 m is a teleport)
+    const tNow = performance.now();
+    let V = 0;
+    if (lastP.t && tNow > lastP.t) {
+      const mdx = P.pos.x - lastP.x, mdz = P.pos.z - lastP.z, d = Math.sqrt(mdx * mdx + mdz * mdz);
+      if (d < 400) V = d / ((tNow - lastP.t) / 1000);
+    }
+    lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
+    const lead = Math.min(250, V * 2.5);
+    if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
+    if (force || dx * dx + dz * dz > (s.r * RECENTRE) * (s.r * RECENTRE)) {
       s.x = P.pos.x; s.z = P.pos.z;
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
       CBZ.streamStats.recentres++;

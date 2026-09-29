@@ -1553,13 +1553,27 @@
     const X0 = CX - SPAN / 2, X1 = CX + SPAN / 2;
     const Z0 = CZ - SPAN / 2, Z1 = CZ + SPAN / 2;
     let AX = null, AZ = null;
+    /* BAKED ONCE PER VERSION (core/bakecache.js): the adaptive axes and every
+       tile's heights and paint are a pure function of the continent plate
+       (its signature carries every input the plate read), this backdrop's
+       span and the config. */
+    let TSIG = null, TB = null, TOFF = 0;
+    if (CBZ.bakeSig && CBZ.bakeGet && CBZ._plateSig && SMOOTH_SHADE) {   // (the faceted path de-indexes: not baked)
+      try {
+        TSIG = CBZ.bakeSig("backdrop|" + CBZ._plateSig + "|" + CBZ.bakeHash({ X0: X0, X1: X1, Z0: Z0, Z1: Z1, N: N, TILES: TILES, TSEG: TSEG, SMOOTH: !!SMOOTH_SHADE, RANGE: !!RANGE_ON(), cfg: CFG }));
+        TB = CBZ.bakeGet("terrain-backdrop", TSIG);
+        if (TB && !(TB.y && TB.c && TB.ax && TB.az)) TB = null;
+      } catch (e) { TSIG = null; TB = null; }
+    }
+    const TY = [], TC = [];               // this build's tile outputs, for the bake
     // TERRAIN_DARK_RANGE: with no relief there is nothing for the CDF to
     // concentrate on — every weight is the floor, so the adaptive axis
     // degenerates to the uniform one the fallback below already builds, and
     // solving it would cost ~26k field evaluations to learn that. Tiles still
     // share their edge samples exactly (same TSEG both sides), so the seabed
     // stays watertight.
-    if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry && RANGE_ON()) {
+    if (TB) { AX = TB.ax.length ? TB.ax : null; AZ = TB.az.length ? TB.az : null; }
+    else if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry && RANGE_ON()) {
       const PN = 36;
       AX = CBZ.mtnAdaptiveAxis(N, X0, X1, function (x) {
         let m = 0;
@@ -1595,9 +1609,14 @@
         geo.translate(tcx, 0, tcz);
       }
       const pos = geo.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        pos.setY(i, v3Visual(pos.getX(i), pos.getZ(i)));
+      const baked = !!(TB && TB.y.length >= TOFF + pos.count);
+      if (baked) { for (let i = 0; i < pos.count; i++) pos.setY(i, TB.y[TOFF + i]); }
+      else {
+        const ty = new Float32Array(pos.count);
+        for (let i = 0; i < pos.count; i++) { const y = v3Visual(pos.getX(i), pos.getZ(i)); pos.setY(i, y); ty[i] = pos.getY(i); }
+        TY.push(ty);
       }
+      const tyOff = TOFF; TOFF += pos.count;
       pos.needsUpdate = true;
       // Indexed + smooth normals (SMOOTH_SHADE) or de-indexed per-face facets.
       const outGeo = SMOOTH_SHADE ? geo : geo.toNonIndexed();
@@ -1605,7 +1624,9 @@
       const fp = outGeo.attributes.position;
       const fn = outGeo.attributes.normal;
       const fcolors = new Float32Array(fp.count * 3);
-      for (let i = 0; i < fp.count; i++) {
+      if (baked) fcolors.set(TB.c.subarray(tyOff * 3, tyOff * 3 + fcolors.length));
+      else TC.push(fcolors);
+      for (let i = baked ? fp.count : 0; i < fp.count; i++) {
         const vx = fp.getX(i), vz = fp.getZ(i);
         const y = fp.getY(i);
         const ny = Math.min(1, Math.max(0, fn.getY(i)));
@@ -1645,6 +1666,13 @@
       terrainTiles.push(tile);
     }
     const terrain = terrainTiles[0];
+    if (!TB && TSIG && CBZ.bakePut && TY.length === terrainTiles.length) {
+      let ny = 0, nc = 0; for (const a of TY) ny += a.length; for (const a of TC) nc += a.length;
+      const Y = new Float32Array(ny), C = new Float32Array(nc);
+      let o = 0; for (const a of TY) { Y.set(a, o); o += a.length; }
+      o = 0; for (const a of TC) { C.set(a, o); o += a.length; }
+      CBZ.bakePut("terrain-backdrop", TSIG, { y: Y, c: C, ax: AX ? Float64Array.from(AX) : new Float64Array(0), az: AZ ? Float64Array.from(AZ) : new Float64Array(0) });
+    }
 
     // ---- TALUS — fractured boulders at the mountain feet (rockscliffs'
     //      slope-aware scatter; angle-of-repose keeps them off cliff faces,

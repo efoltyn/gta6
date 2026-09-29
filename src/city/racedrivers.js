@@ -232,7 +232,7 @@
     car.baseV = 0; car.v = 0; car.vx = 0; car.vz = 0;
     car._raceCar = true;
     if (opts.livery && CBZ.cityApplyRaceLivery) {
-      try { CBZ.cityApplyRaceLivery(car.group, opts.livery); } catch (e) { /* headless rigs */ }
+      try { const lv = opts.livery; const f = function (c) { CBZ.cityApplyRaceLivery(c.group, lv); }; if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(car, f); else f(car); } catch (e) { /* headless rigs */ }
     }
     const skill = opts.skill != null ? opts.skill : 0.8;
     const m = {

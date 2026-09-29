@@ -20,6 +20,7 @@
          # check, so culling passes and a visible change is a LOOK REGRESSION
      node tools/speed.mjs --ask ab --toggle-file toggle.js   # a longer toggle (JS; `on` is the switch)
      node tools/speed.mjs --ask eval 'CBZ.treeAudit()'       # anything, in the live world
+     node tools/speed.mjs --ask prof 'CBZ.startRun()'        # ... under the CPU profiler: self + inclusive tops
      node tools/speed.mjs --ask reload                       # rebuild from edited sources (measured load)
      node tools/speed.mjs --ask info | stop
      node tools/speed.mjs --serve                            # run the world in the foreground instead
@@ -50,6 +51,7 @@
      node tools/speed.mjs --root <dir>            # measure a directory (a snapshot, another tree)
      node tools/speed.mjs --url http://127.0.0.1:8000/   # an already-running server / other worktree
      node tools/speed.mjs --profile               # + V8 sampling profile: top functions (file:function)
+     node tools/speed.mjs --profile --profile-dir d  # ... and keep the raw .cpuprofile files
      node tools/speed.mjs --attribute             # + DIAGNOSTIC: what HD settings / vegetation cost
      node tools/speed.mjs --serial                # v1 frame model: readPixels every frame, frame = cpu + gpuWait
      node tools/speed.mjs --no-look               # skip the pixel grabs (A/B look guard off)
@@ -59,6 +61,7 @@
      node tools/speed.mjs --mem-budget 600        # the phone-total budget in MB (default 600)
      node tools/speed.mjs --gpu swiftshader       # software GL (default is the real GPU)
      node tools/speed.mjs --json out.json         # write the full result anywhere
+     node tools/speed.mjs --preload probe.js      # inject a diagnostic script before the game (e.g. an allocation tracker)
      node tools/speed.mjs --seed 90210 --frames 90 --warm 20
 
    WHAT IT MEASURES (in-page performance.now(), Chrome's own CPU counters,
@@ -227,6 +230,9 @@ const WARM = Math.max(0, +opt("--warm", 8));
 const GPU = opt("--gpu", "real");
 const DEVICE = opt("--device", "desktop");
 const QUERY = opt("--query", "");
+/* --preload <file.js>: extra page script injected before the game (after the
+   measuring preload), e.g. a diagnostic allocation tracker. */
+const PRELOAD_EXTRA = opt("--preload", "");
 /* CITY SLICES (src/core/slice.js): --slice boots ONE piece of Gang City as
    its own world (a name from CBZ.SLICES, or "x,z,r"); the play spots move
    into the slice (its spawn street, its centre, an aerial over it).
@@ -235,6 +241,11 @@ const QUERY = opt("--query", "");
 const SLICE = opt("--slice", "");
 const SLICE_SPOTS = opt("--slice-spots", "") || SLICE;
 const PROFILE = has("--profile");
+/* --heap-sites: V8's sampling heap profiler runs from navigation to settle;
+   after the forced GC, the LIVE V8 bytes are listed by allocating game site
+   (nearest src/ frame) and by file. ArrayBuffer backing stores are not V8
+   heap objects: --preload tools/preload/abtrack.js lists those. */
+const HEAP_SITES = has("--heap-sites");
 const ATTRIBUTE = has("--attribute");
 const SAVE = opt("--save", "");
 const JSON_OUT = opt("--json", "");
@@ -899,6 +910,7 @@ async function newPage(B, salt = newNonce()) {
     await s("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     if (DEVICE === "phone") await s("Emulation.setUserAgentOverride", { userAgent: PHONE_UA, platform: "iPhone", acceptLanguage: "en-US" });
   }
+  if (PRELOAD_EXTRA) pre += "\n;" + fs.readFileSync(path.resolve(PRELOAD_EXTRA), "utf8");
   await s("Page.addScriptToEvaluateOnNewDocument", { source: pre });
   return { s, ev, salt, close: async () => { try { await B.send("Target.closeTarget", { targetId }); } catch (_) {} try { await B.send("Target.disposeBrowserContext", { browserContextId }); } catch (_) {} } };
 }
@@ -920,6 +932,12 @@ async function memSnap(P) {
   let o = null;
   try { o = await P.ev("window.__speed.memRead()", 30000); } catch (_) {}
   try { const h = await P.s("Runtime.getHeapUsage", {}, 10000); if (o) { o.cdpHeap = +(h.usedSize / 1048576).toFixed(1); o.cdpHeapTotal = +(h.totalSize / 1048576).toFixed(1); if (h.backingStorageSize != null) o.arrayBuffers = +(h.backingStorageSize / 1048576).toFixed(1); o.cdpRaw = h; } } catch (_) {}
+  // LIVE = after a forced full GC: what the world really holds (the steady
+  // figure above still counts garbage the build left for the collector; a
+  // phone's GC reclaims that under pressure, so live is the resident floor).
+  try { await P.s("HeapProfiler.collectGarbage", {}, 30000); const r = await P.ev("(function(){ var m = performance.memory; return m ? m.usedJSHeapSize : 0; })()", 10000);
+    const h = await P.s("Runtime.getHeapUsage", {}, 10000);
+    if (o) { o.liveHeap = +(r / 1048576).toFixed(1); o.liveV8 = +(h.usedSize / 1048576).toFixed(1); if (h.backingStorageSize != null) o.liveArrayBuffers = +(h.backingStorageSize / 1048576).toFixed(1); o.livePhone = +(o.liveHeap + (o.gpu || 0)).toFixed(1); } } catch (_) {}
   try { const { metrics } = await P.s("Performance.getMetrics", {}, 10000); if (o) o.cdpMetrics = Object.fromEntries(metrics.filter((x) => /Heap|Nodes|Documents|Frames/.test(x.name)).map((x) => [x.name, x.value])); } catch (_) {}
   return o;
 }
@@ -959,6 +977,7 @@ const SCRIPT_TABLE = String.raw`(function(){
 async function measureLoad(B, P, url, out, prof) {
   const sn0 = await cpuSnap(B, P);
   const tNav = Date.now();
+  if (HEAP_SITES) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 32768 }); }
   await P.s("Page.navigate", { url });
   await waitFor(P.ev, "!!(window.CBZ && CBZ.bootComplete && CBZ.startRun && window.__speed && document.readyState === 'complete')", 240, "bootComplete");
   await P.ev(PAGE_LIB);
@@ -1009,7 +1028,8 @@ async function measureLoad(B, P, url, out, prof) {
   /* MEMORY: peak over the whole load (script eval, build, first frames:
      sampled in-page through all of it), and the steady value after settle */
   const ms = await memSnap(P);
-  if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
+  if (HEAP_SITES) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 120000); await P.s("HeapProfiler.stopSampling", {}, 120000); out.heapSites = heapSites(profile); } catch (e) { out.heapSites = { err: String(e).slice(0, 200) }; } }
+  if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, liveHeap: ms.liveHeap, liveV8: ms.liveV8, liveArrayBuffers: ms.liveArrayBuffers, livePhone: ms.livePhone, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
     objects: { buffers: ms.nBuf, textures: ms.nTex, renderbuffers: ms.nRb }, subDataMB: ms.subMB, samples: ms.samples, precise: ms.precise, budgetMB: MEM_BUDGET_MB,
     atTitle: memTitle && { heap: memTitle.heap, gpu: memTitle.gpu, phone: memTitle.phone, peakPhone: memTitle.peak.phone },
     afterBuild: memBuild && { heap: memBuild.heap, gpu: memBuild.gpu, phone: memBuild.phone, peakPhone: memBuild.peak.phone } };
@@ -1032,6 +1052,21 @@ async function measureLoad(B, P, url, out, prof) {
     gpuProc: cpuD(sn0, sn3, "gpuProc"), gpuProcFirstFrames: cpuD(sn2, sn3, "gpuProc"), key: mainK };
   out.tool.built = Date.now() - tNav;
   return tNav;
+}
+
+/* live V8 bytes by allocating site: each sample node's selfSize is charged to
+   the nearest src/ (game) frame on its stack, and to that frame's file. */
+function heapSites(profile) {
+  const bySite = new Map(), byFile = new Map(); let total = 0;
+  const walk = (n, game) => {
+    const cf = n.callFrame || {}, m = /\/(src\/[^?]+|games\/[^?]+)/.exec(cf.url || "");
+    const g = m && !/vendor\//.test(m[1]) ? { site: m[1].replace(/^src\//, "") + ":" + (cf.lineNumber + 1) + " " + (cf.functionName || "(anon)"), file: m[1].replace(/^src\//, "") } : game;
+    if (n.selfSize) { total += n.selfSize; const s = g ? g.site : "(engine/no game frame)", f = g ? g.file : "(engine)"; bySite.set(s, (bySite.get(s) || 0) + n.selfSize); byFile.set(f, (byFile.get(f) || 0) + n.selfSize); }
+    for (const c of n.children || []) walk(c, g);
+  };
+  walk(profile.head, null);
+  const top = (mp, k) => [...mp.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([s, b]) => [s, +(b / 1048576).toFixed(1)]);
+  return { totalMB: +(total / 1048576).toFixed(0), sites: top(bySite, 50), files: top(byFile, 40) };
 }
 
 async function runCbz(B, base, m, withPlay, ctx = {}) {
@@ -1070,6 +1105,8 @@ async function runCbz(B, base, m, withPlay, ctx = {}) {
     await P.close();
   }
   if (prof && Object.keys(prof).length) out.profile = summarizeProfiles(prof);
+  // --profile-dir <dir>: keep the raw .cpuprofile files (DevTools / custom rollups)
+  if (prof && opt("--profile-dir", "")) { const dir = path.resolve(opt("--profile-dir", "")); fs.mkdirSync(dir, { recursive: true }); for (const k in prof) fs.writeFileSync(path.join(dir, `${m}-${k}.cpuprofile`), JSON.stringify(prof[k])); }
   return out;
 }
 
@@ -1187,7 +1224,7 @@ async function runPage(B, base, m, withPlay) {
     out.entryToFirstDraw = t.firstDraw - entryAt;
     out.firstFrames = t.frames;
     out.loadMs = (d.entry ? readyAt : 0) + (t.cheapAt - (d.entry ? entryAt : 0));
-    { const ms = await memSnap(P); if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap }, budgetMB: MEM_BUDGET_MB }; }
+    { const ms = await memSnap(P); if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, liveHeap: ms.liveHeap, livePhone: ms.livePhone }, budgetMB: MEM_BUDGET_MB }; }
     out.phases = [["script eval + page ready", readyAt], ["entry → first draw", t.firstDraw - entryAt], ["first draw → frames cheap", t.cheapAt - t.firstDraw]];
     out.ok = true;
     if (withPlay) {
@@ -1273,7 +1310,7 @@ function flatten(r) {
       put(`${m}.mem.heapPeak`, b.heap, 0, "MB"); put(`${m}.mem.heap`, st.heap, 0, "MB");
       put(`${m}.mem.gpuPeak`, b.gpu, 0, "MB"); put(`${m}.mem.gpu`, st.gpu, 0, "MB");
       put(`${m}.mem.gpuTex`, st.tex, 0, "MB"); put(`${m}.mem.gpuBuf`, st.buf, 0, "MB"); put(`${m}.mem.gpuRb`, st.rb, 0, "MB");
-      put(`${m}.mem.phonePeak`, b.phone, 0, "MB"); put(`${m}.mem.phone`, st.phone, 0, "MB"); put(`${m}.mem.canvas2d`, st.cv2d, 0, "MB");
+      put(`${m}.mem.phonePeak`, b.phone, 0, "MB"); put(`${m}.mem.phone`, st.phone, 0, "MB"); if (st.livePhone != null) put(`${m}.mem.phoneLive`, st.livePhone, 0, "MB"); put(`${m}.mem.canvas2d`, st.cv2d, 0, "MB");
     }
     if (r.cpu) {   // Chrome's CPU counters (ms): contention-proof load cost
       put(`${m}.load.cpu.main`, r.cpu.main); put(`${m}.load.cpu.mainBuild`, r.cpu.mainBuild); put(`${m}.load.cpu.mainFirstFrames`, r.cpu.mainFirstFrames);
@@ -1554,6 +1591,9 @@ function table(res) {
     pm("load.programs", "  programs compiled", "n");
     if (r.mem) { const b = r.mem.boot || {}, st = r.mem.steady || {};
       p(`  MEMORY (MB)  JS heap peak ${fmt(b.heap, 0)} / steady ${fmt(st.heap, 0)}${st.cdpHeap != null ? ` (= V8 heap ${fmt(st.cdpHeap, 0)} + ArrayBuffers ${fmt(st.arrayBuffers, 0)})` : ""}   GPU peak ${fmt(b.gpu, 0)} / steady ${fmt(st.gpu, 0)} [textures ${fmt(st.tex, 0)} buffers ${fmt(st.buf, 0)} renderbuffers ${fmt(st.rb, 0)} drawing buffer ${fmt(st.db, 0)}]   2D canvases ${fmt(st.cv2d, 0)}`);
+      if (r.heapSites && r.heapSites.files) { p(`  LIVE V8 BY FILE (sampled, ${r.heapSites.totalMB} MB): ` + r.heapSites.files.slice(0, 25).map(([f, mb]) => `${f} ${mb}`).join(" · "));
+        p(`  LIVE V8 BY SITE: ` + r.heapSites.sites.slice(0, 30).map(([f, mb]) => `${f} ${mb}`).join(" · ")); }
+      if (st.liveHeap != null) p(`  LIVE after a forced GC: JS heap ${fmt(st.liveHeap, 0)} (V8 ${fmt(st.liveV8, 0)} + ArrayBuffers ${fmt(st.liveArrayBuffers, 0)})   phone live ${fmt(st.livePhone, 0)} MB ${memVerdict(st.livePhone)}`);
       p(`  PHONE TOTAL (heap + GPU)  peak ${fmt(b.phone, 0)} MB ${memVerdict(b.phone)}   steady ${fmt(st.phone, 0)} MB ${memVerdict(st.phone)}   (budget ${r.mem.budgetMB || MEM_BUDGET_MB} MB; iOS kills a tab near 1-1.5 GB)${r.mem.precise === false ? "  [heap NOT precise]" : ""}`); }
     if (g("load.cpu.main")) p(`  CPU time (Chrome): main thread ${fmt(g("load.cpu.main").v, 0)} ms (build ${fmt(g("load.cpu.mainBuild") && g("load.cpu.mainBuild").v, 0)}, first frames ${fmt(g("load.cpu.mainFirstFrames") && g("load.cpu.mainFirstFrames").v, 0)}, V8 compile ${fmt(g("load.cpu.v8Compile") && g("load.cpu.v8Compile").v, 0)})  GPU process ${fmt(g("load.cpu.gpuProc") && g("load.cpu.gpuProc").v, 0)} ms (first frames ${fmt(g("load.cpu.gpuProcFirstFrames") && g("load.cpu.gpuProcFirstFrames").v, 0)})`);
     if (g("load.return.total")) p(`  RETURN VISIT ${fmt(g("load.return.total").v, 0)} ms = title ${fmt(g("load.return.title") && g("load.return.title").v, 0)} (script eval ${fmt(g("load.return.scriptEval") && g("load.return.scriptEval").v, 0)}) + build ${fmt(g("load.return.build") && g("load.return.build").v, 0)} + first frame ${fmt(g("load.return.firstFrame") && g("load.return.firstFrame").v, 0)} (compile ${fmt(g("load.return.firstFrameCompile") && g("load.return.firstFrameCompile").v, 0)}) + settle ${fmt(g("load.return.warmFrames") && g("load.return.warmFrames").v, 0)}; GPU process ${fmt(g("load.return.cpu.gpuProc") && g("load.return.cpu.gpuProc").v, 0)} ms`);
@@ -1686,6 +1726,14 @@ async function serveMain() {
       if (op === "reload") { res.ms = Date.now() - t0; return res; }
     }
     if (op === "eval") { res.value = await P.ev(q.expr, (q.timeoutS || 60) * 1000); res.ms = Date.now() - t0; return res; }
+    // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
+    // same self / inclusive tables as --profile, plus the expression's value
+    if (op === "prof") {
+      await P.s("Profiler.enable"); await P.s("Profiler.setSamplingInterval", { interval: 1000 }); await P.s("Profiler.start");
+      try { res.value = await P.ev(q.expr, (q.timeoutS || 300) * 1000); }
+      finally { const { profile } = await P.s("Profiler.stop", {}, 240000); const sm = summarizeProfiles({ run: profile }).run; res.profile = { totalMs: sm.totalMs, self: sm.topFunctions.slice(0, 25), inclusive: sm.inclusiveFunctions.slice(0, 50), files: sm.inclusiveFiles.slice(0, 25) }; }
+      res.ms = Date.now() - t0; return res;
+    }
     /* LOCKING. frames are absolute numbers: they wait for the machine lock
        (--no-lock skips it and says so). An in-page ab is PAIRED — base and
        candidate blocks alternate within a second of each other, so other
@@ -1782,7 +1830,7 @@ async function askMain() {
     if (ASK === "stop" || ASK === "info") { console.log("no warm world for this tree"); process.exit(0); }
     // start one, detached, with the same serving flags
     const logf = WORLD_FILE.replace(/\.json$/, ".log");
-    const pass = []; for (const f of ["--root", "--url", "--ref", "--seed", "--device", "--gpu", "--shaders", "--mode", "--modes", "--idle", "--world", "--query", "--slice", "--slice-spots"]) { const v = opt(f, null); if (v != null) pass.push(f, v); }
+    const pass = []; for (const f of ["--root", "--url", "--ref", "--seed", "--device", "--gpu", "--shaders", "--mode", "--modes", "--idle", "--world", "--query", "--slice", "--slice-spots", "--preload"]) { const v = opt(f, null); if (v != null) pass.push(f, v); }
     const fd = fs.openSync(logf, "a");
     const ch = spawn(process.execPath, [fileURLToPath(import.meta.url), "--serve", ...pass], { detached: true, stdio: ["ignore", fd, fd], cwd: ROOT0 });
     ch.unref();
@@ -1809,11 +1857,12 @@ async function askMain() {
   if (has("--leave-on")) q.leave = "on";
   const tg = opt("--toggle", ""), tgf = opt("--toggle-file", "");
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
-  if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed)$/.test(argv[i - 1] || "")).join(" "); }
+  if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget)$/.test(argv[i - 1] || "")).join(" "); }
+  if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
   try { r = await post(w.port, q, 30 * 60 * 1000); } catch (e) { console.error("[speed] query failed: " + e.message); process.exit(1); }
   const O = (s) => process.stdout.write(s + "\n");
-  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "stop") O(JSON.stringify(r, null, 1));
+  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "stop") O(JSON.stringify(r, null, 1));
   if (r.reloaded) O(`reloaded (${r.reloaded.why}): load ${r.reloaded.load} ms = build ${r.reloaded.build} + first frame ${r.reloaded.firstFrame} + settle ${r.reloaded.settle}; CPU main ${r.reloaded.cpuMain} ms, GPU process ${r.reloaded.gpuProc} ms`);
   if (ASK === "frames") for (const [n, o] of Object.entries(r.spots || {}))
     O(`${n.padEnd(9)} frame ${fmt(o.frame)} ms (p95 ${fmt(o.p95)})  cpu ${fmt(o.cpu)} [sim ${fmt(o.sim)} always ${fmt(o.always)} render ${fmt(o.render)}]  gpu ${fmt(o.gpu)} [main ${fmt(o.gpuMain)} shadow ${fmt(o.gpuShadow)} rt ${fmt(o.gpuRt)}]  CPU/frame main ${fmt(o.cpuThread)} gpuProc ${fmt(o.gpuProcCpu)}  calls ${o.calls} tris ${((o.tris || 0) / 1e6).toFixed(2)}M\n` +

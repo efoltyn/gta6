@@ -957,6 +957,22 @@
     for (const j of kitFar) _pending.push(j);
   });
 
+  /* THE GPU WAS LOST (systems/glcontext.js, webglcontextrestored). The far
+     tiles and facade cells keep no CPU copy (metro_fabric.js FREE_FAR), so
+     three cannot re-upload them: every built level is dropped and the sweep
+     above rebuilds what is in view, nearest first, like a first visit. */
+  CBZ.metroGpuLost = function () {
+    for (const M of CBZ.metroCities || []) {
+      if (!M.tiles) continue;
+      for (const t of M.tiles) {
+        if (t.gndBuilt || t.fabBuilt) { try { dropTile(M, t); } catch (e) {} }
+        if (t.fab) t.fab.farBuilt = false;
+      }
+      for (const c of (M.fabric && M.fabric.kit) || []) if (c.built) { try { kitDrop(c); } catch (e) {} }
+    }
+    _pending.length = 0; _cur = null;
+  };
+
   // ------------------------------------------------------------------
   //  AUDIT — what the tools (and the report) read
   // ------------------------------------------------------------------
