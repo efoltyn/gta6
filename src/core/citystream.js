@@ -162,15 +162,66 @@
 
   function cityRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || (CBZ._cityRootBuilding || null); }
 
-  // run fn, capturing what it adds at the top of the city root and the scene
-  // and every collider/platform it pushes
+  /* WHAT A JOB LEAVES BEHIND, SO IT CAN BE TAKEN BACK. A builder writes
+     into shared lists (CBZ.* arrays: shops, lots, work anchors, doors,
+     updaters...; the arena's arrays; any module list registered with
+     CBZ.streamBus). runCaptured notes each list's length before the job and
+     keeps what was appended. A far job is then FREED, not just parked
+     (freeJob below): its objects leave and are disposed, its entries leave
+     every list, and next time it simply runs again. The world's plain DATA
+     (regions, roads, water, no-spawn, frontier, biome blends) stays: the map
+     and traffic read it everywhere; a re-run takes its own old copies out
+     first so nothing is registered twice. */
+  const DATA_BUSES = { regions: 1, roads: 1, waterBodies: 1, noSpawn: 1, frontierRoads: 1, frontierLandmarks: 1, _biomeBlendSpecs: 1 };
+  const OWN_BUSES = { colliders: 1, platforms: 1, losBlockers: 1, streamJobs: 1, updaters: 1, always: 1 };
+  const moduleBuses = [];
+  CBZ.streamBus = function (arr, name) { if (Array.isArray(arr) && moduleBuses.indexOf(arr) < 0) { moduleBuses.push(arr); arr._busName = name || "module"; } };
+  // a registry that is not a plain list (city/placement.js's cell hash) says
+  // how to count, list and take back what a job added: { mark(), since(m), drop(items) }
+  const busHooks = [];
+  CBZ.streamBusHook = function (h) { if (h && busHooks.indexOf(h) < 0) busHooks.push(h); };
+  function busList() {
+    const out = [];
+    const add = function (arr, name) { if (Array.isArray(arr) && Object.isExtensible(arr) && out.every(function (e) { return e.arr !== arr; })) out.push({ arr: arr, name: name, n: arr.length }); };
+    for (const k of Object.keys(CBZ)) { if (OWN_BUSES[k]) continue; const v = CBZ[k]; if (Array.isArray(v)) add(v, k); }
+    const A = CBZ.city && CBZ.city.arena;
+    if (A) for (const k of Object.keys(A)) { const v = A[k]; if (Array.isArray(v)) add(v, "arena." + k); }
+    for (const m of moduleBuses) add(m, m._busName);
+    return out;
+  }
+  function dropItems(arr, items) {
+    if (!arr || !items || !items.length) return;
+    const drop = new Set(items);
+    let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
+    arr.length = w;
+  }
+
+  // run fn, capturing what it adds at the top of the city root and the scene,
+  // every collider/platform it pushes and every list it grows
   function runCaptured(job) {
     const root = cityRoot(), scene = CBZ.scene;
+    // a re-run: its last run's world data comes out first (it registers it again)
+    if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
+    // what is already pending pools up now, so the job's pools hold only its own panes
+    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     const r0 = root ? root.children.length : 0, s0 = scene ? scene.children.length : 0;
     const c0 = (CBZ.colliders || []).length, p0 = (CBZ.platforms || []).length;
+    const buses = busList();
+    const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
     try { job.fn(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
+    // late pools (glass, room deco, masonry) of what it built: now, so they are this job's
+    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     job.ms = performance.now() - t0;
+    job.bus = []; job.data = [];
+    job.hooks = [];
+    busHooks.forEach(function (h, i) { if (marks[i] == null) return; try { const items = h.since(marks[i]); if (items && items.length) job.hooks.push({ h: h, items: items }); } catch (e) {} });
+    for (const b of buses) {
+      if (b.arr.length <= b.n) continue;
+      const items = b.arr.slice(b.n);
+      (DATA_BUSES[b.name] || DATA_BUSES[b.name.replace(/^arena\./, "")] ? job.data : job.bus).push({ arr: b.arr, items: items });
+    }
+
     job.objs = [];
     if (root) for (let i = r0; i < root.children.length; i++) job.objs.push({ o: root.children[i], parent: root });
     if (scene) for (let i = s0; i < scene.children.length; i++) { const o = scene.children[i]; if (o !== root) job.objs.push({ o: o, parent: scene }); }
@@ -266,6 +317,27 @@
     else job.state = "parked";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
+  /* FREE a far job: everything it made goes, and it is queued to run again.
+     Materials are left alone (they are cached and shared across builds). */
+  function freeJob(job) {
+    if (job.state === "built") park(job);
+    for (const it of job.objs || []) {
+      if (it.o.parent) it.o.parent.remove(it.o);
+      it.o.traverse(function (c) {
+        const g = c.geometry;
+        if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) g.dispose();
+      });
+    }
+    for (const b of job.bus || []) dropItems(b.arr, b.items);
+    for (const k of job.hooks || []) { try { k.h.drop(k.items); } catch (e) {} }
+    job.hooks = null;
+    // (frame work a job registered is left running: a builder's first run can
+    // wire a whole system's tick once, and its lists are what just emptied)
+    job.objs = null; job.cols = job.plats = null; job.los = null; job.bus = null;
+    job.state = "queued"; job.freed = (job.freed || 0) + 1;
+    CBZ.streamStats.freed = (CBZ.streamStats.freed || 0) + 1;
+  }
+
   function unpark(job) {
     for (const it of job.objs) if (it.parent) it.parent.add(it.o);
     for (const c of job.cols) CBZ.colliders.push(c);
@@ -369,6 +441,7 @@
 
   /* ---- the streamer --------------------------------------------------------- */
   const HYST = 250;                 // park only this far past the keep circle
+  const FREE_DIST = 700;            // ... and free it outright this far past it
   const STEP_MS = 6;                // per-tick build budget (a job always gets to finish)
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
@@ -403,6 +476,9 @@
       if (performance.now() - t0 > STEP_MS && !force) break;
     }
     for (const j of jobs) if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) park(j);
+    // a parked job this far out is freed outright (it re-runs if the player
+    // comes back); pruned boot content has no fn and stays parked
+    for (const j of jobs) if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) freeJob(j);
     let b = 0, p = 0, qd = 0;
     for (const j of jobs) { if (j.state === "built") b++; else if (j.state === "parked") p++; else qd++; }
     CBZ.streamStats.built = b; CBZ.streamStats.parked = p; CBZ.streamStats.queued = qd;

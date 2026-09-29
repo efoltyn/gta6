@@ -7800,6 +7800,15 @@
     }
   }
 
+  // a streamed job's panes / room deco / veneer become pools at the END of
+  // the job (core/citystream.js), so the pools are that job's own objects
+  CBZ.cityFlushPools = function () {
+    if (pendingGlass.length) buildGlassPools();
+    if (pendingDeco.length) buildRoomDecoPools();
+    if (pendingMasonry.length) buildMasonryPools();
+  };
+  // the module lists a streamed job writes to (freed with it)
+  if (CBZ.streamBus) { CBZ.streamBus(cityGlass, "cityGlass"); CBZ.streamBus(roomDeco, "roomDeco"); CBZ.streamBus(cityDoors, "cityDoors"); }
   CBZ.cityBuildings = function (city) {
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
