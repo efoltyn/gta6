@@ -34,8 +34,8 @@
      merged mesh per colour; ironwork and grime merged; all hash-seeded.
 
    Draw calls for the whole grid street layer: road+apron 1, footway 1,
-   kerb 1, tactile 1, paint 2, ironwork 1, grime 1 (+ lot pads and the
-   avenue medians, built by world.js).
+   kerb 1, tactile 1, paint 2, ironwork 1, grime 1 (+ the one lot-pad mesh
+   wearing city/cityground.js, and the avenue medians, built by world.js).
 
    CBZ.streetKit.build(ctx) is called by city/world.js; see there for ctx.
 ============================================================ */
@@ -361,24 +361,6 @@
       g.fillStyle = "rgba(46,44,40,0.95)"; g.fillRect(x - 1.5, 0, 3, 128);       // the tooled joint (~1 cm)
       g.fillStyle = "rgba(168,163,154,0.45)"; g.fillRect(x + 2, 0, 1, 128);     // trowelled arris
     }
-    return c;
-  }
-  // plaza: 2 x 2 big slabs (3 m) with joints on the tile edges
-  function plazaCanvas() {
-    const c = canvas(256, 256), g = c.getContext("2d"), rnd = lcg(113);
-    const tones = [[126, 124, 120], [120, 118, 115], [130, 127, 122], [123, 121, 117]];   // concrete, not paper (see footwayCanvas)
-    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
-      const t = tones[i * 2 + j];
-      g.fillStyle = "rgb(" + t[0] + "," + t[1] + "," + t[2] + ")"; g.fillRect(i * 128, j * 128, 128, 128);
-    }
-    for (let i = 0; i < 40; i++) {
-      g.globalAlpha = 0.04 + rnd() * 0.05; g.fillStyle = rnd() < 0.5 ? "#6f6a62" : "#cfc9be";
-      g.beginPath(); g.arc(rnd() * 256, rnd() * 256, 10 + rnd() * 30, 0, 6.3); g.fill();
-    }
-    g.globalAlpha = 1;
-    speckle(g, 256, 256, 2600, rnd, 108, 64, 1.4);
-    g.fillStyle = "rgba(52,49,45,0.9)";
-    for (let k = 0; k <= 2; k++) { g.fillRect(k * 128 - 2, 0, 3, 256); g.fillRect(0, k * 128 - 2, 256, 3); }
     return c;
   }
   // kerb: top half = granite top (v 0..0.5), bottom half = sawn face; 4 x 1 m stones
@@ -832,6 +814,9 @@
     const kerbMat = new THREE.MeshLambertMaterial({ map: kerbTex, vertexColors: true });
     const tactTex = texOf(THREE, tactileCanvas());
     const tactMat = new THREE.MeshLambertMaterial({ map: tactTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 });
+    // the 6 m footway canvas repeats its stains; city/cityground.js lays
+    // world-space blots, gum and a 13/41 m mottle over it (and rain)
+    if (CBZ.cityGround && CBZ.cityGround.dressPaving) CBZ.cityGround.dressPaving(footMat);
     [footMat, kerbMat, tactMat].forEach(function (m) { if (CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10); });
     finish("street-footway", foot.geo(THREE, true), footMat);
     finish("street-kerb", kerb.geo(THREE, false), kerbMat);
@@ -1127,15 +1112,12 @@
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(material, 0.10);
       return finish(name, acc.geo(THREE, true), material);
     }
-    function plazaMaterial() {
-      return new THREE.MeshLambertMaterial({ map: texOf(THREE, plazaCanvas()) });
-    }
 
     return {
       profile: P, solve: G, meshes: meshes, stats: stats, roadMaterial: roadMat,
       heightAt: G.heightAt, regionAt: G.regionAt,
       paintRedKerb: paintRedKerb, finishRed: finishRed, redCount: function () { return redCount; },
-      lotMesh: lotMesh, plazaMaterial: plazaMaterial,
+      lotMesh: lotMesh,
       roadMesh: roadMesh, kerbTexture: kerbTex,
     };
   }

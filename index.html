@@ -1728,6 +1728,11 @@ document.body.appendChild(b);}}catch(e){}})();
      for boats first, and this wrapper passes every marine hull straight
      through to it. Revert with ?cfg_LOT_APPROACH=0. -->
 <script src="src/city/approach.js?v=flick1"></script>
+<!-- THE CITY GROUND: one splat-mapped Standard material for every grid lot
+     pad + the footway breakup (city/cityground.js). Runtime-only: world.js
+     and streetkit.js call it inside buildCity; it registers its paint pass
+     at landmass order 68, so it loads after worldmap.js and approach.js. -->
+<script src="src/city/cityground.js?v=cg1"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
