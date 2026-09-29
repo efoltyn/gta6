@@ -17,10 +17,11 @@
 
      CBZ.seatState()  -> null, or { kind, key, verb, at, exit }
         kind  "aircraft" | "armor" | "vehicle" | "mount" | "seat" | "bed"
-        key   always "f" (2026-09-29 key map: F is get in / get out of
-              ANYTHING, a cockpit, a car, a saddle, a chair; E is never an
-              exit, so a press meant for the thing in front of you can never
-              throw you out of your seat)
+        key   "f" in Gang City (2026-09-29 key map: F is get in / get out of
+              ANYTHING; E is never an exit there, so a press meant for the
+              thing in front of you can never throw you out of your seat).
+              Other games keep "e" for a seat; a cockpit is "f" everywhere
+              (E is its rudder).
         verb  what the press will actually do: "Get out", "Jump", "Pull over",
               "Get up", "Climb out", "Get off", "Stand up". A verb, never a
               noun: the thing you are sitting in is the noun.
@@ -61,6 +62,10 @@
     try { return !!(document.body && document.body.classList.contains("touch")); } catch (e) { return false; }
   }
   function num(v, d) { return (typeof v === "number" && isFinite(v)) ? v : d; }
+  // THE WAY-OUT KEY. Gang City's key map (city/interactions.js) is F for in
+  // and out of anything; the other games keep E for a seat, where E is the
+  // one hand key they have always had. A cockpit is F everywhere.
+  function OUT() { return G().mode === "city" ? "f" : "e"; }
 
   // ---- where each seat's verb belongs -------------------------------------
   function doorPoint(car, P) {
@@ -111,7 +116,7 @@
     if (CBZ.cityArmorActive && CBZ.cityArmorActive() && CBZ.cityExitArmor) {
       const rec = CBZ.cityArmorRec ? CBZ.cityArmorRec() : null;
       return {
-        kind: "armor", key: "f",
+        kind: "armor", key: OUT(),
         verb: rec && rec.kind === "tank" ? "Climb out" : "Get out",
         at: rec ? above(rec.pos, rec.kind === "tank" ? 2.4 : 1.8) : null,
         exit: function () { CBZ.cityExitArmor(); },
@@ -123,7 +128,7 @@
       let verb = CBZ.cityVehicleGetOutVerb ? CBZ.cityVehicleGetOutVerb() : null;
       if (!verb) verb = (CBZ.cityVehicleGetOut && carSpeed(car) > STEP_OUT_MS) ? "Jump" : "Get out";
       return {
-        kind: "vehicle", key: "f", verb: verb,
+        kind: "vehicle", key: OUT(), verb: verb,
         at: doorPoint(car, P),
         exit: function () {
           if (CBZ.cityVehicleGetOut && CBZ.cityVehicleGetOut()) return;
@@ -137,7 +142,7 @@
     const mount = P._mountedAnimal;
     if (mount && CBZ.cityDismount && G().mode !== "sharksim") {
       return {
-        kind: "mount", key: "f", verb: "Get off",
+        kind: "mount", key: OUT(), verb: "Get off",
         at: above(mount.pos || P.pos, 1.2),
         exit: function () { CBZ.cityDismount(); },
       };
@@ -151,10 +156,10 @@
       const spot = s || b;
       const at = { x: num(spot.x, P.pos.x), y: num(spot.y, P.pos.y) + (s ? 0.6 : 0.5), z: num(spot.z, P.pos.z) };
       if (s && CBZ.propStand) {
-        return { kind: "seat", key: "f", verb: "Stand up", at: at, exit: function () { CBZ.propStand(P); } };
+        return { kind: "seat", key: OUT(), verb: "Stand up", at: at, exit: function () { CBZ.propStand(P); } };
       }
       if (b && (CBZ.propWake || CBZ.propStand)) {
-        return { kind: "bed", key: "f", verb: "Get up", at: at,
+        return { kind: "bed", key: OUT(), verb: "Get up", at: at,
           exit: function () { if (CBZ.propWake) CBZ.propWake(P); else CBZ.propStand(P); } };
       }
     }
@@ -186,7 +191,7 @@
     if (!e || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e)) return;
     if (!live()) return;
     const k = String(e.key || "").toLowerCase();
-    if (k !== "f") return;
+    if (k !== "e" && k !== "f") return;
     const st = seatState();
     if (!st || st.key !== k) return;
     e.preventDefault();

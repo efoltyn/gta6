@@ -196,7 +196,7 @@
       // Y is F: the way out of whatever you are in, through the one exit
       // dispatcher (systems/seat_exit.js), so a passenger's first press asks
       // the driver to pull over exactly as the keyboard's does.
-      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey("f");
+      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey(CBZ.game && CBZ.game.mode === "city" ? "f" : "e");
       // keep non-driving edges fresh
       if (edge(pad, B.DLEFT)) tapKey("q");      // the wheel on your own car
       edge(pad, B.LB); edge(pad, B.B); edge(pad, B.X); edge(pad, B.DUP); edge(pad, B.BACK);
@@ -223,9 +223,11 @@
       // THE KEYBOARD MAP ON A PAD: Y = F (get in / get out), D-pad right = E
       // (the obvious verb on what you look at), D-pad left = Q (the verb wheel;
       // D-pad right then fires its highlighted verb).
-      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey("f");
-      if (edge(pad, B.DRIGHT)) tapKey("e");
-      if (edge(pad, B.DLEFT)) tapKey("q");
+      // (Gang City only; the other games keep Y as their one hand key, E)
+      const city = CBZ.game && CBZ.game.mode === "city";
+      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey(city ? "f" : "e");
+      if (edge(pad, B.DRIGHT) && city) tapKey("e");
+      if (edge(pad, B.DLEFT) && city) tapKey("q");
       if (edge(pad, B.DUP)) tapKey("m");                            // map
       if (edge(pad, B.BACK)) tapKey("Tab");                        // city power
     }
