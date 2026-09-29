@@ -38,10 +38,12 @@
                                           material + 112 m tile by
                                           core/batch.js batchTexturedUnder
                                           when the prison is first shown
-     CBZ.guardTower(x, z, opts)          the tower. Concrete shaft, steel deck
-                                          with a rail, glazed octagonal cabin,
-                                          hipped roof, a caged ladder, the
-                                          floodlight under the eave
+     CBZ.guardTower(x, z, opts)          the tower. Hollow concrete shaft set
+                                          back off the wall, a ladder up its
+                                          inside to a floor hatch, a glazed
+                                          octagonal cab on a railed catwalk
+                                          over the wall, hipped roof, eave
+                                          flood (see section 5)
      CBZ.prisonFence(run)                chain-link on galvanised posts with a
                                           top rail, concertina coil on top,
                                           gates (open or shut+solid), AABB
@@ -408,78 +410,237 @@
 
   /* ==========================================================
      5. THE GUARD TOWER.
-        opts: deck (m, default TOWER_DECK), face {x,z} unit dir the ladder
-        and the eave floodlight face, register (push CBZ.towers), shaft (m).
+
+     WHAT A PRISON GUARD TOWER IS (US state and federal practice, the
+     Folsom / Marion / ADX pattern): a poured-concrete shaft standing just
+     INSIDE the wall with a steel door at its foot, a ladder (or a stair) up
+     the INSIDE of the shaft to a hatch in the cab floor, and on top a glazed
+     cab with a steel catwalk and a 42-inch guardrail round it, the cab and
+     the catwalk cantilevered out OVER the wall so the post sees both faces
+     of it. Inside the cab: the console with the base radio, a chair, the
+     rifle rack. A searchlight on the roof.
+
+     WHAT IT WAS (to 2026-09-29): the shaft straddled the wall line, solid,
+     with a caged ladder up the outside. Its 3.7 m plinth was a FULL-HEIGHT
+     collider, so at deck height an invisible 3.7 m box filled the middle of
+     the cab and the walkway (you came off the ladder and could not take a
+     step), the wall under the deck was a full-height collider too (a second
+     invisible wall across the catwalk, from the wall's coping to the sky),
+     the rail's collider stood 16 cm above its top rail, and the deck's floor
+     was a 6.5 m SQUARE under an octagon (12 m2 of walkable air per tower).
+     tools/prison-tower-check.mjs measured it: 149 m2 of ghost and 147 m2 of
+     floating floor over the twelve towers. Everything below is built so
+     that check reads zero: what is drawn is solid and nothing else is.
+
+     CBZ.guardTower(x, z, opts)
+       (x, z)       with opts.inward: the point ON THE WALL LINE the post
+                    stands at (a corner, a junction, mid-wall); the tower
+                    stands back off the wall by half its shaft plus the
+                    wall's half-thickness on each inward axis.
+                    Without inward: the tower's own centre.
+       inward       {x, z}, components -1/0/1: which side is the compound
+       face         {x, z} the way the post looks (cab door, eave flood,
+                    the officer). Default: inward.
+       perimeter    {x, z} the OUTSIDE normal when this wall is the outer
+                    wire: over the rail on that side is out of the prison
+       register     push CBZ.towers (capture.js / searchlight.js), default true
+       manned       an officer on post (entities/towerwatch.js), default = register
+       deck         deck height (default TOWER_DECK)
      ========================================================== */
   CBZ.towers = CBZ.towers || [];
   const towerRecs = [];
-  function guardTower(x, z, opts) {
+  const SHAFT = 2.8, SHAFT_T = 0.25, WALL_HALF = 0.5, WALL_SET = 0.1;
+  const DECK_R = 3.6;                 // catwalk octagon circumradius: ~1.2 m of walkway round the cab
+  const CAB_R = 2.15;
+  const RAIL_H = 1.07;                // OSHA / IBC guardrail: 42 in over the walking surface
+  // a wall as colliders: straight runs are one box, diagonal ones chopped
+  // fine enough that the staircase of AABBs stands no more than ~9 cm off
+  // the drawn line (the census tolerance is 10 cm)
+  function segCol(ax, az, bx, bz, y0, y1, th) {
+    const L = Math.hypot(bx - ax, bz - az);
+    const axial = Math.abs(bx - ax) < 0.02 || Math.abs(bz - az) < 0.02;
+    const k = axial ? 1 : Math.max(1, Math.ceil(L / 0.15));
+    for (let i = 0; i < k; i++) {
+      const x0 = ax + (bx - ax) * i / k, z0 = az + (bz - az) * i / k;
+      const x1 = ax + (bx - ax) * (i + 1) / k, z1 = az + (bz - az) * (i + 1) / k;
+      CBZ.colliders.push({ minX: Math.min(x0, x1) - th, maxX: Math.max(x0, x1) + th,
+        minZ: Math.min(z0, z1) - th, maxZ: Math.max(z0, z1) + th, y0: y0, y1: y1, rail: true, noBreach: true });
+    }
+  }
+  function guardTower(wx, wz, opts) {
     opts = opts || {};
     const H = opts.deck != null ? opts.deck : TOWER_DECK;
-    const S = opts.shaft || 2.8;
-    const face = opts.face || { x: 0, z: -1 };
+    const S = SHAFT, t = SHAFT_T, hs = S / 2;
+    const inw = opts.inward || null;
+    const ix = inw ? Math.sign(inw.x || 0) : 0, iz = inw ? Math.sign(inw.z || 0) : 0;
+    const off = hs + WALL_HALF + WALL_SET;
+    const x = wx + ix * off, z = wz + iz * off;
+    let face = opts.face;
+    if (!face) {
+      const l = Math.hypot(ix, iz);
+      face = l > 0 ? { x: ix / l, z: iz / l } : { x: 0, z: -1 };
+    }
     const fa = Math.atan2(face.x, face.z);          // rotation.y that points +z at `face`
-    const concrete = skin("concrete", 0xa9adb1);
+    // the shaft's own axes (it is square to the world): nd out through its
+    // door, p across it (the ladder's wall and the hatch are on +p)
+    let nd, p;
+    if (ix || iz) {
+      nd = ix ? { x: ix, z: 0 } : { x: 0, z: iz };
+      p = ix && iz ? { x: 0, z: iz } : { x: -nd.z, z: nd.x };
+    } else {
+      nd = Math.abs(face.x) >= Math.abs(face.z) ? { x: Math.sign(face.x) || 1, z: 0 } : { x: 0, z: Math.sign(face.z) || 1 };
+      p = { x: -nd.z, z: nd.x };
+    }
+    const at = (u, v) => ({ x: x + nd.x * u + p.x * v, z: z + nd.z * u + p.z * v });
+    const sizeOf = (lu, lv) => ({ w: Math.abs(nd.x) * lu + Math.abs(p.x) * lv, d: Math.abs(nd.z) * lu + Math.abs(p.z) * lv });
+
     const steelDark = skin("steel", 0x3a4048), steelMid = skin("steel", 0x6c7580), steelRoof = skin("steel", 0x2c3138);
     const galv = skin("galv", 0xb4bcc4), grating = skin("grating", 0x8d949c), glass = skin("glass");
+    const floorY = H + 0.25;
 
-    if (opts.register !== false) CBZ.towers.push({ x: x, z: z });
-    const rec = { x: x, z: z, deck: H, floor: H + 0.25, face: { x: face.x, z: face.z }, registered: opts.register !== false, ladder: null };
+    const registered = opts.register !== false;
+    const manned = opts.manned != null ? !!opts.manned : registered;
+    if (registered) CBZ.towers.push({ x: x, z: z });
+    const perim = opts.perimeter ? { x: opts.perimeter.x || 0, z: opts.perimeter.z || 0 } : null;
+    const rec = {
+      x: x, z: z, deck: H, floor: floorY, deckR: DECK_R, face: { x: face.x, z: face.z },
+      registered: registered, manned: manned, perimeter: perim,
+      wall: inw ? { x: wx, z: wz } : null,
+      outward: (ix || iz) ? { x: -ix / Math.hypot(ix, iz), z: -iz / Math.hypot(ix, iz) } : null,
+      ladder: null, hatch: null, rope: null,
+    };
     towerRecs.push(rec);
 
-    // plinth + shaft: the shaft is the collider and the LOS blocker (addBox
-    // keeps it a real mesh with a ref), re-skinned to poured concrete
-    const plinth = addBox(x, 0.25, z, S + 0.9, 0.5, S + 0.9, 0x9aa0a8, { solid: true });
-    skinBox(plinth, "concrete", 0x9ea3a8);
-    // (the collider stops at the deck: up there a body stands in the cabin over it)
-    const shaft = addBox(x, H / 2, z, S, H, S, 0x9aa0a8, { solid: true, blockLOS: true, y0: 0, y1: H + 0.1 });
-    skinBox(shaft, "concrete", 0xa9adb1);
-    // a drip band and the shaft's door at the foot on the ladder face
-    stat(new THREE.BoxGeometry(S + 0.3, 0.22, S + 0.3), steelDark, x, H - 0.4, z, { cast: false });
-    stat(new THREE.BoxGeometry(0.9, 2.05, 0.08), steelMid, x + face.x * (S / 2 + 0.03), 1.03, z + face.z * (S / 2 + 0.03), { ry: fa });
+    /* ---- THE SHAFT: four poured walls, hollow, a door at the foot ------- */
+    // an apron slab round the foot (5 cm, drawn only: a step, not a wall)
+    stat(new THREE.BoxGeometry(S + 0.8, 0.05, S + 0.8), skin("concrete", 0x9ea3a8), x, 0.025, z, { uv: 2, cast: false });
+    function shaftWall(u, v, lu, lv, y0, y1) {
+      const c = at(u, v), s = sizeOf(lu, lv);
+      const m = addBox(c.x, (y0 + y1) / 2, c.z, s.w, y1 - y0, s.d, 0x9aa0a8, { solid: true, blockLOS: true, y0: y0, y1: y1 });
+      skinBox(m, "concrete", 0xa9adb1);
+      if (m.userData.collider) m.userData.collider.noBreach = true;
+      return m;
+    }
+    shaftWall(-(hs - t / 2), 0, t, S, 0, H);                         // the back, against the wall
+    shaftWall(0, hs - t / 2, S - 2 * t, t, 0, H);                    // +p: the ladder's wall
+    shaftWall(0, -(hs - t / 2), S - 2 * t, t, 0, H);                 // -p
+    // the door wall: a 1.1 m x 2.15 m opening, the leaf pinned back open
+    const DV0 = -0.65, DV1 = 0.45, DH = 2.15;
+    shaftWall(hs - t / 2, (-hs + DV0) / 2, t, DV0 + hs, 0, H);
+    shaftWall(hs - t / 2, (DV1 + hs) / 2, t, hs - DV1, 0, H);
+    {
+      // the wall over the door: LOS only, never solid (systems/actorcollide.js
+      // reads any box as full height for a walking body, so a solid head
+      // would seal the door for the post officer)
+      const c = at(hs - t / 2, (DV0 + DV1) / 2), sz = sizeOf(t, DV1 - DV0);
+      const m = addBox(c.x, (DH + H) / 2, c.z, sz.w, H - DH, sz.d, 0x9aa0a8, { blockLOS: true });
+      skinBox(m, "concrete", 0xa9adb1);
+    }
+    /* THE DOOR AT THE FOOT is the prison's one door kit (world/
+       corridorkit.js): a detention-grade steel leaf in a steel frame,
+       swinging OUT, locked on the Corridor Key (the post officer carries it
+       up the ladder with him; a movement officer carries the other), a 5 lb
+       charge blows it, staff open it. (corridorkit.js parses after this
+       file and before any tower is built; without it the foot is an open
+       doorway.) */
+    {
+      const CK = CBZ.corridorKit;
+      const along = nd.x !== 0;                                  // the opening runs along z when the wall faces x
+      const fixed = along ? x + nd.x * (hs - t / 2) : z + nd.z * (hs - t / 2);
+      const e0 = along ? z + p.z * DV0 : x + p.x * DV0, e1 = along ? z + p.z * DV1 : x + p.x * DV1;
+      const cfg = {
+        id: "tower-" + towerRecs.length, label: "The tower door", axis: along ? "z" : "x",
+        a0: Math.min(e0, e1), a1: Math.max(e0, e1), fixed: fixed, t: t, h: DH - 0.02,
+        keys: ["Corridor Key"], lb: 5, hinge: 1, swing: along ? nd.x : -nd.z, autoShut: 5, staffR: 2.2,
+      };
+      if (CK && CK.door) {
+        if (CK.detentionLeaf) cfg.build = CK.detentionLeaf({ color: 0x55606b });
+        rec.shaftDoorRec = CK.door(cfg);
+      }
+      // a caged bulkhead lamp over the door, inside and out
+      const lo = at(hs + 0.09, (DV0 + DV1) / 2), li = at(-(hs - t) + 0.08, 0), s5 = sizeOf(0.1, 0.2);
+      stat(new THREE.BoxGeometry(s5.w, 0.14, s5.d), steelDark, lo.x, DH + 0.45, lo.z, { cast: false });
+      stat(new THREE.BoxGeometry(s5.w, 0.14, s5.d), steelDark, li.x, 2.6, li.z, { cast: false });
+    }
+    rec.shaftDoor = at(hs + 0.9, (DV0 + DV1) / 2);
 
-    // deck: an octagonal steel plate with grating on top, brackets under it
-    const R = 3.25;
+    /* ---- THE WAY UP: a rung ladder up the inside of the +p wall, through
+       a hatch in the cab floor. Drawn and climbed off the same numbers
+       (world/ladderkit.js -> systems/climb.js). */
+    const LU = 0, LV = hs - t - 0.08;                               // the rung line, 8 cm off the wall
+    const L0 = at(LU, LV);
+    const hatchC = at(0, LV - 0.42);                                // the climber's column = the hatch's centre
+    const topStand = at(0, LV - 0.42 - 0.95);                       // step off the hatch, into the cab
+    const footStand = at(0.1, LV - 0.8);
+    const spec = {
+      x: L0.x, z: L0.z, nx: -p.x, nz: -p.z, y0: 0, y1: floorY, ext: 0, standoff: 0.08, cage: false,
+      top: topStand, bottom: footStand, name: "tower", tag: "prison-tower", mode: "escape", meta: rec,
+      onAdd: function (L) { rec.ladder = L; },
+    };
+    if (CBZ.ladderKit) {
+      const built = CBZ.ladderKit.build(root(), spec);
+      if (built.ladder) rec.ladder = built.ladder;
+    } else if (CBZ.climb) spec.onAdd(CBZ.climb.add(spec));
+    else (CBZ.ladderSpecs = CBZ.ladderSpecs || []).push(spec);
+    rec.foot = footStand; rec.head = topStand;
+
+    /* ---- THE DECK: an octagonal steel plate over the shaft and the wall,
+       grating on top, knee braces under the overhang ---------------------- */
+    const R = DECK_R;
     stat(new THREE.CylinderGeometry(R, R, 0.22, 8), steelDark, x, H + 0.11, z, { ry: Math.PI / 8 });
     stat(new THREE.CylinderGeometry(R - 0.05, R - 0.05, 0.03, 8), grating, x, H + 0.235, z, { ry: Math.PI / 8, uv: 1, cast: false });
-    for (let i = 0; i < 4; i++) {
-      const a = i * Math.PI / 2;
-      stat(new THREE.BoxGeometry(0.16, 1.6, 0.16), steelDark, x + Math.cos(a) * (S / 2 + 0.7), H - 0.75, z + Math.sin(a) * (S / 2 + 0.7), { rz: Math.cos(a) * 0.62, rx: -Math.sin(a) * 0.62, cast: false });
+    stat(new THREE.BoxGeometry(S + 0.3, 0.22, S + 0.3), steelDark, x, H - 0.4, z, { cast: false });   // the shaft's steel cap band
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4, ca = Math.cos(a), sa = Math.sin(a);
+      if (rec.outward && ca * rec.outward.x + sa * rec.outward.z > 0.3) continue;   // that side is over the wall: the wall carries it
+      const r0 = (Math.abs(ca) > 0.1 && Math.abs(sa) > 0.1 ? hs * Math.SQRT2 : hs) + 0.02;
+      const r1 = R * Math.cos(Math.PI / 8) - 0.35;
+      const len = Math.hypot(r1 - r0, 1.6), mid = (r0 + r1) / 2;
+      const g = new THREE.BoxGeometry(0.12, len, 0.12);
+      g.rotateZ(-Math.atan2(r1 - r0, 1.6));
+      g.rotateY(-a);
+      stat(g, steelDark, x + ca * mid, H - 0.85, z + sa * mid, { cast: false });
     }
-    // rail: eight corner posts, two rails, a toe plate
-    const Rr = R - 0.12;
+    // THE FLOOR IS THE OCTAGON THAT IS DRAWN: four strips whose union is
+    // exactly the plate (two on the axes, two on the diagonals as oriented
+    // rectangles physics.js groundAt reads), not the 6.5 m square it was
+    const a8 = R * Math.cos(Math.PI / 8), t8 = a8 * Math.tan(Math.PI / 8), u8 = Math.SQRT1_2;
+    const plat = function (o) { o.top = floorY; o.tower = true; if (CBZ.platforms) CBZ.platforms.push(o); };
+    plat({ minX: x - a8, maxX: x + a8, minZ: z - t8, maxZ: z + t8 });
+    plat({ minX: x - t8, maxX: x + t8, minZ: z - a8, maxZ: z + a8 });
+    for (const s of [1, -1]) {
+      plat({ minX: x - a8, maxX: x + a8, minZ: z - a8, maxZ: z + a8, obb: { cx: x, cz: z, ux: u8, uz: s * u8, hl: a8, hw: t8 } });
+    }
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+
+    // THE GUARDRAIL: posts at the eight corners, a top rail at 42 in, a mid
+    // rail, a toe board. The collider IS that rail: from the plate to the top
+    // of the top rail and not a centimetre more, so you walk up to it, lean
+    // on it, and vault it (physics.js characterTraversal) — and on the other
+    // side is twelve metres of air.
+    const Rr = R - 0.12, railTop = floorY + RAIL_H;
     for (let i = 0; i < 8; i++) {
       const a = Math.PI / 8 + i * Math.PI / 4;         // the vertices
-      stat(new THREE.BoxGeometry(0.06, 1.1, 0.06), galv, x + Math.cos(a) * Rr, H + 0.8, z + Math.sin(a) * Rr, { cast: false });
+      stat(new THREE.BoxGeometry(0.06, RAIL_H, 0.06), galv, x + Math.cos(a) * Rr, floorY + RAIL_H / 2, z + Math.sin(a) * Rr, { cast: false });
     }
-    octRing(Rr, H + 1.32, 0.05, 0.05, galv, x, z, { cast: false });
-    octRing(Rr, H + 0.82, 0.04, 0.04, galv, x, z, { cast: false });
-    octRing(Rr, H + 0.30, 0.12, 0.03, steelDark, x, z, { cast: false });
+    octRing(Rr, railTop - 0.025, 0.05, 0.05, galv, x, z, { cast: false });
+    octRing(Rr, floorY + RAIL_H * 0.5, 0.04, 0.04, galv, x, z, { cast: false });
+    octRing(Rr, floorY + 0.05, 0.1, 0.03, steelDark, x, z, { cast: false });
+    for (let i = 0; i < 8; i++) {
+      const a0 = Math.PI / 8 + i * Math.PI / 4, a1 = a0 + Math.PI / 4;
+      segCol(x + Math.cos(a0) * Rr, z + Math.sin(a0) * Rr, x + Math.cos(a1) * Rr, z + Math.sin(a1) * Rr, H + 0.22, railTop, 0.04);
+    }
 
-    /* THE CABIN. Eight flat bays: a steel spandrel to the sill, glazing to
-       the head, a mullion on every corner. The bay that faces the yard has
-       the DOOR (a real opening with its leaf swung in, a fixed half-bay
-       beside it), because a man comes out of it onto the walkway and down
-       the ladder at the change of shift. The walls are colliders, so up
-       there you walk round the cabin on the walkway and in through the door,
-       not through the glass. (It used to be two open cylinders with a solid
-       0.9 m dark drum filling the whole floor "so the glass has depth":
-       nobody could stand in it.) */
-    const Rc = 2.15, fl = H + 0.25, sill = fl + 1.0, head = sill + 1.35;
+    /* ---- THE CAB. Eight flat bays: a steel spandrel to the sill, glazing to
+       the head, a mullion on every corner. The bay on `face` has the DOOR (a
+       real opening, its leaf swung in against the next bay). The walls are
+       colliders, so you go round on the catwalk and in through the door. */
+    const Rc = CAB_R, fl = floorY, sill = fl + 1.0, head = sill + 1.35;
     const ra = Rc * Math.cos(Math.PI / 8), sl = 2 * Rc * Math.sin(Math.PI / 8);
-    const di = ((Math.round(Math.atan2(face.z, face.x) / (Math.PI / 4)) % 8) + 8) % 8;
-    // a wall as colliders: straight runs are one box, diagonal ones chopped
-    const segCol = function (ax, az, bx, bz, y0, y1, th) {
-      const L = Math.hypot(bx - ax, bz - az);
-      const axial = Math.abs(bx - ax) < 0.02 || Math.abs(bz - az) < 0.02;
-      const k = axial ? 1 : Math.max(1, Math.ceil(L / 0.35));
-      for (let i = 0; i < k; i++) {
-        const x0 = ax + (bx - ax) * i / k, z0 = az + (bz - az) * i / k;
-        const x1 = ax + (bx - ax) * (i + 1) / k, z1 = az + (bz - az) * (i + 1) / k;
-        CBZ.colliders.push({ minX: Math.min(x0, x1) - th, maxX: Math.max(x0, x1) + th,
-          minZ: Math.min(z0, z1) - th, maxZ: Math.max(z0, z1) + th, y0: y0, y1: y1, rail: true, noBreach: true });
-      }
-    };
+    // the door is in the bay square to the shaft's door (+nd), never a
+    // diagonal one: a doorway is a straight run of wall, not a staircase of
+    // chopped colliders you cannot get your shoulders through
+    const di = ((Math.round(Math.atan2(nd.z, nd.x) / (Math.PI / 4)) % 8) + 8) % 8;
     let doorAt = null;
     for (let i = 0; i < 8; i++) {
       const a = i * Math.PI / 4, cx = Math.cos(a), cz = Math.sin(a), tx = -cz, tz = cx, ry = -a + Math.PI / 2;
@@ -487,158 +648,161 @@
       if (i !== di) {
         stat(new THREE.BoxGeometry(sl, 1.0, 0.06), steelMid, mx, fl + 0.5, mz, { ry: ry });
         stat(new THREE.BoxGeometry(sl - 0.04, head - sill, 0.02), glass, mx, (sill + head) / 2, mz, { ry: ry, cast: false });
-        segCol(mx - tx * sl / 2, mz - tz * sl / 2, mx + tx * sl / 2, mz + tz * sl / 2, fl - 0.05, head + 0.1, 0.07);
+        segCol(mx - tx * sl / 2, mz - tz * sl / 2, mx + tx * sl / 2, mz + tz * sl / 2, fl - 0.05, head + 0.1, 0.04);
         continue;
       }
-      // the door bay: the fixed half toward +t (the ladder's side), the
-      // opening toward -t
-      const hx = mx + tx * sl / 4, hz = mz + tz * sl / 4;
-      stat(new THREE.BoxGeometry(sl / 2, 1.0, 0.06), steelMid, hx, fl + 0.5, hz, { ry: ry });
-      stat(new THREE.BoxGeometry(sl / 2 - 0.04, head - sill, 0.02), glass, hx, (sill + head) / 2, hz, { ry: ry, cast: false });
-      segCol(mx, mz, mx + tx * sl / 2, mz + tz * sl / 2, fl - 0.05, head + 0.1, 0.07);
-      const ox = mx - tx * sl / 4, oz = mz - tz * sl / 4;
-      stat(new THREE.BoxGeometry(sl / 2, head + 0.05 - (fl + 2.08), 0.06), steelMid, ox, (fl + 2.08 + head + 0.05) / 2, oz, { ry: ry });
-      stat(new THREE.BoxGeometry(0.07, 2.08, 0.09), steelDark, mx, fl + 1.04, mz, { ry: ry, cast: false });   // the latch jamb
-      // the leaf, swung in against the next bay, hung on the corner mullion
+      // a 0.95 m door from the corner mullion (the hinge), a fixed glazed
+      // panel in the rest of the bay (it was half a bay: 0.82 m less the
+      // frame, narrower than a man's shoulders)
+      const DW = 0.95, fw = sl - DW - 0.04, fc = sl / 2 - fw / 2;
+      const hx = mx + tx * fc, hz = mz + tz * fc;
+      stat(new THREE.BoxGeometry(fw, 1.0, 0.06), steelMid, hx, fl + 0.5, hz, { ry: ry });
+      stat(new THREE.BoxGeometry(fw - 0.04, head - sill, 0.02), glass, hx, (sill + head) / 2, hz, { ry: ry, cast: false });
+      segCol(mx + tx * (sl / 2 - fw), mz + tz * (sl / 2 - fw), mx + tx * sl / 2, mz + tz * sl / 2, fl - 0.05, head + 0.1, 0.04);
+      const oc = -sl / 2 + DW / 2, ox = mx + tx * oc, oz = mz + tz * oc;
+      stat(new THREE.BoxGeometry(DW, head + 0.05 - (fl + 2.08), 0.06), steelMid, ox, (fl + 2.08 + head + 0.05) / 2, oz, { ry: ry });
+      const jx = mx + tx * (-sl / 2 + DW + 0.02), jz = mz + tz * (-sl / 2 + DW + 0.02);
+      stat(new THREE.BoxGeometry(0.07, 2.08, 0.09), steelDark, jx, fl + 1.04, jz, { ry: ry, cast: false });   // the latch jamb
+      // the leaf, swung in against the next bay, hung on the corner mullion:
+      // drawn, so solid (it was a picture you walked through)
       const hgx = mx - tx * (sl / 2 - 0.05), hgz = mz - tz * (sl / 2 - 0.05);
-      const lfx = hgx - cx * 0.4 + tx * 0.03, lfz = hgz - cz * 0.4 + tz * 0.03;
-      stat(new THREE.BoxGeometry(0.76, 2.0, 0.045), steelMid, lfx, fl + 1.02, lfz, { ry: -a });
+      const lfx = hgx - cx * 0.45 + tx * 0.03, lfz = hgz - cz * 0.45 + tz * 0.03;
+      stat(new THREE.BoxGeometry(0.9, 2.0, 0.045), steelMid, lfx, fl + 1.02, lfz, { ry: -a });
       stat(new THREE.BoxGeometry(0.5, 0.62, 0.05), glass, lfx, fl + 1.55, lfz, { ry: -a, cast: false });
-      doorAt = { x: ox + cx * 0.5, z: oz + cz * 0.5, in: { x: ox - cx * 0.6, z: oz - cz * 0.6 } };
+      segCol(hgx + tx * 0.03, hgz + tz * 0.03, hgx - cx * 0.9 + tx * 0.03, hgz - cz * 0.9 + tz * 0.03, fl, fl + 2.02, 0.03);
+      doorAt = { x: ox + cx * 0.55, z: oz + cz * 0.55, in: { x: ox - cx * 0.6, z: oz - cz * 0.6 } };
     }
     for (let i = 0; i < 8; i++) {
       const a = Math.PI / 8 + i * Math.PI / 4;
       stat(new THREE.BoxGeometry(0.09, head - fl + 0.1, 0.09), steelDark, x + Math.cos(a) * Rc, (fl + head) / 2, z + Math.sin(a) * Rc, { ry: -a, cast: false });
     }
-    stat(new THREE.CylinderGeometry(Rc, Rc, 0.06, 8), steelDark, x, fl + 0.03, z, { ry: Math.PI / 8, cast: false });   // the cabin floor
+    stat(new THREE.CylinderGeometry(Rc, Rc, 0.03, 8), steelDark, x, fl - 0.01, z, { ry: Math.PI / 8, cast: false });   // the cab floor, flush with the catwalk
     octRing(Rc + 0.05, sill, 0.10, 0.14, steelDark, x, z, { cast: false, skip: di });
     octRing(Rc + 0.05, head + 0.05, 0.14, 0.14, steelDark, x, z, { cast: false });
-    // inside: the console under the back glazing (the base station and its
-    // whip, the log) and the stool the post officer perches on
-    {
-      const bx = -face.x, bz = -face.z, byaw = Math.atan2(bx, bz);
-      const kx = x + bx * (ra - 0.34), kz = z + bz * (ra - 0.34);
-      stat(new THREE.BoxGeometry(1.3, 0.05, 0.55), steelMid, kx, fl + 0.76, kz, { ry: byaw });
-      stat(new THREE.BoxGeometry(1.24, 0.7, 0.5), steelDark, kx + face.x * 0.02, fl + 0.38, kz + face.z * 0.02, { ry: byaw });
-      stat(new THREE.BoxGeometry(0.3, 0.1, 0.2), steelDark, kx + face.z * 0.3, fl + 0.84, kz - face.x * 0.3, { ry: byaw, cast: false });
-      stat(new THREE.CylinderGeometry(0.008, 0.012, 0.32, 5), steelDark, kx + face.z * 0.4, fl + 1.05, kz - face.x * 0.4, { cast: false });
-      stat(new THREE.BoxGeometry(0.34, 0.012, 0.24), skin("steel", 0xd9d4c4, 0.9), kx - face.z * 0.25, fl + 0.79, kz + face.x * 0.25, { ry: byaw + 0.2, cast: false });
-      const sx = x - face.x * 0.35 - face.z * 0.75, sz = z - face.z * 0.35 + face.x * 0.75;
-      stat(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 12), steelDark, sx, fl + 0.66, sz, { cast: false });
-      stat(new THREE.CylinderGeometry(0.03, 0.03, 0.62, 6), galv, sx, fl + 0.33, sz, { cast: false });
-      stat(new THREE.CylinderGeometry(0.2, 0.22, 0.03, 10), galv, sx, fl + 0.02, sz, { cast: false });
-    }
-    // where the officer stands his post: forward in the cabin, on the yard glass
-    rec.post = { x: x + face.x * 0.6, z: z + face.z * 0.6, yaw: Math.atan2(face.x, face.z) };
     rec.door = doorAt;
 
-    // roof: an octagonal hip with an overhang, a fascia, a finial mast
-    const Rf = 3.35, eave = head + 0.12;
+    /* ---- THE HATCH: a steel lid in the cab floor over the ladder, hinged on
+       the +p edge. entities/towerwatch.js swings it up while somebody is on
+       the top of the ladder and drops it shut after them, so the floor you
+       walk on is the lid that is drawn. */
+    {
+      const HS = 0.8;
+      const hinge = at(0, LV - 0.42 + HS / 2);
+      const pivot = new THREE.Group();
+      pivot.position.set(hinge.x, fl + 0.02, hinge.z);
+      pivot.userData.mover = true;
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(HS, 0.03, HS), skin("grating", 0x6b737c));
+      lid.position.set(-p.x * HS / 2, 0, -p.z * HS / 2);
+      lid.userData.mover = true; lid.castShadow = false; lid.receiveShadow = true;
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(nd.x) * 0.22 + 0.03, 0.04, Math.abs(nd.z) * 0.22 + 0.03), steelDark);
+      grip.position.set(-p.x * (HS - 0.08), 0.03, -p.z * (HS - 0.08));
+      grip.userData.mover = true;
+      pivot.add(lid); pivot.add(grip);
+      root().add(pivot);
+      const hole = new THREE.Mesh(new THREE.BoxGeometry(HS - 0.06, 0.004, HS - 0.06), new THREE.MeshBasicMaterial({ color: 0x050607 }));
+      hole.position.set(hatchC.x, fl + 0.008, hatchC.z);
+      hole.visible = false; hole.userData.mover = true;
+      root().add(hole);
+      const cs = sizeOf(0.05, HS + 0.1), cs2 = sizeOf(HS, 0.05);
+      for (const s of [-1, 1]) {
+        const e1 = at(s * (HS / 2 + 0.025), LV - 0.42), e2 = at(0, LV - 0.42 + s * (HS / 2 + 0.025));
+        stat(new THREE.BoxGeometry(cs.w, 0.03, cs.d), steelDark, e1.x, fl + 0.015, e1.z, { cast: false });
+        stat(new THREE.BoxGeometry(cs2.w, 0.03, cs2.d), steelDark, e2.x, fl + 0.015, e2.z, { cast: false });
+      }
+      // open about the hinge line (nd): +angle lifts the free edge if nd x p points down
+      const sign = (nd.x * p.z - nd.z * p.x) >= 0 ? 1 : -1;
+      rec.hatch = { pivot: pivot, hole: hole, axis: new THREE.Vector3(nd.x, 0, nd.z), sign: sign, open: 0, x: hatchC.x, z: hatchC.z };
+    }
+
+    /* ---- INSIDE THE CAB: the console on the back bay (base station and its
+       whip, the handset, the log), the post chair, the rifle rack. Each is
+       drawn and each is solid, at its own height. */
+    {
+      const kc = at(-(ra - 0.34), 0), ks = sizeOf(0.55, 1.3);
+      stat(new THREE.BoxGeometry(ks.w + 0.02, 0.05, ks.d + 0.02), steelMid, kc.x, fl + 0.765, kc.z, {});
+      stat(new THREE.BoxGeometry(ks.w - 0.04, 0.7, ks.d - 0.04), steelDark, kc.x, fl + 0.4, kc.z, {});
+      CBZ.colliders.push({ minX: kc.x - ks.w / 2, maxX: kc.x + ks.w / 2, minZ: kc.z - ks.d / 2, maxZ: kc.z + ks.d / 2, y0: fl, y1: fl + 0.79, noBreach: true });
+      const rb = at(-(ra - 0.3), 0.3), rs = sizeOf(0.2, 0.3);
+      stat(new THREE.BoxGeometry(rs.w, 0.1, rs.d), steelDark, rb.x, fl + 0.84, rb.z, { cast: false });      // the base station
+      stat(new THREE.CylinderGeometry(0.008, 0.012, 0.32, 5), steelDark, rb.x, fl + 1.05, rb.z, { cast: false });
+      const hs2 = at(-(ra - 0.36), -0.1), hz = sizeOf(0.08, 0.2);
+      stat(new THREE.BoxGeometry(hz.w, 0.05, hz.d), steelDark, hs2.x, fl + 0.815, hs2.z, { cast: false }); // the handset
+      const lg = at(-(ra - 0.42), -0.4), lz = sizeOf(0.24, 0.34);
+      stat(new THREE.BoxGeometry(lz.w, 0.012, lz.d), skin("steel", 0xd9d4c4, 0.9), lg.x, fl + 0.796, lg.z, { cast: false });   // the log
+      // the chair: five-star base, gas column, seat, back
+      const ch = at(-(ra - 1.05), -0.35);
+      stat(new THREE.CylinderGeometry(0.25, 0.27, 0.04, 5), steelDark, ch.x, fl + 0.05, ch.z, { cast: false });
+      stat(new THREE.CylinderGeometry(0.03, 0.03, 0.38, 6), galv, ch.x, fl + 0.26, ch.z, { cast: false });
+      stat(new THREE.BoxGeometry(0.46, 0.08, 0.46), skin("steel", 0x23272c), ch.x, fl + 0.48, ch.z, { ry: fa, cast: false });
+      const bk = at(-(ra - 1.05) + 0.22, -0.35);
+      const bs = sizeOf(0.06, 0.44);
+      stat(new THREE.BoxGeometry(bs.w, 0.5, bs.d), skin("steel", 0x23272c), bk.x, fl + 0.8, bk.z, { cast: false });
+      CBZ.colliders.push({ minX: ch.x - 0.24, maxX: ch.x + 0.24, minZ: ch.z - 0.24, maxZ: ch.z + 0.24, y0: fl, y1: fl + 1.05, noBreach: true });
+      // the rifle rack on the -p spandrel: a steel frame, two carbines stood in it
+      const rk = at(0.1, -(ra - 0.16)), rks = sizeOf(0.7, 0.16);
+      stat(new THREE.BoxGeometry(rks.w, 0.06, rks.d), steelDark, rk.x, fl + 0.04, rk.z, { cast: false });
+      stat(new THREE.BoxGeometry(rks.w, 0.05, rks.d), steelDark, rk.x, fl + 0.95, rk.z, { cast: false });
+      for (const s of [-1, 1]) {
+        const up = at(0.1 + s * 0.33, -(ra - 0.16)), us = sizeOf(0.04, 0.16);
+        stat(new THREE.BoxGeometry(us.w, 1.0, us.d), steelDark, up.x, fl + 0.5, up.z, { cast: false });
+        const gun = at(0.1 + s * 0.14, -(ra - 0.14)), gs = sizeOf(0.06, 0.05);
+        stat(new THREE.BoxGeometry(gs.w, 0.9, gs.d), skin("steel", 0x1c1f23), gun.x, fl + 0.5, gun.z, { cast: false });
+      }
+      CBZ.colliders.push({ minX: rk.x - rks.w / 2, maxX: rk.x + rks.w / 2, minZ: rk.z - rks.d / 2, maxZ: rk.z + rks.d / 2, y0: fl, y1: fl + 1.0, noBreach: true });
+    }
+    // where the officer stands his post: forward in the cab, on the yard glass
+    rec.post = { x: x + face.x * 0.6, z: z + face.z * 0.6, yaw: Math.atan2(face.x, face.z) };
+
+    /* ---- THE ROOF: an octagonal hip over the catwalk, a fascia, the apex
+       pedestal the searchlight (entities/searchlight.js) stands on at
+       CBZ.towerHeadY, a lightning rod clamped to a hip. */
+    const Rf = R + 0.1, eave = head + 0.12;
     stat(new THREE.ConeGeometry(Rf, 1.15, 8), steelRoof, x, eave + 0.575, z, { ry: Math.PI / 8 });
     octRing(Rf, eave - 0.09, 0.2, 0.06, steelDark, x, z, { cast: false });
-    /* THE APEX. A round pedestal on the roof's point with a bolted flange on
-       top: the searchlight's yoke (entities/searchlight.js) stands on that
-       flange at CBZ.towerHeadY = eave + 1.15 + 0.5. It was a 0.38 m box with
-       a 2.4 m mast running straight up through where the lamp sits; the mast
-       is a lightning rod now, clamped to a roof hip near the eave. */
     stat(new THREE.CylinderGeometry(0.17, 0.24, 0.62, 12), steelDark, x, eave + 1.15 + 0.17, z, { cast: false });
     stat(new THREE.CylinderGeometry(0.27, 0.27, 0.04, 16), steelDark, x, eave + 1.15 + 0.48, z, { cast: false });
+    // the roof is held up by the cab's corner mullions: carry four of them on
+    // out to the eave as posts, so the overhang is not hanging off nothing
+    for (let i = 0; i < 8; i += 2) {
+      const a = Math.PI / 8 + i * Math.PI / 4;
+      stat(new THREE.BoxGeometry(0.07, eave - railTop, 0.07), steelDark, x + Math.cos(a) * Rr, (railTop + eave) / 2, z + Math.sin(a) * Rr, { cast: false });
+    }
     {
-      // a hip of the octagonal cone: ConeGeometry puts vertex 0 at +z, the roof is turned PI/8
       const back = Math.round((Math.atan2(-face.x, -face.z) - Math.PI / 8) / (Math.PI / 4));
-      const ha = Math.PI / 8 + back * Math.PI / 4;              // the hip facing away from the ladder
-      const t = 0.8, hr = Rf * t, hy = eave + 1.15 * (1 - t);
+      const ha = Math.PI / 8 + back * Math.PI / 4;
+      const tt = 0.8, hr = Rf * tt, hy = eave + 1.15 * (1 - tt);
       const rx = x + Math.sin(ha) * hr, rz = z + Math.cos(ha) * hr;
       stat(new THREE.CylinderGeometry(0.012, 0.016, 1.25, 6), galv, rx, hy + 0.6, rz, { cast: false });
-      stat(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 8), steelDark, rx, hy + 0.04, rz, { cast: false });   // the clamp
+      stat(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 8), steelDark, rx, hy + 0.04, rz, { cast: false });
     }
-    // an under-eave floodlight aimed at the compound: a housing pitched down
-    // at the yard and its lens FLUSH on the housing's face (the lens used to be
-    // an unrotated box sticking out of the pitched housing: at night it was a
-    // glowing block hanging off the eave)
+    // an under-eave floodlight aimed at the compound, its lens flush on the
+    // pitched housing's face
     const hx0 = x + face.x * (Rf - 0.5), hz0 = z + face.z * (Rf - 0.5), hy0 = eave - 0.35;
     stat(new THREE.BoxGeometry(0.62, 0.30, 0.42), steelDark, hx0, hy0, hz0, { ry: fa, rx: 0.45, cast: false });
-    stat(new THREE.BoxGeometry(0.08, 0.3, 0.08), steelDark, hx0, eave - 0.1, hz0, { cast: false });           // the hanger to the soffit
+    stat(new THREE.BoxGeometry(0.08, 0.3, 0.08), steelDark, hx0, eave - 0.1, hz0, { cast: false });
     const lamp = addBox(hx0 + face.x * 0.225 * Math.cos(0.45), hy0 - 0.225 * Math.sin(0.45), hz0 + face.z * 0.225 * Math.cos(0.45), 0.54, 0.24, 0.02, 0x2b2b2b, { cast: false });
     lamp.rotation.order = "YXZ"; lamp.rotation.y = fa; lamp.rotation.x = 0.45;
     lamp.userData.mover = true;
-    if (CBZ.prisonLights && CBZ.prisonLights.register) {
-      try { CBZ.prisonLights.register({ x: x + face.x * 6, z: z + face.z * 6, r: 15, kind: "flood", mesh: lamp, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b }); } catch (e) {}
-    } else {
-      (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push({ x: x + face.x * 6, z: z + face.z * 6, r: 15, kind: "flood", mesh: lamp, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b });
-    }
+    const fix = { x: x + face.x * 6, z: z + face.z * 6, r: 15, kind: "flood", mesh: lamp, color: 0xfff4d2, emissive: 0xffd88a, off: 0x2b2b2b };
+    if (CBZ.prisonLights && CBZ.prisonLights.register) { try { CBZ.prisonLights.register(fix); } catch (e) {} }
+    else (CBZ._prisonLateFixtures || (CBZ._prisonLateFixtures = [])).push(fix);
 
-    /* THE WAY UP. A caged rung ladder on standoffs off the yard face of the
-       shaft, beside the shaft door, up THROUGH a hatch in the walkway plate,
-       its stiles running on 0.85 m above the walkway to come off by. It is
-       CLIMBED (systems/climb.js): rung by rung, hands on the bars, by you and
-       by the officer who posts up here and comes down at the change of shift.
-       (It used to be a vent record whose verb blacked the screen and
-       teleported you, plus a 12 m "ramp" platform up a 0.8 m run.) */
-    const px = -face.z, pz = face.x;                  // across the ladder (the door bay's +t)
-    const lx = x + face.x * 2.1 + px * 0.9, lz = z + face.z * 2.1 + pz * 0.9;
-    const floorY = H + 0.25, top1 = floorY + 0.85;
-    for (let i = 0; i < 2; i++) {
-      const s = i ? 1 : -1;
-      stat(new THREE.CylinderGeometry(0.028, 0.028, top1, 6), galv, lx + px * 0.24 * s, top1 / 2, lz + pz * 0.24 * s, { cast: false });
-      // standoff brackets back to the shaft face
-      for (let y = 1.2; y < H - 0.5; y += 2.4) {
-        stat(new THREE.BoxGeometry(0.05, 0.05, 0.72), steelDark, lx + px * 0.24 * s - face.x * 0.35, y, lz + pz * 0.24 * s - face.z * 0.35, { ry: fa, cast: false });
-      }
-    }
-    let nR = 0;
-    for (let y = 0.35; y <= floorY + 0.62; y += 0.3) {
-      stat(new THREE.CylinderGeometry(0.016, 0.016, 0.48, 6), galv, lx, y, lz, { rz: Math.PI / 2, ry: fa, cast: false });
-      nR++;
-    }
-    // the cage: hoops from 2.3 m to just under the deck, round the climber
-    for (let y = 2.3; y < H - 0.3; y += 1.0) {
-      const hoop = new THREE.TorusGeometry(0.37, 0.016, 5, 10, Math.PI);
-      stat(hoop, galv, lx + face.x * 0.36, y, lz + face.z * 0.36, { rx: Math.PI / 2, ry: fa, cast: false });
-    }
-    for (let i = 0; i < 5; i++) {
-      const s = (i - 2) / 2 * 1.35;                  // round the back of the hoop
-      stat(new THREE.BoxGeometry(0.03, H - 2.6, 0.03), galv, lx + face.x * (0.36 + 0.37 * Math.cos(s)) + px * 0.37 * Math.sin(s), (H + 2.0) / 2, lz + face.z * (0.36 + 0.37 * Math.cos(s)) + pz * 0.37 * Math.sin(s), { cast: false });
-    }
-    // the hatch in the walkway: the dark hole, its coaming, and the lid
-    // flung open against the rail side
-    const hx = lx + face.x * 0.36, hz = lz + face.z * 0.36;
-    stat(new THREE.BoxGeometry(0.8, 0.02, 0.8), skin("steel", 0x0b0d10), hx, floorY + 0.012, hz, { ry: fa, cast: false });
-    for (const s of [-1, 1]) {
-      stat(new THREE.BoxGeometry(0.86, 0.05, 0.04), steelDark, hx + px * 0.41 * s, floorY + 0.03, hz + pz * 0.41 * s, { ry: fa + Math.PI / 2, cast: false });
-    }
-    stat(new THREE.BoxGeometry(0.8, 0.78, 0.035), grating, hx + px * 0.46, floorY + 0.4, hz + pz * 0.46, { ry: fa + Math.PI / 2, uv: 1, cast: false });
-    // below the cage a body walks into the stiles, not through them
-    CBZ.colliders.push({ minX: Math.min(lx - px * 0.26, lx + px * 0.26) - 0.05, maxX: Math.max(lx - px * 0.26, lx + px * 0.26) + 0.05,
-      minZ: Math.min(lz - pz * 0.26, lz + pz * 0.26) - 0.05, maxZ: Math.max(lz - pz * 0.26, lz + pz * 0.26) + 0.05, y0: 0, y1: 2.2, noBreach: true });
-    // off the top: sideways out of the hatch onto the walkway, at the door
-    const topStand = doorAt ? { x: doorAt.x, z: doorAt.z } : { x: hx - px * 0.9, z: hz - pz * 0.9 };
-    const spec = {
-      x: lx, z: lz, nx: face.x, nz: face.z, y0: 0, y1: floorY, r0: 0.35, rung: 0.3,
-      rungTop: 0.35 + (nR - 1) * 0.3, stand: 0.42,
-      bottom: { x: lx + face.x * 0.95, z: lz + face.z * 0.95 },
-      top: topStand, name: "tower", tag: "prison-tower", mode: "escape", meta: rec,
-      topVia: doorAt ? { cx: x, cz: z, r: ra - 0.05, x: doorAt.in.x, z: doorAt.in.z } : null,
-      onAdd: function (L) { rec.ladder = L; },
-    };
-    if (CBZ.climb) spec.onAdd(CBZ.climb.add(spec));
-    else (CBZ.ladderSpecs = CBZ.ladderSpecs || []).push(spec);
-    rec.foot = spec.bottom; rec.head = topStand;
-    // the walkway rail: a collider on each of its eight flats (the old four
-    // axis bars left every diagonal flat open to a twelve-metre drop)
-    const Rr0 = R - 0.12;
-    for (let i = 0; i < 8; i++) {
-      const a0 = Math.PI / 8 + i * Math.PI / 4, a1 = a0 + Math.PI / 4;
-      segCol(x + Math.cos(a0) * Rr0, z + Math.sin(a0) * Rr0, x + Math.cos(a1) * Rr0, z + Math.sin(a1) * Rr0, H + 0.2, H + 1.5, 0.08);
-    }
-    if (CBZ.platforms) CBZ.platforms.push({ minX: x - R, maxX: x + R, minZ: z - R, maxZ: z + R, top: floorY });
-    return { x: x, z: z, deck: H, headY: eave + 1.15 + 0.5 };
+    return { x: x, z: z, deck: H, headY: eave + 1.15 + 0.5, rec: rec };
   }
   // where entities/searchlight.js mounts its lamp: on the finial, over the roof
   CBZ.towerHeadY = TOWER_DECK + 0.25 + 1.0 + 1.35 + 0.12 + 1.15 + 0.5;
   CBZ.TOWER_DECK = TOWER_DECK;
   CBZ.guardTower = guardTower;
-  CBZ.prisonTowers = towerRecs;   // entities/towerwatch.js posts an officer on each
+  CBZ.prisonTowers = towerRecs;   // entities/towerwatch.js posts an officer on each manned one
+  // the tower whose catwalk (x, z, y) is on, or null (towerwatch.js, capture.js)
+  CBZ.prisonTowerAt = function (x, z, y, pad) {
+    for (let i = 0; i < towerRecs.length; i++) {
+      const T = towerRecs[i];
+      if (y != null && (y < T.floor - 0.6 || y > T.floor + 3)) continue;
+      if (Math.hypot(x - T.x, z - T.z) < T.deckR + (pad || 0)) return T;
+    }
+    return null;
+  };
 
   /* ==========================================================
      6. CHAIN-LINK FENCE.

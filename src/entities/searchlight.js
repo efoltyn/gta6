@@ -254,7 +254,18 @@
     return { base: base, yoke: yoke, drum: drum, lens: lens, lensMat: lensMat, glare: glare };
   }
 
+  // the lamp stands on the finial of the tower at that post: the towers stand
+  // back off the wall line (world/prisonkit.js section 5), so the post's
+  // wall point is snapped to the nearest built tower's centre
+  function towerAt(x, z) {
+    let best = null, bd = 6;
+    const T = CBZ.prisonTowers || [];
+    for (let i = 0; i < T.length; i++) { const d = Math.hypot(T[i].x - x, T[i].z - z); if (d < bd) { bd = d; best = T[i]; } }
+    return best;
+  }
   function makeLight(towerX, towerZ, phase, sweep, sweepZ, sweepZAmp) {
+    const T0 = towerAt(towerX, towerZ);
+    if (T0) { towerX = T0.x; towerZ = T0.z; }
     const head = buildHead(towerX, towerZ);
 
     // a real spotlight for the glow (no shadow: keeps it cheap)

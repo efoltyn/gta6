@@ -119,9 +119,12 @@
         Delete that line and the escape game collapses into one verb.
      ========================================================== */
   const K = CBZ.prisonKit;
+  // as tall as it is drawn: the wall and the heavier coil on its coping
+  // (razorwire.js: centre YH + 0.55, radius 0.45), not a slab to the sky
+  // (see world/yard.js), and no climbing through the wire
   function perim(x, z, w, d) {
-    const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
-    if (m && m.userData && m.userData.collider) m.userData.collider.noBreach = true;
+    const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true, y0: 0, y1: YH + 1.0 });
+    if (m && m.userData && m.userData.collider) { m.userData.collider.noBreach = true; m.userData.collider.noClimb = true; }
     if (K) K.skinBox(m, "panel", WALL);               // precast panels, joints in world metres
     return m;
   }
@@ -198,18 +201,22 @@
   slab((OUT.x0 + CBK.x0) / 2, (CBK.z0 + N.z0) / 2, CBK.x0 - OUT.x0, N.z0 - CBK.z0, GA, GB, "concrete"); // west of it
   slab((CBK.x1 + OUT.x1) / 2, (CBK.z0 + N.z0) / 2, OUT.x1 - CBK.x1, N.z0 - CBK.z0, GA, GB, "concrete"); // east of it
 
-  /* ---- corner towers. world/towers.js rings the OLD wall and keeps doing
-       exactly that; these four stand on the new corners so the enlarged
-       perimeter is watched rather than merely long. ---- */
-  // world/prisonkit.js's tower, same deck height as the wall towers; NOT
-  // registered in CBZ.towers (capture.js's fire came from the eight old
-  // posts and still does), ladder and eave light facing the compound.
-  const d7 = 0.7071;
+  /* ---- corner towers. world/towers.js rings the OLD wall; these four
+       stand on the outer wire's corners so the enlarged perimeter is
+       watched rather than merely long. world/prisonkit.js's tower, set back
+       off the corner, its catwalk out over both walls: over the rail on the
+       outside is out of the prison (a twelve-metre drop). NOT registered in
+       CBZ.towers (capture.js's fallback fire and the four searchlights are
+       the old posts'), but MANNED: an officer with a carbine on each
+       (entities/towerwatch.js), because a corner of the wire nobody stands
+       on is not a corner, it is the way out. ---- */
   if (CBZ.guardTower) {
-    CBZ.guardTower(OUT.x0 + 4, OUT.z0 + 4, { register: false, face: { x: d7, z: d7 } });
-    CBZ.guardTower(OUT.x1 - 4, OUT.z0 + 4, { register: false, face: { x: -d7, z: d7 } });
-    CBZ.guardTower(OUT.x0 + 4, OUT.z1 - 4, { register: false, face: { x: d7, z: -d7 } });
-    CBZ.guardTower(OUT.x1 - 4, OUT.z1 - 4, { register: false, face: { x: -d7, z: -d7 } });
+    for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
+      const l = Math.SQRT1_2;
+      CBZ.guardTower(cx < 0 ? OUT.x0 : OUT.x1, cz < 0 ? OUT.z0 : OUT.z1, {
+        register: false, manned: true, inward: { x: -cx, z: -cz }, perimeter: { x: cx * l, z: cz * l },
+      });
+    }
   }
 
   /* ==========================================================

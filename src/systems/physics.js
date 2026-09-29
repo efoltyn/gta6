@@ -842,6 +842,7 @@
   const TRAV_LAND_PAD = 0.20;       // actor centre clears the far face before collision resumes
   const TRAV_TOP_INSET = 0.34;      // chest/hips arrive just inside a climbable top
   const TRAV_EPS = 0.015;
+  const TRAV_DROP_OFF = 1.5;        // a far side lower than this is a drop: the move ends in the air, over it
   /* ---- ONE-LINE REVERT (doctrine.md's DEGRADE-SAFE point) -----------------
      `CBZ.CONFIG.PARKOUR_V2 = false`, or `?cfg_PARKOUR_V2=0`, restores this
      file's shipped traversal EXACTLY: no aperture move, smooth01 root motion
@@ -1288,6 +1289,16 @@
       endT = expanded.exit + TRAV_LAND_PAD;
       const ex = ap.x + dirX * endT, ez = ap.z + dirZ * endT;
       endY = groundAt(ex, ez, feet);
+      /* OVER A RAIL WITH NOTHING BEHIND IT (a tower catwalk, a roof edge, a
+         balcony). The move used to "land" on whatever floor was under the far
+         side however far down it was: a vault off a twelve-metre catwalk was a
+         0.4 s authored arc straight to the ground, no fall, no landing, no
+         consequence — or, where a collider stood in the way, no move at all.
+         A vault carries you OVER; it does not carry you DOWN. Past a real drop
+         the move ends at the height you left from, clear of the rail, and
+         gravity takes it from there (the fall is tracked and the landing is
+         paid for, cityFallLand / CBZ.prisonFallLand). */
+      if (endY < feet - TRAV_DROP_OFF) endY = feet;
     }
     return {
       kind, car: null, collider: c, rise, top: bandY1, span, landOnTop,
@@ -2272,8 +2283,8 @@
   // (vy≈T.jumpVel on landing) and any short step-down are well under the safe
   // threshold and do nothing; ~2 storeys takes a real chunk; a rooftop or tower
   // fall is LETHAL — and a lethal fall reads as a gory splat (death.js dials the
-  // gore up for reason "fell"). Gated to g.mode==="city" so escape/survival fall
-  // behaviour stays byte-identical.
+  // gore up for reason "fell"). The prison hands its landings to
+  // CBZ.prisonFallLand (systems/capture.js); survival to the trauma ledger.
   //
   // We track the player's PEAK downward speed in the air (impact speed at the
   // floor underestimates it if a collision clipped vy on the way down) and arm
@@ -2319,7 +2330,15 @@
       if (CBZ.trauma && CBZ.surv && !player.dead) CBZ.trauma.slam(CBZ.surv.playerActor, v, { dir: { x: 0, y: 1, z: 0 } });
       return;
     }
-    if (CBZ.game.mode !== "city") return;        // escape: no fall damage
+    // THE PRISON pays for a fall too (it used to charge nothing: a man walked
+    // away from a twelve-metre tower). What a landing does to a body there —
+    // the ankle, the legs, the count on the ground — is systems/capture.js's,
+    // the one way the player is hurt in that mode; the height is the fact.
+    if (CBZ.game.mode === "escape") {
+      if (CBZ.prisonFallLand && v > FALL_SAFE) CBZ.prisonFallLand(v * v / (2 * (T.gravity || 22)), { speed: v, roll: !!(landed && landed.roll) });
+      return;
+    }
+    if (CBZ.game.mode !== "city") return;
     if (player.dead || (CBZ.game.invuln || 0) > 0) return;
     if (v <= FALL_SAFE) return;                  // a hop / step-down / normal jump
     const excess = v - FALL_SAFE;

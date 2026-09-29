@@ -329,7 +329,7 @@
     const specs = CBZ._prisonDoorSpecs || [];
     return {
       segments: SEG.length, corridorM: Math.round(corridorM), grilles: grilles, wallRuns: wallRuns,
-      doors: specs.length, ports: 1 + ((CBZ.altExitZones || []).length), unitBeds: unitBeds,
+      doors: specs.length, ports: 1 + ((CBZ.altExitZones || []).filter((z) => !z.test).length), unitBeds: unitBeds,
       ladders: (CBZ.prisonTowers || []).filter((t) => t.ladder || t.foot).length,
       segmentsList: SEG.map((s) => ({ id: s.id, r: s.r })),
     };

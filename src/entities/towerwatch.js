@@ -33,7 +33,24 @@
        the man on the nearest MANNED post in range, off his rifle's muzzle.
        A tower with nobody in it (dead, out cold, down at chow) is silent.
    Take his rifle: it drops where he does (systems/prisondrops.js, the
-   "Rifle" on a tower post's belt) and it is an M4 on your rail.
+   "Rifle" on a tower post's belt) and it is an M4 on your rail. His belt
+   also carries the Corridor Key, which is what locks his tower's door.
+
+   THE TOWER ITSELF (2026-09-29, world/prisonkit.js section 5):
+     · THE HATCH in the cab floor swings up while somebody is on the top of
+       the ladder and drops shut after him.
+     · OVER THE RAIL. The catwalk hangs out over the wall and its rail is a
+       rail: you can vault it. What is on the other side is twelve metres of
+       air and the ground (systems/capture.js CBZ.prisonFallLand: broken
+       legs, a count on the ground, a hobble for the rest of the run). Land
+       outside the compound you were in and it is an ESCAPE: if the man on
+       that post is up and awake he watched you go (the lockdown, the beams
+       on you, his rifle and the next tower's), if not the landing is still
+       heard. Land outside the OUTER wire and get clear of it and you are
+       out (world/escape_routes.js, "over the wall").
+     · THE SMART WAY DOWN. A Bedsheet Rope tied to the rail (E at the rail)
+       is a line you climb down (systems/climb.js), quietly, on your hands:
+       no fall, no noise. It stays tied there for anyone to see.
 ============================================================ */
 (function () {
   "use strict";
@@ -48,6 +65,7 @@
     ladder: ["Off my ladder.", "Get down. Now.", "Not one more rung."],
     shot: ["Shots fired!", "Contact, yard side!"],
     talk: ["Twelve hours up a pole.", "Nobody comes up here.", "Back off my tower."],
+    over: ["Man over the wall!", "Jumper! Over the side!", "He's over! Hit the alarm!"],
   };
   function say(g, list, secs) {
     if (!CBZ.prisonSay) return;
@@ -56,16 +74,19 @@
 
   /* ---- the posts ---------------------------------------------------------- */
   const POSTS = [];
-  const towers = CBZ.prisonTowers.filter(function (t) { return t.registered && t.post && t.foot; });
+  const TW = CBZ.prisonTowers;
+  const towers = TW.filter(function (t) { return (t.manned || t.registered) && t.post && t.foot; });
   towers.forEach(function (T, i) {
     const g = CBZ.spawnGuard([[T.foot.x, T.foot.z]], 3.0, 42, 0.78, { post: "tower", rank: 2 });
     if (!g) return;
     g.armed = true; g.weapon = "Rifle";
     g.flashlightPatrol = false;
     g.data.talk = LINES.talk.slice();
+    // where he stands at roll: out of his shaft's door, a few metres off it
+    const sd = T.shaftDoor || T.foot, ox = sd.x - T.x, oz = sd.z - T.z, ol = Math.hypot(ox, oz) || 1;
     const P = {
       g: g, T: T, i: i, state: "post", t: 0,
-      spot: { x: T.foot.x + T.face.x * 9, z: T.foot.z + T.face.z * 9 },
+      spot: { x: sd.x + ox / ol * 5, z: sd.z + oz / ol * 5 },
       breakFor: 0, hp: null, provokedT: 0, engageT: 0, fireCD: 0, warnT: 0, warned: false,
       scan: i * 1.7, dressed: false,
     };
@@ -73,7 +94,6 @@
     POSTS.push(P);
     toPost(P);
   });
-  if (!POSTS.length) return;
 
   function toPost(P) {
     const g = P.g, T = P.T;
@@ -82,12 +102,13 @@
     P.state = "post"; P.t = 0; P.breakFor = 0;
     if (CBZ.moves && CBZ.moves.reset) { try { CBZ.moves.reset(CBZ.moves.motor(g), g.group.position); } catch (e) {} }
   }
+  function deckR(T) { return T.deckR || 3.4; }
   function onDeck(P) {
     const p = P.g.group.position, T = P.T;
-    return p.y > T.floor - 0.6 && h2(p.x, p.z, T.x, T.z) < 3.4;
+    return p.y > T.floor - 0.6 && h2(p.x, p.z, T.x, T.z) < deckR(T);
   }
   function inCabin(P, x, z) { return h2(x, z, P.T.x, P.T.z) < 1.9; }
-  function playerOnDeck(T) { return player.pos.y > T.floor - 0.6 && h2(player.pos.x, player.pos.z, T.x, T.z) < 3.5; }
+  function playerOnDeck(T) { return player.pos.y > T.floor - 0.6 && player.pos.y < T.floor + 3 && h2(player.pos.x, player.pos.z, T.x, T.z) < deckR(T) + 0.1; }
 
   // the kit for the post: the carbine in the hands, the plate and the helmet
   function dress(P) {
@@ -255,11 +276,12 @@
         break;
       }
       case "down": {
-        // off the post: out of the cabin, down the ladder, to where he stands
+        // off the post: to the hatch in the cab floor (through the cab door
+        // if he is out on the catwalk), down the ladder inside the shaft, out
+        // of its door to where he stands
         if (up) {
           const H = T.head;
-          const inside = inCabin(P, g.group.position.x, g.group.position.z);
-          if (inside) { deckGo(P, H.x, H.z, 1.8, dt, 0.2); break; }
+          if (h2(g.group.position.x, g.group.position.z, H.x, H.z) > 0.6) { deckGo(P, H.x, H.z, 1.8, dt, 0.2); break; }
         }
         const d = CBZ.guardWalkTo(g, P.spot.x, P.spot.z, 2.6, dt, 0.6);
         if (!up && d < 1.2) { P.state = "break"; P.t = 0; }
@@ -305,9 +327,190 @@
     return true;
   }
 
-  // a new run: every officer back up his tower
+  /* ================================================================
+     THE TOWER ITSELF: the hatch, the rope, the drop
+     ================================================================ */
+  const clock = function () { return (CBZ.game && CBZ.game.elapsed) || 0; };
+  function onTowerDeck(T, x, y, z) { return y > T.floor - 0.6 && y < T.floor + 3 && h2(x, z, T.x, T.z) < deckR(T) + 0.2; }
+  function postOf(T) { for (let i = 0; i < POSTS.length; i++) if (POSTS[i].T === T) return POSTS[i]; return null; }
+  function railOf(T, x, z) {
+    // the catwalk flat (x, z) faces and how far in from its rail it stands
+    const a = Math.round(Math.atan2(z - T.z, x - T.x) / (PI / 4)) * (PI / 4);
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const rail = (deckR(T) - 0.12) * Math.cos(PI / 8);
+    return { nx: nx, nz: nz, rail: rail, d: rail - ((x - T.x) * nx + (z - T.z) * nz) };
+  }
+
+  /* ---- THE HATCH: up while somebody is at the top of the ladder ---------- */
+  const _q = new THREE.Quaternion();
+  function hatchTick(dt) {
+    for (let i = 0; i < TW.length; i++) {
+      const T = TW[i], H = T.hatch, L = T.ladder;
+      if (!H || !L) continue;
+      let want = 0;
+      const c = L.climber;
+      if (c) {
+        const y = c.isPlayer ? player.pos.y : (c.group ? c.group.position.y : (c.pos ? c.pos.y : 0));
+        if (y > T.floor - 3.2) want = 1;
+      }
+      if (H.open === want) continue;
+      H.open += (want - H.open) * Math.min(1, dt * 7);
+      if (Math.abs(want - H.open) < 0.01) H.open = want;
+      _q.setFromAxisAngle(H.axis, H.sign * H.open * 1.75);          // a hundred degrees, back against its stop
+      H.pivot.quaternion.copy(_q);
+      H.hole.visible = H.open > 0.05;
+      if (want !== H.was) {
+        H.was = want;
+        if (CBZ.worldSfx) { try { CBZ.worldSfx(want ? "door_open" : "door_close", H.x, H.z, { ref: 8 }); } catch (e) {} }
+      }
+    }
+  }
+
+  /* ---- THE ROPE: a Bedsheet Rope tied off on the rail -------------------- */
+  const ROPE_MAT = new THREE.MeshLambertMaterial({ color: 0xd8d4c8 });
+  let ropeArm = null;
+  function econ() { return CBZ.econ || null; }
+  function tieRope() {
+    const A = ropeArm;
+    if (!A || A.T.rope) return false;
+    const E = econ();
+    if (!E || !E.takeItem || !E.takeItem("Bedsheet Rope")) return false;
+    const T = A.T, R = A.r;
+    // it hangs from the top rail just outside the posts, to whatever is below
+    const hx = T.x + R.nx * (R.rail + 0.1), hz = T.z + R.nz * (R.rail + 0.1);
+    const top = T.floor + 1.07, y0 = CBZ.groundAt ? CBZ.groundAt(hx, hz, 0.5) : 0;
+    const len = top - y0;
+    const grp = new THREE.Group();
+    const line = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, len, 6), ROPE_MAT);
+    line.position.set(hx, y0 + len / 2, hz);
+    grp.add(line);
+    // the knots a man climbs it by, one every sixty centimetres
+    const knot = new THREE.SphereGeometry(0.06, 7, 5);
+    for (let y = y0 + 0.6; y < top - 0.3; y += 0.6) {
+      const k = new THREE.Mesh(knot, ROPE_MAT); k.position.set(hx, y, hz); k.scale.set(1, 0.7, 1); grp.add(k);
+    }
+    // the hitch round the top rail and a tail over the mid rail
+    const hitch = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.03, 5, 10), ROPE_MAT);
+    hitch.position.set(T.x + R.nx * R.rail, top, T.z + R.nz * R.rail);
+    hitch.rotation.y = Math.atan2(R.nx, R.nz); grp.add(hitch);
+    grp.traverse(function (o) { o.userData.mover = true; o.castShadow = true; });
+    (CBZ.prisonRoot || CBZ.scene).add(grp);
+    const meta = { rope: true, T: T };
+    const L = CBZ.climb ? CBZ.climb.add({
+      x: hx, z: hz, nx: R.nx, nz: R.nz, y0: y0, y1: T.floor, r0: 0.6, rung: 0.3, stand: 0.42,
+      top: { x: T.x + R.nx * (R.rail - 0.55), z: T.z + R.nz * (R.rail - 0.55) },
+      bottom: { x: hx + R.nx * 0.8, z: hz + R.nz * 0.8 },
+      name: "rope", tag: "prison-rope", mode: "escape", meta: meta,
+    }) : null;
+    T.rope = { mesh: grp, L: L };
+    if (CBZ.sfx) { try { CBZ.sfx("loot"); } catch (e) {} }
+    return true;
+  }
+  CBZ.towerTieRope = tieRope;                     // the verb's act (@towerTieRope)
+  function ropeIdle() {
+    ropeArm = null;
+    const E = econ();
+    if (!E || !E.hasItem || !E.hasItem("Bedsheet Rope") || !CBZ.prisonPrompt) return;
+    if (CBZ.climb && CBZ.climb.climbing(player)) return;
+    const p = player.pos;
+    for (let i = 0; i < TW.length; i++) {
+      const T = TW[i];
+      if (T.rope || !onTowerDeck(T, p.x, p.y, p.z)) continue;
+      const r = railOf(T, p.x, p.z);
+      if (r.d > 0.85) return;                     // walk up to the rail to tie off on it
+      ropeArm = { T: T, r: r };
+      CBZ.prisonPrompt("tower-rope", "@towerTieRope", "Tie rope",
+        { at: { x: T.x + r.nx * r.rail, y: T.floor + 1.1, z: T.z + r.nz * r.rail }, d2: r.d * r.d, bind: true, key: "e" });
+      return;
+    }
+  }
+  function clearRopes() {
+    for (let i = 0; i < TW.length; i++) {
+      const T = TW[i];
+      if (!T.rope) continue;
+      if (T.rope.mesh && T.rope.mesh.parent) T.rope.mesh.parent.remove(T.rope.mesh);
+      if (T.rope.L && CBZ.climb) CBZ.climb.remove(T.rope.L);
+      T.rope = null;
+    }
+  }
+
+  /* ---- THE DROP: off a catwalk, or down the rope, and where you landed ---- */
+  const DROP = { up: false, T: null, t: 0, via: "jump" };
+  let lastDrop = null;
+  const OLD = [];                                 // the old compound: the rects inside the division walls
+  (function () {
+    const W = CBZ.WORLD || {};
+    ["northYard", "southBlock", "cellBlock", "adminWing"].forEach(function (k) { if (W[k]) OLD.push(W[k]); });
+  })();
+  function inOld(x, z) {
+    for (let i = 0; i < OLD.length; i++) { const r = OLD[i]; if (x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1) return true; }
+    return false;
+  }
+  function outside(x, z) { return !!(CBZ.prisonOutOfBounds && CBZ.prisonOutOfBounds(x, z)); }
+  function aimBeams(x, z, secs) {
+    const list = CBZ.searchlights || [];
+    const byD = list.filter(function (sl) { return sl && sl.gx != null; })
+      .sort(function (a, b) { return h2(a.gx, a.gz, x, z) - h2(b.gx, b.gz, x, z); }).slice(0, 2);
+    for (let i = 0; i < byD.length; i++) {
+      const sl = byD[i];
+      if (sl._outroAim) continue;
+      sl.aimAt = { x: x, z: z }; sl._dropAimT = secs;
+    }
+  }
+  function beamTick(dt) {
+    const list = CBZ.searchlights || [];
+    for (let i = 0; i < list.length; i++) {
+      const sl = list[i];
+      if (!sl || !(sl._dropAimT > 0)) continue;
+      sl._dropAimT -= dt;
+      if (sl.aimAt && !sl._outroAim) { sl.aimAt.x += (player.pos.x - sl.aimAt.x) * Math.min(1, dt * 1.5); sl.aimAt.z += (player.pos.z - sl.aimAt.z) * Math.min(1, dt * 1.5); }
+      if (sl._dropAimT <= 0 && !sl._outroAim) { sl.aimAt = null; sl._dropAimT = 0; }
+    }
+  }
+  function landed(T, via) {
+    const p = player.pos;
+    const out = outside(p.x, p.z);
+    // over the wall: out of the prison, or out of the old compound into the ring
+    const over = out || (inOld(T.x, T.z) && !inOld(p.x, p.z));
+    const P = postOf(T);
+    const g = P && P.g;
+    const watched = !!(g && !g.dead && !(g.ko > 0) && !g.tied && !g.asleep && onDeck(P));
+    lastDrop = { t: clock(), x: p.x, z: p.z, over: over, outside: out, via: via, watched: watched, tower: TW.indexOf(T) };
+    if (!over && !watched) return;
+    if (CBZ.prisonOffense) { try { CBZ.prisonOffense("escape", { severity: over ? 4 : 2 }); } catch (e) {} }
+    if (CBZ.reportCrime) { try { CBZ.reportCrime(over ? 50 : 25, { type: "escape" }); } catch (e) {} }
+    if (!watched) return;                         // nobody on that post: the prison has only the noise to go on
+    say(g, LINES.over, 2.2);
+    P.provokedT = Math.max(P.provokedT, 20);
+    if (CBZ.addHeat) { try { CBZ.addHeat(over ? 60 : 30); } catch (e) {} }
+    if (over && CBZ.lockdown && CBZ.lockdown.begin) { try { CBZ.lockdown.begin("escape"); } catch (e) {} }
+    if (CBZ.worldSfx) { try { CBZ.worldSfx("lockdown", T.x, T.z, { ref: 45, volume: 0.9, gap: 2 }); } catch (e) {} }
+    aimBeams(p.x, p.z, 16);
+    // the next posts along the wire hear the call and look
+    for (let i = 0; i < POSTS.length; i++) {
+      const Q = POSTS[i];
+      if (Q === P || Q.g.dead || !onDeck(Q) || h2(Q.T.x, Q.T.z, p.x, p.z) > 95) continue;
+      Q.engageT = Math.max(Q.engageT, 6);
+    }
+  }
+  function dropTick() {
+    const p = player.pos;
+    const cl = CBZ.climb && CBZ.climb.climbing(player);
+    if (cl && cl.L && cl.L.meta && cl.L.meta.rope) { DROP.up = true; DROP.T = cl.L.meta.T; DROP.t = clock(); DROP.via = "rope"; return; }
+    if (cl) { if (DROP.T && cl.L === DROP.T.ladder) DROP.up = false; return; }   // the ladder down the shaft is the way down, not a drop
+    for (let i = 0; i < TW.length; i++) {
+      if (onTowerDeck(TW[i], p.x, p.y, p.z)) { DROP.up = true; DROP.T = TW[i]; DROP.t = clock(); DROP.via = "jump"; return; }
+    }
+    if (!DROP.up) return;
+    if (clock() - DROP.t > 12) { DROP.up = false; return; }
+    if (!player.grounded || p.y > DROP.T.floor - 3) return;
+    DROP.up = false;
+    landed(DROP.T, DROP.via);
+  }
+
+  // a new run: every officer back up his tower, every rope off the rails
   let runWatch = null;
-  CBZ.onUpdate(19.9, function () {
+  CBZ.onUpdate(19.9, function (dt) {
     if (!CBZ.game || CBZ.game.mode !== "escape") return;
     if (!runWatch && CBZ.jailBoost) runWatch = CBZ.jailBoost.newRunWatcher(0.5);
     if (runWatch && runWatch()) {
@@ -318,7 +521,14 @@
         if (!P.g.dead) toPost(P);
       }
       lastBlock = null;
+      clearRopes();
+      DROP.up = false; lastDrop = null;
     }
+    if (player.dead) return;
+    hatchTick(dt || 0);
+    ropeIdle();
+    dropTick();
+    beamTick(dt || 0);
   });
 
   CBZ.towerWatch = {
@@ -336,8 +546,16 @@
       return best;
     },
     engage: function (g) { const P = g && g.towerPost; if (P) P.engageT = 0.4; },
+    // the last time you came off a tower some other way than its ladder
+    lastDrop: function () { return lastDrop; },
+    tieRope: tieRope,
     audit: function () {
-      return POSTS.map(function (P) { return { state: P.state, up: onDeck(P), dead: !!P.g.dead, armour: P.g._armor || 0 }; });
+      return {
+        posts: POSTS.map(function (P) { return { state: P.state, up: onDeck(P), dead: !!P.g.dead, armour: P.g._armor || 0 }; }),
+        ropes: TW.filter(function (T) { return !!T.rope; }).length,
+        hatchesOpen: TW.filter(function (T) { return T.hatch && T.hatch.open > 0.05; }).length,
+        lastDrop: lastDrop,
+      };
     },
   };
 })();
